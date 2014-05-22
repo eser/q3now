@@ -36,7 +36,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	RANK_TIED_FLAG		0x4000
 
 #define DEFAULT_SHOTGUN_SPREAD	700
-#define DEFAULT_SHOTGUN_COUNT	11
+#define DEFAULT_SHOTGUN_COUNT	16
 
 #define	ITEM_RADIUS			15		// item sizes are needed for client side pickup detection
 

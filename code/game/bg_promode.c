@@ -16,14 +16,9 @@ float	cpm_Gauntletknockback = 1;
 
 // Machinegun
 float	cpm_MGbox = 50;
-float	cpm_MGdmg = 7;
-float	cpm_MGdmg_tp = 5;
 int		cpm_MGweapon = 100;
 
 // Shotgun
-float	cpm_SSGdmg = 10;
-float	cpm_SSGspread = 700;
-int		cpm_SSGcount = 11;
 float	cpm_SSGknockback = 1;
 int		cpm_SSGmaxammo = 200;
 
@@ -32,7 +27,6 @@ float	cpm_GLreload = 800;
 int		cpm_GLmaxammo = 200;
 
 // Rocket Launcher
-float	cpm_RLspeed = 900;
 int		cpm_RLmaxammo = 200;
 float	cpm_RLsplashknockback = 1;
 float	cpm_RLknockback = 1;
@@ -46,7 +40,6 @@ int		cpm_RGbox = 10;
 float	cpm_RGchange;
 
 // Plasma Gun
-float	cpm_PGdmg = 20;
 float	cpm_PGknockback = 1;
 
 // Weapon switching
@@ -59,9 +52,6 @@ int		cpm_armorsystem = 0;
 
 // Battle Suit
 float	cpm_BSprotection = 0.5;
-
-// Respawn Health
-float	cpm_respawnhealth = 25;
 
 // Backpacks
 int		cpm_backpacks = 0;
@@ -116,14 +106,9 @@ void CPM_UpdateSettings(int num)
 
 	// vq3 machine gun settings
 	cpm_MGbox = 50;
-	cpm_MGdmg = 7;
-	cpm_MGdmg_tp = 5;
 	cpm_MGweapon = 100;
 
 	// vq3 ssg settings
-	cpm_SSGdmg = 10;
-	cpm_SSGspread = 700;
-	cpm_SSGcount = 11;
 	cpm_SSGknockback = 1;
 	cpm_SSGmaxammo = 200;
 
@@ -132,7 +117,6 @@ void CPM_UpdateSettings(int num)
 	cpm_GLmaxammo = 200;
 
 	// vq3 Rocket Launcher
-	cpm_RLspeed = 900;
 	cpm_RLmaxammo = 200;
 	cpm_RLsplashknockback = 1;
 	cpm_RLknockback = 1;
@@ -146,7 +130,6 @@ void CPM_UpdateSettings(int num)
 	cpm_RGchange = 1500;
 
 	// vq3 Plasma Gun
-	cpm_PGdmg = 20;
 	cpm_PGknockback = 1;
 
 	// vq3 Weapon switching
@@ -159,9 +142,6 @@ void CPM_UpdateSettings(int num)
 
 	// vq3 Battle Suit
 	cpm_BSprotection = 0.5;
-
-	// vq3 Respawn Health
-	cpm_respawnhealth = 25;
 
 	// Backpacks
 	cpm_backpacks = 0;
@@ -213,14 +193,9 @@ void CPM_UpdateSettings(int num)
 
 		// machinegun
 		cpm_MGbox = 25;
-		cpm_MGdmg = 5;
-		cpm_MGdmg_tp = 5;
 		cpm_MGweapon = 50;
 
 		// Shotgun
-		cpm_SSGdmg = 7;
-		cpm_SSGspread = 900;
-		cpm_SSGcount = 16;
 		cpm_SSGknockback = 1.35;
 		cpm_SSGmaxammo = 100;
 
@@ -229,7 +204,6 @@ void CPM_UpdateSettings(int num)
 		cpm_GLmaxammo = 100;
 
 		// Rocket Launcher
-		cpm_RLspeed = 1000;
 		cpm_RLmaxammo = 100;
 		cpm_RLsplashknockback = 1.2;
 		cpm_RLknockback = 1.2;
@@ -243,7 +217,6 @@ void CPM_UpdateSettings(int num)
 		cpm_RGchange = 1000; // allow users to switch weapon before reload
 
 		// Plasma Gun
-		cpm_PGdmg = 15;
 		cpm_PGknockback = 0.5;
 
 		// Weapon switching
@@ -257,11 +230,8 @@ void CPM_UpdateSettings(int num)
 		// Battle Suit
 		cpm_BSprotection = 0.25; // ie 75% protection
 
-		// Respawn Health
-		cpm_respawnhealth = 0;
-
 		// Backpacks
-		cpm_backpacks = 1;
+		cpm_backpacks = 0;
 
 		// Radius Damage Fix
 		cpm_radiusdamagefix = 1;
