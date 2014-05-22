@@ -73,9 +73,9 @@ gitem_t	bg_itemlist[] =
 		NULL, NULL} ,
 /* icon */		"icons/iconr_shard",
 /* pickup */	"Armor Shard",
-		5,
+		2,
 		IT_ARMOR,
-		0,
+		ARM_NONE,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -88,10 +88,10 @@ gitem_t	bg_itemlist[] =
         { "models/powerups/armor/armor_yel.md3",
 		NULL, NULL, NULL},
 /* icon */		"icons/iconr_yellow",
-/* pickup */	"Armor",
-		50,
+/* pickup */	"Combat Armor",
+		150,
 		IT_ARMOR,
-		0,
+        ARM_COMBAT,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -105,9 +105,9 @@ gitem_t	bg_itemlist[] =
 		NULL, NULL, NULL},
 /* icon */		"icons/iconr_red",
 /* pickup */	"Heavy Armor",
-		100,
+        200,
 		IT_ARMOR,
-		0,
+        ARM_HEAVY,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -308,7 +308,7 @@ gitem_t	bg_itemlist[] =
         { "models/weapons2/plasma/plasma.md3", 
 		NULL, NULL, NULL},
 /* icon */		"icons/iconw_plasma",
-/* pickup */	"Plasma Gun",
+/* pickup */	"Plasma Rifle",
 		50,
 		IT_WEAPON,
 		WP_PLASMAGUN,
@@ -408,7 +408,7 @@ gitem_t	bg_itemlist[] =
         { "models/powerups/ammo/plasmaam.md3", 
 		NULL, NULL, NULL},
 /* icon */		"icons/icona_plasma",
-/* pickup */	"Cells",
+/* pickup */	"Plasma Cells",
 		30,
 		IT_AMMO,
 		WP_PLASMAGUN,
@@ -424,7 +424,7 @@ gitem_t	bg_itemlist[] =
         { "models/powerups/ammo/lightningam.md3", 
 		NULL, NULL, NULL},
 /* icon */		"icons/icona_lightning",
-/* pickup */	"Lightning",
+/* pickup */	"Lightning Cells",
 		60,
 		IT_AMMO,
 		WP_LIGHTNING,
@@ -472,7 +472,7 @@ gitem_t	bg_itemlist[] =
         { "models/powerups/ammo/bfgam.md3", 
 		NULL, NULL, NULL},
 /* icon */		"icons/icona_bfg",
-/* pickup */	"Bfg Ammo",
+/* pickup */	"BFG Cells",
 		15,
 		IT_AMMO,
 		WP_BFG,
@@ -562,7 +562,7 @@ gitem_t	bg_itemlist[] =
 		"models/powerups/instant/haste_ring.md3", 
 		NULL, NULL },
 /* icon */		"icons/haste",
-/* pickup */	"Speed",
+/* pickup */	"Haste",
 		30,
 		IT_POWERUP,
 		PW_HASTE,
@@ -1039,8 +1039,10 @@ This needs to be the same for client side prediction and server use.
 */
 qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const playerState_t *ps ) {
 	gitem_t	*item;
+#ifdef MISSIONPACK
     qboolean hasScout = qfalse;
     qboolean hasGuard = qfalse;
+#endif
     int		quantity;
 
 	if ( ent->modelindex < 1 || ent->modelindex >= bg_numItems ) {
@@ -1093,23 +1095,24 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 		if (hasScout) {
 		    return qfalse;
 		}
-#endif
-        // CPM: pro mode system
-        if (item->quantity == 100) // RA
-        {
-            return (hasGuard || ps->stats[STAT_ARMOR] >= 200) ? qfalse : qtrue;
+
+        if (ps->stats[STAT_ARMORCLASS] > ARM_COMBAT && hasGuard) {
+            return qfalse;
         }
-        if (item->quantity == 50) // YA
-        {
-            if (ps->stats[STAT_ARMORTYPE] <= 1)
-            {
-                return (ps->stats[STAT_ARMOR] >= 150) ? qfalse : qtrue;
-            }
-            return (ps->stats[STAT_ARMOR] > CPM_RABREAKPOINT) ? qfalse : qtrue;
+#endif
+        if (ps->stats[STAT_ARMORCLASS] == ARM_NONE && item->giTag == ARM_NONE) {
+            return qfalse;
         }
 
-        return qtrue; // you can _always_ get shards in cpm
-        // !CPM
+        if (item->giTag != ARM_NONE && ps->stats[STAT_ARMORCLASS] >= item->giTag && ps->stats[STAT_ARMOR] >= item->quantity) {
+            return qfalse;
+        }
+
+        if (ps->stats[STAT_ARMOR] >= MAX_ARMOR) {
+            return qfalse;
+        }
+
+        return qtrue;
 
 	case IT_HEALTH:
 		// small and mega healths will go over the max, otherwise

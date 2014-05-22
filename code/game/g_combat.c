@@ -708,7 +708,7 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
 	gclient_t	*client;
 	int			save;
 	int			count;
-    float	    type; // CPM
+    float	    protection;
 
 	if (!damage)
 		return 0;
@@ -723,8 +723,26 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
 
 	// armor
 	count = client->ps.stats[STAT_ARMOR];
-    type = (client->ps.stats[STAT_ARMORTYPE] <= 1) ? CPM_YAPROTECTION : CPM_RAPROTECTION; // CPM
-    save = ceil(damage * type); // CPM
+    if (count <= 0) {
+        return 0;
+    }
+
+    switch (client->ps.stats[STAT_ARMORCLASS]) {
+    case ARM_HEAVY:
+        protection = 0.75;
+        break;
+    case ARM_COMBAT:
+        protection = 0.66;
+        break;
+    case ARM_JACKET:
+        protection = 0.50;
+        break;
+    case ARM_NONE:
+    default:
+        return 0;
+    }
+
+    save = ceil(damage * protection);
 	if (save >= count)
 		save = count;
 
@@ -732,6 +750,9 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
 		return 0;
 
 	client->ps.stats[STAT_ARMOR] -= save;
+    if (client->ps.stats[STAT_ARMOR] <= 0) {
+        client->ps.stats[STAT_ARMORCLASS] = ARM_NONE;
+    }
 
 	return save;
 }

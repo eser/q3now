@@ -571,13 +571,22 @@ static void CG_DrawStatusBar( void ) {
 		CG_DrawStatusBarFlag( 185 + CHAR_WIDTH*3 + TEXT_ICON_SPACE + ICON_SIZE, TEAM_FREE );
 	}
 
-	if ( ps->stats[ STAT_ARMOR ] ) {
-        qhandle_t model = cgs.media.armorModel; // CPM
-
-        // CPM: Fix RA shader
-        if (ps->stats[STAT_ARMORTYPE] == 2)
-            model = cgs.media.armorModelRA;
-        // !CPM
+    if (ps->stats[STAT_ARMORCLASS] > ARM_NONE && ps->stats[STAT_ARMOR]) {
+        qhandle_t *model;
+        
+        switch (ps->stats[STAT_ARMORCLASS]) {
+        case ARM_HEAVY:
+            model = &cgs.media.heavyArmorModel;
+            break;
+        case ARM_COMBAT:
+            model = &cgs.media.combatArmorModel;
+            break;
+        case ARM_JACKET:
+            model = &cgs.media.jacketArmorModel;
+            break;
+        default:
+            model = NULL;
+        }
 
 		origin[0] = 90;
 		origin[1] = 0;
@@ -585,8 +594,10 @@ static void CG_DrawStatusBar( void ) {
 		angles[YAW] = ( cg.time & 2047 ) * 360 / 2048.0;
 		// CG_Draw3DModel( 370 + CHAR_WIDTH*3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
 		//			   cgs.media.armorModel, 0, origin, angles );
-        CG_Draw3DModel(370 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
-            model, 0, origin, angles); // CPM
+        if (model) {
+            CG_Draw3DModel(370 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
+                *model, 0, origin, angles); // CPM
+        }
 	}
 	//
 	// ammo
@@ -647,21 +658,29 @@ static void CG_DrawStatusBar( void ) {
 	// armor
 	//
 	value = ps->stats[STAT_ARMOR];
-	if (value > 0 ) {
-        // CPM: Armor icon
-        qhandle_t icon = cgs.media.armorIcon;
+    if (ps->stats[STAT_ARMORCLASS] > ARM_NONE && value > 0) {
+        qhandle_t *shader;
 
-        if (ps->stats[STAT_ARMORTYPE] == 2)
-            icon = cgs.media.armorIconRA;
-        // !CPM
+        switch (ps->stats[STAT_ARMORCLASS]) {
+        case ARM_HEAVY:
+            shader = &cgs.media.heavyArmorIcon;
+            break;
+        case ARM_COMBAT:
+            shader = &cgs.media.combatArmorIcon;
+            break;
+        case ARM_JACKET:
+            shader = cgs.media.jacketArmorIcon;
+            break;
+        default:
+            shader = NULL;
+        }
 
 		trap_R_SetColor( colors[0] );
 		CG_DrawField (370, 432, 3, value);
 		trap_R_SetColor( NULL );
 		// if we didn't draw a 3D icon, draw a 2D icon for armor
-		if ( !cg_draw3dIcons.integer && cg_drawIcons.integer ) {
-			// CG_DrawPic( 370 + CHAR_WIDTH*3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE, cgs.media.armorIcon );
-            CG_DrawPic(370 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE, icon); // CPM
+		if ( shader && !cg_draw3dIcons.integer && cg_drawIcons.integer ) {
+            CG_DrawPic(370 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE, *shader);
 		}
 
 	}

@@ -407,26 +407,14 @@ int Pickup_Health (gentity_t *ent, gentity_t *other) {
 //======================================================================
 
 int Pickup_Armor( gentity_t *ent, gentity_t *other ) {
-    if (ent->item->quantity == 100) // RA
-    {
-        other->client->ps.stats[STAT_ARMOR] = 200;
-        other->client->ps.stats[STAT_ARMORTYPE] = 2;
-    }
-    else if (ent->item->quantity == 50) // YA
-    {
-        if (other->client->ps.stats[STAT_ARMORTYPE] == 2)
-            other->client->ps.stats[STAT_ARMOR] *= CPM_RAMULTIPLIER;
-
-        other->client->ps.stats[STAT_ARMOR] += 100;
-        if (other->client->ps.stats[STAT_ARMOR] > 150)
-            other->client->ps.stats[STAT_ARMOR] = 150;
-        other->client->ps.stats[STAT_ARMORTYPE] = 1;
-    }
-    else // Shard
-    {
-        if (other->client->ps.stats[STAT_ARMOR] <= 0)
-            other->client->ps.stats[STAT_ARMORTYPE] = 1; // YA protection
-        other->client->ps.stats[STAT_ARMOR] += 2;
+    if (ent->item->giTag > ARM_NONE) {
+        other->client->ps.stats[STAT_ARMOR] = ent->item->quantity;
+        other->client->ps.stats[STAT_ARMORCLASS] = ent->item->giTag;
+    } else {
+        other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
+        if (other->client->ps.stats[STAT_ARMOR] > MAX_ARMOR) {
+            other->client->ps.stats[STAT_ARMOR] = MAX_ARMOR;
+        }
     }
 
 	return RESPAWN_ARMOR;
