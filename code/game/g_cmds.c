@@ -264,7 +264,7 @@ void Cmd_Give_f (gentity_t *ent)
 	if (give_all || Q_stricmp(name, "ammo") == 0)
 	{
 		for ( i = 0 ; i < MAX_WEAPONS ; i++ ) {
-			ent->client->ps.ammo[i] = 999;
+			ent->client->ps.ammo[i] = 200;
 		}
 		if (!give_all)
 			return;
@@ -272,7 +272,8 @@ void Cmd_Give_f (gentity_t *ent)
 
 	if (give_all || Q_stricmp(name, "armor") == 0)
 	{
-		ent->client->ps.stats[STAT_ARMOR] = 200;
+		ent->client->ps.stats[STAT_ARMOR] = MAX_ARMOR;
+        ent->client->ps.stats[STAT_ARMORCLASS] = ARM_NUM_ARMOR - 1;
 
 		if (!give_all)
 			return;
@@ -470,7 +471,7 @@ void Cmd_Kill_f( gentity_t *ent ) {
 		return;
 	}
 	ent->flags &= ~FL_GODMODE;
-	ent->client->ps.stats[STAT_HEALTH] = ent->health = -999;
+    ent->client->ps.stats[STAT_HEALTH] = ent->health = GIB_HEALTH;
 	player_die (ent, ent, ent, 100000, MOD_SUICIDE);
 }
 

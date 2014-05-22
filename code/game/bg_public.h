@@ -43,8 +43,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	RANK_TIED_FLAG		0x4000
 
-#define DEFAULT_SHOTGUN_SPREAD	500
-#define DEFAULT_SHOTGUN_COUNT	13
+#define DEFAULT_SHOTGUN_SPREAD	600
+#define DEFAULT_SHOTGUN_COUNT	16
 
 #define	ITEM_RADIUS			15		// item sizes are needed for client side pickup detection
 
@@ -216,11 +216,11 @@ typedef enum {
 #endif
 	STAT_WEAPONS,					// 16 bit fields
 	STAT_ARMOR,				
+    STAT_ARMORCLASS,
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
 
 // CPM
-    STAT_ARMORTYPE,					// CPM: Added for armortypes (0=none, 1=YA, 2=RA)
     STAT_JUMPTIME,
     STAT_RAILTIME                   // CPM: Added for allowchange
 // !CPM
@@ -338,6 +338,15 @@ typedef enum {
 	WP_NUM_WEAPONS
 } weapon_t;
 
+typedef enum {
+    ARM_NONE,
+
+    ARM_JACKET,
+    ARM_COMBAT,
+    ARM_HEAVY,
+
+    ARM_NUM_ARMOR
+} armor_t;
 
 // reward sounds (stored in ps->persistant[PERS_PLAYEREVENTS])
 #define	PLAYEREVENT_DENIEDREWARD		0x0001

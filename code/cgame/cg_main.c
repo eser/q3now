@@ -949,8 +949,14 @@ static void CG_RegisterGraphics( void ) {
 #endif
 	}
 
-	cgs.media.armorModel = trap_R_RegisterModel( "models/powerups/armor/armor_yel.md3" );
-	cgs.media.armorIcon  = trap_R_RegisterShaderNoMip( "icons/iconr_yellow" );
+    cgs.media.heavyArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_red.md3");
+    cgs.media.heavyArmorIcon = trap_R_RegisterShaderNoMip("icons/iconr_red");
+
+    cgs.media.combatArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_yel.md3");
+	cgs.media.combatArmorIcon  = trap_R_RegisterShaderNoMip( "icons/iconr_yellow" );
+
+    cgs.media.jacketArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_gre.md3");
+    cgs.media.jacketArmorIcon = trap_R_RegisterShaderNoMip("icons/iconr_gre");
 
 	cgs.media.machinegunBrassModel = trap_R_RegisterModel( "models/weapons2/shells/m_shell.md3" );
 	cgs.media.shotgunBrassModel = trap_R_RegisterModel( "models/weapons2/shells/s_shell.md3" );
@@ -1083,9 +1089,6 @@ static void CG_RegisterGraphics( void ) {
     // CPM: Register graphics
     cgs.media.backpackModel = trap_R_RegisterModel("models/backpack.md3");
     cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/icon_backpack");
-
-    cgs.media.armorModelRA = trap_R_RegisterModel("models/powerups/armor/armor_red.md3");
-    cgs.media.armorIconRA = trap_R_RegisterShaderNoMip("icons/iconr_red");
     // !CPM
 
 	CG_ClearParticles ();

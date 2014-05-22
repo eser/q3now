@@ -693,8 +693,14 @@ typedef struct {
 	qhandle_t	harvesterNeutralModel;
 #endif
 
-	qhandle_t	armorModel;
-	qhandle_t	armorIcon;
+    qhandle_t	heavyArmorModel;
+    qhandle_t	heavyArmorIcon;
+
+    qhandle_t	combatArmorModel;
+    qhandle_t	combatArmorIcon;
+
+    qhandle_t	jacketArmorModel;
+    qhandle_t	jacketArmorIcon;
 
 	qhandle_t	teamStatusBar;
 
@@ -989,9 +995,6 @@ typedef struct {
     // CPM: Backpack gfx
     qhandle_t	backpackModel;
     qhandle_t	backpackIcon;
-
-    qhandle_t	armorModelRA;
-    qhandle_t	armorIconRA;
     // !CPM
 } cgMedia_t;
 
