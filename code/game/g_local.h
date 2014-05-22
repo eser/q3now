@@ -499,6 +499,10 @@ void TossClientPersistantPowerups( gentity_t *self );
 #endif
 void TossClientCubes( gentity_t *self );
 
+// CPM: Radius Damage Fix
+qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, vec3_t viewpoint);
+// !CPM
+
 // damage flags
 #define DAMAGE_RADIUS				0x00000001	// damage was indirect
 #define DAMAGE_NO_ARMOR				0x00000002	// armour does not protect from this damage
@@ -745,6 +749,7 @@ extern	vmCvar_t	g_enableDust;
 extern	vmCvar_t	g_enableBreath;
 extern	vmCvar_t	g_singlePlayer;
 extern	vmCvar_t	g_proxMineTimeout;
+extern	vmCvar_t	g_pro_mode; // CPM: The overall CPM toggle
 
 void	trap_Print( const char *text );
 void	trap_Error( const char *text ) __attribute__((noreturn));

@@ -986,6 +986,13 @@ typedef struct {
 	sfxHandle_t	wstbimpdSound;
 	sfxHandle_t	wstbactvSound;
 
+    // CPM: Backpack gfx
+    qhandle_t	backpackModel;
+    qhandle_t	backpackIcon;
+
+    qhandle_t	armorModelRA;
+    qhandle_t	armorIconRA;
+    // !CPM
 } cgMedia_t;
 
 

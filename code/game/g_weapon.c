@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // perform the server side effects of a weapon firing
 
 #include "g_local.h"
+#include "bg_promode.h" // CPM
 
 static	float	s_quadFactor;
 static	vec3_t	forward, right, up;
@@ -289,7 +290,8 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 		}
 
 		if ( traceEnt->takedamage) {
-			damage = DEFAULT_SHOTGUN_DAMAGE * s_quadFactor;
+			// damage = DEFAULT_SHOTGUN_DAMAGE * s_quadFactor;
+            damage = cpm_SSGdmg * s_quadFactor; // CPM
 #ifdef MISSIONPACK
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
@@ -338,9 +340,12 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 	CrossProduct( forward, right, up );
 
 	// generate the "random" spread pattern
-	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
-		r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-		u = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
+	// for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
+    for (i = 0; i < cpm_SSGcount; i++) { // CPM
+		// r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
+		// u = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
+        r = Q_crandom(&seed) * cpm_SSGspread;  // CPM
+        u = Q_crandom(&seed) * cpm_SSGspread;  // CPM
 		VectorMA( origin, 8192 * 16, forward, end);
 		VectorMA (end, r, right, end);
 		VectorMA (end, u, up, end);
@@ -853,11 +858,17 @@ void FireWeapon( gentity_t *ent ) {
 		weapon_supershotgun_fire( ent );
 		break;
 	case WP_MACHINEGUN:
-		if ( g_gametype.integer != GT_TEAM ) {
-			Bullet_Fire( ent, MACHINEGUN_SPREAD, MACHINEGUN_DAMAGE, MOD_MACHINEGUN );
-		} else {
-			Bullet_Fire( ent, MACHINEGUN_SPREAD, MACHINEGUN_TEAM_DAMAGE, MOD_MACHINEGUN );
-		}
+		// if ( g_gametype.integer != GT_TEAM ) {
+		// 	Bullet_Fire( ent, MACHINEGUN_SPREAD, MACHINEGUN_DAMAGE, MOD_MACHINEGUN );
+		// } else {
+		// 	Bullet_Fire( ent, MACHINEGUN_SPREAD, MACHINEGUN_TEAM_DAMAGE, MOD_MACHINEGUN );
+		// }
+        if (g_gametype.integer != GT_TEAM) {
+            Bullet_Fire(ent, MACHINEGUN_SPREAD, cpm_MGdmg, MOD_MACHINEGUN); // CPM
+        }
+        else {
+            Bullet_Fire(ent, MACHINEGUN_SPREAD, cpm_MGdmg_tp, MOD_MACHINEGUN); // CPM
+        }
 		break;
 	case WP_GRENADE_LAUNCHER:
 		weapon_grenadelauncher_fire( ent );

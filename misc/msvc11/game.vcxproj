@@ -348,7 +348,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;GLOBALRANK;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;GLOBALRANK;_CRT_SECURE_NO_DEPRECATE;QAGAME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -756,6 +756,7 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">WIN32;NDEBUG;_WINDOWS;GLOBALRANK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">WIN32;NDEBUG;_WINDOWS;GLOBALRANK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
+    <ClCompile Include="..\..\code\game\bg_promode.c" />
     <ClCompile Include="..\..\code\game\bg_slidemove.c">
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug TA|Win32'">Disabled</Optimization>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug TA|x64'">Disabled</Optimization>
@@ -1260,6 +1261,7 @@
     <ClInclude Include="..\..\code\game\be_ai_weap.h" />
     <ClInclude Include="..\..\code\game\be_ea.h" />
     <ClInclude Include="..\..\code\game\bg_local.h" />
+    <ClInclude Include="..\..\code\game\bg_promode.h" />
     <ClInclude Include="..\..\code\game\bg_public.h" />
     <ClInclude Include="..\..\code\game\botlib.h" />
     <ClInclude Include="..\..\code\game\chars.h" />

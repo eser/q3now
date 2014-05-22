@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // be a valid snapshot this frame
 
 #include "cg_local.h"
+#include "../game/bg_promode.h" // CPM
 #ifdef MISSIONPACK
 #include "../../ui/menudef.h"
 
@@ -356,7 +357,12 @@ static void CG_ConfigStringModified( void ) {
 	else if ( num == CS_SHADERSTATE ) {
 		CG_ShaderStateChanged();
 	}
-		
+    // CPM
+    else if (num == CS_PRO_MODE)
+    {
+        CPM_UpdateSettings((atoi(str)) ? ((cgs.gametype == GT_TEAM) ? 2 : 1) : 0);
+    }
+    // !CPM
 }
 
 

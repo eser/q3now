@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
+#include "bg_promode.h" // CPM
 
 
 /*
@@ -452,7 +453,8 @@ void ClientTimerActions( gentity_t *ent, int msec ) {
 		}
 
 		// count down armor when over max
-		if ( client->ps.stats[STAT_ARMOR] > client->ps.stats[STAT_MAX_HEALTH] ) {
+		// if ( client->ps.stats[STAT_ARMOR] > client->ps.stats[STAT_MAX_HEALTH] ) {
+        if ((client->ps.stats[STAT_ARMOR] > client->ps.stats[STAT_MAX_HEALTH]) && (!cpm_armorsystem)) { // CPM
 			client->ps.stats[STAT_ARMOR]--;
 		}
 	}

@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+#include "bg_promode.h" // CPM
 
 // g_client.c -- client functions that don't happen every frame
 
@@ -1184,7 +1185,8 @@ void ClientSpawn(gentity_t *ent) {
 	if ( g_gametype.integer == GT_TEAM ) {
 		client->ps.ammo[WP_MACHINEGUN] = 50;
 	} else {
-		client->ps.ammo[WP_MACHINEGUN] = 100;
+		// client->ps.ammo[WP_MACHINEGUN] = 100;
+        client->ps.ammo[WP_MACHINEGUN] = cpm_MGweapon; // CPM
 	}
 
 	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_GAUNTLET );
@@ -1192,7 +1194,8 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.ammo[WP_GRAPPLING_HOOK] = -1;
 
 	// health will count down towards max_health
-	ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] + 25;
+	// ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] + 25;
+    ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] + cpm_respawnhealth; // CPM
 
 	G_SetOrigin( ent, spawn_origin );
 	VectorCopy( spawn_origin, client->ps.origin );
