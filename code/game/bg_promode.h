@@ -26,8 +26,6 @@ extern int		cpm_MGweapon;
 extern float	cpm_SSGknockback;
 extern int		cpm_SSGmaxammo;
 
-qboolean CPM_CanGrabAmmo(const gitem_t *item, const playerState_t *ps);
-
 // Grenade Launcher
 extern float	cpm_GLreload;
 extern int		cpm_GLmaxammo;
@@ -61,9 +59,6 @@ extern float	cpm_outofammodelay;
 								// then MAXYA * 0.8 = 150 * 0.8 = 120
 #define CPM_RAMULTIPLIER 1.25   // If a player has little RA and picks up an YA, multiply his
 								// RA value with this. (0.75 / 0.60 = 1.25)
-extern int		cpm_armorsystem;
-qboolean CPM_CanGrabArmor(const gitem_t *item, const playerState_t *ps);
-
 // Battle Suit
 extern float	cpm_BSprotection;
 

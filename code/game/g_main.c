@@ -50,11 +50,9 @@ vmCvar_t	g_needpass;
 vmCvar_t	g_maxclients;
 vmCvar_t	g_maxGameClients;
 vmCvar_t	g_dedicated;
-vmCvar_t	g_speed;
 vmCvar_t	g_gravity;
 vmCvar_t	g_cheats;
 vmCvar_t	g_knockback;
-vmCvar_t	g_quadfactor;
 vmCvar_t	g_forcerespawn;
 vmCvar_t	g_inactivity;
 vmCvar_t	g_debugMove;
@@ -139,10 +137,8 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_dedicated, "dedicated", "0", 0, 0, qfalse  },
 
-	{ &g_speed, "g_speed", "320", 0, 0, qtrue  },
 	{ &g_gravity, "g_gravity", "800", 0, 0, qtrue  },
 	{ &g_knockback, "g_knockback", "1000", 0, 0, qtrue  },
-	{ &g_quadfactor, "g_quadfactor", "3", 0, 0, qtrue  },
 	{ &g_weaponRespawn, "g_weaponrespawn", "5", 0, 0, qtrue  },
 	{ &g_weaponTeamRespawn, "g_weaponTeamRespawn", "30", 0, 0, qtrue },
 	{ &g_forcerespawn, "g_forcerespawn", "20", 0, 0, qtrue },
@@ -365,14 +361,12 @@ void G_RegisterCvars( void ) {
             // Update all pro mode-dependent server-side cvars					
             if (g_pro_mode.integer)
             {
-                trap_Cvar_Set("g_quadfactor", "4"); // pro mode default
                 trap_Cvar_Set("g_forcerespawn", "3");
                 trap_Cvar_Set("g_weaponrespawn", "15");
                 trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer | DF_NO_FOOTSTEPS)); // turn off footsteps
             }
             else
             {
-                trap_Cvar_Set("g_quadfactor", "3"); // q3 default
                 trap_Cvar_Set("g_forcerespawn", "20");
                 trap_Cvar_Set("g_weaponrespawn", "5");
                 trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer & ~DF_NO_FOOTSTEPS)); // turn on footsteps

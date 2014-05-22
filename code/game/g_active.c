@@ -394,9 +394,7 @@ Actions that happen once a second
 */
 void ClientTimerActions( gentity_t *ent, int msec ) {
 	gclient_t	*client;
-#ifdef MISSIONPACK
 	int			maxHealth;
-#endif
 
 	client = ent->client;
 	client->timeResidual += msec;
@@ -407,10 +405,12 @@ void ClientTimerActions( gentity_t *ent, int msec ) {
 		// regenerate
 #ifdef MISSIONPACK
 		if( bg_itemlist[client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-			maxHealth = client->ps.stats[STAT_MAX_HEALTH] / 2;
+			maxHealth = MAX_HEALTH;
 		}
-		else if ( client->ps.powerups[PW_REGEN] ) {
-			maxHealth = client->ps.stats[STAT_MAX_HEALTH];
+		else
+#endif
+        if ( client->ps.powerups[PW_REGEN] ) {
+			maxHealth = MAX_HEALTH;
 		}
 		else {
 			maxHealth = 0;
@@ -429,33 +429,11 @@ void ClientTimerActions( gentity_t *ent, int msec ) {
 				}
 				G_AddEvent( ent, EV_POWERUP_REGEN, 0 );
 			}
-#else
-		if ( client->ps.powerups[PW_REGEN] ) {
-			if ( ent->health < client->ps.stats[STAT_MAX_HEALTH]) {
-				ent->health += 15;
-				if ( ent->health > client->ps.stats[STAT_MAX_HEALTH] * 1.1 ) {
-					ent->health = client->ps.stats[STAT_MAX_HEALTH] * 1.1;
-				}
-				G_AddEvent( ent, EV_POWERUP_REGEN, 0 );
-			} else if ( ent->health < client->ps.stats[STAT_MAX_HEALTH] * 2) {
-				ent->health += 5;
-				if ( ent->health > client->ps.stats[STAT_MAX_HEALTH] * 2 ) {
-					ent->health = client->ps.stats[STAT_MAX_HEALTH] * 2;
-				}
-				G_AddEvent( ent, EV_POWERUP_REGEN, 0 );
-			}
-#endif
 		} else {
 			// count down health when over max
-			if ( ent->health > client->ps.stats[STAT_MAX_HEALTH] ) {
+			if ( ent->health > MAX_HEALTH ) {
 				ent->health--;
 			}
-		}
-
-		// count down armor when over max
-		// if ( client->ps.stats[STAT_ARMOR] > client->ps.stats[STAT_MAX_HEALTH] ) {
-        if ((client->ps.stats[STAT_ARMOR] > client->ps.stats[STAT_MAX_HEALTH]) && (!cpm_armorsystem)) { // CPM
-			client->ps.stats[STAT_ARMOR]--;
 		}
 	}
 #ifdef MISSIONPACK
@@ -621,7 +599,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			break;
 
 		case EV_USE_ITEM2:		// medkit
-			ent->health = ent->client->ps.stats[STAT_MAX_HEALTH] + 25;
+			ent->health = MAX_HEALTH;
 
 			break;
 
@@ -831,7 +809,7 @@ void ClientThink_real( gentity_t *ent ) {
 	client->ps.gravity = g_gravity.value;
 
 	// set speed
-	client->ps.speed = g_speed.value;
+	client->ps.speed = DEFAULT_MOVESPEED;
 
 #ifdef MISSIONPACK
 	if( bg_itemlist[client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT ) {

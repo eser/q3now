@@ -25,18 +25,26 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#define	GAME_VERSION		BASEGAME "-1"
+#define	GAME_VERSION		"q3now-1"
 
 #define	DEFAULT_GRAVITY		800
+#define	DEFAULT_MOVESPEED	320
+#define	JUMP_VELOCITY		270
+
+#define	QUAD_FACTOR			4
+#define MAX_HEALTH			100
+#define MAX_ARMOR			200
+
 #define	GIB_HEALTH			-40
-#define	ARMOR_PROTECTION	0.66
+#define	GIB_VELOCITY	    350
+#define	GIB_JUMP		    150
 
 #define	MAX_ITEMS			256
 
 #define	RANK_TIED_FLAG		0x4000
 
-#define DEFAULT_SHOTGUN_SPREAD	700
-#define DEFAULT_SHOTGUN_COUNT	16
+#define DEFAULT_SHOTGUN_SPREAD	500
+#define DEFAULT_SHOTGUN_COUNT	13
 
 #define	ITEM_RADIUS			15		// item sizes are needed for client side pickup detection
 
@@ -210,7 +218,6 @@ typedef enum {
 	STAT_ARMOR,				
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
-	STAT_MAX_HEALTH,				// health / armor limit, changable by handicap,
 
 // CPM
     STAT_ARMORTYPE,					// CPM: Added for armortypes (0=none, 1=YA, 2=RA)
