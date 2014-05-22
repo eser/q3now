@@ -1039,7 +1039,7 @@ void ClientBegin( int clientNum ) {
 
 	if ( client->sess.sessionTeam != TEAM_SPECTATOR ) {
 		if ( g_gametype.integer != GT_TOURNAMENT  ) {
-			trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " entered the game\n\"", client->pers.netname) );
+            trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " has entered the game\n\"", client->pers.netname));
 		}
 	}
 	G_LogPrintf( "ClientBegin: %i\n", clientNum );
