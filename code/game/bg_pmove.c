@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "bg_local.h"
+#include "bg_promode.h" // CPM
 
 pmove_t		*pm;
 pml_t		pml;
@@ -378,6 +379,15 @@ static qboolean PM_CheckJump( void ) {
 
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
 	pm->ps->velocity[2] = JUMP_VELOCITY;
+    // CPM: check for double-jump
+    if (cpm_pm_jump_z) {
+        if (pm->ps->stats[STAT_JUMPTIME] > 0) {
+            pm->ps->velocity[2] += cpm_pm_jump_z;
+        }
+
+        pm->ps->stats[STAT_JUMPTIME] = 400;
+    }
+    // !CPM
 	PM_AddEvent( EV_JUMP );
 
 	if ( pm->cmd.forwardmove >= 0 ) {
@@ -605,6 +615,8 @@ static void PM_AirMove( void ) {
 	float		wishspeed;
 	float		scale;
 	usercmd_t	cmd;
+    float		accel; // CPM
+    float		wishspeed2; // CPM
 
 	PM_Friction();
 
@@ -632,8 +644,29 @@ static void PM_AirMove( void ) {
 	wishspeed = VectorNormalize(wishdir);
 	wishspeed *= scale;
 
+    // CPM: Air Control
+    wishspeed2 = wishspeed;
+    if (DotProduct(pm->ps->velocity, wishdir) < 0)
+        accel = cpm_pm_airstopaccelerate;
+    else
+        accel = pm_airaccelerate;
+    if (pm->ps->movementDir == 2 || pm->ps->movementDir == 6)
+    {
+        if (wishspeed > cpm_pm_wishspeed)
+            wishspeed = cpm_pm_wishspeed;
+        accel = cpm_pm_strafeaccelerate;
+    }
+    // !CPM
+
 	// not on ground, so little effect on velocity
-	PM_Accelerate (wishdir, wishspeed, pm_airaccelerate);
+	// PM_Accelerate (wishdir, wishspeed, pm_airaccelerate);
+
+    // CPM: Air control
+    PM_Accelerate(wishdir, wishspeed, accel);
+    if (cpm_pm_aircontrol) {
+        CPM_PM_Aircontrol(pm, wishdir, wishspeed2);
+    }
+    // !CPM
 
 	// we may have a ground plane that is very steep, even
 	// though we don't have a groundentity
@@ -990,9 +1023,14 @@ static void PM_CrashLand( void ) {
 			}
 		} else if ( delta > 7 ) {
 			PM_AddEvent( EV_FALL_SHORT );
-		} else {
-			PM_AddEvent( PM_FootstepForSurface() );
-		}
+		// } else {
+		//	PM_AddEvent( PM_FootstepForSurface() );
+		// }
+        // CPM
+        } else if (!pm->noFootsteps) {
+            PM_AddEvent(PM_FootstepForSurface());
+        }
+        // !CPM
 	}
 
 	// start footstep cycle over
@@ -1480,7 +1518,8 @@ static void PM_BeginWeaponChange( int weapon ) {
 
 	PM_AddEvent( EV_CHANGE_WEAPON );
 	pm->ps->weaponstate = WEAPON_DROPPING;
-	pm->ps->weaponTime += 200;
+	// pm->ps->weaponTime += 200;
+    pm->ps->weaponTime += cpm_weapondrop; // CPM
 	PM_StartTorsoAnim( TORSO_DROP );
 }
 
@@ -1504,7 +1543,8 @@ static void PM_FinishWeaponChange( void ) {
 
 	pm->ps->weapon = weapon;
 	pm->ps->weaponstate = WEAPON_RAISING;
-	pm->ps->weaponTime += 250;
+	// pm->ps->weaponTime += 250;
+    pm->ps->weaponTime += cpm_weaponraise; // CPM
 	PM_StartTorsoAnim( TORSO_RAISE );
 }
 
@@ -1570,6 +1610,12 @@ static void PM_Weapon( void ) {
 		pm->ps->pm_flags &= ~PMF_USE_ITEM_HELD;
 	}
 
+    // CPM: Fix railgun switch
+    if (pm->ps->stats[STAT_RAILTIME] > 0)
+    {
+        pm->ps->stats[STAT_RAILTIME] -= pml.msec;
+    }
+    // !CPM
 
 	// make weapon function
 	if ( pm->ps->weaponTime > 0 ) {
@@ -1595,7 +1641,24 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
+    // CPM
+    if (pm->ps->weapon == WP_RAILGUN && pm->ps->stats[STAT_RAILTIME] > 0) {
+        return;
+    }
+    // !CPM
+
 	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
+        // CPM: allow weapon switch settings
+        if ((pm->ps->weapon == WP_RAILGUN) && (pm->ps->stats[STAT_RAILTIME] > 0))
+        {
+            // the player has switched back to railgun before it has reloaded
+            // setup so that the player now is in "firing state"
+            pm->ps->weaponTime = pm->ps->stats[STAT_RAILTIME];
+            pm->ps->weaponstate = WEAPON_FIRING;
+            return;
+        }
+        // !CPM
+
 		pm->ps->weaponstate = WEAPON_READY;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
 			PM_StartTorsoAnim( TORSO_STAND2 );
@@ -1630,7 +1693,8 @@ static void PM_Weapon( void ) {
 	// check for out of ammo
 	if ( ! pm->ps->ammo[ pm->ps->weapon ] ) {
 		PM_AddEvent( EV_NOAMMO );
-		pm->ps->weaponTime += 500;
+		// pm->ps->weaponTime += 500;
+        pm->ps->weaponTime += cpm_outofammodelay; // CPM: Shorter delay in pro mode
 		return;
 	}
 
@@ -1657,7 +1721,8 @@ static void PM_Weapon( void ) {
 		addTime = 100;
 		break;
 	case WP_GRENADE_LAUNCHER:
-		addTime = 800;
+		// addTime = 800;
+        addTime = cpm_GLreload;
 		break;
 	case WP_ROCKET_LAUNCHER:
 		addTime = 800;
@@ -1666,7 +1731,9 @@ static void PM_Weapon( void ) {
 		addTime = 100;
 		break;
 	case WP_RAILGUN:
-		addTime = 1500;
+		// addTime = 1500;
+        addTime = cpm_RGchange; // CPM
+        pm->ps->stats[STAT_RAILTIME] = 1500; // CPM
 		break;
 	case WP_BFG:
 		addTime = 200;
@@ -1699,6 +1766,7 @@ static void PM_Weapon( void ) {
 #endif
 	if ( pm->ps->powerups[PW_HASTE] ) {
 		addTime /= 1.3;
+        pm->ps->stats[STAT_RAILTIME] /= 1.3; // CPM
 	}
 
 	pm->ps->weaponTime += addTime;
@@ -1966,6 +2034,12 @@ void PmoveSingle (pmove_t *pmove) {
 	}
 
 	PM_DropTimers();
+
+    // CPM: Double-jump timer
+    if (pm->ps->stats[STAT_JUMPTIME] > 0) {
+        pm->ps->stats[STAT_JUMPTIME] -= pml.msec;
+    }
+    // !CPM
 
 #ifdef MISSIONPACK
 	if ( pm->ps->powerups[PW_INVULNERABILITY] ) {

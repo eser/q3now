@@ -249,7 +249,13 @@ static void CG_Item( centity_t *cent ) {
 		ent.reType = RT_SPRITE;
 		VectorCopy( cent->lerpOrigin, ent.origin );
 		ent.radius = 14;
-		ent.customShader = cg_items[es->modelindex].icon;
+		// ent.customShader = cg_items[es->modelindex].icon;
+        // CPM: Draw backpack shader if it's a backpack
+        if (es->eFlags & EF_BACKPACK)
+            ent.customShader = cgs.media.backpackIcon;
+        else
+            ent.customShader = cg_items[es->modelindex].icon;
+        // !CPM
 		ent.shaderRGBA[0] = 255;
 		ent.shaderRGBA[1] = 255;
 		ent.shaderRGBA[2] = 255;
@@ -300,7 +306,13 @@ static void CG_Item( centity_t *cent ) {
 		Byte4Copy( ci->c1RGBA, ent.shaderRGBA );
 	}
 
-	ent.hModel = cg_items[es->modelindex].models[0];
+	// ent.hModel = cg_items[es->modelindex].models[0];
+    // CPM: Use backpack model
+    if (es->eFlags & EF_BACKPACK)
+        ent.hModel = cgs.media.backpackModel;
+    else
+        ent.hModel = cg_items[es->modelindex].models[0];
+    // !CPM
 
 	VectorCopy( cent->lerpOrigin, ent.origin);
 	VectorCopy( cent->lerpOrigin, ent.oldorigin);
@@ -327,7 +339,8 @@ static void CG_Item( centity_t *cent ) {
 	}
 
 	// increase the size of the weapons when they are presented as items
-	if ( item->giType == IT_WEAPON ) {
+	// if ( item->giType == IT_WEAPON ) {
+    if (item->giType == IT_WEAPON && !(es->eFlags & EF_BACKPACK)) { // CPM: don't scale backpacks
 		VectorScale( ent.axis[0], 1.5, ent.axis[0] );
 		VectorScale( ent.axis[1], 1.5, ent.axis[1] );
 		VectorScale( ent.axis[2], 1.5, ent.axis[2] );
