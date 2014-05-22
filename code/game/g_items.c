@@ -133,60 +133,20 @@ int Pickup_PersistantPowerup( gentity_t *ent, gentity_t *other ) {
 
 	switch( ent->item->giTag ) {
 	case PW_GUARD:
-		clientNum = other->client->ps.clientNum;
-		trap_GetUserinfo( clientNum, userinfo, sizeof(userinfo) );
-		handicap = atof( Info_ValueForKey( userinfo, "handicap" ) );
-		if( handicap<=0.0f || handicap>100.0f) {
-			handicap = 100.0f;
-		}
-		max = (int)(2 *  handicap);
-
-		other->health = max;
-		other->client->ps.stats[STAT_HEALTH] = max;
-		other->client->ps.stats[STAT_MAX_HEALTH] = max;
-		other->client->ps.stats[STAT_ARMOR] = max;
-		other->client->pers.maxHealth = max;
-
+		other->health = MAX_HEALTH;
+        other->client->ps.stats[STAT_HEALTH] = MAX_HEALTH;
+        other->client->ps.stats[STAT_ARMOR] = MAX_HEALTH;
 		break;
 
 	case PW_SCOUT:
-		clientNum = other->client->ps.clientNum;
-		trap_GetUserinfo( clientNum, userinfo, sizeof(userinfo) );
-		handicap = atof( Info_ValueForKey( userinfo, "handicap" ) );
-		if( handicap<=0.0f || handicap>100.0f) {
-			handicap = 100.0f;
-		}
-		other->client->pers.maxHealth = handicap;
 		other->client->ps.stats[STAT_ARMOR] = 0;
 		break;
 
-	case PW_DOUBLER:
-		clientNum = other->client->ps.clientNum;
-		trap_GetUserinfo( clientNum, userinfo, sizeof(userinfo) );
-		handicap = atof( Info_ValueForKey( userinfo, "handicap" ) );
-		if( handicap<=0.0f || handicap>100.0f) {
-			handicap = 100.0f;
-		}
-		other->client->pers.maxHealth = handicap;
-		break;
 	case PW_AMMOREGEN:
-		clientNum = other->client->ps.clientNum;
-		trap_GetUserinfo( clientNum, userinfo, sizeof(userinfo) );
-		handicap = atof( Info_ValueForKey( userinfo, "handicap" ) );
-		if( handicap<=0.0f || handicap>100.0f) {
-			handicap = 100.0f;
-		}
-		other->client->pers.maxHealth = handicap;
 		memset(other->client->ammoTimes, 0, sizeof(other->client->ammoTimes));
 		break;
-	default:
-		clientNum = other->client->ps.clientNum;
-		trap_GetUserinfo( clientNum, userinfo, sizeof(userinfo) );
-		handicap = atof( Info_ValueForKey( userinfo, "handicap" ) );
-		if( handicap<=0.0f || handicap>100.0f) {
-			handicap = 100.0f;
-		}
-		other->client->pers.maxHealth = handicap;
+
+    default:
 		break;
 	}
 
@@ -396,14 +356,14 @@ int Pickup_Health (gentity_t *ent, gentity_t *other) {
 	// small and mega healths will go over the max
 #ifdef MISSIONPACK
 	if( bg_itemlist[other->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-		max = other->client->ps.stats[STAT_MAX_HEALTH];
+		max = MAX_HEALTH;
 	}
 	else
 #endif
-	if ( ent->item->quantity != 5 && ent->item->quantity != 100 ) {
-		max = other->client->ps.stats[STAT_MAX_HEALTH];
+	if ( ent->item->quantity == 5 || ent->item->quantity == 100 ) {
+        max = MAX_HEALTH * 2;
 	} else {
-		max = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
+        max = MAX_HEALTH;
 	}
 
 	if ( ent->count ) {
@@ -447,77 +407,27 @@ int Pickup_Health (gentity_t *ent, gentity_t *other) {
 //======================================================================
 
 int Pickup_Armor( gentity_t *ent, gentity_t *other ) {
-#ifdef MISSIONPACK
-	// int		upperBound;
-
-	// other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
-
-	// if( other->client && bg_itemlist[other->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-	//	upperBound = other->client->ps.stats[STAT_MAX_HEALTH];
-	// }
-	// else {
-	//	upperBound = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
-	// }
-
-	// if ( other->client->ps.stats[STAT_ARMOR] > upperBound ) {
-	//	other->client->ps.stats[STAT_ARMOR] = upperBound;
-	// }
-#else
-	// other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
-	// if ( other->client->ps.stats[STAT_ARMOR] > other->client->ps.stats[STAT_MAX_HEALTH] * 2 ) {
-	//	other->client->ps.stats[STAT_ARMOR] = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
-	// }
-#endif
-
-    // CPM
-    int		upperBound;
-    // qboolean hasGuard;
-
-#ifdef MISSIONPACK
-    if (other->client && bg_itemlist[other->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD) {
-        upperBound = other->client->ps.stats[STAT_MAX_HEALTH];
-        // hasGuard = qtrue;
+    if (ent->item->quantity == 100) // RA
+    {
+        other->client->ps.stats[STAT_ARMOR] = 200;
+        other->client->ps.stats[STAT_ARMORTYPE] = 2;
     }
-    else {
-        upperBound = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
-        // hasGuard = qfalse;
+    else if (ent->item->quantity == 50) // YA
+    {
+        if (other->client->ps.stats[STAT_ARMORTYPE] == 2)
+            other->client->ps.stats[STAT_ARMOR] *= CPM_RAMULTIPLIER;
+
+        other->client->ps.stats[STAT_ARMOR] += 100;
+        if (other->client->ps.stats[STAT_ARMOR] > 150)
+            other->client->ps.stats[STAT_ARMOR] = 150;
+        other->client->ps.stats[STAT_ARMORTYPE] = 1;
     }
-#else
-    upperBound = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
-    // hasGuard = qfalse;
-#endif
-
-    if (!cpm_armorsystem) {
-        other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
-
-        if (other->client->ps.stats[STAT_ARMOR] > upperBound) {
-            other->client->ps.stats[STAT_ARMOR] = upperBound;
-        }
-    } else {
-        if (ent->item->quantity == 100) // RA
-        {
-            other->client->ps.stats[STAT_ARMOR] = 200;
-            other->client->ps.stats[STAT_ARMORTYPE] = 2;
-        }
-        else if (ent->item->quantity == 50) // YA
-        {
-            if (other->client->ps.stats[STAT_ARMORTYPE] == 2)
-                other->client->ps.stats[STAT_ARMOR] *= CPM_RAMULTIPLIER;
-
-            other->client->ps.stats[STAT_ARMOR] += 100;
-            if (other->client->ps.stats[STAT_ARMOR] > 150)
-                other->client->ps.stats[STAT_ARMOR] = 150;
-            other->client->ps.stats[STAT_ARMORTYPE] = 1;
-        }
-        else // Shard
-        {
-            if (other->client->ps.stats[STAT_ARMOR] <= 0)
-                other->client->ps.stats[STAT_ARMORTYPE] = 1; // YA protection
-            other->client->ps.stats[STAT_ARMOR] += 2;
-        }
+    else // Shard
+    {
+        if (other->client->ps.stats[STAT_ARMOR] <= 0)
+            other->client->ps.stats[STAT_ARMORTYPE] = 1; // YA protection
+        other->client->ps.stats[STAT_ARMOR] += 2;
     }
-
-    // !CPM
 
 	return RESPAWN_ARMOR;
 }

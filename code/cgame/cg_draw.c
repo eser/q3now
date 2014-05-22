@@ -575,10 +575,8 @@ static void CG_DrawStatusBar( void ) {
         qhandle_t model = cgs.media.armorModel; // CPM
 
         // CPM: Fix RA shader
-        if (cpm_armorsystem) {
-            if (ps->stats[STAT_ARMORTYPE] == 2)
-                model = cgs.media.armorModelRA;
-        }
+        if (ps->stats[STAT_ARMORTYPE] == 2)
+            model = cgs.media.armorModelRA;
         // !CPM
 
 		origin[0] = 90;
@@ -653,7 +651,7 @@ static void CG_DrawStatusBar( void ) {
         // CPM: Armor icon
         qhandle_t icon = cgs.media.armorIcon;
 
-        if (cpm_armorsystem && ps->stats[STAT_ARMORTYPE] == 2)
+        if (ps->stats[STAT_ARMORTYPE] == 2)
             icon = cgs.media.armorIconRA;
         // !CPM
 

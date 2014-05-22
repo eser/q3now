@@ -723,8 +723,7 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
 
 	// armor
 	count = client->ps.stats[STAT_ARMOR];
-    // save = ceil(damage * ARMOR_PROTECTION);
-    type = (cpm_armorsystem) ? ((client->ps.stats[STAT_ARMORTYPE] <= 1) ? CPM_YAPROTECTION : CPM_RAPROTECTION) : ARMOR_PROTECTION; // CPM
+    type = (client->ps.stats[STAT_ARMORTYPE] <= 1) ? CPM_YAPROTECTION : CPM_RAPROTECTION; // CPM
     save = ceil(damage * type); // CPM
 	if (save >= count)
 		save = count;
@@ -889,7 +888,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// reduce damage by the attacker's handicap value
 	// unless they are rocket jumping
 	if ( attacker->client && attacker != targ ) {
-		max = attacker->client->ps.stats[STAT_MAX_HEALTH];
+		max = MAX_HEALTH;
 #ifdef MISSIONPACK
 		if( bg_itemlist[attacker->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
 			max /= 2;

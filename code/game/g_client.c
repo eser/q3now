@@ -759,26 +759,6 @@ void ClientUserinfoChanged( int clientNum ) {
 		}
 	}
 
-	// set max health
-#ifdef MISSIONPACK
-	if (client->ps.powerups[PW_GUARD]) {
-		client->pers.maxHealth = 200;
-	} else {
-		health = atoi( Info_ValueForKey( userinfo, "handicap" ) );
-		client->pers.maxHealth = health;
-		if ( client->pers.maxHealth < 1 || client->pers.maxHealth > 100 ) {
-			client->pers.maxHealth = 100;
-		}
-	}
-#else
-	health = atoi( Info_ValueForKey( userinfo, "handicap" ) );
-	client->pers.maxHealth = health;
-	if ( client->pers.maxHealth < 1 || client->pers.maxHealth > 100 ) {
-		client->pers.maxHealth = 100;
-	}
-#endif
-	client->ps.stats[STAT_MAX_HEALTH] = client->pers.maxHealth;
-
 	// set model
 	if( g_gametype.integer >= GT_TEAM ) {
 		Q_strncpyz( model, Info_ValueForKey (userinfo, "team_model"), sizeof( model ) );
@@ -871,16 +851,16 @@ void ClientUserinfoChanged( int clientNum ) {
 	// print scoreboards, display models, and play custom sounds
 	if (ent->r.svFlags & SVF_BOT)
 	{
-		s = va("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\skill\\%s\\tt\\%d\\tl\\%d",
+		s = va("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\c1\\%s\\c2\\%s\\w\\%i\\l\\%i\\skill\\%s\\tt\\%d\\tl\\%d",
 			client->pers.netname, team, model, headModel, c1, c2, 
-			client->pers.maxHealth, client->sess.wins, client->sess.losses,
+			client->sess.wins, client->sess.losses,
 			Info_ValueForKey( userinfo, "skill" ), teamTask, teamLeader );
 	}
 	else
 	{
-		s = va("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\g_redteam\\%s\\g_blueteam\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\tt\\%d\\tl\\%d",
+		s = va("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\g_redteam\\%s\\g_blueteam\\%s\\c1\\%s\\c2\\%s\\w\\%i\\l\\%i\\tt\\%d\\tl\\%d",
 			client->pers.netname, client->sess.sessionTeam, model, headModel, redTeam, blueTeam, c1, c2, 
-			client->pers.maxHealth, client->sess.wins, client->sess.losses, teamTask, teamLeader);
+			client->sess.wins, client->sess.losses, teamTask, teamLeader);
 	}
 
 	trap_SetConfigstring( CS_PLAYERS+clientNum, s );
@@ -1155,13 +1135,7 @@ void ClientSpawn(gentity_t *ent) {
 	client->airOutTime = level.time + 12000;
 
 	trap_GetUserinfo( index, userinfo, sizeof(userinfo) );
-	// set max health
-	client->pers.maxHealth = atoi( Info_ValueForKey( userinfo, "handicap" ) );
-	if ( client->pers.maxHealth < 1 || client->pers.maxHealth > 100 ) {
-		client->pers.maxHealth = 100;
-	}
 	// clear entity values
-	client->ps.stats[STAT_MAX_HEALTH] = client->pers.maxHealth;
 	client->ps.eFlags = flags;
 
 	ent->s.groundEntityNum = ENTITYNUM_NONE;
@@ -1194,7 +1168,7 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.ammo[WP_GRAPPLING_HOOK] = -1;
 
 	// health will count down towards max_health
-    ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH];
+    ent->health = client->ps.stats[STAT_HEALTH] = MAX_HEALTH;
 
 	G_SetOrigin( ent, spawn_origin );
 	VectorCopy( spawn_origin, client->ps.origin );

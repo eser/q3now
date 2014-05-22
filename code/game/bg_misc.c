@@ -1039,9 +1039,9 @@ This needs to be the same for client side prediction and server use.
 */
 qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const playerState_t *ps ) {
 	gitem_t	*item;
-#ifdef MISSIONPACK
-	int		upperBound;
-#endif
+    qboolean hasScout = qfalse;
+    qboolean hasGuard = qfalse;
+    int		quantity;
 
 	if ( ent->modelindex < 1 || ent->modelindex >= bg_numItems ) {
 		Com_Error( ERR_DROP, "BG_CanItemBeGrabbed: index out of range" );
@@ -1049,71 +1049,79 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 
 	item = &bg_itemlist[ent->modelindex];
 
+#ifdef MISSIONPACK
+    if (bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT) {
+        hasScout = qtrue;
+    } else if (bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD) {
+        hasGuard = qtrue;
+    }
+#endif
+
 	switch( item->giType ) {
 	case IT_WEAPON:
 		return qtrue;	// weapons are always picked up
 
 	case IT_AMMO:
-		// if ( ps->ammo[ item->giTag ] >= 200 ) {
-		//	return qfalse;		// can't hold any more
-		// }
-		// return qtrue;
-        // CPM: Check max ammo values
 #ifndef Q3_UI
-        return CPM_CanGrabAmmo(item, ps);
-#else
-        return qtrue;
+        switch (item->giTag)
+        {
+        case WP_SHOTGUN:
+            quantity = cpm_SSGmaxammo;
+            break;
+        case WP_GRENADE_LAUNCHER:
+            quantity = cpm_GLmaxammo;
+            break;
+        case WP_ROCKET_LAUNCHER:
+            quantity = cpm_RLmaxammo;
+            break;
+        case WP_RAILGUN:
+            quantity = cpm_RGmaxammo;
+            break;
+        default:
+            quantity = 200;
+        }
+
+        if (ps->ammo[item->giTag] >= quantity) {
+            return qfalse;
+        }
 #endif
-        // !CPM;
+
+        return qtrue;
 
 	case IT_ARMOR:
 #ifdef MISSIONPACK
-		// if( bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT ) {
-		//	return qfalse;
-		// }
-
-		// // we also clamp armor to the maxhealth for handicapping
-		// if( bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-		//	upperBound = ps->stats[STAT_MAX_HEALTH];
-		// }
-		// else {
-		//	upperBound = ps->stats[STAT_MAX_HEALTH] * 2;
-		// }
-
-		// if ( ps->stats[STAT_ARMOR] >= upperBound ) {
-		//	return qfalse;
-		// }
-#else
-		// if ( ps->stats[STAT_ARMOR] >= ps->stats[STAT_MAX_HEALTH] * 2 ) {
-		//	return qfalse;
-		// }
+		if (hasScout) {
+		    return qfalse;
+		}
 #endif
-		// return qtrue;
-        // CPM
-#ifndef Q3_UI
-        return CPM_CanGrabArmor(item, ps);
-#else
-        return qtrue;
-#endif
+        // CPM: pro mode system
+        if (item->quantity == 100) // RA
+        {
+            return (hasGuard || ps->stats[STAT_ARMOR] >= 200) ? qfalse : qtrue;
+        }
+        if (item->quantity == 50) // YA
+        {
+            if (ps->stats[STAT_ARMORTYPE] <= 1)
+            {
+                return (ps->stats[STAT_ARMOR] >= 150) ? qfalse : qtrue;
+            }
+            return (ps->stats[STAT_ARMOR] > CPM_RABREAKPOINT) ? qfalse : qtrue;
+        }
+
+        return qtrue; // you can _always_ get shards in cpm
         // !CPM
 
 	case IT_HEALTH:
 		// small and mega healths will go over the max, otherwise
 		// don't pick up if already at max
-#ifdef MISSIONPACK
-		if( bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-			upperBound = ps->stats[STAT_MAX_HEALTH];
-		}
-		else
-#endif
 		if ( item->quantity == 5 || item->quantity == 100 ) {
-			if ( ps->stats[STAT_HEALTH] >= ps->stats[STAT_MAX_HEALTH] * 2 ) {
+			if ( ps->stats[STAT_HEALTH] >= MAX_HEALTH * 2 ) {
 				return qfalse;
 			}
 			return qtrue;
 		}
 
-		if ( ps->stats[STAT_HEALTH] >= ps->stats[STAT_MAX_HEALTH] ) {
+		if ( ps->stats[STAT_HEALTH] >= MAX_HEALTH ) {
 			return qfalse;
 		}
 		return qtrue;
