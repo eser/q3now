@@ -20,14 +20,9 @@ extern float	cpm_Gauntletknockback;
 
 // Machinegun
 extern float	cpm_MGbox;
-extern float	cpm_MGdmg;
-extern float	cpm_MGdmg_tp;
 extern int		cpm_MGweapon;
 
 // Shotgun
-extern float	cpm_SSGdmg;
-extern float	cpm_SSGspread;
-extern int		cpm_SSGcount;
 extern float	cpm_SSGknockback;
 extern int		cpm_SSGmaxammo;
 
@@ -38,7 +33,6 @@ extern float	cpm_GLreload;
 extern int		cpm_GLmaxammo;
 
 // Rocket Launcher
-extern float	cpm_RLspeed;
 extern int		cpm_RLmaxammo;
 extern float	cpm_RLsplashknockback;
 extern float	cpm_RLknockback;
@@ -52,7 +46,6 @@ extern int		cpm_RGbox;
 extern float	cpm_RGchange;
 
 // Plasma Gun
-extern float	cpm_PGdmg;
 extern float	cpm_PGknockback;
 
 // Weapon switching
@@ -73,9 +66,6 @@ qboolean CPM_CanGrabArmor(const gitem_t *item, const playerState_t *ps);
 
 // Battle Suit
 extern float	cpm_BSprotection;
-
-// Respawn Health
-extern float	cpm_respawnhealth;
 
 // Backpacks
 extern int		cpm_backpacks;

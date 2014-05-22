@@ -156,12 +156,10 @@ void SnapVectorTowards( vec3_t v, vec3_t to ) {
 
 #ifdef MISSIONPACK
 #define CHAINGUN_SPREAD		600
-#define CHAINGUN_DAMAGE		7
+#define CHAINGUN_DAMAGE		8
 #endif
-#define MACHINEGUN_SPREAD	200
-#define	MACHINEGUN_DAMAGE	7
-#define	MACHINEGUN_TEAM_DAMAGE	5		// wimpier MG in teamplay
-
+#define MACHINEGUN_DAMAGE   8
+#define MACHINEGUN_SPREAD	250
 void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
 	trace_t		tr;
 	vec3_t		end;
@@ -266,7 +264,7 @@ SHOTGUN
 
 // DEFAULT_SHOTGUN_SPREAD and DEFAULT_SHOTGUN_COUNT	are in bg_public.h, because
 // client predicts same spreads
-#define	DEFAULT_SHOTGUN_DAMAGE	10
+#define	DEFAULT_SHOTGUN_DAMAGE	8
 
 qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 	trace_t		tr;
@@ -290,8 +288,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 		}
 
 		if ( traceEnt->takedamage) {
-			// damage = DEFAULT_SHOTGUN_DAMAGE * s_quadFactor;
-            damage = cpm_SSGdmg * s_quadFactor; // CPM
+			damage = DEFAULT_SHOTGUN_DAMAGE * s_quadFactor;
 #ifdef MISSIONPACK
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
@@ -340,12 +337,9 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 	CrossProduct( forward, right, up );
 
 	// generate the "random" spread pattern
-	// for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
-    for (i = 0; i < cpm_SSGcount; i++) { // CPM
-		// r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-		// u = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-        r = Q_crandom(&seed) * cpm_SSGspread;  // CPM
-        u = Q_crandom(&seed) * cpm_SSGspread;  // CPM
+	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
+		r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
+		u = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
 		VectorMA( origin, 8192 * 16, forward, end);
 		VectorMA (end, r, right, end);
 		VectorMA (end, u, up, end);
@@ -858,17 +852,7 @@ void FireWeapon( gentity_t *ent ) {
 		weapon_supershotgun_fire( ent );
 		break;
 	case WP_MACHINEGUN:
-		// if ( g_gametype.integer != GT_TEAM ) {
-		// 	Bullet_Fire( ent, MACHINEGUN_SPREAD, MACHINEGUN_DAMAGE, MOD_MACHINEGUN );
-		// } else {
-		// 	Bullet_Fire( ent, MACHINEGUN_SPREAD, MACHINEGUN_TEAM_DAMAGE, MOD_MACHINEGUN );
-		// }
-        if (g_gametype.integer != GT_TEAM) {
-            Bullet_Fire(ent, MACHINEGUN_SPREAD, cpm_MGdmg, MOD_MACHINEGUN); // CPM
-        }
-        else {
-            Bullet_Fire(ent, MACHINEGUN_SPREAD, cpm_MGdmg_tp, MOD_MACHINEGUN); // CPM
-        }
+        Bullet_Fire(ent, MACHINEGUN_SPREAD, MACHINEGUN_DAMAGE, MOD_MACHINEGUN);
 		break;
 	case WP_GRENADE_LAUNCHER:
 		weapon_grenadelauncher_fire( ent );
