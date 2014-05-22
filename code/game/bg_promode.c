@@ -47,9 +47,6 @@ float	cpm_weapondrop = 200;
 float	cpm_weaponraise = 250;
 float	cpm_outofammodelay = 500;
 
-// Armor system
-int		cpm_armorsystem = 0;
-
 // Battle Suit
 float	cpm_BSprotection = 0.5;
 
@@ -137,9 +134,6 @@ void CPM_UpdateSettings(int num)
 	cpm_weaponraise = 250;
 	cpm_outofammodelay = 500;
 
-	// Armor system
-	cpm_armorsystem = 0;
-
 	// vq3 Battle Suit
 	cpm_BSprotection = 0.5;
 
@@ -224,9 +218,6 @@ void CPM_UpdateSettings(int num)
 		cpm_weaponraise = 0;
 		cpm_outofammodelay = 100;
 
-		// Armor system
-		cpm_armorsystem = 1;
-
 		// Battle Suit
 		cpm_BSprotection = 0.25; // ie 75% protection
 
@@ -264,83 +255,6 @@ void CPM_UpdateSettings(int num)
 		cpm_lavafrequency = 100;
 
 	}
-}
-
-qboolean CPM_CanGrabAmmo(const gitem_t *item, const playerState_t *ps)
-{
-    int		quantity;
-
-    switch (item->giTag)
-    {
-    case WP_SHOTGUN:
-        quantity = cpm_SSGmaxammo;
-        break;
-    case WP_GRENADE_LAUNCHER:
-        quantity = cpm_GLmaxammo;
-        break;
-    case WP_ROCKET_LAUNCHER:
-        quantity = cpm_RLmaxammo;
-        break;
-    case WP_RAILGUN:
-        quantity = cpm_RGmaxammo;
-        break;
-    default:
-        quantity = 200;
-    }
-
-    if (ps->ammo[item->giTag] < quantity) {
-        return qtrue;
-    }
-
-    return qfalse;
-}
-
-qboolean CPM_CanGrabArmor(const gitem_t *item, const playerState_t *ps)
-{
-    int upperBound;
-    qboolean hasGuard;
-
-#ifdef MISSIONPACK
-    if (bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT) {
-        return qfalse;
-    }
-
-    // we also clamp armor to the maxhealth for handicapping
-    if (bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD) {
-        upperBound = ps->stats[STAT_MAX_HEALTH];
-        hasGuard = qtrue;
-    }
-    else {
-        upperBound = ps->stats[STAT_MAX_HEALTH] * 2;
-        hasGuard = qfalse;
-    }
-#else
-    upperBound = ps->stats[STAT_MAX_HEALTH] * 2;
-    hasGuard = qfalse;
-#endif
-
-    // vq3 system
-    if (!cpm_armorsystem)
-    {
-        // notice that vq3 armor system is cap'ed for handicaps
-        return (ps->stats[STAT_ARMOR] >= upperBound) ? qfalse : qtrue;
-    }
-
-    // pro mode system
-    if (item->quantity == 100) // RA
-    {
-        return (hasGuard || ps->stats[STAT_ARMOR] >= 200) ? qfalse : qtrue;
-    }
-    if (item->quantity == 50) // YA
-    {
-        if (ps->stats[STAT_ARMORTYPE] <= 1)
-        {
-            return (ps->stats[STAT_ARMOR] >= 150) ? qfalse : qtrue;
-        }
-        return (ps->stats[STAT_ARMOR] > CPM_RABREAKPOINT) ? qfalse : qtrue;
-    }
-
-    return qtrue; // you can _always_ get shards in cpm
 }
 
 void CPM_PM_Aircontrol(pmove_t *pm, vec3_t wishdir, float wishspeed)
