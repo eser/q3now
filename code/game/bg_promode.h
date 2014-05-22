@@ -51,14 +51,6 @@ extern float	cpm_weapondrop;
 extern float	cpm_weaponraise;
 extern float	cpm_outofammodelay;
 
-// Armor system
-#define CPM_YAPROTECTION 0.60
-#define CPM_RAPROTECTION 0.75
-#define CPM_RABREAKPOINT 120	// this is the point where a player with RA can pickup an YA
-								// calculated through YAPROT / RAPROT = 0.60 / 0.75 = 0.8
-								// then MAXYA * 0.8 = 150 * 0.8 = 120
-#define CPM_RAMULTIPLIER 1.25   // If a player has little RA and picks up an YA, multiply his
-								// RA value with this. (0.75 / 0.60 = 1.25)
 // Battle Suit
 extern float	cpm_BSprotection;
 
