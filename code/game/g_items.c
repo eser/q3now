@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+#include "bg_promode.h" // CPM
 
 /*
 
@@ -112,7 +113,10 @@ int Pickup_Powerup( gentity_t *ent, gentity_t *other ) {
 		// anti-reward
 		client->ps.persistant[PERS_PLAYEREVENTS] ^= PLAYEREVENT_DENIEDREWARD;
 	}
-	return RESPAWN_POWERUP;
+
+    // return RESPAWN_POWERUP;
+    // CPM: Battle Suit uses different respawn times from the other powerups in cpm
+    return (ent->item->giTag == PW_BATTLESUIT) ? cpm_itemrespawnBS : cpm_itemrespawnpowerup; // CPM
 }
 
 //======================================================================
@@ -208,10 +212,36 @@ int Pickup_Holdable( gentity_t *ent, gentity_t *other ) {
 
 void Add_Ammo (gentity_t *ent, int weapon, int count)
 {
-	ent->client->ps.ammo[weapon] += count;
-	if ( ent->client->ps.ammo[weapon] > 200 ) {
-		ent->client->ps.ammo[weapon] = 200;
-	}
+	// ent->client->ps.ammo[weapon] += count;
+	// if ( ent->client->ps.ammo[weapon] > 200 ) {
+	//  ent->client->ps.ammo[weapon] = 200;
+	// }
+    // CPM: Cap ammo for certain weapons
+    int		quantity;
+
+    switch (weapon)
+    {
+    case WP_SHOTGUN:
+        quantity = cpm_SSGmaxammo;
+        break;
+    case WP_GRENADE_LAUNCHER:
+        quantity = cpm_GLmaxammo;
+        break;
+    case WP_ROCKET_LAUNCHER:
+        quantity = cpm_RLmaxammo;
+        break;
+    case WP_RAILGUN:
+        quantity = cpm_RGmaxammo;
+        break;
+    default:
+        quantity = 200;
+    }
+
+    ent->client->ps.ammo[weapon] += count;
+    if (ent->client->ps.ammo[weapon] > quantity) {
+        ent->client->ps.ammo[weapon] = quantity;
+    }
+    // !CPM
 }
 
 int Pickup_Ammo (gentity_t *ent, gentity_t *other)
@@ -221,12 +251,25 @@ int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 	if ( ent->count ) {
 		quantity = ent->count;
 	} else {
-		quantity = ent->item->quantity;
+		// quantity = ent->item->quantity;
+        // CPM: Ammo counts from boxes
+        switch (ent->item->giTag) {
+        case WP_MACHINEGUN:
+            quantity = cpm_MGbox;
+            break;
+        case WP_RAILGUN:
+            quantity = cpm_RGbox;
+            break;
+        default:
+            quantity = ent->item->quantity;
+        }
+        // !CPM
 	}
 
 	Add_Ammo (other, ent->item->giTag, quantity);
 
-	return RESPAWN_AMMO;
+	// return RESPAWN_AMMO;
+    return cpm_itemrespawnammo; // CPM
 }
 
 //======================================================================
@@ -235,13 +278,64 @@ int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 	int		quantity;
 
+    // CPM: Check for backpack
+    if (ent->s.eFlags & EF_BACKPACK)
+    {
+        int a1, a2, a3, a4, a5, a6, a7, a8;
+        // give the player the backpack's weapon
+        other->client->ps.stats[STAT_WEAPONS] |= (1 << ent->item->giTag);
+
+        a1 = (ent->damage >> 8);
+        a2 = (ent->damage & 0x00FF);
+        a3 = (ent->health >> 8);
+        a4 = (ent->health & 0x00FF);
+        a5 = (ent->splashDamage >> 8);
+        a6 = (ent->splashDamage & 0x00FF);
+        a7 = (ent->splashRadius >> 8);
+        a8 = (ent->splashRadius & 0x00FF);
+
+        // print message:
+        trap_SendServerCommand(other - g_entities, va("print \"Backpack  Ammo:\""));
+        if (a1) trap_SendServerCommand(other - g_entities, va("print \" %d bullets\"", a1));
+        if (a2) trap_SendServerCommand(other - g_entities, va("print \" %d shells\"", a2));
+        if (a3) trap_SendServerCommand(other - g_entities, va("print \" %d grenades\"", a3));
+        if (a4) trap_SendServerCommand(other - g_entities, va("print \" %d rockets\"", a4));
+        if (a5) trap_SendServerCommand(other - g_entities, va("print \" %d lightning\"", a5));
+        if (a6) trap_SendServerCommand(other - g_entities, va("print \" %d slugs\"", a6));
+        if (a7) trap_SendServerCommand(other - g_entities, va("print \" %d cells\"", a7));
+        if (a8) trap_SendServerCommand(other - g_entities, va("print \" %d bfg\"", a8));
+
+        trap_SendServerCommand(other - g_entities, va("print \"\n\""));
+
+        Add_Ammo(other, WP_MACHINEGUN, a1);
+        Add_Ammo(other, WP_SHOTGUN, a2);
+        Add_Ammo(other, WP_GRENADE_LAUNCHER, a3);
+        Add_Ammo(other, WP_ROCKET_LAUNCHER, a4);
+        Add_Ammo(other, WP_LIGHTNING, a5);
+        Add_Ammo(other, WP_RAILGUN, a6);
+        Add_Ammo(other, WP_PLASMAGUN, a7);
+        Add_Ammo(other, WP_BFG, a8);
+
+        return 1; // this value doesn't matter, only it isn't 0
+    }
+    // !CPM
+
 	if ( ent->count < 0 ) {
 		quantity = 0; // None for you, sir!
 	} else {
 		if ( ent->count ) {
 			quantity = ent->count;
 		} else {
-			quantity = ent->item->quantity;
+			// quantity = ent->item->quantity;
+            // CPM: Ammo counts from weapons
+            switch (ent->item->giTag) {
+                case WP_MACHINEGUN:
+                    quantity = cpm_MGweapon;
+                    break;
+                default:
+                    quantity = ent->item->quantity;
+            }
+            // !CPM
 		}
 
 		// dropped items and teamplay weapons always have full ammo
@@ -275,6 +369,26 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 
 //======================================================================
 
+// CPM: Megahealth respawn function
+void CPM_HealthDecay(gentity_t *ent)
+{
+    if (!ent->activator) {
+        ent->think = RespawnItem;
+        ent->nextthink = level.time + CPM_MEGARESPAWNDELAY * 1000;
+        return;
+    }
+
+    if (strcmp(ent->activator->classname, "player")
+        || ent->activator->client->ps.stats[STAT_HEALTH] <= 100) {
+        ent->nextthink = level.time + CPM_MEGARESPAWNDELAY * 1000;
+        ent->think = RespawnItem;
+        return;
+    }
+
+    ent->nextthink = level.time + 1000;
+}
+// !CPM
+
 int Pickup_Health (gentity_t *ent, gentity_t *other) {
 	int			max;
 	int			quantity;
@@ -306,36 +420,104 @@ int Pickup_Health (gentity_t *ent, gentity_t *other) {
 	other->client->ps.stats[STAT_HEALTH] = other->health;
 
 	if ( ent->item->quantity == 100 ) {		// mega health respawns slow
-		return RESPAWN_MEGAHEALTH;
+		// return RESPAWN_MEGAHEALTH;
+
+        // CPM
+        if (cpm_megastyle)
+        {
+            if (g_gametype.integer >= GT_TEAM) {
+                return RESPAWN_MEGAHEALTH;
+            }
+
+            ent->think = CPM_HealthDecay;
+            ent->activator = other;
+            return 1; // nextthink will be one second
+        }
+
+        return RESPAWN_HEALTH; // due to a bug in the vq3 code, this must return health respawn
+        // and not megahealth respawn (or else megahealth wont respawn once every 35 seconds
+        // on maps like q3dm13)
+        // !CPM
 	}
 
-	return RESPAWN_HEALTH;
+	// return RESPAWN_HEALTH;
+    return cpm_itemrespawnhealth; // CPM
 }
 
 //======================================================================
 
 int Pickup_Armor( gentity_t *ent, gentity_t *other ) {
 #ifdef MISSIONPACK
-	int		upperBound;
+	// int		upperBound;
 
-	other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
+	// other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
 
-	if( other->client && bg_itemlist[other->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-		upperBound = other->client->ps.stats[STAT_MAX_HEALTH];
-	}
-	else {
-		upperBound = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
-	}
+	// if( other->client && bg_itemlist[other->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
+	//	upperBound = other->client->ps.stats[STAT_MAX_HEALTH];
+	// }
+	// else {
+	//	upperBound = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
+	// }
 
-	if ( other->client->ps.stats[STAT_ARMOR] > upperBound ) {
-		other->client->ps.stats[STAT_ARMOR] = upperBound;
-	}
+	// if ( other->client->ps.stats[STAT_ARMOR] > upperBound ) {
+	//	other->client->ps.stats[STAT_ARMOR] = upperBound;
+	// }
 #else
-	other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
-	if ( other->client->ps.stats[STAT_ARMOR] > other->client->ps.stats[STAT_MAX_HEALTH] * 2 ) {
-		other->client->ps.stats[STAT_ARMOR] = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
-	}
+	// other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
+	// if ( other->client->ps.stats[STAT_ARMOR] > other->client->ps.stats[STAT_MAX_HEALTH] * 2 ) {
+	//	other->client->ps.stats[STAT_ARMOR] = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
+	// }
 #endif
+
+    // CPM
+    int		upperBound;
+    // qboolean hasGuard;
+
+#ifdef MISSIONPACK
+    if (other->client && bg_itemlist[other->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD) {
+        upperBound = other->client->ps.stats[STAT_MAX_HEALTH];
+        // hasGuard = qtrue;
+    }
+    else {
+        upperBound = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
+        // hasGuard = qfalse;
+    }
+#else
+    upperBound = other->client->ps.stats[STAT_MAX_HEALTH] * 2;
+    // hasGuard = qfalse;
+#endif
+
+    if (!cpm_armorsystem) {
+        other->client->ps.stats[STAT_ARMOR] += ent->item->quantity;
+
+        if (other->client->ps.stats[STAT_ARMOR] > upperBound) {
+            other->client->ps.stats[STAT_ARMOR] = upperBound;
+        }
+    } else {
+        if (ent->item->quantity == 100) // RA
+        {
+            other->client->ps.stats[STAT_ARMOR] = 200;
+            other->client->ps.stats[STAT_ARMORTYPE] = 2;
+        }
+        else if (ent->item->quantity == 50) // YA
+        {
+            if (other->client->ps.stats[STAT_ARMORTYPE] == 2)
+                other->client->ps.stats[STAT_ARMOR] *= CPM_RAMULTIPLIER;
+
+            other->client->ps.stats[STAT_ARMOR] += 100;
+            if (other->client->ps.stats[STAT_ARMOR] > 150)
+                other->client->ps.stats[STAT_ARMOR] = 150;
+            other->client->ps.stats[STAT_ARMORTYPE] = 1;
+        }
+        else // Shard
+        {
+            if (other->client->ps.stats[STAT_ARMOR] <= 0)
+                other->client->ps.stats[STAT_ARMORTYPE] = 1; // YA protection
+            other->client->ps.stats[STAT_ARMOR] += 2;
+        }
+    }
+
+    // !CPM
 
 	return RESPAWN_ARMOR;
 }
@@ -371,6 +553,7 @@ void RespawnItem( gentity_t *ent ) {
 	ent->r.contents = CONTENTS_TRIGGER;
 	ent->s.eFlags &= ~EF_NODRAW;
 	ent->r.svFlags &= ~SVF_NOCLIENT;
+    ent->s.eFlags &= ~EF_BACKPACK; // CPM: Make sure the item no longer is a backpack
 	trap_LinkEntity (ent);
 
 	if ( ent->item->giType == IT_POWERUP ) {
@@ -512,7 +695,8 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 	}
 
 	// non zero wait overrides respawn time
-	if ( ent->wait ) {
+	// if ( ent->wait ) {
+    if (ent->wait && ent->think != CPM_HealthDecay) {	// CPM
 		respawn = ent->wait;
 	}
 
@@ -545,7 +729,12 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 		ent->think = 0;
 	} else {
 		ent->nextthink = level.time + respawn * 1000;
-		ent->think = RespawnItem;
+		// ent->think = RespawnItem;
+        // CPM
+        if (ent->think != CPM_HealthDecay) {
+            ent->think = RespawnItem;
+        }
+        // !CPM
 	}
 	trap_LinkEntity( ent );
 }
@@ -690,7 +879,8 @@ void FinishSpawningItem( gentity_t *ent ) {
 	}
 
 	// powerups don't spawn in for a while
-	if ( ent->item->giType == IT_POWERUP ) {
+	// if ( ent->item->giType == IT_POWERUP ) {
+    if (ent->item->giType == IT_POWERUP && !cpm_startpowerups) { // CPM
 		float	respawn;
 
 		respawn = 45 + crandom() * 15;

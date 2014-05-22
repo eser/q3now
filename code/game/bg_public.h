@@ -210,7 +210,13 @@ typedef enum {
 	STAT_ARMOR,				
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
-	STAT_MAX_HEALTH					// health / armor limit, changable by handicap
+	STAT_MAX_HEALTH,				// health / armor limit, changable by handicap,
+
+// CPM
+    STAT_ARMORTYPE,					// CPM: Added for armortypes (0=none, 1=YA, 2=RA)
+    STAT_JUMPTIME,
+    STAT_RAILTIME                   // CPM: Added for allowchange
+// !CPM
 } statIndex_t;
 
 
@@ -262,6 +268,8 @@ typedef enum {
 #define	EF_AWARD_ASSIST		0x00020000		// draw a assist sprite
 #define EF_AWARD_DENIED		0x00040000		// denied
 #define EF_TEAMVOTED		0x00080000		// already cast a team vote
+
+#define	EF_BACKPACK			0x00000001		// CPM: Backpack indicator bit
 
 // NOTE: may not have more than 16
 typedef enum {

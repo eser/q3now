@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // cg_main.c -- initialization and primary entry point for cgame
 #include "cg_local.h"
+#include "../game/bg_promode.h" // CPM
 
 #ifdef MISSIONPACK
 #include "../ui/ui_shared.h"
@@ -1078,6 +1079,15 @@ static void CG_RegisterGraphics( void ) {
 	trap_R_RegisterModel( "models/players/heads/janet/janet.md3" );
 
 #endif
+
+    // CPM: Register graphics
+    cgs.media.backpackModel = trap_R_RegisterModel("models/backpack.md3");
+    cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/icon_backpack");
+
+    cgs.media.armorModelRA = trap_R_RegisterModel("models/powerups/armor/armor_red.md3");
+    cgs.media.armorIconRA = trap_R_RegisterShaderNoMip("icons/iconr_red");
+    // !CPM
+
 	CG_ClearParticles ();
 /*
 	for (i=1; i<MAX_PARTICLES_AREAS; i++)
@@ -1893,6 +1903,11 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	cgs.levelStartTime = atoi( s );
 
 	CG_ParseServerinfo();
+
+    // CPM: Setup according to the pro mode settings
+    s = CG_ConfigString(CS_PRO_MODE);
+    CPM_UpdateSettings((atoi(s)) ? ((cgs.gametype == GT_TEAM) ? 2 : 1) : 0);
+    // !CPM
 
 	// load the new map
 	CG_LoadingString( "collision map" );

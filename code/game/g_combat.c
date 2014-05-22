@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_combat.c
 
 #include "g_local.h"
+#include "bg_promode.h" // CPM
 
 
 /*
@@ -96,14 +97,46 @@ void TossClientItems( gentity_t *self ) {
 		}
 	}
 
-	if ( weapon > WP_MACHINEGUN && weapon != WP_GRAPPLING_HOOK && 
-		self->client->ps.ammo[ weapon ] ) {
-		// find the item type for this weapon
-		item = BG_FindItemForWeapon( weapon );
+    // if ( weapon > WP_MACHINEGUN && weapon != WP_GRAPPLING_HOOK && 
+    // 	self->client->ps.ammo[ weapon ] ) {
+    // 	// find the item type for this weapon
+    // 	item = BG_FindItemForWeapon( weapon );
 
-		// spawn the item
-		Drop_Item( self, item, 0 );
-	}
+    // 	// spawn the item
+    // 	Drop_Item( self, item, 0 );
+    // }
+
+    // CPM
+    if (weapon > WP_MACHINEGUN && weapon != WP_GRAPPLING_HOOK &&
+        self->client->ps.ammo[weapon] || cpm_backpacks) {
+        // find the item type for this weapon
+        item = BG_FindItemForWeapon(weapon);
+
+        // spawn the item
+        drop = Drop_Item(self, item, 0); // CPM
+
+        // CPM: fix backpacks
+        if (cpm_backpacks)
+        {
+            // set the backpack flag
+            drop->s.eFlags |= EF_BACKPACK;
+
+            // fill with information
+            drop->damage =
+                ((self->client->ps.ammo[WP_MACHINEGUN] & 0x00FF) << 8) +
+                (self->client->ps.ammo[WP_SHOTGUN] & 0x00FF);
+            drop->health =
+                ((self->client->ps.ammo[WP_GRENADE_LAUNCHER] & 0x00FF) << 8) +
+                (self->client->ps.ammo[WP_ROCKET_LAUNCHER] & 0x00FF);
+            drop->splashDamage =
+                ((self->client->ps.ammo[WP_LIGHTNING] & 0x00FF) << 8) +
+                (self->client->ps.ammo[WP_RAILGUN] & 0x00FF);
+            drop->splashRadius =
+                ((self->client->ps.ammo[WP_PLASMAGUN] & 0x00FF) << 8) +
+                (self->client->ps.ammo[WP_BFG] & 0x00FF);
+        }
+    }
+    // !CPM
 
 	// drop all the powerups if not in teamplay
 	if ( g_gametype.integer != GT_TEAM ) {
@@ -605,7 +638,8 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	// don't allow respawn until the death anim is done
 	// g_forcerespawn may force spawning at some later time
-	self->client->respawnTime = level.time + 1700;
+	// self->client->respawnTime = level.time + 1700;
+    self->client->respawnTime = level.time + cpm_clientrespawndelay; // CPM
 
 	// remove powerups
 	memset( self->client->ps.powerups, 0, sizeof(self->client->ps.powerups) );
@@ -674,6 +708,7 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
 	gclient_t	*client;
 	int			save;
 	int			count;
+    float	    type; // CPM
 
 	if (!damage)
 		return 0;
@@ -688,7 +723,9 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
 
 	// armor
 	count = client->ps.stats[STAT_ARMOR];
-	save = ceil( damage * ARMOR_PROTECTION );
+    // save = ceil(damage * ARMOR_PROTECTION);
+    type = (cpm_armorsystem) ? ((client->ps.stats[STAT_ARMORTYPE] <= 1) ? CPM_YAPROTECTION : CPM_RAPROTECTION) : ARMOR_PROTECTION; // CPM
+    save = ceil(damage * type); // CPM
 	if (save >= count)
 		save = count;
 
@@ -889,11 +926,38 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// figure momentum add, even if the damage won't be taken
 	if ( knockback && targ->client ) {
 		vec3_t	kvel;
-		float	mass;
+		float	mass = 200;
 
-		mass = 200;
+        // CPM: Custom weapon knockbacks
+        float	scale = 1;
 
-		VectorScale (dir, g_knockback.value * (float)knockback / mass, kvel);
+        if ((targ == attacker) && (mod == MOD_ROCKET_SPLASH)) {
+        } else {
+            switch (mod) {
+            case MOD_GAUNTLET:
+                scale = cpm_Gauntletknockback;
+                break;
+            case MOD_SHOTGUN:
+                scale = cpm_SSGknockback;
+                break;
+            case MOD_ROCKET:
+                scale = cpm_RLknockback;
+                break;
+            case MOD_ROCKET_SPLASH:
+                scale = cpm_RLsplashknockback;
+                break;
+            case MOD_LIGHTNING:
+                scale = cpm_LGknockback;
+                break;
+            case MOD_PLASMA:
+                scale = cpm_PGknockback;
+                break;
+            }
+        }
+        // !CPM
+
+		// VectorScale (dir, g_knockback.value * (float)knockback / mass, kvel);
+        VectorScale(dir, scale * g_knockback.value * (float)knockback / mass, kvel); // CPM
 		VectorAdd (targ->client->ps.velocity, kvel, targ->client->ps.velocity);
 
 		// set the timer so that the other client can't cancel
@@ -951,7 +1015,8 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		if ( ( dflags & DAMAGE_RADIUS ) || ( mod == MOD_FALLING ) ) {
 			return;
 		}
-		damage *= 0.5;
+		// damage *= 0.5;
+        damage *= cpm_BSprotection; // CPM: Better protection in cpm
 	}
 
 	// add to the attacker's hit counter (if the target isn't a general entity like a prox mine)
@@ -1213,10 +1278,102 @@ qboolean G_RadiusDamage ( vec3_t origin, gentity_t *attacker, float damage, floa
 			VectorSubtract (ent->r.currentOrigin, origin, dir);
 			// push the center of mass higher than the origin so players
 			// get knocked into the air more
-			dir[2] += 24;
+			// dir[2] += 24;
+
+            // CPM: Add some extra knockback
+            if (ent == attacker) { // rjumps are same as in normal Q3A
+                dir[2] += 24;
+            }
+            else {
+                dir[2] += cpm_knockback_z; //24;
+            }
+            // !CPM
+
 			G_Damage (ent, NULL, attacker, dir, origin, (int)points, DAMAGE_RADIUS, mod);
 		}
 	}
 
 	return hitClient;
+}
+
+// New radius damage function (called if radiusDamageFix is enabled)
+qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float radius,
+    gentity_t *ignore, int mod, vec3_t viewpoint) {
+    float		points, dist;
+    gentity_t	*ent;
+    int			entityList[MAX_GENTITIES];
+    int			numListedEntities;
+    vec3_t		mins, maxs;
+    vec3_t		v;
+    vec3_t		dir;
+    int			i, e;
+    qboolean	hitClient = qfalse;
+    trace_t		tr;
+
+    if (radius < 1) {
+        radius = 1;
+    }
+
+    for (i = 0; i < 3; i++) {
+        mins[i] = origin[i] - radius;
+        maxs[i] = origin[i] + radius;
+    }
+
+    numListedEntities = trap_EntitiesInBox(mins, maxs, entityList, MAX_GENTITIES);
+
+    for (e = 0; e < numListedEntities; e++) {
+        ent = &g_entities[entityList[e]];
+
+        if (ent == ignore)
+            continue;
+        if (!ent->takedamage)
+            continue;
+
+        // find the distance from the edge of the bounding box
+        for (i = 0; i < 3; i++) {
+            if (origin[i] < ent->r.absmin[i]) {
+                v[i] = ent->r.absmin[i] - origin[i];
+            }
+            else if (origin[i] > ent->r.absmax[i]) {
+                v[i] = origin[i] - ent->r.absmax[i];
+            }
+            else {
+                v[i] = 0;
+            }
+        }
+
+        dist = VectorLength(v);
+        if (dist >= radius) {
+            continue;
+        }
+
+        // Make sure the ent is visible from the viewpoint! // KHAILE
+        trap_Trace(&tr, viewpoint, NULL, NULL, ent->r.currentOrigin, ENTITYNUM_NONE, MASK_SOLID);
+        if (tr.fraction != 1.0) {
+            continue;		// we hit something solid enough to stop the blast
+        }
+        // !KHAILE
+
+        points = damage * (1.0 - dist / radius);
+
+        if (CanDamage(ent, origin)) {
+            if (LogAccuracyHit(ent, attacker)) {
+                hitClient = qtrue;
+            }
+            VectorSubtract(ent->r.currentOrigin, origin, dir);
+            // push the center of mass higher than the origin so players
+            // get knocked into the air more
+            // CPM: Add some extra knockback
+            if (ent == attacker) { // rjumps are same as in normal Q3A
+                dir[2] += 24;
+            }
+            else {
+                dir[2] += cpm_knockback_z; //24;
+            }
+            // !CPM
+            G_Damage(ent, NULL, attacker, dir, origin, (int)points, DAMAGE_RADIUS, mod);
+        }
+    }
+
+    return hitClient;
 }

@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
+#include "bg_promode.h" // CPM
 
 /*QUAKED item_***** ( 0 0 0 ) (-16 -16 -16) (16 16 16) suspended
 DO NOT USE THIS CLASS, IT JUST HOLDS GENERAL INFORMATION.
@@ -1053,34 +1054,48 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 		return qtrue;	// weapons are always picked up
 
 	case IT_AMMO:
-		if ( ps->ammo[ item->giTag ] >= 200 ) {
-			return qfalse;		// can't hold any more
-		}
-		return qtrue;
+		// if ( ps->ammo[ item->giTag ] >= 200 ) {
+		//	return qfalse;		// can't hold any more
+		// }
+		// return qtrue;
+        // CPM: Check max ammo values
+#ifndef Q3_UI
+        return CPM_CanGrabAmmo(item, ps);
+#else
+        return qtrue;
+#endif
+        // !CPM;
 
 	case IT_ARMOR:
 #ifdef MISSIONPACK
-		if( bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT ) {
-			return qfalse;
-		}
+		// if( bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT ) {
+		//	return qfalse;
+		// }
 
-		// we also clamp armor to the maxhealth for handicapping
-		if( bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-			upperBound = ps->stats[STAT_MAX_HEALTH];
-		}
-		else {
-			upperBound = ps->stats[STAT_MAX_HEALTH] * 2;
-		}
+		// // we also clamp armor to the maxhealth for handicapping
+		// if( bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
+		//	upperBound = ps->stats[STAT_MAX_HEALTH];
+		// }
+		// else {
+		//	upperBound = ps->stats[STAT_MAX_HEALTH] * 2;
+		// }
 
-		if ( ps->stats[STAT_ARMOR] >= upperBound ) {
-			return qfalse;
-		}
+		// if ( ps->stats[STAT_ARMOR] >= upperBound ) {
+		//	return qfalse;
+		// }
 #else
-		if ( ps->stats[STAT_ARMOR] >= ps->stats[STAT_MAX_HEALTH] * 2 ) {
-			return qfalse;
-		}
+		// if ( ps->stats[STAT_ARMOR] >= ps->stats[STAT_MAX_HEALTH] * 2 ) {
+		//	return qfalse;
+		// }
 #endif
-		return qtrue;
+		// return qtrue;
+        // CPM
+#ifndef Q3_UI
+        return CPM_CanGrabArmor(item, ps);
+#else
+        return qtrue;
+#endif
+        // !CPM
 
 	case IT_HEALTH:
 		// small and mega healths will go over the max, otherwise

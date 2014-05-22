@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
+#include "bg_promode.h" // CPM
 
 level_locals_t	level;
 
@@ -94,6 +95,7 @@ vmCvar_t	g_enableDust;
 vmCvar_t	g_enableBreath;
 vmCvar_t	g_proxMineTimeout;
 #endif
+vmCvar_t	g_pro_mode; // CPM: The overall CPM toggle
 
 static cvarTable_t		gameCvarTable[] = {
 	// don't override the cheat state set by the system
@@ -176,7 +178,9 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO, 0, qfalse},
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO, 0, qfalse},
 
-	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse}
+	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
+
+    { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO, 0, qtrue } // CPM: The overall CPM Toggle
 
 };
 
@@ -347,6 +351,34 @@ void G_RegisterCvars( void ) {
 		if (cv->teamShader) {
 			remapped = qtrue;
 		}
+
+        // CPM: Detect if g_pro_mode has been changed
+        if (!strcmp(cv->cvarName, "g_pro_mode"))
+        {
+            // Update all settings
+            CPM_UpdateSettings((g_pro_mode.integer) ?
+                ((g_gametype.integer == GT_TEAM) ? 2 : 1) : 0);
+
+            // Set the config string (so clients will be updated)
+            trap_SetConfigstring(CS_PRO_MODE, va("%d", g_pro_mode.integer));
+
+            // Update all pro mode-dependent server-side cvars					
+            if (g_pro_mode.integer)
+            {
+                trap_Cvar_Set("g_quadfactor", "4"); // pro mode default
+                trap_Cvar_Set("g_forcerespawn", "3");
+                trap_Cvar_Set("g_weaponrespawn", "15");
+                trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer | DF_NO_FOOTSTEPS)); // turn off footsteps
+            }
+            else
+            {
+                trap_Cvar_Set("g_quadfactor", "3"); // q3 default
+                trap_Cvar_Set("g_forcerespawn", "20");
+                trap_Cvar_Set("g_weaponrespawn", "5");
+                trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer & ~DF_NO_FOOTSTEPS)); // turn on footsteps
+            }
+        }
+        // !CPM
 	}
 
 	if (remapped) {
@@ -417,6 +449,15 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	G_ProcessIPBans();
 
 	G_InitMemory();
+
+    // CPM: Initialize
+    // Update all settings
+    CPM_UpdateSettings((g_pro_mode.integer) ?
+        ((g_gametype.integer == GT_TEAM) ? 2 : 1) : 0);
+
+    // Set the config string
+    trap_SetConfigstring(CS_PRO_MODE, va("%d", g_pro_mode.integer));
+    // !CPM
 
 	// set some level globals
 	memset( &level, 0, sizeof( level ) );

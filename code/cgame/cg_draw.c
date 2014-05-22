@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // active (after loading) gameplay
 
 #include "cg_local.h"
+#include "../game/bg_promode.h" // CPM
 
 #ifdef MISSIONPACK
 #include "../ui/ui_shared.h"
@@ -571,12 +572,23 @@ static void CG_DrawStatusBar( void ) {
 	}
 
 	if ( ps->stats[ STAT_ARMOR ] ) {
+        qhandle_t model = cgs.media.armorModel; // CPM
+
+        // CPM: Fix RA shader
+        if (cpm_armorsystem) {
+            if (ps->stats[STAT_ARMORTYPE] == 2)
+                model = cgs.media.armorModelRA;
+        }
+        // !CPM
+
 		origin[0] = 90;
 		origin[1] = 0;
 		origin[2] = -10;
 		angles[YAW] = ( cg.time & 2047 ) * 360 / 2048.0;
-		CG_Draw3DModel( 370 + CHAR_WIDTH*3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
-					   cgs.media.armorModel, 0, origin, angles );
+		// CG_Draw3DModel( 370 + CHAR_WIDTH*3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
+		//			   cgs.media.armorModel, 0, origin, angles );
+        CG_Draw3DModel(370 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
+            model, 0, origin, angles); // CPM
 	}
 	//
 	// ammo
@@ -638,12 +650,20 @@ static void CG_DrawStatusBar( void ) {
 	//
 	value = ps->stats[STAT_ARMOR];
 	if (value > 0 ) {
+        // CPM: Armor icon
+        qhandle_t icon = cgs.media.armorIcon;
+
+        if (cpm_armorsystem && ps->stats[STAT_ARMORTYPE] == 2)
+            icon = cgs.media.armorIconRA;
+        // !CPM
+
 		trap_R_SetColor( colors[0] );
 		CG_DrawField (370, 432, 3, value);
 		trap_R_SetColor( NULL );
 		// if we didn't draw a 3D icon, draw a 2D icon for armor
 		if ( !cg_draw3dIcons.integer && cg_drawIcons.integer ) {
-			CG_DrawPic( 370 + CHAR_WIDTH*3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE, cgs.media.armorIcon );
+			// CG_DrawPic( 370 + CHAR_WIDTH*3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE, cgs.media.armorIcon );
+            CG_DrawPic(370 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE, icon); // CPM
 		}
 
 	}

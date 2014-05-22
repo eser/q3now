@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+#include "bg_promode.h" // CPM
 
 #define	MISSILE_PRESTEP_TIME	50
 
@@ -274,7 +275,13 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 	vec3_t			forward, impactpoint, bouncedir;
 	int				eFlags;
 #endif
+    vec3_t	vec2; // CPM
+
 	other = &g_entities[trace->entityNum];
+
+    // CPM: copy velocity for special radius damage
+    BG_EvaluateTrajectoryDelta(&ent->s.pos, level.time, vec2);
+    // !CPM
 
 	// check for bounce
 	if ( !other->takedamage &&
@@ -429,12 +436,34 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 
 	// splash damage (doesn't apply to person directly hit)
 	if ( ent->splashDamage ) {
-		if( G_RadiusDamage( trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, 
-			other, ent->splashMethodOfDeath ) ) {
-			if( !hitClient ) {
-				g_entities[ent->r.ownerNum].client->accuracy_hits++;
-			}
-		}
+		// if( G_RadiusDamage( trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, 
+		//	other, ent->splashMethodOfDeath ) ) {
+		//	if( !hitClient ) {
+		//		g_entities[ent->r.ownerNum].client->accuracy_hits++;
+		//	}
+		// }
+
+        // CPM: check new radius damage rules
+        if (cpm_radiusdamagefix)
+        {
+            // find "viewpoint" for explosion
+            // backtrace 10 units
+            VectorNormalize(vec2);
+            VectorScale(vec2, 10, vec2);
+            VectorSubtract(trace->endpos, vec2, vec2);
+            // use new radius damage
+            if (CPM_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath, vec2)) {
+                if (!hitClient) {
+                    g_entities[ent->r.ownerNum].client->accuracy_hits++;
+                }
+            }
+        }
+        else if (G_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath)) {
+            if (!hitClient) {
+                g_entities[ent->r.ownerNum].client->accuracy_hits++;
+            }
+        }
+        // !CPM
 	}
 
 	trap_LinkEntity( ent );
@@ -533,7 +562,8 @@ gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->s.weapon = WP_PLASMAGUN;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
-	bolt->damage = 20;
+	// bolt->damage = 20;
+    bolt->damage = cpm_PGdmg; // CPM
 	bolt->splashDamage = 15;
 	bolt->splashRadius = 20;
 	bolt->methodOfDeath = MOD_PLASMA;
@@ -667,7 +697,8 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->s.pos.trType = TR_LINEAR;
 	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
 	VectorCopy( start, bolt->s.pos.trBase );
-	VectorScale( dir, 900, bolt->s.pos.trDelta );
+	// VectorScale( dir, 900, bolt->s.pos.trDelta );
+    VectorScale(dir, cpm_RLspeed, bolt->s.pos.trDelta); // CPM
 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
 	VectorCopy (start, bolt->r.currentOrigin);
 
