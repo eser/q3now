@@ -287,12 +287,10 @@ char *BotWeaponNameForMeansOfDeath(int mod) {
 		case MOD_GRENADE_SPLASH: return "Grenade Launcher";
 		case MOD_ROCKET:
 		case MOD_ROCKET_SPLASH: return "Rocket Launcher";
-		case MOD_PLASMA:
-		case MOD_PLASMA_SPLASH: return "Plasma Rifle";
+		case MOD_PLASMA: return "Plasma Rifle";
 		case MOD_RAILGUN: return "Railgun";
 		case MOD_LIGHTNING: return "Lightning Gun";
 #ifdef MISSIONPACK
-		case MOD_NAIL: return "Nailgun";
 		case MOD_CHAINGUN: return "Chaingun";
 		case MOD_KAMIKAZE: return "Kamikaze";
 #endif
@@ -323,7 +321,6 @@ char *BotRandomWeaponName(void) {
 		case 5: return "Plasma Rifle";
 		case 6: return "Railgun";
 #ifdef MISSIONPACK
-		case 8: return "Nailgun";
 		case 9: return "Chaingun";
 #endif
         default: return "Lightning Gun";

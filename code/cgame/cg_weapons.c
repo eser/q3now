@@ -761,26 +761,14 @@ void CG_RegisterWeapon( int weaponNum ) {
 		cgs.media.grenadeExplosionShader = trap_R_RegisterShader( "grenadeExplosion" );
 		break;
 
-#ifdef MISSIONPACK
-	case WP_NAILGUN:
-		weaponInfo->ejectBrassFunc = CG_NailgunEjectBrass;
-		weaponInfo->missileTrailFunc = CG_NailTrail;
-//		weaponInfo->missileSound = trap_S_RegisterSound( "sound/weapons/nailgun/wnalflit.wav", qfalse );
-		weaponInfo->trailRadius = 16;
-		weaponInfo->wiTrailTime = 250;
-		weaponInfo->missileModel = trap_R_RegisterModel( "models/weaphits/nail.md3" );
-		MAKERGB( weaponInfo->flashDlightColor, 1, 0.75f, 0 );
-		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/nailgun/wnalfire.wav", qfalse );
-		break;
-#endif
-
 	case WP_PLASMAGUN:
-//		weaponInfo->missileModel = cgs.media.invulnerabilityPowerupModel;
 		weaponInfo->missileTrailFunc = CG_PlasmaTrail;
-		weaponInfo->missileSound = trap_S_RegisterSound( "sound/weapons/plasma/lasfly.wav", qfalse );
-		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );
-		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/plasma/hyprbf1a.wav", qfalse );
-		cgs.media.plasmaExplosionShader = trap_R_RegisterShader( "plasmaExplosion" );
+        MAKERGB(weaponInfo->flashDlightColor, 1.0f, 0.6f, 1.0f);
+        weaponInfo->readySound = trap_S_RegisterSound("sound/weapons/bfg/bfg_hum.wav", qfalse);
+        weaponInfo->flashSound[0] = trap_S_RegisterSound("sound/weapons/bfg/bfg_fire.wav", qfalse);
+        weaponInfo->trailRadius = 4;
+        weaponInfo->wiTrailTime = 100;
+        cgs.media.plasmaExplosionShader = trap_R_RegisterShader("plasmaExplosion");
 		cgs.media.railRingsShader = trap_R_RegisterShader( "railDisc" );
 		break;
 
@@ -1753,19 +1741,6 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 
 	switch ( weapon ) {
 	default:
-#ifdef MISSIONPACK
-	case WP_NAILGUN:
-		if( soundType == IMPACTSOUND_FLESH ) {
-			sfx = cgs.media.sfx_nghitflesh;
-		} else if( soundType == IMPACTSOUND_METAL ) {
-			sfx = cgs.media.sfx_nghitmetal;
-		} else {
-			sfx = cgs.media.sfx_nghit;
-		}
-		mark = cgs.media.holeMarkShader;
-		radius = 12;
-		break;
-#endif
 	case WP_LIGHTNING:
 		// no explosion at LG impact, it is added with the beam
 		r = rand() & 3;
@@ -1821,7 +1796,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		shader = cgs.media.plasmaExplosionShader;
 		sfx = cgs.media.sfx_plasmaexp;
 		mark = cgs.media.energyMarkShader;
-		radius = 16;
+		radius = 8;
 		break;
 	case WP_SHOTGUN:
 		mod = cgs.media.bulletFlashModel;
@@ -1919,7 +1894,6 @@ void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum )
 	case WP_ROCKET_LAUNCHER:
 	case WP_PLASMAGUN:
 #ifdef MISSIONPACK
-	case WP_NAILGUN:
 	case WP_CHAINGUN:
 #endif
 		CG_MissileHitWall( weapon, 0, origin, dir, IMPACTSOUND_FLESH );

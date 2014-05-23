@@ -1305,8 +1305,6 @@ int BotSelectActivateWeapon(bot_state_t *bs) {
 #ifdef MISSIONPACK
 	else if (bs->inventory[INVENTORY_CHAINGUN] > 0 && bs->inventory[INVENTORY_BELT] > 0)
 		return WEAPONINDEX_CHAINGUN;
-	else if (bs->inventory[INVENTORY_NAILGUN] > 0 && bs->inventory[INVENTORY_NAILS] > 0)
-		return WEAPONINDEX_NAILGUN;
 #endif
 	else if (bs->inventory[INVENTORY_GRENADELAUNCHER] > 0 && bs->inventory[INVENTORY_GRENADES] > 0)
 		return WEAPONINDEX_GRENADE_LAUNCHER;

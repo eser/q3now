@@ -172,14 +172,6 @@ static void CG_Obituary( entityState_t *ent ) {
 			else
 				message = "blew himself up";
 			break;
-		case MOD_PLASMA_SPLASH:
-			if ( gender == GENDER_FEMALE )
-				message = "melted herself";
-			else if ( gender == GENDER_NEUTER )
-				message = "melted itself";
-			else
-				message = "melted himself";
-			break;
 		default:
 			if ( gender == GENDER_FEMALE )
 				message = "killed herself";
@@ -265,10 +257,6 @@ static void CG_Obituary( entityState_t *ent ) {
 			message = "was melted by";
 			message2 = "'s plasma rifle";
 			break;
-		case MOD_PLASMA_SPLASH:
-			message = "was melted by";
-			message2 = "'s plasma rifle";
-			break;
 		case MOD_RAILGUN:
 			message = "was railed by";
 			break;
@@ -276,9 +264,6 @@ static void CG_Obituary( entityState_t *ent ) {
 			message = "was electrocuted by";
 			break;
 #ifdef MISSIONPACK
-		case MOD_NAIL:
-			message = "was nailed by";
-			break;
 		case MOD_CHAINGUN:
 			message = "got lead poisoning from";
 			message2 = "'s Chaingun";
