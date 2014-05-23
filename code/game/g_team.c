@@ -428,7 +428,7 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 #endif
 	flag = NULL;
 	while ((flag = G_Find (flag, FOFS(classname), c)) != NULL) {
-		if (!(flag->flags & FL_DROPPED_ITEM))
+        if (!(flag->s.eFlags & EF_DROPPED_ITEM))
 			break;
 	}
 
@@ -535,7 +535,7 @@ gentity_t *Team_ResetFlag( int team ) {
 
 	ent = NULL;
 	while ((ent = G_Find (ent, FOFS(classname), c)) != NULL) {
-		if (ent->flags & FL_DROPPED_ITEM)
+        if (ent->s.eFlags & EF_DROPPED_ITEM)
 			G_FreeEntity(ent);
 		else {
 			rent = ent;
@@ -706,7 +706,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 		enemy_flag = PW_REDFLAG;
 	}
 
-	if ( ent->flags & FL_DROPPED_ITEM ) {
+    if (ent->s.eFlags & EF_DROPPED_ITEM) {
 		// hey, it's not home.  return it by teleporting it back
 		PrintMsg( NULL, "%s" S_COLOR_WHITE " returned the %s flag!\n", 
 			cl->pers.netname, TeamName(team));

@@ -975,16 +975,12 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 
 	switch( item->giType ) {
 	case IT_WEAPON:
-        // Eser FIXME: needed
-        // if (ent->eFlags & EF_DROPPED_ITEM) {
-        //    return qtrue;
-        // }
-
-        if (ps->stats[STAT_WEAPONS] & ( 1 << item->giTag )) {
-            return qfalse;
+        // always pick up dropped weapons
+        if (ent->eFlags & EF_DROPPED_ITEM) {
+            return qtrue;
         }
 
-        if (ps->ammo[ item->giTag ] >= item->quantity) {
+        if (ps->stats[STAT_WEAPONS] & (1 << item->giTag) && ps->ammo[item->giTag] >= item->quantity) {
             return qfalse;
         }
 

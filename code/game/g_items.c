@@ -260,9 +260,9 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
         if (a2) trap_SendServerCommand(other - g_entities, va("print \" %d shells\"", a2));
         if (a3) trap_SendServerCommand(other - g_entities, va("print \" %d grenades\"", a3));
         if (a4) trap_SendServerCommand(other - g_entities, va("print \" %d rockets\"", a4));
-        if (a5) trap_SendServerCommand(other - g_entities, va("print \" %d lightning\"", a5));
+        if (a5) trap_SendServerCommand(other - g_entities, va("print \" %d lightning cells\"", a5));
         if (a6) trap_SendServerCommand(other - g_entities, va("print \" %d slugs\"", a6));
-        if (a7) trap_SendServerCommand(other - g_entities, va("print \" %d cells\"", a7));
+        if (a7) trap_SendServerCommand(other - g_entities, va("print \" %d plasma cells\"", a7));
 
         trap_SendServerCommand(other - g_entities, va("print \"\n\""));
 
@@ -297,7 +297,7 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 		}
 
 		// dropped items and teamplay weapons always have full ammo
-		if ( ! (ent->flags & FL_DROPPED_ITEM) && g_gametype.integer != GT_TEAM ) {
+        if (!(ent->s.eFlags & EF_DROPPED_ITEM) && g_gametype.integer != GT_TEAM) {
 			// respawning rules
 			// drop the quantity if the already have over the minimum
 			if ( other->client->ps.ammo[ ent->item->giTag ] < quantity ) {
@@ -605,7 +605,7 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 	}
 
 	// dropped items will not respawn
-	if ( ent->flags & FL_DROPPED_ITEM ) {
+    if (ent->s.eFlags & EF_DROPPED_ITEM) {
 		ent->freeAfterEvent = qtrue;
 	}
 
@@ -681,7 +681,7 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity ) {
 		dropped->nextthink = level.time + 30000;
 	}
 
-	dropped->flags = FL_DROPPED_ITEM;
+    dropped->s.eFlags = EF_DROPPED_ITEM;
 
 	trap_LinkEntity (dropped);
 
