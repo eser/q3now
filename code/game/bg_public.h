@@ -332,11 +332,9 @@ typedef enum {
 	WP_LIGHTNING,
 	WP_RAILGUN,
 	WP_PLASMAGUN,
-	WP_BFG,
 	WP_GRAPPLING_HOOK,
 #ifdef MISSIONPACK
 	WP_NAILGUN,
-	WP_PROX_LAUNCHER,
 	WP_CHAINGUN,
 #endif
 
@@ -458,8 +456,6 @@ typedef enum {
 	EV_SCOREPLUM,			// score plum
 
 //#ifdef MISSIONPACK
-	EV_PROXIMITY_MINE_STICK,
-	EV_PROXIMITY_MINE_TRIGGER,
 	EV_KAMIKAZE,			// kamikaze explodes
 	EV_OBELISKEXPLODE,		// obelisk explodes
 	EV_OBELISKPAIN,			// obelisk is in pain
@@ -611,8 +607,6 @@ typedef enum {
 	MOD_PLASMA_SPLASH,
 	MOD_RAILGUN,
 	MOD_LIGHTNING,
-	MOD_BFG,
-	MOD_BFG_SPLASH,
 	MOD_WATER,
 	MOD_SLIME,
 	MOD_LAVA,
@@ -625,9 +619,7 @@ typedef enum {
 #ifdef MISSIONPACK
 	MOD_NAIL,
 	MOD_CHAINGUN,
-	MOD_PROXIMITY_MINE,
 	MOD_KAMIKAZE,
-	MOD_JUICED,
 #endif
 	MOD_GRAPPLE
 } meansOfDeath_t;
