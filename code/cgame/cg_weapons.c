@@ -624,13 +624,13 @@ void CG_RegisterWeapon( int weaponNum ) {
 	memset( weaponInfo, 0, sizeof( *weaponInfo ) );
 	weaponInfo->registered = qtrue;
 
-	for ( item = bg_itemlist + 1 ; item->classname ; item++ ) {
+	for ( item = bg_itemlist + 1 ; item->classnames[0] ; item++ ) {
 		if ( item->giType == IT_WEAPON && item->giTag == weaponNum ) {
 			weaponInfo->item = item;
 			break;
 		}
 	}
-	if ( !item->classname ) {
+	if ( !item->classnames[0] ) {
 		CG_Error( "Couldn't find weapon %i", weaponNum );
 	}
 	CG_RegisterItemVisuals( item - bg_itemlist );
@@ -647,12 +647,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 	weaponInfo->weaponIcon = trap_R_RegisterShader( item->icon );
 	weaponInfo->ammoIcon = trap_R_RegisterShader( item->icon );
 
-	for ( ammo = bg_itemlist + 1 ; ammo->classname ; ammo++ ) {
+	for ( ammo = bg_itemlist + 1 ; ammo->classnames[0] ; ammo++ ) {
 		if ( ammo->giType == IT_AMMO && ammo->giTag == weaponNum ) {
 			break;
 		}
 	}
-	if ( ammo->classname && ammo->world_model[0] ) {
+	if ( ammo->classnames[0] && ammo->world_model[0] ) {
 		weaponInfo->ammoModel = trap_R_RegisterModel( ammo->world_model[0] );
 	}
 

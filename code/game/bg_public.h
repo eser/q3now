@@ -645,10 +645,11 @@ typedef enum {
 	IT_TEAM
 } itemType_t;
 
-#define MAX_ITEM_MODELS 4
+#define MAX_ITEM_MODELS     4
+#define MAX_ITEM_CLASSNAMES 3
 
 typedef struct gitem_s {
-	char		*classname;	// spawning name
+    char		*classnames[MAX_ITEM_CLASSNAMES];	// spawning name
 	char		*pickup_sound;
 	char		*world_model[MAX_ITEM_MODELS];
 

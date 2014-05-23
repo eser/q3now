@@ -275,10 +275,14 @@ qboolean G_CallSpawn( gentity_t *ent ) {
 	}
 
 	// check item spawn functions
-	for ( item=bg_itemlist+1 ; item->classname ; item++ ) {
-		if ( !strcmp(item->classname, ent->classname) ) {
-			G_SpawnItem( ent, item );
-			return qtrue;
+	for ( item=bg_itemlist+1 ; item->classnames[0] ; item++ ) {
+        int i;
+
+        for (i = 0; i < MAX_ITEM_CLASSNAMES; i++) {
+            if (item->classnames[i] && !strcmp(item->classnames[i], ent->classname)) {
+                G_SpawnItem(ent, item);
+                return qtrue;
+            }
 		}
 	}
 
