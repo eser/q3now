@@ -1,7 +1,5 @@
 
-void CPM_UpdateSettings(int num);
-
-#define CS_PRO_MODE 16
+void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics);
 
 extern float cpm_pm_jump_z;
 

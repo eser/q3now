@@ -1902,7 +1902,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
     // CPM: Setup according to the pro mode settings
     s = CG_ConfigString(CS_PRO_MODE);
-    CPM_UpdateSettings((atoi(s)) ? ((cgs.gametype == GT_TEAM) ? 2 : 1) : 0);
+    CPM_UpdateSettings(cgs.gametype, s[0] - '0', s[1] - '0');
     // !CPM
 
 	// load the new map

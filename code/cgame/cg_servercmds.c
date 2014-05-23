@@ -360,7 +360,7 @@ static void CG_ConfigStringModified( void ) {
     // CPM
     else if (num == CS_PRO_MODE)
     {
-        CPM_UpdateSettings((atoi(str)) ? ((cgs.gametype == GT_TEAM) ? 2 : 1) : 0);
+        CPM_UpdateSettings(cgs.gametype, str[0] - '0', str[1] - '0');
     }
     // !CPM
 }

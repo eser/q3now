@@ -92,7 +92,8 @@ vmCvar_t	g_singlePlayer;
 vmCvar_t	g_enableDust;
 vmCvar_t	g_enableBreath;
 #endif
-vmCvar_t	g_pro_mode; // CPM: The overall CPM toggle
+vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
+vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 
 static cvarTable_t		gameCvarTable[] = {
 	// don't override the cheat state set by the system
@@ -174,7 +175,8 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
 
-    { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO, 0, qtrue } // CPM: The overall CPM Toggle
+    { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO, 0, qtrue },      // CPM: The CPM gameplay
+    { &g_pro_physics, "g_pro_physics", "1", CVAR_SERVERINFO, 0, qtrue } // CPM: The CPM physics
 
 };
 
@@ -347,14 +349,13 @@ void G_RegisterCvars( void ) {
 		}
 
         // CPM: Detect if g_pro_mode has been changed
-        if (!strcmp(cv->cvarName, "g_pro_mode"))
+        if (!strcmp(cv->cvarName, "g_pro_mode") || !strcmp(cv->cvarName, "g_pro_physics"))
         {
             // Update all settings
-            CPM_UpdateSettings((g_pro_mode.integer) ?
-                ((g_gametype.integer == GT_TEAM) ? 2 : 1) : 0);
+            CPM_UpdateSettings(g_gametype.integer, g_pro_mode.integer, g_pro_physics.integer);
 
             // Set the config string (so clients will be updated)
-            trap_SetConfigstring(CS_PRO_MODE, va("%d", g_pro_mode.integer));
+            trap_SetConfigstring(CS_PRO_MODE, va("%d%d", g_pro_mode.integer, g_pro_physics.integer));
 
             // Update all pro mode-dependent server-side cvars					
             if (g_pro_mode.integer)
@@ -444,11 +445,10 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
     // CPM: Initialize
     // Update all settings
-    CPM_UpdateSettings((g_pro_mode.integer) ?
-        ((g_gametype.integer == GT_TEAM) ? 2 : 1) : 0);
+    CPM_UpdateSettings(g_gametype.integer, g_pro_mode.integer, g_pro_physics.integer);
 
     // Set the config string
-    trap_SetConfigstring(CS_PRO_MODE, va("%d", g_pro_mode.integer));
+    trap_SetConfigstring(CS_PRO_MODE, va("%d%d", g_pro_mode.integer, g_pro_physics.integer));
     // !CPM
 
 	// set some level globals
