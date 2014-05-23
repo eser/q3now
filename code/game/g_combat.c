@@ -406,7 +406,7 @@ void CheckAlmostCapture( gentity_t *self, gentity_t *attacker ) {
 		do
 		{
 			ent = G_Find(ent, FOFS(classname), classname);
-		} while (ent && (ent->flags & FL_DROPPED_ITEM));
+        } while (ent && (ent->s.eFlags & EF_DROPPED_ITEM));
 		// if we found the destination flag and it's not picked up
 		if (ent && !(ent->r.svFlags & SVF_NOCLIENT) ) {
 			// if the player was *very* close
@@ -483,13 +483,6 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	if (self->client && self->client->hook) {
 		Weapon_HookFree(self->client->hook);
 	}
-#ifdef MISSIONPACK
-	if ((self->client->ps.eFlags & EF_TICKING) && self->activator) {
-		self->client->ps.eFlags &= ~EF_TICKING;
-		self->activator->think = G_FreeEntity;
-		self->activator->nextthink = level.time;
-	}
-#endif
 	self->client->ps.pm_type = PM_DEAD;
 
 	if ( attacker ) {
