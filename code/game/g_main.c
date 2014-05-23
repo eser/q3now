@@ -91,7 +91,6 @@ vmCvar_t	g_blueteam;
 vmCvar_t	g_singlePlayer;
 vmCvar_t	g_enableDust;
 vmCvar_t	g_enableBreath;
-vmCvar_t	g_proxMineTimeout;
 #endif
 vmCvar_t	g_pro_mode; // CPM: The overall CPM toggle
 
@@ -168,7 +167,6 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_enableDust, "g_enableDust", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
 	{ &g_enableBreath, "g_enableBreath", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
-	{ &g_proxMineTimeout, "g_proxMineTimeout", "20000", 0, 0, qfalse },
 #endif
 	{ &g_smoothClients, "g_smoothClients", "1", 0, 0, qfalse},
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO, 0, qfalse},

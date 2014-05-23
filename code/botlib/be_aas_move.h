@@ -59,8 +59,6 @@ void AAS_JumpReachRunStart(struct aas_reachability_s *reach, vec3_t runstart);
 int AAS_AgainstLadder(vec3_t origin);
 //rocket jump Z velocity when rocket-jumping at origin
 float AAS_RocketJumpZVelocity(vec3_t origin);
-//bfg jump Z velocity when bfg-jumping at origin
-float AAS_BFGJumpZVelocity(vec3_t origin);
 //calculates the horizontal velocity needed for a jump and returns true this velocity could be calculated
 int AAS_HorizontalVelocityForJump(float zvel, vec3_t start, vec3_t end, float *velocity);
 //

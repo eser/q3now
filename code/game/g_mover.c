@@ -198,57 +198,6 @@ qboolean	G_TryPushingEntity( gentity_t *check, gentity_t *pusher, vec3_t move, v
 	return qfalse;
 }
 
-/*
-==================
-G_CheckProxMinePosition
-==================
-*/
-qboolean G_CheckProxMinePosition( gentity_t *check ) {
-	vec3_t		start, end;
-	trace_t	tr;
-
-	VectorMA(check->s.pos.trBase, 0.125, check->movedir, start);
-	VectorMA(check->s.pos.trBase, 2, check->movedir, end);
-	trap_Trace( &tr, start, NULL, NULL, end, check->s.number, MASK_SOLID );
-	
-	if (tr.startsolid || tr.fraction < 1)
-		return qfalse;
-
-	return qtrue;
-}
-
-/*
-==================
-G_TryPushingProxMine
-==================
-*/
-qboolean G_TryPushingProxMine( gentity_t *check, gentity_t *pusher, vec3_t move, vec3_t amove ) {
-	vec3_t		forward, right, up;
-	vec3_t		org, org2, move2;
-	int ret;
-
-	// we need this for pushing things later
-	VectorSubtract (vec3_origin, amove, org);
-	AngleVectors (org, forward, right, up);
-
-	// try moving the contacted entity 
-	VectorAdd (check->s.pos.trBase, move, check->s.pos.trBase);
-
-	// figure movement due to the pusher's amove
-	VectorSubtract (check->s.pos.trBase, pusher->r.currentOrigin, org);
-	org2[0] = DotProduct (org, forward);
-	org2[1] = -DotProduct (org, right);
-	org2[2] = DotProduct (org, up);
-	VectorSubtract (org2, org, move2);
-	VectorAdd (check->s.pos.trBase, move2, check->s.pos.trBase);
-
-	ret = G_CheckProxMinePosition( check );
-	if (ret) {
-		VectorCopy( check->s.pos.trBase, check->r.currentOrigin );
-		trap_LinkEntity (check);
-	}
-	return ret;
-}
 
 void G_ExplodeMissile( gentity_t *ent );
 
@@ -317,42 +266,6 @@ qboolean G_MoverPush( gentity_t *pusher, vec3_t move, vec3_t amove, gentity_t **
 	for ( e = 0 ; e < listedEntities ; e++ ) {
 		check = &g_entities[ entityList[ e ] ];
 
-#ifdef MISSIONPACK
-		if ( check->s.eType == ET_MISSILE ) {
-			// if it is a prox mine
-			if ( !strcmp(check->classname, "prox mine") ) {
-				// if this prox mine is attached to this mover try to move it with the pusher
-				if ( check->enemy == pusher ) {
-					if (!G_TryPushingProxMine( check, pusher, move, amove )) {
-						//explode
-						check->s.loopSound = 0;
-						G_AddEvent( check, EV_PROXIMITY_MINE_TRIGGER, 0 );
-						G_ExplodeMissile(check);
-						if (check->activator) {
-							G_FreeEntity(check->activator);
-							check->activator = NULL;
-						}
-						//G_Printf("prox mine explodes\n");
-					}
-				}
-				else {
-					//check if the prox mine is crushed by the mover
-					if (!G_CheckProxMinePosition( check )) {
-						//explode
-						check->s.loopSound = 0;
-						G_AddEvent( check, EV_PROXIMITY_MINE_TRIGGER, 0 );
-						G_ExplodeMissile(check);
-						if (check->activator) {
-							G_FreeEntity(check->activator);
-							check->activator = NULL;
-						}
-						//G_Printf("prox mine explodes\n");
-					}
-				}
-				continue;
-			}
-		}
-#endif
 		// only push items and players
 		if ( check->s.eType != ET_ITEM && check->s.eType != ET_PLAYER && !check->physicsObject ) {
 			continue;

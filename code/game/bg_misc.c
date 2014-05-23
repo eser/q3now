@@ -254,7 +254,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED weapon_lightning (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "weapon_lightning", NULL },
+        { "weapon_lightning", "weapon_bfg", NULL },
 		"sound/misc/w_pkup.wav",
         { "models/weapons2/lightning/lightning.md3", 
 		NULL, NULL, NULL},
@@ -295,22 +295,6 @@ gitem_t	bg_itemlist[] =
 		50,
 		IT_WEAPON,
 		WP_PLASMAGUN,
-/* precache */ "",
-/* sounds */ ""
-	},
-
-/*QUAKED weapon_bfg (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "weapon_bfg", NULL },
-		"sound/misc/w_pkup.wav",
-        { "models/weapons2/bfg/bfg.md3", 
-		NULL, NULL, NULL},
-/* icon */		"icons/iconw_bfg",
-/* pickup */	"BFG10K",
-		20,
-		IT_WEAPON,
-		WP_BFG,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -402,7 +386,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED ammo_lightning (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "ammo_lightning", NULL },
+        { "ammo_lightning", "ammo_bfg", NULL },
 		"sound/misc/am_pkup.wav",
         { "models/powerups/ammo/lightningam.md3", 
 		NULL, NULL, NULL},
@@ -443,22 +427,6 @@ gitem_t	bg_itemlist[] =
 		10,
 		IT_AMMO,
 		WP_RAILGUN,
-/* precache */ "",
-/* sounds */ ""
-	},
-
-/*QUAKED ammo_bfg (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "ammo_bfg", NULL },
-		"sound/misc/am_pkup.wav",
-        { "models/powerups/ammo/bfgam.md3", 
-		NULL, NULL, NULL},
-/* icon */		"icons/icona_bfg",
-/* pickup */	"BFG Cells",
-		15,
-		IT_AMMO,
-		WP_BFG,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -690,7 +658,7 @@ Only in CTF games
 /*QUAKED ammo_nails (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "ammo_nails", NULL },
+        { "ammo_nails", "ammo_mines", NULL },
 		"sound/misc/am_pkup.wav",
         { "models/powerups/ammo/nailgunam.md3", 
 		NULL, NULL, NULL},
@@ -699,22 +667,6 @@ Only in CTF games
 		20,
 		IT_AMMO,
 		WP_NAILGUN,
-/* precache */ "",
-/* sounds */ ""
-	},
-
-/*QUAKED ammo_mines (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "ammo_mines", NULL },
-		"sound/misc/am_pkup.wav",
-        { "models/powerups/ammo/proxmineam.md3", 
-		NULL, NULL, NULL},
-/* icon */		"icons/icona_proxlauncher",
-/* pickup */	"Proximity Mines",
-		10,
-		IT_AMMO,
-		WP_PROX_LAUNCHER,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -849,7 +801,7 @@ Only in One Flag CTF games
 /*QUAKED weapon_nailgun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "weapon_nailgun", NULL },
+        { "weapon_nailgun", "weapon_prox_launcher", NULL },
 		"sound/misc/w_pkup.wav",
         { "models/weapons/nailgun/nailgun.md3", 
 		NULL, NULL, NULL},
@@ -860,27 +812,6 @@ Only in One Flag CTF games
 		WP_NAILGUN,
 /* precache */ "",
 /* sounds */ ""
-	},
-
-/*QUAKED weapon_prox_launcher (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "weapon_prox_launcher", NULL },
-		"sound/misc/w_pkup.wav",
-        { "models/weapons/proxmine/proxmine.md3", 
-		NULL, NULL, NULL},
-/* icon */		"icons/iconw_proxlauncher",
-/* pickup */	"Prox Launcher",
-		5,
-		IT_WEAPON,
-		WP_PROX_LAUNCHER,
-/* precache */ "",
-/* sounds */ "sound/weapons/proxmine/wstbtick.wav "
-			"sound/weapons/proxmine/wstbactv.wav "
-			"sound/weapons/proxmine/wstbimpl.wav "
-			"sound/weapons/proxmine/wstbimpm.wav "
-			"sound/weapons/proxmine/wstbimpd.wav "
-			"sound/weapons/proxmine/wstbactv.wav"
 	},
 
 /*QUAKED weapon_chaingun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
@@ -1384,8 +1315,6 @@ char *eventnames[] = {
 	"EV_SCOREPLUM",			// score plum
 
 //#ifdef MISSIONPACK
-	"EV_PROXIMITY_MINE_STICK",
-	"EV_PROXIMITY_MINE_TRIGGER",
 	"EV_KAMIKAZE",			// kamikaze explodes
 	"EV_OBELISKEXPLODE",		// obelisk explodes
 	"EV_OBELISKPAIN",		// obelisk pain
