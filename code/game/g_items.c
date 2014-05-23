@@ -510,7 +510,7 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 		return;
 	}
 
-	G_LogPrintf( "Item: %i %s\n", other->s.number, ent->item->classname );
+	G_LogPrintf( "Item: %i %s\n", other->s.number, ent->item->classnames[0] );
 
 	predict = other->client->pers.predictItemPickup;
 
@@ -656,7 +656,7 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity ) {
 	dropped->s.modelindex = item - bg_itemlist;	// store item number in modelindex
 	dropped->s.modelindex2 = 1; // This is non-zero is it's a dropped item
 
-	dropped->classname = item->classname;
+	dropped->classname = item->classnames[0];
 	dropped->item = item;
 	VectorSet (dropped->r.mins, -ITEM_RADIUS, -ITEM_RADIUS, -ITEM_RADIUS);
 	VectorSet (dropped->r.maxs, ITEM_RADIUS, ITEM_RADIUS, ITEM_RADIUS);
@@ -950,9 +950,18 @@ G_ItemDisabled
 int G_ItemDisabled( gitem_t *item ) {
 
 	char name[128];
+    int i;
 
-	Com_sprintf(name, sizeof(name), "disable_%s", item->classname);
-	return trap_Cvar_VariableIntegerValue( name );
+    for (i = 0; i < MAX_ITEM_CLASSNAMES; i++) {
+        if (item->classnames[i]) {
+            Com_sprintf(name, sizeof(name), "disable_%s", item->classnames[i]);
+            if (trap_Cvar_VariableIntegerValue(name)) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
 }
 
 /*

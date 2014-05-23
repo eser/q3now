@@ -1173,7 +1173,7 @@ Controls_InitWeapons
 static void Controls_InitWeapons( void ) {
 	gitem_t *	item;
 
-	for ( item = bg_itemlist + 1 ; item->classname ; item++ ) {
+	for ( item = bg_itemlist + 1 ; item->classnames[0] ; item++ ) {
 		if ( item->giType != IT_WEAPON ) {
 			continue;
 		}
