@@ -1512,15 +1512,18 @@ static void PM_BeginWeaponChange( int weapon ) {
 		return;
 	}
 	
-	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
-		return;
-	}
+    if (pm->ps->weaponstate == WEAPON_DROPPING) {
+        return;
+    }
 
-	PM_AddEvent( EV_CHANGE_WEAPON );
-	pm->ps->weaponstate = WEAPON_DROPPING;
-	// pm->ps->weaponTime += 200;
-    pm->ps->weaponTime += cpm_weapondrop; // CPM
-	PM_StartTorsoAnim( TORSO_DROP );
+    PM_AddEvent(EV_CHANGE_WEAPON);
+    pm->ps->weaponstate = WEAPON_DROPPING;
+
+    if (cpm_weapondrop > 0) {
+        pm->ps->weaponTime += cpm_weapondrop;
+
+        PM_StartTorsoAnim(TORSO_DROP);
+    }
 }
 
 
@@ -1543,9 +1546,11 @@ static void PM_FinishWeaponChange( void ) {
 
 	pm->ps->weapon = weapon;
 	pm->ps->weaponstate = WEAPON_RAISING;
-	// pm->ps->weaponTime += 250;
-    pm->ps->weaponTime += cpm_weaponraise; // CPM
-	PM_StartTorsoAnim( TORSO_RAISE );
+
+    if (cpm_weaponraise > 0) {
+        pm->ps->weaponTime += cpm_weaponraise;
+        PM_StartTorsoAnim(TORSO_RAISE);
+    }
 }
 
 
@@ -1638,8 +1643,11 @@ static void PM_Weapon( void ) {
 	// change weapon if time
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
 		PM_FinishWeaponChange();
-		return;
 	}
+
+    if (pm->ps->weaponTime > 0) {
+        return;
+    }
 
     // CPM
     if (pm->ps->weapon == WP_RAILGUN && pm->ps->stats[STAT_RAILTIME] > 0) {
