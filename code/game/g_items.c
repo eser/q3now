@@ -121,41 +121,6 @@ int Pickup_Powerup( gentity_t *ent, gentity_t *other ) {
 
 //======================================================================
 
-#ifdef MISSIONPACK
-int Pickup_PersistantPowerup( gentity_t *ent, gentity_t *other ) {
-	int		clientNum;
-	char	userinfo[MAX_INFO_STRING];
-	float	handicap;
-	int		max;
-
-	other->client->ps.stats[STAT_PERSISTANT_POWERUP] = ent->item - bg_itemlist;
-	other->client->persistantPowerup = ent;
-
-	switch( ent->item->giTag ) {
-	case PW_GUARD:
-		other->health = MAX_HEALTH;
-        other->client->ps.stats[STAT_HEALTH] = MAX_HEALTH;
-        other->client->ps.stats[STAT_ARMOR] = MAX_HEALTH;
-		break;
-
-	case PW_SCOUT:
-		other->client->ps.stats[STAT_ARMOR] = 0;
-		break;
-
-	case PW_AMMOREGEN:
-		memset(other->client->ammoTimes, 0, sizeof(other->client->ammoTimes));
-		break;
-
-    default:
-		break;
-	}
-
-	return -1;
-}
-
-//======================================================================
-#endif
-
 int Pickup_Holdable( gentity_t *ent, gentity_t *other ) {
 
 	other->client->ps.stats[STAT_HOLDABLE_ITEM] = ent->item - bg_itemlist;
@@ -352,12 +317,6 @@ int Pickup_Health (gentity_t *ent, gentity_t *other) {
 	int			quantity;
 
 	// small and mega healths will go over the max
-#ifdef MISSIONPACK
-	if( bg_itemlist[other->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-		max = MAX_HEALTH;
-	}
-	else
-#endif
 	if ( ent->item->quantity == 5 || ent->item->quantity == 100 ) {
         max = MAX_HEALTH * 2;
 	} else {
@@ -532,11 +491,6 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 		respawn = Pickup_Powerup(ent, other);
 		predict = qfalse;
 		break;
-#ifdef MISSIONPACK
-	case IT_PERSISTANT_POWERUP:
-		respawn = Pickup_PersistantPowerup(ent, other);
-		break;
-#endif
 	case IT_TEAM:
 		respawn = Pickup_Team(ent, other);
 		break;
@@ -992,12 +946,6 @@ void G_SpawnItem (gentity_t *ent, gitem_t *item) {
 		G_SoundIndex( "sound/items/poweruprespawn.wav" );
 		G_SpawnFloat( "noglobalsound", "0", &ent->speed);
 	}
-
-#ifdef MISSIONPACK
-	if ( item->giType == IT_PERSISTANT_POWERUP ) {
-		ent->s.generic1 = ent->spawnflags;
-	}
-#endif
 }
 
 

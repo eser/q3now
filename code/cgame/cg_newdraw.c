@@ -796,15 +796,8 @@ static void CG_OneFlagStatus(rectDef_t *rect) {
 
 
 static void CG_DrawCTFPowerUp(rectDef_t *rect) {
-	int		value;
-
 	if (cgs.gametype < GT_CTF) {
 		return;
-	}
-	value = cg.snap->ps.stats[STAT_PERSISTANT_POWERUP];
-	if ( value ) {
-		CG_RegisterItemVisuals( value );
-		CG_DrawPic( rect->x, rect->y, rect->w, rect->h, cg_items[ value ].icon );
 	}
 }
 

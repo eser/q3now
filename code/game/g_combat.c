@@ -210,34 +210,6 @@ void TossClientCubes( gentity_t *self ) {
 	drop->think = G_FreeEntity;
 	drop->spawnflags = self->client->sess.sessionTeam;
 }
-
-
-/*
-=================
-TossClientPersistantPowerups
-=================
-*/
-void TossClientPersistantPowerups( gentity_t *ent ) {
-	gentity_t	*powerup;
-
-	if( !ent->client ) {
-		return;
-	}
-
-	if( !ent->client->persistantPowerup ) {
-		return;
-	}
-
-	powerup = ent->client->persistantPowerup;
-
-	powerup->r.svFlags &= ~SVF_NOCLIENT;
-	powerup->s.eFlags &= ~EF_NODRAW;
-	powerup->r.contents = CONTENTS_TRIGGER;
-	trap_LinkEntity( powerup );
-
-	ent->client->ps.stats[STAT_PERSISTANT_POWERUP] = 0;
-	ent->client->persistantPowerup = NULL;
-}
 #endif
 
 
@@ -332,7 +304,6 @@ char	*modNames[] = {
 	"MOD_TARGET_LASER",
 	"MOD_TRIGGER_HURT",
 #ifdef MISSIONPACK
-	"MOD_CHAINGUN",
 	"MOD_KAMIKAZE",
 #endif
 	"MOD_GRAPPLE"
@@ -582,7 +553,6 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	TossClientItems( self );
 #ifdef MISSIONPACK
-	TossClientPersistantPowerups( self );
 	if( g_gametype.integer == GT_HARVESTER ) {
 		TossClientCubes( self );
 	}
@@ -896,11 +866,6 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// unless they are rocket jumping
 	if ( attacker->client && attacker != targ ) {
 		max = MAX_HEALTH;
-#ifdef MISSIONPACK
-		if( bg_itemlist[attacker->client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD ) {
-			max /= 2;
-		}
-#endif
 		damage = damage * max / 100;
 	}
 

@@ -110,11 +110,6 @@ qboolean CheckGauntletAttack( gentity_t *ent ) {
 	} else {
 		s_quadFactor = 1;
 	}
-#ifdef MISSIONPACK
-	if( ent->client->persistantPowerup && ent->client->persistantPowerup->item && ent->client->persistantPowerup->item->giTag == PW_DOUBLER ) {
-		s_quadFactor *= 2;
-	}
-#endif
 
 	damage = 80 * s_quadFactor;
 	G_Damage( traceEnt, ent, ent, forward, tr.endpos,
@@ -154,10 +149,6 @@ void SnapVectorTowards( vec3_t v, vec3_t to ) {
 	}
 }
 
-#ifdef MISSIONPACK
-#define CHAINGUN_SPREAD		600
-#define CHAINGUN_DAMAGE		8
-#endif
 #define MACHINEGUN_DAMAGE   8
 #define MACHINEGUN_SPREAD	250
 void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
@@ -753,11 +744,6 @@ void FireWeapon( gentity_t *ent ) {
 	} else {
 		s_quadFactor = 1;
 	}
-#ifdef MISSIONPACK
-	if( ent->client->persistantPowerup && ent->client->persistantPowerup->item && ent->client->persistantPowerup->item->giTag == PW_DOUBLER ) {
-		s_quadFactor *= 2;
-	}
-#endif
 
 	// track shots taken for accuracy tracking.  Grapple is not a weapon and gauntet is just not tracked
 	if( ent->s.weapon != WP_GRAPPLING_HOOK && ent->s.weapon != WP_GAUNTLET ) {
@@ -802,11 +788,6 @@ void FireWeapon( gentity_t *ent ) {
 	case WP_GRAPPLING_HOOK:
 		Weapon_GrapplingHook_Fire( ent );
 		break;
-#ifdef MISSIONPACK
-	case WP_CHAINGUN:
-		Bullet_Fire( ent, CHAINGUN_SPREAD, CHAINGUN_DAMAGE, MOD_CHAINGUN );
-		break;
-#endif
 	default:
 // FIXME		G_Error( "Bad ent->s.weapon" );
 		break;

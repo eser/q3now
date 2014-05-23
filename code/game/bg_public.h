@@ -213,9 +213,6 @@ void Pmove (pmove_t *pmove);
 typedef enum {
 	STAT_HEALTH,
 	STAT_HOLDABLE_ITEM,
-#ifdef MISSIONPACK
-	STAT_PERSISTANT_POWERUP,
-#endif
 	STAT_WEAPONS,					// 16 bit fields
 	STAT_ARMOR,				
     STAT_ARMORCLASS,
@@ -293,10 +290,6 @@ typedef enum {
 	PW_BLUEFLAG,
 	PW_NEUTRALFLAG,
 
-	PW_SCOUT,
-	PW_GUARD,
-	PW_DOUBLER,
-	PW_AMMOREGEN,
 	PW_INVULNERABILITY,
 
 	PW_NUM_POWERUPS
@@ -328,9 +321,6 @@ typedef enum {
 	WP_RAILGUN,
 	WP_PLASMAGUN,
 	WP_GRAPPLING_HOOK,
-#ifdef MISSIONPACK
-	WP_CHAINGUN,
-#endif
 
 	WP_NUM_WEAPONS
 } weapon_t;
@@ -610,7 +600,6 @@ typedef enum {
 	MOD_TARGET_LASER,
 	MOD_TRIGGER_HURT,
 #ifdef MISSIONPACK
-	MOD_CHAINGUN,
 	MOD_KAMIKAZE,
 #endif
 	MOD_GRAPPLE
@@ -630,7 +619,6 @@ typedef enum {
 							// EFX: rotate + external ring that rotates
 	IT_HOLDABLE,			// single use, holdable item
 							// EFX: rotate + bob
-	IT_PERSISTANT_POWERUP,
 	IT_TEAM
 } itemType_t;
 

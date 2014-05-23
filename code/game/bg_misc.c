@@ -190,7 +190,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED weapon_shotgun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "weapon_shotgun", NULL },
+        { "weapon_shotgun", "weapon_chaingun", NULL },
 		"sound/misc/w_pkup.wav",
         { "models/weapons2/shotgun/shotgun.md3", 
 		NULL, NULL, NULL},
@@ -322,7 +322,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED ammo_shells (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "ammo_shells", NULL },
+        { "ammo_shells", "ammo_belt", NULL },
 		"sound/misc/am_pkup.wav",
         { "models/powerups/ammo/shotgunam.md3", 
 		NULL, NULL, NULL},
@@ -655,89 +655,6 @@ Only in CTF games
 /* sounds */ ""
 	},
 
-/*QUAKED ammo_belt (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "ammo_belt", NULL },
-		"sound/misc/am_pkup.wav",
-        { "models/powerups/ammo/chaingunam.md3", 
-		NULL, NULL, NULL},
-/* icon */		"icons/icona_chaingun",
-/* pickup */	"Chaingun Belt",
-		100,
-		IT_AMMO,
-		WP_CHAINGUN,
-/* precache */ "",
-/* sounds */ ""
-	},
-
-	//
-	// PERSISTANT POWERUP ITEMS
-	//
-/*QUAKED item_scout (.3 .3 1) (-16 -16 -16) (16 16 16) suspended redTeam blueTeam
-*/
-	{
-        { "item_scout", NULL },
-		"sound/items/scout.wav",
-        { "models/powerups/scout.md3", 
-		NULL, NULL, NULL },
-/* icon */		"icons/scout",
-/* pickup */	"Scout",
-		30,
-		IT_PERSISTANT_POWERUP,
-		PW_SCOUT,
-/* precache */ "",
-/* sounds */ ""
-	},
-
-/*QUAKED item_guard (.3 .3 1) (-16 -16 -16) (16 16 16) suspended redTeam blueTeam
-*/
-	{
-        { "item_guard", NULL },
-		"sound/items/guard.wav",
-        { "models/powerups/guard.md3", 
-		NULL, NULL, NULL },
-/* icon */		"icons/guard",
-/* pickup */	"Guard",
-		30,
-		IT_PERSISTANT_POWERUP,
-		PW_GUARD,
-/* precache */ "",
-/* sounds */ ""
-	},
-
-/*QUAKED item_doubler (.3 .3 1) (-16 -16 -16) (16 16 16) suspended redTeam blueTeam
-*/
-	{
-        { "item_doubler", NULL },
-		"sound/items/doubler.wav",
-        { "models/powerups/doubler.md3", 
-		NULL, NULL, NULL },
-/* icon */		"icons/doubler",
-/* pickup */	"Doubler",
-		30,
-		IT_PERSISTANT_POWERUP,
-		PW_DOUBLER,
-/* precache */ "",
-/* sounds */ ""
-	},
-
-/*QUAKED item_doubler (.3 .3 1) (-16 -16 -16) (16 16 16) suspended redTeam blueTeam
-*/
-	{
-        { "item_ammoregen", NULL },
-		"sound/items/ammoregen.wav",
-        { "models/powerups/ammo.md3",
-		NULL, NULL, NULL },
-/* icon */		"icons/ammo_regen",
-/* pickup */	"Ammo Regen",
-		30,
-		IT_PERSISTANT_POWERUP,
-		PW_AMMOREGEN,
-/* precache */ "",
-/* sounds */ ""
-	},
-
 	/*QUAKED team_CTF_neutralflag (0 0 1) (-16 -16 -16) (16 16 16)
 Only in One Flag CTF games
 */
@@ -782,22 +699,6 @@ Only in One Flag CTF games
 /* precache */ "",
 /* sounds */ ""
 	},
-
-/*QUAKED weapon_chaingun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "weapon_chaingun", NULL },
-		"sound/misc/w_pkup.wav",
-        { "models/weapons/vulcan/vulcan.md3", 
-		NULL, NULL, NULL},
-/* icon */		"icons/iconw_chaingun",
-/* pickup */	"Chaingun",
-		80,
-		IT_WEAPON,
-		WP_CHAINGUN,
-/* precache */ "",
-/* sounds */ "sound/weapons/vulcan/wvulwind.wav"
-	},
 #endif
 
 	// end of list marker
@@ -817,8 +718,7 @@ gitem_t	*BG_FindItemForPowerup( powerup_t pw ) {
 
 	for ( i = 0 ; i < bg_numItems ; i++ ) {
 		if ( (bg_itemlist[i].giType == IT_POWERUP || 
-					bg_itemlist[i].giType == IT_TEAM ||
-					bg_itemlist[i].giType == IT_PERSISTANT_POWERUP) && 
+					bg_itemlist[i].giType == IT_TEAM) && 
 			bg_itemlist[i].giTag == pw ) {
 			return &bg_itemlist[i];
 		}
@@ -922,10 +822,6 @@ This needs to be the same for client side prediction and server use.
 */
 qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const playerState_t *ps ) {
 	gitem_t	*item;
-#ifdef MISSIONPACK
-    qboolean hasScout = qfalse;
-    qboolean hasGuard = qfalse;
-#endif
     int		quantity;
 
 	if ( ent->modelindex < 1 || ent->modelindex >= bg_numItems ) {
@@ -933,14 +829,6 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 	}
 
 	item = &bg_itemlist[ent->modelindex];
-
-#ifdef MISSIONPACK
-    if (bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT) {
-        hasScout = qtrue;
-    } else if (bg_itemlist[ps->stats[STAT_PERSISTANT_POWERUP]].giTag == PW_GUARD) {
-        hasGuard = qtrue;
-    }
-#endif
 
 	switch( item->giType ) {
 	case IT_WEAPON:
@@ -983,15 +871,6 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
         return qtrue;
 
 	case IT_ARMOR:
-#ifdef MISSIONPACK
-		if (hasScout) {
-		    return qfalse;
-		}
-
-        if (ps->stats[STAT_ARMORCLASS] > ARM_COMBAT && hasGuard) {
-            return qfalse;
-        }
-#endif
         if (ps->stats[STAT_ARMORCLASS] == ARM_NONE && item->giTag == ARM_NONE) {
             return qfalse;
         }
@@ -1023,24 +902,6 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 
 	case IT_POWERUP:
 		return qtrue;	// powerups are always picked up
-
-#ifdef MISSIONPACK
-	case IT_PERSISTANT_POWERUP:
-		// can only hold one item at a time
-		if ( ps->stats[STAT_PERSISTANT_POWERUP] ) {
-			return qfalse;
-		}
-
-		// check team only
-		if( ( ent->generic1 & 2 ) && ( ps->persistant[PERS_TEAM] != TEAM_RED ) ) {
-			return qfalse;
-		}
-		if( ( ent->generic1 & 4 ) && ( ps->persistant[PERS_TEAM] != TEAM_BLUE ) ) {
-			return qfalse;
-		}
-
-		return qtrue;
-#endif
 
 	case IT_TEAM: // team items, such as flags
 #ifdef MISSIONPACK		
