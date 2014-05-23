@@ -132,8 +132,7 @@ void TossClientItems( gentity_t *self ) {
                 ((self->client->ps.ammo[WP_LIGHTNING] & 0x00FF) << 8) +
                 (self->client->ps.ammo[WP_RAILGUN] & 0x00FF);
             drop->splashRadius =
-                ((self->client->ps.ammo[WP_PLASMAGUN] & 0x00FF) << 8) +
-                (self->client->ps.ammo[WP_BFG] & 0x00FF);
+                ((self->client->ps.ammo[WP_PLASMAGUN] & 0x00FF) << 8);
         }
     }
     // !CPM
@@ -324,8 +323,6 @@ char	*modNames[] = {
 	"MOD_PLASMA_SPLASH",
 	"MOD_RAILGUN",
 	"MOD_LIGHTNING",
-	"MOD_BFG",
-	"MOD_BFG_SPLASH",
 	"MOD_WATER",
 	"MOD_SLIME",
 	"MOD_LAVA",
@@ -338,9 +335,7 @@ char	*modNames[] = {
 #ifdef MISSIONPACK
 	"MOD_NAIL",
 	"MOD_CHAINGUN",
-	"MOD_PROXIMITY_MINE",
 	"MOD_KAMIKAZE",
-	"MOD_JUICED",
 #endif
 	"MOD_GRAPPLE"
 };
@@ -878,7 +873,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		return;
 	}
 #ifdef MISSIONPACK
-	if ( targ->client && mod != MOD_JUICED) {
+	if ( targ->client ) {
 		if ( targ->client->invulnerabilityTime > level.time) {
 			if ( dir && point ) {
 				G_InvulnerabilityEffect( targ, dir, point, impactpoint, bouncedir );
@@ -1003,7 +998,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		// if TF_NO_FRIENDLY_FIRE is set, don't do damage to the target
 		// if the attacker was on the same team
 #ifdef MISSIONPACK
-		if ( mod != MOD_JUICED && targ != attacker && !(dflags & DAMAGE_NO_TEAM_PROTECTION) && OnSameTeam (targ, attacker)  ) {
+		if ( targ != attacker && !(dflags & DAMAGE_NO_TEAM_PROTECTION) && OnSameTeam (targ, attacker)  ) {
 #else	
 		if ( targ != attacker && OnSameTeam (targ, attacker)  ) {
 #endif
@@ -1011,16 +1006,6 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 				return;
 			}
 		}
-#ifdef MISSIONPACK
-		if (mod == MOD_PROXIMITY_MINE) {
-			if (inflictor && inflictor->parent && OnSameTeam(targ, inflictor->parent)) {
-				return;
-			}
-			if (targ == attacker) {
-				return;
-			}
-		}
-#endif
 
 		// check for godmode
 		if ( targ->flags & FL_GODMODE ) {

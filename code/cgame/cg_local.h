@@ -749,7 +749,6 @@ typedef struct {
 	qhandle_t	bloodTrailShader;
 #ifdef MISSIONPACK
 	qhandle_t	nailPuffShader;
-	qhandle_t	blueProxMine;
 #endif
 
 	qhandle_t	numberShaders[11];
@@ -792,7 +791,6 @@ typedef struct {
 	qhandle_t	bulletExplosionShader;
 	qhandle_t	rocketExplosionShader;
 	qhandle_t	grenadeExplosionShader;
-	qhandle_t	bfgExplosionShader;
 	qhandle_t	bloodExplosionShader;
 
 	// special effects models
@@ -846,7 +844,6 @@ typedef struct {
 	sfxHandle_t	sfx_rockexp;
 	sfxHandle_t	sfx_plasmaexp;
 #ifdef MISSIONPACK
-	sfxHandle_t	sfx_proxexp;
 	sfxHandle_t	sfx_nghit;
 	sfxHandle_t	sfx_nghitflesh;
 	sfxHandle_t	sfx_nghitmetal;
@@ -987,10 +984,6 @@ typedef struct {
 	sfxHandle_t	n_healthSound;
 	sfxHandle_t	hgrenb1aSound;
 	sfxHandle_t	hgrenb2aSound;
-	sfxHandle_t	wstbimplSound;
-	sfxHandle_t	wstbimpmSound;
-	sfxHandle_t	wstbimpdSound;
-	sfxHandle_t	wstbactvSound;
 
     // CPM: Backpack gfx
     qhandle_t	backpackModel;

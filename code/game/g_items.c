@@ -241,7 +241,7 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
     // CPM: Check for backpack
     if (ent->s.eFlags & EF_BACKPACK)
     {
-        int a1, a2, a3, a4, a5, a6, a7, a8;
+        int a1, a2, a3, a4, a5, a6, a7;
         // give the player the backpack's weapon
         other->client->ps.stats[STAT_WEAPONS] |= (1 << ent->item->giTag);
 
@@ -252,7 +252,7 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
         a5 = (ent->splashDamage >> 8);
         a6 = (ent->splashDamage & 0x00FF);
         a7 = (ent->splashRadius >> 8);
-        a8 = (ent->splashRadius & 0x00FF);
+        // a8 = (ent->splashRadius & 0x00FF);
 
         // print message:
         trap_SendServerCommand(other - g_entities, va("print \"Backpack  Ammo:\""));
@@ -263,7 +263,6 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
         if (a5) trap_SendServerCommand(other - g_entities, va("print \" %d lightning\"", a5));
         if (a6) trap_SendServerCommand(other - g_entities, va("print \" %d slugs\"", a6));
         if (a7) trap_SendServerCommand(other - g_entities, va("print \" %d cells\"", a7));
-        if (a8) trap_SendServerCommand(other - g_entities, va("print \" %d bfg\"", a8));
 
         trap_SendServerCommand(other - g_entities, va("print \"\n\""));
 
@@ -274,7 +273,6 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
         Add_Ammo(other, WP_LIGHTNING, a5);
         Add_Ammo(other, WP_RAILGUN, a6);
         Add_Ammo(other, WP_PLASMAGUN, a7);
-        Add_Ammo(other, WP_BFG, a8);
 
         return 1; // this value doesn't matter, only it isn't 0
     }

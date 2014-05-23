@@ -103,7 +103,6 @@ void AAS_InitSettings(void)
 	aassettings.rs_startwalkoffledge		= LibVarValue("rs_startwalkoffledge", "70");
 	aassettings.rs_startjump				= LibVarValue("rs_startjump", "300");
 	aassettings.rs_rocketjump				= LibVarValue("rs_rocketjump", "500");
-	aassettings.rs_bfgjump					= LibVarValue("rs_bfgjump", "500");
 	aassettings.rs_jumppad					= LibVarValue("rs_jumppad", "250");
 	aassettings.rs_aircontrolledjumppad		= LibVarValue("rs_aircontrolledjumppad", "300");
 	aassettings.rs_funcbob					= LibVarValue("rs_funcbob", "300");
@@ -343,17 +342,6 @@ float AAS_RocketJumpZVelocity(vec3_t origin)
 	//rocket radius damage is 120 (p_weapon.c: Weapon_RocketLauncher_Fire)
 	return AAS_WeaponJumpZVelocity(origin, 120);
 } //end of the function AAS_RocketJumpZVelocity
-//===========================================================================
-//
-// Parameter:			-
-// Returns:				-
-// Changes Globals:		-
-//===========================================================================
-float AAS_BFGJumpZVelocity(vec3_t origin)
-{
-	//bfg radius damage is 1000 (p_weapon.c: weapon_bfg_fire)
-	return AAS_WeaponJumpZVelocity(origin, 120);
-} //end of the function AAS_BFGJumpZVelocity
 //===========================================================================
 // applies ground friction to the given velocity
 //
