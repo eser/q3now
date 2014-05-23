@@ -1,0 +1,20 @@
+* shotgun pellets in pattern
+* unlagged
+* spectator options
+* team arena items: kamikaze, portal, invulnerability, neutralflag, cubes
+* regen -> vitality
+* quad -> berserk
+* battlesuit -> protection
+* invisibility -> cloak
+* flight -> flight
+* team arena hit sounds
+* team arena bullet surface sounds
+* spiral railgun trail
+* pro mode item pickup range
+* machinegun drop
+* mod ffa -> deathmatch
+* mod freezetag
+* mod clan arena
+* mod king of the hill
+* new ui library
+* mod singleplayer -> g_singlePlayer.integer
