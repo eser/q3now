@@ -1459,25 +1459,6 @@ static void CG_DrawHoldableItem( void ) {
 }
 #endif // MISSIONPACK
 
-#ifdef MISSIONPACK
-/*
-===================
-CG_DrawPersistantPowerup
-===================
-*/
-#if 0 // sos001208 - DEAD
-static void CG_DrawPersistantPowerup( void ) { 
-	int		value;
-
-	value = cg.snap->ps.stats[STAT_PERSISTANT_POWERUP];
-	if ( value ) {
-		CG_RegisterItemVisuals( value );
-		CG_DrawPic( 640-ICON_SIZE, (SCREEN_HEIGHT-ICON_SIZE)/2 - ICON_SIZE, ICON_SIZE, ICON_SIZE, cg_items[ value ].icon );
-	}
-}
-#endif
-#endif // MISSIONPACK
-
 
 /*
 ===================
@@ -2565,8 +2546,6 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 
 #ifndef MISSIONPACK
 			CG_DrawHoldableItem();
-#else
-			//CG_DrawPersistantPowerup();
 #endif
 			CG_DrawReward();
 		}

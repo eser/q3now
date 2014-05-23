@@ -707,19 +707,6 @@ void CG_RegisterWeapon( int weaponNum ) {
 		cgs.media.lightningShader = trap_R_RegisterShader( "lightningBoltNew");
 		break;
 
-#ifdef MISSIONPACK
-	case WP_CHAINGUN:
-		weaponInfo->firingSound = trap_S_RegisterSound( "sound/weapons/vulcan/wvulfire.wav", qfalse );
-		MAKERGB( weaponInfo->flashDlightColor, 1, 1, 0 );
-		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/vulcan/vulcanf1b.wav", qfalse );
-		weaponInfo->flashSound[1] = trap_S_RegisterSound( "sound/weapons/vulcan/vulcanf2b.wav", qfalse );
-		weaponInfo->flashSound[2] = trap_S_RegisterSound( "sound/weapons/vulcan/vulcanf3b.wav", qfalse );
-		weaponInfo->flashSound[3] = trap_S_RegisterSound( "sound/weapons/vulcan/vulcanf4b.wav", qfalse );
-		weaponInfo->ejectBrassFunc = CG_MachineGunEjectBrass;
-		cgs.media.bulletExplosionShader = trap_R_RegisterShader( "bulletExplosion" );
-		break;
-#endif
-
 	case WP_MACHINEGUN:
 		MAKERGB( weaponInfo->flashDlightColor, 1, 1, 0 );
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/machinegun/machgf1b.wav", qfalse );
@@ -1121,11 +1108,6 @@ static float	CG_MachinegunSpinAngle( centity_t *cent ) {
 		cent->pe.barrelTime = cg.time;
 		cent->pe.barrelAngle = AngleMod( angle );
 		cent->pe.barrelSpinning = !!(cent->currentState.eFlags & EF_FIRING);
-#ifdef MISSIONPACK
-		if ( cent->currentState.weapon == WP_CHAINGUN && !cent->pe.barrelSpinning ) {
-			trap_S_StartSound( NULL, cent->currentState.number, CHAN_WEAPON, trap_S_RegisterSound( "sound/weapons/vulcan/wvulwind.wav", qfalse ) );
-		}
-#endif
 	}
 
 	return angle;
@@ -1806,22 +1788,6 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		radius = 4;
 		break;
 
-#ifdef MISSIONPACK
-	case WP_CHAINGUN:
-		mod = cgs.media.bulletFlashModel;
-		if( soundType == IMPACTSOUND_FLESH ) {
-			sfx = cgs.media.sfx_chghitflesh;
-		} else if( soundType == IMPACTSOUND_METAL ) {
-			sfx = cgs.media.sfx_chghitmetal;
-		} else {
-			sfx = cgs.media.sfx_chghit;
-		}
-		mark = cgs.media.bulletMarkShader;
-
-		radius = 8;
-		break;
-#endif
-
 	case WP_MACHINEGUN:
 		mod = cgs.media.bulletFlashModel;
 		shader = cgs.media.bulletExplosionShader;
@@ -1835,6 +1801,15 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		} else {
 			sfx = cgs.media.sfx_ric3;
 		}
+        /*
+        if( soundType == IMPACTSOUND_FLESH ) {
+        sfx = cgs.media.sfx_chghitflesh;
+        } else if( soundType == IMPACTSOUND_METAL ) {
+        sfx = cgs.media.sfx_chghitmetal;
+        } else {
+        sfx = cgs.media.sfx_chghit;
+        }
+        */
 
 		radius = 8;
 		break;
@@ -1893,9 +1868,6 @@ void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum )
 	case WP_GRENADE_LAUNCHER:
 	case WP_ROCKET_LAUNCHER:
 	case WP_PLASMAGUN:
-#ifdef MISSIONPACK
-	case WP_CHAINGUN:
-#endif
 		CG_MissileHitWall( weapon, 0, origin, dir, IMPACTSOUND_FLESH );
 		break;
 	default:

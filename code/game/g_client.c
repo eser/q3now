@@ -1280,7 +1280,6 @@ void ClientDisconnect( int clientNum ) {
 		// Especially important for stuff like CTF flags
 		TossClientItems( ent );
 #ifdef MISSIONPACK
-		TossClientPersistantPowerups( ent );
 		if( g_gametype.integer == GT_HARVESTER ) {
 			TossClientCubes( ent );
 		}

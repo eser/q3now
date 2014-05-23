@@ -1638,21 +1638,6 @@ void BotCheckItemPickup(bot_state_t *bs, int *oldinventory) {
 	if (!oldinventory[INVENTORY_INVULNERABILITY] && bs->inventory[INVENTORY_INVULNERABILITY] >= 1) {
 		offence = qtrue;
 	}
-	// if not already wearing the kamikaze or invulnerability
-	if (!bs->inventory[INVENTORY_KAMIKAZE] && !bs->inventory[INVENTORY_INVULNERABILITY]) {
-		if (!oldinventory[INVENTORY_SCOUT] && bs->inventory[INVENTORY_SCOUT] >= 1) {
-			offence = qtrue;
-		}
-		if (!oldinventory[INVENTORY_GUARD] && bs->inventory[INVENTORY_GUARD] >= 1) {
-			offence = qtrue;
-		}
-		if (!oldinventory[INVENTORY_DOUBLER] && bs->inventory[INVENTORY_DOUBLER] >= 1) {
-			offence = qfalse;
-		}
-		if (!oldinventory[INVENTORY_AMMOREGEN] && bs->inventory[INVENTORY_AMMOREGEN] >= 1) {
-			offence = qfalse;
-		}
-	}
 
 	if (offence >= 0) {
 		leader = ClientFromName(bs->teamleader);
@@ -1733,9 +1718,6 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_RAILGUN] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_RAILGUN)) != 0;
 	bs->inventory[INVENTORY_PLASMAGUN] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_PLASMAGUN)) != 0;
 	bs->inventory[INVENTORY_GRAPPLINGHOOK] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_GRAPPLING_HOOK)) != 0;
-#ifdef MISSIONPACK
-	bs->inventory[INVENTORY_CHAINGUN] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_CHAINGUN)) != 0;;
-#endif
 	//ammo
 	bs->inventory[INVENTORY_SHELLS] = bs->cur_ps.ammo[WP_SHOTGUN];
 	bs->inventory[INVENTORY_BULLETS] = bs->cur_ps.ammo[WP_MACHINEGUN];
@@ -1744,9 +1726,6 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_LIGHTNINGAMMO] = bs->cur_ps.ammo[WP_LIGHTNING];
 	bs->inventory[INVENTORY_ROCKETS] = bs->cur_ps.ammo[WP_ROCKET_LAUNCHER];
 	bs->inventory[INVENTORY_SLUGS] = bs->cur_ps.ammo[WP_RAILGUN];
-#ifdef MISSIONPACK
-	bs->inventory[INVENTORY_BELT] = bs->cur_ps.ammo[WP_CHAINGUN];
-#endif
 	//powerups
 	bs->inventory[INVENTORY_HEALTH] = bs->cur_ps.stats[STAT_HEALTH];
 	bs->inventory[INVENTORY_TELEPORTER] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_TELEPORTER;
@@ -1762,12 +1741,6 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_INVISIBILITY] = bs->cur_ps.powerups[PW_INVIS] != 0;
 	bs->inventory[INVENTORY_REGEN] = bs->cur_ps.powerups[PW_REGEN] != 0;
 	bs->inventory[INVENTORY_FLIGHT] = bs->cur_ps.powerups[PW_FLIGHT] != 0;
-#ifdef MISSIONPACK
-	bs->inventory[INVENTORY_SCOUT] = bs->cur_ps.stats[STAT_PERSISTANT_POWERUP] == MODELINDEX_SCOUT;
-	bs->inventory[INVENTORY_GUARD] = bs->cur_ps.stats[STAT_PERSISTANT_POWERUP] == MODELINDEX_GUARD;
-	bs->inventory[INVENTORY_DOUBLER] = bs->cur_ps.stats[STAT_PERSISTANT_POWERUP] == MODELINDEX_DOUBLER;
-	bs->inventory[INVENTORY_AMMOREGEN] = bs->cur_ps.stats[STAT_PERSISTANT_POWERUP] == MODELINDEX_AMMOREGEN;
-#endif
 	bs->inventory[INVENTORY_REDFLAG] = bs->cur_ps.powerups[PW_REDFLAG] != 0;
 	bs->inventory[INVENTORY_BLUEFLAG] = bs->cur_ps.powerups[PW_BLUEFLAG] != 0;
 #ifdef MISSIONPACK
@@ -2406,15 +2379,6 @@ BotHasPersistantPowerupAndWeapon
 ==================
 */
 int BotHasPersistantPowerupAndWeapon(bot_state_t *bs) {
-#ifdef MISSIONPACK
-	// if the bot does not have a persistant powerup
-	if (!bs->inventory[INVENTORY_SCOUT] &&
-		!bs->inventory[INVENTORY_GUARD] &&
-		!bs->inventory[INVENTORY_DOUBLER] &&
-		!bs->inventory[INVENTORY_AMMOREGEN] ) {
-		return qfalse;
-	}
-#endif
 	//if the bot is very low on health
 	if (bs->inventory[INVENTORY_HEALTH] < 60) return qfalse;
 	//if the bot is low on health
@@ -2431,9 +2395,6 @@ int BotHasPersistantPowerupAndWeapon(bot_state_t *bs) {
 	//if the bot can use the rocketlauncher
 	if (bs->inventory[INVENTORY_ROCKETLAUNCHER] > 0 &&
 			bs->inventory[INVENTORY_ROCKETS] > 5) return qtrue;
-	//
-	if (bs->inventory[INVENTORY_CHAINGUN] > 0 &&
-			bs->inventory[INVENTORY_BELT] > 40) return qtrue;
 	//if the bot can use the plasmagun
 	if (bs->inventory[INVENTORY_PLASMAGUN] > 0 &&
 			bs->inventory[INVENTORY_CELLS] > 20) return qtrue;

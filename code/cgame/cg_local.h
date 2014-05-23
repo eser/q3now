@@ -801,10 +801,6 @@ typedef struct {
 	qhandle_t	kamikazeShockWave;
 	qhandle_t	kamikazeHeadModel;
 	qhandle_t	kamikazeHeadTrail;
-	qhandle_t	guardPowerupModel;
-	qhandle_t	scoutPowerupModel;
-	qhandle_t	doublerPowerupModel;
-	qhandle_t	ammoRegenPowerupModel;
 	qhandle_t	invulnerabilityImpactModel;
 	qhandle_t	invulnerabilityJuicedModel;
 	qhandle_t	medkitUsageModel;
@@ -968,11 +964,6 @@ typedef struct {
 	qhandle_t escortShader;
 	qhandle_t flagShaders[3];
 	sfxHandle_t	countPrepareTeamSound;
-
-	sfxHandle_t ammoregenSound;
-	sfxHandle_t doublerSound;
-	sfxHandle_t guardSound;
-	sfxHandle_t scoutSound;
 
 	qhandle_t cursor;
 	qhandle_t selectCursor;

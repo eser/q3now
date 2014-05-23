@@ -264,10 +264,6 @@ static void CG_Obituary( entityState_t *ent ) {
 			message = "was electrocuted by";
 			break;
 #ifdef MISSIONPACK
-		case MOD_CHAINGUN:
-			message = "got lead poisoning from";
-			message2 = "'s Chaingun";
-			break;
 		case MOD_KAMIKAZE:
 			message = "falls to";
 			message2 = "'s Kamikaze blast";
@@ -695,23 +691,6 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 			// will be played at prediction time
 			if ( item->giType == IT_POWERUP || item->giType == IT_TEAM) {
 				trap_S_StartSound (NULL, es->number, CHAN_AUTO,	cgs.media.n_healthSound );
-			} else if (item->giType == IT_PERSISTANT_POWERUP) {
-#ifdef MISSIONPACK
-				switch (item->giTag ) {
-					case PW_SCOUT:
-						trap_S_StartSound (NULL, es->number, CHAN_AUTO,	cgs.media.scoutSound );
-					break;
-					case PW_GUARD:
-						trap_S_StartSound (NULL, es->number, CHAN_AUTO,	cgs.media.guardSound );
-					break;
-					case PW_DOUBLER:
-						trap_S_StartSound (NULL, es->number, CHAN_AUTO,	cgs.media.doublerSound );
-					break;
-					case PW_AMMOREGEN:
-						trap_S_StartSound (NULL, es->number, CHAN_AUTO,	cgs.media.ammoregenSound );
-					break;
-				}
-#endif
 			} else {
 				trap_S_StartSound (NULL, es->number, CHAN_AUTO,	trap_S_RegisterSound( item->pickup_sound, qfalse ) );
 			}
