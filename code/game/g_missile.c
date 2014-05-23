@@ -324,8 +324,12 @@ fire_plasma
 
 =================
 */
-gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t dir) {
+#define PLASMA_SPREAD 500
+gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t right, vec3_t up) {
 	gentity_t	*bolt;
+    vec3_t		dir;
+    vec3_t		end;
+    float		r, u, scale;
 
 	VectorNormalize (dir);
 
@@ -338,18 +342,27 @@ gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->s.weapon = WP_PLASMAGUN;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
-    bolt->damage = 15;
-	bolt->splashDamage = 15;
-	bolt->splashRadius = 20;
+    bolt->damage = 20;
 	bolt->methodOfDeath = MOD_PLASMA;
-	bolt->splashMethodOfDeath = MOD_PLASMA_SPLASH;
 	bolt->clipmask = MASK_SHOT;
 	bolt->target_ent = NULL;
 
 	bolt->s.pos.trType = TR_LINEAR;
-	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
+	// bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
+    bolt->s.pos.trTime = level.time;
 	VectorCopy( start, bolt->s.pos.trBase );
-	VectorScale( dir, 2000, bolt->s.pos.trDelta );
+
+    r = random() * M_PI * 2.0f;
+    u = sin(r) * crandom() * PLASMA_SPREAD * 16;
+    r = cos(r) * crandom() * PLASMA_SPREAD * 16;
+    VectorMA(start, 8192 * 16, forward, end);
+    VectorMA(end, r, right, end);
+    VectorMA(end, u, up, end);
+    VectorSubtract(end, start, dir);
+    VectorNormalize(dir);
+
+    scale = 555 + random() * 1800;
+    VectorScale(dir, scale, bolt->s.pos.trDelta);
 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
 
 	VectorCopy (start, bolt->r.currentOrigin);
@@ -474,55 +487,3 @@ gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir) {
 
 	return hook;
 }
-
-
-#ifdef MISSIONPACK
-/*
-=================
-fire_nail
-=================
-*/
-#define NAILGUN_SPREAD	500
-
-gentity_t *fire_nail( gentity_t *self, vec3_t start, vec3_t forward, vec3_t right, vec3_t up ) {
-	gentity_t	*bolt;
-	vec3_t		dir;
-	vec3_t		end;
-	float		r, u, scale;
-
-	bolt = G_Spawn();
-	bolt->classname = "nail";
-	bolt->nextthink = level.time + 10000;
-	bolt->think = G_ExplodeMissile;
-	bolt->s.eType = ET_MISSILE;
-	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
-	bolt->s.weapon = WP_NAILGUN;
-	bolt->r.ownerNum = self->s.number;
-	bolt->parent = self;
-	bolt->damage = 20;
-	bolt->methodOfDeath = MOD_NAIL;
-	bolt->clipmask = MASK_SHOT;
-	bolt->target_ent = NULL;
-
-	bolt->s.pos.trType = TR_LINEAR;
-	bolt->s.pos.trTime = level.time;
-	VectorCopy( start, bolt->s.pos.trBase );
-
-	r = random() * M_PI * 2.0f;
-	u = sin(r) * crandom() * NAILGUN_SPREAD * 16;
-	r = cos(r) * crandom() * NAILGUN_SPREAD * 16;
-	VectorMA( start, 8192 * 16, forward, end);
-	VectorMA (end, r, right, end);
-	VectorMA (end, u, up, end);
-	VectorSubtract( end, start, dir );
-	VectorNormalize( dir );
-
-	scale = 555 + random() * 1800;
-	VectorScale( dir, scale, bolt->s.pos.trDelta );
-	SnapVector( bolt->s.pos.trDelta );
-
-	VectorCopy( start, bolt->r.currentOrigin );
-
-	return bolt;
-}	
-#endif
