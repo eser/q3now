@@ -1736,7 +1736,7 @@ static void PM_Weapon( void ) {
 		addTime = 800;
 		break;
 	case WP_PLASMAGUN:
-		addTime = 100;
+		addTime = 1000;
 		break;
 	case WP_RAILGUN:
 		// addTime = 1500;
@@ -1747,9 +1747,6 @@ static void PM_Weapon( void ) {
 		addTime = 400;
 		break;
 #ifdef MISSIONPACK
-	case WP_NAILGUN:
-		addTime = 1000;
-		break;
 	case WP_CHAINGUN:
 		addTime = 30;
 		break;

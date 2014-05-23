@@ -320,7 +320,6 @@ char	*modNames[] = {
 	"MOD_ROCKET",
 	"MOD_ROCKET_SPLASH",
 	"MOD_PLASMA",
-	"MOD_PLASMA_SPLASH",
 	"MOD_RAILGUN",
 	"MOD_LIGHTNING",
 	"MOD_WATER",
@@ -333,7 +332,6 @@ char	*modNames[] = {
 	"MOD_TARGET_LASER",
 	"MOD_TRIGGER_HURT",
 #ifdef MISSIONPACK
-	"MOD_NAIL",
 	"MOD_CHAINGUN",
 	"MOD_KAMIKAZE",
 #endif

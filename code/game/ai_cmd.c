@@ -1523,7 +1523,6 @@ void BotMatch_WhereAreYou(bot_state_t *bs, bot_match_t *match) {
 		"Red Flag",
 		"Blue Flag",
 #ifdef MISSIONPACK
-		"Nailgun",
 		"Chaingun",
 		"Scout",
 		"Guard",

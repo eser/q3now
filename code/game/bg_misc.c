@@ -222,7 +222,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED weapon_grenadelauncher (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "weapon_grenadelauncher", NULL },
+        { "weapon_grenadelauncher", "weapon_prox_launcher", NULL },
 		"sound/misc/w_pkup.wav",
         { "models/weapons2/grenadel/grenadel.md3", 
 		NULL, NULL, NULL},
@@ -286,7 +286,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED weapon_plasmagun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "weapon_plasmagun", NULL },
+        { "weapon_plasmagun", "weapon_nailgun", NULL },
 		"sound/misc/w_pkup.wav",
         { "models/weapons2/plasma/plasma.md3", 
 		NULL, NULL, NULL},
@@ -354,7 +354,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED ammo_grenades (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "ammo_grenades", NULL },
+        { "ammo_grenades", "ammo_mines", NULL },
 		"sound/misc/am_pkup.wav",
         { "models/powerups/ammo/grenadeam.md3", 
 		NULL, NULL, NULL},
@@ -370,7 +370,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED ammo_cells (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "ammo_cells", NULL },
+        { "ammo_cells", "ammo_nails", NULL },
 		"sound/misc/am_pkup.wav",
         { "models/powerups/ammo/plasmaam.md3", 
 		NULL, NULL, NULL},
@@ -655,22 +655,6 @@ Only in CTF games
 /* sounds */ ""
 	},
 
-/*QUAKED ammo_nails (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "ammo_nails", "ammo_mines", NULL },
-		"sound/misc/am_pkup.wav",
-        { "models/powerups/ammo/nailgunam.md3", 
-		NULL, NULL, NULL},
-/* icon */		"icons/icona_nailgun",
-/* pickup */	"Nails",
-		20,
-		IT_AMMO,
-		WP_NAILGUN,
-/* precache */ "",
-/* sounds */ ""
-	},
-
 /*QUAKED ammo_belt (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
@@ -795,21 +779,6 @@ Only in One Flag CTF games
 		0,
 		IT_TEAM,
 		0,
-/* precache */ "",
-/* sounds */ ""
-	},
-/*QUAKED weapon_nailgun (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "weapon_nailgun", "weapon_prox_launcher", NULL },
-		"sound/misc/w_pkup.wav",
-        { "models/weapons/nailgun/nailgun.md3", 
-		NULL, NULL, NULL},
-/* icon */		"icons/iconw_nailgun",
-/* pickup */	"Nailgun",
-		10,
-		IT_WEAPON,
-		WP_NAILGUN,
 /* precache */ "",
 /* sounds */ ""
 	},
