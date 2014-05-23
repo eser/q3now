@@ -743,7 +743,8 @@ extern	vmCvar_t	g_rankings;
 extern	vmCvar_t	g_enableDust;
 extern	vmCvar_t	g_enableBreath;
 extern	vmCvar_t	g_singlePlayer;
-extern	vmCvar_t	g_pro_mode; // CPM: The overall CPM toggle
+extern	vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
+extern	vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 
 void	trap_Print( const char *text );
 void	trap_Error( const char *text ) __attribute__((noreturn));

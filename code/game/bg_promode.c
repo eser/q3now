@@ -43,7 +43,7 @@ float	cpm_RGchange;
 float	cpm_PGknockback = 1;
 
 // Weapon switching
-float	cpm_weapondrop = 200;
+float	cpm_weapondrop = 0; // 200;
 float	cpm_weaponraise = 250;
 float	cpm_outofammodelay = 500;
 
@@ -83,7 +83,7 @@ float	cpm_lavadamage = 30;
 float	cpm_slimedamage = 10;
 float	cpm_lavafrequency = 700;
 
-void CPM_UpdateSettings(int num)
+void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 {
 	// num = 0: normal quake 3
 	// num = 1: pro mode
@@ -130,7 +130,7 @@ void CPM_UpdateSettings(int num)
 	cpm_PGknockback = 1;
 
 	// vq3 Weapon switching
-	cpm_weapondrop = 200;
+    cpm_weapondrop = 0; // 200;
 	cpm_weaponraise = 250;
 	cpm_outofammodelay = 500;
 
@@ -170,18 +170,21 @@ void CPM_UpdateSettings(int num)
 	cpm_slimedamage = 10;
 	cpm_lavafrequency = 700;
 
-	if (num)
+    if (pro_physics)
+    {
+        cpm_pm_jump_z = 100; // enable double-jump
+
+        // Physics
+        cpm_pm_airstopaccelerate = 2.5;
+        cpm_pm_aircontrol = 150;
+        cpm_pm_strafeaccelerate = 70;
+        cpm_pm_wishspeed = 30;
+        pm_accelerate = 15;
+        pm_friction = 8;
+    }
+
+	if (pro_mode)
 	{
-		cpm_pm_jump_z = 100; // enable double-jump
-
-		// Physics
-		cpm_pm_airstopaccelerate = 2.5;
-		cpm_pm_aircontrol = 150;
-		cpm_pm_strafeaccelerate = 70;
-		cpm_pm_wishspeed = 30;
-		pm_accelerate = 15;
-		pm_friction = 8;
-
 		// Gauntlet
 		cpm_Gauntletknockback = 0.5;
 
