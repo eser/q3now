@@ -47,7 +47,7 @@ The major features that implemented so far:
 - Proximity Launcher, Nailgun, Chaingun and BFG10K are removed
 - New Plasma Gun (called Plasma Rifle)
 - New Weapon Balances
-- Wall jumps
+- Wall jumps ([youtu.be/RPwSBUZ2Ebw](//youtu.be/RPwSBUZ2Ebw))
 
 ## Mod TODO list
 - Unlagged implementation
