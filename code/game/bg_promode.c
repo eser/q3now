@@ -3,7 +3,8 @@
 #include "bg_local.h"
 #include "bg_promode.h"
 
-float cpm_pm_jump_z;
+float   cpm_pm_jump_z;
+int     pm_walljumps;
 
 // Physics
 float	cpm_pm_airstopaccelerate = 1;
@@ -89,6 +90,7 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 	// num = 1: pro mode
 
 	cpm_pm_jump_z = 0; // turn off double-jump in vq3
+    pm_walljumps = 0;
 
 	// Physics
 	cpm_pm_airstopaccelerate = 1;
@@ -173,6 +175,7 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
     if (pro_physics)
     {
         cpm_pm_jump_z = 100; // enable double-jump
+        pm_walljumps = 1;
 
         // Physics
         cpm_pm_airstopaccelerate = 2.5;
