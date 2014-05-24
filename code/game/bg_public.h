@@ -30,6 +30,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	DEFAULT_GRAVITY		800
 #define	DEFAULT_MOVESPEED	320
 #define	JUMP_VELOCITY		270
+#define WALLJUMP_BOOST      240
+#define MAX_WALLJUMPS       3
 
 #define	QUAD_FACTOR			4
 #define MAX_HEALTH			100
@@ -221,8 +223,10 @@ typedef enum {
 
 // CPM
     STAT_JUMPTIME,
-    STAT_RAILTIME                   // CPM: Added for allowchange
+    STAT_RAILTIME,                  // CPM: Added for allowchange
 // !CPM
+
+    STAT_WALLJUMPS
 } statIndex_t;
 
 
