@@ -54,7 +54,7 @@ The major features that implemented so far:
 - New Team System
 - Spectator Cameras
 - New Powerup System
-- New Game Mods (King of the Hill, Freeze Tag, Clan Arena, etc.)
+- New Game Mods (King of the Hill, Freeze Tag, Clan Arena, Last Man Standing, etc.)
 - A modern HUD with new menu system
 
 ## Contributing

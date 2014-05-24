@@ -16,5 +16,10 @@
 * mod freezetag
 * mod clan arena
 * mod king of the hill
+* mod last man standing
+* free team names (no red and blue)
 * new ui library
 * mod singleplayer -> g_singlePlayer.integer
+* only quad explosions+gauntlet gibs players, only explosions+gauntlet gibs corpses.
+* g_selfdamage.integer
+* weapon knockbacks and kicks
