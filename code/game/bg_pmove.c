@@ -379,6 +379,7 @@ static qboolean PM_CheckJump( void ) {
 
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
 	pm->ps->velocity[2] = JUMP_VELOCITY;
+
     // CPM: check for double-jump
     if (cpm_pm_jump_z) {
         if (pm->ps->stats[STAT_JUMPTIME] > 0) {
@@ -388,7 +389,8 @@ static qboolean PM_CheckJump( void ) {
         pm->ps->stats[STAT_JUMPTIME] = 400;
     }
     // !CPM
-	PM_AddEvent( EV_JUMP );
+
+    PM_AddEvent( EV_JUMP );
 
 	if ( pm->cmd.forwardmove >= 0 ) {
 		PM_ForceLegsAnim( LEGS_JUMP );
@@ -602,12 +604,109 @@ static void PM_FlyMove( void ) {
 
 
 /*
+ =============
+ PM_CheckWallJump
+ =============
+ */
+static qboolean PM_CheckWallJump(void) {
+    vec3_t flatforward, spot;
+    trace_t trace;
+
+    if (pm->ps->pm_flags & PMF_RESPAWNED) {
+        return qfalse;
+    }
+
+    if (pm->cmd.upmove < 10) {
+        return qfalse;
+    }
+
+    if (pm->waterlevel >= 2) {
+        return qfalse;
+    }
+
+    if (pm->ps->pm_flags & PMF_JUMP_HELD) {
+        pm->cmd.upmove = 0;
+        return qfalse;
+    }
+
+    if (pm->cmd.buttons & BUTTON_WALKING) {
+        return qfalse;
+    }
+
+    if (pm->ps->velocity[2] < WALLJUMP_BOOST * -2) {
+        return qfalse;
+    }
+
+    flatforward[0] = pml.forward[0];
+    flatforward[1] = pml.forward[1];
+    flatforward[2] = 0;
+    VectorNormalize(flatforward);
+    VectorMA(pm->ps->origin, 1, flatforward, spot);
+    pm->trace(&trace, pm->ps->origin, pm->mins, pm->maxs, spot, pm->ps->clientNum, MASK_PLAYERSOLID);
+
+    if ((trace.fraction >= 1.0) || !(trace.contents & (CONTENTS_SOLID | CONTENTS_PLAYERCLIP)) || trace.surfaceFlags & SURF_SKY) {
+        return qfalse;
+    }
+
+    return qtrue;
+}
+
+/*
+ =============
+ PM_WallJump
+ =============
+ */
+static void PM_WallJump(void) {
+    vec3_t flatforward, spot, velocity;
+    trace_t trace;
+    float dot;
+    qboolean jumped = qfalse;
+
+    pml.groundPlane = qfalse;
+    pml.walking = qfalse;
+    pm->ps->pm_flags |= PMF_JUMP_HELD;
+
+    flatforward[0] = pml.forward[0];
+    flatforward[1] = pml.forward[1];
+    flatforward[2] = 0;
+    VectorNormalize(flatforward);
+    VectorMA(pm->ps->origin, 1, flatforward, spot);
+    pm->trace(&trace, pm->ps->origin, pm->mins, pm->maxs, spot, pm->ps->clientNum, MASK_PLAYERSOLID);
+
+    VectorCopy(trace.plane.normal, velocity);
+    VectorScale(velocity, WALLJUMP_BOOST, velocity);
+    velocity[2] = pm->ps->velocity[2] + WALLJUMP_BOOST;
+
+    if (velocity[0] != 0 && velocity[1] == 0) {
+        velocity[1] = pm->ps->velocity[1];
+    } else if (velocity[1] != 0 && velocity[0] == 0) {
+        velocity[0] = pm->ps->velocity[0];
+    }
+
+    VectorCopy(velocity, pm->ps->velocity);
+
+    pm->ps->stats[STAT_WALLJUMPS]++;
+    pm->ps->groundEntityNum = ENTITYNUM_NONE;
+    // PM_AddEvent(EV_WALLJUMP);
+
+    if (pm->cmd.forwardmove >= 0) {
+        PM_ForceLegsAnim(LEGS_JUMP);
+        pm->ps->pm_flags &= ~PMF_BACKWARDS_JUMP;
+    } else {
+        PM_ForceLegsAnim(LEGS_JUMPB);
+        pm->ps->pm_flags |= PMF_BACKWARDS_JUMP;
+    }
+
+    pm->ps->stats[STAT_WALLJUMPS]++;
+}
+
+/*
 ===================
 PM_AirMove
 
 ===================
 */
-static void PM_AirMove( void ) {
+static void PM_AirMove(pmove_t *pmove) {
 	int			i;
 	vec3_t		wishvel;
 	float		fmove, smove;
@@ -676,6 +775,13 @@ static void PM_AirMove( void ) {
 			pm->ps->velocity, OVERCLIP );
 	}
 
+	if (pm_walljumps && pmove->ps->stats[STAT_WALLJUMPS] < MAX_WALLJUMPS) {
+	    if (PM_CheckWallJump()) {
+     	 	PM_WallJump();
+	        return;
+    	}
+	}
+
 #if 0
 	//ZOID:  If we are on the grapple, try stair-stepping
 	//this allows a player to use the grapple to pull himself
@@ -721,7 +827,7 @@ PM_WalkMove
 
 ===================
 */
-static void PM_WalkMove( void ) {
+static void PM_WalkMove(pmove_t *pmove) {
 	int			i;
 	vec3_t		wishvel;
 	float		fmove, smove;
@@ -732,19 +838,20 @@ static void PM_WalkMove( void ) {
 	float		accelerate;
 	float		vel;
 
-	if ( pm->waterlevel > 2 && DotProduct( pml.forward, pml.groundTrace.plane.normal ) > 0 ) {
+    pmove->ps->stats[STAT_WALLJUMPS] = 0;
+	
+    if ( pm->waterlevel > 2 && DotProduct( pml.forward, pml.groundTrace.plane.normal ) > 0 ) {
 		// begin swimming
 		PM_WaterMove();
 		return;
 	}
-
 
 	if ( PM_CheckJump () ) {
 		// jumped away
 		if ( pm->waterlevel > 1 ) {
 			PM_WaterMove();
 		} else {
-			PM_AirMove();
+			PM_AirMove(pmove);
 		}
 		return;
 	}
@@ -960,7 +1067,11 @@ static void PM_CrashLand( void ) {
 	float		t;
 	float		a, b, c, den;
 
-	// decide which landing animation to use
+	if (pm->ps->stats[STAT_HEALTH] <= 0) {
+		return;
+	}
+
+    // decide which landing animation to use
 	if ( pm->ps->pm_flags & PMF_BACKWARDS_JUMP ) {
 		PM_ForceLegsAnim( LEGS_LANDB );
 	} else {
@@ -1014,14 +1125,11 @@ static void PM_CrashLand( void ) {
 	// SURF_NODAMAGE is used for bounce pads where you don't ever
 	// want to take damage or play a crunch sound
 	if ( !(pml.groundTrace.surfaceFlags & SURF_NODAMAGE) )  {
-		if ( delta > 60 ) {
+		if ( delta > 120 ) {
 			PM_AddEvent( EV_FALL_FAR );
-		} else if ( delta > 40 ) {
-			// this is a pain grunt, so don't play it if dead
-			if ( pm->ps->stats[STAT_HEALTH] > 0 ) {
-				PM_AddEvent( EV_FALL_MEDIUM );
-			}
-		} else if ( delta > 7 ) {
+		} else if ( delta > 80 ) {
+			PM_AddEvent( EV_FALL_MEDIUM );
+		} else if ( delta > 14 ) {
 			PM_AddEvent( EV_FALL_SHORT );
 		// } else {
 		//	PM_AddEvent( PM_FootstepForSurface() );
@@ -2036,7 +2144,7 @@ void PmoveSingle (pmove_t *pmove) {
 	} else if (pm->ps->pm_flags & PMF_GRAPPLE_PULL) {
 		PM_GrappleMove();
 		// We can wiggle a bit
-		PM_AirMove();
+		PM_AirMove(pmove);
 	} else if (pm->ps->pm_flags & PMF_TIME_WATERJUMP) {
 		PM_WaterJumpMove();
 	} else if ( pm->waterlevel > 1 ) {
@@ -2044,10 +2152,10 @@ void PmoveSingle (pmove_t *pmove) {
 		PM_WaterMove();
 	} else if ( pml.walking ) {
 		// walking on ground
-		PM_WalkMove();
+		PM_WalkMove(pmove);
 	} else {
 		// airborne
-		PM_AirMove();
+		PM_AirMove(pmove);
 	}
 
 	PM_Animate();
