@@ -17,7 +17,6 @@
 * mod clan arena
 * mod king of the hill
 * mod last man standing
-* free team names (no red and blue)
 * new ui library
 * mod singleplayer -> g_singlePlayer.integer
 * only quad explosions+gauntlet gibs players, only explosions+gauntlet gibs corpses.
@@ -27,3 +26,14 @@
 * new plasma gun effects
 * kamikaze effects
 * STAT_DEAD_YAW -> client side handling
+* purple plasmagun
+* cyan railgun
+* no personal colors
+* revamp kamikaze
+* falling damage * distance
+* free team names (no red and blue)
+	- team Pagans (switch to team Pagans)
+	- teamcolor 1 (if color is available, all gfxcolor and skin colors will be changed)
+	- teamvote leader Laroux.PoS (cleaned name)
+	- teamvote name Aliens (renames the team)
+	- ctf and 1fctf supports two teams only (reject on switching to new team)
