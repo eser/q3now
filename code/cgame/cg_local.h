@@ -1421,6 +1421,10 @@ localEntity_t *CG_MakeExplosion( vec3_t origin, vec3_t dir,
 								qhandle_t hModel, qhandle_t shader, int msec,
 								qboolean isSprite );
 
+// eser - lightning discharge
+void CG_Lightning_Discharge(vec3_t origin, int msec);
+// eser - lightning discharge
+
 //
 // cg_snapshot.c
 //

@@ -600,6 +600,29 @@ void Weapon_LightningFire( gentity_t *ent ) {
 	for (i = 0; i < 10; i++) {
 		VectorMA( muzzle, LIGHTNING_RANGE, forward, end );
 
+// eser - lightning discharge
+	if (trap_PointContents (muzzle, -1) & MASK_WATER)
+	{
+		int zaps;
+		gentity_t *tent;
+
+		zaps = ent->client->ps.ammo[WP_LIGHTNING];	// determines size/power of discharge
+		if (!zaps) return;	// prevents any subsequent frames causing second discharge + error
+		zaps++;		// pmove does an ammo[gun]--, so we must compensate
+		SnapVectorTowards (muzzle, ent->s.origin);	// save bandwidth
+
+		tent = G_TempEntity (muzzle, EV_LIGHTNING_DISCHARGE);
+		tent->s.eventParm = zaps;				// duration / size of explosion graphic
+
+        ent->client->ps.ammo[WP_LIGHTNING] = 0;		// drain ent's lightning count
+		if (G_RadiusDamage (muzzle, ent, damage * zaps, (damage * zaps) + 16, NULL, MOD_LIGHTNING_DISCHARGE, qtrue))
+			ent->client->accuracy_hits++;
+
+		return;
+	}
+// eser - lightning discharge
+
+
 		trap_Trace( &tr, muzzle, NULL, NULL, end, passent, MASK_SHOT );
 
 #ifdef MISSIONPACK

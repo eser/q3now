@@ -172,7 +172,17 @@ static void CG_Obituary( entityState_t *ent ) {
 			else
 				message = "blew himself up";
 			break;
-		default:
+// eser - lightning discharge
+        case MOD_LIGHTNING_DISCHARGE:
+            if (gender == GENDER_FEMALE)
+                message = "discharged herself";
+            else if (gender == GENDER_NEUTER)
+                message = "discharged itself";
+            else
+                message = "discharged himself";
+            break;
+// eser - lightning discharge
+        default:
 			if ( gender == GENDER_FEMALE )
 				message = "killed herself";
 			else if ( gender == GENDER_NEUTER )
@@ -263,6 +273,11 @@ static void CG_Obituary( entityState_t *ent ) {
 		case MOD_LIGHTNING:
 			message = "was electrocuted by";
 			break;
+// eser - lightning discharge
+        case MOD_LIGHTNING_DISCHARGE:
+            message = "was discharged by";
+            break;
+// eser - lightning discharge
 #ifdef MISSIONPACK
 		case MOD_KAMIKAZE:
 			message = "falls to";
@@ -929,6 +944,13 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_SHOTGUN");
 		CG_ShotgunFire( es );
 		break;
+
+// eser - lightning discharge
+    case EV_LIGHTNING_DISCHARGE:
+        DEBUGNAME("EV_LIGHTNING_DISCHARGE");
+        CG_Lightning_Discharge(position, es->eventParm);	// eventParm is duration/size
+        break;
+// eser - lightning discharge
 
 	case EV_GENERAL_SOUND:
 		DEBUGNAME("EV_GENERAL_SOUND");
