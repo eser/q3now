@@ -143,12 +143,10 @@ typedef struct
 #define ANIM_WEAPON6	17
 #define ANIM_WEAPON7	18
 #define ANIM_WEAPON8	19
-#define ANIM_WEAPON9	20
-#define ANIM_WEAPON10	21
-#define ANIM_ATTACK		22
-#define ANIM_GESTURE	23
-#define ANIM_DIE		24
-#define ANIM_CHAT		25
+#define ANIM_ATTACK		20
+#define ANIM_GESTURE	21
+#define ANIM_DIE		22
+#define ANIM_CHAT		23
 
 typedef struct
 {
@@ -511,10 +509,6 @@ static void Controls_UpdateModel( int anim ) {
 
 	case ANIM_WEAPON8:
 		s_controls.playerWeapon = WP_PLASMAGUN;
-		break;
-
-	case ANIM_WEAPON9:
-		s_controls.playerWeapon = WP_GRAPPLING_HOOK;
 		break;
 
 	case ANIM_ATTACK:

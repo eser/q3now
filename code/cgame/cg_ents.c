@@ -489,9 +489,13 @@ static void CG_Missile( centity_t *cent ) {
 		return;
 	}
 
+    if (weapon->missileModel == NULL) {
+        return;
+    }
+
 	// flicker between two skins
 	ent.skinNum = cg.clientFrame & 1;
-	ent.hModel = weapon->missileModel;
+    ent.hModel = weapon->missileModel;
 	ent.renderfx = weapon->missileRenderfx | RF_NOSHADOW;
 
 	// convert direction of travel into axis
@@ -545,6 +549,10 @@ static void CG_Grapple( centity_t *cent ) {
 	memset (&ent, 0, sizeof(ent));
 	VectorCopy( cent->lerpOrigin, ent.origin);
 	VectorCopy( cent->lerpOrigin, ent.oldorigin);
+
+    if (weapon->missileModel == NULL) {
+        return;
+    }
 
 	// flicker between two skins
 	ent.skinNum = cg.clientFrame & 1;

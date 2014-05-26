@@ -276,6 +276,8 @@ typedef enum {
 #define	EF_AWARD_ASSIST		0x00020000		// draw a assist sprite
 #define EF_AWARD_DENIED		0x00040000		// denied
 #define EF_TEAMVOTED		0x00080000		// already cast a team vote
+#define	EF_GRAPPLE			0x00100000
+
 
 #define	EF_BACKPACK			0x00000001		// CPM: Backpack indicator bit
 
@@ -324,7 +326,6 @@ typedef enum {
 	WP_LIGHTNING,
 	WP_RAILGUN,
 	WP_PLASMAGUN,
-	WP_GRAPPLING_HOOK,
 
 	WP_NUM_WEAPONS
 } weapon_t;

@@ -597,16 +597,22 @@ void CG_RegisterWeapon( int weaponNum ) {
 
 	weaponInfo = &cg_weapons[weaponNum];
 
-	if ( weaponNum == 0 ) {
-		return;
-	}
-
 	if ( weaponInfo->registered ) {
 		return;
 	}
 
-	memset( weaponInfo, 0, sizeof( *weaponInfo ) );
-	weaponInfo->registered = qtrue;
+    memset(weaponInfo, 0, sizeof(*weaponInfo));
+    weaponInfo->registered = qtrue;
+
+    if (weaponNum == WP_NONE) {
+        MAKERGB(weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f);
+        weaponInfo->flashSound[0] = trap_S_RegisterSound("sound/weapons/rocket/rocklf1a.wav", qfalse);
+        weaponInfo->missileModel = NULL;
+        weaponInfo->missileTrailFunc = CG_GrappleTrail;
+        weaponInfo->missileDlight = 200;
+
+        return;
+    }
 
 	for ( item = bg_itemlist + 1 ; item->classnames[0] ; item++ ) {
 		if ( item->giType == IT_WEAPON && item->giTag == weaponNum ) {
@@ -672,23 +678,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 		weaponInfo->firingSound = trap_S_RegisterSound( "sound/weapons/lightning/lg_hum.wav", qfalse );
 
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/lightning/lg_fire.wav", qfalse );
-		cgs.media.lightningShader = trap_R_RegisterShader( "lightningBoltNew");
+		// cgs.media.lightningShader = trap_R_RegisterShader( "lightningBoltNew");
 		cgs.media.lightningExplosionModel = trap_R_RegisterModel( "models/weaphits/crackle.md3" );
 		cgs.media.sfx_lghit1 = trap_S_RegisterSound( "sound/weapons/lightning/lg_hit.wav", qfalse );
 		cgs.media.sfx_lghit2 = trap_S_RegisterSound( "sound/weapons/lightning/lg_hit2.wav", qfalse );
 		cgs.media.sfx_lghit3 = trap_S_RegisterSound( "sound/weapons/lightning/lg_hit3.wav", qfalse );
 
-		break;
-
-	case WP_GRAPPLING_HOOK:
-		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );
-		weaponInfo->missileModel = trap_R_RegisterModel( "models/ammo/rocket/rocket.md3" );
-		weaponInfo->missileTrailFunc = CG_GrappleTrail;
-		weaponInfo->missileDlight = 200;
-		MAKERGB( weaponInfo->missileDlightColor, 1, 0.75f, 0 );
-		weaponInfo->readySound = trap_S_RegisterSound( "sound/weapons/melee/fsthum.wav", qfalse );
-		weaponInfo->firingSound = trap_S_RegisterSound( "sound/weapons/melee/fstrun.wav", qfalse );
-		cgs.media.lightningShader = trap_R_RegisterShader( "lightningBoltNew");
 		break;
 
 	case WP_MACHINEGUN:
@@ -1224,6 +1219,12 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	if ( !ps ) {
 		// add weapon ready sound
 		cent->pe.lightningFiring = qfalse;
+        cent->pe.grappleFiring = qfalse;
+
+        if (cent->currentState.eFlags & EF_GRAPPLE) {
+            cent->pe.grappleFiring = qtrue;
+        }
+
 		if ( ( cent->currentState.eFlags & EF_FIRING ) && weapon->firingSound ) {
 			// lightning gun and guantlet make a different sound when fire is held down
 			trap_S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, weapon->firingSound );
@@ -1233,9 +1234,19 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		}
 
         if (weaponNum == WP_RAILGUN) {
-            gun.shaderRGBA[0] = 255 * colorSkyBlue[0];
-            gun.shaderRGBA[1] = 255 * colorSkyBlue[1];
-            gun.shaderRGBA[2] = 255 * colorSkyBlue[2];
+            float	f;
+
+            //if (cg.predictedPlayerState.weaponstate == WEAPON_FIRING) {
+            //    f = (float)cent->muzzleFlashTime / cpm_RGchange;
+            //}
+            //else {
+            //    f = 0.0;
+            //}
+            f = 0.0;
+
+            gun.shaderRGBA[0] = 255 * (colorSkyBlue[0] + (1 - colorSkyBlue[0]) * f); // 255 * (colorSkyBlue[0] * (1.0f - f));
+            gun.shaderRGBA[1] = 255 * (colorSkyBlue[1] + (1 - colorSkyBlue[1]) * f);
+            gun.shaderRGBA[2] = 255 * (colorSkyBlue[2] + (1 - colorSkyBlue[2]) * f);
             gun.shaderRGBA[3] = 255;
         }
         else {
@@ -1294,7 +1305,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	}
 
 	// add the flash
-	if ( ( weaponNum == WP_LIGHTNING || weaponNum == WP_GAUNTLET || weaponNum == WP_GRAPPLING_HOOK )
+	if ( ( weaponNum == WP_LIGHTNING || weaponNum == WP_GAUNTLET )
 		&& ( nonPredictedCent->currentState.eFlags & EF_FIRING ) ) 
 	{
 		// continuous flash

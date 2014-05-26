@@ -1851,9 +1851,6 @@ static void PM_Weapon( void ) {
         addTime = cpm_RGchange; // CPM
         pm->ps->stats[STAT_RAILTIME] = 1500; // CPM
 		break;
-	case WP_GRAPPLING_HOOK:
-		addTime = 400;
-		break;
 	}
 
 	if ( pm->ps->powerups[PW_HASTE] ) {
@@ -2028,6 +2025,14 @@ void PmoveSingle (pmove_t *pmove) {
 	} else {
 		pm->ps->eFlags &= ~EF_FIRING;
 	}
+
+    // set the firing flag for continuous beam weapons
+    if (!(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && (pm->cmd.buttons & BUTTON_AFFIRMATIVE)) {
+        pm->ps->eFlags |= EF_GRAPPLE;
+    }
+    else {
+        pm->ps->eFlags &= ~EF_GRAPPLE;
+    }
 
 	// clear the respawned flag if attack and use are cleared
 	if ( pm->ps->stats[STAT_HEALTH] > 0 && 

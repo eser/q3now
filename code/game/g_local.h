@@ -315,6 +315,8 @@ struct gclient_s {
 #endif
 
 	char		*areabits;
+
+    qboolean	hookhasbeenfired;
 };
 
 
@@ -741,6 +743,8 @@ extern	vmCvar_t	g_enableBreath;
 extern	vmCvar_t	g_singlePlayer;
 extern	vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
 extern	vmCvar_t	g_pro_physics;  // CPM: The CPM physics
+extern  vmCvar_t	g_grapple;
+
 
 void	trap_Print( const char *text );
 void	trap_Error( const char *text ) __attribute__((noreturn));
