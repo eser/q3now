@@ -940,6 +940,12 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 		vec3_t angle;
 		int i;
 
+// eser - true lightning
+        // might as well fix up true lightning while we're at it
+        vec3_t viewangles;
+        VectorCopy(cg.predictedPlayerState.viewangles, viewangles);
+// eser - true lightning
+
 		for (i = 0; i < 3; i++) {
 			float a = cent->lerpAngles[i] - cg.refdefViewAngles[i];
 			if (a > 180) {
@@ -976,6 +982,12 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 
 	VectorMA( muzzlePoint, 14, forward, muzzlePoint );
 
+// eser - lightning discharge
+    if (trap_CM_PointContents(muzzlePoint, 0) & MASK_WATER) {
+        return;
+    }
+// eser - lightning discharge
+
 	// project forward by the lightning range
 	VectorMA( muzzlePoint, LIGHTNING_RANGE, forward, endPoint );
 
@@ -994,6 +1006,8 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	beam.customShader = cgs.media.lightningShader;
 	trap_R_AddRefEntityToScene( &beam );
 
+// eser - true lightning
+    /*
 	// add the impact flare if it hit something
 	if ( trace.fraction < 1.0 ) {
 		vec3_t	angles;
@@ -1014,6 +1028,8 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 		AnglesToAxis( angles, beam.axis );
 		trap_R_AddRefEntityToScene( &beam );
 	}
+    */
+// eser - true lightning
 }
 /*
 

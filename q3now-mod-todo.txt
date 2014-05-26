@@ -22,11 +22,9 @@
 * only quad explosions+gauntlet gibs players, only explosions+gauntlet gibs corpses.
 * g_selfdamage.integer
 * weapon knockbacks and kicks
-* lightning gun discharge
 * new plasma gun effects
 * kamikaze effects
 * STAT_DEAD_YAW -> client side handling
-* purple plasmagun
 * cyan railgun
 * no personal colors
 * revamp kamikaze

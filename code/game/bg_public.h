@@ -429,6 +429,9 @@ typedef enum {
 	EV_RAILTRAIL,
 	EV_SHOTGUN,
 	EV_BULLET,				// otherEntity is the shooter
+// eser - lightning discharge
+    EV_LIGHTNING_DISCHARGE,
+// eser - lightning discharge
 
 	EV_PAIN,
 	EV_DEATH1,
@@ -594,6 +597,9 @@ typedef enum {
 	MOD_PLASMA,
 	MOD_RAILGUN,
 	MOD_LIGHTNING,
+// eser - lightning discharge
+    MOD_LIGHTNING_DISCHARGE,
+// eser - lightning discharge
 	MOD_WATER,
 	MOD_SLIME,
 	MOD_LAVA,

@@ -294,6 +294,9 @@ char	*modNames[] = {
 	"MOD_PLASMA",
 	"MOD_RAILGUN",
 	"MOD_LIGHTNING",
+// eser - lightning discharge
+    "MOD_LIGHTNING_DISCHARGE",
+// eser - lightning discharge
 	"MOD_WATER",
 	"MOD_SLIME",
 	"MOD_LAVA",
@@ -1184,7 +1187,7 @@ G_RadiusDamage
 ============
 */
 qboolean G_RadiusDamage ( vec3_t origin, gentity_t *attacker, float damage, float radius,
-					 gentity_t *ignore, int mod) {
+    gentity_t *ignore, int mod, qboolean underWater) {
 	float		points, dist;
 	gentity_t	*ent;
 	int			entityList[MAX_GENTITIES];
@@ -1194,6 +1197,13 @@ qboolean G_RadiusDamage ( vec3_t origin, gentity_t *attacker, float damage, floa
 	vec3_t		dir;
 	int			i, e;
 	qboolean	hitClient = qfalse;
+
+// eser - lightning discharge
+    // if we're not underwater, forget it!
+    if (underWater && !(trap_PointContents(origin, -1) & MASK_WATER)) {
+        return qfalse;
+    }
+// eser - lightning discharge
 
 	if ( radius < 1 ) {
 		radius = 1;
