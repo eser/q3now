@@ -9,7 +9,6 @@
 * flight -> flight
 * team arena hit sounds
 * team arena bullet surface sounds
-* spiral railgun trail
 * pro mode item pickup range
 * machinegun drop
 * mod ffa -> deathmatch
@@ -22,10 +21,8 @@
 * only quad explosions+gauntlet gibs players, only explosions+gauntlet gibs corpses.
 * g_selfdamage.integer
 * weapon knockbacks and kicks
-* new plasma gun effects
 * kamikaze effects
 * STAT_DEAD_YAW -> client side handling
-* cyan railgun
 * no personal colors
 * revamp kamikaze
 * falling damage * distance
