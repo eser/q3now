@@ -37,10 +37,6 @@ static void CG_MachineGunEjectBrass( centity_t *cent ) {
 	float			waterScale = 1.0f;
 	vec3_t			v[3];
 
-	if ( cg_brassTime.integer <= 0 ) {
-		return;
-	}
-
 	le = CG_AllocLocalEntity();
 	re = &le->refEntity;
 
@@ -50,7 +46,7 @@ static void CG_MachineGunEjectBrass( centity_t *cent ) {
 
 	le->leType = LE_FRAGMENT;
 	le->startTime = cg.time;
-	le->endTime = le->startTime + cg_brassTime.integer + ( cg_brassTime.integer / 4 ) * random();
+    le->endTime = le->startTime + BRASS_TIME + (BRASS_TIME / 4) * random();
 
 	le->pos.trType = TR_GRAVITY;
 	le->pos.trTime = cg.time - (rand()&15);
@@ -109,10 +105,6 @@ static void CG_ShotgunEjectBrass( centity_t *cent ) {
 	vec3_t			v[3];
 	int				i;
 
-	if ( cg_brassTime.integer <= 0 ) {
-		return;
-	}
-
 	for ( i = 0; i < 2; i++ ) {
 		float	waterScale = 1.0f;
 
@@ -129,7 +121,7 @@ static void CG_ShotgunEjectBrass( centity_t *cent ) {
 
 		le->leType = LE_FRAGMENT;
 		le->startTime = cg.time;
-		le->endTime = le->startTime + cg_brassTime.integer*3 + cg_brassTime.integer * random();
+        le->endTime = le->startTime + BRASS_TIME * 3 + BRASS_TIME * random();
 
 		le->pos.trType = TR_GRAVITY;
 		le->pos.trTime = cg.time;
@@ -232,7 +224,7 @@ void CG_RailTrail (clientInfo_t *ci, vec3_t start, vec3_t end) {
  
 	le->leType = LE_FADE_RGB;
 	le->startTime = cg.time;
-	le->endTime = cg.time + cg_railTrailTime.value;
+	le->endTime = cg.time + RAIL_TRAILTIME;
 	le->lifeRate = 1.0 / (le->endTime - le->startTime);
  
 	re->shaderTime = cg.time / 1000.0f;
@@ -242,26 +234,18 @@ void CG_RailTrail (clientInfo_t *ci, vec3_t start, vec3_t end) {
 	VectorCopy(start, re->origin);
 	VectorCopy(end, re->oldorigin);
  
-	re->shaderRGBA[0] = ci->color1[0] * 255;
-	re->shaderRGBA[1] = ci->color1[1] * 255;
-	re->shaderRGBA[2] = ci->color1[2] * 255;
+	re->shaderRGBA[0] = colorIndigo[0] * 255;
+	re->shaderRGBA[1] = colorIndigo[1] * 255;
+	re->shaderRGBA[2] = colorIndigo[2] * 255;
 	re->shaderRGBA[3] = 255;
 
-	le->color[0] = ci->color1[0] * 0.75;
-	le->color[1] = ci->color1[1] * 0.75;
-	le->color[2] = ci->color1[2] * 0.75;
+	le->color[0] = colorIndigo[0] * 0.75;
+	le->color[1] = colorIndigo[1] * 0.75;
+	le->color[2] = colorIndigo[2] * 0.75;
 	le->color[3] = 1.0f;
 
 	AxisClear( re->axis );
  
-	if (cg_oldRail.integer)
-	{
-		// nudge down a bit so it isn't exactly in center
-		re->origin[2] -= 8;
-		re->oldorigin[2] -= 8;
-		return;
-	}
-
 	VectorCopy (start, move);
 	VectorSubtract (end, start, vec);
 	len = VectorNormalize (vec);
@@ -287,7 +271,7 @@ void CG_RailTrail (clientInfo_t *ci, vec3_t start, vec3_t end) {
 			le->leFlags = LEF_PUFF_DONT_SCALE;
 			le->leType = LE_MOVE_SCALE_FADE;
 			le->startTime = cg.time;
-			le->endTime = cg.time + (i>>1) + 600;
+			le->endTime = cg.time + (i>>1) + 500;
 			le->lifeRate = 1.0 / (le->endTime - le->startTime);
 
 			re->shaderTime = cg.time / 1000.0f;
@@ -295,14 +279,14 @@ void CG_RailTrail (clientInfo_t *ci, vec3_t start, vec3_t end) {
 			re->radius = 1.1f;
 			re->customShader = cgs.media.railRingsShader;
 
-			re->shaderRGBA[0] = ci->color2[0] * 255;
-			re->shaderRGBA[1] = ci->color2[1] * 255;
-			re->shaderRGBA[2] = ci->color2[2] * 255;
+			re->shaderRGBA[0] = colorSkyBlue[0] * 255;
+			re->shaderRGBA[1] = colorSkyBlue[1] * 255;
+			re->shaderRGBA[2] = colorSkyBlue[2] * 255;
 			re->shaderRGBA[3] = 255;
 
-			le->color[0] = ci->color2[0] * 0.75;
-			le->color[1] = ci->color2[1] * 0.75;
-			le->color[2] = ci->color2[2] * 0.75;
+			le->color[0] = colorSkyBlue[0] * 0.75;
+			le->color[1] = colorSkyBlue[1] * 0.75;
+			le->color[2] = colorSkyBlue[2] * 0.75;
 			le->color[3] = 1.0f;
 
 			le->pos.trType = TR_LINEAR;
@@ -319,7 +303,7 @@ void CG_RailTrail (clientInfo_t *ci, vec3_t start, vec3_t end) {
 
 		VectorAdd (move, vec, move);
 
-		j = (j + ROTATION) % 36;
+        j = j + ROTATION < 36 ? j + ROTATION : (j + ROTATION) % 36;
 	}
 }
 
@@ -474,7 +458,7 @@ static void CG_PlasmaTrail( centity_t *cent, const weaponInfo_t *wi ) {
 
 	float	waterScale = 1.0f;
 
-	if ( cg_noProjectileTrail.integer || cg_oldPlasma.integer ) {
+	if ( cg_noProjectileTrail.integer ) {
 		return;
 	}
 
@@ -749,7 +733,7 @@ void CG_RegisterWeapon( int weaponNum ) {
 		break;
 
 	case WP_PLASMAGUN:
-		weaponInfo->missileTrailFunc = CG_PlasmaTrail;
+		// weaponInfo->missileTrailFunc = CG_PlasmaTrail;
         MAKERGB(weaponInfo->flashDlightColor, 1.0f, 0.6f, 1.0f);
         weaponInfo->readySound = trap_S_RegisterSound("sound/weapons/bfg/bfg_hum.wav", qfalse);
         weaponInfo->flashSound[0] = trap_S_RegisterSound("sound/weapons/bfg/bfg_fire.wav", qfalse);
@@ -936,14 +920,15 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	memset( &beam, 0, sizeof( beam ) );
 
 	// CPMA  "true" lightning
-	if ((cent->currentState.number == cg.predictedPlayerState.clientNum) && (cg_trueLightning.value != 0)) {
+	if (cent->currentState.number == cg.predictedPlayerState.clientNum) {
 		vec3_t angle;
 		int i;
 
 // eser - true lightning
         // might as well fix up true lightning while we're at it
         vec3_t viewangles;
-        VectorCopy(cg.predictedPlayerState.viewangles, viewangles);
+        AngleVectors(cg.predictedPlayerState.viewangles, forward, NULL, NULL);
+        VectorCopy(cg.predictedPlayerState.origin, muzzlePoint);
 // eser - true lightning
 
 		for (i = 0; i < 3; i++) {
@@ -955,7 +940,7 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 				a += 360;
 			}
 
-			angle[i] = cg.refdefViewAngles[i] + a * (1.0 - cg_trueLightning.value);
+			angle[i] = cg.refdefViewAngles[i] + a;
 			if (angle[i] < 0) {
 				angle[i] += 360;
 			}
@@ -964,9 +949,11 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 			}
 		}
 
-		AngleVectors(angle, forward, NULL, NULL );
-		VectorCopy(cent->lerpOrigin, muzzlePoint );
+//		AngleVectors(angle, forward, NULL, NULL );
+//		VectorCopy(cent->lerpOrigin, muzzlePoint );
 //		VectorCopy(cg.refdef.vieworg, muzzlePoint );
+        // *this* is the correct origin for true lightning
+        VectorCopy(cg.predictedPlayerState.origin, muzzlePoint);
 	} else {
 		// !CPMA
 		AngleVectors( cent->lerpAngles, forward, NULL, NULL );
@@ -1006,8 +993,6 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	beam.customShader = cgs.media.lightningShader;
 	trap_R_AddRefEntityToScene( &beam );
 
-// eser - true lightning
-    /*
 	// add the impact flare if it hit something
 	if ( trace.fraction < 1.0 ) {
 		vec3_t	angles;
@@ -1028,8 +1013,6 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 		AnglesToAxis( angles, beam.axis );
 		trap_R_AddRefEntityToScene( &beam );
 	}
-    */
-// eser - true lightning
 }
 /*
 
@@ -1095,6 +1078,27 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 }
 */
 
+/*
+===============
+CG_SpawnRailTrail
+
+Origin will be the exact tag point, which is slightly
+different than the muzzle point used for determining hits.
+===============
+*/
+static void CG_SpawnRailTrail(centity_t *cent, vec3_t origin) {
+    clientInfo_t	*ci;
+
+    if (cent->currentState.weapon != WP_RAILGUN) {
+        return;
+    }
+    if (!cent->pe.railgunFlash) {
+        return;
+    }
+    cent->pe.railgunFlash = qtrue;
+    ci = &cgs.clientinfo[cent->currentState.clientNum];
+    CG_RailTrail(ci, origin, cent->pe.railgunImpact);
+}
 
 /*
 ======================
@@ -1173,8 +1177,10 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	weaponInfo_t	*weapon;
 	centity_t	*nonPredictedCent;
 	orientation_t	lerped;
+    clientInfo_t    *ci;
 
 	weaponNum = cent->currentState.weapon;
+    ci = &cgs.clientinfo[cent->currentState.clientNum];
 
 	CG_RegisterWeapon( weaponNum );
 	weapon = &cg_weapons[weaponNum];
@@ -1186,18 +1192,28 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	gun.renderfx = parent->renderfx;
 
 	// set custom shading for railgun refire rate
-	if( weaponNum == WP_RAILGUN ) {
-		clientInfo_t *ci = &cgs.clientinfo[cent->currentState.clientNum];
-		if( cent->pe.railFireTime + 1500 > cg.time ) {
-			int scale = 255 * ( cg.time - cent->pe.railFireTime ) / 1500;
-			gun.shaderRGBA[0] = ( ci->c1RGBA[0] * scale ) >> 8;
-			gun.shaderRGBA[1] = ( ci->c1RGBA[1] * scale ) >> 8;
-			gun.shaderRGBA[2] = ( ci->c1RGBA[2] * scale ) >> 8;
-			gun.shaderRGBA[3] = 255;
-		}
-		else {
-			Byte4Copy( ci->c1RGBA, gun.shaderRGBA );
-		}
+    if (ps) {
+        if (cg.predictedPlayerState.weapon == WP_RAILGUN) {
+            float	f;
+
+            if (cg.predictedPlayerState.weaponstate == WEAPON_FIRING) {
+                f = (float)cg.predictedPlayerState.weaponTime / cpm_RGchange;
+            }
+            else {
+                f = 0.0;
+            }
+
+            gun.shaderRGBA[0] = 255 * (colorSkyBlue[0] + (1 - colorSkyBlue[0]) * f); // 255 * (colorSkyBlue[0] * (1.0f - f));
+            gun.shaderRGBA[1] = 255 * (colorSkyBlue[1] + (1 - colorSkyBlue[1]) * f);
+            gun.shaderRGBA[2] = 255 * (colorSkyBlue[2] + (1 - colorSkyBlue[2]) * f);
+            gun.shaderRGBA[3] = 255;
+        }
+        else {
+            gun.shaderRGBA[0] = 255;
+            gun.shaderRGBA[1] = 255;
+            gun.shaderRGBA[2] = 255;
+            gun.shaderRGBA[3] = 255;
+        }
 	}
 
 	gun.hModel = weapon->weaponModel;
@@ -1215,6 +1231,19 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		} else if ( weapon->readySound ) {
 			trap_S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, weapon->readySound );
 		}
+
+        if (weaponNum == WP_RAILGUN) {
+            gun.shaderRGBA[0] = 255 * colorSkyBlue[0];
+            gun.shaderRGBA[1] = 255 * colorSkyBlue[1];
+            gun.shaderRGBA[2] = 255 * colorSkyBlue[2];
+            gun.shaderRGBA[3] = 255;
+        }
+        else {
+            gun.shaderRGBA[0] = 255;
+            gun.shaderRGBA[1] = 255;
+            gun.shaderRGBA[2] = 255;
+            gun.shaderRGBA[3] = 255;
+        }
 	}
 
 	trap_R_LerpTag(&lerped, parent->hModel, parent->oldframe, parent->frame,
@@ -1271,7 +1300,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		// continuous flash
 	} else {
 		// impulse flash
-		if ( cg.time - cent->muzzleFlashTime > MUZZLE_FLASH_TIME ) {
+        if (cg.time - cent->muzzleFlashTime > MUZZLE_FLASH_TIME && !cent->pe.railgunFlash) {
 			return;
 		}
 	}
@@ -1295,9 +1324,9 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		clientInfo_t	*ci;
 
 		ci = &cgs.clientinfo[ cent->currentState.clientNum ];
-		flash.shaderRGBA[0] = 255 * ci->color1[0];
-		flash.shaderRGBA[1] = 255 * ci->color1[1];
-		flash.shaderRGBA[2] = 255 * ci->color1[2];
+        flash.shaderRGBA[0] = 255 * colorSkyBlue[0];
+        flash.shaderRGBA[1] = 255 * colorSkyBlue[1];
+        flash.shaderRGBA[2] = 255 * colorSkyBlue[2];
 	}
 
 	CG_PositionRotatedEntityOnTag( &flash, &gun, weapon->weaponModel, "tag_flash");
@@ -1307,6 +1336,9 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		cent->currentState.number != cg.predictedPlayerState.clientNum ) {
 		// add lightning bolt
 		CG_LightningBolt( nonPredictedCent, flash.origin );
+
+		// add rail trail
+		CG_SpawnRailTrail( cent, flash.origin );
 
 		if ( weapon->flashDlightColor[0] || weapon->flashDlightColor[1] || weapon->flashDlightColor[2] ) {
 			trap_R_AddLightToScene( flash.origin, 300 + (rand()&31), weapon->flashDlightColor[0],
@@ -1694,7 +1726,7 @@ void CG_FireWeapon( centity_t *cent ) {
 	}
 
 	// do brass ejection
-	if ( weap->ejectBrassFunc && cg_brassTime.integer > 0 ) {
+	if ( weap->ejectBrassFunc ) {
 		weap->ejectBrassFunc( cent );
 	}
 }
@@ -1859,14 +1891,14 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 	//
 	alphaFade = (mark == cgs.media.energyMarkShader);	// plasma fades alpha, all others fade color
 	if ( weapon == WP_RAILGUN ) {
-		float	*color;
-
-		// colorize with client color
-		color = cgs.clientinfo[clientNum].color1;
-		CG_ImpactMark( mark, origin, dir, random()*360, color[0],color[1], color[2],1, alphaFade, radius, qfalse );
+        CG_ImpactMark(mark, origin, dir, random() * 360, colorSkyBlue[0], colorSkyBlue[1], colorSkyBlue[2], 1, alphaFade, radius, qfalse);
 	} else {
 		CG_ImpactMark( mark, origin, dir, random()*360, 1,1,1,1, alphaFade, radius, qfalse );
 	}
+
+// eser - explosions
+    CG_ExplosionParticles(weapon, origin);
+// eser - explosions
 }
 
 
@@ -1891,6 +1923,95 @@ void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum )
 	}
 }
 
+// eser - explosions
+/*
+=================
+CG_ExplosionParticles
+=================
+*/
+void CG_ExplosionParticles(int weapon, vec3_t origin) {
+    int number; // number of particles 
+    int jump; // amount to nudge the particles trajectory vector up by 
+    int speed; // speed of particles 
+    int light; // amount of light for each particle 
+    vec4_t lColor; // color of light for each particle 
+    qhandle_t shader; // shader to use for the particles 
+    int index;
+    vec3_t randVec, tempVec;
+
+    // set defaults 
+    number = 32;
+    jump = 50;
+    speed = 300;
+    light = 50;
+    lColor[0] = 1.0f;
+    lColor[1] = 1.0f;
+    lColor[2] = 1.0f;
+    lColor[3] = 1.0f; // alpha 
+
+    switch (weapon) {
+    case WP_ROCKET_LAUNCHER:
+        number = 128;
+        jump = 70;
+        light = 100;
+        lColor[0] = 1.0f;
+        lColor[1] = 0.56f;
+        lColor[2] = 0.0f;
+        shader = cgs.media.sparkShader;
+        break;
+
+    case WP_GRENADE_LAUNCHER:
+        number = 64;
+        jump = 60;
+        light = 100;
+        lColor[0] = 1.0f;
+        lColor[1] = 0.56f;
+        lColor[2] = 0.0f;
+        shader = cgs.media.sparkShader;
+        break;
+
+    default:
+        return;
+    }
+
+    for (index = 0; index < number; index++) {
+        localEntity_t *le;
+        refEntity_t *re;
+
+        le = CG_AllocLocalEntity(); //allocate a local entity
+        re = &le->refEntity;
+        le->leFlags = LEF_PUFF_DONT_SCALE; //don't change the particle size 
+        le->leType = LE_MOVE_SCALE_FADE; // particle should fade over time
+        le->startTime = cg.time; // set the start time of the particle to the current time
+        le->endTime = cg.time + 3000 + random() * 250; //set the end time
+        le->lifeRate = 1.0 / (le->endTime - le->startTime);
+        re = &le->refEntity;
+        re->shaderTime = cg.time / 1000.0f;
+        re->reType = RT_SPRITE;
+        re->rotation = 0;
+        re->radius = 3;
+        re->customShader = shader;
+        re->shaderRGBA[0] = 0xff;
+        re->shaderRGBA[1] = 0xff;
+        re->shaderRGBA[2] = 0xff;
+        re->shaderRGBA[3] = 0xff;
+        le->light = light;
+        VectorCopy(lColor, le->lightColor);
+        le->color[3] = 1.0;
+        le->pos.trType = TR_GRAVITY; // moves in a gravity affected arc 
+        le->pos.trTime = cg.time;
+        VectorCopy(origin, le->pos.trBase);
+
+        tempVec[0] = crandom(); //between 1 and -1 
+        tempVec[1] = crandom();
+        tempVec[2] = crandom();
+        VectorNormalize(tempVec);
+        VectorScale(tempVec, speed, randVec);
+        randVec[2] += jump; //nudge the particles up a bit 
+        VectorCopy(randVec, le->pos.trDelta);
+    }
+}
+// eser - explosions
 
 
 /*

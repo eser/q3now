@@ -302,8 +302,10 @@ static void CG_Item( centity_t *cent ) {
 	}
 	
 	if( item->giType == IT_WEAPON && item->giTag == WP_RAILGUN ) {
-		clientInfo_t *ci = &cgs.clientinfo[cg.snap->ps.clientNum];
-		Byte4Copy( ci->c1RGBA, ent.shaderRGBA );
+        ent.shaderRGBA[0] = colorSkyBlue[0] * 255;
+        ent.shaderRGBA[1] = colorSkyBlue[1] * 255;
+        ent.shaderRGBA[2] = colorSkyBlue[2] * 255;
+        ent.shaderRGBA[3] = 255;
 	}
 
 	// ent.hModel = cg_items[es->modelindex].models[0];
