@@ -370,7 +370,11 @@ static void CG_TouchTriggerPrediction( void ) {
 		if ( ent->eType == ET_TELEPORT_TRIGGER ) {
 			cg.hyperspace = qtrue;
 		} else if ( ent->eType == ET_PUSH_TRIGGER ) {
-			BG_TouchJumpPad( &cg.predictedPlayerState, ent );
+            if (cg.predictedPlayerEntity.pe.grappleFiring) {
+                continue;
+            }
+            
+            BG_TouchJumpPad(&cg.predictedPlayerState, ent);
 		}
 	}
 

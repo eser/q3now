@@ -300,9 +300,15 @@ void G_RunMissile( gentity_t *ent ) {
 		// never explode or bounce on sky
 		if ( tr.surfaceFlags & SURF_NOIMPACT ) {
 			// If grapple, reset owner
-			if (ent->parent && ent->parent->client && ent->parent->client->hook == ent) {
-				ent->parent->client->hook = NULL;
-			}
+            if (ent->parent && ent->parent->client && ent->parent->client->hook == ent)
+            {
+                ent->parent->client->hook = NULL;
+                if (g_grapple.integer) {
+                    ent->parent->client->hookhasbeenfired = qfalse;
+                    ent->parent->client->fireHeld = qfalse;
+                }
+            }
+
 			G_FreeEntity( ent );
 			return;
 		}
@@ -471,18 +477,18 @@ gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir) {
 	hook->think = Weapon_HookFree;
 	hook->s.eType = ET_MISSILE;
 	hook->r.svFlags = SVF_USE_CURRENT_ORIGIN;
-	hook->s.weapon = WP_GRAPPLING_HOOK;
+	hook->s.weapon = WP_NONE;
 	hook->r.ownerNum = self->s.number;
 	hook->methodOfDeath = MOD_GRAPPLE;
 	hook->clipmask = MASK_SHOT;
 	hook->parent = self;
 	hook->target_ent = NULL;
 
-	hook->s.pos.trType = TR_LINEAR;
+	hook->s.pos.trType = TR_GRAVITY_DOUBLE;
 	hook->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
 	hook->s.otherEntityNum = self->s.number; // use to match beam in client
 	VectorCopy( start, hook->s.pos.trBase );
-	VectorScale( dir, 800, hook->s.pos.trDelta );
+	VectorScale( dir, 1800, hook->s.pos.trDelta );
 	SnapVector( hook->s.pos.trDelta );			// save net bandwidth
 	VectorCopy (start, hook->r.currentOrigin);
 
