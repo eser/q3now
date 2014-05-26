@@ -1057,12 +1057,6 @@ qboolean CG_OwnerDrawVisible(int flags) {
 		}
 	}
 
-	if (flags & CG_SHOW_SINGLEPLAYER) {
-		if( cgs.gametype == GT_SINGLE_PLAYER ) {
-			return qtrue;
-		}
-	}
-
 	if (flags & CG_SHOW_TOURNAMENT) {
 		if( cgs.gametype == GT_TOURNAMENT ) {
 			return qtrue;

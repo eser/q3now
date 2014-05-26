@@ -1,3 +1,4 @@
+TODO:
 * shotgun pellets in pattern
 * unlagged
 * spectator options
@@ -16,7 +17,6 @@
 * mod clan arena
 * mod king of the hill
 * new ui library
-* mod singleplayer -> g_singlePlayer.integer
 * only quad explosions+gauntlet gibs players, only explosions+gauntlet gibs corpses.
 * g_selfdamage.integer
 * weapon knockbacks and kicks
@@ -31,3 +31,6 @@
 	- teamvote leader Laroux.PoS (cleaned name)
 	- teamvote name Aliens (renames the team)
 	- ctf and 1fctf supports two teams only (reject on switching to new team)
+
+KNOWN ISSUES:
+* single player mod doesn't kick bots on next game
