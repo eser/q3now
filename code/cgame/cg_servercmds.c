@@ -483,15 +483,12 @@ static void CG_MapRestart( void ) {
 		trap_S_StartLocalSound( cgs.media.countFightSound, CHAN_ANNOUNCER );
 		CG_CenterPrint( "FIGHT!", 120, GIANTCHAR_WIDTH*2 );
 	}
-#ifdef MISSIONPACK
-	if (cg_singlePlayerActive.integer) {
+
+    if (cg_singlePlayer.integer) {
 		trap_Cvar_Set("ui_matchStartTime", va("%i", cg.time));
-		if (cg_recordSPDemo.integer && cg_recordSPDemoName.string && *cg_recordSPDemoName.string) {
-			trap_SendConsoleCommand(va("set g_synchronousclients 1 ; record %s \n", cg_recordSPDemoName.string));
-		}
 	}
-#endif
-	trap_Cvar_Set("cg_thirdPerson", "0");
+
+    trap_Cvar_Set("cg_thirdPerson", "0");
 }
 
 #ifdef MISSIONPACK

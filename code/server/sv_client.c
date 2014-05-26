@@ -63,7 +63,7 @@ void SV_GetChallenge(netadr_t from)
 	qboolean gameMismatch;
 
 	// ignore if we are in single player
-	if ( Cvar_VariableValue( "g_gametype" ) == GT_SINGLE_PLAYER || Cvar_VariableValue("ui_singlePlayerActive")) {
+	if ( Cvar_VariableValue( "g_singlePlayer" ) ) {
 		return;
 	}
 

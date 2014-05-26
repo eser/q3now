@@ -109,7 +109,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 typedef enum {
 	GT_FFA,				// free for all
 	GT_TOURNAMENT,		// one on one tournament
-	GT_SINGLE_PLAYER,	// single player ffa
 
 	//-- team games go after this --
 
@@ -140,8 +139,7 @@ typedef enum {
 	PM_SPECTATOR,	// still run into walls
 	PM_DEAD,		// no acceleration or turning, but free falling
 	PM_FREEZE,		// stuck in place with no control
-	PM_INTERMISSION,	// no movement or status bar
-	PM_SPINTERMISSION	// no movement or status bar
+	PM_INTERMISSION
 } pmtype_t;
 
 typedef enum {

@@ -133,11 +133,6 @@ static int GametypeBits( char *string ) {
 			continue;
 		}
 
-		if( Q_stricmp( token, "single" ) == 0 ) {
-			bits |= 1 << GT_SINGLE_PLAYER;
-			continue;
-		}
-
 		if( Q_stricmp( token, "team" ) == 0 ) {
 			bits |= 1 << GT_TEAM;
 			continue;
@@ -259,9 +254,6 @@ static void StartServer_GametypeEvent( void* ptr, int event ) {
 	count = UI_GetNumArenas();
 	s_startserver.nummaps = 0;
 	matchbits = 1 << gametype_remap[s_startserver.gametype.curvalue];
-	if( gametype_remap[s_startserver.gametype.curvalue] == GT_FFA ) {
-		matchbits |= ( 1 << GT_SINGLE_PLAYER );
-	}
 	for( i = 0; i < count; i++ ) {
 		info = UI_GetArenaInfoByNumber( i );
 	

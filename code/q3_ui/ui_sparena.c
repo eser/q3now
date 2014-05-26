@@ -46,5 +46,9 @@ void UI_SPArena_Start( const char *arenaInfo ) {
 	trap_Cvar_SetValue( "ui_spSelection", level );
 
 	map = Info_ValueForKey( arenaInfo, "map" );
-	trap_Cmd_ExecuteText( EXEC_APPEND, va( "spmap %s\n", map ) );
+
+    trap_Cvar_SetValue("g_singlePlayer", 1);
+    trap_Cvar_SetValue("g_gametype", 0);
+
+	trap_Cmd_ExecuteText( EXEC_APPEND, va( "map %s\n", map ) );
 }

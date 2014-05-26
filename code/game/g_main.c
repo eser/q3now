@@ -68,8 +68,6 @@ vmCvar_t	g_restarted;
 vmCvar_t	g_logfile;
 vmCvar_t	g_logfileSync;
 vmCvar_t	g_blood;
-vmCvar_t	g_podiumDist;
-vmCvar_t	g_podiumDrop;
 vmCvar_t	g_allowVote;
 vmCvar_t	g_teamAutoJoin;
 vmCvar_t	g_teamForceBalance;
@@ -88,7 +86,6 @@ vmCvar_t	g_obeliskRespawnDelay;
 vmCvar_t	g_cubeTimeout;
 vmCvar_t	g_redteam;
 vmCvar_t	g_blueteam;
-vmCvar_t	g_singlePlayer;
 vmCvar_t	g_enableDust;
 vmCvar_t	g_enableBreath;
 #endif
@@ -96,6 +93,7 @@ vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
 vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 
 vmCvar_t	g_grapple;
+vmCvar_t	g_singlePlayer;
 
 
 static cvarTable_t		gameCvarTable[] = {
@@ -152,9 +150,6 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_motd, "g_motd", "", 0, 0, qfalse },
 	{ &g_blood, "com_blood", "1", 0, 0, qfalse },
 
-	{ &g_podiumDist, "g_podiumDist", "80", 0, 0, qfalse },
-	{ &g_podiumDrop, "g_podiumDrop", "70", 0, 0, qfalse },
-
 	{ &g_allowVote, "g_allowVote", "1", CVAR_ARCHIVE, 0, qfalse },
 	{ &g_listEntity, "g_listEntity", "0", 0, 0, qfalse },
 
@@ -167,7 +162,6 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_cubeTimeout, "g_cubeTimeout", "30", 0, 0, qfalse },
 	{ &g_redteam, "g_redteam", "Stroggs", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO , 0, qtrue, qtrue },
 	{ &g_blueteam, "g_blueteam", "Pagans", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO , 0, qtrue, qtrue  },
-	{ &g_singlePlayer, "ui_singlePlayerActive", "", 0, 0, qfalse, qfalse  },
 
 	{ &g_enableDust, "g_enableDust", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
 	{ &g_enableBreath, "g_enableBreath", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
@@ -178,10 +172,12 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
 
-    { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO, 0, qtrue },       // CPM: The CPM gameplay
-    { &g_pro_physics, "g_pro_physics", "1", CVAR_SERVERINFO, 0, qtrue }, // CPM: The CPM physics
+    { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },       // CPM: The CPM gameplay
+    { &g_pro_physics, "g_pro_physics", "1", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue }, // CPM: The CPM physics
 
-    { &g_grapple, "g_grapple", "0", 0, 0, qtrue }
+    { &g_grapple, "g_grapple", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+
+    { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse }
 };
 
 static int gameCvarTableSize = ARRAY_LEN( gameCvarTable );
@@ -462,7 +458,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	level.snd_fry = G_SoundIndex("sound/player/fry.wav");	// FIXME standing in lava / slime
 
-	if ( g_gametype.integer != GT_SINGLE_PLAYER && g_logfile.string[0] ) {
+	if ( g_logfile.string[0] ) {
 		if ( g_logfileSync.integer ) {
 			trap_FS_FOpenFile( g_logfile.string, &level.logFile, FS_APPEND_SYNC );
 		} else {
@@ -530,10 +526,6 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	SaveRegisteredItems();
 
 	G_Printf ("-----------------------------------\n");
-
-	if( g_gametype.integer == GT_SINGLE_PLAYER || trap_Cvar_VariableIntegerValue( "com_buildScript" ) ) {
-		G_ModelIndex( SP_PODIUM_MODEL );
-	}
 
 	if ( trap_Cvar_VariableIntegerValue( "bot_enable" ) ) {
 		BotAISetup( restart );
@@ -895,7 +887,7 @@ void CalculateRanks( void ) {
 				level.clients[ level.sortedClients[i] ].ps.persistant[PERS_RANK] = rank | RANK_TIED_FLAG;
 			}
 			score = newScore;
-			if ( g_gametype.integer == GT_SINGLE_PLAYER && level.numPlayingClients == 1 ) {
+			if ( g_singlePlayer.integer && level.numPlayingClients == 1 ) {
 				level.clients[ level.sortedClients[i] ].ps.persistant[PERS_RANK] = rank | RANK_TIED_FLAG;
 			}
 		}
@@ -1047,19 +1039,12 @@ void BeginIntermission( void ) {
 		}
 		MoveClientToIntermission( client );
 	}
-#ifdef MISSIONPACK
-	if (g_singlePlayer.integer) {
-		trap_Cvar_Set("ui_singlePlayerActive", "0");
+
+    if (g_singlePlayer.integer) {
 		UpdateTournamentInfo();
 	}
-#else
-	// if single player game
-	if ( g_gametype.integer == GT_SINGLE_PLAYER ) {
-		UpdateTournamentInfo();
-		SpawnModelsOnVictoryPads();
-	}
-#endif
-	// send the current scoring to all clients
+
+    // send the current scoring to all clients
 	SendScoreboardMessageToAllClients();
 
 }
@@ -1179,9 +1164,7 @@ Append information about this game to the log file
 void LogExit( const char *string ) {
 	int				i, numSorted;
 	gclient_t		*cl;
-#ifdef MISSIONPACK
 	qboolean won = qtrue;
-#endif
 	G_LogPrintf( "Exit: %s\n", string );
 
 	level.intermissionQueued = level.time;
@@ -1216,24 +1199,20 @@ void LogExit( const char *string ) {
 		ping = cl->ps.ping < 999 ? cl->ps.ping : 999;
 
 		G_LogPrintf( "score: %i  ping: %i  client: %i %s\n", cl->ps.persistant[PERS_SCORE], ping, level.sortedClients[i],	cl->pers.netname );
-#ifdef MISSIONPACK
 		if (g_singlePlayer.integer && g_gametype.integer == GT_TOURNAMENT) {
 			if (g_entities[cl - level.clients].r.svFlags & SVF_BOT && cl->ps.persistant[PERS_RANK] == 0) {
 				won = qfalse;
 			}
 		}
-#endif
 
 	}
 
-#ifdef MISSIONPACK
 	if (g_singlePlayer.integer) {
 		if (g_gametype.integer >= GT_CTF) {
 			won = level.teamScores[TEAM_RED] > level.teamScores[TEAM_BLUE];
 		}
 		trap_SendConsoleCommand( EXEC_APPEND, (won) ? "spWin\n" : "spLose\n" );
 	}
-#endif
 
 
 }
@@ -1255,7 +1234,7 @@ void CheckIntermissionExit( void ) {
 	gclient_t	*cl;
 	int			readyMask;
 
-	if ( g_gametype.integer == GT_SINGLE_PLAYER ) {
+	if ( g_singlePlayer.integer ) {
 		return;
 	}
 
@@ -1371,19 +1350,13 @@ void CheckExitRules( void ) {
 	}
 
 	if ( level.intermissionQueued ) {
-#ifdef MISSIONPACK
-		int time = (g_singlePlayer.integer) ? SP_INTERMISSION_DELAY_TIME : INTERMISSION_DELAY_TIME;
-		if ( level.time - level.intermissionQueued >= time ) {
+
+        if (level.time - level.intermissionQueued >= INTERMISSION_DELAY_TIME) {
 			level.intermissionQueued = 0;
 			BeginIntermission();
 		}
-#else
-		if ( level.time - level.intermissionQueued >= INTERMISSION_DELAY_TIME ) {
-			level.intermissionQueued = 0;
-			BeginIntermission();
-		}
-#endif
-		return;
+
+        return;
 	}
 
 	// check for sudden death
@@ -1522,7 +1495,7 @@ void CheckTournament( void ) {
 			level.restarted = qtrue;
 			return;
 		}
-	} else if ( g_gametype.integer != GT_SINGLE_PLAYER && level.warmupTime != 0 ) {
+	} else if ( !g_singlePlayer.integer && level.warmupTime != 0 ) {
 		int		counts[TEAM_NUM_TEAMS];
 		qboolean	notEnough = qfalse;
 

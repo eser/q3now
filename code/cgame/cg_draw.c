@@ -2182,7 +2182,7 @@ static qboolean CG_DrawScoreboard( void ) {
 	}
 
 	// should never happen in Team Arena
-	if (cgs.gametype == GT_SINGLE_PLAYER && cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
+	if (g_singlePlayer.integer && cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
 		cg.deferredPlayerLoading = 0;
 		firstTime = qtrue;
 		return qfalse;
@@ -2238,18 +2238,13 @@ CG_DrawIntermission
 */
 static void CG_DrawIntermission( void ) {
 //	int key;
-#ifdef MISSIONPACK
-	//if (cg_singlePlayer.integer) {
-	//	CG_DrawCenterString();
-	//	return;
-	//}
-#else
-	if ( cgs.gametype == GT_SINGLE_PLAYER ) {
+
+    if ( cg_singlePlayer.integer ) {
 		CG_DrawCenterString();
 		return;
 	}
-#endif
-	cg.scoreFadeTime = cg.time;
+
+    cg.scoreFadeTime = cg.time;
 	cg.scoreBoardShowing = CG_DrawScoreboard();
 }
 

@@ -3005,7 +3005,7 @@ static void UI_StartSkirmish(qboolean next) {
 
 	k = UI_TeamIndexFromName(UI_Cvar_VariableString("ui_opponentName"));
 
-	trap_Cvar_Set("ui_singlePlayerActive", "1");
+	trap_Cvar_Set("g_singlePlayer", "1");
 
 	// set up sp overrides, will be replaced on postgame
 	temp = trap_Cvar_VariableValue( "capturelimit" );
@@ -3376,18 +3376,18 @@ static void UI_RunMenuScript(char **args) {
 		} else if (Q_stricmp(name, "JoinServer") == 0) {
 			trap_Cvar_Set("cg_thirdPerson", "0");
 			trap_Cvar_Set("cg_cameraOrbit", "0");
-			trap_Cvar_Set("ui_singlePlayerActive", "0");
+			trap_Cvar_Set("g_singlePlayer", "0");
 			if (uiInfo.serverStatus.currentServer >= 0 && uiInfo.serverStatus.currentServer < uiInfo.serverStatus.numDisplayServers) {
 				trap_LAN_GetServerAddressString(UI_SourceForLAN(), uiInfo.serverStatus.displayServers[uiInfo.serverStatus.currentServer], buff, 1024);
 				trap_Cmd_ExecuteText( EXEC_APPEND, va( "connect %s\n", buff ) );
 			}
 		} else if (Q_stricmp(name, "FoundPlayerJoinServer") == 0) {
-			trap_Cvar_Set("ui_singlePlayerActive", "0");
+			trap_Cvar_Set("g_singlePlayer", "0");
 			if (uiInfo.currentFoundPlayerServer >= 0 && uiInfo.currentFoundPlayerServer < uiInfo.numFoundPlayerServers) {
 				trap_Cmd_ExecuteText( EXEC_APPEND, va( "connect %s\n", uiInfo.foundPlayerServerAddresses[uiInfo.currentFoundPlayerServer] ) );
 			}
 		} else if (Q_stricmp(name, "Quit") == 0) {
-			trap_Cvar_Set("ui_singlePlayerActive", "0");
+			trap_Cvar_Set("g_singlePlayer", "0");
 			trap_Cmd_ExecuteText( EXEC_NOW, "quit");
 		} else if (Q_stricmp(name, "Controls") == 0) {
 		  trap_Cvar_Set( "cl_paused", "1" );
@@ -3579,9 +3579,6 @@ static int UI_MapCountByGameType(qboolean singlePlayer) {
 	int i, c, game;
 	c = 0;
 	game = singlePlayer ? uiInfo.gameTypes[ui_gameType.integer].gtEnum : uiInfo.gameTypes[ui_netGameType.integer].gtEnum;
-	if (game == GT_SINGLE_PLAYER) {
-		game++;
-	} 
 	if (game == GT_TEAM) {
 		game = GT_FFA;
 	}
@@ -3589,11 +3586,6 @@ static int UI_MapCountByGameType(qboolean singlePlayer) {
 	for (i = 0; i < uiInfo.mapCount; i++) {
 		uiInfo.mapList[i].active = qfalse;
 		if ( uiInfo.mapList[i].typeBits & (1 << game)) {
-			if (singlePlayer) {
-				if (!(uiInfo.mapList[i].typeBits & (1 << GT_SINGLE_PLAYER))) {
-					continue;
-				}
-			}
 			c++;
 			uiInfo.mapList[i].active = qtrue;
 		}
@@ -5295,11 +5287,8 @@ void _UI_SetActiveMenu( uiMenuCommand_t menu ) {
 			Menus_ActivateByName("main");
 			trap_Cvar_VariableStringBuffer("com_errorMessage", buf, sizeof(buf));
 			if (strlen(buf)) {
-				if (!ui_singlePlayerActive.integer) {
-					Menus_ActivateByName("error_popmenu");
-				} else {
-					trap_Cvar_Set("com_errorMessage", "");
-				}
+				Menus_ActivateByName("error_popmenu");
+				// trap_Cvar_Set("com_errorMessage", "");
 			}
 		  return;
 	  case UIMENU_TEAM:
@@ -5635,7 +5624,6 @@ vmCvar_t	ui_spScores2;
 vmCvar_t	ui_spScores3;
 vmCvar_t	ui_spScores4;
 vmCvar_t	ui_spScores5;
-vmCvar_t	ui_spAwards;
 vmCvar_t	ui_spVideos;
 vmCvar_t	ui_spSkill;
 
@@ -5706,7 +5694,6 @@ vmCvar_t	ui_lastServerRefresh_3;
 vmCvar_t	ui_lastServerRefresh_4;
 vmCvar_t	ui_lastServerRefresh_5;
 vmCvar_t	ui_lastServerRefresh_6;
-vmCvar_t	ui_singlePlayerActive;
 vmCvar_t	ui_scoreAccuracy;
 vmCvar_t	ui_scoreImpressives;
 vmCvar_t	ui_scoreExcellents;
@@ -5756,7 +5743,6 @@ static cvarTable_t		cvarTable[] = {
 	{ &ui_spScores3, "g_spScores3", "", CVAR_ARCHIVE },
 	{ &ui_spScores4, "g_spScores4", "", CVAR_ARCHIVE },
 	{ &ui_spScores5, "g_spScores5", "", CVAR_ARCHIVE },
-	{ &ui_spAwards, "g_spAwards", "", CVAR_ARCHIVE },
 	{ &ui_spVideos, "g_spVideos", "", CVAR_ARCHIVE },
 	{ &ui_spSkill, "g_spSkill", "2", CVAR_ARCHIVE },
 
@@ -5826,7 +5812,6 @@ static cvarTable_t		cvarTable[] = {
 	{ &ui_lastServerRefresh_4, "ui_lastServerRefresh_4", "", CVAR_ARCHIVE},
 	{ &ui_lastServerRefresh_5, "ui_lastServerRefresh_5", "", CVAR_ARCHIVE},
 	{ &ui_lastServerRefresh_6, "ui_lastServerRefresh_6", "", CVAR_ARCHIVE},
-	{ &ui_singlePlayerActive, "ui_singlePlayerActive", "0", 0},
 	{ &ui_scoreAccuracy, "ui_scoreAccuracy", "0", CVAR_ARCHIVE},
 	{ &ui_scoreImpressives, "ui_scoreImpressives", "0", CVAR_ARCHIVE},
 	{ &ui_scoreExcellents, "ui_scoreExcellents", "0", CVAR_ARCHIVE},

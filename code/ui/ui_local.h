@@ -53,7 +53,6 @@ extern vmCvar_t	ui_spScores2;
 extern vmCvar_t	ui_spScores3;
 extern vmCvar_t	ui_spScores4;
 extern vmCvar_t	ui_spScores5;
-extern vmCvar_t	ui_spAwards;
 extern vmCvar_t	ui_spVideos;
 extern vmCvar_t	ui_spSkill;
 
@@ -111,7 +110,6 @@ extern vmCvar_t	ui_lastServerRefresh_0;
 extern vmCvar_t	ui_lastServerRefresh_1;
 extern vmCvar_t	ui_lastServerRefresh_2;
 extern vmCvar_t	ui_lastServerRefresh_3;
-extern vmCvar_t	ui_singlePlayerActive;
 extern vmCvar_t	ui_scoreAccuracy;
 extern vmCvar_t	ui_scoreImpressives;
 extern vmCvar_t	ui_scoreExcellents;

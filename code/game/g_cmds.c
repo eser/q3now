@@ -421,14 +421,6 @@ void Cmd_LevelShot_f(gentity_t *ent)
 	if(!CheatsOk(ent))
 		return;
 
-	// doesn't work in single player
-	if(g_gametype.integer == GT_SINGLE_PLAYER)
-	{
-		trap_SendServerCommand(ent-g_entities,
-			"print \"Must not be in singleplayer mode for levelshot\n\"" );
-		return;
-	}
-
 	BeginIntermission();
 	trap_SendServerCommand(ent-g_entities, "clientLevelShot");
 }
@@ -1317,7 +1309,7 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 	// special case for g_gametype, check for bad values
 	if ( !Q_stricmp( arg1, "g_gametype" ) ) {
 		i = atoi( arg2 );
-		if( i == GT_SINGLE_PLAYER || i < GT_FFA || i >= GT_MAX_GAME_TYPE) {
+		if( i < GT_FFA || i >= GT_MAX_GAME_TYPE) {
 			trap_SendServerCommand( ent-g_entities, "print \"Invalid gametype.\n\"" );
 			return;
 		}

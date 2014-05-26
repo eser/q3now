@@ -32,8 +32,6 @@ SINGLE PLAYER POSTGAME MENU
 
 #define MAX_SCOREBOARD_CLIENTS		8
 
-#define AWARD_PRESENTATION_TIME		2000
-
 #define ART_MENU0		"menu/art/menu_0"
 #define ART_MENU1		"menu/art/menu_1"
 #define ART_REPLAY0		"menu/art/replay_0"
@@ -51,10 +49,6 @@ typedef struct {
 	menubitmap_s	item_next;
 	menubitmap_s	item_menu;
 
-	int				phase;
-	int				ignoreKeysTime;
-	int				starttime;
-	int				scoreboardtime;
 	int				serverId;
 
 	int				clientNums[MAX_SCOREBOARD_CLIENTS];
@@ -66,9 +60,6 @@ typedef struct {
 	int				level;
 	int				numClients;
 	int				won;
-	int				numAwards;
-	int				awardsEarned[6];
-	int				awardsLevels[6];
 	qboolean		playedSound[6];
 	int				lastTier;
 	sfxHandle_t		winnerSound;
@@ -76,24 +67,6 @@ typedef struct {
 
 static postgameMenuInfo_t	postgameMenuInfo;
 static char					arenainfo[MAX_INFO_VALUE];
-
-char	*ui_medalNames[] = {"Accuracy", "Impressive", "Excellent", "Gauntlet", "Frags", "Perfect"};
-char	*ui_medalPicNames[] = {
-	"menu/medals/medal_accuracy",
-	"menu/medals/medal_impressive",
-	"menu/medals/medal_excellent",
-	"menu/medals/medal_gauntlet",
-	"menu/medals/medal_frags",
-	"menu/medals/medal_victory"
-};
-char	*ui_medalSounds[] = {
-	"sound/feedback/accuracy.wav",
-	"sound/feedback/impressive_a.wav",
-	"sound/feedback/excellent_a.wav",
-	"sound/feedback/gauntlet.wav",
-	"sound/feedback/frags.wav",
-	"sound/feedback/perfect.wav"
-};
 
 
 /*
@@ -177,85 +150,12 @@ UI_SPPostgameMenu_MenuKey
 =================
 */
 static sfxHandle_t UI_SPPostgameMenu_MenuKey( int key ) {
-	if ( uis.realtime < postgameMenuInfo.ignoreKeysTime ) {
-		return 0;
-	}
-
-	if( postgameMenuInfo.phase == 1 ) {
-		trap_Cmd_ExecuteText( EXEC_APPEND, "abort_podium\n" );
-		postgameMenuInfo.phase = 2;
-		postgameMenuInfo.starttime = uis.realtime;
-		postgameMenuInfo.ignoreKeysTime	= uis.realtime + 250;
-		return 0;
-	}
-
-	if( postgameMenuInfo.phase == 2 ) {
-		postgameMenuInfo.phase = 3;
-		postgameMenuInfo.starttime = uis.realtime;
-		postgameMenuInfo.ignoreKeysTime	= uis.realtime + 250;
-		return 0;
-	}
-
 	if( key == K_ESCAPE || key == K_MOUSE2 ) {
 		return 0;
 	}
 
 	return Menu_DefaultKey( &postgameMenuInfo.menu, key );
 }
-
-
-static int medalLocations[6] = {144, 448, 88, 504, 32, 560};
-
-static void UI_SPPostgameMenu_DrawAwardsMedals( int max ) {
-	int		n;
-	int		medal;
-	int		amount;
-	int		x, y;
-	char	buf[16];
-
-	for( n = 0; n < max; n++ ) {
-		x = medalLocations[n];
-		y = 64;
-		medal = postgameMenuInfo.awardsEarned[n];
-		amount = postgameMenuInfo.awardsLevels[n];
-
-		UI_DrawNamedPic( x, y, 48, 48, ui_medalPicNames[medal] );
-
-		if( medal == AWARD_ACCURACY ) {
-			Com_sprintf( buf, sizeof(buf), "%i%%", amount );
-		}
-		else {
-			if( amount == 1 ) {
-				continue;
-			}
-			Com_sprintf( buf, sizeof(buf), "%i", amount );
-		}
-
-		UI_DrawString( x + 24, y + 52, buf, UI_CENTER, color_yellow );
-	}
-}
-
-
-static void UI_SPPostgameMenu_DrawAwardsPresentation( int timer ) {
-	int		awardNum;
-	int		atimer;
-	vec4_t	color;
-
-	awardNum = timer / AWARD_PRESENTATION_TIME;
-	atimer = timer % AWARD_PRESENTATION_TIME;
-
-	color[0] = color[1] = color[2] = 1.0f;
-	color[3] = (float)( AWARD_PRESENTATION_TIME - atimer ) / (float)AWARD_PRESENTATION_TIME;
-	UI_DrawProportionalString( 320, 64, ui_medalNames[postgameMenuInfo.awardsEarned[awardNum]], UI_CENTER, color );
-
-	UI_SPPostgameMenu_DrawAwardsMedals( awardNum + 1 );
-
-	if( !postgameMenuInfo.playedSound[awardNum] ) {
-		postgameMenuInfo.playedSound[awardNum] = qtrue;
-		trap_S_StartLocalSound( trap_S_RegisterSound( ui_medalSounds[postgameMenuInfo.awardsEarned[awardNum]], qfalse ), CHAN_ANNOUNCER );
-	}
-}
-
 
 /*
 =================
@@ -306,91 +206,31 @@ static void UI_SPPostgameMenu_MenuDraw( void ) {
 		return;
 	}
 
-	// phase 1
-	if ( postgameMenuInfo.numClients > 2 ) {
-		UI_DrawProportionalString( 510, 480 - 64 - PROP_HEIGHT, postgameMenuInfo.placeNames[2], UI_CENTER, color_white );
-	}
-	UI_DrawProportionalString( 130, 480 - 64 - PROP_HEIGHT, postgameMenuInfo.placeNames[1], UI_CENTER, color_white );
-	UI_DrawProportionalString( 320, 480 - 64 - 2 * PROP_HEIGHT, postgameMenuInfo.placeNames[0], UI_CENTER, color_white );
-
-	if( postgameMenuInfo.phase == 1 ) {
-		timer = uis.realtime - postgameMenuInfo.starttime;
-
-		if( timer >= 1000 && postgameMenuInfo.winnerSound ) {
-			trap_S_StartLocalSound( postgameMenuInfo.winnerSound, CHAN_ANNOUNCER );
-			postgameMenuInfo.winnerSound = 0;
-		}
-
-		if( timer < 5000 ) {
+	if( uis.demoversion ) {
+		if( postgameMenuInfo.won == 1 && UI_ShowTierVideo( 8 )) {
+			trap_Cvar_Set( "nextmap", "" );
+			trap_Cmd_ExecuteText( EXEC_APPEND, "disconnect; cinematic demoEnd.RoQ\n" );
 			return;
 		}
-		postgameMenuInfo.phase = 2;
-		postgameMenuInfo.starttime = uis.realtime;
 	}
-
-	// phase 2
-	if( postgameMenuInfo.phase == 2 ) {
-		timer = uis.realtime - postgameMenuInfo.starttime;
-		if( timer >= ( postgameMenuInfo.numAwards * AWARD_PRESENTATION_TIME ) ) {
-
-			if( timer < 5000 ) {
-				return;
-			}
-
-			postgameMenuInfo.phase = 3;
-			postgameMenuInfo.starttime = uis.realtime;
-		}
-		else {
-			UI_SPPostgameMenu_DrawAwardsPresentation( timer );
-		}
-	}
-
-	// phase 3
-	if( postgameMenuInfo.phase == 3 ) {
-		if( uis.demoversion ) {
-			if( postgameMenuInfo.won == 1 && UI_ShowTierVideo( 8 )) {
-				trap_Cvar_Set( "nextmap", "" );
-				trap_Cmd_ExecuteText( EXEC_APPEND, "disconnect; cinematic demoEnd.RoQ\n" );
-				return;
-			}
-		}
-		else if( postgameMenuInfo.won > -1 && UI_ShowTierVideo( postgameMenuInfo.won + 1 )) {
-			if( postgameMenuInfo.won == postgameMenuInfo.lastTier ) {
-				trap_Cvar_Set( "nextmap", "" );
-				trap_Cmd_ExecuteText( EXEC_APPEND, "disconnect; cinematic end.RoQ\n" );
-				return;
-			}
-
-			trap_Cvar_SetValue( "ui_spSelection", postgameMenuInfo.won * ARENAS_PER_TIER );
-			trap_Cvar_Set( "nextmap", "levelselect" );
-			trap_Cmd_ExecuteText( EXEC_APPEND, va( "disconnect; cinematic tier%i.RoQ\n", postgameMenuInfo.won + 1 ) );
+	else if( postgameMenuInfo.won > -1 && UI_ShowTierVideo( postgameMenuInfo.won + 1 )) {
+		if( postgameMenuInfo.won == postgameMenuInfo.lastTier ) {
+			trap_Cvar_Set( "nextmap", "" );
+			trap_Cmd_ExecuteText( EXEC_APPEND, "disconnect; cinematic end.RoQ\n" );
 			return;
 		}
 
-		postgameMenuInfo.item_again.generic.flags &= ~QMF_INACTIVE;
-		postgameMenuInfo.item_next.generic.flags &= ~QMF_INACTIVE;
-		postgameMenuInfo.item_menu.generic.flags &= ~QMF_INACTIVE;
-
-		UI_SPPostgameMenu_DrawAwardsMedals( postgameMenuInfo.numAwards );
-
-		Menu_Draw( &postgameMenuInfo.menu );
-	}
-
-	// draw the scoreboard
-	if( !trap_Cvar_VariableValue( "ui_spScoreboard" ) ) {
+		trap_Cvar_SetValue( "ui_spSelection", postgameMenuInfo.won * ARENAS_PER_TIER );
+		trap_Cvar_Set( "nextmap", "levelselect" );
+		trap_Cmd_ExecuteText( EXEC_APPEND, va( "disconnect; cinematic tier%i.RoQ\n", postgameMenuInfo.won + 1 ) );
 		return;
 	}
 
-	timer = uis.realtime - postgameMenuInfo.scoreboardtime;
-	if( postgameMenuInfo.numClients <= 3 ) {
-		n = 0;
-	}
-	else {
-		n = timer / 1500 % (postgameMenuInfo.numClients + 2);
-	}
-	UI_SPPostgameMenu_MenuDrawScoreLine( n, 0 );
-	UI_SPPostgameMenu_MenuDrawScoreLine( n + 1, 0 + SMALLCHAR_HEIGHT );
-	UI_SPPostgameMenu_MenuDrawScoreLine( n + 2, 0 + 2 * SMALLCHAR_HEIGHT );
+	postgameMenuInfo.item_again.generic.flags &= ~QMF_INACTIVE;
+	postgameMenuInfo.item_next.generic.flags &= ~QMF_INACTIVE;
+	postgameMenuInfo.item_menu.generic.flags &= ~QMF_INACTIVE;
+
+	Menu_Draw( &postgameMenuInfo.menu );
 }
 
 
@@ -411,10 +251,6 @@ void UI_SPPostgameMenu_Cache( void ) {
 	trap_R_RegisterShaderNoMip( ART_REPLAY1 );
 	trap_R_RegisterShaderNoMip( ART_NEXT0 );
 	trap_R_RegisterShaderNoMip( ART_NEXT1 );
-	for( n = 0; n < 6; n++ ) {
-		trap_R_RegisterShaderNoMip( ui_medalPicNames[n] );
-		trap_S_RegisterSound( ui_medalSounds[n], qfalse );
-	}
 
 	if( buildscript ) {
 		trap_S_RegisterSound( "music/loss.wav", qfalse );
@@ -433,7 +269,6 @@ static void UI_SPPostgameMenu_Init( void ) {
 	postgameMenuInfo.menu.wrapAround	= qtrue;
 	postgameMenuInfo.menu.key			= UI_SPPostgameMenu_MenuKey;
 	postgameMenuInfo.menu.draw			= UI_SPPostgameMenu_MenuDraw;
-	postgameMenuInfo.ignoreKeysTime		= uis.realtime + 1500;
 
 	UI_SPPostgameMenu_Cache();
 
@@ -553,61 +388,12 @@ void UI_SPPostgameMenu_f( void ) {
 	awardValues[AWARD_FRAGS] = atoi( UI_Argv( 7 ) );
 	awardValues[AWARD_PERFECT] = atoi( UI_Argv( 8 ) );
 
-	postgameMenuInfo.numAwards = 0;
-
-	if( awardValues[AWARD_ACCURACY] >= 50 ) {
-		UI_LogAwardData( AWARD_ACCURACY, 1 );
-		postgameMenuInfo.awardsEarned[postgameMenuInfo.numAwards] = AWARD_ACCURACY;
-		postgameMenuInfo.awardsLevels[postgameMenuInfo.numAwards] = awardValues[AWARD_ACCURACY];
-		postgameMenuInfo.numAwards++;
-	}
-
-	if( awardValues[AWARD_IMPRESSIVE] ) {
-		UI_LogAwardData( AWARD_IMPRESSIVE, awardValues[AWARD_IMPRESSIVE] );
-		postgameMenuInfo.awardsEarned[postgameMenuInfo.numAwards] = AWARD_IMPRESSIVE;
-		postgameMenuInfo.awardsLevels[postgameMenuInfo.numAwards] = awardValues[AWARD_IMPRESSIVE];
-		postgameMenuInfo.numAwards++;
-	}
-
-	if( awardValues[AWARD_EXCELLENT] ) {
-		UI_LogAwardData( AWARD_EXCELLENT, awardValues[AWARD_EXCELLENT] );
-		postgameMenuInfo.awardsEarned[postgameMenuInfo.numAwards] = AWARD_EXCELLENT;
-		postgameMenuInfo.awardsLevels[postgameMenuInfo.numAwards] = awardValues[AWARD_EXCELLENT];
-		postgameMenuInfo.numAwards++;
-	}
-
-	if( awardValues[AWARD_GAUNTLET] ) {
-		UI_LogAwardData( AWARD_GAUNTLET, awardValues[AWARD_GAUNTLET] );
-		postgameMenuInfo.awardsEarned[postgameMenuInfo.numAwards] = AWARD_GAUNTLET;
-		postgameMenuInfo.awardsLevels[postgameMenuInfo.numAwards] = awardValues[AWARD_GAUNTLET];
-		postgameMenuInfo.numAwards++;
-	}
-
-	oldFrags = UI_GetAwardLevel( AWARD_FRAGS ) / 100;
-	UI_LogAwardData( AWARD_FRAGS, awardValues[AWARD_FRAGS] );
-	newFrags = UI_GetAwardLevel( AWARD_FRAGS ) / 100;
-	if( newFrags > oldFrags ) {
-		postgameMenuInfo.awardsEarned[postgameMenuInfo.numAwards] = AWARD_FRAGS;
-		postgameMenuInfo.awardsLevels[postgameMenuInfo.numAwards] = newFrags * 100;
-		postgameMenuInfo.numAwards++;
-	}
-
-	if( awardValues[AWARD_PERFECT] ) {
-		UI_LogAwardData( AWARD_PERFECT, 1 );
-		postgameMenuInfo.awardsEarned[postgameMenuInfo.numAwards] = AWARD_PERFECT;
-		postgameMenuInfo.awardsLevels[postgameMenuInfo.numAwards] = 1;
-		postgameMenuInfo.numAwards++;
-	}
-
 	if ( playerGameRank == 1 ) {
 		postgameMenuInfo.won = UI_TierCompleted( postgameMenuInfo.level );
 	}
 	else {
 		postgameMenuInfo.won = -1;
 	}
-
-	postgameMenuInfo.starttime = uis.realtime;
-	postgameMenuInfo.scoreboardtime = uis.realtime;
 
 	trap_Key_SetCatcher( KEYCATCH_UI );
 	uis.menusp = 0;
@@ -634,8 +420,6 @@ void UI_SPPostgameMenu_f( void ) {
 		postgameMenuInfo.winnerSound = trap_S_RegisterSound( "sound/player/announce/youwin.wav", qfalse );
 		trap_Cmd_ExecuteText( EXEC_APPEND, "music music/win\n" );
 	}
-
-	postgameMenuInfo.phase = 1;
 
 	postgameMenuInfo.lastTier = UI_GetNumSPTiers();
 	if ( UI_GetSpecialArenaInfo( "final" ) ) {
