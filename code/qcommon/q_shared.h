@@ -397,6 +397,17 @@ extern	vec4_t		colorWhite;
 extern	vec4_t		colorLtGrey;
 extern	vec4_t		colorMdGrey;
 extern	vec4_t		colorDkGrey;
+// eser - new colors
+extern	vec4_t		colorIndigo;
+extern	vec4_t		colorBrown;
+extern	vec4_t		colorTan;
+extern	vec4_t		colorPink;
+extern	vec4_t		colorOrange;
+extern	vec4_t		colorGold;
+extern	vec4_t		colorLime;
+extern	vec4_t		colorSkyBlue;
+extern	vec4_t		colorPurple;
+// eser - new colors
 
 #define Q_COLOR_ESCAPE	'^'
 qboolean Q_IsColorString(const char *p);  // ^[0-9a-zA-Z]
@@ -409,8 +420,19 @@ qboolean Q_IsColorString(const char *p);  // ^[0-9a-zA-Z]
 #define COLOR_CYAN	'5'
 #define COLOR_MAGENTA	'6'
 #define COLOR_WHITE	'7'
+// eser - new colors
+#define	COLOR_INDIGO	'8'
+#define	COLOR_BROWN		'9'
+#define	COLOR_TAN		'A'
+#define	COLOR_PINK		'B'
+#define	COLOR_ORANGE	'C'
+#define	COLOR_GOLD		'D'
+#define	COLOR_LIME		'E'
+#define	COLOR_SKYBLUE	'F'
+#define	COLOR_PURPLE	'G'
+// eser - new colors
 #define ColorIndexForNumber(c) ((c) & 0x07)
-#define ColorIndex(c) (ColorIndexForNumber((c) - '0'))
+#define ColorIndex(c)	( ((c) >= 'A') ? ((c) - 'A') + 10 : ((c) - '0') % 17 )
 
 #define S_COLOR_BLACK	"^0"
 #define S_COLOR_RED	"^1"
@@ -420,8 +442,20 @@ qboolean Q_IsColorString(const char *p);  // ^[0-9a-zA-Z]
 #define S_COLOR_CYAN	"^5"
 #define S_COLOR_MAGENTA	"^6"
 #define S_COLOR_WHITE	"^7"
+// eser - new colors
+#define	S_COLOR_INDIGO	"^8"
+#define	S_COLOR_BROWN	"^9"
+#define	S_COLOR_TAN		"^A"
+#define	S_COLOR_PINK	"^B"
+#define	S_COLOR_ORANGE	"^C"
+#define	S_COLOR_GOLD	"^D"
+#define	S_COLOR_LIME	"^E"
+#define	S_COLOR_SKYBLUE	"^F"
+#define	S_COLOR_PURPLE	"^G"
+// eser - new colors
 
-extern vec4_t	g_color_table[8];
+//extern vec4_t	g_color_table[8];
+extern vec4_t	g_color_table[17];
 
 #define	MAKERGB( v, r, g, b ) v[0]=r;v[1]=g;v[2]=b
 #define	MAKERGBA( v, r, g, b, a ) v[0]=r;v[1]=g;v[2]=b;v[3]=a

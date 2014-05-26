@@ -3091,7 +3091,6 @@ static void UI_Update(const char *name) {
 				trap_Cvar_SetValue( "r_fastSky", 0 );
 				trap_Cvar_SetValue( "r_inGameVideo", 1 );
 				trap_Cvar_SetValue( "cg_shadows", 1 );
-				trap_Cvar_SetValue( "cg_brassTime", 2500 );
 				trap_Cvar_Set( "r_texturemode", "GL_LINEAR_MIPMAP_LINEAR" );
 			break;
 			case 1: // normal 
@@ -3108,7 +3107,6 @@ static void UI_Update(const char *name) {
 				trap_Cvar_SetValue( "r_texturebits", 0 );
 				trap_Cvar_SetValue( "r_fastSky", 0 );
 				trap_Cvar_SetValue( "r_inGameVideo", 1 );
-				trap_Cvar_SetValue( "cg_brassTime", 2500 );
 				trap_Cvar_Set( "r_texturemode", "GL_LINEAR_MIPMAP_LINEAR" );
 				trap_Cvar_SetValue( "cg_shadows", 0 );
 			break;
@@ -3127,7 +3125,6 @@ static void UI_Update(const char *name) {
 				trap_Cvar_SetValue( "cg_shadows", 0 );
 				trap_Cvar_SetValue( "r_fastSky", 1 );
 				trap_Cvar_SetValue( "r_inGameVideo", 0 );
-				trap_Cvar_SetValue( "cg_brassTime", 0 );
 				trap_Cvar_Set( "r_texturemode", "GL_LINEAR_MIPMAP_NEAREST" );
 			break;
 			case 3: // fastest
@@ -3143,7 +3140,6 @@ static void UI_Update(const char *name) {
 				trap_Cvar_SetValue( "r_picmip", 2 );
 				trap_Cvar_SetValue( "r_texturebits", 16 );
 				trap_Cvar_SetValue( "cg_shadows", 0 );
-				trap_Cvar_SetValue( "cg_brassTime", 0 );
 				trap_Cvar_SetValue( "r_fastSky", 1 );
 				trap_Cvar_SetValue( "r_inGameVideo", 0 );
 				trap_Cvar_Set( "r_texturemode", "GL_LINEAR_MIPMAP_NEAREST" );
@@ -5782,7 +5778,6 @@ static cvarTable_t		cvarTable[] = {
 	{ &ui_browserShowFull, "ui_browserShowFull", "1", CVAR_ARCHIVE },
 	{ &ui_browserShowEmpty, "ui_browserShowEmpty", "1", CVAR_ARCHIVE },
 
-	{ &ui_brassTime, "cg_brassTime", "2500", CVAR_ARCHIVE },
 	{ &ui_drawCrosshair, "cg_drawCrosshair", "4", CVAR_ARCHIVE },
 	{ &ui_drawCrosshairNames, "cg_drawCrosshairNames", "1", CVAR_ARCHIVE },
 	{ &ui_marks, "cg_marks", "1", CVAR_ARCHIVE },

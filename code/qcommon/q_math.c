@@ -51,8 +51,19 @@ vec4_t	colorWhite  = {1.0f,  1.0f,  1.0f,  1.0f};
 vec4_t	colorLtGrey = {0.75f, 0.75f, 0.75f, 1.0f};
 vec4_t	colorMdGrey = {0.5f,  0.5f,  0.5f,  1.0f};
 vec4_t	colorDkGrey = {0.25f, 0.25f, 0.25f, 1.0f};
+// eser - new colors
+vec4_t		colorIndigo = { 0.25f, 0.25f, 0.25f, 1.00f };
+vec4_t		colorBrown = { 0.50f, 0.25f, 0.00f, 1.00f };
+vec4_t		colorTan = { 1.00f, 0.75f, 0.25f, 1.00f };
+vec4_t		colorPink = { 1.00f, 0.50f, 0.50f, 1.00f };
+vec4_t		colorOrange = { 1.00f, 0.33f, 0.00f, 1.00f };
+vec4_t		colorGold = { 0.50f, 0.50f, 0.00f, 1.00f };
+vec4_t		colorLime = { 0.50f, 1.00f, 0.00f, 1.00f };
+vec4_t		colorSkyBlue = { 0.01f, 0.50f, 1.00f, 1.00f };
+vec4_t		colorPurple = { 0.05f, 0.00f, 1.00f, 1.00f };
+// eser - new colors
 
-vec4_t	g_color_table[8] =
+vec4_t	g_color_table[17] =
 {
 	{0.0f, 0.0f, 0.0f, 1.0f},
 	{1.0f, 0.0f, 0.0f, 1.0f},
@@ -62,6 +73,17 @@ vec4_t	g_color_table[8] =
 	{0.0f, 1.0f, 1.0f, 1.0f},
 	{1.0f, 0.0f, 1.0f, 1.0f},
 	{1.0f, 1.0f, 1.0f, 1.0f},
+// eser - new colors
+    { 0.25f, 0.25f, 0.25f, 1.00f },
+    { 0.50f, 0.25f, 0.00f, 1.00f },
+    { 1.00f, 0.75f, 0.25f, 1.00f },
+    { 1.00f, 0.50f, 0.50f, 1.00f },
+    { 1.00f, 0.33f, 0.00f, 1.00f },
+    { 0.50f, 0.50f, 0.00f, 1.00f },
+    { 0.50f, 1.00f, 0.00f, 1.00f },
+    { 0.00f, 0.50f, 0.00f, 1.00f },
+    { 0.50f, 0.00f, 0.00f, 1.00f }
+// eser - new colors
 };
 
 
