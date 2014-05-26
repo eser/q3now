@@ -977,6 +977,9 @@ BG_EvaluateTrajectory
 void BG_EvaluateTrajectory( const trajectory_t *tr, int atTime, vec3_t result ) {
 	float		deltaTime;
 	float		phase;
+    vec3_t		dir;
+    vec3_t		friction;
+    float		angle;
 
 	switch( tr->trType ) {
 	case TR_STATIONARY:
@@ -1007,6 +1010,56 @@ void BG_EvaluateTrajectory( const trajectory_t *tr, int atTime, vec3_t result ) 
 		VectorMA( tr->trBase, deltaTime, tr->trDelta, result );
 		result[2] -= 0.5 * DEFAULT_GRAVITY * deltaTime * deltaTime;		// FIXME: local gravity...
 		break;
+    case TR_GRAVITY_DOUBLE:
+        deltaTime = (atTime - tr->trTime) * 0.001;	// milliseconds to seconds
+        VectorMA(tr->trBase, deltaTime, tr->trDelta, result);
+        result[2] -= 0.25 * DEFAULT_GRAVITY * deltaTime * deltaTime;		// FIXME: local gravity...
+        break;
+    case TR_ACCELERATE:
+        // time since missile fired in seconds
+        deltaTime = (atTime - tr->trTime) * 0.001;
+
+        // the .5*a*t^2 part. trDuration = acceleration,
+        // phase gives the magnitude of the distance
+        // we need to move
+        phase = (tr->trDuration / 2) * (deltaTime * deltaTime);
+
+        // Make dir equal to the velocity of the object
+        VectorCopy(tr->trDelta, dir);
+
+        // Sets the magnitude of vector dir to 1
+        VectorNormalize(dir);
+
+        // Move a distance "phase" in the direction "dir"
+        // from our starting point
+        VectorMA(tr->trBase, phase, dir, result);
+
+        // The u*t part. Adds the velocity of the object
+        // multiplied by the time to the last result.
+        VectorMA(result, deltaTime, tr->trDelta, result);
+        break;
+        // eser - accelerate
+        //NT - added small gravity trajectory type
+    case TR_SMALL_GRAVITY:
+        deltaTime = (atTime - tr->trTime) * 0.001;	// milliseconds to seconds
+        VectorMA(tr->trBase, deltaTime, tr->trDelta, result);
+        VectorScale(result, 0.02 * deltaTime * deltaTime, friction);
+        VectorSubtract(result, friction, result);
+        result[2] -= 0.5 * DEFAULT_GRAVITY * deltaTime * deltaTime;		// FIXME: local gravity...
+        break;
+        //NT - added orbital trajectory type
+    case TR_ORBITAL:
+        deltaTime = (atTime - tr->trTime) * 0.001;	// milliseconds to seconds
+        VectorMA(tr->trBase, deltaTime, tr->trDelta, result);
+
+        angle = (float)((atTime + tr->trDuration) % 360) * M_PI / 180;
+        result[0] += cos(angle) * 48;
+        result[1] += sin(angle) * 48;
+
+        angle = (float)((atTime / 6 + tr->trDuration) % 360) * M_PI / 180;
+
+        result[2] += sin(angle) * 32;
+        break;
 	default:
 		Com_Error( ERR_DROP, "BG_EvaluateTrajectory: unknown trType: %i", tr->trType );
 		break;
@@ -1023,6 +1076,7 @@ For determining velocity at a given time
 void BG_EvaluateTrajectoryDelta( const trajectory_t *tr, int atTime, vec3_t result ) {
 	float	deltaTime;
 	float	phase;
+    vec3_t	dir;
 
 	switch( tr->trType ) {
 	case TR_STATIONARY:
@@ -1050,6 +1104,32 @@ void BG_EvaluateTrajectoryDelta( const trajectory_t *tr, int atTime, vec3_t resu
 		VectorCopy( tr->trDelta, result );
 		result[2] -= DEFAULT_GRAVITY * deltaTime;		// FIXME: local gravity...
 		break;
+    case TR_GRAVITY_DOUBLE:
+        deltaTime = (atTime - tr->trTime) * 0.001;	// milliseconds to seconds
+        VectorCopy(tr->trDelta, result);
+        result[2] -= (DEFAULT_GRAVITY / 2) * deltaTime;		// FIXME: local gravity...
+        break;
+    case TR_ACCELERATE:
+        // time since missile fired in seconds
+        deltaTime = (atTime - tr->trTime) * 0.001;
+
+        // Turn magnitude of acceleration into a vector
+        VectorCopy(tr->trDelta, dir);
+        VectorNormalize(dir);
+        VectorScale(dir, tr->trDuration, dir);
+
+        // u + t * a = v
+        VectorMA(tr->trDelta, deltaTime, dir, result);
+        break;
+    case TR_SMALL_GRAVITY:
+        deltaTime = (atTime - tr->trTime) * 0.001;	// milliseconds to seconds
+        VectorCopy(tr->trDelta, result);
+        result[2] -= DEFAULT_GRAVITY * deltaTime;		// FIXME: local gravity...
+        break;
+    case TR_ORBITAL:
+        // I really don't care to calculate angular velocity
+        VectorCopy(tr->trDelta, result);
+        break;
 	default:
 		Com_Error( ERR_DROP, "BG_EvaluateTrajectoryDelta: unknown trType: %i", tr->trType );
 		break;
