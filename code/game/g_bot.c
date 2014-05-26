@@ -47,10 +47,6 @@ static botSpawnQueue_t	botSpawnQueue[BOT_SPAWN_QUEUE_DEPTH];
 
 vmCvar_t bot_minplayers;
 
-extern gentity_t	*podium1;
-extern gentity_t	*podium2;
-extern gentity_t	*podium3;
-
 float trap_Cvar_VariableValue( const char *var_name ) {
 	char buf[128];
 
@@ -479,11 +475,6 @@ void G_CheckBotSpawn( void ) {
 		}
 		ClientBegin( botSpawnQueue[n].clientNum );
 		botSpawnQueue[n].spawnTime = 0;
-
-		if( g_gametype.integer == GT_SINGLE_PLAYER ) {
-			trap_GetUserinfo( botSpawnQueue[n].clientNum, userinfo, sizeof(userinfo) );
-			PlayerIntroSound( Info_ValueForKey (userinfo, "model") );
-		}
 	}
 }
 
@@ -795,10 +786,6 @@ static void G_SpawnBots( char *botList, int baseDelay ) {
 	int			delay;
 	char		bots[MAX_INFO_VALUE];
 
-	podium1 = NULL;
-	podium2 = NULL;
-	podium3 = NULL;
-
 	skill = trap_Cvar_VariableValue( "g_spSkill" );
 	if( skill < 1 ) {
 		trap_Cvar_Set( "g_spSkill", "1" );
@@ -963,7 +950,7 @@ void G_InitBots( qboolean restart ) {
 
 	trap_Cvar_Register( &bot_minplayers, "bot_minplayers", "0", CVAR_SERVERINFO );
 
-	if( g_gametype.integer == GT_SINGLE_PLAYER ) {
+	if( g_singlePlayer.integer ) {
 		trap_GetServerinfo( serverinfo, sizeof(serverinfo) );
 		Q_strncpyz( map, Info_ValueForKey( serverinfo, "mapname" ), sizeof(map) );
 		arenainfo = G_GetArenaInfoByMap( map );

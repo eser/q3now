@@ -56,21 +56,10 @@ SINGLE PLAYER LEVEL SELECT MENU
 #define ID_PICTURE2			13
 #define ID_PICTURE3			14
 #define ID_RIGHTARROW		15
-#define ID_PLAYERPIC		16
-#define ID_AWARD1			17
-#define ID_AWARD2			18
-#define ID_AWARD3			19
-#define ID_AWARD4			20
-#define ID_AWARD5			21
-#define ID_AWARD6			22
-#define ID_BACK				23
-#define ID_RESET			24
-#define ID_CUSTOM			25
-#define ID_NEXT				26
-
-#define PLAYER_Y			314
-#define AWARDS_Y			(PLAYER_Y + 26)
-
+#define ID_BACK				16
+#define ID_RESET			17
+#define ID_CUSTOM			18
+#define ID_NEXT				19
 
 typedef struct {
 	menuframework_s	menu;
@@ -78,8 +67,6 @@ typedef struct {
 	menubitmap_s	item_leftarrow;
 	menubitmap_s	item_maps[4];
 	menubitmap_s	item_rightarrow;
-	menubitmap_s	item_player;
-	menubitmap_s	item_awards[6];
 	menubitmap_s	item_back;
 	menubitmap_s	item_reset;
 	menubitmap_s	item_custom;
@@ -97,11 +84,6 @@ typedef struct {
 	qhandle_t		levelSelectedPic;
 	qhandle_t		levelFocusPic;
 	qhandle_t		levelCompletePic[5];
-
-	char			playerModel[MAX_QPATH];
-	char			playerPicName[MAX_QPATH];
-	int				awardLevels[6];
-	sfxHandle_t		awardSounds[6];
 
 	int				numBots;
 	qhandle_t		botPics[7];
@@ -465,23 +447,6 @@ static void UI_SPLevelMenu_PlayerEvent( void* ptr, int notification ) {
 
 /*
 =================
-UI_SPLevelMenu_AwardEvent
-=================
-*/
-static void UI_SPLevelMenu_AwardEvent( void* ptr, int notification ) {
-	int		n;
-
-	if (notification != QM_ACTIVATED) {
-		return;
-	}
-
-	n = ((menucommon_s*)ptr)->id - ID_AWARD1;
-	trap_S_StartLocalSound( levelMenuInfo.awardSounds[n], CHAN_ANNOUNCER );
-}
-
-
-/*
-=================
 UI_SPLevelMenu_NextEvent
 =================
 */
@@ -557,53 +522,8 @@ static void UI_SPLevelMenu_MenuDraw( void ) {
 		return;
 	}
 
-	// draw player name
-	trap_Cvar_VariableStringBuffer( "name", string, 32 );
-	Q_CleanStr( string );
-	UI_DrawProportionalString( 320, PLAYER_Y, string, UI_CENTER|UI_SMALLFONT, color_orange );
-
-	// check for model changes
-	trap_Cvar_VariableStringBuffer( "model", buf, sizeof(buf) );
-	if( Q_stricmp( buf, levelMenuInfo.playerModel ) != 0 ) {
-		Q_strncpyz( levelMenuInfo.playerModel, buf, sizeof(levelMenuInfo.playerModel) );
-		PlayerIcon( levelMenuInfo.playerModel, levelMenuInfo.playerPicName, sizeof(levelMenuInfo.playerPicName) );
-		levelMenuInfo.item_player.shader = 0;
-	}
-
 	// standard menu drawing
 	Menu_Draw( &levelMenuInfo.menu );
-
-	// draw player award levels
-	y = AWARDS_Y;
-	i = 0;
-	for( n = 0; n < 6; n++ ) {
-		level = levelMenuInfo.awardLevels[n];
-		if( level > 0 ) {
-			if( i & 1 ) {
-				x = 224 - (i - 1 ) / 2 * (48 + 16);
-			}
-			else {
-				x = 368 + i / 2 * (48 + 16);
-			}
-			i++;
-
-			if( level == 1 ) {
-				continue;
-			}
-
-			if( level >= 1000000 ) {
-				Com_sprintf( string, sizeof(string), "%im", level / 1000000 );
-			}
-			else if( level >= 1000 ) {
-				Com_sprintf( string, sizeof(string), "%ik", level / 1000 );
-			}
-			else {
-				Com_sprintf( string, sizeof(string), "%i", level );
-			}
-
-			UI_DrawString( x + 24, y + 48, string, UI_CENTER, color_yellow );
-		}
-	}
 
 	UI_DrawProportionalString( 18, 38, va( "Tier %i", selectedArenaSet + 1 ), UI_LEFT|UI_SMALLFONT, color_orange );
 
@@ -656,7 +576,7 @@ static void UI_SPLevelMenu_MenuDraw( void ) {
 //	UI_DrawString( 18, 212, va("Frags %i", fraglimit) , UI_LEFT|UI_SMALLFONT, color_orange );
 
 	// draw bot opponents
-	y += 24;
+	y += 48;
 	pad = (7 - levelMenuInfo.numBots) * (64 + 26) / 2;
 	for( n = 0; n < levelMenuInfo.numBots; n++ ) {
 		x = 18 + pad + (64 + 26) * n;
@@ -698,11 +618,6 @@ void UI_SPLevelMenu_Cache( void ) {
 	trap_R_RegisterShaderNoMip( ART_RESET1 );
 	trap_R_RegisterShaderNoMip( ART_CUSTOM0 );
 	trap_R_RegisterShaderNoMip( ART_CUSTOM1 );
-
-	for( n = 0; n < 6; n++ ) {
-		trap_R_RegisterShaderNoMip( ui_medalPicNames[n] );
-		levelMenuInfo.awardSounds[n] = trap_S_RegisterSound( ui_medalSounds[n], qfalse );
-	}
 
 	levelMenuInfo.levelSelectedPic = trap_R_RegisterShaderNoMip( ART_LEVELFRAME_SELECTED );
 	levelMenuInfo.levelFocusPic = trap_R_RegisterShaderNoMip( ART_LEVELFRAME_FOCUS );
@@ -807,47 +722,6 @@ static void UI_SPLevelMenu_Init( void ) {
 	levelMenuInfo.item_rightarrow.height			= 114;
 	levelMenuInfo.item_rightarrow.focuspic			= ART_ARROW_FOCUS;
 
-	trap_Cvar_VariableStringBuffer( "model", levelMenuInfo.playerModel, sizeof(levelMenuInfo.playerModel) );
-	PlayerIcon( levelMenuInfo.playerModel, levelMenuInfo.playerPicName, sizeof(levelMenuInfo.playerPicName) );
-	levelMenuInfo.item_player.generic.type			= MTYPE_BITMAP;
-	levelMenuInfo.item_player.generic.name			= levelMenuInfo.playerPicName;
-	levelMenuInfo.item_player.generic.flags			= QMF_LEFT_JUSTIFY|QMF_MOUSEONLY;
-	levelMenuInfo.item_player.generic.x				= 288;
-	levelMenuInfo.item_player.generic.y				= AWARDS_Y;
-	levelMenuInfo.item_player.generic.id			= ID_PLAYERPIC;
-	levelMenuInfo.item_player.generic.callback		= UI_SPLevelMenu_PlayerEvent;
-	levelMenuInfo.item_player.width					= 64;
-	levelMenuInfo.item_player.height				= 64;
-
-	for( n = 0; n < 6; n++ ) {
-		levelMenuInfo.awardLevels[n] = UI_GetAwardLevel( n );
-	}
-	levelMenuInfo.awardLevels[AWARD_FRAGS] = 100 * (levelMenuInfo.awardLevels[AWARD_FRAGS] / 100);
-
-	y = AWARDS_Y;
-	count = 0;
-	for( n = 0; n < 6; n++ ) {
-		if( levelMenuInfo.awardLevels[n] ) {
-			if( count & 1 ) {
-				x = 224 - (count - 1 ) / 2 * (48 + 16);
-			}
-			else {
-				x = 368 + count / 2 * (48 + 16);
-			}
-
-			levelMenuInfo.item_awards[count].generic.type		= MTYPE_BITMAP;
-			levelMenuInfo.item_awards[count].generic.name		= ui_medalPicNames[n];
-			levelMenuInfo.item_awards[count].generic.flags		= QMF_LEFT_JUSTIFY|QMF_SILENT|QMF_MOUSEONLY;
-			levelMenuInfo.item_awards[count].generic.x			= x;
-			levelMenuInfo.item_awards[count].generic.y			= y;
-			levelMenuInfo.item_awards[count].generic.id			= ID_AWARD1 + n;
-			levelMenuInfo.item_awards[count].generic.callback	= UI_SPLevelMenu_AwardEvent;
-			levelMenuInfo.item_awards[count].width				= 48;
-			levelMenuInfo.item_awards[count].height				= 48;
-			count++;
-		}
-	}
-
 	levelMenuInfo.item_back.generic.type			= MTYPE_BITMAP;
 	levelMenuInfo.item_back.generic.name			= ART_BACK0;
 	levelMenuInfo.item_back.generic.flags			= QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS;
@@ -912,11 +786,6 @@ static void UI_SPLevelMenu_Init( void ) {
 	levelMenuInfo.item_maps[3].generic.bottom += 18;
 	Menu_AddItem( &levelMenuInfo.menu, &levelMenuInfo.item_rightarrow );
 
-	Menu_AddItem( &levelMenuInfo.menu, &levelMenuInfo.item_player );
-
-	for( n = 0; n < count; n++ ) {
-		Menu_AddItem( &levelMenuInfo.menu, &levelMenuInfo.item_awards[n] );
-	}
 	Menu_AddItem( &levelMenuInfo.menu, &levelMenuInfo.item_back );
 	Menu_AddItem( &levelMenuInfo.menu, &levelMenuInfo.item_reset );
 	Menu_AddItem( &levelMenuInfo.menu, &levelMenuInfo.item_custom );

@@ -775,7 +775,6 @@ void SV_Shutdown( char *finalmsg ) {
 	Com_Memset( &svs, 0, sizeof( svs ) );
 
 	Cvar_Set( "sv_running", "0" );
-	Cvar_Set("ui_singlePlayerActive", "0");
 
 	Com_Printf( "---------------------------\n" );
 

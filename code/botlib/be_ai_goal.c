@@ -92,7 +92,6 @@ typedef struct campspot_s
 typedef enum {
 	GT_FFA,				// free for all
 	GT_TOURNAMENT,		// one on one tournament
-	GT_SINGLE_PLAYER,	// single player tournament
 
 	//-- team games go after this --
 
@@ -190,6 +189,8 @@ maplocation_t *maplocations = NULL;
 campspot_t *campspots = NULL;
 //the game type
 int g_gametype = 0;
+//the single player
+int g_singlePlayer = 0;
 //additional dropped item weight
 libvar_t *droppedweight = NULL;
 
@@ -874,10 +875,10 @@ int BotGetLevelItemGoal(int index, char *name, bot_goal_t *goal)
 	for (; li; li = li->next)
 	{
 		//
-		if (g_gametype == GT_SINGLE_PLAYER) {
+		if (g_singlePlayer) {
 			if (li->flags & IFL_NOTSINGLE) continue;
 		}
-		else if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TEAM) {
 			if (li->flags & IFL_NOTTEAM) continue;
 		}
 		else {
@@ -1085,10 +1086,10 @@ void BotUpdateEntityItems(void)
 			//if this level item is already linked
 			if (li->entitynum) continue;
 			//
-			if (g_gametype == GT_SINGLE_PLAYER) {
+			if (g_singlePlayer) {
 				if (li->flags & IFL_NOTSINGLE) continue;
 			}
-			else if (g_gametype >= GT_TEAM) {
+			if (g_gametype >= GT_TEAM) {
 				if (li->flags & IFL_NOTTEAM) continue;
 			}
 			else {
@@ -1318,11 +1319,11 @@ int BotChooseLTGItem(int goalstate, vec3_t origin, int *inventory, int travelfla
 	//go through the items in the level
 	for (li = levelitems; li; li = li->next)
 	{
-		if (g_gametype == GT_SINGLE_PLAYER) {
+		if (g_singlePlayer) {
 			if (li->flags & IFL_NOTSINGLE)
 				continue;
 		}
-		else if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TEAM) {
 			if (li->flags & IFL_NOTTEAM)
 				continue;
 		}
@@ -1489,11 +1490,11 @@ int BotChooseNBGItem(int goalstate, vec3_t origin, int *inventory, int travelfla
 	//go through the items in the level
 	for (li = levelitems; li; li = li->next)
 	{
-		if (g_gametype == GT_SINGLE_PLAYER) {
+		if (g_singlePlayer) {
 			if (li->flags & IFL_NOTSINGLE)
 				continue;
 		}
-		else if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TEAM) {
 			if (li->flags & IFL_NOTTEAM)
 				continue;
 		}
@@ -1773,9 +1774,11 @@ int BotSetupGoalAI(void)
 {
 	char *filename;
 
-	//check if teamplay is on
-	g_gametype = LibVarValue("g_gametype", "0");
-	//item configuration file
+    //check if teamplay is on
+    g_gametype = LibVarValue("g_gametype", "0");
+    //check if single player is on
+    g_singlePlayer = LibVarValue("g_singlePlayer", "0");
+    //item configuration file
 	filename = LibVarString("itemconfig", "items.c");
 	//load the item configuration
 	itemconfig = LoadItemConfig(filename);

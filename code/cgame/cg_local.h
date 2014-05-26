@@ -1181,14 +1181,11 @@ extern	vmCvar_t		cg_redTeamName;
 extern	vmCvar_t		cg_blueTeamName;
 extern	vmCvar_t		cg_currentSelectedPlayer;
 extern	vmCvar_t		cg_currentSelectedPlayerName;
-extern	vmCvar_t		cg_singlePlayer;
 extern	vmCvar_t		cg_enableDust;
 extern	vmCvar_t		cg_enableBreath;
-extern	vmCvar_t		cg_singlePlayerActive;
-extern  vmCvar_t		cg_recordSPDemo;
-extern  vmCvar_t		cg_recordSPDemoName;
 extern	vmCvar_t		cg_obeliskRespawnDelay;
 #endif
+extern	vmCvar_t		cg_singlePlayer;
 
 //
 // cg_main.c

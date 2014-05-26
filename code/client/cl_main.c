@@ -255,7 +255,7 @@ void CL_Voip_f( void )
 		reason = "Speex not initialized";
 	else if (!clc.voipEnabled)
 		reason = "Server doesn't support VoIP";
-	else if (!clc.demoplaying && (Cvar_VariableValue( "g_gametype" ) == GT_SINGLE_PLAYER || Cvar_VariableValue("ui_singlePlayerActive")))
+	else if (!clc.demoplaying && Cvar_VariableValue( "g_singlePlayer" ))
 		reason = "running in single-player mode";
 
 	if (reason != NULL) {
@@ -1675,8 +1675,8 @@ CL_Disconnect_f
 */
 void CL_Disconnect_f( void ) {
 	SCR_StopCinematic();
-	Cvar_Set("ui_singlePlayerActive", "0");
-	if ( clc.state != CA_DISCONNECTED && clc.state != CA_CINEMATIC ) {
+
+    if ( clc.state != CA_DISCONNECTED && clc.state != CA_CINEMATIC ) {
 		Com_Error (ERR_DISCONNECT, "Disconnected from server");
 	}
 }
@@ -1691,8 +1691,8 @@ CL_Reconnect_f
 void CL_Reconnect_f( void ) {
 	if ( !strlen( cl_reconnectArgs ) )
 		return;
-	Cvar_Set("ui_singlePlayerActive", "0");
-	Cbuf_AddText( va("connect %s\n", cl_reconnectArgs ) );
+
+    Cbuf_AddText( va("connect %s\n", cl_reconnectArgs ) );
 }
 
 /*
@@ -1728,8 +1728,6 @@ void CL_Connect_f( void ) {
 
 	// save arguments for reconnect
 	Q_strncpyz( cl_reconnectArgs, Cmd_Args(), sizeof( cl_reconnectArgs ) );
-
-	Cvar_Set("ui_singlePlayerActive", "0");
 
 	// fire a message off to the motd server
 	CL_RequestMotd();
