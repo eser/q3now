@@ -95,6 +95,9 @@ vmCvar_t	g_enableBreath;
 vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
 vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 
+vmCvar_t	g_grapple;
+
+
 static cvarTable_t		gameCvarTable[] = {
 	// don't override the cheat state set by the system
 	{ &g_cheats, "sv_cheats", "", 0, 0, qfalse },
@@ -175,9 +178,10 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
 
-    { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO, 0, qtrue },      // CPM: The CPM gameplay
-    { &g_pro_physics, "g_pro_physics", "1", CVAR_SERVERINFO, 0, qtrue } // CPM: The CPM physics
+    { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO, 0, qtrue },       // CPM: The CPM gameplay
+    { &g_pro_physics, "g_pro_physics", "1", CVAR_SERVERINFO, 0, qtrue }, // CPM: The CPM physics
 
+    { &g_grapple, "g_grapple", "0", 0, 0, qtrue }
 };
 
 static int gameCvarTableSize = ARRAY_LEN( gameCvarTable );

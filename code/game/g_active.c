@@ -434,6 +434,7 @@ ClientIntermissionThink
 void ClientIntermissionThink( gclient_t *client ) {
 	client->ps.eFlags &= ~EF_TALK;
 	client->ps.eFlags &= ~EF_FIRING;
+    client->ps.eFlags &= ~EF_GRAPPLE;
 
 	// the level will exit when everyone wants to or after timeouts
 
@@ -765,12 +766,6 @@ void ClientThink_real( gentity_t *ent ) {
 		client->ps.speed *= 1.3;
 	}
 
-	// Let go of the hook if we aren't firing
-	if ( client->ps.weapon == WP_GRAPPLING_HOOK &&
-		client->hook && !( ucmd->buttons & BUTTON_ATTACK ) ) {
-		Weapon_HookFree(client->hook);
-	}
-
 	// set up for pmove
 	oldEventSequence = client->ps.eventSequence;
 
@@ -866,9 +861,20 @@ void ClientThink_real( gentity_t *ent ) {
 	}
 	SendPendingPredictableEvents( &ent->client->ps );
 
-	if ( !( ent->client->ps.eFlags & EF_FIRING ) ) {
-		client->fireHeld = qfalse;		// for grapple
-	}
+    // eser - offhand grapple
+    if (g_grapple.integer) {
+        if ((pm.cmd.buttons & BUTTON_AFFIRMATIVE) && ent->client->ps.pm_type != PM_DEAD && !ent->client->hookhasbeenfired) {
+            Offhand_Grapple_Fire(ent);
+        }
+        if (!(pm.cmd.buttons & BUTTON_AFFIRMATIVE) && ent->client->ps.pm_type != PM_DEAD && ent->client->hookhasbeenfired && ent->client->fireHeld) {
+            ent->client->fireHeld = qfalse;
+            ent->client->hookhasbeenfired = qfalse;
+        }
+        if (client->hook && client->fireHeld == qfalse) {
+            Offhand_Grapple_Free(client->hook);
+        }
+    }
+    // offhand grapple
 
 	// use the snapped origin for linking so it matches client predicted versions
 	VectorCopy( ent->s.pos.trBase, ent->r.currentOrigin );

@@ -1001,6 +1001,7 @@ static void CG_RegisterGraphics( void ) {
 			CG_RegisterItemVisuals( i );
 		}
 	}
+    CG_RegisterWeapon(WP_NONE);
 
 	// wall marks
 	cgs.media.bulletMarkShader = trap_R_RegisterShader( "gfx/damage/bullet_mrk" );
@@ -1068,6 +1069,8 @@ static void CG_RegisterGraphics( void ) {
     cgs.media.backpackModel = trap_R_RegisterModel("models/backpack.md3");
     cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/icon_backpack");
     // !CPM
+
+    cgs.media.lightningShader = trap_R_RegisterShader("lightningBoltNew");
 
 	CG_ClearParticles ();
 /*
