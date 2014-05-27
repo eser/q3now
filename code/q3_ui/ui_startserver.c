@@ -90,14 +90,15 @@ static startserver_t s_startserver;
 
 static const char *gametype_items[] = {
 	"Free For All",
-	"Team Deathmatch",
 	"Tournament",
-	"Capture the Flag",
+    "King of the Hill",
+    "Team Deathmatch",
+    "Capture the Flag",
 	NULL
 };
 
-static int gametype_remap[] = {GT_FFA, GT_TEAM, GT_TOURNAMENT, GT_CTF};
-static int gametype_remap2[] = {0, 2, 0, 1, 3};
+static int gametype_remap[] = {GT_FFA, GT_TOURNAMENT, GT_KINGOFTHEHILL, GT_TEAM, GT_CTF};
+static int gametype_remap2[] = {0, 1, 3, 4, 5};
 
 // use ui_servers2.c definition
 extern const char* punkbuster_items[];
@@ -125,6 +126,7 @@ static int GametypeBits( char *string ) {
 
 		if( Q_stricmp( token, "ffa" ) == 0 ) {
 			bits |= 1 << GT_FFA;
+            bits |= 1 << GT_KINGOFTHEHILL;
 			continue;
 		}
 

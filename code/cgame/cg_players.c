@@ -917,10 +917,6 @@ void CG_NewClientInfo( int clientNum ) {
 	v = Info_ValueForKey( configstring, "skill" );
 	newInfo.botSkill = atoi( v );
 
-	// handicap
-	v = Info_ValueForKey( configstring, "hc" );
-	newInfo.handicap = atoi( v );
-
 	// wins
 	v = Info_ValueForKey( configstring, "w" );
 	newInfo.wins = atoi( v );
@@ -1940,6 +1936,21 @@ Float sprites over the player's head
 */
 static void CG_PlayerSprites( centity_t *cent ) {
 	int		team;
+
+    if (cent->currentState.number == cg.snap->ps.clientNum) {
+        return;
+    }
+
+    if (cgs.gametype == GT_KINGOFTHEHILL && !(cent->currentState.eFlags & EF_DEAD)) {
+        if (cent->currentState.powerups & (1 << PW_KING)) {
+            CG_PlayerFloatSprite(cent, cgs.media.medalExcellent);
+            return;
+        }
+
+        if (cg.snap->ps.powerups[PW_KING]) {
+            CG_PlayerFloatSprite(cent, cgs.media.friendShader);
+        }
+    }
 
 	if ( cent->currentState.eFlags & EF_CONNECTION ) {
 		CG_PlayerFloatSprite( cent, cgs.media.connectionShader );

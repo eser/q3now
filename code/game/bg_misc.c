@@ -816,6 +816,12 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 
 	switch( item->giType ) {
 	case IT_WEAPON:
+        if (gametype == GT_KINGOFTHEHILL) {
+            if (!ps->powerups[PW_KING] && item->giTag > WP_ROCKET_LAUNCHER) {
+                return qfalse;
+            }
+        }
+
         // always pick up dropped weapons
         if (ent->eFlags & EF_DROPPED_ITEM) {
             return qtrue;
@@ -828,6 +834,12 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
         return qtrue;
 
 	case IT_AMMO:
+        if (gametype == GT_KINGOFTHEHILL) {
+            if (!ps->powerups[PW_KING] && item->giTag > WP_ROCKET_LAUNCHER) {
+                return qfalse;
+            }
+        }
+
 #ifndef Q3_UI
         switch (item->giTag)
         {
@@ -855,6 +867,12 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
         return qtrue;
 
 	case IT_ARMOR:
+        if (gametype == GT_KINGOFTHEHILL) {
+            if (ps->powerups[PW_KING]) {
+                return qfalse;
+            }
+        }
+
         if (ps->stats[STAT_ARMORCLASS] == ARM_NONE && item->giTag == ARM_NONE) {
             return qfalse;
         }
