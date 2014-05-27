@@ -48,6 +48,8 @@ The major features that implemented so far:
 - New Plasma Gun (called Plasma Rifle)
 - New Weapon Balances
 - Wall jumps ([youtu.be/RPwSBUZ2Ebw](//youtu.be/RPwSBUZ2Ebw))
+- New Game Mod: King of the Hill
+- Offhand Grapple (`+seta g_grapple 1`)
 
 ## Mod TODO list
 - Unlagged implementation
@@ -55,7 +57,7 @@ The major features that implemented so far:
 - New Team System
 - Spectator Cameras
 - New Powerup System
-- New Game Mods (King of the Hill, Freeze Tag, Clan Arena, Last Man Standing, etc.)
+- New Game Mods (Freeze Tag, Clan Arena, Last Man Standing, InstaGib, etc.)
 - A modern HUD with new menu system
 
 ## Contributing
