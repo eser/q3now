@@ -1321,6 +1321,14 @@ void BotHarvesterRetreatGoals(bot_state_t *bs) {
 
 /*
 ==================
+BotKingOfTheHillSeekGoals
+==================
+*/
+void BotKingOfTheHillSeekGoals(bot_state_t *bs) {
+}
+
+/*
+==================
 BotTeamGoals
 ==================
 */
@@ -1358,6 +1366,11 @@ void BotTeamGoals(bot_state_t *bs, int retreat) {
 			BotHarvesterSeekGoals(bs);
 		}
 #endif
+
+        if (gametype == GT_KINGOFTHEHILL) {
+            //decide what to do in CTF mode
+            BotKingOfTheHillSeekGoals(bs);
+        }
 	}
 	// reset the order time which is used to see if
 	// we decided to refuse an order
@@ -2724,8 +2737,27 @@ int BotSameTeam(bot_state_t *bs, int entnum) {
 		return qfalse;
 	}
 
-	if (gametype >= GT_TEAM) {
-		if (level.clients[bs->client].sess.sessionTeam == level.clients[entnum].sess.sessionTeam) return qtrue;
+    if (gametype == GT_KINGOFTHEHILL) {
+        playerState_t myPs;
+        playerState_t ps;
+
+        BotAI_GetClientState(bs->client, &myPs);
+        BotAI_GetClientState(entnum, &ps);
+
+        if (myPs.powerups[PW_KING]) {
+            return qfalse;
+        }
+        if (ps.powerups[PW_KING]) {
+            return qfalse;
+        }
+
+        return qtrue;
+    }
+    
+    if (gametype >= GT_TEAM) {
+        if (level.clients[bs->client].sess.sessionTeam == level.clients[entnum].sess.sessionTeam) {
+            return qtrue;
+        }
 	}
 
 	return qfalse;

@@ -1123,6 +1123,7 @@ void ClientSpawn(gentity_t *ent) {
 	client->accuracy_hits = accuracy_hits;
 	client->accuracy_shots = accuracy_shots;
 	client->lastkilled_client = -1;
+    client->lasthurt_time = level.time;
 
 	for ( i = 0 ; i < MAX_PERSISTANT ; i++ ) {
 		client->ps.persistant[i] = persistant[i];
@@ -1155,8 +1156,20 @@ void ClientSpawn(gentity_t *ent) {
 
 	client->ps.clientNum = index;
 
-	client->ps.stats[STAT_WEAPONS] = ( 1 << WP_MACHINEGUN );
-	client->ps.ammo[WP_MACHINEGUN] = cpm_MGweapon; // CPM
+    if (g_gametype.integer == GT_KINGOFTHEHILL) {
+        for (i = WP_GAUNTLET + 1; i <= WP_ROCKET_LAUNCHER; i++) {
+            if (!(level.mapWeapons & (1 << i))) {
+                continue;
+            }
+
+            client->ps.stats[STAT_WEAPONS] |= (1 << i);
+            client->ps.ammo[i] = 50;
+        }
+    }
+    else {
+        client->ps.stats[STAT_WEAPONS] = (1 << WP_MACHINEGUN);
+        client->ps.ammo[WP_MACHINEGUN] = cpm_MGweapon; // CPM
+    }
 
 	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_GAUNTLET );
 	client->ps.ammo[WP_GAUNTLET] = -1;
@@ -1187,20 +1200,20 @@ void ClientSpawn(gentity_t *ent) {
 	if (!level.intermissiontime) {
 		if (ent->client->sess.sessionTeam != TEAM_SPECTATOR) {
 			G_KillBox(ent);
-			// force the base weapon up
-			client->ps.weapon = WP_MACHINEGUN;
+
+            // force the base weapon up
+            for (i = WP_ROCKET_LAUNCHER; i > WP_GAUNTLET; i--) {
+                if (client->ps.stats[STAT_WEAPONS] & (1 << i)) {
+                    client->ps.weapon = i;
+                    break;
+                }
+            }
+
 			client->ps.weaponstate = WEAPON_READY;
+
 			// fire the targets of the spawn point
 			G_UseTargets(spawnPoint, ent);
-			// select the highest weapon number available, after any spawn given items have fired
-			client->ps.weapon = 1;
 
-			for (i = WP_NUM_WEAPONS - 1 ; i > 0 ; i--) {
-				if (client->ps.stats[STAT_WEAPONS] & (1 << i)) {
-					client->ps.weapon = i;
-					break;
-				}
-			}
 			// positively link the client, even if the command times are weird
 			VectorCopy(ent->client->ps.origin, ent->r.currentOrigin);
 
@@ -1209,6 +1222,14 @@ void ClientSpawn(gentity_t *ent) {
 
 			trap_LinkEntity (ent);
 		}
+
+        if (ent->client->sess.sessionTeam != TEAM_SPECTATOR) {
+            if (g_gametype.integer == GT_KINGOFTHEHILL) {
+                if (!FindTheKing()) {
+                    AssignAKing(ent);
+                }
+            }
+        }
 	} else {
 		// move players to intermission
 		MoveClientToIntermission(ent);
@@ -1218,6 +1239,7 @@ void ClientSpawn(gentity_t *ent) {
 	client->ps.commandTime = level.time - 100;
 	ent->client->pers.cmd.serverTime = level.time;
 	ClientThink( ent-g_entities );
+
 	// run the presend to set anything else, follow spectators wait
 	// until all clients have been reconnected after map_restart
 	if ( ent->client->sess.spectatorState != SPECTATOR_FOLLOW ) {
@@ -1289,7 +1311,12 @@ void ClientDisconnect( int clientNum ) {
 		&& !level.warmupTime && level.sortedClients[1] == clientNum ) {
 		level.clients[ level.sortedClients[0] ].sess.wins++;
 		ClientUserinfoChanged( level.sortedClients[0] );
-	}
+    }
+    else if (g_gametype.integer == GT_KINGOFTHEHILL && !level.intermissiontime) {
+        if (ent->client->ps.powerups[PW_KING]) {
+            AssignAKing(NULL);
+        }
+    }
 
 	if( g_gametype.integer == GT_TOURNAMENT &&
 		ent->client->sess.sessionTeam == TEAM_FREE &&

@@ -571,6 +571,10 @@ static void CG_DrawStatusBar( void ) {
 		CG_DrawStatusBarFlag( 185 + CHAR_WIDTH*3 + TEXT_ICON_SPACE + ICON_SIZE, TEAM_FREE );
 	}
 
+    if (cgs.gametype == GT_KINGOFTHEHILL && ps->powerups[PW_KING]) {
+        CG_DrawPic(185 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE + ICON_SIZE, 480 - ICON_SIZE, ICON_SIZE, ICON_SIZE, cgs.media.medalExcellent);
+    }
+
     if (ps->stats[STAT_ARMORCLASS] > ARM_NONE && ps->stats[STAT_ARMOR]) {
         qhandle_t *model;
         
@@ -2370,9 +2374,13 @@ static void CG_DrawWarmup( void ) {
 	} else {
 		if ( cgs.gametype == GT_FFA ) {
 			s = "Free For All";
-		} else if ( cgs.gametype == GT_TEAM ) {
-			s = "Team Deathmatch";
-		} else if ( cgs.gametype == GT_CTF ) {
+        } else if ( cgs.gametype == GT_TOURNAMENT ) {
+            s = "Tournament";
+        } else if (cgs.gametype == GT_KINGOFTHEHILL) {
+            s = "King of the Hill";
+        } else if ( cgs.gametype == GT_TEAM ) {
+            s = "Team Deathmatch";
+        } else if ( cgs.gametype == GT_CTF ) {
 			s = "Capture the Flag";
 #ifdef MISSIONPACK
 		} else if ( cgs.gametype == GT_1FCTF ) {

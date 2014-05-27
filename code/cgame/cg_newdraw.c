@@ -1164,9 +1164,13 @@ static void CG_DrawGameStatus(rectDef_t *rect, float scale, vec4_t color, qhandl
 }
 
 const char *CG_GameTypeString(void) {
-	if ( cgs.gametype == GT_FFA ) {
-		return "Free For All";
-	} else if ( cgs.gametype == GT_TEAM ) {
+    if (cgs.gametype == GT_FFA) {
+        return "Free For All";
+    } else if (cgs.gametype == GT_TOURNAMENT) {
+        return "Tournament";
+    } else if (cgs.gametype == GT_KINGOFTHEHILL) {
+        return "King of the Hill";
+    } else if (cgs.gametype == GT_TEAM) {
 		return "Team Deathmatch";
 	} else if ( cgs.gametype == GT_CTF ) {
 		return "Capture the Flag";

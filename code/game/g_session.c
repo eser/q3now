@@ -123,6 +123,7 @@ void G_InitSessionData( gclient_t *client, char *userinfo ) {
 			switch ( g_gametype.integer ) {
 			default:
 			case GT_FFA:
+            case GT_KINGOFTHEHILL:
 				if ( g_maxGameClients.integer > 0 && 
 					level.numNonSpectatorClients >= g_maxGameClients.integer ) {
 					sess->sessionTeam = TEAM_SPECTATOR;

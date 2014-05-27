@@ -1228,7 +1228,8 @@ void Cmd_Where_f( gentity_t *ent ) {
 static const char *gameNames[] = {
 	"Free For All",
 	"Tournament",
-	"Single Player",
+    "Dummy",
+	"King of the Hill",
 	"Team Deathmatch",
 	"Capture the Flag",
 	"One Flag CTF",

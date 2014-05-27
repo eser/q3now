@@ -278,11 +278,6 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 
 	Add_Ammo( other, ent->item->giTag, quantity );
 
-	// team deathmatch has slow weapon respawns
-	if ( g_gametype.integer == GT_TEAM ) {
-		return g_weaponTeamRespawn.integer;
-	}
-
 	return g_weaponRespawn.integer;
 }
 
@@ -725,6 +720,10 @@ void FinishSpawningItem( gentity_t *ent ) {
 		return;
 	}
 
+    if (ent->item->giType == IT_WEAPON) {
+        level.mapWeapons |= (1 << ent->item->giTag);
+    }
+
 	// powerups don't spawn in for a while
 	// if ( ent->item->giType == IT_POWERUP ) {
     if (ent->item->giType == IT_POWERUP && !cpm_startpowerups) { // CPM
@@ -900,6 +899,10 @@ int G_ItemDisabled( gitem_t *item ) {
 
 	char name[128];
     int i;
+
+    if (item->giType == IT_POWERUP && (g_gametype.integer == GT_TOURNAMENT || g_gametype.integer == GT_KINGOFTHEHILL)) {
+        return 1;
+    }
 
     for (i = 0; i < MAX_ITEM_CLASSNAMES; i++) {
         if (item->classnames[i]) {

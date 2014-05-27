@@ -3579,7 +3579,7 @@ static int UI_MapCountByGameType(qboolean singlePlayer) {
 	int i, c, game;
 	c = 0;
 	game = singlePlayer ? uiInfo.gameTypes[ui_gameType.integer].gtEnum : uiInfo.gameTypes[ui_netGameType.integer].gtEnum;
-	if (game == GT_TEAM) {
+	if (game == GT_KINGOFTHEHILL || game == GT_TEAM) {
 		game = GT_FFA;
 	}
 

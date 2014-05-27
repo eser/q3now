@@ -182,6 +182,7 @@ void UI_LoadArenas( void ) {
 		if( *type ) {
 			if( strstr( type, "ffa" ) ) {
 				uiInfo.mapList[uiInfo.mapCount].typeBits |= (1 << GT_FFA);
+                uiInfo.mapList[uiInfo.mapCount].typeBits |= (1 << GT_KINGOFTHEHILL);
 			}
 			if( strstr( type, "tourney" ) ) {
 				uiInfo.mapList[uiInfo.mapCount].typeBits |= (1 << GT_TOURNAMENT);

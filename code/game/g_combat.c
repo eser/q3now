@@ -107,7 +107,7 @@ void TossClientItems( gentity_t *self ) {
     // }
 
     // CPM
-    if (weapon > WP_MACHINEGUN &&
+    if (g_gametype.integer != GT_KINGOFTHEHILL && weapon >= WP_MACHINEGUN &&
         self->client->ps.ammo[weapon] || cpm_backpacks) {
         // find the item type for this weapon
         item = BG_FindItemForWeapon(weapon);
@@ -500,9 +500,19 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		attacker->client->lastkilled_client = self->s.number;
 
 		if ( attacker == self || OnSameTeam (self, attacker ) ) {
+            if (g_gametype.integer == GT_KINGOFTHEHILL && self->client->ps.powerups[PW_KING]) {
+                AssignAKing(NULL);
+            }
+
 			AddScore( attacker, self->r.currentOrigin, -1 );
 		} else {
-			AddScore( attacker, self->r.currentOrigin, 1 );
+            if (g_gametype.integer == GT_KINGOFTHEHILL && self->client->ps.powerups[PW_KING]) {
+                AddScore(attacker, self->r.currentOrigin, 5);
+                AssignAKing(attacker);
+            }
+            else {
+                AddScore(attacker, self->r.currentOrigin, 1);
+            }
 
 			if( meansOfDeath == MOD_GAUNTLET ) {
 				
@@ -533,6 +543,10 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 		}
 	} else {
+        if (g_gametype.integer == GT_KINGOFTHEHILL && self->client->ps.powerups[PW_KING]) {
+            AssignAKing(NULL);
+        }
+
 		AddScore( self, self->r.currentOrigin, -1 );
 	}
 
@@ -709,9 +723,11 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
 	if (!save)
 		return 0;
 
-	client->ps.stats[STAT_ARMOR] -= save;
-    if (client->ps.stats[STAT_ARMOR] <= 0) {
-        client->ps.stats[STAT_ARMORCLASS] = ARM_NONE;
+    if (g_gametype.integer == GT_KINGOFTHEHILL && !ent->client->ps.powerups[PW_KING]) {
+        client->ps.stats[STAT_ARMOR] -= save;
+        if (client->ps.stats[STAT_ARMOR] <= 0) {
+            client->ps.stats[STAT_ARMORCLASS] = ARM_NONE;
+        }
     }
 
 	return save;
@@ -1051,6 +1067,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		// set the last client who damaged the target
 		targ->client->lasthurt_client = attacker->s.number;
 		targ->client->lasthurt_mod = mod;
+        targ->client->lasthurt_time = level.time;
 	}
 
 	// do the damage

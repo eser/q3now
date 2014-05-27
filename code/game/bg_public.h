@@ -110,7 +110,11 @@ typedef enum {
 	GT_FFA,				// free for all
 	GT_TOURNAMENT,		// one on one tournament
 
-	//-- team games go after this --
+    GT_DUMMY,
+
+    GT_KINGOFTHEHILL,
+
+    //-- team games go after this --
 
 	GT_TEAM,			// team deathmatch
 	GT_CTF,				// capture the flag
@@ -295,6 +299,8 @@ typedef enum {
 	PW_NEUTRALFLAG,
 
 	PW_INVULNERABILITY,
+
+    PW_KING,
 
 	PW_NUM_POWERUPS
 
