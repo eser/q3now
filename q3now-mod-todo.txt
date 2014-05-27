@@ -15,7 +15,6 @@ TODO:
 * mod ffa -> deathmatch
 * mod freezetag
 * mod clan arena
-* mod king of the hill
 * mod last man standing
 * new ui library
 * only quad explosions+gauntlet gibs players, only explosions+gauntlet gibs corpses.
