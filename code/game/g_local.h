@@ -314,6 +314,8 @@ struct gclient_s {
 	char		*areabits;
 
     qboolean	hookhasbeenfired;
+
+    int         lasthurt_time;
 };
 
 
@@ -404,6 +406,8 @@ typedef struct {
 #ifdef MISSIONPACK
 	int			portalSequence;
 #endif
+
+    int			mapWeapons;
 } level_locals_t;
 
 
@@ -711,7 +715,6 @@ extern	vmCvar_t	g_debugMove;
 extern	vmCvar_t	g_debugAlloc;
 extern	vmCvar_t	g_debugDamage;
 extern	vmCvar_t	g_weaponRespawn;
-extern	vmCvar_t	g_weaponTeamRespawn;
 extern	vmCvar_t	g_synchronousClients;
 extern	vmCvar_t	g_motd;
 extern	vmCvar_t	g_warmup;

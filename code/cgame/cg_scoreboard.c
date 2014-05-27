@@ -78,24 +78,30 @@ static qboolean localClient; // true if local client has been displayed
 CG_DrawScoreboard
 =================
 */
-static void CG_DrawClientScore( int y, score_t *score, float *color, float fade, qboolean largeFormat ) {
-	char	string[1024];
-	vec3_t	headAngles;
-	clientInfo_t	*ci;
-	int iconx, headx;
+static void CG_DrawClientScore(int y, score_t *score, float *color, float fade, qboolean largeFormat) {
+    char	string[1024];
+    vec3_t	headAngles;
+    clientInfo_t	*ci;
+    int iconx, headx;
 
-	if ( score->client < 0 || score->client >= cgs.maxclients ) {
-		Com_Printf( "Bad score->client: %i\n", score->client );
-		return;
-	}
-	
-	ci = &cgs.clientinfo[score->client];
+    if (score->client < 0 || score->client >= cgs.maxclients) {
+        Com_Printf("Bad score->client: %i\n", score->client);
+        return;
+    }
 
-	iconx = SB_BOTICON_X + (SB_RATING_WIDTH / 2);
-	headx = SB_HEAD_X + (SB_RATING_WIDTH / 2);
+    ci = &cgs.clientinfo[score->client];
 
-	// draw the handicap or bot skill marker (unless player has flag)
-	if ( ci->powerups & ( 1 << PW_NEUTRALFLAG ) ) {
+    iconx = SB_BOTICON_X + (SB_RATING_WIDTH / 2);
+    headx = SB_HEAD_X + (SB_RATING_WIDTH / 2);
+
+    // draw the king or bot skill marker (unless player has flag)
+    if (cgs.gametype == GT_KINGOFTHEHILL) {
+        if (ci->powerups & (1 << PW_KING)) {
+            CG_DrawPic(iconx, y - (32 - BIGCHAR_HEIGHT) / 2, 32, 32, cgs.media.medalExcellent);
+        }
+    }
+
+    if (ci->powerups & (1 << PW_NEUTRALFLAG)) {
 		if( largeFormat ) {
 			CG_DrawFlagModel( iconx, y - ( 32 - BIGCHAR_HEIGHT ) / 2, 32, 32, TEAM_FREE, qfalse );
 		}
@@ -126,23 +132,12 @@ static void CG_DrawClientScore( int y, score_t *score, float *color, float fade,
 					CG_DrawPic( iconx, y, 16, 16, cgs.media.botSkillShaders[ ci->botSkill - 1 ] );
 				}
 			}
-		} else if ( ci->handicap < 100 ) {
-			Com_sprintf( string, sizeof( string ), "%i", ci->handicap );
-			if ( cgs.gametype == GT_TOURNAMENT )
-				CG_DrawSmallStringColor( iconx, y - SMALLCHAR_HEIGHT/2, string, color );
-			else
-				CG_DrawSmallStringColor( iconx, y, string, color );
 		}
 
 		// draw the wins / losses
 		if ( cgs.gametype == GT_TOURNAMENT ) {
 			Com_sprintf( string, sizeof( string ), "%i/%i", ci->wins, ci->losses );
-			if( ci->handicap < 100 && !ci->botSkill ) {
-				CG_DrawSmallStringColor( iconx, y + SMALLCHAR_HEIGHT/2, string, color );
-			}
-			else {
-				CG_DrawSmallStringColor( iconx, y, string, color );
-			}
+			CG_DrawSmallStringColor( iconx, y, string, color );
 		}
 	}
 

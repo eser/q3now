@@ -234,10 +234,13 @@ void CG_DrawInformation( void ) {
 	case GT_FFA:
 		s = "Free For All";
 		break;
-	case GT_TOURNAMENT:
-		s = "Tournament";
-		break;
-	case GT_TEAM:
+    case GT_TOURNAMENT:
+        s = "Tournament";
+        break;
+    case GT_KINGOFTHEHILL:
+        s = "King of the Hill";
+        break;
+    case GT_TEAM:
 		s = "Team Deathmatch";
 		break;
 	case GT_CTF:

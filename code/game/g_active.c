@@ -388,7 +388,6 @@ Actions that happen once a second
 */
 void ClientTimerActions( gentity_t *ent, int msec ) {
 	gclient_t	*client;
-	int			maxHealth;
 
 	client = ent->client;
 	client->timeResidual += msec;
@@ -397,25 +396,19 @@ void ClientTimerActions( gentity_t *ent, int msec ) {
 		client->timeResidual -= 1000;
 
 		// regenerate
-        if ( client->ps.powerups[PW_REGEN] ) {
-			maxHealth = MAX_HEALTH;
-		}
-		else {
-			maxHealth = 0;
-		}
-		if( maxHealth ) {
-			if ( ent->health < maxHealth ) {
-				ent->health += 15;
-				if ( ent->health > maxHealth * 1.1 ) {
-					ent->health = maxHealth * 1.1;
-				}
-				G_AddEvent( ent, EV_POWERUP_REGEN, 0 );
-			} else if ( ent->health < maxHealth * 2) {
-				ent->health += 5;
-				if ( ent->health > maxHealth * 2 ) {
-					ent->health = maxHealth * 2;
-				}
-				G_AddEvent( ent, EV_POWERUP_REGEN, 0 );
+        if (client->ps.powerups[PW_REGEN] || (g_gametype.integer == GT_KINGOFTHEHILL && client->ps.powerups[PW_KING])) {
+            int diff = level.time - client->lasthurt_time;
+            if (diff > 10000) {
+                diff = 10000;
+            }
+
+            if (ent->health < MAX_HEALTH) {
+				ent->health += diff / 1000;
+                if (ent->health > MAX_HEALTH) {
+                    ent->health = MAX_HEALTH;
+                }
+
+                G_AddEvent( ent, EV_POWERUP_REGEN, 0 );
 			}
 		} else {
 			// count down health when over max
@@ -1028,7 +1021,7 @@ void ClientEndFrame( gentity_t *ent ) {
 	}
 
 	// turn off any expired powerups
-	for ( i = 0 ; i < MAX_POWERUPS ; i++ ) {
+    for (i = 0; i < PW_REDFLAG; i++) {
 		if ( ent->client->ps.powerups[ i ] < level.time ) {
 			ent->client->ps.powerups[ i ] = 0;
 		}

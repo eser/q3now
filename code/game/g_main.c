@@ -59,7 +59,6 @@ vmCvar_t	g_debugMove;
 vmCvar_t	g_debugDamage;
 vmCvar_t	g_debugAlloc;
 vmCvar_t	g_weaponRespawn;
-vmCvar_t	g_weaponTeamRespawn;
 vmCvar_t	g_motd;
 vmCvar_t	g_synchronousClients;
 vmCvar_t	g_warmup;
@@ -141,7 +140,6 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_gravity, "g_gravity", "800", 0, 0, qtrue  },
 	{ &g_knockback, "g_knockback", "1000", 0, 0, qtrue  },
 	{ &g_weaponRespawn, "g_weaponrespawn", "5", 0, 0, qtrue  },
-	{ &g_weaponTeamRespawn, "g_weaponTeamRespawn", "30", 0, 0, qtrue },
 	{ &g_forcerespawn, "g_forcerespawn", "20", 0, 0, qtrue },
 	{ &g_inactivity, "g_inactivity", "0", 0, 0, qtrue },
 	{ &g_debugMove, "g_debugMove", "0", 0, 0, qfalse },
@@ -1430,6 +1428,127 @@ FUNCTIONS CALLED EVERY FRAME
 ========================================================================
 */
 
+/*
+==================
+FindTheKing
+==================
+*/
+gentity_t *FindTheKing() {
+    gentity_t *ent;
+    int i;
+
+    if (g_gametype.integer != GT_KINGOFTHEHILL) {
+        return NULL;
+    }
+
+    for (i = 0; i< g_maxclients.integer; i++) {
+        ent = g_entities + i;
+        if (!ent->client) {
+            continue;
+        }
+
+        if (ent->client->pers.connected != CON_CONNECTED) {
+            continue;
+        }
+
+        if (ent->client->sess.sessionTeam != TEAM_FREE) {
+            continue;
+        }
+
+        if (ent->health <= 0) {
+            continue;
+        }
+
+        if (ent->client->ps.powerups[PW_KING]) {
+            return ent;
+        }
+    }
+
+    return NULL;
+}
+
+/*
+==================
+HonorAsKing
+==================
+*/
+qboolean HonorAsKing(gentity_t *ent) {
+    int i;
+
+    if (g_gametype.integer != GT_KINGOFTHEHILL) {
+        return qfalse;
+    }
+
+    if (!ent->client) {
+        return qfalse;
+    }
+
+    if (ent->client->pers.connected != CON_CONNECTED) {
+        return qfalse;
+    }
+
+    if (ent->client->sess.sessionTeam != TEAM_FREE) {
+        return qfalse;
+    }
+
+
+
+    if (ent->health <= 0) {
+        return qfalse;
+    }
+
+    ent->client->ps.powerups[PW_KING] = -1;
+
+    ent->health = ent->client->ps.stats[STAT_HEALTH] = MAX_HEALTH;
+    ent->client->ps.stats[STAT_ARMOR] = MAX_ARMOR;
+    ent->client->ps.stats[STAT_ARMORCLASS] = ARM_HEAVY;
+
+    for (i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++) {
+        if (!(level.mapWeapons & (1 << i))) {
+            continue;
+        }
+
+        ent->client->ps.stats[STAT_WEAPONS] |= (1 << i);
+        ent->client->ps.ammo[i] = 50;
+    }
+
+    trap_SendServerCommand(-1, va("cp \"%s is the new king\n\"", ent->client->pers.netname));
+
+    return qtrue;
+}
+
+/*
+==================
+AssignAKing
+==================
+*/
+gentity_t *AssignAKing(gentity_t *preferred) {
+    gentity_t *ent;
+    int i;
+
+    if (HonorAsKing(preferred)) {
+        return preferred;
+    }
+
+    for (i = 0; i< g_maxclients.integer; i++) {
+        ent = g_entities + i;
+        if (ent == preferred) {
+            continue;
+        }
+
+        if (HonorAsKing(ent)) {
+            return ent;
+        }
+    }
+
+    return NULL;
+}
+
+void CheckKingOfTheHill(void) {
+    //if(!FindTheKing()) {
+    //	AssignAKing( NULL );
+    //}
+}
 
 /*
 =============

@@ -93,6 +93,10 @@ typedef enum {
 	GT_FFA,				// free for all
 	GT_TOURNAMENT,		// one on one tournament
 
+    GT_DUMMY,
+
+    GT_KINGOFTHEHILL,
+
 	//-- team games go after this --
 
 	GT_TEAM,			// team deathmatch
