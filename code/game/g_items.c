@@ -153,12 +153,12 @@ int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 {
     int		quantity;
 
-    if (ent->count) {
-        quantity = ent->count;
-    }
-    else {
+    // if (ent->count) {
+    //    quantity = ent->count;
+    // }
+    // else {
         quantity = bg_weaponlist[ent->item->giTag].ammoBox;
-    }
+    // }
 
     Add_Ammo(other, ent->item->giTag, quantity);
 
@@ -215,11 +215,11 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 	if ( ent->count < 0 ) {
 		quantity = 0; // None for you, sir!
 	} else {
-		if ( ent->count ) {
-			quantity = ent->count;
-		} else {
+		// if ( ent->count ) {
+		//	quantity = ent->count;
+		// } else {
             quantity = bg_weaponlist[ent->item->giTag].ammoBox;
-		}
+		// }
 
 		// dropped items and teamplay weapons always have full ammo
         if (!(ent->s.eFlags & EF_DROPPED_ITEM) && g_gametype.integer != GT_TEAM) {
