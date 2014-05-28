@@ -827,9 +827,12 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
             return qtrue;
         }
 
-        if (ps->stats[STAT_WEAPONS] & (1 << item->giTag) && ps->ammo[item->giTag] >= item->quantity) {
+#ifndef Q3_UI
+        // if (ps->stats[STAT_WEAPONS] & (1 << item->giTag) && ps->ammo[item->giTag] >= item->quantity) {
+        if (ps->stats[STAT_WEAPONS] & (1 << item->giTag) && ps->ammo[item->giTag] >= bg_weaponlist[item->giTag].minAmmunition) {
             return qfalse;
         }
+#endif
 
         return qtrue;
 

@@ -1156,33 +1156,14 @@ void ClientSpawn(gentity_t *ent) {
 
 	client->ps.clientNum = index;
 
-    if (g_gametype.integer == GT_KINGOFTHEHILL) {
-        for (i = WP_GAUNTLET + 1; i <= WP_ROCKET_LAUNCHER; i++) {
-            if (!bg_weaponlist[i].spawnWeapon && !(level.mapWeapons & (1 << i)) && g_spawnWeapons.integer <= 1) {
-                continue;
-            }
-
+    for (i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++) {
+        if ((g_spawnWeapons.integer || level.warmupTime || (g_gametype.integer == GT_KINGOFTHEHILL && i <= WP_ROCKET_LAUNCHER)) && (level.mapWeapons & (1 << i))) {
             client->ps.stats[STAT_WEAPONS] |= (1 << i);
             client->ps.ammo[i] = bg_weaponlist[i].minAmmunition;
         }
-    }
-    else {
-        for (i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++) {
-            if (g_spawnWeapons.integer || level.warmupTime) {
-                if (!bg_weaponlist[i].spawnWeapon && !(level.mapWeapons & (1 << i)) && g_spawnWeapons.integer <= 1) {
-                    continue;
-                }
-
-                client->ps.stats[STAT_WEAPONS] |= (1 << i);
-                client->ps.ammo[i] = bg_weaponlist[i].minAmmunition;
-            }
-            else {
-                if (bg_weaponlist[i].spawnWeapon) {
-                    client->ps.stats[STAT_WEAPONS] |= (1 << i);
-                }
-
-                client->ps.ammo[i] = bg_weaponlist[i].spawnAmmunition;
-            }
+        else if (bg_weaponlist[i].spawnWeapon) {
+            client->ps.stats[STAT_WEAPONS] |= (1 << i);
+            client->ps.ammo[i] = bg_weaponlist[i].spawnAmmunition;
         }
     }
 
