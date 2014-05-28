@@ -1017,6 +1017,7 @@ void ClientBegin( int clientNum ) {
 
     if (g_gametype.integer == GT_LASTMANSTANDING) {
         ent->client->ps.persistant[PERS_SCORE] = level.initialFraglimit;
+        // client->sess.sessionTeam = TEAM_FREE;
     }
 
     // locate ent at a spawn point

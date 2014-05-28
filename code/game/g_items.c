@@ -212,31 +212,23 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
     }
     // !CPM
 
-	if ( ent->count < 0 ) {
-		quantity = 0; // None for you, sir!
-	} else {
-		// if ( ent->count ) {
-		//	quantity = ent->count;
-		// } else {
-            quantity = bg_weaponlist[ent->item->giTag].ammoBox;
-		// }
-
-		// dropped items and teamplay weapons always have full ammo
-        if (!(ent->s.eFlags & EF_DROPPED_ITEM) && g_gametype.integer != GT_TEAM) {
-			// respawning rules
-			// drop the quantity if the already have over the minimum
-			if ( other->client->ps.ammo[ ent->item->giTag ] < quantity ) {
-				quantity = quantity - other->client->ps.ammo[ ent->item->giTag ];
-			} else {
-				quantity = 1;		// only add a single shot
-			}
-		}
+	// dropped items
+    if (ent->s.eFlags & EF_DROPPED_ITEM) {
+        quantity = ent->count;
+    }
+    else if (other->client->ps.ammo[ent->item->giTag] < bg_weaponlist[ent->item->giTag].ammoBox) {
+        quantity = bg_weaponlist[ent->item->giTag].ammoBox - other->client->ps.ammo[ent->item->giTag];
+	}
+    else {
+		quantity = 0;
 	}
 
 	// add the weapon
 	other->client->ps.stats[STAT_WEAPONS] |= ( 1 << ent->item->giTag );
 
-	Add_Ammo( other, ent->item->giTag, quantity );
+    if (quantity > 0) {
+        Add_Ammo(other, ent->item->giTag, quantity);
+    }
 
     return cpm_itemrespawnweapon; // CPM
 }
@@ -587,7 +579,7 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity ) {
 		dropped->nextthink = level.time + 30000;
 	}
 
-    dropped->s.eFlags = EF_DROPPED_ITEM;
+    dropped->s.eFlags |= EF_DROPPED_ITEM;
 
 	trap_LinkEntity (dropped);
 
