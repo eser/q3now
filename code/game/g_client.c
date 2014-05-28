@@ -1016,13 +1016,7 @@ void ClientBegin( int clientNum ) {
 	client->ps.eFlags = flags;
 
     if (g_gametype.integer == GT_LASTMANSTANDING) {
-        int fraglimit = g_fraglimit.integer;
-
-        if (fraglimit < 1) {
-            fraglimit = 1;
-        }
-
-        ent->client->ps.persistant[PERS_SCORE] = fraglimit;
+        ent->client->ps.persistant[PERS_SCORE] = level.initialFraglimit;
     }
 
     // locate ent at a spawn point
