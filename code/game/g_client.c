@@ -1158,21 +1158,33 @@ void ClientSpawn(gentity_t *ent) {
 
     if (g_gametype.integer == GT_KINGOFTHEHILL) {
         for (i = WP_GAUNTLET + 1; i <= WP_ROCKET_LAUNCHER; i++) {
-            if (!(level.mapWeapons & (1 << i))) {
+            if (!bg_weaponlist[i].spawnWeapon && !(level.mapWeapons & (1 << i)) && g_spawnWeapons.integer <= 1) {
                 continue;
             }
 
             client->ps.stats[STAT_WEAPONS] |= (1 << i);
-            client->ps.ammo[i] = 50;
+            client->ps.ammo[i] = bg_weaponlist[i].maxAmmunition;
         }
     }
     else {
-        client->ps.stats[STAT_WEAPONS] = (1 << WP_MACHINEGUN);
-        client->ps.ammo[WP_MACHINEGUN] = cpm_MGweapon; // CPM
-    }
+        for (i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++) {
+            if (g_spawnWeapons.integer || level.warmupTime) {
+                if (!bg_weaponlist[i].spawnWeapon && !(level.mapWeapons & (1 << i)) && g_spawnWeapons.integer <= 1) {
+                    continue;
+                }
 
-	client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_GAUNTLET );
-	client->ps.ammo[WP_GAUNTLET] = -1;
+                client->ps.stats[STAT_WEAPONS] |= (1 << i);
+                client->ps.ammo[i] = bg_weaponlist[i].minAmmunition;
+            }
+            else {
+                if (bg_weaponlist[i].spawnWeapon) {
+                    client->ps.stats[STAT_WEAPONS] |= (1 << i);
+                }
+
+                client->ps.ammo[i] = bg_weaponlist[i].spawnAmmunition;
+            }
+        }
+    }
 
 	// health will count down towards max_health
     ent->health = client->ps.stats[STAT_HEALTH] = MAX_HEALTH;
@@ -1201,6 +1213,9 @@ void ClientSpawn(gentity_t *ent) {
 		if (ent->client->sess.sessionTeam != TEAM_SPECTATOR) {
 			G_KillBox(ent);
 
+			// fire the targets of the spawn point
+			G_UseTargets(spawnPoint, ent);
+
             // force the base weapon up
             for (i = WP_ROCKET_LAUNCHER; i > WP_GAUNTLET; i--) {
                 if (client->ps.stats[STAT_WEAPONS] & (1 << i)) {
@@ -1209,12 +1224,9 @@ void ClientSpawn(gentity_t *ent) {
                 }
             }
 
-			client->ps.weaponstate = WEAPON_READY;
+            client->ps.weaponstate = WEAPON_READY;
 
-			// fire the targets of the spawn point
-			G_UseTargets(spawnPoint, ent);
-
-			// positively link the client, even if the command times are weird
+            // positively link the client, even if the command times are weird
 			VectorCopy(ent->client->ps.origin, ent->r.currentOrigin);
 
 			tent = G_TempEntity(ent->client->ps.origin, EV_PLAYER_TELEPORT_IN);

@@ -1531,6 +1531,27 @@ void CG_DrawWeaponSelect( void ) {
 	trap_R_SetColor( NULL );
 }
 
+/*
+===============
+CG_WeaponSelect
+===============
+*/
+qboolean CG_WeaponSelect(int i) {
+    char string[64];
+    char varname[128];
+
+    cg.weaponSelectTime = cg.time;
+    cg.weaponSelect = i;
+
+    Com_sprintf(varname, sizeof(varname), "cg_weaponConfig_%s", bg_weaponlist[i].shortname);
+    trap_Cvar_VariableStringBuffer(varname, string, 32);
+    if (string[0]) {
+        trap_SendConsoleCommand(va("vstr %s;", varname));
+    }
+
+    return qtrue;
+
+}
 
 /*
 ===============
@@ -1554,34 +1575,27 @@ CG_NextWeapon_f
 ===============
 */
 void CG_NextWeapon_f( void ) {
-	int		i;
-	int		original;
+    int		i;
 
-	if ( !cg.snap ) {
-		return;
-	}
-	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
-		return;
-	}
+    if (!cg.snap) {
+        return;
+    }
 
-	cg.weaponSelectTime = cg.time;
-	original = cg.weaponSelect;
+    if (cg.snap->ps.pm_flags & PMF_FOLLOW) {
+        return;
+    }
 
-	for ( i = 0 ; i < MAX_WEAPONS ; i++ ) {
-		cg.weaponSelect++;
-		if ( cg.weaponSelect == MAX_WEAPONS ) {
-			cg.weaponSelect = 0;
-		}
-		if ( cg.weaponSelect == WP_GAUNTLET ) {
-			continue;		// never cycle to gauntlet
-		}
-		if ( CG_WeaponSelectable( cg.weaponSelect ) ) {
-			break;
-		}
-	}
-	if ( i == MAX_WEAPONS ) {
-		cg.weaponSelect = original;
-	}
+    cg.weaponSelectTime = cg.time;
+
+    for (i = cg.weaponSelect + 1; i < WP_NUM_WEAPONS; i++) {
+        if (!bg_weaponlist[i].switchOnCycle) {
+            continue;
+        }
+        if (CG_WeaponSelectable(i)) {
+            CG_WeaponSelect(i);
+            break;
+        }
+    }
 }
 
 /*
@@ -1590,34 +1604,26 @@ CG_PrevWeapon_f
 ===============
 */
 void CG_PrevWeapon_f( void ) {
-	int		i;
-	int		original;
+    int		i;
 
-	if ( !cg.snap ) {
-		return;
-	}
-	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
-		return;
-	}
+    if (!cg.snap) {
+        return;
+    }
+    if (cg.snap->ps.pm_flags & PMF_FOLLOW) {
+        return;
+    }
 
-	cg.weaponSelectTime = cg.time;
-	original = cg.weaponSelect;
+    cg.weaponSelectTime = cg.time;
 
-	for ( i = 0 ; i < MAX_WEAPONS ; i++ ) {
-		cg.weaponSelect--;
-		if ( cg.weaponSelect == -1 ) {
-			cg.weaponSelect = MAX_WEAPONS - 1;
-		}
-		if ( cg.weaponSelect == WP_GAUNTLET ) {
-			continue;		// never cycle to gauntlet
-		}
-		if ( CG_WeaponSelectable( cg.weaponSelect ) ) {
-			break;
-		}
-	}
-	if ( i == MAX_WEAPONS ) {
-		cg.weaponSelect = original;
-	}
+    for (i = cg.weaponSelect - 1; i > WP_NONE; i--) {
+        if (!bg_weaponlist[i].switchOnCycle) {
+            continue;
+        }
+        if (CG_WeaponSelectable(i)) {
+            CG_WeaponSelect(i);
+            break;
+        }
+    }
 }
 
 /*
@@ -1626,28 +1632,30 @@ CG_Weapon_f
 ===============
 */
 void CG_Weapon_f( void ) {
-	int		num;
+    int		num;
 
-	if ( !cg.snap ) {
-		return;
-	}
-	if ( cg.snap->ps.pm_flags & PMF_FOLLOW ) {
-		return;
-	}
+    if (!cg.snap) {
+        return;
+    }
+    if (cg.snap->ps.pm_flags & PMF_FOLLOW) {
+        return;
+    }
 
-	num = atoi( CG_Argv( 1 ) );
+    num = atoi(CG_Argv(1));
 
-	if ( num < 1 || num > MAX_WEAPONS-1 ) {
-		return;
-	}
+    if (num <= WP_NONE || num >= WP_NUM_WEAPONS) {
+        return;
+    }
 
-	cg.weaponSelectTime = cg.time;
+    cg.weaponSelectTime = cg.time;
+    if (!cg_switchToEmpty.integer && !cg.snap->ps.ammo[num]) {
+        return;
+    }
+    if (!(cg.snap->ps.stats[STAT_WEAPONS] & (1 << num))) {
+        return;		// don't have the weapon
+    }
 
-	if ( ! ( cg.snap->ps.stats[STAT_WEAPONS] & ( 1 << num ) ) ) {
-		return;		// don't have the weapon
-	}
-
-	cg.weaponSelect = num;
+    CG_WeaponSelect(num);
 }
 
 /*
@@ -1658,16 +1666,19 @@ The current weapon has just run out of ammo
 ===================
 */
 void CG_OutOfAmmoChange( void ) {
-	int		i;
+    int		i;
 
-	cg.weaponSelectTime = cg.time;
+    cg.weaponSelectTime = cg.time;
 
-	for ( i = MAX_WEAPONS-1 ; i > 0 ; i-- ) {
-		if ( CG_WeaponSelectable( i ) ) {
-			cg.weaponSelect = i;
-			break;
-		}
-	}
+    for (i = WP_NUM_WEAPONS - 1; i > WP_NONE; i--) {
+        if (!bg_weaponlist[i].switchOnOutOfAmmo) {
+            continue;
+        }
+        if (CG_WeaponSelectable(i)) {
+            CG_WeaponSelect(i);
+            break;
+        }
+    }
 }
 
 

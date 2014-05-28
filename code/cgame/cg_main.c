@@ -190,6 +190,7 @@ vmCvar_t	cg_enableBreath;
 vmCvar_t	cg_obeliskRespawnDelay;
 #endif
 vmCvar_t	cg_singlePlayer;
+vmCvar_t    cg_switchToEmpty;
 
 typedef struct {
 	vmCvar_t	*vmCvar;
@@ -303,7 +304,9 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_oldRocket, "cg_oldRocket", "1", CVAR_ARCHIVE},
 //	{ &cg_pmove_fixed, "cg_pmove_fixed", "0", CVAR_USERINFO | CVAR_ARCHIVE }
 
-    { &cg_singlePlayer, "g_singlePlayer", "0", CVAR_USERINFO }
+    { &cg_singlePlayer, "g_singlePlayer", "0", CVAR_USERINFO },
+
+    { &cg_switchToEmpty, "cg_switchToEmpty", "0", CVAR_ARCHIVE }
 };
 
 static int  cvarTableSize = ARRAY_LEN( cvarTable );

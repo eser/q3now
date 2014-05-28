@@ -137,61 +137,21 @@ int Pickup_Holdable( gentity_t *ent, gentity_t *other ) {
 
 void Add_Ammo (gentity_t *ent, int weapon, int count)
 {
-	// ent->client->ps.ammo[weapon] += count;
-	// if ( ent->client->ps.ammo[weapon] > 200 ) {
-	//  ent->client->ps.ammo[weapon] = 200;
-	// }
-    // CPM: Cap ammo for certain weapons
-    int		quantity;
-
-    switch (weapon)
-    {
-    case WP_SHOTGUN:
-        quantity = cpm_SSGmaxammo;
-        break;
-    case WP_GRENADE_LAUNCHER:
-        quantity = cpm_GLmaxammo;
-        break;
-    case WP_ROCKET_LAUNCHER:
-        quantity = cpm_RLmaxammo;
-        break;
-    case WP_RAILGUN:
-        quantity = cpm_RGmaxammo;
-        break;
-    default:
-        quantity = 200;
+    if (bg_weaponlist[weapon].maxAmmunition != -1) {
+        ent->client->ps.ammo[weapon] += count;
     }
 
-    ent->client->ps.ammo[weapon] += count;
-    if (ent->client->ps.ammo[weapon] > quantity) {
-        ent->client->ps.ammo[weapon] = quantity;
+    if (ent->client->ps.ammo[weapon] < bg_weaponlist[weapon].minAmmunition) {
+        ent->client->ps.ammo[weapon] = bg_weaponlist[weapon].minAmmunition;
     }
-    // !CPM
+    else if (ent->client->ps.ammo[weapon] > bg_weaponlist[weapon].maxAmmunition) {
+        ent->client->ps.ammo[weapon] = bg_weaponlist[weapon].maxAmmunition;
+    }
 }
 
 int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 {
-	int		quantity;
-
-	if ( ent->count ) {
-		quantity = ent->count;
-	} else {
-		// quantity = ent->item->quantity;
-        // CPM: Ammo counts from boxes
-        switch (ent->item->giTag) {
-        case WP_MACHINEGUN:
-            quantity = cpm_MGbox;
-            break;
-        case WP_RAILGUN:
-            quantity = cpm_RGbox;
-            break;
-        default:
-            quantity = ent->item->quantity;
-        }
-        // !CPM
-	}
-
-	Add_Ammo (other, ent->item->giTag, quantity);
+    Add_Ammo(other, ent->item->giTag, bg_weaponlist[ent->item->giTag].ammoBox);
 
 	// return RESPAWN_AMMO;
     return cpm_itemrespawnammo; // CPM
