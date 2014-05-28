@@ -512,6 +512,14 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	// general initialization
 	G_FindTeams();
 
+    if (g_gametype.integer == GT_LASTMANSTANDING) {
+        level.initialFraglimit = g_fraglimit.integer;
+
+        if (level.initialFraglimit < 1) {
+            level.initialFraglimit = 1;
+        }
+    }
+
 	// make sure we have flags for CTF, etc
 	if( g_gametype.integer >= GT_TEAM ) {
 		G_CheckTeamItems();
@@ -1417,11 +1425,8 @@ void CheckExitRules( void ) {
                 if (cl->pers.connected != CON_CONNECTED) {
                     continue;
                 }
-                if (cl->sess.sessionTeam != TEAM_FREE) {
-                    continue;
-                }
 
-                if (cl->ps.persistant[PERS_SCORE] > 0) {
+                if (cl->sess.sessionTeam == TEAM_FREE && cl->ps.persistant[PERS_SCORE] > 0) {
                     trap_SendServerCommand(-1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
                         cl->pers.netname));
 
