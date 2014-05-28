@@ -408,6 +408,7 @@ typedef struct {
 #endif
 
     int			mapWeapons;
+    int         initialFraglimit;
 } level_locals_t;
 
 
