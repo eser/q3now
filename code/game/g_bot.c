@@ -423,36 +423,53 @@ void G_CheckMinimumPlayers( void ) {
 			G_RemoveRandomBot( TEAM_BLUE );
 		}
 	}
-	else if (g_gametype.integer == GT_TOURNAMENT ) {
-		if (minplayers >= g_maxclients.integer) {
-			minplayers = g_maxclients.integer-1;
-		}
-		humanplayers = G_CountHumanPlayers( -1 );
-		botplayers = G_CountBotPlayers( -1 );
-		//
-		if (humanplayers + botplayers < minplayers) {
-			G_AddRandomBot( TEAM_FREE );
-		} else if (humanplayers + botplayers > minplayers && botplayers) {
-			// try to remove spectators first
-			if (!G_RemoveRandomBot( TEAM_SPECTATOR )) {
-				// just remove the bot that is playing
-				G_RemoveRandomBot( -1 );
-			}
-		}
-	}
-    else if (g_gametype.integer == GT_FFA || g_gametype.integer == GT_KINGOFTHEHILL) {
-		if (minplayers >= g_maxclients.integer) {
-			minplayers = g_maxclients.integer-1;
-		}
-		humanplayers = G_CountHumanPlayers( TEAM_FREE );
-		botplayers = G_CountBotPlayers( TEAM_FREE );
-		//
-		if (humanplayers + botplayers < minplayers) {
-			G_AddRandomBot( TEAM_FREE );
-		} else if (humanplayers + botplayers > minplayers && botplayers) {
-			G_RemoveRandomBot( TEAM_FREE );
-		}
-	}
+    else {
+        if (minplayers >= g_maxclients.integer) {
+            minplayers = g_maxclients.integer - 1;
+        }
+
+        if (g_gametype.integer == GT_TOURNAMENT) {
+            humanplayers = G_CountHumanPlayers(-1);
+            botplayers = G_CountBotPlayers(-1);
+            //
+            if (humanplayers + botplayers < minplayers) {
+                G_AddRandomBot(TEAM_FREE);
+            }
+            else if (humanplayers + botplayers > minplayers && botplayers) {
+                // try to remove spectators first
+                if (!G_RemoveRandomBot(TEAM_SPECTATOR)) {
+                    // just remove the bot that is playing
+                    G_RemoveRandomBot(-1);
+                }
+            }
+        }
+        else if (g_gametype.integer == GT_LASTMANSTANDING) {
+            humanplayers = G_CountHumanPlayers(-1);
+            botplayers = G_CountBotPlayers(-1);
+            //
+            if (humanplayers + botplayers < minplayers) {
+                G_AddRandomBot(TEAM_SPECTATOR);
+            }
+            else if (humanplayers + botplayers > minplayers && botplayers) {
+                // try to remove spectators first
+                if (!G_RemoveRandomBot(TEAM_SPECTATOR)) {
+                    // just remove the bot that is playing
+                    G_RemoveRandomBot(-1);
+                }
+            }
+        }
+        else if (g_gametype.integer == GT_FFA || g_gametype.integer == GT_KINGOFTHEHILL) {
+            humanplayers = G_CountHumanPlayers(TEAM_FREE);
+            botplayers = G_CountBotPlayers(TEAM_FREE);
+            //
+            if (humanplayers + botplayers < minplayers) {
+                G_AddRandomBot(TEAM_FREE);
+            }
+            else if (humanplayers + botplayers > minplayers && botplayers) {
+                G_RemoveRandomBot(TEAM_FREE);
+            }
+        }
+    }
 }
 
 /*

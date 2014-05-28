@@ -904,8 +904,12 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// check for respawning
 	if ( client->ps.stats[STAT_HEALTH] <= 0 ) {
+        if (g_gametype.integer == GT_LASTMANSTANDING && client->ps.persistant[PERS_SCORE] < 1) {
+            SetTeam(ent, "s");
+            return;
+        }
 		// wait for the attack button to be pressed
-		if ( level.time > client->respawnTime ) {
+		else if ( level.time > client->respawnTime ) {
 			// forcerespawn is to prevent users from waiting out powerups
 			if ( g_forcerespawn.integer > 0 && 
 				( level.time - client->respawnTime ) > g_forcerespawn.integer * 1000 ) {

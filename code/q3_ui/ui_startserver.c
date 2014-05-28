@@ -92,13 +92,14 @@ static const char *gametype_items[] = {
 	"Free For All",
 	"Tournament",
     "King of the Hill",
+    "Last Man Standing",
     "Team Deathmatch",
     "Capture the Flag",
 	NULL
 };
 
-static int gametype_remap[] = {GT_FFA, GT_TOURNAMENT, GT_KINGOFTHEHILL, GT_TEAM, GT_CTF};
-static int gametype_remap2[] = {0, 1, 3, 4, 5};
+static int gametype_remap[] = {GT_FFA, GT_TOURNAMENT, GT_KINGOFTHEHILL, GT_LASTMANSTANDING, GT_TEAM, GT_CTF};
+static int gametype_remap2[] = {0, 1, 3, 4, 5, 6};
 
 // use ui_servers2.c definition
 extern const char* punkbuster_items[];
@@ -127,6 +128,7 @@ static int GametypeBits( char *string ) {
 		if( Q_stricmp( token, "ffa" ) == 0 ) {
 			bits |= 1 << GT_FFA;
             bits |= 1 << GT_KINGOFTHEHILL;
+            bits |= 1 << GT_LASTMANSTANDING;
 			continue;
 		}
 
@@ -747,6 +749,8 @@ static void ServerOptions_Start( void ) {
 
 	switch( s_serveroptions.gametype ) {
 	case GT_FFA:
+    case GT_KINGOFTHEHILL:
+    case GT_LASTMANSTANDING:
 	default:
 		trap_Cvar_SetValue( "ui_ffa_fraglimit", fraglimit );
 		trap_Cvar_SetValue( "ui_ffa_timelimit", timelimit );
@@ -1127,7 +1131,9 @@ static void ServerOptions_SetMenuItems( void ) {
 
 	switch( s_serveroptions.gametype ) {
 	case GT_FFA:
-	default:
+    case GT_KINGOFTHEHILL:
+    case GT_LASTMANSTANDING:
+    default:
 		Com_sprintf( s_serveroptions.fraglimit.field.buffer, 4, "%i", (int)Com_Clamp( 0, 999, trap_Cvar_VariableValue( "ui_ffa_fraglimit" ) ) );
 		Com_sprintf( s_serveroptions.timelimit.field.buffer, 4, "%i", (int)Com_Clamp( 0, 999, trap_Cvar_VariableValue( "ui_ffa_timelimit" ) ) );
 		break;

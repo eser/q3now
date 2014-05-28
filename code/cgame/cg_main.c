@@ -1620,7 +1620,7 @@ static const char *CG_FeederItemText(float feederID, int index, int column, qhan
 					return "Ready";
 				}
 				if (team == -1) {
-					if (cgs.gametype == GT_TOURNAMENT) {
+                    if (cgs.gametype == GT_TOURNAMENT || cgs.gametype == GT_LASTMANSTANDING) {
 						return va("%i/%i", info->wins, info->losses);
 					} else if (info->infoValid && info->team == TEAM_SPECTATOR ) {
 						return "Spectator";

@@ -139,6 +139,15 @@ void G_InitSessionData( gclient_t *client, char *userinfo ) {
 					sess->sessionTeam = TEAM_FREE;
 				}
 				break;
+            case GT_LASTMANSTANDING:
+                if (level.warmupTime != -1 || (g_maxGameClients.integer > 0 &&
+                    level.numNonSpectatorClients >= g_maxGameClients.integer)) {
+                    sess->sessionTeam = TEAM_SPECTATOR;
+                }
+                else {
+                    sess->sessionTeam = TEAM_FREE;
+                }
+                break;
 			}
 		}
 	}

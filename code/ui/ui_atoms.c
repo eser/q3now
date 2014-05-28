@@ -321,8 +321,7 @@ static void UI_CalcPostGameStats( void ) {
 	trap_Cvar_Set("capturelimit", UI_Cvar_VariableString("ui_saveCaptureLimit"));
 	trap_Cvar_Set("fraglimit", UI_Cvar_VariableString("ui_saveFragLimit"));
 	trap_Cvar_Set("cg_drawTimer", UI_Cvar_VariableString("ui_drawTimer"));
-	trap_Cvar_Set("g_doWarmup", UI_Cvar_VariableString("ui_doWarmup"));
-	trap_Cvar_Set("g_Warmup", UI_Cvar_VariableString("ui_Warmup"));
+	trap_Cvar_Set("g_warmup", UI_Cvar_VariableString("ui_warmup"));
 	trap_Cvar_Set("sv_pure", UI_Cvar_VariableString("ui_pure"));
 	trap_Cvar_Set("g_friendlyFire", UI_Cvar_VariableString("ui_friendlyFire"));
 
