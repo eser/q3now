@@ -12,31 +12,6 @@ float	cpm_pm_aircontrol = 0;
 float	cpm_pm_strafeaccelerate = 1;
 float	cpm_pm_wishspeed = 400;
 
-// Gauntlet
-float	cpm_Gauntletknockback = 1;
-
-// Machinegun
-int		cpm_MGweapon = 100;
-
-// Shotgun
-float	cpm_SSGknockback = 1;
-
-// Grenade Launcher
-float	cpm_GLreload = 800;
-
-// Rocket Launcher
-float	cpm_RLsplashknockback = 1;
-float	cpm_RLknockback = 1;
-
-// Lightning Gun
-float	cpm_LGknockback = 1;
-
-// Railgun
-float	cpm_RGchange;
-
-// Plasma Gun
-float	cpm_PGknockback = 1;
-
 // Weapon switching
 float	cpm_weapondrop = 0; // 200;
 float	cpm_weaponraise = 250;
@@ -57,6 +32,7 @@ float	cpm_knockback_z = 24;
 // Respawn Times
 int		cpm_itemrespawnhealth = 35;
 int		cpm_itemrespawnpowerup = 120;
+int		cpm_itemrespawnweapon = 5;
 int		cpm_itemrespawnammo = 40;
 int		cpm_startpowerups = 0;
 int		cpm_itemrespawnBS = 120;
@@ -97,7 +73,10 @@ gweapon_t	bg_weaponlist[] =
         -1,
 
         qfalse,
-        -1
+        -1,
+
+        0,
+        0
     },
 
     // WP_GAUNTLET
@@ -116,7 +95,10 @@ gweapon_t	bg_weaponlist[] =
         -1,
 
         qtrue,
-        -1
+        -1,
+
+        500,
+        400
     },
 
     // WP_MACHINEGUN,
@@ -135,6 +117,9 @@ gweapon_t	bg_weaponlist[] =
         200,
 
         qtrue,
+        100,
+
+        1350,
         100
     },
 
@@ -154,7 +139,10 @@ gweapon_t	bg_weaponlist[] =
         50,
 
         qfalse,
-        0
+        0,
+
+        1350,
+        1000
     },
 
     // WP_GRENADE_LAUNCHER,
@@ -173,7 +161,10 @@ gweapon_t	bg_weaponlist[] =
         50,
 
         qfalse,
-        0
+        0,
+
+        1200,
+        600
     },
 
     // WP_ROCKET_LAUNCHER,
@@ -192,7 +183,10 @@ gweapon_t	bg_weaponlist[] =
         50,
 
         qfalse,
-        0
+        0,
+
+        1200,
+        800
     },
 
     // WP_LIGHTNING,
@@ -211,7 +205,10 @@ gweapon_t	bg_weaponlist[] =
         200,
 
         qfalse,
-        0
+        0,
+
+        1550,
+        50
     },
 
     // WP_RAILGUN,
@@ -230,7 +227,10 @@ gweapon_t	bg_weaponlist[] =
         25,
 
         qfalse,
-        0
+        0,
+
+        1550,
+        1000
     },
 
     // WP_PLASMAGUN,
@@ -249,7 +249,10 @@ gweapon_t	bg_weaponlist[] =
         25,
 
         qfalse,
-        0
+        0,
+
+        500,
+        1000
     }
 };
 
@@ -268,31 +271,6 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 	cpm_pm_wishspeed = 400;
 	pm_accelerate = 10;
 	pm_friction = 6;
-
-	// vq3 Gauntlet
-	cpm_Gauntletknockback = 1;
-
-	// vq3 machine gun settings
-	cpm_MGweapon = 100;
-
-	// vq3 ssg settings
-	cpm_SSGknockback = 1;
-
-	// vq3 GL settings
-	cpm_GLreload = 800;
-
-	// vq3 Rocket Launcher
-	cpm_RLsplashknockback = 1;
-	cpm_RLknockback = 1;
-
-	// vq3 Lightning Gun
-	cpm_LGknockback = 1;
-
-	// vq3 Railgun
-	cpm_RGchange = 1500;
-
-	// vq3 Plasma Gun
-	cpm_PGknockback = 1;
 
 	// vq3 Weapon switching
     cpm_weapondrop = 0; // 200;
@@ -314,6 +292,7 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 	// Respawn Times
 	cpm_itemrespawnhealth = 35;
 	cpm_itemrespawnpowerup = 120;
+    cpm_itemrespawnweapon = 5;
 	cpm_itemrespawnammo = 40;
 	cpm_startpowerups = 0;
 	cpm_itemrespawnBS = 120;
@@ -351,31 +330,6 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 
 	if (pro_mode)
 	{
-		// Gauntlet
-		cpm_Gauntletknockback = 0.5;
-
-		// machinegun
-		cpm_MGweapon = 50;
-
-		// Shotgun
-		cpm_SSGknockback = 1.35;
-
-		// Grenade Launcher
-		cpm_GLreload = 600;
-
-		// Rocket Launcher
-		cpm_RLsplashknockback = 1.2;
-		cpm_RLknockback = 1.2;
-
-		// Lightning Gun
-		cpm_LGknockback = 1.55;
-
-		// Railgun
-		cpm_RGchange = 1000; // allow users to switch weapon before reload
-
-		// Plasma Gun
-		cpm_PGknockback = 0.5;
-
 		// Weapon switching
 		cpm_weapondrop = 0;
 		cpm_weaponraise = 0;
@@ -396,6 +350,7 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 		// Respawn Times
 		cpm_itemrespawnhealth = 30;
 		cpm_itemrespawnpowerup = 60;
+        cpm_itemrespawnweapon = 15;
 		cpm_itemrespawnammo = 30;
 		cpm_startpowerups = 1;
 		cpm_itemrespawnBS = 120;

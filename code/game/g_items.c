@@ -151,7 +151,16 @@ void Add_Ammo (gentity_t *ent, int weapon, int count)
 
 int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 {
-    Add_Ammo(other, ent->item->giTag, bg_weaponlist[ent->item->giTag].ammoBox);
+    int		quantity;
+
+    if (ent->count) {
+        quantity = ent->count;
+    }
+    else {
+        quantity = bg_weaponlist[ent->item->giTag].ammoBox;
+    }
+
+    Add_Ammo(other, ent->item->giTag, quantity);
 
 	// return RESPAWN_AMMO;
     return cpm_itemrespawnammo; // CPM
@@ -209,16 +218,7 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 		if ( ent->count ) {
 			quantity = ent->count;
 		} else {
-			// quantity = ent->item->quantity;
-            // CPM: Ammo counts from weapons
-            switch (ent->item->giTag) {
-                case WP_MACHINEGUN:
-                    quantity = cpm_MGweapon;
-                    break;
-                default:
-                    quantity = ent->item->quantity;
-            }
-            // !CPM
+            quantity = bg_weaponlist[ent->item->giTag].ammoBox;
 		}
 
 		// dropped items and teamplay weapons always have full ammo
@@ -238,7 +238,7 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 
 	Add_Ammo( other, ent->item->giTag, quantity );
 
-	return g_weaponRespawn.integer;
+    return cpm_itemrespawnweapon; // CPM
 }
 
 
