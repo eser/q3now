@@ -49,6 +49,7 @@ The major features that implemented so far:
 - New Weapon Balances
 - Wall jumps ([youtu.be/RPwSBUZ2Ebw](//youtu.be/RPwSBUZ2Ebw))
 - New Game Mod: King of the Hill
+- New Game Mod: Last Man Standing
 - Offhand Grapple (`+seta g_grapple 1`)
 - Instagib (`+seta g_instagib 1`)
 
@@ -58,7 +59,7 @@ The major features that implemented so far:
 - New Team System
 - Spectator Cameras
 - New Powerup System
-- New Game Mods (Freeze Tag, Clan Arena, Last Man Standing, etc.)
+- New Game Mods (Freeze Tag, etc.)
 - A modern HUD with new menu system
 - JUHOX's BrightArena implementation
 

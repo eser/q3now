@@ -477,6 +477,10 @@ Let everyone know about a team change
 */
 void BroadcastTeamChange( gclient_t *client, int oldTeam )
 {
+    if (g_gametype.integer == GT_LASTMANSTANDING) {
+        return;
+    }
+
 	if ( client->sess.sessionTeam == TEAM_RED ) {
 		trap_SendServerCommand( -1, va("cp \"%s" S_COLOR_WHITE " joined the red team.\n\"",
 			client->pers.netname) );
@@ -566,9 +570,12 @@ void SetTeam( gentity_t *ent, char *s ) {
 	}
 
 	// override decision if limiting the players
-	if ( (g_gametype.integer == GT_TOURNAMENT)
-		&& level.numNonSpectatorClients >= 2 ) {
-		team = TEAM_SPECTATOR;
+    if ((g_gametype.integer == GT_TOURNAMENT)
+        && level.numNonSpectatorClients >= 2) {
+        team = TEAM_SPECTATOR;
+    }
+    else if (g_gametype.integer == GT_LASTMANSTANDING && level.warmupTime == 0) {
+        team = TEAM_SPECTATOR;
 	} else if ( g_maxGameClients.integer > 0 && 
 		level.numNonSpectatorClients >= g_maxGameClients.integer ) {
 		team = TEAM_SPECTATOR;
@@ -1289,7 +1296,7 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 	} else if ( !Q_stricmp( arg1, "g_gametype" ) ) {
 	} else if ( !Q_stricmp( arg1, "kick" ) ) {
 	} else if ( !Q_stricmp( arg1, "clientkick" ) ) {
-	} else if ( !Q_stricmp( arg1, "g_doWarmup" ) ) {
+	} else if ( !Q_stricmp( arg1, "g_warmup" ) ) {
 	} else if ( !Q_stricmp( arg1, "timelimit" ) ) {
 	} else if ( !Q_stricmp( arg1, "fraglimit" ) ) {
     // CPM
@@ -1298,7 +1305,7 @@ void Cmd_CallVote_f( gentity_t *ent ) {
     // CPM
 	} else {
 		trap_SendServerCommand( ent-g_entities, "print \"Invalid vote string.\n\"" );
-		trap_SendServerCommand( ent-g_entities, "print \"Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_doWarmup, timelimit <time>, fraglimit <frags>, g_pro_mode <0/1> and g_pro_physics <0/1>.\n\"" );
+		trap_SendServerCommand( ent-g_entities, "print \"Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_warmup, timelimit <time>, fraglimit <frags>, g_pro_mode <0/1> and g_pro_physics <0/1>.\n\"" );
 		return;
 	}
 

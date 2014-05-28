@@ -60,7 +60,6 @@ vmCvar_t	g_debugAlloc;
 vmCvar_t	g_motd;
 vmCvar_t	g_synchronousClients;
 vmCvar_t	g_warmup;
-vmCvar_t	g_doWarmup;
 vmCvar_t	g_restarted;
 vmCvar_t	g_logfile;
 vmCvar_t	g_logfileSync;
@@ -123,8 +122,7 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_teamAutoJoin, "g_teamAutoJoin", "0", CVAR_ARCHIVE  },
 	{ &g_teamForceBalance, "g_teamForceBalance", "0", CVAR_ARCHIVE  },
 
-	{ &g_warmup, "g_warmup", "20", CVAR_ARCHIVE, 0, qtrue  },
-	{ &g_doWarmup, "g_doWarmup", "0", CVAR_ARCHIVE, 0, qtrue  },
+	{ &g_warmup, "g_warmup", "0", CVAR_ARCHIVE, 0, qtrue  },
 	{ &g_logfile, "g_log", "games.log", CVAR_ARCHIVE, 0, qfalse  },
 	{ &g_logfileSync, "g_logsync", "0", CVAR_ARCHIVE, 0, qfalse  },
 
@@ -530,7 +528,6 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	}
 
 	G_RemapTeamShaders();
-
 }
 
 
@@ -1361,7 +1358,11 @@ void CheckExitRules( void ) {
 		return;
 	}
 
-	if ( g_timelimit.integer && !level.warmupTime ) {
+    if (level.warmupTime != 0) {
+        return;
+    }
+
+	if ( g_timelimit.integer ) {
 		if ( level.time - level.startTime >= g_timelimit.integer*60000 ) {
 			trap_SendServerCommand( -1, "print \"Timelimit hit.\n\"");
 			LogExit( "Timelimit hit." );
@@ -1382,6 +1383,8 @@ void CheckExitRules( void ) {
 			return;
 		}
 
+        int numClients = 0;
+        int aliveClients = 0;
 		for ( i=0 ; i< g_maxclients.integer ; i++ ) {
 			cl = level.clients + i;
 			if ( cl->pers.connected != CON_CONNECTED ) {
@@ -1391,13 +1394,48 @@ void CheckExitRules( void ) {
 				continue;
 			}
 
-			if ( cl->ps.persistant[PERS_SCORE] >= g_fraglimit.integer ) {
-				LogExit( "Fraglimit hit." );
-				trap_SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
-					cl->pers.netname ) );
-				return;
-			}
+            numClients++;
+
+            if (g_gametype.integer == GT_LASTMANSTANDING) {
+                if (cl->ps.persistant[PERS_SCORE] > 0) {
+                    aliveClients++;
+                }
+            }
+            else {
+                if (cl->ps.persistant[PERS_SCORE] >= g_fraglimit.integer) {
+                    LogExit("Fraglimit hit.");
+                    trap_SendServerCommand(-1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
+                        cl->pers.netname));
+                    return;
+                }
+            }
 		}
+
+        if (g_gametype.integer == GT_LASTMANSTANDING && numClients >= 2 && aliveClients <= 1) {
+            for (i = 0; i < g_maxclients.integer; i++) {
+                cl = level.clients + i;
+                if (cl->pers.connected != CON_CONNECTED) {
+                    continue;
+                }
+                if (cl->sess.sessionTeam != TEAM_FREE) {
+                    continue;
+                }
+
+                if (cl->ps.persistant[PERS_SCORE] > 0) {
+                    trap_SendServerCommand(-1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
+                        cl->pers.netname));
+
+                    cl->sess.wins++;
+                }
+                else {
+                    cl->sess.losses++;
+                }
+            }
+
+            // FIXME draw
+            LogExit("Fraglimit hit.");
+            return;
+        }
 	}
 
 	if ( g_gametype.integer >= GT_CTF && g_capturelimit.integer ) {

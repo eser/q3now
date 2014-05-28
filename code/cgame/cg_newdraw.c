@@ -1170,6 +1170,8 @@ const char *CG_GameTypeString(void) {
         return "Tournament";
     } else if (cgs.gametype == GT_KINGOFTHEHILL) {
         return "King of the Hill";
+    } else if (cgs.gametype == GT_LASTMANSTANDING) {
+        return "Last Man Standing";
     } else if (cgs.gametype == GT_TEAM) {
 		return "Team Deathmatch";
 	} else if ( cgs.gametype == GT_CTF ) {

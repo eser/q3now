@@ -2374,11 +2374,11 @@ static void CG_DrawWarmup( void ) {
 	} else {
 		if ( cgs.gametype == GT_FFA ) {
 			s = "Free For All";
-        } else if ( cgs.gametype == GT_TOURNAMENT ) {
-            s = "Tournament";
         } else if (cgs.gametype == GT_KINGOFTHEHILL) {
             s = "King of the Hill";
-        } else if ( cgs.gametype == GT_TEAM ) {
+        } else if (cgs.gametype == GT_LASTMANSTANDING) {
+            s = "Last Man Standing";
+        } else if (cgs.gametype == GT_TEAM) {
             s = "Team Deathmatch";
         } else if ( cgs.gametype == GT_CTF ) {
 			s = "Capture the Flag";

@@ -96,6 +96,7 @@ typedef enum {
     GT_DUMMY,
 
     GT_KINGOFTHEHILL,
+    GT_LASTMANSTANDING,
 
 	//-- team games go after this --
 

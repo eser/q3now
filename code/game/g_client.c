@@ -1015,11 +1015,21 @@ void ClientBegin( int clientNum ) {
 	memset( &client->ps, 0, sizeof( client->ps ) );
 	client->ps.eFlags = flags;
 
-	// locate ent at a spawn point
+    if (g_gametype.integer == GT_LASTMANSTANDING) {
+        int fraglimit = g_fraglimit.integer;
+
+        if (fraglimit < 1) {
+            fraglimit = 1;
+        }
+
+        ent->client->ps.persistant[PERS_SCORE] = fraglimit;
+    }
+
+    // locate ent at a spawn point
 	ClientSpawn( ent );
 
 	if ( client->sess.sessionTeam != TEAM_SPECTATOR ) {
-		if ( g_gametype.integer != GT_TOURNAMENT  ) {
+		if ( g_gametype.integer != GT_TOURNAMENT ) {
             trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " has entered the game\n\"", client->pers.netname));
 		}
 	}

@@ -240,6 +240,9 @@ void CG_DrawInformation( void ) {
     case GT_KINGOFTHEHILL:
         s = "King of the Hill";
         break;
+    case GT_LASTMANSTANDING:
+        s = "Last Man Standing";
+        break;
     case GT_TEAM:
 		s = "Team Deathmatch";
 		break;
