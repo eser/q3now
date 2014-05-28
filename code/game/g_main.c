@@ -52,13 +52,11 @@ vmCvar_t	g_maxGameClients;
 vmCvar_t	g_dedicated;
 vmCvar_t	g_gravity;
 vmCvar_t	g_cheats;
-vmCvar_t	g_knockback;
 vmCvar_t	g_forcerespawn;
 vmCvar_t	g_inactivity;
 vmCvar_t	g_debugMove;
 vmCvar_t	g_debugDamage;
 vmCvar_t	g_debugAlloc;
-vmCvar_t	g_weaponRespawn;
 vmCvar_t	g_motd;
 vmCvar_t	g_synchronousClients;
 vmCvar_t	g_warmup;
@@ -140,8 +138,6 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_dedicated, "dedicated", "0", 0, 0, qfalse  },
 
 	{ &g_gravity, "g_gravity", "800", 0, 0, qtrue  },
-	{ &g_knockback, "g_knockback", "1000", 0, 0, qtrue  },
-	{ &g_weaponRespawn, "g_weaponrespawn", "5", 0, 0, qtrue  },
 	{ &g_forcerespawn, "g_forcerespawn", "20", 0, 0, qtrue },
 	{ &g_inactivity, "g_inactivity", "0", 0, 0, qtrue },
 	{ &g_debugMove, "g_debugMove", "0", 0, 0, qfalse },
@@ -363,13 +359,11 @@ void G_RegisterCvars( void ) {
             if (g_pro_mode.integer)
             {
                 trap_Cvar_Set("g_forcerespawn", "3");
-                trap_Cvar_Set("g_weaponrespawn", "15");
                 trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer | DF_NO_FOOTSTEPS)); // turn off footsteps
             }
             else
             {
                 trap_Cvar_Set("g_forcerespawn", "20");
-                trap_Cvar_Set("g_weaponrespawn", "5");
                 trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer & ~DF_NO_FOOTSTEPS)); // turn on footsteps
             }
         }
@@ -1503,7 +1497,9 @@ qboolean HonorAsKing(gentity_t *ent) {
 
     ent->client->ps.powerups[PW_KING] = -1;
 
-    ent->health = ent->client->ps.stats[STAT_HEALTH] = MAX_HEALTH;
+    if (ent->client->ps.stats[STAT_HEALTH] < MAX_HEALTH) {
+        ent->health = ent->client->ps.stats[STAT_HEALTH] = MAX_HEALTH;
+    }
     ent->client->ps.stats[STAT_ARMOR] = MAX_ARMOR;
     ent->client->ps.stats[STAT_ARMORCLASS] = ARM_HEAVY;
 

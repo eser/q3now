@@ -1163,7 +1163,7 @@ void ClientSpawn(gentity_t *ent) {
             }
 
             client->ps.stats[STAT_WEAPONS] |= (1 << i);
-            client->ps.ammo[i] = bg_weaponlist[i].maxAmmunition;
+            client->ps.ammo[i] = bg_weaponlist[i].minAmmunition;
         }
     }
     else {

@@ -909,15 +909,25 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_RAILTRAIL");
 		cent->currentState.weapon = WP_RAILGUN;
 		
-		if(es->clientNum == cg.snap->ps.clientNum && !cg.renderingThirdPerson)
-		{
-			if(cg_drawGun.integer == 2)
-				VectorMA(es->origin2, 8, cg.refdef.viewaxis[1], es->origin2);
-			else if(cg_drawGun.integer == 3)
-				VectorMA(es->origin2, 4, cg.refdef.viewaxis[1], es->origin2);
-		}
+        if (((cg_drawGun.integer == 2) || (cg_drawGun.integer == 3)) && es->clientNum == cg.snap->ps.clientNum && !cg.renderingThirdPerson) {
+            int pos;
+            vec3_t railtrail_origin;
 
-		CG_RailTrail(ci, es->origin2, es->pos.trBase);
+            if (cg_drawGun.integer == 2) {
+                pos = -4;
+            }
+            else {
+                pos = -8;
+            }
+
+            AngleVectors(cg.snap->ps.viewangles, NULL, railtrail_origin, NULL);
+            VectorMA(es->origin2, pos, railtrail_origin, railtrail_origin);
+
+            CG_RailTrail(ci, railtrail_origin, es->pos.trBase);
+        }
+        else {
+            CG_RailTrail(ci, es->origin2, es->pos.trBase);
+        }
 
 		// if the end was on a nomark surface, don't make an explosion
 		if ( es->eventParm != 255 ) {
