@@ -194,7 +194,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	}
 
 	if (message) {
-		CG_Printf( "%s %s.\n", targetName, message);
+		CG_Printf( S_COLOR_GREEN "%s" S_COLOR_WHITE " %s.\n", targetName, message);
 		return;
 	}
 
@@ -203,11 +203,11 @@ static void CG_Obituary( entityState_t *ent ) {
 		char	*s;
 
 		if ( cgs.gametype < GT_TEAM ) {
-			s = va("You fragged %s\n%s place with %i", targetName, 
+			s = va("You fragged " S_COLOR_GREEN "%s" S_COLOR_WHITE "\n%s place with %i", targetName, 
 				CG_PlaceString( cg.snap->ps.persistant[PERS_RANK] + 1 ),
 				cg.snap->ps.persistant[PERS_SCORE] );
 		} else {
-			s = va("You fragged %s", targetName );
+			s = va("You fragged " S_COLOR_GREEN "%s", targetName );
 		}
 
         if (!cg_cameraOrbit.integer) {
@@ -290,14 +290,14 @@ static void CG_Obituary( entityState_t *ent ) {
 		}
 
 		if (message) {
-			CG_Printf( "%s %s %s%s\n", 
+			CG_Printf( S_COLOR_GREEN "%s" S_COLOR_WHITE " %s " S_COLOR_GREEN "%s" S_COLOR_WHITE "%s\n", 
 				targetName, message, attackerName, message2);
 			return;
 		}
 	}
 
 	// we don't know what it was
-	CG_Printf( "%s died.\n", targetName );
+	CG_Printf( S_COLOR_GREEN "%s" S_COLOR_WHITE " died.\n", targetName );
 }
 
 //==========================================================================
