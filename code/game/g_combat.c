@@ -134,6 +134,9 @@ void TossClientItems( gentity_t *self ) {
             drop->splashRadius =
                 ((self->client->ps.ammo[WP_PLASMAGUN] & 0x00FF) << 8);
         }
+        else {
+            drop->count = self->client->ps.ammo[weapon];
+        }
     }
     // !CPM
 

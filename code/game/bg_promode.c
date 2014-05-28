@@ -134,9 +134,9 @@ gweapon_t	bg_weaponlist[] =
 
         qtrue,
 
-        10,
-        10,
-        50,
+        20,
+        20,
+        80,
 
         qfalse,
         0,
@@ -156,8 +156,8 @@ gweapon_t	bg_weaponlist[] =
 
         qtrue,
 
-        5,
-        5,
+        10,
+        10,
         50,
 
         qfalse,
@@ -178,8 +178,8 @@ gweapon_t	bg_weaponlist[] =
 
         qtrue,
 
-        5,
-        5,
+        10,
+        10,
         50,
 
         qfalse,
