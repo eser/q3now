@@ -325,7 +325,7 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 		attacker->client->pers.teamState.lastfraggedcarrier = level.time;
 		AddScore(attacker, targ->r.currentOrigin, CTF_FRAG_CARRIER_BONUS);
 		attacker->client->pers.teamState.fragcarrier++;
-		PrintMsg(NULL, "%s" S_COLOR_WHITE " fragged %s's flag carrier!\n",
+		PrintMsg(NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " fragged %s's flag carrier!\n",
 			attacker->client->pers.netname, TeamName(team));
 
 		// the target had the flag, clear the hurt carrier
@@ -343,7 +343,7 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 		attacker->client->pers.teamState.lastfraggedcarrier = level.time;
 		AddScore(attacker, targ->r.currentOrigin, CTF_FRAG_CARRIER_BONUS * tokens * tokens);
 		attacker->client->pers.teamState.fragcarrier++;
-		PrintMsg(NULL, "%s" S_COLOR_WHITE " fragged %s's skull carrier!\n",
+		PrintMsg(NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " fragged %s's skull carrier!\n",
 			attacker->client->pers.netname, TeamName(team));
 
 		// the target had the flag, clear the hurt carrier
@@ -718,7 +718,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 
     if (ent->s.eFlags & EF_DROPPED_ITEM) {
 		// hey, it's not home.  return it by teleporting it back
-		PrintMsg( NULL, "%s" S_COLOR_WHITE " returned the %s flag!\n", 
+		PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " returned the %s flag!\n", 
 			cl->pers.netname, TeamName(team));
 		AddScore(other, ent->r.currentOrigin, CTF_RECOVERY_BONUS);
 		other->client->pers.teamState.flagrecovery++;
@@ -737,11 +737,11 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 		return 0; // We don't have the flag
 #ifdef MISSIONPACK
 	if( g_gametype.integer == GT_1FCTF ) {
-		PrintMsg( NULL, "%s" S_COLOR_WHITE " captured the flag!\n", cl->pers.netname );
+        PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the flag!\n", cl->pers.netname );
 	}
 	else {
 #endif
-	PrintMsg( NULL, "%s" S_COLOR_WHITE " captured the %s flag!\n", cl->pers.netname, TeamName(OtherTeam(team)));
+	PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the %s flag!\n", cl->pers.netname, TeamName(OtherTeam(team)));
 #ifdef MISSIONPACK
 	}
 #endif
@@ -820,7 +820,7 @@ int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 
 #ifdef MISSIONPACK
 	if( g_gametype.integer == GT_1FCTF ) {
-		PrintMsg (NULL, "%s" S_COLOR_WHITE " got the flag!\n", other->client->pers.netname );
+		PrintMsg (NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " got the flag!\n", other->client->pers.netname );
 
 		cl->ps.powerups[PW_NEUTRALFLAG] = INT_MAX; // flags never expire
 
@@ -833,7 +833,7 @@ int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 	}
 	else{
 #endif
-		PrintMsg (NULL, "%s" S_COLOR_WHITE " got the %s flag!\n",
+		PrintMsg (NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " got the %s flag!\n",
 			other->client->pers.netname, TeamName(team));
 
 		if (team == TEAM_RED)
@@ -1290,7 +1290,7 @@ static void ObeliskTouch( gentity_t *self, gentity_t *other, trace_t *trace ) {
 		return;
 	}
 
-	PrintMsg(NULL, "%s" S_COLOR_WHITE " brought in %i skull%s.\n",
+	PrintMsg(NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " brought in %i skull%s.\n",
 					other->client->pers.netname, tokens, tokens ? "s" : "" );
 
 	AddTeamScore(self->s.pos.trBase, other->client->sess.sessionTeam, tokens);
