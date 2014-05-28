@@ -510,6 +510,9 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
                 AddScore(attacker, self->r.currentOrigin, 5);
                 AssignAKing(attacker);
             }
+            else if (g_gametype.integer == GT_LASTMANSTANDING) {
+                AddScore(self, self->r.currentOrigin, -1);
+            }
             else {
                 AddScore(attacker, self->r.currentOrigin, 1);
             }
