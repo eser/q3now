@@ -14,31 +14,6 @@ extern float	pm_friction; // located in bg_pmove.c
 
 void CPM_PM_Aircontrol ( pmove_t *pm, vec3_t wishdir, float wishspeed );
 
-// Gauntlet
-extern float	cpm_Gauntletknockback;
-
-// Machinegun
-extern int		cpm_MGweapon;
-
-// Shotgun
-extern float	cpm_SSGknockback;
-
-// Grenade Launcher
-extern float	cpm_GLreload;
-
-// Rocket Launcher
-extern float	cpm_RLsplashknockback;
-extern float	cpm_RLknockback;
-
-// Lightning Gun
-extern float	cpm_LGknockback;
-
-// Railgun
-extern float	cpm_RGchange;
-
-// Plasma Gun
-extern float	cpm_PGknockback;
-
 // Weapon switching
 extern float	cpm_weapondrop;
 extern float	cpm_weaponraise;
@@ -60,6 +35,7 @@ extern float	cpm_knockback_z;
 extern int		cpm_itemrespawnhealth;
 extern int		cpm_itemrespawnpowerup;
 extern int		cpm_itemrespawnBS;
+extern int		cpm_itemrespawnweapon;
 extern int		cpm_itemrespawnammo;
 extern int		cpm_startpowerups;
 
@@ -98,6 +74,9 @@ typedef struct gweapon_s {
 
     qboolean    spawnWeapon;
     int         spawnAmmunition;
+
+    int         knockback;
+    int         reloadTime;
 } gweapon_t;
 
 extern	gweapon_t	bg_weaponlist[];

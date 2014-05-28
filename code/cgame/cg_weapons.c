@@ -1192,7 +1192,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
             float	f;
 
             if (cg.predictedPlayerState.weaponstate == WEAPON_FIRING) {
-                f = (float)cg.predictedPlayerState.weaponTime / cpm_RGchange;
+                f = (float)cg.predictedPlayerState.weaponTime / bg_weaponlist[WP_RAILGUN].reloadTime;
             }
             else {
                 f = 0.0;
@@ -1237,7 +1237,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
             float	f;
 
             //if (cg.predictedPlayerState.weaponstate == WEAPON_FIRING) {
-            //    f = (float)cent->muzzleFlashTime / cpm_RGchange;
+            //    f = (float)cent->muzzleFlashTime / bg_weaponlist[WP_RAILGUN].reloadTime;
             //}
             //else {
             //    f = 0.0;
@@ -1372,6 +1372,7 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	float		fovOffset;
 	vec3_t		angles;
 	weaponInfo_t	*weapon;
+    float gen_gunx, gen_guny, gen_gunz;
 
 	if ( ps->persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
 		return;
@@ -1405,6 +1406,67 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	if ( cg.testGun ) {
 		return;
 	}
+
+    gen_gunx = cg_gun_x.value + 2;
+    gen_guny = cg_gun_y.value;
+    gen_gunz = cg_gun_z.value;
+
+    switch (ps->weapon)
+    {
+    case WP_MACHINEGUN:
+    case WP_SHOTGUN:
+    case WP_LIGHTNING:
+        switch (cg_drawGun.integer) {
+        case 1:
+            gen_guny = cg_gun_y.value - 2;
+            break;
+        case 2:
+            gen_guny = cg_gun_y.value + 3;
+            break;
+        case 3:
+            gen_guny = cg_gun_y.value + 7;
+            break;
+        default:
+            gen_guny = cg_gun_y.value;
+            break;
+        }
+        break;
+    case WP_GAUNTLET:
+    case WP_PLASMAGUN:
+        switch (cg_drawGun.integer) {
+        case 1:
+            gen_guny = cg_gun_y.value - 3;
+            break;
+        case 2:
+            gen_guny = cg_gun_y.value + 4;
+            break;
+        case 3:
+            gen_guny = cg_gun_y.value + 10;
+            break;
+        default:
+            gen_guny = cg_gun_y.value;
+            break;
+        }
+        break;
+    case WP_GRENADE_LAUNCHER:
+    case WP_ROCKET_LAUNCHER:
+    case WP_RAILGUN:
+        switch (cg_drawGun.integer) {
+        case 1:
+            gen_guny = cg_gun_y.value - 4;
+            break;
+        case 2:
+            gen_guny = cg_gun_y.value + 5;
+            break;
+        case 3:
+            gen_guny = cg_gun_y.value + 13;
+            break;
+        default:
+            gen_guny = cg_gun_y.value;
+            break;
+        }
+        break;
+    }
 
 	// drop gun lower at higher fov
 	if ( cg_fov.integer > 90 ) {

@@ -1822,36 +1822,10 @@ static void PM_Weapon( void ) {
 	// fire weapon
 	PM_AddEvent( EV_FIRE_WEAPON );
 
-	switch( pm->ps->weapon ) {
-	default:
-	case WP_GAUNTLET:
-		addTime = 400;
-		break;
-	case WP_LIGHTNING:
-		addTime = 50;
-		break;
-	case WP_SHOTGUN:
-		addTime = 1000;
-		break;
-	case WP_MACHINEGUN:
-		addTime = 100;
-		break;
-	case WP_GRENADE_LAUNCHER:
-		// addTime = 800;
-        addTime = cpm_GLreload;
-		break;
-	case WP_ROCKET_LAUNCHER:
-		addTime = 800;
-		break;
-	case WP_PLASMAGUN:
-		addTime = 1000;
-		break;
-	case WP_RAILGUN:
-		// addTime = 1500;
-        addTime = cpm_RGchange; // CPM
-        pm->ps->stats[STAT_RAILTIME] = 1500; // CPM
-		break;
-	}
+    addTime = bg_weaponlist[pm->ps->weapon].reloadTime;
+    if (pm->ps->weapon == WP_RAILGUN) {
+        pm->ps->stats[STAT_RAILTIME] = addTime; // CPM
+    }
 
 	if ( pm->ps->powerups[PW_HASTE] ) {
 		addTime /= 1.3;

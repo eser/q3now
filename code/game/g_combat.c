@@ -920,31 +920,35 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		float	mass = 200;
 
         // CPM: Custom weapon knockbacks
-        float	scale = 1;
+        float	scale = 1000;
 
-        if (targ == attacker) {
-            if (mod == MOD_ROCKET_SPLASH) {
-                scale = cpm_RLsplashknockback;
-            }
-        } else {
+        if (targ != attacker) {
             switch (mod) {
             case MOD_GAUNTLET:
-                scale = cpm_Gauntletknockback;
+                scale = bg_weaponlist[WP_GAUNTLET].knockback;
+                break;
+            case MOD_MACHINEGUN:
+                scale = bg_weaponlist[WP_MACHINEGUN].knockback;
                 break;
             case MOD_SHOTGUN:
-                scale = cpm_SSGknockback;
+                scale = bg_weaponlist[WP_SHOTGUN].knockback;
+                break;
+            case MOD_GRENADE:
+            case MOD_GRENADE_SPLASH:
+                scale = bg_weaponlist[WP_GRENADE_LAUNCHER].knockback;
                 break;
             case MOD_ROCKET:
-                scale = cpm_RLknockback;
-                break;
             case MOD_ROCKET_SPLASH:
-                scale = cpm_RLsplashknockback;
+                scale = bg_weaponlist[WP_ROCKET_LAUNCHER].knockback;
                 break;
             case MOD_LIGHTNING:
-                scale = cpm_LGknockback;
+                scale = bg_weaponlist[WP_LIGHTNING].knockback;
+                break;
+            case MOD_RAILGUN:
+                scale = bg_weaponlist[WP_RAILGUN].knockback;
                 break;
             case MOD_PLASMA:
-                scale = cpm_PGknockback;
+                scale = bg_weaponlist[WP_PLASMAGUN].knockback;
                 break;
             }
 
@@ -960,8 +964,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
         }
         // !CPM
 
-		// VectorScale (dir, g_knockback.value * (float)knockback / mass, kvel);
-        VectorScale(dir, scale * g_knockback.value * (float)knockback / mass, kvel); // CPM
+        VectorScale(dir, scale * (float)knockback / mass, kvel); // CPM
 		VectorAdd (targ->client->ps.velocity, kvel, targ->client->ps.velocity);
 
 		// set the timer so that the other client can't cancel
