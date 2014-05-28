@@ -841,25 +841,7 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
         }
 
 #ifndef Q3_UI
-        switch (item->giTag)
-        {
-        case WP_SHOTGUN:
-            quantity = cpm_SSGmaxammo;
-            break;
-        case WP_GRENADE_LAUNCHER:
-            quantity = cpm_GLmaxammo;
-            break;
-        case WP_ROCKET_LAUNCHER:
-            quantity = cpm_RLmaxammo;
-            break;
-        case WP_RAILGUN:
-            quantity = cpm_RGmaxammo;
-            break;
-        default:
-            quantity = 200;
-        }
-
-        if (ps->ammo[item->giTag] >= quantity) {
+        if (ps->ammo[item->giTag] >= bg_weaponlist[item->giTag].maxAmmunition) {
             return qfalse;
         }
 #endif

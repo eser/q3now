@@ -18,19 +18,15 @@ void CPM_PM_Aircontrol ( pmove_t *pm, vec3_t wishdir, float wishspeed );
 extern float	cpm_Gauntletknockback;
 
 // Machinegun
-extern float	cpm_MGbox;
 extern int		cpm_MGweapon;
 
 // Shotgun
 extern float	cpm_SSGknockback;
-extern int		cpm_SSGmaxammo;
 
 // Grenade Launcher
 extern float	cpm_GLreload;
-extern int		cpm_GLmaxammo;
 
 // Rocket Launcher
-extern int		cpm_RLmaxammo;
 extern float	cpm_RLsplashknockback;
 extern float	cpm_RLknockback;
 
@@ -38,8 +34,6 @@ extern float	cpm_RLknockback;
 extern float	cpm_LGknockback;
 
 // Railgun
-extern int		cpm_RGmaxammo;
-extern int		cpm_RGbox;
 extern float	cpm_RGchange;
 
 // Plasma Gun
@@ -86,3 +80,24 @@ extern int		cpm_itemsize;
 extern float	cpm_lavadamage;
 extern float	cpm_slimedamage;
 extern float	cpm_lavafrequency;
+
+// Weapons
+typedef struct gweapon_s {
+    char        *name;
+    char        *shortname;
+
+    vec_t       *color;
+    qboolean    switchOnCycle;
+    qboolean    switchOnOutOfAmmo;
+
+    qboolean    tossOnDeath;
+
+    int         ammoBox;
+    int         minAmmunition;
+    int         maxAmmunition;
+
+    qboolean    spawnWeapon;
+    int         spawnAmmunition;
+} gweapon_t;
+
+extern	gweapon_t	bg_weaponlist[];

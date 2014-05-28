@@ -93,6 +93,8 @@ vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
 vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 
 vmCvar_t	g_grapple;
+vmCvar_t	g_spawnWeapons;
+vmCvar_t	g_instagib;
 vmCvar_t	g_singlePlayer;
 
 
@@ -176,6 +178,8 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_pro_physics, "g_pro_physics", "1", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue }, // CPM: The CPM physics
 
     { &g_grapple, "g_grapple", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+    { &g_spawnWeapons, "g_spawnWeapons", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+    { &g_instagib, "g_instagib", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
 
     { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse }
 };
@@ -1529,12 +1533,12 @@ qboolean HonorAsKing(gentity_t *ent) {
     ent->client->ps.stats[STAT_ARMORCLASS] = ARM_HEAVY;
 
     for (i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++) {
-        if (!(level.mapWeapons & (1 << i))) {
+        if (!bg_weaponlist[i].spawnWeapon && !(level.mapWeapons & (1 << i)) && g_spawnWeapons.integer <= 1) {
             continue;
         }
 
         ent->client->ps.stats[STAT_WEAPONS] |= (1 << i);
-        ent->client->ps.ammo[i] = 50;
+        ent->client->ps.ammo[i] = bg_weaponlist[i].maxAmmunition;
     }
 
     trap_SendServerCommand(-1, va("cp \"%s is the new king\n\"", ent->client->pers.netname));

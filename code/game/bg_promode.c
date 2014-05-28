@@ -16,19 +16,15 @@ float	cpm_pm_wishspeed = 400;
 float	cpm_Gauntletknockback = 1;
 
 // Machinegun
-float	cpm_MGbox = 50;
 int		cpm_MGweapon = 100;
 
 // Shotgun
 float	cpm_SSGknockback = 1;
-int		cpm_SSGmaxammo = 200;
 
 // Grenade Launcher
 float	cpm_GLreload = 800;
-int		cpm_GLmaxammo = 200;
 
 // Rocket Launcher
-int		cpm_RLmaxammo = 200;
 float	cpm_RLsplashknockback = 1;
 float	cpm_RLknockback = 1;
 
@@ -36,8 +32,6 @@ float	cpm_RLknockback = 1;
 float	cpm_LGknockback = 1;
 
 // Railgun
-int		cpm_RGmaxammo = 200;
-int		cpm_RGbox = 10;
 float	cpm_RGchange;
 
 // Plasma Gun
@@ -84,6 +78,181 @@ float	cpm_lavadamage = 30;
 float	cpm_slimedamage = 10;
 float	cpm_lavafrequency = 700;
 
+// Weapon
+gweapon_t	bg_weaponlist[] =
+{
+    // WP_NONE
+    {
+        "None",
+        "n",
+
+        colorBlack,
+        qfalse,
+        qfalse,
+
+        qfalse,
+
+        0,
+        -1,
+        -1,
+
+        qfalse,
+        -1
+    },
+
+    // WP_GAUNTLET
+    {
+        "Gauntlet",
+        "g",
+
+        colorOrange,
+        qfalse,
+        qtrue,
+
+        qfalse,
+
+        0,
+        -1,
+        -1,
+
+        qtrue,
+        -1
+    },
+
+    // WP_MACHINEGUN,
+    {
+        "Machinegun",
+        "mg",
+
+        colorYellow,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        50,
+        50,
+        200,
+
+        qtrue,
+        100
+    },
+
+    // WP_SHOTGUN,
+    {
+        "Shotgun",
+        "sg",
+
+        colorRed,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        10,
+        10,
+        50,
+
+        qfalse,
+        0
+    },
+
+    // WP_GRENADE_LAUNCHER,
+    {
+        "Grenade Launcher",
+        "gl",
+
+        colorGreen,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        5,
+        5,
+        50,
+
+        qfalse,
+        0
+    },
+
+    // WP_ROCKET_LAUNCHER,
+    {
+        "Rocket Launcher",
+        "rl",
+
+        colorMdGrey,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        5,
+        5,
+        50,
+
+        qfalse,
+        0
+    },
+
+    // WP_LIGHTNING,
+    {
+        "Lightning Gun",
+        "lg",
+
+        colorWhite,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        50,
+        50,
+        200,
+
+        qfalse,
+        0
+    },
+
+    // WP_RAILGUN,
+    {
+        "Railgun",
+        "rg",
+
+        colorCyan,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        5,
+        5,
+        25,
+
+        qfalse,
+        0
+    },
+
+    // WP_PLASMAGUN,
+    {
+        "Plasma Rifle",
+        "pr",
+
+        colorMagenta, // colorPurple
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        5,
+        5,
+        25,
+
+        qfalse,
+        0
+    }
+};
+
 void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 {
 	// num = 0: normal quake 3
@@ -104,19 +273,15 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 	cpm_Gauntletknockback = 1;
 
 	// vq3 machine gun settings
-	cpm_MGbox = 50;
 	cpm_MGweapon = 100;
 
 	// vq3 ssg settings
 	cpm_SSGknockback = 1;
-	cpm_SSGmaxammo = 200;
 
 	// vq3 GL settings
 	cpm_GLreload = 800;
-	cpm_GLmaxammo = 200;
 
 	// vq3 Rocket Launcher
-	cpm_RLmaxammo = 200;
 	cpm_RLsplashknockback = 1;
 	cpm_RLknockback = 1;
 
@@ -124,8 +289,6 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 	cpm_LGknockback = 1;
 
 	// vq3 Railgun
-	cpm_RGmaxammo = 200;
-	cpm_RGbox = 10;
 	cpm_RGchange = 1500;
 
 	// vq3 Plasma Gun
@@ -192,19 +355,15 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 		cpm_Gauntletknockback = 0.5;
 
 		// machinegun
-		cpm_MGbox = 25;
 		cpm_MGweapon = 50;
 
 		// Shotgun
 		cpm_SSGknockback = 1.35;
-		cpm_SSGmaxammo = 100;
 
 		// Grenade Launcher
 		cpm_GLreload = 600;
-		cpm_GLmaxammo = 100;
 
 		// Rocket Launcher
-		cpm_RLmaxammo = 100;
 		cpm_RLsplashknockback = 1.2;
 		cpm_RLknockback = 1.2;
 
@@ -212,8 +371,6 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 		cpm_LGknockback = 1.55;
 
 		// Railgun
-		cpm_RGmaxammo = 100;
-		cpm_RGbox = 5;
 		cpm_RGchange = 1000; // allow users to switch weapon before reload
 
 		// Plasma Gun
