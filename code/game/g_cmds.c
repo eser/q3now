@@ -482,16 +482,16 @@ void BroadcastTeamChange( gclient_t *client, int oldTeam )
     }
 
 	if ( client->sess.sessionTeam == TEAM_RED ) {
-		trap_SendServerCommand( -1, va("cp \"%s" S_COLOR_WHITE " joined the red team.\n\"",
+        trap_SendServerCommand(-1, va("cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " joined the red team.\n\"",
 			client->pers.netname) );
 	} else if ( client->sess.sessionTeam == TEAM_BLUE ) {
-		trap_SendServerCommand( -1, va("cp \"%s" S_COLOR_WHITE " joined the blue team.\n\"",
+        trap_SendServerCommand(-1, va("cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " joined the blue team.\n\"",
 		client->pers.netname));
 	} else if ( client->sess.sessionTeam == TEAM_SPECTATOR && oldTeam != TEAM_SPECTATOR ) {
-		trap_SendServerCommand( -1, va("cp \"%s" S_COLOR_WHITE " joined the spectators.\n\"",
+        trap_SendServerCommand(-1, va("cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " joined the spectators.\n\"",
 		client->pers.netname));
 	} else if ( client->sess.sessionTeam == TEAM_FREE ) {
-		trap_SendServerCommand( -1, va("cp \"%s" S_COLOR_WHITE " joined the battle.\n\"",
+        trap_SendServerCommand(-1, va("cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " joined the battle.\n\"",
 		client->pers.netname));
 	}
 }
@@ -1352,7 +1352,7 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 		Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "%s", level.voteString );
 	}
 
-	trap_SendServerCommand( -1, va("print \"%s called a vote.\n\"", ent->client->pers.netname ) );
+    trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " called a vote.\n\"", ent->client->pers.netname));
 
 	// start the voting, the caller automatically votes yes
 	level.voteTime = level.time;
@@ -1516,7 +1516,7 @@ void Cmd_CallTeamVote_f( gentity_t *ent ) {
 		if ( level.clients[i].pers.connected == CON_DISCONNECTED )
 			continue;
 		if (level.clients[i].sess.sessionTeam == team)
-			trap_SendServerCommand( i, va("print \"%s called a team vote.\n\"", ent->client->pers.netname ) );
+            trap_SendServerCommand(i, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " called a team vote.\n\"", ent->client->pers.netname));
 	}
 
 	// start the voting, the caller automatically votes yes

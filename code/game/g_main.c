@@ -1412,7 +1412,7 @@ void CheckExitRules( void ) {
             else {
                 if (cl->ps.persistant[PERS_SCORE] >= g_fraglimit.integer) {
                     LogExit("Fraglimit hit.");
-                    trap_SendServerCommand(-1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
+                    trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
                         cl->pers.netname));
                     return;
                 }
@@ -1427,7 +1427,7 @@ void CheckExitRules( void ) {
                 }
 
                 if (cl->sess.sessionTeam == TEAM_FREE && cl->ps.persistant[PERS_SCORE] > 0) {
-                    trap_SendServerCommand(-1, va("print \"%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
+                    trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
                         cl->pers.netname));
 
                     cl->sess.wins++;
@@ -1555,7 +1555,7 @@ qboolean HonorAsKing(gentity_t *ent) {
         ent->client->ps.ammo[i] = bg_weaponlist[i].maxAmmunition;
     }
 
-    trap_SendServerCommand(-1, va("cp \"%s is the new king\n\"", ent->client->pers.netname));
+    trap_SendServerCommand(-1, va("cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is the new king\n\"", ent->client->pers.netname));
 
     return qtrue;
 }
@@ -1774,11 +1774,11 @@ void SetLeader(int team, int client) {
 	int i;
 
 	if ( level.clients[client].pers.connected == CON_DISCONNECTED ) {
-		PrintTeam(team, va("print \"%s is not connected\n\"", level.clients[client].pers.netname) );
+        PrintTeam(team, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is not connected\n\"", level.clients[client].pers.netname));
 		return;
 	}
 	if (level.clients[client].sess.sessionTeam != team) {
-		PrintTeam(team, va("print \"%s is not on the team anymore\n\"", level.clients[client].pers.netname) );
+        PrintTeam(team, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is not on the team anymore\n\"", level.clients[client].pers.netname));
 		return;
 	}
 	for ( i = 0 ; i < level.maxclients ; i++ ) {
@@ -1791,7 +1791,7 @@ void SetLeader(int team, int client) {
 	}
 	level.clients[client].sess.teamLeader = qtrue;
 	ClientUserinfoChanged( client );
-	PrintTeam(team, va("print \"%s is the new team leader\n\"", level.clients[client].pers.netname) );
+    PrintTeam(team, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is the new team leader\n\"", level.clients[client].pers.netname));
 }
 
 /*
