@@ -723,7 +723,7 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
 	if (!save)
 		return 0;
 
-    if (g_gametype.integer == GT_KINGOFTHEHILL && !ent->client->ps.powerups[PW_KING]) {
+    if (g_gametype.integer != GT_KINGOFTHEHILL || !ent->client->ps.powerups[PW_KING]) {
         client->ps.stats[STAT_ARMOR] -= save;
         if (client->ps.stats[STAT_ARMOR] <= 0) {
             client->ps.stats[STAT_ARMORCLASS] = ARM_NONE;
