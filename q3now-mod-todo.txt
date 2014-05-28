@@ -11,15 +11,15 @@ TODO:
 * team arena hit sounds
 * team arena bullet surface sounds
 * pro mode item pickup range
-* machinegun drop
+* machinegun barrel on drop
 * mod ffa -> deathmatch
 * mod freezetag
 * mod clan arena
 * mod last man standing
 * new ui library
 * only quad explosions+gauntlet gibs players, only explosions+gauntlet gibs corpses.
-* g_selfdamage.integer
-* weapon knockbacks and kicks
+* g_selfdamage.integer // g_friendlyFire.integer
+* weapon kicks
 * kamikaze effects
 * STAT_DEAD_YAW -> client side handling
 * no personal colors
@@ -34,3 +34,4 @@ TODO:
 
 KNOWN ISSUES:
 * single player mod doesn't kick bots on next game
+* king of the hill scoreboard gfx
