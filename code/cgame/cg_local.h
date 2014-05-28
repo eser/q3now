@@ -1185,6 +1185,7 @@ extern	vmCvar_t		cg_enableBreath;
 extern	vmCvar_t		cg_obeliskRespawnDelay;
 #endif
 extern	vmCvar_t		cg_singlePlayer;
+extern  vmCvar_t        cg_switchToEmpty;
 
 //
 // cg_main.c

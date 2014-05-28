@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+#include "bg_promode.h" // CPM
 
 #ifdef MISSIONPACK
 #include "../../ui/menudef.h"			// for the voice chats
@@ -263,8 +264,8 @@ void Cmd_Give_f (gentity_t *ent)
 
 	if (give_all || Q_stricmp(name, "ammo") == 0)
 	{
-		for ( i = 0 ; i < MAX_WEAPONS ; i++ ) {
-			ent->client->ps.ammo[i] = 200;
+		for ( i = WP_NONE+1 ; i < MAX_WEAPONS ; i++ ) {
+            ent->client->ps.ammo[i] = bg_weaponlist[i].maxAmmunition;
 		}
 		if (!give_all)
 			return;

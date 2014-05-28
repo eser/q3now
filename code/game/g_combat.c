@@ -922,7 +922,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
         // CPM: Custom weapon knockbacks
         float	scale = 1;
 
-        if ((targ == attacker) && (mod == MOD_ROCKET_SPLASH)) {
+        if (targ == attacker) {
+            if (mod == MOD_ROCKET_SPLASH) {
+                scale = cpm_RLsplashknockback;
+            }
         } else {
             switch (mod) {
             case MOD_GAUNTLET:
@@ -943,6 +946,16 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
             case MOD_PLASMA:
                 scale = cpm_PGknockback;
                 break;
+            }
+
+            if (g_instagib.integer) {
+                switch (mod) {
+                case MOD_GAUNTLET:
+                case MOD_GRENADE:
+                case MOD_ROCKET:
+                case MOD_RAILGUN:
+                    damage = INFINITE;
+                }
             }
         }
         // !CPM
