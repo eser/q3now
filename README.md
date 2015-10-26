@@ -66,4 +66,5 @@ The major features that implemented so far:
 ## Contributing
 It is publicly open for any contribution. Bugfixes, new features and extra modules are
 welcome. All contributions should be filed on the
-[larukedi/ioq3](//github.com/larukedi/ioq3) repository.
+[eserozvataf/ioq3](//github.com/eserozvataf/ioq3) repository.
+

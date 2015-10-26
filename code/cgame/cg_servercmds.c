@@ -327,7 +327,7 @@ static void CG_ConfigStringModified( void ) {
 		cgs.teamVoteNo[num-CS_TEAMVOTE_NO] = atoi( str );
 		cgs.teamVoteModified[num-CS_TEAMVOTE_NO] = qtrue;
 	} else if ( num >= CS_TEAMVOTE_STRING && num <= CS_TEAMVOTE_STRING + 1) {
-		Q_strncpyz( cgs.teamVoteString[num-CS_TEAMVOTE_STRING], str, sizeof( cgs.teamVoteString ) );
+		Q_strncpyz( cgs.teamVoteString[num-CS_TEAMVOTE_STRING], str, sizeof( cgs.teamVoteString[0] ) );
 #ifdef MISSIONPACK
 		trap_S_StartLocalSound( cgs.media.voteNow, CHAN_ANNOUNCER );
 #endif
@@ -486,6 +486,12 @@ static void CG_MapRestart( void ) {
 
     if (cg_singlePlayer.integer) {
 		trap_Cvar_Set("ui_matchStartTime", va("%i", cg.time));
+
+		// eser - tweaks
+		// if (cg_recordSPDemo.integer && *cg_recordSPDemoName.string) {
+		// 	trap_SendConsoleCommand(va("set g_synchronousclients 1 ; record %s \n", cg_recordSPDemoName.string));
+		// }
+		// eser - tweaks
 	}
 
     trap_Cvar_Set("cg_thirdPerson", "0");
@@ -823,7 +829,6 @@ CG_PlayVoiceChat
 =================
 */
 void CG_PlayVoiceChat( bufferedVoiceChat_t *vchat ) {
-#ifdef MISSIONPACK
 	// if we are going into the intermission, don't start any voices
 	if ( cg.intermissionStarted ) {
 		return;
@@ -848,7 +853,6 @@ void CG_PlayVoiceChat( bufferedVoiceChat_t *vchat ) {
 		CG_Printf( "%s\n", vchat->message );
 	}
 	voiceChatBuffer[cg.voiceChatBufferOut].snd = 0;
-#endif
 }
 
 /*
@@ -857,7 +861,6 @@ CG_PlayBufferedVoieChats
 =====================
 */
 void CG_PlayBufferedVoiceChats( void ) {
-#ifdef MISSIONPACK
 	if ( cg.voiceChatTime < cg.time ) {
 		if (cg.voiceChatBufferOut != cg.voiceChatBufferIn && voiceChatBuffer[cg.voiceChatBufferOut].snd) {
 			//
@@ -867,7 +870,6 @@ void CG_PlayBufferedVoiceChats( void ) {
 			cg.voiceChatTime = cg.time + 1000;
 		}
 	}
-#endif
 }
 
 /*
@@ -876,7 +878,6 @@ CG_AddBufferedVoiceChat
 =====================
 */
 void CG_AddBufferedVoiceChat( bufferedVoiceChat_t *vchat ) {
-#ifdef MISSIONPACK
 	// if we are going into the intermission, don't start any voices
 	if ( cg.intermissionStarted ) {
 		return;
@@ -888,7 +889,6 @@ void CG_AddBufferedVoiceChat( bufferedVoiceChat_t *vchat ) {
 		CG_PlayVoiceChat( &voiceChatBuffer[cg.voiceChatBufferOut] );
 		cg.voiceChatBufferOut++;
 	}
-#endif
 }
 
 /*
@@ -897,7 +897,6 @@ CG_VoiceChatLocal
 =================
 */
 void CG_VoiceChatLocal( int mode, qboolean voiceOnly, int clientNum, int color, const char *cmd ) {
-#ifdef MISSIONPACK
 	char *chat;
 	voiceChatList_t *voiceChatList;
 	clientInfo_t *ci;
@@ -937,7 +936,6 @@ void CG_VoiceChatLocal( int mode, qboolean voiceOnly, int clientNum, int color, 
 			CG_AddBufferedVoiceChat(&vchat);
 		}
 	}
-#endif
 }
 
 /*
@@ -965,7 +963,7 @@ void CG_VoiceChat( int mode ) {
 
 	CG_VoiceChatLocal( mode, voiceOnly, clientNum, color, cmd );
 }
-#endif
+#endif // MISSIONPACK
 
 /*
 =================
