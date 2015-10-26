@@ -121,5 +121,8 @@
     <ClInclude Include="..\..\code\game\bg_promode.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\code\renderercommon\tr_types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

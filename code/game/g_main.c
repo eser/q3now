@@ -536,6 +536,10 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	}
 
 	G_RemapTeamShaders();
+
+	// eser - tweaks
+	// trap_SetConfigstring( CS_INTERMISSION, "" );
+	// eser - tweaks
 }
 
 
@@ -1901,7 +1905,7 @@ Runs thinking code for this frame if necessary
 =============
 */
 void G_RunThink (gentity_t *ent) {
-	float	thinktime;
+	int	thinktime;
 
 	thinktime = ent->nextthink;
 	if (thinktime <= 0) {
