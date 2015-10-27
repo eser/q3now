@@ -36,6 +36,7 @@ int		cpm_itemrespawnweapon = 5;
 int		cpm_itemrespawnammo = 40;
 int		cpm_startpowerups = 0;
 int		cpm_itemrespawnBS = 120;
+int     cpm_playerforcerespawn = 20;
 
 // Megahealth
 int		cpm_megastyle = 0;
@@ -94,6 +95,7 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 	cpm_itemrespawnammo = 40;
 	cpm_startpowerups = 0;
 	cpm_itemrespawnBS = 120;
+	cpm_playerforcerespawn = 20;
 
 	// Megahealth
 	cpm_megastyle = 0;
@@ -152,6 +154,7 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 		cpm_itemrespawnammo = 30;
 		cpm_startpowerups = 1;
 		cpm_itemrespawnBS = 120;
+		cpm_playerforcerespawn = 3;
 
 		// Megahealth
 		cpm_megastyle = 1;
