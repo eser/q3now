@@ -194,9 +194,7 @@ UI_SPPostgameMenu_MenuDraw
 =================
 */
 static void UI_SPPostgameMenu_MenuDraw( void ) {
-	int		timer;
 	int		serverId;
-	int		n;
 	char	info[MAX_INFO_STRING];
 
 	trap_GetConfigString( CS_SYSTEMINFO, info, sizeof(info) );
@@ -240,7 +238,6 @@ UI_SPPostgameMenu_Cache
 =================
 */
 void UI_SPPostgameMenu_Cache( void ) {
-	int			n;
 	qboolean	buildscript;
 
 	buildscript = trap_Cvar_VariableValue("com_buildscript");
@@ -339,7 +336,6 @@ void UI_SPPostgameMenu_f( void ) {
 	int			playerGameRank;
 	int			playerClientNum;
 	int			n;
-	int			oldFrags, newFrags;
 	const char	*arena;
 	int			awardValues[6];
 	char		map[MAX_QPATH];

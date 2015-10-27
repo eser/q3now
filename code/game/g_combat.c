@@ -108,7 +108,7 @@ void TossClientItems( gentity_t *self ) {
 
     // CPM
     if (g_gametype.integer != GT_KINGOFTHEHILL && weapon >= WP_MACHINEGUN &&
-        self->client->ps.ammo[weapon] || cpm_backpacks) {
+        (self->client->ps.ammo[weapon] || cpm_backpacks)) {
         // find the item type for this weapon
         item = BG_FindItemForWeapon(weapon);
 

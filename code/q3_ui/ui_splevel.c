@@ -507,10 +507,9 @@ UI_SPLevelMenu_MenuDraw
 #define LEVEL_DESC_LEFT_MARGIN		332
 
 static void UI_SPLevelMenu_MenuDraw( void ) {
-	int				n, i;
+	int				n;
 	int				x, y;
 	vec4_t			color;
-	int				level;
 //	int				fraglimit;
 	int				pad;
 	char			buf[MAX_INFO_VALUE];
@@ -598,8 +597,6 @@ UI_SPLevelMenu_Cache
 =================
 */
 void UI_SPLevelMenu_Cache( void ) {
-	int				n;
-
 	trap_R_RegisterShaderNoMip( ART_LEVELFRAME_FOCUS );
 	trap_R_RegisterShaderNoMip( ART_LEVELFRAME_SELECTED );
 	trap_R_RegisterShaderNoMip( ART_ARROW );
@@ -637,8 +634,6 @@ UI_SPLevelMenu_Init
 static void UI_SPLevelMenu_Init( void ) {
 	int		skill;
 	int		n;
-	int		x, y;
-	int		count;
 	char	buf[MAX_QPATH];
 
 	skill = (int)trap_Cvar_VariableValue( "g_spSkill" );

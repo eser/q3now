@@ -607,7 +607,7 @@ void CG_RegisterWeapon( int weaponNum ) {
     if (weaponNum == WP_NONE) {
         MAKERGB(weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f);
         weaponInfo->flashSound[0] = trap_S_RegisterSound("sound/weapons/rocket/rocklf1a.wav", qfalse);
-        weaponInfo->missileModel = NULL;
+        weaponInfo->missileModel = (qhandle_t)NULL;
         weaponInfo->missileTrailFunc = CG_GrappleTrail;
         weaponInfo->missileDlight = 200;
 
@@ -918,7 +918,6 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 
 // eser - true lightning
         // might as well fix up true lightning while we're at it
-        vec3_t viewangles;
         AngleVectors(cg.predictedPlayerState.viewangles, forward, NULL, NULL);
         VectorCopy(cg.predictedPlayerState.origin, muzzlePoint);
 // eser - true lightning

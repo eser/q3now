@@ -233,7 +233,6 @@ PlayerSettings_SetMenuItems
 static void PlayerSettings_SetMenuItems( void ) {
 	vec3_t	viewangles;
 	int		c;
-	int		h;
 
 	// name
 	Q_strncpyz( s_playersettings.name.field.buffer, UI_Cvar_VariableString("name"), sizeof(s_playersettings.name.field.buffer) );
