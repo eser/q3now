@@ -691,6 +691,207 @@ Only in One Flag CTF games
 
 int		bg_numItems = ARRAY_LEN( bg_itemlist ) - 1;
 
+// Weapon
+gweapon_t	bg_weaponlist[] =
+{
+    // WP_NONE
+    {
+        "None",
+        "n",
+
+        colorBlack,
+        qfalse,
+        qfalse,
+
+        qfalse,
+
+        0,
+        -1,
+        -1,
+
+        qfalse,
+        -1,
+
+        0,
+        0
+    },
+
+    // WP_GAUNTLET
+    {
+        "Gauntlet",
+        "g",
+
+        colorOrange,
+        qfalse,
+        qtrue,
+
+        qfalse,
+
+        0,
+        -1,
+        -1,
+
+        qtrue,
+        -1,
+
+        500,
+        400
+    },
+
+    // WP_MACHINEGUN,
+    {
+        "Machinegun",
+        "mg",
+
+        colorYellow,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        50,
+        50,
+        200,
+
+        qtrue,
+        100,
+
+        1350,
+        100
+    },
+
+    // WP_SHOTGUN,
+    {
+        "Shotgun",
+        "sg",
+
+        colorRed,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        20,
+        20,
+        80,
+
+        qfalse,
+        0,
+
+        1350,
+        1000
+    },
+
+    // WP_GRENADE_LAUNCHER,
+    {
+        "Grenade Launcher",
+        "gl",
+
+        colorGreen,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        10,
+        10,
+        50,
+
+        qfalse,
+        0,
+
+        1200,
+        600
+    },
+
+    // WP_ROCKET_LAUNCHER,
+    {
+        "Rocket Launcher",
+        "rl",
+
+        colorMdGrey,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        10,
+        10,
+        50,
+
+        qfalse,
+        0,
+
+        1200,
+        800
+    },
+
+    // WP_LIGHTNING,
+    {
+        "Lightning Gun",
+        "lg",
+
+        colorWhite,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        50,
+        50,
+        200,
+
+        qfalse,
+        0,
+
+        1550,
+        50
+    },
+
+    // WP_RAILGUN,
+    {
+        "Railgun",
+        "rg",
+
+        colorCyan,
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        5,
+        5,
+        25,
+
+        qfalse,
+        0,
+
+        1550,
+        1000
+    },
+
+    // WP_PLASMAGUN,
+    {
+        "Plasma Rifle",
+        "pr",
+
+        colorMagenta, // colorPurple
+        qtrue,
+        qtrue,
+
+        qtrue,
+
+        5,
+        5,
+        25,
+
+        qfalse,
+        0,
+
+        500,
+        1000
+    }
+};
 
 /*
 ==============
@@ -826,12 +1027,10 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
             return qtrue;
         }
 
-#if defined(QAGAME) || defined(CGAME)
         // if (ps->stats[STAT_WEAPONS] & (1 << item->giTag) && ps->ammo[item->giTag] >= item->quantity) {
         if (ps->stats[STAT_WEAPONS] & (1 << item->giTag) && ps->ammo[item->giTag] >= bg_weaponlist[item->giTag].minAmmunition) {
             return qfalse;
         }
-#endif
 
         return qtrue;
 
@@ -842,11 +1041,9 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
             }
         }
 
-#if defined(QAGAME) || defined(CGAME)
         if (ps->ammo[item->giTag] >= bg_weaponlist[item->giTag].maxAmmunition) {
             return qfalse;
         }
-#endif
 
         return qtrue;
 

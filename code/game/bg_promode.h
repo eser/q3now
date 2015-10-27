@@ -56,27 +56,3 @@ extern int		cpm_itemsize;
 extern float	cpm_lavadamage;
 extern float	cpm_slimedamage;
 extern float	cpm_lavafrequency;
-
-// Weapons
-typedef struct gweapon_s {
-    char        *name;
-    char        *shortname;
-
-    vec_t       *color;
-    qboolean    switchOnCycle;
-    qboolean    switchOnOutOfAmmo;
-
-    qboolean    tossOnDeath;
-
-    int         ammoBox;
-    int         minAmmunition;
-    int         maxAmmunition;
-
-    qboolean    spawnWeapon;
-    int         spawnAmmunition;
-
-    int         knockback;
-    int         reloadTime;
-} gweapon_t;
-
-extern	gweapon_t	bg_weaponlist[];
