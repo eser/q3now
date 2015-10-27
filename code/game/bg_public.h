@@ -700,6 +700,9 @@ qboolean	BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 #define DF_FIXED_FOV			16
 #define	DF_NO_FOOTSTEPS			32
 
+// g_kothflags->integer flags
+#define	KF_GHOSTS   			1
+
 // content masks
 #define	MASK_ALL				(-1)
 #define	MASK_SOLID				(CONTENTS_SOLID)

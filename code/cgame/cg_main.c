@@ -391,6 +391,21 @@ void CG_UpdateCvars( void ) {
 	}
 }
 
+qboolean CG_IsPlayerInvisible( centity_t *cent ) {
+	if ( cent->currentState.powerups & ( 1 << PW_INVIS ) ) {
+		return qtrue;
+	}
+
+	if ( cgs.gametype == GT_KINGOFTHEHILL && ( cgs.kothflags & KF_GHOSTS ) > 0 ) {
+		if ( !(cent->currentState.powerups & ( 1 << PW_KING )) &&
+			cent->muzzleFlashTime + GHOST_FLASH_TIME < cg.time ) {
+			return qtrue;
+		}
+	}
+
+	return qfalse;
+}
+
 int CG_CrosshairPlayer( void ) {
 	if ( cg.time > ( cg.crosshairClientTime + 1000 ) ) {
 		return -1;

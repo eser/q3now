@@ -38,6 +38,7 @@ extern int		cpm_itemrespawnBS;
 extern int		cpm_itemrespawnweapon;
 extern int		cpm_itemrespawnammo;
 extern int		cpm_startpowerups;
+extern int      cpm_playerforcerespawn;
 
 // Megahealth
 extern int		cpm_megastyle;

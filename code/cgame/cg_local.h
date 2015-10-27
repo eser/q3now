@@ -51,6 +51,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	ZOOM_TIME			150
 #define	ITEM_BLOB_TIME		200
 #define	MUZZLE_FLASH_TIME	20
+#define	GHOST_FLASH_TIME	300
 #define	SINK_TIME			1000		// time for fragments to sink into ground before going away
 #define	ATTACKER_HEAD_TIME	10000
 #define	REWARD_TIME			3000
@@ -1005,7 +1006,7 @@ typedef struct {
 	// parsed from serverinfo
 	gametype_t		gametype;
 	int				dmflags;
-	int				teamflags;
+	int             kothflags;
 	int				fraglimit;
 	int				capturelimit;
 	int				timelimit;
@@ -1196,6 +1197,7 @@ void CG_StartMusic( void );
 
 void CG_UpdateCvars( void );
 
+qboolean CG_IsPlayerInvisible( centity_t *cent );
 int CG_CrosshairPlayer( void );
 int CG_LastAttacker( void );
 void CG_LoadMenus(const char *menuFile);
@@ -1302,7 +1304,7 @@ qhandle_t CG_StatusHandle(int task);
 //
 void CG_Player( centity_t *cent );
 void CG_ResetPlayerEntity( centity_t *cent );
-void CG_AddRefEntityWithPowerups( refEntity_t *ent, entityState_t *state, int team );
+void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState_t *state, qboolean isPlayerPart, int team );
 void CG_NewClientInfo( int clientNum );
 sfxHandle_t	CG_CustomSound( int clientNum, const char *soundName );
 

@@ -50,8 +50,13 @@ The major features that implemented so far:
 - Wall jumps ([youtu.be/RPwSBUZ2Ebw](//youtu.be/RPwSBUZ2Ebw))
 - New Game Mod: King of the Hill
 - New Game Mod: Last Man Standing
+- King of the Hill Ghost Mode (`+seta kothflags 1`)
 - Offhand Grapple (`+seta g_grapple 1`)
 - Instagib (`+seta g_instagib 1`)
+- Removed redundant concepts (handicap)
+- Removed redundant objects (guard, scout, doubler, ammoregen)
+- Balanced Rewards
+- No player sounds on Cloak (Invisibility)
 
 ## Mod TODO list
 - Unlagged implementation
@@ -60,8 +65,14 @@ The major features that implemented so far:
 - Spectator Cameras
 - New Powerup System
 - New Game Mods (Freeze Tag, etc.)
+- New Rewards
+- New Crosshair
 - A modern HUD with new menu system
+- New UI fonts
 - JUHOX's BrightArena implementation
+- Modified shaders
+- Armor piercing environment damages (fall, slime, water, lava, etc.)
+- Less falling damage
 
 ## Contributing
 It is publicly open for any contribution. Bugfixes, new features and extra modules are
