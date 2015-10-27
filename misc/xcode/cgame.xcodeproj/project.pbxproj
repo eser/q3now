@@ -34,6 +34,7 @@
 		2711BD2F14D12F01005EB142 /* q_shared.c in Sources */ = {isa = PBXBuildFile; fileRef = 2711BD2414D12F01005EB142 /* q_shared.c */; };
 		27AACFF7178DFDDE0093DFC0 /* ui_shared.c in Sources */ = {isa = PBXBuildFile; fileRef = 27AACFF6178DFDDE0093DFC0 /* ui_shared.c */; };
 		27AACFFA178DFE9A0093DFC0 /* cg_particles.c in Sources */ = {isa = PBXBuildFile; fileRef = 2711BCF314D12E99005EB142 /* cg_particles.c */; };
+		4EB28A281BDF048600502ABD /* bg_promode.c in Sources */ = {isa = PBXBuildFile; fileRef = 4EB28A261BDF048600502ABD /* bg_promode.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -74,6 +75,8 @@
 		2711BD2614D12F01005EB142 /* surfaceflags.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = surfaceflags.h; sourceTree = "<group>"; };
 		2735319514D125FD00EB7BD6 /* cgame.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = cgame.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		27AACFF6178DFDDE0093DFC0 /* ui_shared.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = ui_shared.c; path = ui/ui_shared.c; sourceTree = "<group>"; };
+		4EB28A261BDF048600502ABD /* bg_promode.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = bg_promode.c; path = game/bg_promode.c; sourceTree = "<group>"; };
+		4EB28A271BDF048600502ABD /* bg_promode.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = bg_promode.h; path = game/bg_promode.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +93,8 @@
 		2711BD1814D12E9E005EB142 /* game */ = {
 			isa = PBXGroup;
 			children = (
+				4EB28A261BDF048600502ABD /* bg_promode.c */,
+				4EB28A271BDF048600502ABD /* bg_promode.h */,
 				2711BD1C14D12F01005EB142 /* bg_lib.c */,
 				2711BD1D14D12F01005EB142 /* bg_lib.h */,
 				2711BD1E14D12F01005EB142 /* bg_local.h */,
@@ -253,6 +258,7 @@
 				2711BD2A14D12F01005EB142 /* bg_misc.c in Sources */,
 				2711BD2B14D12F01005EB142 /* bg_pmove.c in Sources */,
 				2711BD2D14D12F01005EB142 /* bg_slidemove.c in Sources */,
+				4EB28A281BDF048600502ABD /* bg_promode.c in Sources */,
 				2711BD2E14D12F01005EB142 /* q_math.c in Sources */,
 				2711BD2F14D12F01005EB142 /* q_shared.c in Sources */,
 				27AACFF7178DFDDE0093DFC0 /* ui_shared.c in Sources */,

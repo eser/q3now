@@ -40,6 +40,7 @@
 		2711BDAE14D12F4E005EB142 /* g_weapon.c in Sources */ = {isa = PBXBuildFile; fileRef = 2711BD6D14D12F4E005EB142 /* g_weapon.c */; };
 		2711BDB114D12F4E005EB142 /* q_math.c in Sources */ = {isa = PBXBuildFile; fileRef = 2711BD7014D12F4E005EB142 /* q_math.c */; };
 		2711BDB214D12F4E005EB142 /* q_shared.c in Sources */ = {isa = PBXBuildFile; fileRef = 2711BD7114D12F4E005EB142 /* q_shared.c */; };
+		4EB28A2B1BDF049B00502ABD /* bg_promode.c in Sources */ = {isa = PBXBuildFile; fileRef = 4EB28A291BDF049B00502ABD /* bg_promode.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -100,6 +101,8 @@
 		2711BD7314D12F4E005EB142 /* surfaceflags.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = surfaceflags.h; sourceTree = "<group>"; };
 		2711BD7414D12F4E005EB142 /* syn.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = syn.h; sourceTree = "<group>"; };
 		273531B414D126C300EB7BD6 /* game.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = game.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
+		4EB28A291BDF049B00502ABD /* bg_promode.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = bg_promode.c; sourceTree = "<group>"; };
+		4EB28A2A1BDF049B00502ABD /* bg_promode.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = bg_promode.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -116,6 +119,8 @@
 		2711BD3314D12F1A005EB142 /* game */ = {
 			isa = PBXGroup;
 			children = (
+				4EB28A291BDF049B00502ABD /* bg_promode.c */,
+				4EB28A2A1BDF049B00502ABD /* bg_promode.h */,
 				2711BD3414D12F4E005EB142 /* ai_chat.c */,
 				2711BD3514D12F4E005EB142 /* ai_chat.h */,
 				2711BD3614D12F4E005EB142 /* ai_cmd.c */,
@@ -277,6 +282,7 @@
 				2711BD9814D12F4E005EB142 /* g_cmds.c in Sources */,
 				2711BD9914D12F4E005EB142 /* g_combat.c in Sources */,
 				2711BD9A14D12F4E005EB142 /* g_items.c in Sources */,
+				4EB28A2B1BDF049B00502ABD /* bg_promode.c in Sources */,
 				2711BD9C14D12F4E005EB142 /* g_main.c in Sources */,
 				2711BD9D14D12F4E005EB142 /* g_mem.c in Sources */,
 				2711BD9E14D12F4E005EB142 /* g_misc.c in Sources */,
