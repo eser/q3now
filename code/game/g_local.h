@@ -492,7 +492,7 @@ const char *BuildShaderStateConfig( void );
 //
 qboolean CanDamage (gentity_t *targ, vec3_t origin);
 void G_Damage (gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_t dir, vec3_t point, int damage, int dflags, int mod);
-qboolean G_RadiusDamage (vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod);
+qboolean G_RadiusDamage (vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, qboolean underWater);
 int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir );
 void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath );
 void TossClientItems( gentity_t *self );
@@ -516,13 +516,10 @@ qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, floa
 //
 void G_RunMissile( gentity_t *ent );
 
-gentity_t *fire_plasma (gentity_t *self, vec3_t start, vec3_t aimdir);
+gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t right, vec3_t up);
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir);
 gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir);
-#ifdef MISSIONPACK
-gentity_t *fire_nail( gentity_t *self, vec3_t start, vec3_t forward, vec3_t right, vec3_t up );
-#endif
 
 
 //
@@ -949,3 +946,7 @@ int		trap_GeneticParentsAndChildSelection(int numranks, float *ranks, int *paren
 
 void	trap_SnapVector( float *v );
 
+gentity_t *FindTheKing();
+gentity_t *AssignAKing(gentity_t *preferred);
+void Offhand_Grapple_Fire(gentity_t *ent);
+void Offhand_Grapple_Free(gentity_t *ent);

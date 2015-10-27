@@ -5668,11 +5668,6 @@ void Menu_Reset(void) {
 displayContextDef_t *Display_GetContext(void) {
 	return DC;
 }
- 
-#ifndef MISSIONPACK
-static float captureX;
-static float captureY;
-#endif
 
 void *Display_CaptureItem(int x, int y) {
 	int i;

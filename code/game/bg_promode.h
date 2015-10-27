@@ -1,8 +1,8 @@
 
 void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics);
 
-extern float cpm_pm_jump_z;
-extern float pm_walljumps;
+extern float    cpm_pm_jump_z;
+extern int      pm_walljumps;
 
 // Physics
 extern float	cpm_pm_airstopaccelerate;

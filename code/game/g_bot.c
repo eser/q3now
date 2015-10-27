@@ -479,7 +479,6 @@ G_CheckBotSpawn
 */
 void G_CheckBotSpawn( void ) {
 	int		n;
-	char	userinfo[MAX_INFO_VALUE];
 
 	G_CheckMinimumPlayers();
 
