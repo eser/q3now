@@ -1347,6 +1347,9 @@ can see the last frag.
 void CheckExitRules( void ) {
  	int			i;
 	gclient_t	*cl;
+    int numClients;
+    int aliveClients;
+
 	// if at the intermission, wait for all non-bots to
 	// signal ready, then go to next level
 	if ( level.intermissiontime ) {
@@ -1395,8 +1398,8 @@ void CheckExitRules( void ) {
 			return;
 		}
 
-        int numClients = 0;
-        int aliveClients = 0;
+        numClients = 0;
+        aliveClients = 0;
 		for ( i=0 ; i< g_maxclients.integer ; i++ ) {
 			cl = level.clients + i;
 			if ( cl->pers.connected != CON_CONNECTED ) {

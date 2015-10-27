@@ -36,7 +36,7 @@ ifndef BUILD_BASEGAME
   BUILD_BASEGAME =
 endif
 ifndef BUILD_MISSIONPACK
-  BUILD_MISSIONPACK=0
+  BUILD_MISSIONPACK=
 endif
 ifndef BUILD_RENDERER_OPENGL2
   BUILD_RENDERER_OPENGL2=
@@ -235,7 +235,7 @@ USE_RENDERER_DLOPEN=1
 endif
 
 ifndef DEBUG_CFLAGS
-DEBUG_CFLAGS=-g -O0 -std=gnu99
+DEBUG_CFLAGS=-g -O0
 endif
 
 #############################################################################
