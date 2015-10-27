@@ -686,7 +686,7 @@ static void ClientCleanName(const char *in, char *out, int outSize)
 
 	// don't allow empty names
 	if( *out == '\0' || colorlessLen == 0)
-		Q_strncpyz(out, "UnnamedPlayer", outSize );
+		Q_strncpyz(out, "Unnamed", outSize );
 }
 
 
@@ -703,7 +703,7 @@ if desired.
 */
 void ClientUserinfoChanged( int clientNum ) {
 	gentity_t *ent;
-	int		teamTask, teamLeader, team, health;
+	int		teamTask, teamLeader, team;
 	char	*s;
 	char	model[MAX_QPATH];
 	char	headModel[MAX_QPATH];

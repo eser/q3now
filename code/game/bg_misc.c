@@ -806,7 +806,6 @@ This needs to be the same for client side prediction and server use.
 */
 qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const playerState_t *ps ) {
 	gitem_t	*item;
-    int		quantity;
 
 	if ( ent->modelindex < 1 || ent->modelindex >= bg_numItems ) {
 		Com_Error( ERR_DROP, "BG_CanItemBeGrabbed: index out of range" );
@@ -827,7 +826,7 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
             return qtrue;
         }
 
-#ifndef Q3_UI
+#if defined(QAGAME) || defined(CGAME)
         // if (ps->stats[STAT_WEAPONS] & (1 << item->giTag) && ps->ammo[item->giTag] >= item->quantity) {
         if (ps->stats[STAT_WEAPONS] & (1 << item->giTag) && ps->ammo[item->giTag] >= bg_weaponlist[item->giTag].minAmmunition) {
             return qfalse;
@@ -843,7 +842,7 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
             }
         }
 
-#ifndef Q3_UI
+#if defined(QAGAME) || defined(CGAME)
         if (ps->ammo[item->giTag] >= bg_weaponlist[item->giTag].maxAmmunition) {
             return qfalse;
         }

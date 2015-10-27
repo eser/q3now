@@ -667,7 +667,7 @@ static void CG_DrawStatusBar( void ) {
             shader = &cgs.media.combatArmorIcon;
             break;
         case ARM_JACKET:
-            shader = cgs.media.jacketArmorIcon;
+            shader = &cgs.media.jacketArmorIcon;
             break;
         default:
             shader = NULL;
@@ -2187,7 +2187,7 @@ static qboolean CG_DrawScoreboard( void ) {
 	}
 
 	// should never happen in Team Arena
-	if (g_singlePlayer.integer && cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
+	if (cg_singlePlayer.integer && cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
 		cg.deferredPlayerLoading = 0;
 		firstTime = qtrue;
 		return qfalse;

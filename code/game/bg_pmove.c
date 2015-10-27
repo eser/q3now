@@ -659,8 +659,6 @@ static qboolean PM_CheckWallJump(void) {
 static void PM_WallJump(void) {
     vec3_t flatforward, spot, velocity;
     trace_t trace;
-    float dot;
-    qboolean jumped = qfalse;
 
     pml.groundPlane = qfalse;
     pml.walking = qfalse;
