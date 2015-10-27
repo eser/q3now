@@ -1130,9 +1130,9 @@ static float	CG_MachinegunSpinAngle( centity_t *cent ) {
 CG_AddWeaponWithPowerups
 ========================
 */
-static void CG_AddWeaponWithPowerups( refEntity_t *gun, int powerups ) {
+static void CG_AddWeaponWithPowerups( centity_t *cent, refEntity_t *gun, int powerups ) {
 	// add powerup effects
-	if ( powerups & ( 1 << PW_INVIS ) ) {
+	if ( CG_IsPlayerInvisible(cent) ) {
 		gun->customShader = cgs.media.invisShader;
 		trap_R_AddRefEntityToScene( gun );
 	} else {
@@ -1270,7 +1270,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	MatrixMultiply(lerped.axis, ((refEntity_t *)parent)->axis, gun.axis);
 	gun.backlerp = parent->backlerp;
 
-	CG_AddWeaponWithPowerups( &gun, cent->currentState.powerups );
+	CG_AddWeaponWithPowerups( cent, &gun, cent->currentState.powerups );
 
 	// add the spinning barrel
 	if ( weapon->barrelModel ) {
@@ -1287,7 +1287,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 
 		CG_PositionRotatedEntityOnTag( &barrel, &gun, weapon->weaponModel, "tag_barrel" );
 
-		CG_AddWeaponWithPowerups( &barrel, cent->currentState.powerups );
+		CG_AddWeaponWithPowerups( cent, &barrel, cent->currentState.powerups );
 	}
 
 	// make sure we aren't looking at cg.predictedPlayerEntity for LG

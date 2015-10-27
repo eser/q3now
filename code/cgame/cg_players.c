@@ -1941,17 +1941,6 @@ static void CG_PlayerSprites( centity_t *cent ) {
         return;
     }
 
-    if (cgs.gametype == GT_KINGOFTHEHILL && !(cent->currentState.eFlags & EF_DEAD)) {
-        if (cent->currentState.powerups & (1 << PW_KING)) {
-            CG_PlayerFloatSprite(cent, cgs.media.medalExcellent);
-            return;
-        }
-
-        if (cg.snap->ps.powerups[PW_KING]) {
-            CG_PlayerFloatSprite(cent, cgs.media.friendShader);
-        }
-    }
-
 	if ( cent->currentState.eFlags & EF_CONNECTION ) {
 		CG_PlayerFloatSprite( cent, cgs.media.connectionShader );
 		return;
@@ -1961,6 +1950,10 @@ static void CG_PlayerSprites( centity_t *cent ) {
 		CG_PlayerFloatSprite( cent, cgs.media.balloonShader );
 		return;
 	}
+
+    if (cent->currentState.powerups & (1 << PW_INVIS)) {
+    	return;
+    }
 
 	if ( cent->currentState.eFlags & EF_AWARD_IMPRESSIVE ) {
 		CG_PlayerFloatSprite( cent, cgs.media.medalImpressive );
@@ -1991,6 +1984,18 @@ static void CG_PlayerSprites( centity_t *cent ) {
 		CG_PlayerFloatSprite( cent, cgs.media.medalCapture );
 		return;
 	}
+
+    if (cgs.gametype == GT_KINGOFTHEHILL && !(cent->currentState.eFlags & EF_DEAD)) {
+        if (cent->currentState.powerups & (1 << PW_KING)) {
+            CG_PlayerFloatSprite(cent, cgs.media.medalExcellent);
+            return;
+        }
+
+        if (cg.snap->ps.powerups[PW_KING] && !CG_IsPlayerInvisible(cent) ) {
+            CG_PlayerFloatSprite(cent, cgs.media.friendShader);
+            return;
+        }
+    }
 
 	team = cgs.clientinfo[ cent->currentState.clientNum ].team;
 	if ( !(cent->currentState.eFlags & EF_DEAD) && 
@@ -2025,7 +2030,7 @@ static qboolean CG_PlayerShadow( centity_t *cent, float *shadowPlane ) {
 	}
 
 	// no shadows when invisible
-	if ( cent->currentState.powerups & ( 1 << PW_INVIS ) ) {
+	if ( CG_IsPlayerInvisible(cent) ) {
 		return qfalse;
 	}
 
@@ -2158,9 +2163,9 @@ Adds a piece with modifications or duplications for powerups
 Also called by CG_Missile for quad rockets, but nobody can tell...
 ===============
 */
-void CG_AddRefEntityWithPowerups( refEntity_t *ent, entityState_t *state, int team ) {
+void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState_t *state, qboolean isPlayerPart, int team ) {
 
-	if ( state->powerups & ( 1 << PW_INVIS ) ) {
+	if ( isPlayerPart && CG_IsPlayerInvisible(cent) ) {
 		ent->customShader = cgs.media.invisShader;
 		trap_R_AddRefEntityToScene( ent );
 	} else {
@@ -2337,7 +2342,7 @@ void CG_Player( centity_t *cent ) {
 	legs.renderfx = renderfx;
 	VectorCopy (legs.origin, legs.oldorigin);	// don't positionally lerp at all
 
-	CG_AddRefEntityWithPowerups( &legs, &cent->currentState, ci->team );
+	CG_AddRefEntityWithPowerups( cent, &legs, &cent->currentState, qtrue, ci->team );
 
 	// if the model failed, allow the default nullmodel to be displayed
 	if (!legs.hModel) {
@@ -2361,7 +2366,7 @@ void CG_Player( centity_t *cent ) {
 	torso.shadowPlane = shadowPlane;
 	torso.renderfx = renderfx;
 
-	CG_AddRefEntityWithPowerups( &torso, &cent->currentState, ci->team );
+	CG_AddRefEntityWithPowerups( cent, &torso, &cent->currentState, qtrue, ci->team );
 
 #ifdef MISSIONPACK
 	if ( cent->currentState.eFlags & EF_KAMIKAZE ) {
@@ -2551,7 +2556,7 @@ void CG_Player( centity_t *cent ) {
 	head.shadowPlane = shadowPlane;
 	head.renderfx = renderfx;
 
-	CG_AddRefEntityWithPowerups( &head, &cent->currentState, ci->team );
+	CG_AddRefEntityWithPowerups( cent, &head, &cent->currentState, qtrue, ci->team );
 
 #ifdef MISSIONPACK
 	CG_BreathPuffs(cent, &head);

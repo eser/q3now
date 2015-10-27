@@ -514,7 +514,7 @@ static void CG_Missile( centity_t *cent ) {
 	}
 
 	// add to refresh list, possibly with quad glow
-	CG_AddRefEntityWithPowerups( &ent, s1, TEAM_FREE );
+	CG_AddRefEntityWithPowerups( cent, &ent, s1, qfalse, TEAM_FREE );
 }
 
 /*

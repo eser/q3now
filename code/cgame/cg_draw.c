@@ -2016,6 +2016,7 @@ static void CG_ScanForCrosshairEntity( void ) {
 	trace_t		trace;
 	vec3_t		start, end;
 	int			content;
+	centity_t	*cent;
 
 	VectorCopy( cg.refdef.vieworg, start );
 	VectorMA( start, 131072, cg.refdef.viewaxis[0], end );
@@ -2032,8 +2033,10 @@ static void CG_ScanForCrosshairEntity( void ) {
 		return;
 	}
 
+	cent = &cg_entities[trace.entityNum];
+
 	// if the player is invisible, don't show it
-	if ( cg_entities[ trace.entityNum ].currentState.powerups & ( 1 << PW_INVIS ) ) {
+	if ( CG_IsPlayerInvisible(cent) ) {
 		return;
 	}
 
