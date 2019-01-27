@@ -48,6 +48,7 @@ The major features that implemented so far:
 - New Plasma Gun (called Plasma Rifle)
 - New Weapon Balances
 - Wall jumps ([youtu.be/RPwSBUZ2Ebw](//youtu.be/RPwSBUZ2Ebw))
+- Less falling damage
 - New Game Mod: King of the Hill
 - New Game Mod: Last Man Standing
 - King of the Hill Ghost Mode (`+seta kothflags 1`)
@@ -72,7 +73,6 @@ The major features that implemented so far:
 - JUHOX's BrightArena implementation
 - Modified shaders
 - Armor piercing environment damages (fall, slime, water, lava, etc.)
-- Less falling damage
 
 ## Contributing
 It is publicly open for any contribution. Bugfixes, new features and extra modules are

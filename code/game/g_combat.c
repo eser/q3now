@@ -97,7 +97,7 @@ void TossClientItems( gentity_t *self ) {
 		}
 	}
 
-    // if ( weapon > WP_MACHINEGUN && 
+    // if ( weapon > WP_MACHINEGUN &&
     // 	self->client->ps.ammo[ weapon ] ) {
     // 	// find the item type for this weapon
     // 	item = BG_FindItemForWeapon( weapon );
@@ -484,8 +484,8 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		obit = modNames[meansOfDeath];
 	}
 
-	G_LogPrintf("Kill: %i %i %i: %s killed %s by %s\n", 
-		killer, self->s.number, meansOfDeath, killerName, 
+	G_LogPrintf("Kill: %i %i %i: %s killed %s by %s\n",
+		killer, self->s.number, meansOfDeath, killerName,
 		self->client->pers.netname, obit );
 
 	// broadcast the death event to everyone
@@ -521,7 +521,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
             }
 
 			if( meansOfDeath == MOD_GAUNTLET ) {
-				
+
 				// play humiliation on player
 				attacker->client->ps.persistant[PERS_GAUNTLET_FRAG_COUNT]++;
 
@@ -653,9 +653,9 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			self->health = GIB_HEALTH+1;
 		}
 
-		self->client->ps.legsAnim = 
+		self->client->ps.legsAnim =
 			( ( self->client->ps.legsAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | anim;
-		self->client->ps.torsoAnim = 
+		self->client->ps.torsoAnim =
 			( ( self->client->ps.torsoAnim & ANIM_TOGGLEBIT ) ^ ANIM_TOGGLEBIT ) | anim;
 
 		G_AddEvent( self, EV_DEATH1 + i, killer );
@@ -979,15 +979,21 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			int		t;
 
 			t = knockback * 2;
-			if ( t < 50 ) {
-				t = 50;
-			}
-			if ( t > 200 ) {
-				t = 200;
-			}
+			// no knockback boundaries
+			// if ( t < 50 ) {
+			// 	t = 50;
+			// }
+			// if ( t > 200 ) {
+			// 	t = 200;
+			// }
 			targ->client->ps.pm_time = t;
 			targ->client->ps.pm_flags |= PMF_TIME_KNOCKBACK;
 		}
+	}
+
+	// attacker hook release
+	if (targ->client && targ->client->hook && (targ->client->hook->enemy == attacker)) {
+		Weapon_HookFree(targ->client->hook);
 	}
 
 	// check for completely getting out of the damage
@@ -997,7 +1003,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		// if the attacker was on the same team
 #ifdef MISSIONPACK
 		if ( targ != attacker && !(dflags & DAMAGE_NO_TEAM_PROTECTION) && OnSameTeam (targ, attacker)  ) {
-#else	
+#else
 		if ( targ != attacker && OnSameTeam (targ, attacker)  ) {
 #endif
 			if ( !g_friendlyFire.integer ) {
@@ -1037,7 +1043,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 	// always give half damage if hurting self
 	// calculated after knockback, so rocket jumping works
-	if ( targ == attacker) {
+	if (targ == attacker) {
 		damage *= 0.5;
 	}
 
@@ -1047,7 +1053,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	take = damage;
 
 	// save some from armor
-	asave = CheckArmor (targ, take, dflags);
+	asave = CheckArmor(targ, take, dflags);
 	take -= asave;
 
 	if ( g_debugDamage.integer ) {
@@ -1079,7 +1085,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// See if it's the player hurting the emeny flag carrier
 #ifdef MISSIONPACK
 	if( g_gametype.integer == GT_CTF || g_gametype.integer == GT_1FCTF ) {
-#else	
+#else
 	if( g_gametype.integer == GT_CTF) {
 #endif
 		Team_CheckHurtCarrier(targ, attacker);
@@ -1093,12 +1099,12 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	// do the damage
-	if (take) {
+	if (take > 0) {
 		targ->health = targ->health - take;
 		if ( targ->client ) {
 			targ->client->ps.stats[STAT_HEALTH] = targ->health;
 		}
-			
+
 		if ( targ->health <= 0 ) {
 			if ( client )
 				targ->flags |= FL_NO_KNOCKBACK;
@@ -1143,7 +1149,7 @@ qboolean CanDamage (gentity_t *targ, vec3_t origin) {
 	if (tr.fraction == 1.0 || tr.entityNum == targ->s.number)
 		return qtrue;
 
-	// this should probably check in the plane of projection, 
+	// this should probably check in the plane of projection,
 	// rather than in world coordinate
 	VectorCopy(midpoint, dest);
 	dest[0] += offsetmaxs[0];

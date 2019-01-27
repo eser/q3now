@@ -20,7 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 //
-// g_weapon.c 
+// g_weapon.c
 // perform the server side effects of a weapon firing
 
 #include "g_local.h"
@@ -133,7 +133,7 @@ SnapVectorTowards
 
 Round a vector to integers for more efficient network
 transmission, but make sure that it rounds towards a given point
-rather than blindly truncating.  This prevents it from truncating 
+rather than blindly truncating.  This prevents it from truncating
 into a wall.
 ======================
 */
@@ -346,7 +346,7 @@ void weapon_grenadelauncher_fire (gentity_t *ent) {
 	forward[2] += 0.2f;
 	VectorNormalize( forward );
 
-	m = fire_grenade (ent, muzzle, forward);
+	m = fire_grenade(ent, muzzle, forward, 1000, qfalse);
 	m->damage *= s_quadFactor;
 	m->splashDamage *= s_quadFactor;
 

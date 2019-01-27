@@ -79,6 +79,27 @@ TELEPORTERS
 void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles ) {
 	gentity_t	*tent;
 	qboolean noAngles;
+	int i;
+
+	// release hook
+	if (player->client && player->client->hook) {
+		Weapon_HookFree(player->client->hook);
+	}
+
+	// release connected hooks
+	for (i = 0 ; i < level.maxclients ; i++) {
+		if (level.clients[i].pers.connected == CON_DISCONNECTED) {
+			continue;
+		}
+
+		if (!level.clients[i].hook) {
+			continue;
+		}
+
+		if (level.clients[i].hook->enemy == player) {
+			Weapon_HookFree(level.clients[i].hook);
+		}
+	}
 
 	noAngles = (angles[0] > 999999.0);
 	// use temp events at source and destination to prevent the effect
@@ -272,7 +293,7 @@ void Use_Shooter( gentity_t *ent, gentity_t *other, gentity_t *activator ) {
 
 	switch ( ent->s.weapon ) {
 	case WP_GRENADE_LAUNCHER:
-		fire_grenade( ent, ent->s.origin, dir );
+		fire_grenade( ent, ent->s.origin, dir, 2500, qtrue );
 		break;
 	case WP_ROCKET_LAUNCHER:
 		fire_rocket( ent, ent->s.origin, dir );
