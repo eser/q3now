@@ -76,11 +76,7 @@ vmCvar_t	g_rankings;
 vmCvar_t	g_listEntity;
 vmCvar_t	g_localTeamPref;
 #ifdef MISSIONPACK
-vmCvar_t	g_obeliskHealth;
-vmCvar_t	g_obeliskRegenPeriod;
-vmCvar_t	g_obeliskRegenAmount;
 vmCvar_t	g_obeliskRespawnDelay;
-vmCvar_t	g_cubeTimeout;
 vmCvar_t	g_redteam;
 vmCvar_t	g_blueteam;
 vmCvar_t	g_enableDust;
@@ -92,6 +88,7 @@ vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 vmCvar_t	g_grapple;
 vmCvar_t	g_spawnWeapons;
 vmCvar_t	g_instagib;
+vmCvar_t	g_excessive;
 vmCvar_t	g_singlePlayer;
 
 
@@ -149,12 +146,8 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_listEntity, "g_listEntity", "0", 0, 0, qfalse },
 
 #ifdef MISSIONPACK
-	{ &g_obeliskHealth, "g_obeliskHealth", "2500", 0, 0, qfalse },
-	{ &g_obeliskRegenPeriod, "g_obeliskRegenPeriod", "1", 0, 0, qfalse },
-	{ &g_obeliskRegenAmount, "g_obeliskRegenAmount", "15", 0, 0, qfalse },
 	{ &g_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", CVAR_SERVERINFO, 0, qfalse },
 
-	{ &g_cubeTimeout, "g_cubeTimeout", "30", 0, 0, qfalse },
 	{ &g_redteam, "g_redteam", "Stroggs", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO , 0, qtrue, qtrue },
 	{ &g_blueteam, "g_blueteam", "Pagans", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO , 0, qtrue, qtrue  },
 
@@ -174,6 +167,7 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_grapple, "g_grapple", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
     { &g_spawnWeapons, "g_spawnWeapons", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
     { &g_instagib, "g_instagib", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+	{ &g_excessive, "g_excessive", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
 
     { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse }
 };

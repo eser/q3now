@@ -1206,28 +1206,28 @@ Obelisks
 */
 
 static void ObeliskRegen( gentity_t *self ) {
-	self->nextthink = level.time + g_obeliskRegenPeriod.integer * 1000;
-	if( self->health >= g_obeliskHealth.integer ) {
+	self->nextthink = level.time + TA_OBELISK_REGEN_PERIOD * 1000;
+	if( self->health >= TA_OBELISK_HEALTH ) {
 		return;
 	}
 
 	G_AddEvent( self, EV_POWERUP_REGEN, 0 );
-	self->health += g_obeliskRegenAmount.integer;
-	if ( self->health > g_obeliskHealth.integer ) {
-		self->health = g_obeliskHealth.integer;
+	self->health += TA_OBELISK_REGEN_AMOUNT;
+	if ( self->health > TA_OBELISK_HEALTH ) {
+		self->health = TA_OBELISK_HEALTH;
 	}
 
-	self->activator->s.modelindex2 = self->health * 0xff / g_obeliskHealth.integer;
+	self->activator->s.modelindex2 = self->health * 0xff / TA_OBELISK_HEALTH;
 	self->activator->s.frame = 0;
 }
 
 
 static void ObeliskRespawn( gentity_t *self ) {
 	self->takedamage = qtrue;
-	self->health = g_obeliskHealth.integer;
+	self->health = TA_OBELISK_HEALTH;
 
 	self->think = ObeliskRegen;
-	self->nextthink = level.time + g_obeliskRegenPeriod.integer * 1000;
+	self->nextthink = level.time + TA_OBELISK_REGEN_PERIOD * 1000;
 
 	self->activator->s.frame = 0;
 }
@@ -1305,7 +1305,7 @@ static void ObeliskPain( gentity_t *self, gentity_t *attacker, int damage ) {
 	if (actualDamage <= 0) {
 		actualDamage = 1;
 	}
-	self->activator->s.modelindex2 = self->health * 0xff / g_obeliskHealth.integer;
+	self->activator->s.modelindex2 = self->health * 0xff / TA_OBELISK_HEALTH;
 	if (!self->activator->s.frame) {
 		G_AddEvent(self, EV_OBELISKPAIN, 0);
 	}
@@ -1332,11 +1332,11 @@ gentity_t *SpawnObelisk( vec3_t origin, vec3_t mins, vec3_t maxs, int team ) {
 	if( g_gametype.integer == GT_OBELISK ) {
 		ent->r.contents = CONTENTS_SOLID;
 		ent->takedamage = qtrue;
-		ent->health = g_obeliskHealth.integer;
+		ent->health = TA_OBELISK_HEALTH;
 		ent->die = ObeliskDie;
 		ent->pain = ObeliskPain;
 		ent->think = ObeliskRegen;
-		ent->nextthink = level.time + g_obeliskRegenPeriod.integer * 1000;
+		ent->nextthink = level.time + TA_OBELISK_REGEN_PERIOD * 1000;
 	}
 	if( g_gametype.integer == GT_HARVESTER ) {
 		ent->r.contents = CONTENTS_TRIGGER;

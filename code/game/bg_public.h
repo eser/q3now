@@ -66,6 +66,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	DEAD_VIEWHEIGHT		-16
 #define INVUL_RADIUS		42
 
+#define TA_OBELISK_HEALTH        2500
+#define TA_OBELISK_REGEN_PERIOD  1
+#define TA_OBELISK_REGEN_AMOUNT  15
+
+#define TA_CUBE_TIMEOUT          30
+
 //
 // config strings are a general means of communicating variable length strings
 // from the server to all connected clients.

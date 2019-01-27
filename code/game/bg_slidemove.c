@@ -57,7 +57,7 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 	float		into;
 	vec3_t		endVelocity;
 	vec3_t		endClipVelocity;
-	
+
 	numbumps = 4;
 
 	VectorCopy (pm->ps->velocity, primal_velocity);
@@ -69,7 +69,7 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 		primal_velocity[2] = endVelocity[2];
 		if ( pml.groundPlane ) {
 			// slide along the ground plane
-			PM_ClipVelocity (pm->ps->velocity, pml.groundTrace.plane.normal, 
+			PM_ClipVelocity (pm->ps->velocity, pml.groundTrace.plane.normal,
 				pm->ps->velocity, OVERCLIP );
 		}
 	}
@@ -249,21 +249,25 @@ void PM_StepSlideMove( qboolean gravity ) {
 //	vec3_t		delta, delta2;
 	vec3_t		up, down;
 	float		stepSize;
+	qboolean	inAir;
 
 	VectorCopy (pm->ps->origin, start_o);
 	VectorCopy (pm->ps->velocity, start_v);
 
 	if ( PM_SlideMove( gravity ) == 0 ) {
-		return;		// we got exactly where we wanted to go first try	
+		return;		// we got exactly where we wanted to go first try
 	}
 
 	VectorCopy(start_o, down);
 	down[2] -= STEPSIZE;
 	pm->trace (&trace, start_o, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask);
 	VectorSet(up, 0, 0, 1);
-	// never step up when you still have up velocity
-	if ( pm->ps->velocity[2] > 0 && (trace.fraction == 1.0 ||
-										DotProduct(trace.plane.normal, up) < 0.7)) {
+
+	inAir = ( pm->ps->velocity[2] > 0 && (trace.fraction == 1.0 ||
+										DotProduct(trace.plane.normal, up) < 0.7));
+
+	// never step up when you still have up velocity and not holding jump
+	if (inAir && pm->cmd.upmove < 10) {
 		return;
 	}
 
@@ -310,7 +314,7 @@ void PM_StepSlideMove( qboolean gravity ) {
 		if ( pm->debugLevel ) {
 			Com_Printf("%i:bend\n", c_pmove);
 		}
-	} else 
+	} else
 #endif
 	{
 		// use the step move
