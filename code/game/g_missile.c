@@ -99,7 +99,7 @@ void G_ExplodeMissile( gentity_t *ent ) {
 G_MissileImpact
 ================
 */
-void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
+void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 	gentity_t		*other;
 	qboolean		hitClient = qfalse;
 #ifdef MISSIONPACK
@@ -196,6 +196,9 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 		ent->think = Weapon_HookThink;
 		ent->nextthink = level.time + FRAMETIME;
 
+		// use this to track when to damage the enemy
+		ent->last_move_time = level.time - 10000;
+
 		ent->parent->client->ps.pm_flags |= PMF_GRAPPLE_PULL;
 		VectorCopy( ent->r.currentOrigin, ent->parent->client->ps.grapplePoint);
 
@@ -270,6 +273,7 @@ void G_RunMissile( gentity_t *ent ) {
 	vec3_t		origin;
 	trace_t		tr;
 	int			passent;
+	vec3_t dir;
 
 	// get current position
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
@@ -284,6 +288,10 @@ void G_RunMissile( gentity_t *ent ) {
 	}
 	// trace a line from the previous position to the current position
 	trap_Trace( &tr, ent->r.currentOrigin, ent->r.mins, ent->r.maxs, origin, passent, ent->clipmask );
+
+	// get the direction
+	VectorSubtract(origin, ent->r.currentOrigin, dir);
+	VectorNormalize(dir);
 
 	if ( tr.startsolid || tr.allsolid ) {
 		// make sure the tr.entityNum is set to the entity we're stuck in
@@ -312,7 +320,7 @@ void G_RunMissile( gentity_t *ent ) {
 			G_FreeEntity( ent );
 			return;
 		}
-		G_MissileImpact( ent, &tr );
+		G_MissileImpact( ent, &tr, dir );
 		if ( ent->s.eType != ET_MISSILE ) {
 			return;		// exploded
 		}
@@ -387,19 +395,19 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 fire_grenade
 =================
 */
-gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir) {
+gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qboolean bounce) {
 	gentity_t	*bolt;
 
 	VectorNormalize (dir);
 
 	bolt = G_Spawn();
 	bolt->classname = "grenade";
-	bolt->nextthink = level.time + 2000;
+	bolt->nextthink = level.time + time;
 	bolt->think = G_ExplodeMissile;
 	bolt->s.eType = ET_MISSILE;
 	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	bolt->s.weapon = WP_GRENADE_LAUNCHER;
-	bolt->s.eFlags = EF_BOUNCE_HALF;
+	bolt->s.eFlags = (bounce) ? EF_BOUNCE_HALF : 0;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
 	bolt->damage = 100;

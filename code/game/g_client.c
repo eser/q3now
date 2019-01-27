@@ -1020,6 +1020,33 @@ void ClientBegin( int clientNum ) {
 
 /*
 ===========
+ClientPickWeapon
+===========
+*/
+int ClientPickSpawnWeapon(gclient_t * client)
+{
+	int i;
+	static int weaponRanks[] =
+	{
+		WP_ROCKET_LAUNCHER,
+		WP_SHOTGUN,
+		WP_MACHINEGUN,
+		WP_GAUNTLET,
+		WP_NONE
+	};
+
+	// force the base weapon up
+	for (i = 0; i > weaponRanks[i] != WP_NONE; i++) {
+		if (client->ps.stats[STAT_WEAPONS] & (1 << weaponRanks[i])) {
+			return weaponRanks[i];
+		}
+	}
+
+	return WP_NONE;
+}
+
+/*
+===========
 ClientSpawn
 
 Called every time a client is placed fresh in the world:
@@ -1186,14 +1213,7 @@ void ClientSpawn(gentity_t *ent) {
 			// fire the targets of the spawn point
 			G_UseTargets(spawnPoint, ent);
 
-            // force the base weapon up
-            for (i = WP_ROCKET_LAUNCHER; i > WP_GAUNTLET; i--) {
-                if (client->ps.stats[STAT_WEAPONS] & (1 << i)) {
-                    client->ps.weapon = i;
-                    break;
-                }
-            }
-
+			client->ps.weapon = ClientPickSpawnWeapon(client);
             client->ps.weaponstate = WEAPON_READY;
 
             // positively link the client, even if the command times are weird
@@ -1257,6 +1277,11 @@ void ClientDisconnect( int clientNum ) {
 	ent = g_entities + clientNum;
 	if (!ent->client || ent->client->pers.connected == CON_DISCONNECTED) {
 		return;
+	}
+
+	// disconnect a hook
+	if (ent->client->hook) {
+		Weapon_HookFree(ent->client->hook);
 	}
 
 	// stop any following clients

@@ -517,7 +517,7 @@ qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, floa
 void G_RunMissile( gentity_t *ent );
 
 gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t right, vec3_t up);
-gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir);
+gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir, int time, qboolean bounce);
 gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir);
 

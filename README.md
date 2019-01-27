@@ -58,11 +58,11 @@ https://ioquake3.org/help/sys-admin-guide/
 ## Visit our forums
 If you've got issues that you aren't sure are worth filing as bugs, or just
 want to chat:
-https://discourse.ioquake.org
+https://discourse.ioquake.org.)
 
 ## I'm going to fork ioquake3 and do my own thing!
 Please update your fork's README.md to credit the ioquake3 project and inform users
-what project they're looking at so you get credit for your work. 
+what project they're looking at so you get credit for your work. .)
 
 Feel free to make a thread on our forums to let people know about
 your project. We're looking forward to hearing about it.
