@@ -70,7 +70,7 @@ void P_DamageFeedback( gentity_t *player ) {
 		client->ps.damageYaw = angles[YAW]/360.0 * 256;
 	}
 
-	// play an apropriate pain sound
+	// play an appropriate pain sound
 	if ( (level.time > player->pain_debounce_time) && !(player->flags & FL_GODMODE) ) {
 		player->pain_debounce_time = level.time + 700;
 		G_AddEvent( player, EV_PAIN, player->health );
@@ -274,7 +274,7 @@ void	G_TouchTriggers( gentity_t *ent ) {
 			}
 		}
 
-		// use seperate code for determining if an item is picked up
+		// use separate code for determining if an item is picked up
 		// so you don't have to actually contact its bounding box
 		if ( hit->s.eType == ET_ITEM ) {
 			if ( !BG_PlayerTouchesItem( &ent->client->ps, &hit->s, level.time ) ) {
@@ -315,8 +315,17 @@ void SpectatorThink( gentity_t *ent, usercmd_t *ucmd ) {
 
 	client = ent->client;
 
-	if ( client->sess.spectatorState != SPECTATOR_FOLLOW ) {
-		client->ps.pm_type = PM_SPECTATOR;
+	if ( client->sess.spectatorState != SPECTATOR_FOLLOW || !( client->ps.pm_flags & PMF_FOLLOW ) ) {
+		if ( client->sess.spectatorState == SPECTATOR_FREE ) {
+			if ( client->noclip ) {
+				client->ps.pm_type = PM_NOCLIP;
+			} else {
+				client->ps.pm_type = PM_SPECTATOR;
+			}
+		} else {
+			client->ps.pm_type = PM_FREEZE;
+		}
+
 		client->ps.speed = 400;	// faster than normal
 
 		// set up for pmove
@@ -704,9 +713,11 @@ void ClientThink_real( gentity_t *ent ) {
 
 	if ( pmove_msec.integer < 8 ) {
 		trap_Cvar_Set("pmove_msec", "8");
+		trap_Cvar_Update(&pmove_msec);
 	}
 	else if (pmove_msec.integer > 33) {
 		trap_Cvar_Set("pmove_msec", "33");
+		trap_Cvar_Update(&pmove_msec);
 	}
 
 	if ( pmove_fixed.integer || client->pers.pmoveFixed ) {
@@ -990,13 +1001,16 @@ void SpectatorClientEndFrame( gentity_t *ent ) {
 				ent->client->ps.pm_flags |= PMF_FOLLOW;
 				ent->client->ps.eFlags = flags;
 				return;
-			} else {
-				// drop them to free spectators unless they are dedicated camera followers
-				if ( ent->client->sess.spectatorClient >= 0 ) {
-					ent->client->sess.spectatorState = SPECTATOR_FREE;
-					ClientBegin( ent->client - level.clients );
-				}
 			}
+		}
+
+		if ( ent->client->ps.pm_flags & PMF_FOLLOW ) {
+			// drop them to free spectators unless they are dedicated camera followers
+			if ( ent->client->sess.spectatorClient >= 0 ) {
+				ent->client->sess.spectatorState = SPECTATOR_FREE;
+			}
+
+			ClientBegin( ent->client - level.clients );
 		}
 	}
 

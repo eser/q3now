@@ -155,7 +155,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 				velocity[2] = 1;	// stepped on a grenade
 			}
 			G_Damage (other, ent, &g_entities[ent->r.ownerNum], velocity,
-				ent->s.origin, ent->damage, 
+				ent->s.origin, ent->damage,
 				0, ent->methodOfDeath);
 		}
 	}
@@ -228,7 +228,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 
 	// splash damage (doesn't apply to person directly hit)
 	if ( ent->splashDamage ) {
-		// if( G_RadiusDamage( trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, 
+		// if( G_RadiusDamage( trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius,
 		//	other, ent->splashMethodOfDeath, qfalse ) ) {
 		//	if( !hitClient ) {
 		//		g_entities[ent->r.ownerNum].client->accuracy_hits++;
@@ -377,7 +377,7 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 	VectorCopy (start, bolt->r.currentOrigin);
 
 	return bolt;
-}	
+}
 
 //=============================================================================
 

@@ -150,7 +150,7 @@ void CG_SelectNextPlayer( void ) {
 
 void CG_SelectPrevPlayer( void ) {
 	CG_CheckOrderPending();
-	if (cg_currentSelectedPlayer.integer > 0 && cg_currentSelectedPlayer.integer < numSortedTeamPlayers) {
+	if (cg_currentSelectedPlayer.integer > 0 && cg_currentSelectedPlayer.integer <= numSortedTeamPlayers) {
 		cg_currentSelectedPlayer.integer--;
 	} else {
 		cg_currentSelectedPlayer.integer = numSortedTeamPlayers;
@@ -198,15 +198,6 @@ static void CG_DrawPlayerArmorValue(rectDef_t *rect, float scale, vec4_t color, 
 		CG_Text_Paint(rect->x + (rect->w - value) / 2, rect->y + rect->h, scale, color, num, 0, 0, textStyle);
 	}
 }
-
-#ifndef MISSIONPACK
-static float healthColors[4][4] = { 
-//		{ 0.2, 1.0, 0.2, 1.0 } , { 1.0, 0.2, 0.2, 1.0 }, {0.5, 0.5, 0.5, 1} };
-  { 1.0f, 0.69f, 0.0f, 1.0f } ,		// normal
-  { 1.0f, 0.2f, 0.2f, 1.0f },		// low health
-  { 0.5f, 0.5f, 0.5f, 1.0f},		// weapon firing
-  { 1.0f, 1.0f, 1.0f, 1.0f } };		// health > 100
-#endif
 
 static void CG_DrawPlayerAmmoIcon( rectDef_t *rect, qboolean draw2D ) {
 	centity_t	*cent;
@@ -834,10 +825,15 @@ static void CG_DrawAreaPowerUp(rectDef_t *rect, int align, float special, float 
 		if ( !ps->powerups[ i ] ) {
 			continue;
 		}
-		t = ps->powerups[ i ] - cg.time;
-		// ZOID--don't draw if the power up has unlimited time (999 seconds)
+
+		// ZOID--don't draw if the power up has unlimited time
 		// This is true of the CTF flags
-		if ( t <= 0 || t >= 999000) {
+		if ( ps->powerups[ i ] == INT_MAX ) {
+			continue;
+		}
+
+		t = ps->powerups[ i ] - cg.time;
+		if ( t <= 0 ) {
 			continue;
 		}
 
@@ -1799,8 +1795,14 @@ int CG_ClientNumFromName(const char *p) {
 }
 
 void CG_ShowResponseHead(void) {
-  Menus_OpenByName("voiceMenu");
-	trap_Cvar_Set("cl_conXOffset", "72");
+	float x, y, w, h;
+
+	x = 72;
+	y = w = h = 0;
+	CG_AdjustFrom640( &x, &y, &w, &h );
+
+	Menus_OpenByName("voiceMenu");
+	trap_Cvar_Set("cl_conXOffset", va("%d", (int)x));
 	cg.voiceTime = cg.time;
 }
 

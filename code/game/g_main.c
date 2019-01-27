@@ -74,6 +74,7 @@ vmCvar_t	pmove_fixed;
 vmCvar_t	pmove_msec;
 vmCvar_t	g_rankings;
 vmCvar_t	g_listEntity;
+vmCvar_t	g_localTeamPref;
 #ifdef MISSIONPACK
 vmCvar_t	g_obeliskHealth;
 vmCvar_t	g_obeliskRegenPeriod;
@@ -100,7 +101,7 @@ static cvarTable_t		gameCvarTable[] = {
 
 	// noset vars
 	{ NULL, "gamename", GAMEVERSION , CVAR_SERVERINFO | CVAR_ROM, 0, qfalse  },
-	{ NULL, "gamedate", __DATE__ , CVAR_ROM, 0, qfalse  },
+	{ NULL, "gamedate", PRODUCT_DATE , CVAR_ROM, 0, qfalse  },
 	{ &g_restarted, "g_restarted", "0", CVAR_ROM, 0, qfalse  },
 
 	// latched vars
@@ -165,6 +166,7 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO, 0, qfalse},
 
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
+	{ &g_localTeamPref, "g_localTeamPref", "", 0, 0, qfalse },
 
     { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },       // CPM: The CPM gameplay
     { &g_pro_physics, "g_pro_physics", "1", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue }, // CPM: The CPM physics
@@ -271,7 +273,7 @@ void G_FindTeams( void ) {
 
 	c = 0;
 	c2 = 0;
-	for ( i=1, e=g_entities+i ; i < level.num_entities ; i++,e++ ){
+	for ( i=MAX_CLIENTS, e=g_entities+i ; i < level.num_entities ; i++,e++ ) {
 		if (!e->inuse)
 			continue;
 		if (!e->team)
@@ -314,11 +316,11 @@ void G_RemapTeamShaders( void ) {
 	char string[1024];
 	float f = level.time * 0.001;
 	Com_sprintf( string, sizeof(string), "team_icon/%s_red", g_redteam.string );
-	AddRemap("textures/ctf2/redteam01", string, f); 
-	AddRemap("textures/ctf2/redteam02", string, f); 
+	AddRemap("textures/ctf2/redteam01", string, f);
+	AddRemap("textures/ctf2/redteam02", string, f);
 	Com_sprintf( string, sizeof(string), "team_icon/%s_blue", g_blueteam.string );
-	AddRemap("textures/ctf2/blueteam01", string, f); 
-	AddRemap("textures/ctf2/blueteam02", string, f); 
+	AddRemap("textures/ctf2/blueteam01", string, f);
+	AddRemap("textures/ctf2/blueteam02", string, f);
 	trap_SetConfigstring(CS_SHADERSTATE, BuildShaderStateConfig());
 #endif
 }
@@ -353,7 +355,7 @@ void G_RegisterCvars( void ) {
             // Set the config string (so clients will be updated)
             trap_SetConfigstring(CS_PRO_MODE, va("%d%d", g_pro_mode.integer, g_pro_physics.integer));
 
-            // Update all pro mode-dependent server-side cvars					
+            // Update all pro mode-dependent server-side cvars
             // if (g_pro_mode.integer) {
             //     trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer | DF_NO_FOOTSTEPS)); // turn off footsteps
             // } else {
@@ -395,7 +397,7 @@ void G_UpdateCvars( void ) {
 				cv->modificationCount = cv->vmCvar->modificationCount;
 
 				if ( cv->trackChange ) {
-					trap_SendServerCommand( -1, va("print \"Server: %s changed to %s\n\"", 
+					trap_SendServerCommand( -1, va("print \"Server: %s changed to %s\n\"",
 						cv->cvarName, cv->vmCvar->string ) );
 				}
 
@@ -422,7 +424,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	G_Printf ("------- Game Initialization -------\n");
 	G_Printf ("gamename: %s\n", GAMEVERSION);
-	G_Printf ("gamedate: %s\n", __DATE__);
+	G_Printf ("gamedate: %s\n", PRODUCT_DATE);
 
 	srand( randomSeed );
 
@@ -493,7 +495,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	}
 
 	// let the server system know where the entites are
-	trap_LocateGameData( level.gentities, level.num_entities, sizeof( gentity_t ), 
+	trap_LocateGameData( level.gentities, level.num_entities, sizeof( gentity_t ),
 		&level.clients[0].ps, sizeof( level.clients[0] ) );
 
 	// reserve some spots for dead player bodies
@@ -629,7 +631,7 @@ void AddTournamentPlayer( void ) {
 			continue;
 		}
 		// never select the dedicated follow or scoreboard clients
-		if ( client->sess.spectatorState == SPECTATOR_SCOREBOARD || 
+		if ( client->sess.spectatorState == SPECTATOR_SCOREBOARD ||
 			client->sess.spectatorClient < 0  ) {
 			continue;
 		}
@@ -660,11 +662,11 @@ void AddTournamentQueue(gclient_t *client)
 {
 	int index;
 	gclient_t *curclient;
-	
+
 	for(index = 0; index < level.maxclients; index++)
 	{
 		curclient = &level.clients[index];
-		
+
 		if(curclient->pers.connected != CON_DISCONNECTED)
 		{
 			if(curclient == client)
@@ -834,7 +836,7 @@ void CalculateRanks( void ) {
 
 			if ( level.clients[i].sess.sessionTeam != TEAM_SPECTATOR ) {
 				level.numNonSpectatorClients++;
-			
+
 				// decide if this should be auto-followed
 				if ( level.clients[i].pers.connected == CON_CONNECTED ) {
 					level.numPlayingClients++;
@@ -855,7 +857,7 @@ void CalculateRanks( void ) {
 		}
 	}
 
-	qsort( level.sortedClients, level.numConnectedClients, 
+	qsort( level.sortedClients, level.numConnectedClients,
 		sizeof(level.sortedClients[0]), SortRanks );
 
 	// set the rank value for all clients that are connected and not spectators
@@ -871,7 +873,7 @@ void CalculateRanks( void ) {
 				cl->ps.persistant[PERS_RANK] = 1;
 			}
 		}
-	} else {	
+	} else {
 		rank = -1;
 		score = 0;
 		for ( i = 0;  i < level.numPlayingClients; i++ ) {
@@ -1055,7 +1057,7 @@ void BeginIntermission( void ) {
 ExitLevel
 
 When the intermission has been exited, the server is either killed
-or moved to a new level based on the "nextmap" cvar 
+or moved to a new level based on the "nextmap" cvar
 
 =============
 */
@@ -1078,7 +1080,7 @@ void ExitLevel (void) {
 			level.changemap = NULL;
 			level.intermissiontime = 0;
 		}
-		return;	
+		return;
 	}
 
 	trap_Cvar_VariableStringBuffer( "nextmap", nextmap, sizeof(nextmap) );
@@ -1165,6 +1167,8 @@ void LogExit( const char *string ) {
 	int				i, numSorted;
 	gclient_t		*cl;
 	qboolean won = qtrue;
+	team_t team = TEAM_RED;
+
 	G_LogPrintf( "Exit: %s\n", string );
 
 	level.intermissionQueued = level.time;
@@ -1199,6 +1203,9 @@ void LogExit( const char *string ) {
 		ping = cl->ps.ping < 999 ? cl->ps.ping : 999;
 
 		G_LogPrintf( "score: %i  ping: %i  client: %i %s\n", cl->ps.persistant[PERS_SCORE], ping, level.sortedClients[i],	cl->pers.netname );
+		if (g_singlePlayer.integer && !(g_entities[cl - level.clients].r.svFlags & SVF_BOT)) {
+			team = cl->sess.sessionTeam;
+		}
 		if (g_singlePlayer.integer && g_gametype.integer == GT_TOURNAMENT) {
 			if (g_entities[cl - level.clients].r.svFlags & SVF_BOT && cl->ps.persistant[PERS_RANK] == 0) {
 				won = qfalse;
@@ -1208,8 +1215,12 @@ void LogExit( const char *string ) {
 	}
 
 	if (g_singlePlayer.integer) {
-		if (g_gametype.integer >= GT_CTF) {
-			won = level.teamScores[TEAM_RED] > level.teamScores[TEAM_BLUE];
+		if (g_gametype.integer >= GT_TEAM) {
+			if (team == TEAM_BLUE) {
+				won = level.teamScores[TEAM_BLUE] > level.teamScores[TEAM_RED];
+			} else {
+				won = level.teamScores[TEAM_RED] > level.teamScores[TEAM_BLUE];
+			}
 		}
 		trap_SendConsoleCommand( EXEC_APPEND, (won) ? "spWin\n" : "spLose\n" );
 	}
@@ -1319,7 +1330,7 @@ qboolean ScoreIsTied( void ) {
 	if ( level.numPlayingClients < 2 ) {
 		return qfalse;
 	}
-	
+
 	if ( g_gametype.integer >= GT_TEAM ) {
 		return level.teamScores[TEAM_RED] == level.teamScores[TEAM_BLUE];
 	}
@@ -1368,16 +1379,26 @@ void CheckExitRules( void ) {
 		return;
 	}
 
-    if (level.warmupTime != 0) {
+	if (level.warmupTime != 0) {
         return;
     }
 
-	if ( g_timelimit.integer ) {
-		if ( level.time - level.startTime >= g_timelimit.integer*60000 ) {
-			trap_SendServerCommand( -1, "print \"Timelimit hit.\n\"");
-			LogExit( "Timelimit hit." );
-			return;
-		}
+	if ( g_timelimit.integer < 0 || g_timelimit.integer > INT_MAX / 60000 ) {
+		G_Printf( "timelimit %i is out of range, defaulting to 0\n", g_timelimit.integer );
+		trap_Cvar_Set( "timelimit", "0" );
+		trap_Cvar_Update( &g_timelimit );
+	}
+
+	if ( g_timelimit.integer && level.time - level.startTime >= g_timelimit.integer*60000 ) {
+		trap_SendServerCommand( -1, "print \"Timelimit hit.\n\"");
+		LogExit( "Timelimit hit." );
+		return;
+	}
+
+	if ( g_fraglimit.integer < 0 ) {
+		G_Printf( "fraglimit %i is out of range, defaulting to 0\n", g_fraglimit.integer );
+		trap_Cvar_Set( "fraglimit", "0" );
+		trap_Cvar_Update( &g_fraglimit );
 	}
 
 	if ( g_gametype.integer < GT_CTF && g_fraglimit.integer ) {
@@ -1443,6 +1464,12 @@ void CheckExitRules( void ) {
             LogExit("Fraglimit hit.");
             return;
         }
+	}
+
+	if ( g_capturelimit.integer < 0 ) {
+		G_Printf( "capturelimit %i is out of range, defaulting to 0\n", g_capturelimit.integer );
+		trap_Cvar_Set( "capturelimit", "0" );
+		trap_Cvar_Update( &g_capturelimit );
 	}
 
 	if ( g_gametype.integer >= GT_CTF && g_capturelimit.integer ) {
@@ -1663,7 +1690,7 @@ void CheckTournament( void ) {
 		int		counts[TEAM_NUM_TEAMS];
 		qboolean	notEnough = qfalse;
 
-		if ( g_gametype.integer > GT_TEAM ) {
+		if ( g_gametype.integer >= GT_TEAM ) {
 			counts[TEAM_BLUE] = TeamCount( -1, TEAM_BLUE );
 			counts[TEAM_RED] = TeamCount( -1, TEAM_RED );
 
@@ -1912,7 +1939,7 @@ void G_RunThink (gentity_t *ent) {
 	if (thinktime > level.time) {
 		return;
 	}
-	
+
 	ent->nextthink = 0;
 	if (!ent->think) {
 		G_Error ( "NULL ent->think");
