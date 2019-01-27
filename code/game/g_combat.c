@@ -209,7 +209,7 @@ void TossClientCubes( gentity_t *self ) {
 
 	drop = LaunchItem( item, origin, velocity );
 
-	drop->nextthink = level.time + g_cubeTimeout.integer * 1000;
+	drop->nextthink = level.time + TA_CUBE_TIMEOUT * 1000;
 	drop->think = G_FreeEntity;
 	drop->spawnflags = self->client->sess.sessionTeam;
 }
@@ -967,6 +967,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
                     damage = INFINITE;
                 }
             }
+
+			if (g_excessive.integer) {
+				scale *= 3;
+			}
         }
         // !CPM
 

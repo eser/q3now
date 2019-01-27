@@ -53,14 +53,15 @@ The major features that implemented so far:
 - New Game Mod: Last Man Standing
 - King of the Hill Ghost Mode (`+seta kothflags 1`)
 - Offhand Grapple (`+seta g_grapple 1`)
-- Instagib (`+seta g_instagib 1`)
+- Instagib mode for instant kills (`+seta g_instagib 1`)
+- Excessive mode for speeding up gameplay (`+seta g_excessive 1`)
 - Removed redundant concepts (handicap)
 - Removed redundant objects (guard, scout, doubler, ammoregen)
 - Balanced Rewards
 - No player sounds on Cloak (Invisibility)
 
 ## Mod TODO list
-- Unlagged implementation
+- Unlagged or ZNudge implementation
 - Match and Tournament Improvements
 - New Team System
 - Spectator Cameras

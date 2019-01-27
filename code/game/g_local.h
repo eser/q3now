@@ -719,11 +719,7 @@ extern	vmCvar_t	g_teamAutoJoin;
 extern	vmCvar_t	g_teamForceBalance;
 extern	vmCvar_t	g_banIPs;
 extern	vmCvar_t	g_filterBan;
-extern	vmCvar_t	g_obeliskHealth;
-extern	vmCvar_t	g_obeliskRegenPeriod;
-extern	vmCvar_t	g_obeliskRegenAmount;
 extern	vmCvar_t	g_obeliskRespawnDelay;
-extern	vmCvar_t	g_cubeTimeout;
 extern	vmCvar_t	g_redteam;
 extern	vmCvar_t	g_blueteam;
 extern	vmCvar_t	g_smoothClients;
@@ -738,8 +734,8 @@ extern	vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 extern  vmCvar_t	g_grapple;
 extern  vmCvar_t	g_spawnWeapons;
 extern  vmCvar_t	g_instagib;
+extern  vmCvar_t	g_excessive;
 
-extern	vmCvar_t	g_proxMineTimeout;
 extern	vmCvar_t	g_localTeamPref;
 
 void	trap_Print( const char *text );

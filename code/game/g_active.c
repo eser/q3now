@@ -764,7 +764,12 @@ void ClientThink_real( gentity_t *ent ) {
 	client->ps.gravity = g_gravity.value;
 
 	// set speed
-	client->ps.speed = DEFAULT_MOVESPEED;
+	if (g_excessive.integer) {
+		client->ps.speed = DEFAULT_MOVESPEED * 2;
+	}
+	else {
+		client->ps.speed = DEFAULT_MOVESPEED;
+	}
 
 	if ( client->ps.powerups[PW_HASTE] ) {
 		client->ps.speed *= 1.3;

@@ -1037,7 +1037,7 @@ int ClientPickSpawnWeapon(gclient_t * client)
 	};
 
 	// force the base weapon up
-	for (i = 0; i > weaponRanks[i] != WP_NONE; i++) {
+	for (i = 0; weaponRanks[i] != WP_NONE; i++) {
 		if (client->ps.stats[STAT_WEAPONS] & (1 << weaponRanks[i])) {
 			return weaponRanks[i];
 		}
