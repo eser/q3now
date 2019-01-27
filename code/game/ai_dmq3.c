@@ -5158,6 +5158,7 @@ BotDeathmatchAI
 void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 	char gender[144], name[144];
 	char userinfo[MAX_INFO_STRING];
+	char buf[MAX_INFO_STRING];
 	int i;
 
 	//if the bot has just been setup
@@ -5170,11 +5171,6 @@ void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 		trap_GetUserinfo(bs->client, userinfo, sizeof(userinfo));
 		Info_SetValueForKey(userinfo, "sex", gender);
 		trap_SetUserinfo(bs->client, userinfo);
-		//set the team
-        if (!bs->map_restart && g_gametype.integer != GT_TOURNAMENT && !(g_gametype.integer == GT_LASTMANSTANDING && level.warmupTime == 0)) {
-			Com_sprintf(buf, sizeof(buf), "team %s", bs->settings.team);
-			trap_EA_Command(bs->client, buf);
-		}
 		//set the chat gender
 		if (gender[0] == 'm') trap_BotSetChatGender(bs->cs, CHAT_GENDERMALE);
 		else if (gender[0] == 'f')  trap_BotSetChatGender(bs->cs, CHAT_GENDERFEMALE);

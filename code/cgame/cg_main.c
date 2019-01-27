@@ -305,7 +305,6 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_noTaunt, "cg_noTaunt", "0", CVAR_ARCHIVE},
 #endif
 	{ &cg_noProjectileTrail, "cg_noProjectileTrail", "0", CVAR_ARCHIVE},
-	{ &cg_oldRail, "cg_oldRail", "1", CVAR_ARCHIVE},
 	{ &cg_oldRocket, "cg_oldRocket", "1", CVAR_ARCHIVE},
 //	{ &cg_pmove_fixed, "cg_pmove_fixed", "0", CVAR_USERINFO | CVAR_ARCHIVE }
 
