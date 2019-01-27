@@ -5154,6 +5154,7 @@ BotDeathmatchAI
 void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 	char gender[144], name[144];
 	char userinfo[MAX_INFO_STRING];
+	char buf[MAX_INFO_STRING];
 	int i;
 
 	//if the bot has just been setup
