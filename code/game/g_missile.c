@@ -339,11 +339,22 @@ fire_plasma
 =================
 */
 #define PLASMA_SPREAD 500
+
 gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t right, vec3_t up) {
 	gentity_t	*bolt;
     vec3_t		dir;
     vec3_t		end;
     float		r, u, scale;
+	float       baseSpeed, additionalSpeed;
+
+	if (g_excessive.integer) {
+		baseSpeed = 1000;
+		additionalSpeed = 2200;
+	}
+	else {
+		baseSpeed = 555;
+		additionalSpeed = 1800;
+	}
 
 	VectorNormalize (dir);
 
@@ -378,7 +389,7 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
     VectorSubtract(end, start, dir);
     VectorNormalize(dir);
 
-    scale = 555 + random() * 1800;
+    scale = baseSpeed + (random() * additionalSpeed);
     VectorScale(dir, scale, bolt->s.pos.trDelta);
 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
 
@@ -397,6 +408,17 @@ fire_grenade
 */
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qboolean bounce) {
 	gentity_t	*bolt;
+	float       speed;
+	int         splashRadius;
+
+	if (g_excessive.integer) {
+		speed = 1200;
+		splashRadius = 300;
+	}
+	else {
+		speed = 800;
+		splashRadius = 150;
+	}
 
 	VectorNormalize (dir);
 
@@ -412,7 +434,7 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 	bolt->parent = self;
 	bolt->damage = 100;
 	bolt->splashDamage = 100;
-	bolt->splashRadius = 150;
+	bolt->splashRadius = splashRadius;
 	bolt->methodOfDeath = MOD_GRENADE;
 	bolt->splashMethodOfDeath = MOD_GRENADE_SPLASH;
 	bolt->clipmask = MASK_SHOT;
@@ -421,7 +443,7 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 	bolt->s.pos.trType = TR_GRAVITY;
 	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
 	VectorCopy( start, bolt->s.pos.trBase );
-	VectorScale( dir, 800, bolt->s.pos.trDelta );
+	VectorScale( dir, speed, bolt->s.pos.trDelta );
 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
 
 	VectorCopy (start, bolt->r.currentOrigin);
@@ -439,9 +461,17 @@ fire_rocket
 */
 gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
 	gentity_t	*bolt;
-	float speed;
+	float       speed;
+	int         splashRadius;
 
-	speed = (g_excessive.integer) ? 2000 : 1000;
+	if (g_excessive.integer) {
+		speed = 2000;
+		splashRadius = 240;
+	}
+	else {
+		speed = 1000;
+		splashRadius = 120;
+	}
 
 	VectorNormalize (dir);
 
@@ -456,7 +486,7 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->parent = self;
 	bolt->damage = 100;
 	bolt->splashDamage = 100;
-	bolt->splashRadius = 120;
+	bolt->splashRadius = splashRadius;
 	bolt->methodOfDeath = MOD_ROCKET;
 	bolt->splashMethodOfDeath = MOD_ROCKET_SPLASH;
 	bolt->clipmask = MASK_SHOT;
@@ -479,6 +509,14 @@ fire_grapple
 */
 gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir) {
 	gentity_t	*hook;
+	float       speed;
+
+	if (g_excessive.integer) {
+		speed = 2800;
+	}
+	else {
+		speed = 1800;
+	}
 
 	VectorNormalize (dir);
 
@@ -499,7 +537,7 @@ gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir) {
 	hook->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
 	hook->s.otherEntityNum = self->s.number; // use to match beam in client
 	VectorCopy( start, hook->s.pos.trBase );
-	VectorScale( dir, 1800, hook->s.pos.trDelta );
+	VectorScale( dir, speed, hook->s.pos.trDelta );
 	SnapVector( hook->s.pos.trDelta );			// save net bandwidth
 	VectorCopy (start, hook->r.currentOrigin);
 

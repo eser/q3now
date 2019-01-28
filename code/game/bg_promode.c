@@ -172,7 +172,6 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 		cpm_lavadamage = 4;
 		cpm_slimedamage = 1.3;
 		cpm_lavafrequency = 100;
-
 	}
 }
 
