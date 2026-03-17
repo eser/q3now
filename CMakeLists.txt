@@ -15,7 +15,7 @@ OPTION(USE_VULKAN "" ON)
 OPTION(USE_SYSTEM_JPEG "" OFF)
 OPTION(USE_RENDERER_DLOPEN "" ON)
 
-SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
+SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
 # exclude platform-dependent QVM bytecode compilers
@@ -233,4 +233,25 @@ IF(APPLE)
 	SET_TARGET_PROPERTIES(${CNAME}${BINEXT} PROPERTIES
 		XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/misc/macos/q3now.entitlements"
 	)
+ENDIF()
+
+# ============================================================
+# q3now game modules (cgame, qagame, ui)
+# ============================================================
+
+OPTION(BUILD_GAME_LIBRARIES "Build game native shared libraries (.dylib/.so)" ON)
+OPTION(BUILD_GAME_QVMS "Build game QVM bytecode (.qvm)" ON)
+
+IF(BUILD_GAME_LIBRARIES OR BUILD_GAME_QVMS)
+	SET(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/code)
+	SET(BASEGAME "baseq3")
+	SET(CGAME_MODULE "cgame")
+	SET(GAME_MODULE "qagame")
+	SET(UI_MODULE "ui")
+	IF(WIN32)
+		SET(COMMON_LIBRARIES)
+	ELSE()
+		SET(COMMON_LIBRARIES m ${CMAKE_DL_LIBS})
+	ENDIF()
+	INCLUDE(basegame)
 ENDIF()

@@ -92,12 +92,14 @@ typedef struct campspot_s
 typedef enum {
 	GT_FFA,				// free for all
 	GT_TOURNAMENT,		// one on one tournament
-	GT_SINGLE_PLAYER,	// single player tournament
+	GT_DUMMY,			// placeholder (was GT_SINGLE_PLAYER)
 
 	//-- team games go after this --
 
 	GT_TEAM,			// team deathmatch
 	GT_CTF,				// capture the flag
+	GT_KINGOFTHEHILL,	// king of the hill
+	GT_LASTMANSTANDING,	// last man standing
 #ifdef MISSIONPACK
 	GT_1FCTF,
 	GT_OBELISK,
@@ -190,6 +192,8 @@ static maplocation_t *maplocations = NULL;
 static campspot_t *campspots = NULL;
 //the game type
 static int g_gametype = 0;
+//single player mode flag (replaces GT_SINGLE_PLAYER gametype check)
+static int g_singlePlayer = 0;
 //additional dropped item weight
 static libvar_t *droppedweight = NULL;
 
@@ -878,10 +882,10 @@ int BotGetLevelItemGoal(int index, const char *name, bot_goal_t *goal)
 	for (; li; li = li->next)
 	{
 		//
-		if (g_gametype == GT_SINGLE_PLAYER) {
+		if (g_singlePlayer) {
 			if (li->flags & IFL_NOTSINGLE) continue;
 		}
-		else if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TEAM) {
 			if (li->flags & IFL_NOTTEAM) continue;
 		}
 		else {
@@ -1098,10 +1102,10 @@ void BotUpdateEntityItems(void)
 			//if this level item is already linked
 			if (li->entitynum) continue;
 			//
-			if (g_gametype == GT_SINGLE_PLAYER) {
+			if (g_singlePlayer) {
 				if (li->flags & IFL_NOTSINGLE) continue;
 			}
-			else if (g_gametype >= GT_TEAM) {
+			if (g_gametype >= GT_TEAM) {
 				if (li->flags & IFL_NOTTEAM) continue;
 			}
 			else {
@@ -1331,11 +1335,11 @@ int BotChooseLTGItem(int goalstate, vec3_t origin, int *inventory, int travelfla
 	//go through the items in the level
 	for (li = levelitems; li; li = li->next)
 	{
-		if (g_gametype == GT_SINGLE_PLAYER) {
+		if (g_singlePlayer) {
 			if (li->flags & IFL_NOTSINGLE)
 				continue;
 		}
-		else if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TEAM) {
 			if (li->flags & IFL_NOTTEAM)
 				continue;
 		}
@@ -1502,11 +1506,11 @@ int BotChooseNBGItem(int goalstate, vec3_t origin, int *inventory, int travelfla
 	//go through the items in the level
 	for (li = levelitems; li; li = li->next)
 	{
-		if (g_gametype == GT_SINGLE_PLAYER) {
+		if (g_singlePlayer) {
 			if (li->flags & IFL_NOTSINGLE)
 				continue;
 		}
-		else if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TEAM) {
 			if (li->flags & IFL_NOTTEAM)
 				continue;
 		}
@@ -1788,6 +1792,7 @@ int BotSetupGoalAI(void)
 
 	//check if teamplay is on
 	g_gametype = LibVarValue("g_gametype", "0");
+	g_singlePlayer = LibVarValue("g_singlePlayer", "0");
 	//item configuration file
 	filename = LibVarString("itemconfig", "items.c");
 	//load the item configuration

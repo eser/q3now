@@ -1,3 +1,5 @@
+#ifndef _BG_PUBLIC_H
+#define _BG_PUBLIC_H
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
@@ -25,21 +27,28 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
-#ifndef _BG_PUBLIC_H
-#define _BG_PUBLIC_H
-
-#define	GAME_VERSION		BASEGAME "-1"
+#define	GAME_VERSION		"q3now-1"
 
 #define	DEFAULT_GRAVITY		800
+#define	DEFAULT_MOVESPEED	320
+#define	JUMP_VELOCITY		270
+#define WALLJUMP_BOOST      240
+#define MAX_WALLJUMPS       3
+
+#define	QUAD_FACTOR			4
+#define MAX_HEALTH			100
+#define MAX_ARMOR			200
+
 #define	GIB_HEALTH			-40
-#define	ARMOR_PROTECTION	0.66
+#define	GIB_VELOCITY	    350
+#define	GIB_JUMP		    150
 
 #define	MAX_ITEMS			256
 
 #define	RANK_TIED_FLAG		0x4000
 
-#define DEFAULT_SHOTGUN_SPREAD	700
-#define DEFAULT_SHOTGUN_COUNT	11
+#define DEFAULT_SHOTGUN_SPREAD	600
+#define DEFAULT_SHOTGUN_COUNT	16
 
 #define	ITEM_RADIUS			15		// item sizes are needed for client side pickup detection
 
@@ -49,10 +58,21 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	VOTE_TIME			30000	// 30 seconds before vote times out
 
+#define PLAYER_WIDTH		15
 #define	MINS_Z				-24
+#define DEFAULT_HEIGHT		32
 #define	DEFAULT_VIEWHEIGHT	26
+#define CROUCH_HEIGHT		16
 #define CROUCH_VIEWHEIGHT	12
+#define DEAD_HEIGHT			-8
 #define	DEAD_VIEWHEIGHT		-16
+#define INVUL_RADIUS		42
+
+#define TA_OBELISK_HEALTH        2500
+#define TA_OBELISK_REGEN_PERIOD  1
+#define TA_OBELISK_REGEN_AMOUNT  15
+
+#define TA_CUBE_TIMEOUT          30
 
 //
 // config strings are a general means of communicating variable length strings
@@ -85,11 +105,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	CS_ITEMS				27		// string of 0's and 1's that tell which items are present
 
+#define CS_PRO_MODE             28
+
 #define	CS_MODELS				32
 #define	CS_SOUNDS				(CS_MODELS+MAX_MODELS)
 #define	CS_PLAYERS				(CS_SOUNDS+MAX_SOUNDS)
 #define CS_LOCATIONS			(CS_PLAYERS+MAX_CLIENTS)
-#define CS_PARTICLES			(CS_LOCATIONS+MAX_LOCATIONS)
+#define CS_PARTICLES			(CS_LOCATIONS+MAX_LOCATIONS) 
 
 #define CS_MAX					(CS_PARTICLES+MAX_LOCATIONS)
 
@@ -100,9 +122,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 typedef enum {
 	GT_FFA,				// free for all
 	GT_TOURNAMENT,		// one on one tournament
-	GT_SINGLE_PLAYER,	// single player ffa
 
-	//-- team games go after this --
+    GT_DUMMY,
+
+    GT_KINGOFTHEHILL,
+    GT_LASTMANSTANDING,
+
+    //-- team games go after this --
 
 	GT_TEAM,			// team deathmatch
 	GT_CTF,				// capture the flag
@@ -131,12 +157,11 @@ typedef enum {
 	PM_SPECTATOR,	// still run into walls
 	PM_DEAD,		// no acceleration or turning, but free falling
 	PM_FREEZE,		// stuck in place with no control
-	PM_INTERMISSION,	// no movement or status bar
-	PM_SPINTERMISSION	// no movement or status bar
+	PM_INTERMISSION
 } pmtype_t;
 
 typedef enum {
-	WEAPON_READY,
+	WEAPON_READY, 
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
 	WEAPON_FIRING
@@ -206,14 +231,18 @@ void Pmove (pmove_t *pmove);
 typedef enum {
 	STAT_HEALTH,
 	STAT_HOLDABLE_ITEM,
-#ifdef MISSIONPACK
-	STAT_PERSISTANT_POWERUP,
-#endif
 	STAT_WEAPONS,					// 16 bit fields
-	STAT_ARMOR,
+	STAT_ARMOR,				
+    STAT_ARMORCLASS,
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
-	STAT_MAX_HEALTH					// health / armor limit, changeable by handicap
+
+// CPM
+    STAT_JUMPTIME,
+    STAT_RAILTIME,                  // CPM: Added for allowchange
+// !CPM
+
+    STAT_WALLJUMPS
 } statIndex_t;
 
 
@@ -243,9 +272,7 @@ typedef enum {
 
 // entityState_t->eFlags
 #define	EF_DEAD				0x00000001		// don't draw a foe marker over players with EF_DEAD
-#ifdef MISSIONPACK
-#define EF_TICKING			0x00000002		// used to make players play the prox mine ticking sound
-#endif
+#define EF_DROPPED_ITEM 	0x00000002
 #define	EF_TELEPORT_BIT		0x00000004		// toggled every time the origin abruptly changes
 #define	EF_AWARD_EXCELLENT	0x00000008		// draw an excellent sprite
 #define EF_PLAYER_EVENT		0x00000010
@@ -265,6 +292,10 @@ typedef enum {
 #define	EF_AWARD_ASSIST		0x00020000		// draw a assist sprite
 #define EF_AWARD_DENIED		0x00040000		// denied
 #define EF_TEAMVOTED		0x00080000		// already cast a team vote
+#define	EF_GRAPPLE			0x00100000
+
+
+#define	EF_BACKPACK			0x00000001		// CPM: Backpack indicator bit
 
 // NOTE: may not have more than 16
 typedef enum {
@@ -281,11 +312,9 @@ typedef enum {
 	PW_BLUEFLAG,
 	PW_NEUTRALFLAG,
 
-	PW_SCOUT,
-	PW_GUARD,
-	PW_DOUBLER,
-	PW_AMMOREGEN,
 	PW_INVULNERABILITY,
+
+    PW_KING,
 
 	PW_NUM_POWERUPS
 
@@ -315,17 +344,19 @@ typedef enum {
 	WP_LIGHTNING,
 	WP_RAILGUN,
 	WP_PLASMAGUN,
-	WP_BFG,
-	WP_GRAPPLING_HOOK,
-#ifdef MISSIONPACK
-	WP_NAILGUN,
-	WP_PROX_LAUNCHER,
-	WP_CHAINGUN,
-#endif
 
 	WP_NUM_WEAPONS
 } weapon_t;
 
+typedef enum {
+    ARM_NONE,
+
+    ARM_JACKET,
+    ARM_COMBAT,
+    ARM_HEAVY,
+
+    ARM_NUM_ARMOR
+} armor_t;
 
 // reward sounds (stored in ps->persistant[PERS_PLAYEREVENTS])
 #define	PLAYEREVENT_DENIEDREWARD		0x0001
@@ -417,6 +448,9 @@ typedef enum {
 	EV_RAILTRAIL,
 	EV_SHOTGUN,
 	EV_BULLET,				// otherEntity is the shooter
+// eser - lightning discharge
+    EV_LIGHTNING_DISCHARGE,
+// eser - lightning discharge
 
 	EV_PAIN,
 	EV_DEATH1,
@@ -432,8 +466,6 @@ typedef enum {
 	EV_SCOREPLUM,			// score plum
 
 //#ifdef MISSIONPACK
-	EV_PROXIMITY_MINE_STICK,
-	EV_PROXIMITY_MINE_TRIGGER,
 	EV_KAMIKAZE,			// kamikaze explodes
 	EV_OBELISKEXPLODE,		// obelisk explodes
 	EV_OBELISKPAIN,			// obelisk is in pain
@@ -562,7 +594,7 @@ typedef enum {
 //team task
 typedef enum {
 	TEAMTASK_NONE,
-	TEAMTASK_OFFENSE,
+	TEAMTASK_OFFENSE, 
 	TEAMTASK_DEFENSE,
 	TEAMTASK_PATROL,
 	TEAMTASK_FOLLOW,
@@ -582,11 +614,11 @@ typedef enum {
 	MOD_ROCKET,
 	MOD_ROCKET_SPLASH,
 	MOD_PLASMA,
-	MOD_PLASMA_SPLASH,
 	MOD_RAILGUN,
 	MOD_LIGHTNING,
-	MOD_BFG,
-	MOD_BFG_SPLASH,
+// eser - lightning discharge
+    MOD_LIGHTNING_DISCHARGE,
+// eser - lightning discharge
 	MOD_WATER,
 	MOD_SLIME,
 	MOD_LAVA,
@@ -597,11 +629,7 @@ typedef enum {
 	MOD_TARGET_LASER,
 	MOD_TRIGGER_HURT,
 #ifdef MISSIONPACK
-	MOD_NAIL,
-	MOD_CHAINGUN,
-	MOD_PROXIMITY_MINE,
 	MOD_KAMIKAZE,
-	MOD_JUICED,
 #endif
 	MOD_GRAPPLE
 } meansOfDeath_t;
@@ -620,14 +648,14 @@ typedef enum {
 							// EFX: rotate + external ring that rotates
 	IT_HOLDABLE,			// single use, holdable item
 							// EFX: rotate + bob
-	IT_PERSISTANT_POWERUP,
 	IT_TEAM
 } itemType_t;
 
-#define MAX_ITEM_MODELS 4
+#define MAX_ITEM_MODELS     4
+#define MAX_ITEM_CLASSNAMES 3
 
 typedef struct gitem_s {
-	char		*classname;	// spawning name
+    char		*classnames[MAX_ITEM_CLASSNAMES];	// spawning name
 	char		*pickup_sound;
 	char		*world_model[MAX_ITEM_MODELS];
 
@@ -647,6 +675,30 @@ typedef struct gitem_s {
 extern	gitem_t	bg_itemlist[];
 extern	int		bg_numItems;
 
+// Weapons
+typedef struct gweapon_s {
+    char        *name;
+    char        *shortname;
+
+    vec_t       *color;
+    qboolean    switchOnCycle;
+    qboolean    switchOnOutOfAmmo;
+
+    qboolean    tossOnDeath;
+
+    int         ammoBox;
+    int         minAmmunition;
+    int         maxAmmunition;
+
+    qboolean    spawnWeapon;
+    int         spawnAmmunition;
+
+    int         knockback;
+    int         reloadTime;
+} gweapon_t;
+
+extern	gweapon_t	bg_weaponlist[];
+
 gitem_t	*BG_FindItem( const char *pickupName );
 gitem_t	*BG_FindItemForWeapon( weapon_t weapon );
 gitem_t	*BG_FindItemForPowerup( powerup_t pw );
@@ -660,6 +712,9 @@ qboolean	BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 #define	DF_NO_FALLING			8
 #define DF_FIXED_FOV			16
 #define	DF_NO_FOOTSTEPS			32
+
+// g_kothflags->integer flags
+#define	KF_GHOSTS   			1
 
 // content masks
 #define	MASK_ALL				(-1)
@@ -740,3 +795,4 @@ qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTim
 #define KAMI_SHOCKWAVE2_MAXRADIUS		704
 
 #endif // _BG_PUBLIC_H
+
