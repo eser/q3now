@@ -3374,14 +3374,24 @@ static void CL_InitRef( void ) {
 #endif
 
 	Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
-	ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
+	// Try app bundle path first (Contents/MacOS/ on macOS) — self-contained bundle layout
+	ospath = FS_BuildOSPath( Sys_DefaultAppPath(), dllName, NULL );
 	rendererLib = Sys_LoadLibrary( ospath );
+	if ( !rendererLib ) {
+		// Fall back to basepath (next to .app) — classic / Linux layout
+		ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
+		rendererLib = Sys_LoadLibrary( ospath );
+	}
 	if ( !rendererLib )
 	{
 		Cvar_ForceReset( "cl_renderer" );
 		Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
-		ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
+		ospath = FS_BuildOSPath( Sys_DefaultAppPath(), dllName, NULL );
 		rendererLib = Sys_LoadLibrary( ospath );
+		if ( !rendererLib ) {
+			ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
+			rendererLib = Sys_LoadLibrary( ospath );
+		}
 		if ( !rendererLib )
 		{
 			Com_Error( ERR_FATAL, "Failed to load renderer %s", dllName );

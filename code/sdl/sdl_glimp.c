@@ -570,6 +570,26 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 		Com_Printf( "SDL using driver \"%s\"\n", driverName );
 	}
 
+#if defined(__APPLE__) && defined(USE_VULKAN_API)
+	// On macOS, SDL_Vulkan_LoadLibrary must be called after SDL_Init(SDL_INIT_VIDEO)
+	// but before SDL_CreateWindow(SDL_WINDOW_VULKAN).
+	// Homebrew installs MoltenVK to /opt/homebrew/lib/ which SDL doesn't search by default.
+	// Preload the bundled libMoltenVK.dylib (copied into Contents/MacOS/ by make install).
+	if ( vulkan )
+	{
+		static char moltenVKPath[ MAX_OSPATH ];
+		Com_sprintf( moltenVKPath, sizeof( moltenVKPath ), "%s/libMoltenVK.dylib", Sys_DefaultAppPath() );
+		if ( SDL_Vulkan_LoadLibrary( moltenVKPath ) == 0 )
+		{
+			Com_Printf( "SDL Vulkan: using bundled MoltenVK from %s\n", moltenVKPath );
+		}
+		else
+		{
+			Com_Printf( "SDL Vulkan: bundled MoltenVK not found at %s (%s), using system default\n", moltenVKPath, SDL_GetError() );
+		}
+	}
+#endif
+
 	err = GLW_SetMode( mode, modeFS, fullscreen, vulkan );
 
 	switch ( err )
