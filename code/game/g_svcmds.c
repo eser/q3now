@@ -174,12 +174,12 @@ static void UpdateIPBans (void)
 G_FilterPacket
 =================
 */
-qboolean G_FilterPacket (char *from)
+qboolean G_FilterPacket (const char *from)
 {
 	int		i;
 	unsigned	in;
 	byte m[4] = {0};
-	char *p;
+	const char *p;
 
 	i = 0;
 	p = from;

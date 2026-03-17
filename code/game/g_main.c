@@ -24,6 +24,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 #include "bg_promode.h" // CPM
 
+// PRODUCT_DATE is injected by cmake for native builds; QVM builds fall back to unknown
+#ifndef PRODUCT_DATE
+#define PRODUCT_DATE "unknown"
+#endif
+
 level_locals_t	level;
 
 typedef struct {
@@ -560,7 +565,7 @@ void G_ShutdownGame( int restart ) {
 
 //===================================================================
 
-void QDECL Com_Error ( int logLevel, const char *error, ... ) {
+void QDECL Com_Error ( errorParm_t logLevel, const char *error, ... ) {
 	va_list		argptr;
 	char		text[1024];
 
@@ -987,7 +992,10 @@ void FindIntermissionPoint( void ) {
 	// find the intermission spot
 	ent = G_Find (NULL, FOFS(classname), "info_player_intermission");
 	if ( !ent ) {	// the map creator forgot to put in an intermission point...
-		SelectSpawnPoint ( vec3_origin, level.intermission_origin, level.intermission_angle, qfalse );
+		{
+			vec3_t avoidOrigin = { 0, 0, 0 };
+			SelectSpawnPoint( avoidOrigin, level.intermission_origin, level.intermission_angle, qfalse );
+		}
 	} else {
 		VectorCopy (ent->s.origin, level.intermission_origin);
 		VectorCopy (ent->s.angles, level.intermission_angle);

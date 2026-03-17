@@ -1031,7 +1031,8 @@ gentity_t *SelectCTFSpawnPoint ( team_t team, int teamstate, vec3_t origin, vec3
 	spot = SelectRandomTeamSpawnPoint ( teamstate, team );
 
 	if (!spot) {
-		return SelectSpawnPoint( vec3_origin, origin, angles, isbot );
+		vec3_t avoidOrigin = { 0, 0, 0 };
+		return SelectSpawnPoint( avoidOrigin, origin, angles, isbot );
 	}
 
 	VectorCopy (spot->s.origin, origin);

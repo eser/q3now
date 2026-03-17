@@ -106,7 +106,7 @@ static void PlayerSettings_DrawName( void *self ) {
 	basex += 64;
 	y += PROP_HEIGHT;
 	txt = f->field.buffer;
-	color = g_color_table[ColorIndex(COLOR_WHITE)];
+	color = (float *)g_color_table[ColorIndex(COLOR_WHITE)];
 	x = basex;
 	while ( (c = *txt) != 0 ) {
 		if ( !focus && Q_IsColorString( txt ) ) {
@@ -114,7 +114,7 @@ static void PlayerSettings_DrawName( void *self ) {
 			if( n == 0 ) {
 				n = 7;
 			}
-			color = g_color_table[n];
+			color = (float *)g_color_table[n];
 			txt += 2;
 			continue;
 		}
@@ -190,7 +190,7 @@ static void PlayerSettings_DrawPlayer( void *self ) {
 		viewangles[YAW]   = 180 - 30;
 		viewangles[PITCH] = 0;
 		viewangles[ROLL]  = 0;
-		UI_PlayerInfo_SetInfo( &s_playersettings.playerinfo, LEGS_IDLE, TORSO_STAND, viewangles, vec3_origin, WP_MACHINEGUN, qfalse );
+		{ vec3_t moveAngles = { 0, 0, 0 }; UI_PlayerInfo_SetInfo( &s_playersettings.playerinfo, LEGS_IDLE, TORSO_STAND, viewangles, moveAngles, WP_MACHINEGUN, qfalse ); }
 	}
 
 	b = (menubitmap_s*) self;
@@ -252,7 +252,7 @@ static void PlayerSettings_SetMenuItems( void ) {
 	viewangles[ROLL]  = 0;
 
 	UI_PlayerInfo_SetModel( &s_playersettings.playerinfo, UI_Cvar_VariableString( "model" ) );
-	UI_PlayerInfo_SetInfo( &s_playersettings.playerinfo, LEGS_IDLE, TORSO_STAND, viewangles, vec3_origin, WP_MACHINEGUN, qfalse );
+	{ vec3_t moveAngles = { 0, 0, 0 }; UI_PlayerInfo_SetInfo( &s_playersettings.playerinfo, LEGS_IDLE, TORSO_STAND, viewangles, moveAngles, WP_MACHINEGUN, qfalse ); }
 }
 
 

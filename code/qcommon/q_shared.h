@@ -140,6 +140,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #ifdef Q3_VM
 
+// q3now: bg_lib.h uses Q_PRINTF_FUNC/Q_SCANF_FUNC — define them as no-ops before include
+// (LCC is a C89 compiler; it doesn't support GCC format attributes)
+#ifndef Q_PRINTF_FUNC
+#define Q_PRINTF_FUNC(x, y)
+#endif
+#ifndef Q_SCANF_FUNC
+#define Q_SCANF_FUNC(x, y)
+#endif
+
 #include "../game/bg_lib.h"
 
 #else
@@ -219,8 +228,13 @@ typedef enum { qfalse = 0, qtrue } qboolean;
 
 typedef union floatint_u
 {
+#ifdef Q3_VM
+	int i;          // LCC (C89) compat — no int32_t
+	unsigned int u;
+#else
 	int32_t i;
 	uint32_t u;
+#endif
 	float f;
 	byte b[4];
 }
@@ -228,7 +242,11 @@ floatint_t;
 
 typedef union {
 	byte rgba[4];
+#ifdef Q3_VM
+	unsigned int u32;  // LCC (C89) compat — no uint32_t
+#else
 	uint32_t u32;
+#endif
 } color4ub_t;
 
 
@@ -459,6 +477,9 @@ extern	vec4_t		colorWhite;
 extern	vec4_t		colorLtGrey;
 extern	vec4_t		colorMdGrey;
 extern	vec4_t		colorDkGrey;
+extern	vec4_t		colorOrange;	// q3now (ioquake3 extension)
+extern	vec4_t		colorIndigo;	// q3now (ioquake3 extension)
+extern	vec4_t		colorSkyBlue;	// q3now (ioquake3 extension)
 
 #define Q_COLOR_ESCAPE	'^'
 #define Q_IsColorString(p) ( *(p) == Q_COLOR_ESCAPE && *((p)+1) && *((p)+1) != Q_COLOR_ESCAPE )
@@ -595,7 +616,11 @@ static ID_INLINE int VectorCompare( const vec3_t v1, const vec3_t v2 ) {
 }
 
 static ID_INLINE vec_t VectorLength( const vec3_t v ) {
-	return (vec_t)sqrtf (v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+#ifdef Q3_VM
+	return (vec_t)sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+#else
+	return (vec_t)sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+#endif
 }
 
 static ID_INLINE vec_t VectorLengthSquared( const vec3_t v ) {
@@ -739,6 +764,12 @@ void	COM_BeginParseSession( const char *name );
 int		COM_GetCurrentParseLine( void );
 const char	*COM_Parse( const char **data_p );
 const char	*COM_ParseExt( const char **data_p, qboolean allowLineBreak );
+#ifdef Q3_VM
+// LCC (C89) compat: game code uses char** but COM_Parse takes const char**.
+// The parenthesized form (COM_Parse) prevents recursive macro expansion.
+#define COM_Parse(x)    (COM_Parse)((const char **)(x))
+#define COM_ParseExt(x,y) (COM_ParseExt)((const char **)(x),(y))
+#endif
 int		COM_Compress( char *data_p );
 void	COM_ParseError( const char *format, ... ) __attribute__ ((format (printf, 1, 2)));
 void	COM_ParseWarning( const char *format, ... ) __attribute__ ((format (printf, 1, 2)));
@@ -886,7 +917,12 @@ float	LittleFloat (const float *l);
 
 void	Swap_Init (void);
 */
-const char *QDECL va( const char *format, ... ) __attribute__ ((format( printf, 1, 2 )));
+#ifdef Q3_VM
+// LCC (C89) compat: return char* so existing game code can assign to char* without const errors
+char *QDECL va( const char *format, ... );
+#else
+const char *QDECL va( const char *format, ... ) FORMAT_PRINTF(1, 2);
+#endif
 
 #define TRUNCATE_LENGTH	64
 void Com_TruncateLongString( char *buffer, const char *s );
@@ -1298,7 +1334,12 @@ typedef enum {
 	TR_LINEAR,
 	TR_LINEAR_STOP,
 	TR_SINE,					// value = base + sin( time / duration ) * delta
-	TR_GRAVITY
+	TR_GRAVITY,
+	// q3now (ioquake3 extension): additional trajectory types used by bg_misc.c
+	TR_GRAVITY_DOUBLE,			// double strength gravity
+	TR_ACCELERATE,				// accelerating linear
+	TR_SMALL_GRAVITY,			// half strength gravity
+	TR_ORBITAL					// gravity + centripetal
 } trType_t;
 
 typedef struct {
@@ -1465,5 +1506,11 @@ typedef enum _flag_status {
 
 #define LERP( a, b, w ) ( ( a ) * ( 1.0f - ( w ) ) + ( b ) * ( w ) )
 #define LUMA( red, green, blue ) ( 0.2126f * ( red ) + 0.7152f * ( green ) + 0.0722f * ( blue ) )
+
+// Quake3e engine extension syscall index — must be defined here (not in bg_public.h)
+// because q3_ui/ui_local.h includes ui_public.h before bg_public.h.
+#ifndef COM_TRAP_GETVALUE
+#define COM_TRAP_GETVALUE 700
+#endif
 
 #endif	// __Q_SHARED_H

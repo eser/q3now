@@ -323,8 +323,10 @@ gentity_t *SelectInitialSpawnPoint( vec3_t origin, vec3_t angles, qboolean isbot
 			break;
 	}
 
-	if (!spot || SpotWouldTelefrag(spot))
-		return SelectSpawnPoint(vec3_origin, origin, angles, isbot);
+	if (!spot || SpotWouldTelefrag(spot)) {
+		vec3_t avoidOrigin = { 0, 0, 0 };
+		return SelectSpawnPoint(avoidOrigin, origin, angles, isbot);
+	}
 
 	VectorCopy (spot->s.origin, origin);
 	origin[2] += 9;
@@ -704,7 +706,7 @@ if desired.
 void ClientUserinfoChanged( int clientNum ) {
 	gentity_t *ent;
 	int		teamTask, teamLeader, health;
-	char	*s;
+	const char	*s;
 	char	model[MAX_QPATH];
 	char	headModel[MAX_QPATH];
 	char	oldname[MAX_STRING_CHARS];
@@ -869,7 +871,7 @@ restarts.
 ============
 */
 char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
-	char		*value;
+	const char	*value;
 //	char		*areabits;
 	gclient_t	*client;
 	char		userinfo[MAX_INFO_STRING];

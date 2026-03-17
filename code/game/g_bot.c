@@ -62,7 +62,7 @@ G_ParseInfos
 ===============
 */
 int G_ParseInfos( char *buf, int max, char *infos[] ) {
-	char	*token;
+	const char	*token;
 	int		count;
 	char	key[MAX_TOKEN_CHARS];
 	char	info[MAX_INFO_STRING];
@@ -98,7 +98,7 @@ int G_ParseInfos( char *buf, int max, char *infos[] ) {
 
 			token = COM_ParseExt( &buf, qfalse );
 			if ( !token[0] ) {
-				strcpy( token, "<NULL>" );
+				token = "<NULL>";
 			}
 			Info_SetValueForKey( info, key, token );
 		}
@@ -268,7 +268,7 @@ int G_SelectRandomBotInfo( int team ) {
 	int		selection[MAX_BOTS];
 	int		n, num;
 	int		count, bestCount;
-	char	*value;
+	const char	*value;
 
 	// don't add duplicate bots to the server if there are less bots than bot types
 	if ( team != -1 && G_CountBotPlayersByName( NULL, -1 ) < g_numBots ) {
@@ -592,11 +592,11 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	int				teamNum;
 	int				botinfoNum;
 	char			*botinfo;
-	char			*key;
-	char			*s;
-	char			*botname;
-	char			*model;
-	char			*headmodel;
+	const char		*key;
+	const char		*s;
+	const char		*botname;
+	const char		*model;
+	const char		*headmodel;
 	char			userinfo[MAX_INFO_STRING];
 
 	// have the server allocate a client slot
@@ -840,7 +840,7 @@ void Svcmd_BotList_f( void ) {
 G_SpawnBots
 ===============
 */
-static void G_SpawnBots( char *botList, int baseDelay ) {
+static void G_SpawnBots( const char *botList, int baseDelay ) {
 	char		*bot;
 	char		*p;
 	float		skill;
@@ -980,7 +980,7 @@ G_GetBotInfoByName
 */
 char *G_GetBotInfoByName( const char *name ) {
 	int		n;
-	char	*value;
+	const char	*value;
 
 	for ( n = 0; n < g_numBots ; n++ ) {
 		value = Info_ValueForKey( g_botInfos[n], "name" );
@@ -1001,7 +1001,7 @@ void G_InitBots( qboolean restart ) {
 	int			fragLimit;
 	int			timeLimit;
 	const char	*arenainfo;
-	char		*strValue;
+	const char	*strValue;
 	int			basedelay;
 	char		map[MAX_QPATH];
 	char		serverinfo[MAX_INFO_STRING];

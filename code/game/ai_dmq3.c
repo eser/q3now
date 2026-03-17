@@ -55,7 +55,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "match.h"				//string matching types and vars
 
 // for the voice chats
-#include "../../ui/menudef.h" // sos001205 - for q3_ui also
+#include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure // sos001205 - for q3_ui also
 
 // from aasfile.h
 #define AREACONTENTS_MOVER				1024
@@ -4963,7 +4963,7 @@ void BotCheckSnapshot(bot_state_t *bs) {
 	entityState_t state;
 
 	//remove all avoid spots
-	trap_BotAddAvoidSpot(bs->ms, vec3_origin, 0, AVOID_CLEAR);
+	{ vec3_t clearOrigin = { 0, 0, 0 }; trap_BotAddAvoidSpot(bs->ms, clearOrigin, 0, AVOID_CLEAR); }
 	//reset kamikaze body
 	bs->kamikazebody = 0;
 	//

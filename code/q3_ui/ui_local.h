@@ -25,6 +25,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../renderercommon/tr_types.h"
+
+// Quake3e compat: refEntity_t renamed shaderRGBA[4] to shader (color4ub_t with .rgba[4])
+#ifndef shaderRGBA
+#define shaderRGBA shader.rgba
+#endif
+
 //NOTE: include the ui_public.h from the new UI
 #include "../ui/ui_public.h"
 //redefine to old API version

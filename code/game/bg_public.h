@@ -24,6 +24,25 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // bg_public.h -- definitions shared by both the server game and client game modules
 
+// ── Quake3e / ioquake3 macro compatibility ───────────────────────────────────
+// ioquake3 game code uses Q_PRINTF_FUNC / Q_NO_RETURN; Quake3e's q_shared.h
+// provides FORMAT_PRINTF / NORETURN instead.  Add aliases here so game
+// modules compile unchanged against either engine header set.
+#ifndef Q_PRINTF_FUNC
+#define Q_PRINTF_FUNC(x, y) FORMAT_PRINTF(x, y)
+#endif
+#ifndef Q_NO_RETURN
+#define Q_NO_RETURN NORETURN
+#endif
+
+// Quake3e engine extension syscall index — defined in engine's qcommon.h but
+// referenced by g_public.h and cg_public.h which game modules include.
+// Game modules don't include qcommon.h, so define it here.
+#ifndef COM_TRAP_GETVALUE
+#define COM_TRAP_GETVALUE 700
+#endif
+// ─────────────────────────────────────────────────────────────────────────────
+
 // because games can change separately from the main system version, we need a
 // second version that must match between game and cgame
 
@@ -137,6 +156,11 @@ typedef enum {
 	GT_HARVESTER,
 	GT_MAX_GAME_TYPE
 } gametype_t;
+
+// Engine compat: sv_ccmds.c and sv_client.c include bg_public.h and reference
+// GT_SINGLE_PLAYER. GT_DUMMY occupies the same enum slot (value 2), so this
+// alias keeps the engine server code compiling without engine changes.
+#define GT_SINGLE_PLAYER GT_DUMMY
 
 typedef enum { GENDER_MALE, GENDER_FEMALE, GENDER_NEUTER } gender_t;
 
