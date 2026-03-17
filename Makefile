@@ -42,7 +42,7 @@ ifeq ($(UNAME_S),Darwin)
   JOBS        ?= $(shell sysctl -n hw.ncpu)
   # cmake puts app bundles at build/<name><arch>.app (no Release/ subdir)
   BUILT_APP   := $(BUILD_DIR)/$(APP_NAME)$(BINEXT).app
-  BUILT_DED   := $(BUILD_DIR)/$(APP_NAME).ded$(BINEXT).app/Contents/MacOS/$(APP_NAME).ded$(BINEXT)
+  BUILT_DED   := $(BUILD_DIR)/$(APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(APP_NAME)-ded$(BINEXT)
   GAME_BIN    := $(BUILT_APP)/Contents/MacOS/$(APP_NAME)$(BINEXT)
   Q3DIR       ?= /Applications/$(APP_NAME)
 else
@@ -70,7 +70,7 @@ CMAKE_BUILD := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
-.PHONY: all configure build clean rebuild pak check install run run-dev help
+.PHONY: all configure build clean rebuild pak check install run run-dev smoke help
 
 all: build
 
@@ -149,7 +149,7 @@ ifeq ($(UNAME_S),Darwin)
 	cp "$(MODULE_DIR)/qagame.dylib" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
 	cp "$(MODULE_DIR)/ui.dylib"     "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
 	@# Dedicated server binary alongside .app (if built)
-	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(Q3DIR)/$(APP_NAME).ded" || true
+	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(Q3DIR)/$(APP_NAME)-ded" || true
 else
 	mkdir -p "$(Q3BASEDIR)"
 	cp "$(MODULE_DIR)/cgame.so"  "$(Q3BASEDIR)/"
@@ -182,6 +182,17 @@ ifeq ($(UNAME_S),Darwin)
 else
 	"$(Q3DIR)/$(APP_NAME)" \
 	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +map $(MAP)
+endif
+
+# ── Smoke test ────────────────────────────────────────────────────────────────
+# Headless gameplay smoke test. Requires Q3DIR with pak0.pk3.
+# Skips gracefully (exit 77) in asset-free CI environments.
+
+smoke: build
+ifeq ($(UNAME_S),Darwin)
+	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded"
+else
+	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)"
 endif
 
 # ── Help ──────────────────────────────────────────────────────────────────────

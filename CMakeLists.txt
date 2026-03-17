@@ -3,7 +3,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.12)
 PROJECT(q3now)
 
 SET(CNAME "q3now")
-SET(DNAME "q3now.ded")
+SET(DNAME "q3now-ded")
 
 SET(RENDERER_PREFIX ${CNAME})
 SET(RENDERER_DEFAULT opengl) # valid options: opengl, vulkan, opengl2
