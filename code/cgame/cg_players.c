@@ -91,7 +91,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	char		*text_p, *prev;
 	int			len;
 	int			i;
-	char		*token;
+	const char	*token;
 	float		fps;
 	int			skip;
 	char		text[20000];
@@ -2115,40 +2115,40 @@ static void CG_PlayerSplash( centity_t *cent ) {
 	verts[0].xyz[1] -= 32;
 	verts[0].st[0] = 0;
 	verts[0].st[1] = 0;
-	verts[0].modulate[0] = 255;
-	verts[0].modulate[1] = 255;
-	verts[0].modulate[2] = 255;
-	verts[0].modulate[3] = 255;
+	verts[0].modulate.rgba[0] = 255;
+	verts[0].modulate.rgba[1] = 255;
+	verts[0].modulate.rgba[2] = 255;
+	verts[0].modulate.rgba[3] = 255;
 
 	VectorCopy( trace.endpos, verts[1].xyz );
 	verts[1].xyz[0] -= 32;
 	verts[1].xyz[1] += 32;
 	verts[1].st[0] = 0;
 	verts[1].st[1] = 1;
-	verts[1].modulate[0] = 255;
-	verts[1].modulate[1] = 255;
-	verts[1].modulate[2] = 255;
-	verts[1].modulate[3] = 255;
+	verts[1].modulate.rgba[0] = 255;
+	verts[1].modulate.rgba[1] = 255;
+	verts[1].modulate.rgba[2] = 255;
+	verts[1].modulate.rgba[3] = 255;
 
 	VectorCopy( trace.endpos, verts[2].xyz );
 	verts[2].xyz[0] += 32;
 	verts[2].xyz[1] += 32;
 	verts[2].st[0] = 1;
 	verts[2].st[1] = 1;
-	verts[2].modulate[0] = 255;
-	verts[2].modulate[1] = 255;
-	verts[2].modulate[2] = 255;
-	verts[2].modulate[3] = 255;
+	verts[2].modulate.rgba[0] = 255;
+	verts[2].modulate.rgba[1] = 255;
+	verts[2].modulate.rgba[2] = 255;
+	verts[2].modulate.rgba[3] = 255;
 
 	VectorCopy( trace.endpos, verts[3].xyz );
 	verts[3].xyz[0] += 32;
 	verts[3].xyz[1] -= 32;
 	verts[3].st[0] = 1;
 	verts[3].st[1] = 0;
-	verts[3].modulate[0] = 255;
-	verts[3].modulate[1] = 255;
-	verts[3].modulate[2] = 255;
-	verts[3].modulate[3] = 255;
+	verts[3].modulate.rgba[0] = 255;
+	verts[3].modulate.rgba[1] = 255;
+	verts[3].modulate.rgba[2] = 255;
+	verts[3].modulate.rgba[3] = 255;
 
 	trap_R_AddPolyToScene( cgs.media.wakeMarkShader, 4, verts );
 }
@@ -2220,31 +2220,31 @@ int CG_LightVerts( vec3_t normal, int numVerts, polyVert_t *verts )
 	for (i = 0; i < numVerts; i++) {
 		incoming = DotProduct (normal, lightDir);
 		if ( incoming <= 0 ) {
-			verts[i].modulate[0] = ambientLight[0];
-			verts[i].modulate[1] = ambientLight[1];
-			verts[i].modulate[2] = ambientLight[2];
-			verts[i].modulate[3] = 255;
+			verts[i].modulate.rgba[0] = ambientLight[0];
+			verts[i].modulate.rgba[1] = ambientLight[1];
+			verts[i].modulate.rgba[2] = ambientLight[2];
+			verts[i].modulate.rgba[3] = 255;
 			continue;
 		} 
 		j = ( ambientLight[0] + incoming * directedLight[0] );
 		if ( j > 255 ) {
 			j = 255;
 		}
-		verts[i].modulate[0] = j;
+		verts[i].modulate.rgba[0] = j;
 
 		j = ( ambientLight[1] + incoming * directedLight[1] );
 		if ( j > 255 ) {
 			j = 255;
 		}
-		verts[i].modulate[1] = j;
+		verts[i].modulate.rgba[1] = j;
 
 		j = ( ambientLight[2] + incoming * directedLight[2] );
 		if ( j > 255 ) {
 			j = 255;
 		}
-		verts[i].modulate[2] = j;
+		verts[i].modulate.rgba[2] = j;
 
-		verts[i].modulate[3] = 255;
+		verts[i].modulate.rgba[3] = 255;
 	}
 	return qtrue;
 }

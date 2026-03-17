@@ -227,7 +227,7 @@ void CG_RailTrail (clientInfo_t *ci, vec3_t start, vec3_t end) {
 	le->endTime = cg.time + RAIL_TRAILTIME;
 	le->lifeRate = 1.0 / (le->endTime - le->startTime);
  
-	re->shaderTime = cg.time / 1000.0f;
+	re->shaderTime.f =cg.time / 1000.0f;
 	re->reType = RT_RAIL_CORE;
 	re->customShader = cgs.media.railCoreShader;
  
@@ -274,7 +274,7 @@ void CG_RailTrail (clientInfo_t *ci, vec3_t start, vec3_t end) {
 			le->endTime = cg.time + (i>>1) + 500;
 			le->lifeRate = 1.0 / (le->endTime - le->startTime);
 
-			re->shaderTime = cg.time / 1000.0f;
+			re->shaderTime.f =cg.time / 1000.0f;
 			re->reType = RT_SPRITE;
 			re->radius = 1.1f;
 			re->customShader = cgs.media.railRingsShader;
@@ -507,7 +507,7 @@ static void CG_PlasmaTrail( centity_t *cent, const weaponInfo_t *wi ) {
 	VectorScale( xvelocity, waterScale, le->pos.trDelta );
 
 	AxisCopy( axisDefault, re->axis );
-	re->shaderTime = cg.time / 1000.0f;
+	re->shaderTime.f =cg.time / 1000.0f;
 	re->reType = RT_SPRITE;
 	re->radius = 0.25f;
 	re->customShader = cgs.media.railRingsShader;
@@ -2062,7 +2062,7 @@ void CG_ExplosionParticles(int weapon, vec3_t origin) {
         le->endTime = cg.time + 3000 + random() * 250; //set the end time
         le->lifeRate = 1.0 / (le->endTime - le->startTime);
         re = &le->refEntity;
-        re->shaderTime = cg.time / 1000.0f;
+        re->shaderTime.f =cg.time / 1000.0f;
         re->reType = RT_SPRITE;
         re->rotation = 0;
         re->radius = 3;
@@ -2254,34 +2254,34 @@ void CG_Tracer( vec3_t source, vec3_t dest ) {
 	VectorMA( finish, cg_tracerWidth.value, right, verts[0].xyz );
 	verts[0].st[0] = 0;
 	verts[0].st[1] = 1;
-	verts[0].modulate[0] = 255;
-	verts[0].modulate[1] = 255;
-	verts[0].modulate[2] = 255;
-	verts[0].modulate[3] = 255;
+	verts[0].modulate.rgba[0] = 255;
+	verts[0].modulate.rgba[1] = 255;
+	verts[0].modulate.rgba[2] = 255;
+	verts[0].modulate.rgba[3] = 255;
 
 	VectorMA( finish, -cg_tracerWidth.value, right, verts[1].xyz );
 	verts[1].st[0] = 1;
 	verts[1].st[1] = 0;
-	verts[1].modulate[0] = 255;
-	verts[1].modulate[1] = 255;
-	verts[1].modulate[2] = 255;
-	verts[1].modulate[3] = 255;
+	verts[1].modulate.rgba[0] = 255;
+	verts[1].modulate.rgba[1] = 255;
+	verts[1].modulate.rgba[2] = 255;
+	verts[1].modulate.rgba[3] = 255;
 
 	VectorMA( start, -cg_tracerWidth.value, right, verts[2].xyz );
 	verts[2].st[0] = 1;
 	verts[2].st[1] = 1;
-	verts[2].modulate[0] = 255;
-	verts[2].modulate[1] = 255;
-	verts[2].modulate[2] = 255;
-	verts[2].modulate[3] = 255;
+	verts[2].modulate.rgba[0] = 255;
+	verts[2].modulate.rgba[1] = 255;
+	verts[2].modulate.rgba[2] = 255;
+	verts[2].modulate.rgba[3] = 255;
 
 	VectorMA( start, cg_tracerWidth.value, right, verts[3].xyz );
 	verts[3].st[0] = 0;
 	verts[3].st[1] = 0;
-	verts[3].modulate[0] = 255;
-	verts[3].modulate[1] = 255;
-	verts[3].modulate[2] = 255;
-	verts[3].modulate[3] = 255;
+	verts[3].modulate.rgba[0] = 255;
+	verts[3].modulate.rgba[1] = 255;
+	verts[3].modulate.rgba[2] = 255;
+	verts[3].modulate.rgba[3] = 255;
 
 	trap_R_AddPolyToScene( cgs.media.tracerShader, 4, verts );
 

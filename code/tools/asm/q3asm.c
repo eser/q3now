@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../../qcommon/q_platform.h"
 #include "cmdlib.h"
 #include "mathlib.h"
+// q3now: Quake3e's qfiles.h uses color4ub_t (defined in q_shared.h, not included here)
+typedef union { byte rgba[4]; unsigned int u32; } color4ub_t;
 #include "../../qcommon/qfiles.h"
 
 /* 19079 total symbols in FI, 2002 Jan 23 */

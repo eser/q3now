@@ -112,10 +112,10 @@ static void UI_ServerOptionsMenu( qboolean multiplayer );
 GametypeBits
 =================
 */
-static int GametypeBits( char *string ) {
-	int		bits;
-	char	*p;
-	char	*token;
+static int GametypeBits( const char *string ) {
+	int			bits;
+	const char	*p;
+	const char	*token;
 
 	bits = 0;
 	p = string;
@@ -1038,7 +1038,7 @@ static void ServerOptions_InitBotNames( void ) {
 	const char	*arenaInfo;
 	const char	*botInfo;
 	char		*p;
-	char		*bot;
+	const char	*bot;
 	char		bots[MAX_INFO_STRING];
 
 	if( s_serveroptions.gametype >= GT_TEAM ) {

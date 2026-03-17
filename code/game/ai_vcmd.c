@@ -55,7 +55,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "match.h"				//string matching types and vars
 
 // for the voice chats
-#include "../../ui/menudef.h"
+#include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure
 
 
 typedef struct voiceCommand_s

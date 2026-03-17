@@ -46,6 +46,9 @@ vec4_t		colorWhite	= {1, 1, 1, 1};
 vec4_t		colorLtGrey	= {0.75, 0.75, 0.75, 1};
 vec4_t		colorMdGrey	= {0.5, 0.5, 0.5, 1};
 vec4_t		colorDkGrey	= {0.25, 0.25, 0.25, 1};
+vec4_t		colorOrange	= {1, 0.5, 0, 1};	// q3now (ioquake3 extension)
+vec4_t		colorIndigo	= {0.25f, 0.25f, 0.25f, 1.00f};	// q3now (ioquake3 extension)
+vec4_t		colorSkyBlue= {0.01f, 0.50f, 1.00f, 1.00f};	// q3now (ioquake3 extension)
 
 // actually there are 35 colors but we want to use bitmask safely
 const vec4_t g_color_table[ 64 ] = {
@@ -1134,6 +1137,10 @@ float Q_atof( const char *str )
 Q_log2f
 ================
 */
+/* Q3_VM: Q_log2f and Q_exp2f use logf/powf which are not available in the QVM
+ * standard lib (bg_lib.c). These functions are not called by any game module,
+ * so we simply exclude them from QVM builds. */
+#ifndef Q3_VM
 float Q_log2f( float f )
 {
 	const float v = logf( f );
@@ -1150,6 +1157,7 @@ float Q_exp2f( float f )
 {
 	return powf( 2.0f, f );
 }
+#endif /* !Q3_VM */
 
 
 #ifndef Q3_VM

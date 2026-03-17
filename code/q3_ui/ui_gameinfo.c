@@ -82,7 +82,7 @@ UI_ParseInfos
 ===============
 */
 int UI_ParseInfos( char *buf, int max, char *infos[] ) {
-	char	*token;
+	const char	*token;
 	int		count;
 	char	key[MAX_TOKEN_CHARS];
 	char	info[MAX_INFO_STRING];
@@ -118,7 +118,7 @@ int UI_ParseInfos( char *buf, int max, char *infos[] ) {
 
 			token = COM_ParseExt( &buf, qfalse );
 			if ( !token[0] ) {
-				strcpy( token, "<NULL>" );
+				token = "<NULL>";
 			}
 			Info_SetValueForKey( info, key, token );
 		}
@@ -173,8 +173,8 @@ static void UI_LoadArenas( void ) {
 	char*		dirptr;
 	int			i, n;
 	int			dirlen;
-	char		*type;
-	char		*tag;
+	const char	*type;
+	const char	*tag;
 	int			singlePlayerNum, specialNum, otherNum;
 
 	ui_numArenas = 0;
@@ -268,7 +268,7 @@ UI_GetArenaInfoByNumber
 */
 const char *UI_GetArenaInfoByNumber( int num ) {
 	int		n;
-	char	*value;
+	const char	*value;
 
 	if( num < 0 || num >= ui_numArenas ) {
 		trap_Print( va( S_COLOR_RED "Invalid arena number: %i\n", num ) );
@@ -408,7 +408,7 @@ UI_GetBotInfoByName
 */
 char *UI_GetBotInfoByName( const char *name ) {
 	int		n;
-	char	*value;
+	const char	*value;
 
 	for ( n = 0; n < ui_numBots ; n++ ) {
 		value = Info_ValueForKey( ui_botInfos[n], "name" );

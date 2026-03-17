@@ -22,6 +22,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // q_shared.c -- stateless support routines that are included in each code dll
 #include "q_shared.h"
+// q3now: Remove Q3_VM cast macros — this file defines the functions themselves
+#ifdef COM_Parse
+#undef COM_Parse
+#endif
+#ifdef COM_ParseExt
+#undef COM_ParseExt
+#endif
 
 float Com_Clamp( float min, float max, float value ) {
 	if ( value < min ) {
@@ -1726,7 +1733,11 @@ int QDECL Com_sprintf( char *dest, int size, const char *fmt, ...)
 	}
 
 	va_start( argptr, fmt );
+#ifdef Q3_VM
+	len = Q_vsnprintf( bigbuffer, sizeof( bigbuffer ), fmt, argptr );
+#else
 	len = vsprintf( bigbuffer, fmt, argptr );
+#endif
 	va_end( argptr );
 
 	if ( len >= sizeof( bigbuffer ) || len < 0 ) 
@@ -1765,7 +1776,11 @@ varargs versions of all text functions.
 FIXME: make this buffer size safe someday
 ============
 */
+#ifdef Q3_VM
+char *QDECL va( const char *format, ... )
+#else
 const char *QDECL va( const char *format, ... )
+#endif
 {
 	char	*buf;
 	va_list		argptr;
@@ -1776,7 +1791,11 @@ const char *QDECL va( const char *format, ... )
 	index ^= 1;
 
 	va_start( argptr, format );
+#ifdef Q3_VM
+	Q_vsnprintf( buf, 32000, format, argptr );
+#else
 	vsprintf( buf, format, argptr );
+#endif
 	va_end( argptr );
 
 	return buf;

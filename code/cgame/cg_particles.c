@@ -278,40 +278,40 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 			VectorCopy (point, verts[0].xyz);	
 			verts[0].st[0] = 0;	
 			verts[0].st[1] = 0;	
-			verts[0].modulate[0] = 255;	
-			verts[0].modulate[1] = 255;	
-			verts[0].modulate[2] = 255;	
-			verts[0].modulate[3] = 255 * p->alpha;	
+			verts[0].modulate.rgba[0] = 255;	
+			verts[0].modulate.rgba[1] = 255;	
+			verts[0].modulate.rgba[2] = 255;	
+			verts[0].modulate.rgba[3] = 255 * p->alpha;	
 
 			VectorMA (org, -p->height, vup, point);	
 			VectorMA (point, p->width, vright, point);	
 			VectorCopy (point, verts[1].xyz);	
 			verts[1].st[0] = 0;	
 			verts[1].st[1] = 1;	
-			verts[1].modulate[0] = 255;	
-			verts[1].modulate[1] = 255;	
-			verts[1].modulate[2] = 255;	
-			verts[1].modulate[3] = 255 * p->alpha;	
+			verts[1].modulate.rgba[0] = 255;	
+			verts[1].modulate.rgba[1] = 255;	
+			verts[1].modulate.rgba[2] = 255;	
+			verts[1].modulate.rgba[3] = 255 * p->alpha;	
 
 			VectorMA (org, p->height, vup, point);	
 			VectorMA (point, p->width, vright, point);	
 			VectorCopy (point, verts[2].xyz);	
 			verts[2].st[0] = 1;	
 			verts[2].st[1] = 1;	
-			verts[2].modulate[0] = 255;	
-			verts[2].modulate[1] = 255;	
-			verts[2].modulate[2] = 255;	
-			verts[2].modulate[3] = 255 * p->alpha;	
+			verts[2].modulate.rgba[0] = 255;	
+			verts[2].modulate.rgba[1] = 255;	
+			verts[2].modulate.rgba[2] = 255;	
+			verts[2].modulate.rgba[3] = 255 * p->alpha;	
 
 			VectorMA (org, p->height, vup, point);	
 			VectorMA (point, -p->width, vright, point);	
 			VectorCopy (point, verts[3].xyz);	
 			verts[3].st[0] = 1;	
 			verts[3].st[1] = 0;	
-			verts[3].modulate[0] = 255;	
-			verts[3].modulate[1] = 255;	
-			verts[3].modulate[2] = 255;	
-			verts[3].modulate[3] = 255 * p->alpha;	
+			verts[3].modulate.rgba[0] = 255;	
+			verts[3].modulate.rgba[1] = 255;	
+			verts[3].modulate.rgba[2] = 255;	
+			verts[3].modulate.rgba[3] = 255 * p->alpha;	
 		}
 		else
 		{
@@ -320,30 +320,30 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 			VectorCopy( point, TRIverts[0].xyz );
 			TRIverts[0].st[0] = 1;
 			TRIverts[0].st[1] = 0;
-			TRIverts[0].modulate[0] = 255;
-			TRIverts[0].modulate[1] = 255;
-			TRIverts[0].modulate[2] = 255;
-			TRIverts[0].modulate[3] = 255 * p->alpha;	
+			TRIverts[0].modulate.rgba[0] = 255;
+			TRIverts[0].modulate.rgba[1] = 255;
+			TRIverts[0].modulate.rgba[2] = 255;
+			TRIverts[0].modulate.rgba[3] = 255 * p->alpha;	
 
 			VectorMA (org, p->height, vup, point);	
 			VectorMA (point, -p->width, vright, point);	
 			VectorCopy (point, TRIverts[1].xyz);	
 			TRIverts[1].st[0] = 0;
 			TRIverts[1].st[1] = 0;
-			TRIverts[1].modulate[0] = 255;
-			TRIverts[1].modulate[1] = 255;
-			TRIverts[1].modulate[2] = 255;
-			TRIverts[1].modulate[3] = 255 * p->alpha;	
+			TRIverts[1].modulate.rgba[0] = 255;
+			TRIverts[1].modulate.rgba[1] = 255;
+			TRIverts[1].modulate.rgba[2] = 255;
+			TRIverts[1].modulate.rgba[3] = 255 * p->alpha;	
 
 			VectorMA (org, p->height, vup, point);	
 			VectorMA (point, p->width, vright, point);	
 			VectorCopy (point, TRIverts[2].xyz);	
 			TRIverts[2].st[0] = 0;
 			TRIverts[2].st[1] = 1;
-			TRIverts[2].modulate[0] = 255;
-			TRIverts[2].modulate[1] = 255;
-			TRIverts[2].modulate[2] = 255;
-			TRIverts[2].modulate[3] = 255 * p->alpha;	
+			TRIverts[2].modulate.rgba[0] = 255;
+			TRIverts[2].modulate.rgba[1] = 255;
+			TRIverts[2].modulate.rgba[2] = 255;
+			TRIverts[2].modulate.rgba[3] = 255 * p->alpha;	
 		}
 	
 	}
@@ -380,10 +380,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[0].xyz);	
 		verts[0].st[0] = 0;	
 		verts[0].st[1] = 0;	
-		verts[0].modulate[0] = 255;	
-		verts[0].modulate[1] = 255;	
-		verts[0].modulate[2] = 255;	
-		verts[0].modulate[3] = 255;
+		verts[0].modulate.rgba[0] = 255;	
+		verts[0].modulate.rgba[1] = 255;	
+		verts[0].modulate.rgba[2] = 255;	
+		verts[0].modulate.rgba[3] = 255;
 
 		if (p->roll) {
 			VectorMA (point, 2*height, ru, point);	
@@ -393,10 +393,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[1].xyz);	
 		verts[1].st[0] = 0;	
 		verts[1].st[1] = 1;	
-		verts[1].modulate[0] = 255;	
-		verts[1].modulate[1] = 255;	
-		verts[1].modulate[2] = 255;	
-		verts[1].modulate[3] = 255;	
+		verts[1].modulate.rgba[0] = 255;	
+		verts[1].modulate.rgba[1] = 255;	
+		verts[1].modulate.rgba[2] = 255;	
+		verts[1].modulate.rgba[3] = 255;	
 
 		if (p->roll) {
 			VectorMA (point, 2*width, rr, point);	
@@ -406,10 +406,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[2].xyz);	
 		verts[2].st[0] = 1;	
 		verts[2].st[1] = 1;	
-		verts[2].modulate[0] = 255;	
-		verts[2].modulate[1] = 255;	
-		verts[2].modulate[2] = 255;	
-		verts[2].modulate[3] = 255;	
+		verts[2].modulate.rgba[0] = 255;	
+		verts[2].modulate.rgba[1] = 255;	
+		verts[2].modulate.rgba[2] = 255;	
+		verts[2].modulate.rgba[3] = 255;	
 
 		if (p->roll) {
 			VectorMA (point, -2*height, ru, point);	
@@ -419,10 +419,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[3].xyz);	
 		verts[3].st[0] = 1;	
 		verts[3].st[1] = 0;	
-		verts[3].modulate[0] = 255;	
-		verts[3].modulate[1] = 255;	
-		verts[3].modulate[2] = 255;	
-		verts[3].modulate[3] = 255;	
+		verts[3].modulate.rgba[0] = 255;	
+		verts[3].modulate.rgba[1] = 255;	
+		verts[3].modulate.rgba[2] = 255;	
+		verts[3].modulate.rgba[3] = 255;	
 	}
 	else if (p->type == P_SMOKE || p->type == P_SMOKE_IMPACT)
 	{// create a front rotating facing polygon
@@ -510,10 +510,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[0].xyz);	
 		verts[0].st[0] = 0;	
 		verts[0].st[1] = 0;	
-		verts[0].modulate[0] = 255 * color[0];	
-		verts[0].modulate[1] = 255 * color[1];	
-		verts[0].modulate[2] = 255 * color[2];	
-		verts[0].modulate[3] = 255 * invratio;	
+		verts[0].modulate.rgba[0] = 255 * color[0];	
+		verts[0].modulate.rgba[1] = 255 * color[1];	
+		verts[0].modulate.rgba[2] = 255 * color[2];	
+		verts[0].modulate.rgba[3] = 255 * invratio;	
 
 		if (p->rotate)
 		{
@@ -528,10 +528,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[1].xyz);	
 		verts[1].st[0] = 0;	
 		verts[1].st[1] = 1;	
-		verts[1].modulate[0] = 255 * color[0];	
-		verts[1].modulate[1] = 255 * color[1];	
-		verts[1].modulate[2] = 255 * color[2];	
-		verts[1].modulate[3] = 255 * invratio;	
+		verts[1].modulate.rgba[0] = 255 * color[0];	
+		verts[1].modulate.rgba[1] = 255 * color[1];	
+		verts[1].modulate.rgba[2] = 255 * color[2];	
+		verts[1].modulate.rgba[3] = 255 * invratio;	
 
 		if (p->rotate)
 		{
@@ -546,10 +546,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[2].xyz);	
 		verts[2].st[0] = 1;	
 		verts[2].st[1] = 1;	
-		verts[2].modulate[0] = 255 * color[0];	
-		verts[2].modulate[1] = 255 * color[1];	
-		verts[2].modulate[2] = 255 * color[2];	
-		verts[2].modulate[3] = 255 * invratio;	
+		verts[2].modulate.rgba[0] = 255 * color[0];	
+		verts[2].modulate.rgba[1] = 255 * color[1];	
+		verts[2].modulate.rgba[2] = 255 * color[2];	
+		verts[2].modulate.rgba[3] = 255 * invratio;	
 
 		if (p->rotate)
 		{
@@ -564,10 +564,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[3].xyz);	
 		verts[3].st[0] = 1;	
 		verts[3].st[1] = 0;	
-		verts[3].modulate[0] = 255 * color[0];	
-		verts[3].modulate[1] = 255 * color[1];	
-		verts[3].modulate[2] = 255 * color[2];	
-		verts[3].modulate[3] = 255  * invratio;	
+		verts[3].modulate.rgba[0] = 255 * color[0];	
+		verts[3].modulate.rgba[1] = 255 * color[1];	
+		verts[3].modulate.rgba[2] = 255 * color[2];	
+		verts[3].modulate.rgba[3] = 255  * invratio;	
 		
 	}
 	else if (p->type == P_BLEED)
@@ -598,40 +598,40 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[0].xyz);	
 		verts[0].st[0] = 0;	
 		verts[0].st[1] = 0;	
-		verts[0].modulate[0] = 111;	
-		verts[0].modulate[1] = 19;	
-		verts[0].modulate[2] = 9;	
-		verts[0].modulate[3] = 255 * pAlpha;
+		verts[0].modulate.rgba[0] = 111;	
+		verts[0].modulate.rgba[1] = 19;	
+		verts[0].modulate.rgba[2] = 9;	
+		verts[0].modulate.rgba[3] = 255 * pAlpha;
 
 		VectorMA (org, -p->height, ru, point);	
 		VectorMA (point, p->width, rr, point);	
 		VectorCopy (point, verts[1].xyz);	
 		verts[1].st[0] = 0;	
 		verts[1].st[1] = 1;	
-		verts[1].modulate[0] = 111;	
-		verts[1].modulate[1] = 19;	
-		verts[1].modulate[2] = 9;	
-		verts[1].modulate[3] = 255 * pAlpha;
+		verts[1].modulate.rgba[0] = 111;	
+		verts[1].modulate.rgba[1] = 19;	
+		verts[1].modulate.rgba[2] = 9;	
+		verts[1].modulate.rgba[3] = 255 * pAlpha;
 
 		VectorMA (org, p->height, ru, point);	
 		VectorMA (point, p->width, rr, point);	
 		VectorCopy (point, verts[2].xyz);	
 		verts[2].st[0] = 1;	
 		verts[2].st[1] = 1;	
-		verts[2].modulate[0] = 111;	
-		verts[2].modulate[1] = 19;	
-		verts[2].modulate[2] = 9;	
-		verts[2].modulate[3] = 255 * pAlpha;
+		verts[2].modulate.rgba[0] = 111;	
+		verts[2].modulate.rgba[1] = 19;	
+		verts[2].modulate.rgba[2] = 9;	
+		verts[2].modulate.rgba[3] = 255 * pAlpha;
 
 		VectorMA (org, p->height, ru, point);	
 		VectorMA (point, -p->width, rr, point);	
 		VectorCopy (point, verts[3].xyz);	
 		verts[3].st[0] = 1;	
 		verts[3].st[1] = 0;	
-		verts[3].modulate[0] = 111;	
-		verts[3].modulate[1] = 19;	
-		verts[3].modulate[2] = 9;	
-		verts[3].modulate[3] = 255 * pAlpha;
+		verts[3].modulate.rgba[0] = 111;	
+		verts[3].modulate.rgba[1] = 19;	
+		verts[3].modulate.rgba[2] = 9;	
+		verts[3].modulate.rgba[3] = 255 * pAlpha;
 
 	}
 	else if (p->type == P_FLAT_SCALEUP)
@@ -664,40 +664,40 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		verts[0].xyz[1] -= cosR;
 		verts[0].st[0] = 0;	
 		verts[0].st[1] = 0;	
-		verts[0].modulate[0] = 255 * color[0];	
-		verts[0].modulate[1] = 255 * color[1];	
-		verts[0].modulate[2] = 255 * color[2];	
-		verts[0].modulate[3] = 255;	
+		verts[0].modulate.rgba[0] = 255 * color[0];	
+		verts[0].modulate.rgba[1] = 255 * color[1];	
+		verts[0].modulate.rgba[2] = 255 * color[2];	
+		verts[0].modulate.rgba[3] = 255;	
 
 		VectorCopy (org, verts[1].xyz);	
 		verts[1].xyz[0] -= cosR;	
 		verts[1].xyz[1] += sinR;	
 		verts[1].st[0] = 0;	
 		verts[1].st[1] = 1;	
-		verts[1].modulate[0] = 255 * color[0];	
-		verts[1].modulate[1] = 255 * color[1];	
-		verts[1].modulate[2] = 255 * color[2];	
-		verts[1].modulate[3] = 255;	
+		verts[1].modulate.rgba[0] = 255 * color[0];	
+		verts[1].modulate.rgba[1] = 255 * color[1];	
+		verts[1].modulate.rgba[2] = 255 * color[2];	
+		verts[1].modulate.rgba[3] = 255;	
 
 		VectorCopy (org, verts[2].xyz);	
 		verts[2].xyz[0] += sinR;	
 		verts[2].xyz[1] += cosR;	
 		verts[2].st[0] = 1;	
 		verts[2].st[1] = 1;	
-		verts[2].modulate[0] = 255 * color[0];	
-		verts[2].modulate[1] = 255 * color[1];	
-		verts[2].modulate[2] = 255 * color[2];	
-		verts[2].modulate[3] = 255;	
+		verts[2].modulate.rgba[0] = 255 * color[0];	
+		verts[2].modulate.rgba[1] = 255 * color[1];	
+		verts[2].modulate.rgba[2] = 255 * color[2];	
+		verts[2].modulate.rgba[3] = 255;	
 
 		VectorCopy (org, verts[3].xyz);	
 		verts[3].xyz[0] += cosR;	
 		verts[3].xyz[1] -= sinR;	
 		verts[3].st[0] = 1;	
 		verts[3].st[1] = 0;	
-		verts[3].modulate[0] = 255 * color[0];	
-		verts[3].modulate[1] = 255 * color[1];	
-		verts[3].modulate[2] = 255 * color[2];	
-		verts[3].modulate[3] = 255;		
+		verts[3].modulate.rgba[0] = 255 * color[0];	
+		verts[3].modulate.rgba[1] = 255 * color[1];	
+		verts[3].modulate.rgba[2] = 255 * color[2];	
+		verts[3].modulate.rgba[3] = 255;		
 	}
 	else if (p->type == P_FLAT)
 	{
@@ -707,40 +707,40 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		verts[0].xyz[1] -= p->width;	
 		verts[0].st[0] = 0;	
 		verts[0].st[1] = 0;	
-		verts[0].modulate[0] = 255;	
-		verts[0].modulate[1] = 255;	
-		verts[0].modulate[2] = 255;	
-		verts[0].modulate[3] = 255;	
+		verts[0].modulate.rgba[0] = 255;	
+		verts[0].modulate.rgba[1] = 255;	
+		verts[0].modulate.rgba[2] = 255;	
+		verts[0].modulate.rgba[3] = 255;	
 
 		VectorCopy (org, verts[1].xyz);	
 		verts[1].xyz[0] -= p->height;	
 		verts[1].xyz[1] += p->width;	
 		verts[1].st[0] = 0;	
 		verts[1].st[1] = 1;	
-		verts[1].modulate[0] = 255;	
-		verts[1].modulate[1] = 255;	
-		verts[1].modulate[2] = 255;	
-		verts[1].modulate[3] = 255;	
+		verts[1].modulate.rgba[0] = 255;	
+		verts[1].modulate.rgba[1] = 255;	
+		verts[1].modulate.rgba[2] = 255;	
+		verts[1].modulate.rgba[3] = 255;	
 
 		VectorCopy (org, verts[2].xyz);	
 		verts[2].xyz[0] += p->height;	
 		verts[2].xyz[1] += p->width;	
 		verts[2].st[0] = 1;	
 		verts[2].st[1] = 1;	
-		verts[2].modulate[0] = 255;	
-		verts[2].modulate[1] = 255;	
-		verts[2].modulate[2] = 255;	
-		verts[2].modulate[3] = 255;	
+		verts[2].modulate.rgba[0] = 255;	
+		verts[2].modulate.rgba[1] = 255;	
+		verts[2].modulate.rgba[2] = 255;	
+		verts[2].modulate.rgba[3] = 255;	
 
 		VectorCopy (org, verts[3].xyz);	
 		verts[3].xyz[0] += p->height;	
 		verts[3].xyz[1] -= p->width;	
 		verts[3].st[0] = 1;	
 		verts[3].st[1] = 0;	
-		verts[3].modulate[0] = 255;	
-		verts[3].modulate[1] = 255;	
-		verts[3].modulate[2] = 255;	
-		verts[3].modulate[3] = 255;	
+		verts[3].modulate.rgba[0] = 255;	
+		verts[3].modulate.rgba[1] = 255;	
+		verts[3].modulate.rgba[2] = 255;	
+		verts[3].modulate.rgba[3] = 255;	
 
 	}
 	// Ridah
@@ -784,10 +784,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[0].xyz);	
 		verts[0].st[0] = 0;	
 		verts[0].st[1] = 0;	
-		verts[0].modulate[0] = 255;	
-		verts[0].modulate[1] = 255;	
-		verts[0].modulate[2] = 255;	
-		verts[0].modulate[3] = 255;
+		verts[0].modulate.rgba[0] = 255;	
+		verts[0].modulate.rgba[1] = 255;	
+		verts[0].modulate.rgba[2] = 255;	
+		verts[0].modulate.rgba[3] = 255;
 
 		if (p->roll) {
 			VectorMA (point, 2*height, ru, point);	
@@ -797,10 +797,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[1].xyz);	
 		verts[1].st[0] = 0;	
 		verts[1].st[1] = 1;	
-		verts[1].modulate[0] = 255;	
-		verts[1].modulate[1] = 255;	
-		verts[1].modulate[2] = 255;	
-		verts[1].modulate[3] = 255;	
+		verts[1].modulate.rgba[0] = 255;	
+		verts[1].modulate.rgba[1] = 255;	
+		verts[1].modulate.rgba[2] = 255;	
+		verts[1].modulate.rgba[3] = 255;	
 
 		if (p->roll) {
 			VectorMA (point, 2*width, rr, point);	
@@ -810,10 +810,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[2].xyz);	
 		verts[2].st[0] = 1;	
 		verts[2].st[1] = 1;	
-		verts[2].modulate[0] = 255;	
-		verts[2].modulate[1] = 255;	
-		verts[2].modulate[2] = 255;	
-		verts[2].modulate[3] = 255;	
+		verts[2].modulate.rgba[0] = 255;	
+		verts[2].modulate.rgba[1] = 255;	
+		verts[2].modulate.rgba[2] = 255;	
+		verts[2].modulate.rgba[3] = 255;	
 
 		if (p->roll) {
 			VectorMA (point, -2*height, ru, point);	
@@ -823,10 +823,10 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 		VectorCopy (point, verts[3].xyz);	
 		verts[3].st[0] = 1;	
 		verts[3].st[1] = 0;	
-		verts[3].modulate[0] = 255;	
-		verts[3].modulate[1] = 255;	
-		verts[3].modulate[2] = 255;	
-		verts[3].modulate[3] = 255;	
+		verts[3].modulate.rgba[0] = 255;	
+		verts[3].modulate.rgba[1] = 255;	
+		verts[3].modulate.rgba[2] = 255;	
+		verts[3].modulate.rgba[3] = 255;	
 	}
 	// done.
 	
@@ -1321,9 +1321,8 @@ void CG_AddParticleShrapnel (localEntity_t *le)
 
 int CG_NewParticleArea (int num)
 {
-	// const char *str;
-	char *str;
-	char *token;
+	const char *str;
+	const char *token;
 	int type;
 	vec3_t origin, origin2;
 	int		i;

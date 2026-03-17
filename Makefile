@@ -28,15 +28,26 @@ BUILD_DIR  ?= build
 BUILD_TYPE ?= Release
 MAP        ?= q3dm1
 
-# CPU count: macOS uses sysctl, Linux uses nproc
+# CPU count and architecture detection
 UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),arm64)
+  BINEXT := .aarch64
+else ifeq ($(UNAME_M),x86_64)
+  BINEXT := .x86_64
+else
+  BINEXT :=
+endif
 ifeq ($(UNAME_S),Darwin)
   JOBS        ?= $(shell sysctl -n hw.ncpu)
-  GAME_BIN    := $(BUILD_DIR)/Release/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)
+  # cmake puts app bundles at build/<name><arch>.app (no Release/ subdir)
+  BUILT_APP   := $(BUILD_DIR)/$(APP_NAME)$(BINEXT).app
+  BUILT_DED   := $(BUILD_DIR)/$(APP_NAME).ded$(BINEXT).app/Contents/MacOS/$(APP_NAME).ded$(BINEXT)
+  GAME_BIN    := $(BUILT_APP)/Contents/MacOS/$(APP_NAME)$(BINEXT)
   Q3DIR       ?= /Applications/$(APP_NAME)
 else
   JOBS        ?= $(shell nproc 2>/dev/null || echo 4)
-  GAME_BIN    := $(BUILD_DIR)/Release/$(APP_NAME)
+  GAME_BIN    := $(BUILD_DIR)/$(APP_NAME)$(BINEXT)
   Q3DIR       ?= $(HOME)/$(APP_NAME)
 endif
 
@@ -131,14 +142,14 @@ install: build pak
 	@echo "==> Installing to: $(Q3DIR)"
 ifeq ($(UNAME_S),Darwin)
 	@# Replace .app bundle cleanly (rsync --delete removes stale files from old bundle)
-	rsync -a --delete "$(BUILD_DIR)/Release/$(APP_NAME).app/" "$(Q3DIR)/$(APP_NAME).app/"
+	rsync -a --delete "$(BUILT_APP)/" "$(Q3DIR)/$(APP_NAME).app/"
 	@# Game modules live inside the bundle (apppath/baseq3/ — matches stock layout)
 	mkdir -p "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3"
 	cp "$(MODULE_DIR)/cgame.dylib"  "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
 	cp "$(MODULE_DIR)/qagame.dylib" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
 	cp "$(MODULE_DIR)/ui.dylib"     "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
-	@# Dedicated server binary alongside .app
-	cp "$(BUILD_DIR)/Release/$(APP_NAME)-ded" "$(Q3DIR)/"
+	@# Dedicated server binary alongside .app (if built)
+	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(Q3DIR)/$(APP_NAME).ded" || true
 else
 	mkdir -p "$(Q3BASEDIR)"
 	cp "$(MODULE_DIR)/cgame.so"  "$(Q3BASEDIR)/"

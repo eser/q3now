@@ -27,7 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_local.h"
 #include "../game/bg_promode.h" // CPM
 #ifdef MISSIONPACK
-#include "../../ui/menudef.h"
+#include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure
 
 typedef struct {
 	const char *order;
@@ -155,7 +155,7 @@ and whenever the server updates any serverinfo flagged cvars
 */
 void CG_ParseServerinfo( void ) {
 	const char	*info;
-	char	*mapname;
+	const char	*mapname;
 
 	info = CG_ConfigString( CS_SERVERINFO );
 	cgs.gametype = atoi( Info_ValueForKey( info, "g_gametype" ) );
