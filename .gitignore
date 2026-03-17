@@ -41,3 +41,7 @@ profile
 *.opensdf
 *.suo
 /.vs
+
+# q3now upstream rebase helpers (one-time use, not for commit)
+cherry-pick-q3now.sh
+q3now-cherry-pick-done.txt
