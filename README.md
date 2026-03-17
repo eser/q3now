@@ -1,3 +1,35 @@
+# q3now
+
+A Quake 3 Arena mod built on top of [ioquake3](https://ioquake3.org).
+
+## Mod Features
+
+* **Promode / CPMA physics** — `g_pro_physics 1` enables Challenge Pro Mode movement
+* **Instagib mode** — `g_instagib 1` for one-shot railgun kills, players spawn with railgun only
+* **Excessive mode** — over-the-top weapon damage and fire rates for chaotic fun
+* **King of the Hill (KOTH)** — custom game type: control the marked zone to score
+* **Last Man Standing (LMS)** — survival game type with limited lives
+* **Grappling hook** — bind `+button5` to fire the hook
+* **Wall jumps** — strafe into a wall to gain a vertical boost
+* **New armor system** — health/armor caps rebalanced; armor shards replaced with +5 health pickups
+* **Weapon rebalancing** — plasma, rocket, grenade, machinegun, shotgun all tuned
+* **Proximity launcher and BFG removed** — cleaner weapon roster
+* **Colored player names** — extended 17-color palette (A–P codes)
+* **Lightning gun discharge** — touch enemies to discharge the LG
+* **Nailgun replaced** by plasma rifle; chaingun removed
+
+## Building
+
+See ioquake3 build instructions below. Use `-DBUILD_GAME_QVMS=OFF` for faster iteration builds.
+
+## Playing
+
+```
+./ioq3.x86_64 +set fs_game baseq3 +map q3dm1
+```
+
+---
+
 ![Build](https://github.com/ioquake/ioq3/workflows/Build/badge.svg)
 
                    ,---------------------------------------.
