@@ -1,9 +1,9 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.12)
 
-PROJECT(quake3e)
+PROJECT(q3now)
 
-SET(CNAME "quake3e")
-SET(DNAME "quake3e.ded")
+SET(CNAME "q3now")
+SET(DNAME "q3now.ded")
 
 SET(RENDERER_PREFIX ${CNAME})
 SET(RENDERER_DEFAULT opengl) # valid options: opengl, vulkan, opengl2
@@ -19,7 +19,7 @@ SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
 
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
 # exclude platform-dependent QVM bytecode compilers
-list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alx].*.c")
+list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alxp].*.c")
 # add platform-dependent QVM bytecode compilers
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
 	IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64)
@@ -154,6 +154,8 @@ IF(UNIX)
 		set_source_files_properties(code/unix/quake3_flat.icns PROPERTIES
 			MACOSX_PACKAGE_LOCATION Resources)
 		SET(MACOSX_BUNDLE_ICON_FILE quake3_flat.icns)
+		SET(MACOSX_BUNDLE_GUI_IDENTIFIER "com.eser.q3now")
+		SET(MACOSX_BUNDLE_BUNDLE_NAME "q3now")
 	ENDIF()
 ELSEIF(WIN32)
 	SET(EXE_TYPE WIN32)
@@ -224,4 +226,11 @@ IF(WIN32)
 ELSE()
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} m ${CMAKE_DL_LIBS})
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} m ${CMAKE_DL_LIBS})
+ENDIF()
+
+# macOS: ARM64 JIT requires entitlements for MAP_JIT and executable memory
+IF(APPLE)
+	SET_TARGET_PROPERTIES(${CNAME}${BINEXT} PROPERTIES
+		XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/misc/macos/q3now.entitlements"
+	)
 ENDIF()
