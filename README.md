@@ -30,7 +30,7 @@ See ioquake3 build instructions below. Use `-DBUILD_GAME_QVMS=OFF` for faster it
 
 ---
 
-![Build](https://github.com/ioquake/ioq3/workflows/Build/badge.svg)
+![Build](https://github.com/eser/q3now/workflows/Build/badge.svg)
 
                    ,---------------------------------------.
                    |   _                     _       ____  |
