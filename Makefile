@@ -4,25 +4,26 @@
 # All cmake details live in cmake/ — this file is a thin workflow layer.
 #
 # TARGETS
-#   make              configure (if needed) + build Release modules
-#   make dev          fast incremental build — skips QVM compilation
+#   make              configure (if needed) + build Release modules + QVMs
 #   make clean        remove build directory
 #   make rebuild      clean + build
-#   make pak          package modfiles/ into build/baseq3/pak0.pk3
-#   make install      copy game modules + pak into Q3DIR/baseq3/
-#   make run          launch q3now locally (requires install first)
-#   make ci           run the same build the CI workflow uses
+#   make pak          package modfiles/ + QVMs into build/baseq3/zz-q3now.pk3
+#   make check        verify QVMs, dylibs, and pk3 contents
+#   make install      build + pak + deploy to Q3DIR
+#   make run          build + install + launch q3now
+#   make run-dev      build + install + launch with native modules (vm_*=0, for debugging)
 #   make help         show this message
 #
 # VARIABLES (override on command line or env)
 #   BUILD_DIR    cmake output directory        (default: build)
 #   BUILD_TYPE   Release | Debug               (default: Release)
-#   Q3DIR        install destination           (default: see below)
+#   Q3DIR        install destination           (default: /Applications/q3now on macOS)
 #   JOBS         parallel job count            (default: CPU count)
 #   MAP          map to load with `make run`   (default: q3dm1)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
+APP_NAME   ?= q3now
 BUILD_DIR  ?= build
 BUILD_TYPE ?= Release
 MAP        ?= q3dm1
@@ -30,19 +31,19 @@ MAP        ?= q3dm1
 # CPU count: macOS uses sysctl, Linux uses nproc
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-  JOBS   ?= $(shell sysctl -n hw.ncpu)
-  # macOS: prefer the .app bundle executable; fall back to loose binary
-  GAME_BIN    := $(BUILD_DIR)/Release/ioquake3.app/Contents/MacOS/ioquake3
-  MODULE_DIR  := $(BUILD_DIR)/Release/baseq3
-  Q3DIR       ?= $(HOME)/Library/Application Support/Quake3
+  JOBS        ?= $(shell sysctl -n hw.ncpu)
+  GAME_BIN    := $(BUILD_DIR)/Release/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)
+  Q3DIR       ?= /Applications/$(APP_NAME)
 else
-  JOBS   ?= $(shell nproc 2>/dev/null || echo 4)
-  GAME_BIN    := $(BUILD_DIR)/Release/ioquake3
-  MODULE_DIR  := $(BUILD_DIR)/Release/baseq3
-  Q3DIR       ?= $(HOME)/.q3a
+  JOBS        ?= $(shell nproc 2>/dev/null || echo 4)
+  GAME_BIN    := $(BUILD_DIR)/Release/$(APP_NAME)
+  Q3DIR       ?= $(HOME)/$(APP_NAME)
 endif
 
-Q3BASEDIR := $(Q3DIR)/baseq3
+# cmake always places game modules at build/Release/baseq3/ regardless of platform
+MODULE_DIR  := $(BUILD_DIR)/Release/baseq3
+
+Q3BASEDIR   := $(Q3DIR)/baseq3
 
 # Use Ninja if available — much faster incremental builds
 ifneq ($(shell which ninja 2>/dev/null),)
@@ -58,7 +59,7 @@ CMAKE_BUILD := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
-.PHONY: all configure build dev clean rebuild pak install run ci help
+.PHONY: all configure build clean rebuild pak check install run run-dev help
 
 all: build
 
@@ -70,71 +71,107 @@ $(BUILD_DIR)/CMakeCache.txt: CMakeLists.txt
 
 configure: $(BUILD_DIR)/CMakeCache.txt
 
-# ── Build (Release, no QVMs — standard developer workflow) ───────────────────
+# ── Build ─────────────────────────────────────────────────────────────────────
+# Builds native .so/.dylib modules AND QVM bytecode.
+# QVM toolchain (lcc/q3asm) is compiled from source the first time (~30s),
+# then cached. Subsequent builds only recompile changed files.
 
 build: $(BUILD_DIR)/CMakeCache.txt
 	$(CMAKE_BUILD)
 
-# Fast iteration: skip QVM compilation (no lcc/q3asm toolchain needed).
-# Uses a separate build dir so it doesn't clobber a Release build.
-dev:
-	cmake -S . -B $(BUILD_DIR)-dev $(GENERATOR) \
-	  -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
-	  -DBUILD_GAME_QVMS=OFF
-	cmake --build $(BUILD_DIR)-dev --parallel $(JOBS)
-
 # ── Clean / Rebuild ───────────────────────────────────────────────────────────
 
 clean:
-	rm -rf $(BUILD_DIR) $(BUILD_DIR)-dev
+	rm -rf $(BUILD_DIR)
 
 rebuild: clean build
 
 # ── Pak packaging ─────────────────────────────────────────────────────────────
-# Creates build/baseq3/pak0.pk3 from modfiles/ content.
-# For distribution with QVMs: run `make build` with BUILD_GAME_QVMS=ON first,
-# then copy build/Release/baseq3/vm/ into modfiles/vm/ before running make pak.
+# Creates build/baseq3/zz-q3now.pk3 from modfiles/ + QVMs.
+# zz- prefix ensures this pak loads last (highest override priority).
+# QVMs in zz-q3now.pk3 override the stock 1999 QVMs in pak0.pk3.
 
 PAK_STAGING := $(BUILD_DIR)/pak-staging
-PAK_OUT     := $(BUILD_DIR)/baseq3/pak0.pk3
+PAK_OUT     := $(BUILD_DIR)/baseq3/zz-$(APP_NAME).pk3
 
 pak: build
 	@echo "==> Staging pak contents..."
 	rm -rf $(PAK_STAGING)
 	mkdir -p $(PAK_STAGING) $(BUILD_DIR)/baseq3
 	cp -R modfiles/. $(PAK_STAGING)/
+	@echo "==> Copying QVMs into pak..."
+	cp -R $(MODULE_DIR)/vm $(PAK_STAGING)/
+	@echo "==> Stamping version..."
+	echo "$(APP_NAME) $$(git describe --always --dirty) ($$(date +%Y-%m-%d))" > $(PAK_STAGING)/description.txt
 	@echo "==> Creating $(PAK_OUT)..."
 	cd $(PAK_STAGING) && zip -r9 "$(CURDIR)/$(PAK_OUT)" . -x "**/.DS_Store" -x ".DS_Store"
-	@echo "==> pak0.pk3 ready: $(PAK_OUT)"
+	@echo "==> $(PAK_OUT) ready"
+
+# ── Check ─────────────────────────────────────────────────────────────────────
+# Verifies all outputs are present and pk3 contains QVMs.
+# Guards against the silent failure mode: stock QVMs loading instead of custom.
+
+check: pak
+	@echo "==> Verifying build..."
+	@ls $(MODULE_DIR)/vm/cgame.qvm  > /dev/null && echo "  cgame.qvm:   OK"
+	@ls $(MODULE_DIR)/vm/qagame.qvm > /dev/null && echo "  qagame.qvm:  OK"
+	@ls $(MODULE_DIR)/vm/ui.qvm     > /dev/null && echo "  ui.qvm:      OK"
+	@ls $(MODULE_DIR)/cgame.*       > /dev/null && echo "  cgame.dylib: OK"
+	@ls $(MODULE_DIR)/qagame.*      > /dev/null && echo "  qagame.dylib: OK"
+	@ls $(MODULE_DIR)/ui.*          > /dev/null && echo "  ui.dylib:    OK"
+	@unzip -l $(PAK_OUT) | grep -q "vm/cgame.qvm" && echo "  pk3 QVMs:    OK"
+	@echo "==> All checks passed."
 
 # ── Install ───────────────────────────────────────────────────────────────────
-# Copies game modules (cgame/qagame/ui) and pak0.pk3 into Q3DIR/baseq3/.
+# Deploys to Q3DIR (default: /Applications/q3now on macOS).
+# Uses rsync --delete to cleanly replace the .app bundle (no stale files).
 # Override Q3DIR to target a different install location.
 
 install: build pak
-	@echo "==> Installing to: $(Q3BASEDIR)"
+	@echo "==> Installing to: $(Q3DIR)"
+ifeq ($(UNAME_S),Darwin)
+	@# Replace .app bundle cleanly (rsync --delete removes stale files from old bundle)
+	rsync -a --delete "$(BUILD_DIR)/Release/$(APP_NAME).app/" "$(Q3DIR)/$(APP_NAME).app/"
+	@# Game modules live inside the bundle (apppath/baseq3/ — matches stock layout)
+	mkdir -p "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3"
+	cp "$(MODULE_DIR)/cgame.dylib"  "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
+	cp "$(MODULE_DIR)/qagame.dylib" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
+	cp "$(MODULE_DIR)/ui.dylib"     "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
+	@# Dedicated server binary alongside .app
+	cp "$(BUILD_DIR)/Release/$(APP_NAME)-ded" "$(Q3DIR)/"
+else
 	mkdir -p "$(Q3BASEDIR)"
-	cp $(MODULE_DIR)/cgame.*  "$(Q3BASEDIR)/"
-	cp $(MODULE_DIR)/qagame.* "$(Q3BASEDIR)/"
-	cp $(MODULE_DIR)/ui.*     "$(Q3BASEDIR)/"
-	cp $(PAK_OUT)             "$(Q3BASEDIR)/"
-	cp modfiles/description.txt "$(Q3BASEDIR)/"
+	cp "$(MODULE_DIR)/cgame.so"  "$(Q3BASEDIR)/"
+	cp "$(MODULE_DIR)/qagame.so" "$(Q3BASEDIR)/"
+	cp "$(MODULE_DIR)/ui.so"     "$(Q3BASEDIR)/"
+endif
+	@# Mod pak into basepath/baseq3/ — QVMs here override stock paks
+	mkdir -p "$(Q3BASEDIR)"
+	cp "$(PAK_OUT)" "$(Q3BASEDIR)/"
 	@echo "==> Done. Launch with: make run"
 
 # ── Run ───────────────────────────────────────────────────────────────────────
-# Launches the locally-built ioquake3 with baseq3 and drops into MAP.
-# Requires `make install` to have been run first.
+# Builds, installs, and launches q3now. QVMs loaded (vm_*=2, default).
 
-run:
-	"$(GAME_BIN)" +set fs_game baseq3 +map $(MAP)
+run: install
+ifeq ($(UNAME_S),Darwin)
+	open "$(Q3DIR)/$(APP_NAME).app" --args +map $(MAP)
+else
+	"$(Q3DIR)/$(APP_NAME)" +map $(MAP)
+endif
 
-# ── CI (mirrors .github/workflows/build.yml) ─────────────────────────────────
-# Runs the same configure+build the CI workflow uses, locally.
-# Useful for catching CI failures before pushing.
+# ── Run (dev / debug) ─────────────────────────────────────────────────────────
+# Builds, installs, and launches with native modules (vm_*=0).
+# Native modules give real crash stack traces — use this for debugging.
 
-ci:
-	cmake -S . -B $(BUILD_DIR)-ci $(GENERATOR) -DCMAKE_BUILD_TYPE=Release
-	cmake --build $(BUILD_DIR)-ci --parallel $(JOBS)
+run-dev: install
+ifeq ($(UNAME_S),Darwin)
+	open "$(Q3DIR)/$(APP_NAME).app" --args \
+	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +map $(MAP)
+else
+	"$(Q3DIR)/$(APP_NAME)" \
+	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +map $(MAP)
+endif
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 
@@ -142,14 +179,14 @@ help:
 	@echo ""
 	@echo "  q3now build targets"
 	@echo "  ───────────────────────────────────────────────────────────"
-	@echo "  make              configure + build Release modules"
-	@echo "  make dev          fast build without QVMs"
-	@echo "  make clean        remove build/ and build-dev/"
+	@echo "  make              configure + build (native modules + QVMs)"
+	@echo "  make clean        remove build/"
 	@echo "  make rebuild      clean + build"
-	@echo "  make pak          package modfiles/ → build/baseq3/pak0.pk3"
-	@echo "  make install      build + pak + copy to Q3DIR/baseq3/"
-	@echo "  make run          launch q3now (needs install first)"
-	@echo "  make ci           mirror the CI workflow build locally"
+	@echo "  make pak          package modfiles/ + QVMs → zz-q3now.pk3"
+	@echo "  make check        verify QVMs, dylibs, pk3 contents"
+	@echo "  make install      build + pak + deploy to Q3DIR"
+	@echo "  make run          build + install + launch (QVM mode)"
+	@echo "  make run-dev      build + install + launch (native debug mode)"
 	@echo "  make help         show this message"
 	@echo ""
 	@echo "  Variables:"
