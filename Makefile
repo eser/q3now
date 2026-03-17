@@ -32,11 +32,14 @@ MAP        ?= q3dm1
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 ifeq ($(UNAME_M),arm64)
-  BINEXT := .aarch64
+  BINEXT  := .aarch64
+  RENDEXT := _aarch64
 else ifeq ($(UNAME_M),x86_64)
-  BINEXT := .x86_64
+  BINEXT  := .x86_64
+  RENDEXT := _x86_64
 else
-  BINEXT :=
+  BINEXT  :=
+  RENDEXT :=
 endif
 ifeq ($(UNAME_S),Darwin)
   JOBS        ?= $(shell sysctl -n hw.ncpu)
@@ -143,6 +146,20 @@ install: build pak
 ifeq ($(UNAME_S),Darwin)
 	@# Replace .app bundle cleanly (rsync --delete removes stale files from old bundle)
 	rsync -a --delete "$(BUILT_APP)/" "$(Q3DIR)/$(APP_NAME).app/"
+	@# Renderer dylibs live inside Contents/MacOS/ — self-contained bundle.
+	@# cl_main.c tries Sys_DefaultAppPath() (Contents/MacOS/) before Sys_DefaultBasePath().
+	cp "$(BUILD_DIR)/$(APP_NAME)_opengl$(RENDEXT).dylib" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"
+	@test -f "$(BUILD_DIR)/$(APP_NAME)_vulkan$(RENDEXT).dylib" && \
+	  cp "$(BUILD_DIR)/$(APP_NAME)_vulkan$(RENDEXT).dylib" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/" || true
+	@# MoltenVK: copy into Contents/MacOS/ — VKimp_Init calls SDL_Vulkan_LoadLibrary(bundledPath)
+	@MOLTEN_VK=$$(find /opt/homebrew/lib /usr/local/lib 2>/dev/null -name "libMoltenVK.dylib" -maxdepth 1 | head -1); \
+	  if [ -n "$$MOLTEN_VK" ]; then \
+	    echo "  MoltenVK: $$MOLTEN_VK → Contents/MacOS/"; \
+	    cp "$$MOLTEN_VK" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"; \
+	  else \
+	    echo "  WARNING: libMoltenVK.dylib not found — Vulkan renderer will not work"; \
+	    echo "  Run: brew install molten-vk"; \
+	  fi
 	@# Game modules live inside the bundle (apppath/baseq3/ — matches stock layout)
 	mkdir -p "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3"
 	cp "$(MODULE_DIR)/cgame.dylib"  "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
