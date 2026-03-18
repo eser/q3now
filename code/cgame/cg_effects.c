@@ -449,6 +449,60 @@ void CG_ScorePlum( int client, vec3_t org, int score ) {
 	AnglesToAxis( angles, re->axis );
 }
 
+#if FEAT_DAMAGE_PLUMS
+/*
+==================
+CG_DamagePlum
+Shows a floating damage number at the target's position, visible only
+to the attacker who dealt the damage. (2A)
+==================
+*/
+void CG_DamagePlum( int client, vec3_t org, int damage ) {
+	localEntity_t	*le;
+	refEntity_t		*re;
+	vec3_t			angles;
+	static vec3_t	lastPos;
+
+	// only show to the client who dealt the damage, and only when enabled
+	if ( client != cg.predictedPlayerState.clientNum || !cg_damagePlum.integer ) {
+		return;
+	}
+
+	le = CG_AllocLocalEntity();
+	le->leFlags = 0;
+	le->leType = LE_DAMAGEPLUM;
+	le->startTime = cg.time;
+	le->endTime = cg.time + 1000;
+	le->lifeRate = 1.0f / ( le->endTime - le->startTime );
+
+	le->color[0] = 1.0f;	// red tint for damage
+	le->color[1] = 0.3f;
+	le->color[2] = 0.3f;
+	le->color[3] = 1.0f;
+	le->radius = damage;
+
+	VectorCopy( org, le->pos.trBase );
+	if ( org[2] >= lastPos[2] - 20 && org[2] <= lastPos[2] + 20 ) {
+		le->pos.trBase[2] -= 20;
+	}
+	VectorCopy( org, lastPos );
+
+	// slight random drift
+	le->pos.trType = TR_LINEAR;
+	le->pos.trDelta[0] = 2.0f * crandom();
+	le->pos.trDelta[1] = 2.0f * crandom();
+	le->pos.trDelta[2] = 12.0f;
+	le->pos.trTime = cg.time;
+
+	re = &le->refEntity;
+	re->reType = RT_SPRITE;
+	re->radius = 11;
+
+	VectorClear( angles );
+	AnglesToAxis( angles, re->axis );
+}
+#endif
+
 
 /*
 ====================
@@ -738,4 +792,3 @@ void CG_BigExplode( vec3_t playerOrigin ) {
 	velocity[2] = EXP_JUMP + crandom()*EXP_VELOCITY;
 	CG_LaunchExplode( origin, velocity, cgs.media.smoke2 );
 }
-

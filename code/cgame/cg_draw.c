@@ -748,6 +748,41 @@ static float CG_DrawAttacker( float y ) {
 
 /*
 ==================
+CG_DrawSpeed
+Shows current horizontal (XY) speed in units/second. (2C)
+cg_drawSpeed 1 = "Xu/s" label, 2 = number only (centered).
+==================
+*/
+static float CG_DrawSpeed( float y ) {
+	const char	*s;
+	int			w, speed;
+	vec_t		*vel;
+
+	if ( cg.scoreBoardShowing ) {
+		return y;
+	}
+
+	vel = cg.snap->ps.velocity;
+	speed = (int)sqrt( vel[0] * vel[0] + vel[1] * vel[1] );	// 2D, ignore Z
+
+	if ( cg_drawSpeed.integer == 2 ) {
+		// center of screen (like RatArena mode 2)
+		s = va( "%i", speed );
+		w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
+		CG_DrawBigString( 320 - w / 2, 300, s, 1.0f );
+		return y;
+	} else {
+		// bottom-right, above mini scoreboard
+		y -= SMALLCHAR_HEIGHT + 4;
+		s = va( "%iu/s", speed );
+		w = CG_DrawStrlen( s ) * SMALLCHAR_WIDTH;
+		CG_DrawSmallString( 640 - w - 4, (int)y, s, 1.0f );
+		return y;
+	}
+}
+
+/*
+==================
 CG_DrawSnapshot
 ==================
 */
@@ -1331,6 +1366,12 @@ static void CG_DrawLowerRight( void ) {
 	}
 
 	y = CG_DrawScores( y );
+
+	// speed display above mini scoreboard (2C)
+	if ( cg_drawSpeed.integer && cg.snap ) {
+		y = CG_DrawSpeed( y );
+	}
+
 	CG_DrawPowerups( y );
 
 	CG_PopScreenPlacement();
@@ -2650,6 +2691,3 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 	// draw status bar and other floating elements
  	CG_Draw2D(stereoView);
 }
-
-
-

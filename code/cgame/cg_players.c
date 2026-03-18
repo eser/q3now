@@ -2199,6 +2199,10 @@ void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState
 			ent->customShader = cgs.media.battleSuitShader;
 			trap_R_AddRefEntityToScene( ent );
 		}
+		if ( state->eFlags & EF_SPAWN_PROTECT ) {
+			ent->customShader = cgs.media.spawnProtectShader;
+			trap_R_AddRefEntityToScene( ent );
+		}
 	}
 }
 
@@ -2616,4 +2620,3 @@ void CG_ResetPlayerEntity( centity_t *cent ) {
 		CG_Printf("%i ResetPlayerEntity yaw=%f\n", cent->currentState.number, cent->pe.torso.yawAngle );
 	}
 }
-

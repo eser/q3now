@@ -48,6 +48,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	GAME_VERSION		"q3now-1"
 
+// features - mature
+#define FEAT_CONSECUTIVE_KILLS            1
+#define FEAT_DAMAGE_PLUMS                 1
+#define FEAT_SPAWN_PROTECTION             1
+#define FEAT_TELEPORTING_MISSILES         1
+
+// features - testing
+#define FEAT_ADDITIONAL_ROCKET_EXPLOSION  0
+#define FEAT_RAILGUN_KNOCKBACK            0
+#define FEAT_UNLAGGED                     0
+
 #define	DEFAULT_GRAVITY		800
 #define	DEFAULT_MOVESPEED	320
 #define	JUMP_VELOCITY		270
@@ -317,6 +328,7 @@ typedef enum {
 #define EF_AWARD_DENIED		0x00040000		// denied
 #define EF_TEAMVOTED		0x00080000		// already cast a team vote
 #define	EF_GRAPPLE			0x00100000
+#define EF_SPAWN_PROTECT	0x00200000		// spawn protection white shell (2B)
 
 
 #define	EF_BACKPACK			0x00000001		// CPM: Backpack indicator bit
@@ -488,6 +500,9 @@ typedef enum {
 
 	EV_GIB_PLAYER,			// gib a previously living player
 	EV_SCOREPLUM,			// score plum
+#if FEAT_DAMAGE_PLUMS
+	EV_DAMAGEPLUM,			// floating damage number (attacker-only)
+#endif
 
 //#ifdef MISSIONPACK
 	EV_KAMIKAZE,			// kamikaze explodes

@@ -473,6 +473,10 @@ void weapon_railgun_fire (gentity_t *ent) {
 #endif
 		}
 		if ( trace.contents & CONTENTS_SOLID ) {
+#if FEAT_RAILGUN_KNOCKBACK
+			// railgun knockback (2G): apply knockback to shooter on solid impact
+			G_RailKnockback( trace.endpos, ent );
+#endif
 			break;		// we hit something solid enough to stop the beam
 		}
 		// unlink this entity, so the next trace will go past it
@@ -480,6 +484,13 @@ void weapon_railgun_fire (gentity_t *ent) {
 		unlinkedEntities[unlinked] = traceEnt;
 		unlinked++;
 	} while ( unlinked < MAX_RAIL_HITS );
+
+#if FEAT_RAILGUN_KNOCKBACK
+	// railgun knockback (2G): also trigger when beam reaches world (no solid hit, ENTITYNUM_WORLD)
+	if ( trace.entityNum >= ENTITYNUM_MAX_NORMAL ) {
+		G_RailKnockback( trace.endpos, ent );
+	}
+#endif
 
 	// link back in any entities we unlinked
 	for ( i = 0 ; i < unlinked ; i++ ) {

@@ -180,6 +180,10 @@ struct gentity_s {
 	float		random;
 
 	gitem_t		*item;			// for bonus items
+
+#if FEAT_TELEPORTING_MISSILES
+	int			missileTeleportCount;	// missile teleportation (2F)
+#endif
 };
 
 
@@ -331,6 +335,13 @@ struct gclient_s {
     int             topMarker;
     playerMarker_t  playerMarkers[MAX_PLAYER_MARKERS];
     playerMarker_t  backupMarker;
+
+#if FEAT_SPAWN_PROTECTION
+    qboolean        spawnprotected;     // spawn protection (2B)
+#endif
+#if FEAT_CONSECUTIVE_KILLS
+    int             consecutiveKills;   // kill sprees (2D)
+#endif
 };
 
 
@@ -512,6 +523,12 @@ int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t i
 void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath );
 void TossClientItems( gentity_t *self );
 void TossClientCubes( gentity_t *self );
+#if FEAT_DAMAGE_PLUMS
+void DamagePlum( gentity_t *attacker, gentity_t *target, int damage );
+#endif
+#if FEAT_RAILGUN_KNOCKBACK
+void G_RailKnockback( vec3_t origin, gentity_t *attacker );
+#endif
 
 // CPM: Radius Damage Fix
 qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, vec3_t viewpoint);
@@ -530,6 +547,9 @@ qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, floa
 // g_missile.c
 //
 void G_RunMissile( gentity_t *ent );
+#if FEAT_TELEPORTING_MISSILES
+void G_TeleportMissile( gentity_t *ent, trace_t *trace, gentity_t *portal );
+#endif
 
 gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t right, vec3_t up);
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir, int time, qboolean bounce);
@@ -749,8 +769,12 @@ extern  vmCvar_t	g_grapple;
 extern  vmCvar_t	g_spawnWeapons;
 extern  vmCvar_t	g_instagib;
 extern  vmCvar_t	g_excessive;
-extern  vmCvar_t	g_q3now;
+#if FEAT_UNLAGGED
 extern  vmCvar_t	g_unlagged;
+#endif
+#if FEAT_SPAWN_PROTECTION
+extern  vmCvar_t	g_spawnProtect;
+#endif
 
 
 void	trap_Print( const char *text );

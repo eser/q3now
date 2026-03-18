@@ -1202,6 +1202,16 @@ void ClientSpawn(gentity_t *ent) {
 
 	client->respawnTime = level.time;
 	client->inactivityTime = level.time + g_inactivity.integer * 1000;
+
+#if FEAT_SPAWN_PROTECTION
+	// spawn protection (2B)
+	if ( g_spawnProtect.integer > 0 ) {
+		client->spawnprotected = qtrue;
+		client->ps.eFlags |= EF_SPAWN_PROTECT;
+	} else {
+		client->spawnprotected = qfalse;
+	}
+#endif
 	client->latched_buttons = 0;
 
 	// set default animations
@@ -1356,5 +1366,3 @@ void ClientDisconnect( int clientNum ) {
 		BotAIShutdownClient( clientNum, qfalse );
 	}
 }
-
-

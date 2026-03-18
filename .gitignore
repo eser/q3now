@@ -22,3 +22,6 @@ Thumbs.db
 build/
 output/
 cmake-*
+
+# todos
+TODOS.md

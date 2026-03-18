@@ -197,9 +197,15 @@ void G_DoTimeShiftFor( gentity_t *ent ) {
 	if ( !ent->inuse || !ent->client || ( ent->r.svFlags & SVF_BOT ) ) {
 		return;
 	}
+
+#if FEAT_UNLAGGED
 	if ( !g_unlagged.integer ) {
 		return;
 	}
+#else
+	return;
+#endif
+
 	G_TimeShiftAllClients( ent->client->ps.commandTime, ent );
 }
 

@@ -8,5 +8,8 @@
 	<!-- Required for Quake3e's VM interpreter: writes to executable pages -->
 	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
 	<true/>
+	<!-- Required for loading ad-hoc signed game module dylibs (cgame, qagame, ui) via dlopen -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 </dict>
 </plist>

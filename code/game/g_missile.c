@@ -24,6 +24,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "bg_promode.h" // CPM
 
 #define	MISSILE_PRESTEP_TIME	50
+#if FEAT_TELEPORTING_MISSILES
+#define MISSILE_MAX_TELEPORTS   3
+#endif
 
 /*
 ================
@@ -264,6 +267,63 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 	trap_LinkEntity( ent );
 }
 
+#if FEAT_TELEPORTING_MISSILES
+/*
+================
+G_TeleportMissile
+Teleports a missile through a teleporter trigger to its destination.
+Rotates velocity to match the destination portal's orientation.
+================
+*/
+void G_TeleportMissile( gentity_t *ent, trace_t *trace, gentity_t *portal ) {
+	gentity_t *dest;
+	vec3_t    velocity;
+	vec3_t    portalInVec, portalInAngles, rotationAngles;
+	vec3_t    rotationMatrix[3];
+	vec3_t    tmp;
+	vec_t     len_norm, len_neg_norm;
+	int       hitTime;
+
+	dest = G_PickTarget( portal->target );
+	if ( !dest ) {
+		G_Printf( "G_TeleportMissile: couldn't find destination\n" );
+		return;
+	}
+
+	// evaluate velocity at impact time
+	hitTime = level.previousTime + (int)( ( level.time - level.previousTime ) * trace->fraction );
+	BG_EvaluateTrajectoryDelta( &ent->s.pos, hitTime, velocity );
+
+	// pick the portal normal direction that opposes velocity
+	VectorAdd( trace->plane.normal, velocity, tmp );
+	len_norm = VectorLengthSquared( tmp );
+	VectorNegate( trace->plane.normal, portalInVec );
+	VectorAdd( portalInVec, velocity, tmp );
+	len_neg_norm = VectorLengthSquared( tmp );
+
+	vectoangles( portalInVec, portalInAngles );
+	if ( len_norm > len_neg_norm ) {
+		VectorSubtract( dest->s.angles, portalInAngles, rotationAngles );
+	} else {
+		VectorSubtract( portalInAngles, dest->s.angles, rotationAngles );
+	}
+
+	// rotate velocity to destination orientation
+	AngleVectors( rotationAngles, rotationMatrix[0], rotationMatrix[1], rotationMatrix[2] );
+	VectorInverse( rotationMatrix[1] );
+	VectorRotate( velocity, (const vec3_t *)rotationMatrix, ent->s.pos.trDelta );
+	SnapVector( ent->s.pos.trDelta );
+
+	// flip teleport bit so clients play teleport effect
+	ent->s.eFlags ^= EF_TELEPORT_BIT;
+
+	// move to destination
+	VectorCopy( dest->s.origin, ent->r.currentOrigin );
+	VectorCopy( ent->r.currentOrigin, ent->s.pos.trBase );
+	ent->s.pos.trTime = level.time;
+}
+#endif
+
 /*
 ================
 G_RunMissile
@@ -288,6 +348,26 @@ void G_RunMissile( gentity_t *ent ) {
 	}
 	// trace a line from the previous position to the current position
 	trap_Trace( &tr, ent->r.currentOrigin, ent->r.mins, ent->r.maxs, origin, passent, ent->clipmask );
+
+#if FEAT_TELEPORTING_MISSILES
+	// missile teleportation (2F): check for teleporter triggers along path
+	if ( MISSILE_MAX_TELEPORTS > 0 && ent->classname && ( !strcmp( ent->classname, "rocket" ) || !strcmp( ent->classname, "plasma" ) ) ) {
+		trace_t trTrig;
+		trap_Trace( &trTrig, ent->r.currentOrigin, ent->r.mins, ent->r.maxs, origin, passent, ent->clipmask | CONTENTS_TRIGGER );
+		if ( trTrig.fraction < tr.fraction && trTrig.entityNum != ENTITYNUM_NONE ) {
+			gentity_t *trigEnt = &g_entities[trTrig.entityNum];
+			if ( trigEnt->s.eType == ET_TELEPORT_TRIGGER && trigEnt->target ) {
+				if ( ent->missileTeleportCount < MISSILE_MAX_TELEPORTS ) {
+					G_TeleportMissile( ent, &trTrig, trigEnt );
+					ent->missileTeleportCount++;
+					// update origin after teleport
+					BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
+					trap_Trace( &tr, ent->r.currentOrigin, ent->r.mins, ent->r.maxs, origin, passent, ent->clipmask );
+				}
+			}
+		}
+	}
+#endif
 
 	// get the direction
 	VectorSubtract(origin, ent->r.currentOrigin, dir);
