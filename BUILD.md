@@ -43,7 +43,7 @@ You may need to run the following commands to install packages (using fresh ubun
 
 * sudo apt install make gcc libcurl4-openssl-dev mesa-common-dev
 * sudo apt install libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev
-* sudo apt install libsdl2-dev
+* sudo apt install libsdl3-dev
 
 Build with: `make`
 
@@ -79,7 +79,7 @@ Build and install `quake3e-git`:
 
 Install the build dependencies:
 
-* apt install libsdl2-dev libxxf86dga-dev libcurl4-openssl-dev
+* apt install libsdl3-dev libxxf86dga-dev libcurl4-openssl-dev
 
 Build with: `make`
 
@@ -91,8 +91,7 @@ Copy the resulting binaries from created `build` directory or use command:
 
 ### macos
 
-* install the official SDL2 framework to /Library/Frameworks
-* `brew install molten-vk` or install Vulkan SDK to use MoltenVK library
+* `brew install sdl3 molten-vk` (SDL3 required; MoltenVK needed for Vulkan renderer)
 
 Build with: `make`
 
@@ -129,7 +128,7 @@ Several Makefile options are available for linux/mingw/macos builds:
 
 `BUILD_SERVER=1` - build dedicated server executable, enabled by default
 
-`USE_SDL=0`- use SDL2 backend for video, audio, input subsystems, enabled by default, enforced for macos
+`USE_SDL=0`- use SDL3 backend for video, audio, input subsystems, enabled by default, enforced for macos
 
 `USE_VULKAN=1` - build vulkan modular renderer, enabled by default
 

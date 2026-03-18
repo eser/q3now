@@ -1,13 +1,30 @@
-# Quake3e
+# q3now
 
-[![build](../../workflows/build/badge.svg)](../../actions?query=workflow%3Abuild) * <a href="https://discord.com/invite/X3Exs4C"><img src="https://img.shields.io/discord/314456230649135105?color=7289da&logo=discord&logoColor=white" alt="Discord server" /></a>
+[![build](../../workflows/build/badge.svg)](../../actions?query=workflow%3Abuild)
 
-This is a modern Quake III Arena engine aimed to be fast, secure and compatible with all existing Q3A mods.
-It is based on last non-SDL source dump of [ioquake3](https://github.com/ioquake/ioq3) with latest upstream fixes applied.
+A Quake 3 Arena mod.
 
-Go to [Releases](../../releases) section to download latest binaries for your platform or follow [Build Instructions](#build-instructions)
+## Mod Features
+
+* **Promode / CPMA physics** — `g_pro_physics 1` enables Challenge Pro Mode movement
+* **Instagib mode** — `g_instagib 1` for one-shot railgun kills, players spawn with railgun only
+* **Excessive mode** — over-the-top weapon damage and fire rates for chaotic fun
+* **King of the Hill (KOTH)** — custom game type: control the marked zone to score
+* **Last Man Standing (LMS)** — survival game type with limited lives
+* **Grappling hook** — bind `+button5` to fire the hook
+* **Wall jumps** — strafe into a wall to gain a vertical boost
+* **New armor system** — health/armor caps rebalanced; armor shards replaced with +5 health pickups
+* **Weapon rebalancing** — plasma, rocket, grenade, machinegun, shotgun all tuned
+* **Proximity launcher and BFG removed** — cleaner weapon roster
+* **Colored player names** — extended 17-color palette (A–P codes)
+* **Lightning gun discharge** — touch enemies to discharge the LG
+* **Nailgun replaced** by plasma rifle; chaingun removed
 
 *This repository does not contain any game content so in order to play you must copy the resulting binaries into your existing Quake III Arena installation*
+
+## Improved Quake III Arena engine
+
+Based on [Quake3e](https://github.com/ec-/Quake3e).
 
 **Key features**:
 
@@ -21,7 +38,9 @@ Go to [Releases](../../releases) section to download latest binaries for your pl
 * improved server-side DoS protection, much reduced memory usage
 * raised filesystem limits (up to 20,000 maps can be handled in a single directory)
 * reworked Zone memory allocator, no more out-of-memory errors
-* non-intrusive support for SDL2 backend (video, audio, input), selectable at compile time
+* SDL3 backend (video, audio, input) with gamepad/controller support and Wayland preference on Linux
+* audio device selection via `\s_sdlDevice` cvar (lists available playback devices at startup)
+* SDL version printed at engine startup for diagnostics
 * tons of bug fixes and other improvements
 
 ## Vulkan renderer
@@ -67,10 +86,6 @@ Based on classic OpenGL renderers from [idq3](https://github.com/id-Software/Qua
 * bloom reflection post-processing effect
 
 Performance is usually greater or equal to other opengl1 renderers
-
-## OpenGL2 renderer
-
-Original ioquake3 renderer, performance is very poor on non-nvidia systems, unmaintained
 
 ## [Build Instructions](BUILD.md)
 
