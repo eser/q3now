@@ -448,6 +448,18 @@ ConsoleCommand
 
 =================
 */
+static void Svcmd_Q3nowEngine_f( void ) {
+    char buf[256];
+    trap_Cvar_VariableStringBuffer( "version", buf, sizeof(buf) );
+    G_Printf( "Engine:      %s\n", buf );
+    trap_Cvar_VariableStringBuffer( "cl_renderer", buf, sizeof(buf) );
+    G_Printf( "Renderer:    %s\n", buf );
+    trap_Cvar_VariableStringBuffer( "vm_rtChecks", buf, sizeof(buf) );
+    G_Printf( "vm_rtChecks: %s\n", buf );
+    trap_Cvar_VariableStringBuffer( "com_maxfps", buf, sizeof(buf) );
+    G_Printf( "com_maxfps:  %s\n", buf );
+}
+
 qboolean	ConsoleCommand( void ) {
 	char	cmd[MAX_TOKEN_CHARS];
 
@@ -465,6 +477,11 @@ qboolean	ConsoleCommand( void ) {
 
 	if (Q_stricmp (cmd, "game_memory") == 0) {
 		Svcmd_GameMem_f();
+		return qtrue;
+	}
+
+	if ( Q_stricmp (cmd, "q3now_engine") == 0 ) {
+		Svcmd_Q3nowEngine_f();
 		return qtrue;
 	}
 

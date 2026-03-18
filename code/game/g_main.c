@@ -90,10 +90,13 @@ vmCvar_t	g_enableBreath;
 vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
 vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 
+#define Q3NOW_VERSION "1.0"
+
 vmCvar_t	g_grapple;
 vmCvar_t	g_spawnWeapons;
 vmCvar_t	g_instagib;
 vmCvar_t	g_excessive;
+vmCvar_t	g_q3now;
 vmCvar_t	g_singlePlayer;
 
 
@@ -173,6 +176,7 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_spawnWeapons, "g_spawnWeapons", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
     { &g_instagib, "g_instagib", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
 	{ &g_excessive, "g_excessive", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+	{ &g_q3now, "g_q3now", Q3NOW_VERSION, CVAR_SERVERINFO | CVAR_ROM, 0, qfalse },
 
     { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse }
 };
@@ -440,6 +444,18 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
     // Set the config string
     trap_SetConfigstring(CS_PRO_MODE, va("%d%d", g_pro_mode.integer, g_pro_physics.integer));
     // !CPM
+
+    // q3now: print mod version and active feature flags
+    {
+        char features[256];
+        features[0] = '\0';
+        if ( g_pro_physics.integer ) Q_strcat( features, sizeof(features), " promode" );
+        if ( g_instagib.integer )    Q_strcat( features, sizeof(features), " instagib" );
+        if ( g_excessive.integer )   Q_strcat( features, sizeof(features), " excessive" );
+        if ( g_grapple.integer )     Q_strcat( features, sizeof(features), " grapple" );
+        G_Printf( "q3now %s | always-on: walljump koth lms | active:%s\n",
+                  Q3NOW_VERSION, features[0] ? features : " (none)" );
+    }
 
 	// set some level globals
 	memset( &level, 0, sizeof( level ) );

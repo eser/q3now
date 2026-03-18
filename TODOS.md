@@ -25,23 +25,7 @@ Remaining work after the Quake3e engine swap.
 
 ## P2 — Polish
 
-- [ ] **`g_q3now` cvar** — add a cvar that prints mod version + active features to console on map start (e.g., `q3now v2.0 | instagib walljump excessive promode grapple lms koth ghost`). Closes the silent-failure gap where mod loads but features are inactive.
-
-- [ ] **`\q3now_engine` command** — add a game-side console command using `trap_Cvar_*` syscalls to print engine capabilities (renderer backend, JIT arch, `vm_rtChecks` value). Zero engine changes — uses only existing game API.
-
-- [ ] **`q3now.cfg`** — ship a `q3now.cfg` inside `zz-q3now.pk3` with competitive defaults:
-  ```
-  seta com_maxfps "240"
-  seta cl_autoNudge "1"
-  seta r_backend "vulkan"
-  seta cg_drawFPS "1"
-  seta rate "25000"
-  ```
-  This sets Vulkan as default renderer without any engine changes.
-
-- [ ] **`make bench`** — timedemo benchmark target: launches `q3now` with `+timedemo 1 +demo four` and prints avg FPS. Check that `demos/four.dm_68` exists before launching; print a clear error if not.
-
-- [ ] **`make diff-api`** — diff Quake3e's `g_public.h`, `cg_public.h`, `ui_public.h` API headers against q3now's modified versions, highlighting any new syscalls or changed enums. Essential for safe upstream sync.
+*(All P2 items completed — see Completed section below)*
 
 ---
 
@@ -71,3 +55,8 @@ Remaining work after the Quake3e engine swap.
 - [x] `tests/smoke.sh` headless smoke test (graceful skip without assets)
 - [x] Ded server renamed: `q3now.ded` → `q3now-ded`
 - [x] SDL2 → SDL3 migration: audio stream API, event restructuring, gamepad enabled, Wayland hint, SDL3 dylib bundling in `.app`
+- [x] `g_q3now` cvar — mod version (1.0) + active feature print in `G_InitGame()` on every map start
+- [x] `q3now_engine` server console command — prints engine version, renderer, `vm_rtChecks`, `com_maxfps`
+- [x] `q3now.cfg` in `modfiles/` — competitive defaults (`com_maxfps 240`, `cl_autoNudge 1`, `cg_drawFPS 1`, `rate 25000`)
+- [x] `make bench` — timedemo target with demo existence check and `DEMO=` variable
+- [x] `make diff-api` — diffs `g_public.h`, `cg_public.h`, `ui_public.h` vs upstream Quake3e fork point
