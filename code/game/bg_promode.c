@@ -55,7 +55,7 @@ float	cpm_lavadamage = 30;
 float	cpm_slimedamage = 10;
 float	cpm_lavafrequency = 700;
 
-void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
+void CPM_UpdateSettings(int gametype)
 {
 	// num = 0: normal quake 3
 	// num = 1: pro mode
@@ -114,7 +114,7 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
 	cpm_slimedamage = 10;
 	cpm_lavafrequency = 700;
 
-    if (pro_physics)
+    if (1) // pro_physics
     {
         cpm_pm_jump_z = 100; // enable double-jump
         pm_walljumps = 1;
@@ -128,7 +128,7 @@ void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics)
         pm_friction = 8;
     }
 
-	if (pro_mode)
+	if (0) // pro_mode
 	{
 		// Weapon switching
 		cpm_weapondrop = 0;

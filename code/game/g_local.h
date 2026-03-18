@@ -730,8 +730,6 @@ extern	vmCvar_t	g_enableDust;
 extern	vmCvar_t	g_enableBreath;
 extern	vmCvar_t	g_singlePlayer;
 extern	vmCvar_t	g_localTeamPref;
-extern	vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
-extern	vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 extern  vmCvar_t	g_grapple;
 extern  vmCvar_t	g_spawnWeapons;
 extern  vmCvar_t	g_instagib;

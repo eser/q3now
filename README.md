@@ -6,7 +6,7 @@ A Quake 3 Arena mod.
 
 ## Mod Features
 
-* **Promode / CPMA physics** — `g_pro_physics 1` enables Challenge Pro Mode movement
+* **Promode / CPMA physics** — Always enabled Challenge Pro Mode movement
 * **Instagib mode** — `g_instagib 1` for one-shot railgun kills, players spawn with railgun only
 * **Excessive mode** — over-the-top weapon damage and fire rates for chaotic fun
 * **King of the Hill (KOTH)** — custom game type: control the marked zone to score
@@ -86,6 +86,25 @@ Based on classic OpenGL renderers from [idq3](https://github.com/id-Software/Qua
 * bloom reflection post-processing effect
 
 Performance is usually greater or equal to other opengl1 renderers
+
+## Build & Release
+
+See [BUILD.md](BUILD.md) for full setup instructions. Key targets:
+
+| Command | What it does |
+|---|---|
+| `make` | Configure + build (native modules + QVMs) |
+| `make check` | Verify QVMs, dylibs, pk3, codesign, JIT entitlement (9 checks) |
+| `make install` | Deploy to `/Applications/q3now/` with ad-hoc code signing |
+| `make run MAP=q3dm1` | Build + install + launch |
+| `make run-dev MAP=q3dm1` | Launch with native modules for crash debugging |
+| `make dmg` | Package signed `q3now-<version>-<arch>.dmg` for distribution |
+| `make release` | Full pipeline: check + dmg + summary |
+| `make bench DEMO=four` | Timedemo benchmark |
+
+**Code signing:** `make install` applies ad-hoc codesigning with `com.apple.security.cs.allow-jit` on macOS, enabling the ARM64 JIT interpreter at full speed.
+
+**In-game diagnostics:** type `\q3now_engine` in the server console to print engine version, active renderer, `vm_rtChecks`, and `com_maxfps`.
 
 ## [Build Instructions](BUILD.md)
 

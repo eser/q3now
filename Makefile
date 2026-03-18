@@ -71,9 +71,15 @@ CMAKE_CONFIGURE := cmake -S . -B $(BUILD_DIR) $(GENERATOR) \
 
 CMAKE_BUILD := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
+# DMG packaging (macOS only)
+VERSION     := $(shell git describe --always --dirty)
+DMG_NAME    := $(APP_NAME)-$(VERSION)-$(UNAME_M)
+DMG_STAGING := $(BUILD_DIR)/dmg-staging
+DMG_OUT     := $(BUILD_DIR)/$(DMG_NAME).dmg
+
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
-.PHONY: all configure build clean rebuild pak check install run run-dev smoke bench diff-api help
+.PHONY: all configure build clean rebuild pak check install run run-dev smoke bench diff-api dmg release help
 
 all: build
 
@@ -134,6 +140,10 @@ check: pak
 	@ls $(MODULE_DIR)/qagame.*      > /dev/null && echo "  qagame.dylib: OK"
 	@ls $(MODULE_DIR)/ui.*          > /dev/null && echo "  ui.dylib:    OK"
 	@unzip -l $(PAK_OUT) | grep -q "vm/cgame.qvm" && echo "  pk3 QVMs:    OK"
+ifeq ($(UNAME_S),Darwin)
+	@codesign --verify "$(Q3DIR)/$(APP_NAME).app" 2>/dev/null && echo "  codesign:    OK" || echo "  codesign:    MISSING (run make install)"
+	@codesign -d --entitlements - "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)$(BINEXT)" 2>/dev/null | grep -q "allow-jit" && echo "  JIT entitlement: OK" || echo "  JIT entitlement: MISSING"
+endif
 	@echo "==> All checks passed."
 
 # ── Install ───────────────────────────────────────────────────────────────────
@@ -183,6 +193,17 @@ ifeq ($(UNAME_S),Darwin)
 	cp "$(MODULE_DIR)/ui.dylib"     "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
 	@# Dedicated server binary alongside .app (if built)
 	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(Q3DIR)/$(APP_NAME)-ded" || true
+	@# Code sign: ad-hoc with JIT entitlements (required for ARM64 JIT on macOS)
+	@echo "==> Code signing..."
+	@for dylib in "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"*.dylib \
+	              "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"*.dylib; do \
+	  [ -f "$$dylib" ] && codesign --force --sign - "$$dylib" 2>/dev/null; \
+	done
+	codesign --force --sign - --entitlements misc/macos/q3now.entitlements \
+	  "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)$(BINEXT)"
+	codesign --force --sign - --entitlements misc/macos/q3now.entitlements "$(Q3DIR)/$(APP_NAME).app"
+	@test -f "$(Q3DIR)/$(APP_NAME)-ded" && \
+	  codesign --force --sign - --entitlements misc/macos/q3now.entitlements "$(Q3DIR)/$(APP_NAME)-ded" || true
 else
 	mkdir -p "$(Q3BASEDIR)"
 	cp "$(MODULE_DIR)/cgame.so"  "$(Q3BASEDIR)/"
@@ -211,10 +232,10 @@ endif
 run-dev: install
 ifeq ($(UNAME_S),Darwin)
 	open "$(Q3DIR)/$(APP_NAME).app" --args \
-	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +map $(MAP)
+	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +devmap $(MAP)
 else
 	"$(Q3DIR)/$(APP_NAME)" \
-	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +map $(MAP)
+	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +devmap $(MAP)
 endif
 
 # ── Smoke test ────────────────────────────────────────────────────────────────
@@ -261,6 +282,38 @@ diff-api:
 	@echo "--- ui_public.h ---"
 	@git diff $(UPSTREAM_REF) -- code/ui/ui_public.h
 
+# ── DMG packaging ─────────────────────────────────────────────────────────────
+# Creates a version-stamped, compressed DMG containing q3now.app + pk3 + README.
+# DMG filename example: q3now-4736ab7-arm64.dmg
+
+dmg: install
+ifeq ($(UNAME_S),Darwin)
+	@echo "==> Creating $(DMG_NAME).dmg..."
+	rm -rf $(DMG_STAGING) "$(DMG_OUT)"
+	mkdir -p $(DMG_STAGING)/baseq3
+	cp -R "$(Q3DIR)/$(APP_NAME).app" "$(DMG_STAGING)/"
+	cp "$(PAK_OUT)" "$(DMG_STAGING)/baseq3/"
+	cp README.md "$(DMG_STAGING)/"
+	@test -f "$(Q3DIR)/$(APP_NAME)-ded" && cp "$(Q3DIR)/$(APP_NAME)-ded" "$(DMG_STAGING)/" || true
+	hdiutil create -volname "$(APP_NAME)" -srcfolder $(DMG_STAGING) -ov -format UDZO "$(DMG_OUT)"
+	rm -rf $(DMG_STAGING)
+	@echo "==> $(DMG_OUT) ready ($$(du -h "$(DMG_OUT)" | cut -f1))"
+else
+	@echo "DMG creation requires macOS"
+endif
+
+# ── Release ───────────────────────────────────────────────────────────────────
+# Full release pipeline: verify everything, then produce a distributable DMG.
+
+release: check dmg
+	@echo ""
+	@echo "  ┌─────────────────────────────────────┐"
+	@echo "  │  q3now release ready                 │"
+	@echo "  ├─────────────────────────────────────┤"
+	@echo "  │  DMG: $(DMG_OUT)"
+	@echo "  │  Size: $$(du -h "$(DMG_OUT)" | cut -f1)"
+	@echo "  └─────────────────────────────────────┘"
+
 # ── Help ──────────────────────────────────────────────────────────────────────
 
 help:
@@ -277,6 +330,8 @@ help:
 	@echo "  make run-dev      build + install + launch (native debug mode)"
 	@echo "  make bench        timedemo benchmark (requires DEMO in Q3BASEDIR/demos/)"
 	@echo "  make diff-api     diff game API headers vs upstream Quake3e fork point"
+	@echo "  make dmg          build + install + package versioned DMG (macOS only)"
+	@echo "  make release      check + dmg + print summary (macOS only)"
 	@echo "  make help         show this message"
 	@echo ""
 	@echo "  Variables:"
