@@ -160,6 +160,22 @@ ifeq ($(UNAME_S),Darwin)
 	    echo "  WARNING: libMoltenVK.dylib not found — Vulkan renderer will not work"; \
 	    echo "  Run: brew install molten-vk"; \
 	  fi
+	@# SDL3: copy libSDL3.dylib into Contents/MacOS/ + fix load paths (belt & suspenders;
+	@#   cmake RPATH handles the rpath, install_name_tool fixes the explicit install path)
+	@SDL3_DYLIB=$$(find /opt/homebrew/lib /usr/local/lib 2>/dev/null -name "libSDL3*.dylib" -maxdepth 1 | head -1); \
+	  if [ -n "$$SDL3_DYLIB" ]; then \
+	    echo "  SDL3: $$SDL3_DYLIB → Contents/MacOS/"; \
+	    cp "$$SDL3_DYLIB" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"; \
+	    SDL3_BASE=$$(basename "$$SDL3_DYLIB"); \
+	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" "$(GAME_BIN)" 2>/dev/null || true; \
+	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" \
+	      "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)_opengl$(RENDEXT).dylib" 2>/dev/null || true; \
+	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" \
+	      "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)_vulkan$(RENDEXT).dylib" 2>/dev/null || true; \
+	  else \
+	    echo "  WARNING: libSDL3.dylib not found — app may not launch without SDL3"; \
+	    echo "  Run: brew install sdl3"; \
+	  fi
 	@# Game modules live inside the bundle (apppath/baseq3/ — matches stock layout)
 	mkdir -p "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3"
 	cp "$(MODULE_DIR)/cgame.dylib"  "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
