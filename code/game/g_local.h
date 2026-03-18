@@ -63,6 +63,16 @@ typedef enum {
 typedef struct gentity_s gentity_t;
 typedef struct gclient_s gclient_t;
 
+// unlagged: history buffer size (covers ~800ms at 20 snapshots/sec)
+#define MAX_PLAYER_MARKERS 32
+
+typedef struct {
+	vec3_t		origin;
+	vec3_t		mins;
+	vec3_t		maxs;
+	int			time;
+} playerMarker_t;
+
 struct gentity_s {
 	entityState_t	s;				// communicated by server to clients
 	entityShared_t	r;				// shared by both the server system and game
@@ -316,6 +326,11 @@ struct gclient_s {
     qboolean	hookhasbeenfired;
 
     int         lasthurt_time;
+
+    // unlagged: position history for lag compensation
+    int             topMarker;
+    playerMarker_t  playerMarkers[MAX_PLAYER_MARKERS];
+    playerMarker_t  backupMarker;
 };
 
 
@@ -735,6 +750,7 @@ extern  vmCvar_t	g_spawnWeapons;
 extern  vmCvar_t	g_instagib;
 extern  vmCvar_t	g_excessive;
 extern  vmCvar_t	g_q3now;
+extern  vmCvar_t	g_unlagged;
 
 
 void	trap_Print( const char *text );
@@ -946,3 +962,9 @@ gentity_t *FindTheKing();
 gentity_t *AssignAKing(gentity_t *preferred);
 void Offhand_Grapple_Fire(gentity_t *ent);
 void Offhand_Grapple_Free(gentity_t *ent);
+
+// g_unlagged.c
+void G_ResetHistory( gentity_t *ent );
+void G_StoreHistory( gentity_t *ent );
+void G_DoTimeShiftFor( gentity_t *ent );
+void G_UndoTimeShiftFor( gentity_t *ent );

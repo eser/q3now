@@ -193,6 +193,10 @@ vmCvar_t	cg_obeliskRespawnDelay;
 #endif
 vmCvar_t	cg_singlePlayer;
 vmCvar_t    cg_switchToEmpty;
+vmCvar_t	cg_stretch;
+vmCvar_t	cg_fovAspectAdjust;
+vmCvar_t	cg_viewbob;
+vmCvar_t	cg_viewkick;
 
 typedef struct {
 	vmCvar_t	*vmCvar;
@@ -310,7 +314,12 @@ static cvarTable_t cvarTable[] = {
 
     { &cg_singlePlayer, "g_singlePlayer", "0", CVAR_USERINFO },
 
-    { &cg_switchToEmpty, "cg_switchToEmpty", "0", CVAR_ARCHIVE }
+    { &cg_switchToEmpty, "cg_switchToEmpty", "0", CVAR_ARCHIVE },
+
+    { &cg_stretch, "cg_stretch", "0", CVAR_ARCHIVE },
+    { &cg_fovAspectAdjust, "cg_fovAspectAdjust", "1", CVAR_ARCHIVE },
+    { &cg_viewbob, "cg_viewbob", "1", CVAR_ARCHIVE },
+    { &cg_viewkick, "cg_viewkick", "1", CVAR_ARCHIVE }
 };
 
 static int  cvarTableSize = ARRAY_LEN( cvarTable );
@@ -1885,8 +1894,21 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	// get the rendering configuration from the client system
 	trap_GetGlconfig( &cgs.glconfig );
-	cgs.screenXScale = cgs.glconfig.vidWidth / 640.0;
-	cgs.screenYScale = cgs.glconfig.vidHeight / 480.0;
+	cgs.screenXScaleStretch = cgs.glconfig.vidWidth * (1.0/640.0);
+	cgs.screenYScaleStretch = cgs.glconfig.vidHeight * (1.0/480.0);
+	if ( cgs.glconfig.vidWidth * 480 > cgs.glconfig.vidHeight * 640 ) {
+		// wide screen: scale X by Y-ratio, add horizontal bias
+		cgs.screenXScale = cgs.glconfig.vidHeight * (640.0/480.0) / 640.0;
+		cgs.screenYScale = cgs.glconfig.vidHeight * (1.0/480.0);
+		cgs.screenXBias = 0.5 * ( cgs.glconfig.vidWidth - ( cgs.glconfig.vidHeight * (640.0/480.0) ) );
+		cgs.screenYBias = 0;
+	} else {
+		// narrow screen: scale Y by X-ratio, add vertical bias
+		cgs.screenXScale = cgs.glconfig.vidWidth * (1.0/640.0);
+		cgs.screenYScale = cgs.glconfig.vidWidth * (480.0/640.0) / 480.0;
+		cgs.screenXBias = 0;
+		cgs.screenYBias = 0.5 * ( cgs.glconfig.vidHeight - ( cgs.glconfig.vidWidth * (480.0/640.0) ) );
+	}
 
 	// get the gamestate from the client system
 	trap_GetGameState( &cgs.gameState );

@@ -68,6 +68,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_trigger.c
     ${SOURCE_DIR}/game/g_utils.c
     ${SOURCE_DIR}/game/g_weapon.c
+    ${SOURCE_DIR}/game/g_unlagged.c
 )
 
 set(GAME_BINARY_SOURCES ${SOURCE_DIR}/game/g_syscalls.c)

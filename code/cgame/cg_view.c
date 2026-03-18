@@ -341,7 +341,7 @@ static void CG_OffsetFirstPersonView( void ) {
 	}
 
 	// add angles based on damage kick
-	if ( cg.damageTime ) {
+	if ( cg_viewkick.integer && cg.damageTime ) {
 		ratio = cg.time - cg.damageTime;
 		if ( ratio < DAMAGE_DEFLECT_TIME ) {
 			ratio /= DAMAGE_DEFLECT_TIME;
@@ -374,20 +374,21 @@ static void CG_OffsetFirstPersonView( void ) {
 	angles[ROLL] -= delta * cg_runroll.value;
 
 	// add angles based on bob
+	if ( cg_viewbob.integer ) {
+		// make sure the bob is visible even at low speeds
+		speed = cg.xyspeed > 200 ? cg.xyspeed : 200;
 
-	// make sure the bob is visible even at low speeds
-	speed = cg.xyspeed > 200 ? cg.xyspeed : 200;
-
-	delta = cg.bobfracsin * cg_bobpitch.value * speed;
-	if (cg.predictedPlayerState.pm_flags & PMF_DUCKED)
-		delta *= 3;		// crouching
-	angles[PITCH] += delta;
-	delta = cg.bobfracsin * cg_bobroll.value * speed;
-	if (cg.predictedPlayerState.pm_flags & PMF_DUCKED)
-		delta *= 3;		// crouching accentuates roll
-	if (cg.bobcycle & 1)
-		delta = -delta;
-	angles[ROLL] += delta;
+		delta = cg.bobfracsin * cg_bobpitch.value * speed;
+		if (cg.predictedPlayerState.pm_flags & PMF_DUCKED)
+			delta *= 3;		// crouching
+		angles[PITCH] += delta;
+		delta = cg.bobfracsin * cg_bobroll.value * speed;
+		if (cg.predictedPlayerState.pm_flags & PMF_DUCKED)
+			delta *= 3;		// crouching accentuates roll
+		if (cg.bobcycle & 1)
+			delta = -delta;
+		angles[ROLL] += delta;
+	}
 
 //===================================
 
@@ -397,17 +398,18 @@ static void CG_OffsetFirstPersonView( void ) {
 	// smooth out duck height changes
 	timeDelta = cg.time - cg.duckTime;
 	if ( timeDelta < DUCK_TIME) {
-		cg.refdef.vieworg[2] -= cg.duckChange 
+		cg.refdef.vieworg[2] -= cg.duckChange
 			* (DUCK_TIME - timeDelta) / DUCK_TIME;
 	}
 
 	// add bob height
-	bob = cg.bobfracsin * cg.xyspeed * cg_bobup.value;
-	if (bob > 6) {
-		bob = 6;
+	if ( cg_viewbob.integer ) {
+		bob = cg.bobfracsin * cg.xyspeed * cg_bobup.value;
+		if (bob > 6) {
+			bob = 6;
+		}
+		origin[2] += bob;
 	}
-
-	origin[2] += bob;
 
 
 	// add fall height
@@ -515,6 +517,12 @@ static int CG_CalcFov( void ) {
 				fov_x = zoomFov + f * ( fov_x - zoomFov );
 			}
 		}
+	}
+
+	// LordHavoc formula: adjust FOV for actual monitor aspect ratio
+	if ( cg_fovAspectAdjust.integer ) {
+		float aspect = (float)cgs.glconfig.vidWidth / (float)cgs.glconfig.vidHeight;
+		fov_x = (float)(atan2( tan( fov_x * M_PI / 360.0 ) * 0.75 * aspect, 1 ) * 360.0 / M_PI);
 	}
 
 	x = cg.refdef.width / tan( fov_x / 360 * M_PI );

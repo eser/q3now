@@ -1238,6 +1238,9 @@ void ClientSpawn(gentity_t *ent) {
 		// move players to intermission
 		MoveClientToIntermission(ent);
 	}
+	// unlagged: reset history on spawn so stale positions don't affect lag compensation
+	G_ResetHistory( ent );
+
 	// run a client frame to drop exactly to the floor,
 	// initialize animations and other things
 	client->ps.commandTime = level.time - 100;

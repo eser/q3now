@@ -1022,9 +1022,11 @@ static void CG_DrawUpperRight(stereoFrame_t stereoFrame)
 
 	y = 0;
 
+	CG_SetScreenPlacement( PLACE_RIGHT, PLACE_TOP );
+
 	if ( cgs.gametype >= GT_TEAM && cg_drawTeamOverlay.integer == 1 ) {
 		y = CG_DrawTeamOverlay( y, qtrue, qtrue );
-	} 
+	}
 	if ( cg_drawSnapshot.integer ) {
 		y = CG_DrawSnapshot( y );
 	}
@@ -1038,6 +1040,7 @@ static void CG_DrawUpperRight(stereoFrame_t stereoFrame)
 		CG_DrawAttacker( y );
 	}
 
+	CG_PopScreenPlacement();
 }
 
 /*
@@ -1321,12 +1324,16 @@ static void CG_DrawLowerRight( void ) {
 
 	y = 480 - ICON_SIZE;
 
+	CG_SetScreenPlacement( PLACE_RIGHT, PLACE_BOTTOM );
+
 	if ( cgs.gametype >= GT_TEAM && cg_drawTeamOverlay.integer == 2 ) {
 		y = CG_DrawTeamOverlay( y, qtrue, qfalse );
-	} 
+	}
 
 	y = CG_DrawScores( y );
 	CG_DrawPowerups( y );
+
+	CG_PopScreenPlacement();
 }
 #endif // MISSIONPACK
 
@@ -1374,12 +1381,15 @@ static void CG_DrawLowerLeft( void ) {
 
 	y = 480 - ICON_SIZE;
 
+	CG_SetScreenPlacement( PLACE_LEFT, PLACE_BOTTOM );
+
 	if ( cgs.gametype >= GT_TEAM && cg_drawTeamOverlay.integer == 3 ) {
 		y = CG_DrawTeamOverlay( y, qfalse, qfalse );
-	} 
-
+	}
 
 	CG_DrawPickupItem( y );
+
+	CG_PopScreenPlacement();
 }
 #endif // MISSIONPACK
 
@@ -1923,9 +1933,12 @@ static void CG_DrawCrosshair(void)
 		h *= ( 1 + f );
 	}
 
+	// crosshair is self-centered via cg.refdef — offset should scale but not be biased
 	x = cg_crosshairX.integer;
 	y = cg_crosshairY.integer;
+	CG_SetScreenPlacement( PLACE_LEFT, PLACE_TOP );
 	CG_AdjustFrom640( &x, &y, &w, &h );
+	CG_PopScreenPlacement();
 
 	ca = cg_drawCrosshair.integer;
 	if (ca < 0) {

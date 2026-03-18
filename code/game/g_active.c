@@ -902,6 +902,9 @@ void ClientThink_real( gentity_t *ent ) {
 	// NOTE: now copy the exact origin over otherwise clients can be snapped into solid
 	VectorCopy( ent->client->ps.origin, ent->r.currentOrigin );
 
+	// unlagged: record position for lag compensation
+	G_StoreHistory( ent );
+
 	//test for solid areas in the AAS file
 	BotTestAAS(ent->r.currentOrigin);
 

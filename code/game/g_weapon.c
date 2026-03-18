@@ -819,6 +819,9 @@ void FireWeapon( gentity_t *ent ) {
 	CalcMuzzlePointOrigin ( ent, ent->client->oldOrigin, forward, right, up, muzzle );
 
 	// fire the specific weapon
+	// unlagged: rewind other clients for hitscan weapons
+	G_DoTimeShiftFor( ent );
+
 	switch( ent->s.weapon ) {
 	case WP_GAUNTLET:
 		Weapon_Gauntlet( ent );
@@ -848,6 +851,9 @@ void FireWeapon( gentity_t *ent ) {
 // FIXME		G_Error( "Bad ent->s.weapon" );
 		break;
 	}
+
+	// unlagged: restore all clients to real positions
+	G_UndoTimeShiftFor( ent );
 }
 
 
