@@ -70,3 +70,4 @@ Remaining work after the Quake3e engine swap.
 - [x] CI workflow updated for cmake-based build with QVM verification
 - [x] `tests/smoke.sh` headless smoke test (graceful skip without assets)
 - [x] Ded server renamed: `q3now.ded` → `q3now-ded`
+- [x] SDL2 → SDL3 migration: audio stream API, event restructuring, gamepad enabled, Wayland hint, SDL3 dylib bundling in `.app`
