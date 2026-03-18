@@ -96,7 +96,12 @@ vmCvar_t	g_instagib;
 vmCvar_t	g_excessive;
 vmCvar_t	g_q3now;
 vmCvar_t	g_singlePlayer;
+#if FEAT_UNLAGGED
 vmCvar_t	g_unlagged;
+#endif
+#if FEAT_SPAWN_PROTECTION
+vmCvar_t	g_spawnProtect;
+#endif
 
 
 static cvarTable_t		gameCvarTable[] = {
@@ -175,7 +180,14 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_q3now, "g_q3now", Q3NOW_VERSION, CVAR_SERVERINFO | CVAR_ROM, 0, qfalse },
 
     { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse },
+#if FEAT_UNLAGGED
+    { &g_unlagged, "g_unlagged", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_SPAWN_PROTECTION
+    { &g_spawnProtect,            "g_spawnProtect",            "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse }
+#else
     { &g_unlagged, "g_unlagged", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse }
+#endif
 };
 
 static int gameCvarTableSize = ARRAY_LEN( gameCvarTable );
@@ -427,8 +439,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
         if ( g_instagib.integer )    Q_strcat( features, sizeof(features), " instagib" );
         if ( g_excessive.integer )   Q_strcat( features, sizeof(features), " excessive" );
         if ( g_grapple.integer )     Q_strcat( features, sizeof(features), " grapple" );
-        G_Printf( "q3now %s | always-on: promode walljump koth lms | active:%s\n",
-                  Q3NOW_VERSION, features[0] ? features : " (none)" );
+        G_Printf( "q3now | active:%s\n", features[0] ? features : " (none)" );
     }
 
 	// set some level globals

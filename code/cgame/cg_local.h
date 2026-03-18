@@ -234,6 +234,9 @@ typedef enum {
 	LE_FADE_RGB,
 	LE_SCALE_FADE,
 	LE_SCOREPLUM,
+#if FEAT_DAMAGE_PLUMS
+	LE_DAMAGEPLUM,			// floating damage number (2A)
+#endif
 #ifdef MISSIONPACK
 	LE_KAMIKAZE,
 	LE_INVULIMPACT,
@@ -783,6 +786,7 @@ typedef struct {
 	qhandle_t	regenShader;
 	qhandle_t	battleSuitShader;
 	qhandle_t	battleWeaponShader;
+	qhandle_t	spawnProtectShader;
 	qhandle_t	hastePuffShader;
 #ifdef MISSIONPACK
 	qhandle_t	redKamikazeShader;
@@ -1182,7 +1186,6 @@ extern  vmCvar_t		cg_bigFont;
 extern	vmCvar_t		cg_noTaunt;
 #endif
 extern	vmCvar_t		cg_noProjectileTrail;
-extern	vmCvar_t		cg_oldRocket;
 #ifdef MISSIONPACK
 extern	vmCvar_t		cg_redTeamName;
 extern	vmCvar_t		cg_blueTeamName;
@@ -1198,6 +1201,10 @@ extern	vmCvar_t		cg_stretch;
 extern	vmCvar_t		cg_fovAspectAdjust;
 extern	vmCvar_t		cg_viewbob;
 extern	vmCvar_t		cg_viewkick;
+#if FEAT_DAMAGE_PLUMS
+extern	vmCvar_t		cg_damagePlum;
+#endif
+extern	vmCvar_t		cg_drawSpeed;
 
 //
 // cg_main.c
@@ -1447,6 +1454,9 @@ void CG_InvulnerabilityJuiced( vec3_t org );
 void CG_LightningBoltBeam( vec3_t start, vec3_t end );
 #endif
 void CG_ScorePlum( int client, vec3_t org, int score );
+#if FEAT_DAMAGE_PLUMS
+void CG_DamagePlum( int client, vec3_t org, int damage );	// 2A
+#endif
 
 void CG_GibPlayer( vec3_t playerOrigin );
 void CG_BigExplode( vec3_t playerOrigin );
@@ -1721,5 +1731,3 @@ void	CG_ParticleMisc (qhandle_t pshader, vec3_t origin, int size, int duration, 
 void	CG_ParticleExplosion (char *animStr, vec3_t origin, vec3_t vel, int duration, int sizeStart, int sizeEnd);
 extern qboolean		initparticles;
 int CG_NewParticleArea ( int num );
-
-

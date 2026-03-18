@@ -1965,12 +1965,15 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 	{
 		//rcg010207 -  see dissertation at top of VM_DllSyscall() in this file.
 		int32_t args[MAX_VMMAIN_CALL_ARGS-1];
-		va_list ap;
-		va_start( ap, callnum );
-		for ( i = 0; i < nargs; i++ ) {
-			args[i] = va_arg( ap, int32_t );
+		args[0] = args[1] = args[2] = 0;
+		if ( nargs > 0 ) {
+			va_list ap;
+			va_start( ap, callnum );
+			for ( i = 0; i < nargs; i++ ) {
+				args[i] = va_arg( ap, int32_t );
+			}
+			va_end( ap );
 		}
-		va_end( ap );
 
 		// add more arguments if you're changed MAX_VMMAIN_CALL_ARGS:
 		r = vm->entryPoint( callnum, args[0], args[1], args[2] );

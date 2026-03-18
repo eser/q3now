@@ -794,7 +794,61 @@ void CG_AddScorePlum( localEntity_t *le ) {
 	}
 }
 
+#if FEAT_DAMAGE_PLUMS
+/*
+===================
+CG_AddDamagePlum
+Floating damage number (red), shown only to the attacker. (2A)
+===================
+*/
+void CG_AddDamagePlum( localEntity_t *le ) {
+	refEntity_t	*re;
+	vec3_t		origin, delta, dir, vec, up = {0, 0, 1};
+	float		c, len;
+	int			dmg, digits[10], numdigits, i;
 
+	re = &le->refEntity;
+	c = ( le->endTime - cg.time ) * le->lifeRate;
+
+	// red color, fades out
+	re->shaderRGBA[0] = 0xff;
+	re->shaderRGBA[1] = 0x33;
+	re->shaderRGBA[2] = 0x33;
+	re->shaderRGBA[3] = ( c < 0.25f ) ? (byte)( 0xff * 4 * c ) : 0xff;
+
+	re->radius = NUMBER_SIZE / 2;
+
+	// float upward along the drift path
+	BG_EvaluateTrajectory( &le->pos, cg.time, origin );
+	origin[2] += 40 - c * 40;	// rise as c goes from 1 → 0
+
+	VectorSubtract( cg.refdef.vieworg, origin, dir );
+	CrossProduct( dir, up, vec );
+	VectorNormalize( vec );
+	VectorMA( origin, -5 + 10 * sin( c * 2 * M_PI ), vec, origin );
+
+	VectorSubtract( origin, cg.refdef.vieworg, delta );
+	len = VectorLength( delta );
+	if ( len < 20 ) {
+		CG_FreeLocalEntity( le );
+		return;
+	}
+
+	dmg = (int)le->radius;
+	if ( dmg <= 0 ) dmg = 1;
+
+	for ( numdigits = 0; !( numdigits && !dmg ); numdigits++ ) {
+		digits[numdigits] = dmg % 10;
+		dmg = dmg / 10;
+	}
+
+	for ( i = 0; i < numdigits; i++ ) {
+		VectorMA( origin, (float)( ( (float)numdigits / 2 ) - i ) * NUMBER_SIZE, vec, re->origin );
+		re->customShader = cgs.media.numberShaders[digits[numdigits - 1 - i]];
+		trap_R_AddRefEntityToScene( re );
+	}
+}
+#endif
 
 
 //==============================================================================
@@ -860,6 +914,12 @@ void CG_AddLocalEntities( void ) {
 			CG_AddScorePlum( le );
 			break;
 
+#if FEAT_DAMAGE_PLUMS
+		case LE_DAMAGEPLUM:
+			CG_AddDamagePlum( le );
+			break;
+#endif
+
 #ifdef MISSIONPACK
 		case LE_KAMIKAZE:
 			CG_AddKamikaze( le );
@@ -877,7 +937,3 @@ void CG_AddLocalEntities( void ) {
 		}
 	}
 }
-
-
-
-

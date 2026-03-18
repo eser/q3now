@@ -41,6 +41,9 @@ else
   BINEXT  :=
   RENDEXT :=
 endif
+# GAME_ARCH mirrors ARCH_STRING from q_platform.h (vm.c appends it to dylib filenames)
+# Strip the leading "_" from RENDEXT: "_aarch64" -> "aarch64"
+GAME_ARCH := $(patsubst _%,%,$(RENDEXT))
 ifeq ($(UNAME_S),Darwin)
   JOBS        ?= $(shell sysctl -n hw.ncpu)
   # cmake puts app bundles at build/<name><arch>.app (no Release/ subdir)
@@ -186,17 +189,19 @@ ifeq ($(UNAME_S),Darwin)
 	    echo "  WARNING: libSDL3.dylib not found — app may not launch without SDL3"; \
 	    echo "  Run: brew install sdl3"; \
 	  fi
-	@# Game modules live inside the bundle (apppath/baseq3/ — matches stock layout)
-	mkdir -p "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3"
-	cp "$(MODULE_DIR)/cgame.dylib"  "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
-	cp "$(MODULE_DIR)/qagame.dylib" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
-	cp "$(MODULE_DIR)/ui.dylib"     "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"
+	@# Game modules go in Q3BASEDIR/ where FS_LoadLibrary finds them via DIR_STATIC searchpaths.
+	@# FS_LoadLibrary builds: FS_BuildOSPath(path, gamedir, name) = $Q3DIR/baseq3/<name>
+	@# This matches how Linux installs them; inside the .app bundle is NOT searched.
+	mkdir -p "$(Q3BASEDIR)"
+	cp "$(MODULE_DIR)/cgame$(GAME_ARCH).dylib"  "$(Q3BASEDIR)/"
+	cp "$(MODULE_DIR)/qagame$(GAME_ARCH).dylib" "$(Q3BASEDIR)/"
+	cp "$(MODULE_DIR)/ui$(GAME_ARCH).dylib"     "$(Q3BASEDIR)/"
 	@# Dedicated server binary alongside .app (if built)
 	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(Q3DIR)/$(APP_NAME)-ded" || true
 	@# Code sign: ad-hoc with JIT entitlements (required for ARM64 JIT on macOS)
 	@echo "==> Code signing..."
 	@for dylib in "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"*.dylib \
-	              "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/baseq3/"*.dylib; do \
+	              "$(Q3BASEDIR)/"*$(GAME_ARCH).dylib; do \
 	  [ -f "$$dylib" ] && codesign --force --sign - "$$dylib" 2>/dev/null; \
 	done
 	codesign --force --sign - --entitlements misc/macos/q3now.entitlements \
@@ -226,16 +231,18 @@ else
 endif
 
 # ── Run (dev / debug) ─────────────────────────────────────────────────────────
-# Builds, installs, and launches with native modules (vm_*=0).
-# Native modules give real crash stack traces — use this for debugging.
+# Builds, installs, and launches with native dylibs (vm_*=0) for debugging.
+# sv_pure must be disabled or the client forces QVM mode regardless of vm_*.
 
 run-dev: install
 ifeq ($(UNAME_S),Darwin)
 	open "$(Q3DIR)/$(APP_NAME).app" --args \
-	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +devmap $(MAP)
+	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
+	  +set developer 1 +devmap $(MAP)
 else
 	"$(Q3DIR)/$(APP_NAME)" \
-	  +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +devmap $(MAP)
+	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
+	  +set developer 1 +devmap $(MAP)
 endif
 
 # ── Smoke test ────────────────────────────────────────────────────────────────

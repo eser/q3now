@@ -1138,12 +1138,16 @@ static void CG_AddWeaponWithPowerups( centity_t *cent, refEntity_t *gun, int pow
 	} else {
 		trap_R_AddRefEntityToScene( gun );
 
+		if ( powerups & ( 1 << PW_QUAD ) ) {
+			gun->customShader = cgs.media.quadWeaponShader;
+			trap_R_AddRefEntityToScene( gun );
+		}
 		if ( powerups & ( 1 << PW_BATTLESUIT ) ) {
 			gun->customShader = cgs.media.battleWeaponShader;
 			trap_R_AddRefEntityToScene( gun );
 		}
-		if ( powerups & ( 1 << PW_QUAD ) ) {
-			gun->customShader = cgs.media.quadWeaponShader;
+		if ( cent->currentState.eFlags & EF_SPAWN_PROTECT ) {
+			gun->customShader = cgs.media.spawnProtectShader;
 			trap_R_AddRefEntityToScene( gun );
 		}
 	}
@@ -1882,13 +1886,13 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		lightColor[0] = 1;
 		lightColor[1] = 0.75;
 		lightColor[2] = 0.0;
-		if (cg_oldRocket.integer == 0) {
-			// explosion sprite animation
-			VectorMA( origin, 24, dir, sprOrg );
-			VectorScale( dir, 64, sprVel );
+#if FEAT_ADDITIONAL_ROCKET_EXPLOSION
+		// explosion sprite animation
+		VectorMA( origin, 24, dir, sprOrg );
+		VectorScale( dir, 64, sprVel );
 
-			CG_ParticleExplosion( "explode1", sprOrg, sprVel, 1400, 20, 30 );
-		}
+		CG_ParticleExplosion( "explode1", sprOrg, sprVel, 1400, 20, 30 );
+#endif
 		break;
 	case WP_RAILGUN:
 		mod = cgs.media.ringFlashModel;

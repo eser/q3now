@@ -6,19 +6,36 @@ A Quake 3 Arena mod.
 
 ## Mod Features
 
-* **Promode / CPMA physics** — Always enabled Challenge Pro Mode movement
-* **Instagib mode** — `g_instagib 1` for one-shot railgun kills, players spawn with railgun only
-* **Excessive mode** — over-the-top weapon damage and fire rates for chaotic fun
+### Game Modes
+
 * **King of the Hill (KOTH)** — custom game type: control the marked zone to score
 * **Last Man Standing (LMS)** — survival game type with limited lives
-* **Grappling hook** — bind `+button5` to fire the hook
+
+### Physics
+
+* **Promode / CPMA physics** — Always enabled Challenge Pro Mode movement
 * **Wall jumps** — strafe into a wall to gain a vertical boost
-* **New armor system** — health/armor caps rebalanced; armor shards replaced with +5 health pickups
+
+### Combat
+
 * **Weapon rebalancing** — plasma, rocket, grenade, machinegun, shotgun all tuned
-* **Proximity launcher and BFG removed** — cleaner weapon roster
-* **Colored player names** — extended 17-color palette (A–P codes)
-* **Lightning gun discharge** — touch enemies to discharge the LG
+* **Instagib mode** — `g_instagib 1` for one-shot railgun kills, players spawn with railgun only
+* **Excessive mode** — over-the-top weapon damage and fire rates for chaotic fun
+* **New armor system** — health/armor caps rebalanced; armor shards replaced with +5 health pickups
+* **Spawn Protection** — spawn protection can be enabled with `g_spawnProtect 500`
+
+### Weapons
+
+* **Grappling hook** — bind `+button5` to fire the hook
 * **Nailgun replaced** by plasma rifle; chaingun removed
+* **Proximity launcher and BFG removed** — cleaner weapon roster
+* **Lightning gun discharge** — touch enemies to discharge the LG
+* **Teleporting missiles** — missiles can pass through teleportation devices
+
+### HUD / UI
+
+* **Colored player names** — extended 17-color palette (A–P codes)
+
 
 *This repository does not contain any game content so in order to play you must copy the resulting binaries into your existing Quake III Arena installation*
 

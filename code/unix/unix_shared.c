@@ -479,6 +479,9 @@ void *Sys_LoadLibrary( const char *name )
 	}
 
 	handle = dlopen( name, RTLD_NOW );
+	if ( !handle ) {
+		Com_Printf( S_COLOR_YELLOW "Sys_LoadLibrary(%s) failed: %s\n", name, dlerror() );
+	}
 	return handle;
 }
 

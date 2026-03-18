@@ -1053,6 +1053,15 @@ void ClientEndFrame( gentity_t *ent ) {
 		}
 	}
 
+#if FEAT_SPAWN_PROTECTION
+	// expire spawn protection by timer
+	if ( ent->client->spawnprotected &&
+		 level.time > ent->client->respawnTime + g_spawnProtect.integer ) {
+		ent->client->spawnprotected = qfalse;
+		ent->client->ps.eFlags &= ~EF_SPAWN_PROTECT;
+	}
+#endif
+
 #ifdef MISSIONPACK
 	if ( ent->client->invulnerabilityTime > level.time ) {
 		ent->client->ps.powerups[PW_INVULNERABILITY] = level.time;

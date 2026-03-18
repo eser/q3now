@@ -180,7 +180,6 @@ vmCvar_t	cg_bigFont;
 vmCvar_t	cg_noTaunt;
 #endif
 vmCvar_t	cg_noProjectileTrail;
-vmCvar_t	cg_oldRocket;
 
 #ifdef MISSIONPACK
 vmCvar_t 	cg_redTeamName;
@@ -197,6 +196,10 @@ vmCvar_t	cg_stretch;
 vmCvar_t	cg_fovAspectAdjust;
 vmCvar_t	cg_viewbob;
 vmCvar_t	cg_viewkick;
+#if FEAT_DAMAGE_PLUMS
+vmCvar_t	cg_damagePlum;
+#endif
+vmCvar_t	cg_drawSpeed;
 
 typedef struct {
 	vmCvar_t	*vmCvar;
@@ -297,7 +300,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_timescaleFadeEnd, "cg_timescaleFadeEnd", "1", 0},
 	{ &cg_timescaleFadeSpeed, "cg_timescaleFadeSpeed", "0", 0},
 	{ &cg_timescale, "timescale", "1", 0},
-	{ &cg_scorePlum, "cg_scorePlums", "1", CVAR_USERINFO | CVAR_ARCHIVE},
+	{ &cg_scorePlum, "cg_scorePlums", "0", CVAR_USERINFO | CVAR_ARCHIVE},
 	{ &cg_smoothClients, "cg_smoothClients", "0", CVAR_USERINFO | CVAR_ARCHIVE},
 	{ &cg_cameraMode, "com_cameraMode", "0", CVAR_CHEAT},
 
@@ -309,7 +312,6 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_noTaunt, "cg_noTaunt", "0", CVAR_ARCHIVE},
 #endif
 	{ &cg_noProjectileTrail, "cg_noProjectileTrail", "0", CVAR_ARCHIVE},
-	{ &cg_oldRocket, "cg_oldRocket", "1", CVAR_ARCHIVE},
 //	{ &cg_pmove_fixed, "cg_pmove_fixed", "0", CVAR_USERINFO | CVAR_ARCHIVE }
 
     { &cg_singlePlayer, "g_singlePlayer", "0", CVAR_USERINFO },
@@ -319,7 +321,11 @@ static cvarTable_t cvarTable[] = {
     { &cg_stretch, "cg_stretch", "0", CVAR_ARCHIVE },
     { &cg_fovAspectAdjust, "cg_fovAspectAdjust", "1", CVAR_ARCHIVE },
     { &cg_viewbob, "cg_viewbob", "1", CVAR_ARCHIVE },
-    { &cg_viewkick, "cg_viewkick", "1", CVAR_ARCHIVE }
+    { &cg_viewkick, "cg_viewkick", "1", CVAR_ARCHIVE },
+#if FEAT_DAMAGE_PLUMS
+    { &cg_damagePlum,  "cg_damagePlum",  "0", CVAR_ARCHIVE },
+#endif
+	{ &cg_drawSpeed,   "cg_drawSpeed",   "0", CVAR_ARCHIVE }
 };
 
 static int  cvarTableSize = ARRAY_LEN( cvarTable );
@@ -882,6 +888,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.quadWeaponShader = trap_R_RegisterShader("powerups/quadWeapon" );
 	cgs.media.battleSuitShader = trap_R_RegisterShader("powerups/battleSuit" );
 	cgs.media.battleWeaponShader = trap_R_RegisterShader("powerups/battleWeapon" );
+	cgs.media.spawnProtectShader = trap_R_RegisterShader("powerups/spawnProtect" );
 	cgs.media.invisShader = trap_R_RegisterShader("powerups/invisibility" );
 	cgs.media.regenShader = trap_R_RegisterShader("powerups/regen" );
 	cgs.media.hastePuffShader = trap_R_RegisterShader("hasteSmokePuff" );

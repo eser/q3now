@@ -25,6 +25,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 #include "bg_promode.h" // CPM
 
+#if FEAT_RAILGUN_KNOCKBACK
+#define RAIL_JUMP 1
+#endif
 
 /*
 ============
@@ -42,6 +45,53 @@ void ScorePlum( gentity_t *ent, vec3_t origin, int score ) {
 	plum->s.otherEntityNum = ent->s.number;
 	plum->s.time = score;
 }
+
+#if FEAT_DAMAGE_PLUMS
+/*
+============
+DamagePlum
+Sends a floating damage number to the attacker's client.
+============
+*/
+void DamagePlum( gentity_t *attacker, gentity_t *target, int damage ) {
+	gentity_t *plum;
+	vec3_t    origin;
+
+	if ( !attacker->client ) {
+		return;
+	}
+
+	VectorCopy( target->r.currentOrigin, origin );
+	origin[2] += 2 * target->r.maxs[2];
+
+	plum = G_TempEntity( origin, EV_DAMAGEPLUM );
+	plum->r.svFlags |= SVF_SINGLECLIENT;
+	plum->r.singleClient = attacker->s.number;
+	plum->s.otherEntityNum = attacker->s.number;
+	plum->s.time = damage;
+}
+#endif
+
+#if FEAT_RAILGUN_KNOCKBACK
+/*
+============
+G_RailKnockback
+Self-knockback when the railgun beam hits a solid surface.
+============
+*/
+void G_RailKnockback( vec3_t origin, gentity_t *attacker ) {
+	vec3_t dir;
+
+	if ( !RAIL_JUMP || !attacker->client ) {
+		return;
+	}
+
+	VectorSubtract( attacker->r.currentOrigin, origin, dir );
+	dir[2] += 24;   // bias upward so it launches player into the air
+	VectorNormalize( dir );
+	VectorMA( attacker->client->ps.velocity, 600.0f, dir, attacker->client->ps.velocity );
+}
+#endif
 
 /*
 ============
@@ -499,6 +549,11 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	self->client->ps.persistant[PERS_KILLED]++;
 
+#if FEAT_CONSECUTIVE_KILLS
+	// kill sprees (2D): reset victim's streak
+	self->client->consecutiveKills = 0;
+#endif
+
 	if (attacker && attacker->client) {
 		attacker->client->lastkilled_client = self->s.number;
 
@@ -546,6 +601,29 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 				attacker->client->rewardTime = level.time + REWARD_SPRITE_TIME;
 			}
 			attacker->client->lastKillTime = level.time;
+
+#if FEAT_CONSECUTIVE_KILLS
+			// kill sprees (2D): track consecutive kills, announce milestones
+			if ( attacker != self && !OnSameTeam( self, attacker ) ) {
+				attacker->client->consecutiveKills++;
+				switch ( attacker->client->consecutiveKills ) {
+				case 5:
+					trap_SendServerCommand( attacker - g_entities, "cp \"Killing Spree!\n\"" );
+					break;
+				case 10:
+					trap_SendServerCommand( attacker - g_entities, "cp \"Rampage!\n\"" );
+					break;
+				case 15:
+					trap_SendServerCommand( attacker - g_entities, "cp \"Massacre!\n\"" );
+					break;
+				case 20:
+					trap_SendServerCommand( attacker - g_entities, "cp \"Unstoppable!\n\"" );
+					break;
+				default:
+					break;
+				}
+			}
+#endif
 
 		}
 	} else {
@@ -1018,6 +1096,18 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		if ( targ->flags & FL_GODMODE ) {
 			return;
 		}
+
+#if FEAT_SPAWN_PROTECTION
+		// spawn protection (2B): block damage for g_spawnProtect ms after respawn
+		if ( g_spawnProtect.integer > 0 && client && client->spawnprotected ) {
+			if ( level.time > client->respawnTime + g_spawnProtect.integer ) {
+				client->spawnprotected = qfalse;
+				client->ps.eFlags &= ~EF_SPAWN_PROTECT;
+			} else {
+				return;
+			}
+		}
+#endif
 	}
 
 	// battlesuit protects from all radius damage (but takes knockback)
@@ -1100,6 +1190,13 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		targ->client->lasthurt_mod = mod;
         targ->client->lasthurt_time = level.time;
 	}
+
+#if FEAT_DAMAGE_PLUMS
+	// damage plums (2A): show floating number to attacker
+	if ( take > 0 && targ->client && attacker != targ && attacker->client ) {
+		DamagePlum( attacker, targ, take );
+	}
+#endif
 
 	// do the damage
 	if (take > 0) {
