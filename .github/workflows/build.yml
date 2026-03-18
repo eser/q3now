@@ -80,13 +80,13 @@ jobs:
         ls build/Release/baseq3/vm/qagame.qvm && echo "qagame QVM: OK"
         ls build/Release/baseq3/vm/ui.qvm     && echo "ui     QVM: OK"
 
+    - name: Install & Package DMG
+      run: make dmg Q3DIR=${{ runner.temp }}/q3now
+
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'release' || github.event_name == 'push'
       with:
-        name: macos-aarch64
-        path: |
-          build/q3now.aarch64.app
-          build/Release/baseq3/*.dylib
-          build/Release/baseq3/vm/*.qvm
+        name: macos-aarch64-dmg
+        path: build/*.dmg
         if-no-files-found: error
         retention-days: 5

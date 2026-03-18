@@ -87,8 +87,6 @@ vmCvar_t	g_blueteam;
 vmCvar_t	g_enableDust;
 vmCvar_t	g_enableBreath;
 #endif
-vmCvar_t	g_pro_mode;     // CPM: The CPM gameplay
-vmCvar_t	g_pro_physics;  // CPM: The CPM physics
 
 #define Q3NOW_VERSION "1.0"
 
@@ -168,9 +166,6 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
 	{ &g_localTeamPref, "g_localTeamPref", "", 0, 0, qfalse },
-
-    { &g_pro_mode, "g_pro_mode", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },       // CPM: The CPM gameplay
-    { &g_pro_physics, "g_pro_physics", "1", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue }, // CPM: The CPM physics
 
     { &g_grapple, "g_grapple", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
     { &g_spawnWeapons, "g_spawnWeapons", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
@@ -348,24 +343,6 @@ void G_RegisterCvars( void ) {
 		if (cv->teamShader) {
 			remapped = qtrue;
 		}
-
-        // CPM: Detect if g_pro_mode has been changed
-        if (!strcmp(cv->cvarName, "g_pro_mode") || !strcmp(cv->cvarName, "g_pro_physics"))
-        {
-            // Update all settings
-            CPM_UpdateSettings(g_gametype.integer, g_pro_mode.integer, g_pro_physics.integer);
-
-            // Set the config string (so clients will be updated)
-            trap_SetConfigstring(CS_PRO_MODE, va("%d%d", g_pro_mode.integer, g_pro_physics.integer));
-
-            // Update all pro mode-dependent server-side cvars					
-            // if (g_pro_mode.integer) {
-            //     trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer | DF_NO_FOOTSTEPS)); // turn off footsteps
-            // } else {
-            //     trap_Cvar_Set("dmflags", va("%d", g_dmflags.integer & ~DF_NO_FOOTSTEPS)); // turn on footsteps
-            // }
-        }
-        // !CPM
 	}
 
 	if (remapped) {
@@ -439,21 +416,16 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
     // CPM: Initialize
     // Update all settings
-    CPM_UpdateSettings(g_gametype.integer, g_pro_mode.integer, g_pro_physics.integer);
-
-    // Set the config string
-    trap_SetConfigstring(CS_PRO_MODE, va("%d%d", g_pro_mode.integer, g_pro_physics.integer));
-    // !CPM
+    CPM_UpdateSettings(g_gametype.integer);
 
     // q3now: print mod version and active feature flags
     {
         char features[256];
         features[0] = '\0';
-        if ( g_pro_physics.integer ) Q_strcat( features, sizeof(features), " promode" );
         if ( g_instagib.integer )    Q_strcat( features, sizeof(features), " instagib" );
         if ( g_excessive.integer )   Q_strcat( features, sizeof(features), " excessive" );
         if ( g_grapple.integer )     Q_strcat( features, sizeof(features), " grapple" );
-        G_Printf( "q3now %s | always-on: walljump koth lms | active:%s\n",
+        G_Printf( "q3now %s | always-on: promode walljump koth lms | active:%s\n",
                   Q3NOW_VERSION, features[0] ? features : " (none)" );
     }
 

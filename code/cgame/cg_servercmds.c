@@ -367,12 +367,6 @@ static void CG_ConfigStringModified( void ) {
 	else if ( num == CS_SHADERSTATE ) {
 		CG_ShaderStateChanged();
 	}
-    // CPM
-    else if (num == CS_PRO_MODE)
-    {
-        CPM_UpdateSettings(cgs.gametype, str[0] - '0', str[1] - '0');
-    }
-    // !CPM
 }
 
 

@@ -1,5 +1,5 @@
 
-void CPM_UpdateSettings(int gametype, int pro_mode, int pro_physics);
+void CPM_UpdateSettings(int gametype);
 
 extern float    cpm_pm_jump_z;
 extern int      pm_walljumps;

@@ -1902,9 +1902,8 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_ParseServerinfo();
 
-    // CPM: Setup according to the pro mode settings
-    s = CG_ConfigString(CS_PRO_MODE);
-    CPM_UpdateSettings(cgs.gametype, s[0] - '0', s[1] - '0');
+    // CPM: Setup according to the physics settings
+    CPM_UpdateSettings(cgs.gametype);
     // !CPM
 
 	// load the new map
@@ -1994,4 +1993,3 @@ void CG_KeyEvent(int key, qboolean down) {
 void CG_MouseEvent(int x, int y) {
 }
 #endif
-
