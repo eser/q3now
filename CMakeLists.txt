@@ -10,7 +10,6 @@ SET(RENDERER_DEFAULT vulkan) # valid options: opengl, vulkan, opengl2; opengl as
 
 OPTION(USE_SDL "" ON)
 OPTION(USE_CURL "" ON)
-OPTION(USE_LOCAL_HEADERS "" ON)
 OPTION(USE_OPENGL "" ON)
 OPTION(USE_VULKAN "" ON)
 OPTION(USE_SYSTEM_JPEG "" OFF)
@@ -188,8 +187,8 @@ ADD_LIBRARY(q3ui OBJECT ${Q3_UI_SRCS})
 
 IF(NOT MSVC)
 	IF(USE_SDL)
-		find_package(SDL2 REQUIRED)
-		TARGET_LINK_LIBRARIES(q3ui SDL2::Main)
+		find_package(SDL3 REQUIRED)
+		TARGET_LINK_LIBRARIES(q3ui SDL3::SDL3)
 	ELSEIF(UNIX)
 		find_package (X11 REQUIRED)
 		TARGET_LINK_LIBRARIES(q3ui ${X11_LIBRARIES})
@@ -239,6 +238,9 @@ IF(APPLE)
 	SET_TARGET_PROPERTIES(${CNAME}${BINEXT} PROPERTIES
 		XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/misc/macos/q3now.entitlements"
 	)
+	# rpath: find bundled dylibs (SDL3, MoltenVK) in the same dir as the executable
+	SET(CMAKE_INSTALL_RPATH "@executable_path")
+	SET(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 ENDIF()
 
 # ============================================================
