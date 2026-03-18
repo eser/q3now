@@ -73,7 +73,7 @@ CMAKE_BUILD := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
-.PHONY: all configure build clean rebuild pak check install run run-dev smoke help
+.PHONY: all configure build clean rebuild pak check install run run-dev smoke bench diff-api help
 
 all: build
 
@@ -228,6 +228,39 @@ else
 	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)"
 endif
 
+# ── Bench ─────────────────────────────────────────────────────────────────────
+# Timedemo benchmark. Requires a demo at Q3BASEDIR/demos/four.dm_68.
+# Override DEMO= to use a different demo file (without the .dm_68 extension).
+
+DEMO ?= four
+
+bench: install
+	@if [ ! -f "$(Q3BASEDIR)/demos/$(DEMO).dm_68" ]; then \
+	  echo "ERROR: $(Q3BASEDIR)/demos/$(DEMO).dm_68 not found"; \
+	  echo "Copy a demo file (.dm_68) to $(Q3BASEDIR)/demos/ and set DEMO=<name>"; \
+	  exit 1; \
+	fi
+ifeq ($(UNAME_S),Darwin)
+	open "$(Q3DIR)/$(APP_NAME).app" --args +timedemo 1 +demo $(DEMO)
+else
+	"$(Q3DIR)/$(APP_NAME)$(BINEXT)" +timedemo 1 +demo $(DEMO)
+endif
+
+# ── Diff-api ──────────────────────────────────────────────────────────────────
+# Diffs q3now's game API headers against upstream Quake3e at the fork point.
+# Use UPSTREAM_REF= to compare against a different commit or tag.
+
+UPSTREAM_REF ?= ecd5fa41
+
+diff-api:
+	@echo "==> API header diff (q3now vs upstream $(UPSTREAM_REF))"
+	@echo "--- g_public.h ---"
+	@git diff $(UPSTREAM_REF) -- code/game/g_public.h
+	@echo "--- cg_public.h ---"
+	@git diff $(UPSTREAM_REF) -- code/cgame/cg_public.h
+	@echo "--- ui_public.h ---"
+	@git diff $(UPSTREAM_REF) -- code/ui/ui_public.h
+
 # ── Help ──────────────────────────────────────────────────────────────────────
 
 help:
@@ -242,10 +275,13 @@ help:
 	@echo "  make install      build + pak + deploy to Q3DIR"
 	@echo "  make run          build + install + launch (QVM mode)"
 	@echo "  make run-dev      build + install + launch (native debug mode)"
+	@echo "  make bench        timedemo benchmark (requires DEMO in Q3BASEDIR/demos/)"
+	@echo "  make diff-api     diff game API headers vs upstream Quake3e fork point"
 	@echo "  make help         show this message"
 	@echo ""
 	@echo "  Variables:"
 	@echo "    BUILD_DIR=$(BUILD_DIR)   BUILD_TYPE=$(BUILD_TYPE)"
 	@echo "    Q3DIR=$(Q3DIR)"
-	@echo "    JOBS=$(JOBS)   MAP=$(MAP)"
+	@echo "    JOBS=$(JOBS)   MAP=$(MAP)   DEMO=$(DEMO)"
+	@echo "    UPSTREAM_REF=$(UPSTREAM_REF)"
 	@echo ""

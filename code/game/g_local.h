@@ -736,6 +736,7 @@ extern  vmCvar_t	g_grapple;
 extern  vmCvar_t	g_spawnWeapons;
 extern  vmCvar_t	g_instagib;
 extern  vmCvar_t	g_excessive;
+extern  vmCvar_t	g_q3now;
 
 
 void	trap_Print( const char *text );
