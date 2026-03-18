@@ -96,6 +96,7 @@ vmCvar_t	g_instagib;
 vmCvar_t	g_excessive;
 vmCvar_t	g_q3now;
 vmCvar_t	g_singlePlayer;
+vmCvar_t	g_unlagged;
 
 
 static cvarTable_t		gameCvarTable[] = {
@@ -173,7 +174,8 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_excessive, "g_excessive", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
 	{ &g_q3now, "g_q3now", Q3NOW_VERSION, CVAR_SERVERINFO | CVAR_ROM, 0, qfalse },
 
-    { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse }
+    { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse },
+    { &g_unlagged, "g_unlagged", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse }
 };
 
 static int gameCvarTableSize = ARRAY_LEN( gameCvarTable );

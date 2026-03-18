@@ -23,25 +23,66 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cg_drawtools.c -- helper functions called by cg_draw, cg_scoreboard, cg_info, etc
 #include "cg_local.h"
 
+// screen placement state (push/pop API for anchoring HUD elements)
+static screenPlacement_e cg_horizontalPlacement = PLACE_CENTER;
+static screenPlacement_e cg_verticalPlacement = PLACE_CENTER;
+static screenPlacement_e cg_lastHorizontalPlacement = PLACE_CENTER;
+static screenPlacement_e cg_lastVerticalPlacement = PLACE_CENTER;
+
+void CG_SetScreenPlacement( screenPlacement_e hpos, screenPlacement_e vpos ) {
+	cg_lastHorizontalPlacement = cg_horizontalPlacement;
+	cg_lastVerticalPlacement = cg_verticalPlacement;
+	cg_horizontalPlacement = hpos;
+	cg_verticalPlacement = vpos;
+}
+
+void CG_PopScreenPlacement( void ) {
+	cg_horizontalPlacement = cg_lastHorizontalPlacement;
+	cg_verticalPlacement = cg_lastVerticalPlacement;
+}
+
+screenPlacement_e CG_GetScreenHorizontalPlacement( void ) {
+	return cg_horizontalPlacement;
+}
+
+screenPlacement_e CG_GetScreenVerticalPlacement( void ) {
+	return cg_verticalPlacement;
+}
+
 /*
 ================
 CG_AdjustFrom640
 
-Adjusted for resolution and screen aspect ratio
+Adjusted for resolution and screen aspect ratio.
+Uses screen placement to correctly anchor HUD elements on widescreen monitors.
 ================
 */
 void CG_AdjustFrom640( float *x, float *y, float *w, float *h ) {
-#if 0
-	// adjust for wide screens
-	if ( cgs.glconfig.vidWidth * 480 > cgs.glconfig.vidHeight * 640 ) {
-		*x += 0.5 * ( cgs.glconfig.vidWidth - ( cgs.glconfig.vidHeight * 640 / 480 ) );
+	if ( cg_horizontalPlacement == PLACE_STRETCH || cg_stretch.integer ) {
+		*w *= cgs.screenXScaleStretch;
+		*x *= cgs.screenXScaleStretch;
+	} else {
+		*w *= cgs.screenXScale;
+		*x *= cgs.screenXScale;
+		if ( cg_horizontalPlacement == PLACE_CENTER ) {
+			*x += cgs.screenXBias;
+		} else if ( cg_horizontalPlacement == PLACE_RIGHT ) {
+			*x += cgs.screenXBias * 2;
+		}
 	}
-#endif
-	// scale for screen sizes
-	*x *= cgs.screenXScale;
-	*y *= cgs.screenYScale;
-	*w *= cgs.screenXScale;
-	*h *= cgs.screenYScale;
+
+	if ( cg_verticalPlacement == PLACE_STRETCH || cg_stretch.integer ) {
+		*h *= cgs.screenYScaleStretch;
+		*y *= cgs.screenYScaleStretch;
+	} else {
+		*h *= cgs.screenYScale;
+		*y *= cgs.screenYScale;
+		if ( cg_verticalPlacement == PLACE_CENTER ) {
+			*y += cgs.screenYBias;
+		} else if ( cg_verticalPlacement == PLACE_BOTTOM ) {
+			*y += cgs.screenYBias * 2;
+		}
+	}
 }
 
 /*
