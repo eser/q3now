@@ -284,6 +284,18 @@ qboolean EntityHasQuad(aas_entityinfo_t *entinfo) {
 	return qfalse;
 }
 
+/*
+==================
+EntityHasBerserk
+==================
+*/
+qboolean EntityHasBerserk(aas_entityinfo_t *entinfo) {
+	if (entinfo->powerups & (1 << PW_BERSERK)) {
+		return qtrue;
+	}
+	return qfalse;
+}
+
 #ifdef MISSIONPACK
 /*
 ==================
@@ -1741,6 +1753,7 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_INVULNERABILITY] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_INVULNERABILITY;
 #endif
 	bs->inventory[INVENTORY_QUAD] = bs->cur_ps.powerups[PW_QUAD] != 0;
+	bs->inventory[INVENTORY_BERSERK] = bs->cur_ps.powerups[PW_BERSERK] != 0;
 	bs->inventory[INVENTORY_ENVIRONMENTSUIT] = bs->cur_ps.powerups[PW_BATTLESUIT] != 0;
 	bs->inventory[INVENTORY_HASTE] = bs->cur_ps.powerups[PW_HASTE] != 0;
 	bs->inventory[INVENTORY_INVISIBILITY] = bs->cur_ps.powerups[PW_INVIS] != 0;
@@ -4518,8 +4531,9 @@ int BotAIPredictObstacles(bot_state_t *bs, bot_goal_t *goal) {
 		return qfalse;
 
 	// always predict when the goal change or at regular intervals
+	// eser - (4J) more aggressive recomputation — 0.5s vs stock 6s
 	if (bs->predictobstacles_goalareanum == goal->areanum &&
-		bs->predictobstacles_time > FloatTime() - 6) {
+		bs->predictobstacles_time > FloatTime() - 0.5f) {
 		return qfalse;
 	}
 	bs->predictobstacles_goalareanum = goal->areanum;

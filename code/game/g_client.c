@@ -815,6 +815,19 @@ void ClientUserinfoChanged( int clientNum ) {
 	}
 	*/
 
+	// eser - admin mode
+	if ( g_adminPassword.string[0] && Q_stricmp( g_adminPassword.string, "none" ) != 0 ) {
+		s = Info_ValueForKey( userinfo, "password" );
+		if ( s[0] && strcmp( s, g_adminPassword.string ) == 0 ) {
+			client->isAdmin = qtrue;
+		} else {
+			client->isAdmin = qfalse;
+		}
+	} else {
+		client->isAdmin = qfalse;
+	}
+	// eser - admin mode
+
 	// team task (0 = none, 1 = offence, 2 = defence)
 	teamTask = atoi(Info_ValueForKey(userinfo, "teamtask"));
 	// team Leader (1 = leader, 0 is normal player)
@@ -1070,6 +1083,7 @@ void ClientSpawn(gentity_t *ent) {
 	int		savedPing;
 //	char	*savedAreaBits;
 	int		accuracy_hits, accuracy_shots;
+	weaponStat_t	savedWeaponStats[WP_NUM_WEAPONS];
 	int		eventSequence;
 	char	userinfo[MAX_INFO_STRING];
 
@@ -1127,6 +1141,7 @@ void ClientSpawn(gentity_t *ent) {
 //	savedAreaBits = client->areabits;
 	accuracy_hits = client->accuracy_hits;
 	accuracy_shots = client->accuracy_shots;
+	memcpy(savedWeaponStats, client->weaponStats, sizeof(savedWeaponStats));
 	for ( i = 0 ; i < MAX_PERSISTANT ; i++ ) {
 		persistant[i] = client->ps.persistant[i];
 	}
@@ -1140,6 +1155,7 @@ void ClientSpawn(gentity_t *ent) {
 //	client->areabits = savedAreaBits;
 	client->accuracy_hits = accuracy_hits;
 	client->accuracy_shots = accuracy_shots;
+	memcpy(client->weaponStats, savedWeaponStats, sizeof(client->weaponStats));
 	client->lastkilled_client = -1;
     client->lasthurt_time = level.time;
 
@@ -1185,6 +1201,17 @@ void ClientSpawn(gentity_t *ent) {
         }
     }
 
+#if FEAT_CLAN_ARENA
+	// clan arena (11K): give all weapons, full ammo, full armor on spawn
+	if ( g_clanArena.integer && g_elimination.integer ) {
+		for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
+			client->ps.stats[STAT_WEAPONS] |= ( 1 << i );
+			client->ps.ammo[i] = 200;
+		}
+		client->ps.stats[STAT_ARMOR] = MAX_ARMOR;
+	}
+#endif
+
 	// health will count down towards max_health
     ent->health = client->ps.stats[STAT_HEALTH] = MAX_HEALTH;
 
@@ -1208,10 +1235,17 @@ void ClientSpawn(gentity_t *ent) {
 	if ( g_spawnProtect.integer > 0 ) {
 		client->spawnprotected = qtrue;
 		client->ps.eFlags |= EF_SPAWN_PROTECT;
-	} else {
+	}
+	else {
 		client->spawnprotected = qfalse;
 	}
 #endif
+
+	// eser - camp-detection
+	VectorCopy( ent->r.currentOrigin, client->campOrigin );
+	client->campTime = level.time;
+	// eser - camp-detection
+
 	client->latched_buttons = 0;
 
 	// set default animations
@@ -1243,6 +1277,25 @@ void ClientSpawn(gentity_t *ent) {
                     AssignAKing(ent);
                 }
             }
+#if FEAT_TEAM_LEADERSHIP
+            // PTL (11M): assign leader flag to first player on each team
+            if ( g_ptl.integer && g_gametype.integer >= GT_TEAM ) {
+                int pw = ( client->sess.sessionTeam == TEAM_RED ) ? PW_REDFLAG : PW_BLUEFLAG;
+                qboolean hasLeader = qfalse;
+                int k;
+                for ( k = 0; k < level.maxclients; k++ ) {
+                    if ( k == index ) continue;
+                    if ( level.clients[k].pers.connected != CON_CONNECTED ) continue;
+                    if ( level.clients[k].sess.sessionTeam != client->sess.sessionTeam ) continue;
+                    if ( level.clients[k].ps.powerups[pw] ) { hasLeader = qtrue; break; }
+                }
+                if ( !hasLeader ) {
+                    client->ps.powerups[pw] = INT_MAX;
+                    trap_SendServerCommand( -1, va( "cp \"%s" S_COLOR_WHITE " is the %s Leader!\"",
+                        client->pers.netname, ( pw == PW_REDFLAG ) ? S_COLOR_RED "Red" : S_COLOR_BLUE "Blue" ) );
+                }
+            }
+#endif
         }
 	} else {
 		// move players to intermission
@@ -1293,6 +1346,14 @@ void ClientDisconnect( int clientNum ) {
 	if (!ent->client || ent->client->pers.connected == CON_DISCONNECTED) {
 		return;
 	}
+
+#if FEAT_READY_UP
+	// clear ready state and update mask
+	if ( ent->client->ready ) {
+		ent->client->ready = qfalse;
+		G_SendReadymask( -1 );
+	}
+#endif
 
 	// disconnect a hook
 	if (ent->client->hook) {

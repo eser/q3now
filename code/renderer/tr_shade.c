@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_shade.c
 
 #include "tr_local.h"
+#include "../game/q_feats.h"
 
 /*
 
@@ -852,9 +853,33 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			//
 			// set state
 			//
+
+#if FEAT_THIRD_PERSON
+			// RF_FORCE_ENT_ALPHA: override alpha — outside setArraysOnce
+			// so it runs for both single-pass and multi-pass shaders
+			if ( backEnd.currentEntity &&
+				 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) ) {
+				int j;
+				byte a = backEnd.currentEntity->e.shader.rgba[3];
+				for ( j = 0; j < tess.numVertexes; j++ ) {
+					tess.svars.colors[j].rgba[3] = a;
+				}
+			}
+#endif
+
 			R_BindAnimatedImage( &pStage->bundle[0] );
 
-			GL_State( pStage->stateBits );
+#if FEAT_THIRD_PERSON
+			// RF_FORCE_ENT_ALPHA: enable alpha blending
+			if ( backEnd.currentEntity &&
+				 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) &&
+				 backEnd.currentEntity->e.shader.rgba[3] < 255 ) {
+				GL_State( pStage->stateBits | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
+			} else
+#endif
+			{
+				GL_State( pStage->stateBits );
+			}
 
 			//
 			// draw

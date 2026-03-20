@@ -502,6 +502,18 @@ void CG_PredictPlayerState( void ) {
 
 	cg_pmove.pmove_fixed = pmove_fixed.integer;// | cg_pmove_fixed.integer;
 	cg_pmove.pmove_msec = pmove_msec.integer;
+	// build pmove_flags bitmask from feature cvars (mirrors g_active.c)
+	cg_pmove.pmove_flags = 0;
+
+	if ( pmove_overbounce.integer ) {
+		cg_pmove.pmove_flags |= PMF_OVERBOUNCE;
+	}
+
+#if FEAT_FAST_WEAPON_SWITCH
+	// fast weapon switch (5A): map cvar value to 2-bit pmove_flags
+	if ( cg_fastWeaponSwitch.integer == 2 )      cg_pmove.pmove_flags |= PMF_FAST_SWITCH_INSTANT;
+	else if ( cg_fastWeaponSwitch.integer == 1 )  cg_pmove.pmove_flags |= PMF_FAST_SWITCH_SKIP_DROP;
+#endif
 
 	// run cmds
 	moved = qfalse;
@@ -628,5 +640,3 @@ void CG_PredictPlayerState( void ) {
 		}
 	}
 }
-
-

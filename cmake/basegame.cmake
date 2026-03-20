@@ -12,6 +12,63 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/game/bg_slidemove.c
     ${SOURCE_DIR}/game/bg_promode.c
     ${SOURCE_DIR}/game/bg_lib.c
+    ${SOURCE_DIR}/cgame/cg_alloc.c
+    ${SOURCE_DIR}/cgame/cg_atmospheric.c
+    ${SOURCE_DIR}/cgame/cg_chatfilter.c
+    ${SOURCE_DIR}/cgame/cg_colorparse.c
+    ${SOURCE_DIR}/cgame/cg_lensflare.c
+    ${SOURCE_DIR}/cgame/cg_ospcompat.c
+    ${SOURCE_DIR}/cgame/cg_osptext.c
+    ${SOURCE_DIR}/cgame/cg_superhud.c
+    ${SOURCE_DIR}/cgame/cg_superhud_configparser.c
+    ${SOURCE_DIR}/cgame/cg_superhud_private.c
+    ${SOURCE_DIR}/cgame/cg_superhud_util.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_ammomessage.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_chat.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_flagstatus.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_followmessage.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_fps.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_fragmessage.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_gametime.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_gametype.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_grid.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_itempickup.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_itempickupicon.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_localtime.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_location.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_name.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_ng.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_ngp.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_obituaries.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_player_name.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_player_stats.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_powerup.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_pred.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_rankmessage.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_reward.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbab.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbac.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbai.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbamb.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbamc.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbami.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbhb.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbhc.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_sbhi.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_score.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_specmessage.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_spectators.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_speed.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_target_name.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_target_status.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_team.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_teamcount.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_tempAcc.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_vmw.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_weapon_stats.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_warmupinfo.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_weaponlist.c
+    ${SOURCE_DIR}/game/bg_tracemap.c
     ${SOURCE_DIR}/cgame/cg_consolecmds.c
     ${SOURCE_DIR}/cgame/cg_draw.c
     ${SOURCE_DIR}/cgame/cg_drawtools.c
@@ -62,6 +119,8 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_mover.c
     ${SOURCE_DIR}/game/g_session.c
     ${SOURCE_DIR}/game/g_spawn.c
+    ${SOURCE_DIR}/game/bg_tracemap.c
+    ${SOURCE_DIR}/game/g_stats.c
     ${SOURCE_DIR}/game/g_svcmds.c
     ${SOURCE_DIR}/game/g_target.c
     ${SOURCE_DIR}/game/g_team.c
@@ -80,7 +139,9 @@ set(UI_SOURCES
     ${SOURCE_DIR}/game/bg_lib.c
     ${SOURCE_DIR}/q3_ui/ui_addbots.c
     ${SOURCE_DIR}/q3_ui/ui_atoms.c
+    ${SOURCE_DIR}/q3_ui/ui_callvote.c
     ${SOURCE_DIR}/q3_ui/ui_cdkey.c
+    ${SOURCE_DIR}/q3_ui/ui_dynamicmenu.c
     ${SOURCE_DIR}/q3_ui/ui_cinematics.c
     ${SOURCE_DIR}/q3_ui/ui_confirm.c
     ${SOURCE_DIR}/q3_ui/ui_connect.c

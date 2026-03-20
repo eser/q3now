@@ -44,7 +44,7 @@ void G_WriteClientSessionData( gclient_t *client ) {
 	const char	*s;
 	const char	*var;
 
-	s = va("%i %i %i %i %i %i %i", 
+	s = va("%i %i %i %i %i %i %i",
 		client->sess.sessionTeam,
 		client->sess.spectatorNum,
 		client->sess.spectatorState,
@@ -57,6 +57,12 @@ void G_WriteClientSessionData( gclient_t *client ) {
 	var = va( "session%i", (int)(client - level.clients) );
 
 	trap_Cvar_Set( var, s );
+
+#if FEAT_ELO_TRACKING
+	// save ELO to a separate session cvar (10J)
+	var = va( "sessionElo%i", (int)(client - level.clients) );
+	trap_Cvar_Set( var, va( "%i", client->elo ) );
+#endif
 }
 
 /*
@@ -89,6 +95,19 @@ void G_ReadSessionData( gclient_t *client ) {
 	client->sess.sessionTeam = (team_t)sessionTeam;
 	client->sess.spectatorState = (spectatorState_t)spectatorState;
 	client->sess.teamLeader = (qboolean)teamLeader;
+
+#if FEAT_ELO_TRACKING
+	// load ELO from session cvar, default 1000 (10J)
+	{
+		char eloStr[MAX_STRING_CHARS];
+		var = va( "sessionElo%i", (int)(client - level.clients) );
+		trap_Cvar_VariableStringBuffer( var, eloStr, sizeof(eloStr) );
+		client->elo = atoi( eloStr );
+		if ( client->elo <= 0 ) {
+			client->elo = 1000;
+		}
+	}
+#endif
 }
 
 
@@ -165,6 +184,11 @@ void G_InitSessionData( gclient_t *client, char *userinfo ) {
 	}
 
 	AddTournamentQueue(client);
+
+#if FEAT_ELO_TRACKING
+	// initialize ELO for new players (10J)
+	client->elo = 1000;
+#endif
 
 	G_WriteClientSessionData( client );
 }

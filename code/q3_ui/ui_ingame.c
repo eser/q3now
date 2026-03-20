@@ -46,6 +46,9 @@ INGAME MENU
 #define ID_QUIT					17
 #define ID_RESUME				18
 #define ID_TEAMORDERS			19
+#if FEAT_CALLVOTE_MENU
+#define ID_CALLVOTE				20
+#endif
 
 
 typedef struct {
@@ -60,6 +63,9 @@ typedef struct {
 	menutext_s		addbots;
 	menutext_s		removebots;
 	menutext_s		teamorders;
+#if FEAT_CALLVOTE_MENU
+	menutext_s		callvote;
+#endif
 	menutext_s		quit;
 	menutext_s		resume;
 } ingamemenu_t;
@@ -142,6 +148,12 @@ void InGame_Event( void *ptr, int notification ) {
 	case ID_TEAMORDERS:
 		UI_TeamOrdersMenu();
 		break;
+
+#if FEAT_CALLVOTE_MENU
+	case ID_CALLVOTE:
+		UI_CallVoteMenu();
+		break;
+#endif
 
 	case ID_RESUME:
 		UI_PopMenu();
@@ -238,13 +250,26 @@ void InGame_MenuInit( void ) {
 		}
 	}
 
+#if FEAT_CALLVOTE_MENU
+	y += INGAME_MENU_VERTICAL_SPACING;
+	s_ingame.callvote.generic.type		= MTYPE_PTEXT;
+	s_ingame.callvote.generic.flags		= QMF_CENTER_JUSTIFY|QMF_PULSEIFFOCUS;
+	s_ingame.callvote.generic.x			= 320;
+	s_ingame.callvote.generic.y			= y;
+	s_ingame.callvote.generic.id		= ID_CALLVOTE;
+	s_ingame.callvote.generic.callback	= InGame_Event;
+	s_ingame.callvote.string			= "CALL VOTE";
+	s_ingame.callvote.color				= color_red;
+	s_ingame.callvote.style				= UI_CENTER|UI_SMALLFONT;
+#endif
+
 	y += INGAME_MENU_VERTICAL_SPACING;
 	s_ingame.setup.generic.type			= MTYPE_PTEXT;
 	s_ingame.setup.generic.flags		= QMF_CENTER_JUSTIFY|QMF_PULSEIFFOCUS;
 	s_ingame.setup.generic.x			= 320;
 	s_ingame.setup.generic.y			= y;
 	s_ingame.setup.generic.id			= ID_SETUP;
-	s_ingame.setup.generic.callback		= InGame_Event; 
+	s_ingame.setup.generic.callback		= InGame_Event;
 	s_ingame.setup.string				= "SETUP";
 	s_ingame.setup.color				= color_red;
 	s_ingame.setup.style				= UI_CENTER|UI_SMALLFONT;
@@ -312,6 +337,9 @@ void InGame_MenuInit( void ) {
 	Menu_AddItem( &s_ingame.menu, &s_ingame.addbots );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.removebots );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.teamorders );
+#if FEAT_CALLVOTE_MENU
+	Menu_AddItem( &s_ingame.menu, &s_ingame.callvote );
+#endif
 	Menu_AddItem( &s_ingame.menu, &s_ingame.setup );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.server );
 	Menu_AddItem( &s_ingame.menu, &s_ingame.restart );

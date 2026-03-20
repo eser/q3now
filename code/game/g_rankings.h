@@ -333,6 +333,7 @@ Key digits:
 #define QGR_KEY_INVIS					1111060400
 #define QGR_KEY_REGEN					1111060500
 #define QGR_KEY_FLIGHT					1111060600
+#define QGR_KEY_BERSERK					1111060700
 
 #ifdef MISSIONPACK
 // persistant powerup keys

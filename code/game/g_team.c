@@ -52,7 +52,7 @@ void Team_InitGame( void ) {
 		 teamgame.blueStatus = -1; // Invalid to force update
 		Team_SetFlagStatus( TEAM_BLUE, FLAG_ATBASE );
 		break;
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	case GT_1FCTF:
 		teamgame.flagStatus = -1; // Invalid to force update
 		Team_SetFlagStatus( TEAM_FREE, FLAG_ATBASE );
@@ -308,11 +308,11 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 		enemy_flag_pw = PW_REDFLAG;
 	}
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	if (g_gametype.integer == GT_1FCTF) {
 		flag_pw = PW_NEUTRALFLAG;
 		enemy_flag_pw = PW_NEUTRALFLAG;
-	} 
+	}
 #endif
 
 	// did the attacker frag the flag carrier?
@@ -324,6 +324,11 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 #endif
 	if (targ->client->ps.powerups[enemy_flag_pw]) {
 		attacker->client->pers.teamState.lastfraggedcarrier = level.time;
+#if FEAT_CTF_SCORING
+		if ( g_ctfScoring.integer ) {
+			AddScore(attacker, targ->r.currentOrigin, 1);  // enhanced: +1 for carrier kill (10F)
+		} else
+#endif
 		AddScore(attacker, targ->r.currentOrigin, CTF_FRAG_CARRIER_BONUS);
 		attacker->client->pers.teamState.fragcarrier++;
 		PrintMsg(NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " fragged %s's flag carrier!\n",
@@ -497,7 +502,7 @@ void Team_CheckHurtCarrier(gentity_t *targ, gentity_t *attacker)
 	else
 		flag_pw = PW_REDFLAG;
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	if (g_gametype.integer == GT_1FCTF) {
 		flag_pw = PW_NEUTRALFLAG;
 	}
@@ -553,7 +558,7 @@ void Team_ResetFlags( void ) {
 		Team_ResetFlag( TEAM_RED );
 		Team_ResetFlag( TEAM_BLUE );
 	}
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	else if( g_gametype.integer == GT_1FCTF ) {
 		Team_ResetFlag( TEAM_FREE );
 	}
@@ -694,7 +699,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 	gclient_t	*cl = other->client;
 	int			enemy_flag;
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		enemy_flag = PW_NEUTRALFLAG;
 	}
@@ -708,8 +713,13 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 
     if (ent->s.eFlags & EF_DROPPED_ITEM) {
 		// hey, it's not home.  return it by teleporting it back
-		PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " returned the %s flag!\n", 
+		PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " returned the %s flag!\n",
 			cl->pers.netname, TeamName(team));
+#if FEAT_CTF_SCORING
+		if ( g_ctfScoring.integer ) {
+			AddScore(other, ent->r.currentOrigin, 2);  // enhanced: +2 for flag return (10F)
+		} else
+#endif
 		AddScore(other, ent->r.currentOrigin, CTF_RECOVERY_BONUS);
 		other->client->pers.teamState.flagrecovery++;
 		other->client->pers.teamState.lastreturnedflag = level.time;
@@ -717,7 +727,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 		Team_ReturnFlagSound(Team_ResetFlag(team), team);
 		return 0;
 	}
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	}
 #endif
 
@@ -725,14 +735,26 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 	// flag, he's just won!
 	if (!cl->ps.powerups[enemy_flag])
 		return 0; // We don't have the flag
-#ifdef MISSIONPACK
+#if FEAT_RTF
+	// RTF (11L): must also carry own team's flag to capture
+	if ( g_rtf.integer && g_gametype.integer == GT_CTF ) {
+		int own_flag = ( cl->sess.sessionTeam == TEAM_RED ) ? PW_REDFLAG : PW_BLUEFLAG;
+		if ( !cl->ps.powerups[own_flag] ) {
+			PrintMsg( other, "You must also carry your own flag to capture!\n" );
+			return 0;
+		}
+		// clear own flag on capture
+		cl->ps.powerups[own_flag] = 0;
+	}
+#endif
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
         PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the flag!\n", cl->pers.netname );
 	}
 	else {
 #endif
 	PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the %s flag!\n", cl->pers.netname, TeamName(OtherTeam(team)));
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	}
 #endif
 
@@ -752,7 +774,12 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 	other->client->rewardTime = level.time + REWARD_SPRITE_TIME;
 	other->client->ps.persistant[PERS_CAPTURES]++;
 
-	// other gets another 10 frag bonus
+	// capture frag bonus
+#if FEAT_CTF_SCORING
+	if ( g_ctfScoring.integer ) {
+		AddScore(other, ent->r.currentOrigin, 5);  // enhanced: +5 for flag capture (10F)
+	} else
+#endif
 	AddScore(other, ent->r.currentOrigin, CTF_CAPTURE_BONUS);
 
 	Team_CaptureFlagSound( ent, team );
@@ -808,7 +835,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 	gclient_t *cl = other->client;
 
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		PrintMsg (NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " got the flag!\n", other->client->pers.netname );
 
@@ -832,7 +859,7 @@ int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 			cl->ps.powerups[PW_BLUEFLAG] = INT_MAX; // flags never expire
 
 		Team_SetFlagStatus( team, FLAG_TAKEN );
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	}
 
 	AddScore(other, ent->r.currentOrigin, CTF_FLAG_BONUS);
@@ -870,7 +897,7 @@ int Pickup_Team( gentity_t *ent, gentity_t *other ) {
 	else if( strcmp(ent->classname, "team_CTF_blueflag") == 0 ) {
 		team = TEAM_BLUE;
 	}
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	else if( strcmp(ent->classname, "team_CTF_neutralflag") == 0  ) {
 		team = TEAM_FREE;
 	}
@@ -879,7 +906,7 @@ int Pickup_Team( gentity_t *ent, gentity_t *other ) {
 		PrintMsg ( other, "Don't know what team the flag is on.\n");
 		return 0;
 	}
-#ifdef MISSIONPACK
+#if defined(MISSIONPACK) || FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		if( team == TEAM_FREE ) {
 			return Team_TouchEnemyFlag( ent, other, cl->sess.sessionTeam );

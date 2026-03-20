@@ -11,9 +11,9 @@ A Quake 3 Arena mod.
 * **King of the Hill (KOTH)** — custom game type: control the marked zone to score
 * **Last Man Standing (LMS)** — survival game type with limited lives
 
-### Physics
+### Movement
 
-* **Promode / CPMA physics** — Always enabled Challenge Pro Mode movement
+* **Pro physics** — thanks to ancient knowledge of QuakeWorld, QWFix, Promode, CPMA, etc. adjusted physics for providing best competitive match experience
 * **Wall jumps** — strafe into a wall to gain a vertical boost
 
 ### Combat
@@ -22,7 +22,7 @@ A Quake 3 Arena mod.
 * **Instagib mode** — `g_instagib 1` for one-shot railgun kills, players spawn with railgun only
 * **Excessive mode** — over-the-top weapon damage and fire rates for chaotic fun
 * **New armor system** — health/armor caps rebalanced; armor shards replaced with +5 health pickups
-* **Spawn Protection** — spawn protection can be enabled with `g_spawnProtect 500`
+* **Spawn Protection** — attacker gets no points for spawnkills
 
 ### Weapons
 
@@ -35,6 +35,10 @@ A Quake 3 Arena mod.
 ### HUD / UI
 
 * **Colored player names** — extended 17-color palette (A–P codes)
+* **Third-person mode** — allows third-person view
+* **Weather conditions** — Rain, snow, clear weather modes
+* **Lens flares** — Lens flares on missiles and light areas
+* **Detailed scoreboards** — Keeps the weapon-specific stats
 
 
 *This repository does not contain any game content so in order to play you must copy the resulting binaries into your existing Quake III Arena installation*

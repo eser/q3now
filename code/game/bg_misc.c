@@ -471,6 +471,23 @@ gitem_t	bg_itemlist[] =
 /* sounds */ "sound/items/damage2.wav sound/items/damage3.wav"
 	},
 
+/*QUAKED item_berserk (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
+*/
+	{
+		{ "item_berserk", NULL },
+		"sound/items/protect.wav",
+		{ "models/powerups/instant/quad.md3", 
+		"models/powerups/instant/quad_ring.md3",
+		NULL, NULL },
+	/* icon */		"icons/quad",
+	/* pickup */	"Berserk",
+		30,
+		IT_POWERUP,
+		PW_BERSERK,
+	/* precache */ "",
+	/* sounds */ "sound/items/protect3.wav"
+	},
+
 /*QUAKED item_enviro (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
@@ -696,200 +713,236 @@ gweapon_t	bg_weaponlist[] =
 {
     // WP_NONE
     {
-        "None",
-        "n",
+        /* name               */ "None",
+        /* shortname          */ "n",
 
-        colorBlack,
-        qfalse,
-        qfalse,
+        /* color              */ colorBlack,
+        /* switchOnCycle      */ qfalse,
+        /* switchOnOutOfAmmo  */ qfalse,
 
-        qfalse,
+        /* tossOnDeath        */ qfalse,
 
-        0,
-        -1,
-        -1,
+        /* ammoBox            */ 0,
+        /* minAmmunition      */ -1,
+        /* maxAmmunition      */ -1,
 
-        qfalse,
-        -1,
+        /* spawnWeapon        */ qfalse,
+        /* spawnAmmunition    */ -1,
 
-        0,
-        0
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 0,
+		/* recoilKick         */ 0.0f,
+
+        /* reloadTime         */ 0,
+        /* weight             */ 1.0f
     },
 
     // WP_GAUNTLET
     {
-        "Gauntlet",
-        "g",
+        /* name               */ "Gauntlet",
+        /* shortname          */ "g",
 
-        colorOrange,
-        qfalse,
-        qtrue,
+        /* color              */ colorOrange,
+        /* switchOnCycle      */ qfalse,
+        /* switchOnOutOfAmmo  */ qtrue,
 
-        qfalse,
+        /* tossOnDeath        */ qfalse,
 
-        0,
-        -1,
-        -1,
+        /* ammoBox            */ 0,
+        /* minAmmunition      */ -1,
+        /* maxAmmunition      */ -1,
 
-        qtrue,
-        -1,
+        /* spawnWeapon        */ qtrue,
+        /* spawnAmmunition    */ -1,
 
-        500,
-        400
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 500,
+		/* recoilKick         */ 0.0f,
+
+		/* reloadTime         */ 400,
+        /* weight             */ 1.0f
     },
 
     // WP_MACHINEGUN,
     {
-        "Machinegun",
-        "mg",
+        /* name               */ "Machinegun",
+        /* shortname          */ "mg",
 
-        colorYellow,
-        qtrue,
-        qtrue,
+        /* color              */ colorYellow,
+        /* switchOnCycle      */ qtrue,
+        /* switchOnOutOfAmmo  */ qtrue,
 
-        qtrue,
+        /* tossOnDeath        */ qtrue,
 
-        50,
-        50,
-        200,
+        /* ammoBox            */ 50,
+        /* minAmmunition      */ 50,
+        /* maxAmmunition      */ 200,
 
-        qtrue,
-        100,
+        /* spawnWeapon        */ qtrue,
+        /* spawnAmmunition    */ 100,
 
-        1350,
-        100
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 1350,
+		/* recoilKick         */ 0.0f,
+
+		/* reloadTime         */ 100,
+        /* weight             */ 1.0f
     },
 
     // WP_SHOTGUN,
     {
-        "Shotgun",
-        "sg",
+        /* name               */ "Shotgun",
+        /* shortname          */ "sg",
 
-        colorRed,
-        qtrue,
-        qtrue,
+        /* color              */ colorRed,
+        /* switchOnCycle      */ qtrue,
+        /* switchOnOutOfAmmo  */ qtrue,
 
-        qtrue,
+        /* tossOnDeath        */ qtrue,
 
-        20,
-        20,
-        80,
+        /* ammoBox            */ 20,
+        /* minAmmunition      */ 20,
+        /* maxAmmunition      */ 80,
 
-        qfalse,
-        0,
+        /* spawnWeapon        */ qfalse,
+        /* spawnAmmunition    */ 0,
 
-        1350,
-        1000
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 1350,
+		/* recoilKick         */ 0.0f,
+
+		/* reloadTime         */ 1000,
+        /* weight             */ 1.0f
     },
 
     // WP_GRENADE_LAUNCHER,
     {
-        "Grenade Launcher",
-        "gl",
+        /* name               */ "Grenade Launcher",
+        /* shortname          */ "gl",
 
-        colorGreen,
-        qtrue,
-        qtrue,
+        /* color              */ colorGreen,
+        /* switchOnCycle      */ qtrue,
+        /* switchOnOutOfAmmo  */ qtrue,
 
-        qtrue,
+        /* tossOnDeath        */ qtrue,
 
-        10,
-        10,
-        50,
+        /* ammoBox            */ 10,
+        /* minAmmunition      */ 10,
+        /* maxAmmunition      */ 50,
 
-        qfalse,
-        0,
+        /* spawnWeapon        */ qfalse,
+        /* spawnAmmunition    */ 0,
 
-        1200,
-        600
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 1200,
+		/* recoilKick         */ 0.0f,
+
+		/* reloadTime         */ 600,
+        /* weight             */ 1.0f
     },
 
     // WP_ROCKET_LAUNCHER,
     {
-        "Rocket Launcher",
-        "rl",
+        /* name               */ "Rocket Launcher",
+        /* shortname          */ "rl",
 
-        colorMdGrey,
-        qtrue,
-        qtrue,
+        /* color              */ colorMdGrey,
+        /* switchOnCycle      */ qtrue,
+        /* switchOnOutOfAmmo  */ qtrue,
 
-        qtrue,
+        /* tossOnDeath        */ qtrue,
 
-        10,
-        10,
-        50,
+        /* ammoBox            */ 10,
+        /* minAmmunition      */ 10,
+        /* maxAmmunition      */ 50,
 
-        qfalse,
-        0,
+        /* spawnWeapon        */ qfalse,
+        /* spawnAmmunition    */ 0,
 
-        1200,
-        800
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 1200,
+		/* recoilKick         */ 0.0f,
+
+		/* reloadTime         */ 800,
+        /* weight             */ 1.0f
     },
 
     // WP_LIGHTNING,
     {
-        "Lightning Gun",
-        "lg",
+        /* name               */ "Lightning Gun",
+        /* shortname          */ "lg",
 
-        colorWhite,
-        qtrue,
-        qtrue,
+        /* color              */ colorWhite,
+        /* switchOnCycle      */ qtrue,
+        /* switchOnOutOfAmmo  */ qtrue,
 
-        qtrue,
+        /* tossOnDeath        */ qtrue,
 
-        50,
-        50,
-        200,
+        /* ammoBox            */ 50,
+        /* minAmmunition      */ 50,
+        /* maxAmmunition      */ 200,
 
-        qfalse,
-        0,
+        /* spawnWeapon        */ qfalse,
+        /* spawnAmmunition    */ 0,
 
-        1550,
-        50
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 1550,
+		/* recoilKick         */ 0.0f,
+
+		/* reloadTime         */ 50,
+        /* weight             */ 1.0f
     },
 
     // WP_RAILGUN,
     {
-        "Railgun",
-        "rg",
+        /* name               */ "Railgun",
+        /* shortname          */ "rg",
 
-        colorCyan,
-        qtrue,
-        qtrue,
+        /* color              */ colorCyan,
+        /* switchOnCycle      */ qtrue,
+        /* switchOnOutOfAmmo  */ qtrue,
 
-        qtrue,
+        /* tossOnDeath        */ qtrue,
 
-        5,
-        5,
-        25,
+        /* ammoBox            */ 5,
+        /* minAmmunition      */ 5,
+        /* maxAmmunition      */ 25,
 
-        qfalse,
-        0,
+        /* spawnWeapon        */ qfalse,
+        /* spawnAmmunition    */ 0,
 
-        1550,
-        1000
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 1550,
+		/* recoilKick         */ 200.0f,
+
+		/* reloadTime         */ 1000,
+        /* weight             */ 1.0f
     },
 
     // WP_PLASMAGUN,
     {
-        "Plasma Rifle",
-        "pr",
+        /* name               */ "Plasma Rifle",
+        /* shortname          */ "pr",
 
-        colorMagenta, // colorPurple
-        qtrue,
-        qtrue,
+        /* color              */ colorMagenta, // colorPurple
+        /* switchOnCycle      */ qtrue,
+        /* switchOnOutOfAmmo  */ qtrue,
 
-        qtrue,
+        /* tossOnDeath        */ qtrue,
 
-        5,
-        5,
-        25,
+        /* ammoBox            */ 5,
+        /* minAmmunition      */ 5,
+        /* maxAmmunition      */ 25,
 
-        qfalse,
-        0,
+        /* spawnWeapon        */ qfalse,
+        /* spawnAmmunition    */ 0,
 
-        500,
-        1000
+        /* maxDamageDistance  */ 0,
+        /* knockback          */ 500,
+		/* recoilKick         */ 0.0f,
+
+		/* reloadTime         */ 1000,
+        /* weight             */ 1.0f
     }
 };
 
@@ -1069,18 +1122,10 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
         return qtrue;
 
 	case IT_HEALTH:
-		// small and mega healths will go over the max, otherwise
-		// don't pick up if already at max
-		if ( item->quantity == 5 || item->quantity == 100 ) {
-			if ( ps->stats[STAT_HEALTH] >= MAX_HEALTH * 2 ) {
-				return qfalse;
-			}
-			return qtrue;
-		}
-
 		if ( ps->stats[STAT_HEALTH] >= MAX_HEALTH ) {
 			return qfalse;
 		}
+
 		return qtrue;
 
 	case IT_POWERUP:
@@ -1400,6 +1445,7 @@ char *eventnames[] = {
 	"EV_OBITUARY",
 
 	"EV_POWERUP_QUAD",
+	"EV_POWERUP_BERSERK",
 	"EV_POWERUP_BATTLESUIT",
 	"EV_POWERUP_REGEN",
 
@@ -1407,6 +1453,12 @@ char *eventnames[] = {
 	"EV_SCOREPLUM",			// score plum
 #if FEAT_DAMAGE_PLUMS
 	"EV_DAMAGEPLUM",			// floating damage number (attacker-only)
+#endif
+#if FEAT_PING_LOCATION
+	"EV_PING_LOCATION",			// team coordination ping (4G)
+#endif
+#if FEAT_FREEZETAG
+	"EV_FREEZE",				// player frozen (7A)
 #endif
 
 //#ifdef MISSIONPACK
@@ -1429,6 +1481,11 @@ char *eventnames[] = {
 	"EV_TAUNT_PATROL"
 
 };
+
+// A3: compile-time check — event name table must match entity_event_t enum
+typedef char _event_table_size_check[
+	(sizeof(eventnames) / sizeof(eventnames[0]) == EV_NUM_ENTITY_EVENTS) ? 1 : -1
+];
 
 /*
 ===============

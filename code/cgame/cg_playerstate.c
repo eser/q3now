@@ -308,16 +308,22 @@ void CG_CheckLocalSounds( playerState_t *ps, playerState_t *ops ) {
 
 	// hit changes
 	if ( ps->persistant[PERS_HITS] > ops->persistant[PERS_HITS] ) {
-#ifdef MISSIONPACK
-		armor  = ps->persistant[PERS_ATTACKEE_ARMOR] & 0xff;
-		health = ps->persistant[PERS_ATTACKEE_ARMOR] >> 8;
-		if (armor > 50 ) {
-			trap_S_StartLocalSound( cgs.media.hitSoundHighArmor, CHAN_LOCAL_SOUND );
-		} else if (armor || health > 100) {
-			trap_S_StartLocalSound( cgs.media.hitSoundLowArmor, CHAN_LOCAL_SOUND );
-		} else {
+#if FEAT_HIT_SOUNDS
+		if ( cg_hitSounds.integer > 0 ) {
+			// damage-based hit sounds: 4 tiers (0-25, 26-50, 51-75, 76+)
+			int damage = ps->persistant[PERS_HITS] - ops->persistant[PERS_HITS];
+			int index;
+			if ( damage > 75 ) index = 3;
+			else if ( damage > 50 ) index = 2;
+			else if ( damage > 25 ) index = 1;
+			else index = 0;
+			// cg_hitSounds 2: reversed (higher damage = higher pitch)
+			if ( cg_hitSounds.integer > 1 ) index = 3 - index;
+			trap_S_StartLocalSound( cgs.media.hitSounds[index], CHAN_LOCAL_SOUND );
+		} else if ( cg_hitSounds.integer == 0 ) {
 			trap_S_StartLocalSound( cgs.media.hitSound, CHAN_LOCAL_SOUND );
 		}
+		// cg_hitSounds -1: no hit sound at all
 #else
 		trap_S_StartLocalSound( cgs.media.hitSound, CHAN_LOCAL_SOUND );
 #endif

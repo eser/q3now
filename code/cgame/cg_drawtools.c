@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // cg_drawtools.c -- helper functions called by cg_draw, cg_scoreboard, cg_info, etc
 #include "cg_local.h"
+#include "cg_superhud_private.h"
 
 // screen placement state (push/pop API for anchoring HUD elements)
 static screenPlacement_e cg_horizontalPlacement = PLACE_CENTER;
@@ -59,28 +60,32 @@ Uses screen placement to correctly anchor HUD elements on widescreen monitors.
 */
 void CG_AdjustFrom640( float *x, float *y, float *w, float *h ) {
 	if ( cg_horizontalPlacement == PLACE_STRETCH || cg_stretch.integer ) {
-		*w *= cgs.screenXScaleStretch;
-		*x *= cgs.screenXScaleStretch;
+		if ( w ) *w *= cgs.screenXScaleStretch;
+		if ( x ) *x *= cgs.screenXScaleStretch;
 	} else {
-		*w *= cgs.screenXScale;
-		*x *= cgs.screenXScale;
-		if ( cg_horizontalPlacement == PLACE_CENTER ) {
-			*x += cgs.screenXBias;
-		} else if ( cg_horizontalPlacement == PLACE_RIGHT ) {
-			*x += cgs.screenXBias * 2;
+		if ( w ) *w *= cgs.screenXScale;
+		if ( x ) {
+			*x *= cgs.screenXScale;
+			if ( cg_horizontalPlacement == PLACE_CENTER ) {
+				*x += cgs.screenXBias;
+			} else if ( cg_horizontalPlacement == PLACE_RIGHT ) {
+				*x += cgs.screenXBias * 2;
+			}
 		}
 	}
 
 	if ( cg_verticalPlacement == PLACE_STRETCH || cg_stretch.integer ) {
-		*h *= cgs.screenYScaleStretch;
-		*y *= cgs.screenYScaleStretch;
+		if ( h ) *h *= cgs.screenYScaleStretch;
+		if ( y ) *y *= cgs.screenYScaleStretch;
 	} else {
-		*h *= cgs.screenYScale;
-		*y *= cgs.screenYScale;
-		if ( cg_verticalPlacement == PLACE_CENTER ) {
-			*y += cgs.screenYBias;
-		} else if ( cg_verticalPlacement == PLACE_BOTTOM ) {
-			*y += cgs.screenYBias * 2;
+		if ( h ) *h *= cgs.screenYScale;
+		if ( y ) {
+			*y *= cgs.screenYScale;
+			if ( cg_verticalPlacement == PLACE_CENTER ) {
+				*y += cgs.screenYBias;
+			} else if ( cg_verticalPlacement == PLACE_BOTTOM ) {
+				*y += cgs.screenYBias * 2;
+			}
 		}
 	}
 }
@@ -255,28 +260,14 @@ void CG_DrawStringExt( int x, int y, const char *string, const float *setColor,
 	trap_R_SetColor( NULL );
 }
 
-void CG_DrawBigString( int x, int y, const char *s, float alpha ) {
-	float	color[4];
-
-	color[0] = color[1] = color[2] = 1.0;
-	color[3] = alpha;
-	CG_DrawStringExt( x, y, s, color, qfalse, qtrue, BIGCHAR_WIDTH, BIGCHAR_HEIGHT, 0 );
+void CG_DrawBigString( int x, int y, const char *s, vec4_t color, int flags, int font ) {
+	CG_FontSelect( font );
+	CG_OSPDrawString( x, y, s, color, BIGCHAR_WIDTH, BIGCHAR_HEIGHT, SCREEN_WIDTH, flags | DS_SHADOW, NULL );
 }
 
-void CG_DrawBigStringColor( int x, int y, const char *s, vec4_t color ) {
-	CG_DrawStringExt( x, y, s, color, qtrue, qtrue, BIGCHAR_WIDTH, BIGCHAR_HEIGHT, 0 );
-}
-
-void CG_DrawSmallString( int x, int y, const char *s, float alpha ) {
-	float	color[4];
-
-	color[0] = color[1] = color[2] = 1.0;
-	color[3] = alpha;
-	CG_DrawStringExt( x, y, s, color, qfalse, qfalse, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, 0 );
-}
-
-void CG_DrawSmallStringColor( int x, int y, const char *s, vec4_t color ) {
-	CG_DrawStringExt( x, y, s, color, qtrue, qfalse, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, 0 );
+void CG_DrawSmallString( int x, int y, const char *s, vec4_t color, int flags, int font ) {
+	CG_FontSelect( font );
+	CG_OSPDrawString( x, y, s, color, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, SCREEN_WIDTH, flags, NULL );
 }
 
 /*
@@ -360,6 +351,20 @@ void CG_TileClear( void ) {
 }
 
 
+
+/*
+================
+CG_ColorFromAlpha
+================
+*/
+float *CG_ColorFromAlpha( float alpha ) {
+	static vec4_t		color;
+
+	color[0] = color[1] = color[2] = 1.0;
+	color[3] = alpha;
+
+	return color;
+}
 
 /*
 ================

@@ -404,6 +404,10 @@ void CG_InvulnerabilityJuiced( vec3_t org ) {
 
 #endif
 
+// cg_scorePlums bitmask
+#define SCOREPLUMS_SCORES	1	// bit 0: show score plums
+#define SCOREPLUMS_DAMAGES	2	// bit 1: show damage plums
+
 /*
 ==================
 CG_ScorePlum
@@ -416,7 +420,7 @@ void CG_ScorePlum( int client, vec3_t org, int score ) {
 	static vec3_t lastPos;
 
 	// only visualize for the client that scored
-	if (client != cg.predictedPlayerState.clientNum || cg_scorePlum.integer == 0) {
+	if (client != cg.predictedPlayerState.clientNum || !(cg_scorePlums.integer & SCOREPLUMS_SCORES)) {
 		return;
 	}
 
@@ -463,8 +467,8 @@ void CG_DamagePlum( int client, vec3_t org, int damage ) {
 	vec3_t			angles;
 	static vec3_t	lastPos;
 
-	// only show to the client who dealt the damage, and only when enabled
-	if ( client != cg.predictedPlayerState.clientNum || !cg_damagePlum.integer ) {
+	// only show to the client who dealt the damage
+	if ( client != cg.predictedPlayerState.clientNum || !(cg_scorePlums.integer & SCOREPLUMS_DAMAGES) ) {
 		return;
 	}
 
@@ -500,6 +504,57 @@ void CG_DamagePlum( int client, vec3_t org, int damage ) {
 
 	VectorClear( angles );
 	AnglesToAxis( angles, re->axis );
+}
+#endif
+
+#if FEAT_PING_LOCATION
+/*
+==================
+CG_PingLocation
+Team ping marker — pulsing diamond at the pinged world position. (4G)
+==================
+*/
+void CG_PingLocation( centity_t *cent ) {
+	localEntity_t	*le;
+	refEntity_t		*re;
+	vec3_t			angles;
+	int				team;
+
+	// only show to teammates
+	team = cgs.clientinfo[cent->currentState.otherEntityNum].team;
+	if ( team != cg.snap->ps.persistant[PERS_TEAM] ) {
+		return;
+	}
+
+	le = CG_AllocLocalEntity();
+	le->leFlags = 0;
+	le->leType = LE_PING_LOCATION;
+	le->startTime = cg.time;
+	le->endTime = cg.time + 5000;
+	le->lifeRate = 1.0f / ( le->endTime - le->startTime );
+
+	// team-colored: blue for blue team, red for red team
+	if ( team == TEAM_BLUE ) {
+		le->color[0] = 0.2f; le->color[1] = 0.5f; le->color[2] = 1.0f;
+	} else {
+		le->color[0] = 1.0f; le->color[1] = 0.3f; le->color[2] = 0.2f;
+	}
+	le->color[3] = 1.0f;
+
+	le->pos.trType = TR_STATIONARY;
+	le->pos.trTime = cg.time;
+	VectorCopy( cent->lerpOrigin, le->pos.trBase );
+
+	re = &le->refEntity;
+	re->reType = RT_SPRITE;
+	re->radius = 8;
+	re->customShader = cgs.media.crosshairShader[3]; // diamond crosshair
+
+	VectorClear( angles );
+	AnglesToAxis( angles, re->axis );
+
+	trap_S_StartSound( cent->lerpOrigin, ENTITYNUM_WORLD, CHAN_AUTO,
+		cgs.media.teleInSound );
 }
 #endif
 
@@ -792,3 +847,49 @@ void CG_BigExplode( vec3_t playerOrigin ) {
 	velocity[2] = EXP_JUMP + crandom()*EXP_VELOCITY;
 	CG_LaunchExplode( origin, velocity, cgs.media.smoke2 );
 }
+
+#if FEAT_IMPACT_SPARKS
+/*
+============
+CG_ImpactSparks
+Spawn spark particles at a player hit impact point. (11A)
+============
+*/
+void CG_ImpactSparks( vec3_t origin, vec3_t dir ) {
+	int				i, count;
+	localEntity_t	*le;
+	refEntity_t		*re;
+	vec3_t			velocity;
+
+	count = 6 + ( random() * 6 );
+	for ( i = 0; i < count; i++ ) {
+		le = CG_AllocLocalEntity();
+		le->leFlags = 0;
+		le->leType = LE_MOVE_SCALE_FADE;
+		le->startTime = cg.time;
+		le->endTime = cg.time + 200 + random() * 250;
+		le->lifeRate = 1.0 / ( le->endTime - le->startTime );
+
+		re = &le->refEntity;
+		re->reType = RT_SPRITE;
+		re->rotation = 0;
+		re->radius = 0.5 + random() * 1.5;
+		re->customShader = cgs.media.whiteShader;
+		re->shaderRGBA[0] = 0xff;
+		re->shaderRGBA[1] = 0xcc;
+		re->shaderRGBA[2] = 0x44;
+		re->shaderRGBA[3] = 0xff;
+
+		le->color[3] = 1.0;
+
+		le->pos.trType = TR_GRAVITY;
+		le->pos.trTime = cg.time;
+		VectorCopy( origin, le->pos.trBase );
+
+		velocity[0] = dir[0] * 100 + crandom() * 150;
+		velocity[1] = dir[1] * 100 + crandom() * 150;
+		velocity[2] = dir[2] * 100 + crandom() * 150 + 50;
+		VectorCopy( velocity, le->pos.trDelta );
+	}
+}
+#endif

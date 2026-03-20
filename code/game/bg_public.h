@@ -48,16 +48,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	GAME_VERSION		"q3now-1"
 
-// features - mature
-#define FEAT_CONSECUTIVE_KILLS            1
-#define FEAT_DAMAGE_PLUMS                 1
-#define FEAT_SPAWN_PROTECTION             1
-#define FEAT_TELEPORTING_MISSILES         1
-
-// features - testing
-#define FEAT_ADDITIONAL_ROCKET_EXPLOSION  0
-#define FEAT_RAILGUN_KNOCKBACK            0
-#define FEAT_UNLAGGED                     0
+// feature flags — single source of truth for all modules
+#include "q_feats.h"
 
 #define	DEFAULT_GRAVITY		800
 #define	DEFAULT_MOVESPEED	320
@@ -248,6 +240,13 @@ typedef struct {
 	int			pmove_fixed;
 	int			pmove_msec;
 
+	// feature flags bitmask (A4) — set from cvars in g_active.c / cg_predict.c
+	int			pmove_flags;
+#define PMF_OVERBOUNCE            0x0001  // allow overbounce (3C)
+#define PMF_FAST_SWITCH_SKIP_DROP 0x0002  // fast switch mode 1: skip drop anim (5A)
+#define PMF_FAST_SWITCH_INSTANT   0x0006  // fast switch mode 2: instant (both bits) (5A)
+#define PMF_FAST_SWITCH_MASK      0x0006  // mask for fast switch bits
+
 	// callbacks to test the world
 	// these will be different functions during game and cgame
 	void		(*trace)( trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentMask );
@@ -277,8 +276,18 @@ typedef enum {
     STAT_RAILTIME,                  // CPM: Added for allowchange
 // !CPM
 
-    STAT_WALLJUMPS
+    STAT_WALLJUMPS,
+#if FEAT_FREEZETAG
+    STAT_FROZENSTATE,               // 0=normal, 1=frozen, 2=thawing (7A)
+#endif
+    STAT_CAMPER                     // 0-255: camping punishment darkness level (11C)
 } statIndex_t;
+
+#if FEAT_FREEZETAG
+#define FROZENSTATE_NORMAL   0
+#define FROZENSTATE_FROZEN   1
+#define FROZENSTATE_THAWING  2
+#endif
 
 
 // player_state->persistant[] indexes
@@ -329,6 +338,7 @@ typedef enum {
 #define EF_TEAMVOTED		0x00080000		// already cast a team vote
 #define	EF_GRAPPLE			0x00100000
 #define EF_SPAWN_PROTECT	0x00200000		// spawn protection white shell (2B)
+#define EF_FROZEN			0x00400000		// frozen in freezetag — ice shell (7A)
 
 
 #define	EF_BACKPACK			0x00000001		// CPM: Backpack indicator bit
@@ -338,6 +348,7 @@ typedef enum {
 	PW_NONE,
 
 	PW_QUAD,
+	PW_BERSERK,
 	PW_BATTLESUIT,
 	PW_HASTE,
 	PW_INVIS,
@@ -495,6 +506,7 @@ typedef enum {
 	EV_OBITUARY,
 
 	EV_POWERUP_QUAD,
+	EV_POWERUP_BERSERK,
 	EV_POWERUP_BATTLESUIT,
 	EV_POWERUP_REGEN,
 
@@ -502,6 +514,12 @@ typedef enum {
 	EV_SCOREPLUM,			// score plum
 #if FEAT_DAMAGE_PLUMS
 	EV_DAMAGEPLUM,			// floating damage number (attacker-only)
+#endif
+#if FEAT_PING_LOCATION
+	EV_PING_LOCATION,		// team coordination ping (4G)
+#endif
+#if FEAT_FREEZETAG
+	EV_FREEZE,				// player frozen in freezetag (7A)
 #endif
 
 //#ifdef MISSIONPACK
@@ -521,8 +539,9 @@ typedef enum {
 	EV_TAUNT_FOLLOWME,
 	EV_TAUNT_GETFLAG,
 	EV_TAUNT_GUARDBASE,
-	EV_TAUNT_PATROL
+	EV_TAUNT_PATROL,
 
+	EV_NUM_ENTITY_EVENTS	// must be last — used by BUILD_ASSERT in bg_misc.c
 } entity_event_t;
 
 
@@ -620,6 +639,10 @@ typedef enum {
 	TEAM_RED,
 	TEAM_BLUE,
 	TEAM_SPECTATOR,
+	TEAM_4,
+	TEAM_5,
+	TEAM_6,
+	TEAM_7,
 
 	TEAM_NUM_TEAMS
 } team_t;
@@ -732,8 +755,12 @@ typedef struct gweapon_s {
     qboolean    spawnWeapon;
     int         spawnAmmunition;
 
+	float       maxDamageDistance;
     int         knockback;
-    int         reloadTime;
+	float       recoilKick;
+
+	int         reloadTime;
+    float       weight;
 } gweapon_t;
 
 extern	gweapon_t	bg_weaponlist[];
@@ -832,5 +859,14 @@ qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTim
 #define KAMI_SHOCKWAVE_MAXRADIUS		1320
 #define KAMI_BOOMSPHERE_MAXRADIUS		720
 #define KAMI_SHOCKWAVE2_MAXRADIUS		704
+
+// Tracemap (3A)
+#if FEAT_ATMOSPHERIC
+float	BG_GetSkyHeightAtPoint( vec3_t pos );
+float	BG_GetGroundHeightAtPoint( vec3_t pos );
+void	BG_GenerateTracemap( vec3_t world_mins, vec3_t world_maxs,
+			void (*trace)( trace_t *, const vec3_t, const vec3_t, const vec3_t, const vec3_t, int, int ) );
+qboolean BG_TracemapLoaded( void );
+#endif
 
 #endif // _BG_PUBLIC_H

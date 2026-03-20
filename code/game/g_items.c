@@ -257,15 +257,7 @@ void CPM_HealthDecay(gentity_t *ent)
 // !CPM
 
 int Pickup_Health (gentity_t *ent, gentity_t *other) {
-	int			max;
 	int			quantity;
-
-	// small and mega healths will go over the max
-	if ( ent->item->quantity == 5 || ent->item->quantity == 100 ) {
-        max = MAX_HEALTH * 2;
-	} else {
-        max = MAX_HEALTH;
-	}
 
 	if ( ent->count ) {
 		quantity = ent->count;
@@ -275,8 +267,8 @@ int Pickup_Health (gentity_t *ent, gentity_t *other) {
 
 	other->health += quantity;
 
-	if (other->health > max ) {
-		other->health = max;
+	if (other->health > MAX_HEALTH ) {
+		other->health = MAX_HEALTH;
 	}
 	other->client->ps.stats[STAT_HEALTH] = other->health;
 
@@ -413,6 +405,14 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 		return;
 	if (other->health < 1)
 		return;		// dead people can't pickup
+
+#if FEAT_DROP_ITEMS
+	// drop items (11D): prevent dropper from re-picking item for 1 second
+	if ( (ent->s.eFlags & EF_DROPPED_ITEM) && ent->r.ownerNum == other->s.number
+		 && level.time - ent->s.pos.trTime < 1000 ) {
+		return;
+	}
+#endif
 
 	// the same pickup rules are used for client side and server side
 	if ( !BG_CanItemBeGrabbed( g_gametype.integer, &ent->s, &other->client->ps ) ) {
@@ -1010,4 +1010,3 @@ void G_RunItem( gentity_t *ent ) {
 
 	G_BounceItem( ent, &tr );
 }
-

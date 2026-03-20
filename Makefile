@@ -256,6 +256,32 @@ else
 	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)"
 endif
 
+# ── Feature stress test ──────────────────────────────────────────────────────
+# Starts devmap with ALL feature cvars enabled, spawns 3 bots, runs 30s.
+# Catches crashes from feature interactions. Exit 0 = all features coexist.
+
+test-features: install
+ifeq ($(UNAME_S),Darwin)
+	@echo "==> Testing all features enabled (30s)..."
+	@timeout 35 "$(GAME_BIN)" \
+	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
+	  +set g_fastWeaponSwitch 2 \
+	  +set g_spawnProtect 2 \
+	  +set cg_scorePlums 2 \
+	  +set developer 1 +set ttycon 0 \
+	  +devmap $(MAP) +addbot Doom 3 +addbot Bones 3 +addbot Slash 3 \
+	  +wait 900 +quit > /tmp/q3now-test-features.log 2>&1 || true
+	@if grep -q "Unknown event\|Error\|FATAL\|Signal caught" /tmp/q3now-test-features.log; then \
+	  echo "FAIL: Feature test detected errors"; \
+	  grep "Unknown event\|Error\|FATAL\|Signal caught" /tmp/q3now-test-features.log; \
+	  exit 1; \
+	else \
+	  echo "==> All features OK"; \
+	fi
+else
+	@echo "test-features: not yet implemented for Linux"
+endif
+
 # ── Bench ─────────────────────────────────────────────────────────────────────
 # Timedemo benchmark. Requires a demo at Q3BASEDIR/demos/four.dm_68.
 # Override DEMO= to use a different demo file (without the .dm_68 extension).

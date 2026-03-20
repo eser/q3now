@@ -77,6 +77,7 @@ vmCvar_t	g_filterBan;
 vmCvar_t	g_smoothClients;
 vmCvar_t	pmove_fixed;
 vmCvar_t	pmove_msec;
+vmCvar_t	pmove_overbounce;
 vmCvar_t	g_rankings;
 vmCvar_t	g_listEntity;
 vmCvar_t	g_localTeamPref;
@@ -101,6 +102,83 @@ vmCvar_t	g_unlagged;
 #endif
 #if FEAT_SPAWN_PROTECTION
 vmCvar_t	g_spawnProtect;
+#endif
+#if FEAT_READY_UP
+vmCvar_t	g_startWhenReady;
+#endif
+#if FEAT_FREEZETAG
+vmCvar_t	g_freeze;
+vmCvar_t	g_thawTime;
+vmCvar_t	g_thawRadius;
+#endif
+#if FEAT_JSON_STATS
+vmCvar_t	g_exportStats;
+#endif
+#if FEAT_MAP_ROTATION
+vmCvar_t	g_maprotation;
+vmCvar_t	g_maprotationMode;
+#endif
+#if FEAT_FAST_WEAPON_SWITCH
+vmCvar_t	g_fastWeaponSwitch;
+#endif
+#if FEAT_OVERTIME
+vmCvar_t	g_overtime;
+#endif
+#if FEAT_AUTO_DEMO
+vmCvar_t	g_autoDemo;
+#endif
+#if FEAT_CTF_SCORING
+vmCvar_t	g_ctfScoring;
+#endif
+#if FEAT_TOURNAMENT_PAUSE
+vmCvar_t	g_allowTimeout;
+#endif
+#if FEAT_PROJECTILE_BOUNCE
+vmCvar_t	g_projectileBounce;
+#endif
+#if FEAT_ATMOSPHERIC
+vmCvar_t	g_weather;
+#endif
+#if FEAT_TEAM_AUTOBALANCE
+vmCvar_t	g_teamBalance;
+vmCvar_t	g_teamBalanceDelay;
+#endif
+#if FEAT_ELIMINATION
+vmCvar_t	g_elimination;
+vmCvar_t	g_eliminationRoundTime;
+#endif
+// eser - admin mode
+vmCvar_t	g_adminPassword;
+// eser - admin mode
+#if FEAT_RANKED_QUEUE
+vmCvar_t	g_ranked;
+vmCvar_t	g_rankedMinPlayers;
+#endif
+#if FEAT_CLAN_ARENA
+vmCvar_t	g_clanArena;
+#endif
+#if FEAT_RTF
+vmCvar_t	g_rtf;
+#endif
+#if FEAT_TEAM_LEADERSHIP
+vmCvar_t	g_ptl;
+#endif
+#if FEAT_CRON_JOBS
+typedef struct {
+	int		intervalSec;
+	char	command[256];
+} cronJob_t;
+#define MAX_CRON_JOBS 32
+static cronJob_t	cronJobs[MAX_CRON_JOBS];
+static int			numCronJobs = 0;
+static int			cronLastCheck = 0;
+#endif
+// eser - camp-detection
+vmCvar_t	g_campDetectionTime;
+vmCvar_t	g_campDetectionRadius;
+// eser - camp-detection
+#if FEAT_DROP_ITEMS
+vmCvar_t	g_dropEnable;
 #endif
 
 
@@ -169,6 +247,7 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_smoothClients, "g_smoothClients", "1", 0, 0, qfalse},
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO, 0, qfalse},
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO, 0, qfalse},
+	{ &pmove_overbounce, "pmove_overbounce", "1", CVAR_SYSTEMINFO, 0, qfalse},
 
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
 	{ &g_localTeamPref, "g_localTeamPref", "", 0, 0, qfalse },
@@ -184,9 +263,74 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_unlagged, "g_unlagged", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
 #endif
 #if FEAT_SPAWN_PROTECTION
-    { &g_spawnProtect,            "g_spawnProtect",            "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse }
-#else
-    { &g_unlagged, "g_unlagged", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse }
+    { &g_spawnProtect,            "g_spawnProtect",            "2", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_READY_UP
+    { &g_startWhenReady,          "g_startWhenReady",          "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_FREEZETAG
+    { &g_freeze,                  "g_freeze",                  "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_LATCH, 0, qfalse },
+    { &g_thawTime,                "g_thawTime",                "3000", CVAR_ARCHIVE, 0, qfalse },
+    { &g_thawRadius,              "g_thawRadius",              "128", CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_JSON_STATS
+    { &g_exportStats,             "g_exportStats",             "0", CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_MAP_ROTATION
+    { &g_maprotation,             "g_maprotation",             "", CVAR_ARCHIVE, 0, qfalse },
+    { &g_maprotationMode,         "g_maprotationMode",         "0", CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_FAST_WEAPON_SWITCH
+    { &g_fastWeaponSwitch,        "g_fastWeaponSwitch",        "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_OVERTIME
+    { &g_overtime,                "g_overtime",                "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_AUTO_DEMO
+    { &g_autoDemo,                "g_autoDemo",                "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_CTF_SCORING
+    { &g_ctfScoring,              "g_ctfScoring",              "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_TOURNAMENT_PAUSE
+    { &g_allowTimeout,            "g_allowTimeout",            "1", CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_PROJECTILE_BOUNCE
+    { &g_projectileBounce,        "g_projectileBounce",        "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_ATMOSPHERIC
+    { &g_weather,                 "g_weather",                 "", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qtrue },
+#endif
+#if FEAT_TEAM_AUTOBALANCE
+    { &g_teamBalance,             "g_teamBalance",             "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+    { &g_teamBalanceDelay,        "g_teamBalanceDelay",        "5", CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_ELIMINATION
+    { &g_elimination,             "g_elimination",             "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_LATCH, 0, qfalse },
+    { &g_eliminationRoundTime,    "g_eliminationRoundTime",    "120", CVAR_ARCHIVE, 0, qfalse },
+#endif
+// eser - admin mode
+    { &g_adminPassword,           "g_adminPassword",           "", CVAR_ARCHIVE, 0, qfalse },
+// eser - admin mode
+#if FEAT_RANKED_QUEUE
+    { &g_ranked,                  "g_ranked",                  "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+    { &g_rankedMinPlayers,        "g_rankedMinPlayers",        "2", CVAR_ARCHIVE, 0, qfalse },
+#endif
+#if FEAT_CLAN_ARENA
+    { &g_clanArena,               "g_clanArena",               "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_LATCH, 0, qfalse },
+#endif
+#if FEAT_RTF
+    { &g_rtf,                     "g_rtf",                     "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_LATCH, 0, qfalse },
+#endif
+#if FEAT_TEAM_LEADERSHIP
+    { &g_ptl,                     "g_ptl",                     "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_LATCH, 0, qfalse },
+#endif
+	// eser - camp-detection
+    { &g_campDetectionTime,            "g_campDetectionTime",            "30",  CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+    { &g_campDetectionRadius,          "g_campDetectionRadius",          "300", CVAR_ARCHIVE, 0, qfalse },
+	// eser - camp-detection
+#if FEAT_DROP_ITEMS
+    { &g_dropEnable,              "g_dropEnable",              "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
 #endif
 };
 
@@ -471,6 +615,54 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	G_InitWorldSession();
 
+#if FEAT_CRON_JOBS
+	// cron jobs (11P): parse crontab.txt at init
+	{
+		fileHandle_t	f;
+		int				len;
+		char			buf[4096];
+
+		numCronJobs = 0;
+		cronLastCheck = 0;
+		len = trap_FS_FOpenFile( "crontab.txt", &f, FS_READ );
+		if ( f && len > 0 && len < (int)sizeof(buf) ) {
+			char *p, *line;
+			trap_FS_Read( buf, len, f );
+			buf[len] = '\0';
+			p = buf;
+			while ( numCronJobs < MAX_CRON_JOBS ) {
+				// find next line
+				line = p;
+				while ( *p && *p != '\n' && *p != '\r' ) p++;
+				if ( *p ) { *p = '\0'; p++; }
+				while ( *p == '\n' || *p == '\r' ) p++;
+				// skip empty / comment lines
+				if ( !line[0] || line[0] == '#' ) {
+					if ( !*p ) break;
+					continue;
+				}
+				// parse: <seconds> <command>
+				{
+					int sec = atoi( line );
+					char *cmd = line;
+					while ( *cmd && *cmd != ' ' && *cmd != '\t' ) cmd++;
+					while ( *cmd == ' ' || *cmd == '\t' ) cmd++;
+					if ( sec > 0 && cmd[0] ) {
+						cronJobs[numCronJobs].intervalSec = sec;
+						Q_strncpyz( cronJobs[numCronJobs].command, cmd, sizeof(cronJobs[0].command) );
+						numCronJobs++;
+					}
+				}
+				if ( !*p ) break;
+			}
+			G_Printf( "Cron: loaded %d jobs from crontab.txt\n", numCronJobs );
+		}
+		if ( f ) {
+			trap_FS_FCloseFile( f );
+		}
+	}
+#endif
+
 	// initialize all entities for this game
 	memset( g_entities, 0, MAX_GENTITIES * sizeof(g_entities[0]) );
 	level.gentities = g_entities;
@@ -517,6 +709,23 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
         }
     }
 
+#if FEAT_CLAN_ARENA
+	// clan arena (11K): remove all pickups (weapons, ammo, armor, health)
+	if ( g_clanArena.integer && g_elimination.integer ) {
+		gentity_t *e;
+		int j;
+		for ( j = MAX_CLIENTS, e = &g_entities[j]; j < level.num_entities; j++, e++ ) {
+			if ( !e->inuse || !e->item ) continue;
+			if ( e->item->giType == IT_WEAPON || e->item->giType == IT_AMMO ||
+				 e->item->giType == IT_ARMOR  || e->item->giType == IT_HEALTH ||
+				 e->item->giType == IT_POWERUP ) {
+				G_FreeEntity( e );
+			}
+		}
+		G_Printf( "Clan Arena: items removed\n" );
+	}
+#endif
+
 	// make sure we have flags for CTF, etc
 	if( g_gametype.integer >= GT_TEAM ) {
 		G_CheckTeamItems();
@@ -535,6 +744,13 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	G_RemapTeamShaders();
 
 	trap_SetConfigstring( CS_INTERMISSION, "" );
+
+#if FEAT_AUTO_DEMO
+	// auto-demo (10K): start recording when match begins (warmup ended)
+	if ( g_autoDemo.integer && g_restarted.integer ) {
+		trap_SendServerCommand( -1, "record\n" );
+	}
+#endif
 }
 
 
@@ -1050,6 +1266,12 @@ void BeginIntermission( void ) {
     // send the current scoring to all clients
 	SendScoreboardMessageToAllClients();
 
+#if FEAT_AUTO_DEMO
+	// auto-demo (10K): stop recording when intermission starts
+	if ( g_autoDemo.integer ) {
+		trap_SendServerCommand( -1, "stoprecord\n" );
+	}
+#endif
 }
 
 
@@ -1068,6 +1290,13 @@ void ExitLevel (void) {
 	char nextmap[MAX_STRING_CHARS];
 	char d1[MAX_STRING_CHARS];
 
+#if FEAT_JSON_STATS
+	G_WriteStatsJSON();
+#endif
+#if FEAT_ELO_TRACKING
+	G_CalculateEloChanges();
+#endif
+
 	//bot interbreeding
 	BotInterbreedEndMatch();
 
@@ -1084,6 +1313,14 @@ void ExitLevel (void) {
 		return;	
 	}
 
+#if FEAT_MAP_ROTATION
+	// map rotation (6D): override nextmap if rotation is configured
+	{
+		const char *rotMap = G_NextRotationMap();
+		if ( rotMap ) {
+			trap_SendConsoleCommand( EXEC_APPEND, va( "map %s\n", rotMap ) );
+		} else {
+#endif
 	trap_Cvar_VariableStringBuffer( "nextmap", nextmap, sizeof(nextmap) );
 	trap_Cvar_VariableStringBuffer( "d1", d1, sizeof(d1) );
 
@@ -1093,6 +1330,10 @@ void ExitLevel (void) {
 	} else {
 		trap_SendConsoleCommand( EXEC_APPEND, "vstr nextmap\n" );
 	}
+#if FEAT_MAP_ROTATION
+		}
+	}
+#endif
 
 	level.changemap = NULL;
 	level.intermissiontime = 0;
@@ -1388,6 +1629,17 @@ void CheckExitRules( void ) {
 
 	if ( g_timelimit.integer ) {
 		if ( level.time - level.startTime >= g_timelimit.integer*60000 ) {
+#if FEAT_OVERTIME
+			// overtime (10D): extend timelimit when score is tied
+			if ( g_overtime.integer > 0 && ScoreIsTied() ) {
+				level.overtimeCount++;
+				trap_Cvar_Set( "timelimit", va( "%i", g_timelimit.integer + g_overtime.integer ) );
+				trap_Cvar_Update( &g_timelimit );
+				trap_SendServerCommand( -1, va( "print \"Score tied! Overtime #%d (%d min).\n\"",
+					level.overtimeCount, g_overtime.integer ) );
+				return;
+			}
+#endif
 			trap_SendServerCommand( -1, "print \"Timelimit hit.\n\"");
 			LogExit( "Timelimit hit." );
 			return;
@@ -1665,6 +1917,12 @@ void CheckTournament( void ) {
 		// if all players have arrived, start the countdown
 		if ( level.warmupTime < 0 ) {
 			if ( level.numPlayingClients == 2 ) {
+#if FEAT_READY_UP
+				// ready-up (4E): wait for all players to be ready
+				if ( g_startWhenReady.integer && !G_AllPlayersReady() ) {
+					return;
+				}
+#endif
 				// fudge by -1 to account for extra delays
 				if ( g_warmup.integer > 1 ) {
 					level.warmupTime = level.time + ( g_warmup.integer - 1 ) * 1000;
@@ -1721,6 +1979,12 @@ void CheckTournament( void ) {
 
 		// if all players have arrived, start the countdown
 		if ( level.warmupTime < 0 ) {
+#if FEAT_READY_UP
+			// ready-up (4E): wait for all players to be ready
+			if ( g_startWhenReady.integer && !G_AllPlayersReady() ) {
+				return;
+			}
+#endif
 			// fudge by -1 to account for extra delays
 			if ( g_warmup.integer > 1 ) {
 				level.warmupTime = level.time + ( g_warmup.integer - 1 ) * 1000;
@@ -1752,11 +2016,20 @@ CheckVote
 void CheckVote( void ) {
 	if ( level.voteExecuteTime && level.voteExecuteTime < level.time ) {
 		level.voteExecuteTime = 0;
+
+		// eser - team shuffle command
+		if ( !Q_stricmp( level.voteString, "shuffle" ) ) {
+			G_ShuffleTeams();
+		} else
+
+		// eser - team shuffle command
 		trap_SendConsoleCommand( EXEC_APPEND, va("%s\n", level.voteString ) );
 	}
+
 	if ( !level.voteTime ) {
 		return;
 	}
+
 	if ( level.time - level.voteTime >= VOTE_TIME ) {
 		trap_SendServerCommand( -1, "print \"Vote failed.\n\"" );
 	} else {
@@ -1778,6 +2051,107 @@ void CheckVote( void ) {
 
 }
 
+#if FEAT_MAP_ROTATION
+/*
+==================
+G_NextRotationMap
+
+Returns the next map from g_maprotation. Cycles through the space-separated
+list. Mode 0 = sequential, mode 1 = random. (6D)
+==================
+*/
+const char *G_NextRotationMap( void ) {
+	static char mapname[MAX_QPATH];
+	char rotation[MAX_INFO_STRING];
+	const char *maps[64];
+	int numMaps, i;
+	char *p;
+	const char *token;
+
+	trap_Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+	if ( !rotation[0] ) {
+		return NULL;
+	}
+
+	// tokenize the space-separated map list
+	numMaps = 0;
+	p = rotation;
+	while ( numMaps < 64 ) {
+		token = COM_Parse( (const char **)&p );
+		if ( !token[0] ) break;
+		maps[numMaps] = token;
+		numMaps++;
+	}
+
+	if ( numMaps == 0 ) {
+		return NULL;
+	}
+
+	if ( g_maprotationMode.integer == 1 ) {
+		// random mode
+		i = rand() % numMaps;
+	} else {
+		// sequential mode
+		i = level.rotationIndex % numMaps;
+		level.rotationIndex++;
+	}
+
+	// re-parse to get the actual token (COM_Parse uses static buffer)
+	{
+		int j;
+		p = rotation;
+		for ( j = 0; j <= i; j++ ) {
+			token = COM_Parse( (const char **)&p );
+		}
+	}
+	Q_strncpyz( mapname, token, sizeof( mapname ) );
+
+	return mapname;
+}
+#endif
+
+// eser - team shuffle command
+/*
+==================
+G_ShuffleTeams
+
+Randomly redistributes all non-spectator players across red and blue teams,
+then restarts the map. (7D)
+==================
+*/
+void G_ShuffleTeams( void ) {
+	int i, count = 0;
+	int players[MAX_CLIENTS];
+	gclient_t *cl;
+
+	// collect non-spectator players
+	for ( i = 0; i < level.maxclients; i++ ) {
+		cl = level.clients + i;
+		if ( cl->pers.connected != CON_CONNECTED ) continue;
+		if ( cl->sess.sessionTeam == TEAM_SPECTATOR ) continue;
+		players[count++] = i;
+	}
+
+	// Fisher-Yates shuffle
+	for ( i = count - 1; i > 0; i-- ) {
+		int j = rand() % ( i + 1 );
+		int tmp = players[i];
+		players[i] = players[j];
+		players[j] = tmp;
+	}
+
+	// assign alternating teams
+	for ( i = 0; i < count; i++ ) {
+		cl = level.clients + players[i];
+		cl->sess.sessionTeam = ( i % 2 ) ? TEAM_BLUE : TEAM_RED;
+		ClientUserinfoChanged( players[i] );
+	}
+
+	trap_SendServerCommand( -1, "print \"Teams have been shuffled!\n\"" );
+	trap_SendConsoleCommand( EXEC_APPEND, "map_restart 0\n" );
+}
+// eser - team shuffle command
+
 /*
 ==================
 PrintTeam
@@ -1792,6 +2166,72 @@ void PrintTeam(int team, char *message) {
 		trap_SendServerCommand( i, message );
 	}
 }
+
+#if FEAT_READY_UP
+/*
+==================
+G_AllPlayersReady
+
+Returns qtrue if all non-spectator players are ready. (4E)
+==================
+*/
+qboolean G_AllPlayersReady( void ) {
+	int i;
+	gclient_t *cl;
+
+	for ( i = 0; i < level.maxclients; i++ ) {
+		cl = level.clients + i;
+		if ( cl->pers.connected != CON_CONNECTED ) {
+			continue;
+		}
+		if ( cl->sess.sessionTeam == TEAM_SPECTATOR ) {
+			continue;
+		}
+		// bots are always ready
+		if ( g_entities[i].r.svFlags & SVF_BOT ) {
+			continue;
+		}
+		if ( !cl->ready ) {
+			return qfalse;
+		}
+	}
+	return qtrue;
+}
+
+/*
+==================
+G_SendReadymask
+
+Broadcasts ready-state bitmask to all clients via STAT_CLIENTS_READY. (4E)
+==================
+*/
+void G_SendReadymask( int clientNum ) {
+	int i, mask = 0;
+	gclient_t *cl;
+
+	for ( i = 0; i < level.maxclients; i++ ) {
+		cl = level.clients + i;
+		if ( cl->pers.connected != CON_CONNECTED ) {
+			continue;
+		}
+		if ( cl->sess.sessionTeam == TEAM_SPECTATOR ) {
+			continue;
+		}
+		if ( cl->ready ) {
+			mask |= ( 1 << i );
+		}
+	}
+	level.readyMask = mask;
+
+	// broadcast via STAT_CLIENTS_READY (already network-synced in playerState_t)
+	for ( i = 0; i < level.maxclients; i++ ) {
+		cl = level.clients + i;
+		if ( cl->pers.connected == CON_CONNECTED ) {
+			cl->ps.stats[STAT_CLIENTS_READY] = mask;
+		}
+	}
+}
+#endif
 
 /*
 ==================
@@ -1946,6 +2386,336 @@ void G_RunThink (gentity_t *ent) {
 	ent->think (ent);
 }
 
+#if FEAT_TEAM_AUTOBALANCE
+/*
+================
+G_CheckTeamBalance
+
+Called from G_RunFrame periodically. If teams differ by 2+,
+move the last-joined player on the larger team to the smaller team.
+================
+*/
+void G_CheckTeamBalance( void ) {
+	int redCount, blueCount, i;
+	int latestTime;
+	int latestClient;
+	gclient_t *cl;
+	team_t bigTeam, smallTeam;
+
+	if ( !g_teamBalance.integer ) {
+		return;
+	}
+	if ( g_gametype.integer < GT_TEAM ) {
+		return;
+	}
+	// only check every g_teamBalanceDelay seconds
+	if ( level.time - level.lastBalanceCheck < g_teamBalanceDelay.integer * 1000 ) {
+		return;
+	}
+	level.lastBalanceCheck = level.time;
+
+	redCount = TeamCount( -1, TEAM_RED );
+	blueCount = TeamCount( -1, TEAM_BLUE );
+
+	if ( abs( redCount - blueCount ) < 2 ) {
+		return;
+	}
+
+	if ( redCount > blueCount ) {
+		bigTeam = TEAM_RED;
+		smallTeam = TEAM_BLUE;
+	} else {
+		bigTeam = TEAM_BLUE;
+		smallTeam = TEAM_RED;
+	}
+
+	// find the last-joined player on the larger team
+	latestTime = 0;
+	latestClient = -1;
+	for ( i = 0; i < level.maxclients; i++ ) {
+		cl = level.clients + i;
+		if ( cl->pers.connected != CON_CONNECTED ) {
+			continue;
+		}
+		if ( cl->sess.sessionTeam != bigTeam ) {
+			continue;
+		}
+#if FEAT_FREEZETAG
+		// don't swap frozen players
+		if ( cl->ps.stats[STAT_FROZENSTATE] != FROZENSTATE_NORMAL ) {
+			continue;
+		}
+#endif
+		if ( cl->pers.enterTime > latestTime ) {
+			latestTime = cl->pers.enterTime;
+			latestClient = i;
+		}
+	}
+
+	if ( latestClient < 0 ) {
+		return;
+	}
+
+	// move the player
+	SetTeam( &g_entities[latestClient], smallTeam == TEAM_RED ? "red" : "blue" );
+	trap_SendServerCommand( -1, "cp \"Teams auto-balanced\n\"" );
+	G_LogPrintf( "TeamAutoBalance: moved client %i to %s\n", latestClient,
+		smallTeam == TEAM_RED ? "red" : "blue" );
+}
+#endif // FEAT_TEAM_AUTOBALANCE
+
+#if FEAT_ELIMINATION
+/*
+================
+G_CheckElimination
+
+Round-based elimination modifier. Called from G_RunFrame.
+================
+*/
+void G_CheckElimination( void ) {
+	int redAlive, blueAlive, i;
+	gclient_t *cl;
+
+	if ( !g_elimination.integer ) {
+		return;
+	}
+	if ( g_gametype.integer < GT_TEAM ) {
+		return;
+	}
+	if ( level.intermissiontime ) {
+		return;
+	}
+
+	switch ( level.roundState ) {
+	case ROUND_WARMUP:
+		// wait 5 seconds then go live
+		if ( level.time - level.roundStartTime >= 5000 ) {
+			level.roundState = ROUND_LIVE;
+			level.roundStartTime = level.time;
+			level.roundNumber++;
+			trap_SendServerCommand( -1, va( "cp \"Round %i - FIGHT!\n\"", level.roundNumber ) );
+		}
+		break;
+
+	case ROUND_LIVE:
+		// count alive players per team
+		redAlive = 0;
+		blueAlive = 0;
+		for ( i = 0; i < level.maxclients; i++ ) {
+			cl = level.clients + i;
+			if ( cl->pers.connected != CON_CONNECTED ) {
+				continue;
+			}
+			if ( cl->sess.sessionTeam == TEAM_RED && cl->ps.pm_type != PM_DEAD ) {
+				redAlive++;
+			} else if ( cl->sess.sessionTeam == TEAM_BLUE && cl->ps.pm_type != PM_DEAD ) {
+				blueAlive++;
+			}
+		}
+
+		if ( redAlive == 0 && blueAlive > 0 ) {
+			// blue wins the round
+			level.roundWins[TEAM_BLUE]++;
+			level.teamScores[TEAM_BLUE]++;
+			level.roundState = ROUND_END;
+			level.roundStartTime = level.time;
+			trap_SendServerCommand( -1, "cp \"Blue team wins the round!\n\"" );
+		} else if ( blueAlive == 0 && redAlive > 0 ) {
+			// red wins the round
+			level.roundWins[TEAM_RED]++;
+			level.teamScores[TEAM_RED]++;
+			level.roundState = ROUND_END;
+			level.roundStartTime = level.time;
+			trap_SendServerCommand( -1, "cp \"Red team wins the round!\n\"" );
+		} else if ( level.time - level.roundStartTime >= g_eliminationRoundTime.integer * 1000 ) {
+			// time expired, draw
+			level.roundState = ROUND_END;
+			level.roundStartTime = level.time;
+			trap_SendServerCommand( -1, "cp \"Round draw - time expired!\n\"" );
+		}
+		break;
+
+	case ROUND_END:
+		// 3 second delay then reset
+		if ( level.time - level.roundStartTime >= 3000 ) {
+			G_ResetRound();
+			level.roundState = ROUND_WARMUP;
+			level.roundStartTime = level.time;
+		}
+		break;
+	}
+}
+
+/*
+================
+G_ResetRound
+
+Respawn all dead players, reset health/ammo for all players.
+================
+*/
+void G_ResetRound( void ) {
+	int i;
+	gentity_t *ent;
+
+	for ( i = 0; i < level.maxclients; i++ ) {
+		ent = &g_entities[i];
+		if ( !ent->inuse || !ent->client ) {
+			continue;
+		}
+		if ( ent->client->pers.connected != CON_CONNECTED ) {
+			continue;
+		}
+		if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
+			continue;
+		}
+		// respawn at a new spawn point with full health/ammo
+		ClientSpawn( ent );
+	}
+	trap_SendServerCommand( -1, "cp \"New round starting...\n\"" );
+}
+#endif // FEAT_ELIMINATION
+
+#if FEAT_ELO_TRACKING
+/*
+================
+G_CalculateEloChanges
+
+At end of match, calculate ELO changes.
+For team games: average team ELO, then apply change to each player.
+For FFA: winner vs each other player.
+K = 32.
+================
+*/
+// QVM-safe 10^x approximation for ELO (no powf in QVM)
+static float ELO_Pow10( float x ) {
+	// 10^x ≈ e^(x * ln10) ≈ polynomial for |x| <= 1
+	// For ELO: x = ratingDiff/400, range ~ [-1, 1]
+	float ln10x = x * 2.302585f;  // x * ln(10)
+	float abs_ln10x = ln10x < 0 ? -ln10x : ln10x;
+	float result;
+	// Taylor: e^t ≈ 1 + t + t²/2 + t³/6 + t⁴/24
+	result = 1.0f + ln10x + ln10x * ln10x * 0.5f
+		+ ln10x * ln10x * ln10x * (1.0f/6.0f)
+		+ ln10x * ln10x * ln10x * ln10x * (1.0f/24.0f);
+	if ( result < 0.01f ) result = 0.01f;
+	return result;
+}
+
+void G_CalculateEloChanges( void ) {
+	int i;
+	gclient_t *cl;
+
+	if ( g_gametype.integer >= GT_TEAM ) {
+		// team game: compare average ELOs
+		int redElo = 0, blueElo = 0, redCount = 0, blueCount = 0;
+		float avgRed, avgBlue, expectedRed, change;
+
+		for ( i = 0; i < level.maxclients; i++ ) {
+			cl = level.clients + i;
+			if ( cl->pers.connected != CON_CONNECTED ) continue;
+			if ( cl->sess.sessionTeam == TEAM_RED ) {
+				redElo += cl->elo;
+				redCount++;
+			} else if ( cl->sess.sessionTeam == TEAM_BLUE ) {
+				blueElo += cl->elo;
+				blueCount++;
+			}
+		}
+		if ( redCount == 0 || blueCount == 0 ) return;
+
+		avgRed = (float)redElo / redCount;
+		avgBlue = (float)blueElo / blueCount;
+
+		// expected score for red
+		expectedRed = 1.0f / ( 1.0f + ELO_Pow10( ( avgBlue - avgRed ) / 400.0f ) );
+
+		if ( level.teamScores[TEAM_RED] > level.teamScores[TEAM_BLUE] ) {
+			change = 32.0f * ( 1.0f - expectedRed );
+		} else if ( level.teamScores[TEAM_BLUE] > level.teamScores[TEAM_RED] ) {
+			change = 32.0f * ( 0.0f - expectedRed );
+		} else {
+			change = 32.0f * ( 0.5f - expectedRed );
+		}
+
+		for ( i = 0; i < level.maxclients; i++ ) {
+			cl = level.clients + i;
+			if ( cl->pers.connected != CON_CONNECTED ) continue;
+			if ( cl->sess.sessionTeam == TEAM_RED ) {
+				cl->elo += (int)change;
+			} else if ( cl->sess.sessionTeam == TEAM_BLUE ) {
+				cl->elo -= (int)change;
+			}
+		}
+	} else {
+		// FFA: winner gains vs all others
+		if ( level.numPlayingClients < 2 ) return;
+
+		{
+			int winnerNum = level.sortedClients[0];
+			gclient_t *winner = level.clients + winnerNum;
+
+			for ( i = 0; i < level.numPlayingClients; i++ ) {
+				int otherNum = level.sortedClients[i];
+				gclient_t *other = level.clients + otherNum;
+				float expected;
+				int gain;
+
+				if ( otherNum == winnerNum ) continue;
+				if ( other->pers.connected != CON_CONNECTED ) continue;
+				if ( other->sess.sessionTeam == TEAM_SPECTATOR ) continue;
+
+				expected = 1.0f / ( 1.0f + ELO_Pow10( ( (float)other->elo - (float)winner->elo ) / 400.0f ) );
+				gain = (int)( 32.0f * ( 1.0f - expected ) );
+				winner->elo += gain;
+				other->elo -= gain;
+			}
+		}
+	}
+
+	G_LogPrintf( "EloUpdate: ratings updated for %i players\n", level.numPlayingClients );
+}
+#endif // FEAT_ELO_TRACKING
+
+#if FEAT_RANKED_QUEUE
+/*
+================
+G_CheckRankedQueue
+
+When enough queued players exist, auto-start match.
+================
+*/
+void G_CheckRankedQueue( void ) {
+	int queuedCount, i;
+	gclient_t *cl;
+
+	if ( !g_ranked.integer ) {
+		return;
+	}
+
+	queuedCount = 0;
+	for ( i = 0; i < level.maxclients; i++ ) {
+		cl = level.clients + i;
+		if ( cl->pers.connected != CON_CONNECTED ) continue;
+		if ( cl->queued ) queuedCount++;
+	}
+
+	if ( queuedCount >= g_rankedMinPlayers.integer ) {
+		// move all queued players to teams, clear queue
+		for ( i = 0; i < level.maxclients; i++ ) {
+			cl = level.clients + i;
+			if ( cl->pers.connected != CON_CONNECTED ) continue;
+			if ( !cl->queued ) continue;
+			cl->queued = qfalse;
+			if ( g_gametype.integer >= GT_TEAM ) {
+				SetTeam( &g_entities[i], "" ); // auto-pick team
+			}
+		}
+		trap_SendServerCommand( -1, "cp \"Ranked match starting!\n\"" );
+		trap_SendConsoleCommand( EXEC_APPEND, "map_restart 0\n" );
+	}
+}
+#endif // FEAT_RANKED_QUEUE
+
 /*
 ================
 G_RunFrame
@@ -2058,6 +2828,31 @@ void G_RunFrame( int levelTime ) {
 
 	// for tracking changes
 	CheckCvars();
+
+#if FEAT_TEAM_AUTOBALANCE
+	G_CheckTeamBalance();
+#endif
+#if FEAT_ELIMINATION
+	G_CheckElimination();
+#endif
+#if FEAT_RANKED_QUEUE
+	G_CheckRankedQueue();
+#endif
+#if FEAT_CRON_JOBS
+	// cron jobs (11P): execute commands at specified intervals
+	if ( numCronJobs > 0 ) {
+		int elapsed = ( level.time - level.startTime ) / 1000; // seconds since map start
+		if ( elapsed > cronLastCheck ) {
+			int j;
+			for ( j = 0; j < numCronJobs; j++ ) {
+				if ( elapsed % cronJobs[j].intervalSec == 0 ) {
+					trap_SendConsoleCommand( EXEC_APPEND, va( "%s\n", cronJobs[j].command ) );
+				}
+			}
+			cronLastCheck = elapsed;
+		}
+	}
+#endif
 
 	if (g_listEntity.integer) {
 		for (i = 0; i < MAX_GENTITIES; i++) {

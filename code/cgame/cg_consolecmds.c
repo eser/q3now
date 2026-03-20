@@ -179,27 +179,19 @@ static void CG_spLose_f( void) {
     CG_CenterPrint("YOU LOSE...", SCREEN_HEIGHT * .30, 0);
 }
 
+static void CG_ReloadHud_f( void ) {
+	CG_SHUDRoutenesDestroyAll();
+	CG_AllocReset();   /* resets temp region only, parser tables survive */
+	CG_SHUDLoadConfig();
+	CG_Printf("SuperHUD config reloaded.\n");
+}
+
 static void CG_TellTarget_f( void ) {
 	int		clientNum;
 	char	command[128];
 	char	message[128];
 
 	clientNum = CG_CrosshairPlayer();
-	if ( clientNum == -1 ) {
-		return;
-	}
-
-	trap_Args( message, 128 );
-	Com_sprintf( command, 128, "tell %i %s", clientNum, message );
-	trap_SendClientCommand( command );
-}
-
-static void CG_TellAttacker_f( void ) {
-	int		clientNum;
-	char	command[128];
-	char	message[128];
-
-	clientNum = CG_LastAttacker();
 	if ( clientNum == -1 ) {
 		return;
 	}
@@ -216,21 +208,6 @@ static void CG_VoiceTellTarget_f( void ) {
 	char	message[128];
 
 	clientNum = CG_CrosshairPlayer();
-	if ( clientNum == -1 ) {
-		return;
-	}
-
-	trap_Args( message, 128 );
-	Com_sprintf( command, 128, "vtell %i %s", clientNum, message );
-	trap_SendClientCommand( command );
-}
-
-static void CG_VoiceTellAttacker_f( void ) {
-	int		clientNum;
-	char	command[128];
-	char	message[128];
-
-	clientNum = CG_LastAttacker();
 	if ( clientNum == -1 ) {
 		return;
 	}
@@ -412,6 +389,21 @@ CG_StartOrbit_f
 ==================
 */
 
+#if FEAT_THIRD_PERSON
+static void CG_ThirdPersonDown_f( void ) {
+	if ( cg.thirdPersonHeld ) {
+		return;
+	}
+	cg.thirdPersonHeld = qtrue;
+}
+static void CG_ThirdPersonUp_f( void ) {
+	if ( !cg.thirdPersonHeld ) {
+		return;
+	}
+	cg.thirdPersonHeld = qfalse;
+}
+#endif
+
 static void CG_StartOrbit_f( void ) {
 	char var[MAX_TOKEN_CHARS];
 
@@ -461,6 +453,10 @@ static consoleCommand_t	commands[] = {
 	{ "-scores", CG_ScoresUp_f },
 	{ "+zoom", CG_ZoomDown_f },
 	{ "-zoom", CG_ZoomUp_f },
+#if FEAT_THIRD_PERSON
+	{ "+thirdperson", CG_ThirdPersonDown_f },
+	{ "-thirdperson", CG_ThirdPersonUp_f },
+#endif
 	{ "sizeup", CG_SizeUp_f },
 	{ "sizedown", CG_SizeDown_f },
 	{ "weapnext", CG_NextWeapon_f },
@@ -468,10 +464,9 @@ static consoleCommand_t	commands[] = {
 	{ "weapon", CG_Weapon_f },
 	{ "tcmd", CG_TargetCommand_f },
 	{ "tell_target", CG_TellTarget_f },
-	{ "tell_attacker", CG_TellAttacker_f },
+	{ "reloadhud", CG_ReloadHud_f },
 #ifdef MISSIONPACK
 	{ "vtell_target", CG_VoiceTellTarget_f },
-	{ "vtell_attacker", CG_VoiceTellAttacker_f },
 	{ "loadhud", CG_LoadHud_f },
 	{ "nextTeamMember", CG_NextTeamMember_f },
 	{ "prevTeamMember", CG_PrevTeamMember_f },
@@ -499,7 +494,11 @@ static consoleCommand_t	commands[] = {
     { "spLose", CG_spLose_f },
     { "startOrbit", CG_StartOrbit_f },
 	//{ "camera", CG_Camera_f },
-	{ "loaddeferred", CG_LoadDeferredPlayers }	
+	{ "loaddeferred", CG_LoadDeferredPlayers },
+#if FEAT_CHAT_FILTER
+	{ "ignore", CG_ChatFilterIgnore_f },
+	{ "unignore", CG_ChatFilterUnignore_f },
+#endif
 };
 
 
@@ -577,6 +576,12 @@ void CG_InitConsoleCommands( void ) {
 	trap_AddCommand ("callteamvote");
 	trap_AddCommand ("teamvote");
 	trap_AddCommand ("stats");
+#if FEAT_PING_LOCATION
+	trap_AddCommand ("ping");
+#endif
+#if FEAT_READY_UP
+	trap_AddCommand ("ready");
+#endif
 	trap_AddCommand ("teamtask");
 	trap_AddCommand ("loaddefered");	// spelled wrong, but not changing for demo
 }

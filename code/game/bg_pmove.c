@@ -927,8 +927,8 @@ static void PM_WalkMove(pmove_t *pmove) {
 	vel = VectorLength(pm->ps->velocity);
 
 	// slide along the ground plane
-	PM_ClipVelocity (pm->ps->velocity, pml.groundTrace.plane.normal, 
-		pm->ps->velocity, OVERCLIP );
+	PM_ClipVelocity (pm->ps->velocity, pml.groundTrace.plane.normal,
+		pm->ps->velocity, (pm->pmove_flags & PMF_OVERBOUNCE) ? OVERCLIP : 1.0f );
 
 	// don't decrease velocity when going up or down a slope
 	VectorNormalize(pm->ps->velocity);
@@ -1320,7 +1320,7 @@ static void PM_GroundTrace( void ) {
 		if ( pm->debugLevel ) {
 			Com_Printf("%i:Land\n", c_pmove);
 		}
-		
+
 		PM_CrashLand();
 
 		// don't do landing time if we were just going down a slope
@@ -1604,6 +1604,11 @@ static void PM_WaterEvents( void ) {		// FIXME?
 }
 
 
+#if FEAT_FAST_WEAPON_SWITCH
+// forward declaration — PM_BeginWeaponChange calls this in fast-switch modes
+static void PM_FinishWeaponChange( void );
+#endif
+
 /*
 ===============
 PM_BeginWeaponChange
@@ -1625,6 +1630,22 @@ static void PM_BeginWeaponChange( int weapon ) {
     PM_AddEvent(EV_CHANGE_WEAPON);
     pm->ps->weaponstate = WEAPON_DROPPING;
 
+#if FEAT_FAST_WEAPON_SWITCH
+    // fast weapon switch (5A):
+    //   mode 1 (skip drop): go straight to WEAPON_RAISING, no drop anim
+    //   mode 2 (instant):   skip both drop and raise, weapon ready immediately
+    if ( (pm->pmove_flags & PMF_FAST_SWITCH_MASK) == PMF_FAST_SWITCH_INSTANT ) {
+        pm->ps->weaponTime = 0;
+        PM_FinishWeaponChange();
+        pm->ps->weaponstate = WEAPON_READY;
+        return;
+    } else if ( pm->pmove_flags & PMF_FAST_SWITCH_SKIP_DROP ) {
+        pm->ps->weaponTime = 0;
+        PM_FinishWeaponChange();
+        // go to RAISING state — raise anim will play
+        return;
+    } else
+#endif
     if (cpm_weapondrop > 0) {
         pm->ps->weaponTime += cpm_weapondrop;
 
@@ -1748,6 +1769,18 @@ static void PM_Weapon( void ) {
 
 	// change weapon if time
 	if ( pm->ps->weaponstate == WEAPON_DROPPING ) {
+#if FEAT_FAST_WEAPON_SWITCH
+		// fast weapon switch (5A): mode 2 = instant, mode 1 = skip drop (already in RAISING)
+		if ( (pm->pmove_flags & PMF_FAST_SWITCH_MASK) == PMF_FAST_SWITCH_INSTANT ) {
+			// mode 2: instant — finish change and go straight to READY
+			PM_FinishWeaponChange();
+			pm->ps->weaponstate = WEAPON_READY;
+			pm->ps->weaponTime = 0;
+		} else if ( pm->pmove_flags & PMF_FAST_SWITCH_SKIP_DROP ) {
+			// mode 1: skip drop — finish change and proceed to RAISING
+			PM_FinishWeaponChange();
+		} else
+#endif
 		PM_FinishWeaponChange();
 	}
 
@@ -2208,4 +2241,3 @@ void Pmove (pmove_t *pmove) {
 	//PM_CheckStuck();
 
 }
-

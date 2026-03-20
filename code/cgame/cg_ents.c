@@ -416,6 +416,11 @@ static void CG_Item( centity_t *cent ) {
 				trap_R_AddRefEntityToScene( &ent );
 			}
 		}
+#if FEAT_LENS_FLARES
+		if ( item->giType == IT_POWERUP ) {
+			CG_AddPowerupFlare( cent, item->giTag );
+		}
+#endif
 	}
 }
 
@@ -1026,6 +1031,9 @@ static void CG_AddCEntity( centity_t *cent ) {
 		break;
 	case ET_MISSILE:
 		CG_Missile( cent );
+#if FEAT_LENS_FLARES
+		CG_AddMissileFlare( cent );
+#endif
 		break;
 	case ET_MOVER:
 		CG_Mover( cent );

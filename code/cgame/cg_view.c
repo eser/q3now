@@ -264,9 +264,65 @@ static void CG_OffsetThirdPersonView( void ) {
 	VectorMA( view, -cg_thirdPersonRange.value * forwardScale, forward, view );
 	VectorMA( view, -cg_thirdPersonRange.value * sideScale, right, view );
 
+#if FEAT_THIRD_PERSON
+	// shoulder offset: shift camera left/right for over-the-shoulder view
+	VectorMA( view, cg_thirdPersonSide.value, right, view );
+#endif
+
 	// trace a ray from the origin to the viewpoint to make sure the view isn't
 	// in a solid block.  Use an 8 by 8 block to prevent the view from near clipping anything
 
+#if FEAT_THIRD_PERSON
+	if (!cg_cameraMode.integer) {
+		vec3_t idealView;
+		float idealDist, currentDist;
+
+		VectorCopy( view, idealView );
+		CG_Trace( &trace, cg.refdef.vieworg, mins, maxs, idealView, cg.predictedPlayerState.clientNum, MASK_SOLID );
+
+		if ( trace.fraction != 1.0 ) {
+			VectorCopy( trace.endpos, idealView );
+			idealView[2] += (1.0 - trace.fraction) * 32;
+			CG_Trace( &trace, cg.refdef.vieworg, mins, maxs, idealView, cg.predictedPlayerState.clientNum, MASK_SOLID );
+			VectorCopy( trace.endpos, idealView );
+		}
+
+		// compute ideal distance from player to clipped camera position
+		{
+			vec3_t d;
+			VectorSubtract( idealView, cg.refdef.vieworg, d );
+			idealDist = VectorLength( d );
+		}
+
+		// smooth interpolation — pull in fast, push out slow
+		currentDist = cg.thirdPersonCurrentRange;
+		if ( currentDist < 0 ) {
+			currentDist = idealDist; // negative = uninitialized, snap to ideal
+		}
+		if ( idealDist < currentDist ) {
+			// pull in fast when wall is close
+			currentDist += (idealDist - currentDist) * 0.3f;
+		} else {
+			// push out progressively when entering third person or wall recedes
+			currentDist += (idealDist - currentDist) * 0.15f;
+		}
+		// snap to target when close enough — prevents perpetual partial transparency
+		if ( idealDist - currentDist < 1.0f && idealDist - currentDist > -1.0f ) {
+			currentDist = idealDist;
+		}
+		cg.thirdPersonCurrentRange = currentDist;
+
+		// recompute view position at smoothed distance
+		if ( idealDist > 0.1f ) {
+			float scale = currentDist / idealDist;
+			vec3_t offset;
+			VectorSubtract( idealView, cg.refdef.vieworg, offset );
+			VectorMA( cg.refdef.vieworg, scale, offset, view );
+		} else {
+			VectorCopy( idealView, view );
+		}
+	}
+#else
 	if (!cg_cameraMode.integer) {
 		CG_Trace( &trace, cg.refdef.vieworg, mins, maxs, view, cg.predictedPlayerState.clientNum, MASK_SOLID );
 
@@ -280,6 +336,7 @@ static void CG_OffsetThirdPersonView( void ) {
 			VectorCopy( trace.endpos, view );
 		}
 	}
+#endif
 
 
 	VectorCopy( view, cg.refdef.vieworg );
@@ -447,7 +504,6 @@ void CG_ZoomDown_f( void ) {
 		return;
 	}
 	cg.zoomed = qtrue;
-	cg.zoomTime = cg.time;
 }
 
 void CG_ZoomUp_f( void ) { 
@@ -455,7 +511,6 @@ void CG_ZoomUp_f( void ) {
 		return;
 	}
 	cg.zoomed = qfalse;
-	cg.zoomTime = cg.time;
 }
 
 
@@ -475,7 +530,6 @@ static int CG_CalcFov( void ) {
 	float	v;
 	int		contents;
 	float	fov_x, fov_y;
-	float	zoomFov;
 	float	f;
 	int		inwater;
 
@@ -488,7 +542,18 @@ static int CG_CalcFov( void ) {
 			// dmflag to prevent wide fov for all clients
 			fov_x = 90;
 		} else {
-			fov_x = cg_fov.value;
+			// determine target FOV based on state priority
+			if ( cg.zoomed ) {
+				fov_x = cg_zoomFov.value;
+			} else
+#if FEAT_THIRD_PERSON
+			if ( cg.renderingThirdPerson && cg_thirdPersonFov.value > 0 ) {
+				fov_x = cg_thirdPersonFov.value;
+			} else
+#endif
+			{
+				fov_x = cg_fov.value;
+			}
 			if ( fov_x < 1 ) {
 				fov_x = 1;
 			} else if ( fov_x > 160 ) {
@@ -496,27 +561,34 @@ static int CG_CalcFov( void ) {
 			}
 		}
 
-		// account for zooms
-		zoomFov = cg_zoomFov.value;
-		if ( zoomFov < 1 ) {
-			zoomFov = 1;
-		} else if ( zoomFov > 160 ) {
-			zoomFov = 160;
+		// smooth FOV transition (unified for zoom, third-person, and normal)
+		if ( fov_x != cg.fovTarget ) {
+			if ( fabs( fov_x - cg.fovTarget ) < 3.0f ) {
+				// snap for tiny deltas (avoids micro-jitter during live cvar tweaking)
+				cg.fovTransitionTime = 0;
+			} else {
+				cg.fovTransitionFrom = cg.fovCurrent > 0 ? cg.fovCurrent : fov_x;
+				cg.fovTransitionTime = cg.time;
+			}
+			cg.fovTarget = fov_x;
 		}
 
-		if ( cg.zoomed ) {
-			f = ( cg.time - cg.zoomTime ) / (float)ZOOM_TIME;
-			if ( f > 1.0 ) {
-				fov_x = zoomFov;
+		if ( cg.fovTransitionTime > 0 ) {
+#if FEAT_THIRD_PERSON
+			float transTime = cg_fovTransitionTime.value > 0
+							? cg_fovTransitionTime.value : (float)ZOOM_TIME;
+#else
+			float transTime = (float)ZOOM_TIME;
+#endif
+			f = ( cg.time - cg.fovTransitionTime ) / transTime;
+			if ( f >= 1.0f ) {
+				fov_x = cg.fovTarget;
 			} else {
-				fov_x = fov_x + f * ( zoomFov - fov_x );
-			}
-		} else {
-			f = ( cg.time - cg.zoomTime ) / (float)ZOOM_TIME;
-			if ( f <= 1.0 ) {
-				fov_x = zoomFov + f * ( fov_x - zoomFov );
+				f = f * f * ( 3.0f - 2.0f * f ); // smooth-step easing
+				fov_x = cg.fovTransitionFrom + f * ( cg.fovTarget - cg.fovTransitionFrom );
 			}
 		}
+		cg.fovCurrent = fov_x;
 	}
 
 	// LordHavoc formula: adjust FOV for actual monitor aspect ratio
@@ -808,9 +880,50 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// update cg.predictedPlayerState
 	CG_PredictPlayerState();
 
+#if FEAT_FOLLOW_KILLER
+	// auto-follow killer: when we die and enter spectator, follow the killer
+	if ( cg_followKiller.integer && cg.followKillerPending
+		 && cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR
+		 && cg.killerClientNum >= 0 && cg.killerClientNum < MAX_CLIENTS ) {
+		trap_SendClientCommand( va( "follow %d", cg.killerClientNum ) );
+		cg.followKillerPending = qfalse;
+	}
+	// clear pending on respawn (back to playing)
+	if ( cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR
+		 && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
+		cg.followKillerPending = qfalse;
+	}
+#endif
+
+#if FEAT_AUTO_DEMO
+	// auto-demo: stop recording at intermission
+	if ( cg.playerRecord && cg.snap->ps.pm_type == PM_INTERMISSION ) {
+		trap_SendConsoleCommand( "stoprecord\n" );
+		cg.playerRecord = qfalse;
+	}
+#endif
+
 	// decide on third person view
+#if FEAT_THIRD_PERSON
+	cg.renderingThirdPerson = cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR
+							&& ((cg_thirdPerson.integer != cg.thirdPersonHeld) || (cg.snap->ps.stats[STAT_HEALTH] <= 0));
+#else
 	cg.renderingThirdPerson = cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR
 							&& (cg_thirdPerson.integer || (cg.snap->ps.stats[STAT_HEALTH] <= 0));
+#endif
+
+#if FEAT_THIRD_PERSON
+	{
+		static qboolean lastThirdPerson = qfalse;
+		if ( cg.renderingThirdPerson != lastThirdPerson ) {
+			if ( cg.renderingThirdPerson ) {
+				// transitioning TO third person: start range at 0 for smooth pull-out
+				cg.thirdPersonCurrentRange = 0;
+			}
+			lastThirdPerson = cg.renderingThirdPerson;
+		}
+	}
+#endif
 
 	// build cg.refdef
 	inwater = CG_CalcViewValues();
@@ -826,6 +939,12 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 		CG_AddMarks();
 		CG_AddParticles ();
 		CG_AddLocalEntities();
+#if FEAT_ATMOSPHERIC
+		CG_AddAtmosphericEffects();
+#endif
+#if FEAT_LENS_FLARES
+		CG_AddLensFlares();
+#endif
 	}
 	CG_AddViewWeapon( &cg.predictedPlayerState );
 

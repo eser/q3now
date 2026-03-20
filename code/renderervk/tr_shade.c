@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_shade.c
 
 #include "tr_local.h"
+#include "../game/q_feats.h"
 
 /*
 
@@ -989,12 +990,31 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 				}
 				if ( tess_flags & ( TESS_RGBA0 << i ) ) {
 					R_ComputeColors( i, tess.svars.colors[i], pStage );
+#if FEAT_THIRD_PERSON
+					// RF_FORCE_ENT_ALPHA: override vertex color alpha
+					if ( i == 0 && backEnd.currentEntity &&
+						 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) ) {
+						int j;
+						byte a = backEnd.currentEntity->e.shader.rgba[3];
+						for ( j = 0; j < tess.numVertexes; j++ ) {
+							tess.svars.colors[0][j].rgba[3] = a;
+						}
+					}
+#endif
 				}
 				if ( tess_flags & (TESS_ENT0 << i) && backEnd.currentEntity ) {
 					uniform.ent.color[i][0] = backEnd.currentEntity->e.shader.rgba[0] / 255.0;
 					uniform.ent.color[i][1] = backEnd.currentEntity->e.shader.rgba[1] / 255.0;
 					uniform.ent.color[i][2] = backEnd.currentEntity->e.shader.rgba[2] / 255.0;
-					uniform.ent.color[i][3] = pStage->bundle[i].alphaGen == AGEN_IDENTITY ? 1.0 : (backEnd.currentEntity->e.shader.rgba[3] / 255.0);
+				#if FEAT_THIRD_PERSON
+					// RF_FORCE_ENT_ALPHA: force alpha from entity regardless of alphaGen
+					if ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) {
+						uniform.ent.color[i][3] = backEnd.currentEntity->e.shader.rgba[3] / 255.0;
+					} else
+			#endif
+					{
+						uniform.ent.color[i][3] = pStage->bundle[i].alphaGen == AGEN_IDENTITY ? 1.0 : (backEnd.currentEntity->e.shader.rgba[3] / 255.0);
+					}
 					pushUniform = qtrue;
 				}
 			}
@@ -1017,6 +1037,22 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		} else {
 			pipeline = pStage->vk_pipeline[fog_stage];
 		}
+
+#if FEAT_THIRD_PERSON
+		// TODO(FEAT_THIRD_PERSON): VK pipeline swap from opaque to blended causes
+		// visual artifacts. Alpha values are correct (verified with debug prints)
+		// but the blended pipeline renders dramatically differently even at alpha=254.
+		// Root cause unknown — needs RenderDoc/GPU trace debugging.
+		// The code below is correct; fix the pipeline swap mechanism.
+		if ( backEnd.currentEntity &&
+			 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) &&
+			 backEnd.currentEntity->e.shader.rgba[3] < 255 ) {
+			Vk_Pipeline_Def def;
+			vk_get_pipeline_def( pipeline, &def );
+			def.state_bits |= GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
+			pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
+		}
+#endif
 
 		vk_bind_pipeline( pipeline );
 		vk_bind_geometry( tess_flags );

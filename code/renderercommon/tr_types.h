@@ -38,6 +38,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 										// projection matrix won't be hacked to reduce the stereo separation as
 										// is done for the gun.
 
+#define RF_FORCE_ENT_ALPHA	0x0020		// force entity shaderRGBA[3] as alpha, enable blending
+
 #define	RF_NOSHADOW			0x0040		// don't add stencil shadows
 
 #define RF_LIGHTING_ORIGIN	0x0080		// use refEntity->lightingOrigin instead of refEntity->origin

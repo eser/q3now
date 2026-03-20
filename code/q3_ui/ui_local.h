@@ -332,6 +332,24 @@ extern void UI_CreditMenu( void );
 extern void InGame_Cache( void );
 extern void UI_InGameMenu(void);
 
+#if FEAT_CALLVOTE_MENU
+//
+// ui_callvote.c
+//
+extern void UI_CallVoteMenu(void);
+#endif
+
+#if FEAT_DYNAMIC_MENU
+//
+// ui_dynamicmenu.c
+//
+typedef void (*dynamicCreateHandler)( void );
+typedef void (*dynamicEventHandler)( int id );
+extern void DynamicMenu_MenuInit( qboolean fullscreen, qboolean wraparound );
+extern qboolean DynamicMenu_AddItem( const char *label, int id, dynamicCreateHandler create, dynamicEventHandler event );
+extern menuframework_s *DynamicMenu_Ref( void );
+#endif
+
 //
 // ui_confirm.c
 //
