@@ -28,6 +28,28 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MISSILE_MAX_TELEPORTS   3
 #endif
 
+#if FEAT_DESTROYABLE_MISSILES
+/*
+============
+G_MakeMissileDestroyable
+Mark a missile entity as damageable so it can be shot down. (11B)
+============
+*/
+static void G_MissileExplodeDie( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int mod ) {
+	(void)inflictor; (void)attacker; (void)damage; (void)mod;
+	G_ExplodeMissile( self );
+}
+
+static void G_MakeMissileDestroyable( gentity_t *bolt ) {
+	bolt->takedamage = qtrue;
+	bolt->health = 100;  // cvar value = missile HP
+	bolt->die = G_MissileExplodeDie;
+	bolt->r.contents = CONTENTS_BODY;               // hitscan can hit it
+	VectorSet( bolt->r.mins, -4, -4, -4 );
+	VectorSet( bolt->r.maxs,  4,  4,  4 );
+}
+#endif
+
 /*
 ================
 G_BounceMissile
@@ -90,12 +112,45 @@ void G_ExplodeMissile( gentity_t *ent ) {
 		if( G_RadiusDamage( ent->r.currentOrigin, ent->parent, ent->splashDamage, ent->splashRadius, ent
 			, ent->splashMethodOfDeath, qfalse ) ) {
 			g_entities[ent->r.ownerNum].client->accuracy_hits++;
+			if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->weaponStats[ent->s.weapon].hits++;
 		}
 	}
 
 	trap_LinkEntity( ent );
 }
 
+
+#if FEAT_PROJECTILE_BOUNCE
+/*
+================
+G_ReflectProjectile
+
+Reflects a projectile's velocity off a surface normal.
+Used when a missile hits an invulnerability shield (10H).
+================
+*/
+static void G_ReflectProjectile( gentity_t *ent, trace_t *trace ) {
+	vec3_t	velocity;
+	float	dot;
+	int		hitTime;
+
+	// evaluate velocity at impact time
+	hitTime = level.previousTime + ( level.time - level.previousTime ) * trace->fraction;
+	BG_EvaluateTrajectoryDelta( &ent->s.pos, hitTime, velocity );
+
+	// reflect velocity across surface normal: v' = v - 2(v . n)n
+	dot = DotProduct( velocity, trace->plane.normal );
+	VectorMA( velocity, -2 * dot, trace->plane.normal, ent->s.pos.trDelta );
+
+	// nudge origin off the surface and reset trajectory
+	VectorAdd( ent->r.currentOrigin, trace->plane.normal, ent->r.currentOrigin );
+	VectorCopy( ent->r.currentOrigin, ent->s.pos.trBase );
+	ent->s.pos.trTime = level.time;
+
+	// snap for network bandwidth
+	SnapVector( ent->s.pos.trDelta );
+}
+#endif
 
 /*
 ================
@@ -125,6 +180,16 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 		return;
 	}
 
+#if FEAT_PROJECTILE_BOUNCE
+	// projectile bounce (10H): reflect missile off invulnerability shield
+	if ( g_projectileBounce.integer && other->takedamage &&
+		 other->client && other->client->ps.powerups[PW_BATTLESUIT] &&
+		 other->client->ps.powerups[PW_BATTLESUIT] > level.time ) {
+		G_ReflectProjectile( ent, trace );
+		ent->target_ent = other;
+		return;
+	}
+#endif
 #ifdef MISSIONPACK
 	if ( other->takedamage ) {
 		if ( other->client && other->client->invulnerabilityTime > level.time ) {
@@ -151,6 +216,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 
 			if( LogAccuracyHit( other, &g_entities[ent->r.ownerNum] ) ) {
 				g_entities[ent->r.ownerNum].client->accuracy_hits++;
+				if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->weaponStats[ent->s.weapon].hits++;
 				hitClient = qtrue;
 			}
 			BG_EvaluateTrajectoryDelta( &ent->s.pos, level.time, velocity );
@@ -253,12 +319,14 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
             if (CPM_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath, vec2)) {
                 if (!hitClient) {
                     g_entities[ent->r.ownerNum].client->accuracy_hits++;
+                    if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->weaponStats[ent->s.weapon].hits++;
                 }
             }
         }
         else if (G_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath, qfalse)) {
             if (!hitClient) {
                 g_entities[ent->r.ownerNum].client->accuracy_hits++;
+                if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->weaponStats[ent->s.weapon].hits++;
             }
         }
         // !CPM
@@ -475,8 +543,12 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 
 	VectorCopy (start, bolt->r.currentOrigin);
 
+#if FEAT_DESTROYABLE_MISSILES
+	G_MakeMissileDestroyable( bolt );  // 11B
+#endif
+
 	return bolt;
-}	
+}
 
 //=============================================================================
 
@@ -528,6 +600,10 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 
 	VectorCopy (start, bolt->r.currentOrigin);
 
+#if FEAT_DESTROYABLE_MISSILES
+	G_MakeMissileDestroyable( bolt );  // 11B
+#endif
+
 	return bolt;
 }
 
@@ -578,6 +654,10 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
     VectorScale(dir, speed, bolt->s.pos.trDelta);
 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
 	VectorCopy (start, bolt->r.currentOrigin);
+
+#if FEAT_DESTROYABLE_MISSILES
+	G_MakeMissileDestroyable( bolt );  // 11B
+#endif
 
 	return bolt;
 }

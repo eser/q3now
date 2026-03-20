@@ -919,6 +919,26 @@ void CG_AddLocalEntities( void ) {
 			CG_AddDamagePlum( le );
 			break;
 #endif
+#if FEAT_PING_LOCATION
+		case LE_PING_LOCATION:
+		{
+			float c = ( le->endTime - cg.time ) * le->lifeRate;
+			refEntity_t *re = &le->refEntity;
+
+			// pulsing size
+			re->radius = 8 + 4 * sin( cg.time * 0.005f );
+
+			// team color, fade out in last 25%
+			re->shaderRGBA[0] = (byte)( le->color[0] * 0xff );
+			re->shaderRGBA[1] = (byte)( le->color[1] * 0xff );
+			re->shaderRGBA[2] = (byte)( le->color[2] * 0xff );
+			re->shaderRGBA[3] = ( c < 0.25f ) ? (byte)( 0xff * 4 * c ) : 0xff;
+
+			VectorCopy( le->pos.trBase, re->origin );
+			trap_R_AddRefEntityToScene( re );
+			break;
+		}
+#endif
 
 #ifdef MISSIONPACK
 		case LE_KAMIKAZE:

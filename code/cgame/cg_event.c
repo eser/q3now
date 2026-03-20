@@ -75,6 +75,49 @@ const char	*CG_PlaceString( int rank ) {
 }
 
 /*
+===================
+CG_ClientName
+
+Returns a team-colored player name from a clientInfo_t.
+Uses rotating static buffers (like va) — safe to call twice in one expression.
+===================
+*/
+const char *CG_ClientName( const clientInfo_t *ci ) {
+	static char	name[2][64];
+	static int	toggle;
+	char		*buf = name[toggle & 1];
+	const char	*color;
+
+	toggle++;
+
+	if ( !ci || !ci->infoValid ) {
+		Q_strncpyz( buf, S_COLOR_GREEN "noname" S_COLOR_WHITE, sizeof(name[0]) );
+		return buf;
+	}
+
+	color = ( ci->team == TEAM_RED ) ? S_COLOR_RED :
+			( ci->team == TEAM_BLUE ) ? S_COLOR_BLUE : S_COLOR_GREEN;
+
+	Com_sprintf( buf, sizeof(name[0]), "%s%s" S_COLOR_WHITE, color, ci->name );
+	return buf;
+}
+
+/*
+===================
+CG_ClientNameByNum
+
+Returns a team-colored player name for the given client number.
+Convenience wrapper around CG_ClientName.
+===================
+*/
+const char *CG_ClientNameByNum( int clientNum ) {
+	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+		return CG_ClientName( NULL );
+	}
+	return CG_ClientName( &cgs.clientinfo[clientNum] );
+}
+
+/*
 =============
 CG_Obituary
 =============
@@ -84,39 +127,23 @@ static void CG_Obituary( entityState_t *ent ) {
 	int			target, attacker;
 	char		*message;
 	char		*message2;
-	const char	*targetInfo;
-	const char	*attackerInfo;
-	char		targetName[32];
-	char		attackerName[32];
 	gender_t	gender;
 	clientInfo_t	*ci;
 
 	target = ent->otherEntityNum;
-	attacker = ent->otherEntityNum2;
-	mod = ent->eventParm;
-
 	if ( target < 0 || target >= MAX_CLIENTS ) {
 		CG_Error( "CG_Obituary: target out of range" );
 	}
-	ci = &cgs.clientinfo[target];
 
+	attacker = ent->otherEntityNum2;
 	if ( attacker < 0 || attacker >= MAX_CLIENTS ) {
 		attacker = ENTITYNUM_WORLD;
-		attackerInfo = NULL;
-	} else {
-		attackerInfo = CG_ConfigString( CS_PLAYERS + attacker );
 	}
-
-	targetInfo = CG_ConfigString( CS_PLAYERS + target );
-	if ( !targetInfo ) {
-		return;
-	}
-	Q_strncpyz( targetName, Info_ValueForKey( targetInfo, "n" ), sizeof(targetName) - 2);
-	strcat( targetName, S_COLOR_WHITE );
 
 	message2 = "";
 
 	// check for single client messages
+	mod = ent->eventParm;
 
 	switch( mod ) {
 	case MOD_SUICIDE:
@@ -147,6 +174,8 @@ static void CG_Obituary( entityState_t *ent ) {
 		message = NULL;
 		break;
 	}
+
+	ci = &cgs.clientinfo[target];
 
 	if (attacker == target) {
 		gender = ci->gender;
@@ -194,7 +223,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	}
 
 	if (message) {
-		CG_Printf( S_COLOR_GREEN "%s" S_COLOR_WHITE " %s.\n", targetName, message);
+		CG_Printf( "%s %s.\n", CG_ClientNameByNum( target ), message);
 		return;
 	}
 
@@ -203,34 +232,30 @@ static void CG_Obituary( entityState_t *ent ) {
 		char	*s;
 
 		if ( cgs.gametype < GT_TEAM ) {
-			s = va("You fragged " S_COLOR_GREEN "%s" S_COLOR_WHITE "\n%s place with %i", targetName, 
+			s = va("You fragged %s\n%s place with %i", CG_ClientNameByNum( target ),
 				CG_PlaceString( cg.snap->ps.persistant[PERS_RANK] + 1 ),
 				cg.snap->ps.persistant[PERS_SCORE] );
 		} else {
-			s = va("You fragged " S_COLOR_GREEN "%s", targetName );
+			s = va("You fragged %s", CG_ClientNameByNum( target ) );
 		}
 
         if (!cg_cameraOrbit.integer) {
-			CG_CenterPrint( s, SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
-		} 
-
-		// print the text message as well
-	}
-
-	// check for double client messages
-	if ( !attackerInfo ) {
-		attacker = ENTITYNUM_WORLD;
-		strcpy( attackerName, "noname" );
-	} else {
-		Q_strncpyz( attackerName, Info_ValueForKey( attackerInfo, "n" ), sizeof(attackerName) - 2);
-		strcat( attackerName, S_COLOR_WHITE );
-		// check for kill messages about the current clientNum
-		if ( target == cg.snap->ps.clientNum ) {
-			Q_strncpyz( cg.killerName, attackerName, sizeof( cg.killerName ) );
+			// CG_CenterPrint( s, SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
+			/* Send only "You fragged X" to SuperHUD (rank is shown by RankMessage) */
+			CG_SHUDEventFrag( va("You fragged %s", CG_ClientNameByNum( target )) );
 		}
 	}
 
 	if ( attacker != ENTITYNUM_WORLD ) {
+		// check for kill messages about the current clientNum
+		if ( target == cg.snap->ps.clientNum ) {
+			Q_strncpyz( cg.killerName, CG_ClientNameByNum( attacker ), sizeof( cg.killerName ) );
+#if FEAT_FOLLOW_KILLER
+			cg.killerClientNum = attacker;
+			cg.followKillerPending = qtrue;
+#endif
+		}
+
 		switch (mod) {
 		case MOD_GRAPPLE:
 			message = "was caught by";
@@ -290,14 +315,14 @@ static void CG_Obituary( entityState_t *ent ) {
 		}
 
 		if (message) {
-			CG_Printf( S_COLOR_GREEN "%s" S_COLOR_WHITE " %s " S_COLOR_GREEN "%s" S_COLOR_WHITE "%s\n", 
-				targetName, message, attackerName, message2);
+			CG_Printf( "%s %s %s%s\n",
+				CG_ClientNameByNum( target ), message, CG_ClientNameByNum( attacker ), message2);
 			return;
 		}
 	}
 
 	// we don't know what it was
-	CG_Printf( S_COLOR_GREEN "%s" S_COLOR_WHITE " died.\n", targetName );
+	CG_Printf( "%s died.\n", CG_ClientNameByNum( target ) );
 }
 
 //==========================================================================
@@ -918,6 +943,19 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		CG_DamagePlum( cent->currentState.otherEntityNum, cent->lerpOrigin, cent->currentState.time );
 		break;
 #endif
+#if FEAT_PING_LOCATION
+	case EV_PING_LOCATION:
+		DEBUGNAME("EV_PING_LOCATION");
+		CG_PingLocation( cent );
+		break;
+#endif
+
+#if FEAT_FREEZETAG
+	case EV_FREEZE:
+		DEBUGNAME("EV_FREEZE");
+		trap_S_StartSound( NULL, es->number, CHAN_BODY, cgs.media.teleInSound );
+		break;
+#endif
 
 	//
 	// missile impacts
@@ -1170,6 +1208,14 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 			cg.powerupTime = cg.time;
 		}
 		trap_S_StartSound (NULL, es->number, CHAN_ITEM, cgs.media.quadSound );
+		break;
+	case EV_POWERUP_BERSERK:
+		DEBUGNAME("EV_POWERUP_BERSERK");
+		if ( es->number == cg.snap->ps.clientNum ) {
+			cg.powerupActive = PW_BERSERK;
+			cg.powerupTime = cg.time;
+		}
+		trap_S_StartSound (NULL, es->number, CHAN_ITEM, cgs.media.berserkSound );
 		break;
 	case EV_POWERUP_BATTLESUIT:
 		DEBUGNAME("EV_POWERUP_BATTLESUIT");

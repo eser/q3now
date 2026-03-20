@@ -27,6 +27,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure			// for the voice chats
 #endif
 
+static void G_SendBStats( int sourceClient, int recipientClient );
+
 /*
 ==================
 DeathmatchScoreboardMessage
@@ -73,16 +75,17 @@ void DeathmatchScoreboardMessage( gentity_t *ent ) {
 		perfect = ( cl->ps.persistant[PERS_RANK] == 0 && cl->ps.persistant[PERS_KILLED] == 0 ) ? 1 : 0;
 
 		Com_sprintf (entry, sizeof(entry),
-			" %i %i %i %i %i %i %i %i %i %i %i %i %i %i", level.sortedClients[i],
+			" %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i", level.sortedClients[i],
 			cl->ps.persistant[PERS_SCORE], ping, (level.time - cl->pers.enterTime)/60000,
-			scoreFlags, g_entities[level.sortedClients[i]].s.powerups, accuracy, 
+			scoreFlags, g_entities[level.sortedClients[i]].s.powerups, accuracy,
 			cl->ps.persistant[PERS_IMPRESSIVE_COUNT],
 			cl->ps.persistant[PERS_EXCELLENT_COUNT],
-			cl->ps.persistant[PERS_GAUNTLET_FRAG_COUNT], 
-			cl->ps.persistant[PERS_DEFEND_COUNT], 
-			cl->ps.persistant[PERS_ASSIST_COUNT], 
+			cl->ps.persistant[PERS_GAUNTLET_FRAG_COUNT],
+			cl->ps.persistant[PERS_DEFEND_COUNT],
+			cl->ps.persistant[PERS_ASSIST_COUNT],
 			perfect,
-			cl->ps.persistant[PERS_CAPTURES]);
+			cl->ps.persistant[PERS_CAPTURES],
+			cl->ps.persistant[PERS_KILLED]);
 		j = strlen(entry);
 		if (stringlength + j >= sizeof(string))
 			break;
@@ -90,9 +93,19 @@ void DeathmatchScoreboardMessage( gentity_t *ent ) {
 		stringlength += j;
 	}
 
-	trap_SendServerCommand( ent-g_entities, va("scores %i %i %i%s", i, 
+	trap_SendServerCommand( ent-g_entities, va("scores %i %i %i%s", i,
 		level.teamScores[TEAM_RED], level.teamScores[TEAM_BLUE],
 		string ) );
+
+	/* auto-send per-weapon stats for all players to the requesting client */
+	{
+		int k;
+		for ( k = 0; k < level.maxclients; k++ ) {
+			if ( level.clients[k].pers.connected == CON_CONNECTED ) {
+				G_SendBStats( k, ent - g_entities );
+			}
+		}
+	}
 }
 
 
@@ -459,6 +472,81 @@ void Cmd_TeamTask_f( gentity_t *ent ) {
 	ClientUserinfoChanged(client);
 }
 
+
+#if FEAT_DROP_ITEMS
+/*
+=================
+Cmd_Drop_f
+Drop current weapon or flag. Bitmask cvar g_dropEnable:
+  bit 0 = weapon, bit 1 = flag, bit 2 = ammo, bit 3 = health. (11D)
+=================
+*/
+#define DROP_WEAPON  1
+#define DROP_FLAG    2
+#define DROP_AMMO    4
+#define DROP_HEALTH  8
+void Cmd_Drop_f( gentity_t *ent ) {
+	char	arg[MAX_TOKEN_CHARS];
+	int		enable;
+
+	if ( !g_dropEnable.integer ) {
+		trap_SendServerCommand( ent->s.number, "print \"Item dropping is disabled.\n\"" );
+		return;
+	}
+	if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR || ent->health <= 0 ) {
+		return;
+	}
+
+	enable = g_dropEnable.integer;
+	trap_Argv( 1, arg, sizeof( arg ) );
+
+	if ( !arg[0] || Q_stricmp( arg, "weapon" ) == 0 ) {
+		// drop current weapon
+		gitem_t	*item;
+		int		weapon;
+
+		if ( !( enable & DROP_WEAPON ) ) {
+			trap_SendServerCommand( ent->s.number, "print \"Weapon dropping is disabled.\n\"" );
+			return;
+		}
+		weapon = ent->s.weapon;
+		if ( weapon <= WP_GAUNTLET || weapon >= WP_NUM_WEAPONS ) {
+			trap_SendServerCommand( ent->s.number, "print \"Cannot drop this weapon.\n\"" );
+			return;
+		}
+		item = BG_FindItemForWeapon( weapon );
+		if ( item ) {
+			gentity_t *drop = Drop_Item( ent, item, 0 );
+			drop->r.ownerNum = ent->s.number;
+			ent->client->ps.ammo[weapon] = 0;
+			ent->client->ps.stats[STAT_WEAPONS] &= ~( 1 << weapon );
+			// switch to next available weapon
+			ent->client->ps.weapon = WP_MACHINEGUN;
+		}
+	} else if ( Q_stricmp( arg, "flag" ) == 0 ) {
+		gitem_t *item = NULL;
+		if ( !( enable & DROP_FLAG ) ) {
+			trap_SendServerCommand( ent->s.number, "print \"Flag dropping is disabled.\n\"" );
+			return;
+		}
+		if ( ent->client->ps.powerups[PW_REDFLAG] ) {
+			item = BG_FindItemForPowerup( PW_REDFLAG );
+			ent->client->ps.powerups[PW_REDFLAG] = 0;
+		} else if ( ent->client->ps.powerups[PW_BLUEFLAG] ) {
+			item = BG_FindItemForPowerup( PW_BLUEFLAG );
+			ent->client->ps.powerups[PW_BLUEFLAG] = 0;
+		}
+		if ( item ) {
+			gentity_t *drop = Drop_Item( ent, item, 0 );
+			drop->r.ownerNum = ent->s.number;
+		} else {
+			trap_SendServerCommand( ent->s.number, "print \"You are not carrying a flag.\n\"" );
+		}
+	} else {
+		trap_SendServerCommand( ent->s.number, "print \"Usage: drop [weapon|flag]\n\"" );
+	}
+}
+#endif
 
 /*
 =================
@@ -862,9 +950,9 @@ static void G_SayTo( gentity_t *ent, gentity_t *other, int mode, int color, cons
 		return;
 	}
 
-	trap_SendServerCommand( other-g_entities, va("%s \"%s%c%c%s\"", 
+	trap_SendServerCommand( other-g_entities, va("%s \"%s%c%c%s\" %d",
 		mode == SAY_TEAM ? "tchat" : "chat",
-		name, Q_COLOR_ESCAPE, color, message));
+		name, Q_COLOR_ESCAPE, color, message, (int)(ent - g_entities)));
 }
 
 #define EC		"\x19"
@@ -1308,6 +1396,15 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 		trap_SendServerCommand( ent-g_entities, "print \"You have called the maximum number of votes.\n\"" );
 		return;
 	}
+
+	// eser - callvote cooldown
+	if ( ent->client->pers.lastVoteTime && level.time - ent->client->pers.lastVoteTime < 30000 ) {
+		trap_SendServerCommand( ent-g_entities, va( "print \"Wait %i seconds before calling another vote.\n\"",
+			( 30000 - ( level.time - ent->client->pers.lastVoteTime ) ) / 1000 ) );
+		return;
+	}
+	// eser - callvote cooldown
+
 	if ( ent->client->sess.sessionTeam == TEAM_SPECTATOR ) {
 		trap_SendServerCommand( ent-g_entities, "print \"Not allowed to call a vote as spectator.\n\"" );
 		return;
@@ -1338,9 +1435,19 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 	} else if ( !Q_stricmp( arg1, "g_warmup" ) ) {
 	} else if ( !Q_stricmp( arg1, "timelimit" ) ) {
 	} else if ( !Q_stricmp( arg1, "fraglimit" ) ) {
+	// eser - team shuffle command
+	} else if ( !Q_stricmp( arg1, "shuffle" ) ) {
+	// eser - team shuffle command
+#if FEAT_ATMOSPHERIC
+	} else if ( !Q_stricmp( arg1, "weather" ) ) {
+#endif
 	} else {
 		trap_SendServerCommand( ent-g_entities, "print \"Invalid vote string.\n\"" );
-		trap_SendServerCommand( ent-g_entities, "print \"Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_warmup, timelimit <time> and fraglimit <frags>.\n\"" );
+		trap_SendServerCommand( ent-g_entities, "print \"Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_warmup, timelimit <time>, fraglimit <frags>, shuffle"
+#if FEAT_ATMOSPHERIC
+			" and weather <rain|snow|clean>"
+#endif
+			".\n\"" );
 		return;
 	}
 
@@ -1402,12 +1509,37 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 
 		Com_sprintf( level.voteString, sizeof( level.voteString ), "clientkick %d", i );
 		Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "kick %s", level.clients[i].pers.netname );
+	// eser - team shuffle command
+	} else if ( !Q_stricmp( arg1, "shuffle" ) ) {
+		Com_sprintf( level.voteString, sizeof( level.voteString ), "shuffle" );
+		Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "Shuffle Teams" );
+	// eser - team shuffle command
+#if FEAT_ATMOSPHERIC
+	} else if ( !Q_stricmp( arg1, "weather" ) ) {
+		if ( !arg2[0] || !Q_stricmp( arg2, "clean" ) ) {
+			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_weather \"\"" );
+			Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "Weather: Clean" );
+		} else if ( !Q_stricmp( arg2, "rain" ) ) {
+			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_weather \"rain\"" );
+			Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "Weather: Rain" );
+		} else if ( !Q_stricmp( arg2, "snow" ) ) {
+			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_weather \"snow\"" );
+			Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "Weather: Snow" );
+		} else {
+			trap_SendServerCommand( ent-g_entities, "print \"Valid weather types: rain, snow, clean.\n\"" );
+			return;
+		}
+#endif
 	} else {
 		Com_sprintf( level.voteString, sizeof( level.voteString ), "%s \"%s\"", arg1, arg2 );
 		Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "%s", level.voteString );
 	}
 
     trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " called a vote.\n\"", ent->client->pers.netname));
+
+	// eser - callvote cooldown
+	ent->client->pers.lastVoteTime = level.time;
+	// eser - callvote cooldown
 
 	// start the voting, the caller automatically votes yes
 	level.voteTime = level.time;
@@ -1703,6 +1835,165 @@ void Cmd_Stats_f( gentity_t *ent ) {
 */
 }
 
+// eser - admin mode
+/*
+================
+Cmd_Admin_f
+
+Admin commands: /adm kick <player>, /adm mute <player>, /adm map <mapname>
+Admin status is validated by comparing the "password" userinfo key
+against g_adminPassword cvar.
+================
+*/
+void Cmd_Admin_f( gentity_t *ent ) {
+	char subcmd[MAX_TOKEN_CHARS];
+	char arg[MAX_TOKEN_CHARS];
+	int clientNum = ent->s.number;
+
+	if ( !ent->client->isAdmin ) {
+		trap_SendServerCommand( clientNum, "print \"You are not an admin.\n\"" );
+		return;
+	}
+
+	if ( trap_Argc() < 2 ) {
+		trap_SendServerCommand( clientNum, "print \"Usage: adm <kick|mute|map> <arg>\n\"" );
+		return;
+	}
+
+	trap_Argv( 1, subcmd, sizeof( subcmd ) );
+	trap_Argv( 2, arg, sizeof( arg ) );
+
+	if ( Q_stricmp( subcmd, "kick" ) == 0 ) {
+		int i;
+		if ( !arg[0] ) {
+			trap_SendServerCommand( clientNum, "print \"Usage: adm kick <player>\n\"" );
+			return;
+		}
+		for ( i = 0; i < level.maxclients; i++ ) {
+			if ( level.clients[i].pers.connected != CON_CONNECTED ) continue;
+			if ( Q_stricmp( level.clients[i].pers.netname, arg ) == 0 ) {
+				trap_DropClient( i, "Kicked by admin" );
+				trap_SendServerCommand( -1, va( "print \"%s" S_COLOR_WHITE " was kicked by admin.\n\"",
+					level.clients[i].pers.netname ) );
+				return;
+			}
+		}
+		trap_SendServerCommand( clientNum, va( "print \"Player '%s' not found.\n\"", arg ) );
+	} else if ( Q_stricmp( subcmd, "mute" ) == 0 ) {
+		int i;
+		if ( !arg[0] ) {
+			trap_SendServerCommand( clientNum, "print \"Usage: adm mute <player>\n\"" );
+			return;
+		}
+		for ( i = 0; i < level.maxclients; i++ ) {
+			if ( level.clients[i].pers.connected != CON_CONNECTED ) continue;
+			if ( Q_stricmp( level.clients[i].pers.netname, arg ) == 0 ) {
+				// mute via EF_TALK flag (prevents chat)
+				g_entities[i].s.eFlags ^= EF_TALK;
+				trap_SendServerCommand( -1, va( "print \"%s" S_COLOR_WHITE " was %s by admin.\n\"",
+					level.clients[i].pers.netname,
+					( g_entities[i].s.eFlags & EF_TALK ) ? "muted" : "unmuted" ) );
+				return;
+			}
+		}
+		trap_SendServerCommand( clientNum, va( "print \"Player '%s' not found.\n\"", arg ) );
+	} else if ( Q_stricmp( subcmd, "map" ) == 0 ) {
+		if ( !arg[0] ) {
+			trap_SendServerCommand( clientNum, "print \"Usage: adm map <mapname>\n\"" );
+			return;
+		}
+		trap_SendServerCommand( -1, va( "print \"Admin changing map to %s.\n\"", arg ) );
+		trap_SendConsoleCommand( EXEC_APPEND, va( "map %s\n", arg ) );
+	} else {
+		trap_SendServerCommand( clientNum, "print \"Unknown admin command. Use: kick, mute, map\n\"" );
+	}
+}
+// eser - admin mode
+
+#if FEAT_RANKED_QUEUE
+/*
+================
+Cmd_Queue_f
+
+Player joins/leaves the matchmaking queue.
+================
+*/
+void Cmd_Queue_f( gentity_t *ent ) {
+	int clientNum = ent->s.number;
+
+	if ( !g_ranked.integer ) {
+		trap_SendServerCommand( clientNum, "print \"Ranked mode is not enabled.\n\"" );
+		return;
+	}
+
+	ent->client->queued = !ent->client->queued;
+	if ( ent->client->queued ) {
+		trap_SendServerCommand( clientNum, "print \"You have joined the ranked queue.\n\"" );
+		trap_SendServerCommand( -1, va( "print \"%s" S_COLOR_WHITE " joined the queue.\n\"",
+			ent->client->pers.netname ) );
+	} else {
+		trap_SendServerCommand( clientNum, "print \"You have left the ranked queue.\n\"" );
+	}
+}
+#endif // FEAT_RANKED_QUEUE
+
+/*
+=================
+Cmd_BStats_f
+
+Send per-weapon stats for the requesting client.
+Format: bstats <weaponBitmask> [<hits> <shots> <kills> <deaths> <damage>] per weapon
+=================
+*/
+/* Send bstats for a specific source client TO a specific recipient */
+static void G_SendBStats( int sourceClient, int recipientClient ) {
+	char		string[1400];
+	int			stringlength;
+	int			i;
+	int			weaponMask;
+	gclient_t	*cl;
+
+	if ( sourceClient < 0 || sourceClient >= level.maxclients ) return;
+	cl = &level.clients[sourceClient];
+	if ( cl->pers.connected != CON_CONNECTED ) return;
+
+	weaponMask = 0;
+	for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
+		if ( cl->weaponStats[i].shots || cl->weaponStats[i].hits ||
+			 cl->weaponStats[i].kills || cl->weaponStats[i].deaths ||
+			 cl->weaponStats[i].damage ) {
+			weaponMask |= ( 1 << i );
+		}
+	}
+
+	if ( !weaponMask ) return;
+
+	stringlength = Com_sprintf( string, sizeof(string), "bstats %i %i",
+		sourceClient, weaponMask );
+
+	for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
+		if ( weaponMask & ( 1 << i ) ) {
+			char entry[128];
+			int len = Com_sprintf( entry, sizeof(entry), " %i %i %i %i %i",
+				cl->weaponStats[i].hits,
+				cl->weaponStats[i].shots,
+				cl->weaponStats[i].kills,
+				cl->weaponStats[i].deaths,
+				cl->weaponStats[i].damage );
+			if ( stringlength + len >= (int)sizeof(string) ) break;
+			strcpy( string + stringlength, entry );
+			stringlength += len;
+		}
+	}
+
+	trap_SendServerCommand( recipientClient, string );
+}
+
+void Cmd_BStats_f( gentity_t *ent ) {
+	if ( !ent->client ) return;
+	G_SendBStats( ent->s.number, ent - g_entities );
+}
+
 /*
 =================
 ClientCommand
@@ -1774,6 +2065,10 @@ void ClientCommand( int clientNum ) {
 		Cmd_Score_f (ent);
 		return;
 	}
+	if (Q_stricmp (cmd, "bstats") == 0) {
+		Cmd_BStats_f (ent);
+		return;
+	}
 
 	// ignore all other commands when at intermission
 	if (level.intermissiontime) {
@@ -1819,6 +2114,85 @@ void ClientCommand( int clientNum ) {
 		Cmd_SetViewpos_f( ent );
 	else if (Q_stricmp (cmd, "stats") == 0)
 		Cmd_Stats_f( ent );
+#if FEAT_PING_LOCATION
+	else if (Q_stricmp (cmd, "ping") == 0) {
+		// ping location (4G): trace from view, broadcast to team
+		if ( g_gametype.integer >= GT_TEAM ) {
+			vec3_t forward, right, up, muzzle, end;
+			trace_t trace;
+			gentity_t *ping;
+
+			AngleVectors( ent->client->ps.viewangles, forward, right, up );
+			CalcMuzzlePoint( ent, forward, right, up, muzzle );
+			VectorMA( muzzle, 16384, forward, end );
+			trap_Trace( &trace, muzzle, NULL, NULL, end, ent->s.number, MASK_SHOT );
+
+			ping = G_TempEntity( trace.endpos, EV_PING_LOCATION );
+			ping->s.otherEntityNum = ent->s.number;
+			// restrict to team only
+			ping->r.svFlags |= SVF_BROADCAST;
+		} else {
+			trap_SendServerCommand( clientNum, "print \"Ping is only available in team games.\n\"" );
+		}
+	}
+#endif
+#if FEAT_READY_UP
+	else if (Q_stricmp (cmd, "ready") == 0) {
+		// ready-up (4E): toggle ready state during warmup
+		if ( !g_startWhenReady.integer ) {
+			trap_SendServerCommand( clientNum, "print \"Ready-up is not enabled on this server.\n\"" );
+		} else if ( level.warmupTime == 0 ) {
+			trap_SendServerCommand( clientNum, "print \"Match already started.\n\"" );
+		} else {
+			ent->client->ready = !ent->client->ready;
+			trap_SendServerCommand( -1, va( "print \"%s" S_COLOR_WHITE " is %s.\n\"",
+				ent->client->pers.netname, ent->client->ready ? "READY" : "NOT READY" ) );
+			G_SendReadymask( -1 );
+		}
+	}
+#endif
+#if FEAT_TOURNAMENT_PAUSE
+	else if (Q_stricmp (cmd, "pause") == 0) {
+		// tournament pause (10C): pause the game
+		if ( !g_allowTimeout.integer ) {
+			trap_SendServerCommand( clientNum, "print \"Timeouts are not enabled on this server.\n\"" );
+		} else if ( level.intermissiontime ) {
+			trap_SendServerCommand( clientNum, "print \"Cannot pause during intermission.\n\"" );
+		} else if ( level.paused ) {
+			trap_SendServerCommand( clientNum, "print \"Game is already paused.\n\"" );
+		} else {
+			level.paused = qtrue;
+			level.pauseTime = level.time;
+			trap_SendServerCommand( -1, "cp \"Game Paused\"" );
+			trap_SendServerCommand( -1, va( "print \"%s" S_COLOR_WHITE " paused the game.\n\"",
+				ent->client->pers.netname ) );
+		}
+	}
+	else if (Q_stricmp (cmd, "unpause") == 0) {
+		// tournament pause (10C): resume the game
+		if ( !level.paused ) {
+			trap_SendServerCommand( clientNum, "print \"Game is not paused.\n\"" );
+		} else {
+			level.paused = qfalse;
+			level.pauseTime = 0;
+			trap_SendServerCommand( -1, "cp \"Game Resumed\"" );
+			trap_SendServerCommand( -1, va( "print \"%s" S_COLOR_WHITE " resumed the game.\n\"",
+				ent->client->pers.netname ) );
+		}
+	}
+#endif
+// eser - admin mode
+	else if (Q_stricmp (cmd, "adm") == 0)
+		Cmd_Admin_f (ent);
+// eser - admin mode
+#if FEAT_DROP_ITEMS
+	else if (Q_stricmp (cmd, "drop") == 0)
+		Cmd_Drop_f (ent);
+#endif
+#if FEAT_RANKED_QUEUE
+	else if (Q_stricmp (cmd, "queue") == 0)
+		Cmd_Queue_f (ent);
+#endif
 	else
 		trap_SendServerCommand( clientNum, va("print \"unknown cmd %s\n\"", cmd ) );
 }

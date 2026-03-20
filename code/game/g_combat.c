@@ -25,10 +25,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 #include "bg_promode.h" // CPM
 
-#if FEAT_RAILGUN_KNOCKBACK
-#define RAIL_JUMP 1
-#endif
-
 /*
 ============
 ScorePlum
@@ -69,27 +65,6 @@ void DamagePlum( gentity_t *attacker, gentity_t *target, int damage ) {
 	plum->r.singleClient = attacker->s.number;
 	plum->s.otherEntityNum = attacker->s.number;
 	plum->s.time = damage;
-}
-#endif
-
-#if FEAT_RAILGUN_KNOCKBACK
-/*
-============
-G_RailKnockback
-Self-knockback when the railgun beam hits a solid surface.
-============
-*/
-void G_RailKnockback( vec3_t origin, gentity_t *attacker ) {
-	vec3_t dir;
-
-	if ( !RAIL_JUMP || !attacker->client ) {
-		return;
-	}
-
-	VectorSubtract( attacker->r.currentOrigin, origin, dir );
-	dir[2] += 24;   // bias upward so it launches player into the air
-	VectorNormalize( dir );
-	VectorMA( attacker->client->ps.velocity, 600.0f, dir, attacker->client->ps.velocity );
 }
 #endif
 
@@ -509,6 +484,24 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
         Offhand_Grapple_Free(self->client->hook);
     }
 
+#if FEAT_FREEZETAG
+	// freezetag (7A): freeze instead of dying in team games
+	if ( g_freeze.integer && g_gametype.integer >= GT_TEAM ) {
+		self->client->ps.pm_type = PM_FREEZE;
+		self->client->ps.stats[STAT_FROZENSTATE] = FROZENSTATE_FROZEN;
+		self->client->ps.eFlags |= EF_FROZEN;
+		self->client->frozenTime = level.time;
+		self->client->thawProgress = 0;
+		self->takedamage = qfalse;
+		G_AddEvent( self, EV_FREEZE, 0 );
+		// don't actually die — skip the rest of player_die
+		// award the kill to the attacker
+		if ( attacker && attacker->client && attacker != self ) {
+			attacker->client->ps.persistant[PERS_SCORE] += 1;
+		}
+		return;
+	}
+#endif
 	self->client->ps.pm_type = PM_DEAD;
 
 	if ( attacker ) {
@@ -547,12 +540,32 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	self->enemy = attacker;
 
+#if FEAT_TEAM_LEADERSHIP
+	// PTL (11M): if the dead player was the leader (carrying team flag),
+	// transfer the flag to the killer
+	if ( g_ptl.integer && g_gametype.integer >= GT_TEAM && attacker && attacker->client && attacker != self ) {
+		if ( self->client->ps.powerups[PW_REDFLAG] ) {
+			self->client->ps.powerups[PW_REDFLAG] = 0;
+			attacker->client->ps.powerups[PW_REDFLAG] = INT_MAX;
+			trap_SendServerCommand( -1, va( "cp \"" S_COLOR_RED "%s" S_COLOR_WHITE " is now the Red Leader!\"",
+				attacker->client->pers.netname ) );
+			AddScore( attacker, self->r.currentOrigin, 2 );
+		}
+		if ( self->client->ps.powerups[PW_BLUEFLAG] ) {
+			self->client->ps.powerups[PW_BLUEFLAG] = 0;
+			attacker->client->ps.powerups[PW_BLUEFLAG] = INT_MAX;
+			trap_SendServerCommand( -1, va( "cp \"" S_COLOR_BLUE "%s" S_COLOR_WHITE " is now the Blue Leader!\"",
+				attacker->client->pers.netname ) );
+			AddScore( attacker, self->r.currentOrigin, 2 );
+		}
+	}
+#endif
+
 	self->client->ps.persistant[PERS_KILLED]++;
 
-#if FEAT_CONSECUTIVE_KILLS
-	// kill sprees (2D): reset victim's streak
+	// eser - kill streaks
 	self->client->consecutiveKills = 0;
-#endif
+	// eser - kill streaks
 
 	if (attacker && attacker->client) {
 		attacker->client->lastkilled_client = self->s.number;
@@ -564,6 +577,13 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 			AddScore( attacker, self->r.currentOrigin, -1 );
 		} else {
+#if FEAT_SPAWN_PROTECTION
+			// spawn protection: no score for killing a protected player
+			if ( self->client->spawnprotected ) {
+				trap_SendServerCommand( attacker->s.number,
+					"print \"No score — target was spawn protected.\n\"" );
+			} else
+#endif
             if (g_gametype.integer == GT_KINGOFTHEHILL && self->client->ps.powerups[PW_KING]) {
                 AddScore(attacker, self->r.currentOrigin, 5);
                 AssignAKing(attacker);
@@ -602,28 +622,27 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			}
 			attacker->client->lastKillTime = level.time;
 
-#if FEAT_CONSECUTIVE_KILLS
-			// kill sprees (2D): track consecutive kills, announce milestones
+			// eser - kill streaks
 			if ( attacker != self && !OnSameTeam( self, attacker ) ) {
 				attacker->client->consecutiveKills++;
 				switch ( attacker->client->consecutiveKills ) {
 				case 5:
-					trap_SendServerCommand( attacker - g_entities, "cp \"Killing Spree!\n\"" );
+					trap_SendServerCommand( -1, va( "cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is on a Killing Spree!\n\"", attacker->client->pers.netname ) );
 					break;
 				case 10:
-					trap_SendServerCommand( attacker - g_entities, "cp \"Rampage!\n\"" );
+					trap_SendServerCommand( -1, va( "cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is on a Rampage!\n\"", attacker->client->pers.netname ) );
 					break;
 				case 15:
-					trap_SendServerCommand( attacker - g_entities, "cp \"Massacre!\n\"" );
+					trap_SendServerCommand( -1, va( "cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is on a Massacre!\n\"", attacker->client->pers.netname ) );
 					break;
 				case 20:
-					trap_SendServerCommand( attacker - g_entities, "cp \"Unstoppable!\n\"" );
+					trap_SendServerCommand( -1, va( "cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is Unstoppable!\n\"", attacker->client->pers.netname ) );
 					break;
 				default:
 					break;
 				}
 			}
-#endif
+			// eser - kill streaks
 
 		}
 	} else {
@@ -632,6 +651,17 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
         }
 
 		AddScore( self, self->r.currentOrigin, -1 );
+	}
+
+	// per-weapon kill/death tracking
+	{
+		int wp = G_WeaponFromMOD( meansOfDeath );
+		if ( wp > WP_NONE && wp < WP_NUM_WEAPONS ) {
+			if ( attacker && attacker->client && attacker != self ) {
+				attacker->client->weaponStats[wp].kills++;
+			}
+			self->client->weaponStats[wp].deaths++;
+		}
 	}
 
 	// Add team bonuses
@@ -916,6 +946,26 @@ dflags		these flags are used to control how T_Damage works
 ============
 */
 
+/*
+============
+G_WeaponFromMOD
+Maps a means-of-death constant to the corresponding weapon index.
+============
+*/
+int G_WeaponFromMOD( int mod ) {
+	switch ( mod ) {
+		case MOD_SHOTGUN:                          return WP_SHOTGUN;
+		case MOD_GAUNTLET:                         return WP_GAUNTLET;
+		case MOD_MACHINEGUN:                       return WP_MACHINEGUN;
+		case MOD_GRENADE: case MOD_GRENADE_SPLASH: return WP_GRENADE_LAUNCHER;
+		case MOD_ROCKET: case MOD_ROCKET_SPLASH:   return WP_ROCKET_LAUNCHER;
+		case MOD_PLASMA:                           return WP_PLASMAGUN;
+		case MOD_RAILGUN:                          return WP_RAILGUN;
+		case MOD_LIGHTNING: case MOD_LIGHTNING_DISCHARGE: return WP_LIGHTNING;
+		default:                                   return WP_NONE;
+	}
+}
+
 void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			   vec3_t dir, vec3_t point, int damage, int dflags, int mod ) {
 	gclient_t	*client;
@@ -923,6 +973,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	int			asave;
 	int			knockback;
 	int			max;
+	int			wp;
 #ifdef MISSIONPACK
 	vec3_t		bouncedir, impactpoint;
 #endif
@@ -987,9 +1038,12 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	knockback = damage;
-	if ( knockback > 200 ) {
+
+	// no knockback cap: skip the 200 limit for extreme physics
+	if ( !g_excessive.integer && knockback > 200 ) {
 		knockback = 200;
 	}
+
 	if ( targ->flags & FL_NO_KNOCKBACK ) {
 		knockback = 0;
 	}
@@ -1002,39 +1056,25 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		vec3_t	kvel;
 		float	mass = 200;
 
-        // CPM: Custom weapon knockbacks
+		// eser - weapon-specific knockbacks
         float	scale = 1000;
 
+		// bg_weaponlist[] instead of damage, decoupling knockback from damage
+		switch ( mod ) {
+		case MOD_GAUNTLET:       scale = bg_weaponlist[WP_GAUNTLET].knockback; break;
+		case MOD_MACHINEGUN:     scale = bg_weaponlist[WP_MACHINEGUN].knockback; break;
+		case MOD_SHOTGUN:        scale = bg_weaponlist[WP_SHOTGUN].knockback; break;
+		case MOD_GRENADE:
+		case MOD_GRENADE_SPLASH: scale = bg_weaponlist[WP_GRENADE_LAUNCHER].knockback; break;
+		case MOD_ROCKET:
+		case MOD_ROCKET_SPLASH:  scale = bg_weaponlist[WP_ROCKET_LAUNCHER].knockback; break;
+		case MOD_LIGHTNING:      scale = bg_weaponlist[WP_LIGHTNING].knockback; break;
+		case MOD_RAILGUN:        scale = bg_weaponlist[WP_RAILGUN].knockback; break;
+		case MOD_PLASMA:         scale = bg_weaponlist[WP_PLASMAGUN].knockback; break;
+		default: break;
+		}
+	
         if (targ != attacker) {
-            switch (mod) {
-            case MOD_GAUNTLET:
-                scale = bg_weaponlist[WP_GAUNTLET].knockback;
-                break;
-            case MOD_MACHINEGUN:
-                scale = bg_weaponlist[WP_MACHINEGUN].knockback;
-                break;
-            case MOD_SHOTGUN:
-                scale = bg_weaponlist[WP_SHOTGUN].knockback;
-                break;
-            case MOD_GRENADE:
-            case MOD_GRENADE_SPLASH:
-                scale = bg_weaponlist[WP_GRENADE_LAUNCHER].knockback;
-                break;
-            case MOD_ROCKET:
-            case MOD_ROCKET_SPLASH:
-                scale = bg_weaponlist[WP_ROCKET_LAUNCHER].knockback;
-                break;
-            case MOD_LIGHTNING:
-                scale = bg_weaponlist[WP_LIGHTNING].knockback;
-                break;
-            case MOD_RAILGUN:
-                scale = bg_weaponlist[WP_RAILGUN].knockback;
-                break;
-            case MOD_PLASMA:
-                scale = bg_weaponlist[WP_PLASMAGUN].knockback;
-                break;
-            }
-
             if (g_instagib.integer) {
                 switch (mod) {
                 case MOD_GAUNTLET:
@@ -1046,13 +1086,13 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
             }
 
 			if (g_excessive.integer) {
-				scale *= 3;
+				scale *= 2;
 			}
         }
-        // !CPM
 
-        VectorScale(dir, scale * (float)knockback / mass, kvel); // CPM
+        VectorScale(dir, scale * (float)knockback / mass, kvel);
 		VectorAdd (targ->client->ps.velocity, kvel, targ->client->ps.velocity);
+		// eser - weapon-specific knockbacks
 
 		// set the timer so that the other client can't cancel
 		// out the movement immediately
@@ -1098,13 +1138,17 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		}
 
 #if FEAT_SPAWN_PROTECTION
-		// spawn protection (2B): block damage for g_spawnProtect ms after respawn
+		// spawn protection (2B): block damage for g_spawnProtect * 1000ms after respawn
 		if ( g_spawnProtect.integer > 0 && client && client->spawnprotected ) {
-			if ( level.time > client->respawnTime + g_spawnProtect.integer ) {
+			if ( level.time > client->respawnTime + ( g_spawnProtect.integer * 1000 ) ) {
 				client->spawnprotected = qfalse;
 				client->ps.eFlags &= ~EF_SPAWN_PROTECT;
 			} else {
-				return;
+				// FIXME(@eser) absorb damage (let it through) but prevent score award
+				//              attacker gets no points for spawnkills
+				//              so damage continues through to reduce health, but if it kills:
+				//              player_die will check spawnprotected and skip AddScore
+				//              so we shouldn't `return;` here for now
 			}
 		}
 #endif
@@ -1191,33 +1235,58 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
         targ->client->lasthurt_time = level.time;
 	}
 
+	if ( take <= 0 ) {
+		return;
+	}
+
 #if FEAT_DAMAGE_PLUMS
 	// damage plums (2A): show floating number to attacker
-	if ( take > 0 && targ->client && attacker != targ && attacker->client ) {
+	if ( targ->client && attacker != targ && attacker->client ) {
 		DamagePlum( attacker, targ, take );
 	}
 #endif
 
+	if ( attacker && attacker->client ) {
+		int wp;
+
+		// berserk
+		if ( attacker->client->ps.powerups[PW_BERSERK]
+			&& attacker != targ
+			&& attacker->client && targ->client && attacker->health > 0
+			&& !OnSameTeam( targ, attacker ) ) {
+			int heal = ( take < targ->health ) ? take : targ->health;
+			attacker->health += heal;
+			if ( attacker->health > MAX_HEALTH ) {
+				attacker->health = MAX_HEALTH;
+			}
+			attacker->client->ps.stats[STAT_HEALTH] = attacker->health;
+		}
+
+		// per-weapon damage tracking
+		wp = G_WeaponFromMOD( mod );
+		if ( wp > WP_NONE && wp < WP_NUM_WEAPONS ) {
+			attacker->client->weaponStats[wp].damage += take;
+		}
+	}
+
 	// do the damage
-	if (take > 0) {
-		targ->health = targ->health - take;
-		if ( targ->client ) {
-			targ->client->ps.stats[STAT_HEALTH] = targ->health;
-		}
+	targ->health = targ->health - take;
+	if ( targ->client ) {
+		targ->client->ps.stats[STAT_HEALTH] = targ->health;
+	}
 
-		if ( targ->health <= 0 ) {
-			if ( client )
-				targ->flags |= FL_NO_KNOCKBACK;
+	if ( targ->health <= 0 ) {
+		if ( client )
+			targ->flags |= FL_NO_KNOCKBACK;
 
-			if (targ->health < -999)
-				targ->health = -999;
+		if (targ->health < -999)
+			targ->health = -999;
 
-			targ->enemy = attacker;
-			targ->die (targ, inflictor, attacker, take, mod);
-			return;
-		} else if ( targ->pain ) {
-			targ->pain (targ, attacker, take);
-		}
+		targ->enemy = attacker;
+		targ->die (targ, inflictor, attacker, take, mod);
+		return;
+	} else if ( targ->pain ) {
+		targ->pain (targ, attacker, take);
 	}
 
 }

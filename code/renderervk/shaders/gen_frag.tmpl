@@ -452,6 +452,10 @@ void main() {
 #endif // !USE_CL1
 #endif // !USE_TX1
 
+#if !defined(USE_TX1)
+	base = color0;
+#endif
+
 #ifdef USE_ATEST
 #if 0
 	if (alpha_to_coverage != 0) {

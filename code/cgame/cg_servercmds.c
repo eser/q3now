@@ -79,20 +79,21 @@ static void CG_ParseScores( void ) {
 	memset( cg.scores, 0, sizeof( cg.scores ) );
 	for ( i = 0 ; i < cg.numScores ; i++ ) {
 		//
-		cg.scores[i].client = atoi( CG_Argv( i * 14 + 4 ) );
-		cg.scores[i].score = atoi( CG_Argv( i * 14 + 5 ) );
-		cg.scores[i].ping = atoi( CG_Argv( i * 14 + 6 ) );
-		cg.scores[i].time = atoi( CG_Argv( i * 14 + 7 ) );
-		cg.scores[i].scoreFlags = atoi( CG_Argv( i * 14 + 8 ) );
-		powerups = atoi( CG_Argv( i * 14 + 9 ) );
-		cg.scores[i].accuracy = atoi(CG_Argv(i * 14 + 10));
-		cg.scores[i].impressiveCount = atoi(CG_Argv(i * 14 + 11));
-		cg.scores[i].excellentCount = atoi(CG_Argv(i * 14 + 12));
-		cg.scores[i].guantletCount = atoi(CG_Argv(i * 14 + 13));
-		cg.scores[i].defendCount = atoi(CG_Argv(i * 14 + 14));
-		cg.scores[i].assistCount = atoi(CG_Argv(i * 14 + 15));
-		cg.scores[i].perfect = atoi(CG_Argv(i * 14 + 16));
-		cg.scores[i].captures = atoi(CG_Argv(i * 14 + 17));
+		cg.scores[i].client = atoi( CG_Argv( i * 15 + 4 ) );
+		cg.scores[i].score = atoi( CG_Argv( i * 15 + 5 ) );
+		cg.scores[i].ping = atoi( CG_Argv( i * 15 + 6 ) );
+		cg.scores[i].time = atoi( CG_Argv( i * 15 + 7 ) );
+		cg.scores[i].scoreFlags = atoi( CG_Argv( i * 15 + 8 ) );
+		powerups = atoi( CG_Argv( i * 15 + 9 ) );
+		cg.scores[i].accuracy = atoi(CG_Argv(i * 15 + 10));
+		cg.scores[i].impressiveCount = atoi(CG_Argv(i * 15 + 11));
+		cg.scores[i].excellentCount = atoi(CG_Argv(i * 15 + 12));
+		cg.scores[i].guantletCount = atoi(CG_Argv(i * 15 + 13));
+		cg.scores[i].defendCount = atoi(CG_Argv(i * 15 + 14));
+		cg.scores[i].assistCount = atoi(CG_Argv(i * 15 + 15));
+		cg.scores[i].perfect = atoi(CG_Argv(i * 15 + 16));
+		cg.scores[i].captures = atoi(CG_Argv(i * 15 + 17));
+		cg.scores[i].deaths = atoi(CG_Argv(i * 15 + 18));
 
 		if ( cg.scores[i].client < 0 || cg.scores[i].client >= MAX_CLIENTS ) {
 			cg.scores[i].client = 0;
@@ -106,6 +107,36 @@ static void CG_ParseScores( void ) {
 	CG_SetScoreSelection(NULL);
 #endif
 
+}
+
+/*
+=================
+CG_ParseBStats
+
+Parse per-weapon stats from server bstats command.
+Format: bstats <clientId> <weaponBitmask> [<hits> <shots> <kills> <deaths> <damage>]...
+=================
+*/
+static void CG_ParseBStats( void ) {
+	int clientId, weaponMask, index, i;
+
+	index = 1;
+	clientId = atoi( CG_Argv( index++ ) );
+	weaponMask = atoi( CG_Argv( index++ ) );
+
+	if ( clientId < 0 || clientId >= MAX_CLIENTS ) return;
+
+	memset( cgs.weaponStats[clientId], 0, sizeof( cgs.weaponStats[clientId] ) );
+
+	for ( i = WP_GAUNTLET; i < WP_NUM_WEAPONS; i++ ) {
+		if ( weaponMask & ( 1 << i ) ) {
+			cgs.weaponStats[clientId][i].hits   = atoi( CG_Argv( index++ ) );
+			cgs.weaponStats[clientId][i].shots  = atoi( CG_Argv( index++ ) );
+			cgs.weaponStats[clientId][i].kills  = atoi( CG_Argv( index++ ) );
+			cgs.weaponStats[clientId][i].deaths = atoi( CG_Argv( index++ ) );
+			cgs.weaponStats[clientId][i].damage = atoi( CG_Argv( index++ ) );
+		}
+	}
 }
 
 /*
@@ -172,6 +203,10 @@ void CG_ParseServerinfo( void ) {
 	trap_Cvar_Set("g_redTeam", cgs.redTeam);
 	Q_strncpyz( cgs.blueTeam, Info_ValueForKey( info, "g_blueTeam" ), sizeof(cgs.blueTeam) );
 	trap_Cvar_Set("g_blueTeam", cgs.blueTeam);
+#if FEAT_ATMOSPHERIC
+	Q_strncpyz( cgs.weather, Info_ValueForKey( info, "g_weather" ), sizeof(cgs.weather) );
+	CG_AtmosphericInit();
+#endif
 }
 
 /*
@@ -487,6 +522,15 @@ static void CG_MapRestart( void ) {
 		trap_S_StartLocalSound( cgs.media.countFightSound, CHAN_ANNOUNCER );
 		CG_CenterPrint( "FIGHT!", 120, GIANTCHAR_WIDTH*2 );
 	}
+
+#if FEAT_AUTO_DEMO
+	if ( cg_autoRecord.integer && !cg.playerRecord ) {
+		trap_SendConsoleCommand( "g_synchronousClients 1\n" );
+		trap_SendConsoleCommand( "record\n" );
+		trap_SendConsoleCommand( "g_synchronousClients 0\n" );
+		cg.playerRecord = qtrue;
+	}
+#endif
 
     if (cg_singlePlayer.integer) {
 		trap_Cvar_Set("ui_matchStartTime", va("%i", cg.time));
@@ -1029,18 +1073,35 @@ static void CG_ServerCommand( void ) {
 		if ( cgs.gametype >= GT_TEAM && cg_teamChatsOnly.integer ) {
 			return;
 		}
-
+#if FEAT_CHAT_FILTER
+		{
+			int senderNum = atoi( CG_Argv(2) );
+			if ( CG_ChatFilterIsMuted( senderNum ) ) {
+				return;
+			}
+		}
+#endif
 		trap_S_StartLocalSound( cgs.media.talkSound, CHAN_LOCAL_SOUND );
 		Q_strncpyz( text, CG_Argv(1), MAX_SAY_TEXT );
 		CG_RemoveChatEscapeChar( text );
+		CG_SHUDEventChat( text );
 		CG_Printf( "%s\n", text );
 		return;
 	}
 
 	if ( !strcmp( cmd, "tchat" ) ) {
+#if FEAT_CHAT_FILTER
+		{
+			int senderNum = atoi( CG_Argv(2) );
+			if ( CG_ChatFilterIsMuted( senderNum ) ) {
+				return;
+			}
+		}
+#endif
 		trap_S_StartLocalSound( cgs.media.talkSound, CHAN_LOCAL_SOUND );
 		Q_strncpyz( text, CG_Argv(1), MAX_SAY_TEXT );
 		CG_RemoveChatEscapeChar( text );
+		CG_SHUDEventChat( text );
 		CG_AddToTeamChat( text );
 		CG_Printf( "%s\n", text );
 		return;
@@ -1065,6 +1126,11 @@ static void CG_ServerCommand( void ) {
 
 	if ( !strcmp( cmd, "scores" ) ) {
 		CG_ParseScores();
+		return;
+	}
+
+	if ( !strcmp( cmd, "bstats" ) ) {
+		CG_ParseBStats();
 		return;
 	}
 

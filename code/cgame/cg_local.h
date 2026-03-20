@@ -1,3 +1,5 @@
+#ifndef CG_LOCAL_H
+#define CG_LOCAL_H
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
@@ -58,7 +60,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	MUZZLE_FLASH_TIME	20
 #define	GHOST_FLASH_TIME	300
 #define	SINK_TIME			1000		// time for fragments to sink into ground before going away
-#define	ATTACKER_HEAD_TIME	10000
 #define	REWARD_TIME			3000
 
 #define	PULSE_SCALE			1.5			// amount to scale up the icons when activating
@@ -237,6 +238,9 @@ typedef enum {
 #if FEAT_DAMAGE_PLUMS
 	LE_DAMAGEPLUM,			// floating damage number (2A)
 #endif
+#if FEAT_PING_LOCATION
+	LE_PING_LOCATION,		// team ping marker (4G)
+#endif
 #ifdef MISSIONPACK
 	LE_KAMIKAZE,
 	LE_INVULIMPACT,
@@ -312,7 +316,17 @@ typedef struct {
 	int				captures;
 	qboolean	perfect;
 	int				team;
+	int				deaths;
 } score_t;
+
+// per-weapon stats (received via bstats server command)
+typedef struct {
+	int hits;
+	int shots;
+	int kills;
+	int deaths;
+	int damage;
+} cgWeaponStat_t;
 
 // each client has an associated clientInfo_t
 // that contains media references necessary to present the
@@ -537,8 +551,13 @@ typedef struct {
 
 	// zoom key
 	qboolean	zoomed;
-	int			zoomTime;
 	float		zoomSensitivity;
+
+	// FOV transition (unified for zoom, third-person, and normal)
+	float		fovCurrent;			// current smoothly-interpolated FOV
+	float		fovTarget;			// cached target to detect changes
+	float		fovTransitionFrom;	// FOV value when transition started
+	int			fovTransitionTime;	// timestamp when transition started
 
 	// information screen text during loading
 	char		infoScreenText[MAX_STRING_CHARS];
@@ -553,6 +572,13 @@ typedef struct {
 	qboolean	scoreBoardShowing;
 	int			scoreFadeTime;
 	char		killerName[MAX_NAME_LENGTH];
+#if FEAT_FOLLOW_KILLER
+	int			killerClientNum;	// client who killed us (-1 if none/world)
+	qboolean	followKillerPending;	// waiting to auto-follow killer
+#endif
+#if FEAT_AUTO_DEMO
+	qboolean	playerRecord;		// auto-recording active
+#endif
 	char			spectatorList[MAX_STRING_CHARS];		// list of names
 	int				spectatorLen;												// length of list
 	float			spectatorWidth;											// width in device units
@@ -654,6 +680,13 @@ typedef struct {
 	refEntity_t		testModelEntity;
 	char			testModelName[MAX_QPATH];
 	qboolean		testGun;
+
+#if FEAT_THIRD_PERSON
+	qboolean	thirdPersonHeld;			// +thirdperson key held (XOR inverts cg_thirdPerson cvar)
+	int			thirdPersonTransitionTime;	// timestamp when 1st<->3rd toggle happened
+	qboolean	thirdPersonTransitionFrom;	// was rendering 3rd person before toggle?
+	float		thirdPersonCurrentRange;	// current camera distance (lerps toward trace-clipped range)
+#endif
 
 } cg_t;
 
@@ -782,6 +815,8 @@ typedef struct {
 	qhandle_t	quadShader;
 	qhandle_t	redQuadShader;
 	qhandle_t	quadWeaponShader;
+	qhandle_t	berserkShader;
+	qhandle_t	berserkWeaponShader;
 	qhandle_t	invisShader;
 	qhandle_t	regenShader;
 	qhandle_t	battleSuitShader;
@@ -839,6 +874,7 @@ typedef struct {
 
 	// sounds
 	sfxHandle_t	quadSound;
+	sfxHandle_t	berserkSound;
 	sfxHandle_t	tracerSound;
 	sfxHandle_t	selectSound;
 	sfxHandle_t	useNothingSound;
@@ -900,6 +936,9 @@ typedef struct {
 	sfxHandle_t hitSoundHighArmor;
 	sfxHandle_t hitSoundLowArmor;
 	sfxHandle_t hitTeamSound;
+#if FEAT_HIT_SOUNDS
+	sfxHandle_t hitSounds[4];	// damage-tier sounds: 0-25, 26-50, 51-75, 76+
+#endif
 	sfxHandle_t impressiveSound;
 	sfxHandle_t excellentSound;
 	sfxHandle_t deniedSound;
@@ -1027,6 +1066,9 @@ typedef struct {
 	char			mapname[MAX_QPATH];
 	char			redTeam[MAX_QPATH];
 	char			blueTeam[MAX_QPATH];
+#if FEAT_ATMOSPHERIC
+	char			weather[16];		// server-controlled: "rain", "snow", or ""
+#endif
 
 	int				voteTime;
 	int				voteYes;
@@ -1087,6 +1129,9 @@ typedef struct {
 	// media
 	cgMedia_t		media;
 
+	// per-weapon stats (populated by bstats server command)
+	cgWeaponStat_t	weaponStats[MAX_CLIENTS][WP_NUM_WEAPONS];
+
 } cgs_t;
 
 //==============================================================================
@@ -1122,6 +1167,8 @@ extern	vmCvar_t		cg_crosshairX;
 extern	vmCvar_t		cg_crosshairY;
 extern	vmCvar_t		cg_crosshairSize;
 extern	vmCvar_t		cg_crosshairHealth;
+extern	vmCvar_t		cg_crosshairColor;
+extern	vmCvar_t		cg_crosshairAlpha;
 extern	vmCvar_t		cg_drawStatus;
 extern	vmCvar_t		cg_draw2D;
 extern	vmCvar_t		cg_animSpeed;
@@ -1151,8 +1198,15 @@ extern	vmCvar_t		cg_zoomFov;
 extern	vmCvar_t		cg_thirdPersonRange;
 extern	vmCvar_t		cg_thirdPersonAngle;
 extern	vmCvar_t		cg_thirdPerson;
+#if FEAT_THIRD_PERSON
+extern	vmCvar_t		cg_thirdPersonFadeStart;
+extern	vmCvar_t		cg_thirdPersonFadeEnd;
+extern	vmCvar_t		cg_thirdPersonSide;
+extern	vmCvar_t		cg_thirdPersonFov;
+extern	vmCvar_t		cg_thirdPersonAlpha;
+extern	vmCvar_t		cg_fovTransitionTime;
+#endif
 extern	vmCvar_t		cg_lagometer;
-extern	vmCvar_t		cg_drawAttacker;
 extern	vmCvar_t		cg_synchronousClients;
 extern	vmCvar_t		cg_teamChatTime;
 extern	vmCvar_t		cg_teamChatHeight;
@@ -1169,10 +1223,31 @@ extern	vmCvar_t		cg_teamChatsOnly;
 extern	vmCvar_t		cg_noVoiceChats;
 extern	vmCvar_t		cg_noVoiceText;
 #endif
-extern  vmCvar_t		cg_scorePlum;
+extern  vmCvar_t		cg_scorePlums;
 extern	vmCvar_t		cg_smoothClients;
 extern	vmCvar_t		pmove_fixed;
 extern	vmCvar_t		pmove_msec;
+extern	vmCvar_t		pmove_overbounce;
+#if FEAT_FAST_WEAPON_SWITCH
+extern	vmCvar_t		cg_fastWeaponSwitch;
+#endif
+#if FEAT_ATMOSPHERIC
+extern	vmCvar_t		cg_atmosphericEffects;
+void	CG_AtmosphericInit( void );
+void	CG_AddAtmosphericEffects( void );
+#endif
+#if FEAT_LENS_FLARES
+extern	vmCvar_t		cg_lensFlare;
+extern	vmCvar_t		cg_missileFlare;
+extern	vmCvar_t		cg_powerupFlares;
+void	CG_InitLensFlares( void );
+void	CG_AddLensFlares( void );
+void	CG_AddMissileFlare( centity_t *cent );
+void	CG_AddPowerupFlare( centity_t *cent, int powerupTag );
+#endif
+#if FEAT_SPECTATOR_OUTLINES
+extern	vmCvar_t		cg_specOutlines;
+#endif
 //extern	vmCvar_t		cg_pmove_fixed;
 extern	vmCvar_t		cg_cameraOrbit;
 extern	vmCvar_t		cg_cameraOrbitDelay;
@@ -1201,10 +1276,52 @@ extern	vmCvar_t		cg_stretch;
 extern	vmCvar_t		cg_fovAspectAdjust;
 extern	vmCvar_t		cg_viewbob;
 extern	vmCvar_t		cg_viewkick;
-#if FEAT_DAMAGE_PLUMS
-extern	vmCvar_t		cg_damagePlum;
-#endif
 extern	vmCvar_t		cg_drawSpeed;
+#if FEAT_HIT_SOUNDS
+extern	vmCvar_t		cg_hitSounds;
+#endif
+#if FEAT_FOLLOW_KILLER
+extern	vmCvar_t		cg_followKiller;
+#endif
+#if FEAT_AUTO_DEMO
+extern	vmCvar_t		cg_autoRecord;
+#endif
+#if FEAT_IMPACT_SPARKS
+extern	vmCvar_t		cg_impactSparks;
+#endif
+#if FEAT_CHAT_FILTER
+void		CG_ChatFilterIgnore_f( void );
+void		CG_ChatFilterUnignore_f( void );
+qboolean	CG_ChatFilterIsMuted( int clientNum );
+#endif
+
+extern	vmCvar_t		cg_hudFile;
+
+// cg_osptext.c — OSP2-BE font/text rendering system
+void	CG_LoadFonts( void );
+
+// cg_superhud.c — SuperHUD configurable HUD system
+void	CG_SHUDLoadConfig( void );
+void	CG_SHUDRoutine( void );
+void	CG_SHUDParserInit( void );
+void	CG_SHUDRoutenesDestroyAll( void );
+qboolean CG_SHUDIsLoaded( void );
+void	CG_SHUDEventFrag( const char *message );
+void	CG_SHUDEventChat( const char *message );
+void	CG_SHUDAvailableElementsInit( void );
+
+// cg_colorparse.c
+void CG_ParseColor( const char *str, float *col, float alpha );
+
+// cg_alloc.c — cgame-local memory allocator
+void	*CG_Alloc( int size );
+void	CG_Free( void *ptr );
+void	CG_AllocReset( void );
+void	CG_AllocSetPermanent( int permanent );
+#define Z_Malloc( size )    CG_Alloc( size )
+#define Z_Free( ptr )       CG_Free( ptr )
+#define OSP_MEMORY_CHECK( ptr ) \
+	if ( !(ptr) ) { CG_Error( "%s:%d: out of memory\n", __FILE__, __LINE__ ); }
 
 //
 // cg_main.c
@@ -1274,20 +1391,15 @@ screenPlacement_e CG_GetScreenVerticalPlacement(void);
 void CG_AdjustFrom640( float *x, float *y, float *w, float *h );
 void CG_FillRect( float x, float y, float width, float height, const float *color );
 void CG_DrawPic( float x, float y, float width, float height, qhandle_t hShader );
-void CG_DrawString( float x, float y, const char *string, 
-				   float charWidth, float charHeight, const float *modulate );
-
-
-void CG_DrawStringExt( int x, int y, const char *string, const float *setColor, 
+void CG_DrawStringExt( int x, int y, const char *string, const float *setColor,
 		qboolean forceColor, qboolean shadow, int charWidth, int charHeight, int maxChars );
-void CG_DrawBigString( int x, int y, const char *s, float alpha );
-void CG_DrawBigStringColor( int x, int y, const char *s, vec4_t color );
-void CG_DrawSmallString( int x, int y, const char *s, float alpha );
-void CG_DrawSmallStringColor( int x, int y, const char *s, vec4_t color );
+void CG_DrawBigString( int x, int y, const char *s, vec4_t color, int flags, int font );
+void CG_DrawSmallString( int x, int y, const char *s, vec4_t color, int flags, int font );
 
 int CG_DrawStrlen( const char *str );
 
-float	*CG_FadeColor( int startMsec, int totalMsec );
+float *CG_ColorFromAlpha( float alpha );
+float *CG_FadeColor( int startMsec, int totalMsec );
 float *CG_TeamColor( int team );
 void CG_TileClear( void );
 void CG_ColorForHealth( vec4_t hcolor );
@@ -1366,6 +1478,8 @@ void CG_LoadDeferredPlayers( void );
 //
 void CG_CheckEvents( centity_t *cent );
 const char	*CG_PlaceString( int rank );
+const char	*CG_ClientName( const clientInfo_t *ci );
+const char	*CG_ClientNameByNum( int clientNum );
 void CG_EntityEvent( centity_t *cent, vec3_t position );
 void CG_PainEvent( centity_t *cent, int health );
 
@@ -1457,6 +1571,12 @@ void CG_ScorePlum( int client, vec3_t org, int score );
 #if FEAT_DAMAGE_PLUMS
 void CG_DamagePlum( int client, vec3_t org, int damage );	// 2A
 #endif
+#if FEAT_PING_LOCATION
+void CG_PingLocation( centity_t *cent );	// 4G
+#endif
+#if FEAT_IMPACT_SPARKS
+void CG_ImpactSparks( vec3_t origin, vec3_t dir );	// 11A
+#endif
 
 void CG_GibPlayer( vec3_t playerOrigin );
 void CG_BigExplode( vec3_t playerOrigin );
@@ -1488,6 +1608,10 @@ void CG_DrawInformation( void );
 // cg_scoreboard.c
 //
 qboolean CG_DrawOldScoreboard( void );
+qboolean CG_OSPDrawFFAScoreboard( void );
+qboolean CG_OSPDrawTourneyScoreboard( void );
+qboolean CG_OSPDrawScoretable( void );
+qboolean CG_BEDrawTeamScoretable( void );
 void CG_DrawTourneyScoreboard( void );
 
 //
@@ -1731,3 +1855,4 @@ void	CG_ParticleMisc (qhandle_t pshader, vec3_t origin, int size, int duration, 
 void	CG_ParticleExplosion (char *animStr, vec3_t origin, vec3_t vel, int duration, int sizeStart, int sizeEnd);
 extern qboolean		initparticles;
 int CG_NewParticleArea ( int num );
+#endif // CG_LOCAL_H

@@ -155,18 +155,13 @@ void TeamMain_MenuInit( void ) {
 	gametype = atoi( Info_ValueForKey( info,"g_gametype" ) );
 			      
 	// set initial states
-	switch( gametype ) {
-	case GT_FFA:
-	case GT_TOURNAMENT:
+	if ( gametype >= GT_TEAM ) {
+		// team games: gray out "JOIN GAME" (free-for-all join)
+		s_teammain.joingame.generic.flags |= QMF_GRAYED;
+	} else {
+		// non-team games: gray out "JOIN RED" / "JOIN BLUE"
 		s_teammain.joinred.generic.flags  |= QMF_GRAYED;
 		s_teammain.joinblue.generic.flags |= QMF_GRAYED;
-		break;
-
-	default:
-	case GT_TEAM:
-	case GT_CTF:
-		s_teammain.joingame.generic.flags |= QMF_GRAYED;
-		break;
 	}
 
 	Menu_AddItem( &s_teammain.menu, (void*) &s_teammain.frame );

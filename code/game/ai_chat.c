@@ -339,6 +339,7 @@ int BotValidChatPosition(bot_state_t *bs) {
 	if (BotIsDead(bs)) return qtrue;
 	//never start chatting with a powerup
 	if (bs->inventory[INVENTORY_QUAD] ||
+		bs->inventory[INVENTORY_BERSERK] ||
 		bs->inventory[INVENTORY_ENVIRONMENTSUIT] ||
 		bs->inventory[INVENTORY_HASTE] ||
 		bs->inventory[INVENTORY_INVISIBILITY] ||

@@ -101,17 +101,19 @@ typedef struct
 #define ID_WEAPON5		21	
 #define ID_WEAPON6		22	
 #define ID_WEAPON7		23	
-#define ID_WEAPON8		24	
-#define ID_WEAPON9		25	
-#define ID_ATTACK		26
-#define ID_WEAPPREV		27
-#define ID_WEAPNEXT		28
-#define ID_GESTURE		29
-#define ID_CHAT			30
-#define ID_CHAT2		31
-#define ID_CHAT3		32
-#define ID_CHAT4		33
-#define ID_TOGGLEMENU	34
+#define ID_WEAPON8		24
+#define ID_ATTACK		25
+#define ID_WEAPPREV		26
+#define ID_WEAPNEXT		27
+#define ID_GESTURE		28
+#define ID_CHAT			29
+#define ID_CHAT2		30
+#define ID_CHAT3		31
+#define ID_CHAT4		32
+#define ID_TOGGLEMENU	33
+#if FEAT_THIRD_PERSON
+#define ID_THIRDPERSON	34
+#endif
 
 // all others
 #define ID_FREELOOK		35
@@ -204,6 +206,9 @@ typedef struct
 	menuaction_s		chat3;
 	menuaction_s		chat4;
 	menuaction_s		togglemenu;
+#if FEAT_THIRD_PERSON
+	menuaction_s		thirdperson;
+#endif
 	menuradiobutton_s	joyenable;
 	menuslider_s		joythreshold;
 	int					section;
@@ -260,6 +265,9 @@ static bind_t g_bindings[] =
 	{"messagemode3", 	"chat - target",	ID_CHAT3,		ANIM_CHAT,		-1,				-1,		-1, -1},
 	{"messagemode4", 	"chat - attacker",	ID_CHAT4,		ANIM_CHAT,		-1,				-1,		-1, -1},
 	{"togglemenu", 		"toggle menu",		ID_TOGGLEMENU,	ANIM_IDLE,		K_ESCAPE,		-1,		-1, -1},
+#if FEAT_THIRD_PERSON
+	{"+thirdperson",	"third person",		ID_THIRDPERSON,	ANIM_IDLE,		-1,				-1,		-1, -1},
+#endif
 	{(char*)NULL,		(char*)NULL,		0,				0,				-1,				-1,		-1,	-1},
 };
 
@@ -332,6 +340,9 @@ static menucommon_s *g_misc_controls[] = {
 	(menucommon_s *)&s_controls.chat3,
 	(menucommon_s *)&s_controls.chat4,
 	(menucommon_s *)&s_controls.togglemenu,
+#if FEAT_THIRD_PERSON
+	(menucommon_s *)&s_controls.thirdperson,
+#endif
 	NULL,
 };
 
@@ -1516,6 +1527,14 @@ static void Controls_MenuInit( void )
 	s_controls.togglemenu.generic.ownerdraw = Controls_DrawKeyBinding;
 	s_controls.togglemenu.generic.id        = ID_TOGGLEMENU;
 
+#if FEAT_THIRD_PERSON
+	s_controls.thirdperson.generic.type      = MTYPE_ACTION;
+	s_controls.thirdperson.generic.flags     = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS|QMF_GRAYED|QMF_HIDDEN;
+	s_controls.thirdperson.generic.callback  = Controls_ActionEvent;
+	s_controls.thirdperson.generic.ownerdraw = Controls_DrawKeyBinding;
+	s_controls.thirdperson.generic.id        = ID_THIRDPERSON;
+#endif
+
 	s_controls.joyenable.generic.type      = MTYPE_RADIOBUTTON;
 	s_controls.joyenable.generic.flags	   = QMF_SMALLFONT;
 	s_controls.joyenable.generic.x	       = SCREEN_WIDTH/2;
@@ -1598,6 +1617,9 @@ static void Controls_MenuInit( void )
 	Menu_AddItem( &s_controls.menu, &s_controls.chat3 );
 	Menu_AddItem( &s_controls.menu, &s_controls.chat4 );
 	Menu_AddItem( &s_controls.menu, &s_controls.togglemenu );
+#if FEAT_THIRD_PERSON
+	Menu_AddItem( &s_controls.menu, &s_controls.thirdperson );
+#endif
 
 	Menu_AddItem( &s_controls.menu, &s_controls.back );
 

@@ -771,6 +771,12 @@ void ClientThink_real( gentity_t *ent ) {
 		client->ps.speed = DEFAULT_MOVESPEED;
 	}
 
+	// eser - weapon weights
+	if ( client->ps.weapon > WP_NONE && client->ps.weapon < WP_NUM_WEAPONS ) {
+		client->ps.speed *= bg_weaponlist[client->ps.weapon].weight;
+	}
+	// eser - weapon weights
+
 	if ( client->ps.powerups[PW_HASTE] ) {
 		client->ps.speed *= 1.3;
 	}
@@ -837,6 +843,18 @@ void ClientThink_real( gentity_t *ent ) {
 
 	pm.pmove_fixed = pmove_fixed.integer | client->pers.pmoveFixed;
 	pm.pmove_msec = pmove_msec.integer;
+	// build pmove_flags bitmask from feature cvars
+	pm.pmove_flags = 0;
+
+	if ( pmove_overbounce.integer ) {
+		pm.pmove_flags |= PMF_OVERBOUNCE;
+	}
+
+#if FEAT_FAST_WEAPON_SWITCH
+	// fast weapon switch (5A): map cvar value to 2-bit pmove_flags
+	if ( g_fastWeaponSwitch.integer == 2 )      pm.pmove_flags |= PMF_FAST_SWITCH_INSTANT;
+	else if ( g_fastWeaponSwitch.integer == 1 )  pm.pmove_flags |= PMF_FAST_SWITCH_SKIP_DROP;
+#endif
 
 	VectorCopy( client->ps.origin, client->oldOrigin );
 
@@ -923,6 +941,12 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// check for respawning
 	if ( client->ps.stats[STAT_HEALTH] <= 0 ) {
+#if FEAT_ELIMINATION
+		// elimination (10B): don't allow respawn during a live round
+		if ( g_elimination.integer && level.roundState == ROUND_LIVE ) {
+			return;
+		}
+#endif
         if (g_gametype.integer == GT_LASTMANSTANDING && client->ps.persistant[PERS_SCORE] < 1) {
             SetTeam(ent, "s");
             return;
@@ -942,6 +966,31 @@ void ClientThink_real( gentity_t *ent ) {
 			}
 		}
 		return;
+	}
+
+	// camp detection (11C): gradual dark screen punishment
+	if ( g_campDetectionTime.integer > 0 && client->sess.sessionTeam != TEAM_SPECTATOR ) {
+		float dist;
+		vec3_t delta;
+		VectorSubtract( ent->r.currentOrigin, client->campOrigin, delta );
+		dist = VectorLength( delta );
+		if ( dist > g_campDetectionRadius.value ) {
+			// moved far enough — clear camper status and reset timer
+			VectorCopy( ent->r.currentOrigin, client->campOrigin );
+			client->campTime = level.time;
+			client->ps.stats[STAT_CAMPER] = 0;
+		} else if ( level.time - client->campTime > g_campDetectionTime.integer * 1000 ) {
+			// camping too long — ramp darkness every second
+			if ( ent->health > 0 ) {
+				client->campTime = level.time - ( g_campDetectionTime.integer * 1000 ) + 1000;
+				if ( client->ps.stats[STAT_CAMPER] < 255 ) {
+					client->ps.stats[STAT_CAMPER] += 50;
+					if ( client->ps.stats[STAT_CAMPER] > 255 ) {
+						client->ps.stats[STAT_CAMPER] = 255;
+					}
+				}
+			}
+		}
 	}
 
 	// perform once-a-second actions
@@ -1056,9 +1105,47 @@ void ClientEndFrame( gentity_t *ent ) {
 #if FEAT_SPAWN_PROTECTION
 	// expire spawn protection by timer
 	if ( ent->client->spawnprotected &&
-		 level.time > ent->client->respawnTime + g_spawnProtect.integer ) {
+		 level.time > ent->client->respawnTime + ( g_spawnProtect.integer * 1000 ) ) {
 		ent->client->spawnprotected = qfalse;
 		ent->client->ps.eFlags &= ~EF_SPAWN_PROTECT;
+	}
+#endif
+
+#if FEAT_FREEZETAG
+	// freezetag thaw (7A): nearby teammates thaw frozen players
+	if ( g_freeze.integer && ent->client->ps.stats[STAT_FROZENSTATE] == FROZENSTATE_FROZEN ) {
+		int j;
+		qboolean teammateNearby = qfalse;
+		for ( j = 0; j < level.maxclients; j++ ) {
+			gentity_t *other = &g_entities[j];
+			if ( !other->client || other == ent ) continue;
+			if ( other->client->pers.connected != CON_CONNECTED ) continue;
+			if ( other->client->sess.sessionTeam != ent->client->sess.sessionTeam ) continue;
+			if ( other->client->ps.stats[STAT_FROZENSTATE] != FROZENSTATE_NORMAL ) continue;
+			if ( other->health <= 0 ) continue;
+			if ( Distance( ent->r.currentOrigin, other->r.currentOrigin ) <= g_thawRadius.integer ) {
+				teammateNearby = qtrue;
+				break;
+			}
+		}
+		if ( teammateNearby ) {
+			ent->client->thawProgress += level.time - level.previousTime;
+			ent->client->ps.stats[STAT_FROZENSTATE] = FROZENSTATE_THAWING;
+			if ( ent->client->thawProgress >= g_thawTime.integer ) {
+				// thaw complete — respawn in place
+				ent->client->ps.pm_type = PM_NORMAL;
+				ent->client->ps.stats[STAT_FROZENSTATE] = FROZENSTATE_NORMAL;
+				ent->client->ps.eFlags &= ~EF_FROZEN;
+				ent->client->ps.stats[STAT_HEALTH] = ent->health = MAX_HEALTH;
+				ent->takedamage = qtrue;
+				ent->client->thawProgress = 0;
+				trap_SendServerCommand( -1, va( "print \"%s" S_COLOR_WHITE " was thawed!\n\"",
+					ent->client->pers.netname ) );
+			}
+		} else {
+			ent->client->thawProgress = 0;
+			ent->client->ps.stats[STAT_FROZENSTATE] = FROZENSTATE_FROZEN;
+		}
 	}
 #endif
 
@@ -1114,5 +1201,3 @@ void ClientEndFrame( gentity_t *ent ) {
 //	i = trap_AAS_PointReachabilityAreaIndex( ent->client->ps.origin );
 //	ent->client->areabits[i >> 3] |= 1 << (i & 7);
 }
-
-

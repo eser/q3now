@@ -33,6 +33,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define BODY_QUEUE_SIZE		8
 
+#if FEAT_ELIMINATION
+#define ROUND_WARMUP	0
+#define ROUND_LIVE		1
+#define ROUND_END		2
+#endif
+
 #define INFINITE			1000000
 
 #define	FRAMETIME			100					// msec
@@ -62,6 +68,15 @@ typedef enum {
 
 typedef struct gentity_s gentity_t;
 typedef struct gclient_s gclient_t;
+
+// per-weapon stats for competitive scoreboards
+typedef struct {
+	int hits;
+	int shots;
+	int kills;
+	int deaths;
+	int damage;
+} weaponStat_t;
 
 // unlagged: history buffer size (covers ~800ms at 20 snapshots/sec)
 #define MAX_PLAYER_MARKERS 32
@@ -243,17 +258,19 @@ typedef struct {
 // client data that stays across multiple respawns, but is cleared
 // on each level change or team change at ClientBegin()
 typedef struct {
-	clientConnected_t	connected;	
+	clientConnected_t	connected;
 	usercmd_t	cmd;				// we would lose angles if not persistant
 	qboolean	localClient;		// true if "ip" info key is "localhost"
 	qboolean	initialSpawn;		// the first spawn should be at a cool location
 	qboolean	predictItemPickup;	// based on cg_predictItems userinfo
 	qboolean	pmoveFixed;			//
 	char		netname[MAX_NETNAME];
-	int			maxHealth;			// for handicapping
 	int			enterTime;			// level.time the client entered the game
 	playerTeamState_t teamState;	// status in teamplay games
 	int			voteCount;			// to prevent people from constantly calling votes
+	// eser - callvote cooldown
+	int			lastVoteTime;		// level.time of last vote call (cooldown)
+	// eser - callvote cooldown
 	int			teamVoteCount;		// to prevent people from constantly calling votes
 	qboolean	teamInfo;			// send team overlay updates?
 } clientPersistant_t;
@@ -294,6 +311,9 @@ struct gclient_s {
 
 	int			accuracy_shots;		// total number of shots
 	int			accuracy_hits;		// total number of hits
+
+	// per-weapon stats for competitive scoreboards (weaponStat_t defined above struct)
+	weaponStat_t	weaponStats[WP_NUM_WEAPONS];
 
 	//
 	int			lastkilled_client;	// last client that this client killed
@@ -339,9 +359,29 @@ struct gclient_s {
 #if FEAT_SPAWN_PROTECTION
     qboolean        spawnprotected;     // spawn protection (2B)
 #endif
-#if FEAT_CONSECUTIVE_KILLS
+// eser - kill streaks
     int             consecutiveKills;   // kill sprees (2D)
+// eser - kill streaks
+#if FEAT_READY_UP
+    qboolean        ready;              // ready-up (4E)
 #endif
+#if FEAT_FREEZETAG
+    int             frozenTime;         // level.time when frozen (7A)
+    int             thawProgress;       // accumulated thaw time from proximity (7A)
+#endif
+#if FEAT_ELO_TRACKING
+    int             elo;                // player skill rating (10J)
+#endif
+// eser - admin mode
+    qboolean        isAdmin;            // admin status (10L)
+// eser - admin mode
+#if FEAT_RANKED_QUEUE
+    qboolean        queued;             // matchmaking queue status (10M)
+#endif
+	// eser - camp-detection
+    vec3_t          campOrigin;         // last recorded position for camping check (11C)
+    int             campTime;           // level.time when camping started (11C)
+	// eser - camp-detection
 };
 
 
@@ -424,6 +464,29 @@ typedef struct {
 	int			exitTime;
 	vec3_t		intermission_origin;	// also used for spectator spawns
 	vec3_t		intermission_angle;
+
+#if FEAT_READY_UP
+	int			readyMask;				// bitmask of ready players (4E)
+#endif
+#if FEAT_MAP_ROTATION
+	int			rotationIndex;			// current position in map rotation (6D)
+#endif
+#if FEAT_OVERTIME
+	int			overtimeCount;			// number of overtime extensions applied (10D)
+#endif
+#if FEAT_TOURNAMENT_PAUSE
+	qboolean	paused;					// game is paused (10C)
+	int			pauseTime;				// level.time when paused (10C)
+#endif
+#if FEAT_ELIMINATION
+	int			roundState;				// ROUND_WARMUP / ROUND_LIVE / ROUND_END (10B)
+	int			roundStartTime;			// level.time when current round state began (10B)
+	int			roundNumber;			// current round number (10B)
+	int			roundWins[TEAM_NUM_TEAMS]; // round wins per team (10B)
+#endif
+#if FEAT_TEAM_AUTOBALANCE
+	int			lastBalanceCheck;		// level.time of last team balance check (10A)
+#endif
 
 	qboolean	locationLinked;			// target_locations get linked
 	gentity_t	*locationHead;			// head of the location list
@@ -521,13 +584,11 @@ void G_Damage (gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 qboolean G_RadiusDamage (vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, qboolean underWater);
 int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir );
 void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath );
+int G_WeaponFromMOD( int mod );
 void TossClientItems( gentity_t *self );
 void TossClientCubes( gentity_t *self );
 #if FEAT_DAMAGE_PLUMS
 void DamagePlum( gentity_t *attacker, gentity_t *target, int damage );
-#endif
-#if FEAT_RAILGUN_KNOCKBACK
-void G_RailKnockback( vec3_t origin, gentity_t *attacker );
 #endif
 
 // CPM: Radius Damage Fix
@@ -760,6 +821,7 @@ extern	vmCvar_t	g_blueteam;
 extern	vmCvar_t	g_smoothClients;
 extern	vmCvar_t	pmove_fixed;
 extern	vmCvar_t	pmove_msec;
+extern	vmCvar_t	pmove_overbounce;
 extern	vmCvar_t	g_rankings;
 extern	vmCvar_t	g_enableDust;
 extern	vmCvar_t	g_enableBreath;
@@ -774,6 +836,81 @@ extern  vmCvar_t	g_unlagged;
 #endif
 #if FEAT_SPAWN_PROTECTION
 extern  vmCvar_t	g_spawnProtect;
+#endif
+#if FEAT_READY_UP
+extern  vmCvar_t	g_startWhenReady;
+qboolean G_AllPlayersReady( void );
+void	G_SendReadymask( int clientNum );
+#endif
+#if FEAT_FREEZETAG
+extern  vmCvar_t	g_freeze;
+extern  vmCvar_t	g_thawTime;
+extern  vmCvar_t	g_thawRadius;
+#endif
+#if FEAT_JSON_STATS
+extern  vmCvar_t	g_exportStats;
+void	G_WriteStatsJSON( void );
+#endif
+#if FEAT_MAP_ROTATION
+extern  vmCvar_t	g_maprotation;
+extern  vmCvar_t	g_maprotationMode;
+const char *G_NextRotationMap( void );
+#endif
+// eser - team shuffle command
+void	G_ShuffleTeams( void );
+// eser - team shuffle command
+#if FEAT_FAST_WEAPON_SWITCH
+extern  vmCvar_t	g_fastWeaponSwitch;
+#endif
+#if FEAT_OVERTIME
+extern  vmCvar_t	g_overtime;
+#endif
+#if FEAT_AUTO_DEMO
+extern  vmCvar_t	g_autoDemo;
+#endif
+#if FEAT_CTF_SCORING
+extern  vmCvar_t	g_ctfScoring;
+#endif
+#if FEAT_TOURNAMENT_PAUSE
+extern  vmCvar_t	g_allowTimeout;
+#endif
+#if FEAT_PROJECTILE_BOUNCE
+extern  vmCvar_t	g_projectileBounce;
+#endif
+#if FEAT_TEAM_AUTOBALANCE
+extern  vmCvar_t	g_teamBalance;
+extern  vmCvar_t	g_teamBalanceDelay;
+void	G_CheckTeamBalance( void );
+#endif
+#if FEAT_ELIMINATION
+extern  vmCvar_t	g_elimination;
+extern  vmCvar_t	g_eliminationRoundTime;
+void	G_CheckElimination( void );
+void	G_ResetRound( void );
+#endif
+#if FEAT_ELO_TRACKING
+void	G_CalculateEloChanges( void );
+#endif
+// eser - admin mode
+extern  vmCvar_t	g_adminPassword;
+void	Cmd_Admin_f( gentity_t *ent );
+// eser - admin mode
+#if FEAT_RANKED_QUEUE
+#if !FEAT_ELO_TRACKING
+#error "FEAT_RANKED_QUEUE requires FEAT_ELO_TRACKING"
+#endif
+extern  vmCvar_t	g_ranked;
+extern  vmCvar_t	g_rankedMinPlayers;
+void	Cmd_Queue_f( gentity_t *ent );
+void	G_CheckRankedQueue( void );
+#endif
+// eser - camp-detection
+extern  vmCvar_t	g_campDetectionTime;
+extern  vmCvar_t	g_campDetectionRadius;
+// eser - camp-detection
+#if FEAT_DROP_ITEMS
+extern  vmCvar_t	g_dropEnable;
+void	Cmd_Drop_f( gentity_t *ent );
 #endif
 
 
@@ -979,6 +1116,19 @@ void	trap_BotFreeWeaponState(int weaponstate);
 void	trap_BotResetWeaponState(int weaponstate);
 
 int		trap_GeneticParentsAndChildSelection(int numranks, float *ranks, int *parent1, int *parent2, int *child);
+
+#if FEAT_CLAN_ARENA
+extern  vmCvar_t	g_clanArena;
+#endif
+#if FEAT_RTF
+extern  vmCvar_t	g_rtf;
+#endif
+#if FEAT_TEAM_LEADERSHIP
+extern  vmCvar_t	g_ptl;
+#endif
+#if FEAT_ATMOSPHERIC
+extern  vmCvar_t	g_weather;
+#endif
 
 void	trap_SnapVector( float *v );
 

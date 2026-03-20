@@ -1848,6 +1848,11 @@ static void CG_PlayerPowerups( centity_t *cent, refEntity_t *torso ) {
 		trap_R_AddLightToScene( cent->lerpOrigin, 200 + (rand()&31), 0.2f, 0.2f, 1 );
 	}
 
+	// berserk gives a dlight
+	if ( powerups & ( 1 << PW_BERSERK ) ) {
+		trap_R_AddLightToScene( cent->lerpOrigin, 200 + (rand()&31), 1, 0.0f, 0.0f );
+	}
+
 	// flight plays a looped sound
 	if ( powerups & ( 1 << PW_FLIGHT ) ) {
 		trap_S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, cgs.media.flightSound );
@@ -2189,6 +2194,11 @@ void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState
 				ent->customShader = cgs.media.quadShader;
 			trap_R_AddRefEntityToScene( ent );
 		}
+		if ( state->powerups & ( 1 << PW_BERSERK ) )
+		{
+			ent->customShader = cgs.media.berserkShader;
+			trap_R_AddRefEntityToScene( ent );
+		}
 		if ( state->powerups & ( 1 << PW_REGEN ) ) {
 			if ( ( ( cg.time / 100 ) % 10 ) == 1 ) {
 				ent->customShader = cgs.media.regenShader;
@@ -2203,6 +2213,33 @@ void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState
 			ent->customShader = cgs.media.spawnProtectShader;
 			trap_R_AddRefEntityToScene( ent );
 		}
+#if FEAT_FREEZETAG
+		// freezetag (7A): blue-white ice shell on frozen players
+		if ( state->eFlags & EF_FROZEN ) {
+			ent->customShader = cgs.media.spawnProtectShader;
+			ent->shaderRGBA[0] = 0x80; ent->shaderRGBA[1] = 0xc0; ent->shaderRGBA[2] = 0xff;
+			ent->shaderRGBA[3] = 0xc0;
+			trap_R_AddRefEntityToScene( ent );
+		}
+#endif
+#if FEAT_SPECTATOR_OUTLINES
+		// spectator outlines (8A): colored shell visible through walls
+		if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR
+			 && cg_specOutlines.integer ) {
+			ent->renderfx |= RF_DEPTHHACK;
+			ent->customShader = cgs.media.spawnProtectShader;
+			if ( team == TEAM_RED ) {
+				ent->shaderRGBA[0] = 0xff; ent->shaderRGBA[1] = 0x40; ent->shaderRGBA[2] = 0x40;
+			} else if ( team == TEAM_BLUE ) {
+				ent->shaderRGBA[0] = 0x40; ent->shaderRGBA[1] = 0x40; ent->shaderRGBA[2] = 0xff;
+			} else {
+				ent->shaderRGBA[0] = 0x40; ent->shaderRGBA[1] = 0xff; ent->shaderRGBA[2] = 0x40;
+			}
+			ent->shaderRGBA[3] = 0x80;
+			trap_R_AddRefEntityToScene( ent );
+			ent->renderfx &= ~RF_DEPTHHACK;
+		}
+#endif
 	}
 }
 
@@ -2265,6 +2302,9 @@ void CG_Player( centity_t *cent ) {
 	refEntity_t		head;
 	int				clientNum;
 	int				renderfx;
+#if FEAT_THIRD_PERSON
+	int				thirdPersonAlpha = 255;
+#endif
 	qboolean		shadow;
 	float			shadowPlane;
 #ifdef MISSIONPACK
@@ -2303,6 +2343,36 @@ void CG_Player( centity_t *cent ) {
 		}
 	}
 
+#if FEAT_THIRD_PERSON
+	#define TP_ALPHA_FAR    255
+	#define TP_ALPHA_CLOSE   10
+	if ( cent->currentState.number == cg.snap->ps.clientNum && cg.renderingThirdPerson ) {
+		vec3_t diff;
+		float dist, fadeStart, fadeEnd, frac;
+
+		VectorSubtract( cent->lerpOrigin, cg.refdef.vieworg, diff );
+		dist = VectorLength( diff );
+
+		fadeStart = cg_thirdPersonFadeStart.value;
+		fadeEnd   = cg_thirdPersonFadeEnd.value;
+		if ( fadeStart <= fadeEnd ) {
+			fadeStart = fadeEnd + 1.0f;
+		}
+
+		if ( dist >= fadeStart ) {
+			thirdPersonAlpha = TP_ALPHA_FAR;
+		} else if ( dist <= fadeEnd ) {
+			thirdPersonAlpha = TP_ALPHA_CLOSE;
+		} else {
+			frac = (dist - fadeEnd) / (fadeStart - fadeEnd);
+			thirdPersonAlpha = TP_ALPHA_CLOSE + (int)((TP_ALPHA_FAR - TP_ALPHA_CLOSE) * frac);
+		}
+
+		if ( cg_thirdPersonAlpha.integer >= 0 && cg_thirdPersonAlpha.integer <= 255 ) {
+			thirdPersonAlpha = cg_thirdPersonAlpha.integer;
+		}
+	}
+#endif
 
 	memset( &legs, 0, sizeof(legs) );
 	memset( &torso, 0, sizeof(torso) );
@@ -2346,6 +2416,12 @@ void CG_Player( centity_t *cent ) {
 	legs.renderfx = renderfx;
 	VectorCopy (legs.origin, legs.oldorigin);	// don't positionally lerp at all
 
+#if FEAT_THIRD_PERSON
+	if ( thirdPersonAlpha < 255 ) {
+		legs.renderfx |= RF_FORCE_ENT_ALPHA;
+		legs.shaderRGBA[3] = thirdPersonAlpha;
+	}
+#endif
 	CG_AddRefEntityWithPowerups( cent, &legs, &cent->currentState, qtrue, ci->team );
 
 	// if the model failed, allow the default nullmodel to be displayed
@@ -2370,6 +2446,12 @@ void CG_Player( centity_t *cent ) {
 	torso.shadowPlane = shadowPlane;
 	torso.renderfx = renderfx;
 
+#if FEAT_THIRD_PERSON
+	if ( thirdPersonAlpha < 255 ) {
+		torso.renderfx |= RF_FORCE_ENT_ALPHA;
+		torso.shaderRGBA[3] = thirdPersonAlpha;
+	}
+#endif
 	CG_AddRefEntityWithPowerups( cent, &torso, &cent->currentState, qtrue, ci->team );
 
 #ifdef MISSIONPACK
@@ -2564,6 +2646,12 @@ void CG_Player( centity_t *cent ) {
 	head.shadowPlane = shadowPlane;
 	head.renderfx = renderfx;
 
+#if FEAT_THIRD_PERSON
+	if ( thirdPersonAlpha < 255 ) {
+		head.renderfx |= RF_FORCE_ENT_ALPHA;
+		head.shaderRGBA[3] = thirdPersonAlpha;
+	}
+#endif
 	CG_AddRefEntityWithPowerups( cent, &head, &cent->currentState, qtrue, ci->team );
 
 #ifdef MISSIONPACK

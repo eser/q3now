@@ -694,59 +694,6 @@ static void CG_DrawStatusBar( void ) {
 */
 
 /*
-================
-CG_DrawAttacker
-
-================
-*/
-static float CG_DrawAttacker( float y ) {
-	int			t;
-	float		size;
-	vec3_t		angles;
-	const char	*info;
-	const char	*name;
-	int			clientNum;
-
-	if ( cg.predictedPlayerState.stats[STAT_HEALTH] <= 0 ) {
-		return y;
-	}
-
-	if ( !cg.attackerTime ) {
-		return y;
-	}
-
-	clientNum = cg.predictedPlayerState.persistant[PERS_ATTACKER];
-	if ( clientNum < 0 || clientNum >= MAX_CLIENTS || clientNum == cg.snap->ps.clientNum ) {
-		return y;
-	}
-
-	if ( !cgs.clientinfo[clientNum].infoValid ) {
-		cg.attackerTime = 0;
-		return y;
-	}
-
-	t = cg.time - cg.attackerTime;
-	if ( t > ATTACKER_HEAD_TIME ) {
-		cg.attackerTime = 0;
-		return y;
-	}
-
-	size = ICON_SIZE * 1.25;
-
-	angles[PITCH] = 0;
-	angles[YAW] = 180;
-	angles[ROLL] = 0;
-	CG_DrawHead( 640 - size, y, size, size, clientNum, angles );
-
-	info = CG_ConfigString( CS_PLAYERS + clientNum );
-	name = Info_ValueForKey(  info, "n" );
-	y += size;
-	CG_DrawBigString( 640 - ( Q_PrintStrlen( name ) * BIGCHAR_WIDTH), y, name, 0.5 );
-
-	return y + BIGCHAR_HEIGHT + 2;
-}
-
-/*
 ==================
 CG_DrawSpeed
 Shows current horizontal (XY) speed in units/second. (2C)
@@ -769,14 +716,14 @@ static float CG_DrawSpeed( float y ) {
 		// center of screen (like RatArena mode 2)
 		s = va( "%i", speed );
 		w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
-		CG_DrawBigString( 320 - w / 2, 300, s, 1.0f );
+		CG_DrawBigString( 320 - w / 2, 300, s, colorWhite, 0, 0 );
 		return y;
 	} else {
 		// bottom-right, above mini scoreboard
 		y -= SMALLCHAR_HEIGHT + 4;
 		s = va( "%iu/s", speed );
 		w = CG_DrawStrlen( s ) * SMALLCHAR_WIDTH;
-		CG_DrawSmallString( 640 - w - 4, (int)y, s, 1.0f );
+		CG_DrawSmallString( 640 - w - 4, (int)y, s, colorWhite, 0, 0 );
 		return y;
 	}
 }
@@ -794,7 +741,7 @@ static float CG_DrawSnapshot( float y ) {
 		cg.latestSnapshotNum, cgs.serverCommandSequence );
 	w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
 
-	CG_DrawBigString( 635 - w, y + 2, s, 1.0F);
+	CG_DrawBigString( 635 - w, y + 2, s, colorWhite, 0, 0 );
 
 	return y + BIGCHAR_HEIGHT + 4;
 }
@@ -837,7 +784,7 @@ static float CG_DrawFPS( float y ) {
 		s = va( "%ifps", fps );
 		w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
 
-		CG_DrawBigString( 635 - w, y + 2, s, 1.0F);
+		CG_DrawBigString( 635 - w, y + 2, s, colorWhite, 0, 0 );
 	}
 
 	return y + BIGCHAR_HEIGHT + 4;
@@ -865,7 +812,7 @@ static float CG_DrawTimer( float y ) {
 	s = va( "%i:%i%i", mins, tens, seconds );
 	w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
 
-	CG_DrawBigString( 635 - w, y + 2, s, 1.0F);
+	CG_DrawBigString( 635 - w, y + 2, s, colorWhite, 0, 0 );
 
 	return y + BIGCHAR_HEIGHT + 4;
 }
@@ -1071,9 +1018,6 @@ static void CG_DrawUpperRight(stereoFrame_t stereoFrame)
 	if ( cg_drawTimer.integer ) {
 		y = CG_DrawTimer( y );
 	}
-	if ( cg_drawAttacker.integer ) {
-		CG_DrawAttacker( y );
-	}
 
 	CG_PopScreenPlacement();
 }
@@ -1124,7 +1068,7 @@ static float CG_DrawScores( float y ) {
 		if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_BLUE ) {
 			CG_DrawPic( x, y-4, w, BIGCHAR_HEIGHT+8, cgs.media.selectShader );
 		}
-		CG_DrawBigString( x + 4, y, s, 1.0F);
+		CG_DrawBigString( x + 4, y, s, colorWhite, 0, 0 );
 
 		if ( cgs.gametype == GT_CTF ) {
 			// Display flag status
@@ -1148,7 +1092,7 @@ static float CG_DrawScores( float y ) {
 		if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_RED ) {
 			CG_DrawPic( x, y-4, w, BIGCHAR_HEIGHT+8, cgs.media.selectShader );
 		}
-		CG_DrawBigString( x + 4, y, s, 1.0F);
+		CG_DrawBigString( x + 4, y, s, colorWhite, 0, 0 );
 
 		if ( cgs.gametype == GT_CTF ) {
 			// Display flag status
@@ -1171,7 +1115,7 @@ static float CG_DrawScores( float y ) {
 			s = va( "%2i", v );
 			w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH + 8;
 			x -= w;
-			CG_DrawBigString( x + 4, y, s, 1.0F);
+			CG_DrawBigString( x + 4, y, s, colorWhite, 0, 0 );
 		}
 
 	} else {
@@ -1203,7 +1147,7 @@ static float CG_DrawScores( float y ) {
 				color[3] = 0.33f;
 				CG_FillRect( x, y-4,  w, BIGCHAR_HEIGHT+8, color );
 			}	
-			CG_DrawBigString( x + 4, y, s, 1.0F);
+			CG_DrawBigString( x + 4, y, s, colorWhite, 0, 0 );
 		}
 
 		// first place
@@ -1225,14 +1169,14 @@ static float CG_DrawScores( float y ) {
 				color[3] = 0.33f;
 				CG_FillRect( x, y-4,  w, BIGCHAR_HEIGHT+8, color );
 			}	
-			CG_DrawBigString( x + 4, y, s, 1.0F);
+			CG_DrawBigString( x + 4, y, s, colorWhite, 0, 0 );
 		}
 
 		if ( cgs.fraglimit ) {
 			s = va( "%2i", cgs.fraglimit );
 			w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH + 8;
 			x -= w;
-			CG_DrawBigString( x + 4, y, s, 1.0F);
+			CG_DrawBigString( x + 4, y, s, colorWhite, 0, 0 );
 		}
 
 	}
@@ -1401,7 +1345,7 @@ static int CG_DrawPickupItem( int y ) {
 			CG_RegisterItemVisuals( value );
 			trap_R_SetColor( fadeColor );
 			CG_DrawPic( 8, y, ICON_SIZE, ICON_SIZE, cg_items[ value ].icon );
-			CG_DrawBigString( ICON_SIZE + 16, y + (ICON_SIZE/2 - BIGCHAR_HEIGHT/2), bg_itemlist[ value ].pickup_name, fadeColor[0] );
+			CG_DrawBigString( ICON_SIZE + 16, y + (ICON_SIZE/2 - BIGCHAR_HEIGHT/2), bg_itemlist[ value ].pickup_name, fadeColor, 0, 0 );
 			trap_R_SetColor( NULL );
 		}
 	}
@@ -1677,7 +1621,7 @@ static void CG_DrawDisconnect( void ) {
 	// also add text in center of screen
 	s = "Connection Interrupted";
 	w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
-	CG_DrawBigString( 320 - w/2, 100, s, 1.0F);
+	CG_DrawBigString( 320 - w/2, 100, s, colorWhite, 0, 0 );
 
 	// blink the icon
 	if ( ( cg.time >> 9 ) & 1 ) {
@@ -1805,7 +1749,7 @@ static void CG_DrawLagometer( void ) {
 	trap_R_SetColor( NULL );
 
 	if ( cg_nopredict.integer || cg_synchronousClients.integer ) {
-		CG_DrawBigString( x, y, "snc", 1.0 );
+		CG_DrawBigString( x, y, "snc", colorWhite, 0, 0 );
 	}
 
 	CG_DrawDisconnect();
@@ -1950,18 +1894,24 @@ static void CG_DrawCrosshair(void)
 		return;
 	}
 
+#if !FEAT_THIRD_PERSON
 	if ( cg.renderingThirdPerson ) {
 		return;
 	}
+#endif
 
-	// set color based on health
-	if ( cg_crosshairHealth.integer ) {
-		vec4_t		hcolor;
-
-		CG_ColorForHealth( hcolor );
-		trap_R_SetColor( hcolor );
-	} else {
-		trap_R_SetColor( NULL );
+	// set crosshair color
+	{
+		vec4_t xhairColor;
+		if ( cg_crosshairHealth.integer ) {
+			CG_ColorForHealth( xhairColor );
+		} else {
+			CG_ParseColor( cg_crosshairColor.string, xhairColor, 1.0f );
+		}
+		xhairColor[3] = cg_crosshairAlpha.value;
+		if ( xhairColor[3] < 0 ) xhairColor[3] = 0;
+		if ( xhairColor[3] > 1 ) xhairColor[3] = 1;
+		trap_R_SetColor( xhairColor );
 	}
 
 	w = h = cg_crosshairSize.value;
@@ -2147,7 +2097,7 @@ static void CG_DrawCrosshairNames( void ) {
 	CG_Text_Paint( 320 - w / 2, 190, 0.3f, color, name, 0, 0, ITEM_TEXTSTYLE_SHADOWED);
 #else
 	w = CG_DrawStrlen( name ) * BIGCHAR_WIDTH;
-	CG_DrawBigString( 320 - w / 2, 170, name, color[3] * 0.5f );
+	CG_DrawBigString( 320 - w / 2, 170, name, CG_ColorFromAlpha( color[3] * 0.5f ), 0, 0 );
 #endif
 	trap_R_SetColor( NULL );
 }
@@ -2161,12 +2111,13 @@ CG_DrawSpectator
 =================
 */
 static void CG_DrawSpectator(void) {
-	CG_DrawBigString(320 - 9 * 8, 440, "SPECTATOR", 1.0F);
+	CG_DrawBigString( 320 - 9 * 8, 440, "SPECTATOR", colorWhite, 0, 0 );
+
 	if ( cgs.gametype == GT_TOURNAMENT ) {
-		CG_DrawBigString(320 - 15 * 8, 460, "waiting to play", 1.0F);
+		CG_DrawBigString( 320 - 15 * 8, 460, "waiting to play", colorWhite, 0, 0 );
 	}
 	else if ( cgs.gametype >= GT_TEAM ) {
-		CG_DrawBigString(320 - 39 * 8, 460, "press ESC and use the JOIN menu to play", 1.0F);
+		CG_DrawBigString( 320 - 39 * 8, 460, "press ESC and use the JOIN menu to play", colorWhite, 0, 0 );
 	}
 }
 
@@ -2195,12 +2146,12 @@ static void CG_DrawVote(void) {
 	}
 #ifdef MISSIONPACK
 	s = va("VOTE(%i):%s yes:%i no:%i", sec, cgs.voteString, cgs.voteYes, cgs.voteNo);
-	CG_DrawSmallString( 0, 58, s, 1.0F );
+	CG_DrawSmallString( 0, 58, s, colorWhite, 0, 0 );
 	s = "or press ESC then click Vote";
-	CG_DrawSmallString( 0, 58 + SMALLCHAR_HEIGHT + 2, s, 1.0F );
+	CG_DrawSmallString( 0, 58 + SMALLCHAR_HEIGHT + 2, s, colorWhite, 0, 0 );
 #else
 	s = va("VOTE(%i):%s yes:%i no:%i", sec, cgs.voteString, cgs.voteYes, cgs.voteNo );
-	CG_DrawSmallString( 0, 58, s, 1.0F );
+	CG_DrawSmallString( 0, 58, s, colorWhite, 0, 0 );
 #endif
 }
 
@@ -2236,7 +2187,7 @@ static void CG_DrawTeamVote(void) {
 	}
 	s = va("TEAMVOTE(%i):%s yes:%i no:%i", sec, cgs.teamVoteString[cs_offset],
 							cgs.teamVoteYes[cs_offset], cgs.teamVoteNo[cs_offset] );
-	CG_DrawSmallString( 0, 90, s, 1.0F );
+	CG_DrawSmallString( 0, 90, s, colorWhite, 0, 0 );
 }
 
 
@@ -2299,9 +2250,70 @@ static qboolean CG_DrawScoreboard( void ) {
 
 	return qtrue;
 #else
-	return CG_DrawOldScoreboard();
+	if ( cgs.gametype == GT_TOURNAMENT )
+		return CG_OSPDrawTourneyScoreboard();
+	if ( cgs.gametype >= GT_TEAM )
+		return CG_OSPDrawScoretable();
+	return CG_OSPDrawFFAScoreboard();
 #endif
 }
+
+#if FEAT_MATCH_SUMMARY
+/*
+=================
+CG_DrawMatchSummary
+
+Intermission overlay: top fragger, best accuracy, most deaths. (8B)
+Draws below the scoreboard using existing score_t data.
+=================
+*/
+static void CG_DrawMatchSummary( void ) {
+	int		i, bestScore = -9999, bestAcc = -1, mostDeaths = -1;
+	int		bestScoreClient = -1, bestAccClient = -1, mostDeathsClient = -1;
+	const char *s;
+	int		w, y;
+	vec4_t	color;
+
+	if ( cg.numScores < 2 ) {
+		return;
+	}
+
+	// find leaders
+	for ( i = 0; i < cg.numScores; i++ ) {
+		if ( cg.scores[i].score > bestScore ) {
+			bestScore = cg.scores[i].score;
+			bestScoreClient = cg.scores[i].client;
+		}
+		if ( cg.scores[i].accuracy > bestAcc ) {
+			bestAcc = cg.scores[i].accuracy;
+			bestAccClient = cg.scores[i].client;
+		}
+	}
+	// most deaths from persistant stats — use score as proxy (lowest score often = most deaths)
+	// We only have score_t data, so show top fragger + best accuracy
+
+	CG_SetScreenPlacement( PLACE_CENTER, PLACE_CENTER );
+
+	y = 340;
+	color[0] = 1.0f; color[1] = 0.8f; color[2] = 0.2f; color[3] = 1.0f;
+	trap_R_SetColor( color );
+
+	if ( bestScoreClient >= 0 ) {
+		s = va( "Top Fragger: %s ^7(%i)", cgs.clientinfo[bestScoreClient].name, bestScore );
+		w = CG_DrawStrlen( s ) * SMALLCHAR_WIDTH;
+		CG_DrawSmallString( 320 - w / 2, y, s, colorWhite, 0, 0 );
+		y += SMALLCHAR_HEIGHT + 2;
+	}
+	if ( bestAccClient >= 0 && bestAcc > 0 ) {
+		s = va( "Best Accuracy: %s ^7(%i%%)", cgs.clientinfo[bestAccClient].name, bestAcc );
+		w = CG_DrawStrlen( s ) * SMALLCHAR_WIDTH;
+		CG_DrawSmallString( 320 - w / 2, y, s, colorWhite, 0, 0 );
+	}
+
+	trap_R_SetColor( NULL );
+	CG_PopScreenPlacement();
+}
+#endif
 
 /*
 =================
@@ -2318,6 +2330,10 @@ static void CG_DrawIntermission( void ) {
 
     cg.scoreFadeTime = cg.time;
 	cg.scoreBoardShowing = CG_DrawScoreboard();
+
+#if FEAT_MATCH_SUMMARY
+	CG_DrawMatchSummary();
+#endif
 }
 
 /*
@@ -2339,7 +2355,7 @@ static qboolean CG_DrawFollow( void ) {
 	color[3] = 1;
 
 
-	CG_DrawBigString( 320 - 9 * 8, 24, "following", 1.0F );
+	CG_DrawBigString( 320 - 9 * 8, 24, "following", colorWhite, 0, 0 );
 
 	name = cgs.clientinfo[ cg.snap->ps.clientNum ].name;
 
@@ -2375,7 +2391,7 @@ static void CG_DrawAmmoWarning( void ) {
 		s = "LOW AMMO WARNING";
 	}
 	w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
-	CG_DrawBigString(320 - w / 2, 64, s, 1.0F);
+	CG_DrawBigString(320 - w / 2, 64, s, colorWhite, 0, 0 );
 }
 
 
@@ -2402,9 +2418,9 @@ static void CG_DrawWarmup( void ) {
 	}
 
 	if ( sec < 0 ) {
-		s = "Waiting for players";		
+		s = "Waiting for players";
 		w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH;
-		CG_DrawBigString(320 - w / 2, 24, s, 1.0F);
+		CG_DrawBigString( 320 - w / 2, 24, s, colorWhite, 0, 0 );
 		cg.warmupCount = 0;
 		return;
 	}
@@ -2559,6 +2575,59 @@ void CG_DrawTimedMenus( void ) {
 #endif
 /*
 =================
+CG_DrawCampOverlay
+Camp detection (11C): gradual dark screen punishment.
+Server sends STAT_CAMPER 0-255 as desiredDarkness.
+Client smoothly lerps actualDarkness toward desired.
+Draws fullscreen dark overlay + persistent "Move!" text.
+=================
+*/
+static void CG_DrawCampOverlay( void ) {
+	static float actualDarkness = 0;
+	float desiredDarkness, deltaTime;
+	int camp;
+
+	camp = cg.snap->ps.stats[STAT_CAMPER];
+	desiredDarkness = camp / 255.0f * 0.85f;
+	deltaTime = cg.frametime * 0.001f;
+
+	// smooth transition toward desired level
+	// darken slowly (0.5/sec = ~1.7s to full dark), recover faster (1.5/sec = ~0.6s to clear)
+	if ( actualDarkness < desiredDarkness ) {
+		actualDarkness += deltaTime * 0.5f;
+		if ( actualDarkness > desiredDarkness ) actualDarkness = desiredDarkness;
+	} else if ( actualDarkness > desiredDarkness ) {
+		actualDarkness -= deltaTime * 1.5f;
+		if ( actualDarkness < 0 ) actualDarkness = 0;
+	}
+
+	if ( actualDarkness > 0.01f ) {
+		vec4_t color;
+		vec4_t textColor;
+		int textWidth;
+		const char *msg = "Move!";
+
+		// fullscreen dark overlay (physical screen coords for full widescreen coverage)
+		color[0] = color[1] = color[2] = 0;
+		color[3] = actualDarkness;
+		trap_R_SetColor( color );
+		trap_R_DrawStretchPic( 0, 0, cgs.glconfig.vidWidth, cgs.glconfig.vidHeight,
+			0, 0, 0, 0, cgs.media.whiteShader );
+		trap_R_SetColor( NULL );
+
+		// "Move!" text — always visible while overlay is active
+		textColor[0] = 1.0f;
+		textColor[1] = 0.3f;
+		textColor[2] = 0.3f;
+		textColor[3] = actualDarkness / 0.85f;  // text fades with overlay
+		textWidth = CG_DrawStrlen( msg ) * BIGCHAR_WIDTH;
+		CG_DrawStringExt( ( SCREEN_WIDTH - textWidth ) / 2, SCREEN_HEIGHT * 0.30,
+			msg, textColor, qfalse, qtrue, BIGCHAR_WIDTH, BIGCHAR_HEIGHT, 0 );
+	}
+}
+
+/*
+=================
 CG_Draw2D
 =================
 */
@@ -2583,77 +2652,97 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		return;
 	}
 
+	// camp detection overlay (drawn before HUD so UI elements render on top)
+	CG_DrawCampOverlay();
+
 /*
 	if (cg.cameraMode) {
 		return;
 	}
 */
-	if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
-		CG_DrawSpectator();
-
-		if(stereoFrame == STEREO_CENTER)
+	// SuperHUD: if a config is loaded AND parsed successfully, use it
+	if ( cg_hudFile.string[0] && CG_SHUDIsLoaded() ) {
+		CG_SHUDRoutine();
+		if ( stereoFrame == STEREO_CENTER )
 			CG_DrawCrosshair();
-
-		CG_DrawCrosshairNames();
 	} else {
-		// don't draw any status if dead or the scoreboard is being explicitly shown
-		if ( !cg.showScores && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
-
-#ifdef MISSIONPACK
-			if ( cg_drawStatus.integer ) {
-				Menu_PaintAll();
-				CG_DrawTimedMenus();
-			}
-#else
-			CG_DrawStatusBar();
-#endif
-      
-			CG_DrawAmmoWarning();
+		// default HUD fallback
+		if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
+			CG_DrawSpectator();
 
 			if(stereoFrame == STEREO_CENTER)
 				CG_DrawCrosshair();
+
 			CG_DrawCrosshairNames();
-			CG_DrawWeaponSelect();
+		} else {
+			// don't draw any status if dead or the scoreboard is being explicitly shown
+			if ( !cg.showScores && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
+
+#ifdef MISSIONPACK
+				if ( cg_drawStatus.integer ) {
+					Menu_PaintAll();
+					CG_DrawTimedMenus();
+				}
+#else
+				CG_DrawStatusBar();
+#endif
+
+				CG_DrawAmmoWarning();
+
+				if(stereoFrame == STEREO_CENTER)
+					CG_DrawCrosshair();
+				CG_DrawCrosshairNames();
+				CG_DrawWeaponSelect();
 
 #ifndef MISSIONPACK
-			CG_DrawHoldableItem();
+				CG_DrawHoldableItem();
 #endif
-			CG_DrawReward();
+				CG_DrawReward();
+			}
+		}
+
+		if ( cgs.gametype >= GT_TEAM ) {
+#ifndef MISSIONPACK
+			CG_DrawTeamInfo();
+#endif
 		}
 	}
 
-	if ( cgs.gametype >= GT_TEAM ) {
-#ifndef MISSIONPACK
-		CG_DrawTeamInfo();
-#endif
-	}
+	if ( !cg_hudFile.string[0] || !CG_SHUDIsLoaded() ) {
+		// classic HUD: draw vote, lagometer, upper/lower corners, etc.
+		CG_DrawVote();
+		CG_DrawTeamVote();
 
-	CG_DrawVote();
-	CG_DrawTeamVote();
-
-	CG_DrawLagometer();
+		CG_DrawLagometer();
 
 #ifdef MISSIONPACK
-	if (!cg_paused.integer) {
-		CG_DrawUpperRight(stereoFrame);
-	}
+		if (!cg_paused.integer) {
+			CG_DrawUpperRight(stereoFrame);
+		}
 #else
-	CG_DrawUpperRight(stereoFrame);
+		CG_DrawUpperRight(stereoFrame);
 #endif
 
 #ifndef MISSIONPACK
-	CG_DrawLowerRight();
-	CG_DrawLowerLeft();
+		CG_DrawLowerRight();
+		CG_DrawLowerLeft();
 #endif
 
-	if ( !CG_DrawFollow() ) {
-		CG_DrawWarmup();
-	}
+		if ( !CG_DrawFollow() ) {
+			CG_DrawWarmup();
+		}
 
-	// don't draw center string if scoreboard is up
-	cg.scoreBoardShowing = CG_DrawScoreboard();
-	if ( !cg.scoreBoardShowing) {
-		CG_DrawCenterString();
+		// don't draw center string if scoreboard is up
+		cg.scoreBoardShowing = CG_DrawScoreboard();
+		if ( !cg.scoreBoardShowing) {
+			CG_DrawCenterString();
+		}
+	} else {
+		// SuperHUD path: still need scoreboard and center string
+		cg.scoreBoardShowing = CG_DrawScoreboard();
+		if ( !cg.scoreBoardShowing ) {
+			CG_DrawCenterString();
+		}
 	}
 }
 

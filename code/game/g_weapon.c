@@ -32,6 +32,35 @@ static	vec3_t	muzzle;
 
 #define NUM_PLASMASHOTS 15
 
+// eser - damage falloff
+/*
+============
+G_DamageFalloff
+Reduce damage linearly over distance. Full damage within 256 units,
+zero at g_damageFalloff distance. (11H)
+============
+*/
+static int G_DamageFalloff( int damage, vec3_t start, vec3_t end, float maxDamageDistance ) {
+	float	dist, maxDist, frac;
+
+	if ( !maxDamageDistance ) {
+		return damage;
+	}
+
+	dist = Distance( start, end );
+	if ( dist <= 256.0f ) {
+		return damage;
+	}
+
+	frac = 1.0f - ( ( dist - 256.0f ) / ( maxDamageDistance - 256.0f ) );
+	if ( frac < 0.1f ) {
+		frac = 0.1f;
+	}
+
+	return (int)( damage * frac );
+}
+// eser - damage falloff
+
 /*
 ================
 G_BounceProjectile
@@ -191,6 +220,7 @@ void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
 			tent->s.eventParm = traceEnt->s.number;
 			if( LogAccuracyHit( traceEnt, ent ) ) {
 				ent->client->accuracy_hits++;
+				if (ent->client) ent->client->weaponStats[WP_MACHINEGUN].hits++;
 			}
 		} else {
 			tent = G_TempEntity( tr.endpos, EV_BULLET_HIT_WALL );
@@ -215,8 +245,15 @@ void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
 			}
 			else {
 #endif
-				G_Damage( traceEnt, ent, ent, forward, tr.endpos,
-					damage, 0, mod);
+			{
+				int	bDamage = damage;
+
+				// eser - damage falloff
+				bDamage = G_DamageFalloff( bDamage, muzzle, tr.endpos, bg_weaponlist[WP_MACHINEGUN].maxDamageDistance );
+				// eser - damage falloff
+
+				G_Damage( traceEnt, ent, ent, forward, tr.endpos, bDamage, 0, mod);
+			}
 #ifdef MISSIONPACK
 			}
 #endif
@@ -260,7 +297,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 			return qfalse;
 		}
 
-		if ( traceEnt->takedamage) {
+		if ( traceEnt->takedamage ) {
 			damage = DEFAULT_SHOTGUN_DAMAGE * s_quadFactor;
 #ifdef MISSIONPACK
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
@@ -280,7 +317,17 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 			if( LogAccuracyHit( traceEnt, ent ) ) {
 				hitClient = qtrue;
 			}
-			G_Damage( traceEnt, ent, ent, forward, tr.endpos, damage, 0, MOD_SHOTGUN);
+
+			{
+				int pDamage = damage;
+
+				// eser - damage falloff
+				pDamage = G_DamageFalloff( pDamage, muzzle, tr.endpos, bg_weaponlist[WP_SHOTGUN].maxDamageDistance );
+				// eser - damage falloff
+
+				G_Damage( traceEnt, ent, ent, forward, tr.endpos, pDamage, 0, MOD_SHOTGUN);
+			}
+
 			return hitClient;
 		}
 		return qfalse;
@@ -312,6 +359,7 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 		if( ShotgunPellet( origin, end, ent ) && !hitClient ) {
 			hitClient = qtrue;
 			ent->client->accuracy_hits++;
+			if (ent->client) ent->client->weaponStats[WP_SHOTGUN].hits++;
 		}
 	}
 }
@@ -459,24 +507,23 @@ void weapon_railgun_fire (gentity_t *ent) {
 					passent = ENTITYNUM_NONE;
 				}
 			}
-			else {
-				if( LogAccuracyHit( traceEnt, ent ) ) {
-					hits++;
-				}
-				G_Damage (traceEnt, ent, ent, forward, trace.endpos, damage, 0, MOD_RAILGUN);
-			}
-#else
-				if( LogAccuracyHit( traceEnt, ent ) ) {
-					hits++;
-				}
-				G_Damage (traceEnt, ent, ent, forward, trace.endpos, damage, 0, MOD_RAILGUN);
 #endif
+
+			{
+				int	sDamage = damage;
+
+				if( LogAccuracyHit( traceEnt, ent ) ) {
+					hits++;
+				}
+
+				// eser - damage falloff
+				sDamage = G_DamageFalloff( sDamage, muzzle, trace.endpos, bg_weaponlist[WP_RAILGUN].maxDamageDistance );
+				// eser - damage falloff
+
+				G_Damage( traceEnt, ent, ent, forward, trace.endpos, sDamage, 0, MOD_RAILGUN);
+			}
 		}
 		if ( trace.contents & CONTENTS_SOLID ) {
-#if FEAT_RAILGUN_KNOCKBACK
-			// railgun knockback (2G): apply knockback to shooter on solid impact
-			G_RailKnockback( trace.endpos, ent );
-#endif
 			break;		// we hit something solid enough to stop the beam
 		}
 		// unlink this entity, so the next trace will go past it
@@ -484,13 +531,6 @@ void weapon_railgun_fire (gentity_t *ent) {
 		unlinkedEntities[unlinked] = traceEnt;
 		unlinked++;
 	} while ( unlinked < MAX_RAIL_HITS );
-
-#if FEAT_RAILGUN_KNOCKBACK
-	// railgun knockback (2G): also trigger when beam reaches world (no solid hit, ENTITYNUM_WORLD)
-	if ( trace.entityNum >= ENTITYNUM_MAX_NORMAL ) {
-		G_RailKnockback( trace.endpos, ent );
-	}
-#endif
 
 	// link back in any entities we unlinked
 	for ( i = 0 ; i < unlinked ; i++ ) {
@@ -537,6 +577,7 @@ void weapon_railgun_fire (gentity_t *ent) {
 			ent->client->rewardTime = level.time + REWARD_SPRITE_TIME;
 		}
 		ent->client->accuracy_hits++;
+		if (ent->client) ent->client->weaponStats[WP_RAILGUN].hits++;
 	}
 
 }
@@ -580,6 +621,20 @@ void Weapon_HookThink (gentity_t *ent)
 	}
 
 	VectorCopy( ent->r.currentOrigin, ent->parent->client->ps.grapplePoint);
+
+#if FEAT_GRAPPLE_DAMAGE
+	// grapple damage (5D): deal damage while hooked to an enemy
+	if ( ent->enemy && ent->enemy->client ) {
+		if ( level.time - ent->pain_debounce_time >= 100 ) {
+			int dmg = 30;
+			if ( ent->parent->client->ps.powerups[PW_QUAD] ) {
+				dmg *= QUAD_FACTOR;
+			}
+			G_Damage( ent->enemy, ent, ent->parent, NULL, NULL, dmg, 0, MOD_GRAPPLE );
+			ent->pain_debounce_time = level.time;
+		}
+	}
+#endif
 }
 
 /*
@@ -620,8 +675,10 @@ void Weapon_LightningFire( gentity_t *ent ) {
 		tent->s.eventParm = zaps;				// duration / size of explosion graphic
 
         ent->client->ps.ammo[WP_LIGHTNING] = 0;		// drain ent's lightning count
-		if (G_RadiusDamage (muzzle, ent, damage * zaps, (damage * zaps) + 16, NULL, MOD_LIGHTNING_DISCHARGE, qtrue))
+		if (G_RadiusDamage (muzzle, ent, damage * zaps, (damage * zaps) + 16, NULL, MOD_LIGHTNING_DISCHARGE, qtrue)) {
 			ent->client->accuracy_hits++;
+			if (ent->client) ent->client->weaponStats[WP_LIGHTNING].hits++;
+		}
 
 		return;
 	}
@@ -668,8 +725,17 @@ void Weapon_LightningFire( gentity_t *ent ) {
 #endif
 			if( LogAccuracyHit( traceEnt, ent ) ) {
 				ent->client->accuracy_hits++;
+				if (ent->client) ent->client->weaponStats[WP_LIGHTNING].hits++;
 			}
-			G_Damage( traceEnt, ent, ent, forward, tr.endpos, damage, 0, MOD_LIGHTNING);
+			{
+				int lgDamage = damage;
+
+				// eser - damage falloff
+				lgDamage = G_DamageFalloff( lgDamage, muzzle, tr.endpos, bg_weaponlist[WP_LIGHTNING].maxDamageDistance );
+				// eser - damage falloff
+
+				G_Damage( traceEnt, ent, ent, forward, tr.endpos, lgDamage, 0, MOD_LIGHTNING);
+			}
 		}
 
 		if ( traceEnt->takedamage && traceEnt->client ) {
@@ -820,8 +886,10 @@ void FireWeapon( gentity_t *ent ) {
 	// track shots taken for accuracy tracking.  Grapple is not a weapon and gauntet is just not tracked
     if (ent->s.weapon == WP_PLASMAGUN) {
         ent->client->accuracy_shots += NUM_PLASMASHOTS;
+        ent->client->weaponStats[WP_PLASMAGUN].shots += NUM_PLASMASHOTS;
     } else if (ent->s.weapon != WP_GAUNTLET) {
         ent->client->accuracy_shots++;
+        ent->client->weaponStats[ent->s.weapon].shots++;
 	}
 
 	// set aiming directions
@@ -844,7 +912,7 @@ void FireWeapon( gentity_t *ent ) {
 		weapon_supershotgun_fire( ent );
 		break;
 	case WP_MACHINEGUN:
-        Bullet_Fire(ent, MACHINEGUN_SPREAD, MACHINEGUN_DAMAGE, MOD_MACHINEGUN);
+		Bullet_Fire(ent, MACHINEGUN_SPREAD, MACHINEGUN_DAMAGE, MOD_MACHINEGUN);
 		break;
 	case WP_GRENADE_LAUNCHER:
 		weapon_grenadelauncher_fire( ent );
@@ -865,6 +933,19 @@ void FireWeapon( gentity_t *ent ) {
 
 	// unlagged: restore all clients to real positions
 	G_UndoTimeShiftFor( ent );
+
+	// firing knockback (11G): small self-knockback push when firing (halved when crouched)
+	if ( ent->client && ent->s.weapon != WP_NONE ) {
+		vec3_t	kickBack;
+		float	scale = bg_weaponlist[ent->s.weapon].recoilKick; // units of push per shot
+
+		if ( ent->client->ps.pm_flags & PMF_DUCKED ) {
+			scale *= 0.5f;
+		}
+
+		VectorScale( forward, -scale, kickBack );
+		VectorAdd( ent->client->ps.velocity, kickBack, ent->client->ps.velocity );
+	}
 }
 
 

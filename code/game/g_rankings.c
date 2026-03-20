@@ -895,8 +895,11 @@ void G_RankPickupPowerup( int self, int powerup )
 	
 	switch( powerup )
 	{
-	case PW_QUAD:
+		case PW_QUAD:
 		trap_RankReportInt( self, -1, QGR_KEY_QUAD, 1, 1 );
+		break;
+	case PW_BERSERK:
+		trap_RankReportInt( self, -1, QGR_KEY_BERSERK, 1, 1 );
 		break;
 	case PW_BATTLESUIT:
 		trap_RankReportInt( self, -1, QGR_KEY_SUIT, 1, 1 );
@@ -1132,4 +1135,3 @@ void G_RankGameOver( void )
 	trap_Cvar_VariableStringBuffer( "version", str, sizeof(str) );
 	trap_RankReportStr( -1, -1, QGR_KEY_VERSION, str );
 }
-

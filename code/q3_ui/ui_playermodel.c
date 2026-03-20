@@ -100,6 +100,9 @@ typedef struct
 	int				numpages;
 	char			modelskin[64];
 	int				selectedmodel;
+	// eser - model rotation
+	float			spinAngle;
+	// eser - model rotation
 } playermodel_t;
 
 static playermodel_t s_playermodel;
@@ -175,8 +178,11 @@ static void PlayerModel_UpdateModel( void )
 	vec3_t	moveangles;
 
 	memset( &s_playermodel.playerinfo, 0, sizeof(playerInfo_t) );
-	
-	viewangles[YAW]   = 180 - 30;
+
+	// eser - model rotation
+	// viewangles[YAW]   = 180 - 30;
+	viewangles[YAW]   = 180 - 30 + s_playermodel.spinAngle;
+	// eser - model rotation
 	viewangles[PITCH] = 0;
 	viewangles[ROLL]  = 0;
 	VectorClear( moveangles );
@@ -242,6 +248,21 @@ static sfxHandle_t PlayerModel_MenuKey( int key )
 {
 	menucommon_s*	m;
 	int				picnum;
+
+	// eser - model rotation
+	// mouse wheel or [ ] keys to spin the preview
+	if ( key == K_MWHEELUP || key == '[' ) {
+		s_playermodel.spinAngle -= 15;
+		PlayerModel_UpdateModel();
+		return 0;
+	}
+
+	if ( key == K_MWHEELDOWN || key == ']' ) {
+		s_playermodel.spinAngle += 15;
+		PlayerModel_UpdateModel();
+		return 0;
+	}
+	// eser - model rotation
 
 	switch (key)
 	{
@@ -732,5 +753,3 @@ void UI_PlayerModelMenu(void)
 
 	Menu_SetCursorToItem( &s_playermodel.menu, &s_playermodel.pics[s_playermodel.selectedmodel % MAX_MODELSPERPAGE] );
 }
-
-
