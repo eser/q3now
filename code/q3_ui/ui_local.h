@@ -33,9 +33,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 //NOTE: include the ui_public.h from the new UI
 #include "../ui/ui_public.h"
-//redefine to old API version
+//redefine to match engine's expected version
 #undef UI_API_VERSION
-#define UI_API_VERSION	4
+#define UI_API_VERSION	6
 #include "../client/keycodes.h"
 #include "../game/bg_public.h"
 
@@ -708,6 +708,12 @@ void			trap_SetCDKey( char *buf );
 qboolean               trap_VerifyCDKey( const char *key, const char *chksum);
 
 void			trap_SetPbClStatus( int status );
+
+// engine extensions (API version 6)
+void			trap_R_AddRefEntityToScene2( const refEntity_t *re );
+void			trap_R_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
+void			trap_Cvar_SetDescription( const char *varName, const char *description );
+int				trap_GetValue( char *value, int valueSize, const char *key );
 
 //
 // ui_addbots.c

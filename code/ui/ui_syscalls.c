@@ -402,3 +402,21 @@ qboolean trap_VerifyCDKey( const char *key, const char *chksum) {
 void trap_SetPbClStatus( int status ) {
 	syscall( UI_SET_PBCLSTATUS, status );
 }
+
+// engine extensions (API version 6)
+
+void trap_R_AddRefEntityToScene2( const refEntity_t *re ) {
+	syscall( UI_R_ADDREFENTITYTOSCENE2, re );
+}
+
+void trap_R_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b ) {
+	syscall( UI_R_ADDLINEARLIGHTTOSCENE, start, end, PASSFLOAT(intensity), PASSFLOAT(r), PASSFLOAT(g), PASSFLOAT(b) );
+}
+
+void trap_Cvar_SetDescription( const char *varName, const char *description ) {
+	syscall( UI_CVAR_SETDESCRIPTION, varName, description );
+}
+
+int trap_GetValue( char *value, int valueSize, const char *key ) {
+	return syscall( UI_TRAP_GETVALUE, value, valueSize, key );
+}
