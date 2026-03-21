@@ -45,10 +45,12 @@ typedef struct {
 	menubitmap_s	framel;
 	menubitmap_s	framer;
 
-	menulist_s		list;
+	menutable_s		table;
 
 	menubitmap_s	back;
 	menubitmap_s	go;
+
+	int				numMods;
 
 	char			description[NAMEBUFSIZE];
 	char			fs_game[GAMEBUFSIZE];
@@ -65,6 +67,34 @@ static mods_t	s_mods;
 
 /*
 ===============
+ModTable_GetColumnText
+===============
+*/
+static const char *ModTable_GetColumnText( int row, int column )
+{
+	if ( row < 0 || row >= s_mods.numMods )
+		return "";
+	if ( column == 0 )
+		return s_mods.fs_gameList[row] ? s_mods.fs_gameList[row] : "";
+	if ( column == 1 )
+		return s_mods.descriptionList[row] ? s_mods.descriptionList[row] : "";
+	return "";
+}
+
+
+/*
+===============
+ModTable_OnSelect
+===============
+*/
+static void ModTable_OnSelect( int row )
+{
+	/* nothing to do */
+}
+
+
+/*
+===============
 UI_Mods_MenuEvent
 ===============
 */
@@ -75,7 +105,7 @@ static void UI_Mods_MenuEvent( void *ptr, int event ) {
 
 	switch ( ((menucommon_s*)ptr)->id ) {
 	case ID_GO:
-		trap_Cvar_Set( "fs_game", s_mods.fs_gameList[s_mods.list.curvalue] );
+		trap_Cvar_Set( "fs_game", s_mods.fs_gameList[s_mods.table.selectedRow] );
 		trap_Cmd_ExecuteText( EXEC_APPEND, "vid_restart;" );
 		UI_PopMenu();
 		break;
@@ -93,16 +123,15 @@ UI_Mods_ParseInfos
 ===============
 */
 static void UI_Mods_ParseInfos( char *modDir, char *modDesc ) {
-	s_mods.fs_gameList[s_mods.list.numitems] = s_mods.fs_gamePtr;
+	s_mods.fs_gameList[s_mods.numMods] = s_mods.fs_gamePtr;
 	Q_strncpyz( s_mods.fs_gamePtr, modDir, 16 );
 
-	s_mods.descriptionList[s_mods.list.numitems] = s_mods.descriptionPtr;
+	s_mods.descriptionList[s_mods.numMods] = s_mods.descriptionPtr;
 	Q_strncpyz( s_mods.descriptionPtr, modDesc, 48 );
 
-	s_mods.list.itemnames[s_mods.list.numitems] = s_mods.descriptionPtr;
 	s_mods.descriptionPtr += strlen( s_mods.descriptionPtr ) + 1;
 	s_mods.fs_gamePtr += strlen( s_mods.fs_gamePtr ) + 1;
-	s_mods.list.numitems++;
+	s_mods.numMods++;
 }
 
 
@@ -119,13 +148,12 @@ static void UI_Mods_LoadMods( void ) {
 	int		i;
 	int		dirlen;
 
-	s_mods.list.itemnames = (const char **)s_mods.descriptionList;
 	s_mods.descriptionPtr = s_mods.description;
 	s_mods.fs_gamePtr = s_mods.fs_game;
 
-	// always start off with baseq3
-	s_mods.list.numitems = 1;
-	s_mods.list.itemnames[0] = s_mods.descriptionList[0] = "Quake III Arena";
+	/* always start off with baseq3 */
+	s_mods.numMods = 1;
+	s_mods.descriptionList[0] = "q3now";
 	s_mods.fs_gameList[0] = "";
 
 	numdirs = trap_FS_GetFileList( "$modlist", "", dirlist, sizeof(dirlist) );
@@ -137,9 +165,9 @@ static void UI_Mods_LoadMods( void ) {
     dirptr += dirlen + strlen(descptr) + 1;
 	}
 
-	trap_Print( va( "%i mods parsed\n", s_mods.list.numitems ) );
-	if (s_mods.list.numitems > MAX_MODS) {
-		s_mods.list.numitems = MAX_MODS;
+	trap_Print( va( "%i mods parsed\n", s_mods.numMods ) );
+	if (s_mods.numMods > MAX_MODS) {
+		s_mods.numMods = MAX_MODS;
 	}
 }
 
@@ -201,22 +229,33 @@ static void UI_Mods_MenuInit( void ) {
 	s_mods.go.height				= 64;
 	s_mods.go.focuspic				= ART_FIGHT1;
 
-	// scan for mods
-	s_mods.list.generic.type		= MTYPE_SCROLLLIST;
-	s_mods.list.generic.flags		= QMF_PULSEIFFOCUS|QMF_CENTER_JUSTIFY;
-	s_mods.list.generic.callback	= UI_Mods_MenuEvent;
-	s_mods.list.generic.id			= ID_LIST;
-	s_mods.list.generic.x			= 320;
-	s_mods.list.generic.y			= 130;
-	s_mods.list.width				= 48;
-	s_mods.list.height				= 14;
+	/* scan for mods */
+	s_mods.table.generic.type			= MTYPE_TABLE;
+	s_mods.table.generic.flags			= QMF_PULSEIFFOCUS;
+	s_mods.table.generic.callback		= UI_Mods_MenuEvent;
+	s_mods.table.generic.id			= ID_LIST;
+	s_mods.table.generic.x				= 320;
+	s_mods.table.generic.y				= 130;
+	s_mods.table.numColumns				= 2;
+	s_mods.table.columns[0].header		= "Mod Name";
+	s_mods.table.columns[0].width		= 24;
+	s_mods.table.columns[0].align		= UI_LEFT;
+	s_mods.table.columns[1].header		= "Description";
+	s_mods.table.columns[1].width		= 24;
+	s_mods.table.columns[1].align		= UI_LEFT;
+	s_mods.table.visibleRows			= 12;
+	s_mods.table.selectedRow			= 0;
+	s_mods.table.emptyText				= "No mods installed";
+	s_mods.table.getColumnText			= ModTable_GetColumnText;
+	s_mods.table.onSelect				= ModTable_OnSelect;
 
 	UI_Mods_LoadMods();
+	s_mods.table.numRows = s_mods.numMods;
 
 	Menu_AddItem( &s_mods.menu, &s_mods.banner );
 	Menu_AddItem( &s_mods.menu, &s_mods.framel );
 	Menu_AddItem( &s_mods.menu, &s_mods.framer );
-	Menu_AddItem( &s_mods.menu, &s_mods.list );
+	Menu_AddItem( &s_mods.menu, &s_mods.table );
 	Menu_AddItem( &s_mods.menu, &s_mods.back );
 	Menu_AddItem( &s_mods.menu, &s_mods.go );
 }

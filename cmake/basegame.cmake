@@ -19,6 +19,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_lensflare.c
     ${SOURCE_DIR}/cgame/cg_ospcompat.c
     ${SOURCE_DIR}/cgame/cg_osptext.c
+    ${SOURCE_DIR}/cgame/cg_window.c
     ${SOURCE_DIR}/cgame/cg_superhud.c
     ${SOURCE_DIR}/cgame/cg_superhud_configparser.c
     ${SOURCE_DIR}/cgame/cg_superhud_private.c
@@ -142,16 +143,15 @@ set(UI_SOURCES
     ${SOURCE_DIR}/q3_ui/ui_callvote.c
     ${SOURCE_DIR}/q3_ui/ui_cdkey.c
     ${SOURCE_DIR}/q3_ui/ui_dynamicmenu.c
-    ${SOURCE_DIR}/q3_ui/ui_cinematics.c
     ${SOURCE_DIR}/q3_ui/ui_confirm.c
     ${SOURCE_DIR}/q3_ui/ui_connect.c
     ${SOURCE_DIR}/q3_ui/ui_controls2.c
-    ${SOURCE_DIR}/q3_ui/ui_credits.c
     ${SOURCE_DIR}/q3_ui/ui_demo2.c
     ${SOURCE_DIR}/q3_ui/ui_display.c
     ${SOURCE_DIR}/q3_ui/ui_gameinfo.c
     ${SOURCE_DIR}/q3_ui/ui_ingame.c
     ${SOURCE_DIR}/q3_ui/ui_loadconfig.c
+    ${SOURCE_DIR}/q3_ui/ui_mapcache.c
     ${SOURCE_DIR}/q3_ui/ui_menu.c
     ${SOURCE_DIR}/q3_ui/ui_mfield.c
     ${SOURCE_DIR}/q3_ui/ui_mods.c
@@ -177,6 +177,7 @@ set(UI_SOURCES
     ${SOURCE_DIR}/q3_ui/ui_team.c
     ${SOURCE_DIR}/q3_ui/ui_teamorders.c
     ${SOURCE_DIR}/q3_ui/ui_video.c
+    ${SOURCE_DIR}/q3_ui/ui_script.c
 )
 
 set(UI_BINARY_SOURCES ${SOURCE_DIR}/ui/ui_syscalls.c)

@@ -66,6 +66,7 @@ typedef struct {
 
 	menutext_s		bots[7];
 
+	menubitmap_s	icon;		// bot portrait icon
 	menubitmap_s	delete;
 	menubitmap_s	back;
 
@@ -74,9 +75,74 @@ typedef struct {
 	int				selectedBotNum;
 	char			botnames[7][32];
 	int				botClientNums[MAX_BOTS];
+	char			boticon[MAX_QPATH];
 } removeBotsMenuInfo_t;
 
 static removeBotsMenuInfo_t	removeBotsMenuInfo;
+
+static void UI_RemoveBotsMenu_SetBotNames( void );
+
+/*
+=================
+UI_RemoveBotsMenu_Key
+=================
+*/
+static sfxHandle_t UI_RemoveBotsMenu_Key( int key ) {
+	switch ( key ) {
+	case K_MWHEELUP:
+		if ( removeBotsMenuInfo.baseBotNum > 0 ) {
+			removeBotsMenuInfo.baseBotNum--;
+			UI_RemoveBotsMenu_SetBotNames();
+			return menu_move_sound;
+		}
+		return menu_buzz_sound;
+
+	case K_MWHEELDOWN:
+		if ( removeBotsMenuInfo.baseBotNum + 7 < removeBotsMenuInfo.numBots ) {
+			removeBotsMenuInfo.baseBotNum++;
+			UI_RemoveBotsMenu_SetBotNames();
+			return menu_move_sound;
+		}
+		return menu_buzz_sound;
+	}
+
+	return Menu_DefaultKey( &removeBotsMenuInfo.menu, key );
+}
+
+
+/*
+=================
+RemoveBots_SetBotIcon
+=================
+*/
+static void RemoveBots_SetBotIcon( void )
+{
+	char	info[MAX_INFO_STRING];
+	const char	*model;
+	char	modelBuf[MAX_QPATH];
+	char	*skin;
+	int		clientNum;
+
+	if (removeBotsMenuInfo.numBots == 0)
+		return;
+
+	clientNum = removeBotsMenuInfo.botClientNums[removeBotsMenuInfo.baseBotNum + removeBotsMenuInfo.selectedBotNum];
+	trap_GetConfigString( CS_PLAYERS + clientNum, info, MAX_INFO_STRING );
+	model = Info_ValueForKey( info, "model" );
+
+	Q_strncpyz( modelBuf, model, sizeof(modelBuf) );
+	skin = strrchr( modelBuf, '/' );
+	if ( skin ) {
+		*skin++ = '\0';
+	} else {
+		skin = "default";
+	}
+
+	Com_sprintf( removeBotsMenuInfo.boticon, sizeof(removeBotsMenuInfo.boticon),
+		"models/players/%s/icon_%s", modelBuf, skin );
+
+	removeBotsMenuInfo.icon.shader = 0;
+}
 
 
 /*
@@ -87,13 +153,28 @@ UI_RemoveBotsMenu_SetBotNames
 static void UI_RemoveBotsMenu_SetBotNames( void ) {
 	int		n;
 	char	info[MAX_INFO_STRING];
+	char	team;
 
 	for ( n = 0; (n < 7) && (removeBotsMenuInfo.baseBotNum + n < removeBotsMenuInfo.numBots); n++ ) {
 		trap_GetConfigString( CS_PLAYERS + removeBotsMenuInfo.botClientNums[removeBotsMenuInfo.baseBotNum + n], info, MAX_INFO_STRING );
 		Q_strncpyz( removeBotsMenuInfo.botnames[n], Info_ValueForKey( info, "n" ), sizeof(removeBotsMenuInfo.botnames[n]) );
 		Q_CleanStr( removeBotsMenuInfo.botnames[n] );
+
+		team = *Info_ValueForKey( info, "t" );
+		if ( team == '1' ) {
+			removeBotsMenuInfo.bots[n].color = color_red;
+		} else if ( team == '2' ) {
+			removeBotsMenuInfo.bots[n].color = color_blue;
+		} else {
+			removeBotsMenuInfo.bots[n].color = color_orange;
+		}
 	}
 
+	/* keep selected bot white */
+	if ( removeBotsMenuInfo.selectedBotNum < 7 &&
+		 removeBotsMenuInfo.baseBotNum + removeBotsMenuInfo.selectedBotNum < removeBotsMenuInfo.numBots ) {
+		removeBotsMenuInfo.bots[removeBotsMenuInfo.selectedBotNum].color = color_white;
+	}
 }
 
 
@@ -117,13 +198,30 @@ UI_RemoveBotsMenu_BotEvent
 =================
 */
 static void UI_RemoveBotsMenu_BotEvent( void* ptr, int event ) {
+	int		prev;
+	char	info[MAX_INFO_STRING];
+	char	team;
+
 	if (event != QM_ACTIVATED) {
 		return;
 	}
 
-	removeBotsMenuInfo.bots[removeBotsMenuInfo.selectedBotNum].color = color_orange;
+	/* deselect previous — restore team-aware color */
+	prev = removeBotsMenuInfo.selectedBotNum;
+	trap_GetConfigString( CS_PLAYERS + removeBotsMenuInfo.botClientNums[removeBotsMenuInfo.baseBotNum + prev], info, MAX_INFO_STRING );
+	team = *Info_ValueForKey( info, "t" );
+	if ( team == '1' ) {
+		removeBotsMenuInfo.bots[prev].color = color_red;
+	} else if ( team == '2' ) {
+		removeBotsMenuInfo.bots[prev].color = color_blue;
+	} else {
+		removeBotsMenuInfo.bots[prev].color = color_orange;
+	}
+
 	removeBotsMenuInfo.selectedBotNum = ((menucommon_s*)ptr)->id - ID_BOTNAME0;
 	removeBotsMenuInfo.bots[removeBotsMenuInfo.selectedBotNum].color = color_white;
+
+	RemoveBots_SetBotIcon();
 }
 
 
@@ -230,6 +328,7 @@ static void UI_RemoveBotsMenu_Init( void ) {
 	memset( &removeBotsMenuInfo, 0 ,sizeof(removeBotsMenuInfo) );
 	removeBotsMenuInfo.menu.fullscreen = qfalse;
 	removeBotsMenuInfo.menu.wrapAround = qtrue;
+	removeBotsMenuInfo.menu.key        = UI_RemoveBotsMenu_Key;
 
 	UI_RemoveBots_Cache();
 
@@ -292,6 +391,15 @@ static void UI_RemoveBotsMenu_Init( void ) {
 		removeBotsMenuInfo.bots[n].style			= UI_LEFT|UI_SMALLFONT;
 	}
 
+	// bot portrait icon
+	removeBotsMenuInfo.icon.generic.type		= MTYPE_BITMAP;
+	removeBotsMenuInfo.icon.generic.flags		= QMF_LEFT_JUSTIFY|QMF_INACTIVE;
+	removeBotsMenuInfo.icon.generic.name		= removeBotsMenuInfo.boticon;
+	removeBotsMenuInfo.icon.generic.x			= 128;
+	removeBotsMenuInfo.icon.generic.y			= 168;
+	removeBotsMenuInfo.icon.width				= 64;
+	removeBotsMenuInfo.icon.height				= 64;
+
 	removeBotsMenuInfo.delete.generic.type		= MTYPE_BITMAP;
 	removeBotsMenuInfo.delete.generic.name		= ART_DELETE0;
 	removeBotsMenuInfo.delete.generic.flags		= QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS;
@@ -322,12 +430,14 @@ static void UI_RemoveBotsMenu_Init( void ) {
 	for( n = 0; n < count; n++ ) {
 		Menu_AddItem( &removeBotsMenuInfo.menu, &removeBotsMenuInfo.bots[n] );
 	}
+	Menu_AddItem( &removeBotsMenuInfo.menu, &removeBotsMenuInfo.icon );
 	Menu_AddItem( &removeBotsMenuInfo.menu, &removeBotsMenuInfo.delete );
 	Menu_AddItem( &removeBotsMenuInfo.menu, &removeBotsMenuInfo.back );
 
 	removeBotsMenuInfo.baseBotNum = 0;
 	removeBotsMenuInfo.selectedBotNum = 0;
 	removeBotsMenuInfo.bots[0].color = color_white;
+	RemoveBots_SetBotIcon();
 }
 
 

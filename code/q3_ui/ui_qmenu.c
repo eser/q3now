@@ -1241,6 +1241,12 @@ void ScrollList_Draw( menulist_s *l )
 	float*		color;
 	qboolean	hasfocus;
 	int			style;
+	const char	*text;
+
+	/* feeder: update numitems from callback if feeder is active */
+	if ( l->feederID && l->feederCount ) {
+		l->numitems = l->feederCount( l->feederID );
+	}
 
 	hasfocus = (l->generic.parent->cursor == l->generic.menuPosition);
 
@@ -1276,18 +1282,365 @@ void ScrollList_Draw( menulist_s *l )
 				style |= UI_CENTER;
 			}
 
-			UI_DrawString(
-				x,
-				y,
-				l->itemnames[i],
-				style,
-				color);
+			/* feeder: get text from callback, or fall back to itemnames */
+			if ( l->feederID && l->feederItemText ) {
+				text = l->feederItemText( l->feederID, i, 0, NULL );
+			} else {
+				text = l->itemnames[i];
+			}
+
+			if ( text ) {
+				UI_DrawString( x, y, text, style, color );
+			}
 
 			y += SMALLCHAR_HEIGHT;
 		}
 		x += (l->width + l->separation) * SMALLCHAR_WIDTH;
 	}
 }
+
+
+/*
+=================
+MenuTable_Init
+
+Calculate hit rectangles and defaults for the table widget.
+=================
+*/
+void MenuTable_Init( menutable_s *t )
+{
+	int i;
+	int totalWidth = 0;
+
+	if ( t->rowHeight <= 0 )
+		t->rowHeight = SMALLCHAR_HEIGHT + 2;
+	if ( t->headerHeight <= 0 )
+		t->headerHeight = SMALLCHAR_HEIGHT + 4;
+
+	for ( i = 0; i < t->numColumns; i++ )
+		totalWidth += t->columns[i].width;
+
+	t->generic.left   = t->generic.x;
+	t->generic.top    = t->generic.y;
+	t->generic.right  = t->generic.x + totalWidth * SMALLCHAR_WIDTH;
+	t->generic.bottom = t->generic.y + t->headerHeight + t->visibleRows * t->rowHeight;
+}
+
+
+/*
+=================
+MenuTable_Draw
+
+Draw column headers, sort indicator, and visible data rows.
+=================
+*/
+void MenuTable_Draw( menutable_s *t )
+{
+	int		i, r;
+	int		x, y, colX;
+	int		totalWidth;
+	float	*color;
+	int		style;
+	qboolean hasfocus;
+	const char *text;
+	int		rowHeight;
+	int		headerHeight;
+	int		mouseRow;
+	vec4_t	headerColor = { 0.2f, 0.2f, 0.2f, 0.7f };
+	vec4_t	hoverColor  = { 0.5f, 0.5f, 0.2f, 0.15f };
+	vec4_t	sepColor    = { 0.5f, 0.5f, 0.5f, 0.3f };
+
+	hasfocus = (t->generic.parent->cursor == t->generic.menuPosition);
+	rowHeight = t->rowHeight;
+	headerHeight = t->headerHeight;
+	x = t->generic.x;
+	y = t->generic.y;
+
+	// total pixel width
+	totalWidth = 0;
+	for ( i = 0; i < t->numColumns; i++ )
+		totalWidth += t->columns[i].width;
+
+	// --- draw header background ---
+	UI_FillRect( x, y, totalWidth * SMALLCHAR_WIDTH, headerHeight, headerColor );
+
+	// --- draw column headers ---
+	colX = x;
+	for ( i = 0; i < t->numColumns; i++ )
+	{
+		int colPixelWidth = t->columns[i].width * SMALLCHAR_WIDTH;
+		int textX;
+		char headerBuf[64];
+
+		// build header text with sort indicator
+		if ( t->sortColumn == i ) {
+			Com_sprintf( headerBuf, sizeof(headerBuf), "%s %s",
+				t->columns[i].header ? t->columns[i].header : "",
+				t->sortAscending ? "^" : "v" );
+		} else {
+			Q_strncpyz( headerBuf, t->columns[i].header ? t->columns[i].header : "", sizeof(headerBuf) );
+		}
+
+		// position based on alignment
+		style = UI_SMALLFONT;
+		if ( t->columns[i].align == UI_CENTER ) {
+			textX = colX + colPixelWidth / 2;
+			style |= UI_CENTER;
+		} else if ( t->columns[i].align == UI_RIGHT ) {
+			textX = colX + colPixelWidth - SMALLCHAR_WIDTH;
+			style |= UI_RIGHT;
+		} else {
+			textX = colX + 2;
+			style |= UI_LEFT;
+		}
+
+		UI_DrawString( textX, y + 2, headerBuf, style, color_yellow );
+		colX += colPixelWidth;
+	}
+
+	// --- header separator line ---
+	UI_FillRect( x, y + headerHeight - 1, totalWidth * SMALLCHAR_WIDTH, 1, sepColor );
+
+	// --- detect hover row from mouse position ---
+	mouseRow = -1;
+	if ( UI_CursorInRect( x, y + headerHeight, totalWidth * SMALLCHAR_WIDTH, t->visibleRows * rowHeight ) ) {
+		mouseRow = t->topRow + (uis.cursory - (y + headerHeight)) / rowHeight;
+		if ( mouseRow >= t->numRows )
+			mouseRow = -1;
+	}
+
+	// --- draw data rows ---
+	y += headerHeight;
+
+	// empty state text
+	if ( t->numRows == 0 && t->emptyText ) {
+		vec4_t emptyColor = { 0.6f, 0.6f, 0.6f, 0.5f };
+		UI_DrawString( x + (totalWidth * SMALLCHAR_WIDTH) / 2,
+			y + (t->visibleRows * rowHeight) / 2 - SMALLCHAR_HEIGHT / 2,
+			t->emptyText, UI_CENTER | UI_SMALLFONT, emptyColor );
+	}
+
+	for ( r = 0; r < t->visibleRows; r++ )
+	{
+		int row = t->topRow + r;
+		if ( row >= t->numRows )
+			break;
+
+		// selected row highlight
+		if ( row == t->selectedRow ) {
+			UI_FillRect( x, y, totalWidth * SMALLCHAR_WIDTH, rowHeight, listbar_color );
+			color = text_color_highlight;
+		}
+		// hover highlight
+		else if ( row == mouseRow ) {
+			UI_FillRect( x, y, totalWidth * SMALLCHAR_WIDTH, rowHeight, hoverColor );
+			color = text_color_normal;
+		}
+		else {
+			color = text_color_normal;
+		}
+
+		// draw each column
+		colX = x;
+		for ( i = 0; i < t->numColumns; i++ )
+		{
+			int colPixelWidth = t->columns[i].width * SMALLCHAR_WIDTH;
+			int textX;
+
+			text = NULL;
+			if ( t->getColumnText )
+				text = t->getColumnText( row, i );
+
+			if ( text ) {
+				style = UI_SMALLFONT;
+				if ( t->columns[i].align == UI_CENTER ) {
+					textX = colX + colPixelWidth / 2;
+					style |= UI_CENTER;
+				} else if ( t->columns[i].align == UI_RIGHT ) {
+					textX = colX + colPixelWidth - SMALLCHAR_WIDTH;
+					style |= UI_RIGHT;
+				} else {
+					textX = colX + 2;
+					style |= UI_LEFT;
+				}
+
+				if ( row == t->selectedRow && hasfocus )
+					style |= UI_PULSE;
+
+				UI_DrawString( textX, y + 1, text, style, color );
+			}
+			colX += colPixelWidth;
+		}
+
+		y += rowHeight;
+	}
+}
+
+
+/*
+=================
+MenuTable_Key
+
+Handle keyboard/mouse input for the table widget.
+=================
+*/
+sfxHandle_t MenuTable_Key( menutable_s *t, int key )
+{
+	int totalWidth;
+	int i;
+	int maxTop;
+
+	totalWidth = 0;
+	for ( i = 0; i < t->numColumns; i++ )
+		totalWidth += t->columns[i].width;
+	maxTop = t->numRows - t->visibleRows;
+	if ( maxTop < 0 ) maxTop = 0;
+
+	switch ( key )
+	{
+	case K_MOUSE1:
+	{
+		int mx = uis.cursorx;
+		int my = uis.cursory;
+		int x = t->generic.x;
+		int y = t->generic.y;
+		int headerHeight = t->headerHeight;
+		int rowHeight = t->rowHeight;
+
+		// click on header → sort
+		if ( my >= y && my < y + headerHeight &&
+			 mx >= x && mx < x + totalWidth * SMALLCHAR_WIDTH )
+		{
+			int colX = x;
+			for ( i = 0; i < t->numColumns; i++ )
+			{
+				int colW = t->columns[i].width * SMALLCHAR_WIDTH;
+				if ( mx >= colX && mx < colX + colW )
+				{
+					if ( t->sortColumn == i )
+						t->sortAscending = !t->sortAscending;
+					else {
+						t->sortColumn = i;
+						t->sortAscending = qtrue;
+					}
+					if ( t->onSort )
+						t->onSort( t->sortColumn, t->sortAscending );
+					return menu_move_sound;
+				}
+				colX += colW;
+			}
+		}
+
+		// click on data row → select
+		if ( my >= y + headerHeight &&
+			 my < y + headerHeight + t->visibleRows * rowHeight &&
+			 mx >= x && mx < x + totalWidth * SMALLCHAR_WIDTH )
+		{
+			int row = t->topRow + (my - (y + headerHeight)) / rowHeight;
+			if ( row >= 0 && row < t->numRows ) {
+				t->selectedRow = row;
+				if ( t->onSelect )
+					t->onSelect( row );
+				return menu_move_sound;
+			}
+		}
+		break;
+	}
+
+	case K_MOUSE2:
+		// double-click activates (same as enter)
+		if ( t->selectedRow >= 0 && t->generic.callback )
+			t->generic.callback( t, QM_ACTIVATED );
+		return 0;
+
+	case K_MWHEELUP:
+		if ( t->topRow > 0 ) {
+			t->topRow -= 3;
+			if ( t->topRow < 0 ) t->topRow = 0;
+			return menu_move_sound;
+		}
+		return menu_buzz_sound;
+
+	case K_MWHEELDOWN:
+		if ( t->topRow < maxTop ) {
+			t->topRow += 3;
+			if ( t->topRow > maxTop ) t->topRow = maxTop;
+			return menu_move_sound;
+		}
+		return menu_buzz_sound;
+
+	case K_KP_UPARROW:
+	case K_UPARROW:
+		if ( t->selectedRow > 0 ) {
+			t->selectedRow--;
+			if ( t->selectedRow < t->topRow )
+				t->topRow = t->selectedRow;
+			if ( t->onSelect )
+				t->onSelect( t->selectedRow );
+			return menu_move_sound;
+		}
+		return menu_buzz_sound;
+
+	case K_KP_DOWNARROW:
+	case K_DOWNARROW:
+		if ( t->selectedRow < t->numRows - 1 ) {
+			t->selectedRow++;
+			if ( t->selectedRow >= t->topRow + t->visibleRows )
+				t->topRow = t->selectedRow - t->visibleRows + 1;
+			if ( t->onSelect )
+				t->onSelect( t->selectedRow );
+			return menu_move_sound;
+		}
+		return menu_buzz_sound;
+
+	case K_KP_PGUP:
+	case K_PGUP:
+		t->selectedRow -= t->visibleRows;
+		if ( t->selectedRow < 0 ) t->selectedRow = 0;
+		t->topRow -= t->visibleRows;
+		if ( t->topRow < 0 ) t->topRow = 0;
+		if ( t->onSelect )
+			t->onSelect( t->selectedRow );
+		return menu_move_sound;
+
+	case K_KP_PGDN:
+	case K_PGDN:
+		t->selectedRow += t->visibleRows;
+		if ( t->selectedRow >= t->numRows ) t->selectedRow = t->numRows - 1;
+		if ( t->selectedRow < 0 ) t->selectedRow = 0;
+		t->topRow += t->visibleRows;
+		if ( t->topRow > maxTop ) t->topRow = maxTop;
+		if ( t->onSelect )
+			t->onSelect( t->selectedRow );
+		return menu_move_sound;
+
+	case K_KP_HOME:
+	case K_HOME:
+		t->selectedRow = 0;
+		t->topRow = 0;
+		if ( t->onSelect )
+			t->onSelect( t->selectedRow );
+		return menu_move_sound;
+
+	case K_KP_END:
+	case K_END:
+		t->selectedRow = t->numRows - 1;
+		if ( t->selectedRow < 0 ) t->selectedRow = 0;
+		t->topRow = maxTop;
+		if ( t->onSelect )
+			t->onSelect( t->selectedRow );
+		return menu_move_sound;
+
+	case K_KP_ENTER:
+	case K_ENTER:
+		if ( t->selectedRow >= 0 && t->generic.callback )
+			t->generic.callback( t, QM_ACTIVATED );
+		return 0;
+	}
+
+	return 0;
+}
+
 
 /*
 =================
@@ -1305,6 +1658,11 @@ void Menu_AddItem( menuframework_s *menu, void *item )
 	((menucommon_s*)menu->items[menu->nitems])->parent        = menu;
 	((menucommon_s*)menu->items[menu->nitems])->menuPosition  = menu->nitems;
 	((menucommon_s*)menu->items[menu->nitems])->flags        &= ~QMF_HASMOUSEFOCUS;
+
+	// initialize fade alpha to fully visible (prevents invisible items from memset)
+	if (((menucommon_s*)menu->items[menu->nitems])->fadeAlpha == 0.0f) {
+		((menucommon_s*)menu->items[menu->nitems])->fadeAlpha = 1.0f;
+	}
 
 	// perform any item specific initializations
 	itemptr = (menucommon_s*)item;
@@ -1344,6 +1702,10 @@ void Menu_AddItem( menuframework_s *menu, void *item )
 				ScrollList_Init((menulist_s*)item);
 				break;
 
+			case MTYPE_TABLE:
+				MenuTable_Init((menutable_s*)item);
+				break;
+
 			case MTYPE_PTEXT:
 				PText_Init((menutext_s*)item);
 				break;
@@ -1368,22 +1730,31 @@ Menu_CursorMoved
 void Menu_CursorMoved( menuframework_s *m )
 {
 	void (*callback)( void *self, int notification );
-	
+	menucommon_s *prev, *cur;
+
 	if (m->cursor_prev == m->cursor)
 		return;
 
 	if (m->cursor_prev >= 0 && m->cursor_prev < m->nitems)
 	{
-		callback = ((menucommon_s*)(m->items[m->cursor_prev]))->callback;
+		prev = (menucommon_s*)(m->items[m->cursor_prev]);
+		callback = prev->callback;
 		if (callback)
 			callback(m->items[m->cursor_prev],QM_LOSTFOCUS);
+		/* script: onDefocus */
+		if (prev->onDefocus)
+			UI_RunScript(prev, prev->onDefocus);
 	}
-	
+
 	if (m->cursor >= 0 && m->cursor < m->nitems)
 	{
-		callback = ((menucommon_s*)(m->items[m->cursor]))->callback;
+		cur = (menucommon_s*)(m->items[m->cursor]);
+		callback = cur->callback;
 		if (callback)
 			callback(m->items[m->cursor],QM_GOTFOCUS);
+		/* script: onFocus */
+		if (cur->onFocus)
+			UI_RunScript(cur, cur->onFocus);
 	}
 }
 
@@ -1492,6 +1863,15 @@ void Menu_Draw( menuframework_s *menu )
 	{
 		itemptr = (menucommon_s*)menu->items[i];
 
+		// cvar-driven show/hide check
+		if ( itemptr->cvarTest ) {
+			Menu_ItemCvarCheck( itemptr );
+		}
+
+		// animation updates (fade + transition)
+		Menu_UpdateItemFade( itemptr );
+		Menu_UpdateItemTransition( itemptr );
+
 		if (itemptr->flags & QMF_HIDDEN)
 			continue;
 
@@ -1534,6 +1914,10 @@ void Menu_Draw( menuframework_s *menu )
 
 				case MTYPE_SCROLLLIST:
 					ScrollList_Draw( (menulist_s*)itemptr );
+					break;
+
+				case MTYPE_TABLE:
+					MenuTable_Draw( (menutable_s*)itemptr );
 					break;
 				
 				case MTYPE_PTEXT:
@@ -1603,6 +1987,11 @@ sfxHandle_t Menu_ActivateItem( menuframework_s *s, menucommon_s* item ) {
 		}
 	}
 
+	/* script: onActivate */
+	if ( item->onActivate ) {
+		UI_RunScript( item, item->onActivate );
+	}
+
 	return 0;
 }
 
@@ -1649,6 +2038,10 @@ sfxHandle_t Menu_DefaultKey( menuframework_s *m, int key )
 
 			case MTYPE_SCROLLLIST:
 				sound = ScrollList_Key( (menulist_s*)item, key );
+				break;
+
+			case MTYPE_TABLE:
+				sound = MenuTable_Key( (menutable_s*)item, key );
 				break;
 
 			case MTYPE_FIELD:
@@ -1774,4 +2167,152 @@ void Menu_Cache( void )
 	sliderButton_0 = trap_R_RegisterShaderNoMip( "menu/art/sliderbutt_0" );
 	sliderButton_1 = trap_R_RegisterShaderNoMip( "menu/art/sliderbutt_1" );
 }
-	
+
+/*
+=================
+Menu_UpdateItemFade
+
+Per-frame fade animation. Ramps fadeAlpha toward 0 or 1 based on fadeFlags.
+Uses uis.realtime for consistent timing with the UI frame loop.
+=================
+*/
+#define FADE_CYCLE_MS  30
+#define FADE_AMOUNT    0.1f
+void Menu_UpdateItemFade( menucommon_s *item )
+{
+	if ( !(item->fadeFlags & (FADEF_IN | FADEF_OUT)) ) return;
+	if ( uis.realtime < item->fadeNextTime ) return;
+
+	item->fadeNextTime = uis.realtime + FADE_CYCLE_MS;
+
+	if ( item->fadeFlags & FADEF_OUT ) {
+		item->fadeAlpha -= FADE_AMOUNT;
+		if ( item->fadeAlpha <= 0.0f ) {
+			item->fadeAlpha = 0.0f;
+			item->fadeFlags &= ~FADEF_OUT;
+			item->flags |= QMF_HIDDEN;
+		}
+	} else if ( item->fadeFlags & FADEF_IN ) {
+		item->fadeAlpha += FADE_AMOUNT;
+		if ( item->fadeAlpha >= 1.0f ) {
+			item->fadeAlpha = 1.0f;
+			item->fadeFlags &= ~FADEF_IN;
+		}
+	}
+}
+
+/*
+=================
+Menu_UpdateItemTransition
+
+Per-frame position/size transition. Lerps x,y from transFromRect to transToRect
+over transDuration milliseconds.
+=================
+*/
+void Menu_UpdateItemTransition( menucommon_s *item )
+{
+	float frac;
+	int elapsed;
+
+	if ( !(item->transFlags & TRANSF_ACTIVE) ) return;
+
+	elapsed = uis.realtime - item->transStartTime;
+	if ( elapsed >= item->transDuration ) {
+		item->x = (int)item->transToRect[0];
+		item->y = (int)item->transToRect[1];
+		item->transFlags &= ~TRANSF_ACTIVE;
+		return;
+	}
+
+	frac = (float)elapsed / (float)item->transDuration;
+	item->x = (int)(item->transFromRect[0] + (item->transToRect[0] - item->transFromRect[0]) * frac);
+	item->y = (int)(item->transFromRect[1] + (item->transToRect[1] - item->transFromRect[1]) * frac);
+}
+
+/*
+=================
+Menu_ItemCvarCheck
+
+Evaluates cvar-driven show/hide for a menu item.
+If item->cvarTest is set, checks the cvar value against
+item->enableCvar (semicolon-separated list of matching values).
+Sets/clears QMF_HIDDEN or QMF_GRAYED based on item->cvarFlags.
+=================
+*/
+void Menu_ItemCvarCheck( menucommon_s *item )
+{
+	char	buff[256];
+	const char *p;
+	qboolean match;
+
+	if ( !item->cvarTest || !item->enableCvar ) {
+		return;
+	}
+
+	trap_Cvar_VariableStringBuffer( item->cvarTest, buff, sizeof( buff ) );
+
+	/* check if buff matches any value in enableCvar (semicolon-separated) */
+	match = qfalse;
+	p = item->enableCvar;
+	while ( *p ) {
+		char token[256];
+		int i = 0;
+		while ( *p && *p != ';' && i < (int)sizeof(token) - 1 ) {
+			token[i++] = *p++;
+		}
+		token[i] = '\0';
+		if ( *p == ';' ) p++;
+
+		if ( !Q_stricmp( buff, token ) ) {
+			match = qtrue;
+			break;
+		}
+	}
+
+	/* apply flags */
+	if ( item->cvarFlags & CVF_SHOW ) {
+		if ( match )
+			item->flags &= ~QMF_HIDDEN;
+		else
+			item->flags |= QMF_HIDDEN;
+	}
+	if ( item->cvarFlags & CVF_HIDE ) {
+		if ( match )
+			item->flags |= QMF_HIDDEN;
+		else
+			item->flags &= ~QMF_HIDDEN;
+	}
+	if ( item->cvarFlags & CVF_ENABLE ) {
+		if ( match )
+			item->flags &= ~QMF_GRAYED;
+		else
+			item->flags |= QMF_GRAYED;
+	}
+	if ( item->cvarFlags & CVF_DISABLE ) {
+		if ( match )
+			item->flags |= QMF_GRAYED;
+		else
+			item->flags &= ~QMF_GRAYED;
+	}
+}
+
+/*
+=================
+Menu_GetColorForRange
+
+Looks up a color from the item's colorRanges based on a numeric value.
+Returns qtrue if a matching range was found, qfalse otherwise.
+=================
+*/
+qboolean Menu_GetColorForRange( menucommon_s *item, float value, vec4_t outColor )
+{
+	int i;
+
+	for ( i = 0; i < item->numColorRanges; i++ ) {
+		if ( value >= item->colorRanges[i].low && value <= item->colorRanges[i].high ) {
+			Vector4Copy( item->colorRanges[i].color, outColor );
+			return qtrue;
+		}
+	}
+	return qfalse;
+}

@@ -967,7 +967,6 @@ void UI_Cache_f( void ) {
 	PlayerSettings_Cache();
 	Controls_Cache();
 	Demos_Cache();
-	UI_CinematicsMenu_Cache();
 	Preferences_Cache();
 	ServerInfo_Cache();
 	SpecifyServer_Cache();
@@ -1023,11 +1022,6 @@ qboolean UI_ConsoleCommand( int realTime ) {
 
 	if ( Q_stricmp (cmd, "ui_cache") == 0 ) {
 		UI_Cache_f();
-		return qtrue;
-	}
-
-	if ( Q_stricmp (cmd, "ui_cinematics") == 0 ) {
-		UI_CinematicsMenu_f();
 		return qtrue;
 	}
 
@@ -1269,4 +1263,50 @@ qboolean UI_CursorInRect (int x, int y, int width, int height)
 		return qfalse;
 
 	return qtrue;
+}
+
+/*
+=================
+UI_OpenMenuByName
+
+Opens a menu by its string name using a static registry table.
+Used by the script "open" command.
+=================
+*/
+typedef struct {
+	const char *name;
+	void (*openFunc)(void);
+} menuRegistry_t;
+
+static const menuRegistry_t menuRegistry[] = {
+	{ "main",        UI_MainMenu },
+	{ "ingame",      UI_InGameMenu },
+	{ "setup",       UI_SetupMenu },
+	{ "player",      UI_PlayerSettingsMenu },
+	{ "controls",    UI_ControlsMenu },
+	{ "options",     UI_PreferencesMenu },
+	{ "video",       UI_GraphicsOptionsMenu },
+	{ "sound",       UI_SoundOptionsMenu },
+	{ "addbot",      UI_AddBotsMenu },
+	{ "removebot",   UI_RemoveBotsMenu },
+	{ "team",        UI_TeamMainMenu },
+	{ "mods",        UI_ModsMenu },
+	{ "demos",       UI_DemosMenu },
+	/* confirm menu needs specific args, can't open by name */
+#if FEAT_CALLVOTE_MENU
+	{ "callvote",    UI_CallVoteMenu },
+#endif
+	{ NULL, NULL }
+};
+
+void UI_OpenMenuByName( const char *name )
+{
+	int i;
+	for ( i = 0; menuRegistry[i].name; i++ ) {
+		if ( !Q_stricmp( name, menuRegistry[i].name ) ) {
+			menuRegistry[i].openFunc();
+			return;
+		}
+	}
+	Com_Printf( "UI_OpenMenuByName: unknown menu '%s'\n", name );
 }

@@ -1066,6 +1066,18 @@ static void CG_ServerCommand( void ) {
 			trap_S_StartLocalSound( cgs.media.votePassed, CHAN_ANNOUNCER );
 		}
 #endif
+#if FEAT_STATS_WINDOW
+		{
+			const char *printText = CG_Argv(1);
+			if ( Q_stristr( printText, "Vote passed" ) ) {
+				CG_voteNotification( "Vote passed!" );
+			} else if ( Q_stristr( printText, "Vote failed" ) ) {
+				CG_voteNotification( "Vote failed" );
+			} else if ( Q_stristr( printText, "Vote:" ) ) {
+				CG_voteNotification( printText );
+			}
+		}
+#endif
 		return;
 	}
 
@@ -1104,6 +1116,47 @@ static void CG_ServerCommand( void ) {
 		CG_SHUDEventChat( text );
 		CG_AddToTeamChat( text );
 		CG_Printf( "%s\n", text );
+#if FEAT_STATS_WINDOW
+		{
+			char cleanBuf[MAX_SAY_TEXT];
+			const char *myName;
+			const char *colon;
+			char senderName[MAX_NAME_LENGTH];
+			int nameLen;
+
+			Q_strncpyz( cleanBuf, text, sizeof( cleanBuf ) );
+			Q_CleanStr( cleanBuf );
+
+			/* tchat format after cleaning: "PlayerName: message text" */
+			colon = strstr( cleanBuf, ": " );
+			if ( colon ) {
+				nameLen = (int)( colon - cleanBuf );
+				if ( nameLen >= (int)sizeof( senderName ) ) {
+					nameLen = (int)sizeof( senderName ) - 1;
+				}
+				Q_strncpyz( senderName, cleanBuf, nameLen + 1 );
+
+				/* build a clean copy of our own name for comparison */
+				{
+					char myCleanName[MAX_NAME_LENGTH];
+					myName = cgs.clientinfo[cg.clientNum].name;
+					Q_strncpyz( myCleanName, myName, sizeof( myCleanName ) );
+					Q_CleanStr( myCleanName );
+
+					if ( !Q_stricmp( senderName, myCleanName ) ) {
+						const char *msg = colon + 2; /* skip ": " */
+						if ( Q_stristr( msg, "follow me" ) ||
+							Q_stristr( msg, "get the flag" ) ||
+							Q_stristr( msg, "camp here" ) ||
+							Q_stristr( msg, "patrol" ) ||
+							Q_stristr( msg, "report" ) ) {
+							CG_botOrderConfirmation( NULL, msg );
+						}
+					}
+				}
+			}
+		}
+#endif
 		return;
 	}
 

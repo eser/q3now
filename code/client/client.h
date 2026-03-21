@@ -516,6 +516,14 @@ void Con_Top( void );
 void Con_Bottom( void );
 void Con_Close( void );
 
+// console search
+void Con_SearchOpen( void );
+void Con_SearchClose( void );
+void Con_SearchNext( qboolean forward );
+void Con_SearchChar( int ch );
+qboolean Con_IsSearchActive( void );
+int  Con_SearchLine( void );
+
 void CL_LoadConsoleHistory( void );
 void CL_SaveConsoleHistory( void );
 

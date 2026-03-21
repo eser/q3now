@@ -392,6 +392,45 @@ void G_ParseField( const char *key, const char *value, gentity_t *ent ) {
 
 /*
 ===================
+G_RemapEntity
+
+Replace entity classnames before spawning. Allows programmatic item
+substitution without modifying map files.
+
+  BSP entity lump -> parse -> G_RemapEntity -> G_CallSpawn
+  e.g. "item_health_mega" becomes "holdable_medkit"
+===================
+*/
+typedef struct {
+	const char *from;
+	const char *to;
+} entityRemap_t;
+
+static entityRemap_t s_entityRemaps[] = {
+	{ "item_health_mega", "holdable_medkit" },     /* mega health -> medkit */
+	{ "item_armor_shard", "item_health_small" },   /* armor shard -> 5 health */
+	{ NULL, NULL }
+};
+
+static void G_RemapEntity( gentity_t *ent ) {
+	entityRemap_t *r;
+
+	if ( !ent->classname ) {
+		return;
+	}
+
+	for ( r = s_entityRemaps; r->from; r++ ) {
+		if ( !Q_stricmp( ent->classname, r->from ) ) {
+			G_Printf( "Entity remap: %s -> %s\n", r->from, r->to );
+			ent->classname = (char *)r->to;
+			return;
+		}
+	}
+}
+
+
+/*
+===================
 G_SpawnGEntityFromSpawnVars
 
 Spawn an entity and fill in all of the level fields from
@@ -469,6 +508,9 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 	// move editor origin to pos
 	VectorCopy( ent->s.origin, ent->s.pos.trBase );
 	VectorCopy( ent->s.origin, ent->r.currentOrigin );
+
+	// entity remap: replace items before spawning
+	G_RemapEntity( ent );
 
 	// if we didn't get a classname, don't bother spawning anything
 	if ( !G_CallSpawn( ent ) ) {
@@ -644,4 +686,3 @@ void G_SpawnEntitiesFromString( void ) {
 
 	level.spawning = qfalse;			// any future calls to G_Spawn*() will be errors
 }
-

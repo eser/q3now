@@ -263,6 +263,26 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		glw_state.desktop_height = 480;
 	}
 
+	// For windowed mode, clamp to usable display area so the window
+	// does not extend behind the menu bar, taskbar, or dock
+	if ( !fullscreen && displayID != 0 )
+	{
+		SDL_Rect bounds, usable;
+		if ( SDL_GetDisplayBounds( displayID, &bounds ) && SDL_GetDisplayUsableBounds( displayID, &usable ) )
+		{
+			int displayBottom = bounds.y + bounds.h;
+			int usableBottom = usable.y + usable.h;
+			int effectiveBottom = ( usableBottom < displayBottom ) ? usableBottom : displayBottom;
+			int availW = usable.w;
+			int availH = effectiveBottom - usable.y;
+
+			if ( availW > 0 && availW < glw_state.desktop_width )
+				glw_state.desktop_width = availW;
+			if ( availH > 0 && availH < glw_state.desktop_height )
+				glw_state.desktop_height = availH;
+		}
+	}
+
 	config->isFullscreen = fullscreen;
 	glw_state.isFullscreen = fullscreen;
 
@@ -435,6 +455,26 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		if ( !fullscreen )
 		{
 			SDL_SetWindowPosition( SDL_window, x, y );
+
+			// Resize if the window extends beyond the display
+			{
+				SDL_DisplayID winDisplay = SDL_GetDisplayForWindow( SDL_window );
+				SDL_Rect dBounds;
+				if ( winDisplay != 0 && SDL_GetDisplayBounds( winDisplay, &dBounds ) )
+				{
+					int screenBottom = dBounds.y + dBounds.h;
+					int winY, contentH, borderTop = 0;
+					SDL_GetWindowPosition( SDL_window, NULL, &winY );
+					SDL_GetWindowSize( SDL_window, NULL, &contentH );
+					SDL_GetWindowBordersSize( SDL_window, &borderTop, NULL, NULL, NULL );
+					int overflow = ( winY + borderTop + contentH ) - screenBottom;
+					if ( overflow > 0 && contentH - overflow > 240 )
+					{
+						config->vidHeight = contentH - overflow;
+						SDL_SetWindowSize( SDL_window, config->vidWidth, config->vidHeight );
+					}
+				}
+			}
 		}
 
 		if ( fullscreen )

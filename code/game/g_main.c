@@ -751,6 +751,17 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 		trap_SendServerCommand( -1, "record\n" );
 	}
 #endif
+
+#if FEAT_MAP_ROTATION
+	// map rotation: set nextmap cvar so vstr nextmap / callvote nextmap work
+	{
+		const char *next = G_PeekRotationMap();
+		if ( next ) {
+			trap_Cvar_Set( "nextmap", va( "map %s", next ) );
+			G_Printf( "Map rotation: next map is %s\n", next );
+		}
+	}
+#endif
 }
 
 
@@ -1313,14 +1324,7 @@ void ExitLevel (void) {
 		return;	
 	}
 
-#if FEAT_MAP_ROTATION
-	// map rotation (6D): override nextmap if rotation is configured
-	{
-		const char *rotMap = G_NextRotationMap();
-		if ( rotMap ) {
-			trap_SendConsoleCommand( EXEC_APPEND, va( "map %s\n", rotMap ) );
-		} else {
-#endif
+	// standard Q3 nextmap flow — rotation index is advanced in G_InitGame, not here — nextmap cvar was set by G_PeekRotationMap at init
 	trap_Cvar_VariableStringBuffer( "nextmap", nextmap, sizeof(nextmap) );
 	trap_Cvar_VariableStringBuffer( "d1", d1, sizeof(d1) );
 
@@ -1330,10 +1334,6 @@ void ExitLevel (void) {
 	} else {
 		trap_SendConsoleCommand( EXEC_APPEND, "vstr nextmap\n" );
 	}
-#if FEAT_MAP_ROTATION
-		}
-	}
-#endif
 
 	level.changemap = NULL;
 	level.intermissiontime = 0;
@@ -2060,10 +2060,28 @@ Returns the next map from g_maprotation. Cycles through the space-separated
 list. Mode 0 = sequential, mode 1 = random. (6D)
 ==================
 */
-const char *G_NextRotationMap( void ) {
+/*
+ * Rotation data flow:
+ *
+ *   G_InitGame → G_PeekRotationMap() → sets nextmap cvar + advances index
+ *                                            ↓
+ *   vstr nextmap (ExitLevel / callvote / manual) → loads the next map
+ *                                            ↓
+ *   G_InitGame → G_PeekRotationMap() → sets nextmap to NEXT map + advances
+ */
+
+/*
+==================
+G_PeekRotationMap
+
+Returns the next map name WITHOUT advancing the rotation index.
+Used at map init to set the nextmap cvar.
+==================
+*/
+const char *G_PeekRotationMap( void ) {
 	static char mapname[MAX_QPATH];
+	static char mapBuf[64][MAX_QPATH];
 	char rotation[MAX_INFO_STRING];
-	const char *maps[64];
 	int numMaps, i;
 	char *p;
 	const char *token;
@@ -2073,13 +2091,15 @@ const char *G_NextRotationMap( void ) {
 		return NULL;
 	}
 
-	// tokenize the space-separated map list
+	/* tokenize the space-separated map list, copying each token
+	   into a persistent buffer (COM_Parse uses a static buffer
+	   that gets overwritten on each call) */
 	numMaps = 0;
 	p = rotation;
 	while ( numMaps < 64 ) {
 		token = COM_Parse( (const char **)&p );
 		if ( !token[0] ) break;
-		maps[numMaps] = token;
+		Q_strncpyz( mapBuf[numMaps], token, MAX_QPATH );
 		numMaps++;
 	}
 
@@ -2088,25 +2108,30 @@ const char *G_NextRotationMap( void ) {
 	}
 
 	if ( g_maprotationMode.integer == 1 ) {
-		// random mode
 		i = rand() % numMaps;
 	} else {
-		// sequential mode
-		i = level.rotationIndex % numMaps;
-		level.rotationIndex++;
+		/* g_maprotationIndex holds the CURRENT map's index; +1 gives the NEXT map */
+		int idx = trap_Cvar_VariableIntegerValue( "g_maprotationIndex" );
+		i = ( idx + 1 ) % numMaps;
+		/* advance: this map load moves us to the next position */
+		trap_Cvar_Set( "g_maprotationIndex", va( "%d", i ) );
 	}
 
-	// re-parse to get the actual token (COM_Parse uses static buffer)
-	{
-		int j;
-		p = rotation;
-		for ( j = 0; j <= i; j++ ) {
-			token = COM_Parse( (const char **)&p );
-		}
-	}
-	Q_strncpyz( mapname, token, sizeof( mapname ) );
-
+	Q_strncpyz( mapname, mapBuf[i], sizeof( mapname ) );
 	return mapname;
+}
+
+
+/*
+==================
+G_AdvanceRotation
+
+Advance the rotation index. Called from ExitLevel when the map actually changes.
+==================
+*/
+void G_AdvanceRotation( void ) {
+	int idx = trap_Cvar_VariableIntegerValue( "g_maprotationIndex" );
+	trap_Cvar_Set( "g_maprotationIndex", va( "%d", idx + 1 ) );
 }
 #endif
 

@@ -50,6 +50,8 @@ GAME OPTIONS MENU
 #define ID_DRAWTEAMOVERLAY		135
 #define ID_ALLOWDOWNLOAD			136
 #define ID_BACK					137
+#define ID_AUTORECORD				138
+#define ID_AUTOJOIN					139
 
 #define	NUM_CROSSHAIRS			10
 
@@ -71,6 +73,8 @@ typedef struct {
 	menuradiobutton_s	forcemodel;
 	menulist_s			drawteamoverlay;
 	menuradiobutton_s	allowdownload;
+	menuradiobutton_s	autorecord;
+	menuradiobutton_s	autojoin;
 	menubitmap_s		back;
 
 	qhandle_t			crosshairShader[NUM_CROSSHAIRS];
@@ -98,6 +102,8 @@ static void Preferences_SetMenuItems( void ) {
 	s_preferences.forcemodel.curvalue		= trap_Cvar_VariableValue( "cg_forcemodel" ) != 0;
 	s_preferences.drawteamoverlay.curvalue	= Com_Clamp( 0, 3, trap_Cvar_VariableValue( "cg_drawTeamOverlay" ) );
 	s_preferences.allowdownload.curvalue	= trap_Cvar_VariableValue( "cl_allowDownload" ) != 0;
+	s_preferences.autorecord.curvalue		= trap_Cvar_VariableValue( "cg_autoRecord" ) != 0;
+	s_preferences.autojoin.curvalue			= trap_Cvar_VariableValue( "cg_autoJoin" ) != 0;
 }
 
 
@@ -146,6 +152,14 @@ static void Preferences_Event( void* ptr, int notification ) {
 	case ID_ALLOWDOWNLOAD:
 		trap_Cvar_SetValue( "cl_allowDownload", s_preferences.allowdownload.curvalue );
 		trap_Cvar_SetValue( "sv_allowDownload", s_preferences.allowdownload.curvalue );
+		break;
+
+	case ID_AUTORECORD:
+		trap_Cvar_SetValue( "cg_autoRecord", s_preferences.autorecord.curvalue );
+		break;
+
+	case ID_AUTOJOIN:
+		trap_Cvar_SetValue( "cg_autoJoin", s_preferences.autojoin.curvalue );
 		break;
 
 	case ID_BACK:
@@ -334,6 +348,24 @@ static void Preferences_MenuInit( void ) {
 	s_preferences.allowdownload.generic.x	       = PREFERENCES_X_POS;
 	s_preferences.allowdownload.generic.y	       = y;
 
+	y += BIGCHAR_HEIGHT+2;
+	s_preferences.autorecord.generic.type        = MTYPE_RADIOBUTTON;
+	s_preferences.autorecord.generic.name        = "Auto Record Demo:";
+	s_preferences.autorecord.generic.flags       = QMF_PULSEIFFOCUS|QMF_SMALLFONT;
+	s_preferences.autorecord.generic.callback    = Preferences_Event;
+	s_preferences.autorecord.generic.id          = ID_AUTORECORD;
+	s_preferences.autorecord.generic.x           = PREFERENCES_X_POS;
+	s_preferences.autorecord.generic.y           = y;
+
+	y += BIGCHAR_HEIGHT+2;
+	s_preferences.autojoin.generic.type          = MTYPE_RADIOBUTTON;
+	s_preferences.autojoin.generic.name          = "Auto Join on Connect:";
+	s_preferences.autojoin.generic.flags         = QMF_PULSEIFFOCUS|QMF_SMALLFONT;
+	s_preferences.autojoin.generic.callback      = Preferences_Event;
+	s_preferences.autojoin.generic.id            = ID_AUTOJOIN;
+	s_preferences.autojoin.generic.x             = PREFERENCES_X_POS;
+	s_preferences.autojoin.generic.y             = y;
+
 	s_preferences.back.generic.type	    = MTYPE_BITMAP;
 	s_preferences.back.generic.name     = ART_BACK0;
 	s_preferences.back.generic.flags    = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS;
@@ -359,6 +391,8 @@ static void Preferences_MenuInit( void ) {
 	Menu_AddItem( &s_preferences.menu, &s_preferences.forcemodel );
 	Menu_AddItem( &s_preferences.menu, &s_preferences.drawteamoverlay );
 	Menu_AddItem( &s_preferences.menu, &s_preferences.allowdownload );
+	Menu_AddItem( &s_preferences.menu, &s_preferences.autorecord );
+	Menu_AddItem( &s_preferences.menu, &s_preferences.autojoin );
 
 	Menu_AddItem( &s_preferences.menu, &s_preferences.back );
 

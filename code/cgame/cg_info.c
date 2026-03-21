@@ -150,6 +150,12 @@ void CG_DrawInformation( void ) {
 	qhandle_t	levelshot;
 	qhandle_t	detail;
 	char		buf[1024];
+	screenPlacement_e	oldH, oldV;
+
+	/* stretch loading screen to fill the entire viewport on widescreen */
+	oldH = CG_GetScreenHorizontalPlacement();
+	oldV = CG_GetScreenVerticalPlacement();
+	CG_SetScreenPlacement( PLACE_STRETCH, PLACE_STRETCH );
 
 	info = CG_ConfigString( CS_SERVERINFO );
 	sysInfo = CG_ConfigString( CS_SYSTEMINFO );
@@ -291,5 +297,8 @@ void CG_DrawInformation( void ) {
 				UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, colorWhite );
 		}
 	}
+
+	/* restore previous screen placement */
+	CG_SetScreenPlacement( oldH, oldV );
 }
 

@@ -32,6 +32,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "q_shared.h"
 #include "qcommon.h"
 #include "unzip.h"
+#include "../game/q_feats.h"
+
+#if FEAT_SW3Z
+#include "sw3z.h"
+#endif
 
 /*
 =============================================================================
@@ -219,58 +224,10 @@ static const unsigned pak_checksums[] = {
 // NOW defined in build files
 //#define PRE_RELEASE_TADEMO
 
-#define USE_PK3_CACHE
-#define USE_PK3_CACHE_FILE
-
-#define USE_HANDLE_CACHE
-#define MAX_CACHED_HANDLES 384
+#include "files_pack.h"
 
 #define MAX_ZPATH			256
 #define MAX_FILEHASH_SIZE	4096
-
-typedef struct fileInPack_s {
-	char					*name;		// name of the file
-	unsigned long			pos;		// file info position in zip
-	unsigned long			size;		// file size
-	struct	fileInPack_s*	next;		// next file in the hash
-} fileInPack_t;
-
-typedef struct pack_s {
-	char			*pakFilename;				// c:\quake3\baseq3\pak0.pk3
-	char			*pakBasename;				// pak0
-	const char		*pakGamename;				// baseq3
-	unzFile			handle;						// handle to zip file
-	int				checksum;					// regular checksum
-	int				pure_checksum;				// checksum for pure
-	int				numfiles;					// number of files in pk3
-	int				referenced;					// referenced file flags
-	qboolean		exclude;					// found in \fs_excludeReference list
-	int				hashSize;					// hash table size (power of 2)
-	fileInPack_t*	*hashTable;					// hash table
-	fileInPack_t*	buildBuffer;				// buffer with the filenames etc.
-	int				index;
-
-	int				handleUsed;
-
-#ifdef USE_HANDLE_CACHE
-	struct pack_s	*next_h;						// double-linked list of unreferenced paks with open file handles
-	struct pack_s	*prev_h;
-#endif
-
-	// caching subsystem
-#ifdef USE_PK3_CACHE
-	unsigned int	namehash;
-	fileOffset_t	size;
-	fileTime_t		mtime;
-	fileTime_t		ctime;
-	qboolean		touched;
-	struct pack_s	*next;
-	struct pack_s	*prev;
-	int				checksumFeed;
-	int				*headerLongs;
-	int				numHeaderLongs;
-#endif
-} pack_t;
 
 typedef struct {
 	char		*path;		// c:\quake3
@@ -347,6 +304,11 @@ typedef struct {
 	handleOwner_t	owner;
 	int			pakIndex;
 	pack_t		*pak;
+#if FEAT_SW3Z
+	byte		*sw3zData;		// decompressed file buffer (NULL if not SW3Z)
+	int			sw3zSize;		// total decompressed size
+	int			sw3zPos;		// current read position
+#endif
 } fileHandleData_t;
 
 static fileHandleData_t	fsh[MAX_FILE_HANDLES];
@@ -414,6 +376,8 @@ static qboolean FS_PakIsPure( const pack_t *pack ) {
 #endif
 	return qtrue;
 }
+
+/* FS_SW3ZPakIsPure removed — FS_PakIsPure now handles both types */
 
 
 /*
@@ -869,6 +833,11 @@ static void FS_InitHandle( fileHandleData_t *fd ) {
 	fd->pak = NULL;
 	fd->pakIndex = -1;
 	fs_lastPakIndex = -1;
+#if FEAT_SW3Z
+	fd->sw3zData = NULL;
+	fd->sw3zSize = 0;
+	fd->sw3zPos = 0;
+#endif
 }
 
 
@@ -1118,7 +1087,7 @@ static void FS_RemoveFromHandleList( pack_t *pak )
 static void FS_AddToHandleList( pack_t *pak )
 {
 #ifdef _DEBUG
-	if ( !pak->handle ) {
+	if ( !PACK_ZIP_HANDLE(pak) ) {
 		Com_Error( ERR_DROP, "%s(): invalid pak handle", __func__ );
 	}
 	if ( pak->next_h || pak->prev_h ) {
@@ -1128,12 +1097,12 @@ static void FS_AddToHandleList( pack_t *pak )
 	while ( hpaksCount >= MAX_CACHED_HANDLES ) {
 		pack_t *pk = hhead->prev_h; // tail item
 #ifdef _DEBUG
-		if ( pk->handle == NULL || pk->handleUsed != 0 ) {
+		if ( PACK_ZIP_HANDLE(pk) == NULL || pk->handleUsed != 0 ) {
 			Com_Error( ERR_DROP, "%s(): invalid pak handle", __func__ );
 		}
 #endif
-		unzClose( pk->handle );
-		pk->handle = NULL;
+		unzClose( PACK_ZIP_HANDLE(pk) );
+		PACK_ZIP_HANDLE(pk) = NULL;
 		FS_RemoveFromHandleList( pk );
 	} 
 
@@ -1172,6 +1141,14 @@ void FS_FCloseFile( fileHandle_t f ) {
 
 	fd = &fsh[ f ];
 
+#if FEAT_SW3Z
+	if ( fd->sw3zData ) {
+		Z_Free( fd->sw3zData );
+		fd->sw3zData = NULL;
+	}
+	/* fall through to Com_Memset cleanup at bottom */
+#endif
+
 	if ( fd->zipFile && fd->pak ) {
 		unzCloseCurrentFile( fd->handleFiles.file.z );
 		if ( fd->handleFiles.unique ) {
@@ -1186,9 +1163,9 @@ void FS_FCloseFile( fileHandle_t f ) {
 		}
 #else
 		if ( !fs_locked->integer ) {
-			if ( fd->pak->handle && !fd->pak->handleUsed ) {
-				unzClose( fd->pak->handle );
-				fd->pak->handle = NULL;
+			if ( PACK_ZIP_HANDLE(fd->pak) && !fd->pak->handleUsed ) {
+				unzClose( PACK_ZIP_HANDLE(fd->pak) );
+				PACK_ZIP_HANDLE(fd->pak) = NULL;
 			}
 		}
 #endif
@@ -1467,6 +1444,82 @@ void FS_RestorePure( void )
 }
 
 
+#if FEAT_SW3Z
+/*
+===========
+FS_OpenFileInSW3Z
+
+Decompress an SW3Z entry into a memory-backed file handle.
+The entire file is decompressed upfront into sw3zData.
+FS_Read then does a simple memcpy from that buffer.
+===========
+*/
+static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pakFile ) {
+	fileHandleData_t *f;
+	int entryIdx = (int)pakFile->pos;
+	int size = (int)pakFile->size;
+
+	{
+		const char *compName;
+		byte comp = pak->entries[entryIdx].compression;
+		switch ( comp ) {
+			case 0: compName = "none"; break;
+			case 1: compName = "lz4"; break;
+			case 2: compName = "zstd"; break;
+			default: compName = "other"; break;
+		}
+		Com_DPrintf( "SW3Z_Open: '%s' entry=%d size=%d compression=%s\n",
+			pakFile->name, entryIdx, size, compName );
+	}
+
+	if ( size == 0 ) {
+		/* empty file / directory entry */
+		*file = FS_HandleForFile();
+		f = &fsh[ *file ];
+		FS_InitHandle( f );
+		f->zipFile = qfalse;
+		f->handleFiles.file.o = NULL;
+		f->sw3zData = NULL;
+		f->sw3zSize = 0;
+		f->sw3zPos = 0;
+		Q_strncpyz( f->name, pakFile->name, sizeof( f->name ) );
+		return 0;
+	}
+
+	/* decompress entire file into memory */
+	*file = FS_HandleForFile();
+	f = &fsh[ *file ];
+	FS_InitHandle( f );
+
+	f->sw3zData = (byte *)Z_Malloc( size );
+	if ( SW3Z_ReadEntry( pak, entryIdx, f->sw3zData, size ) != size ) {
+		Z_Free( f->sw3zData );
+		f->sw3zData = NULL;
+		*file = FS_INVALID_HANDLE;
+		return -1;
+	}
+
+	f->sw3zSize = size;
+	f->sw3zPos = 0;
+	f->zipFile = qfalse;
+	f->handleFiles.file.o = NULL;
+	Q_strncpyz( f->name, pakFile->name, sizeof( f->name ) );
+
+
+	/* reference tracking */
+	if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( pakFile->name ) ) {
+		pak->referenced |= FS_GENERAL_REF;
+	}
+
+	if ( fs_debug->integer ) {
+		Com_Printf( "FS_FOpenFileRead: %s (found in '%s' [sw3z])\n",
+			pakFile->name, pak->pakFilename );
+	}
+
+	return size;
+}
+#endif
+
 static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakFile, qboolean uniqueFILE ) {
 	fileHandleData_t *f;
 	unz_s *zfi;
@@ -1486,9 +1539,9 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 		pak->referenced |= FS_UI_REF;
 	}
 
-	if ( !pak->handle ) {
-		pak->handle = unzOpen( pak->pakFilename );
-		if ( !pak->handle ) {
+	if ( !PACK_ZIP_HANDLE(pak) ) {
+		PACK_ZIP_HANDLE(pak) = unzOpen( pak->pakFilename );
+		if ( !PACK_ZIP_HANDLE(pak) ) {
 			Com_Printf( S_COLOR_RED "Error opening %s@%s\n", pak->pakBasename, pakFile->name );
 			*file = FS_INVALID_HANDLE;
 			return -1;
@@ -1497,14 +1550,14 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 
 	if ( uniqueFILE ) {
 		// open a new file on the pakfile
-		temp = unzReOpen( pak->pakFilename, pak->handle );
+		temp = unzReOpen( pak->pakFilename, PACK_ZIP_HANDLE(pak) );
 		if ( temp == NULL ) {
 			Com_Printf( S_COLOR_RED "Couldn't reopen %s", pak->pakFilename );
 			*file = FS_INVALID_HANDLE;
 			return -1;
 		}
 	} else {
-		temp = pak->handle;
+		temp = PACK_ZIP_HANDLE(pak);
 	}
 
 	*file = FS_HandleForFile();
@@ -1520,9 +1573,9 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 	// in case the file was new
 	temp = zfi->file;
 	// set the file position in the zip file (also sets the current file info)
-	unzSetCurrentFileInfoPosition( pak->handle, pakFile->pos );
+	unzSetCurrentFileInfoPosition( PACK_ZIP_HANDLE(pak), pakFile->pos );
 	// copy the file info into the unzip structure
-	Com_Memcpy( zfi, pak->handle, sizeof( *zfi ) );
+	Com_Memcpy( zfi, PACK_ZIP_HANDLE(pak), sizeof( *zfi ) );
 	// we copy this back into the structure
 	zfi->file = temp;
 	// open the file in the zip
@@ -1620,7 +1673,8 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 					}
 					pakFile = pakFile->next;
 				} while ( pakFile != NULL );
-			} else if ( search->dir && search->policy != DIR_DENY ) {
+			}
+			else if ( search->dir && search->policy != DIR_DENY ) {
 				dir = search->dir;
 				netpath = FS_BuildOSPath( dir->path, dir->gamedir, filename );
 				temp = Sys_FOpen( netpath, "rb" );
@@ -1658,11 +1712,16 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 				// case and separator insensitive comparisons
 				if ( !FS_FilenameCompare( pakFile->name, filename ) ) {
 					// found it!
+#if FEAT_SW3Z
+					if ( pak->type == PACK_SW3Z )
+						return FS_OpenFileInSW3Z( file, pak, pakFile );
+#endif
 					return FS_OpenFileInPak( file, pak, pakFile, uniqueFILE );
 				}
 				pakFile = pakFile->next;
 			} while ( pakFile != NULL );
-		} else if ( search->dir && search->policy != DIR_DENY ) {
+		}
+		else if ( search->dir && search->policy != DIR_DENY ) {
 			// check a file in the directory tree
 			dir = search->dir;
 
@@ -1715,11 +1774,11 @@ void FS_TouchFileInPak( const char *filename ) {
 	fullHash = FS_HashFileName( filename, 0U );
 
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
-		
+
 		// is the element a pak file?
 		if ( !search->pack )
 			continue;
-		
+
 		if ( search->pack->exclude ) // skip paks in \fs_excludeReference list
 			continue;
 
@@ -1817,6 +1876,20 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 
 	buf = (byte *)buffer;
 	fs_readCount += len;
+
+#if FEAT_SW3Z
+	if ( fsh[f].sw3zData ) {
+		int avail;
+		if ( len <= 0 )
+			return 0;
+		avail = fsh[f].sw3zSize - fsh[f].sw3zPos;
+		if ( len > avail )
+			len = avail;
+		Com_Memcpy( buffer, fsh[f].sw3zData + fsh[f].sw3zPos, len );
+		fsh[f].sw3zPos += len;
+		return len;
+	}
+#endif
 
 	if ( !fsh[f].zipFile ) {
 		remaining = len;
@@ -1927,6 +2000,24 @@ int FS_Seek( fileHandle_t f, long offset, fsOrigin_t origin ) {
 		Com_Error( ERR_FATAL, "Filesystem call made without initialization" );
 		return -1;
 	}
+
+#if FEAT_SW3Z
+	if ( fsh[f].sw3zData ) {
+		int newPos;
+		switch ( origin ) {
+		case FS_SEEK_SET: newPos = (int)offset; break;
+		case FS_SEEK_CUR: newPos = fsh[f].sw3zPos + (int)offset; break;
+		case FS_SEEK_END: newPos = fsh[f].sw3zSize + (int)offset; break;
+		default:
+			Com_Error( ERR_FATAL, "Bad origin in FS_Seek" );
+			return -1;
+		}
+		if ( newPos < 0 ) newPos = 0;
+		if ( newPos > fsh[f].sw3zSize ) newPos = fsh[f].sw3zSize;
+		fsh[f].sw3zPos = newPos;
+		return 0;
+	}
+#endif
 
 	if ( fsh[f].zipFile == qtrue ) {
 		//FIXME: this is really, really crappy
@@ -2721,11 +2812,12 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 	pack = Z_TagMalloc( size, TAG_PACK );
 	Com_Memset( pack, 0, size );
 
+	pack->type = PACK_PK3;
 	pack->mtime = pk.mtime;
 	pack->ctime = pk.ctime;
 	pack->size = pk.size;
 
-//	pack->handle = uf;
+//	PACK_ZIP_HANDLE(pack) = uf;
 	pack->numfiles = pk.numFiles;
 	pack->numHeaderLongs = pk.numHeaderLongs;
 
@@ -3042,7 +3134,8 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 	pack = Z_TagMalloc( size, TAG_PACK );
 	Com_Memset( pack, 0, size );
 
-	pack->handle = uf;
+	pack->type = PACK_PK3;
+	PACK_ZIP_HANDLE(pack) = uf;
 	pack->numfiles = filecount;
 	pack->hashSize = hashSize;
 	pack->hashTable = (fileInPack_t **)( pack + 1 );
@@ -3125,8 +3218,8 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 #else
 	if ( fs_locked->integer == 0 )
 	{
-		unzClose( pack->handle );
-		pack->handle = NULL;
+		unzClose( PACK_ZIP_HANDLE(pack) );
+		PACK_ZIP_HANDLE(pack) = NULL;
 	}
 #endif
 
@@ -3150,14 +3243,14 @@ Frees a pak structure and releases all associated resources
 */
 static void FS_FreePak( pack_t *pak )
 {
-	if ( pak->handle )
+	if ( PACK_ZIP_HANDLE(pak) )
 	{
 #ifdef USE_HANDLE_CACHE
 		if ( pak->next_h )
 			FS_RemoveFromHandleList( pak );
 #endif
-		unzClose( pak->handle );
-		pak->handle = NULL;
+		unzClose( PACK_ZIP_HANDLE(pak) );
+		PACK_ZIP_HANDLE(pak) = NULL;
 	}
 
 	Z_Free( pak );
@@ -3441,7 +3534,8 @@ static char **FS_ListFilteredFiles( const char *path, const char *extension, con
 					nfiles = FS_AddFileToList( name + temp, list, nfiles );
 				}
 			}
-		} else if ( search->dir && ( search->policy != DIR_DENY || (flags & FS_MATCH_EXTERN) != 0 ) ) { // scan for files in the filesystem
+		}
+		else if ( search->dir && ( search->policy != DIR_DENY || (flags & FS_MATCH_EXTERN) != 0 ) ) { // scan for files in the filesystem
 			const char *netpath;
 			int		numSysFiles;
 			char	**sysFiles;
@@ -3973,7 +4067,12 @@ static void FS_Path_f( void ) {
 	Com_Printf( "Current search path:\n" );
 	for ( s = fs_searchpaths; s; s = s->next ) {
 		if ( s->pack ) {
+#if FEAT_SW3Z
+			Com_Printf( "%s (%i files)%s\n", s->pack->pakFilename, s->pack->numfiles,
+				s->pack->type == PACK_SW3Z ? " [sw3z]" : "" );
+#else
 			Com_Printf( "%s (%i files)\n", s->pack->pakFilename, s->pack->numfiles );
+#endif
 			if ( fs_numServerPaks ) {
 				if ( !FS_PakIsPure( s->pack ) ) {
 					Com_Printf( S_COLOR_YELLOW "    not on the pure list\n" );
@@ -3981,7 +4080,8 @@ static void FS_Path_f( void ) {
 					Com_Printf( "    on the pure list\n" );
 				}
 			}
-		} else {
+		}
+		else {
 			Com_Printf( "%s%c%s\n", s->dir->path, PATH_SEP, s->dir->gamedir );
 		}
 	}
@@ -4082,7 +4182,8 @@ static void FS_Which_f( void ) {
 				}
 				pakFile = pakFile->next;
 			} while(pakFile != NULL);
-		} else if ( search->dir ) {
+		}
+		else if ( search->dir ) {
 			dir = search->dir;
 
 			netpath = FS_BuildOSPath( dir->path, dir->gamedir, filename );
@@ -4278,6 +4379,44 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 	// done
 	Sys_FreeFileList( pakdirs );
 	Sys_FreeFileList( pakfiles );
+
+#if FEAT_SW3Z
+	{
+		int numsw3z;
+		char **sw3zfiles;
+
+		sw3zfiles = Sys_ListFiles( curpath, ".sw3z", NULL, &numsw3z, 0 );
+		if ( numsw3z >= 2 )
+			FS_SortFileList( sw3zfiles, numsw3z - 1 );
+
+		for ( pakfilesi = 0; pakfilesi < numsw3z; pakfilesi++ ) {
+			len = strlen( sw3zfiles[pakfilesi] );
+			if ( !FS_IsExt( sw3zfiles[pakfilesi], ".sw3z", len ) )
+				continue;
+
+			pakfile = FS_BuildOSPath( path, dir, sw3zfiles[pakfilesi] );
+			pak = SW3Z_LoadArchive( pakfile );
+			if ( !pak )
+				continue;
+
+			pak->pakGamename = gamedir;
+			pak->index = fs_packCount;
+			pak->referenced = 0;
+			pak->exclude = qfalse;
+
+			fs_packFiles += pak->numfiles;
+			fs_packCount++;
+
+			search = Z_TagMalloc( sizeof( *search ), TAG_SEARCH_PACK );
+			Com_Memset( search, 0, sizeof( *search ) );
+			search->pack = pak;
+
+			search->next = fs_searchpaths;
+			fs_searchpaths = search;
+		}
+		Sys_FreeFileList( sw3zfiles );
+	}
+#endif
 }
 
 
@@ -4484,14 +4623,21 @@ void FS_Shutdown( qboolean closemfp )
 
 		if ( p->pack )
 		{
+#if FEAT_SW3Z
+			if ( p->pack->type == PACK_SW3Z ) {
+				SW3Z_CloseArchive( p->pack );
+			} else
+#endif
+			{
 #ifdef USE_PK3_CACHE
 #ifdef USE_HANDLE_CACHE
-			if ( p->pack->next_h )
-				FS_RemoveFromHandleList( p->pack );
+				if ( p->pack->next_h )
+					FS_RemoveFromHandleList( p->pack );
 #endif
 #else
-			FS_FreePak( p->pack );
+				FS_FreePak( p->pack );
 #endif
+			}
 			p->pack = NULL;
 		}
 
@@ -4515,7 +4661,7 @@ void FS_Shutdown( qboolean closemfp )
 	Cmd_RemoveCommand( "fs_restart" );
 }
 
-
+#if !FEAT_FS_PRECEDENCE
 /*
 ================
 FS_ReorderSearchPaths
@@ -4556,6 +4702,7 @@ static void FS_ReorderSearchPaths( void ) {
 
 	Z_Free( list );
 }
+#endif
 
 
 /*
@@ -4677,6 +4824,181 @@ qboolean FS_IsPureChecksum( int sum )
 }
 
 
+#if FEAT_FS_PRECEDENCE
+/*
+================
+FS_DeduplicateArchives
+
+Treats all pk3/sw3z archives across directories as one virtual set.
+For each unique basename (e.g., "pak0"), keeps only the highest-priority
+version and removes duplicates from the search path.
+
+Priority rules:
+  1. Directory order: first seen in search path wins (HOMEDIR > DATADIR > BASEDIR)
+  2. Within same dir: sw3z > pk3 (sw3z is prepended after pk3, so appears first)
+  3. After dedup, re-sort archive entries by basename descending
+     so "pax02" overrides "pak0"
+
+  Before:                           After:
+  ┌─────────────────────────┐      ┌─────────────────────────┐
+  │ HOMEDIR/pak0.pk3        │      │ pax02.pk3 (DATADIR)     │ ← sorted desc
+  │ HOMEDIR/pak1.pk3        │      │ pak8.pk3 (HOMEDIR)      │
+  │ ...                     │      │ pak7.pk3 (HOMEDIR)      │
+  │ DATADIR/pak0.pk3  [dup] │  →   │ ...                     │
+  │ DATADIR/pax02.pk3       │      │ pak1.pk3 (HOMEDIR)      │
+  │ BASEDIR/pak0.pk3  [dup] │      │ pak0.pk3 (HOMEDIR)      │
+  └─────────────────────────┘      └─────────────────────────┘
+================
+*/
+#define MAX_DEDUP_ARCHIVES 256
+
+static void FS_DeduplicateArchives( void )
+{
+	searchpath_t	*s, **pp;
+	const char		*basenames[MAX_DEDUP_ARCHIVES];
+	int				numSeen = 0;
+	int				removed = 0;
+	searchpath_t	*archives[MAX_DEDUP_ARCHIVES];
+	int				numArchives = 0;
+	searchpath_t	*dirs = NULL, *dirsTail = NULL;
+	int				i, j;
+
+	/* ── Phase 1: Dedup — first-seen basename wins ── */
+	pp = &fs_searchpaths;
+	while ( *pp ) {
+		const char *basename = NULL;
+
+		s = *pp;
+
+		if ( s->pack )
+			basename = s->pack->pakBasename;
+
+		if ( basename ) {
+			/* check if this basename was already seen */
+			qboolean duplicate = qfalse;
+			for ( i = 0; i < numSeen; i++ ) {
+				if ( Q_stricmp( basenames[i], basename ) == 0 ) {
+					duplicate = qtrue;
+					break;
+				}
+			}
+
+			if ( duplicate ) {
+				/* remove from search path — lower priority duplicate */
+				*pp = s->next;
+
+				/* close file handles and free pack resources */
+				if ( s->pack ) {
+#if FEAT_SW3Z
+					if ( s->pack->type == PACK_SW3Z ) {
+						SW3Z_CloseArchive( s->pack );
+					} else
+#endif
+					{
+						unzClose( PACK_ZIP_HANDLE(s->pack) );
+					}
+					fs_packFiles -= s->pack->numfiles;
+					fs_packCount--;
+					Z_Free( s->pack );
+				}
+				Z_Free( s );
+				removed++;
+				continue; /* don't advance pp — next element is now at *pp */
+			}
+
+			/* first occurrence — record it */
+			if ( numSeen < MAX_DEDUP_ARCHIVES ) {
+				basenames[numSeen++] = basename;
+			}
+		}
+
+		pp = &(*pp)->next;
+	}
+
+	/* ── Phase 2: Separate into 3 groups ──
+	 * archives:    pack/sw3z entries (will be sorted)
+	 * dynDirs:     pk3dir entries (DIR_ALLOW/DIR_DENY — higher priority than static)
+	 * staticDirs:  base game directories (DIR_STATIC — lowest priority)
+	 */
+	{
+		searchpath_t *dynDirsTail = NULL, *staticDirsTail = NULL;
+		numArchives = 0;
+		dirs = NULL;       /* reuse as dynDirs head */
+		dirsTail = NULL;   /* reuse as staticDirs head */
+
+		while ( fs_searchpaths ) {
+			s = fs_searchpaths;
+			fs_searchpaths = s->next;
+			s->next = NULL;
+
+			if ( s->pack ) {
+				/* archive entry */
+				if ( numArchives < MAX_DEDUP_ARCHIVES )
+					archives[numArchives++] = s;
+			} else if ( s->policy != DIR_STATIC ) {
+				/* pk3dir or dynamic directory — before static dirs */
+				if ( !dirs ) {
+					dirs = dynDirsTail = s;
+				} else {
+					dynDirsTail->next = s;
+					dynDirsTail = s;
+				}
+			} else {
+				/* DIR_STATIC — lowest priority */
+				if ( !dirsTail ) {
+					dirsTail = staticDirsTail = s;
+				} else {
+					staticDirsTail->next = s;
+					staticDirsTail = s;
+				}
+			}
+		}
+
+		/* chain dynDirs → staticDirs for Phase 4 */
+		if ( dirs && dirsTail ) {
+			dynDirsTail->next = dirsTail;
+		} else if ( !dirs ) {
+			dirs = dirsTail;
+		}
+	}
+
+	/* ── Phase 3: Sort archives by basename descending ── */
+	/* simple insertion sort — MAX_DEDUP_ARCHIVES is small */
+	for ( i = 1; i < numArchives; i++ ) {
+		searchpath_t *key = archives[i];
+		const char *keyName = key->pack ? key->pack->pakBasename : "";
+		j = i - 1;
+		while ( j >= 0 ) {
+			const char *jName = archives[j]->pack ? archives[j]->pack->pakBasename : "";
+			if ( Q_stricmp( jName, keyName ) >= 0 )
+				break; /* jName >= keyName → already in descending order */
+			archives[j + 1] = archives[j];
+			j--;
+		}
+		archives[j + 1] = key;
+	}
+
+	/* ── Phase 4: Rebuild search path — archives first (highest priority), then dirs ── */
+	fs_searchpaths = NULL;
+
+	/* append directories (they go to the tail = lowest priority for archive lookups) */
+	if ( dirs ) {
+		fs_searchpaths = dirs;
+	}
+
+	/* prepend sorted archives (first in array = highest priority = prepended last) */
+	for ( i = numArchives - 1; i >= 0; i-- ) {
+		archives[i]->next = fs_searchpaths;
+		fs_searchpaths = archives[i];
+	}
+
+	if ( removed > 0 ) {
+		Com_Printf( "FS_Precedence: removed %d duplicate archives, %d unique remain\n", removed, numArchives );
+	}
+}
+#endif /* FEAT_FS_PRECEDENCE */
+
+
 /*
 ================
 FS_Startup
@@ -4776,6 +5098,17 @@ static void FS_Startup( void ) {
 			FS_AddGameDirectory( fs_apppath->string, basegames[i] );
 		}
 	}
+	// Also search Contents/Resources/ for game data (.sw3z archives).
+	// macOS bundle conventions: code in Contents/MacOS/, data in Contents/Resources/.
+	// codesign requires this separation — non-code files in MacOS/ break bundle signing.
+	if ( fs_apppath->string[0] ) {
+		char resourcesPath[ MAX_OSPATH ];
+		Com_sprintf( resourcesPath, sizeof( resourcesPath ),
+			"%s/../Resources", fs_apppath->string );
+		for ( i = 0; i < basegame_cnt; i++ ) {
+			FS_AddGameDirectory( resourcesPath, basegames[i] );
+		}
+	}
 #endif
 
 	// fs_homepath is somewhat particular to *nix systems, only add if relevant
@@ -4800,8 +5133,14 @@ static void FS_Startup( void ) {
 		}
 	}
 
+#if FEAT_FS_PRECEDENCE
+	// FS_DeduplicateArchives handles separation + dedup + descending sort
+	// (replaces FS_ReorderSearchPaths when precedence is enabled)
+	FS_DeduplicateArchives();
+#else
 	// reorder search paths to minimize further changes
 	FS_ReorderSearchPaths();
+#endif
 
 	// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=506
 	// reorder the pure pk3 files according to server order
@@ -4999,23 +5338,22 @@ const char *FS_LoadedPakChecksums( qboolean *overflowed ) {
 
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
 		// is the element a pak file?
-		if ( !search->pack )
-			continue;
+		if ( search->pack ) {
+			if ( search->pack->exclude )
+				continue;
 
-		if ( search->pack->exclude )
-			continue;
+			if ( info[0] )
+				len = sprintf( buf, " %i", search->pack->checksum );
+			else
+				len = sprintf( buf, "%i", search->pack->checksum );
 
-		if ( info[0] )
-			len = sprintf( buf, " %i", search->pack->checksum );
-		else
-			len = sprintf( buf, "%i", search->pack->checksum );
+			if ( s + len > max ) {
+				*overflowed = qtrue;
+				break;
+			}
 
-		if ( s + len > max ) {
-			*overflowed = qtrue;
-			break;
+			s = Q_stradd( s, buf );
 		}
-
-		s = Q_stradd( s, buf );
 	}
 
 	return info;
@@ -5043,23 +5381,22 @@ const char *FS_LoadedPakNames( void ) {
 
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
 		// is the element a pak file?
-		if ( !search->pack )
-			continue;
+		if ( search->pack ) {
+			if ( search->pack->exclude )
+				continue;
 
-		if ( search->pack->exclude )
-			continue;
+			len = (int)strlen( search->pack->pakBasename );
+			if ( info[0] )
+				len++;
 
-		len = (int)strlen( search->pack->pakBasename );
-		if ( info[0] )
-			len++;
+			if ( s + len > max )
+				break;
 
-		if ( s + len > max )
-			break;
+			if ( info[0] )
+				s = Q_stradd( s, " " );
 
-		if ( info[0] )
-			s = Q_stradd( s, " " );
-
-		s = Q_stradd( s, search->pack->pakBasename );
+			s = Q_stradd( s, search->pack->pakBasename );
+		}
 	}
 
 	return info;
@@ -5635,8 +5972,12 @@ int FS_VM_ReadFile( void *buffer, int len, fileHandle_t f, handleOwner_t owner )
 	if ( f <= 0 || f >= MAX_FILE_HANDLES )
 		return 0;
 
-	if ( fsh[f].owner != owner || !fsh[f].handleFiles.file.v )
-		return 0; 
+	if ( fsh[f].owner != owner )
+		return 0;
+
+	/* sw3z files have no OS file handle — data lives in sw3zData buffer */
+	if ( !fsh[f].handleFiles.file.v && !fsh[f].sw3zData )
+		return 0;
 
 	return FS_Read( buffer, len, f );
 }
@@ -5660,7 +6001,10 @@ int FS_VM_SeekFile( fileHandle_t f, long offset, fsOrigin_t origin, handleOwner_
 	if ( f <= 0 || f >= MAX_FILE_HANDLES )
 		return -1;
 
-	if ( fsh[f].owner != owner || !fsh[f].handleFiles.file.v )
+	if ( fsh[f].owner != owner )
+		return -1;
+
+	if ( !fsh[f].handleFiles.file.v && !fsh[f].sw3zData )
 		return -1;
 
 	r = FS_Seek( f, offset, origin );

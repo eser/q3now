@@ -213,7 +213,7 @@ typedef struct {
 	menuradiobutton_s	showfull;
 	menuradiobutton_s	showempty;
 
-	menulist_s			list;
+	menutable_s			serverTable;
 	menubitmap_s		mappic;
 	menubitmap_s		arrows;
 	menubitmap_s		up;
@@ -372,7 +372,7 @@ ArenaServers_Go
 static void ArenaServers_Go( void ) {
 	servernode_t*	servernode;
 
-	servernode = g_arenaservers.table[g_arenaservers.list.curvalue].servernode;
+	servernode = g_arenaservers.table[g_arenaservers.serverTable.selectedRow].servernode;
 	if( servernode ) {
 		trap_Cmd_ExecuteText( EXEC_APPEND, va( "connect %s\n", servernode->adrstr ) );
 	}
@@ -388,11 +388,11 @@ static void ArenaServers_UpdatePicture( void ) {
 	static char		picname[64];
 	servernode_t*	servernodeptr;
 
-	if( !g_arenaservers.list.numitems ) {
+	if( !g_arenaservers.serverTable.numRows ) {
 		g_arenaservers.mappic.generic.name = NULL;
 	}
 	else {
-		servernodeptr = g_arenaservers.table[g_arenaservers.list.curvalue].servernode;
+		servernodeptr = g_arenaservers.table[g_arenaservers.serverTable.selectedRow].servernode;
 		Com_sprintf( picname, sizeof(picname), "levelshots/%s.tga", servernodeptr->mapname );
 		g_arenaservers.mappic.generic.name = picname;
 	
@@ -431,7 +431,7 @@ static void ArenaServers_UpdateMenu( void ) {
 			g_arenaservers.sortkey.generic.flags	&= ~QMF_GRAYED;
 			g_arenaservers.showempty.generic.flags	&= ~QMF_GRAYED;
 			g_arenaservers.showfull.generic.flags	&= ~QMF_GRAYED;
-			g_arenaservers.list.generic.flags		&= ~QMF_GRAYED;
+			g_arenaservers.serverTable.generic.flags		&= ~QMF_GRAYED;
 			g_arenaservers.refresh.generic.flags	&= ~QMF_GRAYED;
 			g_arenaservers.go.generic.flags			&= ~QMF_GRAYED;
 			g_arenaservers.punkbuster.generic.flags &= ~QMF_GRAYED;
@@ -457,7 +457,7 @@ static void ArenaServers_UpdateMenu( void ) {
 			g_arenaservers.sortkey.generic.flags	|= QMF_GRAYED;
 			g_arenaservers.showempty.generic.flags	|= QMF_GRAYED;
 			g_arenaservers.showfull.generic.flags	|= QMF_GRAYED;
-			g_arenaservers.list.generic.flags		|= QMF_GRAYED;
+			g_arenaservers.serverTable.generic.flags		|= QMF_GRAYED;
 			g_arenaservers.refresh.generic.flags	|= QMF_GRAYED;
 			g_arenaservers.go.generic.flags			|= QMF_GRAYED;
 			g_arenaservers.punkbuster.generic.flags |= QMF_GRAYED;
@@ -484,16 +484,16 @@ static void ArenaServers_UpdateMenu( void ) {
 			g_arenaservers.sortkey.generic.flags	&= ~QMF_GRAYED;
 			g_arenaservers.showempty.generic.flags	&= ~QMF_GRAYED;
 			g_arenaservers.showfull.generic.flags	&= ~QMF_GRAYED;
-			g_arenaservers.list.generic.flags		|= QMF_GRAYED;
+			g_arenaservers.serverTable.generic.flags		|= QMF_GRAYED;
 			g_arenaservers.refresh.generic.flags	&= ~QMF_GRAYED;
 			g_arenaservers.go.generic.flags			|= QMF_GRAYED;
 			g_arenaservers.punkbuster.generic.flags &= ~QMF_GRAYED;
 		}
 
 		// zero out list box
-		g_arenaservers.list.numitems = 0;
-		g_arenaservers.list.curvalue = 0;
-		g_arenaservers.list.top      = 0;
+		g_arenaservers.serverTable.numRows = 0;
+		g_arenaservers.serverTable.selectedRow = 0;
+		g_arenaservers.serverTable.topRow      = 0;
 
 		// update picture
 		ArenaServers_UpdatePicture();
@@ -569,9 +569,9 @@ static void ArenaServers_UpdateMenu( void ) {
 		j++;
 	}
 
-	g_arenaservers.list.numitems = j;
-	g_arenaservers.list.curvalue = 0;
-	g_arenaservers.list.top      = 0;
+	g_arenaservers.serverTable.numRows = j;
+	g_arenaservers.serverTable.selectedRow = 0;
+	g_arenaservers.serverTable.topRow      = 0;
 
 	// update picture
 	ArenaServers_UpdatePicture();
@@ -589,14 +589,14 @@ static void ArenaServers_Remove( void )
 	servernode_t*	servernodeptr;
 	table_t*		tableptr;
 
-	if (!g_arenaservers.list.numitems)
+	if (!g_arenaservers.serverTable.numRows)
 		return;
 
 	// remove selected item from display list
 	// items are in scattered order due to sort and cull
 	// perform delete on list box contents, resync all lists
 
-	tableptr      = &g_arenaservers.table[g_arenaservers.list.curvalue];
+	tableptr      = &g_arenaservers.table[g_arenaservers.serverTable.selectedRow];
 	servernodeptr = tableptr->servernode;
 
 	// find address in master list
@@ -1243,11 +1243,11 @@ static void ArenaServers_Event( void* ptr, int event ) {
 		break;
 
 	case ID_SCROLL_UP:
-		ScrollList_Key( &g_arenaservers.list, K_UPARROW );
+		MenuTable_Key( &g_arenaservers.serverTable, K_UPARROW );
 		break;
 
 	case ID_SCROLL_DOWN:
-		ScrollList_Key( &g_arenaservers.list, K_DOWNARROW );
+		MenuTable_Key( &g_arenaservers.serverTable, K_DOWNARROW );
 		break;
 
 	case ID_BACK:
@@ -1317,7 +1317,7 @@ static sfxHandle_t ArenaServers_MenuKey( int key ) {
 	}
 
 	if( ( key == K_DEL || key == K_KP_DEL ) && ( g_servertype == UIAS_FAVORITES ) &&
-		( Menu_ItemAtCursor( &g_arenaservers.menu) == &g_arenaservers.list ) ) {
+		( Menu_ItemAtCursor( &g_arenaservers.menu) == &g_arenaservers.serverTable ) ) {
 		ArenaServers_Remove();
 		ArenaServers_UpdateMenu();
 		return menu_move_sound;
@@ -1330,6 +1330,87 @@ static sfxHandle_t ArenaServers_MenuKey( int key ) {
 
 
 	return Menu_DefaultKey( &g_arenaservers.menu, key );
+}
+
+
+/*
+=================
+ServerTable_GetColumnText
+
+Table widget callback — return text for the given row and column.
+=================
+*/
+static const char *ServerTable_GetColumnText( int row, int column )
+{
+	static char playersBuf[16];
+	servernode_t *s;
+
+	if ( row < 0 || row >= g_arenaservers.serverTable.numRows )
+		return "";
+
+	s = g_arenaservers.table[row].servernode;
+	if ( !s )
+		return "";
+
+	switch ( column ) {
+	case 0: return s->hostname;
+	case 1: return s->mapname;
+	case 2:
+		Com_sprintf( playersBuf, sizeof(playersBuf), "%d/%d", s->numclients, s->maxclients );
+		return playersBuf;
+	case 3: return s->gamename;
+	case 4:
+		{
+			const char *pingColor;
+			if ( s->pingtime < 80 )        pingColor = S_COLOR_GREEN;
+			else if ( s->pingtime < 200 )  pingColor = S_COLOR_YELLOW;
+			else                           pingColor = S_COLOR_RED;
+			Com_sprintf( playersBuf, sizeof(playersBuf), "%s%d", pingColor, s->pingtime );
+		}
+		return playersBuf;
+	default: return "";
+	}
+}
+
+
+/*
+=================
+ServerTable_OnSelect
+
+Table widget callback — update the map preview when a server is selected.
+=================
+*/
+static void ServerTable_OnSelect( int row )
+{
+	ArenaServers_UpdatePicture();
+}
+
+
+/*
+=================
+ServerTable_OnSort
+
+Table widget callback — re-sort the server list when a column header is clicked.
+=================
+*/
+static void ServerTable_OnSort( int column, qboolean ascending )
+{
+	// map table column to sort key
+	switch ( column ) {
+	case 0: g_sortkey = SORT_HOST;    break;
+	case 1: g_sortkey = SORT_MAP;     break;
+	case 2: g_sortkey = SORT_CLIENTS; break;
+	case 3: g_sortkey = SORT_GAME;    break;
+	case 4: g_sortkey = SORT_PING;    break;
+	default: return;
+	}
+
+	// sync the sortkey spincontrol
+	g_arenaservers.sortkey.curvalue = g_sortkey;
+
+	// re-sort and update display
+	qsort( g_arenaservers.serverlist, *g_arenaservers.numservers, sizeof(servernode_t), ArenaServers_Compare );
+	ArenaServers_UpdateMenu();
 }
 
 
@@ -1410,18 +1491,36 @@ static void ArenaServers_MenuInit( void ) {
 	g_arenaservers.showempty.generic.y			= y;
 
 	y += 3 * SMALLCHAR_HEIGHT;
-	g_arenaservers.list.generic.type			= MTYPE_SCROLLLIST;
-	g_arenaservers.list.generic.flags			= QMF_HIGHLIGHT_IF_FOCUS;
-	g_arenaservers.list.generic.id				= ID_LIST;
-	g_arenaservers.list.generic.callback		= ArenaServers_Event;
-	g_arenaservers.list.generic.x				= 72;
-	g_arenaservers.list.generic.y				= y;
-	g_arenaservers.list.width					= MAX_LISTBOXWIDTH;
-	g_arenaservers.list.height					= 11;
-	g_arenaservers.list.itemnames				= (const char **)g_arenaservers.items;
-	for( i = 0; i < MAX_LISTBOXITEMS; i++ ) {
-		g_arenaservers.items[i] = g_arenaservers.table[i].buff;
-	}
+	g_arenaservers.serverTable.generic.type			= MTYPE_TABLE;
+	g_arenaservers.serverTable.generic.flags			= QMF_HIGHLIGHT_IF_FOCUS;
+	g_arenaservers.serverTable.generic.id			= ID_LIST;
+	g_arenaservers.serverTable.generic.callback		= ArenaServers_Event;
+	g_arenaservers.serverTable.generic.x			= 32;
+	g_arenaservers.serverTable.generic.y			= y;
+	g_arenaservers.serverTable.numColumns			= 5;
+	g_arenaservers.serverTable.columns[0].header	= "Server Name";
+	g_arenaservers.serverTable.columns[0].width		= 24;
+	g_arenaservers.serverTable.columns[0].align		= UI_LEFT;
+	g_arenaservers.serverTable.columns[1].header	= "Map";
+	g_arenaservers.serverTable.columns[1].width		= 12;
+	g_arenaservers.serverTable.columns[1].align		= UI_LEFT;
+	g_arenaservers.serverTable.columns[2].header	= "Players";
+	g_arenaservers.serverTable.columns[2].width		= 7;
+	g_arenaservers.serverTable.columns[2].align		= UI_RIGHT;
+	g_arenaservers.serverTable.columns[3].header	= "Type";
+	g_arenaservers.serverTable.columns[3].width		= 8;
+	g_arenaservers.serverTable.columns[3].align		= UI_LEFT;
+	g_arenaservers.serverTable.columns[4].header	= "Ping";
+	g_arenaservers.serverTable.columns[4].width		= 5;
+	g_arenaservers.serverTable.columns[4].align		= UI_RIGHT;
+	g_arenaservers.serverTable.sortColumn			= SORT_PING;
+	g_arenaservers.serverTable.sortAscending		= qtrue;
+	g_arenaservers.serverTable.visibleRows			= 12;
+	g_arenaservers.serverTable.selectedRow			= 0;
+	g_arenaservers.serverTable.getColumnText		= ServerTable_GetColumnText;
+	g_arenaservers.serverTable.onSelect				= ServerTable_OnSelect;
+	g_arenaservers.serverTable.onSort				= ServerTable_OnSort;
+	g_arenaservers.serverTable.emptyText			= "No servers found";
 
 	g_arenaservers.mappic.generic.type			= MTYPE_BITMAP;
 	g_arenaservers.mappic.generic.flags			= QMF_LEFT_JUSTIFY|QMF_INACTIVE;
@@ -1574,7 +1673,7 @@ static void ArenaServers_MenuInit( void ) {
 	Menu_AddItem( &g_arenaservers.menu, (void*) &g_arenaservers.arrows );
 	Menu_AddItem( &g_arenaservers.menu, (void*) &g_arenaservers.up );
 	Menu_AddItem( &g_arenaservers.menu, (void*) &g_arenaservers.down );
-	Menu_AddItem( &g_arenaservers.menu, (void*) &g_arenaservers.list );
+	Menu_AddItem( &g_arenaservers.menu, (void*) &g_arenaservers.serverTable );
 
 	Menu_AddItem( &g_arenaservers.menu, (void*) &g_arenaservers.remove );
 	Menu_AddItem( &g_arenaservers.menu, (void*) &g_arenaservers.back );

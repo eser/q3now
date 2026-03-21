@@ -383,6 +383,47 @@ Handles history and console scrollback
 ====================
 */
 static void Console_Key( int key ) {
+	// ctrl-F opens search
+	if ( tolower(key) == 'f' && keys[K_CTRL].down ) {
+		if ( Con_IsSearchActive() )
+			Con_SearchClose();
+		else
+			Con_SearchOpen();
+		return;
+	}
+
+	// when search is active, intercept keys
+	if ( Con_IsSearchActive() ) {
+		if ( key == K_ESCAPE ) {
+			Con_SearchClose();
+			return;
+		}
+		if ( key == K_ENTER || key == K_KP_ENTER ) {
+			// Enter = next match (same as F3)
+			Con_SearchNext( qtrue );
+			return;
+		}
+		if ( key == K_F3 ) {
+			Con_SearchNext( keys[K_SHIFT].down ? qfalse : qtrue );
+			return;
+		}
+		if ( key == K_BACKSPACE ) {
+			Con_SearchChar( '\b' );
+			return;
+		}
+		// ignore most special keys while searching
+		if ( key == K_PGUP || key == K_MWHEELUP ) {
+			Con_SearchNext( qfalse );
+			return;
+		}
+		if ( key == K_PGDN || key == K_MWHEELDOWN ) {
+			Con_SearchNext( qtrue );
+			return;
+		}
+		// printable chars handled in CL_CharEvent
+		return;
+	}
+
 	// ctrl-L clears screen
 	if ( key == 'l' && keys[K_CTRL].down ) {
 		Cbuf_AddText( "clear\n" );
@@ -595,6 +636,11 @@ static void CL_KeyDownEvent( int key, unsigned time )
 		}
 #endif
 		if ( Key_GetCatcher() & KEYCATCH_CONSOLE ) {
+			if ( Con_IsSearchActive() ) {
+				// escape closes search first, not console
+				Con_SearchClose();
+				return;
+			}
 			// escape always closes console
 			Con_ToggleConsole_f();
 			Key_ClearStates();
@@ -747,6 +793,10 @@ void CL_CharEvent( int key )
 	// distribute the key down event to the appropriate handler
 	if ( Key_GetCatcher( ) & KEYCATCH_CONSOLE )
 	{
+		if ( Con_IsSearchActive() ) {
+			Con_SearchChar( key );
+			return;
+		}
 		Field_CharEvent( &g_consoleField, key );
 	}
 	else if ( Key_GetCatcher( ) & KEYCATCH_UI )
@@ -759,6 +809,10 @@ void CL_CharEvent( int key )
 	}
 	else if ( cls.state == CA_DISCONNECTED )
 	{
+		if ( Con_IsSearchActive() ) {
+			Con_SearchChar( key );
+			return;
+		}
 		Field_CharEvent( &g_consoleField, key );
 	}
 }

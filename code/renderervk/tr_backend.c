@@ -659,6 +659,12 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 #endif
 				oldEntityNum = -1; // force matrix setup
 			}
+#ifdef USE_VULKAN
+			// depth fade: copy depth buffer at opaque->transparent boundary
+			if ( oldShaderSort < INSERT_POINT && shader->sort >= INSERT_POINT ) {
+				vk_depth_fade_copy();
+			}
+#endif
 			oldShaderSort = shader->sort;
 #endif
 			RB_BeginSurface( shader, fogNum );

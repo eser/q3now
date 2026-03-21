@@ -41,6 +41,10 @@ layout(set = 3, binding = 0) uniform sampler2D texture2;
 #ifdef USE_FOG
 layout(set = 4, binding = 0) uniform sampler2D fog_texture;
 #endif
+#ifdef USE_DEPTH_FADE
+layout(set = 5, binding = 0) uniform sampler2D depth_texture;
+layout (constant_id = 11) const float depth_fade_scale = 2.0;
+#endif
 
 #if defined (USE_CLX_IDENT)
 // fixed identity (1.0) color for all textures
@@ -507,6 +511,23 @@ void main() {
 			discard;
 		}
 	}
+
+#ifdef USE_DEPTH_FADE
+	{
+		// soft particle depth fade: compare fragment depth with scene depth
+		vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(depth_texture, 0));
+		float sceneDepth = texture(depth_texture, screenUV).r;
+		float fragDepth = gl_FragCoord.z;
+#ifdef USE_REVERSED_DEPTH
+		float depthDiff = fragDepth - sceneDepth;
+#else
+		float depthDiff = sceneDepth - fragDepth;
+#endif
+		float fadeFactor = smoothstep(0.0, depth_fade_scale * 0.0005, depthDiff);
+		base.a *= fadeFactor;
+		base.rgb *= fadeFactor;
+	}
+#endif
 
 #ifdef USE_DF
 	if ( base.a < depth_fragment )
