@@ -229,6 +229,10 @@ vmCvar_t	cg_followKiller;
 #endif
 #if FEAT_AUTO_DEMO
 vmCvar_t	cg_autoRecord;
+vmCvar_t	cg_autoJoin;
+#endif
+#if FEAT_STATS_WINDOW
+vmCvar_t	cg_statsWindow;
 #endif
 #if FEAT_IMPACT_SPARKS
 vmCvar_t	cg_impactSparks;
@@ -385,7 +389,7 @@ static cvarTable_t cvarTable[] = {
 
     { &cg_switchToEmpty, "cg_switchToEmpty", "0", CVAR_ARCHIVE },
 
-    { &cg_stretch, "cg_stretch", "0", CVAR_ARCHIVE },
+    { &cg_stretch, "cg_stretch", "1", CVAR_ARCHIVE },
     { &cg_fovAspectAdjust, "cg_fovAspectAdjust", "1", CVAR_ARCHIVE },
     { &cg_viewbob, "cg_viewbob", "1", CVAR_ARCHIVE },
     { &cg_viewkick, "cg_viewkick", "1", CVAR_ARCHIVE },
@@ -398,6 +402,10 @@ static cvarTable_t cvarTable[] = {
 #endif
 #if FEAT_AUTO_DEMO
 	{ &cg_autoRecord, "cg_autoRecord", "0", CVAR_ARCHIVE },
+	{ &cg_autoJoin, "cg_autoJoin", "1", CVAR_ARCHIVE },
+#endif
+#if FEAT_STATS_WINDOW
+	{ &cg_statsWindow, "cg_statsWindow", "0", CVAR_ARCHIVE },
 #endif
 #if FEAT_IMPACT_SPARKS
 	{ &cg_impactSparks, "cg_impactSparks", "1", CVAR_ARCHIVE },
@@ -1978,6 +1986,10 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	CG_RegisterCvars();
 
 	CG_InitConsoleCommands();
+
+#if FEAT_STATS_WINDOW
+	CG_windowInit();
+#endif
 
 	cg.weaponSelect = WP_MACHINEGUN;
 

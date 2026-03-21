@@ -18,6 +18,10 @@ OPTION(USE_RENDERER_DLOPEN "" ON)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
+
+# LZ4 decoder (for SW3Z archive reader)
+list(APPEND QCOMMON_SRCS code/libs/lz4/lz4.c code/libs/lz4/lz4frame.c code/libs/lz4/xxhash.c code/libs/lz4/lz4hc.c)
+
 # exclude platform-dependent QVM bytecode compilers
 list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alxp].*.c")
 # add platform-dependent QVM bytecode compilers
@@ -35,8 +39,13 @@ IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
 	ENDIF()
 	list(APPEND QCOMMON_SRCS code/qcommon/vm_x86.c)
 ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES aarch64|arm64)
-	SET(BINEXT .aarch64)
-	SET(RENDEXT _aarch64)
+	IF(APPLE)
+		SET(BINEXT .arm64)
+		SET(RENDEXT _arm64)
+	ELSE()
+		SET(BINEXT .aarch64)
+		SET(RENDEXT _aarch64)
+	ENDIF()
 	list(APPEND QCOMMON_SRCS code/qcommon/vm_aarch64.c)
 ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES arm*)
 	SET(BINEXT .arm)
@@ -71,6 +80,10 @@ ADD_LIBRARY(qcommon OBJECT ${QCOMMON_SRCS} ${SERVER_SRCS})
 # dedicated server
 ADD_LIBRARY(qcommon_ded OBJECT ${QCOMMON_SRCS} ${SERVER_SRCS})
 TARGET_COMPILE_DEFINITIONS(qcommon_ded PUBLIC DEDICATED)
+
+# LZ4 include path (for SW3Z archive reader)
+TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE code/libs/lz4)
+TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE code/libs/lz4)
 
 IF(NO_VM_COMPILED)
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE NO_VM_COMPILED)

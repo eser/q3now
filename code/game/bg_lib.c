@@ -2095,9 +2095,11 @@ int sscanf( const char *buffer, const char *fmt, ... ) {
 		case 'd':
 		case 'u':
 			*(va_arg (ap, int *)) = _atoi( &buffer );
+			count++;
 			break;
 		case 'f':
 			*(va_arg (ap, float *)) = _atof( &buffer );
+			count++;
 			break;
 		case 's':
 			{
@@ -2107,6 +2109,7 @@ int sscanf( const char *buffer, const char *fmt, ... ) {
 			while (*buffer && !isspace (*buffer) && len-- > 0 )
 				*s++ = *buffer++;
 			*s++ = '\0';
+			count++;
 			break;
 			}
 		}

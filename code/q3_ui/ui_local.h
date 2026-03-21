@@ -125,6 +125,7 @@ extern vmCvar_t	ui_ioq3;
 #define MTYPE_SCROLLLIST		8
 #define MTYPE_PTEXT				9
 #define MTYPE_BTEXT				10
+#define MTYPE_TABLE				11
 
 #define QMF_BLINK				((unsigned int) 0x00000001)
 #define QMF_SMALLFONT			((unsigned int) 0x00000002)
@@ -169,6 +170,20 @@ typedef struct _tag_menuframework
 	qboolean	showlogo;
 } menuframework_s;
 
+// color range definition — value-to-color mapping for dynamic UI elements
+#define MAX_COLOR_RANGES 4
+typedef struct {
+	vec4_t	color;
+	float	low;
+	float	high;
+} colorRangeDef_t;
+
+// cvar-driven visibility flags (bitfield for menucommon_s.cvarFlags)
+#define CVF_SHOW	0x01	// show item when cvar matches
+#define CVF_HIDE	0x02	// hide item when cvar matches
+#define CVF_ENABLE	0x04	// enable item when cvar matches
+#define CVF_DISABLE	0x08	// disable item when cvar matches
+
 typedef struct
 {
 	int type;
@@ -186,6 +201,42 @@ typedef struct
 	void (*callback)( void *self, int event );
 	void (*statusbar)( void *self );
 	void (*ownerdraw)( void *self );
+
+	// cvar-driven show/hide (from ui/)
+	const char		*cvarTest;		// cvar name to check
+	const char		*enableCvar;	// semicolon-separated values to match
+	int				cvarFlags;		// CVF_SHOW, CVF_HIDE, CVF_ENABLE, CVF_DISABLE
+
+	// color ranges (from ui/)
+	colorRangeDef_t	colorRanges[MAX_COLOR_RANGES];
+	int				numColorRanges;
+
+	// script handlers (from ui/)
+	const char		*onFocus;		// script to run when item gains focus
+	const char		*onDefocus;		// script to run when item loses focus
+	const char		*onActivate;	// script to run when item is activated
+
+	// runtime colors (modifiable by scripts at runtime)
+	vec4_t			foreColor;		// text color override
+	vec4_t			backColor;		// background color override
+#define COLORF_FORE		0x01
+#define COLORF_BACK		0x02
+	unsigned		colorFlags;		// which runtime colors are active
+
+	// fade animation state
+#define FADEF_IN		0x01
+#define FADEF_OUT		0x02
+	int				fadeFlags;		// FADEF_IN, FADEF_OUT
+	int				fadeNextTime;	// uis.realtime threshold for next alpha step
+	float			fadeAlpha;		// current alpha (0.0-1.0), defaults to 1.0
+
+	// transition animation state
+#define TRANSF_ACTIVE	0x01
+	int				transFlags;		// TRANSF_ACTIVE
+	int				transStartTime;	// uis.realtime when transition began
+	int				transDuration;	// total duration in ms
+	float			transFromRect[4]; // starting x,y,w,h
+	float			transToRect[4];   // target x,y,w,h
 } menucommon_s;
 
 typedef struct {
@@ -200,6 +251,11 @@ typedef struct
 {
 	menucommon_s	generic;
 	mfield_t		field;
+
+	// debounce: auto-fire callback after typing stops for debounceMs
+	int				debounceMs;			// 0 = disabled, else delay in ms
+	int				debounceChangeTime;	// uis.realtime when field last changed
+	char			debouncePrevText[64]; // previous text for change detection
 } menufield_s;
 
 typedef struct 
@@ -228,6 +284,12 @@ typedef struct
 	int height;
 	int	columns;
 	int	separation;
+
+	// feeder system (from ui/) — if feederID != 0, uses callbacks instead of itemnames
+	int feederID;
+	int (*feederCount)( int feederID );
+	const char *(*feederItemText)( int feederID, int index, int column, qhandle_t *handle );
+	void (*feederSelection)( int feederID, int index );
 } menulist_s;
 
 typedef struct
@@ -261,6 +323,39 @@ typedef struct
 	float*			color;
 } menutext_s;
 
+// multi-column sortable table widget
+#define MAX_TABLE_COLUMNS	8
+
+typedef struct
+{
+	menucommon_s	generic;
+
+	int				numColumns;
+	struct {
+		const char	*header;		// column header text
+		int			width;			// width in chars
+		int			align;			// UI_LEFT, UI_RIGHT, UI_CENTER
+	} columns[MAX_TABLE_COLUMNS];
+
+	int				sortColumn;		// which column is sorted (-1 = none)
+	qboolean		sortAscending;
+
+	int				numRows;		// total data rows
+	int				topRow;			// scroll offset (first visible row)
+	int				selectedRow;	// currently selected row (-1 = none)
+	int				visibleRows;	// how many rows fit on screen
+
+	int				rowHeight;		// row height in pixels (0 = SMALLCHAR_HEIGHT+2)
+	int				headerHeight;	// header height in pixels (0 = SMALLCHAR_HEIGHT+4)
+
+	const char		*emptyText;		// shown centered when numRows == 0
+
+	// data callbacks — table is stateless, data comes from these
+	const char		*(*getColumnText)(int row, int column);
+	void			(*onSelect)(int row);
+	void			(*onSort)(int column, qboolean ascending);
+} menutable_s;
+
 extern void			Menu_Cache( void );
 extern void			Menu_Focus( menucommon_s *m );
 extern void			Menu_AddItem( menuframework_s *menu, void *item );
@@ -275,6 +370,25 @@ extern void			Bitmap_Init( menubitmap_s *b );
 extern void			Bitmap_Draw( menubitmap_s *b );
 extern void			ScrollList_Draw( menulist_s *l );
 extern sfxHandle_t	ScrollList_Key( menulist_s *l, int key );
+extern void			MenuTable_Init( menutable_s *t );
+extern void			MenuTable_Draw( menutable_s *t );
+extern sfxHandle_t	MenuTable_Key( menutable_s *t, int key );
+
+// cvar-driven show/hide (ui_qmenu.c)
+void Menu_ItemCvarCheck( menucommon_s *item );
+
+// color range lookup (ui_qmenu.c)
+qboolean Menu_GetColorForRange( menucommon_s *item, float value, vec4_t outColor );
+
+// fade and transition animation (ui_qmenu.c)
+void Menu_UpdateItemFade( menucommon_s *item );
+void Menu_UpdateItemTransition( menucommon_s *item );
+
+// script system (ui_script.c)
+void UI_RunScript( menucommon_s *item, const char *script );
+
+// menu registry (ui_atoms.c)
+void UI_OpenMenuByName( const char *name );
 extern sfxHandle_t	menu_in_sound;
 extern sfxHandle_t	menu_move_sound;
 extern sfxHandle_t	menu_out_sound;
@@ -322,11 +436,6 @@ extern void UI_RegisterCvars( void );
 extern void UI_UpdateCvars( void );
 
 //
-// ui_credits.c
-//
-extern void UI_CreditMenu( void );
-
-//
 // ui_ingame.c
 //
 extern void InGame_Cache( void );
@@ -348,6 +457,7 @@ typedef void (*dynamicEventHandler)( int id );
 extern void DynamicMenu_MenuInit( qboolean fullscreen, qboolean wraparound );
 extern qboolean DynamicMenu_AddItem( const char *label, int id, dynamicCreateHandler create, dynamicEventHandler event );
 extern menuframework_s *DynamicMenu_Ref( void );
+extern void DynamicMenu_SetBanner( const char *text );
 #endif
 
 //
@@ -386,13 +496,6 @@ extern void Controls_Cache( void );
 //
 extern void UI_DemosMenu( void );
 extern void Demos_Cache( void );
-
-//
-// ui_cinematics.c
-//
-extern void UI_CinematicsMenu( void );
-extern void UI_CinematicsMenu_f( void );
-extern void UI_CinematicsMenu_Cache( void );
 
 //
 // ui_mods.c
@@ -444,6 +547,29 @@ extern void SpecifyServer_Cache( void );
 
 extern void UI_ArenaServersMenu( void );
 extern void ArenaServers_Cache( void );
+
+//
+// ui_mapcache.c
+//
+#define MAPNAME_LEN      64
+
+typedef struct mapCacheEntry_s {
+	char        mapname[MAPNAME_LEN];
+	char        longname[MAPNAME_LEN];
+	char        bots[256];			// space-separated recommended bot names from .arena
+	int         fraglimit;			// recommended fraglimit from .arena (0 = unset)
+	int         gametypeBits;
+	qboolean    hasArena;
+	qboolean    hasAAS;
+	qhandle_t   levelshot;
+} mapCacheEntry_t;
+
+void MapCache_Init( void );
+void MapCache_Filter( const char *text, int gametype, qboolean arenaOnly );
+int MapCache_GetCount( void );
+const mapCacheEntry_t *MapCache_GetEntry( int filteredIndex );
+qhandle_t MapCache_GetLevelshot( int filteredIndex );
+const mapCacheEntry_t *MapCache_FindByName( const char *mapname );
 
 //
 // ui_startserver.c
@@ -680,6 +806,8 @@ void			trap_UpdateScreen( void );
 int				trap_CM_LerpTag( orientation_t *tag, clipHandle_t mod, int startFrame, int endFrame, float frac, const char *tagName );
 void			trap_S_StartLocalSound( sfxHandle_t sfx, int channelNum );
 sfxHandle_t	trap_S_RegisterSound( const char *sample, qboolean compressed );
+void			trap_S_StartBackgroundTrack( const char *intro, const char *loop );
+void			trap_S_StopBackgroundTrack( void );
 void			trap_Key_KeynumToStringBuf( int keynum, char *buf, int buflen );
 void			trap_Key_GetBindingBuf( int keynum, char *buf, int buflen );
 void			trap_Key_SetBinding( int keynum, const char *binding );

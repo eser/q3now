@@ -901,6 +901,16 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 		trap_SendConsoleCommand( "stoprecord\n" );
 		cg.playerRecord = qfalse;
 	}
+
+	// auto-join: if disabled, move to spectator on first frame
+	if ( !cg.autoJoinChecked ) {
+		cg.autoJoinChecked = qtrue;
+		if ( !cg_autoJoin.integer
+			 && cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR
+			 && cg.snap->ps.pm_type != PM_INTERMISSION ) {
+			trap_SendConsoleCommand( "team spectator\n" );
+		}
+	}
 #endif
 
 	// decide on third person view

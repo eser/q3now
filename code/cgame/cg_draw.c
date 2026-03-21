@@ -2744,6 +2744,11 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 			CG_DrawCenterString();
 		}
 	}
+
+#if FEAT_STATS_WINDOW
+	/* floating window overlays (stats, votes, bot orders) — drawn last, on top of everything */
+	CG_windowDraw();
+#endif
 }
 
 

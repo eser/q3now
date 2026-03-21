@@ -1,0 +1,99 @@
+:root {
+  --bg-primary: #121218;
+  --bg-secondary: #1a1a24;
+  --bg-card: #22222e;
+  --bg-card-hover: #2a2a38;
+  --text-primary: #e8e8f0;
+  --text-secondary: #8888a0;
+  --text-muted: #555568;
+  --accent: #c84030;
+  --accent-hover: #e04838;
+  --accent-glow: rgba(200, 64, 48, 0.3);
+  --success: #40a848;
+  --border: #333345;
+  --radius: 8px;
+  --transition: 200ms ease;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+input,
+textarea,
+select,
+.selectable {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+a:hover {
+  color: var(--text-primary);
+}
+
+/* Select wrapper for custom chevron indicator.
+   Shares visual language with NumberInput: 32px right zone, 1px left border. */
+.select-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+}
+.select-wrap::after {
+  content: "▾";
+  position: absolute;
+  right: 0;
+  top: -1px;
+  bottom: 0;
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 20px;
+  pointer-events: none;
+  border-left: 1px solid var(--border);
+}
+.select-wrap select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 100%;
+  padding-right: 36px !important;
+  cursor: pointer;
+}
+
+/* Hide native number input spinners globally */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}

@@ -42,7 +42,7 @@ static void CG_SHUDUpdateVisflags(superHUDConfigElement_t* element, const superh
 
 qboolean CG_SHUDLoadConfigPrivate(const char* filename)
 {
-	static char fileContent[8192];
+	static char fileContent[32768];
 	fileHandle_t fileHandle;
 	int rc;
 	qboolean filePrepared;

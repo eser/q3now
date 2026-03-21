@@ -379,6 +379,21 @@ void MenuField_Draw( menufield_s *f )
 	}
 
 	MField_Draw( &f->field, x + w, y, style, color );
+
+	/* debounce: detect text changes and fire callback after delay */
+	if ( f->debounceMs > 0 ) {
+		if ( Q_stricmp( f->field.buffer, f->debouncePrevText ) != 0 ) {
+			Q_strncpyz( f->debouncePrevText, f->field.buffer, sizeof(f->debouncePrevText) );
+			f->debounceChangeTime = uis.realtime;
+		}
+		if ( f->debounceChangeTime > 0 &&
+		     uis.realtime - f->debounceChangeTime >= f->debounceMs ) {
+			f->debounceChangeTime = 0;
+			if ( f->generic.callback ) {
+				f->generic.callback( f, QM_ACTIVATED );
+			}
+		}
+	}
 }
 
 /*

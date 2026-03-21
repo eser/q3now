@@ -62,7 +62,7 @@ typedef struct {
 	menubitmap_s	framel;
 	menubitmap_s	framer;
 
-	menulist_s		list;
+	menutable_s		table;
 
 	menubitmap_s	arrows;
 	menubitmap_s	left;
@@ -72,11 +72,37 @@ typedef struct {
 
 	int				numDemos;
 	char			names[NAMEBUFSIZE];
-	
+
 	char			*demolist[MAX_DEMOS];
 } demos_t;
 
 static demos_t	s_demos;
+
+
+/*
+===============
+DemoTable_GetColumnText
+===============
+*/
+static const char *DemoTable_GetColumnText( int row, int column )
+{
+	if ( row < 0 || row >= s_demos.numDemos )
+		return "";
+	if ( column == 0 )
+		return s_demos.demolist[row];
+	return "";
+}
+
+
+/*
+===============
+DemoTable_OnSelect
+===============
+*/
+static void DemoTable_OnSelect( int row )
+{
+	/* nothing to do */
+}
 
 
 /*
@@ -93,7 +119,7 @@ static void Demos_MenuEvent( void *ptr, int event ) {
 	case ID_GO:
 		UI_ForceMenuOff ();
 		trap_Cmd_ExecuteText( EXEC_APPEND, va( "demo %s\n",
-								s_demos.list.itemnames[s_demos.list.curvalue]) );
+								s_demos.demolist[s_demos.table.selectedRow]) );
 		break;
 
 	case ID_BACK:
@@ -101,11 +127,11 @@ static void Demos_MenuEvent( void *ptr, int event ) {
 		break;
 
 	case ID_LEFT:
-		ScrollList_Key( &s_demos.list, K_LEFTARROW );
+		MenuTable_Key( &s_demos.table, K_UPARROW );
 		break;
 
 	case ID_RIGHT:
-		ScrollList_Key( &s_demos.list, K_RIGHTARROW );
+		MenuTable_Key( &s_demos.table, K_DOWNARROW );
 		break;
 	}
 }
@@ -202,16 +228,21 @@ static void Demos_MenuInit( void ) {
 	s_demos.go.height				= 64;
 	s_demos.go.focuspic				= ART_GO1;
 
-	s_demos.list.generic.type		= MTYPE_SCROLLLIST;
-	s_demos.list.generic.flags		= QMF_PULSEIFFOCUS;
-	s_demos.list.generic.callback	= Demos_MenuEvent;
-	s_demos.list.generic.id			= ID_LIST;
-	s_demos.list.generic.x			= 118;
-	s_demos.list.generic.y			= 130;
-	s_demos.list.width				= 16;
-	s_demos.list.height				= 14;
-	s_demos.list.itemnames			= (const char **)s_demos.demolist;
-	s_demos.list.columns			= 3;
+	s_demos.table.generic.type			= MTYPE_TABLE;
+	s_demos.table.generic.flags			= QMF_PULSEIFFOCUS;
+	s_demos.table.generic.callback		= Demos_MenuEvent;
+	s_demos.table.generic.id			= ID_LIST;
+	s_demos.table.generic.x			= 118;
+	s_demos.table.generic.y			= 130;
+	s_demos.table.numColumns			= 1;
+	s_demos.table.columns[0].header		= "Demo Name";
+	s_demos.table.columns[0].width		= 40;
+	s_demos.table.columns[0].align		= UI_LEFT;
+	s_demos.table.visibleRows			= 14;
+	s_demos.table.selectedRow			= 0;
+	s_demos.table.emptyText				= "No demos found";
+	s_demos.table.getColumnText			= DemoTable_GetColumnText;
+	s_demos.table.onSelect				= DemoTable_OnSelect;
 
 	protocolLegacy = trap_Cvar_VariableValue("com_legacyprotocol");
 	protocol = trap_Cvar_VariableValue("com_protocol");
@@ -234,7 +265,7 @@ static void Demos_MenuInit( void ) {
 
 		for(; i < s_demos.numDemos; i++)
 		{
-			s_demos.list.itemnames[i] = demoname;
+			s_demos.demolist[i] = demoname;
 		
 			len = strlen(demoname);
 
@@ -254,13 +285,10 @@ static void Demos_MenuInit( void ) {
 		}
 	}
 
-	s_demos.list.numitems = s_demos.numDemos;
+	s_demos.table.numRows = s_demos.numDemos;
 
 	if(!s_demos.numDemos)
 	{
-		s_demos.list.itemnames[0] = "No Demos Found.";
-		s_demos.list.numitems = 1;
-
 		//degenerate case, not selectable
 		s_demos.go.generic.flags |= (QMF_INACTIVE|QMF_HIDDEN);
 	}
@@ -268,7 +296,7 @@ static void Demos_MenuInit( void ) {
 	Menu_AddItem( &s_demos.menu, &s_demos.banner );
 	Menu_AddItem( &s_demos.menu, &s_demos.framel );
 	Menu_AddItem( &s_demos.menu, &s_demos.framer );
-	Menu_AddItem( &s_demos.menu, &s_demos.list );
+	Menu_AddItem( &s_demos.menu, &s_demos.table );
 	Menu_AddItem( &s_demos.menu, &s_demos.arrows );
 	Menu_AddItem( &s_demos.menu, &s_demos.left );
 	Menu_AddItem( &s_demos.menu, &s_demos.right );

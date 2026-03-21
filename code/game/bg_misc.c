@@ -149,24 +149,6 @@ gitem_t	bg_itemlist[] =
 /* sounds */ ""
 	},
 
-/*QUAKED item_health_mega (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
-*/
-	{
-        { "item_health_mega", NULL },
-		"sound/items/m_health.wav",
-        { "models/powerups/health/mega_cross.md3", 
-		"models/powerups/health/mega_sphere.md3", 
-		NULL, NULL },
-/* icon */		"icons/iconh_mega",
-/* pickup */	"Mega Health",
-		100,
-		IT_HEALTH,
-		0,
-/* precache */ "",
-/* sounds */ ""
-	},
-
-
 	//
 	// WEAPONS 
 	//
@@ -436,7 +418,7 @@ gitem_t	bg_itemlist[] =
 /*QUAKED holdable_medkit (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
-        { "holdable_medkit", NULL },
+        { "holdable_medkit", "item_health_mega", NULL },
 		"sound/items/holdable.wav",
         { 
 		"models/powerups/holdable/medkit.md3", 

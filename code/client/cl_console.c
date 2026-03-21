@@ -58,14 +58,24 @@ typedef struct {
 	vec4_t	color;
 
 	int		viswidth;
-	int		vispage;		
+	int		vispage;
 
 	qboolean newline;
+
+	// search state
+	qboolean	searchActive;
+	char		searchPattern[256];
+	int			searchCursor;		// cursor position in searchPattern
+	int			searchLine;			// line index of current match (-1 = none)
+	int			searchMatchCount;	// total matches found
 
 } console_t;
 
 extern  qboolean    chat_team;
 extern  int         chat_playerNum;
+
+// forward declarations
+void Con_SearchClose( void );
 
 console_t	con;
 
@@ -640,6 +650,55 @@ static void Con_DrawInput( void ) {
 
 	y = con.vislines - ( smallchar_height * 2 );
 
+	if ( con.searchActive ) {
+		// draw search bar: "Find: pattern_ (N matches)"
+		static vec4_t searchColor = { 1.0f, 1.0f, 0.0f, 1.0f }; // yellow
+		static vec4_t noMatchColor = { 1.0f, 0.3f, 0.3f, 1.0f }; // red
+		char	info[512];
+		int		i, x;
+		vec4_t	*color;
+
+		if ( con.searchPattern[0] && con.searchMatchCount == 0 )
+			color = &noMatchColor;
+		else
+			color = &searchColor;
+
+		re.SetColor( *color );
+
+		// draw "Find:" prefix
+		SCR_DrawSmallChar( con.xadjust + 1 * smallchar_width, y, 'F' );
+		SCR_DrawSmallChar( con.xadjust + 2 * smallchar_width, y, 'i' );
+		SCR_DrawSmallChar( con.xadjust + 3 * smallchar_width, y, 'n' );
+		SCR_DrawSmallChar( con.xadjust + 4 * smallchar_width, y, 'd' );
+		SCR_DrawSmallChar( con.xadjust + 5 * smallchar_width, y, ':' );
+
+		// draw search pattern
+		re.SetColor( con.color );
+		x = 7;
+		for ( i = 0; con.searchPattern[i] && x < con.linewidth - 16; i++, x++ ) {
+			SCR_DrawSmallChar( con.xadjust + x * smallchar_width, y, con.searchPattern[i] );
+		}
+
+		// draw blinking cursor
+		if ( (int)( cls.realtime >> 8 ) & 1 ) {
+			SCR_DrawSmallChar( con.xadjust + x * smallchar_width, y, '_' );
+		}
+
+		// draw match count on the right
+		if ( con.searchPattern[0] ) {
+			int len;
+			Com_sprintf( info, sizeof( info ), "(%d matches)", con.searchMatchCount );
+			len = strlen( info );
+			re.SetColor( *color );
+			for ( i = 0; i < len; i++ ) {
+				SCR_DrawSmallChar( con.xadjust + ( con.linewidth - len + i ) * smallchar_width, y, info[i] );
+			}
+		}
+
+		re.SetColor( NULL );
+		return;
+	}
+
 	re.SetColor( con.color );
 
 	SCR_DrawSmallChar( con.xadjust + 1 * smallchar_width, y, ']' );
@@ -857,6 +916,14 @@ static void Con_DrawSolidConsole( float frac ) {
 			continue;
 		}
 
+		// highlight search match line with yellow background
+		if ( con.searchActive && con.searchLine >= 0 && row == con.searchLine ) {
+			static vec4_t searchBg = { 0.3f, 0.3f, 0.0f, 0.5f };
+			re.SetColor( searchBg );
+			re.DrawStretchPic( con.xadjust, y, wf, smallchar_height, 0, 0, 1, 1, cls.whiteShader );
+			currentColorIndex = -1; // force color reset after background draw
+		}
+
 		text = con.text + (row % con.totallines) * con.linewidth;
 
 		for ( x = 0 ; x < con.linewidth ; x++ ) {
@@ -987,9 +1054,277 @@ void Con_Close( void )
 	if ( !com_cl_running->integer )
 		return;
 
+	Con_SearchClose();
 	Field_Clear( &g_consoleField );
 	Con_ClearNotify();
 	Key_SetCatcher( Key_GetCatcher( ) & ~KEYCATCH_CONSOLE );
 	con.finalFrac = 0.0;			// none visible
 	con.displayFrac = 0.0;
+}
+
+
+/*
+==============================================================================
+
+CONSOLE SEARCH
+
+==============================================================================
+*/
+
+/*
+================
+Con_LineToString
+
+Extract ASCII text from a console line into a buffer.
+Strips Q3 color codes (high byte) and trailing spaces.
+================
+*/
+static void Con_LineToString( int line, char *buf, int bufSize ) {
+	short	*text;
+	int		x, len;
+
+	text = con.text + ( line % con.totallines ) * con.linewidth;
+	len = con.linewidth;
+	if ( len >= bufSize )
+		len = bufSize - 1;
+
+	for ( x = 0; x < len; x++ )
+		buf[x] = text[x] & 0xff;
+
+	buf[len] = '\0';
+
+	// trim trailing spaces
+	for ( x = len - 1; x >= 0 && buf[x] == ' '; x-- )
+		buf[x] = '\0';
+}
+
+
+/*
+================
+Con_SearchFind
+
+Search for the current pattern starting from startLine, going in direction.
+Returns the matching line index, or -1 if not found.
+direction: -1 = backward (toward older lines), +1 = forward (toward newer lines)
+================
+*/
+static int Con_SearchFind( int startLine, int direction ) {
+	int		i, line, numLines;
+	char	lineBuf[MAX_CONSOLE_WIDTH + 1];
+
+	if ( !con.searchPattern[0] )
+		return -1;
+
+	if ( con.current >= con.totallines )
+		numLines = con.totallines;
+	else
+		numLines = con.current + 1;
+
+	for ( i = 1; i <= numLines; i++ ) {
+		line = startLine + i * direction;
+
+		// wrap around
+		while ( line < 0 )
+			line += numLines;
+		while ( line > con.current )
+			line -= numLines;
+
+		// don't search beyond valid range
+		if ( con.current - line >= con.totallines )
+			continue;
+
+		Con_LineToString( line, lineBuf, sizeof( lineBuf ) );
+
+		if ( Q_stristr( lineBuf, con.searchPattern ) ) {
+			return line;
+		}
+	}
+
+	return -1;
+}
+
+
+/*
+================
+Con_SearchCountMatches
+
+Count total occurrences of the search pattern in the console buffer.
+================
+*/
+static int Con_SearchCountMatches( void ) {
+	int		i, line, numLines, count;
+	char	lineBuf[MAX_CONSOLE_WIDTH + 1];
+
+	if ( !con.searchPattern[0] )
+		return 0;
+
+	count = 0;
+
+	if ( con.current >= con.totallines )
+		numLines = con.totallines;
+	else
+		numLines = con.current + 1;
+
+	for ( i = 0; i < numLines; i++ ) {
+		if ( con.current >= con.totallines )
+			line = ( con.current + 1 + i ) % con.totallines;
+		else
+			line = i;
+
+		Con_LineToString( line, lineBuf, sizeof( lineBuf ) );
+		if ( Q_stristr( lineBuf, con.searchPattern ) )
+			count++;
+	}
+
+	return count;
+}
+
+
+/*
+================
+Con_SearchUpdate
+
+Re-run search from current match position after pattern changes.
+================
+*/
+static void Con_SearchUpdate( void ) {
+	char	lineBuf[MAX_CONSOLE_WIDTH + 1];
+
+	if ( !con.searchPattern[0] ) {
+		con.searchLine = -1;
+		con.searchMatchCount = 0;
+		return;
+	}
+
+	con.searchMatchCount = Con_SearchCountMatches();
+
+	// first check if current display line matches (don't jump away needlessly)
+	if ( con.display >= 0 && con.current - con.display < con.totallines ) {
+		Con_LineToString( con.display, lineBuf, sizeof( lineBuf ) );
+		if ( Q_stristr( lineBuf, con.searchPattern ) ) {
+			con.searchLine = con.display;
+			return;
+		}
+	}
+
+	// search backward from current display position
+	con.searchLine = Con_SearchFind( con.display, -1 );
+
+	// scroll to match
+	if ( con.searchLine >= 0 ) {
+		con.display = con.searchLine;
+		Con_Fixup();
+	}
+}
+
+
+/*
+================
+Con_SearchOpen
+
+Activate console search mode (Ctrl-F).
+================
+*/
+void Con_SearchOpen( void ) {
+	con.searchActive = qtrue;
+	con.searchPattern[0] = '\0';
+	con.searchCursor = 0;
+	con.searchLine = -1;
+	con.searchMatchCount = 0;
+}
+
+
+/*
+================
+Con_SearchClose
+
+Deactivate console search mode.
+================
+*/
+void Con_SearchClose( void ) {
+	con.searchActive = qfalse;
+	con.searchPattern[0] = '\0';
+	con.searchCursor = 0;
+	con.searchLine = -1;
+	con.searchMatchCount = 0;
+}
+
+
+/*
+================
+Con_SearchNext
+
+Jump to next (forward=qtrue) or previous (forward=qfalse) match.
+================
+*/
+void Con_SearchNext( qboolean forward ) {
+	int startLine, dir, found;
+
+	if ( !con.searchActive || !con.searchPattern[0] )
+		return;
+
+	startLine = ( con.searchLine >= 0 ) ? con.searchLine : con.display;
+	dir = forward ? 1 : -1;
+
+	found = Con_SearchFind( startLine, dir );
+	if ( found >= 0 ) {
+		con.searchLine = found;
+		con.display = found;
+		Con_Fixup();
+	}
+}
+
+
+/*
+================
+Con_SearchChar
+
+Handle a character typed into the search bar.
+================
+*/
+void Con_SearchChar( int ch ) {
+	if ( !con.searchActive )
+		return;
+
+	if ( ch == '\b' || ch == 127 ) {
+		// backspace
+		if ( con.searchCursor > 0 ) {
+			con.searchCursor--;
+			con.searchPattern[con.searchCursor] = '\0';
+			Con_SearchUpdate();
+		}
+		return;
+	}
+
+	if ( ch < 32 )
+		return;
+
+	if ( con.searchCursor < (int)sizeof( con.searchPattern ) - 1 ) {
+		con.searchPattern[con.searchCursor] = ch;
+		con.searchCursor++;
+		con.searchPattern[con.searchCursor] = '\0';
+		Con_SearchUpdate();
+	}
+}
+
+
+/*
+================
+Con_IsSearchActive
+================
+*/
+qboolean Con_IsSearchActive( void ) {
+	return con.searchActive;
+}
+
+
+/*
+================
+Con_SearchLine
+
+Returns the currently highlighted search line, or -1.
+================
+*/
+int Con_SearchLine( void ) {
+	return con.searchActive ? con.searchLine : -1;
 }

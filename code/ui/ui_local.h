@@ -368,11 +368,6 @@ extern void UI_RegisterCvars( void );
 extern void UI_UpdateCvars( void );
 
 //
-// ui_credits.c
-//
-extern void UI_CreditMenu( void );
-
-//
 // ui_ingame.c
 //
 extern void InGame_Cache( void );
@@ -412,13 +407,6 @@ extern void Controls_Cache( void );
 //
 extern void UI_DemosMenu( void );
 extern void Demos_Cache( void );
-
-//
-// ui_cinematics.c
-//
-extern void UI_CinematicsMenu( void );
-extern void UI_CinematicsMenu_f( void );
-extern void UI_CinematicsMenu_Cache( void );
 
 //
 // ui_mods.c

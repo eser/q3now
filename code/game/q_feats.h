@@ -34,7 +34,7 @@
 
 // ── competitive (testing) ───────────────────────────────────────────────
 #define FEAT_1FCTF                        0   // 10E one-flag CTF mode
-#define FEAT_AUTO_DEMO                    0   // 10K auto-record demos in tournament
+#define FEAT_AUTO_DEMO                    1   // 10K auto-record demos in tournament
 #define FEAT_CLAN_ARENA                   0   // 11  clan arena game mode
 #define FEAT_CTF_SCORING                  0   // 10F enhanced CTF flag scoring
 #define FEAT_ELIMINATION                  0   // 10B round-based elimination modifier
@@ -47,14 +47,25 @@
 #define FEAT_TOURNAMENT_PAUSE             0   // 10C mid-game pause/timeout
 
 // ── visual / UI (testing) ───────────────────────────────────────────────
-#define FEAT_DYNAMIC_MENU                 0   // 6A  callback-driven submenu system
+#define FEAT_DYNAMIC_MENU                 1   // 6A  callback-driven submenu system
 #define FEAT_IMPACT_SPARKS                0   // 11A spark particles on player hit
-#define FEAT_MAP_ROTATION                 0   // 6D  server-side map rotation list
+#define FEAT_MAP_ROTATION                 1   // 6D  server-side map rotation list
+#define FEAT_STATS_WINDOW                 1   // floating stats overlay + window system
 #define FEAT_PING_LOCATION                0   // 4G  team coordination pings
 #define FEAT_TEAM_LEADERSHIP              0   // 11  particle trail library
 #define FEAT_HIT_SOUNDS                   0   // damage-based hit sound pitch variation
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
 #define FEAT_NEW_RAIL_STYLE               0   // alternate rail trail rendering
+
+// ── archive formats (testing) ─────────────────────────────────────────
+#define FEAT_SW3Z                         1   // SW3Z archive format (.sw3z)
+#define FEAT_FS_PRECEDENCE                1   // archive dedup: basename desc, dir > ext precedence
+
+// ── renderer (from CNQ3) ───────────────────────────────────────────────
+#define FEAT_DEPTH_CLAMP                  0   // disable near-plane vertex clipping at high FOV
+// UPSCALE_BLIT: already in Quake3e via r_fbo + r_renderScale cvars, no flag needed
+#define FEAT_DEPTH_FADE                   0   // soft particle edges (explosions, smoke, blood)
+#define FEAT_SMAA                         0   // sub-pixel morphological anti-aliasing (deferred)
 
 #endif // _Q_FEATS_H

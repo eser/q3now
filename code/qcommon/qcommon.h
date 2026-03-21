@@ -709,6 +709,14 @@ typedef	_off_t  fileOffset_t;
 typedef	off_t  fileOffset_t;
 #endif
 
+// file entry in a pack archive (PK3 or SW3Z)
+typedef struct fileInPack_s {
+	char					*name;		// name of the file
+	unsigned long			pos;		// file info position in zip
+	unsigned long			size;		// file size
+	struct	fileInPack_s*	next;		// next file in the hash
+} fileInPack_t;
+
 qboolean FS_Initialized( void );
 
 void	FS_InitFilesystem ( void );

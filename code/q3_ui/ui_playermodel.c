@@ -37,50 +37,73 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 static char* playermodel_artlist[] =
 {
-	MODEL_BACK0,	
-	MODEL_BACK1,	
+	MODEL_BACK0,
+	MODEL_BACK1,
 	MODEL_SELECT,
 	MODEL_SELECTED,
 	MODEL_FRAMEL,
 	MODEL_FRAMER,
-	MODEL_PORTS,	
+	MODEL_PORTS,
 	MODEL_ARROWS,
 	MODEL_ARROWSL,
 	MODEL_ARROWSR,
 	NULL
 };
 
+// model grid: 4 columns × 3 rows = 12 models per page
+// the 4th row is used for the skin strip
 #define PLAYERGRID_COLS		4
-#define PLAYERGRID_ROWS		4
+#define PLAYERGRID_ROWS		3
 #define MAX_MODELSPERPAGE	(PLAYERGRID_ROWS*PLAYERGRID_COLS)
 
 #define MAX_PLAYERMODELS	256
 
+// skin strip: up to 4 skins visible at a time (same column layout as model grid)
+#define MAX_SKINSPERPAGE	4
+#define MAX_PLAYERSKINS		64
+#define SKINROW_Y			275
+
+// animation preview
+#define NUM_ANIM_BUTTONS	5
+
+// --- control IDs ---
 #define ID_PLAYERPIC0		0
-#define ID_PLAYERPIC1		1
-#define ID_PLAYERPIC2		2
-#define ID_PLAYERPIC3		3
-#define ID_PLAYERPIC4		4
-#define ID_PLAYERPIC5		5
-#define ID_PLAYERPIC6		6
-#define ID_PLAYERPIC7		7
-#define ID_PLAYERPIC8		8
-#define ID_PLAYERPIC9		9
-#define ID_PLAYERPIC10		10
-#define ID_PLAYERPIC11		11
-#define ID_PLAYERPIC12		12
-#define ID_PLAYERPIC13		13
-#define ID_PLAYERPIC14		14
-#define ID_PLAYERPIC15		15
+// ID_PLAYERPIC1 through ID_PLAYERPIC11 = 1..11
+#define ID_SKINPIC0			20
+// ID_SKINPIC1 through ID_SKINPIC3 = 21..23
 #define ID_PREVPAGE			100
 #define ID_NEXTPAGE			101
 #define ID_BACK				102
+#define ID_ANIM0			110
+// ID_ANIM1 through ID_ANIM4 = 111..114
+
+// animation definitions for preview
+typedef struct {
+	const char	*label;
+	int			legsAnim;
+	int			torsoAnim;
+} animDef_t;
+
+static animDef_t s_animDefs[NUM_ANIM_BUTTONS] = {
+	{ "STAND",   LEGS_IDLE,   TORSO_STAND },
+	{ "RUN",     LEGS_RUN,    TORSO_STAND },
+	{ "ATTACK",  LEGS_IDLE,   TORSO_ATTACK },
+	{ "CROUCH",  LEGS_IDLECR, TORSO_STAND },
+	{ "TAUNT",   LEGS_IDLE,   TORSO_GESTURE },
+};
 
 typedef struct
 {
 	menuframework_s	menu;
+
+	// model grid (4×3 = 12 per page)
 	menubitmap_s	pics[MAX_MODELSPERPAGE];
 	menubitmap_s	picbuttons[MAX_MODELSPERPAGE];
+
+	// skin strip (4 per page, single-layer bitmaps)
+	menubitmap_s	skins[MAX_SKINSPERPAGE];
+
+	// decoration and controls
 	menubitmap_s	framel;
 	menubitmap_s	framer;
 	menubitmap_s	ports;
@@ -93,19 +116,86 @@ typedef struct
 	menutext_s		modelname;
 	menutext_s		skinname;
 	menutext_s		playername;
+
+	// animation preview text buttons
+	menutext_s		animItems[NUM_ANIM_BUTTONS];
+
 	playerInfo_t	playerinfo;
+
+	// model list (one entry per unique model, using default icon)
 	int				nummodels;
 	char			modelnames[MAX_PLAYERMODELS][128];
 	int				modelpage;
 	int				numpages;
-	char			modelskin[64];
 	int				selectedmodel;
-	// eser - model rotation
+
+	// skin list (all skins for the currently selected model)
+	int				numskins;
+	char			skinnames[MAX_PLAYERSKINS][128];
+	int				skinpage;
+	int				numskinpages;
+	int				selectedskin;
+
+	// combined model/skin for cvar and preview
+	char			modelskin[64];
+
+	// animation preview state
+	int				currentAnim;	// index into s_animDefs, -1 = default
+
+	// model rotation
 	float			spinAngle;
-	// eser - model rotation
 } playermodel_t;
 
 static playermodel_t s_playermodel;
+
+// static text buffers for menu text items
+static char s_playername[32];
+static char s_modelname[32];
+static char s_skinname[32];
+static char s_animLabels[NUM_ANIM_BUTTONS][16];
+
+
+/*
+=================
+PlayerModel_GetModelDir
+
+Extract just the model directory name from a full icon path.
+"models/players/sarge/icon_default" → "sarge"
+=================
+*/
+static void PlayerModel_GetModelDir( const char *fullpath, char *out, int outSize )
+{
+	const char *p;
+	const char *slash;
+	int len;
+
+	p = fullpath + strlen("models/players/");
+	slash = strchr(p, '/');
+	if (slash) {
+		len = slash - p;
+		if (len >= outSize) len = outSize - 1;
+		Q_strncpyz(out, p, len + 1);
+	} else {
+		Q_strncpyz(out, p, outSize);
+	}
+}
+
+
+/*
+=================
+PlayerModel_GetSkinFromIcon
+
+Extract skin name from an icon path.
+"models/players/sarge/icon_blue" → "blue"
+=================
+*/
+static const char *PlayerModel_GetSkinFromIcon( const char *fullpath )
+{
+	const char *p = strstr(fullpath, "icon_");
+	if (p) return p + 5;
+	return "default";
+}
+
 
 /*
 =================
@@ -115,27 +205,27 @@ PlayerModel_UpdateGrid
 static void PlayerModel_UpdateGrid( void )
 {
 	int	i;
-    int	j;
+	int	j;
 
 	j = s_playermodel.modelpage * MAX_MODELSPERPAGE;
-	for (i=0; i<PLAYERGRID_ROWS*PLAYERGRID_COLS; i++,j++)
+	for (i=0; i<MAX_MODELSPERPAGE; i++,j++)
 	{
 		if (j < s_playermodel.nummodels)
-		{ 
-			// model/skin portrait
- 			s_playermodel.pics[i].generic.name         = s_playermodel.modelnames[j];
+		{
+			// model portrait (default skin icon)
+			s_playermodel.pics[i].generic.name         = s_playermodel.modelnames[j];
 			s_playermodel.picbuttons[i].generic.flags &= ~QMF_INACTIVE;
 		}
 		else
 		{
 			// dead slot
- 			s_playermodel.pics[i].generic.name         = NULL;
+			s_playermodel.pics[i].generic.name         = NULL;
 			s_playermodel.picbuttons[i].generic.flags |= QMF_INACTIVE;
 		}
 
- 		s_playermodel.pics[i].generic.flags       &= ~QMF_HIGHLIGHT;
- 		s_playermodel.pics[i].shader               = 0;
- 		s_playermodel.picbuttons[i].generic.flags |= QMF_PULSEIFFOCUS;
+		s_playermodel.pics[i].generic.flags       &= ~QMF_HIGHLIGHT;
+		s_playermodel.pics[i].shader               = 0;
+		s_playermodel.picbuttons[i].generic.flags |= QMF_PULSEIFFOCUS;
 	}
 
 	if (s_playermodel.selectedmodel/MAX_MODELSPERPAGE == s_playermodel.modelpage)
@@ -167,6 +257,139 @@ static void PlayerModel_UpdateGrid( void )
 	}
 }
 
+
+/*
+=================
+PlayerModel_LoadSkins
+
+Load all skins for the model at the given index in modelnames[].
+Populates skinnames[], numskins, numskinpages.
+Orders: icon_default first, then icon_blue, icon_red, then rest.
+=================
+*/
+static void PlayerModel_LoadSkins( int modelIndex )
+{
+	char	modelDir[64];
+	int		numfiles;
+	char	filelist[2048];
+	char	skinname[MAX_QPATH];
+	char*	fileptr;
+	int		i, j;
+	int		filelen;
+	int		defaultIdx, blueIdx, redIdx;
+	char	temp[128];
+
+	s_playermodel.numskins = 0;
+	s_playermodel.skinpage = 0;
+
+	if (modelIndex < 0 || modelIndex >= s_playermodel.nummodels)
+		return;
+
+	PlayerModel_GetModelDir(s_playermodel.modelnames[modelIndex], modelDir, sizeof(modelDir));
+
+	// enumerate all icon_* files
+	numfiles = trap_FS_GetFileList(va("models/players/%s", modelDir), "tga", filelist, 2048);
+	fileptr = filelist;
+	for (i=0; i<numfiles && s_playermodel.numskins < MAX_PLAYERSKINS; i++, fileptr+=filelen+1)
+	{
+		filelen = strlen(fileptr);
+		COM_StripExtension(fileptr, skinname, sizeof(skinname));
+
+		if (!Q_stricmpn(skinname, "icon_", 5))
+		{
+			Com_sprintf(s_playermodel.skinnames[s_playermodel.numskins++],
+				sizeof(s_playermodel.skinnames[0]),
+				"models/players/%s/%s", modelDir, skinname);
+		}
+	}
+
+	// order: default first, blue second, red third
+	defaultIdx = -1;
+	blueIdx = -1;
+	redIdx = -1;
+	for (i=0; i<s_playermodel.numskins; i++)
+	{
+		if (strstr(s_playermodel.skinnames[i], "icon_default")) defaultIdx = i;
+		else if (strstr(s_playermodel.skinnames[i], "icon_blue")) blueIdx = i;
+		else if (strstr(s_playermodel.skinnames[i], "icon_red")) redIdx = i;
+	}
+
+	// bubble preferred skins to front
+	j = 0;
+	if (defaultIdx >= 0 && defaultIdx != j) {
+		Q_strncpyz(temp, s_playermodel.skinnames[j], sizeof(temp));
+		Q_strncpyz(s_playermodel.skinnames[j], s_playermodel.skinnames[defaultIdx], sizeof(s_playermodel.skinnames[0]));
+		Q_strncpyz(s_playermodel.skinnames[defaultIdx], temp, sizeof(s_playermodel.skinnames[0]));
+		// fix up indices after swap
+		if (blueIdx == j) blueIdx = defaultIdx;
+		if (redIdx == j) redIdx = defaultIdx;
+		j++;
+	} else if (defaultIdx == j) {
+		j++;
+	}
+
+	if (blueIdx >= 0 && blueIdx != j) {
+		Q_strncpyz(temp, s_playermodel.skinnames[j], sizeof(temp));
+		Q_strncpyz(s_playermodel.skinnames[j], s_playermodel.skinnames[blueIdx], sizeof(s_playermodel.skinnames[0]));
+		Q_strncpyz(s_playermodel.skinnames[blueIdx], temp, sizeof(s_playermodel.skinnames[0]));
+		if (redIdx == j) redIdx = blueIdx;
+		j++;
+	} else if (blueIdx == j) {
+		j++;
+	}
+
+	if (redIdx >= 0 && redIdx != j) {
+		Q_strncpyz(temp, s_playermodel.skinnames[j], sizeof(temp));
+		Q_strncpyz(s_playermodel.skinnames[j], s_playermodel.skinnames[redIdx], sizeof(s_playermodel.skinnames[0]));
+		Q_strncpyz(s_playermodel.skinnames[redIdx], temp, sizeof(s_playermodel.skinnames[0]));
+	}
+
+	s_playermodel.numskinpages = s_playermodel.numskins / MAX_SKINSPERPAGE;
+	if (s_playermodel.numskins % MAX_SKINSPERPAGE)
+		s_playermodel.numskinpages++;
+}
+
+
+/*
+=================
+PlayerModel_UpdateSkinGrid
+=================
+*/
+static void PlayerModel_UpdateSkinGrid( void )
+{
+	int i;
+	int j;
+
+	j = s_playermodel.skinpage * MAX_SKINSPERPAGE;
+	for (i=0; i<MAX_SKINSPERPAGE; i++, j++)
+	{
+		if (j < s_playermodel.numskins)
+		{
+			s_playermodel.skins[i].generic.name = s_playermodel.skinnames[j];
+			s_playermodel.skins[i].generic.flags &= ~QMF_INACTIVE;
+		}
+		else
+		{
+			s_playermodel.skins[i].generic.name = NULL;
+			s_playermodel.skins[i].generic.flags |= QMF_INACTIVE;
+		}
+
+		s_playermodel.skins[i].generic.flags &= ~QMF_HIGHLIGHT;
+		s_playermodel.skins[i].shader = 0;
+		s_playermodel.skins[i].generic.flags |= QMF_PULSEIFFOCUS;
+	}
+
+	// highlight selected skin
+	if (s_playermodel.selectedskin >= 0 &&
+		s_playermodel.selectedskin / MAX_SKINSPERPAGE == s_playermodel.skinpage)
+	{
+		i = s_playermodel.selectedskin % MAX_SKINSPERPAGE;
+		s_playermodel.skins[i].generic.flags |= QMF_HIGHLIGHT;
+		s_playermodel.skins[i].generic.flags &= ~QMF_PULSEIFFOCUS;
+	}
+}
+
+
 /*
 =================
 PlayerModel_UpdateModel
@@ -176,20 +399,29 @@ static void PlayerModel_UpdateModel( void )
 {
 	vec3_t	viewangles;
 	vec3_t	moveangles;
+	int		legsAnim;
+	int		torsoAnim;
 
 	memset( &s_playermodel.playerinfo, 0, sizeof(playerInfo_t) );
 
-	// eser - model rotation
-	// viewangles[YAW]   = 180 - 30;
 	viewangles[YAW]   = 180 - 30 + s_playermodel.spinAngle;
-	// eser - model rotation
 	viewangles[PITCH] = 0;
 	viewangles[ROLL]  = 0;
 	VectorClear( moveangles );
 
+	// choose animation
+	if (s_playermodel.currentAnim >= 0 && s_playermodel.currentAnim < NUM_ANIM_BUTTONS) {
+		legsAnim  = s_animDefs[s_playermodel.currentAnim].legsAnim;
+		torsoAnim = s_animDefs[s_playermodel.currentAnim].torsoAnim;
+	} else {
+		legsAnim  = LEGS_IDLE;
+		torsoAnim = TORSO_STAND;
+	}
+
 	UI_PlayerInfo_SetModel( &s_playermodel.playerinfo, s_playermodel.modelskin );
-	UI_PlayerInfo_SetInfo( &s_playermodel.playerinfo, LEGS_IDLE, TORSO_STAND, viewangles, moveangles, WP_MACHINEGUN, qfalse );
+	UI_PlayerInfo_SetInfo( &s_playermodel.playerinfo, legsAnim, torsoAnim, viewangles, moveangles, WP_MACHINEGUN, qfalse );
 }
+
 
 /*
 =================
@@ -203,6 +435,45 @@ static void PlayerModel_SaveChanges( void )
 	trap_Cvar_Set( "team_model", s_playermodel.modelskin );
 	trap_Cvar_Set( "team_headmodel", s_playermodel.modelskin );
 }
+
+
+/*
+=================
+PlayerModel_SetModelskin
+
+Build the "model/skin" string from the selected model and skin.
+Updates modelskin, modelname.string, and skinname.string.
+=================
+*/
+static void PlayerModel_SetModelskin( void )
+{
+	char	modelDir[64];
+	const char	*skin;
+	int		maxlen;
+
+	if (s_playermodel.selectedmodel < 0)
+		return;
+
+	PlayerModel_GetModelDir(s_playermodel.modelnames[s_playermodel.selectedmodel], modelDir, sizeof(modelDir));
+
+	if (s_playermodel.selectedskin >= 0 && s_playermodel.selectedskin < s_playermodel.numskins) {
+		skin = PlayerModel_GetSkinFromIcon(s_playermodel.skinnames[s_playermodel.selectedskin]);
+	} else {
+		skin = "default";
+	}
+
+	Com_sprintf(s_playermodel.modelskin, sizeof(s_playermodel.modelskin), "%s/%s", modelDir, skin);
+
+	// update display strings
+	maxlen = sizeof(s_modelname) - 1;
+	Q_strncpyz(s_modelname, modelDir, maxlen + 1);
+	Q_strupr(s_modelname);
+
+	maxlen = sizeof(s_skinname) - 1;
+	Q_strncpyz(s_skinname, skin, maxlen + 1);
+	Q_strupr(s_skinname);
+}
+
 
 /*
 =================
@@ -239,6 +510,36 @@ static void PlayerModel_MenuEvent( void* ptr, int event )
 	}
 }
 
+
+/*
+=================
+PlayerModel_AnimEvent
+=================
+*/
+static void PlayerModel_AnimEvent( void* ptr, int event )
+{
+	int id;
+
+	if (event != QM_ACTIVATED)
+		return;
+
+	id = ((menucommon_s*)ptr)->id - ID_ANIM0;
+	if (id < 0 || id >= NUM_ANIM_BUTTONS)
+		return;
+
+	// toggle: clicking same animation again returns to default (STAND)
+	if (s_playermodel.currentAnim == id) {
+		s_playermodel.currentAnim = 0;	// back to STAND
+	} else {
+		s_playermodel.currentAnim = id;
+	}
+
+	if( trap_MemoryRemaining() > LOW_MEMORY ) {
+		PlayerModel_UpdateModel();
+	}
+}
+
+
 /*
 =================
 PlayerModel_MenuKey
@@ -249,7 +550,6 @@ static sfxHandle_t PlayerModel_MenuKey( int key )
 	menucommon_s*	m;
 	int				picnum;
 
-	// eser - model rotation
 	// mouse wheel or [ ] keys to spin the preview
 	if ( key == K_MWHEELUP || key == '[' ) {
 		s_playermodel.spinAngle -= 15;
@@ -262,7 +562,6 @@ static sfxHandle_t PlayerModel_MenuKey( int key )
 		PlayerModel_UpdateModel();
 		return 0;
 	}
-	// eser - model rotation
 
 	switch (key)
 	{
@@ -270,18 +569,17 @@ static sfxHandle_t PlayerModel_MenuKey( int key )
 		case K_LEFTARROW:
 			m = Menu_ItemAtCursor(&s_playermodel.menu);
 			picnum = m->id - ID_PLAYERPIC0;
-			if (picnum >= 0 && picnum <= 15)
+			if (picnum >= 0 && picnum < MAX_MODELSPERPAGE)
 			{
 				if (picnum > 0)
 				{
-					Menu_SetCursor(&s_playermodel.menu,s_playermodel.menu.cursor-1);
+					Menu_SetCursor(&s_playermodel.menu, s_playermodel.menu.cursor-1);
 					return (menu_move_sound);
-					
 				}
 				else if (s_playermodel.modelpage > 0)
 				{
 					s_playermodel.modelpage--;
-					Menu_SetCursor(&s_playermodel.menu,s_playermodel.menu.cursor+15);
+					Menu_SetCursor(&s_playermodel.menu, s_playermodel.menu.cursor + MAX_MODELSPERPAGE - 1);
 					PlayerModel_UpdateGrid();
 					return (menu_move_sound);
 				}
@@ -294,17 +592,17 @@ static sfxHandle_t PlayerModel_MenuKey( int key )
 		case K_RIGHTARROW:
 			m = Menu_ItemAtCursor(&s_playermodel.menu);
 			picnum = m->id - ID_PLAYERPIC0;
-			if (picnum >= 0 && picnum <= 15)
+			if (picnum >= 0 && picnum < MAX_MODELSPERPAGE)
 			{
-				if ((picnum < 15) && (s_playermodel.modelpage*MAX_MODELSPERPAGE + picnum+1 < s_playermodel.nummodels))
+				if ((picnum < MAX_MODELSPERPAGE - 1) && (s_playermodel.modelpage*MAX_MODELSPERPAGE + picnum+1 < s_playermodel.nummodels))
 				{
-					Menu_SetCursor(&s_playermodel.menu,s_playermodel.menu.cursor+1);
+					Menu_SetCursor(&s_playermodel.menu, s_playermodel.menu.cursor+1);
 					return (menu_move_sound);
-				}					
-				else if ((picnum == 15) && (s_playermodel.modelpage < s_playermodel.numpages-1))
+				}
+				else if ((picnum == MAX_MODELSPERPAGE - 1) && (s_playermodel.modelpage < s_playermodel.numpages-1))
 				{
 					s_playermodel.modelpage++;
-					Menu_SetCursor(&s_playermodel.menu,s_playermodel.menu.cursor-15);
+					Menu_SetCursor(&s_playermodel.menu, s_playermodel.menu.cursor - (MAX_MODELSPERPAGE - 1));
 					PlayerModel_UpdateGrid();
 					return (menu_move_sound);
 				}
@@ -312,7 +610,7 @@ static sfxHandle_t PlayerModel_MenuKey( int key )
 					return (menu_buzz_sound);
 			}
 			break;
-			
+
 		case K_MOUSE2:
 		case K_ESCAPE:
 			PlayerModel_SaveChanges();
@@ -322,27 +620,28 @@ static sfxHandle_t PlayerModel_MenuKey( int key )
 	return ( Menu_DefaultKey( &s_playermodel.menu, key ) );
 }
 
+
 /*
 =================
 PlayerModel_PicEvent
+
+Called when a model icon in the grid is clicked.
+Selects the model, loads its skins, picks the default skin.
 =================
 */
 static void PlayerModel_PicEvent( void* ptr, int event )
 {
-	int				modelnum;
-	int				maxlen;
-	char*			buffptr;
-	char*			pdest;
-	int				i;
+	int		modelnum;
+	int		i;
 
 	if (event != QM_ACTIVATED)
 		return;
 
-	for (i=0; i<PLAYERGRID_ROWS*PLAYERGRID_COLS; i++)
+	// reset all model highlights
+	for (i=0; i<MAX_MODELSPERPAGE; i++)
 	{
-		// reset
- 		s_playermodel.pics[i].generic.flags       &= ~QMF_HIGHLIGHT;
- 		s_playermodel.picbuttons[i].generic.flags |= QMF_PULSEIFFOCUS;
+		s_playermodel.pics[i].generic.flags       &= ~QMF_HIGHLIGHT;
+		s_playermodel.picbuttons[i].generic.flags |= QMF_PULSEIFFOCUS;
 	}
 
 	// set selected
@@ -350,37 +649,83 @@ static void PlayerModel_PicEvent( void* ptr, int event )
 	s_playermodel.pics[i].generic.flags       |= QMF_HIGHLIGHT;
 	s_playermodel.picbuttons[i].generic.flags &= ~QMF_PULSEIFFOCUS;
 
-	// get model and strip icon_
 	modelnum = s_playermodel.modelpage*MAX_MODELSPERPAGE + i;
-	buffptr  = s_playermodel.modelnames[modelnum] + strlen("models/players/");
-	pdest    = strstr(buffptr,"icon_");
-	if (pdest)
-	{
-		// track the whole model/skin name
-		Q_strncpyz(s_playermodel.modelskin,buffptr,pdest-buffptr+1);
-		strcat(s_playermodel.modelskin,pdest + 5);
+	s_playermodel.selectedmodel = modelnum;
 
-		// separate the model name
-		maxlen = pdest-buffptr;
-		if (maxlen > 16)
-			maxlen = 16;
-		Q_strncpyz( s_playermodel.modelname.string, buffptr, maxlen );
-		Q_strupr( s_playermodel.modelname.string );
+	// load skins for this model
+	PlayerModel_LoadSkins(modelnum);
 
-		// separate the skin name
-		maxlen = strlen(pdest+5)+1;
-		if (maxlen > 16)
-			maxlen = 16;
-		Q_strncpyz( s_playermodel.skinname.string, pdest+5, maxlen );
-		Q_strupr( s_playermodel.skinname.string );
+	// select first skin (icon_default) by default
+	s_playermodel.selectedskin = 0;
+	s_playermodel.skinpage = 0;
 
-		s_playermodel.selectedmodel = modelnum;
+	// try to match current skin if switching between models
+	if (s_playermodel.numskins > 0) {
+		const char *currentSkin;
+		const char *testSkin;
+		int j;
 
-		if( trap_MemoryRemaining() > LOW_MEMORY ) {
-			PlayerModel_UpdateModel();
+		currentSkin = strrchr(s_playermodel.modelskin, '/');
+		if (currentSkin) {
+			currentSkin++;	// skip the /
+			for (j=0; j<s_playermodel.numskins; j++) {
+				testSkin = PlayerModel_GetSkinFromIcon(s_playermodel.skinnames[j]);
+				if (!Q_stricmp(currentSkin, testSkin)) {
+					s_playermodel.selectedskin = j;
+					s_playermodel.skinpage = j / MAX_SKINSPERPAGE;
+					break;
+				}
+			}
 		}
 	}
+
+	PlayerModel_UpdateSkinGrid();
+	PlayerModel_SetModelskin();
+
+	if( trap_MemoryRemaining() > LOW_MEMORY ) {
+		PlayerModel_UpdateModel();
+	}
 }
+
+
+/*
+=================
+PlayerModel_SkinPicEvent
+
+Called when a skin icon in the strip is clicked.
+Updates the skin selection and model preview.
+=================
+*/
+static void PlayerModel_SkinPicEvent( void* ptr, int event )
+{
+	int		skinnum;
+	int		i;
+
+	if (event != QM_ACTIVATED)
+		return;
+
+	// reset all skin highlights
+	for (i=0; i<MAX_SKINSPERPAGE; i++)
+	{
+		s_playermodel.skins[i].generic.flags &= ~QMF_HIGHLIGHT;
+		s_playermodel.skins[i].generic.flags |= QMF_PULSEIFFOCUS;
+	}
+
+	// set selected
+	i = ((menucommon_s*)ptr)->id - ID_SKINPIC0;
+	s_playermodel.skins[i].generic.flags |= QMF_HIGHLIGHT;
+	s_playermodel.skins[i].generic.flags &= ~QMF_PULSEIFFOCUS;
+
+	skinnum = s_playermodel.skinpage * MAX_SKINSPERPAGE + i;
+	s_playermodel.selectedskin = skinnum;
+
+	PlayerModel_SetModelskin();
+
+	if( trap_MemoryRemaining() > LOW_MEMORY ) {
+		PlayerModel_UpdateModel();
+	}
+}
+
 
 /*
 =================
@@ -401,9 +746,13 @@ static void PlayerModel_DrawPlayer( void *self )
 	UI_DrawPlayer( b->generic.x, b->generic.y, b->width, b->height, &s_playermodel.playerinfo, uis.realtime/2 );
 }
 
+
 /*
 =================
 PlayerModel_BuildList
+
+Builds the model list with ONE entry per unique model.
+Instead of listing every icon_*, we find the default (or first) icon for each model directory.
 =================
 */
 static void PlayerModel_BuildList( void )
@@ -420,6 +769,7 @@ static void PlayerModel_BuildList( void )
 	int		dirlen;
 	int		filelen;
 	qboolean precache;
+	char*	defaultSkin;
 
 	precache = trap_Cvar_VariableValue("com_buildscript");
 
@@ -432,43 +782,51 @@ static void PlayerModel_BuildList( void )
 	for (i=0; i<numdirs && s_playermodel.nummodels < MAX_PLAYERMODELS; i++,dirptr+=dirlen+1)
 	{
 		dirlen = strlen(dirptr);
-		
+
 		if (dirlen && dirptr[dirlen-1]=='/') dirptr[dirlen-1]='\0';
 
 		if (!strcmp(dirptr,".") || !strcmp(dirptr,".."))
 			continue;
-			
-		// iterate all skin files in directory
+
+		// find the best icon for this model directory
+		defaultSkin = NULL;
 		numfiles = trap_FS_GetFileList( va("models/players/%s",dirptr), "tga", filelist, 2048 );
 		fileptr  = filelist;
-		for (j=0; j<numfiles && s_playermodel.nummodels < MAX_PLAYERMODELS;j++,fileptr+=filelen+1)
+		for (j=0; j<numfiles; j++, fileptr+=filelen+1)
 		{
 			filelen = strlen(fileptr);
+			COM_StripExtension(fileptr, skinname, sizeof(skinname));
 
-			COM_StripExtension(fileptr,skinname, sizeof(skinname));
-
-			// look for icon_????
-			if (!Q_stricmpn(skinname,"icon_",5))
+			if (!Q_stricmpn(skinname, "icon_", 5))
 			{
-				Com_sprintf( s_playermodel.modelnames[s_playermodel.nummodels++],
-					sizeof( s_playermodel.modelnames[s_playermodel.nummodels] ),
-					"models/players/%s/%s", dirptr, skinname );
-				//if (s_playermodel.nummodels >= MAX_PLAYERMODELS)
-				//	return;
+				// prefer icon_default
+				if (!Q_stricmp(skinname, "icon_default")) {
+					defaultSkin = fileptr;
+					break;	// can't do better
+				}
+				if (!defaultSkin)
+					defaultSkin = fileptr;
 			}
 
 			if( precache ) {
 				trap_S_RegisterSound( va( "sound/player/announce/%s_wins.wav", skinname), qfalse );
 			}
 		}
-	}	
 
-	//APSFIXME - Degenerate no models case
+		// store one entry per model (the default/first icon)
+		if (defaultSkin) {
+			COM_StripExtension(defaultSkin, skinname, sizeof(skinname));
+			Com_sprintf( s_playermodel.modelnames[s_playermodel.nummodels++],
+				sizeof( s_playermodel.modelnames[s_playermodel.nummodels] ),
+				"models/players/%s/%s", dirptr, skinname );
+		}
+	}
 
 	s_playermodel.numpages = s_playermodel.nummodels/MAX_MODELSPERPAGE;
 	if (s_playermodel.nummodels % MAX_MODELSPERPAGE)
 		s_playermodel.numpages++;
 }
+
 
 /*
 =================
@@ -478,60 +836,70 @@ PlayerModel_SetMenuItems
 static void PlayerModel_SetMenuItems( void )
 {
 	int				i;
-	int				maxlen;
-	char			modelskin[64];
-	char*			buffptr;
-	char*			pdest;
+	char			modelDir[64];
+	char			cvarModelDir[64];
+	const char		*cvarSkin;
+	const char		*testSkin;
 
 	// name
-	trap_Cvar_VariableStringBuffer( "name", s_playermodel.playername.string, 16 );
-	Q_CleanStr( s_playermodel.playername.string );
+	trap_Cvar_VariableStringBuffer( "name", s_playername, 16 );
+	Q_CleanStr( s_playername );
 
 	// model
 	trap_Cvar_VariableStringBuffer( "model", s_playermodel.modelskin, 64 );
-	
+
 	// use default skin if none is set
 	if (!strchr(s_playermodel.modelskin, '/')) {
 		Q_strcat(s_playermodel.modelskin, 64, "/default");
 	}
-	
+
+	// extract cvar model directory and skin name
+	{
+		char *slash = strchr(s_playermodel.modelskin, '/');
+		if (slash) {
+			int len = slash - s_playermodel.modelskin;
+			if (len >= (int)sizeof(cvarModelDir)) len = sizeof(cvarModelDir) - 1;
+			Q_strncpyz(cvarModelDir, s_playermodel.modelskin, len + 1);
+			cvarSkin = slash + 1;
+		} else {
+			Q_strncpyz(cvarModelDir, s_playermodel.modelskin, sizeof(cvarModelDir));
+			cvarSkin = "default";
+		}
+	}
+
 	// find model in our list
+	s_playermodel.selectedmodel = 0;
 	for (i=0; i<s_playermodel.nummodels; i++)
 	{
-		// strip icon_
-		buffptr  = s_playermodel.modelnames[i] + strlen("models/players/");
-		pdest    = strstr(buffptr,"icon_");
-		if (pdest)
+		PlayerModel_GetModelDir(s_playermodel.modelnames[i], modelDir, sizeof(modelDir));
+		if (!Q_stricmp(modelDir, cvarModelDir))
 		{
-			Q_strncpyz(modelskin,buffptr,pdest-buffptr+1);
-			strcat(modelskin,pdest + 5);
-		}
-		else
-			continue;
-
-		if (!Q_stricmp( s_playermodel.modelskin, modelskin ))
-		{
-			// found pic, set selection here		
 			s_playermodel.selectedmodel = i;
-			s_playermodel.modelpage     = i/MAX_MODELSPERPAGE;
-
-			// separate the model name
-			maxlen = pdest-buffptr;
-			if (maxlen > 16)
-				maxlen = 16;
-			Q_strncpyz( s_playermodel.modelname.string, buffptr, maxlen );
-			Q_strupr( s_playermodel.modelname.string );
-
-			// separate the skin name
-			maxlen = strlen(pdest+5)+1;
-			if (maxlen > 16)
-				maxlen = 16;
-			Q_strncpyz( s_playermodel.skinname.string, pdest+5, maxlen );
-			Q_strupr( s_playermodel.skinname.string );
+			s_playermodel.modelpage = i / MAX_MODELSPERPAGE;
 			break;
 		}
 	}
+
+	// load skins for selected model
+	PlayerModel_LoadSkins(s_playermodel.selectedmodel);
+
+	// find matching skin
+	s_playermodel.selectedskin = 0;
+	for (i=0; i<s_playermodel.numskins; i++)
+	{
+		testSkin = PlayerModel_GetSkinFromIcon(s_playermodel.skinnames[i]);
+		if (!Q_stricmp(testSkin, cvarSkin))
+		{
+			s_playermodel.selectedskin = i;
+			s_playermodel.skinpage = i / MAX_SKINSPERPAGE;
+			break;
+		}
+	}
+
+	// set display strings
+	PlayerModel_SetModelskin();
 }
+
 
 /*
 =================
@@ -545,12 +913,10 @@ static void PlayerModel_MenuInit( void )
 	int			k;
 	int			x;
 	int			y;
-	static char	playername[32];
-	static char	modelname[32];
-	static char	skinname[32];
 
 	// zero set all our globals
 	memset( &s_playermodel, 0 ,sizeof(playermodel_t) );
+	s_playermodel.currentAnim = 0;	// STAND by default
 
 	PlayerModel_Cache();
 
@@ -589,6 +955,7 @@ static void PlayerModel_MenuInit( void )
 	s_playermodel.ports.width         = 274;
 	s_playermodel.ports.height        = 274;
 
+	// model grid: 4 columns × 3 rows
 	y =	59;
 	for (i=0,k=0; i<PLAYERGRID_ROWS; i++)
 	{
@@ -624,11 +991,35 @@ static void PlayerModel_MenuInit( void )
 		y += 64+6;
 	}
 
+	// skin strip: 4 icons in a row below the model grid
+	// positioned at the same column x values, at SKINROW_Y
+	x = 50;
+	y = SKINROW_Y;
+	for (i=0; i<MAX_SKINSPERPAGE; i++)
+	{
+		s_playermodel.skins[i].generic.type      = MTYPE_BITMAP;
+		s_playermodel.skins[i].generic.flags     = QMF_LEFT_JUSTIFY|QMF_NODEFAULTINIT|QMF_PULSEIFFOCUS;
+		s_playermodel.skins[i].generic.id        = ID_SKINPIC0 + i;
+		s_playermodel.skins[i].generic.callback  = PlayerModel_SkinPicEvent;
+		s_playermodel.skins[i].generic.x         = x;
+		s_playermodel.skins[i].generic.y         = y;
+		s_playermodel.skins[i].generic.left      = x;
+		s_playermodel.skins[i].generic.top       = y;
+		s_playermodel.skins[i].generic.right     = x + 64;
+		s_playermodel.skins[i].generic.bottom    = y + 64;
+		s_playermodel.skins[i].width             = 64;
+		s_playermodel.skins[i].height            = 64;
+		s_playermodel.skins[i].focuspic          = MODEL_SELECTED;
+		s_playermodel.skins[i].focuscolor        = colorRed;
+
+		x += 64+6;
+	}
+
 	s_playermodel.playername.generic.type  = MTYPE_PTEXT;
 	s_playermodel.playername.generic.flags = QMF_CENTER_JUSTIFY|QMF_INACTIVE;
 	s_playermodel.playername.generic.x	   = 320;
 	s_playermodel.playername.generic.y	   = 440;
-	s_playermodel.playername.string	       = playername;
+	s_playermodel.playername.string	       = s_playername;
 	s_playermodel.playername.style		   = UI_CENTER;
 	s_playermodel.playername.color         = text_color_normal;
 
@@ -636,7 +1027,7 @@ static void PlayerModel_MenuInit( void )
 	s_playermodel.modelname.generic.flags = QMF_CENTER_JUSTIFY|QMF_INACTIVE;
 	s_playermodel.modelname.generic.x	  = 497;
 	s_playermodel.modelname.generic.y	  = 54;
-	s_playermodel.modelname.string	      = modelname;
+	s_playermodel.modelname.string	      = s_modelname;
 	s_playermodel.modelname.style		  = UI_CENTER;
 	s_playermodel.modelname.color         = text_color_normal;
 
@@ -644,7 +1035,7 @@ static void PlayerModel_MenuInit( void )
 	s_playermodel.skinname.generic.flags  = QMF_CENTER_JUSTIFY|QMF_INACTIVE;
 	s_playermodel.skinname.generic.x	  = 497;
 	s_playermodel.skinname.generic.y	  = 394;
-	s_playermodel.skinname.string	      = skinname;
+	s_playermodel.skinname.string	      = s_skinname;
 	s_playermodel.skinname.style		  = UI_CENTER;
 	s_playermodel.skinname.color          = text_color_normal;
 
@@ -656,11 +1047,12 @@ static void PlayerModel_MenuInit( void )
 	s_playermodel.player.width	           = 32*10;
 	s_playermodel.player.height            = 56*10;
 
+	// model page arrows (below skin strip)
 	s_playermodel.arrows.generic.type		= MTYPE_BITMAP;
 	s_playermodel.arrows.generic.name		= MODEL_ARROWS;
 	s_playermodel.arrows.generic.flags		= QMF_INACTIVE;
 	s_playermodel.arrows.generic.x			= 125;
-	s_playermodel.arrows.generic.y			= 340;
+	s_playermodel.arrows.generic.y			= 345;
 	s_playermodel.arrows.width				= 128;
 	s_playermodel.arrows.height				= 32;
 
@@ -669,7 +1061,7 @@ static void PlayerModel_MenuInit( void )
 	s_playermodel.left.generic.callback		= PlayerModel_MenuEvent;
 	s_playermodel.left.generic.id			= ID_PREVPAGE;
 	s_playermodel.left.generic.x			= 125;
-	s_playermodel.left.generic.y			= 340;
+	s_playermodel.left.generic.y			= 345;
 	s_playermodel.left.width  				= 64;
 	s_playermodel.left.height  				= 32;
 	s_playermodel.left.focuspic				= MODEL_ARROWSL;
@@ -679,7 +1071,7 @@ static void PlayerModel_MenuInit( void )
 	s_playermodel.right.generic.callback	= PlayerModel_MenuEvent;
 	s_playermodel.right.generic.id			= ID_NEXTPAGE;
 	s_playermodel.right.generic.x			= 125+61;
-	s_playermodel.right.generic.y			= 340;
+	s_playermodel.right.generic.y			= 345;
 	s_playermodel.right.width  				= 64;
 	s_playermodel.right.height  		    = 32;
 	s_playermodel.right.focuspic			= MODEL_ARROWSR;
@@ -695,6 +1087,29 @@ static void PlayerModel_MenuInit( void )
 	s_playermodel.back.height  		    = 64;
 	s_playermodel.back.focuspic         = MODEL_BACK1;
 
+	// animation preview buttons along the bottom
+	{
+		int animX = 385;
+		int animY = 430;
+		int animSpacing = 50;
+
+		for (i=0; i<NUM_ANIM_BUTTONS; i++)
+		{
+			Q_strncpyz(s_animLabels[i], s_animDefs[i].label, sizeof(s_animLabels[i]));
+
+			s_playermodel.animItems[i].generic.type   = MTYPE_PTEXT;
+			s_playermodel.animItems[i].generic.flags  = QMF_CENTER_JUSTIFY|QMF_PULSEIFFOCUS|QMF_SMALLFONT;
+			s_playermodel.animItems[i].generic.x      = animX + i * animSpacing;
+			s_playermodel.animItems[i].generic.y      = animY;
+			s_playermodel.animItems[i].generic.id     = ID_ANIM0 + i;
+			s_playermodel.animItems[i].generic.callback = PlayerModel_AnimEvent;
+			s_playermodel.animItems[i].string         = s_animLabels[i];
+			s_playermodel.animItems[i].style          = UI_CENTER|UI_SMALLFONT;
+			s_playermodel.animItems[i].color          = text_color_normal;
+		}
+	}
+
+	// --- add items to menu ---
 	Menu_AddItem( &s_playermodel.menu,	&s_playermodel.banner );
 	Menu_AddItem( &s_playermodel.menu,	&s_playermodel.framel );
 	Menu_AddItem( &s_playermodel.menu,	&s_playermodel.framer );
@@ -709,22 +1124,31 @@ static void PlayerModel_MenuInit( void )
 		Menu_AddItem( &s_playermodel.menu,	&s_playermodel.picbuttons[i] );
 	}
 
+	for (i=0; i<MAX_SKINSPERPAGE; i++)
+	{
+		Menu_AddItem( &s_playermodel.menu,	&s_playermodel.skins[i] );
+	}
+
 	Menu_AddItem( &s_playermodel.menu,	&s_playermodel.player );
 	Menu_AddItem( &s_playermodel.menu,	&s_playermodel.arrows );
 	Menu_AddItem( &s_playermodel.menu,	&s_playermodel.left );
 	Menu_AddItem( &s_playermodel.menu,	&s_playermodel.right );
 	Menu_AddItem( &s_playermodel.menu,	&s_playermodel.back );
 
-	// find all available models
-//	PlayerModel_BuildList();
+	for (i=0; i<NUM_ANIM_BUTTONS; i++)
+	{
+		Menu_AddItem( &s_playermodel.menu,	&s_playermodel.animItems[i] );
+	}
 
 	// set initial states
 	PlayerModel_SetMenuItems();
 
 	// update user interface
 	PlayerModel_UpdateGrid();
+	PlayerModel_UpdateSkinGrid();
 	PlayerModel_UpdateModel();
 }
+
 
 /*
 =================
@@ -751,5 +1175,5 @@ void UI_PlayerModelMenu(void)
 
 	UI_PushMenu( &s_playermodel.menu );
 
-	Menu_SetCursorToItem( &s_playermodel.menu, &s_playermodel.pics[s_playermodel.selectedmodel % MAX_MODELSPERPAGE] );
+	Menu_SetCursorToItem( &s_playermodel.menu, &s_playermodel.picbuttons[s_playermodel.selectedmodel % MAX_MODELSPERPAGE] );
 }

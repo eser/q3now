@@ -465,6 +465,10 @@ static consoleCommand_t	commands[] = {
 	{ "tcmd", CG_TargetCommand_f },
 	{ "tell_target", CG_TellTarget_f },
 	{ "reloadhud", CG_ReloadHud_f },
+#if FEAT_STATS_WINDOW
+	{ "+stats", CG_StatsDown_f },
+	{ "-stats", CG_StatsUp_f },
+#endif
 #ifdef MISSIONPACK
 	{ "vtell_target", CG_VoiceTellTarget_f },
 	{ "loadhud", CG_LoadHud_f },

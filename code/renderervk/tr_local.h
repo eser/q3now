@@ -1343,6 +1343,8 @@ extern cvar_t	*r_ext_supersample;
 extern cvar_t	*r_renderWidth;
 extern cvar_t	*r_renderHeight;
 extern cvar_t	*r_renderScale;
+extern cvar_t	*r_depthFade;
+extern cvar_t	*r_smaa;
 #endif
 
 extern cvar_t	*r_dlightBacks;			// dlight non-facing surfaces for continuity
@@ -1396,6 +1398,9 @@ extern	cvar_t	*r_skipBackEnd;
 extern	cvar_t	*r_greyscale;
 extern	cvar_t	*r_dither;
 extern	cvar_t	*r_presentBits;
+#if FEAT_DEPTH_CLAMP
+extern	cvar_t	*r_depthClamp;
+#endif
 
 extern	cvar_t	*r_ignoreGLErrors;
 

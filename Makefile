@@ -1,37 +1,54 @@
 # q3now — developer Makefile
 #
-# Wraps cmake configure+build, pak packaging, and local install.
+# Composable build workflow with granular targets.
 # All cmake details live in cmake/ — this file is a thin workflow layer.
 #
-# TARGETS
-#   make              configure (if needed) + build Release modules + QVMs
-#   make clean        remove build directory
-#   make rebuild      clean + build
-#   make pak          package modfiles/ + QVMs into build/baseq3/zz-q3now.pk3
-#   make check        verify QVMs, dylibs, and pk3 contents
-#   make install      build + pak + deploy to Q3DIR
-#   make run          build + install + launch q3now
-#   make run-dev      build + install + launch with native modules (vm_*=0, for debugging)
-#   make help         show this message
+# GENERATION TARGETS
+#   make create-launcher    build Go/Wails launcher binary
+#   make create-paks        package modfiles/ + QVMs → pax02.pk3 (or .sw3z)
+#
+# COPY TARGETS (assemble .app at Q3DIR)
+#   make copy-libs          copy renderer + dependency dylibs into .app
+#   make copy-build         copy Release engine + game dylibs into .app
+#   make copy-build-debug   copy Debug engine + game dylibs into .app
+#   make copy-paks          copy mod pak into .app data directory
+#
+# BUNDLING TARGETS
+#   make bundle-codesign    codesign the .app bundle (macOS)
+#   make bundle-dmg         create versioned DMG (macOS)
+#   make bundle-tar         create versioned tar.gz (Linux)
+#
+# FLOW TARGETS
+#   make run-launcher       build + assemble + codesign + open launcher
+#   make run-game           build + assemble + run engine (QVM mode)
+#   make run-gamedev        build-debug + assemble + run engine (native debug)
+#   make release            build + assemble + codesign + package
 #
 # VARIABLES (override on command line or env)
-#   BUILD_DIR    cmake output directory        (default: build)
-#   BUILD_TYPE   Release | Debug               (default: Release)
-#   Q3DIR        install destination           (default: /Applications/q3now on macOS)
-#   JOBS         parallel job count            (default: CPU count)
-#   MAP          map to load with `make run`   (default: q3dm1)
+#   Q3DIR              install destination     (default: /Applications/q3now on macOS)
+#   JOBS               parallel job count      (default: CPU count)
+#   MAP                map to load             (default: q3dm1)
+#   USE_SW3Z           archive format          (0=pk3/zip, 1=sw3z; default: 0)
+#   CODESIGN_IDENTITY  signing identity        (default: - = ad-hoc)
+#   UPSTREAM_REF       fork point for diff-api (default: ecd5fa41)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
 APP_NAME   ?= q3now
-BUILD_DIR  ?= build
-BUILD_TYPE ?= Release
 MAP        ?= q3dm1
+
+# Dual build directories — avoid cmake reconfigure thrash between Release/Debug
+BUILD_DIR_RELEASE := build-release
+BUILD_DIR_DEBUG   := build-debug
+BUILD_DIR         := $(BUILD_DIR_RELEASE)
 
 # CPU count and architecture detection
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 ifeq ($(UNAME_M),arm64)
+  BINEXT  := .arm64
+  RENDEXT := _arm64
+else ifeq ($(UNAME_M),aarch64)
   BINEXT  := .aarch64
   RENDEXT := _aarch64
 else ifeq ($(UNAME_M),x86_64)
@@ -42,25 +59,34 @@ else
   RENDEXT :=
 endif
 # GAME_ARCH mirrors ARCH_STRING from q_platform.h (vm.c appends it to dylib filenames)
-# Strip the leading "_" from RENDEXT: "_aarch64" -> "aarch64"
 GAME_ARCH := $(patsubst _%,%,$(RENDEXT))
 ifeq ($(UNAME_S),Darwin)
   JOBS        ?= $(shell sysctl -n hw.ncpu)
-  # cmake puts app bundles at build/<name><arch>.app (no Release/ subdir)
-  BUILT_APP   := $(BUILD_DIR)/$(APP_NAME)$(BINEXT).app
-  BUILT_DED   := $(BUILD_DIR)/$(APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(APP_NAME)-ded$(BINEXT)
-  GAME_BIN    := $(BUILT_APP)/Contents/MacOS/$(APP_NAME)$(BINEXT)
-  Q3DIR       ?= /Applications/$(APP_NAME)
+  BUILT_APP_RELEASE := $(BUILD_DIR_RELEASE)/$(APP_NAME)$(BINEXT).app
+  BUILT_APP_DEBUG   := $(BUILD_DIR_DEBUG)/$(APP_NAME)$(BINEXT).app
+  GAME_BIN    := $(BUILT_APP_RELEASE)/Contents/MacOS/$(APP_NAME)$(BINEXT)
+  BUILT_DED_RELEASE := $(BUILD_DIR_RELEASE)/$(APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(APP_NAME)-ded$(BINEXT)
+  BUILT_DED_DEBUG   := $(BUILD_DIR_DEBUG)/$(APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(APP_NAME)-ded$(BINEXT)
+  Q3DIR       ?= /Applications/$(APP_NAME).app
 else
   JOBS        ?= $(shell nproc 2>/dev/null || echo 4)
-  GAME_BIN    := $(BUILD_DIR)/$(APP_NAME)$(BINEXT)
+  GAME_BIN    := $(BUILD_DIR_RELEASE)/$(APP_NAME)$(BINEXT)
   Q3DIR       ?= $(HOME)/$(APP_NAME)
 endif
 
-# cmake always places game modules at build/Release/baseq3/ regardless of platform
-MODULE_DIR  := $(BUILD_DIR)/Release/baseq3
+# cmake puts game modules at <build-dir>/Release/baseq3/ (or Debug/baseq3/)
+MODULE_DIR_RELEASE := $(BUILD_DIR_RELEASE)/Release/baseq3
+MODULE_DIR_DEBUG   := $(BUILD_DIR_DEBUG)/Debug/baseq3
+MODULE_DIR         := $(MODULE_DIR_RELEASE)
 
-Q3BASEDIR   := $(Q3DIR)/baseq3
+ifeq ($(UNAME_S),Darwin)
+  # macOS bundle conventions: code in Contents/MacOS/, data in Contents/Resources/
+  Q3BASEDIR  := $(Q3DIR)/Contents/MacOS/baseq3
+  Q3DATADIR  := $(Q3DIR)/Contents/Resources/baseq3
+else
+  Q3BASEDIR  := $(Q3DIR)/baseq3
+  Q3DATADIR  := $(Q3DIR)/baseq3
+endif
 
 # Use Ninja if available — much faster incremental builds
 ifneq ($(shell which ninja 2>/dev/null),)
@@ -69,174 +95,330 @@ else
   GENERATOR :=
 endif
 
-CMAKE_CONFIGURE := cmake -S . -B $(BUILD_DIR) $(GENERATOR) \
-                     -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release
+CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug
+CMAKE_BUILD_RELEASE     := cmake --build $(BUILD_DIR_RELEASE) --parallel $(JOBS)
+CMAKE_BUILD_DEBUG       := cmake --build $(BUILD_DIR_DEBUG) --parallel $(JOBS)
 
-CMAKE_BUILD := cmake --build $(BUILD_DIR) --parallel $(JOBS)
+# Code signing identity (default: ad-hoc).
+CODESIGN_IDENTITY ?= -
 
 # DMG packaging (macOS only)
 VERSION     := $(shell git describe --always --dirty)
 DMG_NAME    := $(APP_NAME)-$(VERSION)-$(UNAME_M)
-DMG_STAGING := $(BUILD_DIR)/dmg-staging
-DMG_OUT     := $(BUILD_DIR)/$(DMG_NAME).dmg
+DMG_STAGING := $(BUILD_DIR_RELEASE)/dmg-staging
+DMG_OUT     := $(BUILD_DIR_RELEASE)/$(DMG_NAME).dmg
+
+# tar.gz packaging (Linux)
+TAR_NAME    := $(APP_NAME)-$(VERSION)-linux-$(UNAME_M)
+TAR_STAGING := $(BUILD_DIR_RELEASE)/tar-staging
+TAR_OUT     := $(BUILD_DIR_RELEASE)/$(TAR_NAME).tar.gz
+
+# Launcher (Go/Wails)
+LAUNCHER_DIR := launcher
+LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS/q3now-launcher
+
+# SW3Z archiver
+SW3Z_DIR := pkg/sw3z-archiver
+SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
+
+# Archive format toggle: 1 = sw3z, 0 = pk3 (zip)
+USE_SW3Z ?= 1
+
+# Pak output (always from Release build — QVMs are always Release)
+PAK_STAGING := $(BUILD_DIR_RELEASE)/pak-staging
+ifeq ($(USE_SW3Z),1)
+  PAK_EXT := sw3z
+else
+  PAK_EXT := pk3
+endif
+PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax02.$(PAK_EXT)
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
-.PHONY: all configure build clean rebuild pak check install run run-dev smoke bench diff-api dmg release help
+.PHONY: all configure build build-debug clean rebuild \
+        create-launcher create-paks \
+        copy-libs copy-build copy-build-debug copy-paks copy-all copy-all-debug \
+        bundle-codesign bundle-dmg bundle-tar \
+        run-launcher run-game run-gamedev release \
+        check smoke test-features bench diff-api help
 
 all: build
 
-# ── Configure ─────────────────────────────────────────────────────────────────
-# Re-runs only when CMakeLists.txt changes.
+# ══════════════════════════════════════════════════════════════════════════════
+# FOUNDATION — configure, build, clean
+# ══════════════════════════════════════════════════════════════════════════════
 
-$(BUILD_DIR)/CMakeCache.txt: CMakeLists.txt
-	$(CMAKE_CONFIGURE)
+$(BUILD_DIR_RELEASE)/CMakeCache.txt: CMakeLists.txt
+	$(CMAKE_CONFIGURE_RELEASE)
 
-configure: $(BUILD_DIR)/CMakeCache.txt
+$(BUILD_DIR_DEBUG)/CMakeCache.txt: CMakeLists.txt
+	$(CMAKE_CONFIGURE_DEBUG)
 
-# ── Build ─────────────────────────────────────────────────────────────────────
-# Builds native .so/.dylib modules AND QVM bytecode.
-# QVM toolchain (lcc/q3asm) is compiled from source the first time (~30s),
-# then cached. Subsequent builds only recompile changed files.
+configure: $(BUILD_DIR_RELEASE)/CMakeCache.txt
 
-build: $(BUILD_DIR)/CMakeCache.txt
-	$(CMAKE_BUILD)
+build: $(BUILD_DIR_RELEASE)/CMakeCache.txt
+	$(CMAKE_BUILD_RELEASE)
 
-# ── Clean / Rebuild ───────────────────────────────────────────────────────────
+build-debug: $(BUILD_DIR_DEBUG)/CMakeCache.txt
+	$(CMAKE_BUILD_DEBUG)
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR_RELEASE) $(BUILD_DIR_DEBUG)
 
 rebuild: clean build
 
-# ── Pak packaging ─────────────────────────────────────────────────────────────
-# Creates build/baseq3/zz-q3now.pk3 from modfiles/ + QVMs.
-# zz- prefix ensures this pak loads last (highest override priority).
-# QVMs in zz-q3now.pk3 override the stock 1999 QVMs in pak0.pk3.
+# ══════════════════════════════════════════════════════════════════════════════
+# GENERATION TARGETS — produce artifacts
+# ══════════════════════════════════════════════════════════════════════════════
 
-PAK_STAGING := $(BUILD_DIR)/pak-staging
-PAK_OUT     := $(BUILD_DIR)/baseq3/zz-$(APP_NAME).pk3
+# ── create-launcher ──────────────────────────────────────────────────────────
+# Builds the Go/Wails launcher binary. Requires: go, node, wails CLI.
 
-pak: build
+create-launcher:
+	@echo "==> Building launcher..."
+	cd $(LAUNCHER_DIR) && PATH="$$HOME/go/bin:$$PATH" wails build \
+	  -ldflags "-X main.version=$(VERSION)"
+	@echo "==> Launcher ready: $(LAUNCHER_BIN)"
+
+# ── create-paks ──────────────────────────────────────────────────────────────
+# Packages modfiles/ + QVMs into pax02.pk3 (or .sw3z when USE_SW3Z=1).
+# "pax02" sorts after pak0–pak8, ensuring highest override priority.
+# QVMs here override the stock 1999 QVMs in pak0.pk3.
+
+$(SW3Z_BIN):
+	cd $(SW3Z_DIR) && go build -o $(CURDIR)/$(SW3Z_BIN) ./cmd/sw3z
+
+ifeq ($(USE_SW3Z),1)
+create-paks: build $(SW3Z_BIN)
+else
+create-paks: build
+endif
 	@echo "==> Staging pak contents..."
 	rm -rf $(PAK_STAGING)
-	mkdir -p $(PAK_STAGING) $(BUILD_DIR)/baseq3
+	mkdir -p $(PAK_STAGING) $(BUILD_DIR_RELEASE)/baseq3
 	cp -R modfiles/. $(PAK_STAGING)/
 	@echo "==> Copying QVMs into pak..."
-	cp -R $(MODULE_DIR)/vm $(PAK_STAGING)/
+	cp -R $(MODULE_DIR_RELEASE)/vm $(PAK_STAGING)/
 	@echo "==> Stamping version..."
 	echo "$(APP_NAME) $$(git describe --always --dirty) ($$(date +%Y-%m-%d))" > $(PAK_STAGING)/description.txt
 	@echo "==> Creating $(PAK_OUT)..."
+ifeq ($(USE_SW3Z),1)
+	$(SW3Z_BIN) a -x "**/.DS_Store" -x ".DS_Store" "$(PAK_OUT)" $(PAK_STAGING)
+else
 	cd $(PAK_STAGING) && zip -r9 "$(CURDIR)/$(PAK_OUT)" . -x "**/.DS_Store" -x ".DS_Store"
+endif
 	@echo "==> $(PAK_OUT) ready"
 
-# ── Check ─────────────────────────────────────────────────────────────────────
-# Verifies all outputs are present and pk3 contains QVMs.
-# Guards against the silent failure mode: stock QVMs loading instead of custom.
+# ══════════════════════════════════════════════════════════════════════════════
+# COPY TARGETS — assemble .app at Q3DIR
+# ══════════════════════════════════════════════════════════════════════════════
 
-check: pak
-	@echo "==> Verifying build..."
-	@ls $(MODULE_DIR)/vm/cgame.qvm  > /dev/null && echo "  cgame.qvm:   OK"
-	@ls $(MODULE_DIR)/vm/qagame.qvm > /dev/null && echo "  qagame.qvm:  OK"
-	@ls $(MODULE_DIR)/vm/ui.qvm     > /dev/null && echo "  ui.qvm:      OK"
-	@ls $(MODULE_DIR)/cgame.*       > /dev/null && echo "  cgame.dylib: OK"
-	@ls $(MODULE_DIR)/qagame.*      > /dev/null && echo "  qagame.dylib: OK"
-	@ls $(MODULE_DIR)/ui.*          > /dev/null && echo "  ui.dylib:    OK"
-	@unzip -l $(PAK_OUT) | grep -q "vm/cgame.qvm" && echo "  pk3 QVMs:    OK"
+# ── Shared copy logic ────────────────────────────────────────────────────────
+# Platform-specific game module extension (resolved at read time, used in macro)
 ifeq ($(UNAME_S),Darwin)
-	@codesign --verify "$(Q3DIR)/$(APP_NAME).app" 2>/dev/null && echo "  codesign:    OK" || echo "  codesign:    MISSING (run make install)"
-	@codesign -d --entitlements - "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)$(BINEXT)" 2>/dev/null | grep -q "allow-jit" && echo "  JIT entitlement: OK" || echo "  JIT entitlement: MISSING"
+  _GAME_MODULE_EXT = $(GAME_ARCH).dylib
+else
+  _GAME_MODULE_EXT = .so
 endif
-	@echo "==> All checks passed."
 
-# ── Install ───────────────────────────────────────────────────────────────────
-# Deploys to Q3DIR (default: /Applications/q3now on macOS).
-# Uses rsync --delete to cleanly replace the .app bundle (no stale files).
-# Override Q3DIR to target a different install location.
-
-install: build pak
-	@echo "==> Installing to: $(Q3DIR)"
+# _do-copy-build: internal target pattern for copy-build / copy-build-debug
+# Uses target-specific variables set by the caller
+_do-copy-build:
+	@echo "==> Copying $(_CFG) build into .app..."
 ifeq ($(UNAME_S),Darwin)
-	@# Replace .app bundle cleanly (rsync --delete removes stale files from old bundle)
-	rsync -a --delete "$(BUILT_APP)/" "$(Q3DIR)/$(APP_NAME).app/"
-	@# Renderer dylibs live inside Contents/MacOS/ — self-contained bundle.
-	@# cl_main.c tries Sys_DefaultAppPath() (Contents/MacOS/) before Sys_DefaultBasePath().
-	cp "$(BUILD_DIR)/$(APP_NAME)_opengl$(RENDEXT).dylib" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"
-	@test -f "$(BUILD_DIR)/$(APP_NAME)_vulkan$(RENDEXT).dylib" && \
-	  cp "$(BUILD_DIR)/$(APP_NAME)_vulkan$(RENDEXT).dylib" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/" || true
-	@# MoltenVK: copy into Contents/MacOS/ — VKimp_Init calls SDL_Vulkan_LoadLibrary(bundledPath)
+	rsync -a --delete "$(_APP)/" "$(Q3DIR)/"
+	@test -f "$(LAUNCHER_BIN)" && \
+	  cp "$(LAUNCHER_BIN)" "$(Q3DIR)/Contents/MacOS/q3now-launcher" || \
+	  echo "  NOTE: launcher not built (run make create-launcher)"
+	/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable q3now-launcher" \
+	  "$(Q3DIR)/Contents/Info.plist"
+	@test -f "$(_DED)" && cp "$(_DED)" \
+	  "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded" || true
+endif
+	mkdir -p "$(Q3BASEDIR)"
+	cp "$(_BDIR)/$(_CFG)/baseq3/cgame$(_GAME_MODULE_EXT)"  "$(Q3BASEDIR)/"
+	cp "$(_BDIR)/$(_CFG)/baseq3/qagame$(_GAME_MODULE_EXT)" "$(Q3BASEDIR)/"
+	cp "$(_BDIR)/$(_CFG)/baseq3/ui$(_GAME_MODULE_EXT)"     "$(Q3BASEDIR)/"
+
+# ── copy-build ───────────────────────────────────────────────────────────────
+# Build Release engine, copy engine binary + game dylibs into .app at Q3DIR.
+# Also copies launcher binary if previously built (see create-launcher).
+
+copy-build: _BDIR := $(BUILD_DIR_RELEASE)
+copy-build: _CFG  := Release
+copy-build: _APP  := $(BUILT_APP_RELEASE)
+copy-build: _DED  := $(BUILT_DED_RELEASE)
+copy-build: build _do-copy-build
+
+# ── copy-build-debug ─────────────────────────────────────────────────────────
+# Build Debug engine, copy engine binary + game dylibs into .app at Q3DIR.
+# Also copies launcher binary if previously built (see create-launcher).
+
+copy-build-debug: _BDIR := $(BUILD_DIR_DEBUG)
+copy-build-debug: _CFG  := Debug
+copy-build-debug: _APP  := $(BUILT_APP_DEBUG)
+copy-build-debug: _DED  := $(BUILT_DED_DEBUG)
+copy-build-debug: build-debug _do-copy-build
+
+# ── copy-libs ────────────────────────────────────────────────────────────────
+# Copies renderer dylibs and third-party dependencies into .app.
+# Does NOT copy engine binaries or game modules — copy-build handles those.
+
+copy-libs: build
+ifeq ($(UNAME_S),Darwin)
+	@echo "==> Copying renderer + dependency dylibs..."
+	cp "$(BUILD_DIR_RELEASE)/$(APP_NAME)_opengl$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/"
+	@test -f "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).dylib" && \
+	  cp "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/" || true
+	@# MoltenVK
 	@MOLTEN_VK=$$(find /opt/homebrew/lib /usr/local/lib 2>/dev/null -name "libMoltenVK.dylib" -maxdepth 1 | head -1); \
 	  if [ -n "$$MOLTEN_VK" ]; then \
 	    echo "  MoltenVK: $$MOLTEN_VK → Contents/MacOS/"; \
-	    cp "$$MOLTEN_VK" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"; \
+	    cp "$$MOLTEN_VK" "$(Q3DIR)/Contents/MacOS/"; \
 	  else \
 	    echo "  WARNING: libMoltenVK.dylib not found — Vulkan renderer will not work"; \
 	    echo "  Run: brew install molten-vk"; \
 	  fi
-	@# SDL3: copy libSDL3.dylib into Contents/MacOS/ + fix load paths (belt & suspenders;
-	@#   cmake RPATH handles the rpath, install_name_tool fixes the explicit install path)
+	@# SDL3
 	@SDL3_DYLIB=$$(find /opt/homebrew/lib /usr/local/lib 2>/dev/null -name "libSDL3*.dylib" -maxdepth 1 | head -1); \
 	  if [ -n "$$SDL3_DYLIB" ]; then \
 	    echo "  SDL3: $$SDL3_DYLIB → Contents/MacOS/"; \
-	    cp "$$SDL3_DYLIB" "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"; \
+	    cp "$$SDL3_DYLIB" "$(Q3DIR)/Contents/MacOS/"; \
 	    SDL3_BASE=$$(basename "$$SDL3_DYLIB"); \
-	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" "$(GAME_BIN)" 2>/dev/null || true; \
 	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" \
-	      "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)_opengl$(RENDEXT).dylib" 2>/dev/null || true; \
+	      "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" 2>/dev/null || true; \
 	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" \
-	      "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)_vulkan$(RENDEXT).dylib" 2>/dev/null || true; \
+	      "$(Q3DIR)/Contents/MacOS/$(APP_NAME)_opengl$(RENDEXT).dylib" 2>/dev/null || true; \
+	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" \
+	      "$(Q3DIR)/Contents/MacOS/$(APP_NAME)_vulkan$(RENDEXT).dylib" 2>/dev/null || true; \
 	  else \
 	    echo "  WARNING: libSDL3.dylib not found — app may not launch without SDL3"; \
 	    echo "  Run: brew install sdl3"; \
 	  fi
-	@# Game modules go in Q3BASEDIR/ where FS_LoadLibrary finds them via DIR_STATIC searchpaths.
-	@# FS_LoadLibrary builds: FS_BuildOSPath(path, gamedir, name) = $Q3DIR/baseq3/<name>
-	@# This matches how Linux installs them; inside the .app bundle is NOT searched.
-	mkdir -p "$(Q3BASEDIR)"
-	cp "$(MODULE_DIR)/cgame$(GAME_ARCH).dylib"  "$(Q3BASEDIR)/"
-	cp "$(MODULE_DIR)/qagame$(GAME_ARCH).dylib" "$(Q3BASEDIR)/"
-	cp "$(MODULE_DIR)/ui$(GAME_ARCH).dylib"     "$(Q3BASEDIR)/"
-	@# Dedicated server binary alongside .app (if built)
-	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(Q3DIR)/$(APP_NAME)-ded" || true
-	@# Code sign: ad-hoc with JIT entitlements (required for ARM64 JIT on macOS)
-	@echo "==> Code signing..."
-	@for dylib in "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/"*.dylib \
-	              "$(Q3BASEDIR)/"*$(GAME_ARCH).dylib; do \
-	  [ -f "$$dylib" ] && codesign --force --sign - "$$dylib" 2>/dev/null; \
-	done
-	codesign --force --sign - --entitlements misc/macos/q3now.entitlements \
-	  "$(Q3DIR)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME)$(BINEXT)"
-	codesign --force --sign - --entitlements misc/macos/q3now.entitlements "$(Q3DIR)/$(APP_NAME).app"
-	@test -f "$(Q3DIR)/$(APP_NAME)-ded" && \
-	  codesign --force --sign - --entitlements misc/macos/q3now.entitlements "$(Q3DIR)/$(APP_NAME)-ded" || true
-else
-	mkdir -p "$(Q3BASEDIR)"
-	cp "$(MODULE_DIR)/cgame.so"  "$(Q3BASEDIR)/"
-	cp "$(MODULE_DIR)/qagame.so" "$(Q3BASEDIR)/"
-	cp "$(MODULE_DIR)/ui.so"     "$(Q3BASEDIR)/"
 endif
-	@# Mod pak into basepath/baseq3/ — QVMs here override stock paks
-	mkdir -p "$(Q3BASEDIR)"
-	cp "$(PAK_OUT)" "$(Q3BASEDIR)/"
-	@echo "==> Done. Launch with: make run"
 
-# ── Run ───────────────────────────────────────────────────────────────────────
-# Builds, installs, and launches q3now. QVMs loaded (vm_*=2, default).
+# ── copy-paks ────────────────────────────────────────────────────────────────
+# Copies the mod pak (pk3 or sw3z) into Q3DATADIR. Removes stale format.
 
-run: install
+copy-paks: create-paks
+	mkdir -p "$(Q3DATADIR)"
+ifeq ($(USE_SW3Z),1)
+	@echo "==> Copying sw3z pak to $(Q3DATADIR)/"
+	@rm -f "$(Q3DATADIR)/zz-$(APP_NAME).pk3"
+	cp "$(PAK_OUT)" "$(Q3DATADIR)/"
+else
+	@echo "==> Copying pk3 pak to $(Q3DATADIR)/"
+	@rm -f "$(Q3DATADIR)/zz-$(APP_NAME).sw3z"
+	cp "$(PAK_OUT)" "$(Q3DATADIR)/"
+endif
+
+# ── Composite helpers ────────────────────────────────────────────────────────
+
+copy-all:       copy-build copy-libs copy-paks
+copy-all-debug: copy-build-debug copy-libs copy-paks
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BUNDLING TARGETS — codesign, package for distribution
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── bundle-codesign ──────────────────────────────────────────────────────────
+# Code signs the fully assembled .app bundle (macOS only).
+# Ad-hoc by default; set CODESIGN_IDENTITY for distribution signing.
+
+bundle-codesign:
 ifeq ($(UNAME_S),Darwin)
-	open "$(Q3DIR)/$(APP_NAME).app" --args +map $(MAP)
+	@echo "==> Code signing..."
+	@for dylib in "$(Q3DIR)/Contents/MacOS/"*.dylib \
+	              "$(Q3BASEDIR)/"*$(GAME_ARCH).dylib; do \
+	  [ -f "$$dylib" ] && codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" "$$dylib" 2>/dev/null; \
+	done
+	codesign --force --options runtime --entitlements misc/macos/q3now.entitlements \
+	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)"
+	codesign --force --options runtime \
+	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/q3now-launcher"
+	@test -f "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded" && \
+	  codesign --force --options runtime --entitlements misc/macos/q3now.entitlements \
+	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded" || true
+	@# Sign the bundle as a whole (--deep re-signs all subcomponents).
+	@# Non-code data (.sw3z) lives in Contents/Resources/, not Contents/MacOS/,
+	@# so codesign handles the bundle cleanly.
+	codesign --force --deep --options runtime --entitlements misc/macos/q3now.entitlements \
+	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)"
+else
+	@echo "bundle-codesign: macOS only, skipping"
+endif
+
+# ── bundle-dmg ───────────────────────────────────────────────────────────────
+# Creates a styled, version-stamped DMG with background + drag-to-Applications.
+
+bundle-dmg: bundle-codesign
+ifeq ($(UNAME_S),Darwin)
+	@echo "==> Creating $(DMG_NAME).dmg..."
+	rm -rf $(DMG_STAGING) "$(DMG_OUT)"
+	mkdir -p $(DMG_STAGING)
+	cp -R "$(Q3DIR)" "$(DMG_STAGING)/"
+	chmod -R u+w "$(DMG_STAGING)/$(APP_NAME).app/"
+	xattr -cr "$(DMG_STAGING)/$(APP_NAME).app/"
+	misc/macos/create-styled-dmg.sh "$(DMG_STAGING)" misc/macos/dmg-background.png "$(DMG_OUT)" "$(APP_NAME)"
+	rm -rf $(DMG_STAGING)
+	@echo "==> $(DMG_OUT) ready ($$(du -h "$(DMG_OUT)" | cut -f1))"
+else
+	@echo "DMG creation requires macOS"
+endif
+
+# ── bundle-tar ───────────────────────────────────────────────────────────────
+# Creates a version-stamped tar.gz for Linux distribution.
+
+bundle-tar:
+ifeq ($(UNAME_S),Linux)
+	@echo "==> Creating $(TAR_NAME).tar.gz..."
+	rm -rf $(TAR_STAGING) "$(TAR_OUT)"
+	mkdir -p $(TAR_STAGING)/baseq3
+	cp "$(Q3DIR)/$(APP_NAME)$(BINEXT)" "$(TAR_STAGING)/"
+	@test -f "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)" && \
+	  cp "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)" "$(TAR_STAGING)/" || true
+	cp "$(LAUNCHER_BIN)" "$(TAR_STAGING)/q3now-launcher" 2>/dev/null || true
+	cp -R "$(Q3BASEDIR)/." "$(TAR_STAGING)/baseq3/"
+	cp README.md "$(TAR_STAGING)/"
+	tar czf "$(TAR_OUT)" -C $(TAR_STAGING) .
+	rm -rf $(TAR_STAGING)
+	@echo "==> $(TAR_OUT) ready ($$(du -h "$(TAR_OUT)" | cut -f1))"
+else
+	@echo "tar packaging is for Linux — use 'make bundle-dmg' on macOS"
+endif
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FLOW TARGETS — composable workflows
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── run-launcher ─────────────────────────────────────────────────────────────
+# Build launcher + engine + paks, assemble .app, codesign, open launcher.
+
+run-launcher: create-launcher copy-all bundle-codesign
+ifeq ($(UNAME_S),Darwin)
+	open "$(Q3DIR)"
+else
+	"$(Q3DIR)/q3now-launcher"
+endif
+
+# ── run-game ─────────────────────────────────────────────────────────────────
+# Build engine + paks, assemble .app, run engine directly (QVM mode, no launcher).
+
+run-game: copy-all
+ifeq ($(UNAME_S),Darwin)
+	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" +map $(MAP)
 else
 	"$(Q3DIR)/$(APP_NAME)" +map $(MAP)
 endif
 
-# ── Run (dev / debug) ─────────────────────────────────────────────────────────
-# Builds, installs, and launches with native dylibs (vm_*=0) for debugging.
-# sv_pure must be disabled or the client forces QVM mode regardless of vm_*.
+# ── run-gamedev ──────────────────────────────────────────────────────────────
+# Build Debug engine + paks, assemble .app, run with native dylibs (vm_*=0).
+# sv_pure disabled, developer mode enabled — for debugging with crash symbols.
 
-run-dev: install
+run-gamedev: copy-all-debug
 ifeq ($(UNAME_S),Darwin)
-	open "$(Q3DIR)/$(APP_NAME).app" --args \
+	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" \
 	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
 	  +set developer 1 +devmap $(MAP)
 else
@@ -245,25 +427,68 @@ else
 	  +set developer 1 +devmap $(MAP)
 endif
 
-# ── Smoke test ────────────────────────────────────────────────────────────────
+# ── release ──────────────────────────────────────────────────────────────────
+# Verify outputs, build launcher + engine + paks, assemble .app, codesign,
+# package DMG (macOS) or tar.gz (Linux).
+
+release: check create-launcher copy-all bundle-codesign
+ifeq ($(UNAME_S),Darwin)
+	$(MAKE) bundle-dmg
+else
+	$(MAKE) bundle-tar
+endif
+	@echo ""
+	@echo "  ┌─────────────────────────────────────┐"
+	@echo "  │  q3now release ready                 │"
+	@echo "  ├─────────────────────────────────────┤"
+ifeq ($(UNAME_S),Darwin)
+	@echo "  │  DMG: $(DMG_OUT)"
+	@echo "  │  Size: $$(du -h "$(DMG_OUT)" | cut -f1)"
+else
+	@echo "  │  TAR: $(TAR_OUT)"
+	@echo "  │  Size: $$(du -h "$(TAR_OUT)" | cut -f1)"
+endif
+	@echo "  └─────────────────────────────────────┘"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VERIFICATION & TESTING
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── check ────────────────────────────────────────────────────────────────────
+# Verifies all build outputs are present.
+
+check: create-paks
+	@echo "==> Verifying build..."
+	@ls $(MODULE_DIR_RELEASE)/vm/cgame.qvm  > /dev/null && echo "  cgame.qvm:   OK"
+	@ls $(MODULE_DIR_RELEASE)/vm/qagame.qvm > /dev/null && echo "  qagame.qvm:  OK"
+	@ls $(MODULE_DIR_RELEASE)/vm/ui.qvm     > /dev/null && echo "  ui.qvm:      OK"
+	@ls $(MODULE_DIR_RELEASE)/cgame$(GAME_ARCH).*    > /dev/null && echo "  cgame.dylib: OK"
+	@ls $(MODULE_DIR_RELEASE)/qagame$(GAME_ARCH).*  > /dev/null && echo "  qagame.dylib: OK"
+	@ls $(MODULE_DIR_RELEASE)/ui$(GAME_ARCH).*      > /dev/null && echo "  ui.dylib:    OK"
+	@test -f $(PAK_OUT) && echo "  mod pak:     OK ($(PAK_EXT))"
+ifeq ($(UNAME_S),Darwin)
+	@codesign --verify "$(Q3DIR)" 2>/dev/null && echo "  codesign:    OK" || echo "  codesign:    MISSING (run make bundle-codesign)"
+	@codesign -d --entitlements - "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" 2>/dev/null | grep -q "allow-jit" && echo "  JIT entitlement: OK" || echo "  JIT entitlement: MISSING"
+endif
+	@echo "==> All checks passed."
+
+# ── smoke ────────────────────────────────────────────────────────────────────
 # Headless gameplay smoke test. Requires Q3DIR with pak0.pk3.
-# Skips gracefully (exit 77) in asset-free CI environments.
 
 smoke: build
 ifeq ($(UNAME_S),Darwin)
-	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded"
+	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded"
 else
 	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)"
 endif
 
-# ── Feature stress test ──────────────────────────────────────────────────────
+# ── test-features ────────────────────────────────────────────────────────────
 # Starts devmap with ALL feature cvars enabled, spawns 3 bots, runs 30s.
-# Catches crashes from feature interactions. Exit 0 = all features coexist.
 
-test-features: install
+test-features: copy-all
 ifeq ($(UNAME_S),Darwin)
 	@echo "==> Testing all features enabled (30s)..."
-	@timeout 35 "$(GAME_BIN)" \
+	@timeout 35 "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" \
 	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
 	  +set g_fastWeaponSwitch 2 \
 	  +set g_spawnProtect 2 \
@@ -282,27 +507,25 @@ else
 	@echo "test-features: not yet implemented for Linux"
 endif
 
-# ── Bench ─────────────────────────────────────────────────────────────────────
-# Timedemo benchmark. Requires a demo at Q3BASEDIR/demos/four.dm_68.
-# Override DEMO= to use a different demo file (without the .dm_68 extension).
+# ── bench ────────────────────────────────────────────────────────────────────
+# Timedemo benchmark. Requires a demo at Q3BASEDIR/demos/<DEMO>.dm_68.
 
 DEMO ?= four
 
-bench: install
+bench: copy-all
 	@if [ ! -f "$(Q3BASEDIR)/demos/$(DEMO).dm_68" ]; then \
 	  echo "ERROR: $(Q3BASEDIR)/demos/$(DEMO).dm_68 not found"; \
 	  echo "Copy a demo file (.dm_68) to $(Q3BASEDIR)/demos/ and set DEMO=<name>"; \
 	  exit 1; \
 	fi
 ifeq ($(UNAME_S),Darwin)
-	open "$(Q3DIR)/$(APP_NAME).app" --args +timedemo 1 +demo $(DEMO)
+	open "$(Q3DIR)" --args +timedemo 1 +demo $(DEMO)
 else
 	"$(Q3DIR)/$(APP_NAME)$(BINEXT)" +timedemo 1 +demo $(DEMO)
 endif
 
-# ── Diff-api ──────────────────────────────────────────────────────────────────
+# ── diff-api ─────────────────────────────────────────────────────────────────
 # Diffs q3now's game API headers against upstream Quake3e at the fork point.
-# Use UPSTREAM_REF= to compare against a different commit or tag.
 
 UPSTREAM_REF ?= ecd5fa41
 
@@ -315,61 +538,51 @@ diff-api:
 	@echo "--- ui_public.h ---"
 	@git diff $(UPSTREAM_REF) -- code/ui/ui_public.h
 
-# ── DMG packaging ─────────────────────────────────────────────────────────────
-# Creates a version-stamped, compressed DMG containing q3now.app + pk3 + README.
-# DMG filename example: q3now-4736ab7-arm64.dmg
-
-dmg: install
-ifeq ($(UNAME_S),Darwin)
-	@echo "==> Creating $(DMG_NAME).dmg..."
-	rm -rf $(DMG_STAGING) "$(DMG_OUT)"
-	mkdir -p $(DMG_STAGING)/baseq3
-	cp -R "$(Q3DIR)/$(APP_NAME).app" "$(DMG_STAGING)/"
-	cp "$(PAK_OUT)" "$(DMG_STAGING)/baseq3/"
-	cp README.md "$(DMG_STAGING)/"
-	@test -f "$(Q3DIR)/$(APP_NAME)-ded" && cp "$(Q3DIR)/$(APP_NAME)-ded" "$(DMG_STAGING)/" || true
-	hdiutil create -volname "$(APP_NAME)" -srcfolder $(DMG_STAGING) -ov -format UDZO "$(DMG_OUT)"
-	rm -rf $(DMG_STAGING)
-	@echo "==> $(DMG_OUT) ready ($$(du -h "$(DMG_OUT)" | cut -f1))"
-else
-	@echo "DMG creation requires macOS"
-endif
-
-# ── Release ───────────────────────────────────────────────────────────────────
-# Full release pipeline: verify everything, then produce a distributable DMG.
-
-release: check dmg
-	@echo ""
-	@echo "  ┌─────────────────────────────────────┐"
-	@echo "  │  q3now release ready                 │"
-	@echo "  ├─────────────────────────────────────┤"
-	@echo "  │  DMG: $(DMG_OUT)"
-	@echo "  │  Size: $$(du -h "$(DMG_OUT)" | cut -f1)"
-	@echo "  └─────────────────────────────────────┘"
-
-# ── Help ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# HELP
+# ══════════════════════════════════════════════════════════════════════════════
 
 help:
 	@echo ""
 	@echo "  q3now build targets"
 	@echo "  ───────────────────────────────────────────────────────────"
-	@echo "  make              configure + build (native modules + QVMs)"
-	@echo "  make clean        remove build/"
+	@echo "  make              configure + build Release"
+	@echo "  make build-debug  configure + build Debug"
+	@echo "  make clean        remove build-release/ + build-debug/"
 	@echo "  make rebuild      clean + build"
-	@echo "  make pak          package modfiles/ + QVMs → zz-q3now.pk3"
-	@echo "  make check        verify QVMs, dylibs, pk3 contents"
-	@echo "  make install      build + pak + deploy to Q3DIR"
-	@echo "  make run          build + install + launch (QVM mode)"
-	@echo "  make run-dev      build + install + launch (native debug mode)"
-	@echo "  make bench        timedemo benchmark (requires DEMO in Q3BASEDIR/demos/)"
-	@echo "  make diff-api     diff game API headers vs upstream Quake3e fork point"
-	@echo "  make dmg          build + install + package versioned DMG (macOS only)"
-	@echo "  make release      check + dmg + print summary (macOS only)"
-	@echo "  make help         show this message"
+	@echo ""
+	@echo "  Generation:"
+	@echo "    make create-launcher    build Go/Wails launcher binary"
+	@echo "    make create-paks        package modfiles/ + QVMs → .$(PAK_EXT)"
+	@echo ""
+	@echo "  Copy (assemble .app):"
+	@echo "    make copy-build         Release engine + dylibs → .app"
+	@echo "    make copy-build-debug   Debug engine + dylibs → .app"
+	@echo "    make copy-libs          renderer + deps → .app"
+	@echo "    make copy-paks          mod pak (.$(PAK_EXT)) → .app"
+	@echo "    make copy-all           all of the above (Release)"
+	@echo "    make copy-all-debug     all of the above (Debug)"
+	@echo ""
+	@echo "  Bundling:"
+	@echo "    make bundle-codesign    codesign .app (macOS)"
+	@echo "    make bundle-dmg         create versioned DMG (macOS)"
+	@echo "    make bundle-tar         create versioned tar.gz (Linux)"
+	@echo ""
+	@echo "  Flows:"
+	@echo "    make run-launcher       build + assemble + codesign + open launcher"
+	@echo "    make run-game           build + assemble + run engine (QVM)"
+	@echo "    make run-gamedev        build-debug + assemble + run engine (native)"
+	@echo "    make release            build + assemble + codesign + package"
+	@echo ""
+	@echo "  Testing:"
+	@echo "    make check              verify all outputs present"
+	@echo "    make smoke              headless gameplay test"
+	@echo "    make test-features      all features enabled stress test"
+	@echo "    make bench              timedemo benchmark"
+	@echo "    make diff-api           diff API headers vs upstream"
 	@echo ""
 	@echo "  Variables:"
-	@echo "    BUILD_DIR=$(BUILD_DIR)   BUILD_TYPE=$(BUILD_TYPE)"
 	@echo "    Q3DIR=$(Q3DIR)"
 	@echo "    JOBS=$(JOBS)   MAP=$(MAP)   DEMO=$(DEMO)"
-	@echo "    UPSTREAM_REF=$(UPSTREAM_REF)"
+	@echo "    USE_SW3Z=$(USE_SW3Z)   CODESIGN_IDENTITY=$(CODESIGN_IDENTITY)"
 	@echo ""

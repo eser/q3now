@@ -47,17 +47,33 @@ START SERVER MENU *****
 #define GAMESERVER_ARROWSL		"menu/art/gs_arrows_l"
 #define GAMESERVER_ARROWSR		"menu/art/gs_arrows_r"
 
-#define MAX_MAPROWS		2
-#define MAX_MAPCOLS		2
-#define MAX_MAPSPERPAGE	4
+#define MAX_MAPROWS		3
+#define MAX_MAPCOLS		4
+#define MAX_MAPSPERPAGE	12
+
+#define MAP_PIC_WIDTH   128
+#define MAP_PIC_HEIGHT  96
+#define MAP_LABEL_HEIGHT 16
+#define MAP_CELL_WIDTH  148
+#define MAP_CELL_HEIGHT 116
+#define MAP_GRID_X      28
+#define MAP_GRID_Y      60
 
 #define MAX_NAMELENGTH	16
 #define ID_GAMETYPE				10
-#define ID_PICTURES				11	// 12, 13, 14
-#define ID_PREVPAGE				15
-#define ID_NEXTPAGE				16
-#define ID_STARTSERVERBACK		17
-#define ID_STARTSERVERNEXT		18
+#define ID_PICTURES				11	// 11..22 (12 map slots)
+#define ID_PREVPAGE				23
+#define ID_NEXTPAGE				24
+#define ID_STARTSERVERBACK		25
+#define ID_STARTSERVERNEXT		26
+#define ID_FILTER				27
+#define ID_SOURCEFILTER			28
+
+static const char *sourceFilter_items[] = {
+	"All Maps",
+	"Arena Maps Only",
+	NULL
+};
 
 typedef struct {
 	menuframework_s	menu;
@@ -67,6 +83,8 @@ typedef struct {
 	menubitmap_s	framer;
 
 	menulist_s		gametype;
+	menufield_s		filterField;
+	menulist_s		sourceFilter;
 	menubitmap_s	mappics[MAX_MAPSPERPAGE];
 	menubitmap_s	mapbuttons[MAX_MAPSPERPAGE];
 	menubitmap_s	arrows;
@@ -83,7 +101,13 @@ typedef struct {
 	int				nummaps;
 	int				page;
 	int				maxpages;
-	int 			maplist[MAX_ARENAS];
+	char			currentMapName[MAPNAME_LEN]; // stored mapname for server launch
+	char			lastFilterText[64];          // for live filtering debounce
+	int				filterChangeTime;            // uis.realtime when filter text changed
+#if FEAT_MAP_ROTATION
+	int				selectedMaps[64];
+	int				numSelectedMaps;
+#endif
 } startserver_t;
 
 static startserver_t s_startserver;
@@ -101,55 +125,7 @@ static const char *gametype_items[] = {
 static int gametype_remap[] = {GT_FFA, GT_TOURNAMENT, GT_KINGOFTHEHILL, GT_LASTMANSTANDING, GT_TEAM, GT_CTF};
 static int gametype_remap2[] = {0, 1, 3, 4, 5, 6};
 
-// use ui_servers2.c definition
-extern const char* punkbuster_items[];
-
 static void UI_ServerOptionsMenu( qboolean multiplayer );
-
-
-/*
-=================
-GametypeBits
-=================
-*/
-static int GametypeBits( const char *string ) {
-	int			bits;
-	const char	*p;
-	const char	*token;
-
-	bits = 0;
-	p = string;
-	while( 1 ) {
-		token = COM_ParseExt( &p, qfalse );
-		if ( !token[0] ) {
-			break;
-		}
-
-		if( Q_stricmp( token, "ffa" ) == 0 ) {
-			bits |= 1 << GT_FFA;
-            bits |= 1 << GT_KINGOFTHEHILL;
-            bits |= 1 << GT_LASTMANSTANDING;
-			continue;
-		}
-
-		if( Q_stricmp( token, "tourney" ) == 0 ) {
-			bits |= 1 << GT_TOURNAMENT;
-			continue;
-		}
-
-		if( Q_stricmp( token, "team" ) == 0 ) {
-			bits |= 1 << GT_TEAM;
-			continue;
-		}
-
-		if( Q_stricmp( token, "ctf" ) == 0 ) {
-			bits |= 1 << GT_CTF;
-			continue;
-		}
-	}
-
-	return bits;
-}
 
 
 /*
@@ -161,8 +137,7 @@ static void StartServer_Update( void ) {
 	int				i;
 	int				top;
 	static	char	picname[MAX_MAPSPERPAGE][64];
-	const char		*info;
-	char			mapname[MAX_NAMELENGTH];
+	const mapCacheEntry_t *entry;
 
 	top = s_startserver.page*MAX_MAPSPERPAGE;
 
@@ -170,12 +145,13 @@ static void StartServer_Update( void ) {
 	{
 		if (top+i >= s_startserver.nummaps)
 			break;
-		
-		info = UI_GetArenaInfoByNumber( s_startserver.maplist[ top + i ]);
-		Q_strncpyz( mapname, Info_ValueForKey( info, "map"), MAX_NAMELENGTH );
-		Q_strupr( mapname );
 
-		Com_sprintf( picname[i], sizeof(picname[i]), "levelshots/%s", mapname );
+		entry = MapCache_GetEntry( top + i );
+		if ( entry ) {
+			Com_sprintf( picname[i], sizeof(picname[i]), "levelshots/%s", entry->mapname );
+		} else {
+			picname[i][0] = '\0';
+		}
 
 		s_startserver.mappics[i].generic.flags &= ~QMF_HIGHLIGHT;
 		s_startserver.mappics[i].generic.name   = picname[i];
@@ -204,23 +180,39 @@ static void StartServer_Update( void ) {
 
 		// set the map name
 		strcpy( s_startserver.mapname.string, "NO MAPS FOUND" );
+		s_startserver.currentMapName[0] = '\0';
 	}
 	else {
 		// set the highlight
 		s_startserver.next.generic.flags &= ~QMF_INACTIVE;
 		i = s_startserver.currentmap - top;
-		if ( i >=0 && i < MAX_MAPSPERPAGE ) 
+		if ( i >=0 && i < MAX_MAPSPERPAGE )
 		{
 			s_startserver.mappics[i].generic.flags    |= QMF_HIGHLIGHT;
 			s_startserver.mapbuttons[i].generic.flags &= ~QMF_PULSEIFFOCUS;
 		}
 
-		// set the map name
-		info = UI_GetArenaInfoByNumber( s_startserver.maplist[ s_startserver.currentmap ]);
-		Q_strncpyz( s_startserver.mapname.string, Info_ValueForKey( info, "map" ), MAX_NAMELENGTH);
+		// set the map name from cache
+		entry = MapCache_GetEntry( s_startserver.currentmap );
+		if ( entry ) {
+			Q_strncpyz( s_startserver.mapname.string, entry->mapname, MAX_NAMELENGTH );
+			Q_strncpyz( s_startserver.currentMapName, entry->mapname, sizeof( s_startserver.currentMapName ) );
+		}
 	}
-	
+
 	Q_strupr( s_startserver.mapname.string );
+
+	/* disable prev/next arrows when at first/last page */
+	if ( s_startserver.page <= 0 ) {
+		s_startserver.prevpage.generic.flags |= ( QMF_INACTIVE | QMF_HIDDEN );
+	} else {
+		s_startserver.prevpage.generic.flags &= ~( QMF_INACTIVE | QMF_HIDDEN );
+	}
+	if ( s_startserver.page >= s_startserver.maxpages - 1 ) {
+		s_startserver.nextpage.generic.flags |= ( QMF_INACTIVE | QMF_HIDDEN );
+	} else {
+		s_startserver.nextpage.generic.flags &= ~( QMF_INACTIVE | QMF_HIDDEN );
+	}
 }
 
 
@@ -230,11 +222,39 @@ StartServer_MapEvent
 =================
 */
 static void StartServer_MapEvent( void* ptr, int event ) {
+	int mapIdx;
+
 	if( event != QM_ACTIVATED) {
 		return;
 	}
 
-	s_startserver.currentmap = (s_startserver.page*MAX_MAPSPERPAGE) + (((menucommon_s*)ptr)->id - ID_PICTURES);
+	mapIdx = (s_startserver.page*MAX_MAPSPERPAGE) + (((menucommon_s*)ptr)->id - ID_PICTURES);
+	s_startserver.currentmap = mapIdx;
+
+#if FEAT_MAP_ROTATION
+	{
+		int i;
+		int found = -1;
+		for ( i = 0; i < s_startserver.numSelectedMaps; i++ ) {
+			if ( s_startserver.selectedMaps[i] == mapIdx ) {
+				found = i;
+				break;
+			}
+		}
+		if ( found >= 0 ) {
+			/* remove from selection */
+			memmove( &s_startserver.selectedMaps[found],
+					 &s_startserver.selectedMaps[found + 1],
+					 (s_startserver.numSelectedMaps - found - 1) * sizeof(int) );
+			s_startserver.numSelectedMaps--;
+		} else if ( s_startserver.numSelectedMaps < 64 ) {
+			/* append to selection */
+			s_startserver.selectedMaps[s_startserver.numSelectedMaps] = mapIdx;
+			s_startserver.numSelectedMaps++;
+		}
+	}
+#endif
+
 	StartServer_Update();
 }
 
@@ -244,36 +264,34 @@ static void StartServer_MapEvent( void* ptr, int event ) {
 StartServer_GametypeEvent
 =================
 */
-static void StartServer_GametypeEvent( void* ptr, int event ) {
-	int			i;
-	int			count;
-	int			gamebits;
-	int			matchbits;
-	const char	*info;
+static void StartServer_ApplyFilter( void ) {
+	int gametype = gametype_remap[s_startserver.gametype.curvalue];
+	qboolean arenaOnly = (qboolean)( s_startserver.sourceFilter.curvalue == 1 );
 
-	if( event != QM_ACTIVATED) {
-		return;
-	}
+	MapCache_Filter( s_startserver.filterField.field.buffer, gametype, arenaOnly );
 
-	count = UI_GetNumArenas();
-	s_startserver.nummaps = 0;
-	matchbits = 1 << gametype_remap[s_startserver.gametype.curvalue];
-	for( i = 0; i < count; i++ ) {
-		info = UI_GetArenaInfoByNumber( i );
-	
-		gamebits = GametypeBits( Info_ValueForKey( info, "type") );
-		if( !( gamebits & matchbits ) ) {
-			continue;
-		}
-
-		s_startserver.maplist[ s_startserver.nummaps ] = i;
-		s_startserver.nummaps++;
-	}
+	s_startserver.nummaps = MapCache_GetCount();
 	s_startserver.maxpages = (s_startserver.nummaps + MAX_MAPSPERPAGE-1)/MAX_MAPSPERPAGE;
 	s_startserver.page = 0;
 	s_startserver.currentmap = 0;
 
 	StartServer_Update();
+}
+
+static void StartServer_GametypeEvent( void* ptr, int event ) {
+	if( event != QM_ACTIVATED) {
+		return;
+	}
+
+	StartServer_ApplyFilter();
+}
+
+static void StartServer_FilterEvent( void* ptr, int event ) {
+	if( event != QM_ACTIVATED) {
+		return;
+	}
+
+	StartServer_ApplyFilter();
 }
 
 
@@ -282,6 +300,33 @@ static void StartServer_GametypeEvent( void* ptr, int event ) {
 StartServer_MenuEvent
 =================
 */
+/*
+=================
+StartServer_MenuKey
+
+Handle mouse wheel for page navigation in map grid.
+=================
+*/
+static sfxHandle_t StartServer_MenuKey( int key ) {
+	if ( key == K_MWHEELDOWN ) {
+		if ( s_startserver.page < s_startserver.maxpages - 1 ) {
+			s_startserver.page++;
+			StartServer_Update();
+			return menu_move_sound;
+		}
+		return menu_null_sound;
+	}
+	if ( key == K_MWHEELUP ) {
+		if ( s_startserver.page > 0 ) {
+			s_startserver.page--;
+			StartServer_Update();
+			return menu_move_sound;
+		}
+		return menu_null_sound;
+	}
+	return Menu_DefaultKey( &s_startserver.menu, key );
+}
+
 static void StartServer_MenuEvent( void* ptr, int event ) {
 	if( event != QM_ACTIVATED ) {
 		return;
@@ -304,6 +349,28 @@ static void StartServer_MenuEvent( void* ptr, int event ) {
 
 	case ID_STARTSERVERNEXT:
 		trap_Cvar_SetValue( "g_gameType", gametype_remap[s_startserver.gametype.curvalue] );
+#if FEAT_MAP_ROTATION
+		{
+			char rotBuf[1024];
+			int ri;
+			int rotLen = 0;
+			const mapCacheEntry_t *me;
+			rotBuf[0] = '\0';
+			for ( ri = 0; ri < s_startserver.numSelectedMaps; ri++ ) {
+				me = MapCache_GetEntry( s_startserver.selectedMaps[ri] );
+				if ( me ) {
+					if ( rotLen > 0 && rotLen < (int)sizeof(rotBuf) - 1 ) {
+						rotBuf[rotLen++] = ' ';
+						rotBuf[rotLen] = '\0';
+					}
+					Q_strncpyz( rotBuf + rotLen, me->mapname, sizeof(rotBuf) - rotLen );
+					rotLen = strlen( rotBuf );
+				}
+			}
+			trap_Cvar_Set( "g_maprotation", rotBuf );
+			trap_Cvar_Set( "g_maprotationIndex", "0" );  /* current map index — peek adds +1 for next */
+		}
+#endif
 		UI_ServerOptionsMenu( s_startserver.multiplayer );
 		break;
 
@@ -313,6 +380,9 @@ static void StartServer_MenuEvent( void* ptr, int event ) {
 	}
 }
 
+
+/* invisible ownerdraw for mapbuttons — click targets that draw nothing */
+static void StartServer_NullDraw( void *self ) { (void)self; }
 
 /*
 ===============
@@ -326,8 +396,8 @@ static void StartServer_LevelshotDraw( void *self ) {
 	int				w;
 	int				h;
 	int				n;
-	const char		*info;
-	char			mapname[ MAX_NAMELENGTH ];
+	const mapCacheEntry_t *entry;
+	char			displayname[ MAX_NAMELENGTH ];
 
 	b = (menubitmap_s *)self;
 
@@ -356,23 +426,67 @@ static void StartServer_LevelshotDraw( void *self ) {
 
 	x = b->generic.x;
 	y = b->generic.y + b->height;
-	UI_FillRect( x, y, b->width, 28, colorBlack );
+	UI_FillRect( x, y, b->width, MAP_LABEL_HEIGHT, colorBlack );
 
 	x += b->width / 2;
-	y += 4;
+	y += 2;
 	n = s_startserver.page * MAX_MAPSPERPAGE + b->generic.id - ID_PICTURES;
 
-	info = UI_GetArenaInfoByNumber( s_startserver.maplist[ n ]);
-	Q_strncpyz( mapname, Info_ValueForKey( info, "map"), MAX_NAMELENGTH );
-	Q_strupr( mapname );
-	UI_DrawString( x, y, mapname, UI_CENTER|UI_SMALLFONT, color_orange );
+	entry = MapCache_GetEntry( n );
+	if ( entry ) {
+		Q_strncpyz( displayname, entry->mapname, MAX_NAMELENGTH );
+	} else {
+		displayname[0] = '\0';
+	}
+	Q_strupr( displayname );
+	UI_DrawString( x, y, displayname, UI_CENTER|UI_SMALLFONT, color_orange );
 
 	x = b->generic.x;
 	y = b->generic.y;
 	w = b->width;
-	h =	b->height + 28;
-	if( b->generic.flags & QMF_HIGHLIGHT ) {	
-		UI_DrawHandlePic( x, y, w, h, b->focusshader );
+	h =	b->height + MAP_LABEL_HEIGHT;
+
+	{
+		int slot = b->generic.id - ID_PICTURES;
+		qboolean selected = ( b->generic.flags & QMF_HIGHLIGHT ) ? qtrue : qfalse;
+		qboolean hovered  = UI_CursorInRect( x, y, w, h );
+
+		if ( !selected && hovered ) {
+			/* also select this map on hover for immediate feedback */
+		}
+
+		if ( selected || hovered ) {
+			vec4_t borderColor;
+			int borderSize = selected ? 3 : 2;
+			if ( selected ) {
+				borderColor[0] = 1.0f; borderColor[1] = 0.5f; borderColor[2] = 0.0f; borderColor[3] = 1.0f;
+			} else {
+				borderColor[0] = 0.7f; borderColor[1] = 0.7f; borderColor[2] = 0.7f; borderColor[3] = 0.6f;
+			}
+			UI_FillRect( x - borderSize, y - borderSize, w + borderSize*2, borderSize, borderColor );
+			UI_FillRect( x - borderSize, y + h, w + borderSize*2, borderSize, borderColor );
+			UI_FillRect( x - borderSize, y, borderSize, h, borderColor );
+			UI_FillRect( x + w, y, borderSize, h, borderColor );
+		}
+
+#if FEAT_MAP_ROTATION
+		{
+			int si;
+			int selIdx = -1;
+			for ( si = 0; si < s_startserver.numSelectedMaps; si++ ) {
+				if ( s_startserver.selectedMaps[si] == (s_startserver.page * MAX_MAPSPERPAGE + slot) ) {
+					selIdx = si;
+					break;
+				}
+			}
+			if ( selIdx >= 0 ) {
+				vec4_t selColor;
+				selColor[0] = 0.0f; selColor[1] = 0.7f; selColor[2] = 0.0f; selColor[3] = 0.75f;
+				UI_FillRect( x, y, 20, 16, selColor );
+				UI_DrawString( x + 10, y + 1, va( "%d", selIdx + 1 ), UI_CENTER|UI_SMALLFONT, color_white );
+			}
+		}
+#endif
 	}
 }
 
@@ -382,65 +496,110 @@ static void StartServer_LevelshotDraw( void *self ) {
 StartServer_MenuInit
 =================
 */
+/*
+=================
+StartServer_MenuDraw
+=================
+*/
+static void StartServer_MenuDraw( void ) {
+	Menu_Draw( &s_startserver.menu );
+}
+
 static void StartServer_MenuInit( void ) {
 	int	i;
 	int	x;
 	int	y;
+	int col;
+	int row;
 	static char mapnamebuffer[64];
+
+	// Map grid constants defined at file scope above
 
 	// zero set all our globals
 	memset( &s_startserver, 0 ,sizeof(startserver_t) );
+
+	// Initialize the map cache on first use
+	MapCache_Init();
 
 	StartServer_Cache();
 
 	s_startserver.menu.wrapAround = qtrue;
 	s_startserver.menu.fullscreen = qtrue;
+	s_startserver.menu.draw       = StartServer_MenuDraw;
+	s_startserver.menu.key        = StartServer_MenuKey;
 
 	s_startserver.banner.generic.type  = MTYPE_BTEXT;
 	s_startserver.banner.generic.x	   = 320;
 	s_startserver.banner.generic.y	   = 16;
-	s_startserver.banner.string        = "GAME SERVER";
+	s_startserver.banner.string        = "";
 	s_startserver.banner.color         = color_white;
 	s_startserver.banner.style         = UI_CENTER;
+	s_startserver.banner.generic.flags = QMF_HIDDEN;
 
 	s_startserver.framel.generic.type  = MTYPE_BITMAP;
 	s_startserver.framel.generic.name  = GAMESERVER_FRAMEL;
-	s_startserver.framel.generic.flags = QMF_INACTIVE;
-	s_startserver.framel.generic.x	   = 0;  
+	s_startserver.framel.generic.flags = QMF_INACTIVE|QMF_HIDDEN;
+	s_startserver.framel.generic.x	   = 0;
 	s_startserver.framel.generic.y	   = 78;
 	s_startserver.framel.width  	   = 256;
 	s_startserver.framel.height  	   = 329;
 
 	s_startserver.framer.generic.type  = MTYPE_BITMAP;
 	s_startserver.framer.generic.name  = GAMESERVER_FRAMER;
-	s_startserver.framer.generic.flags = QMF_INACTIVE;
+	s_startserver.framer.generic.flags = QMF_INACTIVE|QMF_HIDDEN;
 	s_startserver.framer.generic.x	   = 376;
 	s_startserver.framer.generic.y	   = 76;
 	s_startserver.framer.width  	   = 256;
 	s_startserver.framer.height  	   = 334;
 
+	// Gametype selector — top row
 	s_startserver.gametype.generic.type		= MTYPE_SPINCONTROL;
 	s_startserver.gametype.generic.name		= "Game Type:";
 	s_startserver.gametype.generic.flags	= QMF_PULSEIFFOCUS|QMF_SMALLFONT;
 	s_startserver.gametype.generic.callback	= StartServer_GametypeEvent;
 	s_startserver.gametype.generic.id		= ID_GAMETYPE;
-	s_startserver.gametype.generic.x		= 320 - 24;
-	s_startserver.gametype.generic.y		= 368;
+	s_startserver.gametype.generic.x		= 160;
+	s_startserver.gametype.generic.y		= 16;
 	s_startserver.gametype.itemnames		= gametype_items;
 
+	// Source filter — same row as gametype
+	s_startserver.sourceFilter.generic.type		= MTYPE_SPINCONTROL;
+	s_startserver.sourceFilter.generic.name		= "Source:";
+	s_startserver.sourceFilter.generic.flags	= QMF_PULSEIFFOCUS|QMF_SMALLFONT;
+	s_startserver.sourceFilter.generic.callback	= StartServer_FilterEvent;
+	s_startserver.sourceFilter.generic.id		= ID_SOURCEFILTER;
+	s_startserver.sourceFilter.generic.x		= 160;
+	s_startserver.sourceFilter.generic.y		= 36;
+	s_startserver.sourceFilter.itemnames		= sourceFilter_items;
+
+	// Filter text field — right side of top row
+	s_startserver.filterField.generic.type       = MTYPE_FIELD;
+	s_startserver.filterField.generic.name       = "Filter:";
+	s_startserver.filterField.generic.flags      = QMF_PULSEIFFOCUS|QMF_SMALLFONT;
+	s_startserver.filterField.generic.callback   = StartServer_FilterEvent;
+	s_startserver.filterField.generic.id         = ID_FILTER;
+	s_startserver.filterField.generic.x          = 460;
+	s_startserver.filterField.generic.y          = 16;
+	s_startserver.filterField.field.widthInChars = 12;
+	s_startserver.filterField.field.maxchars     = 16;
+	s_startserver.filterField.debounceMs         = 300; // live filter with 300ms debounce
+
+	// Map grid: 4 columns x 3 rows
 	for (i=0; i<MAX_MAPSPERPAGE; i++)
 	{
-		x =	(i % MAX_MAPCOLS) * (128+8) + 188;
-		y = (i / MAX_MAPROWS) * (128+8) + 96;
+		col = i % MAX_MAPCOLS;
+		row = i / MAX_MAPCOLS;
+		x = MAP_GRID_X + col * MAP_CELL_WIDTH;
+		y = MAP_GRID_Y + row * MAP_CELL_HEIGHT;
 
 		s_startserver.mappics[i].generic.type   = MTYPE_BITMAP;
 		s_startserver.mappics[i].generic.flags  = QMF_LEFT_JUSTIFY|QMF_INACTIVE;
 		s_startserver.mappics[i].generic.x	    = x;
 		s_startserver.mappics[i].generic.y	    = y;
 		s_startserver.mappics[i].generic.id		= ID_PICTURES+i;
-		s_startserver.mappics[i].width  		= 128;
-		s_startserver.mappics[i].height  	    = 96;
-		s_startserver.mappics[i].focuspic       = GAMESERVER_SELECTED;
+		s_startserver.mappics[i].width  		= MAP_PIC_WIDTH;
+		s_startserver.mappics[i].height  	    = MAP_PIC_HEIGHT;
+		/* ownerdraw handles highlight border — no focuspic needed */
 		s_startserver.mappics[i].errorpic       = GAMESERVER_UNKNOWNMAP;
 		s_startserver.mappics[i].generic.ownerdraw = StartServer_LevelshotDraw;
 
@@ -448,44 +607,52 @@ static void StartServer_MenuInit( void ) {
 		s_startserver.mapbuttons[i].generic.flags    = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS|QMF_NODEFAULTINIT;
 		s_startserver.mapbuttons[i].generic.id       = ID_PICTURES+i;
 		s_startserver.mapbuttons[i].generic.callback = StartServer_MapEvent;
-		s_startserver.mapbuttons[i].generic.x	     = x - 30;
-		s_startserver.mapbuttons[i].generic.y	     = y - 32;
-		s_startserver.mapbuttons[i].width  		     = 256;
-		s_startserver.mapbuttons[i].height  	     = 248;
+		s_startserver.mapbuttons[i].generic.x	     = x;
+		s_startserver.mapbuttons[i].generic.y	     = y;
+		s_startserver.mapbuttons[i].width  		     = MAP_PIC_WIDTH;
+		s_startserver.mapbuttons[i].height  	     = MAP_PIC_HEIGHT + MAP_LABEL_HEIGHT;
 		s_startserver.mapbuttons[i].generic.left     = x;
 		s_startserver.mapbuttons[i].generic.top  	 = y;
-		s_startserver.mapbuttons[i].generic.right    = x + 128;
-		s_startserver.mapbuttons[i].generic.bottom   = y + 128;
-		s_startserver.mapbuttons[i].focuspic         = GAMESERVER_SELECT;
+		s_startserver.mapbuttons[i].generic.right    = x + MAP_PIC_WIDTH;
+		s_startserver.mapbuttons[i].generic.bottom   = y + MAP_PIC_HEIGHT + MAP_LABEL_HEIGHT;
+		/* invisible clickable area — ownerdraw draws nothing, hover handled by mappics */
+		s_startserver.mapbuttons[i].generic.ownerdraw = StartServer_NullDraw;
 	}
 
+	/* arrows hidden — using side arrows instead */
 	s_startserver.arrows.generic.type  = MTYPE_BITMAP;
-	s_startserver.arrows.generic.name  = GAMESERVER_ARROWS;
-	s_startserver.arrows.generic.flags = QMF_INACTIVE;
-	s_startserver.arrows.generic.x	   = 260;
-	s_startserver.arrows.generic.y	   = 400;
-	s_startserver.arrows.width  	   = 128;
-	s_startserver.arrows.height  	   = 32;
+	s_startserver.arrows.generic.flags = QMF_INACTIVE|QMF_HIDDEN;
+	s_startserver.arrows.generic.x	   = 0;
+	s_startserver.arrows.generic.y	   = 0;
+	s_startserver.arrows.width  	   = 0;
+	s_startserver.arrows.height  	   = 0;
 
-	s_startserver.prevpage.generic.type	    = MTYPE_BITMAP;
-	s_startserver.prevpage.generic.flags    = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS;
-	s_startserver.prevpage.generic.callback = StartServer_MenuEvent;
-	s_startserver.prevpage.generic.id	    = ID_PREVPAGE;
-	s_startserver.prevpage.generic.x		= 260;
-	s_startserver.prevpage.generic.y		= 400;
-	s_startserver.prevpage.width  		    = 64;
-	s_startserver.prevpage.height  		    = 32;
-	s_startserver.prevpage.focuspic         = GAMESERVER_ARROWSL;
+	/* left arrow — vertically centered with map grid, at left edge */
+	{
+		int arrowY = MAP_GRID_Y + (MAX_MAPROWS * MAP_CELL_HEIGHT) / 2 - 57;
+		s_startserver.prevpage.generic.type	    = MTYPE_BITMAP;
+		s_startserver.prevpage.generic.name      = "menu/art/narrow_0";
+		s_startserver.prevpage.generic.flags    = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS;
+		s_startserver.prevpage.generic.callback = StartServer_MenuEvent;
+		s_startserver.prevpage.generic.id	    = ID_PREVPAGE;
+		s_startserver.prevpage.generic.x		= 2;
+		s_startserver.prevpage.generic.y		= arrowY;
+		s_startserver.prevpage.width  		    = 16;
+		s_startserver.prevpage.height  		    = 114;
+		s_startserver.prevpage.focuspic         = "menu/art/narrow_1";
 
-	s_startserver.nextpage.generic.type	    = MTYPE_BITMAP;
-	s_startserver.nextpage.generic.flags    = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS;
-	s_startserver.nextpage.generic.callback = StartServer_MenuEvent;
-	s_startserver.nextpage.generic.id	    = ID_NEXTPAGE;
-	s_startserver.nextpage.generic.x		= 321;
-	s_startserver.nextpage.generic.y		= 400;
-	s_startserver.nextpage.width  		    = 64;
-	s_startserver.nextpage.height  		    = 32;
-	s_startserver.nextpage.focuspic         = GAMESERVER_ARROWSR;
+		/* right arrow — vertically centered with map grid, at right edge (mirrored) */
+		s_startserver.nextpage.generic.type	    = MTYPE_BITMAP;
+		s_startserver.nextpage.generic.name      = "menu/art/narrow_0";
+		s_startserver.nextpage.generic.flags    = QMF_LEFT_JUSTIFY|QMF_PULSEIFFOCUS;
+		s_startserver.nextpage.generic.callback = StartServer_MenuEvent;
+		s_startserver.nextpage.generic.id	    = ID_NEXTPAGE;
+		s_startserver.nextpage.generic.x		= 622;
+		s_startserver.nextpage.generic.y		= arrowY;
+		s_startserver.nextpage.width  		    = -16;  /* negative = mirrored */
+		s_startserver.nextpage.height  		    = 114;
+		s_startserver.nextpage.focuspic         = "menu/art/narrow_1";
+	}
 
 	s_startserver.mapname.generic.type  = MTYPE_PTEXT;
 	s_startserver.mapname.generic.flags = QMF_CENTER_JUSTIFY|QMF_INACTIVE;
@@ -529,6 +696,8 @@ static void StartServer_MenuInit( void ) {
 	Menu_AddItem( &s_startserver.menu, &s_startserver.framer );
 
 	Menu_AddItem( &s_startserver.menu, &s_startserver.gametype );
+	Menu_AddItem( &s_startserver.menu, &s_startserver.filterField );
+	Menu_AddItem( &s_startserver.menu, &s_startserver.sourceFilter );
 	for (i=0; i<MAX_MAPSPERPAGE; i++)
 	{
 		Menu_AddItem( &s_startserver.menu, &s_startserver.mappics[i] );
@@ -631,6 +800,8 @@ typedef struct {
 	menufield_s			fraglimit;
 	menufield_s			flaglimit;
 	menuradiobutton_s	friendlyfire;
+	menuradiobutton_s	teamBalance;
+	menuradiobutton_s	warmup;
 	menufield_s			hostname;
 	menuradiobutton_s	pure;
 	menulist_s			botSkill;
@@ -652,11 +823,21 @@ typedef struct {
 	qboolean			newBot;
 	int					newBotIndex;
 	char				newBotName[16];
-	
-	menulist_s		punkbuster;
+
+#if FEAT_MAP_ROTATION
+	menutable_s			rotationTable;
+	menubitmap_s		rotPreview;
+	char				rotationMaps[64][MAPNAME_LEN];
+	int					numRotationMaps;
+#endif
 } serveroptions_t;
 
 static serveroptions_t s_serveroptions;
+
+#if FEAT_MAP_ROTATION
+static void RotTable_ParseCvar( void );
+static void RotTable_SerializeCvar( void );
+#endif
 
 static const char *dedicated_list[] = {
 	"No",
@@ -727,9 +908,10 @@ static void ServerOptions_Start( void ) {
 	int		flaglimit;
 	int		pure;
 	int		skill;
+	int		warmup;
+	int		teamBalance;
 	int		n;
 	char	buf[64];
-	const char *info;
 
 	timelimit	 = atoi( s_serveroptions.timelimit.field.buffer );
 	fraglimit	 = atoi( s_serveroptions.fraglimit.field.buffer );
@@ -738,6 +920,8 @@ static void ServerOptions_Start( void ) {
 	friendlyfire = s_serveroptions.friendlyfire.curvalue;
 	pure		 = s_serveroptions.pure.curvalue;
 	skill		 = s_serveroptions.botSkill.curvalue + 1;
+	warmup		 = s_serveroptions.warmup.curvalue;
+	teamBalance	 = s_serveroptions.teamBalance.curvalue;
 
 	//set maxclients
 	for( n = 0, maxclients = 0; n < PLAYER_SLOTS; n++ ) {
@@ -785,12 +969,29 @@ static void ServerOptions_Start( void ) {
 	trap_Cvar_SetValue( "g_friendlyfire", friendlyfire );
 	trap_Cvar_SetValue( "sv_pure", pure );
 	trap_Cvar_Set("sv_hostname", s_serveroptions.hostname.field.buffer );
-	
-	trap_Cvar_SetValue( "sv_punkbuster", s_serveroptions.punkbuster.curvalue );
+	trap_Cvar_SetValue( "g_doWarmup", warmup );
+	if( s_serveroptions.gametype >= GT_TEAM ) {
+		trap_Cvar_SetValue( "g_teamForceBalance", teamBalance );
+	}
+
+#if FEAT_MAP_ROTATION
+	RotTable_SerializeCvar();
+#endif
 
 	// the wait commands will allow the dedicated to take effect
-	info = UI_GetArenaInfoByNumber( s_startserver.maplist[ s_startserver.currentmap ]);
-	trap_Cmd_ExecuteText( EXEC_APPEND, va( "wait ; wait ; map %s\n", Info_ValueForKey( info, "map" )));
+#if FEAT_MAP_ROTATION
+	if ( s_startserver.numSelectedMaps > 0 ) {
+		const mapCacheEntry_t *first = MapCache_GetEntry( s_startserver.selectedMaps[0] );
+		if ( first ) {
+			trap_Cmd_ExecuteText( EXEC_APPEND, va( "wait ; wait ; map %s\n", first->mapname ) );
+		} else {
+			trap_Cmd_ExecuteText( EXEC_APPEND, va( "wait ; wait ; map %s\n", s_startserver.currentMapName ) );
+		}
+	} else
+#endif
+	{
+		trap_Cmd_ExecuteText( EXEC_APPEND, va( "wait ; wait ; map %s\n", s_startserver.currentMapName ) );
+	}
 
 	// add bots
 	trap_Cmd_ExecuteText( EXEC_APPEND, "wait 3\n" );
@@ -1134,7 +1335,6 @@ ServerOptions_SetMenuItems
 static void ServerOptions_SetMenuItems( void ) {
 	static char picname[64];
 	char		mapname[MAX_NAMELENGTH];
-	const char	*info;
 
 	switch( s_serveroptions.gametype ) {
 	case GT_FFA:
@@ -1163,12 +1363,25 @@ static void ServerOptions_SetMenuItems( void ) {
 		break;
 	}
 
+	/* C9: override fraglimit with map-recommended value if available */
+	{
+		const mapCacheEntry_t *mc = MapCache_FindByName( s_startserver.currentMapName );
+		if ( mc && mc->fraglimit > 0 ) {
+			Com_sprintf( s_serveroptions.fraglimit.field.buffer, 4, "%i", mc->fraglimit );
+		}
+	}
+
 	Q_strncpyz( s_serveroptions.hostname.field.buffer, UI_Cvar_VariableString( "sv_hostname" ), sizeof( s_serveroptions.hostname.field.buffer ) );
 	s_serveroptions.pure.curvalue = Com_Clamp( 0, 1, trap_Cvar_VariableValue( "sv_pure" ) );
+	s_serveroptions.warmup.curvalue = Com_Clamp( 0, 1, trap_Cvar_VariableValue( "g_doWarmup" ) );
+	s_serveroptions.teamBalance.curvalue = Com_Clamp( 0, 1, trap_Cvar_VariableValue( "g_teamForceBalance" ) );
+
+#if FEAT_MAP_ROTATION
+	RotTable_ParseCvar();
+#endif
 
 	// set the map pic
-	info = UI_GetArenaInfoByNumber( s_startserver.maplist[ s_startserver.currentmap ]);
-	Q_strncpyz( mapname, Info_ValueForKey( info, "map"), MAX_NAMELENGTH );
+	Q_strncpyz( mapname, s_startserver.currentMapName, MAX_NAMELENGTH );
 	Q_strupr( mapname );
 	Com_sprintf( picname, 64, "levelshots/%s", mapname );
 	s_serveroptions.mappic.generic.name = picname;
@@ -1233,6 +1446,99 @@ static void PlayerName_Draw( void *item ) {
 }
 
 
+#if FEAT_MAP_ROTATION
+/*
+=================
+RotTable_GetColumnText
+=================
+*/
+static const char *RotTable_GetColumnText( int row, int column ) {
+	if ( row < 0 || row >= s_serveroptions.numRotationMaps ) {
+		return "";
+	}
+	if ( column == 0 ) {
+		return va( "%d", row + 1 );
+	}
+	return s_serveroptions.rotationMaps[row];
+}
+
+/*
+=================
+RotTable_ParseCvar
+
+Parse g_maprotation cvar into rotationMaps[].
+=================
+*/
+static void RotTable_ParseCvar( void ) {
+	char rotation[1024];
+	const char *token;
+	char *p;
+
+	trap_Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+	s_serveroptions.numRotationMaps = 0;
+	p = rotation;
+	while ( s_serveroptions.numRotationMaps < 64 ) {
+		token = COM_Parse( (const char **)&p );
+		if ( !token[0] ) break;
+		Q_strncpyz( s_serveroptions.rotationMaps[s_serveroptions.numRotationMaps],
+					 token, MAPNAME_LEN );
+		s_serveroptions.numRotationMaps++;
+	}
+	s_serveroptions.rotationTable.numRows = s_serveroptions.numRotationMaps;
+}
+
+/*
+=================
+RotTable_SerializeCvar
+
+Serialize rotationMaps[] back to g_maprotation cvar.
+=================
+*/
+static void RotTable_SerializeCvar( void ) {
+	char rotBuf[1024];
+	int i;
+	int len = 0;
+
+	rotBuf[0] = '\0';
+	for ( i = 0; i < s_serveroptions.numRotationMaps; i++ ) {
+		if ( len > 0 && len < (int)sizeof(rotBuf) - 1 ) {
+			rotBuf[len++] = ' ';
+			rotBuf[len] = '\0';
+		}
+		Q_strncpyz( rotBuf + len, s_serveroptions.rotationMaps[i],
+					 sizeof(rotBuf) - len );
+		len = strlen( rotBuf );
+	}
+	trap_Cvar_Set( "g_maprotation", rotBuf );
+}
+
+/*
+=================
+RotPreview_Draw
+
+Draws the levelshot for the currently selected rotation map.
+=================
+*/
+static void RotPreview_Draw( void *self ) {
+	menubitmap_s *b;
+	int row;
+	static char rotPicName[64];
+
+	b = (menubitmap_s *)self;
+	row = s_serveroptions.rotationTable.selectedRow;
+	if ( row >= 0 && row < s_serveroptions.numRotationMaps ) {
+		Com_sprintf( rotPicName, sizeof(rotPicName), "levelshots/%s",
+					 s_serveroptions.rotationMaps[row] );
+		b->generic.name = rotPicName;
+		b->shader = 0;
+	} else {
+		b->generic.name = NULL;
+		b->shader = 0;
+	}
+	Bitmap_Draw( b );
+}
+#endif /* FEAT_MAP_ROTATION */
+
 /*
 =================
 ServerOptions_MenuInit
@@ -1248,8 +1554,6 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 	s_serveroptions.multiplayer = multiplayer;
 	s_serveroptions.gametype = (int) Com_Clamp(0, ARRAY_LEN(gametype_remap2) - 1,
 						trap_Cvar_VariableValue("g_gametype"));
-	s_serveroptions.punkbuster.curvalue = Com_Clamp( 0, 1, trap_Cvar_VariableValue( "sv_punkbuster" ) );
-
 	ServerOptions_Cache();
 
 	s_serveroptions.menu.wrapAround = qtrue;
@@ -1318,7 +1622,21 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 		s_serveroptions.friendlyfire.generic.x	      = OPTIONS_X;
 		s_serveroptions.friendlyfire.generic.y	      = y;
 		s_serveroptions.friendlyfire.generic.name	  = "Friendly Fire:";
+
+		y += BIGCHAR_HEIGHT+2;
+		s_serveroptions.teamBalance.generic.type      = MTYPE_RADIOBUTTON;
+		s_serveroptions.teamBalance.generic.flags     = QMF_PULSEIFFOCUS|QMF_SMALLFONT;
+		s_serveroptions.teamBalance.generic.x         = OPTIONS_X;
+		s_serveroptions.teamBalance.generic.y         = y;
+		s_serveroptions.teamBalance.generic.name      = "Team Balance:";
 	}
+
+	y += BIGCHAR_HEIGHT+2;
+	s_serveroptions.warmup.generic.type				= MTYPE_RADIOBUTTON;
+	s_serveroptions.warmup.generic.flags			= QMF_PULSEIFFOCUS|QMF_SMALLFONT;
+	s_serveroptions.warmup.generic.x				= OPTIONS_X;
+	s_serveroptions.warmup.generic.y				= y;
+	s_serveroptions.warmup.generic.name				= "Warmup:";
 
 	y += BIGCHAR_HEIGHT+2;
 	s_serveroptions.pure.generic.type			= MTYPE_RADIOBUTTON;
@@ -1350,15 +1668,6 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 		s_serveroptions.hostname.field.maxchars     = 64;
 	}
 
-	y += BIGCHAR_HEIGHT+2;
-	s_serveroptions.punkbuster.generic.type			= MTYPE_SPINCONTROL;
-	s_serveroptions.punkbuster.generic.name			= "Punkbuster:";
-	s_serveroptions.punkbuster.generic.flags			= QMF_PULSEIFFOCUS|QMF_SMALLFONT;
-	s_serveroptions.punkbuster.generic.id			= 0;
-	s_serveroptions.punkbuster.generic.x				= OPTIONS_X;
-	s_serveroptions.punkbuster.generic.y				= y;
-	s_serveroptions.punkbuster.itemnames				= punkbuster_items;
-	
 	y = 80;
 	s_serveroptions.botSkill.generic.type			= MTYPE_SPINCONTROL;
 	s_serveroptions.botSkill.generic.flags			= QMF_PULSEIFFOCUS|QMF_SMALLFONT;
@@ -1443,6 +1752,35 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 	s_serveroptions.go.height  		    = 64;
 	s_serveroptions.go.focuspic         = GAMESERVER_FIGHT1;
 
+#if FEAT_MAP_ROTATION
+	/* rotation table: 2 columns, positioned below server options */
+	s_serveroptions.rotationTable.generic.type		= MTYPE_TABLE;
+	s_serveroptions.rotationTable.generic.flags		= QMF_PULSEIFFOCUS;
+	s_serveroptions.rotationTable.generic.x			= 352;
+	s_serveroptions.rotationTable.generic.y			= 380;
+	s_serveroptions.rotationTable.numColumns		= 2;
+	s_serveroptions.rotationTable.columns[0].header	= "#";
+	s_serveroptions.rotationTable.columns[0].width	= 3;
+	s_serveroptions.rotationTable.columns[0].align	= UI_CENTER;
+	s_serveroptions.rotationTable.columns[1].header	= "Map";
+	s_serveroptions.rotationTable.columns[1].width	= 18;
+	s_serveroptions.rotationTable.columns[1].align	= UI_LEFT;
+	s_serveroptions.rotationTable.visibleRows		= 4;
+	s_serveroptions.rotationTable.selectedRow		= -1;
+	s_serveroptions.rotationTable.getColumnText		= RotTable_GetColumnText;
+	RotTable_ParseCvar();
+
+	/* small levelshot preview next to rotation table */
+	s_serveroptions.rotPreview.generic.type			= MTYPE_BITMAP;
+	s_serveroptions.rotPreview.generic.flags		= QMF_LEFT_JUSTIFY|QMF_INACTIVE;
+	s_serveroptions.rotPreview.generic.x			= 530;
+	s_serveroptions.rotPreview.generic.y			= 380;
+	s_serveroptions.rotPreview.width				= 96;
+	s_serveroptions.rotPreview.height				= 72;
+	s_serveroptions.rotPreview.errorpic				= GAMESERVER_UNKNOWNMAP;
+	s_serveroptions.rotPreview.generic.ownerdraw	= RotPreview_Draw;
+#endif /* FEAT_MAP_ROTATION */
+
 	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.banner );
 
 	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.mappic );
@@ -1469,7 +1807,9 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.timelimit );
 	if( s_serveroptions.gametype >= GT_TEAM ) {
 		Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.friendlyfire );
+		Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.teamBalance );
 	}
+	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.warmup );
 	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.pure );
 	if( s_serveroptions.multiplayer ) {
 		Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.dedicated );
@@ -1478,12 +1818,15 @@ static void ServerOptions_MenuInit( qboolean multiplayer ) {
 		Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.hostname );
 	}
 
+#if FEAT_MAP_ROTATION
+	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.rotationTable );
+	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.rotPreview );
+#endif
+
 	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.back );
 	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.next );
 	Menu_AddItem( &s_serveroptions.menu, &s_serveroptions.go );
 
-	Menu_AddItem( &s_serveroptions.menu, (void*) &s_serveroptions.punkbuster );
-	
 	ServerOptions_SetMenuItems();
 }
 

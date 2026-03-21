@@ -33,7 +33,7 @@
 #define USE_DEDICATED_ALLOCATION
 #endif
 //#define MIN_IMAGE_ALIGN (128*1024)
-#define MAX_ATTACHMENTS_IN_POOL (8+VK_NUM_BLOOM_PASSES*2) // depth + msaa + msaa-resolve + depth-resolve + screenmap.msaa + screenmap.resolve + screenmap.depth + bloom_extract + blur pairs
+#define MAX_ATTACHMENTS_IN_POOL (8+VK_NUM_BLOOM_PASSES*2+3) // +3 for SMAA edges/blend/input when active
 
 #define VK_DESC_STORAGE      0
 #define VK_DESC_UNIFORM      0
@@ -41,7 +41,8 @@
 #define VK_DESC_TEXTURE1     2
 #define VK_DESC_TEXTURE2     3
 #define VK_DESC_FOG_COLLAPSE 4
-#define VK_DESC_COUNT        5
+#define VK_DESC_DEPTH_FADE   5
+#define VK_DESC_COUNT        6  // includes depth fade set 5
 
 #define VK_DESC_TEXTURE_BASE VK_DESC_TEXTURE0
 #define VK_DESC_FOG_ONLY     VK_DESC_TEXTURE1
@@ -278,6 +279,8 @@ void vk_present_frame( void );
 
 void vk_end_render_pass( void );
 void vk_begin_main_render_pass( void );
+void vk_depth_fade_copy( void );
+void vk_smaa( void );
 
 void vk_bind_pipeline( uint32_t pipeline );
 void vk_bind_index( void );
@@ -336,7 +339,7 @@ typedef struct vk_tess_s {
 
 	struct {
 		uint32_t		start, end;
-		VkDescriptorSet	current[5]; // 0:uniform, 1:color0, 2:color1, 3:color2, 4:fog
+		VkDescriptorSet	current[VK_DESC_COUNT]; // 0:uniform, 1:color0, 2:color1, 3:color2, 4:fog, 5:depth_fade
 		uint32_t		offset[1]; // 0 (uniform)
 	} descriptor_set;
 
@@ -383,6 +386,10 @@ typedef struct {
 		VkRenderPass bloom_extract;
 		VkRenderPass blur[VK_NUM_BLOOM_PASSES*2]; // horizontal-vertical pairs
 		VkRenderPass post_bloom;
+		VkRenderPass depth_fade;	// loads color+depth, for soft particle rendering
+		VkRenderPass smaa_edge;		// SMAA edge detection (R8G8)
+		VkRenderPass smaa_blend;	// SMAA blend weight (RGBA8)
+		VkRenderPass smaa_resolve;	// SMAA resolve (writes to color_image)
 	} render_pass;
 
 	VkDescriptorPool descriptor_pool;
@@ -393,6 +400,7 @@ typedef struct {
 	VkPipelineLayout pipeline_layout;			// default shaders
 	VkPipelineLayout pipeline_layout_storage;	// flare test shader layout
 	VkPipelineLayout pipeline_layout_post_process;	// post-processing
+	VkPipelineLayout pipeline_layout_smaa;		// SMAA (push constants + 3 samplers)
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
 
 	VkDescriptorSet color_descriptor;
@@ -407,6 +415,50 @@ typedef struct {
 
 	VkImage depth_image;
 	VkImageView depth_image_view;
+
+	// depth fade (soft particles)
+	struct {
+		VkImage         image;
+		VkImageView     view;
+		VkDeviceMemory  memory;
+		VkSampler       sampler;
+		VkDescriptorSet descriptor;
+		qboolean        active;
+		qboolean        copied;		// depth was copied this frame
+	} depthFade;
+
+	// SMAA anti-aliasing
+	struct {
+		qboolean        active;
+		int             quality;        // 1-4
+
+		// LUT textures (static, created once)
+		VkImage         area_image;
+		VkImageView     area_view;
+		VkDeviceMemory  area_memory;
+		VkDescriptorSet area_descriptor;
+
+		VkImage         search_image;
+		VkImageView     search_view;
+		VkDeviceMemory  search_memory;
+		VkDescriptorSet search_descriptor;
+
+		// intermediate textures (resolution-dependent)
+		VkImage         edges_image;    // R8G8
+		VkImageView     edges_view;
+		VkDescriptorSet edges_descriptor;
+
+		VkImage         blend_image;    // RGBA8
+		VkImageView     blend_view;
+		VkDescriptorSet blend_descriptor;
+
+		VkImage         input_image;    // color_format (copy of color_image)
+		VkImageView     input_view;
+		VkDescriptorSet input_descriptor;
+
+		VkSampler       point_sampler;
+		VkSampler       linear_sampler;
+	} smaa;
 
 	VkImage msaa_image;
 	VkImageView msaa_image_view;
@@ -437,6 +489,9 @@ typedef struct {
 		VkFramebuffer gamma[MAX_SWAPCHAIN_IMAGES];
 		VkFramebuffer screenmap;
 		VkFramebuffer capture;
+		VkFramebuffer smaa_edge;
+		VkFramebuffer smaa_blend;
+		VkFramebuffer smaa_resolve;
 	} framebuffers;
 
 #ifdef USE_UPLOAD_QUEUE
@@ -493,6 +548,11 @@ typedef struct {
 			VkShaderModule fixed[2][2];  // tx[0,1], fog[0,1]
 			VkShaderModule ent[1][2];    // tx[0], fog[0,1]
 			VkShaderModule light[2][2];  // linear[0,1] fog[0,1]
+			// depth fade variants (single-texture only)
+			VkShaderModule dfade_gen[1][2];    // tx[0], fog[0,1]
+			VkShaderModule dfade_ident1[1][2]; // tx[0], fog[0,1]
+			VkShaderModule dfade_fixed[1][2];  // tx[0], fog[0,1]
+			VkShaderModule dfade_ent[1][2];    // tx[0], fog[0,1]
 		} frag;
 
 		VkShaderModule color_fs;
@@ -510,6 +570,13 @@ typedef struct {
 
 		VkShaderModule dot_fs;
 		VkShaderModule dot_vs;
+
+		VkShaderModule smaa_edge_vs;
+		VkShaderModule smaa_edge_fs;
+		VkShaderModule smaa_blend_vs;
+		VkShaderModule smaa_blend_fs;
+		VkShaderModule smaa_resolve_vs;
+		VkShaderModule smaa_resolve_fs;
 	} modules;
 
 	VkPipelineCache pipelineCache;
@@ -571,6 +638,9 @@ typedef struct {
 	VkPipeline bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs
 	VkPipeline bloom_blend_pipeline;
+	VkPipeline smaa_edge_pipeline;
+	VkPipeline smaa_blend_pipeline;
+	VkPipeline smaa_resolve_pipeline;
 
 	uint32_t frame_count;
 	qboolean active;

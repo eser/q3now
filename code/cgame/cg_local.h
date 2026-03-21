@@ -578,6 +578,7 @@ typedef struct {
 #endif
 #if FEAT_AUTO_DEMO
 	qboolean	playerRecord;		// auto-recording active
+	qboolean	autoJoinChecked;	// have we done the auto-join check yet?
 #endif
 	char			spectatorList[MAX_STRING_CHARS];		// list of names
 	int				spectatorLen;												// length of list
@@ -1285,6 +1286,7 @@ extern	vmCvar_t		cg_followKiller;
 #endif
 #if FEAT_AUTO_DEMO
 extern	vmCvar_t		cg_autoRecord;
+extern	vmCvar_t		cg_autoJoin;
 #endif
 #if FEAT_IMPACT_SPARKS
 extern	vmCvar_t		cg_impactSparks;
@@ -1293,6 +1295,53 @@ extern	vmCvar_t		cg_impactSparks;
 void		CG_ChatFilterIgnore_f( void );
 void		CG_ChatFilterUnignore_f( void );
 qboolean	CG_ChatFilterIsMuted( int clientNum );
+#endif
+
+#if FEAT_STATS_WINDOW
+// --- floating window system (cg_window.c) ---
+#define MAX_WINDOW_LINES    32
+#define MAX_WINDOW_LINE_LEN 128
+#define MAX_WINDOWS         6
+
+#define WID_STATS       1
+#define WID_VOTE        2
+#define WID_BOTORDER    3
+
+typedef enum {
+	WSTATE_OFF,
+	WSTATE_FADEIN,
+	WSTATE_ON,
+	WSTATE_FADEOUT
+} windowState_t;
+
+typedef struct cg_window_s {
+	int             id;
+	windowState_t   state;
+	int             x, y, w, h;
+	int             lineCount;
+	char            lineText[MAX_WINDOW_LINES][MAX_WINDOW_LINE_LEN];
+	vec4_t          lineColor[MAX_WINDOW_LINES];
+	int             stateStartTime;
+	float           alpha;
+	int             autoCloseTime;  /* 0=manual, >0=auto-close after ms */
+} cg_window_t;
+
+typedef struct {
+	cg_window_t     windows[MAX_WINDOWS];
+} cg_windowHandler_t;
+
+extern cg_windowHandler_t cg_windowHandler;
+extern vmCvar_t cg_statsWindow;
+
+void            CG_windowInit( void );
+cg_window_t    *CG_windowAlloc( int id );
+void            CG_windowFree( int id );
+void            CG_windowDraw( void );
+void            CG_statsWindow( void );
+void            CG_StatsDown_f( void );
+void            CG_StatsUp_f( void );
+void            CG_voteNotification( const char *msg );
+void            CG_botOrderConfirmation( const char *bot, const char *order );
 #endif
 
 extern	vmCvar_t		cg_hudFile;

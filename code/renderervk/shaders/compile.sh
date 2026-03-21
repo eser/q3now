@@ -32,11 +32,13 @@ compile() {
 echo "==> Compiling individual shaders..."
 for f in *.vert; do
     [ -f "$f" ] || continue
+    case "$f" in smaa_*) continue;; esac  # compiled separately below
     name="${f%.vert}_vert_spv"
     compile vert "$f" "$name"
 done
 for f in *.frag; do
     [ -f "$f" ] || continue
+    case "$f" in smaa_*) continue;; esac  # compiled separately below
     name="${f%.frag}_frag_spv"
     compile frag "$f" "$name"
 done
@@ -129,6 +131,25 @@ compile frag "gen_frag.tmpl -DUSE_TX2 -DUSE_FOG" frag_tx2_fog
 # triple-texture fragment, non-identical colors
 compile frag "gen_frag.tmpl -DUSE_CL2 -DUSE_TX2" frag_tx2_cl
 compile frag "gen_frag.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_FOG" frag_tx2_cl_fog
+
+echo "==> Compiling depth fade fragment shaders..."
+# depth fade variants for soft particles (single-texture only)
+compile frag "gen_frag.tmpl -DUSE_DEPTH_FADE -DUSE_ATEST" frag_tx0_dfade
+compile frag "gen_frag.tmpl -DUSE_DEPTH_FADE -DUSE_ATEST -DUSE_FOG" frag_tx0_dfade_fog
+compile frag "gen_frag.tmpl -DUSE_DEPTH_FADE -DUSE_CLX_IDENT -DUSE_ATEST" frag_tx0_ident1_dfade
+compile frag "gen_frag.tmpl -DUSE_DEPTH_FADE -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_FOG" frag_tx0_ident1_dfade_fog
+compile frag "gen_frag.tmpl -DUSE_DEPTH_FADE -DUSE_FIXED_COLOR -DUSE_ATEST" frag_tx0_fixed_dfade
+compile frag "gen_frag.tmpl -DUSE_DEPTH_FADE -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_FOG" frag_tx0_fixed_dfade_fog
+compile frag "gen_frag.tmpl -DUSE_DEPTH_FADE -DUSE_ENT_COLOR -DUSE_ATEST" frag_tx0_ent_dfade
+compile frag "gen_frag.tmpl -DUSE_DEPTH_FADE -DUSE_ENT_COLOR -DUSE_ATEST -DUSE_FOG" frag_tx0_ent_dfade_fog
+
+echo "==> Compiling SMAA shaders..."
+compile vert "smaa_edge.vert" smaa_edge_vert_spv
+compile frag "smaa_edge.frag" smaa_edge_frag_spv
+compile vert "smaa_blend.vert" smaa_blend_vert_spv
+compile frag "smaa_blend.frag" smaa_blend_frag_spv
+compile vert "smaa_resolve.vert" smaa_resolve_vert_spv
+compile frag "smaa_resolve.frag" smaa_resolve_frag_spv
 
 rm -f "$TMPF"
 echo "==> Done. shader_data.c regenerated."

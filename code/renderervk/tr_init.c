@@ -62,6 +62,9 @@ cvar_t	*r_skipBackEnd;
 cvar_t	*r_greyscale;
 cvar_t	*r_dither;
 cvar_t	*r_presentBits;
+#if FEAT_DEPTH_CLAMP
+cvar_t	*r_depthClamp;
+#endif
 
 static cvar_t *r_ignorehwgamma;
 
@@ -94,6 +97,8 @@ cvar_t	*r_renderWidth;
 cvar_t	*r_renderHeight;
 cvar_t	*r_renderScale;
 cvar_t	*r_ext_supersample;
+cvar_t	*r_depthFade;
+cvar_t	*r_smaa;
 #endif // USE_VULKAN
 
 cvar_t	*r_dlightBacks;
@@ -1645,6 +1650,12 @@ static void R_Register( void )
 	r_dither = ri.Cvar_Get( "r_dither", "0", CVAR_ARCHIVE_ND );
 	ri.Cvar_CheckRange( r_dither, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_dither, "Set dithering mode:\n 0 - disabled\n 1 - ordered\nRequires " S_COLOR_CYAN "\\r_fbo 1." );
+
+#if FEAT_DEPTH_CLAMP
+	r_depthClamp = ri.Cvar_Get( "r_depthClamp", "0", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_depthClamp, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_depthClamp, "Disable near-plane vertex clipping. Prevents seeing through objects at high FOV." );
+#endif
 	ri.Cvar_SetGroup( r_dither, CVG_RENDERER );
 
 	r_presentBits = ri.Cvar_Get( "r_presentBits", "24", CVAR_ARCHIVE_ND | CVAR_LATCH );
@@ -1824,6 +1835,21 @@ static void R_Register( void )
 		" 2 - nearest filtering, preserve aspect ratio (black bars on sides)\n"
 		" 3 - linear filtering, stretch to full size\n"
 		" 4 - linear filtering, preserve aspect ratio (black bars on sides)\n" );
+
+	r_depthFade = ri.Cvar_Get( "r_depthFade", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_depthFade, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_depthFade, "Soft particle edges: fade transparent surfaces near opaque geometry.\n"
+		" Requires \\r_fbo 1." );
+
+	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_smaa, "0", "4", CV_INTEGER );
+	ri.Cvar_SetDescription( r_smaa, "SMAA anti-aliasing quality:\n"
+		" 0 - disabled\n"
+		" 1 - low\n"
+		" 2 - medium\n"
+		" 3 - high\n"
+		" 4 - ultra\n"
+		" Requires \\r_fbo 1." );
 #endif // USE_VULKAN
 }
 

@@ -854,7 +854,8 @@ void	G_WriteStatsJSON( void );
 #if FEAT_MAP_ROTATION
 extern  vmCvar_t	g_maprotation;
 extern  vmCvar_t	g_maprotationMode;
-const char *G_NextRotationMap( void );
+const char *G_PeekRotationMap( void );
+void G_AdvanceRotation( void );
 #endif
 // eser - team shuffle command
 void	G_ShuffleTeams( void );

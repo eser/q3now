@@ -414,10 +414,106 @@ void UI_TeamOrdersMenu_Cache( void ) {
 UI_TeamOrdersMenu
 ===============
 */
+#if FEAT_DYNAMIC_MENU
+
+static char s_dynBotName[16];
+
+/*
+===============
+UI_TeamOrdersDyn_OrderEvent
+===============
+*/
+static void UI_TeamOrdersDyn_OrderEvent( int id ) {
+	const char *fmt;
+	char message[256];
+
+	switch ( id ) {
+	case 0: fmt = "%s follow me"; break;
+	case 1: fmt = "%s get the flag"; break;
+	case 2: fmt = "%s camp here"; break;
+	case 3: fmt = "%s patrol"; break;
+	case 4: fmt = "%s report"; break;
+	default: return;
+	}
+
+	Com_sprintf( message, sizeof(message), fmt, s_dynBotName );
+	trap_Cmd_ExecuteText( EXEC_APPEND, va( "say_team \"%s\"\n", message ) );
+
+	UI_PopMenu();  /* close dynamic menu */
+	UI_PopMenu();  /* close in-game menu */
+}
+
+/*
+===============
+UI_TeamOrdersDyn_OrdersSubMenu
+===============
+*/
+static void UI_TeamOrdersDyn_OrdersSubMenu( void ) {
+	DynamicMenu_SetBanner( va( "ORDERS: %s", s_dynBotName ) );
+	DynamicMenu_AddItem( "Follow Me", 0, NULL, UI_TeamOrdersDyn_OrderEvent );
+	if ( teamOrdersMenuInfo.gametype >= GT_CTF ) {
+		DynamicMenu_AddItem( "Get Flag", 1, NULL, UI_TeamOrdersDyn_OrderEvent );
+	}
+	DynamicMenu_AddItem( "Camp Here",  2, NULL, UI_TeamOrdersDyn_OrderEvent );
+	DynamicMenu_AddItem( "Patrol",     3, NULL, UI_TeamOrdersDyn_OrderEvent );
+	DynamicMenu_AddItem( "Report",     4, NULL, UI_TeamOrdersDyn_OrderEvent );
+}
+
+/*
+===============
+UI_TeamOrdersDyn_BotCreate
+
+Called when a bot name is selected from the main list.
+Stores the bot name and opens the orders submenu.
+===============
+*/
+static void UI_TeamOrdersDyn_BotCreate_0( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[0], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+static void UI_TeamOrdersDyn_BotCreate_1( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[1], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+static void UI_TeamOrdersDyn_BotCreate_2( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[2], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+static void UI_TeamOrdersDyn_BotCreate_3( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[3], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+static void UI_TeamOrdersDyn_BotCreate_4( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[4], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+static void UI_TeamOrdersDyn_BotCreate_5( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[5], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+static void UI_TeamOrdersDyn_BotCreate_6( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[6], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+static void UI_TeamOrdersDyn_BotCreate_7( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[7], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+static void UI_TeamOrdersDyn_BotCreate_8( void ) { Q_strncpyz( s_dynBotName, teamOrdersMenuInfo.botNames[8], sizeof(s_dynBotName) ); UI_TeamOrdersDyn_OrdersSubMenu(); }
+
+static dynamicCreateHandler s_botCreateHandlers[9] = {
+	UI_TeamOrdersDyn_BotCreate_0,
+	UI_TeamOrdersDyn_BotCreate_1,
+	UI_TeamOrdersDyn_BotCreate_2,
+	UI_TeamOrdersDyn_BotCreate_3,
+	UI_TeamOrdersDyn_BotCreate_4,
+	UI_TeamOrdersDyn_BotCreate_5,
+	UI_TeamOrdersDyn_BotCreate_6,
+	UI_TeamOrdersDyn_BotCreate_7,
+	UI_TeamOrdersDyn_BotCreate_8
+};
+
+void UI_TeamOrdersMenu( void ) {
+	int i;
+
+	memset( &teamOrdersMenuInfo, 0, sizeof(teamOrdersMenuInfo) );
+	UI_TeamOrdersMenu_BuildBotList();
+
+	DynamicMenu_MenuInit( qfalse, qtrue );
+	DynamicMenu_SetBanner( "TEAM ORDERS" );
+
+	for ( i = 0; i < teamOrdersMenuInfo.numBots; i++ ) {
+		DynamicMenu_AddItem( teamOrdersMenuInfo.botNames[i], i,
+			s_botCreateHandlers[i], NULL );
+	}
+
+	UI_PushMenu( DynamicMenu_Ref() );
+}
+
+#else /* !FEAT_DYNAMIC_MENU */
+
 void UI_TeamOrdersMenu( void ) {
 	UI_TeamOrdersMenu_Init();
 	UI_PushMenu( &teamOrdersMenuInfo.menu );
 }
+
+#endif /* FEAT_DYNAMIC_MENU */
 
 
 /*
