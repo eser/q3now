@@ -4,6 +4,11 @@ if(NOT USE_WASM)
     return()
 endif()
 
+# No-op fallback so basegame.cmake doesn't crash when wasi-sdk is absent
+function(add_wasm MODULE_NAME)
+    message(STATUS "WASM: Skipping ${MODULE_NAME} (wasi-sdk not available)")
+endfunction()
+
 # Find wasi-sdk
 if(NOT DEFINED WASI_SDK_PATH)
     if(EXISTS "/opt/wasi-sdk")

@@ -25,6 +25,10 @@ list(APPEND QCOMMON_SRCS code/libs/lz4/lz4.c code/libs/lz4/lz4frame.c code/libs/
 
 # exclude platform-dependent QVM bytecode compilers
 list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alxp].*.c")
+# exclude WASM VM backend when not enabled (vm_wasm.c needs WAMR headers)
+IF(NOT USE_WASM)
+	list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_wasm.c")
+ENDIF()
 # add platform-dependent QVM bytecode compilers
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
 	IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
