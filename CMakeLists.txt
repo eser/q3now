@@ -120,12 +120,13 @@ IF(NOT USE_CURL)
 ENDIF()
 
 # x86_64 sound mixing ASM (GAS syntax for non-Windows)
+# x86_64 sound mixing ASM (GAS syntax — works with GCC on both Linux and MinGW)
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
-	IF(NOT WIN32)
+	IF(NOT MSVC)
 		ENABLE_LANGUAGE(ASM)
 		list(APPEND CLIENT_SRCS code/asm/snd_mix_x86_64.s)
 		# The .s file uses C preprocessor macros (#ifdef, C()) and needs
-		# preprocessing — tell the compiler to treat it as assembler-with-cpp.
+		# preprocessing. -DELF avoids underscore prefix (correct for x86_64 ABI).
 		set_source_files_properties(code/asm/snd_mix_x86_64.s PROPERTIES
 			COMPILE_FLAGS "-x assembler-with-cpp -DELF")
 	ENDIF()
