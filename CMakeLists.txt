@@ -1,6 +1,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
 
-PROJECT(q3now LANGUAGES C CXX)
+PROJECT(q3now LANGUAGES C CXX ASM)
 
 SET(CNAME "q3now")
 SET(DNAME "q3now-ded")
@@ -120,11 +120,9 @@ IF(NOT USE_CURL)
 	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_curl.c)
 ENDIF()
 
-# x86_64 sound mixing ASM (GAS syntax for non-Windows)
 # x86_64 sound mixing ASM (GAS syntax — works with GCC on both Linux and MinGW)
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
 	IF(NOT MSVC)
-		ENABLE_LANGUAGE(ASM)
 		list(APPEND CLIENT_SRCS code/asm/snd_mix_x86_64.s)
 		# The .s file uses C preprocessor macros (#ifdef, C()) and needs
 		# preprocessing. -DELF avoids underscore prefix (correct for x86_64 ABI).
