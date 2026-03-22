@@ -6,6 +6,18 @@ import (
 	"runtime"
 )
 
+// PredefinedQ3Paths returns candidate predefined Q3A/QL parent directories on Linux.
+func PredefinedQ3Paths() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, "q3now", "old-q3"),
+		filepath.Join(home, "q3now", "old-qlive"),
+	}
+}
+
 // SteamQ3Paths returns candidate Steam Q3A/QL parent directories on Linux.
 func SteamQ3Paths() []string {
 	home, err := os.UserHomeDir()
@@ -43,6 +55,17 @@ func SteamQ1Paths() []string {
 		filepath.Join(home, ".var", "app", "com.valvesoftware.Steam",
 			".steam", "steam", "SteamApps", "common",
 			"Quake"),
+	}
+}
+
+// PredefinedQ1Paths returns candidate predefined Quake 1 parent directories on Linux.
+func PredefinedQ1Paths() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, "q3now", "old-q1"),
 	}
 }
 

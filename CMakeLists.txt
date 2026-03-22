@@ -325,7 +325,11 @@ IF(BUILD_GAME_LIBRARIES OR BUILD_GAME_QVMS)
 		SET(COMMON_LIBRARIES m ${CMAKE_DL_LIBS})
 	ENDIF()
 	# PRODUCT_DATE: ioquake3 game code uses this for version stamping
+	# Use target_compile_definitions instead of add_compile_definitions to avoid
+	# passing the date string (with spaces) to windres on Windows, which breaks.
 	STRING(TIMESTAMP PRODUCT_DATE "%b %d %Y" UTC)
-	ADD_COMPILE_DEFINITIONS(PRODUCT_DATE="${PRODUCT_DATE}")
+	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE PRODUCT_DATE="${PRODUCT_DATE}")
+	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE PRODUCT_DATE="${PRODUCT_DATE}")
+	TARGET_COMPILE_DEFINITIONS(client PRIVATE PRODUCT_DATE="${PRODUCT_DATE}")
 	INCLUDE(basegame)
 ENDIF()
