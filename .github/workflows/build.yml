@@ -99,7 +99,7 @@ jobs:
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build and package
-      run: make release Q3DIR=${{ runner.temp }}/q3now
+      run: make release Q3DIR=${{ runner.temp }}/q3now.app
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'release' || github.event_name == 'push'
