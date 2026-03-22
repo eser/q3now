@@ -234,7 +234,7 @@ endif
 ifeq ($(UNAME_S),Darwin)
   _GAME_MODULE_EXT = $(GAME_ARCH).dylib
 else
-  _GAME_MODULE_EXT = .so
+  _GAME_MODULE_EXT = $(GAME_ARCH).so
 endif
 
 # _do-copy-build: internal target pattern for copy-build / copy-build-debug
