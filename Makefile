@@ -117,6 +117,7 @@ TAR_OUT     := $(BUILD_DIR_RELEASE)/$(TAR_NAME).tar.gz
 # Launcher (Go/Wails)
 LAUNCHER_DIR := launcher
 LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS/q3now-launcher
+WAILS_TAGS   ?=
 
 # SW3Z archiver
 SW3Z_DIR := pkg/sw3z-archiver
@@ -178,7 +179,7 @@ rebuild: clean build
 create-launcher:
 	@echo "==> Building launcher..."
 	cd $(LAUNCHER_DIR) && PATH="$$HOME/go/bin:$$PATH" wails build \
-	  -ldflags "-X main.version=$(VERSION)"
+	  $(WAILS_TAGS) -ldflags "-X main.version=$(VERSION)"
 	@echo "==> Launcher ready: $(LAUNCHER_BIN)"
 
 # ── create-paks ──────────────────────────────────────────────────────────────
