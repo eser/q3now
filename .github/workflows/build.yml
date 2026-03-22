@@ -164,7 +164,7 @@ jobs:
     - name: Build game engine
       shell: bash
       run: |
-        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_SDL=OFF -DWASI_SDK_PATH=/opt/wasi-sdk
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_SDL=OFF -DUSE_WASM=ON -DWASI_SDK_PATH=/opt/wasi-sdk
         cmake --build build --parallel
 
     - name: Verify QVMs
