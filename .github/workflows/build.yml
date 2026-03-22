@@ -163,47 +163,15 @@ jobs:
     - name: Install Wails CLI
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-    - name: Build game engine
+    - name: Build and package
       shell: bash
-      run: |
-        export MSYS2_ARG_CONV_EXCL="-DWASI_SDK_PATH="
-        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_SDL=OFF -DUSE_WASM=ON -DWASI_SDK_PATH="$USERPROFILE/wasi-sdk" -DWASI_SDK_PATH=/opt/wasi-sdk
-        cmake --build build --parallel
-
-    - name: Verify QVMs
-      shell: bash
-      run: |
-        ls build/Release/baseq3/vm/cgame.qvm  && echo "cgame  QVM: OK" || echo "cgame  QVM: MISSING (expected on Windows)"
-        ls build/Release/baseq3/vm/qagame.qvm && echo "qagame QVM: OK" || echo "qagame QVM: MISSING (expected on Windows)"
-        ls build/Release/baseq3/vm/ui.qvm     && echo "ui     QVM: OK" || echo "ui     QVM: MISSING (expected on Windows)"
-
-    - name: Build launcher
-      shell: bash
-      run: |
-        cd launcher && wails build \
-          -ldflags "-X main.version=$(git describe --always --dirty)"
-
-    - name: Package zip
-      shell: pwsh
-      run: |
-        $version = git describe --always --dirty
-        $staging = "build/staging"
-        New-Item -ItemType Directory -Force -Path "$staging/baseq3"
-        Copy-Item "build/q3now.x64.exe" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "build/q3now-ded.x64.exe" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "launcher/build/bin/q3now-launcher.exe" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "build/q3now_opengl_x86_64.dll" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "build/q3now_vulkan_x86_64.dll" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "build/Release/baseq3/*" "$staging/baseq3/" -ErrorAction SilentlyContinue
-        Copy-Item "README.md" "$staging/"
-        Compress-Archive -Path "$staging/*" -DestinationPath "build/q3now-$version-windows-x86_64.zip" -Force
-        Remove-Item -Recurse -Force "$staging"
+      run: make release Q3DIR=${{ runner.temp }}/q3now USE_SDL=0
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'release' || github.event_name == 'push'
       with:
         name: windows-x86_64
-        path: build/*.zip
+        path: ${{ runner.temp }}/q3now/
         if-no-files-found: warn
         retention-days: 5
 
@@ -211,4 +179,4 @@ jobs:
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
-        files: build/*.zip
+        files: build/release/*.zip
