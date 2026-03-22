@@ -26,7 +26,7 @@ list(APPEND QCOMMON_SRCS code/libs/lz4/lz4.c code/libs/lz4/lz4frame.c code/libs/
 list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alxp].*.c")
 # add platform-dependent QVM bytecode compilers
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
-	IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64)
+	IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
 		IF(WIN32)
 			SET(BINEXT .x64)
 		ELSE()
@@ -96,6 +96,14 @@ IF(NOT USE_CURL)
 	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_curl.c)
 ENDIF()
 
+# x86_64 sound mixing ASM (GAS syntax for non-Windows)
+IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+	IF(NOT WIN32)
+		ENABLE_LANGUAGE(ASM)
+		list(APPEND CLIENT_SRCS code/asm/snd_mix_x86_64.s)
+	ENDIF()
+ENDIF()
+
 #ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
 
 # jpeg
@@ -131,6 +139,14 @@ IF(USE_RENDERER_DLOPEN)
 	ADD_LIBRARY(${RENDERER_PREFIX}_vulkan${RENDEXT} SHARED ${RENDERER_VK_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PROPERTIES PREFIX "")
+
+	# Linux: renderer shared libs are dlopen'd by the main executable at runtime.
+	# Symbols like Sys_DefaultAppPath are resolved from the host process, so allow
+	# them to remain undefined at link time (macOS does this by default).
+	IF(UNIX AND NOT APPLE)
+		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
+		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
+	ENDIF()
 ELSE()
 	IF(USE_VULKAN)
 		ADD_LIBRARY(${RENDERER_PREFIX}_vulkan OBJECT ${RENDERER_VK_SRCS} ${RENDERER_COMMON_SRCS})

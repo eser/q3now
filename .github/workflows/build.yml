@@ -133,14 +133,17 @@ jobs:
       with:
         node-version: '25.8.0'
 
+    - name: Install system dependencies
+      run: choco install ninja -y
+
     - name: Install Wails CLI
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build game engine
-      shell: cmd
+      shell: bash
       run: |
-        cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-        cmake --build build --config Release --parallel
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_SDL=OFF
+        cmake --build build --parallel
 
     - name: Verify QVMs
       shell: bash
@@ -161,11 +164,11 @@ jobs:
         $version = git describe --always --dirty
         $staging = "build/staging"
         New-Item -ItemType Directory -Force -Path "$staging/baseq3"
-        Copy-Item "build/Release/q3now.exe" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "build/Release/q3now-ded.exe" "$staging/" -ErrorAction SilentlyContinue
+        Copy-Item "build/q3now.exe" "$staging/" -ErrorAction SilentlyContinue
+        Copy-Item "build/q3now-ded.exe" "$staging/" -ErrorAction SilentlyContinue
         Copy-Item "launcher/build/bin/q3now-launcher.exe" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "build/Release/q3now_opengl_x86_64.dll" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "build/Release/q3now_vulkan_x86_64.dll" "$staging/" -ErrorAction SilentlyContinue
+        Copy-Item "build/q3now_opengl_x86_64.dll" "$staging/" -ErrorAction SilentlyContinue
+        Copy-Item "build/q3now_vulkan_x86_64.dll" "$staging/" -ErrorAction SilentlyContinue
         Copy-Item "build/Release/baseq3/*" "$staging/baseq3/" -ErrorAction SilentlyContinue
         Copy-Item "README.md" "$staging/"
         Compress-Archive -Path "$staging/*" -DestinationPath "build/q3now-$version-windows-x86_64.zip" -Force
