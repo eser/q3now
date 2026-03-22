@@ -167,10 +167,11 @@ IF(USE_RENDERER_DLOPEN)
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PROPERTIES PREFIX "")
 
-	# Linux: renderer shared libs are dlopen'd by the main executable at runtime.
-	# Symbols like Sys_DefaultAppPath are resolved from the host process, so allow
-	# them to remain undefined at link time (macOS does this by default).
+	# Linux: renderer shared libs need libm for math functions (powf etc.)
+	# and are dlopen'd at runtime, so allow host-process symbols to remain undefined.
 	IF(UNIX AND NOT APPLE)
+		TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_opengl${RENDEXT} m)
+		TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_vulkan${RENDEXT} m)
 		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
 		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
 	ENDIF()
