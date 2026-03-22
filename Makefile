@@ -250,6 +250,11 @@ ifeq ($(UNAME_S),Darwin)
 	  "$(Q3DIR)/Contents/Info.plist"
 	@test -f "$(_DED)" && cp "$(_DED)" \
 	  "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded" || true
+else
+	mkdir -p "$(Q3DIR)"
+	cp "$(_BDIR)/$(APP_NAME)$(BINEXT)" "$(Q3DIR)/"
+	@test -f "$(_BDIR)/$(APP_NAME)-ded$(BINEXT)" && \
+	  cp "$(_BDIR)/$(APP_NAME)-ded$(BINEXT)" "$(Q3DIR)/" || true
 endif
 	mkdir -p "$(Q3BASEDIR)"
 	cp "$(_BDIR)/$(_CFG)/baseq3/cgame$(_GAME_MODULE_EXT)"  "$(Q3BASEDIR)/"
