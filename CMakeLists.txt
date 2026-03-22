@@ -222,6 +222,9 @@ ELSEIF(WIN32)
 	ELSE()
 		# MinGW: windres needs the source root to resolve relative paths in .rc files
 		SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I${CMAKE_SOURCE_DIR}")
+		# GCC 14+ treats incompatible-pointer-types as error; Quake3 codebase uses
+		# legacy char**/const char** patterns that are safe but technically incorrect.
+		ADD_COMPILE_OPTIONS(-Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
 	ENDIF()
 
 	SET(Q3_SRCS
