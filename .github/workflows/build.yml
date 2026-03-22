@@ -152,10 +152,13 @@ jobs:
       run: choco install ninja -y
 
     - name: Install wasi-sdk
-      shell: bash
+      shell: pwsh
       run: |
-        curl -sLo /tmp/wasi-sdk.tar.gz "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-windows.tar.gz"
-        mkdir -p "$USERPROFILE/wasi-sdk" && tar xzf /tmp/wasi-sdk.tar.gz --strip-components=1 -C "$USERPROFILE/wasi-sdk"
+        $url = "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$env:WASI_SDK_VERSION/wasi-sdk-$env:WASI_SDK_VERSION.0-x86_64-windows.tar.gz"
+        $archive = "$env:RUNNER_TEMP\wasi-sdk.tar.gz"
+        Invoke-WebRequest -Uri $url -OutFile $archive
+        New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\wasi-sdk"
+        tar xzf $archive --strip-components=1 -C "$env:USERPROFILE\wasi-sdk"
 
     - name: Install Wails CLI
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
