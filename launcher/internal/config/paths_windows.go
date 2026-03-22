@@ -1,5 +1,7 @@
 package config
 
+import "runtime"
+
 // PredefinedQ3Paths returns candidate predefined Q3A/QL parent directories on Windows.
 func PredefinedQ3Paths() []string {
 	return []string{
@@ -47,5 +49,13 @@ func GOGQ1Paths() []string {
 }
 
 func gameBinaryName() string {
-	return "q3now.exe"
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
+		return "q3now.x64.exe"
+	case "arm64":
+		return "q3now.arm64.exe"
+	default:
+		return "q3now." + arch + ".exe"
+	}
 }
