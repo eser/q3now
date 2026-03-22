@@ -101,6 +101,10 @@ IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
 	IF(NOT WIN32)
 		ENABLE_LANGUAGE(ASM)
 		list(APPEND CLIENT_SRCS code/asm/snd_mix_x86_64.s)
+		# The .s file uses C preprocessor macros (#ifdef, C()) and needs
+		# preprocessing — tell the compiler to treat it as assembler-with-cpp.
+		set_source_files_properties(code/asm/snd_mix_x86_64.s PROPERTIES
+			COMPILE_FLAGS "-x assembler-with-cpp -DELF")
 	ENDIF()
 ENDIF()
 
