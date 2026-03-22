@@ -189,8 +189,8 @@ jobs:
         $version = git describe --always --dirty
         $staging = "build/staging"
         New-Item -ItemType Directory -Force -Path "$staging/baseq3"
-        Copy-Item "build/q3now.exe" "$staging/" -ErrorAction SilentlyContinue
-        Copy-Item "build/q3now-ded.exe" "$staging/" -ErrorAction SilentlyContinue
+        Copy-Item "build/q3now.x64.exe" "$staging/" -ErrorAction SilentlyContinue
+        Copy-Item "build/q3now-ded.x64.exe" "$staging/" -ErrorAction SilentlyContinue
         Copy-Item "launcher/build/bin/q3now-launcher.exe" "$staging/" -ErrorAction SilentlyContinue
         Copy-Item "build/q3now_opengl_x86_64.dll" "$staging/" -ErrorAction SilentlyContinue
         Copy-Item "build/q3now_vulkan_x86_64.dll" "$staging/" -ErrorAction SilentlyContinue

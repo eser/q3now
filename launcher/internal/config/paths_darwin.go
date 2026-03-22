@@ -87,6 +87,6 @@ func gameBinaryName() string {
 	case "amd64":
 		return "q3now.x86_64"
 	default:
-		return "q3now"
+		return "q3now." + arch
 	}
 }

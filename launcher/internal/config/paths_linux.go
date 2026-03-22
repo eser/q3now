@@ -82,6 +82,6 @@ func gameBinaryName() string {
 	case "arm64":
 		return "q3now.aarch64"
 	default:
-		return "q3now"
+		return "q3now." + arch
 	}
 }
