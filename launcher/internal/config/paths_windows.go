@@ -1,5 +1,13 @@
 package config
 
+// PredefinedQ3Paths returns candidate predefined Q3A/QL parent directories on Windows.
+func PredefinedQ3Paths() []string {
+	return []string{
+		`C:\q3now\old-q3`,
+		`C:\q3now\old-qlive`,
+	}
+}
+
 // SteamQ3Paths returns candidate Steam Q3A/QL parent directories on Windows.
 func SteamQ3Paths() []string {
 	// TODO: read Steam install path from Windows registry
@@ -21,6 +29,13 @@ func GOGPaths() []string {
 func SteamQ1Paths() []string {
 	return []string{
 		`C:\Program Files (x86)\Steam\steamapps\common\Quake`,
+	}
+}
+
+// PredefinedQ1Paths returns candidate predefined Quake 1 parent directories on Windows.
+func PredefinedQ1Paths() []string {
+	return []string{
+		`C:\q3now\old-q1`,
 	}
 }
 
