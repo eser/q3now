@@ -97,13 +97,7 @@ IF(USE_WASM)
 	SET(WAMR_BUILD_AOT 1)
 	SET(WAMR_BUILD_JIT 0)
 	SET(WAMR_BUILD_LIBC_BUILTIN 0)
-	IF(WIN32 AND NOT MSVC)
-		# WAMR's win_file.c has a GCC line-continuation bug in a comment (\??\ at EOL).
-		# Not needed: q3now uses a custom syscall bridge, not WASI file I/O.
-		SET(WAMR_BUILD_LIBC_WASI 0)
-	ELSE()
-		SET(WAMR_BUILD_LIBC_WASI 1)
-	ENDIF()
+	SET(WAMR_BUILD_LIBC_WASI 1)
 	SET(WAMR_BUILD_SHARED_MEMORY 0)
 	SET(WAMR_BUILD_MULTI_MODULE 0)
 	SET(WAMR_BUILD_REF_TYPES 1)
@@ -338,7 +332,7 @@ ENDIF()
 # ============================================================
 
 OPTION(BUILD_GAME_LIBRARIES "Build game native shared libraries (.dylib/.so)" ON)
-OPTION(BUILD_GAME_QVMS "Build game QVM bytecode (.qvm)" ON)
+OPTION(BUILD_GAME_QVMS "Build game QVM bytecode (.qvm)" OFF)
 
 IF(BUILD_GAME_LIBRARIES OR BUILD_GAME_QVMS)
 	SET(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/code)

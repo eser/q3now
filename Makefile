@@ -120,6 +120,10 @@ USE_WASM ?= 1
 
 ifeq ($(USE_WASM),1)
   CMAKE_WASM_FLAG := -DUSE_WASM=ON
+  # Forward WASI_SDK_PATH to cmake if set (cmake auto-detects /opt/wasi-sdk)
+  ifneq ($(WASI_SDK_PATH),)
+    CMAKE_WASM_FLAG += -DWASI_SDK_PATH=$(WASI_SDK_PATH)
+  endif
 else
   CMAKE_WASM_FLAG := -DUSE_WASM=OFF
 endif
@@ -236,9 +240,9 @@ create-launcher:
 	@echo "==> Launcher ready: $(LAUNCHER_BIN)"
 
 # ── create-paks ──────────────────────────────────────────────────────────────
-# Packages modfiles/ + QVMs into pax02.pk3 (or .sw3z when USE_SW3Z=1).
+# Packages modfiles/ + WASM modules into pax02.pk3 (or .sw3z when USE_SW3Z=1).
 # "pax02" sorts after pak0–pak8, ensuring highest override priority.
-# QVMs here override the stock 1999 QVMs in pak0.pk3.
+# WASM modules here override the stock 1999 QVMs in pak0.pk3.
 
 $(SW3Z_BIN):
 	cd $(SW3Z_DIR) && go build -o $(CURDIR)/$(SW3Z_BIN) ./cmd/sw3z
@@ -252,7 +256,7 @@ endif
 	rm -rf $(PAK_STAGING)
 	mkdir -p $(PAK_STAGING) $(BUILD_DIR_RELEASE)/baseq3
 	cp -R modfiles/. $(PAK_STAGING)/
-	@echo "==> Copying QVMs into pak..."
+	@echo "==> Copying VM modules into pak..."
 	cp -R $(MODULE_DIR_RELEASE)/vm $(PAK_STAGING)/
 	@echo "==> Stamping version..."
 	echo "$(APP_NAME) $$(git describe --always --dirty) ($$(date +%Y-%m-%d))" > $(PAK_STAGING)/description.txt
@@ -590,12 +594,12 @@ endif
 
 check: create-paks
 	@echo "==> Verifying build..."
-	@ls $(MODULE_DIR_RELEASE)/vm/cgame.qvm  > /dev/null && echo "  cgame.qvm:   OK"
-	@ls $(MODULE_DIR_RELEASE)/vm/qagame.qvm > /dev/null && echo "  qagame.qvm:  OK"
-	@ls $(MODULE_DIR_RELEASE)/vm/ui.qvm     > /dev/null && echo "  ui.qvm:      OK"
-	@ls $(MODULE_DIR_RELEASE)/cgame$(GAME_ARCH).*    > /dev/null && echo "  cgame.dylib: OK"
-	@ls $(MODULE_DIR_RELEASE)/qagame$(GAME_ARCH).*  > /dev/null && echo "  qagame.dylib: OK"
-	@ls $(MODULE_DIR_RELEASE)/ui$(GAME_ARCH).*      > /dev/null && echo "  ui.dylib:    OK"
+	@ls $(MODULE_DIR_RELEASE)/vm/cgame.wasm  > /dev/null 2>&1 && echo "  cgame.wasm:  OK" || echo "  cgame.wasm:  MISSING (wasi-sdk not found?)"
+	@ls $(MODULE_DIR_RELEASE)/vm/qagame.wasm > /dev/null 2>&1 && echo "  qagame.wasm: OK" || echo "  qagame.wasm: MISSING (wasi-sdk not found?)"
+	@ls $(MODULE_DIR_RELEASE)/vm/ui.wasm     > /dev/null 2>&1 && echo "  ui.wasm:     OK" || echo "  ui.wasm:     MISSING (wasi-sdk not found?)"
+	@ls $(MODULE_DIR_RELEASE)/cgame$(GAME_ARCH).*    > /dev/null 2>&1 && echo "  cgame native: OK" || echo "  cgame native: MISSING"
+	@ls $(MODULE_DIR_RELEASE)/qagame$(GAME_ARCH).*  > /dev/null 2>&1 && echo "  qagame native: OK" || echo "  qagame native: MISSING"
+	@ls $(MODULE_DIR_RELEASE)/ui$(GAME_ARCH).*      > /dev/null 2>&1 && echo "  ui native:    OK" || echo "  ui native:    MISSING"
 	@test -f $(PAK_OUT) && echo "  mod pak:     OK ($(PAK_EXT))"
 ifeq ($(UNAME_S),Darwin)
 	@codesign --verify "$(Q3DIR)" 2>/dev/null && echo "  codesign:    OK" || echo "  codesign:    MISSING (run make bundle-codesign)"
