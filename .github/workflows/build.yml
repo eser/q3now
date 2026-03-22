@@ -19,6 +19,9 @@ on:
     types: [published]
   workflow_dispatch:
 
+env:
+  WASI_SDK_VERSION: "32"
+
 jobs:
   linux-x86_64:
     name: Linux x86_64
@@ -53,6 +56,12 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
         cmake --build /tmp/SDL3/build --parallel
         sudo cmake --install /tmp/SDL3/build
+
+    - name: Install wasi-sdk
+      run: |
+        curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz" \
+          | sudo tar xz -C /opt
+        sudo ln -sf /opt/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux /opt/wasi-sdk
 
     - name: Install Wails CLI
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -95,6 +104,12 @@ jobs:
     - name: Install system dependencies
       run: brew install cmake ninja sdl3 molten-vk create-dmg
 
+    - name: Install wasi-sdk
+      run: |
+        curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-arm64-macos.tar.gz" \
+          | sudo tar xz -C /opt
+        sudo ln -sf /opt/wasi-sdk-${WASI_SDK_VERSION}.0-arm64-macos /opt/wasi-sdk
+
     - name: Install Wails CLI
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
@@ -136,13 +151,20 @@ jobs:
     - name: Install system dependencies
       run: choco install ninja -y
 
+    - name: Install wasi-sdk
+      shell: bash
+      run: |
+        curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-windows.tar.gz" \
+          | tar xz -C /opt
+        ln -sf /opt/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-windows /opt/wasi-sdk
+
     - name: Install Wails CLI
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build game engine
       shell: bash
       run: |
-        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_SDL=OFF
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_SDL=OFF -DWASI_SDK_PATH=/opt/wasi-sdk
         cmake --build build --parallel
 
     - name: Verify QVMs
