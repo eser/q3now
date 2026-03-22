@@ -1,0 +1,23 @@
+name: delete-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to delete (e.g. v1.3.0)'
+        required: true
+        type: string
+
+jobs:
+  delete:
+    name: Delete release ${{ github.event.inputs.version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Delete release and tag
+        run: gh release delete "${{ github.event.inputs.version }}" --yes --cleanup-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
