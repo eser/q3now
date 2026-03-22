@@ -306,6 +306,11 @@ ENDIF()
 IF(WIN32)
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} winmm comctl32 ws2_32)
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} winmm comctl32 ws2_32)
+	IF(USE_WASM)
+		# WAMR's WASI libc (win_file.c, random.c) needs pathcch + bcrypt
+		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} pathcch bcrypt)
+		TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} pathcch bcrypt)
+	ENDIF()
 	IF(NOT MSVC)
 		# MinGW: statically link runtime libs (libwinpthread, libgcc, libstdc++)
 		# so end users don't need MinGW DLLs in PATH
