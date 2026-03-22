@@ -47,18 +47,36 @@ BUILD_DIR         := $(BUILD_DIR_RELEASE)
 # CPU count and architecture detection
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
-ifeq ($(UNAME_M),arm64)
+
+# Detect Windows (Git Bash / MSYS2 reports MINGW64_NT-* or MSYS_NT-*)
+IS_WINDOWS :=
+ifneq ($(findstring MINGW,$(UNAME_S)),)
+  IS_WINDOWS := 1
+else ifneq ($(findstring MSYS,$(UNAME_S)),)
+  IS_WINDOWS := 1
+endif
+
+ifdef IS_WINDOWS
+  # Windows uses .x64 (not .x86_64) — matches CMakeLists.txt BINEXT
+  BINEXT  := .x64
+  RENDEXT := _x86_64
+  EXEEXT  := .exe
+else ifeq ($(UNAME_M),arm64)
   BINEXT  := .arm64
   RENDEXT := _arm64
+  EXEEXT  :=
 else ifeq ($(UNAME_M),aarch64)
   BINEXT  := .aarch64
   RENDEXT := _aarch64
+  EXEEXT  :=
 else ifeq ($(UNAME_M),x86_64)
   BINEXT  := .x86_64
   RENDEXT := _x86_64
+  EXEEXT  :=
 else
   BINEXT  :=
   RENDEXT :=
+  EXEEXT  :=
 endif
 # GAME_ARCH mirrors ARCH_STRING from q_platform.h (vm.c appends it to dylib filenames)
 GAME_ARCH := $(patsubst _%,%,$(RENDEXT))
@@ -72,7 +90,7 @@ ifeq ($(UNAME_S),Darwin)
   Q3DIR       ?= /Applications/$(APP_NAME).app
 else
   JOBS        ?= $(shell nproc 2>/dev/null || echo 4)
-  GAME_BIN    := $(BUILD_DIR_RELEASE)/$(APP_NAME)$(BINEXT)
+  GAME_BIN    := $(BUILD_DIR_RELEASE)/$(APP_NAME)$(BINEXT)$(EXEEXT)
   Q3DIR       ?= $(HOME)/$(APP_NAME)
 endif
 
@@ -106,8 +124,18 @@ else
   CMAKE_WASM_FLAG := -DUSE_WASM=OFF
 endif
 
-CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release $(CMAKE_WASM_FLAG)
-CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug $(CMAKE_WASM_FLAG)
+# SDL toggle: 1 = enable (default), 0 = disable (Windows CI has no SDL)
+USE_SDL ?= 1
+
+ifeq ($(USE_SDL),1)
+  CMAKE_SDL_FLAG := -DUSE_SDL=ON
+else
+  CMAKE_SDL_FLAG := -DUSE_SDL=OFF
+endif
+
+CMAKE_EXTRA_FLAGS ?=
+CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_EXTRA_FLAGS)
 CMAKE_BUILD_RELEASE     := cmake --build $(BUILD_DIR_RELEASE) --parallel $(JOBS)
 CMAKE_BUILD_DEBUG       := cmake --build $(BUILD_DIR_DEBUG) --parallel $(JOBS)
 
@@ -125,9 +153,20 @@ TAR_NAME    := $(APP_NAME)-$(VERSION)-linux-$(UNAME_M)
 TAR_STAGING := $(BUILD_DIR_RELEASE)/tar-staging
 TAR_OUT     := $(BUILD_DIR_RELEASE)/$(TAR_NAME).tar.gz
 
+# zip packaging (Windows)
+ZIP_NAME    := $(APP_NAME)-$(VERSION)-windows-x86_64
+ZIP_STAGING := $(BUILD_DIR_RELEASE)/zip-staging
+ZIP_OUT     := $(BUILD_DIR_RELEASE)/$(ZIP_NAME).zip
+
 # Launcher (Go/Wails)
 LAUNCHER_DIR := launcher
-LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS/q3now-launcher
+ifeq ($(UNAME_S),Darwin)
+  LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS/q3now-launcher
+else ifdef IS_WINDOWS
+  LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now-launcher.exe
+else
+  LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now-launcher
+endif
 WAILS_TAGS   ?=
 
 # SW3Z archiver
@@ -154,7 +193,7 @@ PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax02.$(PAK_EXT)
 .PHONY: all configure build build-debug clean rebuild \
         create-launcher create-paks \
         copy-libs copy-build copy-build-debug copy-paks copy-all copy-all-debug \
-        bundle-codesign bundle-dmg bundle-tar \
+        bundle-codesign bundle-dmg bundle-tar bundle-zip \
         run-launcher run-game run-gamedev run-gamedev-wasm release \
         check smoke test-features bench diff-api help
 
@@ -233,6 +272,8 @@ endif
 # Platform-specific game module extension (resolved at read time, used in macro)
 ifeq ($(UNAME_S),Darwin)
   _GAME_MODULE_EXT = $(GAME_ARCH).dylib
+else ifdef IS_WINDOWS
+  _GAME_MODULE_EXT = $(GAME_ARCH).dll
 else
   _GAME_MODULE_EXT = $(GAME_ARCH).so
 endif
@@ -252,9 +293,14 @@ ifeq ($(UNAME_S),Darwin)
 	  "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded" || true
 else
 	mkdir -p "$(Q3DIR)"
-	cp "$(_BDIR)/$(APP_NAME)$(BINEXT)" "$(Q3DIR)/"
-	@test -f "$(_BDIR)/$(APP_NAME)-ded$(BINEXT)" && \
-	  cp "$(_BDIR)/$(APP_NAME)-ded$(BINEXT)" "$(Q3DIR)/" || true
+	cp "$(_BDIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" "$(Q3DIR)/"
+	@test -f "$(_BDIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)" && \
+	  cp "$(_BDIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)" "$(Q3DIR)/" || true
+ifdef IS_WINDOWS
+	@test -f "$(LAUNCHER_BIN)" && \
+	  cp "$(LAUNCHER_BIN)" "$(Q3DIR)/q3now-launcher.exe" || \
+	  echo "  NOTE: launcher not built (run make create-launcher)"
+endif
 endif
 	mkdir -p "$(Q3BASEDIR)"
 	cp "$(_BDIR)/$(_CFG)/baseq3/cgame$(_GAME_MODULE_EXT)"  "$(Q3BASEDIR)/"
@@ -316,6 +362,18 @@ ifeq ($(UNAME_S),Darwin)
 	  else \
 	    echo "  WARNING: $$LIBNAME not found — run: brew install $$(echo $$LIBNAME | sed 's/lib//' | tr '[:upper:]' '[:lower:]')"; \
 	  fi; \
+	done
+else ifdef IS_WINDOWS
+	@echo "==> Copying renderer DLLs..."
+	@for dll in "$(BUILD_DIR_RELEASE)/$(APP_NAME)_opengl$(RENDEXT).dll" \
+	            "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).dll"; do \
+	  [ -f "$$dll" ] && cp "$$dll" "$(Q3DIR)/" || true; \
+	done
+else
+	@echo "==> Copying renderer shared objects..."
+	@for so in "$(BUILD_DIR_RELEASE)/$(APP_NAME)_opengl$(RENDEXT).so" \
+	           "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).so"; do \
+	  [ -f "$$so" ] && cp "$$so" "$(Q3DIR)/" || true; \
 	done
 endif
 
@@ -409,6 +467,31 @@ else
 	@echo "tar packaging is for Linux — use 'make bundle-dmg' on macOS"
 endif
 
+# ── bundle-zip ──────────────────────────────────────────────────────────
+# Creates a version-stamped zip for Windows distribution.
+
+bundle-zip:
+ifdef IS_WINDOWS
+	@echo "==> Creating $(ZIP_NAME).zip..."
+	rm -rf $(ZIP_STAGING) "$(ZIP_OUT)"
+	mkdir -p $(ZIP_STAGING)/baseq3
+	cp "$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" "$(ZIP_STAGING)/"
+	@test -f "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)" && \
+	  cp "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)" "$(ZIP_STAGING)/" || true
+	cp "$(Q3DIR)/q3now-launcher.exe" "$(ZIP_STAGING)/" 2>/dev/null || true
+	@for dll in "$(Q3DIR)/$(APP_NAME)_opengl$(RENDEXT).dll" \
+	            "$(Q3DIR)/$(APP_NAME)_vulkan$(RENDEXT).dll"; do \
+	  [ -f "$$dll" ] && cp "$$dll" "$(ZIP_STAGING)/" || true; \
+	done
+	cp -R "$(Q3BASEDIR)/." "$(ZIP_STAGING)/baseq3/"
+	cp README.md "$(ZIP_STAGING)/"
+	cd $(ZIP_STAGING) && powershell -Command "Compress-Archive -Path '*' -DestinationPath '$(CURDIR)/$(ZIP_OUT)' -Force"
+	rm -rf $(ZIP_STAGING)
+	@echo "==> $(ZIP_OUT) ready"
+else
+	@echo "zip packaging is for Windows — use 'make bundle-dmg' on macOS or 'make bundle-tar' on Linux"
+endif
+
 # ══════════════════════════════════════════════════════════════════════════════
 # FLOW TARGETS — composable workflows
 # ══════════════════════════════════════════════════════════════════════════════
@@ -420,7 +503,7 @@ run-launcher: create-launcher copy-all bundle-codesign
 ifeq ($(UNAME_S),Darwin)
 	open "$(Q3DIR)"
 else
-	"$(Q3DIR)/q3now-launcher"
+	"$(Q3DIR)/q3now-launcher$(EXEEXT)"
 endif
 
 # ── run-game ─────────────────────────────────────────────────────────────────
@@ -430,7 +513,7 @@ run-game: copy-all
 ifeq ($(UNAME_S),Darwin)
 	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" +map $(MAP)
 else
-	"$(Q3DIR)/$(APP_NAME)" +map $(MAP)
+	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" +map $(MAP)
 endif
 
 # ── run-gamedev ──────────────────────────────────────────────────────────────
@@ -443,7 +526,7 @@ ifeq ($(UNAME_S),Darwin)
 	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
 	  +set developer 1 +devmap $(MAP)
 else
-	"$(Q3DIR)/$(APP_NAME)" \
+	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" \
 	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
 	  +set developer 1 +devmap $(MAP)
 endif
@@ -466,7 +549,7 @@ else
 	@for f in $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.wasm $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.aot; do \
 		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/baseq3/vm/" || true; \
 	done
-	"$(Q3DIR)/$(APP_NAME)" \
+	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" \
 	  +set sv_pure 0 +set vm_game 2 +set vm_cgame 2 +set vm_ui 2 \
 	  +set developer 1 +devmap $(MAP)
 endif
@@ -478,6 +561,8 @@ endif
 release: check create-launcher copy-all bundle-codesign
 ifeq ($(UNAME_S),Darwin)
 	$(MAKE) bundle-dmg
+else ifdef IS_WINDOWS
+	$(MAKE) bundle-zip
 else
 	$(MAKE) bundle-tar
 endif
@@ -488,6 +573,8 @@ endif
 ifeq ($(UNAME_S),Darwin)
 	@echo "  │  DMG: $(DMG_OUT)"
 	@echo "  │  Size: $$(du -h "$(DMG_OUT)" | cut -f1)"
+else ifdef IS_WINDOWS
+	@echo "  │  ZIP: $(ZIP_OUT)"
 else
 	@echo "  │  TAR: $(TAR_OUT)"
 	@echo "  │  Size: $$(du -h "$(TAR_OUT)" | cut -f1)"
@@ -523,7 +610,7 @@ smoke: build
 ifeq ($(UNAME_S),Darwin)
 	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded"
 else
-	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)"
+	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)"
 endif
 
 # ── test-features ────────────────────────────────────────────────────────────
@@ -570,7 +657,7 @@ bench: copy-all
 ifeq ($(UNAME_S),Darwin)
 	open "$(Q3DIR)" --args +timedemo 1 +demo $(DEMO)
 else
-	"$(Q3DIR)/$(APP_NAME)$(BINEXT)" +timedemo 1 +demo $(DEMO)
+	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" +timedemo 1 +demo $(DEMO)
 endif
 
 # ── diff-api ─────────────────────────────────────────────────────────────────
@@ -616,6 +703,7 @@ help:
 	@echo "    make bundle-codesign    codesign .app (macOS)"
 	@echo "    make bundle-dmg         create versioned DMG (macOS)"
 	@echo "    make bundle-tar         create versioned tar.gz (Linux)"
+	@echo "    make bundle-zip         create versioned zip (Windows)"
 	@echo ""
 	@echo "  Flows:"
 	@echo "    make run-launcher       build + assemble + codesign + open launcher"
