@@ -24,6 +24,12 @@ type Q1Installation struct {
 func Scan(paths *config.Paths) []Q3Installation {
 	var found []Q3Installation
 
+	for _, p := range config.PredefinedQ3Paths() {
+		if dirExists(p) {
+			found = append(found, Q3Installation{Path: p, SourceType: "predefined"})
+		}
+	}
+
 	for _, p := range config.SteamQ3Paths() {
 		if dirExists(p) {
 			found = append(found, Q3Installation{Path: p, SourceType: "steam"})
@@ -43,6 +49,12 @@ func Scan(paths *config.Paths) []Q3Installation {
 // ScanQ1 checks known platform paths for Quake 1 game directories.
 func ScanQ1() []Q1Installation {
 	var found []Q1Installation
+
+	for _, p := range config.PredefinedQ1Paths() {
+		if dirExists(p) {
+			found = append(found, Q1Installation{Path: p, SourceType: "predefined"})
+		}
+	}
 
 	for _, p := range config.SteamQ1Paths() {
 		if dirExists(p) {
