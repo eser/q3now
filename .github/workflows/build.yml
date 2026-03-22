@@ -225,7 +225,7 @@ jobs:
 
     - name: Build and package
       shell: bash
-      run: make release Q3DIR=dist/q3now USE_SDL=0
+      run: make release Q3DIR=dist/q3now USE_SDL=0 WASI_SDK_PATH="$USERPROFILE/wasi-sdk"
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'

@@ -1295,13 +1295,13 @@ os_readlinkat(os_file_handle handle, const char *path, char *buf,
 
         if (wbufsize >= 4 && wbuf[0] == L'\\' && wbuf[1] == L'?'
             && wbuf[2] == L'?' && wbuf[3] == L'\\') {
-            // Starts with \??\ 
+            // Starts with \??\ path prefix
             if (wbufsize >= 6
                 && ((wbuf[4] >= L'A' && wbuf[4] <= L'Z')
                     || (wbuf[4] >= L'a' && wbuf[4] <= L'z'))
                 && wbuf[5] == L':' && (wbufsize == 6 || wbuf[6] == L'\\'))
                 {
-                    // \??\<drive>:\ 
+                    // \??\<drive>: path
                     wbuf += 4;
                     wbufsize -= 4;
                 }
@@ -1310,7 +1310,7 @@ os_readlinkat(os_file_handle handle, const char *path, char *buf,
                          && (wbuf[6] == L'C' || wbuf[6] == L'c')
                          && wbuf[7] == L'\\')
                 {
-                    // \??\UNC\<server>\<share>\ - make sure the final path looks like \\<server>\<share>\ 
+                    // \??\UNC\<server>\<share> - make sure the final path looks like \\<server>\<share>
                     wbuf += 6;
                     wbuf[0] = L'\\';
                     wbufsize -= 6;
@@ -1325,7 +1325,7 @@ os_readlinkat(os_file_handle handle, const char *path, char *buf,
         wbufsize = reparse_data->MountPointReparseBuffer.SubstituteNameLength
                    / sizeof(wchar_t);
 
-        // Only treat junctions that look like \??\<drive>:\ as a symlink.
+        // Only treat junctions that look like \??\<drive>: as a symlink.
         if (!(wbufsize >= 6 && wbuf[0] == L'\\' && wbuf[1] == L'?'
               && wbuf[2] == L'?' && wbuf[3] == L'\\'
               && ((wbuf[4] >= L'A' && wbuf[4] <= L'Z')
