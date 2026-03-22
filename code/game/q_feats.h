@@ -62,6 +62,10 @@
 #define FEAT_SW3Z                         1   // SW3Z archive format (.sw3z)
 #define FEAT_FS_PRECEDENCE                1   // archive dedup: basename desc, dir > ext precedence
 
+// ── engine internals (testing) ────────────────────────────────────────
+#define FEAT_WASM                         1   // WASM VM backend via WAMR (replaces QVM over time)
+#define FEAT_LEGACY_QVM                   0   // QVM bytecode interpreter + JIT (retire by setting to 0)
+
 // ── renderer (from CNQ3) ───────────────────────────────────────────────
 #define FEAT_DEPTH_CLAMP                  0   // disable near-plane vertex clipping at high FOV
 // UPSCALE_BLIT: already in Quake3e via r_fbo + r_renderScale cvars, no flag needed

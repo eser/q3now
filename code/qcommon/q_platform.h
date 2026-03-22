@@ -215,6 +215,24 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #endif
 
+// ================================ WASM ===================================
+
+#ifdef WASM_MODULE
+
+#define OS_STRING "wasm"
+#define ID_INLINE inline
+
+#define ARCH_STRING "wasm32"
+#define Q3_LITTLE_ENDIAN
+
+#define PATH_SEP '/'
+#define PATH_SEP_FOREIGN '\\'
+
+#undef DLL_EXT
+#define DLL_EXT ".wasm"
+
+#endif // WASM_MODULE
+
 // =========================================================================
 
 //catch missing defines in above blocks

@@ -3374,11 +3374,14 @@ static void CL_InitRef( void ) {
 #endif
 
 	Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
+#ifdef __APPLE__
 	// Try app bundle path first (Contents/MacOS/ on macOS) — self-contained bundle layout
 	ospath = FS_BuildOSPath( Sys_DefaultAppPath(), dllName, NULL );
 	rendererLib = Sys_LoadLibrary( ospath );
-	if ( !rendererLib ) {
-		// Fall back to basepath (next to .app) — classic / Linux layout
+	if ( !rendererLib )
+#endif
+	{
+		// Fall back to basepath — classic / Linux / Windows layout
 		ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
 		rendererLib = Sys_LoadLibrary( ospath );
 	}
@@ -3386,9 +3389,12 @@ static void CL_InitRef( void ) {
 	{
 		Cvar_ForceReset( "cl_renderer" );
 		Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
+#ifdef __APPLE__
 		ospath = FS_BuildOSPath( Sys_DefaultAppPath(), dllName, NULL );
 		rendererLib = Sys_LoadLibrary( ospath );
-		if ( !rendererLib ) {
+		if ( !rendererLib )
+#endif
+		{
 			ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
 			rendererLib = Sys_LoadLibrary( ospath );
 		}

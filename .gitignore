@@ -19,8 +19,7 @@ Thumbs.db
 *.swp
 
 # build output
-build-debug/
-build-release/
+build/
 cmake-*
 
 # todos

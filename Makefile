@@ -22,15 +22,17 @@
 #   make run-launcher       build + assemble + codesign + open launcher
 #   make run-game           build + assemble + run engine (QVM mode)
 #   make run-gamedev        build-debug + assemble + run engine (native debug)
+#   make run-gamedev-wasm   build-debug + run engine (WASM game modules)
 #   make release            build + assemble + codesign + package
 #
 # VARIABLES (override on command line or env)
-#   Q3DIR              install destination     (default: /Applications/q3now on macOS)
-#   JOBS               parallel job count      (default: CPU count)
-#   MAP                map to load             (default: q3dm1)
-#   USE_SW3Z           archive format          (0=pk3/zip, 1=sw3z; default: 0)
-#   CODESIGN_IDENTITY  signing identity        (default: - = ad-hoc)
-#   UPSTREAM_REF       fork point for diff-api (default: ecd5fa41)
+#   Q3DIR              install destination      (default: /Applications/q3now on macOS)
+#   JOBS               parallel job count       (default: CPU count)
+#   MAP                map to load              (default: q3dm1)
+#   USE_SW3Z           archive format           (0=pk3/zip, 1=sw3z; default: 0)
+#   USE_WASM           WASM VM backend via WAMR (0=off, 1=on; default: 0)
+#   CODESIGN_IDENTITY  signing identity         (default: - = ad-hoc)
+#   UPSTREAM_REF       fork point for diff-api  (default: ecd5fa41)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -38,8 +40,8 @@ APP_NAME   ?= q3now
 MAP        ?= q3dm1
 
 # Dual build directories — avoid cmake reconfigure thrash between Release/Debug
-BUILD_DIR_RELEASE := build-release
-BUILD_DIR_DEBUG   := build-debug
+BUILD_DIR_RELEASE := build/release
+BUILD_DIR_DEBUG   := build/debug
 BUILD_DIR         := $(BUILD_DIR_RELEASE)
 
 # CPU count and architecture detection
@@ -95,8 +97,17 @@ else
   GENERATOR :=
 endif
 
-CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release
-CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug
+# WASM VM backend toggle: 1 = enable WAMR, 0 = QVM only
+USE_WASM ?= 1
+
+ifeq ($(USE_WASM),1)
+  CMAKE_WASM_FLAG := -DUSE_WASM=ON
+else
+  CMAKE_WASM_FLAG := -DUSE_WASM=OFF
+endif
+
+CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release $(CMAKE_WASM_FLAG)
+CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug $(CMAKE_WASM_FLAG)
 CMAKE_BUILD_RELEASE     := cmake --build $(BUILD_DIR_RELEASE) --parallel $(JOBS)
 CMAKE_BUILD_DEBUG       := cmake --build $(BUILD_DIR_DEBUG) --parallel $(JOBS)
 
@@ -126,6 +137,9 @@ SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
 # Archive format toggle: 1 = sw3z, 0 = pk3 (zip)
 USE_SW3Z ?= 1
 
+# WASM VM backend toggle: 1 = enable WAMR, 0 = QVM only (moved to top, before ifeq)
+# USE_WASM is defined near other cmake flags above
+
 # Pak output (always from Release build — QVMs are always Release)
 PAK_STAGING := $(BUILD_DIR_RELEASE)/pak-staging
 ifeq ($(USE_SW3Z),1)
@@ -141,7 +155,7 @@ PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax02.$(PAK_EXT)
         create-launcher create-paks \
         copy-libs copy-build copy-build-debug copy-paks copy-all copy-all-debug \
         bundle-codesign bundle-dmg bundle-tar \
-        run-launcher run-game run-gamedev release \
+        run-launcher run-game run-gamedev run-gamedev-wasm release \
         check smoke test-features bench diff-api help
 
 all: build
@@ -429,6 +443,29 @@ else
 	  +set developer 1 +devmap $(MAP)
 endif
 
+# ── run-gamedev-wasm ─────────────────────────────────────────────────────────
+# Build + run the full game client with WASM modules (auto-detect).
+# cmake builds all three .wasm modules; this target copies them into the app.
+
+run-gamedev-wasm: copy-all-debug
+ifeq ($(UNAME_S),Darwin)
+	@mkdir -p "$(Q3DIR)/Contents/Resources/baseq3/vm"
+	@for f in $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.wasm $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.aot; do \
+		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/Contents/Resources/baseq3/vm/" || true; \
+	done
+	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" \
+	  +set sv_pure 0 +set vm_game 2 +set vm_cgame 2 +set vm_ui 2 \
+	  +set developer 1 +devmap $(MAP)
+else
+	@mkdir -p "$(Q3DIR)/baseq3/vm"
+	@for f in $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.wasm $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.aot; do \
+		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/baseq3/vm/" || true; \
+	done
+	"$(Q3DIR)/$(APP_NAME)" \
+	  +set sv_pure 0 +set vm_game 2 +set vm_cgame 2 +set vm_ui 2 \
+	  +set developer 1 +devmap $(MAP)
+endif
+
 # ── release ──────────────────────────────────────────────────────────────────
 # Verify outputs, build launcher + engine + paks, assemble .app, codesign,
 # package DMG (macOS) or tar.gz (Linux).
@@ -509,6 +546,11 @@ else
 	@echo "test-features: not yet implemented for Linux"
 endif
 
+# ── WASM ─────────────────────────────────────────────────────────────────────
+
+test-wasm:
+	@bash tests/smoke-wasm.sh
+
 # ── bench ────────────────────────────────────────────────────────────────────
 # Timedemo benchmark. Requires a demo at Q3BASEDIR/demos/<DEMO>.dm_68.
 
@@ -574,6 +616,7 @@ help:
 	@echo "    make run-launcher       build + assemble + codesign + open launcher"
 	@echo "    make run-game           build + assemble + run engine (QVM)"
 	@echo "    make run-gamedev        build-debug + assemble + run engine (native)"
+	@echo "    make run-gamedev-wasm   build-debug + run engine (WASM modules)"
 	@echo "    make release            build + assemble + codesign + package"
 	@echo ""
 	@echo "  Testing:"
@@ -586,5 +629,5 @@ help:
 	@echo "  Variables:"
 	@echo "    Q3DIR=$(Q3DIR)"
 	@echo "    JOBS=$(JOBS)   MAP=$(MAP)   DEMO=$(DEMO)"
-	@echo "    USE_SW3Z=$(USE_SW3Z)   CODESIGN_IDENTITY=$(CODESIGN_IDENTITY)"
+	@echo "    USE_SW3Z=$(USE_SW3Z)   USE_WASM=$(USE_WASM)   CODESIGN_IDENTITY=$(CODESIGN_IDENTITY)"
 	@echo ""

@@ -365,9 +365,9 @@ VIRTUAL MACHINE
 typedef struct vm_s vm_t;
 
 typedef enum {
-	VMI_NATIVE,
-	VMI_BYTECODE,
-	VMI_COMPILED
+	VMI_NATIVE     = 0,
+	VMI_BYTECODE   = 1,   // QVM interpreted (requires FEAT_LEGACY_QVM)
+	VMI_COMPILED   = 2,   // QVM JIT-compiled (requires FEAT_LEGACY_QVM)
 } vmInterpret_t;
 
 typedef enum {

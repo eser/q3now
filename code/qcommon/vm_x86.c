@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // with dynamic register allocation and various optimizations
 
 #include "vm_local.h"
+
+#if FEAT_LEGACY_QVM
 #include "../ui/ui_public.h"
 #include "../cgame/cg_public.h"
 #include "../game/g_public.h"
@@ -3618,3 +3620,5 @@ int32_t VM_CallCompiled( vm_t *vm, int nargs, int32_t *args )
 
 	return opStack[1];
 }
+
+#endif // FEAT_LEGACY_QVM

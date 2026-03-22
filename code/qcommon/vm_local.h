@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
+#include "../game/q_feats.h"
 
 #define	MAX_OPSTACK_SIZE	512
 #define	PROC_OPSTACK_SIZE	30
@@ -187,9 +188,18 @@ struct vm_s {
 	dllSyscall_t dllSyscall;
 	void (*destroy)(vm_t* self);
 
-	// for interpreted modules
-	//qboolean	currentlyInterpreting;
+#if FEAT_WASM
+	// for WASM modules (WAMR)
+	void		*wasmModule;		// wasm_module_t*
+	void		*wasmModuleInst;	// wasm_module_inst_t*
+	void		*wasmExecEnv;		// wasm_exec_env_t*
+	void		*wasmFuncVmMain;	// wasm_function_inst_t*
+	qboolean	isWasm;
+	qboolean	isWasmAot;			// loaded from .aot (near-native speed)
+#endif
 
+#if FEAT_LEGACY_QVM
+	// for QVM interpreted / JIT-compiled modules
 	qboolean	compiled;
 
 	vmFunc_t	codeBase;
@@ -199,11 +209,21 @@ struct vm_s {
 	int32_t		instructionCount;
 	intptr_t	*instructionPointers;
 
+	int32_t		*jumpTableTargets;
+	int32_t		numJumpTableTargets;
+
+	uint32_t	programStackExtra;
+
+	uint32_t	crc32sum;
+#endif
+
+	qboolean	forceDataMask;
+
+	// shared by QVM + WASM (VMA pointer translation)
 	uint32_t	dataMask;
 	uint32_t	dataLength;			// data segment length
-	uint32_t	exactDataLength;	// from qvm header
-	uint32_t	dataAlloc;			// actually allocated, for mmap()/munmap()
-	uint32_t	programStackExtra;
+	uint32_t	exactDataLength;	// from qvm header / wasm memory
+	uint32_t	dataAlloc;			// actually allocated
 
 	int			numSymbols;
 	vmSymbol_t	*symbols;
@@ -214,26 +234,15 @@ struct vm_s {
 
 	int			syscallCount;		// syscall counter for current VM_Call invocation
 
-	int32_t		*jumpTableTargets;
-	int32_t		numJumpTableTargets;
-
-	uint32_t	crc32sum;
-
-	qboolean	forceDataMask;
-
 	int			privateFlag;
 };
 
+#if FEAT_LEGACY_QVM
 qboolean VM_Compile( vm_t *vm, vmHeader_t *header );
 int32_t VM_CallCompiled( vm_t *vm, int nargs, int32_t *args );
 
 qboolean VM_PrepareInterpreter2( vm_t *vm, vmHeader_t *header );
 int32_t VM_CallInterpreted2( vm_t *vm, int nargs, int32_t *args );
-
-vmSymbol_t *VM_ValueToFunctionSymbol( vm_t *vm, int value );
-int VM_SymbolToValue( vm_t *vm, const char *symbol );
-const char *VM_ValueToSymbol( vm_t *vm, int value );
-void VM_LogSyscalls( int *args );
 
 const char *VM_LoadInstructions( const byte *code_pos, int codeLength, int instructionCount, instruction_t *buf );
 const char *VM_CheckInstructions( instruction_t *buf, int instructionCount,
@@ -242,7 +251,20 @@ const char *VM_CheckInstructions( instruction_t *buf, int instructionCount,
 								 int dataLength );
 
 void VM_ReplaceInstructions( vm_t *vm, instruction_t *buf );
+#endif
 
+#if FEAT_WASM
+qboolean VM_WasmLoad( vm_t *vm );
+int32_t VM_CallWasm( vm_t *vm, int nargs, int32_t *args );
+void VM_WasmDestroy( vm_t *vm );
+#endif
+
+vmSymbol_t *VM_ValueToFunctionSymbol( vm_t *vm, int value );
+int VM_SymbolToValue( vm_t *vm, const char *symbol );
+const char *VM_ValueToSymbol( vm_t *vm, int value );
+void VM_LogSyscalls( int *args );
+
+#if FEAT_LEGACY_QVM
 #define JUMP	(1<<0)
 #define FPU		(1<<1)
 
@@ -255,5 +277,6 @@ typedef struct opcode_info_s
 } opcode_info_t;
 
 extern opcode_info_t ops[ OP_MAX ];
+#endif // FEAT_LEGACY_QVM
 
 #endif // VM_LOCAL_H

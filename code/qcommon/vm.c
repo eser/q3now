@@ -35,7 +35,9 @@ and one exported function: Perform
 */
 
 #include "vm_local.h"
+#include "../game/q_feats.h"
 
+#if FEAT_LEGACY_QVM
 opcode_info_t ops[ OP_MAX ] =
 {
 	// size, stack, nargs, flags
@@ -114,7 +116,9 @@ opcode_info_t ops[ OP_MAX ] =
 	{ 0, 0, 1, 0 },   // cvif
 	{ 0, 0, 1, FPU }  // cvfi
 };
+#endif
 
+#if FEAT_LEGACY_QVM
 const char *opname[ 256 ] = {
 	"OP_UNDEF",
 
@@ -202,6 +206,7 @@ const char *opname[ 256 ] = {
 	"OP_CVIF",
 	"OP_CVFI"
 };
+#endif
 
 cvar_t	*vm_rtChecks;
 
@@ -221,7 +226,9 @@ static const char *vmName[ VM_COUNT ] = {
 };
 
 static void VM_VmInfo_f( void );
+#if FEAT_LEGACY_QVM
 static void VM_VmProfile_f( void );
+#endif
 
 #ifdef DEBUG
 void VM_Debug( int level ) {
@@ -263,6 +270,26 @@ void VM_CheckBounds2( const vm_t *vm, unsigned int addr1, unsigned int addr2, un
 }
 
 
+#if FEAT_WASM
+/*
+==============
+Cmd_ReloadWasm_f — force reload WASM modules
+==============
+*/
+static void Cmd_ReloadWasm_f( void ) {
+	int i;
+	for ( i = 0; i < VM_COUNT; i++ ) {
+		vm_t *vm = &vmTable[i];
+		if ( vm->name && vm->isWasm ) {
+			Com_Printf( "Reloading %s...\n", vm->name );
+			VM_Free( vm );
+			vm->name = NULL;  // allow VM_Create to recreate
+		}
+	}
+	Com_Printf( "WASM modules unloaded. They will reload on next map.\n" );
+}
+#endif
+
 /*
 ==============
 VM_Init
@@ -275,8 +302,13 @@ void VM_Init( void ) {
 #endif
 	Cvar_Get( "vm_game", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
 
+#if FEAT_LEGACY_QVM
 	Cmd_AddCommand( "vmprofile", VM_VmProfile_f );
+#endif
 	Cmd_AddCommand( "vminfo", VM_VmInfo_f );
+#if FEAT_WASM
+	Cmd_AddCommand( "reload_wasm", Cmd_ReloadWasm_f );
+#endif
 
 	Com_Memset( vmTable, 0, sizeof( vmTable ) );
 }
@@ -431,7 +463,9 @@ static void VM_LoadSymbols( vm_t *vm ) {
 	int		value;
 	int		chars;
 	int		segment;
+#if FEAT_LEGACY_QVM
 	int		numInstructions;
+#endif
 
 	// don't load symbols if not developer
 	if ( !com_developer->integer ) {
@@ -446,7 +480,9 @@ static void VM_LoadSymbols( vm_t *vm ) {
 		return;
 	}
 
+#if FEAT_LEGACY_QVM
 	numInstructions = vm->instructionCount;
+#endif
 
 	// parse the symbols
 	text_p = mapfile.c;
@@ -484,9 +520,11 @@ static void VM_LoadSymbols( vm_t *vm ) {
 		sym->next = NULL;
 
 		// convert value from an instruction number to a code offset
+#if FEAT_LEGACY_QVM
 		if ( vm->instructionPointers && value >= 0 && value < numInstructions ) {
 			value = vm->instructionPointers[value];
 		}
+#endif
 
 		sym->symValue = value;
 		Q_strncpyz( sym->symName, token, chars + 1 );
@@ -561,6 +599,7 @@ intptr_t QDECL VM_DllSyscall( intptr_t arg, ... ) {
 #endif
 
 
+#if FEAT_LEGACY_QVM
 static void VM_SwapLongs( void *data, int length )
 {
 #ifndef Q3_LITTLE_ENDIAN
@@ -896,8 +935,10 @@ static vmHeader_t *VM_LoadQVM( vm_t *vm, qboolean alloc ) {
 
 	return header;
 }
+#endif
 
 
+#if FEAT_LEGACY_QVM
 static void VM_IgnoreInstructions( instruction_t *buf, const int count ) {
 	int i;
 
@@ -1647,6 +1688,7 @@ void VM_ReplaceInstructions( vm_t *vm, instruction_t *buf ) {
 		}
 	}
 }
+#endif
 
 
 /*
@@ -1658,7 +1700,9 @@ This allows a server to do a map_restart without changing memory allocation
 =================
 */
 vm_t *VM_Restart( vm_t *vm ) {
+#if FEAT_LEGACY_QVM
 	vmHeader_t	*header;
+#endif
 
 	// DLL's can't be restarted in place
 	if ( vm->dllHandle ) {
@@ -1676,6 +1720,7 @@ vm_t *VM_Restart( vm_t *vm ) {
 		return vm;
 	}
 
+#if FEAT_LEGACY_QVM
 	// load the image
 	if( ( header = VM_LoadQVM( vm, qfalse ) ) == NULL ) {
 		Com_Printf( S_COLOR_RED "VM_Restart() failed\n" );
@@ -1688,6 +1733,11 @@ vm_t *VM_Restart( vm_t *vm ) {
 	FS_FreeFile( header );
 
 	return vm;
+#else
+	Com_Printf( S_COLOR_YELLOW "QVM support not compiled in.\n" );
+	VM_Free( vm );
+	return NULL;
+#endif
 }
 
 
@@ -1743,7 +1793,9 @@ it will attempt to load as a system dll
 vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret ) {
 	int			remaining;
 	const char	*name;
+#if FEAT_LEGACY_QVM
 	vmHeader_t	*header;
+#endif
 	vm_t		*vm;
 
 	if ( !systemCalls ) {
@@ -1798,6 +1850,16 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 		interpret = VMI_COMPILED;
 	}
 
+#if FEAT_WASM
+	if ( interpret >= VMI_COMPILED ) {
+		// Auto-detect: prefer WASM (.aot > .wasm), silent fallback to QVM
+		if ( VM_WasmLoad( vm ) ) {
+			return vm;
+		}
+	}
+#endif
+
+#if FEAT_LEGACY_QVM
 	// load the image
 	if( ( header = VM_LoadQVM( vm, qtrue ) ) == NULL ) {
 		return NULL;
@@ -1847,6 +1909,12 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 	Com_Printf( "%s loaded in %d bytes on the hunk\n", vm->name, remaining - Hunk_MemoryRemaining() );
 
 	return vm;
+#else
+	// No QVM support compiled in
+	Com_Printf( S_COLOR_YELLOW "QVM support not compiled in.\n" );
+	VM_Free( vm );
+	return NULL;
+#endif
 }
 
 
@@ -1961,6 +2029,25 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 	++vm->callLevel;
 
 	// if we have a dll loaded, call it directly
+#if FEAT_WASM
+	if ( vm->isWasm ) {
+		int32_t wasm_args[MAX_VMMAIN_CALL_ARGS];
+		va_list wasm_ap;
+		int wasm_argc;
+		Com_Memset( wasm_args, 0, sizeof( wasm_args ) );
+		wasm_args[0] = callnum;
+		va_start( wasm_ap, callnum );
+		for ( i = 0; i < nargs; i++ ) {
+			wasm_args[i+1] = va_arg( wasm_ap, int32_t );
+		}
+		va_end( wasm_ap );
+		// vmMain always expects at least 4 params: cmd, arg0, arg1, arg2
+		wasm_argc = nargs + 1;
+		if ( wasm_argc < 4 )
+			wasm_argc = 4;
+		r = VM_CallWasm( vm, wasm_argc, wasm_args );
+	} else
+#endif
 	if ( vm->entryPoint )
 	{
 		//rcg010207 -  see dissertation at top of VM_DllSyscall() in this file.
@@ -1978,6 +2065,7 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 		// add more arguments if you're changed MAX_VMMAIN_CALL_ARGS:
 		r = vm->entryPoint( callnum, args[0], args[1], args[2] );
 	} else {
+#if FEAT_LEGACY_QVM
 #if id386 && !defined __clang__ // calling convention doesn't need conversion in some cases
 #ifndef NO_VM_COMPILED
 		if ( vm->compiled )
@@ -2002,6 +2090,10 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 #endif
 			r = VM_CallInterpreted2( vm, nargs+1, &args[0] );
 #endif
+#else
+		Com_Error( ERR_DROP, "VM_Call: QVM support not compiled in" );
+		r = 0;
+#endif
 	}
 	--vm->callLevel;
 
@@ -2011,6 +2103,7 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 
 //=================================================================
 
+#if FEAT_LEGACY_QVM
 static int QDECL VM_ProfileSort( const void *a, const void *b ) {
 	vmSymbol_t	*sa, *sb;
 
@@ -2106,6 +2199,7 @@ static void VM_VmProfile_f( void ) {
 
 	Z_Free( sorted );
 }
+#endif
 
 
 /*
@@ -2124,10 +2218,18 @@ static void VM_VmInfo_f( void ) {
 			continue;
 		}
 		Com_Printf( "%s : ", vm->name );
+#if FEAT_WASM
+		if ( vm->isWasm ) {
+			Com_Printf( "%s\n", vm->isWasmAot ? "WASM AOT" : "WASM interpreter" );
+			Com_Printf( "    data length : %7i\n", vm->dataMask + 1 );
+			continue;
+		}
+#endif
 		if ( vm->dllHandle ) {
 			Com_Printf( "native\n" );
 			continue;
 		}
+#if FEAT_LEGACY_QVM
 		if ( vm->compiled ) {
 			Com_Printf( "compiled on load\n" );
 		} else {
@@ -2136,6 +2238,9 @@ static void VM_VmInfo_f( void ) {
 		Com_Printf( "    code length : %7i\n", vm->codeLength );
 		Com_Printf( "    table length: %7i\n", vm->instructionCount*4 );
 		Com_Printf( "    data length : %7i\n", vm->dataMask + 1 );
+#else
+		Com_Printf( "unknown\n" );
+#endif
 	}
 }
 
