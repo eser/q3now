@@ -1,6 +1,6 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.12)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
 
-PROJECT(q3now)
+PROJECT(q3now LANGUAGES C CXX)
 
 SET(CNAME "q3now")
 SET(DNAME "q3now-ded")
@@ -25,9 +25,10 @@ list(APPEND QCOMMON_SRCS code/libs/lz4/lz4.c code/libs/lz4/lz4frame.c code/libs/
 
 # exclude platform-dependent QVM bytecode compilers
 list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alxp].*.c")
-# exclude WASM VM backend when not enabled (vm_wasm.c needs WAMR headers)
+# When WASM is disabled, override FEAT_WASM=0 so vm_wasm.c compiles to empty
+# and vm.c skips WASM code paths (q_feats.h hardcodes FEAT_WASM=1).
 IF(NOT USE_WASM)
-	list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_wasm.c")
+	ADD_COMPILE_DEFINITIONS(FEAT_WASM=0)
 ENDIF()
 # add platform-dependent QVM bytecode compilers
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
