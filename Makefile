@@ -271,31 +271,32 @@ ifeq ($(UNAME_S),Darwin)
 	cp "$(BUILD_DIR_RELEASE)/$(APP_NAME)_opengl$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/"
 	@test -f "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).dylib" && \
 	  cp "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/" || true
-	@# MoltenVK
-	@MOLTEN_VK=$$(find /opt/homebrew/lib /usr/local/lib 2>/dev/null -name "libMoltenVK.dylib" -maxdepth 1 | head -1); \
-	  if [ -n "$$MOLTEN_VK" ]; then \
-	    echo "  MoltenVK: $$MOLTEN_VK → Contents/MacOS/"; \
-	    cp "$$MOLTEN_VK" "$(Q3DIR)/Contents/MacOS/"; \
+	@# Bundle third-party dylibs (SDL3, MoltenVK) into .app and rewrite load paths.
+	@# Uses otool -L to find the EXACT path each binary references, then rewrites
+	@# it to @executable_path/. This handles Homebrew symlink vs real path mismatches
+	@# (e.g. /opt/homebrew/opt/sdl3/lib/... vs /opt/homebrew/lib/...).
+	@for LIBNAME in libSDL3 libMoltenVK; do \
+	  DYLIB=$$(find /opt/homebrew/lib /opt/homebrew/opt/*/lib /usr/local/lib \
+	    2>/dev/null -name "$$LIBNAME*.dylib" -not -type l -maxdepth 1 | head -1); \
+	  if [ -n "$$DYLIB" ]; then \
+	    BASENAME=$$(basename "$$DYLIB"); \
+	    echo "  $$LIBNAME: $$DYLIB → Contents/MacOS/$$BASENAME"; \
+	    rm -f "$(Q3DIR)/Contents/MacOS/$$BASENAME"; \
+	    cp "$$DYLIB" "$(Q3DIR)/Contents/MacOS/"; \
+	    for BIN in "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" \
+	              "$(Q3DIR)/Contents/MacOS/$(APP_NAME)_opengl$(RENDEXT).dylib" \
+	              "$(Q3DIR)/Contents/MacOS/$(APP_NAME)_vulkan$(RENDEXT).dylib"; do \
+	      [ -f "$$BIN" ] || continue; \
+	      LINKED=$$(otool -L "$$BIN" 2>/dev/null | grep --color=never "$$LIBNAME" | awk '{print $$1}'); \
+	      if [ -n "$$LINKED" ] && [ "$$LINKED" != "@executable_path/$$BASENAME" ]; then \
+	        install_name_tool -change "$$LINKED" "@executable_path/$$BASENAME" "$$BIN"; \
+	        echo "    Rewrite: $$LINKED → @executable_path/$$BASENAME (in $$(basename $$BIN))"; \
+	      fi; \
+	    done; \
 	  else \
-	    echo "  WARNING: libMoltenVK.dylib not found — Vulkan renderer will not work"; \
-	    echo "  Run: brew install molten-vk"; \
-	  fi
-	@# SDL3
-	@SDL3_DYLIB=$$(find /opt/homebrew/lib /usr/local/lib 2>/dev/null -name "libSDL3*.dylib" -maxdepth 1 | head -1); \
-	  if [ -n "$$SDL3_DYLIB" ]; then \
-	    echo "  SDL3: $$SDL3_DYLIB → Contents/MacOS/"; \
-	    cp "$$SDL3_DYLIB" "$(Q3DIR)/Contents/MacOS/"; \
-	    SDL3_BASE=$$(basename "$$SDL3_DYLIB"); \
-	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" \
-	      "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" 2>/dev/null || true; \
-	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" \
-	      "$(Q3DIR)/Contents/MacOS/$(APP_NAME)_opengl$(RENDEXT).dylib" 2>/dev/null || true; \
-	    install_name_tool -change "$$SDL3_DYLIB" "@executable_path/$$SDL3_BASE" \
-	      "$(Q3DIR)/Contents/MacOS/$(APP_NAME)_vulkan$(RENDEXT).dylib" 2>/dev/null || true; \
-	  else \
-	    echo "  WARNING: libSDL3.dylib not found — app may not launch without SDL3"; \
-	    echo "  Run: brew install sdl3"; \
-	  fi
+	    echo "  WARNING: $$LIBNAME not found — run: brew install $$(echo $$LIBNAME | sed 's/lib//' | tr '[:upper:]' '[:lower:]')"; \
+	  fi; \
+	done
 endif
 
 # ── copy-paks ────────────────────────────────────────────────────────────────

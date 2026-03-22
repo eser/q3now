@@ -326,32 +326,28 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 		}
 	}
 
-	/* ── compute checksums for pure-server protocol ── */
+	/* ── cache subsystem fields ── */
+	Sys_GetFileStats( filename, &pack->size, &pack->mtime, &pack->ctime );
+
+	/* Allocate headerLongs and fill slots 1..N from SW3Z CRC32C values.
+	 * Slot 0 (checksumFeed) and checksum/pure_checksum computation are
+	 * done by the caller in files.c, since fs_checksumFeed is static there.
+	 * Until then, checksum/pure_checksum are set to provisional values. */
+	pack->numHeaderLongs = numValidFiles + 1;
+	pack->headerLongs = (int *)Z_Malloc( pack->numHeaderLongs * sizeof( int ) );
+	pack->headerLongs[0] = 0; /* placeholder — set by files.c */
 	{
-		/*
-		 * Compute checksum from header + index + string table.
-		 * This deterministically identifies the archive content
-		 * regardless of data blob ordering.
-		 */
-		uint32_t crc = SW3Z_CRC32C( headerBuf, SW3Z_HEADER_SIZE );
-
-		if ( entries && indexSize > 0 ) {
-			/* re-read raw index bytes for checksum (entries are endian-converted) */
-			byte *rawIndex = (byte *)Z_Malloc( indexSize );
-			fseek( f, SW3Z_HEADER_SIZE, SEEK_SET );
-			if ( fread( rawIndex, 1, indexSize, f ) == indexSize ) {
-				crc ^= SW3Z_CRC32C( rawIndex, indexSize );
-			}
-			Z_Free( rawIndex );
+		int hi = 1;
+		for ( i = 0; i < (int)header.entryCount; i++ ) {
+			if ( entries[i].uncompressedSize == 0 && entries[i].compressedSize == 0 )
+				continue;
+			pack->headerLongs[hi++] = LittleLong( entries[i].crc32c );
 		}
-
-		if ( stringTable && header.stringTableSize > 0 ) {
-			crc ^= SW3Z_CRC32C( stringTable, header.stringTableSize );
-		}
-
-		pack->checksum      = (int)crc;
-		pack->pure_checksum = (int)crc;
 	}
+
+	/* Provisional checksums — overwritten by files.c after checksumFeed is set */
+	pack->checksum      = 0;
+	pack->pure_checksum = 0;
 
 	Com_DPrintf( "SW3Z: loaded '%s' (%d files)\n", filename, numValidFiles );
 
@@ -370,11 +366,13 @@ void SW3Z_CloseArchive( pack_t *pack ) {
 		PACK_FILE_HANDLE(pack) = NULL;
 	}
 
-	/* entries and stringTable were separately allocated */
+	/* entries, stringTable, and headerLongs were separately allocated */
 	if ( pack->entries )
 		Z_Free( pack->entries );
 	if ( pack->stringTable )
 		Z_Free( pack->stringTable );
+	if ( pack->headerLongs )
+		Z_Free( pack->headerLongs );
 
 	/* pack itself (+ hashTable + buildBuffer + names) is one allocation */
 	Z_Free( pack );

@@ -2433,7 +2433,11 @@ static qboolean fs_cacheSynced = qtrue;
 // 3: [size of file offset and file time]
 // non-matching header will cause whole file being ignored
 static const byte cache_header[ 4 ] = {
+#if FEAT_SW3Z
+	1, //version — bumped for packType field in pk3cacheHeader_t
+#else
 	0, //version
+#endif
 #ifdef Q3_LITTLE_ENDIAN
 	0x0,
 #else
@@ -2452,6 +2456,9 @@ typedef struct pk3cacheHeader_s {
 	fileTime_t ctime;	// creation/status change time
 	fileTime_t mtime;	// modification time
 	fileOffset_t size;	// zip file size
+#if FEAT_SW3Z
+	int packType;		// 0 = PACK_PK3, 1 = PACK_SW3Z
+#endif
 } pk3cacheHeader_t;
 
 typedef struct pk3cacheFileItem_s {
@@ -2673,6 +2680,10 @@ static qboolean FS_SavePackToFile( const pack_t *pak, FILE *f )
 	pk.mtime = pak->mtime;
 	// pak file size
 	pk.size = pak->size;
+#if FEAT_SW3Z
+	// archive format type
+	pk.packType = (int)pak->type;
+#endif
 
 	// dump header
 	fwrite( &pk, sizeof( pk ), 1, f );
@@ -2797,7 +2808,12 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 		basename++;
 
 	Q_strncpyz( pakBase, basename, sizeof( pakBase ) );
-	FS_StripExt( pakBase, ".pk3" );
+#if FEAT_SW3Z
+	if ( pack->type == PACK_SW3Z )
+		FS_StripExt( pakBase, ".sw3z" );
+	else
+#endif
+		FS_StripExt( pakBase, ".pk3" );
 	pakBaseLen = (int) strlen( pakBase ) + 1;
 	pakBaseLen = PAD( pakBaseLen, sizeof( int ) );
 
@@ -2812,7 +2828,11 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 	pack = Z_TagMalloc( size, TAG_PACK );
 	Com_Memset( pack, 0, size );
 
+#if FEAT_SW3Z
+	pack->type = (packType_t)pk.packType;
+#else
 	pack->type = PACK_PK3;
+#endif
 	pack->mtime = pk.mtime;
 	pack->ctime = pk.ctime;
 	pack->size = pk.size;
@@ -4398,6 +4418,17 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 			pak = SW3Z_LoadArchive( pakfile );
 			if ( !pak )
 				continue;
+
+			/* Complete the cache fields that SW3Z_LoadArchive left for us
+			 * (it can't access the static fs_checksumFeed). */
+			pak->checksumFeed = fs_checksumFeed;
+			pak->headerLongs[0] = LittleLong( fs_checksumFeed );
+			pak->checksum = Com_BlockChecksum( pak->headerLongs + 1,
+				sizeof( pak->headerLongs[0] ) * ( pak->numHeaderLongs - 1 ) );
+			pak->checksum = LittleLong( pak->checksum );
+			pak->pure_checksum = Com_BlockChecksum( pak->headerLongs,
+				sizeof( pak->headerLongs[0] ) * pak->numHeaderLongs );
+			pak->pure_checksum = LittleLong( pak->pure_checksum );
 
 			pak->pakGamename = gamedir;
 			pak->index = fs_packCount;
