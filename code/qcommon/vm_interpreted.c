@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "vm_local.h"
 
+#if FEAT_LEGACY_QVM
+
 
 char *VM_Indent( vm_t *vm ) {
 	static char	*string = "                                        ";
@@ -613,3 +615,5 @@ done:
 	// return the result
 	return *opStack;
 }
+
+#endif // FEAT_LEGACY_QVM

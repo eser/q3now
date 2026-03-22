@@ -28,12 +28,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #error "Do not use in VM build"
 #endif
 
+#ifdef WASM_MODULE
+extern intptr_t QDECL syscall( intptr_t arg, ... );
+#else
 static intptr_t (QDECL *syscall)( intptr_t arg, ... ) = (intptr_t (QDECL *)( intptr_t, ...))-1;
 
 
 Q_EXPORT void dllEntry( intptr_t (QDECL *syscallptr)( intptr_t arg,... ) ) {
 	syscall = syscallptr;
 }
+#endif
 
 int PASSFLOAT( float x ) {
 	floatint_t fi;

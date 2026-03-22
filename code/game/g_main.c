@@ -281,7 +281,7 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_maprotationMode,         "g_maprotationMode",         "0", CVAR_ARCHIVE, 0, qfalse },
 #endif
 #if FEAT_FAST_WEAPON_SWITCH
-    { &g_fastWeaponSwitch,        "g_fastWeaponSwitch",        "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+    { &g_fastWeaponSwitch,        "g_fastWeaponSwitch",        "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
 #endif
 #if FEAT_OVERTIME
     { &g_overtime,                "g_overtime",                "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },

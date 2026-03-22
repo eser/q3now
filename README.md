@@ -2,9 +2,18 @@
 
 [![build](../../workflows/build/badge.svg)](../../actions?query=workflow%3Abuild)
 
-A Quake 3 Arena mod.
+A modern fork of id Software's Quake III Arena engine (idTech 3).
 
-## Mod Features
+## q3now vs Quake III Arena
+
+|  | Quake III Arena (1999) | q3now (2026) |
+|---|---|---|
+| **Packages** | PK3 (zip) | SW3Z archives with LZ4 compression |
+| **Renderer** | OpenGL 1.1 | Vulkan (+ OpenGL fallback) |
+| **VM System** | QVM bytecode | WASM via WAMR (+ QVM fallback) |
+| **Gameplay** | Vanilla Quake 3 | q3now competitive gameplay |
+
+## Gameplay Features
 
 ### Game Modes
 
@@ -45,14 +54,9 @@ A Quake 3 Arena mod.
 - **Lens flares** — Lens flares on missiles and light areas
 - **Detailed scoreboards** — Keeps the weapon-specific stats
 
-_This repository does not contain any game content so in order to play you must
-copy the resulting binaries into your existing Quake III Arena installation_
+## Engine
 
-## Improved Quake III Arena engine
-
-Based on [Quake3e](https://github.com/ec-/Quake3e).
-
-**Key features**:
+Built on [Quake3e](https://github.com/ec-/Quake3e), with significant additions:
 
 - optimized OpenGL renderer
 - optimized Vulkan renderer
@@ -64,6 +68,8 @@ Based on [Quake3e](https://github.com/ec-/Quake3e).
 - **\video-pipe** - to use external ffmpeg binary as an encoder for better
   quality and smaller output files
 - significally reworked QVM (Quake Virtual Machine)
+- WASM VM backend via WAMR — game modules can run as `.wasm` with auto-detect
+  fallback to QVM ([details](WASM.md))
 - improved server-side DoS protection, much reduced memory usage
 - raised filesystem limits (up to 20,000 maps can be handled in a single
   directory)
@@ -142,11 +148,16 @@ See [BUILD.md](BUILD.md) for full setup instructions. Key targets:
 | `make run-launcher`          | Build + assemble + codesign + open launcher                      |
 | `make run-game MAP=q3dm1`    | Build + assemble + run engine directly (QVM mode)                |
 | `make run-gamedev MAP=q3dm1` | Build Debug + assemble + run engine (native modules, sv_pure 0)  |
+| `make run-gamedev-wasm`      | Build Debug + WASM modules + run engine (WASM auto-detect)       |
 | `make check`                 | Verify QVMs, dylibs, mod pak, codesign, JIT entitlement          |
 | `make release`               | Full pipeline: check + assemble + codesign + DMG/tar.gz          |
 | `make bundle-dmg`            | Package signed `q3now-<version>-<arch>.dmg` (macOS)              |
 | `make bundle-tar`            | Package `q3now-<version>-<arch>.tar.gz` (Linux)                  |
 | `make bench DEMO=four`       | Timedemo benchmark                                               |
+
+**WASM backend:** Set `USE_WASM=1` to compile game modules as WebAssembly via
+WAMR. See [WASM.md](WASM.md) for architecture, build instructions, and design
+decisions.
 
 **Archive format:** Set `USE_SW3Z=1` for sw3z archives (default: pk3/zip).
 
@@ -158,6 +169,9 @@ at full speed.
 engine version, active renderer, `vm_rtChecks`, and `com_maxfps`.
 
 ## [Build Instructions](BUILD.md)
+
+_This repository does not contain any game content. To play, copy the resulting
+binaries into your existing Quake III Arena installation._
 
 ## Contacts
 
