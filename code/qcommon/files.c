@@ -5175,10 +5175,27 @@ static void FS_Startup( void ) {
 
 	fs_gamedirvar->modified = qfalse; // We just loaded, it's not modified
 
-	// check original q3a files
-	if ( FS_IsBaseGame( BASEGAME ) || FS_IsBaseGame( BASEDEMO ) ) {
-		FS_CheckIdPaks();
+	// check original q3a files — skip when SW3Z packs are present
+	// (assets are repacked into a single .sw3z, the original pak0-pak8
+	// naming convention no longer applies)
+#if FEAT_SW3Z
+	{
+		qboolean hasSW3Z = qfalse;
+		const searchpath_t *sp;
+		for ( sp = fs_searchpaths; sp; sp = sp->next ) {
+			if ( sp->pack && sp->pack->type == PACK_SW3Z ) {
+				hasSW3Z = qtrue;
+				break;
+			}
+		}
+		if ( !hasSW3Z )
+#endif
+		if ( FS_IsBaseGame( BASEGAME ) || FS_IsBaseGame( BASEDEMO ) ) {
+			FS_CheckIdPaks();
+		}
+#if FEAT_SW3Z
 	}
+#endif
 
 #ifdef FS_MISSING
 	if (missingFiles == NULL) {

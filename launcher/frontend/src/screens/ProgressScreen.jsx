@@ -35,6 +35,11 @@ const styles = {
     color: "var(--text-muted)",
     textAlign: "right",
   },
+  checkmark: {
+    fontSize: "48px",
+    color: "var(--success, #4ade80)",
+    lineHeight: 1,
+  },
 };
 
 export default function ProgressScreen({ onComplete, onError }) {
@@ -67,31 +72,39 @@ export default function ProgressScreen({ onComplete, onError }) {
     ? Math.round((progress.current / progress.total) * 100)
     : 0;
 
+  const isComplete = progress.step === "complete";
+
   return (
     <div style={styles.container} className="screen-enter screen-enter-active">
-      <div className="spinner" />
+      {isComplete
+        ? <div style={styles.checkmark}>&#10003;</div>
+        : <div className="spinner" />}
 
       <div style={styles.stepName}>{progress.step}</div>
       <div style={styles.message}>{progress.message}</div>
 
-      <div style={styles.progressContainer}>
-        <div className="progress-bar">
-          <div
-            className="progress-bar-fill"
-            style={{ width: `${percent}%` }}
-          />
+      {!isComplete && (
+        <div style={styles.progressContainer}>
+          <div className="progress-bar">
+            <div
+              className="progress-bar-fill"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+          <div style={styles.percent}>{percent}%</div>
         </div>
-        <div style={styles.percent}>{percent}%</div>
-      </div>
+      )}
 
-      <Button
-        variant="secondary"
-        onClick={() =>
-          CancelImport()}
-        style={{ marginTop: "8px" }}
-      >
-        Cancel
-      </Button>
+      {!isComplete && (
+        <Button
+          variant="secondary"
+          onClick={() =>
+            CancelImport()}
+          style={{ marginTop: "8px" }}
+        >
+          Cancel
+        </Button>
+      )}
     </div>
   );
 }

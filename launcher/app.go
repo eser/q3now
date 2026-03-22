@@ -161,6 +161,12 @@ func (a *App) StartImport(q3Path, q1Path string) error {
 	return nil
 }
 
+// runImport executes the full import pipeline in a background goroutine:
+//
+//	scan inventory → validate → pipeline (Extract → Process → SW3Z) → manifest → done
+//
+// Progress events are forwarded to the frontend via Wails EventsEmit.
+// Cancellation is supported via context — CancelImport() triggers it.
 func (a *App) runImport(q3Path, q1Path string) {
 	defer func() {
 		a.mu.Lock()
@@ -181,8 +187,8 @@ func (a *App) runImport(q3Path, q1Path string) {
 	// Give the frontend a moment to mount ProgressScreen.
 	time.Sleep(100 * time.Millisecond)
 
-	// Step 1: Scan game directories.
-	emitProgress("scan", 0, 3, "Scanning game directories...")
+	// ── Step 1: Scan game directories ────────────────────────────────────
+	emitProgress("scan", 0, 1, "Scanning game directories...")
 
 	inventory := make(map[string]string)
 
@@ -201,7 +207,7 @@ func (a *App) runImport(q3Path, q1Path string) {
 		}
 	}
 
-	emitProgress("scan", 1, 3, fmt.Sprintf("Found %d game content directories", len(inventory)))
+	emitProgress("scan", 1, 1, fmt.Sprintf("Found %d game content directories", len(inventory)))
 
 	// Validate: need Q3A or QL base game.
 	if _, ok := inventory["q3_base"]; !ok {
@@ -212,8 +218,48 @@ func (a *App) runImport(q3Path, q1Path string) {
 		}
 	}
 
-	// Step 2: Write manifest.
-	emitProgress("manifest", 2, 3, "Writing manifest...")
+	// ── Step 2: Run the import pipeline ──────────────────────────────────
+
+	// Build source groups from scanned inventory.
+	var sources []pipeline.SourceGroup
+	if dir, ok := inventory["q3_base"]; ok {
+		sources = append(sources, pipeline.SourceGroup{Origin: "q3_base", Dir: dir})
+	}
+
+	// Create cancellable context so CancelImport() can stop the pipeline.
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.mu.Lock()
+	a.cancelImport = cancel
+	a.mu.Unlock()
+
+	pip := pipeline.New(a.paths, sources,
+		pipeline.WithProcessors(&pipeline.Q3BaseProcessor{}),
+	)
+
+	// Forward pipeline progress events to the frontend.
+	go func() {
+		for p := range pip.Progress() {
+			runtime.EventsEmit(a.ctx, "import:progress", map[string]interface{}{
+				"step":    p.Step,
+				"current": p.Current,
+				"total":   p.Total,
+				"message": p.Message,
+			})
+		}
+	}()
+
+	if err := pip.Run(ctx); err != nil {
+		// User-initiated cancel: silent return (frontend already handling it).
+		if ctx.Err() != nil {
+			slog.Info("import cancelled by user")
+			return
+		}
+		slog.Error("pipeline failed", "error", err)
+		runtime.EventsEmit(a.ctx, "import:error", err.Error())
+		return
+	}
+
+	// ── Step 3: Write manifest (signals "assets are ready") ──────────────
 
 	if err := manifest.WriteWithInventory(a.paths.ManifestPath(), inventory); err != nil {
 		slog.Error("failed to write manifest", "error", err)
@@ -223,9 +269,10 @@ func (a *App) runImport(q3Path, q1Path string) {
 
 	slog.Info("import complete", "inventory_size", len(inventory))
 
-	// Step 3: Done.
-	emitProgress("complete", 3, 3, "Import complete!")
-	time.Sleep(500 * time.Millisecond)
+	// ── Step 4: Success notification ─────────────────────────────────────
+
+	emitProgress("complete", 1, 1, "Import successful!")
+	time.Sleep(2 * time.Second)
 	runtime.EventsEmit(a.ctx, "import:complete", nil)
 }
 

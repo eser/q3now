@@ -247,6 +247,7 @@ export default function ImportScreen({ onImportComplete, onBack }) {
           </div>
         </div>
 
+        {/* Q1 import hidden for this release — will be re-enabled next release
         <div style={styles.section}>
           <div style={styles.sectionTitle}>
             Quake 1 Installation Path (optional)
@@ -281,6 +282,7 @@ export default function ImportScreen({ onImportComplete, onBack }) {
             .
           </div>
         </div>
+        */}
 
         {error && <div style={styles.error}>{error}</div>}
       </div>

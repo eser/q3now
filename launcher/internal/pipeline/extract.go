@@ -57,6 +57,8 @@ func (e *ExtractTransform) Run(ctx context.Context, progress chan<- Progress) ([
 
 		slog.Info("extract: scanning origin", "origin", src.Origin, "archives", len(files))
 
+		var originEntries []AssetEntry
+
 		for _, archivePath := range files {
 			select {
 			case <-ctx.Done():
@@ -75,9 +77,20 @@ func (e *ExtractTransform) Run(ctx context.Context, progress chan<- Progress) ([
 			if err != nil {
 				return nil, fmt.Errorf("extract: scanning %s: %w", filepath.Base(archivePath), err)
 			}
-			allEntries = append(allEntries, entries...)
+			originEntries = append(originEntries, entries...)
 			scanned++
 		}
+
+		// Deduplicate within this origin (higher pak number wins).
+		deduped, overridden := deduplicateEntries(originEntries)
+		if overridden > 0 {
+			slog.Info("extract: deduplicated entries",
+				"origin", src.Origin,
+				"scanned", len(originEntries),
+				"unique", len(deduped),
+				"overridden", overridden)
+		}
+		allEntries = append(allEntries, deduped...)
 	}
 
 	slog.Info("extract: complete", "entries", len(allEntries), "archives", totalArchives)
@@ -124,6 +137,36 @@ func findArchiveFiles(dir string) ([]string, error) {
 
 	sort.Strings(merged)
 	return merged, nil
+}
+
+// deduplicateEntries removes duplicate paths within a single origin,
+// keeping the last occurrence (highest-numbered pak wins).
+// Comparison is case-insensitive, matching Quake 3's VFS behavior.
+// The original casing from the winning entry is preserved.
+//
+//	pak0: [a.txt, b.txt]   pak1: [b.txt, c.txt]
+//	→ result: [a.txt(pak0), b.txt(pak1), c.txt(pak1)], 1 override
+func deduplicateEntries(entries []AssetEntry) ([]AssetEntry, int) {
+	seen := make(map[string]int, len(entries)) // lowercase path → index in result
+	result := make([]AssetEntry, 0, len(entries))
+	overridden := 0
+
+	for _, e := range entries {
+		key := strings.ToLower(e.Path)
+		if idx, exists := seen[key]; exists {
+			slog.Debug("extract: pak override",
+				"path", e.Path,
+				"old_pak", filepath.Base(result[idx].SourcePak),
+				"new_pak", filepath.Base(e.SourcePak))
+			result[idx] = e
+			overridden++
+		} else {
+			seen[key] = len(result)
+			result = append(result, e)
+		}
+	}
+
+	return result, overridden
 }
 
 // scanArchive opens an archive and builds AssetEntry metadata for every entry.
