@@ -2,6 +2,7 @@
 #include "vk.h"
 #include "smaa_area_texture.h"
 #include "smaa_search_texture.h"
+#include "../game/q_feats.h"
 
 #if defined (_DEBUG)
 #if defined (_WIN32)
@@ -825,6 +826,15 @@ static void vk_create_render_passes( void )
 
 	VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass.main ) );
 	SET_OBJECT_NAME( vk.render_pass.main, "render pass - main", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
+
+#if FEAT_FBO_DEBUG
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] Main render pass created:\n" );
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   color format=%d  loadOp=%d  initialLayout=%d  finalLayout=%d\n",
+		attachments[0].format, attachments[0].loadOp, attachments[0].initialLayout, attachments[0].finalLayout );
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   depth format=%d  loadOp=%d\n",
+		attachments[1].format, attachments[1].loadOp );
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   msaaActive=%d  r_fbo=%d\n", vk.msaaActive, r_fbo->integer );
+#endif
 
 	// depth fade pass: loads color+depth from main pass, renders soft transparents
 	if ( vk.depthFade.active ) {
@@ -1651,6 +1661,14 @@ static void setup_surface_formats( VkPhysicalDevice physical_device )
 	{
 		vk.capture_format = vk.color_format;
 	}
+
+#if FEAT_FBO_DEBUG
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] Format selection:\n" );
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   r_fbo=%d r_hdr=%d r_presentBits=%d\n", r_fbo->integer, r_hdr->integer, r_presentBits->integer );
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   base_format=%d  color_format=%d  present_format=%d\n", vk.base_format.format, vk.color_format, vk.present_format.format );
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   bloom_format=%d  capture_format=%d  depth_format=%d\n", vk.bloom_format, vk.capture_format, vk.depth_format );
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   blitEnabled=%d\n", vk.blitEnabled );
+#endif
 }
 
 
@@ -2504,6 +2522,11 @@ void vk_destroy_samplers( void )
 
 
 void vk_update_attachment_descriptors( void ) {
+
+#if FEAT_FBO_DEBUG
+	ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] vk_update_attachment_descriptors: color_image_view=%p fboActive=%d\n",
+		(void*)vk.color_image_view, vk.fboActive );
+#endif
 
 	if ( vk.color_image_view )
 	{
@@ -4397,6 +4420,14 @@ static void vk_create_attachments( void )
 		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, vk.color_format,
 			usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, &vk.color_image, &vk.color_image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
 
+#if FEAT_FBO_DEBUG
+		ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] FBO color attachment created:\n" );
+		ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   size=%dx%d  format=%d  layout=SHADER_READ_ONLY\n",
+			glConfig.vidWidth, glConfig.vidHeight, vk.color_format );
+		ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   usage=%d (COLOR|SAMPLED|TRANSFER_SRC)\n",
+			(int)(usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT) );
+#endif
+
 		// screenmap-msaa
 		if ( vk.screenMapSamples > VK_SAMPLE_COUNT_1_BIT ) {
 			create_color_attachment( vk.screenMapWidth, vk.screenMapHeight, vk.screenMapSamples, vk.color_format,
@@ -6185,6 +6216,13 @@ void vk_create_image( image_t *image, int width, int height, int mip_levels ) {
 	SET_OBJECT_NAME( image->handle, image->imgName, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT );
 	SET_OBJECT_NAME( image->view, image->imgName, VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT );
 	SET_OBJECT_NAME( image->descriptor, image->imgName, VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT );
+
+#if FEAT_FBO_DEBUG
+	if ( image->descriptor == VK_NULL_HANDLE || image->view == VK_NULL_HANDLE || image->handle == VK_NULL_HANDLE ) {
+		ri.Printf( PRINT_ALL, "^1[FBO_DEBUG] INVALID image: '%s' handle=%p view=%p descriptor=%p\n",
+			image->imgName, (void*)image->handle, (void*)image->view, (void*)image->descriptor );
+	}
+#endif
 }
 
 
@@ -9129,8 +9167,16 @@ _retry:
 	}
 
 	if ( vk_find_screenmap_drawsurfs() ) {
+#if FEAT_FBO_DEBUG
+		if ( vk.frame_count <= 3 )
+			ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] Frame %d: screenmap pass selected\n", vk.frame_count );
+#endif
 		vk_begin_screenmap_render_pass();
 	} else {
+#if FEAT_FBO_DEBUG
+		if ( vk.frame_count <= 3 )
+			ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] Frame %d: main pass (no screenmap)\n", vk.frame_count );
+#endif
 		vk_begin_main_render_pass();
 	}
 
@@ -9203,6 +9249,13 @@ void vk_end_frame( void )
 
 	if ( vk.fboActive )
 	{
+#if FEAT_FBO_DEBUG
+		if ( vk.frame_count == 0 ) {
+			ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] vk_end_frame: fboActive=1 bloom=%d smaa=%d\n", r_bloom->integer, vk.smaa.active );
+			ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   color_descriptor=%p gamma_pipeline=%p\n", (void*)vk.color_descriptor, (void*)vk.gamma_pipeline );
+			ri.Printf( PRINT_ALL, "^3[FBO_DEBUG]   renderPassIndex=%d doneSurfaces=%d\n", vk.renderPassIndex, backEnd.doneSurfaces );
+		}
+#endif
 		vk.cmd->last_pipeline = VK_NULL_HANDLE; // do not restore clobbered descriptors in vk_bloom()
 
 		if ( r_bloom->integer )

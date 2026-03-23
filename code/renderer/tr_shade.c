@@ -855,6 +855,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			//
 
 #if FEAT_THIRD_PERSON
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
 			// RF_FORCE_ENT_ALPHA: override alpha — outside setArraysOnce
 			// so it runs for both single-pass and multi-pass shaders
 			if ( backEnd.currentEntity &&
@@ -866,16 +867,19 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 				}
 			}
 #endif
+#endif
 
 			R_BindAnimatedImage( &pStage->bundle[0] );
 
 #if FEAT_THIRD_PERSON
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
 			// RF_FORCE_ENT_ALPHA: enable alpha blending
 			if ( backEnd.currentEntity &&
 				 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) &&
 				 backEnd.currentEntity->e.shader.rgba[3] < 255 ) {
 				GL_State( pStage->stateBits | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
 			} else
+#endif
 #endif
 			{
 				GL_State( pStage->stateBits );

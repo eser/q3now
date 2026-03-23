@@ -6036,7 +6036,11 @@ int FS_VM_ReadFile( void *buffer, int len, fileHandle_t f, handleOwner_t owner )
 		return 0;
 
 	/* sw3z files have no OS file handle — data lives in sw3zData buffer */
-	if ( !fsh[f].handleFiles.file.v && !fsh[f].sw3zData )
+	if ( !fsh[f].handleFiles.file.v
+#if FEAT_SW3Z
+		&& !fsh[f].sw3zData
+#endif
+		)
 		return 0;
 
 	return FS_Read( buffer, len, f );
@@ -6064,7 +6068,11 @@ int FS_VM_SeekFile( fileHandle_t f, long offset, fsOrigin_t origin, handleOwner_
 	if ( fsh[f].owner != owner )
 		return -1;
 
-	if ( !fsh[f].handleFiles.file.v && !fsh[f].sw3zData )
+	if ( !fsh[f].handleFiles.file.v
+#if FEAT_SW3Z
+		&& !fsh[f].sw3zData
+#endif
+		)
 		return -1;
 
 	r = FS_Seek( f, offset, origin );
@@ -6077,7 +6085,14 @@ void FS_VM_CloseFile( fileHandle_t f, handleOwner_t owner ) {
 	if ( f <= 0 || f >= MAX_FILE_HANDLES )
 		return;
 
-	if ( fsh[f].owner != owner || !fsh[f].handleFiles.file.v )
+	if ( fsh[f].owner != owner )
+		return;
+
+	if ( !fsh[f].handleFiles.file.v
+#if FEAT_SW3Z
+		&& !fsh[f].sw3zData
+#endif
+		)
 		return;
 
 	FS_FCloseFile( f );

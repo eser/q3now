@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
+#include "../game/q_feats.h"
 
 backEndData_t	*backEndData;
 backEndState_t	backEnd;
@@ -1431,6 +1432,9 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 #ifdef USE_VULKAN
 	if ( cmd->refdef.switchRenderPass ) {
+#if FEAT_FBO_DEBUG
+		ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] Switching: screenmap → main render pass\n" );
+#endif
 		vk_end_render_pass();
 		vk_begin_main_render_pass();
 		backEnd.screenMapDone = qtrue;

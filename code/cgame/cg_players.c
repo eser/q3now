@@ -2417,10 +2417,12 @@ void CG_Player( centity_t *cent ) {
 	VectorCopy (legs.origin, legs.oldorigin);	// don't positionally lerp at all
 
 #if FEAT_THIRD_PERSON
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
 	if ( thirdPersonAlpha < 255 ) {
 		legs.renderfx |= RF_FORCE_ENT_ALPHA;
 		legs.shaderRGBA[3] = thirdPersonAlpha;
 	}
+#endif
 #endif
 	CG_AddRefEntityWithPowerups( cent, &legs, &cent->currentState, qtrue, ci->team );
 
@@ -2447,10 +2449,12 @@ void CG_Player( centity_t *cent ) {
 	torso.renderfx = renderfx;
 
 #if FEAT_THIRD_PERSON
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
 	if ( thirdPersonAlpha < 255 ) {
 		torso.renderfx |= RF_FORCE_ENT_ALPHA;
 		torso.shaderRGBA[3] = thirdPersonAlpha;
 	}
+#endif
 #endif
 	CG_AddRefEntityWithPowerups( cent, &torso, &cent->currentState, qtrue, ci->team );
 
@@ -2647,10 +2651,12 @@ void CG_Player( centity_t *cent ) {
 	head.renderfx = renderfx;
 
 #if FEAT_THIRD_PERSON
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
 	if ( thirdPersonAlpha < 255 ) {
 		head.renderfx |= RF_FORCE_ENT_ALPHA;
 		head.shaderRGBA[3] = thirdPersonAlpha;
 	}
+#endif
 #endif
 	CG_AddRefEntityWithPowerups( cent, &head, &cent->currentState, qtrue, ci->team );
 
