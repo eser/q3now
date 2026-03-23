@@ -255,6 +255,10 @@ ELSEIF(WIN32)
 	ENDIF()
 ENDIF(UNIX)
 
+# Define _DEBUG for Debug builds so signal handlers, backtraces, and
+# developer diagnostics compile in (guarded by #ifdef _DEBUG in code).
+ADD_COMPILE_DEFINITIONS($<$<CONFIG:Debug>:_DEBUG>)
+
 ADD_LIBRARY(q3ui OBJECT ${Q3_UI_SRCS})
 
 IF(NOT MSVC)

@@ -949,6 +949,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 		CG_AddMarks();
 		CG_AddParticles ();
 		CG_AddLocalEntities();
+#if FEAT_RAIL_TRAIL == 0
+		CG_AddRailTrails();
+#endif
 #if FEAT_ATMOSPHERIC
 		CG_AddAtmosphericEffects();
 #endif
@@ -1013,4 +1016,3 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 
 
 }
-

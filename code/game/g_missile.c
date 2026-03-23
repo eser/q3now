@@ -65,15 +65,28 @@ void G_BounceMissile( gentity_t *ent, trace_t *trace ) {
 	hitTime = level.previousTime + ( level.time - level.previousTime ) * trace->fraction;
 	BG_EvaluateTrajectoryDelta( &ent->s.pos, hitTime, velocity );
 	dot = DotProduct( velocity, trace->plane.normal );
-	VectorMA( velocity, -2*dot, trace->plane.normal, ent->s.pos.trDelta );
 
-	if ( ent->s.eFlags & EF_BOUNCE_HALF ) {
-		VectorScale( ent->s.pos.trDelta, 0.65, ent->s.pos.trDelta );
-		// check for stop
-		if ( trace->plane.normal[2] > 0.2 && VectorLength( ent->s.pos.trDelta ) < 40 ) {
+	if ( ent->s.eFlags & EF_GRENADE_BOUNCE ) {
+		// Q1/Q2-style: overbounce 1.5 (halve normal component, preserve tangential)
+		VectorMA( velocity, -1.5f * dot, trace->plane.normal, ent->s.pos.trDelta );
+		// Q1/Q2 stop: freeze on near-flat floors when vertical velocity decays
+		if ( trace->plane.normal[2] > 0.7f &&
+			 ent->s.pos.trDelta[2] > -60 && ent->s.pos.trDelta[2] < 60 ) {
 			G_SetOrigin( ent, trace->endpos );
 			ent->s.time = level.time / 4;
 			return;
+		}
+	} else {
+		VectorMA( velocity, -2*dot, trace->plane.normal, ent->s.pos.trDelta );
+
+		if ( ent->s.eFlags & EF_BOUNCE_HALF ) {
+			VectorScale( ent->s.pos.trDelta, 0.65, ent->s.pos.trDelta );
+			// check for stop
+			if ( trace->plane.normal[2] > 0.2 && VectorLength( ent->s.pos.trDelta ) < 40 ) {
+				G_SetOrigin( ent, trace->endpos );
+				ent->s.time = level.time / 4;
+				return;
+			}
 		}
 	}
 
@@ -174,7 +187,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 
 	// check for bounce
 	if ( !other->takedamage &&
-		( ent->s.eFlags & ( EF_BOUNCE | EF_BOUNCE_HALF ) ) ) {
+		( ent->s.eFlags & ( EF_BOUNCE | EF_BOUNCE_HALF | EF_GRENADE_BOUNCE ) ) ) {
 		G_BounceMissile( ent, trace );
 		G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
 		return;
@@ -568,8 +581,8 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 		splashRadius = 300;
 	}
 	else {
-		speed = 800;
-		splashRadius = 150;
+		speed = 600;
+		splashRadius = 160;
 	}
 
 	VectorNormalize (dir);
@@ -581,11 +594,11 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 	bolt->s.eType = ET_MISSILE;
 	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	bolt->s.weapon = WP_GRENADE_LAUNCHER;
-	bolt->s.eFlags = (bounce) ? EF_BOUNCE_HALF : 0;
+	bolt->s.eFlags = (bounce) ? EF_GRENADE_BOUNCE : 0;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
-	bolt->damage = 100;
-	bolt->splashDamage = 100;
+	bolt->damage = 120;
+	bolt->splashDamage = 120;
 	bolt->splashRadius = splashRadius;
 	bolt->methodOfDeath = MOD_GRENADE;
 	bolt->splashMethodOfDeath = MOD_GRENADE_SPLASH;
@@ -640,8 +653,8 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->s.weapon = WP_ROCKET_LAUNCHER;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
-	bolt->damage = 100;
-	bolt->splashDamage = 100;
+	bolt->damage = 120;
+	bolt->splashDamage = 120;
 	bolt->splashRadius = splashRadius;
 	bolt->methodOfDeath = MOD_ROCKET;
 	bolt->splashMethodOfDeath = MOD_ROCKET_SPLASH;

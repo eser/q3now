@@ -39,7 +39,57 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // by the server in the server stored userinfos, or stashed in a cvar.
 
 #define	POWERUP_BLINKS		5
-#define RAIL_TRAILTIME		600
+#define RAIL_SPIRAL_TRAILTIME	1200
+#define RAIL_CORE_TRAILTIME		800
+
+// ── rail trail system ───────────────────────────────────────────────
+//
+// Poly-strip helix + batched debris + HDR dynamic lighting.
+// Helix submitted as quad-per-segment batch via AddPolyToScene.
+// No localEntities used — zero entity pool impact.
+//
+//  CG_RailTrail()        — spawns a trail (fills railTrail_t slot)
+//  CG_AddRailTrails()    — per-frame: fade, animate, submit polys
+//  CG_ClearRailTrails()  — reset all trails (map change)
+//
+#define MAX_RAIL_TRAILS     8
+#define MAX_RAIL_SEGMENTS   2048
+#define MAX_RAIL_DEBRIS     128
+#define MAX_RAIL_SPARKS     20
+#define RAIL_TRAILTIME      1500
+#define RAIL_HELIX_RADIUS   3.0f
+#define RAIL_HELIX_SPACING  3.0f
+#define RAIL_RIBBON_WIDTH   1.5f
+#define RAIL_HELIX_ROTATION 2       // ring steps per segment (20° per step)
+
+typedef struct {
+	// ── shared with future Vulkan layer — do not reorder ──
+	vec3_t      start;
+	vec3_t      end;
+	int         startTime;
+	byte        color[4];
+	int         numSegments;
+
+	// ── helix axis data (rebuilt each frame with evolving radius/spacing) ──
+	vec3_t      beamAxis;                       // normalized beam direction
+	vec3_t      perpAxis[36];                   // precomputed ring positions
+	float       beamLen;                        // total beam length
+
+	polyVert_t  debris[MAX_RAIL_DEBRIS * 4];    // billboard quads
+	vec3_t      debrisOrg[MAX_RAIL_DEBRIS];     // spawn positions (for gravity drift)
+	vec3_t      debrisDelta[MAX_RAIL_DEBRIS];   // random drift velocity
+	int         numDebris;
+
+	polyVert_t  sparks[MAX_RAIL_SPARKS * 4];    // impact spark quads
+	vec3_t      sparkOrg[MAX_RAIL_SPARKS];      // spawn positions
+	vec3_t      sparkVel[MAX_RAIL_SPARKS];      // velocity (surface normal based)
+	int         numSparks;
+
+	vec3_t      impactPoint;
+	vec3_t      impactNormal;
+
+	qboolean    active;
+} railTrail_t;
 #define BRASS_TIME          2500
 
 #define	POWERUP_BLINK_TIME	1000
@@ -771,6 +821,8 @@ typedef struct {
 
 	qhandle_t	railRingsShader;
 	qhandle_t	railCoreShader;
+	qhandle_t	railHelixShader;
+	qhandle_t	railDebrisShader;
 
 	qhandle_t	lightningShader;
 
@@ -1568,6 +1620,10 @@ void CG_ExplosionParticles(int weapon, vec3_t origin);
 // eser - explosions
 
 void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end );
+#if FEAT_RAIL_TRAIL == 0
+void CG_AddRailTrails( void );
+void CG_ClearRailTrails( void );
+#endif
 void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi );
 void CG_AddViewWeapon (playerState_t *ps);
 void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent, int team );
@@ -1811,6 +1867,7 @@ void		trap_R_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t 
 void		trap_R_AddPolysToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts, int numPolys );
 void		trap_R_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void		trap_R_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
+void		trap_R_AddRailTrailParams( const railTrailParams_t *params );
 int			trap_R_LightForPoint( vec3_t point, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir );
 void		trap_R_RenderScene( const refdef_t *fd );
 void		trap_R_SetColor( const float *rgba );	// NULL = 1,1,1,1

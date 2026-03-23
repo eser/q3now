@@ -2031,6 +2031,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.AddLightToScene = RE_AddLightToScene;
 	re.AddAdditiveLightToScene = RE_AddAdditiveLightToScene;
 	re.AddLinearLightToScene = RE_AddLinearLightToScene;
+	re.AddRailTrailParams = NULL; // no GPU compute in OpenGL renderer
 
 	re.RenderScene = RE_RenderScene;
 

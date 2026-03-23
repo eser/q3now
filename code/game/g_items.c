@@ -37,12 +37,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 
-#define	RESPAWN_ARMOR		25
-#define	RESPAWN_HEALTH		35
-#define	RESPAWN_AMMO		40
-#define	RESPAWN_HOLDABLE	60
-#define	RESPAWN_MEGAHEALTH	35//120
-#define	RESPAWN_POWERUP		120
+#define	RESPAWN_AMMO			30
+#define	RESPAWN_ARMOR			30
+#define	RESPAWN_HEALTH			30
+#define	RESPAWN_HOLDABLE		60
+#define	RESPAWN_POWERUP			90
+#define	RESPAWN_WEAPON			5
+#define	SPAWN_DELAY_ARMOR		30
+#define	SPAWN_DELAY_HOLDABLE	90
+#define	SPAWN_DELAY_POWERUP		90
 
 
 //======================================================================
@@ -114,9 +117,7 @@ int Pickup_Powerup( gentity_t *ent, gentity_t *other ) {
 		client->ps.persistant[PERS_PLAYEREVENTS] ^= PLAYEREVENT_DENIEDREWARD;
 	}
 
-    // return RESPAWN_POWERUP;
-    // CPM: Battle Suit uses different respawn times from the other powerups in cpm
-    return (ent->item->giTag == PW_BATTLESUIT) ? cpm_itemrespawnBS : cpm_itemrespawnpowerup; // CPM
+    return RESPAWN_POWERUP;
 }
 
 //======================================================================
@@ -162,8 +163,7 @@ int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 
     Add_Ammo(other, ent->item->giTag, quantity);
 
-	// return RESPAWN_AMMO;
-    return cpm_itemrespawnammo; // CPM
+	return RESPAWN_AMMO;
 }
 
 //======================================================================
@@ -230,31 +230,11 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
         Add_Ammo(other, ent->item->giTag, quantity);
     }
 
-    return cpm_itemrespawnweapon; // CPM
+    return RESPAWN_WEAPON;
 }
 
 
 //======================================================================
-
-// CPM: Megahealth respawn function
-void CPM_HealthDecay(gentity_t *ent)
-{
-    if (!ent->activator) {
-        ent->think = RespawnItem;
-        ent->nextthink = level.time + CPM_MEGARESPAWNDELAY * 1000;
-        return;
-    }
-
-    if (strcmp(ent->activator->classname, "player")
-        || ent->activator->client->ps.stats[STAT_HEALTH] <= 100) {
-        ent->nextthink = level.time + CPM_MEGARESPAWNDELAY * 1000;
-        ent->think = RespawnItem;
-        return;
-    }
-
-    ent->nextthink = level.time + 1000;
-}
-// !CPM
 
 int Pickup_Health (gentity_t *ent, gentity_t *other) {
 	int			quantity;
@@ -272,29 +252,7 @@ int Pickup_Health (gentity_t *ent, gentity_t *other) {
 	}
 	other->client->ps.stats[STAT_HEALTH] = other->health;
 
-	if ( ent->item->quantity == 100 ) {		// mega health respawns slow
-		// return RESPAWN_MEGAHEALTH;
-
-        // CPM
-        if (cpm_megastyle)
-        {
-            if (g_gametype.integer >= GT_TEAM) {
-                return RESPAWN_MEGAHEALTH;
-            }
-
-            ent->think = CPM_HealthDecay;
-            ent->activator = other;
-            return 1; // nextthink will be one second
-        }
-
-        return RESPAWN_HEALTH; // due to a bug in the vq3 code, this must return health respawn
-        // and not megahealth respawn (or else megahealth wont respawn once every 35 seconds
-        // on maps like q3dm13)
-        // !CPM
-	}
-
-	// return RESPAWN_HEALTH;
-    return cpm_itemrespawnhealth; // CPM
+	return RESPAWN_HEALTH;
 }
 
 //======================================================================
@@ -497,8 +455,7 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 	}
 
 	// non zero wait overrides respawn time
-	// if ( ent->wait ) {
-    if (ent->wait && ent->think != CPM_HealthDecay) {	// CPM
+	if ( ent->wait ) {
 		respawn = ent->wait;
 	}
 
@@ -531,12 +488,7 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 		ent->think = 0;
 	} else {
 		ent->nextthink = level.time + respawn * 1000;
-		// ent->think = RespawnItem;
-        // CPM
-        if (ent->think != CPM_HealthDecay) {
-            ent->think = RespawnItem;
-        }
-        // !CPM
+		ent->think = RespawnItem;
 	}
 	trap_LinkEntity( ent );
 }
@@ -641,6 +593,7 @@ free fall from their spawn points
 void FinishSpawningItem( gentity_t *ent ) {
 	trace_t		tr;
 	vec3_t		dest;
+	int			spawnDelay;
 
 	VectorSet( ent->r.mins, -ITEM_RADIUS, -ITEM_RADIUS, -ITEM_RADIUS );
 	VectorSet( ent->r.maxs, ITEM_RADIUS, ITEM_RADIUS, ITEM_RADIUS );
@@ -684,19 +637,23 @@ void FinishSpawningItem( gentity_t *ent ) {
         level.mapWeapons |= (1 << ent->item->giTag);
     }
 
-	// powerups don't spawn in for a while
-	// if ( ent->item->giType == IT_POWERUP ) {
-    if (ent->item->giType == IT_POWERUP && !cpm_startpowerups) { // CPM
-		float	respawn;
-
-		respawn = 45 + crandom() * 15;
-		ent->s.eFlags |= EF_NODRAW;
-		ent->r.contents = 0;
-		ent->nextthink = level.time + respawn * 1000;
-		ent->think = RespawnItem;
-		return;
+	// eser - spawn delays
+	switch ( ent->item->giType ) {
+	case IT_ARMOR: spawnDelay = SPAWN_DELAY_ARMOR; break;
+	case IT_HOLDABLE: spawnDelay = SPAWN_DELAY_HOLDABLE; break;
+	case IT_POWERUP: spawnDelay = SPAWN_DELAY_POWERUP; break;
+	default: spawnDelay = 0; break;
 	}
 
+	// some items don't spawn in for a while
+    if ( spawnDelay > 0 ) {
+		ent->s.eFlags |= EF_NODRAW;
+		ent->r.contents = 0;
+		ent->nextthink = level.time + spawnDelay * 1000;
+		ent->think = RespawnItem;
+
+		return;
+	}
 
 	trap_LinkEntity (ent);
 }

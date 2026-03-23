@@ -51,6 +51,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	RF_WRAP_FRAMES		0x0200		// mod the model frames by the maxframes to allow continuous
 										// animation without needing to know the frame count
 
+// ── GPU rail trail params (shared between cgame and renderer) ──
+// Passed via trap_R_AddRailTrailParams syscall.
+// Layout must match TrailParams in rail_common.glsl.
+typedef struct {
+	float  start[4];       // xyz + beamLen
+	float  beamAxis[4];    // xyz + frac
+	float  perpAxis[36][4]; // precomputed ring positions
+	float  params[4];      // curRadius, curSpacing, curWidth, numSegments(float)
+	float  color[4];       // rgba [0..1]
+	float  extra[4];       // rotationStep, elapsed, reserved, reserved
+} railTrailParams_t;       // 656 bytes, matches GLSL std430
+
 // refdef flags
 #define RDF_NOWORLDMODEL	0x0001		// used for player configuration screen
 #define RDF_HYPERSPACE		0x0004		// teleportation effect
@@ -76,6 +88,7 @@ typedef enum {
 	RT_RAIL_RINGS,
 	RT_LIGHTNING,
 	RT_PORTALSURFACE,		// doesn't draw anything, just info for portals
+	RT_POLYSTRIP,			// continuous tri-strip (pairs of verts, proper strip indexing)
 
 	RT_MAX_REF_ENTITY_TYPE
 } refEntityType_t;

@@ -199,7 +199,415 @@ static void CG_NailgunEjectBrass( centity_t *cent ) {
 }
 #endif
 
-#if !FEAT_NEW_RAIL_STYLE
+#if FEAT_RAIL_TRAIL == 0
+
+/*
+==========================
+CG_RailTrail — Q2-spirit modernized rail trail
+
+Architecture:
+  1. Helix ribbon: quad-per-segment batch via AddPolyToScene
+     - Beam-axis-fixed spiral (PerpendicularVector + RotatePointAroundVector)
+     - Stored in railTrail_t for per-frame fade re-submission
+  2. White debris: batched billboard quads (random scatter)
+  3. Impact sparks: surface-normal-based velocity, animated per-frame
+  4. Dynamic light: AddLinearLightToScene with HDR intensity
+
+Zero localEntities used. Zero entity pool impact.
+==========================
+*/
+
+static railTrail_t  cg_railTrails[MAX_RAIL_TRAILS];
+
+// shared temp buffer for per-frame fade submission (avoids stack pressure)
+static polyVert_t   cg_railTempVerts[MAX_RAIL_SEGMENTS * 4];
+
+/*
+==========================
+CG_BuildBillboardQuad — reusable camera-facing quad builder
+==========================
+*/
+static void CG_BuildBillboardQuad( polyVert_t *out, vec3_t origin, float radius, byte *rgba ) {
+	vec3_t left, up;
+	VectorScale( cg.refdef.viewaxis[1], radius, left );
+	VectorScale( cg.refdef.viewaxis[2], radius, up );
+
+	VectorAdd( origin, left, out[0].xyz );
+	VectorAdd( out[0].xyz, up, out[0].xyz );
+	out[0].st[0] = 0; out[0].st[1] = 0;
+	out[0].modulate.rgba[0] = rgba[0]; out[0].modulate.rgba[1] = rgba[1];
+	out[0].modulate.rgba[2] = rgba[2]; out[0].modulate.rgba[3] = rgba[3];
+
+	VectorSubtract( origin, left, out[1].xyz );
+	VectorAdd( out[1].xyz, up, out[1].xyz );
+	out[1].st[0] = 1; out[1].st[1] = 0;
+	out[1].modulate.rgba[0] = rgba[0]; out[1].modulate.rgba[1] = rgba[1];
+	out[1].modulate.rgba[2] = rgba[2]; out[1].modulate.rgba[3] = rgba[3];
+
+	VectorSubtract( origin, left, out[2].xyz );
+	VectorSubtract( out[2].xyz, up, out[2].xyz );
+	out[2].st[0] = 1; out[2].st[1] = 1;
+	out[2].modulate.rgba[0] = rgba[0]; out[2].modulate.rgba[1] = rgba[1];
+	out[2].modulate.rgba[2] = rgba[2]; out[2].modulate.rgba[3] = rgba[3];
+
+	VectorAdd( origin, left, out[3].xyz );
+	VectorSubtract( out[3].xyz, up, out[3].xyz );
+	out[3].st[0] = 0; out[3].st[1] = 1;
+	out[3].modulate.rgba[0] = rgba[0]; out[3].modulate.rgba[1] = rgba[1];
+	out[3].modulate.rgba[2] = rgba[2]; out[3].modulate.rgba[3] = rgba[3];
+}
+
+/*
+==========================
+CG_ClearRailTrails
+==========================
+*/
+void CG_ClearRailTrails( void ) {
+	memset( cg_railTrails, 0, sizeof( cg_railTrails ) );
+}
+
+/*
+==========================
+CG_RailTrail
+==========================
+*/
+void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end ) {
+	railTrail_t *trail;
+	vec3_t      beamAxis, temp;
+	vec3_t      axis[36];
+	float       len;
+	int         i, j, oldest, numSegs;
+
+	// compute beam direction and length
+	VectorSubtract( end, start, beamAxis );
+	len = VectorNormalize( beamAxis );
+	if ( len < 1.0f ) {
+		return; // degenerate (self-hit or zero-length)
+	}
+
+	// find a free trail slot (or recycle oldest)
+	trail = NULL;
+	oldest = 0;
+	for ( i = 0; i < MAX_RAIL_TRAILS; i++ ) {
+		if ( !cg_railTrails[i].active ) {
+			trail = &cg_railTrails[i];
+			break;
+		}
+		if ( cg_railTrails[i].startTime < cg_railTrails[oldest].startTime ) {
+			oldest = i;
+		}
+	}
+	if ( !trail ) {
+		trail = &cg_railTrails[oldest]; // recycle oldest
+	}
+
+	// initialize trail metadata
+	memset( trail, 0, sizeof( *trail ) );
+	VectorCopy( start, trail->start );
+	VectorCopy( end, trail->end );
+	trail->startTime = cg.time;
+	trail->color[0] = 255; trail->color[1] = 255;
+	trail->color[2] = 255; trail->color[3] = 255;
+	VectorCopy( end, trail->impactPoint );
+
+	// ── 1. Store helix axis data (rebuilt each frame with evolving radius/spacing) ──
+
+	// stable perpendicular reference frame (Q2 approach)
+	VectorCopy( beamAxis, trail->beamAxis );
+	trail->beamLen = len;
+	PerpendicularVector( temp, beamAxis );
+	for ( i = 0; i < 36; i++ ) {
+		RotatePointAroundVector( trail->perpAxis[i], beamAxis, temp, i * 10 );
+	}
+	trail->numSegments = (int)( len / RAIL_HELIX_SPACING );
+	if ( trail->numSegments > MAX_RAIL_SEGMENTS ) {
+		trail->numSegments = MAX_RAIL_SEGMENTS;
+	}
+
+	// ── 2. Build debris particles (Q2-style: 1 quad per 7.5 units along beam) ──
+	//
+	// Q2 places one particle every 0.75 units (dec = 0.75 in CL_RailTrail).
+	// Since Q3 debris are quads instead of GL_POINTS, use a 1:10 sampling
+	// ratio — one quad every ~7.5 units. Colors map Q2 palette 0x00-0x0F
+	// (white to mid-grey) via rand()&15 normalized to [0..1].
+	{
+		float debrisDec = 7.5f;
+		float d = 0.0f;
+		int   idx = 0;
+
+		while ( d < len && idx < MAX_RAIL_DEBRIS ) {
+			// Q2 palette 0x00-0x0F: white(255) → mid-grey(128)
+			// lerp: grey = 255 - (rand()&15) * 8  →  range [255..135]
+			int greyVal = 255 - ( rand() & 15 ) * 8;
+			byte debrisColor[4];
+			debrisColor[0] = greyVal; debrisColor[1] = greyVal;
+			debrisColor[2] = greyVal; debrisColor[3] = 255;
+
+			// spawn position: along beam center + scatter ±3 (Q2: crand()*3)
+			trail->debrisOrg[idx][0] = start[0] + d * beamAxis[0] + crandom() * 3;
+			trail->debrisOrg[idx][1] = start[1] + d * beamAxis[1] + crandom() * 3;
+			trail->debrisOrg[idx][2] = start[2] + d * beamAxis[2] + crandom() * 3;
+
+			// random drift velocity (Q2: crand()*3)
+			trail->debrisDelta[idx][0] = crandom() * 3;
+			trail->debrisDelta[idx][1] = crandom() * 3;
+			trail->debrisDelta[idx][2] = crandom() * 3;
+
+			// store initial color in debris quad
+			CG_BuildBillboardQuad( &trail->debris[idx * 4], trail->debrisOrg[idx], 0.5f, debrisColor );
+
+			d += debrisDec;
+			idx++;
+		}
+		trail->numDebris = idx;
+	}
+
+	// ── 3. Build impact sparks ────────────────────────────────────
+
+	trail->numSparks = MAX_RAIL_SPARKS;
+	for ( i = 0; i < trail->numSparks; i++ ) {
+		byte sparkColor[4] = { 255, 255, 220, 255 }; // warm white
+
+		VectorCopy( end, trail->sparkOrg[i] );
+
+		// velocity: surface normal + random scatter
+		trail->sparkVel[i][0] = trail->impactNormal[0] * 80 + crandom() * 40;
+		trail->sparkVel[i][1] = trail->impactNormal[1] * 80 + crandom() * 40;
+		trail->sparkVel[i][2] = trail->impactNormal[2] * 80 + crandom() * 40;
+
+		CG_BuildBillboardQuad( &trail->sparks[i * 4], trail->sparkOrg[i], 0.3f, sparkColor );
+	}
+
+	trail->active = qtrue;
+}
+
+/*
+==========================
+CG_AddRailTrails — per-frame submission with fade, animation
+==========================
+*/
+void CG_AddRailTrails( void ) {
+	int i, j;
+
+	for ( i = 0; i < MAX_RAIL_TRAILS; i++ ) {
+		railTrail_t *trail = &cg_railTrails[i];
+		float       frac, alpha, segAlpha;
+		float       elapsed;
+		int         numQuads;
+		byte        fadedColor[4];
+		qboolean    gpuHelixSubmitted = qfalse;
+
+		if ( !trail->active ) {
+			continue;
+		}
+
+		frac = (float)( cg.time - trail->startTime ) / RAIL_TRAILTIME;
+		if ( frac >= 1.0f ) {
+			trail->active = qfalse;
+			continue;
+		}
+		elapsed = ( cg.time - trail->startTime ) / 1000.0f;
+		alpha = 1.0f - frac;
+
+		// ── GPU helix path: submit trail params to renderer for compute dispatch ──
+		{
+			// ease-out curve for evolving params
+			float easedFrac  = 1.0f - (1.0f - frac) * (1.0f - frac);
+			float curRadius  = 2.0f + easedFrac * 2.0f;
+			float curSpacing = RAIL_HELIX_SPACING * ( 1.0f - easedFrac * 0.667f );
+			float curWidth   = RAIL_RIBBON_WIDTH * ( 1.0f + easedFrac * 1.5f );
+			int   numSegs    = (int)( trail->beamLen / curSpacing );
+			int   k;
+			railTrailParams_t params;
+
+			if ( numSegs > MAX_RAIL_SEGMENTS ) numSegs = MAX_RAIL_SEGMENTS;
+			if ( numSegs < 2 ) numSegs = 2;
+
+			memset( &params, 0, sizeof( params ) );
+
+			// pack TrailParams matching GLSL layout
+			VectorCopy( trail->start, params.start ); params.start[3] = trail->beamLen;
+			VectorCopy( trail->beamAxis, params.beamAxis ); params.beamAxis[3] = frac;
+			for ( k = 0; k < 36; k++ ) {
+				VectorCopy( trail->perpAxis[k], params.perpAxis[k] );
+			}
+			params.params[0] = curRadius;
+			params.params[1] = curSpacing;
+			params.params[2] = curWidth;
+			params.params[3] = (float)numSegs;
+			params.color[0] = 80.0f / 255.0f;   // turquoise R
+			params.color[1] = 200.0f / 255.0f;  // turquoise G
+			params.color[2] = 1.0f;              // turquoise B
+			params.color[3] = alpha;
+			params.extra[0] = (float)RAIL_HELIX_ROTATION;
+			params.extra[1] = elapsed;
+
+			trap_R_AddRailTrailParams( &params );
+		}
+
+		// ── CPU helix (always runs — GPU path not yet producing visible output) ──
+		{
+			// ease-out curve: starts slow, accelerates at end
+			float easedFrac  = 1.0f - (1.0f - frac) * (1.0f - frac);
+			// radius: 2 → 4 over lifetime, spacing: 3 → 1
+			float curRadius  = 2.0f + easedFrac * 2.0f;
+			float curSpacing = RAIL_HELIX_SPACING * ( 1.0f - easedFrac * 0.667f );
+			float curWidth   = RAIL_RIBBON_WIDTH * ( 1.0f + easedFrac * 1.5f );
+			int   numSegs    = (int)( trail->beamLen / curSpacing );
+			int   step       = 1;
+			int   tempIdx    = 0;
+			int   ringJ      = 0;
+			vec3_t midpoint;
+
+			if ( numSegs > MAX_RAIL_SEGMENTS ) numSegs = MAX_RAIL_SEGMENTS;
+			if ( numSegs < 2 ) numSegs = 2;
+
+			// distance LOD
+			midpoint[0] = trail->start[0] + 0.5f * (trail->end[0] - trail->start[0]);
+			midpoint[1] = trail->start[1] + 0.5f * (trail->end[1] - trail->start[1]);
+			midpoint[2] = trail->start[2] + 0.5f * (trail->end[2] - trail->start[2]);
+			if ( Distance( cg.refdef.vieworg, midpoint ) > 1000.0f ) {
+				step = 2;
+			}
+
+			for ( j = 0; j < numSegs - 1; j += step ) {
+				// build from END backward — endpoint stays stable, muzzle recedes
+				float d0 = trail->beamLen - j * curSpacing;
+				float d1 = trail->beamLen - ( j + step ) * curSpacing;
+				int   ring0 = ringJ % 36;
+				int   ring1 = ( ringJ + RAIL_HELIX_ROTATION * step ) % 36;
+				vec3_t sp0, sp1, rn0, rn1;
+				float segPos, unwindFade;
+				byte  a;
+
+				if ( d0 < 0.0f ) d0 = 0.0f;
+				if ( d1 < 0.0f ) break; // past muzzle, stop
+
+				// spiral positions along beam (d measured from start)
+				VectorMA( trail->start, d0, trail->beamAxis, sp0 );
+				VectorMA( sp0, curRadius, trail->perpAxis[ring0], sp0 );
+				VectorMA( trail->start, d1, trail->beamAxis, sp1 );
+				VectorMA( sp1, curRadius, trail->perpAxis[ring1], sp1 );
+
+				// ribbon normals
+				CrossProduct( trail->beamAxis, trail->perpAxis[ring0], rn0 );
+				VectorNormalize( rn0 );
+				CrossProduct( trail->beamAxis, trail->perpAxis[ring1], rn1 );
+				VectorNormalize( rn1 );
+
+				// unwind fade: segments near muzzle (far from impact) fade first
+				segPos = (float)j / ( numSegs - 1 ); // 0=impact end, 1=muzzle end
+				unwindFade = 1.0f - frac * ( 1.0f + segPos );
+				if ( unwindFade < 0.0f ) unwindFade = 0.0f;
+				a = (byte)( alpha * unwindFade * 255 );
+
+				// quad verts
+				VectorMA( sp0, -curWidth, rn0, cg_railTempVerts[tempIdx + 0].xyz );
+				VectorMA( sp0,  curWidth, rn0, cg_railTempVerts[tempIdx + 1].xyz );
+				VectorMA( sp1, -curWidth, rn1, cg_railTempVerts[tempIdx + 2].xyz );
+				VectorMA( sp1,  curWidth, rn1, cg_railTempVerts[tempIdx + 3].xyz );
+
+				cg_railTempVerts[tempIdx + 0].st[0] = d0 / 64.0f; cg_railTempVerts[tempIdx + 0].st[1] = 0.0f;
+				cg_railTempVerts[tempIdx + 1].st[0] = d0 / 64.0f; cg_railTempVerts[tempIdx + 1].st[1] = 1.0f;
+				cg_railTempVerts[tempIdx + 2].st[0] = d1 / 64.0f; cg_railTempVerts[tempIdx + 2].st[1] = 0.0f;
+				cg_railTempVerts[tempIdx + 3].st[0] = d1 / 64.0f; cg_railTempVerts[tempIdx + 3].st[1] = 1.0f;
+
+				{
+					// turquoise/ocean-blue: R=80 G=200 B=255
+					int v;
+					for ( v = 0; v < 4; v++ ) {
+						cg_railTempVerts[tempIdx + v].modulate.rgba[0] = 80;
+						cg_railTempVerts[tempIdx + v].modulate.rgba[1] = 200;
+						cg_railTempVerts[tempIdx + v].modulate.rgba[2] = 255;
+						cg_railTempVerts[tempIdx + v].modulate.rgba[3] = a;
+					}
+				}
+
+				tempIdx += 4;
+				ringJ += RAIL_HELIX_ROTATION * step;
+			}
+
+			if ( tempIdx > 0 ) {
+				int k;
+				for ( k = 0; k < tempIdx; k += 4 ) {
+					trap_R_AddPolyToScene( cgs.media.whiteShader, 4,
+						&cg_railTempVerts[k] );
+				}
+			}
+		}
+
+		// ── Debris (with gravity drift) ──
+
+		if ( trail->numDebris > 0 ) {
+			int tempIdx = 0;
+			for ( j = 0; j < trail->numDebris; j++ ) {
+				vec3_t pos;
+				byte a;
+				byte debrisColor[4];
+
+				VectorMA( trail->debrisOrg[j], elapsed, trail->debrisDelta[j], pos );
+
+				a = (byte)( alpha * 255 );
+				debrisColor[0] = trail->debris[j * 4].modulate.rgba[0];
+				debrisColor[1] = trail->debris[j * 4].modulate.rgba[1];
+				debrisColor[2] = trail->debris[j * 4].modulate.rgba[2];
+				debrisColor[3] = a;
+
+				CG_BuildBillboardQuad( &cg_railTempVerts[tempIdx], pos, 0.5f, debrisColor );
+				tempIdx += 4;
+			}
+
+			{
+				int k;
+				for ( k = 0; k < tempIdx; k += 4 ) {
+					trap_R_AddPolyToScene( cgs.media.railRingsShader, 4,
+						&cg_railTempVerts[k] );
+				}
+			}
+		}
+
+		// ── Impact sparks (first 200ms, velocity + gravity) ──
+
+		if ( frac < 0.2f && trail->numSparks > 0 ) {
+			int tempIdx = 0;
+			float sparkAlpha = 1.0f - ( frac / 0.2f );
+			for ( j = 0; j < trail->numSparks; j++ ) {
+				vec3_t pos;
+				byte sparkColor[4];
+				byte a;
+
+				a = (byte)( sparkAlpha * 255 );
+
+				VectorMA( trail->sparkOrg[j], elapsed, trail->sparkVel[j], pos );
+				pos[2] -= 0.5f * 400.0f * elapsed * elapsed; // strong gravity on sparks
+
+				sparkColor[0] = 255; sparkColor[1] = 255;
+				sparkColor[2] = 220; sparkColor[3] = a;
+
+				CG_BuildBillboardQuad( &cg_railTempVerts[tempIdx], pos, 0.3f, sparkColor );
+				tempIdx += 4;
+			}
+
+			{
+				int k;
+				for ( k = 0; k < tempIdx; k += 4 ) {
+					trap_R_AddPolyToScene( cgs.media.whiteShader, 4,
+						&cg_railTempVerts[k] );
+				}
+			}
+		}
+
+		// ── Dynamic light (synced fade) ──
+
+		{
+			float lightIntensity = 200.0f * alpha;
+			trap_R_AddLightToScene( trail->start, lightIntensity, 0.3f, 0.5f, 1.0f );
+			trap_R_AddLightToScene( trail->end, lightIntensity, 0.3f, 0.5f, 1.0f );
+		}
+	}
+}
+
+#elif FEAT_RAIL_TRAIL == 1
 
 /*
 ==========================
@@ -325,7 +733,7 @@ void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end ) {
 	re = &le->refEntity;
 	le->leType = LE_FADE_RGB;
 	le->startTime = cg.time;
-	le->endTime = cg.time + RAIL_TRAILTIME * 2;
+	le->endTime = cg.time + RAIL_CORE_TRAILTIME;
 	le->lifeRate = 1.0 / ( le->endTime - le->startTime );
 	re->shaderTime.f = cg.time / 1000.0f;
 	re->reType = RT_RAIL_CORE;
@@ -345,7 +753,7 @@ void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end ) {
 	re = &le->refEntity;
 	le->leType = LE_FADE_RGB;
 	le->startTime = cg.time;
-	le->endTime = cg.time + RAIL_TRAILTIME * 2;
+	le->endTime = cg.time + RAIL_CORE_TRAILTIME;
 	le->lifeRate = 1.0 / ( le->endTime - le->startTime );
 	re->shaderTime.f = cg.time / 1000.0f;
 	re->reType = RT_RAIL_CORE;
@@ -800,6 +1208,8 @@ void CG_RegisterWeapon( int weaponNum ) {
 		cgs.media.railExplosionShader = trap_R_RegisterShader( "railExplosion" );
 		cgs.media.railRingsShader = trap_R_RegisterShader( "railDisc" );
 		cgs.media.railCoreShader = trap_R_RegisterShader( "railCore" );
+		cgs.media.railHelixShader = trap_R_RegisterShader( "q3now/railHelix" );
+		cgs.media.railDebrisShader = trap_R_RegisterShader( "q3now/railDebris" );
 		break;
 
 	 default:
@@ -1028,9 +1438,15 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	// project forward by the lightning range
 	VectorMA( muzzlePoint, LIGHTNING_RANGE, forward, endPoint );
 
-	// see if it hit a wall
-	CG_Trace( &trace, muzzlePoint, vec3_origin, vec3_origin, endPoint, 
-		cent->currentState.number, MASK_SHOT );
+// eser - lightning beams
+	// see if it hit a wall — match server-side beam width (±4)
+	{
+		static vec3_t lgMins = { -4, -4, -4 };
+		static vec3_t lgMaxs = {  4,  4,  4 };
+		CG_Trace( &trace, muzzlePoint, lgMins, lgMaxs, endPoint,
+			cent->currentState.number, MASK_SHOT );
+	}
+// eser - lightning beams
 
 	// this is the endpoint
 	VectorCopy( trace.endpos, beam.oldorigin );
@@ -1094,9 +1510,15 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	// project forward by the lightning range
 	VectorMA( muzzlePoint, LIGHTNING_RANGE, forward, endPoint );
 
-	// see if it hit a wall
-	CG_Trace( &trace, muzzlePoint, vec3_origin, vec3_origin, endPoint, 
-		cent->currentState.number, MASK_SHOT );
+// eser - lightning beams
+	// see if it hit a wall — match server-side beam width (±4)
+	{
+		static vec3_t lgMins = { -4, -4, -4 };
+		static vec3_t lgMaxs = {  4,  4,  4 };
+		CG_Trace( &trace, muzzlePoint, lgMins, lgMaxs, endPoint,
+			cent->currentState.number, MASK_SHOT );
+	}
+// eser - lightning beams
 
 	// this is the endpoint
 	VectorCopy( trace.endpos, beam.oldorigin );

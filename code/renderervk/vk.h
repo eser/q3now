@@ -403,6 +403,40 @@ typedef struct {
 	VkPipelineLayout pipeline_layout_smaa;		// SMAA (push constants + 3 samplers)
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
 
+	// ── compute shader infrastructure ─────────────────────────────
+	//
+	// Frame sequence:
+	//   vk_begin_frame() → vk_compute_dispatch() → barrier → vk_begin_main_render_pass()
+	//
+	// Per-frame output SSBOs avoid write/read contention across 2 frames in flight.
+	//
+	VkDescriptorSetLayout set_layout_compute;	// 2 SSBOs: input params + output verts
+	VkPipelineLayout pipeline_layout_compute;	// compute layout + push constants
+	qboolean computeAvailable;					// false if compute init failed
+
+	// per-frame trail dispatch queue (filled by cgame, consumed by renderer)
+	#define MAX_GPU_RAIL_TRAILS 8
+	struct {
+		int   numSegments;
+		float beamLen;
+		float frac;
+		float curRadius;
+		float curSpacing;
+		float curWidth;
+	} railDispatch[MAX_GPU_RAIL_TRAILS];
+	int numRailDispatches;
+
+	struct {
+		VkPipeline		compute_pipeline;		// helix geometry generation
+		VkPipeline		graphics_pipeline;		// helix rendering (empty vertex input)
+		VkBuffer		params_buffer;			// input SSBO (trail params, host-mapped)
+		VkDeviceMemory	params_memory;
+		byte			*params_ptr;			// mapped memory for CPU writes
+		VkBuffer		vertex_buffer[NUM_COMMAND_BUFFERS];	// per-frame output SSBOs
+		VkDeviceMemory	vertex_memory[NUM_COMMAND_BUFFERS];
+		VkDescriptorSet	descriptor[NUM_COMMAND_BUFFERS];	// per-frame descriptor sets
+	} rail;
+
 	VkDescriptorSet color_descriptor;
 
 	VkImage color_image;
@@ -577,6 +611,13 @@ typedef struct {
 		VkShaderModule smaa_blend_fs;
 		VkShaderModule smaa_resolve_vs;
 		VkShaderModule smaa_resolve_fs;
+
+		// rail trail compute + render
+		VkShaderModule rail_helix_cs;
+		VkShaderModule rail_debris_cs;
+		VkShaderModule rail_sparks_cs;
+		VkShaderModule rail_helix_vs;
+		VkShaderModule rail_helix_fs;
 	} modules;
 
 	VkPipelineCache pipelineCache;

@@ -339,6 +339,7 @@ typedef enum {
 #define	EF_GRAPPLE			0x00100000
 #define EF_SPAWN_PROTECT	0x00200000		// spawn protection white shell (2B)
 #define EF_FROZEN			0x00400000		// frozen in freezetag — ice shell (7A)
+#define EF_GRENADE_BOUNCE	0x00800000		// Q1/Q2-style grenade bounce (0.5x normal restitution)
 
 
 #define	EF_BACKPACK			0x00000001		// CPM: Backpack indicator bit
@@ -756,7 +757,8 @@ typedef struct gweapon_s {
     int         spawnAmmunition;
 
 	float       maxDamageDistance;
-    int         knockback;
+    float       knockbackScale;
+	float       selfKnockbackScale;
 	float       recoilKick;
 
 	int         reloadTime;

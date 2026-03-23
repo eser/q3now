@@ -1054,45 +1054,47 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// figure momentum add, even if the damage won't be taken
 	if ( knockback && targ->client ) {
 		vec3_t	kvel;
-		float	mass = 200;
+		int		weapIdx = WP_NONE;
+		float   knockbackScale;
 
-		// eser - weapon-specific knockbacks
-        float	scale = 1000;
-
-		// bg_weaponlist[] instead of damage, decoupling knockback from damage
+		// map MOD to weapon index
 		switch ( mod ) {
-		case MOD_GAUNTLET:       scale = bg_weaponlist[WP_GAUNTLET].knockback; break;
-		case MOD_MACHINEGUN:     scale = bg_weaponlist[WP_MACHINEGUN].knockback; break;
-		case MOD_SHOTGUN:        scale = bg_weaponlist[WP_SHOTGUN].knockback; break;
+		case MOD_GAUNTLET:       weapIdx = WP_GAUNTLET; break;
+		case MOD_MACHINEGUN:     weapIdx = WP_MACHINEGUN; break;
+		case MOD_SHOTGUN:        weapIdx = WP_SHOTGUN; break;
 		case MOD_GRENADE:
-		case MOD_GRENADE_SPLASH: scale = bg_weaponlist[WP_GRENADE_LAUNCHER].knockback; break;
+		case MOD_GRENADE_SPLASH: weapIdx = WP_GRENADE_LAUNCHER; break;
 		case MOD_ROCKET:
-		case MOD_ROCKET_SPLASH:  scale = bg_weaponlist[WP_ROCKET_LAUNCHER].knockback; break;
-		case MOD_LIGHTNING:      scale = bg_weaponlist[WP_LIGHTNING].knockback; break;
-		case MOD_RAILGUN:        scale = bg_weaponlist[WP_RAILGUN].knockback; break;
-		case MOD_PLASMA:         scale = bg_weaponlist[WP_PLASMAGUN].knockback; break;
+		case MOD_ROCKET_SPLASH:  weapIdx = WP_ROCKET_LAUNCHER; break;
+		case MOD_LIGHTNING:      weapIdx = WP_LIGHTNING; break;
+		case MOD_RAILGUN:        weapIdx = WP_RAILGUN; break;
+		case MOD_PLASMA:         weapIdx = WP_PLASMAGUN; break;
 		default: break;
 		}
-	
-        if (targ != attacker) {
-            if (g_instagib.integer) {
-                switch (mod) {
-                case MOD_GAUNTLET:
-                case MOD_GRENADE:
-                case MOD_ROCKET:
-                case MOD_RAILGUN:
-                    damage = INFINITE;
-                }
-            }
 
-			if (g_excessive.integer) {
-				scale *= 2;
+		if (targ != attacker) {
+			if (g_instagib.integer) {
+				switch (mod) {
+				case MOD_GAUNTLET:
+				case MOD_GRENADE:
+				case MOD_ROCKET:
+				case MOD_RAILGUN:
+					damage = INFINITE;
+				}
 			}
-        }
+		}
 
-        VectorScale(dir, scale * (float)knockback / mass, kvel);
-		VectorAdd (targ->client->ps.velocity, kvel, targ->client->ps.velocity);
-		// eser - weapon-specific knockbacks
+		// q3now table-based: fixed per-weapon knockback
+		knockbackScale = ( targ == attacker ) ?
+			bg_weaponlist[weapIdx].selfKnockbackScale :
+			bg_weaponlist[weapIdx].knockbackScale;
+
+		if ( g_excessive.integer && targ != attacker ) {
+			knockbackScale *= 2;
+		}
+
+		VectorScale( dir, (float)knockback * knockbackScale, kvel );
+		VectorAdd( targ->client->ps.velocity, kvel, targ->client->ps.velocity );
 
 		// set the timer so that the other client can't cancel
 		// out the movement immediately
@@ -1155,14 +1157,14 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	// battlesuit protects from all radius damage (but takes knockback)
-	// and protects 50% against all damage
+	// and protects 75% against all damage
 	if ( client && client->ps.powerups[PW_BATTLESUIT] ) {
 		G_AddEvent( targ, EV_POWERUP_BATTLESUIT, 0 );
 		if ( ( dflags & DAMAGE_RADIUS ) || ( mod == MOD_FALLING ) ) {
 			return;
 		}
-		// damage *= 0.5;
-        damage *= cpm_BSprotection; // CPM: Better protection in cpm
+
+		damage *= 0.25f;
 	}
 
 	// add to the attacker's hit counter (if the target isn't a general entity like a prox mine)
@@ -1178,10 +1180,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		attacker->client->ps.persistant[PERS_ATTACKEE_ARMOR] = (targ->health<<8)|(client->ps.stats[STAT_ARMOR]);
 	}
 
-	// always give half damage if hurting self
+	// always give quarter damage if hurting self
 	// calculated after knockback, so rocket jumping works
 	if (targ == attacker) {
-		damage *= 0.5;
+		damage *= 0.25f;
 	}
 
 	if ( damage < 1 ) {
@@ -1471,7 +1473,7 @@ qboolean G_RadiusDamage ( vec3_t origin, gentity_t *attacker, float damage, floa
                 dir[2] += 24;
             }
             else {
-                dir[2] += cpm_knockback_z; //24;
+                dir[2] += 40; // additional vertical velocity for combo potential
             }
             // !CPM
 
@@ -1554,7 +1556,7 @@ qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, floa
                 dir[2] += 24;
             }
             else {
-                dir[2] += cpm_knockback_z; //24;
+                dir[2] += 40; // additional vertical velocity for combo potential
             }
             // !CPM
             G_Damage(ent, NULL, attacker, dir, origin, (int)points, DAMAGE_RADIUS, mod);

@@ -391,10 +391,10 @@ void weapon_grenadelauncher_fire (gentity_t *ent) {
 	gentity_t	*m;
 
 	// extra vertical velocity
-	forward[2] += 0.2f;
+	forward[2] += 0.35f;
 	VectorNormalize( forward );
 
-	m = fire_grenade(ent, muzzle, forward, 1000, qfalse);
+	m = fire_grenade(ent, muzzle, forward, 2500, qtrue);
 	m->damage *= s_quadFactor;
 	m->splashDamage *= s_quadFactor;
 
@@ -685,7 +685,14 @@ void Weapon_LightningFire( gentity_t *ent ) {
 // eser - lightning discharge
 
 
-		trap_Trace( &tr, muzzle, NULL, NULL, end, passent, MASK_SHOT );
+		{
+// eser - lightning push
+			// QW-style: beam has physical width for more forgiving hits
+			static vec3_t lgMins = { -4, -4, -4 };
+			static vec3_t lgMaxs = {  4,  4,  4 };
+			trap_Trace( &tr, muzzle, lgMins, lgMaxs, end, passent, MASK_SHOT );
+		}
+// eser - lightning push
 
 #ifdef MISSIONPACK
 		// if not the first trace (the lightning bounced of an invulnerability sphere)
@@ -734,7 +741,17 @@ void Weapon_LightningFire( gentity_t *ent ) {
 				lgDamage = G_DamageFalloff( lgDamage, muzzle, tr.endpos, bg_weaponlist[WP_LIGHTNING].maxDamageDistance );
 				// eser - damage falloff
 
-				G_Damage( traceEnt, ent, ent, forward, tr.endpos, lgDamage, 0, MOD_LIGHTNING);
+// eser - lightning beams
+				{
+			       // QW-style: LG pushes targets upward for juggle/combo potential
+			       vec3_t lgDir;
+
+				   VectorCopy( forward, lgDir );
+			       lgDir[2] += 0.5f;
+			       VectorNormalize( lgDir );
+			       G_Damage( traceEnt, ent, ent, lgDir, tr.endpos, lgDamage, 0, MOD_LIGHTNING );
+			    }
+// eser - lightning beams
 			}
 		}
 

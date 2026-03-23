@@ -19,30 +19,11 @@ extern float	cpm_weapondrop;
 extern float	cpm_weaponraise;
 extern float	cpm_outofammodelay;
 
-// Battle Suit
-extern float	cpm_BSprotection;
-
 // Backpacks
 extern int		cpm_backpacks;
 
 // Radius Damage Fix
 extern int		cpm_radiusdamagefix;
-
-// Z Knockback
-extern float	cpm_knockback_z;
-
-// Respawn Times
-extern int		cpm_itemrespawnhealth;
-extern int		cpm_itemrespawnpowerup;
-extern int		cpm_itemrespawnBS;
-extern int		cpm_itemrespawnweapon;
-extern int		cpm_itemrespawnammo;
-extern int		cpm_startpowerups;
-extern int      cpm_playerforcerespawn;
-
-// Megahealth
-extern int		cpm_megastyle;
-#define CPM_MEGARESPAWNDELAY 20
 
 // Respawn delay
 extern float	cpm_clientrespawndelay;

@@ -32,13 +32,13 @@ compile() {
 echo "==> Compiling individual shaders..."
 for f in *.vert; do
     [ -f "$f" ] || continue
-    case "$f" in smaa_*) continue;; esac  # compiled separately below
+    case "$f" in smaa_*|rail_*) continue;; esac  # compiled separately below
     name="${f%.vert}_vert_spv"
     compile vert "$f" "$name"
 done
 for f in *.frag; do
     [ -f "$f" ] || continue
-    case "$f" in smaa_*) continue;; esac  # compiled separately below
+    case "$f" in smaa_*|rail_*) continue;; esac  # compiled separately below
     name="${f%.frag}_frag_spv"
     compile frag "$f" "$name"
 done
@@ -150,6 +150,20 @@ compile vert "smaa_blend.vert" smaa_blend_vert_spv
 compile frag "smaa_blend.frag" smaa_blend_frag_spv
 compile vert "smaa_resolve.vert" smaa_resolve_vert_spv
 compile frag "smaa_resolve.frag" smaa_resolve_frag_spv
+
+echo "==> Compiling rail trail compute + render shaders..."
+# compile with rail_common.glsl prepended (shared SSBO struct definitions)
+compile_rail() {
+    cat rail_common.glsl "$2" > "$DIR/spirv/_rail_tmp.$1" && \
+    "$CL" -S "$1" -V -o "$TMPF" "$DIR/spirv/_rail_tmp.$1" && \
+    "$BH" "$TMPF" $OUTF "$3" && \
+    rm -f "$TMPF" "$DIR/spirv/_rail_tmp.$1"
+}
+compile_rail comp rail_helix.comp rail_helix_comp_spv
+compile_rail comp rail_debris.comp rail_debris_comp_spv
+compile_rail comp rail_sparks.comp rail_sparks_comp_spv
+compile_rail vert rail_helix.vert rail_helix_vert_spv
+compile_rail frag rail_helix.frag rail_helix_frag_spv
 
 rm -f "$TMPF"
 echo "==> Done. shader_data.c regenerated."

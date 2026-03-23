@@ -1302,6 +1302,7 @@ extern cvar_t	*r_flareCoeff;			// coefficient for the flare intensity falloff fu
 extern cvar_t	*r_railWidth;
 extern cvar_t	*r_railCoreWidth;
 extern cvar_t	*r_railSegmentLength;
+extern cvar_t	*r_railGPU;
 
 extern cvar_t	*r_znear;				// near Z clip plane
 extern cvar_t	*r_zproj;				// z distance of projection plane
@@ -2014,5 +2015,15 @@ extern void VBO_Flush( void );
 #endif
 
 int R_GetLightmapCoords( const int lightmapIndex, float *x, float *y );
+
+// vk.c — compute shader infrastructure
+qboolean vk_init_compute( void );
+void vk_shutdown_compute( void );
+
+// tr_scene.c — GPU rail trail params
+void RE_AddRailTrailParams( const railTrailParams_t *params );
+
+// tr_surface.c — GPU rail trail draw
+void RB_DrawRailTrailGPU( int numSegments );
 
 #endif //TR_LOCAL_H

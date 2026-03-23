@@ -777,6 +777,11 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		re.AddLinearLightToScene( VMA(1), VMA(2), VMF(3), VMF(4), VMF(5), VMF(6) );
 		return 0;
 
+	case CG_R_ADDRAILTRAILPARAMS:
+		if ( re.AddRailTrailParams )
+			re.AddRailTrailParams( VMA(1) );
+		return 0;
+
 	case CG_R_FORCEFIXEDDLIGHTS:
 		CL_ForceFixedDlights();
 		return 0;

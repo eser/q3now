@@ -1,0 +1,97 @@
+// #version 450 provided by rail_common.glsl
+
+/*
+===============
+rail_helix.comp — GPU helix geometry generation
+
+Each invocation generates one quad (4 vertices) of the helix ribbon.
+Builds from the END backward — endpoint stays stable, muzzle recedes.
+
+Helix math:
+  For segment j: spiral position = start + d * beamAxis + radius * perpAxis[ring]
+  Ribbon normal = cross(beamAxis, perpAxis[ring])
+  Quad = spiralPos ± width * ribbonNormal (two edges, two segments)
+===============
+*/
+
+layout(local_size_x = 64) in;
+
+// rail_common.glsl is prepended by compile.sh
+
+layout(std430, set = 0, binding = 0) readonly buffer InputParams {
+	TrailParams trail;
+};
+
+layout(std430, set = 0, binding = 1) writeonly buffer OutputVerts {
+	GPUVertex verts[];
+};
+
+layout(push_constant) uniform PushConstants {
+	int rotationStep;      // RAIL_HELIX_ROTATION
+	int _pad0;
+	int _pad1;
+	int _pad2;
+};
+
+void main() {
+	uint segIdx = gl_GlobalInvocationID.x;
+	int numSegs = int(trail.params.w);
+
+	if (segIdx >= uint(numSegs - 1))
+		return;
+
+	float beamLen   = trail.start.w;
+	float frac      = trail.beamAxis.w;
+	float curRadius = trail.params.x;
+	float curSpacing = trail.params.y;
+	float curWidth  = trail.params.z;
+
+	// build from END backward — endpoint stays stable
+	float d0 = beamLen - float(segIdx) * curSpacing;
+	float d1 = beamLen - float(segIdx + 1) * curSpacing;
+
+	if (d0 < 0.0) d0 = 0.0;
+	if (d1 < 0.0) return; // past muzzle
+
+	int ring0 = int(segIdx * uint(rotationStep)) % 36;
+	int ring1 = int((segIdx + 1) * uint(rotationStep)) % 36;
+
+	vec3 start   = trail.start.xyz;
+	vec3 axis    = trail.beamAxis.xyz;
+	vec3 pAxis0  = trail.perpAxis[ring0].xyz;
+	vec3 pAxis1  = trail.perpAxis[ring1].xyz;
+
+	// spiral positions
+	vec3 sp0 = start + d0 * axis + curRadius * pAxis0;
+	vec3 sp1 = start + d1 * axis + curRadius * pAxis1;
+
+	// ribbon normals
+	vec3 rn0 = normalize(cross(axis, pAxis0));
+	vec3 rn1 = normalize(cross(axis, pAxis1));
+
+	// unwind fade: segments near muzzle (far from impact) fade first
+	float segPos = float(segIdx) / float(numSegs - 1);
+	float alpha = (1.0 - frac);
+	float unwindFade = clamp(1.0 - frac * (1.0 + segPos), 0.0, 1.0);
+	float a = alpha * unwindFade;
+
+	// turquoise/ocean-blue: R=80/255 G=200/255 B=255/255
+	vec4 segColor = vec4(0.314, 0.784, 1.0, a);
+
+	// 4 quad vertices
+	uint base = segIdx * 4;
+	verts[base + 0].pos = vec4(sp0 - curWidth * rn0, 1.0);
+	verts[base + 1].pos = vec4(sp0 + curWidth * rn0, 1.0);
+	verts[base + 2].pos = vec4(sp1 - curWidth * rn1, 1.0);
+	verts[base + 3].pos = vec4(sp1 + curWidth * rn1, 1.0);
+
+	verts[base + 0].uv = vec2(d0 / 64.0, 0.0);
+	verts[base + 1].uv = vec2(d0 / 64.0, 1.0);
+	verts[base + 2].uv = vec2(d1 / 64.0, 0.0);
+	verts[base + 3].uv = vec2(d1 / 64.0, 1.0);
+
+	verts[base + 0].color = segColor;
+	verts[base + 1].color = segColor;
+	verts[base + 2].color = segColor;
+	verts[base + 3].color = segColor;
+}

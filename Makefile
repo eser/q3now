@@ -37,7 +37,7 @@
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
 APP_NAME   ?= q3now
-MAP        ?= q3dm1
+MAP        ?= q3dm17
 
 # Dual build directories — avoid cmake reconfigure thrash between Release/Debug
 BUILD_DIR_RELEASE := build/release

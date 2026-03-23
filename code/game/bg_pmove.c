@@ -1638,15 +1638,20 @@ static void PM_BeginWeaponChange( int weapon ) {
         pm->ps->weaponTime = 0;
         PM_FinishWeaponChange();
         pm->ps->weaponstate = WEAPON_READY;
-        return;
-    } else if ( pm->pmove_flags & PMF_FAST_SWITCH_SKIP_DROP ) {
+
+		return;
+    }
+
+	if ( pm->pmove_flags & PMF_FAST_SWITCH_SKIP_DROP ) {
         pm->ps->weaponTime = 0;
         PM_FinishWeaponChange();
-        // go to RAISING state — raise anim will play
+
+		// go to RAISING state — raise anim will play
         return;
-    } else
+    }
 #endif
-    if (cpm_weapondrop > 0) {
+
+	if (cpm_weapondrop > 0) {
         pm->ps->weaponTime += cpm_weapondrop;
 
         PM_StartTorsoAnim(TORSO_DROP);
