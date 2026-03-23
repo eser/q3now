@@ -991,6 +991,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 				if ( tess_flags & ( TESS_RGBA0 << i ) ) {
 					R_ComputeColors( i, tess.svars.colors[i], pStage );
 #if FEAT_THIRD_PERSON
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
 					// RF_FORCE_ENT_ALPHA: override vertex color alpha
 					if ( i == 0 && backEnd.currentEntity &&
 						 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) ) {
@@ -1001,16 +1002,19 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 						}
 					}
 #endif
+#endif
 				}
 				if ( tess_flags & (TESS_ENT0 << i) && backEnd.currentEntity ) {
 					uniform.ent.color[i][0] = backEnd.currentEntity->e.shader.rgba[0] / 255.0;
 					uniform.ent.color[i][1] = backEnd.currentEntity->e.shader.rgba[1] / 255.0;
 					uniform.ent.color[i][2] = backEnd.currentEntity->e.shader.rgba[2] / 255.0;
 				#if FEAT_THIRD_PERSON
+				#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
 					// RF_FORCE_ENT_ALPHA: force alpha from entity regardless of alphaGen
 					if ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) {
 						uniform.ent.color[i][3] = backEnd.currentEntity->e.shader.rgba[3] / 255.0;
 					} else
+			#endif
 			#endif
 					{
 						uniform.ent.color[i][3] = pStage->bundle[i].alphaGen == AGEN_IDENTITY ? 1.0 : (backEnd.currentEntity->e.shader.rgba[3] / 255.0);
@@ -1039,7 +1043,8 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		}
 
 #if FEAT_THIRD_PERSON
-		// TODO(FEAT_THIRD_PERSON): VK pipeline swap from opaque to blended causes
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
+		// TODO: VK pipeline swap from opaque to blended causes
 		// visual artifacts. Alpha values are correct (verified with debug prints)
 		// but the blended pipeline renders dramatically differently even at alpha=254.
 		// Root cause unknown — needs RenderDoc/GPU trace debugging.
@@ -1052,6 +1057,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			def.state_bits |= GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
 			pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		}
+#endif
 #endif
 
 		vk_bind_pipeline( pipeline );

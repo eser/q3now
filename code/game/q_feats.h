@@ -71,5 +71,7 @@
 // UPSCALE_BLIT: already in Quake3e via r_fbo + r_renderScale cvars, no flag needed
 #define FEAT_DEPTH_FADE                   0   // soft particle edges (explosions, smoke, blood)
 #define FEAT_SMAA                         0   // sub-pixel morphological anti-aliasing (deferred)
+#define FEAT_FORCE_ENTITY_VERTEX_ALPHA    1   // per-entity alpha override + dynamic pipeline swap (causes pink with r_fbo on MoltenVK)
+#define FEAT_FBO_DEBUG                    0   // verbose FBO pipeline diagnostics (format, layout, passes)
 
 #endif // _Q_FEATS_H
