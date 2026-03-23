@@ -2064,6 +2064,9 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	cg.loading = qfalse;	// future players will be deferred
 
 	CG_InitLocalEntities();
+#if FEAT_RAIL_TRAIL == 0
+	CG_ClearRailTrails();
+#endif
 
 	CG_InitMarkPolys();
 

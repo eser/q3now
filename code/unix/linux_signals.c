@@ -20,12 +20,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include <signal.h>
+#include <unistd.h>
 
 #ifdef _DEBUG
 #include <execinfo.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #endif
 
 #include "../qcommon/q_shared.h"
@@ -45,21 +45,20 @@ static void signal_handler( int sig )
 	if ( signalcaught == qtrue )
 	{
 		printf( "DOUBLE SIGNAL FAULT: Received signal %d, exiting...\n", sig );
-		Sys_Exit( 1 ); // abstraction
+		_exit( 1 );
 	}
 
+	signalcaught = qtrue;
 	printf( "Received signal %d, exiting...\n", sig );
 
 #ifdef _DEBUG
-	if ( sig == SIGSEGV || sig == SIGILL || sig == SIGBUS )
 	{
-		void *syms[10];
+		void *syms[32];
 		const size_t size = backtrace( syms, ARRAY_LEN( syms ) );
 		backtrace_symbols_fd( syms, size, STDERR_FILENO );
 	}
 #endif
 
-	signalcaught = qtrue;
 	sprintf( msg, "Signal caught (%d)", sig );
 	VM_Forced_Unload_Start();
 #ifndef DEDICATED

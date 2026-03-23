@@ -1396,6 +1396,15 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
 
+	// GPU rail trail draw (after scene geometry, before flares)
+	if ( vk.computeAvailable && vk.numRailDispatches > 0 ) {
+		int rt;
+		for ( rt = 0; rt < vk.numRailDispatches; rt++ ) {
+			RB_DrawRailTrailGPU( vk.railDispatch[rt].numSegments );
+		}
+		vk.numRailDispatches = 0; // clear after draw
+	}
+
 #ifdef USE_VBO
 	VBO_UnBind();
 #endif

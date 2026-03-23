@@ -48,6 +48,7 @@ cvar_t	*r_flareCoeff;
 cvar_t	*r_railWidth;
 cvar_t	*r_railCoreWidth;
 cvar_t	*r_railSegmentLength;
+cvar_t	*r_railGPU;
 
 cvar_t	*r_detailTextures;
 
@@ -1632,6 +1633,8 @@ static void R_Register( void )
 	r_railCoreWidth = ri.Cvar_Get( "r_railCoreWidth", "6", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_railCoreWidth, "Size of railgun trail rings when enabled in game code (normally \\cg_oldRail 0)." );
 	r_railSegmentLength = ri.Cvar_Get( "r_railSegmentLength", "32", CVAR_ARCHIVE_ND );
+	r_railGPU = ri.Cvar_Get( "r_railGPU", "1", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_railGPU, "Use GPU compute shader for rail trail rendering (1=GPU, 0=CPU fallback)." );
 	ri.Cvar_SetDescription( r_railSegmentLength, "Length of segments in railgun trails." );
 
 	r_ambientScale = ri.Cvar_Get( "r_ambientScale", "0.6", CVAR_CHEAT );
@@ -2103,6 +2106,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.AddLightToScene = RE_AddLightToScene;
 	re.AddAdditiveLightToScene = RE_AddAdditiveLightToScene;
 	re.AddLinearLightToScene = RE_AddLinearLightToScene;
+	re.AddRailTrailParams = RE_AddRailTrailParams;
 
 	re.RenderScene = RE_RenderScene;
 

@@ -61,6 +61,7 @@ static PFN_vkCmdClearAttachments						qvkCmdClearAttachments;
 static PFN_vkCmdCopyBuffer								qvkCmdCopyBuffer;
 static PFN_vkCmdCopyBufferToImage						qvkCmdCopyBufferToImage;
 static PFN_vkCmdCopyImage								qvkCmdCopyImage;
+static PFN_vkCmdDispatch								qvkCmdDispatch;
 static PFN_vkCmdDraw									qvkCmdDraw;
 static PFN_vkCmdDrawIndexed								qvkCmdDrawIndexed;
 static PFN_vkCmdEndRenderPass							qvkCmdEndRenderPass;
@@ -76,6 +77,7 @@ static PFN_vkCreateDescriptorPool						qvkCreateDescriptorPool;
 static PFN_vkCreateDescriptorSetLayout					qvkCreateDescriptorSetLayout;
 static PFN_vkCreateFence								qvkCreateFence;
 static PFN_vkCreateFramebuffer							qvkCreateFramebuffer;
+static PFN_vkCreateComputePipelines						qvkCreateComputePipelines;
 static PFN_vkCreateGraphicsPipelines					qvkCreateGraphicsPipelines;
 static PFN_vkCreateImage								qvkCreateImage;
 static PFN_vkCreateImageView							qvkCreateImageView;
@@ -2109,6 +2111,7 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkCmdCopyBuffer)
 	INIT_DEVICE_FUNCTION(vkCmdCopyBufferToImage)
 	INIT_DEVICE_FUNCTION(vkCmdCopyImage)
+	INIT_DEVICE_FUNCTION(vkCmdDispatch)
 	INIT_DEVICE_FUNCTION(vkCmdDraw)
 	INIT_DEVICE_FUNCTION(vkCmdDrawIndexed)
 	INIT_DEVICE_FUNCTION(vkCmdEndRenderPass)
@@ -2124,6 +2127,7 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkCreateDescriptorSetLayout)
 	INIT_DEVICE_FUNCTION(vkCreateFence)
 	INIT_DEVICE_FUNCTION(vkCreateFramebuffer)
+	INIT_DEVICE_FUNCTION(vkCreateComputePipelines)
 	INIT_DEVICE_FUNCTION(vkCreateGraphicsPipelines)
 	INIT_DEVICE_FUNCTION(vkCreateImage)
 	INIT_DEVICE_FUNCTION(vkCreateImageView)
@@ -2239,6 +2243,7 @@ static void deinit_device_functions( void )
 	qvkCmdCopyBuffer							= NULL;
 	qvkCmdCopyBufferToImage						= NULL;
 	qvkCmdCopyImage								= NULL;
+	qvkCmdDispatch								= NULL;
 	qvkCmdDraw									= NULL;
 	qvkCmdDrawIndexed							= NULL;
 	qvkCmdEndRenderPass							= NULL;
@@ -2254,6 +2259,7 @@ static void deinit_device_functions( void )
 	qvkCreateDescriptorSetLayout				= NULL;
 	qvkCreateFence								= NULL;
 	qvkCreateFramebuffer						= NULL;
+	qvkCreateComputePipelines					= NULL;
 	qvkCreateGraphicsPipelines					= NULL;
 	qvkCreateImage								= NULL;
 	qvkCreateImageView							= NULL;
@@ -2810,6 +2816,468 @@ static void vk_create_storage_buffer( uint32_t size )
 }
 
 
+/*
+===============
+vk_init_compute — initialize generic compute shader infrastructure
+===============
+*/
+qboolean vk_init_compute( void ) {
+	VkDescriptorSetLayoutBinding bindings[2];
+	VkDescriptorSetLayoutCreateInfo layoutInfo;
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo;
+	VkPushConstantRange pushRange;
+
+	if ( !qvkCreateComputePipelines || !qvkCmdDispatch ) {
+		ri.Printf( PRINT_WARNING, "WARNING: Vulkan compute not available\n" );
+		vk.computeAvailable = qfalse;
+		return qfalse;
+	}
+
+	memset( bindings, 0, sizeof( bindings ) );
+	bindings[0].binding = 0;
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[0].descriptorCount = 1;
+	bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	bindings[1].binding = 1;
+	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[1].descriptorCount = 1;
+	bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+
+	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 2;
+	layoutInfo.pBindings = bindings;
+
+	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.set_layout_compute ) );
+
+	memset( &pushRange, 0, sizeof( pushRange ) );
+	pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+	pushRange.offset = 0;
+	pushRange.size = 128;
+
+	memset( &pipelineLayoutInfo, 0, sizeof( pipelineLayoutInfo ) );
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutInfo.setLayoutCount = 1;
+	pipelineLayoutInfo.pSetLayouts = &vk.set_layout_compute;
+	pipelineLayoutInfo.pushConstantRangeCount = 1;
+	pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+
+	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipelineLayoutInfo, NULL, &vk.pipeline_layout_compute ) );
+
+	vk.computeAvailable = qtrue;
+	ri.Printf( PRINT_ALL, "Vulkan compute shader infrastructure initialized\n" );
+	return qtrue;
+}
+
+
+/*
+===============
+vk_shutdown_compute
+===============
+*/
+void vk_shutdown_compute( void ) {
+	if ( vk.pipeline_layout_compute != VK_NULL_HANDLE ) {
+		qvkDestroyPipelineLayout( vk.device, vk.pipeline_layout_compute, NULL );
+		vk.pipeline_layout_compute = VK_NULL_HANDLE;
+	}
+	if ( vk.set_layout_compute != VK_NULL_HANDLE ) {
+		qvkDestroyDescriptorSetLayout( vk.device, vk.set_layout_compute, NULL );
+		vk.set_layout_compute = VK_NULL_HANDLE;
+	}
+	vk.computeAvailable = qfalse;
+}
+
+
+/*
+===============
+vk_create_compute_pipeline
+===============
+*/
+static VkPipeline vk_create_compute_pipeline( VkShaderModule compModule, VkPipelineLayout layout ) {
+	VkComputePipelineCreateInfo info;
+	VkPipeline pipeline;
+
+	Com_Memset( &info, 0, sizeof( info ) );
+	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	info.stage.module = compModule;
+	info.stage.pName = "main";
+	info.layout = layout;
+
+	VK_CHECK( qvkCreateComputePipelines( vk.device, VK_NULL_HANDLE, 1, &info, NULL, &pipeline ) );
+	return pipeline;
+}
+
+
+/*
+===============
+vk_init_rail_compute — allocate SSBOs + create pipelines for GPU rail trail
+===============
+*/
+#define RAIL_GPU_VERTEX_SIZE    48
+#define RAIL_GPU_MAX_VERTS      (2048 * 4)
+#define RAIL_GPU_PARAMS_SIZE    656
+
+void vk_init_rail_compute( void ) {
+	VkBufferCreateInfo bufInfo;
+	VkMemoryRequirements memReq;
+	VkMemoryAllocateInfo allocInfo;
+	VkDescriptorSetAllocateInfo dsAlloc;
+	VkWriteDescriptorSet writes[2];
+	VkDescriptorBufferInfo bufInfos[2];
+	uint32_t memType;
+	uint32_t outputSize;
+	int i;
+
+	if ( !vk.computeAvailable )
+		return;
+
+	if ( !vk.modules.rail_helix_cs )
+		return;
+
+	outputSize = RAIL_GPU_MAX_VERTS * RAIL_GPU_VERTEX_SIZE;
+
+	Com_Memset( &bufInfo, 0, sizeof( bufInfo ) );
+	bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufInfo.size = RAIL_GPU_PARAMS_SIZE;
+	bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.rail.params_buffer ) );
+	qvkGetBufferMemoryRequirements( vk.device, vk.rail.params_buffer, &memReq );
+	memType = find_memory_type( memReq.memoryTypeBits,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+
+	Com_Memset( &allocInfo, 0, sizeof( allocInfo ) );
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memReq.size;
+	allocInfo.memoryTypeIndex = memType;
+
+	VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.rail.params_memory ) );
+	VK_CHECK( qvkMapMemory( vk.device, vk.rail.params_memory, 0, VK_WHOLE_SIZE, 0, (void**)&vk.rail.params_ptr ) );
+	qvkBindBufferMemory( vk.device, vk.rail.params_buffer, vk.rail.params_memory, 0 );
+
+	bufInfo.size = outputSize;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		VkMemoryPropertyFlags memFlags;
+
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.rail.vertex_buffer[i] ) );
+		qvkGetBufferMemoryRequirements( vk.device, vk.rail.vertex_buffer[i], &memReq );
+
+#ifdef _DEBUG
+		memFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+#else
+		memFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+#endif
+		memType = find_memory_type( memReq.memoryTypeBits, memFlags );
+
+		allocInfo.allocationSize = memReq.size;
+		allocInfo.memoryTypeIndex = memType;
+
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.rail.vertex_memory[i] ) );
+		qvkBindBufferMemory( vk.device, vk.rail.vertex_buffer[i], vk.rail.vertex_memory[i], 0 );
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		Com_Memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+		dsAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dsAlloc.descriptorPool = vk.descriptor_pool;
+		dsAlloc.descriptorSetCount = 1;
+		dsAlloc.pSetLayouts = &vk.set_layout_compute;
+
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.rail.descriptor[i] ) );
+
+		Com_Memset( bufInfos, 0, sizeof( bufInfos ) );
+		bufInfos[0].buffer = vk.rail.params_buffer;
+		bufInfos[0].offset = 0;
+		bufInfos[0].range = RAIL_GPU_PARAMS_SIZE;
+
+		bufInfos[1].buffer = vk.rail.vertex_buffer[i];
+		bufInfos[1].offset = 0;
+		bufInfos[1].range = outputSize;
+
+		Com_Memset( writes, 0, sizeof( writes ) );
+		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[0].dstSet = vk.rail.descriptor[i];
+		writes[0].dstBinding = 0;
+		writes[0].descriptorCount = 1;
+		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[0].pBufferInfo = &bufInfos[0];
+
+		writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[1].dstSet = vk.rail.descriptor[i];
+		writes[1].dstBinding = 1;
+		writes[1].descriptorCount = 1;
+		writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[1].pBufferInfo = &bufInfos[1];
+
+		qvkUpdateDescriptorSets( vk.device, 2, writes, 0, NULL );
+	}
+
+	vk.rail.compute_pipeline = vk_create_compute_pipeline(
+		vk.modules.rail_helix_cs, vk.pipeline_layout_compute );
+
+	// graphics pipeline (empty vertex input, additive blend)
+	{
+		VkGraphicsPipelineCreateInfo gpInfo;
+		VkPipelineShaderStageCreateInfo stages[2];
+		VkPipelineVertexInputStateCreateInfo vertexInput;
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+		VkPipelineViewportStateCreateInfo viewportState;
+		VkPipelineRasterizationStateCreateInfo rasterizer;
+		VkPipelineMultisampleStateCreateInfo multisampling;
+		VkPipelineDepthStencilStateCreateInfo depthStencil;
+		VkPipelineColorBlendAttachmentState blendAttach;
+		VkPipelineColorBlendStateCreateInfo colorBlend;
+		VkPipelineDynamicStateCreateInfo dynamicState;
+		VkDynamicState dynStates[2];
+		VkViewport viewport;
+		VkRect2D scissor;
+
+		Com_Memset( &gpInfo, 0, sizeof( gpInfo ) );
+		Com_Memset( stages, 0, sizeof( stages ) );
+
+		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[0].module = vk.modules.rail_helix_vs;
+		stages[0].pName = "main";
+
+		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stages[1].module = vk.modules.rail_helix_fs;
+		stages[1].pName = "main";
+
+		Com_Memset( &vertexInput, 0, sizeof( vertexInput ) );
+		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+		Com_Memset( &inputAssembly, 0, sizeof( inputAssembly ) );
+		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
+		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
+
+		Com_Memset( &dynamicState, 0, sizeof( dynamicState ) );
+		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = 2;
+		dynamicState.pDynamicStates = dynStates;
+
+		Com_Memset( &viewport, 0, sizeof( viewport ) );
+		viewport.width = (float)vk.renderWidth;
+		viewport.height = (float)vk.renderHeight;
+		viewport.maxDepth = 1.0f;
+
+		Com_Memset( &scissor, 0, sizeof( scissor ) );
+		scissor.extent.width = vk.renderWidth;
+		scissor.extent.height = vk.renderHeight;
+
+		Com_Memset( &viewportState, 0, sizeof( viewportState ) );
+		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.pViewports = &viewport;
+		viewportState.scissorCount = 1;
+		viewportState.pScissors = &scissor;
+
+		Com_Memset( &rasterizer, 0, sizeof( rasterizer ) );
+		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterizer.lineWidth = 1.0f;
+		rasterizer.cullMode = VK_CULL_MODE_NONE;
+		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+		Com_Memset( &multisampling, 0, sizeof( multisampling ) );
+		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.rasterizationSamples = vk.msaaActive ? vkSamples : VK_SAMPLE_COUNT_1_BIT;
+
+		Com_Memset( &depthStencil, 0, sizeof( depthStencil ) );
+		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable = VK_TRUE;
+		depthStencil.depthWriteEnable = VK_FALSE;
+		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+		Com_Memset( &blendAttach, 0, sizeof( blendAttach ) );
+		blendAttach.blendEnable = VK_TRUE;
+		blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttach.colorBlendOp = VK_BLEND_OP_ADD;
+		blendAttach.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttach.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttach.alphaBlendOp = VK_BLEND_OP_ADD;
+		blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+		Com_Memset( &colorBlend, 0, sizeof( colorBlend ) );
+		colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlend.attachmentCount = 1;
+		colorBlend.pAttachments = &blendAttach;
+
+		gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		gpInfo.stageCount = 2;
+		gpInfo.pStages = stages;
+		gpInfo.pVertexInputState = &vertexInput;
+		gpInfo.pInputAssemblyState = &inputAssembly;
+		gpInfo.pViewportState = &viewportState;
+		gpInfo.pRasterizationState = &rasterizer;
+		gpInfo.pMultisampleState = &multisampling;
+		gpInfo.pDepthStencilState = &depthStencil;
+		gpInfo.pColorBlendState = &colorBlend;
+		gpInfo.pDynamicState = &dynamicState;
+		gpInfo.layout = vk.pipeline_layout_compute;
+		gpInfo.renderPass = vk.render_pass.main;
+		gpInfo.subpass = 0;
+
+		VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &gpInfo, NULL, &vk.rail.graphics_pipeline ) );
+	}
+
+	ri.Printf( PRINT_ALL, "Rail trail GPU compute initialized (%d KB output SSBO)\n",
+		outputSize / 1024 );
+}
+
+
+/*
+===============
+vk_shutdown_rail_compute
+===============
+*/
+void vk_shutdown_rail_compute( void ) {
+	int i;
+
+	if ( vk.rail.compute_pipeline != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.rail.compute_pipeline, NULL );
+		vk.rail.compute_pipeline = VK_NULL_HANDLE;
+	}
+	if ( vk.rail.graphics_pipeline != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.rail.graphics_pipeline, NULL );
+		vk.rail.graphics_pipeline = VK_NULL_HANDLE;
+	}
+	if ( vk.rail.params_buffer != VK_NULL_HANDLE ) {
+		qvkDestroyBuffer( vk.device, vk.rail.params_buffer, NULL );
+		if ( vk.rail.params_memory != VK_NULL_HANDLE ) {
+			qvkFreeMemory( vk.device, vk.rail.params_memory, NULL );
+		}
+		vk.rail.params_buffer = VK_NULL_HANDLE;
+		vk.rail.params_memory = VK_NULL_HANDLE;
+		vk.rail.params_ptr = NULL;
+	}
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.rail.vertex_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.rail.vertex_buffer[i], NULL );
+			if ( vk.rail.vertex_memory[i] != VK_NULL_HANDLE ) {
+				qvkFreeMemory( vk.device, vk.rail.vertex_memory[i], NULL );
+			}
+			vk.rail.vertex_buffer[i] = VK_NULL_HANDLE;
+			vk.rail.vertex_memory[i] = VK_NULL_HANDLE;
+		}
+	}
+}
+
+
+/*
+===============
+RB_DrawRailTrailGPU — render compute-generated rail trail vertices
+===============
+*/
+void RB_DrawRailTrailGPU( int numSegments ) {
+	VkCommandBuffer cmd;
+	int frameIdx;
+
+	if ( !vk.computeAvailable || vk.rail.graphics_pipeline == VK_NULL_HANDLE )
+		return;
+
+	if ( numSegments < 2 )
+		return;
+
+	cmd = vk.cmd->command_buffer;
+	frameIdx = vk.cmd_index;
+
+	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.rail.graphics_pipeline );
+
+	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		vk.pipeline_layout_compute, 0, 1, &vk.rail.descriptor[frameIdx], 0, NULL );
+
+	{
+		float mvp[16];
+		myGlMultMatrix( backEnd.viewParms.world.modelMatrix,
+			backEnd.viewParms.projectionMatrix, mvp );
+		qvkCmdPushConstants( cmd, vk.pipeline_layout_compute,
+			VK_SHADER_STAGE_VERTEX_BIT, 0, 64, mvp );
+	}
+
+	{
+		VkViewport viewport;
+		VkRect2D scissor;
+
+		Com_Memset( &viewport, 0, sizeof( viewport ) );
+		viewport.width = (float)glConfig.vidWidth;
+		viewport.height = (float)glConfig.vidHeight;
+		viewport.maxDepth = 1.0f;
+
+		Com_Memset( &scissor, 0, sizeof( scissor ) );
+		scissor.extent.width = glConfig.vidWidth;
+		scissor.extent.height = glConfig.vidHeight;
+
+		qvkCmdSetViewport( cmd, 0, 1, &viewport );
+		qvkCmdSetScissor( cmd, 0, 1, &scissor );
+	}
+
+	qvkCmdDraw( cmd, ( numSegments - 1 ) * 6, 1, 0, 0 );
+}
+
+
+/*
+===============
+vk_dispatch_rail_compute — dispatch compute shader for active rail trails
+===============
+*/
+static void vk_dispatch_rail_compute( void ) {
+	int i;
+	int frameIdx;
+	VkCommandBuffer cmd;
+
+	if ( vk.numRailDispatches == 0 )
+		return;
+
+	frameIdx = vk.cmd_index;
+	cmd = vk.cmd->command_buffer;
+
+	for ( i = 0; i < vk.numRailDispatches; i++ ) {
+		int numSegs = vk.railDispatch[i].numSegments;
+
+		if ( numSegs < 2 )
+			continue;
+
+		qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.rail.compute_pipeline );
+		qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+			vk.pipeline_layout_compute, 0, 1, &vk.rail.descriptor[frameIdx], 0, NULL );
+
+		qvkCmdDispatch( cmd, ( numSegs + 63 ) / 64, 1, 1 );
+
+		{
+			VkBufferMemoryBarrier barrier;
+			Com_Memset( &barrier, 0, sizeof( barrier ) );
+			barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			barrier.buffer = vk.rail.vertex_buffer[frameIdx];
+			barrier.offset = 0;
+			barrier.size = VK_WHOLE_SIZE;
+
+			qvkCmdPipelineBarrier( cmd,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+				0, 0, NULL, 1, &barrier, 0, NULL );
+		}
+	}
+
+	// dispatch queue cleared after draw in tr_backend.c
+}
+
+
 #ifdef USE_VBO
 void vk_release_vbo( void )
 {
@@ -3103,6 +3571,15 @@ static void vk_create_shader_modules( void )
 
 	SET_OBJECT_NAME( vk.modules.dot_vs, "dot vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.dot_fs, "dot fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
+	// rail trail compute + render shader modules
+	if ( vk.computeAvailable ) {
+		vk.modules.rail_helix_cs  = SHADER_MODULE( rail_helix_comp_spv );
+		vk.modules.rail_debris_cs = SHADER_MODULE( rail_debris_comp_spv );
+		vk.modules.rail_sparks_cs = SHADER_MODULE( rail_sparks_comp_spv );
+		vk.modules.rail_helix_vs  = SHADER_MODULE( rail_helix_vert_spv );
+		vk.modules.rail_helix_fs  = SHADER_MODULE( rail_helix_frag_spv );
+	}
 
 	vk.modules.bloom_fs = SHADER_MODULE( bloom_frag_spv );
 	vk.modules.blur_fs = SHADER_MODULE( blur_frag_spv );
@@ -4927,7 +5404,7 @@ void vk_initialize( void )
 	// Descriptor pool.
 	//
 	{
-		VkDescriptorPoolSize pool_size[3];
+		VkDescriptorPoolSize pool_size[4];
 		VkDescriptorPoolCreateInfo desc;
 		uint32_t i, maxSets;
 
@@ -4942,6 +5419,9 @@ void vk_initialize( void )
 
 		pool_size[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
 		pool_size[2].descriptorCount = 1;
+
+		pool_size[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		pool_size[3].descriptorCount = 8;
 
 		for ( i = 0, maxSets = 0; i < ARRAY_LEN( pool_size ); i++ ) {
 			maxSets += pool_size[i].descriptorCount;
@@ -5060,7 +5540,13 @@ void vk_initialize( void )
 
 	vk_create_storage_buffer( MAX_FLARES * vk.storage_alignment );
 
+	// compute shader infrastructure
+	vk_init_compute();
+
 	vk_create_shader_modules();
+
+	// rail trail GPU resources — must be after shader modules are loaded
+	vk_init_rail_compute();
 
 	{
 		VkPipelineCacheCreateInfo ci;
@@ -5384,6 +5870,8 @@ void vk_shutdown( refShutdownCode_t code )
 
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_storage, NULL);
+	vk_shutdown_rail_compute();
+	vk_shutdown_compute();
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_post_process, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_blend, NULL);
 	if ( vk.pipeline_layout_smaa != VK_NULL_HANDLE ) {
@@ -8634,6 +9122,11 @@ _retry:
 
 	backEnd.screenMapDone = qfalse;
 	vk.depthFade.copied = qfalse;
+
+	// compute dispatch phase (before render pass)
+	if ( vk.computeAvailable && vk.rail.compute_pipeline != VK_NULL_HANDLE ) {
+		vk_dispatch_rail_compute();
+	}
 
 	if ( vk_find_screenmap_drawsurfs() ) {
 		vk_begin_screenmap_render_pass();

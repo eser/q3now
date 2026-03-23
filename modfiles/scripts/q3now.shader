@@ -153,3 +153,38 @@ gfx/misc/snow
 		alphagen vertex
 	}
 }
+
+// ── q3now rail trail shaders ──────────────────────────────────────
+// Q2-spirit modernized rail trail: helix ribbon + debris particles.
+// Uses additive blending for glow, tcMod scroll for energy flow.
+
+q3now/railHelix
+{
+	cull none
+	{
+		map sprites/bfglfline.tga
+		blendfunc gl_src_alpha gl_one
+		rgbgen vertex
+		alphagen vertex
+		tcMod scroll 2.0 0
+	}
+	{
+		map sprites/bfglfline.tga
+		blendfunc gl_one gl_one
+		rgbgen vertex
+		alphagen vertex
+		tcMod scroll -1.5 0
+	}
+}
+
+q3now/railDebris
+{
+	cull none
+	{
+		map sprites/bfglfglare.tga
+		blendfunc gl_one gl_one
+		rgbgen vertex
+		alphagen vertex
+	}
+	deformVertexes autosprite
+}

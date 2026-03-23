@@ -344,6 +344,34 @@ void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float inten
 }
 
 
+/*
+=====================
+RE_AddRailTrailParams — receive rail trail params from cgame for GPU compute
+
+Copies the params struct to the mapped input SSBO and queues a compute dispatch.
+=====================
+*/
+void RE_AddRailTrailParams( const railTrailParams_t *params ) {
+	if ( !vk.computeAvailable || !vk.rail.params_ptr || !r_railGPU->integer )
+		return;
+
+	if ( vk.numRailDispatches >= MAX_GPU_RAIL_TRAILS )
+		return;
+
+	// copy params to the mapped SSBO — HOST_COHERENT makes this immediately visible to GPU
+	Com_Memcpy( vk.rail.params_ptr, params, sizeof( railTrailParams_t ) );
+
+	// queue the dispatch
+	vk.railDispatch[ vk.numRailDispatches ].numSegments = (int)params->params[3];
+	vk.railDispatch[ vk.numRailDispatches ].beamLen = params->start[3];
+	vk.railDispatch[ vk.numRailDispatches ].frac = params->beamAxis[3];
+	vk.railDispatch[ vk.numRailDispatches ].curRadius = params->params[0];
+	vk.railDispatch[ vk.numRailDispatches ].curSpacing = params->params[1];
+	vk.railDispatch[ vk.numRailDispatches ].curWidth = params->params[2];
+	vk.numRailDispatches++;
+}
+
+
 
 /*
 =====================

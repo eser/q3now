@@ -56,7 +56,7 @@
 #define FEAT_HIT_SOUNDS                   0   // damage-based hit sound pitch variation
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
-#define FEAT_NEW_RAIL_STYLE               0   // alternate rail trail rendering
+#define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
 
 // ── archive formats (testing) ─────────────────────────────────────────
 #define FEAT_SW3Z                         1   // SW3Z archive format (.sw3z)

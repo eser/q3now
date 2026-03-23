@@ -410,7 +410,11 @@ static fileHandle_t	FS_HandleForFile( void )
 
 	for ( i = 1 ; i < MAX_FILE_HANDLES ; i++ ) 
 	{
-		if ( fsh[i].handleFiles.file.v == NULL )
+		if ( fsh[i].handleFiles.file.v == NULL
+#if FEAT_SW3Z
+			&& fsh[i].sw3zData == NULL
+#endif
+			)
 			return i;
 	}
 
@@ -1892,6 +1896,10 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 #endif
 
 	if ( !fsh[f].zipFile ) {
+		if ( !fsh[f].handleFiles.file.o ) {
+			Com_DPrintf( S_COLOR_YELLOW "FS_Read: NULL file pointer for handle %i (%s)\n", f, fsh[f].name );
+			return 0;
+		}
 		remaining = len;
 		tries = 0;
 		while (remaining) {
@@ -4629,7 +4637,11 @@ void FS_Shutdown( qboolean closemfp )
 	{
 		for ( i = 1; i < MAX_FILE_HANDLES; i++ )
 		{
-			if ( !fsh[i].handleFiles.file.v  )
+			if ( !fsh[i].handleFiles.file.v
+#if FEAT_SW3Z
+				&& !fsh[i].sw3zData
+#endif
+				)
 				continue;
 
 			FS_FCloseFile( i );

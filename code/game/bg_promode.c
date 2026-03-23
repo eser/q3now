@@ -17,29 +17,11 @@ float	cpm_weapondrop = 0; // 200;
 float	cpm_weaponraise = 250;
 float	cpm_outofammodelay = 500;
 
-// Battle Suit
-float	cpm_BSprotection = 0.5;
-
 // Backpacks
 int		cpm_backpacks = 0;
 
 // Radius Damage Fix
 int		cpm_radiusdamagefix = 0;
-
-// Z Knockback
-float	cpm_knockback_z = 24;
-
-// Respawn Times
-int		cpm_itemrespawnhealth = 35;
-int		cpm_itemrespawnpowerup = 120;
-int		cpm_itemrespawnweapon = 5;
-int		cpm_itemrespawnammo = 40;
-int		cpm_startpowerups = 0;
-int		cpm_itemrespawnBS = 120;
-int     cpm_playerforcerespawn = 20;
-
-// Megahealth
-int		cpm_megastyle = 0;
 
 // Respawn delay
 float	cpm_clientrespawndelay = 1700;
@@ -76,29 +58,11 @@ void CPM_UpdateSettings(int gametype)
 	cpm_weaponraise = 250;
 	cpm_outofammodelay = 500;
 
-	// vq3 Battle Suit
-	cpm_BSprotection = 0.5;
-
 	// Backpacks
 	cpm_backpacks = 0;
 
 	// Radius Damage Fix
 	cpm_radiusdamagefix = 0;
-
-	// Z Knockback
-	cpm_knockback_z = 24;
-
-	// Respawn Times
-	cpm_itemrespawnhealth = 35;
-	cpm_itemrespawnpowerup = 120;
-    cpm_itemrespawnweapon = 5;
-	cpm_itemrespawnammo = 40;
-	cpm_startpowerups = 0;
-	cpm_itemrespawnBS = 120;
-	cpm_playerforcerespawn = 20;
-
-	// Megahealth
-	cpm_megastyle = 0;
 
 	// Respawn delay
 	cpm_clientrespawndelay = 1700;
@@ -135,29 +99,11 @@ void CPM_UpdateSettings(int gametype)
 		cpm_weaponraise = 0;
 		cpm_outofammodelay = 100;
 
-		// Battle Suit
-		cpm_BSprotection = 0.25; // ie 75% protection
-
 		// Backpacks
 		cpm_backpacks = 0;
 
 		// Radius Damage Fix
 		cpm_radiusdamagefix = 1;
-
-		// Z Knockback
-		cpm_knockback_z = 40;
-
-		// Respawn Times
-		cpm_itemrespawnhealth = 30;
-		cpm_itemrespawnpowerup = 60;
-        cpm_itemrespawnweapon = 15;
-		cpm_itemrespawnammo = 30;
-		cpm_startpowerups = 1;
-		cpm_itemrespawnBS = 120;
-		cpm_playerforcerespawn = 3;
-
-		// Megahealth
-		cpm_megastyle = 1;
 
 		// Respawn delay
 		cpm_clientrespawndelay = 500;

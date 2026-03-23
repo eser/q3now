@@ -610,6 +610,64 @@ static void DoRailCore( const vec3_t start, const vec3_t end, const vec3_t up, f
 	tess.indexes[tess.numIndexes++] = vbase + 3;
 }
 
+/*
+** DoRailCoreTapered — same as DoRailCore but width and alpha fade from start to end
+*/
+static void DoRailCoreTapered( const vec3_t start, const vec3_t end, const vec3_t up,
+	float len, float startWidth, float endWidth )
+{
+	int			vbase;
+	float		t = len / 256.0f;
+
+	RB_CheckVao(tess.vao);
+
+	RB_CHECKOVERFLOW( 4, 6 );
+
+	vbase = tess.numVertexes;
+
+	// start vertices — full width, full alpha
+	VectorMA( start, startWidth, up, tess.xyz[tess.numVertexes] );
+	tess.texCoords[tess.numVertexes][0] = 0;
+	tess.texCoords[tess.numVertexes][1] = 0;
+	tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 0.25f * 257.0f;
+	tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 0.25f * 257.0f;
+	tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 0.25f * 257.0f;
+	tess.numVertexes++;
+
+	VectorMA( start, -startWidth, up, tess.xyz[tess.numVertexes] );
+	tess.texCoords[tess.numVertexes][0] = 0;
+	tess.texCoords[tess.numVertexes][1] = 1;
+	tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 257;
+	tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 257;
+	tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 257;
+	tess.numVertexes++;
+
+	// end vertices — tapered width, faded alpha
+	VectorMA( end, endWidth, up, tess.xyz[tess.numVertexes] );
+	tess.texCoords[tess.numVertexes][0] = t;
+	tess.texCoords[tess.numVertexes][1] = 0;
+	tess.color[tess.numVertexes][0] = 0;
+	tess.color[tess.numVertexes][1] = 0;
+	tess.color[tess.numVertexes][2] = 0;
+	tess.numVertexes++;
+
+	VectorMA( end, -endWidth, up, tess.xyz[tess.numVertexes] );
+	tess.texCoords[tess.numVertexes][0] = t;
+	tess.texCoords[tess.numVertexes][1] = 1;
+	tess.color[tess.numVertexes][0] = 0;
+	tess.color[tess.numVertexes][1] = 0;
+	tess.color[tess.numVertexes][2] = 0;
+	tess.numVertexes++;
+
+	tess.indexes[tess.numIndexes++] = vbase;
+	tess.indexes[tess.numIndexes++] = vbase + 1;
+	tess.indexes[tess.numIndexes++] = vbase + 2;
+
+	tess.indexes[tess.numIndexes++] = vbase + 2;
+	tess.indexes[tess.numIndexes++] = vbase + 1;
+	tess.indexes[tess.numIndexes++] = vbase + 3;
+}
+
 static void DoRailDiscs( int numSegs, const vec3_t start, const vec3_t dir, const vec3_t right, const vec3_t up )
 {
 	int i;
@@ -743,6 +801,7 @@ static void RB_SurfaceLightningBolt( void ) {
 	vec3_t		start, end;
 	vec3_t		v1, v2;
 	int			i;
+	float		taperLen = 64.0f;
 
 	e = &backEnd.currentEntity->e;
 
@@ -761,12 +820,24 @@ static void RB_SurfaceLightningBolt( void ) {
 	CrossProduct( v1, v2, right );
 	VectorNormalize( right );
 
-	for ( i = 0 ; i < 4 ; i++ ) {
-		vec3_t	temp;
+	if ( len > taperLen * 2 ) {
+		vec3_t taperStart;
+		VectorMA( end, -taperLen, vec, taperStart );
 
-		DoRailCore( start, end, right, len, 8 );
-		RotatePointAroundVector( temp, vec, right, 45 );
-		VectorCopy( temp, right );
+		for ( i = 0; i < 4; i++ ) {
+			vec3_t temp;
+			DoRailCore( start, taperStart, right, len - taperLen, 8 );
+			DoRailCoreTapered( taperStart, end, right, taperLen, 8, 0 );
+			RotatePointAroundVector( temp, vec, right, 45 );
+			VectorCopy( temp, right );
+		}
+	} else {
+		for ( i = 0; i < 4; i++ ) {
+			vec3_t temp;
+			DoRailCore( start, end, right, len, 8 );
+			RotatePointAroundVector( temp, vec, right, 45 );
+			VectorCopy( temp, right );
+		}
 	}
 }
 
