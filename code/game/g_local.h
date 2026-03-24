@@ -78,15 +78,33 @@ typedef struct {
 	int damage;
 } weaponStat_t;
 
-// unlagged: history buffer size (covers ~800ms at 20 snapshots/sec)
-#define MAX_PLAYER_MARKERS 32
+// unlagged: history buffer size
+#define NUM_CLIENT_HISTORY 17
+
+// minimal animation frame for server-side history (game-local, not cgame lerpFrame_t)
+#if FEAT_UNLAGGED
+typedef struct {
+	int		frame;
+	int		animationNumber;
+	int		animationTime;
+	float	backlerp;
+} historyLerpFrame_t;
+#endif
 
 typedef struct {
 	vec3_t		origin;
 	vec3_t		mins;
 	vec3_t		maxs;
 	int			time;
-} playerMarker_t;
+#if FEAT_UNLAGGED
+	vec3_t		currentAngles;
+	vec3_t		legs_angles;
+	vec3_t		torso_angles;
+	vec3_t		viewangles;
+	historyLerpFrame_t	legs;
+	historyLerpFrame_t	torso;
+#endif
+} clientHistory_t;
 
 struct gentity_s {
 	entityState_t	s;				// communicated by server to clients
@@ -273,6 +291,15 @@ typedef struct {
 	// eser - callvote cooldown
 	int			teamVoteCount;		// to prevent people from constantly calling votes
 	qboolean	teamInfo;			// send team overlay updates?
+#if FEAT_UNLAGGED
+	int			delag;				// per-weapon delag bitmask from cg_delag userinfo
+	int			debugDelag;			// debug mode flag
+	int			cmdTimeNudge;		// client time nudge in ms
+#define NUM_PING_SAMPLES 64
+	int			realPing;
+	int			pingsamples[NUM_PING_SAMPLES];
+	int			samplehead;
+#endif
 } clientPersistant_t;
 
 
@@ -352,9 +379,15 @@ struct gclient_s {
     int         lasthurt_time;
 
     // unlagged: position history for lag compensation
-    int             topMarker;
-    playerMarker_t  playerMarkers[MAX_PLAYER_MARKERS];
-    playerMarker_t  backupMarker;
+    int             historyHead;
+    clientHistory_t history[NUM_CLIENT_HISTORY];
+    clientHistory_t savedHistory;
+
+#if FEAT_UNLAGGED
+    int             attackTime;         // server time of button press (pre-pmove_fixed)
+    int             frameOffset;        // sub-frame timing offset
+    int             lastUpdateFrame;    // for smooth client rendering
+#endif
 
 #if FEAT_SPAWN_PROTECTION
     qboolean        spawnprotected;     // spawn protection (2B)
@@ -498,6 +531,10 @@ typedef struct {
 
     int			mapWeapons;
     int         initialFraglimit;
+
+#if FEAT_UNLAGGED
+    int         frameStartTime;     // actual time this server frame started
+#endif
 } level_locals_t;
 
 
@@ -834,6 +871,8 @@ extern  vmCvar_t	g_instagib;
 extern  vmCvar_t	g_excessive;
 #if FEAT_UNLAGGED
 extern  vmCvar_t	g_unlagged;
+extern  vmCvar_t	g_delagHitscan;
+extern  vmCvar_t	g_truePing;
 #endif
 #if FEAT_SPAWN_PROTECTION
 extern  vmCvar_t	g_spawnProtect;
@@ -1144,3 +1183,18 @@ void G_ResetHistory( gentity_t *ent );
 void G_StoreHistory( gentity_t *ent );
 void G_DoTimeShiftFor( gentity_t *ent );
 void G_UndoTimeShiftFor( gentity_t *ent );
+#if FEAT_UNLAGGED
+void G_UnTimeShiftClient( gentity_t *ent );
+#endif
+
+// QUIC transport event emission (g_syscalls.c)
+#if FEAT_QUIC_OBSERVE
+void trap_QUIC_EmitKill( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos );
+void trap_QUIC_EmitDamage( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos );
+void trap_QUIC_EmitItemPickup( int client, const char *item, vec3_t pos );
+void trap_QUIC_EmitChat( int client, const char *msg, qboolean teamOnly );
+void trap_QUIC_EmitMatchEvent( const char *type, const char *data );
+#if FEAT_UNLAGGED
+void trap_QUIC_EmitDelag( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos );
+#endif
+#endif

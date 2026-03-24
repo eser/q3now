@@ -739,6 +739,11 @@ typedef struct {
 	float		thirdPersonCurrentRange;	// current camera distance (lerps toward trace-clipped range)
 #endif
 
+#if FEAT_ZNUDGE
+	vec3_t		smoothVelocities[MAX_CLIENTS];	// smoothed velocity per client
+	float		smoothPing;						// smoothed ping for nudge calculation
+#endif
+
 } cg_t;
 
 
@@ -1961,4 +1966,28 @@ void	CG_ParticleMisc (qhandle_t pshader, vec3_t origin, int size, int duration, 
 void	CG_ParticleExplosion (char *animStr, vec3_t origin, vec3_t vel, int duration, int sizeStart, int sizeEnd);
 extern qboolean		initparticles;
 int CG_NewParticleArea ( int num );
+
+//
+// cg_znudge.c — client-side forward extrapolation
+//
+#if FEAT_ZNUDGE
+extern	vmCvar_t	cg_znudge;
+extern	vmCvar_t	cg_znSmoothweight;
+extern	vmCvar_t	cg_znProjectiles;
+extern	vmCvar_t	cg_znOffset;
+extern	vmCvar_t	cg_znPingWeight;
+extern	vmCvar_t	cg_znGravity;
+extern	vmCvar_t	cg_znMaxclips;
+extern	vmCvar_t	cg_znClimbheight;
+extern	vmCvar_t	cg_znRunningspeed;
+extern	vmCvar_t	cg_znDrawball;
+
+float	ZN_GetNudge( void );
+void	ZN_GetVelocity( centity_t *cent, vec3_t velocity );
+void	ZN_PredictSimple( vec3_t origin, vec3_t velocity, float gravity, float nudge, vec3_t predicted );
+void	ZN_PredictPlayer( centity_t *cent, float nudge, vec3_t predictedOrigin );
+void	ZN_PredictMissile( centity_t *cent, float nudge, vec3_t predictedOrigin );
+void	ZN_PredictGrenade( centity_t *cent, float nudge, vec3_t predictedOrigin );
+#endif
+
 #endif // CG_LOCAL_H

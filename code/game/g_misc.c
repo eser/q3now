@@ -142,6 +142,10 @@ void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles ) {
 	if ( player->client->sess.sessionTeam != TEAM_SPECTATOR ) {
 		trap_LinkEntity (player);
 	}
+
+#if FEAT_UNLAGGED
+	G_ResetHistory( player );
+#endif
 }
 
 

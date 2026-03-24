@@ -531,6 +531,20 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		killer, self->s.number, meansOfDeath, killerName,
 		self->client->pers.netname, obit );
 
+#if FEAT_UNLAGGED
+	G_UnTimeShiftClient( self );
+#endif
+
+#if FEAT_QUIC_OBSERVE
+	// QUIC event: kill with positions for spatial-aware coaching
+	{
+		vec3_t att_pos = {0, 0, 0};
+		if ( attacker && attacker->client )
+			VectorCopy( attacker->client->ps.origin, att_pos );
+		trap_QUIC_EmitKill( killer, self->s.number, meansOfDeath, att_pos, self->client->ps.origin );
+	}
+#endif
+
 	// broadcast the death event to everyone
 	ent = G_TempEntity( self->r.currentOrigin, EV_OBITUARY );
 	ent->s.eventParm = meansOfDeath;
@@ -1276,6 +1290,16 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	if ( targ->client ) {
 		targ->client->ps.stats[STAT_HEALTH] = targ->health;
 	}
+
+#if FEAT_QUIC_OBSERVE
+	// QUIC event: damage with positions
+	if ( take > 0 && attacker ) {
+		vec3_t att_pos = {0, 0, 0};
+		if ( attacker->client )
+			VectorCopy( attacker->client->ps.origin, att_pos );
+		trap_QUIC_EmitDamage( attacker->s.number, targ->s.number, take, mod, att_pos, targ->r.currentOrigin );
+	}
+#endif
 
 	if ( targ->health <= 0 ) {
 		if ( client )

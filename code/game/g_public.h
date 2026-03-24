@@ -398,7 +398,18 @@ typedef enum {
 
 	// engine extensions
 	G_CVAR_SETDESCRIPTION,
-	G_TRAP_GETVALUE = COM_TRAP_GETVALUE
+	G_TRAP_GETVALUE = COM_TRAP_GETVALUE,
+
+	// ── QUIC transport event emission (q3now extension) ──────────
+	// Game code calls these via syscall traps to emit structured
+	// events to the QUIC event stream. Only functional when
+	// FEAT_QUIC_OBSERVE is enabled; otherwise handled as no-ops.
+	G_QUIC_EMIT_KILL = 800,        // ( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos )
+	G_QUIC_EMIT_DAMAGE,            // ( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos )
+	G_QUIC_EMIT_ITEM_PICKUP,       // ( int client, const char *item, vec3_t pos )
+	G_QUIC_EMIT_CHAT,              // ( int client, const char *msg, qboolean teamOnly )
+	G_QUIC_EMIT_MATCH_EVENT,       // ( const char *type, const char *data )
+	G_QUIC_EMIT_DELAG              // ( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos )
 
 } gameImport_t;
 

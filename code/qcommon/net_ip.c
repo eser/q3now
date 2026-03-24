@@ -22,6 +22,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+#include "../game/q_feats.h"
+
+#if FEAT_QUIC_TRANSPORT
+#include "../webtransport/wt_public.h"
+// Set to qtrue when QUIC consumed a packet — tells NET_Event to keep draining
+static qboolean net_quicConsumedPacket;
+#endif
 
 #ifdef _WIN32
 #	include <winsock2.h>
@@ -120,7 +127,7 @@ typedef struct socks5_request_s {
 			struct in_addr addr;
 			uint16_t port;
 		} v4;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		struct {
 			struct in6_addr addr;
 			uint16_t port;
@@ -141,7 +148,7 @@ typedef union socks5_udp_request_s {
 				uint16_t port;
 				char data[2000];
 			} v4;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			struct {
 				struct in6_addr addr;
 				uint16_t port;
@@ -168,7 +175,7 @@ static cvar_t	*net_socksPassword;
 
 static cvar_t	*net_ip;
 static cvar_t	*net_port;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 static cvar_t	*net_ip6;
 static cvar_t	*net_port6;
 static cvar_t	*net_mcast6addr;
@@ -181,7 +188,7 @@ static sockaddr_t socksRelayAddr;
 static SOCKET	ip_socket = INVALID_SOCKET;
 static SOCKET	socks_socket = INVALID_SOCKET;
 
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 static SOCKET	ip6_socket = INVALID_SOCKET;
 static SOCKET	multicast6_socket = INVALID_SOCKET;
 
@@ -291,7 +298,7 @@ static void NetadrToSockadr( const netadr_t *a, sockaddr_t *s ) {
 			memcpy( &s->v4.sin_addr.s_addr, a->ipv._4, sizeof( s->v4.sin_addr.s_addr ) );
 			s->v4.sin_port = a->port;
 			break;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		case NA_IP6:
 			s->v6.sin6_family = AF_INET6;
 			memcpy( &s->v6.sin6_addr, a->ipv._6, sizeof( s->v6.sin6_addr ) );
@@ -319,7 +326,7 @@ static void SockadrToNetadr( const sockaddr_t *s, netadr_t *a ) {
 		memcpy( a->ipv._4, &s->v4.sin_addr.s_addr, sizeof( a->ipv._4 ) );
 		a->port = s->v4.sin_port;
 	}
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	else if ( s->ss.ss_family == AF_INET6 ) {
 		a->type = NA_IP6;
 		memcpy( a->ipv._6, &s->v6.sin6_addr, sizeof( a->ipv._6 ) );
@@ -391,7 +398,7 @@ static qboolean Sys_StringToSockaddr( const char *s, sockaddr_t *sadr, int sadr_
 		if ( family == AF_UNSPEC )
 		{
 			// Decide here and now which protocol family to use
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			if ( net_enabled->integer & NET_PRIOV6 )
 			{
 				if ( net_enabled->integer & NET_ENABLEV6 )
@@ -405,7 +412,7 @@ static qboolean Sys_StringToSockaddr( const char *s, sockaddr_t *sadr, int sadr_
 			{
 				if ( net_enabled->integer & NET_ENABLEV4 )
 					search = SearchAddrInfo( res, AF_INET );
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 				if ( !search && ( net_enabled->integer & NET_ENABLEV6 ) )
 					search = SearchAddrInfo( res, AF_INET6 );
 #endif
@@ -445,7 +452,7 @@ static void Sys_SockaddrToString( char *dest, int destlen, const sockaddr_t *inp
 {
 	socklen_t inputlen;
 
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	if ( input->ss.ss_family == AF_INET6 )
 		inputlen = sizeof(struct sockaddr_in6);
 	else
@@ -471,7 +478,7 @@ qboolean Sys_StringToAdr( const char *s, netadr_t *a, netadrtype_t family ) {
 		case NA_IP:
 			fam = AF_INET;
 		break;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		case NA_IP6:
 			fam = AF_INET6;
 		break;
@@ -516,7 +523,7 @@ qboolean NET_CompareBaseAdrMask( const netadr_t *a, const netadr_t *b, unsigned 
 		if (netmask > 32)
 			netmask = 32;
 	}
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	else if (a->type == NA_IP6)
 	{
 		addra = (byte *) &a->ipv._6;
@@ -574,7 +581,7 @@ const char *NET_AdrToString( const netadr_t *a )
 		strcpy( s, "loopback" );
 	else if (a->type == NA_BOT)
 		strcpy( s, "bot" );
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	else if (a->type == NA_IP || a->type == NA_IP6)
 #else
 	else if (a->type == NA_IP)
@@ -599,7 +606,7 @@ const char *NET_AdrToStringwPort( const netadr_t *a )
 		strcpy( s, "bot" );
 	else if(a->type == NA_IP)
 		Com_sprintf(s, sizeof(s), "%s:%hu", NET_AdrToString(a), ntohs(a->port));
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	else if(a->type == NA_IP6)
 		Com_sprintf(s, sizeof(s), "[%s]:%hu", NET_AdrToString(a), ntohs(a->port));
 #endif
@@ -613,7 +620,7 @@ qboolean NET_CompareAdr( const netadr_t *a, const netadr_t *b )
 	if ( !NET_CompareBaseAdr( a, b ) )
 		return qfalse;
 
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	if (a->type == NA_IP || a->type == NA_IP6)
 #else
 	if (a->type == NA_IP)
@@ -689,12 +696,30 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 				return qfalse;
 			}
 
+#if FEAT_QUIC_TRANSPORT
+			// QUIC demux — check first byte AFTER SOCKS header processing.
+			// Must check 4-byte Q3 connectionless marker (0xFFFFFFFF) BEFORE
+			// single-byte QUIC header check, because both start with 0xFF.
+			{
+				byte *pkt_data = net_message->data + net_message->readcount;
+				int   pkt_len  = ret - net_message->readcount;
+				// Skip Q3 connectionless packets (4 bytes of 0xFF)
+				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
+					// Not QUIC — fall through to Netchan
+				} else if ( QUIC_CheckPacket( net_from, pkt_data, pkt_len ) ) {
+					// Consumed by QUIC — do not process as Netchan
+					net_quicConsumedPacket = qtrue;
+					return qfalse;
+				}
+			}
+#endif
+
 			net_message->cursize = ret;
 			return qtrue;
 		}
 	}
 
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	if(ip6_socket != INVALID_SOCKET && FD_ISSET(ip6_socket, fdr))
 	{
 		fromlen = sizeof(from);
@@ -718,7 +743,20 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 				Com_Printf( "Oversize packet from %s\n", NET_AdrToString( net_from ) );
 				return qfalse;
 			}
-			
+
+#if FEAT_QUIC_TRANSPORT
+			// QUIC demux — IPv6 path (same logic as IPv4)
+			{
+				byte *pkt_data = net_message->data + net_message->readcount;
+				int   pkt_len  = ret - net_message->readcount;
+				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
+					// Q3 connectionless — not QUIC
+				} else if ( QUIC_CheckPacket( net_from, pkt_data, pkt_len ) ) {
+					return qfalse;
+				}
+			}
+#endif
+
 			net_message->cursize = ret;
 			return qtrue;
 		}
@@ -748,11 +786,24 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 				return qfalse;
 			}
 
+#if FEAT_QUIC_TRANSPORT
+			// QUIC demux — multicast6 path (same logic as IPv4/IPv6)
+			{
+				byte *pkt_data = net_message->data + net_message->readcount;
+				int   pkt_len  = ret - net_message->readcount;
+				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
+					// Q3 connectionless — not QUIC
+				} else if ( QUIC_CheckPacket( net_from, pkt_data, pkt_len ) ) {
+					return qfalse;
+				}
+			}
+#endif
+
 			net_message->cursize = ret;
 			return qtrue;
 		}
 	}
-#endif // USE_IPV6
+#endif // FEAT_IPV6
 
 	return qfalse;
 }
@@ -772,7 +823,7 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 	switch ( to->type ) {
 		case NA_BROADCAST:
 		case NA_IP:
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		case NA_IP6:
 		case NA_MULTICAST6:
 #endif
@@ -782,7 +833,7 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 			return;
 	}
 
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	if( (ip_socket == INVALID_SOCKET && to->type == NA_IP) ||
 		(ip_socket == INVALID_SOCKET && to->type == NA_BROADCAST) ||
 		(ip6_socket == INVALID_SOCKET && to->type == NA_IP6) ||
@@ -815,7 +866,7 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 	else {
 		if ( addr.ss.ss_family == AF_INET )
 			ret = sendto( ip_socket, data, length, 0, (struct sockaddr *) &addr, sizeof(struct sockaddr_in) );
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		else if ( addr.ss.ss_family == AF_INET6 )
 			ret = sendto( ip6_socket, data, length, 0, (struct sockaddr *) &addr, sizeof(struct sockaddr_in6) );
 #endif
@@ -873,7 +924,7 @@ qboolean Sys_IsLANAddress( const netadr_t *adr ) {
 		if(adr->ipv._4[0] == 127)
 			return qtrue;
 	}
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	else if(adr->type == NA_IP6)
 	{
 		if(adr->ipv._6[0] == 0xfe && (adr->ipv._6[1] & 0xc0) == 0x80)
@@ -896,7 +947,7 @@ qboolean Sys_IsLANAddress( const netadr_t *adr ) {
 				
 				addrsize = sizeof(adr->ipv._4);
 			}
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			else if ( adr->type == NA_IP6 || adr->type == NA_MULTICAST6 )
 			{
 				// TODO? should we check the scope_id here?
@@ -945,7 +996,7 @@ void Sys_ShowIP( void ) {
 
 		if(localIP[i].type == NA_IP)
 			Com_Printf( "IP: %s\n", addrbuf);
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		else if(localIP[i].type == NA_IP6)
 			Com_Printf( "IP6: %s\n", addrbuf);
 #endif
@@ -1030,7 +1081,7 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 NET_IP6Socket
 ====================
 */
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 static SOCKET NET_IP6Socket( const char *net_interface, int port, struct sockaddr_in6 *bindto, int *err ) {
 	SOCKET				newsocket;
 	struct sockaddr_in6	address;
@@ -1214,7 +1265,7 @@ void NET_LeaveMulticast6( void )
 		multicast6_socket = INVALID_SOCKET;
 	}
 }
-#endif // USE_IPV6
+#endif // FEAT_IPV6
 
 
 /*
@@ -1396,7 +1447,7 @@ static void NET_AddLocalAddress( const char *ifname, const struct sockaddr *addr
 			addrlen = sizeof(struct sockaddr_in);
 			localIP[numIP].type = NA_IP;
 		}
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		else if(family == AF_INET6)
 		{
 			addrlen = sizeof(struct sockaddr_in6);
@@ -1469,7 +1520,7 @@ static void NET_GetLocalAddress( void ) {
 	{
 		struct addrinfo *search;
 		struct sockaddr_in mask4;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		struct sockaddr_in6 mask6;
 #endif
 	
@@ -1480,7 +1531,7 @@ static void NET_GetLocalAddress( void ) {
 		mask4.sin_family = AF_INET;
 		memset(&mask4.sin_addr.s_addr, 0xFF, sizeof(mask4.sin_addr.s_addr));
 
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		memset(&mask6, 0, sizeof(mask6));
 		mask6.sin6_family = AF_INET6;
 		memset(&mask6.sin6_addr, 0xFF, sizeof(mask6.sin6_addr));
@@ -1491,7 +1542,7 @@ static void NET_GetLocalAddress( void ) {
 		{
 			if ( search->ai_family == AF_INET )
 				NET_AddLocalAddress( "", search->ai_addr, (struct sockaddr *) &mask4 );
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			else if ( search->ai_family == AF_INET6 )
 				NET_AddLocalAddress( "", search->ai_addr, (struct sockaddr *) &mask6 );
 #endif
@@ -1515,12 +1566,12 @@ static void NET_OpenIP( void ) {
 	int		i;
 	int		err;
 	int		port;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	int		port6;
 #endif
 
 	port = net_port->integer;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	port6 = net_port6->integer;
 #endif
 
@@ -1529,7 +1580,7 @@ static void NET_OpenIP( void ) {
 	// automatically scan for a valid port, so multiple
 	// dedicated servers can be started without requiring
 	// a different net_port for each one
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	if ( net_enabled->integer & NET_ENABLEV6 )
 	{
 		for( i = 0 ; i < 10 ; i++ )
@@ -1587,18 +1638,15 @@ NET_GetCvars
 static qboolean NET_GetCvars( void ) {
 	int modified;
 
-#if defined (DEDICATED) || !defined (USE_IPV6)
-	// I want server owners to explicitly turn on ipv6 support.
-	net_enabled = Cvar_Get( "net_enabled", "1", CVAR_LATCH | CVAR_ARCHIVE_ND | CVAR_NORESTART );
+#ifdef FEAT_IPV6
+	net_enabled = Cvar_Get( "net_enabled", "7", CVAR_LATCH | CVAR_ARCHIVE_ND | CVAR_NORESTART );
 #else
-	/* End users have it enabled so they can connect to ipv6-only hosts, but ipv4 will be
-	 * used if available due to ping */
-	net_enabled = Cvar_Get( "net_enabled", "3", CVAR_LATCH | CVAR_ARCHIVE_ND | CVAR_NORESTART );
+	net_enabled = Cvar_Get( "net_enabled", "1", CVAR_LATCH | CVAR_ARCHIVE_ND | CVAR_NORESTART );
 #endif
 
 	Cvar_SetDescription( net_enabled, "Networking options, bitmask:\n"
 		" 1 - enable IPv4\n"
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		" 2 - enable IPv6\n"
 		" 4 - prioritize IPv6 connections over IPv4\n"
 		" 8 - disable IPv6 multicast"
@@ -1620,7 +1668,7 @@ static qboolean NET_GetCvars( void ) {
 	modified += net_port->modified;
 	net_port->modified = qfalse;
 	
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	net_ip6 = Cvar_Get( "net_ip6", "::", CVAR_LATCH );
 	Cvar_SetDescription( net_ip6, "Specifies network interface address client should use for outgoing UDP connections using IPv6." );
 	modified += net_ip6->modified;
@@ -1646,7 +1694,7 @@ static qboolean NET_GetCvars( void ) {
 	Cvar_SetDescription( net_mcast6iface, "Outgoing interface to use for scan." );
 	modified += net_mcast6iface->modified;
 	net_mcast6iface->modified = qfalse;
-#endif // USE_IPV6
+#endif // FEAT_IPV6
 
 	net_socksEnabled = Cvar_Get( "net_socksEnabled", "0", CVAR_LATCH | CVAR_ARCHIVE_ND );
 	Cvar_CheckRange( net_socksEnabled, "0", "1", CV_INTEGER );
@@ -1731,7 +1779,7 @@ static void NET_Config( qboolean enableNetworking ) {
 			closesocket( ip_socket );
 			ip_socket = INVALID_SOCKET;
 		}
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		if(multicast6_socket != INVALID_SOCKET)
 		{
 			if(multicast6_socket != ip6_socket)
@@ -1757,7 +1805,7 @@ static void NET_Config( qboolean enableNetworking ) {
 		if ( net_enabled->integer )
 		{
 			NET_OpenIP();
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			NET_SetMulticast6();
 #endif
 		}
@@ -1845,7 +1893,16 @@ static void NET_Event( const fd_set *fdr )
 #endif
 		}
 		else
+		{
+#if FEAT_QUIC_TRANSPORT
+			// QUIC consumed the packet — keep draining, there may be more
+			if ( net_quicConsumedPacket ) {
+				net_quicConsumedPacket = qfalse;
+				continue;
+			}
+#endif
 			break;
+		}
 	}
 }
 
@@ -1878,7 +1935,7 @@ qboolean NET_Sleep( int timeout )
 		highestfd = ip_socket;
 	}
 
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	if ( ip6_socket != INVALID_SOCKET )
 	{
 		FD_SET( ip6_socket, &fdr );

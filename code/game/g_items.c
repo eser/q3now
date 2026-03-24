@@ -379,6 +379,11 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 
 	G_LogPrintf( "Item: %i %s\n", other->s.number, ent->item->classnames[0] );
 
+#if FEAT_QUIC_OBSERVE
+	// QUIC event: item pickup with position
+	trap_QUIC_EmitItemPickup( other->s.number, ent->item->classnames[0], other->r.currentOrigin );
+#endif
+
 	predict = other->client->pers.predictItemPickup;
 
 	// call the item-specific pickup function

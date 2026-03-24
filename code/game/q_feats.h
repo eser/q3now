@@ -13,16 +13,21 @@
 // ── mature (stable, shipped) ────────────────────────────────────────────
 #define FEAT_ATMOSPHERIC                  1   // 3B  rain & snow particles
 #define FEAT_CALLVOTE_MENU                1   // 6C  GUI callvote from ESC menu
+#define FEAT_CRON_JOBS                    1   // 11  timed server-side tasks
 #define FEAT_DAMAGE_PLUMS                 1   // 2A  floating damage numbers
 #define FEAT_FAST_WEAPON_SWITCH           1   // 5A  fast weapon switch (0=normal, 1=skip drop, 2=instant)
+#define FEAT_FS_PRECEDENCE                1   // archive dedup: basename desc, dir > ext precedence
+#define FEAT_IPV6                         1   // IPv6 support
+#define FEAT_JSON_STATS                   1   // 7B  post-match JSON export
 #define FEAT_LENS_FLARES                  1   // 9A  map + missile lens flares (JUHOX)
 #define FEAT_MATCH_SUMMARY                1   // 8B  intermission stats overlay
 #define FEAT_SPAWN_PROTECTION             1   // 2B  attacker gets no points for spawnkills
 #define FEAT_SPECTATOR_OUTLINES           1   // 8A  player outlines for spectators
+#define FEAT_SW3Z                         1   // SW3Z archive format (.sw3z)
 #define FEAT_TELEPORTING_MISSILES         1   // 2F  rockets/plasma through teleporters
 #define FEAT_THIRD_PERSON                 1   // third-person camera with proximity fade & shoulder cam
-#define FEAT_CRON_JOBS                    1   // 11  timed server-side tasks
-#define FEAT_JSON_STATS                   1   // 7B  post-match JSON export
+#define FEAT_UNLAGGED                     1   // 1B  server-side lag compensation (hitscan + projectile nudge)
+#define FEAT_ZNUDGE                       1   // 1C  client-side forward extrapolation (player/missile prediction)
 
 // ── gameplay (testing) ──────────────────────────────────────────────────
 #define FEAT_DESTROYABLE_MISSILES         0   // 11B shoot down rockets/grenades/plasma
@@ -30,7 +35,6 @@
 #define FEAT_FREEZETAG                    0   // 7A  freeze on death, thaw by proximity
 #define FEAT_GRAPPLE_DAMAGE               0   // 5D  hook deals damage while pulling
 #define FEAT_PROJECTILE_BOUNCE            0   // 10H projectile reflection off shields
-#define FEAT_UNLAGGED                     0   // 1B  hitscan lag compensation
 
 // ── competitive (testing) ───────────────────────────────────────────────
 #define FEAT_1FCTF                        0   // 10E one-flag CTF mode
@@ -58,12 +62,10 @@
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
 #define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
 
-// ── archive formats (testing) ─────────────────────────────────────────
-#define FEAT_SW3Z                         1   // SW3Z archive format (.sw3z)
-#define FEAT_FS_PRECEDENCE                1   // archive dedup: basename desc, dir > ext precedence
-
 // ── engine internals (testing) ────────────────────────────────────────
+#ifndef FEAT_WASM
 #define FEAT_WASM                         1   // WASM VM backend via WAMR (replaces QVM over time)
+#endif
 #define FEAT_LEGACY_QVM                   0   // QVM bytecode interpreter + JIT (retire by setting to 0)
 
 // ── renderer (from CNQ3) ───────────────────────────────────────────────
@@ -73,5 +75,44 @@
 #define FEAT_SMAA                         0   // sub-pixel morphological anti-aliasing (deferred)
 #define FEAT_FORCE_ENTITY_VERTEX_ALPHA    1   // per-entity alpha override + dynamic pipeline swap (causes pink with r_fbo on MoltenVK)
 #define FEAT_FBO_DEBUG                    0   // verbose FBO pipeline diagnostics (format, layout, passes)
+
+// ── networking / transport (testing) ─────────────────────────────
+// Layered flags — each layer depends on the one above it.
+// FEAT_QUIC_TRANSPORT is the foundation; higher layers require it.
+//
+//   TRANSPORT ──► OBSERVE ──► CONTROL
+//       │
+//       └──────► HTTP
+//
+#ifndef FEAT_QUIC_TRANSPORT
+#define FEAT_QUIC_TRANSPORT               0   // picoquic integration, demux, handshake, QUIC datagrams
+#endif
+#ifndef FEAT_QUIC_OBSERVE
+#define FEAT_QUIC_OBSERVE                 0   // structured game state datagrams + event stream (requires TRANSPORT)
+#endif
+#ifndef FEAT_QUIC_CONTROL
+#define FEAT_QUIC_CONTROL                 0   // command channel + MCP server (requires OBSERVE)
+#endif
+#ifndef FEAT_QUIC_HTTP
+#define FEAT_QUIC_HTTP                    0   // HTTP endpoints: /health, /metrics (requires TRANSPORT)
+#endif
+
+// dependency enforcement — higher layers silently enable their prerequisites
+#if FEAT_QUIC_OBSERVE && !FEAT_QUIC_TRANSPORT
+#undef  FEAT_QUIC_TRANSPORT
+#define FEAT_QUIC_TRANSPORT               1
+#endif
+#if FEAT_QUIC_CONTROL && !FEAT_QUIC_OBSERVE
+#undef  FEAT_QUIC_OBSERVE
+#define FEAT_QUIC_OBSERVE                 1
+#endif
+#if FEAT_QUIC_CONTROL && !FEAT_QUIC_TRANSPORT
+#undef  FEAT_QUIC_TRANSPORT
+#define FEAT_QUIC_TRANSPORT               1
+#endif
+#if FEAT_QUIC_HTTP && !FEAT_QUIC_TRANSPORT
+#undef  FEAT_QUIC_TRANSPORT
+#define FEAT_QUIC_TRANSPORT               1
+#endif
 
 #endif // _Q_FEATS_H

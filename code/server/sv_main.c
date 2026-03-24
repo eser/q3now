@@ -21,6 +21,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "server.h"
+#include "../game/q_feats.h"
+
+#if FEAT_QUIC_TRANSPORT
+#include "../webtransport/wt_public.h"
+#endif
 
 serverStatic_t	svs;				// persistant server info
 server_t		sv;					// local server
@@ -284,7 +289,7 @@ static void SV_MasterHeartbeat( const char *message )
 				else
 					Com_Printf( "%s has no IPv4 address.\n", sv_master[i]->string );
 			}
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			if(netenabled & NET_ENABLEV6)
 			{
 				Com_Printf("Resolving %s (IPv6)\n", sv_master[i]->string);
@@ -374,7 +379,7 @@ static int SVC_HashForAddress( const netadr_t *address ) {
 
 	switch ( address->type ) {
 		case NA_IP:  ip = address->ipv._4; size = 4;  break;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		case NA_IP6: ip = address->ipv._6; size = 16; break;
 #endif
 		default: break;
@@ -443,7 +448,7 @@ static leakyBucket_t *SVC_BucketForAddress( const netadr_t *address, int burst, 
 					return bucket;
 				}
 				break;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			case NA_IP6:
 				if ( memcmp( bucket->ipv._6, address->ipv._6, 16 ) == 0 ) {
 					if ( n > 8 ) {
@@ -485,7 +490,7 @@ static leakyBucket_t *SVC_BucketForAddress( const netadr_t *address, int burst, 
 			bucket->type = address->type;
 			switch ( address->type ) {
 				case NA_IP:  Com_Memcpy( bucket->ipv._4, address->ipv._4, 4 );  break;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 				case NA_IP6: Com_Memcpy( bucket->ipv._6, address->ipv._6, 16 ); break;
 #endif
 				default: break;
@@ -1307,6 +1312,16 @@ void SV_Frame( int msec ) {
 		return;
 	}
 
+#if FEAT_QUIC_TRANSPORT
+	// QUIC: process timers and flush outbound packets EVERY frame, regardless
+	// of the server frame rate limiter. picoquic needs frequent polling to
+	// maintain connections (ACK timing, keep-alive, retransmits).
+	if ( Cvar_VariableIntegerValue( "sv_quic" ) ) {
+		QUIC_ProcessTimers();
+		QUIC_FlushOutbound();
+	}
+#endif
+
 	// allow pause if only the local client is connected
 	if ( SV_CheckPaused() ) {
 		return;
@@ -1403,6 +1418,23 @@ void SV_Frame( int msec ) {
 	// send messages back to the clients
 	SV_SendClientMessages();
 
+#if FEAT_QUIC_TRANSPORT
+	// QUIC transport frame processing — after game logic and client messages.
+	// Timer-driven: retransmits, keepalives, idle timeouts.
+	// Data-driven: push game state datagrams + events to QUIC observers.
+	if ( Cvar_VariableIntegerValue( "sv_quic" ) ) {
+		QUIC_ProcessTimers();
+		QUIC_FlushOutbound();
+#if FEAT_QUIC_OBSERVE
+		QUIC_SendDatagrams();
+		QUIC_PushEvents();
+#endif
+#if FEAT_QUIC_CONTROL
+		QUIC_ProcessCommandQueue();
+#endif
+	}
+#endif
+
 	// send a heartbeat to the master if needed
 	SV_MasterHeartbeat(HEARTBEAT_FOR_MASTER);
 }
@@ -1430,7 +1462,7 @@ int SV_RateMsec( const client_t *client )
 
 	messageSize = client->netchan.lastSentSize;
 
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	if ( client->netchan.remoteAddress.type == NA_IP6 )
 		messageSize += UDPIP6_HEADER_SIZE;
 	else

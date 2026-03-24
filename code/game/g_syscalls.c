@@ -794,3 +794,32 @@ int trap_PC_ReadToken( int handle, pc_token_t *pc_token ) {
 int trap_PC_SourceFileAndLine( int handle, char *filename, int *line ) {
 	return syscall( BOTLIB_PC_SOURCE_FILE_AND_LINE, handle, filename, line );
 }
+
+// ── QUIC transport event emission ────────────────────────────────
+#if FEAT_QUIC_OBSERVE
+void trap_QUIC_EmitKill( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos ) {
+	syscall( G_QUIC_EMIT_KILL, attacker, victim, mod, att_pos, vic_pos );
+}
+
+void trap_QUIC_EmitDamage( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos ) {
+	syscall( G_QUIC_EMIT_DAMAGE, attacker, victim, damage, mod, att_pos, vic_pos );
+}
+
+void trap_QUIC_EmitItemPickup( int client, const char *item, vec3_t pos ) {
+	syscall( G_QUIC_EMIT_ITEM_PICKUP, client, item, pos );
+}
+
+void trap_QUIC_EmitChat( int client, const char *msg, qboolean teamOnly ) {
+	syscall( G_QUIC_EMIT_CHAT, client, msg, teamOnly );
+}
+
+void trap_QUIC_EmitMatchEvent( const char *type, const char *data ) {
+	syscall( G_QUIC_EMIT_MATCH_EVENT, type, data );
+}
+
+#if FEAT_UNLAGGED
+void trap_QUIC_EmitDelag( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos ) {
+	syscall( G_QUIC_EMIT_DELAG, shooter, target, timeDelta, shooterPos, targetPos );
+}
+#endif
+#endif

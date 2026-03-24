@@ -3746,6 +3746,80 @@ static void Com_SetAffinityMask( const char *str )
 
 /*
 =================
+Com_SetCvarsFromEnvironment
+
+12-factor app support: read Q3_* environment variables and set them as cvars.
+Mapping: Q3_SV_HOSTNAME → sv_hostname, Q3_G_GAMETYPE → g_gametype, etc.
+
+The Q3_ prefix is stripped, and the remainder is lowercased to form the cvar name.
+This allows server operators to configure q3now via environment variables in
+Docker, systemd, k8s, or any 12-factor deployment:
+
+  export Q3_SV_HOSTNAME="My Server"
+  export Q3_SV_MAXCLIENTS=16
+  export Q3_G_GAMETYPE=4
+  export Q3_MAP=q3dm17
+  export Q3_SV_QUIC=1
+  export Q3_SV_QUICAUTHTOKEN="observer:member:user:abc123"
+  ./q3now-ded
+
+Special vars:
+  Q3_MAP  → executed as "map <value>" after full init (not a cvar)
+  Q3_EXEC → executed as "exec <value>" after full init
+=================
+*/
+
+// environment variables we know about — mapped to cvars
+static const struct {
+	const char *env;      // env var name (after Q3_ prefix)
+	const char *cvar;     // cvar name
+} wt_env_map[] = {
+	{ "SV_HOSTNAME",        "sv_hostname" },
+	{ "SV_MAXCLIENTS",      "sv_maxclients" },
+	{ "SV_PURE",            "sv_pure" },
+	{ "SV_FPS",             "sv_fps" },
+	{ "DEDICATED",          "dedicated" },
+	{ "G_GAMETYPE",         "g_gametype" },
+	{ "G_FRAGLIMIT",        "fraglimit" },
+	{ "G_TIMELIMIT",        "timelimit" },
+	{ "NET_PORT",           "net_port" },
+	{ "COM_HUNKMEGS",       "com_hunkmegs" },
+	{ "SV_QUIC",            "sv_quic" },
+	{ "SV_QUICAUTHTOKEN",   "sv_quicAuthToken" },
+	{ "SV_QUICMAXCLIENTS",  "sv_quicMaxClients" },
+	{ "SV_QUICSTATERATE",   "sv_quicStateRate" },
+	{ "SV_QUICEVENTRATE",   "sv_quicEventRate" },
+	{ "SV_QUICRECORD",      "sv_quicRecord" },
+	{ "RCONPASSWORD",       "rconPassword" },
+	{ "LOGFILE",            "logfile" },
+	{ NULL, NULL }
+};
+
+static void Com_SetCvarsFromEnvironment( void )
+{
+	int i;
+	const char *val;
+	int count = 0;
+
+	for ( i = 0; wt_env_map[i].env != NULL; i++ ) {
+		char envname[128];
+		Com_sprintf( envname, sizeof(envname), "Q3_%s", wt_env_map[i].env );
+		val = getenv( envname );
+		if ( val && *val ) {
+			Cvar_Set( wt_env_map[i].cvar, val );
+			Com_Printf( "ENV: %s = \"%s\" → %s\n", envname, val, wt_env_map[i].cvar );
+			count++;
+		}
+	}
+
+	if ( count > 0 ) {
+		Com_Printf( "12-factor: %d cvars set from environment.\n", count );
+	}
+}
+
+
+/*
+=================
 Com_Init
 =================
 */
@@ -3845,6 +3919,12 @@ void Com_Init( char *commandLine ) {
 	Com_InitJournaling();
 
 	Com_ExecuteCfg();
+
+	// 12-factor: override config with Q3_* environment variables.
+	// Precedence: defaults < config files < env vars < command-line args.
+	// Env var format: Q3_CVAR_NAME=value (underscores map to underscores in cvar names).
+	// Example: Q3_SV_HOSTNAME="My Server" → +set sv_hostname "My Server"
+	Com_SetCvarsFromEnvironment();
 
 	// override anything from the config files with command line args
 	Com_StartupVariable( NULL );
@@ -4031,6 +4111,22 @@ void Com_Init( char *commandLine ) {
 	// make sure single player is off by default
 	Cvar_Set( "ui_singlePlayerActive", "0" );
 #endif
+
+	// 12-factor: Q3_MAP and Q3_EXEC env vars execute commands after full init.
+	// These run AFTER Com_AddStartupCommands, so command-line +map overrides Q3_MAP.
+	{
+		const char *envMap = getenv( "Q3_MAP" );
+		const char *envExec = getenv( "Q3_EXEC" );
+		if ( envExec && *envExec ) {
+			Com_Printf( "ENV: Q3_EXEC = \"%s\"\n", envExec );
+			Cbuf_AddText( va( "exec %s\n", envExec ) );
+			Cbuf_Execute();
+		}
+		if ( envMap && *envMap ) {
+			Com_Printf( "ENV: Q3_MAP = \"%s\"\n", envMap );
+			Cbuf_AddText( va( "map %s\n", envMap ) );
+		}
+	}
 
 	com_fullyInitialized = qtrue;
 

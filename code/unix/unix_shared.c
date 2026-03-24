@@ -67,9 +67,10 @@ int Sys_Milliseconds( void )
 	}
 
 	curtime = (tp.tv_sec - sys_timeBase) * 1000 + tp.tv_usec / 1000;
-	
+
 	return curtime;
 }
+
 
 
 char *strlwr( char *s ) {

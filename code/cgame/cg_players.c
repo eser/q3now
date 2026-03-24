@@ -2331,6 +2331,16 @@ void CG_Player( centity_t *cent ) {
 		return;
 	}
 
+#if FEAT_ZNUDGE
+	// znudge: extrapolate other players forward by ping
+	if ( cg_znudge.integer && clientNum != cg.clientNum ) {
+		float nudge = ZN_GetNudge();
+		if ( nudge > 0.0f ) {
+			ZN_PredictPlayer( cent, nudge, cent->lerpOrigin );
+		}
+	}
+#endif
+
 	// get the player model information
 	renderfx = 0;
 	if ( cent->currentState.number == cg.snap->ps.clientNum) {

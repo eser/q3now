@@ -737,6 +737,15 @@ void ClientUserinfoChanged( int clientNum ) {
 		client->pers.predictItemPickup = qtrue;
 	}
 
+#if FEAT_UNLAGGED
+	// parse delag settings from userinfo
+	s = Info_ValueForKey( userinfo, "cg_delag" );
+	client->pers.delag = atoi( s );
+
+	s = Info_ValueForKey( userinfo, "cg_cmdTimeNudge" );
+	client->pers.cmdTimeNudge = atoi( s );
+#endif
+
 	// set name
 	Q_strncpyz ( oldname, client->pers.netname, sizeof( oldname ) );
 	s = Info_ValueForKey (userinfo, "name");

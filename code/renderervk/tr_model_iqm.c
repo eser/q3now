@@ -33,15 +33,13 @@ static float identityMatrix[12] = {
 	0, 0, 1, 0
 };
 
-static qboolean IQM_CheckRange( iqmHeader_t *header, int offset,
-				int count, int size ) {
+static qboolean IQM_CheckRange( iqmHeader_t *header, uint32_t offset,
+				uint32_t count, uint32_t size ) {
 	// return true if the range specified by offset, count and size
-	// doesn't fit into the file
-	return ( count <= 0 ||
-		 offset <= 0 ||
-		 offset > header->filesize ||
-		 offset + count * size < 0 ||
-		 offset + count * size > header->filesize );
+	// doesn't fit into the file — uses uint64_t to prevent overflow
+	return ( count == 0 ||
+		 offset > (uint32_t)header->filesize ||
+		 (uint64_t)count * size > (uint32_t)header->filesize - offset );
 }
 // "multiply" 3x4 matrices, these are assumed to be the top 3 rows
 // of a 4x4 matrix with the last row = (0 0 0 1)
