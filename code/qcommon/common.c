@@ -1433,10 +1433,10 @@ Z_TagMalloc
 ================
 */
 #ifdef ZONE_DEBUG
-void *Z_TagMallocDebug( int size, memtag_t tag, char *label, char *file, int line ) {
-	int		allocSize;
+void *Z_TagMallocDebug( size_t size, memtag_t tag, const char *label, const char *file, int line ) {
+	size_t		allocSize;
 #else
-void *Z_TagMalloc( int size, memtag_t tag ) {
+void *Z_TagMalloc( size_t size, memtag_t tag ) {
 #endif
 	int		extra;
 #ifndef USE_MULTI_SEGMENT
@@ -1447,6 +1447,10 @@ void *Z_TagMalloc( int size, memtag_t tag ) {
 
 	if ( tag == TAG_FREE ) {
 		Com_Error( ERR_FATAL, "Z_TagMalloc: tried to use with TAG_FREE" );
+	}
+
+	if ( size > INT_MAX ) {
+		Com_Error( ERR_FATAL, "Z_TagMalloc: %"PRIz"u > INT_MAX", size );
 	}
 
 	if ( tag == TAG_SMALL ) {
@@ -1490,10 +1494,10 @@ void *Z_TagMalloc( int size, memtag_t tag ) {
 			// scanned all the way around the list
 #ifdef ZONE_DEBUG
 			Z_LogHeap();
-			Com_Error( ERR_FATAL, "Z_Malloc: failed on allocation of %i bytes from the %s zone: %s, line: %d (%s)",
+			Com_Error( ERR_FATAL, "Z_Malloc: failed on allocation of %"PRIz"u bytes from the %s zone: %s, line: %d (%s)",
 								size, zone == smallzone ? "small" : "main", file, line, label );
 #else
-			Com_Error( ERR_FATAL, "Z_Malloc: failed on allocation of %i bytes from the %s zone",
+			Com_Error( ERR_FATAL, "Z_Malloc: failed on allocation of %"PRIz"u bytes from the %s zone",
 								size, zone == smallzone ? "small" : "main" );
 #endif
 			return NULL;
@@ -1557,9 +1561,9 @@ Z_Malloc
 ========================
 */
 #ifdef ZONE_DEBUG
-void *Z_MallocDebug( int size, char *label, char *file, int line ) {
+void *Z_MallocDebug( size_t size, const char *label, const char *file, int line ) {
 #else
-void *Z_Malloc( int size ) {
+void *Z_Malloc( size_t size ) {
 #endif
 	void	*buf;
 
@@ -1582,11 +1586,11 @@ S_Malloc
 ========================
 */
 #ifdef ZONE_DEBUG
-void *S_MallocDebug( int size, char *label, char *file, int line ) {
+void *S_MallocDebug( size_t size, const char *label, const char *file, int line ) {
 	return Z_TagMallocDebug( size, TAG_SMALL, label, file, line );
 }
 #else
-void *S_Malloc( int size ) {
+void *S_Malloc( size_t size ) {
 	return Z_TagMalloc( size, TAG_SMALL );
 }
 #endif
@@ -2324,15 +2328,19 @@ Allocate permanent (until the hunk is cleared) memory
 =================
 */
 #ifdef HUNK_DEBUG
-void *Hunk_AllocDebug( int size, ha_pref preference, char *label, char *file, int line ) {
+void *Hunk_AllocDebug( size_t size, ha_pref preference, const char *label, const char *file, int line ) {
 #else
-void *Hunk_Alloc( int size, ha_pref preference ) {
+void *Hunk_Alloc( size_t size, ha_pref preference ) {
 #endif
 	void	*buf;
 
 	if ( s_hunkData == NULL)
 	{
 		Com_Error( ERR_FATAL, "Hunk_Alloc: Hunk memory system not initialized" );
+	}
+
+	if ( size > INT_MAX ) {
+		Com_Error( ERR_FATAL, "Hunk_Alloc: %"PRIz"u > INT_MAX", size );
 	}
 
 	// can't do preference if there is any temp allocated
@@ -2358,9 +2366,9 @@ void *Hunk_Alloc( int size, ha_pref preference ) {
 		Hunk_Log();
 		Hunk_SmallLog();
 
-		Com_Error(ERR_DROP, "Hunk_Alloc failed on %i: %s, line: %d (%s)", size, file, line, label);
+		Com_Error(ERR_DROP, "Hunk_Alloc failed on %"PRIz"u: %s, line: %d (%s)", size, file, line, label);
 #else
-		Com_Error(ERR_DROP, "Hunk_Alloc failed on %i", size);
+		Com_Error(ERR_DROP, "Hunk_Alloc failed on %"PRIz"u", size);
 #endif
 	}
 
@@ -2403,7 +2411,7 @@ Multiple files can be loaded in temporary memory.
 When the files-in-use count reaches zero, all temp memory will be deleted
 =================
 */
-void *Hunk_AllocateTempMemory( int size ) {
+void *Hunk_AllocateTempMemory( size_t size ) {
 	void		*buf;
 	hunkHeader_t	*hdr;
 
@@ -2416,12 +2424,16 @@ void *Hunk_AllocateTempMemory( int size ) {
 		return Z_Malloc(size);
 	}
 
+	if ( size > INT_MAX ) {
+		Com_Error( ERR_FATAL, "Hunk_AllocateTempMemory: %"PRIz"u > INT_MAX", size );
+	}
+
 	Hunk_SwapBanks();
 
 	size = PAD(size, sizeof(intptr_t)) + sizeof( hunkHeader_t );
 
 	if ( hunk_temp->temp + hunk_permanent->permanent + size > s_hunkTotal ) {
-		Com_Error( ERR_DROP, "Hunk_AllocateTempMemory: failed on %i", size );
+		Com_Error( ERR_DROP, "Hunk_AllocateTempMemory: failed on %"PRIz"u", size );
 	}
 
 	if ( hunk_temp == &hunk_low ) {
