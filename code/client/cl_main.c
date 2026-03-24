@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_main.c  -- client main loop
 
 #include "client.h"
+#include "cl_wired_ui.h"
 #include <limits.h>
 
 cvar_t	*cl_noprint;
@@ -1247,8 +1248,8 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 	S_StopAllSounds();
 	Key_ClearStates();
 
-	if ( uivm && showMainMenu ) {
-		VM_Call( uivm, 1, UI_SET_ACTIVE_MENU, UIMENU_NONE );
+	if ( UI_VM_ACTIVE && showMainMenu ) {
+		UI_CALL_SET_ACTIVE( UIMENU_NONE );
 	}
 
 	// Remove pure paks
@@ -1497,7 +1498,11 @@ void CL_Disconnect_f( void ) {
 	SCR_StopCinematic();
 	Cvar_Set( "ui_singlePlayerActive", "0" );
 	if ( cls.state != CA_DISCONNECTED && cls.state != CA_CINEMATIC ) {
+#if FEAT_WIRED_UI
+		if ( cgvm && cgvm->callLevel ) {
+#else
 		if ( (uivm && uivm->callLevel) || (cgvm && cgvm->callLevel) ) {
+#endif
 			Com_Error( ERR_DISCONNECT, "Disconnected from server" );
 		} else {
 			// clear any previous "server full" type messages
@@ -1512,8 +1517,8 @@ void CL_Disconnect_f( void ) {
 			if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
 				CL_FlushMemory();
 			}
-			if ( uivm ) {
-				VM_Call( uivm, 1, UI_SET_ACTIVE_MENU, UIMENU_MAIN );
+			if ( UI_VM_ACTIVE ) {
+				UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 			}
 		}
 	}
@@ -2898,8 +2903,8 @@ static void CL_CheckTimeout( void ) {
 			if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
 				CL_FlushMemory();
 			}
-			if ( uivm ) {
-				VM_Call( uivm, 1, UI_SET_ACTIVE_MENU, UIMENU_MAIN );
+			if ( UI_VM_ACTIVE ) {
+				UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 			}
 			return;
 		}
@@ -3015,12 +3020,12 @@ void CL_Frame( int msec, int realMsec ) {
 	if ( cls.cddialog ) {
 		// bring up the cd error dialog if needed
 		cls.cddialog = qfalse;
-		VM_Call( uivm, 1, UI_SET_ACTIVE_MENU, UIMENU_NEED_CD );
+		UI_CALL_SET_ACTIVE( UIMENU_NEED_CD );
 	} else	if ( cls.state == CA_DISCONNECTED && !( Key_GetCatcher( ) & KEYCATCH_UI )
-		&& !com_sv_running->integer && uivm ) {
+		&& !com_sv_running->integer && UI_VM_ACTIVE ) {
 		// if disconnected, bring up the menu
 		S_StopAllSounds();
-		VM_Call( uivm, 1, UI_SET_ACTIVE_MENU, UIMENU_MAIN );
+		UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 	}
 
 	// if recording an avi, lock to a fixed fps

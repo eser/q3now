@@ -50,7 +50,7 @@ If `.wasm` is not found, it silently falls back to `.qvm`.
 make build-debug
 
 # Run with WASM modules (auto-detect: prefers .wasm over .qvm)
-make run-gamedev-wasm
+make run-game VM=1
 
 # Run WASM smoke test
 make test-wasm

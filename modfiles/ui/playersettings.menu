@@ -1,0 +1,54 @@
+// playersettings.menu - Wired UI player settings panel
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "playersettings"
+	rect 200 100 240 200
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor COLOR_FOCUS
+
+	onESC { close }
+
+	LABEL(0, 8, 240, 18, "Player", 0.5, 1)
+	SEPARATOR(10, 28, 220)
+
+	itemDef {
+		type 4
+		text "Name:"
+		rect 10 40 220 18
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "name"
+		maxChars 20
+		visible 1
+	}
+
+	itemDef {
+		type 4
+		text "Model:"
+		rect 10 64 220 18
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "model"
+		maxChars 64
+		visible 1
+	}
+
+	itemDef {
+		type 12
+		text "Color:"
+		rect 10 88 220 18
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "color1"
+		cvarFloatList { "White" 5 "Blue" 1 "Cyan" 2 "Green" 3 "Yellow" 4 "Red" 6 "Pink" 7 }
+		visible 1
+	}
+
+	SEPARATOR(10, 114, 220)
+	BUTTON(70, 128, 100, 20, "Back", 0.35, close)
+}

@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "client.h"
+#include "cl_wired_ui.h"
 
 /*
 
@@ -661,7 +662,7 @@ static void CL_KeyDownEvent( int key, unsigned time )
 
 		if ( !( Key_GetCatcher( ) & KEYCATCH_UI ) ) {
 			if ( cls.state == CA_ACTIVE && !clc.demoplaying ) {
-				VM_Call( uivm, 1, UI_SET_ACTIVE_MENU, UIMENU_INGAME );
+				UI_CALL_SET_ACTIVE( UIMENU_INGAME );
 			}
 			else if ( cls.state != CA_DISCONNECTED ) {
 #if 0
@@ -676,12 +677,12 @@ static void CL_KeyDownEvent( int key, unsigned time )
 					CL_FlushMemory();
 				}
 #endif
-				VM_Call( uivm, 1, UI_SET_ACTIVE_MENU, UIMENU_MAIN );
+				UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 			}
 			return;
 		}
 
-		VM_Call( uivm, 2, UI_KEY_EVENT, key, qtrue );
+		UI_CALL_KEY_EVENT( key, qtrue );
 		return;
 	}
 
@@ -689,8 +690,8 @@ static void CL_KeyDownEvent( int key, unsigned time )
 	if ( Key_GetCatcher( ) & KEYCATCH_CONSOLE ) {
 		Console_Key( key );
 	} else if ( Key_GetCatcher( ) & KEYCATCH_UI ) {
-		if ( uivm ) {
-			VM_Call( uivm, 2, UI_KEY_EVENT, key, qtrue );
+		if ( UI_VM_ACTIVE ) {
+			UI_CALL_KEY_EVENT( key, qtrue );
 		}
 	} else if ( Key_GetCatcher( ) & KEYCATCH_CGAME ) {
 		if ( cgvm ) {
@@ -749,8 +750,8 @@ static void CL_KeyUpEvent( int key, unsigned time )
 	}
 
 	if ( Key_GetCatcher() & KEYCATCH_UI ) {
-		if ( uivm ) {
-			VM_Call( uivm, 2, UI_KEY_EVENT, key, qfalse );
+		if ( UI_VM_ACTIVE ) {
+			UI_CALL_KEY_EVENT( key, qfalse );
 		}
 	} else if ( Key_GetCatcher() & KEYCATCH_CGAME ) {
 		if ( cgvm ) {
@@ -801,7 +802,7 @@ void CL_CharEvent( int key )
 	}
 	else if ( Key_GetCatcher( ) & KEYCATCH_UI )
 	{
-		VM_Call( uivm, 2, UI_KEY_EVENT, key | K_CHAR_FLAG, qtrue );
+		UI_CALL_KEY_EVENT( key | K_CHAR_FLAG, qtrue );
 	}
 	else if ( Key_GetCatcher( ) & KEYCATCH_MESSAGE )
 	{

@@ -5,13 +5,13 @@
 #
 # GENERATION TARGETS
 #   make create-launcher    build Go/Wails launcher binary
-#   make create-paks        package modfiles/ + QVMs → pax02.pk3 (or .sw3z)
+#   make create-packs        package modfiles/ + VM modules → mod pack
 #
 # COPY TARGETS (assemble .app at Q3DIR)
 #   make copy-libs          copy renderer + dependency dylibs into .app
 #   make copy-build         copy Release engine + game dylibs into .app
 #   make copy-build-debug   copy Debug engine + game dylibs into .app
-#   make copy-paks          copy mod pak into .app data directory
+#   make copy-packs          copy mod pack into .app data directory
 #
 # BUNDLING TARGETS
 #   make bundle-codesign    codesign the .app bundle (macOS)
@@ -20,24 +20,29 @@
 #
 # FLOW TARGETS
 #   make run-launcher       build + assemble + codesign + open launcher
-#   make run-game           build + assemble + run engine (QVM mode)
-#   make run-gamedev        build-debug + assemble + run engine (native debug)
-#   make run-gamedev-wasm   build-debug + run engine (WASM game modules)
+#   make run-game                     run engine (main menu)
+#   make run-game DEV=1               developer mode (debug build)
+#   make run-game DEV=1 MAP=q3dm17    devmap with debug
+#   make run-game VM=1 MAP=q3dm17     VM modules + map
 #   make release            build + assemble + codesign + package
 #
 # VARIABLES (override on command line or env)
 #   Q3DIR              install destination      (default: /Applications/q3now on macOS)
 #   JOBS               parallel job count       (default: CPU count)
-#   MAP                map to load              (default: q3dm1)
-#   USE_SW3Z           archive format           (0=pk3/zip, 1=sw3z; default: 0)
-#   USE_WASM           WASM VM backend via WAMR (0=off, 1=on; default: 0)
+#   MAP                map to load              (default: none = main menu)
+#   DEV                developer mode           (default: 0; 1 = debug build + developer 1)
+#   VM                 VM game modules           (default: 0; 1=VM + sv_pure 1)
+#   USE_SW3Z           archive format           (0=legacy pk3, 1=sw3z; default: 0)
+#   USE_WASM           VM backend via WAMR       (0=off, 1=on; default: 1)
 #   CODESIGN_IDENTITY  signing identity         (default: - = ad-hoc)
 #   UPSTREAM_REF       fork point for diff-api  (default: ecd5fa41)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
 APP_NAME   ?= q3now
-MAP        ?= q3dm17
+MAP        ?=
+DEV        ?= 0
+VM         ?= 0
 
 # Dual build directories — avoid cmake reconfigure thrash between Release/Debug
 BUILD_DIR_RELEASE := build/release
@@ -115,7 +120,7 @@ else
   GENERATOR :=
 endif
 
-# WASM VM backend toggle: 1 = enable WAMR, 0 = QVM only
+# VM backend toggle: 1 = enable WAMR, 0 = legacy QVM only
 USE_WASM ?= 1
 
 ifeq ($(USE_WASM),1)
@@ -177,13 +182,13 @@ WAILS_TAGS   ?=
 SW3Z_DIR := pkg/sw3z-archiver
 SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
 
-# Archive format toggle: 1 = sw3z, 0 = pk3 (zip)
+# Archive format toggle: 1 = sw3z, 0 = legacy pk3
 USE_SW3Z ?= 1
 
-# WASM VM backend toggle: 1 = enable WAMR, 0 = QVM only (moved to top, before ifeq)
+# VM backend toggle (moved to top, before ifeq)
 # USE_WASM is defined near other cmake flags above
 
-# Pak output (always from Release build — QVMs are always Release)
+# Pak output (always from Release build — VM modules are always Release)
 PAK_STAGING := $(BUILD_DIR_RELEASE)/pak-staging
 ifeq ($(USE_SW3Z),1)
   PAK_EXT := sw3z
@@ -195,11 +200,11 @@ PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax02.$(PAK_EXT)
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
 .PHONY: all configure build build-debug clean rebuild \
-        create-launcher create-paks \
-        copy-libs copy-build copy-build-debug copy-paks copy-all copy-all-debug \
+        create-launcher create-packs \
+        copy-libs copy-build copy-build-debug copy-packs copy-all copy-all-debug \
         bundle-codesign bundle-dmg bundle-tar bundle-zip \
-        run-launcher run-game run-gamedev run-gamedev-wasm release \
-        check smoke test-features bench diff-api help
+        run-launcher run-game release \
+        check smoke test-features test-vm bench diff-api help
 
 all: build
 
@@ -239,18 +244,18 @@ create-launcher:
 	  $(WAILS_TAGS) -ldflags "-X main.version=$(VERSION)"
 	@echo "==> Launcher ready: $(LAUNCHER_BIN)"
 
-# ── create-paks ──────────────────────────────────────────────────────────────
-# Packages modfiles/ + WASM modules into pax02.pk3 (or .sw3z when USE_SW3Z=1).
+# ── create-packs ──────────────────────────────────────────────────────────────
+# Packages modfiles/ + VM modules into the mod pack (pax02.sw3z or legacy .pk3).
 # "pax02" sorts after pak0–pak8, ensuring highest override priority.
-# WASM modules here override the stock 1999 QVMs in pak0.pk3.
+# VM modules here override the stock 1999 bytecode in the base pack.
 
 $(SW3Z_BIN):
 	cd $(SW3Z_DIR) && go build -o $(CURDIR)/$(SW3Z_BIN) ./cmd/sw3z
 
 ifeq ($(USE_SW3Z),1)
-create-paks: build $(SW3Z_BIN)
+create-packs: build $(SW3Z_BIN)
 else
-create-paks: build
+create-packs: build
 endif
 	@echo "==> Staging pak contents..."
 	rm -rf $(PAK_STAGING)
@@ -381,25 +386,25 @@ else
 	done
 endif
 
-# ── copy-paks ────────────────────────────────────────────────────────────────
-# Copies the mod pak (pk3 or sw3z) into Q3DATADIR. Removes stale format.
+# ── copy-packs ────────────────────────────────────────────────────────────────
+# Copies the mod pack into Q3DATADIR. Removes stale format.
 
-copy-paks: create-paks
+copy-packs: create-packs
 	mkdir -p "$(Q3DATADIR)"
 ifeq ($(USE_SW3Z),1)
-	@echo "==> Copying sw3z pak to $(Q3DATADIR)/"
+	@echo "==> Copying mod pack to $(Q3DATADIR)/"
 	@rm -f "$(Q3DATADIR)/zz-$(APP_NAME).pk3"
 	cp "$(PAK_OUT)" "$(Q3DATADIR)/"
 else
-	@echo "==> Copying pk3 pak to $(Q3DATADIR)/"
+	@echo "==> Copying mod pack to $(Q3DATADIR)/"
 	@rm -f "$(Q3DATADIR)/zz-$(APP_NAME).sw3z"
 	cp "$(PAK_OUT)" "$(Q3DATADIR)/"
 endif
 
 # ── Composite helpers ────────────────────────────────────────────────────────
 
-copy-all:       copy-build copy-libs copy-paks
-copy-all-debug: copy-build-debug copy-libs copy-paks
+copy-all:       copy-build copy-libs copy-packs
+copy-all-debug: copy-build-debug copy-libs copy-packs
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BUNDLING TARGETS — codesign, package for distribution
@@ -511,52 +516,73 @@ else
 endif
 
 # ── run-game ─────────────────────────────────────────────────────────────────
-# Build engine + paks, assemble .app, run engine directly (QVM mode, no launcher).
+# Build engine + paks, assemble .app, run engine directly.
+#
+# Variables:
+#   DEV=1    debug build, developer mode                       (default: 0)
+#   VM=1     use VM game modules instead of native dylibs      (default: 0)
+#   MAP=X    load map X; uses +devmap when DEV=1, +map otherwise
+#
+# Examples:
+#   make run-game                    main menu (native dylibs)
+#   make run-game MAP=q3dm17         load q3dm17
+#   make run-game DEV=1              debug build, developer mode
+#   make run-game DEV=1 MAP=q3dm17   debug build, devmap q3dm17
+#   make run-game VM=1 MAP=q3dm17    VM modules, load q3dm17
 
-run-game: copy-all
-ifeq ($(UNAME_S),Darwin)
-	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" +map $(MAP)
+# Build the right target based on DEV flag
+ifeq ($(DEV),1)
+_RUN_GAME_DEP := copy-all-debug
 else
-	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" +map $(MAP)
+_RUN_GAME_DEP := copy-all
 endif
 
-# ── run-gamedev ──────────────────────────────────────────────────────────────
-# Build Debug engine + paks, assemble .app, run with native dylibs (vm_*=0).
-# sv_pure disabled, developer mode enabled — for debugging with crash symbols.
-
-run-gamedev: copy-all-debug
-ifeq ($(UNAME_S),Darwin)
-	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" \
-	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
-	  +set developer 1 +devmap $(MAP)
+# VM mode: 0=native dylibs (default), 1=VM modules (sv_pure 1)
+ifeq ($(VM),1)
+_RUN_VM_ARGS := +set sv_pure 1 +set vm_game 2 +set vm_cgame 2 +set vm_ui 2
 else
-	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" \
-	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
-	  +set developer 1 +devmap $(MAP)
+_RUN_VM_ARGS := +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0
 endif
 
-# ── run-gamedev-wasm ─────────────────────────────────────────────────────────
-# Build + run the full game client with WASM modules (auto-detect).
-# cmake builds all three .wasm modules; this target copies them into the app.
+# Compose command-line arguments
+_RUN_GAME_ARGS := $(_RUN_VM_ARGS)
+ifeq ($(DEV),1)
+_RUN_GAME_ARGS += +set developer 1
+endif
+ifneq ($(MAP),)
+ifeq ($(DEV),1)
+_RUN_GAME_ARGS += +devmap $(MAP)
+else
+_RUN_GAME_ARGS += +map $(MAP)
+endif
+endif
 
-run-gamedev-wasm: copy-all-debug
+# Copy VM modules into .app when VM=1
+_RUN_VM_COPY :=
+ifeq ($(VM),1)
+_RUN_VM_COPY := _copy-vm
+endif
+
+_copy-vm:
 ifeq ($(UNAME_S),Darwin)
 	@mkdir -p "$(Q3DIR)/Contents/Resources/baseq3/vm"
 	@for f in $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.wasm $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.aot; do \
 		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/Contents/Resources/baseq3/vm/" || true; \
 	done
-	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" \
-	  +set sv_pure 0 +set vm_game 2 +set vm_cgame 2 +set vm_ui 2 \
-	  +set developer 1 +devmap $(MAP)
 else
 	@mkdir -p "$(Q3DIR)/baseq3/vm"
 	@for f in $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.wasm $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.aot; do \
 		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/baseq3/vm/" || true; \
 	done
-	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" \
-	  +set sv_pure 0 +set vm_game 2 +set vm_cgame 2 +set vm_ui 2 \
-	  +set developer 1 +devmap $(MAP)
 endif
+
+run-game: $(_RUN_GAME_DEP) $(_RUN_VM_COPY)
+ifeq ($(UNAME_S),Darwin)
+	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" $(_RUN_GAME_ARGS)
+else
+	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" $(_RUN_GAME_ARGS)
+endif
+
 
 # ── release ──────────────────────────────────────────────────────────────────
 # Verify outputs, build launcher + engine + paks, assemble .app, codesign,
@@ -592,15 +618,15 @@ endif
 # ── check ────────────────────────────────────────────────────────────────────
 # Verifies all build outputs are present.
 
-check: create-paks
+check: create-packs
 	@echo "==> Verifying build..."
-	@ls $(MODULE_DIR_RELEASE)/vm/cgame.wasm  > /dev/null 2>&1 && echo "  cgame.wasm:  OK" || echo "  cgame.wasm:  MISSING (wasi-sdk not found?)"
-	@ls $(MODULE_DIR_RELEASE)/vm/qagame.wasm > /dev/null 2>&1 && echo "  qagame.wasm: OK" || echo "  qagame.wasm: MISSING (wasi-sdk not found?)"
-	@ls $(MODULE_DIR_RELEASE)/vm/ui.wasm     > /dev/null 2>&1 && echo "  ui.wasm:     OK" || echo "  ui.wasm:     MISSING (wasi-sdk not found?)"
+	@ls $(MODULE_DIR_RELEASE)/vm/cgame.wasm  > /dev/null 2>&1 && echo "  cgame VM:    OK" || echo "  cgame VM:    MISSING (wasi-sdk not found?)"
+	@ls $(MODULE_DIR_RELEASE)/vm/qagame.wasm > /dev/null 2>&1 && echo "  qagame VM:   OK" || echo "  qagame VM:   MISSING (wasi-sdk not found?)"
+	@ls $(MODULE_DIR_RELEASE)/vm/ui.wasm     > /dev/null 2>&1 && echo "  ui VM:       OK" || echo "  ui VM:       MISSING (wasi-sdk not found?)"
 	@ls $(MODULE_DIR_RELEASE)/cgame$(GAME_ARCH).*    > /dev/null 2>&1 && echo "  cgame native: OK" || echo "  cgame native: MISSING"
 	@ls $(MODULE_DIR_RELEASE)/qagame$(GAME_ARCH).*  > /dev/null 2>&1 && echo "  qagame native: OK" || echo "  qagame native: MISSING"
 	@ls $(MODULE_DIR_RELEASE)/ui$(GAME_ARCH).*      > /dev/null 2>&1 && echo "  ui native:    OK" || echo "  ui native:    MISSING"
-	@test -f $(PAK_OUT) && echo "  mod pak:     OK ($(PAK_EXT))"
+	@test -f $(PAK_OUT) && echo "  mod pack:     OK ($(PAK_EXT))"
 ifeq ($(UNAME_S),Darwin)
 	@codesign --verify "$(Q3DIR)" 2>/dev/null && echo "  codesign:    OK" || echo "  codesign:    MISSING (run make bundle-codesign)"
 	@codesign -d --entitlements - "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" 2>/dev/null | grep -q "allow-jit" && echo "  JIT entitlement: OK" || echo "  JIT entitlement: MISSING"
@@ -608,7 +634,7 @@ endif
 	@echo "==> All checks passed."
 
 # ── smoke ────────────────────────────────────────────────────────────────────
-# Headless gameplay smoke test. Requires Q3DIR with pak0.pk3.
+# Headless gameplay smoke test. Requires Q3DIR with base game pack.
 
 smoke: build
 ifeq ($(UNAME_S),Darwin)
@@ -642,9 +668,9 @@ else
 	@echo "test-features: not yet implemented for Linux"
 endif
 
-# ── WASM ─────────────────────────────────────────────────────────────────────
+# ── VM smoke test ────────────────────────────────────────────────────────────
 
-test-wasm:
+test-vm:
 	@bash tests/smoke-wasm.sh
 
 # ── bench ────────────────────────────────────────────────────────────────────
@@ -693,13 +719,13 @@ help:
 	@echo ""
 	@echo "  Generation:"
 	@echo "    make create-launcher    build Go/Wails launcher binary"
-	@echo "    make create-paks        package modfiles/ + QVMs → .$(PAK_EXT)"
+	@echo "    make create-packs        package modfiles/ + VM modules → .$(PAK_EXT)"
 	@echo ""
 	@echo "  Copy (assemble .app):"
 	@echo "    make copy-build         Release engine + dylibs → .app"
 	@echo "    make copy-build-debug   Debug engine + dylibs → .app"
 	@echo "    make copy-libs          renderer + deps → .app"
-	@echo "    make copy-paks          mod pak (.$(PAK_EXT)) → .app"
+	@echo "    make copy-packs          mod pack (.$(PAK_EXT)) → .app"
 	@echo "    make copy-all           all of the above (Release)"
 	@echo "    make copy-all-debug     all of the above (Debug)"
 	@echo ""
@@ -711,9 +737,10 @@ help:
 	@echo ""
 	@echo "  Flows:"
 	@echo "    make run-launcher       build + assemble + codesign + open launcher"
-	@echo "    make run-game           build + assemble + run engine (QVM)"
-	@echo "    make run-gamedev        build-debug + assemble + run engine (native)"
-	@echo "    make run-gamedev-wasm   build-debug + run engine (WASM modules)"
+	@echo "    make run-game                     run engine (main menu)"
+	@echo "    make run-game DEV=1               developer mode (debug build)"
+	@echo "    make run-game DEV=1 MAP=q3dm17    devmap with debug"
+	@echo "    make run-game VM=1 MAP=q3dm17     VM modules + map"
 	@echo "    make release            build + assemble + codesign + package"
 	@echo ""
 	@echo "  Testing:"
@@ -725,6 +752,6 @@ help:
 	@echo ""
 	@echo "  Variables:"
 	@echo "    Q3DIR=$(Q3DIR)"
-	@echo "    JOBS=$(JOBS)   MAP=$(MAP)   DEMO=$(DEMO)"
+	@echo "    JOBS=$(JOBS)   MAP=$(MAP)   DEV=$(DEV)   VM=$(VM)   DEMO=$(DEMO)"
 	@echo "    USE_SW3Z=$(USE_SW3Z)   USE_WASM=$(USE_WASM)   CODESIGN_IDENTITY=$(CODESIGN_IDENTITY)"
 	@echo ""

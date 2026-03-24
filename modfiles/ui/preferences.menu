@@ -1,0 +1,76 @@
+// preferences.menu - Wired UI gameplay preferences panel (scrollable)
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "preferences"
+	rect 170 40 300 400
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor COLOR_FOCUS
+
+	onESC { close }
+
+	LABEL(0, 8, 300, 18, "Preferences", 0.5, 1)
+	SEPARATOR(10, 28, 280)
+
+	itemDef {
+		type 12
+		text "Crosshair:"
+		rect 10 38 280 18
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "cg_drawCrosshair"
+		cvarFloatList { "None" 0 "Cross" 1 "Dot" 2 "Circle" 3 "Bracket" 4 "X" 5 "Diamond" 6 }
+		visible 1
+	}
+
+	itemDef {
+		type 10
+		text "Crosshair Size:"
+		rect 10 60 280 18
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvarFloat "cg_crosshairSize" 24 12 64
+		visible 1
+	}
+
+	SEPARATOR(10, 84, 280)
+
+	YESNO(10, 94, 280, 18, "Simple Items:", 0.3, "cg_simpleItems")
+	YESNO(10, 116, 280, 18, "Eject Brass:", 0.3, "cg_brassTime")
+	YESNO(10, 138, 280, 18, "Wall Marks:", 0.3, "cg_marks")
+	YESNO(10, 160, 280, 18, "Dynamic Lights:", 0.3, "r_dynamiclight")
+	YESNO(10, 182, 280, 18, "Force Model:", 0.3, "cg_forceModel")
+
+	SEPARATOR(10, 206, 280)
+
+	itemDef {
+		type 12
+		text "Team Overlay:"
+		rect 10 216 280 18
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "cg_drawTeamOverlay"
+		cvarFloatList { "Off" 0 "Upper Right" 1 "Lower Right" 2 "Lower Left" 3 }
+		visible 1
+	}
+
+	YESNO(10, 238, 280, 18, "Identify Target:", 0.3, "cg_drawFriend")
+
+	itemDef {
+		type 12
+		text "Auto-Switch:"
+		rect 10 260 280 18
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "cg_autoswitch"
+		cvarFloatList { "Off" 0 "Best Safe" 1 "Always Best" 2 }
+		visible 1
+	}
+
+	SEPARATOR(10, 286, 280)
+	BUTTON(100, 298, 100, 20, "Back", 0.35, close)
+}

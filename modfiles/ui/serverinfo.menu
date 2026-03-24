@@ -1,0 +1,36 @@
+// serverinfo.menu - Wired UI server info popup
+// Ports: code/q3_ui/ui_serverinfo.c
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "serverinfo"
+	rect 120 80 400 320
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+
+	onESC { close }
+
+	LABEL(0, 12, 400, 20, "Server Info", 0.5, 1)
+	SEPARATOR(16, 36, 368)
+
+	// server status info from FEEDER_SERVERSTATUS
+	itemDef {
+		name "statuslist"
+		type 6
+		rect 16 48 368 240
+		textscale 0.25
+		forecolor 1 1 1 1
+		backcolor 0.12 0.12 0.17 0.8
+		style 1
+		feeder 13
+		elementheight 14
+		columns 2 0 180 32 180 180 32
+		visible 1
+	}
+
+	BUTTON(150, 296, 100, BUTTON_H, "Close", 0.4, close)
+}

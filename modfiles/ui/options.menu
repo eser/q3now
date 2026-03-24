@@ -1,0 +1,29 @@
+// options.menu - Wired UI options hub
+// Centered panel
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "options"
+	rect 220 60 200 360
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor COLOR_FOCUS
+
+	onESC { close }
+
+	LABEL(0, 12, 200, 20, "Options", 0.6, 1)
+	SEPARATOR(12, 36, 176)
+
+	BUTTON(10, 48, 180, BUTTON_H, "Video", 0.45, open "video")
+	BUTTON(10, 76, 180, BUTTON_H, "Display", 0.45, open "display")
+	BUTTON(10, 104, 180, BUTTON_H, "Sound", 0.45, open "sound")
+	BUTTON(10, 132, 180, BUTTON_H, "Controls", 0.45, open "controls")
+	BUTTON(10, 160, 180, BUTTON_H, "Network", 0.45, open "network")
+	BUTTON(10, 188, 180, BUTTON_H, "Preferences", 0.45, open "preferences")
+	BUTTON(10, 216, 180, BUTTON_H, "Player", 0.45, open "playersettings")
+	SEPARATOR(12, 244, 176)
+	BUTTON(10, 256, 180, BUTTON_H, "Back", 0.45, close)
+}

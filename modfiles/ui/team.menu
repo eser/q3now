@@ -1,0 +1,26 @@
+// team.menu - Wired UI team selection
+// Ports: code/q3_ui/ui_team.c
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "team"
+	rect 200 120 240 240
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+
+	onESC { close }
+
+	LABEL(0, 12, 240, 20, "Join Team", 0.5, 1)
+	SEPARATOR(16, 36, 208)
+
+	BUTTON_NAMED("red", 20, 52, 200, BUTTON_H, "Red Team", 0.4, exec "cmd team red" ; close)
+	BUTTON_NAMED("blue", 20, 80, 200, BUTTON_H, "Blue Team", 0.4, exec "cmd team blue" ; close)
+	BUTTON(20, 108, 200, BUTTON_H, "Auto Join", 0.4, exec "cmd team auto" ; close)
+	SEPARATOR(16, 136, 208)
+	BUTTON(20, 148, 200, BUTTON_H, "Spectator", 0.4, exec "cmd team spectator" ; close)
+	BUTTON(20, 176, 200, BUTTON_H, "Cancel", 0.4, close)
+}

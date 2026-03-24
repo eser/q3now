@@ -1,0 +1,28 @@
+// teamorders.menu - Wired UI team orders
+// Ports: code/q3_ui/ui_teamorders.c
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "teamorders"
+	rect 200 100 240 260
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+
+	onESC { close }
+
+	LABEL(0, 12, 240, 20, "Team Orders", 0.5, 1)
+	SEPARATOR(16, 36, 208)
+
+	BUTTON(20, 48, 200, BUTTON_H, "Get Flag", 0.35, exec "cmd vsay_team getflag" ; close)
+	BUTTON(20, 76, 200, BUTTON_H, "Offense", 0.35, exec "cmd vsay_team offense" ; close)
+	BUTTON(20, 104, 200, BUTTON_H, "Defend", 0.35, exec "cmd vsay_team defend" ; close)
+	BUTTON(20, 132, 200, BUTTON_H, "Patrol", 0.35, exec "cmd vsay_team patrol" ; close)
+	BUTTON(20, 160, 200, BUTTON_H, "Follow Me", 0.35, exec "cmd vsay_team followme" ; close)
+
+	SEPARATOR(16, 190, 208)
+	BUTTON(20, 202, 200, BUTTON_H, "Cancel", 0.4, close)
+}
