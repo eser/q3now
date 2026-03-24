@@ -22,6 +22,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // sv_game.c -- interface to the game dll
 
 #include "server.h"
+#include "../game/q_feats.h"
+
+#if FEAT_QUIC_TRANSPORT
+#include "../webtransport/wt_public.h"
+#endif
 
 #include "../botlib/botlib.h"
 
@@ -446,7 +451,7 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		SV_UnlinkEntity( VMA(1) );
 		return 0;
 	case G_ENTITIES_IN_BOX:
-		VM_CHECKBOUNDS( gvm, args[3], args[4] * sizeof( int ) );
+		VM_CHECKBOUNDS3( gvm, args[3], args[4], sizeof( int ) );
 		return SV_AreaEntities( VMA(1), VMA(2), VMA(3), args[4] );
 	case G_ENTITY_CONTACT:
 		return SV_EntityContact( VMA(1), VMA(2), VMA(3), /*int capsule*/ qfalse );
@@ -973,6 +978,33 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case G_TRAP_GETVALUE:
 		VM_CHECKBOUNDS( gvm, args[1], args[2] );
 		return SV_GetValue( VMA(1), args[2], VMA(3) );
+
+#if FEAT_QUIC_OBSERVE
+	// ── QUIC event emission syscalls ────────────────────────────
+	// Game code (g_combat.c, g_items.c, g_cmds.c) calls these via
+	// trap_QUIC_Emit*() which triggers a VM syscall to this handler.
+	case G_QUIC_EMIT_KILL:
+		QUIC_EmitKill( args[1], args[2], args[3], VMA(4), VMA(5) );
+		return 0;
+	case G_QUIC_EMIT_DAMAGE:
+		QUIC_EmitDamage( args[1], args[2], args[3], args[4], VMA(5), VMA(6) );
+		return 0;
+	case G_QUIC_EMIT_ITEM_PICKUP:
+		QUIC_EmitItemPickup( args[1], VMA(2), VMA(3) );
+		return 0;
+	case G_QUIC_EMIT_CHAT:
+		QUIC_EmitChat( args[1], VMA(2), args[3] );
+		return 0;
+	case G_QUIC_EMIT_MATCH_EVENT:
+		QUIC_EmitMatchEvent( VMA(1), VMA(2) );
+		return 0;
+	case G_QUIC_EMIT_DELAG:
+		// delag event: shooter, target, timeDelta, shooterPos, targetPos
+		// Currently a no-op on the server side — the event is logged
+		// but no dedicated QUIC handler exists yet. The trap exists so
+		// game code can emit the event when one is wired up.
+		return 0;
+#endif
 
 	default:
 		Com_Error( ERR_DROP, "Bad game system trap: %ld", (long int) args[0] );

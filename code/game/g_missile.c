@@ -528,6 +528,9 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 	bolt->s.weapon = WP_PLASMAGUN;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
+#if FEAT_UNLAGGED
+	bolt->s.otherEntityNum = self->s.number;
+#endif
     bolt->damage = 20;
 	bolt->methodOfDeath = MOD_PLASMA;
 	bolt->clipmask = MASK_SHOT;
@@ -597,6 +600,9 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 	bolt->s.eFlags = (bounce) ? EF_GRENADE_BOUNCE : 0;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
+#if FEAT_UNLAGGED
+	bolt->s.otherEntityNum = self->s.number;
+#endif
 	bolt->damage = 120;
 	bolt->splashDamage = 120;
 	bolt->splashRadius = splashRadius;
@@ -653,6 +659,9 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->s.weapon = WP_ROCKET_LAUNCHER;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
+#if FEAT_UNLAGGED
+	bolt->s.otherEntityNum = self->s.number;
+#endif
 	bolt->damage = 120;
 	bolt->splashDamage = 120;
 	bolt->splashRadius = splashRadius;

@@ -133,9 +133,7 @@ NET
 
 ==============================================================
 */
-#ifndef DISABLE_IPV6
-#define USE_IPV6
-#endif
+#define FEAT_IPV6
 
 #define NET_ENABLEV4            0x01
 #define NET_ENABLEV6            0x02
@@ -163,7 +161,7 @@ typedef enum {
 	NA_LOOPBACK,
 	NA_BROADCAST,
 	NA_IP,
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	NA_IP6,
 	NA_MULTICAST6,
 #endif
@@ -183,12 +181,12 @@ typedef struct {
 	netadrtype_t	type;
 	union {
 		byte	_4[4];
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		byte	_6[16];
 #endif
 	} ipv;
 	uint16_t	port;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	uint32_t	scope_id;	// Needed for IPv6 link-local addresses
 #endif
 } netadr_t;
@@ -211,7 +209,7 @@ int         NET_StringToAdr( const char *s, netadr_t *a, netadrtype_t family );
 #ifndef DEDICATED
 qboolean	NET_GetLoopPacket( netsrc_t sock, netadr_t *net_from, msg_t *net_message );
 #endif
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 void		NET_JoinMulticast6( void );
 void		NET_LeaveMulticast6( void );
 #endif
@@ -288,7 +286,7 @@ PROTOCOL
 
 #define	OLD_PROTOCOL_VERSION	68
 // new protocol with UDP spoofing protection:
-#define	NEW_PROTOCOL_VERSION	71
+#define	NEW_PROTOCOL_VERSION	72
 // 1.31 - 67
 
 #define DEFAULT_PROTOCOL_VERSION	OLD_PROTOCOL_VERSION
@@ -413,13 +411,16 @@ intptr_t	QDECL VM_Call( vm_t *vm, int nargs, int callNum, ... );
 void	VM_Debug( int level );
 void	VM_CheckBounds( const vm_t *vm, unsigned int address, unsigned int length );
 void	VM_CheckBounds2( const vm_t *vm, unsigned int addr1, unsigned int addr2, unsigned int length );
+void	VM_CheckBounds3( const vm_t *vm, unsigned int address, unsigned int count, unsigned int size );
 
 #if 1
 #define VM_CHECKBOUNDS VM_CheckBounds
 #define VM_CHECKBOUNDS2 VM_CheckBounds2
+#define VM_CHECKBOUNDS3 VM_CheckBounds3
 #else // for performance evaluation purposes
 #define VM_CHECKBOUNDS(vm,a,b)
 #define VM_CHECKBOUNDS2(vm,a,b,c)
+#define VM_CHECKBOUNDS3(vm,a,b,c)
 #endif
 
 void	*GVM_ArgPtr( intptr_t intValue );

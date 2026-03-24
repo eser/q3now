@@ -446,8 +446,21 @@ static void CG_Missile( centity_t *cent ) {
 	// calculate the axis
 	VectorCopy( s1->angles, cent->lerpAngles);
 
+#if FEAT_ZNUDGE
+	// znudge: extrapolate missile position forward by ping
+	if ( cg_znudge.integer && cg_znProjectiles.integer ) {
+		float nudge = ZN_GetNudge();
+		if ( s1->weapon == WP_ROCKET_LAUNCHER ||
+		     s1->weapon == WP_PLASMAGUN ) {
+			ZN_PredictMissile( cent, nudge, cent->lerpOrigin );
+		} else if ( s1->weapon == WP_GRENADE_LAUNCHER ) {
+			ZN_PredictGrenade( cent, nudge, cent->lerpOrigin );
+		}
+	}
+#endif
+
 	// add trails
-	if ( weapon->missileTrailFunc ) 
+	if ( weapon->missileTrailFunc )
 	{
 		weapon->missileTrailFunc( cent, weapon );
 	}

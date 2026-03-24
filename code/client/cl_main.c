@@ -1561,7 +1561,7 @@ static void CL_Connect_f( void ) {
 	} else {
 		if( !strcmp( Cmd_Argv(1), "-4" ) )
 			family = NA_IP;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		else if( !strcmp( Cmd_Argv(1), "-6" ) )
 			family = NA_IP6;
 		else
@@ -2430,7 +2430,7 @@ static unsigned int hash_func( const netadr_t *addr ) {
 
 	switch ( addr->type ) {
 		case NA_IP:  ip = addr->ipv._4; size = 4;  break;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		case NA_IP6: ip = addr->ipv._6; size = 16; break;
 #endif
 		default: size = 0; break;
@@ -2532,7 +2532,7 @@ static void CL_ServersResponsePacket( const netadr_t* from, msg_t *msg, qboolean
 
 			addresses[numservers].type = NA_IP;
 		}
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		// IPv6 address, if it's an extended response
 		else if (extended && *buffptr == '/')
 		{
@@ -4244,7 +4244,7 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 				case NA_IP:
 					type = 1;
 					break;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 				case NA_IP6:
 					type = 2;
 					break;
@@ -4530,7 +4530,7 @@ static void CL_LocalServers_f( void ) {
 
 			to.type = NA_BROADCAST;
 			NET_SendPacket( NS_CLIENT, n, message, &to );
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			to.type = NA_MULTICAST6;
 			NET_SendPacket( NS_CLIENT, n, message, &to );
 #endif
@@ -4611,7 +4611,7 @@ static void CL_GlobalServers_f( void ) {
 	cls.pingUpdateSource = AS_GLOBAL;
 
 	// Use the extended query for IPv6 masters
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	if ( to.type == NA_IP6 || to.type == NA_MULTICAST6 )
 	{
 		int v4enabled = Cvar_VariableIntegerValue( "net_enabled" ) & NET_ENABLEV4;
@@ -4823,7 +4823,7 @@ static void CL_Ping_f( void ) {
 	{
 		if( !strcmp( Cmd_Argv(1), "-4" ) )
 			family = NA_IP;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 		else if( !strcmp( Cmd_Argv(1), "-6" ) )
 			family = NA_IP6;
 		else
@@ -4978,7 +4978,7 @@ static void CL_ServerStatus_f( void ) {
 		if (cls.state != CA_ACTIVE || clc.demoplaying)
 		{
 			Com_Printf( "Not connected to a server.\n" );
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			Com_Printf( "usage: serverstatus [-4|-6] <server>\n" );
 #else
 			Com_Printf("usage: serverstatus <server>\n");
@@ -4999,7 +4999,7 @@ static void CL_ServerStatus_f( void ) {
 		{
 			if ( !strcmp( Cmd_Argv(1), "-4" ) )
 				family = NA_IP;
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 			else if ( !strcmp( Cmd_Argv(1), "-6" ) )
 				family = NA_IP6;
 			else

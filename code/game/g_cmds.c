@@ -1051,6 +1051,11 @@ static void Cmd_Say_f( gentity_t *ent, int mode, qboolean arg0 ) {
 
 	SanitizeChatText( p );
 
+#if FEAT_QUIC_OBSERVE
+	// QUIC event: chat message
+	trap_QUIC_EmitChat( ent->s.number, p, (mode == SAY_TEAM) );
+#endif
+
 	G_Say( ent, NULL, mode, p );
 }
 

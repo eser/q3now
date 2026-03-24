@@ -151,6 +151,18 @@ vmCvar_t	cg_thirdPersonFov;
 vmCvar_t	cg_thirdPersonAlpha;
 vmCvar_t	cg_fovTransitionTime;
 #endif
+#if FEAT_ZNUDGE
+vmCvar_t	cg_znudge;
+vmCvar_t	cg_znSmoothweight;
+vmCvar_t	cg_znProjectiles;
+vmCvar_t	cg_znOffset;
+vmCvar_t	cg_znPingWeight;
+vmCvar_t	cg_znGravity;
+vmCvar_t	cg_znMaxclips;
+vmCvar_t	cg_znClimbheight;
+vmCvar_t	cg_znRunningspeed;
+vmCvar_t	cg_znDrawball;
+#endif
 vmCvar_t	cg_lagometer;
 vmCvar_t	cg_synchronousClients;
 vmCvar_t 	cg_teamChatTime;
@@ -311,6 +323,18 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_thirdPersonFov,       "cg_thirdPersonFov",       "90", CVAR_ARCHIVE },
 	{ &cg_thirdPersonAlpha,     "cg_thirdPersonAlpha",     "-1", 0 },
 	{ &cg_fovTransitionTime,    "cg_fovTransitionTime",    "150", CVAR_ARCHIVE },
+#endif
+#if FEAT_ZNUDGE
+	{ &cg_znudge,        "cg_znudge",        "1",   CVAR_ARCHIVE },
+	{ &cg_znSmoothweight,"cg_znSmoothweight", "0.3", CVAR_ARCHIVE },
+	{ &cg_znProjectiles, "cg_znProjectiles",  "1",   CVAR_ARCHIVE },
+	{ &cg_znOffset,      "cg_znOffset",       "0",   CVAR_ARCHIVE },
+	{ &cg_znPingWeight,  "cg_znPingWeight",   "0.05",CVAR_ARCHIVE },
+	{ &cg_znGravity,     "cg_znGravity",      "800", CVAR_ARCHIVE },
+	{ &cg_znMaxclips,    "cg_znMaxclips",     "5",   CVAR_ARCHIVE },
+	{ &cg_znClimbheight, "cg_znClimbheight",  "18",  CVAR_ARCHIVE },
+	{ &cg_znRunningspeed,"cg_znRunningspeed", "320", CVAR_ARCHIVE },
+	{ &cg_znDrawball,    "cg_znDrawball",     "0",   CVAR_ARCHIVE },
 #endif
 	{ &cg_teamChatTime, "cg_teamChatTime", "3000", CVAR_ARCHIVE  },
 	{ &cg_teamChatHeight, "cg_teamChatHeight", "0", CVAR_ARCHIVE  },

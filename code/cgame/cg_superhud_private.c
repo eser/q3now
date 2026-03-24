@@ -170,6 +170,9 @@ static superHUDConfigElement_t superHUDConfigItemElements[] =
 	{ "playerStats_damageRatio", SE_IM, CG_SHUDElementCreatePlayerStatsDamageRatio, CG_SHUDElementPlayerStatsRoutine, CG_SHUDElementPlayerStatsDestroy },
 	{ "player_name", 0, CG_SHUDElementPlayerNameCreate, CG_SHUDElementPlayerNameRoutine, CG_SHUDElementPlayerNameDestroy },
 	{ "postdecorate", 0, CG_SHUDElementDecorCreate, CG_SHUDElementDecorRoutine, CG_SHUDElementDecorDestroy },
+#if FEAT_UNLAGGED
+	{ "netstats", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementNetStatsCreate, CG_SHUDElementNetStatsRoutine, CG_SHUDElementNetStatsDestroy },
+#endif
 	{ NULL },
 };
 

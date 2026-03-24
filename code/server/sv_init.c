@@ -21,6 +21,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "server.h"
+#include "../game/q_feats.h"
+
+#if FEAT_QUIC_TRANSPORT
+#include "../webtransport/wt_public.h"
+#endif
 
 
 /*
@@ -312,7 +317,7 @@ static void SV_Startup( void ) {
 	Cvar_Set( "sv_running", "1" );
 
 	// Join the ipv6 multicast group now that a map is running so clients can scan for us on the local network.
-#ifdef USE_IPV6
+#ifdef FEAT_IPV6
 	NET_JoinMulticast6();
 #endif
 }
@@ -827,6 +832,11 @@ void SV_Init( void )
 	SV_TrackCvarChanges();
 
 	SV_InitChallenger();
+
+#if FEAT_QUIC_TRANSPORT
+	QUIC_Init();
+	QUIC_RegisterCommands();
+#endif
 }
 
 
@@ -880,7 +890,11 @@ void SV_Shutdown( const char *finalmsg ) {
 
 	Com_Printf( "----- Server Shutdown (%s) -----\n", finalmsg );
 
-#ifdef USE_IPV6
+#if FEAT_QUIC_TRANSPORT
+	QUIC_Shutdown();
+#endif
+
+#ifdef FEAT_IPV6
 	NET_LeaveMulticast6();
 #endif
 

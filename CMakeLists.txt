@@ -15,6 +15,10 @@ OPTION(USE_VULKAN "" ON)
 OPTION(USE_SYSTEM_JPEG "" OFF)
 OPTION(USE_RENDERER_DLOPEN "" ON)
 OPTION(USE_WASM "Enable WASM VM backend via WAMR" OFF)
+OPTION(USE_QUIC "Enable QUIC transport via picoquic (FEAT_QUIC_TRANSPORT)" OFF)
+OPTION(USE_QUIC_OBSERVE "Enable QUIC game state observation (FEAT_QUIC_OBSERVE, implies USE_QUIC)" OFF)
+OPTION(USE_QUIC_CONTROL "Enable QUIC MCP/command channel (FEAT_QUIC_CONTROL, implies USE_QUIC_OBSERVE)" OFF)
+OPTION(USE_QUIC_HTTP "Enable QUIC HTTP endpoints (FEAT_QUIC_HTTP, implies USE_QUIC)" OFF)
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -121,6 +125,102 @@ ENDIF()
 IF(NO_VM_COMPILED)
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE NO_VM_COMPILED)
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE NO_VM_COMPILED)
+ENDIF()
+
+# ── QUIC Transport (picoquic) ─────────────────────────────────────
+# Layered: USE_QUIC_CONTROL → USE_QUIC_OBSERVE → USE_QUIC
+# Each higher layer auto-enables its prerequisites.
+IF(USE_QUIC_CONTROL)
+	SET(USE_QUIC_OBSERVE ON)
+ENDIF()
+IF(USE_QUIC_OBSERVE)
+	SET(USE_QUIC ON)
+ENDIF()
+IF(USE_QUIC_HTTP)
+	SET(USE_QUIC ON)
+ENDIF()
+
+IF(USE_QUIC)
+	# Feature flag defines — passed to compiler, override q_feats.h defaults
+	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_TRANSPORT=1)
+	IF(USE_QUIC_OBSERVE)
+		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_OBSERVE=1)
+	ENDIF()
+	IF(USE_QUIC_CONTROL)
+		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_CONTROL=1)
+	ENDIF()
+	IF(USE_QUIC_HTTP)
+		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_HTTP=1)
+	ENDIF()
+
+	# picoquic + picotls + mpack sources
+	# These are added as git submodules under code/libs/
+	FILE(GLOB PICOQUIC_SRCS code/libs/picoquic/picoquic/*.c)
+
+	# Exclude optional picoquic TLS backend adapters — we only use OpenSSL
+	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*minicrypto.*")
+	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*mbedtls.*")
+
+	# Exclude x86-only AES-NI fusion files on non-x86 platforms (ARM Mac, etc.)
+	IF(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86|i.86|x86_64")
+		list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*fusion.*")
+	ENDIF()
+
+	# Exclude qlog (optional logging, pulls in file I/O we don't need)
+	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*qlog.*")
+
+	# picotls — only compile the core + OpenSSL backend.
+	# Skip optional backends (cifra, mbedtls, brotli, fusion, uecc, minicrypto)
+	# to avoid pulling in dependencies we don't have.
+	SET(PICOTLS_SRCS
+		code/libs/picotls/lib/picotls.c
+		code/libs/picotls/lib/openssl.c
+		code/libs/picotls/lib/pembase64.c
+		code/libs/picotls/lib/asn1.c
+		code/libs/picotls/lib/hpke.c
+	)
+
+	FILE(GLOB MPACK_SRCS    code/libs/mpack/src/mpack/*.c)
+
+	# webtransport module — our integration code
+	FILE(GLOB WT_SRCS code/webtransport/*.c)
+
+	SET(QUIC_ALL_SRCS ${PICOQUIC_SRCS} ${PICOTLS_SRCS} ${MPACK_SRCS} ${WT_SRCS})
+
+	# Include paths
+	SET(QUIC_INCLUDE_DIRS
+		code/libs/picoquic/picoquic
+		code/libs/picotls/include
+		code/libs/mpack/src/mpack
+		code/webtransport
+	)
+
+	# OpenSSL (required by picotls for crypto primitives)
+	FIND_PACKAGE(OpenSSL REQUIRED)
+
+	# Add to qcommon (client) and qcommon_ded (dedicated server)
+	TARGET_SOURCES(qcommon PRIVATE ${QUIC_ALL_SRCS})
+	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${QUIC_INCLUDE_DIRS})
+	TARGET_LINK_LIBRARIES(qcommon PRIVATE OpenSSL::Crypto)
+
+	TARGET_SOURCES(qcommon_ded PRIVATE ${QUIC_ALL_SRCS})
+	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${QUIC_INCLUDE_DIRS})
+	TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE OpenSSL::Crypto)
+
+	MESSAGE(STATUS "QUIC transport enabled (picoquic)")
+	IF(USE_QUIC_OBSERVE)
+		MESSAGE(STATUS "  + QUIC observation (game state + events)")
+	ENDIF()
+	IF(USE_QUIC_CONTROL)
+		MESSAGE(STATUS "  + QUIC control (MCP + commands)")
+	ENDIF()
+	IF(USE_QUIC_HTTP)
+		MESSAGE(STATUS "  + QUIC HTTP (/health, /metrics)")
+	ENDIF()
+ELSE()
+	# When QUIC is disabled, override all FEAT_QUIC flags to 0
+	# (q_feats.h defaults are already 0, but this ensures consistency)
+	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_TRANSPORT=0)
 ENDIF()
 
 # client + cURL

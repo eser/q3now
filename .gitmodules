@@ -1,0 +1,9 @@
+[submodule "code/libs/mpack"]
+	path = code/libs/mpack
+	url = https://github.com/ludocode/mpack.git
+[submodule "code/libs/picoquic"]
+	path = code/libs/picoquic
+	url = https://github.com/private-octopus/picoquic.git
+[submodule "code/libs/picotls"]
+	path = code/libs/picotls
+	url = https://github.com/h2o/picotls.git

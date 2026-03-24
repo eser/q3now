@@ -270,6 +270,24 @@ void VM_CheckBounds2( const vm_t *vm, unsigned int addr1, unsigned int addr2, un
 }
 
 
+/*
+==============
+VM_CheckBounds3
+
+Overflow-safe bounds check for count*size products.
+Prevents integer overflow in args like: VM_CHECKBOUNDS(vm, addr, count * sizeof(int))
+==============
+*/
+void VM_CheckBounds3( const vm_t *vm, unsigned int address, unsigned int count, unsigned int size )
+{
+	uint64_t total = (uint64_t)count * size;
+	if ( total > vm->dataMask || address > vm->dataMask - (unsigned int)total )
+	{
+		Com_Error( ERR_DROP, "program tried to bypass data segment bounds" );
+	}
+}
+
+
 #if FEAT_WASM
 /*
 ==============

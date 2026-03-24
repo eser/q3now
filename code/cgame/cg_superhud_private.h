@@ -469,6 +469,12 @@ void* CG_SHUDElementFPSCreate(const superhudConfig_t* config);
 void CG_SHUDElementFPSRoutine(void* context);
 void CG_SHUDElementFPSDestroy(void* context);
 
+#if FEAT_UNLAGGED
+void* CG_SHUDElementNetStatsCreate(const superhudConfig_t* config);
+void CG_SHUDElementNetStatsRoutine(void* context);
+void CG_SHUDElementNetStatsDestroy(void* context);
+#endif
+
 void* CG_SHUDElementSBHCCreate(const superhudConfig_t* config);
 void CG_SHUDElementSBHCRoutine(void* context);
 void CG_SHUDElementSBHCDestroy(void* context);

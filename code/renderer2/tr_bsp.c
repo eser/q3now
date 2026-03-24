@@ -2192,9 +2192,16 @@ static void R_LoadLightGrid( const lump_t *l ) {
 		w->lightGridBounds[i] = (maxs[i] - w->lightGridOrigin[i])/w->lightGridSize[i] + 1;
 	}
 
+	if ( (uint64_t)w->lightGridBounds[0] * w->lightGridBounds[1] > INT_MAX ||
+		 (uint64_t)w->lightGridBounds[0] * w->lightGridBounds[1] * w->lightGridBounds[2] > INT_MAX ) {
+		ri.Printf( PRINT_WARNING, "WARNING: bad light grid bounds\n" );
+		w->lightGridData = NULL;
+		return;
+	}
+
 	numGridPoints = w->lightGridBounds[0] * w->lightGridBounds[1] * w->lightGridBounds[2];
 
-	if ( l->filelen != numGridPoints * 8 ) {
+	if ( l->filelen % 8 || l->filelen / 8 != numGridPoints ) {
 		ri.Printf( PRINT_WARNING, "WARNING: light grid mismatch\n" );
 		w->lightGridData = NULL;
 		return;

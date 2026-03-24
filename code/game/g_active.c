@@ -921,6 +921,10 @@ void ClientThink_real( gentity_t *ent ) {
 	VectorCopy( ent->client->ps.origin, ent->r.currentOrigin );
 
 	// unlagged: record position for lag compensation
+#if FEAT_UNLAGGED
+	ent->client->frameOffset = trap_Milliseconds() - level.frameStartTime;
+	ent->client->attackTime = ent->client->ps.commandTime;
+#endif
 	G_StoreHistory( ent );
 
 	//test for solid areas in the AAS file
