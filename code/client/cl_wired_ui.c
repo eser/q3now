@@ -370,6 +370,44 @@ void WiredUI_Refresh( int realtime ) {
 		}
 	}
 
+	// ── fade animation ──────────────────────────────────────────────
+	// v6 menus fade in using fadeClamp/fadeCycle/fadeAmount from assetGlobalDef or menuDef
+	{
+		float fadeClamp = menu->fadeClamp > 0 ? menu->fadeClamp : 1.0f;
+		int fadeCycle = menu->fadeCycle > 0 ? menu->fadeCycle : 1;
+		float fadeAmount = menu->fadeAmount > 0 ? menu->fadeAmount : 0.1f;
+
+		if ( menu->openTime > 0 && menu->fadeAlpha < fadeClamp ) {
+			int elapsed = realtime - menu->openTime;
+			int steps = elapsed / fadeCycle;
+			menu->fadeAlpha = steps * fadeAmount;
+			if ( menu->fadeAlpha > fadeClamp ) menu->fadeAlpha = fadeClamp;
+		} else if ( menu->openTime == 0 ) {
+			// first frame — start fade
+			menu->openTime = realtime;
+			menu->fadeAlpha = 0;
+		}
+	}
+
+	// ── transition interpolation ────────────────────────────────────
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		wiredItemDef_t *item = menu->items[i];
+		if ( item->transStartTime > 0 ) {
+			int elapsed = realtime - item->transStartTime;
+			if ( elapsed >= item->transDuration ) {
+				// transition complete
+				item->rect = item->transTo;
+				item->transStartTime = 0;
+			} else {
+				float t = (float)elapsed / (float)item->transDuration;
+				item->rect.x = item->transFrom.x + ( item->transTo.x - item->transFrom.x ) * t;
+				item->rect.y = item->transFrom.y + ( item->transTo.y - item->transFrom.y ) * t;
+				item->rect.w = item->transFrom.w + ( item->transTo.w - item->transFrom.w ) * t;
+				item->rect.h = item->transFrom.h + ( item->transTo.h - item->transFrom.h ) * t;
+			}
+		}
+	}
+
 	// render items — coordinates are relative to menu origin for non-fullscreen
 	for ( i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
@@ -759,6 +797,9 @@ skip_focus:
 
 // forward declarations
 static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char *name );
+static void WiredUI_ForEachItemByNameOrGroup( wiredMenuDef_t *menu, const char *name,
+	void (*callback)( wiredItemDef_t *item, void *data ), void *data );
+static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const char *script );
 
 typedef void (*wiredScriptHandler_t)( wiredMenuDef_t *menu, wiredItemDef_t *item,
                                        int numArgs, const char **args );
@@ -935,29 +976,227 @@ static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *it
 
 }
 
-// command table — matches q3now's ui_script.c set, plus Wired UI additions
-static const wiredScriptCommand_t wiredScriptCommands[] = {
-	{ "show",         WiredScript_Show },
-	{ "hide",         WiredScript_Hide },
-	{ "open",         WiredScript_Open },
-	{ "close",        WiredScript_Close },
-	{ "setcvar",      WiredScript_SetCvar },
-	{ "exec",         WiredScript_Exec },
-	{ "play",         WiredScript_Play },
-	{ "playlooped",   WiredScript_PlayLooped },
-	{ "stopmusic",    WiredScript_StopMusic },
-	{ "fadein",       WiredScript_FadeIn },
-	{ "fadeout",      WiredScript_FadeOut },
-	{ "setfocus",     WiredScript_SetFocus },
-	// ── game action commands (uiScript equivalents) ──────────────────
-	// These use cvars set by feeder selection callbacks.
-	{ "startserver",  WiredScript_StartServer },
-	{ "joinserver",   WiredScript_JoinServer },
-	{ "rundemo",      WiredScript_RunDemo },
-	{ "runmod",       WiredScript_RunMod },
-	{ "refreshservers", WiredScript_RefreshServers },
+// ── conditionalScript ─────────────────────────────────────────────────
+// ET:Legacy syntax: conditionalScript cvarname mode ( "action_true" ) ( "action_false" )
+// mode: 0 = if cvar == 0 run first, else second
+//       2/3 = cvar test mode (same logic, historical)
+static void WiredScript_ConditionalScript( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	const char *trueAction = NULL;
+	const char *falseAction = NULL;
+	int cvarVal;
+	int i;
 
-	// TODO: setcolor, setitemcolor, transition (from q3now ui_script.c)
+	if ( numArgs < 4 ) return;  // cvarname mode ( "action" ) ...
+
+	cvarVal = Cvar_VariableIntegerValue( args[0] );
+
+	// find the two ( "action" ) blocks in the args
+	for ( i = 2; i < numArgs; i++ ) {
+		if ( !Q_stricmp( args[i], "(" ) && i + 1 < numArgs ) {
+			if ( !trueAction ) {
+				trueAction = args[i + 1];
+			} else if ( !falseAction ) {
+				falseAction = args[i + 1];
+			}
+		}
+	}
+
+	if ( !trueAction ) return;
+
+	// mode 0: cvar == 0 → trueAction, else falseAction
+	// mode 2/3: same logic (cvar is tested as boolean)
+	if ( cvarVal == 0 ) {
+		WiredUI_RunScript( menu, item, trueAction );
+	} else if ( falseAction ) {
+		WiredUI_RunScript( menu, item, falseAction );
+	}
+}
+
+// ── setitemcolor ──────────────────────────────────────────────────────
+// Syntax: setitemcolor "nameOrGroup" forecolor|backcolor R G B A
+// Used everywhere for hover effects in Q3:TA/QL/OA/ET:L
+
+typedef struct {
+	const char *property;
+	float      color[4];
+} setItemColorData_t;
+
+static void WiredScript_SetItemColor_Callback( wiredItemDef_t *item, void *data ) {
+	setItemColorData_t *d = (setItemColorData_t *)data;
+	if ( !Q_stricmp( d->property, "forecolor" ) ) {
+		Vector4Copy( d->color, item->forecolor );
+	} else if ( !Q_stricmp( d->property, "backcolor" ) ) {
+		Vector4Copy( d->color, item->backcolor );
+	} else if ( !Q_stricmp( d->property, "bordercolor" ) ) {
+		Vector4Copy( d->color, item->bordercolor );
+	}
+}
+
+static void WiredScript_SetItemColor( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	setItemColorData_t data;
+	if ( numArgs < 6 ) return;  // name property R G B A
+	data.property = args[1];
+	data.color[0] = atof( args[2] );
+	data.color[1] = atof( args[3] );
+	data.color[2] = atof( args[4] );
+	data.color[3] = atof( args[5] );
+	WiredUI_ForEachItemByNameOrGroup( menu, args[0], WiredScript_SetItemColor_Callback, &data );
+}
+
+// setcolor — alias for setitemcolor (some files use one, some the other)
+static void WiredScript_SetColor( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	WiredScript_SetItemColor( menu, item, numArgs, args );
+}
+
+// ── conditionalopen ──────────────────────────────────────────────────
+// Syntax: conditionalopen "cvar" "menuIfTrue" "menuIfFalse"
+static void WiredScript_ConditionalOpen( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	if ( numArgs < 3 ) return;
+	if ( Cvar_VariableIntegerValue( args[0] ) != 0 ) {
+		WiredUI_PushMenu( args[1] );
+	} else {
+		WiredUI_PushMenu( args[2] );
+	}
+}
+
+// ── transition ───────────────────────────────────────────────────────
+// Syntax: transition "name" x1 y1 w1 h1 x2 y2 w2 h2 steps duration
+// Animated rect interpolation over time
+static void WiredScript_Transition( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	wiredItemDef_t *target;
+	if ( numArgs < 9 ) return;  // name x1 y1 w1 h1 x2 y2 w2 h2 [steps] [duration]
+	target = WiredUI_FindItemByName( menu, args[0] );
+	if ( target ) {
+		target->transFrom.x = atof( args[1] );
+		target->transFrom.y = atof( args[2] );
+		target->transFrom.w = atof( args[3] );
+		target->transFrom.h = atof( args[4] );
+		target->transTo.x   = atof( args[5] );
+		target->transTo.y   = atof( args[6] );
+		target->transTo.w   = atof( args[7] );
+		target->transTo.h   = atof( args[8] );
+		// steps (args[9]) and duration (args[10]) — v6 uses steps*frametime
+		// we use duration in ms directly; if only steps given, estimate 16ms/step
+		if ( numArgs >= 11 ) {
+			target->transDuration = atoi( args[9] ) * atoi( args[10] );
+		} else if ( numArgs >= 10 ) {
+			target->transDuration = atoi( args[9] ) * 16;  // ~60fps
+		} else {
+			target->transDuration = 200;  // default 200ms
+		}
+		if ( target->transDuration < 1 ) target->transDuration = 1;
+		target->transStartTime = cls.realtime;
+		// set initial position
+		target->rect = target->transFrom;
+	}
+}
+
+// ── setbackground ────────────────────────────────────────────────────
+// Syntax: setbackground "shader"
+static void WiredScript_SetBackground( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	wiredItemDef_t *target;
+	if ( numArgs < 1 ) return;
+	target = WiredUI_FindItemByName( menu, args[0] );
+	if ( target ) {
+		Q_strncpyz( target->background, args[0], sizeof( target->background ) );
+	}
+}
+
+// ── uiScript ─────────────────────────────────────────────────────────
+// Maps v6 uiScript command names to our existing handlers.
+// Q3:TA/QL/OA/ET:L all use: action { uiScript StartServer } etc.
+
+typedef struct {
+	const char *name;
+	void (*handler)( wiredMenuDef_t *, wiredItemDef_t *, int, const char ** );
+} wiredUiScriptEntry_t;
+
+static const wiredUiScriptEntry_t wiredUiScripts[] = {
+	{ "StartServer",      WiredScript_StartServer },
+	{ "startserver",      WiredScript_StartServer },
+	{ "JoinServer",       WiredScript_JoinServer },
+	{ "joinserver",       WiredScript_JoinServer },
+	{ "RunDemo",          WiredScript_RunDemo },
+	{ "rundemo",          WiredScript_RunDemo },
+	{ "RunMod",           WiredScript_RunMod },
+	{ "runmod",           WiredScript_RunMod },
+	{ "LoadDemos",        NULL },  // feeders auto-load, noop
+	{ "LoadMods",         NULL },
+	{ "LoadMovies",       NULL },
+	{ "RefreshServers",   WiredScript_RefreshServers },
+	{ "RefreshFilter",    WiredScript_RefreshServers },
+	{ "StopRefresh",      NULL },  // noop — server queries are fire-and-forget
+	{ "closeJoin",        NULL },
+	{ "closeingame",      NULL },
+	{ NULL, NULL }
+};
+
+static void WiredScript_UiScript( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	int i;
+	if ( numArgs < 1 ) return;
+
+	for ( i = 0; wiredUiScripts[i].name; i++ ) {
+		if ( !Q_stricmp( args[0], wiredUiScripts[i].name ) ) {
+			if ( wiredUiScripts[i].handler ) {
+				// pass remaining args (skip the uiScript command name)
+				wiredUiScripts[i].handler( menu, item, numArgs - 1, numArgs > 1 ? &args[1] : NULL );
+			}
+			return;
+		}
+	}
+
+	// common actions that map directly to console commands
+	if ( !Q_stricmp( args[0], "Quit" ) || !Q_stricmp( args[0], "quit" ) ) {
+		Cbuf_ExecuteText( EXEC_APPEND, "quit\n" );
+	} else if ( !Q_stricmp( args[0], "Leave" ) || !Q_stricmp( args[0], "leave" ) ) {
+		Cbuf_ExecuteText( EXEC_APPEND, "disconnect\n" );
+	} else if ( !Q_stricmp( args[0], "resetDefaults" ) ) {
+		Cbuf_ExecuteText( EXEC_APPEND, "exec default.cfg\n" );
+	} else if ( !Q_stricmp( args[0], "Controls" ) ) {
+		WiredUI_PushMenu( "controls" );
+	} else if ( !Q_stricmp( args[0], "clearError" ) ) {
+		// noop
+	} else if ( !Q_stricmp( args[0], "ServerSort" ) && numArgs >= 2 ) {
+		// TODO: sort server list by column args[1]
+	} else if ( !Q_stricmp( args[0], "addFavorite" ) ) {
+		Cbuf_ExecuteText( EXEC_APPEND, "addFavorite\n" );
+	} else if ( !Q_stricmp( args[0], "deleteFavorite" ) ) {
+		Cbuf_ExecuteText( EXEC_APPEND, "deleteFavorite\n" );
+	} else {
+		Com_Printf( S_COLOR_YELLOW "WiredUI: unknown uiScript '%s'\n", args[0] );
+	}
+}
+
+// command table — matches q3now's ui_script.c set, plus Wired UI additions + v6 compat
+static const wiredScriptCommand_t wiredScriptCommands[] = {
+	{ "show",             WiredScript_Show },
+	{ "hide",             WiredScript_Hide },
+	{ "open",             WiredScript_Open },
+	{ "close",            WiredScript_Close },
+	{ "setcvar",          WiredScript_SetCvar },
+	{ "exec",             WiredScript_Exec },
+	{ "play",             WiredScript_Play },
+	{ "playlooped",       WiredScript_PlayLooped },
+	{ "stopmusic",        WiredScript_StopMusic },
+	{ "fadein",           WiredScript_FadeIn },
+	{ "fadeout",          WiredScript_FadeOut },
+	{ "setfocus",         WiredScript_SetFocus },
+	// ── Phase 2.5: v6 compatibility commands ────────────────────────
+	{ "setitemcolor",     WiredScript_SetItemColor },
+	{ "setcolor",         WiredScript_SetColor },
+	{ "conditionalopen",  WiredScript_ConditionalOpen },
+	{ "conditionalScript", WiredScript_ConditionalScript },
+	{ "conditionalscript", WiredScript_ConditionalScript },
+	{ "transition",       WiredScript_Transition },
+	{ "setbackground",    WiredScript_SetBackground },
+	{ "uiScript",         WiredScript_UiScript },
+	// ── game action commands (also reachable via uiScript) ──────────
+	{ "startserver",      WiredScript_StartServer },
+	{ "joinserver",       WiredScript_JoinServer },
+	{ "rundemo",          WiredScript_RunDemo },
+	{ "runmod",           WiredScript_RunMod },
+	{ "refreshservers",   WiredScript_RefreshServers },
+
 	{ NULL, NULL }
 };
 
@@ -1057,6 +1296,15 @@ void WiredUI_PushMenu( const char *name ) {
 	wired_focusItem = -1;
 	wired_focusFromMouse = qfalse;
 
+	// reset fade animation for the new menu
+	{
+		wiredMenuDef_t *pushed = WiredUI_FindMenu( name );
+		if ( pushed ) {
+			pushed->openTime = cls.realtime;
+			pushed->fadeAlpha = 0;
+		}
+	}
+
 	Com_DPrintf( "WiredUI: push menu '%s' (depth %d)\n", name, wired_menuStackDepth );
 
 	// run onOpen script if present
@@ -1125,6 +1373,19 @@ static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char 
 		}
 	}
 	return NULL;
+}
+
+// apply a callback to all items matching name OR group
+static void WiredUI_ForEachItemByNameOrGroup( wiredMenuDef_t *menu, const char *name,
+	void (*callback)( wiredItemDef_t *item, void *data ), void *data ) {
+	int i;
+	if ( !menu || !name ) return;
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		wiredItemDef_t *it = menu->items[i];
+		if ( !Q_stricmp( it->name, name ) || !Q_stricmp( it->group, name ) ) {
+			callback( it, data );
+		}
+	}
 }
 
 static qboolean WiredUI_PointInRect( float px, float py, wiredRect_t *r ) {

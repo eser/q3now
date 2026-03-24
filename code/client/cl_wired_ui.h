@@ -167,12 +167,28 @@ typedef struct wiredItemDef_s {
 	char            cvarTest[64];
 	char            showCvar[256];
 	char            hideCvar[256];
+	char            enableCvar[256];        // v6: enable when cvarTest matches
+	char            disableCvar[256];       // v6: disable when cvarTest matches
 	int             ownerdraw;
 	int             ownerdrawFlag;
 	float           feeder;
 	float           elementwidth;
 	float           elementheight;
 	char            hudElement[64];         // Phase 3
+
+	// v6 + Phase 2.5 additions
+	vec4_t          outlinecolor;
+	float           special;                // ownerdraw spacing parameter
+	int             align;                  // HUD_VERTICAL(0) / HUD_HORIZONTAL(1)
+	qboolean        notselectable;
+
+	// addColorRange — dynamic coloring by value (health/armor bars)
+	#define WIRED_MAX_COLOR_RANGES  4
+	struct {
+		float   low, high;
+		vec4_t  color;
+	} colorRanges[WIRED_MAX_COLOR_RANGES];
+	int             numColorRanges;
 
 	// cvar binding data
 	wiredMultiDef_t *multiData;             // for ITEM_TYPE_MULTI (allocated from pool)
@@ -186,6 +202,12 @@ typedef struct wiredItemDef_s {
 	int             listScrollOffset;       // first visible row
 	int             listSelectedRow;        // selected row index (-1 = none)
 	int             listScrollFadeTime;     // cls.realtime when last scrolled (for scrollbar fade)
+
+	// transition animation state (Phase 2.5)
+	wiredRect_t     transFrom;              // start rect
+	wiredRect_t     transTo;                // target rect
+	int             transStartTime;         // cls.realtime when transition started (0 = inactive)
+	int             transDuration;          // total duration in ms
 } wiredItemDef_t;
 
 typedef struct wiredMenuDef_s {
@@ -209,12 +231,26 @@ typedef struct wiredMenuDef_s {
 	qboolean          hudOverlay;           // Phase 3: passive HUD overlay
 	qboolean          modal;                // ET:Legacy: captures all input
 	qboolean          alwaysOnTop;          // ET:Legacy: z-order override
+	qboolean          popup;                // v6: popup menu
+	qboolean          outOfBoundsClick;     // v6: close on click outside
+	int               border;               // WINDOW_BORDER_*
+	float             bordersize;
+	vec4_t            bordercolor;
+	vec4_t            disablecolor;
+	char              font[64];             // per-menu font override
+	float             fadeClamp;            // max fade alpha
+	int               fadeCycle;            // fade cycle time (ms)
+	float             fadeAmount;           // fade step per cycle
 
 	// menu-level scrolling (Wired UI innovation — HTML DIV-style overflow)
 	float             scrollOffset;         // current scroll Y offset (pixels)
 	float             contentHeight;        // computed: bottom-most item Y + H
 	float             scrollVelocity;       // for smooth scrolling (momentum)
 	int               scrollBarFadeTime;    // timestamp for scrollbar fade-out
+
+	// fade animation (v6 assetGlobalDef: fadeClamp/fadeCycle/fadeAmount)
+	int               openTime;             // cls.realtime when menu was opened
+	float             fadeAlpha;            // current fade alpha (0..fadeClamp)
 } wiredMenuDef_t;
 
 // ── feeder system ─────────────────────────────────────────────────────

@@ -462,6 +462,70 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 		else if ( !Q_stricmp( token.string, "horizontalscroll" ) ) {
 			// horizontal scroll — noted, not yet rendered
 		}
+		else if ( !Q_stricmp( token.string, "outlinecolor" ) ) {
+			WiredPC_Color( handle, &item->outlinecolor );
+		}
+		else if ( !Q_stricmp( token.string, "special" ) ) {
+			WiredPC_Float( handle, &item->special );
+		}
+		else if ( !Q_stricmp( token.string, "align" ) ) {
+			WiredPC_Int( handle, &item->align );
+		}
+		else if ( !Q_stricmp( token.string, "addColorRange" ) ) {
+			if ( item->numColorRanges < WIRED_MAX_COLOR_RANGES ) {
+				int idx = item->numColorRanges;
+				WiredPC_Float( handle, &item->colorRanges[idx].low );
+				WiredPC_Float( handle, &item->colorRanges[idx].high );
+				WiredPC_Color( handle, &item->colorRanges[idx].color );
+				item->numColorRanges++;
+			} else {
+				float dummy; vec4_t dc;
+				WiredPC_Float( handle, &dummy ); WiredPC_Float( handle, &dummy );
+				WiredPC_Color( handle, &dc );
+			}
+		}
+		else if ( !Q_stricmp( token.string, "enableCvar" ) || !Q_stricmp( token.string, "disableCvar" ) ) {
+			char *dest2;
+			int destSize2;
+			int depth2 = 0;
+			if ( !Q_stricmp( token.string, "enableCvar" ) ) {
+				dest2 = item->enableCvar; destSize2 = sizeof( item->enableCvar );
+			} else {
+				dest2 = item->disableCvar; destSize2 = sizeof( item->disableCvar );
+			}
+			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
+				continue;
+			}
+			depth2 = 1;
+			dest2[0] = '\0';
+			while ( depth2 > 0 ) {
+				if ( !WiredPC_ReadToken( handle, &token ) ) break;
+				if ( !Q_stricmp( token.string, "{" ) ) { depth2++; continue; }
+				if ( !Q_stricmp( token.string, "}" ) ) { depth2--; continue; }
+				if ( dest2[0] ) Q_strcat( dest2, destSize2, " " );
+				Q_strcat( dest2, destSize2, token.string );
+			}
+		}
+		else if ( !Q_stricmp( token.string, "asset_model" ) || !Q_stricmp( token.string, "asset_shader" ) ||
+		          !Q_stricmp( token.string, "model_origin" ) || !Q_stricmp( token.string, "model_fovx" ) ||
+		          !Q_stricmp( token.string, "model_fovy" ) || !Q_stricmp( token.string, "model_rotation" ) ||
+		          !Q_stricmp( token.string, "model_angle" ) ) {
+			// model keywords — consume value, not yet rendered (type 7 MODEL)
+			if ( !Q_stricmp( token.string, "model_origin" ) ) {
+				float dummy; WiredPC_Float( handle, &dummy ); WiredPC_Float( handle, &dummy ); WiredPC_Float( handle, &dummy );
+			} else {
+				WiredPC_ReadToken( handle, &token ); // consume single value
+			}
+		}
+		else if ( !Q_stricmp( token.string, "textfont" ) ) {
+			WiredPC_ReadToken( handle, &token ); // consume font name (not yet stored)
+		}
+		else if ( !Q_stricmp( token.string, "cinematic" ) ) {
+			WiredPC_ReadToken( handle, &token ); // consume video name
+		}
+		else if ( !Q_stricmp( token.string, "widescreen" ) ) {
+			int dummy; WiredPC_Int( handle, &dummy ); // consume widescreen mode (QL-specific)
+		}
 		else if ( !Q_stricmp( token.string, "hudElement" ) ) {
 			if ( WiredPC_String( handle, &str ) )
 				Q_strncpyz( item->hudElement, str, sizeof( item->hudElement ) );
@@ -554,9 +618,20 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 			}
 		}
 		else {
-			// unknown keyword — skip one token value
+			// unknown keyword — smart skip to avoid poisoning subsequent parsing
 			Com_DPrintf( "WiredUI: unknown item keyword '%s'\n", token.string );
-			WiredPC_ReadToken( handle, &token );
+			if ( WiredPC_ReadToken( handle, &token ) ) {
+				if ( !Q_stricmp( token.string, "{" ) ) {
+					// block parameter — skip balanced braces
+					int skipDepth = 1;
+					while ( skipDepth > 0 ) {
+						if ( !WiredPC_ReadToken( handle, &token ) ) break;
+						if ( !Q_stricmp( token.string, "{" ) ) skipDepth++;
+						else if ( !Q_stricmp( token.string, "}" ) ) skipDepth--;
+					}
+				}
+				// else: consumed one token (the value) — good enough
+			}
 		}
 	}
 
@@ -677,15 +752,79 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		else if ( !Q_stricmp( token.string, "alwaysontop" ) ) {
 			menu->alwaysOnTop = qtrue;
 		}
+		// ── Phase 2.5: additional menu-level keywords ────────────────
+		else if ( !Q_stricmp( token.string, "popup" ) ) {
+			menu->popup = qtrue;
+		}
+		else if ( !Q_stricmp( token.string, "outOfBoundsClick" ) ) {
+			menu->outOfBoundsClick = qtrue;
+		}
+		else if ( !Q_stricmp( token.string, "border" ) ) {
+			WiredPC_Int( handle, &menu->border );
+		}
+		else if ( !Q_stricmp( token.string, "bordersize" ) ) {
+			WiredPC_Float( handle, &menu->bordersize );
+		}
+		else if ( !Q_stricmp( token.string, "bordercolor" ) ) {
+			WiredPC_Color( handle, &menu->bordercolor );
+		}
+		else if ( !Q_stricmp( token.string, "disablecolor" ) ) {
+			WiredPC_Color( handle, &menu->disablecolor );
+		}
+		else if ( !Q_stricmp( token.string, "outlinecolor" ) ) {
+			vec4_t oc; WiredPC_Color( handle, &oc ); // consume, not stored on menu
+		}
+		else if ( !Q_stricmp( token.string, "font" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( menu->font, str, sizeof( menu->font ) );
+			// optional point size follows
+			if ( WiredPC_ReadToken( handle, &token ) ) {
+				if ( token.string[0] >= '0' && token.string[0] <= '9' ) {
+					// consumed point size
+				} else {
+					// not a number — push back by re-parsing
+					// botlib doesn't support pushback, so just ignore
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "fadeClamp" ) ) {
+			WiredPC_Float( handle, &menu->fadeClamp );
+		}
+		else if ( !Q_stricmp( token.string, "fadeCycle" ) ) {
+			WiredPC_Int( handle, &menu->fadeCycle );
+		}
+		else if ( !Q_stricmp( token.string, "fadeAmount" ) ) {
+			WiredPC_Float( handle, &menu->fadeAmount );
+		}
+		else if ( !Q_stricmp( token.string, "cinematic" ) ) {
+			WiredPC_ReadToken( handle, &token ); // consume video name
+		}
+		else if ( !Q_stricmp( token.string, "ownerdraw" ) ) {
+			int od; WiredPC_Int( handle, &od ); // menu-level ownerdraw (rare)
+		}
+		else if ( !Q_stricmp( token.string, "ownerdrawFlag" ) ) {
+			int odf; WiredPC_Int( handle, &odf );
+		}
 		else if ( !Q_stricmp( token.string, "itemDef" ) ) {
 			if ( !WiredUI_ParseItem( handle, menu ) ) {
 				Com_Printf( S_COLOR_YELLOW "WiredUI: failed to parse itemDef in menu '%s'\n", menu->name );
 			}
 		}
 		else {
-			// unknown keyword — skip value
+			// unknown keyword — smart skip to avoid poisoning subsequent parsing
 			Com_DPrintf( "WiredUI: unknown menu keyword '%s'\n", token.string );
-			WiredPC_ReadToken( handle, &token );
+			if ( WiredPC_ReadToken( handle, &token ) ) {
+				if ( !Q_stricmp( token.string, "{" ) ) {
+					// block parameter — skip balanced braces
+					int skipDepth = 1;
+					while ( skipDepth > 0 ) {
+						if ( !WiredPC_ReadToken( handle, &token ) ) break;
+						if ( !Q_stricmp( token.string, "{" ) ) skipDepth++;
+						else if ( !Q_stricmp( token.string, "}" ) ) skipDepth--;
+					}
+				}
+				// else: consumed one token value
+			}
 		}
 	}
 
@@ -742,8 +881,11 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 				else if ( !Q_stricmp( token.string, "}" ) ) depth--;
 			}
 		}
+		else if ( !Q_stricmp( token.string, "{" ) || !Q_stricmp( token.string, "}" ) ) {
+			// top-level braces — Q3:TA/QL files wrap content in { }. Just ignore.
+		}
 		else {
-			Com_Printf( S_COLOR_YELLOW "WiredUI: unexpected token '%s' in '%s'\n", token.string, filename );
+			Com_DPrintf( "WiredUI: unexpected token '%s' in '%s'\n", token.string, filename );
 		}
 	}
 
