@@ -145,6 +145,22 @@ void QUIC_EmitMatchEvent( const char *type, const char *data )
 	(void)buf; (void)len; (void)type; (void)data;
 }
 
+#if FEAT_BOT_IMPROVEMENTS
+void QUIC_EmitBotEvent( int bot_id, const char *event_type,
+                        int param1, int param2, const vec3_t pos )
+{
+	byte buf[256];
+	int len;
+
+	if ( !wt.initialized )
+		return;
+
+	len = WT_EncodeBotEvent( buf, sizeof(buf), bot_id, event_type, param1, param2, pos );
+	if ( len > 0 )
+		WT_EventRingPush( buf, len );
+}
+#endif
+
 
 /*
 ====================

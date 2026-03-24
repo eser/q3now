@@ -82,7 +82,7 @@ vmCvar_t	pmove_overbounce;
 vmCvar_t	g_rankings;
 vmCvar_t	g_listEntity;
 vmCvar_t	g_localTeamPref;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 vmCvar_t	g_obeliskRespawnDelay;
 vmCvar_t	g_redteam;
 vmCvar_t	g_blueteam;
@@ -129,9 +129,6 @@ vmCvar_t	g_overtime;
 #endif
 #if FEAT_AUTO_DEMO
 vmCvar_t	g_autoDemo;
-#endif
-#if FEAT_CTF_SCORING
-vmCvar_t	g_ctfScoring;
 #endif
 #if FEAT_TOURNAMENT_PAUSE
 vmCvar_t	g_allowTimeout;
@@ -239,7 +236,7 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_allowVote, "g_allowVote", "1", CVAR_ARCHIVE, 0, qfalse },
 	{ &g_listEntity, "g_listEntity", "0", 0, 0, qfalse },
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	{ &g_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", CVAR_SERVERINFO, 0, qfalse },
 
 	{ &g_redteam, "g_redteam", "Stroggs", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO , 0, qtrue, qtrue },
@@ -295,9 +292,6 @@ static cvarTable_t		gameCvarTable[] = {
 #if FEAT_AUTO_DEMO
     { &g_autoDemo,                "g_autoDemo",                "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
 #endif
-#if FEAT_CTF_SCORING
-    { &g_ctfScoring,              "g_ctfScoring",              "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
-#endif
 #if FEAT_TOURNAMENT_PAUSE
     { &g_allowTimeout,            "g_allowTimeout",            "1", CVAR_ARCHIVE, 0, qfalse },
 #endif
@@ -332,7 +326,7 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_ptl,                     "g_ptl",                     "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_LATCH, 0, qfalse },
 #endif
 	// eser - camp-detection
-    { &g_campDetectionTime,            "g_campDetectionTime",            "30",  CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+    { &g_campDetectionTime,            "g_campDetectionTime",            "60",  CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
     { &g_campDetectionRadius,          "g_campDetectionRadius",          "300", CVAR_ARCHIVE, 0, qfalse },
 	// eser - camp-detection
 #if FEAT_DROP_ITEMS
@@ -474,7 +468,7 @@ void G_FindTeams( void ) {
 }
 
 void G_RemapTeamShaders( void ) {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	char string[1024];
 	float f = level.time * 0.001;
 	Com_sprintf( string, sizeof(string), "team_icon/%s_red", g_redteam.string );

@@ -174,7 +174,7 @@ void SP_team_CTF_blueplayer( gentity_t *ent );
 void SP_team_CTF_redspawn( gentity_t *ent );
 void SP_team_CTF_bluespawn( gentity_t *ent );
 
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 void SP_team_blueobelisk( gentity_t *ent );
 void SP_team_redobelisk( gentity_t *ent );
 void SP_team_neutralobelisk( gentity_t *ent );
@@ -247,7 +247,7 @@ spawn_t	spawns[] = {
 	{"team_CTF_redspawn", SP_team_CTF_redspawn},
 	{"team_CTF_bluespawn", SP_team_CTF_bluespawn},
 
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 	{"team_redobelisk", SP_team_redobelisk},
 	{"team_blueobelisk", SP_team_blueobelisk},
 	{"team_neutralobelisk", SP_team_neutralobelisk},
@@ -476,7 +476,7 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 		}
 	}
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	G_SpawnInt( "notta", "0", &i );
 	if ( i ) {
 		ADJUST_AREAPORTAL();

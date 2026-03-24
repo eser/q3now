@@ -78,7 +78,7 @@ static const int numNetSources = ARRAY_LEN( netSources );
 static const serverFilter_t serverFilters[] = {
 	{"All", "" },
 	{"Quake 3 Arena", "" },
-	{"Team Arena", BASETA },
+	{"Team Arena", "missionpack" },
 	{"Rocket Arena", "arena" },
 	{"Alliance", "alliance20" },
 	{"Weapons Factory Arena", "wfa" },
@@ -1430,7 +1430,7 @@ static const char *UI_AIFromName(const char *name) {
 			return uiInfo.aliasList[j].ai;
 		}
 	}
-	return "James";
+	return "Visor";
 }
 
 #ifndef MISSIONPACK
@@ -1474,7 +1474,7 @@ static const char *UI_OpponentLeaderModel(void) {
 			return uiInfo.characterList[i].base;
 		}
 	}
-	return "James";
+	return "Visor";
 }
 #endif
 
@@ -4615,9 +4615,9 @@ static qboolean Character_Parse(char **p) {
 			uiInfo.characterList[uiInfo.characterCount].imageName = String_Alloc(va("models/players/heads/%s/icon_default.tga", uiInfo.characterList[uiInfo.characterCount].name));
 
 	  if (tempStr && (!Q_stricmp(tempStr, "female"))) {
-        uiInfo.characterList[uiInfo.characterCount].base = String_Alloc("Janet");
+        uiInfo.characterList[uiInfo.characterCount].base = String_Alloc("Major");
       } else if (tempStr && (!Q_stricmp(tempStr, "male"))) {
-        uiInfo.characterList[uiInfo.characterCount].base = String_Alloc("James");
+        uiInfo.characterList[uiInfo.characterCount].base = String_Alloc("Visor");
 	  } else {
         uiInfo.characterList[uiInfo.characterCount].base = String_Alloc(tempStr);
 	  }
@@ -6036,4 +6036,3 @@ static void UI_StartServerRefresh(qboolean full, qboolean force)
 		}
 	}
 }
-

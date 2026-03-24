@@ -536,7 +536,7 @@ static void CG_AddSpriteExplosion( localEntity_t *le ) {
 }
 
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 /*
 ====================
 CG_AddKamikaze
@@ -940,7 +940,7 @@ void CG_AddLocalEntities( void ) {
 		}
 #endif
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		case LE_KAMIKAZE:
 			CG_AddKamikaze( le );
 			break;

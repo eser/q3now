@@ -4461,21 +4461,38 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 
 /*
 ================
-FS_idPak
+FS_isProprietary
 ================
 */
-qboolean FS_idPak(const char *pak, const char *base, int numPaks)
+static const char *proprietaryFileList[] = {
+	"baseq3/pak0.pk3",
+	"baseq3/pak1.pk3",
+	"baseq3/pak2.pk3",
+	"baseq3/pak3.pk3",
+	"baseq3/pak4.pk3",
+	"baseq3/pak5.pk3",
+	"baseq3/pak6.pk3",
+	"baseq3/pak7.pk3",
+	"baseq3/pak8.pk3",
+	"missionpack/pak0.pk3",
+	"missionpack/pak1.pk3",
+	"missionpack/pak2.pk3",
+	"missionpack/pak3.pk3",
+	NULL
+};
+
+static const int	proprietaryFileCount = ARRAY_LEN( proprietaryFileList ) - 1;
+
+qboolean FS_isProprietary(const char *pak)
 {
 	int i;
 
-	for (i = 0; i < NUM_ID_PAKS; i++) {
-		if ( !FS_FilenameCompare(pak, va("%s/pak%d", base, i)) ) {
-			break;
+	for (i = 0; i < proprietaryFileCount; i++) {
+		if ( !FS_FilenameCompare(pak, proprietaryFileList[i])) {
+			return qtrue;
 		}
 	}
-	if (i < numPaks) {
-		return qtrue;
-	}
+
 	return qfalse;
 }
 
@@ -4540,8 +4557,8 @@ qboolean FS_ComparePaks( char *neededpaks, int len, qboolean dlstring ) {
 		// Ok, see if we have this pak file
 		havepak = qfalse;
 
-		// never autodownload any of the id paks
-		if ( FS_idPak(fs_serverReferencedPakNames[i], BASEGAME, NUM_ID_PAKS) || FS_idPak(fs_serverReferencedPakNames[i], BASETA, NUM_TA_PAKS) ) {
+		// never autodownload any of proprietary files
+		if ( FS_isProprietary(fs_serverReferencedPakNames[i]) ) {
 			continue;
 		}
 
@@ -5233,7 +5250,7 @@ static void FS_Startup( void ) {
 		}
 		if ( !hasSW3Z )
 #endif
-		if ( FS_IsBaseGame( BASEGAME ) || FS_IsBaseGame( BASEDEMO ) ) {
+		if ( FS_IsBaseGame( BASEGAME ) ) {
 			FS_CheckIdPaks();
 		}
 #if FEAT_SW3Z
@@ -5294,23 +5311,7 @@ static void FS_CheckIdPaks( void )
 
 		pakBasename = path->pack->pakBasename;
 
-		if(!Q_stricmpn( path->pack->pakGamename, BASEDEMO, MAX_OSPATH )
-		   && !Q_stricmpn( pakBasename, "pak0", MAX_OSPATH ))
-		{
-			founddemo = qtrue;
-
-			if( path->pack->checksum == DEMO_PAK0_CHECKSUM )
-			{
-				Com_Printf( "\n\n"
-						"**************************************************\n"
-						"WARNING: It looks like you're using pak0.pk3\n"
-						"from the demo. This may work fine, but it is not\n"
-						"guaranteed or supported.\n"
-						"**************************************************\n\n\n" );
-			}
-		}
-
-		else if(!Q_stricmpn( path->pack->pakGamename, BASEGAME, MAX_OSPATH )
+		if(!Q_stricmpn( path->pack->pakGamename, BASEGAME, MAX_OSPATH )
 			&& strlen(pakBasename) == 4 && !Q_stricmpn( pakBasename, "pak", 3 )
 			&& pakBasename[3] >= '0' && pakBasename[3] <= '8')
 		{
@@ -5369,8 +5370,7 @@ static void FS_CheckIdPaks( void )
 			"in the %s directory is present and readable.\n", BASEGAME);
 
 		if(!fs_gamedirvar->string[0]
-		|| !Q_stricmp( fs_gamedirvar->string, BASEGAME )
-		|| !Q_stricmp( fs_gamedirvar->string, BASETA ))
+		|| !Q_stricmp( fs_gamedirvar->string, BASEGAME ))
 			Com_Error(ERR_FATAL, "\n*** you need to install Quake III Arena in order to play ***");
 	}
 }

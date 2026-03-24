@@ -146,6 +146,20 @@ static void WT_McpHandleToolsList( wt_connection_t *conn, uint64_t stream_id, in
 		"\"description\":\"Get the last N game events (kills, damage, items, chat).\","
 		"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
 		"\"count\":{\"type\":\"integer\",\"description\":\"Number of events to return (default 20, max 100).\"}}}}"
+#if FEAT_BOT_IMPROVEMENTS
+		",{\"name\":\"bot.list\","
+		"\"description\":\"List all bots with id, name, skill, team, alive status.\","
+		"\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
+		",{\"name\":\"bot.getState\","
+		"\"description\":\"Get detailed state of a bot: goal, weapon, health, position.\","
+		"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
+		"\"id\":{\"type\":\"integer\",\"description\":\"Bot client slot ID.\"}},\"required\":[\"id\"]}}"
+		",{\"name\":\"bot.setSkill\","
+		"\"description\":\"Set bot skill level (1-50, divide by 10 for float skill).\","
+		"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
+		"\"id\":{\"type\":\"integer\",\"description\":\"Bot client slot ID.\"},"
+		"\"level\":{\"type\":\"integer\",\"description\":\"Skill level x10 (10=1.0, 50=5.0).\"}},\"required\":[\"id\",\"level\"]}}"
+#endif
 		"]},\"id\":%d}",
 		req_id );
 
@@ -242,6 +256,12 @@ static void WT_McpHandleEventHistory( wt_connection_t *conn, uint64_t stream_id,
 }
 
 
+#if FEAT_BOT_IMPROVEMENTS
+static void WT_McpHandleBotList( wt_connection_t *conn, uint64_t stream_id, int req_id );
+static void WT_McpHandleBotGetState( wt_connection_t *conn, uint64_t stream_id, int req_id, int bot_id );
+static void WT_McpHandleBotSetSkill( wt_connection_t *conn, uint64_t stream_id, int req_id, int bot_id, int skill_x10 );
+#endif
+
 /*
 ====================
 WT_McpHandleMessage
@@ -320,6 +340,23 @@ void WT_McpHandleMessage( wt_connection_t *conn, uint64_t stream_id,
 			WT_JsonFindInt( json, "count", &count );
 			WT_McpHandleEventHistory( conn, stream_id, req_id, count );
 		}
+#if FEAT_BOT_IMPROVEMENTS
+		else if ( tool_len == 8 && Q_stricmpn( tool_name, "bot.list", 8 ) == 0 ) {
+			WT_McpHandleBotList( conn, stream_id, req_id );
+		}
+		else if ( tool_len == 12 && Q_stricmpn( tool_name, "bot.getState", 12 ) == 0 ) {
+			int bot_id = -1;
+			WT_JsonFindInt( json, "id", &bot_id );
+			WT_McpHandleBotGetState( conn, stream_id, req_id, bot_id );
+		}
+		else if ( tool_len == 12 && Q_stricmpn( tool_name, "bot.setSkill", 12 ) == 0 ) {
+			int bot_id = -1;
+			int skill_x10 = 30; // default skill 3.0
+			WT_JsonFindInt( json, "id", &bot_id );
+			WT_JsonFindInt( json, "level", &skill_x10 );
+			WT_McpHandleBotSetSkill( conn, stream_id, req_id, bot_id, skill_x10 );
+		}
+#endif
 		else {
 			Com_sprintf( resp, sizeof(resp),
 				"{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32601,\"message\":\"Unknown tool\"},\"id\":%d}", req_id );
@@ -332,6 +369,145 @@ void WT_McpHandleMessage( wt_connection_t *conn, uint64_t stream_id,
 		WT_McpRespond( conn, stream_id, resp );
 	}
 }
+
+#if FEAT_BOT_IMPROVEMENTS
+/*
+====================
+WT_McpHandleBotList
+
+Return list of all bots with id, name, team, alive.
+Server side: uses svs.clients[] and SV_GameClientNum().
+====================
+*/
+static void WT_McpHandleBotList( wt_connection_t *conn, uint64_t stream_id, int req_id )
+{
+	char resp[MCP_MAX_RESPONSE];
+	char *p = resp;
+	int remaining = sizeof(resp);
+	int i, n;
+	client_t *cl;
+	playerState_t *ps;
+	qboolean first = qtrue;
+
+	n = Com_sprintf( p, remaining,
+		"{\"jsonrpc\":\"2.0\",\"result\":[{\"type\":\"text\",\"text\":\"[" );
+	p += n; remaining -= n;
+
+	for ( i = 0; i < sv_maxclients->integer; i++ ) {
+		cl = &svs.clients[i];
+		if ( cl->state < CS_ACTIVE ) continue;
+		if ( !(cl->gentity && (cl->gentity->r.svFlags & SVF_BOT)) ) continue;
+
+		ps = SV_GameClientNum( i );
+
+		if ( !first ) {
+			n = Com_sprintf( p, remaining, "," ); p += n; remaining -= n;
+		}
+		first = qfalse;
+
+		n = Com_sprintf( p, remaining,
+			"{\\\"id\\\":%d,\\\"name\\\":\\\"%s\\\",\\\"team\\\":%d,\\\"alive\\\":%s}",
+			i, cl->name,
+			ps->persistant[PERS_TEAM],
+			ps->pm_type != PM_DEAD ? "true" : "false" );
+		p += n; remaining -= n;
+	}
+
+	n = Com_sprintf( p, remaining, "]\"}],\"id\":%d}", req_id );
+	p += n;
+
+	WT_McpRespond( conn, stream_id, resp );
+}
+
+/*
+====================
+WT_McpHandleBotGetState
+====================
+*/
+static void WT_McpHandleBotGetState( wt_connection_t *conn, uint64_t stream_id, int req_id, int bot_id )
+{
+	char resp[MCP_MAX_RESPONSE];
+	client_t *cl;
+	playerState_t *ps;
+
+	if ( bot_id < 0 || bot_id >= sv_maxclients->integer ) {
+		Com_sprintf( resp, sizeof(resp),
+			"{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32602,\"message\":\"Invalid bot ID\"},\"id\":%d}", req_id );
+		WT_McpRespond( conn, stream_id, resp );
+		return;
+	}
+
+	cl = &svs.clients[bot_id];
+	if ( cl->state < CS_ACTIVE || !(cl->gentity && (cl->gentity->r.svFlags & SVF_BOT)) ) {
+		Com_sprintf( resp, sizeof(resp),
+			"{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32001,\"message\":\"Not a bot or not active\"},\"id\":%d}", req_id );
+		WT_McpRespond( conn, stream_id, resp );
+		return;
+	}
+
+	ps = SV_GameClientNum( bot_id );
+
+	Com_sprintf( resp, sizeof(resp),
+		"{\"jsonrpc\":\"2.0\",\"result\":[{\"type\":\"text\",\"text\":\""
+		"{\\\"id\\\":%d,\\\"name\\\":\\\"%s\\\","
+		"\\\"health\\\":%d,\\\"armor\\\":%d,"
+		"\\\"weapon\\\":%d,"
+		"\\\"pos\\\":[%.0f,%.0f,%.0f],"
+		"\\\"vel\\\":[%.0f,%.0f,%.0f],"
+		"\\\"alive\\\":%s}\"}],\"id\":%d}",
+		bot_id, cl->name,
+		ps->stats[STAT_HEALTH], ps->stats[STAT_ARMOR],
+		ps->weapon,
+		ps->origin[0], ps->origin[1], ps->origin[2],
+		ps->velocity[0], ps->velocity[1], ps->velocity[2],
+		ps->pm_type != PM_DEAD ? "true" : "false",
+		req_id );
+
+	WT_McpRespond( conn, stream_id, resp );
+}
+
+/*
+====================
+WT_McpHandleBotSetSkill
+====================
+*/
+static void WT_McpHandleBotSetSkill( wt_connection_t *conn, uint64_t stream_id,
+                                      int req_id, int bot_id, int skill_x10 )
+{
+	char resp[512];
+	client_t *cl;
+	float skill;
+
+	if ( bot_id < 0 || bot_id >= sv_maxclients->integer ) {
+		Com_sprintf( resp, sizeof(resp),
+			"{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32602,\"message\":\"Invalid bot ID\"},\"id\":%d}", req_id );
+		WT_McpRespond( conn, stream_id, resp );
+		return;
+	}
+
+	cl = &svs.clients[bot_id];
+	if ( cl->state < CS_ACTIVE || !(cl->gentity && (cl->gentity->r.svFlags & SVF_BOT)) ) {
+		Com_sprintf( resp, sizeof(resp),
+			"{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32001,\"message\":\"Not a bot or not active\"},\"id\":%d}", req_id );
+		WT_McpRespond( conn, stream_id, resp );
+		return;
+	}
+
+	skill = (float)skill_x10 / 10.0f;
+	if ( skill < 1.0f ) skill = 1.0f;
+	if ( skill > 5.0f ) skill = 5.0f;
+
+	// Set skill via console command — deferred to next frame
+	Cbuf_ExecuteText( EXEC_APPEND, va("g_spSkill %d\n", (int)(skill + 0.5f)) );
+
+	Com_sprintf( resp, sizeof(resp),
+		"{\"jsonrpc\":\"2.0\",\"result\":[{\"type\":\"text\",\"text\":\"Skill set to %.1f\"}],\"id\":%d}",
+		skill, req_id );
+
+	WT_McpRespond( conn, stream_id, resp );
+}
+#endif // FEAT_BOT_IMPROVEMENTS
+
 
 /*
 ====================

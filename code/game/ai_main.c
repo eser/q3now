@@ -288,13 +288,15 @@ void BotReportStatus(bot_state_t *bs) {
 			else strcpy(flagstatus, S_COLOR_BLUE"F ");
 		}
 	}
-#ifdef MISSIONPACK
+#if FEAT_1FCTF
 	else if (gametype == GT_1FCTF) {
 		if (Bot1FCTFCarryingFlag(bs)) {
 			if (BotTeam(bs) == TEAM_RED) strcpy(flagstatus, S_COLOR_RED"F ");
 			else strcpy(flagstatus, S_COLOR_BLUE"F ");
 		}
 	}
+#endif
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		if (BotHarvesterCarryingCubes(bs)) {
 			if (BotTeam(bs) == TEAM_RED) Com_sprintf(flagstatus, sizeof(flagstatus), S_COLOR_RED"%2d", bs->inventory[INVENTORY_REDCUBE]);
@@ -437,12 +439,14 @@ void BotSetInfoConfigString(bot_state_t *bs) {
 			strcpy(carrying, "F ");
 		}
 	}
-#ifdef MISSIONPACK
+#if FEAT_1FCTF
 	else if (gametype == GT_1FCTF) {
 		if (Bot1FCTFCarryingFlag(bs)) {
 			strcpy(carrying, "F ");
 		}
 	}
+#endif
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		if (BotHarvesterCarryingCubes(bs)) {
 			if (BotTeam(bs) == TEAM_RED) Com_sprintf(carrying, sizeof(carrying), "%2d", bs->inventory[INVENTORY_REDCUBE]);
@@ -1022,7 +1026,7 @@ int BotAI(int client, float thinktime) {
 			args[strlen(args)-1] = '\0';
 			trap_BotQueueConsoleMessage(bs->cs, CMS_CHAT, args);
 		}
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 		else if (!Q_stricmp(buf, "vchat")) {
 			BotVoiceChatCommand(bs, SAY_ALL, args);
 		}
@@ -1415,6 +1419,9 @@ int BotAIStartFrame(int time) {
 	trap_Cvar_Update(&bot_saveroutingcache);
 	trap_Cvar_Update(&bot_pause);
 	trap_Cvar_Update(&bot_report);
+#if FEAT_BOT_IMPROVEMENTS
+	trap_Cvar_Update(&bot_autoskill);
+#endif
 
 	if (bot_report.integer) {
 //		BotTeamplayReport();
@@ -1636,7 +1643,7 @@ int BotInitLibrary(void) {
 	trap_Cvar_VariableStringBuffer("fs_game", buf, sizeof(buf));
 	if (strlen(buf)) trap_BotLibVarSet("gamedir", buf);
 	//
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	trap_BotLibDefine("MISSIONPACK");
 #endif
 	//setup the bot library

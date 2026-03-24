@@ -26,7 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_local.h"
 #include "../game/bg_promode.h" // CPM
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 #include "../ui/ui_shared.h"
 
 // used for scoreboard
@@ -43,7 +43,7 @@ char systemChat[256];
 char teamChat1[256];
 char teamChat2[256];
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 
 int CG_Text_Width(const char *text, float scale, int limit) {
   int count,len;
@@ -1628,7 +1628,7 @@ static void CG_DrawDisconnect( void ) {
 		return;
 	}
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	x = 640 - 48;
 	y = 480 - 144;
 #else
@@ -1663,7 +1663,7 @@ static void CG_DrawLagometer( void ) {
 	//
 	// draw the graph
 	//
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	x = 640 - 48;
 	y = 480 - 144;
 #else
@@ -1803,7 +1803,7 @@ static void CG_DrawCenterString( void ) {
 	char	*start;
 	int		l;
 	int		x, y, w;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	int h;
 #endif
 	float	*color;
@@ -1834,7 +1834,7 @@ static void CG_DrawCenterString( void ) {
 		}
 		linebuffer[l] = 0;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		w = CG_Text_Width(linebuffer, 0.5, 0);
 		h = CG_Text_Height(linebuffer, 0.5, 0);
 		x = (SCREEN_WIDTH - w) / 2;
@@ -2091,7 +2091,7 @@ static void CG_DrawCrosshairNames( void ) {
 	}
 
 	name = cgs.clientinfo[ cg.crosshairClientNum ].name;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	color[3] *= 0.5f;
 	w = CG_Text_Width(name, 0.3f, 0);
 	CG_Text_Paint( 320 - w / 2, 190, 0.3f, color, name, 0, 0, ITEM_TEXTSTYLE_SHADOWED);
@@ -2144,7 +2144,7 @@ static void CG_DrawVote(void) {
 	if ( sec < 0 ) {
 		sec = 0;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	s = va("VOTE(%i):%s yes:%i no:%i", sec, cgs.voteString, cgs.voteYes, cgs.voteNo);
 	CG_DrawSmallString( 0, 58, s, colorWhite, 0, 0 );
 	s = "or press ESC then click Vote";
@@ -2192,7 +2192,7 @@ static void CG_DrawTeamVote(void) {
 
 
 static qboolean CG_DrawScoreboard( void ) {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	static qboolean firstTime = qtrue;
 
 	if (menuScoreboard) {
@@ -2404,7 +2404,7 @@ static void CG_DrawWarmup( void ) {
 	int			w;
 	int			sec;
 	int			i;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	float		scale;
 #else
 	int			cw;
@@ -2441,7 +2441,7 @@ static void CG_DrawWarmup( void ) {
 
 		if ( ci1 && ci2 ) {
 			s = va( "%s vs %s", ci1->name, ci2->name );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 			w = CG_Text_Width(s, 0.6f, 0);
 			CG_Text_Paint(320 - w / 2, 60, 0.6f, colorWhite, s, 0, 0, ITEM_TEXTSTYLE_SHADOWEDMORE);
 #else
@@ -2466,7 +2466,7 @@ static void CG_DrawWarmup( void ) {
             s = "Team Deathmatch";
         } else if ( cgs.gametype == GT_CTF ) {
 			s = "Capture the Flag";
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		} else if ( cgs.gametype == GT_1FCTF ) {
 			s = "One Flag CTF";
 		} else if ( cgs.gametype == GT_OBELISK ) {
@@ -2477,7 +2477,7 @@ static void CG_DrawWarmup( void ) {
 		} else {
 			s = "";
 		}
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		w = CG_Text_Width(s, 0.6f, 0);
 		CG_Text_Paint(320 - w / 2, 90, 0.6f, colorWhite, s, 0, 0, ITEM_TEXTSTYLE_SHADOWEDMORE);
 #else
@@ -2515,7 +2515,7 @@ static void CG_DrawWarmup( void ) {
 		}
 	}
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	switch ( cg.warmupCount ) {
 	case 0:
 		scale = 0.54f;
@@ -2556,7 +2556,7 @@ static void CG_DrawWarmup( void ) {
 }
 
 //==================================================================================
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 /* 
 =================
 CG_DrawTimedMenus
@@ -2633,10 +2633,12 @@ CG_Draw2D
 */
 static void CG_Draw2D(stereoFrame_t stereoFrame)
 {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
+#if FEAT_TA_UI
 	if (cgs.orderPending && cg.time > cgs.orderTime) {
 		CG_CheckOrderPending();
 	}
+#endif
 #endif
 	// if we are taking a levelshot for the menu, don't draw anything
 	if ( cg.levelShot ) {
@@ -2678,11 +2680,13 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 			// don't draw any status if dead or the scoreboard is being explicitly shown
 			if ( !cg.showScores && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
+#if FEAT_TA_UI
 				if ( cg_drawStatus.integer ) {
 					Menu_PaintAll();
 					CG_DrawTimedMenus();
 				}
+#endif
 #else
 				CG_DrawStatusBar();
 #endif
@@ -2715,10 +2719,12 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 
 		CG_DrawLagometer();
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
+#if FEAT_TA_UI
 		if (!cg_paused.integer) {
 			CG_DrawUpperRight(stereoFrame);
 		}
+#endif
 #else
 		CG_DrawUpperRight(stereoFrame);
 #endif

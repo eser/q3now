@@ -26,7 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "../game/bg_promode.h" // CPM
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 #include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure
 
 typedef struct {
@@ -103,7 +103,7 @@ static void CG_ParseScores( void ) {
 
 		cg.scores[i].team = cgs.clientinfo[cg.scores[i].client].team;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	CG_SetScoreSelection(NULL);
 #endif
 
@@ -226,7 +226,7 @@ static void CG_ParseWarmup( void ) {
 	if ( warmup == 0 && cg.warmup ) {
 
 	} else if ( warmup > 0 && cg.warmup <= 0 ) {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		if (cgs.gametype >= GT_CTF && cgs.gametype <= GT_HARVESTER) {
 			trap_S_StartLocalSound( cgs.media.countPrepareTeamSound, CHAN_ANNOUNCER );
 		} else
@@ -257,7 +257,7 @@ void CG_SetConfigValues( void ) {
 		cgs.redflag = s[0] - '0';
 		cgs.blueflag = s[1] - '0';
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	else if( cgs.gametype == GT_1FCTF ) {
 		s = CG_ConfigString( CS_FLAGSTATUS );
 		cgs.flagStatus = s[0] - '0';
@@ -359,7 +359,7 @@ static void CG_ConfigStringModified( void ) {
 		cgs.voteModified = qtrue;
 	} else if ( num == CS_VOTE_STRING ) {
 		Q_strncpyz( cgs.voteString, str, sizeof( cgs.voteString ) );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		trap_S_StartLocalSound( cgs.media.voteNow, CHAN_ANNOUNCER );
 #endif //MISSIONPACK
 	} else if ( num >= CS_TEAMVOTE_TIME && num <= CS_TEAMVOTE_TIME + 1) {
@@ -373,7 +373,7 @@ static void CG_ConfigStringModified( void ) {
 		cgs.teamVoteModified[num-CS_TEAMVOTE_NO] = qtrue;
 	} else if ( num >= CS_TEAMVOTE_STRING && num <= CS_TEAMVOTE_STRING + 1) {
 		Q_strncpyz( cgs.teamVoteString[num-CS_TEAMVOTE_STRING], str, sizeof( cgs.teamVoteString[0] ) );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		trap_S_StartLocalSound( cgs.media.voteNow, CHAN_ANNOUNCER );
 #endif
 	} else if ( num == CS_INTERMISSION ) {
@@ -393,7 +393,7 @@ static void CG_ConfigStringModified( void ) {
 			cgs.redflag = str[0] - '0';
 			cgs.blueflag = str[1] - '0';
 		}
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		else if( cgs.gametype == GT_1FCTF ) {
 			cgs.flagStatus = str[0] - '0';
 		}
@@ -539,7 +539,7 @@ static void CG_MapRestart( void ) {
     trap_Cvar_Set("cg_thirdPerson", "0");
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 
 #define MAX_VOICEFILESIZE	16384
 #define MAX_VOICEFILES		8
@@ -1056,7 +1056,7 @@ static void CG_ServerCommand( void ) {
 
 	if ( !strcmp( cmd, "print" ) ) {
 		CG_Printf( "%s", CG_Argv(1) );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		cmd = CG_Argv(1);			// yes, this is obviously a hack, but so is the way we hear about
 									// votes passing or failing
 
@@ -1160,7 +1160,7 @@ static void CG_ServerCommand( void ) {
 		return;
 	}
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	if ( !strcmp( cmd, "vchat" ) ) {
 		CG_VoiceChat( SAY_ALL );
 		return;

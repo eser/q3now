@@ -33,6 +33,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //#define DEBUG
 #define CTF
 
+#include "q_feats.h"
+
 #define MAX_ITEMS					256
 //bot flags
 #define BFL_STRAFERIGHT				1	//strafe to the right
@@ -86,6 +88,53 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define PRESENCE_NONE				1
 #define PRESENCE_NORMAL				2
 #define PRESENCE_CROUCH				4
+
+#if FEAT_BOT_IMPROVEMENTS
+// ── bot AI improvements: shared types ─────────────────────────────────
+
+// entity reference with type validation (guards against entity slot reuse)
+typedef struct {
+	int		entnum;		// entity slot number
+	int		eType;		// expected entity type (ET_MISSILE, ET_ITEM, ET_PLAYER)
+} tracked_ent_t;
+
+#define MAX_MISSILE_DODGE		8	// max tracked missiles per bot per frame
+#define MAX_AWARE_ENTITIES		12	// max entities in awareness list
+
+// awareness entry
+typedef struct {
+	tracked_ent_t	ent;
+	float			first_noted;	// level.time when first detected
+	float			react_time;		// level.time when bot can act on this
+	qboolean		visual;			// qtrue if visually confirmed
+} bot_aware_t;
+
+// per-weapon accuracy tracking (per combat zone)
+#define ZONE_NEAR		0	// < 300 units
+#define ZONE_MID		1	// < 700
+#define ZONE_FAR		2	// < 1200
+#define ZONE_VERYFAR	3	// 1200+
+#define NUM_ZONES		4
+
+typedef struct {
+	int		shots;
+	int		hits;
+	int		damage;
+} bot_accuracy_t;
+
+// item timing entry
+#define MAX_TIMED_ITEMS		32
+
+typedef struct {
+	tracked_ent_t	ent;
+	int				itemType;		// IT_* item type
+	vec3_t			origin;			// item origin
+	int				areaNum;		// AAS area
+	int				respawnTime;	// respawn interval in ms
+	int				pickupTime;		// level.time when picked up (0 = available or unknown)
+} bot_itemtime_t;
+
+#endif // FEAT_BOT_IMPROVEMENTS
 
 //check points
 typedef struct bot_waypoint_s
@@ -267,7 +316,47 @@ typedef struct bot_state_s
 	bot_waypoint_t *patrolpoints;					//patrol points
 	bot_waypoint_t *curpatrolpoint;					//current patrol point the bot is going for
 	int patrolflags;								//patrol flags
+
+#if FEAT_BOT_IMPROVEMENTS
+	// ── missile avoidance ─────────────────────────────────────────────
+	tracked_ent_t	missile_dodge[MAX_MISSILE_DODGE];
+	int				num_missiles;			// number of tracked missiles this frame
+
+	// ── entity awareness ──────────────────────────────────────────────
+	bot_aware_t		aware[MAX_AWARE_ENTITIES];
+	int				num_aware;				// current entries in awareness list
+
+	// ── strafejumping ─────────────────────────────────────────────────
+	vec3_t			strafejump_angles;		// ideal view angles for strafejump
+	qboolean		strafejump_active;		// currently strafejumping
+	int				strafejump_side;		// alternating left(-1) / right(1)
+
+	// ── item respawn timing ───────────────────────────────────────────
+	bot_itemtime_t	timed_items[MAX_TIMED_ITEMS];
+	int				num_timed_items;		// registered items
+	qboolean		items_initialized;		// qtrue after first scan
+
+	// ── dynamic weapon selection ──────────────────────────────────────
+	bot_accuracy_t	accuracy[MAX_WEAPONS][NUM_ZONES];	// per-weapon per-zone stats
+	int				best_weapon;			// currently selected weapon (DPS-based)
+	int				weapon_reason;			// 0=default, 1=dps, 2=ammo, 3=range
+
+	// ── auto-calibration ──────────────────────────────────────────────
+	float			autoskill;				// floating-point skill [1.0 - 5.0]
+	float			autoskill_time;			// next evaluation time
+	int				kills_vs_humans;		// kills against human players (sliding window)
+	int				deaths_vs_humans;		// deaths from human players (sliding window)
+	float			autoskill_window_start;	// start of current K/D window
+
+	// ── dodge direction for current frame ─────────────────────────────
+	vec3_t			dodge_dir;				// computed dodge direction (zero if no dodge)
+	qboolean		dodge_active;			// qtrue if dodging this frame
+#endif // FEAT_BOT_IMPROVEMENTS
 } bot_state_t;
+
+#if FEAT_BOT_IMPROVEMENTS
+extern bot_state_t *botstates[MAX_CLIENTS];
+#endif
 
 //resets the whole bot state
 void BotResetState(bot_state_t *bs);

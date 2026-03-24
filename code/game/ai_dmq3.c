@@ -48,6 +48,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
 #include "ai_team.h"
+#include "ai_dodge.h"
+#include "ai_aware.h"
+#include "ai_itemtime.h"
+#include "ai_weapsel.h"
 //
 #include "chars.h"				//characteristics
 #include "inv.h"				//indexes into the inventory
@@ -91,7 +95,7 @@ int max_bspmodelindex;			//maximum BSP model index
 //CTF flag goals
 bot_goal_t ctf_redflag;
 bot_goal_t ctf_blueflag;
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 bot_goal_t ctf_neutralflag;
 bot_goal_t redobelisk;
 bot_goal_t blueobelisk;
@@ -225,7 +229,7 @@ qboolean EntityCarriesFlag(aas_entityinfo_t *entinfo) {
 		return qtrue;
 	if ( entinfo->powerups & ( 1 << PW_BLUEFLAG ) )
 		return qtrue;
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	if ( entinfo->powerups & ( 1 << PW_NEUTRALFLAG ) )
 		return qtrue;
 #endif
@@ -296,7 +300,7 @@ qboolean EntityHasBerserk(aas_entityinfo_t *entinfo) {
 	return qfalse;
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 EntityHasKamikze
@@ -373,7 +377,7 @@ BotSetTeamStatus
 ==================
 */
 void BotSetTeamStatus(bot_state_t *bs) {
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	int teamtask;
 	aas_entityinfo_t entinfo;
 
@@ -804,7 +808,7 @@ void BotCTFRetreatGoals(bot_state_t *bs) {
 	}
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 Bot1FCTFSeekGoals
@@ -1352,7 +1356,7 @@ void BotTeamGoals(bot_state_t *bs, int retreat) {
 		if (gametype == GT_CTF) {
 			BotCTFRetreatGoals(bs);
 		}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 		else if (gametype == GT_1FCTF) {
 			Bot1FCTFRetreatGoals(bs);
 		}
@@ -1369,7 +1373,7 @@ void BotTeamGoals(bot_state_t *bs, int retreat) {
 			//decide what to do in CTF mode
 			BotCTFSeekGoals(bs);
 		}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 		else if (gametype == GT_1FCTF) {
 			Bot1FCTFSeekGoals(bs);
 		}
@@ -1558,14 +1562,14 @@ int BotSynonymContext(bot_state_t *bs) {
 	context = CONTEXT_NORMAL|CONTEXT_NEARBYITEM|CONTEXT_NAMES;
 	//
 	if (gametype == GT_CTF
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 		|| gametype == GT_1FCTF
 #endif
 		) {
 		if (BotTeam(bs) == TEAM_RED) context |= CONTEXT_CTFREDTEAM;
 		else context |= CONTEXT_CTFBLUETEAM;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_OBELISK) {
 		if (BotTeam(bs) == TEAM_RED) context |= CONTEXT_OBELISKREDTEAM;
 		else context |= CONTEXT_OBELISKBLUETEAM;
@@ -1591,11 +1595,17 @@ void BotChooseWeapon(bot_state_t *bs) {
 		trap_EA_SelectWeapon(bs->client, bs->weaponnum);
 	}
 	else {
+#if FEAT_BOT_IMPROVEMENTS
+		BotAccuracyUpdate(bs);
+		BotChooseWeaponDPS(bs);
+		trap_EA_SelectWeapon(bs->client, bs->weaponnum);
+#else
 		newweaponnum = trap_BotChooseBestFightWeapon(bs->ws, bs->inventory);
 		if (bs->weaponnum != newweaponnum) bs->weaponchange_time = FloatTime();
 		bs->weaponnum = newweaponnum;
 		//BotAI_Print(PRT_MESSAGE, "bs->weaponnum = %d\n", bs->weaponnum);
 		trap_EA_SelectWeapon(bs->client, bs->weaponnum);
+#endif
 	}
 }
 
@@ -1642,7 +1652,7 @@ BotCheckItemPickup
 ==================
 */
 void BotCheckItemPickup(bot_state_t *bs, int *oldinventory) {
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	int offence, leader;
 
 	if (gametype <= GT_TEAM)
@@ -1747,7 +1757,7 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_HEALTH] = bs->cur_ps.stats[STAT_HEALTH];
 	bs->inventory[INVENTORY_TELEPORTER] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_TELEPORTER;
 	bs->inventory[INVENTORY_MEDKIT] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_MEDKIT;
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	bs->inventory[INVENTORY_KAMIKAZE] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_KAMIKAZE;
 	bs->inventory[INVENTORY_PORTAL] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_PORTAL;
 	bs->inventory[INVENTORY_INVULNERABILITY] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_INVULNERABILITY;
@@ -1761,7 +1771,7 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_FLIGHT] = bs->cur_ps.powerups[PW_FLIGHT] != 0;
 	bs->inventory[INVENTORY_REDFLAG] = bs->cur_ps.powerups[PW_REDFLAG] != 0;
 	bs->inventory[INVENTORY_BLUEFLAG] = bs->cur_ps.powerups[PW_BLUEFLAG] != 0;
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	bs->inventory[INVENTORY_NEUTRALFLAG] = bs->cur_ps.powerups[PW_NEUTRALFLAG] != 0;
 	if (BotTeam(bs) == TEAM_RED) {
 		bs->inventory[INVENTORY_REDCUBE] = bs->cur_ps.generic1;
@@ -1792,7 +1802,7 @@ void BotUpdateBattleInventory(bot_state_t *bs, int enemy) {
 	//FIXME: add num visible enemies and num visible team mates to the inventory
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 BotUseKamikaze
@@ -2021,7 +2031,7 @@ void BotBattleUseItems(bot_state_t *bs) {
 	if (bs->inventory[INVENTORY_HEALTH] < 40) {
 		if (bs->inventory[INVENTORY_TELEPORTER] > 0) {
 			if (!BotCTFCarryingFlag(bs)
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 				&& !Bot1FCTFCarryingFlag(bs)
 				&& !BotHarvesterCarryingCubes(bs)
 #endif
@@ -2035,7 +2045,7 @@ void BotBattleUseItems(bot_state_t *bs) {
 			trap_EA_Use(bs->client);
 		}
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	BotUseKamikaze(bs);
 	BotUseInvulnerability(bs);
 #endif
@@ -2257,7 +2267,7 @@ int BotWantsToRetreat(bot_state_t *bs) {
 		if (BotCTFCarryingFlag(bs))
 			return qtrue;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF) {
 		//if carrying the flag then always retreat
 		if (Bot1FCTFCarryingFlag(bs))
@@ -2286,7 +2296,7 @@ int BotWantsToRetreat(bot_state_t *bs) {
 		BotEntityInfo(bs->enemy, &entinfo);
 		// if the enemy is carrying a flag
 		if (EntityCarriesFlag(&entinfo)) return qfalse;
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 		// if the enemy is carrying cubes
 		if (EntityCarriesCubes(&entinfo)) return qfalse;
 #endif
@@ -2317,7 +2327,7 @@ int BotWantsToChase(bot_state_t *bs) {
 		if (EntityCarriesFlag(&entinfo))
 			return qtrue;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF) {
 		//never chase if carrying the flag
 		if (Bot1FCTFCarryingFlag(bs))
@@ -2938,7 +2948,7 @@ int BotFindEnemy(bot_state_t *bs, int curenemy) {
 	else {
 		cursquaredist = 0;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	if (gametype == GT_OBELISK) {
 		vec3_t target;
 		bot_goal_t *goal;
@@ -3182,7 +3192,7 @@ void BotVisibleTeamMatesAndEnemies(bot_state_t *bs, int *teammates, int *enemies
 	}
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 BotTeamCubeCarrierVisible
@@ -3272,7 +3282,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	if (bs->enemy >= MAX_CLIENTS) {
 		//if the obelisk is visible
 		VectorCopy(entinfo.origin, target);
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 		// if attacking an obelisk
 		if ( bs->enemy == redobelisk.entitynum ||
 			bs->enemy == blueobelisk.entitynum ) {
@@ -3556,7 +3566,7 @@ void BotCheckAttack(bot_state_t *bs) {
 	BotEntityInfo(attackentity, &entinfo);
 	// if not attacking a player
 	if (attackentity >= MAX_CLIENTS) {
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 		// if attacking an obelisk
 		if ( entinfo.number == redobelisk.entitynum ||
 			entinfo.number == blueobelisk.entitynum ) {
@@ -4701,7 +4711,7 @@ void BotCheckForGrenades(bot_state_t *bs, entityState_t *state) {
 	trap_BotAddAvoidSpot(bs->ms, state->pos.trBase, 160, AVOID_ALWAYS);
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 BotCheckForKamikazeBody
@@ -4727,7 +4737,7 @@ BotCheckEvents
 void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 	int event;
 	char buf[128];
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	aas_entityinfo_t entinfo;
 #endif
 
@@ -4778,7 +4788,7 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 				bs->enemysuicide = qtrue;
 			}
 			//
-#ifdef MISSIONPACK			
+#if FEAT_TA_TEAM_ORDERS			
 			if (gametype == GT_1FCTF) {
 				//
 				BotEntityInfo(target, &entinfo);
@@ -4811,7 +4821,7 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 				bs->flagstatuschanged = qtrue;
 			}
 			else*/
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 			if (!strcmp(buf, "sound/items/kamikazerespawn.wav" )) {
 				//the kamikaze respawned so don't avoid it
 				BotDontAvoid(bs, "Kamikaze");
@@ -4860,7 +4870,7 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 						break; //see BotMatch_CTF
 				}
 			}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 			else if (gametype == GT_1FCTF) {
 				switch(state->eventParm) {
 					case GTS_RED_CAPTURE:
@@ -4988,7 +4998,7 @@ void BotCheckSnapshot(bot_state_t *bs) {
 		//check for grenades the bot should avoid
 		BotCheckForGrenades(bs, &state);
 		//
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 		//check for dead bodies with the kamikaze effect which should be gibbed
 		BotCheckForKamikazeBody(bs, &state);
 #endif
@@ -5087,7 +5097,7 @@ void BotSetupAlternativeRouteGoals(void) {
 
 	if (altroutegoals_setup)
 		return;
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	if (gametype == GT_CTF) {
 		if (trap_BotGetLevelItemGoal(-1, "Neutral Flag", &ctf_neutralflag) < 0)
 			BotAI_Print(PRT_WARNING, "No alt routes without Neutral Flag\n");
@@ -5160,6 +5170,265 @@ void BotSetupAlternativeRouteGoals(void) {
 	altroutegoals_setup = qtrue;
 }
 
+#if FEAT_BOT_IMPROVEMENTS
+
+vmCvar_t bot_autoskill;
+
+/*
+==================
+BotAutoCalibrate
+
+Per-bot skill adjustment based on K/D ratio vs human players.
+Evaluates every 60 seconds using a 5-minute sliding window.
+Adjusts by ±0.3f per evaluation, clamped to [1.0, 5.0].
+==================
+*/
+static void BotAutoCalibrate( bot_state_t *bs )
+{
+	float kd, adjustment;
+
+	if ( !bot_autoskill.integer ) return;
+
+	// initialize autoskill from base skill on first call
+	if ( bs->autoskill <= 0 ) {
+		bs->autoskill = bs->settings.skill;
+		bs->autoskill_time = floattime + 60.0f;
+		bs->autoskill_window_start = floattime;
+		bs->kills_vs_humans = 0;
+		bs->deaths_vs_humans = 0;
+		return;
+	}
+
+	// reset window every 5 minutes
+	if ( floattime - bs->autoskill_window_start > 300.0f ) {
+		bs->kills_vs_humans = 0;
+		bs->deaths_vs_humans = 0;
+		bs->autoskill_window_start = floattime;
+	}
+
+	// evaluate every 60 seconds
+	if ( floattime < bs->autoskill_time ) return;
+	bs->autoskill_time = floattime + 60.0f;
+
+	// need some data to calibrate
+	if ( bs->kills_vs_humans + bs->deaths_vs_humans < 3 ) return;
+
+	// compute K/D ratio
+	if ( bs->deaths_vs_humans > 0 ) {
+		kd = (float)bs->kills_vs_humans / (float)bs->deaths_vs_humans;
+	} else {
+		kd = (float)bs->kills_vs_humans + 1.0f; // no deaths = very dominant
+	}
+
+	// adjust: if bot is dominating (K/D > 2.0), make it easier
+	//         if bot is getting crushed (K/D < 0.5), make it harder
+	adjustment = 0;
+	if ( kd > 2.0f ) {
+		adjustment = -0.3f; // bot too strong, lower skill
+	} else if ( kd < 0.5f ) {
+		adjustment = 0.3f;  // bot too weak, raise skill
+	}
+
+	if ( adjustment != 0 ) {
+		bs->autoskill += adjustment;
+		if ( bs->autoskill < 1.0f ) bs->autoskill = 1.0f;
+		if ( bs->autoskill > 5.0f ) bs->autoskill = 5.0f;
+	}
+}
+
+/*
+==================
+BotAutoCalibrate_RecordKill
+
+Called from game code when a kill occurs. Tracks bot kills/deaths
+vs human players for the auto-calibration sliding window.
+==================
+*/
+void BotAutoCalibrate_RecordKill( int attacker, int victim )
+{
+	bot_state_t *bs;
+	gentity_t *ent;
+	int i;
+
+	if ( !bot_autoskill.integer ) return;
+
+	// check if attacker is a bot who killed a human
+	ent = &g_entities[attacker];
+	if ( attacker >= 0 && attacker < MAX_CLIENTS && (ent->r.svFlags & SVF_BOT) ) {
+		// attacker is a bot — check if victim is human
+		ent = &g_entities[victim];
+		if ( victim >= 0 && victim < MAX_CLIENTS && !(ent->r.svFlags & SVF_BOT) ) {
+			for ( i = 0; i < MAX_CLIENTS; i++ ) {
+				bs = botstates[i];
+				if ( bs && bs->entitynum == attacker ) {
+					bs->kills_vs_humans++;
+					break;
+				}
+			}
+		}
+	}
+
+	// check if victim is a bot who was killed by a human
+	ent = &g_entities[victim];
+	if ( victim >= 0 && victim < MAX_CLIENTS && (ent->r.svFlags & SVF_BOT) ) {
+		ent = &g_entities[attacker];
+		if ( attacker >= 0 && attacker < MAX_CLIENTS && !(ent->r.svFlags & SVF_BOT) ) {
+			for ( i = 0; i < MAX_CLIENTS; i++ ) {
+				bs = botstates[i];
+				if ( bs && bs->entitynum == victim ) {
+					bs->deaths_vs_humans++;
+					break;
+				}
+			}
+		}
+	}
+}
+
+/*
+==================
+BotTeamCallout
+
+Issue tactical voice commands based on awareness state.
+Global team cooldown: max 3 callouts per team per 5 seconds.
+==================
+*/
+static int teamCalloutCount[TEAM_NUM_TEAMS];
+static float teamCalloutReset[TEAM_NUM_TEAMS];
+
+static void BotTeamCallout( bot_state_t *bs )
+{
+	int team;
+
+	// only in team games
+	if ( gametype < GT_TEAM ) return;
+
+	team = bs->cur_ps.persistant[PERS_TEAM];
+	if ( team < 0 || team >= TEAM_NUM_TEAMS ) return;
+
+	// global team cooldown
+	if ( floattime > teamCalloutReset[team] ) {
+		teamCalloutCount[team] = 0;
+		teamCalloutReset[team] = floattime + 5.0f;
+	}
+	if ( teamCalloutCount[team] >= 3 ) return;
+
+	// "enemy spotted" — when aware of an enemy not visually confirmed
+	if ( bs->num_aware > 0 && !bs->aware[0].visual ) {
+		trap_EA_Command( bs->client, "vsay_team enemyspot" );
+		teamCalloutCount[team]++;
+		return;
+	}
+
+	// "need backup" — low health + enemy nearby + teammate nearby
+	if ( bs->cur_ps.stats[STAT_HEALTH] < 50 && bs->enemy >= 0 ) {
+		trap_EA_Command( bs->client, "vsay_team needbackup" );
+		teamCalloutCount[team]++;
+		return;
+	}
+}
+
+/*
+==================
+BotStrafeJumpCheck
+
+Check if the bot should strafejump during navigation. Requirements:
+  - On ground with forward momentum
+  - Route ahead is straight (no tight turns)
+  - Skill >= 3
+  - Not in combat (bs->enemy == -1)
+  - Not dodging missiles
+
+If eligible, overrides bs->ideal_viewangles with strafejump angles
+and issues jump commands. The Q3 air acceleration physics handle
+the speed gain automatically.
+==================
+*/
+void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult )
+{
+	float skill, speed, angle;
+	vec3_t flatvel, moveDir, forward;
+	vec3_t sjAngles;
+
+	bs->strafejump_active = qfalse;
+
+	// must have an enemy-free context and no active dodge
+	if ( bs->enemy >= 0 ) return;
+	if ( bs->dodge_active ) return;
+
+	skill = bs->autoskill > 0 ? bs->autoskill : bs->settings.skill;
+	if ( skill < 3.0f ) return;
+
+	// must be on ground
+	if ( bs->cur_ps.groundEntityNum == ENTITYNUM_NONE ) {
+		// in air — continue existing strafejump if already active
+		if ( bs->strafejump_side != 0 ) {
+			bs->strafejump_active = qtrue;
+			// maintain strafejump angles from last frame
+			VectorCopy( bs->strafejump_angles, bs->ideal_viewangles );
+			trap_EA_Move( bs->client, moveresult->movedir, 400 );
+			trap_EA_Jump( bs->client );
+		}
+		return;
+	}
+
+	// compute current horizontal speed
+	VectorCopy( bs->cur_ps.velocity, flatvel );
+	flatvel[2] = 0;
+	speed = VectorLength( flatvel );
+
+	// need some forward momentum to strafejump
+	if ( speed < 200.0f ) {
+		bs->strafejump_side = 0;
+		return;
+	}
+
+	// check that the movement direction is set
+	if ( VectorLength( moveresult->movedir ) < 0.1f ) return;
+
+	// check route straightness — if the movement direction and velocity
+	// are roughly aligned, the route is straight enough
+	VectorCopy( moveresult->movedir, moveDir );
+	moveDir[2] = 0;
+	VectorNormalize( moveDir );
+	VectorNormalize2( flatvel, forward );
+
+	if ( DotProduct( moveDir, forward ) < 0.85f ) {
+		// route is turning — cancel strafejump
+		bs->strafejump_side = 0;
+		return;
+	}
+
+	// compute optimal strafejump angle (speed-dependent)
+	// at low speed (~320): ~30°. at high speed (~600+): ~5°.
+	// formula: angle = atan2(accel * frametime, speed) in degrees
+	// using approximate values: accel=320 (air accel), frametime=0.033
+	angle = atan2f( 320.0f * 0.033f, speed ) * (180.0f / M_PI);
+	if ( angle < 3.0f ) angle = 3.0f;
+	if ( angle > 30.0f ) angle = 30.0f;
+
+	// alternate sides each jump
+	if ( bs->strafejump_side == 0 ) bs->strafejump_side = 1;
+	else bs->strafejump_side = -bs->strafejump_side;
+
+	// compute strafejump view angles: yaw offset from movement direction
+	vectoangles( moveDir, sjAngles );
+	sjAngles[YAW] += angle * bs->strafejump_side;
+	sjAngles[PITCH] = 0; // look level
+
+	VectorCopy( sjAngles, bs->strafejump_angles );
+	VectorCopy( sjAngles, bs->ideal_viewangles );
+	bs->strafejump_active = qtrue;
+
+	// issue movement: forward + strafe + jump
+	trap_EA_Move( bs->client, moveresult->movedir, 400 );
+	trap_EA_Jump( bs->client );
+
+#if FEAT_QUIC_OBSERVE
+	trap_QUIC_EmitBotEvent( bs->entitynum, "strafejump", 1, (int)speed, bs->origin );
+#endif
+}
+#endif // FEAT_BOT_IMPROVEMENTS
+
 /*
 ==================
 BotDeathmatchAI
@@ -5208,6 +5477,20 @@ void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 		BotCheckSnapshot(bs);
 		//check for air
 		BotCheckAir(bs);
+#if FEAT_BOT_IMPROVEMENTS
+		//scan for incoming missiles
+		BotScanMissiles(bs);
+		//update entity awareness (tracks enemies via missiles, teleports, sounds)
+		BotAwareUpdate(bs);
+		//evaluate dodge direction if missiles are incoming
+		BotDodgeMovement(bs);
+		//update item respawn timing
+		BotItemTimeUpdate(bs);
+		//per-bot skill auto-calibration vs human players
+		BotAutoCalibrate(bs);
+		//tactical team voice callouts
+		BotTeamCallout(bs);
+#endif
 	}
 	//check the console messages
 	BotCheckConsoleMessages(bs);
@@ -5381,6 +5664,9 @@ void BotSetupDeathmatchAI(void) {
 	trap_Cvar_Register(&bot_testrchat, "bot_testrchat", "0", 0);
 	trap_Cvar_Register(&bot_challenge, "bot_challenge", "0", 0);
 	trap_Cvar_Register(&bot_predictobstacles, "bot_predictobstacles", "1", 0);
+#if FEAT_BOT_IMPROVEMENTS
+	trap_Cvar_Register(&bot_autoskill, "bot_autoskill", "0", 0);
+#endif
 	trap_Cvar_Register(&g_spSkill, "g_spSkill", "2", 0);
 	//
 	if (gametype == GT_CTF) {
@@ -5389,7 +5675,7 @@ void BotSetupDeathmatchAI(void) {
 		if (trap_BotGetLevelItemGoal(-1, "Blue Flag", &ctf_blueflag) < 0)
 			BotAI_Print(PRT_WARNING, "CTF without Blue Flag\n");
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF) {
 		if (trap_BotGetLevelItemGoal(-1, "Neutral Flag", &ctf_neutralflag) < 0)
 			BotAI_Print(PRT_WARNING, "One Flag CTF without Neutral Flag\n");

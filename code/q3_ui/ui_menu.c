@@ -216,34 +216,6 @@ static void Main_MenuDraw( void ) {
 	}
 }
 
-
-/*
-===============
-UI_TeamArenaExists
-===============
-*/
-static qboolean UI_TeamArenaExists( void ) {
-	int		numdirs;
-	char	dirlist[2048];
-	char	*dirptr;
-  char  *descptr;
-	int		i;
-	int		dirlen;
-
-	numdirs = trap_FS_GetFileList( "$modlist", "", dirlist, sizeof(dirlist) );
-	dirptr  = dirlist;
-	for( i = 0; i < numdirs; i++ ) {
-		dirlen = strlen( dirptr ) + 1;
-    descptr = dirptr + dirlen;
-		if (Q_stricmp(dirptr, BASETA) == 0) {
-			return qtrue;
-		}
-    dirptr += dirlen + strlen(descptr) + 1;
-	}
-	return qfalse;
-}
-
-
 /*
 ===============
 UI_MainMenu

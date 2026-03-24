@@ -198,7 +198,7 @@ struct gentity_s {
 	gentity_t	*teamchain;		// next entity in team
 	gentity_t	*teammaster;	// master of the team
 
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 	int			kamikazeTime;
 	int			kamikazeShockTime;
 #endif
@@ -366,9 +366,11 @@ struct gclient_s {
 	// like health / armor countdowns and regeneration
 	int			timeResidual;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	int			portalID;
+#endif
 	int			ammoTimes[WP_NUM_WEAPONS];
+#if FEAT_PW_INVULNERABILITY
 	int			invulnerabilityTime;
 #endif
 
@@ -525,7 +527,7 @@ typedef struct {
 	gentity_t	*locationHead;			// head of the location list
 	int			bodyQueIndex;			// dead bodies
 	gentity_t	*bodyQue[BODY_QUEUE_SIZE];
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	int			portalSequence;
 #endif
 
@@ -637,9 +639,7 @@ qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, floa
 #define DAMAGE_NO_ARMOR				0x00000002	// armour does not protect from this damage
 #define DAMAGE_NO_KNOCKBACK			0x00000004	// do not affect velocity, just view angles
 #define DAMAGE_NO_PROTECTION		0x00000008  // armor, shields, invulnerability, and godmode have no effect
-#ifdef MISSIONPACK
-#define DAMAGE_NO_TEAM_PROTECTION	0x00000010  // armor, shields, invulnerability, and godmode have no effect
-#endif
+#define DAMAGE_NO_TEAM_PROTECTION	0x00000010  // bypass team friendly-fire protection (especially for kamikaze)
 
 //
 // g_missile.c
@@ -671,7 +671,7 @@ void trigger_teleporter_touch (gentity_t *self, gentity_t *other, trace_t *trace
 // g_misc.c
 //
 void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 void DropPortalSource( gentity_t *ent );
 void DropPortalDestination( gentity_t *ent );
 #endif
@@ -717,7 +717,7 @@ qboolean G_FilterPacket (const char *from);
 // g_weapon.c
 //
 void FireWeapon( gentity_t *ent );
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 void G_StartKamikaze( gentity_t *ent );
 #endif
 
@@ -908,9 +908,6 @@ extern  vmCvar_t	g_overtime;
 #endif
 #if FEAT_AUTO_DEMO
 extern  vmCvar_t	g_autoDemo;
-#endif
-#if FEAT_CTF_SCORING
-extern  vmCvar_t	g_ctfScoring;
 #endif
 #if FEAT_TOURNAMENT_PAUSE
 extern  vmCvar_t	g_allowTimeout;
@@ -1196,5 +1193,8 @@ void trap_QUIC_EmitChat( int client, const char *msg, qboolean teamOnly );
 void trap_QUIC_EmitMatchEvent( const char *type, const char *data );
 #if FEAT_UNLAGGED
 void trap_QUIC_EmitDelag( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos );
+#endif
+#if FEAT_BOT_IMPROVEMENTS
+void trap_QUIC_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos );
 #endif
 #endif

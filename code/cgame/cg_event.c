@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_local.h"
 
 // for the voice chats
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 #include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure
 #endif
 //==========================================================================
@@ -180,7 +180,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	if (attacker == target) {
 		gender = ci->gender;
 		switch (mod) {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		case MOD_KAMIKAZE:
 			message = "goes out with a bang";
 			break;
@@ -300,7 +300,7 @@ static void CG_Obituary( entityState_t *ent ) {
             message = "was discharged by";
             break;
 // eser - lightning discharge
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		case MOD_KAMIKAZE:
 			message = "falls to";
 			message2 = "'s Kamikaze blast";
@@ -373,7 +373,7 @@ static void CG_UseItem( centity_t *cent ) {
 		trap_S_StartSound (NULL, es->number, CHAN_BODY, cgs.media.medkitSound );
 		break;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	case HI_KAMIKAZE:
 		break;
 
@@ -683,7 +683,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_TAUNT");
 		trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*taunt.wav" ) );
 		break;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	case EV_TAUNT_YES:
 		DEBUGNAME("EV_TAUNT_YES");
 		CG_VoiceChatLocal(SAY_TEAM, qfalse, es->number, COLOR_CYAN, VOICECHAT_YES);
@@ -906,7 +906,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		}
 		break;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	case EV_KAMIKAZE:
 		DEBUGNAME("EV_KAMIKAZE");
 		CG_KamikazeEffect( cent->lerpOrigin );
@@ -1091,7 +1091,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 					}
 					else {
 						if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_BLUE) {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 							if (cgs.gametype == GT_1FCTF) 
 								CG_AddBufferedSound( cgs.media.yourTeamTookTheFlagSound );
 							else
@@ -1099,7 +1099,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 							CG_AddBufferedSound( cgs.media.enemyTookYourFlagSound );
 						}
 						else if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_RED) {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 							if (cgs.gametype == GT_1FCTF)
 								CG_AddBufferedSound( cgs.media.enemyTookTheFlagSound );
 							else
@@ -1114,7 +1114,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 					}
 					else {
 						if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_RED) {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 							if (cgs.gametype == GT_1FCTF)
 								CG_AddBufferedSound( cgs.media.yourTeamTookTheFlagSound );
 							else
@@ -1122,7 +1122,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 							CG_AddBufferedSound( cgs.media.enemyTookYourFlagSound );
 						}
 						else if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_BLUE) {
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 							if (cgs.gametype == GT_1FCTF)
 								CG_AddBufferedSound( cgs.media.enemyTookTheFlagSound );
 							else
@@ -1131,7 +1131,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 						}
 					}
 					break;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 				case GTS_REDOBELISK_ATTACKED: // Overload: red obelisk is being attacked
 					if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_RED) {
 						CG_AddBufferedSound( cgs.media.yourBaseIsUnderAttackSound );
@@ -1159,7 +1159,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 				case GTS_TEAMS_ARE_TIED:
 					CG_AddBufferedSound( cgs.media.teamsTiedSound );
 					break;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 				case GTS_KAMIKAZE:
 					trap_S_StartLocalSound(cgs.media.kamikazeFarSound, CHAN_ANNOUNCER);
 					break;

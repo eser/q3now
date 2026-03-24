@@ -25,6 +25,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 #include "bg_promode.h" // CPM
 
+#if FEAT_BOT_IMPROVEMENTS
+void BotAutoCalibrate_RecordKill( int attacker, int victim );
+#endif
+
 /*
 ============
 ScorePlum
@@ -186,7 +190,7 @@ void TossClientItems( gentity_t *self ) {
 	}
 }
 
-#ifdef MISSIONPACK
+#if FEAT_HARVESTER
 
 /*
 =================
@@ -334,13 +338,13 @@ char	*modNames[] = {
 	"MOD_SUICIDE",
 	"MOD_TARGET_LASER",
 	"MOD_TRIGGER_HURT",
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 	"MOD_KAMIKAZE",
 #endif
 	"MOD_GRAPPLE"
 };
 
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 /*
 ==================
 Kamikaze_DeathActivate
@@ -531,6 +535,10 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		killer, self->s.number, meansOfDeath, killerName,
 		self->client->pers.netname, obit );
 
+#if FEAT_BOT_IMPROVEMENTS
+	BotAutoCalibrate_RecordKill( killer, self->s.number );
+#endif
+
 #if FEAT_UNLAGGED
 	G_UnTimeShiftClient( self );
 #endif
@@ -698,7 +706,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	}
 
 	TossClientItems( self );
-#ifdef MISSIONPACK
+#if FEAT_HARVESTER
 	if( g_gametype.integer == GT_HARVESTER ) {
 		TossClientCubes( self );
 	}
@@ -788,7 +796,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		// globally cycle through the different death animations
 		lastDeath = ( lastDeath + 1 ) % 3;
 
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 		if (self->s.eFlags & EF_KAMIKAZE) {
 			Kamikaze_DeathTimer( self );
 		}
@@ -898,7 +906,7 @@ int RaySphereIntersections( vec3_t origin, float radius, vec3_t point, vec3_t di
 	return 0;
 }
 
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 /*
 ================
 G_InvulnerabilityEffect
@@ -988,7 +996,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	int			knockback;
 	int			max;
 	int			wp;
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	vec3_t		bouncedir, impactpoint;
 #endif
 
@@ -1001,7 +1009,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	if ( level.intermissionQueued ) {
 		return;
 	}
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	if ( targ->client ) {
 		if ( targ->client->invulnerabilityTime > level.time) {
 			if ( dir && point ) {
@@ -1025,7 +1033,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		}
 		return;
 	}
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 	if( g_gametype.integer == GT_OBELISK && CheckObeliskAttack( targ, attacker ) ) {
 		return;
 	}
@@ -1138,11 +1146,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 		// if TF_NO_FRIENDLY_FIRE is set, don't do damage to the target
 		// if the attacker was on the same team
-#ifdef MISSIONPACK
 		if ( targ != attacker && !(dflags & DAMAGE_NO_TEAM_PROTECTION) && OnSameTeam (targ, attacker)  ) {
-#else
-		if ( targ != attacker && OnSameTeam (targ, attacker)  ) {
-#endif
 			if ( !g_friendlyFire.integer ) {
 				return;
 			}
@@ -1191,7 +1195,6 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		} else {
 			attacker->client->ps.persistant[PERS_HITS]++;
 		}
-		attacker->client->ps.persistant[PERS_ATTACKEE_ARMOR] = (targ->health<<8)|(client->ps.stats[STAT_ARMOR]);
 	}
 
 	// always give quarter damage if hurting self
@@ -1236,11 +1239,11 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	// See if it's the player hurting the emeny flag carrier
-#ifdef MISSIONPACK
-	if( g_gametype.integer == GT_CTF || g_gametype.integer == GT_1FCTF ) {
-#else
-	if( g_gametype.integer == GT_CTF) {
+	if( g_gametype.integer == GT_CTF
+#if FEAT_1FCTF
+		|| g_gametype.integer == GT_1FCTF
 #endif
+	) {
 		Team_CheckHurtCarrier(targ, attacker);
 	}
 

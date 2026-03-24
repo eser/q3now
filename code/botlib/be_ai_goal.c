@@ -100,11 +100,9 @@ typedef enum {
 	GT_CTF,				// capture the flag
 	GT_KINGOFTHEHILL,	// king of the hill
 	GT_LASTMANSTANDING,	// last man standing
-#ifdef MISSIONPACK
 	GT_1FCTF,
 	GT_OBELISK,
 	GT_HARVESTER,
-#endif
 	GT_MAX_GAME_TYPE
 } gametype_t;
 

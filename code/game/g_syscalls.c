@@ -822,4 +822,10 @@ void trap_QUIC_EmitDelag( int shooter, int target, int timeDelta, vec3_t shooter
 	syscall( G_QUIC_EMIT_DELAG, shooter, target, timeDelta, shooterPos, targetPos );
 }
 #endif
+
+#if FEAT_BOT_IMPROVEMENTS
+void trap_QUIC_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos ) {
+	syscall( G_QUIC_EMIT_BOT_EVENT, bot_id, event_type, param1, param2, pos );
+}
+#endif
 #endif

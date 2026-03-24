@@ -97,13 +97,17 @@ set(CGAME_QVM_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.asm)
 
 set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_main.c
+    ${SOURCE_DIR}/game/ai_aware.c
     ${SOURCE_DIR}/game/ai_chat.c
     ${SOURCE_DIR}/game/ai_cmd.c
     ${SOURCE_DIR}/game/ai_dmnet.c
     ${SOURCE_DIR}/game/ai_dmq3.c
+    ${SOURCE_DIR}/game/ai_dodge.c
+    ${SOURCE_DIR}/game/ai_itemtime.c
     ${SOURCE_DIR}/game/ai_main.c
     ${SOURCE_DIR}/game/ai_team.c
     ${SOURCE_DIR}/game/ai_vcmd.c
+    ${SOURCE_DIR}/game/ai_weapsel.c
     ${SOURCE_DIR}/game/bg_misc.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c

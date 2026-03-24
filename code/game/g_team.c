@@ -52,7 +52,7 @@ void Team_InitGame( void ) {
 		 teamgame.blueStatus = -1; // Invalid to force update
 		Team_SetFlagStatus( TEAM_BLUE, FLAG_ATBASE );
 		break;
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	case GT_1FCTF:
 		teamgame.flagStatus = -1; // Invalid to force update
 		Team_SetFlagStatus( TEAM_FREE, FLAG_ATBASE );
@@ -308,7 +308,7 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 		enemy_flag_pw = PW_REDFLAG;
 	}
 
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	if (g_gametype.integer == GT_1FCTF) {
 		flag_pw = PW_NEUTRALFLAG;
 		enemy_flag_pw = PW_NEUTRALFLAG;
@@ -317,18 +317,13 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 
 	// did the attacker frag the flag carrier?
 	tokens = 0;
-#ifdef MISSIONPACK
+#if FEAT_HARVESTER
 	if( g_gametype.integer == GT_HARVESTER ) {
 		tokens = targ->client->ps.generic1;
 	}
 #endif
 	if (targ->client->ps.powerups[enemy_flag_pw]) {
 		attacker->client->pers.teamState.lastfraggedcarrier = level.time;
-#if FEAT_CTF_SCORING
-		if ( g_ctfScoring.integer ) {
-			AddScore(attacker, targ->r.currentOrigin, 1);  // enhanced: +1 for carrier kill (10F)
-		} else
-#endif
 		AddScore(attacker, targ->r.currentOrigin, CTF_FRAG_CARRIER_BONUS);
 		attacker->client->pers.teamState.fragcarrier++;
 		PrintMsg(NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " fragged %s's flag carrier!\n",
@@ -385,7 +380,7 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 
 	// we have to find the flag and carrier entities
 
-#ifdef MISSIONPACK	
+#if FEAT_OVERLOAD || FEAT_HARVESTER
 	if( g_gametype.integer == GT_OBELISK ) {
 		// find the team obelisk
 		switch (attacker->client->sess.sessionTeam) {
@@ -422,7 +417,7 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 			break;
 		carrier = NULL;
 	}
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD || FEAT_HARVESTER
 	}
 #endif
 	flag = NULL;
@@ -502,7 +497,7 @@ void Team_CheckHurtCarrier(gentity_t *targ, gentity_t *attacker)
 	else
 		flag_pw = PW_REDFLAG;
 
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	if (g_gametype.integer == GT_1FCTF) {
 		flag_pw = PW_NEUTRALFLAG;
 	}
@@ -558,7 +553,7 @@ void Team_ResetFlags( void ) {
 		Team_ResetFlag( TEAM_RED );
 		Team_ResetFlag( TEAM_BLUE );
 	}
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	else if( g_gametype.integer == GT_1FCTF ) {
 		Team_ResetFlag( TEAM_FREE );
 	}
@@ -699,7 +694,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 	gclient_t	*cl = other->client;
 	int			enemy_flag;
 
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		enemy_flag = PW_NEUTRALFLAG;
 	}
@@ -715,11 +710,6 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 		// hey, it's not home.  return it by teleporting it back
 		PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " returned the %s flag!\n",
 			cl->pers.netname, TeamName(team));
-#if FEAT_CTF_SCORING
-		if ( g_ctfScoring.integer ) {
-			AddScore(other, ent->r.currentOrigin, 2);  // enhanced: +2 for flag return (10F)
-		} else
-#endif
 		AddScore(other, ent->r.currentOrigin, CTF_RECOVERY_BONUS);
 		other->client->pers.teamState.flagrecovery++;
 		other->client->pers.teamState.lastreturnedflag = level.time;
@@ -727,7 +717,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 		Team_ReturnFlagSound(Team_ResetFlag(team), team);
 		return 0;
 	}
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	}
 #endif
 
@@ -747,14 +737,14 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 		cl->ps.powerups[own_flag] = 0;
 	}
 #endif
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
         PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the flag!\n", cl->pers.netname );
 	}
 	else {
 #endif
 	PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the %s flag!\n", cl->pers.netname, TeamName(OtherTeam(team)));
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	}
 #endif
 
@@ -775,11 +765,6 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 	other->client->ps.persistant[PERS_CAPTURES]++;
 
 	// capture frag bonus
-#if FEAT_CTF_SCORING
-	if ( g_ctfScoring.integer ) {
-		AddScore(other, ent->r.currentOrigin, 5);  // enhanced: +5 for flag capture (10F)
-	} else
-#endif
 	AddScore(other, ent->r.currentOrigin, CTF_CAPTURE_BONUS);
 
 	Team_CaptureFlagSound( ent, team );
@@ -797,9 +782,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 			player->client->pers.teamState.lasthurtcarrier = -5;
 		} else if (player->client->sess.sessionTeam ==
 			cl->sess.sessionTeam) {
-#ifdef MISSIONPACK
 			AddScore(player, ent->r.currentOrigin, CTF_TEAM_BONUS);
-#endif
 			// award extra points for capture assists
 			if (player->client->pers.teamState.lastreturnedflag + 
 				CTF_RETURN_FLAG_ASSIST_TIMEOUT > level.time) {
@@ -835,7 +818,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 	gclient_t *cl = other->client;
 
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		PrintMsg (NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " got the flag!\n", other->client->pers.netname );
 
@@ -859,7 +842,7 @@ int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 			cl->ps.powerups[PW_BLUEFLAG] = INT_MAX; // flags never expire
 
 		Team_SetFlagStatus( team, FLAG_TAKEN );
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	}
 
 	AddScore(other, ent->r.currentOrigin, CTF_FLAG_BONUS);
@@ -874,7 +857,7 @@ int Pickup_Team( gentity_t *ent, gentity_t *other ) {
 	int team;
 	gclient_t *cl = other->client;
 
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 	if( g_gametype.integer == GT_OBELISK ) {
 		// there are no team items that can be picked up in obelisk
 		G_FreeEntity( ent );
@@ -897,7 +880,7 @@ int Pickup_Team( gentity_t *ent, gentity_t *other ) {
 	else if( strcmp(ent->classname, "team_CTF_blueflag") == 0 ) {
 		team = TEAM_BLUE;
 	}
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	else if( strcmp(ent->classname, "team_CTF_neutralflag") == 0  ) {
 		team = TEAM_FREE;
 	}
@@ -906,7 +889,7 @@ int Pickup_Team( gentity_t *ent, gentity_t *other ) {
 		PrintMsg ( other, "Don't know what team the flag is on.\n");
 		return 0;
 	}
-#if defined(MISSIONPACK) || FEAT_1FCTF
+#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		if( team == TEAM_FREE ) {
 			return Team_TouchEnemyFlag( ent, other, cl->sess.sessionTeam );
@@ -1226,7 +1209,7 @@ void SP_team_CTF_bluespawn(gentity_t *ent) {
 }
 
 
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 /*
 ================
 Obelisks

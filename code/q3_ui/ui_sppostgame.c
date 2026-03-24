@@ -365,9 +365,9 @@ void UI_SPPostgameMenu_f( void ) {
 	}
 
 	for( n = 0; n < postgameMenuInfo.numClients; n++ ) {
-		postgameMenuInfo.clientNums[n] = atoi( UI_Argv( 8 + n * 3 + 1 ) );
-		postgameMenuInfo.ranks[n] = atoi( UI_Argv( 8 + n * 3 + 2 ) );
-		postgameMenuInfo.scores[n] = atoi( UI_Argv( 8 + n * 3 + 3 ) );
+		postgameMenuInfo.clientNums[n] = atoi( UI_Argv( 14 + n * 3 + 1 ) );
+		postgameMenuInfo.ranks[n] = atoi( UI_Argv( 14 + n * 3 + 2 ) );
+		postgameMenuInfo.scores[n] = atoi( UI_Argv( 14 + n * 3 + 3 ) );
 
 		if( postgameMenuInfo.clientNums[n] == playerClientNum ) {
 			playerGameRank = (postgameMenuInfo.ranks[n] & ~RANK_TIED_FLAG) + 1;
@@ -377,12 +377,14 @@ void UI_SPPostgameMenu_f( void ) {
 	UI_SetBestScore( postgameMenuInfo.level, playerGameRank );
 
 	// process award stats and prepare presentation data
+	// postgame format: numClients playerNum accuracy impressives excellents
+	//   defends assists gauntlets score perfect redScore blueScore time captures [clients...]
 	awardValues[AWARD_ACCURACY] = atoi( UI_Argv( 3 ) );
 	awardValues[AWARD_IMPRESSIVE] = atoi( UI_Argv( 4 ) );
 	awardValues[AWARD_EXCELLENT] = atoi( UI_Argv( 5 ) );
-	awardValues[AWARD_GAUNTLET] = atoi( UI_Argv( 6 ) );
-	awardValues[AWARD_FRAGS] = atoi( UI_Argv( 7 ) );
-	awardValues[AWARD_PERFECT] = atoi( UI_Argv( 8 ) );
+	awardValues[AWARD_GAUNTLET] = atoi( UI_Argv( 8 ) );
+	awardValues[AWARD_FRAGS] = atoi( UI_Argv( 9 ) );
+	awardValues[AWARD_PERFECT] = atoi( UI_Argv( 10 ) );
 
 	if ( playerGameRank == 1 ) {
 		postgameMenuInfo.won = UI_TierCompleted( postgameMenuInfo.level );

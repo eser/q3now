@@ -3842,7 +3842,7 @@ void Com_Init( char *commandLine ) {
 	// get the initial time base
 	Sys_Milliseconds();
 
-	Com_Printf( "%s %s %s\n", SVN_VERSION, PLATFORM_STRING, __DATE__ );
+	Com_Printf( "%s %s %s\n", Q3_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
 
 	if ( Q_setjmp( abortframe ) ) {
 		Sys_Error ("Error during initialization");

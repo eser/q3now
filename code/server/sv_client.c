@@ -1325,8 +1325,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 	byte msgBuffer[MAX_DOWNLOAD_BLKSIZE*2+8];
 
 	if ( cl->download == FS_INVALID_HANDLE ) {
-		qboolean idPack = qfalse;
-		qboolean missionPack = qfalse;
+		qboolean isProprietary = qfalse;
  		// Chop off filename extension.
 		Q_strncpyz( pakbuf, cl->downloadName, sizeof( pakbuf ) );
 		pakptr = strrchr( pakbuf, '.' );
@@ -1351,8 +1350,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 
 						// now that we know the file is referenced,
 						// check whether it's legal to download it.
-						missionPack = FS_idPak(pakbuf, BASETA, NUM_TA_PAKS);
-						idPack = missionPack || FS_idPak(pakbuf, BASEGAME, NUM_ID_PAKS);
+						isProprietary = FS_isProprietary(pakbuf);
 
 						break;
 					}
@@ -1365,7 +1363,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 		// We open the file here
 		if ( !(sv_allowDownload->integer & DLF_ENABLE) ||
 			(sv_allowDownload->integer & DLF_NO_UDP) ||
-			idPack || unreferenced ||
+			isProprietary || unreferenced ||
 			( cl->downloadSize = FS_SV_FOpenFileRead( cl->downloadName, &cl->download ) ) < 0 ) {
 
 			// cannot auto-download file
@@ -1374,15 +1372,9 @@ static int SV_WriteDownloadToClient( client_t *cl )
 				Com_Printf("clientDownload: %d : \"%s\" is not referenced and cannot be downloaded.\n", (int) (cl - svs.clients), cl->downloadName);
 				Com_sprintf(errorMessage, sizeof(errorMessage), "File \"%s\" is not referenced and cannot be downloaded.", cl->downloadName);
 			}
-			else if (idPack) {
-				Com_Printf("clientDownload: %d : \"%s\" cannot download id pk3 files\n", (int) (cl - svs.clients), cl->downloadName);
-				if (missionPack) {
-					Com_sprintf(errorMessage, sizeof(errorMessage), "Cannot autodownload Team Arena file \"%s\"\n"
-									"The Team Arena mission pack can be found in your local game store.", cl->downloadName);
-				}
-				else {
-					Com_sprintf(errorMessage, sizeof(errorMessage), "Cannot autodownload id pk3 file \"%s\"", cl->downloadName);
-				}
+			else if (isProprietary) {
+				Com_Printf("clientDownload: %d : \"%s\" cannot download proprietary files\n", (int) (cl - svs.clients), cl->downloadName);
+				Com_sprintf(errorMessage, sizeof(errorMessage), "Cannot autodownload proprietary file \"%s\"", cl->downloadName);
 			}
 			else if ( !(sv_allowDownload->integer & DLF_ENABLE) ||
 				(sv_allowDownload->integer & DLF_NO_UDP) ) {

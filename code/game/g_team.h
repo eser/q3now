@@ -21,7 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 
-#ifdef MISSIONPACK
+#if FEAT_CTF_SCORING
 
 #define CTF_CAPTURE_BONUS		100		// what you get for capture
 #define CTF_TEAM_BONUS			25		// what your team gets for capture
@@ -40,7 +40,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define CTF_CAPTURE_BONUS		5		// what you get for capture
 #define CTF_TEAM_BONUS			0		// what your team gets for capture
-#define CTF_RECOVERY_BONUS		1		// what you get for recovery
+#define CTF_RECOVERY_BONUS		2		// what you get for recovery
 #define CTF_FLAG_BONUS			0		// what you get for picking up enemy flag
 #define CTF_FRAG_CARRIER_BONUS	2		// what you get for fragging enemy flag carrier
 #define CTF_FLAG_RETURN_TIME	40000	// seconds until auto return

@@ -24,7 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // executed by a key binding
 
 #include "cg_local.h"
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 #include "../ui/ui_shared.h"
 extern menuDef_t *menuScoreboard;
 #endif
@@ -86,7 +86,7 @@ static void CG_Viewpos_f (void) {
 
 static void CG_ScoresDown_f( void ) {
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		CG_BuildSpectatorString();
 #endif
 	if ( cg.scoresRequestTime + 2000 < cg.time ) {
@@ -115,7 +115,7 @@ static void CG_ScoresUp_f( void ) {
 	}
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 extern menuDef_t *menuScoreboard;
 void Menu_Reset( void );			// FIXME: add to right include file
 
@@ -201,7 +201,7 @@ static void CG_TellTarget_f( void ) {
 	trap_SendClientCommand( command );
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 static void CG_VoiceTellTarget_f( void ) {
 	int		clientNum;
 	char	command[128];
@@ -469,14 +469,18 @@ static consoleCommand_t	commands[] = {
 	{ "+stats", CG_StatsDown_f },
 	{ "-stats", CG_StatsUp_f },
 #endif
-#ifdef MISSIONPACK
-	{ "vtell_target", CG_VoiceTellTarget_f },
+#if FEAT_TA_UI
 	{ "loadhud", CG_LoadHud_f },
 	{ "nextTeamMember", CG_NextTeamMember_f },
 	{ "prevTeamMember", CG_PrevTeamMember_f },
 	{ "nextOrder", CG_NextOrder_f },
 	{ "confirmOrder", CG_ConfirmOrder_f },
 	{ "denyOrder", CG_DenyOrder_f },
+	{ "scoresDown", CG_scrollScoresDown_f },
+	{ "scoresUp", CG_scrollScoresUp_f },
+#endif
+#if FEAT_TA_UI
+	{ "vtell_target", CG_VoiceTellTarget_f },
 	{ "taskOffense", CG_TaskOffense_f },
 	{ "taskDefense", CG_TaskDefense_f },
 	{ "taskPatrol", CG_TaskPatrol_f },
@@ -491,8 +495,6 @@ static consoleCommand_t	commands[] = {
 	{ "tauntTaunt", CG_TauntTaunt_f },
 	{ "tauntDeathInsult", CG_TauntDeathInsult_f },
 	{ "tauntGauntlet", CG_TauntGauntlet_f },
-	{ "scoresDown", CG_scrollScoresDown_f },
-	{ "scoresUp", CG_scrollScoresUp_f },
 #endif
     { "spWin", CG_spWin_f },
     { "spLose", CG_spLose_f },
@@ -554,7 +556,7 @@ void CG_InitConsoleCommands( void ) {
 	trap_AddCommand ("say");
 	trap_AddCommand ("say_team");
 	trap_AddCommand ("tell");
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	trap_AddCommand ("vsay");
 	trap_AddCommand ("vsay_team");
 	trap_AddCommand ("vtell");

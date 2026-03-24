@@ -173,7 +173,7 @@ G_MissileImpact
 void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 	gentity_t		*other;
 	qboolean		hitClient = qfalse;
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	vec3_t			forward, impactpoint, bouncedir;
 	int				eFlags;
 #endif
@@ -203,7 +203,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 		return;
 	}
 #endif
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	if ( other->takedamage ) {
 		if ( other->client && other->client->invulnerabilityTime > level.time ) {
 			//

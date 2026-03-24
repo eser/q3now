@@ -409,7 +409,8 @@ typedef enum {
 	G_QUIC_EMIT_ITEM_PICKUP,       // ( int client, const char *item, vec3_t pos )
 	G_QUIC_EMIT_CHAT,              // ( int client, const char *msg, qboolean teamOnly )
 	G_QUIC_EMIT_MATCH_EVENT,       // ( const char *type, const char *data )
-	G_QUIC_EMIT_DELAG              // ( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos )
+	G_QUIC_EMIT_DELAG,             // ( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos )
+	G_QUIC_EMIT_BOT_EVENT          // ( int bot_id, const char *event_type, int param1, int param2, vec3_t pos )
 
 } gameImport_t;
 
