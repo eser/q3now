@@ -310,4 +310,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 #endif // idx64
 
+// portable size_t format specifier — use as: "%"PRIz"u"
+#ifndef PRIz
+#ifdef _WIN32
+#define PRIz "I"
+#else
+#define PRIz "z"
+#endif
+#endif
+
 #endif // __Q_PLATFORM_H
