@@ -296,9 +296,6 @@ CG_CheckLocalSounds
 */
 void CG_CheckLocalSounds( playerState_t *ps, playerState_t *ops ) {
 	int			highScore, reward;
-#ifdef MISSIONPACK
-	int			health, armor;
-#endif
 	sfxHandle_t sfx;
 
 	// don't play the sounds if the player just changed teams
@@ -307,28 +304,35 @@ void CG_CheckLocalSounds( playerState_t *ps, playerState_t *ops ) {
 	}
 
 	// hit changes
-	if ( ps->persistant[PERS_HITS] > ops->persistant[PERS_HITS] ) {
-#if FEAT_HIT_SOUNDS
-		if ( cg_hitSounds.integer > 0 ) {
-			// damage-based hit sounds: 4 tiers (0-25, 26-50, 51-75, 76+)
-			int damage = ps->persistant[PERS_HITS] - ops->persistant[PERS_HITS];
-			int index;
-			if ( damage > 75 ) index = 3;
-			else if ( damage > 50 ) index = 2;
-			else if ( damage > 25 ) index = 1;
-			else index = 0;
-			// cg_hitSounds 2: reversed (higher damage = higher pitch)
-			if ( cg_hitSounds.integer > 1 ) index = 3 - index;
-			trap_S_StartLocalSound( cgs.media.hitSounds[index], CHAN_LOCAL_SOUND );
-		} else if ( cg_hitSounds.integer == 0 ) {
-			trap_S_StartLocalSound( cgs.media.hitSound, CHAN_LOCAL_SOUND );
+	if ( cg_hitSounds.integer > 0 ) {
+		if ( ps->persistant[PERS_HITS] < ops->persistant[PERS_HITS] ) {
+			// PERS_HITS decreased — friendly fire (server decrements for team hits)
+			trap_S_StartLocalSound( cgs.media.hitSoundFriendlyFire, CHAN_LOCAL_SOUND );
 		}
-		// cg_hitSounds -1: no hit sound at all
-#else
-		trap_S_StartLocalSound( cgs.media.hitSound, CHAN_LOCAL_SOUND );
-#endif
-	} else if ( ps->persistant[PERS_HITS] < ops->persistant[PERS_HITS] ) {
-		trap_S_StartLocalSound( cgs.media.hitTeamSound, CHAN_LOCAL_SOUND );
+		else if ( ps->persistant[PERS_HITS] > ops->persistant[PERS_HITS] ) {
+			sfxHandle_t sfx;
+
+			if ( ps->stats[STAT_ARMORCLASS] > ARM_NONE && ps->stats[STAT_ARMOR] ) {
+				switch (ps->stats[STAT_ARMORCLASS]) {
+					case ARM_HEAVY:
+						sfx = cgs.media.hitSoundHeavyArmor;
+						break;
+					case ARM_COMBAT:
+						sfx = cgs.media.hitSoundCombatArmor;
+						break;
+					case ARM_JACKET:
+						sfx = cgs.media.hitSoundJacketArmor;
+						break;
+					default:
+						sfx = cgs.media.hitSoundNoArmor;
+						break;
+				}
+			} else {
+				sfx = cgs.media.hitSoundNoArmor;
+			}
+
+			trap_S_StartLocalSound( sfx, CHAN_LOCAL_SOUND );
+		}
 	}
 
 	// health changes of more than -1 should make pain sounds
@@ -352,43 +356,19 @@ void CG_CheckLocalSounds( playerState_t *ps, playerState_t *ops ) {
 		//Com_Printf("capture\n");
 	}
 	if (ps->persistant[PERS_IMPRESSIVE_COUNT] != ops->persistant[PERS_IMPRESSIVE_COUNT]) {
-#ifdef MISSIONPACK
-		if (ps->persistant[PERS_IMPRESSIVE_COUNT] == 1) {
-			sfx = cgs.media.firstImpressiveSound;
-		} else {
-			sfx = cgs.media.impressiveSound;
-		}
-#else
 		sfx = cgs.media.impressiveSound;
-#endif
 		pushReward(sfx, cgs.media.medalImpressive, ps->persistant[PERS_IMPRESSIVE_COUNT]);
 		reward = qtrue;
 		//Com_Printf("impressive\n");
 	}
 	if (ps->persistant[PERS_EXCELLENT_COUNT] != ops->persistant[PERS_EXCELLENT_COUNT]) {
-#ifdef MISSIONPACK
-		if (ps->persistant[PERS_EXCELLENT_COUNT] == 1) {
-			sfx = cgs.media.firstExcellentSound;
-		} else {
-			sfx = cgs.media.excellentSound;
-		}
-#else
 		sfx = cgs.media.excellentSound;
-#endif
 		pushReward(sfx, cgs.media.medalExcellent, ps->persistant[PERS_EXCELLENT_COUNT]);
 		reward = qtrue;
 		//Com_Printf("excellent\n");
 	}
 	if (ps->persistant[PERS_GAUNTLET_FRAG_COUNT] != ops->persistant[PERS_GAUNTLET_FRAG_COUNT]) {
-#ifdef MISSIONPACK
-		if (ps->persistant[PERS_GAUNTLET_FRAG_COUNT] == 1) {
-			sfx = cgs.media.firstHumiliationSound;
-		} else {
-			sfx = cgs.media.humiliationSound;
-		}
-#else
 		sfx = cgs.media.humiliationSound;
-#endif
 		pushReward(sfx, cgs.media.medalGauntlet, ps->persistant[PERS_GAUNTLET_FRAG_COUNT]);
 		reward = qtrue;
 		//Com_Printf("gauntlet frag\n");
@@ -537,4 +517,3 @@ void CG_TransitionPlayerState( playerState_t *ps, playerState_t *ops ) {
 		cg.duckTime = cg.time;
 	}
 }
-

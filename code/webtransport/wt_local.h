@@ -125,6 +125,11 @@ int              WT_EncodeItemPickupEvent( byte *buf, int buf_size,
                                            int client, const char *item, const vec3_t pos );
 int              WT_EncodeChatEvent( byte *buf, int buf_size,
                                      int client, const char *msg, qboolean teamOnly );
+#if FEAT_BOT_IMPROVEMENTS
+int              WT_EncodeBotEvent( byte *buf, int buf_size,
+                                    int bot_id, const char *event_type,
+                                    int param1, int param2, const vec3_t pos );
+#endif
 #endif
 
 #if FEAT_QUIC_CONTROL

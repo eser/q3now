@@ -24,7 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_local.h"
 #include "../game/bg_promode.h" // CPM
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 #include "../ui/ui_shared.h"
 // display context for new ui stuff
 displayContextDef_t cgDC;
@@ -66,7 +66,7 @@ Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, i
 		CG_KeyEvent(arg0, arg1);
 		return 0;
 	case CG_MOUSE_EVENT:
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		cgDC.cursorx = cgs.cursorX;
 		cgDC.cursory = cgs.cursorY;
 #endif
@@ -178,7 +178,7 @@ vmCvar_t	cg_drawTeamOverlay;
 vmCvar_t	cg_teamOverlayUserinfo;
 vmCvar_t	cg_drawFriend;
 vmCvar_t	cg_teamChatsOnly;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 vmCvar_t	cg_noVoiceChats;
 vmCvar_t	cg_noVoiceText;
 #endif
@@ -210,18 +210,22 @@ vmCvar_t	cg_cameraOrbitDelay;
 vmCvar_t	cg_timescaleFadeEnd;
 vmCvar_t	cg_timescaleFadeSpeed;
 vmCvar_t	cg_timescale;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 vmCvar_t	cg_smallFont;
 vmCvar_t	cg_bigFont;
+#endif
+#if FEAT_TA_UI
 vmCvar_t	cg_noTaunt;
 #endif
 vmCvar_t	cg_noProjectileTrail;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 vmCvar_t 	cg_redTeamName;
 vmCvar_t 	cg_blueTeamName;
+#if FEAT_TA_UI
 vmCvar_t	cg_currentSelectedPlayer;
 vmCvar_t	cg_currentSelectedPlayerName;
+#endif
 vmCvar_t	cg_enableDust;
 vmCvar_t	cg_enableBreath;
 vmCvar_t	cg_obeliskRespawnDelay;
@@ -233,9 +237,6 @@ vmCvar_t	cg_fovAspectAdjust;
 vmCvar_t	cg_viewbob;
 vmCvar_t	cg_viewkick;
 vmCvar_t	cg_drawSpeed;
-#if FEAT_HIT_SOUNDS
-vmCvar_t	cg_hitSounds;
-#endif
 #if FEAT_FOLLOW_KILLER
 vmCvar_t	cg_followKiller;
 #endif
@@ -249,6 +250,7 @@ vmCvar_t	cg_statsWindow;
 #if FEAT_IMPACT_SPARKS
 vmCvar_t	cg_impactSparks;
 #endif
+vmCvar_t	cg_hitSounds;
 vmCvar_t	cg_hudFile;
 
 typedef struct {
@@ -340,7 +342,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_teamChatHeight, "cg_teamChatHeight", "0", CVAR_ARCHIVE  },
 	{ &cg_forceModel, "cg_forceModel", "0", CVAR_ARCHIVE  },
 	{ &cg_predictItems, "cg_predictItems", "1", CVAR_ARCHIVE },
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	{ &cg_deferPlayers, "cg_deferPlayers", "0", CVAR_ARCHIVE },
 #else
 	{ &cg_deferPlayers, "cg_deferPlayers", "1", CVAR_ARCHIVE },
@@ -350,7 +352,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_stats, "cg_stats", "0", 0 },
 	{ &cg_drawFriend, "cg_drawFriend", "1", CVAR_ARCHIVE },
 	{ &cg_teamChatsOnly, "cg_teamChatsOnly", "0", CVAR_ARCHIVE },
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	{ &cg_noVoiceChats, "cg_noVoiceChats", "0", CVAR_ARCHIVE },
 	{ &cg_noVoiceText, "cg_noVoiceText", "0", CVAR_ARCHIVE },
 #endif
@@ -360,15 +362,17 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_paused, "cl_paused", "0", CVAR_ROM },
 	{ &cg_blood, "com_blood", "1", CVAR_ARCHIVE },
 	{ &cg_synchronousClients, "g_synchronousClients", "0", CVAR_SYSTEMINFO },
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	{ &cg_redTeamName, "g_redteam", DEFAULT_REDTEAM_NAME, CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO },
 	{ &cg_blueTeamName, "g_blueteam", DEFAULT_BLUETEAM_NAME, CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO },
+#if FEAT_TA_UI
 	{ &cg_currentSelectedPlayer, "cg_currentSelectedPlayer", "0", CVAR_ARCHIVE},
 	{ &cg_currentSelectedPlayerName, "cg_currentSelectedPlayerName", "", CVAR_ARCHIVE},
+	{ &cg_hudFiles, "cg_hudFiles", "ui/hud.txt", CVAR_ARCHIVE},
+#endif
 	{ &cg_enableDust, "g_enableDust", "0", CVAR_SERVERINFO},
 	{ &cg_enableBreath, "g_enableBreath", "0", CVAR_SERVERINFO},
 	{ &cg_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", CVAR_SERVERINFO},
-	{ &cg_hudFiles, "cg_hudFiles", "ui/hud.txt", CVAR_ARCHIVE},
 #endif
 	{ &cg_cameraOrbit, "cg_cameraOrbit", "0", CVAR_CHEAT},
 	{ &cg_cameraOrbitDelay, "cg_cameraOrbitDelay", "50", CVAR_ARCHIVE},
@@ -401,9 +405,11 @@ static cvarTable_t cvarTable[] = {
 #if FEAT_SPECTATOR_OUTLINES
 	{ &cg_specOutlines, "cg_specOutlines", "1", CVAR_ARCHIVE},
 #endif
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	{ &cg_smallFont, "ui_smallFont", "0.25", CVAR_ARCHIVE},
 	{ &cg_bigFont, "ui_bigFont", "0.4", CVAR_ARCHIVE},
+#endif
+#if FEAT_TA_UI
 	{ &cg_noTaunt, "cg_noTaunt", "0", CVAR_ARCHIVE},
 #endif
 	{ &cg_noProjectileTrail, "cg_noProjectileTrail", "0", CVAR_ARCHIVE},
@@ -418,9 +424,7 @@ static cvarTable_t cvarTable[] = {
     { &cg_viewbob, "cg_viewbob", "1", CVAR_ARCHIVE },
     { &cg_viewkick, "cg_viewkick", "1", CVAR_ARCHIVE },
 	{ &cg_drawSpeed,   "cg_drawSpeed",   "0", CVAR_ARCHIVE },
-#if FEAT_HIT_SOUNDS
 	{ &cg_hitSounds, "cg_hitSounds", "1", CVAR_ARCHIVE },
-#endif
 #if FEAT_FOLLOW_KILLER
 	{ &cg_followKiller, "cg_followKiller", "0", CVAR_ARCHIVE },
 #endif
@@ -671,7 +675,7 @@ static void CG_RegisterSounds( void ) {
 	const char	*soundName;
 
 	// voice commands
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	CG_LoadVoiceChats();
 #endif
 
@@ -686,7 +690,7 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.count1Sound = trap_S_RegisterSound( "sound/feedback/one.wav", qtrue );
 	cgs.media.countFightSound = trap_S_RegisterSound( "sound/feedback/fight.wav", qtrue );
 	cgs.media.countPrepareSound = trap_S_RegisterSound( "sound/feedback/prepare.wav", qtrue );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	cgs.media.countPrepareTeamSound = trap_S_RegisterSound( "sound/feedback/prepare_team.wav", qtrue );
 #endif
 
@@ -696,7 +700,7 @@ static void CG_RegisterSounds( void ) {
 		cgs.media.redLeadsSound = trap_S_RegisterSound( "sound/feedback/redleads.wav", qtrue );
 		cgs.media.blueLeadsSound = trap_S_RegisterSound( "sound/feedback/blueleads.wav", qtrue );
 		cgs.media.teamsTiedSound = trap_S_RegisterSound( "sound/feedback/teamstied.wav", qtrue );
-		cgs.media.hitTeamSound = trap_S_RegisterSound( "sound/feedback/hit_teammate.wav", qtrue );
+		cgs.media.hitSoundFriendlyFire = trap_S_RegisterSound( "sound/feedback/hit_teammate.wav", qtrue );
 
 		cgs.media.redScoredSound = trap_S_RegisterSound( "sound/teamplay/voc_red_scores.wav", qtrue );
 		cgs.media.blueScoredSound = trap_S_RegisterSound( "sound/teamplay/voc_blue_scores.wav", qtrue );
@@ -717,25 +721,27 @@ static void CG_RegisterSounds( void ) {
 			cgs.media.yourTeamTookEnemyFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_team_flag.wav", qtrue );
 		}
 
-#ifdef MISSIONPACK
+#if FEAT_1FCTF
 		if ( cgs.gametype == GT_1FCTF || cg_buildScript.integer ) {
-			// FIXME: get a replacement for this sound ?
 			cgs.media.neutralFlagReturnedSound = trap_S_RegisterSound( "sound/teamplay/flagreturn_opponent.wav", qtrue );
 			cgs.media.yourTeamTookTheFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_team_1flag.wav", qtrue );
 			cgs.media.enemyTookTheFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_enemy_1flag.wav", qtrue );
 		}
+#endif
 
-		if ( cgs.gametype == GT_1FCTF || cgs.gametype == GT_CTF || cg_buildScript.integer ) {
+		if ( cgs.gametype == GT_CTF
+#if FEAT_1FCTF
+			|| cgs.gametype == GT_1FCTF
+#endif
+			|| cg_buildScript.integer ) {
 			cgs.media.youHaveFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_you_flag.wav", qtrue );
 			cgs.media.holyShitSound = trap_S_RegisterSound("sound/feedback/voc_holyshit.wav", qtrue);
 		}
 
+#if FEAT_OVERLOAD
 		if ( cgs.gametype == GT_OBELISK || cg_buildScript.integer ) {
 			cgs.media.yourBaseIsUnderAttackSound = trap_S_RegisterSound( "sound/teamplay/voc_base_attack.wav", qtrue );
 		}
-#else
-		cgs.media.youHaveFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_you_flag.wav", qtrue );
-		cgs.media.holyShitSound = trap_S_RegisterSound("sound/feedback/voc_holyshit.wav", qtrue);
 #endif
 	}
 
@@ -748,7 +754,7 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.gibBounce2Sound = trap_S_RegisterSound( "sound/player/gibimp2.wav", qfalse );
 	cgs.media.gibBounce3Sound = trap_S_RegisterSound( "sound/player/gibimp3.wav", qfalse );
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	cgs.media.useInvulnerabilitySound = trap_S_RegisterSound( "sound/items/invul_activate.wav", qfalse );
 	cgs.media.invulnerabilityImpactSound1 = trap_S_RegisterSound( "sound/items/invul_impact_01.wav", qfalse );
 	cgs.media.invulnerabilityImpactSound2 = trap_S_RegisterSound( "sound/items/invul_impact_02.wav", qfalse );
@@ -769,17 +775,10 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.talkSound = trap_S_RegisterSound( "sound/player/talk.wav", qfalse );
 	cgs.media.landSound = trap_S_RegisterSound( "sound/player/land1.wav", qfalse);
 
-	cgs.media.hitSound = trap_S_RegisterSound( "sound/feedback/hit.wav", qfalse );
-#ifdef MISSIONPACK
-	cgs.media.hitSoundHighArmor = trap_S_RegisterSound( "sound/feedback/hithi.wav", qfalse );
-	cgs.media.hitSoundLowArmor = trap_S_RegisterSound( "sound/feedback/hitlo.wav", qfalse );
-#endif
-#if FEAT_HIT_SOUNDS
-	cgs.media.hitSounds[0] = trap_S_RegisterSound( "sound/feedback/hit25.wav", qfalse );
-	cgs.media.hitSounds[1] = trap_S_RegisterSound( "sound/feedback/hit50.wav", qfalse );
-	cgs.media.hitSounds[2] = trap_S_RegisterSound( "sound/feedback/hit75.wav", qfalse );
-	cgs.media.hitSounds[3] = trap_S_RegisterSound( "sound/feedback/hit100.wav", qfalse );
-#endif
+	cgs.media.hitSoundNoArmor = trap_S_RegisterSound( "sound/feedback/hit.wav", qfalse );
+	cgs.media.hitSoundHeavyArmor = trap_S_RegisterSound( "sound/feedback/hit.wav", qfalse );
+	cgs.media.hitSoundCombatArmor = trap_S_RegisterSound( "sound/feedback/hit.wav", qfalse );
+	cgs.media.hitSoundJacketArmor = trap_S_RegisterSound( "sound/feedback/hit.wav", qfalse );
 
 	cgs.media.impressiveSound = trap_S_RegisterSound( "sound/feedback/impressive.wav", qtrue );
 	cgs.media.excellentSound = trap_S_RegisterSound( "sound/feedback/excellent.wav", qtrue );
@@ -787,17 +786,12 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.humiliationSound = trap_S_RegisterSound( "sound/feedback/humiliation.wav", qtrue );
 	cgs.media.assistSound = trap_S_RegisterSound( "sound/feedback/assist.wav", qtrue );
 	cgs.media.defendSound = trap_S_RegisterSound( "sound/feedback/defense.wav", qtrue );
-#ifdef MISSIONPACK
-	cgs.media.firstImpressiveSound = trap_S_RegisterSound( "sound/feedback/first_impressive.wav", qtrue );
-	cgs.media.firstExcellentSound = trap_S_RegisterSound( "sound/feedback/first_excellent.wav", qtrue );
-	cgs.media.firstHumiliationSound = trap_S_RegisterSound( "sound/feedback/first_gauntlet.wav", qtrue );
-#endif
 
 	cgs.media.takenLeadSound = trap_S_RegisterSound( "sound/feedback/takenlead.wav", qtrue);
 	cgs.media.tiedLeadSound = trap_S_RegisterSound( "sound/feedback/tiedlead.wav", qtrue);
 	cgs.media.lostLeadSound = trap_S_RegisterSound( "sound/feedback/lostlead.wav", qtrue);
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	cgs.media.voteNow = trap_S_RegisterSound( "sound/feedback/vote_now.wav", qtrue);
 	cgs.media.votePassed = trap_S_RegisterSound( "sound/feedback/vote_passed.wav", qtrue);
 	cgs.media.voteFailed = trap_S_RegisterSound( "sound/feedback/vote_failed.wav", qtrue);
@@ -863,7 +857,7 @@ static void CG_RegisterSounds( void ) {
 	//cgs.media.sfx_railg = trap_S_RegisterSound ("sound/weapons/railgun/railgf1a.wav", qfalse);
 	cgs.media.sfx_rockexp = trap_S_RegisterSound ("sound/weapons/rocket/rocklx1a.wav", qfalse);
 	cgs.media.sfx_plasmaexp = trap_S_RegisterSound ("sound/weapons/plasma/plasmx1a.wav", qfalse);
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
     /*
 	cgs.media.sfx_nghit = trap_S_RegisterSound( "sound/weapons/nailgun/wnalimpd.wav" , qfalse);
 	cgs.media.sfx_nghitflesh = trap_S_RegisterSound( "sound/weapons/nailgun/wnalimpl.wav" , qfalse);
@@ -885,34 +879,6 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.n_healthSound = trap_S_RegisterSound("sound/items/n_health.wav", qfalse );
 	cgs.media.hgrenb1aSound = trap_S_RegisterSound("sound/weapons/grenade/hgrenb1a.wav", qfalse);
 	cgs.media.hgrenb2aSound = trap_S_RegisterSound("sound/weapons/grenade/hgrenb2a.wav", qfalse);
-
-#ifdef MISSIONPACK
-	trap_S_RegisterSound("sound/player/james/death1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/death2.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/death3.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/jump1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/pain25_1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/pain75_1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/pain100_1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/falling1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/gasp.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/drown.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/fall1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/james/taunt.wav", qfalse );
-
-	trap_S_RegisterSound("sound/player/janet/death1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/death2.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/death3.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/jump1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/pain25_1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/pain75_1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/pain100_1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/falling1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/gasp.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/drown.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/fall1.wav", qfalse );
-	trap_S_RegisterSound("sound/player/janet/taunt.wav", qfalse );
-#endif
 
 }
 
@@ -977,7 +943,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.smokePuffShader = trap_R_RegisterShader( "smokePuff" );
 	cgs.media.smokePuffRageProShader = trap_R_RegisterShader( "smokePuffRagePro" );
 	cgs.media.shotgunSmokePuffShader = trap_R_RegisterShader( "shotgunSmokePuff" );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	cgs.media.nailPuffShader = trap_R_RegisterShader( "nailtrail" );
 #endif
     cgs.media.sparkShader = trap_R_RegisterShader("hasteSmokePuff");
@@ -1011,7 +977,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.regenShader = trap_R_RegisterShader("powerups/regen" );
 	cgs.media.hastePuffShader = trap_R_RegisterShader("hasteSmokePuff" );
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	if ( cgs.gametype == GT_HARVESTER || cg_buildScript.integer ) {
 		cgs.media.redCubeModel = trap_R_RegisterModel( "models/powerups/orb/r_orb.md3" );
 		cgs.media.blueCubeModel = trap_R_RegisterModel( "models/powerups/orb/b_orb.md3" );
@@ -1031,7 +997,7 @@ static void CG_RegisterGraphics( void ) {
 		cgs.media.blueFlagShader[0] = trap_R_RegisterShaderNoMip( "icons/iconf_blu1" );
 		cgs.media.blueFlagShader[1] = trap_R_RegisterShaderNoMip( "icons/iconf_blu2" );
 		cgs.media.blueFlagShader[2] = trap_R_RegisterShaderNoMip( "icons/iconf_blu3" );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		cgs.media.flagPoleModel = trap_R_RegisterModel( "models/flag2/flagpole.md3" );
 		cgs.media.flagFlapModel = trap_R_RegisterModel( "models/flag2/flagflap3.md3" );
 
@@ -1045,7 +1011,7 @@ static void CG_RegisterGraphics( void ) {
 #endif
 	}
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	if ( cgs.gametype == GT_1FCTF || cg_buildScript.integer ) {
 		cgs.media.neutralFlagModel = trap_R_RegisterModel( "models/flags/n_flag.md3" );
 		cgs.media.flagShader[0] = trap_R_RegisterShaderNoMip( "icons/iconf_neutral1" );
@@ -1080,7 +1046,7 @@ static void CG_RegisterGraphics( void ) {
 	if ( cgs.gametype >= GT_TEAM || cg_buildScript.integer ) {
 		cgs.media.redQuadShader = trap_R_RegisterShader("powerups/blueflag" );
 		cgs.media.teamStatusBar = trap_R_RegisterShader( "gfx/2d/colorbar.tga" );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 		cgs.media.blueKamikazeShader = trap_R_RegisterShader( "models/weaphits/kamikblu" );
 #endif
 	}
@@ -1117,13 +1083,13 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.bulletFlashModel = trap_R_RegisterModel("models/weaphits/bullet.md3");
 	cgs.media.ringFlashModel = trap_R_RegisterModel("models/weaphits/ring02.md3");
 	cgs.media.dishFlashModel = trap_R_RegisterModel("models/weaphits/boom01.md3");
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	cgs.media.teleportEffectModel = trap_R_RegisterModel( "models/powerups/pop.md3" );
 #else
 	cgs.media.teleportEffectModel = trap_R_RegisterModel( "models/misc/telep.md3" );
 	cgs.media.teleportEffectShader = trap_R_RegisterShader( "teleportEffect" );
 #endif
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	cgs.media.kamikazeEffectModel = trap_R_RegisterModel( "models/weaphits/kamboom2.md3" );
 	cgs.media.kamikazeShockWave = trap_R_RegisterModel( "models/weaphits/kamwave.md3" );
 	cgs.media.kamikazeHeadModel = trap_R_RegisterModel( "models/powerups/kamikazi.md3" );
@@ -1192,7 +1158,7 @@ static void CG_RegisterGraphics( void ) {
 		cgs.gameModels[i] = trap_R_RegisterModel( modelName );
 	}
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	// new stuff
 	cgs.media.patrolShader = trap_R_RegisterShaderNoMip("ui/assets/statusbar/patrol.tga");
 	cgs.media.assaultShader = trap_R_RegisterShaderNoMip("ui/assets/statusbar/assault.tga");
@@ -1208,15 +1174,6 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.flagShaders[0] = trap_R_RegisterShaderNoMip("ui/assets/statusbar/flag_in_base.tga");
 	cgs.media.flagShaders[1] = trap_R_RegisterShaderNoMip("ui/assets/statusbar/flag_capture.tga");
 	cgs.media.flagShaders[2] = trap_R_RegisterShaderNoMip("ui/assets/statusbar/flag_missing.tga");
-
-	trap_R_RegisterModel( "models/players/james/lower.md3" );
-	trap_R_RegisterModel( "models/players/james/upper.md3" );
-	trap_R_RegisterModel( "models/players/heads/james/james.md3" );
-
-	trap_R_RegisterModel( "models/players/janet/lower.md3" );
-	trap_R_RegisterModel( "models/players/janet/upper.md3" );
-	trap_R_RegisterModel( "models/players/heads/janet/janet.md3" );
-
 #endif
 
     // CPM: Register graphics
@@ -1326,7 +1283,7 @@ void CG_StartMusic( void ) {
 
 	trap_S_StartBackgroundTrack( parm1, parm2 );
 }
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 char *CG_GetMenuBuffer(const char *filename) {
 	int	len;
 	fileHandle_t	f;
@@ -2062,7 +2019,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	trap_CM_LoadMap( cgs.mapname );
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	String_Init();
 #endif
 
@@ -2080,7 +2037,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_RegisterClients();		// if low on memory, some clients will be deferred
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	CG_AssetCache();
 	CG_LoadHudMenu();      // load new hud stuff
 #endif
@@ -2115,7 +2072,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_LoadingString( "" );
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	CG_InitTeamChat();
 #endif
 

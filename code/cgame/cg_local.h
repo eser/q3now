@@ -139,14 +139,9 @@ typedef struct {
 #define TEAM_OVERLAY_MAXNAME_WIDTH	12
 #define TEAM_OVERLAY_MAXLOCATION_WIDTH	16
 
-#define	DEFAULT_MODEL			"sarge"
-#ifdef MISSIONPACK
-#define	DEFAULT_TEAM_MODEL		"james"
-#define	DEFAULT_TEAM_HEAD		"*james"
-#else
-#define	DEFAULT_TEAM_MODEL		"sarge"
-#define	DEFAULT_TEAM_HEAD		"sarge"
-#endif
+#define	DEFAULT_MODEL			"visor"
+#define	DEFAULT_TEAM_MODEL		"visor"
+#define	DEFAULT_TEAM_HEAD		"visor"
 
 #define DEFAULT_REDTEAM_NAME		"Stroggs"
 #define DEFAULT_BLUETEAM_NAME		"Pagans"
@@ -291,7 +286,7 @@ typedef enum {
 #if FEAT_PING_LOCATION
 	LE_PING_LOCATION,		// team ping marker (4G)
 #endif
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	LE_KAMIKAZE,
 	LE_INVULIMPACT,
 	LE_INVULJUICED,
@@ -639,7 +634,7 @@ typedef struct {
 	int				spectatorOffset;										// current offset from start
 	int				spectatorPaintLen; 									// current offset from start
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	// skull trails
 	skulltrail_t	skulltrails[MAX_CLIENTS];
 #endif
@@ -679,7 +674,7 @@ typedef struct {
 	int			soundTime;
 	qhandle_t	soundBuffer[MAX_SOUNDBUFFER];
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	// for voice chat buffer
 	int			voiceChatTime;
 	int			voiceChatBufferIn;
@@ -758,7 +753,7 @@ typedef struct {
 	qhandle_t	charsetPropB;
 	qhandle_t	whiteShader;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	qhandle_t	redCubeModel;
 	qhandle_t	blueCubeModel;
 	qhandle_t	redCubeIcon;
@@ -782,7 +777,7 @@ typedef struct {
 	qhandle_t	blueFlagBaseModel;
 	qhandle_t	neutralFlagBaseModel;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	qhandle_t	overloadBaseModel;
 	qhandle_t	overloadTargetModel;
 	qhandle_t	overloadLightsModel;
@@ -850,7 +845,7 @@ typedef struct {
 	qhandle_t	plasmaBallShader;
 	qhandle_t	waterBubbleShader;
 	qhandle_t	bloodTrailShader;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	qhandle_t	nailPuffShader;
 #endif
     qhandle_t	sparkShader;
@@ -881,7 +876,7 @@ typedef struct {
 	qhandle_t	battleWeaponShader;
 	qhandle_t	spawnProtectShader;
 	qhandle_t	hastePuffShader;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	qhandle_t	redKamikazeShader;
 	qhandle_t	blueKamikazeShader;
 #endif
@@ -903,7 +898,7 @@ typedef struct {
 	// special effects models
 	qhandle_t	teleportEffectModel;
 	qhandle_t	teleportEffectShader;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	qhandle_t	kamikazeEffectModel;
 	qhandle_t	kamikazeShockWave;
 	qhandle_t	kamikazeHeadModel;
@@ -947,7 +942,7 @@ typedef struct {
 	//sfxHandle_t	sfx_railg;
 	sfxHandle_t	sfx_rockexp;
 	sfxHandle_t	sfx_plasmaexp;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	sfxHandle_t	sfx_nghit;
 	sfxHandle_t	sfx_nghitflesh;
 	sfxHandle_t	sfx_nghitmetal;
@@ -990,22 +985,17 @@ typedef struct {
 	sfxHandle_t twoFragSound;
 	sfxHandle_t oneFragSound;
 
-	sfxHandle_t hitSound;
-	sfxHandle_t hitSoundHighArmor;
-	sfxHandle_t hitSoundLowArmor;
-	sfxHandle_t hitTeamSound;
-#if FEAT_HIT_SOUNDS
-	sfxHandle_t hitSounds[4];	// damage-tier sounds: 0-25, 26-50, 51-75, 76+
-#endif
+	sfxHandle_t hitSoundNoArmor;
+	sfxHandle_t hitSoundHeavyArmor;
+	sfxHandle_t hitSoundCombatArmor;
+	sfxHandle_t hitSoundJacketArmor;
+	sfxHandle_t hitSoundFriendlyFire;
 	sfxHandle_t impressiveSound;
 	sfxHandle_t excellentSound;
 	sfxHandle_t deniedSound;
 	sfxHandle_t humiliationSound;
 	sfxHandle_t assistSound;
 	sfxHandle_t defendSound;
-	sfxHandle_t firstImpressiveSound;
-	sfxHandle_t firstExcellentSound;
-	sfxHandle_t firstHumiliationSound;
 
 	sfxHandle_t takenLeadSound;
 	sfxHandle_t tiedLeadSound;
@@ -1022,7 +1012,7 @@ typedef struct {
 	sfxHandle_t flightSound;
 	sfxHandle_t medkitSound;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	sfxHandle_t weaponHoverSound;
 #endif
 
@@ -1043,13 +1033,13 @@ typedef struct {
 
 	sfxHandle_t redFlagReturnedSound;
 	sfxHandle_t blueFlagReturnedSound;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	sfxHandle_t neutralFlagReturnedSound;
 #endif
 	sfxHandle_t	enemyTookYourFlagSound;
 	sfxHandle_t yourTeamTookEnemyFlagSound;
 	sfxHandle_t	youHaveFlagSound;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	sfxHandle_t	enemyTookTheFlagSound;
 	sfxHandle_t yourTeamTookTheFlagSound;
 	sfxHandle_t yourBaseIsUnderAttackSound;
@@ -1063,7 +1053,7 @@ typedef struct {
 	sfxHandle_t	countFightSound;
 	sfxHandle_t	countPrepareSound;
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	// new stuff
 	qhandle_t patrolShader;
 	qhandle_t assaultShader;
@@ -1277,7 +1267,7 @@ extern	vmCvar_t		cg_predictItems;
 extern	vmCvar_t		cg_deferPlayers;
 extern	vmCvar_t		cg_drawFriend;
 extern	vmCvar_t		cg_teamChatsOnly;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 extern	vmCvar_t		cg_noVoiceChats;
 extern	vmCvar_t		cg_noVoiceText;
 #endif
@@ -1313,13 +1303,15 @@ extern	vmCvar_t		cg_timescaleFadeEnd;
 extern	vmCvar_t		cg_timescaleFadeSpeed;
 extern	vmCvar_t		cg_timescale;
 extern	vmCvar_t		cg_cameraMode;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 extern  vmCvar_t		cg_smallFont;
 extern  vmCvar_t		cg_bigFont;
+#endif
+#if FEAT_TA_UI
 extern	vmCvar_t		cg_noTaunt;
 #endif
 extern	vmCvar_t		cg_noProjectileTrail;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 extern	vmCvar_t		cg_redTeamName;
 extern	vmCvar_t		cg_blueTeamName;
 extern	vmCvar_t		cg_currentSelectedPlayer;
@@ -1335,9 +1327,7 @@ extern	vmCvar_t		cg_fovAspectAdjust;
 extern	vmCvar_t		cg_viewbob;
 extern	vmCvar_t		cg_viewkick;
 extern	vmCvar_t		cg_drawSpeed;
-#if FEAT_HIT_SOUNDS
 extern	vmCvar_t		cg_hitSounds;
-#endif
 #if FEAT_FOLLOW_KILLER
 extern	vmCvar_t		cg_followKiller;
 #endif
@@ -1669,7 +1659,7 @@ localEntity_t *CG_SmokePuff( const vec3_t p,
 				   qhandle_t hShader );
 void CG_BubbleTrail( vec3_t start, vec3_t end, float spacing );
 void CG_SpawnEffect( vec3_t org );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 void CG_KamikazeEffect( vec3_t org );
 void CG_ObeliskExplode( vec3_t org, int entityNum );
 void CG_ObeliskPain( vec3_t org );
@@ -1737,7 +1727,7 @@ void CG_ExecuteNewServerCommands( int latestSequence );
 void CG_ParseServerinfo( void );
 void CG_SetConfigValues( void );
 void CG_ShaderStateChanged(void);
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 void CG_LoadVoiceChats( void );
 void CG_VoiceChatLocal( int mode, qboolean voiceOnly, int clientNum, int color, const char *cmd );
 void CG_PlayBufferedVoiceChats( void );

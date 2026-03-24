@@ -62,7 +62,7 @@ qboolean EntityIsDead(aas_entityinfo_t *entinfo);
 qboolean EntityIsInvisible(aas_entityinfo_t *entinfo);
 //returns true if the entity is shooting
 qboolean EntityIsShooting(aas_entityinfo_t *entinfo);
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 //returns true if this entity has the kamikaze
 qboolean EntityHasKamikaze(aas_entityinfo_t *entinfo);
 #endif
@@ -147,7 +147,7 @@ void BotCTFSeekGoals(bot_state_t *bs);
 //set ctf goals (defend base, get enemy flag) during retreat
 void BotCTFRetreatGoals(bot_state_t *bs);
 //
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 int Bot1FCTFCarryingFlag(bot_state_t *bs);
 int BotHarvesterCarryingCubes(bot_state_t *bs);
 void Bot1FCTFSeekGoals(bot_state_t *bs);
@@ -196,9 +196,18 @@ extern vmCvar_t bot_nochat;
 extern vmCvar_t bot_testrchat;
 extern vmCvar_t bot_challenge;
 
+#if FEAT_BOT_IMPROVEMENTS
+//check and apply strafejump during navigation
+void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult );
+//record kill for auto-calibration K/D tracking
+void BotAutoCalibrate_RecordKill( int attacker, int victim );
+//auto-skill cvar
+extern vmCvar_t bot_autoskill;
+#endif
+
 extern bot_goal_t ctf_redflag;
 extern bot_goal_t ctf_blueflag;
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 extern bot_goal_t ctf_neutralflag;
 extern bot_goal_t redobelisk;
 extern bot_goal_t blueobelisk;

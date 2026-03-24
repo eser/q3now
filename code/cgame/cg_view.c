@@ -964,7 +964,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// add buffered sounds
 	CG_PlayBufferedSounds();
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	// play buffered voice chats
 	CG_PlayBufferedVoiceChats();
 #endif

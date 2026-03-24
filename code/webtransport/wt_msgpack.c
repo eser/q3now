@@ -55,6 +55,12 @@ enum {
 	WTK_PL_PING       = 21,  // uint16: latency ms
 	WTK_PL_TEAM       = 22,  // uint8: team index
 	WTK_PL_ALIVE      = 23,  // bool: player alive
+	// bot AI events (FEAT_BOT_IMPROVEMENTS)
+	WTK_BOT_ID        = 24,  // uint8: bot client slot
+	WTK_BOT_EVENT     = 25,  // string: bot event type
+	WTK_BOT_PARAM1    = 26,  // int: event-specific parameter 1
+	WTK_BOT_PARAM2    = 27,  // int: event-specific parameter 2
+	WTK_BOT_POS       = 28,  // array[3] float: relevant position
 };
 
 // ── Weapon short names (MOD enum → compact string) ─────────────
@@ -404,5 +410,63 @@ int WT_EncodeStateUpdate( byte *buf, int buf_size )
 	used = mpack_writer_buffer_used( &writer );
 	return (int)used;
 }
+
+
+#if FEAT_BOT_IMPROVEMENTS
+/*
+====================
+WT_EncodeBotEvent
+
+Generic bot AI event encoder. Event types:
+  "dodge"      — bot dodged a missile (param1=dodge_dir, param2=weapon)
+  "aware"      — bot became aware of enemy (param1=target_id, param2=trigger)
+  "strafejump" — bot started/ended strafejump (param1=started, param2=speed)
+  "item_timed" — bot timing an item respawn (param1=item_type, param2=eta_sec)
+  "weapon_sel" — bot selected weapon by DPS (param1=weapon, param2=reason)
+  "callout"    — bot issued team callout (param1=callout_type)
+  "skill_adj"  — bot skill adjusted (param1=old_skill*10, param2=new_skill*10)
+====================
+*/
+int WT_EncodeBotEvent( byte *buf, int buf_size,
+                       int bot_id, const char *event_type,
+                       int param1, int param2, const vec3_t pos )
+{
+	mpack_writer_t writer;
+	size_t         used;
+
+	mpack_writer_init( &writer, (char *)buf, (size_t)buf_size );
+
+	mpack_start_map( &writer, 7 );
+
+	mpack_write_uint( &writer, WTK_TYPE );
+	mpack_write_cstr( &writer, "bot" );
+
+	mpack_write_uint( &writer, WTK_SEQ );
+	mpack_write_u64( &writer, wt.event_seq );
+
+	mpack_write_uint( &writer, WTK_TIME );
+	mpack_write_u32( &writer, (uint32_t)( Sys_Milliseconds() & 0xFFFFFFFF ) );
+
+	mpack_write_uint( &writer, WTK_BOT_ID );
+	mpack_write_uint( &writer, (unsigned)bot_id );
+
+	mpack_write_uint( &writer, WTK_BOT_EVENT );
+	mpack_write_cstr( &writer, event_type );
+
+	mpack_write_uint( &writer, WTK_BOT_PARAM1 );
+	mpack_write_int( &writer, param1 );
+
+	mpack_write_uint( &writer, WTK_BOT_PARAM2 );
+	mpack_write_int( &writer, param2 );
+
+	mpack_finish_map( &writer );
+
+	if ( mpack_writer_destroy( &writer ) != mpack_ok )
+		return 0;
+
+	used = mpack_writer_buffer_used( &writer );
+	return (int)used;
+}
+#endif // FEAT_BOT_IMPROVEMENTS
 
 #endif // FEAT_QUIC_OBSERVE

@@ -545,7 +545,7 @@ static void PM_WaterMove( void ) {
 	PM_SlideMove( qfalse );
 }
 
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 /*
 ===================
 PM_InvulnerabilityMove
@@ -1884,7 +1884,7 @@ static void PM_Animate( void ) {
 			pm->ps->torsoTimer = TIMER_GESTURE;
 			PM_AddEvent( EV_TAUNT );
 		}
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_ORDERS
 	} else if ( pm->cmd.buttons & BUTTON_GETFLAG ) {
 		if ( pm->ps->torsoTimer == 0 ) {
 			PM_StartTorsoAnim( TORSO_GETFLAG );
@@ -2148,7 +2148,7 @@ void PmoveSingle (pmove_t *pmove) {
     }
     // !CPM
 
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	if ( pm->ps->powerups[PW_INVULNERABILITY] ) {
 		PM_InvulnerabilityMove();
 	} else

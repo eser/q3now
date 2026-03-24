@@ -80,12 +80,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define NUM_VISIBLE_ENEMIES			202
 #define NUM_VISIBLE_TEAMMATES		203
 
-// if running the mission pack
-#ifdef MISSIONPACK
-
-//#error "running mission pack"
-
-#endif
+// (MISSIONPACK block removed — see q_feats.h for TA feature flags)
 
 //item numbers (make sure they are in sync with bg_itemlist in bg_misc.c)
 #define MODELINDEX_ARMORSHARD		1

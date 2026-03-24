@@ -525,7 +525,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 				ent->client->ps.powerups[ j ] = 0;
 			}
 
-#ifdef MISSIONPACK
+#if FEAT_HARVESTER
 			if ( g_gametype.integer == GT_HARVESTER ) {
 				if ( ent->client->ps.generic1 > 0 ) {
 					if ( ent->client->sess.sessionTeam == TEAM_RED ) {
@@ -556,7 +556,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 
 			break;
 
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 		case EV_USE_ITEM3:		// kamikaze
 			// make sure the invulnerability is off
 			ent->client->invulnerabilityTime = 0;
@@ -584,7 +584,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 
 }
 
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 /*
 ==============
 StuckInOtherClient
@@ -798,7 +798,7 @@ void ClientThink_real( gentity_t *ent ) {
 		ent->client->pers.cmd.buttons |= BUTTON_GESTURE;
 	}
 
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	// check for invulnerability expansion before doing the Pmove
 	if (client->ps.powerups[PW_INVULNERABILITY] ) {
 		if ( !(client->ps.pm_flags & PMF_INVULEXPAND) ) {
@@ -1153,7 +1153,7 @@ void ClientEndFrame( gentity_t *ent ) {
 	}
 #endif
 
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	if ( ent->client->invulnerabilityTime > level.time ) {
 		ent->client->ps.powerups[PW_INVULNERABILITY] = level.time;
 	}

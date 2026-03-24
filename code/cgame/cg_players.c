@@ -656,7 +656,7 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 	char		teamname[MAX_QPATH];
 
 	teamname[0] = 0;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	if( cgs.gametype >= GT_TEAM) {
 		if( ci->team == TEAM_BLUE ) {
 			Q_strncpyz(teamname, cg_blueTeamName.string, sizeof(teamname) );
@@ -1528,7 +1528,7 @@ static void CG_HasteTrail( centity_t *cent ) {
 	smoke->leType = LE_SCALE_FADE;
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 /*
 ===============
 CG_BreathPuffs
@@ -1758,7 +1758,7 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 }
 
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 /*
 ===============
 CG_PlayerTokens
@@ -2307,7 +2307,7 @@ void CG_Player( centity_t *cent ) {
 #endif
 	qboolean		shadow;
 	float			shadowPlane;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	refEntity_t		skull;
 	refEntity_t		powerup;
 	int				t;
@@ -2408,7 +2408,7 @@ void CG_Player( centity_t *cent ) {
 		renderfx |= RF_SHADOW_PLANE;
 	}
 	renderfx |= RF_LIGHTING_ORIGIN;			// use the same origin for all
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	if( cgs.gametype == GT_HARVESTER ) {
 		CG_PlayerTokens( cent, renderfx );
 	}
@@ -2468,7 +2468,7 @@ void CG_Player( centity_t *cent ) {
 #endif
 	CG_AddRefEntityWithPowerups( cent, &torso, &cent->currentState, qtrue, ci->team );
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	if ( cent->currentState.eFlags & EF_KAMIKAZE ) {
 
 		memset( &skull, 0, sizeof(skull) );
@@ -2670,7 +2670,7 @@ void CG_Player( centity_t *cent ) {
 #endif
 	CG_AddRefEntityWithPowerups( cent, &head, &cent->currentState, qtrue, ci->team );
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	CG_BreathPuffs(cent, &head);
 
 	CG_DustTrail(cent);

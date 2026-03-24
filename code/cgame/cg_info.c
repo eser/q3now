@@ -255,7 +255,7 @@ void CG_DrawInformation( void ) {
 	case GT_CTF:
 		s = "Capture The Flag";
 		break;
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	case GT_1FCTF:
 		s = "One Flag CTF";
 		break;

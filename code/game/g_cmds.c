@@ -23,7 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 #include "bg_promode.h" // CPM
 
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 #include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure			// for the voice chats
 #endif
 
@@ -1100,7 +1100,7 @@ static void Cmd_Tell_f( gentity_t *ent ) {
 }
 
 
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 static void G_VoiceTo( gentity_t *ent, gentity_t *other, int mode, const char *id, qboolean voiceonly ) {
 	int color;
 	char *cmd;
@@ -2036,7 +2036,7 @@ void ClientCommand( int clientNum ) {
 		Cmd_Tell_f ( ent );
 		return;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 	if (Q_stricmp (cmd, "vsay") == 0) {
 		Cmd_Voice_f (ent, SAY_ALL, qfalse, qfalse);
 		return;

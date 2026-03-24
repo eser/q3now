@@ -97,6 +97,10 @@ void        QUIC_EmitDamage( int attacker, int victim, int damage, int mod,
 void        QUIC_EmitItemPickup( int client, const char *item, const vec3_t pos );
 void        QUIC_EmitChat( int client, const char *msg, qboolean teamOnly );
 void        QUIC_EmitMatchEvent( const char *type, const char *data );
+#if FEAT_BOT_IMPROVEMENTS
+void        QUIC_EmitBotEvent( int bot_id, const char *event_type,
+                               int param1, int param2, const vec3_t pos );
+#endif
 #endif
 
 // Sys_Microseconds() is declared in qcommon.h (int64_t) — no redeclaration needed.

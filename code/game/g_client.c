@@ -403,7 +403,7 @@ just like the existing corpse to leave behind.
 =============
 */
 void CopyToBodyQue( gentity_t *ent ) {
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 	gentity_t	*e;
 	int i;
 #endif
@@ -424,7 +424,7 @@ void CopyToBodyQue( gentity_t *ent ) {
 
 	body->s = ent->s;
 	body->s.eFlags = EF_DEAD;		// clear EF_TALK, etc
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 	if ( ent->s.eFlags & EF_KAMIKAZE ) {
 		body->s.eFlags |= EF_KAMIKAZE;
 
@@ -794,7 +794,7 @@ void ClientUserinfoChanged( int clientNum ) {
 	}
 */
 
-#ifdef MISSIONPACK
+#if FEAT_TA_TEAM_OVERLAYS
 	if (g_gametype.integer >= GT_TEAM && !(ent->r.svFlags & SVF_BOT)) {
 		client->pers.teamInfo = qtrue;
 	} else {
@@ -1387,7 +1387,7 @@ void ClientDisconnect( int clientNum ) {
 		// They don't get to take powerups with them!
 		// Especially important for stuff like CTF flags
 		TossClientItems( ent );
-#ifdef MISSIONPACK
+#if FEAT_HARVESTER
 		if( g_gametype.integer == GT_HARVESTER ) {
 			TossClientCubes( ent );
 		}

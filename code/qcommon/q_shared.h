@@ -27,18 +27,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // A user mod should never modify this file
 
 #define Q3_VERSION            "Q3 1.32e"
-#ifndef SVN_VERSION
-  #define SVN_VERSION Q3_VERSION
+#ifndef Q3_RELEASE_VERSION
+  #define Q3_RELEASE_VERSION Q3_VERSION
 #endif
-#define CLIENT_WINDOW_TITLE   "Quake 3: Arena"
-#define CONSOLE_WINDOW_TITLE  "Quake 3 Console"
+#define CLIENT_WINDOW_TITLE   "q3now"
+#define CONSOLE_WINDOW_TITLE  "q3now Console"
 // 1.32 released 7-10-2002
 
 //#define DEFAULT_GAME			"edawn"
 
 #define BASEGAME				"baseq3"
-#define BASEDEMO				"demoq3"
-#define BASETA					"missionpack"
 #define STEAMPATH_NAME			"Quake 3 Arena"
 #define STEAMPATH_APPID			"2200"
 

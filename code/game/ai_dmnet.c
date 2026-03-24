@@ -195,8 +195,11 @@ int BotNearbyGoal(bot_state_t *bs, int tfl, bot_goal_t *ltg, float range) {
 	if (BotGoForAir(bs, tfl, ltg, range)) return qtrue;
 	// if the bot is carrying a flag or cubes
 	if (BotCTFCarryingFlag(bs)
-#ifdef MISSIONPACK
-		|| Bot1FCTFCarryingFlag(bs) || BotHarvesterCarryingCubes(bs)
+#if FEAT_1FCTF
+		|| Bot1FCTFCarryingFlag(bs)
+#endif
+#if FEAT_HARVESTER
+		|| BotHarvesterCarryingCubes(bs)
 #endif
 		) {
 		//if the bot is just a few secs away from the base 
@@ -834,7 +837,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 		}
 	}
 #endif //CTF
-#ifdef MISSIONPACK
+#if FEAT_1FCTF
 	else if (gametype == GT_1FCTF) {
 		if (bs->ltgtype == LTG_GETFLAG) {
 			//check for bot typing status message
@@ -1665,6 +1668,10 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	BotAIBlocked(bs, &moveresult, qtrue);
 	//
 	BotClearPath(bs, &moveresult);
+#if FEAT_BOT_IMPROVEMENTS
+	BotStrafeJumpCheck(bs, &moveresult);
+	if (!bs->strafejump_active) {
+#endif
 	//if the viewangles are used for the movement
 	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEWSET|MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
 		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
@@ -1688,6 +1695,9 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 		else vectoangles(moveresult.movedir, bs->ideal_viewangles);
 		bs->ideal_viewangles[2] *= 0.5;
 	}
+#if FEAT_BOT_IMPROVEMENTS
+	} //end if (!bs->strafejump_active)
+#endif
 	//if the weapon is used for the bot movement
 	if (moveresult.flags & MOVERESULT_MOVEMENTWEAPON) bs->weaponnum = moveresult.weapon;
 	//if there is an enemy
@@ -1817,7 +1827,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 				range = 50;
 		}
 #endif //CTF
-#ifdef MISSIONPACK
+#if FEAT_1FCTF
 		else if (gametype == GT_1FCTF) {
 			if (Bot1FCTFCarryingFlag(bs))
 				range = 50;
@@ -1858,6 +1868,10 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	BotAIBlocked(bs, &moveresult, qtrue);
 	//
 	BotClearPath(bs, &moveresult);
+#if FEAT_BOT_IMPROVEMENTS
+	BotStrafeJumpCheck(bs, &moveresult);
+	if (!bs->strafejump_active) {
+#endif
 	//if the viewangles are used for the movement
 	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEWSET|MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
 		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
@@ -1888,6 +1902,9 @@ int AINode_Seek_LTG(bot_state_t *bs)
 		}
 		bs->ideal_viewangles[2] *= 0.5;
 	}
+#if FEAT_BOT_IMPROVEMENTS
+	} //end if (!bs->strafejump_active)
+#endif
 	//if the weapon is used for the bot movement
 	if (moveresult.flags & MOVERESULT_MOVEMENTWEAPON) bs->weaponnum = moveresult.weapon;
 	//
@@ -1991,7 +2008,7 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 	VectorCopy(entinfo.origin, target);
 	// if not a player enemy
 	if (bs->enemy >= MAX_CLIENTS) {
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 		// if attacking an obelisk
 		if ( bs->enemy == redobelisk.entitynum ||
 			bs->enemy == blueobelisk.entitynum ) {
@@ -2025,7 +2042,7 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 	}
 	//if the enemy is not visible
 	if (!BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, 360, bs->enemy)) {
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 		if (bs->enemy == redobelisk.entitynum || bs->enemy == blueobelisk.entitynum) {
 			AIEnter_Battle_Chase(bs, "battle fight: obelisk out of sight");
 			return qfalse;
@@ -2295,7 +2312,7 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 		VectorCopy(entinfo.origin, target);
 		// if not a player enemy
 		if (bs->enemy >= MAX_CLIENTS) {
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 			// if attacking an obelisk
 			if ( bs->enemy == redobelisk.entitynum ||
 				bs->enemy == blueobelisk.entitynum ) {
@@ -2343,7 +2360,7 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 				range = 50;
 		}
 #endif //CTF
-#ifdef MISSIONPACK
+#if FEAT_1FCTF
 		else if (gametype == GT_1FCTF) {
 			if (Bot1FCTFCarryingFlag(bs))
 				range = 50;
@@ -2472,7 +2489,7 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 		VectorCopy(entinfo.origin, target);
 		// if not a player enemy
 		if (bs->enemy >= MAX_CLIENTS) {
-#ifdef MISSIONPACK
+#if FEAT_OVERLOAD
 			// if attacking an obelisk
 			if ( bs->enemy == redobelisk.entitynum ||
 				bs->enemy == blueobelisk.entitynum ) {

@@ -183,7 +183,7 @@ void SnapVectorTowards( vec3_t v, vec3_t to ) {
 void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
 	trace_t		tr;
 	vec3_t		end;
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	vec3_t		impactpoint, bouncedir;
 #endif
 	float		r;
@@ -229,7 +229,7 @@ void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
 		tent->s.otherEntityNum = ent->s.number;
 
 		if ( traceEnt->takedamage) {
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
@@ -254,7 +254,7 @@ void Bullet_Fire (gentity_t *ent, float spread, int damage, int mod ) {
 
 				G_Damage( traceEnt, ent, ent, forward, tr.endpos, bDamage, 0, mod);
 			}
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 			}
 #endif
 		}
@@ -279,7 +279,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 	trace_t		tr;
 	int			damage, i, passent;
 	gentity_t	*traceEnt;
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	vec3_t		impactpoint, bouncedir;
 #endif
 	vec3_t		tr_start, tr_end;
@@ -299,7 +299,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 
 		if ( traceEnt->takedamage ) {
 			damage = DEFAULT_SHOTGUN_DAMAGE * s_quadFactor;
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( tr_start, impactpoint, bouncedir, tr_end );
@@ -458,7 +458,7 @@ weapon_railgun_fire
 #define	MAX_RAIL_HITS	4
 void weapon_railgun_fire (gentity_t *ent) {
 	vec3_t		end;
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	vec3_t impactpoint, bouncedir;
 #endif
 	trace_t		trace;
@@ -486,7 +486,7 @@ void weapon_railgun_fire (gentity_t *ent) {
 		}
 		traceEnt = &g_entities[ trace.entityNum ];
 		if ( traceEnt->takedamage ) {
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if ( G_InvulnerabilityEffect( traceEnt, forward, trace.endpos, impactpoint, bouncedir ) ) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
@@ -648,7 +648,7 @@ LIGHTNING GUN
 void Weapon_LightningFire( gentity_t *ent ) {
 	trace_t		tr;
 	vec3_t		end;
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 	vec3_t impactpoint, bouncedir;
 #endif
 	gentity_t	*traceEnt, *tent;
@@ -694,7 +694,7 @@ void Weapon_LightningFire( gentity_t *ent ) {
 		}
 // eser - lightning push
 
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 		// if not the first trace (the lightning bounced of an invulnerability sphere)
 		if (i) {
 			// add bounced off lightning bolt temp entity
@@ -713,7 +713,7 @@ void Weapon_LightningFire( gentity_t *ent ) {
 		traceEnt = &g_entities[ tr.entityNum ];
 
 		if ( traceEnt->takedamage) {
-#ifdef MISSIONPACK
+#if FEAT_PW_INVULNERABILITY
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
@@ -966,7 +966,7 @@ void FireWeapon( gentity_t *ent ) {
 }
 
 
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 
 /*
 ===============

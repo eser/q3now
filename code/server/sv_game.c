@@ -1004,6 +1004,11 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		// but no dedicated QUIC handler exists yet. The trap exists so
 		// game code can emit the event when one is wired up.
 		return 0;
+#if FEAT_BOT_IMPROVEMENTS
+	case G_QUIC_EMIT_BOT_EVENT:
+		QUIC_EmitBotEvent( args[1], VMA(2), args[3], args[4], VMA(5) );
+		return 0;
+#endif
 #endif
 
 	default:

@@ -669,9 +669,6 @@ issues.
 #define FS_GENERAL_REF	0x01
 #define FS_UI_REF		0x02
 #define FS_CGAME_REF	0x04
-// number of id paks that will never be autodownloaded from baseq3/missionpack
-#define NUM_ID_PAKS		9
-#define NUM_TA_PAKS		4
 
 typedef enum {
 	H_SYSTEM,
@@ -853,7 +850,7 @@ void FS_PureServerSetLoadedPaks( const char *pakSums, const char *pakNames );
 qboolean FS_IsPureChecksum( int sum );
 
 qboolean FS_InvalidGameDir( const char *gamedir );
-qboolean FS_idPak( const char *pak, const char *base, int numPaks );
+qboolean FS_isProprietary( const char *pak );
 qboolean FS_ComparePaks( char *neededpaks, int len, qboolean dlstring );
 
 void FS_Rename( const char *from, const char *to );

@@ -302,7 +302,6 @@ typedef enum {
 	PERS_SPAWN_COUNT,				// incremented every respawn
 	PERS_PLAYEREVENTS,				// 16 bits that can be flipped for events
 	PERS_ATTACKER,					// clientnum of last damage inflicter
-	PERS_ATTACKEE_ARMOR,			// health/armor of last person we attacked
 	PERS_KILLED,					// count of the number of times you died
 	// player awards tracking
 	PERS_IMPRESSIVE_COUNT,			// two railgun hits in a row
@@ -691,7 +690,7 @@ typedef enum {
 	MOD_SUICIDE,
 	MOD_TARGET_LASER,
 	MOD_TRIGGER_HURT,
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 	MOD_KAMIKAZE,
 #endif
 	MOD_GRAPPLE

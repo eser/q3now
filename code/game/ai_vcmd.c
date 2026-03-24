@@ -75,7 +75,7 @@ void BotVoiceChat_GetFlag(bot_state_t *bs, int client, int mode) {
 		if (!ctf_redflag.areanum || !ctf_blueflag.areanum)
 			return;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 	else if (gametype == GT_1FCTF) {
 		if (!ctf_neutralflag.areanum || !ctf_redflag.areanum || !ctf_blueflag.areanum)
 			return;
@@ -115,14 +115,14 @@ BotVoiceChat_Offense
 */
 void BotVoiceChat_Offense(bot_state_t *bs, int client, int mode) {
 	if ( gametype == GT_CTF
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 		|| gametype == GT_1FCTF
 #endif
 		) {
 		BotVoiceChat_GetFlag(bs, client, mode);
 		return;
 	}
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 	if (gametype == GT_HARVESTER) {
 		//
 		bs->decisionmaker = client;
@@ -170,7 +170,7 @@ BotVoiceChat_Defend
 ==================
 */
 void BotVoiceChat_Defend(bot_state_t *bs, int client, int mode) {
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 	if ( gametype == GT_OBELISK || gametype == GT_HARVESTER) {
 		//
 		switch(BotTeam(bs)) {
@@ -182,7 +182,7 @@ void BotVoiceChat_Defend(bot_state_t *bs, int client, int mode) {
 	else
 #endif
 		if (gametype == GT_CTF
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 			|| gametype == GT_1FCTF
 #endif
 			) {
@@ -384,7 +384,7 @@ void BotVoiceChat_ReturnFlag(bot_state_t *bs, int client, int mode) {
 	//if not in CTF mode
 	if (
 		gametype != GT_CTF
-#ifdef MISSIONPACK
+#if FEAT_TA_VOICECHAT
 		&& gametype != GT_1FCTF
 #endif
 		) {

@@ -194,7 +194,7 @@ void CG_SpawnEffect( vec3_t org ) {
 	AxisClear( re->axis );
 
 	VectorCopy( org, re->origin );
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 	re->origin[2] += 16;
 #else
 	re->origin[2] -= 24;
@@ -227,7 +227,7 @@ void CG_Lightning_Discharge (vec3_t origin, int msec)
 }
 // eser - lightning discharge
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 /*
 ===============
 CG_LightningBoltBeam

@@ -589,7 +589,7 @@ Only in CTF games
 /* sounds */ ""
 	},
 
-#ifdef MISSIONPACK
+#if FEAT_PW_KAMIKAZE
 /*QUAKED holdable_kamikaze (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
@@ -1123,7 +1123,7 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 		return qtrue;	// powerups are always picked up
 
 	case IT_TEAM: // team items, such as flags
-#ifdef MISSIONPACK		
+#if FEAT_1FCTF
 		if( gametype == GT_1FCTF ) {
 			// neutral flag can always be picked up
 			if( item->giTag == PW_NEUTRALFLAG ) {
@@ -1157,7 +1157,7 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 			}
 		}
 
-#ifdef MISSIONPACK
+#if FEAT_HARVESTER
 		if( gametype == GT_HARVESTER ) {
 			return qtrue;
 		}

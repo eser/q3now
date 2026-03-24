@@ -12,6 +12,7 @@
 
 // ── mature (stable, shipped) ────────────────────────────────────────────
 #define FEAT_ATMOSPHERIC                  1   // 3B  rain & snow particles
+#define FEAT_BOT_IMPROVEMENTS             1   // advanced bot AI: dodge, awareness, strafejump, item timing, weapon selection
 #define FEAT_CALLVOTE_MENU                1   // 6C  GUI callvote from ESC menu
 #define FEAT_CRON_JOBS                    1   // 11  timed server-side tasks
 #define FEAT_DAMAGE_PLUMS                 1   // 2A  floating damage numbers
@@ -24,7 +25,6 @@
 #define FEAT_SPAWN_PROTECTION             1   // 2B  attacker gets no points for spawnkills
 #define FEAT_SPECTATOR_OUTLINES           1   // 8A  player outlines for spectators
 #define FEAT_SW3Z                         1   // SW3Z archive format (.sw3z)
-#define FEAT_TELEPORTING_MISSILES         1   // 2F  rockets/plasma through teleporters
 #define FEAT_THIRD_PERSON                 1   // third-person camera with proximity fade & shoulder cam
 #define FEAT_UNLAGGED                     1   // 1B  server-side lag compensation (hitscan + projectile nudge)
 #define FEAT_ZNUDGE                       1   // 1C  client-side forward extrapolation (player/missile prediction)
@@ -35,12 +35,12 @@
 #define FEAT_FREEZETAG                    0   // 7A  freeze on death, thaw by proximity
 #define FEAT_GRAPPLE_DAMAGE               0   // 5D  hook deals damage while pulling
 #define FEAT_PROJECTILE_BOUNCE            0   // 10H projectile reflection off shields
+#define FEAT_TELEPORTING_MISSILES         0   // 2F  rockets/plasma through teleporters
 
 // ── competitive (testing) ───────────────────────────────────────────────
 #define FEAT_1FCTF                        0   // 10E one-flag CTF mode
 #define FEAT_AUTO_DEMO                    1   // 10K auto-record demos in tournament
 #define FEAT_CLAN_ARENA                   0   // 11  clan arena game mode
-#define FEAT_CTF_SCORING                  0   // 10F enhanced CTF flag scoring
 #define FEAT_ELIMINATION                  0   // 10B round-based elimination modifier
 #define FEAT_ELO_TRACKING                 0   // 10J per-player skill rating
 #define FEAT_OVERTIME                     0   // 10D auto-extend on tied score
@@ -57,7 +57,6 @@
 #define FEAT_STATS_WINDOW                 1   // floating stats overlay + window system
 #define FEAT_PING_LOCATION                0   // 4G  team coordination pings
 #define FEAT_TEAM_LEADERSHIP              0   // 11  particle trail library
-#define FEAT_HIT_SOUNDS                   0   // damage-based hit sound pitch variation
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
 #define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
@@ -113,6 +112,34 @@
 #if FEAT_QUIC_HTTP && !FEAT_QUIC_TRANSPORT
 #undef  FEAT_QUIC_TRANSPORT
 #define FEAT_QUIC_TRANSPORT               1
+#endif
+
+// ── missionpack (Team Arena features, individually toggleable) ────────
+#ifdef MISSIONPACK
+// backward compat: MISSIONPACK enables everything
+#define FEAT_TA_UI                        1   // Team Arena UI framework, HUD, menus
+#define FEAT_TA_VOICECHAT                 1   // vsay/vtell voice commands (bots use when enabled)
+#define FEAT_TA_TEAM_OVERLAYS             1   // team status overlay HUD (health/armor/weapon of teammates)
+#define FEAT_TA_TEAM_ORDERS               1   // team orders & squad commands (order teammates, accept/deny)
+#define FEAT_HARVESTER                    1   // Harvester game mode (skull/cube collection)
+#define FEAT_OVERLOAD                     1   // Overload game mode (obelisk control)
+#define FEAT_PW_KAMIKAZE                  1   // Kamikaze powerup (timer, explosion, body)
+#define FEAT_PW_INVULNERABILITY           1   // Invulnerability shield (sphere, railgun bounce)
+#define FEAT_PW_GUARD                     1   // Guard persistent powerup (damage reduction, health regen)
+#define FEAT_PW_SCOUT                     1   // Scout persistent powerup (speed boost)
+#define FEAT_PW_DOUBLER                   1   // Doubler persistent powerup (2x damage)
+#else
+#define FEAT_TA_UI                        0
+#define FEAT_TA_VOICECHAT                 0
+#define FEAT_TA_TEAM_OVERLAYS             0
+#define FEAT_TA_TEAM_ORDERS               0
+#define FEAT_HARVESTER                    0
+#define FEAT_OVERLOAD                     0
+#define FEAT_PW_KAMIKAZE                  0
+#define FEAT_PW_INVULNERABILITY           0
+#define FEAT_PW_GUARD                     0
+#define FEAT_PW_SCOUT                     0
+#define FEAT_PW_DOUBLER                   0
 #endif
 
 #endif // _Q_FEATS_H

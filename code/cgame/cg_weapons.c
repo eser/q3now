@@ -166,7 +166,7 @@ static void CG_ShotgunEjectBrass( centity_t *cent ) {
 }
 
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 /*
 ==========================
 CG_NailgunEjectBrass
@@ -838,7 +838,7 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 
 }
 
-#ifdef MISSIONPACK
+#if FEAT_TA_UI
 /*
 ==========================
 CG_NailTrail
