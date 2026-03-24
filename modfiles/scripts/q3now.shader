@@ -188,3 +188,47 @@ q3now/railDebris
 	}
 	deformVertexes autosprite
 }
+
+// ── Wired UI menu background clouds ───────────────────────────────────
+// Two-layer scrolling clouds with dark blue tint. Used as fullscreen
+// background behind floating menu panels.
+
+// Available sky textures:
+//   bluedimclouds.jpg, dimclouds.jpg, inteldimclouds.jpg,
+//   intelredclouds.jpg, killsky_1.jpg, killsky_2.jpg,
+//   pjbasesky.jpg, topclouds.jpg
+
+wiredui/clouds
+{
+	nopicmip
+	nomipmaps
+	{
+		// base — dark blue fill
+		map $whiteimage
+		rgbgen const ( 0.06 0.06 0.12 )
+	}
+	{
+		// layer 1 — blue clouds, slow drift right
+		map textures/skies/bluedimclouds.jpg
+		blendfunc gl_one gl_one
+		rgbgen const ( 0.35 0.35 0.55 )
+		tcmod scale 1.5 1.5
+		tcmod scroll 0.01 0.003
+	}
+	{
+		// layer 2 — warm clouds, counter-drift left, parallax depth
+		map textures/skies/dimclouds.jpg
+		blendfunc gl_one gl_one
+		rgbgen const ( 0.40 0.28 0.45 )
+		tcmod scale 2.5 2.0
+		tcmod scroll -0.02 0.006
+	}
+	{
+		// layer 3 — high wisps, diagonal drift
+		map textures/skies/topclouds.jpg
+		blendfunc gl_one gl_one
+		rgbgen const ( 0.20 0.20 0.30 )
+		tcmod scale 4 3
+		tcmod scroll 0.005 -0.012
+	}
+}

@@ -1,0 +1,20 @@
+// confirm.menu - Wired UI confirmation dialog
+// Ports: code/q3_ui/ui_confirm.c
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "confirm"
+	rect 170 160 300 160
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+	modal
+
+	LABEL(0, 16, 300, 20, "Are you sure?", 0.5, 1)
+	SEPARATOR(20, 44, 260)
+	BUTTON(30, 60, 100, BUTTON_H, "Yes", 0.4, exec "quit")
+	BUTTON(170, 60, 100, BUTTON_H, "No", 0.4, close)
+}

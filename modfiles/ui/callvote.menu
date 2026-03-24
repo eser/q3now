@@ -1,0 +1,55 @@
+// callvote.menu - Wired UI callvote dialog
+// Ports: code/q3_ui/ui_callvote.c (FEAT_CALLVOTE_MENU)
+// q3now addition
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "callvote"
+	rect 170 100 300 280
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+
+	onESC { close }
+
+	LABEL(0, 12, 300, 20, "Call Vote", 0.5, 1)
+	SEPARATOR(16, 36, 268)
+
+	BUTTON(20, 48, 260, BUTTON_H, "Restart Map", 0.4, exec "callvote map_restart" ; close)
+	BUTTON(20, 76, 260, BUTTON_H, "Next Map", 0.4, exec "callvote nextmap" ; close)
+	BUTTON(20, 104, 260, BUTTON_H, "Shuffle Teams", 0.4, exec "callvote shuffle" ; close)
+
+	SEPARATOR(16, 134, 268)
+
+	itemDef {
+		type 12
+		text "Timelimit:"
+		rect 20 148 260 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "ui_voteTimelimit"
+		cvarFloatList { "5" 5 "10" 10 "15" 15 "20" 20 "30" 30 }
+		visible 1
+	}
+
+	BUTTON(20, 174, 260, BUTTON_H, "Vote Timelimit", 0.35, exec "callvote timelimit" ; close)
+
+	itemDef {
+		type 12
+		text "Fraglimit:"
+		rect 20 202 260 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "ui_voteFraglimit"
+		cvarFloatList { "10" 10 "20" 20 "30" 30 "50" 50 "100" 100 }
+		visible 1
+	}
+
+	BUTTON(20, 228, 260, BUTTON_H, "Vote Fraglimit", 0.35, exec "callvote fraglimit" ; close)
+
+	SEPARATOR(16, 258, 268)
+	BUTTON(20, 270, 260, BUTTON_H, "Cancel", 0.4, close)
+}

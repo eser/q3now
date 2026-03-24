@@ -1,0 +1,25 @@
+{
+	loadMenu { "ui/main.menu" }
+	loadMenu { "ui/ingame.menu" }
+	loadMenu { "ui/options.menu" }
+	loadMenu { "ui/video.menu" }
+	loadMenu { "ui/display.menu" }
+	loadMenu { "ui/sound.menu" }
+	loadMenu { "ui/controls.menu" }
+	loadMenu { "ui/network.menu" }
+	loadMenu { "ui/preferences.menu" }
+	loadMenu { "ui/playersettings.menu" }
+	loadMenu { "ui/servers.menu" }
+	loadMenu { "ui/startserver.menu" }
+	loadMenu { "ui/demos.menu" }
+	loadMenu { "ui/mods.menu" }
+	loadMenu { "ui/confirm.menu" }
+	loadMenu { "ui/team.menu" }
+	loadMenu { "ui/specifyserver.menu" }
+	loadMenu { "ui/callvote.menu" }
+	loadMenu { "ui/connect.menu" }
+	loadMenu { "ui/serverinfo.menu" }
+	loadMenu { "ui/addbots.menu" }
+	loadMenu { "ui/removebots.menu" }
+	loadMenu { "ui/teamorders.menu" }
+}

@@ -1,0 +1,103 @@
+// startserver.menu - Wired UI create server panel
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "startserver"
+	rect 40 30 560 420
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor COLOR_FOCUS
+
+	onESC { close }
+
+	LABEL(0, 8, 560, 18, "Create Server", 0.5, 1)
+	SEPARATOR(10, 28, 540)
+
+	// game type
+	itemDef {
+		type 12
+		text "Game Type:"
+		rect 10 36 260 18
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "ui_netGameType"
+		cvarFloatList { "Free For All" 0 "Tournament" 1 "Team DM" 5 "CTF" 6 }
+		visible 1
+	}
+
+	// map list column headers
+	LABEL_COLOR(14, 60, 120, 10, "Map", 0.22, 0, 0.5, 0.5, 0.5, 1)
+	LABEL_COLOR(134, 60, 120, 10, "Name", 0.22, 0, 0.5, 0.5, 0.5, 1)
+
+	// map list (left side) — two columns: shortname + longname
+	itemDef {
+		name "maplist"
+		type 6
+		rect 10 72 260 288
+		textscale 0.25
+		forecolor 1 1 1 1
+		backcolor 0.06 0.06 0.1 0.8
+		style 1
+		feeder 4
+		elementheight 14
+		columns 2 0 120 20 120 134 20
+		visible 1
+	}
+
+	// server settings (right side)
+	SUBWINDOW(280, 36, 270, 14, "Settings")
+
+	itemDef {
+		type 4
+		text "Hostname:"
+		rect 280 56 270 18
+		textscale 0.28
+		forecolor 1 1 1 1
+		cvar "sv_hostname"
+		maxChars 32
+		visible 1
+	}
+
+	itemDef {
+		type 12
+		text "Max Players:"
+		rect 280 78 270 18
+		textscale 0.28
+		forecolor 1 1 1 1
+		cvar "sv_maxclients"
+		cvarFloatList { "4" 4 "8" 8 "12" 12 "16" 16 "24" 24 "32" 32 }
+		visible 1
+	}
+
+	itemDef {
+		type 12
+		text "Frag Limit:"
+		rect 280 100 270 18
+		textscale 0.28
+		forecolor 1 1 1 1
+		cvar "fraglimit"
+		cvarFloatList { "None" 0 "10" 10 "20" 20 "30" 30 "50" 50 "100" 100 }
+		visible 1
+	}
+
+	itemDef {
+		type 12
+		text "Time Limit:"
+		rect 280 122 270 18
+		textscale 0.28
+		forecolor 1 1 1 1
+		cvar "timelimit"
+		cvarFloatList { "None" 0 "5" 5 "10" 10 "15" 15 "20" 20 }
+		visible 1
+	}
+
+	YESNO(280, 144, 270, 18, "Pure Server:", 0.28, "sv_pure")
+	YESNO(280, 166, 270, 18, "Auto Download:", 0.28, "sv_allowDownload")
+
+	SEPARATOR(10, 370, 540)
+	BUTTON(180, 382, 100, 20, "Start", 0.4, startserver)
+	BUTTON(300, 382, 80, 20, "Back", 0.35, close)
+}

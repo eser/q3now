@@ -1,0 +1,34 @@
+// ingame.menu — Wired UI in-game ESC menu
+// Ports: code/q3_ui/ui_ingame.c
+//
+// Shown when ESC is pressed during gameplay. Non-fullscreen overlay.
+// Buttons: Resume, Setup, Server, Leave, Quit
+// q3now additions: Call Vote (FEAT_CALLVOTE_MENU)
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "ingame"
+	rect 200 80 240 320
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor COLOR_FOCUS
+
+	onESC {
+		close
+	}
+
+	// title
+	LABEL(0, 8, 240, 16, "q3now", 0.5, 1)
+	SEPARATOR(16, 28, 208)
+
+	// menu items
+	BUTTON(20, 40, 200, BUTTON_H, "Resume", 0.4, close)
+	BUTTON(20, 68, 200, BUTTON_H, "Options", 0.4, open "options")
+	BUTTON(20, 96, 200, BUTTON_H, "Call Vote", 0.4, open "callvote")
+	SEPARATOR(16, 124, 208)
+	BUTTON(20, 136, 200, BUTTON_H, "Leave Match", 0.4, exec "disconnect")
+	BUTTON_TOOLTIP(20, 164, 200, BUTTON_H, "Quit", 0.4, "Exit to desktop", exec "quit")
+}

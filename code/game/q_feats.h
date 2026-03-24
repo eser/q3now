@@ -60,6 +60,7 @@
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
 #define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
+#define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + SuperHUD)
 
 // ── engine internals (testing) ────────────────────────────────────────
 #ifndef FEAT_WASM
@@ -125,9 +126,6 @@
 #define FEAT_OVERLOAD                     1   // Overload game mode (obelisk control)
 #define FEAT_PW_KAMIKAZE                  1   // Kamikaze powerup (timer, explosion, body)
 #define FEAT_PW_INVULNERABILITY           1   // Invulnerability shield (sphere, railgun bounce)
-#define FEAT_PW_GUARD                     1   // Guard persistent powerup (damage reduction, health regen)
-#define FEAT_PW_SCOUT                     1   // Scout persistent powerup (speed boost)
-#define FEAT_PW_DOUBLER                   1   // Doubler persistent powerup (2x damage)
 #else
 #define FEAT_TA_UI                        0
 #define FEAT_TA_VOICECHAT                 0
@@ -137,9 +135,6 @@
 #define FEAT_OVERLOAD                     0
 #define FEAT_PW_KAMIKAZE                  0
 #define FEAT_PW_INVULNERABILITY           0
-#define FEAT_PW_GUARD                     0
-#define FEAT_PW_SCOUT                     0
-#define FEAT_PW_DOUBLER                   0
 #endif
 
 #endif // _Q_FEATS_H

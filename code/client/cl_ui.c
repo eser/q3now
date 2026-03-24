@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "client.h"
+#include "cl_wired_ui.h"
 
 #include "../botlib/botlib.h"
 
@@ -1222,6 +1223,10 @@ CL_ShutdownUI
 void CL_ShutdownUI( void ) {
 	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 	cls.uiStarted = qfalse;
+#if FEAT_WIRED_UI
+	WiredUI_Shutdown();
+	return;
+#else
 	if ( !uivm ) {
 		return;
 	}
@@ -1229,6 +1234,7 @@ void CL_ShutdownUI( void ) {
 	VM_Free( uivm );
 	uivm = NULL;
 	FS_VM_CloseFiles( H_Q3UI );
+#endif
 }
 
 
@@ -1240,6 +1246,13 @@ CL_InitUI
 #define UI_OLD_API_VERSION	4
 
 void CL_InitUI( void ) {
+#if FEAT_WIRED_UI
+	// disallow vl.collapse for UI elements
+	re.VertexLighting( qfalse );
+
+	WiredUI_Init( cls.state >= CA_AUTHORIZING && cls.state < CA_ACTIVE );
+	cls.uiStarted = qtrue;
+#else
 	int		v;
 	vmInterpret_t		interpret;
 
@@ -1292,16 +1305,21 @@ void CL_InitUI( void ) {
 		// init for this gamestate
 		VM_Call( uivm, 1, UI_INIT, (cls.state >= CA_AUTHORIZING && cls.state < CA_ACTIVE) );
 	}
+#endif
 }
 
 
 #ifndef STANDALONE
 qboolean UI_usesUniqueCDKey( void ) {
+#if FEAT_WIRED_UI
+	return qfalse;
+#else
 	if (uivm) {
 		return (VM_Call( uivm, 0, UI_HASUNIQUECDKEY ) != 0);
 	} else {
 		return qfalse;
 	}
+#endif
 }
 #endif
 
@@ -1314,9 +1332,13 @@ See if the current console command is claimed by the ui
 ====================
 */
 qboolean UI_GameCommand( void ) {
+#if FEAT_WIRED_UI
+	return WiredUI_ConsoleCommand( cls.realtime );
+#else
 	if ( !uivm ) {
 		return qfalse;
 	}
 
 	return VM_Call( uivm, 1, UI_CONSOLE_COMMAND, cls.realtime );
+#endif
 }

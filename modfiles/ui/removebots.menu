@@ -1,0 +1,38 @@
+// removebots.menu - Wired UI remove bots dialog
+// Ports: code/q3_ui/ui_removebots.c
+
+#include "ui/menumacros.h"
+
+menuDef {
+	name "removebots"
+	rect 170 80 300 320
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+
+	onESC { close }
+
+	LABEL(0, 12, 300, 20, "Remove Bot", 0.5, 1)
+	SEPARATOR(16, 36, 268)
+
+	// connected bots list — uses player list feeder
+	itemDef {
+		name "botlist"
+		type 6
+		rect 20 48 260 220
+		textscale 0.3
+		forecolor 1 1 1 1
+		backcolor 0.12 0.12 0.17 0.8
+		style 1
+		feeder 7
+		elementheight 18
+		columns 1 0 240 32
+		visible 1
+	}
+
+	SEPARATOR(16, 278, 268)
+	BUTTON(20, 290, 120, BUTTON_H, "Kick", 0.4, exec "kick")
+	BUTTON(160, 290, 120, BUTTON_H, "Close", 0.4, close)
+}
