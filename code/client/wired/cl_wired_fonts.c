@@ -6,7 +6,7 @@ Provides: font loading, text compilation, WiredFont_DrawString.
 Runs in the CLIENT -- uses re.* directly instead of trap_R_*.
 ===========================================================================
 */
-#include "client.h"
+#include "../client.h"
 #include "cl_wired_fonts.h"
 
 #if FEAT_WIRED_UI
@@ -45,7 +45,7 @@ typedef struct {
 #define DS_MAX_WIDTH_IS_CHARS 0x0100
 
 // border frame drawing (ported from CG_OSPDrawFrame in cg_ospcompat.c)
-static void WiredFont_DrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled ) {
+void WiredFont_DrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled ) {
 	if ( !border || !borderColor ) return;
 	if ( border[0] > 0 ) SCR_FillRect( x, y, w, border[0], borderColor );
 	if ( border[2] > 0 ) SCR_FillRect( x, y + h - border[2], w, border[2], borderColor );

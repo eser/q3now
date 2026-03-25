@@ -58,7 +58,22 @@ void CG_WiredHudPushState( void ) {
 	state.redflag  = cgs.redflag;
 
 	// ── crosshair ────────────────────────────────────────────────────
-	state.crosshairClientNum = cg.crosshairClientNum;
+	state.crosshairClientNum  = cg.crosshairClientNum;
+	state.crosshairClientTime = cg.crosshairClientTime;
+
+	// ── player extras ────────────────────────────────────────────────
+	state.lowAmmoWarning        = cg.lowAmmoWarning;
+	state.renderingThirdPerson  = cg.renderingThirdPerson;
+	Com_Memcpy( &state.predictedPlayerState, &cg.predictedPlayerState, sizeof( playerState_t ) );
+
+	// ── rewards ──────────────────────────────────────────────────────
+	state.rewardStack = cg.rewardStack;
+	state.rewardTime  = cg.rewardTime;
+	for ( i = 0; i < WIRED_HUD_MAX_REWARDSTACK && i < MAX_REWARDSTACK; i++ ) {
+		state.rewardCount[i]  = cg.rewardCount[i];
+		state.rewardShader[i] = cg.rewardShader[i];
+		state.rewardSound[i]  = cg.rewardSound[i];
+	}
 
 	// ── vote ─────────────────────────────────────────────────────────
 	state.voteTime     = cgs.voteTime;
@@ -85,7 +100,17 @@ void CG_WiredHudPushState( void ) {
 	state.itemPickupTime = cg.itemPickupTime;
 
 	// ── media ────────────────────────────────────────────────────────
-	state.whiteShader = cgs.media.whiteShader;
+	state.whiteShader       = cgs.media.whiteShader;
+	state.deferShader       = cgs.media.deferShader;
+	state.noammoShader      = cgs.media.noammoShader;
+	state.combatArmorIcon   = cgs.media.combatArmorIcon;
+	state.heavyArmorIcon    = cgs.media.heavyArmorIcon;
+	state.jacketArmorIcon   = cgs.media.jacketArmorIcon;
+	state.talkSound         = cgs.media.talkSound;
+	for ( i = 0; i < 3; i++ ) {
+		state.redFlagShader[i]  = cgs.media.redFlagShader[i];
+		state.blueFlagShader[i] = cgs.media.blueFlagShader[i];
+	}
 	for ( i = 0; i < MAX_WEAPONS; i++ ) {
 		state.weaponIcons[i] = cg_weapons[i].weaponIcon;
 	}

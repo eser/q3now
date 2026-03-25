@@ -14,9 +14,9 @@ Feeders implemented:
 ===========================================================================
 */
 
-#include "client.h"
+#include "../client.h"
 #include "cl_wired_ui.h"
-#include "../ui/menudef.h"
+#include "../../ui/menudef.h"
 
 #if FEAT_WIRED_UI
 

@@ -231,6 +231,19 @@ typedef struct {
 
 	// crosshair
 	int         crosshairClientNum;
+	int         crosshairClientTime;
+
+	// player extras
+	int         lowAmmoWarning;         // cg.lowAmmoWarning
+	qboolean    renderingThirdPerson;   // cg.renderingThirdPerson
+	playerState_t predictedPlayerState; // cg.predictedPlayerState (full copy)
+
+	// rewards
+	int         rewardStack;
+	int         rewardTime;
+	int         rewardCount[WIRED_HUD_MAX_REWARDSTACK];
+	qhandle_t   rewardShader[WIRED_HUD_MAX_REWARDSTACK];
+	sfxHandle_t rewardSound[WIRED_HUD_MAX_REWARDSTACK];
 
 	// vote
 	int         voteTime, voteYes, voteNo;
@@ -241,15 +254,26 @@ typedef struct {
 	struct {
 		char        name[MAX_QPATH];
 		int         team, health, armor, weapon, location;
+		int         curWeapon;
 		qboolean    infoValid;
 	} clients[WIRED_HUD_MAX_CLIENTS];
 
 	// events
 	int         itemPickup, itemPickupTime;
 
-	// media handles
+	// media handles (registered by cgame, passed to client)
 	qhandle_t   whiteShader;
+	qhandle_t   deferShader;
+	qhandle_t   noammoShader;
+	qhandle_t   combatArmorIcon, heavyArmorIcon, jacketArmorIcon;
+	qhandle_t   redFlagShader[3];   // [status 0-2]
+	qhandle_t   blueFlagShader[3];
 	qhandle_t   weaponIcons[MAX_WEAPONS];
+	sfxHandle_t talkSound;
+
+	// config strings (for CG_ConfigString compat)
+	// Elements use CG_ConfigString(CS_SERVERINFO) etc. — we cache needed ones
+	char        hostname[MAX_QPATH];
 
 	qboolean    valid;
 } wiredHudState_t;

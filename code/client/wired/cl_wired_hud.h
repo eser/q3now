@@ -11,7 +11,7 @@ the client-side API.
 #ifndef CL_WIRED_HUD_H
 #define CL_WIRED_HUD_H
 
-#include "../cgame/cg_public.h"
+#include "../../cgame/cg_public.h"
 
 #if FEAT_WIRED_UI
 

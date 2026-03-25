@@ -223,8 +223,11 @@ ELSE()
 	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_TRANSPORT=0)
 ENDIF()
 
-# client + cURL
+# client + cURL + Wired UI
 AUX_SOURCE_DIRECTORY(code/client CLIENT_SRCS)
+AUX_SOURCE_DIRECTORY(code/client/wired CLIENT_SRCS)
+# bg_misc.c needed by Wired UI HUD elements (BG_FindItemForPowerup, bg_itemlist)
+list(APPEND CLIENT_SRCS code/game/bg_misc.c)
 IF(NOT USE_CURL)
 	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_curl.c)
 ENDIF()
