@@ -16,6 +16,7 @@ Feeders implemented:
 
 #include "../client.h"
 #include "cl_wired_ui.h"
+#include "cl_wired_hud.h"
 #include "../../ui/menudef.h"
 
 #if FEAT_WIRED_UI
@@ -110,7 +111,7 @@ void WiredFeeder_LoadDemos( void ) {
 	wired_demoCount = 0;
 
 	// try current protocol demo extension
-	ext = va( ".dm_%d", DEFAULT_PROTOCOL_VERSION );
+	ext = va( ".dm_%d", PROTOCOL_VERSION );
 	numFiles = FS_GetFileList( "demos", ext, listBuf, sizeof( listBuf ) );
 
 	namePtr = listBuf;
@@ -457,6 +458,77 @@ static void WiredFeeder_MapSelection( int feederID, int index ) {
 	}
 }
 
+// ── scoreboard feeder ─────────────────────────────────────────────────
+// Data source: wiredHud->scores[] (pre-sorted by server rank order)
+// FEEDER_SCOREBOARD = all players, FEEDER_REDTEAM/BLUETEAM = team-filtered
+
+static int WiredFeeder_ScoreCount( int feederID ) {
+	int i, count = 0;
+	int teamFilter = -1;
+
+	if ( feederID == FEEDER_REDTEAM_LIST )  teamFilter = TEAM_RED;
+	if ( feederID == FEEDER_BLUETEAM_LIST ) teamFilter = TEAM_BLUE;
+
+	if ( !wiredHud || !wiredHud->valid ) return 0;
+
+	for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+		if ( teamFilter >= 0 && wiredHud->scores[i].team != teamFilter )
+			continue;
+		count++;
+	}
+	return count;
+}
+
+static const char *WiredFeeder_ScoreItemText( int feederID, int index, int column ) {
+	static char buf[128];
+	int i, count = 0;
+	int teamFilter = -1;
+	wiredHudScore_t *sc;
+
+	if ( feederID == FEEDER_REDTEAM_LIST )  teamFilter = TEAM_RED;
+	if ( feederID == FEEDER_BLUETEAM_LIST ) teamFilter = TEAM_BLUE;
+
+	if ( !wiredHud || !wiredHud->valid ) return "";
+
+	// find the Nth matching entry
+	for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+		if ( teamFilter >= 0 && wiredHud->scores[i].team != teamFilter )
+			continue;
+		if ( count == index ) break;
+		count++;
+	}
+	if ( i >= wiredHud->numScores || i >= WIRED_HUD_MAX_SCORES ) return "";
+	sc = &wiredHud->scores[i];
+
+	switch ( column ) {
+		case 0: // name
+			if ( sc->client >= 0 && sc->client < WIRED_HUD_MAX_CLIENTS
+				 && wiredHud->clients[sc->client].infoValid )
+				return wiredHud->clients[sc->client].name;
+			return "???";
+		case 1: // score
+			Com_sprintf( buf, sizeof(buf), "%d", sc->score );
+			return buf;
+		case 2: // ping
+			if ( sc->ping == -1 ) return "...";
+			Com_sprintf( buf, sizeof(buf), "%d", sc->ping );
+			return buf;
+		case 3: // time
+			Com_sprintf( buf, sizeof(buf), "%d", sc->time );
+			return buf;
+		case 4: // accuracy
+			Com_sprintf( buf, sizeof(buf), "%d%%", sc->accuracy );
+			return buf;
+		default: return "";
+	}
+}
+
+static int wired_selectedScore = -1;
+
+static void WiredFeeder_ScoreSelection( int feederID, int index ) {
+	wired_selectedScore = index;
+}
+
 // ── feeder registration ───────────────────────────────────────────────
 
 void WiredUI_RegisterCoreFeeders( void ) {
@@ -470,6 +542,12 @@ void WiredUI_RegisterCoreFeeders( void ) {
 		WiredFeeder_DemoItemText, WiredFeeder_DemoSelection );
 	WiredUI_RegisterFeeder( FEEDER_MODS, WiredFeeder_ModCount,
 		WiredFeeder_ModItemText, WiredFeeder_ModSelection );
+	WiredUI_RegisterFeeder( FEEDER_SCOREBOARD, WiredFeeder_ScoreCount,
+		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
+	WiredUI_RegisterFeeder( FEEDER_REDTEAM_LIST, WiredFeeder_ScoreCount,
+		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
+	WiredUI_RegisterFeeder( FEEDER_BLUETEAM_LIST, WiredFeeder_ScoreCount,
+		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
 
 	// load initial data
 	WiredFeeder_LoadMaps();

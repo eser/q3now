@@ -648,7 +648,7 @@ static void CG_DrawStatusBar( void ) {
 
 	// stretch the health up when taking damage
 	CG_DrawField ( 185, 432, 3, value);
-	CG_ColorForHealth( hcolor );
+	CG_GetColorForAmount( cg.snap->ps.stats[STAT_HEALTH], cg.snap->ps.stats[STAT_ARMOR], hcolor );
 	trap_R_SetColor( hcolor );
 
 
@@ -938,7 +938,7 @@ static float CG_DrawTeamOverlay( float y, qboolean right, qboolean upper ) {
 					TEAM_OVERLAY_MAXLOCATION_WIDTH);
 			}
 
-			CG_GetColorForHealth( ci->health, ci->armor, hcolor );
+			CG_GetColorForAmount( ci->health, ci->armor, hcolor );
 
 			Com_sprintf (st, sizeof(st), "%3i %3i", ci->health,	ci->armor);
 
@@ -1904,7 +1904,8 @@ static void CG_DrawCrosshair(void)
 	{
 		vec4_t xhairColor;
 		if ( cg_crosshairHealth.integer ) {
-			CG_ColorForHealth( xhairColor );
+			int effectiveHealth = BG_GetEffectiveHealth( cg.snap->ps.stats[STAT_HEALTH], cg.snap->ps.stats[STAT_ARMORCLASS], cg.snap->ps.stats[STAT_ARMOR] );
+			BG_GetColorForAmount( effectiveHealth, xhairColor );
 		} else {
 			CG_ParseColor( cg_crosshairColor.string, xhairColor, 1.0f );
 		}
@@ -2192,6 +2193,20 @@ static void CG_DrawTeamVote(void) {
 
 
 static qboolean CG_DrawScoreboard( void ) {
+#if FEAT_WIRED_UI
+	// when Wired UI is active, the client renders the scoreboard overlay
+	// cgame just reports whether the scoreboard should be "showing" (suppresses other HUD)
+	if ( cg_wiredUI.integer ) {
+		if ( cg.showScores || cg.predictedPlayerState.pm_type == PM_DEAD
+			 || cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
+			return qtrue;
+		}
+		if ( CG_FadeColor( cg.scoreFadeTime, FADE_TIME ) ) {
+			return qtrue;
+		}
+		return qfalse;
+	}
+#endif
 #if FEAT_TA_UI
 	static qboolean firstTime = qtrue;
 
@@ -2251,10 +2266,10 @@ static qboolean CG_DrawScoreboard( void ) {
 	return qtrue;
 #else
 	if ( cgs.gametype == GT_TOURNAMENT )
-		return CG_OSPDrawTourneyScoreboard();
+		return CG_ModernDrawTourneyScoreboard();
 	if ( cgs.gametype >= GT_TEAM )
-		return CG_OSPDrawScoretable();
-	return CG_OSPDrawFFAScoreboard();
+		return CG_ModernDrawScoretable();
+	return CG_ModernDrawFFAScoreboard();
 #endif
 }
 
@@ -2663,10 +2678,21 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 	}
 */
 #if FEAT_WIRED_UI
-	// Wired UI: push game state to client each frame for HUD rendering
+	// Wired UI: always push game state to client
 	CG_WiredHudPushState();
+
+	// cg_wiredUI 1: client renders HUD — skip all cgame HUD drawing
+	if ( cg_wiredUI.integer ) {
+		CG_ScanForCrosshairEntity();  // updates crosshairClientNum for state bridge
+		// route center print through Wired UI message queue instead of drawing directly
+		if ( cg.centerPrintTime && cg.centerPrint[0] ) {
+			trap_WiredUI_PushEvent( WIRED_EVENT_CENTERPRINT, cg.centerPrint );
+			cg.centerPrintTime = 0;  // consumed — don't push again
+		}
+		return;
+	}
 #endif
-	// SuperHUD: if a config is loaded AND parsed successfully, use it
+	// SuperHUD: if a config is loaded AND parsed successfully
 	if ( cg_hudFile.string[0] && CG_SHUDIsLoaded() ) {
 		CG_SHUDRoutine();
 		if ( stereoFrame == STEREO_CENTER )

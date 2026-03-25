@@ -42,7 +42,7 @@ void CG_SHUDElementSBHCRoutine(void* context)
 
 	element->ctx.text = va(element->config.text.value, hp > 0 ? hp : 0);
 
-	CG_ColorForHealth(element->config.color.value.rgba);
+	CG_GetColorForAmount( cg.snap->ps.stats[STAT_HEALTH], cg.snap->ps.stats[STAT_ARMOR], element->config.color.value.rgba );
 	CG_SHUDTextPrint(&element->config, &element->ctx);
 }
 

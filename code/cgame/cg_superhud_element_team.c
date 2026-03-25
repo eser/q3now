@@ -163,7 +163,7 @@ void CG_SHUDElementTeamRoutine(void* context)
 	int index;
 	int ourTeam;
 
-	if (CG_OSPIsGameTypeFreeze())
+	if (CG_ModernIsGameTypeFreeze())
 	{
 		ourTeam = cgs.clientinfo[cg.clientNum].team;
 	}
@@ -203,11 +203,11 @@ void CG_SHUDElementTeamRoutine(void* context)
 	CG_SHUDTextPrint(&element->config, &element->ctxName);
 
 	// draw health and armor
-	CG_GetColorForHealth(ci->health, ci->armor, element->ctxHealthArmor.color);
+	CG_GetColorForAmount(ci->health, ci->armor, element->ctxHealthArmor.color);
 	element->ctxHealthArmor.text = va("%3i/%i", ci->health, ci->armor);
 
 	CG_FontSelect(element->ctxHealthArmor.fontIndex);
-	CG_OSPDrawStringNew(element->ctxHealthArmor.coord.named.x,
+	CG_ModernDrawStringNew(element->ctxHealthArmor.coord.named.x,
 	                    element->ctxHealthArmor.coord.named.y,
 	                    element->ctxHealthArmor.text,
 	                    element->ctxHealthArmor.color,

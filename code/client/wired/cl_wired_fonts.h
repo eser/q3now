@@ -3,7 +3,7 @@
 cl_wired_fonts.h — Wired UI font system API
 
 Provides proportional font rendering with 11 fonts, color codes, shadows,
-and alignment. Migrated from cg_osptext.c to run in the client directly.
+and alignment. Migrated from cg_moderntext.c to run in the client directly.
 ===========================================================================
 */
 
@@ -37,22 +37,22 @@ void    WiredFont_Select( int index );                  // switch active font by
 int     WiredFont_IndexFromName( const char *name );    // "sansman" → 2, "elite" → 9, etc.
 
 // ── text rendering ────────────────────────────────────────────────────
-// These are the migrated CG_OSPDrawString* functions, renamed for clarity.
+// These are the migrated CG_ModernDrawString* functions, renamed for clarity.
 // The original cgame functions still exist for backward compat until full migration.
 
 // full-featured: proportional fonts, shadows, color codes, borders, backgrounds
-void    CG_OSPDrawStringNew( float x, float y, const char *str,
+void    CG_ModernDrawStringNew( float x, float y, const char *str,
             const vec4_t color, vec4_t shadowColor,
             float charW, float charH, int maxWidth, int flags,
             vec4_t bgColor, vec4_t border, vec4_t borderColor );
 
 // simpler variant without shadow/border
-void    CG_OSPDrawString( float x, float y, const char *str,
+void    CG_ModernDrawString( float x, float y, const char *str,
             const vec4_t color, float charW, float charH,
             int maxWidth, int flags, vec4_t bgColor );
 
 // measure text width in pixels
-int     CG_OSPDrawStringLenPix( const char *str, float charW, int flags, int toWidth );
+int     CG_ModernDrawStringLenPix( const char *str, float charW, int flags, int toWidth );
 
 // hex color parsing
 qboolean CG_Hex16GetColor( const char *str, float *color );
@@ -66,9 +66,9 @@ void CG_FontSelect( int index );
 int  CG_FontIndexFromName( const char *name );
 
 // convenience aliases
-#define WiredFont_DrawString     CG_OSPDrawStringNew
-#define WiredFont_DrawSimple     CG_OSPDrawString
-#define WiredFont_StringWidth    CG_OSPDrawStringLenPix
+#define WiredFont_DrawString     CG_ModernDrawStringNew
+#define WiredFont_DrawSimple     CG_ModernDrawString
+#define WiredFont_StringWidth    CG_ModernDrawStringLenPix
 
 #endif // FEAT_WIRED_UI
 #endif // CL_WIRED_FONTS_H

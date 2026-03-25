@@ -2,7 +2,6 @@
 ===========================================================================
 Unlagged lag compensation for q3now.
 Based on Unlagged 2.01 by Neil "haste" Toronto.
-Ported from Smokin' Guns / OpenArena references.
 
 When FEAT_UNLAGGED=0 the basic path compiles: G_ResetHistory,
 G_StoreHistory, G_TimeShiftClient (static), G_DoTimeShiftFor,

@@ -23,5 +23,8 @@ build/
 dist/
 cmake-*
 
+# engine runtime (created if run from project dir)
+baseq3/
+
 # todos
 TODOS.md

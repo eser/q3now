@@ -362,6 +362,10 @@ typedef struct {
 	qboolean	perfect;
 	int				team;
 	int				deaths;
+	int				killingSpreeCount;
+	int				rampageCount;
+	int				massacreCount;
+	int				unstoppableCount;
 } score_t;
 
 // per-weapon stats (received via bstats server command)
@@ -789,6 +793,9 @@ typedef struct {
 	qhandle_t	harvesterNeutralModel;
 #endif
 
+	qhandle_t	healthModel;
+	qhandle_t	healthIcon;
+
     qhandle_t	heavyArmorModel;
     qhandle_t	heavyArmorIcon;
 
@@ -924,6 +931,10 @@ typedef struct {
 	qhandle_t	medalDefend;
 	qhandle_t	medalAssist;
 	qhandle_t	medalCapture;
+	qhandle_t	medalKillingSpree;
+	qhandle_t	medalRampage;
+	qhandle_t	medalMassacre;
+	qhandle_t	medalUnstoppable;
 
 	// sounds
 	sfxHandle_t	quadSound;
@@ -996,6 +1007,10 @@ typedef struct {
 	sfxHandle_t humiliationSound;
 	sfxHandle_t assistSound;
 	sfxHandle_t defendSound;
+	sfxHandle_t killingSpreeSound;
+	sfxHandle_t rampageSound;
+	sfxHandle_t massacreSound;
+	sfxHandle_t unstoppableSound;
 
 	sfxHandle_t takenLeadSound;
 	sfxHandle_t tiedLeadSound;
@@ -1219,6 +1234,7 @@ extern	vmCvar_t		cg_crosshairColor;
 extern	vmCvar_t		cg_crosshairAlpha;
 extern	vmCvar_t		cg_drawStatus;
 extern	vmCvar_t		cg_draw2D;
+extern	vmCvar_t		cg_wiredUI;
 extern	vmCvar_t		cg_animSpeed;
 extern	vmCvar_t		cg_debugAnim;
 extern	vmCvar_t		cg_debugPosition;
@@ -1393,7 +1409,7 @@ void            CG_botOrderConfirmation( const char *bot, const char *order );
 
 extern	vmCvar_t		cg_hudFile;
 
-// cg_osptext.c — OSP2-BE font/text rendering system
+// cg_moderntext.c — Modern font/text rendering system
 void	CG_LoadFonts( void );
 
 // cg_superhud.c — SuperHUD configurable HUD system
@@ -1503,8 +1519,7 @@ float *CG_ColorFromAlpha( float alpha );
 float *CG_FadeColor( int startMsec, int totalMsec );
 float *CG_TeamColor( int team );
 void CG_TileClear( void );
-void CG_ColorForHealth( vec4_t hcolor );
-void CG_GetColorForHealth( int health, int armor, vec4_t hcolor );
+void CG_GetColorForAmount( int health, int armor, vec4_t hcolor );
 
 void UI_DrawProportionalString( int x, int y, const char* str, int style, vec4_t color );
 void CG_DrawRect( float x, float y, float width, float height, float size, const float *color );
@@ -1713,9 +1728,9 @@ void CG_DrawInformation( void );
 // cg_scoreboard.c
 //
 qboolean CG_DrawOldScoreboard( void );
-qboolean CG_OSPDrawFFAScoreboard( void );
-qboolean CG_OSPDrawTourneyScoreboard( void );
-qboolean CG_OSPDrawScoretable( void );
+qboolean CG_ModernDrawFFAScoreboard( void );
+qboolean CG_ModernDrawTourneyScoreboard( void );
+qboolean CG_ModernDrawScoretable( void );
 qboolean CG_BEDrawTeamScoretable( void );
 void CG_DrawTourneyScoreboard( void );
 

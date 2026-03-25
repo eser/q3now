@@ -1,0 +1,89 @@
+// end_scoreboard_tdm.menu - End-game Team Deathmatch scoreboard (TAB overlay)
+//
+// Displayed when TAB is held during TDM mode.
+// Two side-by-side scorelist widgets - red and blue.
+
+menuDef {
+	name "end_scoreboard_tdm"
+	rect 30 34 580 0
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.05 0.05 0.1 0.7
+
+	// ── team score boxes ──────────────────────────────────────────
+
+	// red team score
+	itemDef {
+		name "red_score_label"
+		type 0
+		rect 0 6 280 16
+		text "RED TEAM"
+		textscale 0.35
+		textalign 1
+		forecolor 1.0 0.3 0.3 0.9
+		visible 1
+		decoration
+	}
+
+	// blue team score
+	itemDef {
+		name "blue_score_label"
+		type 0
+		rect 300 6 280 16
+		text "BLUE TEAM"
+		textscale 0.35
+		textalign 1
+		forecolor 0.3 0.5 1.0 0.9
+		visible 1
+		decoration
+	}
+
+	// ── separator ─────────────────────────────────────────────────
+
+	itemDef {
+		name "sep_header"
+		type 0
+		rect 4 26 572 1
+		style 1
+		backcolor 0.3 0.3 0.4 0.6
+		visible 1
+		decoration
+	}
+
+	// ── red team scorelist ────────────────────────────────────────
+
+	itemDef {
+		name "red_scorelist"
+		type 20
+		rect 0 30 285 340
+		feeder 5
+		forecolor 1.0 0.85 0.85 0.9
+		visible 1
+		decoration
+	}
+
+	// ── divider ───────────────────────────────────────────────────
+
+	itemDef {
+		name "team_divider"
+		type 0
+		rect 289 30 2 340
+		style 1
+		backcolor 0.3 0.3 0.4 0.3
+		visible 1
+		decoration
+	}
+
+	// ── blue team scorelist ───────────────────────────────────────
+
+	itemDef {
+		name "blue_scorelist"
+		type 20
+		rect 295 30 285 340
+		feeder 6
+		forecolor 0.85 0.85 1.0 0.9
+		visible 1
+		decoration
+	}
+}

@@ -328,7 +328,7 @@ rescan:
 		// reparse the string, because Con_ClearNotify() may have done another Cmd_TokenizeString()
 		Cmd_TokenizeString( s );
 		Com_Memset( cl.cmds, 0, sizeof( cl.cmds ) );
-		cls.lastVidRestart = Sys_Milliseconds(); // hack for OSP mod
+		cls.lastVidRestart = Sys_Milliseconds(); // vid_restart hack
 		return qtrue;
 	}
 
@@ -801,6 +801,9 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 #if FEAT_WIRED_UI
 	case CG_WIREDUI_PUSH_HUD_STATE:
 		WiredHud_ReceiveState( VMA(1) );
+		return 0;
+	case CG_WIREDUI_PUSH_EVENT:
+		WiredHud_ReceiveEvent( args[1], VMA(2) );
 		return 0;
 #endif
 

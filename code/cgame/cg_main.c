@@ -115,6 +115,7 @@ vmCvar_t	cg_crosshairHealth;
 vmCvar_t	cg_crosshairColor;
 vmCvar_t	cg_crosshairAlpha;
 vmCvar_t	cg_draw2D;
+vmCvar_t	cg_wiredUI;
 vmCvar_t	cg_drawStatus;
 vmCvar_t	cg_animSpeed;
 vmCvar_t	cg_debugAnim;
@@ -270,6 +271,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	{ &cg_gibs, "cg_gibs", "1", CVAR_ARCHIVE  },
 	{ &cg_draw2D, "cg_draw2D", "1", CVAR_ARCHIVE  },
+	{ &cg_wiredUI, "cg_wiredUI", "1", CVAR_ARCHIVE  },
 	{ &cg_drawStatus, "cg_drawStatus", "1", CVAR_ARCHIVE  },
 	{ &cg_drawTimer, "cg_drawTimer", "0", CVAR_ARCHIVE  },
 	{ &cg_drawFPS, "cg_drawFPS", "0", CVAR_ARCHIVE  },
@@ -781,11 +783,15 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.hitSoundJacketArmor = trap_S_RegisterSound( "sound/feedback/hit.wav", qfalse );
 
 	cgs.media.impressiveSound = trap_S_RegisterSound( "sound/feedback/impressive.wav", qtrue );
-	cgs.media.excellentSound = trap_S_RegisterSound( "sound/feedback/excellent.wav", qtrue );
 	cgs.media.deniedSound = trap_S_RegisterSound( "sound/feedback/denied.wav", qtrue );
 	cgs.media.humiliationSound = trap_S_RegisterSound( "sound/feedback/humiliation.wav", qtrue );
 	cgs.media.assistSound = trap_S_RegisterSound( "sound/feedback/assist.wav", qtrue );
 	cgs.media.defendSound = trap_S_RegisterSound( "sound/feedback/defense.wav", qtrue );
+	cgs.media.excellentSound = trap_S_RegisterSound( "sound/feedback/excellent.wav", qtrue );
+	cgs.media.killingSpreeSound = trap_S_RegisterSound( "sound/feedback/excellent.wav", qfalse );
+	cgs.media.rampageSound = trap_S_RegisterSound( "sound/feedback/excellent.wav", qfalse );
+	cgs.media.massacreSound = trap_S_RegisterSound( "sound/feedback/excellent.wav", qfalse );
+	cgs.media.unstoppableSound = trap_S_RegisterSound( "sound/feedback/excellent.wav", qfalse );
 
 	cgs.media.takenLeadSound = trap_S_RegisterSound( "sound/feedback/takenlead.wav", qtrue);
 	cgs.media.tiedLeadSound = trap_S_RegisterSound( "sound/feedback/tiedlead.wav", qtrue);
@@ -1051,6 +1057,9 @@ static void CG_RegisterGraphics( void ) {
 #endif
 	}
 
+    cgs.media.healthModel = trap_R_RegisterModel("models/powerups/health/large_cross.md3");
+    cgs.media.healthIcon = trap_R_RegisterShaderNoMip("icons/iconh_red");
+
     cgs.media.heavyArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_red.md3");
     cgs.media.heavyArmorIcon = trap_R_RegisterShaderNoMip("icons/iconr_red");
 
@@ -1107,6 +1116,10 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.medalDefend = trap_R_RegisterShaderNoMip( "medal_defend" );
 	cgs.media.medalAssist = trap_R_RegisterShaderNoMip( "medal_assist" );
 	cgs.media.medalCapture = trap_R_RegisterShaderNoMip( "medal_capture" );
+	cgs.media.medalKillingSpree = trap_R_RegisterShaderNoMip( "medal_excellent" );
+	cgs.media.medalRampage = trap_R_RegisterShaderNoMip( "medal_excellent" );
+	cgs.media.medalMassacre = trap_R_RegisterShaderNoMip( "medal_excellent" );
+	cgs.media.medalUnstoppable = trap_R_RegisterShaderNoMip( "medal_excellent" );
 
 
 	memset( cg_items, 0, sizeof( cg_items ) );

@@ -1,5 +1,19 @@
 // q3now custom shaders
 
+// ── crosshair shaders (fix: rgbGen exactVertex enables SetColor tinting) ──
+// Q3 vanilla uses rgbGen identity which ignores SetColor → crosshair always white.
+// QL fixed this with rgbGen exactVertex. We override all 10 crosshairs here.
+gfx/2d/crosshaira { nopicmip { map gfx/2d/crosshaira.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairb { nopicmip { map gfx/2d/crosshairb.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairc { nopicmip { map gfx/2d/crosshairc.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshaird { nopicmip { map gfx/2d/crosshaird.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshaire { nopicmip { map gfx/2d/crosshaire.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairf { nopicmip { map gfx/2d/crosshairf.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairg { nopicmip { map gfx/2d/crosshairg.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairh { nopicmip { map gfx/2d/crosshairh.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairi { nopicmip { map gfx/2d/crosshairi.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairj { nopicmip { map gfx/2d/crosshairj.tga  blendfunc blend  rgbGen exactVertex } }
+
 // ── q3now lens flare shaders ────────────────────────────────────────
 // Alternatives inspired by JJ Abrams / cinematic lens flare references.
 // All use sort nearest + additive alpha blend for proper compositing.

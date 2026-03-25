@@ -75,7 +75,7 @@ void DeathmatchScoreboardMessage( gentity_t *ent ) {
 		perfect = ( cl->ps.persistant[PERS_RANK] == 0 && cl->ps.persistant[PERS_KILLED] == 0 ) ? 1 : 0;
 
 		Com_sprintf (entry, sizeof(entry),
-			" %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i", level.sortedClients[i],
+			" %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i", level.sortedClients[i],
 			cl->ps.persistant[PERS_SCORE], ping, (level.time - cl->pers.enterTime)/60000,
 			scoreFlags, g_entities[level.sortedClients[i]].s.powerups, accuracy,
 			cl->ps.persistant[PERS_IMPRESSIVE_COUNT],
@@ -85,7 +85,11 @@ void DeathmatchScoreboardMessage( gentity_t *ent ) {
 			cl->ps.persistant[PERS_ASSIST_COUNT],
 			perfect,
 			cl->ps.persistant[PERS_CAPTURES],
-			cl->ps.persistant[PERS_KILLED]);
+			cl->ps.persistant[PERS_KILLED],
+			cl->ps.persistant[PERS_KILLING_SPREE_COUNT],
+			cl->ps.persistant[PERS_RAMPAGE_COUNT],
+			cl->ps.persistant[PERS_MASSACRE_COUNT],
+			cl->ps.persistant[PERS_UNSTOPPABLE_COUNT]);
 		j = strlen(entry);
 		if (stringlength + j >= sizeof(string))
 			break;

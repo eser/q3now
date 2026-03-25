@@ -22,4 +22,11 @@
 	loadMenu { "ui/addbots.menu" }
 	loadMenu { "ui/removebots.menu" }
 	loadMenu { "ui/teamorders.menu" }
+	loadMenu { "ui/hud_default.hud" }
+	loadMenu { "ui/ingame_scoreboard_ffa.menu" }
+	loadMenu { "ui/ingame_scoreboard_tdm.menu" }
+	loadMenu { "ui/ingame_scoreboard_ctf.menu" }
+	loadMenu { "ui/end_scoreboard_ffa.menu" }
+	loadMenu { "ui/end_scoreboard_tdm.menu" }
+	loadMenu { "ui/end_scoreboard_ctf.menu" }
 }

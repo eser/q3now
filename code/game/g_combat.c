@@ -649,15 +649,19 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 				attacker->client->consecutiveKills++;
 				switch ( attacker->client->consecutiveKills ) {
 				case 5:
+					attacker->client->ps.persistant[PERS_KILLING_SPREE_COUNT]++;
 					trap_SendServerCommand( -1, va( "cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is on a Killing Spree!\n\"", attacker->client->pers.netname ) );
 					break;
 				case 10:
+					attacker->client->ps.persistant[PERS_RAMPAGE_COUNT]++;
 					trap_SendServerCommand( -1, va( "cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is on a Rampage!\n\"", attacker->client->pers.netname ) );
 					break;
 				case 15:
+					attacker->client->ps.persistant[PERS_MASSACRE_COUNT]++;
 					trap_SendServerCommand( -1, va( "cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is on a Massacre!\n\"", attacker->client->pers.netname ) );
 					break;
 				case 20:
+					attacker->client->ps.persistant[PERS_UNSTOPPABLE_COUNT]++;
 					trap_SendServerCommand( -1, va( "cp \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is Unstoppable!\n\"", attacker->client->pers.netname ) );
 					break;
 				default:
@@ -837,20 +841,7 @@ int CheckArmor (gentity_t *ent, int damage, int dflags)
         return 0;
     }
 
-    switch (client->ps.stats[STAT_ARMORCLASS]) {
-    case ARM_HEAVY:
-        protection = 0.75;
-        break;
-    case ARM_COMBAT:
-        protection = 0.66;
-        break;
-    case ARM_JACKET:
-        protection = 0.50;
-        break;
-    case ARM_NONE:
-    default:
-        return 0;
-    }
+	protection = BG_GetArmorProtection( client->ps.stats[STAT_ARMORCLASS] );
 
     save = ceil(damage * protection);
 	if (save >= count)

@@ -57,26 +57,22 @@ typedef struct {
 #define DS_MAX_WIDTH_IS_CHARS 0x0100
 #endif
 
-// OSP2-BE text/font system (implemented in cg_osptext.c)
+// Modern text/font system (implemented in cg_moderntext.c)
 void CG_LoadFonts( void );
 int CG_FontIndexFromName( const char *name );
 void CG_FontSelect( int fontIndex );
 qboolean CG_Hex16GetColor( const char *str, float *color );
 text_command_t *CG_CompileText( const char *text );
 void CG_CompiledTextDestroy( text_command_t *root );
-void CG_OSPDrawString( float x, float y, const char *str, const vec4_t color, float charW, float charH, int maxWidth, int flags, vec4_t bgColor );
-int CG_OSPDrawStringLenPix( const char *str, float charW, int flags, int toWidth );
-void CG_OSPDrawStringNew( float x, float y, const char *str, const vec4_t color, vec4_t shadowColor, float charW, float charH, int maxWidth, int flags, vec4_t bgColor, vec4_t border, vec4_t borderColor );
+void CG_ModernDrawString( float x, float y, const char *str, const vec4_t color, float charW, float charH, int maxWidth, int flags, vec4_t bgColor );
+int CG_ModernDrawStringLenPix( const char *str, float charW, int flags, int toWidth );
+void CG_ModernDrawStringNew( float x, float y, const char *str, const vec4_t color, vec4_t shadowColor, float charW, float charH, int maxWidth, int flags, vec4_t bgColor, vec4_t border, vec4_t borderColor );
 
-// OSP2 compatibility functions (implemented in cg_ospcompat.c)
-qboolean CG_OSPIsGameTypeFreeze( void );
-qboolean CG_OSPIsGameTypeTDM( void );
-qboolean CG_OSPIsGameTypeCA( int gametype );
+// cg_utils.c -- A collection of utility functions
+qboolean CG_ModernIsGameTypeFreeze( void );
 qboolean CG_IsFollowing( void );
 qboolean CG_IsSpectator( void );
-qboolean CG_IsSpectatorOnScreen( void );
-void CG_BEStatsShowStatsInfo( void );
-void CG_OSPDrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled );
+void CG_ModernDrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled );
 
 // OSP2 cvar stubs
 extern vmCvar_t cg_MaxlocationWidth;

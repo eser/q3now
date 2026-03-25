@@ -1,4 +1,4 @@
-// cg_superhud_element_obituaries.c — stubbed (needs weapon icon media + OSP client info)
+// cg_superhud_element_obituaries.c — stubbed (needs weapon icon media + client info)
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"

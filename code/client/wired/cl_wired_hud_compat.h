@@ -141,7 +141,8 @@ typedef struct {
 		qhandle_t   whiteShader;
 		qhandle_t   deferShader;
 		qhandle_t   noammoShader;
-		qhandle_t   combatArmorIcon, heavyArmorIcon, jacketArmorIcon;
+		qhandle_t   healthIcon;
+		qhandle_t   heavyArmorIcon, combatArmorIcon, jacketArmorIcon;
 		qhandle_t   redFlagShader[3];
 		qhandle_t   blueFlagShader[3];
 		sfxHandle_t talkSound;
@@ -171,31 +172,25 @@ extern wiredWeaponCompat_t wired_cg_weapons[MAX_WEAPONS];
 #define CG_ConfigString(idx) wired_ConfigString(idx)
 const char *wired_ConfigString( int index );
 
-// CG_GetColorForHealth — color based on health value
-void CG_GetColorForHealth( int health, int armor, vec4_t hcolor );
+// wired_GetColorForAmount — color based on health value
+void wired_GetColorForAmount( int amount, vec4_t hcolor );
 
-// CG_IsFollowing / CG_IsSpectator / CG_IsSpectatorOnScreen
+// CG_IsFollowing / CG_IsSpectator
 qboolean wired_IsFollowing( void );
 qboolean wired_IsSpectator( void );
-qboolean wired_IsSpectatorOnScreen( void );
 #define CG_IsFollowing()          wired_IsFollowing()
 #define CG_IsSpectator()          wired_IsSpectator()
-#define CG_IsSpectatorOnScreen()  wired_IsSpectatorOnScreen()
 
-// CG_OSPIsGameTypeFreeze
+// CG_ModernIsGameTypeFreeze
 qboolean wired_IsGameTypeFreeze( void );
-#define CG_OSPIsGameTypeFreeze()  wired_IsGameTypeFreeze()
+#define CG_ModernIsGameTypeFreeze()  wired_IsGameTypeFreeze()
 
 // CG_RegisterItemVisuals — stub (not needed for HUD drawing)
 #define CG_RegisterItemVisuals(x)
 
-// CG_OSPDrawFrame — border frame drawing
+// CG_ModernDrawFrame — border frame drawing
 void WiredFont_DrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled );
-#define CG_OSPDrawFrame  WiredFont_DrawFrame
-
-// CG_ColorForHealth — 1 arg version (reads from wired_cg.snap)
-void wired_ColorForHealth( vec4_t hcolor );
-#define CG_ColorForHealth(c) wired_ColorForHealth(c)
+#define CG_ModernDrawFrame  WiredFont_DrawFrame
 
 // ── memory functions ──────────────────────────────────────────────────
 // Z_Malloc/Z_Free declared in qcommon.h, available in client
@@ -232,7 +227,7 @@ extern wiredItemCompat_t wired_cg_items[256];
 // ── team overlay data ─────────────────────────────────────────────────
 
 extern int wired_numSortedTeamPlayers;
-extern int wired_sortedTeamPlayers[WIRED_HUD_MAX_CLIENTS];
+extern int wired_sortedTeamPlayers[WIRED_HUD_MAX_TEAMOVERLAY];
 #define numSortedTeamPlayers  wired_numSortedTeamPlayers
 #define sortedTeamPlayers     wired_sortedTeamPlayers
 

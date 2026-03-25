@@ -43,7 +43,7 @@ vmCvar_t wired_drawCrosshair;
 vmCvar_t wired_drawCrosshairNames;
 vmCvar_t wired_crosshairHealth;
 int wired_numSortedTeamPlayers;
-int wired_sortedTeamPlayers[WIRED_HUD_MAX_CLIENTS];
+int wired_sortedTeamPlayers[WIRED_HUD_MAX_TEAMOVERLAY];
 
 // ── SuperHUD global context (event state) ────────────────────────────
 // This holds chat/frag/obituary/powerup event state — pushed from cgame
@@ -135,8 +135,9 @@ void WiredHud_SyncCompat( void ) {
 	wired_cgs.media.whiteShader       = wiredHud->whiteShader;
 	wired_cgs.media.deferShader       = wiredHud->deferShader;
 	wired_cgs.media.noammoShader      = wiredHud->noammoShader;
-	wired_cgs.media.combatArmorIcon   = wiredHud->combatArmorIcon;
+	wired_cgs.media.healthIcon        = wiredHud->healthIcon;
 	wired_cgs.media.heavyArmorIcon    = wiredHud->heavyArmorIcon;
+	wired_cgs.media.combatArmorIcon   = wiredHud->combatArmorIcon;
 	wired_cgs.media.jacketArmorIcon   = wiredHud->jacketArmorIcon;
 	wired_cgs.media.talkSound         = wiredHud->talkSound;
 	for ( i = 0; i < 3; i++ ) {
@@ -155,36 +156,43 @@ void WiredHud_SyncCompat( void ) {
 		wired_cgs.clientinfo[i].infoValid = wiredHud->clients[i].infoValid;
 	}
 
-	// weapon icons
+	// team overlay sorting
+	wired_numSortedTeamPlayers = wiredHud->numSortedTeamPlayers;
+	for ( i = 0; i < wiredHud->numSortedTeamPlayers && i < WIRED_HUD_MAX_TEAMOVERLAY; i++ ) {
+		wired_sortedTeamPlayers[i] = wiredHud->sortedTeamPlayers[i];
+	}
+
+	// weapon + ammo icons
 	for ( i = 0; i < MAX_WEAPONS; i++ ) {
 		wired_cg_weapons[i].weaponIcon = wiredHud->weaponIcons[i];
+		wired_cg_weapons[i].ammoIcon   = wiredHud->ammoIcons[i];
+	}
+
+	// item icons (for item pickup, powerup display)
+	for ( i = 0; i < WIRED_HUD_MAX_ITEMS; i++ ) {
+		wired_cg_items[i].icon = wiredHud->itemIcons[i];
 	}
 }
 
 // ── helper stubs ─────────────────────────────────────────────────────
 
 const char *wired_ConfigString( int index ) {
-	// most elements only use CS_SERVERINFO for hostname
-	// return empty for now — can be extended via state bridge
-	return "";
-}
-
-void wired_ColorForHealth( vec4_t hcolor ) {
-	int health = wiredHud->valid ? wiredHud->health : 100;
-	int armor = wiredHud->valid ? wiredHud->armor : 0;
-	CG_GetColorForHealth( health, armor, hcolor );
-}
-
-void CG_GetColorForHealth( int health, int armor, vec4_t hcolor ) {
-	if ( health > 100 ) {
-		hcolor[0] = 0; hcolor[1] = 0; hcolor[2] = 1; hcolor[3] = 1;
-	} else if ( health > 66 ) {
-		hcolor[0] = 0; hcolor[1] = 1; hcolor[2] = 0; hcolor[3] = 1;
-	} else if ( health > 33 ) {
-		hcolor[0] = 1; hcolor[1] = 1; hcolor[2] = 0; hcolor[3] = 1;
-	} else {
-		hcolor[0] = 1; hcolor[1] = 0; hcolor[2] = 0; hcolor[3] = 1;
+	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
+		return "";
 	}
+	if ( !cl.gameState.stringOffsets[index] ) {
+		return "";
+	}
+	return cl.gameState.stringData + cl.gameState.stringOffsets[index];
+}
+
+void wired_GetColorForAmount( int amount, vec4_t hcolor ) {
+	float t = Com_Clamp(0, 100, amount) / 100.0f;
+
+	hcolor[0] = 1;
+	hcolor[1] = MIN(t * 2, 1.0);
+	hcolor[2] = MAX(t * 2 - 1.0, 0);
+	hcolor[3] = 1;
 }
 
 qboolean wired_IsFollowing( void ) {
@@ -193,10 +201,6 @@ qboolean wired_IsFollowing( void ) {
 
 qboolean wired_IsSpectator( void ) {
 	return ( wiredHud->ourTeam == TEAM_SPECTATOR );
-}
-
-qboolean wired_IsSpectatorOnScreen( void ) {
-	return wired_IsSpectator();
 }
 
 qboolean wired_IsGameTypeFreeze( void ) {

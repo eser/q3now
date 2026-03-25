@@ -328,14 +328,14 @@ void CG_SHUDRoutine(void)
 	is_dead = cg.predictedPlayerState.pm_type == PM_DEAD;
 	is_intermission = cg.predictedPlayerState.pm_type == PM_INTERMISSION;
 	is_team_game = cgs.gametype >= GT_TEAM;
-	is_spectator = CG_IsSpectatorOnScreen();
+	is_spectator = CG_IsSpectator();
 	is_scores = cg.showScores;
 	is_gt_ffa = cgs.gametype == GT_FFA;
 	is_gt_tourney = cgs.gametype == GT_TOURNAMENT;
-	is_gt_tdm = CG_OSPIsGameTypeTDM();
+	is_gt_tdm = cgs.gametype == GT_TOURNAMENT == GT_TEAM;
 	is_gt_ctf = cgs.gametype == GT_CTF;
-	is_gt_ft = CG_OSPIsGameTypeFreeze();
-	is_gt_ca = CG_OSPIsGameTypeCA(cgs.gametype);
+	is_gt_ft = CG_ModernIsGameTypeFreeze();
+	is_gt_ca = qfalse; // cgs.gametype == GT_CLANARENA ?
 
 	while (last)
 	{
@@ -363,8 +363,6 @@ void CG_SHUDRoutine(void)
 		last = last->next;
 	}
 
-	CG_BEStatsShowStatsInfo();
-
 	CG_PopScreenPlacement();
 }
 
@@ -384,6 +382,15 @@ void CG_SHUDEventFrag(const char* message)
 		ctx->rankmessage.time = 0;
 		ctx->rankmessage.message[0] = 0;
 	}
+
+#if FEAT_WIRED_UI
+	// push combined frag+rank as atomic pair to client-side message queue
+	if ( ctx->rankmessage.time ) {
+		trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK, va( "%s|%s", message, ctx->rankmessage.message ) );
+	} else {
+		trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK, message );
+	}
+#endif
 }
 
 void CG_SHUDEventChat(const char* message)
@@ -395,6 +402,10 @@ void CG_SHUDEventChat(const char* message)
 	Q_strncpyz(ctx->chat.line[index].message, message, MAX_SAY_TEXT);
 	ctx->chat.line[index].time = cg.time;
 	++ctx->chat.index;
+
+#if FEAT_WIRED_UI
+	trap_WiredUI_PushEvent( WIRED_EVENT_CHAT, message );
+#endif
 }
 
 void CG_SHUDEventTeamChat(const char* message)
@@ -460,4 +471,3 @@ void CG_SHUDEventTempAccuracy(int weapon, float accuracy)
 	entry->tempAccuracy = accuracy;
 
 }
-

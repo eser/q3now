@@ -637,7 +637,7 @@ void CG_SHUDTextPrint(const superhudConfig_t* cfg, superhudTextContext_t* ctx)
 	CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
 
 	CG_FontSelect(ctx->fontIndex);
-	CG_OSPDrawStringNew(ctx->coord.named.x,
+	CG_ModernDrawStringNew(ctx->coord.named.x,
 	                    ctx->coord.named.y,
 	                    ctx->text,
 	                    ctx->color,
@@ -661,7 +661,7 @@ void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx
 		CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
 
 	CG_FontSelect(ctx->fontIndex);
-	CG_OSPDrawStringNew(ctx->coord.named.x,
+	CG_ModernDrawStringNew(ctx->coord.named.x,
 	                    ctx->coord.named.y,
 	                    ctx->text,
 	                    ctx->color,
@@ -1000,7 +1000,7 @@ void CG_SHUDDrawBorderDirect(const superhudCoord_t* coord, const vec4_t border, 
 
 	CG_AdjustFrom640(&tmpCoord[0], &tmpCoord[1], &tmpCoord[2], &tmpCoord[3]);
 
-	CG_OSPDrawFrame(tmpCoord[0], tmpCoord[1], tmpCoord[2], tmpCoord[3],
+	CG_ModernDrawFrame(tmpCoord[0], tmpCoord[1], tmpCoord[2], tmpCoord[3],
 	                (float*)border, (float*)borderColor, qtrue);
 
 }
@@ -1020,7 +1020,7 @@ qboolean CG_SHUDDrawBorder(const superhudConfig_t* cfg)
 
 	CG_SHUDConfigPickBorderColor(cfg, borderColor, qfalse);
 
-	CG_OSPDrawFrame(coord[0], coord[1], coord[2], coord[3],
+	CG_ModernDrawFrame(coord[0], coord[1], coord[2], coord[3],
 	                (float*)cfg->border.value, borderColor, qfalse);
 
 	return qtrue;
