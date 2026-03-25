@@ -25,11 +25,11 @@ references and calls registered element routines during rendering.
 #ifndef CL_WIRED_UI_H
 #define CL_WIRED_UI_H
 
-#include "../game/q_feats.h"
+#include "../../game/q_feats.h"
 
 #if FEAT_WIRED_UI
 
-#include "../qcommon/q_shared.h"
+#include "../../qcommon/q_shared.h"
 
 // ── public API (called from cl_ui.c, cl_keys.c, cl_scrn.c, etc.) ─────
 

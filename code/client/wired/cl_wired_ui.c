@@ -8,10 +8,10 @@ code/ui/ui_shared.c in subsequent phases.
 ===========================================================================
 */
 
-#include "client.h"
+#include "../client.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
-#include "../ui/menudef.h"
+#include "../../ui/menudef.h"
 
 #if FEAT_WIRED_UI
 

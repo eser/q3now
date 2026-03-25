@@ -10,8 +10,8 @@ and alignment. Migrated from cg_osptext.c to run in the client directly.
 #ifndef CL_WIRED_FONTS_H
 #define CL_WIRED_FONTS_H
 
-#include "../qcommon/q_shared.h"
-#include "../game/q_feats.h"
+#include "../../qcommon/q_shared.h"
+#include "../../game/q_feats.h"
 
 #if FEAT_WIRED_UI
 

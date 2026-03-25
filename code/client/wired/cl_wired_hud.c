@@ -8,9 +8,12 @@ the wiredHud global instead of cgame globals.
 ===========================================================================
 */
 
-#include "client.h"
+#include "../client.h"
 #include "cl_wired_hud.h"
 #include "cl_wired_fonts.h"
+
+// from cl_wired_hud_compat.c
+extern void WiredHud_SyncCompat( void );
 
 #if FEAT_WIRED_UI
 
@@ -29,11 +32,12 @@ void WiredHud_ReceiveState( wiredHudState_t *state ) {
 
 // ── init / shutdown ──────────────────────────────────────────────────
 
+static qboolean wiredHud_fontsLoaded = qfalse;
+
 void WiredHud_Init( void ) {
 	Com_Memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
-	CG_LoadFonts();
-	Com_Printf( "WiredHud: initialized (Phase 3, %d fonts loaded)\n",
-		CG_FontIndexFromName( NULL ) );  // returns 0 for unknown, proves fonts loaded
+	wiredHud_fontsLoaded = qfalse;
+	Com_Printf( "WiredHud: initialized (Phase 3)\n" );
 }
 
 void WiredHud_Shutdown( void ) {
@@ -97,6 +101,17 @@ static void WiredHud_DrawFps( int realtime ) {
 
 void WiredHud_Routine( int realtime ) {
 	if ( !wiredHud->valid ) return;
+
+	// lazy font loading — deferred from init to avoid Z_CheckHeap crash
+	// (heap not stable during early WiredUI_Init, safe once cgame is active)
+	if ( !wiredHud_fontsLoaded ) {
+		CG_LoadFonts();
+		wiredHud_fontsLoaded = qtrue;
+		Com_Printf( "WiredHud: fonts loaded\n" );
+	}
+
+	// sync compat structs so element code sees cg.*/cgs.* patterns
+	WiredHud_SyncCompat();
 
 	// prototype: draw fps counter via client rendering
 	WiredHud_DrawFps( realtime );

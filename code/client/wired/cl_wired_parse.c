@@ -13,13 +13,13 @@ File format reference:
 ===========================================================================
 */
 
-#include "client.h"
+#include "../client.h"
 #include "cl_wired_ui.h"
 
 #if FEAT_WIRED_UI
 
-#include "../botlib/botlib.h"
-#include "../ui/menudef.h"
+#include "../../botlib/botlib.h"
+#include "../../ui/menudef.h"
 
 // wiredRect_t defined in cl_wired_ui.h
 
