@@ -459,4 +459,7 @@ qboolean trap_R_inPVS( const vec3_t p1, const vec3_t p2 ) {
 void trap_WiredUI_PushHudState( wiredHudState_t *state ) {
 	syscall( CG_WIREDUI_PUSH_HUD_STATE, state );
 }
+void trap_WiredUI_PushEvent( int type, const char *data ) {
+	syscall( CG_WIREDUI_PUSH_EVENT, type, data );
+}
 #endif

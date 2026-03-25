@@ -221,7 +221,6 @@ typedef struct {
 	char		recordName[MAX_OSPATH]; // without extension
 	qboolean	explicitRecordName;
 	char		recordNameShort[TRUNCATE_LENGTH]; // for recording message
-	qboolean	dm68compat;
 	qboolean	spDemoRecording;
 	qboolean	demorecording;
 	qboolean	demoplaying;
@@ -242,8 +241,6 @@ typedef struct {
 
 	// big stuff at end of structure so most offsets are 15 bits or less
 	netchan_t	netchan;
-
-	qboolean compat;
 
 	// simultaneous demo playback and recording
 	int		eventMask;

@@ -580,9 +580,10 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			// always supply STEREO_CENTER as vieworg offset is now done by the engine.
 			CL_CGameRendering( stereoFrame );
 #if FEAT_WIRED_UI
-			// Wired UI HUD: render client-side HUD elements after cgame draw
-			// (cgame already pushed state via trap_WiredUI_PushHudState)
-			WiredHud_Routine( cls.realtime );
+			// Wired UI HUD: render client-side HUD elements when cg_wiredUI is active
+			if ( wiredHud->valid && wiredHud->wiredUIActive ) {
+				WiredHud_Routine( cls.realtime );
+			}
 #endif
 			SCR_DrawDemoRecording();
 #ifdef USE_VOIP

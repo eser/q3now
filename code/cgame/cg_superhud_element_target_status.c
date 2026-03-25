@@ -50,7 +50,7 @@ void CG_SHUDElementTargetStatusRoutine(void* context)
 			vec4_t hcolor;
 			char s[1024];
 
-			CG_GetColorForHealth(ci->health, ci->armor, hcolor);
+			CG_GetColorForAmount(ci->health, ci->armor, hcolor);
 
 			Com_sprintf(s, sizeof(s), "[%i/%i]", ci->health, ci->armor);
 
@@ -76,4 +76,3 @@ void CG_SHUDElementTargetStatusDestroy(void* context)
 		Z_Free(context);
 	}
 }
-

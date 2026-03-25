@@ -1,4 +1,4 @@
-// cg_superhud_element_obituaries.c — stubbed (needs weapon icon media + OSP client info)
+// cg_superhud_element_obituaries.c — stubbed (needs weapon icon media + client info)
 #include "cg_local.h"
 #include "cg_superhud_private.h"
 

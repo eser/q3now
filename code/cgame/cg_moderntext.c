@@ -1,13 +1,13 @@
 /*
 ===========================================================================
-cg_osptext.c -- OSP2-BE font system and text rendering for SuperHUD
+cg_moderntext.c -- OSP2-BE font system and text rendering for SuperHUD
 
 Ported from OSP2-BE cg_drawtools.c (lines 547-3483).
-Provides: font loading, text compilation, CG_OSPDrawString,
-CG_OSPDrawStringNew, CG_Hex16GetColor.
+Provides: font loading, text compilation, CG_ModernDrawString,
+CG_ModernDrawStringNew, CG_Hex16GetColor.
 
 Our cg_drawtools.c is NOT replaced -- it keeps CG_AdjustFrom640,
-CG_DrawStringExt, CG_GetColorForHealth, proportional font, etc.
+CG_DrawStringExt, CG_GetColorForAmount, proportional font, etc.
 ===========================================================================
 */
 #include "cg_local.h"
@@ -16,7 +16,7 @@ CG_DrawStringExt, CG_GetColorForHealth, proportional font, etc.
 /*
  * ── Hex color parsing ────────────────────────────────────
  */
-static qboolean CG_OSPCharHexToInt(char c, int *out)
+static qboolean CG_ModernCharHexToInt(char c, int *out)
 {
 	if (c >= '0' && c <= '9') { *out = c - '0'; return qtrue; }
 	if (c >= 'a' && c <= 'f') { *out = c - 'a' + 10; return qtrue; }
@@ -28,8 +28,8 @@ qboolean CG_Hex16GetColor(const char *str, float *color)
 {
 	int d1, d2, color_int;
 	if (!str) return qfalse;
-	if (!CG_OSPCharHexToInt(str[0], &d1)) return qfalse;
-	if (!CG_OSPCharHexToInt(str[1], &d2)) return qfalse;
+	if (!CG_ModernCharHexToInt(str[0], &d1)) return qfalse;
+	if (!CG_ModernCharHexToInt(str[1], &d2)) return qfalse;
 	color_int = d1 * 16 + d2;
 	*color = (float)color_int / 255.0f;
 	return qtrue;
@@ -37,12 +37,12 @@ qboolean CG_Hex16GetColor(const char *str, float *color)
 
 /*
  * ── Text compiler ────────────────────────────────────────
- * Parses a Q3 string with OSP color codes into an array of
+ * Parses a Q3 string with color codes into an array of
  * text_command_t for efficient rendering.
  */
 
 /* Cut time-related symbols like ^f ^F */
-void CG_OSPDrawStringPrepare(const char *from, char *to, int size)
+void CG_ModernDrawStringPrepare(const char *from, char *to, int size)
 {
 	int printed = 0;
 	int max = size - 1;
@@ -105,7 +105,7 @@ text_command_t *CG_CompileText(const char *in)
 	if (len > (int)sizeof(dmem)) len = sizeof(dmem);
 	text = dmem;
 
-	CG_OSPDrawStringPrepare(in, text, len);
+	CG_ModernDrawStringPrepare(in, text, len);
 
 	while (*text)
 	{
@@ -660,10 +660,10 @@ static float RestrictCompiledStringChars(text_command_t *cmd, int maxChars)
 }
 
 /*
- * ── CG_OSPDrawStringLenPix ──────────────────────────────
+ * ── CG_ModernDrawStringLenPix ──────────────────────────────
  * Returns pixel width of a string when rendered with given params.
  */
-int CG_OSPDrawStringLenPix(const char *string, float charWidth, int flags, int toWidth)
+int CG_ModernDrawStringLenPix(const char *string, float charWidth, int flags, int toWidth)
 {
 	float mw;
 	int rez;
@@ -684,13 +684,13 @@ int CG_OSPDrawStringLenPix(const char *string, float charWidth, int flags, int t
 }
 
 /*
- * ── CG_OSPDrawString ────────────────────────────────────
+ * ── CG_ModernDrawString ────────────────────────────────────
  * Main SuperHUD text renderer using compiled text commands
  * and the font metric system.
  *
  * Uses q3now's CG_AdjustFrom640 for widescreen coordinate scaling.
  */
-void CG_OSPDrawString(float x, float y, const char *string, const vec4_t setColor,
+void CG_ModernDrawString(float x, float y, const char *string, const vec4_t setColor,
                        float charWidth, float charHeight, int maxWidth, int flags,
                        vec4_t background)
 {
@@ -868,12 +868,12 @@ void CG_OSPDrawString(float x, float y, const char *string, const vec4_t setColo
 }
 
 /*
- * ── CG_OSPDrawStringNew ─────────────────────────────────
+ * ── CG_ModernDrawStringNew ─────────────────────────────────
  * Extended version with custom shadow color, border, and
  * DS_MAX_WIDTH_IS_CHARS support.
  * Uses single-pass shadow+text rendering for efficiency.
  */
-void CG_OSPDrawStringNew(float x, float y, const char *string, const vec4_t setColor,
+void CG_ModernDrawStringNew(float x, float y, const char *string, const vec4_t setColor,
                           vec4_t shadowColor,
                           float charWidth, float charHeight, int maxWidth, int flags,
                           vec4_t background, vec4_t border, vec4_t borderColor)
@@ -952,7 +952,7 @@ void CG_OSPDrawStringNew(float x, float y, const char *string, const vec4_t setC
 	}
 
 	if (hasBorder)
-		CG_OSPDrawFrame(ax, ay, expectedLength, ah, border, borderColor, 0);
+		CG_ModernDrawFrame(ax, ay, expectedLength, ah, border, borderColor, 0);
 
 	shadowEnabled = (flags & DS_SHADOW) && (shadowColor && shadowColor[3] != 0.0f);
 	if (shadowEnabled)

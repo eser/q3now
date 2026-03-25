@@ -123,7 +123,7 @@ typedef enum {
 typedef struct netchan_buffer_s {
 	msg_t           msg;
 	byte            msgBuffer[MAX_MSGLEN];
-	char		clientCommandString[MAX_STRING_CHARS];	// valid command string for SV_Netchan_Encode
+	char		clientCommandString[MAX_STRING_CHARS];
 	struct netchan_buffer_s *next;
 } netchan_buffer_t;
 

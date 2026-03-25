@@ -5,9 +5,8 @@ cg_colorparse.c -- Hex color parsing utility
 Parses color strings in formats:
   "0xRRGGBB"  — hex RGB
   "red"       — named color
-  "1"-"12"    — OSP-style numeric color codes
+  "1"-"12"    — numeric color codes
 
-Based on Nemesis/OSP color parsing.
 ===========================================================================
 */
 #include "cg_local.h"

@@ -25,7 +25,7 @@ void CG_SHUDElementSpecMessageRoutine(void* context)
 {
 	shudElementSpecMessage_t* element = (shudElementSpecMessage_t*)context;
 
-	if (CG_IsSpectatorOnScreen())
+	if (CG_IsSpectator())
 	{
 		CG_SHUDTextPrint(&element->config, &element->ctx);
 	}

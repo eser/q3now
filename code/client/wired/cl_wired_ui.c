@@ -11,9 +11,16 @@ code/ui/ui_shared.c in subsequent phases.
 #include "../client.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
+#include "cl_wired_hud_private.h"
 #include "../../ui/menudef.h"
 
 #if FEAT_WIRED_UI
+
+// from cl_wired_hud_registry.c
+extern void     WiredHud_DestroyAllElements( void );
+extern int      WiredHud_GetElementCount( void );
+// from cl_wired_hud.c
+extern void     WiredHud_LoadFromMenus( void );
 
 // ── symbol registry ───────────────────────────────────────────────────
 
@@ -271,8 +278,9 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// Phase 3: initialize HUD subsystem (fonts + state bridge)
 	WiredHud_Init();
 
-	// TODO Phase 3: register core symbols and elements from cgame
-	// TODO Phase 4: register /hud_reload and /menu_reload commands
+	// hot reload commands
+	Cmd_AddCommand( "hud_reload", WiredUI_ReloadHud );
+	Cmd_AddCommand( "menu_reload", WiredUI_ReloadMenus );
 
 	wired_activeMenu = UIMENU_NONE;
 	wired_initialized = qtrue;
@@ -290,7 +298,9 @@ void WiredUI_Shutdown( void ) {
 		return;
 	}
 
-	// TODO Phase 3: destroy all HUD element contexts
+	WiredHud_DestroyAllElements();
+	Cmd_RemoveCommand( "hud_reload" );
+	Cmd_RemoveCommand( "menu_reload" );
 
 	Com_Memset( wired_symbols, 0, sizeof( wired_symbols ) );
 	Com_Memset( wired_elements, 0, sizeof( wired_elements ) );
@@ -975,7 +985,7 @@ static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *it
 
 	if ( source > 0 && source < 6 ) {
 		// query internet master servers
-		Cbuf_ExecuteText( EXEC_APPEND, va( "globalservers %d %d\n", source - 1, DEFAULT_PROTOCOL_VERSION ) );
+		Cbuf_ExecuteText( EXEC_APPEND, va( "globalservers %d %d\n", source - 1, PROTOCOL_VERSION ) );
 	}
 
 }
@@ -1918,14 +1928,187 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 	// TODO Phase 2: render connection screen from .menu file
 }
 
+// ── overlay renderer (for scoreboard, vote panel, etc.) ──────────────
+// Renders a menu's background + items without cursor/focus/tooltip logic.
+// Called from WiredHud_Routine() for in-game overlays that need .menu layout.
+
+void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
+	int i;
+
+	if ( !menu ) return;
+
+	float menuX = menu->fullscreen ? 0 : menu->rect.x;
+	float menuY = menu->fullscreen ? 0 : menu->rect.y;
+	float menuW = menu->fullscreen ? SCREEN_WIDTH : menu->rect.w;
+	float menuH = menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h;
+
+	// render background (skip when height=0 — scoreboard draws its own bg)
+	if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f && menuH > 0 ) {
+		if ( menu->fullscreen ) {
+			SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, menu->backcolor );
+		} else {
+			SCR_FillRect( menu->rect.x, menu->rect.y, menu->rect.w, menu->rect.h, menu->backcolor );
+		}
+	}
+
+	// render items
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		wiredItemDef_t *item = menu->items[i];
+
+		if ( !item->visible ) continue;
+
+		// cvarTest + showCvar/hideCvar conditional visibility
+		if ( item->cvarTest[0] ) {
+			char testBuf[256];
+			Cvar_VariableStringBuffer( item->cvarTest, testBuf, sizeof( testBuf ) );
+
+			if ( item->showCvar[0] ) {
+				if ( !strstr( item->showCvar, testBuf ) ) continue;
+			}
+			if ( item->hideCvar[0] ) {
+				if ( strstr( item->hideCvar, testBuf ) ) continue;
+			}
+		}
+
+		float itemX = menuX + item->rect.x;
+		float itemY = menuY + item->rect.y;
+
+		// clip items outside menu bounds (skip when height=0, meaning auto-size)
+		if ( menuH > 0 && ( itemY + item->rect.h < menuY || itemY > menuY + menuH ) ) continue;
+
+		// draw item background
+		if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
+			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, item->backcolor );
+		}
+
+		// draw LISTBOX items (feeder-driven)
+		if ( item->type == ITEM_TYPE_LISTBOX && item->feeder != 0 ) {
+			int feederID = (int)item->feeder;
+			int totalRows = WiredUI_FeederCount( feederID );
+			float rowH = item->elementheight > 0 ? item->elementheight : 16.0f;
+			int visibleRows = (int)( item->rect.h / rowH );
+			int row, col;
+			float charSize = item->textscale >= 0.7f ? 16.0f : 8.0f;
+			vec4_t rowColor;
+			float contentW = item->rect.w;
+
+			// draw list background
+			if ( item->backcolor[3] > 0 ) {
+				SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, item->backcolor );
+			}
+
+			// draw rows
+			for ( row = 0; row < visibleRows && ( item->listScrollOffset + row ) < totalRows; row++ ) {
+				int dataRow = item->listScrollOffset + row;
+				float rowY = itemY + row * rowH;
+
+				// draw columns
+				Vector4Copy( item->forecolor, rowColor );
+				float colX = itemX + 4;
+				for ( col = 0; col < ( item->columns > 0 ? item->columns : 1 ); col++ ) {
+					const char *text = WiredUI_FeederItemText( feederID, dataRow, col );
+					float colW = ( col < item->columns && item->columnWidths[col] > 0 )
+						? item->columnWidths[col] : contentW;
+					if ( text && text[0] ) {
+						int maxChars = (int)( ( colW - 4 ) / charSize );
+						if ( maxChars < 1 ) maxChars = 1;
+						if ( (int)strlen( text ) > maxChars ) {
+							char clipped[128];
+							Q_strncpyz( clipped, text, sizeof( clipped ) );
+							if ( maxChars < (int)sizeof( clipped ) ) {
+								clipped[maxChars] = '\0';
+							}
+							SCR_DrawStringExt( (int)colX, (int)( rowY + 2 ), charSize,
+								clipped, rowColor, qfalse, qfalse );
+						} else {
+							SCR_DrawStringExt( (int)colX, (int)( rowY + 2 ), charSize,
+								text, rowColor, qfalse, qfalse );
+						}
+					}
+					colX += colW;
+				}
+			}
+
+			continue;
+		}
+
+		// draw SCORELIST widget — rich scoreboard with per-cell coloring
+		if ( item->type == ITEM_TYPE_SCORELIST && item->feeder != 0 ) {
+			extern void WiredHud_DrawScorelistWidget( float x, float y, float w, float h,
+				int feederID, const vec4_t textColor );
+			WiredHud_DrawScorelistWidget( itemX, itemY, item->rect.w, item->rect.h,
+				(int)item->feeder, item->forecolor );
+			continue;
+		}
+
+		// draw text items (static text or cvar-bound) using modern font system
+		{
+			const char *drawText = NULL;
+			char cvarBuf[256];
+
+			if ( item->text[0] ) {
+				drawText = item->text;
+			} else if ( item->cvar[0] && item->type == ITEM_TYPE_TEXT ) {
+				Cvar_VariableStringBuffer( item->cvar, cvarBuf, sizeof( cvarBuf ) );
+				if ( cvarBuf[0] ) drawText = cvarBuf;
+			}
+
+			if ( drawText ) {
+				float charW, charH;
+				int flags = DS_PROPORTIONAL | DS_SHADOW;
+
+				// textscale maps to charW/charH (same mapping as main menu renderer)
+				charW = item->textscale >= 0.7f ? 16.0f : ( item->textscale >= 0.3f ? 10.0f : 8.0f );
+				charH = charW * 1.4f;
+
+				if ( item->textalign == ITEM_ALIGN_CENTER ) {
+					flags |= DS_HCENTER;
+				} else if ( item->textalign == ITEM_ALIGN_RIGHT ) {
+					flags |= DS_HRIGHT;
+				} else {
+					flags |= DS_HLEFT;
+				}
+
+				// position: centered items use widget midpoint, others use left edge
+				float x, y;
+				if ( item->textalign == ITEM_ALIGN_CENTER && item->rect.w > 0 ) {
+					x = itemX + item->rect.w * 0.5f;
+				} else if ( item->textalign == ITEM_ALIGN_RIGHT && item->rect.w > 0 ) {
+					x = itemX + item->rect.w;
+				} else {
+					x = itemX;
+				}
+				y = itemY + item->textaligny;
+
+				CG_FontSelect( 2 );
+				CG_ModernDrawString( x, y, drawText, item->forecolor,
+					charW, charH, (int)item->rect.w, flags, NULL );
+			}
+		}
+	}
+}
+
 void WiredUI_ReloadHud( void ) {
-	Com_Printf( "WiredUI: HUD reload (stub — Phase 4)\n" );
-	// TODO Phase 4: reparse .hud files, atomic swap
+	Com_Printf( "WiredUI: reloading HUD...\n" );
+
+	// destroy all active elements (frees Z_Malloc'd contexts)
+	WiredHud_DestroyAllElements();
+
+	// clear all menus + reset memory pool
+	WiredUI_ClearMenus();
+
+	// reparse manifest (all .menu + .hud files)
+	WiredUI_LoadMenus( "ui/menus.txt" );
+
+	// recreate HUD elements from hudOverlay menus
+	WiredHud_LoadFromMenus();
+
+	Com_Printf( "WiredUI: HUD reloaded, %d elements active\n", WiredHud_GetElementCount() );
 }
 
 void WiredUI_ReloadMenus( void ) {
-	Com_Printf( "WiredUI: menu reload (stub — Phase 4)\n" );
-	// TODO Phase 4: reparse .menu files
+	// menus and HUD share the same manifest — same operation
+	WiredUI_ReloadHud();
 }
 
 #endif // FEAT_WIRED_UI

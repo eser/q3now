@@ -246,7 +246,7 @@ void CL_StopRecord_f( void ) {
 	if ( clc.recordfile != FS_INVALID_HANDLE ) {
 		char tempName[MAX_OSPATH];
 		char finalName[MAX_OSPATH];
-		int protocol;
+		int protocol = PROTOCOL_VERSION;
 		int	len, sequence;
 
 		// finish up
@@ -256,14 +256,7 @@ void CL_StopRecord_f( void ) {
 		FS_FCloseFile( clc.recordfile );
 		clc.recordfile = FS_INVALID_HANDLE;
 
-		// select proper extension
-		if ( clc.dm68compat || clc.demoplaying ) {
-			protocol = OLD_PROTOCOL_VERSION;
-		} else {
-			protocol = NEW_PROTOCOL_VERSION;
-		}
-
-		if ( com_protocol->integer != DEFAULT_PROTOCOL_VERSION ) {
+		if ( com_protocol->integer != PROTOCOL_VERSION ) {
 			protocol = com_protocol->integer;
 		}
 
@@ -589,15 +582,9 @@ static void CL_Record_f( void ) {
 		ext = COM_GetExtension( demoName );
 		if ( *ext ) {
 			// strip demo extension
-			sprintf( demoExt, "%s%d", DEMOEXT, OLD_PROTOCOL_VERSION );
+			sprintf( demoExt, "%s%d", DEMOEXT, PROTOCOL_VERSION );
 			if ( Q_stricmp( ext, demoExt ) == 0 ) {
 				*(strrchr( demoName, '.' )) = '\0';
-			} else {
-				// check both protocols
-				sprintf( demoExt, "%s%d", DEMOEXT, NEW_PROTOCOL_VERSION );
-				if ( Q_stricmp( ext, demoExt ) == 0 ) {
-					*(strrchr( demoName, '.' )) = '\0';
-				}
 			}
 		}
 		Com_sprintf( name, sizeof( name ), "demos/%s", demoName );
@@ -640,9 +627,6 @@ static void CL_Record_f( void ) {
 
 	// don't start saving messages until a non-delta compressed message is received
 	clc.demowaiting = qtrue;
-
-	// we will rename record to dm_68 or dm_71 depending from this flag
-	clc.dm68compat = qtrue;
 
 	// write out the gamestate message
 	CL_WriteGamestate( qtrue );
@@ -813,7 +797,7 @@ static qboolean CL_DemoNameCallback_f( const char *filename, int length )
 	if ( version == com_protocol->integer )
 		return qtrue;
 
-	if ( version < 66 || version > NEW_PROTOCOL_VERSION )
+	if ( version > PROTOCOL_VERSION )
 		return qfalse;
 
 	return qtrue;
@@ -933,11 +917,6 @@ static void CL_PlayDemo_f( void ) {
 	cls.state = CA_CONNECTED;
 	clc.demoplaying = qtrue;
 	Q_strncpyz( cls.servername, shortname, sizeof( cls.servername ) );
-
-	if ( protocol <= OLD_PROTOCOL_VERSION )
-		clc.compat = qtrue;
-	else
-		clc.compat = qfalse;
 
 	// read demo messages until connected
 #ifdef USE_CURL
@@ -1850,7 +1829,7 @@ static void CL_Vid_Restart_f( void ) {
 	} else {
 		if ( cls.lastVidRestart ) {
 			if ( abs( cls.lastVidRestart - Sys_Milliseconds() ) < 500 ) {
-				// hack for OSP mod: do not allow vid restart right after cgame init
+				// hack: do not allow vid restart right after cgame init
 				return;
 			}
 		}
@@ -2323,12 +2302,12 @@ static void CL_CheckForResend( void ) {
 			notOverflowed = qtrue;
 		}
 
-		if ( com_protocol->integer != DEFAULT_PROTOCOL_VERSION ) {
+		if ( com_protocol->integer != PROTOCOL_VERSION ) {
 			notOverflowed &= Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "protocol",
 				com_protocol->string );
 		} else {
 			notOverflowed &= Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "protocol",
-				clc.compat ? XSTRING( OLD_PROTOCOL_VERSION ) : XSTRING( NEW_PROTOCOL_VERSION ) );
+				XSTRING( PROTOCOL_VERSION ) );
 		}
 
 		notOverflowed &= Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "qport",
@@ -2650,47 +2629,15 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		if ( *c != '\0' )
 			challenge = atoi( c );
 
-		clc.compat = qtrue;
 		s = Cmd_Argv( 3 ); // analyze server protocol version
 		if ( *s != '\0' ) {
 			int sv_proto = atoi( s );
-			if ( sv_proto > OLD_PROTOCOL_VERSION ) {
-				if ( sv_proto == NEW_PROTOCOL_VERSION || sv_proto == com_protocol->integer ) {
-					clc.compat = qfalse;
-				} else {
-					int cl_proto = com_protocol->integer;
-					if ( cl_proto == DEFAULT_PROTOCOL_VERSION ) {
-						// we support new protocol features by default
-						cl_proto = NEW_PROTOCOL_VERSION;
-					}
-					Com_Printf( S_COLOR_YELLOW "Warning: Server reports protocol version %d, "
-						"we have %d. Trying legacy protocol %d.\n",
-						sv_proto, cl_proto, OLD_PROTOCOL_VERSION );
-				}
-			}
 		}
 
-		if ( clc.compat )
+		if ( *c == '\0' || challenge != clc.challenge )
 		{
-			if ( !NET_CompareAdr( from, &clc.serverAddress ) )
-			{
-				// This challenge response is not coming from the expected address.
-				// Check whether we have a matching client challenge to prevent
-				// connection hi-jacking.
-				if ( *c == '\0' || challenge != clc.challenge )
-				{
-					Com_DPrintf( "Challenge response received from unexpected source. Ignored.\n" );
-					return qfalse;
-				}
-			}
-		}
-		else
-		{
-			if ( *c == '\0' || challenge != clc.challenge )
-			{
-				Com_Printf( "Bad challenge for challengeResponse. Ignored.\n" );
-				return qfalse;
-			}
+			Com_Printf( "Bad challenge for challengeResponse. Ignored.\n" );
+			return qfalse;
 		}
 
 		// start sending connect instead of challenge request packets
@@ -2721,41 +2668,21 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 			return qfalse;
 		}
 
-		if ( !clc.compat ) {
-			// first argument: challenge response
-			c = Cmd_Argv( 1 );
-			if ( *c != '\0' ) {
-				challenge = atoi( c );
-			} else {
-				Com_Printf( "Bad connectResponse received. Ignored.\n" );
-				return qfalse;
-			}
-
-			if ( challenge != clc.challenge ) {
-				Com_Printf( "ConnectResponse with bad challenge received. Ignored.\n" );
-				return qfalse;
-			}
-
-			if ( com_protocolCompat ) {
-				// enforce dm68-compatible stream for legacy/unknown servers
-				clc.compat = qtrue;
-			}
-
-			// second (optional) argument: actual protocol version used on server-side
-			c = Cmd_Argv( 2 );
-			if ( *c != '\0' ) {
-				int protocol = atoi( c );
-				if ( protocol > 0 ) {
-					if ( protocol <= OLD_PROTOCOL_VERSION ) {
-						clc.compat = qtrue;
-					} else {
-						clc.compat = qfalse;
-					}
-				}
-			}
+		// first argument: challenge response
+		c = Cmd_Argv( 1 );
+		if ( *c != '\0' ) {
+			challenge = atoi( c );
+		} else {
+			Com_Printf( "Bad connectResponse received. Ignored.\n" );
+			return qfalse;
 		}
 
-		Netchan_Setup( NS_CLIENT, &clc.netchan, from, Cvar_VariableIntegerValue( "net_qport" ), clc.challenge, clc.compat );
+		if ( challenge != clc.challenge ) {
+			Com_Printf( "ConnectResponse with bad challenge received. Ignored.\n" );
+			return qfalse;
+		}
+
+		Netchan_Setup( NS_CLIENT, &clc.netchan, from, Cvar_VariableIntegerValue( "net_qport" ), clc.challenge );
 
 		cls.state = CA_CONNECTED;
 		clc.lastPacketSentTime = cls.realtime - 9999; // send first packet immediately
@@ -4217,7 +4144,7 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 
 	// if this isn't the correct protocol version, ignore it
 	prot = atoi( Info_ValueForKey( infoString, "protocol" ) );
-	if ( prot != OLD_PROTOCOL_VERSION && prot != NEW_PROTOCOL_VERSION && prot != com_protocol->integer ) {
+	if ( prot != com_protocol->integer ) {
 		Com_DPrintf( "Different protocol info packet: %s\n", infoString );
 		return;
 	}

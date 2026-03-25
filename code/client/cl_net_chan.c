@@ -154,9 +154,6 @@ CL_Netchan_Transmit
 */
 void CL_Netchan_Transmit( netchan_t *chan, msg_t* msg ) {
 
-	if ( chan->compat )
-		CL_Netchan_Encode( msg );
-
 	Netchan_Transmit( chan, msg->cursize, msg->data );
 	
 	// Transmit all fragments without delay
@@ -180,10 +177,6 @@ void CL_Netchan_Enqueue( netchan_t *chan, msg_t* msg, int times ) {
 		;
 	}
 
-	if ( chan->compat ) {
-		CL_Netchan_Encode( msg );
-	}
-
 	for ( i = 0; i < times; i++ ) {
 		Netchan_Enqueue( chan, msg->cursize, msg->data );
 	}
@@ -203,9 +196,6 @@ qboolean CL_Netchan_Process( netchan_t *chan, msg_t *msg ) {
 	ret = Netchan_Process( chan, msg );
 	if ( !ret )
 		return qfalse;
-
-	if ( chan->compat )
-		CL_Netchan_Decode( msg );
 
 	return qtrue;
 }

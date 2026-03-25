@@ -904,7 +904,6 @@ void CL_ParseServerMessage( msg_t *msg ) {
 			CL_ParseDownload( msg );
 			break;
 		case svc_voipSpeex: // ioq3 extension
-			clc.dm68compat = qfalse;
 #ifdef USE_VOIP
 			CL_ParseVoip( msg, qtrue );
 			break;
@@ -912,7 +911,6 @@ void CL_ParseServerMessage( msg_t *msg ) {
 			return;
 #endif
 		case svc_voipOpus: // ioq3 extension
-			clc.dm68compat = qfalse;
 #ifdef USE_VOIP
 			CL_ParseVoip( msg, !clc.voipEnabled );
 			break;

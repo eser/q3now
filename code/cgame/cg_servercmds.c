@@ -79,21 +79,25 @@ static void CG_ParseScores( void ) {
 	memset( cg.scores, 0, sizeof( cg.scores ) );
 	for ( i = 0 ; i < cg.numScores ; i++ ) {
 		//
-		cg.scores[i].client = atoi( CG_Argv( i * 15 + 4 ) );
-		cg.scores[i].score = atoi( CG_Argv( i * 15 + 5 ) );
-		cg.scores[i].ping = atoi( CG_Argv( i * 15 + 6 ) );
-		cg.scores[i].time = atoi( CG_Argv( i * 15 + 7 ) );
-		cg.scores[i].scoreFlags = atoi( CG_Argv( i * 15 + 8 ) );
-		powerups = atoi( CG_Argv( i * 15 + 9 ) );
-		cg.scores[i].accuracy = atoi(CG_Argv(i * 15 + 10));
-		cg.scores[i].impressiveCount = atoi(CG_Argv(i * 15 + 11));
-		cg.scores[i].excellentCount = atoi(CG_Argv(i * 15 + 12));
-		cg.scores[i].guantletCount = atoi(CG_Argv(i * 15 + 13));
-		cg.scores[i].defendCount = atoi(CG_Argv(i * 15 + 14));
-		cg.scores[i].assistCount = atoi(CG_Argv(i * 15 + 15));
-		cg.scores[i].perfect = atoi(CG_Argv(i * 15 + 16));
-		cg.scores[i].captures = atoi(CG_Argv(i * 15 + 17));
-		cg.scores[i].deaths = atoi(CG_Argv(i * 15 + 18));
+		cg.scores[i].client = atoi( CG_Argv( i * 19 + 4 ) );
+		cg.scores[i].score = atoi( CG_Argv( i * 19 + 5 ) );
+		cg.scores[i].ping = atoi( CG_Argv( i * 19 + 6 ) );
+		cg.scores[i].time = atoi( CG_Argv( i * 19 + 7 ) );
+		cg.scores[i].scoreFlags = atoi( CG_Argv( i * 19 + 8 ) );
+		powerups = atoi( CG_Argv( i * 19 + 9 ) );
+		cg.scores[i].accuracy = atoi(CG_Argv(i * 19 + 10));
+		cg.scores[i].impressiveCount = atoi(CG_Argv(i * 19 + 11));
+		cg.scores[i].excellentCount = atoi(CG_Argv(i * 19 + 12));
+		cg.scores[i].guantletCount = atoi(CG_Argv(i * 19 + 13));
+		cg.scores[i].defendCount = atoi(CG_Argv(i * 19 + 14));
+		cg.scores[i].assistCount = atoi(CG_Argv(i * 19 + 15));
+		cg.scores[i].perfect = atoi(CG_Argv(i * 19 + 16));
+		cg.scores[i].captures = atoi(CG_Argv(i * 19 + 17));
+		cg.scores[i].deaths = atoi(CG_Argv(i * 19 + 18));
+		cg.scores[i].killingSpreeCount = atoi(CG_Argv(i * 19 + 19));
+		cg.scores[i].rampageCount = atoi(CG_Argv(i * 19 + 20));
+		cg.scores[i].massacreCount = atoi(CG_Argv(i * 19 + 21));
+		cg.scores[i].unstoppableCount = atoi(CG_Argv(i * 19 + 22));
 
 		if ( cg.scores[i].client < 0 || cg.scores[i].client >= MAX_CLIENTS ) {
 			cg.scores[i].client = 0;

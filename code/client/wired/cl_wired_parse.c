@@ -277,6 +277,9 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 	item->visible = qtrue;
 	item->forecolor[0] = item->forecolor[1] = item->forecolor[2] = item->forecolor[3] = 1.0f;
 	item->textscale = 0.3f;
+	item->textalign = -1;   // sentinel: -1 = not set (LEFT=0 is valid)
+	item->alignV = -1;      // sentinel: -1 = not set (TOP=0 is valid)
+	item->direction = -1;   // sentinel: -1 = not set (L2R=0 is valid)
 
 	// expect opening brace
 	if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
@@ -529,6 +532,59 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 		else if ( !Q_stricmp( token.string, "hudElement" ) ) {
 			if ( WiredPC_String( handle, &str ) )
 				Q_strncpyz( item->hudElement, str, sizeof( item->hudElement ) );
+		}
+		else if ( !Q_stricmp( token.string, "bind" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->bind, str, sizeof( item->bind ) );
+		}
+		// ── SuperHUD element properties (Phase 3) ────────────────────
+		else if ( !Q_stricmp( token.string, "font" ) && item->hudElement[0] ) {
+			// font name for hudElement items (SuperHUD style)
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->fontName, str, sizeof( item->fontName ) );
+		}
+		else if ( !Q_stricmp( token.string, "fontsize" ) ) {
+			WiredPC_Float( handle, &item->fontSize[0] );
+			WiredPC_Float( handle, &item->fontSize[1] );
+		}
+		else if ( !Q_stricmp( token.string, "direction" ) ) {
+			if ( WiredPC_String( handle, &str ) ) {
+				if ( !Q_stricmp( str, "R" ) || !Q_stricmp( str, "right" ) )       item->direction = 0;
+				else if ( !Q_stricmp( str, "L" ) || !Q_stricmp( str, "left" ) )   item->direction = 1;
+				else if ( !Q_stricmp( str, "T" ) || !Q_stricmp( str, "top" ) )    item->direction = 2;
+				else if ( !Q_stricmp( str, "B" ) || !Q_stricmp( str, "bottom" ) ) item->direction = 3;
+				else item->direction = atoi( str );
+			}
+		}
+		else if ( !Q_stricmp( token.string, "fill" ) ) {
+			item->fillFlag = qtrue;
+		}
+		else if ( !Q_stricmp( token.string, "monospace" ) ) {
+			item->monospace = qtrue;
+		}
+		else if ( !Q_stricmp( token.string, "color2" ) ) {
+			WiredPC_Color( handle, &item->color2 );
+		}
+		else if ( !Q_stricmp( token.string, "alignv" ) || !Q_stricmp( token.string, "alignV" ) ) {
+			if ( WiredPC_String( handle, &str ) ) {
+				if ( !Q_stricmp( str, "T" ) || !Q_stricmp( str, "top" ) )        item->alignV = 0;
+				else if ( !Q_stricmp( str, "C" ) || !Q_stricmp( str, "center" ) ) item->alignV = 1;
+				else if ( !Q_stricmp( str, "B" ) || !Q_stricmp( str, "bottom" ) ) item->alignV = 2;
+				else item->alignV = atoi( str );
+			}
+		}
+		else if ( !Q_stricmp( token.string, "fade" ) ) {
+			WiredPC_Color( handle, &item->fadeColor );
+		}
+		else if ( !Q_stricmp( token.string, "fadedelay" ) ) {
+			WiredPC_Int( handle, &item->fadeDelay );
+		}
+		else if ( !Q_stricmp( token.string, "time" ) ) {
+			WiredPC_Int( handle, &item->timeMs );
+		}
+		else if ( !Q_stricmp( token.string, "image" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->image, str, sizeof( item->image ) );
 		}
 		else if ( !Q_stricmp( token.string, "action" ) ||
 		          !Q_stricmp( token.string, "onFocus" ) ||
@@ -943,6 +999,11 @@ qboolean WiredUI_LoadMenus( const char *manifestFile ) {
 
 int WiredUI_GetMenuCount( void ) {
 	return wired_menuCount;
+}
+
+wiredMenuDef_t *WiredUI_GetMenuByIndex( int index ) {
+	if ( index < 0 || index >= wired_menuCount ) return NULL;
+	return wired_menus[index];
 }
 
 wiredMenuDef_t *WiredUI_FindMenu( const char *name ) {

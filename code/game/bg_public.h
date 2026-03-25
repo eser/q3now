@@ -309,7 +309,11 @@ typedef enum {
 	PERS_DEFEND_COUNT,				// defend awards
 	PERS_ASSIST_COUNT,				// assist awards
 	PERS_GAUNTLET_FRAG_COUNT,		// kills with the guantlet
-	PERS_CAPTURES					// captures
+	PERS_CAPTURES,					// captures
+	PERS_KILLING_SPREE_COUNT,		// 5-kill streaks
+	PERS_RAMPAGE_COUNT,				// 10-kill streaks
+	PERS_MASSACRE_COUNT,			// 15-kill streaks
+	PERS_UNSTOPPABLE_COUNT			// 20-kill streaks
 } persEnum_t;
 
 
@@ -698,6 +702,10 @@ typedef enum {
 
 
 //---------------------------------------------------------
+
+float BG_GetArmorProtection( int armorClass );
+int BG_GetEffectiveHealth( int health, int armorClass, int armor );
+void BG_GetColorForAmount( int amount, vec4_t hcolor );
 
 // gitem_t->type
 typedef enum {

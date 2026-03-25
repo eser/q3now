@@ -261,13 +261,12 @@ typedef struct {
 	int			lastSentTime;
 	int			lastSentSize;
 
-	qboolean	compat; // ioq3 extension
 	qboolean	isLANAddress;
 
 } netchan_t;
 
 void Netchan_Init( int qport );
-void Netchan_Setup( netsrc_t sock, netchan_t *chan, const netadr_t *adr, int port, int challenge, qboolean compat );
+void Netchan_Setup( netsrc_t sock, netchan_t *chan, const netadr_t *adr, int port, int challenge );
 
 void Netchan_Transmit( netchan_t *chan, int length, const byte *data );
 void Netchan_TransmitNextFragment( netchan_t *chan );
@@ -284,13 +283,7 @@ PROTOCOL
 ==============================================================
 */
 
-#define	OLD_PROTOCOL_VERSION	68
-// new protocol with UDP spoofing protection:
-#define	NEW_PROTOCOL_VERSION	72
-// 1.31 - 67
-
-#define DEFAULT_PROTOCOL_VERSION	OLD_PROTOCOL_VERSION
-
+#define	PROTOCOL_VERSION	72
 
 // maintain a list of compatible protocols for demo playing
 // NOTE: that stuff only works with two digits protocols
@@ -1028,7 +1021,6 @@ extern	cvar_t	*com_version;
 extern	cvar_t	*com_journal;
 extern	cvar_t	*com_cameraMode;
 extern	cvar_t	*com_protocol;
-extern	qboolean com_protocolCompat;
 
 // both client and server must agree to pause
 extern	cvar_t	*sv_paused;

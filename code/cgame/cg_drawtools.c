@@ -262,12 +262,12 @@ void CG_DrawStringExt( int x, int y, const char *string, const float *setColor,
 
 void CG_DrawBigString( int x, int y, const char *s, vec4_t color, int flags, int font ) {
 	CG_FontSelect( font );
-	CG_OSPDrawString( x, y, s, color, BIGCHAR_WIDTH, BIGCHAR_HEIGHT, SCREEN_WIDTH, flags | DS_SHADOW, NULL );
+	CG_ModernDrawString( x, y, s, color, BIGCHAR_WIDTH, BIGCHAR_HEIGHT, SCREEN_WIDTH, flags | DS_SHADOW, NULL );
 }
 
 void CG_DrawSmallString( int x, int y, const char *s, vec4_t color, int flags, int font ) {
 	CG_FontSelect( font );
-	CG_OSPDrawString( x, y, s, color, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, SCREEN_WIDTH, flags, NULL );
+	CG_ModernDrawString( x, y, s, color, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, SCREEN_WIDTH, flags, NULL );
 }
 
 /*
@@ -424,10 +424,10 @@ float *CG_TeamColor( int team ) {
 
 /*
 =================
-CG_GetColorForHealth
+CG_GetColorForAmount
 =================
 */
-void CG_GetColorForHealth( int health, int armor, vec4_t hcolor ) {
+void CG_GetColorForAmount( int health, int armor, vec4_t hcolor ) {
 	int		count;
 	int		max;
 
@@ -464,18 +464,6 @@ void CG_GetColorForHealth( int health, int armor, vec4_t hcolor ) {
 		hcolor[1] = ( health - 30 ) / 30.0;
 	}
 }
-
-/*
-=================
-CG_ColorForHealth
-=================
-*/
-void CG_ColorForHealth( vec4_t hcolor ) {
-
-	CG_GetColorForHealth( cg.snap->ps.stats[STAT_HEALTH], 
-		cg.snap->ps.stats[STAT_ARMOR], hcolor );
-}
-
 
 /*
 =================

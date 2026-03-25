@@ -60,16 +60,16 @@ typedef struct {
 #define DS_MAX_WIDTH_IS_CHARS 0x0100
 #endif
 
-// OSP2-BE text/font system (implemented in cg_osptext.c)
+// Modern text/font system (implemented in cg_moderntext.c)
 void CG_LoadFonts( void );
 int CG_FontIndexFromName( const char *name );
 void CG_FontSelect( int fontIndex );
 qboolean CG_Hex16GetColor( const char *str, float *color );
 text_command_t *CG_CompileText( const char *text );
 void CG_CompiledTextDestroy( text_command_t *root );
-void CG_OSPDrawString( float x, float y, const char *str, const vec4_t color, float charW, float charH, int maxWidth, int flags, vec4_t bgColor );
-int CG_OSPDrawStringLenPix( const char *str, float charW, int flags, int toWidth );
-void CG_OSPDrawStringNew( float x, float y, const char *str, const vec4_t color, vec4_t shadowColor, float charW, float charH, int maxWidth, int flags, vec4_t bgColor, vec4_t border, vec4_t borderColor );
+void CG_ModernDrawString( float x, float y, const char *str, const vec4_t color, float charW, float charH, int maxWidth, int flags, vec4_t bgColor );
+int CG_ModernDrawStringLenPix( const char *str, float charW, int flags, int toWidth );
+void CG_ModernDrawStringNew( float x, float y, const char *str, const vec4_t color, vec4_t shadowColor, float charW, float charH, int maxWidth, int flags, vec4_t bgColor, vec4_t border, vec4_t borderColor );
 
 // OSP2 compatibility functions — provided by cl_wired_hud_compat.h in client context
 // (declarations removed to avoid macro conflicts with compat layer)
@@ -308,6 +308,11 @@ typedef struct
 		int value;
 		qboolean isSet;
 	} visiblity;
+	struct
+	{
+		char value[32];
+		qboolean isSet;
+	} bind;
 } superhudConfig_t;
 
 typedef superhudConfig_t superhudElementDefault_t;
@@ -887,6 +892,49 @@ typedef struct
 #define SHUD_MAX_OBITUARIES_LINES 8
 #define SHUD_MAX_CHAT_LINES 16
 #define SHUD_MAX_POWERUPS 8
+#define SHUD_MAX_AWARD_QUEUE 8
+
+// award notification queue entry (for WIRED_EVENT_AWARD)
+typedef struct {
+	char        name[32];       // "Impressive", "Rampage", etc.
+	char        shaderPath[64]; // "medal_impressive", "menu/medals/medal_rampage"
+	int         count;          // cumulative count (×3)
+	int         arriveTime;     // wiredHud->time when received
+} superhudAwardEntry_t;
+
+// circular buffer for award notifications
+typedef struct {
+	superhudAwardEntry_t entries[SHUD_MAX_AWARD_QUEUE];
+	int                  writeIndex;
+} superhudAwardQueue_t;
+
+// ── unified message queue (frag messages + center prints) ─────────────
+// Priority-ordered: HIGH (frags) preempt NORMAL (center prints) preempt LOW (warmup)
+
+#define SHUD_MSG_QUEUE_SIZE  8
+#define SHUD_MSG_MAX_LEN     256
+
+typedef enum {
+	SHUD_MSG_LOW,       // warmup countdown, non-urgent info
+	SHUD_MSG_NORMAL,    // center prints (Rampage!, spree announcements)
+	SHUD_MSG_HIGH       // frag messages (most important immediate feedback)
+} superhudMsgPriority_t;
+
+typedef struct {
+	char                    line1[SHUD_MSG_MAX_LEN];   // primary text
+	char                    line2[SHUD_MSG_MAX_LEN];   // secondary text (rank line, or empty)
+	int                     arriveTime;                // when enqueued (ms)
+	int                     displayTime;               // how long to show (ms)
+	superhudMsgPriority_t   priority;
+	qboolean                shown;                     // already displayed and expired
+} superhudMsgEntry_t;
+
+typedef struct {
+	superhudMsgEntry_t entries[SHUD_MSG_QUEUE_SIZE];
+	int     writeIndex;      // next write slot (circular)
+	int     currentIndex;    // currently displaying entry (-1 = none)
+	int     showStartTime;   // when current message started (0 = none showing)
+} superhudMsgQueue_t;
 
 typedef struct
 {
@@ -926,6 +974,8 @@ typedef struct
 		superhudTempAccEntry_t weapon[WP_NUM_WEAPONS];
 	} tempAcc;
 	customStats_t customStats;
+	superhudAwardQueue_t awards;
+	superhudMsgQueue_t msgQueue;
 } superhudGlobalContext_t;
 
 superhudGlobalContext_t* CG_SHUDGetContext(void);

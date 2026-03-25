@@ -26,6 +26,37 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "bg_public.h"
 #include "bg_promode.h" // CPM
 
+
+float BG_GetArmorProtection( int armorClass ) {
+	switch (armorClass) {
+		case ARM_HEAVY:
+			return 0.75f;
+
+		case ARM_COMBAT:
+			return 0.66f;
+
+		case ARM_JACKET:
+			return 0.50f;
+	}
+
+	return 0.00f;
+}
+
+int BG_GetEffectiveHealth( int health, int armorClass, int armor ) {
+	float protection = BG_GetArmorProtection(armorClass);
+
+	return MIN( health / ( 1 - protection ), health + armor );
+}
+
+void BG_GetColorForAmount( int amount, vec4_t hcolor ) {
+	float t = Com_Clamp(0, 100, amount) / 100.0f;
+
+	hcolor[0] = 1;
+	hcolor[1] = MIN(t * 2, 1.0);
+	hcolor[2] = MAX(t * 2 - 1.0, 0);
+	hcolor[3] = 1;
+}
+
 /*QUAKED item_***** ( 0 0 0 ) (-16 -16 -16) (16 16 16) suspended
 DO NOT USE THIS CLASS, IT JUST HOLDS GENERAL INFORMATION.
 The suspended flag will allow items to hang in the air, otherwise they are dropped to the next surface.

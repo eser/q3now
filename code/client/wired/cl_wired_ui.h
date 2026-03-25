@@ -190,6 +190,20 @@ typedef struct wiredItemDef_s {
 	} colorRanges[WIRED_MAX_COLOR_RANGES];
 	int             numColorRanges;
 
+	// SuperHUD-specific properties (Phase 3: hudElement items)
+	char            fontName[MAX_QPATH];    // font name ("sansman", "id", etc.)
+	vec2_t          fontSize;               // fontsize W H (separate from textscale)
+	int             direction;              // 0=L2R, 1=R2L, 2=T2B, 3=B2T
+	qboolean        fillFlag;              // fill background
+	qboolean        monospace;
+	vec4_t          color2;                 // secondary color (e.g. active weapon)
+	int             alignV;                 // 0=top, 1=center, 2=bottom
+	vec4_t          fadeColor;              // fade target color
+	int             fadeDelay;              // ms before fade starts
+	int             timeMs;                 // element display duration (ms)
+	char            image[MAX_QPATH];       // image/shader name (SuperHUD "image" keyword)
+	char            bind[32];               // data binding name ("health", "armor", "ammo")
+
 	// cvar binding data
 	wiredMultiDef_t *multiData;             // for ITEM_TYPE_MULTI (allocated from pool)
 	wiredSliderDef_t sliderData;            // for ITEM_TYPE_SLIDER (cvarFloat min/max)
@@ -252,6 +266,9 @@ typedef struct wiredMenuDef_s {
 	int               openTime;             // cls.realtime when menu was opened
 	float             fadeAlpha;            // current fade alpha (0..fadeClamp)
 } wiredMenuDef_t;
+
+// ── overlay rendering (for in-game overlays like scoreboard) ──────────
+void     WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime );
 
 // ── feeder system ─────────────────────────────────────────────────────
 //

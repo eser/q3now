@@ -54,7 +54,7 @@ void CG_SHUDElementTargetStatusRoutine(void* context)
 			vec4_t hcolor;
 			char s[1024];
 
-			CG_GetColorForHealth(ci->health, ci->armor, hcolor);
+			wired_GetColorForAmount(ci->health, hcolor);
 
 			Com_sprintf(s, sizeof(s), "[%i/%i]", ci->health, ci->armor);
 

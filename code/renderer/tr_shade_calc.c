@@ -978,7 +978,7 @@ static void RB_CalcEnvironmentTexCoordsFPscr( float *st ) {
 ========================
 RB_CalcEnvironmentTexCoordsFP
 
-Special version for first-person models, borrowed from OpenArena
+Special version for first-person models
 ========================
 */
 void RB_CalcEnvironmentTexCoordsFP( float *st, qboolean screenMap ) {

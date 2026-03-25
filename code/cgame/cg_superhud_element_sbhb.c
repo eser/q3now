@@ -29,7 +29,7 @@ void CG_SHUDElementSBHBRoutine(void* context)
 
 	if (element->config.style.value == 1)
 	{
-		CG_ColorForHealth(element->ctx.color_top);
+		CG_GetColorForAmount( cg.snap->ps.stats[STAT_HEALTH], cg.snap->ps.stats[STAT_ARMOR], element->ctx.color_top );
 	}
 	else if (element->config.style.value == 2)
 	{
@@ -49,7 +49,7 @@ void CG_SHUDElementSBHBRoutine(void* context)
 	{
 		if (qfalse)
 		{
-			CG_ColorForHealth(element->ctx.color_top);
+			CG_GetColorForAmount( cg.snap->ps.stats[STAT_HEALTH], cg.snap->ps.stats[STAT_ARMOR], element->ctx.color_top );
 			element->ctx.color_top[3] = element->config.color.value.rgba[3];
 
 			if (!element->config.color2.isSet)
@@ -59,7 +59,7 @@ void CG_SHUDElementSBHBRoutine(void* context)
 			}
 			else
 			{
-				CG_ColorForHealth(element->ctx.color2_top);
+				CG_GetColorForAmount( cg.snap->ps.stats[STAT_HEALTH], cg.snap->ps.stats[STAT_ARMOR], element->ctx.color2_top );
 				element->ctx.color2_top[3] = element->config.color2.value.rgba[3];
 			}
 		}
@@ -91,4 +91,3 @@ void CG_SHUDElementSBHBDestroy(void* context)
 		Z_Free(context);
 	}
 }
-

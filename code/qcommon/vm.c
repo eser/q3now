@@ -1679,14 +1679,13 @@ void VM_ReplaceInstructions( vm_t *vm, instruction_t *buf ) {
 
 	if ( vm->index == VM_GAME ) {
 		if ( vm->crc32sum == 0x5AAE0ACC && vm->instructionCount == 251521 && vm->exactDataLength == 1872720 ) {
-			vm->forceDataMask = qtrue; // OSP server doing some bad things with memory
+			vm->forceDataMask = qtrue;
 		} else {
 			vm->forceDataMask = qfalse;
 		}
 	}
 
 	if ( vm->index == VM_UI ) {
-		// fix OSP demo UI
 		if ( vm->crc32sum == 0xCA84F31D && vm->instructionCount == 78585 && vm->exactDataLength == 542180 ) {
 			if ( memcmp( vm->dataBase + 0x3D2E, "dm_67", 5 ) == 0 ) {
 				memcpy( vm->dataBase + 0x3D2E, "dm_??", 5 );

@@ -1195,9 +1195,9 @@ typedef struct {
 
 // bit field limits
 #define	MAX_STATS				16
-#define	MAX_PERSISTANT			16
+#define	MAX_PERSISTANT			20		// increased from 16 for kill spree tier counters
 #define	MAX_POWERUPS			16
-#define	MAX_WEAPONS				16		
+#define	MAX_WEAPONS				16
 
 #define	MAX_PS_EVENTS			2
 

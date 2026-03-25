@@ -17,8 +17,8 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_chatfilter.c
     ${SOURCE_DIR}/cgame/cg_colorparse.c
     ${SOURCE_DIR}/cgame/cg_lensflare.c
-    ${SOURCE_DIR}/cgame/cg_ospcompat.c
-    ${SOURCE_DIR}/cgame/cg_osptext.c
+    ${SOURCE_DIR}/cgame/cg_utils.c
+    ${SOURCE_DIR}/cgame/cg_moderntext.c
     ${SOURCE_DIR}/cgame/cg_window.c
     ${SOURCE_DIR}/cgame/cg_superhud.c
     ${SOURCE_DIR}/cgame/cg_superhud_configparser.c

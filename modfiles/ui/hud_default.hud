@@ -1,0 +1,261 @@
+// hud_default.hud — q3now default competitive HUD
+// Converted from modfiles/hud/default.cfg to Wired UI .hud format
+
+#include "ui/menudef.h"
+
+menuDef {
+	name "hud_default"
+	fullScreen 0
+	visible 1
+	hudOverlay 1
+
+	// ── Top Score Bar ────────────────────────────────────────
+	itemDef { hudElement "predecorate"
+		rect 215 0 210 20
+		backcolor 0.1 0.1 0.15 0.6
+		fill
+	}
+	itemDef { hudElement "predecorate"
+		rect 319 0 2 20
+		image "white"
+		forecolor 0.85 0.1 0.1 1
+	}
+	itemDef { hudElement "score_own"
+		rect 312 0 0 20
+		fontsize 14 18
+		textalign 2
+		alignv C
+		forecolor 1 1 1 1
+	}
+	itemDef { hudElement "score_nme"
+		rect 328 0 0 20
+		fontsize 14 18
+		textalign 0
+		alignv C
+		forecolor 1 1 1 1
+	}
+
+	// ── Names ────────────────────────────────────────────────
+	itemDef { hudElement "name_own"
+		rect 232 0 0 20
+		fontsize 6 8
+		textalign 0
+		alignv C
+		forecolor 1 1 1 0.6
+	}
+	itemDef { hudElement "name_nme"
+		rect 408 0 0 20
+		fontsize 6 8
+		textalign 2
+		alignv C
+		forecolor 1 1 1 0.6
+	}
+
+	// ── Timer ────────────────────────────────────────────────
+	itemDef { hudElement "gametime"
+		rect 320 22 0 0
+		font "sansman"
+		fontsize 10 14
+		textalign 1
+		forecolor 1 1 1 0.8
+	}
+
+	// ── Crosshair (thin renderer — cgame pre-computes color/size) ────
+	itemDef { hudElement "crosshair"
+		rect 320 240 0 0
+	}
+
+	// ── FPS (top right) ──────────────────────────────────────
+	itemDef { hudElement "fps"
+		rect 638 2 0 0
+		font "sansman"
+		fontsize 8 10
+		textalign 2
+		forecolor 1 1 1 0.2
+	}
+
+	// ── Gametype ─────────────────────────────────────────────
+	itemDef { hudElement "gametype"
+		rect 4 3 0 0
+		fontsize 10 14
+		textalign 0
+		forecolor 1 1 1 1
+	}
+
+	// ── Weapon List (left side) ─────────────────────────────
+	itemDef { hudElement "weaponlist"
+		rect 2 60 16 15
+		fontsize 10 13
+		textalign 0
+		direction T
+		forecolor 1 1 1 0.5
+		backcolor 0.1 0.1 0.1 0.35
+		color2 0.4 0.2 0.6 0.5
+	}
+
+	// ── Health (bottom center-left) ─────────────────────────
+	itemDef { hudElement "predecorate"
+		rect 130 430 190 5
+		image "white"
+		forecolor 0.12 0.12 0.12 0.5
+	}
+	itemDef { hudElement "statusbar_bar"    bind "health"  rect 130 430 190 5  forecolor 1 1 1 0.9  direction L }
+	itemDef { hudElement "statusbar_value"  bind "health"  rect 298 438 0 0  fontsize 28 34  textalign 2 }
+	itemDef { hudElement "statusbar_icon"   bind "health"  rect 298 444 14 18 }
+
+	// ── Armor (bottom center-right) ─────────────────────────
+	itemDef { hudElement "predecorate"
+		rect 340 430 190 5
+		image "white"
+		forecolor 0.12 0.12 0.12 0.5
+	}
+	itemDef { hudElement "statusbar_bar"    bind "armor"   rect 340 430 190 5  forecolor 1 1 1 0.9  direction R }
+	itemDef { hudElement "statusbar_icon"   bind "armor"   rect 342 444 14 18 }
+	itemDef { hudElement "statusbar_value"  bind "armor"   rect 364 438 0 0  fontsize 28 34  textalign 0 }
+
+	// ── Ammo (bottom far right) ─────────────────────────────
+	itemDef { hudElement "statusbar_value"  bind "ammo"    rect 588 438 0 0  fontsize 22 28  textalign 2 }
+	itemDef { hudElement "statusbar_icon"   bind "ammo"    rect 596 442 16 20 }
+	itemDef { hudElement "ammomessage"
+		rect 320 130 0 0
+		fontsize 10 12
+		textalign 1
+		forecolor 1 0 0 0.8
+	}
+
+	// ── Player Speed (bottom left) ──────────────────────────
+	itemDef { hudElement "playerspeed"
+		rect 3 452 0 0
+		fontsize 8 10
+		textalign 0
+		forecolor 1 1 1 0.2
+	}
+
+	// ── Spectator Messages ──────────────────────────────────
+	itemDef { hudElement "followmessage"
+		rect 2 140 0 0
+		fontsize 8 12
+	}
+	itemDef { hudElement "specmessage"
+		rect 2 140 0 0
+		fontsize 8 12
+	}
+
+	// ── Message Queue (replaces fragmessage + rankmessage) ──
+	// Priority queue: frags (HIGH) > center prints (NORMAL) > warmup (LOW)
+	// Messages display one at a time, higher priority preempts lower
+	itemDef { hudElement "msgqueue"
+		rect 320 95 0 0
+		fontsize 10 14
+		textalign 1
+		forecolor 1 1 1 1
+	}
+
+	// ── Chat Lines ──────────────────────────────────────────
+	itemDef { hudElement "chat8"  rect 4 322 300 12  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat7"  rect 4 334 300 12  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat6"  rect 4 346 300 12  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat5"  rect 4 358 300 12  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat4"  rect 4 370 300 12  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat3"  rect 4 382 300 12  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat2"  rect 4 394 300 12  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat1"  rect 4 406 300 12  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+
+	// ── Vote ────────────────────────────────────────────────
+	itemDef { hudElement "votemessageworld"
+		rect 2 60 0 12
+		font "id"
+		fontsize 6 10
+		textalign 0
+		forecolor 1 1 0 1
+	}
+
+	// ── Powerups ────────────────────────────────────────────
+	itemDef { hudElement "powerup1_icon"  rect 610 270 18 24  forecolor 1 1 1 1 }
+	itemDef { hudElement "powerup1_time"  rect 606 275 0 0   fontsize 12 16  textalign 2 }
+	itemDef { hudElement "powerup2_icon"  rect 610 230 18 24  forecolor 1 1 1 1 }
+	itemDef { hudElement "powerup2_time"  rect 606 235 0 0   fontsize 12 16  textalign 2 }
+
+	// ── Crosshair Info ──────────────────────────────────────
+	itemDef { hudElement "targetname"
+		rect 320 280 0 12
+		fontsize 8 12
+		textalign 1
+		fadedelay 250
+		time 100
+		fade 1 1 1 0
+	}
+	itemDef { hudElement "targetstatus"
+		rect 320 294 0 12
+		fontsize 8 12
+		textalign 1
+		fadedelay 250
+		time 100
+		fade 1 1 1 0
+	}
+
+	// ── Item Pickup ─────────────────────────────────────────
+	itemDef { hudElement "itempickup"
+		rect 320 310 0 12
+		fontsize 8 12
+		textalign 1
+		time 3000
+		fadedelay 1000
+		fade 1 1 1 0
+	}
+	itemDef { hudElement "itempickupicon"
+		rect 312 334 16 20
+		time 3000
+		fadedelay 1000
+		fade 1 1 1 0
+	}
+
+	// ── Flag Status (CTF) ───────────────────────────────────
+	itemDef { hudElement "flagstatus_own"  rect 216 2 14 20  forecolor 1 1 1 1 }
+	itemDef { hudElement "flagstatus_nme"  rect 424 2 14 20  forecolor 1 1 1 1 }
+
+	// ── Team Count ──────────────────────────────────────────
+	itemDef { hudElement "teamcount_own"
+		rect 200 2 16 20
+		fontsize 10 14
+		textalign 1
+		forecolor 1 1 1 1
+		backcolor 0 0 0 0.3
+		fill
+	}
+	itemDef { hudElement "teamcount_nme"
+		rect 440 2 16 20
+		fontsize 10 14
+		textalign 1
+		forecolor 1 1 1 1
+		backcolor 0 0 0 0.3
+		fill
+	}
+
+	// ── Team Overlay ────────────────────────────────────────
+	itemDef { hudElement "team8"   rect 4 340 0 10  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team7"   rect 4 350 0 10  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team6"   rect 4 360 0 10  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team5"   rect 4 370 0 10  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team4"   rect 4 380 0 10  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team3"   rect 4 390 0 10  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team2"   rect 4 400 0 10  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team1"   rect 4 410 0 10  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+
+	// ── Awards ──────────────────────────────────────────────
+	itemDef { hudElement "awards"
+		rect 320 42 48 48
+		fontsize 10 14
+		textalign 1
+		forecolor 1 1 1 1
+		time 3000
+		fade 1 1 1 0
+	}
+
+	// ── Warmup Info ─────────────────────────────────────────
+	itemDef { hudElement "warmupinfo"
+		rect 320 70 0 0
+		fontsize 8 10
+		textalign 1
+	}
+}

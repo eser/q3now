@@ -289,6 +289,17 @@ static void pushReward(sfxHandle_t sfx, qhandle_t shader, int rewardCount) {
 	}
 }
 
+#if FEAT_WIRED_UI
+static void pushRewardNamed( sfxHandle_t sfx, qhandle_t shader, int count,
+                             const char *medalName, const char *shaderPath ) {
+	pushReward( sfx, shader, count );
+	trap_WiredUI_PushEvent( WIRED_EVENT_AWARD,
+		va( "%s|%s|%d", medalName, shaderPath, count ) );
+}
+#else
+#define pushRewardNamed( sfx, shader, count, name, path ) pushReward( sfx, shader, count )
+#endif
+
 /*
 ==================
 CG_CheckLocalSounds
@@ -351,37 +362,56 @@ void CG_CheckLocalSounds( playerState_t *ps, playerState_t *ops ) {
 	// reward sounds
 	reward = qfalse;
 	if (ps->persistant[PERS_CAPTURES] != ops->persistant[PERS_CAPTURES]) {
-		pushReward(cgs.media.captureAwardSound, cgs.media.medalCapture, ps->persistant[PERS_CAPTURES]);
+		pushRewardNamed(cgs.media.captureAwardSound, cgs.media.medalCapture,
+			ps->persistant[PERS_CAPTURES], "Capture", "medal_capture");
 		reward = qtrue;
-		//Com_Printf("capture\n");
 	}
 	if (ps->persistant[PERS_IMPRESSIVE_COUNT] != ops->persistant[PERS_IMPRESSIVE_COUNT]) {
-		sfx = cgs.media.impressiveSound;
-		pushReward(sfx, cgs.media.medalImpressive, ps->persistant[PERS_IMPRESSIVE_COUNT]);
+		pushRewardNamed(cgs.media.impressiveSound, cgs.media.medalImpressive,
+			ps->persistant[PERS_IMPRESSIVE_COUNT], "Impressive", "medal_impressive");
 		reward = qtrue;
-		//Com_Printf("impressive\n");
 	}
 	if (ps->persistant[PERS_EXCELLENT_COUNT] != ops->persistant[PERS_EXCELLENT_COUNT]) {
-		sfx = cgs.media.excellentSound;
-		pushReward(sfx, cgs.media.medalExcellent, ps->persistant[PERS_EXCELLENT_COUNT]);
+		pushRewardNamed(cgs.media.excellentSound, cgs.media.medalExcellent,
+			ps->persistant[PERS_EXCELLENT_COUNT], "Excellent", "medal_excellent");
 		reward = qtrue;
-		//Com_Printf("excellent\n");
 	}
 	if (ps->persistant[PERS_GAUNTLET_FRAG_COUNT] != ops->persistant[PERS_GAUNTLET_FRAG_COUNT]) {
-		sfx = cgs.media.humiliationSound;
-		pushReward(sfx, cgs.media.medalGauntlet, ps->persistant[PERS_GAUNTLET_FRAG_COUNT]);
+		pushRewardNamed(cgs.media.humiliationSound, cgs.media.medalGauntlet,
+			ps->persistant[PERS_GAUNTLET_FRAG_COUNT], "Humiliation", "medal_gauntlet");
 		reward = qtrue;
-		//Com_Printf("gauntlet frag\n");
 	}
 	if (ps->persistant[PERS_DEFEND_COUNT] != ops->persistant[PERS_DEFEND_COUNT]) {
-		pushReward(cgs.media.defendSound, cgs.media.medalDefend, ps->persistant[PERS_DEFEND_COUNT]);
+		pushRewardNamed(cgs.media.defendSound, cgs.media.medalDefend,
+			ps->persistant[PERS_DEFEND_COUNT], "Defense", "medal_defend");
 		reward = qtrue;
-		//Com_Printf("defend\n");
 	}
 	if (ps->persistant[PERS_ASSIST_COUNT] != ops->persistant[PERS_ASSIST_COUNT]) {
-		pushReward(cgs.media.assistSound, cgs.media.medalAssist, ps->persistant[PERS_ASSIST_COUNT]);
+		pushRewardNamed(cgs.media.assistSound, cgs.media.medalAssist,
+			ps->persistant[PERS_ASSIST_COUNT], "Assist", "medal_assist");
 		reward = qtrue;
-		//Com_Printf("assist\n");
+	}
+
+	// kill spree tiers — each is a distinct reward with unique icon + sound
+	if (ps->persistant[PERS_KILLING_SPREE_COUNT] != ops->persistant[PERS_KILLING_SPREE_COUNT]) {
+		pushRewardNamed(cgs.media.killingSpreeSound, cgs.media.medalKillingSpree,
+			ps->persistant[PERS_KILLING_SPREE_COUNT], "Killing Spree", "medal_excellent");
+		reward = qtrue;
+	}
+	if (ps->persistant[PERS_RAMPAGE_COUNT] != ops->persistant[PERS_RAMPAGE_COUNT]) {
+		pushRewardNamed(cgs.media.rampageSound, cgs.media.medalRampage,
+			ps->persistant[PERS_RAMPAGE_COUNT], "Rampage", "medal_excellent");
+		reward = qtrue;
+	}
+	if (ps->persistant[PERS_MASSACRE_COUNT] != ops->persistant[PERS_MASSACRE_COUNT]) {
+		pushRewardNamed(cgs.media.massacreSound, cgs.media.medalMassacre,
+			ps->persistant[PERS_MASSACRE_COUNT], "Massacre", "medal_excellent");
+		reward = qtrue;
+	}
+	if (ps->persistant[PERS_UNSTOPPABLE_COUNT] != ops->persistant[PERS_UNSTOPPABLE_COUNT]) {
+		pushRewardNamed(cgs.media.unstoppableSound, cgs.media.medalUnstoppable,
+			ps->persistant[PERS_UNSTOPPABLE_COUNT], "Unstoppable", "medal_excellent");
+		reward = qtrue;
 	}
 	// if any of the player event bits changed
 	if (ps->persistant[PERS_PLAYEREVENTS] != ops->persistant[PERS_PLAYEREVENTS]) {
