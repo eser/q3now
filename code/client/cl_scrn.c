@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "cl_wired_ui.h"
+#include "cl_wired_hud.h"
 
 static qboolean	scr_initialized;		// ready to draw
 
@@ -578,6 +579,11 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 		case CA_ACTIVE:
 			// always supply STEREO_CENTER as vieworg offset is now done by the engine.
 			CL_CGameRendering( stereoFrame );
+#if FEAT_WIRED_UI
+			// Wired UI HUD: render client-side HUD elements after cgame draw
+			// (cgame already pushed state via trap_WiredUI_PushHudState)
+			WiredHud_Routine( cls.realtime );
+#endif
 			SCR_DrawDemoRecording();
 #ifdef USE_VOIP
 			SCR_DrawVoipMeter();

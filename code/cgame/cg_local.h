@@ -1399,6 +1399,11 @@ void	CG_LoadFonts( void );
 // cg_superhud.c — SuperHUD configurable HUD system
 void	CG_SHUDLoadConfig( void );
 void	CG_SHUDRoutine( void );
+
+// cg_wired_bridge.c — Wired UI: push game state to client for HUD rendering
+#if FEAT_WIRED_UI
+void	CG_WiredHudPushState( void );
+#endif
 void	CG_SHUDParserInit( void );
 void	CG_SHUDRoutenesDestroyAll( void );
 qboolean CG_SHUDIsLoaded( void );

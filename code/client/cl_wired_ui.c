@@ -10,6 +10,7 @@ code/ui/ui_shared.c in subsequent phases.
 
 #include "client.h"
 #include "cl_wired_ui.h"
+#include "cl_wired_hud.h"
 #include "../ui/menudef.h"
 
 #if FEAT_WIRED_UI
@@ -266,6 +267,9 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	// register feeder data sources
 	WiredUI_RegisterCoreFeeders();
+
+	// Phase 3: initialize HUD subsystem (fonts + state bridge)
+	WiredHud_Init();
 
 	// TODO Phase 3: register core symbols and elements from cgame
 	// TODO Phase 4: register /hud_reload and /menu_reload commands
