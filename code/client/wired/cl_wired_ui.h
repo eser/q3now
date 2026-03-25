@@ -320,7 +320,7 @@ void     WiredUI_ResetPool( void );
 
 // ── memory pool ───────────────────────────────────────────────────────
 
-#define WIRED_MENU_POOL_SIZE   (4 * 1024 * 1024)  // 4MB for menus
+#define WIRED_MENU_POOL_SIZE   (8 * 1024 * 1024)  // 8MB for menus
 #define WIRED_HUD_POOL_SIZE    (512 * 1024)        // 512KB for HUD overlays
 
 // ── dispatch macros ───────────────────────────────────────────────────

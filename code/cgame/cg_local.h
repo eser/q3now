@@ -1425,6 +1425,8 @@ void	CG_SHUDRoutenesDestroyAll( void );
 qboolean CG_SHUDIsLoaded( void );
 void	CG_SHUDEventFrag( const char *message );
 void	CG_SHUDEventChat( const char *message );
+void	CG_SHUDEventObituaries( int attacker, int target, int mod, qboolean unfrozen );
+void	CG_SHUDEventTempAccuracy( int weapon, float accuracy );
 void	CG_SHUDAvailableElementsInit( void );
 
 // cg_colorparse.c

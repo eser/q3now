@@ -73,6 +73,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define DEFAULT_SHOTGUN_COUNT	16
 
 #define	ITEM_RADIUS			15		// item sizes are needed for client side pickup detection
+#if FEAT_ITEMSIZES
+#define ITEM_PICKUP_SIZE    66
+#endif
 
 #define	LIGHTNING_RANGE		768
 
@@ -280,13 +283,29 @@ typedef enum {
 #if FEAT_FREEZETAG
     STAT_FROZENSTATE,               // 0=normal, 1=frozen, 2=thawing (7A)
 #endif
-    STAT_CAMPER                     // 0-255: camping punishment darkness level (11C)
+    STAT_CAMPER,                    // 0-255: camping punishment darkness level (11C)
+#if FEAT_MOVEMENT_KEYS
+    STAT_KEYS                       // bitmask of movement keys (spectator follow only)
+#endif
 } statIndex_t;
 
 #if FEAT_FREEZETAG
 #define FROZENSTATE_NORMAL   0
 #define FROZENSTATE_FROZEN   1
 #define FROZENSTATE_THAWING  2
+#endif
+
+#if FEAT_MOVEMENT_KEYS
+#define KEYS_FORWARD    (1 << 0)
+#define KEYS_BACK       (1 << 1)
+#define KEYS_LEFT       (1 << 2)
+#define KEYS_RIGHT      (1 << 3)
+#define KEYS_JUMP       (1 << 4)
+#define KEYS_CROUCH     (1 << 5)
+#define KEYS_ATTACK     (1 << 6)
+#define KEYS_USE        (1 << 7)
+#define KEYS_WALK       (1 << 8)
+#define KEYS_GESTURE    (1 << 9)
 #endif
 
 

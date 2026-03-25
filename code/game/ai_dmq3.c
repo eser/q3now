@@ -5358,69 +5358,79 @@ void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult )
 	skill = bs->autoskill > 0 ? bs->autoskill : bs->settings.skill;
 	if ( skill < 3.0f ) return;
 
-	// must be on ground
+	// ── IN AIR ──────────────────────────────────────────────────────
+	// With air control, view angle IS the steering input. Just press
+	// forward with the strafejump angles — no direction vector needed.
 	if ( bs->cur_ps.groundEntityNum == ENTITYNUM_NONE ) {
-		// in air — continue existing strafejump if already active
 		if ( bs->strafejump_side != 0 ) {
 			bs->strafejump_active = qtrue;
-			// maintain strafejump angles from last frame
+			bs->strafejump_landed = qfalse;
 			VectorCopy( bs->strafejump_angles, bs->ideal_viewangles );
-			trap_EA_Move( bs->client, moveresult->movedir, 400 );
+			trap_EA_MoveForward( bs->client );
 			trap_EA_Jump( bs->client );
 		}
 		return;
 	}
 
-	// compute current horizontal speed
+	// ── ON GROUND ───────────────────────────────────────────────────
+
 	VectorCopy( bs->cur_ps.velocity, flatvel );
 	flatvel[2] = 0;
 	speed = VectorLength( flatvel );
 
-	// need some forward momentum to strafejump
 	if ( speed < 200.0f ) {
 		bs->strafejump_side = 0;
 		return;
 	}
 
-	// check that the movement direction is set
-	if ( VectorLength( moveresult->movedir ) < 0.1f ) return;
+	// if nav has no direction this frame (reachability transition),
+	// bridge the gap: keep pressing forward with last strafejump angles
+	if ( VectorLength( moveresult->movedir ) < 0.1f ) {
+		if ( bs->strafejump_side != 0 ) {
+			bs->strafejump_active = qtrue;
+			VectorCopy( bs->strafejump_angles, bs->ideal_viewangles );
+			trap_EA_MoveForward( bs->client );
+			trap_EA_Jump( bs->client );
+		}
+		return;
+	}
 
-	// check route straightness — if the movement direction and velocity
-	// are roughly aligned, the route is straight enough
+	// check route straightness
 	VectorCopy( moveresult->movedir, moveDir );
 	moveDir[2] = 0;
 	VectorNormalize( moveDir );
 	VectorNormalize2( flatvel, forward );
 
 	if ( DotProduct( moveDir, forward ) < 0.85f ) {
-		// route is turning — cancel strafejump
 		bs->strafejump_side = 0;
 		return;
 	}
 
 	// compute optimal strafejump angle (speed-dependent)
-	// at low speed (~320): ~30°. at high speed (~600+): ~5°.
-	// formula: angle = atan2(accel * frametime, speed) in degrees
-	// using approximate values: accel=320 (air accel), frametime=0.033
 	angle = atan2f( 320.0f * 0.033f, speed ) * (180.0f / M_PI);
 	if ( angle < 3.0f ) angle = 3.0f;
 	if ( angle > 30.0f ) angle = 30.0f;
 
-	// alternate sides each jump
-	if ( bs->strafejump_side == 0 ) bs->strafejump_side = 1;
-	else bs->strafejump_side = -bs->strafejump_side;
+	// alternate sides once per landing (not every grounded frame)
+	if ( bs->strafejump_side == 0 ) {
+		bs->strafejump_side = 1;
+		bs->strafejump_landed = qtrue;
+	} else if ( !bs->strafejump_landed ) {
+		bs->strafejump_side = -bs->strafejump_side;
+		bs->strafejump_landed = qtrue;
+	}
 
 	// compute strafejump view angles: yaw offset from movement direction
 	vectoangles( moveDir, sjAngles );
 	sjAngles[YAW] += angle * bs->strafejump_side;
-	sjAngles[PITCH] = 0; // look level
+	sjAngles[PITCH] = 0;
 
 	VectorCopy( sjAngles, bs->strafejump_angles );
 	VectorCopy( sjAngles, bs->ideal_viewangles );
 	bs->strafejump_active = qtrue;
 
-	// issue movement: forward + strafe + jump
-	trap_EA_Move( bs->client, moveresult->movedir, 400 );
+	// press forward — view angle offset handles the strafe component
+	trap_EA_MoveForward( bs->client );
 	trap_EA_Jump( bs->client );
 
 #if FEAT_QUIC_OBSERVE

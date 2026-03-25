@@ -224,6 +224,11 @@ static void CG_Obituary( entityState_t *ent ) {
 
 	if (message) {
 		CG_Printf( "%s %s.\n", CG_ClientNameByNum( target ), message);
+		CG_SHUDEventObituaries( attacker, target, mod, qfalse );
+#if FEAT_WIRED_UI
+		trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
+			va( "%d|%d|%d|%d", attacker, target, mod, 0 ) );
+#endif
 		return;
 	}
 
@@ -317,12 +322,22 @@ static void CG_Obituary( entityState_t *ent ) {
 		if (message) {
 			CG_Printf( "%s %s %s%s\n",
 				CG_ClientNameByNum( target ), message, CG_ClientNameByNum( attacker ), message2);
+			CG_SHUDEventObituaries( attacker, target, mod, qfalse );
+#if FEAT_WIRED_UI
+			trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
+				va( "%d|%d|%d|%d", attacker, target, mod, 0 ) );
+#endif
 			return;
 		}
 	}
 
 	// we don't know what it was
 	CG_Printf( "%s died.\n", CG_ClientNameByNum( target ) );
+	CG_SHUDEventObituaries( ENTITYNUM_WORLD, target, mod, qfalse );
+#if FEAT_WIRED_UI
+	trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
+		va( "%d|%d|%d|%d", ENTITYNUM_WORLD, target, mod, 0 ) );
+#endif
 }
 
 //==========================================================================

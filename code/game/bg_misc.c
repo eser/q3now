@@ -1058,12 +1058,21 @@ qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTim
 	BG_EvaluateTrajectory( &item->pos, atTime, origin );
 
 	// we are ignoring ducked differences here
+#if FEAT_ITEMSIZES
+	if ( ps->origin[0] - origin[0] > ITEM_PICKUP_SIZE + 8
+		|| ps->origin[0] - origin[0] < -(ITEM_PICKUP_SIZE + 14)
+		|| ps->origin[1] - origin[1] > ITEM_PICKUP_SIZE
+		|| ps->origin[1] - origin[1] < -ITEM_PICKUP_SIZE
+		|| ps->origin[2] - origin[2] > ITEM_PICKUP_SIZE
+		|| ps->origin[2] - origin[2] < -ITEM_PICKUP_SIZE ) {
+#else
 	if ( ps->origin[0] - origin[0] > 44
 		|| ps->origin[0] - origin[0] < -50
 		|| ps->origin[1] - origin[1] > 36
 		|| ps->origin[1] - origin[1] < -36
 		|| ps->origin[2] - origin[2] > 36
 		|| ps->origin[2] - origin[2] < -36 ) {
+#endif
 		return qfalse;
 	}
 
@@ -1242,6 +1251,9 @@ void BG_EvaluateTrajectory( const trajectory_t *tr, int atTime, vec3_t result ) 
 		break;
 	case TR_SINE:
 		deltaTime = ( atTime - tr->trTime ) / (float) tr->trDuration;
+#if FEAT_ITEM_BOB_FIX
+		deltaTime = fmod( deltaTime, 1.0f );  // prevent float precision loss on long uptimes
+#endif
 		phase = sin( deltaTime * M_PI * 2 );
 		VectorMA( tr->trBase, phase, tr->trDelta, result );
 		break;
@@ -1338,6 +1350,9 @@ void BG_EvaluateTrajectoryDelta( const trajectory_t *tr, int atTime, vec3_t resu
 		break;
 	case TR_SINE:
 		deltaTime = ( atTime - tr->trTime ) / (float) tr->trDuration;
+#if FEAT_ITEM_BOB_FIX
+		deltaTime = fmod( deltaTime, 1.0f );  // prevent float precision loss on long uptimes
+#endif
 		phase = cos( deltaTime * M_PI * 2 );	// derivative of sin = cos
 		phase *= 0.5;
 		VectorScale( tr->trDelta, phase, result );

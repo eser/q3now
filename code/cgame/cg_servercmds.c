@@ -123,12 +123,16 @@ Format: bstats <clientId> <weaponBitmask> [<hits> <shots> <kills> <deaths> <dama
 */
 static void CG_ParseBStats( void ) {
 	int clientId, weaponMask, index, i;
+	cgWeaponStat_t prevStats[WP_NUM_WEAPONS];
 
 	index = 1;
 	clientId = atoi( CG_Argv( index++ ) );
 	weaponMask = atoi( CG_Argv( index++ ) );
 
 	if ( clientId < 0 || clientId >= MAX_CLIENTS ) return;
+
+	// save previous stats for delta computation (tempAcc)
+	memcpy( prevStats, cgs.weaponStats[clientId], sizeof( prevStats ) );
 
 	memset( cgs.weaponStats[clientId], 0, sizeof( cgs.weaponStats[clientId] ) );
 
@@ -139,6 +143,23 @@ static void CG_ParseBStats( void ) {
 			cgs.weaponStats[clientId][i].kills  = atoi( CG_Argv( index++ ) );
 			cgs.weaponStats[clientId][i].deaths = atoi( CG_Argv( index++ ) );
 			cgs.weaponStats[clientId][i].damage = atoi( CG_Argv( index++ ) );
+		}
+	}
+
+	// compute tempAcc: recent accuracy from hits/shots delta (local player only)
+	if ( clientId == cg.snap->ps.clientNum ) {
+		for ( i = WP_GAUNTLET; i < WP_NUM_WEAPONS; i++ ) {
+			int hitsDelta  = cgs.weaponStats[clientId][i].hits  - prevStats[i].hits;
+			int shotsDelta = cgs.weaponStats[clientId][i].shots - prevStats[i].shots;
+
+			if ( shotsDelta > 0 ) {
+				float acc = (float)hitsDelta / (float)shotsDelta;
+				CG_SHUDEventTempAccuracy( i, acc );
+#if FEAT_WIRED_UI
+				trap_WiredUI_PushEvent( WIRED_EVENT_TEMPACC,
+					va( "%d|%.3f", i, acc ) );
+#endif
+			}
 		}
 	}
 }

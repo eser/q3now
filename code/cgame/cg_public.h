@@ -208,6 +208,16 @@ typedef enum {
 #define WIRED_HUD_MAX_TEAMOVERLAY 32
 #define WIRED_HUD_MAX_BINDINGS    16
 #define WIRED_HUD_MAX_SCORES      64
+#define WIRED_LAG_SAMPLES          128
+
+// lagometer data (ring buffers from cgame — frame timing + snapshot health)
+typedef struct {
+	int     frameSamples[WIRED_LAG_SAMPLES];     // cg.time - cg.latestSnapshotTime per frame
+	int     frameCount;                           // frame ring buffer index
+	int     snapshotFlags[WIRED_LAG_SAMPLES];    // SNAPFLAG_RATE_DELAYED per snapshot
+	int     snapshotSamples[WIRED_LAG_SAMPLES];  // ping per snapshot, -1 = dropped
+	int     snapshotCount;                        // snapshot ring buffer index
+} wiredLagometer_t;
 
 // scoreboard entry (mirrors score_t from cg_local.h, pre-sorted by server)
 typedef struct {
@@ -343,6 +353,15 @@ typedef struct {
 	int               numBindings;
 	wiredHudBinding_t bindings[WIRED_HUD_MAX_BINDINGS];
 
+	// per-weapon stats for local player (for SBA accuracy elements)
+	struct {
+		int hits, shots, kills, deaths, damage;
+	} weaponStats[MAX_WEAPONS];
+
+	// lagometer (ring buffers for frame timing + snapshot health graph)
+	wiredLagometer_t lagometer;
+	qboolean    localServer;        // cgs.localServer — skip lagometer on local
+
 	qboolean    wiredUIActive;  // cg_wiredUI.integer — client uses this to enable/disable rendering
 	qboolean    valid;
 } wiredHudState_t;
@@ -357,6 +376,8 @@ void trap_WiredUI_PushHudState( wiredHudState_t *state );
 #define WIRED_EVENT_AWARD      4
 #define WIRED_EVENT_FRAG_RANK  5   // "frag_text|rank_text" combined atomic pair
 #define WIRED_EVENT_CENTERPRINT 6  // center print text (routed through message queue)
+#define WIRED_EVENT_OBITUARY   7  // "attacker|target|mod|unfrozen" kill event
+#define WIRED_EVENT_TEMPACC    8  // "weapon|accuracy" recent weapon accuracy
 
 void trap_WiredUI_PushEvent( int type, const char *data );
 

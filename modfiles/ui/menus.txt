@@ -18,6 +18,7 @@
 	loadMenu { "ui/specifyserver.menu" }
 	loadMenu { "ui/callvote.menu" }
 	loadMenu { "ui/connect.menu" }
+	loadMenu { "ui/password.menu" }
 	loadMenu { "ui/serverinfo.menu" }
 	loadMenu { "ui/addbots.menu" }
 	loadMenu { "ui/removebots.menu" }

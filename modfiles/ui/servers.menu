@@ -1,69 +1,181 @@
-// servers.menu - Wired UI server browser panel
+// servers.menu — Wired UI server browser
+// Layout follows Team Arena joinserver.menu
 
 #include "ui/menumacros.h"
 
 menuDef {
 	name "servers"
-	rect 40 30 560 420
-	fullScreen 0
+	fullScreen 1
+	rect 0 0 640 480
 	visible 1
 	style 1
-	backcolor 0.08 0.08 0.12 0.92
+	backcolor 0.06 0.06 0.1 1
 	focuscolor COLOR_FOCUS
 
 	onESC { close }
 	onOpen { refreshservers }
 
-	LABEL(0, 8, 560, 18, "Server Browser", 0.5, 1)
-	SEPARATOR(10, 28, 540)
+	// ── top bar: source + filters + map preview ──────────────────
 
-	// source + refresh
+	// source selector
 	itemDef {
 		type 12
 		text "Source:"
-		rect 10 36 180 16
-		textscale 0.28
+		rect 16 8 160 20
+		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "ui_netSource"
 		cvarFloatList { "Local" 0 "Internet" 1 "Favorites" 6 }
 		visible 1
 	}
 
+	// game type filter
+	itemDef {
+		type 12
+		text "Filter:"
+		rect 186 8 160 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "ui_browserGameType"
+		cvarFloatList { "All" 0 "Free For All" 1 "Tournament" 2 "King of the Hill" 4 "Last Man Standing" 5 "Team DM" 6 "CTF" 7 }
+		visible 1
+	}
+
+	// refresh buttons
 	itemDef {
 		type 1
-		text "Refresh"
-		rect 200 36 70 16
-		textalign 1
-		textscale 0.28
-		forecolor 1 0.75 0 1
+		text "Get New List"
+		rect 16 32 90 16
+		textscale 0.25
+		forecolor COLOR_AMBER
 		visible 1
 		action { refreshservers }
 	}
 
-	// column headers
-	LABEL_COLOR(14, 56, 220, 10, "Server", 0.22, 0, 0.5, 0.5, 0.5, 1)
-	LABEL_COLOR(234, 56, 90, 10, "Map", 0.22, 0, 0.5, 0.5, 0.5, 1)
-	LABEL_COLOR(334, 56, 50, 10, "Players", 0.22, 0, 0.5, 0.5, 0.5, 1)
-	LABEL_COLOR(394, 56, 40, 10, "Ping", 0.22, 0, 0.5, 0.5, 0.5, 1)
+	itemDef {
+		type 1
+		text "Refresh"
+		rect 116 32 60 16
+		textscale 0.25
+		forecolor COLOR_AMBER
+		visible 1
+		action { uiScript RefreshFilter }
+	}
 
-	// server list
+	// map preview (top-right, 128×96)
+	itemDef {
+		name "mappreview"
+		type 0
+		rect 496 4 128 96
+		backcolor 0.03 0.03 0.05 1
+		style 1
+		decoration
+		visible 1
+	}
+
+	SEPARATOR(16, 52, 470)
+
+	// ── column sort headers ──────────────────────────────────────
+	// Positions match listbox column offsets: list_x + 4 + col_offset
+
+	itemDef {
+		type 1
+		text "Server Name"
+		rect 20 56 226 16
+		textscale 0.24
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 0 }
+	}
+
+	itemDef {
+		type 1
+		text "Map"
+		rect 250 56 100 16
+		textscale 0.24
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 1 }
+	}
+
+	itemDef {
+		type 1
+		text "#Plyrs"
+		rect 354 56 50 16
+		textscale 0.24
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 2 }
+	}
+
+	itemDef {
+		type 1
+		text "Type"
+		rect 408 56 50 16
+		textscale 0.24
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 3 }
+	}
+
+	itemDef {
+		type 1
+		text "Ping"
+		rect 462 56 50 16
+		textscale 0.24
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 4 }
+	}
+
+	// ── server list ──────────────────────────────────────────────
+
 	itemDef {
 		name "serverlist"
 		type 6
-		rect 10 68 540 300
+		rect 16 74 608 350
 		textscale 0.25
 		forecolor 1 1 1 1
-		backcolor 0.06 0.06 0.1 0.8
+		backcolor 0.04 0.04 0.06 0.8
 		style 1
 		feeder 2
-		elementheight 14
-		columns 4 0 220 32 220 90 16 320 50 8 380 40 8
+		elementheight 16
+		columns 5 0 230 30 230 100 20 340 50 10 394 50 10 450 50 10
 		visible 1
 		doubleclick { joinserver }
 	}
 
-	SEPARATOR(10, 374, 540)
-	BUTTON(10, 384, 100, 20, "Connect", 0.35, joinserver)
-	BUTTON(120, 384, 100, 20, "Favorite", 0.35, exec "addFavorite")
-	BUTTON(440, 384, 100, 20, "Back", 0.35, close)
+	// ── status bar ───────────────────────────────────────────────
+
+	// server count / status (left)
+	itemDef {
+		type 0
+		rect 16 428 300 14
+		textscale 0.22
+		forecolor 0.5 0.5 0.5 1
+		cvar "ui_browserStatus"
+		cvarTest "ui_browserStatus"
+		decoration
+		visible 1
+	}
+
+	// MOTD (right)
+	itemDef {
+		type 0
+		rect 320 428 304 14
+		textscale 0.22
+		forecolor 0.5 0.5 0.5 1
+		cvar "cl_motdString"
+		decoration
+		visible 1
+	}
+
+	// ── bottom buttons ───────────────────────────────────────────
+	SEPARATOR(16, 446, 608)
+
+	BUTTON(16, 454, 60, 20, "Back", 0.35, close)
+	BUTTON(100, 454, 80, 20, "Specify", 0.35, open "specifyserver")
+	BUTTON(204, 454, 80, 20, "Favorite", 0.35, exec "addFavorite")
+	BUTTON(308, 454, 84, 20, "Server Info", 0.3, open "serverinfo")
+	BUTTON(560, 454, 64, 20, "Join", 0.35, joinserver)
 }

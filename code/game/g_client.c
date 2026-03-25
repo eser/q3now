@@ -91,8 +91,11 @@ qboolean SpotWouldTelefrag( gentity_t *spot ) {
 
 	for (i=0 ; i<num ; i++) {
 		hit = &g_entities[touch[i]];
-		//if ( hit->client && hit->client->ps.stats[STAT_HEALTH] > 0 ) {
+#if FEAT_TELEFRAG_FIX
+		if ( hit->client && hit->client->ps.stats[STAT_HEALTH] > 0 ) {
+#else
 		if ( hit->client) {
+#endif
 			return qtrue;
 		}
 
