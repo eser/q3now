@@ -2662,6 +2662,10 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		return;
 	}
 */
+#if FEAT_WIRED_UI
+	// Wired UI: push game state to client each frame for HUD rendering
+	CG_WiredHudPushState();
+#endif
 	// SuperHUD: if a config is loaded AND parsed successfully, use it
 	if ( cg_hudFile.string[0] && CG_SHUDIsLoaded() ) {
 		CG_SHUDRoutine();

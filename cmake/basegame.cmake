@@ -90,6 +90,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_weapons.c
     ${SOURCE_DIR}/cgame/cg_znudge.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_netstats.c
+    ${SOURCE_DIR}/cgame/cg_wired_bridge.c
 )
 
 set(CGAME_BINARY_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.c)

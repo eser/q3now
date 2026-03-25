@@ -186,9 +186,77 @@ typedef enum {
 	CG_R_ADDRAILTRAILPARAMS,
 	CG_IS_RECORDING_DEMO,
 	CG_CVAR_SETDESCRIPTION,
+	// ── Wired UI: HUD state bridge (Phase 3) ────────────────────────
+	CG_WIREDUI_PUSH_HUD_STATE = 200,
+	// void trap_WiredUI_PushHudState( wiredHudState_t *state )
+
 	CG_TRAP_GETVALUE = COM_TRAP_GETVALUE,
 
 } cgameImport_t;
+
+// ── Wired UI: HUD state bridge struct ────────────────────────────────
+// cgame fills this each frame and pushes to client via CG_WIREDUI_PUSH_HUD_STATE.
+// Client-side HUD element code reads from this instead of cg.*/cgs.*.
+
+#if FEAT_WIRED_UI
+
+#define WIRED_HUD_MAX_CLIENTS      64
+#define WIRED_HUD_MAX_REWARDSTACK  10
+
+typedef struct {
+	// player state
+	int         stats[MAX_STATS];
+	int         persistant[MAX_PERSISTANT];
+	int         powerups[MAX_POWERUPS];
+	int         ammo[MAX_WEAPONS];
+	int         weapon, weaponstate;
+	int         clientNum, ping;
+	float       xyspeed;
+	int         health, armor;              // convenience copies
+
+	// timing
+	int         time, frametime, realtime;
+
+	// match state
+	int         gametype;
+	int         scores1, scores2;
+	int         fraglimit, capturelimit, timelimit;
+	int         maxclients;
+	int         warmup, levelStartTime;
+	qboolean    showScores, demoPlayback, intermission;
+
+	// team
+	int         ourTeam;
+	int         blueflag, redflag;
+
+	// crosshair
+	int         crosshairClientNum;
+
+	// vote
+	int         voteTime, voteYes, voteNo;
+	qboolean    voteModified;
+	char        voteString[256];
+
+	// client info
+	struct {
+		char        name[MAX_QPATH];
+		int         team, health, armor, weapon, location;
+		qboolean    infoValid;
+	} clients[WIRED_HUD_MAX_CLIENTS];
+
+	// events
+	int         itemPickup, itemPickupTime;
+
+	// media handles
+	qhandle_t   whiteShader;
+	qhandle_t   weaponIcons[MAX_WEAPONS];
+
+	qboolean    valid;
+} wiredHudState_t;
+
+void trap_WiredUI_PushHudState( wiredHudState_t *state );
+
+#endif // FEAT_WIRED_UI
 
 
 /*
