@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-// OSP2-BE text rendering types
+// Modern text rendering types
 #define OSP_TEXT_CMD_MAX 2048
 
 typedef enum {

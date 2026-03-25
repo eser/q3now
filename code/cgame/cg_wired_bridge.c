@@ -256,6 +256,40 @@ void CG_WiredHudPushState( void ) {
 		state.numBindings = b;
 	}
 
+	// ── per-weapon stats for local player ────────────────────────────
+	{
+		int clientNum = cg.snap->ps.clientNum;
+		if ( clientNum >= 0 && clientNum < MAX_CLIENTS ) {
+			for ( i = 0; i < WP_NUM_WEAPONS && i < MAX_WEAPONS; i++ ) {
+				state.weaponStats[i].hits   = cgs.weaponStats[clientNum][i].hits;
+				state.weaponStats[i].shots  = cgs.weaponStats[clientNum][i].shots;
+				state.weaponStats[i].kills  = cgs.weaponStats[clientNum][i].kills;
+				state.weaponStats[i].deaths = cgs.weaponStats[clientNum][i].deaths;
+				state.weaponStats[i].damage = cgs.weaponStats[clientNum][i].damage;
+			}
+		}
+	}
+
+	// ── lagometer ────────────────────────────────────────────────────
+	{
+		// lagometer_t is a static in cg_draw.c — access via extern
+		typedef struct {
+			int frameSamples[WIRED_LAG_SAMPLES];
+			int frameCount;
+			int snapshotFlags[WIRED_LAG_SAMPLES];
+			int snapshotSamples[WIRED_LAG_SAMPLES];
+			int snapshotCount;
+		} lagometer_t;
+		extern lagometer_t lagometer;
+
+		Com_Memcpy( state.lagometer.frameSamples, lagometer.frameSamples, sizeof( state.lagometer.frameSamples ) );
+		state.lagometer.frameCount = lagometer.frameCount;
+		Com_Memcpy( state.lagometer.snapshotFlags, lagometer.snapshotFlags, sizeof( state.lagometer.snapshotFlags ) );
+		Com_Memcpy( state.lagometer.snapshotSamples, lagometer.snapshotSamples, sizeof( state.lagometer.snapshotSamples ) );
+		state.lagometer.snapshotCount = lagometer.snapshotCount;
+	}
+	state.localServer = cgs.localServer;
+
 	state.wiredUIActive = ( cg_wiredUI.integer != 0 );
 	state.valid = qtrue;
 

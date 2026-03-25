@@ -33,9 +33,18 @@
 #define FEAT_DESTROYABLE_MISSILES         0   // 11B shoot down rockets/grenades/plasma
 #define FEAT_DROP_ITEMS                   0   // 11D /drop command for items
 #define FEAT_FREEZETAG                    0   // 7A  freeze on death, thaw by proximity
+#define FEAT_ITEMSIZES                    0   // dynamic item pickup bounding box via ITEM_PICKUP_SIZE
 #define FEAT_GRAPPLE_DAMAGE               0   // 5D  hook deals damage while pulling
 #define FEAT_PROJECTILE_BOUNCE            0   // 10H projectile reflection off shields
 #define FEAT_TELEPORTING_MISSILES         0   // 2F  rockets/plasma through teleporters
+
+// ── bug fixes (CPMA-sourced id bug fixes) ────────────────────────────────
+#define FEAT_ITEM_BOB_FIX                 0   // fix: item bobbing jitter after ~2 days of server uptime
+#define FEAT_GRENADE_REST_FIX             0   // fix: grenades snap to axis-aligned angles when resting
+#define FEAT_RAIL_BROADCAST               0   // fix: rail trails not visible to players near shooter
+#define FEAT_CORPSE_MOVER_FIX             0   // fix: corpses block movers (doors, lifts, plats)
+#define FEAT_TELEFRAG_FIX                 0   // fix: dead players trigger false telefrag on spawn points
+#define FEAT_BOUNCE_SOUND_LIMIT           0   // fix: unlimited grenade bounce sounds on movers
 
 // ── competitive (testing) ───────────────────────────────────────────────
 #define FEAT_1FCTF                        0   // 10E one-flag CTF mode
@@ -60,6 +69,7 @@
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
 #define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
+#define FEAT_MOVEMENT_KEYS                0   // show followed player's movement keys (spectator HUD)
 #define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + SuperHUD)
 
 // ── engine internals (testing) ────────────────────────────────────────

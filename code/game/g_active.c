@@ -234,7 +234,11 @@ void	G_TouchTriggers( gentity_t *ent ) {
 	gentity_t	*hit;
 	trace_t		trace;
 	vec3_t		mins, maxs;
+#if FEAT_ITEMSIZES
+	vec3_t		range = { ITEM_PICKUP_SIZE + 14, ITEM_PICKUP_SIZE + 4, ITEM_PICKUP_SIZE + 16 };
+#else
 	static vec3_t	range = { 40, 40, 52 };
+#endif
 
 	if ( !ent->client ) {
 		return;
@@ -1061,6 +1065,23 @@ void SpectatorClientEndFrame( gentity_t *ent ) {
 				ent->client->ps = cl->ps;
 				ent->client->ps.pm_flags |= PMF_FOLLOW;
 				ent->client->ps.eFlags = flags;
+#if FEAT_MOVEMENT_KEYS
+				{
+					int keys = 0;
+					usercmd_t *cmd = &cl->pers.cmd;
+					if ( cmd->forwardmove > 0 )            keys |= KEYS_FORWARD;
+					if ( cmd->forwardmove < 0 )            keys |= KEYS_BACK;
+					if ( cmd->rightmove < 0 )              keys |= KEYS_LEFT;
+					if ( cmd->rightmove > 0 )              keys |= KEYS_RIGHT;
+					if ( cmd->upmove > 0 )                 keys |= KEYS_JUMP;
+					if ( cmd->upmove < 0 )                 keys |= KEYS_CROUCH;
+					if ( cmd->buttons & BUTTON_ATTACK )    keys |= KEYS_ATTACK;
+					if ( cmd->buttons & BUTTON_USE_HOLDABLE ) keys |= KEYS_USE;
+					if ( cmd->buttons & BUTTON_WALKING )   keys |= KEYS_WALK;
+					if ( cmd->buttons & BUTTON_GESTURE )   keys |= KEYS_GESTURE;
+					ent->client->ps.stats[STAT_KEYS] = keys;
+				}
+#endif
 				return;
 			}
 		}

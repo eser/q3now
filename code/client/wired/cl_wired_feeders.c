@@ -21,6 +21,9 @@ Feeders implemented:
 
 #if FEAT_WIRED_UI
 
+// forward declarations
+static int WiredFeeder_ServerSortCompare( const void *a, const void *b );
+
 // ── server browser feeder ─────────────────────────────────────────────
 // Data source: cls.globalServers[], cls.localServers[], cls.favoriteServers[]
 // Controlled by ui_netSource cvar (0=local, 1-5=internet masters, 6=favorites)
@@ -56,16 +59,71 @@ static serverInfo_t *WiredFeeder_GetServerPtr( int index ) {
 	return &servers[index];
 }
 
+static int wired_serverLastRawCount = 0;  // track raw count for rebuild detection
+
+static qboolean WiredFeeder_ServerPassesFilter( serverInfo_t *s ) {
+	int filterGameType = Cvar_VariableIntegerValue( "ui_browserGameType" );
+	int showFull      = Cvar_VariableIntegerValue( "ui_browserShowFull" );
+	int showEmpty     = Cvar_VariableIntegerValue( "ui_browserShowEmpty" );
+	int maxPing       = Cvar_VariableIntegerValue( "ui_browserMaxPing" );
+
+	// game type filter (0 = all)
+	if ( filterGameType > 0 && s->gameType != ( filterGameType - 1 ) ) return qfalse;
+	// full server filter
+	if ( !showFull && s->clients >= s->maxClients && s->maxClients > 0 ) return qfalse;
+	// empty server filter
+	if ( !showEmpty && s->clients == 0 ) return qfalse;
+	// ping filter (0 = no limit)
+	if ( maxPing > 0 && s->ping > maxPing ) return qfalse;
+
+	return qtrue;
+}
+
+void WiredFeeder_RebuildServerDisplayList( void ) {
+	serverInfo_t *servers;
+	int count, i;
+	WiredFeeder_GetServerList( &servers, &count );
+
+	wired_serverDisplayCount = 0;
+	for ( i = 0; i < count && wired_serverDisplayCount < MAX_DISPLAY_SERVERS; i++ ) {
+		if ( WiredFeeder_ServerPassesFilter( &servers[i] ) ) {
+			wired_serverDisplayList[wired_serverDisplayCount++] = i;
+		}
+	}
+
+	// apply current sort
+	if ( wired_serverDisplayCount > 1 ) {
+		qsort( wired_serverDisplayList, wired_serverDisplayCount, sizeof( int ), WiredFeeder_ServerSortCompare );
+	}
+
+	wired_serverLastRawCount = count;
+
+	// update status cvar for .menu display
+	Cvar_Set( "ui_browserStatus", va( "%d servers (%d total)", wired_serverDisplayCount, count ) );
+}
+
 static int WiredFeeder_ServerCount( int feederID ) {
 	serverInfo_t *servers;
 	int count;
 	WiredFeeder_GetServerList( &servers, &count );
-	return count;
+
+	// rebuild display list when server count changes (new pings arrived)
+	if ( count != wired_serverLastRawCount ) {
+		WiredFeeder_RebuildServerDisplayList();
+	}
+
+	return wired_serverDisplayCount;
 }
 
 static const char *WiredFeeder_ServerItemText( int feederID, int index, int column ) {
 	static char buf[256];
-	serverInfo_t *s = WiredFeeder_GetServerPtr( index );
+	int realIndex;
+	serverInfo_t *s;
+
+	// map display index → real server index via sorted display list
+	if ( index < 0 || index >= wired_serverDisplayCount ) return "";
+	realIndex = wired_serverDisplayList[index];
+	s = WiredFeeder_GetServerPtr( realIndex );
 
 	if ( !s ) return "";
 
@@ -76,22 +134,100 @@ static const char *WiredFeeder_ServerItemText( int feederID, int index, int colu
 			Com_sprintf( buf, sizeof(buf), "%d/%d", s->clients, s->maxClients );
 			return buf;
 		case 3:
-			Com_sprintf( buf, sizeof(buf), "%d", s->ping );
+			// game type as short string
+			switch ( s->gameType ) {
+				case 0:  return "FFA";
+				case 1:  return "1v1";
+				case 3:  return "KotH";
+				case 4:  return "LMS";
+				case 5:  return "TDM";
+				case 6:  return "CTF";
+				default: return "?";
+			}
+		case 4:
+			// color-coded ping: green <200, yellow <400, red >=400
+			if ( s->ping < 200 )
+				Com_sprintf( buf, sizeof(buf), "^2%d", s->ping );
+			else if ( s->ping < 400 )
+				Com_sprintf( buf, sizeof(buf), "^3%d", s->ping );
+			else
+				Com_sprintf( buf, sizeof(buf), "^1%d", s->ping );
 			return buf;
-		case 4: return s->game[0] ? s->game : "baseq3";
 		default: return "";
 	}
 }
 
 static int wired_selectedServer = -1;
 
+// ── server sort ──────────────────────────────────────────────────────
+// Sort columns use SORT_HOST..SORT_PUNKBUSTER from ui_public.h
+
+static int wired_serverSortKey = SORT_PING;
+static int wired_serverSortDir = 0;  // 0=ascending, 1=descending
+
+static int WiredFeeder_ServerSortCompare( const void *a, const void *b ) {
+	serverInfo_t *servers;
+	int count;
+	int ia = *(const int *)a;
+	int ib = *(const int *)b;
+	serverInfo_t *sa, *sb;
+	int result;
+
+	WiredFeeder_GetServerList( &servers, &count );
+	if ( ia < 0 || ia >= count || ib < 0 || ib >= count ) return 0;
+	sa = &servers[ia];
+	sb = &servers[ib];
+
+	switch ( wired_serverSortKey ) {
+		case SORT_HOST:    result = Q_stricmp( sa->hostName, sb->hostName ); break;
+		case SORT_MAP:     result = Q_stricmp( sa->mapName, sb->mapName ); break;
+		case SORT_CLIENTS: result = sa->clients - sb->clients; break;
+		case SORT_PING:    result = sa->ping - sb->ping; break;
+		case SORT_GAME:    result = sa->gameType - sb->gameType; break;
+		default:           result = 0; break;
+	}
+
+	return wired_serverSortDir ? -result : result;
+}
+
+void WiredFeeder_SortServers( int column ) {
+	serverInfo_t *servers;
+	int count, i;
+
+	// toggle direction if clicking same column
+	if ( column == wired_serverSortKey ) {
+		wired_serverSortDir = !wired_serverSortDir;
+	} else {
+		wired_serverSortKey = column;
+		wired_serverSortDir = 0;
+	}
+
+	WiredFeeder_GetServerList( &servers, &count );
+
+	// build display list
+	wired_serverDisplayCount = 0;
+	for ( i = 0; i < count && i < MAX_DISPLAY_SERVERS; i++ ) {
+		wired_serverDisplayList[wired_serverDisplayCount++] = i;
+	}
+
+	// sort display list
+	if ( wired_serverDisplayCount > 1 ) {
+		qsort( wired_serverDisplayList, wired_serverDisplayCount, sizeof( int ), WiredFeeder_ServerSortCompare );
+	}
+}
+
+// map sort — defined after map data declarations (see below)
+
 static void WiredFeeder_ServerSelection( int feederID, int index ) {
-	serverInfo_t *s = WiredFeeder_GetServerPtr( index );
-	wired_selectedServer = index;
+	int realIndex = ( index >= 0 && index < wired_serverDisplayCount ) ? wired_serverDisplayList[index] : index;
+	serverInfo_t *s = WiredFeeder_GetServerPtr( realIndex );
+	wired_selectedServer = realIndex;
 	if ( s ) {
 		// store address in cvar so connect action can use it
 		Cvar_Set( "ui_selectedServerAddr", NET_AdrToStringwPort( &s->adr ) );
 		Cvar_Set( "ui_selectedServerName", s->hostName );
+		// update map preview levelshot
+		Cvar_Set( "ui_mapLevelshot", va( "levelshots/%s", s->mapName ) );
 	}
 }
 
@@ -409,6 +545,23 @@ void WiredFeeder_LoadMaps( void ) {
 		wired_filteredMaps[i] = i;
 	}
 
+	// select first map by default and set levelshot
+	if ( wired_mapCount > 0 ) {
+		Cvar_Set( "ui_selectedMap", wired_maps[0].mapLoadName );
+		Cvar_Set( "ui_mapLevelshot", va( "levelshots/%s", wired_maps[0].mapLoadName ) );
+		Cvar_Set( "ui_currentNetMap", "0" );
+	}
+
+	// ensure cvars are initialized
+	if ( !Cvar_VariableString( "ui_netGameType" )[0] ) {
+		Cvar_Set( "ui_netGameType", "0" );
+	}
+	if ( !Cvar_VariableString( "g_maprotation" )[0] ) {
+		Cvar_Set( "g_maprotation", "" );
+	}
+	Cvar_Set( "ui_mapPoolStatus", "Single map (no rotation)" );
+	Cvar_Set( "ui_mapPoolAction", "Add to Pool" );
+
 	Com_Printf( "WiredUI: %d maps loaded, %d arena files parsed\n", wired_mapCount, arenaCount );
 }
 
@@ -425,8 +578,15 @@ static void WiredFeeder_FilterMaps( void ) {
 	}
 }
 
+static int wired_lastFilterGameType = -1;
+
 static int WiredFeeder_MapCount( int feederID ) {
-	WiredFeeder_FilterMaps();
+	// only re-filter when game type changes (preserves sort order)
+	int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+	if ( gt != wired_lastFilterGameType ) {
+		WiredFeeder_FilterMaps();
+		wired_lastFilterGameType = gt;
+	}
 	return wired_filteredMapCount;
 }
 
@@ -436,14 +596,36 @@ static const char *WiredFeeder_MapItemText( int feederID, int index, int column 
 	if ( index < 0 || index >= wired_filteredMapCount ) return "";
 	mapIdx = wired_filteredMaps[index];
 	switch ( column ) {
-		case 0:  return wired_maps[mapIdx].mapLoadName;
-		case 1:
-			// show longname if different from shortname, otherwise just shortname
+		case 0: {
+			// pool queue number — check position in g_maprotation
+			char rotation[1024];
+			char token[MAX_QPATH];
+			const char *p;
+			int pos = 0;
+
+			Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+			p = rotation;
+			while ( *p ) {
+				int ti = 0;
+				while ( *p == ' ' ) p++;
+				if ( !*p ) break;
+				while ( *p && *p != ' ' && ti < (int)sizeof(token) - 1 ) token[ti++] = *p++;
+				token[ti] = '\0';
+				pos++;
+				if ( !Q_stricmp( token, wired_maps[mapIdx].mapLoadName ) ) {
+					Com_sprintf( buf, sizeof(buf), "^2%d", pos );
+					return buf;
+				}
+			}
+			return "";
+		}
+		case 1:  return wired_maps[mapIdx].mapLoadName;
+		case 2:
 			if ( Q_stricmp( wired_maps[mapIdx].mapName, wired_maps[mapIdx].mapLoadName ) != 0 ) {
 				return wired_maps[mapIdx].mapName;
 			}
 			return "";
-		default: return wired_maps[mapIdx].mapLoadName;
+		default: return "";
 	}
 }
 
@@ -455,6 +637,47 @@ static void WiredFeeder_MapSelection( int feederID, int index ) {
 		wired_selectedMap = mapIdx;
 		Cvar_Set( "ui_selectedMap", wired_maps[mapIdx].mapLoadName );
 		Cvar_Set( "ui_currentNetMap", va( "%d", mapIdx ) );
+
+		// set levelshot path for map preview (menu reads this cvar)
+		Cvar_Set( "ui_mapLevelshot", va( "levelshots/%s", wired_maps[mapIdx].mapLoadName ) );
+
+		// update pool button state
+		{
+			extern void WiredUI_UpdateMapPoolButton( void );
+			WiredUI_UpdateMapPoolButton();
+		}
+	}
+}
+
+// ── map sort (by column) ─────────────────────────────────────────────
+
+static int wired_mapSortKey = 0;   // 0=name, 1=longname
+static int wired_mapSortDir = 0;
+
+static int WiredFeeder_MapSortByColumn( const void *a, const void *b ) {
+	int ia = *(const int *)a;
+	int ib = *(const int *)b;
+	int result;
+
+	switch ( wired_mapSortKey ) {
+		case 1:  result = Q_stricmp( wired_maps[ia].mapLoadName, wired_maps[ib].mapLoadName ); break;
+		case 2:  result = Q_stricmp( wired_maps[ia].mapName, wired_maps[ib].mapName ); break;
+		default: result = Q_stricmp( wired_maps[ia].mapLoadName, wired_maps[ib].mapLoadName ); break;
+	}
+
+	return wired_mapSortDir ? -result : result;
+}
+
+void WiredFeeder_SortMaps( int column ) {
+	if ( column == wired_mapSortKey ) {
+		wired_mapSortDir = !wired_mapSortDir;
+	} else {
+		wired_mapSortKey = column;
+		wired_mapSortDir = 0;
+	}
+
+	if ( wired_filteredMapCount > 1 ) {
+		qsort( wired_filteredMaps, wired_filteredMapCount, sizeof( int ), WiredFeeder_MapSortByColumn );
 	}
 }
 

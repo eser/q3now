@@ -330,6 +330,7 @@ typedef struct bot_state_s
 	vec3_t			strafejump_angles;		// ideal view angles for strafejump
 	qboolean		strafejump_active;		// currently strafejumping
 	int				strafejump_side;		// alternating left(-1) / right(1)
+	qboolean		strafejump_landed;		// qtrue after side flip on this landing
 
 	// ── item respawn timing ───────────────────────────────────────────
 	bot_itemtime_t	timed_items[MAX_TIMED_ITEMS];

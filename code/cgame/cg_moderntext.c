@@ -1,8 +1,7 @@
 /*
 ===========================================================================
-cg_moderntext.c -- OSP2-BE font system and text rendering for SuperHUD
+cg_moderntext.c -- Modern font system and text rendering for SuperHUD
 
-Ported from OSP2-BE cg_drawtools.c (lines 547-3483).
 Provides: font loading, text compilation, CG_ModernDrawString,
 CG_ModernDrawStringNew, CG_Hex16GetColor.
 

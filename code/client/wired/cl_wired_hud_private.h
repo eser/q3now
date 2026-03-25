@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-// OSP2-BE text rendering types
+// Modern text rendering types
 #define OSP_TEXT_CMD_MAX 2048
 
 typedef enum {
@@ -469,6 +469,34 @@ superhudConfigParseCommand_t CG_SHUDFileInfoGetCommandItem(configFileInfo_t* cfi
 void* CG_SHUDElementFPSCreate(const superhudConfig_t* config);
 void CG_SHUDElementFPSRoutine(void* context);
 void CG_SHUDElementFPSDestroy(void* context);
+
+#if FEAT_MOVEMENT_KEYS
+// shared routine/destroy for all key elements
+void CG_SHUDElementKeyRoutine(void* context);
+void CG_SHUDElementKeyDestroy(void* context);
+// keydown factories
+void* CG_SHUDElementKeyDownForwardCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownBackCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownLeftCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownRightCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownJumpCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownCrouchCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownAttackCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownUseCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownWalkCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyDownGestureCreate(const superhudConfig_t* c);
+// keyup factories
+void* CG_SHUDElementKeyUpForwardCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpBackCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpLeftCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpRightCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpJumpCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpCrouchCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpAttackCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpUseCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpWalkCreate(const superhudConfig_t* c);
+void* CG_SHUDElementKeyUpGestureCreate(const superhudConfig_t* c);
+#endif
 
 #if FEAT_UNLAGGED
 void* CG_SHUDElementNetStatsCreate(const superhudConfig_t* config);

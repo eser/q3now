@@ -1,82 +1,203 @@
-// startserver.menu - Wired UI create server panel
+// startserver.menu — Wired UI create server panel
+// Layout: TA-style — levelshot over map list (left), settings (right)
 
 #include "ui/menumacros.h"
 
 menuDef {
 	name "startserver"
-	rect 40 30 560 420
-	fullScreen 0
+	fullScreen 1
+	rect 0 0 640 480
 	visible 1
 	style 1
-	backcolor 0.08 0.08 0.12 0.92
+	backcolor 0.06 0.06 0.1 1
 	focuscolor COLOR_FOCUS
 
 	onESC { close }
+	onOpen { UpdateGameType }
 
-	LABEL(0, 8, 560, 18, "Create Server", 0.5, 1)
-	SEPARATOR(10, 28, 540)
-
-	// game type
+	// ── header bar ───────────────────────────────────────────────
 	itemDef {
 		type 12
-		text "Game Type:"
-		rect 10 36 260 18
+		text "Type:"
+		rect 16 8 280 20
 		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "ui_netGameType"
-		cvarFloatList { "Free For All" 0 "Tournament" 1 "Team DM" 5 "CTF" 6 }
+		cvarFloatList { "Free For All" 0 "Tournament" 1 "King of the Hill" 3 "Last Man Standing" 4 "Team DM" 5 "CTF" 6 }
+		visible 1
+		action { UpdateGameType }
+	}
+
+	itemDef {
+		type 12
+		text "Bots:"
+		rect 310 8 130 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "ui_botCount"
+		cvarFloatList { "None" 0 "1" 1 "2" 2 "3" 3 "4" 4 "5" 5 "6" 6 "7" 7 }
 		visible 1
 	}
 
-	// map list column headers
-	LABEL_COLOR(14, 60, 120, 10, "Map", 0.22, 0, 0.5, 0.5, 0.5, 1)
-	LABEL_COLOR(134, 60, 120, 10, "Name", 0.22, 0, 0.5, 0.5, 0.5, 1)
+	itemDef {
+		type 12
+		text "Skill:"
+		rect 450 8 174 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "g_spSkill"
+		cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 }
+		visible 1
+	}
 
-	// map list (left side) — two columns: shortname + longname
+	SEPARATOR(16, 32, 608)
+
+	// ── left column: levelshot + map list ─────────────────────────
+
+	// map levelshot preview
+	itemDef {
+		name "mappreview"
+		type 0
+		rect 16 38 380 170
+		backcolor 0.03 0.03 0.05 1
+		style 1
+		decoration
+		visible 1
+	}
+
+	// sortable column headers
+	// col 0 = queue # (24px), col 1 = map name (170px), col 2 = long name (rest)
+	itemDef {
+		type 1
+		text "#"
+		rect 20 212 20 16
+		textscale 0.22
+		forecolor 0.6 0.6 0.6 1
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		type 1
+		text "Map"
+		rect 44 212 166 16
+		textscale 0.24
+		forecolor 0.6 0.6 0.6 1
+		visible 1
+		action { MapSort 1 }
+	}
+
+	itemDef {
+		type 1
+		text "Name"
+		rect 214 212 176 16
+		textscale 0.24
+		forecolor 0.6 0.6 0.6 1
+		visible 1
+		action { MapSort 2 }
+	}
+
+	// map listbox — 3 columns: pool#, mapname, longname
+	// click toggles map in/out of pool
 	itemDef {
 		name "maplist"
 		type 6
-		rect 10 72 260 288
+		rect 16 230 380 186
 		textscale 0.25
 		forecolor 1 1 1 1
-		backcolor 0.06 0.06 0.1 0.8
+		backcolor 0.04 0.04 0.06 0.8
 		style 1
 		feeder 4
 		elementheight 14
-		columns 2 0 120 20 120 134 20
+		columns 3 0 24 0 24 170 0 194 170 0
+		visible 1
+		doubleClick { ToggleMapPool }
+	}
+
+	// map pool toggle — text reads from ui_mapPoolAction cvar
+	itemDef {
+		type 1
+		text "Add to Pool"
+		rect 16 420 120 16
+		textscale 0.28
+		forecolor COLOR_AMBER
+		visible 1
+		cvarTest "ui_mapPoolAction"
+		showCvar { "Add to Pool" }
+		action { ToggleMapPool }
+	}
+	itemDef {
+		type 1
+		text "Remove from Pool"
+		rect 16 420 130 16
+		textscale 0.28
+		forecolor COLOR_RED
+		visible 1
+		cvarTest "ui_mapPoolAction"
+		showCvar { "Remove from Pool" }
+		action { ToggleMapPool }
+	}
+
+	itemDef {
+		type 1
+		text "Clear Pool"
+		rect 160 420 100 16
+		textscale 0.28
+		forecolor COLOR_GREY
+		visible 1
+		action { ClearMapPool }
+	}
+
+	// pool status
+	itemDef {
+		type 0
+		rect 186 420 200 16
+		textscale 0.22
+		forecolor 0.5 0.8 0.5 1
+		cvar "ui_mapPoolStatus"
+		decoration
 		visible 1
 	}
 
-	// server settings (right side)
-	SUBWINDOW(280, 36, 270, 14, "Settings")
+	// ── right column: settings ───────────────────────────────────
+
+	itemDef {
+		type 0
+		text "Server Settings"
+		rect 412 38 212 14
+		textscale 0.24
+		forecolor 0.5 0.5 0.5 1
+		decoration
+		visible 1
+	}
 
 	itemDef {
 		type 4
 		text "Hostname:"
-		rect 280 56 270 18
-		textscale 0.28
+		rect 412 56 212 20
+		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "sv_hostname"
-		maxChars 32
+		maxChars 14
 		visible 1
 	}
 
 	itemDef {
 		type 12
 		text "Max Players:"
-		rect 280 78 270 18
-		textscale 0.28
+		rect 412 80 212 20
+		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "sv_maxclients"
-		cvarFloatList { "4" 4 "8" 8 "12" 12 "16" 16 "24" 24 "32" 32 }
+		cvarFloatList { "2" 2 "4" 4 "8" 8 "12" 12 "16" 16 "32" 32 }
 		visible 1
 	}
 
 	itemDef {
 		type 12
 		text "Frag Limit:"
-		rect 280 100 270 18
-		textscale 0.28
+		rect 412 104 212 20
+		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "fraglimit"
 		cvarFloatList { "None" 0 "10" 10 "20" 20 "30" 30 "50" 50 "100" 100 }
@@ -86,18 +207,134 @@ menuDef {
 	itemDef {
 		type 12
 		text "Time Limit:"
-		rect 280 122 270 18
-		textscale 0.28
+		rect 412 128 212 20
+		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "timelimit"
-		cvarFloatList { "None" 0 "5" 5 "10" 10 "15" 15 "20" 20 }
+		cvarFloatList { "None" 0 "5" 5 "10" 10 "15" 15 "20" 20 "30" 30 }
 		visible 1
 	}
 
-	YESNO(280, 144, 270, 18, "Pure Server:", 0.28, "sv_pure")
-	YESNO(280, 166, 270, 18, "Auto Download:", 0.28, "sv_allowDownload")
+	// pure + warmup (always visible)
+	itemDef {
+		type 11
+		text "Pure:"
+		rect 412 152 106 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "sv_pure"
+		visible 1
+	}
+	itemDef {
+		type 11
+		text "Warmup:"
+		rect 518 152 106 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "g_doWarmup"
+		visible 1
+	}
 
-	SEPARATOR(10, 370, 540)
-	BUTTON(180, 382, 100, 20, "Start", 0.4, startserver)
-	BUTTON(300, 382, 80, 20, "Back", 0.35, close)
+	itemDef {
+		type 12
+		text "Dedicated:"
+		rect 412 176 212 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "ui_dedicated"
+		cvarFloatList { "No" 0 "LAN" 1 "Internet" 2 }
+		visible 1
+	}
+
+	itemDef {
+		type 11
+		text "Auto Download:"
+		rect 412 200 212 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "sv_allowDownload"
+		visible 1
+	}
+
+	// capture limit (CTF only)
+	itemDef {
+		type 12
+		text "Cap Limit:"
+		rect 412 224 212 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "capturelimit"
+		cvarFloatList { "None" 0 "3" 3 "5" 5 "8" 8 "10" 10 }
+		cvarTest "ui_netGameType"
+		showCvar { "6" }
+		visible 1
+	}
+
+	// ── team settings (team modes only: 5=TDM, 6=CTF) ───────────
+	itemDef {
+		type 0
+		text "Team Settings"
+		rect 412 248 212 14
+		textscale 0.24
+		forecolor 0.5 0.5 0.5 1
+		decoration
+		cvarTest "ui_netGameType"
+		showCvar { "5" "6" }
+		visible 1
+	}
+
+	itemDef {
+		type 11
+		text "Friendly Fire:"
+		rect 412 266 106 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "g_friendlyfire"
+		cvarTest "ui_netGameType"
+		showCvar { "5" "6" }
+		visible 1
+	}
+
+	itemDef {
+		type 11
+		text "Balance:"
+		rect 518 266 106 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "g_teamForceBalance"
+		cvarTest "ui_netGameType"
+		showCvar { "5" "6" }
+		visible 1
+	}
+
+	itemDef {
+		type 11
+		text "Allow Vote:"
+		rect 412 290 212 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "g_allowvote"
+		cvarTest "ui_netGameType"
+		showCvar { "5" "6" }
+		visible 1
+	}
+
+	itemDef {
+		type 12
+		text "My Team:"
+		rect 412 314 212 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "g_localTeamPref"
+		cvarFloatList { "Auto" 0 "Red" 1 "Blue" 2 }
+		cvarTest "ui_netGameType"
+		showCvar { "5" "6" }
+		visible 1
+	}
+
+	// ── bottom buttons ───────────────────────────────────────────
+	SEPARATOR(16, 448, 608)
+	BUTTON(16, 456, 80, 20, "Back", 0.35, close)
+	BUTTON(280, 456, 80, 20, "Add Bots", 0.35, open "addbots")
+	BUTTON(544, 456, 80, 20, "Start", 0.35, uiScript StartServer)
 }

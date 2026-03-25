@@ -26,12 +26,6 @@ int		cpm_radiusdamagefix = 0;
 // Respawn delay
 float	cpm_clientrespawndelay = 1700;
 
-// Hit tones
-int		cpm_hittones = 0;
-
-// Item size
-int		cpm_itemsize = 36;
-
 // Lava damage
 float	cpm_lavadamage = 30;
 float	cpm_slimedamage = 10;
@@ -67,12 +61,6 @@ void CPM_UpdateSettings(int gametype)
 	// Respawn delay
 	cpm_clientrespawndelay = 1700;
 
-	// Hit tones
-	cpm_hittones = 0;
-
-	// Item size
-	cpm_itemsize = 36;
-
 	// Lava damage
 	cpm_lavadamage = 30;
 	cpm_slimedamage = 10;
@@ -107,12 +95,6 @@ void CPM_UpdateSettings(int gametype)
 
 		// Respawn delay
 		cpm_clientrespawndelay = 500;
-
-		// Hit tones
-		cpm_hittones = 1;
-
-		// Item size
-		cpm_itemsize = 66; // easier to get items in pro mode
 
 		// Lava damage
 		cpm_lavadamage = 4;

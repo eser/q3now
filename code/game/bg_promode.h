@@ -28,12 +28,6 @@ extern int		cpm_radiusdamagefix;
 // Respawn delay
 extern float	cpm_clientrespawndelay;
 
-// Hit tones
-extern int		cpm_hittones;
-
-// Item size
-extern int		cpm_itemsize;
-
 // Lava damage
 extern float	cpm_lavadamage;
 extern float	cpm_slimedamage;

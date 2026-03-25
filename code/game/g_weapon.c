@@ -494,6 +494,9 @@ void weapon_railgun_fire (gentity_t *ent) {
 					SnapVectorTowards( trace.endpos, muzzle );
 					// send railgun beam effect
 					tent = G_TempEntity( trace.endpos, EV_RAILTRAIL );
+#if FEAT_RAIL_BROADCAST
+					tent->r.svFlags |= SVF_BROADCAST;
+#endif
 					// set player number for custom colors on the railtrail
 					tent->s.clientNum = ent->s.clientNum;
 					VectorCopy( muzzle, tent->s.origin2 );
@@ -544,6 +547,9 @@ void weapon_railgun_fire (gentity_t *ent) {
 
 	// send railgun beam effect
 	tent = G_TempEntity( trace.endpos, EV_RAILTRAIL );
+#if FEAT_RAIL_BROADCAST
+	tent->r.svFlags |= SVF_BROADCAST;
+#endif
 
 	// set player number for custom colors on the railtrail
 	tent->s.clientNum = ent->s.clientNum;

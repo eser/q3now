@@ -64,6 +64,15 @@ typedef struct {
 static wiredFeeder_t  wired_feeders[WIRED_MAX_FEEDERS];
 static int            wired_numFeeders = 0;
 
+// ── menu interaction sounds ──────────────────────────────────────────
+static sfxHandle_t    wired_sfxFocus;     // item gains focus (hover/arrow key)
+static sfxHandle_t    wired_sfxAction;    // button click / action execution
+static sfxHandle_t    wired_sfxMenuOpen;  // menu push onto stack
+static sfxHandle_t    wired_sfxMenuClose; // menu pop from stack
+
+// ── cursor shader ────────────────────────────────────────────────────
+static qhandle_t      wired_cursorShader;
+
 void WiredUI_RegisterFeeder( int feederID, wiredFeederCount_t count,
                               wiredFeederItemText_t itemText,
                               wiredFeederSelection_t selection ) {
@@ -282,8 +291,64 @@ void WiredUI_Init( qboolean inGameUI ) {
 	Cmd_AddCommand( "hud_reload", WiredUI_ReloadHud );
 	Cmd_AddCommand( "menu_reload", WiredUI_ReloadMenus );
 
+	// register menu interaction sounds
+	wired_sfxFocus     = S_RegisterSound( "sound/misc/menu2.wav", qfalse );
+	wired_sfxAction    = S_RegisterSound( "sound/misc/menu1.wav", qfalse );
+	wired_sfxMenuOpen  = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
+	wired_sfxMenuClose = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
+
+	// register cursor shader
+	wired_cursorShader = re.RegisterShaderNoMip( "menu/art/3_cursor2" );
+
 	wired_activeMenu = UIMENU_NONE;
 	wired_initialized = qtrue;
+
+	// restore menu stack after vid_restart
+	{
+		char stackBuf[512];
+		Cvar_VariableStringBuffer( "wired_menuStackSaved", stackBuf, sizeof( stackBuf ) );
+		if ( stackBuf[0] ) {
+			int savedMenu = Cvar_VariableIntegerValue( "wired_activeMenuSaved" );
+			char *p = stackBuf;
+			char *tok;
+
+			if ( savedMenu > UIMENU_NONE ) {
+				wired_activeMenu = savedMenu;
+				Key_SetCatcher( KEYCATCH_UI );
+				if ( savedMenu == UIMENU_INGAME ) {
+					Cvar_Set( "cl_paused", "1" );
+				}
+			}
+
+			// push each menu from saved stack
+			while ( ( tok = strchr( p, ';' ) ) != NULL || *p ) {
+				char name[64];
+				int len;
+				if ( tok ) {
+					len = (int)( tok - p );
+					if ( len >= (int)sizeof( name ) ) len = sizeof( name ) - 1;
+					Q_strncpyz( name, p, len + 1 );
+					p = tok + 1;
+				} else {
+					Q_strncpyz( name, p, sizeof( name ) );
+					p += strlen( p );
+				}
+				if ( name[0] && WiredUI_FindMenu( name ) && wired_menuStackDepth < WIRED_MENU_STACK_DEPTH ) {
+					Q_strncpyz( wired_menuStack[wired_menuStackDepth], name, sizeof( wired_menuStack[0] ) );
+					wired_menuStackDepth++;
+				}
+				if ( !*p ) break;
+			}
+
+			// clear saved state
+			Cvar_Set( "wired_menuStackSaved", "" );
+			Cvar_Set( "wired_activeMenuSaved", "0" );
+
+			if ( wired_menuStackDepth > 0 ) {
+				Com_Printf( "WiredUI: restored menu stack (depth %d)\n", wired_menuStackDepth );
+			}
+		}
+	}
 
 	// delayed screenshot support
 	wired_screenshotDelay = Cvar_Get( "wired_screenshotDelay", "0", 0 );
@@ -296,6 +361,18 @@ void WiredUI_Init( qboolean inGameUI ) {
 void WiredUI_Shutdown( void ) {
 	if ( !wired_initialized ) {
 		return;
+	}
+
+	// save menu stack to cvar so vid_restart can restore it
+	{
+		char stackBuf[512] = "";
+		int i;
+		for ( i = 0; i < wired_menuStackDepth; i++ ) {
+			if ( i > 0 ) Q_strcat( stackBuf, sizeof( stackBuf ), ";" );
+			Q_strcat( stackBuf, sizeof( stackBuf ), wired_menuStack[i] );
+		}
+		Cvar_Set( "wired_menuStackSaved", stackBuf );
+		Cvar_Set( "wired_activeMenuSaved", va( "%d", wired_activeMenu ) );
 	}
 
 	WiredHud_DestroyAllElements();
@@ -435,13 +512,18 @@ void WiredUI_Refresh( int realtime ) {
 			char testBuf[256];
 			Cvar_VariableStringBuffer( item->cvarTest, testBuf, sizeof( testBuf ) );
 
+			// match as integer to handle cvarFloatList values ("5.000000" matches "5")
 			if ( item->showCvar[0] ) {
-				// showCvar: only visible if cvarTest value is in the list
-				if ( !strstr( item->showCvar, testBuf ) ) continue;
+				int testInt = atoi( testBuf );
+				char testIntStr[16];
+				Com_sprintf( testIntStr, sizeof( testIntStr ), "%d", testInt );
+				if ( !strstr( item->showCvar, testBuf ) && !strstr( item->showCvar, testIntStr ) ) continue;
 			}
 			if ( item->hideCvar[0] ) {
-				// hideCvar: hidden if cvarTest value is in the list
-				if ( strstr( item->hideCvar, testBuf ) ) continue;
+				int testInt = atoi( testBuf );
+				char testIntStr[16];
+				Com_sprintf( testIntStr, sizeof( testIntStr ), "%d", testInt );
+				if ( strstr( item->hideCvar, testBuf ) || strstr( item->hideCvar, testIntStr ) ) continue;
 			}
 		}
 
@@ -457,6 +539,23 @@ void WiredUI_Refresh( int realtime ) {
 		// draw item background if styled
 		if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
 			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, item->backcolor );
+		}
+
+		// draw background image (levelshots, icons, etc.)
+		// auto-update "mappreview" items from ui_mapLevelshot cvar
+		if ( item->name[0] && !Q_stricmp( item->name, "mappreview" ) ) {
+			char lsBuf[MAX_QPATH];
+			Cvar_VariableStringBuffer( "ui_mapLevelshot", lsBuf, sizeof( lsBuf ) );
+			if ( lsBuf[0] ) {
+				Q_strncpyz( item->background, lsBuf, sizeof( item->background ) );
+			}
+		}
+		if ( item->background[0] ) {
+			qhandle_t bgShader = re.RegisterShaderNoMip( item->background );
+			if ( bgShader ) {
+				re.SetColor( NULL );
+				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, bgShader );
+			}
 		}
 
 		// draw LISTBOX items — feeder-driven scrollable list
@@ -500,15 +599,30 @@ void WiredUI_Refresh( int realtime ) {
 					float colW = ( col < item->columns && item->columnWidths[col] > 0 )
 						? item->columnWidths[col] : contentW;
 					if ( text && text[0] ) {
-						// truncate to fit column width
+						// truncate to fit column width (account for ^X color codes)
 						int maxChars = (int)( ( colW - 4 ) / charSize );
+						int visChars = 0, ti;
 						if ( maxChars < 1 ) maxChars = 1;
-						if ( (int)strlen( text ) > maxChars ) {
+						// count visible (non-color-code) chars
+						for ( ti = 0; text[ti]; ti++ ) {
+							if ( Q_IsColorString( &text[ti] ) ) { ti++; continue; }
+							visChars++;
+						}
+						if ( visChars > maxChars ) {
 							char clipped[128];
-							Q_strncpyz( clipped, text, sizeof( clipped ) );
-							if ( maxChars < (int)sizeof( clipped ) ) {
-								clipped[maxChars] = '\0';
+							int ci = 0, vc = 0;
+							// copy up to maxChars visible chars, preserving color codes
+							for ( ti = 0; text[ti] && ci < (int)sizeof(clipped) - 1; ti++ ) {
+								if ( Q_IsColorString( &text[ti] ) ) {
+									clipped[ci++] = text[ti++];
+									if ( text[ti] ) clipped[ci++] = text[ti];
+									continue;
+								}
+								if ( vc >= maxChars ) break;
+								clipped[ci++] = text[ti];
+								vc++;
 							}
+							clipped[ci] = '\0';
 							SCR_DrawStringExt( (int)colX, (int)( rowY + 2 ), charSize,
 								clipped, rowColor, qfalse, qfalse );
 						} else {
@@ -559,13 +673,33 @@ void WiredUI_Refresh( int realtime ) {
 			continue; // skip normal text rendering for listbox
 		}
 
+		// ── text truncation helper ──────────────────────────────────
+		// If text is wider than the item rect, truncate with ".." suffix.
+		// buf is reused below for cvar-bound items too.
+		#define WIRED_TRUNCATE_TEXT(src, charSz, maxW, outBuf, outBufSz) do { \
+			if ( (maxW) > 0 && strlen(src) * (charSz) > (maxW) ) { \
+				int maxChars = (int)((maxW) / (charSz)); \
+				if ( maxChars > 2 ) { \
+					Q_strncpyz( (outBuf), (src), MIN( maxChars - 1, (outBufSz) - 1 ) ); \
+					Q_strcat( (outBuf), (outBufSz), ".." ); \
+				} else { \
+					Q_strncpyz( (outBuf), (src), MIN( maxChars + 1, (outBufSz) ) ); \
+				} \
+			} else { \
+				Q_strncpyz( (outBuf), (src), (outBufSz) ); \
+			} \
+		} while(0)
+
 		// draw cvar-bound item value (right side of label)
 		if ( item->cvar[0] && item->type != ITEM_TYPE_TEXT && item->type != ITEM_TYPE_BUTTON ) {
 			char cvarBuf[256];
 			const char *valueText = "";
-			float labelX = itemX + item->textalignx;
-			float labelY = itemY + item->textaligny;
 			float charSize = item->textscale >= 0.7f ? 16.0f : 8.0f;
+			// vertical center text in rect when textaligny is not set
+			float textVCenter = ( item->textaligny == 0 && item->rect.h > charSize )
+				? ( item->rect.h - charSize ) * 0.5f : item->textaligny;
+			float labelX = itemX + item->textalignx;
+			float labelY = itemY + textVCenter;
 			float valueX;
 
 			// draw the label on the left
@@ -585,18 +719,25 @@ void WiredUI_Refresh( int realtime ) {
 				case ITEM_TYPE_MULTI:
 					if ( item->multiData ) {
 						int j;
+						qboolean found = qfalse;
 						for ( j = 0; j < item->multiData->count; j++ ) {
 							if ( item->multiData->isStringList ) {
 								if ( !Q_stricmp( cvarBuf, item->multiData->strValues[j] ) ) {
 									valueText = item->multiData->labels[j];
+									found = qtrue;
 									break;
 								}
 							} else {
 								if ( item->multiData->floatValues[j] == atof( cvarBuf ) ) {
 									valueText = item->multiData->labels[j];
+									found = qtrue;
 									break;
 								}
 							}
+						}
+						// fallback: show raw cvar value if no option matches
+						if ( !found && cvarBuf[0] ) {
+							valueText = cvarBuf;
 						}
 					}
 					break;
@@ -627,18 +768,27 @@ void WiredUI_Refresh( int realtime ) {
 
 				case ITEM_TYPE_BIND:
 					{
-						int k;
+						static char bindBuf[128];
 						if ( wired_waitingForKey && wired_bindItem == item ) {
 							valueText = "Press a key...";
 						} else {
-							// find which key is bound to this command
-							valueText = "---";
+							// find primary + alternate keys bound to this command
+							const char *key1 = NULL, *key2 = NULL;
+							int k;
 							for ( k = 0; k < MAX_KEYS; k++ ) {
 								const char *b = Key_GetBinding( k );
 								if ( b && !Q_stricmp( b, item->cvar ) ) {
-									valueText = Key_KeynumToString( k );
-									break;
+									if ( !key1 ) key1 = Key_KeynumToString( k );
+									else if ( !key2 ) { key2 = Key_KeynumToString( k ); break; }
 								}
+							}
+							if ( key1 && key2 ) {
+								Com_sprintf( bindBuf, sizeof( bindBuf ), "%s ^7or %s", key1, key2 );
+								valueText = bindBuf;
+							} else if ( key1 ) {
+								valueText = key1;
+							} else {
+								valueText = "---";
 							}
 						}
 					}
@@ -681,20 +831,32 @@ void WiredUI_Refresh( int realtime ) {
 		}
 		// draw text-only items (no cvar)
 		else if ( item->text[0] ) {
-			float x = itemX + item->textalignx;
-			float y = itemY + item->textaligny;
 			float charSize = item->textscale >= 0.7f ? 16.0f : 8.0f;
+			float textVCenter = ( item->textaligny == 0 && item->rect.h > charSize )
+				? ( item->rect.h - charSize ) * 0.5f : item->textaligny;
+			float x = itemX + item->textalignx;
+			float y = itemY + textVCenter;
+			char truncBuf[256];
+			const char *displayText;
+
+			// truncate if wider than rect
+			if ( item->rect.w > 0 ) {
+				WIRED_TRUNCATE_TEXT( item->text, charSize, item->rect.w, truncBuf, sizeof( truncBuf ) );
+				displayText = truncBuf;
+			} else {
+				displayText = item->text;
+			}
 
 			// adjust for text alignment within rect
 			if ( item->textalign == ITEM_ALIGN_CENTER && item->rect.w > 0 ) {
-				float textWidth = strlen( item->text ) * charSize;
+				float textWidth = strlen( displayText ) * charSize;
 				x = itemX + ( item->rect.w - textWidth ) * 0.5f;
 			} else if ( item->textalign == ITEM_ALIGN_RIGHT && item->rect.w > 0 ) {
-				float textWidth = strlen( item->text ) * charSize;
+				float textWidth = strlen( displayText ) * charSize;
 				x = itemX + item->rect.w - textWidth;
 			}
 
-			SCR_DrawStringExt( (int)x, (int)y, charSize, item->text,
+			SCR_DrawStringExt( (int)x, (int)y, charSize, displayText,
 				item->forecolor, qfalse, qfalse );
 		}
 	}
@@ -703,6 +865,25 @@ void WiredUI_Refresh( int realtime ) {
 	if ( wired_focusItem >= 0 && wired_focusItem < menu->itemCount ) {
 		wiredItemDef_t *focus = menu->items[wired_focusItem];
 		if ( focus->visible && !focus->decoration ) {
+			// skip focus on cvarTest-hidden items
+			if ( focus->cvarTest[0] ) {
+				char ftBuf[256];
+				Cvar_VariableStringBuffer( focus->cvarTest, ftBuf, sizeof( ftBuf ) );
+				if ( focus->showCvar[0] ) {
+					int ftInt = atoi( ftBuf );
+					char ftIntStr[16];
+					Com_sprintf( ftIntStr, sizeof( ftIntStr ), "%d", ftInt );
+					if ( !strstr( focus->showCvar, ftBuf ) && !strstr( focus->showCvar, ftIntStr ) )
+						goto skip_focus;
+				}
+				if ( focus->hideCvar[0] ) {
+					int ftInt = atoi( ftBuf );
+					char ftIntStr[16];
+					Com_sprintf( ftIntStr, sizeof( ftIntStr ), "%d", ftInt );
+					if ( strstr( focus->hideCvar, ftBuf ) || strstr( focus->hideCvar, ftIntStr ) )
+						goto skip_focus;
+				}
+			}
 			float fx = menuX + focus->rect.x;
 			float fy = menuY + focus->rect.y - scrollY;
 			// don't draw focus highlight outside clip area
@@ -710,9 +891,11 @@ void WiredUI_Refresh( int realtime ) {
 			SCR_FillRect( fx, fy, focus->rect.w, focus->rect.h, menu->focuscolor );
 			// redraw the focused item's text on top of highlight
 			if ( focus->text[0] ) {
-				float x = fx + focus->textalignx;
-				float y = fy + focus->textaligny;
 				float charSize = focus->textscale >= 0.7f ? 16.0f : 8.0f;
+				float focusVCenter = ( focus->textaligny == 0 && focus->rect.h > charSize )
+					? ( focus->rect.h - charSize ) * 0.5f : focus->textaligny;
+				float x = fx + focus->textalignx;
+				float y = fy + focusVCenter;
 				if ( focus->textalign == ITEM_ALIGN_CENTER && focus->rect.w > 0 ) {
 					float textWidth = strlen( focus->text ) * charSize;
 					x = fx + ( focus->rect.w - textWidth ) * 0.5f;
@@ -746,15 +929,19 @@ skip_focus:
 		}
 	}
 
-	// draw cursor (32x32 centered on cursor position, same as q3_ui and v6)
+	// draw cursor centered on the logical point
 	if ( Key_GetCatcher() & KEYCATCH_UI ) {
-		vec4_t cursorColor = { 1.0f, 1.0f, 1.0f, 1.0f };
-		// draw a simple crosshair cursor using filled rects
-		// TODO Phase 2: use a cursor shader image like ui_assets/cursor
-		re.SetColor( cursorColor );
-		SCR_FillRect( wired_cursorX - 1, wired_cursorY - 8, 2, 16, cursorColor );
-		SCR_FillRect( wired_cursorX - 8, wired_cursorY - 1, 16, 2, cursorColor );
-		re.SetColor( NULL );
+		if ( wired_cursorShader ) {
+			re.SetColor( NULL );
+			SCR_DrawPic( wired_cursorX - 16, wired_cursorY - 16, 32, 32, wired_cursorShader );
+		} else {
+			// fallback: simple crosshair cursor if shader not found
+			vec4_t cursorColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+			re.SetColor( cursorColor );
+			SCR_FillRect( wired_cursorX - 1, wired_cursorY - 8, 2, 16, cursorColor );
+			SCR_FillRect( wired_cursorX - 8, wired_cursorY - 1, 16, 2, cursorColor );
+			re.SetColor( NULL );
+		}
 	}
 
 	// macOS-style scrollbar — thin, semi-transparent, fades out
@@ -907,37 +1094,294 @@ static void WiredScript_SetFocus( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 	}
 }
 
+// forward declaration (non-static — also called from cl_wired_feeders.c)
+void WiredUI_UpdateMapPoolButton( void );
+
+// ── per-gametype cvar persistence ─────────────────────────────────────
+// Saves/restores fraglimit, timelimit, capturelimit, friendlyfire when
+// switching game types — same pattern as q3_ui's ServerOptions_Cache.
+
+int wired_lastSavedGameType = -1;
+
+void WiredUI_SaveGameTypeSettings( void ) {
+	int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+	const char *prefix;
+
+	switch ( gt ) {
+		case 0: prefix = "ui_ffa"; break;
+		case 1: prefix = "ui_tourney"; break;
+		case 3: prefix = "ui_koth"; break;
+		case 4: prefix = "ui_lms"; break;
+		case 5: prefix = "ui_team"; break;
+		case 6: prefix = "ui_ctf"; break;
+		default: return;
+	}
+
+	Cvar_Set( va( "%s_fraglimit", prefix ), Cvar_VariableString( "fraglimit" ) );
+	Cvar_Set( va( "%s_timelimit", prefix ), Cvar_VariableString( "timelimit" ) );
+	if ( gt == 6 ) Cvar_Set( "ui_ctf_capturelimit", Cvar_VariableString( "capturelimit" ) );
+	if ( gt >= 5 ) Cvar_Set( va( "%s_friendly", prefix ), Cvar_VariableString( "g_friendlyfire" ) );
+
+	// save map rotation per gametype
+	{
+		char saveBuf[1024];
+		Cvar_VariableStringBuffer( "g_maprotation", saveBuf, sizeof( saveBuf ) );
+		Cvar_Set( va( "%s_maprotation", prefix ), saveBuf );
+	}
+
+	wired_lastSavedGameType = gt;
+}
+
+void WiredUI_LoadGameTypeSettings( void ) {
+	int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+	const char *prefix;
+	char buf[64];
+
+	switch ( gt ) {
+		case 0: prefix = "ui_ffa"; break;
+		case 1: prefix = "ui_tourney"; break;
+		case 3: prefix = "ui_koth"; break;
+		case 4: prefix = "ui_lms"; break;
+		case 5: prefix = "ui_team"; break;
+		case 6: prefix = "ui_ctf"; break;
+		default: return;
+	}
+
+	// restore saved values — use "0" default when cvar was never saved
+	Cvar_VariableStringBuffer( va( "%s_fraglimit", prefix ), buf, sizeof( buf ) );
+	Cvar_Set( "fraglimit", buf[0] ? buf : "0" );
+
+	Cvar_VariableStringBuffer( va( "%s_timelimit", prefix ), buf, sizeof( buf ) );
+	Cvar_Set( "timelimit", buf[0] ? buf : "0" );
+
+	if ( gt == 6 ) {
+		Cvar_VariableStringBuffer( "ui_ctf_capturelimit", buf, sizeof( buf ) );
+		Cvar_Set( "capturelimit", buf[0] ? buf : "8" );
+	}
+
+	if ( gt >= 5 ) {
+		Cvar_VariableStringBuffer( va( "%s_friendly", prefix ), buf, sizeof( buf ) );
+		Cvar_Set( "g_friendlyfire", buf[0] ? buf : "0" );
+	}
+
+	// restore map rotation for this gametype (empty = no rotation)
+	{
+		char rotBuf[1024];
+		Cvar_VariableStringBuffer( va( "%s_maprotation", prefix ), rotBuf, sizeof( rotBuf ) );
+		Cvar_Set( "g_maprotation", rotBuf );
+		Cvar_Set( "g_maprotationIndex", "0" );
+	}
+}
+
+// Called from uiScript: uiScript UpdateGameType
+static void WiredScript_UpdateGameType( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+
+	if ( wired_lastSavedGameType == -1 ) {
+		// first entry — save current defaults so they exist for future loads
+		wired_lastSavedGameType = gt;
+		WiredUI_SaveGameTypeSettings();
+	} else if ( gt != wired_lastSavedGameType ) {
+		// gametype changed — save old, load new
+		WiredUI_SaveGameTypeSettings();
+		wired_lastSavedGameType = gt;
+		WiredUI_LoadGameTypeSettings();
+	}
+
+	WiredUI_UpdateMapPoolButton();
+}
+
+// ── map pool helpers ──────────────────────────────────────────────────
+
+void WiredUI_UpdateMapPoolButton( void ) {
+	char mapName[MAX_QPATH];
+	char rotation[1024];
+	char token[MAX_QPATH];
+	const char *p;
+	qboolean inPool = qfalse;
+	int count = 0;
+
+	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+
+	p = rotation;
+	while ( *p ) {
+		int ti = 0;
+		while ( *p == ' ' ) p++;
+		if ( !*p ) break;
+		while ( *p && *p != ' ' && ti < (int)sizeof(token) - 1 ) token[ti++] = *p++;
+		token[ti] = '\0';
+		count++;
+		if ( mapName[0] && !Q_stricmp( token, mapName ) ) inPool = qtrue;
+	}
+
+	Cvar_Set( "ui_mapPoolAction", inPool ? "Remove from Pool" : "Add to Pool" );
+	Cvar_Set( "ui_mapPoolStatus", count > 0
+		? va( "^2%d maps in pool", count )
+		: "Single map (no rotation)" );
+}
+
+// ── map rotation (map pool) ──────────────────────────────────────────
+
+static void WiredScript_ToggleMapPool( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	char mapName[MAX_QPATH];
+	char rotation[1024];
+	char newRotation[1024];
+	char token[MAX_QPATH];
+	const char *p;
+	qboolean found = qfalse;
+	int len;
+
+	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	if ( !mapName[0] ) {
+		Com_Printf( "WiredUI: ToggleMapPool — no map selected\n" );
+		return;
+	}
+
+	Com_Printf( "WiredUI: ToggleMapPool '%s'\n", mapName );
+	Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+
+	// rebuild rotation without the selected map (or add it if not found)
+	newRotation[0] = '\0';
+	len = 0;
+	p = rotation;
+	while ( *p ) {
+		int i = 0;
+		while ( *p == ' ' ) p++;
+		if ( !*p ) break;
+		while ( *p && *p != ' ' && i < (int)sizeof(token) - 1 ) token[i++] = *p++;
+		token[i] = '\0';
+		if ( !Q_stricmp( token, mapName ) ) {
+			found = qtrue;
+			continue;  // remove
+		}
+		if ( len > 0 ) { newRotation[len++] = ' '; newRotation[len] = '\0'; }
+		Q_strncpyz( newRotation + len, token, sizeof(newRotation) - len );
+		len = strlen( newRotation );
+	}
+
+	if ( !found ) {
+		if ( len > 0 ) { newRotation[len++] = ' '; newRotation[len] = '\0'; }
+		Q_strncpyz( newRotation + len, mapName, sizeof(newRotation) - len );
+	}
+
+	Cvar_Set( "g_maprotation", newRotation );
+	Cvar_Set( "g_maprotationIndex", "0" );
+
+	WiredUI_UpdateMapPoolButton();
+}
+
+static void WiredScript_ClearMapPool( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	Cvar_Set( "g_maprotation", "" );
+	Cvar_Set( "g_maprotationIndex", "0" );
+	WiredUI_UpdateMapPoolButton();
+}
+
 // ── game action handlers ──────────────────────────────────────────────
 // These read cvars set by feeder selection callbacks and execute real game actions.
 
 static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char mapName[MAX_QPATH];
+	int botCount, botSkill, i;
+	static const char *botNames[] = {
+		"Sarge", "Keel", "Bones", "Slash", "Doom", "Anarki", "Major", "Klesk"
+	};
 
-	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	// use first map from rotation pool if set, otherwise selected map
+	{
+		char rotation[1024];
+		Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+		if ( rotation[0] ) {
+			// extract first map from rotation for initial launch
+			int k = 0;
+			const char *r = rotation;
+			while ( *r == ' ' ) r++;
+			while ( *r && *r != ' ' && k < (int)sizeof(mapName) - 1 ) mapName[k++] = *r++;
+			mapName[k] = '\0';
+			Cvar_Set( "g_maprotationIndex", "0" );
+		} else {
+			Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+		}
+	}
 	if ( !mapName[0] ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: no map selected\n" );
 		return;
 	}
 
+	// save per-gametype settings before launch
+	WiredUI_SaveGameTypeSettings();
+
 	// apply server cvars from menu selections
-	// note: fraglimit, timelimit, sv_maxclients, sv_pure, sv_allowDownload
-	// are already set directly by cvar-bound menu items
+	// cvar-bound items (fraglimit, timelimit, capturelimit, sv_maxclients,
+	// sv_pure, sv_allowDownload, g_doWarmup, g_friendlyfire,
+	// g_teamForceBalance, g_allowvote) are set directly by menu items
 	Cvar_Set( "g_gametype", Cvar_VariableString( "ui_netGameType" ) );
-	Cvar_Set( "dedicated", "0" );  // listen server from menu
+
+	// dedicated mode
+	if ( Cvar_VariableIntegerValue( "ui_dedicated" ) <= 0 ) {
+		Cvar_Set( "dedicated", "0" );
+	} else {
+		Cvar_Set( "dedicated", Cvar_VariableString( "ui_dedicated" ) );
+	}
+
+	botCount = Cvar_VariableIntegerValue( "ui_botCount" );
+	botSkill = Cvar_VariableIntegerValue( "g_spSkill" );
+	if ( botSkill < 1 ) botSkill = 3;
+	if ( botSkill > 5 ) botSkill = 5;
 
 	WiredUI_CloseAllMenus();
 
-	// wait allows dedicated cvar to take effect before map load
+	// launch map (wait allows dedicated cvar to take effect)
 	Cbuf_ExecuteText( EXEC_APPEND, va( "wait ; wait ; map %s\n", mapName ) );
+
+	// add bots after map load
+	for ( i = 0; i < botCount && i < 8; i++ ) {
+		Cbuf_ExecuteText( EXEC_APPEND,
+			va( "wait 3 ; addbot %s %d\n", botNames[i], botSkill ) );
+	}
+
+	// team preference for human player in team modes
+	{
+		int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+		int teamPref = Cvar_VariableIntegerValue( "g_localTeamPref" );
+		if ( gt >= 5 && teamPref > 0 ) {
+			const char *team = ( teamPref == 1 ) ? "red" : "blue";
+			Cbuf_ExecuteText( EXEC_APPEND, va( "wait 5 ; team %s\n", team ) );
+		}
+	}
 }
 
 static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char addr[256];
+	char password[256];
 
 	Cvar_VariableStringBuffer( "ui_selectedServerAddr", addr, sizeof( addr ) );
 	if ( !addr[0] ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: no server selected\n" );
 		return;
+	}
+
+	// check if server requires password and none is set
+	{
+		// look up the server by address to check g_needpass
+		int uiSource = Cvar_VariableIntegerValue( "ui_netSource" );
+		serverInfo_t *servers = ( uiSource == 0 ) ? cls.localServers :
+		                        ( uiSource == 6 ) ? cls.favoriteServers : cls.globalServers;
+		int count = ( uiSource == 0 ) ? cls.numlocalservers :
+		            ( uiSource == 6 ) ? cls.numfavoriteservers : cls.numglobalservers;
+		int j;
+		for ( j = 0; j < count; j++ ) {
+			if ( !Q_stricmp( NET_AdrToStringwPort( &servers[j].adr ), addr ) ) {
+				if ( servers[j].g_needpass ) {
+					Cvar_VariableStringBuffer( "password", password, sizeof( password ) );
+					if ( !password[0] ) {
+						WiredUI_PushMenu( "password" );
+						return;
+					}
+				}
+				break;
+			}
+		}
 	}
 
 	WiredUI_CloseAllMenus();
@@ -955,6 +1399,24 @@ static void WiredScript_RunDemo( wiredMenuDef_t *menu, wiredItemDef_t *item, int
 
 	WiredUI_CloseAllMenus();
 	Cbuf_ExecuteText( EXEC_APPEND, va( "demo %s\n", demoName ) );
+}
+
+// ── updateMapPreview ─────────────────────────────────────────────────
+// Updates a named item's background with the levelshot of the selected map.
+// Usage from .menu: action { updateMapPreview "mappreview" }
+static void WiredScript_UpdateMapPreview( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	char mapName[MAX_QPATH];
+	const char *targetName = ( numArgs >= 1 ) ? args[0] : "mappreview";
+	wiredItemDef_t *target;
+
+	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	target = WiredUI_FindItemByName( menu, targetName );
+
+	if ( target && mapName[0] ) {
+		Com_sprintf( target->background, sizeof( target->background ), "levelshots/%s", mapName );
+	} else if ( target ) {
+		target->background[0] = '\0';
+	}
 }
 
 static void WiredScript_RunMod( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -988,6 +1450,11 @@ static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *it
 		Cbuf_ExecuteText( EXEC_APPEND, va( "globalservers %d %d\n", source - 1, PROTOCOL_VERSION ) );
 	}
 
+}
+
+static void WiredScript_RefreshFilter( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	extern void WiredFeeder_RebuildServerDisplayList( void );
+	WiredFeeder_RebuildServerDisplayList();
 }
 
 // ── conditionalScript ─────────────────────────────────────────────────
@@ -1105,6 +1572,21 @@ static void WiredScript_Transition( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 	}
 }
 
+// ── sort commands (direct, not via uiScript) ─────────────────────────
+
+static void WiredScript_MapSortCmd( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	extern void WiredFeeder_SortMaps( int column );
+	int col = ( numArgs >= 1 ) ? atoi( args[0] ) : 0;
+	Com_Printf( "WiredUI: MapSort column %d\n", col );
+	WiredFeeder_SortMaps( col );
+}
+
+static void WiredScript_ServerSortCmd( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	extern void WiredFeeder_SortServers( int column );
+	int col = ( numArgs >= 1 ) ? atoi( args[0] ) : 0;
+	WiredFeeder_SortServers( col );
+}
+
 // ── setbackground ────────────────────────────────────────────────────
 // Syntax: setbackground "shader"
 static void WiredScript_SetBackground( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -1138,7 +1620,7 @@ static const wiredUiScriptEntry_t wiredUiScripts[] = {
 	{ "LoadMods",         NULL },
 	{ "LoadMovies",       NULL },
 	{ "RefreshServers",   WiredScript_RefreshServers },
-	{ "RefreshFilter",    WiredScript_RefreshServers },
+	{ "RefreshFilter",    WiredScript_RefreshFilter },
 	{ "StopRefresh",      NULL },  // noop — server queries are fire-and-forget
 	{ "closeJoin",        NULL },
 	{ "closeingame",      NULL },
@@ -1171,7 +1653,12 @@ static void WiredScript_UiScript( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 	} else if ( !Q_stricmp( args[0], "clearError" ) ) {
 		// noop
 	} else if ( !Q_stricmp( args[0], "ServerSort" ) && numArgs >= 2 ) {
-		// TODO: sort server list by column args[1]
+		extern void WiredFeeder_SortServers( int column );
+		WiredFeeder_SortServers( atoi( args[1] ) );
+	} else if ( !Q_stricmp( args[0], "MapSort" ) && numArgs >= 2 ) {
+		extern void WiredFeeder_SortMaps( int column );
+		Com_Printf( "WiredUI: MapSort column %s\n", args[1] );
+		WiredFeeder_SortMaps( atoi( args[1] ) );
 	} else if ( !Q_stricmp( args[0], "addFavorite" ) ) {
 		Cbuf_ExecuteText( EXEC_APPEND, "addFavorite\n" );
 	} else if ( !Q_stricmp( args[0], "deleteFavorite" ) ) {
@@ -1203,7 +1690,19 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "conditionalscript", WiredScript_ConditionalScript },
 	{ "transition",       WiredScript_Transition },
 	{ "setbackground",    WiredScript_SetBackground },
+	{ "updateMapPreview", WiredScript_UpdateMapPreview },
 	{ "uiScript",         WiredScript_UiScript },
+	// ── sort commands ──────────────────────────────────────────────
+	{ "MapSort",          WiredScript_MapSortCmd },
+	{ "mapsort",          WiredScript_MapSortCmd },
+	{ "UpdateGameType",   WiredScript_UpdateGameType },
+	{ "updategametype",   WiredScript_UpdateGameType },
+	{ "ToggleMapPool",    WiredScript_ToggleMapPool },
+	{ "togglemappool",    WiredScript_ToggleMapPool },
+	{ "ClearMapPool",     WiredScript_ClearMapPool },
+	{ "clearmappool",     WiredScript_ClearMapPool },
+	{ "ServerSort",       WiredScript_ServerSortCmd },
+	{ "serversort",       WiredScript_ServerSortCmd },
 	// ── game action commands (also reachable via uiScript) ──────────
 	{ "startserver",      WiredScript_StartServer },
 	{ "joinserver",       WiredScript_JoinServer },
@@ -1309,6 +1808,7 @@ void WiredUI_PushMenu( const char *name ) {
 	wired_menuStackDepth++;
 	wired_focusItem = -1;
 	wired_focusFromMouse = qfalse;
+	if ( wired_sfxMenuOpen ) S_StartLocalSound( wired_sfxMenuOpen, CHAN_LOCAL_SOUND );
 
 	// reset fade animation for the new menu
 	{
@@ -1342,6 +1842,7 @@ void WiredUI_PopMenu( void ) {
 	wired_menuStackDepth--;
 	wired_focusItem = -1;
 	wired_focusFromMouse = qfalse;
+	if ( wired_sfxMenuClose ) S_StartLocalSound( wired_sfxMenuClose, CHAN_LOCAL_SOUND );
 
 	if ( wired_menuStackDepth <= 0 ) {
 		// stack empty — return to root menu behavior
@@ -1418,6 +1919,21 @@ static int WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) 
 		wiredItemDef_t *item = menu->items[i];
 		wiredRect_t absRect;
 		if ( !item->visible || item->decoration ) continue;
+
+		// skip cvarTest-hidden items (can't focus what you can't see)
+		if ( item->cvarTest[0] ) {
+			char cvBuf[256];
+			Cvar_VariableStringBuffer( item->cvarTest, cvBuf, sizeof( cvBuf ) );
+			int cvInt = atoi( cvBuf );
+			char cvIntStr[16];
+			Com_sprintf( cvIntStr, sizeof( cvIntStr ), "%d", cvInt );
+			if ( item->showCvar[0] ) {
+				if ( !strstr( item->showCvar, cvBuf ) && !strstr( item->showCvar, cvIntStr ) ) continue;
+			}
+			if ( item->hideCvar[0] ) {
+				if ( strstr( item->hideCvar, cvBuf ) || strstr( item->hideCvar, cvIntStr ) ) continue;
+			}
+		}
 		absRect.x = ox + item->rect.x;
 		absRect.y = oy + item->rect.y - sy;
 		absRect.w = item->rect.w;
@@ -1463,6 +1979,28 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					wired_editCursorPos--;
 				}
 				Cvar_Set( wired_editItem->cvar, buff );
+			} else if ( ch == 'a' - 'a' + 1 ) {
+				// ctrl-a = home
+				wired_editCursorPos = 0;
+			} else if ( ch == 'e' - 'a' + 1 ) {
+				// ctrl-e = end
+				wired_editCursorPos = len;
+			} else if ( ch == 'v' - 'a' + 1 ) {
+				// ctrl-v = paste from clipboard
+				char *cbd = Sys_GetClipboardData();
+				if ( cbd ) {
+					int maxC = wired_editItem->maxChars > 0 ? wired_editItem->maxChars : 255;
+					int pasteLen = strlen( cbd );
+					int space = maxC - len;
+					if ( pasteLen > space ) pasteLen = space;
+					if ( pasteLen > 0 ) {
+						memmove( &buff[wired_editCursorPos + pasteLen], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
+						Com_Memcpy( &buff[wired_editCursorPos], cbd, pasteLen );
+						wired_editCursorPos += pasteLen;
+						Cvar_Set( wired_editItem->cvar, buff );
+					}
+					Z_Free( cbd );
+				}
 			} else if ( ch >= 32 ) {
 				// printable character — insert at cursor
 				int maxC = wired_editItem->maxChars > 0 ? wired_editItem->maxChars : 255;
@@ -1498,7 +2036,15 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				break;
 
 			case K_BACKSPACE:
-				if ( wired_editCursorPos > 0 ) {
+				if ( keys[K_CTRL].down && wired_editCursorPos > 0 ) {
+					// ctrl+backspace: delete previous word
+					int pos = wired_editCursorPos;
+					while ( pos > 0 && buff[pos - 1] == ' ' ) pos--;
+					while ( pos > 0 && buff[pos - 1] != ' ' ) pos--;
+					memmove( &buff[pos], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
+					wired_editCursorPos = pos;
+					Cvar_Set( wired_editItem->cvar, buff );
+				} else if ( wired_editCursorPos > 0 ) {
 					memmove( &buff[wired_editCursorPos - 1], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
 					wired_editCursorPos--;
 					Cvar_Set( wired_editItem->cvar, buff );
@@ -1544,8 +2090,28 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			// cancel binding
 			wired_waitingForKey = qfalse;
 			wired_bindItem = NULL;
+		} else if ( key == K_BACKSPACE || key == K_DEL ) {
+			// clear all bindings for this command
+			if ( wired_bindItem && wired_bindItem->cvar[0] ) {
+				int k;
+				for ( k = 0; k < MAX_KEYS; k++ ) {
+					const char *b = Key_GetBinding( k );
+					if ( b && !Q_stricmp( b, wired_bindItem->cvar ) ) {
+						Key_SetBinding( k, "" );
+					}
+				}
+			}
+			wired_waitingForKey = qfalse;
+			wired_bindItem = NULL;
 		} else if ( wired_bindItem && wired_bindItem->cvar[0] ) {
-			// bind the key to the command
+			// remove this key from any OTHER command (conflict resolution)
+			{
+				const char *existing = Key_GetBinding( key );
+				if ( existing && existing[0] && Q_stricmp( existing, wired_bindItem->cvar ) ) {
+					Key_SetBinding( key, "" );
+				}
+			}
+			// bind the key to this command
 			Key_SetBinding( key, wired_bindItem->cvar );
 			wired_waitingForKey = qfalse;
 			wired_bindItem = NULL;
@@ -1646,6 +2212,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					}
 				}
 				if ( focusedItem->action[0] && ( key == K_MOUSE1 || key == K_ENTER || key == K_KP_ENTER ) ) {
+					if ( wired_sfxAction ) S_StartLocalSound( wired_sfxAction, CHAN_LOCAL_SOUND );
 					WiredUI_RunScript( menu, focusedItem, focusedItem->action );
 				}
 				break;
@@ -1693,6 +2260,10 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 								Cvar_Set( focusedItem->cvar,
 									va( "%g", focusedItem->multiData->floatValues[next] ) );
 							}
+							// fire action script on value change
+							if ( focusedItem->action[0] ) {
+								WiredUI_RunScript( menu, focusedItem, focusedItem->action );
+							}
 						}
 						break;
 
@@ -1722,15 +2293,18 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 		case K_MWHEELUP:
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX ) {
-				// scroll listbox
-				if ( focusedItem->listScrollOffset > 0 ) focusedItem->listScrollOffset -= 3;
+				// adaptive scroll: 1 row for small lists, 3 for large
+				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
+				int step = ( total > 20 ) ? 3 : 1;
+				if ( focusedItem->listScrollOffset > 0 ) focusedItem->listScrollOffset -= step;
 				if ( focusedItem->listScrollOffset < 0 ) focusedItem->listScrollOffset = 0;
 				focusedItem->listScrollFadeTime = cls.realtime;
 			} else {
-				// scroll the menu itself (Wired UI: HTML DIV-style scroll)
+				// adaptive menu scroll: larger step for tall menus
 				float maxScroll = menu->contentHeight - menu->rect.h;
+				float step = ( maxScroll > 400 ) ? 48.0f : 24.0f;
 				if ( maxScroll > 0 ) {
-					menu->scrollOffset -= 24.0f;
+					menu->scrollOffset -= step;
 					if ( menu->scrollOffset < 0 ) menu->scrollOffset = 0;
 					menu->scrollBarFadeTime = cls.realtime;
 				}
@@ -1739,20 +2313,22 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 		case K_MWHEELDOWN:
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX && focusedItem->feeder != 0 ) {
-				// scroll listbox
+				// adaptive scroll: 1 row for small lists, 3 for large
 				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
 				float rowH = focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f;
 				int visibleRows = (int)( focusedItem->rect.h / rowH );
-				focusedItem->listScrollOffset += 3;
+				int step = ( total > 20 ) ? 3 : 1;
+				focusedItem->listScrollOffset += step;
 				if ( focusedItem->listScrollOffset > total - visibleRows )
 					focusedItem->listScrollOffset = total - visibleRows;
 				if ( focusedItem->listScrollOffset < 0 ) focusedItem->listScrollOffset = 0;
 				focusedItem->listScrollFadeTime = cls.realtime;
 			} else {
-				// scroll the menu itself
+				// adaptive menu scroll
 				float maxScroll = menu->contentHeight - menu->rect.h;
+				float step = ( maxScroll > 400 ) ? 48.0f : 24.0f;
 				if ( maxScroll > 0 ) {
-					menu->scrollOffset += 24.0f;
+					menu->scrollOffset += step;
 					if ( menu->scrollOffset > maxScroll ) menu->scrollOffset = maxScroll;
 					menu->scrollBarFadeTime = cls.realtime;
 				}
@@ -1793,6 +2369,10 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					} else {
 						Cvar_Set( focusedItem->cvar, va( "%g", focusedItem->multiData->floatValues[next] ) );
 					}
+					// fire action script on value change
+					if ( focusedItem->action[0] ) {
+						WiredUI_RunScript( menu, focusedItem, focusedItem->action );
+					}
 				}
 				else if ( focusedItem->type == ITEM_TYPE_YESNO ) {
 					Cvar_Set( focusedItem->cvar, atof( cvarBuf ) != 0 ? "0" : "1" );
@@ -1809,6 +2389,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					if ( menu->items[idx]->visible && !menu->items[idx]->decoration ) {
 						wired_focusItem = idx;
 						wired_focusFromMouse = qfalse;
+						if ( wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
 						break;
 					}
 				}
@@ -1825,6 +2406,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					if ( menu->items[idx]->visible && !menu->items[idx]->decoration ) {
 						wired_focusItem = idx;
 						wired_focusFromMouse = qfalse;
+						if ( wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
 						break;
 					}
 				}
@@ -1882,6 +2464,7 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 			}
 		}
 		wired_focusItem = newFocus;
+		if ( newFocus >= 0 && wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
 	}
 }
 
@@ -1895,9 +2478,17 @@ void WiredUI_SetActiveMenu( int menu ) {
 	if ( menu != UIMENU_NONE ) {
 		// activate UI key catcher so the engine routes input and draw calls to us
 		Key_SetCatcher( KEYCATCH_UI );
+
+		if ( menu == UIMENU_INGAME ) {
+			// in single-player the server pauses when cl_paused is set;
+			// the UI VM (q3_ui / ui) does this explicitly — we must too
+			Cvar_Set( "cl_paused", "1" );
+		}
+
 		Com_DPrintf( "WiredUI: SetActiveMenu %d\n", menu );
 	} else {
 		Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
+		Cvar_Set( "cl_paused", "0" );
 	}
 }
 
@@ -1921,11 +2512,95 @@ qboolean WiredUI_ConsoleCommand( int realtime ) {
 }
 
 void WiredUI_DrawConnectScreen( qboolean overlay ) {
+	wiredMenuDef_t	*menu;
+	const char		*status;
+	const char		*info;
+	char			buf[MAX_STRING_CHARS];
+	vec4_t			white = { 1, 1, 1, 1 };
+	vec4_t			dim   = { 0.6f, 0.6f, 0.6f, 1 };
+	float			y;
+
 	if ( !wired_initialized ) {
 		return;
 	}
 
-	// TODO Phase 2: render connection screen from .menu file
+	// CA_LOADING/CA_PRIMED overlay: just show a brief "Loading..." strip
+	// so it doesn't flash away too fast on fast loads (matches TA_UI behavior)
+	if ( overlay ) {
+		vec4_t overlayBg = { 0, 0, 0, 0.6f };
+		SCR_FillRect( 0, 440, SCREEN_WIDTH, 40, overlayBg );
+		SCR_DrawStringExt( 8, 448, 8, "Loading...", white, qtrue, qfalse );
+
+		// show server message if present
+		if ( clc.serverMessage[0] ) {
+			SCR_DrawStringExt( 8, 460, 8, clc.serverMessage, dim, qtrue, qfalse );
+		}
+		return;
+	}
+
+	// full-screen connection dialog
+	menu = WiredUI_FindMenu( "connect" );
+	if ( menu ) {
+		WiredUI_RenderMenuOverlay( menu, cls.realtime );
+	} else {
+		// fallback: dark background if connect.menu isn't loaded
+		vec4_t bg = { 0.05f, 0.05f, 0.1f, 1.0f };
+		SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bg );
+	}
+
+	// dynamic status text — drawn on top of the menu
+	y = 260;
+
+	// server name
+	if ( cls.servername[0] ) {
+		if ( !Q_stricmp( cls.servername, "localhost" ) ) {
+			info = "Starting local server...";
+		} else {
+			info = va( "Connecting to %s", cls.servername );
+		}
+		SCR_DrawStringExt( 200, (int)y, 8, info, white, qtrue, qfalse );
+		y += 16;
+	}
+
+	// connection state
+	switch ( cls.state ) {
+		case CA_CONNECTING:
+			status = va( "Awaiting connection... %d", clc.connectPacketCount );
+			break;
+		case CA_CHALLENGING:
+			status = va( "Awaiting challenge... %d", clc.connectPacketCount );
+			break;
+		case CA_CONNECTED:
+			// check for download in progress
+			if ( clc.downloadName[0] ) {
+				int pct = 0;
+				if ( clc.downloadSize > 0 ) {
+					pct = (int)( (float)clc.downloadCount * 100.0f / (float)clc.downloadSize );
+				}
+				status = va( "Downloading %s... %d%%", clc.downloadName, pct );
+			} else {
+				status = "Awaiting gamestate...";
+			}
+			break;
+		default:
+			status = "Connecting...";
+			break;
+	}
+	SCR_DrawStringExt( 200, (int)y, 8, status, dim, qtrue, qfalse );
+	y += 16;
+
+	// server error message
+	if ( clc.serverMessage[0] ) {
+		vec4_t errColor = { 1, 0.4f, 0.4f, 1 };
+		SCR_DrawStringExt( 200, (int)y, 8, clc.serverMessage, errColor, qtrue, qfalse );
+		y += 16;
+	}
+
+	// MOTD from master server
+	Cvar_VariableStringBuffer( "cl_motdString", buf, sizeof( buf ) );
+	if ( buf[0] ) {
+		SCR_DrawStringExt( 200, (int)y, 8, buf, dim, qtrue, qfalse );
+	}
 }
 
 // ── overlay renderer (for scoreboard, vote panel, etc.) ──────────────
