@@ -479,30 +479,42 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 		if ( fullscreen )
 		{
-			SDL_DisplayMode fsMode;
-			SDL_zero( fsMode );
-
-			switch ( testColorBits )
+#ifdef USE_VULKAN_API
+			if ( vulkan )
 			{
-				case 16: fsMode.format = SDL_PIXELFORMAT_RGB565; break;
-				case 24: fsMode.format = SDL_PIXELFORMAT_RGB24;  break;
-				default: Com_DPrintf( "testColorBits is %d, can't fullscreen\n", testColorBits );
+				// Vulkan: desktop fullscreen (SDL_WINDOW_FULLSCREEN default) is sufficient —
+				// the swapchain handles resolution and format independently.
+				// Exclusive mode with SDL_SetWindowFullscreenMode fails on macOS/MoltenVK
+				// because SDL_PIXELFORMAT_RGB24 is not a valid display mode format.
+			}
+			else
+#endif
+			{
+				SDL_DisplayMode fsMode;
+				SDL_zero( fsMode );
+
+				switch ( testColorBits )
+				{
+					case 16: fsMode.format = SDL_PIXELFORMAT_RGB565;  break;
+					case 24: fsMode.format = SDL_PIXELFORMAT_XRGB8888; break;
+					default: Com_DPrintf( "testColorBits is %d, can't fullscreen\n", testColorBits );
+						SDL_DestroyWindow( SDL_window );
+						SDL_window = NULL;
+						continue;
+				}
+
+				fsMode.w = config->vidWidth;
+				fsMode.h = config->vidHeight;
+				// SDL3: refresh_rate is float
+				fsMode.refresh_rate = (float)Cvar_VariableIntegerValue( "r_displayRefresh" );
+
+				if ( !SDL_SetWindowFullscreenMode( SDL_window, &fsMode ) )
+				{
+					Com_DPrintf( "SDL_SetWindowFullscreenMode failed: %s\n", SDL_GetError() );
 					SDL_DestroyWindow( SDL_window );
 					SDL_window = NULL;
 					continue;
-			}
-
-			fsMode.w = config->vidWidth;
-			fsMode.h = config->vidHeight;
-			// SDL3: refresh_rate is float
-			fsMode.refresh_rate = (float)Cvar_VariableIntegerValue( "r_displayRefresh" );
-
-			if ( !SDL_SetWindowFullscreenMode( SDL_window, &fsMode ) )
-			{
-				Com_DPrintf( "SDL_SetWindowFullscreenMode failed: %s\n", SDL_GetError() );
-				SDL_DestroyWindow( SDL_window );
-				SDL_window = NULL;
-				continue;
+				}
 			}
 
 			// SDL3: SDL_GetWindowFullscreenMode returns const pointer (NULL on error)
