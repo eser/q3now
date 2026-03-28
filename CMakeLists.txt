@@ -161,10 +161,10 @@ IF(USE_QUIC)
 	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*minicrypto.*")
 	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*mbedtls.*")
 
-	# Exclude x86-only AES-NI fusion files on non-x86 platforms (ARM Mac, etc.)
-	IF(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86|i.86|x86_64")
-		list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*fusion.*")
-	ENDIF()
+	# Exclude picoquic's fusion TLS backend on all platforms — we don't compile
+	# the picotls fusion source (lib/fusion.c), so the symbols are unresolved.
+	# Our wt_picoquic_stubs.c provides a no-op stub instead.
+	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*fusion.*")
 
 	# Exclude qlog (optional logging, pulls in file I/O we don't need)
 	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*qlog.*")

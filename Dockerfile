@@ -47,8 +47,8 @@ WORKDIR /src
 COPY . .
 
 # Configure: dedicated server only (no SDL, no renderers)
-# QUIC enabled for transport + HTTP health endpoint
 # WASM enabled for portable game module support
+# QUIC enabled for transport + HTTP health endpoint
 RUN cmake -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DUSE_SDL=OFF \
