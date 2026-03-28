@@ -1,0 +1,52 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# q3now dedicated server — Docker Compose example
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Quick start:
+#   1. Place your pak0.pk3 in ./server-data/baseq3/
+#   2. (Optional) Place a custom server.cfg in ./server-data/baseq3/
+#   3. docker compose up -d
+#
+# The server will be reachable at <host-ip>:27960 (UDP).
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  q3now-server:
+    image: eserozvataf/q3now:latest
+    # To build locally instead of pulling:
+    # build:
+    #   context: ..
+    #   dockerfile: Dockerfile
+
+    ports:
+      - "27960:27960/udp"
+
+    environment:
+      Q3_HOSTNAME: "q3now Docker Server"
+      Q3_MAXCLIENTS: "16"
+      Q3_RCONPASSWORD: "changeme"
+      Q3_FRAGLIMIT: "25"
+      Q3_TIMELIMIT: "15"
+      # Q3_GAMETYPE: "0"          # 0=FFA, 1=Duel, 3=TDM, 4=CTF
+      # Q3_MAPROTATION: "q3dm17 q3dm6 q3tourney2"
+      # Q3_QUIC: "1"              # Enable QUIC transport (needs certs)
+      # Q3_DOWNLOAD_URL: "http://yoursite.com/q3now"
+      # Q3_EXEC: "server.cfg"     # Execute a custom config on startup
+      # Q3_HUNKMEGS: "128"        # Increase for many custom maps
+
+    volumes:
+      # Game data: place pak0.pk3, custom maps (.pk3), and server.cfg here
+      - ./server-data/baseq3:/home/q3now/baseq3
+      # QUIC TLS certificates (uncomment if using QUIC)
+      # - ./certs:/home/q3now/certs:ro
+
+    # Override the default map
+    command: ["+map", "q3dm17"]
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "1.0"

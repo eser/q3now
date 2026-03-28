@@ -1345,6 +1345,26 @@ extern cvar_t	*r_renderWidth;
 extern cvar_t	*r_renderHeight;
 extern cvar_t	*r_renderScale;
 extern cvar_t	*r_depthFade;
+#if FEAT_PARALLAX_MAPPING
+extern cvar_t	*r_parallaxMapping;
+#endif
+#if FEAT_SSAO
+extern cvar_t	*r_ssao;
+#endif
+#if FEAT_TONEMAP
+extern cvar_t	*r_tonemap;
+#endif
+#if FEAT_COLOR_GRADING
+extern cvar_t	*r_colorGrading;
+#endif
+#if FEAT_FXAA
+extern cvar_t	*r_fxaa;
+#endif
+#if FEAT_GODRAYS
+extern cvar_t	*r_godRays;
+extern cvar_t	*r_sunX;
+extern cvar_t	*r_sunY;
+#endif
 extern cvar_t	*r_smaa;
 #endif
 

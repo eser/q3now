@@ -893,3 +893,96 @@ void CG_ImpactSparks( vec3_t origin, vec3_t dir ) {
 	}
 }
 #endif
+
+#if FEAT_ENV_LIGHTS
+/*
+===================
+CG_AddEnvironmentLights
+
+Emit colored dynamic lights from nearby lava, slime, and
+teleporter surfaces — KEX-style colored environment lighting.
+
+Traces downward and outward from the player to detect hazard
+surfaces, then places a soft colored dlight at the hit point.
+===================
+*/
+#define ENV_LIGHT_TRACE_DIST	512.0f
+#define ENV_LIGHT_MAX			6		// max simultaneous env dlights
+
+typedef struct {
+	vec3_t	dir;			// trace direction (relative to player)
+	float	dist;			// trace distance
+} envLightProbe_t;
+
+static const envLightProbe_t envProbes[] = {
+	{ {  0,    0,   -1 }, 256 },	// straight down
+	{ {  1,    0,   -1 }, 384 },	// forward-down
+	{ { -1,    0,   -1 }, 384 },	// back-down
+	{ {  0,    1,   -1 }, 384 },	// right-down
+	{ {  0,   -1,   -1 }, 384 },	// left-down
+	{ {  0.7f, 0.7f, -0.5f }, 384 },	// diagonal
+};
+
+void CG_AddEnvironmentLights( void ) {
+	trace_t		tr;
+	vec3_t		start, end, dir;
+	int			i, contents, count;
+
+	if ( !cg_envLights.integer ) {
+		return;
+	}
+
+	VectorCopy( cg.refdef.vieworg, start );
+	count = 0;
+
+	for ( i = 0; i < ARRAY_LEN( envProbes ) && count < ENV_LIGHT_MAX; i++ ) {
+		// build trace direction
+		VectorCopy( envProbes[i].dir, dir );
+		VectorNormalize( dir );
+		VectorMA( start, envProbes[i].dist, dir, end );
+
+		CG_Trace( &tr, start, NULL, NULL, end, cg.predictedPlayerState.clientNum, MASK_WATER );
+
+		if ( tr.fraction >= 1.0f ) {
+			continue;
+		}
+
+		// check what we hit
+		contents = CG_PointContents( tr.endpos, -1 );
+
+		if ( contents & CONTENTS_LAVA ) {
+			// warm orange glow — like KEX remaster
+			float dist = Distance( start, tr.endpos );
+			float intensity = 200.0f * ( 1.0f - dist / envProbes[i].dist );
+			if ( intensity > 20.0f ) {
+				trap_R_AddLightToScene( tr.endpos, intensity, 1.0f, 0.5f, 0.1f );
+				count++;
+			}
+		} else if ( contents & CONTENTS_SLIME ) {
+			// sickly green glow
+			float dist = Distance( start, tr.endpos );
+			float intensity = 150.0f * ( 1.0f - dist / envProbes[i].dist );
+			if ( intensity > 20.0f ) {
+				trap_R_AddLightToScene( tr.endpos, intensity, 0.2f, 0.8f, 0.1f );
+				count++;
+			}
+		} else if ( contents & CONTENTS_TELEPORTER ) {
+			// cool blue-white shimmer
+			float dist = Distance( start, tr.endpos );
+			float intensity = 120.0f * ( 1.0f - dist / envProbes[i].dist );
+			if ( intensity > 20.0f ) {
+				trap_R_AddLightToScene( tr.endpos, intensity, 0.4f, 0.6f, 1.0f );
+				count++;
+			}
+		} else if ( contents & CONTENTS_WATER ) {
+			// subtle blue tint for water
+			float dist = Distance( start, tr.endpos );
+			float intensity = 80.0f * ( 1.0f - dist / envProbes[i].dist );
+			if ( intensity > 15.0f ) {
+				trap_R_AddLightToScene( tr.endpos, intensity, 0.3f, 0.5f, 0.8f );
+				count++;
+			}
+		}
+	}
+}
+#endif // FEAT_ENV_LIGHTS

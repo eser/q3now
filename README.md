@@ -153,6 +153,7 @@ See [BUILD.md](BUILD.md) for full setup instructions. Key targets:
 | `make release`               | Full pipeline: check + assemble + codesign + DMG/tar.gz          |
 | `make bundle-dmg`            | Package signed `q3now-<version>-<arch>.dmg` (macOS)              |
 | `make bundle-tar`            | Package `q3now-<version>-<arch>.tar.gz` (Linux)                  |
+| `make bundle-docker`         | Build Docker image for dedicated server                          |
 | `make bench DEMO=four`       | Timedemo benchmark                                               |
 
 **VM backend:** Set `USE_WASM=1` to compile VM game modules via WAMR.
@@ -167,6 +168,36 @@ at full speed.
 
 **In-game diagnostics:** type `\q3now_engine` in the server console to print
 engine version, active renderer, `vm_rtChecks`, and `com_maxfps`.
+
+## Docker Dedicated Server
+
+[![Docker Hub](https://img.shields.io/docker/pulls/eserozvataf/q3now)](https://hub.docker.com/r/eserozvataf/q3now)
+
+Run a q3now dedicated server with Docker:
+
+```bash
+docker run -d -p 27960:27960/udp \
+  -v /path/to/your/baseq3:/home/q3now/baseq3 \
+  -e Q3_HOSTNAME="My Server" \
+  -e Q3_MAXCLIENTS=16 \
+  eserozvataf/q3now +map q3dm17
+```
+
+Mount your game assets (`pak0.pk3`, custom maps, `server.cfg`) into the
+`baseq3` volume. See `docker/docker-compose.yml` for a complete example with
+all available environment variables.
+
+| Environment Variable | Engine Cvar       | Description                 |
+| -------------------- | ----------------- | --------------------------- |
+| `Q3_HOSTNAME`        | `sv_hostname`     | Server name                 |
+| `Q3_MAXCLIENTS`      | `sv_maxclients`   | Max players                 |
+| `Q3_RCONPASSWORD`    | `rconpassword`    | Remote console password     |
+| `Q3_GAMETYPE`        | `g_gametype`      | 0=FFA, 1=Duel, 3=TDM, 4=CTF |
+| `Q3_FRAGLIMIT`       | `fraglimit`       | Frag limit                  |
+| `Q3_TIMELIMIT`       | `timelimit`       | Time limit (minutes)        |
+| `Q3_QUIC`            | `sv_quic`         | Enable QUIC transport       |
+| `Q3_EXEC`            | `+exec`           | Execute a config file       |
+| `Q3_EXTRA_ARGS`      | _(verbatim)_      | Arbitrary engine arguments  |
 
 ## [Build Instructions](BUILD.md)
 

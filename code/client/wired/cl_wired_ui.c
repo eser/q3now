@@ -1277,6 +1277,70 @@ static void WiredScript_ClearMapPool( wiredMenuDef_t *menu, wiredItemDef_t *item
 	WiredUI_UpdateMapPoolButton();
 }
 
+// ── favorite maps ────────────────────────────────────────────────────
+// Stored in ui_favoriteMaps cvar (CVAR_ARCHIVE — persists across sessions)
+
+static void WiredScript_ToggleFavoriteMap( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	char mapName[MAX_QPATH];
+	char favs[2048];
+	char newFavs[2048];
+	char token[MAX_QPATH];
+	const char *p;
+	qboolean found = qfalse;
+	int len;
+
+	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	if ( !mapName[0] ) return;
+
+	Cvar_VariableStringBuffer( "ui_favoriteMaps", favs, sizeof( favs ) );
+
+	// rebuild without the map, or add it
+	newFavs[0] = '\0';
+	len = 0;
+	p = favs;
+	while ( *p ) {
+		int i = 0;
+		while ( *p == ' ' ) p++;
+		if ( !*p ) break;
+		while ( *p && *p != ' ' && i < (int)sizeof(token) - 1 ) token[i++] = *p++;
+		token[i] = '\0';
+		if ( !Q_stricmp( token, mapName ) ) {
+			found = qtrue;
+			continue;
+		}
+		if ( len > 0 ) { newFavs[len++] = ' '; newFavs[len] = '\0'; }
+		Q_strncpyz( newFavs + len, token, sizeof(newFavs) - len );
+		len = strlen( newFavs );
+	}
+
+	if ( !found ) {
+		if ( len > 0 ) { newFavs[len++] = ' '; newFavs[len] = '\0'; }
+		Q_strncpyz( newFavs + len, mapName, sizeof(newFavs) - len );
+	}
+
+	Cvar_Set( "ui_favoriteMaps", newFavs );
+
+	// update button label
+	Cvar_Set( "ui_favMapAction", found ? "Favorite" : "Unfavorite" );
+}
+
+// update favorite button based on selected map
+void WiredUI_UpdateFavoriteButton( void ) {
+	char mapName[MAX_QPATH];
+	char favs[2048];
+
+	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	Cvar_VariableStringBuffer( "ui_favoriteMaps", favs, sizeof( favs ) );
+
+	if ( mapName[0] ) {
+		extern qboolean WiredFeeder_IsMapInList( const char *list, const char *mapName );
+		Cvar_Set( "ui_favMapAction",
+			WiredFeeder_IsMapInList( favs, mapName ) ? "Unfavorite" : "Favorite" );
+	} else {
+		Cvar_Set( "ui_favMapAction", "Favorite" );
+	}
+}
+
 // ── game action handlers ──────────────────────────────────────────────
 // These read cvars set by feeder selection callbacks and execute real game actions.
 
@@ -1701,6 +1765,8 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "togglemappool",    WiredScript_ToggleMapPool },
 	{ "ClearMapPool",     WiredScript_ClearMapPool },
 	{ "clearmappool",     WiredScript_ClearMapPool },
+	{ "ToggleFavorite",   WiredScript_ToggleFavoriteMap },
+	{ "togglefavorite",   WiredScript_ToggleFavoriteMap },
 	{ "ServerSort",       WiredScript_ServerSortCmd },
 	{ "serversort",       WiredScript_ServerSortCmd },
 	// ── game action commands (also reachable via uiScript) ──────────

@@ -352,6 +352,21 @@ static void WiredFeeder_ModSelection( int feederID, int index ) {
 // Data source: .bsp scan + .arena cross-reference from scripts/ directory
 // Maps are filtered by game type bits
 
+// helper: check if a map name is in a space-separated list (used by pool + favorites)
+qboolean WiredFeeder_IsMapInList( const char *list, const char *mapName ) {
+	char token[MAX_QPATH];
+	const char *p = list;
+	while ( *p ) {
+		int i = 0;
+		while ( *p == ' ' ) p++;
+		if ( !*p ) break;
+		while ( *p && *p != ' ' && i < (int)sizeof(token) - 1 ) token[i++] = *p++;
+		token[i] = '\0';
+		if ( !Q_stricmp( token, mapName ) ) return qtrue;
+	}
+	return qfalse;
+}
+
 #define MAX_WIRED_MAPS  1024
 #define MAX_ARENA_TEXT  8192
 
@@ -561,6 +576,9 @@ void WiredFeeder_LoadMaps( void ) {
 	}
 	Cvar_Set( "ui_mapPoolStatus", "Single map (no rotation)" );
 	Cvar_Set( "ui_mapPoolAction", "Add to Pool" );
+	Cvar_Set( "ui_favMapAction", "Favorite" );
+	// ensure ui_favoriteMaps exists (ARCHIVE so it persists)
+	Cvar_Get( "ui_favoriteMaps", "", CVAR_ARCHIVE );
 
 	Com_Printf( "WiredUI: %d maps loaded, %d arena files parsed\n", wired_mapCount, arenaCount );
 }
@@ -597,7 +615,7 @@ static const char *WiredFeeder_MapItemText( int feederID, int index, int column 
 	mapIdx = wired_filteredMaps[index];
 	switch ( column ) {
 		case 0: {
-			// pool queue number — check position in g_maprotation
+			// pool queue number
 			char rotation[1024];
 			char token[MAX_QPATH];
 			const char *p;
@@ -625,6 +643,15 @@ static const char *WiredFeeder_MapItemText( int feederID, int index, int column 
 				return wired_maps[mapIdx].mapName;
 			}
 			return "";
+		case 3: {
+			// favorite star
+			char favs[2048];
+			Cvar_VariableStringBuffer( "ui_favoriteMaps", favs, sizeof( favs ) );
+			if ( WiredFeeder_IsMapInList( favs, wired_maps[mapIdx].mapLoadName ) ) {
+				return "^3*";
+			}
+			return "";
+		}
 		default: return "";
 	}
 }
@@ -641,10 +668,12 @@ static void WiredFeeder_MapSelection( int feederID, int index ) {
 		// set levelshot path for map preview (menu reads this cvar)
 		Cvar_Set( "ui_mapLevelshot", va( "levelshots/%s", wired_maps[mapIdx].mapLoadName ) );
 
-		// update pool button state
+		// update pool + favorite button states
 		{
 			extern void WiredUI_UpdateMapPoolButton( void );
+			extern void WiredUI_UpdateFavoriteButton( void );
 			WiredUI_UpdateMapPoolButton();
+			WiredUI_UpdateFavoriteButton();
 		}
 	}
 }
@@ -660,8 +689,39 @@ static int WiredFeeder_MapSortByColumn( const void *a, const void *b ) {
 	int result;
 
 	switch ( wired_mapSortKey ) {
+		case 0: {
+			// sort by pool position (pooled maps first, by position)
+			char rotation[1024];
+			int pa = 999, pb = 999, pos = 0;
+			char token[MAX_QPATH];
+			const char *p;
+			Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+			p = rotation;
+			while ( *p ) {
+				int ti = 0;
+				while ( *p == ' ' ) p++;
+				if ( !*p ) break;
+				while ( *p && *p != ' ' && ti < (int)sizeof(token) - 1 ) token[ti++] = *p++;
+				token[ti] = '\0';
+				pos++;
+				if ( !Q_stricmp( token, wired_maps[ia].mapLoadName ) ) pa = pos;
+				if ( !Q_stricmp( token, wired_maps[ib].mapLoadName ) ) pb = pos;
+			}
+			result = pa - pb;
+			break;
+		}
 		case 1:  result = Q_stricmp( wired_maps[ia].mapLoadName, wired_maps[ib].mapLoadName ); break;
 		case 2:  result = Q_stricmp( wired_maps[ia].mapName, wired_maps[ib].mapName ); break;
+		case 3: {
+			// sort by favorite status (favorites first)
+			char favs[2048];
+			qboolean fa, fb;
+			Cvar_VariableStringBuffer( "ui_favoriteMaps", favs, sizeof( favs ) );
+			fa = WiredFeeder_IsMapInList( favs, wired_maps[ia].mapLoadName );
+			fb = WiredFeeder_IsMapInList( favs, wired_maps[ib].mapLoadName );
+			result = (int)fb - (int)fa;
+			break;
+		}
 		default: result = Q_stricmp( wired_maps[ia].mapLoadName, wired_maps[ib].mapLoadName ); break;
 	}
 

@@ -271,6 +271,25 @@ SHOTGUN
 ======================================================================
 */
 
+/*
+  Why the dwell phase is everything: In Doom, the shotgun pump doesn't start until 7 tics (200ms) after firing. During that gap, the muzzle flash
+  is fading and the recoil is settling — your brain registers the shot as complete. Then the pump starts as a separate event. Without the dwell,
+  recoil and pump blur into one motion and it feels like generic weapon bob.
+
+  The new 5-phase timeline (900ms total, fits in 1000ms reload):
+  0ms        100ms       240ms       490ms       740ms       900ms
+   |  RECOIL  |   DWELL   | PUMP BACK | PUMP FWD  |  SETTLE  |
+   |  kick↑   | flash fade|  ch-      |  -chk     |  ready   |
+   | pitch -6°|  ease out | pitch -10°| pitch→0   |  idle    |
+   |          |           | pull -3.5 | push out  |          |
+
+  Easing curves matter: Phase 3 uses t*(2-t) (ease-out) so the pump decelerates into the back position — like a hand gripping and pulling. Phase 4
+   uses 1-t² (ease-in) so the pump accelerates forward — like releasing a spring. This asymmetry is what makes pump-actions feel mechanical rather
+   than robotic.
+
+  The rhythm is BOOM → pause → ch-chk → ready.
+*/
+
 // DEFAULT_SHOTGUN_SPREAD and DEFAULT_SHOTGUN_COUNT	are in bg_public.h, because
 // client predicts same spreads
 #define	DEFAULT_SHOTGUN_DAMAGE	8
@@ -349,6 +368,30 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 	PerpendicularVector( localRight, localForward );
 	CrossProduct( localForward, localRight, localUp );
 
+#if FEAT_SHOTGUN_PATTERN
+	{
+		float rotation = ( seed / 256.0f ) * 2.0f * M_PI;
+		float spreadScale = DEFAULT_SHOTGUN_SPREAD * 16;
+
+		for ( i = 0; i < DEFAULT_SHOTGUN_COUNT; i++ ) {
+			float angle = bg_shotgunPattern[i].angle + rotation;
+			float radius = bg_shotgunPattern[i].radius * spreadScale;
+
+			r = radius * cos( angle );
+			u = radius * sin( angle );
+
+			VectorMA( origin, 8192 * 16, localForward, end );
+			VectorMA( end, r, localRight, end );
+			VectorMA( end, u, localUp, end );
+
+			if ( ShotgunPellet( origin, end, ent ) && !hitClient ) {
+				hitClient = qtrue;
+				ent->client->accuracy_hits++;
+				if ( ent->client ) ent->client->weaponStats[WP_SHOTGUN].hits++;
+			}
+		}
+	}
+#else
 	// generate the "random" spread pattern
 	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
 		r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
@@ -362,6 +405,7 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 			if (ent->client) ent->client->weaponStats[WP_SHOTGUN].hits++;
 		}
 	}
+#endif
 }
 
 

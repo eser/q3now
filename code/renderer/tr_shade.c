@@ -873,11 +873,14 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 
 #if FEAT_THIRD_PERSON
 #if FEAT_FORCE_ENTITY_VERTEX_ALPHA
-			// RF_FORCE_ENT_ALPHA: enable alpha blending
+			// RF_FORCE_ENT_ALPHA: enable alpha blending.
+			// Must mask-and-set (not OR) — GLS blend values are enumerated
+			// within 4-bit fields, not independent bitmasks.
 			if ( backEnd.currentEntity &&
 				 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) &&
 				 backEnd.currentEntity->e.shader.rgba[3] < 255 ) {
-				GL_State( pStage->stateBits | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
+				GL_State( ( pStage->stateBits & ~( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) )
+					| GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
 			} else
 #endif
 #endif

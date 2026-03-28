@@ -1977,6 +1977,70 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
 	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
 
+#if FEAT_SHOTGUN_PUMP
+	// Doom-style shotgun pump: recoil → dwell → pump back → pump forward → settle
+	// Doom ratio (tics): 7:14:13:7 — scaled to ~70% for Q3's pace
+	if ( ps->weapon == WP_SHOTGUN && cg.sgPumpTime ) {
+		int		delta = cg.time - cg.sgPumpTime;
+
+		#define SG_RECOIL_MS		100		// phase 1: kick up from blast
+		#define SG_DWELL_MS			140		// phase 2: hold recoil, flash fades (the pause)
+		#define SG_PUMPBACK_MS		250		// phase 3: pull back toward player (ch-)
+		#define SG_PUMPFWD_MS		250		// phase 4: push forward (-chk)
+		#define SG_SETTLE_MS		160		// phase 5: ease to ready
+		#define SG_PUMP_TOTAL_MS	(SG_RECOIL_MS + SG_DWELL_MS + SG_PUMPBACK_MS + SG_PUMPFWD_MS + SG_SETTLE_MS)
+
+		#define SG_RECOIL_PITCH		-6.0f	// recoil pitch (subtle)
+		#define SG_PUMP_PITCH		-10.0f	// pump pitch (more pronounced)
+		#define SG_PUMP_DROP		-2.5f	// drop during pump
+		#define SG_PUMP_PULLBACK	-3.5f	// pull toward camera during pump
+
+		if ( delta < SG_PUMP_TOTAL_MS ) {
+			float kickPitch = 0.0f;
+			float pumpPitch = 0.0f;
+			float pumpPull = 0.0f;
+			float pumpDrop = 0.0f;
+			float t;
+
+			if ( delta < SG_RECOIL_MS ) {
+				// phase 1: quick recoil kick — pitch only, no pullback
+				t = (float)delta / SG_RECOIL_MS;
+				kickPitch = t * t;
+			} else if ( delta < SG_RECOIL_MS + SG_DWELL_MS ) {
+				// phase 2: dwell — recoil settling, the critical pause
+				t = (float)( delta - SG_RECOIL_MS ) / SG_DWELL_MS;
+				kickPitch = 1.0f - t;  // recoil fading out linearly
+			} else if ( delta < SG_RECOIL_MS + SG_DWELL_MS + SG_PUMPBACK_MS ) {
+				// phase 3: pump back — pitch up + pull toward player
+				t = (float)( delta - SG_RECOIL_MS - SG_DWELL_MS ) / SG_PUMPBACK_MS;
+				t = t * ( 2.0f - t );  // ease-out (decelerating into position)
+				pumpPitch = t;
+				pumpPull = t;
+				pumpDrop = t;
+			} else if ( delta < SG_RECOIL_MS + SG_DWELL_MS + SG_PUMPBACK_MS + SG_PUMPFWD_MS ) {
+				// phase 4: pump forward — push back out
+				t = (float)( delta - SG_RECOIL_MS - SG_DWELL_MS - SG_PUMPBACK_MS ) / SG_PUMPFWD_MS;
+				t = 1.0f - t * t;  // ease-in (accelerating away)
+				pumpPitch = t;
+				pumpPull = t;
+				pumpDrop = t;
+			} else {
+				// phase 5: settle — final ease to ready
+				t = (float)( delta - SG_RECOIL_MS - SG_DWELL_MS - SG_PUMPBACK_MS - SG_PUMPFWD_MS ) / SG_SETTLE_MS;
+				pumpPitch = 0.0f;
+				pumpPull = 0.0f;
+				pumpDrop = 0.0f;
+			}
+
+			angles[PITCH] += SG_RECOIL_PITCH * kickPitch + SG_PUMP_PITCH * pumpPitch;
+			VectorMA( hand.origin, SG_PUMP_DROP * pumpDrop, cg.refdef.viewaxis[2], hand.origin );
+			VectorMA( hand.origin, SG_PUMP_PULLBACK * pumpPull, cg.refdef.viewaxis[0], hand.origin );
+		} else {
+			cg.sgPumpTime = 0;
+		}
+	}
+#endif
+
 	AnglesToAxis( angles, hand.axis );
 
 	// map torso animations to weapon animations
@@ -2278,6 +2342,12 @@ void CG_FireWeapon( centity_t *cent ) {
 	if( ent->weapon == WP_RAILGUN ) {
 		cent->pe.railFireTime = cg.time;
 	}
+
+#if FEAT_SHOTGUN_PUMP
+	if ( ent->weapon == WP_SHOTGUN ) {
+		cg.sgPumpTime = cg.time;
+	}
+#endif
 
 	// play quad sound if needed
 	if ( cent->currentState.powerups & ( 1 << PW_QUAD ) ) {
@@ -2670,6 +2740,26 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 	PerpendicularVector( right, forward );
 	CrossProduct( forward, right, up );
 
+#if FEAT_SHOTGUN_PATTERN
+	{
+		float rotation = ( seed / 256.0f ) * 2.0f * M_PI;
+		float spreadScale = DEFAULT_SHOTGUN_SPREAD * 16;
+
+		for ( i = 0; i < DEFAULT_SHOTGUN_COUNT; i++ ) {
+			float angle = bg_shotgunPattern[i].angle + rotation;
+			float radius = bg_shotgunPattern[i].radius * spreadScale;
+
+			r = radius * cos( angle );
+			u = radius * sin( angle );
+
+			VectorMA( origin, 8192 * 16, forward, end );
+			VectorMA( end, r, right, end );
+			VectorMA( end, u, up, end );
+
+			CG_ShotgunPellet( origin, end, otherEntNum );
+		}
+	}
+#else
 	// generate the "random" spread pattern
 	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
 		r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
@@ -2680,6 +2770,7 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 
 		CG_ShotgunPellet( origin, end, otherEntNum );
 	}
+#endif
 }
 
 /*

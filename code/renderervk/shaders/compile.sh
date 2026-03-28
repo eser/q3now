@@ -43,6 +43,21 @@ for f in *.frag; do
     compile frag "$f" "$name"
 done
 
+echo "==> Compiling gamma post-process variants..."
+compile frag "gamma.frag -DUSE_SSAO" gamma_ssao_frag_spv
+compile frag "gamma.frag -DUSE_TONEMAP" gamma_tonemap_frag_spv
+compile frag "gamma.frag -DUSE_COLOR_GRADING" gamma_colorgrade_frag_spv
+compile frag "gamma.frag -DUSE_SSAO -DUSE_TONEMAP" gamma_ssao_tonemap_frag_spv
+compile frag "gamma.frag -DUSE_SSAO -DUSE_TONEMAP -DUSE_COLOR_GRADING" gamma_full_frag_spv
+compile frag "gamma.frag -DUSE_TONEMAP -DUSE_COLOR_GRADING" gamma_tonemap_cg_frag_spv
+compile frag "gamma.frag -DUSE_FXAA" gamma_fxaa_frag_spv
+compile frag "gamma.frag -DUSE_FXAA -DUSE_SSAO" gamma_fxaa_ssao_frag_spv
+compile frag "gamma.frag -DUSE_FXAA -DUSE_SSAO -DUSE_TONEMAP -DUSE_COLOR_GRADING" gamma_all_frag_spv
+compile frag "gamma.frag -DUSE_GODRAYS" gamma_godrays_frag_spv
+compile frag "gamma.frag -DUSE_SSAO -DUSE_GODRAYS" gamma_ssao_godrays_frag_spv
+compile frag "gamma.frag -DUSE_SSAO -DUSE_GODRAYS -DUSE_TONEMAP" gamma_ssao_godrays_tm_frag_spv
+compile frag "gamma.frag -DUSE_FXAA -DUSE_SSAO -DUSE_GODRAYS -DUSE_TONEMAP -DUSE_COLOR_GRADING" gamma_ultimate_frag_spv
+
 echo "==> Compiling lighting shader variations..."
 compile vert "light_vert.tmpl" vert_light
 compile vert "light_vert.tmpl -DUSE_FOG" vert_light_fog
@@ -50,6 +65,13 @@ compile frag "light_frag.tmpl" frag_light
 compile frag "light_frag.tmpl -DUSE_FOG" frag_light_fog
 compile frag "light_frag.tmpl -DUSE_LINE" frag_light_line
 compile frag "light_frag.tmpl -DUSE_LINE -DUSE_FOG" frag_light_line_fog
+# parallax mapping variants
+compile vert "light_vert.tmpl -DUSE_PARALLAX" vert_light_parallax
+compile vert "light_vert.tmpl -DUSE_PARALLAX -DUSE_FOG" vert_light_parallax_fog
+compile frag "light_frag.tmpl -DUSE_PARALLAX" frag_light_parallax
+compile frag "light_frag.tmpl -DUSE_PARALLAX -DUSE_FOG" frag_light_parallax_fog
+compile frag "light_frag.tmpl -DUSE_PARALLAX -DUSE_LINE" frag_light_parallax_line
+compile frag "light_frag.tmpl -DUSE_PARALLAX -DUSE_LINE -DUSE_FOG" frag_light_parallax_line_fog
 
 echo "==> Compiling generic vertex shaders..."
 # single-texture vertex

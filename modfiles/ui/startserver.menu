@@ -65,40 +65,46 @@ menuDef {
 		visible 1
 	}
 
-	// sortable column headers
-	// col 0 = queue # (24px), col 1 = map name (170px), col 2 = long name (rest)
+	// column headers — aligned with listbox columns (list_x=16, +4 padding)
+	// col0: x=20 w=24, col1: x=44 w=140, col2: x=184 w=150, col3: x=334 w=20
 	itemDef {
 		type 1
 		text "#"
-		rect 20 212 20 16
+		rect 20 212 24 16
 		textscale 0.22
 		forecolor 0.6 0.6 0.6 1
 		visible 1
-		decoration
+		action { MapSort 0 }
 	}
-
 	itemDef {
 		type 1
 		text "Map"
-		rect 44 212 166 16
+		rect 44 212 140 16
 		textscale 0.24
 		forecolor 0.6 0.6 0.6 1
 		visible 1
 		action { MapSort 1 }
 	}
-
 	itemDef {
 		type 1
 		text "Name"
-		rect 214 212 176 16
+		rect 184 212 150 16
 		textscale 0.24
 		forecolor 0.6 0.6 0.6 1
 		visible 1
 		action { MapSort 2 }
 	}
+	itemDef {
+		type 1
+		text "*"
+		rect 334 212 20 16
+		textscale 0.22
+		forecolor 0.8 0.8 0.2 1
+		visible 1
+		action { MapSort 3 }
+	}
 
-	// map listbox — 3 columns: pool#, mapname, longname
-	// click toggles map in/out of pool
+	// map listbox — 4 columns: pool#, mapname, longname, fav
 	itemDef {
 		name "maplist"
 		type 6
@@ -109,7 +115,7 @@ menuDef {
 		style 1
 		feeder 4
 		elementheight 14
-		columns 3 0 24 0 24 170 0 194 170 0
+		columns 4 0 24 0 24 140 0 164 150 0 338 20 0
 		visible 1
 		doubleClick { ToggleMapPool }
 	}
@@ -148,11 +154,35 @@ menuDef {
 		action { ClearMapPool }
 	}
 
+	// favorite toggle — dynamic label
+	itemDef {
+		type 1
+		text "Favorite"
+		rect 270 420 70 16
+		textscale 0.28
+		forecolor 0.8 0.8 0.2 1
+		visible 1
+		cvarTest "ui_favMapAction"
+		showCvar { "Favorite" }
+		action { ToggleFavorite }
+	}
+	itemDef {
+		type 1
+		text "Unfavorite"
+		rect 270 420 80 16
+		textscale 0.28
+		forecolor COLOR_GREY
+		visible 1
+		cvarTest "ui_favMapAction"
+		showCvar { "Unfavorite" }
+		action { ToggleFavorite }
+	}
+
 	// pool status
 	itemDef {
 		type 0
-		rect 186 420 200 16
-		textscale 0.22
+		rect 16 438 370 10
+		textscale 0.2
 		forecolor 0.5 0.8 0.5 1
 		cvar "ui_mapPoolStatus"
 		decoration

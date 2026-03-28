@@ -697,6 +697,26 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 				return qfalse;
 			}
 		}
+#if FEAT_PARALLAX_MAPPING
+		//
+		// normalMap <name> — store in bundle[2] for parallax/normal mapping
+		//
+		else if ( !Q_stricmp( token, "normalMap" ) || !Q_stricmp( token, "bumpMap" ) )
+		{
+			token = COM_ParseExt( text, qfalse );
+			if ( !token[0] )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: missing parameter for 'normalMap' keyword in shader '%s'\n", shader.name );
+				return qfalse;
+			}
+
+			stage->bundle[2].image[0] = R_FindImageFile( token, IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE );
+			if ( !stage->bundle[2].image[0] )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: R_FindImageFile could not find normalMap '%s' in shader '%s'\n", token, shader.name );
+			}
+		}
+#endif
 		//
 		// animMap <frequency> <image1> .... <imageN>
 		//

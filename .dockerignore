@@ -1,0 +1,38 @@
+# Build artifacts
+build/
+dist/
+
+# Version control
+.git/
+.gitignore
+.gitmodules
+
+# Platform-specific packaging
+*.dmg
+*.tar.gz
+*.zip
+
+# Documentation (except README)
+docs/
+*.md
+!README.md
+
+# CI/CD
+.github/
+
+# macOS/Linux packaging support files
+misc/
+
+# Launcher (not needed for dedicated server)
+launcher/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

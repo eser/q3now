@@ -99,6 +99,26 @@ cvar_t	*r_renderHeight;
 cvar_t	*r_renderScale;
 cvar_t	*r_ext_supersample;
 cvar_t	*r_depthFade;
+#if FEAT_PARALLAX_MAPPING
+cvar_t	*r_parallaxMapping;
+#endif
+#if FEAT_SSAO
+cvar_t	*r_ssao;
+#endif
+#if FEAT_TONEMAP
+cvar_t	*r_tonemap;
+#endif
+#if FEAT_COLOR_GRADING
+cvar_t	*r_colorGrading;
+#endif
+#if FEAT_FXAA
+cvar_t	*r_fxaa;
+#endif
+#if FEAT_GODRAYS
+cvar_t	*r_godRays;
+cvar_t	*r_sunX;
+cvar_t	*r_sunY;
+#endif
 cvar_t	*r_smaa;
 #endif // USE_VULKAN
 
@@ -1843,6 +1863,56 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_depthFade, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_depthFade, "Soft particle edges: fade transparent surfaces near opaque geometry.\n"
 		" Requires \\r_fbo 1." );
+
+#if FEAT_PARALLAX_MAPPING
+	r_parallaxMapping = ri.Cvar_Get( "r_parallaxMapping", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_parallaxMapping, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_parallaxMapping, "Steep parallax mapping on surfaces with normalMap textures.\n"
+		" Height data from normalmap alpha channel." );
+#endif
+
+#if FEAT_SSAO
+	r_ssao = ri.Cvar_Get( "r_ssao", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_ssao, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_ssao, "Screen-space ambient occlusion.\n"
+		" Requires \\r_fbo 1." );
+#endif
+
+#if FEAT_TONEMAP
+	r_tonemap = ri.Cvar_Get( "r_tonemap", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_tonemap, "0", "2", CV_INTEGER );
+	ri.Cvar_SetDescription( r_tonemap, "HDR tone mapping.\n"
+		" 0 - disabled, 1 - Reinhard, 2 - ACES filmic. Requires \\r_fbo 1." );
+#endif
+
+#if FEAT_COLOR_GRADING
+	r_colorGrading = ri.Cvar_Get( "r_colorGrading", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_colorGrading, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_colorGrading, "Color grading post-process (tint, saturation, contrast).\n"
+		" Requires \\r_fbo 1." );
+#endif
+
+#if FEAT_FXAA
+	r_fxaa = ri.Cvar_Get( "r_fxaa", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_fxaa, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_fxaa, "Fast approximate anti-aliasing.\n"
+		" Requires \\r_fbo 1." );
+#endif
+
+#if FEAT_ADVANCED_WATER
+	ri.Cvar_Get( "r_waterRefraction", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_waterRefraction", "1", 0 ),
+		"Advanced water with screen-space refraction, Fresnel, and ripple noise." );
+#endif
+
+#if FEAT_GODRAYS
+	r_godRays = ri.Cvar_Get( "r_godRays", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_godRays, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_godRays, "Screen-space crepuscular rays (god rays).\n"
+		" Requires \\r_fbo 1. Set r_sunX/r_sunY for sun direction." );
+	r_sunX = ri.Cvar_Get( "r_sunX", "0.5", CVAR_ARCHIVE_ND );
+	r_sunY = ri.Cvar_Get( "r_sunY", "0.2", CVAR_ARCHIVE_ND );
+#endif
 
 	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_smaa, "0", "4", CV_INTEGER );
