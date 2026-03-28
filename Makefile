@@ -152,7 +152,7 @@ CMAKE_BUILD_DEBUG       := cmake --build $(BUILD_DIR_DEBUG) --parallel $(JOBS)
 CODESIGN_IDENTITY ?= -
 
 # DMG packaging (macOS only)
-VERSION     := $(shell git describe --always --dirty)
+VERSION     := $(shell date +%Y%m%d)-$(shell git describe --always --dirty)
 DMG_NAME    := $(APP_NAME)-$(VERSION)-$(UNAME_M)
 DMG_STAGING := $(BUILD_DIR_RELEASE)/dmg-staging
 DMG_OUT     := $(BUILD_DIR_RELEASE)/$(DMG_NAME).dmg
@@ -202,7 +202,7 @@ PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax02.$(PAK_EXT)
 .PHONY: all configure build build-debug clean rebuild \
         create-launcher create-packs \
         copy-libs copy-build copy-build-debug copy-packs copy-all copy-all-debug \
-        bundle-codesign bundle-dmg bundle-tar bundle-zip \
+        bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
         run-launcher run-game release \
         check smoke test-features test-vm bench diff-api help
 
@@ -500,6 +500,16 @@ ifdef IS_WINDOWS
 else
 	@echo "zip packaging is for Windows — use 'make bundle-dmg' on macOS or 'make bundle-tar' on Linux"
 endif
+
+# ── bundle-docker ────────────────────────────────────────────────────────
+# Builds a Docker image for the dedicated server (Linux x86_64).
+
+DOCKER_IMAGE ?= eserozvataf/q3now
+DOCKER_TAG   ?= $(VERSION)
+
+bundle-docker:
+	docker build -t "$(DOCKER_IMAGE):$(DOCKER_TAG)" -t "$(DOCKER_IMAGE):latest" .
+	@echo "==> Docker image ready: $(DOCKER_IMAGE):$(DOCKER_TAG)"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FLOW TARGETS — composable workflows

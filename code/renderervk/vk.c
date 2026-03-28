@@ -698,12 +698,12 @@ static void vk_create_render_passes( void )
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 
 #ifdef USE_BUFFER_CLEAR
-		if ( vk.msaaActive )
-			attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;	// Assuming this will be completely overwritten
-		else
-			attachments[ 0 ].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		// Always CLEAR the color/resolve target — DONT_CARE leaves
+		// garbage (pink) on TBDR GPUs (Apple Silicon via MoltenVK)
+		// because MTLLoadActionDontCare truly discards tile contents.
+		attachments[ 0 ].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 #else
-		attachments[ 0 ].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;	// Assuming this will be completely overwritten
+		attachments[ 0 ].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 #endif
 
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;   // needed for next render pass
@@ -852,7 +852,7 @@ static void vk_create_render_passes( void )
 		SET_OBJECT_NAME( vk.render_pass.depth_fade, "render pass - depth_fade", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
 
 		// restore main pass settings for subsequent render pass creation
-		attachments[0].loadOp = r_fbo->integer ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		attachments[1].stencilLoadOp = glConfig.stencilBits ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		if ( r_bloom->integer || vk.depthFade.active ) {
@@ -863,7 +863,7 @@ static void vk_create_render_passes( void )
 			attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		}
 		if ( vk.msaaActive ) {
-			attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 			attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		}
 	}
@@ -900,7 +900,7 @@ static void vk_create_render_passes( void )
 		attachments[0].flags = 0;
 		attachments[0].format = vk.bloom_format;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;	// Assuming this will be completely overwritten
+		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		// DONT_CARE leaves pink on TBDR
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;		// needed for next render pass
 		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -975,7 +975,7 @@ static void vk_create_render_passes( void )
 		attachments[0].flags = 0;
 		attachments[0].format = vk.capture_format;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // this will be completely overwritten
+		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // DONT_CARE leaves pink on TBDR GPUs
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;   // needed for next render pass
 		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1015,7 +1015,7 @@ static void vk_create_render_passes( void )
 	attachments[0].flags = 0;
 	attachments[0].format = vk.present_format.format;
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE; // needed for presentation
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1037,12 +1037,10 @@ static void vk_create_render_passes( void )
 	attachments[0].format = vk.color_format;
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 #ifdef USE_BUFFER_CLEAR
-	if ( vk.screenMapSamples > VK_SAMPLE_COUNT_1_BIT )
-		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	else
-		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	// Always CLEAR — DONT_CARE leaves pink on TBDR GPUs (Apple Silicon)
+	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 #else
-	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // Assuming this will be completely overwritten
+	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 #endif
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;   // needed for next render pass
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -3577,6 +3575,15 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.frag.light[1][0], "linear light fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.frag.light[1][1], "linear light fog fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
+#if FEAT_PARALLAX_MAPPING
+	vk.modules.vert.light_parallax[0] = SHADER_MODULE( vert_light_parallax );
+	vk.modules.vert.light_parallax[1] = SHADER_MODULE( vert_light_parallax_fog );
+	vk.modules.frag.light_parallax[0][0] = SHADER_MODULE( frag_light_parallax );
+	vk.modules.frag.light_parallax[0][1] = SHADER_MODULE( frag_light_parallax_fog );
+	vk.modules.frag.light_parallax[1][0] = SHADER_MODULE( frag_light_parallax_line );
+	vk.modules.frag.light_parallax[1][1] = SHADER_MODULE( frag_light_parallax_line_fog );
+#endif
+
 	vk.modules.color_fs = SHADER_MODULE( color_frag_spv );
 	vk.modules.color_vs = SHADER_MODULE( color_vert_spv );
 
@@ -3612,8 +3619,54 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.blur_fs, "gaussian blur fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.blend_fs, "final bloom blend fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
+#if FEAT_ADVANCED_WATER
+	vk.modules.water_fs = SHADER_MODULE( water_frag_spv );
+#endif
+
 	vk.modules.gamma_fs = SHADER_MODULE( gamma_frag_spv );
 	vk.modules.gamma_vs = SHADER_MODULE( gamma_vert_spv );
+
+	// Load compiled gamma post-process variants
+	Com_Memset( vk.gamma_variant_fs, 0, sizeof( vk.gamma_variant_fs ) );
+#if FEAT_SSAO
+	vk.gamma_variant_fs[ GAMMA_VAR_SSAO ] = SHADER_MODULE( gamma_ssao_frag_spv );
+#endif
+#if FEAT_TONEMAP
+	vk.gamma_variant_fs[ GAMMA_VAR_TONEMAP ] = SHADER_MODULE( gamma_tonemap_frag_spv );
+#endif
+#if FEAT_COLOR_GRADING
+	vk.gamma_variant_fs[ GAMMA_VAR_CG ] = SHADER_MODULE( gamma_colorgrade_frag_spv );
+#endif
+#if FEAT_FXAA
+	vk.gamma_variant_fs[ GAMMA_VAR_FXAA ] = SHADER_MODULE( gamma_fxaa_frag_spv );
+#endif
+#if FEAT_SSAO && FEAT_TONEMAP
+	vk.gamma_variant_fs[ GAMMA_VAR_SSAO | GAMMA_VAR_TONEMAP ] = SHADER_MODULE( gamma_ssao_tonemap_frag_spv );
+#endif
+#if FEAT_TONEMAP && FEAT_COLOR_GRADING
+	vk.gamma_variant_fs[ GAMMA_VAR_TONEMAP | GAMMA_VAR_CG ] = SHADER_MODULE( gamma_tonemap_cg_frag_spv );
+#endif
+#if FEAT_SSAO && FEAT_TONEMAP && FEAT_COLOR_GRADING
+	vk.gamma_variant_fs[ GAMMA_VAR_SSAO | GAMMA_VAR_TONEMAP | GAMMA_VAR_CG ] = SHADER_MODULE( gamma_full_frag_spv );
+#endif
+#if FEAT_FXAA && FEAT_SSAO
+	vk.gamma_variant_fs[ GAMMA_VAR_FXAA | GAMMA_VAR_SSAO ] = SHADER_MODULE( gamma_fxaa_ssao_frag_spv );
+#endif
+#if FEAT_FXAA && FEAT_SSAO && FEAT_TONEMAP && FEAT_COLOR_GRADING
+	vk.gamma_variant_fs[ GAMMA_VAR_FXAA | GAMMA_VAR_SSAO | GAMMA_VAR_TONEMAP | GAMMA_VAR_CG ] = SHADER_MODULE( gamma_all_frag_spv );
+#endif
+#if FEAT_GODRAYS
+	vk.gamma_variant_fs[ GAMMA_VAR_GODRAYS ] = SHADER_MODULE( gamma_godrays_frag_spv );
+#endif
+#if FEAT_GODRAYS && FEAT_SSAO
+	vk.gamma_variant_fs[ GAMMA_VAR_SSAO | GAMMA_VAR_GODRAYS ] = SHADER_MODULE( gamma_ssao_godrays_frag_spv );
+#endif
+#if FEAT_GODRAYS && FEAT_SSAO && FEAT_TONEMAP
+	vk.gamma_variant_fs[ GAMMA_VAR_SSAO | GAMMA_VAR_GODRAYS | GAMMA_VAR_TONEMAP ] = SHADER_MODULE( gamma_ssao_godrays_tm_frag_spv );
+#endif
+#if FEAT_GODRAYS && FEAT_FXAA && FEAT_SSAO && FEAT_TONEMAP && FEAT_COLOR_GRADING
+	vk.gamma_variant_fs[ GAMMA_VAR_FXAA | GAMMA_VAR_SSAO | GAMMA_VAR_GODRAYS | GAMMA_VAR_TONEMAP | GAMMA_VAR_CG ] = SHADER_MODULE( gamma_ultimate_frag_spv );
+#endif
 
 	SET_OBJECT_NAME( vk.modules.gamma_fs, "gamma post-processing fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.gamma_vs, "gamma post-processing vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
@@ -4115,6 +4168,28 @@ void vk_update_post_process_pipelines( void )
 		}
 		if ( vk.smaa.active ) {
 			vk_create_smaa_pipelines();
+		}
+		// Create gamma variant pipeline if any post-process features are active
+		{
+			int varIdx = 0;
+#if FEAT_SSAO
+			if ( r_ssao->integer ) varIdx |= GAMMA_VAR_SSAO;
+#endif
+#if FEAT_TONEMAP
+			if ( r_tonemap->integer ) varIdx |= GAMMA_VAR_TONEMAP;
+#endif
+#if FEAT_COLOR_GRADING
+			if ( r_colorGrading->integer ) varIdx |= GAMMA_VAR_CG;
+#endif
+#if FEAT_FXAA
+			if ( r_fxaa->integer ) varIdx |= GAMMA_VAR_FXAA;
+#endif
+#if FEAT_GODRAYS
+			if ( r_godRays->integer ) varIdx |= GAMMA_VAR_GODRAYS;
+#endif
+			if ( varIdx ) {
+				vk_create_post_process_pipeline( 5, 0, 0 ); // gamma variant
+			}
 		}
 	}
 }
@@ -5186,8 +5261,15 @@ void vk_initialize( void )
 		vk.fboActive = qfalse;
 	}
 
-	// depth fade requires FBO for the depth copy
-	vk.depthFade.active = ( r_depthFade->integer && vk.fboActive ) ? qtrue : qfalse;
+	// depth fade requires FBO for the depth copy — also needed for SSAO and god rays
+	vk.depthFade.active = ( vk.fboActive && ( r_depthFade->integer
+#if FEAT_SSAO
+		|| r_ssao->integer
+#endif
+#if FEAT_GODRAYS
+		|| r_godRays->integer
+#endif
+	) ) ? qtrue : qfalse;
 
 	// SMAA anti-aliasing requires FBO
 	vk.smaa.active = ( r_smaa->integer && vk.fboActive ) ? qtrue : qfalse;
@@ -5480,7 +5562,7 @@ void vk_initialize( void )
 	// Pipeline layouts.
 	//
 	{
-		VkDescriptorSetLayout set_layouts[6];
+		VkDescriptorSetLayout set_layouts[8]; // sized for potential parallax set 6
 		VkPipelineLayoutCreateInfo desc;
 		VkPushConstantRange push_range;
 
@@ -5495,10 +5577,20 @@ void vk_initialize( void )
 		set_layouts[3] = vk.set_layout_sampler; // blend
 		set_layouts[4] = vk.set_layout_sampler; // collapsed fog texture
 		set_layouts[5] = vk.set_layout_sampler; // depth fade texture
+#if FEAT_PARALLAX_MAPPING
+		set_layouts[6] = vk.set_layout_sampler; // normalmap (parallax)
+#endif
 		desc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		desc.pNext = NULL;
 		desc.flags = 0;
-		desc.setLayoutCount = (vk.maxBoundDescriptorSets >= VK_DESC_COUNT) ? VK_DESC_COUNT : 4;
+		{
+			int layoutCount = (vk.maxBoundDescriptorSets >= VK_DESC_COUNT) ? VK_DESC_COUNT : 4;
+#if FEAT_PARALLAX_MAPPING
+			if ( r_parallaxMapping->integer && vk.maxBoundDescriptorSets >= 7 )
+				layoutCount = 7; // extend for normalmap set
+#endif
+			desc.setLayoutCount = layoutCount;
+		}
 		desc.pSetLayouts = set_layouts;
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &push_range;
@@ -5537,6 +5629,30 @@ void vk_initialize( void )
 		desc.setLayoutCount = VK_NUM_BLOOM_PASSES;
 
 		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_blend ) );
+
+#if FEAT_SSAO
+		// SSAO pipeline layout: 2 sampler sets (color + depth)
+		desc.setLayoutCount = 2;
+		desc.pushConstantRangeCount = 0;
+		desc.pPushConstantRanges = NULL;
+		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_ssao ) );
+#endif
+
+#if FEAT_GODRAYS
+		{
+			// Godrays pipeline layout: 2 samplers + push constants for sun position
+			VkPushConstantRange godrayPush;
+			godrayPush.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+			godrayPush.offset = 0;
+			godrayPush.size = 16; // vec2 sunScreenPos + float intensity + float decay
+			desc.setLayoutCount = 2;
+			desc.pushConstantRangeCount = 1;
+			desc.pPushConstantRanges = &godrayPush;
+			VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_godrays ) );
+			desc.pushConstantRangeCount = 0;
+			desc.pPushConstantRanges = NULL;
+		}
+#endif
 
 		// SMAA pipeline layout: 3 sampler sets + push constants (vec4 rtMetrics)
 		if ( vk.smaa.active ) {
@@ -6581,6 +6697,38 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			pipeline_name = "gamma-correction pipeline";
 			blend = qfalse;
 			break;
+		case 5: { // gamma variant (SSAO/tonemap/colorgrade/FXAA/godrays combo)
+			int varIdx = 0;
+#if FEAT_SSAO
+			if ( r_ssao->integer )     varIdx |= GAMMA_VAR_SSAO;
+#endif
+#if FEAT_TONEMAP
+			if ( r_tonemap->integer )  varIdx |= GAMMA_VAR_TONEMAP;
+#endif
+#if FEAT_COLOR_GRADING
+			if ( r_colorGrading->integer ) varIdx |= GAMMA_VAR_CG;
+#endif
+#if FEAT_FXAA
+			if ( r_fxaa->integer )     varIdx |= GAMMA_VAR_FXAA;
+#endif
+#if FEAT_GODRAYS
+			if ( r_godRays->integer )  varIdx |= GAMMA_VAR_GODRAYS;
+#endif
+			pipeline = &vk.gamma_variants[ varIdx ];
+			fsmodule = vk.gamma_variant_fs[ varIdx ];
+			renderpass = vk.render_pass.gamma;
+			// Select pipeline layout: godrays needs push constants, SSAO/godrays need depth sampler
+			if ( varIdx & GAMMA_VAR_GODRAYS )
+				layout = vk.pipeline_layout_godrays;
+			else if ( varIdx & GAMMA_VAR_SSAO )
+				layout = vk.pipeline_layout_ssao;
+			else
+				layout = vk.pipeline_layout_post_process;
+			samples = VK_SAMPLE_COUNT_1_BIT;
+			pipeline_name = "gamma-variant pipeline";
+			blend = qfalse;
+			break;
+		}
 	}
 
 	if ( *pipeline != VK_NULL_HANDLE ) {
@@ -7033,6 +7181,25 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			fs_module = &vk.modules.frag.light[1][0];
 			break;
 
+#if FEAT_PARALLAX_MAPPING
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX:
+			vs_module = &vk.modules.vert.light_parallax[0];
+			fs_module = &vk.modules.frag.light_parallax[0][0];
+			break;
+
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX_LINEAR:
+			vs_module = &vk.modules.vert.light_parallax[0];
+			fs_module = &vk.modules.frag.light_parallax[1][0];
+			break;
+#endif
+
+#if FEAT_ADVANCED_WATER
+		case TYPE_WATER:
+			vs_module = &vk.modules.vert.light[0]; // reuse light vertex (has pos, tc, N, L, V)
+			fs_module = &vk.modules.water_fs;
+			break;
+#endif
+
 		case TYPE_SIGNLE_TEXTURE_DF:
 			state_bits |= GLS_DEPTHMASK_TRUE;
 			vs_module = &vk.modules.vert.ident1[0][0][0];
@@ -7295,6 +7462,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	switch ( def->shader_type ) {
 		case TYPE_SIGNLE_TEXTURE_LIGHTING:
 		case TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR:
+#if FEAT_PARALLAX_MAPPING
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX:
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX_LINEAR:
+#endif
+#if FEAT_ADVANCED_WATER
+		case TYPE_WATER:
+#endif
 			frag_spec_data[5].i = def->abs_light ? 1 : 0;
 		default:
 			break;
@@ -7522,6 +7696,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 
 		case TYPE_SIGNLE_TEXTURE_LIGHTING:
 		case TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR:
+#if FEAT_PARALLAX_MAPPING
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX:
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX_LINEAR:
+#endif
+#if FEAT_ADVANCED_WATER
+		case TYPE_WATER:
+#endif
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_bind( 1, sizeof( vec2_t ) );					// st0 array
 			push_bind( 2, sizeof( vec4_t ) );					// normals array
@@ -9300,8 +9481,54 @@ void vk_end_frame( void )
 			vk.renderScaleY = 1.0;
 
 			vk_begin_render_pass( vk.render_pass.gamma, vk.framebuffers.gamma[ vk.cmd->swapchain_image_index ], qfalse, vk.renderWidth, vk.renderHeight );
-			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_pipeline );
-			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
+			{
+				// Build gamma variant index from active post-process cvars
+				int varIdx = 0;
+				qboolean needsDepth = qfalse;
+#if FEAT_SSAO
+				if ( r_ssao->integer && vk.depthFade.active ) { varIdx |= GAMMA_VAR_SSAO; needsDepth = qtrue; }
+#endif
+#if FEAT_TONEMAP
+				if ( r_tonemap->integer ) varIdx |= GAMMA_VAR_TONEMAP;
+#endif
+#if FEAT_COLOR_GRADING
+				if ( r_colorGrading->integer ) varIdx |= GAMMA_VAR_CG;
+#endif
+#if FEAT_FXAA
+				if ( r_fxaa->integer ) varIdx |= GAMMA_VAR_FXAA;
+#endif
+#if FEAT_GODRAYS
+				if ( r_godRays->integer && vk.depthFade.active ) { varIdx |= GAMMA_VAR_GODRAYS; needsDepth = qtrue; }
+#endif
+				if ( varIdx && vk.gamma_variants[ varIdx ] != VK_NULL_HANDLE ) {
+					VkPipelineLayout pLayout;
+					if ( varIdx & GAMMA_VAR_GODRAYS )
+						pLayout = vk.pipeline_layout_godrays;
+					else if ( varIdx & GAMMA_VAR_SSAO )
+						pLayout = vk.pipeline_layout_ssao;
+					else
+						pLayout = vk.pipeline_layout_post_process;
+
+					qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_variants[ varIdx ] );
+					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pLayout, 0, 1, &vk.color_descriptor, 0, NULL );
+					if ( needsDepth ) {
+						qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pLayout, 1, 1, &vk.depthFade.descriptor, 0, NULL );
+					}
+#if FEAT_GODRAYS
+					if ( varIdx & GAMMA_VAR_GODRAYS ) {
+						float pushData[4];
+						pushData[0] = r_sunX->value;  // sun screen X (0-1)
+						pushData[1] = r_sunY->value;  // sun screen Y (0-1)
+						pushData[2] = 0.5f;           // intensity
+						pushData[3] = 0.97f;          // decay
+						qvkCmdPushConstants( vk.cmd->command_buffer, pLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, pushData );
+					}
+#endif
+				} else {
+					qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_pipeline );
+					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
+				}
+			}
 
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		}

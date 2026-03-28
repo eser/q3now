@@ -743,6 +743,10 @@ typedef struct {
 	float		smoothPing;						// smoothed ping for nudge calculation
 #endif
 
+#if FEAT_SHOTGUN_PUMP
+	int			sgPumpTime;		// timestamp when pump animation started
+#endif
+
 } cg_t;
 
 
@@ -1300,6 +1304,11 @@ extern	vmCvar_t		cg_atmosphericEffects;
 void	CG_AtmosphericInit( void );
 void	CG_AddAtmosphericEffects( void );
 #endif
+#if FEAT_ENV_LIGHTS
+extern	vmCvar_t		cg_envLights;
+void	CG_AddEnvironmentLights( void );
+#endif
+
 #if FEAT_LENS_FLARES
 extern	vmCvar_t		cg_lensFlare;
 extern	vmCvar_t		cg_missileFlare;

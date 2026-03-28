@@ -453,8 +453,8 @@ void CG_SHUDEventObituaries(int attacker, int target, int mod, qboolean unfrozen
 	entry->mod = mod;
 	entry->unfrozen = unfrozen;
 	entry->time = cg.time;
-	entry->attackerTeam = cgs.clientinfo[attacker].team;
-	entry->targetTeam = cgs.clientinfo[target].team;
+	entry->attackerTeam = (attacker >= 0 && attacker < MAX_CLIENTS) ? cgs.clientinfo[attacker].team : TEAM_FREE;
+	entry->targetTeam = (target >= 0 && target < MAX_CLIENTS) ? cgs.clientinfo[target].team : TEAM_FREE;
 	entry->runtime.isInitialized = qfalse;
 
 	++ctx->obituaries.index;

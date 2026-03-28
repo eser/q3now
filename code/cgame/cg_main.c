@@ -196,6 +196,9 @@ vmCvar_t	cg_fastWeaponSwitch;
 #if FEAT_ATMOSPHERIC
 vmCvar_t	cg_atmosphericEffects;
 #endif
+#if FEAT_ENV_LIGHTS
+vmCvar_t	cg_envLights;
+#endif
 #if FEAT_LENS_FLARES
 vmCvar_t	cg_lensFlare;
 vmCvar_t	cg_missileFlare;
@@ -398,6 +401,9 @@ static cvarTable_t cvarTable[] = {
 #endif
 #if FEAT_ATMOSPHERIC
 	{ &cg_atmosphericEffects, "cg_atmosphericEffects", "1", CVAR_ARCHIVE},
+#endif
+#if FEAT_ENV_LIGHTS
+	{ &cg_envLights, "cg_envLights", "1", CVAR_ARCHIVE},
 #endif
 #if FEAT_LENS_FLARES
 	{ &cg_lensFlare, "cg_lensFlare", "1", CVAR_ARCHIVE},

@@ -2,6 +2,7 @@
 
 #include "../renderercommon/vulkan/vulkan.h"
 #include "tr_common.h"
+#include "../game/q_feats.h"
 
 #define MAX_SWAPCHAIN_IMAGES 8
 #define MIN_SWAPCHAIN_IMAGES_IMM 3
@@ -42,7 +43,10 @@
 #define VK_DESC_TEXTURE2     3
 #define VK_DESC_FOG_COLLAPSE 4
 #define VK_DESC_DEPTH_FADE   5
-#define VK_DESC_COUNT        6  // includes depth fade set 5
+#define VK_DESC_COUNT        6  // base descriptor count (sets 0-5)
+#if FEAT_PARALLAX_MAPPING
+#define VK_DESC_NORMALMAP    6  // parallax normalmap (only bound when active)
+#endif
 
 #define VK_DESC_TEXTURE_BASE VK_DESC_TEXTURE0
 #define VK_DESC_FOG_ONLY     VK_DESC_TEXTURE1
@@ -58,6 +62,13 @@ typedef enum {
 
 	TYPE_SIGNLE_TEXTURE_LIGHTING,
 	TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR,
+#if FEAT_PARALLAX_MAPPING
+	TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX,
+	TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX_LINEAR,
+#endif
+#if FEAT_ADVANCED_WATER
+	TYPE_WATER,
+#endif
 
 	TYPE_SIGNLE_TEXTURE_DF,
 
@@ -574,6 +585,9 @@ typedef struct {
 			VkShaderModule ident1[2][2][2]; // tx[0,1], env0[0,1] fog[0,1]
 			VkShaderModule fixed[2][2][2];  // tx[0,1], env0[0,1] fog[0,1]
 			VkShaderModule light[2];        // fog[0,1]
+#if FEAT_PARALLAX_MAPPING
+			VkShaderModule light_parallax[2]; // fog[0,1]
+#endif
 		} vert;
 		struct {
 			VkShaderModule gen0_df;
@@ -582,6 +596,9 @@ typedef struct {
 			VkShaderModule fixed[2][2];  // tx[0,1], fog[0,1]
 			VkShaderModule ent[1][2];    // tx[0], fog[0,1]
 			VkShaderModule light[2][2];  // linear[0,1] fog[0,1]
+#if FEAT_PARALLAX_MAPPING
+			VkShaderModule light_parallax[2][2]; // linear[0,1] fog[0,1]
+#endif
 			// depth fade variants (single-texture only)
 			VkShaderModule dfade_gen[1][2];    // tx[0], fog[0,1]
 			VkShaderModule dfade_ident1[1][2]; // tx[0], fog[0,1]
@@ -604,6 +621,10 @@ typedef struct {
 
 		VkShaderModule dot_fs;
 		VkShaderModule dot_vs;
+
+#if FEAT_ADVANCED_WATER
+		VkShaderModule water_fs;
+#endif
 
 		VkShaderModule smaa_edge_vs;
 		VkShaderModule smaa_edge_fs;
@@ -675,6 +696,19 @@ typedef struct {
 	uint32_t dot_pipeline;
 
 	VkPipeline gamma_pipeline;
+
+	// Post-process gamma variants (combinatorial, indexed by feature bitmask)
+	// Bit 0 = SSAO, Bit 1 = TONEMAP, Bit 2 = COLOR_GRADING, Bit 3 = FXAA
+#define GAMMA_VAR_SSAO    1
+#define GAMMA_VAR_TONEMAP 2
+#define GAMMA_VAR_CG      4
+#define GAMMA_VAR_FXAA    8
+#define GAMMA_VAR_GODRAYS 16
+#define GAMMA_VAR_COUNT   32
+	VkPipeline gamma_variants[GAMMA_VAR_COUNT];
+	VkShaderModule gamma_variant_fs[GAMMA_VAR_COUNT];
+	VkPipelineLayout pipeline_layout_ssao;    // 2 samplers: color + depth (SSAO without godrays)
+	VkPipelineLayout pipeline_layout_godrays; // 2 samplers + push constants (godrays sun position)
 	VkPipeline capture_pipeline;
 	VkPipeline bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs

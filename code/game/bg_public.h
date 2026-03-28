@@ -72,6 +72,39 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define DEFAULT_SHOTGUN_SPREAD	600
 #define DEFAULT_SHOTGUN_COUNT	16
 
+#if FEAT_SHOTGUN_PATTERN
+// Fixed pellet pattern: 1 center + 5 inner ring + 10 outer ring = 16 total
+// Each entry is { normalized_radius, base_angle_in_radians }.
+// Radius is scaled by DEFAULT_SHOTGUN_SPREAD * 16 at trace time.
+// The entire pattern is rotated by the shot seed.
+typedef struct {
+	float radius;
+	float angle;
+} shotgunPelletDef_t;
+
+static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
+	// center (1 pellet)
+	{ 0.00f, 0.0000f },
+	// inner ring (5 pellets, 72 deg apart)
+	{ 0.35f, 0.0000f },
+	{ 0.35f, 1.2566f },
+	{ 0.35f, 2.5133f },
+	{ 0.35f, 3.7699f },
+	{ 0.35f, 5.0265f },
+	// outer ring (10 pellets, 36 deg apart)
+	{ 0.80f, 0.0000f },
+	{ 0.80f, 0.6283f },
+	{ 0.80f, 1.2566f },
+	{ 0.80f, 1.8850f },
+	{ 0.80f, 2.5133f },
+	{ 0.80f, 3.1416f },
+	{ 0.80f, 3.7699f },
+	{ 0.80f, 4.3982f },
+	{ 0.80f, 5.0265f },
+	{ 0.80f, 5.6549f },
+};
+#endif
+
 #define	ITEM_RADIUS			15		// item sizes are needed for client side pickup detection
 #if FEAT_ITEMSIZES
 #define ITEM_PICKUP_SIZE    66

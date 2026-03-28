@@ -1044,17 +1044,18 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 
 #if FEAT_THIRD_PERSON
 #if FEAT_FORCE_ENTITY_VERTEX_ALPHA
-		// TODO: VK pipeline swap from opaque to blended causes
-		// visual artifacts. Alpha values are correct (verified with debug prints)
-		// but the blended pipeline renders dramatically differently even at alpha=254.
-		// Root cause unknown — needs RenderDoc/GPU trace debugging.
-		// The code below is correct; fix the pipeline swap mechanism.
+		// RF_FORCE_ENT_ALPHA: swap to alpha-blended pipeline for entity fade.
+		// Must mask-and-set (not OR) because GLS blend values are enumerated
+		// within 4-bit fields, not independent bitmasks.
+		// e.g. GLS_SRCBLEND_ONE(0x02) | GLS_SRCBLEND_SRC_ALPHA(0x05) = 0x07
+		//      which decodes as GLS_SRCBLEND_DST_ALPHA — wrong blend factor.
 		if ( backEnd.currentEntity &&
 			 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) &&
 			 backEnd.currentEntity->e.shader.rgba[3] < 255 ) {
 			Vk_Pipeline_Def def;
 			vk_get_pipeline_def( pipeline, &def );
-			def.state_bits |= GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
+			def.state_bits = ( def.state_bits & ~( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) )
+				| GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
 			pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		}
 #endif
@@ -1253,6 +1254,33 @@ void VK_LightingPass( void )
 		pipeline = vk.dlight1_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
 	else
 		pipeline = vk.dlight_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
+
+#if FEAT_ADVANCED_WATER
+	// Swap to water pipeline for liquid surfaces (refraction + Fresnel)
+	if ( tess.shader->contentFlags & ( CONTENTS_WATER | CONTENTS_LAVA | CONTENTS_SLIME ) ) {
+		Vk_Pipeline_Def def;
+		vk_get_pipeline_def( pipeline, &def );
+		def.shader_type = TYPE_WATER;
+		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
+		// bind screenMap to set 2 (lightmap slot) for refraction sampling
+		vk_update_descriptor( VK_DESC_TEXTURE1, vk.screenMap.color_descriptor );
+	}
+#endif
+
+#if FEAT_PARALLAX_MAPPING
+	// Swap to parallax pipeline variant when surface has a normalmap
+	if ( r_parallaxMapping->integer && pStage->bundle[2].image[0] ) {
+		Vk_Pipeline_Def def;
+		vk_get_pipeline_def( pipeline, &def );
+		if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING )
+			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX;
+		else if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR )
+			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX_LINEAR;
+		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
+		// bind normalmap to descriptor set 6
+		vk_update_descriptor( VK_DESC_NORMALMAP, pStage->bundle[2].image[0]->descriptor );
+	}
+#endif
 
 	GL_SelectTexture( 0 );
 	R_BindAnimatedImage( &pStage->bundle[ tess.shader->lightingBundle ] );

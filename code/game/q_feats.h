@@ -36,6 +36,8 @@
 #define FEAT_ITEMSIZES                    0   // dynamic item pickup bounding box via ITEM_PICKUP_SIZE
 #define FEAT_GRAPPLE_DAMAGE               0   // 5D  hook deals damage while pulling
 #define FEAT_PROJECTILE_BOUNCE            0   // 10H projectile reflection off shields
+#define FEAT_SHOTGUN_PATTERN              1   // fixed pellet ring pattern (replaces random spread)
+#define FEAT_SHOTGUN_PUMP                 1   // Doom-style pump animation after firing
 #define FEAT_TELEPORTING_MISSILES         0   // 2F  rockets/plasma through teleporters
 
 // ── bug fixes (CPMA-sourced id bug fixes) ────────────────────────────────
@@ -60,7 +62,8 @@
 #define FEAT_TOURNAMENT_PAUSE             0   // 10C mid-game pause/timeout
 
 // ── visual / UI (testing) ───────────────────────────────────────────────
-#define FEAT_DYNAMIC_MENU                 1   // 6A  callback-driven submenu system
+#define FEAT_DYNAMIC_MENU                 0   // 6A  callback-driven submenu system
+#define FEAT_ENV_LIGHTS                   0   // colored dlights from lava/slime/water surfaces (KEX-style)
 #define FEAT_IMPACT_SPARKS                0   // 11A spark particles on player hit
 #define FEAT_MAP_ROTATION                 1   // 6D  server-side map rotation list
 #define FEAT_STATS_WINDOW                 1   // floating stats overlay + window system
@@ -82,8 +85,15 @@
 #define FEAT_DEPTH_CLAMP                  0   // disable near-plane vertex clipping at high FOV
 // UPSCALE_BLIT: already in Quake3e via r_fbo + r_renderScale cvars, no flag needed
 #define FEAT_DEPTH_FADE                   0   // soft particle edges (explosions, smoke, blood)
+#define FEAT_PARALLAX_MAPPING             0   // steep parallax mapping with normalmap (height in alpha)
+#define FEAT_SSAO                         1   // screen-space ambient occlusion (embedded in gamma pass)
+#define FEAT_TONEMAP                      1   // HDR tone mapping (Reinhard/ACES/Uncharted2)
+#define FEAT_COLOR_GRADING                1   // color tint, saturation, contrast
+#define FEAT_FXAA                         1   // fast approximate anti-aliasing (embedded in gamma pass)
+#define FEAT_GODRAYS                      1   // screen-space crepuscular rays (depth-based sky detection)
+#define FEAT_ADVANCED_WATER               1   // screen-space refraction + Fresnel + ripple noise for water
 #define FEAT_SMAA                         0   // sub-pixel morphological anti-aliasing (deferred)
-#define FEAT_FORCE_ENTITY_VERTEX_ALPHA    1   // per-entity alpha override + dynamic pipeline swap (causes pink with r_fbo on MoltenVK)
+#define FEAT_FORCE_ENTITY_VERTEX_ALPHA    1   // per-entity alpha override + dynamic pipeline swap
 #define FEAT_FBO_DEBUG                    0   // verbose FBO pipeline diagnostics (format, layout, passes)
 
 // ── networking / transport (testing) ─────────────────────────────

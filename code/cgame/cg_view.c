@@ -958,6 +958,9 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 #if FEAT_LENS_FLARES
 		CG_AddLensFlares();
 #endif
+#if FEAT_ENV_LIGHTS
+		CG_AddEnvironmentLights();
+#endif
 	}
 	CG_AddViewWeapon( &cg.predictedPlayerState );
 
