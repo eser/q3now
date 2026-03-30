@@ -92,6 +92,8 @@
 #define FEAT_FXAA                         1   // fast approximate anti-aliasing (embedded in gamma pass)
 #define FEAT_GODRAYS                      1   // screen-space crepuscular rays (depth-based sky detection)
 #define FEAT_ADVANCED_WATER               1   // screen-space refraction + Fresnel + ripple noise for water
+#define FEAT_SHADOW_MAPPING               1   // per-light shadow maps with PCF (1/5/9 samples)
+#define FEAT_PBR                          1   // physically based rendering (GGX/Schlick/Smith BRDF)
 #define FEAT_SMAA                         0   // sub-pixel morphological anti-aliasing (deferred)
 #define FEAT_FORCE_ENTITY_VERTEX_ALPHA    1   // per-entity alpha override + dynamic pipeline swap
 #define FEAT_FBO_DEBUG                    0   // verbose FBO pipeline diagnostics (format, layout, passes)
@@ -153,7 +155,7 @@
 #define FEAT_TA_TEAM_ORDERS               0
 #define FEAT_HARVESTER                    0
 #define FEAT_OVERLOAD                     0
-#define FEAT_PW_KAMIKAZE                  0
+#define FEAT_PW_KAMIKAZE                  1
 #define FEAT_PW_INVULNERABILITY           0
 #endif
 

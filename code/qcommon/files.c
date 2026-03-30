@@ -4897,15 +4897,15 @@ Priority rules:
   1. Directory order: first seen in search path wins (HOMEDIR > DATADIR > BASEDIR)
   2. Within same dir: sw3z > pk3 (sw3z is prepended after pk3, so appears first)
   3. After dedup, re-sort archive entries by basename descending
-     so "pax02" overrides "pak0"
+     so "pax21" overrides "pak0"
 
   Before:                           After:
   ┌─────────────────────────┐      ┌─────────────────────────┐
-  │ HOMEDIR/pak0.pk3        │      │ pax02.pk3 (DATADIR)     │ ← sorted desc
+  │ HOMEDIR/pak0.pk3        │      │ pax21.pk3 (DATADIR)     │ ← sorted desc
   │ HOMEDIR/pak1.pk3        │      │ pak8.pk3 (HOMEDIR)      │
   │ ...                     │      │ pak7.pk3 (HOMEDIR)      │
   │ DATADIR/pak0.pk3  [dup] │  →   │ ...                     │
-  │ DATADIR/pax02.pk3       │      │ pak1.pk3 (HOMEDIR)      │
+  │ DATADIR/pax21.pk3       │      │ pak1.pk3 (HOMEDIR)      │
   │ BASEDIR/pak0.pk3  [dup] │      │ pak0.pk3 (HOMEDIR)      │
   └─────────────────────────┘      └─────────────────────────┘
 ================

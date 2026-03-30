@@ -45,31 +45,6 @@ void CG_TargetCommand_f( void ) {
 }
 
 
-
-/*
-=================
-CG_SizeUp_f
-
-Keybinding command
-=================
-*/
-static void CG_SizeUp_f (void) {
-	trap_Cvar_Set("cg_viewsize", va("%i",(int)(cg_viewsize.integer+10)));
-}
-
-
-/*
-=================
-CG_SizeDown_f
-
-Keybinding command
-=================
-*/
-static void CG_SizeDown_f (void) {
-	trap_Cvar_Set("cg_viewsize", va("%i",(int)(cg_viewsize.integer-10)));
-}
-
-
 /*
 =============
 CG_Viewpos_f
@@ -457,11 +432,10 @@ static consoleCommand_t	commands[] = {
 	{ "+thirdperson", CG_ThirdPersonDown_f },
 	{ "-thirdperson", CG_ThirdPersonUp_f },
 #endif
-	{ "sizeup", CG_SizeUp_f },
-	{ "sizedown", CG_SizeDown_f },
 	{ "weapnext", CG_NextWeapon_f },
 	{ "weapprev", CG_PrevWeapon_f },
 	{ "weapon", CG_Weapon_f },
+	{ "weapongrabbed", CG_WeaponGrabbed_f },
 	{ "tcmd", CG_TargetCommand_f },
 	{ "tell_target", CG_TellTarget_f },
 	{ "reloadhud", CG_ReloadHud_f },

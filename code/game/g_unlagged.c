@@ -320,8 +320,7 @@ void G_DoTimeShiftFor( gentity_t *ent ) {
 	wpflag = wpflags[ent->client->ps.weapon];
 
 	// if delag is enabled server-side and the client wants it (globally or per-weapon)
-	if ( g_delagHitscan.integer &&
-	     ( ent->client->pers.delag & 1 || ent->client->pers.delag & wpflag ) ) {
+	if ( ent->client->pers.delag & 1 || ent->client->pers.delag & wpflag ) {
 		// full lag compensation, offset by client's time nudge
 		time = ent->client->attackTime + ent->client->pers.cmdTimeNudge;
 	} else {

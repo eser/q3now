@@ -717,6 +717,27 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 			}
 		}
 #endif
+#if FEAT_PBR
+		//
+		// pbrMap <name> — R=roughness, G=metalness (glTF ORM convention)
+		//
+		else if ( !Q_stricmp( token, "pbrMap" ) || !Q_stricmp( token, "roughnessMap" ) || !Q_stricmp( token, "metalnessMap" ) )
+		{
+			int bundleIdx = 3; // bundle[3] for PBR map
+			token = COM_ParseExt( text, qfalse );
+			if ( !token[0] )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: missing parameter for 'pbrMap' keyword in shader '%s'\n", shader.name );
+				return qfalse;
+			}
+
+			stage->bundle[bundleIdx].image[0] = R_FindImageFile( token, IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE );
+			if ( !stage->bundle[bundleIdx].image[0] )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: R_FindImageFile could not find pbrMap '%s' in shader '%s'\n", token, shader.name );
+			}
+		}
+#endif
 		//
 		// animMap <frequency> <image1> .... <imageN>
 		//

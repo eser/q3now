@@ -14,12 +14,20 @@ export function CancelImport() {
   return window['go']['main']['App']['CancelImport']();
 }
 
+export function CheckDownloadStatus() {
+  return window['go']['main']['App']['CheckDownloadStatus']();
+}
+
 export function DetectQ1Installations() {
   return window['go']['main']['App']['DetectQ1Installations']();
 }
 
 export function DetectQ3Installations() {
   return window['go']['main']['App']['DetectQ3Installations']();
+}
+
+export function DownloadFreeResources() {
+  return window['go']['main']['App']['DownloadFreeResources']();
 }
 
 export function GetAppState() {
@@ -58,8 +66,8 @@ export function StartDedicated(arg1) {
   return window['go']['main']['App']['StartDedicated'](arg1);
 }
 
-export function StartImport(arg1, arg2) {
-  return window['go']['main']['App']['StartImport'](arg1, arg2);
+export function StartImport(arg1) {
+  return window['go']['main']['App']['StartImport'](arg1);
 }
 
 export function StopDedicated() {

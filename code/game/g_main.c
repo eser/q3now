@@ -100,8 +100,6 @@ vmCvar_t	g_q3now;
 vmCvar_t	g_singlePlayer;
 #if FEAT_UNLAGGED
 vmCvar_t	g_unlagged;
-vmCvar_t	g_delagHitscan;
-vmCvar_t	g_truePing;
 #endif
 #if FEAT_SPAWN_PROTECTION
 vmCvar_t	g_spawnProtect;
@@ -262,8 +260,6 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse },
 #if FEAT_UNLAGGED
     { &g_unlagged, "g_unlagged", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
-    { &g_delagHitscan, "g_delagHitscan", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
-    { &g_truePing, "g_truePing", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
 #endif
 #if FEAT_SPAWN_PROTECTION
     { &g_spawnProtect,            "g_spawnProtect",            "2", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },

@@ -8,6 +8,7 @@ include(utils/set_output_dirs)
 set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_main.c
     ${SOURCE_DIR}/game/bg_misc.c
+    ${SOURCE_DIR}/game/bg_weapons.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c
     ${SOURCE_DIR}/game/bg_promode.c
@@ -20,6 +21,26 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_utils.c
     ${SOURCE_DIR}/cgame/cg_moderntext.c
     ${SOURCE_DIR}/cgame/cg_window.c
+    ${SOURCE_DIR}/game/bg_tracemap.c
+    ${SOURCE_DIR}/cgame/cg_consolecmds.c
+    ${SOURCE_DIR}/cgame/cg_draw.c
+    ${SOURCE_DIR}/cgame/cg_drawtools.c
+    ${SOURCE_DIR}/cgame/cg_effects.c
+    ${SOURCE_DIR}/cgame/cg_ents.c
+    ${SOURCE_DIR}/cgame/cg_event.c
+    ${SOURCE_DIR}/cgame/cg_info.c
+    ${SOURCE_DIR}/cgame/cg_localents.c
+    ${SOURCE_DIR}/cgame/cg_marks.c
+    ${SOURCE_DIR}/cgame/cg_particles.c
+    ${SOURCE_DIR}/cgame/cg_players.c
+    ${SOURCE_DIR}/cgame/cg_playerstate.c
+    ${SOURCE_DIR}/cgame/cg_predict.c
+    ${SOURCE_DIR}/cgame/cg_scoreboard.c
+    ${SOURCE_DIR}/cgame/cg_servercmds.c
+    ${SOURCE_DIR}/cgame/cg_snapshot.c
+    ${SOURCE_DIR}/cgame/cg_view.c
+    ${SOURCE_DIR}/cgame/cg_weapons.c
+    ${SOURCE_DIR}/cgame/cg_znudge.c
     ${SOURCE_DIR}/cgame/cg_superhud.c
     ${SOURCE_DIR}/cgame/cg_superhud_configparser.c
     ${SOURCE_DIR}/cgame/cg_superhud_private.c
@@ -38,6 +59,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_superhud_element_localtime.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_location.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_name.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_netstats.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_ng.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_ngp.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_obituaries.c
@@ -66,30 +88,9 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_superhud_element_teamcount.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_tempAcc.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_vmw.c
-    ${SOURCE_DIR}/cgame/cg_superhud_element_weapon_stats.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_warmupinfo.c
+    ${SOURCE_DIR}/cgame/cg_superhud_element_weapon_stats.c
     ${SOURCE_DIR}/cgame/cg_superhud_element_weaponlist.c
-    ${SOURCE_DIR}/game/bg_tracemap.c
-    ${SOURCE_DIR}/cgame/cg_consolecmds.c
-    ${SOURCE_DIR}/cgame/cg_draw.c
-    ${SOURCE_DIR}/cgame/cg_drawtools.c
-    ${SOURCE_DIR}/cgame/cg_effects.c
-    ${SOURCE_DIR}/cgame/cg_ents.c
-    ${SOURCE_DIR}/cgame/cg_event.c
-    ${SOURCE_DIR}/cgame/cg_info.c
-    ${SOURCE_DIR}/cgame/cg_localents.c
-    ${SOURCE_DIR}/cgame/cg_marks.c
-    ${SOURCE_DIR}/cgame/cg_particles.c
-    ${SOURCE_DIR}/cgame/cg_players.c
-    ${SOURCE_DIR}/cgame/cg_playerstate.c
-    ${SOURCE_DIR}/cgame/cg_predict.c
-    ${SOURCE_DIR}/cgame/cg_scoreboard.c
-    ${SOURCE_DIR}/cgame/cg_servercmds.c
-    ${SOURCE_DIR}/cgame/cg_snapshot.c
-    ${SOURCE_DIR}/cgame/cg_view.c
-    ${SOURCE_DIR}/cgame/cg_weapons.c
-    ${SOURCE_DIR}/cgame/cg_znudge.c
-    ${SOURCE_DIR}/cgame/cg_superhud_element_netstats.c
     ${SOURCE_DIR}/cgame/cg_wired_bridge.c
 )
 
@@ -110,6 +111,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/ai_vcmd.c
     ${SOURCE_DIR}/game/ai_weapsel.c
     ${SOURCE_DIR}/game/bg_misc.c
+    ${SOURCE_DIR}/game/bg_weapons.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c
     ${SOURCE_DIR}/game/bg_promode.c
@@ -135,6 +137,15 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_trigger.c
     ${SOURCE_DIR}/game/g_utils.c
     ${SOURCE_DIR}/game/g_weapon.c
+    ${SOURCE_DIR}/game/weapons/g_gauntlet.c
+    ${SOURCE_DIR}/game/weapons/g_machinegun.c
+    ${SOURCE_DIR}/game/weapons/g_shotgun.c
+    ${SOURCE_DIR}/game/weapons/g_grenade_launcher.c
+    ${SOURCE_DIR}/game/weapons/g_rocket_launcher.c
+    ${SOURCE_DIR}/game/weapons/g_plasma_rifle.c
+    ${SOURCE_DIR}/game/weapons/g_railgun.c
+    ${SOURCE_DIR}/game/weapons/g_lightning_gun.c
+    ${SOURCE_DIR}/game/weapons/g_grappling_hook.c
     ${SOURCE_DIR}/game/g_unlagged.c
 )
 
@@ -144,6 +155,7 @@ set(GAME_QVM_SOURCES ${SOURCE_DIR}/game/g_syscalls.asm)
 set(UI_SOURCES
     ${SOURCE_DIR}/q3_ui/ui_main.c
     ${SOURCE_DIR}/game/bg_misc.c
+    ${SOURCE_DIR}/game/bg_weapons.c
     ${SOURCE_DIR}/game/bg_lib.c
     ${SOURCE_DIR}/q3_ui/ui_addbots.c
     ${SOURCE_DIR}/q3_ui/ui_atoms.c

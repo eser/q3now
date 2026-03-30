@@ -18,6 +18,9 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 fogEyeT;				// vertex
 	vec4 fogColor;				// fragment
 #endif
+#ifdef USE_SHADOWMAP
+	mat4 shadowMVP;				// light view-projection matrix
+#endif
 };
 
 layout(location = 0) in vec3 in_position;
@@ -35,6 +38,9 @@ layout(location = 4) out vec2 fog_tex_coord;
 #ifdef USE_PARALLAX
 layout(location = 5) out vec3 frag_position; // object-space position for TBN
 #endif
+#ifdef USE_SHADOWMAP
+layout(location = 6) out vec4 shadowCoord;   // light-space position
+#endif
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -49,6 +55,9 @@ void main() {
 	V = eyePos - vec4(in_position, 1.0);
 #ifdef USE_PARALLAX
 	frag_position = in_position;
+#endif
+#ifdef USE_SHADOWMAP
+	shadowCoord = shadowMVP * vec4( in_position, 1.0 );
 #endif
 
 #ifdef USE_FOG

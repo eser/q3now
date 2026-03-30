@@ -36,8 +36,7 @@ void CG_SHUDElementNetStatsRoutine(void* context)
 	}
 
 	// truePing: the server sends the real (averaged) ping via
-	// playerState when g_truePing is enabled; otherwise fall back
-	// to the snapshot ping which is quantised to 50 ms buckets.
+	// playerState.
 	ping = cg.snap->ping;
 
 	// effective delag window: difference between level time and

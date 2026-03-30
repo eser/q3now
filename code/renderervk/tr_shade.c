@@ -1255,6 +1255,36 @@ void VK_LightingPass( void )
 	else
 		pipeline = vk.dlight_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
 
+#if FEAT_PBR
+	// Swap to PBR pipeline when surface has a pbrMap
+	if ( pStage->bundle[3].image[0] ) {
+		Vk_Pipeline_Def def;
+		vk_get_pipeline_def( pipeline, &def );
+		if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING )
+			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_PBR;
+		else if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR )
+			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_PBR_LINEAR;
+		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
+		// bind pbrMap to set 4 (fog_collapse slot, unused during dlight pass)
+		vk_update_descriptor( VK_DESC_FOG_COLLAPSE, pStage->bundle[3].image[0]->descriptor );
+	}
+#endif
+
+#if FEAT_SHADOW_MAPPING
+	// Swap to shadow-mapped pipeline when shadow mapping is active
+	if ( vk.shadowMap.active ) {
+		Vk_Pipeline_Def def;
+		vk_get_pipeline_def( pipeline, &def );
+		if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING )
+			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW;
+		else if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR )
+			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW_LINEAR;
+		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
+		// bind shadow map to set 3 (blend texture slot)
+		vk_update_descriptor( VK_DESC_TEXTURE2, vk.shadowMap.descriptor );
+	}
+#endif
+
 #if FEAT_ADVANCED_WATER
 	// Swap to water pipeline for liquid surfaces (refraction + Fresnel)
 	if ( tess.shader->contentFlags & ( CONTENTS_WATER | CONTENTS_LAVA | CONTENTS_SLIME ) ) {

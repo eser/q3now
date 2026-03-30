@@ -167,21 +167,21 @@ void CG_WiredHudPushState( void ) {
 		state.scores[i].massacreCount     = cg.scores[i].massacreCount;
 		state.scores[i].unstoppableCount  = cg.scores[i].unstoppableCount;
 
-		// pre-compute total damage and best weapon from weaponStats
+		// pre-compute total damage and best attack from attackStats
 		{
 			int j, clientNum = cg.scores[i].client;
-			int totalDmg = 0, bestWp = WP_NONE, bestWpKills = 0;
+			int totalDmg = 0, bestAtt = ATT_NONE, bestAttKills = 0;
 			if ( clientNum >= 0 && clientNum < MAX_CLIENTS ) {
-				for ( j = WP_GAUNTLET; j < WP_NUM_WEAPONS; j++ ) {
-					totalDmg += cgs.weaponStats[clientNum][j].damage;
-					if ( cgs.weaponStats[clientNum][j].kills > bestWpKills ) {
-						bestWpKills = cgs.weaponStats[clientNum][j].kills;
-						bestWp = j;
+				for ( j = ATT_NONE + 1; j < ATT_NUM_ATTACKS; j++ ) {
+					totalDmg += cgs.attackStats[clientNum][j].damage;
+					if ( cgs.attackStats[clientNum][j].kills > bestAttKills ) {
+						bestAttKills = cgs.attackStats[clientNum][j].kills;
+						bestAtt = j;
 					}
 				}
 			}
 			state.scores[i].totalDamage = totalDmg;
-			state.scores[i].bestWeapon  = bestWp;
+			state.scores[i].bestAttack  = bestAtt;
 		}
 	}
 
@@ -202,9 +202,12 @@ void CG_WiredHudPushState( void ) {
 		state.redFlagShader[i]  = cgs.media.redFlagShader[i];
 		state.blueFlagShader[i] = cgs.media.blueFlagShader[i];
 	}
-	for ( i = 0; i < MAX_WEAPONS; i++ ) {
+	for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
 		state.weaponIcons[i] = cg_weapons[i].weaponIcon;
 		state.ammoIcons[i]   = cg_weapons[i].ammoIcon;
+	}
+	for ( i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
+		state.attackIcons[i] = cg_weapons[bg_attacklist[i].weapon].weaponIcon;
 	}
 
 	// item icons (for item pickup, powerup display)
@@ -256,16 +259,16 @@ void CG_WiredHudPushState( void ) {
 		state.numBindings = b;
 	}
 
-	// ── per-weapon stats for local player ────────────────────────────
+	// ── per-attack stats for local player ────────────────────────────
 	{
 		int clientNum = cg.snap->ps.clientNum;
 		if ( clientNum >= 0 && clientNum < MAX_CLIENTS ) {
-			for ( i = 0; i < WP_NUM_WEAPONS && i < MAX_WEAPONS; i++ ) {
-				state.weaponStats[i].hits   = cgs.weaponStats[clientNum][i].hits;
-				state.weaponStats[i].shots  = cgs.weaponStats[clientNum][i].shots;
-				state.weaponStats[i].kills  = cgs.weaponStats[clientNum][i].kills;
-				state.weaponStats[i].deaths = cgs.weaponStats[clientNum][i].deaths;
-				state.weaponStats[i].damage = cgs.weaponStats[clientNum][i].damage;
+			for ( i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
+				state.attackStats[i].hits   = cgs.attackStats[clientNum][i].hits;
+				state.attackStats[i].shots  = cgs.attackStats[clientNum][i].shots;
+				state.attackStats[i].kills  = cgs.attackStats[clientNum][i].kills;
+				state.attackStats[i].deaths = cgs.attackStats[clientNum][i].deaths;
+				state.attackStats[i].damage = cgs.attackStats[clientNum][i].damage;
 			}
 		}
 	}
@@ -291,6 +294,44 @@ void CG_WiredHudPushState( void ) {
 	state.localServer = cgs.localServer;
 
 	state.wiredUIActive = ( cg_wiredUI.integer != 0 );
+
+	// ── TA compat: CG_SHOW_* display flags ──────────────────────────
+	// These use the actual hex values from menudef.h that TA .menu files embed
+	{
+		unsigned int f = 0;
+		int team = cg.snap->ps.persistant[PERS_TEAM];
+
+		if ( cgs.blueflag == 2 /* FLAG_TAKEN_RED */ )   f |= 0x00000001; // CG_SHOW_BLUE_TEAM_HAS_REDFLAG
+		if ( cgs.redflag == 1 /* FLAG_TAKEN_BLUE */ )   f |= 0x00000002; // CG_SHOW_RED_TEAM_HAS_BLUEFLAG
+		if ( cgs.gametype >= GT_TEAM )                   f |= 0x00000004; // CG_SHOW_ANYTEAMGAME
+		if ( cgs.gametype == GT_HARVESTER )              f |= 0x00000008; // CG_SHOW_HARVESTER
+		if ( cgs.gametype == GT_1FCTF )                  f |= 0x00000010; // CG_SHOW_ONEFLAG
+		if ( cgs.gametype == GT_CTF )                    f |= 0x00000020; // CG_SHOW_CTF
+		if ( cgs.gametype == GT_OBELISK )                f |= 0x00000040; // CG_SHOW_OBELISK
+		if ( state.health < 25 )                         f |= 0x00000080; // CG_SHOW_HEALTHCRITICAL
+		if ( cgs.gametype == GT_SINGLE_PLAYER )          f |= 0x00000100; // CG_SHOW_SINGLEPLAYER
+		if ( cgs.gametype == GT_TOURNAMENT )             f |= 0x00000200; // CG_SHOW_TOURNAMENT
+		if ( state.health >= 25 )                        f |= 0x00004000; // CG_SHOW_HEALTHOK
+		if ( cg.snap->ps.powerups[PW_REDFLAG] ||
+		     cg.snap->ps.powerups[PW_BLUEFLAG] )         f |= 0x00000800; // CG_SHOW_IF_PLAYER_HAS_FLAG
+		if ( cgs.gametype < GT_TEAM )                    f |= 0x00080000; // CG_SHOW_ANYNONTEAMGAME
+
+		state.cgShowFlags = f;
+	}
+
+	// ── TA compat: UI_SHOW_* display flags ──────────────────────────
+	{
+		unsigned int uf = 0;
+		int myScore = cg.snap->ps.persistant[PERS_SCORE];
+		// simple leader check: are we #1?
+		if ( myScore >= state.scores1 && myScore > 0 )   uf |= 0x00000001; // UI_SHOW_LEADER
+		if ( myScore < state.scores1 )                    uf |= 0x00000002; // UI_SHOW_NOTLEADER
+		if ( cgs.gametype < GT_TEAM )                     uf |= 0x00000008; // UI_SHOW_ANYNONTEAMGAME
+		if ( cgs.gametype >= GT_TEAM )                    uf |= 0x00000010; // UI_SHOW_ANYTEAMGAME
+
+		state.uiShowFlags = uf;
+	}
+
 	state.valid = qtrue;
 
 	trap_WiredUI_PushHudState( &state );

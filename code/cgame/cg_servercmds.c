@@ -117,13 +117,13 @@ static void CG_ParseScores( void ) {
 =================
 CG_ParseBStats
 
-Parse per-weapon stats from server bstats command.
+Parse per-attack stats from server bstats command.
 Format: bstats <clientId> <weaponBitmask> [<hits> <shots> <kills> <deaths> <damage>]...
 =================
 */
 static void CG_ParseBStats( void ) {
 	int clientId, weaponMask, index, i;
-	cgWeaponStat_t prevStats[WP_NUM_WEAPONS];
+	cgAttackStat_t prevStats[ATT_NUM_ATTACKS];
 
 	index = 1;
 	clientId = atoi( CG_Argv( index++ ) );
@@ -132,25 +132,25 @@ static void CG_ParseBStats( void ) {
 	if ( clientId < 0 || clientId >= MAX_CLIENTS ) return;
 
 	// save previous stats for delta computation (tempAcc)
-	memcpy( prevStats, cgs.weaponStats[clientId], sizeof( prevStats ) );
+	memcpy( prevStats, cgs.attackStats[clientId], sizeof( prevStats ) );
 
-	memset( cgs.weaponStats[clientId], 0, sizeof( cgs.weaponStats[clientId] ) );
+	memset( cgs.attackStats[clientId], 0, sizeof( cgs.attackStats[clientId] ) );
 
-	for ( i = WP_GAUNTLET; i < WP_NUM_WEAPONS; i++ ) {
+	for ( i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
 		if ( weaponMask & ( 1 << i ) ) {
-			cgs.weaponStats[clientId][i].hits   = atoi( CG_Argv( index++ ) );
-			cgs.weaponStats[clientId][i].shots  = atoi( CG_Argv( index++ ) );
-			cgs.weaponStats[clientId][i].kills  = atoi( CG_Argv( index++ ) );
-			cgs.weaponStats[clientId][i].deaths = atoi( CG_Argv( index++ ) );
-			cgs.weaponStats[clientId][i].damage = atoi( CG_Argv( index++ ) );
+			cgs.attackStats[clientId][i].hits   = atoi( CG_Argv( index++ ) );
+			cgs.attackStats[clientId][i].shots  = atoi( CG_Argv( index++ ) );
+			cgs.attackStats[clientId][i].kills  = atoi( CG_Argv( index++ ) );
+			cgs.attackStats[clientId][i].deaths = atoi( CG_Argv( index++ ) );
+			cgs.attackStats[clientId][i].damage = atoi( CG_Argv( index++ ) );
 		}
 	}
 
 	// compute tempAcc: recent accuracy from hits/shots delta (local player only)
 	if ( clientId == cg.snap->ps.clientNum ) {
-		for ( i = WP_GAUNTLET; i < WP_NUM_WEAPONS; i++ ) {
-			int hitsDelta  = cgs.weaponStats[clientId][i].hits  - prevStats[i].hits;
-			int shotsDelta = cgs.weaponStats[clientId][i].shots - prevStats[i].shots;
+		for ( i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
+			int hitsDelta  = cgs.attackStats[clientId][i].hits  - prevStats[i].hits;
+			int shotsDelta = cgs.attackStats[clientId][i].shots - prevStats[i].shots;
 
 			if ( shotsDelta > 0 ) {
 				float acc = (float)hitsDelta / (float)shotsDelta;

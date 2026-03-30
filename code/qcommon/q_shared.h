@@ -30,8 +30,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #ifndef Q3_RELEASE_VERSION
   #define Q3_RELEASE_VERSION Q3_VERSION
 #endif
+#ifdef CHANNEL_SUFFIX
+#define CLIENT_WINDOW_TITLE   "q3now" CHANNEL_SUFFIX
+#define CONSOLE_WINDOW_TITLE  "q3now" CHANNEL_SUFFIX " Console"
+#else
 #define CLIENT_WINDOW_TITLE   "q3now"
 #define CONSOLE_WINDOW_TITLE  "q3now Console"
+#endif
 // 1.32 released 7-10-2002
 
 //#define DEFAULT_GAME			"edawn"
@@ -1198,6 +1203,7 @@ typedef struct {
 #define	MAX_PERSISTANT			20		// increased from 16 for kill spree tier counters
 #define	MAX_POWERUPS			16
 #define	MAX_WEAPONS				16
+#define	MAX_ATTACKS				32
 
 #define	MAX_PS_EVENTS			2
 
@@ -1291,7 +1297,8 @@ typedef struct playerState_s {
 // so they aren't game/cgame only definitions
 //
 #define	BUTTON_ATTACK		1
-#define	BUTTON_TALK			2			// displays talk balloon and disables actions
+#define	BUTTON_ATTACK_ALT	2			// secondary fire (bit 1, slot next to +attack)
+#define	BUTTON_TALK			4096		// displays talk balloon and disables actions
 #define	BUTTON_USE_HOLDABLE	4
 #define	BUTTON_GESTURE		8
 #define	BUTTON_WALKING		16			// walking can't just be inferred from MOVE_RUN

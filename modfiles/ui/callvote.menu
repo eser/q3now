@@ -6,7 +6,7 @@
 
 menuDef {
 	name "callvote"
-	rect 170 100 300 280
+	rect 170 80 300 340
 	fullScreen 0
 	visible 1
 	style 1
@@ -21,13 +21,15 @@ menuDef {
 	BUTTON(20, 48, 260, BUTTON_H, "Restart Map", 0.4, exec "callvote map_restart" ; close)
 	BUTTON(20, 76, 260, BUTTON_H, "Next Map", 0.4, exec "callvote nextmap" ; close)
 	BUTTON(20, 104, 260, BUTTON_H, "Shuffle Teams", 0.4, exec "callvote shuffle" ; close)
+	BUTTON(20, 132, 120, BUTTON_H, "Enable Unlagged", 0.3, exec "callvote g_unlagged 1" ; close)
+	BUTTON(160, 132, 120, BUTTON_H, "Disable Unlagged", 0.3, exec "callvote g_unlagged 0" ; close)
 
-	SEPARATOR(16, 134, 268)
+	SEPARATOR(16, 162, 268)
 
 	itemDef {
 		type 12
 		text "Timelimit:"
-		rect 20 148 260 20
+		rect 20 176 260 20
 		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "ui_voteTimelimit"
@@ -35,12 +37,12 @@ menuDef {
 		visible 1
 	}
 
-	BUTTON(20, 174, 260, BUTTON_H, "Vote Timelimit", 0.35, exec "callvote timelimit" ; close)
+	BUTTON(20, 202, 260, BUTTON_H, "Vote Timelimit", 0.35, exec "callvote timelimit" ; close)
 
 	itemDef {
 		type 12
 		text "Fraglimit:"
-		rect 20 202 260 20
+		rect 20 230 260 20
 		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "ui_voteFraglimit"
@@ -48,8 +50,8 @@ menuDef {
 		visible 1
 	}
 
-	BUTTON(20, 228, 260, BUTTON_H, "Vote Fraglimit", 0.35, exec "callvote fraglimit" ; close)
+	BUTTON(20, 256, 260, BUTTON_H, "Vote Fraglimit", 0.35, exec "callvote fraglimit" ; close)
 
-	SEPARATOR(16, 258, 268)
-	BUTTON(20, 270, 260, BUTTON_H, "Cancel", 0.4, close)
+	SEPARATOR(16, 286, 268)
+	BUTTON(20, 298, 260, BUTTON_H, "Cancel", 0.4, close)
 }

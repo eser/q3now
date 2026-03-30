@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -144,9 +147,168 @@ func (a *App) BrowseForDirectory() (string, error) {
 	})
 }
 
+// ── Free Resource Downloads ─────────────────────────────────────────────────
+
+// CheckDownloadStatus returns the availability of downloaded demo pk3 files.
+func (a *App) CheckDownloadStatus() map[string]interface{} {
+	dlDir := a.paths.DownloadDir()
+	demoQ3 := fileExists(filepath.Join(dlDir, "demoq3", "pak0.pk3"))
+	demoTA := fileExists(filepath.Join(dlDir, "demota", "pak0.pk3"))
+	return map[string]interface{}{
+		"demoQ3": demoQ3,
+		"demoTA": demoTA,
+		"ready":  demoQ3 && demoTA,
+	}
+}
+
+// DownloadFreeResources downloads Q3 demo and Q3TA demo pk3 files.
+func (a *App) DownloadFreeResources() error {
+	a.mu.Lock()
+	if a.importing {
+		a.mu.Unlock()
+		return ErrImportInProgress
+	}
+	a.importing = true
+	a.mu.Unlock()
+
+	go a.runDownload()
+	return nil
+}
+
+func (a *App) runDownload() {
+	defer func() {
+		a.mu.Lock()
+		a.importing = false
+		a.cancelImport = nil
+		a.mu.Unlock()
+	}()
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.mu.Lock()
+	a.cancelImport = cancel
+	a.mu.Unlock()
+
+	dlDir := a.paths.DownloadDir()
+
+	downloads := []struct {
+		url     string
+		dest    string
+		label   string
+	}{
+		{pipeline.QuakeDataDemoQ3DownloadUri, filepath.Join(dlDir, "demoq3", "pak0.pk3"), "Q3 Arena Demo"},
+		{pipeline.QuakeDataDemoQ3TADownloadUri, filepath.Join(dlDir, "demota", "pak0.pk3"), "Q3 Team Arena Demo"},
+	}
+
+	for i, dl := range downloads {
+		if ctx.Err() != nil {
+			return
+		}
+
+		runtime.EventsEmit(a.ctx, "download:progress", map[string]interface{}{
+			"current": i,
+			"total":   len(downloads),
+			"message": fmt.Sprintf("Downloading %s...", dl.label),
+		})
+
+		if fileExists(dl.dest) {
+			slog.Info("already downloaded, skipping", "file", dl.dest)
+			continue
+		}
+
+		if err := downloadFile(ctx, dl.url, dl.dest, func(received, total int64) {
+			runtime.EventsEmit(a.ctx, "download:progress", map[string]interface{}{
+				"current": i,
+				"total":   len(downloads),
+				"message": fmt.Sprintf("Downloading %s... (%d MB)", dl.label, received/(1024*1024)),
+			})
+		}); err != nil {
+			if ctx.Err() != nil {
+				slog.Info("download cancelled by user")
+				return
+			}
+			slog.Error("download failed", "url", dl.url, "error", err)
+			runtime.EventsEmit(a.ctx, "download:error", err.Error())
+			return
+		}
+	}
+
+	runtime.EventsEmit(a.ctx, "download:progress", map[string]interface{}{
+		"current": len(downloads),
+		"total":   len(downloads),
+		"message": "Download complete!",
+	})
+	time.Sleep(500 * time.Millisecond)
+	runtime.EventsEmit(a.ctx, "download:complete", nil)
+}
+
+// downloadFile fetches a URL to a local path with atomic write and progress callbacks.
+func downloadFile(ctx context.Context, url, destPath string, onProgress func(received, total int64)) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
+
+	tmpPath := destPath + ".downloading"
+	out, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		out.Close()
+		os.Remove(tmpPath) // cleanup on error; no-op after successful rename
+	}()
+
+	var received int64
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := out.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			received += int64(n)
+			if onProgress != nil {
+				onProgress(received, resp.ContentLength)
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return readErr
+		}
+	}
+
+	if err := out.Sync(); err != nil {
+		return err
+	}
+	out.Close()
+
+	return os.Rename(tmpPath, destPath)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // ── Import Pipeline ─────────────────────────────────────────────────────────
 
-func (a *App) StartImport(q3Path, q1Path string) error {
+func (a *App) StartImport(q3Path string) error {
 	a.mu.Lock()
 	if a.importing {
 		a.mu.Unlock()
@@ -157,17 +319,25 @@ func (a *App) StartImport(q3Path, q1Path string) error {
 
 	// Run import in background so the frontend can navigate to ProgressScreen
 	// and receive events.
-	go a.runImport(q3Path, q1Path)
+	go a.runImport(q3Path)
 	return nil
 }
 
-// runImport executes the full import pipeline in a background goroutine:
+// paxJob describes one pipeline pass that produces a single .sw3z file.
+type paxJob struct {
+	name      string                 // e.g. "pax01"
+	output    string                 // e.g. "pax01.sw3z"
+	sources   []pipeline.SourceGroup // where to read pk3 files from
+	allowlist map[string]struct{}    // which files to include
+}
+
+// runImport executes multi-pass import pipeline in a background goroutine:
 //
-//	scan inventory → validate → pipeline (Extract → Process → SW3Z) → manifest → done
+//	validate downloads → build pax jobs → run each pipeline → manifest → done
 //
 // Progress events are forwarded to the frontend via Wails EventsEmit.
 // Cancellation is supported via context — CancelImport() triggers it.
-func (a *App) runImport(q3Path, q1Path string) {
+func (a *App) runImport(q3Path string) {
 	defer func() {
 		a.mu.Lock()
 		a.importing = false
@@ -187,44 +357,61 @@ func (a *App) runImport(q3Path, q1Path string) {
 	// Give the frontend a moment to mount ProgressScreen.
 	time.Sleep(100 * time.Millisecond)
 
-	// ── Step 1: Scan game directories ────────────────────────────────────
-	emitProgress("scan", 0, 1, "Scanning game directories...")
+	// ── Step 1: Validate downloaded demo files ───────────────────────────
+	emitProgress("scan", 0, 1, "Checking downloaded resources...")
 
-	inventory := make(map[string]string)
+	dlDir := a.paths.DownloadDir()
+	demoQ3Dir := filepath.Join(dlDir, "demoq3")
+	demoTADir := filepath.Join(dlDir, "demota")
 
+	if !fileExists(filepath.Join(demoQ3Dir, "pak0.pk3")) || !fileExists(filepath.Join(demoTADir, "pak0.pk3")) {
+		runtime.EventsEmit(a.ctx, "import:error",
+			"Free resources not downloaded yet. Please download them first.")
+		return
+	}
+
+	// ── Step 2: Build pax jobs ───────────────────────────────────────────
+
+	// Always: pax01 (Q3 demo) + pax03 (Q3TA demo)
+	jobs := []paxJob{
+		{
+			name:      "pax01",
+			output:    "pax01.sw3z",
+			sources:   []pipeline.SourceGroup{{Origin: "demo_q3", Dir: demoQ3Dir}},
+			allowlist: pipeline.Q3CopyPax01Allowlist,
+		},
+		{
+			name:      "pax03",
+			output:    "pax03.sw3z",
+			sources:   []pipeline.SourceGroup{{Origin: "demo_ta", Dir: demoTADir}},
+			allowlist: pipeline.Q3CopyPax03Allowlist,
+		},
+	}
+
+	// Optional: pax02 + pax04 from full game installation
 	if q3Path != "" {
-		for _, r := range detect.ScanInventory(q3Path, "q3", "qlive") {
-			if r.Found {
-				inventory[r.Item.ID] = r.Path
-			}
+		baseQ3Dir := filepath.Join(q3Path, "baseq3")
+		if fileExists(baseQ3Dir) {
+			jobs = append(jobs, paxJob{
+				name:      "pax02",
+				output:    "pax02.sw3z",
+				sources:   []pipeline.SourceGroup{{Origin: "q3_base", Dir: baseQ3Dir}},
+				allowlist: pipeline.Q3CopyPax02Allowlist,
+			})
 		}
-	}
-	if q1Path != "" {
-		for _, r := range detect.ScanInventory(q1Path, "q1") {
-			if r.Found {
-				inventory[r.Item.ID] = r.Path
-			}
-		}
-	}
 
-	emitProgress("scan", 1, 1, fmt.Sprintf("Found %d game content directories", len(inventory)))
-
-	// Validate: need Q3A or QL base game.
-	if _, ok := inventory["q3_base"]; !ok {
-		if _, ok := inventory["qlive_base"]; !ok {
-			runtime.EventsEmit(a.ctx, "import:error",
-				fmt.Sprintf("No valid Quake 3 Arena / Quake Live installation found at %s", q3Path))
-			return
+		missionpackDir := filepath.Join(q3Path, "missionpack")
+		if fileExists(missionpackDir) {
+			jobs = append(jobs, paxJob{
+				name:      "pax04",
+				output:    "pax04.sw3z",
+				sources:   []pipeline.SourceGroup{{Origin: "q3_ta", Dir: missionpackDir}},
+				allowlist: pipeline.Q3CopyPax04Allowlist,
+			})
 		}
 	}
 
-	// ── Step 2: Run the import pipeline ──────────────────────────────────
-
-	// Build source groups from scanned inventory.
-	var sources []pipeline.SourceGroup
-	if dir, ok := inventory["q3_base"]; ok {
-		sources = append(sources, pipeline.SourceGroup{Origin: "q3_base", Dir: dir})
-	}
+	emitProgress("scan", 1, 1, fmt.Sprintf("Preparing %d asset packs...", len(jobs)))
 
 	// Create cancellable context so CancelImport() can stop the pipeline.
 	ctx, cancel := context.WithCancel(a.ctx)
@@ -232,34 +419,52 @@ func (a *App) runImport(q3Path, q1Path string) {
 	a.cancelImport = cancel
 	a.mu.Unlock()
 
-	pip := pipeline.New(a.paths, sources,
-		pipeline.WithProcessors(&pipeline.Q3BaseProcessor{}),
-	)
+	// ── Step 3: Run each pipeline pass ───────────────────────────────────
 
-	// Forward pipeline progress events to the frontend.
-	go func() {
-		for p := range pip.Progress() {
-			runtime.EventsEmit(a.ctx, "import:progress", map[string]interface{}{
-				"step":    p.Step,
-				"current": p.Current,
-				"total":   p.Total,
-				"message": p.Message,
-			})
-		}
-	}()
-
-	if err := pip.Run(ctx); err != nil {
-		// User-initiated cancel: silent return (frontend already handling it).
+	for i, job := range jobs {
 		if ctx.Err() != nil {
 			slog.Info("import cancelled by user")
 			return
 		}
-		slog.Error("pipeline failed", "error", err)
-		runtime.EventsEmit(a.ctx, "import:error", err.Error())
-		return
+
+		emitProgress("process", i, len(jobs),
+			fmt.Sprintf("Processing %s (%d/%d)...", job.name, i+1, len(jobs)))
+
+		pip := pipeline.New(a.paths, job.sources,
+			pipeline.WithProcessors(&pipeline.Q3CopyProcessor{Allowlist: job.allowlist}),
+			pipeline.WithOutputName(job.output),
+		)
+
+		// Forward pipeline progress events to the frontend.
+		go func() {
+			for p := range pip.Progress() {
+				runtime.EventsEmit(a.ctx, "import:progress", map[string]interface{}{
+					"step":    p.Step,
+					"current": p.Current,
+					"total":   p.Total,
+					"message": fmt.Sprintf("[%s] %s", job.name, p.Message),
+				})
+			}
+		}()
+
+		if err := pip.Run(ctx); err != nil {
+			if ctx.Err() != nil {
+				slog.Info("import cancelled by user")
+				return
+			}
+			slog.Error("pipeline failed", "pax", job.name, "error", err)
+			runtime.EventsEmit(a.ctx, "import:error",
+				fmt.Sprintf("Failed to process %s: %s", job.name, err.Error()))
+			return
+		}
 	}
 
-	// ── Step 3: Write manifest (signals "assets are ready") ──────────────
+	// ── Step 4: Write manifest (signals "assets are ready") ──────────────
+
+	inventory := map[string]string{"demo_q3": demoQ3Dir, "demo_ta": demoTADir}
+	if q3Path != "" {
+		inventory["q3_install"] = q3Path
+	}
 
 	if err := manifest.WriteWithInventory(a.paths.ManifestPath(), inventory); err != nil {
 		slog.Error("failed to write manifest", "error", err)
@@ -267,9 +472,9 @@ func (a *App) runImport(q3Path, q1Path string) {
 		return
 	}
 
-	slog.Info("import complete", "inventory_size", len(inventory))
+	slog.Info("import complete", "jobs", len(jobs))
 
-	// ── Step 4: Success notification ─────────────────────────────────────
+	// ── Step 5: Success notification ─────────────────────────────────────
 
 	emitProgress("complete", 1, 1, "Import successful!")
 	time.Sleep(2 * time.Second)

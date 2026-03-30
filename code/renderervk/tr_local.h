@@ -371,7 +371,11 @@ typedef struct {
 } textureBundle_t;
 
 #ifdef USE_VULKAN
+#if FEAT_PBR
+#define NUM_TEXTURE_BUNDLES 4  // 0=diffuse, 1=lightmap, 2=normalmap, 3=pbrmap
+#else
 #define NUM_TEXTURE_BUNDLES 3
+#endif
 #else
 #define NUM_TEXTURE_BUNDLES 2
 #endif

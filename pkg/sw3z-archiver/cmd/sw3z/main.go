@@ -1,8 +1,11 @@
-// sw3z is a CLI tool for creating SW3Z game asset archives.
+// sw3z is a CLI tool for creating and inspecting SW3Z game asset archives.
 //
 // Usage:
 //
 //	sw3z a [-Z none|lz4] [-0] [-x pattern]... <output.sw3z> <input-dir>
+//	sw3z l <archive.sw3z>
+//	sw3z t <archive.sw3z>
+//	sw3z x <archive.sw3z> [output-dir]
 //
 // Subcommands:
 //
@@ -11,6 +14,9 @@
 //	     Use -x to exclude additional glob patterns.
 //	     Use -Z to control compression (default: auto-detect).
 //	     Use -0 for uncompressed (shorthand for -Z none).
+//	l    List: show archive contents.
+//	t    Test: verify integrity of all entries.
+//	x    Extract: extract archive to disk.
 package main
 
 import (
@@ -78,6 +84,37 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+	case "l":
+		if len(os.Args) != 3 {
+			fmt.Fprintf(os.Stderr, "usage: sw3z l <archive.sw3z>\n")
+			os.Exit(1)
+		}
+		if err := listArchive(os.Args[2]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	case "t":
+		if len(os.Args) != 3 {
+			fmt.Fprintf(os.Stderr, "usage: sw3z t <archive.sw3z>\n")
+			os.Exit(1)
+		}
+		if err := testArchive(os.Args[2]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	case "x":
+		if len(os.Args) < 3 || len(os.Args) > 4 {
+			fmt.Fprintf(os.Stderr, "usage: sw3z x <archive.sw3z> [output-dir]\n")
+			os.Exit(1)
+		}
+		outDir := "."
+		if len(os.Args) == 4 {
+			outDir = os.Args[3]
+		}
+		if err := extractArchive(os.Args[2], outDir); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
 		usage()
@@ -93,6 +130,12 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "      -Z none|lz4  compression method (default: auto-detect)\n")
 	fmt.Fprintf(os.Stderr, "      -0            store uncompressed (shorthand for -Z none)\n")
 	fmt.Fprintf(os.Stderr, "      -x pattern    exclude files matching glob pattern\n")
+	fmt.Fprintf(os.Stderr, "  l <archive.sw3z>\n")
+	fmt.Fprintf(os.Stderr, "      list archive contents\n")
+	fmt.Fprintf(os.Stderr, "  t <archive.sw3z>\n")
+	fmt.Fprintf(os.Stderr, "      test archive integrity\n")
+	fmt.Fprintf(os.Stderr, "  x <archive.sw3z> [output-dir]\n")
+	fmt.Fprintf(os.Stderr, "      extract archive to disk (default: current directory)\n")
 }
 
 func archive(outputPath, inputDir string, excludes []string, mode compressionMode) error {
@@ -205,6 +248,157 @@ func chooseCompression(data []byte, mode compressionMode) uint8 {
 		}
 		return sw3z.CompressLZ4
 	}
+}
+
+func listArchive(archivePath string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	h, err := sw3z.ReadHeader(f)
+	if err != nil {
+		return err
+	}
+	entries, err := sw3z.ReadIndex(f, h.EntryCount)
+	if err != nil {
+		return err
+	}
+	st, err := sw3z.ReadStringTable(f, h.StringTableSize)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%-50s %12s %12s  %-5s  %10s\n",
+		"Path", "Size", "Compressed", "Method", "CRC32C")
+	fmt.Println(strings.Repeat("-", 95))
+
+	var totalUncomp, totalComp uint64
+	for _, e := range entries {
+		path := sw3z.EntryPath(e, st)
+		fmt.Printf("%-50s %12d %12d  %-5s  %08X\n",
+			path, e.UncompressedSize, e.CompressedSize,
+			sw3z.CompressionName(e.Compression), e.CRC32C)
+		totalUncomp += uint64(e.UncompressedSize)
+		totalComp += uint64(e.CompressedSize)
+	}
+
+	fmt.Println(strings.Repeat("-", 95))
+	fmt.Printf("%d entries, %d bytes uncompressed, %d bytes compressed\n",
+		h.EntryCount, totalUncomp, totalComp)
+	return nil
+}
+
+func testArchive(archivePath string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	h, err := sw3z.ReadHeader(f)
+	if err != nil {
+		return err
+	}
+	entries, err := sw3z.ReadIndex(f, h.EntryCount)
+	if err != nil {
+		return err
+	}
+	st, err := sw3z.ReadStringTable(f, h.StringTableSize)
+	if err != nil {
+		return err
+	}
+
+	var failures int
+	for _, e := range entries {
+		path := sw3z.EntryPath(e, st)
+		_, err := sw3z.VerifyEntry(f, e)
+		if err != nil {
+			fmt.Printf("  FAIL %s: %v\n", path, err)
+			failures++
+		} else {
+			fmt.Printf("  OK   %s\n", path)
+		}
+	}
+
+	fmt.Printf("\n%d entries tested, %d OK, %d FAILED\n",
+		len(entries), len(entries)-failures, failures)
+	if failures > 0 {
+		return fmt.Errorf("%d entries failed integrity check", failures)
+	}
+	return nil
+}
+
+func extractArchive(archivePath, outDir string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	h, err := sw3z.ReadHeader(f)
+	if err != nil {
+		return err
+	}
+	entries, err := sw3z.ReadIndex(f, h.EntryCount)
+	if err != nil {
+		return err
+	}
+	st, err := sw3z.ReadStringTable(f, h.StringTableSize)
+	if err != nil {
+		return err
+	}
+
+	var failures int
+	for _, e := range entries {
+		path := sw3z.EntryPath(e, st)
+
+		if !sw3z.IsPathSafe(path) {
+			fmt.Printf("  SKIP %s (unsafe path)\n", path)
+			failures++
+			continue
+		}
+
+		if e.Flags&sw3z.FlagSymlink != 0 {
+			fmt.Printf("  SKIP %s (symlink not supported)\n", path)
+			continue
+		}
+
+		data, err := sw3z.VerifyEntry(f, e)
+		if err != nil {
+			fmt.Printf("  FAIL %s: %v\n", path, err)
+			failures++
+			continue
+		}
+
+		dest := filepath.Join(outDir, filepath.FromSlash(path))
+
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			fmt.Printf("  FAIL %s: mkdir: %v\n", path, err)
+			failures++
+			continue
+		}
+
+		perm := os.FileMode(0644)
+		if e.Flags&sw3z.FlagExecutable != 0 {
+			perm = 0755
+		}
+		if err := os.WriteFile(dest, data, perm); err != nil {
+			fmt.Printf("  FAIL %s: write: %v\n", path, err)
+			failures++
+			continue
+		}
+
+		fmt.Printf("  OK   %s (%d bytes)\n", path, len(data))
+	}
+
+	fmt.Printf("\n%d entries, %d extracted, %d failed\n",
+		len(entries), len(entries)-failures, failures)
+	if failures > 0 {
+		return fmt.Errorf("%d entries failed", failures)
+	}
+	return nil
 }
 
 func matchesAny(relPath, name string, patterns []string) bool {

@@ -688,16 +688,6 @@ static qboolean KeyToAxisAndSign(int keynum, int *outAxis, int *outSign)
 		*outAxis = j_side_axis->integer;
 		*outSign = j_side->value > 0.0f ? 1 : -1;
 	}
-	else if (Q_stricmp(bind, "+lookup") == 0)
-	{
-		*outAxis = j_pitch_axis->integer;
-		*outSign = j_pitch->value > 0.0f ? -1 : 1;
-	}
-	else if (Q_stricmp(bind, "+lookdown") == 0)
-	{
-		*outAxis = j_pitch_axis->integer;
-		*outSign = j_pitch->value > 0.0f ? 1 : -1;
-	}
 	else if (Q_stricmp(bind, "+left") == 0)
 	{
 		*outAxis = j_yaw_axis->integer;

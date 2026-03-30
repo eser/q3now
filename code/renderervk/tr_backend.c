@@ -1232,6 +1232,12 @@ static void RB_LightingPass( void )
 		dl = &backEnd.viewParms.dlights[i];
 		if ( dl->head )
 		{
+#if FEAT_SHADOW_MAPPING
+			// Render shadow map for this light before the lit pass
+			if ( vk.shadowMap.active ) {
+				vk_render_shadow_map( dl );
+			}
+#endif
 			tess.light = dl;
 			RB_RenderLitSurfList( dl );
 		}

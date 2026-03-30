@@ -23,6 +23,7 @@ Enhanced: kick player selection, timelimit/fraglimit spincontrols.
 #define ID_TIMELIMIT     15
 #define ID_FRAGLIMIT     16
 #define ID_KICKPLAYER    17
+#define ID_UNLAGGED      18
 
 #define SPACING          28
 
@@ -62,6 +63,7 @@ typedef struct {
 	menutext_s			shuffle;
 	menulist_s			kickPlayer;
 	menutext_s			kick;
+	menutext_s			unlagged;
 	menulist_s			timelimit;
 	menulist_s			fraglimit;
 	menubitmap_s		back;
@@ -147,6 +149,14 @@ static void CallVote_Event( void *ptr, int notification ) {
 			trap_Cmd_ExecuteText( EXEC_APPEND,
 				va("callvote clientkick %i\n", s_callvote.playerClientNums[idx]) );
 		}
+		UI_PopMenu();
+		UI_PopMenu();
+		break;
+	case ID_UNLAGGED:
+		// toggle: if currently enabled, vote to disable, and vice versa
+		idx = (int)trap_Cvar_VariableValue( "g_unlagged" );
+		trap_Cmd_ExecuteText( EXEC_APPEND,
+			va("callvote g_unlagged %i\n", idx ? 0 : 1) );
 		UI_PopMenu();
 		UI_PopMenu();
 		break;
@@ -248,6 +258,21 @@ static void CallVote_MenuInit( void ) {
 	}
 	y += SPACING;
 
+	// --- unlagged toggle ---
+
+	s_callvote.unlagged.generic.type		= MTYPE_PTEXT;
+	s_callvote.unlagged.generic.flags		= QMF_CENTER_JUSTIFY | QMF_PULSEIFFOCUS;
+	s_callvote.unlagged.generic.x			= 320;
+	s_callvote.unlagged.generic.y			= y;
+	s_callvote.unlagged.generic.id			= ID_UNLAGGED;
+	s_callvote.unlagged.generic.callback	= CallVote_Event;
+	s_callvote.unlagged.string				= (int)trap_Cvar_VariableValue( "g_unlagged" )
+												? "Disable Unlagged"
+												: "Enable Unlagged";
+	s_callvote.unlagged.style				= UI_CENTER | UI_SMALLFONT;
+	s_callvote.unlagged.color				= color_red;
+	y += SPACING;
+
 	// --- kick player: dropdown + button ---
 
 	s_callvote.kickPlayer.generic.type		= MTYPE_SPINCONTROL;
@@ -320,6 +345,7 @@ static void CallVote_MenuInit( void ) {
 	Menu_AddItem( &s_callvote.menu, &s_callvote.restart );
 	Menu_AddItem( &s_callvote.menu, &s_callvote.nextmap );
 	Menu_AddItem( &s_callvote.menu, &s_callvote.shuffle );
+	Menu_AddItem( &s_callvote.menu, &s_callvote.unlagged );
 	Menu_AddItem( &s_callvote.menu, &s_callvote.kickPlayer );
 	Menu_AddItem( &s_callvote.menu, &s_callvote.kick );
 	Menu_AddItem( &s_callvote.menu, &s_callvote.timelimit );

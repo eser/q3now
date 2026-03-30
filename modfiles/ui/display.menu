@@ -26,16 +26,6 @@ menuDef {
 		visible 1
 	}
 
-	itemDef {
-		type 10
-		text "Screen Size:"
-		rect 10 64 220 18
-		textscale 0.3
-		forecolor 1 1 1 1
-		cvarFloat "cg_viewsize" 100 30 100
-		visible 1
-	}
-
 	SEPARATOR(10, 92, 220)
 	BUTTON(70, 104, 100, 20, "Back", 0.35, close)
 }

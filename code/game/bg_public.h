@@ -353,7 +353,7 @@ typedef enum {
 	PERS_TEAM,						// player team
 	PERS_SPAWN_COUNT,				// incremented every respawn
 	PERS_PLAYEREVENTS,				// 16 bits that can be flipped for events
-	PERS_ATTACKER,					// clientnum of last damage inflicter
+	PERS_LAST_ATTACKER,				// clientnum of last damage inflicter
 	PERS_KILLED,					// count of the number of times you died
 	// player awards tracking
 	PERS_IMPRESSIVE_COUNT,			// two railgun hits in a row
@@ -444,9 +444,9 @@ typedef enum {
 	WP_SHOTGUN,
 	WP_GRENADE_LAUNCHER,
 	WP_ROCKET_LAUNCHER,
-	WP_LIGHTNING,
+	WP_LIGHTNING_GUN,
 	WP_RAILGUN,
-	WP_PLASMAGUN,
+	WP_PLASMA_RIFLE,
 
 	WP_NUM_WEAPONS
 } weapon_t;
@@ -513,6 +513,7 @@ typedef enum {
 	EV_NOAMMO,
 	EV_CHANGE_WEAPON,
 	EV_FIRE_WEAPON,
+	EV_FIRE_WEAPON_ALT,
 
 	EV_USE_ITEM0,
 	EV_USE_ITEM1,
@@ -797,6 +798,34 @@ typedef struct gitem_s {
 extern	gitem_t	bg_itemlist[];
 extern	int		bg_numItems;
 
+// Attack types — each weapon references one or two of these
+typedef enum {
+	ATT_NONE,
+
+	ATT_GAUNTLET_PRIMARY,
+	ATT_MACHINEGUN_PRIMARY,
+	ATT_SHOTGUN_PRIMARY,
+	ATT_GRENADE_LAUNCHER_PRIMARY,
+	ATT_ROCKET_LAUNCHER_PRIMARY,
+	ATT_LIGHTNING_GUN_PRIMARY,
+	ATT_RAILGUN_PRIMARY,
+	ATT_PLASMA_RIFLE_PRIMARY,
+
+	ATT_NUM_ATTACKS
+} attackType_t;
+
+typedef struct gattack_s {
+	char        *name;
+	int			weapon;
+	float       maxDamageDistance;
+	float       knockbackScale;
+	float       selfKnockbackScale;
+	float       recoilKick;
+	int         reloadTime;
+} gattack_t;
+
+extern	gattack_t	bg_attacklist[];
+
 // Weapons
 typedef struct gweapon_s {
     char        *name;
@@ -815,12 +844,9 @@ typedef struct gweapon_s {
     qboolean    spawnWeapon;
     int         spawnAmmunition;
 
-	float       maxDamageDistance;
-    float       knockbackScale;
-	float       selfKnockbackScale;
-	float       recoilKick;
+    int         attack;         // attackType_t index into bg_attacklist[]
+    int         attackAlt;      // ATT_NONE if no alt-fire
 
-	int         reloadTime;
     float       weight;
 } gweapon_t;
 

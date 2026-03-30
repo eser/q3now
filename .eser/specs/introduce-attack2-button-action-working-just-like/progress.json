@@ -1,0 +1,19 @@
+{
+  "spec": "introduce-attack2-button-action-working-just-like",
+  "status": "approved",
+  "tasks": [
+    {
+      "id": "task-1",
+      "title": "Full stack with weapon state tracking, animation support, and ammo handling. We aim for 7-star: complete plumbing (button → event → dispa...",
+      "status": "pending"
+    },
+    {
+      "id": "task-2",
+      "title": "1) bind mouse2 +attack2 works without crash. 2) Pressing +attack2 triggers EV_FIRE_WEAPON2 event. 3) FireWeapon2() is called on the server. 4) No crash when +attack2 is pressed with any weapon. 5) +attack still works identically. 6) Weapon state tracks attack2 properly (weaponstate, weaponTime). 7) Bot AI is not broken.",
+      "status": "pending"
+    }
+  ],
+  "decisions": [],
+  "debt": [],
+  "updatedAt": "2026-03-29T23:38:39.957Z"
+}

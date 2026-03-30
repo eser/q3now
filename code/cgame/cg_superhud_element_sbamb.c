@@ -20,7 +20,7 @@ void* CG_SHUDElementSBAmBCreate(const superhudConfig_t* config)
 
 	SHUD_ELEMENT_INIT(element, config);
 
-	for (i = 0; i < MAX_WEAPONS; ++i)
+	for (i = WP_NONE + 1; i < WP_NUM_WEAPONS; ++i)
 	{
 		element->maxammo[i] = 100;
 	}
@@ -92,4 +92,3 @@ void CG_SHUDElementSBAmBDestroy(void* context)
 		Z_Free(context);
 	}
 }
-

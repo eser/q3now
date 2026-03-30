@@ -69,6 +69,15 @@ typedef enum {
 #if FEAT_ADVANCED_WATER
 	TYPE_WATER,
 #endif
+#if FEAT_SHADOW_MAPPING
+	TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW,
+	TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW_LINEAR,
+	TYPE_SHADOW_DEPTH,
+#endif
+#if FEAT_PBR
+	TYPE_SIGNLE_TEXTURE_LIGHTING_PBR,
+	TYPE_SIGNLE_TEXTURE_LIGHTING_PBR_LINEAR,
+#endif
 
 	TYPE_SIGNLE_TEXTURE_DF,
 
@@ -261,6 +270,11 @@ void vk_release_resources( void );
 
 void vk_wait_idle( void );
 void vk_queue_wait_idle( void );
+
+#if FEAT_SHADOW_MAPPING
+struct dlight_s;
+void vk_render_shadow_map( const struct dlight_s *dl );
+#endif
 
 //
 // Resources allocation.
@@ -472,6 +486,23 @@ typedef struct {
 		qboolean        copied;		// depth was copied this frame
 	} depthFade;
 
+#if FEAT_SHADOW_MAPPING
+	// Shadow mapping
+	struct {
+		VkImage         image;
+		VkImageView     view;
+		VkDeviceMemory  memory;
+		VkSampler       sampler;
+		VkDescriptorSet descriptor;
+		VkRenderPass    renderPass;
+		VkFramebuffer   framebuffer;
+		VkPipeline      depthPipeline;   // depth-only rendering pipeline
+		VkPipelineLayout depthLayout;    // push constants only (lightMVP)
+		qboolean        active;
+		uint32_t        size;            // shadow map resolution (default 512)
+	} shadowMap;
+#endif
+
 	// SMAA anti-aliasing
 	struct {
 		qboolean        active;
@@ -624,6 +655,16 @@ typedef struct {
 
 #if FEAT_ADVANCED_WATER
 		VkShaderModule water_fs;
+#endif
+
+#if FEAT_SHADOW_MAPPING
+		VkShaderModule shadow_depth_vs;
+		VkShaderModule shadow_depth_fs;
+		VkShaderModule light_shadow[2];      // vert: fog[0,1]
+		VkShaderModule light_shadow_frag[2][2]; // frag: linear[0,1] fog[0,1]
+#endif
+#if FEAT_PBR
+		VkShaderModule light_pbr_frag[2][2]; // frag: linear[0,1] fog[0,1]
 #endif
 
 		VkShaderModule smaa_edge_vs;

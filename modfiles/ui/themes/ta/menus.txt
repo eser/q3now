@@ -1,0 +1,44 @@
+{
+	// TA Theme: uses our core menus + TA gap screens
+	// Switch to this theme: /set ui_theme "ta" ; /menu_reload
+
+	// ── our core menus (keep our advanced layouts) ──────────────────
+	loadMenu { "ui/main.menu" }
+	loadMenu { "ui/ingame.menu" }
+	loadMenu { "ui/options.menu" }
+	loadMenu { "ui/video.menu" }
+	loadMenu { "ui/display.menu" }
+	loadMenu { "ui/sound.menu" }
+	loadMenu { "ui/controls.menu" }
+	loadMenu { "ui/network.menu" }
+	loadMenu { "ui/preferences.menu" }
+	loadMenu { "ui/playersettings.menu" }
+	loadMenu { "ui/servers.menu" }
+	loadMenu { "ui/startserver.menu" }
+	loadMenu { "ui/demos.menu" }
+	loadMenu { "ui/mods.menu" }
+	loadMenu { "ui/confirm.menu" }
+	loadMenu { "ui/team.menu" }
+	loadMenu { "ui/specifyserver.menu" }
+	loadMenu { "ui/callvote.menu" }
+	loadMenu { "ui/connect.menu" }
+	loadMenu { "ui/password.menu" }
+	loadMenu { "ui/serverinfo.menu" }
+	loadMenu { "ui/addbots.menu" }
+	loadMenu { "ui/removebots.menu" }
+	loadMenu { "ui/teamorders.menu" }
+
+	// ── HUD ──────────────────────────────────────────────────────────
+	loadMenu { "ui/hud_default.hud" }
+	loadMenu { "ui/ingame_scoreboard_ffa.menu" }
+	loadMenu { "ui/ingame_scoreboard_tdm.menu" }
+	loadMenu { "ui/ingame_scoreboard_ctf.menu" }
+	loadMenu { "ui/end_scoreboard_ffa.menu" }
+	loadMenu { "ui/end_scoreboard_tdm.menu" }
+	loadMenu { "ui/end_scoreboard_ctf.menu" }
+
+	// ── gap screens (TODO: write native versions) ──────────────────
+	// These screens need to be created natively in our format.
+	// For now, the TA theme is identical to default — it serves as
+	// the extension point for community themes that override our menus.
+}

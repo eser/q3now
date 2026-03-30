@@ -3226,7 +3226,7 @@ typedef struct
 static bind_t g_bindings[] = 
 {
 	{"+scores",			 K_TAB,				-1,		-1, -1},
-	{"+button2",		 K_ENTER,			-1,		-1, -1},
+	{"+use",			 K_ENTER,			-1,		-1, -1},
 	{"+speed", 			 K_SHIFT,			-1,		-1,	-1},
 	{"+forward", 		 K_UPARROW,		-1,		-1, -1},
 	{"+back", 			 K_DOWNARROW,	-1,		-1, -1},
@@ -3234,13 +3234,6 @@ static bind_t g_bindings[] =
 	{"+moveright", 	 '.',					-1,		-1, -1},
 	{"+moveup",			 K_SPACE,			-1,		-1, -1},
 	{"+movedown",		 'c',					-1,		-1, -1},
-	{"+left", 			 K_LEFTARROW,	-1,		-1, -1},
-	{"+right", 			 K_RIGHTARROW,	-1,		-1, -1},
-	{"+strafe", 		 K_ALT,				-1,		-1, -1},
-	{"+lookup", 		 K_PGDN,				-1,		-1, -1},
-	{"+lookdown", 	 K_DEL,				-1,		-1, -1},
-	{"+mlook", 			 '/',					-1,		-1, -1},
-	{"centerview", 	 K_END,				-1,		-1, -1},
 	{"+zoom", 			 -1,						-1,		-1, -1},
 	{"weapon 1",		 '1',					-1,		-1, -1},
 	{"weapon 2",		 '2',					-1,		-1, -1},
@@ -3250,16 +3243,10 @@ static bind_t g_bindings[] =
 	{"weapon 6",		 '6',					-1,		-1, -1},
 	{"weapon 7",		 '7',					-1,		-1, -1},
 	{"weapon 8",		 '8',					-1,		-1, -1},
-	{"weapon 9",		 '9',					-1,		-1, -1},
-	{"weapon 10",		 '0',					-1,		-1, -1},
-	{"weapon 11",		 -1,					-1,		-1, -1},
-	{"weapon 12",		 -1,					-1,		-1, -1},
-	{"weapon 13",		 -1,					-1,		-1, -1},
 	{"+attack", 		 K_CTRL,				-1,		-1, -1},
 	{"weapprev",		 '[',					-1,		-1, -1},
 	{"weapnext", 		 ']',					-1,		-1, -1},
-	{"+button3", 		 K_MOUSE3,			-1,		-1, -1},
-	{"+button4", 		 K_MOUSE4,			-1,		-1, -1},
+	{"+gesture1", 		 K_MOUSE3,			-1,		-1, -1},
 	{"prevTeamMember", 'w',					-1,		-1, -1},
 	{"nextTeamMember", 'r',					-1,		-1, -1},
 	{"nextOrder", 't',					-1,		-1, -1},
@@ -6062,4 +6049,3 @@ static qboolean Menu_OverActiveItem(menuDef_t *menu, float x, float y) {
 	}
 	return qfalse;
 }
-

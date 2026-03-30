@@ -280,6 +280,7 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 	item->textalign = -1;   // sentinel: -1 = not set (LEFT=0 is valid)
 	item->alignV = -1;      // sentinel: -1 = not set (TOP=0 is valid)
 	item->direction = -1;   // sentinel: -1 = not set (L2R=0 is valid)
+	item->fadeAlphaItem = 1.0f;  // fully opaque by default
 
 	// expect opening brace
 	if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
@@ -713,6 +714,7 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 
 	// defaults
 	menu->visible = qtrue;
+	menu->cinematicHandle = -1;
 	menu->focuscolor[0] = 1.0f;
 	menu->focuscolor[1] = 0.75f;
 	menu->focuscolor[2] = 0.0f;
@@ -853,7 +855,8 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 			WiredPC_Float( handle, &menu->fadeAmount );
 		}
 		else if ( !Q_stricmp( token.string, "cinematic" ) ) {
-			WiredPC_ReadToken( handle, &token ); // consume video name
+			if ( WiredPC_ReadToken( handle, &token ) )
+				Q_strncpyz( menu->cinematic, token.string, sizeof( menu->cinematic ) );
 		}
 		else if ( !Q_stricmp( token.string, "ownerdraw" ) ) {
 			int od; WiredPC_Int( handle, &od ); // menu-level ownerdraw (rare)
@@ -927,15 +930,72 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 			WiredUI_ParseMenu( handle );
 		}
 		else if ( !Q_stricmp( token.string, "assetGlobalDef" ) ) {
-			// TODO Phase 2: parse global assets (fonts, cursor, sounds)
-			// for now, skip the block
-			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) continue;
-			int depth = 1;
-			while ( depth > 0 ) {
-				if ( !WiredPC_ReadToken( handle, &token ) ) break;
-				if ( !Q_stricmp( token.string, "{" ) ) depth++;
-				else if ( !Q_stricmp( token.string, "}" ) ) depth--;
+			wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
+			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
+				Com_Printf( S_COLOR_YELLOW "WiredUI: expected '{' for assetGlobalDef\n" );
+				continue;
 			}
+			while ( 1 ) {
+				if ( !WiredPC_ReadToken( handle, &token ) ) break;
+				if ( !Q_stricmp( token.string, "}" ) ) break;
+
+				if ( !Q_stricmp( token.string, "cursor" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->cursor, token.string, sizeof( ag->cursor ) );
+				}
+				else if ( !Q_stricmp( token.string, "gradientBar" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->gradientBar, token.string, sizeof( ag->gradientBar ) );
+				}
+				else if ( !Q_stricmp( token.string, "font" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->font, token.string, sizeof( ag->font ) );
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->fontSize = atoi( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "smallFont" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->smallFont, token.string, sizeof( ag->smallFont ) );
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->smallFontSize = atoi( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "bigFont" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->bigFont, token.string, sizeof( ag->bigFont ) );
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->bigFontSize = atoi( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "fadeClamp" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->fadeClamp = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "fadeCycle" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->fadeCycle = atoi( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "fadeAmount" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->fadeAmount = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "shadowColor" ) ) {
+					WiredPC_ReadToken( handle, &token ); ag->shadowColor[0] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->shadowColor[1] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->shadowColor[2] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->shadowColor[3] = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "itemFocusSound" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->focusSound, token.string, sizeof( ag->focusSound ) );
+				}
+				else if ( !Q_stricmp( token.string, "focusColor" ) ) {
+					WiredPC_ReadToken( handle, &token ); ag->focusColor[0] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->focusColor[1] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->focusColor[2] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->focusColor[3] = atof( token.string );
+				}
+				// skip unknown keywords gracefully
+			}
+			Com_DPrintf( "WiredUI: parsed assetGlobalDef (cursor=%s)\n", ag->cursor );
 		}
 		else if ( !Q_stricmp( token.string, "{" ) || !Q_stricmp( token.string, "}" ) ) {
 			// top-level braces — Q3:TA/QL files wrap content in { }. Just ignore.
@@ -1019,6 +1079,49 @@ wiredMenuDef_t *WiredUI_FindMenu( const char *name ) {
 void WiredUI_ClearMenus( void ) {
 	wired_menuCount = 0;
 	WiredUI_ResetPool();
+}
+
+// ── two-phase safe reload ─────────────────────────────────────────────
+// Parses menus into a fresh pool. If parsing succeeds, the new menus
+// become active. If parsing fails, the old menus are restored.
+
+typedef struct {
+	char             pool[WIRED_MENU_POOL_SIZE];
+	int              poolUsed;
+	wiredMenuDef_t  *menus[WIRED_MAX_MENUS];
+	int              menuCount;
+} wiredMenuBackup_t;
+
+static wiredMenuBackup_t *wired_backup = NULL;  // heap-allocated on demand
+
+qboolean WiredUI_SafeReload( const char *manifestFile ) {
+	// allocate backup on first use (8MB+ — too large for stack)
+	if ( !wired_backup ) {
+		wired_backup = Z_Malloc( sizeof( wiredMenuBackup_t ) );
+	}
+
+	// phase 1: save current state
+	Com_Memcpy( wired_backup->pool, wired_menuPool, wired_menuPoolUsed );
+	wired_backup->poolUsed = wired_menuPoolUsed;
+	Com_Memcpy( wired_backup->menus, wired_menus, sizeof( wired_menus[0] ) * wired_menuCount );
+	wired_backup->menuCount = wired_menuCount;
+
+	// phase 2: clear and reparse
+	WiredUI_ClearMenus();
+	qboolean ok = WiredUI_LoadMenus( manifestFile );
+
+	if ( !ok || wired_menuCount == 0 ) {
+		// parse failed — restore old menus
+		Com_Printf( S_COLOR_YELLOW "Menu reload failed — keeping old menus.\n" );
+		Com_Memcpy( wired_menuPool, wired_backup->pool, wired_backup->poolUsed );
+		wired_menuPoolUsed = wired_backup->poolUsed;
+		Com_Memcpy( wired_menus, wired_backup->menus, sizeof( wired_menus[0] ) * wired_backup->menuCount );
+		wired_menuCount = wired_backup->menuCount;
+		return qfalse;
+	}
+
+	// parse succeeded — new menus are now active
+	return qtrue;
 }
 
 #endif // FEAT_WIRED_UI

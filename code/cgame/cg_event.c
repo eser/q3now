@@ -413,8 +413,10 @@ static void CG_ItemPickup( int itemNum ) {
 	cg.itemPickup = itemNum;
 	cg.itemPickupTime = cg.time;
 	cg.itemPickupBlendTime = cg.time;
+
 	// see if it should be the grabbed weapon
 	if ( bg_itemlist[itemNum].giType == IT_WEAPON ) {
+		cg.lastGrabbedWeapon = bg_itemlist[itemNum].giTag;
 		// select it immediately
 		if ( cg_autoswitch.integer && bg_itemlist[itemNum].giTag != WP_MACHINEGUN ) {
 			cg.weaponSelectTime = cg.time;
@@ -817,6 +819,11 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		break;
 	case EV_FIRE_WEAPON:
 		DEBUGNAME("EV_FIRE_WEAPON");
+		CG_FireWeapon( cent );
+		break;
+
+	case EV_FIRE_WEAPON_ALT:
+		DEBUGNAME("EV_FIRE_WEAPON_ALT");
 		CG_FireWeapon( cent );
 		break;
 

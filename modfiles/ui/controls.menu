@@ -50,7 +50,7 @@ menuDef {
 	BIND(10, 316, 300, 16, "Next Weapon:", 0.28, "weapnext")
 	BIND(10, 336, 300, 16, "Prev Weapon:", 0.28, "weapprev")
 	BIND(10, 356, 300, 16, "Zoom:", 0.28, "+zoom")
-	BIND(10, 376, 300, 16, "Use Item:", 0.28, "+button2")
+	BIND(10, 376, 300, 16, "Use Item:", 0.28, "+use")
 
 	// communication
 	SUBWINDOW(10, 400, 300, 14, "Communication")

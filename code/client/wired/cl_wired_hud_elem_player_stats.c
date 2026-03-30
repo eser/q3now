@@ -45,10 +45,10 @@ void CG_SHUDElementPlayerStatsRoutine( void *context ) {
 	if ( !element ) return;
 
 	// aggregate stats across all weapons
-	for ( i = WP_GAUNTLET; i < WP_NUM_WEAPONS && i < MAX_WEAPONS; i++ ) {
-		totalDG     += wiredHud->weaponStats[i].damage;
-		totalKills  += wiredHud->weaponStats[i].kills;
-		totalDeaths += wiredHud->weaponStats[i].deaths;
+	for ( i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
+		totalDG     += wiredHud->attackStats[i].damage;
+		totalKills  += wiredHud->attackStats[i].kills;
+		totalDeaths += wiredHud->attackStats[i].deaths;
 	}
 
 	switch ( element->mode ) {

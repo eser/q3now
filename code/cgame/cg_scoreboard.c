@@ -836,7 +836,7 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 
 	for (i = 0; i < cg.numScores; i++)
 	{
-		int totalDmg, bestWp, bestWpKills, acc, pingColor;
+		int totalDmg, bestAtt, bestAttKills, acc, pingColor;
 		char tmpStr[128];
 
 		score = &cg.scores[i];
@@ -898,24 +898,26 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 
 		/* total damage */
 		totalDmg = 0;
-		for (j = WP_GAUNTLET; j < WP_NUM_WEAPONS; j++)
-			totalDmg += cgs.weaponStats[score->client][j].damage;
+		for (j = ATT_NONE + 1; j < ATT_NUM_ATTACKS; j++) {
+			totalDmg += cgs.attackStats[score->client][j].damage;
+		}
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i", totalDmg);
 		CG_ModernDrawString(colDmg, y + 2, tmpStr, *color, 8, 12, SCREEN_WIDTH, DS_HRIGHT | DS_SHADOW, NULL);
 
 		/* best weapon icon (by kills) */
-		bestWp = WP_NONE;
-		bestWpKills = 0;
-		for (j = WP_GAUNTLET; j < WP_NUM_WEAPONS; j++)
+		bestAtt = ATT_NONE;
+		bestAttKills = 0;
+		for (j = ATT_NONE + 1; j < ATT_NUM_ATTACKS; j++)
 		{
-			if (cgs.weaponStats[score->client][j].kills > bestWpKills)
+			if (cgs.attackStats[score->client][j].kills > bestAttKills)
 			{
-				bestWpKills = cgs.weaponStats[score->client][j].kills;
-				bestWp = j;
+				bestAttKills = cgs.attackStats[score->client][j].kills;
+				bestAtt = j;
 			}
 		}
-		if (bestWp != WP_NONE && cg_weapons[bestWp].weaponIcon)
-		{
+
+		int bestWp = bg_attacklist[bestAtt].weapon;
+		if ( bestWp != WP_NONE && cg_weapons[bestWp].weaponIcon ) {
 			CG_DrawPic(colWeap + 8, y + 1, 14, 14, cg_weapons[bestWp].weaponIcon);
 		}
 
@@ -987,18 +989,18 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 =================
 CG_ModernDrawTourneyScoreboard
 
-CPMA-style tournament scoreboard with per-weapon stats.
+CPMA-style tournament scoreboard with per-attack stats.
 =================
 */
 
-/* helper: draw one fighter's per-weapon stats panel */
+/* helper: draw one fighter's per-attack stats panel */
 static void CG_DrawTourneyFighterPanel(int px, int py, int pw, score_t *sc, float fade)
 {
 	clientInfo_t *ci;
 	vec3_t headAngles;
 	vec4_t panelBg, hdrBg, lineColor, textColor;
 	char tmpStr[128];
-	int wp, wy, totalHits, totalShots, totalKills, totalDeaths;
+	int att, wy, totalHits, totalShots, totalKills, totalDeaths;
 	int acc, eff;
 
 	/* column positions within panel */
@@ -1087,20 +1089,21 @@ static void CG_DrawTourneyFighterPanel(int px, int py, int pw, score_t *sc, floa
 
 	/* per-weapon rows */
 	totalHits = 0; totalShots = 0; totalKills = 0; totalDeaths = 0;
-	for (wp = WP_GAUNTLET; wp < WP_NUM_WEAPONS; wp++)
+	for (att = ATT_NONE + 1; att < ATT_NUM_ATTACKS; att++)
 	{
-		int wHits   = cgs.weaponStats[sc->client][wp].hits;
-		int wShots  = cgs.weaponStats[sc->client][wp].shots;
-		int wKills  = cgs.weaponStats[sc->client][wp].kills;
-		int wDeaths = cgs.weaponStats[sc->client][wp].deaths;
+		int weap;
+		int aHits   = cgs.attackStats[sc->client][att].hits;
+		int aShots  = cgs.attackStats[sc->client][att].shots;
+		int aKills  = cgs.attackStats[sc->client][att].kills;
+		int aDeaths = cgs.attackStats[sc->client][att].deaths;
 
-		if (wShots == 0 && wKills == 0 && wDeaths == 0)
+		if (aShots == 0 && aKills == 0 && aDeaths == 0)
 			continue;
 
-		totalHits += wHits;
-		totalShots += wShots;
-		totalKills += wKills;
-		totalDeaths += wDeaths;
+		totalHits += aHits;
+		totalShots += aShots;
+		totalKills += aKills;
+		totalDeaths += aDeaths;
 
 		/* alternating row bg */
 		if (((wy - py) / 14) % 2 == 0)
@@ -1112,27 +1115,28 @@ static void CG_DrawTourneyFighterPanel(int px, int py, int pw, score_t *sc, floa
 		CG_FontSelect(0);
 
 		/* K/D */
-		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", wKills, wDeaths);
+		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", aKills, aDeaths);
 		CG_ModernDrawString(cKD, wy, tmpStr, textColor, 7, 11, SCREEN_WIDTH, DS_HRIGHT | DS_SHADOW, NULL);
 
 		/* efficiency */
-		eff = (wKills + wDeaths > 0) ? (wKills * 100 / (wKills + wDeaths)) : 0;
-		if (wKills > 0 && wDeaths == 0) eff = 100;
+		eff = (aKills + aDeaths > 0) ? (aKills * 100 / (aKills + aDeaths)) : 0;
+		if (aKills > 0 && aDeaths == 0) eff = 100;
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i%%", eff);
 		CG_ModernDrawString(cEff, wy, tmpStr, textColor, 7, 11, SCREEN_WIDTH, DS_HRIGHT | DS_SHADOW, NULL);
 
 		/* weapon icon */
-		if (cg_weapons[wp].weaponIcon)
+		weap = bg_attacklist[att].weapon;
+		if (weap != WP_NONE && cg_weapons[weap].weaponIcon)
 		{
-			CG_DrawPic((float)(cIcon), (float)(wy), 12.0f, 12.0f, cg_weapons[wp].weaponIcon);
+			CG_DrawPic((float)(cIcon), (float)(wy), 12.0f, 12.0f, cg_weapons[weap].weaponIcon);
 		}
 
 		/* hits/shots */
-		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", wHits, wShots);
+		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", aHits, aShots);
 		CG_ModernDrawString(cHits, wy, tmpStr, textColor, 7, 11, SCREEN_WIDTH, DS_HRIGHT | DS_SHADOW, NULL);
 
 		/* accuracy */
-		acc = (wShots > 0) ? (wHits * 100 / wShots) : 0;
+		acc = (aShots > 0) ? (aHits * 100 / aShots) : 0;
 		if (acc > 50)
 			Com_sprintf(tmpStr, sizeof(tmpStr), "^2%i%%", acc);
 		else if (acc > 30)

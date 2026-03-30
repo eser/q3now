@@ -368,14 +368,14 @@ typedef struct {
 	int				unstoppableCount;
 } score_t;
 
-// per-weapon stats (received via bstats server command)
+// per-attack stats (received via bstats server command)
 typedef struct {
 	int hits;
 	int shots;
 	int kills;
 	int deaths;
 	int damage;
-} cgWeaponStat_t;
+} cgAttackStat_t;
 
 // each client has an associated clientInfo_t
 // that contains media references necessary to present the
@@ -587,6 +587,7 @@ typedef struct {
 
 	// input state sent to server
 	int			weaponSelect;
+	int			lastGrabbedWeapon;		// last weapon picked up (for weapongrabbed cmd)
 
 	// auto rotating items
 	vec3_t		autoAngles;
@@ -1196,8 +1197,8 @@ typedef struct {
 	// media
 	cgMedia_t		media;
 
-	// per-weapon stats (populated by bstats server command)
-	cgWeaponStat_t	weaponStats[MAX_CLIENTS][WP_NUM_WEAPONS];
+	// per-attack stats (populated by bstats server command)
+	cgAttackStat_t	attackStats[MAX_CLIENTS][ATT_NUM_ATTACKS];
 
 } cgs_t;
 
@@ -1250,11 +1251,10 @@ extern	vmCvar_t		cg_showmiss;
 extern	vmCvar_t		cg_footsteps;
 extern	vmCvar_t		cg_addMarks;
 extern	vmCvar_t		cg_gun_frame;
-extern	vmCvar_t		cg_gun_x;
-extern	vmCvar_t		cg_gun_y;
-extern	vmCvar_t		cg_gun_z;
+extern	vmCvar_t		cg_gunX;
+extern	vmCvar_t		cg_gunY;
+extern	vmCvar_t		cg_gunZ;
 extern	vmCvar_t		cg_drawGun;
-extern	vmCvar_t		cg_viewsize;
 extern	vmCvar_t		cg_tracerChance;
 extern	vmCvar_t		cg_tracerWidth;
 extern	vmCvar_t		cg_tracerLength;
@@ -1632,6 +1632,7 @@ void CG_PositionRotatedEntityOnTag( refEntity_t *entity, const refEntity_t *pare
 void CG_NextWeapon_f( void );
 void CG_PrevWeapon_f( void );
 void CG_Weapon_f( void );
+void CG_WeaponGrabbed_f( void );
 
 void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );

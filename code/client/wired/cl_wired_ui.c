@@ -12,6 +12,7 @@ code/ui/ui_shared.c in subsequent phases.
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
 #include "cl_wired_hud_private.h"
+#include "cl_wired_fonts.h"
 #include "../../ui/menudef.h"
 
 #if FEAT_WIRED_UI
@@ -72,6 +73,38 @@ static sfxHandle_t    wired_sfxMenuClose; // menu pop from stack
 
 // ── cursor shader ────────────────────────────────────────────────────
 static qhandle_t      wired_cursorShader;
+
+// ── asset globals (parsed from assetGlobalDef) ──────────────────────
+static wiredAssetGlobals_t wired_assetGlobals;
+static qhandle_t           wired_gradientBarShader;
+
+wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void ) {
+	return &wired_assetGlobals;
+}
+
+// ── theme system ────────────────────────────────────────────────────
+// Returns the manifest path based on ui_theme cvar.
+// Empty ui_theme → "ui/menus.txt" (default)
+// ui_theme "ta" → "ui/themes/ta/menus.txt"
+static const char *WiredUI_GetManifestPath( void ) {
+	static char path[MAX_QPATH];
+	char theme[64];
+
+	Cvar_VariableStringBuffer( "ui_theme", theme, sizeof( theme ) );
+	if ( theme[0] ) {
+		Com_sprintf( path, sizeof( path ), "ui/themes/%s/menus.txt", theme );
+		// verify the manifest exists
+		fileHandle_t f;
+		int len = FS_FOpenFileRead( path, &f, qfalse );
+		if ( f != FS_INVALID_HANDLE ) {
+			FS_FCloseFile( f );
+			return path;
+		}
+		Com_Printf( S_COLOR_YELLOW "WiredUI: theme '%s' not found — staying on current theme.\n", theme );
+		return "ui/menus.txt";
+	}
+	return "ui/menus.txt";
+}
 
 void WiredUI_RegisterFeeder( int feederID, wiredFeederCount_t count,
                               wiredFeederItemText_t itemText,
@@ -277,9 +310,9 @@ void WiredUI_Init( qboolean inGameUI ) {
 	wired_numSymbols = 0;
 	wired_numElements = 0;
 
-	// load menu files from manifest
+	// load menu files from manifest (theme-aware)
 	WiredUI_ClearMenus();
-	WiredUI_LoadMenus( "ui/menus.txt" );
+	WiredUI_LoadMenus( WiredUI_GetManifestPath() );
 
 	// register feeder data sources
 	WiredUI_RegisterCoreFeeders();
@@ -291,14 +324,51 @@ void WiredUI_Init( qboolean inGameUI ) {
 	Cmd_AddCommand( "hud_reload", WiredUI_ReloadHud );
 	Cmd_AddCommand( "menu_reload", WiredUI_ReloadMenus );
 
+	// initialize asset globals with TA-style defaults
+	memset( &wired_assetGlobals, 0, sizeof( wired_assetGlobals ) );
+	Q_strncpyz( wired_assetGlobals.cursor, "ui/assets/3_cursor3", sizeof( wired_assetGlobals.cursor ) );
+	Q_strncpyz( wired_assetGlobals.gradientBar, "ui/assets/gradientbar2.tga", sizeof( wired_assetGlobals.gradientBar ) );
+	Q_strncpyz( wired_assetGlobals.font, "fonts/font", sizeof( wired_assetGlobals.font ) );
+	wired_assetGlobals.fontSize = 16;
+	Q_strncpyz( wired_assetGlobals.smallFont, "fonts/smallfont", sizeof( wired_assetGlobals.smallFont ) );
+	wired_assetGlobals.smallFontSize = 12;
+	Q_strncpyz( wired_assetGlobals.bigFont, "fonts/bigfont", sizeof( wired_assetGlobals.bigFont ) );
+	wired_assetGlobals.bigFontSize = 20;
+	wired_assetGlobals.fadeClamp = 1.0f;
+	wired_assetGlobals.fadeCycle = 1;
+	wired_assetGlobals.fadeAmount = 0.2f;  // fast 150ms transitions
+	Vector4Set( wired_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
+	Q_strncpyz( wired_assetGlobals.focusSound, "sound/misc/menu2.wav", sizeof( wired_assetGlobals.focusSound ) );
+	Vector4Set( wired_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );  // TA gold
+
 	// register menu interaction sounds
 	wired_sfxFocus     = S_RegisterSound( "sound/misc/menu2.wav", qfalse );
 	wired_sfxAction    = S_RegisterSound( "sound/misc/menu1.wav", qfalse );
 	wired_sfxMenuOpen  = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
 	wired_sfxMenuClose = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
 
-	// register cursor shader
-	wired_cursorShader = re.RegisterShaderNoMip( "menu/art/3_cursor2" );
+	// register cursor shader — try cvar override, then assetGlobals, then legacy fallback
+	{
+		char cursorPath[MAX_QPATH];
+		Cvar_VariableStringBuffer( "wired_cursor", cursorPath, sizeof( cursorPath ) );
+		if ( cursorPath[0] ) {
+			wired_cursorShader = re.RegisterShaderNoMip( cursorPath );
+		}
+		if ( !wired_cursorShader ) {
+			wired_cursorShader = re.RegisterShaderNoMip( wired_assetGlobals.cursor );
+		}
+		if ( !wired_cursorShader ) {
+			wired_cursorShader = re.RegisterShaderNoMip( "menu/art/3_cursor2" );
+		}
+	}
+
+	// register gradient bar shader
+	if ( wired_assetGlobals.gradientBar[0] ) {
+		wired_gradientBarShader = re.RegisterShaderNoMip( wired_assetGlobals.gradientBar );
+	}
+
+	// load TA fonts (fontInfo_t-based, for v6/TA menu text rendering)
+	WiredUI_LoadTAFonts();
 
 	wired_activeMenu = UIMENU_NONE;
 	wired_initialized = qtrue;
@@ -446,18 +516,46 @@ void WiredUI_Refresh( int realtime ) {
 	float clipTop = menuY;               // visible area top
 	float clipBottom = menuY + menuH;    // visible area bottom
 
-	// render background — SCR_FillRect takes 640x480 virtual coords
+	// render background — supports FILLED, SHADER, GRADIENT, and CINEMATIC styles
 	{
-		vec4_t bgColor;
-		if ( menu->style == WINDOW_STYLE_FILLED && ( menu->backcolor[3] > 0.0f ) ) {
-			Vector4Copy( menu->backcolor, bgColor );
+		float bgX = menu->fullscreen ? 0 : menu->rect.x;
+		float bgY = menu->fullscreen ? 0 : menu->rect.y;
+		float bgW = menu->fullscreen ? SCREEN_WIDTH : menu->rect.w;
+		float bgH = menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h;
+
+		if ( menu->style == WINDOW_STYLE_CINEMATIC && menu->cinematicHandle >= 0 ) {
+			// WINDOW_STYLE_CINEMATIC: run + draw ROQ video as background
+			CIN_SetExtents( menu->cinematicHandle, (int)bgX, (int)bgY, (int)bgW, (int)bgH );
+			CIN_RunCinematic( menu->cinematicHandle );
+			CIN_DrawCinematic( menu->cinematicHandle );
+		} else if ( menu->style == WINDOW_STYLE_SHADER && menu->background[0] ) {
+			// WINDOW_STYLE_SHADER: draw background image/shader
+			qhandle_t bgShader = re.RegisterShaderNoMip( menu->background );
+			if ( bgShader ) {
+				re.SetColor( NULL );
+				SCR_DrawPic( bgX, bgY, bgW, bgH, bgShader );
+			} else if ( menu->backcolor[3] > 0.0f ) {
+				SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+			}
+		} else if ( menu->style == WINDOW_STYLE_GRADIENT && menu->backcolor[3] > 0.0f ) {
+			// WINDOW_STYLE_GRADIENT: solid fill + gradient bar overlay
+			SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+			if ( wired_gradientBarShader ) {
+				vec4_t gradColor;
+				Vector4Copy( menu->backcolor, gradColor );
+				gradColor[3] *= 0.5f;  // semi-transparent gradient overlay
+				re.SetColor( gradColor );
+				SCR_DrawPic( bgX, bgY, bgW, bgH, wired_gradientBarShader );
+				re.SetColor( NULL );
+			}
+		} else if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f ) {
+			SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+		} else if ( menu->style == WINDOW_STYLE_EMPTY ) {
+			// no background — transparent
 		} else {
-			bgColor[0] = 0.1f; bgColor[1] = 0.1f; bgColor[2] = 0.15f; bgColor[3] = 1.0f;
-		}
-		if ( menu->fullscreen ) {
-			SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bgColor );
-		} else {
-			SCR_FillRect( menu->rect.x, menu->rect.y, menu->rect.w, menu->rect.h, bgColor );
+			// fallback: dark panel
+			vec4_t bgColor = { 0.1f, 0.1f, 0.15f, 1.0f };
+			SCR_FillRect( bgX, bgY, bgW, bgH, bgColor );
 		}
 	}
 
@@ -480,13 +578,14 @@ void WiredUI_Refresh( int realtime ) {
 		}
 	}
 
-	// ── transition interpolation ────────────────────────────────────
+	// ── transition + fade interpolation ─────────────────────────────
 	for ( i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
+
+		// rect transition
 		if ( item->transStartTime > 0 ) {
 			int elapsed = realtime - item->transStartTime;
 			if ( elapsed >= item->transDuration ) {
-				// transition complete
 				item->rect = item->transTo;
 				item->transStartTime = 0;
 			} else {
@@ -497,6 +596,23 @@ void WiredUI_Refresh( int realtime ) {
 				item->rect.h = item->transFrom.h + ( item->transTo.h - item->transFrom.h ) * t;
 			}
 		}
+
+		// alpha fade (fadein/fadeout)
+		if ( item->fadeStartTime > 0 ) {
+			int elapsed = realtime - item->fadeStartTime;
+			if ( elapsed >= item->fadeDurationItem ) {
+				// fade complete
+				item->fadeAlphaItem = item->fadeTargetAlpha;
+				item->fadeStartTime = 0;
+				if ( item->fadeTargetAlpha <= 0.0f ) {
+					item->visible = qfalse;  // fadeout hides item when done
+				}
+			} else {
+				float t = (float)elapsed / (float)item->fadeDurationItem;
+				float startAlpha = ( item->fadeTargetAlpha > 0.5f ) ? 0.0f : 1.0f;
+				item->fadeAlphaItem = startAlpha + ( item->fadeTargetAlpha - startAlpha ) * t;
+			}
+		}
 	}
 
 	// render items — coordinates are relative to menu origin for non-fullscreen
@@ -504,6 +620,11 @@ void WiredUI_Refresh( int realtime ) {
 		wiredItemDef_t *item = menu->items[i];
 
 		if ( !item->visible ) {
+			continue;
+		}
+
+		// TA compat: ownerdrawFlag visibility gating
+		if ( item->ownerdrawFlag && !WiredUI_OwnerDrawVisible( item->ownerdrawFlag ) ) {
 			continue;
 		}
 
@@ -536,9 +657,40 @@ void WiredUI_Refresh( int realtime ) {
 			continue;
 		}
 
-		// draw item background if styled
-		if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
-			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, item->backcolor );
+		// apply fade alpha modulation (fadein/fadeout animation)
+		float itemAlpha = 1.0f;
+		if ( item->fadeStartTime > 0 || item->fadeAlphaItem < 1.0f ) {
+			itemAlpha = item->fadeAlphaItem;
+			if ( itemAlpha <= 0.01f ) continue;  // fully transparent — skip drawing
+		}
+
+		// draw item background if styled (modulated by itemAlpha)
+		if ( item->style == WINDOW_STYLE_SHADER && item->background[0] ) {
+			qhandle_t itemBg = re.RegisterShaderNoMip( item->background );
+			if ( itemBg ) {
+				vec4_t alphaColor = { 1, 1, 1, itemAlpha };
+				re.SetColor( itemAlpha < 1.0f ? alphaColor : NULL );
+				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, itemBg );
+				re.SetColor( NULL );
+			}
+		} else if ( item->style == WINDOW_STYLE_GRADIENT && item->backcolor[3] > 0.0f ) {
+			vec4_t bc;
+			Vector4Copy( item->backcolor, bc );
+			bc[3] *= itemAlpha;
+			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, bc );
+			if ( wired_gradientBarShader ) {
+				vec4_t gc;
+				Vector4Copy( item->backcolor, gc );
+				gc[3] *= 0.5f * itemAlpha;
+				re.SetColor( gc );
+				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, wired_gradientBarShader );
+				re.SetColor( NULL );
+			}
+		} else if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
+			vec4_t bc;
+			Vector4Copy( item->backcolor, bc );
+			bc[3] *= itemAlpha;
+			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, bc );
 		}
 
 		// draw background image (levelshots, icons, etc.)
@@ -556,6 +708,13 @@ void WiredUI_Refresh( int realtime ) {
 				re.SetColor( NULL );
 				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, bgShader );
 			}
+		}
+
+		// draw OWNERDRAW items — TA compat (CG_OWNERDRAW_* dispatch)
+		if ( item->type == ITEM_TYPE_OWNERDRAW && item->ownerdraw > 0 ) {
+			WiredUI_OwnerDraw( item->ownerdraw, itemX, itemY,
+				item->rect.w, item->rect.h, item->forecolor, item->textstyle );
+			continue;  // ownerdraw items handle their own rendering entirely
 		}
 
 		// draw LISTBOX items — feeder-driven scrollable list
@@ -888,7 +1047,14 @@ void WiredUI_Refresh( int realtime ) {
 			float fy = menuY + focus->rect.y - scrollY;
 			// don't draw focus highlight outside clip area
 			if ( fy + focus->rect.h < clipTop || fy > clipBottom ) goto skip_focus;
-			SCR_FillRect( fx, fy, focus->rect.w, focus->rect.h, menu->focuscolor );
+			// TA-style: gradient bar behind focused item, or solid fill as fallback
+			if ( wired_gradientBarShader ) {
+				re.SetColor( menu->focuscolor );
+				SCR_DrawPic( fx, fy, focus->rect.w, focus->rect.h, wired_gradientBarShader );
+				re.SetColor( NULL );
+			} else {
+				SCR_FillRect( fx, fy, focus->rect.w, focus->rect.h, menu->focuscolor );
+			}
 			// redraw the focused item's text on top of highlight
 			if ( focus->text[0] ) {
 				float charSize = focus->textscale >= 0.7f ? 16.0f : 8.0f;
@@ -1069,8 +1235,17 @@ static void WiredScript_FadeIn( wiredMenuDef_t *menu, wiredItemDef_t *item, int 
 	if ( numArgs < 1 ) return;
 	target = WiredUI_FindItemByName( menu, args[0] );
 	if ( target ) {
+		wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
 		target->visible = qtrue;
-		// TODO Phase 4: animate alpha ramp
+		target->fadeAlphaItem = 0.0f;
+		target->fadeTargetAlpha = 1.0f;
+		target->fadeStartTime = cls.realtime;
+		// derive duration from assetGlobalDef: (fadeClamp / fadeAmount) * fadeCycle ms
+		if ( ag->fadeAmount > 0 && ag->fadeCycle > 0 ) {
+			target->fadeDurationItem = (int)( ( ag->fadeClamp / ag->fadeAmount ) * ag->fadeCycle );
+		} else {
+			target->fadeDurationItem = 150;
+		}
 	}
 }
 
@@ -1079,7 +1254,15 @@ static void WiredScript_FadeOut( wiredMenuDef_t *menu, wiredItemDef_t *item, int
 	if ( numArgs < 1 ) return;
 	target = WiredUI_FindItemByName( menu, args[0] );
 	if ( target ) {
-		// TODO Phase 4: animate alpha ramp, then set visible = qfalse
+		wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
+		target->fadeAlphaItem = 1.0f;
+		target->fadeTargetAlpha = 0.0f;
+		target->fadeStartTime = cls.realtime;
+		if ( ag->fadeAmount > 0 && ag->fadeCycle > 0 ) {
+			target->fadeDurationItem = (int)( ( ag->fadeClamp / ag->fadeAmount ) * ag->fadeCycle );
+		} else {
+			target->fadeDurationItem = 150;
+		}
 	}
 }
 
@@ -1882,6 +2065,16 @@ void WiredUI_PushMenu( const char *name ) {
 		if ( pushed ) {
 			pushed->openTime = cls.realtime;
 			pushed->fadeAlpha = 0;
+
+			// start cinematic if menu uses WINDOW_STYLE_CINEMATIC
+			if ( pushed->style == WINDOW_STYLE_CINEMATIC && pushed->cinematic[0] ) {
+				pushed->cinematicHandle = CIN_PlayCinematic( pushed->cinematic,
+					0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, CIN_loop | CIN_silent );
+				if ( pushed->cinematicHandle >= 0 ) {
+					Com_DPrintf( "WiredUI: started cinematic '%s' (handle %d)\n",
+						pushed->cinematic, pushed->cinematicHandle );
+				}
+			}
 		}
 	}
 
@@ -1905,6 +2098,15 @@ void WiredUI_PopMenu( void ) {
 		return;
 	}
 
+	// stop cinematic on the menu being popped (before decrement)
+	{
+		wiredMenuDef_t *popped = WiredUI_FindMenu( wired_menuStack[wired_menuStackDepth - 1] );
+		if ( popped && popped->cinematicHandle >= 0 ) {
+			CIN_StopCinematic( popped->cinematicHandle );
+			popped->cinematicHandle = -1;
+		}
+	}
+
 	wired_menuStackDepth--;
 	wired_focusItem = -1;
 	wired_focusFromMouse = qfalse;
@@ -1925,6 +2127,15 @@ void WiredUI_PopMenu( void ) {
 }
 
 void WiredUI_CloseAllMenus( void ) {
+	int i;
+	// stop all active cinematics on the stack
+	for ( i = 0; i < wired_menuStackDepth; i++ ) {
+		wiredMenuDef_t *m = WiredUI_FindMenu( wired_menuStack[i] );
+		if ( m && m->cinematicHandle >= 0 ) {
+			CIN_StopCinematic( m->cinematicHandle );
+			m->cinematicHandle = -1;
+		}
+	}
 	wired_menuStackDepth = 0;
 	wired_focusItem = -1;
 	wired_activeMenu = UIMENU_NONE;
@@ -2684,11 +2895,30 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 	float menuH = menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h;
 
 	// render background (skip when height=0 — scoreboard draws its own bg)
-	if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f && menuH > 0 ) {
-		if ( menu->fullscreen ) {
-			SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, menu->backcolor );
-		} else {
-			SCR_FillRect( menu->rect.x, menu->rect.y, menu->rect.w, menu->rect.h, menu->backcolor );
+	if ( menuH > 0 ) {
+		float bgX = menu->fullscreen ? 0 : menu->rect.x;
+		float bgY = menu->fullscreen ? 0 : menu->rect.y;
+		float bgW = menu->fullscreen ? SCREEN_WIDTH : menu->rect.w;
+		float bgH = menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h;
+
+		if ( menu->style == WINDOW_STYLE_SHADER && menu->background[0] ) {
+			qhandle_t bgShader = re.RegisterShaderNoMip( menu->background );
+			if ( bgShader ) {
+				re.SetColor( NULL );
+				SCR_DrawPic( bgX, bgY, bgW, bgH, bgShader );
+			}
+		} else if ( menu->style == WINDOW_STYLE_GRADIENT && menu->backcolor[3] > 0.0f ) {
+			SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+			if ( wired_gradientBarShader ) {
+				vec4_t gc;
+				Vector4Copy( menu->backcolor, gc );
+				gc[3] *= 0.5f;
+				re.SetColor( gc );
+				SCR_DrawPic( bgX, bgY, bgW, bgH, wired_gradientBarShader );
+				re.SetColor( NULL );
+			}
+		} else if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f ) {
+			SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
 		}
 	}
 
@@ -2718,7 +2948,13 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 		if ( menuH > 0 && ( itemY + item->rect.h < menuY || itemY > menuY + menuH ) ) continue;
 
 		// draw item background
-		if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
+		if ( item->style == WINDOW_STYLE_SHADER && item->background[0] ) {
+			qhandle_t itemBg = re.RegisterShaderNoMip( item->background );
+			if ( itemBg ) {
+				re.SetColor( NULL );
+				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, itemBg );
+			}
+		} else if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
 			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, item->backcolor );
 		}
 
@@ -2830,16 +3066,14 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 }
 
 void WiredUI_ReloadHud( void ) {
-	Com_Printf( "WiredUI: reloading HUD...\n" );
+	const char *manifest = WiredUI_GetManifestPath();
+	Com_Printf( "WiredUI: reloading HUD from '%s'...\n", manifest );
 
 	// destroy all active elements (frees Z_Malloc'd contexts)
 	WiredHud_DestroyAllElements();
 
-	// clear all menus + reset memory pool
-	WiredUI_ClearMenus();
-
-	// reparse manifest (all .menu + .hud files)
-	WiredUI_LoadMenus( "ui/menus.txt" );
+	// two-phase safe reload
+	WiredUI_SafeReload( manifest );
 
 	// recreate HUD elements from hudOverlay menus
 	WiredHud_LoadFromMenus();
@@ -2848,8 +3082,55 @@ void WiredUI_ReloadHud( void ) {
 }
 
 void WiredUI_ReloadMenus( void ) {
-	// menus and HUD share the same manifest — same operation
-	WiredUI_ReloadHud();
+	const char *manifest = WiredUI_GetManifestPath();
+	char theme[64];
+	Cvar_VariableStringBuffer( "ui_theme", theme, sizeof( theme ) );
+
+	Com_Printf( "WiredUI: reloading menus%s%s%s...\n",
+		theme[0] ? " (theme: " : "",
+		theme[0] ? theme : "",
+		theme[0] ? ")" : "" );
+
+	// stop all cinematics before reload
+	{
+		int i;
+		for ( i = 0; i < wired_menuStackDepth; i++ ) {
+			wiredMenuDef_t *m = WiredUI_FindMenu( wired_menuStack[i] );
+			if ( m && m->cinematicHandle >= 0 ) {
+				CIN_StopCinematic( m->cinematicHandle );
+				m->cinematicHandle = -1;
+			}
+		}
+	}
+
+	// save current menu name for re-open after reload
+	char currentMenu[64] = {0};
+	if ( wired_menuStackDepth > 0 ) {
+		Q_strncpyz( currentMenu, wired_menuStack[wired_menuStackDepth - 1], sizeof( currentMenu ) );
+	}
+	wired_menuStackDepth = 0;
+	wired_focusItem = -1;
+
+	// destroy HUD elements (they'll be recreated after reload)
+	WiredHud_DestroyAllElements();
+
+	// two-phase safe reload: parse new → swap, or keep old on failure
+	if ( WiredUI_SafeReload( manifest ) ) {
+		if ( theme[0] ) {
+			Com_Printf( "Theme switched to '%s'. Menus reloaded.\n", theme );
+		} else {
+			Com_Printf( "Menus reloaded successfully.\n" );
+		}
+	}
+	// on failure, SafeReload already restored old menus + printed error
+
+	// recreate HUD elements from (possibly new) hudOverlay menus
+	WiredHud_LoadFromMenus();
+
+	// re-open the menu that was active before reload
+	if ( currentMenu[0] && WiredUI_FindMenu( currentMenu ) ) {
+		WiredUI_PushMenu( currentMenu );
+	}
 }
 
 #endif // FEAT_WIRED_UI

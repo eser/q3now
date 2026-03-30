@@ -1300,15 +1300,15 @@ int BotSelectActivateWeapon(bot_state_t *bs) {
 		return WEAPONINDEX_MACHINEGUN;
 	else if (bs->inventory[INVENTORY_SHOTGUN] > 0 && bs->inventory[INVENTORY_SHELLS] > 0)
 		return WEAPONINDEX_SHOTGUN;
-	else if (bs->inventory[INVENTORY_PLASMAGUN] > 0 && bs->inventory[INVENTORY_CELLS] > 0)
+	else if (bs->inventory[INVENTORY_PLASMA_RIFLE] > 0 && bs->inventory[INVENTORY_CELLS] > 0)
 		return WEAPONINDEX_PLASMAGUN;
-	else if (bs->inventory[INVENTORY_LIGHTNING] > 0 && bs->inventory[INVENTORY_LIGHTNINGAMMO] > 0)
+	else if (bs->inventory[INVENTORY_LIGHTNING_GUN] > 0 && bs->inventory[INVENTORY_LIGHTNING] > 0)
 		return WEAPONINDEX_LIGHTNING;
-	else if (bs->inventory[INVENTORY_GRENADELAUNCHER] > 0 && bs->inventory[INVENTORY_GRENADES] > 0)
+	else if (bs->inventory[INVENTORY_GRENADE_LAUNCHER] > 0 && bs->inventory[INVENTORY_GRENADES] > 0)
 		return WEAPONINDEX_GRENADE_LAUNCHER;
 	else if (bs->inventory[INVENTORY_RAILGUN] > 0 && bs->inventory[INVENTORY_SLUGS] > 0)
 		return WEAPONINDEX_RAILGUN;
-	else if (bs->inventory[INVENTORY_ROCKETLAUNCHER] > 0 && bs->inventory[INVENTORY_ROCKETS] > 0)
+	else if (bs->inventory[INVENTORY_ROCKET_LAUNCHER] > 0 && bs->inventory[INVENTORY_ROCKETS] > 0)
 		return WEAPONINDEX_ROCKET_LAUNCHER;
 	else {
 		return -1;
@@ -2570,4 +2570,3 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	//
 	return qtrue;
 }
-

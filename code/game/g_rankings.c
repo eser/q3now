@@ -199,20 +199,14 @@ void G_RankFireWeapon( int self, int weapon )
 	case WP_ROCKET_LAUNCHER:
 		trap_RankReportInt( self, -1, QGR_KEY_SHOT_FIRED_ROCKET, 1, 1 );
 		break;
-	case WP_LIGHTNING:
+	case WP_LIGHTNING_GUN:
 		trap_RankReportInt( self, -1, QGR_KEY_SHOT_FIRED_LIGHTNING, 1, 1 );
 		break;
 	case WP_RAILGUN:
 		trap_RankReportInt( self, -1, QGR_KEY_SHOT_FIRED_RAILGUN, 1, 1 );
 		break;
-	case WP_PLASMAGUN:
+	case WP_PLASMA_RIFLE:
 		trap_RankReportInt( self, -1, QGR_KEY_SHOT_FIRED_PLASMA, 1, 1 );
-		break;
-	case WP_BFG:
-		trap_RankReportInt( self, -1, QGR_KEY_SHOT_FIRED_BFG, 1, 1 );
-		break;
-	case WP_GRAPPLING_HOOK:
-		trap_RankReportInt( self, -1, QGR_KEY_SHOT_FIRED_GRAPPLE, 1, 1 );
 		break;
 	default:
 		break;
@@ -678,20 +672,14 @@ void G_RankWeaponTime( int self, int weapon )
 	case WP_ROCKET_LAUNCHER:
 		trap_RankReportInt( self, -1, QGR_KEY_TIME_ROCKET, time, 1 );
 		break;
-	case WP_LIGHTNING:
+	case WP_LIGHTNING_GUN:
 		trap_RankReportInt( self, -1, QGR_KEY_TIME_LIGHTNING, time, 1 );
 		break;
 	case WP_RAILGUN:
 		trap_RankReportInt( self, -1, QGR_KEY_TIME_RAILGUN, time, 1 );
 		break;
-	case WP_PLASMAGUN:
+	case WP_PLASMA_RIFLE:
 		trap_RankReportInt( self, -1, QGR_KEY_TIME_PLASMA, time, 1 );
-		break;
-	case WP_BFG:
-		trap_RankReportInt( self, -1, QGR_KEY_TIME_BFG, time, 1 );
-		break;
-	case WP_GRAPPLING_HOOK:
-		trap_RankReportInt( self, -1, QGR_KEY_TIME_GRAPPLE, time, 1 );
 		break;
 	default:
 		break;
@@ -729,20 +717,14 @@ void G_RankPickupWeapon( int self, int weapon )
 	case WP_ROCKET_LAUNCHER:
 		trap_RankReportInt( self, -1, QGR_KEY_PICKUP_ROCKET, 1, 1 );
 		break;
-	case WP_LIGHTNING:
+	case WP_LIGHTNING_GUN:
 		trap_RankReportInt( self, -1, QGR_KEY_PICKUP_LIGHTNING, 1, 1 );
 		break;
 	case WP_RAILGUN:
 		trap_RankReportInt( self, -1, QGR_KEY_PICKUP_RAILGUN, 1, 1 );
 		break;
-	case WP_PLASMAGUN:
-		trap_RankReportInt( self, -1, QGR_KEY_PICKUP_PLASMA, 1, 1 );
-		break;
-	case WP_BFG:
-		trap_RankReportInt( self, -1, QGR_KEY_PICKUP_BFG, 1, 1 );
-		break;
-	case WP_GRAPPLING_HOOK:
-		trap_RankReportInt( self, -1, QGR_KEY_PICKUP_GRAPPLE, 1, 1 );
+	case WP_PLASMA_RIFLE:
+		trap_RankReportInt( self, -1, QGR_KEY_PICKUP_PLASMA_RIFLE, 1, 1 );
 		break;
 	default:
 		break;
@@ -783,7 +765,7 @@ void G_RankPickupAmmo( int self, int weapon, int quantity )
 		trap_RankReportInt( self, -1, QGR_KEY_BOXES_ROCKETS, 1, 1 );
 		trap_RankReportInt( self, -1, QGR_KEY_ROUNDS_ROCKETS, quantity, 1 );
 		break;
-	case WP_LIGHTNING:
+	case WP_LIGHTNING_GUN:
 		trap_RankReportInt( self, -1, QGR_KEY_BOXES_LG_AMMO, 1, 1 );
 		trap_RankReportInt( self, -1, QGR_KEY_ROUNDS_LG_AMMO, quantity, 1 );
 		break;
@@ -791,13 +773,9 @@ void G_RankPickupAmmo( int self, int weapon, int quantity )
 		trap_RankReportInt( self, -1, QGR_KEY_BOXES_SLUGS, 1, 1 );
 		trap_RankReportInt( self, -1, QGR_KEY_ROUNDS_SLUGS, quantity, 1 );
 		break;
-	case WP_PLASMAGUN:
+	case WP_PLASMA_RIFLE:
 		trap_RankReportInt( self, -1, QGR_KEY_BOXES_CELLS, 1, 1 );
 		trap_RankReportInt( self, -1, QGR_KEY_ROUNDS_CELLS, quantity, 1 );
-		break;
-	case WP_BFG:
-		trap_RankReportInt( self, -1, QGR_KEY_BOXES_BFG_AMMO, 1, 1 );
-		trap_RankReportInt( self, -1, QGR_KEY_ROUNDS_BFG_AMMO, quantity, 1 );
 		break;
 	default:
 		break;

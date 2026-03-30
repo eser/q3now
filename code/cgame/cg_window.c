@@ -41,21 +41,6 @@ Inspired by Nemesis cg_window.c, simplified for q3now.
 
 cg_windowHandler_t cg_windowHandler;
 
-static const char *s_weaponNames[] = {
-	"",           /* WP_NONE */
-	"Gauntlet",   /* WP_GAUNTLET */
-	"Machinegun",  /* WP_MACHINEGUN */
-	"Shotgun",    /* WP_SHOTGUN */
-	"Grenade",    /* WP_GRENADE_LAUNCHER */
-	"Rocket",     /* WP_ROCKET_LAUNCHER */
-	"Lightning",  /* WP_LIGHTNING */
-	"Railgun",    /* WP_RAILGUN */
-	"Plasma",     /* WP_PLASMA_GUN */
-	"BFG",        /* WP_BFG */
-	"Grapple"     /* WP_GRAPPLING_HOOK */
-};
-
-
 /*
 =================
 CG_windowInit
@@ -258,7 +243,7 @@ static qboolean CG_windowAddLine( cg_window_t *w, const vec4_t color, const char
 void CG_statsWindow( void )
 {
 	cg_window_t *w;
-	int wp;
+	int att;
 	int acc;
 	qboolean hasData;
 	char buf[MAX_WINDOW_LINE_LEN];
@@ -269,7 +254,7 @@ void CG_statsWindow( void )
 	vec4_t colorWhite  = { 1.0f, 1.0f, 1.0f, 1.0f };
 	vec4_t colorGray   = { 0.6f, 0.6f, 0.6f, 1.0f };
 	vec4_t *accColor;
-	cgWeaponStat_t *s;
+	cgAttackStat_t *s;
 
 	w = CG_windowAlloc( WID_STATS );
 	w->x = 8;
@@ -281,8 +266,8 @@ void CG_statsWindow( void )
 	CG_windowAddLine( w, colorHeader, "Weapon       Shots Hits  Acc  Kills  Dmg" );
 
 	hasData = qfalse;
-	for ( wp = WP_MACHINEGUN; wp < WP_NUM_WEAPONS; wp++ ) {
-		s = &cgs.weaponStats[cg.clientNum][wp];
+	for ( att = ATT_NONE + 1; att < ATT_NUM_ATTACKS; att++ ) {
+		s = &cgs.attackStats[cg.clientNum][att];
 		if ( s->shots == 0 && s->kills == 0 )
 			continue;
 
@@ -298,7 +283,7 @@ void CG_statsWindow( void )
 			accColor = &colorRed;
 
 		Com_sprintf( buf, sizeof( buf ), "%-12s %4d %4d  %3d%%  %4d %5d",
-			( wp < (int)(sizeof(s_weaponNames)/sizeof(s_weaponNames[0])) ) ? s_weaponNames[wp] : "???",
+			( att < ATT_NUM_ATTACKS ) ? bg_attacklist[att].name : "???",
 			s->shots, s->hits, acc, s->kills, s->damage );
 
 		CG_windowAddLine( w, *accColor, buf );
