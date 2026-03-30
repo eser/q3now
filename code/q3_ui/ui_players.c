@@ -118,7 +118,7 @@ tryagain:
 		MAKERGB( pi->flashDlightColor, 1, 0.75f, 0 );
 		break;
 
-	case WP_LIGHTNING:
+	case WP_LIGHTNING_GUN:
 		MAKERGB( pi->flashDlightColor, 0.6f, 0.6f, 1 );
 		break;
 
@@ -126,7 +126,7 @@ tryagain:
 		MAKERGB( pi->flashDlightColor, 1, 0.5f, 0 );
 		break;
 
-	case WP_PLASMAGUN:
+	case WP_PLASMA_RIFLE:
 		MAKERGB( pi->flashDlightColor, 0.6f, 0.6f, 1 );
 		break;
 

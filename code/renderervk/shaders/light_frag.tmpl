@@ -13,6 +13,9 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 fogEyeT;				// vertex
 	vec4 fogColor;				// fragment
 #endif
+#ifdef USE_SHADOWMAP
+	mat4 shadowMVP;				// light view-projection matrix (vertex uses this)
+#endif
 };
 
 layout(set = 1, binding = 0) uniform sampler2D texture0;
@@ -21,6 +24,12 @@ layout(set = 2, binding = 0) uniform sampler2D fogtexture;
 #endif
 #ifdef USE_PARALLAX
 layout(set = 6, binding = 0) uniform sampler2D normalmap;
+#endif
+#ifdef USE_SHADOWMAP
+layout(set = 3, binding = 0) uniform sampler2D shadowMap;
+#endif
+#ifdef USE_PBR
+layout(set = 4, binding = 0) uniform sampler2D pbrMap; // R=roughness, G=metalness
 #endif
 
 layout(location = 0) centroid in vec2 frag_tex_coord;
@@ -33,6 +42,9 @@ layout(location = 4) in vec2 fog_tex_coord;
 #ifdef USE_PARALLAX
 layout(location = 5) in vec3 frag_position;
 #endif
+#ifdef USE_SHADOWMAP
+layout(location = 6) in vec4 shadowCoord; // light-space position for shadow lookup
+#endif
 
 layout(location = 0) out vec4 out_color;
 
@@ -42,9 +54,88 @@ layout (constant_id = 1) const float alpha_test_value = 0.0;
 layout (constant_id = 3) const int alpha_to_coverage = 0;
 //layout (constant_id = 4) const int color_mode = 0;
 layout (constant_id = 5) const int abs_light = 0;
+#ifdef USE_SHADOWMAP
+layout (constant_id = 28) const int shadow_pcf = 5;       // 1, 5, or 9 samples
+layout (constant_id = 29) const float shadow_bias = 0.005;
+#endif
+#ifdef USE_PBR
+layout (constant_id = 30) const float pbr_base_roughness = 0.5;
+layout (constant_id = 31) const float pbr_base_metalness = 0.0;
+#endif
 #ifdef USE_PARALLAX
 layout (constant_id = 12) const float parallax_scale = 0.03;
 layout (constant_id = 13) const int parallax_steps = 8;
+#endif
+
+#ifdef USE_SHADOWMAP
+// PCF shadow sampling — 3-tier quality (1/5/9 samples, FTEQW-style)
+float sampleShadow() {
+	// Perspective divide → NDC → [0,1] shadow UV
+	vec3 sc = shadowCoord.xyz / shadowCoord.w;
+	sc.xy = sc.xy * 0.5 + 0.5;
+
+	// Out-of-bounds → fully lit
+	if ( sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0 )
+		return 1.0;
+
+	vec2 texelSize = 1.0 / vec2( textureSize( shadowMap, 0 ) );
+	float currentDepth = sc.z - shadow_bias;
+	float shadow = 0.0;
+
+	if ( shadow_pcf <= 1 ) {
+		// Single sample
+		shadow = step( currentDepth, texture( shadowMap, sc.xy ).r );
+	} else if ( shadow_pcf <= 5 ) {
+		// 5-sample cross pattern
+		shadow += step( currentDepth, texture( shadowMap, sc.xy ).r );
+		shadow += step( currentDepth, texture( shadowMap, sc.xy + vec2( texelSize.x, 0 ) ).r );
+		shadow += step( currentDepth, texture( shadowMap, sc.xy - vec2( texelSize.x, 0 ) ).r );
+		shadow += step( currentDepth, texture( shadowMap, sc.xy + vec2( 0, texelSize.y ) ).r );
+		shadow += step( currentDepth, texture( shadowMap, sc.xy - vec2( 0, texelSize.y ) ).r );
+		shadow /= 5.0;
+	} else {
+		// 9-sample 3x3 kernel
+		for ( int x = -1; x <= 1; x++ ) {
+			for ( int y = -1; y <= 1; y++ ) {
+				shadow += step( currentDepth, texture( shadowMap, sc.xy + vec2( x, y ) * texelSize ).r );
+			}
+		}
+		shadow /= 9.0;
+	}
+
+	return shadow;
+}
+#endif
+
+#ifdef USE_PBR
+const float PI = 3.14159265359;
+
+// GGX/Trowbridge-Reitz normal distribution function
+float DistributionGGX( float NdotH, float roughness ) {
+	float a = roughness * roughness;
+	float a2 = a * a;
+	float denom = NdotH * NdotH * ( a2 - 1.0 ) + 1.0;
+	return a2 / ( PI * denom * denom );
+}
+
+// Schlick-GGX geometry function (single direction)
+float GeometrySchlickGGX( float NdotV, float roughness ) {
+	float r = roughness + 1.0;
+	float k = ( r * r ) / 8.0;
+	return NdotV / ( NdotV * ( 1.0 - k ) + k );
+}
+
+// Smith geometry function (both view and light directions)
+float GeometrySmith( float NdotV, float NdotL, float roughness ) {
+	return GeometrySchlickGGX( NdotV, roughness ) * GeometrySchlickGGX( NdotL, roughness );
+}
+
+// Schlick Fresnel approximation
+vec3 FresnelSchlick( float cosTheta, vec3 F0 ) {
+	float t = 1.0 - cosTheta;
+	float t2 = t * t;
+	return F0 + ( 1.0 - F0 ) * ( t2 * t2 * t ); // pow5
+}
 #endif
 
 float CorrectAlpha(float threshold, float alpha, vec2 tc)
@@ -163,12 +254,54 @@ void main() {
 		discard;
 	vec3 intens = lightColorRadius.rgb * intensFactor;
 
+#ifdef USE_SHADOWMAP
+	intens *= sampleShadow();
+#endif
+
 #ifdef USE_FOG
 	// modulate base by inverted fog alpha
 	base.xyz = base.xyz * ( 1.0 - fog.a );
 #endif
 
-	// Lambertian diffuse reflection term (Np.L) — Np is parallax-mapped normal or plain N
+#ifdef USE_PBR
+	// Physically Based Rendering — GGX + Schlick + Smith
+	float roughness, metalness;
+	{
+		vec2 pbr = texture( pbrMap, parallax_tc ).rg;
+		roughness = clamp( pbr.r, 0.04, 1.0 );
+		metalness = pbr.g;
+	}
+
+	vec3 halfVec = normalize( nL + nV );
+	float NdotL = max( dot( Np, nL ), 0.0 );
+	float NdotV = max( dot( Np, nV ), 0.001 );
+	float NdotH = max( dot( Np, halfVec ), 0.0 );
+	float HdotV = max( dot( halfVec, nV ), 0.0 );
+
+	if ( abs_light != 0 ) {
+		if ( NdotL * NdotV <= 0.0 )
+			discard;
+		NdotL = abs( NdotL );
+		NdotV = abs( NdotV );
+	}
+
+	// Dielectric F0=0.04, metallic F0=albedo color
+	vec3 F0 = mix( vec3( 0.04 ), base.rgb, metalness );
+
+	// Cook-Torrance BRDF
+	float D = DistributionGGX( NdotH, roughness );
+	float G = GeometrySmith( NdotV, NdotL, roughness );
+	vec3  F = FresnelSchlick( HdotV, F0 );
+
+	vec3 specular = ( D * G * F ) / max( 4.0 * NdotV * NdotL, 0.001 );
+
+	// Energy conservation: metallic surfaces have no diffuse
+	vec3 kD = ( vec3( 1.0 ) - F ) * ( 1.0 - metalness );
+	vec3 diffuseColor = kD * base.rgb / PI;
+
+	out_color = vec4( ( diffuseColor + specular ) * NdotL * intens, base.a );
+#else
+	// Classic Phong lighting
 	float diffuse = dot(Np, nL);
 
 	// specular reflection term (Np.H)
@@ -188,4 +321,5 @@ void main() {
 	vec4 spec = vec4(pow(specFactor, 10.0)*0.25) * base * 0.8;
 
 	out_color = (base * vec4(diffuse) + spec) * vec4(intens, 1.0);
+#endif
 }

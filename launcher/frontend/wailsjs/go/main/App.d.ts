@@ -10,9 +10,13 @@ export function BuildGameCommand(arg1:Record<string, any>):Promise<string>;
 
 export function CancelImport():Promise<void>;
 
+export function CheckDownloadStatus():Promise<Record<string, any>>;
+
 export function DetectQ1Installations():Promise<Array<detect.Q1Installation>>;
 
 export function DetectQ3Installations():Promise<Array<detect.Q3Installation>>;
+
+export function DownloadFreeResources():Promise<void>;
 
 export function GetAppState():Promise<Record<string, any>>;
 
@@ -32,6 +36,6 @@ export function SaveSettings(arg1:settings.Settings):Promise<void>;
 
 export function StartDedicated(arg1:engine.ServerConfig):Promise<void>;
 
-export function StartImport(arg1:string,arg2:string):Promise<void>;
+export function StartImport(arg1:string):Promise<void>;
 
 export function StopDedicated():Promise<void>;

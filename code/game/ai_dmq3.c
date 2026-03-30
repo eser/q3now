@@ -1740,17 +1740,17 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_GAUNTLET] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_GAUNTLET)) != 0;
 	bs->inventory[INVENTORY_SHOTGUN] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_SHOTGUN)) != 0;
 	bs->inventory[INVENTORY_MACHINEGUN] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_MACHINEGUN)) != 0;
-	bs->inventory[INVENTORY_GRENADELAUNCHER] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_GRENADE_LAUNCHER)) != 0;
-	bs->inventory[INVENTORY_ROCKETLAUNCHER] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_ROCKET_LAUNCHER)) != 0;
-	bs->inventory[INVENTORY_LIGHTNING] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_LIGHTNING)) != 0;
+	bs->inventory[INVENTORY_GRENADE_LAUNCHER] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_GRENADE_LAUNCHER)) != 0;
+	bs->inventory[INVENTORY_ROCKET_LAUNCHER] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_ROCKET_LAUNCHER)) != 0;
+	bs->inventory[INVENTORY_LIGHTNING_GUN] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_LIGHTNING_GUN)) != 0;
 	bs->inventory[INVENTORY_RAILGUN] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_RAILGUN)) != 0;
-	bs->inventory[INVENTORY_PLASMAGUN] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_PLASMAGUN)) != 0;
+	bs->inventory[INVENTORY_PLASMA_RIFLE] = (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_PLASMA_RIFLE)) != 0;
 	//ammo
 	bs->inventory[INVENTORY_SHELLS] = bs->cur_ps.ammo[WP_SHOTGUN];
 	bs->inventory[INVENTORY_BULLETS] = bs->cur_ps.ammo[WP_MACHINEGUN];
 	bs->inventory[INVENTORY_GRENADES] = bs->cur_ps.ammo[WP_GRENADE_LAUNCHER];
-	bs->inventory[INVENTORY_CELLS] = bs->cur_ps.ammo[WP_PLASMAGUN];
-	bs->inventory[INVENTORY_LIGHTNINGAMMO] = bs->cur_ps.ammo[WP_LIGHTNING];
+	bs->inventory[INVENTORY_CELLS] = bs->cur_ps.ammo[WP_PLASMA_RIFLE];
+	bs->inventory[INVENTORY_LIGHTNING] = bs->cur_ps.ammo[WP_LIGHTNING_GUN];
 	bs->inventory[INVENTORY_ROCKETS] = bs->cur_ps.ammo[WP_ROCKET_LAUNCHER];
 	bs->inventory[INVENTORY_SLUGS] = bs->cur_ps.ammo[WP_RAILGUN];
 	//powerups
@@ -2215,16 +2215,16 @@ float BotAggression(bot_state_t *bs) {
 	if (bs->inventory[INVENTORY_RAILGUN] > 0 &&
 			bs->inventory[INVENTORY_SLUGS] > 5) return 95;
 	//if the bot can use the lightning gun
-	if (bs->inventory[INVENTORY_LIGHTNING] > 0 &&
-			bs->inventory[INVENTORY_LIGHTNINGAMMO] > 50) return 90;
+	if (bs->inventory[INVENTORY_LIGHTNING_GUN] > 0 &&
+			bs->inventory[INVENTORY_LIGHTNING] > 50) return 90;
 	//if the bot can use the rocketlauncher
-	if (bs->inventory[INVENTORY_ROCKETLAUNCHER] > 0 &&
+	if (bs->inventory[INVENTORY_ROCKET_LAUNCHER] > 0 &&
 			bs->inventory[INVENTORY_ROCKETS] > 5) return 90;
 	//if the bot can use the plasmagun
-	if (bs->inventory[INVENTORY_PLASMAGUN] > 0 &&
+	if (bs->inventory[INVENTORY_PLASMA_RIFLE] > 0 &&
 			bs->inventory[INVENTORY_CELLS] > 40) return 85;
 	//if the bot can use the grenade launcher
-	if (bs->inventory[INVENTORY_GRENADELAUNCHER] > 0 &&
+	if (bs->inventory[INVENTORY_GRENADE_LAUNCHER] > 0 &&
 			bs->inventory[INVENTORY_GRENADES] > 10) return 80;
 	//if the bot can use the shotgun
 	if (bs->inventory[INVENTORY_SHOTGUN] > 0 &&
@@ -2384,7 +2384,7 @@ int BotCanAndWantsToRocketJump(bot_state_t *bs) {
 	//if rocket jumping is disabled
 	if (!bot_rocketjump.integer) return qfalse;
 	//if no rocket launcher
-	if (bs->inventory[INVENTORY_ROCKETLAUNCHER] <= 0) return qfalse;
+	if (bs->inventory[INVENTORY_ROCKET_LAUNCHER] <= 0) return qfalse;
 	//if low on rockets
 	if (bs->inventory[INVENTORY_ROCKETS] < 3) return qfalse;
 	//never rocket jump with the Quad
@@ -2418,13 +2418,13 @@ int BotHasPersistantPowerupAndWeapon(bot_state_t *bs) {
 	if (bs->inventory[INVENTORY_RAILGUN] > 0 &&
 			bs->inventory[INVENTORY_SLUGS] > 5) return qtrue;
 	//if the bot can use the lightning gun
-	if (bs->inventory[INVENTORY_LIGHTNING] > 0 &&
-			bs->inventory[INVENTORY_LIGHTNINGAMMO] > 50) return qtrue;
+	if (bs->inventory[INVENTORY_LIGHTNING_GUN] > 0 &&
+			bs->inventory[INVENTORY_LIGHTNING] > 50) return qtrue;
 	//if the bot can use the rocketlauncher
-	if (bs->inventory[INVENTORY_ROCKETLAUNCHER] > 0 &&
+	if (bs->inventory[INVENTORY_ROCKET_LAUNCHER] > 0 &&
 			bs->inventory[INVENTORY_ROCKETS] > 5) return qtrue;
 	//if the bot can use the plasmagun
-	if (bs->inventory[INVENTORY_PLASMAGUN] > 0 &&
+	if (bs->inventory[INVENTORY_PLASMA_RIFLE] > 0 &&
 			bs->inventory[INVENTORY_CELLS] > 20) return qtrue;
 	return qfalse;
 }
@@ -2489,7 +2489,7 @@ int BotWantsToCamp(bot_state_t *bs) {
 	//if the bot isn't healthy enough
 	if (BotAggression(bs) < 50) return qfalse;
 	//the bot should have at least have the rocket launcher or the railgun with some ammo
-	if ((bs->inventory[INVENTORY_ROCKETLAUNCHER] <= 0 || bs->inventory[INVENTORY_ROCKETS] < 10) &&
+	if ((bs->inventory[INVENTORY_ROCKET_LAUNCHER] <= 0 || bs->inventory[INVENTORY_ROCKETS] < 10) &&
 		(bs->inventory[INVENTORY_RAILGUN] <= 0 || bs->inventory[INVENTORY_SLUGS] < 10)) {
 		return qfalse;
 	}
@@ -3326,13 +3326,13 @@ void BotAimAtEnemy(bot_state_t *bs) {
 		aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_ROCKETLAUNCHER, 0, 1);
 		aim_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_SKILL_ROCKETLAUNCHER, 0, 1);
 	}
-	else if (wi.number == WP_LIGHTNING) {
+	else if (wi.number == WP_LIGHTNING_GUN) {
 		aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_LIGHTNING, 0, 1);
 	}
 	else if (wi.number == WP_RAILGUN) {
 		aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_RAILGUN, 0, 1);
 	}
-	else if (wi.number == WP_PLASMAGUN) {
+	else if (wi.number == WP_PLASMA_RIFLE) {
 		aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_PLASMAGUN, 0, 1);
 		aim_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_SKILL_PLASMAGUN, 0, 1);
 	}
@@ -3513,7 +3513,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	//
 	if (wi.number == WP_MACHINEGUN ||
 		wi.number == WP_SHOTGUN ||
-		wi.number == WP_LIGHTNING ||
+		wi.number == WP_LIGHTNING_GUN ||
 		wi.number == WP_RAILGUN) {
 		//distance towards the enemy
 		dist = VectorLength(dir);

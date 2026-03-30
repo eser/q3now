@@ -1,5 +1,7 @@
 #ifndef CG_PUBLIC_H
 #define CG_PUBLIC_H
+
+#include "../game/bg_public.h"
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
@@ -242,7 +244,7 @@ typedef struct {
 	int         massacreCount;
 	int         unstoppableCount;
 	int         totalDamage;        // sum of all weapon damage (pre-computed by cgame)
-	int         bestWeapon;         // weapon with most kills (WP_* enum, WP_NONE if none)
+	int         bestAttack;         // attack with most kills (ATT_* enum, ATT_NONE if none)
 } wiredHudScore_t;
 
 // data binding: named stat bundle pushed from cgame, consumed by generic HUD elements
@@ -341,6 +343,7 @@ typedef struct {
 	qhandle_t   redFlagShader[3];   // [status 0-2]
 	qhandle_t   blueFlagShader[3];
 	qhandle_t   weaponIcons[MAX_WEAPONS];
+	qhandle_t   attackIcons[MAX_ATTACKS];
 	qhandle_t   ammoIcons[MAX_WEAPONS];
 	qhandle_t   itemIcons[WIRED_HUD_MAX_ITEMS];
 	sfxHandle_t talkSound;
@@ -353,10 +356,10 @@ typedef struct {
 	int               numBindings;
 	wiredHudBinding_t bindings[WIRED_HUD_MAX_BINDINGS];
 
-	// per-weapon stats for local player (for SBA accuracy elements)
+	// per-attack stats for local player (for SBA accuracy elements)
 	struct {
 		int hits, shots, kills, deaths, damage;
-	} weaponStats[MAX_WEAPONS];
+	} attackStats[ATT_NUM_ATTACKS];
 
 	// lagometer (ring buffers for frame timing + snapshot health graph)
 	wiredLagometer_t lagometer;
@@ -364,6 +367,10 @@ typedef struct {
 
 	qboolean    wiredUIActive;  // cg_wiredUI.integer — client uses this to enable/disable rendering
 	qboolean    valid;
+
+	// TA compat: CG_SHOW_* / UI_SHOW_* display flags for ownerdrawFlag evaluation
+	unsigned int cgShowFlags;   // CG_SHOW_* bitmask (set by cgame each frame)
+	unsigned int uiShowFlags;   // UI_SHOW_* bitmask (set by cgame each frame)
 } wiredHudState_t;
 
 void trap_WiredUI_PushHudState( wiredHudState_t *state );

@@ -204,9 +204,9 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
         Add_Ammo(other, WP_SHOTGUN, a2);
         Add_Ammo(other, WP_GRENADE_LAUNCHER, a3);
         Add_Ammo(other, WP_ROCKET_LAUNCHER, a4);
-        Add_Ammo(other, WP_LIGHTNING, a5);
+        Add_Ammo(other, WP_LIGHTNING_GUN, a5);
         Add_Ammo(other, WP_RAILGUN, a6);
-        Add_Ammo(other, WP_PLASMAGUN, a7);
+        Add_Ammo(other, WP_PLASMA_RIFLE, a7);
 
         return 1; // this value doesn't matter, only it isn't 0
     }

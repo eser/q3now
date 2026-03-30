@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import {
   BrowseForDirectory,
+  CheckDownloadStatus,
   DetectQ3Installations,
-  DetectQ1Installations,
+  DownloadFreeResources,
   StartImport,
 } from "../../wailsjs/go/main/App";
+import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
 import Button from "../components/Button";
 import ExternalLink from "../components/ExternalLink";
 import Logo from "../components/Logo";
@@ -110,26 +112,40 @@ const styles = {
     color: "var(--accent)",
     fontSize: "13px",
   },
+  downloadStatus: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    marginTop: "8px",
+  },
+  downloadReady: {
+    fontSize: "13px",
+    color: "var(--text-secondary)",
+    fontWeight: 500,
+  },
+  downloadMessage: {
+    fontSize: "12px",
+    color: "var(--text-muted)",
+    marginTop: "4px",
+  },
 };
 
 export default function ImportScreen({ onImportComplete, onBack }) {
   const [q3aInstallations, setQ3aInstallations] = useState([]);
-  const [q1Installations, setQ1Installations] = useState([]);
   const [q3aPath, setQ3aPath] = useState("");
-  const [q1Path, setQ1Path] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [downloadStatus, setDownloadStatus] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadMessage, setDownloadMessage] = useState("");
 
   useEffect(() => {
-    Promise.all([DetectQ3Installations(), DetectQ1Installations()])
-      .then(([q3aFound, q1Found]) => {
+    Promise.all([DetectQ3Installations(), CheckDownloadStatus()])
+      .then(([q3aFound, dlStatus]) => {
         setQ3aInstallations(q3aFound || []);
-        setQ1Installations(q1Found || []);
+        setDownloadStatus(dlStatus);
         if (q3aFound && q3aFound.length > 0) {
           setQ3aPath(q3aFound[0].path);
-        }
-        if (q1Found && q1Found.length > 0) {
-          setQ1Path(q1Found[0].path);
         }
         setLoading(false);
       })
@@ -138,6 +154,39 @@ export default function ImportScreen({ onImportComplete, onBack }) {
         setLoading(false);
       });
   }, []);
+
+  // Listen for download events
+  useEffect(() => {
+    const offProgress = EventsOn("download:progress", (data) => {
+      setDownloadMessage(data.message || "");
+    });
+    const offComplete = EventsOn("download:complete", () => {
+      setDownloading(false);
+      setDownloadMessage("");
+      CheckDownloadStatus().then(setDownloadStatus);
+    });
+    const offError = EventsOn("download:error", (msg) => {
+      setDownloading(false);
+      setDownloadMessage("");
+      setError(msg);
+    });
+    return () => {
+      offProgress();
+      offComplete();
+      offError();
+    };
+  }, []);
+
+  const handleDownload = async () => {
+    setError(null);
+    setDownloading(true);
+    try {
+      await DownloadFreeResources();
+    } catch (err) {
+      setDownloading(false);
+      setError(err.toString());
+    }
+  };
 
   const handleBrowseQ3A = async () => {
     try {
@@ -148,36 +197,22 @@ export default function ImportScreen({ onImportComplete, onBack }) {
     }
   };
 
-  const handleBrowseQ1 = async () => {
-    try {
-      const dir = await BrowseForDirectory();
-      if (dir) setQ1Path(dir);
-    } catch (err) {
-      setError(err.toString());
-    }
-  };
-
   const handleAutoDetect = () => {
     setLoading(true);
-    Promise.all([DetectQ3Installations(), DetectQ1Installations()])
-      .then(([q3aFound, q1Found]) => {
-        setQ3aInstallations(q3aFound || []);
-        setQ1Installations(q1Found || []);
-        if (q3aFound && q3aFound.length > 0) {
-          setQ3aPath(q3aFound[0].path);
-        }
-        if (q1Found && q1Found.length > 0) {
-          setQ1Path(q1Found[0].path);
-        }
-        setLoading(false);
-      });
+    DetectQ3Installations().then((q3aFound) => {
+      setQ3aInstallations(q3aFound || []);
+      if (q3aFound && q3aFound.length > 0) {
+        setQ3aPath(q3aFound[0].path);
+      }
+      setLoading(false);
+    });
   };
 
   const handleImport = async () => {
-    if (!q3aPath) return;
+    if (!downloadStatus?.ready) return;
     setError(null);
     try {
-      await StartImport(q3aPath, q1Path);
+      await StartImport(q3aPath);
       onImportComplete();
     } catch (err) {
       setError(err.toString());
@@ -198,6 +233,8 @@ export default function ImportScreen({ onImportComplete, onBack }) {
     );
   }
 
+  const isDownloaded = downloadStatus?.ready;
+
   return (
     <div style={styles.container} className="screen-enter screen-enter-active">
       <div style={styles.header}>
@@ -212,9 +249,39 @@ export default function ImportScreen({ onImportComplete, onBack }) {
       </div>
 
       <div style={styles.body}>
+        {/* Download Free Resources */}
         <div style={styles.section}>
           <div style={styles.sectionTitle}>
-            Quake 3 Arena / Quake Live Installation Path (required)
+            Download Free Resources
+          </div>
+          <div style={{ ...styles.helpText, marginTop: 0, marginBottom: "12px" }}>
+            Download free demo files to get started without purchasing the full
+            game.
+          </div>
+          <div style={styles.downloadStatus}>
+            {isDownloaded ? (
+              <span style={styles.downloadReady}>
+                &#10003; Downloaded
+              </span>
+            ) : (
+              <Button
+                variant="secondary"
+                disabled={downloading}
+                onClick={handleDownload}
+              >
+                {downloading ? "Downloading..." : "Download"}
+              </Button>
+            )}
+          </div>
+          {downloadMessage && (
+            <div style={styles.downloadMessage}>{downloadMessage}</div>
+          )}
+        </div>
+
+        {/* Q3A Installation Path (optional) */}
+        <div style={styles.section}>
+          <div style={styles.sectionTitle}>
+            Quake 3 Arena Installation Path (optional)
           </div>
           <div style={styles.inputRow}>
             <input
@@ -235,7 +302,8 @@ export default function ImportScreen({ onImportComplete, onBack }) {
                 Not detected.{" "}
               </span>
             )}
-            Don't own Quake 3 Arena? Purchase on{" "}
+            Providing the full game adds extra maps, textures, and models.
+            Purchase on{" "}
             <ExternalLink href="https://store.steampowered.com/app/2200/Quake_III_Arena/">
               Steam
             </ExternalLink>{" "}
@@ -246,43 +314,6 @@ export default function ImportScreen({ onImportComplete, onBack }) {
             .
           </div>
         </div>
-
-        {/* Q1 import hidden for this release — will be re-enabled next release
-        <div style={styles.section}>
-          <div style={styles.sectionTitle}>
-            Quake 1 Installation Path (optional)
-          </div>
-          <div style={styles.inputRow}>
-            <input
-              type="text"
-              style={styles.input}
-              value={q1Path}
-              onChange={(e) =>
-                setQ1Path(e.target.value)}
-              placeholder="/path/to/Quake"
-            />
-            <button style={styles.browseBtn} onClick={handleBrowseQ1}>
-              Browse
-            </button>
-          </div>
-          <div style={styles.helpText}>
-            {q1Installations.length === 0 && (
-              <span style={{ color: "var(--accent)" }}>
-                Not detected.{" "}
-              </span>
-            )}
-            Don't own Quake? Purchase on{" "}
-            <ExternalLink href="https://store.steampowered.com/app/2310/Quake/">
-              Steam
-            </ExternalLink>{" "}
-            or{" "}
-            <ExternalLink href="https://www.gog.com/game/quake_the_offering">
-              GoG
-            </ExternalLink>
-            .
-          </div>
-        </div>
-        */}
 
         {error && <div style={styles.error}>{error}</div>}
       </div>
@@ -300,7 +331,7 @@ export default function ImportScreen({ onImportComplete, onBack }) {
         <Button variant="secondary" onClick={handleAutoDetect}>
           Auto-Detect
         </Button>
-        <Button disabled={!q3aPath} onClick={handleImport}>
+        <Button disabled={!isDownloaded || downloading} onClick={handleImport}>
           Import
         </Button>
       </div>

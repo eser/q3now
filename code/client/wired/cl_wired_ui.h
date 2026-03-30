@@ -222,6 +222,12 @@ typedef struct wiredItemDef_s {
 	wiredRect_t     transTo;                // target rect
 	int             transStartTime;         // cls.realtime when transition started (0 = inactive)
 	int             transDuration;          // total duration in ms
+
+	// fade animation state (TA compat: fadein/fadeout script commands)
+	float           fadeAlphaItem;          // current item alpha multiplier (0.0 = invisible, 1.0 = opaque)
+	float           fadeTargetAlpha;        // target alpha (0.0 for fadeout, 1.0 for fadein)
+	int             fadeStartTime;          // cls.realtime when fade started (0 = inactive)
+	int             fadeDurationItem;       // fade duration in ms
 } wiredItemDef_t;
 
 typedef struct wiredMenuDef_s {
@@ -265,6 +271,10 @@ typedef struct wiredMenuDef_s {
 	// fade animation (v6 assetGlobalDef: fadeClamp/fadeCycle/fadeAmount)
 	int               openTime;             // cls.realtime when menu was opened
 	float             fadeAlpha;            // current fade alpha (0..fadeClamp)
+
+	// cinematic background (WINDOW_STYLE_CINEMATIC / TA compat)
+	char              cinematic[MAX_QPATH]; // ROQ file path (parsed from "cinematic" keyword)
+	int               cinematicHandle;      // CIN handle (-1 = none)
 } wiredMenuDef_t;
 
 // ── overlay rendering (for in-game overlays like scoreboard) ──────────
@@ -309,6 +319,31 @@ void     WiredUI_PopMenu( void );
 void     WiredUI_CloseAllMenus( void );
 wiredMenuDef_t *WiredUI_GetActiveMenu( void );
 
+// ── asset globals (assetGlobalDef from .menu files) ──────────────────
+//
+// These values are set by parsing the assetGlobalDef {} block in menus.txt.
+// They provide global defaults for cursor, fonts, colors, and sounds.
+// If not specified, sensible defaults are used (TA-style).
+
+typedef struct {
+	char            cursor[MAX_QPATH];         // cursor shader path
+	char            gradientBar[MAX_QPATH];    // gradient bar shader path
+	char            font[MAX_QPATH];           // primary font path
+	int             fontSize;                  // primary font size (default 16)
+	char            smallFont[MAX_QPATH];      // small font path
+	int             smallFontSize;             // small font size (default 12)
+	char            bigFont[MAX_QPATH];        // big font path
+	int             bigFontSize;               // big font size (default 20)
+	float           fadeClamp;                 // max fade alpha (default 1.0)
+	int             fadeCycle;                 // fade cycle time ms (default 1)
+	float           fadeAmount;                // fade step per cycle (default 0.2)
+	vec4_t          shadowColor;               // text shadow color
+	char            focusSound[MAX_QPATH];     // item focus sound path
+	vec4_t          focusColor;                // focus highlight color
+} wiredAssetGlobals_t;
+
+wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void );
+
 // ── parser (cl_wired_parse.c) ─────────────────────────────────────────
 
 qboolean WiredUI_LoadMenus( const char *manifestFile );
@@ -317,6 +352,13 @@ int      WiredUI_GetMenuCount( void );
 wiredMenuDef_t *WiredUI_FindMenu( const char *name );
 void     WiredUI_ClearMenus( void );
 void     WiredUI_ResetPool( void );
+qboolean WiredUI_SafeReload( const char *manifestFile );  // two-phase: parse new → swap or keep old
+
+// ── ownerdraw system (cl_wired_ownerdraw.c) ──────────────────────────
+
+qboolean WiredUI_OwnerDrawVisible( int flags );  // evaluate CG_SHOW_*/UI_SHOW_* flags
+void     WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
+                             vec4_t color, int style );
 
 // ── memory pool ───────────────────────────────────────────────────────
 

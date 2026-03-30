@@ -237,7 +237,8 @@ gitem_t	bg_itemlist[] =
 	{
         { "weapon_grenadelauncher", "weapon_prox_launcher", NULL },
 		"sound/misc/w_pkup.wav",
-        { "models/weapons2/grenadel/grenadel.md3", 
+        // { "models/weapons/proxmine/proxmine.md3", 
+		{ "models/weapons2/grenadel/grenadel.md3", 
 		NULL, NULL, NULL},
 /* icon */		"icons/iconw_grenade",
 /* pickup */	"Grenade Launcher",
@@ -275,7 +276,7 @@ gitem_t	bg_itemlist[] =
 /* pickup */	"Lightning Gun",
 		100,
 		IT_WEAPON,
-		WP_LIGHTNING,
+		WP_LIGHTNING_GUN,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -307,7 +308,7 @@ gitem_t	bg_itemlist[] =
 /* pickup */	"Plasma Rifle",
 		50,
 		IT_WEAPON,
-		WP_PLASMAGUN,
+		WP_PLASMA_RIFLE,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -375,7 +376,7 @@ gitem_t	bg_itemlist[] =
 /* pickup */	"Plasma Cells",
 		30,
 		IT_AMMO,
-		WP_PLASMAGUN,
+		WP_PLASMA_RIFLE,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -391,7 +392,7 @@ gitem_t	bg_itemlist[] =
 /* pickup */	"Lightning Cells",
 		60,
 		IT_AMMO,
-		WP_LIGHTNING,
+		WP_LIGHTNING_GUN,
 /* precache */ "",
 /* sounds */ ""
 	},
@@ -636,7 +637,9 @@ Only in CTF games
 /* precache */ "",
 /* sounds */ "sound/items/kamikazerespawn.wav"
 	},
+#endif
 
+#if FEAT_PW_INVULNERABILITY
 /*QUAKED holdable_portal (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
@@ -668,7 +671,9 @@ Only in CTF games
 /* precache */ "",
 /* sounds */ ""
 	},
+#endif
 
+#if FEAT_1FCTF
 	/*QUAKED team_CTF_neutralflag (0 0 1) (-16 -16 -16) (16 16 16)
 Only in One Flag CTF games
 */
@@ -685,7 +690,9 @@ Only in One Flag CTF games
 /* precache */ "",
 /* sounds */ ""
 	},
+#endif
 
+#if FEAT_HARVESTER
 	{
         { "item_redcube", NULL },
 		"sound/misc/am_pkup.wav",
@@ -721,252 +728,7 @@ Only in One Flag CTF games
 
 int		bg_numItems = ARRAY_LEN( bg_itemlist ) - 1;
 
-// Weapon
-gweapon_t	bg_weaponlist[] =
-{
-    // WP_NONE
-    {
-        /* name                 */ "None",
-        /* shortname            */ "n",
-
-        /* color                */ colorBlack,
-        /* switchOnCycle        */ qfalse,
-        /* switchOnOutOfAmmo    */ qfalse,
-
-        /* tossOnDeath          */ qfalse,
-
-        /* ammoBox              */ 0,
-        /* minAmmunition        */ -1,
-        /* maxAmmunition        */ -1,
-
-        /* spawnWeapon          */ qfalse,
-        /* spawnAmmunition      */ -1,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 5.0f, // should be stay in that way
-		/* selfKnockbackScale   */ 5.0f, // should be stay in that way
-		/* recoilKick           */ 0.0f,
-
-        /* reloadTime           */ 0,
-        /* weight               */ 1.0f
-    },
-
-    // WP_GAUNTLET
-    {
-        /* name                 */ "Gauntlet",
-        /* shortname            */ "g",
-
-        /* color                */ colorOrange,
-        /* switchOnCycle        */ qfalse,
-        /* switchOnOutOfAmmo    */ qtrue,
-
-        /* tossOnDeath          */ qfalse,
-
-        /* ammoBox              */ 0,
-        /* minAmmunition        */ -1,
-        /* maxAmmunition        */ -1,
-
-        /* spawnWeapon          */ qtrue,
-        /* spawnAmmunition      */ -1,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 2.5f,
-		/* selfKnockbackScale   */ 2.5f,
-		/* recoilKick           */ 0.0f,
-
-		/* reloadTime           */ 400,
-        /* weight               */ 1.0f
-    },
-
-    // WP_MACHINEGUN,
-    {
-        /* name                 */ "Machinegun",
-        /* shortname            */ "mg",
-
-        /* color                */ colorYellow,
-        /* switchOnCycle        */ qtrue,
-        /* switchOnOutOfAmmo    */ qtrue,
-
-        /* tossOnDeath          */ qtrue,
-
-        /* ammoBox              */ 50,
-        /* minAmmunition        */ 50,
-        /* maxAmmunition        */ 200,
-
-        /* spawnWeapon          */ qtrue,
-        /* spawnAmmunition      */ 100,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 6.75f,
-		/* selfKnockbackScale   */ 6.75f,
-		/* recoilKick           */ 0.0f,
-
-		/* reloadTime           */ 100,
-        /* weight               */ 1.0f
-    },
-
-    // WP_SHOTGUN,
-    {
-        /* name                 */ "Shotgun",
-        /* shortname            */ "sg",
-
-        /* color                */ colorRed,
-        /* switchOnCycle        */ qtrue,
-        /* switchOnOutOfAmmo    */ qtrue,
-
-        /* tossOnDeath          */ qtrue,
-
-        /* ammoBox              */ 20,
-        /* minAmmunition        */ 20,
-        /* maxAmmunition        */ 80,
-
-        /* spawnWeapon          */ qfalse,
-        /* spawnAmmunition      */ 0,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 6.75f,
-		/* selfKnockbackScale   */ 6.75f,
-		/* recoilKick           */ 0.0f,
-
-		/* reloadTime           */ 1000,
-        /* weight               */ 1.0f
-    },
-
-    // WP_GRENADE_LAUNCHER,
-    {
-        /* name                 */ "Grenade Launcher",
-        /* shortname            */ "gl",
-
-        /* color                */ colorGreen,
-        /* switchOnCycle        */ qtrue,
-        /* switchOnOutOfAmmo    */ qtrue,
-
-        /* tossOnDeath          */ qtrue,
-
-        /* ammoBox              */ 10,
-        /* minAmmunition        */ 10,
-        /* maxAmmunition        */ 50,
-
-        /* spawnWeapon          */ qfalse,
-        /* spawnAmmunition      */ 0,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 6.0f,
-		/* selfKnockbackScale   */ 5.0f,
-		/* recoilKick           */ 0.0f,
-
-		/* reloadTime           */ 600,
-        /* weight               */ 1.0f
-    },
-
-    // WP_ROCKET_LAUNCHER,
-    {
-        /* name                 */ "Rocket Launcher",
-        /* shortname            */ "rl",
-
-        /* color                */ colorMdGrey,
-        /* switchOnCycle        */ qtrue,
-        /* switchOnOutOfAmmo    */ qtrue,
-
-        /* tossOnDeath          */ qtrue,
-
-        /* ammoBox              */ 10,
-        /* minAmmunition        */ 10,
-        /* maxAmmunition        */ 50,
-
-        /* spawnWeapon          */ qfalse,
-        /* spawnAmmunition      */ 0,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 6.0f,
-		/* selfKnockbackScale   */ 5.0f,
-		/* recoilKick           */ 0.0f,
-
-		/* reloadTime           */ 800,
-        /* weight               */ 1.0f
-    },
-
-    // WP_LIGHTNING,
-    {
-        /* name                 */ "Lightning Gun",
-        /* shortname            */ "lg",
-
-        /* color                */ colorWhite,
-        /* switchOnCycle        */ qtrue,
-        /* switchOnOutOfAmmo    */ qtrue,
-
-        /* tossOnDeath          */ qtrue,
-
-        /* ammoBox              */ 50,
-        /* minAmmunition        */ 50,
-        /* maxAmmunition        */ 250,
-
-        /* spawnWeapon          */ qfalse,
-        /* spawnAmmunition      */ 0,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 7.75f,
-		/* selfKnockbackScale   */ 7.75f,
-		/* recoilKick           */ 0.0f,
-
-		/* reloadTime           */ 50,
-        /* weight               */ 1.0f
-    },
-
-    // WP_RAILGUN,
-    {
-        /* name                 */ "Railgun",
-        /* shortname            */ "rg",
-
-        /* color                */ colorCyan,
-        /* switchOnCycle        */ qtrue,
-        /* switchOnOutOfAmmo    */ qtrue,
-
-        /* tossOnDeath          */ qtrue,
-
-        /* ammoBox              */ 5,
-        /* minAmmunition        */ 5,
-        /* maxAmmunition        */ 25,
-
-        /* spawnWeapon          */ qfalse,
-        /* spawnAmmunition      */ 0,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 7.75f,
-		/* selfKnockbackScale   */ 7.75f,
-		/* recoilKick           */ 200.0f,
-
-		/* reloadTime           */ 1000,
-        /* weight               */ 1.0f
-    },
-
-    // WP_PLASMAGUN,
-    {
-        /* name                 */ "Plasma Rifle",
-        /* shortname            */ "pr",
-
-        /* color                */ colorMagenta, // colorPurple
-        /* switchOnCycle        */ qtrue,
-        /* switchOnOutOfAmmo    */ qtrue,
-
-        /* tossOnDeath          */ qtrue,
-
-        /* ammoBox              */ 5,
-        /* minAmmunition        */ 5,
-        /* maxAmmunition        */ 25,
-
-        /* spawnWeapon          */ qfalse,
-        /* spawnAmmunition      */ 0,
-
-        /* maxDamageDistance    */ 0,
-        /* knockbackScale       */ 2.5f,
-		/* selfKnockbackScale   */ 2.5f,
-		/* recoilKick           */ 0.0f,
-
-		/* reloadTime           */ 1000,
-        /* weight               */ 1.0f
-    }
-};
+// bg_weaponlist moved to bg_weapons.c
 
 /*
 ==============
@@ -1433,6 +1195,7 @@ char *eventnames[] = {
 	"EV_NOAMMO",
 	"EV_CHANGE_WEAPON",
 	"EV_FIRE_WEAPON",
+	"EV_FIRE_WEAPON_ALT",
 
 	"EV_USE_ITEM0",
 	"EV_USE_ITEM1",
@@ -1660,7 +1423,7 @@ void BG_PlayerStateToEntityState( playerState_t *ps, entityState_t *s, qboolean 
 	s->groundEntityNum = ps->groundEntityNum;
 
 	s->powerups = 0;
-	for ( i = 0 ; i < MAX_POWERUPS ; i++ ) {
+	for ( i = PW_NONE + 1 ; i < PW_NUM_POWERUPS ; i++ ) {
 		if ( ps->powerups[ i ] ) {
 			s->powerups |= 1 << i;
 		}
@@ -1740,7 +1503,7 @@ void BG_PlayerStateToEntityStateExtraPolate( playerState_t *ps, entityState_t *s
 	s->groundEntityNum = ps->groundEntityNum;
 
 	s->powerups = 0;
-	for ( i = 0 ; i < MAX_POWERUPS ; i++ ) {
+	for ( i = PW_NONE + 1 ; i < PW_NUM_POWERUPS ; i++ ) {
 		if ( ps->powerups[ i ] ) {
 			s->powerups |= 1 << i;
 		}

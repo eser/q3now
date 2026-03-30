@@ -499,7 +499,11 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			break;
 
 		case EV_FIRE_WEAPON:
-			FireWeapon( ent );
+			FireWeapon( ent, 0 );
+			break;
+
+		case EV_FIRE_WEAPON_ALT:
+			FireWeapon( ent, 1 );
 			break;
 
 		case EV_USE_ITEM1:		// teleporter
@@ -562,12 +566,16 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 
 #if FEAT_PW_KAMIKAZE
 		case EV_USE_ITEM3:		// kamikaze
+#if FEAT_PW_INVULNERABILITY
 			// make sure the invulnerability is off
 			ent->client->invulnerabilityTime = 0;
+#endif
 			// start the kamikze
 			G_StartKamikaze( ent );
 			break;
+#endif
 
+#if FEAT_PW_INVULNERABILITY
 		case EV_USE_ITEM4:		// portal
 			if( ent->client->portalID ) {
 				DropPortalSource( ent );
@@ -576,6 +584,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 				DropPortalDestination( ent );
 			}
 			break;
+
 		case EV_USE_ITEM5:		// invulnerability
 			ent->client->invulnerabilityTime = level.time + 10000;
 			break;

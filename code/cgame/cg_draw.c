@@ -1216,7 +1216,7 @@ static float CG_DrawPowerups( float y ) {
 
 	// sort the list by time remaining
 	active = 0;
-	for ( i = 0 ; i < MAX_POWERUPS ; i++ ) {
+	for ( i = PW_NONE + 1 ; i < PW_NUM_POWERUPS ; i++ ) {
 		if ( !ps->powerups[ i ] ) {
 			continue;
 		}

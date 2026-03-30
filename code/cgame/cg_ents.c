@@ -451,7 +451,7 @@ static void CG_Missile( centity_t *cent ) {
 	if ( cg_znudge.integer && cg_znProjectiles.integer ) {
 		float nudge = ZN_GetNudge();
 		if ( s1->weapon == WP_ROCKET_LAUNCHER ||
-		     s1->weapon == WP_PLASMAGUN ) {
+		     s1->weapon == WP_PLASMA_RIFLE ) {
 			ZN_PredictMissile( cent, nudge, cent->lerpOrigin );
 		} else if ( s1->weapon == WP_GRENADE_LAUNCHER ) {
 			ZN_PredictGrenade( cent, nudge, cent->lerpOrigin );
@@ -501,7 +501,7 @@ static void CG_Missile( centity_t *cent ) {
 	VectorCopy( cent->lerpOrigin, ent.origin);
 	VectorCopy( cent->lerpOrigin, ent.oldorigin);
 
-	if ( cent->currentState.weapon == WP_PLASMAGUN ) {
+	if ( cent->currentState.weapon == WP_PLASMA_RIFLE ) {
 		ent.reType = RT_SPRITE;
 		ent.radius = 16;
 		ent.rotation = 0;
@@ -1121,4 +1121,3 @@ void CG_AddPacketEntities( void ) {
 		CG_AddCEntity( cent );
 	}
 }
-

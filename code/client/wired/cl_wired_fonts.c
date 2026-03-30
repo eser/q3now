@@ -8,6 +8,7 @@ Runs in the CLIENT -- uses re.* directly instead of trap_R_*.
 */
 #include "../client.h"
 #include "cl_wired_fonts.h"
+#include "cl_wired_ui.h"
 
 #if FEAT_WIRED_UI
 
@@ -1092,6 +1093,161 @@ void CG_ModernDrawStringNew(float x, float y, const char *string, const vec4_t s
 
 	CG_CompiledTextDestroy(text_commands);
 	re.SetColor(NULL);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// TA Font System — fontInfo_t-based rendering for v6/TA menu compat
+// ══════════════════════════════════════════════════════════════════════
+
+static fontInfo_t taFonts[TA_FONT_COUNT];
+static qboolean   taFontsLoaded = qfalse;
+
+void WiredUI_LoadTAFonts( void ) {
+	wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
+
+	re.RegisterFont( ag->font,      ag->fontSize,      &taFonts[TA_FONT_NORMAL] );
+	re.RegisterFont( ag->smallFont,  ag->smallFontSize,  &taFonts[TA_FONT_SMALL] );
+	re.RegisterFont( ag->bigFont,    ag->bigFontSize,    &taFonts[TA_FONT_BIG] );
+
+	taFontsLoaded = qtrue;
+	Com_DPrintf( "WiredUI: TA fonts loaded (normal=%s/%d, small=%s/%d, big=%s/%d)\n",
+		ag->font, ag->fontSize, ag->smallFont, ag->smallFontSize, ag->bigFont, ag->bigFontSize );
+}
+
+fontInfo_t *WiredUI_GetTAFont( taFontSize_t size ) {
+	if ( !taFontsLoaded ) {
+		WiredUI_LoadTAFonts();
+	}
+	if ( size < 0 || size >= TA_FONT_COUNT ) size = TA_FONT_NORMAL;
+	return &taFonts[size];
+}
+
+/*
+============
+WiredUI_DrawText_TA
+
+Draws text using TA fontInfo_t glyphs.
+Scale: 1.0 = font's native point size. 0.5 = half size, etc.
+Style: 0 = normal, 3 = shadowed (ITEM_TEXTSTYLE_SHADOWED), 6 = more shadow
+Limit: max chars to draw (0 = unlimited)
+============
+*/
+void WiredUI_DrawText_TA( float x, float y, float scale, const vec4_t color,
+                          const char *text, int limit, int style, fontInfo_t *font ) {
+	int len, count;
+	float ax, ay;
+	glyphInfo_t *glyph;
+	float useScale;
+
+	if ( !text || !text[0] ) return;
+	if ( !font ) font = WiredUI_GetTAFont( TA_FONT_NORMAL );
+
+	useScale = scale * font->glyphScale;
+	len = Q_PrintStrlen( text );
+	if ( limit > 0 && len > limit ) len = limit;
+
+	ax = x;
+	ay = y;
+	re.SetColor( color );
+
+	count = 0;
+	while ( *text && ( limit <= 0 || count < limit ) ) {
+		if ( Q_IsColorString( text ) ) {
+			// handle color codes
+			vec4_t newColor;
+			Com_Memcpy( newColor, g_color_table[ColorIndex(*(text+1))], sizeof( newColor ) );
+			newColor[3] = color[3];
+			re.SetColor( newColor );
+			text += 2;
+			continue;
+		}
+
+		glyph = &font->glyphs[(unsigned char)*text];
+
+		// shadow pass
+		if ( style == 3 || style == 6 ) {
+			float shadowOffset = ( style == 6 ) ? 2.0f : 1.0f;
+			vec4_t shadowColor = { 0, 0, 0, color[3] };
+			re.SetColor( shadowColor );
+			SCR_DrawPic( ax + shadowOffset, ay + shadowOffset,
+				glyph->imageWidth * useScale,
+				glyph->imageHeight * useScale,
+				glyph->glyph );
+			re.SetColor( color );
+		}
+
+		SCR_DrawPic( ax, ay,
+			glyph->imageWidth * useScale,
+			glyph->imageHeight * useScale,
+			glyph->glyph );
+
+		ax += ( glyph->xSkip * useScale );
+		text++;
+		count++;
+	}
+
+	re.SetColor( NULL );
+}
+
+/*
+============
+WiredUI_TextWidth_TA
+
+Measures text width in pixels using TA fontInfo_t glyphs.
+============
+*/
+float WiredUI_TextWidth_TA( const char *text, float scale, int limit, fontInfo_t *font ) {
+	float width = 0;
+	float useScale;
+	int count = 0;
+
+	if ( !text || !text[0] ) return 0;
+	if ( !font ) font = WiredUI_GetTAFont( TA_FONT_NORMAL );
+
+	useScale = scale * font->glyphScale;
+
+	while ( *text && ( limit <= 0 || count < limit ) ) {
+		if ( Q_IsColorString( text ) ) {
+			text += 2;
+			continue;
+		}
+		width += font->glyphs[(unsigned char)*text].xSkip * useScale;
+		text++;
+		count++;
+	}
+
+	return width;
+}
+
+/*
+============
+WiredUI_TextHeight_TA
+
+Returns the height of the tallest glyph in the text.
+============
+*/
+float WiredUI_TextHeight_TA( const char *text, float scale, int limit, fontInfo_t *font ) {
+	float maxHeight = 0;
+	float useScale;
+	int count = 0;
+
+	if ( !text || !text[0] ) return 0;
+	if ( !font ) font = WiredUI_GetTAFont( TA_FONT_NORMAL );
+
+	useScale = scale * font->glyphScale;
+
+	while ( *text && ( limit <= 0 || count < limit ) ) {
+		if ( Q_IsColorString( text ) ) {
+			text += 2;
+			continue;
+		}
+		float h = font->glyphs[(unsigned char)*text].imageHeight * useScale;
+		if ( h > maxHeight ) maxHeight = h;
+		text++;
+		count++;
+	}
+
+	return maxHeight;
 }
 
 #endif // FEAT_WIRED_UI

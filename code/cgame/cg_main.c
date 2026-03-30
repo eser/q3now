@@ -127,12 +127,11 @@ vmCvar_t	cg_noPlayerAnims;
 vmCvar_t	cg_showmiss;
 vmCvar_t	cg_footsteps;
 vmCvar_t	cg_addMarks;
-vmCvar_t	cg_viewsize;
 vmCvar_t	cg_drawGun;
 vmCvar_t	cg_gun_frame;
-vmCvar_t	cg_gun_x;
-vmCvar_t	cg_gun_y;
-vmCvar_t	cg_gun_z;
+vmCvar_t	cg_gunX;
+vmCvar_t	cg_gunY;
+vmCvar_t	cg_gunZ;
 vmCvar_t	cg_tracerChance;
 vmCvar_t	cg_tracerWidth;
 vmCvar_t	cg_tracerLength;
@@ -266,11 +265,10 @@ typedef struct {
 
 static cvarTable_t cvarTable[] = {
 	{ &cg_ignore, "cg_ignore", "0", 0 },	// used for debugging
-	{ &cg_autoswitch, "cg_autoswitch", "1", CVAR_ARCHIVE },
+	{ &cg_autoswitch, "cg_autoswitch", "0", CVAR_ARCHIVE },
 	{ &cg_drawGun, "cg_drawGun", "1", CVAR_ARCHIVE },
 	{ &cg_zoomFov, "cg_zoomfov", "22.5", CVAR_ARCHIVE },
 	{ &cg_fov, "cg_fov", "90", CVAR_ARCHIVE },
-	{ &cg_viewsize, "cg_viewsize", "100", CVAR_ARCHIVE },
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	{ &cg_gibs, "cg_gibs", "1", CVAR_ARCHIVE  },
 	{ &cg_draw2D, "cg_draw2D", "1", CVAR_ARCHIVE  },
@@ -294,9 +292,9 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_simpleItems, "cg_simpleItems", "0", CVAR_ARCHIVE },
 	{ &cg_addMarks, "cg_marks", "1", CVAR_ARCHIVE },
 	{ &cg_lagometer, "cg_lagometer", "1", CVAR_ARCHIVE },
-	{ &cg_gun_x, "cg_gunX", "0", CVAR_CHEAT },
-	{ &cg_gun_y, "cg_gunY", "0", CVAR_CHEAT },
-	{ &cg_gun_z, "cg_gunZ", "0", CVAR_CHEAT },
+	{ &cg_gunX, "cg_gunX", "0", CVAR_CHEAT },
+	{ &cg_gunY, "cg_gunY", "0", CVAR_CHEAT },
+	{ &cg_gunZ, "cg_gunZ", "0", CVAR_CHEAT },
 	{ &cg_centertime, "cg_centertime", "3", CVAR_CHEAT },
 	{ &cg_runpitch, "cg_runpitch", "0.002", CVAR_ARCHIVE},
 	{ &cg_runroll, "cg_runroll", "0.005", CVAR_ARCHIVE },
@@ -557,7 +555,7 @@ int CG_LastAttacker( void ) {
 	if ( !cg.attackerTime ) {
 		return -1;
 	}
-	return cg.snap->ps.persistant[PERS_ATTACKER];
+	return cg.snap->ps.persistant[PERS_LAST_ATTACKER];
 }
 
 void QDECL CG_Printf( const char *msg, ... ) {
@@ -1072,8 +1070,10 @@ static void CG_RegisterGraphics( void ) {
     cgs.media.combatArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_yel.md3");
 	cgs.media.combatArmorIcon  = trap_R_RegisterShaderNoMip( "icons/iconr_yellow" );
 
-    cgs.media.jacketArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_gre.md3");
-    cgs.media.jacketArmorIcon = trap_R_RegisterShaderNoMip("icons/iconr_gre");
+    // cgs.media.jacketArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_gre.md3");
+    // cgs.media.jacketArmorIcon = trap_R_RegisterShaderNoMip("icons/iconr_gre");
+    cgs.media.jacketArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_yel.md3");
+    cgs.media.jacketArmorIcon = trap_R_RegisterShaderNoMip("icons/iconr_yellow");
 
 	cgs.media.machinegunBrassModel = trap_R_RegisterModel( "models/weapons2/shells/m_shell.md3" );
 	cgs.media.shotgunBrassModel = trap_R_RegisterModel( "models/weapons2/shells/s_shell.md3" );
@@ -1196,8 +1196,10 @@ static void CG_RegisterGraphics( void ) {
 #endif
 
     // CPM: Register graphics
-    cgs.media.backpackModel = trap_R_RegisterModel("models/backpack.md3");
-    cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/icon_backpack");
+    // cgs.media.backpackModel = trap_R_RegisterModel("models/backpack.md3");
+    // cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/icon_backpack");
+    cgs.media.backpackModel = trap_R_RegisterModel("models/powerups/armor/shard.md3");
+    cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/iconr_shard");
     // !CPM
 
     cgs.media.lightningShader = trap_R_RegisterShader("lightningBoltNew");

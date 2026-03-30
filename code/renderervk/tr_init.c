@@ -1899,10 +1899,29 @@ static void R_Register( void )
 		" Requires \\r_fbo 1." );
 #endif
 
+#if FEAT_PBR
+	ri.Cvar_Get( "r_pbr", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_pbr", "0", 0 ),
+		"Physically based rendering on surfaces with pbrMap textures.\n"
+		" pbrMap: R=roughness, G=metalness (glTF ORM convention)." );
+#endif
+
 #if FEAT_ADVANCED_WATER
 	ri.Cvar_Get( "r_waterRefraction", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_waterRefraction", "1", 0 ),
 		"Advanced water with screen-space refraction, Fresnel, and ripple noise." );
+#endif
+
+#if FEAT_SHADOW_MAPPING
+	ri.Cvar_Get( "r_shadowMapping", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowMapping", "0", 0 ), "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_shadowMapping", "0", 0 ),
+		"Per-light shadow maps with PCF filtering.\n"
+		" Requires \\r_fbo 1 and \\r_dlightMode 2." );
+	ri.Cvar_Get( "r_shadowPCF", "5", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowPCF", "5", 0 ), "1", "9", CV_INTEGER );
+	ri.Cvar_Get( "r_shadowMapSize", "512", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowMapSize", "512", 0 ), "256", "2048", CV_INTEGER );
 #endif
 
 #if FEAT_GODRAYS

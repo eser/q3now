@@ -918,8 +918,6 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-lookup", IN_LookupUp);
 	Cmd_AddCommand ("+lookdown", IN_LookdownDown);
 	Cmd_AddCommand ("-lookdown", IN_LookdownUp);
-	Cmd_AddCommand ("+strafe", IN_StrafeDown);
-	Cmd_AddCommand ("-strafe", IN_StrafeUp);
 	Cmd_AddCommand ("+moveleft", IN_MoveleftDown);
 	Cmd_AddCommand ("-moveleft", IN_MoveleftUp);
 	Cmd_AddCommand ("+moveright", IN_MoverightDown);
@@ -928,6 +926,12 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-speed", IN_SpeedUp);
 	Cmd_AddCommand ("+attack", IN_Button0Down);
 	Cmd_AddCommand ("-attack", IN_Button0Up);
+	Cmd_AddCommand ("+attackalt", IN_Button1Down);
+	Cmd_AddCommand ("-attackalt", IN_Button1Up);
+	Cmd_AddCommand ("+use", IN_Button2Down);
+	Cmd_AddCommand ("-use", IN_Button2Up);
+	Cmd_AddCommand ("+gesture1", IN_Button3Down);
+	Cmd_AddCommand ("-gesture1", IN_Button3Up);
 	Cmd_AddCommand ("+button0", IN_Button0Down);
 	Cmd_AddCommand ("-button0", IN_Button0Up);
 	Cmd_AddCommand ("+button1", IN_Button1Down);
@@ -960,8 +964,6 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-button14", IN_Button14Up);
 	Cmd_AddCommand ("+button15", IN_Button15Down);
 	Cmd_AddCommand ("-button15", IN_Button15Up);
-	Cmd_AddCommand ("+mlook", IN_MLookDown);
-	Cmd_AddCommand ("-mlook", IN_MLookUp);
 
 	cl_nodelta = Cvar_Get( "cl_nodelta", "0", CVAR_DEVELOPER );
 	Cvar_SetDescription( cl_nodelta, "Flag server to disable delta compression on server snapshots." );
@@ -1050,8 +1052,6 @@ void CL_ClearInput( void ) {
 	Cmd_RemoveCommand ("-lookup");
 	Cmd_RemoveCommand ("+lookdown");
 	Cmd_RemoveCommand ("-lookdown");
-	Cmd_RemoveCommand ("+strafe");
-	Cmd_RemoveCommand ("-strafe");
 	Cmd_RemoveCommand ("+moveleft");
 	Cmd_RemoveCommand ("-moveleft");
 	Cmd_RemoveCommand ("+moveright");
@@ -1092,6 +1092,4 @@ void CL_ClearInput( void ) {
 	Cmd_RemoveCommand ("-button14");
 	Cmd_RemoveCommand ("+button15");
 	Cmd_RemoveCommand ("-button15");
-	Cmd_RemoveCommand ("+mlook");
-	Cmd_RemoveCommand ("-mlook");
 }

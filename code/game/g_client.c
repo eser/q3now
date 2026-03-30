@@ -1095,7 +1095,7 @@ void ClientSpawn(gentity_t *ent) {
 	int		savedPing;
 //	char	*savedAreaBits;
 	int		accuracy_hits, accuracy_shots;
-	weaponStat_t	savedWeaponStats[WP_NUM_WEAPONS];
+	attackStat_t	savedAttackStats[ATT_NUM_ATTACKS];
 	int		eventSequence;
 	char	userinfo[MAX_INFO_STRING];
 
@@ -1153,7 +1153,7 @@ void ClientSpawn(gentity_t *ent) {
 //	savedAreaBits = client->areabits;
 	accuracy_hits = client->accuracy_hits;
 	accuracy_shots = client->accuracy_shots;
-	memcpy(savedWeaponStats, client->weaponStats, sizeof(savedWeaponStats));
+	memcpy(savedAttackStats, client->attackStats, sizeof(savedAttackStats));
 	for ( i = 0 ; i < MAX_PERSISTANT ; i++ ) {
 		persistant[i] = client->ps.persistant[i];
 	}
@@ -1167,7 +1167,7 @@ void ClientSpawn(gentity_t *ent) {
 //	client->areabits = savedAreaBits;
 	client->accuracy_hits = accuracy_hits;
 	client->accuracy_shots = accuracy_shots;
-	memcpy(client->weaponStats, savedWeaponStats, sizeof(client->weaponStats));
+	memcpy(client->attackStats, savedAttackStats, sizeof(client->attackStats));
 	client->lastkilled_client = -1;
     client->lasthurt_time = level.time;
 
@@ -1369,7 +1369,7 @@ void ClientDisconnect( int clientNum ) {
 
 	// disconnect a hook
 	if (ent->client->hook) {
-		Weapon_HookFree(ent->client->hook);
+		Offhand_Grapple_Free(ent->client->hook);
 	}
 
 	// stop any following clients

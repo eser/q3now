@@ -139,7 +139,7 @@ static void CG_SHUDElementPwUpdateState(struct superhudPowerupsCache_t* pw)
 
 	// sort the list by time remaining
 	pw->numberOfActive = 0;
-	for (i = 0 ; i < MAX_POWERUPS ; i++)
+	for (i = PW_NONE + 1 ; i < PW_NUM_POWERUPS ; i++)
 	{
 		if (!ps->powerups[ i ])
 		{

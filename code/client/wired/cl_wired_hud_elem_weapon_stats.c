@@ -13,7 +13,7 @@
 typedef struct {
 	superhudConfig_t config;
 	superhudTextContext_t ctx;
-	int weaponId;       // WP_MACHINEGUN..WP_PLASMAGUN, or -1 for current weapon
+	int weaponId;       // WP_MACHINEGUN..WP_PLASMA_RIFLE, or -1 for current weapon
 	qboolean isIcon;    // qtrue = draw weapon icon, qfalse = draw text stats
 } shudElementWeaponStats_t;
 
@@ -50,10 +50,9 @@ void *CG_SHUDElementWeaponStatsCreateMG( const superhudConfig_t *config )     { 
 void *CG_SHUDElementWeaponStatsCreateSG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, WP_SHOTGUN ); }
 void *CG_SHUDElementWeaponStatsCreateGL( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, WP_GRENADE_LAUNCHER ); }
 void *CG_SHUDElementWeaponStatsCreateRL( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, WP_ROCKET_LAUNCHER ); }
-void *CG_SHUDElementWeaponStatsCreateLG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, WP_LIGHTNING ); }
+void *CG_SHUDElementWeaponStatsCreateLG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, WP_LIGHTNING_GUN ); }
 void *CG_SHUDElementWeaponStatsCreateRG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, WP_RAILGUN ); }
-void *CG_SHUDElementWeaponStatsCreatePG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, WP_PLASMAGUN ); }
-void *CG_SHUDElementWeaponStatsCreateBFG( const superhudConfig_t *config )    { return WeaponStats_CreateText( config, WP_PLASMAGUN ); } // no BFG in q3now, map to PG
+void *CG_SHUDElementWeaponStatsCreatePG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, WP_PLASMA_RIFLE ); }
 
 // ── icon Create functions ────────────────────────────────────────────
 
@@ -62,9 +61,9 @@ void *CG_SHUDElementIconCreateMG( const superhudConfig_t *config )            { 
 void *CG_SHUDElementIconCreateSG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, WP_SHOTGUN ); }
 void *CG_SHUDElementIconCreateGL( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, WP_GRENADE_LAUNCHER ); }
 void *CG_SHUDElementIconCreateRL( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, WP_ROCKET_LAUNCHER ); }
-void *CG_SHUDElementIconCreateLG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, WP_LIGHTNING ); }
+void *CG_SHUDElementIconCreateLG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, WP_LIGHTNING_GUN ); }
 void *CG_SHUDElementIconCreateRG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, WP_RAILGUN ); }
-void *CG_SHUDElementIconCreatePG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, WP_PLASMAGUN ); }
+void *CG_SHUDElementIconCreatePG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, WP_PLASMA_RIFLE ); }
 
 // ── shared Routine ───────────────────────────────────────────────────
 
@@ -80,10 +79,10 @@ void CG_SHUDElementWeaponStatsRoutine( void *context ) {
 	if ( wp < 0 ) {
 		wp = wiredHud->weapon;
 	}
-	if ( wp < 0 || wp >= MAX_WEAPONS ) return;
+	if ( wp < 0 || wp >= WP_NUM_WEAPONS ) return;
 
-	hits  = wiredHud->weaponStats[wp].hits;
-	shots = wiredHud->weaponStats[wp].shots;
+	hits  = wiredHud->attackStats[wp].hits;
+	shots = wiredHud->attackStats[wp].shots;
 	acc   = ( shots > 0 ) ? (int)( 100.0f * hits / shots ) : 0;
 
 	if ( element->isIcon ) {

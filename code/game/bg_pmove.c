@@ -1820,8 +1820,17 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// check for fire
-	if ( ! (pm->cmd.buttons & BUTTON_ATTACK) ) {
+	// ignore +attackalt if the weapon has no alt-fire
+	if ( (pm->cmd.buttons & BUTTON_ATTACK_ALT) && !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+		if ( bg_weaponlist[pm->ps->weapon].attackAlt == ATT_NONE ) {
+			pm->ps->weaponTime = 0;
+			pm->ps->weaponstate = WEAPON_READY;
+			return;
+		}
+	}
+
+	// check for fire (primary or secondary)
+	if ( ! (pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_ATTACK_ALT)) ) {
 		pm->ps->weaponTime = 0;
 		pm->ps->weaponstate = WEAPON_READY;
 		return;
@@ -1855,10 +1864,15 @@ static void PM_Weapon( void ) {
 		pm->ps->ammo[ pm->ps->weapon ]--;
 	}
 
-	// fire weapon
-	PM_AddEvent( EV_FIRE_WEAPON );
+	// fire weapon (primary or secondary)
+	PM_AddEvent( (pm->cmd.buttons & BUTTON_ATTACK_ALT) ? EV_FIRE_WEAPON_ALT : EV_FIRE_WEAPON );
 
-    addTime = bg_weaponlist[pm->ps->weapon].reloadTime;
+    {
+        int attIdx = (pm->cmd.buttons & BUTTON_ATTACK_ALT) ?
+            bg_weaponlist[pm->ps->weapon].attackAlt :
+            bg_weaponlist[pm->ps->weapon].attack;
+        addTime = bg_attacklist[attIdx].reloadTime;
+    }
     if (pm->ps->weapon == WP_RAILGUN) {
         pm->ps->stats[STAT_RAILTIME] = addTime; // CPM
     }
@@ -2029,11 +2043,16 @@ void PmoveSingle (pmove_t *pmove) {
 	}
 
 	// set the firing flag for continuous beam weapons
-	if ( !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && pm->ps->pm_type != PM_NOCLIP
-		&& ( pm->cmd.buttons & BUTTON_ATTACK ) && pm->ps->ammo[ pm->ps->weapon ] ) {
-		pm->ps->eFlags |= EF_FIRING;
-	} else {
-		pm->ps->eFlags &= ~EF_FIRING;
+	{
+		qboolean wantFire = ( pm->cmd.buttons & BUTTON_ATTACK ) ? qtrue : qfalse;
+		if ( !wantFire && ( pm->cmd.buttons & BUTTON_ATTACK_ALT ) && bg_weaponlist[pm->ps->weapon].attackAlt != ATT_NONE )
+			wantFire = qtrue;
+		if ( !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && pm->ps->pm_type != PM_NOCLIP
+			&& wantFire && pm->ps->ammo[ pm->ps->weapon ] ) {
+			pm->ps->eFlags |= EF_FIRING;
+		} else {
+			pm->ps->eFlags &= ~EF_FIRING;
+		}
 	}
 
     // set the firing flag for continuous beam weapons
@@ -2045,8 +2064,8 @@ void PmoveSingle (pmove_t *pmove) {
     }
 
 	// clear the respawned flag if attack and use are cleared
-	if ( pm->ps->stats[STAT_HEALTH] > 0 && 
-		!( pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_USE_HOLDABLE) ) ) {
+	if ( pm->ps->stats[STAT_HEALTH] > 0 &&
+		!( pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_ATTACK_ALT | BUTTON_USE_HOLDABLE) ) ) {
 		pm->ps->pm_flags &= ~PMF_RESPAWNED;
 	}
 

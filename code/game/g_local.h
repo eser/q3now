@@ -69,14 +69,14 @@ typedef enum {
 typedef struct gentity_s gentity_t;
 typedef struct gclient_s gclient_t;
 
-// per-weapon stats for competitive scoreboards
+// per-attack stats for competitive scoreboards
 typedef struct {
 	int hits;
 	int shots;
 	int kills;
 	int deaths;
 	int damage;
-} weaponStat_t;
+} attackStat_t;
 
 // unlagged: history buffer size
 #define NUM_CLIENT_HISTORY 17
@@ -339,8 +339,8 @@ struct gclient_s {
 	int			accuracy_shots;		// total number of shots
 	int			accuracy_hits;		// total number of hits
 
-	// per-weapon stats for competitive scoreboards (weaponStat_t defined above struct)
-	weaponStat_t	weaponStats[WP_NUM_WEAPONS];
+	// per-attack stats for competitive scoreboards (attackStat_t defined above struct)
+	attackStat_t	attackStats[ATT_NUM_ATTACKS];
 
 	//
 	int			lastkilled_client;	// last client that this client killed
@@ -623,7 +623,7 @@ void G_Damage (gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 qboolean G_RadiusDamage (vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, qboolean underWater);
 int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir );
 void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath );
-int G_WeaponFromMOD( int mod );
+int G_AttackFromMOD( int mod );
 void TossClientItems( gentity_t *self );
 void TossClientCubes( gentity_t *self );
 #if FEAT_DAMAGE_PLUMS
@@ -684,7 +684,7 @@ qboolean LogAccuracyHit( gentity_t *target, gentity_t *attacker );
 void CalcMuzzlePoint ( gentity_t *ent, vec3_t forward, vec3_t right, vec3_t up, vec3_t muzzlePoint );
 void SnapVectorTowards( vec3_t v, vec3_t to );
 qboolean CheckGauntletAttack( gentity_t *ent );
-void Weapon_HookFree (gentity_t *ent);
+void Offhand_Grapple_Free (gentity_t *ent);
 void Weapon_HookThink (gentity_t *ent);
 
 
@@ -716,10 +716,27 @@ qboolean G_FilterPacket (const char *from);
 //
 // g_weapon.c
 //
-void FireWeapon( gentity_t *ent );
+int G_DamageFalloff( int damage, vec3_t start, vec3_t end, float maxDamageDistance );
+void SnapVectorTowards( vec3_t v, vec3_t to );
+void FireWeapon( gentity_t *ent, int attackIndex );
 #if FEAT_PW_KAMIKAZE
 void G_StartKamikaze( gentity_t *ent );
 #endif
+
+// weapons/
+void Attack_Gauntlet_Primary( gentity_t *ent );
+qboolean CheckGauntletAttack( gentity_t *ent );
+void Attack_Machinegun_Primary( gentity_t *ent );
+void Attack_Shotgun_Primary( gentity_t *ent );
+void Attack_GrenadeLauncher_Primary( gentity_t *ent );
+void Attack_RocketLauncher_Primary( gentity_t *ent );
+void Weapon_PlasmaRifle_Primary( gentity_t *ent );
+void Attack_Railgun_Primary( gentity_t *ent );
+void Attack_LightningGun_Primary( gentity_t *ent );
+void Offhand_Grapple_Fire( gentity_t *ent );
+void Offhand_Grapple_Free( gentity_t *ent );
+void Offhand_Grapple_Think( gentity_t *ent );
+void Offhand_Grapple_Hook_Think( gentity_t *ent );
 
 //
 // g_cmds.c
@@ -871,8 +888,6 @@ extern  vmCvar_t	g_instagib;
 extern  vmCvar_t	g_excessive;
 #if FEAT_UNLAGGED
 extern  vmCvar_t	g_unlagged;
-extern  vmCvar_t	g_delagHitscan;
-extern  vmCvar_t	g_truePing;
 #endif
 #if FEAT_SPAWN_PROTECTION
 extern  vmCvar_t	g_spawnProtect;

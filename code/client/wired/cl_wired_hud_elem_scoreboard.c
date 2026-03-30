@@ -46,7 +46,7 @@ void WiredHud_DrawScorelistWidget( float ox, float oy, float ow, float oh,
 	float colScore = ox + 200 * scale;
 	float colKD    = ox + 250 * scale;
 	float colDmg   = ox + 300 * scale;
-	float colWeap  = ox + 340 * scale;
+	float colAtt   = ox + 340 * scale;
 	float colAcc   = ox + 400 * scale;
 	float colPing  = ox + 470 * scale;
 
@@ -59,7 +59,7 @@ void WiredHud_DrawScorelistWidget( float ox, float oy, float ow, float oh,
 	CG_ModernDrawString( colScore,      y, "SCORE",  hdrColor, 8, 12, (int)ow, DS_HRIGHT | DS_SHADOW, NULL );
 	CG_ModernDrawString( colKD,         y, "K/D",    hdrColor, 8, 12, (int)ow, DS_HRIGHT | DS_SHADOW, NULL );
 	CG_ModernDrawString( colDmg,        y, "DMG",    hdrColor, 8, 12, (int)ow, DS_HRIGHT | DS_SHADOW, NULL );
-	CG_ModernDrawString( colWeap + 16 * scale, y, "WP", hdrColor, 8, 12, (int)ow, DS_HCENTER | DS_SHADOW, NULL );
+	CG_ModernDrawString( colAtt + 16 * scale, y, "ATT", hdrColor, 8, 12, (int)ow, DS_HCENTER | DS_SHADOW, NULL );
 	CG_ModernDrawString( colAcc,        y, "ACC%",  hdrColor, 8, 12, (int)ow, DS_HRIGHT | DS_SHADOW, NULL );
 	CG_ModernDrawString( colPing,       y, "PING",   hdrColor, 8, 12, (int)ow, DS_HRIGHT | DS_SHADOW, NULL );
 
@@ -134,20 +134,20 @@ void WiredHud_DrawScorelistWidget( float ox, float oy, float ow, float oh,
 		CG_ModernDrawString( colDmg, y + 2, tmp, colorWhite,
 			8, 12, (int)ow, DS_HRIGHT | DS_SHADOW, NULL );
 
-		/* best weapon icon */
+		/* best attack icon */
 		{
 			static int dbgWp = 0;
 			if ( dbgWp++ % 600 == 0 )
 				Com_Printf( "SB: client=%d bestWp=%d icon=%d dmg=%d\n",
-					clientNum, sc->bestWeapon,
-					sc->bestWeapon > 0 && sc->bestWeapon < MAX_WEAPONS ? wiredHud->weaponIcons[sc->bestWeapon] : -1,
+					clientNum, sc->bestAttack,
+					sc->bestAttack > 0 && sc->bestAttack < ATT_NUM_ATTACKS ? wiredHud->attackIcons[sc->bestAttack] : -1,
 					sc->totalDamage );
 		}
-		if ( sc->bestWeapon > 0 && sc->bestWeapon < MAX_WEAPONS
-			 && wiredHud->weaponIcons[sc->bestWeapon] ) {
+		if ( sc->bestAttack > ATT_NONE && sc->bestAttack < ATT_NUM_ATTACKS
+			 && wiredHud->attackIcons[sc->bestAttack] ) {
 			re.SetColor( colorWhite );
-			SCR_DrawPic( colWeap + 8 * scale, y + 1, 14, 14,
-				wiredHud->weaponIcons[sc->bestWeapon] );
+			SCR_DrawPic( colAtt + 8 * scale, y + 1, 14, 14,
+				wiredHud->attackIcons[sc->bestAttack] );
 			re.SetColor( NULL );
 		}
 

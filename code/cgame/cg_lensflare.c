@@ -296,7 +296,7 @@ void CG_AddMissileFlare( centity_t *cent ) {
 	case WP_ROCKET_LAUNCHER:
 		r = 255; g = 180; b = 60;		// hot orange
 		break;
-	case WP_PLASMAGUN:
+	case WP_PLASMA_RIFLE:
 		r = 100; g = 255; b = 120;		// neon green
 		break;
 	case WP_RAILGUN:
@@ -305,7 +305,7 @@ void CG_AddMissileFlare( centity_t *cent ) {
 	case WP_GRENADE_LAUNCHER:
 		r = 240; g = 220; b = 80;		// bright yellow
 		break;
-	case WP_LIGHTNING:
+	case WP_LIGHTNING_GUN:
 		r = 200; g = 220; b = 255;		// white-blue
 		break;
 	default:

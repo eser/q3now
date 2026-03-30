@@ -158,10 +158,10 @@ void TossClientItems( gentity_t *self ) {
                 ((self->client->ps.ammo[WP_GRENADE_LAUNCHER] & 0x00FF) << 8) +
                 (self->client->ps.ammo[WP_ROCKET_LAUNCHER] & 0x00FF);
             drop->splashDamage =
-                ((self->client->ps.ammo[WP_LIGHTNING] & 0x00FF) << 8) +
+                ((self->client->ps.ammo[WP_LIGHTNING_GUN] & 0x00FF) << 8) +
                 (self->client->ps.ammo[WP_RAILGUN] & 0x00FF);
             drop->splashRadius =
-                ((self->client->ps.ammo[WP_PLASMAGUN] & 0x00FF) << 8);
+                ((self->client->ps.ammo[WP_PLASMA_RIFLE] & 0x00FF) << 8);
         }
         else {
             drop->count = self->client->ps.ammo[weapon];
@@ -679,14 +679,14 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		AddScore( self, self->r.currentOrigin, -1 );
 	}
 
-	// per-weapon kill/death tracking
+	// per-attack kill/death tracking
 	{
-		int wp = G_WeaponFromMOD( meansOfDeath );
-		if ( wp > WP_NONE && wp < WP_NUM_WEAPONS ) {
+		int att = G_AttackFromMOD( meansOfDeath );
+		if ( att > ATT_NONE && att < ATT_NUM_ATTACKS ) {
 			if ( attacker && attacker->client && attacker != self ) {
-				attacker->client->weaponStats[wp].kills++;
+				attacker->client->attackStats[att].kills++;
 			}
-			self->client->weaponStats[wp].deaths++;
+			self->client->attackStats[att].deaths++;
 		}
 	}
 
@@ -961,21 +961,33 @@ dflags		these flags are used to control how T_Damage works
 
 /*
 ============
-G_WeaponFromMOD
-Maps a means-of-death constant to the corresponding weapon index.
+G_AttackFromMOD
+Maps a means-of-death constant to the corresponding attack index.
 ============
 */
-int G_WeaponFromMOD( int mod ) {
+int G_AttackFromMOD( int mod ) {
 	switch ( mod ) {
-		case MOD_SHOTGUN:                          return WP_SHOTGUN;
-		case MOD_GAUNTLET:                         return WP_GAUNTLET;
-		case MOD_MACHINEGUN:                       return WP_MACHINEGUN;
-		case MOD_GRENADE: case MOD_GRENADE_SPLASH: return WP_GRENADE_LAUNCHER;
-		case MOD_ROCKET: case MOD_ROCKET_SPLASH:   return WP_ROCKET_LAUNCHER;
-		case MOD_PLASMA:                           return WP_PLASMAGUN;
-		case MOD_RAILGUN:                          return WP_RAILGUN;
-		case MOD_LIGHTNING: case MOD_LIGHTNING_DISCHARGE: return WP_LIGHTNING;
-		default:                                   return WP_NONE;
+		case MOD_GAUNTLET:
+			return ATT_GAUNTLET_PRIMARY;
+		case MOD_MACHINEGUN:
+			return ATT_MACHINEGUN_PRIMARY;
+		case MOD_SHOTGUN:
+			return ATT_SHOTGUN_PRIMARY;
+		case MOD_GRENADE:
+		case MOD_GRENADE_SPLASH:
+			return ATT_GRENADE_LAUNCHER_PRIMARY;
+		case MOD_ROCKET:
+		case MOD_ROCKET_SPLASH:
+			return ATT_ROCKET_LAUNCHER_PRIMARY;
+		case MOD_LIGHTNING:
+		case MOD_LIGHTNING_DISCHARGE:
+			return ATT_LIGHTNING_GUN_PRIMARY;
+		case MOD_RAILGUN:
+			return ATT_RAILGUN_PRIMARY;
+		case MOD_PLASMA:
+			return ATT_PLASMA_RIFLE_PRIMARY;
+		default:
+			return ATT_NONE;
 	}
 }
 
@@ -1079,9 +1091,9 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		case MOD_GRENADE_SPLASH: weapIdx = WP_GRENADE_LAUNCHER; break;
 		case MOD_ROCKET:
 		case MOD_ROCKET_SPLASH:  weapIdx = WP_ROCKET_LAUNCHER; break;
-		case MOD_LIGHTNING:      weapIdx = WP_LIGHTNING; break;
+		case MOD_LIGHTNING:      weapIdx = WP_LIGHTNING_GUN; break;
 		case MOD_RAILGUN:        weapIdx = WP_RAILGUN; break;
-		case MOD_PLASMA:         weapIdx = WP_PLASMAGUN; break;
+		case MOD_PLASMA:         weapIdx = WP_PLASMA_RIFLE; break;
 		default: break;
 		}
 
@@ -1097,10 +1109,13 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			}
 		}
 
-		// q3now table-based: fixed per-weapon knockback
-		knockbackScale = ( targ == attacker ) ?
-			bg_weaponlist[weapIdx].selfKnockbackScale :
-			bg_weaponlist[weapIdx].knockbackScale;
+		// q3now table-based: fixed per-weapon knockback (via attack table)
+		{
+			int attIdx = bg_weaponlist[weapIdx].attack;
+			knockbackScale = ( targ == attacker ) ?
+				bg_attacklist[attIdx].selfKnockbackScale :
+				bg_attacklist[attIdx].knockbackScale;
+		}
 
 		if ( g_excessive.integer && targ != attacker ) {
 			knockbackScale *= 2;
@@ -1129,7 +1144,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 	// attacker hook release
 	if (targ->client && targ->client->hook && (targ->client->hook->enemy == attacker)) {
-		Weapon_HookFree(targ->client->hook);
+		Offhand_Grapple_Free(targ->client->hook);
 	}
 
 	// check for completely getting out of the damage
@@ -1213,9 +1228,9 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// at the end of the frame
 	if ( client ) {
 		if ( attacker ) {
-			client->ps.persistant[PERS_ATTACKER] = attacker->s.number;
+			client->ps.persistant[PERS_LAST_ATTACKER] = attacker->s.number;
 		} else {
-			client->ps.persistant[PERS_ATTACKER] = ENTITYNUM_WORLD;
+			client->ps.persistant[PERS_LAST_ATTACKER] = ENTITYNUM_WORLD;
 		}
 		client->damage_armor += asave;
 		client->damage_blood += take;
@@ -1257,7 +1272,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 #endif
 
 	if ( attacker && attacker->client ) {
-		int wp;
+		int att;
 
 		// berserk
 		if ( attacker->client->ps.powerups[PW_BERSERK]
@@ -1272,10 +1287,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			attacker->client->ps.stats[STAT_HEALTH] = attacker->health;
 		}
 
-		// per-weapon damage tracking
-		wp = G_WeaponFromMOD( mod );
-		if ( wp > WP_NONE && wp < WP_NUM_WEAPONS ) {
-			attacker->client->weaponStats[wp].damage += take;
+		// per-attack damage tracking
+		att = G_AttackFromMOD( mod );
+		if ( att > ATT_NONE && att < ATT_NUM_ATTACKS ) {
+			attacker->client->attackStats[att].damage += take;
 		}
 	}
 

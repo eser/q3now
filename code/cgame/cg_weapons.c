@@ -1133,7 +1133,7 @@ void CG_RegisterWeapon( int weaponNum ) {
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/melee/fstatck.wav", qfalse );
 		break;
 
-	case WP_LIGHTNING:
+	case WP_LIGHTNING_GUN:
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );
 		weaponInfo->readySound = trap_S_RegisterSound( "sound/weapons/melee/fsthum.wav", qfalse );
 		weaponInfo->firingSound = trap_S_RegisterSound( "sound/weapons/lightning/lg_hum.wav", qfalse );
@@ -1190,7 +1190,7 @@ void CG_RegisterWeapon( int weaponNum ) {
 		cgs.media.grenadeExplosionShader = trap_R_RegisterShader( "grenadeExplosion" );
 		break;
 
-	case WP_PLASMAGUN:
+	case WP_PLASMA_RIFLE:
 		// weaponInfo->missileTrailFunc = CG_PlasmaTrail;
         MAKERGB(weaponInfo->flashDlightColor, 1.0f, 0.6f, 1.0f);
         weaponInfo->readySound = trap_S_RegisterSound("sound/weapons/bfg/bfg_hum.wav", qfalse);
@@ -1373,7 +1373,7 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	vec3_t   muzzlePoint, endPoint;
 	int      anim;
 
-	if (cent->currentState.weapon != WP_LIGHTNING) {
+	if (cent->currentState.weapon != WP_LIGHTNING_GUN) {
 		return;
 	}
 
@@ -1492,7 +1492,7 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	vec3_t			forward;
 	vec3_t			muzzlePoint, endPoint;
 
-	if ( cent->currentState.weapon != WP_LIGHTNING ) {
+	if ( cent->currentState.weapon != WP_LIGHTNING_GUN ) {
 		return;
 	}
 
@@ -1681,7 +1681,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
             float	f;
 
             if (cg.predictedPlayerState.weaponstate == WEAPON_FIRING) {
-                f = (float)cg.predictedPlayerState.weaponTime / bg_weaponlist[WP_RAILGUN].reloadTime;
+                f = (float)cg.predictedPlayerState.weaponTime / bg_attacklist[bg_weaponlist[WP_RAILGUN].attack].reloadTime;
             }
             else {
                 f = 0.0;
@@ -1794,7 +1794,7 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	}
 
 	// add the flash
-	if ( ( weaponNum == WP_LIGHTNING || weaponNum == WP_GAUNTLET )
+	if ( ( weaponNum == WP_LIGHTNING_GUN || weaponNum == WP_GAUNTLET )
 		&& ( nonPredictedCent->currentState.eFlags & EF_FIRING ) ) 
 	{
 		// continuous flash
@@ -1854,14 +1854,63 @@ CG_AddViewWeapon
 Add the weapon, and flash for the player's view
 ==============
 */
+int cg_weapon_positions[][3][3] = {
+	{ // WP_NONE
+		/* Right  */ {  0,   0,  0 },
+		/* Center */ {  0,   0,  0 },
+		/* Left   */ {  0,   0,  0 },
+	},
+	{ // WP_GAUNTLET
+		/* Right  */ {  1,  -6, -2 },
+		/* Center */ {  1,   1, -2 },
+		/* Left   */ {  1,   7, -2 },
+	},
+	{ // WP_MACHINEGUN
+		/* Right  */ { -2,  -6, -4 },
+		/* Center */ { -2,   1, -4 },
+		/* Left   */ { -2,   5, -4 },
+	},
+	{ // WP_SHOTGUN
+		/* Right  */ { -2,  -7, -2 },
+		/* Center */ { -2,  -2, -2 },
+		/* Left   */ { -2,   2, -2 },
+	},
+	{ // WP_GRENADE_LAUNCHER
+		/* Right  */ { -1,  -6, -4 },
+		/* Center */ { -1,  -3, -4 },
+		/* Left   */ { -1, -11, -4 },
+	},
+	{ // WP_ROCKET_LAUNCHER
+		/* Right  */ { -7,  -5, -4 },
+		/* Center */ { -7,   4, -4 },
+		/* Left   */ { -7,  12, -4 },
+	},
+	{ // WP_LIGHTNING_GUN
+		/* Right  */ {  8,  -5,  0 },
+		/* Center */ {  8,   0,  0 },
+		/* Left   */ {  8,   4,  0 },
+	},
+	{ // WP_RAILGUN
+		/* Right  */ { -1,  -7, -2 },
+		/* Center */ { -1,   2, -2 },
+		/* Left   */ { -1,  10, -2 },
+	},
+	{ // WP_PLASMA_RIFLE
+		/* Right  */ { -7,  -7, -3 },
+		/* Center */ { -7,   0, -3 },
+		/* Left   */ { -7,   6, -3 },
+	},
+};
+
 void CG_AddViewWeapon( playerState_t *ps ) {
-	refEntity_t	hand;
-	centity_t	*cent;
+	refEntity_t		hand;
+	centity_t		*cent;
 	clientInfo_t	*ci;
-	float		fovOffset;
-	vec3_t		angles;
+	float			fovOffset;
+	vec3_t			angles;
 	weaponInfo_t	*weapon;
-    float gen_gunx, gen_guny, gen_gunz;
+    float 			gen_gunx, gen_guny, gen_gunz;
+	int				gun_position;
 
 	if ( ps->persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
 		return;
@@ -1876,7 +1925,6 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	if ( cg.renderingThirdPerson ) {
 		return;
 	}
-
 
 	// allow the gun to be completely removed
 	if ( !cg_drawGun.integer ) {
@@ -1896,66 +1944,24 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		return;
 	}
 
-    gen_gunx = cg_gun_x.value + 2;
-    gen_guny = cg_gun_y.value;
-    gen_gunz = cg_gun_z.value;
+	switch (cg_drawGun.integer) {
+		case 1:
+			gun_position = 0;
+			break;
+		case 2:
+			gun_position = 1;
+			break;
+		case 3:
+			gun_position = 2;;
+			break;
+		default:
+			gun_position = 0;;
+			break;
+		}
 
-    switch (ps->weapon)
-    {
-    case WP_MACHINEGUN:
-    case WP_SHOTGUN:
-    case WP_LIGHTNING:
-        switch (cg_drawGun.integer) {
-        case 1:
-            gen_guny = cg_gun_y.value - 2;
-            break;
-        case 2:
-            gen_guny = cg_gun_y.value + 3;
-            break;
-        case 3:
-            gen_guny = cg_gun_y.value + 7;
-            break;
-        default:
-            gen_guny = cg_gun_y.value;
-            break;
-        }
-        break;
-    case WP_GAUNTLET:
-    case WP_PLASMAGUN:
-        switch (cg_drawGun.integer) {
-        case 1:
-            gen_guny = cg_gun_y.value - 3;
-            break;
-        case 2:
-            gen_guny = cg_gun_y.value + 4;
-            break;
-        case 3:
-            gen_guny = cg_gun_y.value + 10;
-            break;
-        default:
-            gen_guny = cg_gun_y.value;
-            break;
-        }
-        break;
-    case WP_GRENADE_LAUNCHER:
-    case WP_ROCKET_LAUNCHER:
-    case WP_RAILGUN:
-        switch (cg_drawGun.integer) {
-        case 1:
-            gen_guny = cg_gun_y.value - 4;
-            break;
-        case 2:
-            gen_guny = cg_gun_y.value + 5;
-            break;
-        case 3:
-            gen_guny = cg_gun_y.value + 13;
-            break;
-        default:
-            gen_guny = cg_gun_y.value;
-            break;
-        }
-        break;
-    }
+	gen_gunx = cg_gunX.value + cg_weapon_positions[ps->weapon][gun_position][0];
+	gen_guny = cg_gunY.value + cg_weapon_positions[ps->weapon][gun_position][1];
+	gen_gunz = cg_gunZ.value + cg_weapon_positions[ps->weapon][gun_position][2];
 
 	// drop gun lower at higher fov
 	if ( cg_fov.integer > 90 ) {
@@ -1973,9 +1979,9 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	// set up gun position
 	CG_CalculateWeaponPosition( hand.origin, angles );
 
-	VectorMA( hand.origin, cg_gun_x.value, cg.refdef.viewaxis[0], hand.origin );
-	VectorMA( hand.origin, cg_gun_y.value, cg.refdef.viewaxis[1], hand.origin );
-	VectorMA( hand.origin, (cg_gun_z.value+fovOffset), cg.refdef.viewaxis[2], hand.origin );
+	VectorMA( hand.origin, gen_gunx, cg.refdef.viewaxis[0], hand.origin );
+	VectorMA( hand.origin, gen_guny, cg.refdef.viewaxis[1], hand.origin );
+	VectorMA( hand.origin, (gen_gunz+fovOffset), cg.refdef.viewaxis[2], hand.origin );
 
 #if FEAT_SHOTGUN_PUMP
 	// Doom-style shotgun pump: recoil → dwell → pump back → pump forward → settle
@@ -2101,7 +2107,7 @@ void CG_DrawWeaponSelect( void ) {
 	// count the number of weapons owned
 	bits = cg.snap->ps.stats[ STAT_WEAPONS ];
 	count = 0;
-	for ( i = 1 ; i < MAX_WEAPONS ; i++ ) {
+	for ( i = WP_NONE + 1 ; i < WP_NUM_WEAPONS ; i++ ) {
 		if ( bits & ( 1 << i ) ) {
 			count++;
 		}
@@ -2110,7 +2116,7 @@ void CG_DrawWeaponSelect( void ) {
 	x = 320 - count * 20;
 	y = 380;
 
-	for ( i = 1 ; i < MAX_WEAPONS ; i++ ) {
+	for ( i = WP_NONE + 1 ; i < WP_NUM_WEAPONS ; i++ ) {
 		if ( !( bits & ( 1 << i ) ) ) {
 			continue;
 		}
@@ -2274,6 +2280,23 @@ void CG_Weapon_f( void ) {
 }
 
 /*
+===============
+CG_WeaponGrabbed_f
+
+Switch to the last weapon picked up.
+===============
+*/
+void CG_WeaponGrabbed_f( void ) {
+	if ( !cg.lastGrabbedWeapon ) {
+		return;
+	}
+	if ( !CG_WeaponSelectable( cg.lastGrabbedWeapon ) ) {
+		return;
+	}
+	CG_WeaponSelect( cg.lastGrabbedWeapon );
+}
+
+/*
 ===================
 CG_OutOfAmmoChange
 
@@ -2333,7 +2356,7 @@ void CG_FireWeapon( centity_t *cent ) {
 	cent->muzzleFlashTime = cg.time;
 
 	// lightning gun only does this this on initial press
-	if ( ent->weapon == WP_LIGHTNING ) {
+	if ( ent->weapon == WP_LIGHTNING_GUN ) {
 		if ( cent->pe.lightningFiring ) {
 			return;
 		}
@@ -2416,7 +2439,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 
 	switch ( weapon ) {
 	default:
-	case WP_LIGHTNING:
+	case WP_LIGHTNING_GUN:
 		// no explosion at LG impact, it is added with the beam
 		r = rand() & 3;
 		if ( r < 2 ) {
@@ -2464,7 +2487,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		mark = cgs.media.energyMarkShader;
 		radius = 24;
 		break;
-	case WP_PLASMAGUN:
+	case WP_PLASMA_RIFLE:
 		mod = cgs.media.ringFlashModel;
 		shader = cgs.media.plasmaExplosionShader;
 		sfx = cgs.media.sfx_plasmaexp;

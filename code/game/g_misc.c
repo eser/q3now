@@ -83,7 +83,7 @@ void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles ) {
 
 	// release hook
 	if (player->client && player->client->hook) {
-		Weapon_HookFree(player->client->hook);
+		Offhand_Grapple_Free(player->client->hook);
 	}
 
 	// release connected hooks
@@ -97,7 +97,7 @@ void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles ) {
 		}
 
 		if (level.clients[i].hook->enemy == player) {
-			Weapon_HookFree(level.clients[i].hook);
+			Offhand_Grapple_Free(level.clients[i].hook);
 		}
 	}
 
@@ -302,7 +302,7 @@ void Use_Shooter( gentity_t *ent, gentity_t *other, gentity_t *activator ) {
 	case WP_ROCKET_LAUNCHER:
 		fire_rocket( ent, ent->s.origin, dir );
 		break;
-	// case WP_PLASMAGUN:
+	// case WP_PLASMA_RIFLE:
 	//	fire_plasma( ent, ent->s.origin, dir );
 	//	break;
 	}
@@ -350,7 +350,7 @@ Fires at either the target or the current direction.
 "random" is the number of degrees of deviance from the taget. (1.0 default)
 */
 void SP_shooter_plasma( gentity_t *ent ) {
-	InitShooter( ent, WP_PLASMAGUN);
+	InitShooter( ent, WP_PLASMA_RIFLE);
 }
 
 /*QUAKED shooter_grenade (1 0 0) (-16 -16 -16) (16 16 16)

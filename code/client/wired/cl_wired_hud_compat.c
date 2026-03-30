@@ -163,7 +163,7 @@ void WiredHud_SyncCompat( void ) {
 	}
 
 	// weapon + ammo icons
-	for ( i = 0; i < MAX_WEAPONS; i++ ) {
+	for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
 		wired_cg_weapons[i].weaponIcon = wiredHud->weaponIcons[i];
 		wired_cg_weapons[i].ammoIcon   = wiredHud->ammoIcons[i];
 	}

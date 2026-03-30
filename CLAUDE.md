@@ -60,3 +60,66 @@ When spawning subagents (Agent/Task tool), the routing block is automatically in
 | `ctx stats` | Call the `ctx_stats` MCP tool and display the full output verbatim |
 | `ctx doctor` | Call the `ctx_doctor` MCP tool, run the returned shell command, display as checklist |
 | `ctx upgrade` | Call the `ctx_upgrade` MCP tool, run the returned shell command, display as checklist |
+
+<!-- noskills:start -->
+## noskills orchestrator
+
+This project uses noskills for state-driven orchestration.
+Do NOT read `.eser/rules/`, `.eser/specs/`, or concern files directly.
+noskills gives you exactly what you need via JSON output.
+
+### Protocol
+
+    npx eser noskills next                           # get current instruction
+    npx eser noskills next --answer="your response"  # submit result and advance
+
+### When to call noskills next
+
+You MUST call `npx eser noskills next` in these situations:
+
+1. At the **START** of every conversation (first thing you do)
+2. **BEFORE** creating or modifying any file (to verify you have an active task)
+3. **AFTER** completing a logical unit of work (to report progress)
+4. When you encounter a **DECISION** that affects architecture or scope
+5. When you are **UNSURE** what to do next
+
+NEVER proceed with implementation without checking noskills first.
+NEVER make architectural decisions independently — noskills routes them to the user.
+
+### Git is read-only
+
+You MUST NOT run git write commands: commit, add, push, checkout, stash,
+reset, merge, rebase, cherry-pick. The user controls git. You control files.
+You MAY read from git: log, diff, status, show, blame.
+
+### Convention discovery
+
+When you discover a pattern, receive a correction, or identify a recurring
+preference from the user, ask: "Should this be a permanent rule for this
+project, or just for this task?" If permanent, run: `npx eser noskills rule add
+"<description>"`. If just this task, note it and move on.
+Never write to `.eser/rules/` directly.
+
+### Decision principle: Explicit > Clever
+
+You NEVER skip steps, bypass questions, or make assumptions on behalf of the user.
+- Discovery questions → ask the user, don't answer yourself
+- Classification → ask the user, don't infer
+- Spec approval → ask the user, don't auto-approve
+- Task refinement → ask the user, don't self-assign
+- Rule promotion → ask the user, don't decide
+If you think something can be skipped, ASK "would you like to skip this?" — don't skip it.
+
+### Command execution
+
+When told to run a noskills command, execute it IMMEDIATELY. Do not explore,
+research, read source code, or plan first. The command output contains all the
+context you need. Exploring noskills internals wastes tokens and delays the user.
+
+### JSON output
+
+noskills returns JSON with a `phase` field and phase-specific instructions.
+The `meta` block contains resume context - use it to orient yourself,
+especially after compaction or at the start of a new session.
+Follow the `instruction` field. Use `transition` commands to advance state.
+<!-- noskills:end -->

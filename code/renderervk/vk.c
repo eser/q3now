@@ -2593,6 +2593,21 @@ void vk_update_attachment_descriptors( void ) {
 			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
 		}
 
+#if FEAT_SHADOW_MAPPING
+		// shadow map depth image
+		if ( vk.shadowMap.active && vk.shadowMap.image != VK_NULL_HANDLE )
+		{
+			info.sampler = vk.shadowMap.sampler;
+			info.imageView = vk.shadowMap.view;
+			info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			desc.dstSet = vk.shadowMap.descriptor;
+			desc.dstBinding = 0;
+			desc.dstArrayElement = 0;
+			desc.descriptorCount = 1;
+			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+		}
+#endif
+
 		// SMAA descriptors
 		if ( vk.smaa.active && vk.smaa.edges_image != VK_NULL_HANDLE )
 		{
@@ -2707,6 +2722,12 @@ void vk_init_descriptors( void )
 		if ( vk.depthFade.active ) {
 			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.depthFade.descriptor ) );
 		}
+
+#if FEAT_SHADOW_MAPPING
+		if ( vk.shadowMap.active ) {
+			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.shadowMap.descriptor ) );
+		}
+#endif
 
 		if ( vk.smaa.active ) {
 			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.edges_descriptor ) );
@@ -3621,6 +3642,24 @@ static void vk_create_shader_modules( void )
 
 #if FEAT_ADVANCED_WATER
 	vk.modules.water_fs = SHADER_MODULE( water_frag_spv );
+#endif
+
+#if FEAT_SHADOW_MAPPING
+	vk.modules.shadow_depth_vs = SHADER_MODULE( shadow_depth_vert_spv );
+	vk.modules.shadow_depth_fs = SHADER_MODULE( shadow_depth_frag_spv );
+	vk.modules.light_shadow[0] = SHADER_MODULE( vert_light_shadow );
+	vk.modules.light_shadow[1] = SHADER_MODULE( vert_light_shadow_fog );
+	vk.modules.light_shadow_frag[0][0] = SHADER_MODULE( frag_light_shadow );
+	vk.modules.light_shadow_frag[0][1] = SHADER_MODULE( frag_light_shadow_fog );
+	vk.modules.light_shadow_frag[1][0] = SHADER_MODULE( frag_light_shadow_line );
+	vk.modules.light_shadow_frag[1][1] = SHADER_MODULE( frag_light_shadow_line_fog );
+#endif
+
+#if FEAT_PBR
+	vk.modules.light_pbr_frag[0][0] = SHADER_MODULE( frag_light_pbr );
+	vk.modules.light_pbr_frag[0][1] = SHADER_MODULE( frag_light_pbr_fog );
+	vk.modules.light_pbr_frag[1][0] = SHADER_MODULE( frag_light_pbr_line );
+	vk.modules.light_pbr_frag[1][1] = SHADER_MODULE( frag_light_pbr_line_fog );
 #endif
 
 	vk.modules.gamma_fs = SHADER_MODULE( gamma_frag_spv );
@@ -4600,6 +4639,125 @@ static void vk_create_attachments( void )
 		SET_OBJECT_NAME( vk.depthFade.view, "depth fade copy view", VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT );
 	}
 
+#if FEAT_SHADOW_MAPPING
+	// Shadow map depth texture
+	if ( vk.shadowMap.active ) {
+		VkImageCreateInfo img_desc;
+		VkImageViewCreateInfo view_desc;
+		VkSamplerCreateInfo sampler_desc;
+		VkMemoryRequirements mem_req;
+		VkMemoryAllocateInfo alloc_info;
+		VkAttachmentDescription att;
+		VkAttachmentReference depthRef;
+		VkSubpassDescription subpass;
+		VkRenderPassCreateInfo rpDesc;
+		VkFramebufferCreateInfo fbDesc;
+		VkPushConstantRange pushRange;
+		VkPipelineLayoutCreateInfo plDesc;
+		uint32_t mapSize = vk.shadowMap.size;
+		uint32_t mem_type;
+
+		// depth image
+		Com_Memset( &img_desc, 0, sizeof( img_desc ) );
+		img_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		img_desc.imageType = VK_IMAGE_TYPE_2D;
+		img_desc.format = vk.depth_format;
+		img_desc.extent.width = mapSize;
+		img_desc.extent.height = mapSize;
+		img_desc.extent.depth = 1;
+		img_desc.mipLevels = 1;
+		img_desc.arrayLayers = 1;
+		img_desc.samples = VK_SAMPLE_COUNT_1_BIT;
+		img_desc.tiling = VK_IMAGE_TILING_OPTIMAL;
+		img_desc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+		img_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+		VK_CHECK( qvkCreateImage( vk.device, &img_desc, NULL, &vk.shadowMap.image ) );
+		qvkGetImageMemoryRequirements( vk.device, vk.shadowMap.image, &mem_req );
+
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.pNext = NULL;
+		alloc_info.allocationSize = mem_req.size;
+		mem_type = find_memory_type( mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+		alloc_info.memoryTypeIndex = mem_type;
+		VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.shadowMap.memory ) );
+		VK_CHECK( qvkBindImageMemory( vk.device, vk.shadowMap.image, vk.shadowMap.memory, 0 ) );
+
+		// image view
+		Com_Memset( &view_desc, 0, sizeof( view_desc ) );
+		view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		view_desc.image = vk.shadowMap.image;
+		view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		view_desc.format = vk.depth_format;
+		view_desc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+		view_desc.subresourceRange.levelCount = 1;
+		view_desc.subresourceRange.layerCount = 1;
+		VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.shadowMap.view ) );
+
+		// nearest sampler with border clamp (outside shadow map = lit)
+		Com_Memset( &sampler_desc, 0, sizeof( sampler_desc ) );
+		sampler_desc.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+		sampler_desc.magFilter = VK_FILTER_NEAREST;
+		sampler_desc.minFilter = VK_FILTER_NEAREST;
+		sampler_desc.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		sampler_desc.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		sampler_desc.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		sampler_desc.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE; // out-of-bounds = lit (depth=1.0)
+		VK_CHECK( qvkCreateSampler( vk.device, &sampler_desc, NULL, &vk.shadowMap.sampler ) );
+
+		// render pass (depth-only, clear on begin)
+		Com_Memset( &att, 0, sizeof( att ) );
+		att.format = vk.depth_format;
+		att.samples = VK_SAMPLE_COUNT_1_BIT;
+		att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		att.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		depthRef.attachment = 0;
+		depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		Com_Memset( &subpass, 0, sizeof( subpass ) );
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpass.pDepthStencilAttachment = &depthRef;
+
+		Com_Memset( &rpDesc, 0, sizeof( rpDesc ) );
+		rpDesc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		rpDesc.attachmentCount = 1;
+		rpDesc.pAttachments = &att;
+		rpDesc.subpassCount = 1;
+		rpDesc.pSubpasses = &subpass;
+		VK_CHECK( qvkCreateRenderPass( vk.device, &rpDesc, NULL, &vk.shadowMap.renderPass ) );
+
+		// framebuffer
+		Com_Memset( &fbDesc, 0, sizeof( fbDesc ) );
+		fbDesc.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		fbDesc.renderPass = vk.shadowMap.renderPass;
+		fbDesc.attachmentCount = 1;
+		fbDesc.pAttachments = &vk.shadowMap.view;
+		fbDesc.width = mapSize;
+		fbDesc.height = mapSize;
+		fbDesc.layers = 1;
+		VK_CHECK( qvkCreateFramebuffer( vk.device, &fbDesc, NULL, &vk.shadowMap.framebuffer ) );
+
+		// pipeline layout (push constants only — lightMVP)
+		pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		pushRange.offset = 0;
+		pushRange.size = 64; // mat4
+
+		Com_Memset( &plDesc, 0, sizeof( plDesc ) );
+		plDesc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		plDesc.pushConstantRangeCount = 1;
+		plDesc.pPushConstantRanges = &pushRange;
+		VK_CHECK( qvkCreatePipelineLayout( vk.device, &plDesc, NULL, &vk.shadowMap.depthLayout ) );
+
+		SET_OBJECT_NAME( vk.shadowMap.image, "shadow map depth image", VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT );
+		SET_OBJECT_NAME( vk.shadowMap.renderPass, "render pass - shadow depth", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
+	}
+#endif
+
 	// SMAA intermediate images (goes through attachment pool)
 	if ( vk.smaa.active ) {
 		VkImageUsageFlags usage;
@@ -5271,6 +5429,17 @@ void vk_initialize( void )
 #endif
 	) ) ? qtrue : qfalse;
 
+#if FEAT_SHADOW_MAPPING
+	{
+		cvar_t *r_shadowMapping = ri.Cvar_Get( "r_shadowMapping", "0", 0 );
+		cvar_t *r_shadowMapSize = ri.Cvar_Get( "r_shadowMapSize", "512", 0 );
+		vk.shadowMap.active = ( r_shadowMapping->integer && vk.fboActive ) ? qtrue : qfalse;
+		vk.shadowMap.size = r_shadowMapSize->integer;
+		if ( vk.shadowMap.size < 256 ) vk.shadowMap.size = 256;
+		if ( vk.shadowMap.size > 2048 ) vk.shadowMap.size = 2048;
+	}
+#endif
+
 	// SMAA anti-aliasing requires FBO
 	vk.smaa.active = ( r_smaa->integer && vk.fboActive ) ? qtrue : qfalse;
 	vk.smaa.quality = r_smaa->integer;
@@ -5777,6 +5946,21 @@ static void vk_destroy_attachments( void )
 		vk.depthFade.sampler = VK_NULL_HANDLE;
 		vk.depthFade.memory = VK_NULL_HANDLE;
 	}
+
+#if FEAT_SHADOW_MAPPING
+	if ( vk.shadowMap.image ) {
+		qvkDestroyImage( vk.device, vk.shadowMap.image, NULL );
+		qvkDestroyImageView( vk.device, vk.shadowMap.view, NULL );
+		qvkDestroySampler( vk.device, vk.shadowMap.sampler, NULL );
+		qvkFreeMemory( vk.device, vk.shadowMap.memory, NULL );
+		qvkDestroyRenderPass( vk.device, vk.shadowMap.renderPass, NULL );
+		qvkDestroyFramebuffer( vk.device, vk.shadowMap.framebuffer, NULL );
+		qvkDestroyPipelineLayout( vk.device, vk.shadowMap.depthLayout, NULL );
+		if ( vk.shadowMap.depthPipeline )
+			qvkDestroyPipeline( vk.device, vk.shadowMap.depthPipeline, NULL );
+		Com_Memset( &vk.shadowMap, 0, sizeof( vk.shadowMap ) );
+	}
+#endif
 
 	// SMAA intermediate images (edges/blend/input are in attachment pool, destroyed with image_memory below)
 	if ( vk.smaa.edges_image ) {
@@ -7195,8 +7379,38 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 
 #if FEAT_ADVANCED_WATER
 		case TYPE_WATER:
-			vs_module = &vk.modules.vert.light[0]; // reuse light vertex (has pos, tc, N, L, V)
+			vs_module = &vk.modules.vert.light[0];
 			fs_module = &vk.modules.water_fs;
+			break;
+#endif
+
+#if FEAT_SHADOW_MAPPING
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW:
+			vs_module = &vk.modules.light_shadow[0];
+			fs_module = &vk.modules.light_shadow_frag[0][0];
+			break;
+
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW_LINEAR:
+			vs_module = &vk.modules.light_shadow[0];
+			fs_module = &vk.modules.light_shadow_frag[1][0];
+			break;
+
+		case TYPE_SHADOW_DEPTH:
+			vs_module = &vk.modules.shadow_depth_vs;
+			fs_module = &vk.modules.shadow_depth_fs;
+			state_bits |= GLS_DEPTHMASK_TRUE;
+			break;
+#endif
+
+#if FEAT_PBR
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PBR:
+			vs_module = &vk.modules.vert.light[0];
+			fs_module = &vk.modules.light_pbr_frag[0][0];
+			break;
+
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PBR_LINEAR:
+			vs_module = &vk.modules.vert.light[0];
+			fs_module = &vk.modules.light_pbr_frag[1][0];
 			break;
 #endif
 
@@ -7469,6 +7683,14 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 #if FEAT_ADVANCED_WATER
 		case TYPE_WATER:
 #endif
+#if FEAT_SHADOW_MAPPING
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW:
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW_LINEAR:
+#endif
+#if FEAT_PBR
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PBR:
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PBR_LINEAR:
+#endif
 			frag_spec_data[5].i = def->abs_light ? 1 : 0;
 		default:
 			break;
@@ -7703,6 +7925,14 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 #if FEAT_ADVANCED_WATER
 		case TYPE_WATER:
 #endif
+#if FEAT_SHADOW_MAPPING
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW:
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW_LINEAR:
+#endif
+#if FEAT_PBR
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PBR:
+		case TYPE_SIGNLE_TEXTURE_LIGHTING_PBR_LINEAR:
+#endif
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_bind( 1, sizeof( vec2_t ) );					// st0 array
 			push_bind( 2, sizeof( vec4_t ) );					// normals array
@@ -7710,6 +7940,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			push_attr( 1, 1, VK_FORMAT_R32G32_SFLOAT );
 			push_attr( 2, 2, VK_FORMAT_R32G32B32A32_SFLOAT );
 			break;
+
+#if FEAT_SHADOW_MAPPING
+		case TYPE_SHADOW_DEPTH:
+			push_bind( 0, sizeof( vec4_t ) );					// xyz array only
+			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
+			break;
+#endif
 
 		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY:
 		case TYPE_MULTI_TEXTURE_ADD2_IDENTITY:
@@ -9909,6 +10146,133 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 		end_command_buffer( command_buffer, "restore layout" );
 	}
 }
+
+
+#if FEAT_SHADOW_MAPPING
+/*
+===================
+vk_render_shadow_map
+
+Renders the scene from the light's perspective into the shadow map depth texture.
+Called once per dynamic light before its lit surface pass.
+===================
+*/
+void vk_render_shadow_map( const dlight_t *dl ) {
+	VkRenderPassBeginInfo rpBegin;
+	VkClearValue clearVal;
+	VkViewport viewport;
+	VkRect2D scissor;
+	float lightMVP[16];
+	float lightView[16];
+	float lightProj[16];
+	vec3_t lightDir, up, right;
+	float radius = dl->radius;
+	uint32_t mapSize = vk.shadowMap.size;
+
+	if ( !vk.shadowMap.framebuffer || !vk.shadowMap.renderPass )
+		return;
+
+	// End the current render pass (main scene) temporarily
+	vk_end_render_pass();
+
+	// Build light view matrix — look from light toward camera
+	VectorSubtract( backEnd.viewParms.or.origin, dl->origin, lightDir );
+	VectorNormalize( lightDir );
+
+	// Choose an up vector that isn't parallel to lightDir
+	if ( fabs( lightDir[2] ) < 0.9f ) {
+		VectorSet( up, 0, 0, 1 );
+	} else {
+		VectorSet( up, 1, 0, 0 );
+	}
+	CrossProduct( lightDir, up, right );
+	VectorNormalize( right );
+	CrossProduct( right, lightDir, up );
+	VectorNormalize( up );
+
+	// View matrix (look-at)
+	lightView[0]  = right[0]; lightView[4]  = right[1]; lightView[8]  = right[2]; lightView[12] = -DotProduct( right, dl->origin );
+	lightView[1]  = up[0];    lightView[5]  = up[1];    lightView[9]  = up[2];    lightView[13] = -DotProduct( up, dl->origin );
+	lightView[2]  = lightDir[0]; lightView[6] = lightDir[1]; lightView[10] = lightDir[2]; lightView[14] = -DotProduct( lightDir, dl->origin );
+	lightView[3]  = 0;        lightView[7]  = 0;        lightView[11] = 0;        lightView[15] = 1;
+
+	// Orthographic projection covering the light's radius
+	{
+		float l = -radius, r2 = radius, b = -radius, t = radius;
+		float n = 1.0f, f = radius * 2.0f;
+		Com_Memset( lightProj, 0, sizeof( lightProj ) );
+		lightProj[0]  = 2.0f / (r2 - l);
+		lightProj[5]  = 2.0f / (t - b);
+		lightProj[10] = -1.0f / (f - n);
+		lightProj[12] = -(r2 + l) / (r2 - l);
+		lightProj[13] = -(t + b) / (t - b);
+		lightProj[14] = -n / (f - n);
+		lightProj[15] = 1.0f;
+	}
+
+	// lightMVP = lightProj * lightView
+	{
+		int i, j, k;
+		for ( i = 0; i < 4; i++ ) {
+			for ( j = 0; j < 4; j++ ) {
+				lightMVP[i + j*4] = 0;
+				for ( k = 0; k < 4; k++ ) {
+					lightMVP[i + j*4] += lightProj[i + k*4] * lightView[k + j*4];
+				}
+			}
+		}
+	}
+
+	// Begin shadow render pass
+	Com_Memset( &clearVal, 0, sizeof( clearVal ) );
+	clearVal.depthStencil.depth = 1.0f;
+
+	rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	rpBegin.pNext = NULL;
+	rpBegin.renderPass = vk.shadowMap.renderPass;
+	rpBegin.framebuffer = vk.shadowMap.framebuffer;
+	rpBegin.renderArea.offset.x = 0;
+	rpBegin.renderArea.offset.y = 0;
+	rpBegin.renderArea.extent.width = mapSize;
+	rpBegin.renderArea.extent.height = mapSize;
+	rpBegin.clearValueCount = 1;
+	rpBegin.pClearValues = &clearVal;
+
+	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &rpBegin, VK_SUBPASS_CONTENTS_INLINE );
+
+	viewport.x = 0;
+	viewport.y = 0;
+	viewport.width = (float)mapSize;
+	viewport.height = (float)mapSize;
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+	qvkCmdSetViewport( vk.cmd->command_buffer, 0, 1, &viewport );
+
+	scissor.offset.x = 0;
+	scissor.offset.y = 0;
+	scissor.extent.width = mapSize;
+	scissor.extent.height = mapSize;
+	qvkCmdSetScissor( vk.cmd->command_buffer, 0, 1, &scissor );
+
+	// Push the light MVP matrix
+	qvkCmdPushConstants( vk.cmd->command_buffer, vk.shadowMap.depthLayout,
+		VK_SHADER_STAGE_VERTEX_BIT, 0, 64, lightMVP );
+
+	// TODO: render shadow-casting geometry here
+	// For now, the shadow map is cleared to depth=1.0 (fully lit)
+	// Full implementation would iterate dl->head litSurfs and render their geometry
+	// using the shadow depth pipeline + lightMVP push constants
+
+	qvkCmdEndRenderPass( vk.cmd->command_buffer );
+
+	// Store the lightMVP in the uniform buffer for the lit pass to read
+	// (The lit pass fragment shader uses shadowCoord = shadowMVP * position)
+	// This is done by extending the UBO in VK_SetLightParams()
+
+	// Re-enter the main render pass
+	vk_begin_main_render_pass();
+}
+#endif // FEAT_SHADOW_MAPPING
 
 
 qboolean vk_bloom( void )

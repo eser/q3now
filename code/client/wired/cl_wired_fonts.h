@@ -70,5 +70,24 @@ int  CG_FontIndexFromName( const char *name );
 #define WiredFont_DrawSimple     CG_ModernDrawString
 #define WiredFont_StringWidth    CG_ModernDrawStringLenPix
 
+// ── TA font system (fontInfo_t-based, for v6/TA menu compatibility) ──
+//
+// These load fonts via re.RegisterFont() using .dat metric files + .tga atlases.
+// Three sizes: small (12pt), normal (16pt), big (20pt) — matching TA's assetGlobalDef.
+
+typedef enum {
+	TA_FONT_SMALL,     // 12pt — smallFont
+	TA_FONT_NORMAL,    // 16pt — font
+	TA_FONT_BIG,       // 20pt — bigFont
+	TA_FONT_COUNT
+} taFontSize_t;
+
+void          WiredUI_LoadTAFonts( void );
+fontInfo_t   *WiredUI_GetTAFont( taFontSize_t size );
+void          WiredUI_DrawText_TA( float x, float y, float scale, const vec4_t color,
+                  const char *text, int limit, int style, fontInfo_t *font );
+float         WiredUI_TextWidth_TA( const char *text, float scale, int limit, fontInfo_t *font );
+float         WiredUI_TextHeight_TA( const char *text, float scale, int limit, fontInfo_t *font );
+
 #endif // FEAT_WIRED_UI
 #endif // CL_WIRED_FONTS_H

@@ -135,11 +135,16 @@ void G_ExplodeMissile( gentity_t *ent ) {
 	ent->freeAfterEvent = qtrue;
 
 	// splash damage
-	if ( ent->splashDamage ) {
-		if( G_RadiusDamage( ent->r.currentOrigin, ent->parent, ent->splashDamage, ent->splashRadius, ent
-			, ent->splashMethodOfDeath, qfalse ) ) {
+	if ( ent->splashDamage &&
+		G_RadiusDamage( ent->r.currentOrigin, ent->parent, ent->splashDamage, ent->splashRadius, ent, ent->splashMethodOfDeath, qfalse ) ) {
+		int att = G_AttackFromMOD(ent->splashMethodOfDeath);
+
+		if (g_entities[ent->r.ownerNum].client) {
 			g_entities[ent->r.ownerNum].client->accuracy_hits++;
-			if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->weaponStats[ent->s.weapon].hits++;
+
+			if ( att > ATT_NONE && att < ATT_NUM_ATTACKS ) {
+				g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
+			}
 		}
 	}
 
@@ -249,14 +254,24 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 			vec3_t	velocity;
 
 			if( LogAccuracyHit( other, &g_entities[ent->r.ownerNum] ) ) {
-				g_entities[ent->r.ownerNum].client->accuracy_hits++;
-				if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->weaponStats[ent->s.weapon].hits++;
+				int att;
+
+				att = G_AttackFromMOD( ent->methodOfDeath );
+
+				if (g_entities[ent->r.ownerNum].client) {
+					g_entities[ent->r.ownerNum].client->accuracy_hits++;
+					g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
+				}
+
 				hitClient = qtrue;
 			}
+
 			BG_EvaluateTrajectoryDelta( &ent->s.pos, level.time, velocity );
+
 			if ( VectorLength( velocity ) == 0 ) {
 				velocity[2] = 1;	// stepped on a grenade
 			}
+
 			G_Damage (other, ent, &g_entities[ent->r.ownerNum], velocity,
 				ent->s.origin, ent->damage, 
 				0, ent->methodOfDeath);
@@ -296,7 +311,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 		G_SetOrigin( ent, v );
 		G_SetOrigin( nent, v );
 
-		ent->think = Weapon_HookThink;
+		ent->think = Offhand_Grapple_Hook_Think;
 		ent->nextthink = level.time + FRAMETIME;
 
 		// use this to track when to damage the enemy
@@ -351,16 +366,24 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
             VectorSubtract(trace->endpos, vec2, vec2);
             // use new radius damage
             if (CPM_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath, vec2)) {
+				int att;
+
+				att = G_AttackFromMOD( ent->splashMethodOfDeath );
+
                 if (!hitClient) {
                     g_entities[ent->r.ownerNum].client->accuracy_hits++;
-                    if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->weaponStats[ent->s.weapon].hits++;
+                    if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
                 }
             }
         }
         else if (G_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath, qfalse)) {
             if (!hitClient) {
-                g_entities[ent->r.ownerNum].client->accuracy_hits++;
-                if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->weaponStats[ent->s.weapon].hits++;
+				int att;
+
+				att = G_AttackFromMOD( ent->splashMethodOfDeath );
+
+				g_entities[ent->r.ownerNum].client->accuracy_hits++;
+                if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
             }
         }
         // !CPM
@@ -546,7 +569,7 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 	bolt->think = G_ExplodeMissile;
 	bolt->s.eType = ET_MISSILE;
 	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
-	bolt->s.weapon = WP_PLASMAGUN;
+	bolt->s.weapon = WP_PLASMA_RIFLE;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
 #if FEAT_UNLAGGED
@@ -736,7 +759,7 @@ gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir) {
 	hook = G_Spawn();
 	hook->classname = "hook";
 	hook->nextthink = level.time + 10000;
-	hook->think = Weapon_HookFree;
+	hook->think = Offhand_Grapple_Free;
 	hook->s.eType = ET_MISSILE;
 	hook->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	hook->s.weapon = WP_NONE;

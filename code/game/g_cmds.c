@@ -101,7 +101,7 @@ void DeathmatchScoreboardMessage( gentity_t *ent ) {
 		level.teamScores[TEAM_RED], level.teamScores[TEAM_BLUE],
 		string ) );
 
-	/* auto-send per-weapon stats for all players to the requesting client */
+	/* auto-send per-attack stats for all players to the requesting client */
 	{
 		int k;
 		for ( k = 0; k < level.maxclients; k++ ) {
@@ -1447,12 +1447,15 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 	// eser - team shuffle command
 	} else if ( !Q_stricmp( arg1, "shuffle" ) ) {
 	// eser - team shuffle command
+	// eser - vote g_unlagged
+	} else if ( !Q_stricmp( arg1, "g_unlagged" ) ) {
+	// eser - vote g_unlagged
 #if FEAT_ATMOSPHERIC
 	} else if ( !Q_stricmp( arg1, "weather" ) ) {
 #endif
 	} else {
 		trap_SendServerCommand( ent-g_entities, "print \"Invalid vote string.\n\"" );
-		trap_SendServerCommand( ent-g_entities, "print \"Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_warmup, timelimit <time>, fraglimit <frags>, shuffle"
+		trap_SendServerCommand( ent-g_entities, "print \"Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_warmup, timelimit <time>, fraglimit <frags>, shuffle, g_unlagged <0|1>"
 #if FEAT_ATMOSPHERIC
 			" and weather <rain|snow|clean>"
 #endif
@@ -1523,6 +1526,16 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 		Com_sprintf( level.voteString, sizeof( level.voteString ), "shuffle" );
 		Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "Shuffle Teams" );
 	// eser - team shuffle command
+	// eser - vote g_unlagged
+	} else if ( !Q_stricmp( arg1, "g_unlagged" ) ) {
+		i = atoi( arg2 );
+		if ( !arg2[0] || ( i != 0 && i != 1 ) ) {
+			trap_SendServerCommand( ent-g_entities, "print \"Valid g_unlagged values: 0 or 1.\n\"" );
+			return;
+		}
+		Com_sprintf( level.voteString, sizeof( level.voteString ), "g_unlagged %d", i );
+		Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "%s Unlagged", i ? "Enable" : "Disable" );
+	// eser - vote g_unlagged
 #if FEAT_ATMOSPHERIC
 	} else if ( !Q_stricmp( arg1, "weather" ) ) {
 		if ( !arg2[0] || !Q_stricmp( arg2, "clean" ) ) {
@@ -1950,7 +1963,7 @@ void Cmd_Queue_f( gentity_t *ent ) {
 =================
 Cmd_BStats_f
 
-Send per-weapon stats for the requesting client.
+Send per-attack stats for the requesting client.
 Format: bstats <weaponBitmask> [<hits> <shots> <kills> <deaths> <damage>] per weapon
 =================
 */
@@ -1967,10 +1980,10 @@ static void G_SendBStats( int sourceClient, int recipientClient ) {
 	if ( cl->pers.connected != CON_CONNECTED ) return;
 
 	weaponMask = 0;
-	for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
-		if ( cl->weaponStats[i].shots || cl->weaponStats[i].hits ||
-			 cl->weaponStats[i].kills || cl->weaponStats[i].deaths ||
-			 cl->weaponStats[i].damage ) {
+	for ( i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
+		if ( cl->attackStats[i].shots || cl->attackStats[i].hits ||
+			 cl->attackStats[i].kills || cl->attackStats[i].deaths ||
+			 cl->attackStats[i].damage ) {
 			weaponMask |= ( 1 << i );
 		}
 	}
@@ -1980,15 +1993,15 @@ static void G_SendBStats( int sourceClient, int recipientClient ) {
 	stringlength = Com_sprintf( string, sizeof(string), "bstats %i %i",
 		sourceClient, weaponMask );
 
-	for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
+	for ( i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
 		if ( weaponMask & ( 1 << i ) ) {
 			char entry[128];
 			int len = Com_sprintf( entry, sizeof(entry), " %i %i %i %i %i",
-				cl->weaponStats[i].hits,
-				cl->weaponStats[i].shots,
-				cl->weaponStats[i].kills,
-				cl->weaponStats[i].deaths,
-				cl->weaponStats[i].damage );
+				cl->attackStats[i].hits,
+				cl->attackStats[i].shots,
+				cl->attackStats[i].kills,
+				cl->attackStats[i].deaths,
+				cl->attackStats[i].damage );
 			if ( stringlength + len >= (int)sizeof(string) ) break;
 			strcpy( string + stringlength, entry );
 			stringlength += len;

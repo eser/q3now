@@ -4,7 +4,7 @@ cg_alloc.c -- Cgame-local memory allocator
 
 Simple bump allocator with two regions:
 - Permanent region: grows from the start (parser tables, etc.)
-- Temp region: grows from the end (SuperHUD elements, text commands)
+- Temp region: grows from the end (hud elements, text commands)
 
 CG_AllocReset() only resets the temp region. Safe to call on HUD reload.
 ===========================================================================

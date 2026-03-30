@@ -5,7 +5,16 @@ import (
 	"path/filepath"
 )
 
-const appName = "q3now"
+// channelSuffix is set at build time via -ldflags "-X ...config.channelSuffix=-preview"
+// Empty string for public channel, "-preview" for preview, "-canary" for canary, etc.
+var channelSuffix = "-preview"
+
+var appName = "q3now" + channelSuffix
+
+// ChannelSuffix returns the current channel suffix (e.g. "-preview", "-canary", or "").
+func ChannelSuffix() string {
+	return channelSuffix
+}
 
 // Paths holds all resolved filesystem paths the launcher needs.
 type Paths struct {
@@ -55,6 +64,11 @@ func (p *Paths) GameBinaryPath() string {
 // DedBinaryPath returns the full path to the dedicated server binary.
 func (p *Paths) DedBinaryPath() string {
 	return filepath.Join(p.ExecDir, "q3now-ded")
+}
+
+// DownloadDir returns the path to ~/q3now/downloaded/quakedata/.
+func (p *Paths) DownloadDir() string {
+	return filepath.Join(p.HomeDir, "downloaded", "quakedata")
 }
 
 // SettingsPath returns the path to ~/q3now/settings.json.

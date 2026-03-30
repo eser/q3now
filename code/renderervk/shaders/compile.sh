@@ -72,6 +72,18 @@ compile frag "light_frag.tmpl -DUSE_PARALLAX" frag_light_parallax
 compile frag "light_frag.tmpl -DUSE_PARALLAX -DUSE_FOG" frag_light_parallax_fog
 compile frag "light_frag.tmpl -DUSE_PARALLAX -DUSE_LINE" frag_light_parallax_line
 compile frag "light_frag.tmpl -DUSE_PARALLAX -DUSE_LINE -DUSE_FOG" frag_light_parallax_line_fog
+# shadow mapping variants
+compile vert "light_vert.tmpl -DUSE_SHADOWMAP" vert_light_shadow
+compile vert "light_vert.tmpl -DUSE_SHADOWMAP -DUSE_FOG" vert_light_shadow_fog
+compile frag "light_frag.tmpl -DUSE_SHADOWMAP" frag_light_shadow
+compile frag "light_frag.tmpl -DUSE_SHADOWMAP -DUSE_FOG" frag_light_shadow_fog
+compile frag "light_frag.tmpl -DUSE_SHADOWMAP -DUSE_LINE" frag_light_shadow_line
+compile frag "light_frag.tmpl -DUSE_SHADOWMAP -DUSE_LINE -DUSE_FOG" frag_light_shadow_line_fog
+# PBR material variants
+compile frag "light_frag.tmpl -DUSE_PBR" frag_light_pbr
+compile frag "light_frag.tmpl -DUSE_PBR -DUSE_FOG" frag_light_pbr_fog
+compile frag "light_frag.tmpl -DUSE_PBR -DUSE_LINE" frag_light_pbr_line
+compile frag "light_frag.tmpl -DUSE_PBR -DUSE_LINE -DUSE_FOG" frag_light_pbr_line_fog
 
 echo "==> Compiling generic vertex shaders..."
 # single-texture vertex

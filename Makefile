@@ -34,12 +34,24 @@
 #   VM                 VM game modules           (default: 0; 1=VM + sv_pure 1)
 #   USE_SW3Z           archive format           (0=legacy pk3, 1=sw3z; default: 0)
 #   USE_WASM           VM backend via WAMR       (0=off, 1=on; default: 1)
+#   CHANNEL            release channel           (default: preview; "public" omits suffix)
 #   CODESIGN_IDENTITY  signing identity         (default: - = ad-hoc)
 #   UPSTREAM_REF       fork point for diff-api  (default: ecd5fa41)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
-APP_NAME   ?= q3now
+# Release channel: "preview" (default), "canary", "public" (no suffix), etc.
+CHANNEL ?= preview
+ifeq ($(CHANNEL),public)
+  CHANNEL_SUFFIX :=
+else
+  CHANNEL_SUFFIX := -$(CHANNEL)
+endif
+
+# CMAKE_APP_NAME: matches cmake PROJECT() name — used for build output paths
+# APP_NAME: channel-suffixed name — used for install paths and artifact names
+CMAKE_APP_NAME := q3now
+APP_NAME       ?= $(CMAKE_APP_NAME)$(CHANNEL_SUFFIX)
 MAP        ?=
 DEV        ?= 0
 VM         ?= 0
@@ -87,15 +99,15 @@ endif
 GAME_ARCH := $(patsubst _%,%,$(RENDEXT))
 ifeq ($(UNAME_S),Darwin)
   JOBS        ?= $(shell sysctl -n hw.ncpu)
-  BUILT_APP_RELEASE := $(BUILD_DIR_RELEASE)/$(APP_NAME)$(BINEXT).app
-  BUILT_APP_DEBUG   := $(BUILD_DIR_DEBUG)/$(APP_NAME)$(BINEXT).app
-  GAME_BIN    := $(BUILT_APP_RELEASE)/Contents/MacOS/$(APP_NAME)$(BINEXT)
-  BUILT_DED_RELEASE := $(BUILD_DIR_RELEASE)/$(APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(APP_NAME)-ded$(BINEXT)
-  BUILT_DED_DEBUG   := $(BUILD_DIR_DEBUG)/$(APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(APP_NAME)-ded$(BINEXT)
+  BUILT_APP_RELEASE := $(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)$(BINEXT).app
+  BUILT_APP_DEBUG   := $(BUILD_DIR_DEBUG)/$(CMAKE_APP_NAME)$(BINEXT).app
+  GAME_BIN    := $(BUILT_APP_RELEASE)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)
+  BUILT_DED_RELEASE := $(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(CMAKE_APP_NAME)-ded$(BINEXT)
+  BUILT_DED_DEBUG   := $(BUILD_DIR_DEBUG)/$(CMAKE_APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(CMAKE_APP_NAME)-ded$(BINEXT)
   Q3DIR       ?= /Applications/$(APP_NAME).app
 else
   JOBS        ?= $(shell nproc 2>/dev/null || echo 4)
-  GAME_BIN    := $(BUILD_DIR_RELEASE)/$(APP_NAME)$(BINEXT)$(EXEEXT)
+  GAME_BIN    := $(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)
   Q3DIR       ?= $(HOME)/$(APP_NAME)
 endif
 
@@ -143,8 +155,9 @@ else
 endif
 
 CMAKE_EXTRA_FLAGS ?=
-CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_EXTRA_FLAGS)
-CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CHANNEL_FLAG := -DCHANNEL_SUFFIX="$(CHANNEL_SUFFIX)"
+CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
 CMAKE_BUILD_RELEASE     := cmake --build $(BUILD_DIR_RELEASE) --parallel $(JOBS)
 CMAKE_BUILD_DEBUG       := cmake --build $(BUILD_DIR_DEBUG) --parallel $(JOBS)
 
@@ -195,7 +208,7 @@ ifeq ($(USE_SW3Z),1)
 else
   PAK_EXT := pk3
 endif
-PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax02.$(PAK_EXT)
+PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax21.$(PAK_EXT)
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
@@ -241,12 +254,12 @@ rebuild: clean build
 create-launcher:
 	@echo "==> Building launcher..."
 	cd $(LAUNCHER_DIR) && PATH="$$HOME/go/bin:$$PATH" wails build \
-	  $(WAILS_TAGS) -ldflags "-X main.version=$(VERSION)"
+	  $(WAILS_TAGS) -ldflags "-X main.version=$(VERSION) -X github.com/eser/q3now/launcher/internal/config.channelSuffix=$(CHANNEL_SUFFIX)"
 	@echo "==> Launcher ready: $(LAUNCHER_BIN)"
 
 # ── create-packs ──────────────────────────────────────────────────────────────
-# Packages modfiles/ + VM modules into the mod pack (pax02.sw3z or legacy .pk3).
-# "pax02" sorts after pak0–pak8, ensuring highest override priority.
+# Packages modfiles/ + VM modules into the mod pack (pax21.sw3z or legacy .pk3).
+# "pax21" sorts after pak0–pak8, ensuring highest override priority.
 # VM modules here override the stock 1999 bytecode in the base pack.
 
 $(SW3Z_BIN):
@@ -299,12 +312,12 @@ ifeq ($(UNAME_S),Darwin)
 	/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable q3now-launcher" \
 	  "$(Q3DIR)/Contents/Info.plist"
 	@test -f "$(_DED)" && cp "$(_DED)" \
-	  "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded" || true
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)-ded" || true
 else
 	mkdir -p "$(Q3DIR)"
-	cp "$(_BDIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" "$(Q3DIR)/"
-	@test -f "$(_BDIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)" && \
-	  cp "$(_BDIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)" "$(Q3DIR)/" || true
+	cp "$(_BDIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" "$(Q3DIR)/"
+	@test -f "$(_BDIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" && \
+	  cp "$(_BDIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" "$(Q3DIR)/" || true
 ifdef IS_WINDOWS
 	@test -f "$(LAUNCHER_BIN)" && \
 	  cp "$(LAUNCHER_BIN)" "$(Q3DIR)/q3now-launcher.exe" || \
@@ -343,9 +356,9 @@ copy-build-debug: build-debug _do-copy-build
 copy-libs: build
 ifeq ($(UNAME_S),Darwin)
 	@echo "==> Copying renderer + dependency dylibs..."
-	cp "$(BUILD_DIR_RELEASE)/$(APP_NAME)_opengl$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/"
-	@test -f "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).dylib" && \
-	  cp "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/" || true
+	cp "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/"
+	@test -f "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" && \
+	  cp "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/" || true
 	@# Bundle third-party dylibs (SDL3, MoltenVK) into .app and rewrite load paths.
 	@# Uses otool -L to find the EXACT path each binary references, then rewrites
 	@# it to @executable_path/. This handles Homebrew symlink vs real path mismatches
@@ -358,9 +371,9 @@ ifeq ($(UNAME_S),Darwin)
 	    echo "  $$LIBNAME: $$DYLIB → Contents/MacOS/$$BASENAME"; \
 	    rm -f "$(Q3DIR)/Contents/MacOS/$$BASENAME"; \
 	    cp "$$DYLIB" "$(Q3DIR)/Contents/MacOS/"; \
-	    for BIN in "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" \
-	              "$(Q3DIR)/Contents/MacOS/$(APP_NAME)_opengl$(RENDEXT).dylib" \
-	              "$(Q3DIR)/Contents/MacOS/$(APP_NAME)_vulkan$(RENDEXT).dylib"; do \
+	    for BIN in "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" \
+	              "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dylib" \
+	              "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib"; do \
 	      [ -f "$$BIN" ] || continue; \
 	      LINKED=$$(otool -L "$$BIN" 2>/dev/null | grep --color=never "$$LIBNAME" | awk '{print $$1}'); \
 	      if [ -n "$$LINKED" ] && [ "$$LINKED" != "@executable_path/$$BASENAME" ]; then \
@@ -374,14 +387,14 @@ ifeq ($(UNAME_S),Darwin)
 	done
 else ifdef IS_WINDOWS
 	@echo "==> Copying renderer DLLs..."
-	@for dll in "$(BUILD_DIR_RELEASE)/$(APP_NAME)_opengl$(RENDEXT).dll" \
-	            "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).dll"; do \
+	@for dll in "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dll" \
+	            "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dll"; do \
 	  [ -f "$$dll" ] && cp "$$dll" "$(Q3DIR)/" || true; \
 	done
 else
 	@echo "==> Copying renderer shared objects..."
-	@for so in "$(BUILD_DIR_RELEASE)/$(APP_NAME)_opengl$(RENDEXT).so" \
-	           "$(BUILD_DIR_RELEASE)/$(APP_NAME)_vulkan$(RENDEXT).so"; do \
+	@for so in "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).so" \
+	           "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).so"; do \
 	  [ -f "$$so" ] && cp "$$so" "$(Q3DIR)/" || true; \
 	done
 endif
@@ -422,12 +435,12 @@ ifeq ($(UNAME_S),Darwin)
 	  [ -f "$$dylib" ] && codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" "$$dylib" 2>/dev/null; \
 	done
 	codesign --force --options runtime --entitlements misc/macos/q3now.entitlements \
-	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)"
+	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
 	codesign --force --options runtime \
 	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/q3now-launcher"
-	@test -f "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded" && \
+	@test -f "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)-ded" && \
 	  codesign --force --options runtime --entitlements misc/macos/q3now.entitlements \
-	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded" || true
+	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)-ded" || true
 	@# Sign the bundle as a whole (--deep re-signs all subcomponents).
 	@# Non-code data (.sw3z) lives in Contents/Resources/, not Contents/MacOS/,
 	@# so codesign handles the bundle cleanly.
@@ -463,9 +476,9 @@ ifeq ($(UNAME_S),Linux)
 	@echo "==> Creating $(TAR_NAME).tar.gz..."
 	rm -rf $(TAR_STAGING) "$(TAR_OUT)"
 	mkdir -p $(TAR_STAGING)/baseq3
-	cp "$(Q3DIR)/$(APP_NAME)$(BINEXT)" "$(TAR_STAGING)/"
-	@test -f "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)" && \
-	  cp "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)" "$(TAR_STAGING)/" || true
+	cp "$(Q3DIR)/$(CMAKE_APP_NAME)$(BINEXT)" "$(TAR_STAGING)/"
+	@test -f "$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)" && \
+	  cp "$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)" "$(TAR_STAGING)/" || true
 	cp "$(LAUNCHER_BIN)" "$(TAR_STAGING)/q3now-launcher" 2>/dev/null || true
 	cp -R "$(Q3BASEDIR)/." "$(TAR_STAGING)/baseq3/"
 	cp README.md "$(TAR_STAGING)/"
@@ -484,12 +497,12 @@ ifdef IS_WINDOWS
 	@echo "==> Creating $(ZIP_NAME).zip..."
 	rm -rf $(ZIP_STAGING) "$(ZIP_OUT)"
 	mkdir -p $(ZIP_STAGING)/baseq3
-	cp "$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" "$(ZIP_STAGING)/"
-	@test -f "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)" && \
-	  cp "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)" "$(ZIP_STAGING)/" || true
+	cp "$(Q3DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" "$(ZIP_STAGING)/"
+	@test -f "$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" && \
+	  cp "$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" "$(ZIP_STAGING)/" || true
 	cp "$(Q3DIR)/q3now-launcher.exe" "$(ZIP_STAGING)/" 2>/dev/null || true
-	@for dll in "$(Q3DIR)/$(APP_NAME)_opengl$(RENDEXT).dll" \
-	            "$(Q3DIR)/$(APP_NAME)_vulkan$(RENDEXT).dll"; do \
+	@for dll in "$(Q3DIR)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dll" \
+	            "$(Q3DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dll"; do \
 	  [ -f "$$dll" ] && cp "$$dll" "$(ZIP_STAGING)/" || true; \
 	done
 	cp -R "$(Q3BASEDIR)/." "$(ZIP_STAGING)/baseq3/"
@@ -588,9 +601,9 @@ endif
 
 run-game: $(_RUN_GAME_DEP) $(_RUN_VM_COPY)
 ifeq ($(UNAME_S),Darwin)
-	"$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" $(_RUN_GAME_ARGS)
+	"$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" $(_RUN_GAME_ARGS)
 else
-	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" $(_RUN_GAME_ARGS)
+	"$(Q3DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" $(_RUN_GAME_ARGS)
 endif
 
 
@@ -639,7 +652,7 @@ check: create-packs
 	@test -f $(PAK_OUT) && echo "  mod pack:     OK ($(PAK_EXT))"
 ifeq ($(UNAME_S),Darwin)
 	@codesign --verify "$(Q3DIR)" 2>/dev/null && echo "  codesign:    OK" || echo "  codesign:    MISSING (run make bundle-codesign)"
-	@codesign -d --entitlements - "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" 2>/dev/null | grep -q "allow-jit" && echo "  JIT entitlement: OK" || echo "  JIT entitlement: MISSING"
+	@codesign -d --entitlements - "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" 2>/dev/null | grep -q "allow-jit" && echo "  JIT entitlement: OK" || echo "  JIT entitlement: MISSING"
 endif
 	@echo "==> All checks passed."
 
@@ -648,9 +661,9 @@ endif
 
 smoke: build
 ifeq ($(UNAME_S),Darwin)
-	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/Contents/MacOS/$(APP_NAME)-ded"
+	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)-ded"
 else
-	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(APP_NAME)-ded$(BINEXT)$(EXEEXT)"
+	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)"
 endif
 
 # ── test-features ────────────────────────────────────────────────────────────
@@ -659,7 +672,7 @@ endif
 test-features: copy-all
 ifeq ($(UNAME_S),Darwin)
 	@echo "==> Testing all features enabled (30s)..."
-	@timeout 35 "$(Q3DIR)/Contents/MacOS/$(APP_NAME)$(BINEXT)" \
+	@timeout 35 "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" \
 	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
 	  +set g_fastWeaponSwitch 2 \
 	  +set g_spawnProtect 2 \
@@ -697,7 +710,7 @@ bench: copy-all
 ifeq ($(UNAME_S),Darwin)
 	open "$(Q3DIR)" --args +timedemo 1 +demo $(DEMO)
 else
-	"$(Q3DIR)/$(APP_NAME)$(BINEXT)$(EXEEXT)" +timedemo 1 +demo $(DEMO)
+	"$(Q3DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" +timedemo 1 +demo $(DEMO)
 endif
 
 # ── diff-api ─────────────────────────────────────────────────────────────────

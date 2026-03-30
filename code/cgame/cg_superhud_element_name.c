@@ -45,7 +45,7 @@ static void CG_SHUDElementNameGetPairFFA(const char** own, const char** nme)
 	const char* info;
 	*own = cgs.clientinfo[cg.snap->ps.clientNum].name;
 
-	clientNum = cg.predictedPlayerState.persistant[PERS_ATTACKER];
+	clientNum = cg.predictedPlayerState.persistant[PERS_LAST_ATTACKER];
 	if (clientNum < 0 || clientNum >= MAX_CLIENTS)
 	{
 		return;
