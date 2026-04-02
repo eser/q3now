@@ -1071,7 +1071,7 @@ void CG_RegisterWeapon( int weaponNum ) {
     if (weaponNum == WP_NONE) {
         MAKERGB(weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f);
         weaponInfo->flashSound[0] = trap_S_RegisterSound("sound/weapons/rocket/rocklf1a.wav", qfalse);
-        weaponInfo->missileModel = (qhandle_t)NULL;
+        weaponInfo->missileModel = 0;
         weaponInfo->missileTrailFunc = CG_GrappleTrail;
         weaponInfo->missileDlight = 200;
 
@@ -1886,9 +1886,9 @@ int cg_weapon_positions[][3][3] = {
 		/* Left   */ { -7,  12, -4 },
 	},
 	{ // WP_LIGHTNING_GUN
-		/* Right  */ {  8,  -5,  0 },
-		/* Center */ {  8,   0,  0 },
-		/* Left   */ {  8,   4,  0 },
+		/* Right  */ { -7,  -5, -1 },
+		/* Center */ { -7,   0, -1 },
+		/* Left   */ { -7,   4, -1 },
 	},
 	{ // WP_RAILGUN
 		/* Right  */ { -1,  -7, -2 },

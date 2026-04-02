@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include <sys/types.h>
 #include "cm_public.h"
+#include "q_feats.h"
 
 //Ignore __attribute__ on non-gcc/clang platforms
 #if !defined(__GNUC__) && !defined(__clang__)
@@ -133,7 +134,7 @@ NET
 
 ==============================================================
 */
-#define FEAT_IPV6
+// FEAT_IPV6 is defined in q_feats.h
 
 #define NET_ENABLEV4            0x01
 #define NET_ENABLEV6            0x02
@@ -376,7 +377,6 @@ typedef enum {
 	VM_GAME = 0,
 #ifndef USE_DEDICATED
 	VM_CGAME,
-	VM_UI,
 #endif
 	VM_COUNT
 } vmIndex_t;
@@ -666,8 +666,7 @@ issues.
 typedef enum {
 	H_SYSTEM,
 	H_QAGAME,
-	H_CGAME,
-	H_Q3UI
+	H_CGAME
 } handleOwner_t;
 
 #define FS_MATCH_EXTERN    (1<<0)

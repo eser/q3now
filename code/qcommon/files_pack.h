@@ -10,7 +10,7 @@
 
 #include "q_shared.h"
 #include "qcommon.h"		/* fileInPack_t, fileOffset_t, fileTime_t */
-#include "../game/q_feats.h"
+#include "q_feats.h"
 #include "unzip.h"			/* unzFile */
 
 #if FEAT_SW3Z

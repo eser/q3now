@@ -54,7 +54,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // for the voice chats
 #if FEAT_TA_VOICECHAT
-#include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure
+#include "../qcommon/menudef.h"
 #endif
 
 #define TIME_BETWEENCHATTING	25

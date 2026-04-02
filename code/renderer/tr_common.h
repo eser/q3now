@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../renderercommon/tr_public.h"
+#include "../qcommon/q_feats.h"
 
 #define MAX_TEXTURE_UNITS 8
 
@@ -121,11 +122,13 @@ IMAGE LOADERS
 =============================================================
 */
 
-void R_LoadBMP( const char *name, byte **pic, int *width, int *height );
 void R_LoadJPG( const char *name, byte **pic, int *width, int *height );
-void R_LoadPCX( const char *name, byte **pic, int *width, int *height );
 void R_LoadPNG( const char *name, byte **pic, int *width, int *height );
+#if FEAT_LEGACY_FORMATS_IMAGE
+void R_LoadBMP( const char *name, byte **pic, int *width, int *height );
+void R_LoadPCX( const char *name, byte **pic, int *width, int *height );
 void R_LoadTGA( const char *name, byte **pic, int *width, int *height );
+#endif
 
 /*
 ====================================================================

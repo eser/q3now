@@ -4,6 +4,8 @@ import {detect} from '../models';
 import {engine} from '../models';
 import {settings} from '../models';
 
+export function AcceptEula():Promise<void>;
+
 export function BrowseForDirectory():Promise<string>;
 
 export function BuildGameCommand(arg1:Record<string, any>):Promise<string>;
@@ -24,9 +26,13 @@ export function GetDedCommandPreview(arg1:engine.ServerConfig):Promise<string>;
 
 export function GetDedStatus():Promise<boolean>;
 
+export function GetEulaText():Promise<string>;
+
 export function GetLocalIP():Promise<string>;
 
 export function GetSettings():Promise<settings.Settings>;
+
+export function HasAcceptedEula():Promise<boolean>;
 
 export function LaunchGame():Promise<void>;
 

@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 #include "cg_local.h"
-#include "../ui/ui_shared.h"
+#include "ui_shared.h"
 
 extern displayContextDef_t cgDC;
 

@@ -33,7 +33,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_extramath.h"
 #include "tr_fbo.h"
 #include "tr_postprocess.h"
+#if defined(FEAT_IQM)
 #include "../renderer/iqm.h"
+#endif // FEAT_IQM
 #include "qgl.h"
 
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
@@ -857,11 +859,15 @@ typedef enum {
 	SF_POLY,
 	SF_MDV,
 	SF_MDR,
+#if defined(FEAT_IQM)
 	SF_IQM,
+#endif // FEAT_IQM
 	SF_FLARE,
 	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
 	SF_VAO_MDVMESH,
+#if defined(FEAT_IQM)
 	SF_VAO_IQM,
+#endif // FEAT_IQM
 
 	SF_NUM_SURFACE_TYPES,
 	SF_MAX = 0x7fffffff			// ensures that sizeof( surfaceType_t ) == sizeof( int )
@@ -952,6 +958,7 @@ typedef struct srfBspSurface_s
 	float			*heightLodError;
 } srfBspSurface_t;
 
+#if defined(FEAT_IQM)
 typedef struct {
 	vec3_t translate;
 	quat_t rotate;
@@ -997,6 +1004,19 @@ typedef struct {
 	iqmTransform_t	*poses; // [num_frames * num_poses]
 	float		*bounds;
 
+	// pre-allocated skinning matrices (sized to num_influences)
+	int		num_influences;
+	float		*influenceVtxMat; // [num_influences * 12]
+	float		*influenceNrmMat; // [num_influences * 9]
+
+	// embedded animation data
+	int		num_anims;
+	char		*animNames;		// packed null-terminated strings
+	int		*animFirstFrames;	// [num_anims]
+	int		*animNumFrames;		// [num_anims]
+	float		*animFramerates;	// [num_anims]
+	int		*animFlags;		// [num_anims]
+
 	int		numVaoSurfaces;
 	struct srfVaoIQModel_s	*vaoSurfaces;
 } iqmData_t;
@@ -1026,6 +1046,7 @@ typedef struct srfVaoIQModel_s
 	// static render data
 	vao_t          *vao;
 } srfVaoIQModel_t;
+#endif // FEAT_IQM
 
 typedef struct srfVaoMdvMesh_s
 {
@@ -1267,7 +1288,9 @@ typedef enum {
 	MOD_BRUSH,
 	MOD_MESH,
 	MOD_MDR,
-	MOD_IQM
+#if defined(FEAT_IQM)
+	MOD_IQM,
+#endif // FEAT_IQM
 } modtype_t;
 
 typedef struct model_s {
@@ -1291,6 +1314,9 @@ model_t		*R_GetModelByHandle( qhandle_t hModel );
 int			R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame, 
 					 float frac, const char *tagName );
 void		R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs );
+#if defined(FEAT_IQM)
+int		R_GetIQMAnimations( qhandle_t handle, iqmAnimInfo_t *anims, int maxAnims );
+#endif // FEAT_IQM
 
 void		R_Modellist_f (void);
 
@@ -1369,8 +1395,10 @@ typedef struct {
 	uint32_t    storedGlState;
 	float           vertexAttribsInterpolation;
 	qboolean        vertexAnimation;
+#if defined(FEAT_IQM)
 	int             boneAnimation; // number of bones
 	mat4_t          boneMatrix[IQM_MAX_JOINTS];
+#endif // FEAT_IQM
 	uint32_t        vertexAttribsEnabled;  // global if no VAOs, tess only otherwise
 	FBO_t          *currentFBO;
 	vao_t          *currentVao;
@@ -2278,6 +2306,7 @@ ANIMATED MODELS
 
 void R_MDRAddAnimSurfaces( trRefEntity_t *ent );
 void RB_MDRSurfaceAnim( mdrSurface_t *surface );
+#if defined(FEAT_IQM)
 qboolean R_LoadIQM (model_t *mod, void *buffer, int filesize, const char *name );
 void R_AddIQMSurfaces( trRefEntity_t *ent );
 void RB_IQMSurfaceAnim( const surfaceType_t *surface );
@@ -2285,6 +2314,7 @@ void RB_IQMSurfaceAnimVao( const srfVaoIQModel_t *surface );
 int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
                   int startFrame, int endFrame,
                   float frac, const char *tagName );
+#endif // FEAT_IQM
 
 /*
 =============================================================

@@ -13,7 +13,7 @@ code/ui/ui_shared.c in subsequent phases.
 #include "cl_wired_hud.h"
 #include "cl_wired_hud_private.h"
 #include "cl_wired_fonts.h"
-#include "../../ui/menudef.h"
+#include "../../qcommon/menudef.h"
 
 #if FEAT_WIRED_UI
 
@@ -302,6 +302,47 @@ static cvar_t *wired_screenshotDelay = NULL;
 static int     wired_screenshotTime = 0;
 static qboolean wired_screenshotTaken = qfalse;
 
+/*
+=================
+WiredUI_RegisterAssets
+
+(Re-)registers all WiredUI shader and sound handles.
+Called from WiredUI_Init and WiredUI_SetActiveMenu to
+survive Hunk_Clear cycles.  RegisterShaderNoMip / S_RegisterSound
+return cached handles when assets are already loaded, so this is
+essentially free outside of hunk-clear transitions.
+=================
+*/
+static void WiredUI_RegisterAssets( void ) {
+	// sounds
+	wired_sfxFocus     = S_RegisterSound( "sound/misc/menu2.wav", qfalse );
+	wired_sfxAction    = S_RegisterSound( "sound/misc/menu1.wav", qfalse );
+	wired_sfxMenuOpen  = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
+	wired_sfxMenuClose = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
+
+	// cursor shader — try cvar override, then assetGlobals, then legacy fallback
+	wired_cursorShader = 0;
+	{
+		char cursorPath[MAX_QPATH];
+		Cvar_VariableStringBuffer( "wired_cursor", cursorPath, sizeof( cursorPath ) );
+		if ( cursorPath[0] ) {
+			wired_cursorShader = re.RegisterShaderNoMip( cursorPath );
+		}
+	}
+	if ( !wired_cursorShader && wired_assetGlobals.cursor[0] ) {
+		wired_cursorShader = re.RegisterShaderNoMip( wired_assetGlobals.cursor );
+	}
+	if ( !wired_cursorShader ) {
+		wired_cursorShader = re.RegisterShaderNoMip( "menu/art/3_cursor2" );
+	}
+
+	// gradient bar shader
+	wired_gradientBarShader = 0;
+	if ( wired_assetGlobals.gradientBar[0] ) {
+		wired_gradientBarShader = re.RegisterShaderNoMip( wired_assetGlobals.gradientBar );
+	}
+}
+
 void WiredUI_Init( qboolean inGameUI ) {
 	Com_Printf( "------- WiredUI_Init -------\n" );
 
@@ -341,31 +382,7 @@ void WiredUI_Init( qboolean inGameUI ) {
 	Q_strncpyz( wired_assetGlobals.focusSound, "sound/misc/menu2.wav", sizeof( wired_assetGlobals.focusSound ) );
 	Vector4Set( wired_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );  // TA gold
 
-	// register menu interaction sounds
-	wired_sfxFocus     = S_RegisterSound( "sound/misc/menu2.wav", qfalse );
-	wired_sfxAction    = S_RegisterSound( "sound/misc/menu1.wav", qfalse );
-	wired_sfxMenuOpen  = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
-	wired_sfxMenuClose = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
-
-	// register cursor shader — try cvar override, then assetGlobals, then legacy fallback
-	{
-		char cursorPath[MAX_QPATH];
-		Cvar_VariableStringBuffer( "wired_cursor", cursorPath, sizeof( cursorPath ) );
-		if ( cursorPath[0] ) {
-			wired_cursorShader = re.RegisterShaderNoMip( cursorPath );
-		}
-		if ( !wired_cursorShader ) {
-			wired_cursorShader = re.RegisterShaderNoMip( wired_assetGlobals.cursor );
-		}
-		if ( !wired_cursorShader ) {
-			wired_cursorShader = re.RegisterShaderNoMip( "menu/art/3_cursor2" );
-		}
-	}
-
-	// register gradient bar shader
-	if ( wired_assetGlobals.gradientBar[0] ) {
-		wired_gradientBarShader = re.RegisterShaderNoMip( wired_assetGlobals.gradientBar );
-	}
+	WiredUI_RegisterAssets();
 
 	// load TA fonts (fontInfo_t-based, for v6/TA menu text rendering)
 	WiredUI_LoadTAFonts();
@@ -2762,6 +2779,9 @@ void WiredUI_SetActiveMenu( int menu ) {
 			Cvar_Set( "cl_paused", "1" );
 		}
 
+		// re-register all assets — Hunk_Clear on map load invalidates handles
+		WiredUI_RegisterAssets();
+
 		Com_DPrintf( "WiredUI: SetActiveMenu %d\n", menu );
 	} else {
 		Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
@@ -3131,6 +3151,30 @@ void WiredUI_ReloadMenus( void ) {
 	if ( currentMenu[0] && WiredUI_FindMenu( currentMenu ) ) {
 		WiredUI_PushMenu( currentMenu );
 	}
+}
+
+// ── Engine-facing API (replaces cl_ui.c) ──────────────────────────────
+
+void CL_InitUI( void ) {
+	// disallow vl.collapse for UI elements
+	re.VertexLighting( qfalse );
+
+	WiredUI_Init( cls.state >= CA_AUTHORIZING && cls.state < CA_ACTIVE );
+	cls.uiStarted = qtrue;
+}
+
+void CL_ShutdownUI( void ) {
+	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
+	cls.uiStarted = qfalse;
+	WiredUI_Shutdown();
+}
+
+qboolean UI_GameCommand( void ) {
+	return WiredUI_ConsoleCommand( cls.realtime );
+}
+
+qboolean UI_usesUniqueCDKey( void ) {
+	return qfalse;
 }
 
 #endif // FEAT_WIRED_UI

@@ -794,6 +794,13 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		Cvar_SetDescription2( (const char*)VMA(1), (const char*)VMA(2) );
 		return 0;
 
+#if defined(FEAT_IQM)
+	case CG_R_GETIQMANIMS:
+		if ( re.GetIQMAnimations )
+			return re.GetIQMAnimations( args[1], VMA(2), args[3] );
+		return 0;
+#endif // FEAT_IQM
+
 	case CG_TRAP_GETVALUE:
 		VM_CHECKBOUNDS( cgvm, args[1], args[2] );
 		return CL_GetValue( VMA(1), args[2], VMA(3) );

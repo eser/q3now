@@ -23,6 +23,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../renderercommon/tr_public.h"
+#include "../qcommon/q_feats.h"
+
+#if FEAT_LEGACY_FORMATS_IMAGE
 
 /*
 ========================================================================
@@ -174,3 +177,5 @@ void R_LoadPCX ( const char *filename, byte **pic, int *width, int *height)
 	ri.FS_FreeFile (pcx);
 	ri.Free (pic8);
 }
+
+#endif // FEAT_LEGACY_FORMATS_IMAGE

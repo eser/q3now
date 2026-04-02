@@ -23,6 +23,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "snd_codec.h"
+#include "../qcommon/q_feats.h"
+
+#if FEAT_LEGACY_FORMATS_AUDIO
 
 /*
 =================
@@ -294,3 +297,5 @@ int S_WAV_CodecReadStream(snd_stream_t *stream, int bytes, void *buffer)
 	S_ByteSwapRawSamples(samples, stream->info.width, stream->info.channels, buffer);
 	return bytes;
 }
+
+#endif // FEAT_LEGACY_FORMATS_AUDIO

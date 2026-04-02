@@ -1,9 +1,17 @@
 package pipeline
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestQ3BaseProcessor_AllowedFiles(t *testing.T) {
 	proc := &Q3BaseProcessor{}
+
+	// Build a minimal WAV for entries that now trigger ModeConvert.
+	pcm := buildSilent16BitPCM(960) // 1 Opus frame at 48kHz
+	wavData := buildWAV(48000, 1, 16, pcm)
+	wavReader := func() ([]byte, error) { return wavData, nil }
 
 	cases := []string{
 		"botfiles/bots/anarki_c.c",
@@ -32,12 +40,21 @@ func TestQ3BaseProcessor_AllowedFiles(t *testing.T) {
 
 	for _, path := range cases {
 		entry := AssetEntry{Origin: "q3_base", Path: path}
-		decision, err := proc.Process(entry, nil)
+
+		// .wav entries are ModeConvert and need a readFile function.
+		var readFile func() ([]byte, error)
+		if strings.HasSuffix(path, ".wav") {
+			readFile = wavReader
+		}
+
+		decision, err := proc.Process(entry, readFile)
 		if err != nil {
 			t.Fatalf("Process(%q): %v", path, err)
 		}
-		if decision.Action != Include {
-			t.Errorf("Process(%q): expected Include, got Skip", path)
+		// Include means ModeCopy kept the file; Replace means ModeConvert converted it.
+		// Both are "allowed" (not skipped).
+		if decision.Action != Include && decision.Action != Replace {
+			t.Errorf("Process(%q): expected Include or Replace, got %d", path, decision.Action)
 		}
 	}
 }
@@ -116,9 +133,9 @@ func TestQ3BaseProcessor_Finalize(t *testing.T) {
 	}
 }
 
-func TestQ3BaseProcessor_AllowlistSize(t *testing.T) {
-	// Sanity check: the allowlist should have a reasonable number of entries.
-	if len(q3BaseAllowlist) < 3000 {
-		t.Errorf("allowlist too small: %d entries (expected 3000+)", len(q3BaseAllowlist))
+func TestQ3BaseProcessor_EntriesSize(t *testing.T) {
+	// Sanity check: the entries map should have a reasonable number of entries.
+	if len(q3BaseEntries) < 3000 {
+		t.Errorf("entries too small: %d entries (expected 3000+)", len(q3BaseEntries))
 	}
 }

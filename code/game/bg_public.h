@@ -49,7 +49,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	GAME_VERSION		"q3now-1"
 
 // feature flags — single source of truth for all modules
-#include "q_feats.h"
+#include "../qcommon/q_feats.h"
 
 #define	DEFAULT_GRAVITY		800
 #define	DEFAULT_MOVESPEED	320
@@ -71,6 +71,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define DEFAULT_SHOTGUN_SPREAD	600
 #define DEFAULT_SHOTGUN_COUNT	16
+
+#define	DEFAULT_TEAM_MODEL		"visor"
+#define	DEFAULT_TEAM_HEAD		"visor"
+
+#define DEFAULT_REDTEAM_NAME		"Stroggs"
+#define DEFAULT_BLUETEAM_NAME		"Pagans"
 
 #if FEAT_SHOTGUN_PATTERN
 // Fixed pellet pattern: 1 center + 5 inner ring + 10 outer ring = 16 total

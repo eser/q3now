@@ -2270,11 +2270,13 @@ typedef struct
 static const imageExtToLoaderMap_t imageLoaders[ ] =
 {
 	{ "png",  R_LoadPNG },
-	{ "tga",  R_LoadTGA },
 	{ "jpg",  R_LoadJPG },
 	{ "jpeg", R_LoadJPG },
+#if FEAT_LEGACY_FORMATS_IMAGE
+	{ "tga",  R_LoadTGA },
 	{ "pcx",  R_LoadPCX },
-	{ "bmp",  R_LoadBMP }
+	{ "bmp",  R_LoadBMP },
+#endif
 };
 
 static const int numImageLoaders = ARRAY_LEN( imageLoaders );

@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+#include "../qcommon/q_feats.h"
 
 typedef struct snd_info_s
 {
@@ -35,6 +36,8 @@ typedef struct snd_info_s
 	int samples;
 	int size;
 	int dataofs;
+	int loopStart;  // sample offset for loop start (-1 if not set)
+	int loopEnd;    // sample offset for loop end (-1 if not set)
 } snd_info_t;
 
 typedef struct snd_codec_s snd_codec_t;
@@ -79,6 +82,7 @@ snd_stream_t *S_CodecUtilOpen(const char *filename, snd_codec_t *codec);
 void S_CodecUtilClose(snd_stream_t **stream);
 
 // WAV Codec
+#if FEAT_LEGACY_FORMATS_AUDIO
 extern snd_codec_t wav_codec;
 void *S_WAV_CodecLoad(const char *filename, snd_info_t *info);
 snd_stream_t *S_WAV_CodecOpenStream(const char *filename);
@@ -93,5 +97,13 @@ snd_stream_t *S_OGG_CodecOpenStream(const char *filename);
 void S_OGG_CodecCloseStream(snd_stream_t *stream);
 int S_OGG_CodecReadStream(snd_stream_t *stream, int bytes, void *buffer);
 #endif // USE_OGG_VORBIS
+#endif // FEAT_LEGACY_FORMATS_AUDIO
+
+// Opus codec
+extern snd_codec_t opus_codec;
+void *S_OPUS_CodecLoad(const char *filename, snd_info_t *info);
+snd_stream_t *S_OPUS_CodecOpenStream(const char *filename);
+void S_OPUS_CodecCloseStream(snd_stream_t *stream);
+int S_OPUS_CodecReadStream(snd_stream_t *stream, int bytes, void *buffer);
 
 #endif // !_SND_CODEC_H_

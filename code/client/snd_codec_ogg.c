@@ -22,6 +22,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
+#include "../qcommon/q_feats.h"
+
+#if FEAT_LEGACY_FORMATS_AUDIO
 // OGG support is enabled by this define
 #ifdef USE_OGG_VORBIS
 
@@ -473,3 +476,4 @@ void *S_OGG_CodecLoad(const char *filename, snd_info_t *info)
 }
 
 #endif // USE_OGG_VORBIS
+#endif // FEAT_LEGACY_FORMATS_AUDIO

@@ -2219,5 +2219,9 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.VertexLighting = RE_VertexLighting;
 	re.SyncRender = RE_SyncRender;
 
+#if defined(FEAT_IQM)
+	re.GetIQMAnimations = R_GetIQMAnimations;
+#endif // FEAT_IQM
+
 	return &re;
 }

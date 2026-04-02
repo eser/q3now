@@ -351,6 +351,8 @@ typedef enum {
 	ERR_NEED_CD					// pop up the need-cd dialog
 } errorParm_t;
 
+// base model rendering values
+#define	DEFAULT_MODEL			"visor"
 
 // font rendering values used by ui and cgame
 
@@ -1511,11 +1513,5 @@ typedef enum _flag_status {
 
 #define LERP( a, b, w ) ( ( a ) * ( 1.0f - ( w ) ) + ( b ) * ( w ) )
 #define LUMA( red, green, blue ) ( 0.2126f * ( red ) + 0.7152f * ( green ) + 0.0722f * ( blue ) )
-
-// Quake3e engine extension syscall index — must be defined here (not in bg_public.h)
-// because q3_ui/ui_local.h includes ui_public.h before bg_public.h.
-#ifndef COM_TRAP_GETVALUE
-#define COM_TRAP_GETVALUE 700
-#endif
 
 #endif	// __Q_SHARED_H

@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../game/bg_promode.h" // CPM
 
 #if FEAT_TA_UI
-#include "../ui/ui_shared.h"
+#include "ui_shared.h"
 // display context for new ui stuff
 displayContextDef_t cgDC;
 #endif
@@ -2072,12 +2072,8 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_InitMarkPolys();
 
-	// SuperHUD initialization
+	// Modern font initialization
 	CG_LoadFonts();
-	CG_AllocSetPermanent(1);
-	CG_SHUDParserInit();
-	CG_AllocSetPermanent(0);
-	CG_SHUDLoadConfig();
 
 #if FEAT_LENS_FLARES
 	CG_InitLensFlares();

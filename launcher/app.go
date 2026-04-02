@@ -147,6 +147,27 @@ func (a *App) BrowseForDirectory() (string, error) {
 	})
 }
 
+// ── EULA ────────────────────────────────────────────────────────────────────
+
+// GetEulaText returns the id Software demo EULA that must be accepted before
+// downloading game assets.
+func (a *App) GetEulaText() string {
+	return eulaText
+}
+
+// HasAcceptedEula returns true if the user has previously accepted the EULA.
+func (a *App) HasAcceptedEula() bool {
+	s := settings.Read(a.paths.SettingsPath())
+	return s.EulaAcceptedAt != ""
+}
+
+// AcceptEula records the user's acceptance of the EULA with a timestamp.
+func (a *App) AcceptEula() error {
+	s := settings.Read(a.paths.SettingsPath())
+	s.EulaAcceptedAt = time.Now().UTC().Format(time.RFC3339)
+	return settings.Write(a.paths.SettingsPath(), s)
+}
+
 // ── Free Resource Downloads ─────────────────────────────────────────────────
 
 // CheckDownloadStatus returns the availability of downloaded demo pk3 files.
@@ -328,7 +349,7 @@ type paxJob struct {
 	name      string                 // e.g. "pax01"
 	output    string                 // e.g. "pax01.sw3z"
 	sources   []pipeline.SourceGroup // where to read pk3 files from
-	allowlist map[string]struct{}    // which files to include
+	entries   map[string]pipeline.ProcessorEntry // which files to include
 }
 
 // runImport executes multi-pass import pipeline in a background goroutine:
@@ -378,13 +399,13 @@ func (a *App) runImport(q3Path string) {
 			name:      "pax01",
 			output:    "pax01.sw3z",
 			sources:   []pipeline.SourceGroup{{Origin: "demo_q3", Dir: demoQ3Dir}},
-			allowlist: pipeline.Q3CopyPax01Allowlist,
+			entries:   pipeline.Q3CopyPax01Entries,
 		},
 		{
 			name:      "pax03",
 			output:    "pax03.sw3z",
 			sources:   []pipeline.SourceGroup{{Origin: "demo_ta", Dir: demoTADir}},
-			allowlist: pipeline.Q3CopyPax03Allowlist,
+			entries:   pipeline.Q3CopyPax03Entries,
 		},
 	}
 
@@ -396,7 +417,7 @@ func (a *App) runImport(q3Path string) {
 				name:      "pax02",
 				output:    "pax02.sw3z",
 				sources:   []pipeline.SourceGroup{{Origin: "q3_base", Dir: baseQ3Dir}},
-				allowlist: pipeline.Q3CopyPax02Allowlist,
+				entries:   pipeline.Q3CopyPax02Entries,
 			})
 		}
 
@@ -406,7 +427,7 @@ func (a *App) runImport(q3Path string) {
 				name:      "pax04",
 				output:    "pax04.sw3z",
 				sources:   []pipeline.SourceGroup{{Origin: "q3_ta", Dir: missionpackDir}},
-				allowlist: pipeline.Q3CopyPax04Allowlist,
+				entries:   pipeline.Q3CopyPax04Entries,
 			})
 		}
 	}
@@ -431,7 +452,7 @@ func (a *App) runImport(q3Path string) {
 			fmt.Sprintf("Processing %s (%d/%d)...", job.name, i+1, len(jobs)))
 
 		pip := pipeline.New(a.paths, job.sources,
-			pipeline.WithProcessors(&pipeline.Q3CopyProcessor{Allowlist: job.allowlist}),
+			pipeline.WithProcessors(&pipeline.Q3CopyProcessor{Entries: job.entries}),
 			pipeline.WithOutputName(job.output),
 		)
 

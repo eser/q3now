@@ -432,10 +432,10 @@ static qboolean SNDDMA_InitWASAPI( void )
 	switch ( s_khz->integer ) {
 		case 48: dma.speed = 48000; break;
 		case 44: dma.speed = 44100; break;
+		case 22: dma.speed = 22050; break;
 		case 11: dma.speed = 11025; break;
 		case 8:  dma.speed = 8000;  break;
-		case 22:
-		default: dma.speed = 22050; break;
+		default: dma.speed = 48000; break;
 	};
 
 	initFormat( &desiredFormat, dma.channels, dma.speed, dma.samplebits );
@@ -878,9 +878,9 @@ static qboolean SNDDMA_InitDS( void )
 	switch ( s_khz->integer ) {
 		case 48: dma.speed = 48000; break;
 		case 44: dma.speed = 44100; break;
+		case 22: dma.speed = 22050; break;
 		case 11: dma.speed = 11025; break;
-		case 22:
-		default: dma.speed = 22050; break;
+		default: dma.speed = 48000; break;
 	};
 
 	memset( &format, 0, sizeof( format ) );

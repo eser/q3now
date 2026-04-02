@@ -12,10 +12,11 @@ const maxRecentServers = 10
 
 // Settings holds user preferences persisted in settings.json.
 type Settings struct {
-	PlayerName    string         `json:"playerName"`
-	Renderer      string         `json:"renderer"`
-	CustomArgs    string         `json:"customArgs"`
-	RecentServers []RecentServer `json:"recentServers"`
+	PlayerName     string         `json:"playerName"`
+	Renderer       string         `json:"renderer"`
+	CustomArgs     string         `json:"customArgs"`
+	RecentServers  []RecentServer `json:"recentServers"`
+	EulaAcceptedAt string         `json:"eulaAcceptedAt,omitempty"`
 }
 
 // RecentServer tracks a previously connected server address.

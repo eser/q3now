@@ -17,7 +17,7 @@ Feeders implemented:
 #include "../client.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
-#include "../../ui/menudef.h"
+#include "../../qcommon/menudef.h"
 
 #if FEAT_WIRED_UI
 

@@ -35,7 +35,7 @@ and one exported function: Perform
 */
 
 #include "vm_local.h"
-#include "../game/q_feats.h"
+#include "q_feats.h"
 
 #if FEAT_LEGACY_QVM
 opcode_info_t ops[ OP_MAX ] =
@@ -221,8 +221,7 @@ static struct vm_s vmTable[ VM_COUNT ];
 
 static const char *vmName[ VM_COUNT ] = {
 	"qagame",
-	"cgame",
-	"ui"
+	"cgame"
 };
 
 static void VM_VmInfo_f( void );
@@ -315,7 +314,6 @@ VM_Init
 */
 void VM_Init( void ) {
 #ifndef DEDICATED
-	Cvar_Get( "vm_ui", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
 	Cvar_Get( "vm_cgame", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
 #endif
 	Cvar_Get( "vm_game", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
@@ -1684,26 +1682,6 @@ void VM_ReplaceInstructions( vm_t *vm, instruction_t *buf ) {
 			vm->forceDataMask = qfalse;
 		}
 	}
-
-	if ( vm->index == VM_UI ) {
-		if ( vm->crc32sum == 0xCA84F31D && vm->instructionCount == 78585 && vm->exactDataLength == 542180 ) {
-			if ( memcmp( vm->dataBase + 0x3D2E, "dm_67", 5 ) == 0 ) {
-				memcpy( vm->dataBase + 0x3D2E, "dm_??", 5 );
-			}
-			if ( memcmp( vm->dataBase + 0x3D50, "\"%s.%s\"\n", 8 ) == 0 ) {
-				memcpy( vm->dataBase + 0x3D50, "\"%s\"\n", 6 );
-			}
-		}
-		// fix defrag-1.91.25 demo UI - masked Q_strupr() calls for directories and filenames
-		if ( vm->crc32sum == 0x6E51985F && vm->instructionCount == 125942 && vm->exactDataLength == 1334788 ) {
-			ip = buf + 60150;
-			if ( ip[0].op == OP_LOCAL && ip[0].value == 28 && ip[1].op == OP_LOAD4 && ip[2].op == OP_ARG && ip[3].value == 124325 ) {
-				VM_IgnoreInstructions( ip, 6 );
-				ip = buf + 60438;
-				VM_IgnoreInstructions( ip, 6 );
-			}
-		}
-	}
 }
 #endif
 
@@ -1778,11 +1756,11 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 	libHandle = FS_LoadLibrary( filename );
 
 	if ( !libHandle ) {
-		Com_Printf( "VM_LoadDLL '%s' failed\n", filename );
+		Com_DPrintf( "VM_LoadDLL '%s' failed\n", filename );
 		return NULL;
 	}
 
-	Com_Printf( "VM_LoadDLL '%s' ok\n", filename );
+	Com_DPrintf( "VM_LoadDLL '%s' ok\n", filename );
 
 	dllEntry = /* ( dllEntry_t ) */ Sys_LoadFunction( libHandle, "dllEntry" );
 	*entryPoint = /* ( dllSyscall_t ) */ Sys_LoadFunction( libHandle, "vmMain" );
@@ -1791,9 +1769,9 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 		return NULL;
 	}
 
-	Com_Printf( "VM_LoadDll(%s) found **vmMain** at %p\n", name, *entryPoint );
+	Com_DPrintf( "VM_LoadDll(%s) found **vmMain** at %p\n", name, *entryPoint );
 	dllEntry( systemcalls );
-	Com_Printf( "VM_LoadDll(%s) succeeded!\n", name );
+	Com_DPrintf( "VM_LoadDll(%s) succeeded!\n", name );
 
 	return libHandle;
 }
@@ -2150,8 +2128,6 @@ static vm_t *VM_NameToVM( const char *name )
 		index = VM_GAME;
 	else if ( !Q_stricmp( name, "cgame" ) )
 		index = VM_CGAME;
-	else if ( !Q_stricmp( name, "ui" ) )
-		index = VM_UI;
 	else {
 		Com_Printf( " unknown VM name '%s'\n", name );
 		return NULL;

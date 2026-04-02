@@ -51,7 +51,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
 #include "tr_common.h"
+#if defined(FEAT_IQM)
 #include "iqm.h"
+#endif // FEAT_IQM
 
 
 #ifdef USE_VULKAN
@@ -678,7 +680,9 @@ typedef enum {
 	SF_POLY,
 	SF_MD3,
 	SF_MDR,
+#if defined(FEAT_IQM)
 	SF_IQM,
+#endif // FEAT_IQM
 	SF_FLARE,
 	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
 
@@ -801,6 +805,7 @@ typedef struct {
 	drawVert_t		*verts;
 } srfTriangles_t;
 
+#if defined(FEAT_IQM)
 typedef struct {
 	vec3_t translate;
 	quat_t rotate;
@@ -845,6 +850,30 @@ typedef struct {
 	float		*invBindJoints; // [num_joints * 12]
 	iqmTransform_t	*poses; // [num_frames * num_poses]
 	float		*bounds;
+
+	// pre-allocated skinning matrices (sized to num_influences)
+	int		num_influences;
+	float		*influenceVtxMat; // [num_influences * 12]
+	float		*influenceNrmMat; // [num_influences * 9]
+
+	// embedded animation data
+	int		num_anims;
+	char		*animNames;		// packed null-terminated strings
+	int		*animFirstFrames;	// [num_anims]
+	int		*animNumFrames;		// [num_anims]
+	float		*animFramerates;	// [num_anims]
+	int		*animFlags;		// [num_anims]
+
+#ifdef USE_VULKAN
+	// GPU skinning Vulkan resources (created at load time)
+	VkBuffer	vk_vertex_buffer;
+	VkDeviceMemory	vk_vertex_memory;
+	VkBuffer	vk_index_buffer;
+	VkDeviceMemory	vk_index_memory;
+	int		vk_total_vertexes;  // total vertex count across all surfaces
+	int		vk_total_indexes;   // total index count (num_triangles * 3)
+	qboolean	vk_gpu_skinning;    // qtrue if GPU skinning VBOs are ready
+#endif
 } iqmData_t;
 
 // inter-quake-model surface
@@ -857,6 +886,7 @@ typedef struct srfIQModel_s {
 	int		first_triangle, num_triangles;
 	int		first_influence, num_influences;
 } srfIQModel_t;
+#endif // FEAT_IQM
 
 
 extern	void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES])(void *);
@@ -966,7 +996,9 @@ typedef enum {
 	MOD_BRUSH,
 	MOD_MESH,
 	MOD_MDR,
-	MOD_IQM
+#if defined(FEAT_IQM)
+	MOD_IQM,
+#endif // FEAT_IQM
 } modtype_t;
 
 typedef struct model_s {
@@ -989,6 +1021,9 @@ model_t		*R_GetModelByHandle( qhandle_t hModel );
 int			R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame, 
 					 float frac, const char *tagName );
 void		R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs );
+#if defined(FEAT_IQM)
+int		R_GetIQMAnimations( qhandle_t handle, iqmAnimInfo_t *anims, int maxAnims );
+#endif // FEAT_IQM
 
 void		R_Modellist_f (void);
 
@@ -1831,12 +1866,14 @@ ANIMATED MODELS
 
 void R_MDRAddAnimSurfaces( trRefEntity_t *ent );
 void RB_MDRSurfaceAnim( mdrSurface_t *surface );
+#if defined(FEAT_IQM)
 qboolean R_LoadIQM (model_t *mod, void *buffer, int filesize, const char *name );
 void R_AddIQMSurfaces( trRefEntity_t *ent );
 void RB_IQMSurfaceAnim( const surfaceType_t *surface );
 int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
                   int startFrame, int endFrame,
                   float frac, const char *tagName );
+#endif // FEAT_IQM
 
 /*
 =============================================================

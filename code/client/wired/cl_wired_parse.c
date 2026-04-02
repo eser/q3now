@@ -19,7 +19,7 @@ File format reference:
 #if FEAT_WIRED_UI
 
 #include "../../botlib/botlib.h"
-#include "../../ui/menudef.h"
+#include "../../qcommon/menudef.h"
 
 // wiredRect_t defined in cl_wired_ui.h
 

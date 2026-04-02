@@ -6,7 +6,7 @@ ai_aware.h — entity/sound awareness for bot AI improvements
 #ifndef AI_AWARE_H
 #define AI_AWARE_H
 
-#include "q_feats.h"
+#include "../qcommon/q_feats.h"
 
 #if FEAT_BOT_IMPROVEMENTS
 

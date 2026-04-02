@@ -1,0 +1,19 @@
+{
+  "spec": "fix-debug-log-levels-and-rchat-gender-deprecation",
+  "status": "completed",
+  "tasks": [
+    {
+      "id": "task-1",
+      "title": "Full bot chat modernization",
+      "status": "done"
+    },
+    {
+      "id": "task-2",
+      "title": "(1) Run game without developer 1: verify no Sys_LoadLibrary or VM_LoadDll messages in console. Run with developer 1: verify they appear. (2) Start game with bots: verify rchat.c parse error (expected a string found male) is gone. No documentation changes needed — these are internal fixes.",
+      "status": "done"
+    }
+  ],
+  "decisions": [],
+  "debt": [],
+  "updatedAt": "2026-03-30T20:00:05.063Z"
+}

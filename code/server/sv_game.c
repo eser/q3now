@@ -22,7 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // sv_game.c -- interface to the game dll
 
 #include "server.h"
-#include "../game/q_feats.h"
+#include "../qcommon/q_feats.h"
 
 #if FEAT_QUIC_TRANSPORT
 #include "../webtransport/wt_public.h"

@@ -30,7 +30,7 @@ GNU General Public License for more details.
  *   vm_t* retrieved via wasm_runtime_get_user_data(exec_env)
  */
 
-#include "../game/q_feats.h"
+#include "q_feats.h"
 
 #if FEAT_WASM
 

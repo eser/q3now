@@ -16,7 +16,7 @@
 
 #include "q_shared.h"
 #include "qcommon.h"
-#include "../game/q_feats.h"
+#include "q_feats.h"
 #include "files_pack.h"
 
 #include <lz4.h>

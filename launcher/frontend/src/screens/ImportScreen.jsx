@@ -4,6 +4,7 @@ import {
   CheckDownloadStatus,
   DetectQ3Installations,
   DownloadFreeResources,
+  HasAcceptedEula,
   StartImport,
 } from "../../wailsjs/go/main/App";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
@@ -130,7 +131,7 @@ const styles = {
   },
 };
 
-export default function ImportScreen({ onImportComplete, onBack }) {
+export default function ImportScreen({ onImportComplete, onBack, onEula, importError }) {
   const [q3aInstallations, setQ3aInstallations] = useState([]);
   const [q3aPath, setQ3aPath] = useState("");
   const [loading, setLoading] = useState(true);
@@ -179,8 +180,13 @@ export default function ImportScreen({ onImportComplete, onBack }) {
 
   const handleDownload = async () => {
     setError(null);
-    setDownloading(true);
     try {
+      const accepted = await HasAcceptedEula();
+      if (!accepted) {
+        onEula();
+        return;
+      }
+      setDownloading(true);
       await DownloadFreeResources();
     } catch (err) {
       setDownloading(false);
@@ -315,7 +321,8 @@ export default function ImportScreen({ onImportComplete, onBack }) {
           </div>
         </div>
 
-        {error && <div style={styles.error}>{error}</div>}
+        {importError && <div className="selectable" style={styles.error}>{importError}</div>}
+        {error && <div className="selectable" style={styles.error}>{error}</div>}
       </div>
 
       <div style={styles.actions}>

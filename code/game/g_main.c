@@ -2178,7 +2178,7 @@ void G_ShuffleTeams( void ) {
 PrintTeam
 ==================
 */
-void PrintTeam(int team, char *message) {
+void PrintTeam(int team, const char *message) {
 	int i;
 
 	for ( i = 0 ; i < level.maxclients ; i++ ) {

@@ -1,6 +1,6 @@
 /*
 ===========================================================================
-cg_moderntext.c -- Modern font system and text rendering for SuperHUD
+cg_moderntext.c -- Modern font system and text rendering
 
 Provides: font loading, text compilation, CG_ModernDrawString,
 CG_ModernDrawStringNew, CG_Hex16GetColor.
@@ -10,7 +10,7 @@ CG_DrawStringExt, CG_GetColorForAmount, proportional font, etc.
 ===========================================================================
 */
 #include "cg_local.h"
-#include "cg_superhud_private.h"
+#include "cg_modern_private.h"
 
 /*
  * ── Hex color parsing ────────────────────────────────────
@@ -684,7 +684,7 @@ int CG_ModernDrawStringLenPix(const char *string, float charWidth, int flags, in
 
 /*
  * ── CG_ModernDrawString ────────────────────────────────────
- * Main SuperHUD text renderer using compiled text commands
+ * Modern text renderer using compiled text commands
  * and the font metric system.
  *
  * Uses q3now's CG_AdjustFrom640 for widescreen coordinate scaling.

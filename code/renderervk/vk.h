@@ -2,7 +2,7 @@
 
 #include "../renderercommon/vulkan/vulkan.h"
 #include "tr_common.h"
-#include "../game/q_feats.h"
+#include "../qcommon/q_feats.h"
 
 #define MAX_SWAPCHAIN_IMAGES 8
 #define MIN_SWAPCHAIN_IMAGES_IMM 3
@@ -338,6 +338,23 @@ void VBO_PrepareQueues( void );
 void VBO_RenderIBOItems( void );
 void VBO_ClearQueue( void );
 
+#if defined(FEAT_IQM)
+// IQM GPU skinning
+void vk_init_iqm_gpu_skinning( void );
+void vk_shutdown_iqm_gpu_skinning( void );
+qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
+	VkBuffer *outIdxBuf, VkDeviceMemory *outIdxMem,
+	const byte *vertData, int vertSize,
+	const byte *idxData, int idxSize );
+void vk_destroy_iqm_vbo( VkBuffer *vertBuf, VkDeviceMemory *vertMem,
+	VkBuffer *idxBuf, VkDeviceMemory *idxMem );
+void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
+	int firstIndex, int numIndexes,
+	const float *boneMats, int numBones,
+	VkDescriptorSet textureDescriptor,
+	const float *mvp );
+#endif
+
 typedef struct vk_tess_s {
 	VkCommandBuffer command_buffer;
 
@@ -461,6 +478,26 @@ typedef struct {
 		VkDeviceMemory	vertex_memory[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet	descriptor[NUM_COMMAND_BUFFERS];	// per-frame descriptor sets
 	} rail;
+
+#if defined(FEAT_IQM)
+	// ── IQM GPU skinning infrastructure ──────────────────────────────
+	//
+	// Self-contained pipeline for skeletal IQM models.
+	// Per-model VBOs (vertex+index) are stored in iqmData_t.
+	// Per-frame bone matrices are uploaded to a host-visible UBO
+	// and bound via a dedicated descriptor set + pipeline layout.
+	//
+	struct {
+		VkDescriptorSetLayout	set_layout_bones;	// bone matrix UBO (set 0)
+		VkPipelineLayout		pipeline_layout;	// push(mvp) + set0(bones) + set1(texture)
+		VkPipeline				pipeline;			// graphics pipeline
+		VkBuffer				bone_buffer[NUM_COMMAND_BUFFERS]; // per-frame bone UBOs
+		VkDeviceMemory			bone_memory[NUM_COMMAND_BUFFERS];
+		byte					*bone_ptr[NUM_COMMAND_BUFFERS];   // mapped pointers
+		VkDescriptorSet			bone_descriptor[NUM_COMMAND_BUFFERS]; // per-frame bone descriptors
+		qboolean				available;			// false if init failed
+	} iqmGpu;
+#endif
 
 	VkDescriptorSet color_descriptor;
 
@@ -680,6 +717,12 @@ typedef struct {
 		VkShaderModule rail_sparks_cs;
 		VkShaderModule rail_helix_vs;
 		VkShaderModule rail_helix_fs;
+
+#if defined(FEAT_IQM)
+		// IQM GPU skinning
+		VkShaderModule iqm_skinning_vs;
+		VkShaderModule iqm_skinning_fs;
+#endif
 	} modules;
 
 	VkPipelineCache pipelineCache;

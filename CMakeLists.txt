@@ -223,8 +223,85 @@ ELSE()
 	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_TRANSPORT=0)
 ENDIF()
 
+# ── libogg (Ogg container format) ─────────────────────────────────
+set(OGG_SRCS code/libogg/src/bitwise.c code/libogg/src/framing.c)
+add_library(ogg STATIC ${OGG_SRCS})
+target_include_directories(ogg PUBLIC code/libogg/include)
+
+# ── libopus (Opus audio codec) ─────────────────────────────────────
+file(GLOB OPUS_CELT_SRCS code/libopus/celt/*.c)
+file(GLOB OPUS_SILK_SRCS code/libopus/silk/*.c)
+file(GLOB OPUS_SILK_FLOAT_SRCS code/libopus/silk/float/*.c)
+set(OPUS_SRC_SRCS
+    code/libopus/src/opus.c
+    code/libopus/src/opus_decoder.c
+    code/libopus/src/opus_encoder.c
+    code/libopus/src/opus_multistream.c
+    code/libopus/src/opus_multistream_decoder.c
+    code/libopus/src/opus_multistream_encoder.c
+    code/libopus/src/opus_projection_decoder.c
+    code/libopus/src/opus_projection_encoder.c
+    code/libopus/src/repacketizer.c
+    code/libopus/src/mapping_matrix.c
+    code/libopus/src/analysis.c
+    code/libopus/src/mlp.c
+    code/libopus/src/mlp_data.c
+    code/libopus/src/extensions.c
+)
+# Exclude encoder-only demo/test files from celt
+list(FILTER OPUS_CELT_SRCS EXCLUDE REGEX "opus_custom_demo\\.c$")
+# Exclude silk/fixed/ entirely (we use FLOATING_POINT)
+# Platform-specific SIMD sources — only compile on matching architecture
+set(OPUS_ARCH_SRCS "")
+IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64|x86|i.86")
+    file(GLOB OPUS_CELT_X86_SRCS code/libopus/celt/x86/*.c)
+    file(GLOB OPUS_SILK_X86_SRCS code/libopus/silk/x86/*.c)
+    file(GLOB OPUS_SILK_FLOAT_X86_SRCS code/libopus/silk/float/x86/*.c)
+    list(APPEND OPUS_ARCH_SRCS ${OPUS_CELT_X86_SRCS} ${OPUS_SILK_X86_SRCS} ${OPUS_SILK_FLOAT_X86_SRCS})
+ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|arm")
+    file(GLOB OPUS_CELT_ARM_SRCS code/libopus/celt/arm/*.c)
+    file(GLOB OPUS_SILK_ARM_SRCS code/libopus/silk/arm/*.c)
+    # Exclude NE10 files (require external NE10 library we don't vendor)
+    list(FILTER OPUS_CELT_ARM_SRCS EXCLUDE REGEX "ne10\\.c$")
+    list(APPEND OPUS_ARCH_SRCS ${OPUS_CELT_ARM_SRCS} ${OPUS_SILK_ARM_SRCS})
+ENDIF()
+
+set(OPUS_ALL_SRCS
+    ${OPUS_CELT_SRCS} ${OPUS_SILK_SRCS} ${OPUS_SILK_FLOAT_SRCS}
+    ${OPUS_ARCH_SRCS} ${OPUS_SRC_SRCS}
+)
+
+add_library(opus STATIC ${OPUS_ALL_SRCS})
+target_include_directories(opus PUBLIC code/libopus/include)
+target_include_directories(opus PRIVATE
+    code/libopus
+    code/libopus/include/opus
+    code/libopus/celt
+    code/libopus/silk
+    code/libopus/silk/float
+    code/libopus/silk/fixed
+    code/libopus/src
+)
+target_compile_definitions(opus PRIVATE OPUS_BUILD HAVE_CONFIG_H)
+
+# ── libopusfile (Opus file reader) ─────────────────────────────────
+set(OPUSFILE_SRCS
+    code/libopusfile/src/info.c
+    code/libopusfile/src/internal.c
+    code/libopusfile/src/opusfile.c
+    code/libopusfile/src/stream.c
+)
+add_library(opusfile STATIC ${OPUSFILE_SRCS})
+target_include_directories(opusfile PUBLIC code/libopusfile/include)
+target_include_directories(opusfile PRIVATE code/libopusfile/src)
+target_link_libraries(opusfile PUBLIC opus ogg)
+# libopusfile needs libogg headers and opus headers (without opus/ prefix)
+target_include_directories(opusfile PUBLIC code/libogg/include)
+target_include_directories(opusfile PRIVATE code/libopus/include/opus)
+
 # client + cURL + Wired UI
 AUX_SOURCE_DIRECTORY(code/client CLIENT_SRCS)
+list(FILTER CLIENT_SRCS EXCLUDE REGEX "cl_ui\\.c$")
 AUX_SOURCE_DIRECTORY(code/client/wired CLIENT_SRCS)
 # bg_misc.c needed by Wired UI HUD elements (BG_FindItemForPowerup, bg_itemlist)
 list(APPEND CLIENT_SRCS code/game/bg_misc.c code/game/bg_weapons.c)
@@ -257,6 +334,14 @@ ELSE()
 	#TARGET_LINK_LIBRARIES(client jpeg)
 	ADD_LIBRARY(client OBJECT ${CLIENT_SRCS} ${JPEG_SRCS})
 ENDIF()
+
+# Opus codec: client needs opusfile + libogg + libopus include paths
+target_include_directories(client PRIVATE
+    code/libopusfile/include
+    code/libogg/include
+    code/libopus/include
+    code/libopus/include/opus
+)
 
 # renderers
 AUX_SOURCE_DIRECTORY(code/renderercommon RENDERER_COMMON_SRCS)
@@ -303,9 +388,9 @@ IF(UNIX)
 		code/unix/linux_signals.c)
 
 	IF(USE_SDL)
-		AUX_SOURCE_DIRECTORY(code/sdl Q3_UI_SRCS)
+		AUX_SOURCE_DIRECTORY(code/sdl WINDOW_SYSTEM_SRCS)
 	ELSE()
-		SET(Q3_UI_SRCS
+		SET(WINDOW_SYSTEM_SRCS
 			code/unix/linux_glimp.c
 			code/unix/linux_qgl.c
 			code/unix/linux_snd.c
@@ -313,7 +398,7 @@ IF(UNIX)
 			code/unix/x11_randr.c
 			code/unix/x11_vidmode.c)
 		IF(USE_VULKAN)
-			list(APPEND Q3_UI_SRCS code/unix/linux_qvk.c)
+			list(APPEND WINDOW_SYSTEM_SRCS code/unix/linux_qvk.c)
 		ENDIF()
 	ENDIF()
 
@@ -345,7 +430,7 @@ ELSEIF(WIN32)
 		code/win32/win_syscon.c
 		code/win32/win_resource.rc)
 
-	SET(Q3_UI_SRCS
+	SET(WINDOW_SYSTEM_SRCS
 		code/win32/win_gamma.c
 		code/win32/win_glimp.c
 		code/win32/win_input.c
@@ -354,7 +439,7 @@ ELSEIF(WIN32)
 		code/win32/win_snd.c
 		code/win32/win_wndproc.c)
 	IF(USE_VULKAN)
-		list(APPEND Q3_UI_SRCS code/win32/win_qvk.c)
+		list(APPEND WINDOW_SYSTEM_SRCS code/win32/win_qvk.c)
 	ENDIF()
 ENDIF(UNIX)
 
@@ -362,32 +447,32 @@ ENDIF(UNIX)
 # developer diagnostics compile in (guarded by #ifdef _DEBUG in code).
 ADD_COMPILE_DEFINITIONS($<$<CONFIG:Debug>:_DEBUG>)
 
-ADD_LIBRARY(q3ui OBJECT ${Q3_UI_SRCS})
+ADD_LIBRARY(windowSystem OBJECT ${WINDOW_SYSTEM_SRCS})
 
 IF(NOT MSVC)
 	IF(USE_SDL)
 		find_package(SDL3 REQUIRED)
-		TARGET_LINK_LIBRARIES(q3ui SDL3::SDL3)
+		TARGET_LINK_LIBRARIES(windowSystem SDL3::SDL3)
 	ELSEIF(UNIX)
 		find_package (X11 REQUIRED)
-		TARGET_LINK_LIBRARIES(q3ui ${X11_LIBRARIES})
+		TARGET_LINK_LIBRARIES(windowSystem ${X11_LIBRARIES})
 	ENDIF()
 ENDIF()
 
 IF(USE_OPENGL)
-	TARGET_COMPILE_DEFINITIONS(q3ui PRIVATE USE_OPENGL_API)
+	TARGET_COMPILE_DEFINITIONS(windowSystem PRIVATE USE_OPENGL_API)
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE USE_OPENGL_API)
 ENDIF()
 
 IF(USE_VULKAN)
-	TARGET_COMPILE_DEFINITIONS(q3ui PRIVATE USE_VULKAN_API)
+	TARGET_COMPILE_DEFINITIONS(windowSystem PRIVATE USE_VULKAN_API)
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE USE_VULKAN_API)
 ENDIF()
 
 # client executable
 
 ADD_EXECUTABLE(${CNAME}${BINEXT} ${EXE_TYPE} ${Q3_SRCS})
-TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} qcommon botlib client q3ui)
+TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} qcommon botlib client windowSystem opusfile)
 #TARGET_LINK_OPTIONS(${CNAME} PRIVATE -fno-pie) # v3.13+
 
 IF(NOT USE_RENDERER_DLOPEN)
@@ -451,7 +536,6 @@ IF(BUILD_GAME_LIBRARIES OR BUILD_GAME_QVMS)
 	SET(BASEGAME "baseq3")
 	SET(CGAME_MODULE "cgame")
 	SET(GAME_MODULE "qagame")
-	SET(UI_MODULE "ui")
 	IF(WIN32)
 		SET(COMMON_LIBRARIES)
 	ELSE()

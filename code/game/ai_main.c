@@ -426,7 +426,8 @@ void BotSetInfoConfigString(bot_state_t *bs) {
 	char goalname[MAX_MESSAGE_SIZE];
 	char netname[MAX_MESSAGE_SIZE];
 	char action[MAX_MESSAGE_SIZE];
-	char *leader, carrying[32], *cs;
+	char *leader, carrying[32];
+	const char *cs;
 	bot_goal_t goal;
 	//
 	ClientName(bs->client, netname, sizeof(netname));
@@ -1170,11 +1171,77 @@ void BotReadSessionData(bot_state_t *bs) {
 
 /*
 ==============
+BotDetermineGender
+
+Read the model's animation.cfg to determine gender.
+Returns CHAT_GENDERMALE, CHAT_GENDERFEMALE, or CHAT_GENDERLESS.
+==============
+*/
+static int BotDetermineGender( int client ) {
+	char userinfo[MAX_INFO_STRING];
+	char model[MAX_QPATH];
+	char filename[MAX_QPATH];
+	char buf[2048];
+	fileHandle_t f;
+	int len;
+	const char *p;
+	const char *modelName;
+
+	trap_GetUserinfo( client, userinfo, sizeof( userinfo ) );
+	Q_strncpyz( model, Info_ValueForKey( userinfo, "model" ), sizeof( model ) );
+
+	// strip skin suffix (e.g. "sarge/default" -> "sarge")
+	modelName = model;
+	p = strchr( model, '/' );
+	if ( p ) {
+		model[ p - model ] = '\0';
+	}
+
+	Com_sprintf( filename, sizeof( filename ), "models/players/%s/animation.cfg", modelName );
+	len = trap_FS_FOpenFile( filename, &f, FS_READ );
+	if ( !f ) {
+		return CHAT_GENDERLESS;
+	}
+	if ( len >= (int)sizeof( buf ) - 1 ) {
+		len = sizeof( buf ) - 1;
+	}
+	trap_FS_Read( buf, len, f );
+	buf[ len ] = '\0';
+	trap_FS_FCloseFile( f );
+
+	// look for "sex" line
+	p = strstr( buf, "\nsex " );
+	if ( !p ) {
+		// check if it starts at beginning of file
+		if ( Q_strncmp( buf, "sex ", 4 ) == 0 ) {
+			p = buf - 1; // will be incremented below
+		} else {
+			return CHAT_GENDERLESS;
+		}
+	}
+	p += 5; // skip "\nsex "
+
+	// skip whitespace
+	while ( *p == ' ' || *p == '\t' ) {
+		p++;
+	}
+
+	if ( *p == 'f' || *p == 'F' ) {
+		return CHAT_GENDERFEMALE;
+	} else if ( *p == 'm' || *p == 'M' ) {
+		return CHAT_GENDERMALE;
+	}
+
+	return CHAT_GENDERLESS;
+}
+
+/*
+==============
 BotAISetupClient
 ==============
 */
 int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean restart) {
-	char filename[144], name[144], gender[144];
+	char filename[144], name[144];
 	bot_state_t *bs;
 	int errnum;
 
@@ -1234,12 +1301,8 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 		trap_BotFreeWeaponState(bs->ws);
 		return qfalse;
 	}
-	//get the gender characteristic
-	trap_Characteristic_String(bs->character, CHARACTERISTIC_GENDER, gender, sizeof(gender));
-	//set the chat gender
-	if (*gender == 'f' || *gender == 'F') trap_BotSetChatGender(bs->cs, CHAT_GENDERFEMALE);
-	else if (*gender == 'm' || *gender == 'M') trap_BotSetChatGender(bs->cs, CHAT_GENDERMALE);
-	else trap_BotSetChatGender(bs->cs, CHAT_GENDERLESS);
+	//set the gender for reply chat gender-specific keys
+	trap_BotSetChatGender(bs->cs, BotDetermineGender(client));
 
 	bs->inuse = qtrue;
 	bs->client = client;
@@ -1708,4 +1771,3 @@ int BotAIShutdown( int restart ) {
 	}
 	return qtrue;
 }
-

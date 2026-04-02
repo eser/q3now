@@ -22,7 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // cg_scoreboard -- draw the scoreboard on top of the game screen
 #include "cg_local.h"
-#include "cg_superhud_private.h"
+#include "cg_modern_private.h"
 
 vec4_t scoreboard_rtColor = {1, 0, 0, 1};
 vec4_t scoreboard_btColor = {0, 0, 1, 1};

@@ -327,7 +327,6 @@ endif
 	mkdir -p "$(Q3BASEDIR)"
 	cp "$(_BDIR)/$(_CFG)/baseq3/cgame$(_GAME_MODULE_EXT)"  "$(Q3BASEDIR)/"
 	cp "$(_BDIR)/$(_CFG)/baseq3/qagame$(_GAME_MODULE_EXT)" "$(Q3BASEDIR)/"
-	cp "$(_BDIR)/$(_CFG)/baseq3/ui$(_GAME_MODULE_EXT)"     "$(Q3BASEDIR)/"
 
 # ── copy-build ───────────────────────────────────────────────────────────────
 # Build Release engine, copy engine binary + game dylibs into .app at Q3DIR.
@@ -562,9 +561,9 @@ endif
 
 # VM mode: 0=native dylibs (default), 1=VM modules (sv_pure 1)
 ifeq ($(VM),1)
-_RUN_VM_ARGS := +set sv_pure 1 +set vm_game 2 +set vm_cgame 2 +set vm_ui 2
+_RUN_VM_ARGS := +set sv_pure 1 +set vm_game 2 +set vm_cgame 2
 else
-_RUN_VM_ARGS := +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0
+_RUN_VM_ARGS := +set sv_pure 0 +set vm_game 0 +set vm_cgame 0
 endif
 
 # Compose command-line arguments
@@ -645,10 +644,8 @@ check: create-packs
 	@echo "==> Verifying build..."
 	@ls $(MODULE_DIR_RELEASE)/vm/cgame.wasm  > /dev/null 2>&1 && echo "  cgame VM:    OK" || echo "  cgame VM:    MISSING (wasi-sdk not found?)"
 	@ls $(MODULE_DIR_RELEASE)/vm/qagame.wasm > /dev/null 2>&1 && echo "  qagame VM:   OK" || echo "  qagame VM:   MISSING (wasi-sdk not found?)"
-	@ls $(MODULE_DIR_RELEASE)/vm/ui.wasm     > /dev/null 2>&1 && echo "  ui VM:       OK" || echo "  ui VM:       MISSING (wasi-sdk not found?)"
 	@ls $(MODULE_DIR_RELEASE)/cgame$(GAME_ARCH).*    > /dev/null 2>&1 && echo "  cgame native: OK" || echo "  cgame native: MISSING"
 	@ls $(MODULE_DIR_RELEASE)/qagame$(GAME_ARCH).*  > /dev/null 2>&1 && echo "  qagame native: OK" || echo "  qagame native: MISSING"
-	@ls $(MODULE_DIR_RELEASE)/ui$(GAME_ARCH).*      > /dev/null 2>&1 && echo "  ui native:    OK" || echo "  ui native:    MISSING"
 	@test -f $(PAK_OUT) && echo "  mod pack:     OK ($(PAK_EXT))"
 ifeq ($(UNAME_S),Darwin)
 	@codesign --verify "$(Q3DIR)" 2>/dev/null && echo "  codesign:    OK" || echo "  codesign:    MISSING (run make bundle-codesign)"
@@ -673,7 +670,7 @@ test-features: copy-all
 ifeq ($(UNAME_S),Darwin)
 	@echo "==> Testing all features enabled (30s)..."
 	@timeout 35 "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" \
-	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 \
+	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
 	  +set g_fastWeaponSwitch 2 \
 	  +set g_spawnProtect 2 \
 	  +set cg_scorePlums 2 \
@@ -724,8 +721,6 @@ diff-api:
 	@git diff $(UPSTREAM_REF) -- code/game/g_public.h
 	@echo "--- cg_public.h ---"
 	@git diff $(UPSTREAM_REF) -- code/cgame/cg_public.h
-	@echo "--- ui_public.h ---"
-	@git diff $(UPSTREAM_REF) -- code/ui/ui_public.h
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HELP

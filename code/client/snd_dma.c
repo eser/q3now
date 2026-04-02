@@ -1291,8 +1291,8 @@ static void S_OpenBackgroundStream( const char *filename ) {
 		return;
 	}
 
-	if( s_backgroundStream->info.channels != 2 || s_backgroundStream->info.rate != 22050 ) {
-		Com_Printf(S_COLOR_YELLOW "WARNING: music file %s is not 22k stereo\n", filename );
+	if( s_backgroundStream->info.channels != 2 || s_backgroundStream->info.rate != 48000 ) {
+		Com_DPrintf(S_COLOR_YELLOW "WARNING: music file %s is not 48kHz stereo\n", filename );
 	}
 }
 
@@ -1450,7 +1450,9 @@ static void S_Base_Shutdown( void ) {
 
 	SNDDMA_Shutdown();
 
-	// release sound buffers only when switching to dedicated 
+	S_OpusDecoderShutdown();
+
+	// release sound buffers only when switching to dedicated
 	// to avoid redundant reallocation at client restart
 	if ( com_dedicated->integer )
 		SND_shutdown();
@@ -1481,9 +1483,9 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 		return qfalse;
 	}
 
-	s_khz = Cvar_Get( "s_khz", "22", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	s_khz = Cvar_Get( "s_khz", "48", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	Cvar_CheckRange( s_khz, "0", "48", CV_INTEGER );
-	Cvar_SetDescription( s_khz, "Specifies the sound sampling rate, (8, 11, 22, 44, 48) in kHz. Default value is 22." );
+	Cvar_SetDescription( s_khz, "Specifies the sound sampling rate, (8, 11, 22, 44, 48) in kHz. Default value is 48." );
 
 	switch( s_khz->integer ) {
 		case 48:
@@ -1532,6 +1534,8 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 		s_paintedtime = 0;
 
 		S_Base_StopAllSounds();
+
+		S_OpusDecoderInit();
 
 		// setup (likely) or allocate (unlikely) buffer for muted painting
 		if ( dma.samples * dma.samplebits/8 <= sizeof( buffer2 ) ) {

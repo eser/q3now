@@ -26,7 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // for the voice chats
 #if FEAT_TA_UI
-#include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure
+#include "../qcommon/menudef.h"
 #endif
 //==========================================================================
 
@@ -39,7 +39,7 @@ Also called by scoreboard drawing
 */
 const char	*CG_PlaceString( int rank ) {
 	static char	str[64];
-	char	*s, *t;
+	const char	*s, *t;
 
 	if ( rank & RANK_TIED_FLAG ) {
 		rank &= ~RANK_TIED_FLAG;
@@ -127,7 +127,6 @@ static void CG_Obituary( entityState_t *ent ) {
 	int			target, attacker;
 	char		*message;
 	char		*message2;
-	gender_t	gender;
 	clientInfo_t	*ci;
 
 	target = ent->otherEntityNum;
@@ -178,7 +177,6 @@ static void CG_Obituary( entityState_t *ent ) {
 	ci = &cgs.clientinfo[target];
 
 	if (attacker == target) {
-		gender = ci->gender;
 		switch (mod) {
 #if FEAT_TA_UI
 		case MOD_KAMIKAZE:
@@ -186,45 +184,24 @@ static void CG_Obituary( entityState_t *ent ) {
 			break;
 #endif
 		case MOD_GRENADE_SPLASH:
-			if ( gender == GENDER_FEMALE )
-				message = "tripped on her own grenade";
-			else if ( gender == GENDER_NEUTER )
-				message = "tripped on its own grenade";
-			else
-				message = "tripped on his own grenade";
+			message = "tripped on their own grenade";
 			break;
 		case MOD_ROCKET_SPLASH:
-			if ( gender == GENDER_FEMALE )
-				message = "blew herself up";
-			else if ( gender == GENDER_NEUTER )
-				message = "blew itself up";
-			else
-				message = "blew himself up";
+			message = "blew themself up";
 			break;
 // eser - lightning discharge
         case MOD_LIGHTNING_DISCHARGE:
-            if (gender == GENDER_FEMALE)
-                message = "discharged herself";
-            else if (gender == GENDER_NEUTER)
-                message = "discharged itself";
-            else
-                message = "discharged himself";
+			message = "discharged themself";
             break;
 // eser - lightning discharge
         default:
-			if ( gender == GENDER_FEMALE )
-				message = "killed herself";
-			else if ( gender == GENDER_NEUTER )
-				message = "killed itself";
-			else
-				message = "killed himself";
+			message = "killed themself";
 			break;
 		}
 	}
 
 	if (message) {
 		CG_Printf( "%s %s.\n", CG_ClientNameByNum( target ), message);
-		CG_SHUDEventObituaries( attacker, target, mod, qfalse );
 #if FEAT_WIRED_UI
 		trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
 			va( "%d|%d|%d|%d", attacker, target, mod, 0 ) );
@@ -234,7 +211,7 @@ static void CG_Obituary( entityState_t *ent ) {
 
 	// check for kill messages from the current clientNum
 	if ( attacker == cg.snap->ps.clientNum ) {
-		char	*s;
+		const char	*s;
 
 		if ( cgs.gametype < GT_TEAM ) {
 			s = va("You fragged %s\n%s place with %i", CG_ClientNameByNum( target ),
@@ -246,8 +223,6 @@ static void CG_Obituary( entityState_t *ent ) {
 
         if (!cg_cameraOrbit.integer) {
 			// CG_CenterPrint( s, SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
-			/* Send only "You fragged X" to SuperHUD (rank is shown by RankMessage) */
-			CG_SHUDEventFrag( va("You fragged %s", CG_ClientNameByNum( target )) );
 		}
 	}
 
@@ -322,7 +297,6 @@ static void CG_Obituary( entityState_t *ent ) {
 		if (message) {
 			CG_Printf( "%s %s %s%s\n",
 				CG_ClientNameByNum( target ), message, CG_ClientNameByNum( attacker ), message2);
-			CG_SHUDEventObituaries( attacker, target, mod, qfalse );
 #if FEAT_WIRED_UI
 			trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
 				va( "%d|%d|%d|%d", attacker, target, mod, 0 ) );
@@ -333,7 +307,6 @@ static void CG_Obituary( entityState_t *ent ) {
 
 	// we don't know what it was
 	CG_Printf( "%s died.\n", CG_ClientNameByNum( target ) );
-	CG_SHUDEventObituaries( ENTITYNUM_WORLD, target, mod, qfalse );
 #if FEAT_WIRED_UI
 	trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
 		va( "%d|%d|%d|%d", ENTITYNUM_WORLD, target, mod, 0 ) );

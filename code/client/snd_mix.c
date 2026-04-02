@@ -542,7 +542,9 @@ static void S_PaintChannelFromWavelet( channel_t *ch, sfx_t *sc, int count, int 
 	}
 
 	if (i!=sfxScratchIndex || sfxScratchPointer != sc) {
+#if FEAT_LEGACY_FORMATS_AUDIO
 		S_AdpcmGetSamples( chunk, sfxScratchBuffer );
+#endif
 		sfxScratchIndex = i;
 		sfxScratchPointer = sc;
 	}
@@ -564,6 +566,7 @@ static void S_PaintChannelFromWavelet( channel_t *ch, sfx_t *sc, int count, int 
 }
 
 
+#if FEAT_LEGACY_FORMATS_AUDIO
 static void S_PaintChannelFromADPCM( channel_t *ch, sfx_t *sc, int count, int sampleOffset, int bufferOffset ) {
 	int						data;
 	int						leftvol, rightvol;
@@ -608,6 +611,52 @@ static void S_PaintChannelFromADPCM( channel_t *ch, sfx_t *sc, int count, int sa
 			sampleOffset = 0;
 			sfxScratchIndex++;
 		}
+	}
+}
+#endif // FEAT_LEGACY_FORMATS_AUDIO
+
+
+static void S_PaintChannelFromOpus( channel_t *ch, sfx_t *sc, int count, int sampleOffset, int bufferOffset ) {
+	int						data;
+	int						leftvol, rightvol;
+	int						i;
+	portable_samplepair_t	*samp;
+	short					opusBuf[OPUS_INMEM_FRAME_SAMPLES];
+	int						decoded;
+
+	leftvol = ch->leftvol*snd_vol;
+	rightvol = ch->rightvol*snd_vol;
+
+	samp = &paintbuffer[ bufferOffset ];
+
+	if (ch->doppler) {
+		sampleOffset = sampleOffset*ch->oldDopplerScale;
+	}
+
+	/*
+	 * Decode in frame-sized batches.  S_OpusGetSamples() handles
+	 * frame navigation and caching internally.
+	 */
+	i = 0;
+	while ( i < count ) {
+		int batch = count - i;
+		int j;
+		if ( batch > OPUS_INMEM_FRAME_SAMPLES ) {
+			batch = OPUS_INMEM_FRAME_SAMPLES;
+		}
+
+		decoded = S_OpusGetSamples( sc, sampleOffset + i, opusBuf, batch );
+		if ( decoded <= 0 ) {
+			break; // no more data
+		}
+
+		for ( j = 0; j < decoded; j++ ) {
+			data = opusBuf[j];
+			samp[i + j].left  += (data * leftvol) >> 8;
+			samp[i + j].right += (data * rightvol) >> 8;
+		}
+
+		i += decoded;
 	}
 }
 
@@ -743,8 +792,13 @@ void S_PaintChannels( int endtime ) {
 			}
 
 			if ( count > 0 ) {
+#if FEAT_LEGACY_FORMATS_AUDIO
 				if( sc->soundCompressionMethod == 1) {
 					S_PaintChannelFromADPCM		(ch, sc, count, sampleOffset, ltime - s_paintedtime);
+				} else
+#endif
+				if( sc->soundCompressionMethod == 4) {
+					S_PaintChannelFromOpus		(ch, sc, count, sampleOffset, ltime - s_paintedtime);
 				} else if( sc->soundCompressionMethod == 2) {
 					S_PaintChannelFromWavelet	(ch, sc, count, sampleOffset, ltime - s_paintedtime);
 				} else if( sc->soundCompressionMethod == 3) {
@@ -780,8 +834,13 @@ void S_PaintChannels( int endtime ) {
 				}
 
 				if ( count > 0 ) {
+#if FEAT_LEGACY_FORMATS_AUDIO
 					if( sc->soundCompressionMethod == 1) {
 						S_PaintChannelFromADPCM		(ch, sc, count, sampleOffset, ltime - s_paintedtime);
+					} else
+#endif
+					if( sc->soundCompressionMethod == 4) {
+						S_PaintChannelFromOpus		(ch, sc, count, sampleOffset, ltime - s_paintedtime);
 					} else if( sc->soundCompressionMethod == 2) {
 						S_PaintChannelFromWavelet	(ch, sc, count, sampleOffset, ltime - s_paintedtime);
 					} else if( sc->soundCompressionMethod == 3) {

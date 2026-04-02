@@ -441,8 +441,8 @@ static qboolean setup_ALSA( smode_t mode )
 		case 44: speed = 44100; break;
 		case 11: speed = 11025; break;
 		case  8: speed =  8000; break;
-		case 22:
-		default: speed = 22050; break;
+		case 22: speed = 22050; break;
+		default: speed = 48000; break;
 	};
 
 	rrate = speed;
@@ -1120,7 +1120,7 @@ static int map_size;
 static cvar_t *snddevice;
 
 /* Some devices may work only with 48000 */
-static int tryrates[] = { 22050, 11025, 44100, 48000, 8000 };
+static int tryrates[] = { 48000, 44100, 22050, 11025, 8000 };
 
 void Snd_Memset( void* dest, const int val, const size_t count )
 {

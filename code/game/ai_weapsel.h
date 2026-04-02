@@ -6,7 +6,7 @@ ai_weapsel.h — DPS-based weapon selection for bot AI improvements
 #ifndef AI_WEAPSEL_H
 #define AI_WEAPSEL_H
 
-#include "q_feats.h"
+#include "../qcommon/q_feats.h"
 
 #if FEAT_BOT_IMPROVEMENTS
 

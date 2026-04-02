@@ -21,10 +21,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #ifndef __IQM_H__
 #define __IQM_H__
 
+#include "../qcommon/q_feats.h"
+
+#if defined(FEAT_IQM)
+
 #define IQM_MAGIC "INTERQUAKEMODEL"
 #define IQM_VERSION 2
 
 #define	IQM_MAX_JOINTS		128
+#define	IQM_MAX_VERTEXES	65536
+#define	IQM_MAX_INDEXES		(IQM_MAX_VERTEXES * 6)
 
 typedef struct iqmheader
 {
@@ -124,6 +130,8 @@ typedef struct iqmbounds
     float bbmin[3], bbmax[3];
     float xyradius, radius;
 } iqmBounds_t;
+
+#endif // FEAT_IQM
 
 #endif
 

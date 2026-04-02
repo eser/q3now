@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_local.h"
 
+#if defined(FEAT_IQM)
+
 #define	LL(x) x=LittleLong(x)
 
 // 3x4 identity matrix
@@ -181,8 +183,9 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	int			i, j, k;
 	iqmTransform_t		*transform;
 	float			*mat, *matInv;
-	size_t			size, joint_names;
+	size_t			size, joint_names, anim_names;
 	byte			*dataPtr;
+	iqmAnim_t		*anim;
 	iqmData_t		*iqmData;
 	srfIQModel_t		*surface;
 	char			meshName[MAX_QPATH];
@@ -374,8 +377,8 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			vertexArrayFormat[IQM_BLENDWEIGHTS] = -1;
 		}
 
-		// opengl1 renderer doesn't use tangents
-		vertexArrayFormat[IQM_TANGENT] = -1;
+		// renderervk uses tangents for normal mapping when available
+		// (leave vertexArrayFormat[IQM_TANGENT] as-is so tangent data loads)
 
 		// check and swap triangles
 		if( IQM_CheckRange( header, header->ofs_triangles,
@@ -415,16 +418,16 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 				meshName[0] = '\0';
 			}
 
-			// check ioq3 limits
-			if ( mesh->num_vertexes >= SHADER_MAX_VERTEXES ) {
+			// check IQM limits
+			if ( mesh->num_vertexes >= IQM_MAX_VERTEXES ) {
 				ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has more than %i verts on %s (%i).\n",
-					  mod_name, SHADER_MAX_VERTEXES - 1, meshName[0] ? meshName : "a surface",
+					  mod_name, IQM_MAX_VERTEXES - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_vertexes );
 				return qfalse;
 			}
-			if ( mesh->num_triangles*3 >= SHADER_MAX_INDEXES ) {
+			if ( mesh->num_triangles*3 >= IQM_MAX_INDEXES ) {
 				ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has more than %i triangles on %s (%i).\n",
-					  mod_name, ( SHADER_MAX_INDEXES / 3 ) - 1, meshName[0] ? meshName : "a surface",
+					  mod_name, ( IQM_MAX_INDEXES / 3 ) - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_triangles );
 				return qfalse;
 			}
@@ -476,6 +479,33 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 		ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has %d poses and %d joints, must have the same number or 0 poses\n",
 			  mod_name, header->num_poses, header->num_joints );
 		return qfalse;
+	}
+
+	// check and swap animations
+	anim_names = 0;
+	if ( header->num_anims )
+	{
+		if( IQM_CheckRange( header, header->ofs_anims,
+				    header->num_anims, sizeof(iqmAnim_t) ) ) {
+			return qfalse;
+		}
+		anim = (iqmAnim_t *)((byte *)header + header->ofs_anims);
+		for( i = 0; i < header->num_anims; i++, anim++ ) {
+			LL( anim->name );
+			LL( anim->first_frame );
+			LL( anim->num_frames );
+			LL( anim->framerate );
+			LL( anim->flags );
+
+			if( anim->name >= header->num_text ) {
+				return qfalse;
+			}
+			if( anim->first_frame + anim->num_frames > header->num_frames ) {
+				return qfalse;
+			}
+			anim_names += strlen( (char *)header + header->ofs_text +
+						   anim->name ) + 1;
+		}
 	}
 
 	joint_names = 0;
@@ -610,6 +640,17 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	} else if( header->num_meshes && header->num_frames == 0 ) {
 		size += 6 * sizeof(float);							// model bounds
 	}
+	if ( allocateInfluences ) {
+		size += allocateInfluences * 12 * sizeof(float);	// influenceVtxMat
+		size += allocateInfluences * 9 * sizeof(float);		// influenceNrmMat
+	}
+	if( header->num_anims ) {
+		size += anim_names;					// anim names
+		size += header->num_anims * sizeof(int);		// animFirstFrames
+		size += header->num_anims * sizeof(int);		// animNumFrames
+		size += header->num_anims * sizeof(float);		// animFramerates
+		size += header->num_anims * sizeof(int);		// animFlags
+	}
 
 	mod->type = MOD_IQM;
 	iqmData = (iqmData_t *)ri.Hunk_Alloc( size, h_low );
@@ -623,6 +664,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	iqmData->num_joints   = header->num_joints;
 	iqmData->num_poses    = header->num_poses;
 	iqmData->blendWeightsType = vertexArrayFormat[IQM_BLENDWEIGHTS];
+	iqmData->num_influences = allocateInfluences;
 
 	dataPtr = (byte*)iqmData + sizeof(iqmData_t);
 	if( header->num_meshes ) {
@@ -690,6 +732,49 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	} else if( header->num_meshes && header->num_frames == 0 ) {
 		iqmData->bounds = (float*)dataPtr;
 		dataPtr += 6 * sizeof(float);						// model bounds
+	}
+	if ( allocateInfluences ) {
+		iqmData->influenceVtxMat = (float*)dataPtr;
+		dataPtr += allocateInfluences * 12 * sizeof(float);	// influenceVtxMat
+		iqmData->influenceNrmMat = (float*)dataPtr;
+		dataPtr += allocateInfluences * 9 * sizeof(float);	// influenceNrmMat
+	}
+
+	// store embedded animation data
+	if( header->num_anims ) {
+		iqmData->num_anims = header->num_anims;
+
+		iqmData->animNames = (char*)dataPtr;
+		dataPtr += anim_names;
+
+		iqmData->animFirstFrames = (int*)dataPtr;
+		dataPtr += header->num_anims * sizeof(int);
+
+		iqmData->animNumFrames = (int*)dataPtr;
+		dataPtr += header->num_anims * sizeof(int);
+
+		iqmData->animFramerates = (float*)dataPtr;
+		dataPtr += header->num_anims * sizeof(float);
+
+		iqmData->animFlags = (int*)dataPtr;
+		dataPtr += header->num_anims * sizeof(int);
+
+		// copy animation data from header
+		anim = (iqmAnim_t *)((byte *)header + header->ofs_anims);
+		{
+			char *namePtr = iqmData->animNames;
+			for( i = 0; i < header->num_anims; i++, anim++ ) {
+				const char *animName = (char *)header + header->ofs_text + anim->name;
+				size_t nameLen = strlen( animName ) + 1;
+				memcpy( namePtr, animName, nameLen );
+				namePtr += nameLen;
+
+				iqmData->animFirstFrames[i] = anim->first_frame;
+				iqmData->animNumFrames[i] = anim->num_frames;
+				iqmData->animFramerates[i] = anim->framerate;
+				iqmData->animFlags[i] = anim->flags;
+			}
+		}
 	}
 
 	if( header->num_meshes )
@@ -956,6 +1041,117 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			AddPointToBounds( &iqmData->positions[i*3], &iqmData->bounds[0], &iqmData->bounds[3] );
 		}
 	}
+
+#ifdef USE_VULKAN
+	// ── GPU skinning VBO creation ────────────────────────────────────
+	// Build an interleaved vertex buffer for GPU skinning:
+	//   position (vec3, 12B) + normal (vec3, 12B) + texcoord (vec2, 8B)
+	//   + tangent (vec4, 16B) + bone_weights (vec4, 16B) + bone_indices (byte4, 4B)
+	//   = 68 bytes per vertex
+	iqmData->vk_gpu_skinning = qfalse;
+	iqmData->vk_vertex_buffer = VK_NULL_HANDLE;
+	iqmData->vk_vertex_memory = VK_NULL_HANDLE;
+	iqmData->vk_index_buffer  = VK_NULL_HANDLE;
+	iqmData->vk_index_memory  = VK_NULL_HANDLE;
+
+	if ( header->num_meshes && header->num_joints && blendIndexes && vk.iqmGpu.available ) {
+		int numVerts = header->num_vertexes;
+		int numTris = header->num_triangles;
+		int vertStride = 68;
+		int vertBufSize = numVerts * vertStride;
+		int idxBufSize = numTris * 3 * sizeof( uint32_t );
+		byte *vertBuf, *idxBuf;
+		uint32_t *idxPtr;
+
+		vertBuf = ri.Malloc( vertBufSize );
+		idxBuf = ri.Malloc( idxBufSize );
+
+		// build interleaved vertex data
+		for ( i = 0; i < numVerts; i++ ) {
+			byte *dst = vertBuf + i * vertStride;
+			float *fDst = (float *)dst;
+
+			// position (3 floats, 12 bytes at offset 0)
+			fDst[0] = iqmData->positions[i*3+0];
+			fDst[1] = iqmData->positions[i*3+1];
+			fDst[2] = iqmData->positions[i*3+2];
+
+			// normal (3 floats, 12 bytes at offset 12)
+			fDst[3] = iqmData->normals[i*3+0];
+			fDst[4] = iqmData->normals[i*3+1];
+			fDst[5] = iqmData->normals[i*3+2];
+
+			// texcoord (2 floats, 8 bytes at offset 24)
+			fDst[6] = iqmData->texcoords[i*2+0];
+			fDst[7] = iqmData->texcoords[i*2+1];
+
+			// tangent (4 floats, 16 bytes at offset 32)
+			if ( iqmData->tangents ) {
+				fDst[8]  = iqmData->tangents[i*4+0];
+				fDst[9]  = iqmData->tangents[i*4+1];
+				fDst[10] = iqmData->tangents[i*4+2];
+				fDst[11] = iqmData->tangents[i*4+3];
+			} else {
+				// no tangent data — store a default tangent (1,0,0,1)
+				fDst[8]  = 1.0f;
+				fDst[9]  = 0.0f;
+				fDst[10] = 0.0f;
+				fDst[11] = 1.0f;
+			}
+
+			// bone weights (4 floats, 16 bytes at offset 48)
+			if ( vertexArrayFormat[IQM_BLENDWEIGHTS] == IQM_FLOAT ) {
+				fDst[12] = blendWeights.f[i*4+0];
+				fDst[13] = blendWeights.f[i*4+1];
+				fDst[14] = blendWeights.f[i*4+2];
+				fDst[15] = blendWeights.f[i*4+3];
+			} else {
+				fDst[12] = (float)blendWeights.b[i*4+0] / 255.0f;
+				fDst[13] = (float)blendWeights.b[i*4+1] / 255.0f;
+				fDst[14] = (float)blendWeights.b[i*4+2] / 255.0f;
+				fDst[15] = (float)blendWeights.b[i*4+3] / 255.0f;
+			}
+
+			// bone indices (4 bytes at offset 64)
+			// blendIndexes can be IQM_INT (4 bytes each) or IQM_UBYTE (1 byte each)
+			if ( vertexArrayFormat[IQM_BLENDINDEXES] == IQM_UBYTE ) {
+				dst[64] = blendIndexes[i*4+0];
+				dst[65] = blendIndexes[i*4+1];
+				dst[66] = blendIndexes[i*4+2];
+				dst[67] = blendIndexes[i*4+3];
+			} else {
+				// IQM_INT — stored as 4-byte ints, cast to bytes
+				int *intIdx = (int *)blendIndexes;
+				dst[64] = (byte)intIdx[i*4+0];
+				dst[65] = (byte)intIdx[i*4+1];
+				dst[66] = (byte)intIdx[i*4+2];
+				dst[67] = (byte)intIdx[i*4+3];
+			}
+		}
+
+		// build index buffer (absolute vertex indices)
+		idxPtr = (uint32_t *)idxBuf;
+		for ( i = 0; i < numTris * 3; i++ ) {
+			idxPtr[i] = (uint32_t)iqmData->triangles[i];
+		}
+
+		// upload to Vulkan device-local buffers
+		if ( vk_create_iqm_vbo(
+			&iqmData->vk_vertex_buffer, &iqmData->vk_vertex_memory,
+			&iqmData->vk_index_buffer, &iqmData->vk_index_memory,
+			vertBuf, vertBufSize,
+			idxBuf, idxBufSize ) ) {
+			iqmData->vk_total_vertexes = numVerts;
+			iqmData->vk_total_indexes = numTris * 3;
+			iqmData->vk_gpu_skinning = qtrue;
+			ri.Printf( PRINT_DEVELOPER, "IQM GPU skinning VBO: %d verts, %d tris (%s)\n",
+				numVerts, numTris, mod_name );
+		}
+
+		ri.Free( vertBuf );
+		ri.Free( idxBuf );
+	}
+#endif // USE_VULKAN
 
 	return qtrue;
 }
@@ -1255,8 +1451,8 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 	srfIQModel_t	*surf = (srfIQModel_t *)surface;
 	iqmData_t	*data = surf->data;
 	float		poseMats[IQM_MAX_JOINTS * 12];
-	float		influenceVtxMat[SHADER_MAX_VERTEXES * 12];
-	float		influenceNrmMat[SHADER_MAX_VERTEXES * 9];
+	float		*influenceVtxMat = data->influenceVtxMat;
+	float		*influenceNrmMat = data->influenceNrmMat;
 	int		i;
 
 	float		*xyz;
@@ -1275,6 +1471,49 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 	int		*tri;
 	glIndex_t	*ptr;
 	glIndex_t	base;
+
+#ifdef USE_VULKAN
+	// ── GPU skinning path ────────────────────────────────────────────
+	// If GPU skinning is available for this model, compute bone matrices
+	// on CPU, upload to UBO, and issue a GPU draw call. Skip the CPU
+	// tessellation path entirely.
+	if ( data->vk_gpu_skinning && data->num_poses > 0 ) {
+		float boneMatsGpu[IQM_MAX_JOINTS * 12];
+		float mvp[16];
+		VkDescriptorSet texDescriptor;
+
+		// compute interpolated bone matrices
+		ComputePoseMats( data, frame, oldframe, backlerp, boneMatsGpu );
+
+		// compute model-view-projection matrix
+		myGlMultMatrix( backEnd.or.modelMatrix,
+			backEnd.viewParms.projectionMatrix, mvp );
+
+		// get the texture descriptor from the surface shader
+		if ( tess.shader && tess.shader->stages[0] &&
+			tess.shader->stages[0]->bundle[0].image[0] ) {
+			texDescriptor = tess.shader->stages[0]->bundle[0].image[0]->descriptor;
+		} else if ( tr.defaultShader->stages[0] &&
+			tr.defaultShader->stages[0]->bundle[0].image[0] ) {
+			texDescriptor = tr.defaultShader->stages[0]->bundle[0].image[0]->descriptor;
+		} else {
+			texDescriptor = tr.whiteImage->descriptor;
+		}
+
+		// issue GPU draw call for this surface
+		vk_draw_iqm_gpu(
+			data->vk_vertex_buffer,
+			data->vk_index_buffer,
+			surf->first_triangle * 3,  // firstIndex (into the global index buffer)
+			surf->num_triangles * 3,   // numIndexes
+			boneMatsGpu,
+			data->num_poses,
+			texDescriptor,
+			mvp );
+
+		return; // skip CPU tessellation
+	}
+#endif // USE_VULKAN
 
 	RB_CHECKOVERFLOW( surf->num_vertexes, surf->num_triangles * 3 );
 
@@ -1494,3 +1733,5 @@ int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
 
 	return qtrue;
 }
+
+#endif // FEAT_IQM
