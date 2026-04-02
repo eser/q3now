@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_local.h"
 
+#if defined(FEAT_IQM)
+
 #define	LL(x) x=LittleLong(x)
 
 // 3x4 identity matrix
@@ -181,7 +183,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	int			i, j, k;
 	iqmTransform_t		*transform;
 	float			*mat, *matInv;
-	size_t			size, joint_names;
+	size_t			size, joint_names, anim_names;
 	byte			*dataPtr;
 	iqmData_t		*iqmData;
 	srfIQModel_t		*surface;
@@ -193,6 +195,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 		byte *b;
 		float *f;
 	} blendWeights;
+	iqmAnim_t		*anim;
 
 	if( filesize < sizeof(iqmHeader_t) ) {
 		return qfalse;
@@ -415,16 +418,16 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 				meshName[0] = '\0';
 			}
 
-			// check ioq3 limits
-			if ( mesh->num_vertexes >= SHADER_MAX_VERTEXES ) {
+			// check IQM limits
+			if ( mesh->num_vertexes >= IQM_MAX_VERTEXES ) {
 				ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has more than %i verts on %s (%i).\n",
-					  mod_name, SHADER_MAX_VERTEXES - 1, meshName[0] ? meshName : "a surface",
+					  mod_name, IQM_MAX_VERTEXES - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_vertexes );
 				return qfalse;
 			}
-			if ( mesh->num_triangles*3 >= SHADER_MAX_INDEXES ) {
+			if ( mesh->num_triangles*3 >= IQM_MAX_INDEXES ) {
 				ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has more than %i triangles on %s (%i).\n",
-					  mod_name, ( SHADER_MAX_INDEXES / 3 ) - 1, meshName[0] ? meshName : "a surface",
+					  mod_name, ( IQM_MAX_INDEXES / 3 ) - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_triangles );
 				return qfalse;
 			}
@@ -476,6 +479,33 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 		ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has %d poses and %d joints, must have the same number or 0 poses\n",
 			  mod_name, header->num_poses, header->num_joints );
 		return qfalse;
+	}
+
+	// check and swap animations
+	anim_names = 0;
+	if ( header->num_anims )
+	{
+		if( IQM_CheckRange( header, header->ofs_anims,
+				    header->num_anims, sizeof(iqmAnim_t) ) ) {
+			return qfalse;
+		}
+		anim = (iqmAnim_t *)((byte *)header + header->ofs_anims);
+		for( i = 0; i < header->num_anims; i++, anim++ ) {
+			LL( anim->name );
+			LL( anim->first_frame );
+			LL( anim->num_frames );
+			LL( anim->framerate );
+			LL( anim->flags );
+
+			if( anim->name >= header->num_text ) {
+				return qfalse;
+			}
+			if( anim->first_frame + anim->num_frames > header->num_frames ) {
+				return qfalse;
+			}
+			anim_names += strlen( (char *)header + header->ofs_text +
+						   anim->name ) + 1;
+		}
 	}
 
 	joint_names = 0;
@@ -610,6 +640,17 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	} else if( header->num_meshes && header->num_frames == 0 ) {
 		size += 6 * sizeof(float);							// model bounds
 	}
+	if ( allocateInfluences ) {
+		size += allocateInfluences * 12 * sizeof(float);	// influenceVtxMat
+		size += allocateInfluences * 9 * sizeof(float);		// influenceNrmMat
+	}
+	if( header->num_anims ) {
+		size += anim_names;					// anim names
+		size += header->num_anims * sizeof(int);		// animFirstFrames
+		size += header->num_anims * sizeof(int);		// animNumFrames
+		size += header->num_anims * sizeof(float);		// animFramerates
+		size += header->num_anims * sizeof(int);		// animFlags
+	}
 
 	mod->type = MOD_IQM;
 	iqmData = (iqmData_t *)ri.Hunk_Alloc( size, h_low );
@@ -623,6 +664,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	iqmData->num_joints   = header->num_joints;
 	iqmData->num_poses    = header->num_poses;
 	iqmData->blendWeightsType = vertexArrayFormat[IQM_BLENDWEIGHTS];
+	iqmData->num_influences = allocateInfluences;
 
 	dataPtr = (byte*)iqmData + sizeof(iqmData_t);
 	if( header->num_meshes ) {
@@ -690,6 +732,49 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	} else if( header->num_meshes && header->num_frames == 0 ) {
 		iqmData->bounds = (float*)dataPtr;
 		dataPtr += 6 * sizeof(float);						// model bounds
+	}
+	if ( allocateInfluences ) {
+		iqmData->influenceVtxMat = (float*)dataPtr;
+		dataPtr += allocateInfluences * 12 * sizeof(float);	// influenceVtxMat
+		iqmData->influenceNrmMat = (float*)dataPtr;
+		dataPtr += allocateInfluences * 9 * sizeof(float);	// influenceNrmMat
+	}
+
+	// store embedded animation data
+	if( header->num_anims ) {
+		iqmData->num_anims = header->num_anims;
+
+		iqmData->animNames = (char*)dataPtr;
+		dataPtr += anim_names;
+
+		iqmData->animFirstFrames = (int*)dataPtr;
+		dataPtr += header->num_anims * sizeof(int);
+
+		iqmData->animNumFrames = (int*)dataPtr;
+		dataPtr += header->num_anims * sizeof(int);
+
+		iqmData->animFramerates = (float*)dataPtr;
+		dataPtr += header->num_anims * sizeof(float);
+
+		iqmData->animFlags = (int*)dataPtr;
+		dataPtr += header->num_anims * sizeof(int);
+
+		// copy animation data from header
+		anim = (iqmAnim_t *)((byte *)header + header->ofs_anims);
+		{
+			char *namePtr = iqmData->animNames;
+			for( i = 0; i < header->num_anims; i++, anim++ ) {
+				const char *animName = (char *)header + header->ofs_text + anim->name;
+				size_t nameLen = strlen( animName ) + 1;
+				memcpy( namePtr, animName, nameLen );
+				namePtr += nameLen;
+
+				iqmData->animFirstFrames[i] = anim->first_frame;
+				iqmData->animNumFrames[i] = anim->num_frames;
+				iqmData->animFramerates[i] = anim->framerate;
+				iqmData->animFlags[i] = anim->flags;
+			}
+		}
 	}
 
 	if( header->num_meshes )
@@ -1254,8 +1339,8 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 	srfIQModel_t	*surf = (srfIQModel_t *)surface;
 	iqmData_t	*data = surf->data;
 	float		poseMats[IQM_MAX_JOINTS * 12];
-	float		influenceVtxMat[SHADER_MAX_VERTEXES * 12];
-	float		influenceNrmMat[SHADER_MAX_VERTEXES * 9];
+	float		*influenceVtxMat = data->influenceVtxMat;
+	float		*influenceNrmMat = data->influenceNrmMat;
 	int		i;
 
 	float		*xyz;
@@ -1493,3 +1578,5 @@ int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
 
 	return qtrue;
 }
+
+#endif // FEAT_IQM

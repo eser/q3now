@@ -235,8 +235,8 @@ static int SNDDMA_KHzToHz( int khz )
 	switch ( khz )
 	{
 		default:
-		case 22: return 22050;
 		case 48: return 48000;
+		case 22: return 22050;
 		case 44: return 44100;
 		case 11: return 11025;
 		case  8: return  8000;
@@ -312,7 +312,7 @@ qboolean SNDDMA_Init( void )
 	SDL_zero( desired );
 	desired.freq = SNDDMA_KHzToHz( s_khz->integer );
 	if ( desired.freq == 0 )
-		desired.freq = 22050;
+		desired.freq = 48000;
 
 	tmp = s_sdlBits->integer;
 	if ( tmp < 16 )

@@ -199,5 +199,9 @@ compile_rail comp rail_sparks.comp rail_sparks_comp_spv
 compile_rail vert rail_helix.vert rail_helix_vert_spv
 compile_rail frag rail_helix.frag rail_helix_frag_spv
 
+echo "==> Compiling IQM GPU skinning shaders..."
+compile vert iqm_skinning.vert iqm_skinning_vert_spv
+compile frag iqm_skinning.frag iqm_skinning_frag_spv
+
 rm -f "$TMPF"
 echo "==> Done. shader_data.c regenerated."

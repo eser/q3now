@@ -20,7 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
-#include "../game/q_feats.h"
+#include "../qcommon/q_feats.h"
 
 backEndData_t	*backEndData;
 backEndState_t	backEnd;

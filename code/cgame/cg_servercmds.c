@@ -27,7 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_local.h"
 #include "../game/bg_promode.h" // CPM
 #if FEAT_TA_UI
-#include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure
+#include "../qcommon/menudef.h"
 
 typedef struct {
 	const char *order;
@@ -154,7 +154,6 @@ static void CG_ParseBStats( void ) {
 
 			if ( shotsDelta > 0 ) {
 				float acc = (float)hitsDelta / (float)shotsDelta;
-				CG_SHUDEventTempAccuracy( i, acc );
 #if FEAT_WIRED_UI
 				trap_WiredUI_PushEvent( WIRED_EVENT_TEMPACC,
 					va( "%d|%.3f", i, acc ) );
@@ -862,7 +861,7 @@ voiceChatList_t *CG_VoiceChatListForClient( int clientNum ) {
 		// fall back to male gender because we don't have neuter in the mission pack
 		if (gender == GENDER_MALE)
 			break;
-		gender = GENDER_MALE;
+		gender = GENDER_NEUTER;
 	}
 	// store this head model with voice chat for future reference
 	for ( j = 0; j < MAX_HEADMODELS; j++ ) {
@@ -1121,7 +1120,6 @@ static void CG_ServerCommand( void ) {
 		trap_S_StartLocalSound( cgs.media.talkSound, CHAN_LOCAL_SOUND );
 		Q_strncpyz( text, CG_Argv(1), MAX_SAY_TEXT );
 		CG_RemoveChatEscapeChar( text );
-		CG_SHUDEventChat( text );
 		CG_Printf( "%s\n", text );
 		return;
 	}
@@ -1138,7 +1136,6 @@ static void CG_ServerCommand( void ) {
 		trap_S_StartLocalSound( cgs.media.talkSound, CHAN_LOCAL_SOUND );
 		Q_strncpyz( text, CG_Argv(1), MAX_SAY_TEXT );
 		CG_RemoveChatEscapeChar( text );
-		CG_SHUDEventChat( text );
 		CG_AddToTeamChat( text );
 		CG_Printf( "%s\n", text );
 #if FEAT_STATS_WINDOW

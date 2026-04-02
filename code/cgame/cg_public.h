@@ -188,6 +188,9 @@ typedef enum {
 	CG_R_ADDRAILTRAILPARAMS,
 	CG_IS_RECORDING_DEMO,
 	CG_CVAR_SETDESCRIPTION,
+	// ── IQM animation query ─────────────────────────────────────────
+	CG_R_GETIQMANIMS,
+	// int trap_R_GetIQMAnimations( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims )
 	// ── Wired UI: HUD state bridge (Phase 3) ────────────────────────
 	CG_WIREDUI_PUSH_HUD_STATE = 200,
 	// void trap_WiredUI_PushHudState( wiredHudState_t *state )

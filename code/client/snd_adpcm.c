@@ -32,6 +32,9 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
 #include "snd_local.h"
+#include "../qcommon/q_feats.h"
+
+#if FEAT_LEGACY_FORMATS_AUDIO
 
 
 /* Intel ADPCM step variation table */
@@ -328,3 +331,5 @@ void S_AdpcmEncodeSound( sfx_t *sfx, short *samples ) {
 		count -= n;
 	}
 }
+
+#endif // FEAT_LEGACY_FORMATS_AUDIO

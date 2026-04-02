@@ -27,7 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../game/bg_promode.h" // CPM
 
 #if FEAT_TA_UI
-#include "../ui/ui_shared.h"
+#include "ui_shared.h"
 
 // used for scoreboard
 extern displayContextDef_t cgDC;
@@ -734,7 +734,7 @@ CG_DrawSnapshot
 ==================
 */
 static float CG_DrawSnapshot( float y ) {
-	char		*s;
+	const char	*s;
 	int			w;
 
 	s = va( "time:%i snap:%i cmd:%i", cg.snap->serverTime, 
@@ -753,7 +753,7 @@ CG_DrawFPS
 */
 #define	FPS_FRAMES	4
 static float CG_DrawFPS( float y ) {
-	char		*s;
+	const char	*s;
 	int			w;
 	static int	previousTimes[FPS_FRAMES];
 	static int	index;
@@ -796,7 +796,7 @@ CG_DrawTimer
 =================
 */
 static float CG_DrawTimer( float y ) {
-	char		*s;
+	const char	*s;
 	int			w;
 	int			mins, seconds, tens;
 	int			msec;
@@ -2128,7 +2128,7 @@ CG_DrawVote
 =================
 */
 static void CG_DrawVote(void) {
-	char	*s;
+	const char	*s;
 	int		sec;
 
 	if ( !cgs.voteTime ) {
@@ -2162,7 +2162,7 @@ CG_DrawTeamVote
 =================
 */
 static void CG_DrawTeamVote(void) {
-	char	*s;
+	const char	*s;
 	int		sec, cs_offset;
 
 	if ( cgs.clientinfo[cg.clientNum].team == TEAM_RED )
@@ -2692,93 +2692,78 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		return;
 	}
 #endif
-	// SuperHUD: if a config is loaded AND parsed successfully
-	if ( cg_hudFile.string[0] && CG_SHUDIsLoaded() ) {
-		CG_SHUDRoutine();
-		if ( stereoFrame == STEREO_CENTER )
+	// default HUD
+	if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
+		CG_DrawSpectator();
+
+		if(stereoFrame == STEREO_CENTER)
 			CG_DrawCrosshair();
+
+		CG_DrawCrosshairNames();
 	} else {
-		// default HUD fallback
-		if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
-			CG_DrawSpectator();
+		// don't draw any status if dead or the scoreboard is being explicitly shown
+		if ( !cg.showScores && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
+
+#if FEAT_TA_UI
+#if FEAT_TA_UI
+			if ( cg_drawStatus.integer ) {
+				Menu_PaintAll();
+				CG_DrawTimedMenus();
+			}
+#endif
+#else
+			CG_DrawStatusBar();
+#endif
+
+			CG_DrawAmmoWarning();
 
 			if(stereoFrame == STEREO_CENTER)
 				CG_DrawCrosshair();
-
 			CG_DrawCrosshairNames();
-		} else {
-			// don't draw any status if dead or the scoreboard is being explicitly shown
-			if ( !cg.showScores && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
-
-#if FEAT_TA_UI
-#if FEAT_TA_UI
-				if ( cg_drawStatus.integer ) {
-					Menu_PaintAll();
-					CG_DrawTimedMenus();
-				}
-#endif
-#else
-				CG_DrawStatusBar();
-#endif
-
-				CG_DrawAmmoWarning();
-
-				if(stereoFrame == STEREO_CENTER)
-					CG_DrawCrosshair();
-				CG_DrawCrosshairNames();
-				CG_DrawWeaponSelect();
+			CG_DrawWeaponSelect();
 
 #ifndef MISSIONPACK
-				CG_DrawHoldableItem();
+			CG_DrawHoldableItem();
 #endif
-				CG_DrawReward();
-			}
-		}
-
-		if ( cgs.gametype >= GT_TEAM ) {
-#ifndef MISSIONPACK
-			CG_DrawTeamInfo();
-#endif
+			CG_DrawReward();
 		}
 	}
 
-	if ( !cg_hudFile.string[0] || !CG_SHUDIsLoaded() ) {
-		// classic HUD: draw vote, lagometer, upper/lower corners, etc.
-		CG_DrawVote();
-		CG_DrawTeamVote();
+	if ( cgs.gametype >= GT_TEAM ) {
+#ifndef MISSIONPACK
+		CG_DrawTeamInfo();
+#endif
+	}
 
-		CG_DrawLagometer();
+	// classic HUD: draw vote, lagometer, upper/lower corners, etc.
+	CG_DrawVote();
+	CG_DrawTeamVote();
+
+	CG_DrawLagometer();
 
 #if FEAT_TA_UI
 #if FEAT_TA_UI
-		if (!cg_paused.integer) {
-			CG_DrawUpperRight(stereoFrame);
-		}
+	if (!cg_paused.integer) {
+		CG_DrawUpperRight(stereoFrame);
+	}
 #endif
 #else
-		CG_DrawUpperRight(stereoFrame);
+	CG_DrawUpperRight(stereoFrame);
 #endif
 
 #ifndef MISSIONPACK
-		CG_DrawLowerRight();
-		CG_DrawLowerLeft();
+	CG_DrawLowerRight();
+	CG_DrawLowerLeft();
 #endif
 
-		if ( !CG_DrawFollow() ) {
-			CG_DrawWarmup();
-		}
+	if ( !CG_DrawFollow() ) {
+		CG_DrawWarmup();
+	}
 
-		// don't draw center string if scoreboard is up
-		cg.scoreBoardShowing = CG_DrawScoreboard();
-		if ( !cg.scoreBoardShowing) {
-			CG_DrawCenterString();
-		}
-	} else {
-		// SuperHUD path: still need scoreboard and center string
-		cg.scoreBoardShowing = CG_DrawScoreboard();
-		if ( !cg.scoreBoardShowing ) {
-			CG_DrawCenterString();
-		}
+	// don't draw center string if scoreboard is up
+	cg.scoreBoardShowing = CG_DrawScoreboard();
+	if ( !cg.scoreBoardShowing) {
+		CG_DrawCenterString();
 	}
 
 #if FEAT_STATS_WINDOW

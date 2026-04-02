@@ -81,6 +81,7 @@ export namespace settings {
 	    renderer: string;
 	    customArgs: string;
 	    recentServers: RecentServer[];
+	    eulaAcceptedAt?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -92,6 +93,7 @@ export namespace settings {
 	        this.renderer = source["renderer"];
 	        this.customArgs = source["customArgs"];
 	        this.recentServers = this.convertValues(source["recentServers"], RecentServer);
+	        this.eulaAcceptedAt = source["eulaAcceptedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -122,6 +122,11 @@ typedef struct {
 	void	(*VertexLighting)( qboolean allowed );
 	void	(*SyncRender)( void );
 
+#if defined(FEAT_IQM)
+	// Query embedded IQM animation data from a model.
+	// Returns number of animations found (0 if not IQM or no anims).
+	int		(*GetIQMAnimations)( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );
+#endif // FEAT_IQM
 
 } refexport_t;
 

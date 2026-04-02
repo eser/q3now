@@ -17,7 +17,7 @@ Tiered implementation:
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
 #include "cl_wired_fonts.h"
-#include "../../ui/menudef.h"
+#include "../../qcommon/menudef.h"
 
 #if FEAT_WIRED_UI
 

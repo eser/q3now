@@ -32,7 +32,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "q_shared.h"
 #include "qcommon.h"
 #include "unzip.h"
-#include "../game/q_feats.h"
+#include "q_feats.h"
 
 #if FEAT_SW3Z
 #include "sw3z.h"
@@ -4813,8 +4813,8 @@ FS_OwnerName
 */
 static const char *FS_OwnerName( handleOwner_t owner ) 
 {
-	static const char *s[4]= { "SY", "QA", "CG", "UI" };
-	if ( owner < H_SYSTEM || owner > H_Q3UI )
+	static const char *s[4]= { "SY", "QA", "CG" };
+	if ( owner < H_SYSTEM )
 		return "??";
 	return s[owner];
 }
@@ -5970,6 +5970,11 @@ int	FS_FOpenFileByMode( const char *qpath, fileHandle_t *f, fsMode_t mode ) {
 
 int FS_FTell( fileHandle_t f ) {
 	int pos;
+#if FEAT_SW3Z
+	if ( fsh[f].sw3zData ) {
+		return fsh[f].sw3zPos;
+	}
+#endif
 	if ( fsh[f].zipFile ) {
 		pos = unztell( fsh[f].handleFiles.file.z );
 	} else {

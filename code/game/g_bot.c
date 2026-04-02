@@ -61,7 +61,7 @@ float trap_Cvar_VariableValue( const char *var_name ) {
 G_ParseInfos
 ===============
 */
-int G_ParseInfos( char *buf, int max, char *infos[] ) {
+int G_ParseInfos( const char *buf, int max, char *infos[] ) {
 	const char	*token;
 	int		count;
 	char	key[MAX_TOKEN_CHARS];
@@ -691,13 +691,6 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	Info_SetValueForKey( userinfo, key, headmodel );
 	key = "team_headmodel";
 	Info_SetValueForKey( userinfo, key, headmodel );
-
-	key = "gender";
-	s = Info_ValueForKey( botinfo, key );
-	if ( !*s ) {
-		s = "male";
-	}
-	Info_SetValueForKey( userinfo, "sex", s );
 
 	key = "color1";
 	s = Info_ValueForKey( botinfo, key );

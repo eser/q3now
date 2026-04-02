@@ -18,7 +18,7 @@ Channel architecture:
 #ifndef WT_PUBLIC_H
 #define WT_PUBLIC_H
 
-#include "../game/q_feats.h"
+#include "../qcommon/q_feats.h"
 
 #if FEAT_QUIC_TRANSPORT
 

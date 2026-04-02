@@ -127,12 +127,15 @@ void S_CodecInit( void )
 {
 	codecs = NULL;
 
+#if FEAT_LEGACY_FORMATS_AUDIO
 #ifdef USE_OGG_VORBIS
 	S_CodecRegister( &ogg_codec );
 #endif
-
-	// Register wav codec last so that it is always tried first when a file extension was not found
 	S_CodecRegister( &wav_codec );
+#endif // FEAT_LEGACY_FORMATS_AUDIO
+
+	// Register opus codec last so it is head of list (tried first in fallback)
+	S_CodecRegister( &opus_codec );
 }
 
 
@@ -237,6 +240,8 @@ snd_stream_t *S_CodecUtilOpen( const char *filename, snd_codec_t *codec )
 	stream->codec = codec;
 	stream->file = hnd;
 	stream->length = length;
+	stream->info.loopStart = -1;
+	stream->info.loopEnd = -1;
 	return stream;
 }
 

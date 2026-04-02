@@ -25,7 +25,7 @@ references and calls registered element routines during rendering.
 #ifndef CL_WIRED_UI_H
 #define CL_WIRED_UI_H
 
-#include "../../game/q_feats.h"
+#include "../../qcommon/q_feats.h"
 
 #if FEAT_WIRED_UI
 
@@ -368,8 +368,7 @@ void     WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
 // ── dispatch macros ───────────────────────────────────────────────────
 //
 // These replace VM_Call(uivm, ...) throughout the client code.
-// When FEAT_WIRED_UI=1, they call the embedded WiredUI functions directly.
-// When FEAT_WIRED_UI=0, the old VM_Call path is used (macros not defined).
+// Wired UI is now the only path — no VM fallback.
 
 #define UI_VM_ACTIVE            (1)  // always active — no VM to check
 #define UI_CALL_REFRESH(rt)     WiredUI_Refresh(rt)
@@ -379,21 +378,6 @@ void     WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
 #define UI_CALL_IS_FULLSCREEN() WiredUI_IsFullscreen()
 #define UI_CALL_CONNECT(o)      WiredUI_DrawConnectScreen(o)
 #define UI_CALL_CONSOLE_CMD(rt) WiredUI_ConsoleCommand(rt)
-
-#else // !FEAT_WIRED_UI
-
-// ── fallback: traditional UI VM path ──────────────────────────────────
-
-extern vm_t *uivm;
-
-#define UI_VM_ACTIVE            (uivm != NULL)
-#define UI_CALL_REFRESH(rt)     VM_Call(uivm, 1, UI_REFRESH, rt)
-#define UI_CALL_KEY_EVENT(k,d)  VM_Call(uivm, 2, UI_KEY_EVENT, k, d)
-#define UI_CALL_MOUSE_EVENT(x,y) VM_Call(uivm, 2, UI_MOUSE_EVENT, x, y)
-#define UI_CALL_SET_ACTIVE(m)   VM_Call(uivm, 1, UI_SET_ACTIVE_MENU, m)
-#define UI_CALL_IS_FULLSCREEN() VM_Call(uivm, 0, UI_IS_FULLSCREEN)
-#define UI_CALL_CONNECT(o)      VM_Call(uivm, 1, UI_DRAW_CONNECT_SCREEN, o)
-#define UI_CALL_CONSOLE_CMD(rt) VM_Call(uivm, 1, UI_CONSOLE_COMMAND, rt)
 
 #endif // FEAT_WIRED_UI
 #endif // CL_WIRED_UI_H

@@ -35,7 +35,7 @@
 #    → Accept upstream static/const improvements. Preserve q3now's
 #      g_singlePlayer logic and GT_KINGOFTHEHILL/GT_LASTMANSTANDING.
 #
-#  code/game/*.c, code/cgame/*.c, code/q3_ui/*.c
+#  code/game/*.c, code/cgame/*.c
 #    → These are game-only — upstream (Quake3e) will never touch them.
 #      No conflicts expected.
 #

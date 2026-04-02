@@ -70,8 +70,30 @@ noskills gives you exactly what you need via JSON output.
 
 ### Protocol
 
-    npx eser noskills next                           # get current instruction
-    npx eser noskills next --answer="your response"  # submit result and advance
+    npx eser noskills next --spec=<name>                           # get current instruction
+    npx eser noskills next --spec=<name> --answer="your response"  # submit result and advance
+
+Every noskills command that operates on a spec MUST include `--spec=<name>`.
+Never omit it. Use `npx eser noskills spec list` to see available specs.
+
+### Why noskills calls matter
+
+noskills is not a form to fill out. It is a live state machine that the user
+watches in real-time. Every `npx eser noskills next --answer` call:
+
+- Updates the spec file on disk (the user sees it change)
+- Updates the terminal dashboard if `noskills watch` is running
+- Advances the state machine to the next phase
+- Records the decision permanently in the project history
+
+When you batch-submit answers or backfill discovery responses yourself,
+the user sees nothing happening — then suddenly everything jumps forward.
+This defeats the purpose.
+
+Call noskills ONCE per interaction. Ask the user ONE question. Wait for
+their answer. Submit it. Ask the next. The user is watching every step.
+Do NOT pre-fill answers. Do NOT batch multiple answers. Do NOT answer
+discovery questions yourself — the user's input is the data.
 
 ### When to call noskills next
 
@@ -91,6 +113,17 @@ NEVER make architectural decisions independently — noskills routes them to the
 You MUST NOT run git write commands: commit, add, push, checkout, stash,
 reset, merge, rebase, cherry-pick. The user controls git. You control files.
 You MAY read from git: log, diff, status, show, blame.
+
+### Interactive choices
+
+When noskills output contains `interactiveOptions`, you MUST present them
+using the AskUserQuestion tool. NEVER present options in prose.
+
+This is not optional. If you ask a question without AskUserQuestion when
+interactiveOptions are present, you are violating protocol.
+
+Pass interactiveOptions as the `options` array in AskUserQuestion.
+Use the `commandMap` to resolve the user's selection to a CLI command.
 
 ### Convention discovery
 

@@ -8,7 +8,7 @@ these symbols even though they're never called at runtime when using
 the OpenSSL backend.
 ===========================================================================
 */
-#include "../game/q_feats.h"
+#include "../qcommon/q_feats.h"
 
 #if FEAT_QUIC_TRANSPORT
 

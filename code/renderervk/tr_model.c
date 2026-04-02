@@ -158,6 +158,7 @@ static qhandle_t R_RegisterMDR(const char *name, model_t *mod)
 }
 
 
+#if defined(FEAT_IQM)
 /*
 ====================
 R_RegisterIQM
@@ -178,20 +179,21 @@ static qhandle_t R_RegisterIQM(const char *name, model_t *mod)
 		mod->type = MOD_BAD;
 		return 0;
 	}
-	
+
 	loaded = R_LoadIQM(mod, buf.u, filesize, name);
 
 	ri.FS_FreeFile (buf.v);
-	
+
 	if ( !loaded )
 	{
 		ri.Printf( PRINT_WARNING, "%s: couldn't load %s\n", __func__, name );
 		mod->type = MOD_BAD;
 		return 0;
 	}
-	
+
 	return mod->index;
 }
+#endif // FEAT_IQM
 
 
 typedef struct
@@ -204,7 +206,9 @@ typedef struct
 // when there are multiple models of different formats available
 static modelExtToLoaderMap_t modelLoaders[ ] =
 {
+#if defined(FEAT_IQM)
 	{ "iqm", R_RegisterIQM },
+#endif // FEAT_IQM
 	{ "mdr", R_RegisterMDR },
 	{ "md3", R_RegisterMD3 }
 };
@@ -1104,11 +1108,15 @@ int R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFram
 			start = R_GetAnimTag((mdrHeader_t *) model->modelData, startFrame, tagName, &start_space);
 			end = R_GetAnimTag((mdrHeader_t *) model->modelData, endFrame, tagName, &end_space);
 		}
+
+#if defined(FEAT_IQM)
 		else if( model->type == MOD_IQM ) {
 			return R_IQMLerpTag( tag, model->modelData,
 					startFrame, endFrame,
 					frac, tagName );
-		} else {
+		}
+#endif // FEAT_IQM
+		else {
 			start = end = NULL;
 		}
 	}
@@ -1177,9 +1185,11 @@ void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
 		VectorCopy( frame->bounds[1], maxs );
 		
 		return;
-	} else if(model->type == MOD_IQM) {
+	}
+#if defined(FEAT_IQM)
+	else if(model->type == MOD_IQM) {
 		iqmData_t *iqmData;
-		
+
 		iqmData = model->modelData;
 
 		if(iqmData->bounds)
@@ -1189,7 +1199,53 @@ void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
 			return;
 		}
 	}
+#endif // FEAT_IQM
 
 	VectorClear( mins );
 	VectorClear( maxs );
 }
+
+
+#if defined(FEAT_IQM)
+/*
+====================
+R_GetIQMAnimations
+
+Query embedded IQM animation data from a model handle.
+Returns number of animations found (0 if not IQM or no embedded anims).
+====================
+*/
+int R_GetIQMAnimations( qhandle_t handle, iqmAnimInfo_t *anims, int maxAnims ) {
+	model_t		*model;
+	iqmData_t	*iqmData;
+	const char	*namePtr;
+	int		i, count;
+
+	model = R_GetModelByHandle( handle );
+	if ( model->type != MOD_IQM ) {
+		return 0;
+	}
+
+	iqmData = (iqmData_t *)model->modelData;
+	if ( !iqmData || iqmData->num_anims <= 0 ) {
+		return 0;
+	}
+
+	count = iqmData->num_anims;
+	if ( count > maxAnims ) {
+		count = maxAnims;
+	}
+
+	namePtr = iqmData->animNames;
+	for ( i = 0; i < count; i++ ) {
+		Q_strncpyz( anims[i].name, namePtr, sizeof( anims[i].name ) );
+		anims[i].first_frame = iqmData->animFirstFrames[i];
+		anims[i].num_frames = iqmData->animNumFrames[i];
+		anims[i].framerate = iqmData->animFramerates[i];
+		anims[i].flags = iqmData->animFlags[i];
+		namePtr += strlen( namePtr ) + 1;
+	}
+
+	return count;
+}
+#endif // FEAT_IQM

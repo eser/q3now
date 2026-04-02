@@ -24,8 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //========================================================
 //name
 #define CHARACTERISTIC_NAME							0	//string
-//gender of the bot
-#define CHARACTERISTIC_GENDER						1	//string ("male", "female", "it")
 //attack skill
 // >  0.0 && <  0.2 = don't move
 // >  0.3 && <  1.0 = aim at enemy during retreat
@@ -131,4 +129,3 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define CHARACTERISTIC_ALERTNESS					46	//float [0, 1]
 //how much the bot fires its weapon
 #define CHARACTERISTIC_FIRETHROTTLE					47	//float [0, 1]
-

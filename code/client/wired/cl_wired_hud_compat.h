@@ -72,14 +72,11 @@ Provides:
 
 typedef struct {
 	// Snapshot proxy — elements access cg.snap->ps.*
-	struct {
+	struct wiredSnapProxy_s {
 		playerState_t ps;
 		int ping;
 	} _snapData;
-	struct {
-		playerState_t ps;
-		int ping;
-	} *snap;
+	struct wiredSnapProxy_s *snap;
 
 	int         clientNum;
 	int         time;

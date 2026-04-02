@@ -40,6 +40,19 @@ const styles = {
     color: "var(--success, #4ade80)",
     lineHeight: 1,
   },
+  errorIcon: {
+    fontSize: "48px",
+    color: "var(--accent, #ef4444)",
+    lineHeight: 1,
+  },
+  errorMessage: {
+    fontSize: "13px",
+    color: "var(--accent, #ef4444)",
+    textAlign: "center",
+    maxWidth: "400px",
+    lineHeight: 1.5,
+    wordBreak: "break-word",
+  },
 };
 
 export default function ProgressScreen({ onComplete, onError }) {
@@ -49,6 +62,7 @@ export default function ProgressScreen({ onComplete, onError }) {
     total: 1,
     message: "",
   });
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const unsubProgress = EventsOn("import:progress", (data) => {
@@ -58,7 +72,7 @@ export default function ProgressScreen({ onComplete, onError }) {
       onComplete();
     });
     const unsubError = EventsOn("import:error", (errMsg) => {
-      onError(errMsg);
+      setError(errMsg);
     });
 
     return () => {
@@ -73,6 +87,23 @@ export default function ProgressScreen({ onComplete, onError }) {
     : 0;
 
   const isComplete = progress.step === "complete";
+
+  if (error) {
+    return (
+      <div style={styles.container} className="screen-enter screen-enter-active">
+        <div style={styles.errorIcon}>&#10007;</div>
+        <div style={styles.stepName}>Import Failed</div>
+        <div className="selectable" style={styles.errorMessage}>{error}</div>
+        <Button
+          variant="secondary"
+          onClick={() => onError(error)}
+          style={{ marginTop: "8px" }}
+        >
+          Back
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container} className="screen-enter screen-enter-active">

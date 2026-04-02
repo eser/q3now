@@ -25,6 +25,27 @@ type EntryDecision struct {
 	Data     []byte // new content — required for Replace, nil for Include.
 }
 
+// ProcessorMode declares how an entry in a processor list should be handled.
+type ProcessorMode int
+
+const (
+	ModeCopy    ProcessorMode = iota // default — copy verbatim (zero value)
+	ModeConvert                      // transform format (e.g., tga→png)
+	ModePatch                        // apply delta from PatchSource (not yet implemented)
+	ModeSkip                         // ignore this entry
+)
+
+// ProcessorEntry describes per-file processing intent in a processor list.
+// The zero value is valid and means ModeCopy with no overrides.
+type ProcessorEntry struct {
+	Mode        ProcessorMode // how to process this entry
+	TargetFmt   string        // target format for ModeConvert (e.g., "png")
+	TargetPath  string        // output path override (full path, any mode; empty = use source path)
+	PatchSource string        // delta source for ModePatch (deferred)
+	Quality     string        // quality preset for ModeConvert: "high" (128kbps), "medium" (96kbps), "low" (64kbps), "" = default (high)
+	Preprocess  bool          // if true, pre-resample audio to 48kHz before encoding (default false)
+}
+
 // Processor makes per-entry decisions about what to include in the output.
 // Processors are composed in a chain: last non-Skip decision wins.
 //

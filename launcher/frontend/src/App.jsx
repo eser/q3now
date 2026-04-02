@@ -3,6 +3,7 @@ import { GetAppState } from "../wailsjs/go/main/App";
 import Background from "./components/Background";
 import ImportScreen from "./screens/ImportScreen";
 import ProgressScreen from "./screens/ProgressScreen";
+import EulaScreen from "./screens/EulaScreen";
 import LaunchScreen from "./screens/LaunchScreen";
 import GameOptionsScreen from "./screens/GameOptionsScreen";
 import DedicatedScreen from "./screens/DedicatedScreen";
@@ -13,6 +14,7 @@ import "./styles/animations.css";
 function App() {
   const [screen, setScreen] = useState("loading");
   const [appState, setAppState] = useState({});
+  const [importError, setImportError] = useState(null);
 
   const refreshState = useCallback(() => {
     return GetAppState().then((state) => {
@@ -87,15 +89,24 @@ function App() {
 
         {screen === "import" && (
           <ImportScreen
-            onImportComplete={() => setScreen("progress")}
+            onImportComplete={() => { setImportError(null); setScreen("progress"); }}
             onBack={handleBackToLaunch}
+            onEula={() => setScreen("eula")}
+            importError={importError}
+          />
+        )}
+
+        {screen === "eula" && (
+          <EulaScreen
+            onAccept={() => setScreen("import")}
+            onDecline={() => setScreen("import")}
           />
         )}
 
         {screen === "progress" && (
           <ProgressScreen
             onComplete={handleImportComplete}
-            onError={() => setScreen("import")}
+            onError={(errMsg) => { setImportError(errMsg); setScreen("import"); }}
           />
         )}
 

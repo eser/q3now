@@ -72,7 +72,7 @@ static qboolean R_CompareVert(srfVert_t * v1, srfVert_t * v2, qboolean checkST)
 =============
 R_CalcTexDirs
 
-Lengyel, Eric. “Computing Tangent Space Basis Vectors for an Arbitrary Mesh”. Terathon Software 3D Graphics Library, 2001. http://www.terathon.com/code/tangent.html
+Lengyel, Eric. ï¿½Computing Tangent Space Basis Vectors for an Arbitrary Meshï¿½. Terathon Software 3D Graphics Library, 2001. http://www.terathon.com/code/tangent.html
 =============
 */
 void R_CalcTexDirs(vec3_t sdir, vec3_t tdir, const vec3_t v1, const vec3_t v2,
@@ -104,7 +104,7 @@ void R_CalcTexDirs(vec3_t sdir, vec3_t tdir, const vec3_t v1, const vec3_t v2,
 =============
 R_CalcTangentSpace
 
-Lengyel, Eric. “Computing Tangent Space Basis Vectors for an Arbitrary Mesh”. Terathon Software 3D Graphics Library, 2001. http://www.terathon.com/code/tangent.html
+Lengyel, Eric. ï¿½Computing Tangent Space Basis Vectors for an Arbitrary Meshï¿½. Terathon Software 3D Graphics Library, 2001. http://www.terathon.com/code/tangent.html
 =============
 */
 vec_t R_CalcTangentSpace(vec3_t tangent, vec3_t bitangent, const vec3_t normal, const vec3_t sdir, const vec3_t tdir)
@@ -1603,9 +1603,11 @@ static void R_AddEntitySurface (int entityNum)
 			case MOD_MDR:
 				R_MDRAddAnimSurfaces( ent );
 				break;
+#if defined(FEAT_IQM)
 			case MOD_IQM:
 				R_AddIQMSurfaces( ent );
 				break;
+#endif // FEAT_IQM
 			case MOD_BRUSH:
 				R_AddBrushModelSurfaces( ent );
 				break;
@@ -1908,6 +1910,7 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 					radius = frame->radius;
 				}
 				break;
+#if defined(FEAT_IQM)
 				case MOD_IQM:
 				{
 					// FIXME: never actually tested this
@@ -1920,6 +1923,7 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 					radius = 0.5f * VectorLength( diag );
 				}
 				break;
+#endif // FEAT_IQM
 
 				default:
 					break;

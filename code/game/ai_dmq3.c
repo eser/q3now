@@ -59,7 +59,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "match.h"				//string matching types and vars
 
 // for the voice chats
-#include "../ui/menudef.h"  // q3now: path adjusted for code/ui/ structure // sos001205 - for q3_ui also
+#include "../qcommon/menudef.h"
 
 // from aasfile.h
 #define AREACONTENTS_MOVER				1024
@@ -116,7 +116,7 @@ int blue_numaltroutegoals;
 BotSetUserInfo
 ==================
 */
-void BotSetUserInfo(bot_state_t *bs, char *key, char *value) {
+void BotSetUserInfo(bot_state_t *bs, const char *key, const char *value) {
 	char userinfo[MAX_INFO_STRING];
 
 	trap_GetUserinfo(bs->client, userinfo, sizeof(userinfo));
@@ -5445,7 +5445,7 @@ BotDeathmatchAI
 ==================
 */
 void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
-	char gender[144], name[144];
+	char name[144];
 	char userinfo[MAX_INFO_STRING];
 	char buf[MAX_INFO_STRING];
 	int i;
@@ -5454,16 +5454,6 @@ void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 	if (bs->setupcount > 0) {
 		bs->setupcount--;
 		if (bs->setupcount > 0) return;
-		//get the gender characteristic
-		trap_Characteristic_String(bs->character, CHARACTERISTIC_GENDER, gender, sizeof(gender));
-		//set the bot gender
-		trap_GetUserinfo(bs->client, userinfo, sizeof(userinfo));
-		Info_SetValueForKey(userinfo, "sex", gender);
-		trap_SetUserinfo(bs->client, userinfo);
-		//set the chat gender
-		if (gender[0] == 'm') trap_BotSetChatGender(bs->cs, CHAT_GENDERMALE);
-		else if (gender[0] == 'f')  trap_BotSetChatGender(bs->cs, CHAT_GENDERFEMALE);
-		else  trap_BotSetChatGender(bs->cs, CHAT_GENDERLESS);
 		//set the chat name
 		ClientName(bs->client, name, sizeof(name));
 		trap_BotSetChatName(bs->cs, name, bs->client);

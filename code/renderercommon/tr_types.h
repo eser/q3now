@@ -237,4 +237,17 @@ typedef struct {
 #define OPENGL_DRIVER_NAME	"libGL.so.1"
 #endif
 
+// ── IQM animation query (renderer -> cgame) ─────────────────────────
+#include "../qcommon/q_feats.h"
+#if defined(FEAT_IQM)
+#define MAX_IQM_ANIMS	64
+typedef struct {
+	char		name[MAX_QPATH];	// animation name from IQM file
+	int		first_frame;		// first frame index
+	int		num_frames;		// number of frames
+	float		framerate;		// frames per second
+	int		flags;			// IQM_LOOP etc.
+} iqmAnimInfo_t;
+#endif // FEAT_IQM
+
 #endif	// __TR_TYPES_H

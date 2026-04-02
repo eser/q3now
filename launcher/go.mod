@@ -2,7 +2,10 @@ module github.com/eser/q3now/launcher
 
 go 1.26.1
 
-require github.com/wailsapp/wails/v2 v2.11.0
+require (
+	github.com/wailsapp/wails/v2 v2.11.0
+	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
+)
 
 require github.com/pierrec/lz4/v4 v4.1.26 // indirect
 

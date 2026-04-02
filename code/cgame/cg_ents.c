@@ -510,7 +510,7 @@ static void CG_Missile( centity_t *cent ) {
 		return;
 	}
 
-    if (weapon->missileModel == (qhandle_t)NULL) {
+    if (weapon->missileModel == 0) {
         return;
     }
 
@@ -571,7 +571,7 @@ static void CG_Grapple( centity_t *cent ) {
 	VectorCopy( cent->lerpOrigin, ent.origin);
 	VectorCopy( cent->lerpOrigin, ent.oldorigin);
 
-    if (weapon->missileModel == (qhandle_t)NULL) {
+    if (weapon->missileModel == 0) {
         return;
     }
 

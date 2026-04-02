@@ -255,6 +255,48 @@ static int ResampleSfxRaw( short *sfx, int channels, int inrate, int inwidth, in
 	return outcount;
 }
 
+/*
+================
+ResampleSfxRawToRate
+
+Like ResampleSfxRaw but resamples to an explicit target rate instead of dma.speed.
+Used by Opus in-memory encoding which always operates at 48 kHz.
+================
+*/
+static int ResampleSfxRawToRate( short *sfx, int channels, int inrate, int inwidth,
+                                 int samples, byte *data, int outrate ) {
+	int			outcount;
+	int			srcsample;
+	float		stepscale;
+	int			i, j;
+	int			sample, samplefrac, fracstep;
+
+	stepscale = (float)inrate / outrate;
+
+	outcount = samples / stepscale;
+
+	srcsample = 0;
+	samplefrac = 0;
+	fracstep = stepscale * 256 * channels;
+
+	for (i=0 ; i<outcount ; i++)
+	{
+		srcsample += samplefrac >> 8;
+		samplefrac &= 255;
+		samplefrac += fracstep;
+		for (j=0 ; j<channels ; j++)
+		{
+			if( inwidth == 2 ) {
+				sample = LittleShort ( ((short *)data)[srcsample+j] );
+			} else {
+				sample = (int)( (unsigned char)(data[srcsample+j]) - 128) << 8;
+			}
+			sfx[i*channels+j] = sample;
+		}
+	}
+	return outcount;
+}
+
 //=============================================================================
 
 /*
@@ -281,8 +323,8 @@ qboolean S_LoadSound( sfx_t *sfx )
 		Com_DPrintf(S_COLOR_YELLOW "WARNING: %s is a 8 bit audio file\n", sfx->soundName);
 	}
 
-	if ( info.rate != 22050 ) {
-		Com_DPrintf(S_COLOR_YELLOW "WARNING: %s is not a 22kHz audio file\n", sfx->soundName);
+	if ( info.rate != 48000 && info.rate != 44100 && info.rate != 22050 ) {
+		Com_DPrintf(S_COLOR_YELLOW "WARNING: %s has unusual sample rate %dHz\n", sfx->soundName, info.rate);
 	}
 
 	samples = Hunk_AllocateTempMemory(info.samples * sizeof(short) * 2);
@@ -295,11 +337,20 @@ qboolean S_LoadSound( sfx_t *sfx )
 	// manager to do the right thing for us and page
 	// sound in as needed
 
+#if FEAT_LEGACY_FORMATS_AUDIO
 	if( info.channels == 1 && sfx->soundCompressed == qtrue) {
 		sfx->soundCompressionMethod = 1;
 		sfx->soundData = NULL;
 		sfx->soundLength = ResampleSfxRaw( samples, info.channels, info.rate, info.width, info.samples, data + info.dataofs );
 		S_AdpcmEncodeSound(sfx, samples);
+#else
+	if( info.channels == 1 && sfx->soundCompressed == qtrue) {
+		// Opus in-memory compression: resample to 48 kHz, encode, store
+		sfx->soundCompressionMethod = 4;
+		sfx->soundData = NULL;
+		sfx->soundLength = ResampleSfxRawToRate( samples, info.channels, info.rate, info.width, info.samples, data + info.dataofs, OPUS_INMEM_RATE );
+		S_OpusEncodeSound( sfx, samples );
+#endif
 #if 0
 	} else if (info.channels == 1 && info.samples>(SND_CHUNK_SIZE*16) && info.width >1) {
 		sfx->soundCompressionMethod = 3;

@@ -139,13 +139,6 @@ typedef struct {
 #define TEAM_OVERLAY_MAXNAME_WIDTH	12
 #define TEAM_OVERLAY_MAXLOCATION_WIDTH	16
 
-#define	DEFAULT_MODEL			"visor"
-#define	DEFAULT_TEAM_MODEL		"visor"
-#define	DEFAULT_TEAM_HEAD		"visor"
-
-#define DEFAULT_REDTEAM_NAME		"Stroggs"
-#define DEFAULT_BLUETEAM_NAME		"Pagans"
-
 typedef enum {
 	FOOTSTEP_NORMAL,
 	FOOTSTEP_BOOT,
@@ -450,6 +443,12 @@ typedef struct {
 	animation_t		animations[MAX_TOTALANIMATIONS];
 
 	sfxHandle_t		sounds[MAX_CUSTOM_SOUNDS];
+
+#if defined(FEAT_IQM)
+	qboolean		iqmModel;		// true if using body.iqm single-mesh
+	qhandle_t		bodyModel;		// body.iqm model handle
+	qhandle_t		bodySkin;		// body.iqm skin handle
+#endif // FEAT_IQM
 } clientInfo_t;
 
 
@@ -1421,22 +1420,10 @@ extern	vmCvar_t		cg_hudFile;
 // cg_moderntext.c — Modern font/text rendering system
 void	CG_LoadFonts( void );
 
-// cg_superhud.c — SuperHUD configurable HUD system
-void	CG_SHUDLoadConfig( void );
-void	CG_SHUDRoutine( void );
-
 // cg_wired_bridge.c — Wired UI: push game state to client for HUD rendering
 #if FEAT_WIRED_UI
 void	CG_WiredHudPushState( void );
 #endif
-void	CG_SHUDParserInit( void );
-void	CG_SHUDRoutenesDestroyAll( void );
-qboolean CG_SHUDIsLoaded( void );
-void	CG_SHUDEventFrag( const char *message );
-void	CG_SHUDEventChat( const char *message );
-void	CG_SHUDEventObituaries( int attacker, int target, int mod, qboolean unfrozen );
-void	CG_SHUDEventTempAccuracy( int weapon, float accuracy );
-void	CG_SHUDAvailableElementsInit( void );
 
 // cg_colorparse.c
 void CG_ParseColor( const char *str, float *col, float alpha );
@@ -1905,6 +1892,9 @@ int			trap_R_LerpTag( orientation_t *tag, clipHandle_t mod, int startFrame, int 
 					   float frac, const char *tagName );
 void		trap_R_RemapShader( const char *oldShader, const char *newShader, const char *timeOffset );
 qboolean	trap_R_inPVS( const vec3_t p1, const vec3_t p2 );
+#if defined(FEAT_IQM)
+int		trap_R_GetIQMAnimations( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );
+#endif // FEAT_IQM
 
 // The glconfig_t will not change during the life of a cgame.
 // If it needs to change, the entire cgame will be restarted, because

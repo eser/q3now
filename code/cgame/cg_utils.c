@@ -5,7 +5,7 @@ cg_utils.c -- A collection of utility functions
 ===========================================================================
 */
 #include "cg_local.h"
-#include "cg_superhud_private.h"
+#include "cg_modern_private.h"
 
 vmCvar_t cg_MaxlocationWidth;
 

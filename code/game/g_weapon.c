@@ -210,6 +210,10 @@ void FireWeapon( gentity_t *ent, int attackIndex ) {
 		s_quadFactor = 1;
 	}
 
+	if ( attackIndex > 0 ) {
+		return;
+	}
+
 	// set aiming directions
 	AngleVectors (ent->client->ps.viewangles, forward, right, up);
 
@@ -224,11 +228,7 @@ void FireWeapon( gentity_t *ent, int attackIndex ) {
 		Attack_Gauntlet_Primary( ent );
 		break;
 	case WP_MACHINEGUN:
-		if ( attackIndex == 0 ) {
-			Attack_Machinegun_Primary( ent );
-		} else {
-			Attack_GrenadeLauncher_Primary( ent );
-		}
+		Attack_Machinegun_Primary( ent );
 		break;
 	case WP_SHOTGUN:
 		Attack_Shotgun_Primary( ent );

@@ -6,7 +6,7 @@ ai_itemtime.h — item respawn timing for bot AI improvements
 #ifndef AI_ITEMTIME_H
 #define AI_ITEMTIME_H
 
-#include "q_feats.h"
+#include "../qcommon/q_feats.h"
 
 #if FEAT_BOT_IMPROVEMENTS
 

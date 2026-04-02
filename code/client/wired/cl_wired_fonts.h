@@ -11,7 +11,7 @@ and alignment. Migrated from cg_moderntext.c to run in the client directly.
 #define CL_WIRED_FONTS_H
 
 #include "../../qcommon/q_shared.h"
-#include "../../game/q_feats.h"
+#include "../../qcommon/q_feats.h"
 
 #if FEAT_WIRED_UI
 

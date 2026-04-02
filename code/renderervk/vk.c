@@ -2,7 +2,14 @@
 #include "vk.h"
 #include "smaa_area_texture.h"
 #include "smaa_search_texture.h"
-#include "../game/q_feats.h"
+#include "../qcommon/q_feats.h"
+
+#if defined(FEAT_IQM)
+// Bone UBO size: 128 joints * 3 vec4 rows = 6144 bytes
+// Must match IQM_MAX_JOINTS (128) from iqm.h and the shader's boneMats[128*3]
+#define IQM_GPU_MAX_JOINTS 128
+#define IQM_BONE_UBO_SIZE (IQM_GPU_MAX_JOINTS * 3 * sizeof(vec4_t))
+#endif
 
 #if defined (_DEBUG)
 #if defined (_WIN32)
@@ -2739,6 +2746,41 @@ void vk_init_descriptors( void )
 
 		vk_update_attachment_descriptors();
 	}
+
+#if defined(FEAT_IQM)
+	// re-allocate IQM bone UBO descriptors after descriptor pool reset
+	if ( vk.iqmGpu.available ) {
+		VkDescriptorSetAllocateInfo boneAlloc;
+		VkDescriptorBufferInfo boneBufDesc;
+		VkWriteDescriptorSet boneWriteDesc;
+		uint32_t j;
+
+		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+			Com_Memset( &boneAlloc, 0, sizeof( boneAlloc ) );
+			boneAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			boneAlloc.descriptorPool = vk.descriptor_pool;
+			boneAlloc.descriptorSetCount = 1;
+			boneAlloc.pSetLayouts = &vk.iqmGpu.set_layout_bones;
+			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &boneAlloc, &vk.iqmGpu.bone_descriptor[j] ) );
+
+			Com_Memset( &boneBufDesc, 0, sizeof( boneBufDesc ) );
+			boneBufDesc.buffer = vk.iqmGpu.bone_buffer[j];
+			boneBufDesc.offset = 0;
+			boneBufDesc.range = IQM_BONE_UBO_SIZE;
+
+			Com_Memset( &boneWriteDesc, 0, sizeof( boneWriteDesc ) );
+			boneWriteDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			boneWriteDesc.dstSet = vk.iqmGpu.bone_descriptor[j];
+			boneWriteDesc.dstBinding = 0;
+			boneWriteDesc.dstArrayElement = 0;
+			boneWriteDesc.descriptorCount = 1;
+			boneWriteDesc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			boneWriteDesc.pBufferInfo = &boneBufDesc;
+
+			qvkUpdateDescriptorSets( vk.device, 1, &boneWriteDesc, 0, NULL );
+		}
+	}
+#endif
 }
 
 
@@ -3320,6 +3362,548 @@ static void vk_dispatch_rail_compute( void ) {
 }
 
 
+#if defined(FEAT_IQM)
+/*
+===============
+IQM GPU skinning — self-contained pipeline for skeletal IQM models
+===============
+*/
+
+/*
+===============
+vk_init_iqm_gpu_skinning — create descriptor set layout, pipeline layout,
+bone UBOs, descriptors, and the graphics pipeline
+===============
+*/
+void vk_init_iqm_gpu_skinning( void )
+{
+	VkDescriptorSetLayoutBinding binds[1];
+	VkDescriptorSetLayoutCreateInfo layoutInfo;
+	VkPushConstantRange pushRange;
+	VkPipelineLayoutCreateInfo pipeLayoutInfo;
+	VkDescriptorSetLayout setLayouts[2];
+	VkMemoryRequirements memReqs;
+	VkMemoryAllocateInfo allocInfo;
+	VkBufferCreateInfo bufInfo;
+	VkDescriptorSetAllocateInfo allocDesc;
+	VkDescriptorBufferInfo bufDesc;
+	VkWriteDescriptorSet writeDesc;
+	int i;
+
+	vk.iqmGpu.available = qfalse;
+
+	// descriptor set layout for bone matrices (set 0, binding 0, UBO)
+	Com_Memset( binds, 0, sizeof( binds ) );
+	binds[0].binding = 0;
+	binds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	binds[0].descriptorCount = 1;
+	binds[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	binds[0].pImmutableSamplers = NULL;
+
+	Com_Memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 1;
+	layoutInfo.pBindings = binds;
+
+	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.iqmGpu.set_layout_bones ) );
+
+	// pipeline layout: push constants (MVP 64 bytes) + set 0 (bones) + set 1 (texture sampler)
+	pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	pushRange.offset = 0;
+	pushRange.size = 64; // mat4 MVP
+
+	setLayouts[0] = vk.iqmGpu.set_layout_bones;
+	setLayouts[1] = vk.set_layout_sampler;
+
+	Com_Memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
+	pipeLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipeLayoutInfo.setLayoutCount = 2;
+	pipeLayoutInfo.pSetLayouts = setLayouts;
+	pipeLayoutInfo.pushConstantRangeCount = 1;
+	pipeLayoutInfo.pPushConstantRanges = &pushRange;
+
+	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.iqmGpu.pipeline_layout ) );
+
+	// per-frame bone UBOs (host-visible, persistently mapped)
+	Com_Memset( &bufInfo, 0, sizeof( bufInfo ) );
+	bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufInfo.size = IQM_BONE_UBO_SIZE;
+	bufInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.iqmGpu.bone_buffer[i] ) );
+
+		qvkGetBufferMemoryRequirements( vk.device, vk.iqmGpu.bone_buffer[i], &memReqs );
+
+		Com_Memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memReqs.size;
+		allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.iqmGpu.bone_memory[i] ) );
+		VK_CHECK( qvkBindBufferMemory( vk.device, vk.iqmGpu.bone_buffer[i], vk.iqmGpu.bone_memory[i], 0 ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.iqmGpu.bone_memory[i], 0, IQM_BONE_UBO_SIZE, 0, (void **)&vk.iqmGpu.bone_ptr[i] ) );
+
+		// allocate descriptor set
+		Com_Memset( &allocDesc, 0, sizeof( allocDesc ) );
+		allocDesc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocDesc.descriptorPool = vk.descriptor_pool;
+		allocDesc.descriptorSetCount = 1;
+		allocDesc.pSetLayouts = &vk.iqmGpu.set_layout_bones;
+
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &allocDesc, &vk.iqmGpu.bone_descriptor[i] ) );
+
+		// update descriptor to point at bone UBO
+		Com_Memset( &bufDesc, 0, sizeof( bufDesc ) );
+		bufDesc.buffer = vk.iqmGpu.bone_buffer[i];
+		bufDesc.offset = 0;
+		bufDesc.range = IQM_BONE_UBO_SIZE;
+
+		Com_Memset( &writeDesc, 0, sizeof( writeDesc ) );
+		writeDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writeDesc.dstSet = vk.iqmGpu.bone_descriptor[i];
+		writeDesc.dstBinding = 0;
+		writeDesc.dstArrayElement = 0;
+		writeDesc.descriptorCount = 1;
+		writeDesc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		writeDesc.pBufferInfo = &bufDesc;
+
+		qvkUpdateDescriptorSets( vk.device, 1, &writeDesc, 0, NULL );
+	}
+
+	// create the graphics pipeline
+	{
+		VkGraphicsPipelineCreateInfo gpInfo;
+		VkPipelineShaderStageCreateInfo stages[2];
+		VkPipelineVertexInputStateCreateInfo vertexInput;
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+		VkPipelineViewportStateCreateInfo viewportState;
+		VkPipelineRasterizationStateCreateInfo rasterizer;
+		VkPipelineMultisampleStateCreateInfo multisampling;
+		VkPipelineDepthStencilStateCreateInfo depthStencil;
+		VkPipelineColorBlendAttachmentState blendAttach;
+		VkPipelineColorBlendStateCreateInfo colorBlend;
+		VkPipelineDynamicStateCreateInfo dynamicState;
+		VkDynamicState dynStates[2];
+		VkViewport viewport;
+		VkRect2D scissor;
+		VkVertexInputBindingDescription iqmBindings[1];
+		VkVertexInputAttributeDescription iqmAttribs[6];
+
+		// interleaved vertex layout: pos(3f) + normal(3f) + texcoord(2f) + tangent(4f) + weights(4f) + indices(4u8)
+		// stride = 3*4 + 3*4 + 2*4 + 4*4 + 4*4 + 4*1 = 12+12+8+16+16+4 = 68 bytes
+		uint32_t stride = 68;
+
+		Com_Memset( &gpInfo, 0, sizeof( gpInfo ) );
+		Com_Memset( stages, 0, sizeof( stages ) );
+
+		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[0].module = vk.modules.iqm_skinning_vs;
+		stages[0].pName = "main";
+
+		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stages[1].module = vk.modules.iqm_skinning_fs;
+		stages[1].pName = "main";
+
+		// single interleaved binding
+		iqmBindings[0].binding = 0;
+		iqmBindings[0].stride = stride;
+		iqmBindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+		// location 0: position (vec3)
+		iqmAttribs[0].location = 0;
+		iqmAttribs[0].binding = 0;
+		iqmAttribs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+		iqmAttribs[0].offset = 0;
+
+		// location 1: normal (vec3)
+		iqmAttribs[1].location = 1;
+		iqmAttribs[1].binding = 0;
+		iqmAttribs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+		iqmAttribs[1].offset = 12;
+
+		// location 2: texcoord (vec2)
+		iqmAttribs[2].location = 2;
+		iqmAttribs[2].binding = 0;
+		iqmAttribs[2].format = VK_FORMAT_R32G32_SFLOAT;
+		iqmAttribs[2].offset = 24;
+
+		// location 3: tangent (vec4) — xyz tangent + w bitangent sign
+		iqmAttribs[3].location = 3;
+		iqmAttribs[3].binding = 0;
+		iqmAttribs[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+		iqmAttribs[3].offset = 32;
+
+		// location 4: bone weights (vec4)
+		iqmAttribs[4].location = 4;
+		iqmAttribs[4].binding = 0;
+		iqmAttribs[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+		iqmAttribs[4].offset = 48;
+
+		// location 5: bone indices (uvec4, stored as R8G8B8A8_UINT)
+		iqmAttribs[5].location = 5;
+		iqmAttribs[5].binding = 0;
+		iqmAttribs[5].format = VK_FORMAT_R8G8B8A8_UINT;
+		iqmAttribs[5].offset = 64;
+
+		Com_Memset( &vertexInput, 0, sizeof( vertexInput ) );
+		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		vertexInput.vertexBindingDescriptionCount = 1;
+		vertexInput.pVertexBindingDescriptions = iqmBindings;
+		vertexInput.vertexAttributeDescriptionCount = 6;
+		vertexInput.pVertexAttributeDescriptions = iqmAttribs;
+
+		Com_Memset( &inputAssembly, 0, sizeof( inputAssembly ) );
+		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
+		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
+
+		Com_Memset( &dynamicState, 0, sizeof( dynamicState ) );
+		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = 2;
+		dynamicState.pDynamicStates = dynStates;
+
+		Com_Memset( &viewport, 0, sizeof( viewport ) );
+		viewport.width = (float)vk.renderWidth;
+		viewport.height = (float)vk.renderHeight;
+		viewport.maxDepth = 1.0f;
+
+		Com_Memset( &scissor, 0, sizeof( scissor ) );
+		scissor.extent.width = vk.renderWidth;
+		scissor.extent.height = vk.renderHeight;
+
+		Com_Memset( &viewportState, 0, sizeof( viewportState ) );
+		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.pViewports = &viewport;
+		viewportState.scissorCount = 1;
+		viewportState.pScissors = &scissor;
+
+		Com_Memset( &rasterizer, 0, sizeof( rasterizer ) );
+		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterizer.lineWidth = 1.0f;
+		rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
+		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+		Com_Memset( &multisampling, 0, sizeof( multisampling ) );
+		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.rasterizationSamples = vk.msaaActive ? vkSamples : VK_SAMPLE_COUNT_1_BIT;
+
+		Com_Memset( &depthStencil, 0, sizeof( depthStencil ) );
+		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable = VK_TRUE;
+		depthStencil.depthWriteEnable = VK_TRUE;
+#ifdef USE_REVERSED_DEPTH
+		depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+#else
+		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+#endif
+
+		Com_Memset( &blendAttach, 0, sizeof( blendAttach ) );
+		blendAttach.blendEnable = VK_FALSE;
+		blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+		Com_Memset( &colorBlend, 0, sizeof( colorBlend ) );
+		colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlend.attachmentCount = 1;
+		colorBlend.pAttachments = &blendAttach;
+
+		gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		gpInfo.stageCount = 2;
+		gpInfo.pStages = stages;
+		gpInfo.pVertexInputState = &vertexInput;
+		gpInfo.pInputAssemblyState = &inputAssembly;
+		gpInfo.pViewportState = &viewportState;
+		gpInfo.pRasterizationState = &rasterizer;
+		gpInfo.pMultisampleState = &multisampling;
+		gpInfo.pDepthStencilState = &depthStencil;
+		gpInfo.pColorBlendState = &colorBlend;
+		gpInfo.pDynamicState = &dynamicState;
+		gpInfo.layout = vk.iqmGpu.pipeline_layout;
+		gpInfo.renderPass = vk.render_pass.main;
+		gpInfo.subpass = 0;
+
+		VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &gpInfo, NULL, &vk.iqmGpu.pipeline ) );
+	}
+
+	vk.iqmGpu.available = qtrue;
+
+	ri.Printf( PRINT_ALL, "IQM GPU skinning initialized (bone UBO %d bytes)\n",
+		(int)IQM_BONE_UBO_SIZE );
+}
+
+
+/*
+===============
+vk_shutdown_iqm_gpu_skinning
+===============
+*/
+void vk_shutdown_iqm_gpu_skinning( void )
+{
+	int i;
+
+	if ( vk.iqmGpu.pipeline != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.iqmGpu.pipeline, NULL );
+		vk.iqmGpu.pipeline = VK_NULL_HANDLE;
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.iqmGpu.bone_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.iqmGpu.bone_buffer[i], NULL );
+			if ( vk.iqmGpu.bone_memory[i] != VK_NULL_HANDLE ) {
+				qvkFreeMemory( vk.device, vk.iqmGpu.bone_memory[i], NULL );
+			}
+			vk.iqmGpu.bone_buffer[i] = VK_NULL_HANDLE;
+			vk.iqmGpu.bone_memory[i] = VK_NULL_HANDLE;
+			vk.iqmGpu.bone_ptr[i] = NULL;
+		}
+	}
+
+	if ( vk.iqmGpu.pipeline_layout != VK_NULL_HANDLE ) {
+		qvkDestroyPipelineLayout( vk.device, vk.iqmGpu.pipeline_layout, NULL );
+		vk.iqmGpu.pipeline_layout = VK_NULL_HANDLE;
+	}
+
+	if ( vk.iqmGpu.set_layout_bones != VK_NULL_HANDLE ) {
+		qvkDestroyDescriptorSetLayout( vk.device, vk.iqmGpu.set_layout_bones, NULL );
+		vk.iqmGpu.set_layout_bones = VK_NULL_HANDLE;
+	}
+
+	vk.iqmGpu.available = qfalse;
+}
+
+
+/*
+===============
+vk_create_iqm_vbo — create device-local vertex + index buffers for an IQM model
+Uses the staging buffer to upload data.
+===============
+*/
+qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
+	VkBuffer *outIdxBuf, VkDeviceMemory *outIdxMem,
+	const byte *vertData, int vertSize,
+	const byte *idxData, int idxSize )
+{
+	VkBufferCreateInfo bufDesc;
+	VkMemoryRequirements memReqs;
+	VkMemoryAllocateInfo allocInfo;
+	VkCommandBuffer cmdBuf;
+	VkBufferCopy copyRegion;
+
+	if ( !vk.iqmGpu.available )
+		return qfalse;
+
+	// check that the staging buffer can hold the data
+	if ( (VkDeviceSize)(vertSize + idxSize) > vk.staging_buffer.size ) {
+		ri.Printf( PRINT_WARNING, "vk_create_iqm_vbo: data too large for staging buffer (%d > %d)\n",
+			vertSize + idxSize, (int)vk.staging_buffer.size );
+		return qfalse;
+	}
+
+	// create device-local vertex buffer
+	Com_Memset( &bufDesc, 0, sizeof( bufDesc ) );
+	bufDesc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufDesc.size = vertSize;
+	bufDesc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	bufDesc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	VK_CHECK( qvkCreateBuffer( vk.device, &bufDesc, NULL, outVertBuf ) );
+
+	qvkGetBufferMemoryRequirements( vk.device, *outVertBuf, &memReqs );
+	Com_Memset( &allocInfo, 0, sizeof( allocInfo ) );
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memReqs.size;
+	allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, outVertMem ) );
+	VK_CHECK( qvkBindBufferMemory( vk.device, *outVertBuf, *outVertMem, 0 ) );
+
+	// create device-local index buffer
+	bufDesc.size = idxSize;
+	bufDesc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+	VK_CHECK( qvkCreateBuffer( vk.device, &bufDesc, NULL, outIdxBuf ) );
+
+	qvkGetBufferMemoryRequirements( vk.device, *outIdxBuf, &memReqs );
+	allocInfo.allocationSize = memReqs.size;
+	allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, outIdxMem ) );
+	VK_CHECK( qvkBindBufferMemory( vk.device, *outIdxBuf, *outIdxMem, 0 ) );
+
+	// upload vertex data via staging buffer
+	{
+		VkCommandBufferAllocateInfo cmdAlloc;
+		VkCommandBufferBeginInfo beginInfo;
+		VkSubmitInfo submitInfo;
+		VkFence fence;
+		VkFenceCreateInfo fenceInfo;
+
+		Com_Memset( &cmdAlloc, 0, sizeof( cmdAlloc ) );
+		cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cmdAlloc.commandPool = vk.command_pool;
+		cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cmdAlloc.commandBufferCount = 1;
+		VK_CHECK( qvkAllocateCommandBuffers( vk.device, &cmdAlloc, &cmdBuf ) );
+
+		Com_Memset( &beginInfo, 0, sizeof( beginInfo ) );
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		VK_CHECK( qvkBeginCommandBuffer( cmdBuf, &beginInfo ) );
+
+		// copy vertex data to staging, then staging to device
+		Com_Memcpy( vk.staging_buffer.ptr, vertData, vertSize );
+		Com_Memset( &copyRegion, 0, sizeof( copyRegion ) );
+		copyRegion.size = vertSize;
+		qvkCmdCopyBuffer( cmdBuf, vk.staging_buffer.handle, *outVertBuf, 1, &copyRegion );
+
+		// copy index data to staging, then staging to device
+		Com_Memcpy( vk.staging_buffer.ptr + vertSize, idxData, idxSize );
+		copyRegion.srcOffset = vertSize;
+		copyRegion.dstOffset = 0;
+		copyRegion.size = idxSize;
+		qvkCmdCopyBuffer( cmdBuf, vk.staging_buffer.handle, *outIdxBuf, 1, &copyRegion );
+
+		VK_CHECK( qvkEndCommandBuffer( cmdBuf ) );
+
+		Com_Memset( &fenceInfo, 0, sizeof( fenceInfo ) );
+		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		VK_CHECK( qvkCreateFence( vk.device, &fenceInfo, NULL, &fence ) );
+
+		Com_Memset( &submitInfo, 0, sizeof( submitInfo ) );
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &cmdBuf;
+		VK_CHECK( qvkQueueSubmit( vk.queue, 1, &submitInfo, fence ) );
+		VK_CHECK( qvkWaitForFences( vk.device, 1, &fence, VK_TRUE, 1e10 ) );
+
+		qvkDestroyFence( vk.device, fence, NULL );
+		qvkFreeCommandBuffers( vk.device, vk.command_pool, 1, &cmdBuf );
+	}
+
+	return qtrue;
+}
+
+
+/*
+===============
+vk_destroy_iqm_vbo — release per-model VBO resources
+===============
+*/
+void vk_destroy_iqm_vbo( VkBuffer *vertBuf, VkDeviceMemory *vertMem,
+	VkBuffer *idxBuf, VkDeviceMemory *idxMem )
+{
+	if ( *vertBuf != VK_NULL_HANDLE ) {
+		qvkDestroyBuffer( vk.device, *vertBuf, NULL );
+		*vertBuf = VK_NULL_HANDLE;
+	}
+	if ( *vertMem != VK_NULL_HANDLE ) {
+		qvkFreeMemory( vk.device, *vertMem, NULL );
+		*vertMem = VK_NULL_HANDLE;
+	}
+	if ( *idxBuf != VK_NULL_HANDLE ) {
+		qvkDestroyBuffer( vk.device, *idxBuf, NULL );
+		*idxBuf = VK_NULL_HANDLE;
+	}
+	if ( *idxMem != VK_NULL_HANDLE ) {
+		qvkFreeMemory( vk.device, *idxMem, NULL );
+		*idxMem = VK_NULL_HANDLE;
+	}
+}
+
+
+/*
+===============
+vk_draw_iqm_gpu — issue a GPU-skinned IQM draw call
+
+Binds the IQM pipeline, uploads bone matrices, binds the per-model VBO,
+binds the texture descriptor, and issues a drawIndexed call.
+Must be called during an active render pass.
+===============
+*/
+void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
+	int firstIndex, int numIndexes,
+	const float *boneMats, int numBones,
+	VkDescriptorSet textureDescriptor,
+	const float *mvp )
+{
+	VkCommandBuffer cmd;
+	int frameIdx;
+	VkDeviceSize vertOffset;
+	VkViewport viewport;
+	VkRect2D scissor;
+
+	if ( !vk.iqmGpu.available )
+		return;
+
+	if ( vk.geometry_buffer_size_new )
+		return; // geometry buffer overflow this frame
+
+	cmd = vk.cmd->command_buffer;
+	frameIdx = vk.cmd_index;
+
+	// upload bone matrices to per-frame UBO
+	// each bone is 3 * vec4 = 48 bytes
+	Com_Memcpy( vk.iqmGpu.bone_ptr[frameIdx], boneMats, numBones * 3 * sizeof( vec4_t ) );
+
+	// bind IQM skinning pipeline
+	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.iqmGpu.pipeline );
+
+	// push MVP matrix
+	qvkCmdPushConstants( cmd, vk.iqmGpu.pipeline_layout,
+		VK_SHADER_STAGE_VERTEX_BIT, 0, 64, mvp );
+
+	// bind descriptor set 0: bone matrices
+	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		vk.iqmGpu.pipeline_layout, 0, 1,
+		&vk.iqmGpu.bone_descriptor[frameIdx], 0, NULL );
+
+	// bind descriptor set 1: texture
+	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		vk.iqmGpu.pipeline_layout, 1, 1,
+		&textureDescriptor, 0, NULL );
+
+	// bind vertex buffer
+	vertOffset = 0;
+	qvkCmdBindVertexBuffers( cmd, 0, 1, &vertBuffer, &vertOffset );
+
+	// bind index buffer
+	qvkCmdBindIndexBuffer( cmd, idxBuffer, 0, VK_INDEX_TYPE_UINT32 );
+
+	// set viewport and scissor
+	Com_Memset( &viewport, 0, sizeof( viewport ) );
+	viewport.x = (float)backEnd.viewParms.viewportX;
+	viewport.y = (float)backEnd.viewParms.viewportY;
+	viewport.width = (float)backEnd.viewParms.viewportWidth;
+	viewport.height = (float)backEnd.viewParms.viewportHeight;
+	viewport.maxDepth = 1.0f;
+	qvkCmdSetViewport( cmd, 0, 1, &viewport );
+
+	Com_Memset( &scissor, 0, sizeof( scissor ) );
+	scissor.offset.x = backEnd.viewParms.viewportX;
+	scissor.offset.y = backEnd.viewParms.viewportY;
+	scissor.extent.width = backEnd.viewParms.viewportWidth;
+	scissor.extent.height = backEnd.viewParms.viewportHeight;
+	qvkCmdSetScissor( cmd, 0, 1, &scissor );
+
+	// draw
+	qvkCmdDrawIndexed( cmd, numIndexes, 1, firstIndex, 0, 0 );
+
+	// invalidate pipeline and descriptor state so the next standard draw
+	// rebinds correctly (we bound a different pipeline layout)
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT; // force viewport/scissor update
+	Com_Memset( vk.cmd->descriptor_set.current, 0, sizeof( vk.cmd->descriptor_set.current ) );
+	vk.cmd->descriptor_set.start = ~0U;
+	vk.cmd->descriptor_set.end = 0;
+}
+#endif // FEAT_IQM
+
+
 #ifdef USE_VBO
 void vk_release_vbo( void )
 {
@@ -3709,6 +4293,13 @@ static void vk_create_shader_modules( void )
 
 	SET_OBJECT_NAME( vk.modules.gamma_fs, "gamma post-processing fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.gamma_vs, "gamma post-processing vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
+#if defined(FEAT_IQM)
+	vk.modules.iqm_skinning_vs = SHADER_MODULE( iqm_skinning_vert_spv );
+	vk.modules.iqm_skinning_fs = SHADER_MODULE( iqm_skinning_frag_spv );
+	SET_OBJECT_NAME( vk.modules.iqm_skinning_vs, "IQM skinning vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+	SET_OBJECT_NAME( vk.modules.iqm_skinning_fs, "IQM skinning fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+#endif
 }
 
 
@@ -5686,7 +6277,7 @@ void vk_initialize( void )
 	// Descriptor pool.
 	//
 	{
-		VkDescriptorPoolSize pool_size[4];
+		VkDescriptorPoolSize pool_size[5];
 		VkDescriptorPoolCreateInfo desc;
 		uint32_t i, maxSets;
 
@@ -5704,6 +6295,10 @@ void vk_initialize( void )
 
 		pool_size[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		pool_size[3].descriptorCount = 8;
+
+		// IQM GPU skinning: per-frame bone matrix UBOs (non-dynamic uniform buffers)
+		pool_size[4].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		pool_size[4].descriptorCount = NUM_COMMAND_BUFFERS;
 
 		for ( i = 0, maxSets = 0; i < ARRAY_LEN( pool_size ); i++ ) {
 			maxSets += pool_size[i].descriptorCount;
@@ -5863,6 +6458,11 @@ void vk_initialize( void )
 
 	// rail trail GPU resources — must be after shader modules are loaded
 	vk_init_rail_compute();
+
+#if defined(FEAT_IQM)
+	// IQM GPU skinning — must be after shader modules and descriptor pool
+	vk_init_iqm_gpu_skinning();
+#endif
 
 	{
 		VkPipelineCacheCreateInfo ci;
@@ -6202,6 +6802,9 @@ void vk_shutdown( refShutdownCode_t code )
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_storage, NULL);
 	vk_shutdown_rail_compute();
+#if defined(FEAT_IQM)
+	vk_shutdown_iqm_gpu_skinning();
+#endif
 	vk_shutdown_compute();
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_post_process, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_blend, NULL);
@@ -6365,6 +6968,23 @@ void vk_release_resources( void ) {
 	int i, j;
 
 	vk_wait_idle();
+
+#if defined(FEAT_IQM)
+	// destroy per-model IQM GPU skinning VBOs before hunk is reset
+	if ( vk.iqmGpu.available ) {
+		for ( i = 0; i < tr.numModels; i++ ) {
+			model_t *mod = tr.models[i];
+			if ( mod && mod->type == MOD_IQM && mod->modelData ) {
+				iqmData_t *data = (iqmData_t *)mod->modelData;
+				if ( data->vk_gpu_skinning ) {
+					vk_destroy_iqm_vbo( &data->vk_vertex_buffer, &data->vk_vertex_memory,
+						&data->vk_index_buffer, &data->vk_index_memory );
+					data->vk_gpu_skinning = qfalse;
+				}
+			}
+		}
+	}
+#endif
 
 	for (i = 0; i < vk_world.num_image_chunks; i++)
 		qvkFreeMemory(vk.device, vk_world.image_chunks[i].memory, NULL);

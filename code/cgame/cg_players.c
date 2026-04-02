@@ -79,6 +79,174 @@ CLIENT INFO
 =============================================================================
 */
 
+#if defined(FEAT_IQM)
+/*
+======================
+IQM embedded animation name-to-enum mapping table.
+Content creators name their IQM animations with these strings.
+======================
+*/
+static const struct {
+	const char	*name;
+	int		anim;
+} iqmAnimNames[] = {
+	{ "BOTH_DEATH1",		BOTH_DEATH1 },
+	{ "BOTH_DEAD1",		BOTH_DEAD1 },
+	{ "BOTH_DEATH2",		BOTH_DEATH2 },
+	{ "BOTH_DEAD2",		BOTH_DEAD2 },
+	{ "BOTH_DEATH3",		BOTH_DEATH3 },
+	{ "BOTH_DEAD3",		BOTH_DEAD3 },
+	{ "TORSO_GESTURE",		TORSO_GESTURE },
+	{ "TORSO_ATTACK",		TORSO_ATTACK },
+	{ "TORSO_ATTACK2",		TORSO_ATTACK2 },
+	{ "TORSO_DROP",			TORSO_DROP },
+	{ "TORSO_RAISE",		TORSO_RAISE },
+	{ "TORSO_STAND",		TORSO_STAND },
+	{ "TORSO_STAND2",		TORSO_STAND2 },
+	{ "LEGS_WALKCR",		LEGS_WALKCR },
+	{ "LEGS_WALK",			LEGS_WALK },
+	{ "LEGS_RUN",			LEGS_RUN },
+	{ "LEGS_BACK",			LEGS_BACK },
+	{ "LEGS_SWIM",			LEGS_SWIM },
+	{ "LEGS_JUMP",			LEGS_JUMP },
+	{ "LEGS_LAND",			LEGS_LAND },
+	{ "LEGS_JUMPB",			LEGS_JUMPB },
+	{ "LEGS_LANDB",			LEGS_LANDB },
+	{ "LEGS_IDLE",			LEGS_IDLE },
+	{ "LEGS_IDLECR",		LEGS_IDLECR },
+	{ "LEGS_TURN",			LEGS_TURN },
+	{ "TORSO_GETFLAG",		TORSO_GETFLAG },
+	{ "TORSO_GUARDBASE",		TORSO_GUARDBASE },
+	{ "TORSO_PATROL",		TORSO_PATROL },
+	{ "TORSO_FOLLOWME",		TORSO_FOLLOWME },
+	{ "TORSO_AFFIRMATIVE",		TORSO_AFFIRMATIVE },
+	{ "TORSO_NEGATIVE",		TORSO_NEGATIVE },
+	{ "LEGS_BACKCR",		LEGS_BACKCR },
+	{ "LEGS_BACKWALK",		LEGS_BACKWALK },
+	{ "FLAG_RUN",			FLAG_RUN },
+	{ "FLAG_STAND",			FLAG_STAND },
+	{ "FLAG_STAND2RUN",		FLAG_STAND2RUN },
+};
+static const int numIqmAnimNames = ARRAY_LEN( iqmAnimNames );
+
+
+/*
+======================
+CG_ParseIQMAnimations
+
+Map embedded IQM animation names to Q3 animation enums.
+Returns qtrue if at least one animation was successfully mapped.
+======================
+*/
+static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci ) {
+	iqmAnimInfo_t	iqmAnims[MAX_IQM_ANIMS];
+	int		numAnims;
+	int		i, j;
+	animation_t	*animations;
+	qboolean	mapped[MAX_TOTALANIMATIONS];
+	int		mappedCount;
+
+	numAnims = trap_R_GetIQMAnimations( ci->bodyModel, iqmAnims, MAX_IQM_ANIMS );
+	if ( numAnims <= 0 ) {
+		return qfalse;
+	}
+
+	animations = ci->animations;
+	memset( mapped, 0, sizeof( mapped ) );
+	mappedCount = 0;
+
+	// set sensible defaults for all animations
+	ci->footsteps = FOOTSTEP_NORMAL;
+	VectorClear( ci->headOffset );
+	ci->gender = GENDER_NEUTER;
+	ci->fixedlegs = qfalse;
+	ci->fixedtorso = qfalse;
+
+	for ( i = 0; i < numAnims; i++ ) {
+		qboolean found = qfalse;
+		for ( j = 0; j < numIqmAnimNames; j++ ) {
+			if ( !Q_stricmp( iqmAnims[i].name, iqmAnimNames[j].name ) ) {
+				int animIdx = iqmAnimNames[j].anim;
+				float fps;
+
+				animations[animIdx].firstFrame = iqmAnims[i].first_frame;
+				animations[animIdx].numFrames = iqmAnims[i].num_frames;
+				animations[animIdx].loopFrames = ( iqmAnims[i].flags & 1 ) ? iqmAnims[i].num_frames : 0;  // IQM_LOOP = 1<<0
+				fps = iqmAnims[i].framerate;
+				if ( fps == 0 ) {
+					fps = 1;
+				}
+				animations[animIdx].frameLerp = (int)( 1000.0f / fps );
+				animations[animIdx].initialLerp = (int)( 1000.0f / fps );
+				animations[animIdx].reversed = qfalse;
+				animations[animIdx].flipflop = qfalse;
+
+				mapped[animIdx] = qtrue;
+				mappedCount++;
+				found = qtrue;
+				break;
+			}
+		}
+		if ( !found ) {
+			Com_Printf( "IQM %s: unmapped animation '%s'\n", modelName, iqmAnims[i].name );
+		}
+	}
+
+	if ( mappedCount == 0 ) {
+		return qfalse;
+	}
+
+	// warn about unmapped Q3 animation enums (developer-level)
+	for ( i = 0; i < MAX_ANIMATIONS; i++ ) {
+		if ( !mapped[i] ) {
+			Com_Printf( "IQM %s: missing Q3 animation enum %d\n", modelName, i );
+		}
+	}
+
+	// synthesize backward animations from forward ones if not explicitly mapped
+	if ( !mapped[LEGS_BACKCR] && mapped[LEGS_WALKCR] ) {
+		memcpy( &animations[LEGS_BACKCR], &animations[LEGS_WALKCR], sizeof(animation_t) );
+		animations[LEGS_BACKCR].reversed = qtrue;
+	}
+	if ( !mapped[LEGS_BACKWALK] && mapped[LEGS_WALK] ) {
+		memcpy( &animations[LEGS_BACKWALK], &animations[LEGS_WALK], sizeof(animation_t) );
+		animations[LEGS_BACKWALK].reversed = qtrue;
+	}
+
+	// set default flag animations if not mapped
+	if ( !mapped[FLAG_RUN] ) {
+		animations[FLAG_RUN].firstFrame = 0;
+		animations[FLAG_RUN].numFrames = 16;
+		animations[FLAG_RUN].loopFrames = 16;
+		animations[FLAG_RUN].frameLerp = 1000 / 15;
+		animations[FLAG_RUN].initialLerp = 1000 / 15;
+		animations[FLAG_RUN].reversed = qfalse;
+	}
+	if ( !mapped[FLAG_STAND] ) {
+		animations[FLAG_STAND].firstFrame = 16;
+		animations[FLAG_STAND].numFrames = 5;
+		animations[FLAG_STAND].loopFrames = 0;
+		animations[FLAG_STAND].frameLerp = 1000 / 20;
+		animations[FLAG_STAND].initialLerp = 1000 / 20;
+		animations[FLAG_STAND].reversed = qfalse;
+	}
+	if ( !mapped[FLAG_STAND2RUN] ) {
+		animations[FLAG_STAND2RUN].firstFrame = 16;
+		animations[FLAG_STAND2RUN].numFrames = 5;
+		animations[FLAG_STAND2RUN].loopFrames = 1;
+		animations[FLAG_STAND2RUN].frameLerp = 1000 / 15;
+		animations[FLAG_STAND2RUN].initialLerp = 1000 / 15;
+		animations[FLAG_STAND2RUN].reversed = qtrue;
+	}
+
+	Com_Printf( "IQM %s: mapped %d/%d animations from embedded data\n",
+		modelName, mappedCount, numAnims );
+
+	return qtrue;
+}
+#endif // FEAT_IQM
+
+
 /*
 ======================
 CG_ParseAnimationFile
@@ -88,7 +256,7 @@ models/players/visor/animation.cfg, etc
 ======================
 */
 static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) {
-	char		*text_p, *prev;
+	const char	*text_p, *prev;
 	int			len;
 	int			i;
 	const char	*token;
@@ -120,7 +288,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 
 	ci->footsteps = FOOTSTEP_NORMAL;
 	VectorClear( ci->headOffset );
-	ci->gender = GENDER_MALE;
+	ci->gender = GENDER_NEUTER;
 	ci->fixedlegs = qfalse;
 	ci->fixedtorso = qfalse;
 
@@ -157,19 +325,6 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 					break;
 				}
 				ci->headOffset[i] = atof( token );
-			}
-			continue;
-		} else if ( !Q_stricmp( token, "sex" ) ) {
-			token = COM_Parse( &text_p );
-			if ( !token[0] ) {
-				break;
-			}
-			if ( token[0] == 'f' || token[0] == 'F' ) {
-				ci->gender = GENDER_FEMALE;
-			} else if ( token[0] == 'n' || token[0] == 'N' ) {
-				ci->gender = GENDER_NEUTER;
-			} else {
-				ci->gender = GENDER_MALE;
 			}
 			continue;
 		} else if ( !Q_stricmp( token, "fixedlegs" ) ) {
@@ -530,6 +685,58 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *modelN
 	else {
 		headName = headModelName;
 	}
+
+#if defined(FEAT_IQM)
+	// Try body.iqm first for single-mesh IQM player model
+	Com_sprintf( filename, sizeof( filename ), "models/players/%s/body.iqm", modelName );
+	ci->bodyModel = trap_R_RegisterModel( filename );
+	if ( ci->bodyModel ) {
+		ci->iqmModel = qtrue;
+		// For IQM, the single model serves as legs, torso, and head
+		ci->legsModel = ci->bodyModel;
+		ci->torsoModel = ci->bodyModel;
+		ci->headModel = ci->bodyModel;
+		// Load skin
+		Com_sprintf( filename, sizeof( filename ), "models/players/%s/body_%s.skin", modelName, skinName );
+		ci->bodySkin = trap_R_RegisterSkin( filename );
+		if ( !ci->bodySkin ) {
+			Com_sprintf( filename, sizeof( filename ), "models/players/%s/body_default.skin", modelName );
+			ci->bodySkin = trap_R_RegisterSkin( filename );
+		}
+		if ( !ci->bodySkin ) {
+			Com_sprintf( filename, sizeof( filename ), "models/players/%s/default.skin", modelName );
+			ci->bodySkin = trap_R_RegisterSkin( filename );
+		}
+		ci->legsSkin = ci->bodySkin;
+		ci->torsoSkin = ci->bodySkin;
+		ci->headSkin = ci->bodySkin;
+
+		// load animations: try embedded IQM anims first, fall back to animation.cfg
+		if ( !CG_ParseIQMAnimations( modelName, ci ) ) {
+			Com_sprintf( filename, sizeof( filename ), "models/players/%s/animation.cfg", modelName );
+			if ( !CG_ParseAnimationFile( filename, ci ) ) {
+				Com_Printf( "Failed to load animation file %s\n", filename );
+				return qfalse;
+			}
+		}
+
+		// load icon
+		if ( CG_FindClientHeadFile( filename, sizeof(filename), ci, teamName, headName, headSkinName, "icon", "skin" ) ) {
+			ci->modelIcon = trap_R_RegisterShaderNoMip( filename );
+		}
+		else if ( CG_FindClientHeadFile( filename, sizeof(filename), ci, teamName, headName, headSkinName, "icon", "png" ) ) {
+			ci->modelIcon = trap_R_RegisterShaderNoMip( filename );
+		}
+		else if ( CG_FindClientHeadFile( filename, sizeof(filename), ci, teamName, headName, headSkinName, "icon", "jpg" ) ) {
+			ci->modelIcon = trap_R_RegisterShaderNoMip( filename );
+		}
+
+		return qtrue;
+	} else {
+		ci->iqmModel = qfalse;
+	}
+#endif // FEAT_IQM
+
 	Com_sprintf( filename, sizeof( filename ), "models/players/%s/lower.md3", modelName );
 	ci->legsModel = trap_R_RegisterModel( filename );
 	if ( !ci->legsModel ) {
@@ -602,9 +809,17 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *modelN
 	if ( CG_FindClientHeadFile( filename, sizeof(filename), ci, teamName, headName, headSkinName, "icon", "skin" ) ) {
 		ci->modelIcon = trap_R_RegisterShaderNoMip( filename );
 	}
+	else if ( CG_FindClientHeadFile( filename, sizeof(filename), ci, teamName, headName, headSkinName, "icon", "png" ) ) {
+		ci->modelIcon = trap_R_RegisterShaderNoMip( filename );
+	}
+	else if ( CG_FindClientHeadFile( filename, sizeof(filename), ci, teamName, headName, headSkinName, "icon", "jpg" ) ) {
+		ci->modelIcon = trap_R_RegisterShaderNoMip( filename );
+	}
+#if FEAT_LEGACY_FORMATS_IMAGE
 	else if ( CG_FindClientHeadFile( filename, sizeof(filename), ci, teamName, headName, headSkinName, "icon", "tga" ) ) {
 		ci->modelIcon = trap_R_RegisterShaderNoMip( filename );
 	}
+#endif
 
 	if ( !ci->modelIcon ) {
 		return qfalse;
@@ -2413,6 +2628,56 @@ void CG_Player( centity_t *cent ) {
 		CG_PlayerTokens( cent, renderfx );
 	}
 #endif
+#if defined(FEAT_IQM)
+	//
+	// IQM single-mesh player model rendering
+	//
+	if ( ci->iqmModel ) {
+		refEntity_t body;
+
+		memset( &body, 0, sizeof(body) );
+
+		body.hModel = ci->bodyModel;
+		body.customSkin = ci->bodySkin;
+
+		VectorCopy( cent->lerpOrigin, body.origin );
+		VectorCopy( cent->lerpOrigin, body.lightingOrigin );
+		body.shadowPlane = shadowPlane;
+		body.renderfx = renderfx;
+		VectorCopy( body.origin, body.oldorigin );
+
+		// use legs animation frames for the single-mesh model
+		body.frame = legs.frame;
+		body.oldframe = legs.oldframe;
+		body.backlerp = legs.backlerp;
+
+		// copy rotation from legs (full-body orientation)
+		AxisCopy( legs.axis, body.axis );
+
+#if FEAT_THIRD_PERSON
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
+		if ( thirdPersonAlpha < 255 ) {
+			body.renderfx |= RF_FORCE_ENT_ALPHA;
+			body.shaderRGBA[3] = thirdPersonAlpha;
+		}
+#endif
+#endif
+
+		CG_AddRefEntityWithPowerups( cent, &body, &cent->currentState, qtrue, ci->team );
+
+		if ( !body.hModel ) {
+			return;
+		}
+
+		// attach weapon to tag_weapon joint in the IQM model
+		CG_AddPlayerWeapon( &body, NULL, cent, ci->team );
+
+		// add powerups floating behind the player
+		CG_PlayerPowerups( cent, &body );
+		return;
+	}
+#endif // FEAT_IQM
+
 	//
 	// add the legs
 	//

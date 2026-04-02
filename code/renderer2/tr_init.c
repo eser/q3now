@@ -298,10 +298,14 @@ static void InitOpenGL( void )
 
 		// reserve 160 components for other uniforms
 		qglGetIntegerv( GL_MAX_VERTEX_UNIFORM_COMPONENTS, &temp );
+#if defined(FEAT_IQM)
 		glRefConfig.glslMaxAnimatedBones = Com_Clamp( 0, IQM_MAX_JOINTS, ( temp - 160 ) / 16 );
 		if ( glRefConfig.glslMaxAnimatedBones < 12 ) {
 			glRefConfig.glslMaxAnimatedBones = 0;
 		}
+#else
+		glRefConfig.glslMaxAnimatedBones = 0;
+#endif // FEAT_IQM
 	}
 
 	// check for GLSL function textureCubeLod()
@@ -1675,6 +1679,10 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.GetConfig = RE_GetConfig;
 	re.VertexLighting = RE_VertexLighting;
 	re.SyncRender = RE_SyncRender;
+
+#if defined(FEAT_IQM)
+	re.GetIQMAnimations = R_GetIQMAnimations;
+#endif // FEAT_IQM
 
 	return &re;
 }

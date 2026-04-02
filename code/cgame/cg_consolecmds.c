@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #if FEAT_TA_UI
-#include "../ui/ui_shared.h"
+#include "ui_shared.h"
 extern menuDef_t *menuScoreboard;
 #endif
 
@@ -155,10 +155,7 @@ static void CG_spLose_f( void) {
 }
 
 static void CG_ReloadHud_f( void ) {
-	CG_SHUDRoutenesDestroyAll();
-	CG_AllocReset();   /* resets temp region only, parser tables survive */
-	CG_SHUDLoadConfig();
-	CG_Printf("SuperHUD config reloaded.\n");
+	CG_Printf("HUD reload (no-op: SuperHUD removed).\n");
 }
 
 static void CG_TellTarget_f( void ) {

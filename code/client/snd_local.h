@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "snd_public.h"
+#include "../qcommon/q_feats.h"
 
 #define	PAINTBUFFER_SIZE		4096					// this is in samples
 
@@ -210,9 +211,20 @@ void S_PaintChannels(int endtime);
 void S_Spatialize(channel_t *ch);
 
 // adpcm functions
+#if FEAT_LEGACY_FORMATS_AUDIO
 int  S_AdpcmMemoryNeeded( const wavinfo_t *info );
 void S_AdpcmEncodeSound( sfx_t *sfx, short *samples );
 void S_AdpcmGetSamples(sndBuffer *chunk, short *to);
+#endif
+
+// Opus in-memory compression (soundCompressionMethod == 4)
+#define OPUS_INMEM_FRAME_SAMPLES	960		// 20ms at 48kHz
+#define OPUS_INMEM_RATE				48000
+
+void  S_OpusEncodeSound( sfx_t *sfx, short *samples );
+void  S_OpusDecoderInit( void );
+void  S_OpusDecoderShutdown( void );
+int   S_OpusGetSamples( const sfx_t *sc, int sampleOffset, short *out, int count );
 
 // wavelet function
 

@@ -25,9 +25,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
 #include "../qcommon/vm_local.h"
-#include "../ui/ui_public.h"
 #include "../cgame/cg_public.h"
 #include "../game/bg_public.h"
+#include "../qcommon/menudef.h"
 #include "snd_public.h"
 #include "keys.h"
 
@@ -375,7 +375,6 @@ qboolean	CL_Download( const char *cmd, const char *pakname, qboolean autoDownloa
 //=============================================================================
 
 extern	vm_t			*cgvm;	// interface to cgame dll or vm
-extern	vm_t			*uivm;	// interface to ui dll or vm
 extern	refexport_t		re;		// interface to refresh .dll
 
 
