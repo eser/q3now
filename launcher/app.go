@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"fmt"
 	"io"
@@ -21,6 +22,8 @@ import (
 	"github.com/eser/q3now/launcher/internal/settings"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+const idQuake3PackURL = "https://objects.eser.live/quakedata/id-quake3pack.zip"
 
 // App is the main application struct. Methods are bound to the frontend via Wails.
 type App struct {
@@ -170,15 +173,12 @@ func (a *App) AcceptEula() error {
 
 // ── Free Resource Downloads ─────────────────────────────────────────────────
 
-// CheckDownloadStatus returns the availability of downloaded demo pk3 files.
+// CheckDownloadStatus returns whether the id-quake3pack has been downloaded and extracted.
 func (a *App) CheckDownloadStatus() map[string]interface{} {
-	dlDir := a.paths.DownloadDir()
-	demoQ3 := fileExists(filepath.Join(dlDir, "demoq3", "pak0.pk3"))
-	demoTA := fileExists(filepath.Join(dlDir, "demota", "pak0.pk3"))
+	packDir := filepath.Join(a.paths.DownloadDir(), "id-quake3pack")
+	ready := dirExists(packDir)
 	return map[string]interface{}{
-		"demoQ3": demoQ3,
-		"demoTA": demoTA,
-		"ready":  demoQ3 && demoTA,
+		"ready": ready,
 	}
 }
 
@@ -210,52 +210,58 @@ func (a *App) runDownload() {
 	a.mu.Unlock()
 
 	dlDir := a.paths.DownloadDir()
+	zipPath := filepath.Join(dlDir, "id-quake3pack.zip")
+	unzipDir := filepath.Join(dlDir, "id-quake3pack")
 
-	downloads := []struct {
-		url     string
-		dest    string
-		label   string
-	}{
-		{pipeline.QuakeDataDemoQ3DownloadUri, filepath.Join(dlDir, "demoq3", "pak0.pk3"), "Q3 Arena Demo"},
-		{pipeline.QuakeDataDemoQ3TADownloadUri, filepath.Join(dlDir, "demota", "pak0.pk3"), "Q3 Team Arena Demo"},
-	}
-
-	for i, dl := range downloads {
-		if ctx.Err() != nil {
-			return
-		}
-
+	// Step 1: Check if zip already downloaded.
+	if fileExists(zipPath) {
+		slog.Info("zip already downloaded, skipping download", "file", zipPath)
+	} else {
+		// Step 2: Download the zip with progress.
 		runtime.EventsEmit(a.ctx, "download:progress", map[string]interface{}{
-			"current": i,
-			"total":   len(downloads),
-			"message": fmt.Sprintf("Downloading %s...", dl.label),
+			"current": 0,
+			"total":   2,
+			"message": "Downloading Quake III data pack...",
 		})
 
-		if fileExists(dl.dest) {
-			slog.Info("already downloaded, skipping", "file", dl.dest)
-			continue
-		}
-
-		if err := downloadFile(ctx, dl.url, dl.dest, func(received, total int64) {
+		if err := downloadFile(ctx, idQuake3PackURL, zipPath, func(received, total int64) {
 			runtime.EventsEmit(a.ctx, "download:progress", map[string]interface{}{
-				"current": i,
-				"total":   len(downloads),
-				"message": fmt.Sprintf("Downloading %s... (%d MB)", dl.label, received/(1024*1024)),
+				"current": 0,
+				"total":   2,
+				"message": fmt.Sprintf("Downloading Quake III data pack... (%d MB)", received/(1024*1024)),
 			})
 		}); err != nil {
 			if ctx.Err() != nil {
 				slog.Info("download cancelled by user")
 				return
 			}
-			slog.Error("download failed", "url", dl.url, "error", err)
+			slog.Error("download failed", "url", idQuake3PackURL, "error", err)
 			runtime.EventsEmit(a.ctx, "download:error", err.Error())
 			return
 		}
 	}
 
+	if ctx.Err() != nil {
+		return
+	}
+
+	// Step 3: Unzip to downloads/id-quake3pack/.
 	runtime.EventsEmit(a.ctx, "download:progress", map[string]interface{}{
-		"current": len(downloads),
-		"total":   len(downloads),
+		"current": 1,
+		"total":   2,
+		"message": "Extracting game data...",
+	})
+
+	if err := unzipFile(zipPath, unzipDir); err != nil {
+		slog.Error("unzip failed", "file", zipPath, "error", err)
+		runtime.EventsEmit(a.ctx, "download:error", fmt.Sprintf("Failed to extract: %s", err.Error()))
+		return
+	}
+
+	// Step 4: Emit completion (zip is kept as cache).
+	runtime.EventsEmit(a.ctx, "download:progress", map[string]interface{}{
+		"current": 2,
+		"total":   2,
 		"message": "Download complete!",
 	})
 	time.Sleep(500 * time.Millisecond)
@@ -327,6 +333,74 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// unzipFile extracts a zip archive to destDir, creating directories as needed.
+// It includes zip slip protection to prevent path traversal attacks.
+func unzipFile(src, destDir string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return fmt.Errorf("opening zip: %w", err)
+	}
+	defer r.Close()
+
+	// Ensure destDir is absolute for zip slip checks.
+	destDir, err = filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("resolving destination: %w", err)
+	}
+
+	for _, f := range r.File {
+		// Zip slip protection: ensure the extracted path stays within destDir.
+		target := filepath.Join(destDir, f.Name)
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("zip slip detected: %s", f.Name)
+		}
+
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return fmt.Errorf("creating directory %s: %w", target, err)
+			}
+			continue
+		}
+
+		// Ensure parent directory exists.
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return fmt.Errorf("creating parent directory for %s: %w", target, err)
+		}
+
+		if err := extractZipEntry(f, target); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// extractZipEntry writes a single zip file entry to the given target path.
+func extractZipEntry(f *zip.File, target string) error {
+	rc, err := f.Open()
+	if err != nil {
+		return fmt.Errorf("opening zip entry %s: %w", f.Name, err)
+	}
+	defer rc.Close()
+
+	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+	if err != nil {
+		return fmt.Errorf("creating file %s: %w", target, err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, rc); err != nil {
+		return fmt.Errorf("writing file %s: %w", target, err)
+	}
+
+	return nil
+}
+
 // ── Import Pipeline ─────────────────────────────────────────────────────────
 
 func (a *App) StartImport(q3Path string) error {
@@ -346,10 +420,10 @@ func (a *App) StartImport(q3Path string) error {
 
 // paxJob describes one pipeline pass that produces a single .sw3z file.
 type paxJob struct {
-	name      string                 // e.g. "pax01"
-	output    string                 // e.g. "pax01.sw3z"
-	sources   []pipeline.SourceGroup // where to read pk3 files from
-	entries   map[string]pipeline.ProcessorEntry // which files to include
+	name    string                             // e.g. "pax01"
+	output  string                             // e.g. "pax01.sw3z"
+	sources []pipeline.SourceGroup             // where to read pk3 files from
+	entries map[string]pipeline.ProcessorEntry // which files to include
 }
 
 // runImport executes multi-pass import pipeline in a background goroutine:
@@ -378,14 +452,12 @@ func (a *App) runImport(q3Path string) {
 	// Give the frontend a moment to mount ProgressScreen.
 	time.Sleep(100 * time.Millisecond)
 
-	// ── Step 1: Validate downloaded demo files ───────────────────────────
+	// ── Step 1: Validate downloaded pack ─────────────────────────────────
 	emitProgress("scan", 0, 1, "Checking downloaded resources...")
 
-	dlDir := a.paths.DownloadDir()
-	demoQ3Dir := filepath.Join(dlDir, "demoq3")
-	demoTADir := filepath.Join(dlDir, "demota")
+	packDir := filepath.Join(a.paths.DownloadDir(), "id-quake3pack")
 
-	if !fileExists(filepath.Join(demoQ3Dir, "pak0.pk3")) || !fileExists(filepath.Join(demoTADir, "pak0.pk3")) {
+	if !dirExists(packDir) {
 		runtime.EventsEmit(a.ctx, "import:error",
 			"Free resources not downloaded yet. Please download them first.")
 		return
@@ -393,19 +465,15 @@ func (a *App) runImport(q3Path string) {
 
 	// ── Step 2: Build pax jobs ───────────────────────────────────────────
 
-	// Always: pax01 (Q3 demo) + pax03 (Q3TA demo)
+	// Always: pax01 (id-quake3pack: all paks from the free download)
 	jobs := []paxJob{
 		{
-			name:      "pax01",
-			output:    "pax01.sw3z",
-			sources:   []pipeline.SourceGroup{{Origin: "demo_q3", Dir: demoQ3Dir}},
-			entries:   pipeline.Q3CopyPax01Entries,
-		},
-		{
-			name:      "pax03",
-			output:    "pax03.sw3z",
-			sources:   []pipeline.SourceGroup{{Origin: "demo_ta", Dir: demoTADir}},
-			entries:   pipeline.Q3CopyPax03Entries,
+			name:   "pax01",
+			output: "pax01.sw3z",
+			sources: []pipeline.SourceGroup{
+				{Origin: "id-quake3pack", Dir: packDir},
+			},
+			entries: pipeline.Q3CopyPax01Entries,
 		},
 	}
 
@@ -414,20 +482,20 @@ func (a *App) runImport(q3Path string) {
 		baseQ3Dir := filepath.Join(q3Path, "baseq3")
 		if fileExists(baseQ3Dir) {
 			jobs = append(jobs, paxJob{
-				name:      "pax02",
-				output:    "pax02.sw3z",
-				sources:   []pipeline.SourceGroup{{Origin: "q3_base", Dir: baseQ3Dir}},
-				entries:   pipeline.Q3CopyPax02Entries,
+				name:    "pax02",
+				output:  "pax02.sw3z",
+				sources: []pipeline.SourceGroup{{Origin: "q3_base", Dir: baseQ3Dir}},
+				entries: pipeline.Q3CopyPax02Entries,
 			})
 		}
 
 		missionpackDir := filepath.Join(q3Path, "missionpack")
 		if fileExists(missionpackDir) {
 			jobs = append(jobs, paxJob{
-				name:      "pax04",
-				output:    "pax04.sw3z",
-				sources:   []pipeline.SourceGroup{{Origin: "q3_ta", Dir: missionpackDir}},
-				entries:   pipeline.Q3CopyPax04Entries,
+				name:    "pax04",
+				output:  "pax04.sw3z",
+				sources: []pipeline.SourceGroup{{Origin: "q3_ta", Dir: missionpackDir}},
+				entries: pipeline.Q3CopyPax04Entries,
 			})
 		}
 	}
@@ -482,7 +550,7 @@ func (a *App) runImport(q3Path string) {
 
 	// ── Step 4: Write manifest (signals "assets are ready") ──────────────
 
-	inventory := map[string]string{"demo_q3": demoQ3Dir, "demo_ta": demoTADir}
+	inventory := map[string]string{"id-quake3pack": packDir}
 	if q3Path != "" {
 		inventory["q3_install"] = q3Path
 	}

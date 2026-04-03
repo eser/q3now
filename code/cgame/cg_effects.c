@@ -227,7 +227,6 @@ void CG_Lightning_Discharge (vec3_t origin, int msec)
 }
 // eser - lightning discharge
 
-#if FEAT_TA_UI
 /*
 ===============
 CG_LightningBoltBeam
@@ -284,6 +283,7 @@ void CG_KamikazeEffect( vec3_t org ) {
 
 }
 
+#if FEAT_TA_UI
 /*
 ==================
 CG_ObeliskExplode

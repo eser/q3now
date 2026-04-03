@@ -753,9 +753,7 @@ typedef enum {
 	MOD_SUICIDE,
 	MOD_TARGET_LASER,
 	MOD_TRIGGER_HURT,
-#if FEAT_PW_KAMIKAZE
 	MOD_KAMIKAZE,
-#endif
 	MOD_GRAPPLE
 } meansOfDeath_t;
 

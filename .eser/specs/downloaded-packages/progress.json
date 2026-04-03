@@ -1,0 +1,29 @@
+{
+  "spec": "downloaded-packages",
+  "status": "completed",
+  "tasks": [
+    {
+      "id": "task-1",
+      "title": "Versioned asset packs with checksum verification, integrity dashboard, automatic re-download on corruption. We're building the reliable m...",
+      "status": "done"
+    },
+    {
+      "id": "task-2",
+      "title": "Manual e2e testing is sufficient. Verification: (1) Download single zip via launcher, (2) verify unzip produces both pak files in quakedata dir, (3) run pipeline extraction with explicit Source fields, (4) launch game and connect to a server without rejection, (5) error path: rename a source pak and verify hard error with clear message. No automated tests needed for this scope.",
+      "status": "done"
+    },
+    {
+      "id": "task-3",
+      "title": "Write or update tests for all new and changed behavior",
+      "status": "done"
+    },
+    {
+      "id": "task-4",
+      "title": "Update documentation for all public-facing changes (README, API docs, CHANGELOG)",
+      "status": "done"
+    }
+  ],
+  "decisions": [],
+  "debt": [],
+  "updatedAt": "2026-04-02T12:16:20.986Z"
+}

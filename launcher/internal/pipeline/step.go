@@ -36,11 +36,14 @@ const (
 )
 
 // ProcessorEntry describes per-file processing intent in a processor list.
+// Map key is the OUTPUT path (what appears in the sw3z).
+// PackIndex is the SOURCE path inside the archive (if empty, same as map key).
 // The zero value is valid and means ModeCopy with no overrides.
 type ProcessorEntry struct {
+	Pack        string        // source archive path (relative), e.g. "demota/pak0.pk3"
+	PackIndex   string        // path inside the archive; empty = same as map key
 	Mode        ProcessorMode // how to process this entry
-	TargetFmt   string        // target format for ModeConvert (e.g., "png")
-	TargetPath  string        // output path override (full path, any mode; empty = use source path)
+	Converter   string        // target format for ModeConvert (e.g., "png")
 	PatchSource string        // delta source for ModePatch (deferred)
 	Quality     string        // quality preset for ModeConvert: "high" (128kbps), "medium" (96kbps), "low" (64kbps), "" = default (high)
 	Preprocess  bool          // if true, pre-resample audio to 48kHz before encoding (default false)

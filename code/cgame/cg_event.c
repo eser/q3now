@@ -178,11 +178,9 @@ static void CG_Obituary( entityState_t *ent ) {
 
 	if (attacker == target) {
 		switch (mod) {
-#if FEAT_TA_UI
 		case MOD_KAMIKAZE:
 			message = "goes out with a bang";
 			break;
-#endif
 		case MOD_GRENADE_SPLASH:
 			message = "tripped on their own grenade";
 			break;
@@ -280,12 +278,10 @@ static void CG_Obituary( entityState_t *ent ) {
             message = "was discharged by";
             break;
 // eser - lightning discharge
-#if FEAT_TA_UI
 		case MOD_KAMIKAZE:
 			message = "falls to";
 			message2 = "'s Kamikaze blast";
 			break;
-#endif
 		case MOD_TELEFRAG:
 			message = "was telefragged by";
 			break;
@@ -361,10 +357,10 @@ static void CG_UseItem( centity_t *cent ) {
 		trap_S_StartSound (NULL, es->number, CHAN_BODY, cgs.media.medkitSound );
 		break;
 
-#if FEAT_TA_UI
 	case HI_KAMIKAZE:
 		break;
 
+#if FEAT_TA_UI
 	case HI_PORTAL:
 		break;
 	case HI_INVULNERABILITY:
@@ -901,11 +897,11 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		}
 		break;
 
-#if FEAT_TA_UI
 	case EV_KAMIKAZE:
 		DEBUGNAME("EV_KAMIKAZE");
 		CG_KamikazeEffect( cent->lerpOrigin );
 		break;
+#if FEAT_TA_UI
 	case EV_OBELISKEXPLODE:
 		DEBUGNAME("EV_OBELISKEXPLODE");
 		CG_ObeliskExplode( cent->lerpOrigin, es->eventParm );
@@ -922,11 +918,11 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_JUICED");
 		CG_InvulnerabilityJuiced( cent->lerpOrigin );
 		break;
+#endif
 	case EV_LIGHTNINGBOLT:
 		DEBUGNAME("EV_LIGHTNINGBOLT");
 		CG_LightningBoltBeam(es->origin2, es->pos.trBase);
 		break;
-#endif
 	case EV_SCOREPLUM:
 		DEBUGNAME("EV_SCOREPLUM");
 		CG_ScorePlum( cent->currentState.otherEntityNum, cent->lerpOrigin, cent->currentState.time );
@@ -1154,11 +1150,9 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 				case GTS_TEAMS_ARE_TIED:
 					CG_AddBufferedSound( cgs.media.teamsTiedSound );
 					break;
-#if FEAT_TA_UI
 				case GTS_KAMIKAZE:
 					trap_S_StartLocalSound(cgs.media.kamikazeFarSound, CHAN_ANNOUNCER);
 					break;
-#endif
 				default:
 					break;
 			}

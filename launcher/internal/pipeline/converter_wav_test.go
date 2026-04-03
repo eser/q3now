@@ -276,11 +276,11 @@ func TestQ3CopyProcessor_ModeConvert_WAV_WithOpts(t *testing.T) {
 
 	proc := &Q3CopyProcessor{
 		Entries: map[string]ProcessorEntry{
-			"sound/test.wav": {
-				Mode:       ModeConvert,
-				TargetFmt:  "opus",
-				TargetPath: "sound/test.opus",
-				Quality:    "low",
+			"sound/test.opus": {
+				Mode:      ModeConvert,
+				Converter: "opus",
+				PackIndex: "sound/test.wav",
+				Quality:   "low",
 			},
 		},
 	}

@@ -66,9 +66,9 @@ func (p *Paths) DedBinaryPath() string {
 	return filepath.Join(p.ExecDir, "q3now-ded")
 }
 
-// DownloadDir returns the path to ~/q3now/downloaded/quakedata/.
+// DownloadDir returns the path to ~/q3now/downloaded/.
 func (p *Paths) DownloadDir() string {
-	return filepath.Join(p.HomeDir, "downloaded", "quakedata")
+	return filepath.Join(p.HomeDir, "downloaded")
 }
 
 // SettingsPath returns the path to ~/q3now/settings.json.

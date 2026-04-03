@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -57,8 +58,6 @@ func (e *ExtractTransform) Run(ctx context.Context, progress chan<- Progress) ([
 
 		slog.Info("extract: scanning origin", "origin", src.Origin, "archives", len(files))
 
-		var originEntries []AssetEntry
-
 		for _, archivePath := range files {
 			select {
 			case <-ctx.Done():
@@ -77,20 +76,9 @@ func (e *ExtractTransform) Run(ctx context.Context, progress chan<- Progress) ([
 			if err != nil {
 				return nil, fmt.Errorf("extract: scanning %s: %w", filepath.Base(archivePath), err)
 			}
-			originEntries = append(originEntries, entries...)
+			allEntries = append(allEntries, entries...)
 			scanned++
 		}
-
-		// Deduplicate within this origin (higher pak number wins).
-		deduped, overridden := deduplicateEntries(originEntries)
-		if overridden > 0 {
-			slog.Info("extract: deduplicated entries",
-				"origin", src.Origin,
-				"scanned", len(originEntries),
-				"unique", len(deduped),
-				"overridden", overridden)
-		}
-		allEntries = append(allEntries, deduped...)
 	}
 
 	slog.Info("extract: complete", "entries", len(allEntries), "archives", totalArchives)
@@ -104,69 +92,54 @@ func (e *ExtractTransform) Run(ctx context.Context, progress chan<- Progress) ([
 	return allEntries, nil
 }
 
-// findArchiveFiles returns sorted pak*.pk3 and pak*.pak files in a directory.
-// If both pakN.pk3 and pakN.pak exist for the same base name, PK3 is preferred.
+// findArchiveFiles recursively finds sorted pak*.pk3 and pak*.pak files under dir.
+// If both pakN.pk3 and pakN.pak exist in the same directory, PK3 is preferred.
 func findArchiveFiles(dir string) ([]string, error) {
-	pk3s, err := filepath.Glob(filepath.Join(dir, "pak*.pk3"))
-	if err != nil {
-		return nil, err
-	}
-	paks, err := filepath.Glob(filepath.Join(dir, "pak*.pak"))
+	var pk3s, paks []string
+
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(d.Name())
+		if strings.HasPrefix(name, "pak") && strings.HasSuffix(name, ".pk3") {
+			pk3s = append(pk3s, path)
+		} else if strings.HasPrefix(name, "pak") && strings.HasSuffix(name, ".pak") {
+			paks = append(paks, path)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Build set of PK3 base names (without extension) for dedup.
-	pk3Bases := make(map[string]bool, len(pk3s))
+	// Build set of PK3 keys (dir + base name without extension) for dedup.
+	pk3Keys := make(map[string]bool, len(pk3s))
 	for _, p := range pk3s {
-		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
-		pk3Bases[base] = true
+		key := filepath.Join(filepath.Dir(p), strings.TrimSuffix(filepath.Base(p), filepath.Ext(p)))
+		pk3Keys[key] = true
 	}
 
-	// Add PAK files that don't collide with a PK3 of the same base name.
+	// Add PAK files that don't collide with a PK3 of the same base name in the same dir.
 	var merged []string
 	merged = append(merged, pk3s...)
 	for _, p := range paks {
-		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
-		if !pk3Bases[base] {
+		key := filepath.Join(filepath.Dir(p), strings.TrimSuffix(filepath.Base(p), filepath.Ext(p)))
+		if !pk3Keys[key] {
 			merged = append(merged, p)
 		} else {
-			slog.Info("extract: preferring pk3 over pak", "base", base, "dir", dir)
+			slog.Info("extract: preferring pk3 over pak", "base", filepath.Base(p), "dir", filepath.Dir(p))
 		}
 	}
 
 	sort.Strings(merged)
-	return merged, nil
-}
-
-// deduplicateEntries removes duplicate paths within a single origin,
-// keeping the last occurrence (highest-numbered pak wins).
-// Comparison is case-insensitive, matching Quake 3's VFS behavior.
-// The original casing from the winning entry is preserved.
-//
-//	pak0: [a.txt, b.txt]   pak1: [b.txt, c.txt]
-//	→ result: [a.txt(pak0), b.txt(pak1), c.txt(pak1)], 1 override
-func deduplicateEntries(entries []AssetEntry) ([]AssetEntry, int) {
-	seen := make(map[string]int, len(entries)) // lowercase path → index in result
-	result := make([]AssetEntry, 0, len(entries))
-	overridden := 0
-
-	for _, e := range entries {
-		key := strings.ToLower(e.Path)
-		if idx, exists := seen[key]; exists {
-			slog.Debug("extract: pak override",
-				"path", e.Path,
-				"old_pak", filepath.Base(result[idx].SourcePak),
-				"new_pak", filepath.Base(e.SourcePak))
-			result[idx] = e
-			overridden++
-		} else {
-			seen[key] = len(result)
-			result = append(result, e)
-		}
+	for _, f := range merged {
+		slog.Info("extract: found archive", "path", f)
 	}
-
-	return result, overridden
+	return merged, nil
 }
 
 // scanArchive opens an archive and builds AssetEntry metadata for every entry.

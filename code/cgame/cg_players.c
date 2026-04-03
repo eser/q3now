@@ -2522,14 +2522,12 @@ void CG_Player( centity_t *cent ) {
 #endif
 	qboolean		shadow;
 	float			shadowPlane;
-#if FEAT_TA_UI
 	refEntity_t		skull;
 	refEntity_t		powerup;
 	int				t;
 	float			c;
 	float			angle;
 	vec3_t			dir, angles;
-#endif
 
 	// the client number is stored in clientNum.  It can't be derived
 	// from the entity number, because a single client may have
@@ -2733,7 +2731,6 @@ void CG_Player( centity_t *cent ) {
 #endif
 	CG_AddRefEntityWithPowerups( cent, &torso, &cent->currentState, qtrue, ci->team );
 
-#if FEAT_TA_UI
 	if ( cent->currentState.eFlags & EF_KAMIKAZE ) {
 
 		memset( &skull, 0, sizeof(skull) );
@@ -2843,6 +2840,7 @@ void CG_Player( centity_t *cent ) {
 		}
 	}
 
+#if FEAT_TA_UI
 	if ( cent->currentState.powerups & ( 1 << PW_INVULNERABILITY ) ) {
 		if ( !ci->invulnerabilityStartTime ) {
 			ci->invulnerabilityStartTime = cg.time;

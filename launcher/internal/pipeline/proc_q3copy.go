@@ -2,29 +2,69 @@ package pipeline
 
 import (
 	"fmt"
+	"log/slog"
 	"path"
+	"sort"
 	"strings"
 )
 
 // Q3CopyProcessor includes only the exact files specified in the given entry map.
-// No origin filtering — each pipeline run targets specific source directories,
-// so origin checking is unnecessary.
+// Map keys are OUTPUT paths. PackIndex (or key if empty) is the SOURCE path inside archives.
 //
 // Used for all pax01-04 pipelines, each with its own entry map.
 type Q3CopyProcessor struct {
-	Entries map[string]ProcessorEntry
+	Entries     map[string]ProcessorEntry
+	matched     map[string]bool   // tracks which entries were fulfilled
+	byPackIndex map[string]string // lowercase pack-index → output key (built lazily)
+}
+
+// resolvePackIndex returns the source path for an entry (PackIndex if set, otherwise the key).
+func resolvePackIndex(key string, pe ProcessorEntry) string {
+	if pe.PackIndex != "" {
+		return pe.PackIndex
+	}
+	return key
+}
+
+// initIndex builds the reverse lookup from pack-index → output key.
+func (p *Q3CopyProcessor) initIndex() {
+	if p.byPackIndex != nil {
+		return
+	}
+	p.byPackIndex = make(map[string]string, len(p.Entries))
+	p.matched = make(map[string]bool, len(p.Entries))
+	for key, pe := range p.Entries {
+		idx := strings.ToLower(resolvePackIndex(key, pe))
+		p.byPackIndex[idx] = key
+	}
 }
 
 func (p *Q3CopyProcessor) Process(entry AssetEntry, readFile func() ([]byte, error)) (EntryDecision, error) {
+	p.initIndex()
+
 	lower := strings.ToLower(entry.Path)
-	pe, ok := p.Entries[lower]
+	outputKey, ok := p.byPackIndex[lower]
 	if !ok {
 		return EntryDecision{Action: Skip}, nil
 	}
+	pe := p.Entries[outputKey]
+
+	// Strict pack validation: the asset must come from the declared pak.
+	if pe.Pack != "" && !strings.HasSuffix(entry.SourcePak, pe.Pack) {
+		slog.Debug("q3copy: pack mismatch", "path", lower, "want", pe.Pack, "got", entry.SourcePak)
+		return EntryDecision{Action: Skip}, nil
+	}
+	slog.Debug("q3copy: matched", "path", lower, "output", outputKey, "pack", entry.SourcePak)
+	p.matched[outputKey] = true
 
 	switch pe.Mode {
 	case ModeCopy:
-		return EntryDecision{Action: Include, DestPath: pe.TargetPath}, nil
+		// Output key IS the target path.
+		destPath := outputKey
+		if destPath == lower {
+			destPath = "" // no rename needed
+		}
+		return EntryDecision{Action: Include, DestPath: destPath}, nil
 
 	case ModeSkip:
 		return EntryDecision{Action: Skip}, nil
@@ -33,7 +73,7 @@ func (p *Q3CopyProcessor) Process(entry AssetEntry, readFile func() ([]byte, err
 		srcFmt := strings.TrimPrefix(path.Ext(lower), ".")
 
 		// Try options-aware converter first (for formats that support Quality/Preprocess).
-		if fnOpts, ok := LookupConverterWithOpts(srcFmt, pe.TargetFmt); ok {
+		if fnOpts, ok := LookupConverterWithOpts(srcFmt, pe.Converter); ok {
 			data, err := readFile()
 			if err != nil {
 				return EntryDecision{}, fmt.Errorf("read %s for convert: %w", entry.Path, err)
@@ -43,11 +83,11 @@ func (p *Q3CopyProcessor) Process(entry AssetEntry, readFile func() ([]byte, err
 			if err != nil {
 				return EntryDecision{}, fmt.Errorf("convert %s: %w", entry.Path, err)
 			}
-			return EntryDecision{Action: Replace, DestPath: pe.TargetPath, Data: converted}, nil
+			return EntryDecision{Action: Replace, DestPath: outputKey, Data: converted}, nil
 		}
 
 		// Fall back to simple converter (for TGA->PNG etc.).
-		fn, err := LookupConverter(srcFmt, pe.TargetFmt)
+		fn, err := LookupConverter(srcFmt, pe.Converter)
 		if err != nil {
 			return EntryDecision{}, fmt.Errorf("convert %s: %w", entry.Path, err)
 		}
@@ -59,7 +99,7 @@ func (p *Q3CopyProcessor) Process(entry AssetEntry, readFile func() ([]byte, err
 		if err != nil {
 			return EntryDecision{}, fmt.Errorf("convert %s: %w", entry.Path, err)
 		}
-		return EntryDecision{Action: Replace, DestPath: pe.TargetPath, Data: converted}, nil
+		return EntryDecision{Action: Replace, DestPath: outputKey, Data: converted}, nil
 
 	case ModePatch:
 		return EntryDecision{}, fmt.Errorf("pipeline: ModePatch not yet implemented for %s", entry.Path)
@@ -70,5 +110,16 @@ func (p *Q3CopyProcessor) Process(entry AssetEntry, readFile func() ([]byte, err
 }
 
 func (p *Q3CopyProcessor) Finalize() ([]OutputEntry, error) {
+	var missingList []string
+	for key, pe := range p.Entries {
+		if !p.matched[key] {
+			missingList = append(missingList, key+" (want "+pe.Pack+")")
+		}
+	}
+	if len(missingList) > 0 {
+		sort.Strings(missingList)
+		return nil, fmt.Errorf("q3copy: %d entries not found in any source archive:\n  %s",
+			len(missingList), strings.Join(missingList, "\n  "))
+	}
 	return nil, nil
 }
