@@ -564,7 +564,6 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 
 			break;
 
-#if FEAT_PW_KAMIKAZE
 		case EV_USE_ITEM3:		// kamikaze
 #if FEAT_PW_INVULNERABILITY
 			// make sure the invulnerability is off
@@ -573,7 +572,6 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			// start the kamikze
 			G_StartKamikaze( ent );
 			break;
-#endif
 
 #if FEAT_PW_INVULNERABILITY
 		case EV_USE_ITEM4:		// portal

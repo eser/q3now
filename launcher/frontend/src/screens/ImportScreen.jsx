@@ -131,7 +131,7 @@ const styles = {
   },
 };
 
-export default function ImportScreen({ onImportComplete, onBack, onEula, importError }) {
+export default function ImportScreen({ onImportComplete, onBack, onEula, importError, autoDownload }) {
   const [q3aInstallations, setQ3aInstallations] = useState([]);
   const [q3aPath, setQ3aPath] = useState("");
   const [loading, setLoading] = useState(true);
@@ -178,14 +178,9 @@ export default function ImportScreen({ onImportComplete, onBack, onEula, importE
     };
   }, []);
 
-  const handleDownload = async () => {
+  const startDownload = async () => {
     setError(null);
     try {
-      const accepted = await HasAcceptedEula();
-      if (!accepted) {
-        onEula();
-        return;
-      }
       setDownloading(true);
       await DownloadFreeResources();
     } catch (err) {
@@ -193,6 +188,22 @@ export default function ImportScreen({ onImportComplete, onBack, onEula, importE
       setError(err.toString());
     }
   };
+
+  const handleDownload = async () => {
+    const accepted = await HasAcceptedEula();
+    if (!accepted) {
+      onEula();
+      return;
+    }
+    startDownload();
+  };
+
+  // Auto-trigger download after EULA acceptance.
+  useEffect(() => {
+    if (autoDownload && !loading && !downloading) {
+      startDownload();
+    }
+  }, [autoDownload, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleBrowseQ3A = async () => {
     try {

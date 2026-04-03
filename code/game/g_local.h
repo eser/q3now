@@ -198,10 +198,8 @@ struct gentity_s {
 	gentity_t	*teamchain;		// next entity in team
 	gentity_t	*teammaster;	// master of the team
 
-#if FEAT_PW_KAMIKAZE
 	int			kamikazeTime;
 	int			kamikazeShockTime;
-#endif
 
 	int			watertype;
 	int			waterlevel;
@@ -719,9 +717,7 @@ qboolean G_FilterPacket (const char *from);
 int G_DamageFalloff( int damage, vec3_t start, vec3_t end, float maxDamageDistance );
 void SnapVectorTowards( vec3_t v, vec3_t to );
 void FireWeapon( gentity_t *ent, int attackIndex );
-#if FEAT_PW_KAMIKAZE
 void G_StartKamikaze( gentity_t *ent );
-#endif
 
 // weapons/
 void Attack_Gauntlet_Primary( gentity_t *ent );

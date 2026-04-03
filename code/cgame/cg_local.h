@@ -279,12 +279,12 @@ typedef enum {
 #if FEAT_PING_LOCATION
 	LE_PING_LOCATION,		// team ping marker (4G)
 #endif
-#if FEAT_TA_UI
 	LE_KAMIKAZE,
+#if FEAT_TA_UI
 	LE_INVULIMPACT,
 	LE_INVULJUICED,
-	LE_SHOWREFENTITY
 #endif
+	LE_SHOWREFENTITY
 } leType_t;
 
 typedef enum {
@@ -856,10 +856,10 @@ typedef struct {
 	qhandle_t	plasmaBallShader;
 	qhandle_t	waterBubbleShader;
 	qhandle_t	bloodTrailShader;
-#if FEAT_TA_UI
-	qhandle_t	nailPuffShader;
-#endif
-    qhandle_t	sparkShader;
+
+	// qhandle_t	nailPuffShader;
+
+	qhandle_t	sparkShader;
 
 	qhandle_t	numberShaders[11];
 
@@ -887,10 +887,8 @@ typedef struct {
 	qhandle_t	battleWeaponShader;
 	qhandle_t	spawnProtectShader;
 	qhandle_t	hastePuffShader;
-#if FEAT_TA_UI
 	qhandle_t	redKamikazeShader;
 	qhandle_t	blueKamikazeShader;
-#endif
 
 	// weapon effect models
 	qhandle_t	bulletFlashModel;
@@ -909,11 +907,11 @@ typedef struct {
 	// special effects models
 	qhandle_t	teleportEffectModel;
 	qhandle_t	teleportEffectShader;
-#if FEAT_TA_UI
 	qhandle_t	kamikazeEffectModel;
 	qhandle_t	kamikazeShockWave;
 	qhandle_t	kamikazeHeadModel;
 	qhandle_t	kamikazeHeadTrail;
+#if FEAT_TA_UI
 	qhandle_t	invulnerabilityImpactModel;
 	qhandle_t	invulnerabilityJuicedModel;
 	qhandle_t	medkitUsageModel;
@@ -957,6 +955,9 @@ typedef struct {
 	//sfxHandle_t	sfx_railg;
 	sfxHandle_t	sfx_rockexp;
 	sfxHandle_t	sfx_plasmaexp;
+	sfxHandle_t kamikazeExplodeSound;
+	sfxHandle_t kamikazeImplodeSound;
+	sfxHandle_t kamikazeFarSound;
 #if FEAT_TA_UI
 	sfxHandle_t	sfx_nghit;
 	sfxHandle_t	sfx_nghitflesh;
@@ -964,9 +965,6 @@ typedef struct {
 	sfxHandle_t	sfx_chghit;
 	sfxHandle_t	sfx_chghitflesh;
 	sfxHandle_t	sfx_chghitmetal;
-	sfxHandle_t kamikazeExplodeSound;
-	sfxHandle_t kamikazeImplodeSound;
-	sfxHandle_t kamikazeFarSound;
 	sfxHandle_t useInvulnerabilitySound;
 	sfxHandle_t invulnerabilityImpactSound1;
 	sfxHandle_t invulnerabilityImpactSound2;
@@ -1678,14 +1676,14 @@ localEntity_t *CG_SmokePuff( const vec3_t p,
 				   qhandle_t hShader );
 void CG_BubbleTrail( vec3_t start, vec3_t end, float spacing );
 void CG_SpawnEffect( vec3_t org );
-#if FEAT_TA_UI
 void CG_KamikazeEffect( vec3_t org );
+#if FEAT_TA_UI
 void CG_ObeliskExplode( vec3_t org, int entityNum );
 void CG_ObeliskPain( vec3_t org );
 void CG_InvulnerabilityImpact( vec3_t org, vec3_t angles );
 void CG_InvulnerabilityJuiced( vec3_t org );
-void CG_LightningBoltBeam( vec3_t start, vec3_t end );
 #endif
+void CG_LightningBoltBeam( vec3_t start, vec3_t end );
 void CG_ScorePlum( int client, vec3_t org, int score );
 #if FEAT_DAMAGE_PLUMS
 void CG_DamagePlum( int client, vec3_t org, int damage );	// 2A

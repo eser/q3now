@@ -352,14 +352,12 @@ static void CG_Item( centity_t *cent ) {
 #endif
 	}
 
-#if FEAT_TA_UI
 	if ( item->giType == IT_HOLDABLE && item->giTag == HI_KAMIKAZE ) {
 		VectorScale( ent.axis[0], 2, ent.axis[0] );
 		VectorScale( ent.axis[1], 2, ent.axis[1] );
 		VectorScale( ent.axis[2], 2, ent.axis[2] );
 		ent.nonNormalizedAxes = qtrue;
 	}
-#endif
 
 	// add to refresh list
 	trap_R_AddRefEntityToScene(&ent);

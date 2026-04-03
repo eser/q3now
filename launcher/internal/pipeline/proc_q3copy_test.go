@@ -48,10 +48,10 @@ func TestQ3CopyProcessor_ModeCopy_Default(t *testing.T) {
 	}
 }
 
-func TestQ3CopyProcessor_ModeCopy_WithTargetPath(t *testing.T) {
+func TestQ3CopyProcessor_ModeCopy_WithRename(t *testing.T) {
 	proc := &Q3CopyProcessor{
 		Entries: map[string]ProcessorEntry{
-			"maps/old.bsp": {TargetPath: "maps/new.bsp"},
+			"maps/new.bsp": {PackIndex: "maps/old.bsp"},
 		},
 	}
 
@@ -90,7 +90,7 @@ func TestQ3CopyProcessor_ModeConvert(t *testing.T) {
 
 	proc := &Q3CopyProcessor{
 		Entries: map[string]ProcessorEntry{
-			"gfx/test.tga": {Mode: ModeConvert, TargetFmt: "png", TargetPath: "gfx/test.png"},
+			"gfx/test.png": {Mode: ModeConvert, Converter: "png", PackIndex: "gfx/test.tga"},
 		},
 	}
 

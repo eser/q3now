@@ -87,18 +87,19 @@ function App() {
           />
         )}
 
-        {screen === "import" && (
+        {(screen === "import" || screen === "import-after-eula") && (
           <ImportScreen
             onImportComplete={() => { setImportError(null); setScreen("progress"); }}
             onBack={handleBackToLaunch}
             onEula={() => setScreen("eula")}
             importError={importError}
+            autoDownload={screen === "import-after-eula"}
           />
         )}
 
         {screen === "eula" && (
           <EulaScreen
-            onAccept={() => setScreen("import")}
+            onAccept={() => setScreen("import-after-eula")}
             onDecline={() => setScreen("import")}
           />
         )}

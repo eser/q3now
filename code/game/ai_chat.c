@@ -261,9 +261,7 @@ char *BotWeaponNameForMeansOfDeath(int mod) {
 		case MOD_PLASMA: return "Plasma Rifle";
 		case MOD_RAILGUN: return "Railgun";
 		case MOD_LIGHTNING: return "Lightning Gun";
-#if FEAT_PW_KAMIKAZE
 		case MOD_KAMIKAZE: return "Kamikaze";
-#endif
 		case MOD_GRAPPLE: return "Grapple";
 		default: return "[unknown weapon]";
 	}
@@ -586,10 +584,8 @@ int BotChat_Death(bot_state_t *bs) {
 			BotAI_BotInitialChat(bs, "death_suicide", BotRandomOpponentName(bs), NULL);
 		else if (bs->botdeathtype == MOD_TELEFRAG)
 			BotAI_BotInitialChat(bs, "death_telefrag", name, NULL);
-#if FEAT_PW_KAMIKAZE
 		else if (bs->botdeathtype == MOD_KAMIKAZE && trap_BotNumInitialChats(bs->cs, "death_kamikaze"))
 			BotAI_BotInitialChat(bs, "death_kamikaze", name, NULL);
-#endif
 		else {
 			if ((bs->botdeathtype == MOD_GAUNTLET ||
 				bs->botdeathtype == MOD_RAILGUN) && random() < 0.5) {
@@ -675,10 +671,8 @@ int BotChat_Kill(bot_state_t *bs) {
 		else if (bs->enemydeathtype == MOD_TELEFRAG) {
 			BotAI_BotInitialChat(bs, "kill_telefrag", name, NULL);
 		}
-#if FEAT_PW_KAMIKAZE
 		else if (bs->botdeathtype == MOD_KAMIKAZE && trap_BotNumInitialChats(bs->cs, "kill_kamikaze"))
 			BotAI_BotInitialChat(bs, "kill_kamikaze", name, NULL);
-#endif
 		//choose between insult and praise
 		else if (random() < trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_INSULT, 0, 1)) {
 			BotAI_BotInitialChat(bs, "kill_insult", name, NULL);

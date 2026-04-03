@@ -338,13 +338,10 @@ char	*modNames[] = {
 	"MOD_SUICIDE",
 	"MOD_TARGET_LASER",
 	"MOD_TRIGGER_HURT",
-#if FEAT_PW_KAMIKAZE
 	"MOD_KAMIKAZE",
-#endif
 	"MOD_GRAPPLE"
 };
 
-#if FEAT_PW_KAMIKAZE
 /*
 ==================
 Kamikaze_DeathActivate
@@ -372,8 +369,6 @@ void Kamikaze_DeathTimer( gentity_t *self ) {
 
 	ent->activator = self;
 }
-
-#endif
 
 /*
 ==================
@@ -800,11 +795,9 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		// globally cycle through the different death animations
 		lastDeath = ( lastDeath + 1 ) % 3;
 
-#if FEAT_PW_KAMIKAZE
 		if (self->s.eFlags & EF_KAMIKAZE) {
 			Kamikaze_DeathTimer( self );
 		}
-#endif
 	}
 
 	trap_LinkEntity (self);

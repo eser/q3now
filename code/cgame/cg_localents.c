@@ -536,7 +536,6 @@ static void CG_AddSpriteExplosion( localEntity_t *le ) {
 }
 
 
-#if FEAT_TA_UI
 /*
 ====================
 CG_AddKamikaze
@@ -662,6 +661,7 @@ void CG_AddKamikaze( localEntity_t *le ) {
 	}
 }
 
+#if FEAT_TA_UI
 /*
 ===================
 CG_AddInvulnerabilityImpact
@@ -694,6 +694,8 @@ void CG_AddInvulnerabilityJuiced( localEntity_t *le ) {
 	}
 }
 
+#endif
+
 /*
 ===================
 CG_AddRefEntity
@@ -707,7 +709,6 @@ void CG_AddRefEntity( localEntity_t *le ) {
 	trap_R_AddRefEntityToScene( &le->refEntity );
 }
 
-#endif
 /*
 ===================
 CG_AddScorePlum
@@ -940,20 +941,20 @@ void CG_AddLocalEntities( void ) {
 		}
 #endif
 
-#if FEAT_TA_UI
 		case LE_KAMIKAZE:
 			CG_AddKamikaze( le );
 			break;
+#if FEAT_TA_UI
 		case LE_INVULIMPACT:
 			CG_AddInvulnerabilityImpact( le );
 			break;
 		case LE_INVULJUICED:
 			CG_AddInvulnerabilityJuiced( le );
 			break;
+#endif
 		case LE_SHOWREFENTITY:
 			CG_AddRefEntity( le );
 			break;
-#endif
 		}
 	}
 }

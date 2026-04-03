@@ -53,6 +53,44 @@ const styles = {
     lineHeight: 1.5,
     wordBreak: "break-word",
   },
+  errorContainer: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    padding: "24px 40px 0",
+    gap: "16px",
+  },
+  errorHeader: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "12px",
+    flexShrink: 0,
+  },
+  errorDetailBox: {
+    flex: 1,
+    minHeight: 0,
+    padding: "12px 16px",
+    background: "var(--bg-card)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius)",
+    overflowY: "auto",
+    fontSize: "12px",
+    lineHeight: 1.6,
+    color: "var(--accent, #ef4444)",
+    fontFamily: "monospace",
+    whiteSpace: "pre-wrap",
+    WebkitUserSelect: "text",
+    userSelect: "text",
+  },
+  errorActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    padding: "16px 40px",
+    borderTop: "1px solid var(--border)",
+    flexShrink: 0,
+  },
 };
 
 export default function ProgressScreen({ onComplete, onError }) {
@@ -89,18 +127,28 @@ export default function ProgressScreen({ onComplete, onError }) {
   const isComplete = progress.step === "complete";
 
   if (error) {
+    // Split into summary (first line) and details (rest).
+    const lines = error.split("\n");
+    const summary = lines[0];
+    const details = lines.slice(1).join("\n").trim();
+
     return (
-      <div style={styles.container} className="screen-enter screen-enter-active">
-        <div style={styles.errorIcon}>&#10007;</div>
-        <div style={styles.stepName}>Import Failed</div>
-        <div className="selectable" style={styles.errorMessage}>{error}</div>
-        <Button
-          variant="secondary"
-          onClick={() => onError(error)}
-          style={{ marginTop: "8px" }}
-        >
-          Back
-        </Button>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }} className="screen-enter screen-enter-active">
+        <div style={styles.errorContainer}>
+          <div style={styles.errorHeader}>
+            <div style={styles.errorIcon}>&#10007;</div>
+            <div style={styles.stepName}>Import Failed</div>
+            <div style={styles.errorMessage}>{summary}</div>
+          </div>
+          {details && (
+            <div style={styles.errorDetailBox}>{details}</div>
+          )}
+        </div>
+        <div style={styles.errorActions}>
+          <Button variant="secondary" onClick={() => onError(error)}>
+            Back
+          </Button>
+        </div>
       </div>
     );
   }
