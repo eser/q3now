@@ -45,7 +45,8 @@ typedef struct {
 
 static botSpawnQueue_t	botSpawnQueue[BOT_SPAWN_QUEUE_DEPTH];
 
-vmCvar_t bot_minplayers;
+vmCvar_t g_minPlayers;
+vmCvar_t g_autoBots;
 
 float trap_Cvar_VariableValue( const char *var_name ) {
 	char buf[128];
@@ -408,91 +409,148 @@ int G_CountBotPlayers( int team ) {
 G_CheckMinimumPlayers
 ===============
 */
-void G_CheckMinimumPlayers( void ) {
-	int minplayers;
-	int humanplayers, botplayers;
-	static int checkminimumplayers_time;
+/*
+===============
+G_RemoveLowestScoringBot
 
-	if (level.intermissiontime) return;
-	//only check once each 10 seconds
-	if (checkminimumplayers_time > level.time - 10000) {
+Find the connected bot with the lowest score and kick it.
+Used by g_autoBots to make room for human players.
+===============
+*/
+void G_RemoveLowestScoringBot( void ) {
+	int i, lowestScore, lowestClient;
+	gentity_t *ent;
+
+	lowestScore = 999999;
+	lowestClient = -1;
+
+	for ( i = 0; i < level.maxclients; i++ ) {
+		ent = &g_entities[i];
+		if ( !ent->inuse ) continue;
+		if ( ent->client->pers.connected != CON_CONNECTED ) continue;
+		if ( !( ent->r.svFlags & SVF_BOT ) ) continue;
+		if ( ent->client->ps.persistant[PERS_SCORE] < lowestScore ) {
+			lowestScore = ent->client->ps.persistant[PERS_SCORE];
+			lowestClient = i;
+		}
+	}
+
+	if ( lowestClient >= 0 ) {
+		trap_SendConsoleCommand( EXEC_INSERT, va( "clientkick %d\n", lowestClient ) );
+	}
+}
+
+/*
+===============
+G_CheckMinimumPlayers
+
+Automatic bot management via g_minPlayers + g_autoBots.
+Ensures total players (human+bot) >= g_minPlayers.
+When a human joins and total > g_minPlayers, the lowest-scoring bot is kicked.
+Replaces the old bot_minplayers system.
+===============
+*/
+void G_CheckMinimumPlayers( void ) {
+	int needed, humans, bots, total;
+	static int checktime;
+
+	if ( level.intermissiontime ) return;
+
+	trap_Cvar_Update( &g_autoBots );
+	trap_Cvar_Update( &g_minPlayers );
+
+	if ( !g_autoBots.integer ) return;
+
+	needed = g_minPlayers.integer;
+	if ( needed <= 0 ) return;
+
+	// cap to leave at least 1 slot for humans
+	if ( needed >= g_maxclients.integer ) {
+		needed = g_maxclients.integer - 1;
+	}
+
+	// rate-limit additions to once per 3 seconds (removals are immediate via G_CheckAutoBots)
+	if ( checktime > level.time - 3000 ) {
 		return;
 	}
-	checkminimumplayers_time = level.time;
-	trap_Cvar_Update(&bot_minplayers);
-	minplayers = bot_minplayers.integer;
-	if (minplayers <= 0) return;
+	checktime = level.time;
 
-	if (g_gametype.integer >= GT_TEAM) {
-		if (minplayers >= g_maxclients.integer / 2) {
-			minplayers = (g_maxclients.integer / 2) -1;
-		}
+	if ( g_gametype.integer >= GT_TDM ) {
+		// team modes: balance per-team (each team gets needed/2)
+		int perTeam = needed / 2;
+		if ( perTeam < 1 ) perTeam = 1;
 
-		humanplayers = G_CountHumanPlayers( TEAM_RED );
-		botplayers = G_CountBotPlayers(	TEAM_RED );
-		//
-		if (humanplayers + botplayers < minplayers) {
+		humans = G_CountHumanPlayers( TEAM_RED );
+		bots = G_CountBotPlayers( TEAM_RED );
+		if ( humans + bots < perTeam ) {
 			G_AddRandomBot( TEAM_RED );
-		} else if (humanplayers + botplayers > minplayers && botplayers) {
-			G_RemoveRandomBot( TEAM_RED );
 		}
-		//
-		humanplayers = G_CountHumanPlayers( TEAM_BLUE );
-		botplayers = G_CountBotPlayers( TEAM_BLUE );
-		//
-		if (humanplayers + botplayers < minplayers) {
+
+		humans = G_CountHumanPlayers( TEAM_BLUE );
+		bots = G_CountBotPlayers( TEAM_BLUE );
+		if ( humans + bots < perTeam ) {
 			G_AddRandomBot( TEAM_BLUE );
-		} else if (humanplayers + botplayers > minplayers && botplayers) {
-			G_RemoveRandomBot( TEAM_BLUE );
+		}
+	} else {
+		// FFA / Duel / KOTH / LMS modes
+		humans = G_CountHumanPlayers( -1 );
+		bots = G_CountBotPlayers( -1 );
+		total = humans + bots;
+
+		if ( total < needed ) {
+			G_AddRandomBot( TEAM_FREE );
 		}
 	}
-    else {
-        if (minplayers >= g_maxclients.integer) {
-            minplayers = g_maxclients.integer - 1;
-        }
+}
 
-        if (g_gametype.integer == GT_TOURNAMENT) {
-            humanplayers = G_CountHumanPlayers(-1);
-            botplayers = G_CountBotPlayers(-1);
-            //
-            if (humanplayers + botplayers < minplayers) {
-                G_AddRandomBot(TEAM_FREE);
-            }
-            else if (humanplayers + botplayers > minplayers && botplayers) {
-                // try to remove spectators first
-                if (!G_RemoveRandomBot(TEAM_SPECTATOR)) {
-                    // just remove the bot that is playing
-                    G_RemoveRandomBot(-1);
-                }
-            }
-        }
-        else if (g_gametype.integer == GT_LASTMANSTANDING) {
-            humanplayers = G_CountHumanPlayers(-1);
-            botplayers = G_CountBotPlayers(-1);
-            //
-            if (humanplayers + botplayers < minplayers) {
-                G_AddRandomBot(TEAM_SPECTATOR);
-            }
-            else if (humanplayers + botplayers > minplayers && botplayers) {
-                // try to remove spectators first
-                if (!G_RemoveRandomBot(TEAM_SPECTATOR)) {
-                    // just remove the bot that is playing
-                    G_RemoveRandomBot(-1);
-                }
-            }
-        }
-        else if (g_gametype.integer == GT_FFA || g_gametype.integer == GT_KINGOFTHEHILL) {
-            humanplayers = G_CountHumanPlayers(TEAM_FREE);
-            botplayers = G_CountBotPlayers(TEAM_FREE);
-            //
-            if (humanplayers + botplayers < minplayers) {
-                G_AddRandomBot(TEAM_FREE);
-            }
-            else if (humanplayers + botplayers > minplayers && botplayers) {
-                G_RemoveRandomBot(TEAM_FREE);
-            }
-        }
-    }
+/*
+===============
+G_CheckAutoBots
+
+Called from ClientBegin (human join) and ClientDisconnect (human leave).
+Immediately adjusts bot count without waiting for the periodic check.
+===============
+*/
+void G_CheckAutoBots( void ) {
+	int needed, humans, bots, total;
+
+	if ( level.intermissiontime ) return;
+	if ( !g_autoBots.integer ) return;
+
+	needed = g_minPlayers.integer;
+	if ( needed <= 0 ) return;
+	if ( needed >= g_maxclients.integer ) {
+		needed = g_maxclients.integer - 1;
+	}
+
+	if ( g_gametype.integer >= GT_TDM ) {
+		// team modes: check each team for excess bots
+		int perTeam = needed / 2;
+		if ( perTeam < 1 ) perTeam = 1;
+
+		humans = G_CountHumanPlayers( TEAM_RED );
+		bots = G_CountBotPlayers( TEAM_RED );
+		while ( humans + bots > perTeam && bots > 0 ) {
+			G_RemoveRandomBot( TEAM_RED );
+			bots--;
+		}
+
+		humans = G_CountHumanPlayers( TEAM_BLUE );
+		bots = G_CountBotPlayers( TEAM_BLUE );
+		while ( humans + bots > perTeam && bots > 0 ) {
+			G_RemoveRandomBot( TEAM_BLUE );
+			bots--;
+		}
+	} else {
+		// FFA / Duel / KOTH / LMS: remove excess bots globally
+		humans = G_CountHumanPlayers( -1 );
+		bots = G_CountBotPlayers( -1 );
+		total = humans + bots;
+
+		if ( total > needed && bots > 0 ) {
+			G_RemoveLowestScoringBot();
+		}
+	}
 }
 
 /*
@@ -609,7 +667,7 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 
 	// set default team
 	if( !team || !*team ) {
-		if( g_gametype.integer >= GT_TEAM ) {
+		if( g_gametype.integer >= GT_TDM ) {
 			if( PickTeam(clientNum) == TEAM_RED) {
 				team = "red";
 			}
@@ -1002,7 +1060,8 @@ void G_InitBots( qboolean restart ) {
 	G_LoadBots();
 	G_LoadArenas();
 
-	trap_Cvar_Register( &bot_minplayers, "bot_minplayers", "0", CVAR_SERVERINFO );
+	trap_Cvar_Register( &g_minPlayers, "g_minPlayers", "2", CVAR_SERVERINFO | CVAR_ARCHIVE );
+	trap_Cvar_Register( &g_autoBots, "g_autoBots", "1", CVAR_SERVERINFO | CVAR_ARCHIVE );
 
 	if( g_singlePlayer.integer ) {
 		trap_GetServerinfo( serverinfo, sizeof(serverinfo) );

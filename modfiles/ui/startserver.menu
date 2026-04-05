@@ -19,30 +19,30 @@ menuDef {
 	itemDef {
 		type 12
 		text "Type:"
-		rect 16 8 280 20
+		rect 16 8 200 20
 		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "ui_netGameType"
-		cvarFloatList { "Free For All" 0 "Tournament" 1 "King of the Hill" 3 "Last Man Standing" 4 "Team DM" 5 "CTF" 6 }
+		cvarFloatList { "Deathmatch" 0 "Duel" 1 "King of the Hill" 2 "Last Man Standing" 3 "Team Deathmatch" 4 "Capture the Flag" 5 }
 		visible 1
 		action { UpdateGameType }
 	}
 
 	itemDef {
 		type 12
-		text "Bots:"
-		rect 310 8 130 20
+		text "Min Players:"
+		rect 230 8 140 20
 		textscale 0.3
 		forecolor 1 1 1 1
-		cvar "ui_botCount"
-		cvarFloatList { "None" 0 "1" 1 "2" 2 "3" 3 "4" 4 "5" 5 "6" 6 "7" 7 }
+		cvar "g_minPlayers"
+		cvarFloatList { "2" 2 "3" 3 "4" 4 "6" 6 "8" 8 }
 		visible 1
 	}
 
 	itemDef {
 		type 12
 		text "Skill:"
-		rect 450 8 174 20
+		rect 380 8 160 20
 		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "g_spSkill"
@@ -283,6 +283,16 @@ menuDef {
 		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "sv_allowDownload"
+		visible 1
+	}
+
+	itemDef {
+		type 11
+		text "Auto Bots:"
+		rect 412 224 212 20
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "g_autoBots"
 		visible 1
 	}
 

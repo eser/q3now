@@ -32,13 +32,13 @@ compile() {
 echo "==> Compiling individual shaders..."
 for f in *.vert; do
     [ -f "$f" ] || continue
-    case "$f" in smaa_*|rail_*) continue;; esac  # compiled separately below
+    case "$f" in smaa_*|rail_*|msdf.*|iqm_skinning.*) continue;; esac  # compiled separately below
     name="${f%.vert}_vert_spv"
     compile vert "$f" "$name"
 done
 for f in *.frag; do
     [ -f "$f" ] || continue
-    case "$f" in smaa_*|rail_*) continue;; esac  # compiled separately below
+    case "$f" in smaa_*|rail_*|msdf.*|iqm_skinning.*) continue;; esac  # compiled separately below
     name="${f%.frag}_frag_spv"
     compile frag "$f" "$name"
 done
@@ -202,6 +202,10 @@ compile_rail frag rail_helix.frag rail_helix_frag_spv
 echo "==> Compiling IQM GPU skinning shaders..."
 compile vert iqm_skinning.vert iqm_skinning_vert_spv
 compile frag iqm_skinning.frag iqm_skinning_frag_spv
+
+echo "==> Compiling MSDF text rendering shaders..."
+compile vert msdf.vert msdf_vert_spv
+compile frag msdf.frag msdf_frag_spv
 
 rm -f "$TMPF"
 echo "==> Done. shader_data.c regenerated."

@@ -1,0 +1,42 @@
+// mods.wmenu - Wired UI mod browser panel
+// Flex column layout -- vertical positioning handled by the layout engine.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "mods"
+	rect 0.156 0.125 0.688 0.750
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor 1 0.75 0 0.15
+	layout column
+	padding 0.05
+	gap 0.01
+	justify center
+
+	onESC { close }
+
+	WLABEL(0, 0, 1.0, 0.038, "Mods", 24, 1)
+	WSEPARATOR(0, 0, 1.0)
+
+	itemDef {
+		name "modlist"
+		type 6
+		rect 0 0 1.0 0.583
+		font "oxanium" 13
+		forecolor WCOLOR_TEXT
+		backcolor 0.06 0.06 0.1 0.8
+		style 1
+		feeder 9
+		elementheight 16
+		columns 2 0 140 32 140 280 64
+		visible 1
+		grow 1
+	}
+
+	WSEPARATOR(0, 0, 1.0)
+	WBUTTON(0, 0, 1.0, 0.042, "Load Mod", 17, runmod)
+	WBUTTON(0, 0, 1.0, 0.042, "Back", 17, close)
+}

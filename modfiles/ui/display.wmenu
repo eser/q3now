@@ -1,0 +1,52 @@
+// display.wmenu - Wired UI display settings panel
+// Ported from TA system.menu "Other" tab, Display section.
+// TA has Brightness and Screen Size sliders.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "display"
+	// Compact centered panel
+	rect 0.291 0.208 0.417 0.417
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor 1 0.75 0 0.15
+
+	WFULLSCREEN_BACKGROUND
+
+	onESC { close }
+
+	WLABEL(0.000, 0.040, 1.000, 0.080, "Display", 24, 1)
+	WSEPARATOR(0.042, 0.140, 0.917)
+
+	// TA: Brightness slider at rect 99 52 256 20 (within Other)
+	itemDef {
+		type 10
+		text "Brightness:"
+		rect 0.042 0.200 0.917 0.080
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvarFloat "r_gamma" 1.0 0.5 2.0
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Screen Size slider at rect 99 79 256 20
+	itemDef {
+		type 10
+		text "Screen Size:"
+		rect 0.042 0.320 0.917 0.080
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvarFloat "cg_viewsize" 100 30 100
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	WSEPARATOR(0.042, 0.440, 0.917)
+	WBUTTON(0.292, 0.500, 0.417, 0.080, "Back", 14, close)
+}

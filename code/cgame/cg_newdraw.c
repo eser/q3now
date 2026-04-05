@@ -1004,13 +1004,13 @@ qboolean CG_OwnerDrawVisible(int flags) {
 	}
 
 	if (flags & CG_SHOW_ANYTEAMGAME) {
-		if( cgs.gametype >= GT_TEAM) {
+		if( cgs.gametype >= GT_TDM) {
 			return qtrue;
 		}
 	}
 
 	if (flags & CG_SHOW_ANYNONTEAMGAME) {
-		if( cgs.gametype < GT_TEAM) {
+		if( cgs.gametype < GT_TDM) {
 			return qtrue;
 		}
 	}
@@ -1057,8 +1057,8 @@ qboolean CG_OwnerDrawVisible(int flags) {
 		}
 	}
 
-	if (flags & CG_SHOW_TOURNAMENT) {
-		if( cgs.gametype == GT_TOURNAMENT ) {
+	if (flags & CG_SHOW_DUEL) {
+		if( cgs.gametype == GT_DUEL ) {
 			return qtrue;
 		}
 	}
@@ -1137,7 +1137,7 @@ static void CG_Draw2ndPlace(rectDef_t *rect, float scale, vec4_t color, qhandle_
 
 const char *CG_GetGameStatusText(void) {
 	const char *s = "";
-	if ( cgs.gametype < GT_TEAM) {
+	if ( cgs.gametype < GT_TDM) {
 		if (cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR ) {
 			s = va("%s place with %i",CG_PlaceString( cg.snap->ps.persistant[PERS_RANK] + 1 ),cg.snap->ps.persistant[PERS_SCORE] );
 		}
@@ -1158,24 +1158,8 @@ static void CG_DrawGameStatus(rectDef_t *rect, float scale, vec4_t color, qhandl
 }
 
 const char *CG_GameTypeString(void) {
-    if (cgs.gametype == GT_FFA) {
-        return "Free For All";
-    } else if (cgs.gametype == GT_TOURNAMENT) {
-        return "Tournament";
-    } else if (cgs.gametype == GT_KINGOFTHEHILL) {
-        return "King of the Hill";
-    } else if (cgs.gametype == GT_LASTMANSTANDING) {
-        return "Last Man Standing";
-    } else if (cgs.gametype == GT_TEAM) {
-		return "Team Deathmatch";
-	} else if ( cgs.gametype == GT_CTF ) {
-		return "Capture the Flag";
-	} else if ( cgs.gametype == GT_1FCTF ) {
-		return "One Flag CTF";
-	} else if ( cgs.gametype == GT_OBELISK ) {
-		return "Overload";
-	} else if ( cgs.gametype == GT_HARVESTER ) {
-		return "Harvester";
+	if (cgs.gametype >= 0 && cgs.gametype < GT_MAX_GAME_TYPE) {
+		return bg_gametypelist[cgs.gametype].name;
 	}
 	return "";
 }
@@ -1684,14 +1668,14 @@ void CG_MouseEvent(int x, int y) {
 	cgs.cursorX+= x;
 	if (cgs.cursorX < 0)
 		cgs.cursorX = 0;
-	else if (cgs.cursorX > 640)
-		cgs.cursorX = 640;
+	else if (cgs.cursorX > CG_VIRTUAL_W)
+		cgs.cursorX = CG_VIRTUAL_W;
 
 	cgs.cursorY += y;
 	if (cgs.cursorY < 0)
 		cgs.cursorY = 0;
-	else if (cgs.cursorY > 480)
-		cgs.cursorY = 480;
+	else if (cgs.cursorY > CG_VIRTUAL_H)
+		cgs.cursorY = CG_VIRTUAL_H;
 
 	n = Display_CursorType(cgs.cursorX, cgs.cursorY);
 	cgs.activeCursor = 0;
@@ -1797,14 +1781,14 @@ int CG_ClientNumFromName(const char *p) {
 }
 
 void CG_ShowResponseHead(void) {
-	float x, y, w, h;
+	float nx, ny, nw, nh;
 
-	x = 72;
-	y = w = h = 0;
-	CG_AdjustFrom640( &x, &y, &w, &h );
+	nx = CG_NormX( 72 );
+	ny = nw = nh = 0;
+	CG_AdjustNorm( &nx, &ny, &nw, &nh );
 
 	Menus_OpenByName("voiceMenu");
-	trap_Cvar_Set("cl_conXOffset", va("%d", (int)x));
+	trap_Cvar_Set("cl_conXOffset", va("%d", (int)(nx * cgs.glconfig.vidWidth)));
 	cg.voiceTime = cg.time;
 }
 

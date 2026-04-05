@@ -68,7 +68,7 @@ static int WT_NetadrToSockaddr( const netadr_t *a, struct sockaddr_storage *s )
 		v4->sin_port = a->port;
 		return sizeof( struct sockaddr_in );
 	}
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 	if ( a->type == NA_IP6 || a->type == NA_MULTICAST6 ) {
 		struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)s;
 		v6->sin6_family = AF_INET6;
@@ -455,7 +455,7 @@ void QUIC_FlushOutbound( void )
 			memcpy( to.ipv._4, &v4->sin_addr.s_addr, 4 );
 			to.port = v4->sin_port;
 		}
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 		else if ( addr_to.ss_family == AF_INET6 ) {
 			struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)&addr_to;
 			to.type = NA_IP6;

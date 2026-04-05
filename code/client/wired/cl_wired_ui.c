@@ -13,15 +13,23 @@ code/ui/ui_shared.c in subsequent phases.
 #include "cl_wired_hud.h"
 #include "cl_wired_hud_private.h"
 #include "cl_wired_fonts.h"
+#include "cl_wired_text.h"
+#include "cl_wired_draw.h"
 #include "../../qcommon/menudef.h"
 
 #if FEAT_WIRED_UI
+
+#define WUI_DEFAULT_FONT_SIZE  14.0f
 
 // from cl_wired_hud_registry.c
 extern void     WiredHud_DestroyAllElements( void );
 extern int      WiredHud_GetElementCount( void );
 // from cl_wired_hud.c
 extern void     WiredHud_LoadFromMenus( void );
+
+// forward declarations
+static void WiredUI_ApplyAnchor( wiredMenuDef_t *menu, float menuW, float menuH,
+                                  float *outX, float *outY );
 
 // ── symbol registry ───────────────────────────────────────────────────
 
@@ -177,6 +185,10 @@ static int       wired_menuStackDepth = 0;
 static qboolean  wired_waitingForKey = qfalse;
 static wiredItemDef_t *wired_bindItem = NULL;
 
+// ── slider drag state ────────────────────────────────────────────────
+static qboolean       wired_sliderDragging = qfalse;
+static wiredItemDef_t *wired_sliderDragItem = NULL;
+
 // ── text field editing state ──────────────────────────────────────────
 static qboolean       wired_editingField = qfalse;
 static wiredItemDef_t *wired_editItem = NULL;
@@ -187,6 +199,17 @@ static float     wired_cursorX = 320.0f;
 static float     wired_cursorY = 240.0f;
 static int       wired_focusItem = -1;     // index of focused item
 static qboolean  wired_focusFromMouse = qfalse;  // qtrue if focus came from mouse hover
+
+// ── tooltip delay ─────────────────────────────────────────────────────
+#define WIRED_TOOLTIP_DELAY_MS  500   // ms before tooltip appears
+static int       wired_tooltipStartTime = 0;  // realtime when hover started on tooltip item
+static int       wired_tooltipFocusItem = -1; // item index that started the tooltip timer
+
+// ── ui_testall dev command ────────────────────────────────────────────
+static qboolean  testall_active = qfalse;
+static int       testall_menuIndex = 0;
+static int       testall_nextTime = 0;
+static int       testall_delay = 2000;  // ms between menu switches
 
 // ── double-click detection ───────────────────────────────────────────
 #define WIRED_DOUBLECLICK_TIME  300   // ms
@@ -302,6 +325,15 @@ static cvar_t *wired_screenshotDelay = NULL;
 static int     wired_screenshotTime = 0;
 static qboolean wired_screenshotTaken = qfalse;
 
+// generic confirm dialog cvars
+static cvar_t *ui_confirmText = NULL;
+static cvar_t *ui_confirmAction = NULL;
+
+// ── Layer 5: hot-reload and debug overlay cvars ──────────────────────
+static cvar_t *wired_hotreload = NULL;
+static int     wired_lastReloadCheck = 0;
+static cvar_t *wired_debug_layout = NULL;
+
 /*
 =================
 WiredUI_RegisterAssets
@@ -343,6 +375,86 @@ static void WiredUI_RegisterAssets( void ) {
 	}
 }
 
+// ── ui_testall command handler ────────────────────────────────────────
+static void WiredUI_TestAll_f( void ) {
+	if ( testall_active ) {
+		// Toggle off
+		testall_active = qfalse;
+		WiredUI_CloseAllMenus();
+		Com_Printf( "ui_testall: stopped\n" );
+		return;
+	}
+
+	// Parse optional delay argument
+	if ( Cmd_Argc() > 1 ) {
+		testall_delay = atoi( Cmd_Argv(1) );
+		if ( testall_delay < 100 ) testall_delay = 100;
+		if ( testall_delay > 30000 ) testall_delay = 30000;
+	}
+
+	testall_active = qtrue;
+	testall_menuIndex = 0;
+	testall_nextTime = 0;
+	Com_Printf( "ui_testall: cycling %d menus every %d ms (run again to stop)\n",
+		WiredUI_GetMenuCount(), testall_delay );
+}
+
+// ── Layer 5: hot-reload check ─────────────────────────────────────────
+static void WiredUI_CheckHotReload( int realtime ) {
+	if ( !wired_hotreload || !wired_hotreload->integer ) return;
+	if ( realtime - wired_lastReloadCheck < 1000 ) return; // check once per second
+	wired_lastReloadCheck = realtime;
+
+	// Re-load all menus from manifest using the existing safe-reload path
+	Com_Printf( "Wired UI: hot-reload check\n" );
+	WiredUI_ReloadMenus();
+}
+
+// ── Layer 5: visual layout debug overlay ──────────────────────────────
+static void WiredUI_DrawDebugOverlay( wiredMenuDef_t *menu ) {
+	int i;
+	vec4_t containerColor = { 0, 1, 0, 0.5f };    // green
+	vec4_t childColor     = { 0, 0.5f, 1, 0.5f };  // blue
+	vec4_t itemColor      = { 1, 0, 0, 0.3f };      // red (unused label kept for clarity)
+
+	if ( !wired_debug_layout || !wired_debug_layout->integer ) return;
+	if ( !menu ) return;
+
+	(void)itemColor; // suppress unused warning
+
+	// Draw menu rect outline (green if flex container)
+	if ( menu->isFlexContainer ) {
+		float mx = menu->rect.x;
+		float my = menu->rect.y;
+		float mw = menu->rect.w;
+		float mh = menu->rect.h;
+		WUI_FillRect( mx, my, mw, 1, containerColor );
+		WUI_FillRect( mx, my + mh - 1, mw, 1, containerColor );
+		WUI_FillRect( mx, my, 1, mh, containerColor );
+		WUI_FillRect( mx + mw - 1, my, 1, mh, containerColor );
+	}
+
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		wiredItemDef_t *item = menu->items[i];
+		vec4_t *color;
+		float x, y, w, h;
+
+		if ( !item ) continue;
+
+		color = item->isFlexContainer ? &containerColor : &childColor;
+		x = item->rect.x;
+		y = item->rect.y;
+		w = item->rect.w;
+		h = item->rect.h;
+
+		// Draw outline (1px borders)
+		WUI_FillRect( x, y, w, 1, *color );
+		WUI_FillRect( x, y + h - 1, w, 1, *color );
+		WUI_FillRect( x, y, 1, h, *color );
+		WUI_FillRect( x + w - 1, y, 1, h, *color );
+	}
+}
+
 void WiredUI_Init( qboolean inGameUI ) {
 	Com_Printf( "------- WiredUI_Init -------\n" );
 
@@ -358,12 +470,18 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// register feeder data sources
 	WiredUI_RegisterCoreFeeders();
 
-	// Phase 3: initialize HUD subsystem (fonts + state bridge)
+	// Bootstrap MSDF font subsystem before HUD init
+	Text_Init();
+
+	// Phase 3: initialize HUD subsystem (state bridge)
 	WiredHud_Init();
 
 	// hot reload commands
 	Cmd_AddCommand( "hud_reload", WiredUI_ReloadHud );
 	Cmd_AddCommand( "menu_reload", WiredUI_ReloadMenus );
+
+	// dev: cycle through all menus for visual verification
+	Cmd_AddCommand( "ui_testall", WiredUI_TestAll_f );
 
 	// initialize asset globals with TA-style defaults
 	memset( &wired_assetGlobals, 0, sizeof( wired_assetGlobals ) );
@@ -381,8 +499,17 @@ void WiredUI_Init( qboolean inGameUI ) {
 	Vector4Set( wired_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
 	Q_strncpyz( wired_assetGlobals.focusSound, "sound/misc/menu2.wav", sizeof( wired_assetGlobals.focusSound ) );
 	Vector4Set( wired_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );  // TA gold
+	wired_assetGlobals.shadowX = 1.0f;
+	wired_assetGlobals.shadowY = 1.0f;
+	Vector4Set( wired_assetGlobals.gradientBarColor, 0, 0, 0, 0 );  // no color by default
+	// radialGlowShader, defaultFont/Heading/ConsoleFont: zeroed by memset (empty = no override)
 
 	WiredUI_RegisterAssets();
+
+	// ensure cvar defaults for menu dropdowns
+	if ( Cvar_VariableIntegerValue( "g_spSkill" ) < 1 ) {
+		Cvar_Set( "g_spSkill", "3" );  // default to "Competitive"
+	}
 
 	// load TA fonts (fontInfo_t-based, for v6/TA menu text rendering)
 	WiredUI_LoadTAFonts();
@@ -442,6 +569,14 @@ void WiredUI_Init( qboolean inGameUI ) {
 	wired_screenshotTime = cls.realtime;
 	wired_screenshotTaken = qfalse;
 
+	// generic confirm dialog cvars
+	ui_confirmText = Cvar_Get( "ui_confirmText", "", 0 );
+	ui_confirmAction = Cvar_Get( "ui_confirmAction", "", 0 );
+
+	// Layer 5: hot-reload and debug overlay cvars
+	wired_hotreload = Cvar_Get( "wired_hotreload", "0", CVAR_TEMP );
+	wired_debug_layout = Cvar_Get( "wired_debug_layout", "0", CVAR_TEMP );
+
 	Com_Printf( "WiredUI: initialized (%d menus loaded)\n", WiredUI_GetMenuCount() );
 }
 
@@ -465,6 +600,8 @@ void WiredUI_Shutdown( void ) {
 	WiredHud_DestroyAllElements();
 	Cmd_RemoveCommand( "hud_reload" );
 	Cmd_RemoveCommand( "menu_reload" );
+	Cmd_RemoveCommand( "ui_testall" );
+	testall_active = qfalse;
 
 	Com_Memset( wired_symbols, 0, sizeof( wired_symbols ) );
 	Com_Memset( wired_elements, 0, sizeof( wired_elements ) );
@@ -484,12 +621,45 @@ void WiredUI_Refresh( int realtime ) {
 		return;
 	}
 
+	// Layer 5: hot-reload check (dev mode)
+	WiredUI_CheckHotReload( realtime );
+
 	// delayed screenshot — fire once after N seconds
 	if ( wired_screenshotDelay && wired_screenshotDelay->integer > 0 && !wired_screenshotTaken ) {
 		if ( realtime - wired_screenshotTime >= wired_screenshotDelay->integer * 1000 ) {
 			Cbuf_ExecuteText( EXEC_APPEND, "screenshotJPEG\n" );
 			wired_screenshotTaken = qtrue;
 			Com_Printf( "WiredUI: delayed screenshot taken\n" );
+		}
+	}
+
+	// ui_testall: cycle through registered menus for visual scanning
+	if ( testall_active ) {
+		if ( realtime >= testall_nextTime ) {
+			int menuCount = WiredUI_GetMenuCount();
+
+			// close whatever is currently shown
+			WiredUI_CloseAllMenus();
+
+			if ( testall_menuIndex < menuCount ) {
+				wiredMenuDef_t *m = WiredUI_GetMenuByIndex( testall_menuIndex );
+				if ( m ) {
+					// activate UI capture so the menu renders
+					wired_activeMenu = UIMENU_MAIN;
+					Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
+
+					WiredUI_PushMenu( m->name );
+					Com_Printf( "ui_testall: [%d/%d] %s\n",
+						testall_menuIndex + 1, menuCount, m->name );
+				}
+				testall_menuIndex++;
+			} else {
+				// all menus shown — stop
+				testall_active = qfalse;
+				Com_Printf( "ui_testall: done (%d menus tested)\n", testall_menuIndex );
+			}
+
+			testall_nextTime = realtime + testall_delay;
 		}
 	}
 
@@ -524,21 +694,25 @@ void WiredUI_Refresh( int realtime ) {
 	// TODO: animated cloud background — deferred (tcmod scroll not animating in 2D path)
 	// See TODOS.md "Wired UI: animated cloud menu background"
 
-	// menu origin offset — non-fullscreen menus position items relative to rect
-	float menuX = menu->fullscreen ? 0 : menu->rect.x;
-	float menuY = menu->fullscreen ? 0 : menu->rect.y;
-	float menuW = menu->fullscreen ? SCREEN_WIDTH : menu->rect.w;
-	float menuH = menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h;
-	float scrollY = menu->scrollOffset;  // scroll offset applied to all items
-	float clipTop = menuY;               // visible area top
-	float clipBottom = menuY + menuH;    // visible area bottom
+	// resolve layout tree: all items get resolvedRect in pixel coords
+	float vpW = (float)cls.glconfig.vidWidth;
+	float vpH = (float)cls.glconfig.vidHeight;
+	WUI_LayoutMenu( menu, vpW, vpH );
+
+	float menuX = menu->resolvedRect.x;
+	float menuY = menu->resolvedRect.y;
+	float menuW = menu->resolvedRect.w;
+	float menuH = menu->resolvedRect.h;
+	float scrollY = menu->scrollOffset;
+	float clipTop = menuY;
+	float clipBottom = menuY + menuH;
 
 	// render background — supports FILLED, SHADER, GRADIENT, and CINEMATIC styles
 	{
-		float bgX = menu->fullscreen ? 0 : menu->rect.x;
-		float bgY = menu->fullscreen ? 0 : menu->rect.y;
-		float bgW = menu->fullscreen ? SCREEN_WIDTH : menu->rect.w;
-		float bgH = menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h;
+		float bgX = menuX;
+		float bgY = menuY;
+		float bgW = menuW;
+		float bgH = menuH;
 
 		if ( menu->style == WINDOW_STYLE_CINEMATIC && menu->cinematicHandle >= 0 ) {
 			// WINDOW_STYLE_CINEMATIC: run + draw ROQ video as background
@@ -550,29 +724,29 @@ void WiredUI_Refresh( int realtime ) {
 			qhandle_t bgShader = re.RegisterShaderNoMip( menu->background );
 			if ( bgShader ) {
 				re.SetColor( NULL );
-				SCR_DrawPic( bgX, bgY, bgW, bgH, bgShader );
+				WUI_DrawPic( bgX, bgY, bgW, bgH, bgShader );
 			} else if ( menu->backcolor[3] > 0.0f ) {
-				SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+				WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
 			}
 		} else if ( menu->style == WINDOW_STYLE_GRADIENT && menu->backcolor[3] > 0.0f ) {
 			// WINDOW_STYLE_GRADIENT: solid fill + gradient bar overlay
-			SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+			WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
 			if ( wired_gradientBarShader ) {
 				vec4_t gradColor;
 				Vector4Copy( menu->backcolor, gradColor );
 				gradColor[3] *= 0.5f;  // semi-transparent gradient overlay
 				re.SetColor( gradColor );
-				SCR_DrawPic( bgX, bgY, bgW, bgH, wired_gradientBarShader );
+				WUI_DrawPic( bgX, bgY, bgW, bgH, wired_gradientBarShader );
 				re.SetColor( NULL );
 			}
 		} else if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f ) {
-			SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+			WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
 		} else if ( menu->style == WINDOW_STYLE_EMPTY ) {
 			// no background — transparent
 		} else {
 			// fallback: dark panel
 			vec4_t bgColor = { 0.1f, 0.1f, 0.15f, 1.0f };
-			SCR_FillRect( bgX, bgY, bgW, bgH, bgColor );
+			WUI_FillRect( bgX, bgY, bgW, bgH, bgColor );
 		}
 	}
 
@@ -665,12 +839,14 @@ void WiredUI_Refresh( int realtime ) {
 			}
 		}
 
-		// compute absolute item position (menu origin + scroll offset)
-		float itemX = menuX + item->rect.x;
-		float itemY = menuY + item->rect.y - scrollY;
+		// read resolved pixel rect from layout engine
+		float itemX = item->resolvedRect.x;
+		float itemY = item->resolvedRect.y - scrollY;
+		float itemW = item->resolvedRect.w;
+		float itemH = item->resolvedRect.h;
 
 		// clip items outside visible area
-		if ( itemY + item->rect.h < clipTop || itemY > clipBottom ) {
+		if ( itemY + itemH < clipTop || itemY > clipBottom ) {
 			continue;
 		}
 
@@ -681,33 +857,44 @@ void WiredUI_Refresh( int realtime ) {
 			if ( itemAlpha <= 0.01f ) continue;  // fully transparent — skip drawing
 		}
 
+		// apply menu-level fade (fadeClamp/fadeCycle/fadeAmount)
+		itemAlpha *= menu->fadeAlpha;
+		if ( itemAlpha <= 0.01f ) continue;
+
 		// draw item background if styled (modulated by itemAlpha)
 		if ( item->style == WINDOW_STYLE_SHADER && item->background[0] ) {
 			qhandle_t itemBg = re.RegisterShaderNoMip( item->background );
 			if ( itemBg ) {
-				vec4_t alphaColor = { 1, 1, 1, itemAlpha };
-				re.SetColor( itemAlpha < 1.0f ? alphaColor : NULL );
-				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, itemBg );
+				vec4_t shaderColor;
+				if ( item->forecolor[0] > 0.0f || item->forecolor[1] > 0.0f ||
+				     item->forecolor[2] > 0.0f || item->forecolor[3] > 0.0f ) {
+					Vector4Copy( item->forecolor, shaderColor );
+				} else {
+					Vector4Set( shaderColor, 1, 1, 1, 1 );
+				}
+				shaderColor[3] *= itemAlpha;
+				re.SetColor( shaderColor );
+				WUI_DrawPic( itemX, itemY, itemW, itemH, itemBg );
 				re.SetColor( NULL );
 			}
 		} else if ( item->style == WINDOW_STYLE_GRADIENT && item->backcolor[3] > 0.0f ) {
 			vec4_t bc;
 			Vector4Copy( item->backcolor, bc );
 			bc[3] *= itemAlpha;
-			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, bc );
+			WUI_FillRect( itemX, itemY, itemW, itemH, bc );
 			if ( wired_gradientBarShader ) {
 				vec4_t gc;
 				Vector4Copy( item->backcolor, gc );
 				gc[3] *= 0.5f * itemAlpha;
 				re.SetColor( gc );
-				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, wired_gradientBarShader );
+				WUI_DrawPic( itemX, itemY, itemW, itemH, wired_gradientBarShader );
 				re.SetColor( NULL );
 			}
 		} else if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
 			vec4_t bc;
 			Vector4Copy( item->backcolor, bc );
 			bc[3] *= itemAlpha;
-			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, bc );
+			WUI_FillRect( itemX, itemY, itemW, itemH, bc );
 		}
 
 		// draw background image (levelshots, icons, etc.)
@@ -723,14 +910,14 @@ void WiredUI_Refresh( int realtime ) {
 			qhandle_t bgShader = re.RegisterShaderNoMip( item->background );
 			if ( bgShader ) {
 				re.SetColor( NULL );
-				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, bgShader );
+				WUI_DrawPic( itemX, itemY, itemW, itemH, bgShader );
 			}
 		}
 
 		// draw OWNERDRAW items — TA compat (CG_OWNERDRAW_* dispatch)
 		if ( item->type == ITEM_TYPE_OWNERDRAW && item->ownerdraw > 0 ) {
 			WiredUI_OwnerDraw( item->ownerdraw, itemX, itemY,
-				item->rect.w, item->rect.h, item->forecolor, item->textstyle );
+				itemW, itemH, item->forecolor, item->textstyle );
 			continue;  // ownerdraw items handle their own rendering entirely
 		}
 
@@ -739,13 +926,13 @@ void WiredUI_Refresh( int realtime ) {
 			int feederID = (int)item->feeder;
 			int totalRows = WiredUI_FeederCount( feederID );
 			float rowH = item->elementheight > 0 ? item->elementheight : 16.0f;
-			int visibleRows = (int)( item->rect.h / rowH );
+			int visibleRows = (int)( itemH / rowH );
 			int row, col;
-			float charSize = item->textscale >= 0.7f ? 16.0f : 8.0f;
+			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
 			vec4_t selColor = { 0.3f, 0.3f, 0.5f, 0.6f };
 			vec4_t rowColor;
 			float scrollBarW = 4.0f;
-			float contentW = item->rect.w;
+			float contentW = itemW;
 
 			// reserve space for scrollbar when content overflows
 			if ( totalRows > visibleRows ) {
@@ -754,7 +941,7 @@ void WiredUI_Refresh( int realtime ) {
 
 			// draw list background
 			if ( item->backcolor[3] > 0 ) {
-				SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, item->backcolor );
+				WUI_FillRect( itemX, itemY, itemW, itemH, item->backcolor );
 			}
 
 			// draw rows
@@ -764,7 +951,7 @@ void WiredUI_Refresh( int realtime ) {
 
 				// highlight selected row
 				if ( dataRow == item->listSelectedRow ) {
-					SCR_FillRect( itemX, rowY, contentW, rowH, selColor );
+					WUI_FillRect( itemX, rowY, contentW, rowH, selColor );
 				}
 
 				// draw columns — clip text to column width
@@ -799,11 +986,9 @@ void WiredUI_Refresh( int realtime ) {
 								vc++;
 							}
 							clipped[ci] = '\0';
-							SCR_DrawStringExt( (int)colX, (int)( rowY + 2 ), charSize,
-								clipped, rowColor, qfalse, qfalse );
+							Text_Draw( clipped, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
 						} else {
-							SCR_DrawStringExt( (int)colX, (int)( rowY + 2 ), charSize,
-								text, rowColor, qfalse, qfalse );
+							Text_Draw( text, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
 						}
 					}
 					colX += colW;
@@ -812,9 +997,9 @@ void WiredUI_Refresh( int realtime ) {
 
 			// listbox scrollbar — macOS-style with fade
 			if ( totalRows > visibleRows ) {
-				float trackX = itemX + item->rect.w - scrollBarW - 1.0f;
+				float trackX = itemX + itemW - scrollBarW - 1.0f;
 				float trackY = itemY + 1.0f;
-				float trackH = item->rect.h - 2.0f;
+				float trackH = itemH - 2.0f;
 				float visibleFrac = (float)visibleRows / (float)totalRows;
 				float thumbH = trackH * visibleFrac;
 				float maxScroll = (float)( totalRows - visibleRows );
@@ -841,8 +1026,8 @@ void WiredUI_Refresh( int realtime ) {
 				if ( alpha > 0 ) {
 					vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.15f * alpha };
 					vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.5f * alpha };
-					SCR_FillRect( trackX, trackY, scrollBarW, trackH, trackColor );
-					SCR_FillRect( trackX, thumbY, scrollBarW, thumbH, thumbColor );
+					WUI_FillRect( trackX, trackY, scrollBarW, trackH, trackColor );
+					WUI_FillRect( trackX, thumbY, scrollBarW, thumbH, thumbColor );
 				}
 			}
 
@@ -870,18 +1055,17 @@ void WiredUI_Refresh( int realtime ) {
 		if ( item->cvar[0] && item->type != ITEM_TYPE_TEXT && item->type != ITEM_TYPE_BUTTON ) {
 			char cvarBuf[256];
 			const char *valueText = "";
-			float charSize = item->textscale >= 0.7f ? 16.0f : 8.0f;
+			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
 			// vertical center text in rect when textaligny is not set
-			float textVCenter = ( item->textaligny == 0 && item->rect.h > charSize )
-				? ( item->rect.h - charSize ) * 0.5f : item->textaligny;
+			float textVCenter = ( item->textaligny == 0 && itemH > charSize )
+				? ( itemH - charSize ) * 0.5f : item->textaligny;
 			float labelX = itemX + item->textalignx;
 			float labelY = itemY + textVCenter;
 			float valueX;
 
 			// draw the label on the left
 			if ( item->text[0] ) {
-				SCR_DrawStringExt( (int)labelX, (int)labelY, charSize, item->text,
-					item->forecolor, qfalse, qfalse );
+				Text_Draw( item->text, (float)labelX, (float)labelY, FONT_UI, charSize, item->forecolor, TEXT_ALIGN_LEFT, 0 );
 			}
 
 			// compute value text based on item type
@@ -923,9 +1107,9 @@ void WiredUI_Refresh( int realtime ) {
 						float val = atof( cvarBuf );
 						float range = item->sliderData.maxVal - item->sliderData.minVal;
 						float frac = ( range > 0 ) ? ( val - item->sliderData.minVal ) / range : 0;
-						float barX = itemX + item->rect.w * 0.5f;
-						float barW = item->rect.w * 0.45f;
-						float barY = itemY + item->rect.h * 0.4f;
+						float barX = itemX + itemW * 0.5f;
+						float barW = itemW * 0.45f;
+						float barY = itemY + itemH * 0.4f;
 						float barH = 4.0f;
 						vec4_t barBg = { 0.3f, 0.3f, 0.3f, 0.6f };
 						vec4_t barFg = { 1.0f, 0.75f, 0.0f, 1.0f };
@@ -934,9 +1118,9 @@ void WiredUI_Refresh( int realtime ) {
 						if ( frac > 1 ) frac = 1;
 
 						// draw slider track
-						SCR_FillRect( barX, barY, barW, barH, barBg );
+						WUI_FillRect( barX, barY, barW, barH, barBg );
 						// draw slider fill
-						SCR_FillRect( barX, barY, barW * frac, barH, barFg );
+						WUI_FillRect( barX, barY, barW * frac, barH, barFg );
 						// draw value as text
 						valueText = va( "%.1f", val );
 					}
@@ -994,46 +1178,41 @@ void WiredUI_Refresh( int realtime ) {
 					break;
 			}
 
-			// draw value text on the right side
+			// draw value text after label with consistent spacing
 			if ( valueText[0] ) {
 				float textLen = strlen( item->text[0] ? item->text : "" ) * charSize;
-				valueX = itemX + textLen + 16;
-				if ( valueX < itemX + item->rect.w * 0.5f ) {
-					valueX = itemX + item->rect.w * 0.5f;
-				}
-				SCR_DrawStringExt( (int)valueX, (int)labelY, charSize, valueText,
-					item->forecolor, qfalse, qfalse );
+				valueX = itemX + textLen + 12;
+				Text_Draw( valueText, (float)valueX, (float)labelY, FONT_UI, charSize, item->forecolor, TEXT_ALIGN_LEFT, 0 );
 			}
 		}
 		// draw text-only items (no cvar)
 		else if ( item->text[0] ) {
-			float charSize = item->textscale >= 0.7f ? 16.0f : 8.0f;
-			float textVCenter = ( item->textaligny == 0 && item->rect.h > charSize )
-				? ( item->rect.h - charSize ) * 0.5f : item->textaligny;
+			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+			float textVCenter = ( item->textaligny == 0 && itemH > charSize )
+				? ( itemH - charSize ) * 0.5f : item->textaligny;
 			float x = itemX + item->textalignx;
 			float y = itemY + textVCenter;
 			char truncBuf[256];
 			const char *displayText;
 
 			// truncate if wider than rect
-			if ( item->rect.w > 0 ) {
-				WIRED_TRUNCATE_TEXT( item->text, charSize, item->rect.w, truncBuf, sizeof( truncBuf ) );
+			if ( itemW > 0 ) {
+				WIRED_TRUNCATE_TEXT( item->text, charSize, itemW, truncBuf, sizeof( truncBuf ) );
 				displayText = truncBuf;
 			} else {
 				displayText = item->text;
 			}
 
 			// adjust for text alignment within rect
-			if ( item->textalign == ITEM_ALIGN_CENTER && item->rect.w > 0 ) {
+			if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
 				float textWidth = strlen( displayText ) * charSize;
-				x = itemX + ( item->rect.w - textWidth ) * 0.5f;
-			} else if ( item->textalign == ITEM_ALIGN_RIGHT && item->rect.w > 0 ) {
+				x = itemX + ( itemW - textWidth ) * 0.5f;
+			} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
 				float textWidth = strlen( displayText ) * charSize;
-				x = itemX + item->rect.w - textWidth;
+				x = itemX + itemW - textWidth;
 			}
 
-			SCR_DrawStringExt( (int)x, (int)y, charSize, displayText,
-				item->forecolor, qfalse, qfalse );
+			Text_Draw( displayText, (float)x, (float)y, FONT_UI, charSize, item->forecolor, TEXT_ALIGN_LEFT, 0 );
 		}
 	}
 
@@ -1060,31 +1239,32 @@ void WiredUI_Refresh( int realtime ) {
 						goto skip_focus;
 				}
 			}
-			float fx = menuX + focus->rect.x;
-			float fy = menuY + focus->rect.y - scrollY;
+			float fx = focus->resolvedRect.x;
+			float fy = focus->resolvedRect.y - scrollY;
+			float fw = focus->resolvedRect.w;
+			float fh = focus->resolvedRect.h;
 			// don't draw focus highlight outside clip area
-			if ( fy + focus->rect.h < clipTop || fy > clipBottom ) goto skip_focus;
+			if ( fy + fh < clipTop || fy > clipBottom ) goto skip_focus;
 			// TA-style: gradient bar behind focused item, or solid fill as fallback
 			if ( wired_gradientBarShader ) {
 				re.SetColor( menu->focuscolor );
-				SCR_DrawPic( fx, fy, focus->rect.w, focus->rect.h, wired_gradientBarShader );
+				WUI_DrawPic( fx, fy, fw, fh, wired_gradientBarShader );
 				re.SetColor( NULL );
 			} else {
-				SCR_FillRect( fx, fy, focus->rect.w, focus->rect.h, menu->focuscolor );
+				WUI_FillRect( fx, fy, fw, fh, menu->focuscolor );
 			}
 			// redraw the focused item's text on top of highlight
 			if ( focus->text[0] ) {
-				float charSize = focus->textscale >= 0.7f ? 16.0f : 8.0f;
-				float focusVCenter = ( focus->textaligny == 0 && focus->rect.h > charSize )
-					? ( focus->rect.h - charSize ) * 0.5f : focus->textaligny;
+				float charSize = focus->fontPointSize > 0.0f ? focus->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+				float focusVCenter = ( focus->textaligny == 0 && fh > charSize )
+					? ( fh - charSize ) * 0.5f : focus->textaligny;
 				float x = fx + focus->textalignx;
 				float y = fy + focusVCenter;
-				if ( focus->textalign == ITEM_ALIGN_CENTER && focus->rect.w > 0 ) {
+				if ( focus->textalign == ITEM_ALIGN_CENTER && fw > 0 ) {
 					float textWidth = strlen( focus->text ) * charSize;
-					x = fx + ( focus->rect.w - textWidth ) * 0.5f;
+					x = fx + ( fw - textWidth ) * 0.5f;
 				}
-				SCR_DrawStringExt( (int)x, (int)y, charSize, focus->text,
-					focus->forecolor, qfalse, qfalse );
+				Text_Draw( focus->text, (float)x, (float)y, FONT_UI, charSize, focus->forecolor, TEXT_ALIGN_LEFT, 0 );
 			}
 		}
 	}
@@ -1092,37 +1272,40 @@ skip_focus:
 
 	// draw tooltip for mouse-hovered item only (ET:Legacy + QL)
 	// keyboard focus does NOT show tooltips — they anchor to the cursor
+	// tooltip only appears after WIRED_TOOLTIP_DELAY_MS of continuous hover
 	if ( wired_focusFromMouse && wired_focusItem >= 0 && wired_focusItem < menu->itemCount ) {
 		wiredItemDef_t *focus = menu->items[wired_focusItem];
-		if ( focus->tooltip[0] ) {
+		if ( focus->tooltip[0] && wired_tooltipStartTime > 0 &&
+		     ( realtime - wired_tooltipStartTime ) >= WIRED_TOOLTIP_DELAY_MS ) {
 			float tx = wired_cursorX + 16;
 			float ty = wired_cursorY + 16;
 			float tw = strlen( focus->tooltip ) * 8.0f + 8;
 			float th = 16.0f;
 			vec4_t tipBg = { 0.0f, 0.0f, 0.0f, 0.85f };
-			vec4_t tipFg = { 1.0f, 1.0f, 1.0f, 1.0f };
+			vec4_t tipFg = { 1.0f, 1.0f, 1.0f, 0.95f };
 
 			// keep tooltip on screen
-			if ( tx + tw > SCREEN_WIDTH ) tx = SCREEN_WIDTH - tw;
-			if ( ty + th > SCREEN_HEIGHT ) ty = wired_cursorY - th - 4;
+			if ( tx + tw > (float)cls.glconfig.vidWidth ) tx = (float)cls.glconfig.vidWidth - tw;
+			if ( ty + th > (float)cls.glconfig.vidHeight ) ty = wired_cursorY - th - 4;
 
-			SCR_FillRect( tx, ty, tw, th, tipBg );
-			SCR_DrawStringExt( (int)(tx + 4), (int)(ty + 4), 8.0f,
-				focus->tooltip, tipFg, qfalse, qfalse );
+			WUI_FillRect( tx, ty, tw, th, tipBg );
+			Text_Draw( focus->tooltip, (float)(tx + 4), (float)(ty + 4), FONT_UI, 8.0f, tipFg, TEXT_ALIGN_LEFT, 0 );
 		}
 	}
 
 	// draw cursor centered on the logical point
 	if ( Key_GetCatcher() & KEYCATCH_UI ) {
+		vec4_t cursorTint = { 0.85f, 0.55f, 0.1f, 1.0f }; // amber accent
 		if ( wired_cursorShader ) {
+			re.SetColor( cursorTint );
+			WUI_DrawPic( wired_cursorX - 16, wired_cursorY - 16, 32, 32, wired_cursorShader );
 			re.SetColor( NULL );
-			SCR_DrawPic( wired_cursorX - 16, wired_cursorY - 16, 32, 32, wired_cursorShader );
 		} else {
 			// fallback: simple crosshair cursor if shader not found
-			vec4_t cursorColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+			vec4_t cursorColor = { 0.85f, 0.55f, 0.1f, 1.0f };
 			re.SetColor( cursorColor );
-			SCR_FillRect( wired_cursorX - 1, wired_cursorY - 8, 2, 16, cursorColor );
-			SCR_FillRect( wired_cursorX - 8, wired_cursorY - 1, 16, 2, cursorColor );
+			WUI_FillRect( wired_cursorX - 1, wired_cursorY - 8, 2, 16, cursorColor );
+			WUI_FillRect( wired_cursorX - 8, wired_cursorY - 1, 16, 2, cursorColor );
 			re.SetColor( NULL );
 		}
 	}
@@ -1159,11 +1342,14 @@ skip_focus:
 				vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.15f * alpha };
 				vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.5f * alpha };
 
-				SCR_FillRect( trackX, trackY, scrollBarWidth, trackH, trackColor );
-				SCR_FillRect( trackX, thumbY, scrollBarWidth, thumbH, thumbColor );
+				WUI_FillRect( trackX, trackY, scrollBarWidth, trackH, trackColor );
+				WUI_FillRect( trackX, thumbY, scrollBarWidth, thumbH, thumbColor );
 			}
 		}
 	}
+
+	// Layer 5: visual layout debug overlay
+	WiredUI_DrawDebugOverlay( menu );
 
 	// TODO Phase 2: full rendering with borders, models, etc.
 }
@@ -1227,6 +1413,16 @@ static void WiredScript_SetCvar( wiredMenuDef_t *menu, wiredItemDef_t *item, int
 static void WiredScript_Exec( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	if ( numArgs >= 1 ) {
 		Cbuf_ExecuteText( EXEC_APPEND, va( "%s\n", args[0] ) );
+	}
+}
+
+// execConfirm: execute the command stored in ui_confirmAction cvar.
+// Used by the generic confirm dialog's Yes button.
+static void WiredScript_ExecConfirm( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	char actionBuf[256];
+	Cvar_VariableStringBuffer( "ui_confirmAction", actionBuf, sizeof( actionBuf ) );
+	if ( actionBuf[0] ) {
+		Cbuf_ExecuteText( EXEC_APPEND, va( "%s\n", actionBuf ) );
 	}
 }
 
@@ -1309,7 +1505,7 @@ void WiredUI_SaveGameTypeSettings( void ) {
 
 	switch ( gt ) {
 		case 0: prefix = "ui_ffa"; break;
-		case 1: prefix = "ui_tourney"; break;
+		case 1: prefix = "ui_duel"; break;
 		case 3: prefix = "ui_koth"; break;
 		case 4: prefix = "ui_lms"; break;
 		case 5: prefix = "ui_team"; break;
@@ -1339,7 +1535,7 @@ void WiredUI_LoadGameTypeSettings( void ) {
 
 	switch ( gt ) {
 		case 0: prefix = "ui_ffa"; break;
-		case 1: prefix = "ui_tourney"; break;
+		case 1: prefix = "ui_duel"; break;
 		case 3: prefix = "ui_koth"; break;
 		case 4: prefix = "ui_lms"; break;
 		case 5: prefix = "ui_team"; break;
@@ -1546,10 +1742,6 @@ void WiredUI_UpdateFavoriteButton( void ) {
 
 static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char mapName[MAX_QPATH];
-	int botCount, botSkill, i;
-	static const char *botNames[] = {
-		"Sarge", "Keel", "Bones", "Slash", "Doom", "Anarki", "Major", "Klesk"
-	};
 
 	// use first map from rotation pool if set, otherwise selected map
 	{
@@ -1588,21 +1780,19 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 		Cvar_Set( "dedicated", Cvar_VariableString( "ui_dedicated" ) );
 	}
 
-	botCount = Cvar_VariableIntegerValue( "ui_botCount" );
-	botSkill = Cvar_VariableIntegerValue( "g_spSkill" );
-	if ( botSkill < 1 ) botSkill = 3;
-	if ( botSkill > 5 ) botSkill = 5;
+	// ensure sv_maxclients can accommodate g_minPlayers
+	{
+		int minPlayers = Cvar_VariableIntegerValue( "g_minPlayers" );
+		int maxclients = Cvar_VariableIntegerValue( "sv_maxclients" );
+		if ( maxclients < minPlayers ) {
+			Cvar_SetIntegerValue( "sv_maxclients", minPlayers );
+		}
+	}
 
 	WiredUI_CloseAllMenus();
 
-	// launch map (wait allows dedicated cvar to take effect)
+	// launch map — g_autoBots will handle bot population server-side
 	Cbuf_ExecuteText( EXEC_APPEND, va( "wait ; wait ; map %s\n", mapName ) );
-
-	// add bots after map load
-	for ( i = 0; i < botCount && i < 8; i++ ) {
-		Cbuf_ExecuteText( EXEC_APPEND,
-			va( "wait 3 ; addbot %s %d\n", botNames[i], botSkill ) );
-	}
 
 	// team preference for human player in team modes
 	{
@@ -1705,6 +1895,7 @@ static void WiredScript_RunMod( wiredMenuDef_t *menu, wiredItemDef_t *item, int 
 
 static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	int source = Cvar_VariableIntegerValue( "ui_netSource" );
+	qtime_t qt;
 
 	// always query local servers too — they appear instantly
 	Cbuf_ExecuteText( EXEC_APPEND, "localservers\n" );
@@ -1714,6 +1905,9 @@ static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *it
 		Cbuf_ExecuteText( EXEC_APPEND, va( "globalservers %d %d\n", source - 1, PROTOCOL_VERSION ) );
 	}
 
+	// record refresh timestamp for UI display
+	Com_RealTime( &qt );
+	Cvar_Set( "ui_lastRefreshDate", va( "%02d:%02d:%02d", qt.tm_hour, qt.tm_min, qt.tm_sec ) );
 }
 
 static void WiredScript_RefreshFilter( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -1862,6 +2056,29 @@ static void WiredScript_SetBackground( wiredMenuDef_t *menu, wiredItemDef_t *ite
 	}
 }
 
+// ── player model cycling ──────────────────────────────────────────────
+
+extern int         WiredFeeder_GetModelCount( void );
+extern int         WiredFeeder_GetModelSelected( void );
+extern const char *WiredFeeder_GetModelName( int index );
+extern void        WiredFeeder_SetModelSelected( int index );
+
+static void WiredScript_PrevPlayerModel( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	int count = WiredFeeder_GetModelCount();
+	if ( count < 1 ) return;
+	int sel = WiredFeeder_GetModelSelected();
+	sel = ( sel <= 0 ) ? count - 1 : sel - 1;
+	WiredFeeder_SetModelSelected( sel );
+}
+
+static void WiredScript_NextPlayerModel( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	int count = WiredFeeder_GetModelCount();
+	if ( count < 1 ) return;
+	int sel = WiredFeeder_GetModelSelected();
+	sel = ( sel >= count - 1 ) ? 0 : sel + 1;
+	WiredFeeder_SetModelSelected( sel );
+}
+
 // ── uiScript ─────────────────────────────────────────────────────────
 // Maps v6 uiScript command names to our existing handlers.
 // Q3:TA/QL/OA/ET:L all use: action { uiScript StartServer } etc.
@@ -1888,6 +2105,8 @@ static const wiredUiScriptEntry_t wiredUiScripts[] = {
 	{ "StopRefresh",      NULL },  // noop — server queries are fire-and-forget
 	{ "closeJoin",        NULL },
 	{ "closeingame",      NULL },
+	{ "prevPlayerModel",  WiredScript_PrevPlayerModel },
+	{ "nextPlayerModel",  WiredScript_NextPlayerModel },
 	{ NULL, NULL }
 };
 
@@ -1940,6 +2159,8 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "close",            WiredScript_Close },
 	{ "setcvar",          WiredScript_SetCvar },
 	{ "exec",             WiredScript_Exec },
+	{ "execConfirm",      WiredScript_ExecConfirm },
+	{ "execconfirm",      WiredScript_ExecConfirm },
 	{ "play",             WiredScript_Play },
 	{ "playlooped",       WiredScript_PlayLooped },
 	{ "stopmusic",        WiredScript_StopMusic },
@@ -2074,6 +2295,8 @@ void WiredUI_PushMenu( const char *name ) {
 	wired_menuStackDepth++;
 	wired_focusItem = -1;
 	wired_focusFromMouse = qfalse;
+	wired_tooltipStartTime = 0;
+	wired_tooltipFocusItem = -1;
 	if ( wired_sfxMenuOpen ) S_StartLocalSound( wired_sfxMenuOpen, CHAN_LOCAL_SOUND );
 
 	// reset fade animation for the new menu
@@ -2086,7 +2309,7 @@ void WiredUI_PushMenu( const char *name ) {
 			// start cinematic if menu uses WINDOW_STYLE_CINEMATIC
 			if ( pushed->style == WINDOW_STYLE_CINEMATIC && pushed->cinematic[0] ) {
 				pushed->cinematicHandle = CIN_PlayCinematic( pushed->cinematic,
-					0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, CIN_loop | CIN_silent );
+					0, 0, (float)cls.glconfig.vidWidth, (float)cls.glconfig.vidHeight, CIN_loop | CIN_silent );
 				if ( pushed->cinematicHandle >= 0 ) {
 					Com_DPrintf( "WiredUI: started cinematic '%s' (handle %d)\n",
 						pushed->cinematic, pushed->cinematicHandle );
@@ -2127,6 +2350,8 @@ void WiredUI_PopMenu( void ) {
 	wired_menuStackDepth--;
 	wired_focusItem = -1;
 	wired_focusFromMouse = qfalse;
+	wired_tooltipStartTime = 0;
+	wired_tooltipFocusItem = -1;
 	if ( wired_sfxMenuClose ) S_StartLocalSound( wired_sfxMenuClose, CHAN_LOCAL_SOUND );
 
 	if ( wired_menuStackDepth <= 0 ) {
@@ -2155,7 +2380,15 @@ void WiredUI_CloseAllMenus( void ) {
 	}
 	wired_menuStackDepth = 0;
 	wired_focusItem = -1;
+	wired_tooltipStartTime = 0;
+	wired_tooltipFocusItem = -1;
 	wired_activeMenu = UIMENU_NONE;
+	wired_waitingForKey = qfalse;
+	wired_bindItem = NULL;
+	wired_sliderDragging = qfalse;
+	wired_sliderDragItem = NULL;
+	wired_editingField = qfalse;
+	wired_editItem = NULL;
 	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 	Cvar_Set( "cl_paused", "0" );
 }
@@ -2197,6 +2430,34 @@ static void WiredUI_ForEachItemByNameOrGroup( wiredMenuDef_t *menu, const char *
 	}
 }
 
+// Compute the menu origin after applying anchor offset.
+// Anchor places the menu relative to the screen in real pixel space,
+// and rect.x/y become offsets from that anchor position.
+static void WiredUI_ApplyAnchor( wiredMenuDef_t *menu, float menuW, float menuH,
+                                  float *outX, float *outY ) {
+	if ( menu->fullscreen || menu->anchor == ANCHOR_NONE ) {
+		*outX = menu->fullscreen ? 0 : menu->rect.x;
+		*outY = menu->fullscreen ? 0 : menu->rect.y;
+		return;
+	}
+
+	float anchorX = 0, anchorY = 0;
+	switch ( menu->anchor ) {
+		case ANCHOR_TOP_LEFT:      anchorX = 0;                              anchorY = 0;                                break;
+		case ANCHOR_TOP_CENTER:    anchorX = ((float)cls.glconfig.vidWidth - menuW) * 0.5f;  anchorY = 0;                                break;
+		case ANCHOR_TOP_RIGHT:     anchorX = (float)cls.glconfig.vidWidth - menuW;           anchorY = 0;                                break;
+		case ANCHOR_CENTER_LEFT:   anchorX = 0;                              anchorY = ((float)cls.glconfig.vidHeight - menuH) * 0.5f;   break;
+		case ANCHOR_CENTER:        anchorX = ((float)cls.glconfig.vidWidth - menuW) * 0.5f;  anchorY = ((float)cls.glconfig.vidHeight - menuH) * 0.5f;   break;
+		case ANCHOR_CENTER_RIGHT:  anchorX = (float)cls.glconfig.vidWidth - menuW;           anchorY = ((float)cls.glconfig.vidHeight - menuH) * 0.5f;   break;
+		case ANCHOR_BOTTOM_LEFT:   anchorX = 0;                              anchorY = (float)cls.glconfig.vidHeight - menuH;            break;
+		case ANCHOR_BOTTOM_CENTER: anchorX = ((float)cls.glconfig.vidWidth - menuW) * 0.5f;  anchorY = (float)cls.glconfig.vidHeight - menuH;            break;
+		case ANCHOR_BOTTOM_RIGHT:  anchorX = (float)cls.glconfig.vidWidth - menuW;           anchorY = (float)cls.glconfig.vidHeight - menuH;            break;
+		default: break;
+	}
+	*outX = anchorX + menu->rect.x;
+	*outY = anchorY + menu->rect.y;
+}
+
 static qboolean WiredUI_PointInRect( float px, float py, wiredRect_t *r ) {
 	return ( px >= r->x && px < r->x + r->w &&
 	         py >= r->y && py < r->y + r->h );
@@ -2204,8 +2465,9 @@ static qboolean WiredUI_PointInRect( float px, float py, wiredRect_t *r ) {
 
 static int WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) {
 	int i;
-	float ox = menu->fullscreen ? 0 : menu->rect.x;
-	float oy = menu->fullscreen ? 0 : menu->rect.y;
+	// Layout is already resolved by the render loop (WUI_LayoutMenu called each frame)
+	float menuH = menu->resolvedRect.h;
+	float oy = menu->resolvedRect.y;
 	float sy = menu->scrollOffset;
 
 	// iterate back-to-front so topmost item wins
@@ -2228,14 +2490,14 @@ static int WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) 
 				if ( strstr( item->hideCvar, cvBuf ) || strstr( item->hideCvar, cvIntStr ) ) continue;
 			}
 		}
-		absRect.x = ox + item->rect.x;
-		absRect.y = oy + item->rect.y - sy;
-		absRect.w = item->rect.w;
-		absRect.h = item->rect.h;
+		absRect.x = item->resolvedRect.x;
+		absRect.y = item->resolvedRect.y - sy;
+		absRect.w = item->resolvedRect.w;
+		absRect.h = item->resolvedRect.h;
 
 		// skip items scrolled out of view
-		float clipTop = menu->fullscreen ? 0 : menu->rect.y;
-		float clipBottom = clipTop + ( menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h );
+		float clipTop = oy;
+		float clipBottom = clipTop + menuH;
 		if ( absRect.y + absRect.h < clipTop || absRect.y > clipBottom ) continue;
 
 		if ( WiredUI_PointInRect( cx, cy, &absRect ) ) return i;
@@ -2420,6 +2682,12 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		focusedItem = menu->items[wired_focusItem];
 	}
 
+	// slider drag: release mouse button ends drag
+	if ( !down && ( key == K_MOUSE1 ) && wired_sliderDragging ) {
+		wired_sliderDragging = qfalse;
+		wired_sliderDragItem = NULL;
+	}
+
 	// only process key-down for most actions
 	if ( !down ) return;
 
@@ -2562,7 +2830,23 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 						break;
 
 					case ITEM_TYPE_SLIDER:
-						{
+						if ( key == K_MOUSE1 ) {
+							// mouse1 click: start drag and set value by click position
+							float menuOX = menu->fullscreen ? 0 : menu->rect.x;
+							float absItemX = menuOX + focusedItem->rect.x;
+							float barX = absItemX + focusedItem->rect.w * 0.5f;
+							float barW = focusedItem->rect.w * 0.45f;
+							float range = focusedItem->sliderData.maxVal - focusedItem->sliderData.minVal;
+							wired_sliderDragging = qtrue;
+							wired_sliderDragItem = focusedItem;
+							if ( barW > 0 && range > 0 ) {
+								float frac = ( wired_cursorX - barX ) / barW;
+								if ( frac < 0 ) frac = 0;
+								if ( frac > 1 ) frac = 1;
+								Cvar_Set( focusedItem->cvar, va( "%g", focusedItem->sliderData.minVal + frac * range ) );
+							}
+						} else {
+							// right-click / enter / kp_enter: step value
 							float val = atof( cvarBuf );
 							float step = ( focusedItem->sliderData.maxVal - focusedItem->sliderData.minVal ) / 20.0f;
 							if ( step < 0.01f ) step = 0.01f;
@@ -2710,7 +2994,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 }
 
 // ── mouse event ───────────────────────────────────────────────────────
-// Accumulates deltas into virtual 640x480 cursor, updates focus item,
+// Accumulates deltas into screen-space cursor, updates focus item,
 // fires mouseEnter/mouseExit scripts (ET:Legacy per-item events).
 
 void WiredUI_MouseEvent( int dx, int dy ) {
@@ -2719,14 +3003,34 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 
 	if ( !wired_initialized ) return;
 
-	// accumulate deltas into virtual 640x480 cursor position
+	// accumulate deltas into cursor position (real screen pixels)
 	wired_cursorX += dx;
 	if ( wired_cursorX < 0 ) wired_cursorX = 0;
-	else if ( wired_cursorX > SCREEN_WIDTH ) wired_cursorX = SCREEN_WIDTH;
+	else if ( wired_cursorX > (float)cls.glconfig.vidWidth ) wired_cursorX = (float)cls.glconfig.vidWidth;
 
 	wired_cursorY += dy;
 	if ( wired_cursorY < 0 ) wired_cursorY = 0;
-	else if ( wired_cursorY > SCREEN_HEIGHT ) wired_cursorY = SCREEN_HEIGHT;
+	else if ( wired_cursorY > (float)cls.glconfig.vidHeight ) wired_cursorY = (float)cls.glconfig.vidHeight;
+
+	// slider drag: continuously update cvar while mouse1 is held
+	if ( wired_sliderDragging && wired_sliderDragItem && wired_sliderDragItem->cvar[0] ) {
+		wiredMenuDef_t *dragMenu = WiredUI_GetActiveMenu();
+		if ( dragMenu ) {
+			float menuOX = dragMenu->fullscreen ? 0 : dragMenu->rect.x;
+			float absItemX = menuOX + wired_sliderDragItem->rect.x;
+			float barX = absItemX + wired_sliderDragItem->rect.w * 0.5f;
+			float barW = wired_sliderDragItem->rect.w * 0.45f;
+			float range = wired_sliderDragItem->sliderData.maxVal - wired_sliderDragItem->sliderData.minVal;
+			if ( barW > 0 && range > 0 ) {
+				float frac = ( wired_cursorX - barX ) / barW;
+				if ( frac < 0 ) frac = 0;
+				if ( frac > 1 ) frac = 1;
+				Cvar_Set( wired_sliderDragItem->cvar,
+					va( "%g", wired_sliderDragItem->sliderData.minVal + frac * range ) );
+			}
+		}
+		return; // don't change focus while dragging
+	}
 
 	menu = WiredUI_GetActiveMenu();
 	if ( !menu ) return;
@@ -2748,6 +3052,7 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 				WiredUI_RunScript( menu, old, old->leaveFocus );
 			}
 		}
+		// reset tooltip timer on focus change
 		if ( newFocus >= 0 && newFocus < menu->itemCount ) {
 			wiredItemDef_t *cur = menu->items[newFocus];
 			if ( cur->mouseEnter[0] ) {
@@ -2756,6 +3061,18 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 			if ( cur->onFocus[0] ) {
 				WiredUI_RunScript( menu, cur, cur->onFocus );
 			}
+			// start tooltip delay timer if new item has a tooltip
+			if ( cur->tooltip[0] ) {
+				wired_tooltipStartTime = cls.realtime;
+				wired_tooltipFocusItem = newFocus;
+			} else {
+				wired_tooltipStartTime = 0;
+				wired_tooltipFocusItem = -1;
+			}
+		} else {
+			// cursor left all items — clear tooltip state
+			wired_tooltipStartTime = 0;
+			wired_tooltipFocusItem = -1;
 		}
 		wired_focusItem = newFocus;
 		if ( newFocus >= 0 && wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
@@ -2825,12 +3142,12 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 	// so it doesn't flash away too fast on fast loads (matches TA_UI behavior)
 	if ( overlay ) {
 		vec4_t overlayBg = { 0, 0, 0, 0.6f };
-		SCR_FillRect( 0, 440, SCREEN_WIDTH, 40, overlayBg );
-		SCR_DrawStringExt( 8, 448, 8, "Loading...", white, qtrue, qfalse );
+		WUI_FillRect( 0, (float)cls.glconfig.vidHeight - 40, (float)cls.glconfig.vidWidth, 40, overlayBg );
+		Text_Draw( "Loading...", 8, (float)cls.glconfig.vidHeight - 32, FONT_UI, 8, white, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
 
 		// show server message if present
 		if ( clc.serverMessage[0] ) {
-			SCR_DrawStringExt( 8, 460, 8, clc.serverMessage, dim, qtrue, qfalse );
+			Text_Draw( clc.serverMessage, 8, (float)cls.glconfig.vidHeight - 20, FONT_UI, 8, dim, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
 		}
 		return;
 	}
@@ -2842,7 +3159,7 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 	} else {
 		// fallback: dark background if connect.menu isn't loaded
 		vec4_t bg = { 0.05f, 0.05f, 0.1f, 1.0f };
-		SCR_FillRect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bg );
+		WUI_FillRect( 0, 0, (float)cls.glconfig.vidWidth, (float)cls.glconfig.vidHeight, bg );
 	}
 
 	// dynamic status text — drawn on top of the menu
@@ -2855,7 +3172,7 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 		} else {
 			info = va( "Connecting to %s", cls.servername );
 		}
-		SCR_DrawStringExt( 200, (int)y, 8, info, white, qtrue, qfalse );
+		Text_Draw( info, 200, (float)y, FONT_UI, 8, white, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
 		y += 16;
 	}
 
@@ -2883,20 +3200,20 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 			status = "Connecting...";
 			break;
 	}
-	SCR_DrawStringExt( 200, (int)y, 8, status, dim, qtrue, qfalse );
+	Text_Draw( status, 200, (float)y, FONT_UI, 8, dim, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
 	y += 16;
 
 	// server error message
 	if ( clc.serverMessage[0] ) {
 		vec4_t errColor = { 1, 0.4f, 0.4f, 1 };
-		SCR_DrawStringExt( 200, (int)y, 8, clc.serverMessage, errColor, qtrue, qfalse );
+		Text_Draw( clc.serverMessage, 200, (float)y, FONT_UI, 8, errColor, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
 		y += 16;
 	}
 
 	// MOTD from master server
 	Cvar_VariableStringBuffer( "cl_motdString", buf, sizeof( buf ) );
 	if ( buf[0] ) {
-		SCR_DrawStringExt( 200, (int)y, 8, buf, dim, qtrue, qfalse );
+		Text_Draw( buf, 200, (float)y, FONT_UI, 8, dim, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
 	}
 }
 
@@ -2909,36 +3226,40 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 
 	if ( !menu ) return;
 
-	float menuX = menu->fullscreen ? 0 : menu->rect.x;
-	float menuY = menu->fullscreen ? 0 : menu->rect.y;
-	float menuW = menu->fullscreen ? SCREEN_WIDTH : menu->rect.w;
-	float menuH = menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h;
+	float vpW = (float)cls.glconfig.vidWidth;
+	float vpH = (float)cls.glconfig.vidHeight;
+	WUI_LayoutMenu( menu, vpW, vpH );
+
+	float menuX = menu->resolvedRect.x;
+	float menuY = menu->resolvedRect.y;
+	float menuW = menu->resolvedRect.w;
+	float menuH = menu->resolvedRect.h;
 
 	// render background (skip when height=0 — scoreboard draws its own bg)
 	if ( menuH > 0 ) {
-		float bgX = menu->fullscreen ? 0 : menu->rect.x;
-		float bgY = menu->fullscreen ? 0 : menu->rect.y;
-		float bgW = menu->fullscreen ? SCREEN_WIDTH : menu->rect.w;
-		float bgH = menu->fullscreen ? SCREEN_HEIGHT : menu->rect.h;
+		float bgX = menuX;
+		float bgY = menuY;
+		float bgW = menuW;
+		float bgH = menuH;
 
 		if ( menu->style == WINDOW_STYLE_SHADER && menu->background[0] ) {
 			qhandle_t bgShader = re.RegisterShaderNoMip( menu->background );
 			if ( bgShader ) {
 				re.SetColor( NULL );
-				SCR_DrawPic( bgX, bgY, bgW, bgH, bgShader );
+				WUI_DrawPic( bgX, bgY, bgW, bgH, bgShader );
 			}
 		} else if ( menu->style == WINDOW_STYLE_GRADIENT && menu->backcolor[3] > 0.0f ) {
-			SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+			WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
 			if ( wired_gradientBarShader ) {
 				vec4_t gc;
 				Vector4Copy( menu->backcolor, gc );
 				gc[3] *= 0.5f;
 				re.SetColor( gc );
-				SCR_DrawPic( bgX, bgY, bgW, bgH, wired_gradientBarShader );
+				WUI_DrawPic( bgX, bgY, bgW, bgH, wired_gradientBarShader );
 				re.SetColor( NULL );
 			}
 		} else if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f ) {
-			SCR_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
+			WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
 		}
 	}
 
@@ -2961,21 +3282,23 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 			}
 		}
 
-		float itemX = menuX + item->rect.x;
-		float itemY = menuY + item->rect.y;
+		float itemX = item->resolvedRect.x;
+		float itemY = item->resolvedRect.y;
+		float itemW = item->resolvedRect.w;
+		float itemH = item->resolvedRect.h;
 
-		// clip items outside menu bounds (skip when height=0, meaning auto-size)
-		if ( menuH > 0 && ( itemY + item->rect.h < menuY || itemY > menuY + menuH ) ) continue;
+		// clip items outside menu bounds (when height=0, meaning auto-size)
+		if ( menuH > 0 && ( itemY + itemH < menuY || itemY > menuY + menuH ) ) continue;
 
 		// draw item background
 		if ( item->style == WINDOW_STYLE_SHADER && item->background[0] ) {
 			qhandle_t itemBg = re.RegisterShaderNoMip( item->background );
 			if ( itemBg ) {
 				re.SetColor( NULL );
-				SCR_DrawPic( itemX, itemY, item->rect.w, item->rect.h, itemBg );
+				WUI_DrawPic( itemX, itemY, itemW, itemH, itemBg );
 			}
 		} else if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
-			SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, item->backcolor );
+			WUI_FillRect( itemX, itemY, itemW, itemH, item->backcolor );
 		}
 
 		// draw LISTBOX items (feeder-driven)
@@ -2983,15 +3306,15 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 			int feederID = (int)item->feeder;
 			int totalRows = WiredUI_FeederCount( feederID );
 			float rowH = item->elementheight > 0 ? item->elementheight : 16.0f;
-			int visibleRows = (int)( item->rect.h / rowH );
+			int visibleRows = (int)( itemH / rowH );
 			int row, col;
-			float charSize = item->textscale >= 0.7f ? 16.0f : 8.0f;
+			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
 			vec4_t rowColor;
-			float contentW = item->rect.w;
+			float contentW = itemW;
 
 			// draw list background
 			if ( item->backcolor[3] > 0 ) {
-				SCR_FillRect( itemX, itemY, item->rect.w, item->rect.h, item->backcolor );
+				WUI_FillRect( itemX, itemY, itemW, itemH, item->backcolor );
 			}
 
 			// draw rows
@@ -3015,11 +3338,9 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 							if ( maxChars < (int)sizeof( clipped ) ) {
 								clipped[maxChars] = '\0';
 							}
-							SCR_DrawStringExt( (int)colX, (int)( rowY + 2 ), charSize,
-								clipped, rowColor, qfalse, qfalse );
+							Text_Draw( clipped, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
 						} else {
-							SCR_DrawStringExt( (int)colX, (int)( rowY + 2 ), charSize,
-								text, rowColor, qfalse, qfalse );
+							Text_Draw( text, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
 						}
 					}
 					colX += colW;
@@ -3033,8 +3354,15 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 		if ( item->type == ITEM_TYPE_SCORELIST && item->feeder != 0 ) {
 			extern void WiredHud_DrawScorelistWidget( float x, float y, float w, float h,
 				int feederID, const vec4_t textColor );
-			WiredHud_DrawScorelistWidget( itemX, itemY, item->rect.w, item->rect.h,
+			WiredHud_DrawScorelistWidget( itemX, itemY, itemW, itemH,
 				(int)item->feeder, item->forecolor );
+			continue;
+		}
+
+		// draw DUELBOARD widget — CPMA-style two-panel duel scoreboard
+		if ( item->type == ITEM_TYPE_DUELBOARD ) {
+			extern void WiredHud_DrawDuelBoard( float x, float y, float w, float h );
+			WiredHud_DrawDuelBoard( itemX, itemY, itemW, itemH );
 			continue;
 		}
 
@@ -3068,10 +3396,10 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 
 				// position: centered items use widget midpoint, others use left edge
 				float x, y;
-				if ( item->textalign == ITEM_ALIGN_CENTER && item->rect.w > 0 ) {
-					x = itemX + item->rect.w * 0.5f;
-				} else if ( item->textalign == ITEM_ALIGN_RIGHT && item->rect.w > 0 ) {
-					x = itemX + item->rect.w;
+				if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
+					x = itemX + itemW * 0.5f;
+				} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
+					x = itemX + itemW;
 				} else {
 					x = itemX;
 				}
@@ -3079,7 +3407,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 
 				CG_FontSelect( 2 );
 				CG_ModernDrawString( x, y, drawText, item->forecolor,
-					charW, charH, (int)item->rect.w, flags, NULL );
+					charW, charH, (int)itemW, flags, NULL );
 			}
 		}
 	}
@@ -3130,6 +3458,8 @@ void WiredUI_ReloadMenus( void ) {
 	}
 	wired_menuStackDepth = 0;
 	wired_focusItem = -1;
+	wired_tooltipStartTime = 0;
+	wired_tooltipFocusItem = -1;
 
 	// destroy HUD elements (they'll be recreated after reload)
 	WiredHud_DestroyAllElements();
@@ -3159,7 +3489,6 @@ void CL_InitUI( void ) {
 	// disallow vl.collapse for UI elements
 	re.VertexLighting( qfalse );
 
-	WiredUI_Init( cls.state >= CA_AUTHORIZING && cls.state < CA_ACTIVE );
 	cls.uiStarted = qtrue;
 }
 

@@ -35,8 +35,10 @@ Provides:
 #define trap_R_RegisterShaderNoMip(n)       re.RegisterShaderNoMip(n)
 
 // ── coordinate scaling ────────────────────────────────────────────────
+// Legacy coordinate scaling macro removed — Wired UI uses real screen pixels
 
-#define CG_AdjustFrom640(x,y,w,h)  SCR_AdjustFrom640(x,y,w,h)
+// ── Wired UI draw helpers — REAL SCREEN PIXELS (bypass AdjustFrom640) ─
+#include "cl_wired_draw.h"
 
 // ── filesystem trap → direct FS_* calls ───────────────────────────────
 

@@ -394,7 +394,7 @@ int Com_MD5Addr( const netadr_t *addr, int timestamp )
 		case NA_IP: 
 			MD5Update( &ctx_in, addr->ipv._4, 4 ); 
 				break;
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 		case NA_IP6:
 		case NA_MULTICAST6:
 			MD5Update( &ctx_in, addr->ipv._6, 16 ); 

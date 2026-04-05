@@ -360,6 +360,22 @@ extern	clientStatic_t		cls;
 extern	char		cl_oldGame[MAX_QPATH];
 extern	qboolean	cl_oldGameSet;
 
+// Loading screen progress tracking — updated from various load callsites,
+// read by cl_loading_ui.c to render progress bars
+typedef struct {
+	float		geometry;	// 0.0–1.0: BSP geometry loading
+	float		shaders;	// 0.0–1.0: shader/texture compilation and upload
+	float		audio;		// 0.0–1.0: sound loading
+	float		download;	// 0.0–1.0: pak file downloads (from CL_DownloadLoop)
+	float		overall;	// 0.0–1.0: weighted average of all phases
+	const char	*phase;		// current human-readable phase label (e.g. "compiling shaders")
+	int			startTime;	// cls.realtime when loading began (for minimum display time)
+} clLoadProgress_t;
+
+extern clLoadProgress_t cl_loadProgress;
+
+void CL_LoadingYield( const char *phaseName );
+
 #ifdef USE_CURL
 
 extern		download_t	download;
@@ -547,6 +563,12 @@ void	SCR_DrawSmallChar( int x, int y, int ch );
 void	SCR_DrawSmallString( int x, int y, const char *s, int len );
 
 //
+// cl_loading_ui.c
+//
+void	CL_DrawLoadingScreen( void );
+void	CL_LoadingScreenFinished( void );
+
+//
 // cl_cin.c
 //
 
@@ -604,6 +626,91 @@ size_t	CL_SaveJPGToBuffer( byte *buffer, size_t bufSize, int quality, int image_
 void	CL_SaveJPG( const char *filename, int quality, int image_width, int image_height, byte *image_buffer, int padding );
 void	CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *height );
 
+
+//
+// cl_bsp_preview.c
+//
+#define BSP_PREVIEW_MAX_EDGES    8192
+#define BSP_PREVIEW_MAX_MARKERS  256
+
+typedef struct {
+	float x1, y1, x2, y2;  // 2D projected edge (top-down XY)
+	float z1, z2;           // original Z height per vertex (for height coloring)
+	int   type;             // 0=outer hull, 1=internal, 2=floor
+} bspPreviewEdge_t;
+
+typedef struct {
+	float x, y;             // 2D position
+	int   type;             // 0=spawn, 1=item, 2=flag
+} bspPreviewMarker_t;
+
+typedef struct {
+	bspPreviewEdge_t  edges[BSP_PREVIEW_MAX_EDGES];
+	int               numEdges;
+	bspPreviewMarker_t markers[BSP_PREVIEW_MAX_MARKERS];
+	int               numMarkers;
+	float             minX, minY, maxX, maxY;  // XY bounding box
+	float             minZ, maxZ;              // Z height range (for height coloring)
+	int               numSurfaces;  // planar surfaces parsed from BSP
+	qboolean          valid;
+} bspPreview_t;
+
+extern bspPreview_t cl_bspPreview;
+
+void CL_BuildBspPreview( const char *mapname );
+void CL_ClearBspPreview( void );
+
+//
+// cl_mapinfo.c
+//
+typedef struct {
+	char		mapName[MAX_QPATH];		// e.g. "q3dm6"
+	char		longName[128];			// from worldspawn "message" or .meta
+	char		series[64];				// e.g. "Pro-DM Series"
+	char		archetype[32];			// "tech", "gothic", "base", or ""
+	char		author[64];				// map author
+	char		year[8];				// year created
+	char		quote[256];				// flavor text
+	char		metaWeapon[8];			// dominant weapon shortname (RL, RG, etc.)
+	int			playersMin;				// min player count
+	int			playersMax;				// max player count
+	int			itemNodes;				// count of item/weapon entities
+	char		sky[MAX_QPATH];			// worldspawn sky key (for archetype detection)
+	qboolean	hasMetaFile;			// whether .meta file was found
+} clMapInfo_t;
+
+extern clMapInfo_t cl_mapInfo;
+
+void CL_LoadMapInfo( const char *mapname );
+void CL_ClearMapInfo( void );
+
+//
+// cl_loading_theme.c -- map archetype detection and loading color themes
+//
+typedef enum {
+	ARCHETYPE_TECH,
+	ARCHETYPE_GOTHIC,
+	ARCHETYPE_BASE,
+	ARCHETYPE_DEFAULT
+} mapArchetype_t;
+
+typedef struct {
+	mapArchetype_t	archetype;
+	vec4_t			bgColor;		// full-screen background fill
+	vec4_t			primaryGlow;	// background radial gradient center
+	vec4_t			secondaryGlow;	// background radial gradient edge
+	vec4_t			accentColor;	// progress bars, wireframe, text accents
+	vec4_t			gridColor;		// horizontal grid overlay (accent at 10% opacity)
+} clLoadingTheme_t;
+
+extern clLoadingTheme_t cl_loadingTheme;
+
+mapArchetype_t	CL_DetectArchetype( const clMapInfo_t *info );
+void			CL_ApplyLoadingTheme( const clMapInfo_t *info );
+
+// cl_loading_ui.c — fade transition state
+extern float		cl_loadFadeAlpha;
+extern qboolean		cl_loadFading;
 
 // base backend functions
 void	HandleEvents( void );

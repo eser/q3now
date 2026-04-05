@@ -26,7 +26,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "../game/bg_promode.h" // CPM
-#if FEAT_TA_UI
 #include "../qcommon/menudef.h"
 
 typedef struct {
@@ -35,14 +34,14 @@ typedef struct {
 } orderTask_t;
 
 static const orderTask_t validOrders[] = {
-	{ VOICECHAT_GETFLAG,						TEAMTASK_OFFENSE },
-	{ VOICECHAT_OFFENSE,						TEAMTASK_OFFENSE },
-	{ VOICECHAT_DEFEND,							TEAMTASK_DEFENSE },
-	{ VOICECHAT_DEFENDFLAG,					TEAMTASK_DEFENSE },
-	{ VOICECHAT_PATROL,							TEAMTASK_PATROL },
-	{ VOICECHAT_CAMP,								TEAMTASK_CAMP },
-	{ VOICECHAT_FOLLOWME,						TEAMTASK_FOLLOW },
-	{ VOICECHAT_RETURNFLAG,					TEAMTASK_RETRIEVE },
+	{ VOICECHAT_GETFLAG,			TEAMTASK_OFFENSE },
+	{ VOICECHAT_OFFENSE,			TEAMTASK_OFFENSE },
+	{ VOICECHAT_DEFEND,				TEAMTASK_DEFENSE },
+	{ VOICECHAT_DEFENDFLAG,			TEAMTASK_DEFENSE },
+	{ VOICECHAT_PATROL,				TEAMTASK_PATROL },
+	{ VOICECHAT_CAMP,				TEAMTASK_CAMP },
+	{ VOICECHAT_FOLLOWME,			TEAMTASK_FOLLOW },
+	{ VOICECHAT_RETURNFLAG,			TEAMTASK_RETRIEVE },
 	{ VOICECHAT_FOLLOWFLAGCARRIER,	TEAMTASK_ESCORT }
 };
 
@@ -57,7 +56,6 @@ static int CG_ValidOrder(const char *p) {
 	}
 	return -1;
 }
-#endif
 
 /*
 =================
@@ -215,8 +213,8 @@ void CG_ParseServerinfo( void ) {
 	info = CG_ConfigString( CS_SERVERINFO );
 	cgs.gametype = atoi( Info_ValueForKey( info, "g_gametype" ) );
 	trap_Cvar_Set("g_gametype", va("%i", cgs.gametype));
-	cgs.dmflags = atoi( Info_ValueForKey( info, "dmflags" ) );
-	cgs.kothflags = atoi( Info_ValueForKey( info, "kothflags" ) );
+	cgs.g_noFootsteps = atoi( Info_ValueForKey( info, "g_noFootsteps" ) );
+	cgs.g_kothGhosts = atoi( Info_ValueForKey( info, "g_kothGhosts" ) );
 	cgs.fraglimit = atoi( Info_ValueForKey( info, "fraglimit" ) );
 	cgs.capturelimit = atoi( Info_ValueForKey( info, "capturelimit" ) );
 	cgs.timelimit = atoi( Info_ValueForKey( info, "timelimit" ) );
@@ -250,12 +248,9 @@ static void CG_ParseWarmup( void ) {
 	if ( warmup == 0 && cg.warmup ) {
 
 	} else if ( warmup > 0 && cg.warmup <= 0 ) {
-#if FEAT_TA_UI
 		if (cgs.gametype >= GT_CTF && cgs.gametype <= GT_HARVESTER) {
 			trap_S_StartLocalSound( cgs.media.countPrepareTeamSound, CHAN_ANNOUNCER );
-		} else
-#endif
-		{
+		} else {
 			trap_S_StartLocalSound( cgs.media.countPrepareSound, CHAN_ANNOUNCER );
 		}
 	}
@@ -281,12 +276,11 @@ void CG_SetConfigValues( void ) {
 		cgs.redflag = s[0] - '0';
 		cgs.blueflag = s[1] - '0';
 	}
-#if FEAT_TA_UI
 	else if( cgs.gametype == GT_1FCTF ) {
 		s = CG_ConfigString( CS_FLAGSTATUS );
 		cgs.flagStatus = s[0] - '0';
 	}
-#endif
+
 	cg.warmup = atoi( CG_ConfigString( CS_WARMUP ) );
 }
 
@@ -417,11 +411,9 @@ static void CG_ConfigStringModified( void ) {
 			cgs.redflag = str[0] - '0';
 			cgs.blueflag = str[1] - '0';
 		}
-#if FEAT_TA_UI
 		else if( cgs.gametype == GT_1FCTF ) {
 			cgs.flagStatus = str[0] - '0';
 		}
-#endif
 	}
 	else if ( num == CS_SHADERSTATE ) {
 		CG_ShaderStateChanged();
@@ -535,6 +527,11 @@ static void CG_MapRestart( void ) {
 
 	cg.mapRestart = qtrue;
 
+	// clear scoreboard and per-player attack stats from previous round
+	cg.numScores = 0;
+	memset( cg.scores, 0, sizeof( cg.scores ) );
+	memset( cgs.attackStats, 0, sizeof( cgs.attackStats ) );
+
 	CG_StartMusic();
 
 	trap_S_ClearLoopingSounds(qtrue);
@@ -542,7 +539,7 @@ static void CG_MapRestart( void ) {
 	// we really should clear more parts of cg here and stop sounds
 
 	// play the "fight" sound if this is a restart without warmup
-	if ( cg.warmup == 0 /* && cgs.gametype == GT_TOURNAMENT */) {
+	if ( cg.warmup == 0 /* && cgs.gametype == GT_DUEL */) {
 		trap_S_StartLocalSound( cgs.media.countFightSound, CHAN_ANNOUNCER );
 		CG_CenterPrint( "FIGHT!", 120, GIANTCHAR_WIDTH*2 );
 	}
@@ -562,8 +559,6 @@ static void CG_MapRestart( void ) {
 
     trap_Cvar_Set("cg_thirdPerson", "0");
 }
-
-#if FEAT_TA_UI
 
 #define MAX_VOICEFILESIZE	16384
 #define MAX_VOICEFILES		8
@@ -910,8 +905,10 @@ void CG_PlayVoiceChat( bufferedVoiceChat_t *vchat ) {
 				cgs.acceptTask = orderTask;
 				cgs.acceptLeader = vchat->clientNum;
 			}
+#if FEAT_TA_UI
 			// see if this was an order
 			CG_ShowResponseHead();
+#endif
 		}
 	}
 	if (!vchat->voiceOnly && !cg_noVoiceText.integer) {
@@ -974,7 +971,7 @@ void CG_VoiceChatLocal( int mode, qboolean voiceOnly, int clientNum, int color, 
 		return;
 	}
 
-	if ( mode == SAY_ALL && cgs.gametype >= GT_TEAM && cg_teamChatsOnly.integer ) {
+	if ( mode == SAY_ALL && cgs.gametype >= GT_TDM && cg_teamChatsOnly.integer ) {
 		return;
 	}
 
@@ -1030,7 +1027,6 @@ void CG_VoiceChat( int mode ) {
 
 	CG_VoiceChatLocal( mode, voiceOnly, clientNum, color, cmd );
 }
-#endif // MISSIONPACK
 
 /*
 =================
@@ -1069,7 +1065,7 @@ static void CG_ServerCommand( void ) {
 	}
 
 	if ( !strcmp( cmd, "cp" ) ) {
-		CG_CenterPrint( CG_Argv(1), SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
+		CG_CenterPrint( CG_Argv(1), CG_VIRTUAL_H * 0.30f, BIGCHAR_WIDTH );
 		return;
 	}
 
@@ -1106,7 +1102,7 @@ static void CG_ServerCommand( void ) {
 	}
 
 	if ( !strcmp( cmd, "chat" ) ) {
-		if ( cgs.gametype >= GT_TEAM && cg_teamChatsOnly.integer ) {
+		if ( cgs.gametype >= GT_TDM && cg_teamChatsOnly.integer ) {
 			return;
 		}
 #if FEAT_CHAT_FILTER

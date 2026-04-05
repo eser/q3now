@@ -71,6 +71,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define DEFAULT_SHOTGUN_SPREAD	600
 #define DEFAULT_SHOTGUN_COUNT	16
+#define DEFAULT_SHOTGUN_DOUBLE_BLAST_SPREAD	1000
 
 #define	DEFAULT_TEAM_MODEL		"visor"
 #define	DEFAULT_TEAM_HEAD		"visor"
@@ -184,28 +185,37 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 #endif
 
 typedef enum {
-	GT_FFA,				// free for all
-	GT_TOURNAMENT,		// one on one tournament
-
-    GT_DUMMY,
+	GT_DEATHMATCH,		// deathmatch
+	GT_DUEL,			// one on one tournament
 
     GT_KINGOFTHEHILL,
     GT_LASTMANSTANDING,
 
     //-- team games go after this --
 
-	GT_TEAM,			// team deathmatch
+	GT_TDM,			// team deathmatch
 	GT_CTF,				// capture the flag
 	GT_1FCTF,
 	GT_OBELISK,
 	GT_HARVESTER,
+#if FEAT_FREEZETAG
+	GT_FREEZETAG,
+#endif
 	GT_MAX_GAME_TYPE
 } gametype_t;
 
-// Engine compat: sv_ccmds.c and sv_client.c include bg_public.h and reference
-// GT_SINGLE_PLAYER. GT_DUMMY occupies the same enum slot (value 2), so this
-// alias keeps the engine server code compiling without engine changes.
-#define GT_SINGLE_PLAYER GT_DUMMY
+// Gametype metadata — indexed by gametype_t
+typedef struct ggametype_s {
+	char		*name;
+	char		*shortname;
+	char		**parseTokens;		// NULL-terminated token list for arena/BSP matching
+	char		*hudToken;			// SuperHUD visibility token (e.g. "gt_ffa"), "" if none
+} ggametype_t;
+
+extern	ggametype_t	bg_gametypelist[];
+
+int			BG_GametypeBits( const char *token );		// single token → bitmask of matching gametypes
+int			BG_GametypeForToken( const char *token );	// single token → gametype_t, or -1 if not found
 
 typedef enum { GENDER_MALE, GENDER_FEMALE, GENDER_NEUTER } gender_t;
 
@@ -557,6 +567,7 @@ typedef enum {
 	EV_MISSILE_MISS_METAL,
 	EV_RAILTRAIL,
 	EV_SHOTGUN,
+	EV_SHOTGUN_WIDE,
 	EV_BULLET,				// otherEntity is the shooter
 // eser - lightning discharge
     EV_LIGHTNING_DISCHARGE,
@@ -592,6 +603,7 @@ typedef enum {
 	EV_INVUL_IMPACT,		// invulnerability sphere impact
 	EV_JUICED,				// invulnerability juiced effect
 	EV_LIGHTNINGBOLT,		// lightning bolt bounced of invulnerability sphere
+	EV_LIGHTNING_ARC,		// chain arc beam from primary target to secondary target
 //#endif
 
 	EV_DEBUG_LINE,
@@ -744,6 +756,13 @@ typedef enum {
 // eser - lightning discharge
     MOD_LIGHTNING_DISCHARGE,
 // eser - lightning discharge
+	// alt-fire means of death
+	MOD_GAUNTLET_LUNGE,
+	MOD_MACHINEGUN_BURST,
+	MOD_SHOTGUN_DOUBLE_BLAST,
+	MOD_ROCKET_MORTAR,
+	MOD_ROCKET_MORTAR_SPLASH,
+	MOD_LIGHTNING_CHAIN_ARC,
 	MOD_WATER,
 	MOD_SLIME,
 	MOD_LAVA,
@@ -807,11 +826,16 @@ typedef enum {
 	ATT_NONE,
 
 	ATT_GAUNTLET_PRIMARY,
+	ATT_GAUNTLET_LUNGE,
 	ATT_MACHINEGUN_PRIMARY,
+	ATT_MACHINEGUN_BURST,
 	ATT_SHOTGUN_PRIMARY,
+	ATT_SHOTGUN_DOUBLE_BLAST,
 	ATT_GRENADE_LAUNCHER_PRIMARY,
 	ATT_ROCKET_LAUNCHER_PRIMARY,
+	ATT_ROCKET_LAUNCHER_MORTAR,
 	ATT_LIGHTNING_GUN_PRIMARY,
+	ATT_LIGHTNING_GUN_CHAIN_ARC,
 	ATT_RAILGUN_PRIMARY,
 	ATT_PLASMA_RIFLE_PRIMARY,
 
@@ -826,7 +850,41 @@ typedef struct gattack_s {
 	float       selfKnockbackScale;
 	float       recoilKick;
 	int         reloadTime;
+	int         meansOfDeath;        // MOD_ value for direct hit kills
+	int         splashMeansOfDeath;  // MOD_ value for splash kills (0 if no splash)
+
+	// Alt-fire callbacks (NULL = use default fire behavior)
+	qboolean    (*onAltFireStart)(pmove_t *pm);    // called on initial alt-fire press; return qtrue if handled
+	qboolean    (*onAltFireThink)(pmove_t *pm);    // called each frame during alt-fire; return qtrue if handled
+	void        (*onAltFireRelease)(pmove_t *pm);  // called when alt-fire released or cancelled
 } gattack_t;
+
+// MG burst alt-fire callbacks (implemented in bg_pmove.c)
+qboolean PM_MG_Burst_Start( pmove_t *pm );
+qboolean PM_MG_Burst_Think( pmove_t *pm );
+void     PM_MG_Burst_Release( pmove_t *pm );
+
+// Gauntlet lunge alt-fire callbacks (implemented in bg_pmove.c)
+#define GAUNTLET_CHARGE_TIME    750     // ms to fully charge lunge
+#define GAUNTLET_LUNGE_SPEED    700.0f  // forward velocity impulse
+
+qboolean PM_Gauntlet_Lunge_Start( pmove_t *pm );
+qboolean PM_Gauntlet_Lunge_Think( pmove_t *pm );
+void     PM_Gauntlet_Lunge_Release( pmove_t *pm );
+
+// SG double-blast alt-fire callbacks (implemented in bg_pmove.c)
+qboolean PM_SG_DoubleBlast_Start( pmove_t *pm );
+qboolean PM_SG_DoubleBlast_Think( pmove_t *pm );
+void     PM_SG_DoubleBlast_Release( pmove_t *pm );
+
+// LG chain arc alt-fire callbacks (implemented in bg_pmove.c)
+#define LG_CHAIN_ARC_RANGE      192.0f  // max arc distance from primary target to secondary
+#define LG_CHAIN_ARC_DAMAGE     3       // damage per tick to secondary target (~37.5% of primary 8)
+#define LG_CHAIN_ARC_AMMO_MULT  2       // ammo drain multiplier in chain mode
+
+qboolean PM_LG_ChainArc_Start( pmove_t *pm );
+qboolean PM_LG_ChainArc_Think( pmove_t *pm );
+void     PM_LG_ChainArc_Release( pmove_t *pm );
 
 extern	gattack_t	bg_attacklist[];
 
@@ -864,14 +922,6 @@ gitem_t	*BG_FindItemForHoldable( holdable_t pw );
 
 qboolean	BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const playerState_t *ps );
 
-
-// g_dmflags->integer flags
-#define	DF_NO_FALLING			8
-#define DF_FIXED_FOV			16
-#define	DF_NO_FOOTSTEPS			32
-
-// g_kothflags->integer flags
-#define	KF_GHOSTS   			1
 
 // content masks
 #define	MASK_ALL				(-1)

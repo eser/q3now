@@ -59,6 +59,7 @@ typedef enum {
 	TYPE_COLOR_RED,
 	TYPE_FOG_ONLY,
 	TYPE_DOT,
+	TYPE_MSDF,
 
 	TYPE_SIGNLE_TEXTURE_LIGHTING,
 	TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR,
@@ -674,6 +675,9 @@ typedef struct {
 			VkShaderModule dfade_ent[1][2];    // tx[0], fog[0,1]
 		} frag;
 
+		VkShaderModule msdf_fs;
+		VkShaderModule msdf_vs;
+
 		VkShaderModule color_fs;
 		VkShaderModule color_vs;
 
@@ -778,6 +782,8 @@ typedef struct {
 	uint32_t surface_beam_pipeline;
 	uint32_t surface_axis_pipeline;
 	uint32_t dot_pipeline;
+
+	uint32_t msdf_pipeline;
 
 	VkPipeline gamma_pipeline;
 

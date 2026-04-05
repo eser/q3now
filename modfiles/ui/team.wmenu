@@ -1,0 +1,59 @@
+// team.wmenu - Wired UI team selection
+// Flex column layout -- vertical positioning handled by the layout engine.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "team"
+	rect 0.313 0.250 0.375 0.500
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+	layout column
+	padding 0.05
+	gap 0.01
+
+	onESC { close }
+
+	WLABEL(0, 0, 1.0, 0.042, "Join Team", 24, 1)
+	WSEPARATOR(0, 0, 1.0)
+
+	// Red Team (named for script targeting)
+	itemDef {
+		name "red"
+		type 1
+		text "Red Team"
+		rect 0 0 1.0 WM_BUTTON_H
+		textalign 1
+		font "sansman" 19
+		forecolor WCOLOR_ACCENT
+		visible 1
+		grow 0
+		action { exec "cmd team red" ; close }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+
+	// Blue Team (named for script targeting)
+	itemDef {
+		name "blue"
+		type 1
+		text "Blue Team"
+		rect 0 0 1.0 WM_BUTTON_H
+		textalign 1
+		font "sansman" 19
+		forecolor WCOLOR_ACCENT
+		visible 1
+		grow 0
+		action { exec "cmd team blue" ; close }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Auto Join", 19, exec "cmd team auto" ; close)
+	WSEPARATOR(0, 0, 1.0)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Spectator", 19, exec "cmd team spectator" ; close)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Cancel", 19, close)
+}

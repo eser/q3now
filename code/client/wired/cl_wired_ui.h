@@ -30,6 +30,7 @@ references and calls registered element routines during rendering.
 #if FEAT_WIRED_UI
 
 #include "../../qcommon/q_shared.h"
+#include "cl_wired_layout.h"
 
 // ── public API (called from cl_ui.c, cl_keys.c, cl_scrn.c, etc.) ─────
 
@@ -100,6 +101,19 @@ void     WiredUI_RegisterCoreElements( void );    // batch: all 167 SuperHUD ele
 
 // ── types ─────────────────────────────────────────────────────────────
 
+typedef enum {
+	ANCHOR_NONE = 0,        // use absolute/normalized position as-is
+	ANCHOR_TOP_LEFT,
+	ANCHOR_TOP_CENTER,
+	ANCHOR_TOP_RIGHT,
+	ANCHOR_CENTER_LEFT,
+	ANCHOR_CENTER,
+	ANCHOR_CENTER_RIGHT,
+	ANCHOR_BOTTOM_LEFT,
+	ANCHOR_BOTTOM_CENTER,
+	ANCHOR_BOTTOM_RIGHT
+} wiredAnchor_t;
+
 typedef struct {
 	float x, y, w, h;
 } wiredRect_t;
@@ -131,6 +145,8 @@ typedef struct wiredItemDef_s {
 	char            group[64];
 	int             type;                   // ITEM_TYPE_*
 	wiredRect_t     rect;
+	wuiRect_t       wuiRect;                // unit-aware source rect (Layer 1)
+	wuiPosition_t   position;               // POSITION_STATIC / ABSOLUTE / VIEWPORT
 	int             textalign;              // ITEM_ALIGN_*
 	float           textalignx;
 	float           textaligny;
@@ -190,6 +206,12 @@ typedef struct wiredItemDef_s {
 	} colorRanges[WIRED_MAX_COLOR_RANGES];
 	int             numColorRanges;
 
+	// Wired native format extensions (.wmenu/.whud)
+	wiredAnchor_t   anchor;                 // screen anchor position
+	float           textoffsetX;            // normalized text offset X (replaces textalignx)
+	float           textoffsetY;            // normalized text offset Y (replaces textaligny)
+	float           fontPointSize;          // font size in points (native format "font" keyword)
+
 	// SuperHUD-specific properties (Phase 3: hudElement items)
 	char            fontName[MAX_QPATH];    // font name ("sansman", "id", etc.)
 	vec2_t          fontSize;               // fontsize W H (separate from textscale)
@@ -228,11 +250,42 @@ typedef struct wiredItemDef_s {
 	float           fadeTargetAlpha;        // target alpha (0.0 for fadeout, 1.0 for fadein)
 	int             fadeStartTime;          // cls.realtime when fade started (0 = inactive)
 	int             fadeDurationItem;       // fade duration in ms
+
+	// Flex child properties (Layer 2)
+	wuiFlexChild_t      flexChild;
+	wuiAspect_t         aspect;
+
+	// If this item is a flex container (has "layout" keyword)
+	wuiFlexContainer_t  flexContainer;
+	qboolean            isFlexContainer;
+
+	// Nested children (for flex containers)
+	struct wiredItemDef_s  *children[WIRED_MAX_ITEMS_PER_MENU];
+	int                     childCount;
+
+	// Animated rect transition (Layer 5)
+	wuiTransition_t     wuiTransition;
+
+	// Responsive breakpoints (Layer 5)
+	wuiBreakpoint_t     breakpoints[WUI_MAX_BREAKPOINTS];
+	int                 breakpointCount;
+
+	// Resolved pixel rect (filled by layout engine)
+	wuiPixelRect_t  resolvedRect;
 } wiredItemDef_t;
 
 typedef struct wiredMenuDef_s {
 	char              name[64];
 	wiredRect_t       rect;
+	wuiRect_t         wuiRect;              // unit-aware source rect (Layer 1)
+
+	// Flex container properties (Layer 2)
+	wuiFlexContainer_t  flexContainer;
+	qboolean            isFlexContainer;
+
+	// Resolved pixel rect (filled by layout engine)
+	wuiPixelRect_t      resolvedRect;
+
 	qboolean          fullscreen;
 	qboolean          visible;
 	int               style;
@@ -248,6 +301,7 @@ typedef struct wiredMenuDef_s {
 	int               itemCount;
 
 	// Wired UI extensions
+	wiredAnchor_t     anchor;               // menu-level anchor
 	qboolean          hudOverlay;           // Phase 3: passive HUD overlay
 	qboolean          modal;                // ET:Legacy: captures all input
 	qboolean          alwaysOnTop;          // ET:Legacy: z-order override
@@ -340,6 +394,22 @@ typedef struct {
 	vec4_t          shadowColor;               // text shadow color
 	char            focusSound[MAX_QPATH];     // item focus sound path
 	vec4_t          focusColor;                // focus highlight color
+
+	// Shadow offset
+	float           shadowX;                   // horizontal shadow offset (default 1.0)
+	float           shadowY;                   // vertical shadow offset (default 1.0)
+
+	// Visual effects
+	vec4_t          gradientBarColor;          // gradient bar decoration color
+	char            radialGlowShader[MAX_QPATH]; // shader name for radial glow effect
+
+	// Default MSDF fonts
+	char            defaultFontName[MAX_QPATH];         // default body font name
+	float           defaultFontSize;                    // default body font point size
+	char            defaultHeadingFontName[MAX_QPATH];  // default heading font name
+	float           defaultHeadingFontSize;             // default heading font point size
+	char            defaultConsoleFontName[MAX_QPATH];  // default console font name
+	float           defaultConsoleFontSize;             // default console font point size
 } wiredAssetGlobals_t;
 
 wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void );
@@ -349,6 +419,7 @@ wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void );
 qboolean WiredUI_LoadMenus( const char *manifestFile );
 qboolean WiredUI_LoadMenuFile( const char *filename );
 int      WiredUI_GetMenuCount( void );
+wiredMenuDef_t *WiredUI_GetMenuByIndex( int index );
 wiredMenuDef_t *WiredUI_FindMenu( const char *name );
 void     WiredUI_ClearMenus( void );
 void     WiredUI_ResetPool( void );

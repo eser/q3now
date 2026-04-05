@@ -232,9 +232,7 @@ void CG_SHUDElementAwardsRoutine( void *context ) {
 			re.SetColor( color );
 
 			if ( n->shader && drawW > 0.1f && drawH > 0.1f ) {
-				float sx = drawX, sy = drawY, sw = drawW, sh = drawH;
-				SCR_AdjustFrom640( &sx, &sy, &sw, &sh );
-				re.DrawStretchPic( sx, sy, sw, sh, 0, 0, 1, 1, n->shader );
+				re.DrawStretchPic( drawX, drawY, drawW, drawH, 0, 0, 1, 1, n->shader );
 			}
 
 			slotIdx++;

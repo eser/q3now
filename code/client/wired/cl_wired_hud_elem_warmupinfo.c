@@ -36,7 +36,7 @@ void CG_SHUDElementWarmupInfoRoutine(void* context)
 
 	if (sec < 0)
 	{
-		element->ctx.text = cgs.gametype != GT_TOURNAMENT ? "^BWaiting for Players" : "^BWaiting for Opponent";
+		element->ctx.text = cgs.gametype != GT_DUEL ? "^BWaiting for Players" : "^BWaiting for Opponent";
 	}
 	else if (sec > 0)
 	{

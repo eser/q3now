@@ -1706,6 +1706,308 @@ static void PM_TorsoAnimation( void ) {
 
 /*
 ==============
+PM_MG_Burst_Start — begin a new 3-round burst sequence
+==============
+*/
+qboolean PM_MG_Burst_Start( pmove_t *pm ) {
+	int maxRounds = 3;
+	if ( pm->ps->ammo[ pm->ps->weapon ] >= 0 && pm->ps->ammo[ pm->ps->weapon ] < maxRounds ) {
+		maxRounds = pm->ps->ammo[ pm->ps->weapon ];
+	}
+	pm->ps->burstRoundsRemaining = maxRounds - 1;  // -1: first round fires now
+	PM_StartTorsoAnim( TORSO_ATTACK2 );
+	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	pm->ps->weaponstate = WEAPON_FIRING;
+
+	if ( pm->ps->burstRoundsRemaining > 0 ) {
+		pm->ps->weaponTime += 60;  // inter-round delay
+	} else {
+		pm->ps->weaponTime += bg_attacklist[ bg_weaponlist[pm->ps->weapon].attackAlt ].reloadTime;
+	}
+	return qtrue;
+}
+
+/*
+==============
+PM_MG_Burst_Think — fire remaining rounds in current burst
+==============
+*/
+qboolean PM_MG_Burst_Think( pmove_t *pm ) {
+	if ( pm->ps->burstRoundsRemaining <= 0 ) {
+		return qfalse;
+	}
+	// interruptible: cancel if alt-fire released
+	if ( !( pm->cmd.buttons & BUTTON_ATTACK_ALT ) ) {
+		pm->ps->burstRoundsRemaining = 0;
+		pm->ps->weaponTime = 0;
+		pm->ps->weaponstate = WEAPON_READY;
+		return qtrue;
+	}
+	// cancel if weapon switch requested
+	if ( pm->ps->weapon != pm->cmd.weapon ) {
+		pm->ps->burstRoundsRemaining = 0;
+		PM_BeginWeaponChange( pm->cmd.weapon );
+		return qtrue;
+	}
+	// cancel if out of ammo
+	if ( !pm->ps->ammo[ pm->ps->weapon ] ) {
+		pm->ps->burstRoundsRemaining = 0;
+		PM_AddEvent( EV_NOAMMO );
+		pm->ps->weaponTime += cpm_outofammodelay;
+		return qtrue;
+	}
+	// fire next burst round
+	if ( pm->ps->ammo[ pm->ps->weapon ] != -1 ) {
+		pm->ps->ammo[ pm->ps->weapon ]--;
+	}
+	pm->ps->burstRoundsRemaining--;
+	PM_StartTorsoAnim( TORSO_ATTACK2 );
+	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	pm->ps->weaponstate = WEAPON_FIRING;
+
+	if ( pm->ps->burstRoundsRemaining > 0 ) {
+		pm->ps->weaponTime += 60;
+	} else {
+		pm->ps->weaponTime += bg_attacklist[ bg_weaponlist[pm->ps->weapon].attackAlt ].reloadTime;
+	}
+	return qtrue;
+}
+
+/*
+==============
+PM_MG_Burst_Release — cancel burst when alt-fire released
+==============
+*/
+void PM_MG_Burst_Release( pmove_t *pm ) {
+	pm->ps->burstRoundsRemaining = 0;
+}
+
+/*
+==============
+PM_Gauntlet_Lunge_Start — begin charging the gauntlet lunge
+==============
+*/
+qboolean PM_Gauntlet_Lunge_Start( pmove_t *pm ) {
+	// don't start if already charging or in cooldown
+	if ( pm->ps->chargeStartTime > 0 || pm->ps->weaponTime > 0 ) {
+		return qfalse;
+	}
+	pm->ps->chargeStartTime = pm->cmd.serverTime;
+	pm->ps->weaponstate = WEAPON_FIRING;
+	PM_StartTorsoAnim( TORSO_ATTACK2 );
+	return qtrue;
+}
+
+/*
+==============
+PM_Gauntlet_Lunge_Think — handle charge progress and lunge trigger on release
+==============
+*/
+qboolean PM_Gauntlet_Lunge_Think( pmove_t *pm ) {
+	vec3_t	forward;
+	int		chargeTime;
+
+	// not charging? nothing to do
+	if ( pm->ps->chargeStartTime <= 0 ) {
+		return qfalse;
+	}
+
+	// cancel if weapon switch requested
+	if ( pm->ps->weapon != pm->cmd.weapon ) {
+		pm->ps->chargeStartTime = 0;
+		PM_BeginWeaponChange( pm->cmd.weapon );
+		return qtrue;
+	}
+
+	// alt-fire button released: trigger lunge if charged enough
+	if ( !( pm->cmd.buttons & BUTTON_ATTACK_ALT ) ) {
+		chargeTime = pm->cmd.serverTime - pm->ps->chargeStartTime;
+		pm->ps->chargeStartTime = 0;
+
+		if ( chargeTime >= GAUNTLET_CHARGE_TIME ) {
+			// lunge! apply forward velocity boost
+			AngleVectors( pm->ps->viewangles, forward, NULL, NULL );
+			VectorMA( pm->ps->velocity, GAUNTLET_LUNGE_SPEED, forward, pm->ps->velocity );
+
+			// fire event for server-side damage trace
+			PM_AddEvent( EV_FIRE_WEAPON_ALT );
+			PM_StartTorsoAnim( TORSO_ATTACK2 );
+
+			// set cooldown (blocks all fire for 1.5s)
+			pm->ps->weaponTime = bg_attacklist[ATT_GAUNTLET_LUNGE].reloadTime;
+			pm->ps->cooldownEndTime = pm->cmd.serverTime + pm->ps->weaponTime;
+			pm->ps->weaponstate = WEAPON_FIRING;
+		} else {
+			// charge not complete, cancel without lunge
+			pm->ps->weaponstate = WEAPON_READY;
+		}
+		return qtrue;
+	}
+
+	// button still held: continue charging
+	pm->ps->weaponstate = WEAPON_FIRING;
+	return qtrue;
+}
+
+/*
+==============
+PM_Gauntlet_Lunge_Release — cleanup when charge is cancelled externally
+==============
+*/
+void PM_Gauntlet_Lunge_Release( pmove_t *pm ) {
+	pm->ps->chargeStartTime = 0;
+}
+
+/*
+==============
+PM_SG_DoubleBlast_Start — fire first wide-spread blast, schedule second
+==============
+*/
+qboolean PM_SG_DoubleBlast_Start( pmove_t *pm ) {
+	// don't start if in cooldown
+	if ( pm->ps->weaponTime > 0 ) {
+		return qfalse;
+	}
+
+	// consume 1 ammo for first blast
+	if ( pm->ps->ammo[pm->ps->weapon] != -1 ) {
+		pm->ps->ammo[pm->ps->weapon]--;
+	}
+
+	// fire first blast
+	pm->ps->doubleBlastState = 1;  // waiting for second blast
+	PM_StartTorsoAnim( TORSO_ATTACK2 );
+	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	pm->ps->weaponstate = WEAPON_FIRING;
+
+	// check if we have ammo for second blast
+	if ( pm->ps->ammo[pm->ps->weapon] != -1 && pm->ps->ammo[pm->ps->weapon] <= 0 ) {
+		// no ammo for second blast — apply full cooldown now
+		pm->ps->doubleBlastState = 0;
+		pm->ps->weaponTime = bg_attacklist[bg_weaponlist[pm->ps->weapon].attackAlt].reloadTime;
+	} else {
+		// schedule second blast after ~150ms
+		pm->ps->weaponTime = 150;
+	}
+	return qtrue;
+}
+
+/*
+==============
+PM_SG_DoubleBlast_Think — fire second blast when timer expires
+==============
+*/
+qboolean PM_SG_DoubleBlast_Think( pmove_t *pm ) {
+	if ( pm->ps->doubleBlastState != 1 ) {
+		return qfalse;
+	}
+
+	// cancel if weapon switch requested
+	if ( pm->ps->weapon != pm->cmd.weapon ) {
+		pm->ps->doubleBlastState = 0;
+		PM_BeginWeaponChange( pm->cmd.weapon );
+		return qtrue;
+	}
+
+	// cancel if out of ammo
+	if ( pm->ps->ammo[pm->ps->weapon] != -1 && pm->ps->ammo[pm->ps->weapon] <= 0 ) {
+		pm->ps->doubleBlastState = 0;
+		pm->ps->weaponTime = bg_attacklist[bg_weaponlist[pm->ps->weapon].attackAlt].reloadTime;
+		return qtrue;
+	}
+
+	// fire second blast
+	if ( pm->ps->ammo[pm->ps->weapon] != -1 ) {
+		pm->ps->ammo[pm->ps->weapon]--;
+	}
+	pm->ps->doubleBlastState = 0;
+	PM_StartTorsoAnim( TORSO_ATTACK2 );
+	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	pm->ps->weaponstate = WEAPON_FIRING;
+
+	// apply full cooldown after second blast
+	pm->ps->weaponTime = bg_attacklist[bg_weaponlist[pm->ps->weapon].attackAlt].reloadTime;
+	return qtrue;
+}
+
+/*
+==============
+PM_SG_DoubleBlast_Release — cleanup when cancelled externally (e.g., death)
+==============
+*/
+void PM_SG_DoubleBlast_Release( pmove_t *pm ) {
+	pm->ps->doubleBlastState = 0;
+}
+
+/*
+==============
+PM_LG_ChainArc_Start — Lightning Gun chain arc alt-fire: initiates chain mode.
+Hold alt-fire to fire chain beam with arc to secondary target.
+==============
+*/
+qboolean PM_LG_ChainArc_Start( pmove_t *pm ) {
+	// Need at least 2 cells (2x drain)
+	if ( pm->ps->ammo[pm->ps->weapon] < 2 ) {
+		return qfalse;  // not enough ammo, fall through to normal fire
+	}
+
+	// Deduct ammo: 2 cells per tick (2x drain)
+	pm->ps->ammo[pm->ps->weapon] -= 2;
+
+	// Fire the first chain arc tick
+	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	PM_StartTorsoAnim( TORSO_ATTACK2 );
+	pm->ps->weaponstate = WEAPON_FIRING;
+	pm->ps->weaponTime += 50;  // same timing as primary LG
+	return qtrue;
+}
+
+/*
+==============
+PM_LG_ChainArc_Think — fires chain arc beam each frame while alt-fire is held.
+Handles 2x ammo drain by consuming extra cell per tick.
+==============
+*/
+qboolean PM_LG_ChainArc_Think( pmove_t *pm ) {
+	// Only active while alt-fire is held
+	if ( !( pm->cmd.buttons & BUTTON_ATTACK_ALT ) ) {
+		return qfalse;  // let release path handle cleanup
+	}
+
+	// Check ammo — need at least 2 for the fire (1 normal + 1 extra for 2x drain)
+	if ( pm->ps->ammo[pm->ps->weapon] < 2 ) {
+		pm->ps->weaponstate = WEAPON_READY;
+		PM_AddEvent( EV_NOAMMO );
+		pm->ps->weaponTime += 500;
+		return qtrue;
+	}
+
+	// Deduct ammo: 1 for normal fire + 1 extra for 2x drain = 2 total per tick
+	pm->ps->ammo[pm->ps->weapon] -= 2;
+
+	// Generate fire event so server calls Attack_LightningGun_ChainArc()
+	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	pm->ps->weaponstate = WEAPON_FIRING;
+	pm->ps->weaponTime += 50;  // same timing as primary LG
+	PM_StartTorsoAnim( TORSO_ATTACK2 );
+
+	return qtrue;
+}
+
+/*
+==============
+PM_LG_ChainArc_Release — cleans up chain arc state when alt-fire is released.
+==============
+*/
+void PM_LG_ChainArc_Release( pmove_t *pm ) {
+	// Nothing special to clean up — just return to ready state
+	if ( pm->ps->weaponstate == WEAPON_FIRING ) {
+		pm->ps->weaponstate = WEAPON_READY;
+	}
+}
+
+/*
+==============
 PM_Weapon
 
 Generates weapon events and modifes the weapon counter
@@ -1764,12 +2066,28 @@ static void PM_Weapon( void ) {
 	// again if lowering or raising
 	if ( pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING ) {
 		if ( pm->ps->weapon != pm->cmd.weapon ) {
+			{
+				int altIdx = bg_weaponlist[pm->ps->weapon].attackAlt;
+				if ( altIdx != ATT_NONE && bg_attacklist[altIdx].onAltFireRelease ) {
+					bg_attacklist[altIdx].onAltFireRelease( pm );
+				}
+			}
 			PM_BeginWeaponChange( pm->cmd.weapon );
 		}
 	}
 
 	if ( pm->ps->weaponTime > 0 ) {
 		return;
+	}
+
+	// alt-fire think callback: handle ongoing alt-fire behavior
+	{
+		int altIdx = bg_weaponlist[pm->ps->weapon].attackAlt;
+		if ( altIdx != ATT_NONE && bg_attacklist[altIdx].onAltFireThink ) {
+			if ( bg_attacklist[altIdx].onAltFireThink( pm ) ) {
+				return;
+			}
+		}
 	}
 
 	// change weapon if time
@@ -1831,6 +2149,13 @@ static void PM_Weapon( void ) {
 
 	// check for fire (primary or secondary)
 	if ( ! (pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_ATTACK_ALT)) ) {
+		// alt-fire release callback
+		{
+			int altIdx = bg_weaponlist[pm->ps->weapon].attackAlt;
+			if ( altIdx != ATT_NONE && bg_attacklist[altIdx].onAltFireRelease ) {
+				bg_attacklist[altIdx].onAltFireRelease( pm );
+			}
+		}
 		pm->ps->weaponTime = 0;
 		pm->ps->weaponstate = WEAPON_READY;
 		return;
@@ -1838,11 +2163,13 @@ static void PM_Weapon( void ) {
 
 	// start the animation even if out of ammo
 	if ( pm->ps->weapon == WP_GAUNTLET ) {
-		// the guantlet only "fires" when it actually hits something
-		if ( !pm->gauntletHit ) {
-			pm->ps->weaponTime = 0;
-			pm->ps->weaponstate = WEAPON_READY;
-			return;
+		// skip gauntlet hit check for alt-fire (lunge charges regardless of hit)
+		if ( !( pm->cmd.buttons & BUTTON_ATTACK_ALT ) ) {
+			if ( !pm->gauntletHit ) {
+				pm->ps->weaponTime = 0;
+				pm->ps->weaponstate = WEAPON_READY;
+				return;
+			}
 		}
 		PM_StartTorsoAnim( TORSO_ATTACK2 );
 	} else {
@@ -1862,6 +2189,16 @@ static void PM_Weapon( void ) {
 	// take an ammo away if not infinite
 	if ( pm->ps->ammo[ pm->ps->weapon ] != -1 ) {
 		pm->ps->ammo[ pm->ps->weapon ]--;
+	}
+
+	// alt-fire start callback: initiate alt-fire behavior
+	if ( pm->cmd.buttons & BUTTON_ATTACK_ALT ) {
+		int altIdx = bg_weaponlist[pm->ps->weapon].attackAlt;
+		if ( altIdx != ATT_NONE && bg_attacklist[altIdx].onAltFireStart ) {
+			if ( bg_attacklist[altIdx].onAltFireStart( pm ) ) {
+				return;
+			}
+		}
 	}
 
 	// fire weapon (primary or secondary)

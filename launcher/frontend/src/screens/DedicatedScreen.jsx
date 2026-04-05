@@ -18,7 +18,7 @@ const PRESETS = [
     label: "FFA q3dm17",
     hostname: "q3now FFA",
     map: "q3dm17",
-    gameType: "ffa",
+    gameType: "dm",
     maxClients: 8,
     addBots: true,
     botCount: 3,
@@ -44,10 +44,9 @@ const PRESETS = [
 ];
 
 const GAME_TYPES = [
-  { value: "ffa", label: "FFA" },
+  { value: "dm", label: "DM" },
   { value: "tdm", label: "TDM" },
   { value: "ctf", label: "CTF" },
-  { value: "freezetag", label: "FreezeTag" },
 ];
 
 const MAPS = [
@@ -227,7 +226,7 @@ export default function DedicatedScreen({ assetsReady, onBack }) {
   const [config, setConfig] = useState({
     hostname: "q3now server",
     map: "q3dm17",
-    gameType: "ffa",
+    gameType: "dm",
     maxClients: 16,
     password: "",
     addBots: true,

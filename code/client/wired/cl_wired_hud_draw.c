@@ -403,7 +403,7 @@ void CG_SHUDTextMakeContext(const superhudConfig_t* in, superhudTextContext_t* o
 	}
 
 	out->fontIndex = CG_FontIndexFromName(config.font.isSet ? config.font.value : "sansman");
-	out->width = SCREEN_WIDTH;
+	out->width = (float)cls.glconfig.vidWidth;
 
 
 	CG_SHUDConfigPickColor(&config, out->color, qtrue);
@@ -494,8 +494,6 @@ void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out
 				out->bar[1][2] = out->bar[0][2] = config.rect.value[2]; // w
 				out->bar[1][3] = out->bar[0][3] = config.rect.value[3]; // h
 			}
-			CG_AdjustFrom640(&out->bar[1][0], &out->bar[1][1], &out->bar[1][2], &out->bar[1][3]);
-			CG_AdjustFrom640(&out->bar[0][0], &out->bar[0][1], &out->bar[0][2], &out->bar[0][3]);
 			out->max = out->bar[1][2];
 			out->koeff = 2 * out->bar[1][2] / max;
 		}
@@ -524,8 +522,6 @@ void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out
 				out->bar[1][2] = out->bar[0][2] = config.rect.value[2]; // w
 				out->bar[1][3] = out->bar[0][3] = config.rect.value[3]; // h
 			}
-			CG_AdjustFrom640(&out->bar[1][0], &out->bar[1][1], &out->bar[1][2], &out->bar[1][3]);
-			CG_AdjustFrom640(&out->bar[0][0], &out->bar[0][1], &out->bar[0][2], &out->bar[0][3]);
 			out->max = out->bar[1][3];
 			out->koeff = 2 * out->bar[1][3] / max;
 		}
@@ -537,7 +533,6 @@ void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out
 		out->bar[0][1] = y;
 		out->bar[0][2] = config.rect.value[2];
 		out->bar[0][3] = config.rect.value[3];
-		CG_AdjustFrom640(&out->bar[0][0], &out->bar[0][1], &out->bar[0][2], &out->bar[0][3]);
 		if (out->direction == SUPERHUD_DIR_LEFT_TO_RIGHT || out->direction == SUPERHUD_DIR_RIGHT_TO_LEFT)
 		{
 			out->max = out->bar[0][2]; // max / width
@@ -871,7 +866,6 @@ void CG_SHUDFillWithColor(const superhudCoord_t* coord, const float* color)
 	y = coord->named.y;
 	w = coord->named.w;
 	h = coord->named.h;
-	CG_AdjustFrom640(&x, &y, &w, &h);
 	trap_R_SetColor(color);
 	trap_R_DrawStretchPic(x, y, w, h, 0, 0, 0, 0, cgs.media.whiteShader);
 	trap_R_SetColor(NULL);
@@ -890,8 +884,6 @@ qboolean CG_SHUDFill(const superhudConfig_t* cfg)
 	y = cfg->rect.value[1];
 	w = cfg->rect.value[2];
 	h = cfg->rect.value[3];
-
-	CG_AdjustFrom640(&x, &y, &w, &h);
 
 	if (cfg->bgcolor.isSet)
 	{
@@ -975,7 +967,6 @@ void CG_SHUDDrawStretchPic(superhudCoord_t coord, const superhudCoord_t coordPic
 	if (!shader) return;
 
 	trap_R_SetColor(color);
-	CG_AdjustFrom640(&coord.named.x, &coord.named.y, &coord.named.w, &coord.named.h);
 	trap_R_DrawStretchPic(coord.named.x,
 	                      coord.named.y,
 	                      coord.named.w,
@@ -998,8 +989,6 @@ void CG_SHUDDrawBorderDirect(const superhudCoord_t* coord, const vec4_t border, 
 
 	Vector4Copy(coord->arr, tmpCoord);
 
-	CG_AdjustFrom640(&tmpCoord[0], &tmpCoord[1], &tmpCoord[2], &tmpCoord[3]);
-
 	CG_ModernDrawFrame(tmpCoord[0], tmpCoord[1], tmpCoord[2], tmpCoord[3],
 	                (float*)border, (float*)borderColor, qtrue);
 
@@ -1016,7 +1005,6 @@ qboolean CG_SHUDDrawBorder(const superhudConfig_t* cfg)
 	}
 
 	Vector4Copy(cfg->rect.value, coord);
-	CG_AdjustFrom640(&coord[0], &coord[1], &coord[2], &coord[3]);
 
 	CG_SHUDConfigPickBorderColor(cfg, borderColor, qfalse);
 

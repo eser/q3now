@@ -236,7 +236,7 @@ static void WiredHud_DrawFps( int realtime ) {
 
 	// draw below SuperHUD fps — using proper font system
 	charSize = 8.0f;
-	x = 640.0f - 2.0f;  // right-aligned
+	x = (float)cls.glconfig.vidWidth - 2.0f;  // right-aligned
 	y = 16.0f;
 
 	// green tint to distinguish from SuperHUD's white fps
@@ -461,7 +461,8 @@ void WiredHud_Routine( int realtime ) {
 
 			// select scoreboard menu by gametype
 			switch ( wiredHud->gametype ) {
-				case 5:  menuName = va( "%s_tdm", prefix ); break;  // GT_TEAM
+				case 1:  menuName = va( "%s_duel", prefix ); break; // GT_TOURNAMENT
+				case 5:  menuName = va( "%s_tdm", prefix ); break;  // GT_TDM
 				case 6:  menuName = va( "%s_ctf", prefix ); break;  // GT_CTF
 				case 7:  menuName = va( "%s_ctf", prefix ); break;  // GT_1FCTF
 				default: menuName = va( "%s_ffa", prefix ); break;  // FFA, Tournament, etc.
@@ -472,17 +473,10 @@ void WiredHud_Routine( int realtime ) {
 				// set cvars for header text
 				{
 					const char *gt;
-					switch ( wiredHud->gametype ) {
-						case 0:  gt = "Free For All"; break;
-						case 1:  gt = "Tournament"; break;
-						case 3:  gt = "King of the Hill"; break;
-						case 4:  gt = "Last Man Standing"; break;
-						case 5:  gt = "Team Deathmatch"; break;
-						case 6:  gt = "Capture the Flag"; break;
-						case 7:  gt = "One Flag CTF"; break;
-						case 8:  gt = "Overload"; break;
-						case 9:  gt = "Harvester"; break;
-						default: gt = "Free For All"; break;
+					if (wiredHud->gametype >= 0 && wiredHud->gametype < GT_MAX_GAME_TYPE) {
+						gt = bg_gametypelist[wiredHud->gametype].name;
+					} else {
+						gt = bg_gametypelist[GT_DEATHMATCH].name;
 					}
 					Cvar_Set( "wired_sb_gametype", gt );
 				}

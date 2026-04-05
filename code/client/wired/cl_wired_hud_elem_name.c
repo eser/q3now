@@ -74,7 +74,7 @@ static void CG_SHUDElementNameGetPairFFA(const char** own, const char** nme)
 	*nme = Info_ValueForKey(info, "n");
 }
 
-static void CG_SHUDElementNameGetPair1vs1(const char** own, const char** nme)
+static void CG_SHUDElementNameGetPairDuel(const char** own, const char** nme)
 {
 	int i;
 	int k;
@@ -162,14 +162,13 @@ static void CG_SHUDElementNameGetPair(const char** own, const char** nme)
 	*nme = "";
 	switch (cgs.gametype)
 	{
-		case GT_SINGLE_PLAYER:
-		case GT_FFA: //our name / last attacker or second
+		case GT_DEATHMATCH: //our name / last attacker or second
 			CG_SHUDElementNameGetPairFFA(own, nme);
 			break;
-		case GT_TOURNAMENT: //our name and second player name
-			CG_SHUDElementNameGetPair1vs1(own, nme);
+		case GT_DUEL: //our name and second player name
+			CG_SHUDElementNameGetPairDuel(own, nme);
 			break;
-		case GT_TEAM: // red/blue
+		case GT_TDM: // red/blue
 		case GT_CTF:
 		// case GT_CA:
 			CG_SHUDElementNameGetPairTeam(own, nme);

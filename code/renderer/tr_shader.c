@@ -2475,6 +2475,12 @@ static void FixRenderCommandList( int newShader ) {
 				curCmd = (const void *)(sp_cmd + 1);
 				break;
 				}
+			case RC_DRAW_LINE:
+				{
+				const drawLineCommand_t *dl_cmd = (const drawLineCommand_t *)curCmd;
+				curCmd = (const void *)(dl_cmd + 1);
+				break;
+				}
 			case RC_DRAW_SURFS:
 				{
 				int i;
@@ -3496,6 +3502,33 @@ qhandle_t RE_RegisterShaderNoMip( const char *name ) {
 	}
 
 	return sh->index;
+}
+
+/*
+====================
+RE_RegisterMSDFShader
+
+Register a shader as an MSDF atlas.  This calls RegisterShaderNoMip
+internally, then stamps the MSDF metadata onto the resulting shader_t
+so the backend knows to use the MSDF fragment program.
+====================
+*/
+qhandle_t RE_RegisterMSDFShader( const char *name, float distanceRange, int atlasWidth, int atlasHeight )
+{
+	qhandle_t h;
+	shader_t *sh;
+
+	h = RE_RegisterShaderNoMip( name );
+	if ( h ) {
+		sh = R_GetShaderByHandle( h );
+		if ( sh != tr.defaultShader ) {
+			sh->msdf = qtrue;
+			sh->msdfDistanceRange = distanceRange;
+			sh->msdfAtlasWidth = atlasWidth;
+			sh->msdfAtlasHeight = atlasHeight;
+		}
+	}
+	return h;
 }
 
 /*

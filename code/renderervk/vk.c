@@ -4300,6 +4300,11 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.iqm_skinning_vs, "IQM skinning vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.iqm_skinning_fs, "IQM skinning fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 #endif
+
+	vk.modules.msdf_vs = SHADER_MODULE( msdf_vert_spv );
+	vk.modules.msdf_fs = SHADER_MODULE( msdf_frag_spv );
+	SET_OBJECT_NAME( vk.modules.msdf_vs, "MSDF text vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+	SET_OBJECT_NAME( vk.modules.msdf_fs, "MSDF text fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 }
 
 
@@ -4454,6 +4459,15 @@ static void vk_alloc_persistent_pipelines( void )
 		def.shader_type = TYPE_DOT;
 		def.primitives = POINT_LIST;
 		vk.dot_pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
+	}
+
+	// MSDF text rendering pipeline
+	{
+		Com_Memset( &def, 0, sizeof( def ) );
+		def.state_bits = GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
+		def.face_culling = CT_TWO_SIDED;
+		def.shader_type = TYPE_MSDF;
+		vk.msdf_pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 	}
 
 	// DrawTris()
@@ -6905,6 +6919,11 @@ void vk_shutdown( refShutdownCode_t code )
 			qvkDestroyShaderModule( vk.device, vk.modules.frag.dfade_ent[0][i], NULL );
 	}
 
+	if ( vk.modules.msdf_fs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.msdf_fs, NULL );
+	if ( vk.modules.msdf_vs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.msdf_vs, NULL );
+
 	qvkDestroyShaderModule( vk.device, vk.modules.color_fs, NULL );
 	qvkDestroyShaderModule( vk.device, vk.modules.color_vs, NULL );
 
@@ -8194,6 +8213,11 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			fs_module = &vk.modules.dot_fs;
 			break;
 
+		case TYPE_MSDF:
+			vs_module = &vk.modules.msdf_vs;
+			fs_module = &vk.modules.msdf_fs;
+			break;
+
 		default:
 			ri.Error(ERR_DROP, "create_pipeline: unknown shader type %i\n", def->shader_type);
 			return 0;
@@ -8203,6 +8227,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		switch ( def->shader_type ) {
 			case TYPE_FOG_ONLY:
 			case TYPE_DOT:
+			case TYPE_MSDF:
 			case TYPE_SIGNLE_TEXTURE_DF:
 			case TYPE_COLOR_BLACK:
 			case TYPE_COLOR_WHITE:
@@ -8475,7 +8500,14 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	frag_spec_info.pMapEntries = spec_entries + 1;
 	frag_spec_info.dataSize = sizeof( int32_t ) * 12;
 	frag_spec_info.pData = &frag_spec_data[0];
-	shader_stages[1].pSpecializationInfo = &frag_spec_info;
+
+	// MSDF fragment shader has its own specialization layout (constant_id=0 is
+	// msdf_distance_range, not alpha-test-function), so skip the generic spec
+	// constants and let the shader use its compiled-in default (4.0).
+	if ( def->shader_type == TYPE_MSDF )
+		shader_stages[1].pSpecializationInfo = NULL;
+	else
+		shader_stages[1].pSpecializationInfo = &frag_spec_info;
 
 	//
 	// Vertex input
@@ -8507,6 +8539,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			push_attr( 2, 2, VK_FORMAT_R32G32_SFLOAT );
 			break;
 
+		case TYPE_MSDF:
 		case TYPE_SIGNLE_TEXTURE:
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_bind( 1, sizeof( color4ub_t ) );				// color array

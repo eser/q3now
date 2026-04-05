@@ -154,7 +154,7 @@ Restart the server on a different map
 static void SV_Map_f( void ) {
 	const char		*cmd;
 	const char		*map;
-	qboolean	killBots, cheat;
+	qboolean	cheat;
 	char		expanded[MAX_QPATH];
 	char		mapname[MAX_QPATH];
 	int			len;
@@ -180,31 +180,10 @@ static void SV_Map_f( void ) {
 	Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_USERINFO | CVAR_LATCH );
 
 	cmd = Cmd_Argv(0);
-	if( Q_stricmpn( cmd, "sp", 2 ) == 0 ) {
-		Cvar_SetIntegerValue( "g_gametype", GT_SINGLE_PLAYER );
-		Cvar_Set( "g_doWarmup", "0" );
-		// may not set sv_maxclients directly, always set latched
-		Cvar_SetLatched( "sv_maxclients", "8" );
-		cmd += 2;
-		if (!Q_stricmp( cmd, "devmap" ) ) {
-			cheat = qtrue;
-		} else {
-			cheat = qfalse;
-		}
-		killBots = qtrue;
-	}
-	else {
-		if ( !Q_stricmp( cmd, "devmap" ) ) {
-			cheat = qtrue;
-		} else {
-			cheat = qfalse;
-		}
-		if( sv_gametype->integer == GT_SINGLE_PLAYER ) {
-			Cvar_SetIntegerValue( "g_gametype", GT_FFA );
-			killBots = qtrue;
-		} else {
-			killBots = qfalse;
-		}
+	if ( !Q_stricmp( cmd, "devmap" ) ) {
+		cheat = qtrue;
+	} else {
+		cheat = qfalse;
 	}
 
 	// save the map name here cause on a map restart we reload the q3config.cfg
@@ -212,7 +191,8 @@ static void SV_Map_f( void ) {
 	Q_strncpyz(mapname, map, sizeof(mapname));
 
 	// start up the map
-	SV_SpawnServer( mapname, killBots );
+	// FIXME(@eser) second argument "killBots" should be enabled in single player
+	SV_SpawnServer( mapname, qfalse );
 
 	// set the cheat value
 	// if the level was started with "map <levelname>", then

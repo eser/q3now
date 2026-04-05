@@ -22,7 +22,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // cg_drawtools.c -- helper functions called by cg_draw, cg_scoreboard, cg_info, etc
 #include "cg_local.h"
-#include "cg_modern_private.h"
 
 // screen placement state (push/pop API for anchoring HUD elements)
 static screenPlacement_e cg_horizontalPlacement = PLACE_CENTER;
@@ -52,39 +51,41 @@ screenPlacement_e CG_GetScreenVerticalPlacement( void ) {
 
 /*
 ================
-CG_AdjustFrom640
+CG_AdjustNorm
 
-Adjusted for resolution and screen aspect ratio.
-Uses screen placement to correctly anchor HUD elements on widescreen monitors.
+Adjust normalized (0.0-1.0) coordinates for widescreen placement.
+Applies aspect-ratio-preserving scale and centering bias.
+Output values are still in 0.0-1.0 normalized space (consumed by
+trap_R_DrawStretchPicNorm which multiplies by vidWidth/vidHeight).
 ================
 */
-void CG_AdjustFrom640( float *x, float *y, float *w, float *h ) {
+void CG_AdjustNorm( float *x, float *y, float *w, float *h ) {
 	if ( cg_horizontalPlacement == PLACE_STRETCH || cg_stretch.integer ) {
-		if ( w ) *w *= cgs.screenXScaleStretch;
-		if ( x ) *x *= cgs.screenXScaleStretch;
+		if ( w ) *w *= cgs.normXScaleStretch;
+		if ( x ) *x *= cgs.normXScaleStretch;
 	} else {
-		if ( w ) *w *= cgs.screenXScale;
+		if ( w ) *w *= cgs.normXScale;
 		if ( x ) {
-			*x *= cgs.screenXScale;
+			*x *= cgs.normXScale;
 			if ( cg_horizontalPlacement == PLACE_CENTER ) {
-				*x += cgs.screenXBias;
+				*x += cgs.normXBias;
 			} else if ( cg_horizontalPlacement == PLACE_RIGHT ) {
-				*x += cgs.screenXBias * 2;
+				*x += cgs.normXBias * 2;
 			}
 		}
 	}
 
 	if ( cg_verticalPlacement == PLACE_STRETCH || cg_stretch.integer ) {
-		if ( h ) *h *= cgs.screenYScaleStretch;
-		if ( y ) *y *= cgs.screenYScaleStretch;
+		if ( h ) *h *= cgs.normYScaleStretch;
+		if ( y ) *y *= cgs.normYScaleStretch;
 	} else {
-		if ( h ) *h *= cgs.screenYScale;
+		if ( h ) *h *= cgs.normYScale;
 		if ( y ) {
-			*y *= cgs.screenYScale;
+			*y *= cgs.normYScale;
 			if ( cg_verticalPlacement == PLACE_CENTER ) {
-				*y += cgs.screenYBias;
+				*y += cgs.normYBias;
 			} else if ( cg_verticalPlacement == PLACE_BOTTOM ) {
-				*y += cgs.screenYBias * 2;
+				*y += cgs.normYBias * 2;
 			}
 		}
 	}
@@ -94,15 +95,29 @@ void CG_AdjustFrom640( float *x, float *y, float *w, float *h ) {
 ================
 CG_FillRect
 
-Coordinates are 640*480 virtual values
+Coordinates are in virtual space; converted to normalized internally.
 =================
 */
 void CG_FillRect( float x, float y, float width, float height, const float *color ) {
+	float nx = CG_NormX( x ), ny = CG_NormY( y );
+	float nw = CG_NormW( width ), nh = CG_NormH( height );
 	trap_R_SetColor( color );
+	CG_AdjustNorm( &nx, &ny, &nw, &nh );
+	trap_R_DrawStretchPicNorm( nx, ny, nw, nh, 0, 0, 0, 0, cgs.media.whiteShader );
+	trap_R_SetColor( NULL );
+}
 
-	CG_AdjustFrom640( &x, &y, &width, &height );
-	trap_R_DrawStretchPic( x, y, width, height, 0, 0, 0, 0, cgs.media.whiteShader );
+/*
+================
+CG_FillRectNorm
 
+Coordinates are normalized (0.0-1.0).
+=================
+*/
+void CG_FillRectNorm( float nx, float ny, float nw, float nh, const float *color ) {
+	trap_R_SetColor( color );
+	CG_AdjustNorm( &nx, &ny, &nw, &nh );
+	trap_R_DrawStretchPicNorm( nx, ny, nw, nh, 0, 0, 0, 0, cgs.media.whiteShader );
 	trap_R_SetColor( NULL );
 }
 
@@ -110,27 +125,33 @@ void CG_FillRect( float x, float y, float width, float height, const float *colo
 ================
 CG_DrawSides
 
-Coords are virtual 640x480
+Coords are virtual; converted to normalized internally.
 ================
 */
 void CG_DrawSides(float x, float y, float w, float h, float size) {
-	CG_AdjustFrom640( &x, &y, &w, &h );
-	size *= cgs.screenXScale;
-	trap_R_DrawStretchPic( x, y, size, h, 0, 0, 0, 0, cgs.media.whiteShader );
-	trap_R_DrawStretchPic( x + w - size, y, size, h, 0, 0, 0, 0, cgs.media.whiteShader );
+	float nx = CG_NormX( x ), ny = CG_NormY( y );
+	float nw = CG_NormW( w ), nh = CG_NormH( h );
+	float ns;
+	CG_AdjustNorm( &nx, &ny, &nw, &nh );
+	ns = CG_NormW( size ) * cgs.normXScale;
+	trap_R_DrawStretchPicNorm( nx, ny, ns, nh, 0, 0, 0, 0, cgs.media.whiteShader );
+	trap_R_DrawStretchPicNorm( nx + nw - ns, ny, ns, nh, 0, 0, 0, 0, cgs.media.whiteShader );
 }
 
 void CG_DrawTopBottom(float x, float y, float w, float h, float size) {
-	CG_AdjustFrom640( &x, &y, &w, &h );
-	size *= cgs.screenYScale;
-	trap_R_DrawStretchPic( x, y, w, size, 0, 0, 0, 0, cgs.media.whiteShader );
-	trap_R_DrawStretchPic( x, y + h - size, w, size, 0, 0, 0, 0, cgs.media.whiteShader );
+	float nx = CG_NormX( x ), ny = CG_NormY( y );
+	float nw = CG_NormW( w ), nh = CG_NormH( h );
+	float ns;
+	CG_AdjustNorm( &nx, &ny, &nw, &nh );
+	ns = CG_NormH( size ) * cgs.normYScale;
+	trap_R_DrawStretchPicNorm( nx, ny, nw, ns, 0, 0, 0, 0, cgs.media.whiteShader );
+	trap_R_DrawStretchPicNorm( nx, ny + nh - ns, nw, ns, 0, 0, 0, 0, cgs.media.whiteShader );
 }
 /*
 ================
 UI_DrawRect
 
-Coordinates are 640*480 virtual values
+Coordinates are in virtual space; converted to normalized internally.
 =================
 */
 void CG_DrawRect( float x, float y, float width, float height, float size, const float *color ) {
@@ -148,127 +169,29 @@ void CG_DrawRect( float x, float y, float width, float height, float size, const
 ================
 CG_DrawPic
 
-Coordinates are 640*480 virtual values
+Coordinates are in virtual space; converted to normalized internally.
 =================
 */
 void CG_DrawPic( float x, float y, float width, float height, qhandle_t hShader ) {
-	CG_AdjustFrom640( &x, &y, &width, &height );
-	trap_R_DrawStretchPic( x, y, width, height, 0, 0, 1, 1, hShader );
+	float nx = CG_NormX( x ), ny = CG_NormY( y );
+	float nw = CG_NormW( width ), nh = CG_NormH( height );
+	CG_AdjustNorm( &nx, &ny, &nw, &nh );
+	trap_R_DrawStretchPicNorm( nx, ny, nw, nh, 0, 0, 1, 1, hShader );
 }
-
-
 
 /*
-===============
-CG_DrawChar
+================
+CG_DrawPicNorm
 
-Coordinates and size in 640*480 virtual screen size
-===============
+Coordinates are normalized (0.0-1.0).
+=================
 */
-void CG_DrawChar( int x, int y, int width, int height, int ch ) {
-	int row, col;
-	float frow, fcol;
-	float size;
-	float	ax, ay, aw, ah;
-
-	ch &= 255;
-
-	if ( ch == ' ' ) {
-		return;
-	}
-
-	ax = x;
-	ay = y;
-	aw = width;
-	ah = height;
-	CG_AdjustFrom640( &ax, &ay, &aw, &ah );
-
-	row = ch>>4;
-	col = ch&15;
-
-	frow = row*0.0625;
-	fcol = col*0.0625;
-	size = 0.0625;
-
-	trap_R_DrawStretchPic( ax, ay, aw, ah,
-					   fcol, frow, 
-					   fcol + size, frow + size, 
-					   cgs.media.charsetShader );
+void CG_DrawPicNorm( float nx, float ny, float nw, float nh, qhandle_t hShader ) {
+	CG_AdjustNorm( &nx, &ny, &nw, &nh );
+	trap_R_DrawStretchPicNorm( nx, ny, nw, nh, 0, 0, 1, 1, hShader );
 }
 
 
-/*
-==================
-CG_DrawStringExt
-
-Draws a multi-colored string with a drop shadow, optionally forcing
-to a fixed color.
-
-Coordinates are at 640 by 480 virtual resolution
-==================
-*/
-void CG_DrawStringExt( int x, int y, const char *string, const float *setColor, 
-		qboolean forceColor, qboolean shadow, int charWidth, int charHeight, int maxChars ) {
-	vec4_t		color;
-	const char	*s;
-	int			xx;
-	int			cnt;
-
-	if (maxChars <= 0)
-		maxChars = 32767; // do them all!
-
-	// draw the drop shadow
-	if (shadow) {
-		color[0] = color[1] = color[2] = 0;
-		color[3] = setColor[3];
-		trap_R_SetColor( color );
-		s = string;
-		xx = x;
-		cnt = 0;
-		while ( *s && cnt < maxChars) {
-			if ( Q_IsColorString( s ) ) {
-				s += 2;
-				continue;
-			}
-			CG_DrawChar( xx + 2, y + 2, charWidth, charHeight, *s );
-			cnt++;
-			xx += charWidth;
-			s++;
-		}
-	}
-
-	// draw the colored text
-	s = string;
-	xx = x;
-	cnt = 0;
-	trap_R_SetColor( setColor );
-	while ( *s && cnt < maxChars) {
-		if ( Q_IsColorString( s ) ) {
-			if ( !forceColor ) {
-				memcpy( color, g_color_table[ColorIndex(*(s+1))], sizeof( color ) );
-				color[3] = setColor[3];
-				trap_R_SetColor( color );
-			}
-			s += 2;
-			continue;
-		}
-		CG_DrawChar( xx, y, charWidth, charHeight, *s );
-		xx += charWidth;
-		cnt++;
-		s++;
-	}
-	trap_R_SetColor( NULL );
-}
-
-void CG_DrawBigString( int x, int y, const char *s, vec4_t color, int flags, int font ) {
-	CG_FontSelect( font );
-	CG_ModernDrawString( x, y, s, color, BIGCHAR_WIDTH, BIGCHAR_HEIGHT, SCREEN_WIDTH, flags | DS_SHADOW, NULL );
-}
-
-void CG_DrawSmallString( int x, int y, const char *s, vec4_t color, int flags, int font ) {
-	CG_FontSelect( font );
-	CG_ModernDrawString( x, y, s, color, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, SCREEN_WIDTH, flags, NULL );
-}
 
 /*
 =================
@@ -636,16 +559,16 @@ static void UI_DrawBannerString2( int x, int y, const char* str, vec4_t color )
 
 	// draw the colored text
 	trap_R_SetColor( color );
-	
-	ax = x * cgs.screenXScale + cgs.screenXBias;
-	ay = y * cgs.screenYScale;
+
+	ax = CG_NormX( (float)x ) * cgs.normXScale + cgs.normXBias;
+	ay = CG_NormY( (float)y ) * cgs.normYScale;
 
 	s = str;
 	while ( *s )
 	{
 		ch = *s & 127;
 		if ( ch == ' ' ) {
-			ax += ((float)PROPB_SPACE_WIDTH + (float)PROPB_GAP_WIDTH)* cgs.screenXScale;
+			ax += CG_NormW( (float)(PROPB_SPACE_WIDTH + PROPB_GAP_WIDTH) ) * cgs.normXScale;
 		}
 		else if ( ch >= 'A' && ch <= 'Z' ) {
 			ch -= 'A';
@@ -653,10 +576,10 @@ static void UI_DrawBannerString2( int x, int y, const char* str, vec4_t color )
 			frow = (float)propMapB[ch][1] / 256.0f;
 			fwidth = (float)propMapB[ch][2] / 256.0f;
 			fheight = (float)PROPB_HEIGHT / 256.0f;
-			aw = (float)propMapB[ch][2] * cgs.screenXScale;
-			ah = (float)PROPB_HEIGHT * cgs.screenYScale;
-			trap_R_DrawStretchPic( ax, ay, aw, ah, fcol, frow, fcol+fwidth, frow+fheight, cgs.media.charsetPropB );
-			ax += (aw + (float)PROPB_GAP_WIDTH * cgs.screenXScale);
+			aw = CG_NormW( (float)propMapB[ch][2] ) * cgs.normXScale;
+			ah = CG_NormH( (float)PROPB_HEIGHT ) * cgs.normYScale;
+			trap_R_DrawStretchPicNorm( ax, ay, aw, ah, fcol, frow, fcol+fwidth, frow+fheight, cgs.media.charsetPropB );
+			ax += (aw + CG_NormW( (float)PROPB_GAP_WIDTH ) * cgs.normXScale);
 		}
 		s++;
 	}
@@ -746,29 +669,29 @@ static void UI_DrawProportionalString2( int x, int y, const char* str, vec4_t co
 
 	// draw the colored text
 	trap_R_SetColor( color );
-	
-	ax = x * cgs.screenXScale + cgs.screenXBias;
-	ay = y * cgs.screenYScale;
+
+	ax = CG_NormX( (float)x ) * cgs.normXScale + cgs.normXBias;
+	ay = CG_NormY( (float)y ) * cgs.normYScale;
 
 	s = str;
 	while ( *s )
 	{
 		ch = *s & 127;
 		if ( ch == ' ' ) {
-			aw = (float)PROP_SPACE_WIDTH * cgs.screenXScale * sizeScale;
+			aw = CG_NormW( (float)PROP_SPACE_WIDTH ) * cgs.normXScale * sizeScale;
 		} else if ( propMap[ch][2] != -1 ) {
 			fcol = (float)propMap[ch][0] / 256.0f;
 			frow = (float)propMap[ch][1] / 256.0f;
 			fwidth = (float)propMap[ch][2] / 256.0f;
 			fheight = (float)PROP_HEIGHT / 256.0f;
-			aw = (float)propMap[ch][2] * cgs.screenXScale * sizeScale;
-			ah = (float)PROP_HEIGHT * cgs.screenYScale * sizeScale;
-			trap_R_DrawStretchPic( ax, ay, aw, ah, fcol, frow, fcol+fwidth, frow+fheight, charset );
+			aw = CG_NormW( (float)propMap[ch][2] ) * cgs.normXScale * sizeScale;
+			ah = CG_NormH( (float)PROP_HEIGHT ) * cgs.normYScale * sizeScale;
+			trap_R_DrawStretchPicNorm( ax, ay, aw, ah, fcol, frow, fcol+fwidth, frow+fheight, charset );
 		} else {
 			aw = 0;
 		}
 
-		ax += (aw + (float)PROP_GAP_WIDTH * cgs.screenXScale * sizeScale);
+		ax += (aw + CG_NormW( (float)PROP_GAP_WIDTH ) * cgs.normXScale * sizeScale);
 		s++;
 	}
 

@@ -1,0 +1,25 @@
+// end_scoreboard_duel.wmenu - End-of-match Duel/Tournament scoreboard
+// Absolute positioning -- single full-screen duel board widget.
+// Uses ITEM_TYPE_DUELBOARD (type 21) -- WiredHud_DrawDuelBoard checks
+// wiredHud->intermission to add winner banner and match duration.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "end_scoreboard_duel"
+	rect 0 0 1 1
+	fullScreen 0
+	visible 1
+	style 0
+
+	// -- duel board (full-screen custom renderer) --
+
+	itemDef {
+		name "duelboard"
+		type 21
+		rect 0 0 1.0 1.0
+		forecolor 1.0 1.0 1.0 1.0
+		visible 1
+		decoration
+	}
+}

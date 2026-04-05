@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 
+#include "wired/cl_wired_text.h"
+
 #define  DEFAULT_CONSOLE_WIDTH 78
 #define  MAX_CONSOLE_WIDTH 120
 
@@ -34,6 +36,57 @@ int bigchar_width;
 int bigchar_height;
 int smallchar_width;
 int smallchar_height;
+
+/* ── Text_Draw console metrics ────────────────────────────────────── */
+
+static float con_textPointSize = 0;     /* real-pixel size for FONT_MONO */
+static float con_textCharWidth = 0;     /* monospace width in real pixels */
+static float con_textNativeCharW = 0;   /* monospace width in real screen pixels */
+
+/*
+================
+Con_UpdateTextMetrics
+
+Recompute point size and character width from the current
+smallchar_height.  Uses the unified Text_Measure API.
+All values are in real screen pixels (no 640x480 virtual conversion).
+================
+*/
+static void Con_UpdateTextMetrics( void ) {
+	if ( cls.glconfig.vidHeight <= 0 ) return;
+
+	/* smallchar_height is already in real screen pixels */
+	con_textPointSize = (float)smallchar_height;
+
+	/* measure a monospace character for grid width (real pixels) */
+	con_textCharWidth = Text_Measure( "M", FONT_MONO, con_textPointSize );
+	if ( con_textCharWidth < 1.0f ) {
+		con_textCharWidth = (float)smallchar_width;
+	}
+
+	/* native-pixel equivalent — same as con_textCharWidth now */
+	con_textNativeCharW = con_textCharWidth;
+	if ( con_textNativeCharW < 1.0f ) {
+		con_textNativeCharW = (float)smallchar_width;
+	}
+}
+
+/*
+================
+Con_NativeToVirtualX / Con_NativeToVirtualY
+
+Identity pass-through — Text_Draw now expects real screen pixels,
+which is the same coordinate space the console code already uses.
+Kept as helpers so call sites remain readable.
+================
+*/
+static float Con_NativeToVirtualX( float nativeX ) {
+	return nativeX;
+}
+
+static float Con_NativeToVirtualY( float nativeY ) {
+	return nativeY;
+}
 
 typedef struct {
 	qboolean	initialized;
@@ -312,6 +365,8 @@ void Con_CheckResize( void )
 	bigchar_width = BIGCHAR_WIDTH * scale * cls.con_factor;
 	bigchar_height = BIGCHAR_HEIGHT * scale * cls.con_factor;
 
+	Con_UpdateTextMetrics();
+
 	if ( cls.glconfig.vidWidth == 0 ) // video hasn't been initialized yet
 	{
 		g_console_field_width = DEFAULT_CONSOLE_WIDTH;
@@ -324,7 +379,12 @@ void Con_CheckResize( void )
 	}
 	else
 	{
-		width = ((cls.glconfig.vidWidth / smallchar_width) - 2);
+		if ( con_textCharWidth > 0 ) {
+			width = (int)( (float)cls.glconfig.vidWidth / con_textNativeCharW ) - 2;
+		} else {
+			/* Text system not ready yet (early init) — use a reasonable default */
+			width = DEFAULT_CONSOLE_WIDTH;
+		}
 
 		g_console_field_width = width;
 		g_consoleField.widthInChars = g_console_field_width;
@@ -643,12 +703,19 @@ Draw the editline after a ] prompt
 */
 static void Con_DrawInput( void ) {
 	int		y;
+	float	cw;     /* character width for grid positioning (native px) */
+	float	vcw;    /* character width in virtual pixels */
+	float	vy;     /* y in virtual pixels */
 
 	if ( cls.state != CA_DISCONNECTED && !(Key_GetCatcher( ) & KEYCATCH_CONSOLE ) ) {
 		return;
 	}
 
 	y = con.vislines - ( smallchar_height * 2 );
+
+	cw = con_textNativeCharW;
+	vcw = con_textCharWidth;
+	vy = Con_NativeToVirtualY( (float)y );
 
 	if ( con.searchActive ) {
 		// draw search bar: "Find: pattern_ (N matches)"
@@ -663,48 +730,50 @@ static void Con_DrawInput( void ) {
 		else
 			color = &searchColor;
 
-		re.SetColor( *color );
+		{
+			float vxa = Con_NativeToVirtualX( con.xadjust );
 
-		// draw "Find:" prefix
-		SCR_DrawSmallChar( con.xadjust + 1 * smallchar_width, y, 'F' );
-		SCR_DrawSmallChar( con.xadjust + 2 * smallchar_width, y, 'i' );
-		SCR_DrawSmallChar( con.xadjust + 3 * smallchar_width, y, 'n' );
-		SCR_DrawSmallChar( con.xadjust + 4 * smallchar_width, y, 'd' );
-		SCR_DrawSmallChar( con.xadjust + 5 * smallchar_width, y, ':' );
+			// draw "Find:" prefix
+			Text_DrawChar( 'F', vxa + 1 * vcw, vy, FONT_MONO, con_textPointSize, *color );
+			Text_DrawChar( 'i', vxa + 2 * vcw, vy, FONT_MONO, con_textPointSize, *color );
+			Text_DrawChar( 'n', vxa + 3 * vcw, vy, FONT_MONO, con_textPointSize, *color );
+			Text_DrawChar( 'd', vxa + 4 * vcw, vy, FONT_MONO, con_textPointSize, *color );
+			Text_DrawChar( ':', vxa + 5 * vcw, vy, FONT_MONO, con_textPointSize, *color );
 
-		// draw search pattern
-		re.SetColor( con.color );
-		x = 7;
-		for ( i = 0; con.searchPattern[i] && x < con.linewidth - 16; i++, x++ ) {
-			SCR_DrawSmallChar( con.xadjust + x * smallchar_width, y, con.searchPattern[i] );
-		}
-
-		// draw blinking cursor
-		if ( (int)( cls.realtime >> 8 ) & 1 ) {
-			SCR_DrawSmallChar( con.xadjust + x * smallchar_width, y, '_' );
-		}
-
-		// draw match count on the right
-		if ( con.searchPattern[0] ) {
-			int len;
-			Com_sprintf( info, sizeof( info ), "(%d matches)", con.searchMatchCount );
-			len = strlen( info );
-			re.SetColor( *color );
-			for ( i = 0; i < len; i++ ) {
-				SCR_DrawSmallChar( con.xadjust + ( con.linewidth - len + i ) * smallchar_width, y, info[i] );
+			// draw search pattern
+			x = 7;
+			for ( i = 0; con.searchPattern[i] && x < con.linewidth - 16; i++, x++ ) {
+				Text_DrawChar( con.searchPattern[i], vxa + x * vcw, vy, FONT_MONO, con_textPointSize, con.color );
 			}
-		}
 
-		re.SetColor( NULL );
-		return;
+			// draw blinking cursor
+			if ( (int)( cls.realtime >> 8 ) & 1 ) {
+				Text_DrawChar( '_', vxa + x * vcw, vy, FONT_MONO, con_textPointSize, con.color );
+			}
+
+			// draw match count on the right
+			if ( con.searchPattern[0] ) {
+				int len;
+				Com_sprintf( info, sizeof( info ), "(%d matches)", con.searchMatchCount );
+				len = strlen( info );
+				for ( i = 0; i < len; i++ ) {
+					Text_DrawChar( info[i], vxa + ( con.linewidth - len + i ) * vcw, vy, FONT_MONO, con_textPointSize, *color );
+				}
+			}
+
+			re.SetColor( NULL );
+			return;
+		}
 	}
 
-	re.SetColor( con.color );
+	{
+		float vxa = Con_NativeToVirtualX( con.xadjust );
+		Text_DrawChar( ']', vxa + 1 * vcw, vy, FONT_MONO, con_textPointSize, con.color );
 
-	SCR_DrawSmallChar( con.xadjust + 1 * smallchar_width, y, ']' );
-
-	Field_Draw( &g_consoleField, con.xadjust + 2 * smallchar_width, y,
-		SCREEN_WIDTH - 3 * smallchar_width, qtrue, qtrue );
+		/* Field_Draw still uses bitmap path; position it on the grid */
+		Field_Draw( &g_consoleField, con.xadjust + 2 * cw, y,
+			cls.glconfig.vidWidth - 3 * smallchar_width, qtrue, qtrue );
+	}
 }
 
 
@@ -724,6 +793,14 @@ static void Con_DrawNotify( void )
 	int		skip;
 	int		currentColorIndex;
 	int		colorIndex;
+	float	vcw;    /* character width in virtual pixels */
+
+	// Suppress notify text during loading screen
+	if ( cls.state == CA_LOADING || cl_loadProgress.startTime > 0 ) {
+		return;
+	}
+
+	vcw = con_textCharWidth;
 
 	currentColorIndex = ColorIndex( COLOR_WHITE );
 	re.SetColor( g_color_table[ currentColorIndex ] );
@@ -745,16 +822,18 @@ static void Con_DrawNotify( void )
 			continue;
 		}
 
-		for (x = 0 ; x < con.linewidth ; x++) {
-			if ( ( text[x] & 0xff ) == ' ' ) {
-				continue;
-			}
-			colorIndex = ( text[x] >> 8 ) & 63;
-			if ( currentColorIndex != colorIndex ) {
+		{
+			float vxa = Con_NativeToVirtualX( cl_conXOffset->integer + con.xadjust );
+			float vy = Con_NativeToVirtualY( (float)v );
+			for (x = 0 ; x < con.linewidth ; x++) {
+				if ( ( text[x] & 0xff ) == ' ' ) {
+					continue;
+				}
+				colorIndex = ( text[x] >> 8 ) & 63;
 				currentColorIndex = colorIndex;
-				re.SetColor( g_color_table[ colorIndex ] );
+				Text_DrawChar( text[x] & 0xff, vxa + (x+1)*vcw, vy,
+				               FONT_MONO, con_textPointSize, g_color_table[ colorIndex ] );
 			}
-			SCR_DrawSmallChar( cl_conXOffset->integer + con.xadjust + (x+1)*smallchar_width, v, text[x] & 0xff );
 		}
 
 		v += smallchar_height;
@@ -769,22 +848,30 @@ static void Con_DrawNotify( void )
 	// draw the chat line
 	if ( Key_GetCatcher( ) & KEYCATCH_MESSAGE )
 	{
-		// rescale to virtual 640x480 space
-		v /= cls.glconfig.vidHeight / 480.0;
+		// v is already in native screen pixels — use directly
 
 		if (chat_team)
 		{
-			SCR_DrawBigString( SMALLCHAR_WIDTH, v, "say_team:", 1.0f, qfalse );
+			vec4_t chatColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+			Text_Draw( "say_team:", (float)smallchar_width, (float)v, FONT_DISPLAY,
+			           (float)bigchar_height, chatColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 			skip = 10;
 		}
 		else
 		{
-			SCR_DrawBigString( SMALLCHAR_WIDTH, v, "say:", 1.0f, qfalse );
+			vec4_t chatColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+			Text_Draw( "say:", (float)smallchar_width, (float)v, FONT_DISPLAY,
+			           (float)bigchar_height, chatColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 			skip = 5;
 		}
 
-		Field_BigDraw( &chatField, skip * BIGCHAR_WIDTH, v,
-			SCREEN_WIDTH - ( skip + 1 ) * BIGCHAR_WIDTH, qtrue, qtrue );
+		{
+			/* All coordinates in native screen pixels */
+			int fieldX = skip * bigchar_width;
+			int fieldY = v;
+			int fieldW = cls.glconfig.vidWidth - ( skip + 1 ) * bigchar_width;
+			Field_BigDraw( &chatField, fieldX, fieldY, fieldW, qtrue, qtrue );
+		}
 	}
 }
 
@@ -822,14 +909,13 @@ static void Con_DrawSolidConsole( float frac ) {
 	if ( lines > cls.glconfig.vidHeight )
 		lines = cls.glconfig.vidHeight;
 
-	wf = SCREEN_WIDTH;
+	wf = (float)cls.glconfig.vidWidth;
 
 	// draw the background
-	yf = frac * SCREEN_HEIGHT;
+	yf = frac * (float)cls.glconfig.vidHeight;
 
-	// on wide screens, we will center the text
+	// on wide screens, center the text
 	con.xadjust = 0;
-	SCR_AdjustFrom640( &con.xadjust, &yf, &wf, NULL );
 
 	if ( yf < 1.0 ) {
 		yf = 0;
@@ -866,8 +952,13 @@ static void Con_DrawSolidConsole( float frac ) {
 	//y = yf;
 
 	// draw the version number
-	SCR_DrawSmallString( cls.glconfig.vidWidth - ( ARRAY_LEN( Q3_VERSION ) ) * smallchar_width,
-		lines - smallchar_height, Q3_VERSION, ARRAY_LEN( Q3_VERSION ) - 1 );
+	{
+		float verVX = Con_NativeToVirtualX( (float)cls.glconfig.vidWidth
+		              - ( ARRAY_LEN( Q3_VERSION ) ) * con_textNativeCharW );
+		float verVY = Con_NativeToVirtualY( (float)(lines - smallchar_height) );
+		Text_Draw( Q3_VERSION, verVX, verVY, FONT_MONO,
+		           con_textPointSize, colorWhite, TEXT_ALIGN_LEFT, 0 );
+	}
 
 	// draw the text
 	con.vislines = lines;
@@ -877,67 +968,65 @@ static void Con_DrawSolidConsole( float frac ) {
 
 	row = con.display;
 
-	// draw from the bottom up
-	if ( con.display != con.current )
 	{
-		// draw arrows to show the buffer is backscrolled
-		re.SetColor( g_color_table[ ColorIndex( COLOR_RED ) ] );
-		for ( x = 0 ; x < con.linewidth ; x += 4 )
-			SCR_DrawSmallChar( con.xadjust + (x+1)*smallchar_width, y, '^' );
-		y -= smallchar_height;
-		row--;
-	}
+		float vcw = con_textCharWidth;
+		float vxa = Con_NativeToVirtualX( con.xadjust );
+
+		// draw from the bottom up
+		if ( con.display != con.current )
+		{
+			// draw arrows to show the buffer is backscrolled
+			float vy = Con_NativeToVirtualY( (float)y );
+			for ( x = 0 ; x < con.linewidth ; x += 4 )
+				Text_DrawChar( '^', vxa + (x+1)*vcw, vy,
+				               FONT_MONO, con_textPointSize, g_color_table[ ColorIndex( COLOR_RED ) ] );
+			y -= smallchar_height;
+			row--;
+		}
 
 #ifdef USE_CURL
-	if ( download.progress[ 0 ] ) 
-	{
-		currentColorIndex = ColorIndex( COLOR_CYAN );
-		re.SetColor( g_color_table[ currentColorIndex ] );
-
-		i = strlen( download.progress );
-		for ( x = 0 ; x < i ; x++ ) 
+		if ( download.progress[ 0 ] )
 		{
-			SCR_DrawSmallChar( ( x + 1 ) * smallchar_width,
-				lines - smallchar_height, download.progress[x] );
+			float dlVY = Con_NativeToVirtualY( (float)(lines - smallchar_height) );
+			i = strlen( download.progress );
+			for ( x = 0 ; x < i ; x++ )
+			{
+				Text_DrawChar( download.progress[x], ( x + 1 ) * vcw, dlVY,
+				               FONT_MONO, con_textPointSize, g_color_table[ ColorIndex( COLOR_CYAN ) ] );
+			}
 		}
-	}
 #endif
 
-	currentColorIndex = ColorIndex( COLOR_WHITE );
-	re.SetColor( g_color_table[ currentColorIndex ] );
+		for ( i = 0 ; i < rows ; i++, y -= smallchar_height, row-- )
+		{
+			float vy;
+			if ( row < 0 )
+				break;
 
-	for ( i = 0 ; i < rows ; i++, y -= smallchar_height, row-- )
-	{
-		if ( row < 0 )
-			break;
-
-		if ( con.current - row >= con.totallines ) {
-			// past scrollback wrap point
-			continue;
-		}
-
-		// highlight search match line with yellow background
-		if ( con.searchActive && con.searchLine >= 0 && row == con.searchLine ) {
-			static vec4_t searchBg = { 0.3f, 0.3f, 0.0f, 0.5f };
-			re.SetColor( searchBg );
-			re.DrawStretchPic( con.xadjust, y, wf, smallchar_height, 0, 0, 1, 1, cls.whiteShader );
-			currentColorIndex = -1; // force color reset after background draw
-		}
-
-		text = con.text + (row % con.totallines) * con.linewidth;
-
-		for ( x = 0 ; x < con.linewidth ; x++ ) {
-			// skip rendering whitespace
-			if ( ( text[x] & 0xff ) == ' ' ) {
+			if ( con.current - row >= con.totallines ) {
+				// past scrollback wrap point
 				continue;
 			}
-			// track color changes
-			colorIndex = ( text[ x ] >> 8 ) & 63;
-			if ( currentColorIndex != colorIndex ) {
-				currentColorIndex = colorIndex;
-				re.SetColor( g_color_table[ colorIndex ] );
+
+			// highlight search match line with yellow background
+			if ( con.searchActive && con.searchLine >= 0 && row == con.searchLine ) {
+				static vec4_t searchBg = { 0.3f, 0.3f, 0.0f, 0.5f };
+				re.SetColor( searchBg );
+				re.DrawStretchPic( con.xadjust, y, wf, smallchar_height, 0, 0, 1, 1, cls.whiteShader );
 			}
-			SCR_DrawSmallChar( con.xadjust + (x + 1) * smallchar_width, y, text[x] & 0xff );
+
+			text = con.text + (row % con.totallines) * con.linewidth;
+			vy = Con_NativeToVirtualY( (float)y );
+
+			for ( x = 0 ; x < con.linewidth ; x++ ) {
+				// skip rendering whitespace
+				if ( ( text[x] & 0xff ) == ' ' ) {
+					continue;
+				}
+				colorIndex = ( text[ x ] >> 8 ) & 63;
+				Text_DrawChar( text[x] & 0xff, vxa + (x + 1) * vcw, vy,
+				               FONT_MONO, con_textPointSize, g_color_table[ colorIndex ] );
+			}
 		}
 	}
 

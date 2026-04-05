@@ -1,0 +1,39 @@
+// serverinfo.wmenu - Wired UI server info popup
+// Absolute positioning -- list-based info display.
+// Coordinates faithfully converted from serverinfo.menu (640x480 -> normalized).
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "serverinfo"
+	rect 0.188 0.167 0.625 0.667
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+	popup
+	outOfBoundsClick
+
+	onESC { close }
+
+	WLABEL(0.0, 0.037, 1.0, 0.062, "Server Info", 24, 1)
+	WSEPARATOR(0.040, 0.113, 0.920)
+
+	// server status info from FEEDER_SERVERSTATUS
+	itemDef {
+		name "statuslist"
+		type 6
+		rect 0.040 0.150 0.920 0.750
+		font "oxanium" 12
+		forecolor WCOLOR_TEXT
+		backcolor 0.12 0.12 0.17 0.8
+		style 1
+		feeder 13
+		elementheight 14
+		columns 2 0 180 32 180 180 32
+		visible 1
+	}
+
+	WBUTTON(0.375, 0.925, 0.250, 0.062, "Close", 19, close)
+}

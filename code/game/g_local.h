@@ -194,6 +194,7 @@ struct gentity_s {
 
 	gentity_t	*chain;
 	gentity_t	*enemy;
+	gentity_t	*helixPairEntity;	// paired helix mortar rocket (for collision exclusion)
 	gentity_t	*activator;
 	gentity_t	*teamchain;		// next entity in team
 	gentity_t	*teammaster;	// master of the team
@@ -721,14 +722,19 @@ void G_StartKamikaze( gentity_t *ent );
 
 // weapons/
 void Attack_Gauntlet_Primary( gentity_t *ent );
+void Attack_Gauntlet_Lunge( gentity_t *ent );
 qboolean CheckGauntletAttack( gentity_t *ent );
 void Attack_Machinegun_Primary( gentity_t *ent );
+void Attack_Machinegun_Burst( gentity_t *ent );
 void Attack_Shotgun_Primary( gentity_t *ent );
+void Attack_Shotgun_DoubleBlast( gentity_t *ent );
 void Attack_GrenadeLauncher_Primary( gentity_t *ent );
 void Attack_RocketLauncher_Primary( gentity_t *ent );
+void Attack_RocketLauncher_Mortar( gentity_t *ent );
 void Weapon_PlasmaRifle_Primary( gentity_t *ent );
 void Attack_Railgun_Primary( gentity_t *ent );
 void Attack_LightningGun_Primary( gentity_t *ent );
+void Attack_LightningGun_ChainArc( gentity_t *ent );
 void Offhand_Grapple_Fire( gentity_t *ent );
 void Offhand_Grapple_Free( gentity_t *ent );
 void Offhand_Grapple_Think( gentity_t *ent );
@@ -843,12 +849,9 @@ extern	vmCvar_t	g_maxclients;			// allow this many total, including spectators
 extern	vmCvar_t	g_maxGameClients;		// allow this many active
 extern	vmCvar_t	g_restarted;
 
-extern	vmCvar_t	g_dmflags;
-extern	vmCvar_t	g_kothflags;
 extern	vmCvar_t	g_fraglimit;
 extern	vmCvar_t	g_timelimit;
 extern	vmCvar_t	g_capturelimit;
-extern	vmCvar_t	g_friendlyFire;
 extern	vmCvar_t	g_password;
 extern	vmCvar_t	g_needpass;
 extern	vmCvar_t	g_gravity;
@@ -876,12 +879,16 @@ extern	vmCvar_t	pmove_overbounce;
 extern	vmCvar_t	g_rankings;
 extern	vmCvar_t	g_enableDust;
 extern	vmCvar_t	g_enableBreath;
-extern	vmCvar_t	g_singlePlayer;
 extern	vmCvar_t	g_localTeamPref;
-extern  vmCvar_t	g_grapple;
-extern  vmCvar_t	g_spawnWeapons;
 extern  vmCvar_t	g_instagib;
 extern  vmCvar_t	g_excessive;
+extern	vmCvar_t	g_friendlyFire;
+extern  vmCvar_t	g_spawnWeapons;
+extern  vmCvar_t	g_grapple;
+extern	vmCvar_t	g_noFootsteps;
+extern	vmCvar_t	g_kothGhosts;
+
+extern	vmCvar_t	g_singlePlayer;
 #if FEAT_UNLAGGED
 extern  vmCvar_t	g_unlagged;
 #endif
@@ -940,6 +947,12 @@ void	G_ResetRound( void );
 #if FEAT_ELO_TRACKING
 void	G_CalculateEloChanges( void );
 #endif
+// auto bot management
+extern  vmCvar_t	g_minPlayers;
+extern  vmCvar_t	g_autoBots;
+void	G_RemoveLowestScoringBot( void );
+void	G_CheckAutoBots( void );
+
 // eser - admin mode
 extern  vmCvar_t	g_adminPassword;
 void	Cmd_Admin_f( gentity_t *ent );

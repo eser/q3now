@@ -178,10 +178,8 @@ vmCvar_t	cg_drawTeamOverlay;
 vmCvar_t	cg_teamOverlayUserinfo;
 vmCvar_t	cg_drawFriend;
 vmCvar_t	cg_teamChatsOnly;
-#if FEAT_TA_UI
 vmCvar_t	cg_noVoiceChats;
 vmCvar_t	cg_noVoiceText;
-#endif
 vmCvar_t	cg_hudFiles;
 vmCvar_t 	cg_scorePlums;
 vmCvar_t 	cg_smoothClients;
@@ -217,9 +215,7 @@ vmCvar_t	cg_timescale;
 vmCvar_t	cg_smallFont;
 vmCvar_t	cg_bigFont;
 #endif
-#if FEAT_TA_UI
 vmCvar_t	cg_noTaunt;
-#endif
 vmCvar_t	cg_noProjectileTrail;
 
 #if FEAT_TA_UI
@@ -355,10 +351,8 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_stats, "cg_stats", "0", 0 },
 	{ &cg_drawFriend, "cg_drawFriend", "1", CVAR_ARCHIVE },
 	{ &cg_teamChatsOnly, "cg_teamChatsOnly", "0", CVAR_ARCHIVE },
-#if FEAT_TA_UI
 	{ &cg_noVoiceChats, "cg_noVoiceChats", "0", CVAR_ARCHIVE },
 	{ &cg_noVoiceText, "cg_noVoiceText", "0", CVAR_ARCHIVE },
-#endif
 	// the following variables are created in other parts of the system,
 	// but we also reference them here
 	{ &cg_buildScript, "com_buildScript", "0", 0 },	// force loading of all possible data amd error on failures
@@ -415,9 +409,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_smallFont, "ui_smallFont", "0.25", CVAR_ARCHIVE},
 	{ &cg_bigFont, "ui_bigFont", "0.4", CVAR_ARCHIVE},
 #endif
-#if FEAT_TA_UI
 	{ &cg_noTaunt, "cg_noTaunt", "0", CVAR_ARCHIVE},
-#endif
 	{ &cg_noProjectileTrail, "cg_noProjectileTrail", "0", CVAR_ARCHIVE},
 //	{ &cg_pmove_fixed, "cg_pmove_fixed", "0", CVAR_USERINFO | CVAR_ARCHIVE }
 
@@ -534,7 +526,7 @@ qboolean CG_IsPlayerInvisible( centity_t *cent ) {
 		return qtrue;
 	}
 
-	if ( cgs.gametype == GT_KINGOFTHEHILL && ( cgs.kothflags & KF_GHOSTS ) > 0 ) {
+	if ( cgs.gametype == GT_KINGOFTHEHILL && cgs.g_kothGhosts ) {
 		if ( !(cent->currentState.powerups & ( 1 << PW_KING )) &&
 			cent->muzzleFlashTime + GHOST_FLASH_TIME < cg.time ) {
 			return qtrue;
@@ -681,9 +673,7 @@ static void CG_RegisterSounds( void ) {
 	const char	*soundName;
 
 	// voice commands
-#if FEAT_TA_UI
 	CG_LoadVoiceChats();
-#endif
 
 	cgs.media.oneMinuteSound = trap_S_RegisterSound( "sound/feedback/1_minute.wav", qtrue );
 	cgs.media.fiveMinuteSound = trap_S_RegisterSound( "sound/feedback/5_minute.wav", qtrue );
@@ -696,11 +686,9 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.count1Sound = trap_S_RegisterSound( "sound/feedback/one.wav", qtrue );
 	cgs.media.countFightSound = trap_S_RegisterSound( "sound/feedback/fight.wav", qtrue );
 	cgs.media.countPrepareSound = trap_S_RegisterSound( "sound/feedback/prepare.wav", qtrue );
-#if FEAT_TA_UI
 	cgs.media.countPrepareTeamSound = trap_S_RegisterSound( "sound/feedback/prepare_team.wav", qtrue );
-#endif
 
-	if ( cgs.gametype >= GT_TEAM || cg_buildScript.integer ) {
+	if ( cgs.gametype >= GT_TDM || cg_buildScript.integer ) {
 
 		cgs.media.captureAwardSound = trap_S_RegisterSound( "sound/teamplay/flagcapture_yourteam.wav", qtrue );
 		cgs.media.redLeadsSound = trap_S_RegisterSound( "sound/feedback/redleads.wav", qtrue );
@@ -727,19 +715,13 @@ static void CG_RegisterSounds( void ) {
 			cgs.media.yourTeamTookEnemyFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_team_flag.wav", qtrue );
 		}
 
-#if FEAT_1FCTF
 		if ( cgs.gametype == GT_1FCTF || cg_buildScript.integer ) {
 			cgs.media.neutralFlagReturnedSound = trap_S_RegisterSound( "sound/teamplay/flagreturn_opponent.wav", qtrue );
 			cgs.media.yourTeamTookTheFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_team_1flag.wav", qtrue );
 			cgs.media.enemyTookTheFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_enemy_1flag.wav", qtrue );
 		}
-#endif
 
-		if ( cgs.gametype == GT_CTF
-#if FEAT_1FCTF
-			|| cgs.gametype == GT_1FCTF
-#endif
-			|| cg_buildScript.integer ) {
+		if ( cgs.gametype == GT_CTF || cgs.gametype == GT_1FCTF || cg_buildScript.integer ) {
 			cgs.media.youHaveFlagSound = trap_S_RegisterSound( "sound/teamplay/voc_you_flag.wav", qtrue );
 			cgs.media.holyShitSound = trap_S_RegisterSound("sound/feedback/voc_holyshit.wav", qtrue);
 		}
@@ -955,9 +937,11 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.tracerShader = trap_R_RegisterShader( "gfx/misc/tracer" );
 	cgs.media.selectShader = trap_R_RegisterShader( "gfx/2d/select" );
 
-	for ( i = 0 ; i < NUM_CROSSHAIRS ; i++ ) {
-		cgs.media.crosshairShader[i] = trap_R_RegisterShader( va("gfx/2d/crosshair%c", 'a'+i) );
-	}
+	cgs.media.crosshairMeleeShader = trap_R_RegisterShader( "gfx/2d/crosshairMelee" );
+	cgs.media.crosshairBulletShader = trap_R_RegisterShader( "gfx/2d/crosshairBullet" );
+	cgs.media.crosshairBurstShader = trap_R_RegisterShader( "gfx/2d/crosshairBurst" );
+	cgs.media.crosshairMissileShader = trap_R_RegisterShader( "gfx/2d/crosshairMissile" );
+	cgs.media.crosshairMiscShader = trap_R_RegisterShader( "gfx/2d/crosshairMisc" );
 
 	cgs.media.backTileShader = trap_R_RegisterShader( "gfx/2d/backtile" );
 	cgs.media.noammoShader = trap_R_RegisterShader( "icons/noammo" );
@@ -974,7 +958,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.regenShader = trap_R_RegisterShader("powerups/regen" );
 	cgs.media.hastePuffShader = trap_R_RegisterShader("hasteSmokePuff" );
 
-#if FEAT_TA_UI
+#if FEAT_HARVESTER
 	if ( cgs.gametype == GT_HARVESTER || cg_buildScript.integer ) {
 		cgs.media.redCubeModel = trap_R_RegisterModel( "models/powerups/orb/r_orb.md3" );
 		cgs.media.blueCubeModel = trap_R_RegisterModel( "models/powerups/orb/b_orb.md3" );
@@ -984,7 +968,7 @@ static void CG_RegisterGraphics( void ) {
 
 	if ( cgs.gametype == GT_CTF || cgs.gametype == GT_1FCTF || cgs.gametype == GT_HARVESTER || cg_buildScript.integer ) {
 #else
-	if ( cgs.gametype == GT_CTF || cg_buildScript.integer ) {
+	if ( cgs.gametype == GT_CTF || cgs.gametype == GT_1FCTF || cg_buildScript.integer ) {
 #endif
 		cgs.media.redFlagModel = trap_R_RegisterModel( "models/flags/r_flag.md3" );
 		cgs.media.blueFlagModel = trap_R_RegisterModel( "models/flags/b_flag.md3" );
@@ -1008,7 +992,6 @@ static void CG_RegisterGraphics( void ) {
 #endif
 	}
 
-#if FEAT_TA_UI
 	if ( cgs.gametype == GT_1FCTF || cg_buildScript.integer ) {
 		cgs.media.neutralFlagModel = trap_R_RegisterModel( "models/flags/n_flag.md3" );
 		cgs.media.flagShader[0] = trap_R_RegisterShaderNoMip( "icons/iconf_neutral1" );
@@ -1017,6 +1000,7 @@ static void CG_RegisterGraphics( void ) {
 		cgs.media.flagShader[3] = trap_R_RegisterShaderNoMip( "icons/iconf_neutral3" );
 	}
 
+#if FEAT_OVERLOAD
 	if ( cgs.gametype == GT_OBELISK || cg_buildScript.integer ) {
 		cgs.media.rocketExplosionShader = trap_R_RegisterShader("rocketExplosion");
 		cgs.media.overloadBaseModel = trap_R_RegisterModel( "models/powerups/overload_base.md3" );
@@ -1024,7 +1008,9 @@ static void CG_RegisterGraphics( void ) {
 		cgs.media.overloadLightsModel = trap_R_RegisterModel( "models/powerups/overload_lights.md3" );
 		cgs.media.overloadEnergyModel = trap_R_RegisterModel( "models/powerups/overload_energy.md3" );
 	}
+#endif
 
+#if FEAT_HARVESTER
 	if ( cgs.gametype == GT_HARVESTER || cg_buildScript.integer ) {
 		cgs.media.harvesterModel = trap_R_RegisterModel( "models/powerups/harvester/harvester.md3" );
 		cgs.media.harvesterRedSkin = trap_R_RegisterSkin( "models/powerups/harvester/red.skin" );
@@ -1036,11 +1022,11 @@ static void CG_RegisterGraphics( void ) {
 #endif
 	cgs.media.redKamikazeShader = trap_R_RegisterShader( "models/weaphits/kamikred" );
 
-    if (cgs.gametype == GT_KINGOFTHEHILL || cgs.gametype >= GT_TEAM || cg_buildScript.integer) {
+    if (cgs.gametype == GT_KINGOFTHEHILL || cgs.gametype >= GT_TDM || cg_buildScript.integer) {
         cgs.media.friendShader = trap_R_RegisterShader("sprites/foe");
     }
 
-	if ( cgs.gametype >= GT_TEAM || cg_buildScript.integer ) {
+	if ( cgs.gametype >= GT_TDM || cg_buildScript.integer ) {
 		cgs.media.redQuadShader = trap_R_RegisterShader("powerups/blueflag" );
 		cgs.media.teamStatusBar = trap_R_RegisterShader( "gfx/2d/colorbar.tga" );
 		cgs.media.blueKamikazeShader = trap_R_RegisterShader( "models/weaphits/kamikblu" );
@@ -1188,6 +1174,8 @@ static void CG_RegisterGraphics( void ) {
     // !CPM
 
     cgs.media.lightningShader = trap_R_RegisterShader("lightningBoltNew");
+	cgs.media.lightningArcShader = trap_R_RegisterShader( "lightningArc" );
+	cgs.media.sfx_lightningArcLoop = trap_S_RegisterSound( "sound/weapons/lightning/lg_arc_loop.wav", qfalse );
 
 	CG_ClearParticles ();
 /*
@@ -1656,7 +1644,7 @@ void CG_SetScoreSelection(void *p) {
 		return;
 	}
 
-	if ( cgs.gametype >= GT_TEAM ) {
+	if ( cgs.gametype >= GT_TDM ) {
 		int feeder = FEEDER_REDTEAM_LIST;
 		i = red;
 		if (cg.scores[cg.selectedScore].team == TEAM_BLUE) {
@@ -1672,7 +1660,7 @@ void CG_SetScoreSelection(void *p) {
 // FIXME: might need to cache this info
 static clientInfo_t * CG_InfoFromScoreIndex(int index, int team, int *scoreIndex) {
 	int i, count;
-	if ( cgs.gametype >= GT_TEAM ) {
+	if ( cgs.gametype >= GT_TDM ) {
 		count = 0;
 		for (i = 0; i < cg.numScores; i++) {
 			if (cg.scores[i].team == team) {
@@ -1736,7 +1724,7 @@ static const char *CG_FeederItemText(float feederID, int index, int column, qhan
 					return "Ready";
 				}
 				if (team == -1) {
-                    if (cgs.gametype == GT_TOURNAMENT || cgs.gametype == GT_LASTMANSTANDING) {
+                    if (cgs.gametype == GT_DUEL || cgs.gametype == GT_LASTMANSTANDING) {
 						return va("%i/%i", info->wins, info->losses);
 					} else if (info->infoValid && info->team == TEAM_SPECTATOR ) {
 						return "Spectator";
@@ -1775,7 +1763,7 @@ static qhandle_t CG_FeederItemImage(float feederID, int index) {
 }
 
 static void CG_FeederSelection(float feederID, int index) {
-	if ( cgs.gametype >= GT_TEAM ) {
+	if ( cgs.gametype >= GT_TDM ) {
 		int i, count;
 		int team = (feederID == FEEDER_REDTEAM_LIST) ? TEAM_RED : TEAM_BLUE;
 		count = 0;
@@ -1959,6 +1947,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	memset( cg_items, 0, sizeof(cg_items) );
 
 	cg.clientNum = clientNum;
+	cg.lastArcTarget = -1;
 
 	cgs.processedSnapshotNum = serverMessageNum;
 	cgs.serverCommandSequence = serverCommandSequence;
@@ -1986,20 +1975,36 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	// get the rendering configuration from the client system
 	trap_GetGlconfig( &cgs.glconfig );
-	cgs.screenXScaleStretch = cgs.glconfig.vidWidth * (1.0/640.0);
-	cgs.screenYScaleStretch = cgs.glconfig.vidHeight * (1.0/480.0);
-	if ( cgs.glconfig.vidWidth * 480 > cgs.glconfig.vidHeight * 640 ) {
-		// wide screen: scale X by Y-ratio, add horizontal bias
-		cgs.screenXScale = cgs.glconfig.vidHeight * (640.0/480.0) / 640.0;
-		cgs.screenYScale = cgs.glconfig.vidHeight * (1.0/480.0);
-		cgs.screenXBias = 0.5 * ( cgs.glconfig.vidWidth - ( cgs.glconfig.vidHeight * (640.0/480.0) ) );
-		cgs.screenYBias = 0;
-	} else {
-		// narrow screen: scale Y by X-ratio, add vertical bias
-		cgs.screenXScale = cgs.glconfig.vidWidth * (1.0/640.0);
-		cgs.screenYScale = cgs.glconfig.vidWidth * (480.0/640.0) / 480.0;
-		cgs.screenXBias = 0;
-		cgs.screenYBias = 0.5 * ( cgs.glconfig.vidHeight - ( cgs.glconfig.vidWidth * (480.0/640.0) ) );
+	{
+		const float vw = CG_VIRTUAL_W;
+		const float vh = CG_VIRTUAL_H;
+		const float rw = (float)cgs.glconfig.vidWidth;
+		const float rh = (float)cgs.glconfig.vidHeight;
+		const float aspect = vw / vh;
+
+		cgs.screenXScaleStretch = rw / vw;
+		cgs.screenYScaleStretch = rh / vh;
+		if ( rw * vh > rh * vw ) {
+			// wide screen: scale X by Y-ratio, add horizontal bias
+			cgs.screenXScale = rh * aspect / vw;
+			cgs.screenYScale = rh / vh;
+			cgs.screenXBias = 0.5f * ( rw - rh * aspect );
+			cgs.screenYBias = 0;
+		} else {
+			// narrow screen: scale Y by X-ratio, add vertical bias
+			cgs.screenXScale = rw / vw;
+			cgs.screenYScale = rw / aspect / vh;
+			cgs.screenXBias = 0;
+			cgs.screenYBias = 0.5f * ( rh - rw / aspect );
+		}
+
+		// normalized-space equivalents (scale/bias for 0.0-1.0 coords)
+		cgs.normXScaleStretch = 1.0f;
+		cgs.normYScaleStretch = 1.0f;
+		cgs.normXScale = cgs.screenXScale * vw / rw;
+		cgs.normYScale = cgs.screenYScale * vh / rh;
+		cgs.normXBias  = cgs.screenXBias / rw;
+		cgs.normYBias  = cgs.screenYBias / rh;
 	}
 
 	// get the gamestate from the client system
@@ -2057,8 +2062,8 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_InitMarkPolys();
 
-	// Modern font initialization
-	CG_LoadFonts();
+	// Font loading is handled client-side by Text_Init() in WiredUI_Init().
+	// cgame uses trap_R_DrawText() — no local font init needed.
 
 #if FEAT_LENS_FLARES
 	CG_InitLensFlares();

@@ -1,0 +1,100 @@
+// sound.wmenu - Wired UI sound settings panel
+// Ported from TA system.menu "Other" tab, Sound section.
+// TA has sound settings within system_menu rect 186 0 443 426.
+// Sound items: Effects Volume, Music Volume, Sound Quality, Doppler.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "sound"
+	// Centered panel
+	rect 0.266 0.125 0.469 0.750
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor 1 0.75 0 0.15
+
+	WFULLSCREEN_BACKGROUND
+
+	onESC { close }
+
+	WLABEL(0.000, 0.022, 1.000, 0.056, "Sound", 24, 1)
+	WSEPARATOR(0.033, 0.078, 0.933)
+
+	// TA: Effects Volume slider at rect 99 160 256 20 (within Other)
+	itemDef {
+		type 10
+		text "Effects Volume:"
+		rect 0.033 0.111 0.933 0.056
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvarFloat "s_volume" 0.7 0.0 1.0
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Music Volume slider at rect 99 187 256 20
+	itemDef {
+		type 10
+		text "Music Volume:"
+		rect 0.033 0.178 0.933 0.056
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvarFloat "s_musicvolume" 0.25 0.0 1.0
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	WSEPARATOR(0.033, 0.256, 0.933)
+
+	// TA: Sound Quality at rect 99 214 256 20
+	itemDef {
+		type 12
+		text "Sound Quality:"
+		rect 0.033 0.289 0.933 0.056
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "s_khz"
+		cvarFloatList { "22 kHz (High)" 22 "11 kHz (Low)" 11 "44 kHz (Very High)" 44 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Doppler Sound at rect 99 241 256 20
+	WYESNO(0.033, 0.356, 0.933, 0.056, "Doppler Sound:", 14, "s_doppler")
+
+	// Our addition: Sound System (OpenAL vs SDL)
+	itemDef {
+		type 12
+		text "Sound System:"
+		rect 0.033 0.422 0.933 0.056
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "s_useOpenAL"
+		cvarFloatList { "SDL" 0 "OpenAL" 1 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	WSEPARATOR(0.033, 0.500, 0.933)
+
+	// Restart notice
+	itemDef {
+		type 0
+		text "Changes require snd_restart"
+		rect 0.033 0.522 0.933 0.044
+		font "oxanium" 12
+		textalign 1
+		forecolor 0.5 0.5 0.3 1
+		visible 1
+		decoration
+	}
+
+	WBUTTON(0.133, 0.589, 0.300, 0.056, "Apply", 14, exec "snd_restart")
+	WBUTTON(0.567, 0.589, 0.300, 0.056, "Back", 14, close)
+}

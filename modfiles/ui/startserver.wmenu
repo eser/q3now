@@ -1,0 +1,442 @@
+// startserver.wmenu — Wired UI create server panel
+// Layout: TA-style — levelshot over map list (left), settings (right)
+// Coordinates faithfully converted from startserver.menu (÷640, ÷480)
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "startserver"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor 0.06 0.06 0.1 1
+	focuscolor 1 0.75 0 0.15
+
+	WFULLSCREEN_BACKGROUND
+
+	onESC { close }
+	onOpen { UpdateGameType }
+
+	// ── header bar ───────────────────────────────────────────────
+	// Type: rect 16 8 280 20 → 0.025 0.017 0.438 0.042
+	itemDef {
+		type 12
+		text "Type:"
+		rect 0.025 0.017 0.438 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "ui_netGameType"
+		cvarFloatList { "Deathmatch" 0 "Duel" 1 "King of the Hill" 2 "Last Man Standing" 3 "Team Deathmatch" 4 "Capture the Flag" 5 }
+		visible 1
+		action { UpdateGameType }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// Bots: rect 310 8 130 20 → 0.484 0.017 0.203 0.042
+	itemDef {
+		type 12
+		text "Bots:"
+		rect 0.484 0.017 0.203 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "ui_botCount"
+		cvarFloatList { "None" 0 "1" 1 "2" 2 "3" 3 "4" 4 "5" 5 "6" 6 "7" 7 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// Skill: rect 450 8 174 20 → 0.703 0.017 0.272 0.042
+	itemDef {
+		type 12
+		text "Skill:"
+		rect 0.703 0.017 0.272 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "g_spSkill"
+		cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	WSEPARATOR(0.025, 0.067, 0.950)
+
+	// ── left column: levelshot + map list ─────────────────────────
+
+	// map levelshot preview: rect 16 38 380 170 → 0.025 0.079 0.594 0.354
+	itemDef {
+		name "mappreview"
+		type 0
+		rect 0.025 0.079 0.594 0.354
+		backcolor 0.03 0.03 0.05 1
+		style 1
+		decoration
+		visible 1
+	}
+
+	// column headers: #=20,212  Map=44,212  Name=184,212  *=334,212
+	itemDef {
+		type 1
+		text "#"
+		rect 0.031 0.442 0.038 0.033
+		font "oxanium" 11
+		forecolor 0.6 0.6 0.6 1
+		visible 1
+		action { MapSort 0 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.6 0.6 0.6 1 }
+	}
+	itemDef {
+		type 1
+		text "Map"
+		rect 0.069 0.442 0.219 0.033
+		font "oxanium" 12
+		forecolor 0.6 0.6 0.6 1
+		visible 1
+		action { MapSort 1 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.6 0.6 0.6 1 }
+	}
+	itemDef {
+		type 1
+		text "Name"
+		rect 0.288 0.442 0.234 0.033
+		font "oxanium" 12
+		forecolor 0.6 0.6 0.6 1
+		visible 1
+		action { MapSort 2 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.6 0.6 0.6 1 }
+	}
+	itemDef {
+		type 1
+		text "*"
+		rect 0.522 0.442 0.031 0.033
+		font "oxanium" 11
+		forecolor 0.8 0.8 0.2 1
+		visible 1
+		action { MapSort 3 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.8 0.8 0.2 1 }
+	}
+
+	// map listbox: rect 16 230 380 186 → 0.025 0.479 0.594 0.388
+	itemDef {
+		name "maplist"
+		type 6
+		rect 0.025 0.479 0.594 0.388
+		font "oxanium" 12
+		forecolor 1 1 1 1
+		backcolor 0.04 0.04 0.06 0.8
+		style 1
+		feeder 4
+		elementheight 14
+		columns 4 0 24 0 24 140 0 164 150 0 338 20 0
+		visible 1
+		doubleClick { ToggleMapPool }
+	}
+
+	// pool management buttons: y=420 → 0.875
+	itemDef {
+		type 1
+		text "Add to Pool"
+		rect 0.025 0.875 0.188 0.033
+		font "oxanium" 13
+		forecolor WCOLOR_ACCENT
+		visible 1
+		cvarTest "ui_mapPoolAction"
+		showCvar { "Add to Pool" }
+		action { ToggleMapPool }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+	itemDef {
+		type 1
+		text "Remove from Pool"
+		rect 0.025 0.875 0.203 0.033
+		font "oxanium" 13
+		forecolor 1 0.2 0.2 1
+		visible 1
+		cvarTest "ui_mapPoolAction"
+		showCvar { "Remove from Pool" }
+		action { ToggleMapPool }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 0.2 0.2 1 }
+	}
+	itemDef {
+		type 1
+		text "Clear Pool"
+		rect 0.250 0.875 0.156 0.033
+		font "oxanium" 13
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ClearMapPool }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.7 0.7 0.7 1 }
+	}
+	itemDef {
+		type 1
+		text "Favorite"
+		rect 0.422 0.875 0.109 0.033
+		font "oxanium" 13
+		forecolor 0.8 0.8 0.2 1
+		visible 1
+		cvarTest "ui_favMapAction"
+		showCvar { "Favorite" }
+		action { ToggleFavorite }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.8 0.8 0.2 1 }
+	}
+	itemDef {
+		type 1
+		text "Unfavorite"
+		rect 0.422 0.875 0.125 0.033
+		font "oxanium" 13
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		cvarTest "ui_favMapAction"
+		showCvar { "Unfavorite" }
+		action { ToggleFavorite }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.7 0.7 0.7 1 }
+	}
+
+	// pool status: rect 16 438 370 10 → 0.025 0.913 0.578 0.021
+	itemDef {
+		type 0
+		rect 0.025 0.913 0.578 0.021
+		font "oxanium" 10
+		forecolor 0.5 0.8 0.5 1
+		cvar "ui_mapPoolStatus"
+		decoration
+		visible 1
+	}
+
+	// ── right column: settings ───────────────────────────────────
+
+	// Server Settings header: rect 412 38 212 14 → 0.644 0.079 0.331 0.029
+	itemDef {
+		type 0
+		text "Server Settings"
+		rect 0.644 0.079 0.331 0.029
+		font "oxanium" 12
+		forecolor 0.5 0.5 0.5 1
+		decoration
+		visible 1
+	}
+
+	// Hostname: rect 412 56 212 20 → 0.644 0.117 0.331 0.042
+	WEDITFIELD(0.644, 0.117, 0.331, 0.042, "Hostname:", 14, "sv_hostname", 14)
+
+	// Max Players: rect 412 80 212 20 → 0.644 0.167 0.331 0.042
+	itemDef {
+		type 12
+		text "Max Players:"
+		rect 0.644 0.167 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "sv_maxclients"
+		cvarFloatList { "2" 2 "4" 4 "8" 8 "12" 12 "16" 16 "32" 32 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// Frag Limit: rect 412 104 212 20 → 0.644 0.217 0.331 0.042
+	itemDef {
+		type 12
+		text "Frag Limit:"
+		rect 0.644 0.217 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "fraglimit"
+		cvarFloatList { "None" 0 "10" 10 "20" 20 "30" 30 "50" 50 "100" 100 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// Time Limit: rect 412 128 212 20 → 0.644 0.267 0.331 0.042
+	itemDef {
+		type 12
+		text "Time Limit:"
+		rect 0.644 0.267 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "timelimit"
+		cvarFloatList { "None" 0 "5" 5 "10" 10 "15" 15 "20" 20 "30" 30 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// Pure + Warmup side by side: y=152 → 0.317
+	itemDef {
+		type 11
+		text "Pure:"
+		rect 0.644 0.317 0.166 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "sv_pure"
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+	itemDef {
+		type 11
+		text "Warmup:"
+		rect 0.809 0.317 0.166 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "g_doWarmup"
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// Dedicated: rect 412 176 212 20 → 0.644 0.367 0.331 0.042
+	itemDef {
+		type 12
+		text "Dedicated:"
+		rect 0.644 0.367 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "ui_dedicated"
+		cvarFloatList { "No" 0 "LAN" 1 "Internet" 2 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// Auto Download: rect 412 200 212 20 → 0.644 0.417 0.331 0.042
+	itemDef {
+		type 11
+		text "Auto Download:"
+		rect 0.644 0.417 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "sv_allowDownload"
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// Cap Limit (CTF): rect 412 224 212 20 → 0.644 0.467 0.331 0.042
+	itemDef {
+		type 12
+		text "Cap Limit:"
+		rect 0.644 0.467 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "capturelimit"
+		cvarFloatList { "None" 0 "3" 3 "5" 5 "8" 8 "10" 10 }
+		cvarTest "ui_netGameType"
+		showCvar { "5" }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// ── team settings (team modes: 4=TDM, 5=CTF) ────────────────
+
+	itemDef {
+		type 0
+		text "Team Settings"
+		rect 0.644 0.517 0.331 0.029
+		font "oxanium" 12
+		forecolor 0.5 0.5 0.5 1
+		decoration
+		cvarTest "ui_netGameType"
+		showCvar { "4" "5" }
+		visible 1
+	}
+
+	itemDef {
+		type 11
+		text "Friendly Fire:"
+		rect 0.644 0.554 0.166 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "g_friendlyfire"
+		cvarTest "ui_netGameType"
+		showCvar { "4" "5" }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+	itemDef {
+		type 11
+		text "Balance:"
+		rect 0.809 0.554 0.166 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "g_teamForceBalance"
+		cvarTest "ui_netGameType"
+		showCvar { "4" "5" }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+	itemDef {
+		type 11
+		text "Allow Vote:"
+		rect 0.644 0.604 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "g_allowvote"
+		cvarTest "ui_netGameType"
+		showCvar { "4" "5" }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+	itemDef {
+		type 12
+		text "My Team:"
+		rect 0.644 0.654 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "g_localTeamPref"
+		cvarFloatList { "Auto" 0 "Red" 1 "Blue" 2 }
+		cvarTest "ui_netGameType"
+		showCvar { "4" "5" }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// ── new items (added after original .menu) ───────────────────
+
+	itemDef {
+		type 11
+		text "Auto Bots:"
+		rect 0.644 0.717 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "g_autoBots"
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+	itemDef {
+		type 12
+		text "Min Players:"
+		rect 0.644 0.767 0.331 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "g_minPlayers"
+		cvarFloatList { "2" 2 "3" 3 "4" 4 "6" 6 "8" 8 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// ── bottom buttons ───────────────────────────────────────────
+	WSEPARATOR(0.025, 0.933, 0.950)
+	WBUTTON(0.025, 0.950, 0.125, 0.042, "Back", 14, close)
+	WBUTTON(0.438, 0.950, 0.125, 0.042, "Add Bots", 14, open "addbots")
+	WBUTTON(0.850, 0.950, 0.125, 0.042, "Start", 14, uiScript StartServer)
+}

@@ -103,7 +103,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define SLIDER_HEIGHT 16.0
 #define SLIDER_THUMB_WIDTH 12.0
 #define SLIDER_THUMB_HEIGHT 20.0
-#define	NUM_CROSSHAIRS			10
 
 typedef struct {
   const char *command;
@@ -307,7 +306,12 @@ typedef struct {
   // player settings
 	qhandle_t fxBasePic;
   qhandle_t fxPic[7];
-	qhandle_t	crosshairShader[NUM_CROSSHAIRS];
+
+	qhandle_t	crosshairMeleeShader;
+	qhandle_t	crosshairBulletShader;
+	qhandle_t	crosshairBurstShader;
+	qhandle_t	crosshairMissileShader;
+	qhandle_t	crosshairMiscShader;
 
 } cachedAssets_t;
 

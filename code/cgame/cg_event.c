@@ -185,6 +185,7 @@ static void CG_Obituary( entityState_t *ent ) {
 			message = "tripped on their own grenade";
 			break;
 		case MOD_ROCKET_SPLASH:
+		case MOD_ROCKET_MORTAR_SPLASH:
 			message = "blew themself up";
 			break;
 // eser - lightning discharge
@@ -211,7 +212,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	if ( attacker == cg.snap->ps.clientNum ) {
 		const char	*s;
 
-		if ( cgs.gametype < GT_TEAM ) {
+		if ( cgs.gametype < GT_TDM ) {
 			s = va("You fragged %s\n%s place with %i", CG_ClientNameByNum( target ),
 				CG_PlaceString( cg.snap->ps.persistant[PERS_RANK] + 1 ),
 				cg.snap->ps.persistant[PERS_SCORE] );
@@ -220,7 +221,23 @@ static void CG_Obituary( entityState_t *ent ) {
 		}
 
         if (!cg_cameraOrbit.integer) {
-			// CG_CenterPrint( s, SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
+#if FEAT_WIRED_UI
+			if ( cg_wiredUI.integer ) {
+				if ( cgs.gametype < GT_TDM ) {
+					trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK,
+						va( "You fragged %s|%s place with %i",
+							CG_ClientNameByNum( target ),
+							CG_PlaceString( cg.snap->ps.persistant[PERS_RANK] + 1 ),
+							cg.snap->ps.persistant[PERS_SCORE] ) );
+				} else {
+					trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK,
+						va( "You fragged %s", CG_ClientNameByNum( target ) ) );
+				}
+			} else
+#endif
+			{
+				CG_CenterPrint( s, CG_VIRTUAL_H * 0.30f, BIGCHAR_WIDTH );
+			}
 		}
 	}
 
@@ -239,12 +256,15 @@ static void CG_Obituary( entityState_t *ent ) {
 			message = "was caught by";
 			break;
 		case MOD_GAUNTLET:
+		case MOD_GAUNTLET_LUNGE:
 			message = "was pummeled by";
 			break;
 		case MOD_MACHINEGUN:
+		case MOD_MACHINEGUN_BURST:
 			message = "was machinegunned by";
 			break;
 		case MOD_SHOTGUN:
+		case MOD_SHOTGUN_DOUBLE_BLAST:
 			message = "was gunned down by";
 			break;
 		case MOD_GRENADE:
@@ -256,10 +276,12 @@ static void CG_Obituary( entityState_t *ent ) {
 			message2 = "'s shrapnel";
 			break;
 		case MOD_ROCKET:
+		case MOD_ROCKET_MORTAR:
 			message = "rides";
 			message2 = "'s rocket";
 			break;
 		case MOD_ROCKET_SPLASH:
+		case MOD_ROCKET_MORTAR_SPLASH:
 			message = "almost dodged";
 			message2 = "'s rocket";
 			break;
@@ -272,6 +294,9 @@ static void CG_Obituary( entityState_t *ent ) {
 			break;
 		case MOD_LIGHTNING:
 			message = "was electrocuted by";
+			break;
+		case MOD_LIGHTNING_CHAIN_ARC:
+			message = "was arc'd by";
 			break;
 // eser - lightning discharge
         case MOD_LIGHTNING_DISCHARGE:
@@ -332,10 +357,10 @@ static void CG_UseItem( centity_t *cent ) {
 	// print a message if the local player
 	if ( es->number == cg.snap->ps.clientNum ) {
 		if ( !itemNum ) {
-			CG_CenterPrint( "No item to use", SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
+			CG_CenterPrint( "No item to use", CG_VIRTUAL_H * 0.30f, BIGCHAR_WIDTH );
 		} else {
 			item = BG_FindItemForHoldable( itemNum );
-			CG_CenterPrint( va("Use %s", item->pickup_name), SCREEN_HEIGHT * 0.30, BIGCHAR_WIDTH );
+			CG_CenterPrint( va("Use %s", item->pickup_name), CG_VIRTUAL_H * 0.30f, BIGCHAR_WIDTH );
 		}
 	}
 
@@ -669,7 +694,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_TAUNT");
 		trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*taunt.wav" ) );
 		break;
-#if FEAT_TA_UI
+#if FEAT_TA_TEAM_ORDERS
 	case EV_TAUNT_YES:
 		DEBUGNAME("EV_TAUNT_YES");
 		CG_VoiceChatLocal(SAY_TEAM, qfalse, es->number, COLOR_CYAN, VOICECHAT_YES);
@@ -794,6 +819,21 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_FIRE_WEAPON_ALT:
 		DEBUGNAME("EV_FIRE_WEAPON_ALT");
 		CG_FireWeapon( cent );
+		// gauntlet lunge: play whoosh sound
+		if ( cent->currentState.weapon == WP_GAUNTLET ) {
+			trap_S_StartSound( NULL, cent->currentState.number, CHAN_WEAPON,
+				trap_S_RegisterSound( "sound/weapons/melee/fstatck.wav", qfalse ) );
+		}
+		// shotgun double-blast: play sawed-off blast sound
+		if ( cent->currentState.weapon == WP_SHOTGUN ) {
+			// use existing shotgun sound as placeholder — distinct sound is v2
+			trap_S_StartSound( NULL, cent->currentState.number, CHAN_WEAPON,
+				trap_S_RegisterSound( "sound/weapons/shotgun/sshotf1b.wav", qfalse ) );
+			// trigger screen shake for local player
+			if ( cent->currentState.number == cg.snap->ps.clientNum ) {
+				cg.doubleBlastKickTime = cg.time;
+			}
+		}
 		break;
 
 	case EV_USE_ITEM0:
@@ -923,6 +963,16 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_LIGHTNINGBOLT");
 		CG_LightningBoltBeam(es->origin2, es->pos.trBase);
 		break;
+	case EV_LIGHTNING_ARC:
+		DEBUGNAME("EV_LIGHTNING_ARC");
+		CG_LightningArcBeam( es->origin, es->origin2 );
+		trap_S_StartSound( es->origin, es->number, CHAN_AUTO, cgs.media.sfx_lightningArcLoop );
+		// Screen shake on new arc connection
+		if ( es->otherEntityNum != cg.lastArcTarget ) {
+			cg.lastArcTarget = es->otherEntityNum;
+			cg.lastArcTime = cg.time;
+		}
+		break;
 	case EV_SCOREPLUM:
 		DEBUGNAME("EV_SCOREPLUM");
 		CG_ScorePlum( cent->currentState.otherEntityNum, cent->lerpOrigin, cent->currentState.time );
@@ -960,13 +1010,13 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_MISSILE_MISS:
 		DEBUGNAME("EV_MISSILE_MISS");
 		ByteToDir( es->eventParm, dir );
-		CG_MissileHitWall( es->weapon, 0, position, dir, IMPACTSOUND_DEFAULT );
+		CG_MissileHitWall( es->weapon, 0, position, dir, IMPACTSOUND_DEFAULT, es->number );
 		break;
 
 	case EV_MISSILE_MISS_METAL:
 		DEBUGNAME("EV_MISSILE_MISS_METAL");
 		ByteToDir( es->eventParm, dir );
-		CG_MissileHitWall( es->weapon, 0, position, dir, IMPACTSOUND_METAL );
+		CG_MissileHitWall( es->weapon, 0, position, dir, IMPACTSOUND_METAL, es->number );
 		break;
 
 	case EV_RAILTRAIL:
@@ -996,7 +1046,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		// if the end was on a nomark surface, don't make an explosion
 		if ( es->eventParm != 255 ) {
 			ByteToDir( es->eventParm, dir );
-			CG_MissileHitWall( es->weapon, es->clientNum, position, dir, IMPACTSOUND_DEFAULT );
+			CG_MissileHitWall( es->weapon, es->clientNum, position, dir, IMPACTSOUND_DEFAULT, es->number );
 		}
 		break;
 
@@ -1014,6 +1064,11 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_SHOTGUN:
 		DEBUGNAME("EV_SHOTGUN");
 		CG_ShotgunFire( es );
+		break;
+
+	case EV_SHOTGUN_WIDE:
+		DEBUGNAME("EV_SHOTGUN_WIDE");
+		CG_ShotgunFireWide( es );
 		break;
 
 // eser - lightning discharge
@@ -1082,20 +1137,16 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 					}
 					else {
 						if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_BLUE) {
-#if FEAT_TA_UI
 							if (cgs.gametype == GT_1FCTF) 
 								CG_AddBufferedSound( cgs.media.yourTeamTookTheFlagSound );
 							else
-#endif
-							CG_AddBufferedSound( cgs.media.enemyTookYourFlagSound );
+								CG_AddBufferedSound( cgs.media.enemyTookYourFlagSound );
 						}
 						else if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_RED) {
-#if FEAT_TA_UI
 							if (cgs.gametype == GT_1FCTF)
 								CG_AddBufferedSound( cgs.media.enemyTookTheFlagSound );
 							else
-#endif
- 							CG_AddBufferedSound( cgs.media.yourTeamTookEnemyFlagSound );
+	 							CG_AddBufferedSound( cgs.media.yourTeamTookEnemyFlagSound );
 						}
 					}
 					break;
@@ -1105,24 +1156,20 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 					}
 					else {
 						if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_RED) {
-#if FEAT_TA_UI
 							if (cgs.gametype == GT_1FCTF)
 								CG_AddBufferedSound( cgs.media.yourTeamTookTheFlagSound );
 							else
-#endif
-							CG_AddBufferedSound( cgs.media.enemyTookYourFlagSound );
+								CG_AddBufferedSound( cgs.media.enemyTookYourFlagSound );
 						}
 						else if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_BLUE) {
-#if FEAT_TA_UI
 							if (cgs.gametype == GT_1FCTF)
 								CG_AddBufferedSound( cgs.media.enemyTookTheFlagSound );
 							else
-#endif
-							CG_AddBufferedSound( cgs.media.yourTeamTookEnemyFlagSound );
+								CG_AddBufferedSound( cgs.media.yourTeamTookEnemyFlagSound );
 						}
 					}
 					break;
-#if FEAT_TA_UI
+#if FEAT_OVERLOAD
 				case GTS_REDOBELISK_ATTACKED: // Overload: red obelisk is being attacked
 					if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_RED) {
 						CG_AddBufferedSound( cgs.media.yourBaseIsUnderAttackSound );

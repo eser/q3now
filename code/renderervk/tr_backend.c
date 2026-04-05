@@ -1214,6 +1214,122 @@ static const void *RB_StretchPic( const void *data ) {
 }
 
 
+/*
+=============
+RB_DrawLine
+=============
+*/
+static const void *RB_DrawLine( const void *data ) {
+	const drawLineCommand_t	*cmd;
+	shader_t *shader;
+	int		numVerts, numIndexes;
+	float	dx, dy, len, px, py, halfWidth;
+
+	cmd = (const drawLineCommand_t *)data;
+
+	shader = cmd->shader;
+	if ( shader != tess.shader ) {
+		if ( tess.numIndexes ) {
+			RB_EndSurface();
+		}
+		backEnd.currentEntity = &backEnd.entity2D;
+		RB_BeginSurface( shader, 0 );
+	}
+
+#ifdef USE_VBO
+	VBO_UnBind();
+#endif
+
+	if ( !backEnd.projection2D ) {
+		RB_SetGL2D();
+	}
+
+#ifdef USE_VULKAN
+	if ( r_bloom->integer ) {
+		vk_bloom();
+	}
+#endif
+
+	halfWidth = cmd->width * 0.5f;
+
+	// handle zero-length lines: draw nothing
+	dx = cmd->x2 - cmd->x1;
+	dy = cmd->y2 - cmd->y1;
+	len = sqrtf( dx * dx + dy * dy );
+	if ( len < 0.001f ) {
+		return (const void *)(cmd + 1);
+	}
+
+	// perpendicular direction, normalized and scaled by half-width
+	px = -dy / len * halfWidth;
+	py =  dx / len * halfWidth;
+
+	// clamp very thin widths to at least 0.5 pixel
+	if ( halfWidth < 0.25f ) {
+		halfWidth = 0.25f;
+		px = -dy / len * halfWidth;
+		py =  dx / len * halfWidth;
+	}
+
+#ifdef USE_VBO
+	VBO_Flush();
+#endif
+
+	RB_CHECKOVERFLOW( 4, 6 );
+
+#ifdef USE_VBO
+	tess.surfType = SF_TRIANGLES;
+#endif
+
+	numIndexes = tess.numIndexes;
+	numVerts = tess.numVertexes;
+
+	tess.numVertexes += 4;
+	tess.numIndexes += 6;
+
+	tess.indexes[numIndexes + 0] = numVerts + 3;
+	tess.indexes[numIndexes + 1] = numVerts + 0;
+	tess.indexes[numIndexes + 2] = numVerts + 2;
+	tess.indexes[numIndexes + 3] = numVerts + 2;
+	tess.indexes[numIndexes + 4] = numVerts + 0;
+	tess.indexes[numIndexes + 5] = numVerts + 1;
+
+	tess.vertexColors[numVerts + 0] =
+	tess.vertexColors[numVerts + 1] =
+	tess.vertexColors[numVerts + 2] =
+	tess.vertexColors[numVerts + 3] = backEnd.color2D;
+
+	// quad corners: p1 +/- perp, p2 +/- perp
+	tess.xyz[numVerts + 0][0] = cmd->x1 + px;
+	tess.xyz[numVerts + 0][1] = cmd->y1 + py;
+	tess.xyz[numVerts + 0][2] = 0;
+
+	tess.xyz[numVerts + 1][0] = cmd->x1 - px;
+	tess.xyz[numVerts + 1][1] = cmd->y1 - py;
+	tess.xyz[numVerts + 1][2] = 0;
+
+	tess.xyz[numVerts + 2][0] = cmd->x2 - px;
+	tess.xyz[numVerts + 2][1] = cmd->y2 - py;
+	tess.xyz[numVerts + 2][2] = 0;
+
+	tess.xyz[numVerts + 3][0] = cmd->x2 + px;
+	tess.xyz[numVerts + 3][1] = cmd->y2 + py;
+	tess.xyz[numVerts + 3][2] = 0;
+
+	// stretch texture along the line
+	tess.texCoords[0][numVerts + 0][0] = 0;
+	tess.texCoords[0][numVerts + 0][1] = 0;
+	tess.texCoords[0][numVerts + 1][0] = 1;
+	tess.texCoords[0][numVerts + 1][1] = 0;
+	tess.texCoords[0][numVerts + 2][0] = 1;
+	tess.texCoords[0][numVerts + 2][1] = 1;
+	tess.texCoords[0][numVerts + 3][0] = 0;
+	tess.texCoords[0][numVerts + 3][1] = 1;
+
+	return (const void *)(cmd + 1);
+}
+
+
 #ifdef USE_PMLIGHT
 static void RB_LightingPass( void )
 {
@@ -1825,6 +1941,9 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_STRETCH_PIC:
 			data = RB_StretchPic( data );
+			break;
+		case RC_DRAW_LINE:
+			data = RB_DrawLine( data );
 			break;
 		case RC_DRAW_SURFS:
 			data = RB_DrawSurfs( data );

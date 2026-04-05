@@ -17,7 +17,7 @@ import (
 type ServerConfig struct {
 	Hostname   string `json:"hostname"`
 	Map        string `json:"map"`
-	GameType   string `json:"gameType"` // "ffa", "tdm", "ctf", "freezetag"
+	GameType   string `json:"gameType"` // "dm", "tdm", "ctf"
 	MaxClients int    `json:"maxClients"`
 	Password   string `json:"password"`
 	AddBots    bool   `json:"addBots"`
@@ -43,7 +43,7 @@ type DedServer struct {
 // NewDedServer creates a DedServer with callbacks for log lines and stop events.
 func NewDedServer(onLog func(string), onStop func()) *DedServer {
 	return &DedServer{
-		onLog: onLog,
+		onLog:  onLog,
 		onStop: onStop,
 	}
 }

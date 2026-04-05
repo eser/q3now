@@ -1,0 +1,201 @@
+// servers.wmenu - Wired UI server browser
+// Absolute positioning -- complex multi-section layout with listbox.
+// Coordinates faithfully converted from servers.menu (640x480 -> normalized).
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "servers"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor 0.06 0.06 0.1 1
+	focuscolor 1 0.75 0 0.15
+
+	WFULLSCREEN_BACKGROUND
+
+	onESC { close }
+	onOpen { refreshservers }
+
+	// -- top bar: source + filters --
+
+	// source selector
+	itemDef {
+		type 12
+		text "Source:"
+		rect 0.025 0.017 0.250 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "ui_netSource"
+		cvarFloatList { "Local" 0 "Internet" 1 "Favorites" 6 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// game type filter
+	itemDef {
+		type 12
+		text "Filter:"
+		rect 0.291 0.017 0.250 0.042
+		font "oxanium" 14
+		forecolor 1 1 1 1
+		cvar "ui_browserGameType"
+		cvarFloatList { "All" 0 "Free For All" 1 "Tournament" 2 "King of the Hill" 4 "Last Man Standing" 5 "Team DM" 6 "CTF" 7 }
+		visible 1
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 1 1 1 1 }
+	}
+
+	// refresh buttons
+	itemDef {
+		type 1
+		text "Get New List"
+		rect 0.025 0.067 0.141 0.033
+		font "oxanium" 12
+		forecolor WCOLOR_ACCENT
+		visible 1
+		action { refreshservers }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+
+	itemDef {
+		type 1
+		text "Refresh"
+		rect 0.181 0.067 0.094 0.033
+		font "oxanium" 12
+		forecolor WCOLOR_ACCENT
+		visible 1
+		action { uiScript RefreshFilter }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+
+	// map preview (top-right, 128x96)
+	itemDef {
+		name "mappreview"
+		type 0
+		rect 0.775 0.008 0.200 0.200
+		backcolor 0.03 0.03 0.05 1
+		style 1
+		decoration
+		visible 1
+	}
+
+	WSEPARATOR(0.025, 0.108, 0.734)
+
+	// -- column sort headers --
+
+	itemDef {
+		type 1
+		text "Server Name"
+		rect 0.031 0.117 0.353 0.033
+		font "oxanium" 12
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 0 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.7 0.7 0.7 1 }
+	}
+
+	itemDef {
+		type 1
+		text "Map"
+		rect 0.391 0.117 0.156 0.033
+		font "oxanium" 12
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 1 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.7 0.7 0.7 1 }
+	}
+
+	itemDef {
+		type 1
+		text "#Plyrs"
+		rect 0.553 0.117 0.078 0.033
+		font "oxanium" 12
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 2 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.7 0.7 0.7 1 }
+	}
+
+	itemDef {
+		type 1
+		text "Type"
+		rect 0.638 0.117 0.078 0.033
+		font "oxanium" 12
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 3 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.7 0.7 0.7 1 }
+	}
+
+	itemDef {
+		type 1
+		text "Ping"
+		rect 0.722 0.117 0.078 0.033
+		font "oxanium" 12
+		forecolor 0.7 0.7 0.7 1
+		visible 1
+		action { ServerSort 4 }
+		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
+		mouseExit { setcolor forecolor 0.7 0.7 0.7 1 }
+	}
+
+	// -- server list --
+
+	itemDef {
+		name "serverlist"
+		type 6
+		rect 0.025 0.154 0.950 0.729
+		font "oxanium" 12
+		forecolor 1 1 1 1
+		backcolor 0.04 0.04 0.06 0.8
+		style 1
+		feeder 2
+		elementheight 16
+		columns 5 0 230 30 230 100 20 340 50 10 394 50 10 450 50 10
+		visible 1
+		doubleclick { joinserver }
+	}
+
+	// -- status bar --
+
+	// server count / status (left)
+	itemDef {
+		type 0
+		rect 0.025 0.892 0.469 0.029
+		font "oxanium" 11
+		forecolor 0.5 0.5 0.5 1
+		cvar "ui_browserStatus"
+		cvarTest "ui_browserStatus"
+		decoration
+		visible 1
+	}
+
+	// MOTD (right)
+	itemDef {
+		type 0
+		rect 0.500 0.892 0.475 0.029
+		font "oxanium" 11
+		forecolor 0.5 0.5 0.5 1
+		cvar "cl_motdString"
+		decoration
+		visible 1
+	}
+
+	// -- bottom buttons --
+	WSEPARATOR(0.025, 0.929, 0.950)
+
+	WBUTTON(0.025, 0.946, 0.094, 0.042, "Back", 14, close)
+	WBUTTON(0.156, 0.946, 0.125, 0.042, "Specify", 14, open "specifyserver")
+	WBUTTON(0.319, 0.946, 0.125, 0.042, "Favorite", 14, exec "addFavorite")
+	WBUTTON(0.481, 0.946, 0.131, 0.042, "Server Info", 14, open "serverinfo")
+	WBUTTON(0.875, 0.946, 0.100, 0.042, "Join", 14, joinserver)
+}

@@ -24,6 +24,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "wired/cl_wired_ui.h"
 #include "wired/cl_wired_hud.h"
+#include "wired/cl_wired_msdf.h"
+#include "wired/cl_wired_fonts.h"
+#include "wired/cl_wired_text.h"
 
 static qboolean	scr_initialized;		// ready to draw
 
@@ -116,107 +119,50 @@ void SCR_DrawPic( float x, float y, float width, float height, qhandle_t hShader
 }
 
 
-/*
-** SCR_DrawChar
-** chars are drawn at 640*480 virtual screen size
-*/
-static void SCR_DrawChar( int x, int y, float size, int ch ) {
-	int row, col;
-	float frow, fcol;
-	float	ax, ay, aw, ah;
-
-	ch &= 255;
-
-	if ( ch == ' ' ) {
-		return;
-	}
-
-	if ( y < -size ) {
-		return;
-	}
-
-	ax = x;
-	ay = y;
-	aw = size;
-	ah = size;
-	SCR_AdjustFrom640( &ax, &ay, &aw, &ah );
-
-	row = ch>>4;
-	col = ch&15;
-
-	frow = row*0.0625;
-	fcol = col*0.0625;
-	size = 0.0625;
-
-	re.DrawStretchPic( ax, ay, aw, ah,
-					   fcol, frow, 
-					   fcol + size, frow + size, 
-					   cls.charSetShader );
-}
+/* SCR_DrawChar — DELETED, was static and only called by old SCR_DrawStringExt bitmap path */
 
 
 /*
 ** SCR_DrawSmallChar
 ** small chars are drawn at native screen resolution
+** Thin wrapper — delegates to Text_DrawChar (MSDF).
 */
 void SCR_DrawSmallChar( int x, int y, int ch ) {
-	int row, col;
-	float frow, fcol;
-	float size;
+	vec4_t white = {1, 1, 1, 1};
 
 	ch &= 255;
-
 	if ( ch == ' ' ) {
 		return;
 	}
-
 	if ( y < -smallchar_height ) {
 		return;
 	}
 
-	row = ch>>4;
-	col = ch&15;
-
-	frow = row*0.0625;
-	fcol = col*0.0625;
-	size = 0.0625;
-
-	re.DrawStretchPic( x, y, smallchar_width, smallchar_height,
-					   fcol, frow, 
-					   fcol + size, frow + size, 
-					   cls.charSetShader );
+	Text_DrawChar( ch, (float)x, (float)y, FONT_MONO, (float)smallchar_height, white );
 }
 
 
 /*
 ** SCR_DrawSmallString
 ** small string are drawn at native screen resolution
+** Thin wrapper — delegates to Text_Draw (MSDF).
 */
 void SCR_DrawSmallString( int x, int y, const char *s, int len ) {
-	int row, col, ch, i;
-	float frow, fcol;
-	float size;
+	vec4_t white = {1, 1, 1, 1};
+	char buf[1024];
 
 	if ( y < -smallchar_height ) {
 		return;
 	}
 
-	size = 0.0625;
-
-	for ( i = 0; i < len; i++ ) {
-		ch = *s++ & 255;
-		row = ch>>4;
-		col = ch&15;
-
-		frow = row*0.0625;
-		fcol = col*0.0625;
-
-		re.DrawStretchPic( x, y, smallchar_width, smallchar_height,
-						   fcol, frow, fcol + size, frow + size, 
-						   cls.charSetShader );
-
-		x += smallchar_width;
+	/* copy up to len chars so we have a NUL-terminated string for Text_Draw */
+	if ( len >= (int)sizeof(buf) ) {
+		len = (int)sizeof(buf) - 1;
 	}
+	Com_Memcpy( buf, s, len );
+	buf[len] = '\0';
+
+	Text_Draw( buf, (float)x, (float)y, FONT_MONO, (float)smallchar_height, white, TEXT_ALIGN_LEFT, 0 );
 }
 
 
@@ -232,48 +178,15 @@ Coordinates are at 640 by 480 virtual resolution
 */
 void SCR_DrawStringExt( int x, int y, float size, const char *string, const float *setColor, qboolean forceColor,
 		qboolean noColorEscape ) {
-	vec4_t		color;
-	const char	*s;
-	int			xx;
+	int flags = TEXT_DROPSHADOW;
 
-	// draw the drop shadow
-	color[0] = color[1] = color[2] = 0.0;
-	color[3] = setColor[3];
-	re.SetColor( color );
-	s = string;
-	xx = x;
-	while ( *s ) {
-		if ( !noColorEscape && Q_IsColorString( s ) ) {
-			s += 2;
-			continue;
-		}
-		SCR_DrawChar( xx+2, y+2, size, *s );
-		xx += size;
-		s++;
+	(void)noColorEscape;
+
+	if ( forceColor ) {
+		flags |= TEXT_FORCECOLOR;
 	}
 
-
-	// draw the colored text
-	s = string;
-	xx = x;
-	re.SetColor( setColor );
-	while ( *s ) {
-		if ( Q_IsColorString( s ) ) {
-			if ( !forceColor ) {
-				Com_Memcpy( color, g_color_table[ ColorIndexFromChar( *(s+1) ) ], sizeof( color ) );
-				color[3] = setColor[3];
-				re.SetColor( color );
-			}
-			if ( !noColorEscape ) {
-				s += 2;
-				continue;
-			}
-		}
-		SCR_DrawChar( xx, y, size, *s );
-		xx += size;
-		s++;
-	}
-	re.SetColor( NULL );
+	Text_Draw( string, (float)x, (float)y, FONT_DISPLAY, size, setColor, TEXT_ALIGN_LEFT, flags );
 }
 
 
@@ -283,11 +196,14 @@ SCR_DrawBigString
 ==================
 */
 void SCR_DrawBigString( int x, int y, const char *s, float alpha, qboolean noColorEscape ) {
-	float	color[4];
+	vec4_t color;
 
-	color[0] = color[1] = color[2] = 1.0;
+	(void)noColorEscape;
+
+	color[0] = color[1] = color[2] = 1.0f;
 	color[3] = alpha;
-	SCR_DrawStringExt( x, y, BIGCHAR_WIDTH, s, color, qfalse, noColorEscape );
+
+	Text_Draw( s, (float)x, (float)y, FONT_DISPLAY, (float)BIGCHAR_WIDTH, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 }
 
 
@@ -301,31 +217,15 @@ to a fixed color.
 */
 void SCR_DrawSmallStringExt( int x, int y, const char *string, const float *setColor, qboolean forceColor,
 		qboolean noColorEscape ) {
-	vec4_t		color;
-	const char	*s;
-	int			xx;
+	int flags = 0;
 
-	// draw the colored text
-	s = string;
-	xx = x;
-	re.SetColor( setColor );
-	while ( *s ) {
-		if ( Q_IsColorString( s ) ) {
-			if ( !forceColor ) {
-				Com_Memcpy( color, g_color_table[ ColorIndexFromChar( *(s+1) ) ], sizeof( color ) );
-				color[3] = setColor[3];
-				re.SetColor( color );
-			}
-			if ( !noColorEscape ) {
-				s += 2;
-				continue;
-			}
-		}
-		SCR_DrawSmallChar( xx, y, *s );
-		xx += smallchar_width;
-		s++;
+	(void)noColorEscape;
+
+	if ( forceColor ) {
+		flags |= TEXT_FORCECOLOR;
 	}
-	re.SetColor( NULL );
+
+	Text_Draw( string, (float)x, (float)y, FONT_MONO, (float)smallchar_height, setColor, TEXT_ALIGN_LEFT, flags );
 }
 
 
@@ -379,10 +279,10 @@ static void SCR_DrawDemoRecording( void ) {
 
 	if (cl_drawRecording->integer == 1) {
 		sprintf(string, "RECORDING %s: %ik", clc.recordNameShort, pos / 1024);
-		SCR_DrawStringExt(320 - strlen(string) * 4, 20, 8, string, g_color_table[ColorIndex(COLOR_WHITE)], qtrue, qfalse);
+		Text_Draw(string, (float)(320 - strlen(string) * 4), 20.0f, FONT_DISPLAY, 8.0f, g_color_table[ColorIndex(COLOR_WHITE)], TEXT_ALIGN_LEFT, TEXT_FORCECOLOR | TEXT_DROPSHADOW);
 	} else if (cl_drawRecording->integer == 2) {
 		sprintf(string, "RECORDING: %ik", pos / 1024);
-		SCR_DrawStringExt(320 - strlen(string) * 4, 20, 8, string, g_color_table[ColorIndex(COLOR_WHITE)], qtrue, qfalse);
+		Text_Draw(string, (float)(320 - strlen(string) * 4), 20.0f, FONT_DISPLAY, 8.0f, g_color_table[ColorIndex(COLOR_WHITE)], TEXT_ALIGN_LEFT, TEXT_FORCECOLOR | TEXT_DROPSHADOW);
 	}
 }
 
@@ -422,7 +322,7 @@ static void SCR_DrawVoipMeter( void ) {
 	buffer[i] = '\0';
 
 	sprintf( string, "VoIP: [%s]", buffer );
-	SCR_DrawStringExt( 320 - strlen( string ) * 4, 10, 8, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
+	Text_Draw( string, (float)(320 - strlen( string ) * 4), 10.0f, FONT_DISPLAY, 8.0f, g_color_table[ ColorIndex( COLOR_WHITE ) ], TEXT_ALIGN_LEFT, TEXT_FORCECOLOR | TEXT_DROPSHADOW );
 }
 #endif
 
@@ -541,9 +441,66 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 		}
 	}
 
-	// if the menu is going to cover the entire screen, we
-	// don't need to render anything under it
-	if ( UI_VM_ACTIVE && !uiFullscreen ) {
+	// ── Loading screen takes priority over UI ──
+	// When a local map load is active, draw the loading screen regardless
+	// of UI VM state.  After CL_ShutdownAll() the UI VM may be inactive
+	// for several frames — without this guard the old framebuffer content
+	// (levelshot) bleeds through.
+	if ( cl_loadProgress.startTime > 0
+		 && !Q_stricmp( cls.servername, "localhost" ) ) {
+		if ( cls.state == CA_LOADING || cls.state == CA_PRIMED ) {
+			CL_DrawLoadingScreen();
+			if ( cgvm && cls.state == CA_PRIMED ) {
+				CL_CGameRendering( stereoFrame );
+			}
+		} else if ( cls.state == CA_ACTIVE ) {
+			if ( cls.realtime - cl_loadProgress.startTime < ( com_developer->integer ? 10000 : 1000 ) ) {
+				// Still within minimum display time — draw loading screen at full opacity
+				cl_loadFadeAlpha = 1.0f;
+				CL_DrawLoadingScreen();
+			} else if ( !cl_loadFading ) {
+				// Minimum display time expired — start fade transition
+				cl_loadFading = qtrue;
+				cl_loadFadeAlpha = 1.0f;
+				// Render game frame underneath, loading screen overlay on top
+				CL_CGameRendering( stereoFrame );
+				CL_DrawLoadingScreen();
+			} else {
+				// Fade in progress — game renders first, loading screen dissolves on top
+				cl_loadFadeAlpha -= cls.frametime * 0.002f;  // 500ms total
+				if ( cl_loadFadeAlpha <= 0.0f ) {
+					// Fade complete — clean up
+					cl_loadFadeAlpha = 0.0f;
+					cl_loadFading = qfalse;
+					CL_LoadingScreenFinished();
+				}
+				CL_CGameRendering( stereoFrame );
+				if ( cl_loadFading ) {
+					CL_DrawLoadingScreen();
+				}
+#if FEAT_WIRED_UI
+				if ( !cl_loadFading && wiredHud->valid && wiredHud->wiredUIActive ) {
+					WiredHud_Routine( cls.realtime );
+				}
+#endif
+				if ( !cl_loadFading ) {
+					SCR_DrawDemoRecording();
+#ifdef USE_VOIP
+					SCR_DrawVoipMeter();
+#endif
+				}
+			}
+		} else {
+			// CA_DISCONNECTED / CA_CONNECTING / CA_CHALLENGING / CA_CONNECTED:
+			// dark fill while waiting for CA_LOADING
+			vec4_t dark = { 0.031f, 0.047f, 0.063f, 1.0f };
+			re.SetColor( dark );
+			re.DrawStretchPic( 0, 0, cls.glconfig.vidWidth, cls.glconfig.vidHeight, 0, 0, 0, 0, cls.whiteShader );
+			re.SetColor( NULL );
+		}
+	}
+	// ── Normal UI / game rendering (when not loading) ──
+	else if ( UI_VM_ACTIVE && !uiFullscreen ) {
 		switch( cls.state ) {
 		default:
 			Com_Error( ERR_FATAL, "SCR_DrawScreenField: bad cls.state" );
@@ -553,34 +510,32 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			break;
 		case CA_DISCONNECTED:
 			// force menu up
-			S_StopAllSounds();
-			UI_CALL_SET_ACTIVE( UIMENU_MAIN );
+			if ( cl_loadProgress.startTime <= 0 ) {
+				S_StopAllSounds();
+				UI_CALL_SET_ACTIVE( UIMENU_MAIN );
+			}
 			break;
 		case CA_CONNECTING:
 		case CA_CHALLENGING:
 		case CA_CONNECTED:
-			// connecting clients will only show the connection dialog
-			// refresh to update the time
-			UI_CALL_REFRESH( cls.realtime );
-			UI_CALL_CONNECT( qfalse );
+			if ( Q_stricmp( cls.servername, "localhost" ) ) {
+				// Remote connection: show the UI connection dialog
+				UI_CALL_REFRESH( cls.realtime );
+				UI_CALL_CONNECT( qfalse );
+			}
 			break;
 		case CA_LOADING:
 		case CA_PRIMED:
-			// draw the game information screen and loading progress
-			if ( cgvm ) {
+			// Remote server loading: draw loading screen
+			// (localhost loading is handled by the priority block above)
+			CL_DrawLoadingScreen();
+			if ( cgvm && cls.state == CA_PRIMED ) {
 				CL_CGameRendering( stereoFrame );
 			}
-			// also draw the connection information, so it doesn't
-			// flash away too briefly on local or lan games
-			// refresh to update the time
-			UI_CALL_REFRESH( cls.realtime );
-			UI_CALL_CONNECT( qtrue );
 			break;
 		case CA_ACTIVE:
-			// always supply STEREO_CENTER as vieworg offset is now done by the engine.
 			CL_CGameRendering( stereoFrame );
 #if FEAT_WIRED_UI
-			// Wired UI HUD: render client-side HUD elements when cg_wiredUI is active
 			if ( wiredHud->valid && wiredHud->wiredUIActive ) {
 				WiredHud_Routine( cls.realtime );
 			}

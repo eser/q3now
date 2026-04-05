@@ -1,0 +1,36 @@
+// assets.wmenu — Global Wired UI configuration (native .wmenu format)
+// This file is loaded first and sets defaults for all menus.
+
+assetGlobalDef {
+    // Cursor
+    cursor "ui/assets/cursor"
+
+    // Default fonts (MSDF)
+    defaultFont "oxanium" 12
+    defaultHeadingFont "sansman" 18
+    defaultConsoleFont "console" 10
+
+    // Legacy font references (for shim compatibility)
+    font "oxanium" 16
+    smallFont "oxanium" 12
+    bigFont "sansman" 24
+
+    // Shadow
+    shadowX 1
+    shadowY 1
+    shadowColor 0 0 0 0.5
+
+    // Fade transition
+    fadeClamp 1.0
+    fadeCycle 25
+    fadeAmount 0.05
+
+    // Gradient bar
+    gradientBarColor 0.85 0.55 0.1 0.3
+
+    // Focus color (hover highlight)
+    focuscolor 1 0.75 0 0.15
+
+    // Sounds
+    itemFocusSound "sound/misc/menu2.wav"
+}

@@ -1626,7 +1626,7 @@ void CIN_DrawCinematic( int handle ) {
 	w = w * cls.scale;
 	h = h * cls.scale;
 #else
-	SCR_AdjustFrom640( &x, &y, &w, &h );
+	// Extents are already in real screen pixels (set by caller)
 #endif
 
 	if (cinTable[handle].dirty && (cinTable[handle].CIN_WIDTH != cinTable[handle].drawX || cinTable[handle].CIN_HEIGHT != cinTable[handle].drawY)) {
@@ -1668,7 +1668,7 @@ void CL_PlayCinematic_f( void ) {
 
 	S_StopAllSounds ();
 
-	CL_handle = CIN_PlayCinematic( arg, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bits );
+	CL_handle = CIN_PlayCinematic( arg, 0, 0, cls.glconfig.vidWidth, cls.glconfig.vidHeight, bits );
 	if (CL_handle >= 0) {
 		do {
 			SCR_RunCinematic();

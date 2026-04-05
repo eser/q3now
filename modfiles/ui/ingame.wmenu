@@ -1,0 +1,51 @@
+// ingame.wmenu - Wired UI in-game ESC menu
+// Flex column layout -- vertical positioning handled by the layout engine.
+// Shown when ESC is pressed during gameplay.
+// q3now additions: Call Vote (FEAT_CALLVOTE_MENU)
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "ingame"
+	rect 0.313 0.167 0.375 0.667
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.88
+	focuscolor 1 0.75 0 0.15
+	layout column
+	padding 0.05
+	gap 0.01
+	justify center
+
+	onESC {
+		close
+	}
+
+	// title
+	WLABEL(0, 0, 1.0, 0.033, "q3now", 24, 1)
+	WSEPARATOR(0, 0, 1.0)
+
+	// menu items
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Resume", 19, close)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Options", 19, open "options")
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Call Vote", 19, open "callvote")
+	WSEPARATOR(0, 0, 1.0)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Leave Match", 19, exec "disconnect")
+
+	// Quit button with tooltip
+	itemDef {
+		type 1
+		text "Quit"
+		rect 0 0 1.0 WM_BUTTON_H
+		textalign 1
+		font "sansman" 19
+		forecolor WCOLOR_ACCENT
+		tooltip "Exit to desktop"
+		visible 1
+		grow 0
+		action { exec "quit" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+}

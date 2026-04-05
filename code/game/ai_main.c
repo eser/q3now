@@ -288,14 +288,12 @@ void BotReportStatus(bot_state_t *bs) {
 			else strcpy(flagstatus, S_COLOR_BLUE"F ");
 		}
 	}
-#if FEAT_1FCTF
 	else if (gametype == GT_1FCTF) {
 		if (Bot1FCTFCarryingFlag(bs)) {
 			if (BotTeam(bs) == TEAM_RED) strcpy(flagstatus, S_COLOR_RED"F ");
 			else strcpy(flagstatus, S_COLOR_BLUE"F ");
 		}
 	}
-#endif
 #if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		if (BotHarvesterCarryingCubes(bs)) {
@@ -440,13 +438,11 @@ void BotSetInfoConfigString(bot_state_t *bs) {
 			strcpy(carrying, "F ");
 		}
 	}
-#if FEAT_1FCTF
 	else if (gametype == GT_1FCTF) {
 		if (Bot1FCTFCarryingFlag(bs)) {
 			strcpy(carrying, "F ");
 		}
 	}
-#endif
 #if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		if (BotHarvesterCarryingCubes(bs)) {
@@ -656,9 +652,9 @@ void BotInterbreeding(void) {
 
 	trap_Cvar_Update(&bot_interbreedchar);
 	if (!strlen(bot_interbreedchar.string)) return;
-	//make sure we are in tournament mode
-	if (gametype != GT_TOURNAMENT) {
-		trap_Cvar_Set("g_gametype", va("%d", GT_TOURNAMENT));
+	//make sure we are in duel mode
+	if (gametype != GT_DUEL) {
+		trap_Cvar_Set("g_gametype", va("%d", GT_DUEL));
 		ExitLevel();
 		return;
 	}
@@ -837,6 +833,7 @@ void BotInputToUserCommand(bot_input_t *bi, usercmd_t *ucmd, int delta_angles[3]
 	//set the buttons
 	if (bi->actionflags & ACTION_RESPAWN) ucmd->buttons = BUTTON_ATTACK;
 	if (bi->actionflags & ACTION_ATTACK) ucmd->buttons |= BUTTON_ATTACK;
+	if (bi->actionflags & ACTION_ATTACK_ALT) ucmd->buttons |= BUTTON_ATTACK_ALT;
 	if (bi->actionflags & ACTION_TALK) ucmd->buttons |= BUTTON_TALK;
 	if (bi->actionflags & ACTION_GESTURE) ucmd->buttons |= BUTTON_GESTURE;
 	if (bi->actionflags & ACTION_USE) ucmd->buttons |= BUTTON_USE_HOLDABLE;

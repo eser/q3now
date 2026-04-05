@@ -56,12 +56,12 @@ void CG_SHUDElementGridRoutine(void* context)
 	}
 
 	index = 0;
-	for (col = startCol; col <= 640; col += cellWidth, index++)
+	for (col = startCol; col <= (float)cls.glconfig.vidWidth; col += cellWidth, index++)
 	{
 		coord.named.x = col;
 		coord.named.y = 0;
 		coord.named.w = 1;
-		coord.named.h = 480;
+		coord.named.h = (float)cls.glconfig.vidHeight;
 
 		if (hasColor2 && (index & 1))
 		{
@@ -74,11 +74,11 @@ void CG_SHUDElementGridRoutine(void* context)
 	}
 
 	index = 0;
-	for (row = startRow; row <= 480; row += cellHeight, index++)
+	for (row = startRow; row <= (float)cls.glconfig.vidHeight; row += cellHeight, index++)
 	{
 		coord.named.x = 0;
 		coord.named.y = row;
-		coord.named.w = 640;
+		coord.named.w = (float)cls.glconfig.vidWidth;
 		coord.named.h = 1;
 
 		if (hasColor2 && (index & 1))

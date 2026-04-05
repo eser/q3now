@@ -454,6 +454,11 @@ typedef struct shader_s {
 
 	struct shader_s *remappedShader;		// current shader this one is remapped too
 
+	qboolean	msdf;				// qtrue if this is an MSDF atlas shader
+	float		msdfDistanceRange;	// distance field range from msdf-atlas-gen
+	int			msdfAtlasWidth;		// atlas texture width
+	int			msdfAtlasHeight;	// atlas texture height
+
 	struct	shader_s	*next;
 } shader_t;
 
@@ -1860,6 +1865,14 @@ typedef struct {
 
 typedef struct {
 	int		commandId;
+	shader_t	*shader;
+	float	x1, y1;
+	float	x2, y2;
+	float	width;
+} drawLineCommand_t;
+
+typedef struct {
+	int		commandId;
 	trRefdef_t	refdef;
 	viewParms_t	viewParms;
 	drawSurf_t *drawSurfs;
@@ -1890,6 +1903,7 @@ typedef enum {
 	RC_END_OF_LIST,
 	RC_SET_COLOR,
 	RC_STRETCH_PIC,
+	RC_DRAW_LINE,
 	RC_DRAW_SURFS,
 	RC_DRAW_BUFFER,
 	RC_SWAP_BUFFERS,
@@ -1940,8 +1954,9 @@ void R_IssuePendingRenderCommands( void );
 void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 
 void RE_SetColor( const float *rgba );
-void RE_StretchPic ( float x, float y, float w, float h, 
+void RE_StretchPic ( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, qhandle_t hShader );
+void RE_DrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t hShader );
 void RE_BeginFrame( stereoFrame_t stereoFrame );
 void RE_EndFrame( int *frontEndMsec, int *backEndMsec );
 void RE_TakeVideoFrame( int width, int height,
@@ -2021,6 +2036,9 @@ typedef enum {
 	DLIGHT_LINEAR_ABS_FRAGMENT_FOG,
 #endif
 	SPRITE_FRAGMENT,
+
+	MSDF_FRAGMENT,
+
 #ifdef USE_FBO
 	GAMMA_FRAGMENT,
 	BLOOM_EXTRACT_FRAGMENT,
@@ -2039,6 +2057,9 @@ extern const char *fogInVPCode;
 
 qboolean ARB_CompileProgram( programType ptype, const char *text, GLuint program );
 void ARB_ProgramEnableExt( GLuint vertexProgram, GLuint fragmentProgram );
+
+void ARB_MSDF_Enable( float screenPxRange );
+void ARB_MSDF_Disable( void );
 
 void QGL_SetRenderScale( qboolean verbose );
 

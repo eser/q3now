@@ -632,7 +632,7 @@ void SetTeam( gentity_t *ent, const char *s ) {
 	} else if ( !Q_stricmp( s, "spectator" ) || !Q_stricmp( s, "s" ) ) {
 		team = TEAM_SPECTATOR;
 		specState = SPECTATOR_FREE;
-	} else if ( g_gametype.integer >= GT_TEAM ) {
+	} else if ( g_gametype.integer >= GT_TDM ) {
 		// if running a team game, assign player to one of the teams
 		specState = SPECTATOR_NOT;
 		if ( !Q_stricmp( s, "red" ) || !Q_stricmp( s, "r" ) ) {
@@ -671,7 +671,7 @@ void SetTeam( gentity_t *ent, const char *s ) {
 	}
 
 	// override decision if limiting the players
-    if ((g_gametype.integer == GT_TOURNAMENT)
+    if ((g_gametype.integer == GT_DUEL)
         && level.numNonSpectatorClients >= 2) {
         team = TEAM_SPECTATOR;
     }
@@ -800,8 +800,8 @@ void Cmd_Team_f( gentity_t *ent ) {
 		return;
 	}
 
-	// if they are playing a tournement game, count as a loss
-	if ( (g_gametype.integer == GT_TOURNAMENT )
+	// if they are playing a duel game, count as a loss
+	if ( (g_gametype.integer == GT_DUEL )
 		&& ent->client->sess.sessionTeam == TEAM_FREE ) {
 		ent->client->sess.losses++;
 	}
@@ -846,8 +846,8 @@ void Cmd_Follow_f( gentity_t *ent ) {
 		return;
 	}
 
-	// if they are playing a tournement game, count as a loss
-	if ( (g_gametype.integer == GT_TOURNAMENT )
+	// if they are playing a duel game, count as a loss
+	if ( (g_gametype.integer == GT_DUEL )
 		&& ent->client->sess.sessionTeam == TEAM_FREE ) {
 		ent->client->sess.losses++;
 	}
@@ -870,8 +870,8 @@ void Cmd_FollowCycle_f( gentity_t *ent, int dir ) {
 	int		clientnum;
 	int		original;
 
-	// if they are playing a tournement game, count as a loss
-	if ( (g_gametype.integer == GT_TOURNAMENT )
+	// if they are playing a duel game, count as a loss
+	if ( (g_gametype.integer == GT_DUEL )
 		&& ent->client->sess.sessionTeam == TEAM_FREE ) {
 		ent->client->sess.losses++;
 	}
@@ -947,8 +947,8 @@ static void G_SayTo( gentity_t *ent, gentity_t *other, int mode, int color, cons
 	if ( mode == SAY_TEAM  && !OnSameTeam(ent, other) ) {
 		return;
 	}
-	// no chatting to players in tournements
-	if ( (g_gametype.integer == GT_TOURNAMENT )
+	// no chatting to players in duels
+	if ( (g_gametype.integer == GT_DUEL )
 		&& other->client->sess.sessionTeam == TEAM_FREE
 		&& ent->client->sess.sessionTeam != TEAM_FREE ) {
 		return;
@@ -970,7 +970,7 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 	char		text[MAX_SAY_TEXT];
 	char		location[64];
 
-	if ( g_gametype.integer < GT_TEAM && mode == SAY_TEAM ) {
+	if ( g_gametype.integer < GT_TDM && mode == SAY_TEAM ) {
 		mode = SAY_ALL;
 	}
 
@@ -992,7 +992,7 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 		color = COLOR_CYAN;
 		break;
 	case SAY_TELL:
-		if (target && target->inuse && target->client && g_gametype.integer >= GT_TEAM &&
+		if (target && target->inuse && target->client && g_gametype.integer >= GT_TDM &&
 			target->client->sess.sessionTeam == ent->client->sess.sessionTeam &&
 			Team_GetLocationMsg(ent, location, sizeof(location)))
 			Com_sprintf (name, sizeof(name), EC"[%s%c%c"EC"] (%s)"EC": ", ent->client->pers.netname, Q_COLOR_ESCAPE, COLOR_WHITE, location );
@@ -1121,8 +1121,8 @@ static void G_VoiceTo( gentity_t *ent, gentity_t *other, int mode, const char *i
 	if ( mode == SAY_TEAM && !OnSameTeam(ent, other) ) {
 		return;
 	}
-	// no chatting to players in tournements
-	if ( g_gametype.integer == GT_TOURNAMENT ) {
+	// no chatting to players in duels
+	if ( g_gametype.integer == GT_DUEL ) {
 		return;
 	}
 
@@ -1146,7 +1146,7 @@ void G_Voice( gentity_t *ent, gentity_t *target, int mode, const char *id, qbool
 	int			j;
 	gentity_t	*other;
 
-	if ( g_gametype.integer < GT_TEAM && mode == SAY_TEAM ) {
+	if ( g_gametype.integer < GT_TDM && mode == SAY_TEAM ) {
 		mode = SAY_ALL;
 	}
 
@@ -1264,7 +1264,7 @@ static void Cmd_VoiceTaunt_f( gentity_t *ent ) {
 		who = g_entities + ent->client->lastkilled_client;
 		if (who->client) {
 			// who is the person I just killed
-			if (who->client->lasthurt_mod == MOD_GAUNTLET) {
+			if (who->client->lasthurt_mod == MOD_GAUNTLET || who->client->lasthurt_mod == MOD_GAUNTLET_LUNGE) {
 				if (!(who->r.svFlags & SVF_BOT)) {
 					G_Voice( ent, who, SAY_TELL, VOICECHAT_KILLGAUNTLET, qfalse );	// and I killed them with a gauntlet
 				}
@@ -1284,7 +1284,7 @@ static void Cmd_VoiceTaunt_f( gentity_t *ent ) {
 		}
 	}
 
-	if (g_gametype.integer >= GT_TEAM) {
+	if (g_gametype.integer >= GT_TDM) {
 		// praise a team mate who just got a reward
 		for(i = 0; i < MAX_CLIENTS; i++) {
 			who = g_entities + i;
@@ -1368,18 +1368,6 @@ Cmd_Where_f
 void Cmd_Where_f( gentity_t *ent ) {
 	trap_SendServerCommand( ent-g_entities, va("print \"%s\n\"", vtos(ent->r.currentOrigin) ) );
 }
-
-static const char *gameNames[] = {
-	"Free For All",
-	"Tournament",
-    "Dummy",
-	"King of the Hill",
-	"Team Deathmatch",
-	"Capture the Flag",
-	"One Flag CTF",
-	"Overload",
-	"Harvester"
-};
 
 /*
 ==================
@@ -1479,13 +1467,13 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 	// special case for g_gametype, check for bad values
 	if ( !Q_stricmp( arg1, "g_gametype" ) ) {
 		i = atoi( arg2 );
-		if( i < GT_FFA || i >= GT_MAX_GAME_TYPE) {
+		if( i < GT_DEATHMATCH || i >= GT_MAX_GAME_TYPE) {
 			trap_SendServerCommand( ent-g_entities, "print \"Invalid gametype.\n\"" );
 			return;
 		}
 
 		Com_sprintf( level.voteString, sizeof( level.voteString ), "%s %d", arg1, i );
-		Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "%s %s", arg1, gameNames[i] );
+		Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "%s %s", arg1, bg_gametypelist[i].name );
 	} else if ( !Q_stricmp( arg1, "map" ) ) {
 		// special case for map changes, we want to reset the nextmap setting
 		// this allows a player to change maps, but not upset the map rotation
@@ -2139,7 +2127,7 @@ void ClientCommand( int clientNum ) {
 #if FEAT_PING_LOCATION
 	else if (Q_stricmp (cmd, "ping") == 0) {
 		// ping location (4G): trace from view, broadcast to team
-		if ( g_gametype.integer >= GT_TEAM ) {
+		if ( g_gametype.integer >= GT_TDM ) {
 			vec3_t forward, right, up, muzzle, end;
 			trace_t trace;
 			gentity_t *ping;

@@ -135,15 +135,10 @@ static const char *WiredFeeder_ServerItemText( int feederID, int index, int colu
 			return buf;
 		case 3:
 			// game type as short string
-			switch ( s->gameType ) {
-				case 0:  return "FFA";
-				case 1:  return "1v1";
-				case 3:  return "KotH";
-				case 4:  return "LMS";
-				case 5:  return "TDM";
-				case 6:  return "CTF";
-				default: return "?";
+			if ( s->gameType >= 0 && s->gameType < GT_MAX_GAME_TYPE ) {
+				return bg_gametypelist[s->gameType].shortname;
 			}
+			return "?";
 		case 4:
 			// color-coded ping: green <200, yellow <400, red >=400
 			if ( s->ping < 200 )
@@ -213,6 +208,20 @@ void WiredFeeder_SortServers( int column ) {
 	// sort display list
 	if ( wired_serverDisplayCount > 1 ) {
 		qsort( wired_serverDisplayList, wired_serverDisplayCount, sizeof( int ), WiredFeeder_ServerSortCompare );
+	}
+
+	// export sort state to cvars for menu sort-direction indicators
+	Cvar_Set( "ui_serverSortKey", va( "%d", wired_serverSortKey ) );
+	Cvar_Set( "ui_serverSortDir", va( "%d", wired_serverSortDir ) );
+
+	// set per-column indicator cvars (arrow for active column, empty for others)
+	{
+		const char *arrow = wired_serverSortDir ? "v" : "^";
+		int col;
+		for ( col = 0; col < 5; col++ ) {
+			Cvar_Set( va( "ui_sortInd%d", col ),
+				( col == wired_serverSortKey ) ? arrow : "" );
+		}
 	}
 }
 
@@ -373,7 +382,7 @@ qboolean WiredFeeder_IsMapInList( const char *list, const char *mapName ) {
 typedef struct {
 	char    mapLoadName[MAX_QPATH];
 	char    mapName[64];
-	int     typeBits;                   // bitmask: (1 << GT_FFA) | (1 << GT_TEAM) etc.
+	int     typeBits;                   // bitmask: (1 << GT_DEATHMATCH) | (1 << GT_TDM) etc.
 } wiredMapInfo_t;
 
 static wiredMapInfo_t  wired_maps[MAX_WIRED_MAPS];
@@ -381,8 +390,7 @@ static int             wired_mapCount = 0;
 static int             wired_filteredMaps[MAX_WIRED_MAPS];
 static int             wired_filteredMapCount = 0;
 
-// parse "ffa tourney team ctf" → bitmask
-// mirrors MapCache_GametypeBits (ui_mapcache.c) — adapted for client-side use
+// parse "ffa duel team ctf" → bitmask
 static int WiredFeeder_GametypeBits( const char *string ) {
 	int         bits = 0;
 	const char  *p = string;
@@ -391,18 +399,7 @@ static int WiredFeeder_GametypeBits( const char *string ) {
 	while ( 1 ) {
 		token = COM_ParseExt( &p, qfalse );
 		if ( !token[0] ) break;
-
-		if ( Q_stricmp( token, "ffa" ) == 0 ) {
-			bits |= 1 << GT_FFA;
-			bits |= 1 << GT_KINGOFTHEHILL;
-			bits |= 1 << GT_LASTMANSTANDING;
-		} else if ( Q_stricmp( token, "tourney" ) == 0 ) {
-			bits |= 1 << GT_TOURNAMENT;
-		} else if ( Q_stricmp( token, "team" ) == 0 ) {
-			bits |= 1 << GT_TEAM;
-		} else if ( Q_stricmp( token, "ctf" ) == 0 ) {
-			bits |= 1 << GT_CTF;
-		}
+		bits |= BG_GametypeBits( token );
 	}
 
 	return bits;
@@ -529,8 +526,8 @@ void WiredFeeder_LoadMaps( void ) {
 		Q_strncpyz( wired_maps[wired_mapCount].mapName,
 			wired_maps[wired_mapCount].mapLoadName, sizeof( wired_maps[0].mapName ) );
 		wired_maps[wired_mapCount].typeBits =
-			(1 << GT_FFA) | (1 << GT_TOURNAMENT) | (1 << GT_TEAM) |
-			(1 << GT_CTF) | (1 << GT_KINGOFTHEHILL) | (1 << GT_LASTMANSTANDING);
+			(1 << GT_DEATHMATCH) | (1 << GT_DUEL) | (1 << GT_TDM) |
+			(1 << GT_CTF)        | (1 << GT_KINGOFTHEHILL) | (1 << GT_LASTMANSTANDING);
 
 		wired_mapCount++;
 		namePtr += strlen( namePtr ) + 1;
@@ -812,6 +809,81 @@ static void WiredFeeder_ScoreSelection( int feederID, int index ) {
 	wired_selectedScore = index;
 }
 
+// ── player model heads feeder (FEEDER_HEADS) ─────────────────────────
+
+#define MAX_PLAYER_MODELS 128
+
+static char wired_modelList[MAX_PLAYER_MODELS][64];
+static int  wired_modelCount = 0;
+static int  wired_modelSelected = -1;
+
+void WiredFeeder_LoadModels( void ) {
+	char **dirList;
+	int   numDirs, i;
+	char  testPath[MAX_QPATH];
+
+	wired_modelCount = 0;
+	dirList = FS_ListFiles( "models/players", "/", &numDirs );
+
+	if ( dirList ) {
+		for ( i = 0; i < numDirs && wired_modelCount < MAX_PLAYER_MODELS; i++ ) {
+			if ( dirList[i][0] == '.' ) continue;
+			// only list models that have head.md3
+			Com_sprintf( testPath, sizeof( testPath ),
+				"models/players/%s/head.md3", dirList[i] );
+			if ( FS_ReadFile( testPath, NULL ) > 0 ) {
+				Q_strncpyz( wired_modelList[wired_modelCount],
+					dirList[i], sizeof( wired_modelList[0] ) );
+				wired_modelCount++;
+			}
+		}
+		FS_FreeFileList( dirList );
+	}
+
+	// match current model cvar to selection
+	{
+		char modelBuf[64];
+		char *slash;
+		Cvar_VariableStringBuffer( "model", modelBuf, sizeof( modelBuf ) );
+		slash = strchr( modelBuf, '/' );
+		if ( slash ) *slash = '\0';
+		wired_modelSelected = -1;
+		for ( i = 0; i < wired_modelCount; i++ ) {
+			if ( !Q_stricmp( wired_modelList[i], modelBuf ) ) {
+				wired_modelSelected = i;
+				break;
+			}
+		}
+	}
+
+	Com_Printf( "WiredUI: found %d player models\n", wired_modelCount );
+}
+
+static int WiredFeeder_HeadsCount( int feederID ) {
+	return wired_modelCount;
+}
+
+static const char *WiredFeeder_HeadsItemText( int feederID, int index, int column ) {
+	if ( index < 0 || index >= wired_modelCount ) return "";
+	return wired_modelList[index];
+}
+
+static void WiredFeeder_HeadsSelection( int feederID, int index ) {
+	if ( index < 0 || index >= wired_modelCount ) return;
+	wired_modelSelected = index;
+	Cvar_Set( "model", va( "%s/default", wired_modelList[index] ) );
+}
+
+int WiredFeeder_GetModelCount( void ) { return wired_modelCount; }
+int WiredFeeder_GetModelSelected( void ) { return wired_modelSelected; }
+const char *WiredFeeder_GetModelName( int index ) {
+	if ( index < 0 || index >= wired_modelCount ) return NULL;
+	return wired_modelList[index];
+}
+void WiredFeeder_SetModelSelected( int index ) {
+	WiredFeeder_HeadsSelection( FEEDER_HEADS, index );
+}
+
 // ── feeder registration ───────────────────────────────────────────────
 
 void WiredUI_RegisterCoreFeeders( void ) {
@@ -831,11 +903,14 @@ void WiredUI_RegisterCoreFeeders( void ) {
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
 	WiredUI_RegisterFeeder( FEEDER_BLUETEAM_LIST, WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
+	WiredUI_RegisterFeeder( FEEDER_HEADS, WiredFeeder_HeadsCount,
+		WiredFeeder_HeadsItemText, WiredFeeder_HeadsSelection );
 
 	// load initial data
 	WiredFeeder_LoadMaps();
 	WiredFeeder_LoadDemos();
 	WiredFeeder_LoadMods();
+	WiredFeeder_LoadModels();
 
 	Com_Printf( "WiredUI: feeders registered (demos=%d, mods=%d)\n",
 		wired_demoCount, wired_modCount );

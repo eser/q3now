@@ -1,0 +1,7 @@
+fonts/
+- Enter Sansman Font Family -- https://font.download/font/enter-sansman -- License: All Rights Reserved
+- Share Tech Mono Font -- https://font.download/font/share-tech-mono -- License: SIL Open Font License, Version 1.1
+- Oxanium -- https://justfreefonts.com/fonts/oxanium/ -- License: SIL Open Font License, Version 1.1
+
+sounds/
+- Sci-Fi Weapon - Shoot - Firing - Pulse DN 02 -- https://freesound.org/s/751785/ -- License: Attribution NonCommercial 4.0

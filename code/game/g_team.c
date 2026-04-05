@@ -52,12 +52,10 @@ void Team_InitGame( void ) {
 		 teamgame.blueStatus = -1; // Invalid to force update
 		Team_SetFlagStatus( TEAM_BLUE, FLAG_ATBASE );
 		break;
-#if FEAT_1FCTF
 	case GT_1FCTF:
 		teamgame.flagStatus = -1; // Invalid to force update
 		Team_SetFlagStatus( TEAM_FREE, FLAG_ATBASE );
 		break;
-#endif
 	default:
 		break;
 	}
@@ -114,8 +112,8 @@ static Q_PRINTF_FUNC(2, 3) void QDECL PrintMsg( gentity_t *ent, const char *fmt,
 ==============
 AddTeamScore
 
- used for gametype > GT_TEAM
- for gametype GT_TEAM the level.teamScores is updated in AddScore in g_combat.c
+ used for gametype > GT_TDM
+ for gametype GT_TDM the level.teamScores is updated in AddScore in g_combat.c
 ==============
 */
 void AddTeamScore(vec3_t origin, int team, int score) {
@@ -177,7 +175,7 @@ qboolean OnSameTeam( gentity_t *ent1, gentity_t *ent2 ) {
         return qtrue;
     }
 
-	if ( g_gametype.integer < GT_TEAM ) {
+	if ( g_gametype.integer < GT_TDM ) {
 		return qfalse;
 	}
 
@@ -308,12 +306,10 @@ void Team_FragBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 		enemy_flag_pw = PW_REDFLAG;
 	}
 
-#if FEAT_1FCTF
 	if (g_gametype.integer == GT_1FCTF) {
 		flag_pw = PW_NEUTRALFLAG;
 		enemy_flag_pw = PW_NEUTRALFLAG;
 	}
-#endif
 
 	// did the attacker frag the flag carrier?
 	tokens = 0;
@@ -497,11 +493,9 @@ void Team_CheckHurtCarrier(gentity_t *targ, gentity_t *attacker)
 	else
 		flag_pw = PW_REDFLAG;
 
-#if FEAT_1FCTF
 	if (g_gametype.integer == GT_1FCTF) {
 		flag_pw = PW_NEUTRALFLAG;
 	}
-#endif
 
 	// flags
 	if (targ->client->ps.powerups[flag_pw] &&
@@ -553,11 +547,9 @@ void Team_ResetFlags( void ) {
 		Team_ResetFlag( TEAM_RED );
 		Team_ResetFlag( TEAM_BLUE );
 	}
-#if FEAT_1FCTF
 	else if( g_gametype.integer == GT_1FCTF ) {
 		Team_ResetFlag( TEAM_FREE );
 	}
-#endif
 }
 
 void Team_ReturnFlagSound( gentity_t *ent, int team ) {
@@ -694,32 +686,28 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 	gclient_t	*cl = other->client;
 	int			enemy_flag;
 
-#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		enemy_flag = PW_NEUTRALFLAG;
 	}
 	else {
-#endif
-	if (cl->sess.sessionTeam == TEAM_RED) {
-		enemy_flag = PW_BLUEFLAG;
-	} else {
-		enemy_flag = PW_REDFLAG;
-	}
+		if (cl->sess.sessionTeam == TEAM_RED) {
+			enemy_flag = PW_BLUEFLAG;
+		} else {
+			enemy_flag = PW_REDFLAG;
+		}
 
-    if (ent->s.eFlags & EF_DROPPED_ITEM) {
-		// hey, it's not home.  return it by teleporting it back
-		PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " returned the %s flag!\n",
-			cl->pers.netname, TeamName(team));
-		AddScore(other, ent->r.currentOrigin, CTF_RECOVERY_BONUS);
-		other->client->pers.teamState.flagrecovery++;
-		other->client->pers.teamState.lastreturnedflag = level.time;
-		//ResetFlag will remove this entity!  We must return zero
-		Team_ReturnFlagSound(Team_ResetFlag(team), team);
-		return 0;
+		if (ent->s.eFlags & EF_DROPPED_ITEM) {
+			// hey, it's not home.  return it by teleporting it back
+			PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " returned the %s flag!\n",
+				cl->pers.netname, TeamName(team));
+			AddScore(other, ent->r.currentOrigin, CTF_RECOVERY_BONUS);
+			other->client->pers.teamState.flagrecovery++;
+			other->client->pers.teamState.lastreturnedflag = level.time;
+			//ResetFlag will remove this entity!  We must return zero
+			Team_ReturnFlagSound(Team_ResetFlag(team), team);
+			return 0;
+		}
 	}
-#if FEAT_1FCTF
-	}
-#endif
 
 	// the flag is at home base.  if the player has the enemy
 	// flag, he's just won!
@@ -737,16 +725,12 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 		cl->ps.powerups[own_flag] = 0;
 	}
 #endif
-#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
         PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the flag!\n", cl->pers.netname );
 	}
 	else {
-#endif
-	PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the %s flag!\n", cl->pers.netname, TeamName(OtherTeam(team)));
-#if FEAT_1FCTF
+		PrintMsg( NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " captured the %s flag!\n", cl->pers.netname, TeamName(OtherTeam(team)));
 	}
-#endif
 
 	cl->ps.powerups[enemy_flag] = 0;
 
@@ -818,7 +802,6 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 	gclient_t *cl = other->client;
 
-#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		PrintMsg (NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " got the flag!\n", other->client->pers.netname );
 
@@ -832,7 +815,6 @@ int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 		}
 	}
 	else{
-#endif
 		PrintMsg (NULL, S_COLOR_GREEN "%s" S_COLOR_WHITE " got the %s flag!\n",
 			other->client->pers.netname, TeamName(team));
 
@@ -842,11 +824,10 @@ int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 			cl->ps.powerups[PW_BLUEFLAG] = INT_MAX; // flags never expire
 
 		Team_SetFlagStatus( team, FLAG_TAKEN );
-#if FEAT_1FCTF
 	}
 
 	AddScore(other, ent->r.currentOrigin, CTF_FLAG_BONUS);
-#endif
+
 	cl->pers.teamState.flagsince = level.time;
 	Team_TakeFlagSound( ent, team );
 
@@ -880,16 +861,13 @@ int Pickup_Team( gentity_t *ent, gentity_t *other ) {
 	else if( strcmp(ent->classname, "team_CTF_blueflag") == 0 ) {
 		team = TEAM_BLUE;
 	}
-#if FEAT_1FCTF
 	else if( strcmp(ent->classname, "team_CTF_neutralflag") == 0  ) {
 		team = TEAM_FREE;
 	}
-#endif
 	else {
 		PrintMsg ( other, "Don't know what team the flag is on.\n");
 		return 0;
 	}
-#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		if( team == TEAM_FREE ) {
 			return Team_TouchEnemyFlag( ent, other, cl->sess.sessionTeam );
@@ -899,7 +877,6 @@ int Pickup_Team( gentity_t *ent, gentity_t *other ) {
 		}
 		return 0;
 	}
-#endif
 	// GT_CTF
 	if( team == cl->sess.sessionTeam) {
 		return Team_TouchOurFlag( ent, other, team );
@@ -1404,7 +1381,7 @@ void ObeliskInit( gentity_t *ent ) {
 void SP_team_redobelisk( gentity_t *ent ) {
 	gentity_t *obelisk;
 
-	if ( g_gametype.integer <= GT_TEAM ) {
+	if ( g_gametype.integer <= GT_TDM ) {
 		G_FreeEntity(ent);
 		return;
 	}
@@ -1429,7 +1406,7 @@ void SP_team_redobelisk( gentity_t *ent ) {
 void SP_team_blueobelisk( gentity_t *ent ) {
 	gentity_t *obelisk;
 
-	if ( g_gametype.integer <= GT_TEAM ) {
+	if ( g_gametype.integer <= GT_TDM ) {
 		G_FreeEntity(ent);
 		return;
 	}

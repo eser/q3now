@@ -1,0 +1,45 @@
+// network.wmenu - Wired UI network settings panel
+// Ported from TA system.menu "Other" tab, Network section.
+// TA has Net Data Rate within system_menu.
+// Also includes Auto Download from TA options.menu.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "network"
+	// Compact centered panel
+	rect 0.291 0.250 0.417 0.375
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor 1 0.75 0 0.15
+
+	WFULLSCREEN_BACKGROUND
+
+	onESC { close }
+
+	WLABEL(0.000, 0.044, 1.000, 0.089, "Network", 24, 1)
+	WSEPARATOR(0.042, 0.156, 0.917)
+
+	// TA: Net Data Rate at rect 99 327 256 20 (within system Other)
+	itemDef {
+		type 12
+		text "Net Data Rate:"
+		rect 0.042 0.222 0.917 0.089
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "rate"
+		cvarFloatList { "<=28.8k" 2500 "33.6k" 3000 "56k" 4000 "ISDN" 5000 "LAN/Cable/xDSL" 25000 }
+		visible 1
+		action { uiScript update "ui_setRate" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA options.menu: Auto Download (cg_allowDownload)
+	WYESNO(0.042, 0.333, 0.917, 0.089, "Auto Download:", 14, "cl_allowDownload")
+
+	WSEPARATOR(0.042, 0.467, 0.917)
+	WBUTTON(0.292, 0.533, 0.417, 0.089, "Back", 14, close)
+}

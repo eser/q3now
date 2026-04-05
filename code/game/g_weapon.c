@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 #include "bg_promode.h" // CPM
 
+extern void Attack_LightningGun_ChainArc( gentity_t *ent );
+
 float	s_quadFactor;
 vec3_t	forward, right, up;
 vec3_t	muzzle;
@@ -211,6 +213,45 @@ void FireWeapon( gentity_t *ent, int attackIndex ) {
 	}
 
 	if ( attackIndex > 0 ) {
+		// Alt-fire dispatch
+		AngleVectors(ent->client->ps.viewangles, forward, right, up);
+		CalcMuzzlePointOrigin(ent, ent->client->oldOrigin, forward, right, up, muzzle);
+		G_DoTimeShiftFor(ent);
+
+		switch( ent->s.weapon ) {
+		case WP_GAUNTLET:
+			Attack_Gauntlet_Lunge( ent );
+			break;
+		case WP_MACHINEGUN:
+			Attack_Machinegun_Burst( ent );
+			break;
+		case WP_SHOTGUN:
+			Attack_Shotgun_DoubleBlast( ent );
+			break;
+		case WP_ROCKET_LAUNCHER:
+			Attack_RocketLauncher_Mortar( ent );
+			break;
+		case WP_LIGHTNING_GUN:
+			Attack_LightningGun_ChainArc( ent );
+			break;
+		default:
+			break;
+		}
+
+		G_UndoTimeShiftFor(ent);
+
+		// alt-fire recoil kick
+		if ( ent->client && ent->s.weapon != WP_NONE ) {
+			vec3_t kickBack;
+			float scale = bg_attacklist[bg_weaponlist[ent->s.weapon].attackAlt].recoilKick;
+			if ( ent->client->ps.pm_flags & PMF_DUCKED ) {
+				scale *= 0.5f;
+			}
+			if ( scale > 0.0f ) {
+				VectorScale( forward, -scale, kickBack );
+				VectorAdd( ent->client->ps.velocity, kickBack, ent->client->ps.velocity );
+			}
+		}
 		return;
 	}
 
@@ -270,8 +311,6 @@ void FireWeapon( gentity_t *ent, int attackIndex ) {
 	}
 }
 
-
-#if FEAT_PW_KAMIKAZE
 
 /*
 ===============
@@ -520,4 +559,3 @@ void G_StartKamikaze( gentity_t *ent ) {
 	te->r.svFlags |= SVF_BROADCAST;
 	te->s.eventParm = GTS_KAMIKAZE;
 }
-#endif

@@ -317,7 +317,7 @@ static void SV_Startup( void ) {
 	Cvar_Set( "sv_running", "1" );
 
 	// Join the ipv6 multicast group now that a map is running so clients can scan for us on the local network.
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 	NET_JoinMulticast6();
 #endif
 }
@@ -431,7 +431,7 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 #ifndef DEDICATED
 	// if not running a dedicated server CL_MapLoading will connect the client to the server
 	// also print some status stuff
-	CL_MapLoading();
+	CL_MapLoading( mapname );
 
 	// make sure all the client stuff is unloaded
 	CL_ShutdownAll();
@@ -712,7 +712,7 @@ void SV_Init( void )
 		SV_AddDedicatedCommands();
 
 	// serverinfo vars
-	Cvar_Get ("dmflags", "0", CVAR_SERVERINFO);
+	Cvar_Get ("g_noFootsteps", "0", CVAR_SERVERINFO);
 	Cvar_Get ("fraglimit", "20", CVAR_SERVERINFO);
 	Cvar_Get ("timelimit", "0", CVAR_SERVERINFO);
 	sv_gametype = Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_LATCH );
@@ -894,7 +894,7 @@ void SV_Shutdown( const char *finalmsg ) {
 	QUIC_Shutdown();
 #endif
 
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 	NET_LeaveMulticast6();
 #endif
 

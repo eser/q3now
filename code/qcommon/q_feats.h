@@ -49,7 +49,6 @@
 #define FEAT_BOUNCE_SOUND_LIMIT           0   // fix: unlimited grenade bounce sounds on movers
 
 // ── competitive (testing) ───────────────────────────────────────────────
-#define FEAT_1FCTF                        0   // 10E one-flag CTF mode
 #define FEAT_AUTO_DEMO                    1   // 10K auto-record demos in tournament
 #define FEAT_CLAN_ARENA                   0   // 11  clan arena game mode
 #define FEAT_ELIMINATION                  0   // 10B round-based elimination modifier
@@ -151,7 +150,6 @@
 #define FEAT_TA_TEAM_ORDERS               1   // team orders & squad commands (order teammates, accept/deny)
 #define FEAT_HARVESTER                    1   // Harvester game mode (skull/cube collection)
 #define FEAT_OVERLOAD                     1   // Overload game mode (obelisk control)
-#define FEAT_PW_KAMIKAZE                  1   // Kamikaze powerup (timer, explosion, body)
 #define FEAT_PW_INVULNERABILITY           1   // Invulnerability shield (sphere, railgun bounce)
 #else
 #define FEAT_TA_UI                        0
@@ -160,7 +158,6 @@
 #define FEAT_TA_TEAM_ORDERS               0
 #define FEAT_HARVESTER                    0
 #define FEAT_OVERLOAD                     0
-#define FEAT_PW_KAMIKAZE                  1
 #define FEAT_PW_INVULNERABILITY           0
 #endif
 

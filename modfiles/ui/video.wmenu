@@ -1,0 +1,184 @@
+// video.wmenu - Wired UI video settings panel
+// Ported from TA system.menu Graphics tab (menu rect 186 0 443 426 -> menuW=443 menuH=426)
+// Items relative to menu dimensions.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "video"
+	// TA: rect 186 0 443 426 -> 186/640=0.291, 0/480=0, 443/640=0.692, 426/480=0.888
+	rect 0.291 0.000 0.692 0.888
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor 1 0.75 0 0.15
+
+	WFULLSCREEN_BACKGROUND
+
+	onOpen { hide grpSystem }
+	onESC { close }
+
+	// TA: window rect 0 2 443 426 -> background panel
+	itemDef {
+		name "window"
+		rect 0.000 0.005 1.000 0.995
+		style 1
+		border 1
+		bordercolor 0.5 0.5 0.5 0.5
+		backcolor 0 0 0 0.25
+		visible 1
+		decoration
+	}
+
+	WLABEL(0.000, 0.019, 1.000, 0.043, "Video Settings", 24, 1)
+	WSEPARATOR(0.033, 0.067, 0.933)
+
+	// TA: Quality preset at rect 99 42 256 20 -> 99/443=0.224, 42/426=0.099, 256/443=0.578, 20/426=0.047
+	itemDef {
+		type 12
+		text "Quality:"
+		rect 0.033 0.099 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "ui_glCustom"
+		cvarFloatList { "High Quality" 0 "Normal" 1 "Fast" 2 "Fastest" 3 "Custom" 4 }
+		visible 1
+		action { uiScript update "ui_glCustom" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: GL Extensions at rect 99 92 256 20 -> 92/426=0.216
+	WYESNO(0.033, 0.157, 0.933, 0.047, "GL Extensions:", 14, "r_allowExtensions")
+
+	// TA: Video Mode at rect 99 117 256 20 -> 117/426=0.275
+	itemDef {
+		type 12
+		text "Video Mode:"
+		rect 0.033 0.216 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "r_mode"
+		cvarFloatList { "320x240" 0 "400x300" 1 "512x384" 2 "640x480" 3 "800x600" 4 "960x720" 5 "1024x768" 6 "1152x864" 7 "1280x1024" 8 "1600x1200" 9 "2048x1536" 10 "856x480 Wide" 11 "Custom" -1 }
+		visible 1
+		action { uiScript glCustom }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Color Depth at rect 99 142 256 20 -> 142/426=0.333
+	itemDef {
+		type 12
+		text "Color Depth:"
+		rect 0.033 0.275 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "r_colorbits"
+		cvarFloatList { "Default" 0 "16-bit" 16 "32-bit" 32 }
+		visible 1
+		action { uiScript glCustom ; uiScript update "r_colorbits" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Fullscreen at rect 99 167 256 20 -> 167/426=0.392
+	WYESNO(0.033, 0.334, 0.933, 0.047, "Fullscreen:", 14, "r_fullscreen")
+
+	// TA: Lighting at rect 99 192 256 20 -> 192/426=0.451
+	itemDef {
+		type 12
+		text "Lighting:"
+		rect 0.033 0.393 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "r_vertexLight"
+		cvarFloatList { "Lightmap (High)" 0 "Vertex (Low)" 1 }
+		visible 1
+		action { uiScript glCustom }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Geometric Detail at rect 99 217 256 20 -> 217/426=0.510
+	itemDef {
+		type 12
+		text "Geometric Detail:"
+		rect 0.033 0.452 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "r_lodbias"
+		cvarFloatList { "High" 0 "Medium" 1 "Low" 2 }
+		visible 1
+		action { uiScript glCustom ; uiScript update "r_lodbias" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Texture Detail at rect 99 242 256 20 -> 242/426=0.568
+	itemDef {
+		type 12
+		text "Texture Detail:"
+		rect 0.033 0.511 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "r_picmip"
+		cvarFloatList { "High" 0 "Normal" 1 "Low" 2 }
+		visible 1
+		action { uiScript glCustom }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Texture Quality at rect 99 269 256 20 -> 269/426=0.631
+	itemDef {
+		type 12
+		text "Texture Quality:"
+		rect 0.033 0.570 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "r_texturebits"
+		cvarFloatList { "Default" 0 "16-bit" 16 "32-bit" 32 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Texture Filter at rect 99 294 256 20 -> 294/426=0.690
+	itemDef {
+		type 12
+		text "Texture Filter:"
+		rect 0.033 0.629 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "r_textureMode"
+		cvarStrList { "Bilinear" "GL_LINEAR_MIPMAP_NEAREST" "Trilinear" "GL_LINEAR_MIPMAP_LINEAR" }
+		visible 1
+		action { uiScript glCustom }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Compress Textures at rect 99 319 256 20 -> 319/426=0.749
+	WYESNO(0.033, 0.688, 0.933, 0.047, "Compress Textures:", 14, "r_ext_compressed_textures")
+
+	// Our addition: Anti-Aliasing (not in TA, keeping from our version)
+	itemDef {
+		type 12
+		text "Anti-Aliasing:"
+		rect 0.033 0.747 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "r_ext_multisample"
+		cvarFloatList { "Off" 0 "2x" 2 "4x" 4 "8x" 8 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	WSEPARATOR(0.033, 0.812, 0.933)
+
+	// TA: Apply button at rect 181 357 100 26 -> 181/443=0.409, 357/426=0.838
+	WBUTTON(0.200, 0.838, 0.267, 0.048, "Apply", 14, exec "vid_restart")
+	WBUTTON(0.533, 0.838, 0.267, 0.048, "Back", 14, close)
+}

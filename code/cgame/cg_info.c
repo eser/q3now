@@ -166,11 +166,11 @@ void CG_DrawInformation( void ) {
 		levelshot = trap_R_RegisterShaderNoMip( "menu/art/unknownmap" );
 	}
 	trap_R_SetColor( NULL );
-	CG_DrawPic( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, levelshot );
+	CG_DrawPic( 0, 0, CG_VIRTUAL_W, CG_VIRTUAL_H, levelshot );
 
 	// blend a detail texture over it
 	detail = trap_R_RegisterShader( "levelShotDetail" );
-	trap_R_DrawStretchPic( 0, 0, cgs.glconfig.vidWidth, cgs.glconfig.vidHeight, 0, 0, 2.5, 2, detail );
+	trap_R_DrawStretchPicNorm( 0, 0, 1.0f, 1.0f, 0, 0, 2.5, 2, detail );
 
 	// draw the icons of things as they are loaded
 	CG_DrawLoadingIcons();
@@ -236,39 +236,10 @@ void CG_DrawInformation( void ) {
 	}
 
 	// game type
-	switch ( cgs.gametype ) {
-	case GT_FFA:
-		s = "Free For All";
-		break;
-    case GT_TOURNAMENT:
-        s = "Tournament";
-        break;
-    case GT_KINGOFTHEHILL:
-        s = "King of the Hill";
-        break;
-    case GT_LASTMANSTANDING:
-        s = "Last Man Standing";
-        break;
-    case GT_TEAM:
-		s = "Team Deathmatch";
-		break;
-	case GT_CTF:
-		s = "Capture The Flag";
-		break;
-#if FEAT_TA_UI
-	case GT_1FCTF:
-		s = "One Flag CTF";
-		break;
-	case GT_OBELISK:
-		s = "Overload";
-		break;
-	case GT_HARVESTER:
-		s = "Harvester";
-		break;
-#endif
-	default:
+	if (cgs.gametype >= 0 && cgs.gametype < GT_MAX_GAME_TYPE) {
+		s = bg_gametypelist[cgs.gametype].name;
+	} else {
 		s = "Unknown Gametype";
-		break;
 	}
 	UI_DrawProportionalString( 320, y, s,
 		UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, colorWhite );
@@ -301,4 +272,3 @@ void CG_DrawInformation( void ) {
 	/* restore previous screen placement */
 	CG_SetScreenPlacement( oldH, oldV );
 }
-

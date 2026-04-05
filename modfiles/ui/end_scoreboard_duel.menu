@@ -1,0 +1,26 @@
+// end_scoreboard_duel.menu - End-of-match Duel/Tournament scoreboard
+//
+// Displayed during intermission after a Duel/Tournament match ends.
+// Uses ITEM_TYPE_DUELBOARD (type 21) — same as the in-game TAB scoreboard,
+// but WiredHud_DrawDuelBoard checks wiredHud->intermission to add:
+//   - Winner banner ("WINNER" above the winning fighter's panel, or "DRAW")
+//   - Match duration display
+
+menuDef {
+	name "end_scoreboard_duel"
+	rect 0 0 640 480
+	fullScreen 0
+	visible 1
+	style 0
+
+	// ── duel board (full-screen custom renderer) ─────────────────
+
+	itemDef {
+		name "duelboard"
+		type 21
+		rect 0 0 640 480
+		forecolor 1.0 1.0 1.0 1.0
+		visible 1
+		decoration
+	}
+}

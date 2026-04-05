@@ -253,6 +253,33 @@ void CG_LightningBoltBeam( vec3_t start, vec3_t end ) {
 }
 
 /*
+=================
+CG_LightningArcBeam
+Renders the chain arc beam from primary impact point to secondary target.
+Uses a dedicated shader for visual distinction from the primary beam.
+=================
+*/
+void CG_LightningArcBeam( vec3_t start, vec3_t end ) {
+	localEntity_t	*le;
+	refEntity_t		*beam;
+
+	le = CG_AllocLocalEntity();
+	le->leType = LE_SHOWREFENTITY;
+	le->startTime = cg.time;
+	le->endTime = cg.time + 50;
+
+	beam = &le->refEntity;
+	VectorCopy( start, beam->origin );
+	VectorCopy( end, beam->oldorigin );
+
+	beam->reType = RT_LIGHTNING;
+	beam->customShader = cgs.media.lightningArcShader;
+
+	// Make arc beam thinner than primary by scaling down
+	beam->radius = 4;   // thinner than primary beam
+}
+
+/*
 ==================
 CG_KamikazeEffect
 ==================
@@ -548,7 +575,7 @@ void CG_PingLocation( centity_t *cent ) {
 	re = &le->refEntity;
 	re->reType = RT_SPRITE;
 	re->radius = 8;
-	re->customShader = cgs.media.crosshairShader[3]; // diamond crosshair
+	re->customShader = cgs.media.crosshairBurstShader;
 
 	VectorClear( angles );
 	AnglesToAxis( angles, re->axis );

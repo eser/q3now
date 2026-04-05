@@ -12,6 +12,7 @@ and alignment. Migrated from cg_moderntext.c to run in the client directly.
 
 #include "../../qcommon/q_shared.h"
 #include "../../qcommon/q_feats.h"
+#include "cl_wired_msdf.h"
 
 #if FEAT_WIRED_UI
 
@@ -35,6 +36,14 @@ and alignment. Migrated from cg_moderntext.c to run in the client directly.
 void    WiredFont_Init( void );                         // load all fonts from .cfg files
 void    WiredFont_Select( int index );                  // switch active font by index
 int     WiredFont_IndexFromName( const char *name );    // "sansman" → 2, "elite" → 9, etc.
+
+// ── MSDF font integration ────────────────────────────────────────────
+// Load MSDF fonts (sansman, sansman-italic, oxanium, oxanium-medium, sharetechmono).
+// Call once after CG_LoadFonts().
+void            WiredFonts_InitMSDF( void );
+
+// Look up an MSDF font by name. Returns NULL for unknown/bitmap-only fonts.
+msdfFont_t *WiredFonts_GetMSDF( const char *fontName );
 
 // ── text rendering ────────────────────────────────────────────────────
 // These are the migrated CG_ModernDrawString* functions, renamed for clarity.

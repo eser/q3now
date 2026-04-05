@@ -96,12 +96,14 @@ void BotPrintTeamGoal(bot_state_t *bs) {
 			BotAI_Print(PRT_MESSAGE, "%s: I'm gonna try to return the flag for %1.0f secs\n", netname, t);
 			break;
 		}
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_OVERLOAD
 		case LTG_ATTACKENEMYBASE:
 		{
 			BotAI_Print(PRT_MESSAGE, "%s: I'm gonna attack the enemy base for %1.0f secs\n", netname, t);
 			break;
 		}
+#endif
+#if FEAT_HARVESTER
 		case LTG_HARVEST:
 		{
 			BotAI_Print(PRT_MESSAGE, "%s: I'm gonna harvest for %1.0f secs\n", netname, t);
@@ -824,12 +826,10 @@ void BotMatch_GetFlag(bot_state_t *bs, bot_match_t *match) {
 		if (!ctf_redflag.areanum || !ctf_blueflag.areanum)
 			return;
 	}
-#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF) {
 		if (!ctf_neutralflag.areanum || !ctf_redflag.areanum || !ctf_blueflag.areanum)
 			return;
 	}
-#endif
 	else {
 		return;
 	}
@@ -875,12 +875,10 @@ void BotMatch_AttackEnemyBase(bot_state_t *bs, bot_match_t *match) {
 	if (gametype == GT_CTF) {
 		BotMatch_GetFlag(bs, match);
 	}
-#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF || gametype == GT_OBELISK || gametype == GT_HARVESTER) {
 		if (!redobelisk.areanum || !blueobelisk.areanum)
 			return;
 	}
-#endif
 	else {
 		return;
 	}
@@ -910,7 +908,7 @@ void BotMatch_AttackEnemyBase(bot_state_t *bs, bot_match_t *match) {
 #endif //DEBUG
 }
 
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_HARVESTER
 /*
 ==================
 BotMatch_Harvest
@@ -967,12 +965,10 @@ void BotMatch_RushBase(bot_state_t *bs, bot_match_t *match) {
 		if (!ctf_redflag.areanum || !ctf_blueflag.areanum)
 			return;
 	}
-#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF || gametype == GT_HARVESTER) {
 		if (!redobelisk.areanum || !blueobelisk.areanum)
 			return;
 	}
-#endif
 	else {
 		return;
 	}
@@ -1057,12 +1053,7 @@ void BotMatch_ReturnFlag(bot_state_t *bs, bot_match_t *match) {
 	int client;
 
 	//if not in CTF mode
-	if (
-		gametype != GT_CTF
-#if FEAT_TA_TEAM_ORDERS
-		&& gametype != GT_1FCTF
-#endif
-		)
+	if ( gametype != GT_CTF && gametype != GT_1FCTF )
 		return;
 	//if not addressed to this bot
 	if (!BotAddressedToBot(bs, match))
@@ -1424,12 +1415,14 @@ void BotMatch_WhatAreYouDoing(bot_state_t *bs, bot_match_t *match) {
 			BotAI_BotInitialChat(bs, "returningflag", NULL);
 			break;
 		}
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_OVERLOAD
 		case LTG_ATTACKENEMYBASE:
 		{
 			BotAI_BotInitialChat(bs, "attackingenemybase", NULL);
 			break;
 		}
+#endif
+#if FEAT_HARVESTER
 		case LTG_HARVEST:
 		{
 			BotAI_BotInitialChat(bs, "harvesting", NULL);
@@ -1522,8 +1515,8 @@ void BotMatch_WhereAreYou(bot_state_t *bs, bot_match_t *match) {
 		"Heavy Armor",
 		"Red Flag",
 		"Blue Flag",
-#if FEAT_TA_TEAM_ORDERS
 		"Neutral Flag",
+#if FEAT_OVERLOAD
 		"Red Obelisk",
 		"Blue Obelisk",
 		"Neutral Obelisk",
@@ -1547,11 +1540,7 @@ void BotMatch_WhereAreYou(bot_state_t *bs, bot_match_t *match) {
 		}
 	}
 	if (bestitem != -1) {
-		if (gametype == GT_CTF
-#if FEAT_TA_TEAM_ORDERS
-			|| gametype == GT_1FCTF
-#endif
-			) {
+		if (gametype == GT_CTF || gametype == GT_1FCTF) {
 			redtt = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, ctf_redflag.areanum, TFL_DEFAULT);
 			bluett = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, ctf_blueflag.areanum, TFL_DEFAULT);
 			if (redtt < (redtt + bluett) * 0.4) {
@@ -1564,7 +1553,7 @@ void BotMatch_WhereAreYou(bot_state_t *bs, bot_match_t *match) {
 				BotAI_BotInitialChat(bs, "location", nearbyitems[bestitem], NULL);
 			}
 		}
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_OVERLOAD || FEAT_HARVESTER
 		else if (gametype == GT_OBELISK || gametype == GT_HARVESTER) {
 			redtt = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, redobelisk.areanum, TFL_DEFAULT);
 			bluett = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, blueobelisk.areanum, TFL_DEFAULT);
@@ -1736,14 +1725,12 @@ void BotMatch_CTF(bot_state_t *bs, bot_match_t *match) {
 			bs->flagstatuschanged = 1;
 		}
 	}
-#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF) {
 		if (match->subtype & ST_1FCTFGOTFLAG) {
 			trap_BotMatchVariable(match, NETNAME, netname, sizeof(netname));
 			bs->flagcarrier = ClientFromName(netname);
 		}
 	}
-#endif
 }
 
 void BotMatch_EnterGame(bot_state_t *bs, bot_match_t *match) {
@@ -1816,13 +1803,13 @@ int BotMatchMessage(bot_state_t *bs, char *message) {
 			BotMatch_GetFlag(bs, &match);
 			break;
 		}
-#if FEAT_TA_TEAM_ORDERS
 		//CTF & 1FCTF & Obelisk & Harvester
 		case MSG_ATTACKENEMYBASE:
 		{
 			BotMatch_AttackEnemyBase(bs, &match);
 			break;
 		}
+#if FEAT_HARVESTER
 		//Harvester
 		case MSG_HARVEST:
 		{

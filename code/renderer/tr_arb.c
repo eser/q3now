@@ -138,6 +138,30 @@ void GL_ProgramEnable( void )
 }
 
 
+/*
+ * ARB_MSDF_Enable -- bind the MSDF fragment program and set screenPxRange.
+ */
+void ARB_MSDF_Enable( float screenPxRange )
+{
+	if ( !programCompiled )
+		return;
+	ARB_ProgramEnable( DUMMY_VERTEX, MSDF_FRAGMENT );
+	qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 0,
+		screenPxRange, 0.0f, 0.0f, 0.0f );
+}
+
+
+/*
+ * ARB_MSDF_Disable -- unbind fragment/vertex programs after MSDF draw.
+ */
+void ARB_MSDF_Disable( void )
+{
+	if ( programEnabled ) {
+		ARB_ProgramDisable();
+	}
+}
+
+
 #ifdef USE_PMLIGHT
 static void ARB_Lighting( const shaderStage_t* pStage )
 {
@@ -631,6 +655,35 @@ static const char *spriteFP = {
 };
 
 
+/*
+ * MSDF fragment program -- computes median(R,G,B) from the atlas texture
+ * and applies smoothstep antialiasing.  screenPxRange is passed via
+ * program.local[0].x from the CPU side.
+ */
+static const char *msdfFP = {
+	"!!ARBfp1.0 \n"
+	"OPTION ARB_precision_hint_fastest; \n"
+	"TEMP msd, t; \n"
+	"PARAM screenPxRange = program.local[0]; \n"
+	"TEX msd, fragment.texcoord[0], texture[0], 2D; \n"
+	"# median(r, g, b) = max(min(r,g), min(max(r,g), b)) \n"
+	"MIN t.x, msd.r, msd.g; \n"
+	"MAX t.y, msd.r, msd.g; \n"
+	"MIN t.z, t.y, msd.b; \n"
+	"MAX t.x, t.x, t.z; \n"
+	"# opacity = clamp(screenPxRange * (sd - 0.5) + 0.5, 0, 1) \n"
+	"SUB t.x, t.x, 0.5; \n"
+	"MUL t.x, t.x, screenPxRange.x; \n"
+	"ADD t.x, t.x, 0.5; \n"
+	"MAX t.x, t.x, 0.0; \n"
+	"MIN t.x, t.x, 1.0; \n"
+	"# Apply to alpha, keep vertex color \n"
+	"MOV_SAT result.color, fragment.color; \n"
+	"MUL result.color.a, fragment.color.a, t.x; \n"
+	"END \n"
+};
+
+
 #ifdef USE_FBO
 static char *ARB_BuildGreyscaleProgram( char *buf ) {
 	char *s;
@@ -1036,6 +1089,9 @@ qboolean ARB_UpdatePrograms( void )
 		return qfalse;
 
 	if ( !ARB_CompileProgram( Fragment, spriteFP, programs[ SPRITE_FRAGMENT ] ) )
+		return qfalse;
+
+	if ( !ARB_CompileProgram( Fragment, msdfFP, programs[ MSDF_FRAGMENT ] ) )
 		return qfalse;
 
 #ifdef USE_FBO

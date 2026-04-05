@@ -218,7 +218,7 @@ void CG_SHUDElementTeamRoutine(void* context)
 	                    element->ctxHealthArmor.shadowColor,
 	                    element->ctxHealthArmor.coord.named.w,
 	                    element->ctxHealthArmor.coord.named.h,
-	                    SCREEN_WIDTH,
+	                    (float)cls.glconfig.vidWidth,
 	                    element->ctxHealthArmor.flags,
 	                    NULL, NULL, NULL);
 

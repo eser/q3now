@@ -81,6 +81,7 @@ struct weaponinfo_s;
 //action flags
 #define ACTION_ATTACK			0x00000001
 #define ACTION_USE			0x00000002
+#define ACTION_ATTACK_ALT		0x00000004
 #define ACTION_RESPAWN			0x00000008
 #define ACTION_JUMP			0x00000010
 #define ACTION_MOVEUP			0x00000020

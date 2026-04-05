@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "wired/cl_wired_hud.h"
+#include "wired/cl_wired_text.h"
 
 #include "../botlib/botlib.h"
 
@@ -458,6 +459,44 @@ static void CL_ForceFixedDlights( void ) {
 
 /*
 ====================
+CL_LoadingYield
+
+Cooperative yield during loading — renders a loading screen frame
+and pumps OS events to keep the application responsive.
+Must ONLY be called between discrete, safe operations (never mid-shader
+or mid-texture-upload).
+====================
+*/
+void CL_LoadingYield( const char *phaseName ) {
+	cl_loadProgress.phase = phaseName;
+	// Recompute weighted overall: geometry 25%, shaders 40%, audio 15%, download 20%
+	cl_loadProgress.overall =
+		cl_loadProgress.geometry * 0.25f +
+		cl_loadProgress.shaders * 0.40f +
+		cl_loadProgress.audio   * 0.15f +
+		cl_loadProgress.download * 0.20f;
+	SCR_UpdateScreen();
+	Sys_SendKeyEvents();
+}
+
+
+// Loading yield counters — track registrations during CG_INIT for cooperative yielding
+static int loadYield_modelCount;
+static int loadYield_shaderCount;
+static int loadYield_soundCount;
+
+#define LOADING_YIELD_MODELS   20   // yield every N model registrations
+#define LOADING_YIELD_SHADERS  50   // yield every N shader registrations
+#define LOADING_YIELD_SOUNDS   30   // yield every N sound registrations
+
+// Estimated totals for progress computation (approximate — exact counts not critical)
+#define LOADING_EST_MODELS    100
+#define LOADING_EST_SHADERS   200
+#define LOADING_EST_SOUNDS    100
+
+
+/*
+====================
 CL_CgameSystemCalls
 
 The cgame module is making a system call
@@ -537,6 +576,8 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return 0;
 	case CG_CM_LOADMAP:
 		CL_CM_LoadMap( VMA(1) );
+		cl_loadProgress.geometry = 1.0f;
+		CL_LoadingYield( "loading geometry" );
 		return 0;
 	case CG_CM_NUMINLINEMODELS:
 		return CM_NumInlineModels();
@@ -588,22 +629,61 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_S_RESPATIALIZE:
 		S_Respatialize( args[1], VMA(2), VMA(3), args[4] );
 		return 0;
-	case CG_S_REGISTERSOUND:
-		return S_RegisterSound( VMA(1), args[2] );
+	case CG_S_REGISTERSOUND: {
+		sfxHandle_t h = S_RegisterSound( VMA(1), args[2] );
+		if ( cls.state == CA_LOADING ) {
+			loadYield_soundCount++;
+			cl_loadProgress.audio = (float)loadYield_soundCount / LOADING_EST_SOUNDS;
+			if ( cl_loadProgress.audio > 1.0f ) cl_loadProgress.audio = 1.0f;
+			if ( loadYield_soundCount % LOADING_YIELD_SOUNDS == 0 ) {
+				CL_LoadingYield( "loading audio" );
+			}
+		}
+		return h;
+	}
 	case CG_S_STARTBACKGROUNDTRACK:
 		S_StartBackgroundTrack( VMA(1), VMA(2) );
 		return 0;
 	case CG_R_LOADWORLDMAP:
 		re.LoadWorld( VMA(1) );
+		CL_LoadingYield( "loading BSP" );
 		return 0;
-	case CG_R_REGISTERMODEL:
-		return re.RegisterModel( VMA(1) );
+	case CG_R_REGISTERMODEL: {
+		qhandle_t h = re.RegisterModel( VMA(1) );
+		if ( cls.state == CA_LOADING ) {
+			loadYield_modelCount++;
+			if ( loadYield_modelCount % LOADING_YIELD_MODELS == 0 ) {
+				CL_LoadingYield( "loading models" );
+			}
+		}
+		return h;
+	}
 	case CG_R_REGISTERSKIN:
 		return re.RegisterSkin( VMA(1) );
-	case CG_R_REGISTERSHADER:
-		return re.RegisterShader( VMA(1) );
-	case CG_R_REGISTERSHADERNOMIP:
-		return re.RegisterShaderNoMip( VMA(1) );
+	case CG_R_REGISTERSHADER: {
+		qhandle_t h = re.RegisterShader( VMA(1) );
+		if ( cls.state == CA_LOADING ) {
+			loadYield_shaderCount++;
+			cl_loadProgress.shaders = (float)loadYield_shaderCount / LOADING_EST_SHADERS;
+			if ( cl_loadProgress.shaders > 1.0f ) cl_loadProgress.shaders = 1.0f;
+			if ( loadYield_shaderCount % LOADING_YIELD_SHADERS == 0 ) {
+				CL_LoadingYield( "compiling shaders" );
+			}
+		}
+		return h;
+	}
+	case CG_R_REGISTERSHADERNOMIP: {
+		qhandle_t h = re.RegisterShaderNoMip( VMA(1) );
+		if ( cls.state == CA_LOADING ) {
+			loadYield_shaderCount++;
+			cl_loadProgress.shaders = (float)loadYield_shaderCount / LOADING_EST_SHADERS;
+			if ( cl_loadProgress.shaders > 1.0f ) cl_loadProgress.shaders = 1.0f;
+			if ( loadYield_shaderCount % LOADING_YIELD_SHADERS == 0 ) {
+				CL_LoadingYield( "compiling shaders" );
+			}
+		}
+		return h;
+	}
 	case CG_R_REGISTERFONT:
 		re.RegisterFont( VMA(1), args[2], VMA(3));
 		return 0;
@@ -634,8 +714,20 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		re.SetColor( VMA(1) );
 		return 0;
 	case CG_R_DRAWSTRETCHPIC:
-		re.DrawStretchPic( VMF(1), VMF(2), VMF(3), VMF(4), VMF(5), VMF(6), VMF(7), VMF(8), args[9] );
+		// Pass through — cgame callers (CG_DrawPic etc.) already normalize
+		// via CG_R_DRAWSTRETCHPICNORM. This old path is used by CG_TileClearBox
+		// and cgDC which send real pixel coords.
+		re.DrawStretchPic( VMF(1), VMF(2), VMF(3), VMF(4),
+			VMF(5), VMF(6), VMF(7), VMF(8), args[9] );
 		return 0;
+	case CG_R_DRAWSTRETCHPICNORM: {
+		float x = VMF(1) * cls.glconfig.vidWidth;
+		float y = VMF(2) * cls.glconfig.vidHeight;
+		float w = VMF(3) * cls.glconfig.vidWidth;
+		float h = VMF(4) * cls.glconfig.vidHeight;
+		re.DrawStretchPic( x, y, w, h, VMF(5), VMF(6), VMF(7), VMF(8), args[9] );
+		return 0;
+	}
 	case CG_R_MODELBOUNDS:
 		re.ModelBounds( args[1], VMA(2), VMA(3) );
 		return 0;
@@ -812,6 +904,26 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_WIREDUI_PUSH_EVENT:
 		WiredHud_ReceiveEvent( args[1], VMA(2) );
 		return 0;
+	case CG_R_DRAWTEXT:
+		/* cgame sends 640x480 virtual coordinates — scale to real pixels */
+		{
+			float xscale = (float)cls.glconfig.vidWidth / 640.0f;
+			float yscale = (float)cls.glconfig.vidHeight / 480.0f;
+			float x = VMF(2) * xscale;
+			float y = VMF(3) * yscale;
+			float size = VMF(5) * yscale;
+			Text_Draw( VMA(1), x, y, args[4], size, VMA(6), args[7], args[8] );
+		}
+		return 0;
+	case CG_R_MEASURETEXT:
+		/* cgame sends virtual size — scale to real pixels, measure, scale result back */
+		{
+			float yscale = (float)cls.glconfig.vidHeight / 480.0f;
+			float xscale = (float)cls.glconfig.vidWidth / 640.0f;
+			float realSize = VMF(3) * yscale;
+			float realWidth = Text_Measure( VMA(1), args[2], realSize );
+			return FloatAsInt( realWidth / xscale );
+		}
 #endif
 
 	default:
@@ -862,6 +974,14 @@ void CL_InitCGame( void ) {
 
 	t1 = Sys_Milliseconds();
 
+	// Reset loading progress tracking
+	Com_Memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
+	cl_loadProgress.startTime = cls.realtime;
+	cl_loadProgress.phase = "initializing";
+	loadYield_modelCount = 0;
+	loadYield_shaderCount = 0;
+	loadYield_soundCount = 0;
+
 	// put away the console
 	Con_Close();
 
@@ -908,6 +1028,12 @@ void CL_InitCGame( void ) {
 	// have the renderer touch all its images, so they are present
 	// on the card even if the driver does deferred loading
 	re.EndRegistration();
+
+	// Final yield — all assets are loaded and finalized
+	cl_loadProgress.geometry = 1.0f;
+	cl_loadProgress.shaders = 1.0f;
+	cl_loadProgress.audio = 1.0f;
+	CL_LoadingYield( "finalizing" );
 
 	// make sure everything is paged in
 	if (!Sys_LowPhysicalMemory()) {

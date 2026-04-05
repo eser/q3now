@@ -1,0 +1,62 @@
+// callvote.wmenu - Wired UI callvote dialog
+// Absolute positioning -- form layout with vote options.
+// Coordinates faithfully converted from callvote.menu (640x480 -> normalized).
+// q3now addition (FEAT_CALLVOTE_MENU)
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "callvote"
+	rect 0.266 0.208 0.469 0.583
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+	popup
+	outOfBoundsClick
+
+	onESC { close }
+
+	WLABEL(0.0, 0.043, 1.0, 0.071, "Call Vote", 24, 1)
+	WSEPARATOR(0.053, 0.129, 0.893)
+
+	WBUTTON(0.067, 0.171, 0.867, 0.071, "Restart Map", 19, exec "callvote map_restart" ; close)
+	WBUTTON(0.067, 0.271, 0.867, 0.071, "Next Map", 19, exec "callvote nextmap" ; close)
+	WBUTTON(0.067, 0.371, 0.867, 0.071, "Shuffle Teams", 19, exec "callvote shuffle" ; close)
+
+	WSEPARATOR(0.053, 0.479, 0.893)
+
+	itemDef {
+		type 12
+		text "Timelimit:"
+		rect 0.067 0.529 0.867 0.071
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "ui_voteTimelimit"
+		cvarFloatList { "5" 5 "10" 10 "15" 15 "20" 20 "30" 30 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	WBUTTON(0.067, 0.621, 0.867, 0.071, "Vote Timelimit", 17, exec "callvote timelimit" ; close)
+
+	itemDef {
+		type 12
+		text "Fraglimit:"
+		rect 0.067 0.721 0.867 0.071
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "ui_voteFraglimit"
+		cvarFloatList { "10" 10 "20" 20 "30" 30 "50" 50 "100" 100 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	WBUTTON(0.067, 0.814, 0.867, 0.071, "Vote Fraglimit", 17, exec "callvote fraglimit" ; close)
+
+	WSEPARATOR(0.053, 0.921, 0.893)
+	WBUTTON(0.067, 0.964, 0.867, 0.071, "Cancel", 19, close)
+}

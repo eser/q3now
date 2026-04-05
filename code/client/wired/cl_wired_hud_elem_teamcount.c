@@ -59,7 +59,7 @@ void CG_SHUDElementTeamCountRoutine(void* context)
 	team_t countTeam;
 	int i;
 
-	if ( cgs.gametype < GT_TEAM ) {
+	if ( cgs.gametype < GT_TDM ) {
 		return;
 	}
 
