@@ -1,0 +1,62 @@
+// connect.wmenu - Wired UI connection progress
+// Flex column layout -- vertical positioning handled by the layout engine.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "connect"
+	fullScreen 1
+	rect 0 0 1 1
+	style 1
+	backcolor 0.05 0.05 0.1 1
+	layout column
+	padding 0.05
+	gap 0.01
+
+	// spacer to push content toward center
+	itemDef {
+		type 0
+		rect 0 0 1.0 0
+		decoration
+		visible 1
+		grow 1
+	}
+
+	WLABEL(0, 0, 1.0, 0.050, "Connecting...", 24, 1)
+
+	// dimmed "Please wait" label
+	itemDef {
+		type 0
+		text "Please wait"
+		rect 0 0 1.0 0.033
+		textalign 1
+		font "oxanium" 17
+		forecolor 0.5 0.5 0.5 1
+		decoration
+		visible 1
+		grow 0
+	}
+
+	itemDef {
+		type 1
+		text "Cancel"
+		rect 0 0 1.0 0.050
+		textalign 1
+		font "sansman" 19
+		forecolor WCOLOR_ACCENT
+		visible 1
+		grow 0
+		action { exec "disconnect" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+
+	// spacer to push content toward center
+	itemDef {
+		type 0
+		rect 0 0 1.0 0
+		decoration
+		visible 1
+		grow 1
+	}
+}

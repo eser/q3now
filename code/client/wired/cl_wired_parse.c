@@ -25,6 +25,21 @@ File format reference:
 
 extern botlib_export_t *botlib_export;
 
+// ── format detection ──────────────────────────────────────────────────
+// .wmenu/.whud files use normalized coordinates (0.0-1.0) and point sizes.
+// .menu/.hud files use legacy virtual pixel coordinates and textscale fractions.
+// When loading legacy files, the parser shim converts values at parse time.
+
+static qboolean parseNativeFormat = qfalse;
+
+static qboolean IsNativeFormat( const char *filename ) {
+	const char *ext = COM_GetExtension( filename );
+	if ( !Q_stricmp( ext, "wmenu" ) || !Q_stricmp( ext, "whud" ) ) {
+		return qtrue;
+	}
+	return qfalse;
+}
+
 // ── memory pool ───────────────────────────────────────────────────────
 
 static char wired_menuPool[WIRED_MENU_POOL_SIZE];
@@ -61,8 +76,22 @@ static int WiredPC_FreeSource( int handle ) {
 	return botlib_export->PC_FreeSourceHandle( handle );
 }
 
+// One-token pushback buffer (botlib PC API has no unread function)
+static pc_token_t wired_pendingToken;
+static qboolean   wired_hasPendingToken = qfalse;
+
 static int WiredPC_ReadToken( int handle, pc_token_t *token ) {
+	if ( wired_hasPendingToken ) {
+		*token = wired_pendingToken;
+		wired_hasPendingToken = qfalse;
+		return 1;
+	}
 	return botlib_export->PC_ReadTokenHandle( handle, token );
+}
+
+static void WiredPC_UnreadToken( pc_token_t *token ) {
+	wired_pendingToken = *token;
+	wired_hasPendingToken = qtrue;
 }
 
 static int WiredPC_AddDefine( const char *define ) {
@@ -251,6 +280,55 @@ static qboolean WiredPC_Color( int handle, vec4_t *color ) {
 	return qtrue;
 }
 
+// ── unit-aware value parser ───────────────────────────────────────────
+// Parse a value with optional unit suffix: "0.5" (norm), "50vw", "50vh", "16px"
+
+static wuiValue_t WiredPC_ParseValue( int handle ) {
+	pc_token_t token;
+	wuiValue_t val;
+	val.value = 0.0f;
+	val.unit = UNIT_NORM;
+
+	if ( !WiredPC_ReadTokenEval( handle, &token ) ) {
+		return val;
+	}
+
+	val.value = token.floatvalue;
+
+	// Peek at next token for unit keyword (tokenizer splits "50vw" → "50" + "vw")
+	if ( WiredPC_ReadToken( handle, &token ) ) {
+		if ( !Q_stricmp( token.string, "vw" ) ) {
+			val.unit = UNIT_VW;
+		} else if ( !Q_stricmp( token.string, "vh" ) ) {
+			val.unit = UNIT_VH;
+		} else if ( !Q_stricmp( token.string, "px" ) ) {
+			val.unit = UNIT_PX;
+		} else {
+			// Not a unit keyword — push back for the next read
+			WiredPC_UnreadToken( &token );
+		}
+	}
+
+	return val;
+}
+
+// Legacy .menu/.hud files use a fixed virtual coordinate system.
+// These constants are ONLY used to normalize legacy coordinates to 0.0-1.0.
+#define LEGACY_VSCREEN_W  640.0f
+#define LEGACY_VSCREEN_H  480.0f
+
+// Back-fill a unit-aware value to real screen pixels for draw code.
+// screenDim is cls.glconfig.vidWidth for x/w, cls.glconfig.vidHeight for y/h.
+static float WUI_BackfillToScreen( wuiValue_t val, float screenDim ) {
+	switch ( val.unit ) {
+		case UNIT_VW:   return ( val.value / 100.0f ) * (float)cls.glconfig.vidWidth;
+		case UNIT_VH:   return ( val.value / 100.0f ) * (float)cls.glconfig.vidHeight;
+		case UNIT_PX:   return val.value;
+		case UNIT_NORM:
+		default:        return val.value * screenDim;
+	}
+}
+
 // ── data structures ───────────────────────────────────────────────────
 
 // wiredItemDef_t, wiredMenuDef_t defined in cl_wired_ui.h
@@ -260,13 +338,14 @@ static qboolean WiredPC_Color( int handle, vec4_t *color ) {
 static wiredMenuDef_t *wired_menus[WIRED_MAX_MENUS];
 static int              wired_menuCount = 0;
 
+// ── item property parser (shared between top-level and nested items) ──
+
+static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item );
+
 // ── item parser ───────────────────────────────────────────────────────
 
 static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
-	pc_token_t      token;
 	wiredItemDef_t *item;
-	const char     *str;
-	int             depth;
 
 	item = (wiredItemDef_t *)WiredUI_Alloc( sizeof( wiredItemDef_t ) );
 	if ( !item ) {
@@ -281,6 +360,27 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 	item->alignV = -1;      // sentinel: -1 = not set (TOP=0 is valid)
 	item->direction = -1;   // sentinel: -1 = not set (L2R=0 is valid)
 	item->fadeAlphaItem = 1.0f;  // fully opaque by default
+	item->anchor = ANCHOR_NONE;
+	item->textoffsetX = 0;
+	item->textoffsetY = 0;
+	item->fontPointSize = 0;
+	item->flexChild.shrink = 1.0f;  // default shrink for flex children
+
+	if ( !WiredUI_ParseItemProperties( handle, item ) ) {
+		return qfalse;
+	}
+
+	if ( menu->itemCount < WIRED_MAX_ITEMS_PER_MENU ) {
+		menu->items[menu->itemCount++] = item;
+	}
+
+	return qtrue;
+}
+
+static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) {
+	pc_token_t      token;
+	const char     *str;
+	int             depth;
 
 	// expect opening brace
 	if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
@@ -313,10 +413,34 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 			WiredPC_Int( handle, &item->type );
 		}
 		else if ( !Q_stricmp( token.string, "rect" ) ) {
-			WiredPC_Float( handle, &item->rect.x );
-			WiredPC_Float( handle, &item->rect.y );
-			WiredPC_Float( handle, &item->rect.w );
-			WiredPC_Float( handle, &item->rect.h );
+			if ( parseNativeFormat ) {
+				// .wmenu: parse with unit awareness
+				item->wuiRect.x = WiredPC_ParseValue( handle );
+				item->wuiRect.y = WiredPC_ParseValue( handle );
+				item->wuiRect.w = WiredPC_ParseValue( handle );
+				item->wuiRect.h = WiredPC_ParseValue( handle );
+				// Back-fill old rect for draw code (real screen pixels)
+				item->rect.x = WUI_BackfillToScreen( item->wuiRect.x, (float)cls.glconfig.vidWidth );
+				item->rect.y = WUI_BackfillToScreen( item->wuiRect.y, (float)cls.glconfig.vidHeight );
+				item->rect.w = WUI_BackfillToScreen( item->wuiRect.w, (float)cls.glconfig.vidWidth );
+				item->rect.h = WUI_BackfillToScreen( item->wuiRect.h, (float)cls.glconfig.vidHeight );
+			} else {
+				// Legacy .menu: parse raw virtual coords, normalize to wuiRect,
+				// then convert rect to real screen pixels
+				float rawX, rawY, rawW, rawH;
+				WiredPC_Float( handle, &rawX );
+				WiredPC_Float( handle, &rawY );
+				WiredPC_Float( handle, &rawW );
+				WiredPC_Float( handle, &rawH );
+				item->wuiRect.x = WUI_Val( rawX / LEGACY_VSCREEN_W, UNIT_NORM );
+				item->wuiRect.y = WUI_Val( rawY / LEGACY_VSCREEN_H, UNIT_NORM );
+				item->wuiRect.w = WUI_Val( rawW / LEGACY_VSCREEN_W, UNIT_NORM );
+				item->wuiRect.h = WUI_Val( rawH / LEGACY_VSCREEN_H, UNIT_NORM );
+				item->rect.x = ( rawX / LEGACY_VSCREEN_W ) * (float)cls.glconfig.vidWidth;
+				item->rect.y = ( rawY / LEGACY_VSCREEN_H ) * (float)cls.glconfig.vidHeight;
+				item->rect.w = ( rawW / LEGACY_VSCREEN_W ) * (float)cls.glconfig.vidWidth;
+				item->rect.h = ( rawH / LEGACY_VSCREEN_H ) * (float)cls.glconfig.vidHeight;
+			}
 		}
 		else if ( !Q_stricmp( token.string, "style" ) ) {
 			WiredPC_Int( handle, &item->style );
@@ -326,12 +450,17 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 		}
 		else if ( !Q_stricmp( token.string, "textalignx" ) ) {
 			WiredPC_Float( handle, &item->textalignx );
+			// Legacy .menu textalignx values are in pixels — keep as-is
+			// .wmenu uses textoffset instead, textalignx not used in native format
 		}
 		else if ( !Q_stricmp( token.string, "textaligny" ) ) {
 			WiredPC_Float( handle, &item->textaligny );
+			// Legacy .menu textaligny values are in pixels — keep as-is
 		}
 		else if ( !Q_stricmp( token.string, "textscale" ) ) {
 			WiredPC_Float( handle, &item->textscale );
+			// Legacy .menu textscale is 0.0-1.0 fraction — keep as-is for render loop
+			// .wmenu uses font "name" pointsize instead, textscale not used in native format
 		}
 		else if ( !Q_stricmp( token.string, "textstyle" ) ) {
 			WiredPC_Int( handle, &item->textstyle );
@@ -472,8 +601,29 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 		else if ( !Q_stricmp( token.string, "special" ) ) {
 			WiredPC_Float( handle, &item->special );
 		}
-		else if ( !Q_stricmp( token.string, "align" ) ) {
+		else if ( !parseNativeFormat && !Q_stricmp( token.string, "align" ) ) {
 			WiredPC_Int( handle, &item->align );
+		}
+		else if ( !Q_stricmp( token.string, "anchor" ) ) {
+			if ( WiredPC_String( handle, &str ) ) {
+				if      ( !Q_stricmp( str, "TOP_LEFT" ) )      item->anchor = ANCHOR_TOP_LEFT;
+				else if ( !Q_stricmp( str, "TOP_CENTER" ) )     item->anchor = ANCHOR_TOP_CENTER;
+				else if ( !Q_stricmp( str, "TOP_RIGHT" ) )      item->anchor = ANCHOR_TOP_RIGHT;
+				else if ( !Q_stricmp( str, "CENTER_LEFT" ) )    item->anchor = ANCHOR_CENTER_LEFT;
+				else if ( !Q_stricmp( str, "CENTER" ) )         item->anchor = ANCHOR_CENTER;
+				else if ( !Q_stricmp( str, "CENTER_RIGHT" ) )   item->anchor = ANCHOR_CENTER_RIGHT;
+				else if ( !Q_stricmp( str, "BOTTOM_LEFT" ) )    item->anchor = ANCHOR_BOTTOM_LEFT;
+				else if ( !Q_stricmp( str, "BOTTOM_CENTER" ) )  item->anchor = ANCHOR_BOTTOM_CENTER;
+				else if ( !Q_stricmp( str, "BOTTOM_RIGHT" ) )   item->anchor = ANCHOR_BOTTOM_RIGHT;
+				else {
+					Com_Printf( S_COLOR_YELLOW "WARNING: unknown anchor '%s'\n", str );
+					item->anchor = ANCHOR_NONE;
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "textoffset" ) ) {
+			WiredPC_Float( handle, &item->textoffsetX );
+			WiredPC_Float( handle, &item->textoffsetY );
 		}
 		else if ( !Q_stricmp( token.string, "addColorRange" ) ) {
 			if ( item->numColorRanges < WIRED_MAX_COLOR_RANGES ) {
@@ -539,14 +689,20 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 				Q_strncpyz( item->bind, str, sizeof( item->bind ) );
 		}
 		// ── SuperHUD element properties (Phase 3) ────────────────────
-		else if ( !Q_stricmp( token.string, "font" ) && item->hudElement[0] ) {
-			// font name for hudElement items (SuperHUD style)
+		else if ( !Q_stricmp( token.string, "font" ) && ( item->hudElement[0] || parseNativeFormat ) ) {
+			// font "name" [pointsize]
+			// SuperHUD items: font name only (fontsize parsed separately)
+			// Native format (.wmenu/.whud): font "name" pointsize
 			if ( WiredPC_String( handle, &str ) )
 				Q_strncpyz( item->fontName, str, sizeof( item->fontName ) );
+			if ( parseNativeFormat && !item->hudElement[0] ) {
+				WiredPC_Float( handle, &item->fontPointSize );
+			}
 		}
 		else if ( !Q_stricmp( token.string, "fontsize" ) ) {
 			WiredPC_Float( handle, &item->fontSize[0] );
 			WiredPC_Float( handle, &item->fontSize[1] );
+			// Legacy fontsize W+H — keep as-is for render loop
 		}
 		else if ( !Q_stricmp( token.string, "direction" ) ) {
 			if ( WiredPC_String( handle, &str ) ) {
@@ -674,6 +830,216 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 				}
 			}
 		}
+		// ── Layer 2: flex container keywords ──────────────────────────
+		else if ( !Q_stricmp( token.string, "layout" ) ) {
+			pc_token_t layoutToken;
+			if ( WiredPC_ReadTokenEval( handle, &layoutToken ) ) {
+				if ( !Q_stricmp( layoutToken.string, "row" ) ) {
+					item->flexContainer.direction = WUI_LAYOUT_ROW;
+					item->isFlexContainer = qtrue;
+				} else if ( !Q_stricmp( layoutToken.string, "column" ) ) {
+					item->flexContainer.direction = WUI_LAYOUT_COLUMN;
+					item->isFlexContainer = qtrue;
+				}
+				// Check for "wrap" modifier
+				if ( WiredPC_ReadToken( handle, &layoutToken ) ) {
+					if ( !Q_stricmp( layoutToken.string, "wrap" ) ) {
+						item->flexContainer.wrap = qtrue;
+					} else {
+						WiredPC_UnreadToken( &layoutToken );
+					}
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "gap" ) ) {
+			item->flexContainer.gap = WiredPC_ParseValue( handle );
+		}
+		else if ( !Q_stricmp( token.string, "padding" ) ) {
+			// Support 1, 2, or 4 value forms
+			pc_token_t peek;
+			item->flexContainer.padding[0] = WiredPC_ParseValue( handle );
+			// Try reading more values
+			if ( WiredPC_ReadToken( handle, &peek ) ) {
+				if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
+					// At least 2 values
+					WiredPC_UnreadToken( &peek );
+					item->flexContainer.padding[1] = WiredPC_ParseValue( handle );
+					// Try 3rd and 4th
+					if ( WiredPC_ReadToken( handle, &peek ) ) {
+						if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
+							WiredPC_UnreadToken( &peek );
+							item->flexContainer.padding[2] = WiredPC_ParseValue( handle );
+							item->flexContainer.padding[3] = WiredPC_ParseValue( handle );
+						} else {
+							WiredPC_UnreadToken( &peek );
+							// 2-value form: top/bottom = [0], left/right = [1]
+							item->flexContainer.padding[2] = item->flexContainer.padding[0];
+							item->flexContainer.padding[3] = item->flexContainer.padding[1];
+						}
+					}
+				} else {
+					WiredPC_UnreadToken( &peek );
+					// 1-value form: all sides equal
+					item->flexContainer.padding[1] = item->flexContainer.padding[0];
+					item->flexContainer.padding[2] = item->flexContainer.padding[0];
+					item->flexContainer.padding[3] = item->flexContainer.padding[0];
+				}
+			}
+		}
+		else if ( parseNativeFormat && !Q_stricmp( token.string, "align" ) ) {
+			// Native format: flex align keyword (overrides legacy int align)
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
+				if ( !Q_stricmp( val.string, "start" ) ) item->flexContainer.align = WUI_ALIGN_START;
+				else if ( !Q_stricmp( val.string, "center" ) ) item->flexContainer.align = WUI_ALIGN_CENTER;
+				else if ( !Q_stricmp( val.string, "end" ) ) item->flexContainer.align = WUI_ALIGN_END;
+				else if ( !Q_stricmp( val.string, "stretch" ) ) item->flexContainer.align = WUI_ALIGN_STRETCH;
+				else {
+					// Legacy numeric align value in native format
+					item->align = atoi( val.string );
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "justify" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
+				if ( !Q_stricmp( val.string, "start" ) ) item->flexContainer.justify = WUI_JUSTIFY_START;
+				else if ( !Q_stricmp( val.string, "center" ) ) item->flexContainer.justify = WUI_JUSTIFY_CENTER;
+				else if ( !Q_stricmp( val.string, "end" ) ) item->flexContainer.justify = WUI_JUSTIFY_END;
+				else if ( !Q_stricmp( val.string, "space-between" ) ) item->flexContainer.justify = WUI_JUSTIFY_SPACE_BETWEEN;
+			}
+		}
+		// ── positioning mode ──────────────────────────────────────────
+		else if ( !Q_stricmp( token.string, "position" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
+				if ( !Q_stricmp( val.string, "absolute" ) ) item->position = POSITION_ABSOLUTE;
+				else if ( !Q_stricmp( val.string, "viewport" ) ) item->position = POSITION_VIEWPORT;
+				else item->position = POSITION_STATIC;
+			}
+		}
+		// ── Layer 2: flex child keywords ──────────────────────────────
+		else if ( !Q_stricmp( token.string, "grow" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) item->flexChild.grow = val.floatvalue;
+		}
+		else if ( !Q_stricmp( token.string, "shrink" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) item->flexChild.shrink = val.floatvalue;
+		}
+		else if ( !Q_stricmp( token.string, "basis" ) ) {
+			item->flexChild.basis = WiredPC_ParseValue( handle );
+		}
+		else if ( !Q_stricmp( token.string, "alignSelf" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
+				if ( !Q_stricmp( val.string, "start" ) ) item->flexChild.alignSelf = WUI_ALIGN_START;
+				else if ( !Q_stricmp( val.string, "center" ) ) item->flexChild.alignSelf = WUI_ALIGN_CENTER;
+				else if ( !Q_stricmp( val.string, "end" ) ) item->flexChild.alignSelf = WUI_ALIGN_END;
+				else if ( !Q_stricmp( val.string, "stretch" ) ) item->flexChild.alignSelf = WUI_ALIGN_STRETCH;
+			}
+		}
+		else if ( !Q_stricmp( token.string, "aspect" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
+				const char *slash;
+				item->aspect.active = qtrue;
+				// Check for "N/M" format (e.g. "16/9")
+				slash = strchr( val.string, '/' );
+				if ( slash ) {
+					float num = atof( val.string );
+					float den = atof( slash + 1 );
+					item->aspect.ratio = ( den > 0 ) ? num / den : 1.0f;
+				} else {
+					item->aspect.ratio = val.floatvalue;
+					if ( item->aspect.ratio <= 0 ) item->aspect.ratio = 1.0f;
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "minWidth" ) ) {
+			item->flexChild.minWidth = WiredPC_ParseValue( handle );
+		}
+		else if ( !Q_stricmp( token.string, "maxWidth" ) ) {
+			item->flexChild.maxWidth = WiredPC_ParseValue( handle );
+		}
+		else if ( !Q_stricmp( token.string, "minHeight" ) ) {
+			item->flexChild.minHeight = WiredPC_ParseValue( handle );
+		}
+		else if ( !Q_stricmp( token.string, "maxHeight" ) ) {
+			item->flexChild.maxHeight = WiredPC_ParseValue( handle );
+		}
+		// ── Layer 2: nested itemDef (flex container children) ─────────
+		else if ( !Q_stricmp( token.string, "itemDef" ) ) {
+			if ( item->isFlexContainer && item->childCount < WIRED_MAX_ITEMS_PER_MENU ) {
+				wiredItemDef_t *child = (wiredItemDef_t *)WiredUI_Alloc( sizeof( wiredItemDef_t ) );
+				if ( child ) {
+					Com_Memset( child, 0, sizeof( *child ) );
+					// defaults for nested child
+					child->visible = qtrue;
+					child->forecolor[0] = child->forecolor[1] = child->forecolor[2] = child->forecolor[3] = 1.0f;
+					child->textscale = 0.3f;
+					child->textalign = -1;
+					child->alignV = -1;
+					child->direction = -1;
+					child->fadeAlphaItem = 1.0f;
+					child->anchor = ANCHOR_NONE;
+					child->flexChild.shrink = 1.0f;
+					if ( WiredUI_ParseItemProperties( handle, child ) ) {
+						item->children[item->childCount++] = child;
+					}
+				}
+			} else {
+				// Not a flex container or children full — skip the block
+				if ( WiredPC_ReadToken( handle, &token ) && !Q_stricmp( token.string, "{" ) ) {
+					int skipDepth = 1;
+					while ( skipDepth > 0 ) {
+						if ( !WiredPC_ReadToken( handle, &token ) ) break;
+						if ( !Q_stricmp( token.string, "{" ) ) skipDepth++;
+						else if ( !Q_stricmp( token.string, "}" ) ) skipDepth--;
+					}
+				}
+			}
+		}
+		// ── Layer 5: transition animation ─────────────────────────────
+		else if ( !Q_stricmp( token.string, "transition" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
+				item->wuiTransition.duration = val.intvalue;
+			}
+			// Check for optional easing keyword
+			if ( WiredPC_ReadToken( handle, &val ) ) {
+				if ( !Q_stricmp( val.string, "ease-in" ) ) item->wuiTransition.easing = WUI_EASE_IN;
+				else if ( !Q_stricmp( val.string, "ease-out" ) ) item->wuiTransition.easing = WUI_EASE_OUT;
+				else if ( !Q_stricmp( val.string, "ease-in-out" ) ) item->wuiTransition.easing = WUI_EASE_IN_OUT;
+				else if ( !Q_stricmp( val.string, "linear" ) ) item->wuiTransition.easing = WUI_EASE_LINEAR;
+				else WiredPC_UnreadToken( &val );
+			}
+		}
+		// ── Layer 5: responsive breakpoint ────────────────────────────
+		else if ( !Q_stricmp( token.string, "breakpoint" ) ) {
+			if ( item->breakpointCount < WUI_MAX_BREAKPOINTS ) {
+				wuiBreakpoint_t *bp = &item->breakpoints[item->breakpointCount];
+				bp->active = qtrue;
+				// Parse: breakpoint minW maxW { rect ... }
+				pc_token_t val;
+				if ( WiredPC_ReadTokenEval( handle, &val ) ) bp->minWidth = val.intvalue;
+				if ( WiredPC_ReadTokenEval( handle, &val ) ) bp->maxWidth = val.intvalue;
+				// Expect opening brace
+				if ( WiredPC_ReadToken( handle, &val ) && val.string[0] == '{' ) {
+					// Parse inner properties (currently only rect)
+					while ( WiredPC_ReadToken( handle, &val ) ) {
+						if ( val.string[0] == '}' ) break;
+						if ( !Q_stricmp( val.string, "rect" ) ) {
+							bp->rect.x = WiredPC_ParseValue( handle );
+							bp->rect.y = WiredPC_ParseValue( handle );
+							bp->rect.w = WiredPC_ParseValue( handle );
+							bp->rect.h = WiredPC_ParseValue( handle );
+						}
+					}
+				}
+				item->breakpointCount++;
+			}
+		}
 		else {
 			// unknown keyword — smart skip to avoid poisoning subsequent parsing
 			Com_DPrintf( "WiredUI: unknown item keyword '%s'\n", token.string );
@@ -690,10 +1056,6 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 				// else: consumed one token (the value) — good enough
 			}
 		}
-	}
-
-	if ( menu->itemCount < WIRED_MAX_ITEMS_PER_MENU ) {
-		menu->items[menu->itemCount++] = item;
 	}
 
 	return qtrue;
@@ -714,6 +1076,7 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 
 	// defaults
 	menu->visible = qtrue;
+	menu->anchor = ANCHOR_NONE;
 	menu->cinematicHandle = -1;
 	menu->focuscolor[0] = 1.0f;
 	menu->focuscolor[1] = 0.75f;
@@ -745,10 +1108,34 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 			menu->fullscreen = (qboolean)v;
 		}
 		else if ( !Q_stricmp( token.string, "rect" ) ) {
-			WiredPC_Float( handle, &menu->rect.x );
-			WiredPC_Float( handle, &menu->rect.y );
-			WiredPC_Float( handle, &menu->rect.w );
-			WiredPC_Float( handle, &menu->rect.h );
+			if ( parseNativeFormat ) {
+				// .wmenu: parse with unit awareness
+				menu->wuiRect.x = WiredPC_ParseValue( handle );
+				menu->wuiRect.y = WiredPC_ParseValue( handle );
+				menu->wuiRect.w = WiredPC_ParseValue( handle );
+				menu->wuiRect.h = WiredPC_ParseValue( handle );
+				// Back-fill old rect for draw code (real screen pixels)
+				menu->rect.x = WUI_BackfillToScreen( menu->wuiRect.x, (float)cls.glconfig.vidWidth );
+				menu->rect.y = WUI_BackfillToScreen( menu->wuiRect.y, (float)cls.glconfig.vidHeight );
+				menu->rect.w = WUI_BackfillToScreen( menu->wuiRect.w, (float)cls.glconfig.vidWidth );
+				menu->rect.h = WUI_BackfillToScreen( menu->wuiRect.h, (float)cls.glconfig.vidHeight );
+			} else {
+				// Legacy .menu: parse raw virtual coords, normalize to wuiRect,
+				// then convert rect to real screen pixels
+				float rawX, rawY, rawW, rawH;
+				WiredPC_Float( handle, &rawX );
+				WiredPC_Float( handle, &rawY );
+				WiredPC_Float( handle, &rawW );
+				WiredPC_Float( handle, &rawH );
+				menu->wuiRect.x = WUI_Val( rawX / LEGACY_VSCREEN_W, UNIT_NORM );
+				menu->wuiRect.y = WUI_Val( rawY / LEGACY_VSCREEN_H, UNIT_NORM );
+				menu->wuiRect.w = WUI_Val( rawW / LEGACY_VSCREEN_W, UNIT_NORM );
+				menu->wuiRect.h = WUI_Val( rawH / LEGACY_VSCREEN_H, UNIT_NORM );
+				menu->rect.x = ( rawX / LEGACY_VSCREEN_W ) * (float)cls.glconfig.vidWidth;
+				menu->rect.y = ( rawY / LEGACY_VSCREEN_H ) * (float)cls.glconfig.vidHeight;
+				menu->rect.w = ( rawW / LEGACY_VSCREEN_W ) * (float)cls.glconfig.vidWidth;
+				menu->rect.h = ( rawH / LEGACY_VSCREEN_H ) * (float)cls.glconfig.vidHeight;
+			}
 		}
 		else if ( !Q_stricmp( token.string, "style" ) ) {
 			WiredPC_Int( handle, &menu->style );
@@ -817,6 +1204,23 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		else if ( !Q_stricmp( token.string, "outOfBoundsClick" ) ) {
 			menu->outOfBoundsClick = qtrue;
 		}
+		else if ( !Q_stricmp( token.string, "anchor" ) ) {
+			if ( WiredPC_String( handle, &str ) ) {
+				if      ( !Q_stricmp( str, "TOP_LEFT" ) )      menu->anchor = ANCHOR_TOP_LEFT;
+				else if ( !Q_stricmp( str, "TOP_CENTER" ) )     menu->anchor = ANCHOR_TOP_CENTER;
+				else if ( !Q_stricmp( str, "TOP_RIGHT" ) )      menu->anchor = ANCHOR_TOP_RIGHT;
+				else if ( !Q_stricmp( str, "CENTER_LEFT" ) )    menu->anchor = ANCHOR_CENTER_LEFT;
+				else if ( !Q_stricmp( str, "CENTER" ) )         menu->anchor = ANCHOR_CENTER;
+				else if ( !Q_stricmp( str, "CENTER_RIGHT" ) )   menu->anchor = ANCHOR_CENTER_RIGHT;
+				else if ( !Q_stricmp( str, "BOTTOM_LEFT" ) )    menu->anchor = ANCHOR_BOTTOM_LEFT;
+				else if ( !Q_stricmp( str, "BOTTOM_CENTER" ) )  menu->anchor = ANCHOR_BOTTOM_CENTER;
+				else if ( !Q_stricmp( str, "BOTTOM_RIGHT" ) )   menu->anchor = ANCHOR_BOTTOM_RIGHT;
+				else {
+					Com_Printf( S_COLOR_YELLOW "WARNING: unknown anchor '%s'\n", str );
+					menu->anchor = ANCHOR_NONE;
+				}
+			}
+		}
 		else if ( !Q_stricmp( token.string, "border" ) ) {
 			WiredPC_Int( handle, &menu->border );
 		}
@@ -863,6 +1267,75 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		}
 		else if ( !Q_stricmp( token.string, "ownerdrawFlag" ) ) {
 			int odf; WiredPC_Int( handle, &odf );
+		}
+		// ── Layer 2: flex container keywords (menu level) ────────────
+		else if ( !Q_stricmp( token.string, "layout" ) ) {
+			pc_token_t layoutToken;
+			if ( WiredPC_ReadTokenEval( handle, &layoutToken ) ) {
+				if ( !Q_stricmp( layoutToken.string, "row" ) ) {
+					menu->flexContainer.direction = WUI_LAYOUT_ROW;
+					menu->isFlexContainer = qtrue;
+				} else if ( !Q_stricmp( layoutToken.string, "column" ) ) {
+					menu->flexContainer.direction = WUI_LAYOUT_COLUMN;
+					menu->isFlexContainer = qtrue;
+				}
+				// Check for "wrap" modifier
+				if ( WiredPC_ReadToken( handle, &layoutToken ) ) {
+					if ( !Q_stricmp( layoutToken.string, "wrap" ) ) {
+						menu->flexContainer.wrap = qtrue;
+					} else {
+						WiredPC_UnreadToken( &layoutToken );
+					}
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "gap" ) ) {
+			menu->flexContainer.gap = WiredPC_ParseValue( handle );
+		}
+		else if ( !Q_stricmp( token.string, "padding" ) ) {
+			// Support 1, 2, or 4 value forms
+			pc_token_t peek;
+			menu->flexContainer.padding[0] = WiredPC_ParseValue( handle );
+			if ( WiredPC_ReadToken( handle, &peek ) ) {
+				if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
+					WiredPC_UnreadToken( &peek );
+					menu->flexContainer.padding[1] = WiredPC_ParseValue( handle );
+					if ( WiredPC_ReadToken( handle, &peek ) ) {
+						if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
+							WiredPC_UnreadToken( &peek );
+							menu->flexContainer.padding[2] = WiredPC_ParseValue( handle );
+							menu->flexContainer.padding[3] = WiredPC_ParseValue( handle );
+						} else {
+							WiredPC_UnreadToken( &peek );
+							menu->flexContainer.padding[2] = menu->flexContainer.padding[0];
+							menu->flexContainer.padding[3] = menu->flexContainer.padding[1];
+						}
+					}
+				} else {
+					WiredPC_UnreadToken( &peek );
+					menu->flexContainer.padding[1] = menu->flexContainer.padding[0];
+					menu->flexContainer.padding[2] = menu->flexContainer.padding[0];
+					menu->flexContainer.padding[3] = menu->flexContainer.padding[0];
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "align" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
+				if ( !Q_stricmp( val.string, "start" ) ) menu->flexContainer.align = WUI_ALIGN_START;
+				else if ( !Q_stricmp( val.string, "center" ) ) menu->flexContainer.align = WUI_ALIGN_CENTER;
+				else if ( !Q_stricmp( val.string, "end" ) ) menu->flexContainer.align = WUI_ALIGN_END;
+				else if ( !Q_stricmp( val.string, "stretch" ) ) menu->flexContainer.align = WUI_ALIGN_STRETCH;
+			}
+		}
+		else if ( !Q_stricmp( token.string, "justify" ) ) {
+			pc_token_t val;
+			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
+				if ( !Q_stricmp( val.string, "start" ) ) menu->flexContainer.justify = WUI_JUSTIFY_START;
+				else if ( !Q_stricmp( val.string, "center" ) ) menu->flexContainer.justify = WUI_JUSTIFY_CENTER;
+				else if ( !Q_stricmp( val.string, "end" ) ) menu->flexContainer.justify = WUI_JUSTIFY_END;
+				else if ( !Q_stricmp( val.string, "space-between" ) ) menu->flexContainer.justify = WUI_JUSTIFY_SPACE_BETWEEN;
+			}
 		}
 		else if ( !Q_stricmp( token.string, "itemDef" ) ) {
 			if ( !WiredUI_ParseItem( handle, menu ) ) {
@@ -915,15 +1388,31 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 	int         handle;
 	pc_token_t  token;
 
+	// detect file format before parsing begins
+	parseNativeFormat = IsNativeFormat( filename );
+
 	handle = WiredPC_LoadSource( filename );
 	if ( !handle ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: could not load '%s'\n", filename );
 		return qfalse;
 	}
 
+	if ( parseNativeFormat ) {
+		Com_DPrintf( "WiredUI: loading native format '%s'\n", filename );
+	}
+
 	while ( 1 ) {
 		if ( !WiredPC_ReadToken( handle, &token ) ) {
 			break;
+		}
+
+		// skip #include directives for legacy files — shim handles conversions
+		if ( token.string[0] == '#' ) {
+			if ( !parseNativeFormat ) {
+				// Legacy files use #include for menumacros.h — skip the directive and its argument
+				Com_DPrintf( "WiredUI: skipping preprocessor directive '%s' in legacy file\n", token.string );
+				continue;
+			}
 		}
 
 		if ( !Q_stricmp( token.string, "menuDef" ) ) {
@@ -992,6 +1481,42 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 					WiredPC_ReadToken( handle, &token ); ag->focusColor[1] = atof( token.string );
 					WiredPC_ReadToken( handle, &token ); ag->focusColor[2] = atof( token.string );
 					WiredPC_ReadToken( handle, &token ); ag->focusColor[3] = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "shadowX" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->shadowX = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "shadowY" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->shadowY = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "gradientBarColor" ) ) {
+					WiredPC_ReadToken( handle, &token ); ag->gradientBarColor[0] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->gradientBarColor[1] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->gradientBarColor[2] = atof( token.string );
+					WiredPC_ReadToken( handle, &token ); ag->gradientBarColor[3] = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "radialGlow" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->radialGlowShader, token.string, sizeof( ag->radialGlowShader ) );
+				}
+				else if ( !Q_stricmp( token.string, "defaultFont" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->defaultFontName, token.string, sizeof( ag->defaultFontName ) );
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->defaultFontSize = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "defaultHeadingFont" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->defaultHeadingFontName, token.string, sizeof( ag->defaultHeadingFontName ) );
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->defaultHeadingFontSize = atof( token.string );
+				}
+				else if ( !Q_stricmp( token.string, "defaultConsoleFont" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->defaultConsoleFontName, token.string, sizeof( ag->defaultConsoleFontName ) );
+					if ( WiredPC_ReadToken( handle, &token ) )
+						ag->defaultConsoleFontSize = atof( token.string );
 				}
 				// skip unknown keywords gracefully
 			}

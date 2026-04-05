@@ -516,7 +516,7 @@ void WiredHud_RenderElements( void ) {
 
 	is_dead        = wiredHud->predictedPlayerState.pm_type == PM_DEAD;
 	is_intermission = wiredHud->predictedPlayerState.pm_type == PM_INTERMISSION;
-	is_team_game   = wiredHud->gametype >= GT_TEAM;
+	is_team_game   = wiredHud->gametype >= GT_TDM;
 	is_spectator   = wired_IsSpectator();
 	is_scores      = wiredHud->showScores;
 

@@ -440,8 +440,7 @@ level.spawnVars[], then call the class specific spawn function
 void G_SpawnGEntityFromSpawnVars( void ) {
 	int			i;
 	gentity_t	*ent;
-	char		*s, *value, *gametypeName;
-	static char *gametypeNames[] = {"ffa", "tournament", "team", "ctf", "oneflag", "obelisk", "harvester"};
+	char		*s, *value;
 
 	// get the next free entity
 	ent = G_Spawn();
@@ -459,8 +458,8 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 			return;
 		}
 	}
-	// check for "notteam" flag (GT_FFA, GT_TOURNAMENT)
-	if ( g_gametype.integer >= GT_TEAM ) {
+	// check for "notteam" flag (GT_DEATHMATCH, GT_DUEL, GT_KINGOFTHEHILL)
+	if ( g_gametype.integer >= GT_TDM ) {
 		G_SpawnInt( "notteam", "0", &i );
 		if ( i ) {
 			ADJUST_AREAPORTAL();
@@ -493,10 +492,8 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 #endif
 
 	if( G_SpawnString( "gametype", NULL, &value ) ) {
-		if( g_gametype.integer >= GT_FFA && g_gametype.integer < GT_MAX_GAME_TYPE ) {
-			gametypeName = gametypeNames[g_gametype.integer];
-
-			s = strstr( value, gametypeName );
+		if( g_gametype.integer >= GT_DEATHMATCH && g_gametype.integer < GT_MAX_GAME_TYPE ) {
+			s = strstr( value, bg_gametypelist[g_gametype.integer].shortname );
 			if( !s ) {
 				ADJUST_AREAPORTAL();
 				G_FreeEntity( ent );

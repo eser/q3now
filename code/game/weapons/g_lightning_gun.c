@@ -136,3 +136,141 @@ void Attack_LightningGun_Primary( gentity_t *ent ) {
 		break;
 	}
 }
+
+/*
+=================
+Attack_LightningGun_ChainArc
+Alt-fire: fires primary LG beam + arcs to nearby secondary target.
+Arc searches 192 units around the primary hit target.
+Arc damage: 3 per tick (~37.5% of primary 8).
+=================
+*/
+void Attack_LightningGun_ChainArc( gentity_t *ent ) {
+	trace_t		tr;
+	vec3_t		end;
+	gentity_t	*traceEnt, *tent;
+	int			damage, i, passent;
+	vec3_t		impactPoint;
+	gentity_t	*primaryTarget = NULL;
+
+	damage = 8 * s_quadFactor;
+
+	// --- Primary beam (same as Attack_LightningGun_Primary) ---
+	VectorMA( muzzle, LIGHTNING_RANGE, forward, end );
+
+	passent = ent->s.number;
+	for (i = 0; i < 10; i++) {
+		vec3_t lgMins = {-4, -4, -4};
+		vec3_t lgMaxs = {4, 4, 4};
+		trap_Trace( &tr, muzzle, lgMins, lgMaxs, end, passent, MASK_SHOT );
+
+		if ( tr.entityNum == ENTITYNUM_NONE ) {
+			break;
+		}
+
+		traceEnt = &g_entities[tr.entityNum];
+
+		if ( traceEnt->takedamage ) {
+			int finalDamage = damage;
+
+			if ( bg_attacklist[ATT_LIGHTNING_GUN_CHAIN_ARC].maxDamageDistance > 0 ) {
+				finalDamage = G_DamageFalloff( damage, muzzle, tr.endpos,
+					bg_attacklist[ATT_LIGHTNING_GUN_CHAIN_ARC].maxDamageDistance );
+			}
+
+			// Apply primary beam damage with upward bias for juggle
+			{
+				vec3_t lgDir;
+				VectorSubtract( tr.endpos, muzzle, lgDir );
+				VectorNormalize( lgDir );
+				lgDir[2] += 0.5f;
+
+				G_Damage( traceEnt, ent, ent, lgDir, tr.endpos, finalDamage,
+					0, MOD_LIGHTNING );
+			}
+
+			// Track primary target for arc search
+			if ( traceEnt->client && !primaryTarget ) {
+				primaryTarget = traceEnt;
+				VectorCopy( tr.endpos, impactPoint );
+			}
+
+			// Stats tracking
+			if ( traceEnt->client ) {
+				ent->client->attackStats[ATT_LIGHTNING_GUN_CHAIN_ARC].hits++;
+			}
+		}
+
+		if ( traceEnt->takedamage && traceEnt->client ) {
+			break;  // Stop at first client hit for primary beam
+		}
+
+		// Continue trace through non-client entities
+		passent = traceEnt->s.number;
+	}
+
+	// Always count as a shot for stats
+	ent->client->attackStats[ATT_LIGHTNING_GUN_CHAIN_ARC].shots++;
+
+	// --- Arc to secondary target ---
+	if ( primaryTarget && primaryTarget->client ) {
+		gentity_t	*arcTarget = NULL;
+		float		bestDist = LG_CHAIN_ARC_RANGE + 1;
+		int			j;
+		trace_t		arcTrace;
+
+		// Search for nearest enemy within arc range of primary target
+		for ( j = 0; j < level.maxclients; j++ ) {
+			gentity_t *candidate = &g_entities[j];
+
+			// Skip invalid candidates
+			if ( !candidate->inuse || !candidate->client ) continue;
+			if ( candidate == ent ) continue;           // not the shooter
+			if ( candidate == primaryTarget ) continue;  // not the primary target
+			if ( candidate->health <= 0 ) continue;      // must be alive
+			if ( candidate->client->sess.sessionTeam == TEAM_SPECTATOR ) continue;
+
+			// Team check: don't arc to teammates
+			if ( OnSameTeam( candidate, ent ) ) continue;
+
+			// Distance check from primary target
+			{
+				vec3_t diff;
+				float dist;
+				VectorSubtract( candidate->r.currentOrigin, primaryTarget->r.currentOrigin, diff );
+				dist = VectorLength( diff );
+
+				if ( dist > LG_CHAIN_ARC_RANGE ) continue;
+				if ( dist >= bestDist ) continue;
+
+				// LOS check from primary target to candidate
+				trap_Trace( &arcTrace, impactPoint, NULL, NULL,
+					candidate->r.currentOrigin, primaryTarget->s.number, MASK_SHOT );
+
+				if ( arcTrace.entityNum != candidate->s.number ) continue;
+
+				// Valid arc target
+				arcTarget = candidate;
+				bestDist = dist;
+			}
+		}
+
+		// Apply arc damage to secondary target
+		if ( arcTarget ) {
+			int arcDamage = LG_CHAIN_ARC_DAMAGE * s_quadFactor;
+			vec3_t arcDir;
+
+			VectorSubtract( arcTarget->r.currentOrigin, impactPoint, arcDir );
+			VectorNormalize( arcDir );
+
+			G_Damage( arcTarget, ent, ent, arcDir, arcTarget->r.currentOrigin,
+				arcDamage, 0, MOD_LIGHTNING_CHAIN_ARC );
+
+			// Send arc event for client-side rendering
+			tent = G_TempEntity( impactPoint, EV_LIGHTNING_ARC );
+			VectorCopy( impactPoint, tent->s.origin );
+			VectorCopy( arcTarget->r.currentOrigin, tent->s.origin2 );
+			tent->s.otherEntityNum = arcTarget->s.number;
+		}
+	}
+}

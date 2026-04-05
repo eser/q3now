@@ -98,6 +98,7 @@ cvar_t *cl_drawBuffer;
 clientActive_t		cl;
 clientConnection_t	clc;
 clientStatic_t		cls;
+clLoadProgress_t	cl_loadProgress;
 vm_t				*cgvm = NULL;
 
 netadr_t			rcon_address;
@@ -1053,7 +1054,7 @@ screen to let the user know about it, then dump all client
 memory on the hunk from cgame, ui, and renderer
 =====================
 */
-void CL_MapLoading( void ) {
+void CL_MapLoading( const char *mapname ) {
 	if ( com_dedicated->integer ) {
 		cls.state = CA_DISCONNECTED;
 		Key_SetCatcher( KEYCATCH_CONSOLE );
@@ -1066,6 +1067,21 @@ void CL_MapLoading( void ) {
 
 	Con_Close();
 	Key_SetCatcher( 0 );
+
+	// Set loading flag early so SCR_DrawScreenField suppresses the
+	// levelshot/menu flash during disconnect→reconnect transition.
+	// CL_LoadingScreenFinished() clears this when gameplay starts.
+	if ( !cl_loadProgress.startTime ) {
+		cl_loadProgress.startTime = cls.realtime ? cls.realtime : 1;
+	}
+
+	// Load map metadata and BSP wireframe preview for the loading screen.
+	// mapname comes from SV_SpawnServer parameter (cvar not set yet at this point).
+	if ( mapname && mapname[0] ) {
+		CL_LoadMapInfo( mapname );
+		CL_ApplyLoadingTheme( &cl_mapInfo );
+		CL_BuildBspPreview( mapname );
+	}
 
 	// if we are already connected to the local host, stay connected
 	if ( cls.state >= CA_CONNECTED && !Q_stricmp( cls.servername, "localhost" ) ) {
@@ -1541,7 +1557,7 @@ static void CL_Connect_f( void ) {
 	} else {
 		if( !strcmp( Cmd_Argv(1), "-4" ) )
 			family = NA_IP;
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 		else if( !strcmp( Cmd_Argv(1), "-6" ) )
 			family = NA_IP6;
 		else
@@ -2410,7 +2426,7 @@ static unsigned int hash_func( const netadr_t *addr ) {
 
 	switch ( addr->type ) {
 		case NA_IP:  ip = addr->ipv._4; size = 4;  break;
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 		case NA_IP6: ip = addr->ipv._6; size = 16; break;
 #endif
 		default: size = 0; break;
@@ -2512,7 +2528,7 @@ static void CL_ServersResponsePacket( const netadr_t* from, msg_t *msg, qboolean
 
 			addresses[numservers].type = NA_IP;
 		}
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 		// IPv6 address, if it's an extended response
 		else if (extended && *buffptr == '/')
 		{
@@ -3134,6 +3150,12 @@ static void CL_InitRenderer( void ) {
 	cls.charSetShader = re.RegisterShader( "gfx/2d/bigchars" );
 	cls.whiteShader = re.RegisterShader( "white" );
 	cls.consoleShader = re.RegisterShader( "console" );
+
+#if FEAT_WIRED_UI
+	// Wired UI owns font + menu subsystem — initialize here
+	// so text works before cgame loads.
+	WiredUI_Init( cls.state >= CA_AUTHORIZING && cls.state < CA_ACTIVE );
+#endif
 
 	Con_CheckResize();
 
@@ -3896,7 +3918,7 @@ void CL_Init( void ) {
 
 	// init cg_autoswitch so the ui will have it correctly even
 	// if the cgame hasn't been started
-	Cvar_Get ("cg_autoswitch", "1", CVAR_ARCHIVE);
+	Cvar_Get ("cg_autoswitch", "0", CVAR_ARCHIVE);
 
 	cl_motdString = Cvar_Get( "cl_motdString", "", CVAR_ROM );
 	Cvar_SetDescription( cl_motdString, "Message of the day string from id's master server, it is a read only variable." );
@@ -4168,7 +4190,7 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 				case NA_IP:
 					type = 1;
 					break;
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 				case NA_IP6:
 					type = 2;
 					break;
@@ -4454,7 +4476,7 @@ static void CL_LocalServers_f( void ) {
 
 			to.type = NA_BROADCAST;
 			NET_SendPacket( NS_CLIENT, n, message, &to );
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 			to.type = NA_MULTICAST6;
 			NET_SendPacket( NS_CLIENT, n, message, &to );
 #endif
@@ -4535,7 +4557,7 @@ static void CL_GlobalServers_f( void ) {
 	cls.pingUpdateSource = AS_GLOBAL;
 
 	// Use the extended query for IPv6 masters
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 	if ( to.type == NA_IP6 || to.type == NA_MULTICAST6 )
 	{
 		int v4enabled = Cvar_VariableIntegerValue( "net_enabled" ) & NET_ENABLEV4;
@@ -4747,7 +4769,7 @@ static void CL_Ping_f( void ) {
 	{
 		if( !strcmp( Cmd_Argv(1), "-4" ) )
 			family = NA_IP;
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 		else if( !strcmp( Cmd_Argv(1), "-6" ) )
 			family = NA_IP6;
 		else
@@ -4902,7 +4924,7 @@ static void CL_ServerStatus_f( void ) {
 		if (cls.state != CA_ACTIVE || clc.demoplaying)
 		{
 			Com_Printf( "Not connected to a server.\n" );
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 			Com_Printf( "usage: serverstatus [-4|-6] <server>\n" );
 #else
 			Com_Printf("usage: serverstatus <server>\n");
@@ -4923,7 +4945,7 @@ static void CL_ServerStatus_f( void ) {
 		{
 			if ( !strcmp( Cmd_Argv(1), "-4" ) )
 				family = NA_IP;
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 			else if ( !strcmp( Cmd_Argv(1), "-6" ) )
 				family = NA_IP6;
 			else

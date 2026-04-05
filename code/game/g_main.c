@@ -45,12 +45,9 @@ gentity_t		g_entities[MAX_GENTITIES];
 gclient_t		g_clients[MAX_CLIENTS];
 
 vmCvar_t	g_gametype;
-vmCvar_t	g_dmflags;
-vmCvar_t	g_kothflags;
 vmCvar_t	g_fraglimit;
 vmCvar_t	g_timelimit;
 vmCvar_t	g_capturelimit;
-vmCvar_t	g_friendlyFire;
 vmCvar_t	g_password;
 vmCvar_t	g_needpass;
 vmCvar_t	g_maxclients;
@@ -92,11 +89,15 @@ vmCvar_t	g_enableBreath;
 
 #define Q3NOW_VERSION "1.0"
 
-vmCvar_t	g_grapple;
+vmCvar_t	g_q3now;
 vmCvar_t	g_spawnWeapons;
+vmCvar_t	g_grapple;
 vmCvar_t	g_instagib;
 vmCvar_t	g_excessive;
-vmCvar_t	g_q3now;
+vmCvar_t	g_friendlyFire;
+vmCvar_t	g_noFootsteps;
+vmCvar_t	g_kothGhosts;
+
 vmCvar_t	g_singlePlayer;
 #if FEAT_UNLAGGED
 vmCvar_t	g_unlagged;
@@ -196,8 +197,6 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_maxGameClients, "g_maxGameClients", "0", CVAR_SERVERINFO | CVAR_LATCH | CVAR_ARCHIVE, 0, qfalse  },
 
 	// change anytime vars
-	{ &g_dmflags, "dmflags", "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qtrue },
-	{ &g_kothflags, "kothflags", "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qtrue },
 	{ &g_fraglimit, "fraglimit", "20", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 	{ &g_timelimit, "timelimit", "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 	{ &g_capturelimit, "capturelimit", "8", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
@@ -251,11 +250,13 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
 	{ &g_localTeamPref, "g_localTeamPref", "", 0, 0, qfalse },
 
-    { &g_grapple, "g_grapple", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
-    { &g_spawnWeapons, "g_spawnWeapons", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+	{ &g_q3now, "g_q3now", Q3NOW_VERSION, CVAR_SERVERINFO | CVAR_ROM, 0, qfalse },
     { &g_instagib, "g_instagib", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
 	{ &g_excessive, "g_excessive", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
-	{ &g_q3now, "g_q3now", Q3NOW_VERSION, CVAR_SERVERINFO | CVAR_ROM, 0, qfalse },
+    { &g_spawnWeapons, "g_spawnWeapons", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+    { &g_grapple, "g_grapple", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+	{ &g_noFootsteps, "g_noFootsteps", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
+	{ &g_kothGhosts, "g_kothGhosts", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
 
     { &g_singlePlayer, "g_singlePlayer", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qfalse, qfalse },
 #if FEAT_UNLAGGED
@@ -723,7 +724,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 #endif
 
 	// make sure we have flags for CTF, etc
-	if( g_gametype.integer >= GT_TEAM ) {
+	if( g_gametype.integer >= GT_TDM ) {
 		G_CheckTeamItems();
 	}
 
@@ -1082,7 +1083,7 @@ void CalculateRanks( void ) {
 		sizeof(level.sortedClients[0]), SortRanks );
 
 	// set the rank value for all clients that are connected and not spectators
-	if ( g_gametype.integer >= GT_TEAM ) {
+	if ( g_gametype.integer >= GT_TDM ) {
 		// in team games, rank is just the order of the teams, 0=red, 1=blue, 2=tied
 		for ( i = 0;  i < level.numConnectedClients; i++ ) {
 			cl = &level.clients[ level.sortedClients[i] ];
@@ -1117,7 +1118,7 @@ void CalculateRanks( void ) {
 	}
 
 	// set the CS_SCORES1/2 configstrings, which will be visible to everyone
-	if ( g_gametype.integer >= GT_TEAM ) {
+	if ( g_gametype.integer >= GT_TDM ) {
 		trap_SetConfigstring( CS_SCORES1, va("%i", level.teamScores[TEAM_RED] ) );
 		trap_SetConfigstring( CS_SCORES2, va("%i", level.teamScores[TEAM_BLUE] ) );
 	} else {
@@ -1248,8 +1249,8 @@ void BeginIntermission( void ) {
 		return;		// already active
 	}
 
-	// if in tournement mode, change the wins / losses
-	if ( g_gametype.integer == GT_TOURNAMENT ) {
+	// if in duel mode, change the wins / losses
+	if ( g_gametype.integer == GT_DUEL ) {
 		AdjustTournamentScores();
 	}
 
@@ -1307,9 +1308,9 @@ void ExitLevel (void) {
 	//bot interbreeding
 	BotInterbreedEndMatch();
 
-	// if we are running a tournement map, kick the loser to spectator status,
+	// if we are running a duel map, kick the loser to spectator status,
 	// which will automatically grab the next spectator and restart
-	if ( g_gametype.integer == GT_TOURNAMENT  ) {
+	if ( g_gametype.integer == GT_DUEL  ) {
 		if ( !level.restarted ) {
 			RemoveTournamentLoser();
 			trap_SendConsoleCommand( EXEC_APPEND, "map_restart 0\n" );
@@ -1420,7 +1421,7 @@ void LogExit( const char *string ) {
 		numSorted = 32;
 	}
 
-	if ( g_gametype.integer >= GT_TEAM ) {
+	if ( g_gametype.integer >= GT_TDM ) {
 		G_LogPrintf( "red:%i  blue:%i\n",
 			level.teamScores[TEAM_RED], level.teamScores[TEAM_BLUE] );
 	}
@@ -1440,7 +1441,7 @@ void LogExit( const char *string ) {
 		ping = cl->ps.ping < 999 ? cl->ps.ping : 999;
 
 		G_LogPrintf( "score: %i  ping: %i  client: %i %s\n", cl->ps.persistant[PERS_SCORE], ping, level.sortedClients[i],	cl->pers.netname );
-		if (g_singlePlayer.integer && g_gametype.integer < GT_TEAM) {
+		if (g_singlePlayer.integer && g_gametype.integer < GT_TDM) {
 			if (g_entities[cl - level.clients].r.svFlags & SVF_BOT && cl->ps.persistant[PERS_RANK] == 0) {
 				won = qfalse;
 			}
@@ -1449,7 +1450,7 @@ void LogExit( const char *string ) {
 	}
 
 	if (g_singlePlayer.integer) {
-		if (g_gametype.integer >= GT_TEAM) {
+		if (g_gametype.integer >= GT_TDM) {
 			if (team == TEAM_BLUE) {
 				won = level.teamScores[TEAM_BLUE] > level.teamScores[TEAM_RED];
 			} else {
@@ -1565,7 +1566,7 @@ qboolean ScoreIsTied( void ) {
 		return qfalse;
 	}
 	
-	if ( g_gametype.integer >= GT_TEAM ) {
+	if ( g_gametype.integer >= GT_TDM ) {
 		return level.teamScores[TEAM_RED] == level.teamScores[TEAM_BLUE];
 	}
 
@@ -1871,27 +1872,28 @@ void CheckKingOfTheHill(void) {
 
 /*
 =============
-CheckTournament
+CheckDuel
 
-Once a frame, check for changes in tournement player state
+Once a frame, check for changes in duel player state
 =============
 */
-void CheckTournament( void ) {
+void CheckDuel( void ) {
 	// check because we run 3 game frames before calling Connect and/or ClientBegin
 	// for clients on a map_restart
 	if ( level.numPlayingClients == 0 ) {
 		return;
 	}
 
-	if ( g_gametype.integer == GT_TOURNAMENT ) {
+	if ( g_gametype.integer == GT_DUEL ) {
+		int minNeeded = ( g_minPlayers.integer > 0 ) ? g_minPlayers.integer : 2;
 
 		// pull in a spectator if needed
-		if ( level.numPlayingClients < 2 ) {
+		if ( level.numPlayingClients < minNeeded ) {
 			AddTournamentPlayer();
 		}
 
-		// if we don't have two players, go back to "waiting for players"
-		if ( level.numPlayingClients != 2 ) {
+		// if we don't have enough players, go back to "waiting for players"
+		if ( level.numPlayingClients < minNeeded ) {
 			if ( level.warmupTime != -1 ) {
 				level.warmupTime = -1;
 				trap_SetConfigstring( CS_WARMUP, va("%i", level.warmupTime) );
@@ -1912,7 +1914,7 @@ void CheckTournament( void ) {
 
 		// if all players have arrived, start the countdown
 		if ( level.warmupTime < 0 ) {
-			if ( level.numPlayingClients == 2 ) {
+			if ( level.numPlayingClients >= minNeeded ) {
 #if FEAT_READY_UP
 				// ready-up (4E): wait for all players to be ready
 				if ( g_startWhenReady.integer && !G_AllPlayersReady() ) {
@@ -1942,15 +1944,16 @@ void CheckTournament( void ) {
 	} else if ( !g_singlePlayer.integer && level.warmupTime != 0 ) {
 		int		counts[TEAM_NUM_TEAMS];
 		qboolean	notEnough = qfalse;
+		int		minNeeded = ( g_minPlayers.integer > 0 ) ? g_minPlayers.integer : 2;
 
-		if ( g_gametype.integer >= GT_TEAM ) {
+		if ( g_gametype.integer >= GT_TDM ) {
 			counts[TEAM_BLUE] = TeamCount( -1, TEAM_BLUE );
 			counts[TEAM_RED] = TeamCount( -1, TEAM_RED );
 
 			if (counts[TEAM_RED] < 1 || counts[TEAM_BLUE] < 1) {
 				notEnough = qtrue;
 			}
-		} else if ( level.numPlayingClients < 2 ) {
+		} else if ( level.numPlayingClients < minNeeded ) {
 			notEnough = qtrue;
 		}
 
@@ -2426,7 +2429,7 @@ void G_CheckTeamBalance( void ) {
 	if ( !g_teamBalance.integer ) {
 		return;
 	}
-	if ( g_gametype.integer < GT_TEAM ) {
+	if ( g_gametype.integer < GT_TDM ) {
 		return;
 	}
 	// only check every g_teamBalanceDelay seconds
@@ -2500,7 +2503,7 @@ void G_CheckElimination( void ) {
 	if ( !g_elimination.integer ) {
 		return;
 	}
-	if ( g_gametype.integer < GT_TEAM ) {
+	if ( g_gametype.integer < GT_TDM ) {
 		return;
 	}
 	if ( level.intermissiontime ) {
@@ -2626,7 +2629,7 @@ void G_CalculateEloChanges( void ) {
 	int i;
 	gclient_t *cl;
 
-	if ( g_gametype.integer >= GT_TEAM ) {
+	if ( g_gametype.integer >= GT_TDM ) {
 		// team game: compare average ELOs
 		int redElo = 0, blueElo = 0, redCount = 0, blueCount = 0;
 		float avgRed, avgBlue, expectedRed, change;
@@ -2727,7 +2730,7 @@ void G_CheckRankedQueue( void ) {
 			if ( cl->pers.connected != CON_CONNECTED ) continue;
 			if ( !cl->queued ) continue;
 			cl->queued = qfalse;
-			if ( g_gametype.integer >= GT_TEAM ) {
+			if ( g_gametype.integer >= GT_TDM ) {
 				SetTeam( &g_entities[i], "" ); // auto-pick team
 			}
 		}
@@ -2836,7 +2839,7 @@ void G_RunFrame( int levelTime ) {
 	}
 
 	// see if it is time to do a tournement restart
-	CheckTournament();
+	CheckDuel();
 
 	// see if it is time to end the level
 	CheckExitRules();

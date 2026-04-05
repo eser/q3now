@@ -1,0 +1,31 @@
+// teamorders.wmenu - Wired UI team orders
+// Flex column layout -- vertical positioning handled by the layout engine.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "teamorders"
+	rect 0.313 0.208 0.375 0.542
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+	layout column
+	padding 0.05
+	gap 0.01
+
+	onESC { close }
+
+	WLABEL(0, 0, 1.0, 0.042, "Team Orders", 24, 1)
+	WSEPARATOR(0, 0, 1.0)
+
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Get Flag", 17, exec "cmd vsay_team getflag" ; close)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Offense", 17, exec "cmd vsay_team offense" ; close)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Defend", 17, exec "cmd vsay_team defend" ; close)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Patrol", 17, exec "cmd vsay_team patrol" ; close)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Follow Me", 17, exec "cmd vsay_team followme" ; close)
+
+	WSEPARATOR(0, 0, 1.0)
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Cancel", 19, close)
+}

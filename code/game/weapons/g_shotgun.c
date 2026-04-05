@@ -31,7 +31,7 @@ extern void SnapVectorTowards( vec3_t v, vec3_t to );
 // client predicts same spreads
 #define	DEFAULT_SHOTGUN_DAMAGE	8
 
-qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
+qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent, int mod ) {
 	trace_t		tr;
 	int			damage, i, passent;
 	gentity_t	*traceEnt;
@@ -81,7 +81,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent ) {
 				pDamage = G_DamageFalloff( pDamage, muzzle, tr.endpos, bg_attacklist[ATT_SHOTGUN_PRIMARY].maxDamageDistance );
 				// eser - damage falloff
 
-				G_Damage( traceEnt, ent, ent, forward, tr.endpos, pDamage, 0, MOD_SHOTGUN );
+				G_Damage( traceEnt, ent, ent, forward, tr.endpos, pDamage, 0, mod );
 			}
 
 			return hitClient;
@@ -121,7 +121,7 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 			VectorMA( end, r, localRight, end );
 			VectorMA( end, u, localUp, end );
 
-			if ( ShotgunPellet( origin, end, ent ) && !hitClient ) {
+			if ( ShotgunPellet( origin, end, ent, MOD_SHOTGUN ) && !hitClient ) {
 				hitClient = qtrue;
 				if ( ent->client ) {
 					ent->client->accuracy_hits++;
@@ -138,7 +138,7 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 		VectorMA( origin, 8192 * 16, localForward, end);
 		VectorMA (end, r, localRight, end);
 		VectorMA (end, u, localUp, end);
-		if( ShotgunPellet( origin, end, ent ) && !hitClient ) {
+		if( ShotgunPellet( origin, end, ent, MOD_SHOTGUN ) && !hitClient ) {
 			hitClient = qtrue;
 
 			if (ent->client) {
@@ -167,4 +167,76 @@ void Attack_Shotgun_Primary (gentity_t *ent) {
 	tent->s.otherEntityNum = ent->s.number;
 
 	ShotgunPattern( tent->s.pos.trBase, tent->s.origin2, tent->s.eventParm, ent );
+}
+
+void ShotgunPatternSpread( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent, int spread, int attackIdx, int mod ) {
+	int			i;
+	float		r, u;
+	vec3_t		end;
+	vec3_t		localForward, localRight, localUp;
+	qboolean	hitClient = qfalse;
+
+	VectorNormalize2( origin2, localForward );
+	PerpendicularVector( localRight, localForward );
+	CrossProduct( localForward, localRight, localUp );
+
+#if FEAT_SHOTGUN_PATTERN
+	{
+		float rotation = ( seed / 256.0f ) * 2.0f * M_PI;
+		float spreadScale = spread * 16;
+
+		for ( i = 0; i < DEFAULT_SHOTGUN_COUNT; i++ ) {
+			float angle = bg_shotgunPattern[i].angle + rotation;
+			float radius = bg_shotgunPattern[i].radius * spreadScale;
+
+			r = radius * cos( angle );
+			u = radius * sin( angle );
+
+			VectorMA( origin, 8192 * 16, localForward, end );
+			VectorMA( end, r, localRight, end );
+			VectorMA( end, u, localUp, end );
+
+			if ( ShotgunPellet( origin, end, ent, mod ) && !hitClient ) {
+				hitClient = qtrue;
+				if ( ent->client ) {
+					ent->client->accuracy_hits++;
+					ent->client->attackStats[attackIdx].hits++;
+				}
+			}
+		}
+	}
+#else
+	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
+		r = Q_crandom( &seed ) * spread * 16;
+		u = Q_crandom( &seed ) * spread * 16;
+		VectorMA( origin, 8192 * 16, localForward, end);
+		VectorMA (end, r, localRight, end);
+		VectorMA (end, u, localUp, end);
+		if( ShotgunPellet( origin, end, ent, mod ) && !hitClient ) {
+			hitClient = qtrue;
+			if (ent->client) {
+				ent->client->accuracy_hits++;
+				ent->client->attackStats[attackIdx].hits++;
+			}
+		}
+	}
+#endif
+}
+
+void Attack_Shotgun_DoubleBlast( gentity_t *ent ) {
+	gentity_t		*tent;
+
+	if (ent->client) {
+		ent->client->accuracy_shots++;
+		ent->client->attackStats[ATT_SHOTGUN_DOUBLE_BLAST].shots++;
+	}
+
+	// send shotgun blast with wide spread event for double-blast
+	tent = G_TempEntity( muzzle, EV_SHOTGUN_WIDE );
+	VectorScale( forward, 4096, tent->s.origin2 );
+	SnapVector( tent->s.origin2 );
+	tent->s.eventParm = rand() & 255;
+	tent->s.otherEntityNum = ent->s.number;
+
+	ShotgunPatternSpread( tent->s.pos.trBase, tent->s.origin2, tent->s.eventParm, ent, DEFAULT_SHOTGUN_DOUBLE_BLAST_SPREAD, ATT_SHOTGUN_DOUBLE_BLAST, MOD_SHOTGUN_DOUBLE_BLAST );
 }

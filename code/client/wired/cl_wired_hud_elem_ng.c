@@ -49,8 +49,8 @@ void CG_SHUDElementNGRoutine(void* context)
 		w = element->config.rect.value[2];
 		h = element->config.rect.value[3];
 	} else {
-		x = 640 - 48;
-		y = 480 - 48;
+		x = (float)cls.glconfig.vidWidth - 48;
+		y = (float)cls.glconfig.vidHeight - 48;
 		w = 48;
 		h = 48;
 	}
@@ -58,9 +58,8 @@ void CG_SHUDElementNGRoutine(void* context)
 	// draw background
 	CG_SHUDFill( &element->config );
 
-	// convert to adjusted screen coords for 1px-wide bar drawing
+	// coordinates are already real screen pixels
 	ax = x; ay = y; aw = w; ah = h;
-	SCR_AdjustFrom640( &ax, &ay, &aw, &ah );
 
 	// ── frame interpolation/extrapolation graph (top 1/3) ────────
 	color = -1;

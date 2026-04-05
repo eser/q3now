@@ -14,11 +14,9 @@ No game logic — armor classes, health formulas stay in cgame.
 
 #if FEAT_WIRED_UI
 
-#define WIRED_NUM_CROSSHAIRS 10
-
 typedef struct {
 	superhudConfig_t config;
-	qhandle_t        shaders[WIRED_NUM_CROSSHAIRS];
+	qhandle_t        shader;
 } shudElementCrosshair_t;
 
 void *CG_SHUDElementCrosshairCreate( const superhudConfig_t *config ) {
@@ -27,9 +25,7 @@ void *CG_SHUDElementCrosshairCreate( const superhudConfig_t *config ) {
 
 	SHUD_ELEMENT_INIT( element, config );
 
-	for ( i = 0; i < WIRED_NUM_CROSSHAIRS; i++ ) {
-		element->shaders[i] = re.RegisterShader( va( "gfx/2d/crosshair%c", 'a' + i ) );
-	}
+	element->shader = re.RegisterShader( "gfx/2d/crosshairMisc" );
 
 	return element;
 }
@@ -42,9 +38,9 @@ void CG_SHUDElementCrosshairRoutine( void *context ) {
 
 	// cgame already decided visibility — shaderIndex < 0 means hidden
 	idx = wiredHud->crosshair.shaderIndex;
-	if ( idx <= 0 ) return;
+	if ( idx < 0 ) return;
 
-	shader = element->shaders[ idx % WIRED_NUM_CROSSHAIRS ];
+	shader = element->shader;
 	if ( !shader ) return;
 
 	w = h = wiredHud->crosshair.size;
@@ -54,10 +50,7 @@ void CG_SHUDElementCrosshairRoutine( void *context ) {
 	x = wiredHud->crosshair.x;
 	y = wiredHud->crosshair.y;
 
-	// adjust for virtual 640x480 coords
-	SCR_AdjustFrom640( &x, &y, &w, &h );
-
-	// draw centered with cgame-computed color
+	// draw centered with cgame-computed color (coords are already real pixels)
 	re.SetColor( wiredHud->crosshair.color );
 	re.DrawStretchPic(
 		x + cls.glconfig.vidWidth * 0.5f - w * 0.5f,

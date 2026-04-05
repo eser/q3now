@@ -91,7 +91,7 @@ void AddScore( gentity_t *ent, vec3_t origin, int score ) {
 	ScorePlum(ent, origin, score);
 	//
 	ent->client->ps.persistant[PERS_SCORE] += score;
-	if ( g_gametype.integer == GT_TEAM )
+	if ( g_gametype.integer == GT_TDM )
 		level.teamScores[ ent->client->ps.persistant[PERS_TEAM] ] += score;
 	CalculateRanks();
 }
@@ -170,7 +170,7 @@ void TossClientItems( gentity_t *self ) {
     // !CPM
 
 	// drop all the powerups if not in teamplay
-	if ( g_gametype.integer != GT_TEAM ) {
+	if ( g_gametype.integer != GT_TDM ) {
 		angle = 45;
 		for ( i = 1 ; i < PW_NUM_POWERUPS ; i++ ) {
 			if ( self->client->ps.powerups[ i ] > level.time ) {
@@ -329,6 +329,13 @@ char	*modNames[] = {
 // eser - lightning discharge
     "MOD_LIGHTNING_DISCHARGE",
 // eser - lightning discharge
+	// alt-fire means of death
+	"MOD_GAUNTLET_LUNGE",
+	"MOD_MACHINEGUN_BURST",
+	"MOD_SHOTGUN_DOUBLE_BLAST",
+	"MOD_ROCKET_MORTAR",
+	"MOD_ROCKET_MORTAR_SPLASH",
+	"MOD_LIGHTNING_CHAIN_ARC",
 	"MOD_WATER",
 	"MOD_SLIME",
 	"MOD_LAVA",
@@ -485,7 +492,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 #if FEAT_FREEZETAG
 	// freezetag (7A): freeze instead of dying in team games
-	if ( g_freeze.integer && g_gametype.integer >= GT_TEAM ) {
+	if ( g_freeze.integer && g_gametype.integer >= GT_TDM ) {
 		self->client->ps.pm_type = PM_FREEZE;
 		self->client->ps.stats[STAT_FROZENSTATE] = FROZENSTATE_FROZEN;
 		self->client->ps.eFlags |= EF_FROZEN;
@@ -560,7 +567,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 #if FEAT_TEAM_LEADERSHIP
 	// PTL (11M): if the dead player was the leader (carrying team flag),
 	// transfer the flag to the killer
-	if ( g_ptl.integer && g_gametype.integer >= GT_TEAM && attacker && attacker->client && attacker != self ) {
+	if ( g_ptl.integer && g_gametype.integer >= GT_TDM && attacker && attacker->client && attacker != self ) {
 		if ( self->client->ps.powerups[PW_REDFLAG] ) {
 			self->client->ps.powerups[PW_REDFLAG] = 0;
 			attacker->client->ps.powerups[PW_REDFLAG] = INT_MAX;
@@ -612,7 +619,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
                 AddScore(attacker, self->r.currentOrigin, 1);
             }
 
-			if( meansOfDeath == MOD_GAUNTLET ) {
+			if( meansOfDeath == MOD_GAUNTLET || meansOfDeath == MOD_GAUNTLET_LUNGE ) {
 
 				// play humiliation on player
 				attacker->client->ps.persistant[PERS_GAUNTLET_FRAG_COUNT]++;
@@ -959,29 +966,13 @@ Maps a means-of-death constant to the corresponding attack index.
 ============
 */
 int G_AttackFromMOD( int mod ) {
-	switch ( mod ) {
-		case MOD_GAUNTLET:
-			return ATT_GAUNTLET_PRIMARY;
-		case MOD_MACHINEGUN:
-			return ATT_MACHINEGUN_PRIMARY;
-		case MOD_SHOTGUN:
-			return ATT_SHOTGUN_PRIMARY;
-		case MOD_GRENADE:
-		case MOD_GRENADE_SPLASH:
-			return ATT_GRENADE_LAUNCHER_PRIMARY;
-		case MOD_ROCKET:
-		case MOD_ROCKET_SPLASH:
-			return ATT_ROCKET_LAUNCHER_PRIMARY;
-		case MOD_LIGHTNING:
-		case MOD_LIGHTNING_DISCHARGE:
-			return ATT_LIGHTNING_GUN_PRIMARY;
-		case MOD_RAILGUN:
-			return ATT_RAILGUN_PRIMARY;
-		case MOD_PLASMA:
-			return ATT_PLASMA_RIFLE_PRIMARY;
-		default:
-			return ATT_NONE;
+	int i;
+	for ( i = 1; i < ATT_NUM_ATTACKS; i++ ) {
+		if ( bg_attacklist[i].meansOfDeath == mod || bg_attacklist[i].splashMeansOfDeath == mod ) {
+			return i;
+		}
 	}
+	return ATT_NONE;
 }
 
 void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
@@ -1077,14 +1068,20 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 		// map MOD to weapon index
 		switch ( mod ) {
-		case MOD_GAUNTLET:       weapIdx = WP_GAUNTLET; break;
-		case MOD_MACHINEGUN:     weapIdx = WP_MACHINEGUN; break;
-		case MOD_SHOTGUN:        weapIdx = WP_SHOTGUN; break;
+		case MOD_GAUNTLET:
+		case MOD_GAUNTLET_LUNGE:       weapIdx = WP_GAUNTLET; break;
+		case MOD_MACHINEGUN:
+		case MOD_MACHINEGUN_BURST:     weapIdx = WP_MACHINEGUN; break;
+		case MOD_SHOTGUN:
+		case MOD_SHOTGUN_DOUBLE_BLAST: weapIdx = WP_SHOTGUN; break;
 		case MOD_GRENADE:
 		case MOD_GRENADE_SPLASH: weapIdx = WP_GRENADE_LAUNCHER; break;
 		case MOD_ROCKET:
-		case MOD_ROCKET_SPLASH:  weapIdx = WP_ROCKET_LAUNCHER; break;
-		case MOD_LIGHTNING:      weapIdx = WP_LIGHTNING_GUN; break;
+		case MOD_ROCKET_SPLASH:
+		case MOD_ROCKET_MORTAR:
+		case MOD_ROCKET_MORTAR_SPLASH: weapIdx = WP_ROCKET_LAUNCHER; break;
+		case MOD_LIGHTNING:
+		case MOD_LIGHTNING_CHAIN_ARC: weapIdx = WP_LIGHTNING_GUN; break;
 		case MOD_RAILGUN:        weapIdx = WP_RAILGUN; break;
 		case MOD_PLASMA:         weapIdx = WP_PLASMA_RIFLE; break;
 		default: break;
@@ -1094,17 +1091,22 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			if (g_instagib.integer) {
 				switch (mod) {
 				case MOD_GAUNTLET:
+				case MOD_GAUNTLET_LUNGE:
 				case MOD_GRENADE:
 				case MOD_ROCKET:
+				case MOD_ROCKET_MORTAR:
 				case MOD_RAILGUN:
 					damage = INFINITE;
 				}
 			}
 		}
 
-		// q3now table-based: fixed per-weapon knockback (via attack table)
+		// q3now table-based: fixed per-attack knockback (uses MOD to find correct attack)
 		{
-			int attIdx = bg_weaponlist[weapIdx].attack;
+			int attIdx = G_AttackFromMOD( mod );
+			if ( attIdx <= ATT_NONE || attIdx >= ATT_NUM_ATTACKS ) {
+				attIdx = bg_weaponlist[weapIdx].attack;  // fallback to primary
+			}
 			knockbackScale = ( targ == attacker ) ?
 				bg_attacklist[attIdx].selfKnockbackScale :
 				bg_attacklist[attIdx].knockbackScale;
@@ -1238,11 +1240,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	// See if it's the player hurting the emeny flag carrier
-	if( g_gametype.integer == GT_CTF
-#if FEAT_1FCTF
-		|| g_gametype.integer == GT_1FCTF
-#endif
-	) {
+	if( g_gametype.integer == GT_CTF || g_gametype.integer == GT_1FCTF ) {
 		Team_CheckHurtCarrier(targ, attacker);
 	}
 
@@ -1502,6 +1500,10 @@ qboolean G_RadiusDamage ( vec3_t origin, gentity_t *attacker, float damage, floa
                 dir[2] += 40; // additional vertical velocity for combo potential
             }
             // !CPM
+
+			if (mod == MOD_ROCKET_MORTAR || mod == MOD_ROCKET_MORTAR_SPLASH) {
+				dir[2] += 40;
+			}
 
 			G_Damage (ent, NULL, attacker, dir, origin, (int)points, DAMAGE_RADIUS, mod);
 		}

@@ -6,6 +6,7 @@
 # GENERATION TARGETS
 #   make create-launcher    build Go/Wails launcher binary
 #   make create-packs        package modfiles/ + VM modules → mod pack
+#   make build-fonts          build MSDF font atlases from TTF sources
 #
 # COPY TARGETS (assemble .app at Q3DIR)
 #   make copy-libs          copy renderer + dependency dylibs into .app
@@ -192,7 +193,7 @@ endif
 WAILS_TAGS   ?=
 
 # SW3Z archiver
-SW3Z_DIR := pkg/sw3z-archiver
+SW3Z_DIR := tools/sw3z-archiver
 SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
 
 # Archive format toggle: 1 = sw3z, 0 = legacy pk3
@@ -213,7 +214,7 @@ PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax21.$(PAK_EXT)
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
 .PHONY: all configure build build-debug clean rebuild \
-        create-launcher create-packs \
+        create-launcher create-packs build-fonts \
         copy-libs copy-build copy-build-debug copy-packs copy-all copy-all-debug \
         bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
         run-launcher run-game release \
@@ -285,6 +286,27 @@ else
 	cd $(PAK_STAGING) && zip -r9 "$(CURDIR)/$(PAK_OUT)" . -x "**/.DS_Store" -x ".DS_Store"
 endif
 	@echo "==> $(PAK_OUT) ready"
+
+# ── build-fonts ───────────────────────────────────────────────────────────────
+# Build MSDF font atlases from TTF sources using msdf-atlas-gen.
+# Requires: TTF files in assets/fonts/ (see assets/fonts/README.md)
+
+MSDF_ATLAS_GEN_DIR = tools/msdf-atlas-gen
+MSDF_ATLAS_GEN     = $(MSDF_ATLAS_GEN_DIR)/build/bin/msdf-atlas-gen
+FONT_SRC           = assets/fonts
+FONT_OUT           = modfiles/fonts
+
+$(MSDF_ATLAS_GEN):
+	cd $(MSDF_ATLAS_GEN_DIR) && cmake -B build -DCMAKE_BUILD_TYPE=Release -DMSDF_ATLAS_BUILD_STANDALONE=ON -DMSDF_ATLAS_USE_VCPKG=OFF -DMSDF_ATLAS_USE_SKIA=OFF && cmake --build build --config Release
+
+build-fonts: $(MSDF_ATLAS_GEN)
+	@mkdir -p $(FONT_OUT)
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/entsans.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 4 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman.png -json $(FONT_OUT)/sansman.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/entsani.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 4 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-italic.png -json $(FONT_OUT)/sansman-italic.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/Oxanium-Regular.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 4 -dimensions 1024 1024 -imageout $(FONT_OUT)/oxanium.png -json $(FONT_OUT)/oxanium.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/Oxanium-Medium.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 4 -dimensions 1024 1024 -imageout $(FONT_OUT)/oxanium-medium.png -json $(FONT_OUT)/oxanium-medium.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/ShareTechMono-Regular.ttf -charset $(FONT_SRC)/charset_console.txt -type msdf -format png -size 48 -pxrange 4 -dimensions 1024 1024 -imageout $(FONT_OUT)/sharetechmono.png -json $(FONT_OUT)/sharetechmono.json
+	@echo "Generated 5 MSDF font atlases in $(FONT_OUT)/"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # COPY TARGETS — assemble .app at Q3DIR

@@ -1,20 +1,34 @@
-// confirm.menu - Wired UI confirmation dialog
-// Ports: code/q3_ui/ui_confirm.c
+// confirm.menu - Wired UI generic confirmation dialog
+// Callers set ui_confirmText and ui_confirmAction cvars, then open this menu.
+// Example:  setcvar "ui_confirmText" "Are you sure you want to quit?"
+//           setcvar "ui_confirmAction" "quit"
+//           open "confirm_popup"
 
 #include "ui/menumacros.h"
 
 menuDef {
-	name "confirm"
-	rect 170 160 300 160
+	name "confirm_popup"
+	rect 220 200 200 80
 	fullScreen 0
 	visible 1
 	style 1
-	backcolor 0.1 0.1 0.15 0.95
+	backcolor 0 0 0 0.85
 	focuscolor 1 0.75 0 0.15
-	modal
+	popup
+	outOfBoundsClick
 
-	LABEL(0, 16, 300, 20, "Are you sure?", 0.5, 1)
-	SEPARATOR(20, 44, 260)
-	BUTTON(30, 60, 100, BUTTON_H, "Yes", 0.4, exec "quit")
-	BUTTON(170, 60, 100, BUTTON_H, "No", 0.4, close)
+	// display text from ui_confirmText cvar
+	itemDef {
+		type 0
+		rect 0 8 200 20
+		textalign 1
+		textscale 0.3
+		forecolor 1 1 1 1
+		cvar "ui_confirmText"
+		decoration
+		visible 1
+	}
+
+	BUTTON( 20, 48, 70, 24, "Yes", 0.25, execConfirm ; close )
+	BUTTON( 110, 48, 70, 24, "No", 0.25, close )
 }

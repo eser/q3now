@@ -1061,6 +1061,11 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 #endif
 #endif
 
+		/* MSDF shader override — use dedicated pipeline when available */
+		if ( tess.shader->msdf && vk.msdf_pipeline != 0 ) {
+			pipeline = vk.msdf_pipeline;
+		}
+
 		vk_bind_pipeline( pipeline );
 		vk_bind_geometry( tess_flags );
 		vk_draw_geometry( tess.depthRange, qtrue );

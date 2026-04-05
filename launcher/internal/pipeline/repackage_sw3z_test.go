@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	sw3z "github.com/eser/q3now/pkg/sw3z-archiver"
+	sw3z "github.com/eser/q3now/tools/sw3z-archiver"
 )
 
 func TestSW3ZSink_ValidOutput(t *testing.T) {
@@ -20,7 +20,10 @@ func TestSW3ZSink_ValidOutput(t *testing.T) {
 	}
 
 	progress := make(chan Progress, 100)
-	go func() { for range progress {} }()
+	go func() {
+		for range progress {
+		}
+	}()
 
 	err := sink.Run(context.Background(), output, progress)
 	if err != nil {
@@ -54,7 +57,10 @@ func TestSW3ZSink_ReplacedEntries(t *testing.T) {
 	}
 
 	progress := make(chan Progress, 100)
-	go func() { for range progress {} }()
+	go func() {
+		for range progress {
+		}
+	}()
 
 	err := sink.Run(context.Background(), output, progress)
 	if err != nil {
@@ -72,7 +78,10 @@ func TestSW3ZSink_EmptyOutput(t *testing.T) {
 	sink := &SW3ZSink{DestDir: dir, OutputName: "empty.sw3z"}
 
 	progress := make(chan Progress, 100)
-	go func() { for range progress {} }()
+	go func() {
+		for range progress {
+		}
+	}()
 
 	err := sink.Run(context.Background(), nil, progress)
 	if err != nil {
@@ -114,7 +123,10 @@ func TestSW3ZSink_ContextCancellation(t *testing.T) {
 	cancel() // cancel immediately
 
 	progress := make(chan Progress, 100)
-	go func() { for range progress {} }()
+	go func() {
+		for range progress {
+		}
+	}()
 
 	err := sink.Run(ctx, output, progress)
 	if err == nil {
@@ -131,7 +143,10 @@ func TestSW3ZSink_ZeroByteEntry(t *testing.T) {
 	}
 
 	progress := make(chan Progress, 100)
-	go func() { for range progress {} }()
+	go func() {
+		for range progress {
+		}
+	}()
 
 	err := sink.Run(context.Background(), output, progress)
 	if err != nil {

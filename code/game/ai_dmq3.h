@@ -62,10 +62,8 @@ qboolean EntityIsDead(aas_entityinfo_t *entinfo);
 qboolean EntityIsInvisible(aas_entityinfo_t *entinfo);
 //returns true if the entity is shooting
 qboolean EntityIsShooting(aas_entityinfo_t *entinfo);
-#if FEAT_TA_TEAM_ORDERS
 //returns true if this entity has the kamikaze
 qboolean EntityHasKamikaze(aas_entityinfo_t *entinfo);
-#endif
 // set a user info key/value pair
 void BotSetUserInfo(bot_state_t *bs, const char *key, const char *value);
 // set the team status (offense, defense etc.)
@@ -147,13 +145,15 @@ void BotCTFSeekGoals(bot_state_t *bs);
 //set ctf goals (defend base, get enemy flag) during retreat
 void BotCTFRetreatGoals(bot_state_t *bs);
 //
-#if FEAT_TA_TEAM_ORDERS
 int Bot1FCTFCarryingFlag(bot_state_t *bs);
-int BotHarvesterCarryingCubes(bot_state_t *bs);
 void Bot1FCTFSeekGoals(bot_state_t *bs);
 void Bot1FCTFRetreatGoals(bot_state_t *bs);
+#if FEAT_OVERLOAD
 void BotObeliskSeekGoals(bot_state_t *bs);
 void BotObeliskRetreatGoals(bot_state_t *bs);
+#endif
+#if FEAT_HARVESTER
+int BotHarvesterCarryingCubes(bot_state_t *bs);
 void BotGoHarvest(bot_state_t *bs);
 void BotHarvesterSeekGoals(bot_state_t *bs);
 void BotHarvesterRetreatGoals(bot_state_t *bs);
@@ -207,9 +207,7 @@ extern vmCvar_t bot_autoskill;
 
 extern bot_goal_t ctf_redflag;
 extern bot_goal_t ctf_blueflag;
-#if FEAT_TA_TEAM_ORDERS
 extern bot_goal_t ctf_neutralflag;
 extern bot_goal_t redobelisk;
 extern bot_goal_t blueobelisk;
 extern bot_goal_t neutralobelisk;
-#endif

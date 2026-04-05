@@ -1,0 +1,29 @@
+// specifyserver.wmenu - Wired UI manual server connect
+// Flex column layout -- vertical positioning handled by the layout engine.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "specifyserver"
+	rect 0.266 0.333 0.469 0.292
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+	popup
+	outOfBoundsClick
+	layout column
+	padding 0.05
+	gap 0.01
+
+	onESC { close }
+
+	WLABEL(0, 0, 1.0, 0.042, "Connect to Server", 24, 1)
+	WSEPARATOR(0, 0, 1.0)
+
+	WEDITFIELD(0, 0, 1.0, 0.042, "Address:", 17, "ui_specifyAddress", 64)
+
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Connect", 19, exec "connect")
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Cancel", 19, close)
+}

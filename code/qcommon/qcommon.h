@@ -162,7 +162,7 @@ typedef enum {
 	NA_LOOPBACK,
 	NA_BROADCAST,
 	NA_IP,
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 	NA_IP6,
 	NA_MULTICAST6,
 #endif
@@ -182,12 +182,12 @@ typedef struct {
 	netadrtype_t	type;
 	union {
 		byte	_4[4];
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 		byte	_6[16];
 #endif
 	} ipv;
 	uint16_t	port;
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 	uint32_t	scope_id;	// Needed for IPv6 link-local addresses
 #endif
 } netadr_t;
@@ -210,7 +210,7 @@ int         NET_StringToAdr( const char *s, netadr_t *a, netadrtype_t family );
 #ifndef DEDICATED
 qboolean	NET_GetLoopPacket( netsrc_t sock, netadr_t *net_from, msg_t *net_message );
 #endif
-#ifdef FEAT_IPV6
+#if FEAT_IPV6
 void		NET_JoinMulticast6( void );
 void		NET_LeaveMulticast6( void );
 #endif
@@ -1158,7 +1158,7 @@ void CL_PacketEvent( const netadr_t *from, msg_t *msg );
 
 void CL_ConsolePrint( const char *text );
 
-void CL_MapLoading( void );
+void CL_MapLoading( const char *mapname );
 // do a screen update before starting to load a map
 // when the server is going to load a new map, the entire hunk
 // will be cleared, so the client must shutdown cgame, ui, and

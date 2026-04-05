@@ -200,6 +200,11 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 
 	other = &g_entities[trace->entityNum];
 
+	// skip collision between helix pair rockets
+	if ( ent->helixPairEntity && other == ent->helixPairEntity ) {
+		return;
+	}
+
     // CPM: copy velocity for special radius damage
     BG_EvaluateTrajectoryDelta(&ent->s.pos, level.time, vec2);
     // !CPM

@@ -380,18 +380,9 @@ typedef enum
 #define SE_KEY4_SHOW_STR  "key4show"
 #define SE_SHOW_EMPTY  (1 << 10) // 0x00000400
 #define SE_SHOW_EMPTY_STR  "showempty"
-#define SE_GT_FFA 	(1 << 11) // 0x00000800
-#define SE_GT_FFA_STR "gt_ffa"
-#define SE_GT_TOURNEY   (1 << 12) // 0x00001000
-#define SE_GT_TOURNEY_STR "gt_tourney"
-#define SE_GT_TDM      (1 << 13) // 0x00002000
-#define SE_GT_TDM_STR  "gt_tdm"
-#define SE_GT_CTF       (1 << 14) // 0x00004000
-#define SE_GT_CTF_STR   "gt_ctf"
-#define SE_GT_FREEZETAG (1 << 15) // 0x00008000
-#define SE_GT_FREEZETAG_STR "gt_freezetag"
-#define SE_GT_CLANARENA (1 << 16) // 0x00010000
-#define SE_GT_CLANARENA_STR "gt_clanarena"
+// gametype visibility flags — derived from bg_gametypelist[].hudToken
+// bit positions are sequential from SE_GT_BASE_BIT, one per unique hudToken
+#define SE_GT_BASE_BIT  11
 
 #define SHUD_CHECK_SHOW_EMPTY(element) ( \
     ((element) != NULL) && \

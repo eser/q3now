@@ -279,6 +279,31 @@ void RE_StretchPic ( float x, float y, float w, float h,
 	cmd->t2 = t2;
 }
 
+
+/*
+=============
+RE_DrawLine
+=============
+*/
+void RE_DrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t hShader ) {
+	drawLineCommand_t	*cmd;
+
+	if ( !tr.registered ) {
+		return;
+	}
+	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
+	if ( !cmd ) {
+		return;
+	}
+	cmd->commandId = RC_DRAW_LINE;
+	cmd->shader = R_GetShaderByHandle( hShader );
+	cmd->x1 = x1;
+	cmd->y1 = y1;
+	cmd->x2 = x2;
+	cmd->y2 = y2;
+	cmd->width = width;
+}
+
 #define MODE_RED_CYAN	1
 #define MODE_RED_BLUE	2
 #define MODE_RED_GREEN	3

@@ -21,6 +21,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "client.h"
 #include "wired/cl_wired_ui.h"
+#include "wired/cl_wired_msdf.h"
+#include "wired/cl_wired_fonts.h"
+#include "wired/cl_wired_text.h"
 
 /*
 
@@ -110,43 +113,71 @@ static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int 
 		}
 	}
 
-	// draw it
-	if ( size == smallchar_width ) {
-		SCR_DrawSmallStringExt( x, y, str, g_color_table[ ColorIndexFromChar( curColor ) ],
-			qfalse, noColorEscape );
-		if ( len > drawLen + prestep ) {
-			SCR_DrawSmallChar( x + ( edit->widthInChars - 1 ) * size, y, '>' );
+	// draw it — Text_Draw expects real screen pixels, same as native coords
+	{
+		float vx = (float)x;
+		float vy = (float)y;
+
+		if ( size == smallchar_width ) {
+			float vsize = (float)smallchar_height;
+			float vsizeW = (float)size;
+			Text_Draw( str, vx, vy, FONT_MONO, vsize,
+				g_color_table[ ColorIndexFromChar( curColor ) ], TEXT_ALIGN_LEFT, 0 );
+			if ( len > drawLen + prestep ) {
+				Text_DrawChar( '>', vx + ( edit->widthInChars - 1 ) * vsizeW, vy,
+					FONT_MONO, vsize, colorWhite );
+			}
+		} else {
+			float vsize = (float)bigchar_height;
+			float vsizeW = (float)bigchar_width;
+			if ( len > drawLen + prestep ) {
+				Text_Draw( ">", vx + ( edit->widthInChars - 1 ) * vsizeW, vy,
+					FONT_DISPLAY, vsize,
+					g_color_table[ ColorIndex( COLOR_WHITE ) ], TEXT_ALIGN_LEFT, 0 );
+			}
+			Text_Draw( str, vx, vy, FONT_DISPLAY, vsize,
+				g_color_table[ ColorIndexFromChar( curColor ) ], TEXT_ALIGN_LEFT, 0 );
 		}
-	} else {
-		if ( len > drawLen + prestep ) {
-			SCR_DrawStringExt( x + ( edit->widthInChars - 1 ) * BIGCHAR_WIDTH, y, size, ">",
-				g_color_table[ ColorIndex( COLOR_WHITE ) ], qfalse, noColorEscape );
-		}
-		// draw big string with drop shadow
-		SCR_DrawStringExt( x, y, BIGCHAR_WIDTH, str, g_color_table[ ColorIndexFromChar( curColor ) ],
-			qfalse, noColorEscape );
 	}
 
-	// draw the cursor
+	// draw the cursor — real screen pixel coordinates
 	if ( showCursor ) {
+		float vx = (float)x;
+		float vy = (float)y;
+
 		if ( cls.realtime & 256 ) {
 			return;		// off blink
 		}
 
 		if ( key_overstrikeMode ) {
-			cursorChar = 11;
+			cursorChar = '|';
 		} else {
-			cursorChar = 10;
+			cursorChar = '_';
 		}
 
 		i = drawLen - strlen( str );
 
 		if ( size == smallchar_width ) {
-			SCR_DrawSmallChar( x + ( edit->cursor - prestep - i ) * size, y, cursorChar );
+			float vsize = (float)smallchar_height;
+			int cursorPos = edit->cursor - prestep - i;
+			char tmp[MAX_STRING_CHARS];
+			int copyLen = cursorPos;
+			float cursorX;
+
+			if ( copyLen > (int)strlen( str ) ) copyLen = (int)strlen( str );
+			if ( copyLen < 0 ) copyLen = 0;
+			Q_strncpyz( tmp, str, copyLen + 1 );
+
+			/* Text_Measure returns real screen pixels — use directly */
+			cursorX = Text_Measure( tmp, FONT_MONO, vsize );
+			Text_DrawChar( cursorChar, vx + cursorX, vy,
+				FONT_MONO, vsize, colorWhite );
 		} else {
-			str[0] = cursorChar;
-			str[1] = '\0';
-			SCR_DrawBigString( x + ( edit->cursor - prestep - i ) * BIGCHAR_WIDTH, y, str, 1.0, qfalse );
+			float vsize = (float)bigchar_height;
+			float vsizeW = (float)bigchar_width;
+			Text_DrawChar( cursorChar,
+				vx + ( edit->cursor - prestep - i ) * vsizeW, vy,
+				FONT_DISPLAY, vsize, colorWhite );
 		}
 	}
 }

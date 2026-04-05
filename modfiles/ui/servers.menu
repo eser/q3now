@@ -37,7 +37,7 @@ menuDef {
 		textscale 0.3
 		forecolor 1 1 1 1
 		cvar "ui_browserGameType"
-		cvarFloatList { "All" 0 "Free For All" 1 "Tournament" 2 "King of the Hill" 4 "Last Man Standing" 5 "Team DM" 6 "CTF" 7 }
+		cvarFloatList { "All" 0 "Deathmatch" 1 "Duel" 2 "King of the Hill" 3 "Last Man Standing" 4 "Team Deathmatch" 5 "Capture the Flag" 6 }
 		visible 1
 	}
 

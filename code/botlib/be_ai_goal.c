@@ -90,16 +90,15 @@ typedef struct campspot_s
 
 //FIXME: these are game specific
 typedef enum {
-	GT_FFA,				// free for all
-	GT_TOURNAMENT,		// one on one tournament
-	GT_DUMMY,			// placeholder (was GT_SINGLE_PLAYER)
+	GT_DEATHMATCH,		// deathmatch
+	GT_DUEL,			// one on one duel
+	GT_LASTMANSTANDING,	// last man standing
+	GT_KINGOFTHEHILL,	// king of the hill
 
 	//-- team games go after this --
 
-	GT_TEAM,			// team deathmatch
+	GT_TDM,				// team deathmatch
 	GT_CTF,				// capture the flag
-	GT_KINGOFTHEHILL,	// king of the hill
-	GT_LASTMANSTANDING,	// last man standing
 	GT_1FCTF,
 	GT_OBELISK,
 	GT_HARVESTER,
@@ -883,7 +882,7 @@ int BotGetLevelItemGoal(int index, const char *name, bot_goal_t *goal)
 		if (g_singlePlayer) {
 			if (li->flags & IFL_NOTSINGLE) continue;
 		}
-		if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TDM) {
 			if (li->flags & IFL_NOTTEAM) continue;
 		}
 		else {
@@ -1103,7 +1102,7 @@ void BotUpdateEntityItems(void)
 			if (g_singlePlayer) {
 				if (li->flags & IFL_NOTSINGLE) continue;
 			}
-			if (g_gametype >= GT_TEAM) {
+			if (g_gametype >= GT_TDM) {
 				if (li->flags & IFL_NOTTEAM) continue;
 			}
 			else {
@@ -1337,7 +1336,7 @@ int BotChooseLTGItem(int goalstate, vec3_t origin, int *inventory, int travelfla
 			if (li->flags & IFL_NOTSINGLE)
 				continue;
 		}
-		if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TDM) {
 			if (li->flags & IFL_NOTTEAM)
 				continue;
 		}
@@ -1508,7 +1507,7 @@ int BotChooseNBGItem(int goalstate, vec3_t origin, int *inventory, int travelfla
 			if (li->flags & IFL_NOTSINGLE)
 				continue;
 		}
-		if (g_gametype >= GT_TEAM) {
+		if (g_gametype >= GT_TDM) {
 			if (li->flags & IFL_NOTTEAM)
 				continue;
 		}

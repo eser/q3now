@@ -105,7 +105,7 @@ void G_RankRunFrame()
 				break;
 			case QGR_STATUS_ACTIVE:
 				if( (ent->client->sess.sessionTeam == TEAM_SPECTATOR) &&
-					(g_gametype.integer < GT_TEAM) )
+					(g_gametype.integer < GT_TDM) )
 				{
 					SetTeam( ent, "free" );
 				}
@@ -250,8 +250,8 @@ void G_RankDamage( int self, int attacker, int damage, int means_of_death )
 	last_means_of_death = means_of_death;
 
 	// the gauntlet only "fires" when it actually hits something
-	if( (attacker != ENTITYNUM_WORLD) && (attacker != self) && 
-		(means_of_death == MOD_GAUNTLET)  && 
+	if( (attacker != ENTITYNUM_WORLD) && (attacker != self) &&
+		(means_of_death == MOD_GAUNTLET || means_of_death == MOD_GAUNTLET_LUNGE)  &&
 		(g_entities[attacker].client) )
 	{
 		trap_RankReportInt( attacker, -1, QGR_KEY_SHOT_FIRED_GAUNTLET, 1, 1 );
@@ -278,6 +278,7 @@ void G_RankDamage( int self, int attacker, int damage, int means_of_death )
 	{
 	case MOD_GRENADE_SPLASH:
 	case MOD_ROCKET_SPLASH:
+	case MOD_ROCKET_MORTAR_SPLASH:
 	case MOD_PLASMA_SPLASH:
 	case MOD_BFG_SPLASH:
 		splash = damage;
@@ -292,14 +293,17 @@ void G_RankDamage( int self, int attacker, int damage, int means_of_death )
 	switch( means_of_death )
 	{
 	case MOD_GAUNTLET:
+	case MOD_GAUNTLET_LUNGE:
 		key_hit = QGR_KEY_HIT_TAKEN_GAUNTLET;
 		key_damage = QGR_KEY_DAMAGE_TAKEN_GAUNTLET;
 		break;
 	case MOD_MACHINEGUN:
+	case MOD_MACHINEGUN_BURST:
 		key_hit = QGR_KEY_HIT_TAKEN_MACHINEGUN;
 		key_damage = QGR_KEY_DAMAGE_TAKEN_MACHINEGUN;
 		break;
 	case MOD_SHOTGUN:
+	case MOD_SHOTGUN_DOUBLE_BLAST:
 		key_hit = QGR_KEY_HIT_TAKEN_SHOTGUN;
 		key_damage = QGR_KEY_DAMAGE_TAKEN_SHOTGUN;
 		break;
@@ -311,6 +315,8 @@ void G_RankDamage( int self, int attacker, int damage, int means_of_death )
 		break;
 	case MOD_ROCKET:
 	case MOD_ROCKET_SPLASH:
+	case MOD_ROCKET_MORTAR:
+	case MOD_ROCKET_MORTAR_SPLASH:
 		key_hit = QGR_KEY_HIT_TAKEN_ROCKET;
 		key_damage = QGR_KEY_DAMAGE_TAKEN_ROCKET;
 		key_splash = QGR_KEY_SPLASH_TAKEN_ROCKET;
@@ -369,14 +375,17 @@ void G_RankDamage( int self, int attacker, int damage, int means_of_death )
 		switch( means_of_death )
 		{
 		case MOD_GAUNTLET:
+		case MOD_GAUNTLET_LUNGE:
 			key_hit = QGR_KEY_HIT_GIVEN_GAUNTLET;
 			key_damage = QGR_KEY_DAMAGE_GIVEN_GAUNTLET;
 			break;
 		case MOD_MACHINEGUN:
+		case MOD_MACHINEGUN_BURST:
 			key_hit = QGR_KEY_HIT_GIVEN_MACHINEGUN;
 			key_damage = QGR_KEY_DAMAGE_GIVEN_MACHINEGUN;
 			break;
 		case MOD_SHOTGUN:
+		case MOD_SHOTGUN_DOUBLE_BLAST:
 			key_hit = QGR_KEY_HIT_GIVEN_SHOTGUN;
 			key_damage = QGR_KEY_DAMAGE_GIVEN_SHOTGUN;
 			break;
@@ -388,6 +397,8 @@ void G_RankDamage( int self, int attacker, int damage, int means_of_death )
 			break;
 		case MOD_ROCKET:
 		case MOD_ROCKET_SPLASH:
+		case MOD_ROCKET_MORTAR:
+		case MOD_ROCKET_MORTAR_SPLASH:
 			key_hit = QGR_KEY_HIT_GIVEN_ROCKET;
 			key_damage = QGR_KEY_DAMAGE_GIVEN_ROCKET;
 			key_splash = QGR_KEY_SPLASH_GIVEN_ROCKET;
@@ -540,12 +551,15 @@ void G_RankPlayerDie( int self, int attacker, int means_of_death )
 		switch( means_of_death )
 		{
 		case MOD_GAUNTLET:
+		case MOD_GAUNTLET_LUNGE:
 			trap_RankReportInt( p1, p2, QGR_KEY_SUICIDE_GAUNTLET, 1, 1 );
 			break;
 		case MOD_MACHINEGUN:
+		case MOD_MACHINEGUN_BURST:
 			trap_RankReportInt( p1, p2, QGR_KEY_SUICIDE_MACHINEGUN, 1, 1 );
 			break;
 		case MOD_SHOTGUN:
+		case MOD_SHOTGUN_DOUBLE_BLAST:
 			trap_RankReportInt( p1, p2, QGR_KEY_SUICIDE_SHOTGUN, 1, 1 );
 			break;
 		case MOD_GRENADE:
@@ -554,6 +568,8 @@ void G_RankPlayerDie( int self, int attacker, int means_of_death )
 			break;
 		case MOD_ROCKET:
 		case MOD_ROCKET_SPLASH:
+		case MOD_ROCKET_MORTAR:
+		case MOD_ROCKET_MORTAR_SPLASH:
 			trap_RankReportInt( p1, p2, QGR_KEY_SUICIDE_ROCKET, 1, 1 );
 			break;
 		case MOD_PLASMA:
@@ -588,12 +604,15 @@ void G_RankPlayerDie( int self, int attacker, int means_of_death )
 		switch( means_of_death )
 		{
 		case MOD_GAUNTLET:
+		case MOD_GAUNTLET_LUNGE:
 			trap_RankReportInt( p1, p2, QGR_KEY_FRAG_GAUNTLET, 1, 1 );
 			break;
 		case MOD_MACHINEGUN:
+		case MOD_MACHINEGUN_BURST:
 			trap_RankReportInt( p1, p2, QGR_KEY_FRAG_MACHINEGUN, 1, 1 );
 			break;
 		case MOD_SHOTGUN:
+		case MOD_SHOTGUN_DOUBLE_BLAST:
 			trap_RankReportInt( p1, p2, QGR_KEY_FRAG_SHOTGUN, 1, 1 );
 			break;
 		case MOD_GRENADE:
@@ -602,6 +621,8 @@ void G_RankPlayerDie( int self, int attacker, int means_of_death )
 			break;
 		case MOD_ROCKET:
 		case MOD_ROCKET_SPLASH:
+		case MOD_ROCKET_MORTAR:
+		case MOD_ROCKET_MORTAR_SPLASH:
 			trap_RankReportInt( p1, p2, QGR_KEY_FRAG_ROCKET, 1, 1 );
 			break;
 		case MOD_PLASMA:

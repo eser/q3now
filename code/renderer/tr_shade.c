@@ -891,7 +891,16 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			//
 			// draw
 			//
-			R_DrawElements( input->numIndexes, input->indexes );
+			if ( tess.shader->msdf && GL_ProgramAvailable() ) {
+				// MSDF rendering: enable MSDF fragment program with screenPxRange
+				float screenPxRange = tess.shader->msdfDistanceRange * 2.0f;
+				if ( screenPxRange < 1.0f ) screenPxRange = 1.0f;
+				ARB_MSDF_Enable( screenPxRange );
+				R_DrawElements( input->numIndexes, input->indexes );
+				ARB_MSDF_Disable();
+			} else {
+				R_DrawElements( input->numIndexes, input->indexes );
+			}
 			if ( pStage->depthFragment )
 			{
 				GL_State( pStage->stateBits | GLS_DEPTHMASK_TRUE );

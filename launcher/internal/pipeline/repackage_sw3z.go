@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	sw3z "github.com/eser/q3now/pkg/sw3z-archiver"
+	sw3z "github.com/eser/q3now/tools/sw3z-archiver"
 )
 
 // SW3ZSink writes all output entries into a single SW3Z archive.

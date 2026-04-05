@@ -90,7 +90,7 @@ int Pickup_Powerup( gentity_t *ent, gentity_t *other ) {
 
     // if same team in team game, no sound
     // cannot use OnSameTeam as it expects to g_entities, not clients
-  	if ( g_gametype.integer >= GT_TEAM && other->client->sess.sessionTeam == client->sess.sessionTeam  ) {
+  	if ( g_gametype.integer >= GT_TDM && other->client->sess.sessionTeam == client->sess.sessionTeam  ) {
       continue;
     }
 
@@ -531,11 +531,7 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity ) {
 	VectorCopy( velocity, dropped->s.pos.trDelta );
 
 	dropped->s.eFlags |= EF_BOUNCE_HALF;
-	if ((g_gametype.integer == GT_CTF
-#if FEAT_1FCTF
-		|| g_gametype.integer == GT_1FCTF
-#endif
-	) && item->giType == IT_TEAM) { // Special case for CTF flags
+	if ((g_gametype.integer == GT_CTF || g_gametype.integer == GT_1FCTF) && item->giType == IT_TEAM) { // Special case for CTF flags
 		dropped->think = Team_DroppedFlagThink;
 		dropped->nextthink = level.time + 30000;
 		Team_CheckDroppedItem( dropped );
@@ -689,7 +685,6 @@ void G_CheckTeamItems( void ) {
 			G_Printf( S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
 		}
 	}
-#if FEAT_1FCTF
 	if( g_gametype.integer == GT_1FCTF ) {
 		gitem_t	*item;
 
@@ -708,6 +703,7 @@ void G_CheckTeamItems( void ) {
 		}
 	}
 
+#if FEAT_OVERLOAD
 	if( g_gametype.integer == GT_OBELISK ) {
 		gentity_t	*ent;
 
@@ -724,7 +720,9 @@ void G_CheckTeamItems( void ) {
 			G_Printf( S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
 		}
 	}
+#endif
 
+#if FEAT_HARVESTER
 	if( g_gametype.integer == GT_HARVESTER ) {
 		gentity_t	*ent;
 
@@ -822,7 +820,7 @@ int G_ItemDisabled( gitem_t *item ) {
 	char name[128];
     int i;
 
-    if (item->giType == IT_POWERUP && (g_gametype.integer == GT_TOURNAMENT || g_gametype.integer == GT_KINGOFTHEHILL)) {
+    if (item->giType == IT_POWERUP && (g_gametype.integer == GT_DUEL || g_gametype.integer == GT_KINGOFTHEHILL)) {
         return 1;
     }
 

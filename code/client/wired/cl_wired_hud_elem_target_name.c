@@ -29,45 +29,34 @@ void CG_SHUDElementTargetNameRoutine(void* context)
 	shudElementTargetName_t* element = (shudElementTargetName_t*)context;
 	char    s[1024];
 	clientInfo_t* ci;
-	qboolean hide = qfalse;
+	int clientNum;
 
-	if (cg_drawCrosshair.integer == 0) return;
-	if (cg_drawCrosshairNames.integer == 0) return;
-	if (cg.renderingThirdPerson != 0) return;
-	if (0 > 1) return;
+	if ( wiredHud->crosshair.shaderIndex < 0 ) return;  // crosshair hidden
+	if ( wiredHud->renderingThirdPerson ) return;
+	if ( wiredHud->crosshairClientTime == 0 ) return;
 
-	
-	if (cg.crosshairClientTime == 0) return;
-
-	if (!CG_SHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.crosshairClientTime))
+	if ( !CG_SHUDGetFadeColor( element->ctx.color_origin, element->ctx.color,
+			&element->config, wiredHud->crosshairClientTime ) )
 	{
-		cg.crosshairClientTime = 0;
 		return;
 	}
 
-	ci = &cgs.clientinfo[cg.crosshairClientNum];
+	clientNum = wiredHud->crosshairClientNum;
+	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) return;
 
-	// our team OR not team only OR not our freeze team
-	if (cgs.gametype >= GT_TEAM && cg_drawCrosshairNames.integer == 2)
+	ci = &wired_cgs.clientinfo[clientNum];
+	if ( !ci->infoValid ) return;
+
+	// team-only mode: hide enemy names in team games
+	if ( wiredHud->gametype >= GT_TDM && cg_drawCrosshairNames.integer == 2 )
 	{
-		if (qfalse)
-		{
-			hide = ci->team != cg.snap->ps.persistant[PERS_TEAM];
-		}
-		else
-		{
-			hide = ci->team != cg.snap->ps.persistant[PERS_TEAM];
-		}
-
+		if ( ci->team != wiredHud->ourTeam ) return;
 	}
 
-	if (!hide)
-	{
-		Com_sprintf(s, 1024, "%s", ci->name);
-		element->ctx.text = s;
-		CG_SHUDTextPrint(&element->config, &element->ctx);
-		element->ctx.text = NULL;
-	}
+	Com_sprintf( s, sizeof(s), "%s", ci->name );
+	element->ctx.text = s;
+	CG_SHUDTextPrint( &element->config, &element->ctx );
+	element->ctx.text = NULL;
 }
 
 void CG_SHUDElementTargetNameDestroy(void* context)

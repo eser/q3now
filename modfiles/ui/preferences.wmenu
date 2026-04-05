@@ -1,0 +1,146 @@
+// preferences.wmenu - Wired UI gameplay preferences panel
+// Ported from TA options.menu (menu rect 186 0 443 426 -> menuW=443 menuH=426)
+// All game option cvars from TA's options_menu.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "preferences"
+	// TA: rect 186 0 443 426 -> 186/640=0.291, 0/480=0, 443/640=0.692, 426/480=0.888
+	rect 0.291 0.000 0.692 0.888
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor 1 0.75 0 0.15
+
+	WFULLSCREEN_BACKGROUND
+
+	onESC { close }
+
+	// TA: window rect 0 2 443 426
+	itemDef {
+		name "window"
+		rect 0.000 0.005 1.000 0.995
+		style 1
+		border 1
+		bordercolor 0.5 0.5 0.5 0.5
+		backcolor 0 0 0 0.25
+		visible 1
+		decoration
+	}
+
+	WLABEL(0.000, 0.019, 1.000, 0.043, "Game Options", 24, 1)
+	WSEPARATOR(0.033, 0.067, 0.933)
+
+	// TA: Simple Items (yesno) rect 99 15 256 20 -> 15/426=0.035
+	WYESNO(0.033, 0.082, 0.933, 0.047, "Simple Items:", 14, "cg_simpleItems")
+
+	// TA: Marks On Walls (yesno) rect 99 35 -> 35/426=0.082
+	WYESNO(0.033, 0.129, 0.933, 0.047, "Marks On Walls:", 14, "cg_marks")
+
+	// TA: Show Floating Scores (yesno) rect 99 55 -> 55/426=0.129
+	WYESNO(0.033, 0.176, 0.933, 0.047, "Floating Scores:", 14, "cg_scorePlums")
+
+	// TA: Ejecting Brass (multi) rect 99 75 -> 75/426=0.176
+	itemDef {
+		type 12
+		text "Ejecting Brass:"
+		rect 0.033 0.223 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "cg_brassTime"
+		cvarFloatList { "High" 2500 "Med" 1250 "Off" 0 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Dynamic Lights (yesno) rect 99 95 -> 95/426=0.223
+	WYESNO(0.033, 0.270, 0.933, 0.047, "Dynamic Lights:", 14, "r_dynamiclight")
+
+	// TA: Identify Target (yesno) rect 99 115 -> 115/426=0.270
+	WYESNO(0.033, 0.317, 0.933, 0.047, "Identify Target:", 14, "cg_drawCrosshairNames")
+
+	// TA: Draw Gun (yesno) rect 99 135 -> 135/426=0.317
+	WYESNO(0.033, 0.364, 0.933, 0.047, "Draw Gun:", 14, "cg_drawGun")
+
+	// TA: Low Quality Sky (yesno) rect 99 155 -> 155/426=0.364
+	WYESNO(0.033, 0.411, 0.933, 0.047, "Low Quality Sky:", 14, "r_fastsky")
+
+	// TA: Force Player Models (yesno) rect 99 195 -> 195/426=0.458
+	WYESNO(0.033, 0.458, 0.933, 0.047, "Force Player Models:", 14, "cg_forceModel")
+
+	// TA: Draw Team Overlay (yesno) rect 99 215 -> 215/426=0.505
+	itemDef {
+		type 12
+		text "Team Overlay:"
+		rect 0.033 0.505 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "cg_drawTeamOverlay"
+		cvarFloatList { "Off" 0 "Upper Right" 1 "Lower Right" 2 "Lower Left" 3 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: Show Time (yesno) rect 99 255 -> 255/426=0.599
+	WYESNO(0.033, 0.552, 0.933, 0.047, "Show Time:", 14, "cg_drawTimer")
+
+	// TA: Voices Off (yesno) rect 99 275 -> 275/426=0.645
+	WYESNO(0.033, 0.599, 0.933, 0.047, "Voices Off:", 14, "cg_NoVoiceChats")
+
+	// TA: Taunts Off (yesno) rect 99 295 -> 295/426=0.692
+	WYESNO(0.033, 0.646, 0.933, 0.047, "Taunts Off:", 14, "cg_noTaunt")
+
+	// TA: Voice Text Off (yesno) rect 99 315 -> 315/426=0.739
+	WYESNO(0.033, 0.693, 0.933, 0.047, "Voice Text Off:", 14, "cg_noVoiceText")
+
+	// TA: Team Chats Only (yesno) rect 99 335 -> 335/426=0.786
+	WYESNO(0.033, 0.740, 0.933, 0.047, "Team Chats Only:", 14, "cg_teamChatsOnly")
+
+	// TA: In Game Video (yesno) rect 99 355 -> 355/426=0.833
+	WYESNO(0.033, 0.787, 0.933, 0.047, "In Game Video:", 14, "r_inGameVideo")
+
+	// TA: Crosshair (ownerdraw UI_CROSSHAIR) rect 227 395 20 20
+	itemDef {
+		name "crosshair"
+		text "Crosshair:"
+		rect 0.033 0.834 0.933 0.047
+		ownerdraw UI_CROSSHAIR
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		visible 1
+	}
+
+	// Our additions: crosshair style and auto-switch
+	itemDef {
+		type 12
+		text "Crosshair Style:"
+		rect 0.033 0.881 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "cg_drawCrosshair"
+		cvarFloatList { "None" 0 "Cross" 1 "Dot" 2 "Circle" 3 "Bracket" 4 "X" 5 "Diamond" 6 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	itemDef {
+		type 12
+		text "Auto-Switch:"
+		rect 0.033 0.928 0.933 0.047
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "cg_autoswitch"
+		cvarFloatList { "Off" 0 "Best Safe" 1 "Always Best" 2 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	WSEPARATOR(0.033, 0.981, 0.933)
+	WBUTTON(0.344, 0.990, 0.313, 0.048, "Back", 14, close)
+}

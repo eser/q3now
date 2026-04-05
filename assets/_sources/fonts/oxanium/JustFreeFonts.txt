@@ -1,0 +1,85 @@
+===============================================================================
+
+-------------------------------------------------------------------------------
+                        Welcome to JustFreeFonts.com
+-------------------------------------------------------------------------------
+
+Thank you for downloading a font from JustFreeFonts.com, a website dedicated to 
+providing high-quality fonts that are free for both personal and commercial use. 
+Our mission is to curate a diverse collection of stunning typefaces from talented 
+designers worldwide and make them easily accessible to everyone.
+
+-------------------------------------------------------------------------------
+                            1. Font License Information
+-------------------------------------------------------------------------------
+
+The fonts available on JustFreeFonts.com are generally licensed for free 
+personal and commercial use. However, some fonts may have specific usage rights, 
+restrictions, or attribution requirements set by their creators. It is crucial 
+that you carefully read and understand the individual license agreement included 
+with each font.
+
+-------------------------------------------------------------------------------
+                            2. Installation Guide
+-------------------------------------------------------------------------------
+
+Installing fonts on your computer is a straightforward process, but the specific 
+steps may vary depending on your operating system.
+
+Windows:
+
+After downloading the font file, right-click on it and select "Install." 
+Alternatively, you can copy the font file to the "Fonts" folder (typically 
+located at C:\\Windows\\Fonts).
+
+macOS:
+
+Double-click the font file to open the Font Book utility, then click "Install 
+Font" to add the font to your system.
+
+Linux:
+
+The process may vary depending on your distribution, but generally, you can copy 
+the font file to the ~/.fonts or ~/.local/share/fonts directory, then run a 
+command to update the font cache (e.g., fc-cache -f -v).
+
+-------------------------------------------------------------------------------
+                            3. Using Fonts Responsibly
+-------------------------------------------------------------------------------
+
+While we encourage you to explore and enjoy the fonts from JustFreeFonts.com, we 
+kindly remind you to use them responsibly and in accordance with the applicable 
+license agreements. Adhering to licensing terms ensures that you respect the hard 
+work and intellectual property rights of the font creators.
+
+-------------------------------------------------------------------------------
+                            4. Getting Support
+-------------------------------------------------------------------------------
+
+If you have any questions, feedback, or inquiries regarding the fonts you've 
+downloaded or our website in general, please don't hesitate to reach out to our 
+support team at hello@justfreefonts.com. We're here to assist you and ensure 
+your experience with JustFreeFonts.com is positive.
+
+-------------------------------------------------------------------------------
+                            5. Acknowledgements
+-------------------------------------------------------------------------------
+
+We extend our sincere gratitude to you for choosing JustFreeFonts.com as your 
+source for free fonts, and to the talented designers who have shared their 
+incredible work with our community. Your support and contributions make our 
+platform thrive.
+
+-------------------------------------------------------------------------------
+                            6. Disclaimer
+-------------------------------------------------------------------------------
+
+Please note that the fonts provided on JustFreeFonts.com are offered as-is, 
+without any warranties or guarantees. While we strive to ensure the quality and 
+functionality of the fonts, their use is ultimately at your own risk. We 
+recommend thoroughly testing the fonts before implementing them in any critical 
+projects.
+
+Happy typography!
+
+The JustFreeFonts.com Team

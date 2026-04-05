@@ -17,6 +17,8 @@ Tiered implementation:
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
 #include "cl_wired_fonts.h"
+#include "cl_wired_draw.h"
+#include "cl_wired_background.h"
 #include "../../qcommon/menudef.h"
 
 #if FEAT_WIRED_UI
@@ -51,7 +53,7 @@ qboolean WiredUI_OwnerDrawVisible( int flags ) {
 
 // ── P1 ownerdraw renderers ───────────────────────────────────────────
 
-static void WiredOD_PlayerHealth( float x, float y, float w, float h ) {
+static void WiredOD_PlayerHealth( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	char buf[16];
 	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->health );
@@ -71,7 +73,7 @@ static void WiredOD_PlayerHealth( float x, float y, float w, float h ) {
 	WiredUI_DrawText_TA( x + ( w - tw ) * 0.5f, y + h * 0.25f, scale, color, buf, 0, 3, font );
 }
 
-static void WiredOD_PlayerArmor( float x, float y, float w, float h ) {
+static void WiredOD_PlayerArmor( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	char buf[16];
 	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->armor );
@@ -89,7 +91,7 @@ static void WiredOD_PlayerArmor( float x, float y, float w, float h ) {
 	WiredUI_DrawText_TA( x + ( w - tw ) * 0.5f, y + h * 0.25f, scale, color, buf, 0, 3, font );
 }
 
-static void WiredOD_PlayerAmmoValue( float x, float y, float w, float h ) {
+static void WiredOD_PlayerAmmoValue( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	int weapon = wiredHud->weapon;
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) return;
@@ -110,28 +112,28 @@ static void WiredOD_PlayerAmmoValue( float x, float y, float w, float h ) {
 	WiredUI_DrawText_TA( x + ( w - tw ) * 0.5f, y + h * 0.25f, scale, color, buf, 0, 3, font );
 }
 
-static void WiredOD_PlayerArmorIcon( float x, float y, float w, float h ) {
+static void WiredOD_PlayerArmorIcon( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	// draw the appropriate armor tier icon
 	qhandle_t icon = wiredHud->combatArmorIcon;  // default to combat armor
 	if ( icon ) {
 		re.SetColor( NULL );
-		SCR_DrawPic( x, y, w, h, icon );
+		WUI_DrawPic( x, y, w, h, icon );
 	}
 }
 
-static void WiredOD_PlayerAmmoIcon( float x, float y, float w, float h ) {
+static void WiredOD_PlayerAmmoIcon( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	int weapon = wiredHud->weapon;
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) return;
 	qhandle_t icon = wiredHud->ammoIcons[weapon];
 	if ( icon ) {
 		re.SetColor( NULL );
-		SCR_DrawPic( x, y, w, h, icon );
+		WUI_DrawPic( x, y, w, h, icon );
 	}
 }
 
-static void WiredOD_PlayerScore( float x, float y, float w, float h ) {
+static void WiredOD_PlayerScore( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	int score = wiredHud->persistant[PERS_SCORE];
 	char buf[16];
@@ -145,7 +147,7 @@ static void WiredOD_PlayerScore( float x, float y, float w, float h ) {
 
 // ── P2 ownerdraw renderers ───────────────────────────────────────────
 
-static void WiredOD_BlueScore( float x, float y, float w, float h ) {
+static void WiredOD_BlueScore( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	char buf[16];
 	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->scores2 );
@@ -155,7 +157,7 @@ static void WiredOD_BlueScore( float x, float y, float w, float h ) {
 	WiredUI_DrawText_TA( x, y + h * 0.25f, scale, color, buf, 0, 3, font );
 }
 
-static void WiredOD_RedScore( float x, float y, float w, float h ) {
+static void WiredOD_RedScore( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	char buf[16];
 	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->scores1 );
@@ -165,26 +167,19 @@ static void WiredOD_RedScore( float x, float y, float w, float h ) {
 	WiredUI_DrawText_TA( x, y + h * 0.25f, scale, color, buf, 0, 3, font );
 }
 
-static void WiredOD_Killer( float x, float y, float w, float h ) {
+static void WiredOD_Killer( float x, float y, float w, float h, vec4_t itemColor ) {
 	// The "who killed you" text — uses killerName from the bridge
 	if ( !wiredHud || !wiredHud->valid ) return;
 	// TODO: add killerName to wiredHudState_t — for now, stub
 }
 
-static void WiredOD_GameType( float x, float y, float w, float h ) {
+static void WiredOD_GameType( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	const char *gt;
-	switch ( wiredHud->gametype ) {
-		case 0: gt = "Free For All"; break;
-		case 1: gt = "Tournament"; break;
-		case 2: gt = "Single Player"; break;
-		case 3: gt = "Team Deathmatch"; break;
-		case 4: gt = "CTF"; break;
-		case 5: gt = "1-Flag CTF"; break;
-		case 6: gt = "Overload"; break;
-		case 7: gt = "Harvester"; break;
-		case 8: gt = "FreezeTag"; break;
-		default: gt = "Unknown"; break;
+	if ( wiredHud->gametype >= 0 && wiredHud->gametype < GT_MAX_GAME_TYPE ) {
+		gt = bg_gametypelist[wiredHud->gametype].name;
+	} else {
+		gt = "Unknown";
 	}
 	vec4_t color = { 1, 1, 1, 1 };
 	float scale = 0.35f;
@@ -192,9 +187,117 @@ static void WiredOD_GameType( float x, float y, float w, float h ) {
 	WiredUI_DrawText_TA( x, y + h * 0.25f, scale, color, gt, 0, 0, font );
 }
 
+// ── background grid (scanlines) ──────────────────────────────────────
+
+static void WiredOD_BackgroundGrid( float x, float y, float w, float h, vec4_t itemColor ) {
+	// Draw horizontal scanlines every 48 pixels across the full
+	// screen.  Uses the item's forecolor for tint and alpha,
+	// falling back to white 3% alpha if no color is provided.
+	vec4_t lineColor;
+	if ( itemColor && ( itemColor[0] > 0.0f || itemColor[1] > 0.0f || itemColor[2] > 0.0f ) ) {
+		Vector4Copy( itemColor, lineColor );
+	} else {
+		Vector4Set( lineColor, 1, 1, 1, 0.03f );
+	}
+	float lineH   = 1.0f;   // 1 virtual pixel height
+	float spacing = 48.0f;
+	float sy;
+
+	for ( sy = 0; sy < (float)cls.glconfig.vidHeight; sy += spacing ) {
+		WUI_FillRect( 0, sy, (float)cls.glconfig.vidWidth, lineH, lineColor );
+	}
+}
+
+// ── background full (3-layer) ─────────────────────────────────────────
+
+static void WiredOD_BackgroundFull( float x, float y, float w, float h, vec4_t itemColor ) {
+	Com_Printf(">>> UI_BACKGROUND_FULL ownerdraw hit: %.0f %.0f %.0f %.0f\n", x, y, w, h);
+	WUI_DrawBackground( x, y, w, h );
+}
+
+// ── UI ownerdraw renderers ────────────────────────────────────────────
+
+static void WiredOD_NetMapPreview( float x, float y, float w, float h, vec4_t itemColor ) {
+	// Draw the levelshot for the currently selected server's map.
+	// The cvar ui_mapLevelshot is set by server selection in the feeder.
+	char lsBuf[MAX_QPATH];
+	qhandle_t shader;
+
+	Cvar_VariableStringBuffer( "ui_mapLevelshot", lsBuf, sizeof( lsBuf ) );
+	if ( !lsBuf[0] ) return;
+
+	shader = re.RegisterShaderNoMip( lsBuf );
+	if ( shader ) {
+		re.SetColor( NULL );
+		WUI_DrawPic( x, y, w, h, shader );
+	}
+}
+
+// ── player model preview ──────────────────────────────────────────────
+
+static qhandle_t wiredOD_headModel = 0;
+static char      wiredOD_headModelName[MAX_QPATH];
+
+static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t itemColor ) {
+	refdef_t    refdef;
+	refEntity_t ent;
+	char        model[MAX_QPATH];
+	char        headPath[MAX_QPATH];
+	vec3_t      angles;
+	char       *slash;
+
+	// read model cvar (format: "model/skin")
+	Cvar_VariableStringBuffer( "model", model, sizeof( model ) );
+	slash = strchr( model, '/' );
+	if ( slash ) *slash = '\0';
+	if ( !model[0] ) Q_strncpyz( model, "sarge", sizeof( model ) );
+
+	// cache head model handle
+	Com_sprintf( headPath, sizeof( headPath ), "models/players/%s/head.md3", model );
+	if ( Q_stricmp( headPath, wiredOD_headModelName ) ) {
+		Q_strncpyz( wiredOD_headModelName, headPath, sizeof( wiredOD_headModelName ) );
+		wiredOD_headModel = re.RegisterModel( headPath );
+	}
+	if ( !wiredOD_headModel ) return;
+
+	// coordinates are already real screen pixels
+	Com_Memset( &refdef, 0, sizeof( refdef ) );
+	refdef.rdflags = RDF_NOWORLDMODEL;
+	refdef.x       = (int)x;
+	refdef.y       = (int)y;
+	refdef.width   = (int)w;
+	refdef.height  = (int)h;
+	if ( refdef.width < 1 || refdef.height < 1 ) return;
+	refdef.fov_x   = 25.0f;
+	refdef.fov_y   = 25.0f * (float)refdef.height / (float)refdef.width;
+	refdef.time    = cls.realtime;
+	AxisClear( refdef.viewaxis );
+
+	// camera looks down -X toward the model at origin
+	VectorSet( refdef.vieworg, 80, 0, 0 );
+
+	// model entity — spinning head at origin
+	Com_Memset( &ent, 0, sizeof( ent ) );
+	ent.reType  = RT_MODEL;
+	ent.hModel  = wiredOD_headModel;
+	ent.origin[2] = -5.0f;
+
+	angles[PITCH] = 0;
+	angles[YAW]   = (float)( cls.realtime % 10000 ) / 10000.0f * 360.0f;
+	angles[ROLL]  = 0;
+	AnglesToAxis( angles, ent.axis );
+
+	VectorCopy( ent.origin, ent.lightingOrigin );
+	ent.renderfx = RF_LIGHTING_ORIGIN | RF_NOSHADOW;
+
+	re.ClearScene();
+	re.AddRefEntityToScene( &ent, qfalse );
+	re.RenderScene( &refdef );
+}
+
 // ── dispatch table ────────────────────────────────────────────────────
 
-typedef void (*ownerDrawFunc_t)( float x, float y, float w, float h );
+typedef void (*ownerDrawFunc_t)( float x, float y, float w, float h, vec4_t itemColor );
 
 typedef struct {
 	int              id;
@@ -219,6 +322,14 @@ static const ownerDrawEntry_t ownerDrawTable[] = {
 	{ CG_KILLER,              WiredOD_Killer,           "CG_KILLER" },
 	{ CG_GAME_TYPE,           WiredOD_GameType,         "CG_GAME_TYPE" },
 
+	// Wired UI extensions
+	{ UI_BACKGROUND_GRID,     WiredOD_BackgroundGrid,   "UI_BACKGROUND_GRID" },
+	{ UI_BACKGROUND_FULL,     WiredOD_BackgroundFull,    "UI_BACKGROUND_FULL" },
+
+	// UI ownerdraw items (server browser, etc.)
+	{ UI_NETMAPPREVIEW,       WiredOD_NetMapPreview,    "UI_NETMAPPREVIEW" },
+	{ UI_PLAYERMODEL,         WiredOD_PlayerModel,      "UI_PLAYERMODEL" },
+
 	{ 0, NULL, NULL }  // sentinel
 };
 
@@ -234,7 +345,7 @@ void WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
 	// search dispatch table
 	for ( i = 0; ownerDrawTable[i].draw != NULL; i++ ) {
 		if ( ownerDrawTable[i].id == ownerDraw ) {
-			ownerDrawTable[i].draw( x, y, w, h );
+			ownerDrawTable[i].draw( x, y, w, h, color );
 			return;
 		}
 	}

@@ -9,6 +9,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_main.c
     ${SOURCE_DIR}/game/bg_misc.c
     ${SOURCE_DIR}/game/bg_weapons.c
+    ${SOURCE_DIR}/game/bg_gametypes.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c
     ${SOURCE_DIR}/game/bg_promode.c
@@ -19,7 +20,6 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_colorparse.c
     ${SOURCE_DIR}/cgame/cg_lensflare.c
     ${SOURCE_DIR}/cgame/cg_utils.c
-    ${SOURCE_DIR}/cgame/cg_moderntext.c
     ${SOURCE_DIR}/cgame/cg_window.c
     ${SOURCE_DIR}/game/bg_tracemap.c
     ${SOURCE_DIR}/cgame/cg_consolecmds.c
@@ -62,6 +62,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/ai_weapsel.c
     ${SOURCE_DIR}/game/bg_misc.c
     ${SOURCE_DIR}/game/bg_weapons.c
+    ${SOURCE_DIR}/game/bg_gametypes.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c
     ${SOURCE_DIR}/game/bg_promode.c

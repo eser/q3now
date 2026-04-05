@@ -1,0 +1,63 @@
+// addbots.wmenu - Wired UI add bots dialog
+// Absolute positioning -- form layout with quick-add buttons.
+// Coordinates faithfully converted from addbots.menu (640x480 -> normalized).
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "addbots"
+	rect 0.266 0.167 0.469 0.667
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.1 0.1 0.15 0.95
+	focuscolor 1 0.75 0 0.15
+
+	onESC { close }
+
+	WLABEL(0.0, 0.037, 1.0, 0.062, "Add Bot", 24, 1)
+	WSEPARATOR(0.053, 0.113, 0.893)
+
+	// bot name input
+	WEDITFIELD(0.067, 0.163, 0.867, 0.062, "Bot:", 17, "ui_botName", 32)
+
+	// skill level
+	itemDef {
+		type 12
+		text "Skill:"
+		rect 0.067 0.250 0.867 0.062
+		font "oxanium" 17
+		forecolor WCOLOR_TEXT
+		cvar "g_spSkill"
+		cvarFloatList { "I Can Win" 1 "Bring It On" 2 "Hurt Me Plenty" 3 "Hardcore" 4 "Nightmare" 5 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// team
+	itemDef {
+		type 12
+		text "Team:"
+		rect 0.067 0.338 0.867 0.062
+		font "oxanium" 17
+		forecolor WCOLOR_TEXT
+		cvar "ui_botTeam"
+		cvarStrList { "Red" "red" "Blue" "blue" "Free" "free" }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	WSEPARATOR(0.053, 0.438, 0.893)
+
+	// quick add buttons for known bots
+	WBUTTON(0.067, 0.487, 0.867, 0.062, "Sarge", 17, exec "addbot Sarge 3")
+	WBUTTON(0.067, 0.562, 0.867, 0.062, "Keel", 17, exec "addbot Keel 3")
+	WBUTTON(0.067, 0.637, 0.867, 0.062, "Bones", 17, exec "addbot Bones 3")
+	WBUTTON(0.067, 0.713, 0.867, 0.062, "Slash", 17, exec "addbot Slash 3")
+	WBUTTON(0.067, 0.787, 0.867, 0.062, "Doom", 17, exec "addbot Doom 3")
+
+	WSEPARATOR(0.053, 0.869, 0.893)
+	WBUTTON(0.067, 0.906, 0.867, 0.062, "Close", 19, close)
+}

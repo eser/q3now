@@ -7,3 +7,6 @@
 [submodule "code/libs/picotls"]
 	path = code/libs/picotls
 	url = https://github.com/h2o/picotls.git
+[submodule "tools/msdf-atlas-gen"]
+	path = tools/msdf-atlas-gen
+	url = https://github.com/Chlumsky/msdf-atlas-gen.git

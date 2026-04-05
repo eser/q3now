@@ -80,6 +80,29 @@ Built on [Quake3e](https://github.com/ec-/Quake3e), with significant additions:
 - SDL version printed at engine startup for diagnostics
 - tons of bug fixes and other improvements
 
+## Wired UI Menu Format (.wmenu/.whud)
+
+q3now uses a normalized menu format (`.wmenu` for menus, `.whud` for HUD definitions) alongside legacy Q3 `.menu`/`.hud` files.
+
+### Key differences from legacy .menu
+- **Coordinates**: 0.0-1.0 normalized (not 640x480 pixels)
+- **Font sizes**: Point-based (e.g., `font "oxanium" 12`) instead of textscale fractions
+- **Anchor system**: `anchor TOP_LEFT` through `BOTTOM_RIGHT` for responsive positioning
+- **Text offset**: `textoffset 0.01 0.005` (normalized) replaces textalignx/textaligny
+- **Hover states**: Per-item `mouseEnter`/`mouseExit` for visual feedback
+- **Macros**: `#include "ui/wmenumacros.h"` provides `WBUTTON`, `WLABEL`, `WYESNO`, `WSLIDER`, `WMULTI`, `WBIND`, `WEDITFIELD`, `WSUBWINDOW`, `WSECTION_HEADER`, `WFULLSCREEN_BACKGROUND`, `WBACKGROUND_GRID`
+
+### Legacy compatibility
+Legacy `.menu`/`.hud` files are automatically converted at load time through a shim (coordinates divided by 640/480, textscale multiplied by 48). Third-party and Team Arena menu files continue to work without modification.
+
+### MSDF Fonts
+Three MSDF fonts are available:
+- **Sansman** (`"sansman"`) — Display/heading font
+- **Oxanium** (`"oxanium"`) — UI labels and body text
+- **Share Tech Mono** (`"console"`) — Console and monospace text
+
+Font atlases are generated at build time via `tools/msdf/generate_atlases.sh`. See `tools/msdf/fonts/README.md` for licensing.
+
 ## Vulkan renderer
 
 Based on
@@ -192,7 +215,7 @@ all available environment variables.
 | `Q3_HOSTNAME`        | `sv_hostname`     | Server name                 |
 | `Q3_MAXCLIENTS`      | `sv_maxclients`   | Max players                 |
 | `Q3_RCONPASSWORD`    | `rconpassword`    | Remote console password     |
-| `Q3_GAMETYPE`        | `g_gametype`      | 0=FFA, 1=Duel, 3=TDM, 4=CTF |
+| `Q3_GAMETYPE`        | `g_gametype`      | 0=DM, 1=Duel, 3=TDM, 4=CTF  |
 | `Q3_FRAGLIMIT`       | `fraglimit`       | Frag limit                  |
 | `Q3_TIMELIMIT`       | `timelimit`       | Time limit (minutes)        |
 | `Q3_QUIC`            | `sv_quic`         | Enable QUIC transport       |

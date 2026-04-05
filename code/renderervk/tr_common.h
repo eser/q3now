@@ -99,6 +99,7 @@ void R_UploadSubImage( byte *data, int x, int y, int width, int height, image_t 
 qhandle_t RE_RegisterShaderLightMap( const char *name, int lightmapIndex );
 qhandle_t RE_RegisterShader( const char *name );
 qhandle_t RE_RegisterShaderNoMip( const char *name );
+qhandle_t RE_RegisterMSDFShader( const char *name, float distanceRange, int atlasWidth, int atlasHeight );
 qhandle_t RE_RegisterShaderFromImage(const char *name, int lightmapIndex, image_t *image, qboolean mipRawImage);
 
 // font stuff

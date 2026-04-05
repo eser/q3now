@@ -621,7 +621,6 @@ Only in CTF games
 /* sounds */ ""
 	},
 
-#if FEAT_PW_KAMIKAZE
 /*QUAKED holdable_kamikaze (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
 */
 	{
@@ -637,7 +636,6 @@ Only in CTF games
 /* precache */ "",
 /* sounds */ "sound/items/kamikazerespawn.wav"
 	},
-#endif
 
 #if FEAT_PW_INVULNERABILITY
 /*QUAKED holdable_portal (.3 .3 1) (-16 -16 -16) (16 16 16) suspended
@@ -673,7 +671,6 @@ Only in CTF games
 	},
 #endif
 
-#if FEAT_1FCTF
 	/*QUAKED team_CTF_neutralflag (0 0 1) (-16 -16 -16) (16 16 16)
 Only in One Flag CTF games
 */
@@ -690,7 +687,6 @@ Only in One Flag CTF games
 /* precache */ "",
 /* sounds */ ""
 	},
-#endif
 
 #if FEAT_HARVESTER
 	{
@@ -925,7 +921,6 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 		return qtrue;	// powerups are always picked up
 
 	case IT_TEAM: // team items, such as flags
-#if FEAT_1FCTF
 		if( gametype == GT_1FCTF ) {
 			// neutral flag can always be picked up
 			if( item->giTag == PW_NEUTRALFLAG ) {
@@ -941,7 +936,6 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 				}
 			}
 		}
-#endif
 		if( gametype == GT_CTF ) {
 			// ent->modelindex2 is non-zero on items if they are dropped
 			// we need to know this because we can pick up our dropped flag (and return it)
@@ -1233,6 +1227,7 @@ char *eventnames[] = {
 	"EV_MISSILE_MISS_METAL",
 	"EV_RAILTRAIL",
 	"EV_SHOTGUN",
+	"EV_SHOTGUN_WIDE",
 	"EV_BULLET",				// otherEntity is the shooter
 // eser - lightning discharge
 	"EV_LIGHTNING_DISCHARGE",
@@ -1268,6 +1263,7 @@ char *eventnames[] = {
 	"EV_INVUL_IMPACT",		// invulnerability sphere impact
 	"EV_JUICED",				// invulnerability juiced effect
 	"EV_LIGHTNINGBOLT",		// lightning bolt bounced of invulnerability sphere
+	"EV_LIGHTNING_ARC",		// chain arc beam from primary target to secondary target
 //#endif
 
 	"EV_DEBUG_LINE",

@@ -134,8 +134,6 @@ typedef struct {
 #define	GIANT_WIDTH			32
 #define	GIANT_HEIGHT		48
 
-#define	NUM_CROSSHAIRS		10
-
 #define TEAM_OVERLAY_MAXNAME_WIDTH	12
 #define TEAM_OVERLAY_MAXLOCATION_WIDTH	16
 
@@ -397,7 +395,7 @@ typedef struct {
 	int				armor;
 	int				curWeapon;
 
-	int				wins, losses;	// in tourney mode
+	int				wins, losses;	// in duel mode
 
 	int				teamTask;		// task in teamplay (offence/defence)
 	qboolean		teamLeader;		// true when this is a team leader
@@ -678,12 +676,10 @@ typedef struct {
 	int			soundTime;
 	qhandle_t	soundBuffer[MAX_SOUNDBUFFER];
 
-#if FEAT_TA_UI
 	// for voice chat buffer
 	int			voiceChatTime;
 	int			voiceChatBufferIn;
 	int			voiceChatBufferOut;
-#endif
 
 	// warmup countdown
 	int			warmup;
@@ -702,6 +698,11 @@ typedef struct {
 	// blend blobs
 	float		damageTime;
 	float		damageX, damageY, damageValue;
+
+	int			doubleBlastKickTime;	// time of last double-blast kick
+
+	int			lastArcTarget;		// entity number of last chain arc target (-1 = none)
+	int			lastArcTime;		// time of last arc connection
 
 	// status bar head
 	float		headYaw;
@@ -836,6 +837,7 @@ typedef struct {
 	qhandle_t	railDebrisShader;
 
 	qhandle_t	lightningShader;
+	qhandle_t	lightningArcShader;
 
 	qhandle_t	friendShader;
 
@@ -845,10 +847,15 @@ typedef struct {
 	qhandle_t	selectShader;
 	qhandle_t	viewBloodShader;
 	qhandle_t	tracerShader;
-	qhandle_t	crosshairShader[NUM_CROSSHAIRS];
 	qhandle_t	lagometerShader;
 	qhandle_t	backTileShader;
 	qhandle_t	noammoShader;
+
+	qhandle_t	crosshairMeleeShader;
+	qhandle_t	crosshairBulletShader;
+	qhandle_t	crosshairBurstShader;
+	qhandle_t	crosshairMissileShader;
+	qhandle_t	crosshairMiscShader;
 
 	qhandle_t	smokePuffShader;
 	qhandle_t	smokePuffRageProShader;
@@ -949,6 +956,7 @@ typedef struct {
 	sfxHandle_t	sfx_lghit1;
 	sfxHandle_t	sfx_lghit2;
 	sfxHandle_t	sfx_lghit3;
+	sfxHandle_t	sfx_lightningArcLoop;
 	sfxHandle_t	sfx_ric1;
 	sfxHandle_t	sfx_ric2;
 	sfxHandle_t	sfx_ric3;
@@ -1050,15 +1058,13 @@ typedef struct {
 
 	sfxHandle_t redFlagReturnedSound;
 	sfxHandle_t blueFlagReturnedSound;
-#if FEAT_TA_UI
 	sfxHandle_t neutralFlagReturnedSound;
-#endif
 	sfxHandle_t	enemyTookYourFlagSound;
 	sfxHandle_t yourTeamTookEnemyFlagSound;
 	sfxHandle_t	youHaveFlagSound;
-#if FEAT_TA_UI
 	sfxHandle_t	enemyTookTheFlagSound;
 	sfxHandle_t yourTeamTookTheFlagSound;
+#if FEAT_OVERLOAD
 	sfxHandle_t yourBaseIsUnderAttackSound;
 #endif
 	sfxHandle_t holyShitSound;
@@ -1069,6 +1075,7 @@ typedef struct {
 	sfxHandle_t	count1Sound;
 	sfxHandle_t	countFightSound;
 	sfxHandle_t	countPrepareSound;
+	sfxHandle_t	countPrepareTeamSound;
 
 #if FEAT_TA_UI
 	// new stuff
@@ -1081,8 +1088,9 @@ typedef struct {
 	qhandle_t retrieveShader;
 	qhandle_t escortShader;
 	qhandle_t flagShaders[3];
-	sfxHandle_t	countPrepareTeamSound;
+#endif
 
+#if FEAT_TA_UI
 	qhandle_t cursor;
 	qhandle_t selectCursor;
 	qhandle_t sizeCursor;
@@ -1108,12 +1116,20 @@ typedef struct {
 typedef struct {
 	gameState_t		gameState;			// gamestate from server
 	glconfig_t		glconfig;			// rendering configuration
-	float			screenXScale;		// derived from glconfig
+	float			screenXScale;		// derived from glconfig (legacy, used by proportional text)
 	float			screenYScale;
 	float			screenXBias;
 	float			screenYBias;
 	float			screenXScaleStretch;
 	float			screenYScaleStretch;
+
+	// normalized-space equivalents (0.0-1.0 screen space)
+	float			normXScale;			// aspect-preserving scale factor in norm space
+	float			normYScale;
+	float			normXBias;			// centering bias in norm space
+	float			normYBias;
+	float			normXScaleStretch;	// stretch-to-fill scale factor
+	float			normYScaleStretch;
 
 	int				serverCommandSequence;	// reliable command stream counter
 	int				processedSnapshotNum;// the number of snapshots cgame has requested
@@ -1122,8 +1138,8 @@ typedef struct {
 
 	// parsed from serverinfo
 	gametype_t		gametype;
-	int				dmflags;
-	int             kothflags;
+	int				g_noFootsteps;
+	int             g_kothGhosts;
 	int				fraglimit;
 	int				capturelimit;
 	int				timelimit;
@@ -1284,10 +1300,8 @@ extern	vmCvar_t		cg_predictItems;
 extern	vmCvar_t		cg_deferPlayers;
 extern	vmCvar_t		cg_drawFriend;
 extern	vmCvar_t		cg_teamChatsOnly;
-#if FEAT_TA_UI
 extern	vmCvar_t		cg_noVoiceChats;
 extern	vmCvar_t		cg_noVoiceText;
-#endif
 extern  vmCvar_t		cg_scorePlums;
 extern	vmCvar_t		cg_smoothClients;
 extern	vmCvar_t		pmove_fixed;
@@ -1329,9 +1343,7 @@ extern	vmCvar_t		cg_cameraMode;
 extern  vmCvar_t		cg_smallFont;
 extern  vmCvar_t		cg_bigFont;
 #endif
-#if FEAT_TA_UI
 extern	vmCvar_t		cg_noTaunt;
-#endif
 extern	vmCvar_t		cg_noProjectileTrail;
 #if FEAT_TA_UI
 extern	vmCvar_t		cg_redTeamName;
@@ -1501,13 +1513,27 @@ void CG_SetScreenPlacement(screenPlacement_e hpos, screenPlacement_e vpos);
 void CG_PopScreenPlacement(void);
 screenPlacement_e CG_GetScreenHorizontalPlacement(void);
 screenPlacement_e CG_GetScreenVerticalPlacement(void);
-void CG_AdjustFrom640( float *x, float *y, float *w, float *h );
+void CG_AdjustNorm( float *x, float *y, float *w, float *h );
 void CG_FillRect( float x, float y, float width, float height, const float *color );
 void CG_DrawPic( float x, float y, float width, float height, qhandle_t hShader );
-void CG_DrawStringExt( int x, int y, const char *string, const float *setColor,
-		qboolean forceColor, qboolean shadow, int charWidth, int charHeight, int maxChars );
-void CG_DrawBigString( int x, int y, const char *s, vec4_t color, int flags, int font );
-void CG_DrawSmallString( int x, int y, const char *s, vec4_t color, int flags, int font );
+
+// Normalized-coordinate draw helpers (0.0-1.0 screen space)
+void CG_DrawPicNorm( float nx, float ny, float nw, float nh, qhandle_t hShader );
+void CG_FillRectNorm( float nx, float ny, float nw, float nh, const float *color );
+
+// Virtual-to-normalized conversion (1/virtual_w and 1/virtual_h)
+#define NORM_HSCALE  0.001562500f
+#define NORM_VSCALE  0.002083333f
+
+// Virtual screen dimensions (derived from norm scales, avoids literal references)
+#define CG_VIRTUAL_W  (1.0f / NORM_HSCALE)
+#define CG_VIRTUAL_H  (1.0f / NORM_VSCALE)
+
+// Convert old virtual coordinates to normalized (transitional helpers)
+static ID_INLINE float CG_NormX( float x ) { return x * NORM_HSCALE; }
+static ID_INLINE float CG_NormY( float y ) { return y * NORM_VSCALE; }
+static ID_INLINE float CG_NormW( float w ) { return w * NORM_HSCALE; }
+static ID_INLINE float CG_NormH( float h ) { return h * NORM_VSCALE; }
 
 int CG_DrawStrlen( const char *str );
 
@@ -1549,7 +1575,9 @@ void CG_SelectNextPlayer( void );
 float CG_GetValue(int ownerDraw);
 qboolean CG_OwnerDrawVisible(int flags);
 void CG_RunMenuScript(char **args);
+#if FEAT_TA_UI
 void CG_ShowResponseHead( void );
+#endif
 void CG_SetPrintString(int type, const char *p);
 void CG_InitTeamChat( void );
 void CG_GetTeamColor(vec4_t *color);
@@ -1623,9 +1651,10 @@ void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );
 
 void CG_FireWeapon( centity_t *cent );
-void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType );
+void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType, int sourceEntityNum );
 void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum );
 void CG_ShotgunFire( entityState_t *es );
+void CG_ShotgunFireWide( entityState_t *es );
 void CG_Bullet( vec3_t origin, int sourceEntityNum, vec3_t normal, qboolean flesh, int fleshEntityNum );
 // eser - explosions
 void CG_ExplosionParticles(int weapon, vec3_t origin);
@@ -1684,6 +1713,7 @@ void CG_InvulnerabilityImpact( vec3_t org, vec3_t angles );
 void CG_InvulnerabilityJuiced( vec3_t org );
 #endif
 void CG_LightningBoltBeam( vec3_t start, vec3_t end );
+void CG_LightningArcBeam( vec3_t start, vec3_t end );
 void CG_ScorePlum( int client, vec3_t org, int score );
 #if FEAT_DAMAGE_PLUMS
 void CG_DamagePlum( int client, vec3_t org, int damage );	// 2A
@@ -1726,10 +1756,10 @@ void CG_DrawInformation( void );
 //
 qboolean CG_DrawOldScoreboard( void );
 qboolean CG_ModernDrawFFAScoreboard( void );
-qboolean CG_ModernDrawTourneyScoreboard( void );
+qboolean CG_ModernDrawDuelScoreboard( void );
 qboolean CG_ModernDrawScoretable( void );
 qboolean CG_BEDrawTeamScoretable( void );
-void CG_DrawTourneyScoreboard( void );
+void CG_DrawDuelScoreboard( void );
 
 //
 // cg_consolecmds.c
@@ -1744,12 +1774,9 @@ void CG_ExecuteNewServerCommands( int latestSequence );
 void CG_ParseServerinfo( void );
 void CG_SetConfigValues( void );
 void CG_ShaderStateChanged(void);
-#if FEAT_TA_UI
 void CG_LoadVoiceChats( void );
 void CG_VoiceChatLocal( int mode, qboolean voiceOnly, int clientNum, int color, const char *cmd );
 void CG_PlayBufferedVoiceChats( void );
-#endif
-
 //
 // cg_playerstate.c
 //
@@ -1883,7 +1910,9 @@ void		trap_R_AddRailTrailParams( const railTrailParams_t *params );
 int			trap_R_LightForPoint( vec3_t point, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir );
 void		trap_R_RenderScene( const refdef_t *fd );
 void		trap_R_SetColor( const float *rgba );	// NULL = 1,1,1,1
-void		trap_R_DrawStretchPic( float x, float y, float w, float h, 
+void		trap_R_DrawStretchPic( float x, float y, float w, float h,
+			float s1, float t1, float s2, float t2, qhandle_t hShader );
+void		trap_R_DrawStretchPicNorm( float nx, float ny, float nw, float nh,
 			float s1, float t1, float s2, float t2, qhandle_t hShader );
 void		trap_R_ModelBounds( clipHandle_t model, vec3_t mins, vec3_t maxs );
 int			trap_R_LerpTag( orientation_t *tag, clipHandle_t mod, int startFrame, int endFrame, 

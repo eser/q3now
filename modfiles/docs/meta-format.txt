@@ -1,0 +1,64 @@
+.meta Sidecar File Format
+=========================
+
+What are .meta files?
+---------------------
+Each map can have a companion .meta file that provides metadata for the
+loading screen. The file sits next to the .bsp in modfiles/maps/ and
+shares the map's base name:
+
+    modfiles/maps/q3dm17.bsp   ->   modfiles/maps/q3dm17.meta
+
+Format
+------
+Plain text, one key=value pair per line. No sections, no nesting,
+no quoting required. Blank lines and unknown keys are ignored.
+
+Keys
+----
+All keys are optional. Missing keys use fallback values.
+
+  series        Map series name.
+                Example: series=Q3A Arena
+
+  archetype     Visual theme keyword. Affects loading screen accent
+                colors. Known values: "tech", "gothic", "base".
+                Example: archetype=gothic
+
+  players_min   Minimum recommended players (integer).
+                Example: players_min=2
+
+  players_max   Maximum recommended players (integer).
+                Example: players_max=8
+
+  meta_weapon   Dominant weapon abbreviation (RL, LG, RG, SG, GL, PG, BFG).
+                Example: meta_weapon=RL
+
+  item_nodes    Number of key item pickup locations (integer).
+                Example: item_nodes=6
+
+  quote         Flavor text shown on the loading screen.
+                Keep under 80 characters.
+                Example: quote=The longest yard.
+
+  author        Map author or studio.
+                Example: author=id Software
+
+  year          Year the map was released (integer).
+                Example: year=1999
+
+Fallbacks
+---------
+When a key is absent the loading screen shows "--" for stat fields
+and omits the element entirely for quote.
+
+Example (q3dm17.meta)
+---------------------
+    series=Q3A Arena
+    archetype=tech
+    players_min=4
+    players_max=8
+    meta_weapon=RG
+    quote=Floating platforms in the void. One wrong step.
+    author=id Software
+    year=1999

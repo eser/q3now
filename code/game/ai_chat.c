@@ -250,17 +250,15 @@ BotWeaponNameForMeansOfDeath
 */
 
 char *BotWeaponNameForMeansOfDeath(int mod) {
+	int att = G_AttackFromMOD( mod );
+	if ( att > ATT_NONE && att < ATT_NUM_ATTACKS ) {
+		int wp = bg_attacklist[att].weapon;
+		if ( wp >= 0 && wp < WP_NUM_WEAPONS ) {
+			return bg_weaponlist[wp].name;
+		}
+	}
+	// fallback for non-weapon MODs
 	switch(mod) {
-		case MOD_SHOTGUN: return "Shotgun";
-		case MOD_GAUNTLET: return "Gauntlet";
-		case MOD_MACHINEGUN: return "Machinegun";
-		case MOD_GRENADE:
-		case MOD_GRENADE_SPLASH: return "Grenade Launcher";
-		case MOD_ROCKET:
-		case MOD_ROCKET_SPLASH: return "Rocket Launcher";
-		case MOD_PLASMA: return "Plasma Rifle";
-		case MOD_RAILGUN: return "Railgun";
-		case MOD_LIGHTNING: return "Lightning Gun";
 		case MOD_KAMIKAZE: return "Kamikaze";
 		case MOD_GRAPPLE: return "Grapple";
 		default: return "[unknown weapon]";
@@ -275,11 +273,8 @@ BotRandomWeaponName
 char *BotRandomWeaponName(void) {
 	int rnd;
 
-#if FEAT_TA_VOICECHAT
-	rnd = random() * 11.9;
-#else
 	rnd = random() * 8.9;
-#endif
+
 	switch(rnd) {
 		case 0: return "Gauntlet";
 		case 1: return "Shotgun";
@@ -378,8 +373,8 @@ int BotChat_EnterGame(bot_state_t *bs) {
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	//don't chat in teamplay
 	if (TeamPlayIsOn()) return qfalse;
-	// don't chat in tournament mode
-	if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+	if (gametype == GT_DUEL) return qfalse;
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_ENTEREXITGAME, 0, 1);
 	if (!bot_fastchat.integer) {
 		if (random() > rnd) return qfalse;
@@ -411,8 +406,8 @@ int BotChat_ExitGame(bot_state_t *bs) {
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	//don't chat in teamplay
 	if (TeamPlayIsOn()) return qfalse;
-	// don't chat in tournament mode
-    if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+    if (gametype == GT_DUEL) return qfalse;
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_ENTEREXITGAME, 0, 1);
 	if (!bot_fastchat.integer) {
 		if (random() > rnd) return qfalse;
@@ -450,8 +445,8 @@ int BotChat_StartLevel(bot_state_t *bs) {
 #endif
 	    return qfalse;
 	}
-	// don't chat in tournament mode
-    if (gametype == GT_TOURNAMENT || gametype == GT_LASTMANSTANDING) return qfalse;
+	// don't chat in duel mode
+    if (gametype == GT_DUEL || gametype == GT_LASTMANSTANDING) return qfalse;
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_STARTENDLEVEL, 0, 1);
 	if (!bot_fastchat.integer) {
 		if (random() > rnd) return qfalse;
@@ -487,8 +482,8 @@ int BotChat_EndLevel(bot_state_t *bs) {
 #endif
 		return qtrue;
 	}
-	// don't chat in tournament mode
-    if (gametype == GT_TOURNAMENT || gametype == GT_LASTMANSTANDING) return qfalse;
+	// don't chat in duel mode
+    if (gametype == GT_DUEL || gametype == GT_LASTMANSTANDING) return qfalse;
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_STARTENDLEVEL, 0, 1);
 	if (!bot_fastchat.integer) {
 		if (random() > rnd) return qfalse;
@@ -539,8 +534,8 @@ int BotChat_Death(bot_state_t *bs) {
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_DEATH, 0, 1);
-	// don't chat in tournament mode
-	if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+	if (gametype == GT_DUEL) return qfalse;
 	//if fast chatting is off
 	if (!bot_fastchat.integer) {
 		if (random() > rnd) return qfalse;
@@ -587,10 +582,10 @@ int BotChat_Death(bot_state_t *bs) {
 		else if (bs->botdeathtype == MOD_KAMIKAZE && trap_BotNumInitialChats(bs->cs, "death_kamikaze"))
 			BotAI_BotInitialChat(bs, "death_kamikaze", name, NULL);
 		else {
-			if ((bs->botdeathtype == MOD_GAUNTLET ||
+			if ((bs->botdeathtype == MOD_GAUNTLET || bs->botdeathtype == MOD_GAUNTLET_LUNGE ||
 				bs->botdeathtype == MOD_RAILGUN) && random() < 0.5) {
 
-				if (bs->botdeathtype == MOD_GAUNTLET)
+				if (bs->botdeathtype == MOD_GAUNTLET || bs->botdeathtype == MOD_GAUNTLET_LUNGE)
 					BotAI_BotInitialChat(bs, "death_gauntlet",
 							name,												// 0
 							BotWeaponNameForMeansOfDeath(bs->botdeathtype),		// 1
@@ -633,8 +628,8 @@ int BotChat_Kill(bot_state_t *bs) {
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_KILL, 0, 1);
-	// don't chat in tournament mode
-	if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+	if (gametype == GT_DUEL) return qfalse;
 	//if fast chat is off
 	if (!bot_fastchat.integer) {
 		if (random() > rnd) return qfalse;
@@ -662,7 +657,7 @@ int BotChat_Kill(bot_state_t *bs) {
 			return qfalse;			// don't wait
 		}
 		//
-		if (bs->enemydeathtype == MOD_GAUNTLET) {
+		if (bs->enemydeathtype == MOD_GAUNTLET || bs->enemydeathtype == MOD_GAUNTLET_LUNGE) {
 			BotAI_BotInitialChat(bs, "kill_gauntlet", name, NULL);
 		}
 		else if (bs->enemydeathtype == MOD_RAILGUN) {
@@ -701,8 +696,8 @@ int BotChat_EnemySuicide(bot_state_t *bs) {
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_ENEMYSUICIDE, 0, 1);
 	//don't chat in teamplay
 	if (TeamPlayIsOn()) return qfalse;
-	// don't chat in tournament mode
-	if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+	if (gametype == GT_DUEL) return qfalse;
 	//if fast chat is off
 	if (!bot_fastchat.integer) {
 		if (random() > rnd) return qfalse;
@@ -741,8 +736,8 @@ int BotChat_HitTalking(bot_state_t *bs) {
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_HITTALKING, 0, 1);
 	//don't chat in teamplay
 	if (TeamPlayIsOn()) return qfalse;
-	// don't chat in tournament mode
-	if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+	if (gametype == GT_DUEL) return qfalse;
 	//if fast chat is off
 	if (!bot_fastchat.integer) {
 		if (random() > rnd * 0.5) return qfalse;
@@ -781,8 +776,8 @@ int BotChat_HitNoDeath(bot_state_t *bs) {
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_HITNODEATH, 0, 1);
 	//don't chat in teamplay
 	if (TeamPlayIsOn()) return qfalse;
-	// don't chat in tournament mode
-	if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+	if (gametype == GT_DUEL) return qfalse;
 	//if fast chat is off
 	if (!bot_fastchat.integer) {
 		if (random() > rnd * 0.5) return qfalse;
@@ -819,8 +814,8 @@ int BotChat_HitNoKill(bot_state_t *bs) {
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_HITNOKILL, 0, 1);
 	//don't chat in teamplay
 	if (TeamPlayIsOn()) return qfalse;
-	// don't chat in tournament mode
-	if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+	if (gametype == GT_DUEL) return qfalse;
 	//if fast chat is off
 	if (!bot_fastchat.integer) {
 		if (random() > rnd * 0.5) return qfalse;
@@ -853,8 +848,8 @@ int BotChat_Random(bot_state_t *bs) {
 	if (bot_nochat.integer) return qfalse;
 	if (BotIsObserver(bs)) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
-	// don't chat in tournament mode
-	if (gametype == GT_TOURNAMENT) return qfalse;
+	// don't chat in duel mode
+	if (gametype == GT_DUEL) return qfalse;
 	//don't chat when doing something important :)
 	if (bs->ltgtype == LTG_TEAMHELP ||
 		bs->ltgtype == LTG_TEAMACCOMPANY ||

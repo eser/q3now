@@ -1,18 +1,47 @@
 // q3now custom shaders
 
+// ── loading screen radial glow ──────────────────────────────────────
+// White-to-transparent radial falloff texture (alpha encodes falloff).
+// GL_SRC_ALPHA GL_ONE = alpha-modulated additive blend:
+//   result = src_color * src_alpha + dst_color
+// The alpha channel provides the radial shape, additive ensures the
+// glow only brightens the background, never darkens it.
+gfx/loading/glow_radial
+{
+	sort additive
+	nopicmip
+	nomipmaps
+	{
+		map gfx/loading/glow_radial.tga
+		blendfunc GL_SRC_ALPHA GL_ONE
+		rgbGen vertex
+		alphaGen vertex
+	}
+}
+
+// ── UI radial glow ────────────────────────────────────────────────────
+// Circular gradient from white center to transparent edges.
+// Alpha-modulated additive blend: brightens the background, never darkens.
+gfx/ui/radial_glow
+{
+	nopicmip
+	nomipmaps
+	{
+		map gfx/ui/radial_glow.png
+		blendfunc GL_SRC_ALPHA GL_ONE
+		rgbGen vertex
+		alphaGen vertex
+	}
+}
+
 // ── crosshair shaders (fix: rgbGen exactVertex enables SetColor tinting) ──
 // Q3 vanilla uses rgbGen identity which ignores SetColor → crosshair always white.
 // QL fixed this with rgbGen exactVertex. We override all 10 crosshairs here.
-gfx/2d/crosshaira { nopicmip { map gfx/2d/crosshaira.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairb { nopicmip { map gfx/2d/crosshairb.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairc { nopicmip { map gfx/2d/crosshairc.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshaird { nopicmip { map gfx/2d/crosshaird.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshaire { nopicmip { map gfx/2d/crosshaire.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairf { nopicmip { map gfx/2d/crosshairf.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairg { nopicmip { map gfx/2d/crosshairg.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairh { nopicmip { map gfx/2d/crosshairh.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairi { nopicmip { map gfx/2d/crosshairi.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairj { nopicmip { map gfx/2d/crosshairj.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairMelee   { nopicmip { map gfx/2d/crosshairMelee.tga    blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairBullet  { nopicmip { map gfx/2d/crosshairBullet.tga   blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairBurst   { nopicmip { map gfx/2d/crosshairBurst.tga    blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairMissile { nopicmip { map gfx/2d/crosshairMissile.tga  blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairMisc    { nopicmip { map gfx/2d/crosshairMisc.tga     blendfunc blend  rgbGen exactVertex } }
 
 // ── q3now lens flare shaders ────────────────────────────────────────
 // Alternatives inspired by JJ Abrams / cinematic lens flare references.
@@ -244,5 +273,46 @@ wiredui/clouds
 		rgbgen const ( 0.20 0.20 0.30 )
 		tcmod scale 4 3
 		tcmod scroll 0.005 -0.012
+	}
+}
+
+models/powerups/health/red
+{	
+	
+	{
+		map textures/effects/envmapred.tga
+        tcGen environment
+	}
+}
+
+models/powerups/health/red_sphere
+{
+	{
+		map textures/effects/tinfx2b.tga
+		tcGen environment
+		blendfunc GL_ONE GL_ONE
+	}
+}
+
+// ── Lightning Gun Chain Arc beam shader ─────────────────────────────
+// Visually distinct from primary: bluer tint, more flicker, thinner appearance.
+// Uses existing gfx/misc/lightning1.tga — no new texture needed.
+// Dual-pass additive with offset scroll creates crackling interference pattern.
+lightningArc
+{
+	cull none
+	{
+		map gfx/misc/lightning1.tga
+		blendFunc GL_ONE GL_ONE
+		rgbGen wave inverseSawtooth 0 1 0 10
+		tcMod scroll 2.0 0
+		tcMod scale 1.5 1
+	}
+	{
+		map gfx/misc/lightning1.tga
+		blendFunc GL_ONE GL_ONE
+		rgbGen wave sawtooth 0.3 0.7 0 7
+		tcMod scroll -3.0 0
+		tcMod scale 1.0 1
 	}
 }

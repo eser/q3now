@@ -454,8 +454,8 @@ __asm__(".symver memcpy,memcpy@GLIBC_2.2.5");
 #define NUMVERTEXNORMALS	162
 extern	vec3_t	bytedirs[NUMVERTEXNORMALS];
 
-// all drawing is done to a 640*480 virtual screen size
-// and will be automatically scaled to the real resolution
+// DEPRECATED -- Wired UI and cgame use normalized coordinates (0.0-1.0).
+// Only kept for server/renderer backward compatibility.
 #define	SCREEN_WIDTH		640
 #define	SCREEN_HEIGHT		480
 
@@ -1264,6 +1264,10 @@ typedef struct playerState_s {
 	int			clientNum;		// ranges from 0 to MAX_CLIENTS-1
 	int			weapon;			// copied to entityState_t->weapon
 	int			weaponstate;
+	int			burstRoundsRemaining;	// rounds left in current burst fire
+	int			chargeStartTime;		// time when alt-fire charge began (0 = not charging)
+	int			cooldownEndTime;		// time when weapon cooldown ends (0 = no cooldown)
+	int			doubleBlastState;		// state for shotgun double-blast (0 = idle, 1 = first blast fired, waiting for second)
 
 	vec3_t		viewangles;		// for fixed views
 	int			viewheight;

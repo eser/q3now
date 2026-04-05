@@ -138,7 +138,7 @@ void CG_SHUDElementMsgQueueRoutine( void *context ) {
 		// line 1: primary text (centered, proportional + shadow)
 		CG_FontSelect( 2 );
 		CG_ModernDrawString( x, y, current->line1, color,
-			charW, charH, SCREEN_WIDTH,
+			charW, charH, (float)cls.glconfig.vidWidth,
 			DS_HCENTER | DS_PROPORTIONAL | DS_SHADOW, NULL );
 
 		// line 2: secondary text (rank placement — smaller, slightly dimmer)
@@ -150,7 +150,7 @@ void CG_SHUDElementMsgQueueRoutine( void *context ) {
 			Vector4Set( color2, 1, 1, 1, alpha * 0.85f );
 
 			CG_ModernDrawString( x, y + charH + 2, current->line2, color2,
-				charW2, charH2, SCREEN_WIDTH,
+				charW2, charH2, (float)cls.glconfig.vidWidth,
 				DS_HCENTER | DS_PROPORTIONAL | DS_SHADOW, NULL );
 		}
 	}

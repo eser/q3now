@@ -1,0 +1,133 @@
+// playersettings.wmenu - Wired UI player settings panel
+// Ported from TA player.menu (fullscreen, rect 0 0 640 480)
+// Player name, model selection, handicap, effect color.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "playersettings"
+	// TA is fullscreen 640x480 but we use a centered panel
+	rect 0.156 0.104 0.688 0.792
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor 1 0.75 0 0.15
+
+	WFULLSCREEN_BACKGROUND
+
+	onOpen { uiScript update "ui_GetName" }
+	onClose { uiScript update "ui_SetName" }
+	onESC { close }
+
+	WLABEL(0.000, 0.020, 1.000, 0.047, "Player Settings", 24, 1)
+	WSEPARATOR(0.033, 0.073, 0.933)
+
+	// ── Settings panel (left side) ──
+	// TA: window rect 10 50 620 60 -> info area
+	// TA: window rect 10 112 205 216 -> settings column
+	// TA: window rect 424 112 206 216 -> model preview
+
+	WSUBWINDOW(0.033, 0.089, 0.450, 0.033, "Player Info")
+
+	// TA: namefield at rect 0 70 215 32 (screen coords) -> within settings area
+	// Name field
+	WEDITFIELD(0.033, 0.131, 0.450, 0.063, "Name:", 14, "ui_Name", 32)
+
+	// TA: handicapfield at rect 0 175 215 32
+	// Handicap
+	itemDef {
+		name "handicapfield"
+		rect 0.033 0.210 0.450 0.063
+		style 0
+		text "Handicap:"
+		ownerdraw UI_HANDICAP
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// TA: effectfield at rect 0 205 215 32
+	// Effect color
+	itemDef {
+		name "effectfield"
+		rect 0.033 0.289 0.450 0.063
+		style 0
+		text "Effect:"
+		ownerdraw UI_EFFECTS
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// Our addition: model cvar text field
+	itemDef {
+		type 4
+		text "Model:"
+		rect 0.033 0.368 0.450 0.063
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "model"
+		maxChars 64
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// Our addition: Color selector
+	itemDef {
+		type 12
+		text "Color:"
+		rect 0.033 0.447 0.450 0.063
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "color1"
+		cvarFloatList { "White" 5 "Blue" 1 "Cyan" 2 "Green" 3 "Yellow" 4 "Red" 6 "Pink" 7 }
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
+
+	// ── Model preview (right side) ──
+	// TA: modelselection ownerdraw UI_PLAYERMODEL rect 424 80 260 260
+	// Normalized: right portion of our panel
+	itemDef {
+		name "modelselection"
+		ownerdraw UI_PLAYERMODEL
+		rect 0.550 0.089 0.420 0.500
+		style 1
+		decoration
+		visible 1
+	}
+
+	// ── Model list ──
+	// TA: headlist rect 10 330 620 80 (Team Arena heads)
+	itemDef {
+		name "headlist"
+		rect 0.033 0.605 0.933 0.158
+		type 6
+		style 1
+		elementwidth 0.120
+		elementheight 0.120
+		elementtype 2
+		feeder 2
+		horizontalscroll
+		border 1
+		bordersize 1
+		backcolor 0 0 0 0.25
+		bordercolor 0.5 0.5 0.5 0.5
+		forecolor 1 1 1 1
+		visible 1
+		mouseEnter { setitemcolor headlist bordercolor 0.7 0 0 1 }
+		mouseExit { setitemcolor headlist bordercolor 0.5 0.5 0.5 0.5 }
+	}
+
+	WSEPARATOR(0.033, 0.789, 0.933)
+
+	// TA: back bar at bottom
+	WBUTTON(0.344, 0.815, 0.313, 0.048, "Back", 14, close)
+}

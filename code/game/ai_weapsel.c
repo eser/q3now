@@ -181,8 +181,8 @@ void BotChooseWeaponDPS( struct bot_state_s *bs )
 			if ( bs->inventory[weapAmmoInv[wp]] <= 0 ) continue;
 		}
 
-		// gauntlet only viable at very close range
-		if ( wp == WP_GAUNTLET && enemyDist > 80.0f ) continue;
+		// gauntlet only viable at close range (lunge extends effective range)
+		if ( wp == WP_GAUNTLET && enemyDist > 128.0f ) continue;
 
 		// railgun not great at close range
 		if ( wp == WP_RAILGUN && enemyDist < 200.0f && bestDps > 0 ) continue;
@@ -206,6 +206,45 @@ void BotChooseWeaponDPS( struct bot_state_s *bs )
 			// splash contribution: lower accuracy requirement, but distance-dependent
 			float splashRate = hitRate * 0.5f; // splash hits more often
 			dps += (splashRate * (float)ws->splashDamage * 1000.0f) / (float)ws->fireInterval;
+		}
+
+		// machinegun burst mode: boost DPS at range due to tighter spread
+		if ( wp == WP_MACHINEGUN && enemyDist > 500.0f ) {
+			// at range, burst (10 dmg, tighter spread) is more effective
+			// simulate burst accuracy improvement: 50% better hit rate at range
+			float burstHitRate = hitRate * 1.5f;
+			if ( burstHitRate > 0.95f ) burstHitRate = 0.95f;
+			float burstDps = (burstHitRate * 10.0f * 1000.0f) / 400.0f;  // 10 dmg, 400ms effective rate (3 rounds per burst)
+			if ( burstDps > dps ) {
+				dps = burstDps;
+			}
+		}
+
+		// shotgun double-blast: boost DPS at close range due to wide spread
+		if ( wp == WP_SHOTGUN && enemyDist < 128.0f ) {
+			// at close range, double-blast (2x pellets in rapid succession) is devastating
+			// double the DPS since both blasts land at close range
+			dps *= 2.0f;
+		}
+
+		// rocket launcher mortar: boost effective DPS at close range
+		// mortar launches targets into the air for combo follow-ups
+		if ( wp == WP_ROCKET_LAUNCHER && enemyDist < 300.0f ) {
+			// mortar: 60 dmg + 60 splash, 800ms reload, 250 splash radius, huge knockback
+			float mortarSplashRate = hitRate * 0.9f;  // 250 radius = near-guaranteed splash at close range
+			float mortarDps = (mortarSplashRate * 120.0f * 1000.0f) / 800.0f;  // 60 direct + 60 splash
+			if ( mortarDps > dps ) {
+				dps = mortarDps;
+			}
+		}
+
+		// gauntlet lunge: boost DPS at close range due to gap-close ability
+		if ( wp == WP_GAUNTLET && enemyDist <= 128.0f && enemyDist > 40.0f ) {
+			// lunge does 100 damage with gap-close, making gauntlet viable beyond normal melee
+			float lungeDps = (hitRate * 100.0f * 1000.0f) / 1500.0f;  // 100 dmg, 1.5s cycle
+			if ( lungeDps > dps ) {
+				dps = lungeDps;
+			}
 		}
 
 		// penalize weapon switch (0.4s lost)

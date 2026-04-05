@@ -11,7 +11,7 @@ require github.com/pierrec/lz4/v4 v4.1.26 // indirect
 
 require (
 	github.com/bep/debounce v1.2.1 // indirect
-	github.com/eser/q3now/pkg/sw3z-archiver v0.0.0
+	github.com/eser/q3now/tools/sw3z-archiver v0.0.0
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -42,4 +42,4 @@ require (
 
 // replace github.com/wailsapp/wails/v2 v2.11.0 => /Users/eser/go/pkg/mod
 
-replace github.com/eser/q3now/pkg/sw3z-archiver => ../pkg/sw3z-archiver
+replace github.com/eser/q3now/tools/sw3z-archiver => ../tools/sw3z-archiver

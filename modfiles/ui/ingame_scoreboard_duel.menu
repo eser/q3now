@@ -1,0 +1,26 @@
+// ingame_scoreboard_duel.menu - In-game Duel/Tournament scoreboard (TAB overlay)
+//
+// Displayed when TAB is held during Tournament/Duel modes.
+// Uses ITEM_TYPE_DUELBOARD (type 21) for CPMA-style two-panel fighter layout.
+//
+// The C renderer (WiredHud_DrawDuelBoard) draws the full layout programmatically:
+// two side-by-side fighter panels with per-weapon stats, awards, and match info.
+
+menuDef {
+	name "ingame_scoreboard_duel"
+	rect 0 0 640 480
+	fullScreen 0
+	visible 1
+	style 0
+
+	// ── duel board (full-screen custom renderer) ─────────────────
+
+	itemDef {
+		name "duelboard"
+		type 21
+		rect 0 0 640 480
+		forecolor 1.0 1.0 1.0 1.0
+		visible 1
+		decoration
+	}
+}

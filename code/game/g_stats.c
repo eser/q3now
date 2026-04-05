@@ -114,7 +114,7 @@ void G_WriteStatsJSON( void ) {
 
 	json_write( f, "  " ); json_writeint( f, "duration", level.time / 1000 ); json_write( f, ",\n" );
 
-	if ( g_gametype.integer >= GT_TEAM ) {
+	if ( g_gametype.integer >= GT_TDM ) {
 		json_write( f, "  " ); json_writeint( f, "score_red", level.teamScores[TEAM_RED] ); json_write( f, ",\n" );
 		json_write( f, "  " ); json_writeint( f, "score_blue", level.teamScores[TEAM_BLUE] ); json_write( f, ",\n" );
 	}

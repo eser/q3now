@@ -766,7 +766,7 @@ void ClientUserinfoChanged( int clientNum ) {
 	}
 
 	// set model
-	if( g_gametype.integer >= GT_TEAM ) {
+	if( g_gametype.integer >= GT_TDM ) {
 		Q_strncpyz( model, Info_ValueForKey (userinfo, "team_model"), sizeof( model ) );
 		Q_strncpyz( headModel, Info_ValueForKey (userinfo, "team_headmodel"), sizeof( headModel ) );
 	} else {
@@ -789,14 +789,14 @@ void ClientUserinfoChanged( int clientNum ) {
 	}
 	// don't ever use a default skin in teamplay, it would just waste memory
 	// however bots will always join a team but they spawn in as spectator
-	if ( g_gametype.integer >= GT_TEAM && team == TEAM_SPECTATOR) {
+	if ( g_gametype.integer >= GT_TDM && team == TEAM_SPECTATOR) {
 		ForceClientSkin(client, model, "red");
 //		ForceClientSkin(client, headModel, "red");
 	}
 */
 
 #if FEAT_TA_TEAM_OVERLAYS
-	if (g_gametype.integer >= GT_TEAM && !(ent->r.svFlags & SVF_BOT)) {
+	if (g_gametype.integer >= GT_TDM && !(ent->r.svFlags & SVF_BOT)) {
 		client->pers.teamInfo = qtrue;
 	} else {
 		s = Info_ValueForKey( userinfo, "teamoverlay" );
@@ -969,7 +969,7 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 		trap_SendServerCommand( -1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " connected\n\"", client->pers.netname) );
 	}
 
-	if ( g_gametype.integer >= GT_TEAM &&
+	if ( g_gametype.integer >= GT_TDM &&
 		client->sess.sessionTeam != TEAM_SPECTATOR ) {
 		BroadcastTeamChange( client, -1 );
 	}
@@ -1033,7 +1033,7 @@ void ClientBegin( int clientNum ) {
 	ClientSpawn( ent );
 
 	if ( client->sess.sessionTeam != TEAM_SPECTATOR ) {
-		if ( g_gametype.integer != GT_TOURNAMENT ) {
+		if ( g_gametype.integer != GT_DUEL ) {
             trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " has entered the game\n\"", client->pers.netname));
 		}
 	}
@@ -1041,6 +1041,11 @@ void ClientBegin( int clientNum ) {
 
 	// count current clients and rank for scoreboard
 	CalculateRanks();
+
+	// auto bot management: if a human joined and we have excess bots, kick one
+	if ( !( ent->r.svFlags & SVF_BOT ) ) {
+		G_CheckAutoBots();
+	}
 }
 
 /*
@@ -1289,7 +1294,7 @@ void ClientSpawn(gentity_t *ent) {
             }
 #if FEAT_TEAM_LEADERSHIP
             // PTL (11M): assign leader flag to first player on each team
-            if ( g_ptl.integer && g_gametype.integer >= GT_TEAM ) {
+            if ( g_ptl.integer && g_gametype.integer >= GT_TDM ) {
                 int pw = ( client->sess.sessionTeam == TEAM_RED ) ? PW_REDFLAG : PW_BLUEFLAG;
                 qboolean hasLeader = qfalse;
                 int k;
@@ -1398,8 +1403,8 @@ void ClientDisconnect( int clientNum ) {
 
 	G_LogPrintf( "ClientDisconnect: %i\n", clientNum );
 
-	// if we are playing in tourney mode and losing, give a win to the other player
-	if ( (g_gametype.integer == GT_TOURNAMENT )
+	// if we are playing in duel mode and losing, give a win to the other player
+	if ( (g_gametype.integer == GT_DUEL )
 		&& !level.intermissiontime
 		&& !level.warmupTime && level.sortedClients[1] == clientNum ) {
 		level.clients[ level.sortedClients[0] ].sess.wins++;
@@ -1411,7 +1416,7 @@ void ClientDisconnect( int clientNum ) {
         }
     }
 
-	if( g_gametype.integer == GT_TOURNAMENT &&
+	if( g_gametype.integer == GT_DUEL &&
 		ent->client->sess.sessionTeam == TEAM_FREE &&
 		level.intermissiontime ) {
 
@@ -1436,4 +1441,7 @@ void ClientDisconnect( int clientNum ) {
 	if ( ent->r.svFlags & SVF_BOT ) {
 		BotAIShutdownClient( clientNum, qfalse );
 	}
+
+	// auto bot management: if a human left, the periodic check will add a bot
+	// (G_CheckMinimumPlayers runs every 3 seconds)
 }

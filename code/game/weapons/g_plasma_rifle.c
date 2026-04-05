@@ -14,7 +14,7 @@ void Weapon_PlasmaRifle_Primary (gentity_t *ent) {
 
 	if (ent->client) {
 		ent->client->accuracy_shots += NUM_PLASMASHOTS;
-		ent->client->attackStats[ATT_MACHINEGUN_PRIMARY].shots += NUM_PLASMASHOTS;
+		ent->client->attackStats[ATT_PLASMA_RIFLE_PRIMARY].shots += NUM_PLASMASHOTS;
 	}
 
     for (count = 0; count < NUM_PLASMASHOTS; count++) {

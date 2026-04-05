@@ -207,8 +207,10 @@ void CG_windowDraw( void )
 		for ( line = 0; line < w->lineCount && line < MAX_WINDOW_LINES; line++ ) {
 			Vector4Copy( w->lineColor[line], lineColor );
 			lineColor[3] *= w->alpha;
-			CG_DrawStringExt( w->x + WIN_PADDING, w->y + WIN_PADDING + line * WIN_LINE_HEIGHT,
-				w->lineText[line], lineColor, qfalse, qtrue, SMALLCHAR_WIDTH, SMALLCHAR_HEIGHT, 0 );
+			trap_R_DrawText( w->lineText[line],
+				(float)( w->x + WIN_PADDING ),
+				(float)( w->y + WIN_PADDING + line * WIN_LINE_HEIGHT ),
+				FONT_UI, (float)SMALLCHAR_HEIGHT, lineColor, TEXT_ALIGN_LEFT, 0 );
 		}
 	}
 }

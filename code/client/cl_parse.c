@@ -753,6 +753,11 @@ static void CL_ParseDownload( msg_t *msg ) {
 	// So UI gets access to it
 	Cvar_SetIntegerValue( "cl_downloadCount", clc.downloadCount );
 
+	// update loading screen download progress
+	if ( clc.downloadSize > 0 ) {
+		cl_loadProgress.download = (float)clc.downloadCount / (float)clc.downloadSize;
+	}
+
 	if ( size == 0 ) { // A zero length block means EOF
 		if ( clc.download != FS_INVALID_HANDLE ) {
 			FS_FCloseFile( clc.download );

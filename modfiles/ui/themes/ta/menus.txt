@@ -29,7 +29,7 @@
 	loadMenu { "ui/teamorders.menu" }
 
 	// ── HUD ──────────────────────────────────────────────────────────
-	loadMenu { "ui/hud_default.hud" }
+	loadMenu { "ui/hud_default.whud" }
 	loadMenu { "ui/ingame_scoreboard_ffa.menu" }
 	loadMenu { "ui/ingame_scoreboard_tdm.menu" }
 	loadMenu { "ui/ingame_scoreboard_ctf.menu" }

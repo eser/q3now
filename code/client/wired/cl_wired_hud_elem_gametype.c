@@ -36,7 +36,7 @@ void CG_SHUDElementGameTypeRoutine(void* context)
 
 	if (sec > 0)
 	{
-		if (cgs.gametype == GT_TOURNAMENT)
+		if (cgs.gametype == GT_DUEL)
 		{
 			const char* player1Name = NULL;
 			const char* player2Name = NULL;
@@ -69,14 +69,10 @@ void CG_SHUDElementGameTypeRoutine(void* context)
 			int len;
 			int width;
 
-			switch ( cgs.gametype ) {
-				case GT_FFA:            text = "Free for all"; break;
-				case GT_TOURNAMENT:     text = "Tournament"; break;
-				case GT_SINGLE_PLAYER:  text = "Single Player"; break;
-				case GT_TEAM:           text = "Team Deathmatch"; break;
-				case GT_CTF:            text = "Capture the Flag"; break;
-				case GT_KINGOFTHEHILL:  text = "King of the Hill"; break;
-				default:                text = ""; break;
+			if (cgs.gametype >= 0 && cgs.gametype < GT_MAX_GAME_TYPE) {
+				text = bg_gametypelist[cgs.gametype].name;
+			} else {
+				text = "";
 			}
 			Com_sprintf(str, 512, "%s", text);
 			element->ctx.text = str;

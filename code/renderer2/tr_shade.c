@@ -1093,6 +1093,28 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			backEnd.pc.c_genericDraws++;
 		}
 
+		// MSDF atlas rendering: use dedicated MSDF shader, bind texture,
+		// draw, then skip normal stage processing.
+		if ( input->shader->msdf ) {
+			vec4_t msdfParams;
+			sp = &tr.msdfShader;
+			GLSL_BindProgram(sp);
+			msdfParams[0] = input->shader->msdfDistanceRange;
+			msdfParams[1] = (float)input->shader->msdfAtlasWidth;
+			msdfParams[2] = (float)input->shader->msdfAtlasHeight;
+			msdfParams[3] = 0.0f;
+			GLSL_SetUniformMat4(sp, UNIFORM_MODELVIEWPROJECTIONMATRIX, glState.modelviewProjection);
+			GLSL_SetUniformVec4(sp, UNIFORM_COLOR, msdfParams);
+
+			if ( pStage->bundle[TB_DIFFUSEMAP].image[0] )
+				R_BindAnimatedImageToTMU( &pStage->bundle[TB_DIFFUSEMAP], TB_DIFFUSEMAP );
+
+			GL_State( pStage->stateBits );
+
+			R_DrawElements(input->numIndexes, input->firstIndex);
+			continue;
+		}
+
 		GLSL_BindProgram(sp);
 
 		GLSL_SetUniformMat4(sp, UNIFORM_MODELVIEWPROJECTIONMATRIX, glState.modelviewProjection);

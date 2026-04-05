@@ -95,12 +95,10 @@ int max_bspmodelindex;			//maximum BSP model index
 //CTF flag goals
 bot_goal_t ctf_redflag;
 bot_goal_t ctf_blueflag;
-#if FEAT_TA_TEAM_ORDERS
 bot_goal_t ctf_neutralflag;
 bot_goal_t redobelisk;
 bot_goal_t blueobelisk;
 bot_goal_t neutralobelisk;
-#endif
 
 #define MAX_ALTROUTEGOALS		32
 
@@ -229,10 +227,8 @@ qboolean EntityCarriesFlag(aas_entityinfo_t *entinfo) {
 		return qtrue;
 	if ( entinfo->powerups & ( 1 << PW_BLUEFLAG ) )
 		return qtrue;
-#if FEAT_TA_TEAM_ORDERS
 	if ( entinfo->powerups & ( 1 << PW_NEUTRALFLAG ) )
 		return qtrue;
-#endif
 	return qfalse;
 }
 
@@ -300,7 +296,6 @@ qboolean EntityHasBerserk(aas_entityinfo_t *entinfo) {
 	return qfalse;
 }
 
-#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 EntityHasKamikze
@@ -315,6 +310,19 @@ qboolean EntityHasKamikaze(aas_entityinfo_t *entinfo) {
 
 /*
 ==================
+Bot1FCTFCarryingFlag
+==================
+*/
+int Bot1FCTFCarryingFlag(bot_state_t *bs) {
+	if (gametype != GT_1FCTF) return qfalse;
+
+	if (bs->inventory[INVENTORY_NEUTRALFLAG] > 0) return qtrue;
+	return qfalse;
+}
+
+#if FEAT_HARVESTER
+/*
+==================
 EntityCarriesCubes
 ==================
 */
@@ -327,18 +335,6 @@ qboolean EntityCarriesCubes(aas_entityinfo_t *entinfo) {
 	BotAI_GetEntityState(entinfo->number, &state);
 	if (state.generic1 > 0)
 		return qtrue;
-	return qfalse;
-}
-
-/*
-==================
-Bot1FCTFCarryingFlag
-==================
-*/
-int Bot1FCTFCarryingFlag(bot_state_t *bs) {
-	if (gametype != GT_1FCTF) return qfalse;
-
-	if (bs->inventory[INVENTORY_NEUTRALFLAG] > 0) return qtrue;
 	return qfalse;
 }
 
@@ -808,7 +804,6 @@ void BotCTFRetreatGoals(bot_state_t *bs) {
 	}
 }
 
-#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 Bot1FCTFSeekGoals
@@ -1055,6 +1050,7 @@ void Bot1FCTFRetreatGoals(bot_state_t *bs) {
 	}
 }
 
+#if FEAT_OVERLOAD
 /*
 ==================
 BotObeliskSeekGoals
@@ -1150,6 +1146,17 @@ void BotObeliskSeekGoals(bot_state_t *bs) {
 
 /*
 ==================
+BotObeliskRetreatGoals
+==================
+*/
+void BotObeliskRetreatGoals(bot_state_t *bs) {
+	//nothing special
+}
+#endif
+
+#if FEAT_HARVESTER
+/*
+==================
 BotGoHarvest
 ==================
 */
@@ -1163,15 +1170,6 @@ void BotGoHarvest(bot_state_t *bs) {
 	bs->teamgoal_time = FloatTime() + TEAM_HARVEST_TIME;
 	bs->harvestaway_time = 0;
 	BotSetTeamStatus(bs);
-}
-
-/*
-==================
-BotObeliskRetreatGoals
-==================
-*/
-void BotObeliskRetreatGoals(bot_state_t *bs) {
-	//nothing special
 }
 
 /*
@@ -1356,13 +1354,15 @@ void BotTeamGoals(bot_state_t *bs, int retreat) {
 		if (gametype == GT_CTF) {
 			BotCTFRetreatGoals(bs);
 		}
-#if FEAT_TA_TEAM_ORDERS
 		else if (gametype == GT_1FCTF) {
 			Bot1FCTFRetreatGoals(bs);
 		}
+#if FEAT_OVERLOAD
 		else if (gametype == GT_OBELISK) {
 			BotObeliskRetreatGoals(bs);
 		}
+#endif
+#if FEAT_HARVESTER
 		else if (gametype == GT_HARVESTER) {
 			BotHarvesterRetreatGoals(bs);
 		}
@@ -1373,13 +1373,15 @@ void BotTeamGoals(bot_state_t *bs, int retreat) {
 			//decide what to do in CTF mode
 			BotCTFSeekGoals(bs);
 		}
-#if FEAT_TA_TEAM_ORDERS
 		else if (gametype == GT_1FCTF) {
 			Bot1FCTFSeekGoals(bs);
 		}
+#if FEAT_OVERLOAD
 		else if (gametype == GT_OBELISK) {
 			BotObeliskSeekGoals(bs);
 		}
+#endif
+#if FEAT_HARVESTER
 		else if (gametype == GT_HARVESTER) {
 			BotHarvesterSeekGoals(bs);
 		}
@@ -1561,19 +1563,17 @@ int BotSynonymContext(bot_state_t *bs) {
 
 	context = CONTEXT_NORMAL|CONTEXT_NEARBYITEM|CONTEXT_NAMES;
 	//
-	if (gametype == GT_CTF
-#if FEAT_TA_TEAM_ORDERS
-		|| gametype == GT_1FCTF
-#endif
-		) {
+	if (gametype == GT_CTF || gametype == GT_1FCTF) {
 		if (BotTeam(bs) == TEAM_RED) context |= CONTEXT_CTFREDTEAM;
 		else context |= CONTEXT_CTFBLUETEAM;
 	}
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_OVERLOAD
 	else if (gametype == GT_OBELISK) {
 		if (BotTeam(bs) == TEAM_RED) context |= CONTEXT_OBELISKREDTEAM;
 		else context |= CONTEXT_OBELISKBLUETEAM;
 	}
+#endif
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		if (BotTeam(bs) == TEAM_RED) context |= CONTEXT_HARVESTERREDTEAM;
 		else context |= CONTEXT_HARVESTERBLUETEAM;
@@ -1655,7 +1655,7 @@ void BotCheckItemPickup(bot_state_t *bs, int *oldinventory) {
 #if FEAT_TA_TEAM_ORDERS
 	int offence, leader;
 
-	if (gametype <= GT_TEAM)
+	if (gametype <= GT_TDM)
 		return;
 
 	offence = -1;
@@ -1771,8 +1771,8 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_FLIGHT] = bs->cur_ps.powerups[PW_FLIGHT] != 0;
 	bs->inventory[INVENTORY_REDFLAG] = bs->cur_ps.powerups[PW_REDFLAG] != 0;
 	bs->inventory[INVENTORY_BLUEFLAG] = bs->cur_ps.powerups[PW_BLUEFLAG] != 0;
-#if FEAT_TA_TEAM_ORDERS
 	bs->inventory[INVENTORY_NEUTRALFLAG] = bs->cur_ps.powerups[PW_NEUTRALFLAG] != 0;
+#if FEAT_HARVESTER
 	if (BotTeam(bs) == TEAM_RED) {
 		bs->inventory[INVENTORY_REDCUBE] = bs->cur_ps.generic1;
 		bs->inventory[INVENTORY_BLUECUBE] = 0;
@@ -1802,7 +1802,6 @@ void BotUpdateBattleInventory(bot_state_t *bs, int enemy) {
 	//FIXME: add num visible enemies and num visible team mates to the inventory
 }
 
-#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 BotUseKamikaze
@@ -1865,6 +1864,7 @@ void BotUseKamikaze(bot_state_t *bs) {
 			}
 		}
 	}
+#if FEAT_OVERLOAD
 	else if (gametype == GT_OBELISK) {
 		switch(BotTeam(bs)) {
 			case TEAM_RED: goal = &blueobelisk; break;
@@ -1882,6 +1882,8 @@ void BotUseKamikaze(bot_state_t *bs) {
 			}
 		}
 	}
+#endif
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		//
 		if (BotHarvesterCarryingCubes(bs))
@@ -1904,6 +1906,7 @@ void BotUseKamikaze(bot_state_t *bs) {
 			}
 		}
 	}
+#endif
 	//
 	BotVisibleTeamMatesAndEnemies(bs, &teammates, &enemies, KAMIKAZE_DIST);
 	//
@@ -1913,6 +1916,7 @@ void BotUseKamikaze(bot_state_t *bs) {
 	}
 }
 
+#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 BotUseInvulnerability
@@ -2030,9 +2034,8 @@ BotBattleUseItems
 void BotBattleUseItems(bot_state_t *bs) {
 	if (bs->inventory[INVENTORY_HEALTH] < 40) {
 		if (bs->inventory[INVENTORY_TELEPORTER] > 0) {
-			if (!BotCTFCarryingFlag(bs)
-#if FEAT_TA_TEAM_ORDERS
-				&& !Bot1FCTFCarryingFlag(bs)
+			if (!BotCTFCarryingFlag(bs) && !Bot1FCTFCarryingFlag(bs)
+#if FEAT_HARVESTER
 				&& !BotHarvesterCarryingCubes(bs)
 #endif
 				) {
@@ -2045,8 +2048,8 @@ void BotBattleUseItems(bot_state_t *bs) {
 			trap_EA_Use(bs->client);
 		}
 	}
-#if FEAT_TA_TEAM_ORDERS
 	BotUseKamikaze(bs);
+#if FEAT_TA_TEAM_ORDERS
 	BotUseInvulnerability(bs);
 #endif
 }
@@ -2185,7 +2188,7 @@ TeamPlayIsOn
 ==================
 */
 int TeamPlayIsOn(void) {
-	return ( gametype >= GT_TEAM );
+	return ( gametype >= GT_TDM );
 }
 
 /*
@@ -2267,12 +2270,12 @@ int BotWantsToRetreat(bot_state_t *bs) {
 		if (BotCTFCarryingFlag(bs))
 			return qtrue;
 	}
-#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF) {
 		//if carrying the flag then always retreat
 		if (Bot1FCTFCarryingFlag(bs))
 			return qtrue;
 	}
+#if FEAT_OVERLOAD
 	else if (gametype == GT_OBELISK) {
 		//the bots should be dedicated to attacking the enemy obelisk
 		if (bs->ltgtype == LTG_ATTACKENEMYBASE) {
@@ -2286,6 +2289,8 @@ int BotWantsToRetreat(bot_state_t *bs) {
 		}
 		return qfalse;
 	}
+#endif
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		//if carrying cubes then always retreat
 		if (BotHarvesterCarryingCubes(bs)) return qtrue;
@@ -2296,7 +2301,7 @@ int BotWantsToRetreat(bot_state_t *bs) {
 		BotEntityInfo(bs->enemy, &entinfo);
 		// if the enemy is carrying a flag
 		if (EntityCarriesFlag(&entinfo)) return qfalse;
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_HARVESTER
 		// if the enemy is carrying cubes
 		if (EntityCarriesCubes(&entinfo)) return qfalse;
 #endif
@@ -2327,7 +2332,6 @@ int BotWantsToChase(bot_state_t *bs) {
 		if (EntityCarriesFlag(&entinfo))
 			return qtrue;
 	}
-#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF) {
 		//never chase if carrying the flag
 		if (Bot1FCTFCarryingFlag(bs))
@@ -2337,6 +2341,7 @@ int BotWantsToChase(bot_state_t *bs) {
 		if (EntityCarriesFlag(&entinfo))
 			return qtrue;
 	}
+#if FEAT_OVERLOAD
 	else if (gametype == GT_OBELISK) {
 		//the bots should be dedicated to attacking the enemy obelisk
 		if (bs->ltgtype == LTG_ATTACKENEMYBASE) {
@@ -2346,6 +2351,8 @@ int BotWantsToChase(bot_state_t *bs) {
 			}
 		}
 	}
+#endif
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		//never chase if carrying cubes
 		if (BotHarvesterCarryingCubes(bs)) return qfalse;
@@ -2770,7 +2777,7 @@ int BotSameTeam(bot_state_t *bs, int entnum) {
         return qtrue;
     }
     
-    if (gametype >= GT_TEAM) {
+    if (gametype >= GT_TDM) {
         if (level.clients[bs->client].sess.sessionTeam == level.clients[entnum].sess.sessionTeam) {
             return qtrue;
         }
@@ -2948,7 +2955,7 @@ int BotFindEnemy(bot_state_t *bs, int curenemy) {
 	else {
 		cursquaredist = 0;
 	}
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_OVERLOAD
 	if (gametype == GT_OBELISK) {
 		vec3_t target;
 		bot_goal_t *goal;
@@ -3192,7 +3199,7 @@ void BotVisibleTeamMatesAndEnemies(bot_state_t *bs, int *teammates, int *enemies
 	}
 }
 
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_HARVESTER
 /*
 ==================
 BotTeamCubeCarrierVisible
@@ -3282,7 +3289,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	if (bs->enemy >= MAX_CLIENTS) {
 		//if the obelisk is visible
 		VectorCopy(entinfo.origin, target);
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_OVERLOAD
 		// if attacking an obelisk
 		if ( bs->enemy == redobelisk.entitynum ||
 			bs->enemy == blueobelisk.entitynum ) {
@@ -3566,7 +3573,7 @@ void BotCheckAttack(bot_state_t *bs) {
 	BotEntityInfo(attackentity, &entinfo);
 	// if not attacking a player
 	if (attackentity >= MAX_CLIENTS) {
-#if FEAT_TA_TEAM_ORDERS
+#if FEAT_OVERLOAD
 		// if attacking an obelisk
 		if ( entinfo.number == redobelisk.entitynum ||
 			entinfo.number == blueobelisk.entitynum ) {
@@ -3660,7 +3667,67 @@ void BotCheckAttack(bot_state_t *bs) {
 		}
 	}
 	else {
-		trap_EA_Attack(bs->client);
+		float distSq = VectorLengthSquared(dir);
+		qboolean useAlt = qfalse;
+
+		// shotgun double-blast: use alt-fire at close range
+		if ( bs->cur_ps.weapon == WP_SHOTGUN && distSq < Square(128) ) {
+			useAlt = qtrue;
+		}
+		// machinegun burst: use alt-fire at mid-to-long range
+		else if ( bs->cur_ps.weapon == WP_MACHINEGUN && distSq > Square(500) ) {
+			useAlt = qtrue;
+		}
+		// rocket launcher mortar: use alt-fire at close range to launch targets
+		else if ( bs->cur_ps.weapon == WP_ROCKET_LAUNCHER && distSq < Square(300) ) {
+			useAlt = qtrue;
+		}
+		// lightning gun chain arc: use alt-fire when 2+ enemies are clustered
+		// chain arc hits primary target + arcs to a nearby secondary within 192u
+		else if ( bs->cur_ps.weapon == WP_LIGHTNING_GUN && distSq < Square(LIGHTNING_RANGE) ) {
+			// check if any other visible enemy is within arc range of the primary target
+			int k;
+			aas_entityinfo_t enemyInfo;
+			vec3_t enemyOrigin;
+
+			BotEntityInfo(attackentity, &enemyInfo);
+			VectorCopy(enemyInfo.origin, enemyOrigin);
+
+			for ( k = 0; k < level.maxclients; k++ ) {
+				aas_entityinfo_t candidateInfo;
+				vec3_t diff;
+				float candDistSq;
+				bsp_trace_t losTrace;
+
+				if ( k == bs->client ) continue;       // skip self
+				if ( k == attackentity ) continue;      // skip primary target
+
+				BotEntityInfo(k, &candidateInfo);
+				if ( !candidateInfo.valid ) continue;
+				if ( EntityIsDead(&candidateInfo) ) continue;
+				if ( BotSameTeam(bs, k) ) continue;
+
+				// candidate must be within arc range of primary target
+				VectorSubtract(candidateInfo.origin, enemyOrigin, diff);
+				candDistSq = VectorLengthSquared(diff);
+				if ( candDistSq > Square(LG_CHAIN_ARC_RANGE) ) continue;
+
+				// LOS check: primary target to candidate
+				BotAI_Trace(&losTrace, enemyOrigin, NULL, NULL,
+					candidateInfo.origin, attackentity, CONTENTS_SOLID);
+				if ( losTrace.ent != k ) continue;
+
+				// found a valid arc target — use chain arc alt-fire
+				useAlt = qtrue;
+				break;
+			}
+		}
+
+		if ( useAlt ) {
+			trap_EA_Action(bs->client, ACTION_ATTACK_ALT);
+		} else {
+			trap_EA_Attack(bs->client);
+		}
 	}
 	bs->flags ^= BFL_ATTACKED;
 }
@@ -4711,7 +4778,6 @@ void BotCheckForGrenades(bot_state_t *bs, entityState_t *state) {
 	trap_BotAddAvoidSpot(bs->ms, state->pos.trBase, 160, AVOID_ALWAYS);
 }
 
-#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 BotCheckForKamikazeBody
@@ -4727,7 +4793,6 @@ void BotCheckForKamikazeBody(bot_state_t *bs, entityState_t *state) {
 	//remember this kamikaze body
 	bs->kamikazebody = state->number;
 }
-#endif
 
 /*
 ==================
@@ -4737,9 +4802,7 @@ BotCheckEvents
 void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 	int event;
 	char buf[128];
-#if FEAT_TA_TEAM_ORDERS
 	aas_entityinfo_t entinfo;
-#endif
 
 	//NOTE: this sucks, we're accessing the gentity_t directly
 	//but there's no other fast way to do it right now
@@ -4788,7 +4851,6 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 				bs->enemysuicide = qtrue;
 			}
 			//
-#if FEAT_TA_TEAM_ORDERS			
 			if (gametype == GT_1FCTF) {
 				//
 				BotEntityInfo(target, &entinfo);
@@ -4799,7 +4861,6 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 					}
 				}
 			}
-#endif
 			break;
 		}
 		case EV_GLOBAL_SOUND:
@@ -4821,14 +4882,11 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 				bs->flagstatuschanged = qtrue;
 			}
 			else*/
-#if FEAT_TA_TEAM_ORDERS
 			if (!strcmp(buf, "sound/items/kamikazerespawn.wav" )) {
 				//the kamikaze respawned so don't avoid it
 				BotDontAvoid(bs, "Kamikaze");
 			}
-			else
-#endif
-				if (!strcmp(buf, "sound/items/poweruprespawn.wav")) {
+			else if (!strcmp(buf, "sound/items/poweruprespawn.wav")) {
 				//powerup respawned... go get it
 				BotGoForPowerups(bs);
 			}
@@ -4870,7 +4928,6 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 						break; //see BotMatch_CTF
 				}
 			}
-#if FEAT_TA_TEAM_ORDERS
 			else if (gametype == GT_1FCTF) {
 				switch(state->eventParm) {
 					case GTS_RED_CAPTURE:
@@ -4901,7 +4958,6 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 						break;
 				}
 			}
-#endif
 			break;
 		}
 		case EV_PLAYER_TELEPORT_IN:
@@ -4998,10 +5054,8 @@ void BotCheckSnapshot(bot_state_t *bs) {
 		//check for grenades the bot should avoid
 		BotCheckForGrenades(bs, &state);
 		//
-#if FEAT_TA_TEAM_ORDERS
 		//check for dead bodies with the kamikaze effect which should be gibbed
 		BotCheckForKamikazeBody(bs, &state);
-#endif
 	}
 	//check the player state for events
 	BotAI_GetEntityState(bs->client, &state);
@@ -5097,7 +5151,6 @@ void BotSetupAlternativeRouteGoals(void) {
 
 	if (altroutegoals_setup)
 		return;
-#if FEAT_TA_TEAM_ORDERS
 	if (gametype == GT_CTF) {
 		if (trap_BotGetLevelItemGoal(-1, "Neutral Flag", &ctf_neutralflag) < 0)
 			BotAI_Print(PRT_WARNING, "No alt routes without Neutral Flag\n");
@@ -5118,8 +5171,8 @@ void BotSetupAlternativeRouteGoals(void) {
 		}
 	}
 	else if (gametype == GT_1FCTF) {
-		if (trap_BotGetLevelItemGoal(-1, "Neutral Obelisk", &neutralobelisk) < 0)
-			BotAI_Print(PRT_WARNING, "One Flag CTF without Neutral Obelisk\n");
+		if (trap_BotGetLevelItemGoal(-1, "Neutral Flag", &neutralobelisk) < 0)
+			BotAI_Print(PRT_WARNING, "One Flag CTF without Neutral Flag\n");
 		red_numaltroutegoals = trap_AAS_AlternativeRouteGoals(
 									ctf_neutralflag.origin, ctf_neutralflag.areanum,
 									ctf_redflag.origin, ctf_redflag.areanum, TFL_DEFAULT,
@@ -5133,6 +5186,7 @@ void BotSetupAlternativeRouteGoals(void) {
 									ALTROUTEGOAL_CLUSTERPORTALS|
 									ALTROUTEGOAL_VIEWPORTALS);
 	}
+#if FEAT_OVERLOAD
 	else if (gametype == GT_OBELISK) {
 		if (trap_BotGetLevelItemGoal(-1, "Neutral Obelisk", &neutralobelisk) < 0)
 			BotAI_Print(PRT_WARNING, "No alt routes without Neutral Obelisk\n");
@@ -5150,6 +5204,8 @@ void BotSetupAlternativeRouteGoals(void) {
 									ALTROUTEGOAL_CLUSTERPORTALS|
 									ALTROUTEGOAL_VIEWPORTALS);
 	}
+#endif
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		if (trap_BotGetLevelItemGoal(-1, "Neutral Obelisk", &neutralobelisk) < 0)
 			BotAI_Print(PRT_WARNING, "Harvester without Neutral Obelisk\n");
@@ -5300,7 +5356,7 @@ static void BotTeamCallout( bot_state_t *bs )
 	int team;
 
 	// only in team games
-	if ( gametype < GT_TEAM ) return;
+	if ( gametype < GT_TDM ) return;
 
 	team = bs->cur_ps.persistant[PERS_TEAM];
 	if ( team < 0 || team >= TEAM_NUM_TEAMS ) return;
@@ -5675,7 +5731,6 @@ void BotSetupDeathmatchAI(void) {
 		if (trap_BotGetLevelItemGoal(-1, "Blue Flag", &ctf_blueflag) < 0)
 			BotAI_Print(PRT_WARNING, "CTF without Blue Flag\n");
 	}
-#if FEAT_TA_TEAM_ORDERS
 	else if (gametype == GT_1FCTF) {
 		if (trap_BotGetLevelItemGoal(-1, "Neutral Flag", &ctf_neutralflag) < 0)
 			BotAI_Print(PRT_WARNING, "One Flag CTF without Neutral Flag\n");
@@ -5684,6 +5739,7 @@ void BotSetupDeathmatchAI(void) {
 		if (trap_BotGetLevelItemGoal(-1, "Blue Flag", &ctf_blueflag) < 0)
 			BotAI_Print(PRT_WARNING, "One Flag CTF without Blue Flag\n");
 	}
+#if FEAT_OVERLOAD
 	else if (gametype == GT_OBELISK) {
 		if (trap_BotGetLevelItemGoal(-1, "Red Obelisk", &redobelisk) < 0)
 			BotAI_Print(PRT_WARNING, "Overload without Red Obelisk\n");
@@ -5692,6 +5748,8 @@ void BotSetupDeathmatchAI(void) {
 			BotAI_Print(PRT_WARNING, "Overload without Blue Obelisk\n");
 		BotSetEntityNumForGoalWithActivator(&blueobelisk, "team_blueobelisk");
 	}
+#endif
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		if (trap_BotGetLevelItemGoal(-1, "Red Obelisk", &redobelisk) < 0)
 			BotAI_Print(PRT_WARNING, "Harvester without Red Obelisk\n");

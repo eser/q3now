@@ -1,0 +1,118 @@
+// main.wmenu - Wired UI main menu
+// Flex column layout — all vertical positioning handled by the layout engine.
+// No hardcoded y values anywhere.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "main"
+	anchor CENTER
+	rect 0 0 0.3 0.750
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.08 0.08 0.12 0.92
+	focuscolor 1 0.75 0 0.15
+	layout column
+	padding 0.05
+	gap 0.015
+	justify center
+
+	WFULLSCREEN_BACKGROUND
+
+	// title
+	itemDef {
+		type 0
+		text "q3now"
+		rect 0 0 1.0 0.067
+		textalign 1
+		font "sansman" 34
+		forecolor WCOLOR_TEXT
+		decoration
+		visible 1
+		grow 0
+	}
+
+	// subtitle
+	itemDef {
+		type 0
+		text "Wired UI"
+		rect 0 0 1.0 0.033
+		textalign 1
+		font "oxanium" 14
+		forecolor 0.5 0.5 0.6 1
+		decoration
+		visible 1
+		grow 0
+	}
+
+	WSEPARATOR(0, 0, 1.0)
+
+	// Play
+	itemDef {
+		type 1
+		text "Play"
+		rect 0 0 1.0 0.056
+		textalign 1
+		font "sansman" 22
+		forecolor WCOLOR_ACCENT
+		tooltip "Find a server"
+		visible 1
+		grow 0
+		action { open "servers" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+
+	// Create Server
+	WBUTTON(0, 0, 1.0, 0.056, "Create Server", 22, open "startserver")
+
+	WSEPARATOR(0, 0, 1.0)
+
+	// Options
+	WBUTTON(0, 0, 1.0, 0.056, "Options", 22, open "options")
+	// Demos
+	WBUTTON(0, 0, 1.0, 0.056, "Demos", 22, open "demos")
+	// Mods
+	WBUTTON(0, 0, 1.0, 0.056, "Mods", 22, open "mods")
+
+	WSEPARATOR(0, 0, 1.0)
+
+	// Quit
+	itemDef {
+		type 1
+		text "Quit"
+		rect 0 0 1.0 0.056
+		textalign 1
+		font "sansman" 22
+		forecolor WCOLOR_ACCENT
+		tooltip "Exit to desktop"
+		visible 1
+		grow 0
+		action { exec "quit" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_ACCENT }
+	}
+
+	// spacer — pushes footer toward bottom (not pinned to edge)
+	itemDef {
+		type 0
+		rect 0 0 1.0 0
+		decoration
+		visible 1
+		grow 0.3
+	}
+
+	// version footer
+	itemDef {
+		type 0
+		text "q3now - Wired UI"
+		rect 0 0 1.0 0.028
+		textalign 0
+		font "oxanium" 10
+		forecolor 0.5 0.5 0.55 1
+		decoration
+		visible 1
+		grow 0
+	}
+}

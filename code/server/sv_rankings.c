@@ -85,7 +85,7 @@ void SV_RankBegin( char *gamekey )
 	assert( !s_rankings_active );
 	assert( s_ranked_players == NULL );
 
-	if( sv_enableRankings->integer == 0 || Cvar_VariableValue( "g_gametype" ) == GT_SINGLE_PLAYER )
+	if( sv_enableRankings->integer == 0 )
 	{
 		s_rankings_active = qfalse;
 		if( sv_rankingsActive->integer == 1 )
@@ -107,31 +107,11 @@ void SV_RankBegin( char *gamekey )
 */
 
 		// substitute game-specific game key
-		switch( (int)Cvar_VariableValue("g_gametype") )
 		{
-		case GT_FFA:
-			gamekey = "Q3 Free For All";
-			break;
-		case GT_TOURNAMENT:
-			gamekey = "Q3 Tournament";
-			break;
-		case GT_TEAM:
-			gamekey = "Q3 Team Deathmatch";
-			break;
-		case GT_CTF:
-			gamekey = "Q3 Capture the Flag";
-			break;
-		case GT_1FCTF:
-			gamekey = "Q3 One Flag CTF";
-			break;
-		case GT_OBELISK:
-			gamekey = "Q3 Overload";
-			break;
-		case GT_HARVESTER:
-			gamekey = "Q3 Harvester";
-			break;
-		default:
-			break;
+			int gt = (int)Cvar_VariableValue("g_gametype");
+			if (gt >= 0 && gt < GT_MAX_GAME_TYPE) {
+				gamekey = va("Q3 %s", bg_gametypelist[gt].name);
+			}
 		}
 	}
 	s_rankings_game_key = gamekey;
@@ -1534,4 +1514,3 @@ static void SV_RankError( const char* fmt, ... )
 	Cvar_Set( "sv_rankingsActive", "0" );
 	// FIXME - attempt clean shutdown?
 }
-

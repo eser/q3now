@@ -136,7 +136,7 @@ void G_InitSessionData( gclient_t *client, char *userinfo ) {
 	}
 
 	// initial team determination
-	if ( g_gametype.integer >= GT_TEAM ) {
+	if ( g_gametype.integer >= GT_TDM ) {
 		// always spawn as spectator in team games
 		sess->sessionTeam = TEAM_SPECTATOR;
 		sess->spectatorState = SPECTATOR_FREE;
@@ -151,7 +151,7 @@ void G_InitSessionData( gclient_t *client, char *userinfo ) {
 		} else {
 			switch ( g_gametype.integer ) {
 			default:
-			case GT_FFA:
+			case GT_DEATHMATCH:
             case GT_KINGOFTHEHILL:
 				if ( g_maxGameClients.integer > 0 && 
 					level.numNonSpectatorClients >= g_maxGameClients.integer ) {
@@ -160,7 +160,7 @@ void G_InitSessionData( gclient_t *client, char *userinfo ) {
 					sess->sessionTeam = TEAM_FREE;
 				}
 				break;
-			case GT_TOURNAMENT:
+			case GT_DUEL:
 				// if the game is full, go into a waiting mode
 				if ( level.numNonSpectatorClients >= 2 ) {
 					sess->sessionTeam = TEAM_SPECTATOR;

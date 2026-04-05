@@ -395,6 +395,26 @@ static void CG_OffsetFirstPersonView( void ) {
 		}
 	}
 
+	// Chain arc screen shake
+	if ( cg.lastArcTime > 0 && cg.time - cg.lastArcTime < 150 ) {
+		float intensity = 1.0f - (float)(cg.time - cg.lastArcTime) / 150.0f;
+		angles[ROLL] += intensity * 0.5f * (((cg.time >> 2) & 1) ? 1.0f : -1.0f);
+		angles[PITCH] += intensity * 0.3f * (((cg.time >> 3) & 1) ? 1.0f : -1.0f);
+	}
+
+	// shotgun double-blast: screen shake / recoil kick
+	if ( cg.doubleBlastKickTime > 0 ) {
+		float kickTime = (float)( cg.time - cg.doubleBlastKickTime );
+		if ( kickTime < 200.0f ) {
+			float intensity = 1.0f - ( kickTime / 200.0f );
+			intensity *= intensity;  // ease-out
+			angles[PITCH] -= 3.0f * intensity;  // pitch up
+			angles[ROLL] += 1.5f * intensity * ( ( cg.doubleBlastKickTime & 1 ) ? 1.0f : -1.0f );  // slight roll
+		} else {
+			cg.doubleBlastKickTime = 0;
+		}
+	}
+
 	// add pitch based on fall kick
 #if 0
 	ratio = ( cg.time - cg.landTime) / FALL_TIME;
@@ -519,28 +539,22 @@ static int CG_CalcFov( void ) {
 		// if in intermission, use a fixed value
 		fov_x = 90;
 	} else {
-		// user selectable
-		if ( cgs.dmflags & DF_FIXED_FOV ) {
-			// dmflag to prevent wide fov for all clients
-			fov_x = 90;
-		} else {
-			// determine target FOV based on state priority
-			if ( cg.zoomed ) {
-				fov_x = cg_zoomFov.value;
-			} else
+		// determine target FOV based on state priority
+		if ( cg.zoomed ) {
+			fov_x = cg_zoomFov.value;
+		} else
 #if FEAT_THIRD_PERSON
-			if ( cg.renderingThirdPerson && cg_thirdPersonFov.value > 0 ) {
-				fov_x = cg_thirdPersonFov.value;
-			} else
+		if ( cg.renderingThirdPerson && cg_thirdPersonFov.value > 0 ) {
+			fov_x = cg_thirdPersonFov.value;
+		} else
 #endif
-			{
-				fov_x = cg_fov.value;
-			}
-			if ( fov_x < 1 ) {
-				fov_x = 1;
-			} else if ( fov_x > 160 ) {
-				fov_x = 160;
-			}
+		{
+			fov_x = cg_fov.value;
+		}
+		if ( fov_x < 1 ) {
+			fov_x = 1;
+		} else if ( fov_x > 160 ) {
+			fov_x = 160;
 		}
 
 		// smooth FOV transition (unified for zoom, third-person, and normal)
@@ -949,10 +963,8 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// add buffered sounds
 	CG_PlayBufferedSounds();
 
-#if FEAT_TA_UI
 	// play buffered voice chats
 	CG_PlayBufferedVoiceChats();
-#endif
 
 	// finish up the rest of the refdef
 	if ( cg.testModelEntity.hModel ) {

@@ -197,6 +197,16 @@ typedef enum {
 	CG_WIREDUI_PUSH_EVENT = 201,
 	// void trap_WiredUI_PushEvent( int type, const char *data )
 
+	// ── Normalized-coordinate draw (Wired UI layer 4) ──────────────
+	CG_R_DRAWSTRETCHPICNORM = 204,
+	// void trap_R_DrawStretchPicNorm( float nx, float ny, float nw, float nh,
+	//                                  float s1, float t1, float s2, float t2,
+	//                                  qhandle_t hShader )
+
+	// ── Unified text rendering (MSDF) ────────────────────────────────
+	CG_R_DRAWTEXT = 202,
+	CG_R_MEASURETEXT = 203,
+
 	CG_TRAP_GETVALUE = COM_TRAP_GETVALUE,
 
 } cgameImport_t;
@@ -224,6 +234,16 @@ typedef struct {
 	int     snapshotCount;                        // snapshot ring buffer index
 } wiredLagometer_t;
 
+// per-weapon stat counters (for scoreboard weapon breakdown)
+#define WIRED_MAX_WEAPONS  16  // covers all weapon_t values
+
+typedef struct {
+	int     hits;
+	int     shots;
+	int     kills;
+	int     deaths;
+} wiredWeaponStats_t;
+
 // scoreboard entry (mirrors score_t from cg_local.h, pre-sorted by server)
 typedef struct {
 	int         client;
@@ -248,6 +268,17 @@ typedef struct {
 	int         unstoppableCount;
 	int         totalDamage;        // sum of all weapon damage (pre-computed by cgame)
 	int         bestAttack;         // attack with most kills (ATT_* enum, ATT_NONE if none)
+
+	// tournament / duel stats
+	int         wins;               // tournament wins
+	int         losses;             // tournament losses
+
+	// damage dealt / received
+	int         damageDone;         // total damage dealt
+	int         damageTaken;        // total damage received
+
+	// per-weapon breakdown
+	wiredWeaponStats_t weaponStats[WIRED_MAX_WEAPONS];
 } wiredHudScore_t;
 
 // data binding: named stat bundle pushed from cgame, consumed by generic HUD elements
@@ -349,6 +380,7 @@ typedef struct {
 	qhandle_t   attackIcons[MAX_ATTACKS];
 	qhandle_t   ammoIcons[MAX_WEAPONS];
 	qhandle_t   itemIcons[WIRED_HUD_MAX_ITEMS];
+	qhandle_t   headIcons[WIRED_HUD_MAX_CLIENTS];
 	sfxHandle_t talkSound;
 
 	// config strings (for CG_ConfigString compat)
@@ -391,6 +423,25 @@ void trap_WiredUI_PushHudState( wiredHudState_t *state );
 
 void trap_WiredUI_PushEvent( int type, const char *data );
 
+// ── Unified text rendering (MSDF) ────────────────────────────────────
+
+#define FONT_DISPLAY         0
+#define FONT_DISPLAY_ITALIC  1
+#define FONT_UI              2
+#define FONT_UI_MEDIUM       3
+#define FONT_MONO            4
+
+#define TEXT_ALIGN_LEFT       0
+#define TEXT_ALIGN_CENTER     1
+#define TEXT_ALIGN_RIGHT      2
+
+#define TEXT_DROPSHADOW       (1 << 0)
+#define TEXT_FORCECOLOR       (1 << 1)
+
+void  trap_R_DrawText( const char *text, float x, float y, int fontId,
+                       float size, const vec4_t color, int alignment, int flags );
+float trap_R_MeasureText( const char *text, int fontId, float size );
+
 #endif // FEAT_WIRED_UI
 
 
@@ -410,7 +461,7 @@ typedef enum {
 	// cgame will display loading status by calling SCR_Update, which
 	// will call CG_DrawInformation during the loading process
 	// reliableCommandSequence will be 0 on fresh loads, but higher for
-	// demos, tourney restarts, or vid_restarts
+	// demos, duel restarts, or vid_restarts
 
 	CG_SHUTDOWN,
 //	void (*CG_Shutdown)( void );

@@ -130,11 +130,7 @@ int BotSortTeamMatesByBaseTravelTime(bot_state_t *bs, int *teammates, int maxtea
 	int traveltimes[MAX_CLIENTS];
 	bot_goal_t *goal = NULL;
 
-	if (gametype == GT_CTF
-#if FEAT_1FCTF
-		|| gametype == GT_1FCTF
-#endif
-	) {
+	if (gametype == GT_CTF || gametype == GT_1FCTF) {
 		if (BotTeam(bs) == TEAM_RED)
 			goal = &ctf_redflag;
 		else
@@ -932,8 +928,6 @@ void BotTeamOrders(bot_state_t *bs) {
 	}
 }
 
-#if FEAT_TA_TEAM_ORDERS
-
 /*
 ==================
 Bot1FCTFOrders_FlagAtCenter
@@ -1592,6 +1586,7 @@ void Bot1FCTFOrders(bot_state_t *bs) {
 	}
 }
 
+#if FEAT_OVERLOAD
 /*
 ==================
 BotObeliskOrders
@@ -1738,7 +1733,9 @@ void BotObeliskOrders(bot_state_t *bs) {
 		}
 	}
 }
+#endif
 
+#if FEAT_HARVESTER
 /*
 ==================
 BotHarvesterOrders
@@ -1928,7 +1925,7 @@ void BotTeamAI(bot_state_t *bs) {
 	char netname[MAX_NETNAME];
 
 	//
-	if ( gametype < GT_TEAM  )
+	if ( gametype < GT_TDM  )
 		return;
 	// make sure we've got a valid team leader
 	if (!BotValidTeamLeader(bs)) {
@@ -1971,7 +1968,7 @@ void BotTeamAI(bot_state_t *bs) {
 	numteammates = BotNumTeamMates(bs);
 	//give orders
 	switch(gametype) {
-		case GT_TEAM:
+		case GT_TDM:
 		{
 			if (bs->numteammates != numteammates || bs->forceorders) {
 				bs->teamgiveorders_time = FloatTime();
@@ -2013,7 +2010,6 @@ void BotTeamAI(bot_state_t *bs) {
 			}
 			break;
 		}
-#if FEAT_TA_TEAM_ORDERS
 		case GT_1FCTF:
 		{
 			if (bs->numteammates != numteammates || bs->flagstatuschanged || bs->forceorders) {
@@ -2039,6 +2035,7 @@ void BotTeamAI(bot_state_t *bs) {
 			}
 			break;
 		}
+#if FEAT_OVERLOAD
 		case GT_OBELISK:
 		{
 			if (bs->numteammates != numteammates || bs->forceorders) {
@@ -2054,6 +2051,8 @@ void BotTeamAI(bot_state_t *bs) {
 			}
 			break;
 		}
+#endif
+#if FEAT_HARVESTER
 		case GT_HARVESTER:
 		{
 			if (bs->numteammates != numteammates || bs->forceorders) {
@@ -2072,4 +2071,3 @@ void BotTeamAI(bot_state_t *bs) {
 #endif
 	}
 }
-

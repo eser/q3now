@@ -8,9 +8,53 @@ Runs in the CLIENT -- uses re.* directly instead of trap_R_*.
 */
 #include "../client.h"
 #include "cl_wired_fonts.h"
+#include "cl_wired_msdf.h"
 #include "cl_wired_ui.h"
+#include "cl_wired_draw.h"
 
 #if FEAT_WIRED_UI
+
+/* ── MSDF font integration ─────────────────────────────────────────── */
+
+static msdfFont_t *msdf_sansman = NULL;
+static msdfFont_t *msdf_sansman_italic = NULL;
+static msdfFont_t *msdf_oxanium = NULL;
+static msdfFont_t *msdf_oxanium_medium = NULL;
+static msdfFont_t *msdf_console = NULL;
+
+void WiredFonts_InitMSDF( void ) {
+	msdf_sansman        = MSDF_LoadFont( "sansman" );
+	msdf_sansman_italic = MSDF_LoadFont( "sansman-italic" );
+	msdf_oxanium        = MSDF_LoadFont( "oxanium" );
+	msdf_oxanium_medium = MSDF_LoadFont( "oxanium-medium" );
+	msdf_console        = MSDF_LoadFont( "sharetechmono" );
+}
+
+msdfFont_t *WiredFonts_GetMSDF( const char *fontName ) {
+	/* Primary MSDF fonts */
+	if ( !Q_stricmp( fontName, "sansman" ) )         return msdf_sansman;
+	if ( !Q_stricmp( fontName, "sansman-italic" ) )   return msdf_sansman_italic;
+	if ( !Q_stricmp( fontName, "oxanium" ) )          return msdf_oxanium;
+	if ( !Q_stricmp( fontName, "oxanium-medium" ) )   return msdf_oxanium_medium;
+	if ( !Q_stricmp( fontName, "console" ) )          return msdf_console;
+	if ( !Q_stricmp( fontName, "sharetechmono" ) )    return msdf_console;
+
+	/* Legacy bitmap names -> MSDF equivalents */
+	if ( !Q_stricmp( fontName, "id" ) )               return msdf_console;
+	if ( !Q_stricmp( fontName, "idblock" ) )          return msdf_console;
+	if ( !Q_stricmp( fontName, "cpma" ) )             return msdf_oxanium_medium;
+	if ( !Q_stricmp( fontName, "m1rage" ) )           return msdf_oxanium;
+	if ( !Q_stricmp( fontName, "elite" ) )            return msdf_oxanium;
+	if ( !Q_stricmp( fontName, "elitebigchars" ) )    return msdf_sansman;
+	if ( !Q_stricmp( fontName, "qlnumbers" ) )        return msdf_sansman;
+	if ( !Q_stricmp( fontName, "eternal" ) )          return msdf_oxanium_medium;
+	if ( !Q_stricmp( fontName, "diablo" ) )           return msdf_oxanium_medium;
+	if ( !Q_stricmp( fontName, "elite_emoji" ) )      return msdf_oxanium;
+
+	/* Unknown font -- use oxanium as safe default */
+	Com_Printf( S_COLOR_YELLOW "WiredFonts_GetMSDF: unknown font '%s', using oxanium\n", fontName );
+	return msdf_oxanium;
+}
 
 // ── type definitions from superhud (needed by font system) ───────────
 #define OSP_TEXT_CMD_MAX 2048
@@ -48,10 +92,10 @@ typedef struct {
 // border frame drawing
 void WiredFont_DrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled ) {
 	if ( !border || !borderColor ) return;
-	if ( border[0] > 0 ) SCR_FillRect( x, y, w, border[0], borderColor );
-	if ( border[2] > 0 ) SCR_FillRect( x, y + h - border[2], w, border[2], borderColor );
-	if ( border[3] > 0 ) SCR_FillRect( x, y + border[0], border[3], h - border[0] - border[2], borderColor );
-	if ( border[1] > 0 ) SCR_FillRect( x + w - border[1], y + border[0], border[1], h - border[0] - border[2], borderColor );
+	if ( border[0] > 0 ) WUI_FillRect( x, y, w, border[0], borderColor );
+	if ( border[2] > 0 ) WUI_FillRect( x, y + h - border[2], w, border[2], borderColor );
+	if ( border[3] > 0 ) WUI_FillRect( x, y + border[0], border[3], h - border[0] - border[2], borderColor );
+	if ( border[1] > 0 ) WUI_FillRect( x + w - border[1], y + border[0], border[1], h - border[0] - border[2], borderColor );
 }
 
 /*
@@ -712,200 +756,40 @@ int CG_ModernDrawStringLenPix(const char *string, float charWidth, int flags, in
 
 	if (!string) return 0;
 
+	/* MSDF-only routing */
+	{
+		msdfFont_t *msdfFont = WiredFonts_GetMSDF( font->name );
+		if ( !msdfFont || !msdfFont->loaded ) {
+			Com_Printf( S_COLOR_RED "MSDF font not loaded for '%s'\n", font->name );
+			return 0;
+		}
+		return (int)MSDF_MeasureString( msdfFont, (float)charWidth, string, -1 );
+	}
+
+	/* BITMAP RENDERING REMOVED -- MSDF only
 	text_commands = CG_CompileText(string);
 	if (!text_commands) return 0;
 
 	mw = (float)toWidth;
-	if (mw > 0)
-		SCR_AdjustFrom640(NULL, NULL, &mw, NULL);
 	RestrictCompiledString(text_commands, charWidth, flags & DS_PROPORTIONAL, mw);
 	rez = DrawCompiledStringLength(text_commands, charWidth, flags & DS_PROPORTIONAL);
 	CG_CompiledTextDestroy(text_commands);
 	return rez;
+	*/
 }
 
 /*
  * ── CG_ModernDrawString ────────────────────────────────────
- * Main SuperHUD text renderer using compiled text commands
- * and the font metric system.
- *
- * Uses q3now's CG_AdjustFrom640 for widescreen coordinate scaling.
+ * Thin wrapper — delegates to CG_ModernDrawStringNew which
+ * handles MSDF routing with proper alignment flag support.
  */
 void CG_ModernDrawString(float x, float y, const char *string, const vec4_t setColor,
                        float charWidth, float charHeight, int maxWidth, int flags,
                        vec4_t background)
 {
-	const font_metric_t *fm;
-	const float *tc;
-	float ax, ay, aw, aw1, ah;
-	float x_end, xx;
-	float fade = 1.0f;
-	vec4_t color;
-	float xx_add, yy_add;
-	int i;
-	qhandle_t sh;
-	int proportional;
-	text_command_t *text_commands;
-	text_command_t *curr;
-	float expectedLength = 0;
-
-	if (!string) return;
-
-	text_commands = CG_CompileText(string);
-	if (!text_commands) return;
-
-	SCR_AdjustFrom640(&x, &y, &charWidth, &charHeight);
-
-	ax = x;
-	ay = y;
-	aw = charWidth;
-	ah = charHeight;
-
-	proportional = (flags & DS_PROPORTIONAL);
-
-	{
-		float mw = (float)maxWidth;
-		SCR_AdjustFrom640(NULL, NULL, &mw, NULL);
-		RestrictCompiledString(text_commands, aw, proportional, mw);
-	}
-
-	if (background || (flags & (DS_HCENTER | DS_HRIGHT)))
-		expectedLength = DrawCompiledStringLength(text_commands, aw, proportional);
-
-	if (flags & (DS_HCENTER | DS_HRIGHT))
-	{
-		if (flags & DS_HCENTER)
-			ax -= 0.5f * expectedLength;
-		else
-			ax -= expectedLength;
-	}
-
-	if (flags & DS_VCENTER)
-		ay -= ah / 2;
-	else if (flags & DS_VTOP)
-		ay -= ah;
-
-	sh = font->shader[0];
-	for (i = 1; i < font->shaderCount; i++)
-	{
-		if (ah >= font->shaderThreshold[i])
-			sh = font->shader[i];
-	}
-
-	if (background)
-	{
-		re.SetColor(background);
-		re.DrawStretchPic(ax, ay, expectedLength, ah, 0, 0, 0, 0, cls.whiteShader);
-		re.SetColor(colorWhite);
-	}
-
-	/* shadow pass */
-	if (flags & DS_SHADOW)
-	{
-		xx = ax;
-		yy_add = xx_add = charWidth / 10.0f;
-
-		VectorCopy(colorBlack, color);
-		color[3] = fade;
-		re.SetColor(color);
-
-		for (i = 0; i < OSP_TEXT_CMD_MAX && text_commands[i].type != OSP_TEXT_CMD_STOP; ++i)
-		{
-			curr = &text_commands[i];
-			switch (curr->type)
-			{
-				case OSP_TEXT_CMD_CHAR:
-					fm = &metrics[(unsigned char)curr->value.character];
-					if (proportional)
-					{
-						tc = fm->tc_prop;
-						aw1 = fm->width * aw;
-						ax += fm->space1 * aw;
-						x_end = ax + fm->space2 * aw;
-					}
-					else
-					{
-						tc = fm->tc_mono;
-						aw1 = aw;
-						x_end = ax + aw;
-					}
-					if (ax >= cls.glconfig.vidWidth) break;
-					re.DrawStretchPic(ax + xx_add, ay + yy_add, aw1, ah, tc[0], tc[1], tc[2], tc[3], sh);
-					ax = x_end;
-					break;
-				case OSP_TEXT_CMD_SHADOW_COLOR:
-					VectorCopy(curr->value.color, color);
-					color[3] = fade;
-					if (setColor && color[3] > setColor[3]) color[3] = setColor[3];
-					re.SetColor(color);
-					break;
-				case OSP_TEXT_CMD_FADE:
-					fade = curr->value.fade;
-					color[3] = fade;
-					if (setColor && color[3] > setColor[3]) color[3] = setColor[3];
-					re.SetColor(color);
-					break;
-				case OSP_TEXT_CMD_STOP:
-				case OSP_TEXT_CMD_TEXT_COLOR:
-					break;
-			}
-		}
-		ax = xx;
-	}
-
-	/* main text pass */
-	Vector4Copy(setColor, color);
-	re.SetColor(color);
-	fade = 1.0f;
-
-	for (i = 0; i < OSP_TEXT_CMD_MAX && text_commands[i].type != OSP_TEXT_CMD_STOP; ++i)
-	{
-		curr = &text_commands[i];
-		switch (curr->type)
-		{
-			case OSP_TEXT_CMD_CHAR:
-			{
-				int index = curr->value.character;
-				if (index < 0) index += 256;
-				fm = &metrics[(unsigned char)index];
-			}
-			if (proportional)
-			{
-				tc = fm->tc_prop;
-				aw1 = fm->width * aw;
-				ax += fm->space1 * aw;
-				x_end = ax + fm->space2 * aw;
-			}
-			else
-			{
-				tc = fm->tc_mono;
-				aw1 = aw;
-				x_end = ax + aw;
-			}
-			if (ax >= cls.glconfig.vidWidth) break;
-			re.DrawStretchPic(ax, ay, aw1, ah, tc[0], tc[1], tc[2], tc[3], sh);
-			ax = x_end;
-			break;
-			case OSP_TEXT_CMD_TEXT_COLOR:
-				VectorCopy(curr->value.color, color);
-				color[3] = fade;
-				if (setColor && color[3] > setColor[3]) color[3] = setColor[3];
-				re.SetColor(color);
-				break;
-			case OSP_TEXT_CMD_FADE:
-				fade = curr->value.fade;
-				color[3] = fade;
-				if (setColor && color[3] > setColor[3]) color[3] = setColor[3];
-				re.SetColor(color);
-				break;
-			case OSP_TEXT_CMD_SHADOW_COLOR:
-			case OSP_TEXT_CMD_STOP:
-				break;
-		}
-	}
-
-	CG_CompiledTextDestroy(text_commands);
-	re.SetColor(NULL);
+	CG_ModernDrawStringNew( x, y, string, setColor, NULL,
+		charWidth, charHeight, maxWidth, flags,
+		background, NULL, NULL );
 }
 
 /*
@@ -937,10 +821,35 @@ void CG_ModernDrawStringNew(float x, float y, const char *string, const vec4_t s
 
 	if (!string) return;
 
+	/* MSDF-only routing */
+	{
+		msdfFont_t *msdfFont = WiredFonts_GetMSDF( font->name );
+		if ( !msdfFont || !msdfFont->loaded ) {
+			Com_Printf( S_COLOR_RED "MSDF font not loaded for '%s'\n", font->name );
+			return;
+		}
+
+		/* Apply alignment flags — bitmap path did this after measuring */
+		if ( flags & (DS_HCENTER | DS_HRIGHT) ) {
+			float textW = MSDF_MeasureString( msdfFont, (float)charHeight, string, -1 );
+			if ( flags & DS_HCENTER )
+				x -= textW * 0.5f;
+			else
+				x -= textW;
+		}
+		if ( flags & DS_VCENTER )
+			y -= charHeight * 0.5f;
+		else if ( flags & DS_VTOP )
+			y -= charHeight;
+
+		MSDF_DrawString( msdfFont, x, y, (float)charHeight, setColor, string,
+		    ( flags & DS_MAX_WIDTH_IS_CHARS ) ? maxWidth : -1 );
+		return;
+	}
+
+	/* BITMAP RENDERING REMOVED -- MSDF only
 	text_commands = CG_CompileText(string);
 	if (!text_commands) return;
-
-	SCR_AdjustFrom640(&x, &y, &charWidth, &charHeight);
 
 	ax = x;
 	ay = y;
@@ -958,7 +867,6 @@ void CG_ModernDrawStringNew(float x, float y, const char *string, const vec4_t s
 	else
 	{
 		float mw = (float)maxWidth;
-		SCR_AdjustFrom640(NULL, NULL, &mw, NULL);
 		RestrictCompiledString(text_commands, aw, proportional, mw);
 	}
 
@@ -1037,18 +945,15 @@ void CG_ModernDrawStringNew(float x, float y, const char *string, const vec4_t s
 					aw1 = aw;
 				}
 
-				/* shadow */
 				if (shadowEnabled)
 				{
 					re.SetColor(shadowCol);
 					re.DrawStretchPic(ax + xx_add, ay + yy_add, aw1, ah, tc[0], tc[1], tc[2], tc[3], sh);
 				}
 
-				/* character */
 				re.SetColor(color);
 				re.DrawStretchPic(ax, ay, aw1, ah, tc[0], tc[1], tc[2], tc[3], sh);
 
-				/* advance position */
 				if (proportional)
 				{
 					ax += fm->space1 * aw;
@@ -1093,6 +998,7 @@ void CG_ModernDrawStringNew(float x, float y, const char *string, const vec4_t s
 
 	CG_CompiledTextDestroy(text_commands);
 	re.SetColor(NULL);
+	*/
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1169,14 +1075,14 @@ void WiredUI_DrawText_TA( float x, float y, float scale, const vec4_t color,
 			float shadowOffset = ( style == 6 ) ? 2.0f : 1.0f;
 			vec4_t shadowColor = { 0, 0, 0, color[3] };
 			re.SetColor( shadowColor );
-			SCR_DrawPic( ax + shadowOffset, ay + shadowOffset,
+			WUI_DrawPic( ax + shadowOffset, ay + shadowOffset,
 				glyph->imageWidth * useScale,
 				glyph->imageHeight * useScale,
 				glyph->glyph );
 			re.SetColor( color );
 		}
 
-		SCR_DrawPic( ax, ay,
+		WUI_DrawPic( ax, ay,
 			glyph->imageWidth * useScale,
 			glyph->imageHeight * useScale,
 			glyph->glyph );

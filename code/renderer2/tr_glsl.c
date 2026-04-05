@@ -53,6 +53,52 @@ extern const char *fallbackShader_texturecolor_fp;
 extern const char *fallbackShader_tonemap_vp;
 extern const char *fallbackShader_tonemap_fp;
 
+/* MSDF shader fallbacks -- defined inline because the GLSL files exist
+   in glsl/msdf_{vp,fp}.glsl but may not yet be wired into the
+   stringify build step. */
+static const char *fallbackShader_msdf_vp =
+"attribute vec3 attr_Position;\n"
+"attribute vec4 attr_TexCoord0;\n"
+"attribute vec4 attr_Color;\n"
+"\n"
+"uniform mat4 u_ModelViewProjectionMatrix;\n"
+"\n"
+"varying vec2 var_Tex1;\n"
+"varying vec4 var_Color;\n"
+"\n"
+"void main()\n"
+"{\n"
+"    gl_Position = u_ModelViewProjectionMatrix * vec4(attr_Position, 1.0);\n"
+"    var_Tex1 = attr_TexCoord0.st;\n"
+"    var_Color = attr_Color;\n"
+"}\n";
+
+static const char *fallbackShader_msdf_fp =
+"uniform sampler2D u_DiffuseMap;\n"
+"uniform vec4      u_Color;\n"
+"\n"
+"varying vec2      var_Tex1;\n"
+"varying vec4      var_Color;\n"
+"\n"
+"float median(float r, float g, float b) {\n"
+"    return max(min(r, g), min(max(r, g), b));\n"
+"}\n"
+"\n"
+"void main()\n"
+"{\n"
+"    vec3 msd = texture2D(u_DiffuseMap, var_Tex1).rgb;\n"
+"    float sd = median(msd.r, msd.g, msd.b);\n"
+"\n"
+"    vec2 unitRange = vec2(u_Color.x) / vec2(u_Color.y, u_Color.z);\n"
+"    vec2 screenTexSize = vec2(1.0) / fwidth(var_Tex1);\n"
+"    float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);\n"
+"\n"
+"    float screenPxDistance = screenPxRange * (sd - 0.5);\n"
+"    float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);\n"
+"\n"
+"    gl_FragColor = vec4(var_Color.rgb, var_Color.a * opacity);\n"
+"}\n";
+
 typedef struct uniformInfo_s
 {
 	char *name;
@@ -995,6 +1041,22 @@ void GLSL_InitGPUShaders(void)
 
 	numEtcShaders++;
 
+	// MSDF shader -- uses attr_Color for per-vertex color, u_Color for MSDF params
+	attribs = ATTR_POSITION | ATTR_TEXCOORD | ATTR_COLOR;
+
+	if (!GLSL_InitGPUShader(&tr.msdfShader, "msdf", attribs, qtrue, extradefines, qtrue, fallbackShader_msdf_vp, fallbackShader_msdf_fp))
+	{
+		ri.Error(ERR_FATAL, "Could not load msdf shader!");
+	}
+
+	GLSL_InitUniforms(&tr.msdfShader);
+
+	GLSL_SetUniformInt(&tr.msdfShader, UNIFORM_DIFFUSEMAP, TB_DIFFUSEMAP);
+
+	GLSL_FinishGPUShader(&tr.msdfShader);
+
+	numEtcShaders++;
+
 	for (i = 0; i < FOGDEF_COUNT; i++)
 	{
 		if ((i & FOGDEF_USE_VERTEX_ANIMATION) && (i & FOGDEF_USE_BONE_ANIMATION))
@@ -1465,6 +1527,7 @@ void GLSL_ShutdownGPUShaders(void)
 		GLSL_DeleteGPUShader(&tr.genericShader[i]);
 
 	GLSL_DeleteGPUShader(&tr.textureColorShader);
+	GLSL_DeleteGPUShader(&tr.msdfShader);
 
 	for ( i = 0; i < FOGDEF_COUNT; i++)
 		GLSL_DeleteGPUShader(&tr.fogShader[i]);

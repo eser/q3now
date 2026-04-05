@@ -859,16 +859,14 @@ CG_TeamBase
 */
 static void CG_TeamBase( centity_t *cent ) {
 	refEntity_t model;
-#if FEAT_TA_UI
+#if FEAT_OBELISK
 	vec3_t angles;
 	int t, h;
 	float c;
+#endif
 
 	if ( cgs.gametype == GT_CTF || cgs.gametype == GT_1FCTF ) {
-#else
-	if ( cgs.gametype == GT_CTF) {
-#endif
-		// show the flag base
+	// show the flag base
 		memset(&model, 0, sizeof(model));
 		model.reType = RT_MODEL;
 		VectorCopy( cent->lerpOrigin, model.lightingOrigin );
@@ -885,7 +883,7 @@ static void CG_TeamBase( centity_t *cent ) {
 		}
 		trap_R_AddRefEntityToScene( &model );
 	}
-#if FEAT_TA_UI
+#if FEAT_OBELISK
 	else if ( cgs.gametype == GT_OBELISK ) {
 		// show the obelisk
 		memset(&model, 0, sizeof(model));
@@ -980,6 +978,8 @@ static void CG_TeamBase( centity_t *cent ) {
 			trap_R_AddRefEntityToScene( &model );
 		}
 	}
+#endif
+#if FEAT_HARVESTER
 	else if ( cgs.gametype == GT_HARVESTER ) {
 		// show harvester model
 		memset(&model, 0, sizeof(model));

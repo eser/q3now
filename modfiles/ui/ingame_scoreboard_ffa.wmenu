@@ -1,0 +1,66 @@
+// ingame_scoreboard_ffa.wmenu - In-game FFA scoreboard (TAB overlay)
+// Absolute positioning -- header + scorelist widget.
+// Uses ITEM_TYPE_SCORELIST (type 20) for rich per-cell rendering.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "ingame_scoreboard_ffa"
+	rect 0.109 0.071 0.781 0
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.05 0.05 0.1 0.7
+
+	// -- header: gametype title --
+
+	itemDef {
+		name "title"
+		type 0
+		rect 0 0.02 1.0 0.038
+		cvar "wired_sb_gametype"
+		font "sansman" 19
+		textalign 1
+		forecolor 1.0 1.0 1.0 1.0
+		visible 1
+		decoration
+	}
+
+	// -- header: placement --
+
+	itemDef {
+		name "placement"
+		type 0
+		rect 0 0.065 1.0 0.029
+		cvar "wired_sb_place"
+		font "oxanium" 14
+		textalign 1
+		forecolor 1.0 0.75 0.0 1.0
+		visible 1
+		decoration
+	}
+
+	// -- separator --
+
+	itemDef {
+		name "sep_header"
+		type 0
+		rect 0 0.10 1.0 0.002
+		style 1
+		backcolor 0.3 0.3 0.4 0.6
+		visible 1
+		decoration
+	}
+
+	// -- FFA score list (scorelist widget) --
+
+	itemDef {
+		name "scorelist"
+		type 20
+		rect 0 0.11 1.0 0.708
+		feeder 11
+		forecolor 1.0 1.0 1.0 1.0
+		visible 1
+		decoration
+	}
+}
