@@ -56,6 +56,12 @@ wuiStoreEntry_t *WiredStore_Set( const char *key );
 void             WiredStore_Delete( const char *key );
 void             WiredStore_BeginFrame( void );
 
+/* Iterate all entries matching a key prefix. Calls fn(entry, userData) for
+   each match. prefix="" matches everything. Not for use in render path. */
+void             WiredStore_ForEach( const char *prefix,
+                                     void (*fn)( wuiStoreEntry_t *entry, void *userData ),
+                                     void *userData );
+
 #endif /* FEAT_WIRED_UI */
 
 #endif /* CL_WIRED_STORE_H */
