@@ -137,7 +137,7 @@ static qhandle_t R_RegisterMDR(const char *name, model_t *mod)
 }
 
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 /*
 ====================
 R_RegisterIQM
@@ -185,7 +185,7 @@ typedef struct
 // when there are multiple models of different formats available
 static modelExtToLoaderMap_t modelLoaders[ ] =
 {
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	{ "iqm", R_RegisterIQM },
 #endif // FEAT_IQM
 	{ "mdr", R_RegisterMDR },
@@ -1086,7 +1086,7 @@ int R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFram
 			end = R_GetAnimTag((mdrHeader_t *) model->modelData, endFrame, tagName, &end_space);
 		}
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 		else if( model->type == MOD_IQM ) {
 			return R_IQMLerpTag( tag, model->modelData,
 					startFrame, endFrame,
@@ -1163,7 +1163,7 @@ void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
 		
 		return;
 	}
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	else if(model->type == MOD_IQM) {
 		iqmData_t *iqmData;
 
@@ -1183,7 +1183,7 @@ void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
 }
 
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 /*
 ====================
 R_GetIQMAnimations

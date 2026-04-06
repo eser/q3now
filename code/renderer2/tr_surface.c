@@ -1379,13 +1379,13 @@ void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES])( void *) = {
 	(void(*)(void*))RB_SurfacePolychain,		// SF_POLY,
 	(void(*)(void*))RB_SurfaceMesh,			// SF_MDV,
 	(void(*)(void*))RB_MDRSurfaceAnim,		// SF_MDR,
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	(void(*)(void*))RB_IQMSurfaceAnim,		// SF_IQM,
 #endif // FEAT_IQM
 	(void(*)(void*))RB_SurfaceFlare,		// SF_FLARE,
 	(void(*)(void*))RB_SurfaceEntity,		// SF_ENTITY
 	(void(*)(void*))RB_SurfaceVaoMdvMesh,   // SF_VAO_MDVMESH
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	(void(*)(void*))RB_IQMSurfaceAnimVao,   // SF_VAO_IQM
 #endif // FEAT_IQM
 };

@@ -90,6 +90,10 @@ void	RemoveColinearPoints (winding_t *w)
 	int		nump;
 	vec3_t	p[MAX_POINTS_ON_WINDING];
 
+	if (w->numpoints > MAX_POINTS_ON_WINDING) {
+		return; // prevent overflow
+	}
+
 	nump = 0;
 	for (i=0 ; i<w->numpoints ; i++)
 	{

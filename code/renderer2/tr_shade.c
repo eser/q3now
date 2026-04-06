@@ -90,7 +90,14 @@ static void R_BindAnimatedImageToTMU( const textureBundle_t *bundle, int tmu ) {
 	if ( index < 0 ) {
 		index = 0;	// may happen with shader time offsets
 	}
-	index %= bundle->numImageAnimations;
+
+	if ( bundle->loopingImageAnim || bundle->numImageAnimations == 0 ) {
+		index %= bundle->numImageAnimations;
+	} else {
+		if ( index >= bundle->numImageAnimations ) {
+			index = bundle->numImageAnimations - 1;
+		}
+	}
 
 	GL_BindToTMU( bundle->image[ index ], tmu );
 }

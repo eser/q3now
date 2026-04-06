@@ -45,6 +45,12 @@ cvar_t	*r_flareSize;
 cvar_t	*r_flareFade;
 cvar_t	*r_flareCoeff;
 
+#if FEAT_FOG_SYSTEM
+cvar_t	*r_useGlFog;
+cvar_t	*r_defaultFogParmsType;
+cvar_t	*r_globalLinearFogDrawSky;
+#endif
+
 cvar_t	*r_railWidth;
 cvar_t	*r_railCoreWidth;
 cvar_t	*r_railSegmentLength;
@@ -76,6 +82,8 @@ cvar_t	*r_neatsky;
 cvar_t	*r_drawSun;
 cvar_t	*r_dynamiclight;
 cvar_t  *r_mergeLightmaps;
+cvar_t  *r_lightmapAtlas;
+cvar_t  *r_loadingFpsCap;
 #ifdef USE_PMLIGHT
 cvar_t	*r_dlightMode;
 cvar_t	*r_dlightScale;
@@ -184,6 +192,8 @@ cvar_t	*r_lodCurveError;
 
 cvar_t	*r_overBrightBits;
 cvar_t	*r_mapOverBrightBits;
+cvar_t	*r_brightness;
+cvar_t	*r_mapBrightness;
 cvar_t	*r_mapGreyScale;
 
 cvar_t	*r_debugSurface;
@@ -992,18 +1002,24 @@ R_ScreenshotFilename
 static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
 	qtime_t t;
 	int count;
+	int ms;
 
 	count = 0;
 	ri.Com_RealTime( &t );
+	ms = ri.Milliseconds() % 1000;
+	if ( ms < 0 ) ms = 0;
 
-	Com_sprintf( fileName, MAX_OSPATH, "screenshots/shot-%04d%02d%02d-%02d%02d%02d.%s",
-			1900 + t.tm_year, 1 + t.tm_mon,	t.tm_mday,
-			t.tm_hour, t.tm_min, t.tm_sec, fileExt );
+	/* CNQ3 backport: YYYY_MM_DD-HH_MM_SS-TTT filename format */
+	Com_sprintf( fileName, MAX_OSPATH,
+		"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d.%s",
+		1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
+		t.tm_hour, t.tm_min, t.tm_sec, ms, fileExt );
 
 	while (	ri.FS_FileExists( fileName ) && ++count < 1000 ) {
-		Com_sprintf( fileName, MAX_OSPATH, "screenshots/shot-%04d%02d%02d-%02d%02d%02d-%d.%s",
-				1900 + t.tm_year, 1 + t.tm_mon,	t.tm_mday,
-				t.tm_hour, t.tm_min, t.tm_sec, count, fileExt );
+		Com_sprintf( fileName, MAX_OSPATH,
+			"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d_%d.%s",
+			1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
+			t.tm_hour, t.tm_min, t.tm_sec, ms, count, fileExt );
 	}
 }
 
@@ -1537,6 +1553,16 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_overBrightBits, "Sets the intensity of overall brightness of texture pixels." );
 	r_mapOverBrightBits = ri.Cvar_Get( "r_mapOverBrightBits", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_mapOverBrightBits, "Sets the number of overbright bits baked into all lightmaps and map data." );
+	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_brightness, "0.25", "32", CV_FLOAT );
+	ri.Cvar_SetDescription( r_brightness,
+		"Float-based overall brightness multiplier (replaces r_overBrightBits).\n"
+		"Range 0.25-32, default 2.0." );
+	r_mapBrightness = ri.Cvar_Get( "r_mapBrightness", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_mapBrightness, "0.25", "32", CV_FLOAT );
+	ri.Cvar_SetDescription( r_mapBrightness,
+		"Float-based map (lightmap) brightness multiplier (replaces r_mapOverBrightBits).\n"
+		"Range 0.25-32, default 2.0." );
 	r_intensity = ri.Cvar_Get( "r_intensity", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_intensity, "1", "255", CV_FLOAT );
 	ri.Cvar_SetDescription( r_intensity, "Global texture lighting scale." );
@@ -1571,6 +1597,28 @@ static void R_Register( void )
 
 	r_mergeLightmaps = ri.Cvar_Get( "r_mergeLightmaps", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_mergeLightmaps, "Merge built-in small lightmaps into bigger lightmaps (atlases)." );
+
+	// CNQ3 lightmap atlas optimization alias. In the Vulkan renderer the
+	// atlas is already implemented by R_LoadMergedLightmaps() in tr_bsp.c,
+	// but we expose r_lightmapAtlas as an alias so the cvar name matches
+	// CNQ3 and the GL1 renderer. Both cvars must be non-zero for the
+	// atlas pack to be built. Vulkan descriptor sets still benefit from
+	// fewer image views, so leave this on by default.
+	r_lightmapAtlas = ri.Cvar_Get( "r_lightmapAtlas", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_lightmapAtlas,
+		"Pack individual BSP lightmaps into larger atlas textures (CNQ3 port).\n"
+		" 1: pack into atlases (default, fewer image/descriptor allocations)\n"
+		" 0: one image per lightmap (legacy behaviour)\n"
+		" Works together with r_mergeLightmaps." );
+
+	// CNQ3 port: cap presentation while map is loading to reduce
+	// CPU/GPU contention with BSP parse, lightmap upload, shader compile.
+	r_loadingFpsCap = ri.Cvar_Get( "r_loadingFpsCap", "10", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_loadingFpsCap, "0", "60", CV_INTEGER );
+	ri.Cvar_SetDescription( r_loadingFpsCap,
+		"Maximum render backend frames per second while loading a map.\n"
+		" 0: no cap (legacy behaviour)\n"
+		" 1-60: cap presentation to this rate. Default 10." );
 #if defined (USE_VULKAN) && defined (USE_VBO)
 	r_vbo = ri.Cvar_Get( "r_vbo", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_vbo, "Use Vertex Buffer Objects to cache static map geometry, may improve FPS on modern GPUs, increases hunk memory usage by 15-30MB (map-dependent)." );
@@ -1717,6 +1765,16 @@ static void R_Register( void )
 	r_flareCoeff = ri.Cvar_Get( "r_flareCoeff", "150", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_flareCoeff, "0.1", NULL, CV_FLOAT );
 	ri.Cvar_SetDescription( r_flareCoeff, "Coefficient for the light flare intensity falloff function. Requires \\r_flares 1." );
+
+#if FEAT_FOG_SYSTEM
+	r_useGlFog = ri.Cvar_Get( "r_useGlFog", "1", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_useGlFog, "Use enhanced fog pipeline (Vulkan push constant upload)." );
+	r_defaultFogParmsType = ri.Cvar_Get( "r_defaultFogParmsType", "0", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_defaultFogParmsType, "Default fogType_t for maps without explicit fog: 0=linear, 1=exp, 2=exp2." );
+	ri.Cvar_CheckRange( r_defaultFogParmsType, "0", "2", CV_INTEGER );
+	r_globalLinearFogDrawSky = ri.Cvar_Get( "r_globalLinearFogDrawSky", "0", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_globalLinearFogDrawSky, "Draw sky surfaces through linear global fog (Spearmint compat)." );
+#endif
 
 	r_skipBackEnd = ri.Cvar_Get ("r_skipBackEnd", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_skipBackEnd, "Skips loading rendering backend." );
@@ -2197,12 +2255,21 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.AddAdditiveLightToScene = RE_AddAdditiveLightToScene;
 	re.AddLinearLightToScene = RE_AddLinearLightToScene;
 	re.AddRailTrailParams = RE_AddRailTrailParams;
+#if FEAT_CORONA
+	re.AddCoronaToScene = RE_AddCoronaToScene;
+#endif
+#if FEAT_FOG_SYSTEM
+	re.GetGlobalFog = RE_GetGlobalFog;
+	re.GetViewFog = RE_GetViewFog;
+#endif
 
 	re.RenderScene = RE_RenderScene;
 
 	re.SetColor = RE_SetColor;
+	re.SetClipRegion = RE_SetClipRegion;
 	re.SetMSDFOutline = RE_SetMSDFOutline;
 	re.DrawStretchPic = RE_StretchPic;
+	re.DrawRotatedPic = RE_RotatedPic;
 	re.DrawLine = RE_DrawLine;
 	re.DrawStretchRaw = RE_StretchRaw;
 	re.UploadCinematic = RE_UploadCinematic;
@@ -2222,7 +2289,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.VertexLighting = RE_VertexLighting;
 	re.SyncRender = RE_SyncRender;
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	re.GetIQMAnimations = R_GetIQMAnimations;
 #endif // FEAT_IQM
 

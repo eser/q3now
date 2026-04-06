@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cmodel.c -- model loading
 
 #include "cm_local.h"
+#include "cm_patch.h"
 
 #ifdef BSPC
 
@@ -679,6 +680,331 @@ static void CM_ValidateTree( void ) {
 
 
 /*
+===============================================================================
+
+RUNTIME TRIANGLE SOUP REGISTRATION
+
+Used by IQM models (and any other caller holding a raw triangle mesh)
+to register collision geometry with cm_trace. Handles returned here can
+be passed directly to CM_BoxTrace / CM_TransformedBoxTrace.
+
+===============================================================================
+*/
+
+/*
+====================
+CM_ClearTriangleSoups
+
+Reset the runtime triangle-soup table. The patchCollide_t payloads live
+in the hunk (h_high), so they are automatically released on the next
+CM_ClearMap / Hunk_Clear cycle.
+====================
+*/
+void CM_ClearTriangleSoups( void ) {
+	Com_Memset( cm.triSoups, 0, sizeof( cm.triSoups ) );
+	cm.numTriSoups = 0;
+}
+
+/*
+====================
+CM_FindTriSoupByName
+
+Return an existing tri-soup handle if one is already registered for
+`name`, otherwise 0 (invalid).
+====================
+*/
+static clipHandle_t CM_FindTriSoupByName( const char *name ) {
+	int i;
+
+	for ( i = 0; i < MAX_TRI_SOUPS; i++ ) {
+		cTriSoup_t *ts = &cm.triSoups[i];
+		if ( !ts->inUse ) {
+			continue;
+		}
+		if ( !Q_stricmp( ts->name, name ) ) {
+			return (clipHandle_t)( TRI_SOUP_HANDLE_BASE + i );
+		}
+	}
+	return 0;
+}
+
+/*
+====================
+CM_RegisterTriangleSoup
+
+Generate a patchCollide_t from the given triangle mesh and insert it
+into the runtime triangle-soup table. The returned handle is valid
+until CM_ClearMap is called (collision data lives in the h_high hunk).
+Returns 0 on failure.
+====================
+*/
+clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
+	int numVertexes, const int *indexes, int numIndexes ) {
+	int				slot;
+	cTriSoup_t		*ts;
+	struct patchCollide_s *pc;
+	vec3_t			*mutableVerts;
+	int				*mutableIndexes;
+	clipHandle_t	handle;
+	int				i, j;
+
+	if ( !name || !name[0] ) {
+		return 0;
+	}
+	if ( !vertexes || numVertexes <= 0 || !indexes || numIndexes <= 0 ) {
+		return 0;
+	}
+	if ( numIndexes % 3 ) {
+		Com_Printf( "CM_RegisterTriangleSoup: %s numIndexes %i not a multiple of 3\n",
+			name, numIndexes );
+		return 0;
+	}
+
+	// Reuse existing slot if already registered.
+	handle = CM_FindTriSoupByName( name );
+	if ( handle ) {
+		return handle;
+	}
+
+	// Find a free slot.
+	slot = -1;
+	for ( i = 0; i < MAX_TRI_SOUPS; i++ ) {
+		if ( !cm.triSoups[i].inUse ) {
+			slot = i;
+			break;
+		}
+	}
+	if ( slot < 0 ) {
+		Com_Printf( "CM_RegisterTriangleSoup: %s exceeds MAX_TRI_SOUPS (%i)\n",
+			name, MAX_TRI_SOUPS );
+		return 0;
+	}
+
+	// CM_GenerateTriangleSoupCollide takes non-const pointers (it never
+	// modifies them, but the signature is historical). Duplicate onto
+	// temporary hunk memory to honor the const contract at our API.
+	mutableVerts = Hunk_AllocateTempMemory( numVertexes * sizeof( vec3_t ) );
+	mutableIndexes = Hunk_AllocateTempMemory( numIndexes * sizeof( int ) );
+	Com_Memcpy( mutableVerts, vertexes, numVertexes * sizeof( vec3_t ) );
+	Com_Memcpy( mutableIndexes, indexes, numIndexes * sizeof( int ) );
+
+	pc = CM_GenerateTriangleSoupCollide( numVertexes, mutableVerts,
+		numIndexes, mutableIndexes );
+
+	Hunk_FreeTempMemory( mutableIndexes );
+	Hunk_FreeTempMemory( mutableVerts );
+
+	if ( !pc ) {
+		return 0;
+	}
+
+	ts = &cm.triSoups[slot];
+	Com_Memset( ts, 0, sizeof( *ts ) );
+	ts->inUse = qtrue;
+	Q_strncpyz( ts->name, name, sizeof( ts->name ) );
+	ts->pc = pc;
+
+	// Populate bounds on the embedded cmodel_t so CM_ModelBounds works.
+	for ( j = 0; j < 3; j++ ) {
+		ts->cmod.mins[j] = pc->bounds[0][j];
+		ts->cmod.maxs[j] = pc->bounds[1][j];
+	}
+
+	if ( slot >= cm.numTriSoups ) {
+		cm.numTriSoups = slot + 1;
+	}
+
+	return (clipHandle_t)( TRI_SOUP_HANDLE_BASE + slot );
+}
+
+/*
+====================
+CM_IqmReadUShort / CM_IqmReadFloat3
+
+Helpers for reading little-endian IQM vertex streams into native
+values. IQM files are always little-endian on disk.
+====================
+*/
+static uint16_t CM_IqmReadUShort( const byte *p ) {
+	return (uint16_t)( p[0] | ( p[1] << 8 ) );
+}
+
+static void CM_IqmReadFloat3( const byte *p, vec3_t out ) {
+	int i;
+	union {
+		uint32_t u;
+		float f;
+	} v;
+	for ( i = 0; i < 3; i++ ) {
+		v.u = (uint32_t)p[0] | ( (uint32_t)p[1] << 8 )
+			| ( (uint32_t)p[2] << 16 ) | ( (uint32_t)p[3] << 24 );
+		out[i] = v.f;
+		p += 4;
+	}
+}
+
+/*
+====================
+CM_LoadIQMGeometry
+
+Read an IQM file from the VFS and register its position vertex stream
+and triangle indexes as a triangle-soup collision handle. Does not
+touch the renderer — this is a standalone header walker so that
+collision can be wired up independently of any GPU upload path.
+
+Returns 0 on failure (file missing, wrong magic, missing position
+stream, missing triangles, etc.). Prints a diagnostic to the console
+on Developer builds.
+====================
+*/
+clipHandle_t CM_LoadIQMGeometry( const char *name ) {
+#define IQM_MAGIC_STRING	"INTERQUAKEMODEL"
+#define IQM_POSITION_ATTR	0
+#define IQM_FLOAT_FORMAT	7
+
+	union {
+		const byte	*b;
+		void		*v;
+	} buf;
+	int				fileSize;
+	clipHandle_t	handle;
+	const byte		*base;
+	uint32_t		version, filesize;
+	uint32_t		num_vertexes, num_vertexarrays, ofs_vertexarrays;
+	uint32_t		num_triangles, ofs_triangles;
+	uint32_t		posOffset;
+	qboolean		posFound;
+	vec3_t			*verts;
+	int				*tris;
+	int				i;
+
+	if ( !name || !name[0] ) {
+		return 0;
+	}
+
+	handle = CM_FindTriSoupByName( name );
+	if ( handle ) {
+		return handle;
+	}
+
+	fileSize = FS_ReadFile( name, &buf.v );
+	if ( !buf.v || fileSize <= 0 ) {
+		return 0;
+	}
+	base = buf.b;
+
+	if ( fileSize < 16 + 27 * 4 ) {
+		Com_DPrintf( "CM_LoadIQMGeometry: %s truncated header\n", name );
+		FS_FreeFile( buf.v );
+		return 0;
+	}
+	if ( Q_strncmp( (const char *)base, IQM_MAGIC_STRING, 16 ) ) {
+		Com_DPrintf( "CM_LoadIQMGeometry: %s wrong magic\n", name );
+		FS_FreeFile( buf.v );
+		return 0;
+	}
+
+	{
+		const byte *h = base + 16;
+		version = LittleLong( *(const uint32_t *)( h +  0 ) );
+		filesize = LittleLong( *(const uint32_t *)( h +  4 ) );
+		/* flags */
+		/* num_text, ofs_text */
+		/* num_meshes, ofs_meshes */
+		num_vertexarrays = LittleLong( *(const uint32_t *)( h + 32 ) );
+		num_vertexes     = LittleLong( *(const uint32_t *)( h + 36 ) );
+		ofs_vertexarrays = LittleLong( *(const uint32_t *)( h + 40 ) );
+		num_triangles    = LittleLong( *(const uint32_t *)( h + 44 ) );
+		ofs_triangles    = LittleLong( *(const uint32_t *)( h + 48 ) );
+	}
+	(void)version;
+	if ( filesize > (uint32_t)fileSize ) {
+		Com_DPrintf( "CM_LoadIQMGeometry: %s filesize mismatch\n", name );
+		FS_FreeFile( buf.v );
+		return 0;
+	}
+
+	if ( num_vertexes == 0 || num_triangles == 0 ) {
+		FS_FreeFile( buf.v );
+		return 0;
+	}
+
+	// Locate the position vertex array (type == 0, format == float, size == 3).
+	posFound = qfalse;
+	posOffset = 0;
+	{
+		const byte *va = base + ofs_vertexarrays;
+		for ( i = 0; i < (int)num_vertexarrays; i++ ) {
+			uint32_t type, format, size, offset;
+			if ( (uint64_t)ofs_vertexarrays + (uint64_t)( i + 1 ) * 20 > filesize ) {
+				break;
+			}
+			type   = LittleLong( *(const uint32_t *)( va +  0 ) );
+			/* flags */
+			format = LittleLong( *(const uint32_t *)( va +  8 ) );
+			size   = LittleLong( *(const uint32_t *)( va + 12 ) );
+			offset = LittleLong( *(const uint32_t *)( va + 16 ) );
+			va += 20;
+			if ( type == IQM_POSITION_ATTR && format == IQM_FLOAT_FORMAT && size == 3 ) {
+				posOffset = offset;
+				posFound = qtrue;
+				break;
+			}
+		}
+	}
+	if ( !posFound ) {
+		Com_DPrintf( "CM_LoadIQMGeometry: %s no position vertex array\n", name );
+		FS_FreeFile( buf.v );
+		return 0;
+	}
+	if ( (uint64_t)posOffset + (uint64_t)num_vertexes * 12 > filesize ) {
+		Com_DPrintf( "CM_LoadIQMGeometry: %s position array out of range\n", name );
+		FS_FreeFile( buf.v );
+		return 0;
+	}
+	if ( (uint64_t)ofs_triangles + (uint64_t)num_triangles * 12 > filesize ) {
+		Com_DPrintf( "CM_LoadIQMGeometry: %s triangle array out of range\n", name );
+		FS_FreeFile( buf.v );
+		return 0;
+	}
+
+	// Copy positions to a temporary vec3_t array.
+	verts = Hunk_AllocateTempMemory( num_vertexes * sizeof( vec3_t ) );
+	{
+		const byte *p = base + posOffset;
+		for ( i = 0; i < (int)num_vertexes; i++, p += 12 ) {
+			CM_IqmReadFloat3( p, verts[i] );
+		}
+	}
+
+	// Copy triangle indexes to a temporary int array.
+	tris = Hunk_AllocateTempMemory( num_triangles * 3 * sizeof( int ) );
+	{
+		const byte *p = base + ofs_triangles;
+		for ( i = 0; i < (int)num_triangles; i++, p += 12 ) {
+			tris[i * 3 + 0] = (int)LittleLong( *(const uint32_t *)( p + 0 ) );
+			tris[i * 3 + 1] = (int)LittleLong( *(const uint32_t *)( p + 4 ) );
+			tris[i * 3 + 2] = (int)LittleLong( *(const uint32_t *)( p + 8 ) );
+		}
+	}
+
+	FS_FreeFile( buf.v );
+
+	handle = CM_RegisterTriangleSoup( name, (const vec3_t *)verts,
+		(int)num_vertexes, tris, (int)num_triangles * 3 );
+
+	Hunk_FreeTempMemory( tris );
+	Hunk_FreeTempMemory( verts );
+
+	return handle;
+
+#undef IQM_MAGIC_STRING
+#undef IQM_POSITION_ATTR
+#undef IQM_FLOAT_FORMAT
+}
+
+
+/*
 ==================
 CM_LoadMap
 
@@ -790,6 +1116,15 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 
 	CM_FloodAreaConnections();
 
+#ifndef BSPC
+	{
+		extern cvar_t *com_developer;
+		if ( com_developer && com_developer->integer ) {
+			CM_TriangleSoupCollideSelfTest();
+		}
+	}
+#endif
+
 	// allow this to be cached if it is loaded by the server
 	if ( !clientload ) {
 		Q_strncpyz( cm.name, name, sizeof( cm.name ) );
@@ -805,6 +1140,7 @@ CM_ClearMap
 void CM_ClearMap( void ) {
 	Com_Memset( &cm, 0, sizeof( cm ) );
 	CM_ClearLevelPatches();
+	CM_ClearTriangleSoups();
 }
 
 
@@ -823,8 +1159,15 @@ cmodel_t *CM_ClipHandleToModel( clipHandle_t handle ) {
 	if ( handle == BOX_MODEL_HANDLE ) {
 		return &box_model;
 	}
+	if ( handle >= TRI_SOUP_HANDLE_BASE && handle < TRI_SOUP_HANDLE_END ) {
+		int idx = handle - TRI_SOUP_HANDLE_BASE;
+		if ( !cm.triSoups[idx].inUse ) {
+			Com_Error( ERR_DROP, "CM_ClipHandleToModel: stale triangle-soup handle %i", handle );
+		}
+		return &cm.triSoups[idx].cmod;
+	}
 	if ( handle < MAX_SUBMODELS ) {
-		Com_Error( ERR_DROP, "CM_ClipHandleToModel: bad handle %i < %i < %i", 
+		Com_Error( ERR_DROP, "CM_ClipHandleToModel: bad handle %i < %i < %i",
 			cm.numSubModels, handle, MAX_SUBMODELS );
 	}
 	Com_Error( ERR_DROP, "CM_ClipHandleToModel: bad handle %i", handle + MAX_SUBMODELS );

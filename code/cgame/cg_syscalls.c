@@ -226,6 +226,11 @@ sfxHandle_t	trap_S_RegisterSound( const char *sample, qboolean compressed ) {
 	return syscall( CG_S_REGISTERSOUND, sample, compressed );
 }
 
+int trap_S_SoundDuration( sfxHandle_t handle ) {
+	// Phase 6.2: returns sound length in milliseconds (0 if invalid).
+	return syscall( CG_S_SOUNDDURATION, handle );
+}
+
 void	trap_S_StartBackgroundTrack( const char *intro, const char *loop ) {
 	syscall( CG_S_STARTBACKGROUNDTRACK, intro, loop );
 }
@@ -459,7 +464,7 @@ qboolean trap_R_inPVS( const vec3_t p1, const vec3_t p2 ) {
 	return syscall( CG_R_INPVS, p1, p2 );
 }
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 int trap_R_GetIQMAnimations( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims ) {
 	return syscall( CG_R_GETIQMANIMS, model, anims, maxAnims );
 }

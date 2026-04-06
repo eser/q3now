@@ -808,6 +808,19 @@ void SV_Init( void )
 	sv_levelTimeReset = Cvar_Get( "sv_levelTimeReset", "0", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( sv_levelTimeReset, "Whether or not to reset leveltime after new map loads." );
 
+	sv_minRestartDelay = Cvar_Get( "sv_minRestartDelay", "2", CVAR_ARCHIVE_ND );
+	Cvar_CheckRange( sv_minRestartDelay, "2", "48", CV_INTEGER );
+	Cvar_SetDescription( sv_minRestartDelay,
+		"Schedule an automatic server process restart after this many hours of uptime.\n"
+		"The actual restart waits for all human clients to disconnect before firing.\n"
+		"Range 2-48 hours, default 2." );
+
+	// Record server start time for the scheduled-restart logic.
+	if ( sv_startRealTime == 0 ) {
+		sv_startRealTime = Sys_Milliseconds();
+	}
+	sv_restartPending = qfalse;
+
 	sv_filter = Cvar_Get( "sv_filter", "filter.txt", CVAR_ARCHIVE );
 	Cvar_SetDescription( sv_filter, "Cvar that point on filter file, if it is "" then filtering will be disabled." );
 

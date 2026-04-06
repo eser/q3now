@@ -23,7 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_feats.h"
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 
 #define IQM_MAGIC "INTERQUAKEMODEL"
 #define IQM_VERSION 2
@@ -134,4 +134,3 @@ typedef struct iqmbounds
 #endif // FEAT_IQM
 
 #endif
-

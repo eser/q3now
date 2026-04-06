@@ -44,7 +44,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
 #include "tr_common.h"
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 #include "iqm.h"
 #endif // FEAT_IQM
 #include "qgl.h"
@@ -151,12 +151,22 @@ typedef enum {
 	GF_SIN,
 	GF_SQUARE,
 	GF_TRIANGLE,
-	GF_SAWTOOTH, 
-	GF_INVERSE_SAWTOOTH, 
+	GF_SAWTOOTH,
+	GF_INVERSE_SAWTOOTH,
 
-	GF_NOISE
+	GF_NOISE,
+	GF_RANDOM		// per-frame random value in [base, base+amplitude]
 
 } genFunc_t;
+
+#if FEAT_FOG_SYSTEM
+typedef enum {
+	FT_NONE,
+	FT_LINEAR,
+	FT_EXP,
+	FT_EXP2
+} fogType_t;
+#endif
 
 
 typedef enum {
@@ -319,6 +329,7 @@ typedef struct {
 	qboolean		isVideoMap;
 	unsigned int 	isScreenMap : 1;
 	unsigned int 	dlight : 1;
+	qboolean		loopingImageAnim;		// if qfalse, clamp to last frame instead of looping (imageAnimClamp)
 } textureBundle_t;
 
 #define NUM_TEXTURE_BUNDLES 2
@@ -349,6 +360,8 @@ typedef struct {
 	qboolean		isDetail;
 	qboolean		depthFragment;
 
+	float			zFadeBounds[2];		// distance-based stage fading [near, far]; {0,0} = disabled
+
 	short			vboVPindex[3];		// normal, eye-in, eye-out
 	short			vboFPindex[2];		// normal, fog-blend
 	
@@ -375,6 +388,11 @@ typedef struct {
 typedef struct {
 	vec3_t	color;
 	float	depthForOpaque;
+#if FEAT_FOG_SYSTEM
+	fogType_t	type;		// FT_NONE means "use Q3 volume fog only"
+	float		density;	// used for FT_EXP, FT_EXP2
+	float		farClip;	// used for FT_LINEAR clamping
+#endif
 } fogParms_t;
 
 typedef struct shader_s {
@@ -564,6 +582,20 @@ typedef struct {
 	const float *fogColor; // vec4_t
 } fogProgramParms_t;
 
+#if FEAT_CORONA
+#define MAX_CORONAS 32
+
+typedef struct corona_s {
+	vec3_t				origin;
+	vec3_t				color;
+	vec3_t				transformed;	// viewspace position
+	float				scale;
+	int					id;
+	qboolean			visible;
+	struct shader_s		*shader;
+} corona_t;
+#endif
+
 typedef enum {
 	PV_NONE = 0,
 	PV_PORTAL, // this view is through a portal
@@ -612,7 +644,7 @@ typedef enum {
 	SF_POLY,
 	SF_MD3,
 	SF_MDR,
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	SF_IQM,
 #endif // FEAT_IQM
 	SF_FLARE,
@@ -733,7 +765,7 @@ typedef struct {
 	drawVert_t		*verts;
 } srfTriangles_t;
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 typedef struct {
 	vec3_t translate;
 	quat_t rotate;
@@ -913,7 +945,7 @@ typedef enum {
 	MOD_BRUSH,
 	MOD_MESH,
 	MOD_MDR,
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	MOD_IQM,
 #endif // FEAT_IQM
 } modtype_t;
@@ -938,7 +970,7 @@ model_t		*R_GetModelByHandle( qhandle_t hModel );
 int			R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame, 
 					 float frac, const char *tagName );
 void		R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs );
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 int		R_GetIQMAnimations( qhandle_t handle, iqmAnimInfo_t *anims, int maxAnims );
 #endif // FEAT_IQM
 
@@ -1105,6 +1137,11 @@ typedef struct {
 	qboolean drawConsole;
 	qboolean doneShadows;
 
+	// CNQ3 loading throttle: last time RB_SwapBuffers actually presented
+	// while tr.mapLoading was set. Used with r_loadingFpsCap to rate-limit
+	// buffer swaps during map loads.
+	int		lastLoadingSwapMsec;
+
 } backEndState_t;
 
 /*
@@ -1218,6 +1255,27 @@ typedef struct {
 
 	qboolean				vertexLightingAllowed;
 
+#if FEAT_FOG_SYSTEM
+	// Engine-wide "global fog" state (applied when the view is not inside
+	// any Q3 fog volume). Populated from worldspawn or cvars in tr_main.c.
+	int						globalFog;		// 0 = none, otherwise index of a virtual fog in fogs[]
+	fogType_t				globalFogType;
+	vec3_t					globalFogColor;
+	float					globalFogDepthForOpaque;
+	float					globalFogDensity;
+#endif
+
+#if FEAT_FOG_SYSTEM
+	// Cached current fog state (set by RB_Fog / R_FogOff so the backend
+	// can short-circuit redundant state changes).
+	qboolean				fogEnabled;
+	fogType_t				fogTypeCurrent;
+#endif
+
+#if FEAT_CORONA
+	int						coronaShader;
+#endif
+
 } trGlobals_t;
 
 extern backEndState_t	backEnd;
@@ -1259,6 +1317,8 @@ extern cvar_t	*r_neatsky;				// nomip and nopicmip for skyboxes, cnq3 like look
 extern cvar_t	*r_drawSun;				// controls drawing of sun quad
 extern cvar_t	*r_dynamiclight;		// dynamic lights enabled/disabled
 extern cvar_t	*r_mergeLightmaps;
+extern cvar_t	*r_lightmapAtlas;	// CNQ3 alias for r_mergeLightmaps
+extern cvar_t	*r_loadingFpsCap;	// CNQ3 swap throttle during map loads
 #ifdef USE_PMLIGHT
 extern cvar_t	*r_dlightMode;			// 0 - vq3, 1 - pmlight
 extern cvar_t	*r_dlightSpecPower;		// 1 - 32
@@ -1326,6 +1386,12 @@ extern	cvar_t	*r_clear;						// force screen clear every frame
 extern	cvar_t	*r_shadows;						// controls shadows: 0 = none, 1 = blur, 2 = stencil, 3 = black planar projection
 extern	cvar_t	*r_flares;						// light flares
 
+#if FEAT_FOG_SYSTEM
+extern	cvar_t	*r_useGlFog;					// enable GL_FOG fixed-function fog
+extern	cvar_t	*r_defaultFogParmsType;			// default fogType_t for maps without fog
+extern	cvar_t	*r_globalLinearFogDrawSky;		// draw sky through linear global fog
+#endif
+
 extern	cvar_t	*r_intensity;
 
 extern	cvar_t	*r_lockpvs;
@@ -1344,6 +1410,8 @@ extern	cvar_t	*r_ignoreGLErrors;
 
 extern	cvar_t	*r_overBrightBits;
 extern	cvar_t	*r_mapOverBrightBits;
+extern	cvar_t	*r_brightness;
+extern	cvar_t	*r_mapBrightness;
 extern	cvar_t	*r_mapGreyScale;
 
 extern	cvar_t	*r_debugSurface;
@@ -1730,6 +1798,23 @@ void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *vert
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
+#if FEAT_CORONA
+void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
+void RB_AddCoronaFlares( void );
+void R_ClearCoronas( void );
+#endif
+
+void *R_GetCommandBuffer( int bytes );
+#if FEAT_FOG_SYSTEM
+void RE_GetGlobalFog( refFogType_t *type, vec3_t color, float *depthForOpaque, float *density );
+void RE_GetViewFog( const vec3_t origin, refFogType_t *type, vec3_t color,
+	float *depthForOpaque, float *density, qboolean *useColorArray );
+void RB_Fog( int fogNum );
+void R_FogOff( void );
+void RB_FogOn( void );
+int  R_BoundsFogNum( const vec3_t mins, const vec3_t maxs );
+qboolean R_IsGlobalFog( int fogNum );
+#endif
 
 void RE_RenderScene( const refdef_t *fd );
 
@@ -1762,7 +1847,7 @@ ANIMATED MODELS
 
 void R_MDRAddAnimSurfaces( trRefEntity_t *ent );
 void RB_MDRSurfaceAnim( mdrSurface_t *surface );
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 qboolean R_LoadIQM (model_t *mod, void *buffer, int filesize, const char *name );
 void R_AddIQMSurfaces( trRefEntity_t *ent );
 void RB_IQMSurfaceAnim( const surfaceType_t *surface );
@@ -1907,10 +1992,28 @@ typedef struct {
 	float glowColor[4];
 } setMsdfOutlineCommand_t;
 
+typedef struct {
+	int		commandId;
+	shader_t	*shader;
+	float	x, y;
+	float	w, h;
+	float	s1, t1;
+	float	s2, t2;
+	float	angle;	// degrees, clockwise, rotation around center
+} rotatedPicCommand_t;
+
+typedef struct {
+	int		commandId;
+	qboolean	hasRegion;
+	float	x, y, w, h;
+} setClipRegionCommand_t;
+
 typedef enum {
 	RC_END_OF_LIST,
 	RC_SET_COLOR,
 	RC_STRETCH_PIC,
+	RC_ROTATED_PIC,
+	RC_SET_CLIP_REGION,
 	RC_DRAW_LINE,
 	RC_DRAW_SURFS,
 	RC_DRAW_BUFFER,
@@ -1945,6 +2048,9 @@ typedef struct {
 	trRefEntity_t	entities[MAX_REFENTITIES];
 	srfPoly_t	*polys;//[MAX_POLYS];
 	polyVert_t	*polyVerts;//[MAX_POLYVERTS];
+#if FEAT_CORONA
+	corona_t	coronas[MAX_CORONAS];
+#endif
 	renderCommandList_t	commands;
 } backEndData_t;
 
@@ -1963,8 +2069,11 @@ void R_IssuePendingRenderCommands( void );
 void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 
 void RE_SetColor( const float *rgba );
+void RE_SetClipRegion( const float *region );
 void RE_StretchPic ( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, qhandle_t hShader );
+void RE_RotatedPic( float x, float y, float w, float h,
+					  float s1, float t1, float s2, float t2, float angle, qhandle_t hShader );
 void RE_DrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t hShader );
 void RE_BeginFrame( stereoFrame_t stereoFrame );
 void RE_EndFrame( int *frontEndMsec, int *backEndMsec );

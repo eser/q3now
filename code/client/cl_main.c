@@ -73,6 +73,16 @@ cvar_t	*cl_dlDirectory;
 
 cvar_t	*cl_reconnectArgs;
 
+/* CNQ3 backport: cl_matchAlerts
+ *   Bit 1 = trigger alert even when the window is merely unfocused
+ *           (without the bit, alerts fire only while minimized)
+ *   Bit 2 = flash the taskbar / dock / window manager
+ *   Bit 4 = beep (platform attention sound)
+ *   Bit 8 = temporarily override s_autoMute while the alert is active
+ * Default is 7 (flash + beep + focus-sensitive, no unmute override).
+ */
+cvar_t	*cl_matchAlerts;
+
 // common cvars for GLimp modules
 cvar_t	*vid_xpos;			// X coordinate of window position
 cvar_t	*vid_ypos;			// Y coordinate of window position
@@ -149,6 +159,10 @@ static void CL_ShutdownRef( refShutdownCode_t code );
 static void CL_InitGLimp_Cvars( void );
 
 static void CL_NextDemo( void );
+
+qboolean CL_DemoPlaying( void ) {
+	return clc.demoplaying;
+}
 
 /*
 ===============
@@ -594,8 +608,11 @@ static void CL_Record_f( void ) {
 	} else {
 
 		Com_RealTime( &t );
-		Com_sprintf( name, sizeof( name ), "demos/demo-%04d%02d%02d-%02d%02d%02d",
-			1900 + t.tm_year, 1 + t.tm_mon,	t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec );
+		/* CNQ3 backport: use YYYY_MM_DD-HH_MM_SS filename format so
+		   timestamped demos sort lexicographically. */
+		Com_sprintf( name, sizeof( name ), "demos/%04d_%02d_%02d-%02d_%02d_%02d",
+			1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
+			t.tm_hour, t.tm_min, t.tm_sec );
 
 		clc.explicitRecordName = qfalse;
 	}
@@ -886,6 +903,9 @@ static void CL_PlayDemo_f( void ) {
 
 	if ( hFile == FS_INVALID_HANDLE ) {
 		Com_Printf( S_COLOR_YELLOW "couldn't open %s\n", name );
+		// Honor the "nextdemo" cvar even if the current demo fails to
+		// open so that a queued demo reel keeps advancing.
+		CL_NextDemo();
 		return;
 	}
 
@@ -902,7 +922,10 @@ static void CL_PlayDemo_f( void ) {
 	if ( FS_FOpenFileRead( name, &clc.demofile, qtrue ) == -1 )
 	{
 		// drop this time
-		Com_Error( ERR_DROP, "couldn't open %s\n", name );
+		Com_Printf( S_COLOR_YELLOW "couldn't open %s\n", name );
+		// Honor the "nextdemo" cvar so a demo reel can progress past a
+		// missing entry rather than tearing down with an ERR_DROP.
+		CL_NextDemo();
 		return;
 	}
 
@@ -1372,89 +1395,6 @@ static void CL_RequestMotd( void ) {
 }
 #endif
 
-/*
-===================
-CL_RequestAuthorization
-
-Authorization server protocol
------------------------------
-
-All commands are text in Q3 out of band packets (leading 0xff 0xff 0xff 0xff).
-
-Whenever the client tries to get a challenge from the server it wants to
-connect to, it also blindly fires off a packet to the authorize server:
-
-getKeyAuthorize <challenge> <cdkey>
-
-cdkey may be "demo"
-
-
-#OLD The authorize server returns a:
-#OLD
-#OLD keyAthorize <challenge> <accept | deny>
-#OLD
-#OLD A client will be accepted if the cdkey is valid and it has not been used by any other IP
-#OLD address in the last 15 minutes.
-
-
-The server sends a:
-
-getIpAuthorize <challenge> <ip>
-
-The authorize server returns a:
-
-ipAuthorize <challenge> <accept | deny | demo | unknown >
-
-A client will be accepted if a valid cdkey was sent by that ip (only) in the last 15 minutes.
-If no response is received from the authorize server after two tries, the client will be let
-in anyway.
-===================
-*/
-#ifndef STANDALONE
-static void CL_RequestAuthorization( void ) {
-	char	nums[64];
-	int		i, j, l;
-	cvar_t	*fs;
-
-	if ( !cls.authorizeServer.port ) {
-		Com_Printf( "Resolving %s\n", AUTHORIZE_SERVER_NAME );
-		if ( !NET_StringToAdr( AUTHORIZE_SERVER_NAME, &cls.authorizeServer, NA_IP ) ) {
-			Com_Printf( "Couldn't resolve address\n" );
-			return;
-		}
-
-		cls.authorizeServer.port = BigShort( PORT_AUTHORIZE );
-		Com_Printf( "%s resolved to %i.%i.%i.%i:%i\n", AUTHORIZE_SERVER_NAME,
-			cls.authorizeServer.ipv._4[0], cls.authorizeServer.ipv._4[1],
-			cls.authorizeServer.ipv._4[2], cls.authorizeServer.ipv._4[3],
-			BigShort( cls.authorizeServer.port ) );
-	}
-	if ( cls.authorizeServer.type == NA_BAD ) {
-		return;
-	}
-
-	// only grab the alphanumeric values from the cdkey, to avoid any dashes or spaces
-	j = 0;
-	l = strlen( cl_cdkey );
-	if ( l > 32 ) {
-		l = 32;
-	}
-	for ( i = 0 ; i < l ; i++ ) {
-		if ( ( cl_cdkey[i] >= '0' && cl_cdkey[i] <= '9' )
-				|| ( cl_cdkey[i] >= 'a' && cl_cdkey[i] <= 'z' )
-				|| ( cl_cdkey[i] >= 'A' && cl_cdkey[i] <= 'Z' )
-			 ) {
-			nums[j] = cl_cdkey[i];
-			j++;
-		}
-	}
-	nums[j] = 0;
-
-	fs = Cvar_Get( "cl_anonymous", "0", CVAR_INIT | CVAR_SYSTEMINFO );
-
-	NET_OutOfBandPrint(NS_CLIENT, &cls.authorizeServer, "getKeyAuthorize %i %s", fs->integer, nums );
-}
-#endif
 
 
 /*
@@ -2285,11 +2225,7 @@ static void CL_CheckForResend( void ) {
 
 	switch ( cls.state ) {
 	case CA_CONNECTING:
-		// requesting a challenge .. IPv6 users always get in as authorize server supports no ipv6.
-#ifndef STANDALONE
-		if (!Cvar_VariableIntegerValue("com_standalone") && clc.serverAddress.type == NA_IP && !Sys_IsLANAddress( &clc.serverAddress ) )
-			CL_RequestAuthorization();
-#endif
+		// Phase 6.4: skip the authorize server round-trip — q3now is standalone.
 		// The challenge request shall be followed by a client challenge so no malicious server can hijack this connection.
 		NET_OutOfBandPrint( NS_CLIENT, &clc.serverAddress, "getchallenge %d %s", clc.challenge, GAMENAME_FOR_MASTER );
 		break;
@@ -2722,11 +2658,8 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		return fromserver;
 	}
 
-	// cd check
-	if ( !Q_stricmp(c, "keyAuthorize") ) {
-		// we don't use these now, so dump them on the floor
-		return qfalse;
-	}
+	// Phase 6.4: legacy "keyAuthorize" packet handler removed — q3now never
+	// talks to the id authorize server, so any such packet is unsolicited.
 
 	// global MOTD from id
 	if ( !Q_stricmp(c, "motd") ) {
@@ -2920,6 +2853,104 @@ static void CL_CheckUserinfo( void ) {
 
 /*
 ==================
+CL_CheckMatchAlerts
+
+CNQ3 backport: raise OS-level attention (taskbar flash, beep, audio
+unmute) when a match is about to start while the window is unfocused
+or minimized.
+
+We detect the transition by polling the CS_WARMUP configstring:
+  - warmup > 0   : countdown running
+  - warmup == 0  : waiting for warmup
+  - warmup < 0   : match has started (server wrote -|restarttime|)
+
+The engine has no direct "match started" event, so we store the
+previous CS_WARMUP value and fire the alert on any warmup -> match or
+warmup -> new-warmup-value transition.
+==================
+*/
+static int  cl_lastWarmupValue = 0;
+static int  cl_matchAlertExpire = 0;
+
+static void CL_CheckMatchAlerts( void )
+{
+	int warmup;
+	int bits;
+	const char *s;
+	int ofs;
+	qboolean fire = qfalse;
+
+	/* clear the s_autoMute override once the alert window closes */
+	if ( cl_matchAlertExpire > 0 && Sys_Milliseconds() >= cl_matchAlertExpire ) {
+		cl_matchAlertExpire = 0;
+		S_SetMuteOverride( qfalse );
+	}
+
+	if ( cls.state != CA_ACTIVE ) {
+		cl_lastWarmupValue = 0;
+		return;
+	}
+
+	if ( cl_matchAlerts == NULL || cl_matchAlerts->integer == 0 )
+		return;
+
+	/* read CS_WARMUP from the current gamestate */
+	if ( CS_WARMUP < 0 || CS_WARMUP >= MAX_CONFIGSTRINGS )
+		return;
+
+	ofs = cl.gameState.stringOffsets[ CS_WARMUP ];
+	if ( ofs == 0 )
+		return;
+
+	s = cl.gameState.stringData + ofs;
+	warmup = atoi( s );
+
+	/* trigger whenever the warmup value transitions — either warmup
+	   begins (0 -> positive), a new restart time is scheduled
+	   (positive -> new positive), or warmup ends (positive -> 0 or
+	   anything -> negative for "match live") */
+	if ( warmup != cl_lastWarmupValue ) {
+		/* only treat transitions that actually represent a match start
+		   event — avoid firing on the initial gamestate parse where
+		   cl_lastWarmupValue is still 0 and warmup is 0 */
+		if ( cl_lastWarmupValue != 0 || warmup != 0 ) {
+			fire = qtrue;
+		}
+		cl_lastWarmupValue = warmup;
+	}
+
+	if ( !fire )
+		return;
+
+	bits = cl_matchAlerts->integer;
+
+	/* bit 1: require window to be either minimized, or (with bit 1 set)
+	   unfocused but not minimized either way we only alert when the
+	   user is not actively looking. */
+	if ( gw_active && !gw_minimized ) {
+		/* user is actively looking at the window — no alert needed */
+		return;
+	}
+	if ( !gw_minimized && !(bits & 1) ) {
+		/* unfocused but not minimized, and bit 1 not set → skip */
+		return;
+	}
+
+	if ( bits & 2 ) {
+		Sys_FlashWindow();
+	}
+	if ( bits & 4 ) {
+		Sys_BeepAttention();
+	}
+	if ( bits & 8 ) {
+		S_SetMuteOverride( qtrue );
+		cl_matchAlertExpire = Sys_Milliseconds() + 5000;
+	}
+}
+
+
+/*
+==================
 CL_Frame
 ==================
 */
@@ -3051,6 +3082,10 @@ void CL_Frame( int msec, int realMsec ) {
 
 	// decide on the serverTime to render
 	CL_SetCGameTime();
+
+	// CNQ3 backport: check for match start and raise an alert if the
+	// user is not currently paying attention to the window
+	CL_CheckMatchAlerts();
 
 	// update the screen
 	cls.framecount++;
@@ -3904,6 +3939,15 @@ void CL_Init( void ) {
 	Cvar_SetDescription( cl_conXOffset, "Console notifications X-offset." );
 	cl_conColor = Cvar_Get( "cl_conColor", "", 0 );
 	Cvar_SetDescription( cl_conColor, "Console background color, set as R G B A values from 0-255, use with \\seta to save in config." );
+
+	cl_matchAlerts = Cvar_Get( "cl_matchAlerts", "7", CVAR_ARCHIVE );
+	Cvar_CheckRange( cl_matchAlerts, "0", "15", CV_INTEGER );
+	Cvar_SetDescription( cl_matchAlerts,
+		"Match-start alert bitmask:\n"
+		"  1 = alert when the window is unfocused (not just minimized)\n"
+		"  2 = flash the taskbar / dock\n"
+		"  4 = beep (attention sound)\n"
+		"  8 = unmute audio (overrides s_autoMute)" );
 
 #ifdef MACOS_X
 	// In game video is REALLY slow in Mac OS X right now due to driver slowness

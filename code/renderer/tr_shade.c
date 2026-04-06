@@ -92,7 +92,15 @@ void R_BindAnimatedImage( const textureBundle_t *bundle ) {
 	if ( index < 0 ) {
 		index = 0;	// may happen with shader time offsets
 	}
-	index %= bundle->numImageAnimations;
+
+	if ( bundle->loopingImageAnim || bundle->numImageAnimations == 0 ) {
+		index %= bundle->numImageAnimations;
+	} else {
+		// clamp: hold on the last frame
+		if ( index >= bundle->numImageAnimations ) {
+			index = bundle->numImageAnimations - 1;
+		}
+	}
 
 	GL_Bind( bundle->image[ index ] );
 }

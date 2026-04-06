@@ -25,7 +25,19 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_types.h"
 #include "vulkan/vulkan.h"
 
-#define	REF_API_VERSION		8
+#define	REF_API_VERSION		9
+
+#if !defined(REF_FOG_TYPE_DEFINED)
+#define REF_FOG_TYPE_DEFINED
+// Fog type enum — shared between renderer and engine.
+// Must match fogType_t in each renderer's tr_local.h.
+typedef enum {
+	REF_FT_NONE,
+	REF_FT_LINEAR,
+	REF_FT_EXP,
+	REF_FT_EXP2
+} refFogType_t;
+#endif
 
 //
 // these are the functions exported by the refresh module
@@ -83,8 +95,11 @@ typedef struct {
 	void	(*SetColor)( const float *rgba );	// NULL = 1,1,1,1
 	void	(*SetMSDFOutline)( float outlineWidth, const float *outlineColor,
 		float glowWidth, const float *glowColor );
+	void	(*SetClipRegion)( const float *region );	// NULL = clear clip region; non-NULL = {x,y,w,h}
 	void	(*DrawStretchPic) ( float x, float y, float w, float h,
 		float s1, float t1, float s2, float t2, qhandle_t hShader );	// 0 = white
+	void	(*DrawRotatedPic)( float x, float y, float w, float h,
+		float s1, float t1, float s2, float t2, float angle, qhandle_t hShader );
 	void	(*DrawLine)( float x1, float y1, float x2, float y2, float width, qhandle_t hShader );
 
 	// Draw images for cinematic rendering, pass as 32 bit rgba
@@ -126,7 +141,25 @@ typedef struct {
 	void	(*VertexLighting)( qboolean allowed );
 	void	(*SyncRender)( void );
 
-#if defined(FEAT_IQM)
+#if FEAT_FOG_SYSTEM
+	// Query global fog parameters (fog volume 0 or explicit global fog).
+	// type receives REF_FT_NONE if no global fog is set.
+	void	(*GetGlobalFog)( refFogType_t *type, vec3_t color, float *depthForOpaque, float *density );
+
+	// Query the fog affecting a given view origin. useColorArray is set to qtrue
+	// if the engine should use vertex color arrays for fog, qfalse for fixed-function fog.
+	void	(*GetViewFog)( const vec3_t origin, refFogType_t *type, vec3_t color,
+		float *depthForOpaque, float *density, qboolean *useColorArray );
+#endif
+
+#if FEAT_CORONA
+	// Add a corona (lens-flare-style glow) to the current scene. Rendered with
+	// depth-buffer occlusion testing.
+	void	(*AddCoronaToScene)( const vec3_t org, float r, float g, float b,
+		float scale, int id, qboolean visible );
+#endif
+
+#if FEAT_IQM
 	// Query embedded IQM animation data from a model.
 	// Returns number of animations found (0 if not IQM or no anims).
 	int		(*GetIQMAnimations)( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );

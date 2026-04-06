@@ -948,6 +948,70 @@ char *Sys_GetClipboardData( void )
 
 /*
 ===============
+Sys_FlashWindow
+
+Briefly flashes the engine window in its system taskbar / dock so the
+user notices that a match has started.  Implemented via SDL3's
+SDL_FlashWindow on all platforms that support it — on platforms where
+SDL has no flash support the call becomes a no-op.
+===============
+*/
+void Sys_FlashWindow( void )
+{
+#ifndef DEDICATED
+	if ( SDL_window != NULL ) {
+		SDL_FlashWindow( SDL_window, SDL_FLASH_BRIEFLY );
+	}
+#endif
+}
+
+
+/*
+===============
+Sys_BeepAttention
+
+Emits a single system-level attention beep.  Used by cl_matchAlerts
+bit 4.  On SDL3 we do not have a portable "system beep", so we fall
+back to writing the BEL character to stderr which is almost universally
+routed to the current terminal's bell.  On Windows this is augmented
+by MessageBeep via the win32 backend.
+===============
+*/
+void Sys_BeepAttention( void )
+{
+#ifndef DEDICATED
+	/* SDL3 has no direct system beep API; fall back to the BEL control
+	   character which both terminals and modern desktop environments
+	   interpret as an attention signal. */
+	fputc( '\a', stderr );
+	fflush( stderr );
+#endif
+}
+
+
+/*
+===============
+Sys_SetClipboardData
+
+Places the provided plain-text string onto the system clipboard.
+Used by console mark-mode copy and the help/search tooling.
+===============
+*/
+void Sys_SetClipboardData( const char *text )
+{
+#ifdef DEDICATED
+	(void)text;
+#else
+	if ( text == NULL )
+		return;
+	/* SDL3: SDL_SetClipboardText returns bool (true on success) */
+	SDL_SetClipboardText( text );
+#endif
+}
+
+
+/*
+===============
 Sys_SetClipboardBitmap
 ===============
 */

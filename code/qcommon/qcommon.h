@@ -150,7 +150,7 @@ NET
 
 #define	MAX_PACKET_USERCMDS		32		// max number of usercmd_t in a packet
 
-#define	MAX_SNAPSHOT_ENTITIES	256
+#define	MAX_SNAPSHOT_ENTITIES	512
 
 #define	PORT_ANY			-1
 
@@ -284,7 +284,7 @@ PROTOCOL
 ==============================================================
 */
 
-#define	PROTOCOL_VERSION	72
+#define	PROTOCOL_VERSION	73
 
 // maintain a list of compatible protocols for demo playing
 // NOTE: that stuff only works with two digits protocols
@@ -295,15 +295,12 @@ extern const int demo_protocols[];
 #ifndef MASTER_SERVER_NAME
 #define MASTER_SERVER_NAME	"master.quake3arena.com"
 #endif
-#ifndef AUTHORIZE_SERVER_NAME
-#define	AUTHORIZE_SERVER_NAME	"authorize.quake3arena.com"
-#endif
+// Phase 6.4: AUTHORIZE_SERVER_NAME / PORT_AUTHORIZE removed.
+// q3now never contacts authorize.quake3arena.com — see CL_RequestAuthorization
+// removal in cl_main.c and SV_AuthorizeIpPacket removal in sv_client.c.
 
 #define	PORT_MASTER			27950
 #define	PORT_UPDATE			27951
-#ifndef PORT_AUTHORIZE
-#define	PORT_AUTHORIZE		27952
-#endif
 #define	PORT_SERVER			27960
 #define	NUM_SERVER_PORTS	4		// broadcast scan this many ports after
 									// PORT_SERVER so a single machine can
@@ -466,6 +463,9 @@ void Cbuf_InsertText( const char *text );
 void Cbuf_ExecuteText( cbufExec_t exec_when, const char *text );
 // this can be used in place of either Cbuf_AddText or Cbuf_InsertText
 
+void Cbuf_ExecuteTextSafe( cbufExec_t exec_when, const char *text );
+// like Cbuf_ExecuteText but converts dangerous commands from EXEC_NOW to EXEC_INSERT
+
 void Cbuf_Execute( void );
 // Pulls off \n terminated lines of text from the command buffer and sends
 // them through Cmd_ExecuteString.  Stops when the buffer is empty.
@@ -495,8 +495,26 @@ void	Cmd_AddCommand( const char *cmd_name, xcommand_t function );
 // if function is NULL, the command will be forwarded to the server
 // as a clc_clientCommand instead of executed locally
 
+void	Cmd_AddCgameCommand( const char *cmd_name );
+// Same as Cmd_AddCommand with function=NULL, but also tags the command
+// as cgame-owned so Cmd_RemoveCgameCommands can clean it up cleanly on
+// CL_ShutdownCGame without clobbering completion-only stubs.
+
 void	Cmd_RemoveCommand( const char *cmd_name );
 void	Cmd_RemoveCgameCommands( void );
+
+qboolean Cmd_Exists( const char *cmd_name );
+// returns qtrue if a command with the given name is registered
+
+void Cmd_ForEachName( void (*callback)( const char *cmd_name, void *userdata ), void *userdata );
+// iterates every registered command name and invokes the callback —
+// used by the searchhelp command.
+
+// help system (help/man/searchhelp + con_drawHelp panel)
+void Help_Init( void );
+qboolean Help_LookupText( const char *token, char *out, int outSize );
+qboolean Help_IsKnownCvar( const char *token );
+qboolean Help_IsKnownCommand( const char *token );
 
 typedef void (*completionFunc_t)( const char *args, int argNum );
 
@@ -506,6 +524,7 @@ void	Cmd_RemoveCommandSafe( const char *cmd_name );
 void	Cmd_CommandCompletion( void(*callback)(const char *s) );
 // callback with each valid string
 void	Cmd_SetCommandCompletionFunc( const char *command, completionFunc_t complete );
+completionFunc_t Cmd_GetCommandCompletionFunc( const char *command );
 qboolean Cmd_CompleteArgument( const char *command, const char *args, int argNum );
 void	Cmd_CompleteWriteCfgName( const char *args, int argNum );
 
@@ -529,6 +548,10 @@ void	Cmd_TokenizeStringIgnoreQuotes( const char *text_in );
 void	Cmd_ExecuteString( const char *text );
 // Parses a single line of text into arguments and tries to execute it
 // as if it was typed at the console
+
+void	Cmd_SaveCmdContext( void );
+void	Cmd_RestoreCmdContext( void );
+// Save and restore command context for nested command execution
 
 
 /*
@@ -598,6 +621,13 @@ void	Cvar_VariableStringBuffer( const char *var_name, char *buffer, int bufsize 
 void	Cvar_VariableStringBufferSafe( const char *var_name, char *buffer, int bufsize, int flag );
 // returns an empty string if not defined
 
+void	Cvar_LatchedVariableStringBuffer( const char *var_name, char *buffer, int bufsize );
+void	Cvar_DefaultVariableStringBuffer( const char *var_name, char *buffer, int bufsize );
+// returns latched/default value into buffer, or empty string if not defined
+
+void	Cvar_SetDefault( const char *var_name, const char *value );
+// updates the default (reset) value of an existing cvar
+
 unsigned Cvar_Flags( const char *var_name );
 // returns CVAR_NONEXISTENT if cvar doesn't exist or the flags of that particular CVAR.
 
@@ -615,9 +645,18 @@ qboolean Cvar_Command( void );
 // command.  Returns true if the command was a variable reference that
 // was handled. (print or change)
 
-void 	Cvar_WriteVariables( fileHandle_t f );
+void 	Cvar_WriteVariables( fileHandle_t f, qboolean writeAll );
 // writes lines containing "set variable value" for all variables
-// with the archive flag set to true.
+// with the archive flag set to true. When writeAll is qtrue every CVar
+// is written (used by "writeconfig -f").
+
+cvar_t *Cvar_FindVarPublic( const char *var_name );
+// public wrapper around the internal Cvar_FindVar hash lookup — used by
+// the help system.  Returns NULL if not found.
+
+void Cvar_ForEach( void (*callback)( cvar_t *var, void *userdata ), void *userdata );
+// iterates every registered cvar and invokes the callback — used by
+// the searchhelp command.
 
 void	Cvar_Init( void );
 
@@ -899,14 +938,20 @@ typedef struct {
 	int		scroll;
 	int		widthInChars;
 	char	buffer[MAX_EDIT_LINE];
+	/* CNQ3 backport Phase 6: cycling auto-completion (con_completionStyle 1) */
+	int		acOffset;	/* buffer offset at which the current cycle began, 0 = no active cycle */
+	int		acLength;	/* length of the most recently inserted match (for future use) */
+	int		acMatchIndex;	/* current match index used by cycling tab */
 } field_t;
 
 void Field_Clear( field_t *edit );
 void Field_AutoComplete( field_t *edit );
+void Field_ResetCompletionCycle( field_t *edit );
 void Field_CompleteKeyname( void );
 void Field_CompleteKeyBind( int key );
 void Field_CompleteFilename( const char *dir, const char *ext, qboolean stripExt, int flags );
 void Field_CompleteCommand( const char *cmd, qboolean doCommands, qboolean doCvars );
+void Field_CompleteList( void (*enumerate)( void (*cb)( const char *s ) ) );
 
 void Con_ResetHistory( void );
 void Con_SaveField( const field_t *field );
@@ -1140,6 +1185,8 @@ CLIENT / SERVER SYSTEMS
 // client interface
 //
 void CL_Init( void );
+void CL_AbortFrame( void );
+qboolean CL_DemoPlaying( void );
 qboolean CL_Disconnect( qboolean showMainMenu );
 void CL_ResetOldGame( void );
 void CL_Shutdown( const char *finalmsg, qboolean quit );
@@ -1270,7 +1317,15 @@ char	*Sys_ConsoleInput( void );
 void	NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... );
 void	NORETURN Sys_Quit( void );
 char	*Sys_GetClipboardData( void );	// note that this isn't journaled...
+void	Sys_SetClipboardData( const char *text );
 void	Sys_SetClipboardBitmap( const byte *bitmap, int length );
+
+/* CNQ3 backport: match alerts.
+ * Sys_FlashWindow briefly flashes the taskbar / dock entry to draw
+ * attention to the game window when the user is in another app.
+ * Sys_BeepAttention emits a single system-level alert beep. */
+void	Sys_FlashWindow( void );
+void	Sys_BeepAttention( void );
 
 void	Sys_Print( const char *msg );
 
@@ -1312,7 +1367,9 @@ qboolean Sys_ResetReadOnlyAttribute( const char *ospath );
 const char *Sys_Pwd( void );
 const char *Sys_DefaultBasePath( void );
 const char *Sys_DefaultHomePath( void );
-const char *Sys_SteamPath( void );
+
+int Sys_GetCapsLockMode( void );
+int Sys_GetNumLockMode( void );
 
 #ifdef __APPLE__
 char    *Sys_DefaultAppPath( void );
@@ -1358,5 +1415,8 @@ int HuffmanGetSymbol( unsigned int* symbol, const byte* buffer, int bitIndex );
 
 // functional gate syscall number
 #define COM_TRAP_GETVALUE 700
+
+// BSP format abstraction (FEAT_BSP_ABSTRACTION)
+void BSP_Init( void );
 
 #endif // _QCOMMON_H_

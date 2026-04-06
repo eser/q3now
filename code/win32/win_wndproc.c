@@ -1041,6 +1041,77 @@ char *Sys_GetClipboardData( void ) {
 
 /*
 ================
+Sys_FlashWindow
+
+Briefly flashes the game window in the Windows taskbar to alert the
+user that something requires their attention (match start, etc.).
+================
+*/
+void Sys_FlashWindow( void )
+{
+	FLASHWINFO fi;
+
+	if ( !g_wv.hWnd ) {
+		return;
+	}
+
+	Com_Memset( &fi, 0, sizeof( fi ) );
+	fi.cbSize    = sizeof( fi );
+	fi.hwnd      = g_wv.hWnd;
+	fi.dwFlags   = FLASHW_TRAY | FLASHW_TIMERNOFG;
+	fi.uCount    = 5;
+	fi.dwTimeout = 0;
+	FlashWindowEx( &fi );
+}
+
+
+/*
+================
+Sys_BeepAttention
+
+Plays the Windows system alert sound.
+================
+*/
+void Sys_BeepAttention( void )
+{
+	MessageBeep( MB_OK );
+}
+
+
+/*
+================
+Sys_SetClipboardData
+
+Places the provided plain-text string onto the system clipboard.
+Used by console mark-mode copy.
+================
+*/
+void Sys_SetClipboardData( const char *text )
+{
+	HGLOBAL hMem;
+	char *ptr;
+	size_t len;
+
+	if ( text == NULL || !g_wv.hWnd || !OpenClipboard( g_wv.hWnd ) )
+		return;
+
+	EmptyClipboard();
+	len = strlen( text ) + 1;
+	hMem = GlobalAlloc( GMEM_MOVEABLE | GMEM_DDESHARE, len );
+	if ( hMem != NULL ) {
+		ptr = (char*)GlobalLock( hMem );
+		if ( ptr != NULL ) {
+			memcpy( ptr, text, len );
+		}
+		GlobalUnlock( hMem );
+		SetClipboardData( CF_TEXT, hMem );
+	}
+	CloseClipboard();
+}
+
+
+/*
+================
 Sys_SetClipboardBitmap
 ================
 */

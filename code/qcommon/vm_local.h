@@ -264,6 +264,13 @@ int VM_SymbolToValue( vm_t *vm, const char *symbol );
 const char *VM_ValueToSymbol( vm_t *vm, int value );
 void VM_LogSyscalls( int *args );
 
+// Walks the current interpreter/JIT program stack (vm->dataBase + vm->programStack)
+// collecting up to MAX_VM_CALLSTACK_DEPTH return addresses, and writes a
+// space-separated hex representation into buf. Format: "vm_name: 0xaddr 0xaddr ...".
+// Safe to call from crash handlers — never allocates, never calls printf.
+#define MAX_VM_CALLSTACK_DEPTH 64
+void VM_GetCallStack( vm_t *vm, char *buf, int bufSize );
+
 #if FEAT_LEGACY_QVM
 #define JUMP	(1<<0)
 #define FPU		(1<<1)

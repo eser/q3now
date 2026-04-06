@@ -1824,3 +1824,301 @@ void CM_DrawDebugSurface( void (*drawPoly)(int color, int numPoints, float *poin
 	drawPoly( 4, v[0] );
 #endif
 }
+
+
+/*
+================================================================================
+
+TRIANGLE SOUP COLLIDE
+
+Arbitrary triangle meshes (e.g. IQM models) converted into a patchCollide_t so
+that they can be traced with the same facet/bevel machinery used for curved
+patches. Each triangle becomes a single facet with three edge borders, and
+CM_AddFacetBevels adds the axial and edge bevels required for swept-AABB
+traces.
+
+================================================================================
+*/
+
+/*
+===================
+CM_SetTriangleSoupBorderInward
+
+Flips borderPlanes that point away from the triangle so that their normals
+face inward (toward the remaining triangle points), matching the convention
+used by CM_SetBorderInward for patches.
+===================
+*/
+static void CM_SetTriangleSoupBorderInward( facet_t *facet, float *p1, float *p2, float *p3 ) {
+	int		k, l;
+	float	*points[3];
+
+	points[0] = p1;
+	points[1] = p2;
+	points[2] = p3;
+
+	for ( k = 0 ; k < facet->numBorders ; k++ ) {
+		int		front, back;
+
+		front = 0;
+		back = 0;
+
+		for ( l = 0 ; l < 3 ; l++ ) {
+			int		side;
+
+			side = CM_PointOnPlaneSide( points[l], facet->borderPlanes[k] );
+			if ( side == SIDE_FRONT ) {
+				front++;
+			} else if ( side == SIDE_BACK ) {
+				back++;
+			}
+		}
+
+		if ( front && !back ) {
+			facet->borderInward[k] = qtrue;
+		} else if ( back && !front ) {
+			facet->borderInward[k] = qfalse;
+		} else if ( !front && !back ) {
+			// flat side border
+			facet->borderPlanes[k] = -1;
+		} else {
+			// bisecting side border
+			Com_DPrintf( "WARNING: CM_SetTriangleSoupBorderInward: mixed plane sides\n" );
+			facet->borderInward[k] = qfalse;
+		}
+	}
+}
+
+/*
+==================
+CM_GenerateBoundaryForPoints
+
+Returns a plane that contains the edge (p1,p2) and is perpendicular to the
+surface plane given by surfacePlaneNum. The plane is created (or reused) via
+CM_FindPlane by passing three coplanar points: p1, p2, and p1 extruded along
+the surface normal.
+==================
+*/
+static int CM_GenerateBoundaryForPoints( int surfacePlaneNum, float *p1, float *p2 ) {
+	vec3_t	up;
+
+	VectorMA( p1, 4, planes[surfacePlaneNum].plane, up );
+
+	return CM_FindPlane( p1, p2, up );
+}
+
+/*
+==================
+CM_PatchCollideFromTriangleSoup
+
+Core worker: turns a triangle list into facets, borders, bevels, then copies
+planes/facets into the provided patchCollide_t using Hunk_Alloc.
+==================
+*/
+static void CM_PatchCollideFromTriangleSoup( int numTriangles, vec3_t *vertexes, int *indexes, patchCollide_t *pf ) {
+	int		i;
+	float	*p1, *p2, *p3;
+	facet_t	*facet;
+
+	numPlanes = 0;
+	numFacets = 0;
+
+	// create the borders for each triangle
+	for ( i = 0 ; i < numTriangles ; i++ ) {
+		int		trianglePlane;
+
+		p1 = vertexes[indexes[i * 3 + 0]];
+		p2 = vertexes[indexes[i * 3 + 1]];
+		p3 = vertexes[indexes[i * 3 + 2]];
+
+		trianglePlane = CM_FindPlane( p1, p2, p3 );
+		if ( trianglePlane == -1 ) {
+			// degenerate triangle, skip
+			continue;
+		}
+
+		if ( numFacets == MAX_FACETS ) {
+			Com_Error( ERR_DROP, "MAX_FACETS" );
+		}
+		facet = &facets[numFacets];
+		Com_Memset( facet, 0, sizeof( *facet ) );
+
+		facet->surfacePlane = trianglePlane;
+		facet->numBorders = 3;
+
+		facet->borderNoAdjust[0] = qfalse;
+		facet->borderNoAdjust[1] = qfalse;
+		facet->borderNoAdjust[2] = qfalse;
+
+		facet->borderPlanes[0] = CM_GenerateBoundaryForPoints( facet->surfacePlane, p1, p2 );
+		facet->borderPlanes[1] = CM_GenerateBoundaryForPoints( facet->surfacePlane, p2, p3 );
+		facet->borderPlanes[2] = CM_GenerateBoundaryForPoints( facet->surfacePlane, p3, p1 );
+
+		CM_SetTriangleSoupBorderInward( facet, p1, p2, p3 );
+
+		if ( CM_ValidateFacet( facet ) ) {
+			CM_AddFacetBevels( facet );
+			numFacets++;
+		}
+	}
+
+	// copy the results out
+	pf->numPlanes = numPlanes;
+	pf->numFacets = numFacets;
+	pf->facets = Hunk_Alloc( numFacets * sizeof( *pf->facets ), h_high );
+	Com_Memcpy( pf->facets, facets, numFacets * sizeof( *pf->facets ) );
+	pf->planes = Hunk_Alloc( numPlanes * sizeof( *pf->planes ), h_high );
+	Com_Memcpy( pf->planes, planes, numPlanes * sizeof( *pf->planes ) );
+}
+
+/*
+===================
+CM_GenerateTriangleSoupCollide
+
+Creates an internal structure that will be used to perform collision detection
+against an arbitrary triangle mesh. Each triangle is turned into a single
+facet with three edge borders plus bevels, and the resulting patchCollide_t
+is allocated from the high hunk.
+
+Intended for dynamic meshes (e.g. IQM models) that are registered at runtime
+but still need full sv_world / cm_trace collision support. The returned
+pointer is compatible with CM_TraceThroughPatchCollide and
+CM_PositionTestInPatchCollide.
+===================
+*/
+struct patchCollide_s *CM_GenerateTriangleSoupCollide( int numVertexes, vec3_t *vertexes,
+	int numIndexes, int *indexes ) {
+	patchCollide_t	*pf;
+	int				numTriangles;
+	int				i, j;
+
+	if ( numVertexes <= 2 || !vertexes || numIndexes <= 2 || !indexes ) {
+		Com_Error( ERR_DROP, "CM_GenerateTriangleSoupCollide: bad parameters: (%i, %p, %i, %p)",
+			numVertexes, (void *)vertexes, numIndexes, (void *)indexes );
+	}
+
+	if ( numIndexes % 3 != 0 ) {
+		Com_Error( ERR_DROP, "CM_GenerateTriangleSoupCollide: numIndexes %i not a multiple of 3",
+			numIndexes );
+	}
+
+	if ( numIndexes > SHADER_MAX_INDEXES ) {
+		Com_Error( ERR_DROP, "CM_GenerateTriangleSoupCollide: source is > SHADER_MAX_INDEXES" );
+	}
+
+	numTriangles = numIndexes / 3;
+
+	// validate indices
+	for ( i = 0 ; i < numIndexes ; i++ ) {
+		if ( indexes[i] < 0 || indexes[i] >= numVertexes ) {
+			Com_Error( ERR_DROP, "CM_GenerateTriangleSoupCollide: index %i out of range [0,%i)",
+				indexes[i], numVertexes );
+		}
+	}
+
+	pf = Hunk_Alloc( sizeof( *pf ), h_high );
+	ClearBounds( pf->bounds[0], pf->bounds[1] );
+	for ( i = 0 ; i < numTriangles ; i++ ) {
+		for ( j = 0 ; j < 3 ; j++ ) {
+			AddPointToBounds( vertexes[indexes[i * 3 + j]], pf->bounds[0], pf->bounds[1] );
+		}
+	}
+
+	// generate facets and bevels for every triangle
+	CM_PatchCollideFromTriangleSoup( numTriangles, vertexes, indexes, pf );
+
+	// expand by one unit for epsilon purposes
+	pf->bounds[0][0] -= 1;
+	pf->bounds[0][1] -= 1;
+	pf->bounds[0][2] -= 1;
+
+	pf->bounds[1][0] += 1;
+	pf->bounds[1][1] += 1;
+	pf->bounds[1][2] += 1;
+
+	return pf;
+}
+
+
+/*
+===================
+CM_TriangleSoupCollideSelfTest
+
+Developer-mode sanity check for CM_GenerateTriangleSoupCollide. Builds a
+regular tetrahedron (4 verts, 4 triangles) and verifies the resulting
+patchCollide_t has the expected facet count and a non-degenerate bounding
+box. Intended to be called from CM_LoadMap under com_developer.
+
+Also exercises CM_RegisterTriangleSoup to confirm the runtime registration
+path (used by IQM models via CM_LoadIQMGeometry) can allocate a handle,
+populate bounds, and dispatch through CM_BoxTrace.
+
+Prints one line of diagnostic output on success; Com_Error on failure.
+===================
+*/
+void CM_TriangleSoupCollideSelfTest( void ) {
+	vec3_t			verts[4] = {
+		{ 0.0f,  0.0f,  0.0f},
+		{16.0f,  0.0f,  0.0f},
+		{ 8.0f, 16.0f,  0.0f},
+		{ 8.0f,  8.0f, 16.0f}
+	};
+	int				tris[12] = {
+		0, 2, 1,	// bottom
+		0, 1, 3,	// front
+		1, 2, 3,	// right
+		2, 0, 3		// left
+	};
+	patchCollide_t	*pc;
+	clipHandle_t	handle;
+	trace_t			trace;
+	vec3_t			traceStart = {  8.0f,  8.0f, 64.0f };
+	vec3_t			traceEnd   = {  8.0f,  8.0f, -8.0f };
+	vec3_t			mins = { 0, 0, 0 };
+	vec3_t			maxs = { 0, 0, 0 };
+	vec3_t			soupMins, soupMaxs;
+
+	pc = CM_GenerateTriangleSoupCollide( 4, verts, 12, tris );
+	if ( !pc ) {
+		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: returned NULL" );
+	}
+	if ( pc->numFacets != 4 ) {
+		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: expected 4 facets, got %i",
+			pc->numFacets );
+	}
+	if ( pc->numPlanes < 4 ) {
+		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: expected >=4 planes, got %i",
+			pc->numPlanes );
+	}
+	if ( pc->bounds[0][0] >= pc->bounds[1][0]
+		|| pc->bounds[0][1] >= pc->bounds[1][1]
+		|| pc->bounds[0][2] >= pc->bounds[1][2] ) {
+		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: degenerate bounds" );
+	}
+
+	// Exercise the full runtime registration + dispatch path. This
+	// mirrors what CM_LoadIQMGeometry does for an IQM model loaded at
+	// runtime, confirming that CM_BoxTrace can reach a tri-soup handle
+	// and return meaningful collision data.
+	handle = CM_RegisterTriangleSoup( "<selftest>", (const vec3_t *)verts, 4, tris, 12 );
+	if ( handle == 0 ) {
+		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: CM_RegisterTriangleSoup failed" );
+	}
+
+	CM_ModelBounds( handle, soupMins, soupMaxs );
+	if ( soupMins[0] >= soupMaxs[0] || soupMins[1] >= soupMaxs[1] || soupMins[2] >= soupMaxs[2] ) {
+		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: degenerate tri-soup bounds" );
+	}
+
+	// Trace a point straight down through the tetrahedron's apex.
+	CM_BoxTrace( &trace, traceStart, traceEnd, mins, maxs, handle, CONTENTS_SOLID, qfalse );
+	if ( trace.fraction >= 1.0f ) {
+		Com_DPrintf( "CM_TriangleSoupCollideSelfTest: warning — downward trace missed tetrahedron\n" );
+	}
+
+	Com_DPrintf( "CM_TriangleSoupCollideSelfTest: ok (facets=%i planes=%i bounds=[%.1f %.1f %.1f]-[%.1f %.1f %.1f] handle=%i trace=%.3f)\n",
+		pc->numFacets, pc->numPlanes,
+		pc->bounds[0][0], pc->bounds[0][1], pc->bounds[0][2],
+		pc->bounds[1][0], pc->bounds[1][1], pc->bounds[1][2],
+		handle, trace.fraction );
+}

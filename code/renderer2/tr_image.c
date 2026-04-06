@@ -2843,9 +2843,19 @@ void R_SetColorMappings( void ) {
 	int		i, j;
 	float	g;
 	int		inf;
+	float	brightness;
 
-	// setup the overbright lighting
-	tr.overbrightBits = r_overBrightBits->integer;
+	// Float-based brightness (CNQ3-style rework).
+	// When r_brightness != 0 we convert log2(brightness) into overbright-bits.
+	if ( r_brightness != NULL && r_brightness->value > 0.0f ) {
+		brightness = r_brightness->value;
+		if ( brightness < 0.25f ) brightness = 0.25f;
+		if ( brightness > 32.0f ) brightness = 32.0f;
+		tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
+	} else {
+		// setup the overbright lighting
+		tr.overbrightBits = r_overBrightBits->integer;
+	}
 
 	// allow 2 overbright bits
 	if ( tr.overbrightBits > 2 ) {
@@ -2855,8 +2865,17 @@ void R_SetColorMappings( void ) {
 	}
 
 	// don't allow more overbright bits than map overbright bits
-	if ( tr.overbrightBits > r_mapOverBrightBits->integer ) {
-		tr.overbrightBits = r_mapOverBrightBits->integer;
+	{
+		int mapShift = r_mapOverBrightBits->integer;
+		if ( r_mapBrightness != NULL && r_mapBrightness->value > 0.0f ) {
+			float mb = r_mapBrightness->value;
+			if ( mb < 0.25f ) mb = 0.25f;
+			if ( mb > 32.0f ) mb = 32.0f;
+			mapShift = (int)( logf( mb ) / logf( 2.0f ) + 0.5f );
+		}
+		if ( tr.overbrightBits > mapShift ) {
+			tr.overbrightBits = mapShift;
+		}
 	}
 
 	tr.identityLight = 1.0f / ( 1 << tr.overbrightBits );

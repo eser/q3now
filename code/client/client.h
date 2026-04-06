@@ -326,8 +326,6 @@ typedef struct {
 	char		updateChallenge[MAX_TOKEN_CHARS];
 	char		updateInfoString[MAX_INFO_STRING];
 
-	netadr_t	authorizeServer;
-
 	// rendering info
 	glconfig_t	glconfig;
 	qhandle_t	charSetShader;
@@ -535,6 +533,12 @@ void Con_SearchNext( qboolean forward );
 void Con_SearchChar( int ch );
 qboolean Con_IsSearchActive( void );
 int  Con_SearchLine( void );
+
+// console mark mode (Ctrl+M text selection)
+void Con_MarkOpen( void );
+void Con_MarkClose( void );
+qboolean Con_IsMarkActive( void );
+qboolean Con_MarkKey( int key, qboolean ctrlDown, qboolean shiftDown );
 
 void CL_LoadConsoleHistory( void );
 void CL_SaveConsoleHistory( void );

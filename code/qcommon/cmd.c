@@ -33,6 +33,7 @@ typedef struct {
 } cmd_t;
 
 static int   cmd_wait;
+static int   cmd_waitms_until;	/* absolute Sys_Milliseconds() deadline for /waitms */
 static cmd_t cmd_text;
 static byte  cmd_text_buf[MAX_CMD_BUFFER];
 
@@ -56,6 +57,35 @@ static void Cmd_Wait_f( void ) {
 	} else {
 		cmd_wait = 1;
 	}
+}
+
+
+/*
+============
+Cmd_WaitMs_f
+
+Causes execution of the remainder of the command buffer to be delayed
+by a wall-clock interval in milliseconds.  This is independent of the
+frame-based /wait command and works well with variable framerates.
+
+Usage: waitms <milliseconds>
+============
+*/
+static void Cmd_WaitMs_f( void ) {
+	int duration;
+
+	if ( Cmd_Argc() != 2 ) {
+		Com_Printf( "usage: waitms <milliseconds>\n" );
+		return;
+	}
+
+	duration = atoi( Cmd_Argv( 1 ) );
+	if ( duration <= 0 ) {
+		Com_Printf( "waitms: invalid duration\n" );
+		return;
+	}
+
+	cmd_waitms_until = Sys_Milliseconds() + duration;
 }
 
 
@@ -226,6 +256,7 @@ void Cbuf_ExecuteText( cbufExec_t exec_when, const char *text )
 	{
 	case EXEC_NOW:
 		cmd_wait = 0; // discard any pending waiting
+		cmd_waitms_until = 0;
 		if ( text && text[0] != '\0' ) {
 			Com_DPrintf(S_COLOR_YELLOW "EXEC_NOW %s\n", text);
 			Cmd_ExecuteString( text );
@@ -248,6 +279,27 @@ void Cbuf_ExecuteText( cbufExec_t exec_when, const char *text )
 
 /*
 ============
+Cbuf_ExecuteTextSafe
+
+Wraps Cbuf_ExecuteText but converts dangerous commands from
+EXEC_NOW to EXEC_INSERT when called from VM trap handlers.
+============
+*/
+void Cbuf_ExecuteTextSafe( cbufExec_t exec_when, const char *text )
+{
+	if ( exec_when == EXEC_NOW ) {
+		if ( !Q_stricmpn( text, "snd_restart", 11 ) ||
+			 !Q_stricmpn( text, "vid_restart", 11 ) ||
+			 !Q_stricmpn( text, "quit", 4 ) ) {
+			exec_when = EXEC_INSERT;
+		}
+	}
+	Cbuf_ExecuteText( exec_when, text );
+}
+
+
+/*
+============
 Cbuf_Execute
 ============
 */
@@ -261,6 +313,13 @@ void Cbuf_Execute( void )
 	if ( cmd_wait > 0 ) {
 		// delay command buffer execution
 		return;
+	}
+
+	if ( cmd_waitms_until > 0 ) {
+		if ( cmd_waitms_until > Sys_Milliseconds() ) {
+			return;
+		}
+		cmd_waitms_until = 0;
 	}
 
 	// This will keep // style comments all on one line by not breaking on
@@ -440,6 +499,77 @@ static void Cmd_Vstr_f( void ) {
 
 /*
 ===============
+Cmd_VstrDown_f / Cmd_VstrUp_f
+
+Paired button-style vstr. Use as `bind k "+vstr pressCvar releaseCvar"`.
+
+Tracks which keys have actually triggered the press action so that the
+release action is only executed if the matching press actually fired.
+This prevents the release cvar from running when the press was blocked
+(e.g. fired while the console or menu was up) or when the release
+arrived without a matching press (e.g. alt-tab focus loss).
+===============
+*/
+#define MAX_VSTR_KEYS 256
+static qboolean vstrKeyPressed[ MAX_VSTR_KEYS ];
+
+static void Cmd_VstrDown_f( void ) {
+	int key;
+	const char *v;
+
+	if ( Cmd_Argc() < 3 ) {
+		Com_Printf( "+vstr <press cvar> <release cvar> : press/release variable commands\n" );
+		return;
+	}
+
+	// When invoked from a key binding, the key number is appended as an
+	// extra argument by Key_ParseBinding (e.g. "+vstr a b 32 1234").
+	// When invoked manually from the console there is no keynum, so we
+	// use a sentinel slot (0) that is always considered "pressed".
+	key = 0;
+	if ( Cmd_Argc() >= 4 ) {
+		key = atoi( Cmd_Argv( 3 ) );
+		if ( key < 0 || key >= MAX_VSTR_KEYS ) {
+			key = 0;
+		}
+	}
+
+	vstrKeyPressed[ key ] = qtrue;
+
+	v = Cvar_VariableString( Cmd_Argv( 1 ) );
+	Cbuf_InsertText( v );
+}
+
+static void Cmd_VstrUp_f( void ) {
+	int key;
+	const char *v;
+
+	if ( Cmd_Argc() < 3 ) {
+		Com_Printf( "-vstr <press cvar> <release cvar> : press/release variable commands\n" );
+		return;
+	}
+
+	key = 0;
+	if ( Cmd_Argc() >= 4 ) {
+		key = atoi( Cmd_Argv( 3 ) );
+		if ( key < 0 || key >= MAX_VSTR_KEYS ) {
+			key = 0;
+		}
+	}
+
+	// Only run the release cvar if the matching press actually fired.
+	if ( !vstrKeyPressed[ key ] ) {
+		return;
+	}
+	vstrKeyPressed[ key ] = qfalse;
+
+	v = Cvar_VariableString( Cmd_Argv( 2 ) );
+	Cbuf_InsertText( v );
+}
+
+
+/*
+===============
 Cmd_Echo_f
 
 Just prints the rest of the line to the console
@@ -465,6 +595,7 @@ typedef struct cmd_function_s
 	char					*name;
 	xcommand_t				function;
 	completionFunc_t	complete;
+	qboolean				cgame;	// registered by cgame via CG_ADDCOMMAND?
 } cmd_function_t;
 
 
@@ -474,6 +605,35 @@ static	char		cmd_tokenized[BIG_INFO_STRING+MAX_STRING_TOKENS];	// will have 0 by
 static	char		cmd_cmd[BIG_INFO_STRING]; // the original command we received (no token processing)
 
 static	cmd_function_t	*cmd_functions;		// possible commands to execute
+
+/*
+============
+Command context save/restore — allows nested command execution
+without clobbering the current tokenization state.
+============
+*/
+typedef struct {
+	int		argc;
+	char	*argv[MAX_STRING_TOKENS];
+	char	tokenized[BIG_INFO_STRING + MAX_STRING_TOKENS];
+	char	cmd[BIG_INFO_STRING];
+} cmdContext_t;
+
+static cmdContext_t savedCmd;
+
+void Cmd_SaveCmdContext( void ) {
+	savedCmd.argc = cmd_argc;
+	Com_Memcpy( savedCmd.argv, cmd_argv, sizeof( cmd_argv ) );
+	Com_Memcpy( savedCmd.tokenized, cmd_tokenized, sizeof( cmd_tokenized ) );
+	Com_Memcpy( savedCmd.cmd, cmd_cmd, sizeof( cmd_cmd ) );
+}
+
+void Cmd_RestoreCmdContext( void ) {
+	cmd_argc = savedCmd.argc;
+	Com_Memcpy( cmd_argv, savedCmd.argv, sizeof( cmd_argv ) );
+	Com_Memcpy( cmd_tokenized, savedCmd.tokenized, sizeof( cmd_tokenized ) );
+	Com_Memcpy( cmd_cmd, savedCmd.cmd, sizeof( cmd_cmd ) );
+}
 
 /*
 ============
@@ -759,7 +919,7 @@ static cmd_function_t *Cmd_FindCommand( const char *cmd_name )
 Cmd_AddCommand
 ============
 */
-void Cmd_AddCommand( const char *cmd_name, xcommand_t function ) {
+static void Cmd_AddCommandInternal( const char *cmd_name, xcommand_t function, qboolean cgame ) {
 	cmd_function_t *cmd;
 
 	// fail if the command already exists
@@ -776,8 +936,17 @@ void Cmd_AddCommand( const char *cmd_name, xcommand_t function ) {
 	cmd->name = CopyString( cmd_name );
 	cmd->function = function;
 	cmd->complete = NULL;
+	cmd->cgame = cgame;
 	cmd->next = cmd_functions;
 	cmd_functions = cmd;
+}
+
+void Cmd_AddCommand( const char *cmd_name, xcommand_t function ) {
+	Cmd_AddCommandInternal( cmd_name, function, qfalse );
+}
+
+void Cmd_AddCgameCommand( const char *cmd_name ) {
+	Cmd_AddCommandInternal( cmd_name, NULL, qtrue );
 }
 
 
@@ -795,6 +964,28 @@ void Cmd_SetCommandCompletionFunc( const char *command, completionFunc_t complet
 			return;
 		}
 	}
+}
+
+
+/*
+============
+Cmd_GetCommandCompletionFunc
+
+Returns the completion callback previously registered for this command, or
+NULL if none was registered.  Used by the tab-completion handler so it can
+query a command's completion function without triggering it.
+============
+*/
+completionFunc_t Cmd_GetCommandCompletionFunc( const char *command ) {
+	const cmd_function_t *cmd;
+
+	for ( cmd = cmd_functions; cmd; cmd = cmd->next ) {
+		if ( !Q_stricmp( command, cmd->name ) ) {
+			return cmd->complete;
+		}
+	}
+
+	return NULL;
 }
 
 
@@ -859,19 +1050,23 @@ Remove cgame-created commands
 */
 void Cmd_RemoveCgameCommands( void )
 {
-	const cmd_function_t *cmd;
-	qboolean removed;
+	cmd_function_t **back = &cmd_functions;
 
-	do {
-		removed = qfalse;
-		for ( cmd = cmd_functions ; cmd ; cmd = cmd->next ) {
-			if ( cmd->function == NULL ) {
-				Cmd_RemoveCommand( cmd->name );
-				removed = qtrue;
-				break;
-			}
+	for ( ;; ) {
+		cmd_function_t *cmd = *back;
+		if ( cmd == NULL ) {
+			return;
 		}
-	} while ( removed );
+		if ( !cmd->cgame ) {
+			back = &cmd->next;
+			continue;
+		}
+		*back = cmd->next;
+		if ( cmd->name ) {
+			Z_Free( cmd->name );
+		}
+		Z_Free( cmd );
+	}
 }
 
 
@@ -885,6 +1080,46 @@ void Cmd_CommandCompletion( void(*callback)(const char *s) ) {
 
 	for ( cmd = cmd_functions ; cmd ; cmd=cmd->next ) {
 		callback( cmd->name );
+	}
+}
+
+
+/*
+============
+Cmd_Exists
+
+Returns qtrue when a command with the given name is registered.  Used by
+the help system to distinguish between cvars and commands.
+============
+*/
+qboolean Cmd_Exists( const char *cmd_name )
+{
+	if ( cmd_name == NULL || cmd_name[0] == '\0' )
+		return qfalse;
+
+	return Cmd_FindCommand( cmd_name ) != NULL ? qtrue : qfalse;
+}
+
+
+/*
+============
+Cmd_ForEachName
+
+Iterates every registered command and invokes callback with its name.
+Used by the searchhelp command to enumerate every command.
+============
+*/
+void Cmd_ForEachName( void (*callback)( const char *cmd_name, void *userdata ), void *userdata )
+{
+	const cmd_function_t *cmd;
+
+	if ( callback == NULL )
+		return;
+
+	for ( cmd = cmd_functions ; cmd ; cmd = cmd->next ) {
+		if ( cmd->name ) {
+			callback( cmd->name, userdata );
+		}
 	}
 }
 
@@ -1042,6 +1277,9 @@ void Cmd_Init( void ) {
 	Cmd_SetCommandCompletionFunc( "execq", Cmd_CompleteCfgName );
 	Cmd_AddCommand ("vstr",Cmd_Vstr_f);
 	Cmd_SetCommandCompletionFunc( "vstr", Cvar_CompleteCvarName );
+	Cmd_AddCommand ("+vstr", Cmd_VstrDown_f);
+	Cmd_AddCommand ("-vstr", Cmd_VstrUp_f);
 	Cmd_AddCommand ("echo",Cmd_Echo_f);
 	Cmd_AddCommand ("wait", Cmd_Wait_f);
+	Cmd_AddCommand ("waitms", Cmd_WaitMs_f);
 }

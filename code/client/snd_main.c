@@ -32,6 +32,10 @@ cvar_t *s_doppler;
 cvar_t *s_muteWhenMinimized;
 cvar_t *s_muteWhenUnfocused;
 
+/* CNQ3 backport: s_autoMute bitmask */
+cvar_t *s_autoMute;
+qboolean s_autoMute_OverrideMute = qfalse;
+
 static soundInterface_t si;
 
 /*
@@ -58,6 +62,7 @@ static qboolean S_ValidSoundInterface( const soundInterface_t *s )
 	if( !s->DisableSounds ) return qfalse;
 	if( !s->BeginRegistration ) return qfalse;
 	if( !s->RegisterSound ) return qfalse;
+	if( !s->SoundDuration ) return qfalse;
 	if( !s->ClearSoundBuffer ) return qfalse;
 	if( !s->SoundInfo ) return qfalse;
 	if( !s->SoundList ) return qfalse;
@@ -241,6 +246,22 @@ void S_Update( int msec )
 
 /*
 =================
+S_SetMuteOverride
+
+Temporarily override the auto-mute decision (used by the match-alert
+bit 8 to make the alert audible while the window is unfocused).  When
+called with qfalse the override is cleared and normal s_autoMute rules
+apply again.
+=================
+*/
+void S_SetMuteOverride( qboolean enabled )
+{
+	s_autoMute_OverrideMute = enabled ? qtrue : qfalse;
+}
+
+
+/*
+=================
 S_DisableSounds
 =================
 */
@@ -282,6 +303,23 @@ sfxHandle_t	S_RegisterSound( const char *sample, qboolean compressed )
 	} else {
 		return 0;
 	}
+}
+
+
+/*
+=================
+S_SoundDuration
+
+Phase 6.2: returns the duration of a registered sound in milliseconds.
+Returns 0 if the handle is invalid or the sound system is not running.
+=================
+*/
+int S_SoundDuration( sfxHandle_t handle )
+{
+	if ( si.SoundDuration ) {
+		return si.SoundDuration( handle );
+	}
+	return 0;
 }
 
 
@@ -425,6 +463,15 @@ void S_Init( void )
 	s_muteWhenMinimized = Cvar_Get( "s_muteWhenMinimized", "1", CVAR_ARCHIVE );
 	Cvar_CheckRange( s_muteWhenMinimized, "0", "1", CV_INTEGER );
 	Cvar_SetDescription( s_muteWhenMinimized, "Mutes all audio while game is minimized." );
+
+	s_autoMute = Cvar_Get( "s_autoMute", "1", CVAR_ARCHIVE );
+	Cvar_CheckRange( s_autoMute, "0", "3", CV_INTEGER );
+	Cvar_SetDescription( s_autoMute,
+		"Auto-mute bitmask (overrides s_muteWhenUnfocused/s_muteWhenMinimized):\n"
+		"  0 = never mute\n"
+		"  1 = mute when window is unfocused\n"
+		"  2 = mute when window is minimized\n"
+		"  3 = mute in both cases" );
 
 	cv = Cvar_Get( "s_initsound", "1", 0 );
 	Cvar_SetDescription( cv, "Whether or not to startup the sound system." );

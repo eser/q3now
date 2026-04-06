@@ -330,6 +330,10 @@ Field_CharEvent
 static void Field_CharEvent( field_t *edit, int ch ) {
 	int		len;
 
+	/* CNQ3 backport Phase 6: any character event ends a cycling-completion
+	 * sequence so the next Tab starts a fresh match list. */
+	Field_ResetCompletionCycle( edit );
+
 	if ( ch == 'v' - 'a' + 1 ) {	// ctrl-v is paste
 		Field_Paste( edit );
 		return;
@@ -418,6 +422,17 @@ Handles history and console scrollback
 ====================
 */
 static void Console_Key( int key ) {
+	// ctrl-M toggles mark (selection) mode.  When active, the mark
+	// handler consumes navigation keys; it also swallows everything else
+	// except Ctrl+M / Esc / Ctrl+C / Enter to prevent accidental command
+	// execution while selecting.
+	if ( Con_IsMarkActive() ||
+	     ( keys[K_CTRL].down && tolower( key ) == 'm' ) ) {
+		if ( Con_MarkKey( tolower( key ), keys[K_CTRL].down, keys[K_SHIFT].down ) ) {
+			return;
+		}
+	}
+
 	// ctrl-F opens search
 	if ( tolower(key) == 'f' && keys[K_CTRL].down ) {
 		if ( Con_IsSearchActive() )
@@ -520,6 +535,10 @@ static void Console_Key( int key ) {
 		Field_AutoComplete(&g_consoleField);
 		return;
 	}
+
+	/* CNQ3 backport Phase 6: any non-Tab key ends a cycling-completion
+	 * sequence so the next Tab starts a fresh match list. */
+	Field_ResetCompletionCycle( &g_consoleField );
 
 	// command history (ctrl-p ctrl-n for unix style)
 

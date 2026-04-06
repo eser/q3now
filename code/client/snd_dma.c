@@ -56,6 +56,10 @@ byte			*dma_buffer2;
 
 #define		SOUND_ATTENUATE		0.0008f
 
+// CNQ3 linear fall-off: sounds fade linearly from full volume at 0 to
+// silence at SOUND_MAX_DIST. Enabled when s_linearFalloff is non-zero.
+#define		SOUND_MAX_DIST		1250.0f
+
 #define		MASTER_VOL			127
 #define		SPHERE_VOL			90
 
@@ -89,6 +93,7 @@ cvar_t		*s_khz;
 cvar_t		*s_show;
 static cvar_t *s_mixahead;
 static cvar_t *s_mixOffset;
+static cvar_t *s_linearFalloff;
 #if defined(__linux__) && !defined(USE_SDL)
 cvar_t		*s_device;
 #endif
@@ -352,6 +357,23 @@ static sfxHandle_t S_Base_RegisterSound( const char *name, qboolean compressed )
 
 
 /*
+==================
+S_Base_SoundDuration
+
+Phase 6.2: returns the cached duration of a sfx in milliseconds, or 0 if the
+handle is out of range / not loaded. The duration field is populated in
+S_LoadSound when the sound first hits memory.
+==================
+*/
+static int S_Base_SoundDuration( sfxHandle_t handle ) {
+	if ( handle < 0 || handle >= s_numSfx ) {
+		return 0;
+	}
+	return s_knownSfx[ handle ].duration;
+}
+
+
+/*
 =====================
 S_BeginRegistration
 =====================
@@ -398,18 +420,75 @@ static void S_SpatializeOrigin( const vec3_t origin, int master_vol, int *left_v
 	vec_t	lscale, rscale, scale;
 	vec3_t	source_vec;
 	vec3_t	vec;
+	qboolean linearFalloff;
 
-	const float dist_mult = SOUND_ATTENUATE;
-	
+	linearFalloff = ( s_linearFalloff != NULL && s_linearFalloff->integer != 0 ) ? qtrue : qfalse;
+
 	// calculate stereo separation and distance attenuation
 	VectorSubtract(origin, listener_origin, source_vec);
 
 	dist = VectorNormalize(source_vec);
-	dist -= SOUND_FULLVOLUME;
-	if (dist < 0)
-		dist = 0;			// close enough to be at full volume
-	dist *= dist_mult;		// different attenuation levels
-	
+
+	if ( linearFalloff ) {
+		// CNQ3 linear fall-off: culls completely beyond SOUND_MAX_DIST,
+		// then scales master_vol linearly with normalized distance.
+		if ( dist >= SOUND_MAX_DIST ) {
+			*left_vol = 0;
+			*right_vol = 0;
+			return;
+		}
+
+		{
+			float dist_normalized = dist * ( 1.0f / SOUND_MAX_DIST );
+			if ( dist_normalized > 1.0f ) {
+				dist_normalized = 1.0f;
+			}
+			scale = (float)master_vol * ( 1.0f - dist_normalized );
+		}
+
+		// attenuate correctly even if we can't spatialise
+		if ( dma.channels == 1 ) {
+			if ( scale < 0.0f ) {
+				scale = 0.0f;
+			}
+			*left_vol = *right_vol = (int)scale;
+			return;
+		}
+
+		VectorRotate( source_vec, listener_axis, vec );
+		dot = -vec[1];
+
+		rscale = 0.5f * ( 1.0f + dot );
+		lscale = 0.5f * ( 1.0f - dot );
+		if ( rscale < 0.0f ) {
+			rscale = 0.0f;
+		}
+		if ( lscale < 0.0f ) {
+			lscale = 0.0f;
+		}
+
+		*right_vol = (int)( scale * rscale );
+		if ( *right_vol < 0 ) {
+			*right_vol = 0;
+		}
+
+		*left_vol = (int)( scale * lscale );
+		if ( *left_vol < 0 ) {
+			*left_vol = 0;
+		}
+		return;
+	}
+
+	// --- Original Q3 power-like fall-off (s_linearFalloff 0) ---
+	{
+		const float dist_mult = SOUND_ATTENUATE;
+
+		dist -= SOUND_FULLVOLUME;
+		if (dist < 0)
+			dist = 0;			// close enough to be at full volume
+		dist *= dist_mult;		// different attenuation levels
+	}
+
 	VectorRotate( source_vec, listener_axis, vec );
 
 	dot = -vec[1];
@@ -1524,6 +1603,13 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 	s_mixOffset = Cvar_Get( "s_mixOffset", "0", CVAR_ARCHIVE_ND | CVAR_DEVELOPER );
 	Cvar_CheckRange( s_mixOffset, "0", "0.5", CV_FLOAT );
 
+	s_linearFalloff = Cvar_Get( "s_linearFalloff", "1", CVAR_ARCHIVE_ND );
+	Cvar_CheckRange( s_linearFalloff, "0", "1", CV_INTEGER );
+	Cvar_SetDescription( s_linearFalloff,
+		"Distance-based sound attenuation model (CNQ3 port).\n"
+		" 0: classic Q3 falloff (full volume within SOUND_FULLVOLUME, then exponential decay)\n"
+		" 1: linear falloff from listener to SOUND_MAX_DIST (default)" );
+
 	s_show = Cvar_Get( "s_show", "0", CVAR_CHEAT );
 	Cvar_SetDescription( s_show, "Debugging output (used sound files)." );
 	s_testsound = Cvar_Get( "s_testsound", "0", CVAR_CHEAT );
@@ -1580,6 +1666,7 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 	si->DisableSounds = S_Base_DisableSounds;
 	si->BeginRegistration = S_Base_BeginRegistration;
 	si->RegisterSound = S_Base_RegisterSound;
+	si->SoundDuration = S_Base_SoundDuration;
 	si->ClearSoundBuffer = S_Base_ClearSoundBuffer;
 	si->SoundInfo = S_Base_SoundInfo;
 	si->SoundList = S_Base_SoundList;

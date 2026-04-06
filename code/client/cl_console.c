@@ -122,6 +122,16 @@ typedef struct {
 	int			searchLine;			// line index of current match (-1 = none)
 	int			searchMatchCount;	// total matches found
 
+	// mark (selection) mode state — Ctrl+M copies selected region
+	// Lines are absolute line indices into the scrollback buffer, same
+	// convention as con.current / con.display.  Columns are 0-based into
+	// the fixed-width con.text grid.
+	qboolean	markActive;
+	int			markStartLine;
+	int			markStartCol;
+	int			markEndLine;
+	int			markEndCol;
+
 } console_t;
 
 extern  qboolean    chat_team;
@@ -129,6 +139,11 @@ extern  int         chat_playerNum;
 
 // forward declarations
 void Con_SearchClose( void );
+void Con_MarkOpen( void );
+void Con_MarkClose( void );
+qboolean Con_IsMarkActive( void );
+qboolean Con_MarkKey( int key, qboolean ctrlDown, qboolean shiftDown );
+qboolean Con_MarkCellIsSelected( int row, int col );
 
 console_t	con;
 
@@ -136,6 +151,31 @@ cvar_t		*con_conspeed;
 cvar_t		*con_autoclear;
 cvar_t		*con_notifytime;
 cvar_t		*con_scale;
+
+/* CNQ3 backport: per-element console colors.  Each cvar stores a hex
+   string in the form "RRGGBB" or "RRGGBBAA"; we parse them lazily every
+   frame (string comparison guards against rebuilding the vec4 when the
+   value has not changed). */
+cvar_t		*con_colBG;
+cvar_t		*con_colBorder;
+cvar_t		*con_colText;
+cvar_t		*con_colCVar;
+cvar_t		*con_colCmd;
+cvar_t		*con_colValue;
+
+static vec4_t con_bgColor     = { 0.063f, 0.074f, 0.074f, 0.965f };
+static vec4_t con_borderColor = { 0.278f, 0.470f, 0.698f, 1.0f };
+static vec4_t con_textColor   = { 0.886f, 0.886f, 0.886f, 1.0f };
+static vec4_t con_cvarColor   = { 0.278f, 0.470f, 0.698f, 1.0f };
+static vec4_t con_cmdColor    = { 0.309f, 0.654f, 0.741f, 1.0f };
+static vec4_t con_valueColor  = { 0.898f, 0.737f, 0.223f, 1.0f };
+
+static char con_bgString[16]     = "";
+static char con_borderString[16] = "";
+static char con_textString[16]   = "";
+static char con_cvarString[16]   = "";
+static char con_cmdString[16]    = "";
+static char con_valueString[16]  = "";
 
 int			g_console_field_width;
 
@@ -458,10 +498,142 @@ static void Cmd_CompleteTxtName(const char *args, int argNum ) {
 
 /*
 ================
+Con_HexCharToInt
+
+Returns the 0..15 value of a hex character, or -1 for invalid input.
+================
+*/
+static int Con_HexCharToInt( char c ) {
+	if ( c >= '0' && c <= '9' ) return c - '0';
+	if ( c >= 'a' && c <= 'f' ) return 10 + (c - 'a');
+	if ( c >= 'A' && c <= 'F' ) return 10 + (c - 'A');
+	return -1;
+}
+
+
+/*
+================
+Con_ParseHexColor
+
+Parses a 6- or 8-character hex color string into a vec4.  Returns
+qtrue on success.  Supports "RRGGBB" (alpha = 1) and "RRGGBBAA".
+Whitespace and a leading '#' are tolerated.
+================
+*/
+static qboolean Con_ParseHexColor( const char *str, vec4_t out ) {
+	char buf[16];
+	int i, len;
+	int nyb[8];
+
+	if ( str == NULL || out == NULL )
+		return qfalse;
+
+	/* trim leading whitespace and '#' */
+	while ( *str == ' ' || *str == '\t' )
+		str++;
+	if ( *str == '#' )
+		str++;
+
+	len = 0;
+	while ( str[len] && len < (int)sizeof(buf) - 1 ) {
+		if ( str[len] == ' ' || str[len] == '\t' )
+			break;
+		buf[len] = str[len];
+		len++;
+	}
+	buf[len] = '\0';
+
+	if ( len != 6 && len != 8 )
+		return qfalse;
+
+	for ( i = 0; i < len; i++ ) {
+		nyb[i] = Con_HexCharToInt( buf[i] );
+		if ( nyb[i] < 0 )
+			return qfalse;
+	}
+
+	out[0] = (float)( (nyb[0] << 4) | nyb[1] ) / 255.0f;
+	out[1] = (float)( (nyb[2] << 4) | nyb[3] ) / 255.0f;
+	out[2] = (float)( (nyb[4] << 4) | nyb[5] ) / 255.0f;
+	if ( len == 8 ) {
+		out[3] = (float)( (nyb[6] << 4) | nyb[7] ) / 255.0f;
+	} else {
+		out[3] = 1.0f;
+	}
+	return qtrue;
+}
+
+
+/*
+================
+Con_UpdateColor
+
+Re-parses one cvar into its backing vec4 when the string value changed.
+If the cvar string is empty or invalid, the previous value is kept so
+users can clear a cvar without losing the default color.
+================
+*/
+static void Con_UpdateColor( cvar_t *cv, char *lastString, int lastSize,
+                             vec4_t out, const vec4_t fallback )
+{
+	if ( cv == NULL )
+		return;
+
+	if ( strcmp( cv->string, lastString ) == 0 )
+		return;
+
+	Q_strncpyz( lastString, cv->string, lastSize );
+
+	if ( cv->string[0] == '\0' ) {
+		Vector4Copy( fallback, out );
+		return;
+	}
+
+	if ( !Con_ParseHexColor( cv->string, out ) ) {
+		Com_Printf( S_COLOR_YELLOW "WARNING: invalid hex color in %s: '%s'\n",
+			cv->name, cv->string );
+		Vector4Copy( fallback, out );
+	}
+}
+
+
+/*
+================
+Con_UpdateColors
+
+Refreshes every per-element cvar.  Cheap — short-circuits when the
+cvar string has not changed since last call.
+================
+*/
+static void Con_UpdateColors( void ) {
+	static const vec4_t defBG     = { 0.063f, 0.074f, 0.074f, 0.965f };
+	static const vec4_t defBorder = { 0.278f, 0.470f, 0.698f, 1.0f };
+	static const vec4_t defText   = { 0.886f, 0.886f, 0.886f, 1.0f };
+	static const vec4_t defCVar   = { 0.278f, 0.470f, 0.698f, 1.0f };
+	static const vec4_t defCmd    = { 0.309f, 0.654f, 0.741f, 1.0f };
+	static const vec4_t defValue  = { 0.898f, 0.737f, 0.223f, 1.0f };
+
+	Con_UpdateColor( con_colBG,     con_bgString,     sizeof(con_bgString),
+	                 con_bgColor,     defBG );
+	Con_UpdateColor( con_colBorder, con_borderString, sizeof(con_borderString),
+	                 con_borderColor, defBorder );
+	Con_UpdateColor( con_colText,   con_textString,   sizeof(con_textString),
+	                 con_textColor,   defText );
+	Con_UpdateColor( con_colCVar,   con_cvarString,   sizeof(con_cvarString),
+	                 con_cvarColor,   defCVar );
+	Con_UpdateColor( con_colCmd,    con_cmdString,    sizeof(con_cmdString),
+	                 con_cmdColor,    defCmd );
+	Con_UpdateColor( con_colValue,  con_valueString,  sizeof(con_valueString),
+	                 con_valueColor,  defValue );
+}
+
+
+/*
+================
 Con_Init
 ================
 */
-void Con_Init( void ) 
+void Con_Init( void )
 {
 	con_notifytime = Cvar_Get( "con_notifytime", "3", 0 );
 	Cvar_SetDescription( con_notifytime, "Defines how long messages (from players or the system) are on the screen (in seconds)." );
@@ -472,6 +644,22 @@ void Con_Init( void )
 	con_scale = Cvar_Get( "con_scale", "1", CVAR_ARCHIVE_ND );
 	Cvar_CheckRange( con_scale, "0.5", "8", CV_FLOAT );
 	Cvar_SetDescription( con_scale, "Console font size scale." );
+
+	/* CNQ3 backport: per-element console colors */
+	con_colBG     = Cvar_Get( "con_colBG",     "101013F6", CVAR_ARCHIVE );
+	Cvar_SetDescription( con_colBG, "Console background color (hex RRGGBB or RRGGBBAA)." );
+	con_colBorder = Cvar_Get( "con_colBorder", "4778B2FF", CVAR_ARCHIVE );
+	Cvar_SetDescription( con_colBorder, "Console border color (hex RRGGBB or RRGGBBAA)." );
+	con_colText   = Cvar_Get( "con_colText",   "E2E2E2",   CVAR_ARCHIVE );
+	Cvar_SetDescription( con_colText, "Console text color (hex RRGGBB)." );
+	con_colCVar   = Cvar_Get( "con_colCVar",   "4778B2",   CVAR_ARCHIVE );
+	Cvar_SetDescription( con_colCVar, "Console input color for cvar names (hex RRGGBB)." );
+	con_colCmd    = Cvar_Get( "con_colCmd",    "4FA7BD",   CVAR_ARCHIVE );
+	Cvar_SetDescription( con_colCmd, "Console input color for command names (hex RRGGBB)." );
+	con_colValue  = Cvar_Get( "con_colValue",  "E5BC39",   CVAR_ARCHIVE );
+	Cvar_SetDescription( con_colValue, "Console input color for cvar values (hex RRGGBB)." );
+
+	Con_UpdateColors();
 
 	Field_Clear( &g_consoleField );
 	g_consoleField.widthInChars = g_console_field_width;
@@ -773,6 +961,82 @@ static void Con_DrawInput( void ) {
 		/* Field_Draw still uses bitmap path; position it on the grid */
 		Field_Draw( &g_consoleField, con.xadjust + 2 * cw, y,
 			cls.glconfig.vidWidth - 3 * smallchar_width, qtrue, qtrue );
+
+		/* CNQ3 backport: syntax-highlight the first token on the input
+		   line by drawing a thin colored underline below it.  We also
+		   render a help panel below the input line when the token
+		   resolves to a known cvar or command. */
+		{
+			const char *buf = g_consoleField.buffer;
+			int start = 0;
+			int end = 0;
+			int tokLen;
+			char token[128];
+			int tokenStartCharOffset;
+			qboolean knownCvar = qfalse;
+			qboolean knownCmd = qfalse;
+			const float *highlightColor = NULL;
+			char helpText[MAX_STRING_CHARS];
+
+			/* skip a leading / or \ used for explicit commands */
+			if ( buf[start] == '/' || buf[start] == '\\' )
+				start++;
+
+			/* skip leading whitespace */
+			while ( buf[start] == ' ' || buf[start] == '\t' )
+				start++;
+
+			end = start;
+			while ( buf[end] != '\0' && buf[end] != ' ' && buf[end] != '\t' ) {
+				end++;
+			}
+			tokLen = end - start;
+
+			if ( tokLen > 0 && tokLen < (int)sizeof( token ) ) {
+				int k;
+				for ( k = 0; k < tokLen; k++ )
+					token[k] = buf[start + k];
+				token[tokLen] = '\0';
+
+				knownCvar = Help_IsKnownCvar( token );
+				if ( !knownCvar )
+					knownCmd = Help_IsKnownCommand( token );
+
+				if ( knownCvar )
+					highlightColor = con_cvarColor;
+				else if ( knownCmd )
+					highlightColor = con_cmdColor;
+
+				/* "start" is the char offset after the leading / prefix.
+				   Field_Draw places the first character of the buffer at
+				   (con.xadjust + 2 * cw).  Adjust for the prefix and the
+				   scroll offset (widthInChars). */
+				tokenStartCharOffset = start - g_consoleField.scroll;
+				if ( tokenStartCharOffset >= 0 && highlightColor != NULL ) {
+					float tx = con.xadjust + (2 + tokenStartCharOffset) * cw;
+					float tw = tokLen * cw;
+					float ty = y + smallchar_height - 2;
+					re.SetColor( highlightColor );
+					re.DrawStretchPic( tx, ty, tw, 2, 0, 0, 1, 1, cls.whiteShader );
+					re.SetColor( NULL );
+				}
+			}
+
+			/* draw the help panel one line below the input */
+			if ( tokLen > 0 && Help_LookupText( token, helpText, sizeof( helpText ) ) ) {
+				float hy = (float)( y + smallchar_height + 2 );
+				float hvy = Con_NativeToVirtualY( hy );
+				int hi;
+				int hLen = (int)strlen( helpText );
+				if ( hLen > con.linewidth - 2 )
+					hLen = con.linewidth - 2;
+				for ( hi = 0; hi < hLen; hi++ ) {
+					Text_DrawChar( helpText[hi],
+						vxa + (1 + hi) * vcw, hvy,
+						FONT_MONO, con_textPointSize, con_textColor );
+				}
+			}
+		}
 	}
 }
 
@@ -917,13 +1181,21 @@ static void Con_DrawSolidConsole( float frac ) {
 	// on wide screens, center the text
 	con.xadjust = 0;
 
+	/* CNQ3 backport: refresh per-element color cvars if changed */
+	Con_UpdateColors();
+
 	if ( yf < 1.0 ) {
 		yf = 0;
 	} else {
-		// custom console background color
-		if ( cl_conColor->string[0] ) {
+		/* Prefer the per-element con_colBG when present; fall back to
+		   cl_conColor (legacy 4-integer RGBA form) and finally to the
+		   stock console background shader. */
+		if ( con_colBG && con_colBG->string[0] ) {
+			re.SetColor( con_bgColor );
+			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.whiteShader );
+		} else if ( cl_conColor->string[0] ) {
 			// track changes
-			if ( strcmp( cl_conColor->string, conColorString ) ) 
+			if ( strcmp( cl_conColor->string, conColorString ) )
 			{
 				Q_strncpyz( conColorString, cl_conColor->string, sizeof( conColorString ) );
 				Q_strncpyz( buf, cl_conColor->string, sizeof( buf ) );
@@ -943,10 +1215,14 @@ static void Con_DrawSolidConsole( float frac ) {
 			re.SetColor( g_color_table[ ColorIndex( COLOR_WHITE ) ] );
 			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.consoleShader );
 		}
-
 	}
 
-	re.SetColor( g_color_table[ ColorIndex( COLOR_RED ) ] );
+	/* border — per-element color with a red fallback */
+	if ( con_colBorder && con_colBorder->string[0] ) {
+		re.SetColor( con_borderColor );
+	} else {
+		re.SetColor( g_color_table[ ColorIndex( COLOR_RED ) ] );
+	}
 	re.DrawStretchPic( 0, yf, wf, 2, 0, 0, 1, 1, cls.whiteShader );
 
 	//y = yf;
@@ -1013,6 +1289,29 @@ static void Con_DrawSolidConsole( float frac ) {
 				static vec4_t searchBg = { 0.3f, 0.3f, 0.0f, 0.5f };
 				re.SetColor( searchBg );
 				re.DrawStretchPic( con.xadjust, y, wf, smallchar_height, 0, 0, 1, 1, cls.whiteShader );
+			}
+
+			// mark-mode selection highlight: draw contiguous selected spans
+			// on this row as a solid background before the characters
+			if ( con.markActive ) {
+				static vec4_t markBg = { 0.25f, 0.40f, 0.75f, 0.55f };
+				int runStart = -1;
+				int cx;
+				for ( cx = 0; cx <= con.linewidth; cx++ ) {
+					qboolean inside = ( cx < con.linewidth )
+						? Con_MarkCellIsSelected( row, cx )
+						: qfalse;
+					if ( inside && runStart < 0 ) {
+						runStart = cx;
+					} else if ( !inside && runStart >= 0 ) {
+						float px = con.xadjust + (runStart + 1) * vcw;
+						float pw = (cx - runStart) * vcw;
+						re.SetColor( markBg );
+						re.DrawStretchPic( px, y, pw, smallchar_height,
+						                   0, 0, 1, 1, cls.whiteShader );
+						runStart = -1;
+					}
+				}
 			}
 
 			text = con.text + (row % con.totallines) * con.linewidth;
@@ -1416,4 +1715,400 @@ Returns the currently highlighted search line, or -1.
 */
 int Con_SearchLine( void ) {
 	return con.searchActive ? con.searchLine : -1;
+}
+
+
+/*
+==============================================================================
+
+CONSOLE MARK MODE (Ctrl+M text selection)
+
+Provides a keyboard-only text selection interface for the console buffer:
+  Ctrl+M        Toggle mark mode.  Initial selection anchors at the current
+                bottom-most visible line.
+  Arrows        Move the "end" marker (with Shift) or move and reset the
+                anchor (without Shift).
+  Home / End    Jump to line start / end of the current row.
+  PgUp / PgDn   Move the end marker by one page.
+  Ctrl+C / Enter  Copy selection to the system clipboard with color codes
+                stripped, then exit mark mode.
+  Esc           Exit mark mode without copying.
+
+The selection rectangle is drawn with a distinct background color in
+Con_DrawSolidConsole.  Lines are stored as absolute indices into the
+ring buffer, matching con.current / con.display semantics.
+
+==============================================================================
+*/
+
+/*
+================
+Con_MarkValidLine
+
+Clamp an absolute line index to the portion of the scrollback buffer that
+still has live data available.  Returns the (possibly clamped) index.
+================
+*/
+static int Con_MarkValidLine( int line ) {
+	int firstValid;
+
+	firstValid = con.current - (con.totallines - 1);
+	if ( firstValid < 0 ) {
+		firstValid = 0;
+	}
+
+	if ( line < firstValid ) {
+		line = firstValid;
+	}
+	if ( line > con.current ) {
+		line = con.current;
+	}
+	return line;
+}
+
+
+/*
+================
+Con_MarkClampCol
+
+Clamp a column index to [0, linewidth).
+================
+*/
+static int Con_MarkClampCol( int col ) {
+	if ( col < 0 ) {
+		col = 0;
+	}
+	if ( col >= con.linewidth ) {
+		col = con.linewidth - 1;
+	}
+	return col;
+}
+
+
+/*
+================
+Con_MarkEnsureVisible
+
+Scroll the console display so that the current end-of-selection row is
+within the visible region.
+================
+*/
+static void Con_MarkEnsureVisible( void ) {
+	int visibleRows;
+
+	visibleRows = con.vispage;
+	if ( visibleRows <= 0 ) {
+		visibleRows = 1;
+	}
+
+	if ( con.markEndLine > con.display ) {
+		con.display = con.markEndLine;
+	} else if ( con.markEndLine < con.display - visibleRows + 1 ) {
+		con.display = con.markEndLine + visibleRows - 1;
+	}
+
+	Con_Fixup();
+}
+
+
+/*
+================
+Con_MarkOpen
+
+Activate mark mode.  The anchor and cursor both start at the bottom-most
+line currently on screen, column 0.
+================
+*/
+void Con_MarkOpen( void ) {
+	con.markActive = qtrue;
+	con.markStartLine = con.display;
+	con.markStartCol = 0;
+	con.markEndLine = con.display;
+	con.markEndCol = 0;
+}
+
+
+/*
+================
+Con_MarkClose
+================
+*/
+void Con_MarkClose( void ) {
+	con.markActive = qfalse;
+}
+
+
+/*
+================
+Con_IsMarkActive
+================
+*/
+qboolean Con_IsMarkActive( void ) {
+	return con.markActive;
+}
+
+
+/*
+================
+Con_MarkGetRange
+
+Returns the normalized selection rectangle:
+  line1,col1 = top-left (earliest)
+  line2,col2 = bottom-right (latest)
+================
+*/
+static void Con_MarkGetRange( int *line1, int *col1, int *line2, int *col2 ) {
+	int sl = con.markStartLine;
+	int sc = con.markStartCol;
+	int el = con.markEndLine;
+	int ec = con.markEndCol;
+
+	if ( sl < el || ( sl == el && sc <= ec ) ) {
+		*line1 = sl; *col1 = sc;
+		*line2 = el; *col2 = ec;
+	} else {
+		*line1 = el; *col1 = ec;
+		*line2 = sl; *col2 = sc;
+	}
+}
+
+
+/*
+================
+Con_MarkRowIsSelected
+
+Returns qtrue if (row, col) falls inside the normalized selection.
+================
+*/
+qboolean Con_MarkCellIsSelected( int row, int col ) {
+	int l1, c1, l2, c2;
+
+	if ( !con.markActive ) {
+		return qfalse;
+	}
+
+	Con_MarkGetRange( &l1, &c1, &l2, &c2 );
+
+	if ( row < l1 || row > l2 ) {
+		return qfalse;
+	}
+
+	if ( l1 == l2 ) {
+		return (col >= c1 && col <= c2) ? qtrue : qfalse;
+	}
+
+	if ( row == l1 ) {
+		return (col >= c1) ? qtrue : qfalse;
+	}
+	if ( row == l2 ) {
+		return (col <= c2) ? qtrue : qfalse;
+	}
+	return qtrue;
+}
+
+
+/*
+================
+Con_MarkCopySelection
+
+Extract the currently selected text (stripping any embedded color bytes,
+which live in the high byte of each short in con.text) and push it to the
+system clipboard.
+================
+*/
+static void Con_MarkCopySelection( void ) {
+	int l1, c1, l2, c2;
+	int line, col, startCol, endCol;
+	short *text;
+	char buf[CON_TEXTSIZE + 4];
+	int bufPos = 0;
+	char ch;
+
+	if ( !con.markActive ) {
+		return;
+	}
+
+	Con_MarkGetRange( &l1, &c1, &l2, &c2 );
+
+	for ( line = l1; line <= l2; line++ ) {
+		/* validate line is inside the live scrollback */
+		if ( con.current - line >= con.totallines ) {
+			continue;
+		}
+
+		text = con.text + (line % con.totallines) * con.linewidth;
+
+		startCol = (line == l1) ? c1 : 0;
+		endCol   = (line == l2) ? c2 : (con.linewidth - 1);
+
+		for ( col = startCol; col <= endCol; col++ ) {
+			ch = (char)(text[col] & 0xff);
+			/* color codes are stored in the high byte, not inline — no need
+			   to strip ^x sequences here, but leave the guard in place so
+			   paste targets never see unrenderable bytes. */
+			if ( ch == '\0' ) {
+				ch = ' ';
+			}
+			if ( bufPos < (int)sizeof( buf ) - 1 ) {
+				buf[bufPos++] = ch;
+			}
+		}
+
+		if ( line != l2 && bufPos < (int)sizeof( buf ) - 2 ) {
+			buf[bufPos++] = '\r';
+			buf[bufPos++] = '\n';
+		}
+	}
+
+	buf[bufPos] = '\0';
+
+	Sys_SetClipboardData( buf );
+}
+
+
+/*
+================
+Con_MarkKey
+
+Handles all keystrokes when the console is in mark mode.  Returns qtrue
+if the key was consumed by the mark system.
+================
+*/
+qboolean Con_MarkKey( int key, qboolean ctrlDown, qboolean shiftDown ) {
+	int step;
+
+	/* Ctrl+M toggles — handled even if not currently active */
+	if ( ctrlDown && (key == 'm' || key == 'M') ) {
+		if ( con.markActive ) {
+			Con_MarkClose();
+		} else {
+			Con_MarkOpen();
+		}
+		return qtrue;
+	}
+
+	if ( !con.markActive ) {
+		return qfalse;
+	}
+
+	/* ESC exits without copying */
+	if ( key == K_ESCAPE ) {
+		Con_MarkClose();
+		return qtrue;
+	}
+
+	/* Ctrl+C or Enter copies and exits */
+	if ( (ctrlDown && (key == 'c' || key == 'C')) ||
+	     key == K_ENTER || key == K_KP_ENTER ) {
+		Con_MarkCopySelection();
+		Con_MarkClose();
+		return qtrue;
+	}
+
+	switch ( key ) {
+	case K_LEFTARROW:
+	case K_KP_LEFTARROW:
+		if ( con.markEndCol > 0 ) {
+			con.markEndCol--;
+		} else if ( con.markEndLine > Con_MarkValidLine( 0 ) ) {
+			con.markEndLine--;
+			con.markEndCol = con.linewidth - 1;
+		}
+		if ( !shiftDown ) {
+			con.markStartLine = con.markEndLine;
+			con.markStartCol = con.markEndCol;
+		}
+		Con_MarkEnsureVisible();
+		return qtrue;
+
+	case K_RIGHTARROW:
+	case K_KP_RIGHTARROW:
+		if ( con.markEndCol < con.linewidth - 1 ) {
+			con.markEndCol++;
+		} else if ( con.markEndLine < con.current ) {
+			con.markEndLine++;
+			con.markEndCol = 0;
+		}
+		if ( !shiftDown ) {
+			con.markStartLine = con.markEndLine;
+			con.markStartCol = con.markEndCol;
+		}
+		Con_MarkEnsureVisible();
+		return qtrue;
+
+	case K_UPARROW:
+	case K_KP_UPARROW:
+		con.markEndLine = Con_MarkValidLine( con.markEndLine - 1 );
+		con.markEndCol = Con_MarkClampCol( con.markEndCol );
+		if ( !shiftDown ) {
+			con.markStartLine = con.markEndLine;
+			con.markStartCol = con.markEndCol;
+		}
+		Con_MarkEnsureVisible();
+		return qtrue;
+
+	case K_DOWNARROW:
+	case K_KP_DOWNARROW:
+		con.markEndLine = Con_MarkValidLine( con.markEndLine + 1 );
+		con.markEndCol = Con_MarkClampCol( con.markEndCol );
+		if ( !shiftDown ) {
+			con.markStartLine = con.markEndLine;
+			con.markStartCol = con.markEndCol;
+		}
+		Con_MarkEnsureVisible();
+		return qtrue;
+
+	case K_HOME:
+	case K_KP_HOME:
+		con.markEndCol = 0;
+		if ( ctrlDown ) {
+			con.markEndLine = Con_MarkValidLine( 0 );
+		}
+		if ( !shiftDown ) {
+			con.markStartLine = con.markEndLine;
+			con.markStartCol = con.markEndCol;
+		}
+		Con_MarkEnsureVisible();
+		return qtrue;
+
+	case K_END:
+	case K_KP_END:
+		con.markEndCol = con.linewidth - 1;
+		if ( ctrlDown ) {
+			con.markEndLine = con.current;
+		}
+		if ( !shiftDown ) {
+			con.markStartLine = con.markEndLine;
+			con.markStartCol = con.markEndCol;
+		}
+		Con_MarkEnsureVisible();
+		return qtrue;
+
+	case K_PGUP:
+	case K_KP_PGUP:
+		step = con.vispage > 0 ? con.vispage : 1;
+		con.markEndLine = Con_MarkValidLine( con.markEndLine - step );
+		con.markEndCol = Con_MarkClampCol( con.markEndCol );
+		if ( !shiftDown ) {
+			con.markStartLine = con.markEndLine;
+			con.markStartCol = con.markEndCol;
+		}
+		Con_MarkEnsureVisible();
+		return qtrue;
+
+	case K_PGDN:
+	case K_KP_PGDN:
+		step = con.vispage > 0 ? con.vispage : 1;
+		con.markEndLine = Con_MarkValidLine( con.markEndLine + step );
+		con.markEndCol = Con_MarkClampCol( con.markEndCol );
+		if ( !shiftDown ) {
+			con.markStartLine = con.markEndLine;
+			con.markStartCol = con.markEndCol;
+		}
+		Con_MarkEnsureVisible();
+		return qtrue;
+	}
+
+	/* Block everything else while in mark mode */
+	return qtrue;
 }

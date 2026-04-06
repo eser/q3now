@@ -42,8 +42,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //#define DEFAULT_GAME			"edawn"
 
 #define BASEGAME				"baseq3"
-#define STEAMPATH_NAME			"Quake 3 Arena"
-#define STEAMPATH_APPID			"2200"
 
 #define MAX_TEAMNAME            32
 #define MAX_MASTER_SERVERS      5	// number of supported master servers
@@ -995,6 +993,8 @@ default values.
 #define CVAR_DEVELOPER		0x10000 // can be set only in developer mode
 #define CVAR_NOTABCOMPLETE	0x20000 // no tab completion in console
 
+#define CVAR_CMDLINE_CREATED	0x80000 // cvar was created through the command-line (+set)
+
 #define CVAR_ARCHIVE_ND		(CVAR_ARCHIVE | CVAR_NODEFAULT)
 
 // These flags are only returned by the Cvar_Flags() function
@@ -1104,6 +1104,14 @@ typedef struct {
 	int			contents;	// contents on other side of surface hit
 	int			entityNum;	// entity the contacted surface is a part of
 } trace_t;
+
+// trace type for collision detection
+typedef enum {
+	TT_NONE,
+	TT_AABB,
+	TT_CAPSULE,
+	TT_BISPHERE
+} traceType_t;
 
 // trace->entityNum can also be 0 to (MAX_GENTITIES-1)
 // or ENTITYNUM_NONE, ENTITYNUM_WORLD

@@ -36,6 +36,7 @@ and one exported function: Perform
 
 #include "vm_local.h"
 #include "q_feats.h"
+#include "crash.h"
 
 #if FEAT_LEGACY_QVM
 opcode_info_t ops[ OP_MAX ] =
@@ -1871,10 +1872,12 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 			vm->dataAlloc = ~0U;
 			vm->dataMask = ~0U;
 			vm->dataBase = 0;
+			Crash_SaveQVMPointer( index, vm );
+			Crash_SaveQVMChecksum( index, 0 );
 			return vm;
 		}
 
-		Com_Printf( "Failed to load dll, looking for qvm.\n" );
+		Com_DPrintf( "Failed to load dll, looking for qvm.\n" );
 		interpret = VMI_COMPILED;
 	}
 
@@ -1882,6 +1885,8 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 	if ( interpret >= VMI_COMPILED ) {
 		// Auto-detect: prefer WASM (.aot > .wasm), silent fallback to QVM
 		if ( VM_WasmLoad( vm ) ) {
+			Crash_SaveQVMPointer( index, vm );
+			Crash_SaveQVMChecksum( index, 0 );
 			return vm;
 		}
 	}
@@ -1936,6 +1941,10 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 
 	Com_Printf( "%s loaded in %d bytes on the hunk\n", vm->name, remaining - Hunk_MemoryRemaining() );
 
+	// Register with the crash reporter so we can dump VM state on faults.
+	Crash_SaveQVMPointer( index, vm );
+	Crash_SaveQVMChecksum( index, vm->crc32sum );
+
 	return vm;
 #else
 	// No QVM support compiled in
@@ -1972,6 +1981,10 @@ void VM_Free( vm_t *vm ) {
 	if ( vm->dllHandle )
 		Sys_UnloadLibrary( vm->dllHandle );
 
+	// Clear crash-reporter state for this VM before wiping the struct.
+	Crash_SaveQVMPointer( vm->index, NULL );
+	Crash_SaveQVMChecksum( vm->index, 0 );
+
 #if 0	// now automatically freed by hunk
 	if ( vm->codeBase.ptr ) {
 		Z_Free( vm->codeBase.ptr );
@@ -2002,6 +2015,114 @@ void VM_Forced_Unload_Start(void) {
 
 void VM_Forced_Unload_Done(void) {
 	forced_unload = 0;
+}
+
+
+/*
+==============
+VM_GetCallStack
+
+Walks the interpreter/JIT program stack to build a human-readable call
+trace. Used by the crash reporter and (when needed) by VM debug tooling.
+
+Format: "vm_name: <sym1>+off1 <sym2>+off2 ...".
+
+If the VM is a native DLL (no program stack, no symbols) we emit
+"vm_name: native".
+
+This function must be safe to call on a partially-torn-down VM: any
+pointer may be NULL, and the walk stops as soon as we see a clearly
+invalid stack offset.
+==============
+*/
+void VM_GetCallStack( vm_t *vm, char *buf, int bufSize )
+{
+	if ( buf == NULL || bufSize <= 0 ) {
+		return;
+	}
+	buf[ 0 ] = '\0';
+
+	if ( vm == NULL ) {
+		Q_strncpyz( buf, "(null vm)", bufSize );
+		return;
+	}
+
+	Q_strncpyz( buf, vm->name ? vm->name : "?", bufSize );
+	Q_strcat( buf, bufSize, ": " );
+
+#if FEAT_LEGACY_QVM
+	if ( !vm->compiled && vm->entryPoint == NULL && vm->dataBase != NULL ) {
+		int depth = 0;
+		int programCounter = -1;
+		int programStack = vm->programStack;
+		const int dataLimit = (int)vm->dataLength;
+
+		while ( depth < MAX_VM_CALLSTACK_DEPTH ) {
+			const char *symbol;
+			char        frame[ 128 ];
+			int         remainingBuf;
+
+			if ( programStack < 0 || programStack + 8 > dataLimit ) {
+				break;
+			}
+
+			if ( depth == 0 ) {
+				/* No PC tracking — start walk from program stack directly. */
+				programStack = *(int *)&vm->dataBase[ programStack + 4 ];
+				if ( programStack < 0 || programStack + 4 > dataLimit ) {
+					break;
+				}
+				programCounter = *(int *)&vm->dataBase[ programStack ];
+			} else {
+				programStack = *(int *)&vm->dataBase[ programStack + 4 ];
+				if ( programStack < 0 || programStack + 4 > dataLimit ) {
+					break;
+				}
+				programCounter = *(int *)&vm->dataBase[ programStack ];
+			}
+
+			if ( programCounter == -1 || programCounter == 0 ) {
+				break;
+			}
+
+			symbol = VM_ValueToSymbol( vm, programCounter );
+			Com_sprintf( frame, sizeof( frame ), "%s%s+0x%x",
+				depth == 0 ? "" : " ",
+				symbol ? symbol : "?",
+				(unsigned)programCounter );
+
+			remainingBuf = bufSize - (int)strlen( buf ) - 1;
+			if ( remainingBuf <= (int)strlen( frame ) ) {
+				Q_strcat( buf, bufSize, " ..." );
+				break;
+			}
+			Q_strcat( buf, bufSize, frame );
+			depth++;
+		}
+
+		if ( depth == 0 ) {
+			Q_strcat( buf, bufSize, "empty" );
+		}
+		return;
+	}
+#endif
+
+	if ( vm->entryPoint != NULL || vm->dllHandle != NULL ) {
+		Q_strcat( buf, bufSize, "native" );
+		return;
+	}
+
+#if FEAT_WASM
+	{
+		char frame[ 64 ];
+		Com_sprintf( frame, sizeof( frame ), "wasm level=%d stack=0x%x",
+			vm->callLevel, (unsigned)vm->programStack );
+		Q_strcat( buf, bufSize, frame );
+		return;
+	}
+#else
+	Q_strcat( buf, bufSize, "unknown" );
+#endif
 }
 
 

@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+#include "../qcommon/crash.h"
 #ifndef DEDICATED
 #include "../client/client.h"
 #endif
@@ -33,6 +34,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <errno.h>
 #include <direct.h>
 #include <io.h>
+#include <time.h>
+#include <dbghelp.h>
 
 
 #define MEM_THRESHOLD (96*1024*1024)
@@ -700,9 +703,75 @@ static const char *GetExceptionName( DWORD code )
 
 /*
 ==================
+WriteMinidump
+
+Best-effort minidump writer. Uses MiniDumpWriteDump from dbghelp.dll loaded
+dynamically so that release builds don't have a hard link dependency when
+the SDK library is missing. Silently returns on failure — we're already
+crashing, there's nothing reasonable to do if the dump can't be written.
+==================
+*/
+static void WriteMinidump( struct _EXCEPTION_POINTERS *ExceptionInfo )
+{
+	typedef BOOL (WINAPI *PFN_MiniDumpWriteDump)(
+		HANDLE hProcess, DWORD ProcessId, HANDLE hFile,
+		MINIDUMP_TYPE DumpType,
+		PMINIDUMP_EXCEPTION_INFORMATION ExceptionParam,
+		PMINIDUMP_USER_STREAM_INFORMATION UserStreamParam,
+		PMINIDUMP_CALLBACK_INFORMATION CallbackParam );
+
+	HMODULE dbg;
+	PFN_MiniDumpWriteDump pMiniDumpWriteDump;
+	HANDLE dumpFile;
+	char dumpName[ MAX_OSPATH ];
+	SYSTEMTIME lt;
+	MINIDUMP_EXCEPTION_INFORMATION mei;
+
+	dbg = LoadLibraryA( "dbghelp.dll" );
+	if ( dbg == NULL ) {
+		return;
+	}
+	pMiniDumpWriteDump = (PFN_MiniDumpWriteDump)GetProcAddress( dbg, "MiniDumpWriteDump" );
+	if ( pMiniDumpWriteDump == NULL ) {
+		FreeLibrary( dbg );
+		return;
+	}
+
+	GetLocalTime( &lt );
+	Com_sprintf( dumpName, sizeof( dumpName ),
+		"crash_%04d%02d%02d_%02d%02d%02d.dmp",
+		lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond );
+
+	dumpFile = CreateFileA( dumpName,
+		GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL, NULL );
+	if ( dumpFile == INVALID_HANDLE_VALUE ) {
+		FreeLibrary( dbg );
+		return;
+	}
+
+	mei.ThreadId = GetCurrentThreadId();
+	mei.ExceptionPointers = ExceptionInfo;
+	mei.ClientPointers = FALSE;
+
+	pMiniDumpWriteDump(
+		GetCurrentProcess(), GetCurrentProcessId(),
+		dumpFile,
+		(MINIDUMP_TYPE)( MiniDumpNormal | MiniDumpWithIndirectlyReferencedMemory ),
+		&mei, NULL, NULL );
+
+	CloseHandle( dumpFile );
+	FreeLibrary( dbg );
+}
+
+
+/*
+==================
 ExceptionFilter
 
-Restore gamma and hide fullscreen window in case of crash
+Restore gamma and hide fullscreen window in case of crash, walk the
+native call stack via StackWalk64, dump VM state, and write a structured
+JSON crash report plus a minidump.
 ==================
 */
 static LONG WINAPI ExceptionFilter( struct _EXCEPTION_POINTERS *ExceptionInfo )
@@ -722,7 +791,9 @@ static LONG WINAPI ExceptionFilter( struct _EXCEPTION_POINTERS *ExceptionInfo )
 	if ( ExceptionInfo->ExceptionRecord->ExceptionCode != EXCEPTION_BREAKPOINT )
 	{
 		char msg[128], name[MAX_OSPATH];
+		char addressText[ 64 ];
 		const char *basename;
+		const char *reasonText;
 		HMODULE hModule, hKernel32;
 		byte *addr;
 
@@ -766,10 +837,49 @@ static LONG WINAPI ExceptionFilter( struct _EXCEPTION_POINTERS *ExceptionInfo )
 				addr );
 		}
 
+		reasonText = GetExceptionName( ExceptionInfo->ExceptionRecord->ExceptionCode );
+		Com_sprintf( addressText, sizeof( addressText ), "%p", (void*)addr );
+
+		// Structured crash report (JSON).
+		Crash_WriteReport( reasonText, addressText, basename && *basename ? basename : "" );
+
+		// Best-effort full minidump — lets the user share a .dmp file
+		// alongside the JSON for offline triage.
+		WriteMinidump( ExceptionInfo );
+
 		Com_Error( ERR_DROP, "Unhandled exception caught\n%s", msg );
 	}
 
 	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+
+/*
+==================
+Sys_InstallCrashHandler
+
+Called from the generic crash.c layer. We already install an
+unhandled-exception filter in WinMain before Com_Init runs, but this
+second call is a no-op update that also initialises dbghelp symbol
+lookup — having symbols available makes the minidump far more useful.
+==================
+*/
+void Sys_InstallCrashHandler( void )
+{
+	HMODULE dbg;
+	typedef BOOL (WINAPI *PFN_SymInitialize)( HANDLE, PCSTR, BOOL );
+	PFN_SymInitialize pSymInitialize;
+
+	SetUnhandledExceptionFilter( ExceptionFilter );
+
+	dbg = LoadLibraryA( "dbghelp.dll" );
+	if ( dbg != NULL ) {
+		pSymInitialize = (PFN_SymInitialize)GetProcAddress( dbg, "SymInitialize" );
+		if ( pSymInitialize != NULL ) {
+			pSymInitialize( GetCurrentProcess(), NULL, TRUE );
+		}
+		/* Intentionally leak the dbghelp reference so symbols stay loaded. */
+	}
 }
 
 

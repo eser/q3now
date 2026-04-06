@@ -61,6 +61,15 @@ cvar_t	*sv_lanForceRate; // dedicated 1 (LAN) server forces local client rates t
 
 cvar_t *sv_levelTimeReset;
 cvar_t *sv_filter;
+cvar_t *sv_minRestartDelay;
+
+// Scheduled server restart state (CNQ3 port).
+// sv_startRealTime is Sys_Milliseconds() at the moment the server first came
+// up; used to measure uptime regardless of level resets. sv_restartPending is
+// set when the configured delay elapses, and we defer the actual restart
+// until the last human leaves.
+qboolean sv_restartPending = qfalse;
+int      sv_startRealTime  = 0;
 
 #ifdef USE_BANS
 cvar_t	*sv_banFile;
@@ -951,10 +960,8 @@ static void SV_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		SV_GetChallenge( from );
 	} else if (!Q_stricmp(c, "connect")) {
 		SV_DirectConnect( from );
-#ifndef STANDALONE
-	} else if (!Q_stricmp(c, "ipAuthorize")) {
-		// removed from codebase since stateless challenges
-#endif
+	// Phase 6.4: legacy "ipAuthorize" handler removed — q3now never sends a
+	// getIpAuthorize request, so we never need to receive a reply.
 	} else if (!Q_stricmp(c, "disconnect")) {
 		// if a client starts up a local server, we may see some spurious
 		// server disconnect messages when their new server sees our final
@@ -1112,6 +1119,12 @@ static void SV_CheckTimeouts( void ) {
 
 	for ( i = 0, cl = svs.clients ; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state == CS_FREE ) {
+			continue;
+		}
+		// CNQ3 bot-timeout fix: bots never send packets over the network
+		// and therefore have stale lastPacketTime. Skip them entirely so a
+		// long-running server never times out its own AI clients.
+		if ( cl->netchan.remoteAddress.type == NA_BOT ) {
 			continue;
 		}
 		// message times may be wrong across a changelevel
@@ -1363,6 +1376,34 @@ void SV_Frame( int msec ) {
 			}
 			if ( i == sv.maxclients ) {
 				SV_Restart( "Restarting server" );
+				return;
+			}
+		}
+	}
+
+	// CNQ3: scheduled server process restart after sv_minRestartDelay hours.
+	// Mark the pending flag once the delay has elapsed, then wait for all
+	// human clients to drop before quitting (the parent watchdog will
+	// relaunch us — see Sys_InstallHardRebootWatchdog).
+	if ( sv_minRestartDelay != NULL && sv_startRealTime > 0 ) {
+		int uptimeMs = Sys_Milliseconds() - sv_startRealTime;
+		int thresholdMs = sv_minRestartDelay->integer * 3600 * 1000;
+		if ( !sv_restartPending && thresholdMs > 0 && uptimeMs >= thresholdMs ) {
+			sv_restartPending = qtrue;
+			Com_Printf( "Scheduled restart pending after %d hour(s) of uptime.\n",
+				sv_minRestartDelay->integer );
+		}
+		if ( sv_restartPending && svs.clients != NULL ) {
+			int humans = 0;
+			for ( i = 0; i < sv.maxclients; i++ ) {
+				const client_t *cl = &svs.clients[ i ];
+				if ( cl->state < CS_CONNECTED ) continue;
+				if ( cl->netchan.remoteAddress.type == NA_BOT ) continue;
+				humans++;
+			}
+			if ( humans == 0 ) {
+				Com_Printf( "Scheduled restart: no human clients connected, quitting for watchdog.\n" );
+				Cbuf_AddText( "quit\n" );
 				return;
 			}
 		}

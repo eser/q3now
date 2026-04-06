@@ -198,6 +198,43 @@ static qboolean IN_IsConsoleKey( keyNum_t key, int character )
 
 /*
 ===============
+IN_GenericModifierKey
+
+Phase 6.1: maps a side-specific modifier (e.g. K_LEFTSHIFT) to its generic
+counterpart (K_SHIFT). Returns 0 if the key is not a side-specific modifier.
+
+This lets HandleEvents emit BOTH events on the same physical key press,
+preserving backward compatibility for bindings and engine code that checks
+keys[K_ALT].down etc.
+===============
+*/
+static keyNum_t IN_GenericModifierKey( keyNum_t key )
+{
+	switch ( key )
+	{
+		case K_LEFTSHIFT:
+		case K_RIGHTSHIFT:
+			return K_SHIFT;
+		case K_LEFTCTRL:
+		case K_RIGHTCTRL:
+			return K_CTRL;
+		case K_LEFTALT:
+		case K_RIGHTALT:
+			return K_ALT;
+		case K_LEFTSUPER:
+		case K_RIGHTSUPER:
+			return K_SUPER;
+		case K_LEFTCOMMAND:
+		case K_RIGHTCOMMAND:
+			return K_COMMAND;
+		default:
+			return 0;
+	}
+}
+
+
+/*
+===============
 IN_TranslateSDLToQ3Key
 ===============
 */
@@ -295,22 +332,26 @@ static keyNum_t IN_TranslateSDLToQ3Key( const SDL_KeyboardEvent *event, qboolean
 			case SDLK_DELETE:       key = K_DEL;           break;
 			case SDLK_PAUSE:        key = K_PAUSE;         break;
 
-			case SDLK_LSHIFT:
-			case SDLK_RSHIFT:       key = K_SHIFT;         break;
+			// Phase 6.1: side-specific modifier keys.
+			// Translate to the LEFT/RIGHT variant; HandleEvents emits the
+			// generic K_SHIFT/K_CTRL/K_ALT/K_COMMAND/K_SUPER alongside for
+			// backward compatibility with bindings and engine code.
+			case SDLK_LSHIFT:       key = K_LEFTSHIFT;     break;
+			case SDLK_RSHIFT:       key = K_RIGHTSHIFT;    break;
 
-			case SDLK_LCTRL:
-			case SDLK_RCTRL:        key = K_CTRL;          break;
+			case SDLK_LCTRL:        key = K_LEFTCTRL;      break;
+			case SDLK_RCTRL:        key = K_RIGHTCTRL;     break;
 
 #ifdef __APPLE__
-			case SDLK_RGUI:
-			case SDLK_LGUI:         key = K_COMMAND;       break;
+			case SDLK_LGUI:         key = K_LEFTCOMMAND;   break;
+			case SDLK_RGUI:         key = K_RIGHTCOMMAND;  break;
 #else
-			case SDLK_RGUI:
-			case SDLK_LGUI:         key = K_SUPER;         break;
+			case SDLK_LGUI:         key = K_LEFTSUPER;     break;
+			case SDLK_RGUI:         key = K_RIGHTSUPER;    break;
 #endif
 
-			case SDLK_RALT:
-			case SDLK_LALT:         key = K_ALT;           break;
+			case SDLK_LALT:         key = K_LEFTALT;       break;
+			case SDLK_RALT:         key = K_RIGHTALT;      break;
 
 			case SDLK_KP_5:         key = K_KP_5;          break;
 			case SDLK_INSERT:       key = K_INS;           break;
@@ -1034,6 +1075,26 @@ static void IN_JoyMove( void )
 
 /*
 ===============
+Sys_GetCapsLockMode
+===============
+*/
+int Sys_GetCapsLockMode( void ) {
+    return (SDL_GetModState() & SDL_KMOD_CAPS) != 0;
+}
+
+
+/*
+===============
+Sys_GetNumLockMode
+===============
+*/
+int Sys_GetNumLockMode( void ) {
+    return (SDL_GetModState() & SDL_KMOD_NUM) != 0;
+}
+
+
+/*
+===============
 IN_SyncModifiers
 ===============
 */
@@ -1090,7 +1151,15 @@ void HandleEvents( void )
 				}
 
 				if ( key ) {
+					keyNum_t generic;
+
 					Com_QueueEvent( in_eventTime, SE_KEY, key, qtrue, 0, NULL );
+
+					// Phase 6.1: also emit the generic modifier (K_ALT/K_CTRL/...)
+					// for backward compatibility with bindings and engine code.
+					generic = IN_GenericModifierKey( key );
+					if ( generic )
+						Com_QueueEvent( in_eventTime, SE_KEY, generic, qtrue, 0, NULL );
 
 					if ( key == K_BACKSPACE )
 						Com_QueueEvent( in_eventTime, SE_CHAR, CTRL('h'), 0, 0, NULL );
@@ -1109,8 +1178,20 @@ void HandleEvents( void )
 
 			// SDL3: SDL_KEYUP → SDL_EVENT_KEY_UP
 			case SDL_EVENT_KEY_UP:
-				if( ( key = IN_TranslateSDLToQ3Key( &e.key, qfalse ) ) )
+				if( ( key = IN_TranslateSDLToQ3Key( &e.key, qfalse ) ) ) {
+					keyNum_t generic;
+
 					Com_QueueEvent( in_eventTime, SE_KEY, key, qfalse, 0, NULL );
+
+					// Phase 6.1: release the generic modifier alongside the
+					// side-specific one. We always emit it on key-up (even if
+					// the opposite-side key is still held) — this is OK because
+					// IN_SyncModifiers re-asserts keys[K_ALT].down etc. from
+					// SDL_GetModState() at the top of every HandleEvents pass.
+					generic = IN_GenericModifierKey( key );
+					if ( generic )
+						Com_QueueEvent( in_eventTime, SE_KEY, generic, qfalse, 0, NULL );
+				}
 
 				lastKeyDown = 0;
 				break;
@@ -1196,7 +1277,7 @@ void HandleEvents( void )
 				}
 				break;
 
-			// SDL3: SDL_MOUSEWHEEL → SDL_EVENT_MOUSE_WHEEL; y is now float
+			// SDL3: SDL_MOUSEWHEEL → SDL_EVENT_MOUSE_WHEEL; x and y are now float
 			case SDL_EVENT_MOUSE_WHEEL:
 				if( (int)e.wheel.y > 0 )
 				{
@@ -1207,6 +1288,17 @@ void HandleEvents( void )
 				{
 					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELDOWN, qtrue, 0, NULL );
 					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELDOWN, qfalse, 0, NULL );
+				}
+				// Phase 6.1: horizontal mouse wheel (touchpad gestures, tilt wheels)
+				if( (int)e.wheel.x > 0 )
+				{
+					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELRIGHT, qtrue, 0, NULL );
+					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELRIGHT, qfalse, 0, NULL );
+				}
+				else if( (int)e.wheel.x < 0 )
+				{
+					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELLEFT, qtrue, 0, NULL );
+					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELLEFT, qfalse, 0, NULL );
 				}
 				break;
 

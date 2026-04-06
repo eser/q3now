@@ -4,7 +4,7 @@
 #include "smaa_search_texture.h"
 #include "../qcommon/q_feats.h"
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 // Bone UBO size: 128 joints * 3 vec4 rows = 6144 bytes
 // Must match IQM_MAX_JOINTS (128) from iqm.h and the shader's boneMats[128*3]
 #define IQM_GPU_MAX_JOINTS 128
@@ -2747,7 +2747,7 @@ void vk_init_descriptors( void )
 		vk_update_attachment_descriptors();
 	}
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	// re-allocate IQM bone UBO descriptors after descriptor pool reset
 	if ( vk.iqmGpu.available ) {
 		VkDescriptorSetAllocateInfo boneAlloc;
@@ -3362,7 +3362,7 @@ static void vk_dispatch_rail_compute( void ) {
 }
 
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 /*
 ===============
 IQM GPU skinning — self-contained pipeline for skeletal IQM models
@@ -4294,7 +4294,7 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.gamma_fs, "gamma post-processing fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.gamma_vs, "gamma post-processing vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	vk.modules.iqm_skinning_vs = SHADER_MODULE( iqm_skinning_vert_spv );
 	vk.modules.iqm_skinning_fs = SHADER_MODULE( iqm_skinning_frag_spv );
 	SET_OBJECT_NAME( vk.modules.iqm_skinning_vs, "IQM skinning vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
@@ -6343,10 +6343,24 @@ void vk_initialize( void )
 		VkDescriptorSetLayout set_layouts[8]; // sized for potential parallax set 6
 		VkPipelineLayoutCreateInfo desc;
 		VkPushConstantRange push_range;
+#if FEAT_FOG_SYSTEM
+		VkPushConstantRange push_ranges[2];
+#endif
 
 		push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 		push_range.offset = 0;
 		push_range.size = 64; // 16 floats
+
+#if FEAT_FOG_SYSTEM
+		// Range 0: MVP matrix (vertex stage, bytes 0-63)
+		push_ranges[0] = push_range;
+		// Range 1: Enhanced fog parameters (fragment stage, bytes 64-95).
+		// Consumed by vk_update_fog_push; reserved even if no shader
+		// currently reads it so the layout is forward-compatible.
+		push_ranges[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		push_ranges[1].offset = 64;
+		push_ranges[1].size = 32;
+#endif
 
 		// standard pipelines
 		set_layouts[0] = vk.set_layout_uniform; // fog/dlight parameters
@@ -6370,8 +6384,13 @@ void vk_initialize( void )
 			desc.setLayoutCount = layoutCount;
 		}
 		desc.pSetLayouts = set_layouts;
+#if FEAT_FOG_SYSTEM
+		desc.pushConstantRangeCount = 2;
+		desc.pPushConstantRanges = push_ranges;
+#else
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &push_range;
+#endif
 
 		VK_CHECK(qvkCreatePipelineLayout(vk.device, &desc, NULL, &vk.pipeline_layout));
 
@@ -6492,7 +6511,7 @@ void vk_initialize( void )
 	// rail trail GPU resources — must be after shader modules are loaded
 	vk_init_rail_compute();
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	// IQM GPU skinning — must be after shader modules and descriptor pool
 	vk_init_iqm_gpu_skinning();
 #endif
@@ -6837,7 +6856,7 @@ void vk_shutdown( refShutdownCode_t code )
 		qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_msdf, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_storage, NULL);
 	vk_shutdown_rail_compute();
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	vk_shutdown_iqm_gpu_skinning();
 #endif
 	vk_shutdown_compute();
@@ -7008,7 +7027,7 @@ void vk_release_resources( void ) {
 
 	vk_wait_idle();
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	// destroy per-model IQM GPU skinning VBOs before hunk is reset
 	if ( vk.iqmGpu.available ) {
 		for ( i = 0; i < tr.numModels; i++ ) {
@@ -9346,6 +9365,93 @@ void vk_update_mvp( const float *m ) {
 
 	vk.stats.push_size += sizeof( push_constants );
 }
+
+
+/*
+====================
+vk_set_2d_scissor
+
+Sets a scissor rect on the current command buffer. Accepts a 4-int array
+{x, y, w, h} in pixel coordinates, or NULL to restore the full-screen
+scissor. Used by RE_SetClipRegion to clamp 2D drawing to a rectangular
+region. Wraps the static qvkCmdSetScissor binding so non-vk.c callers can
+drive it.
+====================
+*/
+void vk_set_2d_scissor( const int *rect ) {
+	VkRect2D scissor;
+	if ( !vk.active || !vk.cmd ) {
+		return;
+	}
+	if ( rect ) {
+		int x = rect[0];
+		int y = rect[1];
+		int w = rect[2];
+		int h = rect[3];
+		if ( x < 0 ) x = 0;
+		if ( y < 0 ) y = 0;
+		if ( w < 0 ) w = 0;
+		if ( h < 0 ) h = 0;
+		scissor.offset.x = x;
+		scissor.offset.y = y;
+		scissor.extent.width = (uint32_t)w;
+		scissor.extent.height = (uint32_t)h;
+	} else {
+		scissor.offset.x = 0;
+		scissor.offset.y = 0;
+		scissor.extent.width = glConfig.vidWidth;
+		scissor.extent.height = glConfig.vidHeight;
+	}
+	qvkCmdSetScissor( vk.cmd->command_buffer, 0, 1, &scissor );
+}
+
+
+#if FEAT_FOG_SYSTEM
+/*
+====================
+vk_update_fog_push
+
+Push the enhanced-fog parameters as a 32-byte fragment-stage push constant
+at offset 64 (right after the 64-byte vertex MVP). This is a REAL push
+constant upload via qvkCmdPushConstants; the pipeline layout has been
+extended to reserve this range so any future fog fragment shader that wants
+to read it can do so without further layout changes.
+
+Layout (std430, 32 bytes):
+  float fogColorR;    // offset 64
+  float fogColorG;    // offset 68
+  float fogColorB;    // offset 72
+  float density;      // offset 76
+  int   fogType;      // offset 80   (0=none, 1=linear, 2=exp, 3=exp2)
+  float farClip;      // offset 84
+  int   enabled;      // offset 88
+  float _pad;         // offset 92
+====================
+*/
+void vk_update_fog_push( const vec4_t color, int fogType, float density, float farClip, qboolean enabled ) {
+	struct {
+		float r, g, b, density;
+		int   type;
+		float farClip;
+		int   enabled;
+		float pad;
+	} push;
+
+	push.r       = color[0];
+	push.g       = color[1];
+	push.b       = color[2];
+	push.density = density;
+	push.type    = fogType;
+	push.farClip = farClip;
+	push.enabled = enabled ? 1 : 0;
+	push.pad     = 0.0f;
+
+	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout,
+		VK_SHADER_STAGE_FRAGMENT_BIT, 64, sizeof( push ), &push );
+
+	vk.stats.push_size += sizeof( push );
+}
+#endif // FEAT_FOG_SYSTEM
 
 
 void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,

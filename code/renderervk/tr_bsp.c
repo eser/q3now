@@ -438,7 +438,7 @@ static void R_LoadLightmaps( const lump_t *l ) {
 
 	numLightmaps = l->filelen / (LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3);
 
-	if ( r_mergeLightmaps->integer && numLightmaps > 1 ) {
+	if ( r_mergeLightmaps->integer && r_lightmapAtlas->integer && numLightmaps > 1 ) {
 		// check for low texture sizes
 		if ( glConfig.maxTextureSize >= LIGHTMAP_LEN * 2 ) {
 			tr.mergeLightmaps = qtrue;
@@ -752,6 +752,26 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, int numPoi
 		}
 	}
 #endif
+
+	// fix up broken (degenerate) face plane normals from the BSP by computing
+	// a unit-length normal from the first triangle's vertices, which helps
+	// dynamic light face culling work correctly (e.g. map "industrial")
+	if ( numPoints >= 3 && numIndexes >= 3 ) {
+		const float lenSq = cv->plane.normal[0] * cv->plane.normal[0]
+			+ cv->plane.normal[1] * cv->plane.normal[1]
+			+ cv->plane.normal[2] * cv->plane.normal[2];
+		if ( lenSq < 0.01f ) {
+			vec3_t v1, v2, normal;
+			const int i0 = indexes[0];
+			const int i1 = indexes[1];
+			const int i2 = indexes[2];
+			VectorSubtract( cv->points[i2], cv->points[i0], v1 );
+			VectorSubtract( cv->points[i1], cv->points[i0], v2 );
+			CrossProduct( v1, v2, normal );
+			VectorNormalize( normal );
+			VectorCopy( normal, cv->plane.normal );
+		}
+	}
 
 	for ( i = 0; i < 3; i++ ) {
 		cv->plane.normal[i] = R_ClampDenorm( cv->plane.normal[i] );
@@ -2377,6 +2397,9 @@ void RE_LoadWorldMap( const char *name ) {
 	if ( tr.worldMapLoaded ) {
 		ri.Error( ERR_DROP, "ERROR: attempted to redundantly load world map" );
 	}
+
+	// CNQ3 port: clear any stale loading flag from a previous errored load
+	tr.mapLoading = qfalse;
 
 	// set default sun direction to be used if it isn't
 	// overridden by a shader

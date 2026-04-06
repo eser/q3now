@@ -1642,7 +1642,7 @@ static void R_AddEntitySurfaces( void ) {
 				case MOD_MDR:
 					R_MDRAddAnimSurfaces( ent );
 					break;
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 				case MOD_IQM:
 					R_AddIQMSurfaces( ent );
 					break;

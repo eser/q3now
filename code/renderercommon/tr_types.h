@@ -239,7 +239,7 @@ typedef struct {
 
 // ── IQM animation query (renderer -> cgame) ─────────────────────────
 #include "../qcommon/q_feats.h"
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 #define MAX_IQM_ANIMS	64
 typedef struct {
 	char		name[MAX_QPATH];	// animation name from IQM file

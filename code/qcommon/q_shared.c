@@ -1997,10 +1997,17 @@ const char *Info_ValueForKeyToken( const char *key )
 Info_NextPair
 
 Used to iterate through all the key/value pairs in an info string
+
+Callers MUST pass key and value buffers of at least BIG_INFO_KEY /
+BIG_INFO_VALUE bytes - this function bounds the writes to those sizes
+to avoid overflowing if the input contains an unusually long token,
+which used to crash /systeminfo /serverinfo /clientinfo /dumpuser when
+a single token exceeded the legacy 512-byte buffer size.
 ===================
 */
 const char *Info_NextPair( const char *s, char *key, char *value ) {
 	char	*o;
+	int		l;
 
 	if ( *s == '\\' ) {
 		s++;
@@ -2010,19 +2017,39 @@ const char *Info_NextPair( const char *s, char *key, char *value ) {
 	value[0] = '\0';
 
 	o = key;
+	l = 0;
 	while ( *s != '\\' ) {
 		if ( !*s ) {
 			*o = '\0';
 			return s;
 		}
+		if ( l >= BIG_INFO_KEY - 1 ) {
+			// truncate the key safely; consume the rest of the token
+			// from the input so the parser stays in sync
+			while ( *s && *s != '\\' ) {
+				s++;
+			}
+			break;
+		}
 		*o++ = *s++;
+		l++;
 	}
 	*o = '\0';
-	s++;
+	if ( *s == '\\' ) {
+		s++;
+	}
 
 	o = value;
+	l = 0;
 	while ( *s != '\\' && *s ) {
+		if ( l >= BIG_INFO_VALUE - 1 ) {
+			while ( *s && *s != '\\' ) {
+				s++;
+			}
+			break;
+		}
 		*o++ = *s++;
+		l++;
 	}
 	*o = '\0';
 

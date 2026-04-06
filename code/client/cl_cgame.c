@@ -171,7 +171,7 @@ CL_AddCgameCommand
 =====================
 */
 static void CL_AddCgameCommand( const char *cmdName ) {
-	Cmd_AddCommand( cmdName, NULL );
+	Cmd_AddCgameCommand( cmdName );
 }
 
 
@@ -395,6 +395,12 @@ void CL_ShutdownCGame( void ) {
 	VM_Free( cgvm );
 	cgvm = NULL;
 	FS_VM_CloseFiles( H_CGAME );
+
+	// Remove commands that cgame registered via CG_ADDCOMMAND so that
+	// they stop showing up in auto-completion / console help once the
+	// cgame QVM is gone. These are tracked internally as "function==NULL"
+	// stub entries installed by CL_AddCgameCommand.
+	Cmd_RemoveCgameCommands();
 }
 
 
@@ -645,6 +651,9 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		}
 		return h;
 	}
+	case CG_S_SOUNDDURATION:
+		// Phase 6.2: returns sound length in milliseconds (0 if invalid).
+		return S_SoundDuration( args[1] );
 	case CG_S_STARTBACKGROUNDTRACK:
 		S_StartBackgroundTrack( VMA(1), VMA(2) );
 		return 0;
@@ -887,7 +896,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		Cvar_SetDescription2( (const char*)VMA(1), (const char*)VMA(2) );
 		return 0;
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	case CG_R_GETIQMANIMS:
 		if ( re.GetIQMAnimations )
 			return re.GetIQMAnimations( args[1], VMA(2), args[3] );
