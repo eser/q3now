@@ -1899,6 +1899,14 @@ typedef struct
 	qboolean colorMask;
 } clearColorCommand_t;
 
+typedef struct {
+	int   commandId;
+	float outlineWidth;
+	float outlineColor[4];
+	float glowWidth;
+	float glowColor[4];
+} setMsdfOutlineCommand_t;
+
 typedef enum {
 	RC_END_OF_LIST,
 	RC_SET_COLOR,
@@ -1912,7 +1920,8 @@ typedef enum {
 #endif
 	RC_COLORMASK,
 	RC_CLEARDEPTH,
-	RC_CLEARCOLOR
+	RC_CLEARCOLOR,
+	RC_SET_MSDF_OUTLINE
 } renderCommand_t;
 
 

@@ -1,10 +1,11 @@
+/* cl_wired_hud_elem_flagstatus.c -- Flag status HUD elements (OWN / NME)
+   Uses pre-computed flag shader handles from wiredHud bridge. Numeric
+   team IDs (0=free, 1=red, 2=blue, 3=spectator) avoid enum dependencies. */
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
 
 #if FEAT_WIRED_UI
-
-
 
 enum flagType_t
 {
@@ -46,41 +47,38 @@ void* CG_SHUDElementFlagStatusOWNCreate(const superhudConfig_t* config)
 void CG_SHUDElementFlagStatusRoutine(void* context)
 {
 	shudElementFlagStatus_t* element = (shudElementFlagStatus_t*)context;
-	team_t team;
-	gitem_t* item;
+	int side;
 
-	team = cgs.clientinfo[cg.snap->ps.clientNum].team;
+	if (!wiredHud || !wiredHud->valid) return;
+
+	side = cgs.clientinfo[cg.snap->ps.clientNum].team;
 
 	if (element->flagType == SHUDFLTYPE_NME)
 	{
-		switch (team)
+		switch (side)
 		{
-			case TEAM_RED:
-				team = TEAM_BLUE;
+			case 1: /* red -> show blue flag */
+				side = 2;
 				break;
-			case TEAM_BLUE:
-				team = TEAM_RED;
+			case 2: /* blue -> show red flag */
+				side = 1;
 				break;
-			case TEAM_FREE:
-			case TEAM_SPECTATOR:
-			case TEAM_4:
-			case TEAM_5:
-			case TEAM_6:
-			case TEAM_7:
-			case TEAM_NUM_TEAMS:
+			default:
 				return;
 		}
 	}
 
-	if (team == TEAM_RED)
+	if (side == 1) /* red */
 	{
-		item = BG_FindItemForPowerup(PW_REDFLAG);
-		element->ctx.image = cgs.media.redFlagShader[cgs.redflag];
+		int idx = wiredHud->redflag;
+		if (idx < 0 || idx > 2) idx = 0;
+		element->ctx.image = wiredHud->redFlagShader[idx];
 	}
-	else if (team == TEAM_BLUE)
+	else if (side == 2) /* blue */
 	{
-		item = BG_FindItemForPowerup(PW_BLUEFLAG);
-		element->ctx.image = cgs.media.blueFlagShader[cgs.blueflag];
+		int idx = wiredHud->blueflag;
+		if (idx < 0 || idx > 2) idx = 0;
+		element->ctx.image = wiredHud->blueFlagShader[idx];
 	}
 	else
 	{
@@ -90,12 +88,8 @@ void CG_SHUDElementFlagStatusRoutine(void* context)
 	CG_SHUDFill(&element->config);
 	CG_SHUDDrawBorder(&element->config);
 
-	if (item)
+	if (element->ctx.image)
 	{
-		// element->ctx.color[0] = 1.0f;
-		// element->ctx.color[1] = 1.0f;
-		// element->ctx.color[2] = 1.0f;
-		// element->ctx.color[3] = 1.0f;
 		CG_SHUDDrawStretchPic(element->ctx.coord, element->ctx.coordPicture, element->ctx.color, element->ctx.image);
 	}
 }
@@ -108,4 +102,4 @@ void CG_SHUDElementFlagStatusDestroy(void* context)
 	}
 }
 
-#endif // FEAT_WIRED_UI
+#endif /* FEAT_WIRED_UI */

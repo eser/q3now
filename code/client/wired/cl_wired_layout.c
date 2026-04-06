@@ -15,6 +15,7 @@ float WUI_Resolve( wuiValue_t val, float parentSizePx, float vpWidth, float vpHe
 		case UNIT_VW:   return ( val.value / 100.0f ) * vpWidth;
 		case UNIT_VH:   return ( val.value / 100.0f ) * vpHeight;
 		case UNIT_PX:   return val.value;
+		case UNIT_AUTO: return 0.0f;  // resolved later by layout engine from content
 		case UNIT_NORM:
 		default:        return val.value * parentSizePx;
 	}
@@ -414,14 +415,27 @@ void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 		menu->resolvedRect.h = vpHeight;
 	}
 
+	// UNIT_AUTO on height: size to content (walk children to find extent)
+	if ( menu->wuiRect.h.unit == UNIT_AUTO ) {
+		float bottom = 0;
+		for ( i = 0; i < menu->itemCount; i++ ) {
+			if ( !menu->items[i] ) continue;
+			// Temporarily resolve each item to find its bottom edge
+			wuiPixelRect_t childRect = WUI_ResolveRect( &menu->items[i]->wuiRect,
+				&menu->resolvedRect, vpWidth, vpHeight );
+			float childBottom = ( childRect.y - menu->resolvedRect.y ) + childRect.h;
+			if ( childBottom > bottom ) bottom = childBottom;
+		}
+		if ( bottom > 0 ) {
+			menu->resolvedRect.h = bottom;
+		} else {
+			// No children — fall back to remaining viewport space
+			menu->resolvedRect.h = vpHeight - menu->resolvedRect.y;
+		}
+	}
+
 	// Resolve items using flex layout or absolute positioning
 	if ( menu->isFlexContainer && menu->itemCount > 0 ) {
-		static int dbgOnce = 0;
-		if ( !dbgOnce ) {
-			Com_Printf(">>> WUI_LayoutMenu flex: menu=%s items=%d dir=%d justify=%d\n",
-				menu->name, menu->itemCount, menu->flexContainer.direction, menu->flexContainer.justify);
-			dbgOnce = 1;
-		}
 		// Separate items into flex participants and viewport-absolute items.
 		// Items with VW/VH on x or y are viewport-absolute (e.g. fullscreen backgrounds)
 		// and should not participate in flex flow.

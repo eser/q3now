@@ -1,10 +1,11 @@
+/* cl_wired_hud_elem_score.c -- Score display HUD elements (OWN / NME / MAX)
+   Uses numeric team IDs (0=free, 1=red, 2=blue, 3=spectator) and
+   pre-computed bridge fields to avoid game enum dependencies. */
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
 
 #if FEAT_WIRED_UI
-
-
 
 typedef enum
 {
@@ -26,7 +27,6 @@ static void* CG_SHUDElementScoreCreate(const superhudConfig_t* config, shudEleme
 
 	SHUD_ELEMENT_INIT(element, config);
 
-	//load defaults
 	if (!element->config.color.isSet)
 	{
 		element->config.color.isSet = qtrue;
@@ -65,7 +65,8 @@ void* CG_SHUDElementScoreMAXCreate(const superhudConfig_t* config)
 
 static qboolean CG_SHUDScoresGetMax(int* scores)
 {
-	if (cgs.gametype == GT_CTF)
+	/* use pre-computed isTeamGame flag + capturelimit vs fraglimit */
+	if (wiredHud->isTeamGame && wiredHud->capturelimit > 0)
 	{
 		*scores = cgs.capturelimit;
 	}
@@ -79,26 +80,20 @@ static qboolean CG_SHUDScoresGetMax(int* scores)
 
 static qboolean CG_SHUDScoresGetOWN(int* scores)
 {
-	team_t team = CG_SHUDGetOurActiveTeam();
+	int side = (int)CG_SHUDGetOurActiveTeam();
 
-	switch (team)
+	switch (side)
 	{
-		case TEAM_FREE:
-			/* FFA: OWN = your actual score */
+		case 0: /* free */
 			*scores = cg.snap->ps.persistant[PERS_SCORE];
 			return qtrue;
-		case TEAM_RED:
+		case 1: /* red */
 			*scores = cgs.scores1;
 			return *scores != SCORE_NOT_PRESENT;
-		case TEAM_BLUE:
+		case 2: /* blue */
 			*scores = cgs.scores2;
 			return *scores != SCORE_NOT_PRESENT;
-		case TEAM_SPECTATOR:
-		case TEAM_4:
-		case TEAM_5:
-		case TEAM_6:
-		case TEAM_7:
-		case TEAM_NUM_TEAMS:
+		default:
 			break;
 	}
 	return qfalse;
@@ -106,15 +101,12 @@ static qboolean CG_SHUDScoresGetOWN(int* scores)
 
 static qboolean CG_SHUDScoresGetNME(int* scores)
 {
-	team_t team = CG_SHUDGetOurActiveTeam();
+	int side = (int)CG_SHUDGetOurActiveTeam();
 
-	switch (team)
+	switch (side)
 	{
-		case TEAM_FREE:
+		case 0: /* free */
 		{
-			/* FFA: NME = leading opponent's score.
-			   If we ARE the leader (our score == scores1), show scores2.
-			   Otherwise show scores1 (the leader's score). */
 			int playerScore = cg.snap->ps.persistant[PERS_SCORE];
 			if (playerScore == cgs.scores1)
 				*scores = cgs.scores2;
@@ -122,18 +114,13 @@ static qboolean CG_SHUDScoresGetNME(int* scores)
 				*scores = cgs.scores1;
 			return *scores != SCORE_NOT_PRESENT;
 		}
-		case TEAM_RED:
+		case 1: /* red */
 			*scores = cgs.scores2;
 			return *scores != SCORE_NOT_PRESENT;
-		case TEAM_BLUE:
+		case 2: /* blue */
 			*scores = cgs.scores1;
 			return *scores != SCORE_NOT_PRESENT;
-		case TEAM_SPECTATOR:
-		case TEAM_4:
-		case TEAM_5:
-		case TEAM_6:
-		case TEAM_7:
-		case TEAM_NUM_TEAMS:
+		default:
 			break;
 	}
 	return qfalse;
@@ -141,22 +128,22 @@ static qboolean CG_SHUDScoresGetNME(int* scores)
 
 static qboolean CG_SHUDScoresShouldUseColor2(shudElementScoreType_t type)
 {
-	team_t team = CG_SHUDGetOurActiveTeam();
+	int side = (int)CG_SHUDGetOurActiveTeam();
 	int playerScore;
-	
-	if (team != TEAM_FREE)
+
+	if (side != 0 /* free */)
 		return qfalse;
-		
+
 	playerScore = cg.snap->ps.persistant[PERS_SCORE];
-	
+
 	switch (type)
 	{
 		case SHUD_ELEMENT_SCORE_OWN:
 			return (playerScore == cgs.scores1);
-			
+
 		case SHUD_ELEMENT_SCORE_NME:
 			return (cgs.scores1 != playerScore);
-		
+
 		default:
 			return qfalse;
 	}
@@ -167,8 +154,7 @@ void CG_SHUDElementScoreRoutine(void* context)
 	shudElementScore* element = (shudElementScore*)context;
 	int scores;
 	qboolean result = qfalse;
-	int playerScore;
-	qboolean shouldUseColor2;
+
 	switch (element->type)
 	{
 		case SHUD_ELEMENT_SCORE_OWN:
@@ -179,7 +165,7 @@ void CG_SHUDElementScoreRoutine(void* context)
 			result = CG_SHUDScoresGetNME(&scores);
 
 			if (!result && SHUD_CHECK_SHOW_EMPTY(element) &&
-			        CG_SHUDGetOurActiveTeam() == TEAM_FREE)
+			        (int)CG_SHUDGetOurActiveTeam() == 0 /* free */)
 			{
 				scores = 0;
 				result = qtrue;
@@ -195,7 +181,7 @@ void CG_SHUDElementScoreRoutine(void* context)
 		return;
 
 	element->ctx.text = va(element->config.text.value, scores);
-	
+
 	if (element->config.color2.isSet && CG_SHUDScoresShouldUseColor2(element->type))
 	{
 		Vector4Copy(element->config.color2.value.rgba, element->ctx.color);
@@ -216,4 +202,4 @@ void CG_SHUDElementScoreDestroy(void* context)
 	}
 }
 
-#endif // FEAT_WIRED_UI
+#endif /* FEAT_WIRED_UI */

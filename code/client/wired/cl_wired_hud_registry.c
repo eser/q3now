@@ -260,8 +260,8 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "chat15", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat15Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
 	{ "chat16", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat16Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
 	{ "console", 0, NULL, NULL, NULL },
-	{ "flagstatus_nme", SE_TEAM_ONLY, CG_SHUDElementFlagStatusNMECreate, CG_SHUDElementFlagStatusRoutine, CG_SHUDElementFlagStatusDestroy },
-	{ "flagstatus_own", SE_TEAM_ONLY, CG_SHUDElementFlagStatusOWNCreate, CG_SHUDElementFlagStatusRoutine, CG_SHUDElementFlagStatusDestroy },
+	{ "flagstatus_nme", SE_SIDES_ONLY, CG_SHUDElementFlagStatusNMECreate, CG_SHUDElementFlagStatusRoutine, CG_SHUDElementFlagStatusDestroy },
+	{ "flagstatus_own", SE_SIDES_ONLY, CG_SHUDElementFlagStatusOWNCreate, CG_SHUDElementFlagStatusRoutine, CG_SHUDElementFlagStatusDestroy },
 	{ "followmessage", 0, CG_SHUDElementFollowMessageCreate, CG_SHUDElementFollowMessageRoutine, CG_SHUDElementFollowMessageDestroy },
 	{ "fps", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementFPSCreate, CG_SHUDElementFPSRoutine, CG_SHUDElementFPSDestroy },
 	{ "fragmessage", 0, CG_SHUDElementFragMessageCreate, CG_SHUDElementFragMessageRoutine, CG_SHUDElementFragMessageDestroy },
@@ -354,27 +354,27 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "spectators", SE_IM, CG_SHUDElementSpectatorsCreate, CG_SHUDElementSpectatorsRoutine, CG_SHUDElementSpectatorsDestroy },
 	// old statusbar_health/armor/ammo count/icon/bar entries removed — use statusbar_value/icon/bar + bind
 	{ "targetname", 0, CG_SHUDElementTargetNameCreate, CG_SHUDElementTargetNameRoutine, CG_SHUDElementTargetNameDestroy },
-	{ "targetstatus", SE_TEAM_ONLY, CG_SHUDElementTargetStatusCreate, CG_SHUDElementTargetStatusRoutine, CG_SHUDElementTargetStatusDestroy },
-	{ "teamcount_nme", SE_TEAM_ONLY, CG_SHUDElementTeamCountNMECreate, CG_SHUDElementTeamCountRoutine, CG_SHUDElementTeamCountDestroy },
-	{ "teamcount_own", SE_TEAM_ONLY, CG_SHUDElementTeamCountOWNCreate, CG_SHUDElementTeamCountRoutine, CG_SHUDElementTeamCountDestroy },
-	{ "teamicon_nme", SE_TEAM_ONLY, NULL, NULL, NULL },
-	{ "teamicon_own", SE_TEAM_ONLY, NULL, NULL, NULL },
-	{ "team1", SE_TEAM_ONLY, CG_SHUDElementTeam1Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team2", SE_TEAM_ONLY, CG_SHUDElementTeam2Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team3", SE_TEAM_ONLY, CG_SHUDElementTeam3Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team4", SE_TEAM_ONLY, CG_SHUDElementTeam4Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team5", SE_TEAM_ONLY, CG_SHUDElementTeam5Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team6", SE_TEAM_ONLY, CG_SHUDElementTeam6Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team7", SE_TEAM_ONLY, CG_SHUDElementTeam7Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team8", SE_TEAM_ONLY, CG_SHUDElementTeam8Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team9", SE_TEAM_ONLY, CG_SHUDElementTeam9Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team10", SE_TEAM_ONLY, CG_SHUDElementTeam10Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team11", SE_TEAM_ONLY, CG_SHUDElementTeam11Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team12", SE_TEAM_ONLY, CG_SHUDElementTeam12Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team13", SE_TEAM_ONLY, CG_SHUDElementTeam13Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team14", SE_TEAM_ONLY, CG_SHUDElementTeam14Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team15", SE_TEAM_ONLY, CG_SHUDElementTeam15Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team16", SE_TEAM_ONLY, CG_SHUDElementTeam16Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "targetstatus", SE_SIDES_ONLY, CG_SHUDElementTargetStatusCreate, CG_SHUDElementTargetStatusRoutine, CG_SHUDElementTargetStatusDestroy },
+	{ "teamcount_nme", SE_SIDES_ONLY, CG_SHUDElementTeamCountNMECreate, CG_SHUDElementTeamCountRoutine, CG_SHUDElementTeamCountDestroy },
+	{ "teamcount_own", SE_SIDES_ONLY, CG_SHUDElementTeamCountOWNCreate, CG_SHUDElementTeamCountRoutine, CG_SHUDElementTeamCountDestroy },
+	{ "teamicon_nme", SE_SIDES_ONLY, NULL, NULL, NULL },
+	{ "teamicon_own", SE_SIDES_ONLY, NULL, NULL, NULL },
+	{ "team1", SE_SIDES_ONLY, CG_SHUDElementTeam1Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team2", SE_SIDES_ONLY, CG_SHUDElementTeam2Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team3", SE_SIDES_ONLY, CG_SHUDElementTeam3Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team4", SE_SIDES_ONLY, CG_SHUDElementTeam4Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team5", SE_SIDES_ONLY, CG_SHUDElementTeam5Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team6", SE_SIDES_ONLY, CG_SHUDElementTeam6Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team7", SE_SIDES_ONLY, CG_SHUDElementTeam7Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team8", SE_SIDES_ONLY, CG_SHUDElementTeam8Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team9", SE_SIDES_ONLY, CG_SHUDElementTeam9Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team10", SE_SIDES_ONLY, CG_SHUDElementTeam10Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team11", SE_SIDES_ONLY, CG_SHUDElementTeam11Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team12", SE_SIDES_ONLY, CG_SHUDElementTeam12Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team13", SE_SIDES_ONLY, CG_SHUDElementTeam13Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team14", SE_SIDES_ONLY, CG_SHUDElementTeam14Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team15", SE_SIDES_ONLY, CG_SHUDElementTeam15Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team16", SE_SIDES_ONLY, CG_SHUDElementTeam16Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
 	{ "votemessagearena", 0, NULL, NULL, NULL },
 	{ "votemessageworld", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementVMWCreate, CG_SHUDElementVMWRoutine, CG_SHUDElementVMWDestroy },
 	{ "warmupinfo", 0, CG_SHUDElementWarmupInfoCreate, CG_SHUDElementWarmupInfoRoutine, CG_SHUDElementWarmupInfoDestroy },
@@ -516,7 +516,7 @@ void WiredHud_RenderElements( void ) {
 
 	is_dead        = wiredHud->predictedPlayerState.pm_type == PM_DEAD;
 	is_intermission = wiredHud->predictedPlayerState.pm_type == PM_INTERMISSION;
-	is_team_game   = wiredHud->gametype >= GT_TDM;
+	is_team_game   = wiredHud->isTeamGame;
 	is_spectator   = wired_IsSpectator();
 	is_scores      = wiredHud->showScores;
 
@@ -527,7 +527,7 @@ void WiredHud_RenderElements( void ) {
 		vflags = elem->visibility;
 
 		skip = (!(vflags & SE_IM) && is_intermission) ||
-		       ((vflags & SE_TEAM_ONLY) && !is_team_game) ||
+		       ((vflags & SE_SIDES_ONLY) && !is_team_game) ||
 		       (!(vflags & SE_DEAD) && is_dead) ||
 		       (!(vflags & SE_SPECT) && is_spectator) ||
 		       ((vflags & SE_SCORES_HIDE) && is_scores) ||

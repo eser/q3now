@@ -12,6 +12,7 @@ the wiredHud global instead of cgame globals.
 #include "cl_wired_hud.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_fonts.h"
+#include "cl_wired_text.h"
 #include "cl_wired_hud_private.h"
 
 // from cl_wired_hud_compat.c
@@ -149,7 +150,7 @@ void WiredHud_ReceiveEvent( int type, const char *data ) {
 			int wp;
 			float acc;
 			if ( sscanf( data, "%d|%f", &wp, &acc ) == 2 ) {
-				if ( wp >= 0 && wp < WP_NUM_WEAPONS ) {
+				if ( wp >= 0 && wp < (int)(sizeof(ctx->tempAcc.weapon) / sizeof(ctx->tempAcc.weapon[0])) ) {
 					ctx->tempAcc.weapon[wp].tempAccuracy = acc;
 				}
 			}
@@ -242,9 +243,7 @@ static void WiredHud_DrawFps( int realtime ) {
 	// green tint to distinguish from SuperHUD's white fps
 	color[0] = 0.2f; color[1] = 1.0f; color[2] = 0.4f; color[3] = 0.8f;
 
-	CG_FontSelect( CG_FontIndexFromName( "sansman" ) );
-	CG_ModernDrawString( x, y, buf, color, charSize, charSize * 1.5f, 0,
-		DS_HRIGHT | DS_PROPORTIONAL, NULL );
+	Text_Draw( buf, x, y, FONT_DISPLAY, charSize, color, TEXT_ALIGN_RIGHT, 0 );
 }
 
 // ── wiredItemDef_t → superhudConfig_t conversion ─────────────────────
@@ -459,33 +458,25 @@ void WiredHud_Routine( int realtime ) {
 			const char *menuName;
 			wiredMenuDef_t *sbMenu;
 
-			// select scoreboard menu by gametype
+			// select scoreboard menu by gametype (numeric: 1=duel 5=tdm 6=ctf 7=1fctf)
 			switch ( wiredHud->gametype ) {
-				case 1:  menuName = va( "%s_duel", prefix ); break; // GT_TOURNAMENT
-				case 5:  menuName = va( "%s_tdm", prefix ); break;  // GT_TDM
-				case 6:  menuName = va( "%s_ctf", prefix ); break;  // GT_CTF
-				case 7:  menuName = va( "%s_ctf", prefix ); break;  // GT_1FCTF
-				default: menuName = va( "%s_ffa", prefix ); break;  // FFA, Tournament, etc.
+				case 1:  menuName = va( "%s_duel", prefix ); break;
+				case 5:  menuName = va( "%s_tdm", prefix ); break;
+				case 6:  menuName = va( "%s_ctf", prefix ); break;
+				case 7:  menuName = va( "%s_ctf", prefix ); break;
+				default: menuName = va( "%s_ffa", prefix ); break;
 			}
 
 			sbMenu = WiredUI_FindMenu( menuName );
 			if ( sbMenu ) {
 				// set cvars for header text
-				{
-					const char *gt;
-					if (wiredHud->gametype >= 0 && wiredHud->gametype < GT_MAX_GAME_TYPE) {
-						gt = bg_gametypelist[wiredHud->gametype].name;
-					} else {
-						gt = bg_gametypelist[GT_DEATHMATCH].name;
-					}
-					Cvar_Set( "wired_sb_gametype", gt );
-				}
+				Cvar_Set( "wired_sb_gametype", wiredHud->gametypeName );
 
 				// compute placement text (FFA modes only)
 				if ( wiredHud->gametype < 5 ) {
 					int i, myRank = 0, myScore = 0;
 					for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
-						if ( wiredHud->scores[i].team == TEAM_SPECTATOR ) continue;
+						if ( wiredHud->scores[i].team == 3 ) continue; /* spectator */
 						myRank++;
 						if ( wiredHud->scores[i].client == wiredHud->clientNum ) {
 							myScore = wiredHud->scores[i].score;

@@ -48,7 +48,7 @@ void CG_SHUDElementTempAccRoutine( void *context ) {
 
 	// track the current weapon's temp accuracy
 	wp = wiredHud->weapon;
-	if ( wp < 0 || wp >= WP_NUM_WEAPONS ) return;
+	if ( wp < 0 || wp >= (int)(sizeof(ctx->tempAcc.weapon) / sizeof(ctx->tempAcc.weapon[0])) ) return;
 
 	acc = ctx->tempAcc.weapon[wp].tempAccuracy;
 
@@ -86,7 +86,7 @@ void CG_SHUDElementTempAccRoutine( void *context ) {
 			}
 
 			trap_R_SetColor( color );
-			trap_R_DrawStretchPic( x, y, w, h, 0, 0, 1, 1, icon );
+			Wired_DrawPic( x, y, w, h, 0, 0, 1, 1, icon );
 			trap_R_SetColor( NULL );
 		}
 	} else {

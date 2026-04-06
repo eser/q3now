@@ -29,7 +29,7 @@ Provides:
 // ── renderer trap → direct re.* calls ─────────────────────────────────
 
 #define trap_R_SetColor(c)                  re.SetColor(c)
-#define trap_R_DrawStretchPic(x,y,w,h,s1,t1,s2,t2,sh) \
+#define Wired_DrawPic(x,y,w,h,s1,t1,s2,t2,sh) \
         re.DrawStretchPic(x,y,w,h,s1,t1,s2,t2,sh)
 #define trap_R_RegisterShader(n)            re.RegisterShader(n)
 #define trap_R_RegisterShaderNoMip(n)       re.RegisterShaderNoMip(n)
@@ -162,7 +162,7 @@ typedef struct {
 	qhandle_t ammoIcon;
 } wiredWeaponCompat_t;
 
-extern wiredWeaponCompat_t wired_cg_weapons[MAX_WEAPONS];
+extern wiredWeaponCompat_t wired_cg_weapons[32]; /* generic weapon buffer */
 #define cg_weapons wired_cg_weapons
 
 // ── helper function compat ────────────────────────────────────────────

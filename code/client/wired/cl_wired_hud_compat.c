@@ -26,7 +26,7 @@ Provides stub implementations of cgame helper functions.
 
 wiredCgCompat_t     wired_cg;
 wiredCgsCompat_t    wired_cgs;
-wiredWeaponCompat_t wired_cg_weapons[MAX_WEAPONS];
+wiredWeaponCompat_t wired_cg_weapons[32]; /* generic weapon buffer */
 wiredItemCompat_t   wired_cg_items[256];
 #undef cg_drawRewards
 #undef cg_drawCrosshair
@@ -162,10 +162,15 @@ void WiredHud_SyncCompat( void ) {
 		wired_sortedTeamPlayers[i] = wiredHud->sortedTeamPlayers[i];
 	}
 
-	// weapon + ammo icons
-	for ( i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++ ) {
-		wired_cg_weapons[i].weaponIcon = wiredHud->weaponIcons[i];
-		wired_cg_weapons[i].ammoIcon   = wiredHud->ammoIcons[i];
+	/* weapon + ammo icons — copy as many slots as both buffers can hold */
+	{
+		int maxSlots = (int)(sizeof(wired_cg_weapons) / sizeof(wired_cg_weapons[0]));
+		int srcSlots = (int)(sizeof(wiredHud->weaponIcons) / sizeof(wiredHud->weaponIcons[0]));
+		if ( srcSlots < maxSlots ) maxSlots = srcSlots;
+		for ( i = 1; i < maxSlots; i++ ) {
+			wired_cg_weapons[i].weaponIcon = wiredHud->weaponIcons[i];
+			wired_cg_weapons[i].ammoIcon   = wiredHud->ammoIcons[i];
+		}
 	}
 
 	// item icons (for item pickup, powerup display)
@@ -200,7 +205,7 @@ qboolean wired_IsFollowing( void ) {
 }
 
 qboolean wired_IsSpectator( void ) {
-	return ( wiredHud->ourTeam == TEAM_SPECTATOR );
+	return wiredHud->isSpectator;
 }
 
 qboolean wired_IsGameTypeFreeze( void ) {

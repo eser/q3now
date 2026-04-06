@@ -28,7 +28,8 @@ typedef enum {
 	UNIT_NORM = 0,   // fraction of parent (0.0-1.0)
 	UNIT_VW,         // fraction of viewport width (0-100)
 	UNIT_VH,         // fraction of viewport height (0-100)
-	UNIT_PX          // real device pixels
+	UNIT_PX,         // real device pixels
+	UNIT_AUTO        // size determined by content (children or text)
 } wuiUnit_t;
 
 // -- Unit-aware value -----------------------------------------------------

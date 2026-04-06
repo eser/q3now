@@ -115,7 +115,7 @@ static void CG_ScoreboardAdjustTeamColor(const vec4_t src, vec4_t dst) {
 static void CG_ScoreboardDrawField(int x, int y, int value) {
 	char num[16];
 	Com_sprintf(num, sizeof(num), "%d", value);
-	trap_R_DrawText(num, x + 8, y + 8, FONT_DISPLAY, 40, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(num, (x + 8) * NORM_HSCALE, (y + 8) * NORM_VSCALE, FONT_DISPLAY, (40) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 }
 
 
@@ -184,11 +184,11 @@ static void CG_DrawClientScore(int y, score_t *score, float *color, float fade, 
 			{
 				if (largeFormat)
 				{
-					CG_DrawPic(iconx, y - (32 - BIGCHAR_HEIGHT) / 2, 32, 32, cgs.media.botSkillShaders[ ci->botSkill - 1 ]);
+					CG_DrawPicNorm((iconx) * NORM_HSCALE, (y - (32 - BIGCHAR_HEIGHT) / 2) * NORM_VSCALE, (32) * NORM_HSCALE, (32) * NORM_VSCALE, cgs.media.botSkillShaders[ ci->botSkill - 1 ]);
 				}
 				else
 				{
-					CG_DrawPic(iconx, y, 16, 16, cgs.media.botSkillShaders[ ci->botSkill - 1 ]);
+					CG_DrawPicNorm((iconx) * NORM_HSCALE, (y) * NORM_VSCALE, (16) * NORM_HSCALE, (16) * NORM_VSCALE, cgs.media.botSkillShaders[ ci->botSkill - 1 ]);
 				}
 			}
 		}
@@ -199,7 +199,7 @@ static void CG_DrawClientScore(int y, score_t *score, float *color, float fade, 
 			int score_x = iconx;
 
 			Com_sprintf(string, sizeof(string), "%i/%i", ci->wins, ci->losses);
-			trap_R_DrawText(string, score_x, y, FONT_UI, 12, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(string, (score_x) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 
 	}
@@ -283,13 +283,13 @@ static void CG_DrawClientScore(int y, score_t *score, float *color, float fade, 
 		}
 
 		hcolor[3] = fade * 0.7;
-		CG_FillRect(SB_SCORELINE_X + BIGCHAR_WIDTH + (SB_RATING_WIDTH / 2.0), y,
-		            CG_VIRTUAL_W - SB_SCORELINE_X - BIGCHAR_WIDTH, BIGCHAR_HEIGHT + 1, hcolor);
+		CG_FillRectNorm((SB_SCORELINE_X + BIGCHAR_WIDTH + (SB_RATING_WIDTH / 2.0)) * NORM_HSCALE, y * NORM_VSCALE,
+		            (640 - SB_SCORELINE_X - BIGCHAR_WIDTH) * NORM_HSCALE, (BIGCHAR_HEIGHT + 1) * NORM_VSCALE, hcolor);
 	}
 
-	trap_R_DrawText(string, 128, y, FONT_DISPLAY, 16, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(string, (128) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
-	trap_R_DrawText(ci->name, 128 + 16 * 16, y, FONT_UI, 16, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(ci->name, (128 + 16 * 16) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (16) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 	// add the "ready" marker for intermission exiting
 	if (cg.warmup == 0 && cg.predictedPlayerState.pm_type != PM_INTERMISSION)
@@ -354,11 +354,11 @@ static void CG_BEDrawClientScore(int y, score_t *score, float *color, float fade
 			{
 				if (largeFormat)
 				{
-					CG_DrawPic(iconx, y - (32 - bHeight) / 2, 32, 32, cgs.media.botSkillShaders[ci->botSkill - 1]);
+					CG_DrawPicNorm((iconx) * NORM_HSCALE, (y - (32 - bHeight) / 2) * NORM_VSCALE, (32) * NORM_HSCALE, (32) * NORM_VSCALE, cgs.media.botSkillShaders[ci->botSkill - 1]);
 				}
 				else
 				{
-					CG_DrawPic(iconx, y, 16, 16, cgs.media.botSkillShaders[ci->botSkill - 1]);
+					CG_DrawPicNorm((iconx) * NORM_HSCALE, (y) * NORM_VSCALE, (16) * NORM_HSCALE, (16) * NORM_VSCALE, cgs.media.botSkillShaders[ci->botSkill - 1]);
 				}
 			}
 		}
@@ -368,7 +368,7 @@ static void CG_BEDrawClientScore(int y, score_t *score, float *color, float fade
 			int score_x = iconx;
 
 			Com_sprintf(string, sizeof(string), "%i/%i", ci->wins, ci->losses);
-			trap_R_DrawText(string, score_x, y, FONT_DISPLAY, bHeight, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(string, (score_x) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (bHeight) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 	}
 
@@ -434,15 +434,15 @@ static void CG_BEDrawClientScore(int y, score_t *score, float *color, float fade
 				break;
 		}
 		hcolor[3] = fade * 0.7;
-		CG_FillRect(SB_SCORELINE_X + BIGCHAR_WIDTH + (SB_RATING_WIDTH / 2.0), y,
-		            CG_VIRTUAL_W - SB_SCORELINE_X - bWidth, bHeight + 1, hcolor);
+		CG_FillRectNorm((SB_SCORELINE_X + BIGCHAR_WIDTH + (SB_RATING_WIDTH / 2.0)) * NORM_HSCALE, y * NORM_VSCALE,
+		            (640 - SB_SCORELINE_X - bWidth) * NORM_HSCALE, (bHeight + 1) * NORM_VSCALE, hcolor);
 	}
 
-	trap_R_DrawText(string, 206, y, FONT_DISPLAY, bHeight, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText(string2, 286, y, FONT_DISPLAY, bHeight, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText(string3, 366, y, FONT_DISPLAY, bHeight, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(string, (206) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (bHeight) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(string2, (286) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (bHeight) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(string3, (366) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (bHeight) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
-	trap_R_DrawText(ci->name, 128 + 4 + 16 * 16, y, FONT_DISPLAY, bHeight, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(ci->name, (128 + 4 + 16 * 16) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (bHeight) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 
 	if (cg.warmup != 0 || cg.predictedPlayerState.pm_type == PM_INTERMISSION)
@@ -539,13 +539,13 @@ qboolean CG_DrawOldScoreboard(void)
 
 	if (cg.demoPlayback != 0)
 	{
-		trap_R_DrawText("^3Demo Playback", (int)CG_VIRTUAL_W / 2, 40, FONT_DISPLAY, 16, CG_ColorFromAlpha(fade), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("^3Demo Playback", (640 / 2) * NORM_HSCALE, (40) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, CG_ColorFromAlpha(fade), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 	// fragged by ... line
 	else if (cg.killerName[0])
 	{
 		s = va("Fragged by %s", cg.killerName);
-		trap_R_DrawText(s, (int)CG_VIRTUAL_W / 2, 40, FONT_DISPLAY, 16, CG_ColorFromAlpha(fade), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (640 / 2) * NORM_HSCALE, (40) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, CG_ColorFromAlpha(fade), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	// current rank
@@ -556,7 +556,7 @@ qboolean CG_DrawOldScoreboard(void)
 			s = va("%s place with %i",
 			       CG_PlaceString(cg.snap->ps.persistant[PERS_RANK] + 1),
 			       cg.snap->ps.persistant[PERS_SCORE]);
-			trap_R_DrawText(s, (int)CG_VIRTUAL_W / 2, 60, FONT_DISPLAY, 16, CG_ColorFromAlpha(fade), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(s, (640 / 2) * NORM_HSCALE, (60) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, CG_ColorFromAlpha(fade), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 		}
 	}
 	else
@@ -574,16 +574,16 @@ qboolean CG_DrawOldScoreboard(void)
 			s = va("Blue leads %i to %i", cg.teamScores[1], cg.teamScores[0]);
 		}
 
-		trap_R_DrawText(s, (int)CG_VIRTUAL_W / 2, 60, FONT_DISPLAY, 16, CG_ColorFromAlpha(fade), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (640 / 2) * NORM_HSCALE, (60) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, CG_ColorFromAlpha(fade), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	// scoreboard
 	y = SB_HEADER;
 
-	CG_DrawPic(SB_SCORE_X + (SB_RATING_WIDTH / 2.0), y, 64, 32, cgs.media.scoreboardScore);
-	CG_DrawPic(SB_PING_X - (SB_RATING_WIDTH / 2.0), y, 64, 32, cgs.media.scoreboardPing);
-	CG_DrawPic(SB_TIME_X - (SB_RATING_WIDTH / 2.0), y, 64, 32, cgs.media.scoreboardTime);
-	CG_DrawPic(SB_NAME_X - (SB_RATING_WIDTH / 2.0), y, 64, 32, cgs.media.scoreboardName);
+	CG_DrawPicNorm((SB_SCORE_X + (SB_RATING_WIDTH / 2.0)) * NORM_HSCALE, (y) * NORM_VSCALE, (64) * NORM_HSCALE, (32) * NORM_VSCALE, cgs.media.scoreboardScore);
+	CG_DrawPicNorm((SB_PING_X - (SB_RATING_WIDTH / 2.0)) * NORM_HSCALE, (y) * NORM_VSCALE, (64) * NORM_HSCALE, (32) * NORM_VSCALE, cgs.media.scoreboardPing);
+	CG_DrawPicNorm((SB_TIME_X - (SB_RATING_WIDTH / 2.0)) * NORM_HSCALE, (y) * NORM_VSCALE, (64) * NORM_HSCALE, (32) * NORM_VSCALE, cgs.media.scoreboardTime);
+	CG_DrawPicNorm((SB_NAME_X - (SB_RATING_WIDTH / 2.0)) * NORM_HSCALE, (y) * NORM_VSCALE, (64) * NORM_HSCALE, (32) * NORM_VSCALE, cgs.media.scoreboardName);
 
 	y = SB_TOP;
 
@@ -615,22 +615,22 @@ qboolean CG_DrawOldScoreboard(void)
 		if (cg.teamScores[0] >= cg.teamScores[1])
 		{
 			n1 = CG_TeamScoreboard(y, TEAM_RED, fade, maxClients, lineHeight);
-			CG_DrawTeamBackground(0, y - topBorderSize, (int)CG_VIRTUAL_W, n1 * lineHeight + bottomBorderSize, 0.33f, TEAM_RED);
+			CG_DrawTeamBackground(0, y - topBorderSize, 640, n1 * lineHeight + bottomBorderSize, 0.33f, TEAM_RED);
 			y += (n1 * lineHeight) + BIGCHAR_HEIGHT;
 			maxClients -= n1;
 			n2 = CG_TeamScoreboard(y, TEAM_BLUE, fade, maxClients, lineHeight);
-			CG_DrawTeamBackground(0, y - topBorderSize, (int)CG_VIRTUAL_W, n2 * lineHeight + bottomBorderSize, 0.33f, TEAM_BLUE);
+			CG_DrawTeamBackground(0, y - topBorderSize, 640, n2 * lineHeight + bottomBorderSize, 0.33f, TEAM_BLUE);
 			y += (n2 * lineHeight) + BIGCHAR_HEIGHT;
 			maxClients -= n2;
 		}
 		else
 		{
 			n1 = CG_TeamScoreboard(y, TEAM_BLUE, fade, maxClients, lineHeight);
-			CG_DrawTeamBackground(0, y - topBorderSize, (int)CG_VIRTUAL_W, n1 * lineHeight + bottomBorderSize, 0.33f, TEAM_BLUE);
+			CG_DrawTeamBackground(0, y - topBorderSize, 640, n1 * lineHeight + bottomBorderSize, 0.33f, TEAM_BLUE);
 			y += (n1 * lineHeight) + BIGCHAR_HEIGHT;
 			maxClients -= n1;
 			n2 = CG_TeamScoreboard(y, TEAM_RED, fade, maxClients, lineHeight);
-			CG_DrawTeamBackground(0, y - topBorderSize, (int)CG_VIRTUAL_W, n2 * lineHeight + bottomBorderSize, 0.33f, TEAM_RED);
+			CG_DrawTeamBackground(0, y - topBorderSize, 640, n2 * lineHeight + bottomBorderSize, 0.33f, TEAM_RED);
 			y += (n2 * lineHeight) + BIGCHAR_HEIGHT;
 			maxClients -= n2;
 
@@ -752,23 +752,23 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 		float panelH = (firstRowY - 40) + numPlayers * rowH + 20;
 		if (numSpecs > 0)
 			panelH += 30 + ((numSpecs + 1) / 2) * 10;
-		CG_FillRect(panelX, 34, panelW, panelH, bgColor);
+		CG_FillRectNorm((panelX) * NORM_HSCALE, (34) * NORM_VSCALE, (panelW) * NORM_HSCALE, (panelH) * NORM_VSCALE, bgColor);
 	}
 
 	/* Header: title */
 	y = 40;
 	if (cg.demoPlayback)
 	{
-		trap_R_DrawText("^3Demo Playback", CG_VIRTUAL_W / 2.0f, y, FONT_DISPLAY, 18, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("^3Demo Playback", (640 / 2.0f) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (18) * NORM_VSCALE, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 	else if (cg.killerName[0])
 	{
 		s = va("Fragged by %s", cg.killerName);
-		trap_R_DrawText(s, CG_VIRTUAL_W / 2.0f, y, FONT_DISPLAY, 18, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (640 / 2.0f) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (18) * NORM_VSCALE, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 	else
 	{
-		trap_R_DrawText(bg_gametypelist[cgs.gametype].name, CG_VIRTUAL_W / 2.0f, y, FONT_DISPLAY, 18, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(bg_gametypelist[cgs.gametype].name, (640 / 2.0f) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (18) * NORM_VSCALE, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	/* Header: placement */
@@ -778,31 +778,31 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 		s = va("%s place with %i",
 		       CG_PlaceString(cg.snap->ps.persistant[PERS_RANK] + 1),
 		       cg.snap->ps.persistant[PERS_SCORE]);
-		trap_R_DrawText(s, CG_VIRTUAL_W / 2.0f, y, FONT_UI, 14, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (640 / 2.0f) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (14) * NORM_VSCALE, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	/* thin separator line below header */
 	{
 		vec4_t lineColor = {0.3f, 0.3f, 0.4f, 0.6f};
-		CG_FillRect(panelX + 4, 80, panelW - 8, 1, lineColor);
+		CG_FillRectNorm((panelX + 4) * NORM_HSCALE, (80) * NORM_VSCALE, (panelW - 8) * NORM_HSCALE, (1) * NORM_VSCALE, lineColor);
 	}
 
 	/* Column headers */
 	hdrColor[0] = 0.7f; hdrColor[1] = 0.8f; hdrColor[2] = 0.9f; hdrColor[3] = (*color)[3];
 	y = (int)hdrY;
-	trap_R_DrawText("#",      colRank,      y, FONT_UI, 12, hdrColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
-	trap_R_DrawText("PLAYER", colName,      y, FONT_UI, 12, hdrColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
-	trap_R_DrawText("SCORE",  colScore,     y, FONT_UI, 12, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText("K/D",    colKD,        y, FONT_UI, 12, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText("DMG",    colDmg,       y, FONT_UI, 12, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText("WEAP",   colWeap + 16, y, FONT_UI, 12, hdrColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
-	trap_R_DrawText("ACC%",   colAcc,       y, FONT_UI, 12, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText("PING",   colPing,      y, FONT_UI, 12, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm("#", (     colRank) * NORM_HSCALE, (     y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm("PLAYER", (colName) * NORM_HSCALE, (     y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm("SCORE", ( colScore) * NORM_HSCALE, (    y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm("K/D", (   colKD) * NORM_HSCALE, (       y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm("DMG", (   colDmg) * NORM_HSCALE, (      y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm("WEAP", (  colWeap + 16) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm("ACC%", (  colAcc) * NORM_HSCALE, (      y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm("PING", (  colPing) * NORM_HSCALE, (     y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 	/* separator below column header */
 	{
 		vec4_t lineColor = {0.3f, 0.3f, 0.4f, 0.4f};
-		CG_FillRect(panelX + 4, hdrY + 13, panelW - 8, 1, lineColor);
+		CG_FillRectNorm((panelX + 4) * NORM_HSCALE, (hdrY + 13) * NORM_VSCALE, (panelW - 8) * NORM_HSCALE, (1) * NORM_VSCALE, lineColor);
 	}
 
 	/* Player rows */
@@ -832,19 +832,19 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 		{
 			vec4_t hlColor = {0.15f, 0.2f, 0.4f, 0.35f};
 			localClient = qtrue;
-			CG_FillRect(panelX + 2, (float)y - 1, panelW - 4, rowH, hlColor);
+			CG_FillRectNorm((panelX + 2) * NORM_HSCALE, ((float)y - 1) * NORM_VSCALE, (panelW - 4) * NORM_HSCALE, (rowH) * NORM_VSCALE, hlColor);
 		}
 
 		/* alternating row shading */
 		if (rank % 2 == 0)
 		{
 			vec4_t altColor = {0.1f, 0.1f, 0.15f, 0.2f};
-			CG_FillRect(panelX + 2, (float)y - 1, panelW - 4, rowH, altColor);
+			CG_FillRectNorm((panelX + 2) * NORM_HSCALE, ((float)y - 1) * NORM_VSCALE, (panelW - 4) * NORM_HSCALE, (rowH) * NORM_VSCALE, altColor);
 		}
 
 		/* rank number */
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i", rank);
-		trap_R_DrawText(tmpStr, colRank + 10, y, FONT_UI, 14, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (colRank + 10) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (14) * NORM_VSCALE, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* head icon */
 		if (score->client == cg.snap->ps.clientNum)
@@ -854,22 +854,22 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 		CG_DrawHead(colHead, y + 1, 14, 14, score->client, headAngles);
 
 		/* player name (proportional, truncated) */
-		trap_R_DrawText(ci->name, colName, y + 1, FONT_UI, 13, *color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(ci->name, (colName) * NORM_HSCALE, (y + 1) * NORM_VSCALE, FONT_UI, (13) * NORM_VSCALE, *color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 		/* score */
 		if (score->ping == -1)
 		{
-			trap_R_DrawText("^2...", colScore, y, FONT_UI, 14, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("^2...", (colScore) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (14) * NORM_VSCALE, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 			y += (int)rowH;
 			continue;
 		}
 
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i", score->score);
-		trap_R_DrawText(tmpStr, colScore, y, FONT_UI, 14, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (colScore) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (14) * NORM_VSCALE, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* K/D */
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", score->score, score->deaths);
-		trap_R_DrawText(tmpStr, colKD, y + 2, FONT_UI, 12, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (colKD) * NORM_HSCALE, (y + 2) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* total damage */
 		totalDmg = 0;
@@ -877,7 +877,7 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 			totalDmg += cgs.attackStats[score->client][j].damage;
 		}
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i", totalDmg);
-		trap_R_DrawText(tmpStr, colDmg, y + 2, FONT_UI, 12, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (colDmg) * NORM_HSCALE, (y + 2) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* best weapon icon (by kills) */
 		bestAtt = ATT_NONE;
@@ -893,7 +893,7 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 
 		int bestWp = bg_attacklist[bestAtt].weapon;
 		if ( bestWp != WP_NONE && cg_weapons[bestWp].weaponIcon ) {
-			CG_DrawPic(colWeap + 8, y + 1, 14, 14, cg_weapons[bestWp].weaponIcon);
+			CG_DrawPicNorm((colWeap + 8) * NORM_HSCALE, (y + 1) * NORM_VSCALE, (14) * NORM_HSCALE, (14) * NORM_VSCALE, cg_weapons[bestWp].weaponIcon);
 		}
 
 		/* accuracy (colored) */
@@ -904,7 +904,7 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 			Com_sprintf(tmpStr, sizeof(tmpStr), "^3%i%%", acc);
 		else
 			Com_sprintf(tmpStr, sizeof(tmpStr), "^1%i%%", acc);
-		trap_R_DrawText(tmpStr, colAcc, y + 2, FONT_UI, 12, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (colAcc) * NORM_HSCALE, (y + 2) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* ping (colored) */
 		if (score->ping < 40)
@@ -914,7 +914,7 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 		else
 			pingColor = 1;
 		Com_sprintf(tmpStr, sizeof(tmpStr), "^%i%i", pingColor, score->ping);
-		trap_R_DrawText(tmpStr, colPing, y + 2, FONT_UI, 12, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (colPing) * NORM_HSCALE, (y + 2) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, *color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		y += (int)rowH;
 	}
@@ -927,10 +927,10 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 		int specY, specCount, si;
 
 		y += 6;
-		CG_FillRect(panelX + 4, (float)y, panelW - 8, 1, lineColor);
+		CG_FillRectNorm((panelX + 4) * NORM_HSCALE, ((float)y) * NORM_VSCALE, (panelW - 8) * NORM_HSCALE, (1) * NORM_VSCALE, lineColor);
 		y += 4;
 
-		trap_R_DrawText("Spectators", CG_VIRTUAL_W / 2.0f, y, FONT_UI, 12, hdrColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("Spectators", (640 / 2.0f) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, hdrColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 		y += 14;
 
 		specY = y;
@@ -947,7 +947,7 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 
 			sx = (specCount % 2 == 0) ? (int)(panelX + 20) : (int)(panelX + 260);
 			sy = specY + (specCount / 2) * 10;
-			trap_R_DrawText(ci->name, sx, sy, FONT_UI, 10, *color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(ci->name, (sx) * NORM_HSCALE, (sy) * NORM_VSCALE, FONT_UI, (10) * NORM_VSCALE, *color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			specCount++;
 		}
 	}
@@ -987,11 +987,11 @@ static void CG_DrawDuelFighterPanel(int px, int py, int pw, score_t *sc, float f
 
 	/* panel background */
 	panelBg[0] = 0.08f; panelBg[1] = 0.08f; panelBg[2] = 0.12f; panelBg[3] = 0.65f;
-	CG_FillRect((float)px, (float)py, (float)pw, 400.0f, panelBg);
+	CG_FillRectNorm(((float)px) * NORM_HSCALE, ((float)py) * NORM_VSCALE, ((float)pw) * NORM_HSCALE, (400.0f) * NORM_VSCALE, panelBg);
 
 	/* header area background */
 	hdrBg[0] = 0.12f; hdrBg[1] = 0.12f; hdrBg[2] = 0.2f; hdrBg[3] = 0.5f;
-	CG_FillRect((float)px, (float)py, (float)pw, 70.0f, hdrBg);
+	CG_FillRectNorm(((float)px) * NORM_HSCALE, ((float)py) * NORM_VSCALE, ((float)pw) * NORM_HSCALE, (70.0f) * NORM_VSCALE, hdrBg);
 
 	/* head icon */
 	VectorClear(headAngles);
@@ -1000,16 +1000,16 @@ static void CG_DrawDuelFighterPanel(int px, int py, int pw, score_t *sc, float f
 
 	/* player name */
 	textColor[0] = textColor[1] = textColor[2] = 1.0f; textColor[3] = fade;
-	trap_R_DrawText(ci->name, px + 58, py + 6, FONT_UI, 16, textColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(ci->name, (px + 58) * NORM_HSCALE, (py + 6) * NORM_VSCALE, FONT_UI, (16) * NORM_VSCALE, textColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 	/* big score */
 	Com_sprintf(tmpStr, sizeof(tmpStr), "%i", sc->score);
-	trap_R_DrawText(tmpStr, px + pw - 8, py + 2, FONT_DISPLAY, 28, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(tmpStr, (px + pw - 8) * NORM_HSCALE, (py + 2) * NORM_VSCALE, FONT_DISPLAY, (28) * NORM_VSCALE, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 	/* sub-header: acc, W/L, ping */
 	Com_sprintf(tmpStr, sizeof(tmpStr), "Acc: %i%%  W:%i L:%i  Ping: %ims",
 	            sc->accuracy, ci->wins, ci->losses, sc->ping);
-	trap_R_DrawText(tmpStr, px + 58, py + 28, FONT_UI, 10, textColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(tmpStr, (px + 58) * NORM_HSCALE, (py + 28) * NORM_VSCALE, FONT_UI, (10) * NORM_VSCALE, textColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 	/* award badges */
 	{
@@ -1020,39 +1020,39 @@ static void CG_DrawDuelFighterPanel(int px, int py, int pw, score_t *sc, float f
 		if (sc->excellentCount > 0)
 		{
 			Com_sprintf(tmpStr, sizeof(tmpStr), "^3Exc:%i", sc->excellentCount);
-			trap_R_DrawText(tmpStr, bx, by, FONT_UI, 9, awardColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(tmpStr, (bx) * NORM_HSCALE, (by) * NORM_VSCALE, FONT_UI, (9) * NORM_VSCALE, awardColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			bx += 48;
 		}
 		if (sc->impressiveCount > 0)
 		{
 			Com_sprintf(tmpStr, sizeof(tmpStr), "^3Imp:%i", sc->impressiveCount);
-			trap_R_DrawText(tmpStr, bx, by, FONT_UI, 9, awardColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(tmpStr, (bx) * NORM_HSCALE, (by) * NORM_VSCALE, FONT_UI, (9) * NORM_VSCALE, awardColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			bx += 48;
 		}
 		if (sc->guantletCount > 0)
 		{
 			Com_sprintf(tmpStr, sizeof(tmpStr), "^3Gnt:%i", sc->guantletCount);
-			trap_R_DrawText(tmpStr, bx, by, FONT_UI, 9, awardColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(tmpStr, (bx) * NORM_HSCALE, (by) * NORM_VSCALE, FONT_UI, (9) * NORM_VSCALE, awardColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 	}
 
 	/* separator */
 	lineColor[0] = 0.4f; lineColor[1] = 0.4f; lineColor[2] = 0.5f; lineColor[3] = 0.5f;
-	CG_FillRect((float)px + 4, (float)(py + 70), (float)(pw - 8), 1.0f, lineColor);
+	CG_FillRectNorm(((float)px + 4) * NORM_HSCALE, ((float)(py + 70)) * NORM_VSCALE, ((float)(pw - 8)) * NORM_HSCALE, (1.0f) * NORM_VSCALE, lineColor);
 
 	/* weapon table column headers */
 	wy = py + 76;
 	{
 		vec4_t colHdr;
 		colHdr[0] = 0.6f; colHdr[1] = 0.7f; colHdr[2] = 0.8f; colHdr[3] = fade;
-		trap_R_DrawText("K/D",       cKD,   wy, FONT_UI, 10, colHdr, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-		trap_R_DrawText("EFF%",      cEff,  wy, FONT_UI, 10, colHdr, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("K/D", (      cKD) * NORM_HSCALE, (  wy) * NORM_VSCALE, FONT_UI, (10) * NORM_VSCALE, colHdr, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("EFF%", (     cEff) * NORM_HSCALE, ( wy) * NORM_VSCALE, FONT_UI, (10) * NORM_VSCALE, colHdr, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 		/* icon column - no header */
-		trap_R_DrawText("HITS/ATTS", cHits, wy, FONT_UI, 10, colHdr, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-		trap_R_DrawText("ACC%",      cAcc,  wy, FONT_UI, 10, colHdr, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("HITS/ATTS", (cHits) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (10) * NORM_VSCALE, colHdr, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("ACC%", (     cAcc) * NORM_HSCALE, ( wy) * NORM_VSCALE, FONT_UI, (10) * NORM_VSCALE, colHdr, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 	}
 
-	CG_FillRect((float)px + 4, (float)(wy + 11), (float)(pw - 8), 1.0f, lineColor);
+	CG_FillRectNorm(((float)px + 4) * NORM_HSCALE, ((float)(wy + 11)) * NORM_VSCALE, ((float)(pw - 8)) * NORM_HSCALE, (1.0f) * NORM_VSCALE, lineColor);
 	wy += 14;
 
 	/* per-weapon rows */
@@ -1077,29 +1077,29 @@ static void CG_DrawDuelFighterPanel(int px, int py, int pw, score_t *sc, float f
 		if (((wy - py) / 14) % 2 == 0)
 		{
 			vec4_t altBg = {0.1f, 0.1f, 0.15f, 0.25f};
-			CG_FillRect((float)px + 2, (float)wy - 1, (float)(pw - 4), 14.0f, altBg);
+			CG_FillRectNorm(((float)px + 2) * NORM_HSCALE, ((float)wy - 1) * NORM_VSCALE, ((float)(pw - 4)) * NORM_HSCALE, (14.0f) * NORM_VSCALE, altBg);
 		}
 
 		/* K/D */
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", aKills, aDeaths);
-		trap_R_DrawText(tmpStr, cKD, wy, FONT_UI, 11, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (cKD) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (11) * NORM_VSCALE, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* efficiency */
 		eff = (aKills + aDeaths > 0) ? (aKills * 100 / (aKills + aDeaths)) : 0;
 		if (aKills > 0 && aDeaths == 0) eff = 100;
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i%%", eff);
-		trap_R_DrawText(tmpStr, cEff, wy, FONT_UI, 11, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (cEff) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (11) * NORM_VSCALE, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* weapon icon */
 		weap = bg_attacklist[att].weapon;
 		if (weap != WP_NONE && cg_weapons[weap].weaponIcon)
 		{
-			CG_DrawPic((float)(cIcon), (float)(wy), 12.0f, 12.0f, cg_weapons[weap].weaponIcon);
+			CG_DrawPicNorm(((float)(cIcon)) * NORM_HSCALE, ((float)(wy)) * NORM_VSCALE, (12.0f) * NORM_HSCALE, (12.0f) * NORM_VSCALE, cg_weapons[weap].weaponIcon);
 		}
 
 		/* hits/shots */
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", aHits, aShots);
-		trap_R_DrawText(tmpStr, cHits, wy, FONT_UI, 11, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (cHits) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (11) * NORM_VSCALE, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* accuracy */
 		acc = (aShots > 0) ? (aHits * 100 / aShots) : 0;
@@ -1109,34 +1109,34 @@ static void CG_DrawDuelFighterPanel(int px, int py, int pw, score_t *sc, float f
 			Com_sprintf(tmpStr, sizeof(tmpStr), "^3%i%%", acc);
 		else
 			Com_sprintf(tmpStr, sizeof(tmpStr), "^1%i%%", acc);
-		trap_R_DrawText(tmpStr, cAcc, wy, FONT_UI, 11, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (cAcc) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (11) * NORM_VSCALE, textColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		wy += 14;
 	}
 
 	/* summary row */
-	CG_FillRect((float)px + 4, (float)(wy - 1), (float)(pw - 8), 1.0f, lineColor);
+	CG_FillRectNorm(((float)px + 4) * NORM_HSCALE, ((float)(wy - 1)) * NORM_VSCALE, ((float)(pw - 8)) * NORM_HSCALE, (1.0f) * NORM_VSCALE, lineColor);
 	wy += 3;
 	{
 		vec4_t sumColor;
 		sumColor[0] = 0.9f; sumColor[1] = 0.9f; sumColor[2] = 1.0f; sumColor[3] = fade;
 
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", totalKills, totalDeaths);
-		trap_R_DrawText(tmpStr, cKD, wy, FONT_UI, 11, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (cKD) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (11) * NORM_VSCALE, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		eff = (totalKills + totalDeaths > 0) ? (totalKills * 100 / (totalKills + totalDeaths)) : 0;
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i%%", eff);
-		trap_R_DrawText(tmpStr, cEff, wy, FONT_UI, 11, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (cEff) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (11) * NORM_VSCALE, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		/* "TOTAL" label in icon column */
-		trap_R_DrawText("TOTAL", cIcon + 6, wy, FONT_UI, 9, sumColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("TOTAL", (cIcon + 6) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (9) * NORM_VSCALE, sumColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i/%i", totalHits, totalShots);
-		trap_R_DrawText(tmpStr, cHits, wy, FONT_UI, 11, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (cHits) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (11) * NORM_VSCALE, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		acc = (totalShots > 0) ? (totalHits * 100 / totalShots) : 0;
 		Com_sprintf(tmpStr, sizeof(tmpStr), "%i%%", acc);
-		trap_R_DrawText(tmpStr, cAcc, wy, FONT_UI, 11, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (cAcc) * NORM_HSCALE, (wy) * NORM_VSCALE, FONT_UI, (11) * NORM_VSCALE, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 	}
 
 	/* clip the panel background to actual content height */
@@ -1189,7 +1189,7 @@ qboolean CG_ModernDrawDuelScoreboard(void)
 
 	/* full dark background */
 	bgColor[0] = 0.02f; bgColor[1] = 0.02f; bgColor[2] = 0.05f; bgColor[3] = 0.85f;
-	CG_FillRect(0, 0, CG_VIRTUAL_W, CG_VIRTUAL_H, bgColor);
+	CG_FillRectNorm((0) * NORM_HSCALE, (0) * NORM_VSCALE, (640) * NORM_HSCALE, (480) * NORM_VSCALE, bgColor);
 
 	textColor[0] = textColor[1] = textColor[2] = 1.0f;
 	textColor[3] = (*color)[3];
@@ -1201,14 +1201,14 @@ qboolean CG_ModernDrawDuelScoreboard(void)
 		int mins = secs / 60;
 		secs %= 60;
 		s = va("%i:%02i", mins, secs);
-		trap_R_DrawText(s, CG_VIRTUAL_W / 2.0f, 8, FONT_DISPLAY, 28, textColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (640 / 2.0f) * NORM_HSCALE, (8) * NORM_VSCALE, FONT_DISPLAY, (28) * NORM_VSCALE, textColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	/* fragged by */
 	if (cg.killerName[0] && !cg.demoPlayback)
 	{
 		s = va("Fragged by %s", cg.killerName);
-		trap_R_DrawText(s, CG_VIRTUAL_W / 2.0f, 38, FONT_UI, 12, colorYellow, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (640 / 2.0f) * NORM_HSCALE, (38) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, colorYellow, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	/* two side-by-side panels */
@@ -1232,7 +1232,7 @@ qboolean CG_ModernDrawDuelScoreboard(void)
 	{
 		vec4_t vsColor;
 		vsColor[0] = 0.5f; vsColor[1] = 0.5f; vsColor[2] = 0.6f; vsColor[3] = (*color)[3] * 0.6f;
-		trap_R_DrawText("vs", CG_VIRTUAL_W / 2.0f, 80, FONT_DISPLAY, 14, vsColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("vs", (640 / 2.0f) * NORM_HSCALE, (80) * NORM_VSCALE, FONT_DISPLAY, (14) * NORM_VSCALE, vsColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	/* spectators at bottom */
@@ -1255,7 +1255,7 @@ qboolean CG_ModernDrawDuelScoreboard(void)
 		specHdr[0] = 0.6f; specHdr[1] = 0.6f; specHdr[2] = 0.7f; specHdr[3] = (*color)[3];
 
 		y = 450 - ((specCount + 3) / 4) * 10;
-		trap_R_DrawText("Spectators", CG_VIRTUAL_W / 2.0f, y - 12, FONT_UI, 10, specHdr, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("Spectators", (640 / 2.0f) * NORM_HSCALE, (y - 12) * NORM_VSCALE, FONT_UI, (10) * NORM_VSCALE, specHdr, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 
 		drewSpect = 0;
 		for (i = 0; i < cg.numScores; i++)
@@ -1267,7 +1267,7 @@ qboolean CG_ModernDrawDuelScoreboard(void)
 				continue;
 
 			sx = 40 + (drewSpect % 4) * 148;
-			trap_R_DrawText(ci->name, sx, y + (drewSpect / 4) * 10, FONT_UI, 9, textColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(ci->name, (sx) * NORM_HSCALE, (y + (drewSpect / 4) * 10) * NORM_VSCALE, FONT_UI, (9) * NORM_VSCALE, textColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			drewSpect++;
 		}
 	}
@@ -1279,7 +1279,7 @@ qboolean CG_ModernDrawDuelScoreboard(void)
 		s = va("%s // %s // Tournament",
 		       Info_ValueForKey(CG_ConfigString(CS_SERVERINFO), "sv_hostname"),
 		       cgs.mapname);
-		trap_R_DrawText(s, CG_VIRTUAL_W / 2.0f, 468, FONT_UI, 8, footColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (640 / 2.0f) * NORM_HSCALE, (468) * NORM_VSCALE, FONT_UI, (8) * NORM_VSCALE, footColor, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	if (++cg.deferredPlayerLoading > 10)
@@ -1304,7 +1304,7 @@ static void CG_CenterGiantLine(float y, const char *string)
 	color[2] = 1;
 	color[3] = 1;
 
-	trap_R_DrawText(string, CG_VIRTUAL_W / 2.0f, y, FONT_DISPLAY, GIANT_HEIGHT, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(string, (640 / 2.0f) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (GIANT_HEIGHT) * NORM_VSCALE, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 }
 
 /*
@@ -1341,7 +1341,7 @@ void CG_DrawDuelScoreboard(void)
 	// draw the dialog background
 	color[0] = color[1] = color[2] = 0;
 	color[3] = 1;
-	CG_FillRect(0, 0, CG_VIRTUAL_W, CG_VIRTUAL_H, color);
+	CG_FillRectNorm((0) * NORM_HSCALE, (0) * NORM_VSCALE, (640) * NORM_HSCALE, (480) * NORM_VSCALE, color);
 
 	// print the mesage of the day
 	s = CG_ConfigString(CS_MOTD);
@@ -1372,15 +1372,15 @@ void CG_DrawDuelScoreboard(void)
 		//
 		// teamplay scoreboard
 		//
-		trap_R_DrawText("Red Team", 8, y, FONT_DISPLAY, GIANT_HEIGHT, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("Red Team", (8) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (GIANT_HEIGHT) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		s = va("%i", cg.teamScores[0]);
-		trap_R_DrawText(s, 632, y, FONT_DISPLAY, GIANT_HEIGHT, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (632) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (GIANT_HEIGHT) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		y += 64;
 
-		trap_R_DrawText("Blue Team", 8, y, FONT_DISPLAY, GIANT_HEIGHT, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("Blue Team", (8) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (GIANT_HEIGHT) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		s = va("%i", cg.teamScores[1]);
-		trap_R_DrawText(s, 632, y, FONT_DISPLAY, GIANT_HEIGHT, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(s, (632) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (GIANT_HEIGHT) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 	}
 	else
 	{
@@ -1399,9 +1399,9 @@ void CG_DrawDuelScoreboard(void)
 				continue;
 			}
 
-			trap_R_DrawText(CG_ClientName( ci ), 8, y, FONT_DISPLAY, GIANT_HEIGHT, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(CG_ClientName( ci ), (8) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (GIANT_HEIGHT) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			s = va("%i", ci->score);
-			trap_R_DrawText(s, 632, y, FONT_DISPLAY, GIANT_HEIGHT, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(s, (632) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (GIANT_HEIGHT) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 			y += 64;
 		}
 	}
@@ -1434,7 +1434,7 @@ static void CG_ModernDrawClientScore(int x, int y, const score_t *score, const f
 		ourColor[1] = 0.7f;
 		ourColor[2] = 0.7f;
 		ourColor[3] = 0.2f * fade;
-		CG_FillRect(x + 8, y, 304.0f, 17.0f, ourColor);
+		CG_FillRectNorm((x + 8) * NORM_HSCALE, (y) * NORM_VSCALE, (304.0f) * NORM_HSCALE, (17.0f) * NORM_VSCALE, ourColor);
 	}
 	if (ci->powerups & (1 << PW_REDFLAG))
 	{
@@ -1455,7 +1455,7 @@ static void CG_ModernDrawClientScore(int x, int y, const score_t *score, const f
 	if (score->ping == -1)
 	{
 		Com_sprintf(string, 1024, " ^2connecting^7      %s", ci->name);
-		trap_R_DrawText(string, x + 34, y + 2, FONT_UI, 12, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 34) * NORM_HSCALE, (y + 2) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 	}
 	else
 	{
@@ -1481,7 +1481,7 @@ static void CG_ModernDrawClientScore(int x, int y, const score_t *score, const f
 			pingColor = 6;
 		}
 		Com_sprintf(string, 1024, "%3i", score->score);
-		trap_R_DrawText(string, x + 46, y, FONT_DISPLAY, 16, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 46) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		if (cgs.gametype == GT_TDM)
 		{
 			if (CG_ModernIsGameTypeFreeze())
@@ -1492,18 +1492,18 @@ static void CG_ModernDrawClientScore(int x, int y, const score_t *score, const f
 			{
 				Com_sprintf(string, 1024, "^%i%3i", score->scoreFlags < 0 ? 3 : 7, score->scoreFlags);
 			}
-			trap_R_DrawText(string, x + 90, y + 4, FONT_UI, 12, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(string, (x + 90) * NORM_HSCALE, (y + 4) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 		else
 		{
-			trap_R_DrawText(" 0", x + 90, y + 4, FONT_UI, 12, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(" 0", (x + 90) * NORM_HSCALE, (y + 4) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 		Com_sprintf(string, 1024, "^%i%3i", pingColor, score->ping);
-		trap_R_DrawText(string, x + 118, y, FONT_DISPLAY, 16, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 118) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		Com_sprintf(string, 1024, "%3i", score->time);
-		trap_R_DrawText(string, x + 150, y, FONT_DISPLAY, 16, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 150) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		Com_sprintf(string, 1024, "%s", ci->name);
-		trap_R_DrawText(string, x + 202, y + 4, FONT_UI, 12, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 202) * NORM_HSCALE, (y + 4) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 	}
 	if (!cg.warmup && cg.predictedPlayerState.pm_type != PM_INTERMISSION)
@@ -1532,9 +1532,6 @@ static void CG_ModernDrawPowerupFrame(int x, int y, const clientInfo_t *ci)
 	}
 
 	Vector4Copy(defaultBorderSize, borderSize);
-
-	// NOTE: removed CG_AdjustFrom640 -- CG_ModernDrawFrame uses CG_FillRect
-	// which normalizes internally from virtual coords.
 
 	if (ci->powerups & (1 << PW_QUAD))
 	{
@@ -1628,7 +1625,7 @@ static void CG_BEDrawTeamClientScore(int x, int y, const score_t *score, const f
 		ourColor[1] = 0.7f;
 		ourColor[2] = 0.7f;
 		ourColor[3] = 0.2f * fade;
-		CG_FillRect(x + 8, y, 304.0f, 17.0f, ourColor);
+		CG_FillRectNorm((x + 8) * NORM_HSCALE, (y) * NORM_VSCALE, (304.0f) * NORM_HSCALE, (17.0f) * NORM_VSCALE, ourColor);
 	}
 	if (ci->powerups & (1 << PW_REDFLAG))
 	{
@@ -1651,7 +1648,7 @@ static void CG_BEDrawTeamClientScore(int x, int y, const score_t *score, const f
 	if (score->ping == -1)
 	{
 		Com_sprintf(string, 1024, " ^2connecting^7      %s", ci->name);
-		trap_R_DrawText(string, x + 34, y + 2, FONT_UI, mHeight, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 34) * NORM_HSCALE, (y + 2) * NORM_VSCALE, FONT_UI, (mHeight) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 	}
 	else
 	{
@@ -1677,7 +1674,7 @@ static void CG_BEDrawTeamClientScore(int x, int y, const score_t *score, const f
 			pingColor = 6;
 		}
 		Com_sprintf(string, 1024, "%3i", score->score);
-		trap_R_DrawText(string, x + 80, y, FONT_DISPLAY, bHeight, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 80) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (bHeight) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 		if (cgs.gametype == GT_TDM)
 		{
 			if (CG_ModernIsGameTypeFreeze())
@@ -1688,20 +1685,20 @@ static void CG_BEDrawTeamClientScore(int x, int y, const score_t *score, const f
 			{
 				Com_sprintf(string, 1024, "^%i%3i", score->scoreFlags < 0 ? 3 : 7, score->scoreFlags);
 			}
-			trap_R_DrawText(string, x + 112, y + 4, FONT_UI, mHeight, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(string, (x + 112) * NORM_HSCALE, (y + 4) * NORM_VSCALE, FONT_UI, (mHeight) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 		}
 		else
 		{
-			trap_R_DrawText("0", x + 112, y + 4, FONT_UI, mHeight, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("0", (x + 112) * NORM_HSCALE, (y + 4) * NORM_VSCALE, FONT_UI, (mHeight) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 		}
 		Com_sprintf(string, 1024, "^%i%3i", pingColor, score->ping);
-		trap_R_DrawText(string, x + 152, y, FONT_DISPLAY, bHeight, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 152) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (bHeight) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		Com_sprintf(string, 1024, "%i", score->time);
-		trap_R_DrawText(string, x + 184, y, FONT_DISPLAY, bHeight, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 184) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (bHeight) * NORM_VSCALE, color, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
 		Com_sprintf(string, 1024, "%s", ci->name);
-		trap_R_DrawText(string, x + 202, y + 4, FONT_UI, mHeight, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(string, (x + 202) * NORM_HSCALE, (y + 4) * NORM_VSCALE, FONT_UI, (mHeight) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 	}
 	if (!cg.warmup && cg.predictedPlayerState.pm_type != PM_INTERMISSION)
@@ -1826,21 +1823,21 @@ qboolean CG_ModernDrawScoretable(void)
 	y = 40;
 	if (cg.demoPlayback)
 	{
-		trap_R_DrawText("^3Demo Playback", (int)CG_VIRTUAL_W / 2, y, FONT_DISPLAY, 16, CG_ColorFromAlpha((*color)[0]), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("^3Demo Playback", (640 / 2) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, CG_ColorFromAlpha((*color)[0]), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 	else if (cg.killerName[0])
 	{
-		trap_R_DrawText(va("Fragged by %s", cg.killerName), (int)CG_VIRTUAL_W / 2, y, FONT_DISPLAY, 16, CG_ColorFromAlpha((*color)[0]), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(va("Fragged by %s", cg.killerName), (640 / 2) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, CG_ColorFromAlpha((*color)[0]), TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 
 	y = 64;
 
 	CG_ScoreboardAdjustTeamColor(scoreboard_rtColor, colorRect);
-	CG_FillRect(8.0f, (float)y, 304.0f, 48.0f, colorRect);
+	CG_FillRectNorm((8.0f) * NORM_HSCALE, ((float)y) * NORM_VSCALE, (304.0f) * NORM_HSCALE, (48.0f) * NORM_VSCALE, colorRect);
 
 	CG_ScoreboardAdjustTeamColor(scoreboard_btColor, colorRect);
-	CG_FillRect(328.0f, (float)y, 304.0f, 48.0f, colorRect);
+	CG_FillRectNorm((328.0f) * NORM_HSCALE, ((float)y) * NORM_VSCALE, (304.0f) * NORM_HSCALE, (48.0f) * NORM_VSCALE, colorRect);
 
 	CG_ScoreboardDrawField(8, y, cg.teamScores[0]);
 	trap_R_SetColor(NULL);
@@ -1867,7 +1864,7 @@ qboolean CG_ModernDrawScoretable(void)
 			tmpArgStr = "PL ";
 		}
 		tmpStr = va("^1Score %s Ping Min  Name", tmpArgStr);
-		trap_R_DrawText(tmpStr, 40, y, FONT_UI, 12, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (40) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 	}
 
 	{
@@ -1889,7 +1886,7 @@ qboolean CG_ModernDrawScoretable(void)
 			tmpArgStr = "PL ";
 		}
 		tmpStr = va("^4Score %s Ping Min  Name", tmpArgStr);
-		trap_R_DrawText(tmpStr, 360, y, FONT_UI, 12, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(tmpStr, (360) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 	}
 
 	y = 140;
@@ -1903,25 +1900,25 @@ qboolean CG_ModernDrawScoretable(void)
 		if (cgs.gametype >= GT_CTF)
 		{
 			tmpStr = va("^1Points  Players  AvgPing");
-			trap_R_DrawText(tmpStr, 116, 64, FONT_DISPLAY, 16, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(tmpStr, (116) * NORM_HSCALE, (64) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			Com_sprintf(string, 128, "^3%3i^7  %2i  %3i", sumScoresRed, drewRed, sumPingRed / drewRed);
-			trap_R_DrawText(string, 116, 80, FONT_DISPLAY, 20, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(string, (116) * NORM_HSCALE, (80) * NORM_VSCALE, FONT_DISPLAY, (20) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 		else
 		{
 			if (cgs.gametype == GT_TDM && !CG_ModernIsGameTypeFreeze())
 			{
 				tmpStr = va("^1Players  AvgPing");
-				trap_R_DrawText(tmpStr, 104, 64, FONT_DISPLAY, 16, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+				trap_R_DrawTextNorm(tmpStr, (104) * NORM_HSCALE, (64) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 				Com_sprintf(string, 128, " %2i  %3i", drewRed, sumPingRed / drewRed);
-				trap_R_DrawText(string, 88, 80, FONT_DISPLAY, 20, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+				trap_R_DrawTextNorm(string, (88) * NORM_HSCALE, (80) * NORM_VSCALE, FONT_DISPLAY, (20) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			}
 			else if (CG_ModernIsGameTypeFreeze())
 			{
 				tmpStr = va("^1Scores   Thaws Players");
-				trap_R_DrawText(tmpStr, 80, 64, FONT_DISPLAY, 16, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+				trap_R_DrawTextNorm(tmpStr, (80) * NORM_HSCALE, (64) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 				Com_sprintf(string, 128, " %3i %3i  %2i", sumScoresRed, sumThawsRed, drewRed);
-				trap_R_DrawText(string, 64, 80, FONT_DISPLAY, 20, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+				trap_R_DrawTextNorm(string, (64) * NORM_HSCALE, (80) * NORM_VSCALE, FONT_DISPLAY, (20) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			}
 		}
 	}
@@ -1933,23 +1930,23 @@ qboolean CG_ModernDrawScoretable(void)
 		if (cgs.gametype >= GT_CTF)
 		{
 			tmpStr = va("^4Points  Players  AvgPing");
-			trap_R_DrawText(tmpStr, 436, 64, FONT_DISPLAY, 16, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(tmpStr, (436) * NORM_HSCALE, (64) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			Com_sprintf(string, 128, "^3%3i^7  %2i  %3i", sumScoresBlue, drewBlue, sumPingBlue / drewBlue);
-			trap_R_DrawText(string, 436, 80, FONT_DISPLAY, 20, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(string, (436) * NORM_HSCALE, (80) * NORM_VSCALE, FONT_DISPLAY, (20) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 		else if (cgs.gametype == GT_TDM && !CG_ModernIsGameTypeFreeze())
 		{
 			tmpStr = va("^4Players  AvgPing");
-			trap_R_DrawText(tmpStr, 424, 64, FONT_DISPLAY, 16, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(tmpStr, (424) * NORM_HSCALE, (64) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			Com_sprintf(string, 128, " %2i  %3i", drewBlue, sumPingBlue / drewBlue);
-			trap_R_DrawText(string, 408, 80, FONT_DISPLAY, 20, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(string, (408) * NORM_HSCALE, (80) * NORM_VSCALE, FONT_DISPLAY, (20) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 		else if (CG_ModernIsGameTypeFreeze())
 		{
 			tmpStr = va("^4Scores   Thaws Players");
-			trap_R_DrawText(tmpStr, 400, 64, FONT_DISPLAY, 16, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(tmpStr, (400) * NORM_HSCALE, (64) * NORM_VSCALE, FONT_DISPLAY, (16) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 			Com_sprintf(string, 128, " %3i %3i  %2i", sumScoresBlue, sumThawsBlue, drewBlue);
-			trap_R_DrawText(string, 384, 80, FONT_DISPLAY, 20, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm(string, (384) * NORM_HSCALE, (80) * NORM_VSCALE, FONT_DISPLAY, (20) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 	}
 
@@ -1968,11 +1965,11 @@ qboolean CG_ModernDrawScoretable(void)
 
 	if (drewRed != 0)
 	{
-		trap_R_DrawText("^1Red Team Spectator", 60, y - 14, FONT_UI, 12, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("^1Red Team Spectator", (60) * NORM_HSCALE, (y - 14) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 	}
 	if (drewBlue != 0)
 	{
-		trap_R_DrawText("^4Blue Team Spectator", 380, y - 14, FONT_UI, 12, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("^4Blue Team Spectator", (380) * NORM_HSCALE, (y - 14) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 	}
 
 	{
@@ -1984,16 +1981,16 @@ qboolean CG_ModernDrawScoretable(void)
 		y = y + 18 * max + 36;
 
 		CG_ScoreboardAdjustTeamColor(scoreboard_rtColor, bgColor);
-		CG_FillRect(8.0f, 112.0f, 304.0f, (float)y - 148, bgColor);
+		CG_FillRectNorm((8.0f) * NORM_HSCALE, (112.0f) * NORM_VSCALE, (304.0f) * NORM_HSCALE, ((float)y - 148) * NORM_VSCALE, bgColor);
 
 		CG_ScoreboardAdjustTeamColor(scoreboard_btColor, bgColor);
-		CG_FillRect(328.0f, 112.0f, 304.0f, (float)y - 148, bgColor);
+		CG_FillRectNorm((328.0f) * NORM_HSCALE, (112.0f) * NORM_VSCALE, (304.0f) * NORM_HSCALE, ((float)y - 148) * NORM_VSCALE, bgColor);
 
 		drewSpect = CG_ModernDrawTeamScores(0, y, TEAM_SPECTATOR, (*color)[0], 24);
 
 		if (drewSpect)
 		{
-			trap_R_DrawText("Spectator", CG_VIRTUAL_W / 2.0f, y - 32, FONT_UI, 12, colorWhite, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("Spectator", (640 / 2.0f) * NORM_HSCALE, (y - 32) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, colorWhite, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 
 			if ((customScoreboardColorIsSet_spec & 1) == 0)
 			{
@@ -2005,7 +2002,7 @@ qboolean CG_ModernDrawScoretable(void)
 			}
 			bgColor[3] = 0.15f;
 
-			CG_FillRect(8.0f, (float)(y - 34), 624.0f, (float)(9 * drewSpect + 29), bgColor);
+			CG_FillRectNorm((8.0f) * NORM_HSCALE, ((float)(y - 34)) * NORM_VSCALE, (624.0f) * NORM_HSCALE, ((float)(9 * drewSpect + 29)) * NORM_VSCALE, bgColor);
 		}
 	}
 
@@ -2122,9 +2119,9 @@ static void CG_ModernDrawTeamSummary(
 	{
 		Vector4Copy(titleColor, curColor);
 
-		trap_R_DrawText(labels[i], baseX + posX[i], sb_row1Y, FONT_DISPLAY, sb_mHeight2, curColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(labels[i], (baseX + posX[i]) * NORM_HSCALE, (sb_row1Y) * NORM_VSCALE, FONT_DISPLAY, (sb_mHeight2) * NORM_VSCALE, curColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 
-		trap_R_DrawText(values[i], baseX + posX[i], sb_row2Y, FONT_DISPLAY, sb_bHeight2, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(values[i], (baseX + posX[i]) * NORM_HSCALE, (sb_row2Y) * NORM_VSCALE, FONT_DISPLAY, (sb_bHeight2) * NORM_VSCALE, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
 	}
 }
 
@@ -2143,11 +2140,11 @@ static void CG_ModernDrawScoreHeader(float baseX, float y, vec4_t colorBody, vec
 
 	Vector4Copy(colorBody, headerColor1);
 
-	trap_R_DrawText(label1, baseX + sb_pos1X, y, FONT_UI, mHeight_p, headerColor1, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText(label2, baseX + sb_pos2X, y, FONT_UI, mHeight_p, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText(label3, baseX + sb_pos3X, y, FONT_UI, mHeight_p, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText(label4, baseX + sb_pos4X, y, FONT_UI, mHeight_p, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
-	trap_R_DrawText(label5, baseX + sb_pos5X, y, FONT_UI, mHeight_p, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(label1, (baseX + sb_pos1X) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (mHeight_p) * NORM_VSCALE, headerColor1, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(label2, (baseX + sb_pos2X) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (mHeight_p) * NORM_VSCALE, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(label3, (baseX + sb_pos3X) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (mHeight_p) * NORM_VSCALE, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(label4, (baseX + sb_pos4X) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (mHeight_p) * NORM_VSCALE, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(label5, (baseX + sb_pos5X) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_UI, (mHeight_p) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 }
 
 
@@ -2199,11 +2196,11 @@ qboolean CG_BEDrawTeamScoretable(void)
 
 	if (cg.demoPlayback)
 	{
-		trap_R_DrawText("^3Demo Playback", CG_VIRTUAL_W / 2.0f, y, FONT_DISPLAY, sb_bHeight, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm("^3Demo Playback", (640 / 2.0f) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (sb_bHeight) * NORM_VSCALE, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 	else if (cg.killerName[0])
 	{
-		trap_R_DrawText(va("Fragged by %s", cg.killerName), CG_VIRTUAL_W / 2.0f, y, FONT_DISPLAY, sb_bHeight, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+		trap_R_DrawTextNorm(va("Fragged by %s", cg.killerName), (640 / 2.0f) * NORM_HSCALE, (y) * NORM_VSCALE, FONT_DISPLAY, (sb_bHeight) * NORM_VSCALE, *color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 	}
 
 	SetScoreboardColors(&rtColorHeader, &rtColorBody, &btColorHeader, &btColorBody);
@@ -2213,20 +2210,20 @@ qboolean CG_BEDrawTeamScoretable(void)
 
 	CG_ScoreboardAdjustTeamColor(rtColorHeader, colorRect);
 	colorRect[3] *= 1.5;
-	CG_FillRect(8.0f, (float)y, 304.0f, 48.0f, colorRect);
+	CG_FillRectNorm((8.0f) * NORM_HSCALE, ((float)y) * NORM_VSCALE, (304.0f) * NORM_HSCALE, (48.0f) * NORM_VSCALE, colorRect);
 
 	CG_ScoreboardAdjustTeamColor(btColorHeader, colorRect);
 	colorRect[3] *= 1.5;
-	CG_FillRect(328.0f, (float)y, 304.0f, 48.0f, colorRect);
+	CG_FillRectNorm((328.0f) * NORM_HSCALE, ((float)y) * NORM_VSCALE, (304.0f) * NORM_HSCALE, (48.0f) * NORM_VSCALE, colorRect);
 
 	// main team scores -- use large text style (cg_scoreboardBE & 2 would use CG_ModernDrawField, but we use 0)
-	trap_R_DrawText(va("%d", cg.teamScores[0]), sb_leftX - 32, 87, FONT_DISPLAY, 60, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
-	trap_R_DrawText(va("%d", cg.teamScores[1]), sb_rightX - 32, 87, FONT_DISPLAY, 60, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(va("%d", cg.teamScores[0]), (sb_leftX - 32) * NORM_HSCALE, (87) * NORM_VSCALE, FONT_DISPLAY, (60) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+	trap_R_DrawTextNorm(va("%d", cg.teamScores[1]), (sb_rightX - 32) * NORM_HSCALE, (87) * NORM_VSCALE, FONT_DISPLAY, (60) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 
 	y = 116;
 	// Header text
-	CG_ModernDrawScoreHeader(sb_leftX, y, (customScoreboardColorIsSet_red & 2) ? scoreboard_rtColorTitle : rtColorBody, colorBlack, sb_mWidth, sb_mHeight, CG_VIRTUAL_W, sb_proportional);
-	CG_ModernDrawScoreHeader(sb_rightX, y, (customScoreboardColorIsSet_blue & 2) ? scoreboard_btColorTitle : btColorBody, colorBlack, sb_mWidth, sb_mHeight, CG_VIRTUAL_W, sb_proportional);
+	CG_ModernDrawScoreHeader(sb_leftX, y, (customScoreboardColorIsSet_red & 2) ? scoreboard_rtColorTitle : rtColorBody, colorBlack, sb_mWidth, sb_mHeight, 640, sb_proportional);
+	CG_ModernDrawScoreHeader(sb_rightX, y, (customScoreboardColorIsSet_blue & 2) ? scoreboard_btColorTitle : btColorBody, colorBlack, sb_mWidth, sb_mHeight, 640, sb_proportional);
 
 	y = 140;
 	// Team score lines
@@ -2261,16 +2258,16 @@ qboolean CG_BEDrawTeamScoretable(void)
 	{
 		if (drewRed)
 		{
-			trap_R_DrawText("Red", sb_leftX + 20, y - 14, FONT_UI, sb_mHeight, rtColorHeader, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
-			trap_R_DrawText("Team", sb_leftX + 60, y - 14, FONT_UI, sb_mHeight, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
-			trap_R_DrawText("Spectator", sb_leftX + 100, y - 14, FONT_UI, sb_mHeight, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("Red", (sb_leftX + 20) * NORM_HSCALE, (y - 14) * NORM_VSCALE, FONT_UI, (sb_mHeight) * NORM_VSCALE, rtColorHeader, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("Team", (sb_leftX + 60) * NORM_HSCALE, (y - 14) * NORM_VSCALE, FONT_UI, (sb_mHeight) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("Spectator", (sb_leftX + 100) * NORM_HSCALE, (y - 14) * NORM_VSCALE, FONT_UI, (sb_mHeight) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 
 		if (drewBlue)
 		{
-			trap_R_DrawText("Blue", sb_rightX + 20, y - 14, FONT_UI, sb_mHeight, btColorHeader, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
-			trap_R_DrawText("Team", sb_rightX + 60, y - 14, FONT_UI, sb_mHeight, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
-			trap_R_DrawText("Spectator", sb_rightX + 100, y - 14, FONT_UI, sb_mHeight, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("Blue", (sb_rightX + 20) * NORM_HSCALE, (y - 14) * NORM_VSCALE, FONT_UI, (sb_mHeight) * NORM_VSCALE, btColorHeader, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("Team", (sb_rightX + 60) * NORM_HSCALE, (y - 14) * NORM_VSCALE, FONT_UI, (sb_mHeight) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("Spectator", (sb_rightX + 100) * NORM_HSCALE, (y - 14) * NORM_VSCALE, FONT_UI, (sb_mHeight) * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW);
 		}
 	}
 
@@ -2282,16 +2279,16 @@ qboolean CG_BEDrawTeamScoretable(void)
 		y += 18 * max + 36;
 
 		CG_ScoreboardAdjustTeamColor(rtColorBody, bgColor);
-		CG_FillRect(8.0f, 112.0f, 304.0f, (float)(y - 148), bgColor);
+		CG_FillRectNorm((8.0f) * NORM_HSCALE, (112.0f) * NORM_VSCALE, (304.0f) * NORM_HSCALE, ((float)(y - 148)) * NORM_VSCALE, bgColor);
 
 		CG_ScoreboardAdjustTeamColor(btColorBody, bgColor);
-		CG_FillRect(328.0f, 112.0f, 304.0f, (float)(y - 148), bgColor);
+		CG_FillRectNorm((328.0f) * NORM_HSCALE, (112.0f) * NORM_VSCALE, (304.0f) * NORM_HSCALE, ((float)(y - 148)) * NORM_VSCALE, bgColor);
 
 		drewSpect = CG_ModernDrawTeamScores(0, y, TEAM_SPECTATOR, (*color)[0], 24);
 
 		if (drewSpect)
 		{
-			trap_R_DrawText("Spectator", CG_VIRTUAL_W / 2.0f, y - 32, FONT_UI, 12, (customScoreboardColorIsSet_spec & 2) ? scoreboard_specColorTitle : colorWhite, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
+			trap_R_DrawTextNorm("Spectator", (640 / 2.0f) * NORM_HSCALE, (y - 32) * NORM_VSCALE, FONT_UI, (12) * NORM_VSCALE, (customScoreboardColorIsSet_spec & 2) ? scoreboard_specColorTitle : colorWhite, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW);
 
 			if ((customScoreboardColorIsSet_spec & 1) == 0)
 			{
@@ -2303,7 +2300,7 @@ qboolean CG_BEDrawTeamScoretable(void)
 			}
 			bgColor[3] = 0.15f;
 
-			CG_FillRect(8.0f, (float)(y - 34), 624.0f, (float)(9 * drewSpect + 29), bgColor);
+			CG_FillRectNorm((8.0f) * NORM_HSCALE, ((float)(y - 34)) * NORM_VSCALE, (624.0f) * NORM_HSCALE, ((float)(9 * drewSpect + 29)) * NORM_VSCALE, bgColor);
 		}
 	}
 

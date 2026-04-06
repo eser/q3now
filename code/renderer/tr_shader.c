@@ -2541,6 +2541,12 @@ static void FixRenderCommandList( int newShader ) {
 				curCmd = (const void *)(cc_cmd + 1);
 				break;
 				}
+			case RC_SET_MSDF_OUTLINE:
+				{
+				const setMsdfOutlineCommand_t *oc_cmd = (const setMsdfOutlineCommand_t *)curCmd;
+				curCmd = (const void *)(oc_cmd + 1);
+				break;
+				}
 			case RC_END_OF_LIST:
 			default:
 				return;

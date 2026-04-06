@@ -27,18 +27,6 @@ extern botlib_export_t *botlib_export;
 
 // ── format detection ──────────────────────────────────────────────────
 // .wmenu/.whud files use normalized coordinates (0.0-1.0) and point sizes.
-// .menu/.hud files use legacy virtual pixel coordinates and textscale fractions.
-// When loading legacy files, the parser shim converts values at parse time.
-
-static qboolean parseNativeFormat = qfalse;
-
-static qboolean IsNativeFormat( const char *filename ) {
-	const char *ext = COM_GetExtension( filename );
-	if ( !Q_stricmp( ext, "wmenu" ) || !Q_stricmp( ext, "whud" ) ) {
-		return qtrue;
-	}
-	return qfalse;
-}
 
 // ── memory pool ───────────────────────────────────────────────────────
 
@@ -293,6 +281,13 @@ static wuiValue_t WiredPC_ParseValue( int handle ) {
 		return val;
 	}
 
+	// "auto" keyword — size determined by content
+	if ( !Q_stricmp( token.string, "auto" ) ) {
+		val.value = 0.0f;
+		val.unit = UNIT_AUTO;
+		return val;
+	}
+
 	val.value = token.floatvalue;
 
 	// Peek at next token for unit keyword (tokenizer splits "50vw" → "50" + "vw")
@@ -311,11 +306,6 @@ static wuiValue_t WiredPC_ParseValue( int handle ) {
 
 	return val;
 }
-
-// Legacy .menu/.hud files use a fixed virtual coordinate system.
-// These constants are ONLY used to normalize legacy coordinates to 0.0-1.0.
-#define LEGACY_VSCREEN_W  640.0f
-#define LEGACY_VSCREEN_H  480.0f
 
 // Back-fill a unit-aware value to real screen pixels for draw code.
 // screenDim is cls.glconfig.vidWidth for x/w, cls.glconfig.vidHeight for y/h.
@@ -364,6 +354,8 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 	item->textoffsetX = 0;
 	item->textoffsetY = 0;
 	item->fontPointSize = 0;
+	item->fontWeight = FONT_WEIGHT_BOLD;  // backward compat: current Sansman Bold rendering
+	item->letterSpacing = 0.0f;
 	item->flexChild.shrink = 1.0f;  // default shrink for flex children
 
 	if ( !WiredUI_ParseItemProperties( handle, item ) ) {
@@ -413,34 +405,16 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			WiredPC_Int( handle, &item->type );
 		}
 		else if ( !Q_stricmp( token.string, "rect" ) ) {
-			if ( parseNativeFormat ) {
-				// .wmenu: parse with unit awareness
-				item->wuiRect.x = WiredPC_ParseValue( handle );
-				item->wuiRect.y = WiredPC_ParseValue( handle );
-				item->wuiRect.w = WiredPC_ParseValue( handle );
-				item->wuiRect.h = WiredPC_ParseValue( handle );
-				// Back-fill old rect for draw code (real screen pixels)
-				item->rect.x = WUI_BackfillToScreen( item->wuiRect.x, (float)cls.glconfig.vidWidth );
-				item->rect.y = WUI_BackfillToScreen( item->wuiRect.y, (float)cls.glconfig.vidHeight );
-				item->rect.w = WUI_BackfillToScreen( item->wuiRect.w, (float)cls.glconfig.vidWidth );
-				item->rect.h = WUI_BackfillToScreen( item->wuiRect.h, (float)cls.glconfig.vidHeight );
-			} else {
-				// Legacy .menu: parse raw virtual coords, normalize to wuiRect,
-				// then convert rect to real screen pixels
-				float rawX, rawY, rawW, rawH;
-				WiredPC_Float( handle, &rawX );
-				WiredPC_Float( handle, &rawY );
-				WiredPC_Float( handle, &rawW );
-				WiredPC_Float( handle, &rawH );
-				item->wuiRect.x = WUI_Val( rawX / LEGACY_VSCREEN_W, UNIT_NORM );
-				item->wuiRect.y = WUI_Val( rawY / LEGACY_VSCREEN_H, UNIT_NORM );
-				item->wuiRect.w = WUI_Val( rawW / LEGACY_VSCREEN_W, UNIT_NORM );
-				item->wuiRect.h = WUI_Val( rawH / LEGACY_VSCREEN_H, UNIT_NORM );
-				item->rect.x = ( rawX / LEGACY_VSCREEN_W ) * (float)cls.glconfig.vidWidth;
-				item->rect.y = ( rawY / LEGACY_VSCREEN_H ) * (float)cls.glconfig.vidHeight;
-				item->rect.w = ( rawW / LEGACY_VSCREEN_W ) * (float)cls.glconfig.vidWidth;
-				item->rect.h = ( rawH / LEGACY_VSCREEN_H ) * (float)cls.glconfig.vidHeight;
-			}
+			// .wmenu: parse with unit awareness
+			item->wuiRect.x = WiredPC_ParseValue( handle );
+			item->wuiRect.y = WiredPC_ParseValue( handle );
+			item->wuiRect.w = WiredPC_ParseValue( handle );
+			item->wuiRect.h = WiredPC_ParseValue( handle );
+			// Back-fill old rect for draw code (real screen pixels)
+			item->rect.x = WUI_BackfillToScreen( item->wuiRect.x, (float)cls.glconfig.vidWidth );
+			item->rect.y = WUI_BackfillToScreen( item->wuiRect.y, (float)cls.glconfig.vidHeight );
+			item->rect.w = WUI_BackfillToScreen( item->wuiRect.w, (float)cls.glconfig.vidWidth );
+			item->rect.h = WUI_BackfillToScreen( item->wuiRect.h, (float)cls.glconfig.vidHeight );
 		}
 		else if ( !Q_stricmp( token.string, "style" ) ) {
 			WiredPC_Int( handle, &item->style );
@@ -601,9 +575,6 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		else if ( !Q_stricmp( token.string, "special" ) ) {
 			WiredPC_Float( handle, &item->special );
 		}
-		else if ( !parseNativeFormat && !Q_stricmp( token.string, "align" ) ) {
-			WiredPC_Int( handle, &item->align );
-		}
 		else if ( !Q_stricmp( token.string, "anchor" ) ) {
 			if ( WiredPC_String( handle, &str ) ) {
 				if      ( !Q_stricmp( str, "TOP_LEFT" ) )      item->anchor = ANCHOR_TOP_LEFT;
@@ -685,17 +656,39 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 				Q_strncpyz( item->hudElement, str, sizeof( item->hudElement ) );
 		}
 		else if ( !Q_stricmp( token.string, "bind" ) ) {
-			if ( WiredPC_String( handle, &str ) )
+			if ( WiredPC_String( handle, &str ) ) {
 				Q_strncpyz( item->bind, str, sizeof( item->bind ) );
+				Q_strncpyz( item->storeBind, str, sizeof( item->storeBind ) );
+			}
+		}
+		else if ( !Q_stricmp( token.string, "bindcolor" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->storeBindColor, str, sizeof( item->storeBindColor ) );
+		}
+		else if ( !Q_stricmp( token.string, "bindicon" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->storeBindIcon, str, sizeof( item->storeBindIcon ) );
+		}
+		else if ( !Q_stricmp( token.string, "bindvalue" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->storeBindValue, str, sizeof( item->storeBindValue ) );
+		}
+		else if ( !Q_stricmp( token.string, "showbind" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->showBind, str, sizeof( item->showBind ) );
+		}
+		else if ( !Q_stricmp( token.string, "hidebind" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->hideBind, str, sizeof( item->hideBind ) );
 		}
 		// ── SuperHUD element properties (Phase 3) ────────────────────
-		else if ( !Q_stricmp( token.string, "font" ) && ( item->hudElement[0] || parseNativeFormat ) ) {
+		else if ( !Q_stricmp( token.string, "font" ) ) {
 			// font "name" [pointsize]
 			// SuperHUD items: font name only (fontsize parsed separately)
 			// Native format (.wmenu/.whud): font "name" pointsize
 			if ( WiredPC_String( handle, &str ) )
 				Q_strncpyz( item->fontName, str, sizeof( item->fontName ) );
-			if ( parseNativeFormat && !item->hudElement[0] ) {
+			if ( !item->hudElement[0] ) {
 				WiredPC_Float( handle, &item->fontPointSize );
 			}
 		}
@@ -703,6 +696,23 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			WiredPC_Float( handle, &item->fontSize[0] );
 			WiredPC_Float( handle, &item->fontSize[1] );
 			// Legacy fontsize W+H — keep as-is for render loop
+		}
+		else if ( !Q_stricmp( token.string, "fontweight" ) ) {
+			if ( WiredPC_String( handle, &str ) ) {
+				if ( !Q_stricmp( str, "light" ) )          item->fontWeight = FONT_WEIGHT_LIGHT;
+				else if ( !Q_stricmp( str, "regular" ) )   item->fontWeight = FONT_WEIGHT_REGULAR;
+				else if ( !Q_stricmp( str, "medium" ) )    item->fontWeight = FONT_WEIGHT_MEDIUM;
+				else if ( !Q_stricmp( str, "semibold" ) )  item->fontWeight = FONT_WEIGHT_SEMIBOLD;
+				else if ( !Q_stricmp( str, "bold" ) )      item->fontWeight = FONT_WEIGHT_BOLD;
+				else if ( !Q_stricmp( str, "extrabold" ) ) item->fontWeight = FONT_WEIGHT_EXTRABOLD;
+				else {
+					Com_Printf( S_COLOR_YELLOW "WiredUI: unknown fontweight '%s'\n", str );
+					item->fontWeight = FONT_WEIGHT_BOLD;
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "letterspacing" ) ) {
+			WiredPC_Float( handle, &item->letterSpacing );
 		}
 		else if ( !Q_stricmp( token.string, "direction" ) ) {
 			if ( WiredPC_String( handle, &str ) ) {
@@ -886,7 +896,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 				}
 			}
 		}
-		else if ( parseNativeFormat && !Q_stricmp( token.string, "align" ) ) {
+		else if ( !Q_stricmp( token.string, "align" ) ) {
 			// Native format: flex align keyword (overrides legacy int align)
 			pc_token_t val;
 			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
@@ -1040,12 +1050,70 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 				item->breakpointCount++;
 			}
 		}
+		/* ── TABLE widget keywords ─────────────────────────────────── */
+		else if ( !Q_stricmp( token.string, "source" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->tableSource, str, sizeof( item->tableSource ) );
+		}
+		else if ( !Q_stricmp( token.string, "countbind" ) ) {
+			if ( WiredPC_String( handle, &str ) )
+				Q_strncpyz( item->tableCountBind, str, sizeof( item->tableCountBind ) );
+		}
+		else if ( !Q_stricmp( token.string, "teamfilter" ) ) {
+			int v;
+			if ( WiredPC_Int( handle, &v ) )
+				item->tableTeamFilter = v;
+		}
+		else if ( !Q_stricmp( token.string, "column" ) ) {
+			/* column { field "name" header "Player" width 0.25 align 0 colorfield "namecolor" } */
+			if ( item->numTableColumns < WUI_TABLE_MAX_COLUMNS ) {
+				pc_token_t subToken;
+				wuiTableColumn_t *col = &item->tableColumns[item->numTableColumns];
+				Com_Memset( col, 0, sizeof( *col ) );
+				col->align = 0; /* default left */
+
+				if ( WiredPC_ReadToken( handle, &subToken ) && !Q_stricmp( subToken.string, "{" ) ) {
+					while ( WiredPC_ReadToken( handle, &subToken ) ) {
+						if ( !Q_stricmp( subToken.string, "}" ) ) {
+							break;
+						}
+						if ( !Q_stricmp( subToken.string, "field" ) ) {
+							if ( WiredPC_String( handle, &str ) )
+								Q_strncpyz( col->field, str, sizeof( col->field ) );
+						}
+						else if ( !Q_stricmp( subToken.string, "header" ) ) {
+							if ( WiredPC_String( handle, &str ) )
+								Q_strncpyz( col->header, str, sizeof( col->header ) );
+						}
+						else if ( !Q_stricmp( subToken.string, "width" ) ) {
+							float fw;
+							if ( WiredPC_Float( handle, &fw ) )
+								col->width = fw;
+						}
+						else if ( !Q_stricmp( subToken.string, "align" ) ) {
+							int av;
+							if ( WiredPC_Int( handle, &av ) )
+								col->align = av;
+						}
+						else if ( !Q_stricmp( subToken.string, "colorfield" ) ) {
+							if ( WiredPC_String( handle, &str ) )
+								Q_strncpyz( col->colorfield, str, sizeof( col->colorfield ) );
+						}
+						else if ( !Q_stricmp( subToken.string, "iconfield" ) ) {
+							if ( WiredPC_String( handle, &str ) )
+								Q_strncpyz( col->iconfield, str, sizeof( col->iconfield ) );
+						}
+					}
+					item->numTableColumns++;
+				}
+			}
+		}
 		else {
-			// unknown keyword — smart skip to avoid poisoning subsequent parsing
+			/* unknown keyword -- smart skip to avoid poisoning subsequent parsing */
 			Com_DPrintf( "WiredUI: unknown item keyword '%s'\n", token.string );
 			if ( WiredPC_ReadToken( handle, &token ) ) {
 				if ( !Q_stricmp( token.string, "{" ) ) {
-					// block parameter — skip balanced braces
+					/* block parameter -- skip balanced braces */
 					int skipDepth = 1;
 					while ( skipDepth > 0 ) {
 						if ( !WiredPC_ReadToken( handle, &token ) ) break;
@@ -1053,7 +1121,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 						else if ( !Q_stricmp( token.string, "}" ) ) skipDepth--;
 					}
 				}
-				// else: consumed one token (the value) — good enough
+				/* else: consumed one token (the value) -- good enough */
 			}
 		}
 	}
@@ -1108,34 +1176,16 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 			menu->fullscreen = (qboolean)v;
 		}
 		else if ( !Q_stricmp( token.string, "rect" ) ) {
-			if ( parseNativeFormat ) {
-				// .wmenu: parse with unit awareness
-				menu->wuiRect.x = WiredPC_ParseValue( handle );
-				menu->wuiRect.y = WiredPC_ParseValue( handle );
-				menu->wuiRect.w = WiredPC_ParseValue( handle );
-				menu->wuiRect.h = WiredPC_ParseValue( handle );
-				// Back-fill old rect for draw code (real screen pixels)
-				menu->rect.x = WUI_BackfillToScreen( menu->wuiRect.x, (float)cls.glconfig.vidWidth );
-				menu->rect.y = WUI_BackfillToScreen( menu->wuiRect.y, (float)cls.glconfig.vidHeight );
-				menu->rect.w = WUI_BackfillToScreen( menu->wuiRect.w, (float)cls.glconfig.vidWidth );
-				menu->rect.h = WUI_BackfillToScreen( menu->wuiRect.h, (float)cls.glconfig.vidHeight );
-			} else {
-				// Legacy .menu: parse raw virtual coords, normalize to wuiRect,
-				// then convert rect to real screen pixels
-				float rawX, rawY, rawW, rawH;
-				WiredPC_Float( handle, &rawX );
-				WiredPC_Float( handle, &rawY );
-				WiredPC_Float( handle, &rawW );
-				WiredPC_Float( handle, &rawH );
-				menu->wuiRect.x = WUI_Val( rawX / LEGACY_VSCREEN_W, UNIT_NORM );
-				menu->wuiRect.y = WUI_Val( rawY / LEGACY_VSCREEN_H, UNIT_NORM );
-				menu->wuiRect.w = WUI_Val( rawW / LEGACY_VSCREEN_W, UNIT_NORM );
-				menu->wuiRect.h = WUI_Val( rawH / LEGACY_VSCREEN_H, UNIT_NORM );
-				menu->rect.x = ( rawX / LEGACY_VSCREEN_W ) * (float)cls.glconfig.vidWidth;
-				menu->rect.y = ( rawY / LEGACY_VSCREEN_H ) * (float)cls.glconfig.vidHeight;
-				menu->rect.w = ( rawW / LEGACY_VSCREEN_W ) * (float)cls.glconfig.vidWidth;
-				menu->rect.h = ( rawH / LEGACY_VSCREEN_H ) * (float)cls.glconfig.vidHeight;
-			}
+			// .wmenu: parse with unit awareness
+			menu->wuiRect.x = WiredPC_ParseValue( handle );
+			menu->wuiRect.y = WiredPC_ParseValue( handle );
+			menu->wuiRect.w = WiredPC_ParseValue( handle );
+			menu->wuiRect.h = WiredPC_ParseValue( handle );
+			// Back-fill old rect for draw code (real screen pixels)
+			menu->rect.x = WUI_BackfillToScreen( menu->wuiRect.x, (float)cls.glconfig.vidWidth );
+			menu->rect.y = WUI_BackfillToScreen( menu->wuiRect.y, (float)cls.glconfig.vidHeight );
+			menu->rect.w = WUI_BackfillToScreen( menu->wuiRect.w, (float)cls.glconfig.vidWidth );
+			menu->rect.h = WUI_BackfillToScreen( menu->wuiRect.h, (float)cls.glconfig.vidHeight );
 		}
 		else if ( !Q_stricmp( token.string, "style" ) ) {
 			WiredPC_Int( handle, &menu->style );
@@ -1388,31 +1438,17 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 	int         handle;
 	pc_token_t  token;
 
-	// detect file format before parsing begins
-	parseNativeFormat = IsNativeFormat( filename );
-
 	handle = WiredPC_LoadSource( filename );
 	if ( !handle ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: could not load '%s'\n", filename );
 		return qfalse;
 	}
 
-	if ( parseNativeFormat ) {
-		Com_DPrintf( "WiredUI: loading native format '%s'\n", filename );
-	}
+	Com_DPrintf( "WiredUI: loading native format '%s'\n", filename );
 
 	while ( 1 ) {
 		if ( !WiredPC_ReadToken( handle, &token ) ) {
 			break;
-		}
-
-		// skip #include directives for legacy files — shim handles conversions
-		if ( token.string[0] == '#' ) {
-			if ( !parseNativeFormat ) {
-				// Legacy files use #include for menumacros.h — skip the directive and its argument
-				Com_DPrintf( "WiredUI: skipping preprocessor directive '%s' in legacy file\n", token.string );
-				continue;
-			}
 		}
 
 		if ( !Q_stricmp( token.string, "menuDef" ) ) {

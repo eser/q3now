@@ -1,6 +1,7 @@
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
+#include "cl_wired_store.h"
 
 #if FEAT_WIRED_UI
 
@@ -47,10 +48,10 @@ void CG_SHUDElementTargetNameRoutine(void* context)
 	ci = &wired_cgs.clientinfo[clientNum];
 	if ( !ci->infoValid ) return;
 
-	// team-only mode: hide enemy names in team games
-	if ( wiredHud->gametype >= GT_TDM && cg_drawCrosshairNames.integer == 2 )
+	// team-only mode: hide enemy names in team games (pre-computed by cgame)
 	{
-		if ( ci->team != wiredHud->ourTeam ) return;
+		wuiStoreEntry_t *e = WiredStore_Get( "crosshair.showName" );
+		if ( e && (int)e->value == 0 ) return;
 	}
 
 	Com_sprintf( s, sizeof(s), "%s", ci->name );

@@ -10,3 +10,6 @@
 [submodule "tools/msdf-atlas-gen"]
 	path = tools/msdf-atlas-gen
 	url = https://github.com/Chlumsky/msdf-atlas-gen.git
+[submodule "code/libs/luajit"]
+	path = code/libs/luajit
+	url = https://github.com/LuaJIT/LuaJIT.git

@@ -5,10 +5,10 @@
 
 menuDef {
 	name "ingame_scoreboard_tdm"
-	rect 0.047 0.071 0.906 0
+	rect 0.047 0.071 0.906 auto
 	fullScreen 0
 	visible 1
-	style 1
+	style 0
 	backcolor 0.05 0.05 0.1 0.7
 
 	// -- team score boxes --

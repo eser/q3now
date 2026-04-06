@@ -73,6 +73,9 @@
 #define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
 #define FEAT_MOVEMENT_KEYS                0   // show followed player's movement keys (spectator HUD)
 #define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + SuperHUD)
+#ifndef FEAT_LUA
+#define FEAT_LUA                          0   // LuaJIT scripting: REPL console, cvar bridge, store API
+#endif
 
 // ── engine internals (testing) ────────────────────────────────────────
 #define FEAT_LEGACY_FORMATS_AUDIO         1   // WAV, OGG Vorbis, ADPCM audio codecs (retire by setting to 0; Opus remains)

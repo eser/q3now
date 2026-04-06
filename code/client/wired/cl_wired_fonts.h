@@ -16,6 +16,41 @@ and alignment. Migrated from cg_moderntext.c to run in the client directly.
 
 #if FEAT_WIRED_UI
 
+// ── font face / family types ─────────────────────────────────────────
+
+#define MSDF_MAX_FACES_PER_FAMILY 6
+
+typedef enum {
+	FONT_WEIGHT_LIGHT      = 300,
+	FONT_WEIGHT_REGULAR    = 400,
+	FONT_WEIGHT_MEDIUM     = 500,
+	FONT_WEIGHT_SEMIBOLD   = 600,
+	FONT_WEIGHT_BOLD       = 700,
+	FONT_WEIGHT_EXTRABOLD  = 800,
+} fontWeight_t;
+
+typedef enum {
+	FONT_STYLE_NORMAL,
+	FONT_STYLE_ITALIC,
+} fontStyle_t;
+
+// A single renderable face: one atlas
+typedef struct {
+	char            name[64];       // e.g. "sansman-regular"
+	char            atlasName[64];  // e.g. "sansman" — references the MSDF atlas
+	fontWeight_t    weight;         // semantic weight this face represents
+	fontStyle_t     style;          // normal or italic
+	// Populated at load time:
+	msdfFont_t     *atlas;          // pointer to loaded MSDF atlas (shared across faces)
+} fontFace_t;
+
+// A font family: groups multiple faces sharing atlas(es)
+typedef struct {
+	char            familyName[64]; // e.g. "sansman"
+	fontFace_t      faces[MSDF_MAX_FACES_PER_FAMILY];
+	int             faceCount;
+} fontFamily_t;
+
 // ── draw style flags ──────────────────────────────────────────────────
 #ifndef DS_HLEFT
 #define DS_HLEFT        0x0000
@@ -45,39 +80,24 @@ void            WiredFonts_InitMSDF( void );
 // Look up an MSDF font by name. Returns NULL for unknown/bitmap-only fonts.
 msdfFont_t *WiredFonts_GetMSDF( const char *fontName );
 
-// ── text rendering ────────────────────────────────────────────────────
-// These are the migrated CG_ModernDrawString* functions, renamed for clarity.
-// The original cgame functions still exist for backward compat until full migration.
-
-// full-featured: proportional fonts, shadows, color codes, borders, backgrounds
-void    CG_ModernDrawStringNew( float x, float y, const char *str,
-            const vec4_t color, vec4_t shadowColor,
-            float charW, float charH, int maxWidth, int flags,
-            vec4_t bgColor, vec4_t border, vec4_t borderColor );
-
-// simpler variant without shadow/border
-void    CG_ModernDrawString( float x, float y, const char *str,
-            const vec4_t color, float charW, float charH,
-            int maxWidth, int flags, vec4_t bgColor );
-
-// measure text width in pixels
-int     CG_ModernDrawStringLenPix( const char *str, float charW, int flags, int toWidth );
+// Resolve a font face by family name, weight, and style (CSS-like matching).
+const fontFace_t *WiredFont_Resolve(
+	const char   *familyName,
+	fontWeight_t  weight,
+	fontStyle_t   style
+);
 
 // hex color parsing
 qboolean CG_Hex16GetColor( const char *str, float *color );
 
-// text command compiler (used internally and by SuperHUD elements)
-// note: text_command_t is defined in cl_wired_fonts.c — opaque to callers
-
 // font loading (internal, called from WiredFont_Init)
 void CG_LoadFonts( void );
-void CG_FontSelect( int index );
 int  CG_FontIndexFromName( const char *name );
 
-// convenience aliases
-#define WiredFont_DrawString     CG_ModernDrawStringNew
-#define WiredFont_DrawSimple     CG_ModernDrawString
-#define WiredFont_StringWidth    CG_ModernDrawStringLenPix
+// font-index-to-Text_Draw helpers
+int  WiredFont_ToFontId( int fontIndex );
+int  WiredFont_ToAlignment( int dsFlags );
+int  WiredFont_ToTextFlags( int dsFlags );
 
 // ── TA font system (fontInfo_t-based, for v6/TA menu compatibility) ──
 //

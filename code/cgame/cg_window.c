@@ -197,20 +197,25 @@ void CG_windowDraw( void )
 
 		/* draw background */
 		Vector4Set( bgColor, 0.0f, 0.0f, 0.0f, WIN_BG_ALPHA * w->alpha );
-		CG_FillRect( w->x, w->y, w->w, w->h, bgColor );
+		CG_FillRectNorm( w->x * NORM_HSCALE, w->y * NORM_VSCALE, w->w * NORM_HSCALE, w->h * NORM_VSCALE, bgColor );
 
-		/* draw border */
+		/* draw border (top, bottom, left, right) */
 		Vector4Set( bgColor, 0.5f, 0.5f, 0.5f, 0.3f * w->alpha );
-		CG_DrawRect( w->x, w->y, w->w, w->h, 1, bgColor );
+		trap_R_SetColor( bgColor );
+		CG_FillRectNorm( w->x * NORM_HSCALE, w->y * NORM_VSCALE, w->w * NORM_HSCALE, 1 * NORM_VSCALE, bgColor );
+		CG_FillRectNorm( w->x * NORM_HSCALE, (w->y + w->h - 1) * NORM_VSCALE, w->w * NORM_HSCALE, 1 * NORM_VSCALE, bgColor );
+		CG_FillRectNorm( w->x * NORM_HSCALE, (w->y + 1) * NORM_VSCALE, 1 * NORM_HSCALE, (w->h - 2) * NORM_VSCALE, bgColor );
+		CG_FillRectNorm( (w->x + w->w - 1) * NORM_HSCALE, (w->y + 1) * NORM_VSCALE, 1 * NORM_HSCALE, (w->h - 2) * NORM_VSCALE, bgColor );
+		trap_R_SetColor( NULL );
 
 		/* draw lines */
 		for ( line = 0; line < w->lineCount && line < MAX_WINDOW_LINES; line++ ) {
 			Vector4Copy( w->lineColor[line], lineColor );
 			lineColor[3] *= w->alpha;
-			trap_R_DrawText( w->lineText[line],
-				(float)( w->x + WIN_PADDING ),
-				(float)( w->y + WIN_PADDING + line * WIN_LINE_HEIGHT ),
-				FONT_UI, (float)SMALLCHAR_HEIGHT, lineColor, TEXT_ALIGN_LEFT, 0 );
+			trap_R_DrawTextNorm( w->lineText[line],
+				(float)( w->x + WIN_PADDING ) * NORM_HSCALE,
+				(float)( w->y + WIN_PADDING + line * WIN_LINE_HEIGHT ) * NORM_VSCALE,
+				FONT_UI, (float)SMALLCHAR_HEIGHT * NORM_VSCALE, lineColor, TEXT_ALIGN_LEFT, 0 );
 		}
 	}
 }

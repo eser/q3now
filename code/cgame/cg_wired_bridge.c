@@ -9,6 +9,7 @@ from cgame game state for HUD purposes after Phase 3 migration.
 */
 
 #include "cg_local.h"
+#include "cg_wired_store.h"
 
 #if FEAT_WIRED_UI
 
@@ -65,6 +66,46 @@ void CG_WiredHudPushState( void ) {
 	state.ourTeam = cgs.clientinfo[cg.clientNum].team;
 	state.blueflag = cgs.blueflag;
 	state.redflag  = cgs.redflag;
+
+	// ── pre-computed game mode state ─────────────────────────────────
+	{
+		int activeTeam = cgs.clientinfo[cg.clientNum].team;
+		int redCount = 0, blueCount = 0;
+
+		if ( activeTeam == TEAM_SPECTATOR && cg.snap ) {
+			activeTeam = cgs.clientinfo[cg.snap->ps.clientNum].team;
+		}
+		state.ourActiveTeam = activeTeam;
+		state.isOurTeamBlue = ( activeTeam == TEAM_BLUE );
+		state.isSpectator   = ( cgs.clientinfo[cg.clientNum].team == TEAM_SPECTATOR );
+		state.isTeamGame    = ( cgs.gametype >= GT_TDM );
+		state.isDuel        = ( cgs.gametype == GT_DUEL );
+
+		if ( cgs.gametype >= 0 && cgs.gametype < GT_MAX_GAME_TYPE ) {
+			Q_strncpyz( state.gametypeName, bg_gametypelist[cgs.gametype].name,
+				sizeof( state.gametypeName ) );
+		} else {
+			Q_strncpyz( state.gametypeName, "Unknown", sizeof( state.gametypeName ) );
+		}
+
+		/* count players per team for team-count elements */
+		for ( i = 0; i < cgs.maxclients && i < WIRED_HUD_MAX_CLIENTS; i++ ) {
+			if ( cgs.clientinfo[i].infoValid ) {
+				if ( cgs.clientinfo[i].team == TEAM_RED )  redCount++;
+				if ( cgs.clientinfo[i].team == TEAM_BLUE ) blueCount++;
+			}
+		}
+		if ( activeTeam == TEAM_RED ) {
+			state.ownTeamCount   = redCount;
+			state.enemyTeamCount = blueCount;
+		} else if ( activeTeam == TEAM_BLUE ) {
+			state.ownTeamCount   = blueCount;
+			state.enemyTeamCount = redCount;
+		} else {
+			state.ownTeamCount   = 0;
+			state.enemyTeamCount = 0;
+		}
+	}
 
 	// ── crosshair ────────────────────────────────────────────────────
 	state.crosshairClientNum  = cg.crosshairClientNum;
@@ -221,6 +262,19 @@ void CG_WiredHudPushState( void ) {
 		}
 	}
 
+	/* ── pre-compute per-score weapon totals ──────────────────────────── */
+	for ( i = 0; i < cg.numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+		int w, tK = 0, tS = 0, tH = 0;
+		for ( w = 0; w < WIRED_MAX_WEAPONS; w++ ) {
+			tK += state.scores[i].weaponStats[w].kills;
+			tS += state.scores[i].weaponStats[w].shots;
+			tH += state.scores[i].weaponStats[w].hits;
+		}
+		state.scoreWeaponTotals[i].totalKills = tK;
+		state.scoreWeaponTotals[i].totalShots = tS;
+		state.scoreWeaponTotals[i].totalHits  = tH;
+	}
+
 	// ── events ───────────────────────────────────────────────────────
 	state.itemPickup     = cg.itemPickup;
 	state.itemPickupTime = cg.itemPickupTime;
@@ -254,6 +308,62 @@ void CG_WiredHudPushState( void ) {
 	// head model icons (2D player head icons for scoreboard)
 	for ( i = 0; i < cgs.maxclients && i < WIRED_HUD_MAX_CLIENTS; i++ ) {
 		state.headIcons[i] = cgs.clientinfo[i].modelIcon;
+	}
+
+	/* ── pre-computed weapon list (owned weapons for HUD display) ───── */
+	{
+		int w, weaponCount = 0;
+		int statWeapons = cg.snap->ps.stats[STAT_WEAPONS];
+		int curWeap = cg.snap->ps.weapon;
+		/* Start at WP_MACHINEGUN (skip gauntlet) */
+		for ( w = WP_MACHINEGUN; w < WP_NUM_WEAPONS && weaponCount < WIRED_MAX_WEAPONS; w++ ) {
+			if ( statWeapons & ( 1 << w ) ) {
+				int ammoVal = cg.snap->ps.ammo[w];
+				if ( ammoVal < 0 ) ammoVal = 0;
+				if ( ammoVal > 999 ) ammoVal = 999;
+				state.weaponList[weaponCount].id       = w;
+				state.weaponList[weaponCount].icon      = cg_weapons[w].weaponIcon;
+				state.weaponList[weaponCount].ammoIcon   = cg_weapons[w].ammoIcon;
+				state.weaponList[weaponCount].ammo       = ammoVal;
+				state.weaponList[weaponCount].selected   = ( w == curWeap ) ? qtrue : qfalse;
+				weaponCount++;
+			}
+		}
+		state.weaponListCount = weaponCount;
+	}
+
+	/* ── pre-computed active powerups ────────────────────────────────── */
+	{
+		int pw, pwCount = 0;
+		/* timed powerups: sorted by time remaining, skip flags (t>999000) */
+		for ( pw = PW_NONE + 1; pw < PW_NUM_POWERUPS && pwCount < 8; pw++ ) {
+			int t;
+			if ( !cg.snap->ps.powerups[pw] ) continue;
+			t = cg.snap->ps.powerups[pw] - cg.time;
+			if ( t < 0 || t > 999000 ) continue;
+			{
+				gitem_t *item = BG_FindItemForPowerup( pw );
+				if ( item && item->icon ) {
+					state.activePowerups[pwCount].icon = trap_R_RegisterShader( item->icon );
+				} else {
+					state.activePowerups[pwCount].icon = 0;
+				}
+			}
+			state.activePowerups[pwCount].timeLeft = ( t + 999 ) / 1000;
+			state.activePowerups[pwCount].isHoldable = qfalse;
+			pwCount++;
+		}
+		/* holdable item */
+		{
+			int hi = cg.snap->ps.stats[STAT_HOLDABLE_ITEM];
+			if ( hi && pwCount < 8 ) {
+				state.activePowerups[pwCount].icon = cg_items[hi].icon;
+				state.activePowerups[pwCount].timeLeft = 0;
+				state.activePowerups[pwCount].isHoldable = qtrue;
+				pwCount++;
+			}
+		}
+		state.activePowerupCount = pwCount;
 	}
 
 	// ── data bindings (named stat bundles for generic HUD elements) ──
@@ -298,6 +408,318 @@ void CG_WiredHudPushState( void ) {
 		b++;
 
 		state.numBindings = b;
+	}
+
+	/* ── Write player state to Wired Store ──────────────────────────── */
+	{
+		int hp, ap, wp, ammoVal;
+		char buf[64];
+		vec4_t color;
+
+		hp = cg.snap->ps.stats[STAT_HEALTH];
+		ap = cg.snap->ps.stats[STAT_ARMOR];
+		wp = cg.snap->ps.weapon;
+		ammoVal = cg.snap->ps.ammo[wp];
+
+		/* ── player.health ──────────────────────────────── */
+		Com_sprintf( buf, sizeof( buf ), "%d", hp > 0 ? hp : 0 );
+		WUI_Stage_SetString( "player.health.text", buf );
+		WUI_Stage_SetFloat( "player.health.value", (float)hp );
+		WUI_Stage_SetFloat( "player.health.percent", Com_Clamp( 0.0f, 1.0f, hp / 100.0f ) );
+
+		/* health color from effective health */
+		BG_GetColorForAmount( state.effectiveHealth, color );
+		WUI_Stage_SetColor( "player.health.color", color );
+
+		/* health icon */
+		WUI_Stage_SetIcon( "player.health.icon", cgs.media.healthIcon );
+
+		/* health semantic state */
+		if ( state.effectiveHealth < 25 ) {
+			WUI_Stage_SetState( "player.health.state", "critical" );
+		} else if ( state.effectiveHealth < 50 ) {
+			WUI_Stage_SetState( "player.health.state", "warning" );
+		} else if ( hp > 100 ) {
+			WUI_Stage_SetState( "player.health.state", "overhealed" );
+		} else {
+			WUI_Stage_SetState( "player.health.state", "normal" );
+		}
+
+		/* ── player.armor ───────────────────────────────── */
+		Com_sprintf( buf, sizeof( buf ), "%d", ap > 0 ? ap : 0 );
+		WUI_Stage_SetString( "player.armor.text", buf );
+		WUI_Stage_SetFloat( "player.armor.value", (float)ap );
+		WUI_Stage_SetFloat( "player.armor.percent", Com_Clamp( 0.0f, 1.0f, ap / 200.0f ) );
+
+		/* armor color */
+		BG_GetColorForAmount( ap, color );
+		WUI_Stage_SetColor( "player.armor.color", color );
+
+		/* armor icon by armor class */
+		{
+			qhandle_t armorIcon;
+			int armorClass = cg.snap->ps.stats[STAT_ARMORCLASS];
+			if ( armorClass == ARM_HEAVY ) {
+				armorIcon = cgs.media.heavyArmorIcon;
+			} else if ( armorClass == ARM_COMBAT ) {
+				armorIcon = cgs.media.combatArmorIcon;
+			} else { // if ( armorClass == ARM_JACKET ) {
+				armorIcon = cgs.media.jacketArmorIcon;
+			}
+			WUI_Stage_SetIcon( "player.armor.icon", armorIcon );
+		}
+
+		/* armor semantic state */
+		if ( ap <= 0 ) {
+			WUI_Stage_SetState( "player.armor.state", "neutral" );
+		} else if ( ap < 50 ) {
+			WUI_Stage_SetState( "player.armor.state", "warning" );
+		} else {
+			WUI_Stage_SetState( "player.armor.state", "normal" );
+		}
+
+		/* ── player.ammo ────────────────────────────────── */
+		Com_sprintf( buf, sizeof( buf ), "%d", ammoVal > 0 ? ammoVal : 0 );
+		WUI_Stage_SetString( "player.ammo.text", buf );
+		WUI_Stage_SetFloat( "player.ammo.value", (float)ammoVal );
+		WUI_Stage_SetFloat( "player.ammo.percent", Com_Clamp( 0.0f, 1.0f, ammoVal / 200.0f ) );
+
+		/* ammo color */
+		if ( ammoVal <= 0 ) {
+			Vector4Set( color, 1.0f, 0.0f, 0.0f, 1.0f );
+		} else {
+			Vector4Set( color, 1.0f, 1.0f, 1.0f, 1.0f );
+		}
+		WUI_Stage_SetColor( "player.ammo.color", color );
+
+		/* ammo icon */
+		WUI_Stage_SetIcon( "player.ammo.icon", cg_weapons[wp].ammoIcon );
+
+		/* ammo semantic state + visibility */
+		if ( wp == WP_NONE || wp == WP_GAUNTLET ) {
+			WUI_Stage_SetState( "player.ammo.state", "neutral" );
+			WUI_Stage_SetString( "player.ammo.visible", "0" );
+		} else if ( ammoVal <= 0 ) {
+			WUI_Stage_SetState( "player.ammo.state", "critical" );
+			WUI_Stage_SetString( "player.ammo.visible", "1" );
+		} else if ( cg.lowAmmoWarning >= 1 ) {
+			WUI_Stage_SetState( "player.ammo.state", "warning" );
+			WUI_Stage_SetString( "player.ammo.visible", "1" );
+		} else {
+			WUI_Stage_SetState( "player.ammo.state", "normal" );
+			WUI_Stage_SetString( "player.ammo.visible", "1" );
+		}
+
+		/* ── player.weapon ──────────────────────────────── */
+		WUI_Stage_SetInt( "player.weapon.current", wp );
+		WUI_Stage_SetString( "player.weapon.name", bg_weaponlist[wp].name );
+		WUI_Stage_SetIcon( "player.weapon.icon", cg_weapons[wp].weaponIcon );
+
+		/* ── match.score ────────────────────────────────── */
+		WUI_Stage_SetInt( "match.score.own", cg.snap->ps.persistant[PERS_SCORE] );
+		WUI_Stage_SetInt( "match.score.red", cgs.scores1 );
+		WUI_Stage_SetInt( "match.score.blue", cgs.scores2 );
+
+		/* ── Write scoreboard data to Wired Store ──────────────────── */
+		{
+			int si, totalKills;
+			char key[128];
+
+			WUI_Stage_SetInt( "game.scores.count", state.numScores );
+			WUI_Stage_SetInt( "game.scores.gametype", state.gametype );
+
+			for ( si = 0; si < state.numScores && si < WIRED_HUD_MAX_SCORES; si++ ) {
+				wiredHudScore_t *sc = &state.scores[si];
+				int cn = sc->client;
+
+				/* name */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.name", si );
+				if ( cn >= 0 && cn < WIRED_HUD_MAX_CLIENTS ) {
+					WUI_Stage_SetString( key, state.clients[cn].name );
+				} else {
+					WUI_Stage_SetString( key, "???" );
+				}
+
+				/* team */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.team", si );
+				WUI_Stage_SetInt( key, sc->team );
+
+				/* highlight (local player) */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.highlight", si );
+				WUI_Stage_SetFloat( key, (cn == state.clientNum) ? 1.0f : 0.0f );
+
+				/* client index */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.client", si );
+				WUI_Stage_SetInt( key, cn );
+
+				/* rank */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.rank", si );
+				Com_sprintf( buf, sizeof(buf), "%d", si + 1 );
+				WUI_Stage_SetString( key, buf );
+
+				/* score */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.score", si );
+				Com_sprintf( buf, sizeof(buf), "%d", sc->score );
+				WUI_Stage_SetString( key, buf );
+
+				/* K/D */
+				totalKills = 0;
+				{
+					int w;
+					for ( w = 0; w < WIRED_MAX_WEAPONS; w++ ) {
+						totalKills += sc->weaponStats[w].kills;
+					}
+				}
+
+				Com_sprintf( key, sizeof(key), "game.scores.%d.kd", si );
+				Com_sprintf( buf, sizeof(buf), "%d/%d", totalKills, sc->deaths );
+				WUI_Stage_SetString( key, buf );
+
+				/* K/D color */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.kdcolor", si );
+				if ( sc->deaths == 0 && totalKills > 0 ) {
+					Vector4Set( color, 0.2f, 1.0f, 0.2f, 1.0f ); /* bright green */
+				} else if ( totalKills >= sc->deaths ) {
+					Vector4Set( color, 0.6f, 1.0f, 0.6f, 1.0f ); /* light green */
+				} else {
+					Vector4Set( color, 1.0f, 0.4f, 0.4f, 1.0f ); /* red */
+				}
+				WUI_Stage_SetColor( key, color );
+
+				/* efficiency */
+				{
+					int eff;
+					if ( totalKills + sc->deaths > 0 ) {
+						eff = (int)( 100.0f * totalKills / (totalKills + sc->deaths) );
+					} else {
+						eff = 0;
+					}
+					Com_sprintf( key, sizeof(key), "game.scores.%d.eff", si );
+					Com_sprintf( buf, sizeof(buf), "%d%%", eff );
+					WUI_Stage_SetString( key, buf );
+
+					Com_sprintf( key, sizeof(key), "game.scores.%d.effcolor", si );
+					if ( eff >= 60 ) {
+						Vector4Set( color, 0.2f, 1.0f, 0.2f, 1.0f );
+					} else if ( eff >= 40 ) {
+						Vector4Set( color, 1.0f, 1.0f, 0.2f, 1.0f );
+					} else {
+						Vector4Set( color, 1.0f, 1.0f, 1.0f, 1.0f );
+					}
+					WUI_Stage_SetColor( key, color );
+				}
+
+				/* damage */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.damage", si );
+				if ( sc->damageDone >= 100000 ) {
+					Com_sprintf( buf, sizeof(buf), "%dk", sc->damageDone / 1000 );
+				} else if ( sc->damageDone >= 10000 ) {
+					Com_sprintf( buf, sizeof(buf), "%.1fk", sc->damageDone / 1000.0f );
+				} else {
+					Com_sprintf( buf, sizeof(buf), "%d", sc->damageDone );
+				}
+				WUI_Stage_SetString( key, buf );
+
+				/* accuracy */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.acc", si );
+				Com_sprintf( buf, sizeof(buf), "%d%%", sc->accuracy );
+				WUI_Stage_SetString( key, buf );
+
+				Com_sprintf( key, sizeof(key), "game.scores.%d.acccolor", si );
+				if ( sc->accuracy >= 50 ) {
+					Vector4Set( color, 0.2f, 1.0f, 0.2f, 1.0f );
+				} else if ( sc->accuracy >= 30 ) {
+					Vector4Set( color, 1.0f, 1.0f, 0.2f, 1.0f );
+				} else {
+					Vector4Set( color, 1.0f, 1.0f, 1.0f, 1.0f );
+				}
+				WUI_Stage_SetColor( key, color );
+
+				/* ping */
+				Com_sprintf( key, sizeof(key), "game.scores.%d.ping", si );
+				if ( sc->ping == -1 ) {
+					WUI_Stage_SetString( key, "..." );
+				} else {
+					Com_sprintf( buf, sizeof(buf), "%d", sc->ping );
+					WUI_Stage_SetString( key, buf );
+				}
+
+				Com_sprintf( key, sizeof(key), "game.scores.%d.pingcolor", si );
+				if ( sc->ping < 0 ) {
+					Vector4Set( color, 0.2f, 1.0f, 0.2f, 1.0f );
+				} else if ( sc->ping < 40 ) {
+					Vector4Set( color, 0.2f, 1.0f, 0.2f, 1.0f );
+				} else if ( sc->ping < 100 ) {
+					Vector4Set( color, 1.0f, 1.0f, 0.2f, 1.0f );
+				} else {
+					Vector4Set( color, 1.0f, 0.3f, 0.3f, 1.0f );
+				}
+				WUI_Stage_SetColor( key, color );
+			}
+		}
+
+		/* ── game mode state ────────────────────────────────────── */
+		if ( cgs.gametype == GT_DUEL ) {
+			WUI_Stage_SetString( "game.warmup.message", "^BWaiting for Opponent" );
+		} else {
+			WUI_Stage_SetString( "game.warmup.message", "^BWaiting for Players" );
+		}
+
+		/* ── crosshair target state ─────────────────────────────── */
+		{
+			int xhairClient = cg.crosshairClientNum;
+			int myTeam = cg.snap->ps.persistant[PERS_TEAM];
+			qboolean isTeammate = qfalse;
+			qboolean showName = qtrue;
+
+			if ( xhairClient >= 0 && xhairClient < MAX_CLIENTS &&
+			     cgs.clientinfo[xhairClient].infoValid ) {
+				int targetTeam = cgs.clientinfo[xhairClient].team;
+				isTeammate = ( targetTeam != TEAM_FREE && targetTeam == myTeam );
+
+				/* showName: hide enemy names in team games when cvar == 2 */
+				if ( cgs.gametype >= GT_TDM && cg_drawCrosshairNames.integer == 2 ) {
+					if ( targetTeam != myTeam ) {
+						showName = qfalse;
+					}
+				}
+			}
+
+			WUI_Stage_SetInt( "crosshair.isTeammate", isTeammate ? 1 : 0 );
+			WUI_Stage_SetInt( "crosshair.showName", showName ? 1 : 0 );
+		}
+
+		/* ── spectator list ─────────────────────────────────────── */
+		{
+			char specList[MAX_STRING_CHARS];
+			int len = 0;
+			int ci2;
+			qboolean hasSpecs = qfalse;
+
+			specList[0] = '\0';
+			for ( ci2 = 0; ci2 < cgs.maxclients && ci2 < MAX_CLIENTS; ci2++ ) {
+				if ( cgs.clientinfo[ci2].infoValid &&
+				     cgs.clientinfo[ci2].team == TEAM_SPECTATOR ) {
+					const char *name = cgs.clientinfo[ci2].name;
+					if ( !name || !name[0] ) continue;
+					if ( hasSpecs ) {
+						Q_strncpyz( specList + len, ", ",
+						            (int)sizeof(specList) - len );
+						len = strlen( specList );
+						if ( len >= (int)sizeof(specList) - 1 ) break;
+					}
+					Q_strncpyz( specList + len, name,
+					            (int)sizeof(specList) - len );
+					len = strlen( specList );
+					if ( len >= (int)sizeof(specList) - 1 ) break;
+					hasSpecs = qtrue;
+				}
+			}
+			WUI_Stage_SetString( "game.spectators.list", specList );
+		}
+
+		/* Flush all staged entries in one batch syscall */
+		WUI_Stage_Flush();
 	}
 
 	// ── per-attack stats for local player ────────────────────────────

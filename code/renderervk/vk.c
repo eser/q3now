@@ -6375,6 +6375,25 @@ void vk_initialize( void )
 
 		VK_CHECK(qvkCreatePipelineLayout(vk.device, &desc, NULL, &vk.pipeline_layout));
 
+		// MSDF pipeline layout: 112 bytes (64 MVP + 48 outline/glow params), VERTEX|FRAGMENT
+		{
+			VkPushConstantRange msdfPush;
+			msdfPush.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+			msdfPush.offset = 0;
+			msdfPush.size = 112; // 64 (mat4 mvp) + 4 (outlineWidth) + 4 (glowWidth) + 8 (pad) + 16 (outlineColor) + 16 (glowColor)
+
+			VkPipelineLayoutCreateInfo msdfLayoutInfo;
+			Com_Memset(&msdfLayoutInfo, 0, sizeof(msdfLayoutInfo));
+			msdfLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+			msdfLayoutInfo.setLayoutCount = desc.setLayoutCount;
+			msdfLayoutInfo.pSetLayouts = set_layouts;
+			msdfLayoutInfo.pushConstantRangeCount = 1;
+			msdfLayoutInfo.pPushConstantRanges = &msdfPush;
+
+			VK_CHECK(qvkCreatePipelineLayout(vk.device, &msdfLayoutInfo, NULL, &vk.pipeline_layout_msdf));
+			SET_OBJECT_NAME(vk.pipeline_layout_msdf, "pipeline layout: MSDF text", VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT);
+		}
+
 		// flare test pipeline
 		set_layouts[0] = vk.set_layout_storage; // dynamic storage buffer
 
@@ -6814,6 +6833,8 @@ void vk_shutdown( refShutdownCode_t code )
 	qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_storage, NULL);
 
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout, NULL);
+	if ( vk.pipeline_layout_msdf != VK_NULL_HANDLE )
+		qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_msdf, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_storage, NULL);
 	vk_shutdown_rail_compute();
 #if defined(FEAT_IQM)
@@ -6825,7 +6846,6 @@ void vk_shutdown( refShutdownCode_t code )
 	if ( vk.pipeline_layout_smaa != VK_NULL_HANDLE ) {
 		qvkDestroyPipelineLayout( vk.device, vk.pipeline_layout_smaa, NULL );
 	}
-
 #ifdef USE_VBO
 	vk_release_vbo();
 #endif
@@ -9044,6 +9064,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 
 	if ( def->shader_type == TYPE_DOT )
 		create_info.layout = vk.pipeline_layout_storage;
+	else if ( def->shader_type == TYPE_MSDF )
+		create_info.layout = vk.pipeline_layout_msdf;
 	else
 		create_info.layout = vk.pipeline_layout;
 
@@ -9323,6 +9345,50 @@ void vk_update_mvp( const float *m ) {
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( push_constants ), push_constants );
 
 	vk.stats.push_size += sizeof( push_constants );
+}
+
+
+void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
+                              float glowWidth, const float *glowColor )
+{
+	// Re-push MVP (bytes 0-63) via the MSDF layout so push constants are valid
+	// for the currently bound MSDF pipeline.
+	float mvp[16];
+	get_mvp_transform( mvp );
+	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_msdf,
+		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		0, sizeof( mvp ), mvp );
+
+	// Push outline/glow params at offset 64 (48 bytes, std430 aligned)
+	// Layout: float outlineWidth (4) + float glowWidth (4) + pad (8) + vec4 outlineColor (16) + vec4 glowColor (16)
+	struct {
+		float outlineWidth;
+		float glowWidth;
+		float _pad[2];
+		float outlineColor[4];
+		float glowColor[4];
+	} params;
+
+	params.outlineWidth = outlineWidth;
+	params.glowWidth = glowWidth;
+	params._pad[0] = 0.0f;
+	params._pad[1] = 0.0f;
+	if ( outlineColor ) {
+		Com_Memcpy( params.outlineColor, outlineColor, sizeof( params.outlineColor ) );
+	} else {
+		Com_Memset( params.outlineColor, 0, sizeof( params.outlineColor ) );
+	}
+	if ( glowColor ) {
+		Com_Memcpy( params.glowColor, glowColor, sizeof( params.glowColor ) );
+	} else {
+		Com_Memset( params.glowColor, 0, sizeof( params.glowColor ) );
+	}
+
+	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_msdf,
+		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		64, sizeof( params ), &params );
+
+	vk.stats.push_size += sizeof( mvp ) + sizeof( params );
 }
 
 

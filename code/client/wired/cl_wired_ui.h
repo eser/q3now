@@ -31,6 +31,7 @@ references and calls registered element routines during rendering.
 
 #include "../../qcommon/q_shared.h"
 #include "cl_wired_layout.h"
+#include "cl_wired_fonts.h"
 
 // ── public API (called from cl_ui.c, cl_keys.c, cl_scrn.c, etc.) ─────
 
@@ -139,6 +140,19 @@ typedef struct {
 	float   maxVal;
 } wiredSliderDef_t;
 
+/* ── TABLE widget column definition (Phase 4) ──────────────────── */
+
+#define WUI_TABLE_MAX_COLUMNS   16
+
+typedef struct {
+	char        field[64];          /* store key suffix for cell text (e.g. "name", "score") */
+	char        header[64];         /* column header text (e.g. "PLAYER", "SCORE") */
+	float       width;              /* column width as fraction of table width (0.0-1.0) */
+	int         align;              /* 0=left, 1=center, 2=right */
+	char        colorfield[64];     /* store key suffix for per-cell color override */
+	char        iconfield[64];      /* store key suffix for per-cell icon */
+} wuiTableColumn_t;
+
 typedef struct wiredItemDef_s {
 	char            name[64];
 	char            text[256];
@@ -211,6 +225,8 @@ typedef struct wiredItemDef_s {
 	float           textoffsetX;            // normalized text offset X (replaces textalignx)
 	float           textoffsetY;            // normalized text offset Y (replaces textaligny)
 	float           fontPointSize;          // font size in points (native format "font" keyword)
+	fontWeight_t    fontWeight;             // font weight (FONT_WEIGHT_BOLD default, .whud "fontweight")
+	float           letterSpacing;          // extra pixels between glyphs (0.0 default, .whud "letterspacing")
 
 	// SuperHUD-specific properties (Phase 3: hudElement items)
 	char            fontName[MAX_QPATH];    // font name ("sansman", "id", etc.)
@@ -225,6 +241,22 @@ typedef struct wiredItemDef_s {
 	int             timeMs;                 // element display duration (ms)
 	char            image[MAX_QPATH];       // image/shader name (SuperHUD "image" keyword)
 	char            bind[32];               // data binding name ("health", "armor", "ammo")
+
+	/* Wired Store data bindings (Phase 4) */
+	char            storeBind[128];         /* store key for text override (e.g. "player.health.text") */
+	char            storeBindColor[128];    /* store key for color override */
+	char            storeBindIcon[128];     /* store key for icon override */
+	char            storeBindValue[128];    /* store key for numeric value */
+	char            showBind[128];          /* show item when store key is truthy */
+	char            hideBind[128];          /* hide item when store key is truthy */
+	qboolean        bindWarned;             /* dev-mode: already warned about missing binding */
+
+	/* ── TABLE widget properties (Phase 4) ────────────────────── */
+	char            tableSource[128];       /* store key prefix for row data (e.g. "game.scores") */
+	char            tableCountBind[128];    /* store key for row count (e.g. "game.scores.count") */
+	int             tableTeamFilter;        /* -1=all, 0=none, 1=red side, 2=blue side */
+	wuiTableColumn_t tableColumns[WUI_TABLE_MAX_COLUMNS];
+	int             numTableColumns;
 
 	// cvar binding data
 	wiredMultiDef_t *multiData;             // for ITEM_TYPE_MULTI (allocated from pool)

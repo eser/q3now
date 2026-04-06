@@ -15,6 +15,9 @@ code/ui/ui_shared.c in subsequent phases.
 #include "cl_wired_fonts.h"
 #include "cl_wired_text.h"
 #include "cl_wired_draw.h"
+#include "cl_wired_store.h"
+#include "cl_wired_theme.h"
+#include "cl_wired_scripting.h"
 #include "../../qcommon/menudef.h"
 
 #if FEAT_WIRED_UI
@@ -476,6 +479,14 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// Phase 3: initialize HUD subsystem (state bridge)
 	WiredHud_Init();
 
+	// Phase 4: semantic state theme system
+	WiredTheme_Init();
+
+#if FEAT_LUA
+	// Phase 5: LuaJIT scripting (REPL console, cvar bridge, store API)
+	WiredScript_Init();
+#endif
+
 	// hot reload commands
 	Cmd_AddCommand( "hud_reload", WiredUI_ReloadHud );
 	Cmd_AddCommand( "menu_reload", WiredUI_ReloadMenus );
@@ -597,6 +608,10 @@ void WiredUI_Shutdown( void ) {
 		Cvar_Set( "wired_activeMenuSaved", va( "%d", wired_activeMenu ) );
 	}
 
+#if FEAT_LUA
+	WiredScript_Shutdown();
+#endif
+	WiredTheme_Shutdown();
 	WiredHud_DestroyAllElements();
 	Cmd_RemoveCommand( "hud_reload" );
 	Cmd_RemoveCommand( "menu_reload" );
@@ -814,6 +829,20 @@ void WiredUI_Refresh( int realtime ) {
 			continue;
 		}
 
+		/* showbind/hidebind: store-based visibility */
+		if ( item->showBind[0] ) {
+			wuiStoreEntry_t *vis = WiredStore_Get( item->showBind );
+			if ( !vis || ( !vis->text[0] && vis->value == 0.0f ) ) {
+				continue;
+			}
+		}
+		if ( item->hideBind[0] ) {
+			wuiStoreEntry_t *vis = WiredStore_Get( item->hideBind );
+			if ( vis && ( vis->text[0] || vis->value != 0.0f ) ) {
+				continue;
+			}
+		}
+
 		// TA compat: ownerdrawFlag visibility gating
 		if ( item->ownerdrawFlag && !WiredUI_OwnerDrawVisible( item->ownerdrawFlag ) ) {
 			continue;
@@ -912,6 +941,42 @@ void WiredUI_Refresh( int realtime ) {
 				re.SetColor( NULL );
 				WUI_DrawPic( itemX, itemY, itemW, itemH, bgShader );
 			}
+		}
+
+		/* bindicon: draw store-bound icon overlay */
+		{
+			qhandle_t storeIcon = 0;
+			float storeValue = 0.0f;
+
+			if ( item->storeBindIcon[0] ) {
+				wuiStoreEntry_t *iconEntry = WiredStore_Get( item->storeBindIcon );
+				if ( iconEntry && iconEntry->icon ) {
+					storeIcon = iconEntry->icon;
+				} else if ( !item->bindWarned ) {
+					Com_DPrintf( "WiredUI: bindicon key '%s' not found (item '%s')\n",
+								 item->storeBindIcon, item->name );
+					item->bindWarned = qtrue;
+				}
+			}
+
+			/* bindvalue: resolve numeric value from store */
+			if ( item->storeBindValue[0] ) {
+				wuiStoreEntry_t *valEntry = WiredStore_Get( item->storeBindValue );
+				if ( valEntry ) {
+					storeValue = valEntry->value;
+				} else if ( !item->bindWarned ) {
+					Com_DPrintf( "WiredUI: bindvalue key '%s' not found (item '%s')\n",
+								 item->storeBindValue, item->name );
+					item->bindWarned = qtrue;
+				}
+			}
+
+			if ( storeIcon ) {
+				re.SetColor( NULL );
+				WUI_DrawPic( itemX, itemY, itemW, itemH, storeIcon );
+			}
+
+			(void)storeValue; /* resolved for use by status bar elements (task-5) */
 		}
 
 		// draw OWNERDRAW items — TA compat (CG_OWNERDRAW_* dispatch)
@@ -1185,8 +1250,8 @@ void WiredUI_Refresh( int realtime ) {
 				Text_Draw( valueText, (float)valueX, (float)labelY, FONT_UI, charSize, item->forecolor, TEXT_ALIGN_LEFT, 0 );
 			}
 		}
-		// draw text-only items (no cvar)
-		else if ( item->text[0] ) {
+		/* draw text-only items (no cvar) — also handles storeBind text override */
+		else if ( item->text[0] || item->storeBind[0] ) {
 			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
 			float textVCenter = ( item->textaligny == 0 && itemH > charSize )
 				? ( itemH - charSize ) * 0.5f : item->textaligny;
@@ -1194,25 +1259,64 @@ void WiredUI_Refresh( int realtime ) {
 			float y = itemY + textVCenter;
 			char truncBuf[256];
 			const char *displayText;
+			const char *sourceText;
+			vec4_t drawColor;
 
-			// truncate if wider than rect
-			if ( itemW > 0 ) {
-				WIRED_TRUNCATE_TEXT( item->text, charSize, itemW, truncBuf, sizeof( truncBuf ) );
-				displayText = truncBuf;
-			} else {
-				displayText = item->text;
+			Vector4Copy( item->forecolor, drawColor );
+			sourceText = item->text;
+
+			/* bind: override display text from store */
+			if ( item->storeBind[0] ) {
+				wuiStoreEntry_t *bindEntry = WiredStore_Get( item->storeBind );
+				if ( bindEntry && bindEntry->text[0] ) {
+					sourceText = bindEntry->text;
+				} else if ( !item->bindWarned ) {
+					Com_DPrintf( "WiredUI: bind key '%s' not found (item '%s')\n",
+								 item->storeBind, item->name );
+					item->bindWarned = qtrue;
+				}
 			}
 
-			// adjust for text alignment within rect
-			if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
-				float textWidth = strlen( displayText ) * charSize;
-				x = itemX + ( itemW - textWidth ) * 0.5f;
-			} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
-				float textWidth = strlen( displayText ) * charSize;
-				x = itemX + itemW - textWidth;
+			/* bindcolor: override forecolor from store */
+			if ( item->storeBindColor[0] ) {
+				wuiStoreEntry_t *colorEntry = WiredStore_Get( item->storeBindColor );
+				if ( colorEntry ) {
+					/* semantic state takes priority over raw color */
+					if ( colorEntry->state[0] ) {
+						if ( !WiredTheme_ResolveState( colorEntry->state, drawColor ) ) {
+							/* unknown state — fall back to raw color */
+							Vector4Copy( colorEntry->color, drawColor );
+						}
+					} else {
+						Vector4Copy( colorEntry->color, drawColor );
+					}
+				} else if ( !item->bindWarned ) {
+					Com_DPrintf( "WiredUI: bindcolor key '%s' not found (item '%s')\n",
+								 item->storeBindColor, item->name );
+					item->bindWarned = qtrue;
+				}
 			}
 
-			Text_Draw( displayText, (float)x, (float)y, FONT_UI, charSize, item->forecolor, TEXT_ALIGN_LEFT, 0 );
+			if ( sourceText[0] ) {
+				/* truncate if wider than rect */
+				if ( itemW > 0 ) {
+					WIRED_TRUNCATE_TEXT( sourceText, charSize, itemW, truncBuf, sizeof( truncBuf ) );
+					displayText = truncBuf;
+				} else {
+					displayText = sourceText;
+				}
+
+				/* adjust for text alignment within rect */
+				if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
+					float textWidth = strlen( displayText ) * charSize;
+					x = itemX + ( itemW - textWidth ) * 0.5f;
+				} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
+					float textWidth = strlen( displayText ) * charSize;
+					x = itemX + itemW - textWidth;
+				}
+
+				Text_Draw( displayText, (float)x, (float)y, FONT_UI, charSize, drawColor, TEXT_ALIGN_LEFT, 0 );
+			}
 		}
 	}
 
@@ -3269,6 +3373,20 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 
 		if ( !item->visible ) continue;
 
+		/* showbind/hidebind: store-based visibility */
+		if ( item->showBind[0] ) {
+			wuiStoreEntry_t *vis = WiredStore_Get( item->showBind );
+			if ( !vis || ( !vis->text[0] && vis->value == 0.0f ) ) {
+				continue;
+			}
+		}
+		if ( item->hideBind[0] ) {
+			wuiStoreEntry_t *vis = WiredStore_Get( item->hideBind );
+			if ( vis && ( vis->text[0] || vis->value != 0.0f ) ) {
+				continue;
+			}
+		}
+
 		// cvarTest + showCvar/hideCvar conditional visibility
 		if ( item->cvarTest[0] ) {
 			char testBuf[256];
@@ -3299,6 +3417,42 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 			}
 		} else if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
 			WUI_FillRect( itemX, itemY, itemW, itemH, item->backcolor );
+		}
+
+		/* bindicon: draw store-bound icon overlay */
+		{
+			qhandle_t storeIcon = 0;
+			float storeValue = 0.0f;
+
+			if ( item->storeBindIcon[0] ) {
+				wuiStoreEntry_t *iconEntry = WiredStore_Get( item->storeBindIcon );
+				if ( iconEntry && iconEntry->icon ) {
+					storeIcon = iconEntry->icon;
+				} else if ( !item->bindWarned ) {
+					Com_DPrintf( "WiredUI: bindicon key '%s' not found (item '%s')\n",
+								 item->storeBindIcon, item->name );
+					item->bindWarned = qtrue;
+				}
+			}
+
+			/* bindvalue: resolve numeric value from store */
+			if ( item->storeBindValue[0] ) {
+				wuiStoreEntry_t *valEntry = WiredStore_Get( item->storeBindValue );
+				if ( valEntry ) {
+					storeValue = valEntry->value;
+				} else if ( !item->bindWarned ) {
+					Com_DPrintf( "WiredUI: bindvalue key '%s' not found (item '%s')\n",
+								 item->storeBindValue, item->name );
+					item->bindWarned = qtrue;
+				}
+			}
+
+			if ( storeIcon ) {
+				re.SetColor( NULL );
+				WUI_DrawPic( itemX, itemY, itemW, itemH, storeIcon );
+			}
+
+			(void)storeValue; /* resolved for use by status bar elements (task-5) */
 		}
 
 		// draw LISTBOX items (feeder-driven)
@@ -3350,7 +3504,17 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 			continue;
 		}
 
-		// draw SCORELIST widget — rich scoreboard with per-cell coloring
+		/* TABLE widget -- store-driven data table (Phase 4) */
+		if ( item->tableSource[0] && item->numTableColumns > 0 ) {
+			extern void WiredHud_DrawTable( wiredItemDef_t *item, float ox, float oy, float ow, float oh,
+				int fontId, float fontSize );
+			int tblFontId = FONT_UI;
+			float tblFontSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+			WiredHud_DrawTable( item, itemX, itemY, itemW, itemH, tblFontId, tblFontSize );
+			continue;
+		}
+
+		// draw SCORELIST widget -- rich scoreboard with per-cell coloring
 		if ( item->type == ITEM_TYPE_SCORELIST && item->feeder != 0 ) {
 			extern void WiredHud_DrawScorelistWidget( float x, float y, float w, float h,
 				int feederID, const vec4_t textColor );
@@ -3366,10 +3530,13 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 			continue;
 		}
 
-		// draw text items (static text or cvar-bound) using modern font system
+		/* draw text items (static text or cvar-bound) using modern font system */
 		{
 			const char *drawText = NULL;
 			char cvarBuf[256];
+			vec4_t overlayDrawColor;
+
+			Vector4Copy( item->forecolor, overlayDrawColor );
 
 			if ( item->text[0] ) {
 				drawText = item->text;
@@ -3378,36 +3545,67 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 				if ( cvarBuf[0] ) drawText = cvarBuf;
 			}
 
+			/* bind: override display text from store */
+			if ( item->storeBind[0] ) {
+				wuiStoreEntry_t *bindEntry = WiredStore_Get( item->storeBind );
+				if ( bindEntry && bindEntry->text[0] ) {
+					drawText = bindEntry->text;
+				} else if ( !drawText && !item->bindWarned ) {
+					Com_DPrintf( "WiredUI: bind key '%s' not found (item '%s')\n",
+								 item->storeBind, item->name );
+					item->bindWarned = qtrue;
+				}
+			}
+
+			/* bindcolor: override forecolor from store */
+			if ( item->storeBindColor[0] ) {
+				wuiStoreEntry_t *colorEntry = WiredStore_Get( item->storeBindColor );
+				if ( colorEntry ) {
+					/* semantic state takes priority over raw color */
+					if ( colorEntry->state[0] ) {
+						if ( !WiredTheme_ResolveState( colorEntry->state, overlayDrawColor ) ) {
+							/* unknown state — fall back to raw color */
+							Vector4Copy( colorEntry->color, overlayDrawColor );
+						}
+					} else {
+						Vector4Copy( colorEntry->color, overlayDrawColor );
+					}
+				} else if ( !item->bindWarned ) {
+					Com_DPrintf( "WiredUI: bindcolor key '%s' not found (item '%s')\n",
+								 item->storeBindColor, item->name );
+					item->bindWarned = qtrue;
+				}
+			}
+
 			if ( drawText ) {
 				float charW, charH;
-				int flags = DS_PROPORTIONAL | DS_SHADOW;
+				int alignment = TEXT_ALIGN_LEFT;
 
-				// textscale maps to charW/charH (same mapping as main menu renderer)
+				/* textscale maps to charW/charH (same mapping as main menu renderer) */
 				charW = item->textscale >= 0.7f ? 16.0f : ( item->textscale >= 0.3f ? 10.0f : 8.0f );
 				charH = charW * 1.4f;
 
 				if ( item->textalign == ITEM_ALIGN_CENTER ) {
-					flags |= DS_HCENTER;
+					alignment = TEXT_ALIGN_CENTER;
 				} else if ( item->textalign == ITEM_ALIGN_RIGHT ) {
-					flags |= DS_HRIGHT;
-				} else {
-					flags |= DS_HLEFT;
+					alignment = TEXT_ALIGN_RIGHT;
 				}
 
-				// position: centered items use widget midpoint, others use left edge
-				float x, y;
-				if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
-					x = itemX + itemW * 0.5f;
-				} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
-					x = itemX + itemW;
-				} else {
-					x = itemX;
-				}
-				y = itemY + item->textaligny;
+				/* position: centered items use widget midpoint, others use left edge */
+				{
+					float x, y;
+					if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
+						x = itemX + itemW * 0.5f;
+					} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
+						x = itemX + itemW;
+					} else {
+						x = itemX;
+					}
+					y = itemY + item->textaligny;
 
-				CG_FontSelect( 2 );
-				CG_ModernDrawString( x, y, drawText, item->forecolor,
-					charW, charH, (int)itemW, flags, NULL );
+					Text_Draw( drawText, x, y, FONT_DISPLAY,
+						charH, overlayDrawColor, alignment, TEXT_DROPSHADOW );
+				}
 			}
 		}
 	}

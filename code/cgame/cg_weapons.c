@@ -2131,16 +2131,16 @@ void CG_DrawWeaponSelect( void ) {
 		CG_RegisterWeapon( i );
 
 		// draw weapon icon
-		CG_DrawPic( x, y, 32, 32, cg_weapons[i].weaponIcon );
+		CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, 32 * NORM_HSCALE, 32 * NORM_VSCALE, cg_weapons[i].weaponIcon );
 
 		// draw selection marker
 		if ( i == cg.weaponSelect ) {
-			CG_DrawPic( x-4, y-4, 40, 40, cgs.media.selectShader );
+			CG_DrawPicNorm( (x-4) * NORM_HSCALE, (y-4) * NORM_VSCALE, 40 * NORM_HSCALE, 40 * NORM_VSCALE, cgs.media.selectShader );
 		}
 
 		// no ammo cross on top
 		if ( !cg.snap->ps.ammo[ i ] ) {
-			CG_DrawPic( x, y, 32, 32, cgs.media.noammoShader );
+			CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, 32 * NORM_HSCALE, 32 * NORM_VSCALE, cgs.media.noammoShader );
 		}
 
 		x += 40;
@@ -2151,8 +2151,8 @@ void CG_DrawWeaponSelect( void ) {
 		name = cg_weapons[ cg.weaponSelect ].item->pickup_name;
 		if ( name ) {
 			w = CG_DrawStrlen( name ) * BIGCHAR_WIDTH;
-			x = ( (int)CG_VIRTUAL_W - w ) / 2;
-			trap_R_DrawText( name, (float)x, (float)( y - 22 ), FONT_DISPLAY, 16.0f, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
+			x = ( 640 - w ) / 2;
+			trap_R_DrawTextNorm( name, (float)x * NORM_HSCALE, (float)( y - 22 ) * NORM_VSCALE, FONT_DISPLAY, 16.0f * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 		}
 	}
 

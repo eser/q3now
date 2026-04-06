@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "wired/cl_wired_hud.h"
 #include "wired/cl_wired_text.h"
+#include "wired/cl_wired_store.h"
 
 #include "../botlib/botlib.h"
 
@@ -714,11 +715,8 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		re.SetColor( VMA(1) );
 		return 0;
 	case CG_R_DRAWSTRETCHPIC:
-		// Pass through — cgame callers (CG_DrawPic etc.) already normalize
-		// via CG_R_DRAWSTRETCHPICNORM. This old path is used by CG_TileClearBox
-		// and cgDC which send real pixel coords.
-		re.DrawStretchPic( VMF(1), VMF(2), VMF(3), VMF(4),
-			VMF(5), VMF(6), VMF(7), VMF(8), args[9] );
+		/* removed — all callers migrated to CG_R_DRAWSTRETCHPICNORM */
+		Com_Printf( S_COLOR_YELLOW "WARNING: CG_R_DRAWSTRETCHPIC is removed, use CG_R_DRAWSTRETCHPICNORM\n" );
 		return 0;
 	case CG_R_DRAWSTRETCHPICNORM: {
 		float x = VMF(1) * cls.glconfig.vidWidth;
@@ -904,26 +902,55 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_WIREDUI_PUSH_EVENT:
 		WiredHud_ReceiveEvent( args[1], VMA(2) );
 		return 0;
-	case CG_R_DRAWTEXT:
-		/* cgame sends 640x480 virtual coordinates — scale to real pixels */
+	case CG_R_DRAWTEXTNORM:
+		/* normalized coords (0.0-1.0) — scale to real pixels */
 		{
-			float xscale = (float)cls.glconfig.vidWidth / 640.0f;
-			float yscale = (float)cls.glconfig.vidHeight / 480.0f;
-			float x = VMF(2) * xscale;
-			float y = VMF(3) * yscale;
-			float size = VMF(5) * yscale;
+			float x = VMF(2) * cls.glconfig.vidWidth;
+			float y = VMF(3) * cls.glconfig.vidHeight;
+			float size = VMF(5) * cls.glconfig.vidHeight;
 			Text_Draw( VMA(1), x, y, args[4], size, VMA(6), args[7], args[8] );
 		}
 		return 0;
-	case CG_R_MEASURETEXT:
-		/* cgame sends virtual size — scale to real pixels, measure, scale result back */
+	case CG_R_MEASURETEXTNORM:
+		/* normalized size (0.0-1.0) — scale to real pixels, measure, scale result back */
 		{
-			float yscale = (float)cls.glconfig.vidHeight / 480.0f;
-			float xscale = (float)cls.glconfig.vidWidth / 640.0f;
-			float realSize = VMF(3) * yscale;
+			float realSize = VMF(3) * cls.glconfig.vidHeight;
 			float realWidth = Text_Measure( VMA(1), args[2], realSize );
-			return FloatAsInt( realWidth / xscale );
+			return FloatAsInt( realWidth / (float)cls.glconfig.vidWidth );
 		}
+	case CG_WUI_STORE_PUSH_BATCH:
+		{
+			const wuiStagedEntry_t *entries = VMA(1);
+			int count = args[2];
+			int i;
+			for ( i = 0; i < count; i++ ) {
+				wuiStoreEntry_t *e = WiredStore_Set( entries[i].key );
+				if ( !e ) continue;
+				if ( entries[i].fields & WUI_STAGED_TEXT ) {
+					Q_strncpyz( e->text, entries[i].text, sizeof( e->text ) );
+				}
+				if ( entries[i].fields & WUI_STAGED_COLOR ) {
+					Vector4Copy( entries[i].color, e->color );
+				}
+				if ( entries[i].fields & WUI_STAGED_ICON ) {
+					e->icon = entries[i].icon;
+				}
+				if ( entries[i].fields & WUI_STAGED_VALUE ) {
+					e->value = entries[i].value;
+				}
+				if ( entries[i].fields & WUI_STAGED_STATE ) {
+					Q_strncpyz( e->state, entries[i].state, sizeof( e->state ) );
+				}
+				e->flags |= WUI_STORE_FLAG_DIRTY;
+			}
+		}
+		return 0;
+	case CG_WUI_STORE_DELETE:
+		WiredStore_Delete( VMA(1) );
+		return 0;
+	case CG_WUI_STORE_CLEAR:
+		WiredStore_Clear();
+		return 0;
 #endif
 
 	default:

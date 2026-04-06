@@ -1,6 +1,7 @@
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
+#include "cl_wired_store.h"
 
 #if FEAT_WIRED_UI
 
@@ -36,7 +37,10 @@ void CG_SHUDElementWarmupInfoRoutine(void* context)
 
 	if (sec < 0)
 	{
-		element->ctx.text = cgs.gametype != GT_DUEL ? "^BWaiting for Players" : "^BWaiting for Opponent";
+		{
+			wuiStoreEntry_t *e = WiredStore_Get( "game.warmup.message" );
+			element->ctx.text = ( e && e->text[0] ) ? e->text : "^BWaiting for Players";
+		}
 	}
 	else if (sec > 0)
 	{

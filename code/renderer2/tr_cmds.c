@@ -250,13 +250,12 @@ void	RE_SetColor( const float *rgba ) {
 	cmd->color[3] = rgba[3];
 }
 
-
 /*
 =============
 RE_StretchPic
 =============
 */
-void RE_StretchPic ( float x, float y, float w, float h, 
+void RE_StretchPic ( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, qhandle_t hShader ) {
 	stretchPicCommand_t	*cmd;
 
@@ -624,6 +623,13 @@ const glconfig_t *RE_GetConfig( void )
 {
 	return &glConfig;
 }
+
+void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
+                         float glowWidth, const float *glowColor )
+{
+	/* MSDF outline not supported in GL2 renderer */
+}
+
 
 void RE_VertexLighting( qboolean allowed )
 {

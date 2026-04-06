@@ -294,10 +294,7 @@ void	trap_R_SetColor( const float *rgba ) {
 	syscall( CG_R_SETCOLOR, rgba );
 }
 
-void	trap_R_DrawStretchPic( float x, float y, float w, float h,
-							   float s1, float t1, float s2, float t2, qhandle_t hShader ) {
-	syscall( CG_R_DRAWSTRETCHPIC, PASSFLOAT(x), PASSFLOAT(y), PASSFLOAT(w), PASSFLOAT(h), PASSFLOAT(s1), PASSFLOAT(t1), PASSFLOAT(s2), PASSFLOAT(t2), hShader );
-}
+/* Legacy stretch-pic wrapper removed -- all callers use trap_R_DrawStretchPicNorm */
 
 void	trap_R_DrawStretchPicNorm( float nx, float ny, float nw, float nh,
 								  float s1, float t1, float s2, float t2, qhandle_t hShader ) {
@@ -475,14 +472,28 @@ void trap_WiredUI_PushHudState( wiredHudState_t *state ) {
 void trap_WiredUI_PushEvent( int type, const char *data ) {
 	syscall( CG_WIREDUI_PUSH_EVENT, type, data );
 }
-void trap_R_DrawText( const char *text, float x, float y, int fontId,
-                      float size, const vec4_t color, int alignment, int flags ) {
-	syscall( CG_R_DRAWTEXT, text, PASSFLOAT(x), PASSFLOAT(y), fontId,
-	         PASSFLOAT(size), color, alignment, flags );
+/* Normalized-coordinate text draw: nx/ny/nSize are in 0.0-1.0 screen space */
+void trap_R_DrawTextNorm( const char *text, float nx, float ny, int fontId,
+                          float nSize, const vec4_t color, int alignment, int flags ) {
+	syscall( CG_R_DRAWTEXTNORM, text, PASSFLOAT(nx), PASSFLOAT(ny), fontId,
+	         PASSFLOAT(nSize), color, alignment, flags );
 }
-float trap_R_MeasureText( const char *text, int fontId, float size ) {
+
+/* Normalized-coordinate text measure: nSize is in 0.0-1.0 screen space, returns normalized width */
+float trap_R_MeasureTextNorm( const char *text, int fontId, float nSize ) {
 	floatint_t fi;
-	fi.i = syscall( CG_R_MEASURETEXT, text, fontId, PASSFLOAT(size) );
+	fi.i = syscall( CG_R_MEASURETEXTNORM, text, fontId, PASSFLOAT(nSize) );
 	return fi.f;
+}
+
+/* Wired Store batch operations */
+void trap_WiredStore_PushBatch( const wuiStagedEntry_t *entries, int count ) {
+	syscall( CG_WUI_STORE_PUSH_BATCH, entries, count );
+}
+void trap_WiredStore_Delete( const char *key ) {
+	syscall( CG_WUI_STORE_DELETE, key );
+}
+void trap_WiredStore_Clear( void ) {
+	syscall( CG_WUI_STORE_CLEAR );
 }
 #endif

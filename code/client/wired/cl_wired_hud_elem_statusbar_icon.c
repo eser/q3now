@@ -12,6 +12,7 @@ cgame selects the right icon (e.g., heavy/combat/jacket armor) — client just d
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
 #include "cl_wired_hud.h"
+#include "cl_wired_store.h"
 
 #if FEAT_WIRED_UI
 
@@ -31,15 +32,33 @@ void *CG_SHUDElementStatusbarIconCreate( const superhudConfig_t *config ) {
 
 void CG_SHUDElementStatusbarIconRoutine( void *context ) {
 	shudElementStatusbarIcon_t *element = (shudElementStatusbarIcon_t *)context;
-	const wiredHudBinding_t *binding;
 
 	if ( !element->config.bind.isSet ) return;
 
-	binding = WiredHud_FindBinding( element->config.bind.value );
-	if ( !binding || !binding->visible || !binding->icon ) return;
+	/* Try Wired Store first, fall back to old binding */
+	{
+		char iconKey[128];
+		wuiStoreEntry_t *storeEntry;
 
-	element->ctx.image = binding->icon;
-	CG_SHUDDrawStretchPicCtx( &element->config, &element->ctx );
+		Com_sprintf( iconKey, sizeof( iconKey ), "player.%s.icon", element->config.bind.value );
+		storeEntry = WiredStore_Get( iconKey );
+		if ( storeEntry && storeEntry->icon ) {
+			element->ctx.image = storeEntry->icon;
+			CG_SHUDDrawStretchPicCtx( &element->config, &element->ctx );
+			return;
+		}
+	}
+
+	/* Fall back to old binding system */
+	{
+		const wiredHudBinding_t *binding;
+
+		binding = WiredHud_FindBinding( element->config.bind.value );
+		if ( !binding || !binding->visible || !binding->icon ) return;
+
+		element->ctx.image = binding->icon;
+		CG_SHUDDrawStretchPicCtx( &element->config, &element->ctx );
+	}
 }
 
 void CG_SHUDElementStatusbarIconDestroy( void *context ) {

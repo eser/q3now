@@ -16,6 +16,20 @@ Alignment and drop shadow are handled here so callers don't need to.
 
 #if FEAT_WIRED_UI
 
+/* ── letter spacing state ──────────────────────────────────────────── */
+
+static float text_letterSpacing = 0.0f;
+
+void Text_SetLetterSpacing( float spacing )
+{
+	text_letterSpacing = spacing;
+}
+
+float Text_GetLetterSpacing( void )
+{
+	return text_letterSpacing;
+}
+
 /* ── Text_Init ─────────────────────────────────────────────────────── */
 /*
  * Bootstrap the MSDF font subsystem.  Called from WiredUI_Init()
@@ -28,17 +42,18 @@ void Text_Init( void )
 	WiredFonts_InitMSDF();
 }
 
-/* ── font handle resolution ────────────────────────────────────────── */
+/* ── font face resolution (family-based) ──────────────────────────── */
 
-static msdfFont_t *Text_GetFont( int fontId )
+static const fontFace_t *Text_ResolveFace( int fontId )
 {
 	switch ( fontId ) {
-	case FONT_DISPLAY:        return WiredFonts_GetMSDF( "sansman" );
-	case FONT_DISPLAY_ITALIC: return WiredFonts_GetMSDF( "sansman-italic" );
-	case FONT_UI:             return WiredFonts_GetMSDF( "oxanium" );
-	case FONT_UI_MEDIUM:      return WiredFonts_GetMSDF( "oxanium-medium" );
-	case FONT_MONO:           return WiredFonts_GetMSDF( "sharetechmono" );
-	default:                  return WiredFonts_GetMSDF( "oxanium" );
+	case FONT_DISPLAY:        return WiredFont_Resolve( "sansman",       FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+	case FONT_DISPLAY_ITALIC: return WiredFont_Resolve( "sansman",       FONT_WEIGHT_REGULAR, FONT_STYLE_ITALIC );
+	case FONT_DISPLAY_BOLD:   return WiredFont_Resolve( "sansman",       FONT_WEIGHT_BOLD,    FONT_STYLE_NORMAL );
+	case FONT_UI:             return WiredFont_Resolve( "oxanium",       FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+	case FONT_UI_MEDIUM:      return WiredFont_Resolve( "oxanium",       FONT_WEIGHT_MEDIUM,  FONT_STYLE_NORMAL );
+	case FONT_MONO:           return WiredFont_Resolve( "sharetechmono", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+	default:                  return WiredFont_Resolve( "oxanium",       FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
 	}
 }
 
@@ -47,22 +62,23 @@ static msdfFont_t *Text_GetFont( int fontId )
 void Text_Draw( const char *text, float x, float y, int fontId,
                 float size, const vec4_t color, int alignment, int flags )
 {
-	msdfFont_t *font;
+	const fontFace_t *face;
 	float drawX, drawY;
+	float ls = text_letterSpacing;
 
 	if ( !text || !text[0] ) return;
 
-	font = Text_GetFont( fontId );
-	if ( !font ) return;
+	face = Text_ResolveFace( fontId );
+	if ( !face || !face->atlas ) return;
 
 	drawX = x;
 	drawY = y;
 
 	/* alignment */
 	if ( alignment == TEXT_ALIGN_CENTER ) {
-		drawX -= MSDF_MeasureString( font, size, text, -1 ) * 0.5f;
+		drawX -= MSDF_MeasureString( face->atlas, size, text, -1, ls ) * 0.5f;
 	} else if ( alignment == TEXT_ALIGN_RIGHT ) {
-		drawX -= MSDF_MeasureString( font, size, text, -1 );
+		drawX -= MSDF_MeasureString( face->atlas, size, text, -1, ls );
 	}
 
 	/* drop shadow */
@@ -73,25 +89,26 @@ void Text_Draw( const char *text, float x, float y, int fontId,
 		if ( color ) {
 			shadowColor[3] = color[3] * 0.8f;
 		}
-		MSDF_DrawString( font, drawX + offset, drawY + offset,
-		                 size, shadowColor, text, -1 );
+		MSDF_DrawString( face->atlas, drawX + offset, drawY + offset,
+		                 size, shadowColor, text, -1, ls, qtrue );
 	}
 
-	MSDF_DrawString( font, drawX, drawY, size, color, text, -1 );
+	MSDF_DrawString( face->atlas, drawX, drawY, size, color, text, -1, ls,
+	                 ( flags & TEXT_FORCECOLOR ) ? qtrue : qfalse );
 }
 
 /* ── Text_Measure ──────────────────────────────────────────────────── */
 
 float Text_Measure( const char *text, int fontId, float size )
 {
-	msdfFont_t *font;
+	const fontFace_t *face;
 
 	if ( !text || !text[0] ) return 0.0f;
 
-	font = Text_GetFont( fontId );
-	if ( !font ) return 0.0f;
+	face = Text_ResolveFace( fontId );
+	if ( !face || !face->atlas ) return 0.0f;
 
-	return MSDF_MeasureString( font, size, text, -1 );
+	return MSDF_MeasureString( face->atlas, size, text, -1, text_letterSpacing );
 }
 
 /* ── Text_DrawChar ─────────────────────────────────────────────────── */
@@ -99,14 +116,14 @@ float Text_Measure( const char *text, int fontId, float size )
 void Text_DrawChar( int ch, float x, float y, int fontId,
                     float size, const vec4_t color )
 {
-	msdfFont_t *font;
+	const fontFace_t *face;
 
 	if ( ch <= 0 ) return;
 
-	font = Text_GetFont( fontId );
-	if ( !font ) return;
+	face = Text_ResolveFace( fontId );
+	if ( !face || !face->atlas ) return;
 
-	MSDF_DrawChar( font, x, y, size, color, ch );
+	MSDF_DrawChar( face->atlas, x, y, size, color, ch );
 }
 
 #endif /* FEAT_WIRED_UI */

@@ -102,20 +102,32 @@ void MSDF_DrawChar( msdfFont_t *font, float x, float y,
  * MSDF_DrawString
  *   Draw a null-terminated string with Q3 color code support (^0-^7, ^^).
  *   `maxChars` limits visible characters drawn (-1 = no limit).
+ *   `letterSpacing` adds extra pixels between each glyph advance (0.0 = normal).
+ *   `forceColor` if qtrue, ignore inline color codes — use `color` for all glyphs.
  *   Coordinates are in real screen pixels.
  */
 void MSDF_DrawString( msdfFont_t *font, float x, float y,
                       float size, const float *color,
-                      const char *str, int maxChars );
+                      const char *str, int maxChars, float letterSpacing,
+                      qboolean forceColor );
 
 /*
  * MSDF_MeasureString
  *   Return the total width in real screen pixels of the string,
  *   skipping Q3 color codes.  `maxChars` limits visible chars counted
- *   (-1 = no limit).
+ *   (-1 = no limit).  `letterSpacing` matches the draw call spacing.
  */
 float MSDF_MeasureString( msdfFont_t *font, float size,
-                          const char *str, int maxChars );
+                          const char *str, int maxChars, float letterSpacing );
+
+/*
+ * MSDF_SetOutline
+ *   Set outline and glow parameters for subsequent MSDF draws.
+ *   outlineWidth/glowWidth are in SDF units (0.0 = disabled).
+ *   outlineColor/glowColor are RGBA vec4; NULL leaves current value.
+ */
+void MSDF_SetOutline( float outlineWidth, const float *outlineColor,
+                       float glowWidth, const float *glowColor );
 
 /*
  * MSDF_ReregisterShaders

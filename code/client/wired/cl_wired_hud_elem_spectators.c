@@ -1,6 +1,7 @@
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
+#include "cl_wired_store.h"
 
 #if FEAT_WIRED_UI
 
@@ -26,9 +27,14 @@ void* CG_SHUDElementSpectatorsCreate(const superhudConfig_t* config)
 
 static qboolean CG_SHUD_SpectatorsBuildString(char* out, int outSize, const superhudConfig_t* config)
 {
+	wuiStoreEntry_t *e;
 	int len = 0;
-	int clientId;
-	qboolean hasSpectators = qfalse;
+
+	e = WiredStore_Get( "game.spectators.list" );
+	if ( !e || !e->text[0] ) {
+		out[0] = '\0';
+		return qfalse;
+	}
 
 	if (config->style.isSet && config->style.value & 2)
 	{
@@ -40,35 +46,7 @@ static qboolean CG_SHUD_SpectatorsBuildString(char* out, int outSize, const supe
 	}
 	len = strlen(out);
 
-	for (clientId = 0; clientId < MAX_CLIENTS; ++clientId)
-	{
-		if (cgs.clientinfo[clientId].infoValid && cgs.clientinfo[clientId].team == TEAM_SPECTATOR)
-		{
-			const char* name = cgs.clientinfo[clientId].name;
-			if (!name || !name[0])
-			{
-				continue;
-			}
-			if (hasSpectators)
-			{
-				Q_strncpyz(out + len, ", ", outSize - len);
-				len = strlen(out);
-				if (len >= outSize)
-					break;
-			}
-			Q_strncpyz(out + len, name, outSize - len);
-			len = strlen(out);
-			if (len >= outSize)
-				break;
-			hasSpectators = qtrue;
-		}
-	}
-
-	if (!hasSpectators)
-	{
-		out[0] = '\0';
-		return qfalse;
-	}
+	Q_strncpyz(out + len, e->text, outSize - len);
 
 	return qtrue;
 }

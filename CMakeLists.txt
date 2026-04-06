@@ -19,6 +19,7 @@ OPTION(USE_QUIC "Enable QUIC transport via picoquic (FEAT_QUIC_TRANSPORT)" OFF)
 OPTION(USE_QUIC_OBSERVE "Enable QUIC game state observation (FEAT_QUIC_OBSERVE, implies USE_QUIC)" OFF)
 OPTION(USE_QUIC_CONTROL "Enable QUIC MCP/command channel (FEAT_QUIC_CONTROL, implies USE_QUIC_OBSERVE)" OFF)
 OPTION(USE_QUIC_HTTP "Enable QUIC HTTP endpoints (FEAT_QUIC_HTTP, implies USE_QUIC)" OFF)
+OPTION(USE_LUA "Enable LuaJIT scripting (FEAT_LUA)" ON)
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -493,6 +494,43 @@ IF(USE_WASM)
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} vmlib)
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} vmlib)
 ENDIF()
+
+# ── LuaJIT scripting ──────────────────────────────────────────────
+# LuaJIT has its own Makefile that generates architecture-specific JIT code.
+# Build the static library via custom command, then import and link it.
+IF(USE_LUA)
+	SET(LUAJIT_DIR ${CMAKE_SOURCE_DIR}/code/libs/luajit)
+	SET(LUAJIT_LIB ${LUAJIT_DIR}/src/libluajit.a)
+
+	# Platform-specific build flags
+	SET(LUAJIT_XCFLAGS "")
+	SET(LUAJIT_MAKE_ENV "")
+	IF(APPLE)
+		SET(LUAJIT_MAKE_ENV ${CMAKE_COMMAND} -E env MACOSX_DEPLOYMENT_TARGET=10.15)
+		IF(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+			SET(LUAJIT_XCFLAGS "-DLUAJIT_ENABLE_GC64")
+		ENDIF()
+	ENDIF()
+
+	add_custom_command(
+		OUTPUT ${LUAJIT_LIB}
+		COMMAND ${LUAJIT_MAKE_ENV} make -C ${LUAJIT_DIR}/src clean
+		COMMAND ${LUAJIT_MAKE_ENV} make -C ${LUAJIT_DIR}/src BUILDMODE=static "XCFLAGS=${LUAJIT_XCFLAGS}"
+		COMMENT "Building LuaJIT (static)"
+	)
+	add_custom_target(luajit_build DEPENDS ${LUAJIT_LIB})
+
+	add_library(luajit STATIC IMPORTED GLOBAL)
+	set_target_properties(luajit PROPERTIES IMPORTED_LOCATION ${LUAJIT_LIB})
+	add_dependencies(luajit luajit_build)
+
+	TARGET_INCLUDE_DIRECTORIES(client PRIVATE ${LUAJIT_DIR}/src)
+	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} luajit)
+	TARGET_COMPILE_DEFINITIONS(client PRIVATE FEAT_LUA=1)
+
+	MESSAGE(STATUS "LuaJIT scripting enabled (FEAT_LUA)")
+ENDIF()
+
 #TARGET_LINK_OPTIONS(${DNAME} PRIVATE -fno-pie) # v3.13+
 
 IF(WIN32)
