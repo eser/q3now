@@ -300,9 +300,14 @@ target_link_libraries(opusfile PUBLIC opus ogg)
 target_include_directories(opusfile PUBLIC code/libogg/include)
 target_include_directories(opusfile PRIVATE code/libopus/include/opus)
 
-# client + cURL + Wired UI
+# client + cURL + Wired UI + miniaudio test
 AUX_SOURCE_DIRECTORY(code/client CLIENT_SRCS)
 list(FILTER CLIENT_SRCS EXCLUDE REGEX "cl_ui\\.c$")
+list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
+
+# snd_miniaudio_test.c is a standalone test runner with its own main();
+# it must NOT be linked into the client library or it duplicates _main.
+list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
 AUX_SOURCE_DIRECTORY(code/client/wired CLIENT_SRCS)
 # bg_misc.c needed by Wired UI HUD elements (BG_FindItemForPowerup, bg_itemlist)
 list(APPEND CLIENT_SRCS code/game/bg_misc.c code/game/bg_weapons.c code/game/bg_gametypes.c)
@@ -391,10 +396,12 @@ IF(UNIX)
 	IF(USE_SDL)
 		AUX_SOURCE_DIRECTORY(code/sdl WINDOW_SYSTEM_SRCS)
 	ELSE()
+		# Note: audio is now handled by code/client/snd_miniaudio.c (vendored
+		# miniaudio.h), not by a per-platform SNDDMA backend. linux_snd.c was
+		# deleted along with sdl_snd.c and win_snd.c.
 		SET(WINDOW_SYSTEM_SRCS
 			code/unix/linux_glimp.c
 			code/unix/linux_qgl.c
-			code/unix/linux_snd.c
 			code/unix/x11_dga.c
 			code/unix/x11_randr.c
 			code/unix/x11_vidmode.c)
@@ -431,13 +438,15 @@ ELSEIF(WIN32)
 		code/win32/win_syscon.c
 		code/win32/win_resource.rc)
 
+	# Note: audio is now handled by code/client/snd_miniaudio.c (vendored
+	# miniaudio.h), not by a per-platform SNDDMA backend. win_snd.c was
+	# deleted along with sdl_snd.c and linux_snd.c.
 	SET(WINDOW_SYSTEM_SRCS
 		code/win32/win_gamma.c
 		code/win32/win_glimp.c
 		code/win32/win_input.c
 		code/win32/win_minimize.c
 		code/win32/win_qgl.c
-		code/win32/win_snd.c
 		code/win32/win_wndproc.c)
 	IF(USE_VULKAN)
 		list(APPEND WINDOW_SYSTEM_SRCS code/win32/win_qvk.c)
@@ -554,6 +563,25 @@ IF(WIN32)
 ELSE()
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} m ${CMAKE_DL_LIBS})
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} m ${CMAKE_DL_LIBS})
+
+	# miniaudio platform link dependencies (client only — dedicated server
+	# never compiles snd_miniaudio.c thanks to #ifndef DEDICATED).
+	IF(APPLE)
+		# miniaudio uses CoreAudio + AudioToolbox on macOS.
+		FIND_LIBRARY(COREAUDIO_LIBRARY CoreAudio)
+		FIND_LIBRARY(AUDIOTOOLBOX_LIBRARY AudioToolbox)
+		FIND_LIBRARY(COREFOUNDATION_LIBRARY CoreFoundation)
+		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT}
+			${COREAUDIO_LIBRARY}
+			${AUDIOTOOLBOX_LIBRARY}
+			${COREFOUNDATION_LIBRARY})
+	ELSE()
+		# miniaudio dlopens ALSA / PulseAudio / JACK at runtime, so the
+		# only hard link deps on Linux are pthread, dl (already via
+		# CMAKE_DL_LIBS above), and m (already linked above).
+		FIND_PACKAGE(Threads REQUIRED)
+		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} Threads::Threads)
+	ENDIF()
 ENDIF()
 
 # macOS: ARM64 JIT requires entitlements for MAP_JIT and executable memory

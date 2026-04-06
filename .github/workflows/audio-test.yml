@@ -1,0 +1,53 @@
+name: audio-test
+
+# Run the audio backend's standalone tests on every push and PR.
+# This is a separate workflow from build.yml because:
+#   - It's fast (< 1 minute) and runs on every commit
+#   - It doesn't depend on the full game build
+#   - Failure should not block release packaging until proven stable
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'code/client/snd_miniaudio*.c'
+      - 'code/client/snd_public.h'
+      - 'code/client/wired/cl_wired_hud_elem_audio_waveform.c'
+      - 'code/client/wired/cl_wired_populate.c'
+      - 'tools/check_audio_callback.sh'
+      - '.github/workflows/audio-test.yml'
+  pull_request:
+    paths:
+      - 'code/client/snd_miniaudio*.c'
+      - 'code/client/snd_public.h'
+      - 'code/client/wired/cl_wired_hud_elem_audio_waveform.c'
+      - 'code/client/wired/cl_wired_populate.c'
+      - 'tools/check_audio_callback.sh'
+      - '.github/workflows/audio-test.yml'
+
+jobs:
+  unit-tests:
+    name: Ring buffer unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compile snd_miniaudio_test
+        run: |
+          gcc -O2 -Wall -Wno-unused-function \
+              -o /tmp/snd_miniaudio_test \
+              code/client/snd_miniaudio_test.c \
+              -lm -lpthread
+
+      - name: Run snd_miniaudio_test
+        run: /tmp/snd_miniaudio_test
+
+  static-analysis:
+    name: Audio callback lock-free check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run check_audio_callback.sh
+        run: tools/check_audio_callback.sh
