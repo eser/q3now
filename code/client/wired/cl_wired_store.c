@@ -183,6 +183,31 @@ void WiredStore_BeginFrame( void ) {
 	}
 }
 
+/*
+==================
+WiredStore_ForEach
+
+Iterate all active entries whose key starts with prefix.
+prefix="" or NULL matches everything.
+==================
+*/
+void WiredStore_ForEach( const char *prefix,
+                         void (*fn)( wuiStoreEntry_t *entry, void *userData ),
+                         void *userData ) {
+	int i;
+	int prefixLen;
+
+	if ( !fn ) return;
+	prefixLen = ( prefix && prefix[0] ) ? (int)strlen( prefix ) : 0;
+
+	for ( i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
+		wuiStoreEntry_t *e = &wired_store.pool[i];
+		if ( e->key[0] == '\0' ) continue;
+		if ( prefixLen > 0 && Q_stricmpn( e->key, prefix, prefixLen ) != 0 ) continue;
+		fn( e, userData );
+	}
+}
+
 /* ── qsort comparison for key list ──────────────────────────────────── */
 
 static int WiredStore_KeyCmp( const void *a, const void *b ) {

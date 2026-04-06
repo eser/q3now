@@ -111,9 +111,69 @@ static int WiredScript_StoreGetColor( lua_State *L ) {
 	return 1;
 }
 
-/* store.pairs(prefix) -- deferred until store iteration API exists */
+/* ---- store.pairs(prefix) — stateless iterator ----------------------- */
+
+/* Collector callback: pushes key and text onto a Lua table */
+typedef struct {
+	lua_State *L;
+	int index;
+} storePairsCtx_t;
+
+static void WiredScript_StorePairsCollect( wuiStoreEntry_t *entry, void *userData ) {
+	storePairsCtx_t *ctx = (storePairsCtx_t *)userData;
+	lua_State *L = ctx->L;
+
+	/* t[index] = { key, text } as two values at sequential indices */
+	ctx->index++;
+	lua_pushinteger( L, ctx->index );
+	lua_newtable( L );
+	lua_pushstring( L, entry->key );
+	lua_setfield( L, -2, "key" );
+	lua_pushstring( L, entry->text );
+	lua_setfield( L, -2, "text" );
+	lua_pushnumber( L, entry->value );
+	lua_setfield( L, -2, "value" );
+	lua_rawset( L, -3 ); /* t[index] = entry_table */
+}
+
+/* Iterator function: upvalue 1 = collected array, upvalue 2 = current index */
+static int WiredScript_StorePairsNext( lua_State *L ) {
+	int idx;
+
+	/* increment index */
+	idx = (int)lua_tointeger( L, lua_upvalueindex( 2 ) ) + 1;
+	lua_pushinteger( L, idx );
+	lua_replace( L, lua_upvalueindex( 2 ) );
+
+	/* get collected[idx] */
+	lua_rawgeti( L, lua_upvalueindex( 1 ), idx );
+	if ( lua_isnil( L, -1 ) ) {
+		return 0; /* end of iteration */
+	}
+
+	/* extract key and text from the entry table */
+	lua_getfield( L, -1, "key" );
+	lua_getfield( L, -2, "text" );
+	lua_remove( L, -3 ); /* remove the entry table, leaving key and text */
+	return 2; /* return key, text */
+}
+
+/* store.pairs(prefix) → iterator, nil, nil (for generic for) */
 static int WiredScript_StorePairs( lua_State *L ) {
-	return luaL_error( L, "store.pairs() not yet implemented" );
+	const char *prefix;
+	storePairsCtx_t ctx;
+
+	prefix = luaL_optstring( L, 1, "" );
+
+	/* Collect all matching entries into a Lua table */
+	lua_newtable( L );              /* upvalue 1: collected array */
+	ctx.L = L;
+	ctx.index = 0;
+	WiredStore_ForEach( prefix, WiredScript_StorePairsCollect, &ctx );
+
+	lua_pushinteger( L, 0 );       /* upvalue 2: current index */
+	lua_pushcclosure( L, WiredScript_StorePairsNext, 2 );
+	return 1; /* return iterator function */
 }
 
 static const luaL_Reg storeLib[] = {
@@ -131,31 +191,34 @@ static const luaL_Reg storeLib[] = {
    print(sensitivity)   -> Cvar_Get("sensitivity") */
 
 static int WiredScript_CvarIndex( lua_State *L ) {
+	/* __index receives (table, key) at stack positions 1 and 2 */
 	const char *name;
 	char buf[1024];
 
-	/* First check if it's a real global (function, table, etc.) */
-	lua_rawget( L, 1 );
+	/* First check if it's a real global (function, table, etc.)
+	   lua_rawget consumes the key from stack, so push a copy first */
+	lua_pushvalue( L, 2 );             /* duplicate key onto stack top */
+	lua_rawget( L, 1 );               /* pops key copy, pushes value */
 	if ( !lua_isnil( L, -1 ) ) {
 		return 1; /* found a real global, return it */
 	}
-	lua_pop( L, 1 );
+	lua_pop( L, 1 );                  /* pop the nil */
 
-	/* Not a real global -- try as cvar */
+	/* Key is still at position 2 — read it */
 	name = lua_tostring( L, 2 );
 	if ( !name ) {
 		lua_pushnil( L );
 		return 1;
 	}
 
+	/* Try as cvar */
 	Cvar_VariableStringBuffer( name, buf, sizeof( buf ) );
 	if ( buf[0] == '\0' ) {
-		/* Not a cvar either -- return nil */
 		lua_pushnil( L );
 		return 1;
 	}
 
-	/* Try to return as number if possible */
+	/* Return as number if parseable, string otherwise */
 	{
 		char *endptr;
 		double val = strtod( buf, &endptr );
