@@ -142,7 +142,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif // __arm64__
 
 #if defined (__PPC64__)
-#if defined (__LITTLE_ENDIAN__)
+#if defined (__LITTLE_ENDIAN__) || defined (__LITTLE_ENDIAN)
 #define ARCH_STRING "ppc64le"
 #define Q3_LITTLE_ENDIAN
 #else
@@ -309,6 +309,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define _GCC_SSE2
 #endif
 #endif // idx64
+
+// Modifier for printing size_t values portably
+
+#if (defined _WIN64)
+#define PRIz "I64"
+#elif (defined _WIN32)
+#define PRIz "I32"
+#elif (defined Q3_VM)
+#define PRIz ""
+#else
+#define PRIz "z"
+#endif
 
 // portable size_t format specifier — use as: "%"PRIz"u"
 #ifndef PRIz

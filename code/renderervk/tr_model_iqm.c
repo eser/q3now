@@ -36,12 +36,11 @@ static float identityMatrix[12] = {
 };
 
 static qboolean IQM_CheckRange( iqmHeader_t *header, uint32_t offset,
-				uint32_t count, uint32_t size ) {
+				uint32_t count, size_t size ) {
 	// return true if the range specified by offset, count and size
-	// doesn't fit into the file — uses uint64_t to prevent overflow
-	return ( count == 0 ||
-		 offset > (uint32_t)header->filesize ||
-		 (uint64_t)count * size > (uint32_t)header->filesize - offset );
+	// doesn't fit into the file
+	return count == 0 || offset == 0 ||
+		(uint64_t)offset + (uint64_t)count * size > header->filesize;
 }
 // "multiply" 3x4 matrices, these are assumed to be the top 3 rows
 // of a 4x4 matrix with the last row = (0 0 0 1)
@@ -251,6 +250,12 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 		return qfalse;
 	}
 
+	// check text offset
+	if ( header->num_meshes || header->num_joints ) {
+		if (IQM_CheckRange(header, header->ofs_text, header->num_text, 1))
+			return qfalse;
+	}
+
 	for ( i = 0; i < ARRAY_LEN( vertexArrayFormat ); i++ ) {
 		vertexArrayFormat[i] = -1;
 	}
@@ -276,15 +281,12 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 				return qfalse;
 			}
 
-			// total number of values
-			n = header->num_vertexes * vertexarray->size;
-
 			switch( vertexarray->format ) {
 			case IQM_BYTE:
 			case IQM_UBYTE:
 				// 1 byte, no swapping necessary
 				if( IQM_CheckRange( header, vertexarray->offset,
-						    n, sizeof(byte) ) ) {
+						    header->num_vertexes, vertexarray->size * sizeof(byte) ) ) {
 					return qfalse;
 				}
 				break;
@@ -293,9 +295,11 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			case IQM_FLOAT:
 				// 4-byte swap
 				if( IQM_CheckRange( header, vertexarray->offset,
-						    n, sizeof(float) ) ) {
+						    header->num_vertexes, vertexarray->size * sizeof(int) ) ) {
 					return qfalse;
 				}
+				// total number of values
+				n = header->num_vertexes * vertexarray->size;
 				intPtr = (int *)((byte *)header + vertexarray->offset);
 				for( j = 0; j < n; j++, intPtr++ ) {
 					LL( *intPtr );
@@ -391,9 +395,9 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			LL( triangle->vertex[1] );
 			LL( triangle->vertex[2] );
 
-			if( triangle->vertex[0] > header->num_vertexes ||
-			    triangle->vertex[1] > header->num_vertexes ||
-			    triangle->vertex[2] > header->num_vertexes ) {
+			if( triangle->vertex[0] >= header->num_vertexes ||
+			    triangle->vertex[1] >= header->num_vertexes ||
+			    triangle->vertex[2] >= header->num_vertexes ) {
 				return qfalse;
 			}
 		}
@@ -425,7 +429,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 					  mesh->num_vertexes );
 				return qfalse;
 			}
-			if ( mesh->num_triangles*3 >= IQM_MAX_INDEXES ) {
+			if ( mesh->num_triangles >= IQM_MAX_INDEXES / 3 ) {
 				ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has more than %i triangles on %s (%i).\n",
 					  mod_name, ( IQM_MAX_INDEXES / 3 ) - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_triangles );
@@ -433,9 +437,9 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			}
 
 			if( mesh->first_vertex >= header->num_vertexes ||
-			    mesh->first_vertex + mesh->num_vertexes > header->num_vertexes ||
 			    mesh->first_triangle >= header->num_triangles ||
-			    mesh->first_triangle + mesh->num_triangles > header->num_triangles ||
+			    mesh->num_vertexes > header->num_vertexes - mesh->first_vertex ||
+			    mesh->num_triangles > header->num_triangles - mesh->first_triangle ||
 			    mesh->name >= header->num_text ||
 			    mesh->material >= header->num_text ) {
 				return qfalse;
@@ -534,12 +538,13 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 			if( joint->parent < -1 ||
 				joint->parent >= (int)header->num_joints ||
-				joint->name >= (int)header->num_text ) {
+				joint->name >= header->num_text ) {
 				return qfalse;
 			}
 			joint_names += strlen( (char *)header + header->ofs_text +
 						   joint->name ) + 1;
 		}
+		joint_names = PAD(joint_names, sizeof(uintptr_t));
 	}
 
 	if ( header->num_poses )

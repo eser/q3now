@@ -1,7 +1,7 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2020-2021 Quake3e project
+Copyright (C) 2020-2026 Quake3e project
 
 This file is part of Quake III Arena source code.
 
@@ -251,7 +251,7 @@ static void VM_Destroy_Compiled( vm_t *vm )
 		VirtualFree( vm->codeBase.ptr, 0, MEM_RELEASE );
 #else
 		if ( munmap( vm->codeBase.ptr, vm->codeLength ) )
-			Com_Printf( S_COLOR_RED "%s(): memory unmap failed, possible memory leak!\n", __func__ );
+			Com_Printf( S_COLOR_ERROR "%s(): memory unmap failed, possible memory leak!\n", __func__ );
 #endif
 	}
 
@@ -1478,7 +1478,7 @@ qboolean VM_Compile( vm_t *vm, vmHeader_t *header )
 
 	if ( errMsg ) {
 		VM_FreeBuffers();
-		Com_Printf( S_COLOR_YELLOW "%s(%s) error: %s\n", __func__, vm->name, errMsg );
+		Com_Printf( S_COLOR_WARNING "%s(%s) error: %s\n", __func__, vm->name, errMsg );
 		return qfalse;
 	}
 
@@ -1607,6 +1607,7 @@ __recompile:
 				if ( proc_len == 0 ) {
 					// empty function, just return
 					emit( RET( LR ) );
+					proc_base = -1;
 					ip += 2; // OP_PUSH + OP_LEAVE
 					break;
 				}
@@ -1989,20 +1990,6 @@ __recompile:
 			case OP_SEX16:
 			case OP_NEGI:
 			case OP_BCOM:
-				if ( ci->op == OP_SEX8 || ci->op == OP_SEX16 ) {
-					// skip sign-extension for `if ( var == 0 )` tests if we already zero-extended
-					reg = rx_on_top();
-					if ( reg && (ci+1)->op == OP_CONST && (ci+1)->value == 0 && ( (ci+2)->op == OP_EQ || (ci+2)->op == OP_NE ) ) {
-						if ( !(ci+1)->jused && !(ci+2)->jused ) {
-							if ( ci->op == OP_SEX8 && reg->ext == Z_EXT8 ) {
-								break;
-							}
-							if ( ci->op == OP_SEX16 && reg->ext == Z_EXT16 ) {
-								break;
-							}
-						}
-					}
-				}
 				rx[1] = rx[0] = load_rx_opstack( R0 ); // r0 = *opstack
 				//load_rx_opstack2( &rx[1], R1, &rx[0], R0 );
 				switch ( ci->op ) {
@@ -2166,14 +2153,14 @@ __recompile:
 		vm->codeBase.ptr = VirtualAlloc( NULL, allocSize, MEM_COMMIT, PAGE_EXECUTE_READWRITE );
 		if ( !vm->codeBase.ptr ) {
 			VM_FreeBuffers();
-			Com_Printf( S_COLOR_YELLOW "%s(%s): VirtualAlloc failed\n", __func__, vm->name );
+			Com_Printf( S_COLOR_WARNING "%s(%s): VirtualAlloc failed\n", __func__, vm->name );
 			return qfalse;
 		}
 #else
 		vm->codeBase.ptr = mmap( NULL, allocSize, PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0 );
 		if ( vm->codeBase.ptr == MAP_FAILED ) {
 			VM_FreeBuffers();
-			Com_Printf( S_COLOR_YELLOW "%s(%s): mmap failed\n", __func__, vm->name );
+			Com_Printf( S_COLOR_WARNING "%s(%s): mmap failed\n", __func__, vm->name );
 			return qfalse;
 		}
 #endif
@@ -2216,14 +2203,14 @@ __recompile:
 		// remove write permissions
 		if ( !VirtualProtect( vm->codeBase.ptr, vm->codeLength, PAGE_EXECUTE_READ, &oldProtect ) ) {
 			VM_Destroy_Compiled( vm );
-			Com_Printf( S_COLOR_YELLOW "%s(%s): VirtualProtect failed\n", __func__, vm->name );
+			Com_Printf( S_COLOR_WARNING "%s(%s): VirtualProtect failed\n", __func__, vm->name );
 			return qfalse;
 		}
 	}
 #else
 	if ( mprotect( vm->codeBase.ptr, vm->codeLength, PROT_READ | PROT_EXEC ) ) {
 		VM_Destroy_Compiled( vm );
-		Com_Printf( S_COLOR_YELLOW "%s(%s): mprotect failed\n", __func__, vm->name );
+		Com_Printf( S_COLOR_WARNING "%s(%s): mprotect failed\n", __func__, vm->name );
 		return qfalse;
 	}
 
