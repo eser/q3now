@@ -55,36 +55,13 @@ void CG_SHUDElementTeamCountRoutine(void* context)
 {
 	shudElementStatusbarTeamCount* element = (shudElementStatusbarTeamCount*)context;
 	int count;
-	team_t team;
-	team_t countTeam;
-	int i;
 
-	if ( cgs.gametype < GT_TDM ) {
+	if ( !wiredHud->isTeamGame ) {
 		return;
 	}
 
-	team = CG_SHUDGetOurActiveTeam();
-
-	if (team == TEAM_RED)
-	{
-		countTeam = element->enemy ? TEAM_BLUE : TEAM_RED;
-	}
-	else if (team == TEAM_BLUE)
-	{
-		countTeam = element->enemy ? TEAM_RED : TEAM_BLUE;
-	}
-	else
-	{
-		return;
-	}
-
-	// count alive players on the target team
-	count = 0;
-	for ( i = 0; i < MAX_CLIENTS; i++ ) {
-		if ( cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team == countTeam ) {
-			count++;
-		}
-	}
+	/* cgame pre-computes own and enemy team counts each frame */
+	count = element->enemy ? wiredHud->enemyTeamCount : wiredHud->ownTeamCount;
 
 	if (count >= 0)
 	{

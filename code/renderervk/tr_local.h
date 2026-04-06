@@ -1317,6 +1317,11 @@ typedef struct {
 #endif
 
 	qboolean				vertexLightingAllowed;
+
+	float					msdfOutlineWidth;		// current MSDF outline width (SDF units)
+	float					msdfOutlineColor[4];	// current MSDF outline color (RGBA)
+	float					msdfGlowWidth;			// current MSDF glow width (SDF units)
+	float					msdfGlowColor[4];		// current MSDF glow color (RGBA)
 } trGlobals_t;
 
 
@@ -2005,6 +2010,14 @@ typedef struct
 	int commandId;
 } clearColorCommand_t;
 
+typedef struct {
+	int   commandId;
+	float outlineWidth;
+	float outlineColor[4];
+	float glowWidth;
+	float glowColor[4];
+} setMsdfOutlineCommand_t;
+
 typedef enum {
 	RC_END_OF_LIST,
 	RC_SET_COLOR,
@@ -2016,7 +2029,8 @@ typedef enum {
 	RC_FINISHBLOOM,
 	RC_COLORMASK,
 	RC_CLEARDEPTH,
-	RC_CLEARCOLOR
+	RC_CLEARCOLOR,
+	RC_SET_MSDF_OUTLINE
 } renderCommand_t;
 
 
@@ -2056,6 +2070,8 @@ void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *file
 void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 
 void RE_SetColor( const float *rgba );
+void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
+                         float glowWidth, const float *glowColor );
 void RE_StretchPic ( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, qhandle_t hShader );
 void RE_DrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t hShader );

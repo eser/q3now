@@ -1,6 +1,7 @@
 // Wired UI: SuperHUD drawing helpers migrated from cg_superhud_util.c
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
+#include "cl_wired_text.h"
 #include "cl_wired_hud_private.h"
 
 #if FEAT_WIRED_UI
@@ -13,138 +14,8 @@ typedef struct
 	vec4_t bar2_bottom;
 } drawBarCoords_t;
 
-// static void CG_SHUDConfigPickColor(const superhudConfig_t* config, float* color, qboolean alphaOverride)
-// {
-//  const superhudColor_t* in = &config->color.value;
-//  const float* target;
-//  team_t team;
-//  float finalAlpha = 1.0f;
-
-//  if (!config->color.isSet)
-//  {
-//      if (alphaOverride)
-//      {
-//          Vector4Copy(colorWhite, color);
-//      }
-//      else
-//      {
-//          VectorCopy(colorWhite, color);
-//      }
-//      return;
-//  }
-
-//  switch (in->type)
-//  {
-//      case SUPERHUD_COLOR_RGBA:
-//          target = in->rgba;
-//          finalAlpha = in->rgba[3]; // Берём альфу из исходного цвета
-//          break;
-
-//      case SUPERHUD_COLOR_T:
-//          team = CG_SHUDGetOurActiveTeam();
-//          target = (team == TEAM_BLUE) ? colorBlue : colorRed;
-//          break;
-
-//      case SUPERHUD_COLOR_E:
-//          team = CG_SHUDGetOurActiveTeam();
-//          target = (team == TEAM_BLUE) ? colorRed : colorBlue;
-//          break;
-
-//      case SUPERHUD_COLOR_I:
-//          target = colorWhite;
-//          break;
-
-//      default:
-//          target = colorWhite;
-//          break;
-//  }
-
-//  // Если color2 задан и исходный color — это буква (T, E, I), то заменяем только альфу
-//  if (config->color2.isSet && in->type != SUPERHUD_COLOR_RGBA)
-//  {
-//      finalAlpha = config->color2.value.rgba[3];
-//  }
-
-//  // Применяем цвет
-//  if (alphaOverride)
-//  {
-//      color[0] = target[0];
-//      color[1] = target[1];
-//      color[2] = target[2];
-//      color[3] = finalAlpha;
-//  }
-//  else
-//  {
-//      color[0] = target[0];
-//      color[1] = target[1];
-//      color[2] = target[2];
-//  }
-// }
-
-// static void CG_SHUDConfigPickBgColor(const superhudConfig_t* config, float* color, qboolean alphaOverride)
-// {
-//  const superhudColor_t* in = &config->bgcolor.value;
-//  const float* target;
-//  team_t team;
-//  float finalAlpha = 1.0f;  // по умолчанию 1
-
-//  if (!config->bgcolor.isSet)
-//  {
-//      if (alphaOverride)
-//      {
-//          Vector4Copy(colorWhite, color);
-//      }
-//      else
-//      {
-//          VectorCopy(colorWhite, color);
-//      }
-//      return;
-//  }
-
-//  switch (in->type)
-//  {
-//      case SUPERHUD_COLOR_RGBA:
-//          target = in->rgba;
-//          finalAlpha = in->rgba[3];  // Берём альфу из исходного цвета
-//          break;
-
-//      case SUPERHUD_COLOR_T:
-//          team = CG_SHUDGetOurActiveTeam();
-//          target = (team == TEAM_BLUE) ? colorBlue : colorRed;
-//          break;
-
-//      case SUPERHUD_COLOR_E:
-//          team = CG_SHUDGetOurActiveTeam();
-//          target = (team == TEAM_BLUE) ? colorRed : colorBlue;
-//          break;
-
-//      case SUPERHUD_COLOR_I:
-//      default:
-//          target = colorWhite;
-//          break;
-//  }
-
-//  // Если bgcolor2 задан и исходный цвет не RGBA, заменяем только альфу
-//  if (config->bgcolor2.isSet && in->type != SUPERHUD_COLOR_RGBA)
-//  {
-//      finalAlpha = config->bgcolor2.value.rgba[3];
-//  }
-
-//  if (alphaOverride)
-//  {
-//      color[0] = target[0];
-//      color[1] = target[1];
-//      color[2] = target[2];
-//      color[3] = finalAlpha;
-//  }
-//  else
-//  {
-//      color[0] = target[0];
-//      color[1] = target[1];
-//      color[2] = target[2];
-//      color[3] = finalAlpha;  // Всегда задаём альфу и здесь
-//  }
-// }
+/* Old CG_SHUDConfigPickColor / CG_SHUDConfigPickBgColor removed --
+   replaced by CG_SHUDConfigPickColorGeneric below. */
 
 static void CG_SHUDConfigPickColorGeneric(
     const qboolean* mainIsSet,
@@ -156,7 +27,6 @@ static void CG_SHUDConfigPickColorGeneric(
 {
 	const superhudColor_t* in = mainValue;
 	const float* target;
-	team_t team;
 	float finalAlpha = 1.0f;
 
 	if (!(*mainIsSet))
@@ -180,13 +50,11 @@ static void CG_SHUDConfigPickColorGeneric(
 			break;
 
 		case SUPERHUD_COLOR_T:
-			team = CG_SHUDGetOurActiveTeam();
-			target = (team == TEAM_BLUE) ? colorBlue : colorRed;
+			target = wiredHud->isOurTeamBlue ? colorBlue : colorRed;
 			break;
 
 		case SUPERHUD_COLOR_E:
-			team = CG_SHUDGetOurActiveTeam();
-			target = (team == TEAM_BLUE) ? colorRed : colorBlue;
+			target = wiredHud->isOurTeamBlue ? colorRed : colorBlue;
 			break;
 
 		case SUPERHUD_COLOR_I:
@@ -631,19 +499,14 @@ void CG_SHUDTextPrint(const superhudConfig_t* cfg, superhudTextContext_t* ctx)
 
 	CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
 
-	CG_FontSelect(ctx->fontIndex);
-	CG_ModernDrawStringNew(ctx->coord.named.x,
-	                    ctx->coord.named.y,
-	                    ctx->text,
-	                    ctx->color,
-	                    ctx->shadowColor, // default shadow color - black
-	                    ctx->coord.named.w,
-	                    ctx->coord.named.h,
-	                    ctx->width,
-	                    ctx->flags,
-	                    ctx->background,
-	                    ctx->border,
-	                    ctx->borderColor);
+	Text_Draw( ctx->text,
+	           ctx->coord.named.x,
+	           ctx->coord.named.y,
+	           WiredFont_ToFontId( ctx->fontIndex ),
+	           ctx->coord.named.h,
+	           ctx->color,
+	           WiredFont_ToAlignment( ctx->flags ),
+	           WiredFont_ToTextFlags( ctx->flags ) );
 }
 
 void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx, qboolean colorOverride)
@@ -655,19 +518,14 @@ void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx
 	if (colorOverride)
 		CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
 
-	CG_FontSelect(ctx->fontIndex);
-	CG_ModernDrawStringNew(ctx->coord.named.x,
-	                    ctx->coord.named.y,
-	                    ctx->text,
-	                    ctx->color,
-	                    ctx->shadowColor, // default shadow color - black
-	                    ctx->coord.named.w,
-	                    ctx->coord.named.h,
-	                    ctx->width,
-	                    ctx->flags,
-	                    ctx->background,
-	                    ctx->border,
-	                    ctx->borderColor);
+	Text_Draw( ctx->text,
+	           ctx->coord.named.x,
+	           ctx->coord.named.y,
+	           WiredFont_ToFontId( ctx->fontIndex ),
+	           ctx->coord.named.h,
+	           ctx->color,
+	           WiredFont_ToAlignment( ctx->flags ),
+	           WiredFont_ToTextFlags( ctx->flags ) );
 }
 
 static void CG_SHUDBarPreparePrintLTR(const superhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
@@ -818,17 +676,17 @@ void CG_SHUDBarPrint(const superhudConfig_t* cfg, superhudBarContext_t* ctx, flo
 	}
 
 	trap_R_SetColor(ctx->color_back);
-	trap_R_DrawStretchPic(coords.bar1_bottom[0], coords.bar1_bottom[1], coords.bar1_bottom[2], coords.bar1_bottom[3],
+	Wired_DrawPic(coords.bar1_bottom[0], coords.bar1_bottom[1], coords.bar1_bottom[2], coords.bar1_bottom[3],
 	                      0, 0, 0, 0,
 	                      cgs.media.whiteShader);
 	if (ctx->two_bars)
 	{
-		trap_R_DrawStretchPic(coords.bar2_bottom[0], coords.bar2_bottom[1], coords.bar2_bottom[2], coords.bar2_bottom[3],
+		Wired_DrawPic(coords.bar2_bottom[0], coords.bar2_bottom[1], coords.bar2_bottom[2], coords.bar2_bottom[3],
 		                      0, 0, 0, 0,
 		                      cgs.media.whiteShader);
 	}
 	trap_R_SetColor(ctx->color_top);
-	trap_R_DrawStretchPic(coords.bar1_value[0], coords.bar1_value[1], coords.bar1_value[2], coords.bar1_value[3],
+	Wired_DrawPic(coords.bar1_value[0], coords.bar1_value[1], coords.bar1_value[2], coords.bar1_value[3],
 	                      0, 0, 0, 0,
 	                      cgs.media.whiteShader);
 	if (ctx->two_bars)
@@ -838,7 +696,7 @@ void CG_SHUDBarPrint(const superhudConfig_t* cfg, superhudBarContext_t* ctx, flo
 			trap_R_SetColor(ctx->color2_top); // 2nd bar color
 		}
 
-		trap_R_DrawStretchPic(coords.bar2_value[0], coords.bar2_value[1], coords.bar2_value[2], coords.bar2_value[3],
+		Wired_DrawPic(coords.bar2_value[0], coords.bar2_value[1], coords.bar2_value[2], coords.bar2_value[3],
 		                      0, 0, 0, 0,
 		                      cgs.media.whiteShader);
 	}
@@ -847,15 +705,7 @@ void CG_SHUDBarPrint(const superhudConfig_t* cfg, superhudBarContext_t* ctx, flo
 
 team_t CG_SHUDGetOurActiveTeam(void)
 {
-	team_t our_team;
-
-	our_team = cgs.clientinfo[cg.clientNum].team;
-
-	if (our_team == TEAM_SPECTATOR && cg.snap)
-	{
-		our_team = cgs.clientinfo[cg.snap->ps.clientNum].team;
-	}
-	return our_team;
+	return (team_t)wiredHud->ourActiveTeam;
 }
 
 void CG_SHUDFillWithColor(const superhudCoord_t* coord, const float* color)
@@ -867,7 +717,7 @@ void CG_SHUDFillWithColor(const superhudCoord_t* coord, const float* color)
 	w = coord->named.w;
 	h = coord->named.h;
 	trap_R_SetColor(color);
-	trap_R_DrawStretchPic(x, y, w, h, 0, 0, 0, 0, cgs.media.whiteShader);
+	Wired_DrawPic(x, y, w, h, 0, 0, 0, 0, cgs.media.whiteShader);
 	trap_R_SetColor(NULL);
 }
 
@@ -890,7 +740,7 @@ qboolean CG_SHUDFill(const superhudConfig_t* cfg)
 		CG_SHUDConfigPickBgColor(cfg, bgColor, qfalse);
 
 		trap_R_SetColor(bgColor);
-		trap_R_DrawStretchPic(x, y, w, h, 0, 0, 0, 0, cgs.media.whiteShader);
+		Wired_DrawPic(x, y, w, h, 0, 0, 0, 0, cgs.media.whiteShader);
 		trap_R_SetColor(NULL);
 		return qtrue;
 	}
@@ -907,7 +757,7 @@ qboolean CG_SHUDFill(const superhudConfig_t* cfg)
 		CG_SHUDConfigPickColor(cfg, color, qfalse);
 
 		trap_R_SetColor(color);
-		trap_R_DrawStretchPic(x, y, w, h, 0, 0, 1, 1, image);
+		Wired_DrawPic(x, y, w, h, 0, 0, 1, 1, image);
 		trap_R_SetColor(NULL);
 		return qtrue;
 	}
@@ -949,7 +799,7 @@ void CG_SHUDElementCompileTeamOverlayConfig(int fontWidth, shudTeamOverlay_t* co
 }
 
 //
-// trap_R_DrawStretchPic Wrapper
+// Wired_DrawPic Wrapper
 //
 // float x       X coord of result image
 // float y       Y coord of result image
@@ -967,7 +817,7 @@ void CG_SHUDDrawStretchPic(superhudCoord_t coord, const superhudCoord_t coordPic
 	if (!shader) return;
 
 	trap_R_SetColor(color);
-	trap_R_DrawStretchPic(coord.named.x,
+	Wired_DrawPic(coord.named.x,
 	                      coord.named.y,
 	                      coord.named.w,
 	                      coord.named.h,

@@ -1737,6 +1737,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		case RC_CLEARCOLOR:
 			data = RB_ClearColor(data);
 			break;
+		case RC_SET_MSDF_OUTLINE:
+		{
+			const setMsdfOutlineCommand_t *oc = (const setMsdfOutlineCommand_t *)data;
+			data = (const void *)( oc + 1 );
+			break;
+		}
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering

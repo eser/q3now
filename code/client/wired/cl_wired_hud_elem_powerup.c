@@ -1,10 +1,11 @@
+/* cl_wired_hud_elem_powerup.c -- Powerup icon and timer HUD elements
+   Reads pre-computed powerup data from wiredHud->activePowerups[].
+   cgame iterates game powerup arrays and pushes results; client displays. */
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
 
 #if FEAT_WIRED_UI
-
-
 
 enum shudPWType
 {
@@ -123,138 +124,36 @@ void* CG_SHUDElementPwIcon8Create(const superhudConfig_t* config)
 	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 8);
 }
 
-static void CG_SHUDElementPwUpdateState(struct superhudPowerupsCache_t* pw)
-{
-	int     i, j, k;
-	playerState_t*   ps;
-	int     t;
-	gitem_t* item;
-
-	ps = &cg.snap->ps;
-
-	if (ps->stats[STAT_HEALTH] <= 0)
-	{
-		return;
-	}
-
-	// sort the list by time remaining
-	pw->numberOfActive = 0;
-	for (i = PW_NONE + 1 ; i < PW_NUM_POWERUPS ; i++)
-	{
-		if (!ps->powerups[ i ])
-		{
-			continue;
-		}
-		t = ps->powerups[ i ] - cg.time;
-		// ZOID--don't draw if the power up has unlimited time (999 seconds)
-		// This is true of the CTF flags
-		if (t < 0 || t > 999000)
-		{
-			continue;
-		}
-
-		// insert with sort by time
-		for (j = 0 ; j < pw->numberOfActive ; j++)
-		{
-			if (pw->element[j].time >= t)
-			{
-				for (k = pw->numberOfActive - 1 ; k >= j ; k--)
-				{
-					pw->element[k + 1].powerup = pw->element[k].powerup;
-					pw->element[k + 1].time = pw->element[k].time;
-					pw->element[k + 1].isHoldable = pw->element[k].isHoldable;
-				}
-				break;
-			}
-		}
-		pw->element[j].powerup = i;
-		pw->element[j].time = t;
-		pw->element[j].isHoldable = qfalse;
-		++pw->numberOfActive;
-	}
-
-	{
-		int hi = cg.snap->ps.stats[STAT_HOLDABLE_ITEM];
-		if (hi)
-		{
-			pw->element[pw->numberOfActive].powerup = hi;
-			pw->element[pw->numberOfActive].time = SUPERHUD_UPDATE_TIME * 2;
-			pw->element[pw->numberOfActive].isHoldable = qtrue;
-			++pw->numberOfActive;
-		}
-	}
-
-	for (i = 0 ; i < pw->numberOfActive ; i++)
-	{
-		// need to fix
-		if (pw->element[i].isHoldable)
-		{
-			CG_RegisterItemVisuals(pw->element[i].powerup);
-			pw->element[i].powerup = cg_items[pw->element[i].powerup].icon;
-			pw->element[i].time /= 1000;
-		}
-		else
-		{
-			switch (pw->element[i].powerup)
-			{
-				case PW_QUAD:
-				case PW_BERSERK:
-				case PW_BATTLESUIT:
-				case PW_HASTE:
-				case PW_INVIS:
-				case PW_REGEN:
-				case PW_FLIGHT:
-				case PW_REDFLAG:
-				case PW_BLUEFLAG:
-					item = BG_FindItemForPowerup(pw->element[i].powerup);
-					if (item)
-					{
-						pw->element[i].powerup = trap_R_RegisterShader(item->icon);
-					}
-					break;
-				default:
-					pw->element[i].powerup = 0;
-					break;
-			}
-			pw->element[i].time = (pw->element[i].time + 999) / 1000;
-		}
-	}
-}
-
 void CG_SHUDElementPwRoutine(void* context)
 {
 	shudElementPowerupContext* element = (shudElementPowerupContext*)context;
-	struct superhudPowerupsCache_t* pw = &CG_SHUDGetContext()->powerupsCache;
-	struct superhudPowerupElement_t* pwElement;
+	int maxPW;
+	int idx;
 
-	if (cg.time - pw->lastUpdateTime > SUPERHUD_UPDATE_TIME)
-	{
-		CG_SHUDElementPwUpdateState(pw);
-		pw->lastUpdateTime = cg.time;
-	}
+	if (!wiredHud || !wiredHud->valid) return;
 
-	if (!pw->numberOfActive || element->pwIndex > pw->numberOfActive)
+	maxPW = wiredHud->activePowerupCount;
+	idx = element->pwIndex - 1;   /* pwIndex is 1-based */
+
+	if (idx < 0 || idx >= maxPW)
 	{
-		//nothing to do
 		return;
 	}
 
 	CG_SHUDFill(&element->config);
 	CG_SHUDDrawBorder(&element->config);
 
-	pwElement = &pw->element[element->pwIndex - 1];
-
 	if (element->pwType == SHUDPWTYPE_TIME)
 	{
-		if (!pwElement->isHoldable)
+		if (!wiredHud->activePowerups[idx].isHoldable)
 		{
-			element->textCtx.text = va("%d", pwElement->time);
+			element->textCtx.text = va("%d", wiredHud->activePowerups[idx].timeLeft);
 			CG_SHUDTextPrint(&element->config, &element->textCtx);
 		}
 	}
 	else
 	{
-		element->drawCtx.image = pwElement->powerup;
+		element->drawCtx.image = wiredHud->activePowerups[idx].icon;
 		CG_SHUDDrawStretchPicCtx(&element->config, &element->drawCtx);
 	}
 }
@@ -266,4 +165,4 @@ void CG_SHUDElementPwDestroy(void* context)
 		Z_Free(context);
 	}
 }
-#endif // FEAT_WIRED_UI
+#endif /* FEAT_WIRED_UI */

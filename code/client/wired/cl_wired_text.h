@@ -41,5 +41,12 @@ float Text_Measure( const char *text, int fontId, float size );
 void  Text_DrawChar( int ch, float x, float y, int fontId,
                      float size, const vec4_t color );
 
+/* ── letter spacing ───────────────────────────────────────────────── */
+
+/* Set extra pixels between glyphs for subsequent Text_Draw / Text_Measure calls.
+ * Default is 0.0. Reset after use. */
+void  Text_SetLetterSpacing( float spacing );
+float Text_GetLetterSpacing( void );
+
 #endif /* FEAT_WIRED_UI */
 #endif /* CL_WIRED_TEXT_H */

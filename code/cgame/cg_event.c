@@ -236,7 +236,7 @@ static void CG_Obituary( entityState_t *ent ) {
 			} else
 #endif
 			{
-				CG_CenterPrint( s, CG_VIRTUAL_H * 0.30f, BIGCHAR_WIDTH );
+				CG_CenterPrint( s, 144, BIGCHAR_WIDTH );
 			}
 		}
 	}
@@ -357,10 +357,10 @@ static void CG_UseItem( centity_t *cent ) {
 	// print a message if the local player
 	if ( es->number == cg.snap->ps.clientNum ) {
 		if ( !itemNum ) {
-			CG_CenterPrint( "No item to use", CG_VIRTUAL_H * 0.30f, BIGCHAR_WIDTH );
+			CG_CenterPrint( "No item to use", 144, BIGCHAR_WIDTH );
 		} else {
 			item = BG_FindItemForHoldable( itemNum );
-			CG_CenterPrint( va("Use %s", item->pickup_name), CG_VIRTUAL_H * 0.30f, BIGCHAR_WIDTH );
+			CG_CenterPrint( va("Use %s", item->pickup_name), 144, BIGCHAR_WIDTH );
 		}
 	}
 

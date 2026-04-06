@@ -1,1 +1,14 @@
-{}
+{
+  noskills:
+    # noskills orchestrator — inline comments in this section won't be preserved on next write
+    {
+      concerns: [ open-source, long-lived, move-fast, beautiful-product ],
+      tools: [ claude-code ],
+      providers: [ claude-code, opencode ],
+      project: { languages: [], frameworks: [], ci: [ github-actions ], testRunner: null },
+      maxIterationsBeforeRestart: 15,
+      verifyCommand: null,
+      allowGit: false,
+      command: npx eser noskills
+    }
+}

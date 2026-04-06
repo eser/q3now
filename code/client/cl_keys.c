@@ -24,6 +24,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/cl_wired_msdf.h"
 #include "wired/cl_wired_fonts.h"
 #include "wired/cl_wired_text.h"
+#if FEAT_LUA
+#include "wired/cl_wired_scripting.h"
+#endif
 
 /*
 
@@ -486,7 +489,13 @@ static void Console_Key( int key ) {
 			// other text will be chat messages
 			if ( !g_consoleField.buffer[0] ) {
 				return;	// empty lines just scroll the console without adding to history
-			} else {
+			}
+#if FEAT_LUA
+			else if ( WiredScript_TryEval( g_consoleField.buffer ) ) {
+				/* Lua handled it -- skip chat dispatch */
+			}
+#endif
+			else {
 				Cbuf_AddText( "cmd say " );
 				Cbuf_AddText( g_consoleField.buffer );
 				Cbuf_AddText( "\n" );

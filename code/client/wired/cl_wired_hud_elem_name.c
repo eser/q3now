@@ -1,10 +1,12 @@
+/* cl_wired_hud_elem_name.c -- Player name HUD elements (OWN / NME)
+   Displays player names based on gametype using pre-computed fields
+   from the bridge (wiredHud). Numeric team and gametype IDs avoid
+   direct use of game enum constants. */
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
 
 #if FEAT_WIRED_UI
-
-
 
 enum shudElementNameType_t
 {
@@ -56,18 +58,17 @@ static void CG_SHUDElementNameGetPairFFA(const char** own, const char** nme)
 	}
 	if (!cgs.clientinfo[clientNum].infoValid || clientNum == cg.snap->ps.clientNum)
 	{
-		/* No valid enemy yet — check if there's any other player in the game */
 		int i;
 		for (i = 0; i < MAX_CLIENTS; i++)
 		{
 			if (i != cg.snap->ps.clientNum && cgs.clientinfo[i].infoValid &&
-			    cgs.clientinfo[i].team != TEAM_SPECTATOR)
+			    cgs.clientinfo[i].team != 3 /* spectator */)
 			{
 				clientNum = i;
 				break;
 			}
 		}
-		if (i == MAX_CLIENTS) return; /* truly alone */
+		if (i == MAX_CLIENTS) return;
 	}
 
 	info = CG_ConfigString(CS_PLAYERS + clientNum);
@@ -79,11 +80,11 @@ static void CG_SHUDElementNameGetPairDuel(const char** own, const char** nme)
 	int i;
 	int k;
 
-	if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR)
+	if (cg.snap->ps.persistant[PERS_TEAM] == 3 /* spectator */)
 	{
 		for (i = 0, k = 0; i < MAX_CLIENTS; ++i)
 		{
-			if (cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team != TEAM_SPECTATOR)
+			if (cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team != 3 /* spectator */)
 			{
 				if (k == 0)
 				{
@@ -103,7 +104,7 @@ static void CG_SHUDElementNameGetPairDuel(const char** own, const char** nme)
 
 		for (i = 0; i < MAX_CLIENTS; ++i)
 		{
-			if (cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team != TEAM_SPECTATOR)
+			if (cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team != 3 /* spectator */)
 			{
 				*nme = cgs.clientinfo[i].name;
 			}
@@ -111,70 +112,51 @@ static void CG_SHUDElementNameGetPairDuel(const char** own, const char** nme)
 	}
 }
 
-static void CG_SHUDElementNameGetPairTeam(const char** own, const char** nme)
+static void CG_SHUDElementNameGetPairSides(const char** own, const char** nme)
 {
-	team_t our_team;
-	if (qfalse)
+	int our_side;
+
+	our_side = cgs.clientinfo[cg.clientNum].team;
+
+	if (our_side == 3 /* spectator */)
 	{
-		our_team = cgs.clientinfo[cg.clientNum].team;
-	}
-	else
-	{
-		our_team = cgs.clientinfo[cg.clientNum].team;
+		our_side = cgs.clientinfo[cg.snap->ps.clientNum].team;
 	}
 
-	if (our_team == TEAM_SPECTATOR)
+	switch (our_side)
 	{
-		if (qfalse)
-		{
-			our_team = cgs.clientinfo[cg.snap->ps.clientNum].team;
-		}
-		else
-		{
-			our_team = cgs.clientinfo[cg.snap->ps.clientNum].team;
-		}
-	}
-
-	switch (our_team)
-	{
-		case TEAM_SPECTATOR:
-		case TEAM_RED:
+		case 3: /* spectator */
+		case 1: /* red */
 			*own = "Red";
 			*nme = "Blue";
 			break;
-		case TEAM_BLUE:
+		case 2: /* blue */
 			*own = "Blue";
 			*nme = "Red";
 			break;
-		case TEAM_FREE:
-		case TEAM_4:
-		case TEAM_5:
-		case TEAM_6:
-		case TEAM_7:
-		case TEAM_NUM_TEAMS:
+		default:
 			break;
 	}
 }
 
 static void CG_SHUDElementNameGetPair(const char** own, const char** nme)
 {
+	int gt = cgs.gametype;
 	*own = "";
 	*nme = "";
-	switch (cgs.gametype)
+
+	if (wiredHud->isTeamGame)
 	{
-		case GT_DEATHMATCH: //our name / last attacker or second
-			CG_SHUDElementNameGetPairFFA(own, nme);
-			break;
-		case GT_DUEL: //our name and second player name
-			CG_SHUDElementNameGetPairDuel(own, nme);
-			break;
-		case GT_TDM: // red/blue
-		case GT_CTF:
-		// case GT_CA:
-			CG_SHUDElementNameGetPairTeam(own, nme);
-			break;
-		case GT_MAX_GAME_TYPE:
-			break;
+		CG_SHUDElementNameGetPairSides(own, nme);
+	}
+	else if (wiredHud->isDuel)
+	{
+		CG_SHUDElementNameGetPairDuel(own, nme);
+	}
+	else
+	{
+		/* FFA / default */
+		CG_SHUDElementNameGetPairFFA(own, nme);
 	}
 }
 
@@ -205,4 +187,4 @@ void CG_SHUDElementNameDestroy(void* context)
 		Z_Free(context);
 	}
 }
-#endif // FEAT_WIRED_UI
+#endif /* FEAT_WIRED_UI */

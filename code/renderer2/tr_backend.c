@@ -1889,6 +1889,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		case RC_EXPORT_CUBEMAPS:
 			data = RB_ExportCubemaps(data);
 			break;
+		case RC_SET_MSDF_OUTLINE:
+		{
+			const setMsdfOutlineCommand_t *oc = (const setMsdfOutlineCommand_t *)data;
+			data = (const void *)( oc + 1 );
+			break;
+		}
 		case RC_END_OF_LIST:
 		default:
 			// finish any 2D drawing if needed

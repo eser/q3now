@@ -1,6 +1,7 @@
 
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
+#include "cl_wired_text.h"
 #include "cl_wired_hud_private.h"
 
 #if FEAT_WIRED_UI
@@ -210,17 +211,14 @@ void CG_SHUDElementTeamRoutine(void* context)
 	wired_GetColorForAmount(ci->health, element->ctxHealthArmor.color);
 	element->ctxHealthArmor.text = va("%3i/%i", ci->health, ci->armor);
 
-	CG_FontSelect(element->ctxHealthArmor.fontIndex);
-	CG_ModernDrawStringNew(element->ctxHealthArmor.coord.named.x,
-	                    element->ctxHealthArmor.coord.named.y,
-	                    element->ctxHealthArmor.text,
-	                    element->ctxHealthArmor.color,
-	                    element->ctxHealthArmor.shadowColor,
-	                    element->ctxHealthArmor.coord.named.w,
-	                    element->ctxHealthArmor.coord.named.h,
-	                    (float)cls.glconfig.vidWidth,
-	                    element->ctxHealthArmor.flags,
-	                    NULL, NULL, NULL);
+	Text_Draw( element->ctxHealthArmor.text,
+	           element->ctxHealthArmor.coord.named.x,
+	           element->ctxHealthArmor.coord.named.y,
+	           WiredFont_ToFontId( element->ctxHealthArmor.fontIndex ),
+	           element->ctxHealthArmor.coord.named.h,
+	           element->ctxHealthArmor.color,
+	           WiredFont_ToAlignment( element->ctxHealthArmor.flags ),
+	           WiredFont_ToTextFlags( element->ctxHealthArmor.flags ) );
 
 	// draw weapon
 	element->ctxWeapon.image = cg_weapons[ci->curWeapon].ammoIcon ?  cg_weapons[ci->curWeapon].ammoIcon : cgs.media.deferShader;
@@ -254,21 +252,7 @@ void CG_SHUDElementTeamRoutine(void* context)
 
 	// draw location
 	{
-		if (qfalse != 0)
-		{
-			element->ctxLocation.text = CG_ConfigString(CS_LOCATIONS + ci->location);
-		}
-		else
-		{
-			if (0 != 0 && cgs.gametype == GT_CTF)
-			{
-				element->ctxLocation.text = CG_ConfigString(CS_LOCATIONS + ci->location);
-			}
-			else
-			{
-				element->ctxLocation.text = CG_ConfigString(CS_LOCATIONS + ci->location);
-			}
-		}
+		element->ctxLocation.text = CG_ConfigString(CS_LOCATIONS + ci->location);
 		if (!element->ctxLocation.text || *element->ctxLocation.text == 0)
 		{
 			element->ctxLocation.text = "unknown";

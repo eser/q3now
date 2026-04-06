@@ -205,7 +205,6 @@ void RE_SetColor( const float *rgba ) {
 	cmd->color[3] = rgba[3];
 }
 
-
 /*
 =============
 RE_StretchPic
@@ -557,6 +556,13 @@ qboolean RE_CanMinimize( void )
 const glconfig_t *RE_GetConfig( void )
 {
 	return &glConfig;
+}
+
+
+void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
+                         float glowWidth, const float *glowColor )
+{
+	/* MSDF outline not supported in GL1 renderer */
 }
 
 

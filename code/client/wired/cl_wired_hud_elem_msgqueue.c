@@ -14,7 +14,7 @@ Messages display one at a time with fade-in (300ms) and fade-out (500ms).
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
 #include "cl_wired_hud.h"
-#include "cl_wired_fonts.h"
+#include "cl_wired_text.h"
 
 #if FEAT_WIRED_UI
 
@@ -136,22 +136,18 @@ void CG_SHUDElementMsgQueueRoutine( void *context ) {
 		Vector4Set( color, 1, 1, 1, alpha );
 
 		// line 1: primary text (centered, proportional + shadow)
-		CG_FontSelect( 2 );
-		CG_ModernDrawString( x, y, current->line1, color,
-			charW, charH, (float)cls.glconfig.vidWidth,
-			DS_HCENTER | DS_PROPORTIONAL | DS_SHADOW, NULL );
+		Text_Draw( current->line1, x, y, FONT_DISPLAY,
+			charH, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
 
 		// line 2: secondary text (rank placement — smaller, slightly dimmer)
 		if ( current->line2[0] ) {
 			vec4_t color2;
-			float charW2 = charW * 0.85f;
 			float charH2 = charH * 0.85f;
 
 			Vector4Set( color2, 1, 1, 1, alpha * 0.85f );
 
-			CG_ModernDrawString( x, y + charH + 2, current->line2, color2,
-				charW2, charH2, (float)cls.glconfig.vidWidth,
-				DS_HCENTER | DS_PROPORTIONAL | DS_SHADOW, NULL );
+			Text_Draw( current->line2, x, y + charH + 2, FONT_DISPLAY,
+				charH2, color2, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
 		}
 	}
 }

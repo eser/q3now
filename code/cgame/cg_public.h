@@ -122,7 +122,7 @@ typedef enum {
 	CG_R_ADDLIGHTTOSCENE,
 	CG_R_RENDERSCENE,
 	CG_R_SETCOLOR,
-	CG_R_DRAWSTRETCHPIC,
+	CG_R_DRAWSTRETCHPIC, /* removed — kept for ABI numbering */
 	CG_R_MODELBOUNDS,
 	CG_R_LERPTAG,
 	CG_GETGLCONFIG,
@@ -204,8 +204,23 @@ typedef enum {
 	//                                  qhandle_t hShader )
 
 	// ── Unified text rendering (MSDF) ────────────────────────────────
-	CG_R_DRAWTEXT = 202,
-	CG_R_MEASURETEXT = 203,
+	CG_R_DRAWTEXT = 202,       /* removed — dispatch deleted, kept for ABI numbering */
+	CG_R_MEASURETEXT = 203,    /* removed — dispatch deleted, kept for ABI numbering */
+
+	// ── Normalized-coordinate text rendering (MSDF) ──────────────────
+	CG_R_DRAWTEXTNORM = 205,
+	// void trap_R_DrawTextNorm( const char *text, float nx, float ny, int fontId,
+	//                           float nSize, const float *color, int alignment, int flags )
+	CG_R_MEASURETEXTNORM = 206,
+	// float trap_R_MeasureTextNorm( const char *text, int fontId, float nSize )
+
+	// ── Wired Store: game-agnostic key-value state ────────────────────
+	CG_WUI_STORE_DELETE = 216,
+	// void trap_WiredStore_Delete( const char *key )
+	CG_WUI_STORE_CLEAR = 217,
+	// void trap_WiredStore_Clear( void )
+	CG_WUI_STORE_PUSH_BATCH = 218,
+	// void trap_WiredStore_PushBatch( const wuiStagedEntry_t *entries, int count )
 
 	CG_TRAP_GETVALUE = COM_TRAP_GETVALUE,
 
@@ -318,6 +333,14 @@ typedef struct {
 
 	// team
 	int         ourTeam;
+	int         ourActiveTeam;     // resolved team (follows spectator target)
+	qboolean    isOurTeamBlue;     // ourActiveTeam == TEAM_BLUE
+	qboolean    isSpectator;       // ourTeam == TEAM_SPECTATOR
+	qboolean    isTeamGame;        // gametype >= GT_TDM
+	qboolean    isDuel;            // gametype == GT_DUEL
+	int         ownTeamCount;      // alive players on our team
+	int         enemyTeamCount;    // alive players on enemy team
+	char        gametypeName[32];  // bg_gametypelist[gametype].name
 	int         blueflag, redflag;
 
 	// crosshair
@@ -406,6 +429,31 @@ typedef struct {
 	// TA compat: CG_SHOW_* / UI_SHOW_* display flags for ownerdrawFlag evaluation
 	unsigned int cgShowFlags;   // CG_SHOW_* bitmask (set by cgame each frame)
 	unsigned int uiShowFlags;   // UI_SHOW_* bitmask (set by cgame each frame)
+
+	/* ── pre-computed weapon list (cgame fills, client iterates) ──── */
+	int         weaponListCount;                  /* number of entries */
+	struct {
+		int       id;          /* weapon_t value */
+		qhandle_t icon;        /* weapon icon handle */
+		qhandle_t ammoIcon;    /* ammo icon handle */
+		int       ammo;        /* current ammo count */
+		qboolean  selected;    /* qtrue if currently held */
+	} weaponList[WIRED_MAX_WEAPONS];
+
+	/* ── pre-computed active powerups (cgame fills, client iterates) ─ */
+	int         activePowerupCount;
+	struct {
+		qhandle_t icon;        /* powerup icon handle (pre-registered) */
+		int       timeLeft;    /* seconds remaining */
+		qboolean  isHoldable;  /* qtrue if holdable item, not a timed powerup */
+	} activePowerups[8];
+
+	/* ── pre-computed scoreboard weapon totals per score entry ──────── */
+	struct {
+		int totalKills;
+		int totalShots;
+		int totalHits;
+	} scoreWeaponTotals[WIRED_HUD_MAX_SCORES];
 } wiredHudState_t;
 
 void trap_WiredUI_PushHudState( wiredHudState_t *state );
@@ -423,6 +471,30 @@ void trap_WiredUI_PushHudState( wiredHudState_t *state );
 
 void trap_WiredUI_PushEvent( int type, const char *data );
 
+// ── Wired Store: staged entry (cgame → client batch transfer) ─────────
+// Flat struct that can cross the VM boundary in a single batch syscall.
+
+/* staged entry fields bitmask — tracks which fields were actually set */
+#define WUI_STAGED_TEXT    (1 << 0)
+#define WUI_STAGED_COLOR   (1 << 1)
+#define WUI_STAGED_ICON    (1 << 2)
+#define WUI_STAGED_VALUE   (1 << 3)
+#define WUI_STAGED_STATE   (1 << 4)
+
+typedef struct {
+	char        key[128];       /* store key */
+	char        text[256];      /* string value */
+	vec4_t      color;          /* RGBA color */
+	qhandle_t   icon;           /* shader handle */
+	float       value;          /* numeric value */
+	char        state[32];      /* semantic state label */
+	int         fields;         /* WUI_STAGED_* bitmask — which fields are valid */
+} wuiStagedEntry_t;
+
+void trap_WiredStore_PushBatch( const wuiStagedEntry_t *entries, int count );
+void trap_WiredStore_Delete( const char *key );
+void trap_WiredStore_Clear( void );
+
 // ── Unified text rendering (MSDF) ────────────────────────────────────
 
 #define FONT_DISPLAY         0
@@ -430,6 +502,7 @@ void trap_WiredUI_PushEvent( int type, const char *data );
 #define FONT_UI              2
 #define FONT_UI_MEDIUM       3
 #define FONT_MONO            4
+#define FONT_DISPLAY_BOLD    5
 
 #define TEXT_ALIGN_LEFT       0
 #define TEXT_ALIGN_CENTER     1
@@ -438,9 +511,11 @@ void trap_WiredUI_PushEvent( int type, const char *data );
 #define TEXT_DROPSHADOW       (1 << 0)
 #define TEXT_FORCECOLOR       (1 << 1)
 
-void  trap_R_DrawText( const char *text, float x, float y, int fontId,
-                       float size, const vec4_t color, int alignment, int flags );
-float trap_R_MeasureText( const char *text, int fontId, float size );
+/* Normalized-coordinate text rendering: nx/ny/nSize are in 0.0-1.0 screen space */
+void  trap_R_DrawTextNorm( const char *text, float nx, float ny, int fontId,
+                           float nSize, const vec4_t color, int alignment, int flags );
+/* Normalized-coordinate text measure: nSize in 0.0-1.0, returns normalized width */
+float trap_R_MeasureTextNorm( const char *text, int fontId, float nSize );
 
 #endif // FEAT_WIRED_UI
 

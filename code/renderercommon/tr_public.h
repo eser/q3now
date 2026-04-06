@@ -81,6 +81,8 @@ typedef struct {
 	void	(*RenderScene)( const refdef_t *fd );
 
 	void	(*SetColor)( const float *rgba );	// NULL = 1,1,1,1
+	void	(*SetMSDFOutline)( float outlineWidth, const float *outlineColor,
+		float glowWidth, const float *glowColor );
 	void	(*DrawStretchPic) ( float x, float y, float w, float h,
 		float s1, float t1, float s2, float t2, qhandle_t hShader );	// 0 = white
 	void	(*DrawLine)( float x1, float y1, float x2, float y2, float width, qhandle_t hShader );

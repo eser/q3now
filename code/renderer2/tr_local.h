@@ -2469,6 +2469,14 @@ typedef struct {
 	int commandId;
 } exportCubemapsCommand_t;
 
+typedef struct {
+	int   commandId;
+	float outlineWidth;
+	float outlineColor[4];
+	float glowWidth;
+	float glowColor[4];
+} setMsdfOutlineCommand_t;
+
 typedef enum {
 	RC_END_OF_LIST,
 	RC_SET_COLOR,
@@ -2483,7 +2491,8 @@ typedef enum {
 	RC_CLEARDEPTH,
 	RC_CAPSHADOWMAP,
 	RC_POSTPROCESS,
-	RC_EXPORT_CUBEMAPS
+	RC_EXPORT_CUBEMAPS,
+	RC_SET_MSDF_OUTLINE
 } renderCommand_t;
 
 

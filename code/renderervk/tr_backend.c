@@ -1966,6 +1966,16 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		case RC_CLEARCOLOR:
 			data = RB_ClearColor(data);
 			break;
+		case RC_SET_MSDF_OUTLINE:
+		{
+			const setMsdfOutlineCommand_t *oc = (const setMsdfOutlineCommand_t *)data;
+			tr.msdfOutlineWidth = oc->outlineWidth;
+			Com_Memcpy( tr.msdfOutlineColor, oc->outlineColor, sizeof( tr.msdfOutlineColor ) );
+			tr.msdfGlowWidth = oc->glowWidth;
+			Com_Memcpy( tr.msdfGlowColor, oc->glowColor, sizeof( tr.msdfGlowColor ) );
+			data = (const void *)( oc + 1 );
+			break;
+		}
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering

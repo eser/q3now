@@ -1513,27 +1513,15 @@ void CG_SetScreenPlacement(screenPlacement_e hpos, screenPlacement_e vpos);
 void CG_PopScreenPlacement(void);
 screenPlacement_e CG_GetScreenHorizontalPlacement(void);
 screenPlacement_e CG_GetScreenVerticalPlacement(void);
-void CG_AdjustNorm( float *x, float *y, float *w, float *h );
-void CG_FillRect( float x, float y, float width, float height, const float *color );
-void CG_DrawPic( float x, float y, float width, float height, qhandle_t hShader );
+void CG_AdjustPlacement( float *x, float *y, float *w, float *h );
 
 // Normalized-coordinate draw helpers (0.0-1.0 screen space)
 void CG_DrawPicNorm( float nx, float ny, float nw, float nh, qhandle_t hShader );
 void CG_FillRectNorm( float nx, float ny, float nw, float nh, const float *color );
 
-// Virtual-to-normalized conversion (1/virtual_w and 1/virtual_h)
+// Virtual-to-normalized conversion scales
 #define NORM_HSCALE  0.001562500f
 #define NORM_VSCALE  0.002083333f
-
-// Virtual screen dimensions (derived from norm scales, avoids literal references)
-#define CG_VIRTUAL_W  (1.0f / NORM_HSCALE)
-#define CG_VIRTUAL_H  (1.0f / NORM_VSCALE)
-
-// Convert old virtual coordinates to normalized (transitional helpers)
-static ID_INLINE float CG_NormX( float x ) { return x * NORM_HSCALE; }
-static ID_INLINE float CG_NormY( float y ) { return y * NORM_VSCALE; }
-static ID_INLINE float CG_NormW( float w ) { return w * NORM_HSCALE; }
-static ID_INLINE float CG_NormH( float h ) { return h * NORM_VSCALE; }
 
 int CG_DrawStrlen( const char *str );
 
@@ -1544,9 +1532,6 @@ void CG_TileClear( void );
 void CG_GetColorForAmount( int health, int armor, vec4_t hcolor );
 
 void UI_DrawProportionalString( int x, int y, const char* str, int style, vec4_t color );
-void CG_DrawRect( float x, float y, float width, float height, float size, const float *color );
-void CG_DrawSides(float x, float y, float w, float h, float size);
-void CG_DrawTopBottom(float x, float y, float w, float h, float size);
 
 
 //
@@ -1910,8 +1895,7 @@ void		trap_R_AddRailTrailParams( const railTrailParams_t *params );
 int			trap_R_LightForPoint( vec3_t point, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir );
 void		trap_R_RenderScene( const refdef_t *fd );
 void		trap_R_SetColor( const float *rgba );	// NULL = 1,1,1,1
-void		trap_R_DrawStretchPic( float x, float y, float w, float h,
-			float s1, float t1, float s2, float t2, qhandle_t hShader );
+/* Legacy stretch-pic wrapper removed -- all callers use trap_R_DrawStretchPicNorm */
 void		trap_R_DrawStretchPicNorm( float nx, float ny, float nw, float nh,
 			float s1, float t1, float s2, float t2, qhandle_t hShader );
 void		trap_R_ModelBounds( clipHandle_t model, vec3_t mins, vec3_t maxs );

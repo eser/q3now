@@ -25,6 +25,24 @@ and geometry will be correct, but glyph edges will appear blurred.
 static msdfFont_t	msdfFonts[MAX_MSDF_FONTS];
 static int			msdfFontCount = 0;
 
+/* ── outline / glow state ──────────────────────────────────────────── */
+
+static float msdf_outlineWidth = 0.0f;
+static float msdf_outlineColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+static float msdf_glowWidth = 0.0f;
+static float msdf_glowColor[4] = { 1.0f, 1.0f, 1.0f, 0.3f };
+
+void MSDF_SetOutline( float outlineWidth, const float *outlineColor,
+                       float glowWidth, const float *glowColor )
+{
+	msdf_outlineWidth = outlineWidth;
+	if ( outlineColor )
+		Com_Memcpy( msdf_outlineColor, outlineColor, sizeof( msdf_outlineColor ) );
+	msdf_glowWidth = glowWidth;
+	if ( glowColor )
+		Com_Memcpy( msdf_glowColor, glowColor, sizeof( msdf_glowColor ) );
+}
+
 /* ── minimal JSON tokeniser ─────────────────────────────────────────── */
 /*
  * msdf-atlas-gen outputs well-formed JSON.  We only need:
@@ -208,15 +226,6 @@ static qboolean MSDF_ParseBounds( jsonParser_t *jp,
 {
 	*left = *bottom = *right = *top = 0.0f;
 
-	/* DEBUG */
-	{
-		static int pbDebug = 0;
-		if ( pbDebug < 4 ) {
-			Com_Printf( "^4ParseBounds ENTER: type=%d\n", jp->type );
-		}
-		pbDebug++;
-	}
-
 	while ( jp->type != JTOK_RBRACE && jp->type != JTOK_EOF ) {
 		JSON_NextToken( jp );
 
@@ -230,15 +239,6 @@ static qboolean MSDF_ParseBounds( jsonParser_t *jp,
 
 			if ( !JSON_Expect( jp, JTOK_COLON ) ) return qfalse;
 			JSON_NextToken( jp );   /* value */
-
-			/* DEBUG */
-			{
-				static int kvDebug = 0;
-				if ( kvDebug < 16 ) {
-					Com_Printf( "^4  ParseBounds key='%s' num=%.4f type=%d\n", key, jp->num, jp->type );
-					kvDebug++;
-				}
-			}
 
 			if ( Q_stricmp( key, "left" ) == 0 )        *left   = jp->num;
 			else if ( Q_stricmp( key, "bottom" ) == 0 )  *bottom = jp->num;
@@ -484,18 +484,6 @@ msdfGlyph_t *MSDF_FindGlyph( msdfFont_t *font, int unicode )
 {
 	int lo = 0, hi = font->glyphCount - 1;
 
-	/* DEBUG: one-shot trace of glyph table state */
-	{
-		static int fgDebug = 0;
-		if ( fgDebug < 1 ) {
-			Com_Printf( "^6MSDF_FindGlyph: font='%s' searching for unicode=%d count=%d first=%d last=%d\n",
-				font->name, unicode, font->glyphCount,
-				font->glyphCount > 0 ? font->glyphs[0].unicode : -1,
-				font->glyphCount > 0 ? font->glyphs[font->glyphCount - 1].unicode : -1 );
-			fgDebug++;
-		}
-	}
-
 	while ( lo <= hi ) {
 		int mid = (lo + hi) / 2;
 		if ( font->glyphs[mid].unicode == unicode )
@@ -647,21 +635,7 @@ void MSDF_DrawChar( msdfFont_t *font, float x, float y,
 
 	g = MSDF_FindGlyph( font, ch );
 
-	/* DEBUG: trace glyph lookup result */
-	{
-		static int glDebug = 0;
-		if ( glDebug < 3 ) {
-			if ( !g ) {
-				Com_Printf( "^1MSDF_DrawChar: glyph NOT FOUND ch='%c'(%d)\n", ch > 31 ? ch : '?', ch );
-			} else {
-				Com_Printf( "^3MSDF_DrawChar: FOUND ch='%c'(%d) atlas=(%.1f,%.1f,%.1f,%.1f) plane=(%.3f,%.3f,%.3f,%.3f)\n",
-					ch > 31 ? ch : '?', ch,
-					g->atlasLeft, g->atlasBottom, g->atlasRight, g->atlasTop,
-					g->planeLeft, g->planeBottom, g->planeRight, g->planeTop );
-			}
-			glDebug++;
-		}
-	}
+
 
 	if ( !g ) return;
 
@@ -700,32 +674,12 @@ void MSDF_DrawChar( msdfFont_t *font, float x, float y,
 	drawW = w;
 	drawH = h;
 
-	/* DEBUG: one-shot diagnostic — remove after verifying */
-	{
-		static int debugCount = 0;
-		if ( debugCount < 3 ) {
-			Com_Printf( "^1MSDF_DrawChar: ch='%c'(%d) shader=%d size=%.1f px=%.1f quad=(%.1f,%.1f,%.1f,%.1f) uv=(%.3f,%.3f,%.3f,%.3f) color=(%.2f,%.2f,%.2f,%.2f)\n",
-				ch > 31 ? ch : '?', ch, font->atlasShader, size, pixelSize,
-				drawX, drawY, drawW, drawH, s0, t0, s1, t1,
-				color ? color[0] : -1, color ? color[1] : -1, color ? color[2] : -1, color ? color[3] : -1 );
-			debugCount++;
-		}
-	}
-
-	/* DEBUG: also draw a visible red rectangle to test if positioning works */
-	{
-		static int redCount = 0;
-		if ( redCount < 20 ) {
-			vec4_t red = { 1, 0, 0, 1 };
-			re.SetColor( red );
-			re.DrawStretchPic( drawX, drawY, drawW, drawH, 0, 0, 0, 0, 0 );
-			re.SetColor( NULL );
-			redCount++;
-		}
-	}
-
 	/* apply color */
 	re.SetColor( color );
+
+	/* push outline/glow state into the render command stream */
+	re.SetMSDFOutline( msdf_outlineWidth, msdf_outlineColor,
+	                    msdf_glowWidth, msdf_glowColor );
 
 	/* coordinates are already real screen pixels */
 	re.DrawStretchPic( drawX, drawY, drawW, drawH, s0, t0, s1, t1, font->atlasShader );
@@ -771,7 +725,8 @@ static int MSDF_HandleColorCode( const char *p, float *outColor )
 
 void MSDF_DrawString( msdfFont_t *font, float x, float y,
                       float size, const float *color,
-                      const char *str, int maxChars )
+                      const char *str, int maxChars, float letterSpacing,
+                      qboolean forceColor )
 {
 	float       curColor[4];
 	float       pixelSize;
@@ -780,16 +735,6 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 	const char *p;
 
 	if ( !font || !font->loaded || !str || !str[0] ) return;
-
-	/* DEBUG: trace MSDF_DrawString calls */
-	{
-		static int dsCount = 0;
-		if ( dsCount < 5 ) {
-			Com_Printf( "^2MSDF_DrawString: font='%s' str='%.20s' size=%.1f x=%.1f y=%.1f\n",
-				font->name, str, size, x, y );
-			dsCount++;
-		}
-	}
 
 	/* copy the initial color so we can modify RGB via color codes */
 	curColor[0] = color ? color[0] : 1.0f;
@@ -814,14 +759,14 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 			msdfGlyph_t *caretGlyph;
 			MSDF_DrawChar( font, curX, y, size, curColor, Q_COLOR_ESCAPE );
 			caretGlyph = MSDF_FindGlyph( font, Q_COLOR_ESCAPE );
-			curX += ( caretGlyph ? caretGlyph->advance : 0.5f ) * pixelSize;
+			curX += ( caretGlyph ? caretGlyph->advance : 0.5f ) * pixelSize + letterSpacing;
 			drawn++;
 			p += 2;
 			continue;
 		}
 
 		/* handle color codes (^0 - ^9, ^a-^z, etc.) */
-		skip = MSDF_HandleColorCode( p, curColor );
+		skip = MSDF_HandleColorCode( p, forceColor ? NULL : curColor );
 		if ( skip > 0 ) {
 			p += skip;
 			continue;   /* color codes don't count as drawn chars */
@@ -835,10 +780,10 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 			/* advance cursor */
 			charGlyph = MSDF_FindGlyph( font, (unsigned char)*p );
 			if ( charGlyph ) {
-				curX += charGlyph->advance * pixelSize;
+				curX += charGlyph->advance * pixelSize + letterSpacing;
 			} else {
 				/* fallback: advance by half an em for unknown glyphs */
-				curX += 0.5f * pixelSize;
+				curX += 0.5f * pixelSize + letterSpacing;
 			}
 		}
 
@@ -853,7 +798,7 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 /* ── string measurement ─────────────────────────────────────────────── */
 
 float MSDF_MeasureString( msdfFont_t *font, float size,
-                          const char *str, int maxChars )
+                          const char *str, int maxChars, float letterSpacing )
 {
 	float       pixelSize;
 	float       width;
@@ -877,9 +822,9 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
 			msdfGlyph_t *caretGlyph = MSDF_FindGlyph( font, Q_COLOR_ESCAPE );
 			if ( caretGlyph ) {
-				width += caretGlyph->advance * pixelSize;
+				width += caretGlyph->advance * pixelSize + letterSpacing;
 			} else {
-				width += 0.5f * pixelSize;
+				width += 0.5f * pixelSize + letterSpacing;
 			}
 			counted++;
 			p += 2;
@@ -897,9 +842,9 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 		{
 			msdfGlyph_t *charGlyph = MSDF_FindGlyph( font, (unsigned char)*p );
 			if ( charGlyph ) {
-				width += charGlyph->advance * pixelSize;
+				width += charGlyph->advance * pixelSize + letterSpacing;
 			} else {
-				width += 0.5f * pixelSize;
+				width += 0.5f * pixelSize + letterSpacing;
 			}
 		}
 

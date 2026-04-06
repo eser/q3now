@@ -135,7 +135,7 @@ static const char *WiredFeeder_ServerItemText( int feederID, int index, int colu
 			return buf;
 		case 3:
 			// game type as short string
-			if ( s->gameType >= 0 && s->gameType < GT_MAX_GAME_TYPE ) {
+			if ( s->gameType >= 0 && s->gameType < 16 /* safe gametype bound */ ) {
 				return bg_gametypelist[s->gameType].shortname;
 			}
 			return "?";
@@ -382,7 +382,7 @@ qboolean WiredFeeder_IsMapInList( const char *list, const char *mapName ) {
 typedef struct {
 	char    mapLoadName[MAX_QPATH];
 	char    mapName[64];
-	int     typeBits;                   // bitmask: (1 << GT_DEATHMATCH) | (1 << GT_TDM) etc.
+	int     typeBits;                   /* bitmask of supported gametype indices */
 } wiredMapInfo_t;
 
 static wiredMapInfo_t  wired_maps[MAX_WIRED_MAPS];
@@ -525,9 +525,10 @@ void WiredFeeder_LoadMaps( void ) {
 		// defaults: display name = load name, all game types
 		Q_strncpyz( wired_maps[wired_mapCount].mapName,
 			wired_maps[wired_mapCount].mapLoadName, sizeof( wired_maps[0].mapName ) );
+		/* default: all common gametypes (0=FFA, 1=duel, 2=KotH, 3=LMS, 4=TDM, 5=CTF) */
 		wired_maps[wired_mapCount].typeBits =
-			(1 << GT_DEATHMATCH) | (1 << GT_DUEL) | (1 << GT_TDM) |
-			(1 << GT_CTF)        | (1 << GT_KINGOFTHEHILL) | (1 << GT_LASTMANSTANDING);
+			(1 << 0) | (1 << 1) | (1 << 4) |
+			(1 << 5) | (1 << 2) | (1 << 3);
 
 		wired_mapCount++;
 		namePtr += strlen( namePtr ) + 1;
@@ -746,8 +747,8 @@ static int WiredFeeder_ScoreCount( int feederID ) {
 	int i, count = 0;
 	int teamFilter = -1;
 
-	if ( feederID == FEEDER_REDTEAM_LIST )  teamFilter = TEAM_RED;
-	if ( feederID == FEEDER_BLUETEAM_LIST ) teamFilter = TEAM_BLUE;
+	if ( feederID == 0x05 /* red team feeder */ )  teamFilter = 1 /* red */;
+	if ( feederID == 0x06 /* blue team feeder */ ) teamFilter = 2 /* blue */;
 
 	if ( !wiredHud || !wiredHud->valid ) return 0;
 
@@ -765,8 +766,8 @@ static const char *WiredFeeder_ScoreItemText( int feederID, int index, int colum
 	int teamFilter = -1;
 	wiredHudScore_t *sc;
 
-	if ( feederID == FEEDER_REDTEAM_LIST )  teamFilter = TEAM_RED;
-	if ( feederID == FEEDER_BLUETEAM_LIST ) teamFilter = TEAM_BLUE;
+	if ( feederID == 0x05 /* red team feeder */ )  teamFilter = 1 /* red */;
+	if ( feederID == 0x06 /* blue team feeder */ ) teamFilter = 2 /* blue */;
 
 	if ( !wiredHud || !wiredHud->valid ) return "";
 
@@ -899,9 +900,9 @@ void WiredUI_RegisterCoreFeeders( void ) {
 		WiredFeeder_ModItemText, WiredFeeder_ModSelection );
 	WiredUI_RegisterFeeder( FEEDER_SCOREBOARD, WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
-	WiredUI_RegisterFeeder( FEEDER_REDTEAM_LIST, WiredFeeder_ScoreCount,
+	WiredUI_RegisterFeeder( 0x05 /* red team feeder */, WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
-	WiredUI_RegisterFeeder( FEEDER_BLUETEAM_LIST, WiredFeeder_ScoreCount,
+	WiredUI_RegisterFeeder( 0x06 /* blue team feeder */, WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
 	WiredUI_RegisterFeeder( FEEDER_HEADS, WiredFeeder_HeadsCount,
 		WiredFeeder_HeadsItemText, WiredFeeder_HeadsSelection );

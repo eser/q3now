@@ -22,12 +22,80 @@ static msdfFont_t *msdf_oxanium = NULL;
 static msdfFont_t *msdf_oxanium_medium = NULL;
 static msdfFont_t *msdf_console = NULL;
 
+/* ── Font family registration table ───────────────────────────────── */
+
+static fontFamily_t s_fontFamilies[] = {
+	// ── Enter Sansman ──────────────────────────────────────────────
+	// Each weight is a separate atlas from a FontForge-transformed TTF.
+	// Source: entsans.ttf (Bold), entsani.ttf (Bold Italic)
+	// Regular/Medium synthesized via changeWeight() at build time.
+	{
+		"sansman", {
+			{ "sansman-regular",     "sansman-regular",     FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL,  NULL },
+			{ "sansman-medium",      "sansman-medium",      FONT_WEIGHT_MEDIUM,  FONT_STYLE_NORMAL,  NULL },
+			{ "sansman-bold",        "sansman-bold",         FONT_WEIGHT_BOLD,    FONT_STYLE_NORMAL,  NULL },
+			{ "sansman-italic",      "sansman-italic",      FONT_WEIGHT_REGULAR, FONT_STYLE_ITALIC,  NULL },
+			{ "sansman-bold-italic", "sansman-bold-italic", FONT_WEIGHT_BOLD,    FONT_STYLE_ITALIC,  NULL },
+		}, 5
+	},
+	// ── Oxanium ────────────────────────────────────────────────────
+	// Native Regular + Medium TTFs. No transform needed.
+	{
+		"oxanium", {
+			{ "oxanium-regular",  "oxanium",        FONT_WEIGHT_REGULAR,  FONT_STYLE_NORMAL, NULL },
+			{ "oxanium-medium",   "oxanium-medium", FONT_WEIGHT_MEDIUM,   FONT_STYLE_NORMAL, NULL },
+		}, 2
+	},
+	// ── Share Tech Mono ────────────────────────────────────────────
+	// Single weight, no transform.
+	{
+		"sharetechmono", {
+			{ "sharetechmono-regular", "sharetechmono", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL, NULL },
+		}, 1
+	},
+};
+
+#define FONT_FAMILY_COUNT (sizeof(s_fontFamilies) / sizeof(s_fontFamilies[0]))
+
 void WiredFonts_InitMSDF( void ) {
-	msdf_sansman        = MSDF_LoadFont( "sansman" );
-	msdf_sansman_italic = MSDF_LoadFont( "sansman-italic" );
-	msdf_oxanium        = MSDF_LoadFont( "oxanium" );
-	msdf_oxanium_medium = MSDF_LoadFont( "oxanium-medium" );
-	msdf_console        = MSDF_LoadFont( "sharetechmono" );
+	int i, j;
+
+	/* ── Family-based loading: iterate families and faces ─────────── */
+	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
+		fontFamily_t *fam = &s_fontFamilies[i];
+		for ( j = 0; j < fam->faceCount; j++ ) {
+			fontFace_t *face = &fam->faces[j];
+			msdfFont_t *atlas = NULL;
+			int k, m;
+
+			/* Check if this atlas is already loaded by a previous face */
+			for ( k = 0; k < i + 1; k++ ) {
+				fontFamily_t *prev = &s_fontFamilies[k];
+				int limit = ( k == i ) ? j : prev->faceCount;
+				for ( m = 0; m < limit; m++ ) {
+					if ( !Q_stricmp( prev->faces[m].atlasName, face->atlasName ) &&
+					     prev->faces[m].atlas != NULL ) {
+						atlas = prev->faces[m].atlas;
+						break;
+					}
+				}
+				if ( atlas ) break;
+			}
+
+			if ( !atlas ) {
+				atlas = MSDF_LoadFont( face->atlasName );
+			}
+
+			face->atlas = atlas;
+		}
+	}
+
+	/* ── Legacy static pointers (for WiredFonts_GetMSDF compat) ──── */
+	msdf_sansman        = s_fontFamilies[0].faces[2].atlas;  /* sansman-bold */
+	msdf_sansman_italic = s_fontFamilies[0].faces[3].atlas;  /* sansman-italic */
+	msdf_oxanium        = s_fontFamilies[1].faces[0].atlas;  /* oxanium-regular */
+	msdf_oxanium_medium = s_fontFamilies[1].faces[1].atlas;  /* oxanium-medium */
+	msdf_console        = s_fontFamilies[2].faces[0].atlas;  /* sharetechmono */
 }
 
 msdfFont_t *WiredFonts_GetMSDF( const char *fontName ) {
@@ -54,6 +122,114 @@ msdfFont_t *WiredFonts_GetMSDF( const char *fontName ) {
 	/* Unknown font -- use oxanium as safe default */
 	Com_Printf( S_COLOR_YELLOW "WiredFonts_GetMSDF: unknown font '%s', using oxanium\n", fontName );
 	return msdf_oxanium;
+}
+
+/*
+ * WiredFont_Resolve — CSS-like font face resolution.
+ *
+ * 1. Find the family by name (case-insensitive).
+ * 2. Filter faces by style (normal / italic).
+ * 3. Exact weight match first.
+ * 4. If no exact match: weight >= 500 prefers nearest heavier,
+ *    weight < 500 prefers nearest lighter. Falls back to the
+ *    nearest in the opposite direction.
+ * 5. Returns NULL if family not found.
+ */
+const fontFace_t *WiredFont_Resolve(
+	const char   *familyName,
+	fontWeight_t  weight,
+	fontStyle_t   style
+) {
+	int i, j;
+	const fontFamily_t *family = NULL;
+	const fontFace_t   *best = NULL;
+	int                 bestDist = 99999;
+
+	/* Find the family */
+	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
+		if ( !Q_stricmp( familyName, s_fontFamilies[i].familyName ) ) {
+			family = &s_fontFamilies[i];
+			break;
+		}
+	}
+
+	if ( !family ) {
+		return NULL;
+	}
+
+	/* Pass 1: exact weight match among faces with matching style */
+	for ( j = 0; j < family->faceCount; j++ ) {
+		const fontFace_t *f = &family->faces[j];
+		if ( f->style != style ) {
+			continue;
+		}
+		if ( f->weight == weight ) {
+			return f;
+		}
+	}
+
+	/* Pass 2: nearest weight with CSS-like preference direction */
+	for ( j = 0; j < family->faceCount; j++ ) {
+		const fontFace_t *f = &family->faces[j];
+		int diff, dist;
+
+		if ( f->style != style ) {
+			continue;
+		}
+
+		diff = (int)f->weight - (int)weight;
+		dist = diff < 0 ? -diff : diff;
+
+		if ( !best ) {
+			best = f;
+			bestDist = dist;
+			continue;
+		}
+
+		if ( (int)weight >= 500 ) {
+			/* Prefer heavier (positive diff), then nearest */
+			if ( diff >= 0 && ( (int)best->weight - (int)weight ) < 0 ) {
+				/* f is heavier, best is lighter — take f */
+				best = f;
+				bestDist = dist;
+			} else if ( diff >= 0 && ( (int)best->weight - (int)weight ) >= 0 ) {
+				/* Both heavier — pick nearest */
+				if ( dist < bestDist ) {
+					best = f;
+					bestDist = dist;
+				}
+			} else if ( diff < 0 && ( (int)best->weight - (int)weight ) < 0 ) {
+				/* Both lighter — pick nearest */
+				if ( dist < bestDist ) {
+					best = f;
+					bestDist = dist;
+				}
+			}
+			/* diff < 0 and best is heavier: keep best */
+		} else {
+			/* Prefer lighter (negative diff), then nearest */
+			if ( diff <= 0 && ( (int)best->weight - (int)weight ) > 0 ) {
+				/* f is lighter, best is heavier — take f */
+				best = f;
+				bestDist = dist;
+			} else if ( diff <= 0 && ( (int)best->weight - (int)weight ) <= 0 ) {
+				/* Both lighter — pick nearest */
+				if ( dist < bestDist ) {
+					best = f;
+					bestDist = dist;
+				}
+			} else if ( diff > 0 && ( (int)best->weight - (int)weight ) > 0 ) {
+				/* Both heavier — pick nearest */
+				if ( dist < bestDist ) {
+					best = f;
+					bestDist = dist;
+				}
+			}
+			/* diff > 0 and best is lighter: keep best */
+		}
+	}
+
+	return best;
 }
 
 // ── type definitions from superhud (needed by font system) ───────────
@@ -120,185 +296,8 @@ qboolean CG_Hex16GetColor(const char *str, float *color)
 	return qtrue;
 }
 
-/*
- * ── Text compiler ────────────────────────────────────────
- * Parses a Q3 string with color codes into an array of
- * text_command_t for efficient rendering.
- */
+/* Old bitmap text compiler removed -- dead code after MSDF migration. */
 
-/* Cut time-related symbols like ^f ^F */
-void CG_ModernDrawStringPrepare(const char *from, char *to, int size)
-{
-	int printed = 0;
-	int max = size - 1;
-
-	if (!from || !to) return;
-
-	while (*from && printed < max)
-	{
-		if (from[0] == '^' && from[1] != '^')
-		{
-			switch (from[1])
-			{
-				case 'f':
-					from += 2;
-					if ((cls.realtime & 0x3ff) >= 512)
-					{
-						while (*from && !(from[0] == '^' && (from[1] == 'N' || from[1] == 'F')))
-							++from;
-					}
-					break;
-				case 'F':
-					from += 2;
-					if ((cls.realtime & 0x3ff) < 512)
-					{
-						while (*from && !(from[0] == '^' && (from[1] == 'N' || from[1] == 'f')))
-							++from;
-					}
-					break;
-				default:
-					break;
-			}
-		}
-		*to = *from;
-		++to;
-		++from;
-		++printed;
-	}
-	*to = 0;
-}
-
-text_command_t *CG_CompileText(const char *in)
-{
-	static text_command_t commands[OSP_TEXT_CMD_MAX];
-	static char dmem[4096];
-	int b;
-	char *text;
-	int i = 0;
-	int len;
-	vec4_t back_color;
-	qboolean back_color_was_set = qfalse;
-	qboolean top_color_was_set = qfalse;
-	float rc, gc, bc;
-	unsigned int color_index;
-
-	if (!in || *in == 0) return NULL;
-
-	Vector4Copy(colorWhite, back_color);
-
-	len = strlen(in) + 1;
-	if (len > (int)sizeof(dmem)) len = sizeof(dmem);
-	text = dmem;
-
-	CG_ModernDrawStringPrepare(in, text, len);
-
-	while (*text)
-	{
-		if (text[0] == '^' && text[1])
-		{
-			switch (text[1])
-			{
-				case 'F':
-				case 'f':
-					text += 2;
-					break;
-				case 'B':
-					if (!top_color_was_set && back_color_was_set)
-					{
-						commands[i].type = OSP_TEXT_CMD_TEXT_COLOR;
-						VectorCopy(back_color, commands[i].value.color);
-						++i;
-					}
-					b = cls.realtime & 0x7ff;
-					if (b > 1024) b = ~b & 0x7ff;
-					commands[i].type = OSP_TEXT_CMD_FADE;
-					commands[i].value.fade = b / 1463.0f + 0.3f;
-					++i;
-					text += 2;
-					break;
-				case 'b':
-					if (!top_color_was_set && back_color_was_set)
-					{
-						commands[i].type = OSP_TEXT_CMD_TEXT_COLOR;
-						VectorCopy(back_color, commands[i].value.color);
-						++i;
-					}
-					b = cls.realtime & 0x7ff;
-					if (b > 1024) b = ~b & 0x7ff;
-					commands[i].type = OSP_TEXT_CMD_FADE;
-					commands[i].value.fade = b / 1024.0f;
-					++i;
-					text += 2;
-					break;
-				case 'N':
-				case 'n':
-					commands[i].type = OSP_TEXT_CMD_FADE;
-					commands[i].value.fade = 1.0f;
-					++i;
-					if (!top_color_was_set && back_color_was_set)
-					{
-						commands[i].type = OSP_TEXT_CMD_TEXT_COLOR;
-						VectorCopy(back_color, commands[i].value.color);
-						++i;
-					}
-					else if (top_color_was_set && !back_color_was_set)
-					{
-						commands[i].type = OSP_TEXT_CMD_TEXT_COLOR;
-						VectorCopy(colorWhite, commands[i].value.color);
-						++i;
-					}
-					text += 2;
-					break;
-				case '^':
-					commands[i].type = OSP_TEXT_CMD_CHAR;
-					commands[i].value.character = '^';
-					++i;
-					text += 1;
-					break;
-				case 'X':
-				case 'x':
-					if (!CG_Hex16GetColor(&text[2], &rc)) { text += 2; break; }
-					if (!CG_Hex16GetColor(&text[4], &gc)) { text += 2; break; }
-					if (!CG_Hex16GetColor(&text[6], &bc)) { text += 2; break; }
-					back_color[0] = rc;
-					back_color[1] = gc;
-					back_color[2] = bc;
-					commands[i].type = OSP_TEXT_CMD_SHADOW_COLOR;
-					VectorCopy(back_color, commands[i].value.color);
-					back_color_was_set = qtrue;
-					++i;
-					text += 8;
-					break;
-				default:
-					if ((text[1] >= '0') && (text[1] <= '9'))
-					{
-						color_index = text[1] - 0x30;
-						VectorCopy(g_color_table[color_index], commands[i].value.color);
-						commands[i].type = OSP_TEXT_CMD_TEXT_COLOR;
-						++i;
-						top_color_was_set = qtrue;
-					}
-					text += 2;
-					break;
-			}
-		}
-		else
-		{
-			commands[i].type = OSP_TEXT_CMD_CHAR;
-			commands[i].value.character = text[0];
-			++i;
-			++text;
-		}
-	}
-	commands[i++].type = OSP_TEXT_CMD_STOP;
-
-	return commands;
-}
-
-void CG_CompiledTextDestroy(text_command_t *root)
-{
-	/* static buffer — nothing to free */
-}
 
 /*
  * ── Font system ──────────────────────────────────────────
@@ -331,28 +330,9 @@ static font_t fonts[] = {
 	{"elite"}, {"elitebigchars"}
 };
 static int fonts_num = sizeof(fonts) / sizeof(fonts[0]);
-static const font_t *font = &fonts[0];
-static const font_metric_t *metrics = &fonts[0].metrics[0];
+/* font/metrics globals removed -- were used by old bitmap text system (dead) */
 
-qboolean CG_FontAvailable(int index)
-{
-	if (index >= 0 && index < fonts_num) return qtrue;
-	Com_Printf("Nonexistent font number: ^1%d\n", index);
-	return qfalse;
-}
 
-void CG_FontSelect(int index)
-{
-	if (CG_FontAvailable(index))
-	{
-		if (index < 0 || index >= fonts_num)
-		{
-			Com_Error( ERR_DROP,"Requested nonexistent font number: %d\n", index);
-		}
-		font = &fonts[index];
-		metrics = &font->metrics[0];
-	}
-}
 
 int CG_FontIndexFromName(const char *name)
 {
@@ -363,6 +343,49 @@ int CG_FontIndexFromName(const char *name)
 			return index;
 	}
 	return 0;
+}
+
+/*
+ * Map a bitmap font index (0-10) to a FONT_* id for Text_Draw().
+ * The mapping is based on which MSDF font each bitmap slot maps to.
+ */
+int WiredFont_ToFontId( int fontIndex )
+{
+	if ( fontIndex < 0 || fontIndex >= fonts_num )
+		return FONT_UI;
+
+	{
+		const char *name = fonts[fontIndex].name;
+		msdfFont_t *msdf = WiredFonts_GetMSDF( name );
+
+		if ( msdf == msdf_sansman )         return FONT_DISPLAY;
+		if ( msdf == msdf_sansman_italic )   return FONT_DISPLAY_ITALIC;
+		if ( msdf == msdf_oxanium )          return FONT_UI;
+		if ( msdf == msdf_oxanium_medium )   return FONT_UI_MEDIUM;
+		if ( msdf == msdf_console )          return FONT_MONO;
+	}
+
+	return FONT_UI;
+}
+
+/*
+ * Convert DS_* flags to TEXT_ALIGN_* alignment value.
+ */
+int WiredFont_ToAlignment( int dsFlags )
+{
+	if ( dsFlags & DS_HCENTER ) return TEXT_ALIGN_CENTER;
+	if ( dsFlags & DS_HRIGHT )  return TEXT_ALIGN_RIGHT;
+	return TEXT_ALIGN_LEFT;
+}
+
+/*
+ * Convert DS_* flags to Text_Draw flags (TEXT_DROPSHADOW, etc.).
+ */
+int WiredFont_ToTextFlags( int dsFlags )
+{
+	int f = 0;
+	if ( dsFlags & DS_SHADOW ) f |= TEXT_DROPSHADOW;
+	return f;
 }
 
 static qboolean CG_FileExist(const char *file)
@@ -594,412 +617,6 @@ void CG_LoadFonts(void)
 	CG_LoadFont(&fonts[10], "gfx/2d/EliteBigchars.cfg");
 }
 
-/*
- * ── String length helpers ────────────────────────────────
- */
-static float DrawCompiledStringLength(const text_command_t *cmd, float aw, int proportional)
-{
-	const font_metric_t *fm;
-	float x_end;
-	float ax = 0;
-	int i;
-	const text_command_t *curr;
-
-	if (!cmd) return 0.0f;
-
-	for (i = 0; i < OSP_TEXT_CMD_MAX; ++i)
-	{
-		curr = &cmd[i];
-		if (curr->type == OSP_TEXT_CMD_CHAR)
-		{
-			fm = &metrics[(unsigned char)curr->value.character];
-			if (proportional)
-			{
-				ax += fm->space1 * aw;
-				x_end = ax + fm->space2 * aw;
-			}
-			else
-			{
-				x_end = ax + aw;
-			}
-			if (x_end >= cls.glconfig.vidWidth) break;
-			ax = x_end;
-		}
-		else if (curr->type == OSP_TEXT_CMD_STOP)
-		{
-			break;
-		}
-	}
-	return ax;
-}
-
-static int CompiledStringSize(const text_command_t *cmd)
-{
-	int size;
-	if (!cmd) return 0;
-	for (size = 0; size < OSP_TEXT_CMD_MAX && cmd[size].type != OSP_TEXT_CMD_STOP; ++size);
-	return size;
-}
-
-static float GetSymbolSize(char sym, qboolean proportional, float charWidth)
-{
-	const font_metric_t *fm;
-	fm = &metrics[(unsigned char)sym];
-	if (proportional) return (fm->space1 + fm->space2) * charWidth;
-	return charWidth;
-}
-
-static float RestrictCompiledString(text_command_t *cmd, float charWidth, qboolean proportional, float toWidth)
-{
-	const font_metric_t *fm;
-	float x_end;
-	float ax = 0;
-	int i, size;
-	text_command_t *curr;
-	qboolean restricted = qfalse;
-
-	if (!cmd || toWidth == 0) return 0;
-
-	size = CompiledStringSize(cmd);
-
-	for (i = 0; i < size; ++i)
-	{
-		curr = &cmd[i];
-		if (curr->type == OSP_TEXT_CMD_CHAR)
-		{
-			fm = &metrics[(unsigned char)curr->value.character];
-			if (proportional)
-			{
-				ax += fm->space1 * charWidth;
-				x_end = ax + fm->space2 * charWidth;
-			}
-			else
-			{
-				x_end = ax + charWidth;
-			}
-			if (x_end > toWidth) { restricted = qtrue; break; }
-			ax = x_end;
-		}
-		else if (curr->type == OSP_TEXT_CMD_STOP)
-		{
-			break;
-		}
-	}
-
-	if (restricted)
-	{
-		while (i > 0)
-		{
-			float dotSize = GetSymbolSize('.', proportional, charWidth);
-			float prevSize = GetSymbolSize(cmd[i - 1].value.character, proportional, charWidth);
-			if ((ax - prevSize + dotSize) <= toWidth)
-			{
-				--i;
-				ax = ax - prevSize + dotSize;
-				break;
-			}
-			--i;
-			ax -= prevSize;
-		}
-		curr = &cmd[i];
-		curr->type = OSP_TEXT_CMD_CHAR;
-		curr->value.character = '.';
-		if (i + 1 < OSP_TEXT_CMD_MAX)
-			cmd[i + 1].type = OSP_TEXT_CMD_STOP;
-	}
-	return ax;
-}
-
-static float RestrictCompiledStringChars(text_command_t *cmd, int maxChars)
-{
-	int chars = 0;
-	int i;
-	text_command_t *curr;
-	qboolean restricted = qfalse;
-
-	if (!cmd || maxChars <= 0) return 0;
-
-	for (i = 0; i < OSP_TEXT_CMD_MAX; ++i)
-	{
-		curr = &cmd[i];
-		if (curr->type == OSP_TEXT_CMD_CHAR)
-		{
-			chars++;
-			if (chars >= maxChars) { restricted = qtrue; break; }
-		}
-		else if (curr->type == OSP_TEXT_CMD_STOP)
-		{
-			break;
-		}
-	}
-
-	if (restricted)
-	{
-		curr = &cmd[i];
-		if (curr->type == OSP_TEXT_CMD_CHAR)
-			curr->value.character = '.';
-		if (i + 1 < OSP_TEXT_CMD_MAX)
-			cmd[i + 1].type = OSP_TEXT_CMD_STOP;
-	}
-	return (float)chars;
-}
-
-/*
- * ── CG_ModernDrawStringLenPix ──────────────────────────────
- * Returns pixel width of a string when rendered with given params.
- */
-int CG_ModernDrawStringLenPix(const char *string, float charWidth, int flags, int toWidth)
-{
-	float mw;
-	int rez;
-	text_command_t *text_commands;
-
-	if (!string) return 0;
-
-	/* MSDF-only routing */
-	{
-		msdfFont_t *msdfFont = WiredFonts_GetMSDF( font->name );
-		if ( !msdfFont || !msdfFont->loaded ) {
-			Com_Printf( S_COLOR_RED "MSDF font not loaded for '%s'\n", font->name );
-			return 0;
-		}
-		return (int)MSDF_MeasureString( msdfFont, (float)charWidth, string, -1 );
-	}
-
-	/* BITMAP RENDERING REMOVED -- MSDF only
-	text_commands = CG_CompileText(string);
-	if (!text_commands) return 0;
-
-	mw = (float)toWidth;
-	RestrictCompiledString(text_commands, charWidth, flags & DS_PROPORTIONAL, mw);
-	rez = DrawCompiledStringLength(text_commands, charWidth, flags & DS_PROPORTIONAL);
-	CG_CompiledTextDestroy(text_commands);
-	return rez;
-	*/
-}
-
-/*
- * ── CG_ModernDrawString ────────────────────────────────────
- * Thin wrapper — delegates to CG_ModernDrawStringNew which
- * handles MSDF routing with proper alignment flag support.
- */
-void CG_ModernDrawString(float x, float y, const char *string, const vec4_t setColor,
-                       float charWidth, float charHeight, int maxWidth, int flags,
-                       vec4_t background)
-{
-	CG_ModernDrawStringNew( x, y, string, setColor, NULL,
-		charWidth, charHeight, maxWidth, flags,
-		background, NULL, NULL );
-}
-
-/*
- * ── CG_ModernDrawStringNew ─────────────────────────────────
- * Extended version with custom shadow color, border, and
- * DS_MAX_WIDTH_IS_CHARS support.
- * Uses single-pass shadow+text rendering for efficiency.
- */
-void CG_ModernDrawStringNew(float x, float y, const char *string, const vec4_t setColor,
-                          vec4_t shadowColor,
-                          float charWidth, float charHeight, int maxWidth, int flags,
-                          vec4_t background, vec4_t border, vec4_t borderColor)
-{
-	const font_metric_t *fm;
-	const float *tc;
-	float ax, ay, aw, aw1, ah;
-	float x_end, xx;
-	float fade;
-	vec4_t color;
-	float xx_add, yy_add;
-	int i, hasBorder, proportional;
-	qhandle_t sh;
-	text_command_t *text_commands;
-	text_command_t *curr;
-	float expectedLength;
-	int shadowEnabled;
-	float shadowFade;
-	vec4_t shadowCol;
-
-	if (!string) return;
-
-	/* MSDF-only routing */
-	{
-		msdfFont_t *msdfFont = WiredFonts_GetMSDF( font->name );
-		if ( !msdfFont || !msdfFont->loaded ) {
-			Com_Printf( S_COLOR_RED "MSDF font not loaded for '%s'\n", font->name );
-			return;
-		}
-
-		/* Apply alignment flags — bitmap path did this after measuring */
-		if ( flags & (DS_HCENTER | DS_HRIGHT) ) {
-			float textW = MSDF_MeasureString( msdfFont, (float)charHeight, string, -1 );
-			if ( flags & DS_HCENTER )
-				x -= textW * 0.5f;
-			else
-				x -= textW;
-		}
-		if ( flags & DS_VCENTER )
-			y -= charHeight * 0.5f;
-		else if ( flags & DS_VTOP )
-			y -= charHeight;
-
-		MSDF_DrawString( msdfFont, x, y, (float)charHeight, setColor, string,
-		    ( flags & DS_MAX_WIDTH_IS_CHARS ) ? maxWidth : -1 );
-		return;
-	}
-
-	/* BITMAP RENDERING REMOVED -- MSDF only
-	text_commands = CG_CompileText(string);
-	if (!text_commands) return;
-
-	ax = x;
-	ay = y;
-	aw = charWidth;
-	ah = charHeight;
-
-	proportional = (flags & DS_PROPORTIONAL) ? 1 : 0;
-	hasBorder = (border != NULL) ? 1 : 0;
-	expectedLength = 0.0f;
-	xx_add = 0.0f;
-	yy_add = 0.0f;
-
-	if (flags & DS_MAX_WIDTH_IS_CHARS)
-		RestrictCompiledStringChars(text_commands, maxWidth);
-	else
-	{
-		float mw = (float)maxWidth;
-		RestrictCompiledString(text_commands, aw, proportional, mw);
-	}
-
-	if (hasBorder || background || (flags & (DS_HCENTER | DS_HRIGHT)))
-		expectedLength = DrawCompiledStringLength(text_commands, aw, proportional);
-
-	if (flags & (DS_HCENTER | DS_HRIGHT))
-	{
-		if (flags & DS_HCENTER)
-			ax -= 0.5f * expectedLength;
-		else
-			ax -= expectedLength;
-	}
-
-	if (flags & DS_VCENTER)
-		ay -= ah / 2;
-	else if (flags & DS_VTOP)
-		ay -= ah;
-
-	sh = font->shader[0];
-	for (i = 1; i < font->shaderCount; i++)
-	{
-		if (ah >= font->shaderThreshold[i])
-			sh = font->shader[i];
-	}
-
-	if (background)
-	{
-		re.SetColor(background);
-		re.DrawStretchPic(ax, ay, expectedLength, ah, 0, 0, 0, 0, cls.whiteShader);
-		re.SetColor(colorWhite);
-	}
-
-	if (hasBorder)
-		WiredFont_DrawFrame(ax, ay, expectedLength, ah, border, borderColor, 0);
-
-	shadowEnabled = (flags & DS_SHADOW) && (shadowColor && shadowColor[3] != 0.0f);
-	if (shadowEnabled)
-	{
-		xx_add = charWidth / 10.0f;
-		yy_add = xx_add;
-		VectorCopy(shadowColor, shadowCol);
-		shadowFade = shadowColor[3];
-		shadowCol[3] = shadowFade;
-	}
-	else
-	{
-		shadowFade = 1.0f;
-		Vector4Copy(colorBlack, shadowCol);
-	}
-
-	fade = 1.0f;
-	Vector4Copy(setColor, color);
-	xx = ax;
-
-	for (i = 0; i < OSP_TEXT_CMD_MAX && text_commands[i].type != OSP_TEXT_CMD_STOP; i++)
-	{
-		curr = &text_commands[i];
-
-		switch (curr->type)
-		{
-			case OSP_TEXT_CMD_CHAR:
-			{
-				int index = curr->value.character;
-				if (index < 0) index += 256;
-				fm = &metrics[(unsigned char)index];
-
-				if (proportional)
-				{
-					tc = fm->tc_prop;
-					aw1 = fm->width * aw;
-				}
-				else
-				{
-					tc = fm->tc_mono;
-					aw1 = aw;
-				}
-
-				if (shadowEnabled)
-				{
-					re.SetColor(shadowCol);
-					re.DrawStretchPic(ax + xx_add, ay + yy_add, aw1, ah, tc[0], tc[1], tc[2], tc[3], sh);
-				}
-
-				re.SetColor(color);
-				re.DrawStretchPic(ax, ay, aw1, ah, tc[0], tc[1], tc[2], tc[3], sh);
-
-				if (proportional)
-				{
-					ax += fm->space1 * aw;
-					x_end = ax + fm->space2 * aw;
-				}
-				else
-				{
-					x_end = ax + aw;
-				}
-				ax = x_end;
-			}
-			break;
-
-			case OSP_TEXT_CMD_TEXT_COLOR:
-				VectorCopy(curr->value.color, color);
-				color[3] = fade;
-				if (setColor && color[3] > setColor[3]) color[3] = setColor[3];
-				shadowCol[3] = color[3];
-				break;
-
-			case OSP_TEXT_CMD_SHADOW_COLOR:
-				VectorCopy(curr->value.color, shadowCol);
-				shadowCol[3] = shadowFade;
-				if (setColor && shadowCol[3] > setColor[3]) shadowCol[3] = setColor[3];
-				break;
-
-			case OSP_TEXT_CMD_FADE:
-				fade = curr->value.fade;
-				color[3] = fade;
-				shadowCol[3] = fade;
-				if (setColor)
-				{
-					if (color[3] > setColor[3]) color[3] = setColor[3];
-					if (shadowCol[3] > setColor[3]) shadowCol[3] = setColor[3];
-				}
-				break;
-
-			case OSP_TEXT_CMD_STOP:
-				break;
-		}
-	}
-
-	CG_CompiledTextDestroy(text_commands);
-	re.SetColor(NULL);
-	*/
-}
 
 // ══════════════════════════════════════════════════════════════════════
 // TA Font System — fontInfo_t-based rendering for v6/TA menu compat

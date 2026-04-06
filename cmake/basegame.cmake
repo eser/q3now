@@ -42,6 +42,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_weapons.c
     ${SOURCE_DIR}/cgame/cg_znudge.c
     ${SOURCE_DIR}/cgame/cg_wired_bridge.c
+    ${SOURCE_DIR}/cgame/cg_wired_store.c
 )
 
 set(CGAME_BINARY_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.c)

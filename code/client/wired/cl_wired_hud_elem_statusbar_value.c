@@ -12,6 +12,7 @@ cgame pre-computes everything — this is a pure renderer.
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
 #include "cl_wired_hud.h"
+#include "cl_wired_store.h"
 
 #if FEAT_WIRED_UI
 
@@ -38,18 +39,45 @@ void *CG_SHUDElementStatusbarValueCreate( const superhudConfig_t *config ) {
 
 void CG_SHUDElementStatusbarValueRoutine( void *context ) {
 	shudElementStatusbarValue_t *element = (shudElementStatusbarValue_t *)context;
-	const wiredHudBinding_t *binding;
 
 	if ( !element->config.bind.isSet ) return;
 
-	binding = WiredHud_FindBinding( element->config.bind.value );
-	if ( !binding || !binding->visible ) return;
+	/* Try Wired Store first, fall back to old binding */
+	{
+		char storeKey[128];
+		wuiStoreEntry_t *storeEntry;
+		wuiStoreEntry_t *colorEntry;
+		char colorKey[128];
 
-	element->ctx.text = (char *)binding->text;
-	Vector4Copy( binding->color, element->config.color.value.rgba );
+		Com_sprintf( storeKey, sizeof( storeKey ), "player.%s.text", element->config.bind.value );
+		storeEntry = WiredStore_Get( storeKey );
+		if ( storeEntry && storeEntry->text[0] ) {
+			Com_sprintf( colorKey, sizeof( colorKey ), "player.%s.color", element->config.bind.value );
+			colorEntry = WiredStore_Get( colorKey );
+			if ( colorEntry ) {
+				Vector4Copy( colorEntry->color, element->config.color.value.rgba );
+			}
 
-	CG_SHUDFill( &element->config );
-	CG_SHUDTextPrint( &element->config, &element->ctx );
+			element->ctx.text = storeEntry->text;
+			CG_SHUDFill( &element->config );
+			CG_SHUDTextPrint( &element->config, &element->ctx );
+			return;
+		}
+	}
+
+	/* Fall back to old binding system */
+	{
+		const wiredHudBinding_t *binding;
+
+		binding = WiredHud_FindBinding( element->config.bind.value );
+		if ( !binding || !binding->visible ) return;
+
+		element->ctx.text = (char *)binding->text;
+		Vector4Copy( binding->color, element->config.color.value.rgba );
+
+		CG_SHUDFill( &element->config );
+		CG_SHUDTextPrint( &element->config, &element->ctx );
+	}
 }
 
 void CG_SHUDElementStatusbarValueDestroy( void *context ) {

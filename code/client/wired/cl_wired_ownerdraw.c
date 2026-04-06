@@ -16,6 +16,7 @@ Tiered implementation:
 #include "../client.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
+#include "cl_wired_hud_private.h"
 #include "cl_wired_fonts.h"
 #include "cl_wired_draw.h"
 #include "cl_wired_background.h"
@@ -94,7 +95,7 @@ static void WiredOD_PlayerArmor( float x, float y, float w, float h, vec4_t item
 static void WiredOD_PlayerAmmoValue( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	int weapon = wiredHud->weapon;
-	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) return;
+	if ( weapon <= 0 || weapon >= (int)(sizeof(wiredHud->ammo) / sizeof(wiredHud->ammo[0])) ) return;
 	int ammo = wiredHud->ammo[weapon];
 	char buf[16];
 	Com_sprintf( buf, sizeof( buf ), "%d", ammo );
@@ -125,7 +126,7 @@ static void WiredOD_PlayerArmorIcon( float x, float y, float w, float h, vec4_t 
 static void WiredOD_PlayerAmmoIcon( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	int weapon = wiredHud->weapon;
-	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) return;
+	if ( weapon <= 0 || weapon >= (int)(sizeof(wiredHud->ammoIcons) / sizeof(wiredHud->ammoIcons[0])) ) return;
 	qhandle_t icon = wiredHud->ammoIcons[weapon];
 	if ( icon ) {
 		re.SetColor( NULL );
@@ -176,11 +177,7 @@ static void WiredOD_Killer( float x, float y, float w, float h, vec4_t itemColor
 static void WiredOD_GameType( float x, float y, float w, float h, vec4_t itemColor ) {
 	if ( !wiredHud || !wiredHud->valid ) return;
 	const char *gt;
-	if ( wiredHud->gametype >= 0 && wiredHud->gametype < GT_MAX_GAME_TYPE ) {
-		gt = bg_gametypelist[wiredHud->gametype].name;
-	} else {
-		gt = "Unknown";
-	}
+	gt = wiredHud->gametypeName;
 	vec4_t color = { 1, 1, 1, 1 };
 	float scale = 0.35f;
 	fontInfo_t *font = WiredUI_GetTAFont( TA_FONT_SMALL );
@@ -211,7 +208,6 @@ static void WiredOD_BackgroundGrid( float x, float y, float w, float h, vec4_t i
 // ── background full (3-layer) ─────────────────────────────────────────
 
 static void WiredOD_BackgroundFull( float x, float y, float w, float h, vec4_t itemColor ) {
-	Com_Printf(">>> UI_BACKGROUND_FULL ownerdraw hit: %.0f %.0f %.0f %.0f\n", x, y, w, h);
 	WUI_DrawBackground( x, y, w, h );
 }
 

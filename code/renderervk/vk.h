@@ -321,6 +321,8 @@ qboolean vk_bloom( void );
 
 qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size );
 void vk_update_mvp( const float *m );
+void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
+                              float glowWidth, const float *glowColor );
 
 uint32_t vk_tess_index( uint32_t numIndexes, const void *src );
 void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset );
@@ -445,6 +447,7 @@ typedef struct {
 	VkPipelineLayout pipeline_layout_post_process;	// post-processing
 	VkPipelineLayout pipeline_layout_smaa;		// SMAA (push constants + 3 samplers)
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
+	VkPipelineLayout pipeline_layout_msdf;		// MSDF text (112-byte push constant range)
 
 	// ── compute shader infrastructure ─────────────────────────────
 	//

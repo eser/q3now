@@ -36,7 +36,7 @@ void CG_SHUDElementGameTypeRoutine(void* context)
 
 	if (sec > 0)
 	{
-		if (cgs.gametype == GT_DUEL)
+		if (wiredHud->isDuel)
 		{
 			const char* player1Name = NULL;
 			const char* player2Name = NULL;
@@ -44,7 +44,7 @@ void CG_SHUDElementGameTypeRoutine(void* context)
 
 			for (i = 0; i < cgs.maxclients; ++i)
 			{
-				if (cgs.clientinfo[i].name[0] && cgs.clientinfo[i].team == TEAM_FREE)
+				if (cgs.clientinfo[i].name[0] && cgs.clientinfo[i].team == 0)
 				{
 					if (!player1Name)
 					{
@@ -65,16 +65,7 @@ void CG_SHUDElementGameTypeRoutine(void* context)
 		}
 		else
 		{
-			const char* text;
-			int len;
-			int width;
-
-			if (cgs.gametype >= 0 && cgs.gametype < GT_MAX_GAME_TYPE) {
-				text = bg_gametypelist[cgs.gametype].name;
-			} else {
-				text = "";
-			}
-			Com_sprintf(str, 512, "%s", text);
+			Com_sprintf(str, 512, "%s", wiredHud->gametypeName);
 			element->ctx.text = str;
 		}
 	}

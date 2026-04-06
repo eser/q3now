@@ -19,8 +19,6 @@ void WUI_DrawBackground(float x, float y, float w, float h) {
 	float vpW = (float)cls.glconfig.vidWidth;
 	float vpH = (float)cls.glconfig.vidHeight;
 
-	Com_Printf(">>> WUI_DrawBackground called: %.0f %.0f %.0f %.0f\n", x, y, w, h);
-
 	// Layer 1: dark base fill
 	{
 		vec4_t bg = { 0.031f, 0.047f, 0.063f, 1.0f };

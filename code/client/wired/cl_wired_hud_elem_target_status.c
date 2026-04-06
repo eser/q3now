@@ -1,6 +1,7 @@
 #include "../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
+#include "cl_wired_store.h"
 
 #if FEAT_WIRED_UI
 
@@ -47,9 +48,9 @@ void CG_SHUDElementTargetStatusRoutine(void* context)
 
 	ci = &cgs.clientinfo[cg.crosshairClientNum];
 
-	if ((ci->team == cg.snap->ps.persistant[PERS_TEAM]) || (qfalse && ci->team == cgs.clientinfo[cg.snap->ps.clientNum].team))
 	{
-		if (ci->team != TEAM_FREE && ci->team == cg.snap->ps.persistant[PERS_TEAM] && cg_crosshairHealth.integer != 0 && !(cg.snap->ps.pm_flags & PMF_FOLLOW))
+		wuiStoreEntry_t *e = WiredStore_Get( "crosshair.isTeammate" );
+		if ( e && (int)e->value != 0 && cg_crosshairHealth.integer != 0 && !(cg.snap->ps.pm_flags & PMF_FOLLOW) )
 		{
 			vec4_t hcolor;
 			char s[1024];

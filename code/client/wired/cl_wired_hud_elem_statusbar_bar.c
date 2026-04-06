@@ -12,6 +12,7 @@ cgame computes the percentage and color — client just draws the bar.
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
 #include "cl_wired_hud.h"
+#include "cl_wired_store.h"
 
 #if FEAT_WIRED_UI
 
@@ -31,19 +32,38 @@ void *CG_SHUDElementStatusbarBarCreate( const superhudConfig_t *config ) {
 
 void CG_SHUDElementStatusbarBarRoutine( void *context ) {
 	shudElementStatusbarBar_t *element = (shudElementStatusbarBar_t *)context;
-	const wiredHudBinding_t *binding;
 
 	if ( !element->config.bind.isSet ) return;
 
-	binding = WiredHud_FindBinding( element->config.bind.value );
-	if ( !binding || !binding->visible ) return;
+	/* Try Wired Store first, fall back to old binding */
+	{
+		char pctKey[128];
+		wuiStoreEntry_t *storeEntry;
 
-	CG_SHUDFill( &element->config );
-	CG_SHUDDrawBorder( &element->config );
+		Com_sprintf( pctKey, sizeof( pctKey ), "player.%s.percent", element->config.bind.value );
+		storeEntry = WiredStore_Get( pctKey );
+		if ( storeEntry ) {
+			CG_SHUDFill( &element->config );
+			CG_SHUDDrawBorder( &element->config );
+			/* bar uses its own forecolor from .hud, store provides fill percentage (0-1) */
+			CG_SHUDBarPrint( &element->config, &element->ctx, storeEntry->value * 100.0f );
+			return;
+		}
+	}
 
-	// bar uses its own forecolor from .hud (typically white), NOT the binding color
-	// binding only provides the fill percentage
-	CG_SHUDBarPrint( &element->config, &element->ctx, binding->percent * 100.0f );
+	/* Fall back to old binding system */
+	{
+		const wiredHudBinding_t *binding;
+
+		binding = WiredHud_FindBinding( element->config.bind.value );
+		if ( !binding || !binding->visible ) return;
+
+		CG_SHUDFill( &element->config );
+		CG_SHUDDrawBorder( &element->config );
+		/* bar uses its own forecolor from .hud (typically white), NOT the binding color */
+		/* binding only provides the fill percentage */
+		CG_SHUDBarPrint( &element->config, &element->ctx, binding->percent * 100.0f );
+	}
 }
 
 void CG_SHUDElementStatusbarBarDestroy( void *context ) {

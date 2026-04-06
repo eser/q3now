@@ -1064,6 +1064,11 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		/* MSDF shader override — use dedicated pipeline when available */
 		if ( tess.shader->msdf && vk.msdf_pipeline != 0 ) {
 			pipeline = vk.msdf_pipeline;
+			/* Push outline/glow params (also re-pushes MVP via MSDF layout) */
+			vk_update_msdf_outline( tr.msdfOutlineWidth,
+			                         tr.msdfOutlineColor,
+			                         tr.msdfGlowWidth,
+			                         tr.msdfGlowColor );
 		}
 
 		vk_bind_pipeline( pipeline );

@@ -45,7 +45,7 @@ static void CG_DrawLoadingIcons( void ) {
 	for( n = 0; n < loadingPlayerIconCount; n++ ) {
 		x = 16 + n * 78;
 		y = 324-40;
-		CG_DrawPic( x, y, 64, 64, loadingPlayerIcons[n] );
+		CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, 64 * NORM_HSCALE, 64 * NORM_VSCALE, loadingPlayerIcons[n] );
 	}
 
 	for( n = 0; n < loadingItemIconCount; n++ ) {
@@ -54,7 +54,7 @@ static void CG_DrawLoadingIcons( void ) {
 			y += 40;
 		}
 		x = 16 + n % 13 * 48;
-		CG_DrawPic( x, y, 32, 32, loadingItemIcons[n] );
+		CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, 32 * NORM_HSCALE, 32 * NORM_VSCALE, loadingItemIcons[n] );
 	}
 }
 
@@ -166,7 +166,7 @@ void CG_DrawInformation( void ) {
 		levelshot = trap_R_RegisterShaderNoMip( "menu/art/unknownmap" );
 	}
 	trap_R_SetColor( NULL );
-	CG_DrawPic( 0, 0, CG_VIRTUAL_W, CG_VIRTUAL_H, levelshot );
+	CG_DrawPicNorm( 0, 0, 1.0f, 1.0f, levelshot );
 
 	// blend a detail texture over it
 	detail = trap_R_RegisterShader( "levelShotDetail" );

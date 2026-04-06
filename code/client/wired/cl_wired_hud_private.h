@@ -13,26 +13,15 @@ extern "C" {
 // Modern text rendering types
 #define OSP_TEXT_CMD_MAX 2048
 
-typedef enum {
-	OSP_TEXT_CMD_CHAR = 0,
-	OSP_TEXT_CMD_STOP,
-	OSP_TEXT_CMD_FADE,
-	OSP_TEXT_CMD_TEXT_COLOR,
-	OSP_TEXT_CMD_SHADOW_COLOR,
-} text_command_type_t;
-
-typedef struct {
-	text_command_type_t type;
-	union {
-		char character;
-		float fade;
-		vec4_t color;
-	} value;
-} text_command_t;
+/* text_command_t removed — bitmap text compiler dead after MSDF migration */
 
 #ifndef FS_INVALID_HANDLE
 #define FS_INVALID_HANDLE 0
 #endif
+
+/* generic weapon buffer size — large enough for any game configuration.
+   Client does not know how many weapons exist; it uses this as a buffer. */
+#define WIRED_WEAPON_BUFFER_SIZE 32
 
 // q3now compatibility macros
 #ifndef Vector4Clear
@@ -60,16 +49,13 @@ typedef struct {
 #define DS_MAX_WIDTH_IS_CHARS 0x0100
 #endif
 
-// Modern text/font system (implemented in cg_moderntext.c)
+// Modern text/font system (implemented in cl_wired_fonts.c)
 void CG_LoadFonts( void );
 int CG_FontIndexFromName( const char *name );
-void CG_FontSelect( int fontIndex );
+int  WiredFont_ToFontId( int fontIndex );
+int  WiredFont_ToAlignment( int dsFlags );
+int  WiredFont_ToTextFlags( int dsFlags );
 qboolean CG_Hex16GetColor( const char *str, float *color );
-text_command_t *CG_CompileText( const char *text );
-void CG_CompiledTextDestroy( text_command_t *root );
-void CG_ModernDrawString( float x, float y, const char *str, const vec4_t color, float charW, float charH, int maxWidth, int flags, vec4_t bgColor );
-int CG_ModernDrawStringLenPix( const char *str, float charW, int flags, int toWidth );
-void CG_ModernDrawStringNew( float x, float y, const char *str, const vec4_t color, vec4_t shadowColor, float charW, float charH, int maxWidth, int flags, vec4_t bgColor, vec4_t border, vec4_t borderColor );
 
 // OSP2 compatibility functions — provided by cl_wired_hud_compat.h in client context
 // (declarations removed to avoid macro conflicts with compat layer)
@@ -122,11 +108,11 @@ typedef enum
 
 typedef enum
 {
-	SUPERHUD_ITTEAM_BLUE,
-	SUPERHUD_ITTEAM_RED,
-	SUPERHUD_ITTEAM_NEUTRAL,
-	SUPERHUD_ITTEAM_OWN,
-	SUPERHUD_ITTEAM_ENEMY,
+	SUPERHUD_ITSIDE_BLUE,
+	SUPERHUD_ITSIDE_RED,
+	SUPERHUD_ITSIDE_NEUTRAL,
+	SUPERHUD_ITSIDE_OWN,
+	SUPERHUD_ITSIDE_ENEMY,
 } superhudItTeam_t;
 
 typedef struct
@@ -360,8 +346,8 @@ typedef enum
 
 #define SE_IM         (1 << 0)  // 0x00000001
 #define SE_IM_STR "im"
-#define SE_TEAM_ONLY  (1 << 1)  // 0x00000002
-#define SE_TEAM_ONLY_STR "teamonly"
+#define SE_SIDES_ONLY  (1 << 1)  // 0x00000002
+#define SE_SIDES_ONLY_STR "teamonly"
 #define SE_SPECT      (1 << 2)  // 0x00000004
 #define SE_SPECT_STR      "spectator"
 #define SE_DEAD       (1 << 3)  // 0x00000008
@@ -380,9 +366,9 @@ typedef enum
 #define SE_KEY4_SHOW_STR  "key4show"
 #define SE_SHOW_EMPTY  (1 << 10) // 0x00000400
 #define SE_SHOW_EMPTY_STR  "showempty"
-// gametype visibility flags — derived from bg_gametypelist[].hudToken
-// bit positions are sequential from SE_GT_BASE_BIT, one per unique hudToken
-#define SE_GT_BASE_BIT  11
+// gametype visibility flags -- derived from bg_gametypelist[].hudToken
+// bit positions are sequential from SE_MODE_BASE_BIT, one per unique hudToken
+#define SE_MODE_BASE_BIT  11
 
 #define SHUD_CHECK_SHOW_EMPTY(element) ( \
     ((element) != NULL) && \
@@ -905,7 +891,7 @@ typedef struct
 		int shots;
 		int pickUps;
 		int drops;
-	} stats[WP_NUM_WEAPONS];
+	} stats[WIRED_WEAPON_BUFFER_SIZE];
 } customStats_t;
 
 #define SHUD_MAX_OBITUARIES_LINES 8
@@ -990,7 +976,7 @@ typedef struct
 	} powerupsCache;
 	struct
 	{
-		superhudTempAccEntry_t weapon[WP_NUM_WEAPONS];
+		superhudTempAccEntry_t weapon[WIRED_WEAPON_BUFFER_SIZE];
 	} tempAcc;
 	customStats_t customStats;
 	superhudAwardQueue_t awards;

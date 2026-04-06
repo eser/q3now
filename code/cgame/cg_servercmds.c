@@ -1065,7 +1065,7 @@ static void CG_ServerCommand( void ) {
 	}
 
 	if ( !strcmp( cmd, "cp" ) ) {
-		CG_CenterPrint( CG_Argv(1), CG_VIRTUAL_H * 0.30f, BIGCHAR_WIDTH );
+		CG_CenterPrint( CG_Argv(1), 144, BIGCHAR_WIDTH );
 		return;
 	}
 
