@@ -49,7 +49,7 @@ Con_UpdateTextMetrics
 
 Recompute point size and character width from the current
 smallchar_height.  Uses the unified Text_Measure API.
-All values are in real screen pixels (no 640x480 virtual conversion).
+All values are in real screen pixels.
 ================
 */
 static void Con_UpdateTextMetrics( void ) {
@@ -899,7 +899,7 @@ static void Con_DrawInput( void ) {
 		return;
 	}
 
-	y = con.vislines - ( smallchar_height * 2 );
+	y = con.vislines - ( smallchar_height * 3 );
 
 	cw = con_textNativeCharW;
 	vcw = con_textCharWidth;
@@ -1240,7 +1240,7 @@ static void Con_DrawSolidConsole( float frac ) {
 	con.vislines = lines;
 	rows = lines / smallchar_width - 1;	// rows of text to draw
 
-	y = lines - (smallchar_height * 3);
+	y = lines - (smallchar_height * 4);
 
 	row = con.display;
 

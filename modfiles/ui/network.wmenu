@@ -1,45 +1,156 @@
-// network.wmenu - Wired UI network settings panel
-// Ported from TA system.menu "Other" tab, Network section.
-// TA has Net Data Rate within system_menu.
-// Also includes Auto Download from TA options.menu.
+// network.wmenu - QL-style network options
 
 #include "ui/wmenumacros.h"
 
 menuDef {
 	name "network"
-	// Compact centered panel
-	rect 0.291 0.250 0.417 0.375
+	rect 0.160 0.180 0.680 0.640
 	fullScreen 0
 	visible 1
 	style 1
-	backcolor 0.08 0.08 0.12 0.92
-	focuscolor 1 0.75 0 0.15
+	backcolor 0.08 0.08 0.12 0.95
 
 	WFULLSCREEN_BACKGROUND
 
-	onESC { close }
+	onESC { close ; open "options" }
 
-	WLABEL(0.000, 0.044, 1.000, 0.089, "Network", 24, 1)
-	WSEPARATOR(0.042, 0.156, 0.917)
+	itemDef {
+		rect 0.000 0.000 1.000 1.000
+		style 1
+		border 1
+		bordercolor 0.45 0.45 0.50 0.6
+		backcolor 0.06 0.06 0.09 0.75
+		visible 1
+		decoration
+	}
 
-	// TA: Net Data Rate at rect 99 327 256 20 (within system Other)
+	itemDef {
+		rect 0.020 0.020 0.960 0.100
+		type 0
+		style 1
+		text "NETWORK"
+		font "sansman" 24
+		textalign 1
+		textoffset 0.000 0.026
+		forecolor WCOLOR_ACCENT
+		backcolor 0.11 0.11 0.16 0.98
+		border 1
+		bordercolor 0.25 0.25 0.30 0.95
+		visible 1
+		decoration
+	}
+
+	// Left box
+	itemDef {
+		rect 0.040 0.160 0.440 0.610
+		style 1
+		border 1
+		bordercolor 0.55 0.55 0.60 0.5
+		backcolor 0.22 0.22 0.22 0.45
+		visible 1
+		decoration
+	}
+	itemDef {
+		rect 0.045 0.165 0.430 0.045
+		type 0
+		style 1
+		text "Connection"
+		font "sansman" 14
+		textoffset 0.010 0.012
+		forecolor WCOLOR_ACCENT
+		backcolor 0.12 0.12 0.12 1
+		visible 1
+		decoration
+	}
+
 	itemDef {
 		type 12
 		text "Net Data Rate:"
-		rect 0.042 0.222 0.917 0.089
-		font "oxanium" 14
+		rect 0.060 0.240 0.400 0.060
+		font "oxanium" 13
 		forecolor WCOLOR_TEXT
 		cvar "rate"
 		cvarFloatList { "<=28.8k" 2500 "33.6k" 3000 "56k" 4000 "ISDN" 5000 "LAN/Cable/xDSL" 25000 }
 		visible 1
-		action { uiScript update "ui_setRate" }
-		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
-		mouseExit { setcolor forecolor WCOLOR_TEXT }
 	}
 
-	// TA options.menu: Auto Download (cg_allowDownload)
-	WYESNO(0.042, 0.333, 0.917, 0.089, "Auto Download:", 14, "cl_allowDownload")
+	WYESNO(0.060, 0.315, 0.400, 0.060, "Auto Download:", 13, "cl_allowDownload")
+	WYESNO(0.060, 0.390, 0.400, 0.060, "Predict Items:", 13, "cg_predictItems")
+	WYESNO(0.060, 0.465, 0.400, 0.060, "Delag Hitscan:", 13, "g_delagHitscan")
 
-	WSEPARATOR(0.042, 0.467, 0.917)
-	WBUTTON(0.292, 0.533, 0.417, 0.089, "Back", 14, close)
+	itemDef {
+		type 0
+		text "Higher rate helps on fast links"
+		rect 0.060 0.545 0.400 0.040
+		font "oxanium" 10
+		forecolor WCOLOR_TEXT_DIM
+		visible 1
+		decoration
+	}
+
+	// Right box
+	itemDef {
+		rect 0.520 0.160 0.440 0.610
+		style 1
+		border 1
+		bordercolor 0.55 0.55 0.60 0.5
+		backcolor 0.22 0.22 0.22 0.45
+		visible 1
+		decoration
+	}
+	itemDef {
+		rect 0.525 0.165 0.430 0.045
+		type 0
+		style 1
+		text "Packets"
+		font "sansman" 14
+		textoffset 0.010 0.012
+		forecolor WCOLOR_ACCENT
+		backcolor 0.12 0.12 0.12 1
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		type 10
+		text "cl_maxpackets:"
+		rect 0.540 0.240 0.400 0.060
+		font "oxanium" 13
+		forecolor WCOLOR_TEXT
+		cvarFloat "cl_maxpackets" 125 30 125
+		visible 1
+	}
+	itemDef {
+		type 10
+		text "snaps:"
+		rect 0.540 0.315 0.400 0.060
+		font "oxanium" 13
+		forecolor WCOLOR_TEXT
+		cvarFloat "snaps" 40 20 125
+		visible 1
+	}
+
+	itemDef {
+		type 12
+		text "Network Graph:"
+		rect 0.540 0.390 0.400 0.060
+		font "oxanium" 13
+		forecolor WCOLOR_TEXT
+		cvar "cg_lagometer"
+		cvarFloatList { "Off" 0 "On" 1 }
+		visible 1
+	}
+
+	itemDef {
+		type 0
+		text "Tune packets/snaps for your server tick"
+		rect 0.540 0.545 0.400 0.040
+		font "oxanium" 10
+		forecolor WCOLOR_TEXT_DIM
+		visible 1
+		decoration
+	}
+
+	WSEPARATOR(0.040, 0.790, 0.920)
+	WBUTTON(0.390, 0.840, 0.220, 0.080, "Back", 14, close ; open "options")
 }

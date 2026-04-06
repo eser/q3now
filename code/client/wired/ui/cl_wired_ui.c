@@ -236,6 +236,200 @@ static int       wired_lastClickTime = 0;
 static int       wired_lastClickRow = -1;
 static float     wired_lastClickFeeder = 0;
 
+typedef struct {
+	int count;
+	qboolean numericValues;
+	const char *labels[WIRED_MAX_MULTI_CHOICES];
+	const char *values[WIRED_MAX_MULTI_CHOICES];
+	char numericBuf[WIRED_MAX_MULTI_CHOICES][32];
+} wiredMultiOptions_t;
+
+static qboolean        wired_multiDropdownOpen = qfalse;
+static wiredItemDef_t *wired_multiDropdownItem = NULL;
+static int             wired_multiDropdownHover = -1;
+static int             wired_multiDropdownScroll = 0;
+
+static void WiredUI_CloseMultiDropdown( void ) {
+	wired_multiDropdownOpen = qfalse;
+	wired_multiDropdownItem = NULL;
+	wired_multiDropdownHover = -1;
+	wired_multiDropdownScroll = 0;
+}
+
+static void WiredUI_GetMultiOptions( wiredItemDef_t *item, wiredMultiOptions_t *out ) {
+	int i;
+	Com_Memset( out, 0, sizeof( *out ) );
+	if ( !item ) return;
+
+	if ( item->populateCallback[0] ) {
+		wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( item->populateCallback );
+		if ( pop ) {
+			wuiPopulateResult_t res;
+			Com_Memset( &res, 0, sizeof( res ) );
+			pop( &res );
+			if ( ( res.state == WUI_POPULATE_SUCCESS || res.state == WUI_POPULATE_PARTIAL ) &&
+			     res.count > 0 && res.names && res.values ) {
+				out->count = res.count > WIRED_MAX_MULTI_CHOICES ? WIRED_MAX_MULTI_CHOICES : res.count;
+				for ( i = 0; i < out->count; i++ ) {
+					out->labels[i] = res.names[i] ? res.names[i] : "";
+					out->values[i] = res.values[i] ? res.values[i] : "";
+				}
+			}
+		}
+		return;
+	}
+
+	if ( !item->multiData ) return;
+	out->count = item->multiData->count > WIRED_MAX_MULTI_CHOICES ? WIRED_MAX_MULTI_CHOICES : item->multiData->count;
+	out->numericValues = !item->multiData->isStringList;
+	for ( i = 0; i < out->count; i++ ) {
+		out->labels[i] = item->multiData->labels[i];
+		if ( item->multiData->isStringList ) {
+			out->values[i] = item->multiData->strValues[i];
+		} else {
+			Com_sprintf( out->numericBuf[i], sizeof( out->numericBuf[i] ), "%g", item->multiData->floatValues[i] );
+			out->values[i] = out->numericBuf[i];
+		}
+	}
+}
+
+static int WiredUI_FindMultiOptionIndex( wiredItemDef_t *item, const wiredMultiOptions_t *opts, const char *currentValue ) {
+	int i;
+	if ( !opts || opts->count <= 0 || !currentValue ) return -1;
+	for ( i = 0; i < opts->count; i++ ) {
+		if ( opts->numericValues ) {
+			if ( fabs( atof( currentValue ) - atof( opts->values[i] ) ) < 0.0001 ) {
+				return i;
+			}
+		} else {
+			if ( !Q_stricmp( currentValue, opts->values[i] ) ) {
+				return i;
+			}
+		}
+	}
+	return -1;
+}
+
+static void WiredUI_SetMultiOptionByIndex( wiredItemDef_t *item, const wiredMultiOptions_t *opts, int index ) {
+	if ( !item || !opts || index < 0 || index >= opts->count ) return;
+	if ( opts->values[index] ) {
+		Cvar_Set( item->cvar, opts->values[index] );
+	}
+}
+
+static qboolean WiredUI_GetMultiDropdownRect( wiredMenuDef_t *menu, wiredItemDef_t *item,
+	int optionCount, float *x, float *y, float *w, float *h, float *rowH, int *visibleRows ) {
+	float rx, ry, rw, rh;
+	int rows;
+	if ( !menu || !item || optionCount <= 0 ) return qfalse;
+
+	rw = item->resolvedRect.w;
+	rh = item->resolvedRect.h;
+	if ( rh < 18.0f ) rh = 18.0f;
+
+	rows = optionCount;
+	if ( rows > 10 ) rows = 10;
+	if ( rows < 1 ) rows = 1;
+
+	rx = item->resolvedRect.x;
+	ry = item->resolvedRect.y - menu->scrollOffset + item->resolvedRect.h + 2.0f;
+
+	if ( ry + rh * rows > (float)cls.glconfig.vidHeight - 4.0f ) {
+		ry = item->resolvedRect.y - menu->scrollOffset - ( rh * rows ) - 2.0f;
+	}
+	if ( ry < 4.0f ) ry = 4.0f;
+	if ( rx + rw > (float)cls.glconfig.vidWidth - 4.0f ) rx = (float)cls.glconfig.vidWidth - rw - 4.0f;
+	if ( rx < 4.0f ) rx = 4.0f;
+
+	*x = rx;
+	*y = ry;
+	*w = rw;
+	*h = rh * rows;
+	*rowH = rh;
+	*visibleRows = rows;
+	return qtrue;
+}
+
+static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
+	wiredMultiOptions_t opts;
+	float ddX, ddY, ddW, ddH, rowH;
+	int visibleRows;
+	int i;
+	char currentValue[256];
+	int selectedIndex;
+	vec4_t panelColor = { 0.06f, 0.06f, 0.1f, 0.96f };
+	vec4_t borderColor = { 0.45f, 0.45f, 0.52f, 0.95f };
+	vec4_t hoverColor = { 0.85f, 0.55f, 0.1f, 0.20f };
+	vec4_t selectedColor = { 0.85f, 0.55f, 0.1f, 0.32f };
+
+	if ( !wired_multiDropdownOpen || !menu || !wired_multiDropdownItem ) return;
+
+	WiredUI_GetMultiOptions( wired_multiDropdownItem, &opts );
+	if ( opts.count <= 0 ) {
+		WiredUI_CloseMultiDropdown();
+		return;
+	}
+
+	if ( !WiredUI_GetMultiDropdownRect( menu, wired_multiDropdownItem, opts.count,
+		&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
+		WiredUI_CloseMultiDropdown();
+		return;
+	}
+
+	Cvar_VariableStringBuffer( wired_multiDropdownItem->cvar, currentValue, sizeof( currentValue ) );
+	selectedIndex = WiredUI_FindMultiOptionIndex( wired_multiDropdownItem, &opts, currentValue );
+
+	{
+		int maxScroll = opts.count - visibleRows;
+		if ( maxScroll < 0 ) maxScroll = 0;
+		if ( wired_multiDropdownScroll > maxScroll ) wired_multiDropdownScroll = maxScroll;
+		if ( wired_multiDropdownScroll < 0 ) wired_multiDropdownScroll = 0;
+	}
+
+	WUI_FillRect( ddX, ddY, ddW, ddH, panelColor );
+	WUI_FillRect( ddX, ddY, ddW, 1.0f, borderColor );
+	WUI_FillRect( ddX, ddY + ddH - 1.0f, ddW, 1.0f, borderColor );
+	WUI_FillRect( ddX, ddY, 1.0f, ddH, borderColor );
+	WUI_FillRect( ddX + ddW - 1.0f, ddY, 1.0f, ddH, borderColor );
+
+	for ( i = 0; i < visibleRows; i++ ) {
+		int idx = wired_multiDropdownScroll + i;
+		float rowY = ddY + rowH * i;
+		if ( idx >= opts.count ) break;
+
+		if ( idx == selectedIndex ) {
+			WUI_FillRect( ddX + 1.0f, rowY, ddW - 2.0f, rowH, selectedColor );
+		}
+		if ( idx == wired_multiDropdownHover ) {
+			WUI_FillRect( ddX + 1.0f, rowY, ddW - 2.0f, rowH, hoverColor );
+		}
+
+		if ( opts.labels[idx] && opts.labels[idx][0] ) {
+			float charSize = wired_multiDropdownItem->fontPointSize > 0.0f
+				? wired_multiDropdownItem->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+			float textY = rowY + ( rowH - charSize ) * 0.5f;
+			Text_Draw( opts.labels[idx], ddX + 10.0f, textY, FONT_UI, charSize,
+				wired_multiDropdownItem->forecolor, TEXT_ALIGN_LEFT, 0 );
+		}
+	}
+
+	if ( opts.count > visibleRows ) {
+		float trackW = 4.0f;
+		float trackX = ddX + ddW - trackW - 2.0f;
+		float trackY = ddY + 2.0f;
+		float trackH = ddH - 4.0f;
+		float thumbH = trackH * ( (float)visibleRows / (float)opts.count );
+		float thumbY;
+		vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.35f };
+		vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.6f };
+		if ( thumbH < 16.0f ) thumbH = 16.0f;
+		thumbY = trackY + ( trackH - thumbH ) *
+			( (float)wired_multiDropdownScroll / (float)( opts.count - visibleRows ) );
+		WUI_FillRect( trackX, trackY, trackW, trackH, trackColor );
+		WUI_FillRect( trackX, thumbY, trackW, thumbH, thumbColor );
+	}
+}
+
 // ── symbol registration ───────────────────────────────────────────────
 
 void WiredUI_RegisterSymbol( const char *name, wiredSymbolCallback_t callback, void *userData ) {
@@ -1384,6 +1578,7 @@ void WiredUI_Refresh( int realtime ) {
 				? ( itemH - charSize ) * 0.5f : item->textaligny;
 			float x = itemX + item->textalignx;
 			float y = itemY + textVCenter;
+			int drawAlign = TEXT_ALIGN_LEFT;
 			char truncBuf[256];
 			const char *displayText;
 			const char *sourceText;
@@ -1433,16 +1628,15 @@ void WiredUI_Refresh( int realtime ) {
 					displayText = sourceText;
 				}
 
-				/* adjust for text alignment within rect */
 				if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
-					float textWidth = strlen( displayText ) * charSize;
-					x = itemX + ( itemW - textWidth ) * 0.5f;
+					x = itemX + itemW * 0.5f;
+					drawAlign = TEXT_ALIGN_CENTER;
 				} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
-					float textWidth = strlen( displayText ) * charSize;
-					x = itemX + itemW - textWidth;
+					x = itemX + itemW;
+					drawAlign = TEXT_ALIGN_RIGHT;
 				}
 
-				Text_Draw( displayText, (float)x, (float)y, FONT_UI, charSize, drawColor, TEXT_ALIGN_LEFT, 0 );
+				Text_Draw( displayText, (float)x, (float)y, FONT_UI, charSize, drawColor, drawAlign, 0 );
 			}
 		}
 	}
@@ -1491,11 +1685,15 @@ void WiredUI_Refresh( int realtime ) {
 					? ( fh - charSize ) * 0.5f : focus->textaligny;
 				float x = fx + focus->textalignx;
 				float y = fy + focusVCenter;
+				int focusAlign = TEXT_ALIGN_LEFT;
 				if ( focus->textalign == ITEM_ALIGN_CENTER && fw > 0 ) {
-					float textWidth = strlen( focus->text ) * charSize;
-					x = fx + ( fw - textWidth ) * 0.5f;
+					x = fx + fw * 0.5f;
+					focusAlign = TEXT_ALIGN_CENTER;
+				} else if ( focus->textalign == ITEM_ALIGN_RIGHT && fw > 0 ) {
+					x = fx + fw;
+					focusAlign = TEXT_ALIGN_RIGHT;
 				}
-				Text_Draw( focus->text, (float)x, (float)y, FONT_UI, charSize, focus->forecolor, TEXT_ALIGN_LEFT, 0 );
+				Text_Draw( focus->text, (float)x, (float)y, FONT_UI, charSize, focus->forecolor, focusAlign, 0 );
 			}
 		}
 	}
@@ -1521,23 +1719,6 @@ skip_focus:
 
 			WUI_FillRect( tx, ty, tw, th, tipBg );
 			Text_Draw( focus->tooltip, (float)(tx + 4), (float)(ty + 4), FONT_UI, 8.0f, tipFg, TEXT_ALIGN_LEFT, 0 );
-		}
-	}
-
-	// draw cursor centered on the logical point
-	if ( Key_GetCatcher() & KEYCATCH_UI ) {
-		vec4_t cursorTint = { 0.85f, 0.55f, 0.1f, 1.0f }; // amber accent
-		if ( wired_cursorShader ) {
-			re.SetColor( cursorTint );
-			WUI_DrawPic( wired_cursorX - 16, wired_cursorY - 16, 32, 32, wired_cursorShader );
-			re.SetColor( NULL );
-		} else {
-			// fallback: simple crosshair cursor if shader not found
-			vec4_t cursorColor = { 0.85f, 0.55f, 0.1f, 1.0f };
-			re.SetColor( cursorColor );
-			WUI_FillRect( wired_cursorX - 1, wired_cursorY - 8, 2, 16, cursorColor );
-			WUI_FillRect( wired_cursorX - 8, wired_cursorY - 1, 16, 2, cursorColor );
-			re.SetColor( NULL );
 		}
 	}
 
@@ -1582,6 +1763,23 @@ skip_focus:
 	// Layer 5: visual layout debug overlay
 	WiredUI_DrawDebugOverlay( menu );
 
+	WiredUI_DrawMultiDropdown( menu );
+
+	if ( Key_GetCatcher() & KEYCATCH_UI ) {
+		vec4_t cursorTint = { 0.85f, 0.55f, 0.1f, 1.0f };
+		if ( wired_cursorShader ) {
+			re.SetColor( cursorTint );
+			WUI_DrawPic( wired_cursorX - 16, wired_cursorY - 16, 32, 32, wired_cursorShader );
+			re.SetColor( NULL );
+		} else {
+			vec4_t cursorColor = { 0.85f, 0.55f, 0.1f, 1.0f };
+			re.SetColor( cursorColor );
+			WUI_FillRect( wired_cursorX - 1, wired_cursorY - 8, 2, 16, cursorColor );
+			WUI_FillRect( wired_cursorX - 8, wired_cursorY - 1, 16, 2, cursorColor );
+			re.SetColor( NULL );
+		}
+	}
+
 	// TODO Phase 2: full rendering with borders, models, etc.
 }
 
@@ -1612,18 +1810,26 @@ typedef struct {
 
 // ── script handlers ───────────────────────────────────────────────────
 
+static void WiredScript_Show_Callback( wiredItemDef_t *target, void *data ) {
+	(void)data;
+	target->visible = qtrue;
+}
+
+static void WiredScript_Hide_Callback( wiredItemDef_t *target, void *data ) {
+	(void)data;
+	target->visible = qfalse;
+}
+
 static void WiredScript_Show( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	wiredItemDef_t *target;
+	(void)item;
 	if ( numArgs < 1 ) return;
-	target = WiredUI_FindItemByName( menu, args[0] );
-	if ( target ) target->visible = qtrue;
+	WiredUI_ForEachItemByNameOrGroup( menu, args[0], WiredScript_Show_Callback, NULL );
 }
 
 static void WiredScript_Hide( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	wiredItemDef_t *target;
+	(void)item;
 	if ( numArgs < 1 ) return;
-	target = WiredUI_FindItemByName( menu, args[0] );
-	if ( target ) target->visible = qfalse;
+	WiredUI_ForEachItemByNameOrGroup( menu, args[0], WiredScript_Hide_Callback, NULL );
 }
 
 static void WiredScript_Open( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -2528,6 +2734,7 @@ void WiredUI_PushMenu( const char *name ) {
 	wired_focusFromMouse = qfalse;
 	wired_tooltipStartTime = 0;
 	wired_tooltipFocusItem = -1;
+	WiredUI_CloseMultiDropdown();
 	if ( wired_sfxMenuOpen ) S_StartLocalSound( wired_sfxMenuOpen, CHAN_LOCAL_SOUND );
 
 	// reset fade animation for the new menu
@@ -2583,6 +2790,7 @@ void WiredUI_PopMenu( void ) {
 	wired_focusFromMouse = qfalse;
 	wired_tooltipStartTime = 0;
 	wired_tooltipFocusItem = -1;
+	WiredUI_CloseMultiDropdown();
 	if ( wired_sfxMenuClose ) S_StartLocalSound( wired_sfxMenuClose, CHAN_LOCAL_SOUND );
 
 	if ( wired_menuStackDepth <= 0 ) {
@@ -2614,6 +2822,7 @@ void WiredUI_CloseAllMenus( void ) {
 	wired_tooltipStartTime = 0;
 	wired_tooltipFocusItem = -1;
 	wired_activeMenu = UIMENU_NONE;
+	WiredUI_CloseMultiDropdown();
 	wired_waitingForKey = qfalse;
 	wired_bindItem = NULL;
 	wired_sliderDragging = qfalse;
@@ -2746,6 +2955,103 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 	int i;
 
 	if ( !wired_initialized ) return;
+
+	menu = WiredUI_GetActiveMenu();
+
+	if ( wired_multiDropdownOpen && down ) {
+		wiredMultiOptions_t opts;
+		float ddX, ddY, ddW, ddH, rowH;
+		int visibleRows;
+		if ( !menu || !wired_multiDropdownItem ) {
+			WiredUI_CloseMultiDropdown();
+			return;
+		}
+
+		WiredUI_GetMultiOptions( wired_multiDropdownItem, &opts );
+		if ( opts.count <= 0 ) {
+			WiredUI_CloseMultiDropdown();
+			return;
+		}
+		if ( !WiredUI_GetMultiDropdownRect( menu, wired_multiDropdownItem, opts.count,
+			&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
+			WiredUI_CloseMultiDropdown();
+			return;
+		}
+
+		if ( key == K_ESCAPE ) {
+			WiredUI_CloseMultiDropdown();
+			return;
+		}
+
+		if ( key == K_MWHEELUP ) {
+			if ( wired_multiDropdownScroll > 0 ) wired_multiDropdownScroll--;
+			return;
+		}
+		if ( key == K_MWHEELDOWN ) {
+			int maxScroll = opts.count - visibleRows;
+			if ( maxScroll < 0 ) maxScroll = 0;
+			if ( wired_multiDropdownScroll < maxScroll ) wired_multiDropdownScroll++;
+			return;
+		}
+
+		if ( key == K_UPARROW || key == K_KP_UPARROW ) {
+			if ( wired_multiDropdownHover < 0 ) wired_multiDropdownHover = 0;
+			wired_multiDropdownHover = ( wired_multiDropdownHover - 1 + opts.count ) % opts.count;
+			if ( wired_multiDropdownHover < wired_multiDropdownScroll ) {
+				wired_multiDropdownScroll = wired_multiDropdownHover;
+			}
+			return;
+		}
+		if ( key == K_DOWNARROW || key == K_KP_DOWNARROW ) {
+			if ( wired_multiDropdownHover < 0 ) wired_multiDropdownHover = 0;
+			wired_multiDropdownHover = ( wired_multiDropdownHover + 1 ) % opts.count;
+			if ( wired_multiDropdownHover >= wired_multiDropdownScroll + visibleRows ) {
+				wired_multiDropdownScroll = wired_multiDropdownHover - visibleRows + 1;
+			}
+			return;
+		}
+
+		if ( key == K_ENTER || key == K_KP_ENTER ) {
+			if ( wired_multiDropdownHover >= 0 && wired_multiDropdownHover < opts.count ) {
+				WiredUI_SetMultiOptionByIndex( wired_multiDropdownItem, &opts, wired_multiDropdownHover );
+				if ( wired_multiDropdownItem->action[0] ) {
+					WiredUI_RunScript( menu, wired_multiDropdownItem, wired_multiDropdownItem->action );
+				}
+			}
+			WiredUI_CloseMultiDropdown();
+			return;
+		}
+
+		if ( key == K_MOUSE1 ) {
+			wiredRect_t srcRect;
+			srcRect.x = wired_multiDropdownItem->resolvedRect.x;
+			srcRect.y = wired_multiDropdownItem->resolvedRect.y - menu->scrollOffset;
+			srcRect.w = wired_multiDropdownItem->resolvedRect.w;
+			srcRect.h = wired_multiDropdownItem->resolvedRect.h;
+
+			if ( wired_cursorX >= ddX && wired_cursorX < ddX + ddW &&
+			     wired_cursorY >= ddY && wired_cursorY < ddY + ddH ) {
+				int row = (int)( ( wired_cursorY - ddY ) / rowH );
+				int idx = wired_multiDropdownScroll + row;
+				if ( idx >= 0 && idx < opts.count ) {
+					WiredUI_SetMultiOptionByIndex( wired_multiDropdownItem, &opts, idx );
+					if ( wired_multiDropdownItem->action[0] ) {
+						WiredUI_RunScript( menu, wired_multiDropdownItem, wired_multiDropdownItem->action );
+					}
+				}
+				WiredUI_CloseMultiDropdown();
+				return;
+			}
+
+			if ( WiredUI_PointInRect( wired_cursorX, wired_cursorY, &srcRect ) ) {
+				WiredUI_CloseMultiDropdown();
+				return;
+			}
+
+			WiredUI_CloseMultiDropdown();
+			return;
+		}
+	}
 
 	// text field editing mode — intercepts all keys while editing
 	if ( wired_editingField && wired_editItem && down ) {
@@ -2906,7 +3212,6 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		return;
 	}
 
-	menu = WiredUI_GetActiveMenu();
 	if ( !menu ) return;
 
 	if ( wired_focusItem >= 0 && wired_focusItem < menu->itemCount ) {
@@ -2962,6 +3267,8 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_MOUSE2:
 		case K_ENTER:
 		case K_KP_ENTER:
+			{
+				qboolean openedDropdown = qfalse;
 			if ( !focusedItem ) {
 				break;
 			}
@@ -3023,82 +3330,35 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				char cvarBuf[256];
 				Cvar_VariableStringBuffer( focusedItem->cvar, cvarBuf, sizeof( cvarBuf ) );
 
-				switch ( focusedItem->type ) {
+					switch ( focusedItem->type ) {
 					case ITEM_TYPE_YESNO:
 						// toggle 0 <-> 1
 						Cvar_Set( focusedItem->cvar, atof( cvarBuf ) != 0 ? "0" : "1" );
 						break;
 
 					case ITEM_TYPE_MULTI:
-						/* Dynamic MULTI cycle: invoke the populate callback
-						 * to fetch the option list, then cycle. Empty/error
-						 * states map clicks to recovery actions: empty →
-						 * retry (no-op, list will refresh on next render);
-						 * error → set the cvar to "" so default device is
-						 * used on next snd_restart. */
-						if ( focusedItem->populateCallback[0] ) {
-							wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( focusedItem->populateCallback );
-							if ( pop ) {
-								wuiPopulateResult_t res;
-								int dir = ( key == K_MOUSE2 ) ? -1 : 1;
-								int cur = -1, next, j;
-								memset( &res, 0, sizeof( res ) );
-								pop( &res );
-								if ( res.state == WUI_POPULATE_ERROR ) {
-									/* Error → click acts as "Use default" */
-									Cvar_Set( focusedItem->cvar, "" );
-								} else if ( res.state == WUI_POPULATE_EMPTY ) {
-									/* Empty → click acts as "Retry": clear
-									 * the cvar so the next snd_restart picks
-									 * the system default; the list refreshes
-									 * automatically on the next render. */
-									Cvar_Set( focusedItem->cvar, "" );
-								} else if ( ( res.state == WUI_POPULATE_SUCCESS ||
-								              res.state == WUI_POPULATE_PARTIAL ) &&
-								            res.count > 0 && res.values && res.names ) {
-									for ( j = 0; j < res.count; j++ ) {
-										if ( res.values[j] &&
-										     !Q_stricmp( cvarBuf, res.values[j] ) ) {
-											cur = j; break;
-										}
-									}
-									next = ( cur + dir + res.count ) % res.count;
-									if ( next < 0 ) next += res.count;
-									if ( res.values[next] ) {
-										Cvar_Set( focusedItem->cvar, res.values[next] );
-									}
-								}
-								if ( focusedItem->action[0] ) {
-									WiredUI_RunScript( menu, focusedItem, focusedItem->action );
-								}
+						if ( key == K_MOUSE2 ) {
+							wiredMultiOptions_t opts;
+							int cur, next;
+							WiredUI_GetMultiOptions( focusedItem, &opts );
+							if ( opts.count > 0 ) {
+								cur = WiredUI_FindMultiOptionIndex( focusedItem, &opts, cvarBuf );
+								next = ( cur - 1 + opts.count ) % opts.count;
+								WiredUI_SetMultiOptionByIndex( focusedItem, &opts, next );
 							}
-						}
-						else if ( focusedItem->multiData ) {
-							int cur = -1, next, j;
-							int dir = ( key == K_MOUSE2 ) ? -1 : 1;
-							// find current value index
-							for ( j = 0; j < focusedItem->multiData->count; j++ ) {
-								if ( focusedItem->multiData->isStringList ) {
-									if ( !Q_stricmp( cvarBuf, focusedItem->multiData->strValues[j] ) ) {
-										cur = j; break;
-									}
-								} else {
-									if ( focusedItem->multiData->floatValues[j] == atof( cvarBuf ) ) {
-										cur = j; break;
-									}
-								}
-							}
-							// cycle to next
-							next = ( cur + dir + focusedItem->multiData->count ) % focusedItem->multiData->count;
-							if ( focusedItem->multiData->isStringList ) {
-								Cvar_Set( focusedItem->cvar, focusedItem->multiData->strValues[next] );
-							} else {
-								Cvar_Set( focusedItem->cvar,
-									va( "%g", focusedItem->multiData->floatValues[next] ) );
-							}
-							// fire action script on value change
-							if ( focusedItem->action[0] ) {
-								WiredUI_RunScript( menu, focusedItem, focusedItem->action );
+						} else {
+							wiredMultiOptions_t opts;
+							char curBuf[256];
+							WiredUI_GetMultiOptions( focusedItem, &opts );
+							if ( opts.count > 0 ) {
+								Cvar_VariableStringBuffer( focusedItem->cvar, curBuf, sizeof( curBuf ) );
+								wired_multiDropdownOpen = qtrue;
+								wired_multiDropdownItem = focusedItem;
+								wired_multiDropdownHover = WiredUI_FindMultiOptionIndex( focusedItem, &opts, curBuf );
+								if ( wired_multiDropdownHover < 0 ) wired_multiDropdownHover = 0;
+								wired_multiDropdownScroll = wired_multiDropdownHover - 4;
+								if ( wired_multiDropdownScroll < 0 ) wired_multiDropdownScroll = 0;
+								openedDropdown = qtrue;
 							}
 						}
 						break;
@@ -3138,10 +3398,11 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			}
 
 			// always run action script if present
-			if ( focusedItem->action[0] ) {
+			if ( !openedDropdown && focusedItem->action[0] ) {
 				WiredUI_RunScript( menu, focusedItem, focusedItem->action );
 			}
 			break;
+			}
 
 		case K_MWHEELUP:
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX ) {
@@ -3206,52 +3467,20 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					if ( val > focusedItem->sliderData.maxVal ) val = focusedItem->sliderData.maxVal;
 					Cvar_Set( focusedItem->cvar, va( "%g", val ) );
 				}
-				else if ( focusedItem->type == ITEM_TYPE_MULTI && focusedItem->populateCallback[0] ) {
-					/* Dynamic MULTI: arrow-cycle via populate callback. */
-					wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( focusedItem->populateCallback );
-					if ( pop ) {
-						wuiPopulateResult_t res;
-						int cur = -1, next, j;
-						memset( &res, 0, sizeof( res ) );
-						pop( &res );
-						if ( ( res.state == WUI_POPULATE_SUCCESS ||
-						       res.state == WUI_POPULATE_PARTIAL ) &&
-						     res.count > 0 && res.values && res.names ) {
-							for ( j = 0; j < res.count; j++ ) {
-								if ( res.values[j] &&
-								     !Q_stricmp( cvarBuf, res.values[j] ) ) {
-									cur = j; break;
-								}
-							}
-							next = ( cur + dir + res.count ) % res.count;
-							if ( next < 0 ) next += res.count;
-							if ( res.values[next] ) {
-								Cvar_Set( focusedItem->cvar, res.values[next] );
-							}
-							if ( focusedItem->action[0] ) {
-								WiredUI_RunScript( menu, focusedItem, focusedItem->action );
-							}
+				else if ( focusedItem->type == ITEM_TYPE_MULTI ) {
+					wiredMultiOptions_t opts;
+					int cur, next;
+					if ( wired_multiDropdownOpen ) {
+						break;
+					}
+					WiredUI_GetMultiOptions( focusedItem, &opts );
+					if ( opts.count > 0 ) {
+						cur = WiredUI_FindMultiOptionIndex( focusedItem, &opts, cvarBuf );
+						next = ( cur + dir + opts.count ) % opts.count;
+						WiredUI_SetMultiOptionByIndex( focusedItem, &opts, next );
+						if ( focusedItem->action[0] ) {
+							WiredUI_RunScript( menu, focusedItem, focusedItem->action );
 						}
-					}
-				}
-				else if ( focusedItem->type == ITEM_TYPE_MULTI && focusedItem->multiData ) {
-					int cur = -1, next, j;
-					for ( j = 0; j < focusedItem->multiData->count; j++ ) {
-						if ( focusedItem->multiData->isStringList ) {
-							if ( !Q_stricmp( cvarBuf, focusedItem->multiData->strValues[j] ) ) { cur = j; break; }
-						} else {
-							if ( focusedItem->multiData->floatValues[j] == atof( cvarBuf ) ) { cur = j; break; }
-						}
-					}
-					next = ( cur + dir + focusedItem->multiData->count ) % focusedItem->multiData->count;
-					if ( focusedItem->multiData->isStringList ) {
-						Cvar_Set( focusedItem->cvar, focusedItem->multiData->strValues[next] );
-					} else {
-						Cvar_Set( focusedItem->cvar, va( "%g", focusedItem->multiData->floatValues[next] ) );
-					}
-					// fire action script on value change
-					if ( focusedItem->action[0] ) {
-						WiredUI_RunScript( menu, focusedItem, focusedItem->action );
 					}
 				}
 				else if ( focusedItem->type == ITEM_TYPE_YESNO ) {
@@ -3337,6 +3566,28 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 	menu = WiredUI_GetActiveMenu();
 	if ( !menu ) return;
 
+	if ( wired_multiDropdownOpen && wired_multiDropdownItem ) {
+		wiredMultiOptions_t opts;
+		float ddX, ddY, ddW, ddH, rowH;
+		int visibleRows;
+		WiredUI_GetMultiOptions( wired_multiDropdownItem, &opts );
+		if ( opts.count <= 0 ) {
+			WiredUI_CloseMultiDropdown();
+		} else if ( WiredUI_GetMultiDropdownRect( menu, wired_multiDropdownItem, opts.count,
+			&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
+			if ( wired_cursorX >= ddX && wired_cursorX < ddX + ddW &&
+			     wired_cursorY >= ddY && wired_cursorY < ddY + ddH ) {
+				int row = (int)( ( wired_cursorY - ddY ) / rowH );
+				int idx = wired_multiDropdownScroll + row;
+				if ( idx >= 0 && idx < opts.count ) {
+					wired_multiDropdownHover = idx;
+				}
+			} else {
+				wired_multiDropdownHover = -1;
+			}
+		}
+	}
+
 	oldFocus = wired_focusItem;
 	newFocus = WiredUI_FindItemAtCursor( menu, wired_cursorX, wired_cursorY );
 
@@ -3387,6 +3638,9 @@ void WiredUI_SetActiveMenu( int menu ) {
 	}
 
 	wired_activeMenu = menu;
+	if ( menu == UIMENU_NONE ) {
+		WiredUI_CloseMultiDropdown();
+	}
 
 	if ( menu != UIMENU_NONE ) {
 		// activate UI key catcher so the engine routes input and draw calls to us

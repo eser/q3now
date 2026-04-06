@@ -571,6 +571,7 @@ void	SCR_DrawSmallString( int x, int y, const char *s, int len );
 //
 void	CL_DrawLoadingScreen( void );
 void	CL_LoadingScreenFinished( void );
+void	CL_ResetLoadingScreenState( void );
 
 //
 // cl_cin.c

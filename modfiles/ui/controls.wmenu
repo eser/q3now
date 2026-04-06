@@ -1,184 +1,228 @@
-// controls.wmenu - Wired UI controls panel
-// Ported from TA controls.menu (menu rect 186 0 443 426 -> menuW=443 menuH=426)
-// Full tabbed layout: Look, Move, Shoot, Misc, Orders, Chat
-// TA uses show/hide groups; we flatten all binds into sections.
+// controls.wmenu - QL ingame_controls style with tabbed groups and two-column boxes
 
 #include "ui/wmenumacros.h"
 
 menuDef {
 	name "controls"
-	// TA: rect 186 0 443 426 -> 186/640=0.291, 0/480=0, 443/640=0.692, 426/480=0.888
-	rect 0.291 0.000 0.692 0.888
+	rect 0.080 0.120 0.840 0.760
 	fullScreen 0
 	visible 1
 	style 1
-	backcolor 0.08 0.08 0.12 0.92
-	focuscolor 1 0.75 0 0.15
+	backcolor 0.08 0.08 0.12 0.95
 
 	WFULLSCREEN_BACKGROUND
 
-	onOpen { uiScript loadControls }
-	onClose { uiScript saveControls }
-	onESC { close }
+	onOpen {
+		hide move ; hide actions ; hide weapons ; hide chat ; hide mouse ; hide gamepad
+		show move
+		setitemcolor btnMoveTxt backcolor 0.8 0.8 0.8 1
+		setitemcolor btnMoveTxt forecolor 0.729 0.439 0.039 1
+		setitemcolor btnActionsTxt backcolor 0.133 0.133 0.133 1
+		setitemcolor btnActionsTxt forecolor 0.6 0.6 0.6 1
+		setitemcolor btnWeaponsTxt backcolor 0.133 0.133 0.133 1
+		setitemcolor btnWeaponsTxt forecolor 0.6 0.6 0.6 1
+		setitemcolor btnChatTxt backcolor 0.133 0.133 0.133 1
+		setitemcolor btnChatTxt forecolor 0.6 0.6 0.6 1
+		setitemcolor btnMouseTxt backcolor 0.133 0.133 0.133 1
+		setitemcolor btnMouseTxt forecolor 0.6 0.6 0.6 1
+		setitemcolor btnGamepadTxt backcolor 0.133 0.133 0.133 1
+		setitemcolor btnGamepadTxt forecolor 0.6 0.6 0.6 1
+	}
 
-	// TA: window panel
+	onESC { close ; open "options" }
+
 	itemDef {
-		name "window"
-		rect 0.000 0.005 1.000 0.995
+		rect 0.000 0.000 1.000 1.000
 		style 1
 		border 1
-		bordercolor 0.5 0.5 0.5 0.5
-		backcolor 0 0 0 0.25
+		bordercolor 0.45 0.45 0.50 0.6
+		backcolor 0.06 0.06 0.09 0.75
 		visible 1
 		decoration
 	}
 
-	WLABEL(0.000, 0.019, 1.000, 0.043, "Controls", 24, 1)
-	WSEPARATOR(0.033, 0.067, 0.933)
-
-	// ── LOOK ──
-	// TA: look items at rect 99 50..200 256 20 within 443x426 menu
-	WSUBWINDOW(0.033, 0.081, 0.933, 0.033, "Look")
-
-	// TA: Lookup rect 99 50 -> 50/426=0.117
-	WBIND(0.033, 0.117, 0.933, 0.047, "Lookup:", 13, "+lookup")
-	// TA: Look Down rect 99 80 -> 80/426=0.188
-	WBIND(0.033, 0.164, 0.933, 0.047, "Look Down:", 13, "+lookdown")
-	// TA: Mouse Look rect 99 110 -> 110/426=0.258
-	WBIND(0.033, 0.211, 0.933, 0.047, "Mouse Look:", 13, "+mlook")
-	// TA: Centerview rect 99 140 -> 140/426=0.329
-	WBIND(0.033, 0.258, 0.933, 0.047, "Centerview:", 13, "centerview")
-	// TA: ZoomView rect 99 170 -> 170/426=0.399
-	WBIND(0.033, 0.305, 0.933, 0.047, "Zoom:", 13, "+zoom")
-	// TA: Free Look rect 99 200 -> 200/426=0.469
-	WYESNO(0.033, 0.352, 0.933, 0.047, "Free Look:", 13, "cl_freelook")
-
-	// ── MOVE ──
-	WSUBWINDOW(0.033, 0.411, 0.933, 0.033, "Movement")
-
-	// TA: Always Run (yesno) rect 99 50
-	WYESNO(0.033, 0.447, 0.933, 0.047, "Always Run:", 13, "cl_run")
-	// TA: Run/Walk bind rect 99 75
-	WBIND(0.033, 0.494, 0.933, 0.047, "Run / Walk:", 13, "+speed")
-	// TA: Forward rect 99 100
-	WBIND(0.033, 0.541, 0.933, 0.047, "Forward:", 13, "+forward")
-	// TA: Backpedal rect 99 125
-	WBIND(0.033, 0.588, 0.933, 0.047, "Backpedal:", 13, "+back")
-	// TA: Move Left rect 99 150
-	WBIND(0.033, 0.635, 0.933, 0.047, "Move Left:", 13, "+moveleft")
-	// TA: Move Right rect 99 175
-	WBIND(0.033, 0.682, 0.933, 0.047, "Move Right:", 13, "+moveright")
-	// TA: Jump rect 99 200
-	WBIND(0.033, 0.729, 0.933, 0.047, "Jump:", 13, "+moveup")
-	// TA: Crouch rect 99 225
-	WBIND(0.033, 0.776, 0.933, 0.047, "Crouch:", 13, "+movedown")
-	// TA: Turn Left rect 99 250
-	WBIND(0.033, 0.823, 0.933, 0.047, "Turn Left:", 13, "+left")
-	// TA: Turn Right rect 99 275
-	WBIND(0.033, 0.870, 0.933, 0.047, "Turn Right:", 13, "+right")
-	// TA: Strafe rect 99 300
-	WBIND(0.033, 0.917, 0.933, 0.047, "Strafe:", 13, "+strafe")
-
-	// ── SHOOT ──
-	WSUBWINDOW(0.033, 0.976, 0.933, 0.033, "Weapons")
-
-	// TA: Attack rect 99 50
-	WBIND(0.033, 1.012, 0.933, 0.047, "Attack:", 13, "+attack")
-	// TA: Previous Weapon rect 99 70
-	WBIND(0.033, 1.059, 0.933, 0.047, "Previous Weapon:", 13, "weapprev")
-	// TA: Next Weapon rect 99 90
-	WBIND(0.033, 1.106, 0.933, 0.047, "Next Weapon:", 13, "weapnext")
-	// TA: Autoswitch (yesno) rect 99 110
-	WYESNO(0.033, 1.153, 0.933, 0.047, "Autoswitch:", 13, "cg_autoswitch")
-	// TA: Individual weapon binds
-	WBIND(0.033, 1.200, 0.933, 0.047, "Gauntlet:", 13, "weapon 1")
-	WBIND(0.033, 1.247, 0.933, 0.047, "Machinegun:", 13, "weapon 2")
-	WBIND(0.033, 1.294, 0.933, 0.047, "Shotgun:", 13, "weapon 3")
-	WBIND(0.033, 1.341, 0.933, 0.047, "Grenade Launcher:", 13, "weapon 4")
-	WBIND(0.033, 1.388, 0.933, 0.047, "Rocket Launcher:", 13, "weapon 5")
-	WBIND(0.033, 1.435, 0.933, 0.047, "Lightning Gun:", 13, "weapon 6")
-	WBIND(0.033, 1.482, 0.933, 0.047, "Railgun:", 13, "weapon 7")
-	WBIND(0.033, 1.529, 0.933, 0.047, "Plasma Gun:", 13, "weapon 8")
-	WBIND(0.033, 1.576, 0.933, 0.047, "BFG:", 13, "weapon 9")
-
-	// ── MISC ──
-	WSUBWINDOW(0.033, 1.635, 0.933, 0.033, "Miscellaneous")
-
-	// TA: Show Scores rect 99 50
-	WBIND(0.033, 1.671, 0.933, 0.047, "Show Scores:", 13, "+scores")
-	// TA: Scroll Scores Up rect 99 80
-	WBIND(0.033, 1.718, 0.933, 0.047, "Scroll Scores Up:", 13, "scoresUp")
-	// TA: Scroll Scores Down rect 99 110
-	WBIND(0.033, 1.765, 0.933, 0.047, "Scroll Scores Down:", 13, "scoresDown")
-	// TA: Use Item rect 99 140
-	WBIND(0.033, 1.812, 0.933, 0.047, "Use Item:", 13, "+button2")
-
-	// TA: Sensitivity slider rect 99 170
 	itemDef {
-		type 10
-		text "Sensitivity:"
-		rect 0.033 1.859 0.933 0.047
-		font "oxanium" 13
-		forecolor WCOLOR_TEXT
-		cvarFloat "sensitivity" 5 1 30
+		rect 0.020 0.020 0.960 0.080
+		type 0
+		style 1
+		text "CONTROLS"
+		font "sansman" 24
+		textalign 1
+		textoffset 0.000 0.020
+		forecolor WCOLOR_ACCENT
+		backcolor 0.11 0.11 0.16 0.98
+		border 1
+		bordercolor 0.25 0.25 0.30 0.95
 		visible 1
-		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
-		mouseExit { setcolor forecolor WCOLOR_TEXT }
+		decoration
 	}
 
-	// TA: Invert Mouse rect 99 200
-	WYESNO(0.033, 1.906, 0.933, 0.047, "Invert Mouse:", 13, "ui_mousePitch")
-	// TA: Smooth Mouse rect 99 230
-	WYESNO(0.033, 1.953, 0.933, 0.047, "Smooth Mouse:", 13, "m_filter")
+	// Tab text elements (color-changed by actions)
+	itemDef { name "btnMoveTxt" rect 0.030 0.120 0.140 0.050 type 0 style 1 text "MOVEMENT" font "sansman" 11 textalign 1 textoffset 0.000 0.015 backcolor 0.8 0.8 0.8 1 forecolor 0.729 0.439 0.039 1 visible 1 decoration }
+	itemDef { name "btnActionsTxt" rect 0.180 0.120 0.140 0.050 type 0 style 1 text "ACTIONS" font "sansman" 11 textalign 1 textoffset 0.000 0.015 backcolor 0.133 0.133 0.133 1 forecolor 0.6 0.6 0.6 1 visible 1 decoration }
+	itemDef { name "btnWeaponsTxt" rect 0.330 0.120 0.140 0.050 type 0 style 1 text "WEAPONS" font "sansman" 11 textalign 1 textoffset 0.000 0.015 backcolor 0.133 0.133 0.133 1 forecolor 0.6 0.6 0.6 1 visible 1 decoration }
+	itemDef { name "btnChatTxt" rect 0.480 0.120 0.100 0.050 type 0 style 1 text "CHAT" font "sansman" 11 textalign 1 textoffset 0.000 0.015 backcolor 0.133 0.133 0.133 1 forecolor 0.6 0.6 0.6 1 visible 1 decoration }
+	itemDef { name "btnMouseTxt" rect 0.590 0.120 0.100 0.050 type 0 style 1 text "MOUSE" font "sansman" 11 textalign 1 textoffset 0.000 0.015 backcolor 0.133 0.133 0.133 1 forecolor 0.6 0.6 0.6 1 visible 1 decoration }
+	itemDef { name "btnGamepadTxt" rect 0.700 0.120 0.140 0.050 type 0 style 1 text "GAMEPAD" font "sansman" 11 textalign 1 textoffset 0.000 0.015 backcolor 0.133 0.133 0.133 1 forecolor 0.6 0.6 0.6 1 visible 1 decoration }
 
-	// ── CHAT ──
-	WSUBWINDOW(0.033, 2.012, 0.933, 0.033, "Communication")
+	// Tab click overlays
+	itemDef {
+		rect 0.030 0.120 0.140 0.050
+		type 1
+		backcolor 0 0 0 0
+		visible 1
+		action {
+			hide move ; hide actions ; hide weapons ; hide chat ; hide mouse ; hide gamepad ; show move
+			setitemcolor btnMoveTxt backcolor 0.8 0.8 0.8 1 ; setitemcolor btnMoveTxt forecolor 0.729 0.439 0.039 1
+			setitemcolor btnActionsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnActionsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnWeaponsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnWeaponsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnChatTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnChatTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnMouseTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMouseTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnGamepadTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnGamepadTxt forecolor 0.6 0.6 0.6 1
+		}
+	}
+	itemDef {
+		rect 0.180 0.120 0.140 0.050
+		type 1
+		backcolor 0 0 0 0
+		visible 1
+		action {
+			hide move ; hide actions ; hide weapons ; hide chat ; hide mouse ; hide gamepad ; show actions
+			setitemcolor btnActionsTxt backcolor 0.8 0.8 0.8 1 ; setitemcolor btnActionsTxt forecolor 0.729 0.439 0.039 1
+			setitemcolor btnMoveTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMoveTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnWeaponsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnWeaponsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnChatTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnChatTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnMouseTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMouseTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnGamepadTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnGamepadTxt forecolor 0.6 0.6 0.6 1
+		}
+	}
+	itemDef {
+		rect 0.330 0.120 0.140 0.050
+		type 1
+		backcolor 0 0 0 0
+		visible 1
+		action {
+			hide move ; hide actions ; hide weapons ; hide chat ; hide mouse ; hide gamepad ; show weapons
+			setitemcolor btnWeaponsTxt backcolor 0.8 0.8 0.8 1 ; setitemcolor btnWeaponsTxt forecolor 0.729 0.439 0.039 1
+			setitemcolor btnMoveTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMoveTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnActionsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnActionsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnChatTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnChatTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnMouseTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMouseTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnGamepadTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnGamepadTxt forecolor 0.6 0.6 0.6 1
+		}
+	}
+	itemDef {
+		rect 0.480 0.120 0.100 0.050
+		type 1
+		backcolor 0 0 0 0
+		visible 1
+		action {
+			hide move ; hide actions ; hide weapons ; hide chat ; hide mouse ; hide gamepad ; show chat
+			setitemcolor btnChatTxt backcolor 0.8 0.8 0.8 1 ; setitemcolor btnChatTxt forecolor 0.729 0.439 0.039 1
+			setitemcolor btnMoveTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMoveTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnActionsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnActionsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnWeaponsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnWeaponsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnMouseTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMouseTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnGamepadTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnGamepadTxt forecolor 0.6 0.6 0.6 1
+		}
+	}
+	itemDef {
+		rect 0.590 0.120 0.100 0.050
+		type 1
+		backcolor 0 0 0 0
+		visible 1
+		action {
+			hide move ; hide actions ; hide weapons ; hide chat ; hide mouse ; hide gamepad ; show mouse
+			setitemcolor btnMouseTxt backcolor 0.8 0.8 0.8 1 ; setitemcolor btnMouseTxt forecolor 0.729 0.439 0.039 1
+			setitemcolor btnMoveTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMoveTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnActionsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnActionsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnWeaponsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnWeaponsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnChatTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnChatTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnGamepadTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnGamepadTxt forecolor 0.6 0.6 0.6 1
+		}
+	}
+	itemDef {
+		rect 0.700 0.120 0.140 0.050
+		type 1
+		backcolor 0 0 0 0
+		visible 1
+		action {
+			hide move ; hide actions ; hide weapons ; hide chat ; hide mouse ; hide gamepad ; show gamepad
+			setitemcolor btnGamepadTxt backcolor 0.8 0.8 0.8 1 ; setitemcolor btnGamepadTxt forecolor 0.729 0.439 0.039 1
+			setitemcolor btnMoveTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMoveTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnActionsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnActionsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnWeaponsTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnWeaponsTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnChatTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnChatTxt forecolor 0.6 0.6 0.6 1
+			setitemcolor btnMouseTxt backcolor 0.133 0.133 0.133 1 ; setitemcolor btnMouseTxt forecolor 0.6 0.6 0.6 1
+		}
+	}
 
-	// TA: Gesture rect 99 50
-	WBIND(0.033, 2.048, 0.933, 0.047, "Gesture:", 13, "+button3")
-	// TA: Chat rect 99 75
-	WBIND(0.033, 2.095, 0.933, 0.047, "Chat:", 13, "messagemode")
-	// TA: Team Chat rect 99 100
-	WBIND(0.033, 2.142, 0.933, 0.047, "Team Chat:", 13, "messagemode2")
-	// TA: Target Chat rect 99 125
-	WBIND(0.033, 2.189, 0.933, 0.047, "Target Chat:", 13, "messagemode3")
-	// TA: Attack Chat rect 99 150
-	WBIND(0.033, 2.236, 0.933, 0.047, "Attack Chat:", 13, "messagemode4")
-	// TA: Voice Taunt rect 99 175
-	WBIND(0.033, 2.283, 0.933, 0.047, "Voice Taunt:", 13, "tauntTaunt")
-	// Our addition: Console
-	WBIND(0.033, 2.330, 0.933, 0.047, "Console:", 13, "toggleconsole")
+	// move tab
+	itemDef { name "move" rect 0.030 0.200 0.390 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "move" rect 0.430 0.200 0.390 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "move" type 13 text "Forward:" rect 0.045 0.230 0.360 0.050 font "oxanium" 12 cvar "+forward" visible 0 }
+	itemDef { name "move" type 13 text "Backpedal:" rect 0.045 0.290 0.360 0.050 font "oxanium" 12 cvar "+back" visible 0 }
+	itemDef { name "move" type 13 text "Move Left:" rect 0.045 0.350 0.360 0.050 font "oxanium" 12 cvar "+moveleft" visible 0 }
+	itemDef { name "move" type 13 text "Move Right:" rect 0.045 0.410 0.360 0.050 font "oxanium" 12 cvar "+moveright" visible 0 }
+	itemDef { name "move" type 11 text "Always Run:" rect 0.045 0.470 0.360 0.050 font "oxanium" 12 cvar "cl_run" visible 0 }
+	itemDef { name "move" type 13 text "Jump:" rect 0.445 0.230 0.360 0.050 font "oxanium" 12 cvar "+moveup" visible 0 }
+	itemDef { name "move" type 13 text "Crouch:" rect 0.445 0.290 0.360 0.050 font "oxanium" 12 cvar "+movedown" visible 0 }
+	itemDef { name "move" type 13 text "Walk (Hold):" rect 0.445 0.350 0.360 0.050 font "oxanium" 12 cvar "+speed" visible 0 }
+	itemDef { name "move" type 13 text "Center View:" rect 0.445 0.410 0.360 0.050 font "oxanium" 12 cvar "centerview" visible 0 }
+	itemDef { name "move" type 13 text "Strafe Key:" rect 0.445 0.470 0.360 0.050 font "oxanium" 12 cvar "+strafe" visible 0 }
 
-	// ── ORDERS ──
-	WSUBWINDOW(0.033, 2.389, 0.933, 0.033, "Team Orders")
+	// actions tab
+	itemDef { name "actions" rect 0.030 0.200 0.390 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "actions" rect 0.430 0.200 0.390 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "actions" type 13 text "Fire:" rect 0.045 0.230 0.360 0.050 font "oxanium" 12 cvar "+attack" visible 0 }
+	itemDef { name "actions" type 13 text "Use Item:" rect 0.045 0.290 0.360 0.050 font "oxanium" 12 cvar "+button2" visible 0 }
+	itemDef { name "actions" type 13 text "Scoreboard:" rect 0.045 0.350 0.360 0.050 font "oxanium" 12 cvar "+scores" visible 0 }
+	itemDef { name "actions" type 13 text "Drop Weapon:" rect 0.045 0.410 0.360 0.050 font "oxanium" 12 cvar "dropweapon" visible 0 }
+	itemDef { name "actions" type 13 text "Ready Up:" rect 0.045 0.470 0.360 0.050 font "oxanium" 12 cvar "readyup" visible 0 }
+	itemDef { name "actions" type 13 text "Taunt:" rect 0.445 0.230 0.360 0.050 font "oxanium" 12 cvar "+button3" visible 0 }
+	itemDef { name "actions" type 13 text "Drop Flag:" rect 0.445 0.290 0.360 0.050 font "oxanium" 12 cvar "dropflag" visible 0 }
+	itemDef { name "actions" type 13 text "Drop Powerup:" rect 0.445 0.350 0.360 0.050 font "oxanium" 12 cvar "droppowerup" visible 0 }
+	itemDef { name "actions" type 13 text "Accuracy:" rect 0.445 0.410 0.360 0.050 font "oxanium" 12 cvar "+acc" visible 0 }
+	itemDef { name "actions" type 13 text "Screenshot JPEG:" rect 0.445 0.470 0.360 0.050 font "oxanium" 12 cvar "screenshotJPEG" visible 0 }
 
-	// TA: Next Team Member
-	WBIND(0.033, 2.425, 0.933, 0.047, "Next Team Member:", 13, "nextTeamMember")
-	// TA: Next Team Order
-	WBIND(0.033, 2.472, 0.933, 0.047, "Next Team Order:", 13, "nextOrder")
-	// TA: Confirm Order
-	WBIND(0.033, 2.519, 0.933, 0.047, "Confirm Order:", 13, "confirmOrder")
-	// TA: Deny Order
-	WBIND(0.033, 2.566, 0.933, 0.047, "Deny Order:", 13, "denyOrder")
-	// TA: Offense
-	WBIND(0.033, 2.613, 0.933, 0.047, "Offense:", 13, "taskOffense")
-	// TA: Defense
-	WBIND(0.033, 2.660, 0.933, 0.047, "Defense:", 13, "taskDefense")
-	// TA: Patrol
-	WBIND(0.033, 2.707, 0.933, 0.047, "Patrol:", 13, "taskPatrol")
-	// TA: Camp
-	WBIND(0.033, 2.754, 0.933, 0.047, "Camp:", 13, "taskCamp")
-	// TA: Follow
-	WBIND(0.033, 2.801, 0.933, 0.047, "Follow:", 13, "taskFollow")
-	// TA: Retrieve
-	WBIND(0.033, 2.848, 0.933, 0.047, "Retrieve:", 13, "taskRetrieve")
-	// TA: Escort
-	WBIND(0.033, 2.895, 0.933, 0.047, "Escort:", 13, "taskEscort")
-	// TA: I Have the Flag!
-	WBIND(0.033, 2.942, 0.933, 0.047, "I Have the Flag!:", 13, "taskOwnFlag")
-	// TA: Target Suicide
-	WBIND(0.033, 2.989, 0.933, 0.047, "Target Suicide:", 13, "taskSuicide")
+	// weapons tab
+	itemDef { name "weapons" rect 0.030 0.200 0.390 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "weapons" rect 0.430 0.200 0.390 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "weapons" type 13 text "Gauntlet:" rect 0.045 0.230 0.360 0.050 font "oxanium" 12 cvar "weapon 1" visible 0 }
+	itemDef { name "weapons" type 13 text "Machinegun:" rect 0.045 0.290 0.360 0.050 font "oxanium" 12 cvar "weapon 2" visible 0 }
+	itemDef { name "weapons" type 13 text "Shotgun:" rect 0.045 0.350 0.360 0.050 font "oxanium" 12 cvar "weapon 3" visible 0 }
+	itemDef { name "weapons" type 13 text "Grenade Launcher:" rect 0.045 0.410 0.360 0.050 font "oxanium" 12 cvar "weapon 4" visible 0 }
+	itemDef { name "weapons" type 13 text "Rocket Launcher:" rect 0.045 0.470 0.360 0.050 font "oxanium" 12 cvar "weapon 5" visible 0 }
+	itemDef { name "weapons" type 13 text "Lightning Gun:" rect 0.445 0.230 0.360 0.050 font "oxanium" 12 cvar "weapon 6" visible 0 }
+	itemDef { name "weapons" type 13 text "Railgun:" rect 0.445 0.290 0.360 0.050 font "oxanium" 12 cvar "weapon 7" visible 0 }
+	itemDef { name "weapons" type 13 text "Plasma Gun:" rect 0.445 0.350 0.360 0.050 font "oxanium" 12 cvar "weapon 8" visible 0 }
+	itemDef { name "weapons" type 13 text "Next Weapon:" rect 0.445 0.410 0.360 0.050 font "oxanium" 12 cvar "weapnext" visible 0 }
+	itemDef { name "weapons" type 13 text "Previous Weapon:" rect 0.445 0.470 0.360 0.050 font "oxanium" 12 cvar "weapprev" visible 0 }
 
-	WSEPARATOR(0.033, 3.048, 0.933)
-	WBUTTON(0.344, 3.076, 0.313, 0.048, "Back", 14, close)
+	// chat tab
+	itemDef { name "chat" rect 0.030 0.200 0.390 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "chat" rect 0.430 0.200 0.390 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "chat" type 13 text "Chat:" rect 0.045 0.230 0.360 0.050 font "oxanium" 12 cvar "messagemode" visible 0 }
+	itemDef { name "chat" type 13 text "Team Chat:" rect 0.045 0.290 0.360 0.050 font "oxanium" 12 cvar "messagemode2" visible 0 }
+	itemDef { name "chat" type 13 text "Target Chat:" rect 0.045 0.350 0.360 0.050 font "oxanium" 12 cvar "messagemode3" visible 0 }
+	itemDef { name "chat" type 13 text "Attacker Chat:" rect 0.045 0.410 0.360 0.050 font "oxanium" 12 cvar "messagemode4" visible 0 }
+	itemDef { name "chat" type 13 text "Chat History:" rect 0.045 0.470 0.360 0.050 font "oxanium" 12 cvar "+chat" visible 0 }
+	itemDef { name "chat" type 13 text "Console:" rect 0.445 0.230 0.360 0.050 font "oxanium" 12 cvar "toggleconsole" visible 0 }
+
+	// mouse tab
+	itemDef { name "mouse" rect 0.030 0.200 0.790 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "mouse" type 10 text "Sensitivity:" rect 0.045 0.230 0.760 0.055 font "oxanium" 12 cvarFloat "sensitivity" 5 1 30 visible 0 }
+	itemDef { name "mouse" type 11 text "Invert Mouse:" rect 0.045 0.300 0.760 0.055 font "oxanium" 12 cvar "ui_mousePitch" visible 0 }
+	itemDef { name "mouse" type 11 text "Smooth Mouse:" rect 0.045 0.370 0.760 0.055 font "oxanium" 12 cvar "m_filter" visible 0 }
+	itemDef { name "mouse" type 11 text "Raw Input:" rect 0.045 0.440 0.760 0.055 font "oxanium" 12 cvar "in_mouse" visible 0 }
+
+	// gamepad tab
+	itemDef { name "gamepad" rect 0.030 0.200 0.790 0.500 style 1 border 1 bordercolor 0.6 0.6 0.6 0.5 backcolor 0.22 0.22 0.22 0.5 visible 0 decoration }
+	itemDef { name "gamepad" type 11 text "Enable Gamepad:" rect 0.045 0.230 0.760 0.055 font "oxanium" 12 cvar "in_joystick" visible 0 }
+	itemDef { name "gamepad" type 10 text "Look Sensitivity:" rect 0.045 0.300 0.760 0.055 font "oxanium" 12 cvarFloat "j_pitch" 0.02 0.01 0.40 visible 0 }
+	itemDef { name "gamepad" type 10 text "Turn Sensitivity:" rect 0.045 0.370 0.760 0.055 font "oxanium" 12 cvarFloat "j_yaw" 0.02 0.01 0.40 visible 0 }
+	itemDef { name "gamepad" type 11 text "Invert Y Axis:" rect 0.045 0.440 0.760 0.055 font "oxanium" 12 cvar "j_invert" visible 0 }
+
+	WSEPARATOR(0.030, 0.760, 0.790)
+	WBUTTON(0.320, 0.810, 0.220, 0.080, "Back", 14, close ; open "options")
 }

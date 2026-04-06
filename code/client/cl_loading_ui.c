@@ -40,6 +40,9 @@ Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // Remove or set to 0 once debugging is complete.
 #define LOADING_DIAG 1
 
+#define LOADING_WIREFRAME_MAX_DRAW_EDGES    4096
+#define LOADING_WIREFRAME_MAX_DRAW_MARKERS   128
+
 // Diagnostic frame counter — print only on first 3 frames per map load
 static int s_diagFrames;
 
@@ -68,6 +71,21 @@ static qboolean s_wireframeDiagPrinted;
 // Fade transition state
 float cl_loadFadeAlpha = 0.0f;
 qboolean cl_loadFading = qfalse;
+
+void CL_ResetLoadingScreenState( void ) {
+	s_dispGeometry = 0.0f;
+	s_dispShaders = 0.0f;
+	s_dispAudio = 0.0f;
+	s_dispDownload = 0.0f;
+	s_dispOverall = 0.0f;
+	s_pulsePhase = 0;
+	s_glowShader = 0;
+	s_glowDiagCount = 0;
+	s_wireframeDiagPrinted = qfalse;
+	s_diagFrames = 0;
+	cl_loadFadeAlpha = 1.0f;
+	cl_loadFading = qfalse;
+}
 
 // -----------------------------------------------------------------------
 // Helpers
@@ -127,12 +145,17 @@ Fade-aware string draw. Multiplies text color alpha by fade factor.
 static void Loading_DrawStringFaded( int x, int y, float charSize,
 									 const char *text, const float *rgba ) {
 	vec4_t color;
+	int flags;
 	color[0] = rgba[0];
 	color[1] = rgba[1];
 	color[2] = rgba[2];
 	color[3] = ( cl_loadFadeAlpha >= 1.0f ) ? rgba[3] : rgba[3] * cl_loadFadeAlpha;
+	flags = TEXT_FORCECOLOR;
+	if ( !cl_loadFading && cl_loadFadeAlpha >= 1.0f ) {
+		flags |= TEXT_DROPSHADOW;
+	}
 
-	Text_Draw( text, x, y, FONT_UI, charSize, color, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR | TEXT_DROPSHADOW );
+	Text_Draw( text, x, y, FONT_UI, charSize, color, TEXT_ALIGN_LEFT, flags );
 }
 
 /*
@@ -484,9 +507,14 @@ static void Loading_DrawWireframe( void ) {
 	// t=0.0 (floor): #1a3a5a  →  t=0.5 (mid): #00b4d8  →  t=1.0 (top): #80e0f0
 	{
 		float zRange = cl_bspPreview.maxZ - cl_bspPreview.minZ;
+		int edgeStep = 1;
 		if ( zRange < 1.0f ) zRange = 1.0f;
+		if ( cl_bspPreview.numEdges > LOADING_WIREFRAME_MAX_DRAW_EDGES ) {
+			edgeStep = ( cl_bspPreview.numEdges + LOADING_WIREFRAME_MAX_DRAW_EDGES - 1 ) /
+				LOADING_WIREFRAME_MAX_DRAW_EDGES;
+		}
 
-		for ( i = 0; i < cl_bspPreview.numEdges; i++ ) {
+		for ( i = 0; i < cl_bspPreview.numEdges; i += edgeStep ) {
 			const bspPreviewEdge_t *e = &cl_bspPreview.edges[i];
 			float ex1 = offX + ( e->x1 - cl_bspPreview.minX ) * scale;
 			float ey1 = offY + ( e->y1 - cl_bspPreview.minY ) * scale;
@@ -523,10 +551,15 @@ static void Loading_DrawWireframe( void ) {
 
 	// Draw markers: apply rotation first, then float offset
 	{
+	int markerStep = 1;
 	float markerR1 = vpH * 0.0083f;  // spawn circle radius (was 4/480)
 	float markerR2 = vpH * 0.00625f; // item circle radius (was 3/480)
 	float markerS  = vpH * 0.0083f;  // flag half-size (was 4/480)
-	for ( i = 0; i < cl_bspPreview.numMarkers; i++ ) {
+	if ( cl_bspPreview.numMarkers > LOADING_WIREFRAME_MAX_DRAW_MARKERS ) {
+		markerStep = ( cl_bspPreview.numMarkers + LOADING_WIREFRAME_MAX_DRAW_MARKERS - 1 ) /
+			LOADING_WIREFRAME_MAX_DRAW_MARKERS;
+	}
+	for ( i = 0; i < cl_bspPreview.numMarkers; i += markerStep ) {
 		const bspPreviewMarker_t *m = &cl_bspPreview.markers[i];
 		float rawX = offX + ( m->x - cl_bspPreview.minX ) * scale;
 		float rawY = offY + ( m->y - cl_bspPreview.minY ) * scale;
@@ -1042,15 +1075,7 @@ void CL_LoadingScreenFinished( void ) {
 	// Clear the loading flag so the dark-background guard in
 	// SCR_DrawScreenField stops suppressing the UI.
 	cl_loadProgress.startTime = 0;
-	// Reset shader handle — Hunk_Clear between maps invalidates all
-	// registered shaders.
-	s_glowShader = 0;
-	s_glowDiagCount = 0;
-	s_wireframeDiagPrinted = qfalse;
-	s_diagFrames = 0;
-	// Reset fade transition state
-	cl_loadFadeAlpha = 1.0f;
-	cl_loadFading = qfalse;
+	CL_ResetLoadingScreenState();
 }
 
 /*
