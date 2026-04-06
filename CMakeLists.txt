@@ -26,7 +26,7 @@ SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
 
 # LZ4 decoder (for SW3Z archive reader)
-list(APPEND QCOMMON_SRCS code/libs/lz4/lz4.c code/libs/lz4/lz4frame.c code/libs/lz4/xxhash.c code/libs/lz4/lz4hc.c)
+list(APPEND QCOMMON_SRCS src/libs/lz4/lz4.c src/libs/lz4/lz4frame.c src/libs/lz4/xxhash.c src/libs/lz4/lz4hc.c)
 
 # exclude platform-dependent QVM bytecode compilers
 list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alxp].*.c")
@@ -93,8 +93,8 @@ ADD_LIBRARY(qcommon_ded OBJECT ${QCOMMON_SRCS} ${SERVER_SRCS})
 TARGET_COMPILE_DEFINITIONS(qcommon_ded PUBLIC DEDICATED)
 
 # LZ4 include path (for SW3Z archive reader)
-TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE code/libs/lz4)
-TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE code/libs/lz4)
+TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE src/libs/lz4)
+TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE src/libs/lz4)
 
 # WAMR (WebAssembly Micro Runtime) for WASM VM backend
 IF(USE_WASM)
@@ -109,7 +109,7 @@ IF(USE_WASM)
 	SET(WAMR_BUILD_SIMD 0)
 	SET(WAMR_DISABLE_HW_BOUND_CHECK 1)
 	SET(WAMR_BUILD_LOAD_CUSTOM_SECTION 1)
-	ADD_SUBDIRECTORY(code/libs/wamr)
+	ADD_SUBDIRECTORY(src/libs/wamr)
 	IF(WIN32)
 		# WAMR upstream hardcodes -lm -ldl (line 154) without platform guard.
 		# Windows has no libdl — strip it from vmlib's transitive link interface.
@@ -119,8 +119,8 @@ IF(USE_WASM)
 			set_target_properties(vmlib PROPERTIES INTERFACE_LINK_LIBRARIES "${_vmlib_libs}")
 		ENDIF()
 	ENDIF()
-	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE code/libs/wamr/core/iwasm/include)
-	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE code/libs/wamr/core/iwasm/include)
+	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE src/libs/wamr/core/iwasm/include)
+	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE src/libs/wamr/core/iwasm/include)
 ENDIF()
 
 IF(NO_VM_COMPILED)
@@ -155,8 +155,8 @@ IF(USE_QUIC)
 	ENDIF()
 
 	# picoquic + picotls + mpack sources
-	# These are added as git submodules under code/libs/
-	FILE(GLOB PICOQUIC_SRCS code/libs/picoquic/picoquic/*.c)
+	# These are added as git submodules under src/libs/
+	FILE(GLOB PICOQUIC_SRCS src/libs/picoquic/picoquic/*.c)
 
 	# Exclude optional picoquic TLS backend adapters — we only use OpenSSL
 	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*minicrypto.*")
@@ -174,14 +174,14 @@ IF(USE_QUIC)
 	# Skip optional backends (cifra, mbedtls, brotli, fusion, uecc, minicrypto)
 	# to avoid pulling in dependencies we don't have.
 	SET(PICOTLS_SRCS
-		code/libs/picotls/lib/picotls.c
-		code/libs/picotls/lib/openssl.c
-		code/libs/picotls/lib/pembase64.c
-		code/libs/picotls/lib/asn1.c
-		code/libs/picotls/lib/hpke.c
+		src/libs/picotls/lib/picotls.c
+		src/libs/picotls/lib/openssl.c
+		src/libs/picotls/lib/pembase64.c
+		src/libs/picotls/lib/asn1.c
+		src/libs/picotls/lib/hpke.c
 	)
 
-	FILE(GLOB MPACK_SRCS    code/libs/mpack/src/mpack/*.c)
+	FILE(GLOB MPACK_SRCS    src/libs/mpack/src/mpack/*.c)
 
 	# webtransport module — our integration code
 	FILE(GLOB WT_SRCS code/webtransport/*.c)
@@ -190,9 +190,9 @@ IF(USE_QUIC)
 
 	# Include paths
 	SET(QUIC_INCLUDE_DIRS
-		code/libs/picoquic/picoquic
-		code/libs/picotls/include
-		code/libs/mpack/src/mpack
+		src/libs/picoquic/picoquic
+		src/libs/picotls/include
+		src/libs/mpack/src/mpack
 		code/webtransport
 	)
 
@@ -225,29 +225,29 @@ ELSE()
 ENDIF()
 
 # ── libogg (Ogg container format) ─────────────────────────────────
-set(OGG_SRCS code/libogg/src/bitwise.c code/libogg/src/framing.c)
+set(OGG_SRCS src/libs/ogg/src/bitwise.c src/libs/ogg/src/framing.c)
 add_library(ogg STATIC ${OGG_SRCS})
-target_include_directories(ogg PUBLIC code/libogg/include)
+target_include_directories(ogg PUBLIC src/libs/ogg/include)
 
 # ── libopus (Opus audio codec) ─────────────────────────────────────
-file(GLOB OPUS_CELT_SRCS code/libopus/celt/*.c)
-file(GLOB OPUS_SILK_SRCS code/libopus/silk/*.c)
-file(GLOB OPUS_SILK_FLOAT_SRCS code/libopus/silk/float/*.c)
+file(GLOB OPUS_CELT_SRCS src/libs/opus/celt/*.c)
+file(GLOB OPUS_SILK_SRCS src/libs/opus/silk/*.c)
+file(GLOB OPUS_SILK_FLOAT_SRCS src/libs/opus/silk/float/*.c)
 set(OPUS_SRC_SRCS
-    code/libopus/src/opus.c
-    code/libopus/src/opus_decoder.c
-    code/libopus/src/opus_encoder.c
-    code/libopus/src/opus_multistream.c
-    code/libopus/src/opus_multistream_decoder.c
-    code/libopus/src/opus_multistream_encoder.c
-    code/libopus/src/opus_projection_decoder.c
-    code/libopus/src/opus_projection_encoder.c
-    code/libopus/src/repacketizer.c
-    code/libopus/src/mapping_matrix.c
-    code/libopus/src/analysis.c
-    code/libopus/src/mlp.c
-    code/libopus/src/mlp_data.c
-    code/libopus/src/extensions.c
+    src/libs/opus/src/opus.c
+    src/libs/opus/src/opus_decoder.c
+    src/libs/opus/src/opus_encoder.c
+    src/libs/opus/src/opus_multistream.c
+    src/libs/opus/src/opus_multistream_decoder.c
+    src/libs/opus/src/opus_multistream_encoder.c
+    src/libs/opus/src/opus_projection_decoder.c
+    src/libs/opus/src/opus_projection_encoder.c
+    src/libs/opus/src/repacketizer.c
+    src/libs/opus/src/mapping_matrix.c
+    src/libs/opus/src/analysis.c
+    src/libs/opus/src/mlp.c
+    src/libs/opus/src/mlp_data.c
+    src/libs/opus/src/extensions.c
 )
 # Exclude encoder-only demo/test files from celt
 list(FILTER OPUS_CELT_SRCS EXCLUDE REGEX "opus_custom_demo\\.c$")
@@ -255,13 +255,13 @@ list(FILTER OPUS_CELT_SRCS EXCLUDE REGEX "opus_custom_demo\\.c$")
 # Platform-specific SIMD sources — only compile on matching architecture
 set(OPUS_ARCH_SRCS "")
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64|x86|i.86")
-    file(GLOB OPUS_CELT_X86_SRCS code/libopus/celt/x86/*.c)
-    file(GLOB OPUS_SILK_X86_SRCS code/libopus/silk/x86/*.c)
-    file(GLOB OPUS_SILK_FLOAT_X86_SRCS code/libopus/silk/float/x86/*.c)
+    file(GLOB OPUS_CELT_X86_SRCS src/libs/opus/celt/x86/*.c)
+    file(GLOB OPUS_SILK_X86_SRCS src/libs/opus/silk/x86/*.c)
+    file(GLOB OPUS_SILK_FLOAT_X86_SRCS src/libs/opus/silk/float/x86/*.c)
     list(APPEND OPUS_ARCH_SRCS ${OPUS_CELT_X86_SRCS} ${OPUS_SILK_X86_SRCS} ${OPUS_SILK_FLOAT_X86_SRCS})
 ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|arm")
-    file(GLOB OPUS_CELT_ARM_SRCS code/libopus/celt/arm/*.c)
-    file(GLOB OPUS_SILK_ARM_SRCS code/libopus/silk/arm/*.c)
+    file(GLOB OPUS_CELT_ARM_SRCS src/libs/opus/celt/arm/*.c)
+    file(GLOB OPUS_SILK_ARM_SRCS src/libs/opus/silk/arm/*.c)
     # Exclude NE10 files (require external NE10 library we don't vendor)
     list(FILTER OPUS_CELT_ARM_SRCS EXCLUDE REGEX "ne10\\.c$")
     list(APPEND OPUS_ARCH_SRCS ${OPUS_CELT_ARM_SRCS} ${OPUS_SILK_ARM_SRCS})
@@ -273,32 +273,32 @@ set(OPUS_ALL_SRCS
 )
 
 add_library(opus STATIC ${OPUS_ALL_SRCS})
-target_include_directories(opus PUBLIC code/libopus/include)
+target_include_directories(opus PUBLIC src/libs/opus/include)
 target_include_directories(opus PRIVATE
-    code/libopus
-    code/libopus/include/opus
-    code/libopus/celt
-    code/libopus/silk
-    code/libopus/silk/float
-    code/libopus/silk/fixed
-    code/libopus/src
+    src/libs/opus
+    src/libs/opus/include/opus
+    src/libs/opus/celt
+    src/libs/opus/silk
+    src/libs/opus/silk/float
+    src/libs/opus/silk/fixed
+    src/libs/opus/src
 )
 target_compile_definitions(opus PRIVATE OPUS_BUILD HAVE_CONFIG_H)
 
 # ── libopusfile (Opus file reader) ─────────────────────────────────
 set(OPUSFILE_SRCS
-    code/libopusfile/src/info.c
-    code/libopusfile/src/internal.c
-    code/libopusfile/src/opusfile.c
-    code/libopusfile/src/stream.c
+    src/libs/opusfile/src/info.c
+    src/libs/opusfile/src/internal.c
+    src/libs/opusfile/src/opusfile.c
+    src/libs/opusfile/src/stream.c
 )
 add_library(opusfile STATIC ${OPUSFILE_SRCS})
-target_include_directories(opusfile PUBLIC code/libopusfile/include)
-target_include_directories(opusfile PRIVATE code/libopusfile/src)
+target_include_directories(opusfile PUBLIC src/libs/opusfile/include)
+target_include_directories(opusfile PRIVATE src/libs/opusfile/src)
 target_link_libraries(opusfile PUBLIC opus ogg)
 # libopusfile needs libogg headers and opus headers (without opus/ prefix)
-target_include_directories(opusfile PUBLIC code/libogg/include)
-target_include_directories(opusfile PRIVATE code/libopus/include/opus)
+target_include_directories(opusfile PUBLIC src/libs/ogg/include)
+target_include_directories(opusfile PRIVATE src/libs/opus/include/opus)
 
 # client + cURL + Wired UI + miniaudio test
 AUX_SOURCE_DIRECTORY(code/client CLIENT_SRCS)
@@ -308,7 +308,11 @@ list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
 # snd_miniaudio_test.c is a standalone test runner with its own main();
 # it must NOT be linked into the client library or it duplicates _main.
 list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
-AUX_SOURCE_DIRECTORY(code/client/wired CLIENT_SRCS)
+AUX_SOURCE_DIRECTORY(code/client/wired/ui          CLIENT_SRCS)
+AUX_SOURCE_DIRECTORY(code/client/wired/store       CLIENT_SRCS)
+AUX_SOURCE_DIRECTORY(code/client/wired/scripting   CLIENT_SRCS)
+AUX_SOURCE_DIRECTORY(code/client/wired/hud         CLIENT_SRCS)
+AUX_SOURCE_DIRECTORY(code/client/wired/hud/elements CLIENT_SRCS)
 # bg_misc.c needed by Wired UI HUD elements (BG_FindItemForPowerup, bg_itemlist)
 list(APPEND CLIENT_SRCS code/game/bg_misc.c code/game/bg_weapons.c code/game/bg_gametypes.c)
 IF(NOT USE_CURL)
@@ -335,18 +339,24 @@ IF(USE_SYSTEM_JPEG)
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE -DUSE_SYSTEM_JPEG)
 	TARGET_LINK_LIBRARIES(client ${JPEG_LIBRARIES})
 ELSE()
-	AUX_SOURCE_DIRECTORY(code/libjpeg JPEG_SRCS)
+	AUX_SOURCE_DIRECTORY(src/libs/jpeg JPEG_SRCS)
 	#ADD_LIBRARY(jpeg ${JPEG_SRCS})
 	#TARGET_LINK_LIBRARIES(client jpeg)
 	ADD_LIBRARY(client OBJECT ${CLIENT_SRCS} ${JPEG_SRCS})
 ENDIF()
 
-# Opus codec: client needs opusfile + libogg + libopus include paths
+# jpeg (vendored) + Opus codec: client needs these include paths
+# wired bucket dirs: bare #include "cl_wired_*.h" works across buckets
 target_include_directories(client PRIVATE
-    code/libopusfile/include
-    code/libogg/include
-    code/libopus/include
-    code/libopus/include/opus
+    src/libs/jpeg
+    src/libs/opusfile/include
+    src/libs/ogg/include
+    src/libs/opus/include
+    src/libs/opus/include/opus
+    code/client/wired/ui
+    code/client/wired/hud
+    code/client/wired/store
+    code/client/wired/scripting
 )
 
 # renderers
@@ -512,7 +522,7 @@ ENDIF()
 # LuaJIT has its own Makefile that generates architecture-specific JIT code.
 # Build the static library via custom command, then import and link it.
 IF(USE_LUA)
-	SET(LUAJIT_DIR ${CMAKE_SOURCE_DIR}/code/libs/luajit)
+	SET(LUAJIT_DIR ${CMAKE_SOURCE_DIR}/src/libs/luajit)
 	SET(LUAJIT_LIB ${LUAJIT_DIR}/src/libluajit.a)
 
 	# Platform-specific build flags

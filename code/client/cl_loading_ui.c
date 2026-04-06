@@ -28,8 +28,8 @@ Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //   Right panel (48%):    Map info, streaming rows, overall bar, Vulkan badge
 
 #include "client.h"
-#include "wired/cl_wired_text.h"
-#include "wired/cl_wired_background.h"
+#include "wired/ui/cl_wired_text.h"
+#include "wired/ui/cl_wired_background.h"
 
 // Viewport-relative font sizes
 #define LOADING_FONT_TITLE   (cls.glconfig.vidHeight * 0.028f)

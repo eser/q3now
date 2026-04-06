@@ -1,15 +1,15 @@
-[submodule "code/libs/mpack"]
-	path = code/libs/mpack
+[submodule "src/libs/luajit"]
+	path = src/libs/luajit
+	url = https://github.com/LuaJIT/LuaJIT.git
+[submodule "src/libs/mpack"]
+	path = src/libs/mpack
 	url = https://github.com/ludocode/mpack.git
-[submodule "code/libs/picoquic"]
-	path = code/libs/picoquic
+[submodule "src/libs/picoquic"]
+	path = src/libs/picoquic
 	url = https://github.com/private-octopus/picoquic.git
-[submodule "code/libs/picotls"]
-	path = code/libs/picotls
+[submodule "src/libs/picotls"]
+	path = src/libs/picotls
 	url = https://github.com/h2o/picotls.git
 [submodule "tools/msdf-atlas-gen"]
 	path = tools/msdf-atlas-gen
 	url = https://github.com/Chlumsky/msdf-atlas-gen.git
-[submodule "code/libs/luajit"]
-	path = code/libs/luajit
-	url = https://github.com/LuaJIT/LuaJIT.git

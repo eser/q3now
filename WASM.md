@@ -94,7 +94,7 @@ Bytecode Alliance.
 - Pure C, designed for embedding
 - Interpreter + AOT modes
 - Pre-allocated linear memory maps to QVM's `dataMask` model
-- Vendored at `code/libs/wamr/`
+- Vendored at `src/libs/wamr/`
 
 ### WAMR build flags
 
@@ -191,7 +191,7 @@ game code needs beyond what `bg_lib.c` provides. The WASI imports
 | `code/qcommon/vm_wasm.c` | Core backend: load, call, destroy, syscall bridge |
 | `code/qcommon/q_platform.h` | WASM platform definitions |
 | `code/wasm/wasm_bridge.c` | Varargs adapter compiled into WASM modules |
-| `code/libs/wamr/` | Vendored WAMR runtime |
+| `src/libs/wamr/` | Vendored WAMR runtime |
 | `CMakeLists.txt` | `USE_WASM` option, WAMR linking |
 | `cmake/basegame.cmake` | `add_wasm()` calls for game/cgame/ui |
 | `cmake/utils/wasm_tools.cmake` | `add_wasm()` cmake function |

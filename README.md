@@ -194,6 +194,12 @@ Performance is usually greater or equal to other opengl1 renderers
 
 See [BUILD.md](BUILD.md) for full setup instructions. Key targets:
 
+**First-time setup** — after cloning, initialize submodules before building:
+```
+git submodule update --init --recursive
+```
+
+
 | Command                      | What it does                                                     |
 | ---------------------------- | ---------------------------------------------------------------- |
 | `make`                       | Configure + build Release (native + VM modules)                  |

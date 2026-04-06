@@ -22,21 +22,14 @@ void Attack_RocketLauncher_Primary (gentity_t *ent) {
 }
 
 #define MORTAR_SPEED			650
-#define MORTAR_DAMAGE			60
-#define MORTAR_SPLASH_DAMAGE	60
-#define MORTAR_SPLASH_RADIUS	250
+#define MORTAR_DAMAGE			50
+#define MORTAR_SPLASH_DAMAGE	50
+#define MORTAR_SPLASH_RADIUS	300
+// #define MORTAR_HELIX_OFFSET		10.0f
 
-void Attack_RocketLauncher_Mortar (gentity_t *ent) {
-	gentity_t	*m;
-	vec_t		speed;
+static void Mortar_SetupRocket( gentity_t *m, float quadFactor ) {
+	vec_t speed;
 
-	if (ent->client) {
-		ent->client->accuracy_shots++;
-		ent->client->attackStats[ATT_ROCKET_LAUNCHER_MORTAR].shots++;
-	}
-
-	// fire single mortar rocket
-	m = fire_rocket( ent, muzzle, forward );
 	m->methodOfDeath = MOD_ROCKET_MORTAR;
 	m->splashMethodOfDeath = MOD_ROCKET_MORTAR_SPLASH;
 
@@ -51,11 +44,51 @@ void Attack_RocketLauncher_Mortar (gentity_t *ent) {
 	m->s.pos.trType = TR_GRAVITY;
 
 	// override damage: lower direct hit, serious splash
-	m->damage = MORTAR_DAMAGE;
-	m->splashDamage = MORTAR_SPLASH_DAMAGE;
+	m->damage = MORTAR_DAMAGE * quadFactor;
+	m->splashDamage = MORTAR_SPLASH_DAMAGE * quadFactor;
 	m->splashRadius = MORTAR_SPLASH_RADIUS;
+}
 
-	// quad factor
-	m->damage *= s_quadFactor;
-	m->splashDamage *= s_quadFactor;
+void Attack_RocketLauncher_Mortar (gentity_t *ent) {
+	// gentity_t	*m1, *m2;
+	gentity_t	*m1;
+	// vec3_t		offset;
+	// qboolean	dualRocket;
+
+	if (ent->client) {
+		ent->client->accuracy_shots++;
+		ent->client->attackStats[ATT_ROCKET_LAUNCHER_MORTAR].shots++;
+	}
+
+	// // pmove already consumed 1 ammo; consume a second if available
+	// dualRocket = qtrue;
+	// if ( ent->client && ent->client->ps.ammo[WP_ROCKET_LAUNCHER] != -1 ) {
+	// 	if ( ent->client->ps.ammo[WP_ROCKET_LAUNCHER] > 0 ) {
+	// 		ent->client->ps.ammo[WP_ROCKET_LAUNCHER]--;
+	// 	} else {
+	// 		dualRocket = qfalse;  // only 1 ammo total — single mortar
+	// 	}
+	// }
+
+	// if ( dualRocket ) {
+	// 	// spawn two rockets with lateral offsets for helix pairing
+	// 	VectorScale( right, MORTAR_HELIX_OFFSET, offset );
+
+	// 	VectorAdd( muzzle, offset, offset );
+	// 	m1 = fire_rocket( ent, offset, forward );
+	// 	Mortar_SetupRocket( m1, s_quadFactor );
+
+	// 	VectorScale( right, -MORTAR_HELIX_OFFSET, offset );
+	// 	VectorAdd( muzzle, offset, offset );
+	// 	m2 = fire_rocket( ent, offset, forward );
+	// 	Mortar_SetupRocket( m2, s_quadFactor );
+
+	// 	// link pair for collision exclusion
+	// 	m1->helixPairEntity = m2;
+	// 	m2->helixPairEntity = m1;
+	// } else {
+		// 1-ammo edge case: single mortar rocket, no helix
+		m1 = fire_rocket( ent, muzzle, forward );
+		Mortar_SetupRocket( m1, s_quadFactor );
+	// }
 }
