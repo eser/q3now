@@ -2016,8 +2016,7 @@ void R_BloomScreen( void )
 	{
 		if ( !backEnd.doneBloom && backEnd.doneSurfaces )
 		{
-			if ( !backEnd.projection2D )
-				RB_SetGL2D();
+			RB_SetGL2D();
 			qglColor4f( 1, 1, 1, 1 );
 			FBO_Bloom( 0, 0, qfalse );
 		}
@@ -2044,6 +2043,7 @@ void FBO_PostProcess( void )
 		qglMatrixMode( GL_MODELVIEW );
 		qglLoadIdentity();
 		backEnd.projection2D = qtrue;
+		// no need to setup shader time there
 	}
 
 	if ( blitMSfbo )

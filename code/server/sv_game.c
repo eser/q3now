@@ -46,6 +46,9 @@ int	SV_NumForGentity( sharedEntity_t *ent ) {
 sharedEntity_t *SV_GentityNum( int num ) {
 	sharedEntity_t *ent;
 
+	if ( num < 0 || num >= MAX_GENTITIES ) {
+		Com_Error( ERR_DROP, "%s: bad num %d", __func__, num );
+	}
 	ent = (sharedEntity_t *)((byte *)sv.gentities + sv.gentitySize*(num));
 
 	return ent;
@@ -160,11 +163,15 @@ qboolean SV_inPVS( const vec3_t p1, const vec3_t p2 )
 
 	leafnum = CM_PointLeafnum (p1);
 	cluster = CM_LeafCluster (leafnum);
+	if ( cluster < 0 )
+		return qfalse;
 	area1 = CM_LeafArea (leafnum);
 	mask = CM_ClusterPVS (cluster);
 
 	leafnum = CM_PointLeafnum (p2);
 	cluster = CM_LeafCluster (leafnum);
+	if ( cluster < 0 )
+		return qfalse;
 	area2 = CM_LeafArea (leafnum);
 	if ( mask && (!(mask[cluster>>3] & (1<<(cluster&7)) ) ) )
 		return qfalse;
@@ -189,10 +196,14 @@ static qboolean SV_inPVSIgnorePortals( const vec3_t p1, const vec3_t p2 )
 
 	leafnum = CM_PointLeafnum (p1);
 	cluster = CM_LeafCluster (leafnum);
+	if ( cluster < 0 )
+		return qfalse;
 	mask = CM_ClusterPVS (cluster);
 
 	leafnum = CM_PointLeafnum (p2);
 	cluster = CM_LeafCluster (leafnum);
+	if ( cluster < 0 )
+		return qfalse;
 
 	if ( mask && (!(mask[cluster>>3] & (1<<(cluster&7)) ) ) )
 		return qfalse;
@@ -262,22 +273,23 @@ SV_LocateGameData
 
 ===============
 */
-static void SV_LocateGameData( sharedEntity_t *gEnts, int numGEntities, int sizeofGEntity_t, playerState_t *clients, int sizeofGameClient ) {
+static void SV_LocateGameData( sharedEntity_t *gEnts, unsigned numGEntities, unsigned sizeofGEntity_t,
+							   playerState_t *clients, unsigned sizeofGameClient ) {
 
 	if ( !gvm->entryPoint ) {
 		if ( numGEntities > MAX_GENTITIES ) {
-			Com_Error( ERR_DROP, "%s: bad entity count %i", __func__, numGEntities );
-		} else {
-			if ( sizeofGEntity_t > gvm->exactDataLength / numGEntities ) {
-				Com_Error( ERR_DROP, "%s: bad entity size %i", __func__, sizeofGEntity_t );	
-			} else if ( (byte*)gEnts + (numGEntities * sizeofGEntity_t) > (gvm->dataBase + gvm->exactDataLength) ) {
-				Com_Error( ERR_DROP, "%s: entities located out of data segment", __func__ );
-			}
+			Com_Error( ERR_DROP, "%s: bad entity count %u", __func__, numGEntities );
 		}
 
-		if ( sizeofGameClient > gvm->exactDataLength / MAX_CLIENTS ) {
-			Com_Error( ERR_DROP, "%s: bad game client size %i", __func__, sizeofGameClient );	
-		} else if ( (byte*)clients + (sizeofGameClient * MAX_CLIENTS) > gvm->dataBase + gvm->exactDataLength ) {
+		if ( sizeofGEntity_t < sizeof(sharedEntity_t) || sizeofGEntity_t > gvm->exactDataLength / MAX_GENTITIES ) {
+			Com_Error( ERR_DROP, "%s: bad entity size %u", __func__, sizeofGEntity_t );
+		} else if ( (byte*)gEnts - gvm->dataBase > gvm->exactDataLength - sizeofGEntity_t * MAX_GENTITIES ) {
+			Com_Error( ERR_DROP, "%s: entities located out of data segment", __func__ );
+		}
+
+		if ( sizeofGameClient < sizeof(playerState_t) || sizeofGameClient > gvm->exactDataLength / MAX_CLIENTS ) {
+			Com_Error( ERR_DROP, "%s: bad game client size %u", __func__, sizeofGameClient );
+		} else if ( (byte*)clients - gvm->dataBase > gvm->exactDataLength - sizeofGameClient * MAX_CLIENTS ) {
 			Com_Error( ERR_DROP, "%s: clients located out of data segment", __func__ );
 		}
 	}

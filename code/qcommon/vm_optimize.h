@@ -48,7 +48,7 @@ typedef enum {
 
 typedef struct opstack_s {
 	uint32_t value;
-	int offset;
+	int offset;		// negative value means it is already on the opStack
 	opstack_value_t type;
 	int safe_arg;	// local/global address validated to be in the sane range
 } opstack_t;
@@ -72,6 +72,10 @@ typedef enum {
 	Z_EXT16,
 	S_EXT16,
 } ext_t;
+
+#ifndef REG_MAP_COUNT
+#define REG_MAP_COUNT 4
+#endif
 
 typedef struct reg_s {
 	int type_mask; // mask or enum of reg_value_t
@@ -298,12 +302,18 @@ qboolean find_sx_var( uint32_t *reg, const var_addr_t *v ) {
 
 
 void reduce_map_size( reg_t *reg, uint32_t size ) {
+#ifdef Q3_LITTLE_ENDIAN
 	int i;
 	for ( i = 0; i < ARRAY_LEN( reg->vars.map ); i++ ) {
 		if ( reg->vars.map[i].size > size ) {
 			reg->vars.map[i].size = size;
 		}
 	}
+#else
+	// zero/sign extension shifts memory mappings on BE systems
+	reg->type_mask &= ~RTYPE_VAR;
+	memset( reg->vars.map, 0x0, sizeof( reg->vars.map ) );
+#endif
 	// modify constant
 	if ( size == 1 ) {
 		reg->cnst.value &= 0xFF;
@@ -858,7 +868,7 @@ static uint32_t alloc_sx_const( uint32_t pref, uint32_t imm )
 	return sx;
 }
 
-#ifdef DYN_ALLOC_SX
+#ifdef DYN_ALLOC_RX
 static uint32_t dyn_alloc_rx( void )
 {
 	const uint32_t _rx_mask = build_rx_mask();
@@ -1112,7 +1122,7 @@ void store_syscall_opstack( uint32_t reg )
 #endif
 
 	it->type = TYPE_RX;
-	it->offset = -1; // < 0 means it is already on the opStack, no need to flush
+	it->offset = -(opstack + 1) * sizeof( int32_t ); // < 0 means it is already on the opStack, no need to flush
 	it->value = reg;
 	it->safe_arg = 0;
 
@@ -1349,7 +1359,13 @@ static uint32_t load_sx_opstack( uint32_t pref )
 		// move from general-purpose to scalar register
 		// should never happen with FPU type promotion, except syscalls
 		reg = alloc_sx( pref );
-		mov_sx_rx( reg, it->value );
+		if ( it->offset < 0 ) {
+			// syscall return
+			it->offset = -it->offset + sizeof( int32_t );
+			load4_sx( reg, it->offset );
+		} else {
+			mov_sx_rx( reg, it->value );
+		}
 		it->type = TYPE_RAW;
 		return reg;
 	}
