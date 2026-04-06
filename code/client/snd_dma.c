@@ -94,9 +94,12 @@ cvar_t		*s_show;
 static cvar_t *s_mixahead;
 static cvar_t *s_mixOffset;
 static cvar_t *s_linearFalloff;
-#if defined(__linux__) && !defined(USE_SDL)
+/* miniaudio backend cvars (task-3): registered for all platforms now that
+ * miniaudio replaces the legacy ALSA/WASAPI/CoreAudio backends. The original
+ * Linux-only ALSA s_device is superseded by the cross-platform one below. */
 cvar_t		*s_device;
-#endif
+cvar_t		*s_latency;
+cvar_t		*s_underruns;
 
 static loopSound_t	loopSounds[MAX_GENTITIES];
 static	channel_t	*freelist = NULL;
@@ -1614,13 +1617,28 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 	Cvar_SetDescription( s_show, "Debugging output (used sound files)." );
 	s_testsound = Cvar_Get( "s_testsound", "0", CVAR_CHEAT );
 	Cvar_SetDescription( s_testsound, "Debugging tool that plays a simple sine wave tone to test the sound system." );
-#if defined(__linux__) && !defined(USE_SDL)
-	s_device = Cvar_Get( "s_device", "default", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	Cvar_SetDescription( s_device, "Set ALSA output device\n"
-		" Use \"default\", \"sysdefault\", \"front\", etc.\n"
-		" Enter " S_COLOR_CYAN "aplay -L "S_COLOR_WHITE"in your shell to see all options.\n"
-		S_COLOR_YELLOW " Please note that only mono/stereo devices are acceptable.\n" );
-#endif
+	/* miniaudio backend cvars (task-3) */
+	s_device = Cvar_Get( "s_device", "", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	Cvar_SetDescription( s_device,
+		"Audio output device name (miniaudio backend).\n"
+		" Empty string = system default device.\n"
+		" To pick a specific device, set this to its name as reported\n"
+		" by your OS (use the OS sound panel to look up the exact name).\n"
+		" Requires snd_restart to take effect." );
+
+	s_latency = Cvar_Get( "s_latency", "6", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	Cvar_CheckRange( s_latency, "2", "20", CV_INTEGER );
+	Cvar_SetDescription( s_latency,
+		"Audio output latency hint in milliseconds (clamped 2-20).\n"
+		" Lower = less delay but higher CPU and risk of underruns.\n"
+		" Higher = safer but more audible delay.\n"
+		" Requires snd_restart to take effect." );
+
+	s_underruns = Cvar_Get( "s_underruns", "0", CVAR_TEMP );
+	Cvar_SetDescription( s_underruns,
+		"Read-only counter: number of audio underruns since startup.\n"
+		" Updated by the miniaudio backend each frame.\n"
+		" Non-zero values indicate the audio thread is starved." );
 
 	r = SNDDMA_Init();
 

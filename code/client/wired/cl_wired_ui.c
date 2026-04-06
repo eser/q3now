@@ -63,6 +63,23 @@ typedef struct {
 static wiredElement_t  wired_elements[WIRED_MAX_ELEMENTS];
 static int             wired_numElements = 0;
 
+// ── populate callback registry ───────────────────────────────────────
+// Used by dynamic-MULTI items (populateCallback "name" in .wmenu) to fill
+// the option list at render time. Implementation lives here so the
+// registry survives Wired UI reloads. Callbacks themselves are typically
+// registered from cl_wired_populate.c.
+
+#define WIRED_MAX_POPULATE_CALLBACKS  32
+
+typedef struct {
+	char                     name[64];
+	wuiPopulateCallback_t    fn;
+	qboolean                 active;
+} wiredPopulateEntry_t;
+
+static wiredPopulateEntry_t wired_populateCallbacks[WIRED_MAX_POPULATE_CALLBACKS];
+static int                   wired_numPopulateCallbacks = 0;
+
 // ── feeder registry ───────────────────────────────────────────────────
 
 typedef struct {
@@ -307,6 +324,53 @@ void WiredUI_RegisterElement( const char *name,
 	wired_numElements++;
 }
 
+// ── populate callback registration ────────────────────────────────────
+
+void WiredUI_RegisterPopulateCallback( const char *name, wuiPopulateCallback_t fn ) {
+	int i;
+
+	if ( !name || !name[0] || !fn ) {
+		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterPopulateCallback: invalid args\n" );
+		return;
+	}
+
+	// update existing entry in place
+	for ( i = 0; i < wired_numPopulateCallbacks; i++ ) {
+		if ( wired_populateCallbacks[i].active &&
+		     !Q_stricmp( wired_populateCallbacks[i].name, name ) ) {
+			wired_populateCallbacks[i].fn = fn;
+			return;
+		}
+	}
+
+	if ( wired_numPopulateCallbacks >= WIRED_MAX_POPULATE_CALLBACKS ) {
+		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterPopulateCallback: too many callbacks (max %d)\n",
+		            WIRED_MAX_POPULATE_CALLBACKS );
+		return;
+	}
+
+	Q_strncpyz( wired_populateCallbacks[wired_numPopulateCallbacks].name, name,
+	            sizeof( wired_populateCallbacks[0].name ) );
+	wired_populateCallbacks[wired_numPopulateCallbacks].fn = fn;
+	wired_populateCallbacks[wired_numPopulateCallbacks].active = qtrue;
+	wired_numPopulateCallbacks++;
+}
+
+wuiPopulateCallback_t WiredUI_GetPopulateCallback( const char *name ) {
+	int i;
+
+	if ( !name || !name[0] )
+		return NULL;
+
+	for ( i = 0; i < wired_numPopulateCallbacks; i++ ) {
+		if ( wired_populateCallbacks[i].active &&
+		     !Q_stricmp( wired_populateCallbacks[i].name, name ) ) {
+			return wired_populateCallbacks[i].fn;
+		}
+	}
+	return NULL;
+}
+
 // ── batch registration stubs ──────────────────────────────────────────
 // These will be filled in Phase 3 when SuperHUD elements are wrapped.
 
@@ -463,8 +527,14 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	Com_Memset( wired_symbols, 0, sizeof( wired_symbols ) );
 	Com_Memset( wired_elements, 0, sizeof( wired_elements ) );
+	Com_Memset( wired_populateCallbacks, 0, sizeof( wired_populateCallbacks ) );
 	wired_numSymbols = 0;
 	wired_numElements = 0;
+	wired_numPopulateCallbacks = 0;
+
+	// Register dynamic-MULTI populate callbacks (audio_devices, etc.).
+	// Lives in cl_wired_populate.c so additions don't churn this file.
+	WiredUI_RegisterCorePopulateCallbacks();
 
 	// load menu files from manifest (theme-aware)
 	WiredUI_ClearMenus();
@@ -1142,7 +1212,65 @@ void WiredUI_Refresh( int realtime ) {
 					break;
 
 				case ITEM_TYPE_MULTI:
-					if ( item->multiData ) {
+					/* Dynamic MULTI: populateCallback supplies the option
+					 * list at render time. Branch on the callback's state
+					 * so loading/empty/error/success/partial each render
+					 * with intentional, non-generic visuals. */
+					if ( item->populateCallback[0] ) {
+						wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( item->populateCallback );
+						if ( !pop ) {
+							/* Callback name typo / forgot to register: surface
+							 * loudly so devs notice. */
+							valueText = "<missing populate callback>";
+						} else {
+							wuiPopulateResult_t res;
+							int j;
+							qboolean found = qfalse;
+							memset( &res, 0, sizeof( res ) );
+							pop( &res );
+							switch ( res.state ) {
+								case WUI_POPULATE_LOADING:
+									valueText = "Scanning…";
+									break;
+								case WUI_POPULATE_EMPTY:
+									valueText = "No devices detected";
+									break;
+								case WUI_POPULATE_ERROR:
+									valueText = "Enumeration failed — Use default";
+									break;
+								case WUI_POPULATE_SUCCESS:
+								case WUI_POPULATE_PARTIAL:
+									for ( j = 0; j < res.count; j++ ) {
+										if ( res.values && res.values[j] &&
+										     !Q_stricmp( cvarBuf, res.values[j] ) ) {
+											valueText = res.names[j];
+											found = qtrue;
+											break;
+										}
+									}
+									if ( !found ) {
+										if ( cvarBuf[0] ) {
+											/* User requested a device that
+											 * isn't currently present
+											 * (unplugged, renamed, etc.). */
+											valueText = va( "%s (not present)", cvarBuf );
+										} else if ( res.count > 0 && res.names && res.names[0] ) {
+											/* Empty cvar = system default —
+											 * still show first option as a
+											 * preview hint. */
+											valueText = "(System Default)";
+										} else {
+											valueText = "(System Default)";
+										}
+									}
+									break;
+								default:
+									valueText = cvarBuf;
+									break;
+							}
+						}
+					}
+					else if ( item->multiData ) {
 						int j;
 						qboolean found = qfalse;
 						for ( j = 0; j < item->multiData->count; j++ ) {
@@ -2903,7 +3031,50 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 						break;
 
 					case ITEM_TYPE_MULTI:
-						if ( focusedItem->multiData ) {
+						/* Dynamic MULTI cycle: invoke the populate callback
+						 * to fetch the option list, then cycle. Empty/error
+						 * states map clicks to recovery actions: empty →
+						 * retry (no-op, list will refresh on next render);
+						 * error → set the cvar to "" so default device is
+						 * used on next snd_restart. */
+						if ( focusedItem->populateCallback[0] ) {
+							wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( focusedItem->populateCallback );
+							if ( pop ) {
+								wuiPopulateResult_t res;
+								int dir = ( key == K_MOUSE2 ) ? -1 : 1;
+								int cur = -1, next, j;
+								memset( &res, 0, sizeof( res ) );
+								pop( &res );
+								if ( res.state == WUI_POPULATE_ERROR ) {
+									/* Error → click acts as "Use default" */
+									Cvar_Set( focusedItem->cvar, "" );
+								} else if ( res.state == WUI_POPULATE_EMPTY ) {
+									/* Empty → click acts as "Retry": clear
+									 * the cvar so the next snd_restart picks
+									 * the system default; the list refreshes
+									 * automatically on the next render. */
+									Cvar_Set( focusedItem->cvar, "" );
+								} else if ( ( res.state == WUI_POPULATE_SUCCESS ||
+								              res.state == WUI_POPULATE_PARTIAL ) &&
+								            res.count > 0 && res.values && res.names ) {
+									for ( j = 0; j < res.count; j++ ) {
+										if ( res.values[j] &&
+										     !Q_stricmp( cvarBuf, res.values[j] ) ) {
+											cur = j; break;
+										}
+									}
+									next = ( cur + dir + res.count ) % res.count;
+									if ( next < 0 ) next += res.count;
+									if ( res.values[next] ) {
+										Cvar_Set( focusedItem->cvar, res.values[next] );
+									}
+								}
+								if ( focusedItem->action[0] ) {
+									WiredUI_RunScript( menu, focusedItem, focusedItem->action );
+								}
+							}
+						}
+						else if ( focusedItem->multiData ) {
 							int cur = -1, next, j;
 							int dir = ( key == K_MOUSE2 ) ? -1 : 1;
 							// find current value index
@@ -3035,6 +3206,34 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					if ( val < focusedItem->sliderData.minVal ) val = focusedItem->sliderData.minVal;
 					if ( val > focusedItem->sliderData.maxVal ) val = focusedItem->sliderData.maxVal;
 					Cvar_Set( focusedItem->cvar, va( "%g", val ) );
+				}
+				else if ( focusedItem->type == ITEM_TYPE_MULTI && focusedItem->populateCallback[0] ) {
+					/* Dynamic MULTI: arrow-cycle via populate callback. */
+					wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( focusedItem->populateCallback );
+					if ( pop ) {
+						wuiPopulateResult_t res;
+						int cur = -1, next, j;
+						memset( &res, 0, sizeof( res ) );
+						pop( &res );
+						if ( ( res.state == WUI_POPULATE_SUCCESS ||
+						       res.state == WUI_POPULATE_PARTIAL ) &&
+						     res.count > 0 && res.values && res.names ) {
+							for ( j = 0; j < res.count; j++ ) {
+								if ( res.values[j] &&
+								     !Q_stricmp( cvarBuf, res.values[j] ) ) {
+									cur = j; break;
+								}
+							}
+							next = ( cur + dir + res.count ) % res.count;
+							if ( next < 0 ) next += res.count;
+							if ( res.values[next] ) {
+								Cvar_Set( focusedItem->cvar, res.values[next] );
+							}
+							if ( focusedItem->action[0] ) {
+								WiredUI_RunScript( menu, focusedItem, focusedItem->action );
+							}
+						}
+					}
 				}
 				else if ( focusedItem->type == ITEM_TYPE_MULTI && focusedItem->multiData ) {
 					int cur = -1, next, j;

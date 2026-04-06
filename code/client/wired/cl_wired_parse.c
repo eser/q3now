@@ -527,6 +527,17 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 				}
 			}
 		}
+		else if ( !Q_stricmp( token.string, "populateCallback" ) ) {
+			// populateCallback "audio_devices"
+			//
+			// Marks an ITEM_TYPE_MULTI as dynamic: at render time the named
+			// callback (registered via WiredUI_RegisterPopulateCallback) is
+			// invoked to populate the option list. Replaces cvarFloatList /
+			// cvarStrList for runtime-discovered options.
+			if ( WiredPC_String( handle, &str ) ) {
+				Q_strncpyz( item->populateCallback, str, sizeof( item->populateCallback ) );
+			}
+		}
 		else if ( !Q_stricmp( token.string, "maxChars" ) ) {
 			WiredPC_Int( handle, &item->maxChars );
 		}

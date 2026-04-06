@@ -18,6 +18,9 @@ function pointers. Auto-generated from cg_superhud_private.c.
 extern void* CG_SHUDElementAmmoMessageCreate(const superhudConfig_t*);
 extern void CG_SHUDElementAmmoMessageDestroy(void*);
 extern void CG_SHUDElementAmmoMessageRoutine(void*);
+extern void* CG_SHUDElementAudioWaveformCreate(const superhudConfig_t*);
+extern void CG_SHUDElementAudioWaveformRoutine(void*);
+extern void CG_SHUDElementAudioWaveformDestroy(void*);
 extern void* CG_SHUDElementChat10Create(const superhudConfig_t*);
 extern void* CG_SHUDElementChat11Create(const superhudConfig_t*);
 extern void* CG_SHUDElementChat12Create(const superhudConfig_t*);
@@ -241,6 +244,7 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "grid", 0, CG_SHUDElementGridCreate, CG_SHUDElementGridRoutine, CG_SHUDElementGridDestroy },
 	{ "predecorate", 0, CG_SHUDElementDecorCreate, CG_SHUDElementDecorRoutine, CG_SHUDElementDecorDestroy },
 	{ "ammomessage", 0, CG_SHUDElementAmmoMessageCreate, CG_SHUDElementAmmoMessageRoutine, CG_SHUDElementAmmoMessageDestroy },
+	{ "audio_waveform", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementAudioWaveformCreate, CG_SHUDElementAudioWaveformRoutine, CG_SHUDElementAudioWaveformDestroy },
 	{ "attackericon", 0, NULL, NULL, NULL },
 	{ "attackername", 0, NULL, NULL, NULL },
 	{ "chat1", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat1Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },

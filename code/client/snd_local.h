@@ -198,6 +198,11 @@ extern cvar_t *s_doppler;
 extern cvar_t *s_muteWhenUnfocused;
 extern cvar_t *s_muteWhenMinimized;
 
+/* miniaudio backend cvars (task-3) */
+extern cvar_t *s_device;
+extern cvar_t *s_latency;
+extern cvar_t *s_underruns;
+
 /* CNQ3 backport: s_autoMute bitmask
  *   0 = never auto-mute
  *   1 = mute when the window loses input focus

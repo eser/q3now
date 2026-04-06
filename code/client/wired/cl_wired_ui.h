@@ -92,6 +92,51 @@ void     WiredUI_RegisterElement( const char *name,
                                    wiredElementRoutine_t routine,
                                    wiredElementDestroy_t destroy );
 
+// ── populate callbacks (for dynamicMulti / runtime-populated MULTI) ───
+//
+// A populate callback fills in an option list at menu open / render
+// time. .wmenu files reference one via:
+//
+//   itemDef {
+//       type 12                            // MULTI
+//       cvar "s_device"
+//       populateCallback "audio_devices"
+//       ...
+//   }
+//
+// At render time the MULTI item invokes the named callback once per
+// frame; the callback returns option labels/values and a state describing
+// the result (loading / empty / error / success / partial). The renderer
+// dispatches per-state visuals (e.g. "No audio devices detected" + Retry
+// in the empty state, normal dropdown in the success state).
+//
+// All option strings are owned by the callback (typically a small static
+// buffer). The renderer never frees them and must finish reading before
+// the next callback invocation — which is fine because rendering is
+// fully synchronous.
+
+typedef enum {
+	WUI_POPULATE_LOADING = 0,   // populate is in progress (sync APIs skip this)
+	WUI_POPULATE_EMPTY   = 1,   // callback succeeded but found zero options
+	WUI_POPULATE_ERROR   = 2,   // callback failed (e.g. driver enumeration failed)
+	WUI_POPULATE_SUCCESS = 3,   // callback returned ≥1 option
+	WUI_POPULATE_PARTIAL = 4    // some options returned, some failed/marked
+} wuiPopulateState_t;
+
+typedef struct {
+	int             state;          // wuiPopulateState_t
+	int             count;          // number of valid entries in names[]/values[]
+	const char    **names;          // option labels (callback-owned static storage)
+	const char    **values;         // cvar values (often the same pointers as names)
+} wuiPopulateResult_t;
+
+typedef int (*wuiPopulateCallback_t)( wuiPopulateResult_t *out );
+
+void                     WiredUI_RegisterPopulateCallback( const char *name,
+                                                            wuiPopulateCallback_t fn );
+wuiPopulateCallback_t    WiredUI_GetPopulateCallback( const char *name );
+void                     WiredUI_RegisterCorePopulateCallbacks( void );
+
 // ── cgame batch registration ──────────────────────────────────────────
 //
 // Called once from CG_Init to register all core symbols and elements.
@@ -263,6 +308,12 @@ typedef struct wiredItemDef_s {
 	wiredSliderDef_t sliderData;            // for ITEM_TYPE_SLIDER (cvarFloat min/max)
 	int             maxChars;               // for ITEM_TYPE_EDITFIELD
 	int             maxPaintChars;          // visible chars in edit field
+
+	// Dynamic MULTI: when populateCallback is set on an ITEM_TYPE_MULTI, the
+	// option list is filled at render time by the named callback (registered
+	// via WiredUI_RegisterPopulateCallback) instead of via cvarFloatList /
+	// cvarStrList. Empty string = static MULTI (legacy behaviour).
+	char            populateCallback[64];
 
 	// listbox data (for ITEM_TYPE_LISTBOX)
 	int             columns;                // number of columns

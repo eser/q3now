@@ -21,6 +21,24 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 
+/*
+The audio output backend was migrated from three platform-specific files
+(`win_snd.c`, `linux_snd.c`, `sdl_snd.c`) to a single cross-platform `snd_miniaudio.c`
+that uses the vendored [miniaudio](https://github.com/mackron/miniaudio) v0.11.25
+single-header library via its low-level `ma_device` API only.
+
+When working on audio:
+- The audio callback in `S_MiniaudioCallback` MUST remain lock-free.
+  Run `tools/check_audio_callback.sh` to verify.
+- Do NOT use miniaudio's high-level `ma_engine` / `ma_sound` APIs — they would
+  recreate the dual-mixer problem we deliberately avoided.
+- Do NOT touch `snd_mix.c` (the engine mixer) or `S_SpatializeOrigin`. They are
+  battle-tested and intentionally untouched by the migration.
+- The dedicated server build skips the audio path via `#ifndef DEDICATED`.
+
+
+*/
+
 void S_Init( void );
 void S_Shutdown( void );
 
@@ -78,3 +96,28 @@ void S_DisplayFreeMemory(void);
 void S_ClearSoundBuffer( void );
 
 void SNDDMA_Activate( void );
+
+/* Wired UI audio waveform hook.
+ * Copies the most recent `outCount` RMS levels from the lock-free ring
+ * buffer written by the miniaudio audio callback into `outLevels` (oldest
+ * first, newest last). Safe to call from the main/render thread. Returns
+ * the number of levels written (≤ outCount, and ≤ S_LEVELS_RING_SIZE
+ * internal to snd_miniaudio.c). When no audio device is running this
+ * still writes zeros if the ring has been memset on shutdown. */
+int S_GetRecentLevels( float *outLevels, int outCount );
+
+/* Wired UI audio device dropdown hook.
+ * Enumerates available playback devices via miniaudio and writes up to
+ * `outCapacity` device-name pointers into `outNames`. The returned
+ * pointers are owned by a static buffer inside snd_miniaudio.c and remain
+ * valid until the next call to S_GetAudioDeviceList. Callers MUST NOT
+ * free or modify the strings.
+ *
+ * Returns:
+ *    > 0: number of device names written
+ *    0:   no devices found (empty)
+ *   -1:   enumeration failed (error)
+ *
+ * Threading: MAIN THREAD ONLY. Spins up a fresh ma_context, allocates
+ * inside miniaudio, then uninits. Never call from the audio callback. */
+int S_GetAudioDeviceList( const char **outNames, int outCapacity );

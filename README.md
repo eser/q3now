@@ -103,6 +103,39 @@ Three MSDF fonts are available:
 
 Font atlases are generated at build time via `tools/msdf/generate_atlases.sh`. See `tools/msdf/fonts/README.md` for licensing.
 
+## Audio backend
+
+q3now uses [miniaudio](https://github.com/mackron/miniaudio) (single-header, vendored at
+`code/client/miniaudio.h`) as its single cross-platform audio output backend, replacing
+the legacy `win_snd.c` (DirectSound), `linux_snd.c` (ALSA/OSS), and `sdl_snd.c` (SDL2 Audio)
+that were inherited from the Quake3e fork.
+
+### Supported platforms
+
+- **Windows**: WASAPI (loaded dynamically by miniaudio)
+- **macOS**: CoreAudio + AudioToolbox
+- **Linux**: PulseAudio with ALSA fallback (PipeWire works through PulseAudio compat)
+
+### Cvars
+
+In addition to the existing `s_volume`, `s_musicvolume`, `s_separation`, `s_mixahead`,
+and `s_khz`, three new cvars expose miniaudio configuration:
+
+| Cvar | Default | Range | Purpose |
+|---|---|---|---|
+| `s_device` | `""` (system default) | any device name | Override audio output device. Empty string uses the system default. The Wired UI audio panel populates this from a live device dropdown. |
+| `s_latency` | `6` | `2`–`20` ms | Period size hint in milliseconds. Lower = lower latency, higher = more underrun headroom. Requires `snd_restart` to take effect. |
+| `s_underruns` | `0` | read-only counter | Increments when the audio callback runs out of painted data. Useful for diagnosing audio stuttering. |
+
+### Architecture
+
+The miniaudio backend follows the existing engine mixer's `SNDDMA_*` interface and stays
+strictly lock-free in the audio callback (verified by `tools/check_audio_callback.sh`).
+The mixer (`snd_mix.c`) and spatial audio model (`S_SpatializeOrigin`) are unchanged from
+their classic id Software / Quake3e form.
+
+The dedicated server build excludes the entire audio path via `#ifndef DEDICATED`.
+
 ## Vulkan renderer
 
 Based on
@@ -231,9 +264,30 @@ binaries into your existing Quake III Arena installation._
 
 Discord channel: https://discordapp.com/invite/X3Exs4C
 
-## Links
+## Thanks
 
-- https://bitbucket.org/CPMADevs/cnq3
-- https://github.com/ioquake/ioq3
-- https://github.com/kennyalive/Quake-III-Arena-Kenny-Edition
-- https://github.com/OpenArena/engine
+q3now contains code from;
+
+- BrightArena
+- CNQ3
+- ioEF engine
+- ioquake3
+- NetRadiant's q3map2
+- OpenArena
+- OpenMoHAA
+- OSP2
+- OSP2-BE
+- Quake 3 Arena
+- Quake 3 Team Arena
+- Quake-III-Arena-Kenny-Edition
+- Quake3e
+- RTCW MP
+- RTCW SP
+- spearmint
+- Tremulous
+- Unlagged
+- Wolfenstein: Enemy Territory
+- World of Padman
+- Xreal
+- ZEQ2-lite
+- ZNudge

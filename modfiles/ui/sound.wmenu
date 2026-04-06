@@ -1,13 +1,14 @@
-// sound.wmenu - Wired UI sound settings panel
-// Ported from TA system.menu "Other" tab, Sound section.
-// TA has sound settings within system_menu rect 186 0 443 426.
-// Sound items: Effects Volume, Music Volume, Sound Quality, Doppler.
+// sound.wmenu - Wired UI sound settings panel (miniaudio backend)
+// Exposes the cvars provided by snd_miniaudio.c:
+//   s_volume, s_musicvolume, s_khz, s_latency, s_device, s_underruns
+// and embeds the live audio_waveform HUD element so the user can see
+// playback levels while testing.
 
 #include "ui/wmenumacros.h"
 
 menuDef {
 	name "sound"
-	// Centered panel
+	// Compact centered floating panel
 	rect 0.266 0.125 0.469 0.750
 	fullScreen 0
 	visible 1
@@ -19,10 +20,11 @@ menuDef {
 
 	onESC { close }
 
-	WLABEL(0.000, 0.022, 1.000, 0.056, "Sound", 24, 1)
-	WSEPARATOR(0.033, 0.078, 0.933)
+	// ── Title ─────────────────────────────────────────────────
+	WLABEL(0.000, 0.022, 1.000, 0.056, "Audio Settings", 24, 1)
+	WSEPARATOR(0.033, 0.089, 0.933)
 
-	// TA: Effects Volume slider at rect 99 160 256 20 (within Other)
+	// ── Volumes ───────────────────────────────────────────────
 	itemDef {
 		type 10
 		text "Effects Volume:"
@@ -35,7 +37,6 @@ menuDef {
 		mouseExit { setcolor forecolor WCOLOR_TEXT }
 	}
 
-	// TA: Music Volume slider at rect 99 187 256 20
 	itemDef {
 		type 10
 		text "Music Volume:"
@@ -50,51 +51,98 @@ menuDef {
 
 	WSEPARATOR(0.033, 0.256, 0.933)
 
-	// TA: Sound Quality at rect 99 214 256 20
+	// ── Sample rate (multi) ───────────────────────────────────
 	itemDef {
 		type 12
-		text "Sound Quality:"
-		rect 0.033 0.289 0.933 0.056
+		text "Sample Rate:"
+		rect 0.033 0.278 0.933 0.056
 		font "oxanium" 14
 		forecolor WCOLOR_TEXT
 		cvar "s_khz"
-		cvarFloatList { "22 kHz (High)" 22 "11 kHz (Low)" 11 "44 kHz (Very High)" 44 }
+		cvarFloatList { "11 kHz" 11 "22 kHz" 22 "44 kHz" 44 "48 kHz" 48 }
 		visible 1
 		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
 		mouseExit { setcolor forecolor WCOLOR_TEXT }
 	}
 
-	// TA: Doppler Sound at rect 99 241 256 20
-	WYESNO(0.033, 0.356, 0.933, 0.056, "Doppler Sound:", 14, "s_doppler")
-
-	// Our addition: Sound System (OpenAL vs SDL)
+	// ── Latency / period size (slider, ms) ────────────────────
 	itemDef {
-		type 12
-		text "Sound System:"
-		rect 0.033 0.422 0.933 0.056
+		type 10
+		text "Latency (ms):"
+		rect 0.033 0.344 0.933 0.056
 		font "oxanium" 14
 		forecolor WCOLOR_TEXT
-		cvar "s_useOpenAL"
-		cvarFloatList { "SDL" 0 "OpenAL" 1 }
+		cvarFloat "s_latency" 6 2 20
 		visible 1
 		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
 		mouseExit { setcolor forecolor WCOLOR_TEXT }
 	}
 
-	WSEPARATOR(0.033, 0.500, 0.933)
+	// ── Output device (dynamic MULTI dropdown) ────────────────
+	// Type 12 MULTI with populateCallback "audio_devices": the option
+	// list is built at render time by S_GetAudioDeviceList (miniaudio
+	// playback enumeration). Click / arrow keys cycle through real
+	// devices. Empty/error states map to recovery actions (see the
+	// CL_WiredAudioDevicesPopulate dispatch in cl_wired_ui.c).
+	itemDef {
+		type 12
+		text "Device:"
+		rect 0.033 0.411 0.933 0.056
+		font "oxanium" 14
+		forecolor WCOLOR_TEXT
+		cvar "s_device"
+		populateCallback "audio_devices"
+		visible 1
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit { setcolor forecolor WCOLOR_TEXT }
+	}
 
-	// Restart notice
+	// ── Underrun counter (static note) ────────────────────────
+	// .wmenu cannot bind a label to a live cvar value, so we point
+	// the user at the cvar in console. Non-zero underruns indicate
+	// audio glitches; check after long sessions.
 	itemDef {
 		type 0
-		text "Changes require snd_restart"
-		rect 0.033 0.522 0.933 0.044
-		font "oxanium" 12
+		text "Underruns: see console cvar 's_underruns'"
+		rect 0.033 0.478 0.933 0.044
+		font "oxanium" 11
 		textalign 1
-		forecolor 0.5 0.5 0.3 1
+		forecolor WCOLOR_TEXT_DIM
 		visible 1
 		decoration
 	}
 
-	WBUTTON(0.133, 0.589, 0.300, 0.056, "Apply", 14, exec "snd_restart")
-	WBUTTON(0.567, 0.589, 0.300, 0.056, "Back", 14, close)
+	WSEPARATOR(0.033, 0.533, 0.933)
+
+	// ── Live waveform visualization ───────────────────────────
+	// Reads recent RMS levels from snd_miniaudio.c via S_GetRecentLevels.
+	// Driven by the snd_test command's 1 kHz sine sweep, or any active
+	// sound. Bar colour: green (normal) → amber (loud) → red (clipping).
+	itemDef {
+		hudElement "audio_waveform"
+		rect 0.067 0.567 0.867 0.111
+		backcolor 0.05 0.05 0.07 0.85
+		forecolor 0.55 0.58 0.65 0.6
+		fill
+		visible 1
+	}
+
+	WSEPARATOR(0.033, 0.700, 0.933)
+
+	// ── Hint ──────────────────────────────────────────────────
+	itemDef {
+		type 0
+		text "Sample rate / device changes require Apply (snd_restart)"
+		rect 0.033 0.722 0.933 0.044
+		font "oxanium" 11
+		textalign 1
+		forecolor WCOLOR_TEXT_DIM
+		visible 1
+		decoration
+	}
+
+	// ── Buttons row ───────────────────────────────────────────
+	WBUTTON(0.067, 0.789, 0.267, 0.056, "Test",  14, exec "snd_test")
+	WBUTTON(0.367, 0.789, 0.267, 0.056, "Apply", 14, exec "snd_restart")
+	WBUTTON(0.667, 0.789, 0.267, 0.056, "Back",  14, close)
 }
