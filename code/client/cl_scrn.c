@@ -447,17 +447,21 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	// of UI VM state.  After CL_ShutdownAll() the UI VM may be inactive
 	// for several frames — without this guard the old framebuffer content
 	// (levelshot) bleeds through.
-	if ( cl_loadProgress.startTime > 0
-		 && !Q_stricmp( cls.servername, "localhost" ) ) {
+	if ( cl_loadProgress.startTime > 0 ) {
 		if ( cls.state == CA_LOADING || cls.state == CA_PRIMED ) {
-			CL_DrawLoadingScreen();
+			if ( !cl_loadFading || cl_loadFadeAlpha <= 0.0f ) {
+				cl_loadFadeAlpha = 1.0f;
+				cl_loadFading = qfalse;
+			}
 			if ( cgvm && cls.state == CA_PRIMED ) {
 				CL_CGameRendering( stereoFrame );
 			}
+			CL_DrawLoadingScreen();
 		} else if ( cls.state == CA_ACTIVE ) {
-			if ( cls.realtime - cl_loadProgress.startTime < ( com_developer->integer ? 10000 : 1000 ) ) {
+			if ( cls.realtime - cl_loadProgress.startTime < 0 ) { // ( com_developer->integer ? 1500 : 350 )
 				// Still within minimum display time — draw loading screen at full opacity
 				cl_loadFadeAlpha = 1.0f;
+				CL_CGameRendering( stereoFrame );
 				CL_DrawLoadingScreen();
 			} else if ( !cl_loadFading ) {
 				// Minimum display time expired — start fade transition
@@ -527,6 +531,10 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			break;
 		case CA_LOADING:
 		case CA_PRIMED:
+			if ( !cl_loadFading || cl_loadFadeAlpha <= 0.0f ) {
+				cl_loadFadeAlpha = 1.0f;
+				cl_loadFading = qfalse;
+			}
 			// Remote server loading: draw loading screen
 			// (localhost loading is handled by the priority block above)
 			CL_DrawLoadingScreen();

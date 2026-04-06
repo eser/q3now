@@ -458,16 +458,35 @@ void WiredHud_Routine( int realtime ) {
 			const char *menuName;
 			wiredMenuDef_t *sbMenu;
 
-			// select scoreboard menu by gametype (numeric: 1=duel 5=tdm 6=ctf 7=1fctf)
 			switch ( wiredHud->gametype ) {
-				case 1:  menuName = va( "%s_duel", prefix ); break;
-				case 5:  menuName = va( "%s_tdm", prefix ); break;
-				case 6:  menuName = va( "%s_ctf", prefix ); break;
-				case 7:  menuName = va( "%s_ctf", prefix ); break;
-				default: menuName = va( "%s_ffa", prefix ); break;
+				case GT_DUEL:
+					menuName = va( "%s_duel", prefix );
+					break;
+				case GT_TDM:
+					menuName = va( "%s_tdm", prefix );
+					break;
+				case GT_CTF:
+				case GT_1FCTF:
+					menuName = va( "%s_ctf", prefix );
+					break;
+				case GT_OBELISK:
+				case GT_HARVESTER:
+					menuName = va( "%s_tdm", prefix );
+					break;
+				case GT_DEATHMATCH:
+				case GT_KINGOFTHEHILL:
+				case GT_LASTMANSTANDING:
+				default:
+					menuName = va( "%s_ffa", prefix );
+					break;
 			}
 
 			sbMenu = WiredUI_FindMenu( menuName );
+			if ( !sbMenu ) {
+				menuName = va( "%s_ffa", prefix );
+				sbMenu = WiredUI_FindMenu( menuName );
+			}
+
 			if ( sbMenu ) {
 				// set cvars for header text
 				Cvar_Set( "wired_sb_gametype", wiredHud->gametypeName );

@@ -1658,6 +1658,26 @@ static void PM_BeginWeaponChange( int weapon ) {
     }
 }
 
+static void PM_OutOfAmmoChange( void ) {
+	int i;
+
+	for ( i = WP_NUM_WEAPONS - 1; i > WP_NONE; i-- ) {
+		if ( !bg_weaponlist[i].switchOnOutOfAmmo ) {
+			continue;
+		}
+		if ( !( pm->ps->stats[STAT_WEAPONS] & ( 1 << i ) ) ) {
+			continue;
+		}
+		if ( !pm->ps->ammo[i] ) {
+			continue;
+		}
+
+		pm->cmd.weapon = i;
+		PM_BeginWeaponChange( i );
+		break;
+	}
+}
+
 
 /*
 ===============
@@ -1754,6 +1774,7 @@ qboolean PM_MG_Burst_Think( pmove_t *pm ) {
 		pm->ps->burstRoundsRemaining = 0;
 		PM_AddEvent( EV_NOAMMO );
 		pm->ps->weaponTime += cpm_outofammodelay;
+		PM_OutOfAmmoChange();
 		return qtrue;
 	}
 	// fire next burst round
@@ -1979,6 +2000,7 @@ qboolean PM_LG_ChainArc_Think( pmove_t *pm ) {
 		pm->ps->weaponstate = WEAPON_READY;
 		PM_AddEvent( EV_NOAMMO );
 		pm->ps->weaponTime += 500;
+		PM_OutOfAmmoChange();
 		return qtrue;
 	}
 
@@ -2183,6 +2205,7 @@ static void PM_Weapon( void ) {
 		PM_AddEvent( EV_NOAMMO );
 		// pm->ps->weaponTime += 500;
         pm->ps->weaponTime += cpm_outofammodelay; // CPM: Shorter delay in pro mode
+		PM_OutOfAmmoChange();
 		return;
 	}
 

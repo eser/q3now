@@ -36,10 +36,11 @@ Adding a new callback:
  * Threading: MAIN THREAD ONLY. The renderer invokes this from the UI
  * frame loop, never from the audio callback. */
 
+/* +1 for the leading "Default Device" sentinel entry */
 #define WUI_AUDIO_DEVICE_CAPACITY  64
 
-static const char *s_audioDeviceNames[WUI_AUDIO_DEVICE_CAPACITY];
-static const char *s_audioDeviceValues[WUI_AUDIO_DEVICE_CAPACITY];
+static const char *s_audioDeviceNames[WUI_AUDIO_DEVICE_CAPACITY + 1];
+static const char *s_audioDeviceValues[WUI_AUDIO_DEVICE_CAPACITY + 1];
 
 static int CL_WiredAudioDevicesPopulate( wuiPopulateResult_t *out ) {
 	int count;
@@ -52,7 +53,8 @@ static int CL_WiredAudioDevicesPopulate( wuiPopulateResult_t *out ) {
 	out->names = NULL;
 	out->values = NULL;
 
-	count = S_GetAudioDeviceList( s_audioDeviceNames, WUI_AUDIO_DEVICE_CAPACITY );
+	/* Reserve slot 0 for the system-default option; enumerate into [1..]. */
+	count = S_GetAudioDeviceList( s_audioDeviceNames + 1, WUI_AUDIO_DEVICE_CAPACITY );
 
 	if ( count < 0 ) {
 		/* miniaudio context init or device enumeration failed. */
@@ -60,24 +62,22 @@ static int CL_WiredAudioDevicesPopulate( wuiPopulateResult_t *out ) {
 		return 0;
 	}
 
-	if ( count == 0 ) {
-		/* No playback devices present at all. Likely no audio hardware
-		 * or the OS audio service is offline. */
-		out->state = WUI_POPULATE_EMPTY;
-		return 0;
-	}
+	/* Prepend "Default Device" — empty cvar value tells miniaudio to use
+	 * whatever the OS considers the default output. */
+	s_audioDeviceNames[0]  = "Default Device";
+	s_audioDeviceValues[0] = "";
 
 	/* For miniaudio the cvar value IS the device name (s_device matching
-	 * is by name, not UUID), so values[] mirrors names[]. */
-	for ( i = 0; i < count; i++ ) {
+	 * is by name, not UUID), so values[] mirrors names[] for real devices. */
+	for ( i = 1; i <= count; i++ ) {
 		s_audioDeviceValues[i] = s_audioDeviceNames[i];
 	}
 
 	out->state = WUI_POPULATE_SUCCESS;
-	out->count = count;
+	out->count = count + 1;
 	out->names = s_audioDeviceNames;
 	out->values = s_audioDeviceValues;
-	return count;
+	return count + 1;
 }
 
 /* ── batch registration ──────────────────────────────────────────────

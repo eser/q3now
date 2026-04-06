@@ -1078,6 +1078,8 @@ memory on the hunk from cgame, ui, and renderer
 =====================
 */
 void CL_MapLoading( const char *mapname ) {
+	qboolean localReconnect;
+
 	if ( com_dedicated->integer ) {
 		cls.state = CA_DISCONNECTED;
 		Key_SetCatcher( KEYCATCH_CONSOLE );
@@ -1091,30 +1093,15 @@ void CL_MapLoading( const char *mapname ) {
 	Con_Close();
 	Key_SetCatcher( 0 );
 
-	// Set loading flag early so SCR_DrawScreenField suppresses the
-	// levelshot/menu flash during disconnect→reconnect transition.
-	// CL_LoadingScreenFinished() clears this when gameplay starts.
-	if ( !cl_loadProgress.startTime ) {
-		cl_loadProgress.startTime = cls.realtime ? cls.realtime : 1;
-	}
-
-	// Load map metadata and BSP wireframe preview for the loading screen.
-	// mapname comes from SV_SpawnServer parameter (cvar not set yet at this point).
-	if ( mapname && mapname[0] ) {
-		CL_LoadMapInfo( mapname );
-		CL_ApplyLoadingTheme( &cl_mapInfo );
-		CL_BuildBspPreview( mapname );
-	}
+	localReconnect = ( cls.state >= CA_CONNECTED && !Q_stricmp( cls.servername, "localhost" ) );
 
 	// if we are already connected to the local host, stay connected
-	if ( cls.state >= CA_CONNECTED && !Q_stricmp( cls.servername, "localhost" ) ) {
+	if ( localReconnect ) {
 		cls.state = CA_CONNECTED;		// so the connect screen is drawn
 		Com_Memset( cls.updateInfoString, 0, sizeof( cls.updateInfoString ) );
 		Com_Memset( clc.serverMessage, 0, sizeof( clc.serverMessage ) );
 		Com_Memset( &cl.gameState, 0, sizeof( cl.gameState ) );
 		clc.lastPacketSentTime = cls.realtime - 9999;  // send packet immediately
-		cls.framecount++;
-		SCR_UpdateScreen();
 	} else {
 		// clear nextmap so the cinematic shutdown doesn't execute it
 		Cvar_Set( "nextmap", "" );
@@ -1122,8 +1109,28 @@ void CL_MapLoading( const char *mapname ) {
 		Q_strncpyz( cls.servername, "localhost", sizeof(cls.servername) );
 		cls.state = CA_CHALLENGING;		// so the connect screen is drawn
 		Key_SetCatcher( 0 );
-		cls.framecount++;
-		SCR_UpdateScreen();
+	}
+
+	Com_Memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
+	CL_ResetLoadingScreenState();
+	CL_ClearMapInfo();
+	CL_ClearBspPreview();
+
+	cl_loadProgress.startTime = cls.realtime ? cls.realtime : 1;
+	cl_loadProgress.phase = "initializing";
+
+	// Load map metadata and BSP wireframe preview for the loading screen.
+	// mapname comes from SV_SpawnServer parameter (cvar not set yet at this point).
+	if ( mapname && mapname[0] ) {
+		CL_BuildBspPreview( mapname );
+		CL_LoadMapInfo( mapname );
+		CL_ApplyLoadingTheme( &cl_mapInfo );
+	}
+
+	cls.framecount++;
+	SCR_UpdateScreen();
+
+	if ( !localReconnect ) {
 		clc.connectTime = -RETRANSMIT_TIMEOUT;
 		NET_StringToAdr( cls.servername, &clc.serverAddress, NA_UNSPEC );
 		// we don't need a challenge on the localhost
@@ -1290,6 +1297,10 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 	}
 
 	CL_ClearState();
+	Com_Memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
+	CL_ResetLoadingScreenState();
+	CL_ClearMapInfo();
+	CL_ClearBspPreview();
 
 	// wipe the client connection
 	Com_Memset( &clc, 0, sizeof( clc ) );

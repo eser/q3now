@@ -1,60 +1,60 @@
-// options.wmenu - Wired UI options hub
-// Ported from TA setup.menu (rect 186 0 454 480 -> menuW=454 menuH=480)
-// Hub with sub-menu buttons: Controls, Video, Game Options, Defaults, etc.
-// TA's CD Key and Clear Scores replaced with our split menus.
+// options.wmenu - Wired UI options hub (QL-style navigation)
 
 #include "ui/wmenumacros.h"
 
 menuDef {
 	name "options"
-	// TA: rect 186 0 454 480 -> 186/640=0.291, 0/480=0, 454/640=0.709, 480/480=1.0
-	rect 0.291 0.000 0.709 1.000
+	anchor CENTER
+	rect 0 0 0.360 0.860
 	fullScreen 0
 	visible 1
 	style 1
 	backcolor 0.08 0.08 0.12 0.92
-	focuscolor 1 0.75 0 0.15
+	focuscolor WCOLOR_ACCENT
+	layout column
+	padding 0.045
+	gap 0.012
+	justify center
 
 	WFULLSCREEN_BACKGROUND
 
-	onOpen { hide grpmessage }
+	onOpen { }
 	onESC { close }
 
-	// TA solid_box: rect 4 2 178 426 -> 4/454=0.009, 2/480=0.004, 178/454=0.392, 426/480=0.888
 	itemDef {
-		name "solid_box"
-		rect 0.009 0.004 0.392 0.888
-		style 1
-		border 1
-		bordersize 1
-		bordercolor 0.5 0.5 0.5 0.5
-		backcolor 0.05 0.05 0.1 0.4
-		visible 1
+		type 0
+		text "OPTIONS"
+		rect 0 0 1.0 0.060
+		textalign 1
+		font "sansman" 28
+		forecolor WCOLOR_ACCENT
 		decoration
+		visible 1
+		grow 0
 	}
 
-	// ── Navigation buttons ──
-	// TA: Controls at rect 0 75 200 40 -> 0/454=0, 75/480=0.156, 200/454=0.441, 40/480=0.083
-	WBUTTON(0.000, 0.156, 0.441, 0.083, "Controls", 18, close ; open "controls")
-	// TA: System at rect 0 125 200 40 -> 125/480=0.260
-	WBUTTON(0.000, 0.260, 0.441, 0.083, "Video", 18, close ; open "video")
-	// TA: Game Options at rect 0 175 200 40 -> 175/480=0.365
-	WBUTTON(0.000, 0.365, 0.441, 0.083, "Game Options", 18, close ; open "preferences")
-	// TA: CD Key at rect 0 225 200 40 -> 225/480=0.469
-	// Replaced with Display
-	WBUTTON(0.000, 0.469, 0.441, 0.083, "Display", 18, close ; open "display")
-	// TA: Defaults at rect 0 275 200 40 -> 275/480=0.573
-	WBUTTON(0.000, 0.573, 0.441, 0.083, "Sound", 18, close ; open "sound")
-	// TA: Clear Scores at rect 0 325 200 40 -> 325/480=0.677
-	WBUTTON(0.000, 0.677, 0.441, 0.083, "Network", 18, close ; open "network")
-	// Player settings
-	WBUTTON(0.000, 0.781, 0.441, 0.083, "Player", 18, close ; open "playersettings")
+	itemDef {
+		type 0
+		text "Configure your game"
+		rect 0 0 1.0 0.030
+		textalign 1
+		font "oxanium" 12
+		forecolor WCOLOR_TEXT_DIM
+		decoration
+		visible 1
+		grow 0
+	}
 
-	// ── Bottom bar ──
-	// TA: gotobar rect 0 430 640 30 (screen coords) -> bottom region
-	// TA: back arrow at rect 16 424 50 50 (screen coords)
-	// Using normalized within menu:
-	// 430/480=0.896, 640 is wider than menu so fill width
-	WSEPARATOR(0.000, 0.888, 1.000)
-	WBUTTON(0.000, 0.917, 0.441, 0.063, "Back", 16, close)
+	WSEPARATOR(0, 0, 1.0)
+
+	WBUTTON(0, 0, 1.0, 0.058, "Video", 20, close ; open "video")
+	WBUTTON(0, 0, 1.0, 0.058, "Display", 20, close ; open "display")
+	WBUTTON(0, 0, 1.0, 0.058, "Sound", 20, close ; open "sound")
+	WBUTTON(0, 0, 1.0, 0.058, "Controls", 20, close ; open "controls")
+	WBUTTON(0, 0, 1.0, 0.058, "Network", 20, close ; open "network")
+	WBUTTON(0, 0, 1.0, 0.058, "Preferences", 20, close ; open "preferences")
+	WBUTTON(0, 0, 1.0, 0.058, "Player", 20, close ; open "playersettings")
+
+	WSEPARATOR(0, 0, 1.0)
+	WBUTTON(0, 0, 1.0, 0.056, "Back", 18, close)
 }
