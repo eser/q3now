@@ -321,6 +321,15 @@ qboolean vk_bloom( void );
 
 qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size );
 void vk_update_mvp( const float *m );
+#if FEAT_FOG_SYSTEM
+// Push fog parameters as a fragment-stage push constant.
+// Layout: vec4 fogColor (rgb + density), vec4 fogTypeFarClip (type, farClip, enabled, _pad)
+// offset = 64 bytes (after MVP), size = 32 bytes.
+void vk_update_fog_push( const vec4_t color, int fogType, float density, float farClip, qboolean enabled );
+#endif
+// Set a 2D scissor rect on the current command buffer. Pass NULL to restore
+// the fullscreen scissor (equivalent to "no clip region").
+void vk_set_2d_scissor( const int *rect );
 void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
                               float glowWidth, const float *glowColor );
 
@@ -341,7 +350,7 @@ void VBO_PrepareQueues( void );
 void VBO_RenderIBOItems( void );
 void VBO_ClearQueue( void );
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 // IQM GPU skinning
 void vk_init_iqm_gpu_skinning( void );
 void vk_shutdown_iqm_gpu_skinning( void );
@@ -483,7 +492,7 @@ typedef struct {
 		VkDescriptorSet	descriptor[NUM_COMMAND_BUFFERS];	// per-frame descriptor sets
 	} rail;
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	// ── IQM GPU skinning infrastructure ──────────────────────────────
 	//
 	// Self-contained pipeline for skeletal IQM models.
@@ -725,7 +734,7 @@ typedef struct {
 		VkShaderModule rail_helix_vs;
 		VkShaderModule rail_helix_fs;
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 		// IQM GPU skinning
 		VkShaderModule iqm_skinning_vs;
 		VkShaderModule iqm_skinning_fs;

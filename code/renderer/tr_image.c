@@ -1367,15 +1367,33 @@ void R_SetColorMappings( void ) {
 	int		inf;
 	int		shift;
 	qboolean applyGamma;
+	float	brightness;
 
 	if ( !tr.inited ) {
 		// it may be called from window handling functions where gamma flags is now yet known/set
 		return;
 	}
 
-	// setup the overbright lighting
-	// negative value will force gamma in windowed mode
-	tr.overbrightBits = abs( r_overBrightBits->integer );
+	// Float-based brightness (CNQ3-style rework).
+	// When r_brightness != 0 we use its log2 as the effective overbright-bits
+	// shift, replacing the integer r_overBrightBits input. r_overBrightBits
+	// is still honored as a fallback to preserve existing configs and
+	// command-line overrides.
+	if ( r_brightness != NULL && r_brightness->value > 0.0f ) {
+		brightness = r_brightness->value;
+		if ( brightness < 0.25f ) brightness = 0.25f;
+		if ( brightness > 32.0f ) brightness = 32.0f;
+		tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
+		if ( r_overBrightBits->integer < 0 ) {
+			// negative overBrightBits forces gamma even in windowed mode
+			tr.overbrightBits = -tr.overbrightBits;
+		}
+	} else {
+		// setup the overbright lighting
+		// negative value will force gamma in windowed mode
+		tr.overbrightBits = r_overBrightBits->integer;
+	}
+	tr.overbrightBits = abs( tr.overbrightBits );
 
 	// never overbright in windowed mode
 #ifdef USE_FBO

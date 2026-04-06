@@ -64,6 +64,10 @@ void R_InitNextFrame( void ) {
 	r_firstScenePoly = 0;
 
 	r_numpolyverts = 0;
+
+#if FEAT_CORONA
+	R_ClearCoronas();
+#endif
 }
 
 

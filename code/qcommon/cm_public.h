@@ -46,6 +46,21 @@ void		CM_TransformedBoxTrace( trace_t *results, const vec3_t start, const vec3_t
 						clipHandle_t model, int brushmask,
 						const vec3_t origin, const vec3_t angles, qboolean capsule );
 
+void		CM_BiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
+						float startRadius, float endRadius, clipHandle_t model, int brushmask );
+void		CM_TransformedBiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
+						float startRadius, float endRadius, clipHandle_t model, int brushmask,
+						const vec3_t origin );
+
+// Runtime triangle-soup collision registration.
+// Used by IQM models (or any other caller with raw triangle geometry)
+// to register a clipHandle_t that can be used with CM_BoxTrace /
+// CM_TransformedBoxTrace. Returns 0 on failure. Handles persist until
+// CM_ClearMap is called.
+clipHandle_t	CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
+	int numVertexes, const int *indexes, int numIndexes );
+clipHandle_t	CM_LoadIQMGeometry( const char *name );
+
 byte		*CM_ClusterPVS (int cluster);
 
 int			CM_PointLeafnum( const vec3_t p );

@@ -876,6 +876,125 @@ static const void *RB_StretchPic ( const void *data ) {
 
 /*
 =============
+RB_RotatedPic
+=============
+*/
+static const void *RB_RotatedPic( const void *data ) {
+	const rotatedPicCommand_t *cmd = (const rotatedPicCommand_t *)data;
+	shader_t *shader;
+	int numVerts, numIndexes;
+	float cx, cy, hw, hh;
+	float ang, c, s;
+
+	if ( glRefConfig.framebufferObject )
+		FBO_Bind( backEnd.framePostProcessed ? NULL : tr.renderFbo );
+
+	RB_SetGL2D();
+
+	shader = cmd->shader;
+	if ( shader != tess.shader ) {
+		if ( tess.numIndexes ) {
+			RB_EndSurface();
+		}
+		backEnd.currentEntity = &backEnd.entity2D;
+		RB_BeginSurface( shader, 0, 0 );
+	}
+
+	RB_CHECKOVERFLOW( 4, 6 );
+	numVerts = tess.numVertexes;
+	numIndexes = tess.numIndexes;
+
+	tess.numVertexes += 4;
+	tess.numIndexes += 6;
+
+	tess.indexes[ numIndexes ] = numVerts + 3;
+	tess.indexes[ numIndexes + 1 ] = numVerts + 0;
+	tess.indexes[ numIndexes + 2 ] = numVerts + 2;
+	tess.indexes[ numIndexes + 3 ] = numVerts + 2;
+	tess.indexes[ numIndexes + 4 ] = numVerts + 0;
+	tess.indexes[ numIndexes + 5 ] = numVerts + 1;
+
+	{
+		uint16_t color[4];
+		VectorScale4( backEnd.color2D, 257, color );
+		VectorCopy4( color, tess.color[ numVerts ] );
+		VectorCopy4( color, tess.color[ numVerts + 1 ] );
+		VectorCopy4( color, tess.color[ numVerts + 2 ] );
+		VectorCopy4( color, tess.color[ numVerts + 3 ] );
+	}
+
+	cx = cmd->x + cmd->w * 0.5f;
+	cy = cmd->y + cmd->h * 0.5f;
+	hw = cmd->w * 0.5f;
+	hh = cmd->h * 0.5f;
+
+	ang = cmd->angle * ( ( float )M_PI / 180.0f );
+	c = cosf( ang );
+	s = sinf( ang );
+
+	tess.xyz[ numVerts + 0 ][0] = cx + ( -hw * c - -hh * s );
+	tess.xyz[ numVerts + 0 ][1] = cy + ( -hw * s + -hh * c );
+	tess.xyz[ numVerts + 0 ][2] = 0;
+	tess.texCoords[ numVerts + 0 ][0] = cmd->s1;
+	tess.texCoords[ numVerts + 0 ][1] = cmd->t1;
+
+	tess.xyz[ numVerts + 1 ][0] = cx + (  hw * c - -hh * s );
+	tess.xyz[ numVerts + 1 ][1] = cy + (  hw * s + -hh * c );
+	tess.xyz[ numVerts + 1 ][2] = 0;
+	tess.texCoords[ numVerts + 1 ][0] = cmd->s2;
+	tess.texCoords[ numVerts + 1 ][1] = cmd->t1;
+
+	tess.xyz[ numVerts + 2 ][0] = cx + (  hw * c -  hh * s );
+	tess.xyz[ numVerts + 2 ][1] = cy + (  hw * s +  hh * c );
+	tess.xyz[ numVerts + 2 ][2] = 0;
+	tess.texCoords[ numVerts + 2 ][0] = cmd->s2;
+	tess.texCoords[ numVerts + 2 ][1] = cmd->t2;
+
+	tess.xyz[ numVerts + 3 ][0] = cx + ( -hw * c -  hh * s );
+	tess.xyz[ numVerts + 3 ][1] = cy + ( -hw * s +  hh * c );
+	tess.xyz[ numVerts + 3 ][2] = 0;
+	tess.texCoords[ numVerts + 3 ][0] = cmd->s1;
+	tess.texCoords[ numVerts + 3 ][1] = cmd->t2;
+
+	return (const void *)( cmd + 1 );
+}
+
+
+/*
+=============
+RB_SetClipRegion
+=============
+*/
+static const void *RB_SetClipRegion( const void *data ) {
+	const setClipRegionCommand_t *cmd = (const setClipRegionCommand_t *)data;
+
+	if ( tess.numIndexes ) {
+		RB_EndSurface();
+		RB_BeginSurface( tess.shader, tess.fogNum, tess.cubemapIndex );
+	}
+
+	if ( !cmd->hasRegion ) {
+		qglDisable( GL_SCISSOR_TEST );
+	} else {
+		int sx, sy, sw, sh;
+		float xScale = (float)glConfig.vidWidth / 640.0f;
+		float yScale = (float)glConfig.vidHeight / 480.0f;
+		sx = (int)( cmd->x * xScale );
+		sy = glConfig.vidHeight - (int)( ( cmd->y + cmd->h ) * yScale );
+		sw = (int)( cmd->w * xScale );
+		sh = (int)( cmd->h * yScale );
+		if ( sw < 0 ) sw = 0;
+		if ( sh < 0 ) sh = 0;
+		qglScissor( sx, sy, sw, sh );
+		qglEnable( GL_SCISSOR_TEST );
+	}
+
+	return (const void *)( cmd + 1 );
+}
+
+
+/*
+=============
 RB_DrawLine
 =============
 */
@@ -1506,7 +1625,27 @@ static const void	*RB_SwapBuffers( const void *data ) {
 
 //	GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
 
-	ri.GLimp_EndFrame();
+	// CNQ3 port: throttle presentation while a map is loading so the
+	// renderer does not starve the loader thread. r_loadingFpsCap sets
+	// the maximum present rate (0 disables the throttle, default 10).
+	{
+		qboolean skipSwap = qfalse;
+		if ( tr.mapLoading && r_loadingFpsCap->integer > 0 ) {
+			const int minInterval = 1000 / r_loadingFpsCap->integer;
+			const int nowMsec = ri.Milliseconds();
+			if ( nowMsec - backEnd.lastLoadingSwapMsec < minInterval ) {
+				skipSwap = qtrue;
+			} else {
+				backEnd.lastLoadingSwapMsec = nowMsec;
+			}
+		} else {
+			backEnd.lastLoadingSwapMsec = 0;
+		}
+
+		if ( !skipSwap ) {
+			ri.GLimp_EndFrame();
+		}
+	}
 
 	backEnd.framePostProcessed = qfalse;
 	backEnd.projection2D = qfalse;
@@ -1855,6 +1994,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_STRETCH_PIC:
 			data = RB_StretchPic( data );
+			break;
+		case RC_ROTATED_PIC:
+			data = RB_RotatedPic( data );
+			break;
+		case RC_SET_CLIP_REGION:
+			data = RB_SetClipRegion( data );
 			break;
 		case RC_DRAW_LINE:
 			data = RB_DrawLine( data );

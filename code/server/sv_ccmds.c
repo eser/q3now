@@ -544,27 +544,10 @@ static void SV_Ban_f( void ) {
 		return;
 	}
 
-	// look up the authorize server's IP
-	if ( !svs.authorizeAddress.ip[0] && svs.authorizeAddress.type != NA_BAD ) {
-		Com_Printf( "Resolving %s\n", AUTHORIZE_SERVER_NAME );
-		if ( !NET_StringToAdr( AUTHORIZE_SERVER_NAME, &svs.authorizeAddress, NA_IP ) ) {
-			Com_Printf( "Couldn't resolve address\n" );
-			return;
-		}
-		svs.authorizeAddress.port = BigShort( PORT_AUTHORIZE );
-		Com_Printf( "%s resolved to %i.%i.%i.%i:%i\n", AUTHORIZE_SERVER_NAME,
-			svs.authorizeAddress.ip[0], svs.authorizeAddress.ip[1],
-			svs.authorizeAddress.ip[2], svs.authorizeAddress.ip[3],
-			BigShort( svs.authorizeAddress.port ) );
-	}
-
-	// otherwise send their ip to the authorize server
-	if ( svs.authorizeAddress.type != NA_BAD ) {
-		NET_OutOfBandPrint( NS_SERVER, &svs.authorizeAddress,
-			"banUser %i.%i.%i.%i", cl->netchan.remoteAddress.ip[0], cl->netchan.remoteAddress.ip[1], 
-								   cl->netchan.remoteAddress.ip[2], cl->netchan.remoteAddress.ip[3] );
-		Com_Printf("%s was banned from coming back\n", cl->name);
-	}
+	// Phase 6.4: id authorize server is gone — these legacy banUser/banClient
+	// commands are dead. Use SV_AddBanToList()/SV_RehashBans_f() (also gated
+	// behind USE_BANS) for local file-based banning instead.
+	Com_Printf( "banUser is deprecated; use SV_RehashBans/SV_BanAddr instead\n" );
 }
 
 /*
@@ -598,27 +581,8 @@ static void SV_BanNum_f( void ) {
 		return;
 	}
 
-	// look up the authorize server's IP
-	if ( !svs.authorizeAddress.ip[0] && svs.authorizeAddress.type != NA_BAD ) {
-		Com_Printf( "Resolving %s\n", AUTHORIZE_SERVER_NAME );
-		if ( !NET_StringToAdr( AUTHORIZE_SERVER_NAME, &svs.authorizeAddress, NA_IP ) ) {
-			Com_Printf( "Couldn't resolve address\n" );
-			return;
-		}
-		svs.authorizeAddress.port = BigShort( PORT_AUTHORIZE );
-		Com_Printf( "%s resolved to %i.%i.%i.%i:%i\n", AUTHORIZE_SERVER_NAME,
-			svs.authorizeAddress.ip[0], svs.authorizeAddress.ip[1],
-			svs.authorizeAddress.ip[2], svs.authorizeAddress.ip[3],
-			BigShort( svs.authorizeAddress.port ) );
-	}
-
-	// otherwise send their ip to the authorize server
-	if ( svs.authorizeAddress.type != NA_BAD ) {
-		NET_OutOfBandPrint( NS_SERVER, &svs.authorizeAddress,
-			"banUser %i.%i.%i.%i", cl->netchan.remoteAddress.ip[0], cl->netchan.remoteAddress.ip[1], 
-								   cl->netchan.remoteAddress.ip[2], cl->netchan.remoteAddress.ip[3] );
-		Com_Printf("%s was banned from coming back\n", cl->name);
-	}
+	// Phase 6.4: id authorize server is gone — see SV_Ban_f for details.
+	Com_Printf( "banClient is deprecated; use SV_RehashBans/SV_BanAddr instead\n" );
 }
 
 #endif // USE_BANS
@@ -1515,6 +1479,72 @@ static void SV_CompleteMapName( const char *args, int argNum ) {
 
 /*
 ==================
+SV_ClientNameCompletion
+
+CNQ3 backport Phase 6: enumerates the names of every connected client and
+invokes the supplied callback once per name.  Used by the tab-completion
+handler of admin commands like kick, banUser, dumpuser and clientkick.
+==================*/
+static void SV_ClientNameCompletion( void (*callback)( const char *s ) ) {
+	int i;
+	int maxClients;
+
+	if ( callback == NULL ) {
+		return;
+	}
+
+	/* Only meaningful while a server is running and the client table is
+	 * allocated.  Silently do nothing otherwise so the completion system
+	 * can still fall back to the usual cvar/cmd matching. */
+	if ( com_sv_running == NULL || !com_sv_running->integer ) {
+		return;
+	}
+	if ( svs.clients == NULL ) {
+		return;
+	}
+
+	maxClients = sv.maxclients;
+	if ( maxClients <= 0 && sv_maxclients != NULL ) {
+		maxClients = sv_maxclients->integer;
+	}
+	if ( maxClients < 0 ) {
+		maxClients = 0;
+	}
+	if ( maxClients > MAX_CLIENTS ) {
+		maxClients = MAX_CLIENTS;
+	}
+
+	for ( i = 0; i < maxClients; i++ ) {
+		const client_t *cl = &svs.clients[i];
+		if ( cl->state < CS_CONNECTED ) {
+			continue;
+		}
+		if ( cl->name[0] == '\0' ) {
+			continue;
+		}
+		callback( cl->name );
+	}
+}
+
+
+/*
+==================
+SV_CompleteClientName
+
+CNQ3 backport Phase 6: tab completion handler for admin commands that take
+a connected client's name as the first argument.
+==================
+*/
+static void SV_CompleteClientName( const char *args, int argNum ) {
+	if ( argNum != 2 ) {
+		return;
+	}
+	Field_CompleteList( SV_ClientNameCompletion );
+}
+
+
+/*
+==================
 SV_AddOperatorCommands
 ==================
 */
@@ -1528,12 +1558,16 @@ void SV_AddOperatorCommands( void ) {
 
 	Cmd_AddCommand ("heartbeat", SV_Heartbeat_f);
 	Cmd_AddCommand ("kick", SV_Kick_f);
+	/* CNQ3 backport Phase 6: client-name aware auto-completion */
+	Cmd_SetCommandCompletionFunc( "kick", SV_CompleteClientName );
 #ifndef STANDALONE
 #ifdef USE_BANS
 	if(!Cvar_VariableIntegerValue("com_standalone"))
 	{
 		Cmd_AddCommand ("banUser", SV_Ban_f);
+		Cmd_SetCommandCompletionFunc( "banUser", SV_CompleteClientName );
 		Cmd_AddCommand ("banClient", SV_BanNum_f);
+		Cmd_SetCommandCompletionFunc( "banClient", SV_CompleteClientName );
 	}
 #endif
 #endif
@@ -1541,8 +1575,19 @@ void SV_AddOperatorCommands( void ) {
 	Cmd_AddCommand ("kickall", SV_KickAll_f);
 	Cmd_AddCommand ("kicknum", SV_KickNum_f);
 	Cmd_AddCommand ("clientkick", SV_KickNum_f); // Legacy command
+	Cmd_SetCommandCompletionFunc( "clientkick", SV_CompleteClientName );
 	Cmd_AddCommand ("status", SV_Status_f);
 	Cmd_AddCommand ("dumpuser", SV_DumpUser_f);
+	Cmd_SetCommandCompletionFunc( "dumpuser", SV_CompleteClientName );
+	/*
+	 * "mute" is exposed by the game VM rather than the engine; we still
+	 * register a completion callback so that if the game registers a
+	 * top-level "mute" command the tab-completion handler picks it up.
+	 * Cmd_SetCommandCompletionFunc() is a silent no-op when the command
+	 * doesn't exist, so this is safe even when mute is only a sub-command
+	 * of /adm.
+	 */
+	Cmd_SetCommandCompletionFunc( "mute", SV_CompleteClientName );
 	Cmd_AddCommand ("map_restart", SV_MapRestart_f);
 	Cmd_AddCommand ("sectorlist", SV_SectorList_f);
 	Cmd_AddCommand ("map", SV_Map_f);

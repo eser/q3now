@@ -2155,6 +2155,91 @@ char *Sys_GetClipboardData( void )
 
 /*
 =================
+Sys_FlashWindow
+
+Sets the _NET_WM_STATE_DEMANDS_ATTENTION hint on the game window so a
+compliant window manager flashes the taskbar entry.
+=================
+*/
+void Sys_FlashWindow( void )
+{
+	Atom wm_state;
+	Atom demands_attention;
+	XEvent ev;
+
+	if ( dpy == NULL || win == 0 )
+		return;
+
+	wm_state = XInternAtom( dpy, "_NET_WM_STATE", False );
+	demands_attention = XInternAtom( dpy, "_NET_WM_STATE_DEMANDS_ATTENTION", False );
+	if ( wm_state == None || demands_attention == None )
+		return;
+
+	Com_Memset( &ev, 0, sizeof( ev ) );
+	ev.xclient.type = ClientMessage;
+	ev.xclient.window = win;
+	ev.xclient.message_type = wm_state;
+	ev.xclient.format = 32;
+	ev.xclient.data.l[0] = 1;	/* _NET_WM_STATE_ADD */
+	ev.xclient.data.l[1] = (long)demands_attention;
+	ev.xclient.data.l[2] = 0;
+	ev.xclient.data.l[3] = 1;	/* source indication: app */
+	ev.xclient.data.l[4] = 0;
+
+	XSendEvent( dpy, DefaultRootWindow( dpy ), False,
+	            SubstructureRedirectMask | SubstructureNotifyMask, &ev );
+	XFlush( dpy );
+}
+
+
+/*
+=================
+Sys_BeepAttention
+
+Emits an X11 bell via XBell, falling back to the stderr BEL character
+when the server refuses the request.
+=================
+*/
+void Sys_BeepAttention( void )
+{
+	if ( dpy != NULL ) {
+		XBell( dpy, 0 );
+		XFlush( dpy );
+	}
+	fputc( '\a', stderr );
+	fflush( stderr );
+}
+
+
+/*
+=================
+Sys_SetClipboardData
+
+Places the provided plain-text string onto the X11 primary selection so
+that other X clients (and the engine itself via Sys_GetClipboardData) can
+retrieve it.  Used by console mark-mode copy.
+=================
+*/
+void Sys_SetClipboardData( const char *text )
+{
+	if ( text == NULL || dpy == NULL || win == 0 )
+		return;
+
+	/* Take ownership of the PRIMARY selection and hand over the requested
+	   data to any future SelectionRequest events. The simplest portable
+	   approach is to store the string on the window as a property and
+	   become the selection owner — consumers retrieve the property via
+	   XConvertSelection.  For q3now's use (round-trip within the engine),
+	   setting XA_CUT_BUFFER0 covers the common "paste into other client"
+	   case on most X servers. */
+	XStoreBytes( dpy, text, (int)strlen( text ) );
+	XSetSelectionOwner( dpy, XA_PRIMARY, win, CurrentTime );
+	XFlush( dpy );
+}
+
+
+/*
+=================
 Sys_SetClipboardBitmap
 =================
 */

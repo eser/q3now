@@ -58,6 +58,7 @@ typedef struct sfx_s {
 	int				soundCompressionMethod;
 	int 			soundLength;
 	int				soundChannels;
+	int				duration;				// Phase 6.2: cached length in milliseconds
 	char 			soundName[MAX_QPATH];
 	int				lastTimeUsed;
 	struct sfx_s	*next;
@@ -144,6 +145,7 @@ typedef struct
 	void (*DisableSounds)( void );
 	void (*BeginRegistration)( void );
 	sfxHandle_t (*RegisterSound)( const char *sample, qboolean compressed );
+	int (*SoundDuration)( sfxHandle_t handle );	// Phase 6.2
 	void (*ClearSoundBuffer)( void );
 	void (*SoundInfo)( void );
 	void (*SoundList)( void );
@@ -195,6 +197,21 @@ extern cvar_t *s_musicVolume;
 extern cvar_t *s_doppler;
 extern cvar_t *s_muteWhenUnfocused;
 extern cvar_t *s_muteWhenMinimized;
+
+/* CNQ3 backport: s_autoMute bitmask
+ *   0 = never auto-mute
+ *   1 = mute when the window loses input focus
+ *   2 = mute when the window is minimized
+ *   3 = mute in either case
+ *
+ * When non-zero it overrides the legacy s_muteWhenUnfocused/
+ * s_muteWhenMinimized toggles.
+ *
+ * cl_matchAlerts bit 8 (match-alert unmute) can temporarily force audio
+ * on via `s_autoMute_OverrideMute` — see cl_main.c.
+ */
+extern cvar_t *s_autoMute;
+extern qboolean s_autoMute_OverrideMute; /* qtrue = force unmute */
 
 extern cvar_t *s_testsound;
 

@@ -1118,6 +1118,147 @@ static const void *RB_StretchPic( const void *data ) {
 
 /*
 =============
+RB_RotatedPic
+
+A rotated variant of RB_StretchPic. The quad is rotated clockwise by
+cmd->angle degrees around its centre. We cannot reuse RB_AddQuadStamp2
+because it only emits axis-aligned quads.
+=============
+*/
+static const void *RB_RotatedPic( const void *data ) {
+	const rotatedPicCommand_t *cmd;
+	shader_t *shader;
+	int numVerts, numIndexes;
+	float cx, cy, hw, hh;
+	float ang, c, s;
+
+	cmd = (const rotatedPicCommand_t *)data;
+
+	shader = cmd->shader;
+	if ( shader != tess.shader ) {
+		RB_EndSurface();
+		RB_SetGL2D();
+		backEnd.currentEntity = &backEnd.entity2D;
+		RB_BeginSurface( shader, 0 );
+	}
+
+#ifdef USE_VBO
+	VBO_UnBind();
+#endif
+
+	RB_SetGL2D();
+
+#ifdef USE_FBO
+	R_BloomScreen();
+#endif
+
+#ifdef USE_VBO
+	VBO_Flush();
+#endif
+
+	RB_CHECKOVERFLOW( 4, 6 );
+
+#ifdef USE_VBO
+	tess.surfType = SF_TRIANGLES;
+#endif
+
+	numIndexes = tess.numIndexes;
+	numVerts = tess.numVertexes;
+
+	tess.numVertexes += 4;
+	tess.numIndexes += 6;
+
+	tess.indexes[numIndexes + 0] = numVerts + 3;
+	tess.indexes[numIndexes + 1] = numVerts + 0;
+	tess.indexes[numIndexes + 2] = numVerts + 2;
+	tess.indexes[numIndexes + 3] = numVerts + 2;
+	tess.indexes[numIndexes + 4] = numVerts + 0;
+	tess.indexes[numIndexes + 5] = numVerts + 1;
+
+	tess.vertexColors[numVerts + 0] =
+	tess.vertexColors[numVerts + 1] =
+	tess.vertexColors[numVerts + 2] =
+	tess.vertexColors[numVerts + 3] = backEnd.color2D;
+
+	cx = cmd->x + cmd->w * 0.5f;
+	cy = cmd->y + cmd->h * 0.5f;
+	hw = cmd->w * 0.5f;
+	hh = cmd->h * 0.5f;
+
+	ang = cmd->angle * ( ( float )M_PI / 180.0f );
+	c = cosf( ang );
+	s = sinf( ang );
+
+	/* local quad corners: (-hw,-hh), (hw,-hh), (hw,hh), (-hw,hh) */
+	/* rotate each by (c,s) and translate to (cx,cy) */
+	tess.xyz[numVerts + 0][0] = cx + ( -hw * c - -hh * s );
+	tess.xyz[numVerts + 0][1] = cy + ( -hw * s + -hh * c );
+	tess.xyz[numVerts + 0][2] = 0;
+
+	tess.xyz[numVerts + 1][0] = cx + (  hw * c - -hh * s );
+	tess.xyz[numVerts + 1][1] = cy + (  hw * s + -hh * c );
+	tess.xyz[numVerts + 1][2] = 0;
+
+	tess.xyz[numVerts + 2][0] = cx + (  hw * c -  hh * s );
+	tess.xyz[numVerts + 2][1] = cy + (  hw * s +  hh * c );
+	tess.xyz[numVerts + 2][2] = 0;
+
+	tess.xyz[numVerts + 3][0] = cx + ( -hw * c -  hh * s );
+	tess.xyz[numVerts + 3][1] = cy + ( -hw * s +  hh * c );
+	tess.xyz[numVerts + 3][2] = 0;
+
+	tess.texCoords[0][numVerts + 0][0] = cmd->s1;
+	tess.texCoords[0][numVerts + 0][1] = cmd->t1;
+	tess.texCoords[0][numVerts + 1][0] = cmd->s2;
+	tess.texCoords[0][numVerts + 1][1] = cmd->t1;
+	tess.texCoords[0][numVerts + 2][0] = cmd->s2;
+	tess.texCoords[0][numVerts + 2][1] = cmd->t2;
+	tess.texCoords[0][numVerts + 3][0] = cmd->s1;
+	tess.texCoords[0][numVerts + 3][1] = cmd->t2;
+
+	return (const void *)( cmd + 1 );
+}
+
+
+/*
+=============
+RB_SetClipRegion
+
+Configure a scissor rectangle for subsequent 2D draws. Coordinates are in
+640x480 virtual space (same as RE_StretchPic) and are converted to real
+pixel coordinates via the glConfig scale factors. Pass NULL region to clear.
+=============
+*/
+static const void *RB_SetClipRegion( const void *data ) {
+	const setClipRegionCommand_t *cmd = (const setClipRegionCommand_t *)data;
+
+	if ( tess.numIndexes ) {
+		RB_EndSurface();
+		RB_BeginSurface( tess.shader, tess.fogNum );
+	}
+
+	if ( !cmd->hasRegion ) {
+		qglDisable( GL_SCISSOR_TEST );
+	} else {
+		int sx, sy, sw, sh;
+		float xScale = (float)glConfig.vidWidth / 640.0f;
+		float yScale = (float)glConfig.vidHeight / 480.0f;
+		sx = (int)( cmd->x * xScale );
+		sy = glConfig.vidHeight - (int)( ( cmd->y + cmd->h ) * yScale );
+		sw = (int)( cmd->w * xScale );
+		sh = (int)( cmd->h * yScale );
+		if ( sw < 0 ) sw = 0;
+		if ( sh < 0 ) sh = 0;
+		qglScissor( sx, sy, sw, sh );
+		qglEnable( GL_SCISSOR_TEST );
+	}
+
+	return (const void *)( cmd + 1 );
+}
+
+
+/*
+=============
 RB_DrawLine
 =============
 */
@@ -1675,7 +1816,28 @@ static const void *RB_SwapBuffers( const void *data ) {
 		backEnd.screenshotMask = 0;
 	}
 
-	ri.GLimp_EndFrame();
+	// CNQ3 port: throttle buffer swaps while a map is loading so the
+	// render thread doesn't steal CPU/GPU time from BSP parse, lightmap
+	// upload and shader compile. r_loadingFpsCap picks the maximum
+	// presentation frequency (0 disables the cap, the default is 10 fps).
+	{
+		qboolean skipSwap = qfalse;
+		if ( tr.mapLoading && r_loadingFpsCap->integer > 0 ) {
+			const int minInterval = 1000 / r_loadingFpsCap->integer;
+			const int nowMsec = ri.Milliseconds();
+			if ( nowMsec - backEnd.lastLoadingSwapMsec < minInterval ) {
+				skipSwap = qtrue;
+			} else {
+				backEnd.lastLoadingSwapMsec = nowMsec;
+			}
+		} else {
+			backEnd.lastLoadingSwapMsec = 0;
+		}
+
+		if ( !skipSwap ) {
+			ri.GLimp_EndFrame();
+		}
+	}
 
 #ifdef USE_FBO
 	FBO_BindMain();
@@ -1743,6 +1905,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			data = (const void *)( oc + 1 );
 			break;
 		}
+		case RC_ROTATED_PIC:
+			data = RB_RotatedPic( data );
+			break;
+		case RC_SET_CLIP_REGION:
+			data = RB_SetClipRegion( data );
+			break;
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering

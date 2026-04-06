@@ -78,6 +78,7 @@
 #endif
 
 // ── engine internals (testing) ────────────────────────────────────────
+#define FEAT_BSP_ABSTRACTION              1   // Pluggable BSP format loaders
 #define FEAT_LEGACY_FORMATS_AUDIO         1   // WAV, OGG Vorbis, ADPCM audio codecs (retire by setting to 0; Opus remains)
 #define FEAT_LEGACY_FORMATS_IMAGE         1   // BMP, PCX, TGA image loaders (retire by setting to 0; PNG+JPG remain)
 #ifndef FEAT_WASM
@@ -89,6 +90,9 @@
 #define FEAT_IQM                          1   // IQM (Inter-Quake Model) skeletal mesh format
 
 // ── renderer (from CNQ3) ───────────────────────────────────────────────
+#define FEAT_FOG_SYSTEM                   1   // Enhanced fog types (linear, exp, exp2) — Spearmint adaptation
+#define FEAT_CORONA                       1   // Corona/lens flare entities via flare pipeline — Spearmint adaptation
+#define FEAT_HEADLESS_RENDERER            1   // Dedicated server renderer stub (sv_ref.c) — Spearmint adaptation
 #define FEAT_DEPTH_CLAMP                  0   // disable near-plane vertex clipping at high FOV
 // UPSCALE_BLIT: already in Quake3e via r_fbo + r_renderScale cvars, no flag needed
 #define FEAT_DEPTH_FADE                   0   // soft particle edges (explosions, smoke, blood)

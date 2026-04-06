@@ -56,9 +56,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+#include "../qcommon/crash.h"
 #include "../renderercommon/tr_public.h"
 
 #include "linux_local.h" // bk001204
+
+#include <execinfo.h>
 
 #ifndef DEDICATED
 #include "../client/client.h"
@@ -341,6 +344,107 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *format, ... )
 void floating_point_exception_handler( int whatever )
 {
 	signal( SIGFPE, floating_point_exception_handler );
+}
+
+
+/*
+=================
+Unix crash handler
+
+Catches SIGSEGV / SIGBUS / SIGFPE / SIGILL / SIGABRT, writes a structured
+JSON crash report + async-signal-safe backtrace, then re-raises the signal
+so the OS still produces a core dump.
+=================
+*/
+static volatile sig_atomic_t s_crashSignalInProgress = 0;
+
+static const char *Sys_SignalName( int sig )
+{
+	switch ( sig ) {
+		case SIGSEGV: return "SIGSEGV";
+		case SIGBUS:  return "SIGBUS";
+		case SIGFPE:  return "SIGFPE";
+		case SIGILL:  return "SIGILL";
+		case SIGABRT: return "SIGABRT";
+		case SIGHUP:  return "SIGHUP";
+		case SIGQUIT: return "SIGQUIT";
+		case SIGTERM: return "SIGTERM";
+		case SIGTRAP: return "SIGTRAP";
+		case SIGINT:  return "SIGINT";
+		default:      return "unknown";
+	}
+}
+
+static void Sys_CrashSignal( int sig, siginfo_t *info, void *ucontext )
+{
+	void  *frames[ 64 ];
+	int    nframes;
+	char   addressText[ 64 ];
+	const char *reason;
+
+	(void)ucontext;
+
+	/* Recursive signal — avoid infinite loops, just write a note and die. */
+	if ( s_crashSignalInProgress ) {
+		static const char msg[] = "\r\nDOUBLE CRASH, aborting.\r\n";
+		if ( write( STDERR_FILENO, msg, sizeof( msg ) - 1 ) < 0 ) {
+			/* ignored */
+		}
+		signal( sig, SIG_DFL );
+		raise( sig );
+		return;
+	}
+	s_crashSignalInProgress = 1;
+
+	reason = Sys_SignalName( sig );
+
+	/* Reset the terminal so async-signal-safe writes look right on tty
+	   dedicated servers. We use the low-level tcsetattr path directly;
+	   tty_Hide() can touch FILE* and isn't AS-safe. */
+	if ( ttycon_on ) {
+		tcsetattr( STDIN_FILENO, TCSADRAIN, &tty_tc );
+	}
+
+	/* Async-signal-safe native backtrace to stderr. */
+	nframes = backtrace( frames, (int)( sizeof( frames ) / sizeof( frames[ 0 ] ) ) );
+	{
+		static const char hdr[] = "\r\n=== q3now crash ===\r\n";
+		if ( write( STDERR_FILENO, hdr, sizeof( hdr ) - 1 ) < 0 ) {
+			/* ignored */
+		}
+	}
+	backtrace_symbols_fd( frames, nframes, STDERR_FILENO );
+	Crash_PrintVMStackTracesASS( STDERR_FILENO );
+
+	/* Structured JSON crash report. This may touch FILE* / malloc and is
+	   technically not AS-safe, but we're exiting anyway, and the user
+	   expects the report to exist after a crash. */
+	if ( info != NULL && info->si_addr != NULL ) {
+		snprintf( addressText, sizeof( addressText ), "%p", info->si_addr );
+	} else {
+		Q_strncpyz( addressText, "unknown", sizeof( addressText ) );
+	}
+	Crash_WriteReport( reason, addressText, "" );
+
+	/* Re-raise with the default disposition to get a core file. */
+	signal( sig, SIG_DFL );
+	raise( sig );
+}
+
+void Sys_InstallCrashHandler( void )
+{
+	struct sigaction sa;
+	int sigs[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT };
+	int i;
+
+	memset( &sa, 0, sizeof( sa ) );
+	sa.sa_sigaction = Sys_CrashSignal;
+	sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+	sigemptyset( &sa.sa_mask );
+
+	for ( i = 0; i < (int)( sizeof( sigs ) / sizeof( sigs[ 0 ] ) ); i++ ) {
+		sigaction( sigs[ i ], &sa, NULL );
+	}
 }
 
 
@@ -978,6 +1082,155 @@ static int Sys_ParseArgs( int argc, const char* argv[] )
 }
 
 
+/*
+=================
+Sys_ParseNoHardReboot
+
+Scan the raw argv for `+set com_noHardReboot 1` so the watchdog knows
+whether to stay out of the way. We can't use the cvar system here
+because it hasn't been initialised yet.
+=================
+*/
+#ifdef DEDICATED
+static qboolean Sys_ParseNoHardReboot( int argc, const char *argv[] )
+{
+	int i;
+	for ( i = 1; i + 2 < argc; i++ ) {
+		if ( strcmp( argv[ i ], "+set" ) == 0
+			&& strcmp( argv[ i + 1 ], "com_noHardReboot" ) == 0
+			&& atoi( argv[ i + 2 ] ) != 0 ) {
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
+/*
+=================
+Sys_IsDedicatedArgv
+
+Scan argv to determine whether this invocation is a dedicated server.
+The client binary links the same unix_main.c but is built without
+DEDICATED; the dedicated binary is always dedicated regardless of
+command line, so this always returns qtrue inside #ifdef DEDICATED.
+=================
+*/
+static qboolean Sys_IsDedicatedArgv( int argc, const char *argv[] )
+{
+	(void)argc;
+	(void)argv;
+	return qtrue;
+}
+
+/*
+=================
+Sys_RunWatchdog
+
+Two-process supervisor for dedicated servers on POSIX platforms:
+
+  parent (watchdog)
+    +- fork() child (actual server)
+    +- waitpid(child)
+       - child exited 0 or died on SIGINT/SIGTERM → clean exit, parent exits
+       - child exited with RESTART_EXIT_CODE → parent forks a new child
+       - child died on other signal or exited non-zero → parent logs and
+         forks a new child
+
+Disabled by `+set com_noHardReboot 1`.
+=================
+*/
+#define HARD_REBOOT_EXIT_CODE 42
+
+static qboolean Sys_RunWatchdog( int argc, const char *argv[] )
+{
+	pid_t child;
+	int   status;
+	int   restartCount;
+
+	if ( Sys_ParseNoHardReboot( argc, argv ) ) {
+		return qfalse; // run in-process
+	}
+	if ( !Sys_IsDedicatedArgv( argc, argv ) ) {
+		return qfalse;
+	}
+
+	restartCount = 0;
+	while ( 1 ) {
+		child = fork();
+		if ( child < 0 ) {
+			fprintf( stderr, "Sys_RunWatchdog: fork() failed: %s\n", strerror( errno ) );
+			return qfalse; // fall back to in-process
+		}
+		if ( child == 0 ) {
+			return qfalse; // child returns to main() and keeps running
+		}
+
+		// Parent: block until child exits.
+		for ( ;; ) {
+			pid_t r = waitpid( child, &status, 0 );
+			if ( r == (pid_t)-1 ) {
+				if ( errno == EINTR ) continue;
+				fprintf( stderr, "Sys_RunWatchdog: waitpid() failed: %s\n", strerror( errno ) );
+				_exit( 1 );
+			}
+			break;
+		}
+
+		if ( WIFEXITED( status ) ) {
+			int code = WEXITSTATUS( status );
+			if ( code == HARD_REBOOT_EXIT_CODE ) {
+				restartCount++;
+				fprintf( stderr, "Sys_RunWatchdog: child requested restart (#%d), relaunching.\n",
+					restartCount );
+				continue;
+			}
+			fprintf( stderr, "Sys_RunWatchdog: child exited %d, watchdog exiting.\n", code );
+			_exit( code );
+		}
+		if ( WIFSIGNALED( status ) ) {
+			int sig = WTERMSIG( status );
+			if ( sig == SIGINT || sig == SIGTERM || sig == SIGHUP ) {
+				fprintf( stderr, "Sys_RunWatchdog: child killed by signal %d, watchdog exiting.\n", sig );
+				_exit( 128 + sig );
+			}
+			restartCount++;
+			fprintf( stderr, "Sys_RunWatchdog: child died on signal %d (#%d), relaunching.\n",
+				sig, restartCount );
+			/* Small rate-limit so a crash loop doesn't burn CPU. */
+			sleep( 1 );
+			continue;
+		}
+		// Unknown status — just relaunch.
+		restartCount++;
+		fprintf( stderr, "Sys_RunWatchdog: unknown child exit status %d (#%d), relaunching.\n",
+			status, restartCount );
+		continue;
+	}
+	return qfalse; // unreachable
+}
+
+/*
+=================
+Sys_HardReboot
+
+Command handler for `sv_restartProcess`. Tells the child to terminate
+with the restart code so the watchdog will relaunch it. If there is no
+watchdog (com_noHardReboot 1, or non-DEDICATED) we simply exit normally.
+=================
+*/
+void Sys_HardReboot( void )
+{
+	Com_Printf( "Hard reboot requested — exiting with restart code.\n" );
+	_exit( HARD_REBOOT_EXIT_CODE );
+}
+
+static void Sys_HardReboot_f( void )
+{
+	Sys_HardReboot();
+}
+#endif // DEDICATED
+
+
 int main( int argc, const char* argv[] )
 {
 	char con_title[ MAX_CVAR_VALUE_STRING ];
@@ -998,6 +1251,19 @@ int main( int argc, const char* argv[] )
 	{
 		return 0; // print version and exit
 	}
+
+#ifdef DEDICATED
+	// Parent watchdog loop — when it returns, we are the child and should
+	// continue normal initialisation. When the child exits the parent will
+	// either fork a new child or exit itself.
+	if ( Sys_RunWatchdog( argc, argv ) ) {
+		// Parent returned qtrue means "we handled it, exit now". Today
+		// Sys_RunWatchdog never returns qtrue (it either returns qfalse
+		// to the child or _exit()s the parent), but this branch future
+		// proofs the contract.
+		return 0;
+	}
+#endif
 
 #ifdef __APPLE__
 	Sys_SetBinaryPath( argv[ 0 ] );
@@ -1024,6 +1290,19 @@ int main( int argc, const char* argv[] )
 //	memset( &sys_packetReceived[0], 0, sizeof( sys_packetReceived ) );
 
 	Com_Init( cmdline );
+
+#ifdef DEDICATED
+	{
+		cvar_t *cv = Cvar_Get( "com_noHardReboot", "0", CVAR_INIT );
+		Cvar_CheckRange( cv, "0", "1", CV_INTEGER );
+		Cvar_SetDescription( cv,
+			"Disable the POSIX parent-watchdog that auto-relaunches the\n"
+			"dedicated server on abnormal exit or the sv_restartProcess\n"
+			"command. Effective only at startup (must be set via +set on\n"
+			"the command line)." );
+		Cmd_AddCommand( "sv_restartProcess", Sys_HardReboot_f );
+	}
+#endif
 
 	// Sys_ConsoleInputInit() might be called in signal handler
 	// so modify/init any cvars here

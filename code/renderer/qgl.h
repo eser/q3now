@@ -189,6 +189,9 @@ typedef char GLchar;
 	GLE( void, glEnable, GLenum cap ) \
 	GLE( void, glEnableClientState, GLenum array ) \
 	GLE( void, glFinish, void ) \
+	GLE( void, glFogf, GLenum pname, GLfloat param ) \
+	GLE( void, glFogfv, GLenum pname, const GLfloat *params ) \
+	GLE( void, glFogi, GLenum pname, GLint param ) \
 	GLE( void, glGenTextures, GLsizei n, GLuint *textures ) \
 	GLE( void, glGetBooleanv, GLenum pname, GLboolean *params ) \
 	GLE( GLenum, glGetError, void ) \

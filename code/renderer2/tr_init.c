@@ -39,6 +39,12 @@ cvar_t	*r_flareSize;
 cvar_t	*r_flareFade;
 cvar_t	*r_flareCoeff;
 
+#if FEAT_FOG_SYSTEM
+cvar_t	*r_useGlFog;
+cvar_t	*r_defaultFogParmsType;
+cvar_t	*r_globalLinearFogDrawSky;
+#endif
+
 cvar_t	*r_railWidth;
 cvar_t	*r_railCoreWidth;
 cvar_t	*r_railSegmentLength;
@@ -136,6 +142,8 @@ cvar_t  *r_baseSpecular;
 cvar_t  *r_baseGloss;
 cvar_t  *r_glossType;
 cvar_t  *r_mergeLightmaps;
+cvar_t  *r_lightmapAtlas;
+cvar_t  *r_loadingFpsCap;
 cvar_t  *r_dlightMode;
 cvar_t  *r_pshadowDist;
 cvar_t  *r_imageUpsample;
@@ -192,6 +200,8 @@ cvar_t	*r_lodCurveError;
 
 cvar_t	*r_overBrightBits;
 cvar_t	*r_mapOverBrightBits;
+cvar_t	*r_brightness;
+cvar_t	*r_mapBrightness;
 
 cvar_t	*r_debugSurface;
 cvar_t	*r_simpleMipMaps;
@@ -298,7 +308,7 @@ static void InitOpenGL( void )
 
 		// reserve 160 components for other uniforms
 		qglGetIntegerv( GL_MAX_VERTEX_UNIFORM_COMPONENTS, &temp );
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 		glRefConfig.glslMaxAnimatedBones = Com_Clamp( 0, IQM_MAX_JOINTS, ( temp - 160 ) / 16 );
 		if ( glRefConfig.glslMaxAnimatedBones < 12 ) {
 			glRefConfig.glslMaxAnimatedBones = 0;
@@ -553,54 +563,32 @@ static void R_TakeScreenshot( int x, int y, int width, int height, char *name, q
 	cmd->jpeg = jpeg;
 }
 
-/* 
-================== 
-R_ScreenshotFilename
-================== 
-*/  
-static void R_ScreenshotFilename( int lastNumber, char *fileName ) {
-	int		a,b,c,d;
+/*
+==================
+R_ScreenshotFilename (CNQ3 backport: timestamp-based)
+==================
+*/
+static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
+	qtime_t t;
+	int count;
+	int ms;
 
-	if ( lastNumber < 0 || lastNumber > 9999 ) {
-		Com_sprintf( fileName, MAX_OSPATH, "screenshots/shot9999.tga" );
-		return;
+	count = 0;
+	ri.Com_RealTime( &t );
+	ms = ri.Milliseconds() % 1000;
+	if ( ms < 0 ) ms = 0;
+
+	Com_sprintf( fileName, MAX_OSPATH,
+		"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d.%s",
+		1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
+		t.tm_hour, t.tm_min, t.tm_sec, ms, fileExt );
+
+	while (	ri.FS_FileExists( fileName ) && ++count < 1000 ) {
+		Com_sprintf( fileName, MAX_OSPATH,
+			"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d_%d.%s",
+			1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
+			t.tm_hour, t.tm_min, t.tm_sec, ms, count, fileExt );
 	}
-
-	a = lastNumber / 1000;
-	lastNumber -= a*1000;
-	b = lastNumber / 100;
-	lastNumber -= b*100;
-	c = lastNumber / 10;
-	lastNumber -= c*10;
-	d = lastNumber;
-
-	Com_sprintf( fileName, MAX_OSPATH, "screenshots/shot%i%i%i%i.tga"
-		, a, b, c, d );
-}
-
-/* 
-================== 
-R_ScreenshotFilename
-================== 
-*/  
-static void R_ScreenshotFilenameJPEG( int lastNumber, char *fileName ) {
-	int		a,b,c,d;
-
-	if ( lastNumber < 0 || lastNumber > 9999 ) {
-		Com_sprintf( fileName, MAX_OSPATH, "screenshots/shot9999.jpg" );
-		return;
-	}
-
-	a = lastNumber / 1000;
-	lastNumber -= a*1000;
-	b = lastNumber / 100;
-	lastNumber -= b*100;
-	c = lastNumber / 10;
-	lastNumber -= c*10;
-	d = lastNumber;
-
-	Com_sprintf( fileName, MAX_OSPATH, "screenshots/shot%i%i%i%i.jpg"
-		, a, b, c, d );
 }
 
 /*
@@ -684,7 +672,6 @@ Doesn't print the pacifier message if there is a second arg
 */  
 static void R_ScreenShot_f (void) {
 	char	checkname[MAX_OSPATH];
-	static	int	lastNumber = -1;
 	qboolean	silent;
 
 	if ( !strcmp( ri.Cmd_Argv(1), "levelshot" ) ) {
@@ -702,30 +689,7 @@ static void R_ScreenShot_f (void) {
 		// explicit filename
 		Com_sprintf( checkname, MAX_OSPATH, "screenshots/%s.tga", ri.Cmd_Argv( 1 ) );
 	} else {
-		// scan for a free filename
-
-		// if we have saved a previous screenshot, don't scan
-		// again, because recording demo avis can involve
-		// thousands of shots
-		if ( lastNumber == -1 ) {
-			lastNumber = 0;
-		}
-		// scan for a free number
-		for ( ; lastNumber <= 9999 ; lastNumber++ ) {
-			R_ScreenshotFilename( lastNumber, checkname );
-
-      if (!ri.FS_FileExists( checkname ))
-      {
-        break; // file doesn't exist
-      }
-		}
-
-		if ( lastNumber >= 9999 ) {
-			ri.Printf (PRINT_ALL, "ScreenShot: Couldn't create a file\n"); 
-			return;
- 		}
-
-		lastNumber++;
+		R_ScreenshotFilename( checkname, "tga" );
 	}
 
 	R_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, checkname, qfalse );
@@ -733,11 +697,10 @@ static void R_ScreenShot_f (void) {
 	if ( !silent ) {
 		ri.Printf (PRINT_ALL, "Wrote %s\n", checkname);
 	}
-} 
+}
 
 static void R_ScreenShotJPEG_f (void) {
 	char		checkname[MAX_OSPATH];
-	static	int	lastNumber = -1;
 	qboolean	silent;
 
 	if ( !strcmp( ri.Cmd_Argv(1), "levelshot" ) ) {
@@ -755,30 +718,7 @@ static void R_ScreenShotJPEG_f (void) {
 		// explicit filename
 		Com_sprintf( checkname, MAX_OSPATH, "screenshots/%s.jpg", ri.Cmd_Argv( 1 ) );
 	} else {
-		// scan for a free filename
-
-		// if we have saved a previous screenshot, don't scan
-		// again, because recording demo avis can involve
-		// thousands of shots
-		if ( lastNumber == -1 ) {
-			lastNumber = 0;
-		}
-		// scan for a free number
-		for ( ; lastNumber <= 9999 ; lastNumber++ ) {
-			R_ScreenshotFilenameJPEG( lastNumber, checkname );
-
-      if (!ri.FS_FileExists( checkname ))
-      {
-        break; // file doesn't exist
-      }
-		}
-
-		if ( lastNumber == 10000 ) {
-			ri.Printf (PRINT_ALL, "ScreenShot: Couldn't create a file\n"); 
-			return;
- 		}
-
-		lastNumber++;
+		R_ScreenshotFilename( checkname, "jpg" );
 	}
 
 	R_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, checkname, qtrue );
@@ -786,7 +726,7 @@ static void R_ScreenShotJPEG_f (void) {
 	if ( !silent ) {
 		ri.Printf (PRINT_ALL, "Wrote %s\n", checkname);
 	}
-} 
+}
 
 //============================================================================
 
@@ -1152,6 +1092,11 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_ext_multisample, "For anti-aliasing geometry edges." );
 	r_overBrightBits = ri.Cvar_Get ("r_overBrightBits", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_overBrightBits, "Sets the intensity of overall brightness of texture pixels." );
+	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_brightness, "0.25", "32", CV_FLOAT );
+	ri.Cvar_SetDescription( r_brightness,
+		"Float-based overall brightness multiplier (replaces r_overBrightBits).\n"
+		"Range 0.25-32, default 2.0." );
 	r_ignorehwgamma = ri.Cvar_Get( "r_ignorehwgamma", "0", CVAR_ARCHIVE | CVAR_LATCH);
 	ri.Cvar_SetDescription( r_ignorehwgamma, "Overrides hardware gamma capabilities." );
 	r_simpleMipMaps = ri.Cvar_Get( "r_simpleMipMaps", "1", CVAR_ARCHIVE | CVAR_LATCH );
@@ -1220,6 +1165,22 @@ static void R_Register( void )
 	r_pshadowDist = ri.Cvar_Get( "r_pshadowDist", "128", CVAR_ARCHIVE );
 	r_mergeLightmaps = ri.Cvar_Get( "r_mergeLightmaps", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_mergeLightmaps, "Merge small lightmaps into 2 or fewer giant lightmaps." );
+	// CNQ3 lightmap atlas optimization (alias). Both cvars must be non-zero
+	// for the atlas pack to be built inside R_LoadLightmaps().
+	r_lightmapAtlas = ri.Cvar_Get( "r_lightmapAtlas", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_lightmapAtlas,
+		"Pack individual BSP lightmaps into larger atlas textures (CNQ3 port).\n"
+		" 1: pack into atlases (default, fewer texture binds, faster loads)\n"
+		" 0: one texture per lightmap (legacy behaviour)\n"
+		" Works together with r_mergeLightmaps." );
+
+	// CNQ3 port: swap throttle during map loads.
+	r_loadingFpsCap = ri.Cvar_Get( "r_loadingFpsCap", "10", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_loadingFpsCap, "0", "60", CV_INTEGER );
+	ri.Cvar_SetDescription( r_loadingFpsCap,
+		"Maximum render backend frames per second while loading a map.\n"
+		" 0: no cap (legacy behaviour)\n"
+		" 1-60: cap presentation to this rate. Default 10." );
 	r_imageUpsample = ri.Cvar_Get( "r_imageUpsample", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	r_imageUpsampleMaxSize = ri.Cvar_Get( "r_imageUpsampleMaxSize", "1024", CVAR_ARCHIVE | CVAR_LATCH );
 	r_imageUpsampleType = ri.Cvar_Get( "r_imageUpsampleType", "1", CVAR_ARCHIVE | CVAR_LATCH );
@@ -1252,6 +1213,11 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_fullbright, "Debugging tool to render the entire level without lighting." );
 	r_mapOverBrightBits = ri.Cvar_Get ("r_mapOverBrightBits", "2", CVAR_LATCH );
 	ri.Cvar_SetDescription( r_mapOverBrightBits, "Sets the number of overbright bits baked into all lightmaps and map data." );
+	r_mapBrightness = ri.Cvar_Get( "r_mapBrightness", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_mapBrightness, "0.25", "32", CV_FLOAT );
+	ri.Cvar_SetDescription( r_mapBrightness,
+		"Float-based map (lightmap) brightness multiplier (replaces r_mapOverBrightBits).\n"
+		"Range 0.25-32, default 2.0." );
 	r_intensity = ri.Cvar_Get ("r_intensity", "1", CVAR_LATCH );
 	ri.Cvar_SetDescription( r_intensity, "Global texture lighting scale." );
 	r_singleShader = ri.Cvar_Get ("r_singleShader", "0", CVAR_CHEAT | CVAR_LATCH );
@@ -1339,6 +1305,16 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_flareFade, "Distance to fade out light flares. Requires \\r_flares 1." );
 	r_flareCoeff = ri.Cvar_Get ("r_flareCoeff", FLARE_STDCOEFF, CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_flareCoeff, "Coefficient for the light flare intensity falloff function. Requires \\r_flares 1." );
+
+#if FEAT_FOG_SYSTEM
+	r_useGlFog = ri.Cvar_Get( "r_useGlFog", "1", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_useGlFog, "Use GL_FOG fixed-function fog pipeline in addition to per-vertex volume fog." );
+	r_defaultFogParmsType = ri.Cvar_Get( "r_defaultFogParmsType", "0", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_defaultFogParmsType, "Default fogType_t for maps without explicit fog: 0=linear, 1=exp, 2=exp2." );
+	ri.Cvar_CheckRange( r_defaultFogParmsType, "0", "2", CV_INTEGER );
+	r_globalLinearFogDrawSky = ri.Cvar_Get( "r_globalLinearFogDrawSky", "0", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_globalLinearFogDrawSky, "Draw sky surfaces through linear global fog (Spearmint compat)." );
+#endif
 
 	r_skipBackEnd = ri.Cvar_Get ("r_skipBackEnd", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_skipBackEnd, "Skips loading rendering backend." );
@@ -1660,11 +1636,20 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.AddLightToScene = RE_AddLightToScene;
 	re.AddAdditiveLightToScene = RE_AddAdditiveLightToScene;
 	re.AddRailTrailParams = NULL; // no GPU compute in OpenGL2 renderer
+#if FEAT_CORONA
+	re.AddCoronaToScene = RE_AddCoronaToScene;
+#endif
+#if FEAT_FOG_SYSTEM
+	re.GetGlobalFog = RE_GetGlobalFog;
+	re.GetViewFog = RE_GetViewFog;
+#endif
 	re.RenderScene = RE_RenderScene;
 
 	re.SetColor = RE_SetColor;
+	re.SetClipRegion = RE_SetClipRegion;
 	re.SetMSDFOutline = RE_SetMSDFOutline;
 	re.DrawStretchPic = RE_StretchPic;
+	re.DrawRotatedPic = RE_RotatedPic;
 	re.DrawLine = RE_DrawLine;
 	re.DrawStretchRaw = RE_StretchRaw;
 	re.UploadCinematic = RE_UploadCinematic;
@@ -1683,7 +1668,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.VertexLighting = RE_VertexLighting;
 	re.SyncRender = RE_SyncRender;
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	re.GetIQMAnimations = R_GetIQMAnimations;
 #endif // FEAT_IQM
 

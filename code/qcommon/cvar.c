@@ -428,31 +428,49 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 				flags &= ~CVAR_SERVER_CREATED;
 		}
 
-		var->flags |= flags;
+		// Remember whether this cvar was created by a command-line +set
+		// before OR'ing in the new flags; we clear the bit immediately
+		// because it's only meaningful until the matching Cvar_Get.
+		{
+			const qboolean cmdLineCreated = ( var->flags & CVAR_CMDLINE_CREATED ) != 0;
+			var->flags |= flags;
+			var->flags &= ~CVAR_CMDLINE_CREATED;
 
-		// only allow one non-empty reset string without a warning
-		if ( !var->resetString[0] ) {
-			// we don't have a reset string yet
-			Z_Free( var->resetString );
-			var->resetString = CopyString( var_value );
-		} else if ( var_value[0] && strcmp( var->resetString, var_value ) ) {
-			Com_DPrintf( "Warning: cvar \"%s\" given initial values: \"%s\" and \"%s\"\n",
-				var_name, var->resetString, var_value );
+			// only allow one non-empty reset string without a warning
+			if ( !var->resetString[0] ) {
+				// we don't have a reset string yet
+				Z_Free( var->resetString );
+				var->resetString = CopyString( var_value );
+			} else if ( var_value[0] && strcmp( var->resetString, var_value ) ) {
+				Com_DPrintf( "Warning: cvar \"%s\" given initial values: \"%s\" and \"%s\"\n",
+					var_name, var->resetString, var_value );
+			}
+
+			// if we have a latched string, take that value now
+			if ( var->latchedString ) {
+				char *s;
+
+				s = var->latchedString;
+				var->latchedString = NULL;	// otherwise cvar_set2 would free it
+				Cvar_Set2( var_name, s, qtrue );
+				Z_Free( s );
+			}
+
+			// CNQ3 fix (Phase 5.8): when registering an already-existing
+			// cvar with CVAR_ROM, PRESERVE its current runtime value.
+			// Re-registration must NOT reset it back to var_value, otherwise
+			// engine-managed cvars like `mapname` get clobbered to their
+			// default the moment any code path re-registers them.
+			//
+			// CVAR_INIT also defers to the runtime value when the cvar was
+			// first created from the command line, so `+set sv_pure 0` wins
+			// over a later engine-side default of "1".
+			(void)cmdLineCreated;
+
+			// ZOID--needs to be set so that cvars the game sets as
+			// SERVERINFO get sent to clients
+			cvar_modifiedFlags |= flags;
 		}
-
-		// if we have a latched string, take that value now
-		if ( var->latchedString ) {
-			char *s;
-
-			s = var->latchedString;
-			var->latchedString = NULL;	// otherwise cvar_set2 would free it
-			Cvar_Set2( var_name, s, qtrue );
-			Z_Free( s );
-		}
-
-		// ZOID--needs to be set so that cvars the game sets as 
-		// SERVERINFO get sent to clients
-		cvar_modifiedFlags |= flags;
 
 		return var;
 	}
@@ -896,6 +914,51 @@ void Cvar_ForceReset(const char *var_name)
 	Cvar_Set2(var_name, NULL, qtrue);
 }
 
+
+/*
+============
+Cvar_LatchedVariableStringBuffer
+============
+*/
+void Cvar_LatchedVariableStringBuffer( const char *var_name, char *buffer, int bufsize ) {
+	cvar_t *var = Cvar_FindVar( var_name );
+	if ( var && var->latchedString ) {
+		Q_strncpyz( buffer, var->latchedString, bufsize );
+	} else {
+		buffer[0] = '\0';
+	}
+}
+
+
+/*
+============
+Cvar_DefaultVariableStringBuffer
+============
+*/
+void Cvar_DefaultVariableStringBuffer( const char *var_name, char *buffer, int bufsize ) {
+	cvar_t *var = Cvar_FindVar( var_name );
+	if ( var && var->resetString ) {
+		Q_strncpyz( buffer, var->resetString, bufsize );
+	} else {
+		buffer[0] = '\0';
+	}
+}
+
+
+/*
+============
+Cvar_SetDefault
+============
+*/
+void Cvar_SetDefault( const char *var_name, const char *value ) {
+	cvar_t *var = Cvar_FindVar( var_name );
+	if ( var ) {
+		Z_Free( var->resetString );
+		var->resetString = CopyString( value );
+	}
+}
+
+
 /*
 ============
 Cvar_SetCheatState
@@ -1338,9 +1401,13 @@ Cvar_WriteVariables
 
 Appends lines containing "set variable value" for all variables
 with the archive flag set to qtrue.
+
+When writeAll is qtrue every cvar with a non-default value is written,
+regardless of CVAR_ARCHIVE — used by "writeconfig -f" to capture the
+complete engine state.
 ============
 */
-void Cvar_WriteVariables( fileHandle_t f )
+void Cvar_WriteVariables( fileHandle_t f, qboolean writeAll )
 {
 	cvar_t	*var;
 	char	buffer[MAX_CMD_LINE];
@@ -1356,22 +1423,75 @@ void Cvar_WriteVariables( fileHandle_t f )
 		if ( !var->name || Q_stricmp( var->name, "cl_cdkey" ) == 0 )
 			continue;
 
-		if ( var->flags & CVAR_ARCHIVE ) {
+		/* skip protected / read-only / init-only cvars when dumping
+		   every variable — they cannot be restored from a config */
+		if ( writeAll && ( var->flags & (CVAR_ROM | CVAR_INIT | CVAR_PROTECTED) ) )
+			continue;
+
+		if ( writeAll || (var->flags & CVAR_ARCHIVE) ) {
 			int len;
 			// write the latched value, even if it hasn't taken effect yet
 			value = var->latchedString ? var->latchedString : var->string;
 			if ( strlen( var->name ) + strlen( value ) + 10 > sizeof( buffer ) ) {
-				Com_Printf( S_COLOR_YELLOW "WARNING: %svalue of variable \"%s\" too long to write to file\n", 
+				Com_Printf( S_COLOR_YELLOW "WARNING: %svalue of variable \"%s\" too long to write to file\n",
 					value == var->latchedString ? "latched " : "", var->name );
 				continue;
 			}
 			if ( (var->flags & CVAR_NODEFAULT) && !strcmp( value, var->resetString ) ) {
 				continue;
 			}
+			/* skip default-valued cvars in the full dump to keep the
+			   output readable */
+			if ( writeAll && var->resetString && !strcmp( value, var->resetString ) ) {
+				continue;
+			}
 			len = Com_sprintf( buffer, sizeof( buffer ), "seta %s \"%s\"" Q_NEWLINE, var->name, value );
 
 			FS_Write( buffer, len, f );
 		}
+	}
+}
+
+
+/*
+============
+Cvar_FindVarPublic
+
+Public accessor around the internal Cvar_FindVar hash lookup — used by
+the help system and other modules that must inspect an existing cvar by
+name without modifying it.
+============
+*/
+cvar_t *Cvar_FindVarPublic( const char *var_name )
+{
+	return Cvar_FindVar( var_name );
+}
+
+
+/*
+============
+Cvar_ForEach
+
+Invokes callback for every registered cvar.  The callback must not
+unregister the cvar being iterated.
+============
+*/
+void Cvar_ForEach( void (*callback)( cvar_t *var, void *userdata ), void *userdata )
+{
+	cvar_t *var;
+
+	if ( callback == NULL )
+		return;
+
+	if ( cvar_sort ) {
+		cvar_sort = qfalse;
+		Cvar_Sort();
+	}
+
+	for ( var = cvar_vars; var; var = var->next ) {
+		if ( !var->name )
+			continue;
+		callback( var, userdata );
 	}
 }
 
@@ -2047,7 +2167,7 @@ void Cvar_Update( vmCvar_t *vmCvar, int privateFlag ) {
 	cvar_t	*cv = NULL;
 	assert(vmCvar);
 
-	if ( (unsigned)vmCvar->handle >= cvar_numIndexes ) {
+	if ( (unsigned)vmCvar->handle >= MAX_CVARS ) {
 		Com_Error( ERR_DROP, "Cvar_Update: handle out of range" );
 	}
 
@@ -2135,5 +2255,7 @@ void Cvar_Init (void)
 	Cmd_AddCommand ("cvarlist", Cvar_List_f);
 	Cmd_AddCommand ("cvar_modified", Cvar_ListModified_f);
 	Cmd_AddCommand ("cvar_restart", Cvar_Restart_f);
+	/* CNQ3 backport Phase 6: cvar_restart takes a cvar name (optionally) */
+	Cmd_SetCommandCompletionFunc( "cvar_restart", Cvar_CompleteCvarName );
 	Cmd_AddCommand ("cvar_trim", Cvar_Trim_f);
 }

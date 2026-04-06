@@ -208,6 +208,9 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 	int			numLightmapsPerPage = 16;
 	float maxIntensity = 0;
 	double sumIntensity = 0;
+	// CNQ3 lightmap atlas port: either r_mergeLightmaps or r_lightmapAtlas
+	// being 0 disables atlases. Both default to 1.
+	const int atlasEnabled = ( r_mergeLightmaps->integer && r_lightmapAtlas->integer ) ? 1 : 0;
 
 	// if we are in r_vertexLight mode, we don't need the lightmaps at all
 	if ( ( r_vertexLight->integer && tr.vertexLightingAllowed ) || glConfig.hardwareType == GLHW_PERMEDIA2 ) {
@@ -251,7 +254,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 		numLightmaps >>= 1;
 
 	// Use fat lightmaps of an appropriate size.
-	if (r_mergeLightmaps->integer)
+	if (atlasEnabled)
 	{
 		int maxLightmapsPerAxis = glConfig.maxTextureSize / tr.lightmapSize;
 		int lightmapCols = 4, lightmapRows = 4;
@@ -290,7 +293,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 			textureInternalFormat = GL_RGBA16;
 	}
 
-	if (r_mergeLightmaps->integer)
+	if (atlasEnabled)
 	{
 		int width  = tr.fatLightmapCols * tr.lightmapSize;
 		int height = tr.fatLightmapRows * tr.lightmapSize;
@@ -310,7 +313,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 		int lightmapnum = i;
 		// expand the 24 bit on-disk to 32 bit
 
-		if (r_mergeLightmaps->integer)
+		if (atlasEnabled)
 		{
 			int lightmaponpage = i % numLightmapsPerPage;
 			xoff = (lightmaponpage % tr.fatLightmapCols) * tr.lightmapSize;
@@ -457,7 +460,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 				}
 			}
 
-			if (r_mergeLightmaps->integer)
+			if (atlasEnabled)
 				R_UpdateSubImage(tr.lightmaps[lightmapnum], image, xoff, yoff, tr.lightmapSize, tr.lightmapSize, textureInternalFormat);
 			else
 				tr.lightmaps[i] = R_CreateImage(va("*lightmap%d", i), image, tr.lightmapSize, tr.lightmapSize, IMGTYPE_COLORALPHA, imgFlags, textureInternalFormat );
@@ -486,7 +489,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 				image[j*4+3] = 255;
 			}
 
-			if (r_mergeLightmaps->integer)
+			if (atlasEnabled)
 				R_UpdateSubImage(tr.deluxemaps[lightmapnum], image, xoff, yoff, tr.lightmapSize, tr.lightmapSize, GL_RGBA8 );
 			else
 				tr.deluxemaps[i] = R_CreateImage(va("*deluxemap%d", i), image, tr.lightmapSize, tr.lightmapSize, IMGTYPE_DELUXE, imgFlags, 0 );
@@ -773,6 +776,27 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, float *hdr
 	for ( i = 0 ; i < 3 ; i++ ) {
 		cv->cullPlane.normal[i] = LittleFloat( ds->lightmapVecs[2][i] );
 	}
+
+	// fix up broken (degenerate) face plane normals from the BSP by computing
+	// a unit-length normal from the first triangle's vertices, which helps
+	// dynamic light face culling work correctly (e.g. map "industrial")
+	if ( cv->numVerts >= 3 && cv->numIndexes >= 3 ) {
+		const float lenSq = cv->cullPlane.normal[0] * cv->cullPlane.normal[0]
+			+ cv->cullPlane.normal[1] * cv->cullPlane.normal[1]
+			+ cv->cullPlane.normal[2] * cv->cullPlane.normal[2];
+		if ( lenSq < 0.01f ) {
+			vec3_t v1, v2, normal;
+			const int i0 = cv->indexes[0];
+			const int i1 = cv->indexes[1];
+			const int i2 = cv->indexes[2];
+			VectorSubtract( cv->verts[i2].xyz, cv->verts[i0].xyz, v1 );
+			VectorSubtract( cv->verts[i1].xyz, cv->verts[i0].xyz, v2 );
+			CrossProduct( v1, v2, normal );
+			VectorNormalize( normal );
+			VectorCopy( normal, cv->cullPlane.normal );
+		}
+	}
+
 	cv->cullPlane.dist = DotProduct( cv->verts[0].xyz, cv->cullPlane.normal );
 	SetPlaneSignbits( &cv->cullPlane );
 	cv->cullPlane.type = PlaneTypeForNormal( cv->cullPlane.normal );
@@ -2726,6 +2750,9 @@ void RE_LoadWorldMap( const char *name ) {
 		ri.Error( ERR_DROP, "ERROR: attempted to redundantly load world map" );
 	}
 
+	// CNQ3 port: clear any stale loading flag from a previous errored load
+	tr.mapLoading = qfalse;
+
 	// set default map light scale
 	tr.sunShadowScale = 0.5f;
 
@@ -2756,6 +2783,8 @@ void RE_LoadWorldMap( const char *name ) {
 	if ( !buffer.b ) {
 		ri.Error (ERR_DROP, "RE_LoadWorldMap: %s not found", name);
 	}
+
+	tr.mapLoading = qtrue;		// CNQ3: signal backend to throttle swaps during load
 
 	// clear tr.world so if the level fails to load, the next
 	// try will not look at the partially loaded version
@@ -3026,4 +3055,6 @@ void RE_LoadWorldMap( const char *name ) {
 	}
 
     ri.FS_FreeFile( buffer.v );
+
+	tr.mapLoading = qfalse;		// CNQ3: loading complete, resume normal swaps
 }

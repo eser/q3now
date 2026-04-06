@@ -1218,6 +1218,152 @@ static const void *RB_StretchPic( const void *data ) {
 
 /*
 =============
+RB_RotatedPic
+=============
+*/
+static const void *RB_RotatedPic( const void *data ) {
+	const rotatedPicCommand_t *cmd = (const rotatedPicCommand_t *)data;
+	shader_t *shader;
+	int numVerts, numIndexes;
+	float cx, cy, hw, hh;
+	float ang, c, s;
+
+	shader = cmd->shader;
+	if ( shader != tess.shader ) {
+		RB_EndSurface();
+		backEnd.currentEntity = &backEnd.entity2D;
+		RB_SetGL2D();
+		RB_BeginSurface( shader, 0 );
+	}
+
+#ifdef USE_VBO
+	VBO_UnBind();
+#endif
+
+	RB_SetGL2D();
+
+#ifdef USE_VULKAN
+	if ( r_bloom->integer ) {
+		vk_bloom();
+	}
+#endif
+
+#ifdef USE_VBO
+	VBO_Flush();
+#endif
+
+	RB_CHECKOVERFLOW( 4, 6 );
+
+#ifdef USE_VBO
+	tess.surfType = SF_TRIANGLES;
+#endif
+
+	numIndexes = tess.numIndexes;
+	numVerts = tess.numVertexes;
+
+	tess.numVertexes += 4;
+	tess.numIndexes += 6;
+
+	tess.indexes[numIndexes + 0] = numVerts + 3;
+	tess.indexes[numIndexes + 1] = numVerts + 0;
+	tess.indexes[numIndexes + 2] = numVerts + 2;
+	tess.indexes[numIndexes + 3] = numVerts + 2;
+	tess.indexes[numIndexes + 4] = numVerts + 0;
+	tess.indexes[numIndexes + 5] = numVerts + 1;
+
+	tess.vertexColors[numVerts + 0] =
+	tess.vertexColors[numVerts + 1] =
+	tess.vertexColors[numVerts + 2] =
+	tess.vertexColors[numVerts + 3] = backEnd.color2D;
+
+	cx = cmd->x + cmd->w * 0.5f;
+	cy = cmd->y + cmd->h * 0.5f;
+	hw = cmd->w * 0.5f;
+	hh = cmd->h * 0.5f;
+
+	ang = cmd->angle * ( ( float )M_PI / 180.0f );
+	c = cosf( ang );
+	s = sinf( ang );
+
+	tess.xyz[numVerts + 0][0] = cx + ( -hw * c - -hh * s );
+	tess.xyz[numVerts + 0][1] = cy + ( -hw * s + -hh * c );
+	tess.xyz[numVerts + 0][2] = 0;
+
+	tess.xyz[numVerts + 1][0] = cx + (  hw * c - -hh * s );
+	tess.xyz[numVerts + 1][1] = cy + (  hw * s + -hh * c );
+	tess.xyz[numVerts + 1][2] = 0;
+
+	tess.xyz[numVerts + 2][0] = cx + (  hw * c -  hh * s );
+	tess.xyz[numVerts + 2][1] = cy + (  hw * s +  hh * c );
+	tess.xyz[numVerts + 2][2] = 0;
+
+	tess.xyz[numVerts + 3][0] = cx + ( -hw * c -  hh * s );
+	tess.xyz[numVerts + 3][1] = cy + ( -hw * s +  hh * c );
+	tess.xyz[numVerts + 3][2] = 0;
+
+	tess.texCoords[0][numVerts + 0][0] = cmd->s1;
+	tess.texCoords[0][numVerts + 0][1] = cmd->t1;
+	tess.texCoords[0][numVerts + 1][0] = cmd->s2;
+	tess.texCoords[0][numVerts + 1][1] = cmd->t1;
+	tess.texCoords[0][numVerts + 2][0] = cmd->s2;
+	tess.texCoords[0][numVerts + 2][1] = cmd->t2;
+	tess.texCoords[0][numVerts + 3][0] = cmd->s1;
+	tess.texCoords[0][numVerts + 3][1] = cmd->t2;
+
+	return (const void *)( cmd + 1 );
+}
+
+
+/*
+=============
+RB_SetClipRegion
+=============
+*/
+static const void *RB_SetClipRegion( const void *data ) {
+	const setClipRegionCommand_t *cmd = (const setClipRegionCommand_t *)data;
+
+	if ( tess.numIndexes ) {
+		RB_EndSurface();
+		RB_BeginSurface( tess.shader, tess.fogNum );
+	}
+
+#ifdef USE_VULKAN
+	if ( !cmd->hasRegion ) {
+		vk_set_2d_scissor( NULL );
+	} else {
+		int rect[4];
+		float xScale = (float)glConfig.vidWidth / 640.0f;
+		float yScale = (float)glConfig.vidHeight / 480.0f;
+		rect[0] = (int)( cmd->x * xScale );
+		rect[1] = (int)( cmd->y * yScale );
+		rect[2] = (int)( cmd->w * xScale );
+		rect[3] = (int)( cmd->h * yScale );
+		vk_set_2d_scissor( rect );
+	}
+#else
+	if ( !cmd->hasRegion ) {
+		qglDisable( GL_SCISSOR_TEST );
+	} else {
+		int sx, sy, sw, sh;
+		float xScale = (float)glConfig.vidWidth / 640.0f;
+		float yScale = (float)glConfig.vidHeight / 480.0f;
+		sx = (int)( cmd->x * xScale );
+		sy = glConfig.vidHeight - (int)( ( cmd->y + cmd->h ) * yScale );
+		sw = (int)( cmd->w * xScale );
+		sh = (int)( cmd->h * yScale );
+		if ( sw < 0 ) sw = 0;
+		if ( sh < 0 ) sh = 0;
+		qglScissor( sx, sy, sw, sh );
+		qglEnable( GL_SCISSOR_TEST );
+	}
+#endif
+
+	return (const void *)( cmd + 1 );
+}
+
+
+/*
+=============
 RB_DrawLine
 =============
 */
@@ -1904,11 +2050,31 @@ static const void *RB_SwapBuffers( const void *data ) {
 		backEnd.screenshotMask = 0;
 	}
 
+	// CNQ3 port: throttle presentation while a map is loading so the
+	// renderer does not starve the loader thread. r_loadingFpsCap sets
+	// the maximum present rate (0 disables the throttle, default 10).
+	{
+		qboolean skipSwap = qfalse;
+		if ( tr.mapLoading && r_loadingFpsCap->integer > 0 ) {
+			const int minInterval = 1000 / r_loadingFpsCap->integer;
+			const int nowMsec = ri.Milliseconds();
+			if ( nowMsec - backEnd.lastLoadingSwapMsec < minInterval ) {
+				skipSwap = qtrue;
+			} else {
+				backEnd.lastLoadingSwapMsec = nowMsec;
+			}
+		} else {
+			backEnd.lastLoadingSwapMsec = 0;
+		}
+
+		if ( !skipSwap ) {
 #ifdef USE_VULKAN
-	vk_present_frame();
+			vk_present_frame();
 #else
-	ri.GLimp_EndFrame();
+			ri.GLimp_EndFrame();
 #endif
+		}
+	}
 
 	backEnd.projection2D = qfalse;
 	backEnd.doneSurfaces = qfalse;
@@ -1939,6 +2105,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_STRETCH_PIC:
 			data = RB_StretchPic( data );
+			break;
+		case RC_ROTATED_PIC:
+			data = RB_RotatedPic( data );
+			break;
+		case RC_SET_CLIP_REGION:
+			data = RB_SetClipRegion( data );
 			break;
 		case RC_DRAW_LINE:
 			data = RB_DrawLine( data );

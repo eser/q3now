@@ -175,7 +175,22 @@ static void CM_TestBoxInBrush( traceWork_t *tw, const cbrush_t *brush ) {
 		return;
 	}
 
-   if ( tw->sphere.use ) {
+   if ( tw->type == TT_BISPHERE ) {
+		// For a bi-sphere position test there is no meaningful "end"
+		// sweep, so test the start point against all planes using the
+		// start radius. If any plane places the sphere entirely
+		// outside, the brush does not contain the sphere.
+		for ( i = 0; i < brush->numsides; i++ ) {
+			side = brush->sides + i;
+			plane = side->plane;
+
+			dist = (double)plane->dist + tw->biSphere.startRadius;
+			d1 = DotProductDP( tw->start, plane->normal ) - dist;
+			if ( d1 > 0 ) {
+				return;
+			}
+		}
+	} else if ( tw->type == TT_CAPSULE ) {
 		// the first six planes are the axial planes, so we only
 		// need to test the remainder
 		for ( i = 6 ; i < brush->numsides ; i++ ) {
@@ -383,6 +398,7 @@ static void CM_TestBoundingBoxInCapsule( traceWork_t *tw, clipHandle_t model ) {
 	}
 
 	// replace the bounding box with the capsule
+	tw->type = TT_CAPSULE;
 	tw->sphere.use = qtrue;
 	tw->sphere.radius = ( size[1][0] > size[1][2] ) ? size[1][2]: size[1][0];
 	tw->sphere.halfheight = size[1][2];
@@ -502,7 +518,61 @@ static void CM_TraceThroughBrush( traceWork_t *tw, const cbrush_t *brush ) {
 
 	leadside = NULL;
 
-	if ( tw->sphere.use ) {
+	if ( tw->type == TT_BISPHERE ) {
+		//
+		// compare the trace against all planes of the brush
+		// expanding the plane distance by the start / end radius of the
+		// bi-sphere at each endpoint (the effective radius interpolates
+		// linearly along the trace)
+		//
+		for ( i = 0; i < brush->numsides; i++ ) {
+			side = brush->sides + i;
+			plane = side->plane;
+
+			d1 = DotProductDP( tw->start, plane->normal ) -
+				( (double)plane->dist + tw->biSphere.startRadius );
+			d2 = DotProductDP( tw->end, plane->normal ) -
+				( (double)plane->dist + tw->biSphere.endRadius );
+
+			if ( d2 > 0 ) {
+				getout = qtrue;	// endpoint is not in solid
+			}
+			if ( d1 > 0 ) {
+				startout = qtrue;
+			}
+
+			// if completely in front of face, no intersection with the entire brush
+			if ( d1 > 0 && ( d2 >= SURFACE_CLIP_EPSILON || d2 >= d1 ) ) {
+				return;
+			}
+
+			// if it doesn't cross the plane, the plane isn't relevant
+			if ( d1 <= 0 && d2 <= 0 ) {
+				continue;
+			}
+
+			// crosses face
+			if ( d1 > d2 ) {	// enter
+				f = ( d1 - SURFACE_CLIP_EPSILON ) / ( d1 - d2 );
+				if ( f < 0 ) {
+					f = 0;
+				}
+				if ( f > enterFrac ) {
+					enterFrac = f;
+					clipplane = plane;
+					leadside = side;
+				}
+			} else {	// leave
+				f = ( d1 + SURFACE_CLIP_EPSILON ) / ( d1 - d2 );
+				if ( f > 1 ) {
+					f = 1;
+				}
+				if ( f < leaveFrac ) {
+					leaveFrac = f;
+				}
+			}
+		}
+	} else if ( tw->type == TT_CAPSULE ) {
 		//
 		// compare the trace against all planes of the brush
 		// find the latest time the trace crosses a plane towards the interior
@@ -694,10 +764,14 @@ static void CM_TraceThroughLeaf( traceWork_t *tw, const cLeaf_t *leaf ) {
 	}
 
 	// trace line against all patches in the leaf
+	// TT_BISPHERE does not support patch collision (CM_TraceThroughPatchCollide
+	// reads tw->offsets which are only populated for AABB/capsule sweeps). The
+	// bi-sphere code path is currently only used for point-like queries where
+	// brush collision is sufficient.
 #ifdef BSPC
-	if (1) {
+	if ( 1 ) {
 #else
-	if ( !cm_noCurves->integer ) {
+	if ( !cm_noCurves->integer && tw->type != TT_BISPHERE ) {
 #endif
 		for ( k = 0 ; k < leaf->numLeafSurfaces ; k++ ) {
 			patch = cm.surfaces[ cm.leafsurfaces[ leaf->firstLeafSurface + k ] ];
@@ -1007,6 +1081,7 @@ static void CM_TraceBoundingBoxThroughCapsule( traceWork_t *tw, clipHandle_t mod
 	}
 
 	// replace the bounding box with the capsule
+	tw->type = TT_CAPSULE;
 	tw->sphere.use = qtrue;
 	tw->sphere.radius = ( size[1][0] > size[1][2] ) ? size[1][2]: size[1][0];
 	tw->sphere.halfheight = size[1][2];
@@ -1197,6 +1272,7 @@ static void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, co
 		tw.sphere.halfheight = tw.size[1][2];
 		VectorSet( tw.sphere.offset, 0, 0, tw.size[1][2] - tw.sphere.radius );
 	}
+	tw.type = capsule ? TT_CAPSULE : TT_AABB;
 
 	tw.maxOffset = tw.size[1][0] + tw.size[1][1] + tw.size[1][2];
 
@@ -1236,7 +1312,7 @@ static void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, co
 	//
 	// calculate bounds
 	//
-	if ( tw.sphere.use ) {
+	if ( tw.type == TT_CAPSULE ) {
 		for ( i = 0 ; i < 3 ; i++ ) {
 			if ( tw.start[i] < tw.end[i] ) {
 				tw.bounds[0][i] = tw.start[i] - fabs(tw.sphere.offset[i]) - tw.sphere.radius;
@@ -1260,12 +1336,65 @@ static void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, co
 	}
 
 	//
+	// triangle-soup collision path: dynamic meshes (IQM models, etc.)
+	// registered via CM_RegisterTriangleSoup don't live in the world
+	// BSP, so trace them directly against the stored patchCollide_t.
+	//
+	if ( model >= TRI_SOUP_HANDLE_BASE && model < TRI_SOUP_HANDLE_END ) {
+		int idx = model - TRI_SOUP_HANDLE_BASE;
+		const cTriSoup_t *ts;
+
+		if ( idx < 0 || idx >= MAX_TRI_SOUPS || !cm.triSoups[idx].inUse ) {
+			*results = tw.trace;
+			return;
+		}
+		ts = &cm.triSoups[idx];
+
+		// Set up isPoint / extents the same way the normal sweep path
+		// would so CM_TraceThroughPatchCollide sees a valid tw.
+		if ( tw.size[0][0] == 0 && tw.size[0][1] == 0 && tw.size[0][2] == 0 ) {
+			tw.isPoint = qtrue;
+			VectorClear( tw.extents );
+		} else {
+			tw.isPoint = qfalse;
+			tw.extents[0] = tw.size[1][0];
+			tw.extents[1] = tw.size[1][1];
+			tw.extents[2] = tw.size[1][2];
+		}
+
+		if ( start[0] == end[0] && start[1] == end[1] && start[2] == end[2] ) {
+			if ( CM_PositionTestInPatchCollide( &tw, ts->pc ) ) {
+				tw.trace.startsolid = tw.trace.allsolid = qtrue;
+				tw.trace.fraction = 0;
+				tw.trace.contents = CONTENTS_SOLID;
+			}
+		} else {
+			CM_TraceThroughPatchCollide( &tw, ts->pc );
+			if ( tw.trace.fraction < 1.0f ) {
+				tw.trace.contents = CONTENTS_SOLID;
+			}
+		}
+
+		// generate endpos from the original, unmodified start/end
+		if ( tw.trace.fraction == 1 ) {
+			VectorCopy( end, tw.trace.endpos );
+		} else {
+			for ( i = 0; i < 3; i++ ) {
+				tw.trace.endpos[i] = start[i] + tw.trace.fraction * ( end[i] - start[i] );
+			}
+		}
+		*results = tw.trace;
+		return;
+	}
+
+	//
 	// check for position test special case
 	//
 	if (start[0] == end[0] && start[1] == end[1] && start[2] == end[2]) {
 		if ( model ) {
 #ifdef ALWAYS_BBOX_VS_BBOX // FIXME - compile time flag?
 			if ( model == BOX_MODEL_HANDLE || model == CAPSULE_MODEL_HANDLE) {
+				tw.type = TT_AABB;
 				tw.sphere.use = qfalse;
 				CM_TestInLeaf( &tw, &cmod->leaf );
 			}
@@ -1277,7 +1406,7 @@ static void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, co
 			else
 #endif
 			if ( model == CAPSULE_MODEL_HANDLE ) {
-				if ( tw.sphere.use ) {
+				if ( tw.type == TT_CAPSULE ) {
 					CM_TestCapsuleInCapsule( &tw, model );
 				}
 				else {
@@ -1310,6 +1439,7 @@ static void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, co
 		if ( model ) {
 #ifdef ALWAYS_BBOX_VS_BBOX
 			if ( model == BOX_MODEL_HANDLE || model == CAPSULE_MODEL_HANDLE) {
+				tw.type = TT_AABB;
 				tw.sphere.use = qfalse;
 				CM_TraceThroughLeaf( &tw, &cmod->leaf );
 			}
@@ -1321,7 +1451,7 @@ static void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, co
 			else
 #endif
 			if ( model == CAPSULE_MODEL_HANDLE ) {
-				if ( tw.sphere.use ) {
+				if ( tw.type == TT_CAPSULE ) {
 					CM_TraceCapsuleThroughCapsule( &tw, model );
 				}
 				else {
@@ -1463,6 +1593,118 @@ void CM_TransformedBoxTrace( trace_t *results, const vec3_t start, const vec3_t 
 	trace.endpos[0] = start[0] + trace.fraction * (end[0] - start[0]);
 	trace.endpos[1] = start[1] + trace.fraction * (end[1] - start[1]);
 	trace.endpos[2] = start[2] + trace.fraction * (end[2] - start[2]);
+
+	*results = trace;
+}
+
+
+/*
+==================
+CM_BiSphereTrace
+
+Sweeps a bi-sphere (sphere whose radius interpolates linearly from
+startRadius to endRadius along the trace) through the world or a brush
+model. Dispatches into CM_TraceThroughTree / CM_TraceThroughLeaf, which
+recognize TT_BISPHERE via CM_TraceThroughBrush.
+==================
+*/
+void CM_BiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
+	float startRadius, float endRadius, clipHandle_t model, int brushmask ) {
+	int			i;
+	traceWork_t	tw;
+	float		largestRadius = startRadius > endRadius ? startRadius : endRadius;
+	cmodel_t	*cmod;
+
+	cmod = CM_ClipHandleToModel( model );
+
+	cm.checkcount++;		// for multi-check avoidance
+	c_traces++;				// for statistics, may be zeroed
+
+	Com_Memset( &tw, 0, sizeof( tw ) );
+	tw.trace.fraction = 1.0f;
+	VectorCopy( vec3_origin, tw.modelOrigin );
+	tw.type = TT_BISPHERE;
+
+	if ( !cm.numNodes ) {
+		*results = tw.trace;
+		return;	// map not loaded, shouldn't happen
+	}
+
+	tw.contents = brushmask;
+
+	VectorCopy( start, tw.start );
+	VectorCopy( end, tw.end );
+
+	tw.biSphere.startRadius = startRadius;
+	tw.biSphere.endRadius = endRadius;
+
+	// calculate bounds: expand start/end by the larger of the two radii
+	// at the appropriate end so the leaf cull is conservative.
+	for ( i = 0; i < 3; i++ ) {
+		if ( tw.start[i] < tw.end[i] ) {
+			tw.bounds[0][i] = tw.start[i] - tw.biSphere.startRadius;
+			tw.bounds[1][i] = tw.end[i] + tw.biSphere.endRadius;
+		} else {
+			tw.bounds[0][i] = tw.end[i] - tw.biSphere.endRadius;
+			tw.bounds[1][i] = tw.start[i] + tw.biSphere.startRadius;
+		}
+	}
+
+	tw.isPoint = qfalse;
+	tw.extents[0] = largestRadius;
+	tw.extents[1] = largestRadius;
+	tw.extents[2] = largestRadius;
+
+	// general sweeping through world
+	if ( model ) {
+		CM_TraceThroughLeaf( &tw, &cmod->leaf );
+	} else {
+		CM_TraceThroughTree( &tw, 0, 0.0f, 1.0f, tw.start, tw.end );
+	}
+
+	// generate endpos from the original, unmodified start/end
+	if ( tw.trace.fraction == 1.0f ) {
+		VectorCopy( end, tw.trace.endpos );
+	} else {
+		for ( i = 0; i < 3; i++ ) {
+			tw.trace.endpos[i] = start[i] + tw.trace.fraction * ( end[i] - start[i] );
+		}
+	}
+
+	assert( tw.trace.allsolid
+		|| tw.trace.fraction == 1.0
+		|| VectorLengthSquared( tw.trace.plane.normal ) > 0.9999 );
+
+	*results = tw.trace;
+}
+
+
+/*
+==================
+CM_TransformedBiSphereTrace
+
+Handles offsetting of the start/end positions for moving brush models.
+Rotation is not supported for bi-sphere traces (a bi-sphere has
+rotational symmetry about its sweep axis, so brush-model yaw/pitch/roll
+would only affect the bounds of attached brushes, not the sphere sweep).
+==================
+*/
+void CM_TransformedBiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
+	float startRadius, float endRadius, clipHandle_t model, int brushmask,
+	const vec3_t origin ) {
+	trace_t	trace;
+	vec3_t	start_l, end_l;
+
+	// subtract origin offset
+	VectorSubtract( start, origin, start_l );
+	VectorSubtract( end, origin, end_l );
+
+	CM_BiSphereTrace( &trace, start_l, end_l, startRadius, endRadius, model, brushmask );
+
+	// re-calculate endpos in the original (unoffset) frame.
+	trace.endpos[0] = start[0] + trace.fraction * ( end[0] - start[0] );
+	trace.endpos[1] = start[1] + trace.fraction * ( end[1] - start[1] );
+	trace.endpos[2] = start[2] + trace.fraction * ( end[2] - start[2] );
 
 	*results = trace;
 }

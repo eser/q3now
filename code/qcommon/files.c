@@ -260,8 +260,6 @@ static	cvar_t		*fs_homepath;
 // Also search the .app bundle for .pk3 files
 static  cvar_t          *fs_apppath;
 #endif
-static	cvar_t		*fs_steampath;
-
 static	cvar_t		*fs_basepath;
 static	cvar_t		*fs_basegame;
 static	cvar_t		*fs_copyfiles;
@@ -951,19 +949,6 @@ int FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp ) {
 			fd->handleFiles.file.o = Sys_FOpen( ospath, "rb" );
 		}
 
-		// Check fs_steampath too
-		if ( !fd->handleFiles.file.o && fs_steampath->string[0] )
-		{
-			// search steampath
-			ospath = FS_BuildOSPath( fs_steampath->string, filename, NULL );
-
-			if ( fs_debug->integer )
-			{
-				Com_Printf( "FS_SV_FOpenFileRead (fs_steampath): %s\n", ospath );
-			}
-
-			fd->handleFiles.file.o = Sys_FOpen( ospath, "rb" );
-		}
 	}
 
 	if( fd->handleFiles.file.o != NULL ) {
@@ -3907,7 +3892,7 @@ static int FS_GetModList( char *listbuf, int bufsize ) {
 	qboolean bDrop = qfalse;
 
 	// paths to search for mods
-	cvar_t *const *paths[] = { &fs_basepath, &fs_homepath, &fs_steampath };
+	cvar_t *const *paths[] = { &fs_basepath, &fs_homepath };
 
 	*listbuf = '\0';
 	nMods = nTotal = 0;
@@ -5091,8 +5076,6 @@ static void FS_Startup( void ) {
 	Cvar_SetDescription( fs_basepath, "Write-protected CVAR specifying the path to the installation folder of the game." );
 	fs_basegame = Cvar_Get( "fs_basegame", BASEGAME, CVAR_INIT | CVAR_PROTECTED );
 	Cvar_SetDescription( fs_basegame, "Write-protected CVAR specifying the path to the base game(s) folder(s), separated by '/'." );
-	fs_steampath = Cvar_Get( "fs_steampath", Sys_SteamPath(), CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE );
-
 	/* parse fs_basegame cvar */
 	if ( basegame_cnt == 0 || Q_stricmp( basegame, fs_basegame->string ) ) {
 		Q_strncpyz( basegame_str, fs_basegame->string, sizeof( basegame_str ) );
@@ -5148,13 +5131,6 @@ static void FS_Startup( void ) {
 #endif
 
 	// add search path elements in reverse priority order
-	if (fs_steampath->string[0]) {
-		// handle multiple basegames:
-		for (i = 0; i < basegame_cnt; i++) {
-			FS_AddGameDirectory( fs_steampath->string, basegames[i] );
-		}
-	}
-
 	if (fs_basepath->string[0]) {
 		// handle multiple basegames:
 		for (i = 0; i < basegame_cnt; i++) {
@@ -5195,9 +5171,6 @@ static void FS_Startup( void ) {
 
 	// check for additional game folder for mods
 	if ( fs_gamedirvar->string[0] != '\0' && !FS_IsBaseGame( fs_gamedirvar->string ) ) {
-		if ( fs_steampath->string[0] != '\0' ) {
-			FS_AddGameDirectory( fs_steampath->string, fs_gamedirvar->string );
-		}
 		if ( fs_basepath->string[0] != '\0' ) {
 			FS_AddGameDirectory( fs_basepath->string, fs_gamedirvar->string );
 		}

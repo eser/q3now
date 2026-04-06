@@ -214,6 +214,11 @@ typedef enum {
 	CG_R_MEASURETEXTNORM = 206,
 	// float trap_R_MeasureTextNorm( const char *text, int fontId, float nSize )
 
+	// ── Sound duration (Phase 6.2) ───────────────────────────────────
+	CG_S_SOUNDDURATION = 207,
+	// int trap_S_SoundDuration( sfxHandle_t handle )
+	// Returns sound length in milliseconds (0 if invalid).
+
 	// ── Wired Store: game-agnostic key-value state ────────────────────
 	CG_WUI_STORE_DELETE = 216,
 	// void trap_WiredStore_Delete( const char *key )

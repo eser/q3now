@@ -292,6 +292,10 @@ static genFunc_t NameToGenFunc( const char *funcname )
 	{
 		return GF_NOISE;
 	}
+	else if ( !Q_stricmp( funcname, "random" ) )
+	{
+		return GF_RANDOM;
+	}
 
 	ri.Printf( PRINT_WARNING, "WARNING: invalid genfunc name '%s' in shader '%s'\n", funcname, shader.name );
 	return GF_SIN;
@@ -728,11 +732,13 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 		}
 		//
 		// animMap <frequency> <image1> .... <imageN>
+		// animMapClamp <frequency> <image1> .... <imageN>
 		//
-		else if ( !Q_stricmp( token, "animMap" ) )
+		else if ( !Q_stricmp( token, "animMap" ) || !Q_stricmp( token, "animMapClamp" ) )
 		{
 			int	totalImages = 0;
 			int maxAnimations = s_extendedShader ? MAX_IMAGE_ANIMATIONS : MAX_IMAGE_ANIMATIONS_VQ3;
+			qboolean looping = (qboolean)( !Q_stricmp( token, "animMap" ) );
 
 			token = COM_ParseExt( text, qfalse );
 			if ( !token[0] )
@@ -741,6 +747,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 				return qfalse;
 			}
 			stage->bundle[0].imageAnimationSpeed = Q_atof( token );
+			stage->bundle[0].loopingImageAnim = looping;
 
 			// parse up to MAX_IMAGE_ANIMATIONS animations
 			while ( 1 ) {
@@ -1352,6 +1359,24 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 		}
 		else if ( !Q_stricmp( token, "depthFragment" ) )
 		{
+			continue;
+		}
+		else if ( !Q_stricmp( token, "zFadeBounds" ) )
+		{
+			token = COM_ParseExt( text, qfalse );
+			if ( !token[0] )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: missing first parameter for 'zFadeBounds' in shader '%s'\n", shader.name );
+				continue;
+			}
+			stage->zFadeBounds[0] = Q_atof( token );
+			token = COM_ParseExt( text, qfalse );
+			if ( !token[0] )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: missing second parameter for 'zFadeBounds' in shader '%s'\n", shader.name );
+				continue;
+			}
+			stage->zFadeBounds[1] = Q_atof( token );
 			continue;
 		}
 		else
@@ -2138,6 +2163,30 @@ static qboolean ParseShader( const char **text )
 				continue;
 			}
 			shader.fogParms.depthForOpaque = Q_atof( token );
+
+#if FEAT_FOG_SYSTEM
+			// Optional Spearmint fog type: linear / exp / exp2 [density] [farClip]
+			token = COM_ParseExt( text, qfalse );
+			if ( token[0] && !isdigit( (unsigned char)token[0] ) ) {
+				if ( !Q_stricmp( token, "linear" ) ) {
+					shader.fogParms.type = FT_LINEAR;
+				} else if ( !Q_stricmp( token, "exp" ) ) {
+					shader.fogParms.type = FT_EXP;
+				} else if ( !Q_stricmp( token, "exp2" ) ) {
+					shader.fogParms.type = FT_EXP2;
+				} else {
+					shader.fogParms.type = FT_NONE;
+				}
+				token = COM_ParseExt( text, qfalse );
+				if ( token[0] ) {
+					shader.fogParms.density = Q_atof( token );
+					token = COM_ParseExt( text, qfalse );
+					if ( token[0] ) {
+						shader.fogParms.farClip = Q_atof( token );
+					}
+				}
+			}
+#endif
 
 			// skip any old gradient directions
 			SkipRestOfLine( text );
@@ -2968,16 +3017,27 @@ shaders.
 Sets shader->sortedIndex
 ==============
 */
+// returns positive if 'a' should sort after 'b', negative if before, zero if equal
+// transparent surfaces ("classes" such as sprites, beams, decals) need stable
+// per-class ordering so they always render in the same relative order across
+// map loads regardless of shader registration order
+static int R_CompareShadersForSort( const shader_t *a, const shader_t *b )
+{
+	if ( a->sort < b->sort ) return -1;
+	if ( a->sort > b->sort ) return 1;
+	if ( a->polygonOffset != b->polygonOffset )
+		return (int)a->polygonOffset - (int)b->polygonOffset;
+	return (int)a->cullType - (int)b->cullType;
+}
+
 static void SortNewShader( void ) {
 	int		i;
-	float	sort;
 	shader_t	*newShader;
 
 	newShader = tr.shaders[ tr.numShaders - 1 ];
-	sort = newShader->sort;
 
 	for ( i = tr.numShaders - 2 ; i >= 0 ; i-- ) {
-		if ( tr.sortedShaders[ i ]->sort <= sort ) {
+		if ( R_CompareShadersForSort( tr.sortedShaders[ i ], newShader ) <= 0 ) {
 			break;
 		}
 		tr.sortedShaders[i+1] = tr.sortedShaders[i];
@@ -3065,7 +3125,10 @@ static void FindLightingStages( void )
 	int i;
 	shader.lightingStage = -1;
 
-	if ( shader.isSky || ( shader.surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) || shader.sort > SS_OPAQUE )
+	// allow dynamic lights on transparent surfaces (SS_BLEND*, SS_DECAL,
+	// SS_BANNER, SS_UNDERWATER, etc.) but not on the fog pass itself or
+	// the sky box - the fog pass has no diffuse stage to light
+	if ( shader.isSky || ( shader.surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) || shader.sort == SS_FOG )
 		return;
 
 	for ( i = 0; i < shader.numUnfoggedPasses; i++ ) {
@@ -3634,7 +3697,14 @@ shader_t *R_FindShader( const char *name, int lightmapIndex, qboolean mipRawImag
 		stages[1].stateBits |= GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO;
 	} else {
 		// two pass lightmap
-		stages[0].bundle[0].image[0] = tr.lightmaps[shader.lightmapIndex];
+		// Safety: if the map was compiled without lightmaps, tr.lightmaps
+		// can be NULL here. Fall back to the white image so we render
+		// un-lit rather than crashing (e.g. b0_beta5).
+		if ( tr.lightmaps == NULL || shader.lightmapIndex >= tr.numLightmaps ) {
+			stages[0].bundle[0].image[0] = tr.whiteImage;
+		} else {
+			stages[0].bundle[0].image[0] = tr.lightmaps[shader.lightmapIndex];
+		}
 		stages[0].bundle[0].isLightmap = qtrue;
 		stages[0].active = qtrue;
 		stages[0].rgbGen = CGEN_IDENTITY;	// lightmaps are scaled on creation
@@ -3718,7 +3788,14 @@ qhandle_t RE_RegisterShaderFromImage(const char *name, int lightmapIndex, image_
 		stages[1].stateBits |= GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO;
 	} else {
 		// two pass lightmap
-		stages[0].bundle[0].image[0] = tr.lightmaps[shader.lightmapIndex];
+		// Safety: if the map was compiled without lightmaps, tr.lightmaps
+		// can be NULL here. Fall back to the white image so we render
+		// un-lit rather than crashing (e.g. b0_beta5).
+		if ( tr.lightmaps == NULL || shader.lightmapIndex >= tr.numLightmaps ) {
+			stages[0].bundle[0].image[0] = tr.whiteImage;
+		} else {
+			stages[0].bundle[0].image[0] = tr.lightmaps[shader.lightmapIndex];
+		}
 		stages[0].bundle[0].isLightmap = qtrue;
 		stages[0].active = qtrue;
 		stages[0].rgbGen = CGEN_IDENTITY;	// lightmaps are scaled on creation
@@ -3732,7 +3809,7 @@ qhandle_t RE_RegisterShaderFromImage(const char *name, int lightmapIndex, image_
 	}
 
 	sh = FinishShader();
-  return sh->index; 
+  return sh->index;
 }
 
 

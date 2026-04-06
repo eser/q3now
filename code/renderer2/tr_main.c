@@ -1603,7 +1603,7 @@ static void R_AddEntitySurface (int entityNum)
 			case MOD_MDR:
 				R_MDRAddAnimSurfaces( ent );
 				break;
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 			case MOD_IQM:
 				R_AddIQMSurfaces( ent );
 				break;
@@ -1910,7 +1910,7 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 					radius = frame->radius;
 				}
 				break;
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 				case MOD_IQM:
 				{
 					// FIXME: never actually tested this

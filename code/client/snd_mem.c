@@ -32,7 +32,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "snd_local.h"
 #include "snd_codec.h"
 
-#define DEF_COMSOUNDMEGS "8"
+#define DEF_COMSOUNDMEGS "32"
 
 /*
 ===============================================================================
@@ -370,7 +370,16 @@ qboolean S_LoadSound( sfx_t *sfx )
 	}
 
 	sfx->soundChannels = info.channels;
-	
+
+	// Phase 6.2: cache sound length in milliseconds for S_SoundDuration().
+	// info.samples is the per-channel sample count (set in S_ReadRIFFHeader),
+	// so duration = samples / rate * 1000.
+	if ( info.rate > 0 ) {
+		sfx->duration = (int)( ( (float)info.samples / (float)info.rate ) * 1000.0f );
+	} else {
+		sfx->duration = 0;
+	}
+
 	Hunk_FreeTempMemory(samples);
 	Hunk_FreeTempMemory(data);
 

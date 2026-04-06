@@ -25,8 +25,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cm_polylib.h"
 
 #define	MAX_SUBMODELS			256
-#define	BOX_MODEL_HANDLE		255
-#define CAPSULE_MODEL_HANDLE	254
+#define	BOX_MODEL_HANDLE		(cm.numSubModels)
+#define CAPSULE_MODEL_HANDLE	(cm.numSubModels + 1)
+
+// Triangle-soup collision handles live above the inline model range so
+// that an IQM (or any other dynamic triangle mesh) can be registered at
+// runtime and used with CM_BoxTrace / CM_TransformedBoxTrace like any
+// brush model.
+#define MAX_TRI_SOUPS			64
+#define TRI_SOUP_HANDLE_BASE	(MAX_SUBMODELS + 2)
+#define TRI_SOUP_HANDLE_END		(TRI_SOUP_HANDLE_BASE + MAX_TRI_SOUPS)
 
 
 // forced double-precison functions
@@ -93,6 +101,16 @@ typedef struct cmodel_s {
 	vec3_t		mins, maxs;
 	cLeaf_t		leaf;			// submodels don't reference the main tree
 } cmodel_t;
+
+// Registered triangle-soup collision entry. The cmodel_t is used for
+// CM_ModelBounds responses; the patchCollide_t holds the actual facet
+// geometry and is consumed by CM_TraceThroughPatchCollide.
+typedef struct cTriSoup_s {
+	qboolean			inUse;
+	char				name[MAX_QPATH];
+	cmodel_t			cmod;		// bounds only, leaf is unused
+	struct patchCollide_s	*pc;
+} cTriSoup_t;
 
 typedef struct {
 	cplane_t	*plane;
@@ -168,6 +186,11 @@ typedef struct {
 	int			numSurfaces;
 	cPatch_t	**surfaces;			// non-patches will be NULL
 
+	// Runtime-registered triangle soups (IQM and other dynamic
+	// triangle meshes). Indexed by (handle - TRI_SOUP_HANDLE_BASE).
+	cTriSoup_t	triSoups[MAX_TRI_SOUPS];
+	int			numTriSoups;
+
 	int			floodvalid;
 	int			checkcount;					// incremented on each trace
 
@@ -198,6 +221,11 @@ typedef struct
 } sphere_t;
 
 typedef struct {
+	float	startRadius;
+	float	endRadius;
+} biSphere_t;
+
+typedef struct {
 	vec3_t		start;
 	vec3_t		end;
 	vec3_t		size[2];	// size of the box being swept through the model
@@ -210,6 +238,9 @@ typedef struct {
 	qboolean	isPoint;	// optimized case
 	trace_t		trace;		// returned from trace call
 	sphere_t	sphere;		// sphere for oriendted capsule collision
+	traceType_t	type;		// replaces sphere.use boolean
+	biSphere_t	biSphere;	// for TT_BISPHERE
+	qboolean	testLateralCollision;
 } traceWork_t;
 
 typedef struct leafList_s {
@@ -237,6 +268,15 @@ qboolean CM_BoundsIntersectPoint( const vec3_t mins, const vec3_t maxs, const ve
 // cm_patch.c
 
 struct patchCollide_s	*CM_GeneratePatchCollide( int width, int height, vec3_t *points );
+struct patchCollide_s	*CM_GenerateTriangleSoupCollide( int numVertexes, vec3_t *vertexes,
+	int numIndexes, int *indexes );
 void CM_TraceThroughPatchCollide( traceWork_t *tw, const struct patchCollide_s *pc );
 qboolean CM_PositionTestInPatchCollide( traceWork_t *tw, const struct patchCollide_s *pc );
 void CM_ClearLevelPatches( void );
+void CM_TriangleSoupCollideSelfTest( void );
+
+// cm_load.c — runtime triangle soup / IQM registration
+clipHandle_t	CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
+	int numVertexes, const int *indexes, int numIndexes );
+clipHandle_t	CM_LoadIQMGeometry( const char *name );
+void			CM_ClearTriangleSoups( void );

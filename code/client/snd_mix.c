@@ -20,6 +20,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 // snd_mix.c -- portable code to mix sounds for snd_dma.c
+//
+// NOTE: The per-channel left/right volumes consumed below are populated by
+// S_SpatializeOrigin() in snd_dma.c. The CNQ3-ported linear distance
+// fall-off (controlled by the "s_linearFalloff" cvar, default 1) is applied
+// there before the mixer ever sees ch->leftvol / ch->rightvol, so no
+// additional attenuation math is needed in this file.
 
 #include "client.h"
 #include "snd_local.h"
@@ -733,21 +739,53 @@ void S_PaintChannels( int endtime ) {
 
 	snd_vol = s_volume->value * 255;
 
-	if ( (!gw_active && !gw_minimized && s_muteWhenUnfocused->integer) || (gw_minimized && s_muteWhenMinimized->integer) ) {
-		buffer = dma_buffer2;
-		if ( !muted ) {
-			// switching to muted, clear hardware buffer
-			Com_Memset( dma.buffer, 0, dma.samples * dma.samplebits/8 );
+	/* CNQ3 backport: consolidated auto-mute decision.  When s_autoMute
+	   is non-zero it overrides the legacy s_muteWhenUnfocused /
+	   s_muteWhenMinimized CVars entirely.  Bit 1 = mute unfocused,
+	   bit 2 = mute minimized.  A match alert can temporarily force
+	   audio back on via the s_autoMute_OverrideMute flag. */
+	{
+		qboolean wantMute;
+		int am = s_autoMute ? s_autoMute->integer : 0;
+
+		if ( am != 0 ) {
+			wantMute = qfalse;
+			if ( (am & 1) && !gw_active && !gw_minimized ) {
+				wantMute = qtrue;
+			}
+			if ( (am & 2) && gw_minimized ) {
+				wantMute = qtrue;
+			}
+		} else {
+			wantMute = qfalse;
+			if ( !gw_active && !gw_minimized && s_muteWhenUnfocused->integer ) {
+				wantMute = qtrue;
+			}
+			if ( gw_minimized && s_muteWhenMinimized->integer ) {
+				wantMute = qtrue;
+			}
 		}
-		muted = qtrue;
-	} else {
-		buffer = dma.buffer;
-		// switching to unmuted, clear both buffers
-		if ( muted ) {
-			Com_Memset( dma.buffer, 0, dma.samples * dma.samplebits/8 );
-			Com_Memset( dma_buffer2, 0, dma.samples * dma.samplebits/8 );
+
+		if ( s_autoMute_OverrideMute ) {
+			wantMute = qfalse;
 		}
-		muted = qfalse;
+
+		if ( wantMute ) {
+			buffer = dma_buffer2;
+			if ( !muted ) {
+				/* switching to muted, clear hardware buffer */
+				Com_Memset( dma.buffer, 0, dma.samples * dma.samplebits/8 );
+			}
+			muted = qtrue;
+		} else {
+			buffer = dma.buffer;
+			/* switching to unmuted, clear both buffers */
+			if ( muted ) {
+				Com_Memset( dma.buffer, 0, dma.samples * dma.samplebits/8 );
+				Com_Memset( dma_buffer2, 0, dma.samples * dma.samplebits/8 );
+			}
+			muted = qfalse;
+		}
 	}
 
 	//Com_Printf ("%i to %i\n", s_paintedtime, endtime);

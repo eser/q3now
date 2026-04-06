@@ -1634,15 +1634,31 @@ void R_SetColorMappings( void ) {
 	int		inf;
 	int		shift;
 	qboolean applyGamma;
+	float	brightness;
 
 	if ( !tr.inited ) {
 		// it may be called from window handling functions where gamma flags is now yet known/set
 		return;
 	}
 
-	// setup the overbright lighting
-	// negative value will force gamma in windowed mode
-	tr.overbrightBits = abs( r_overBrightBits->integer );
+	// Float-based brightness (CNQ3-style rework).
+	// r_brightness replaces r_overBrightBits when set (value > 0), but we
+	// still honor negative r_overBrightBits as the signal to force gamma in
+	// windowed mode.
+	if ( r_brightness != NULL && r_brightness->value > 0.0f ) {
+		brightness = r_brightness->value;
+		if ( brightness < 0.25f ) brightness = 0.25f;
+		if ( brightness > 32.0f ) brightness = 32.0f;
+		tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
+		if ( r_overBrightBits->integer < 0 ) {
+			tr.overbrightBits = -tr.overbrightBits;
+		}
+	} else {
+		// setup the overbright lighting
+		// negative value will force gamma in windowed mode
+		tr.overbrightBits = r_overBrightBits->integer;
+	}
+	tr.overbrightBits = abs( tr.overbrightBits );
 
 	// never overbright in windowed mode
 #ifdef USE_VULKAN

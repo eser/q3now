@@ -277,12 +277,15 @@ static int R_DlightGrid( srfGridMesh_t *grid, int dlightBits ) {
 			continue;
 		}
 		dl = &tr.refdef.dlights[i];
-		if ( dl->origin[0] - dl->radius > grid->meshBounds[1][0]
-			|| dl->origin[0] + dl->radius < grid->meshBounds[0][0]
-			|| dl->origin[1] - dl->radius > grid->meshBounds[1][1]
-			|| dl->origin[1] + dl->radius < grid->meshBounds[0][1]
-			|| dl->origin[2] - dl->radius > grid->meshBounds[1][2]
-			|| dl->origin[2] + dl->radius < grid->meshBounds[0][2] ) {
+		// use the entity-local (transformed) light position so brush model
+		// entities such as moving platforms (e.g. cpm25 elevator) keep
+		// affecting their surfaces correctly each frame
+		if ( dl->transformed[0] - dl->radius > grid->meshBounds[1][0]
+			|| dl->transformed[0] + dl->radius < grid->meshBounds[0][0]
+			|| dl->transformed[1] - dl->radius > grid->meshBounds[1][1]
+			|| dl->transformed[1] + dl->radius < grid->meshBounds[0][1]
+			|| dl->transformed[2] - dl->radius > grid->meshBounds[1][2]
+			|| dl->transformed[2] + dl->radius < grid->meshBounds[0][2] ) {
 			// dlight doesn't reach the bounds
 			dlightBits &= ~( 1 << i );
 		}

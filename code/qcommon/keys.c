@@ -92,6 +92,17 @@ static const keyname_t keynames[] =
 	{"CTRL", K_CTRL},
 	{"SHIFT", K_SHIFT},
 
+	{"LEFTALT", K_LEFTALT},
+	{"RIGHTALT", K_RIGHTALT},
+	{"LEFTCTRL", K_LEFTCTRL},
+	{"RIGHTCTRL", K_RIGHTCTRL},
+	{"LEFTSHIFT", K_LEFTSHIFT},
+	{"RIGHTSHIFT", K_RIGHTSHIFT},
+	{"LEFTSUPER", K_LEFTSUPER},
+	{"RIGHTSUPER", K_RIGHTSUPER},
+	{"LEFTCOMMAND", K_LEFTCOMMAND},
+	{"RIGHTCOMMAND", K_RIGHTCOMMAND},
+
 	{"COMMAND", K_COMMAND},
 
 	{"CAPSLOCK", K_CAPSLOCK},
@@ -127,6 +138,8 @@ static const keyname_t keynames[] =
 
 	{"MWHEELUP",	K_MWHEELUP },
 	{"MWHEELDOWN",	K_MWHEELDOWN },
+	{"MWHEELLEFT",	K_MWHEELLEFT },
+	{"MWHEELRIGHT",	K_MWHEELRIGHT },
 
 	{"JOY1", K_JOY1},
 	{"JOY2", K_JOY2},
@@ -308,7 +321,11 @@ int Key_StringToKeynum( const char *str ) {
 		return -1;
 	}
 	if ( str[1] == '\0' ) {
-		return str[0];
+		// Single-character key names are case-insensitive. The keys[]
+		// array is indexed by the character the platform actually
+		// reports (lowercase for A-Z), so normalize here so that
+		// `/bind A ...` and `/bind a ...` both work.
+		return tolower( (unsigned char)str[0] );
 	}
 
 	// check for hex code

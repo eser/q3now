@@ -442,7 +442,7 @@ typedef struct {
 
 	sfxHandle_t		sounds[MAX_CUSTOM_SOUNDS];
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	qboolean		iqmModel;		// true if using body.iqm single-mesh
 	qhandle_t		bodyModel;		// body.iqm model handle
 	qhandle_t		bodySkin;		// body.iqm skin handle
@@ -1867,6 +1867,7 @@ void		trap_S_UpdateEntityPosition( int entityNum, const vec3_t origin );
 // given entityNum and position
 void		trap_S_Respatialize( int entityNum, const vec3_t origin, vec3_t axis[3], int inwater );
 sfxHandle_t	trap_S_RegisterSound( const char *sample, qboolean compressed );		// returns buzz if not found
+int			trap_S_SoundDuration( sfxHandle_t handle );	// Phase 6.2: returns sound length in milliseconds
 void		trap_S_StartBackgroundTrack( const char *intro, const char *loop );	// empty name stops music
 void	trap_S_StopBackgroundTrack( void );
 
@@ -1903,7 +1904,7 @@ int			trap_R_LerpTag( orientation_t *tag, clipHandle_t mod, int startFrame, int 
 					   float frac, const char *tagName );
 void		trap_R_RemapShader( const char *oldShader, const char *newShader, const char *timeOffset );
 qboolean	trap_R_inPVS( const vec3_t p1, const vec3_t p2 );
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 int		trap_R_GetIQMAnimations( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );
 #endif // FEAT_IQM
 

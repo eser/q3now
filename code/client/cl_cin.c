@@ -1498,10 +1498,28 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 		cinTable[currentHandle].status = FMV_PLAY;
 		Com_DPrintf("trFMV::play(), playing %s\n", arg);
 
+		// Phase 6.3: pre-buffer the first frame BEFORE transitioning to
+		// CA_CINEMATIC. Without this, cls.state flips to CA_CINEMATIC while
+		// cinTable[handle].buf is still NULL — the first display update sees
+		// "no frame yet" and renders a black screen for one frame, producing
+		// a visible flash at cinematic start.
+		//
+		// We call RoQInterrupt() directly (not CIN_RunCinematic) because the
+		// latter short-circuits while alterGameState && cls.state != CA_CINEMATIC.
+		// We have to bypass that gate during pre-buffering.
+		if ( cinTable[currentHandle].alterGameState ) {
+			int safetyLimit = 4096;	// hard cap so a malformed file can't infinite-loop
+			while ( cinTable[currentHandle].buf == NULL
+					&& cinTable[currentHandle].status == FMV_PLAY
+					&& safetyLimit-- > 0 ) {
+				RoQInterrupt();
+			}
+		}
+
 		if (cinTable[currentHandle].alterGameState) {
 			cls.state = CA_CINEMATIC;
 		}
-		
+
 		Con_Close();
 
 		if ( !cinTable[currentHandle].silent ) {

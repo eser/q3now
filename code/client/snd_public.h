@@ -24,6 +24,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 void S_Init( void );
 void S_Shutdown( void );
 
+/* CNQ3 backport: temporarily override s_autoMute.  When enabled=qtrue,
+ * the sound system will mix audio regardless of the s_autoMute state
+ * (used by the match-alert bit 8 to make the alert audible even if the
+ * window is unfocused). */
+void S_SetMuteOverride( qboolean enabled );
+
 // if origin is NULL, the sound will be dynamically sourced from the entity
 void S_StartSound( vec3_t origin, int entnum, int entchannel, sfxHandle_t sfx );
 void S_StartLocalSound( sfxHandle_t sfx, int channelNum );
@@ -62,6 +68,10 @@ void S_BeginRegistration( void );
 // has to create a placeholder.  This prevents continuous filesystem
 // checks for missing files
 sfxHandle_t	S_RegisterSound( const char *sample, qboolean compressed );
+
+// Phase 6.2: returns the duration of a registered sound in milliseconds.
+// Returns 0 if the handle is invalid or the sound system is not running.
+int S_SoundDuration( sfxHandle_t handle );
 
 void S_DisplayFreeMemory(void);
 

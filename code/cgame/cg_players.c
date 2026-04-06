@@ -79,7 +79,7 @@ CLIENT INFO
 =============================================================================
 */
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 /*
 ======================
 IQM embedded animation name-to-enum mapping table.
@@ -699,7 +699,7 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *modelN
 		headName = headModelName;
 	}
 
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	// Try body.iqm first for single-mesh IQM player model
 	Com_sprintf( filename, sizeof( filename ), "models/players/%s/body.iqm", modelName );
 	ci->bodyModel = trap_R_RegisterModel( filename );
@@ -2639,7 +2639,7 @@ void CG_Player( centity_t *cent ) {
 		CG_PlayerTokens( cent, renderfx );
 	}
 #endif
-#if defined(FEAT_IQM)
+#if FEAT_IQM
 	//
 	// IQM single-mesh player model rendering
 	//

@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
+#include "crash.h"
 #include <setjmp.h>
 #ifndef _WIN32
 #include <netinet/in.h>
@@ -42,17 +43,17 @@ const int demo_protocols[] = { PROTOCOL_VERSION, 0 };
 #define USE_MULTI_SEGMENT // allocate additional zone segments on demand
 
 #ifdef DEDICATED
-#define MIN_COMHUNKMEGS		48
-#define DEF_COMHUNKMEGS		56
+#define MIN_COMHUNKMEGS		128
+#define DEF_COMHUNKMEGS		128
 #else
-#define MIN_COMHUNKMEGS		64
+#define MIN_COMHUNKMEGS		128
 #define DEF_COMHUNKMEGS		128
 #endif
 
 #ifdef USE_MULTI_SEGMENT
-#define DEF_COMZONEMEGS		12
+#define DEF_COMZONEMEGS		48
 #else
-#define DEF_COMZONEMEGS		25
+#define DEF_COMZONEMEGS		48
 #endif
 
 static jmp_buf abortframe;	// an ERR_DROP occurred, exit the entire frame
@@ -71,9 +72,11 @@ cvar_t	*com_timescale;
 static cvar_t *com_fixedtime;
 cvar_t	*com_journal;
 cvar_t	*com_protocol;
+cvar_t	*com_busyWait;
 #ifndef DEDICATED
 cvar_t	*com_maxfps;
 cvar_t	*com_maxfpsUnfocused;
+cvar_t	*com_maxfpsMinimized;
 cvar_t	*com_yieldCPU;
 cvar_t	*com_timedemo;
 #endif
@@ -357,6 +360,12 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 
 		Q_longjmp( abortframe, 1 );
 	} else if ( code == ERR_DROP ) {
+#ifndef DEDICATED
+		// Capture whether a demo was playing BEFORE CL_Disconnect clears
+		// the flag so we can honor the "nextdemo" cvar below.
+		const qboolean wasDemoPlaying = ( com_cl_running && com_cl_running->integer &&
+			CL_DemoPlaying() );
+#endif
 		Com_Printf( "********************\nERROR: %s\n********************\n",
 			com_errorMessage );
 		VM_Forced_Unload_Start();
@@ -365,6 +374,18 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 #ifndef DEDICATED
 		CL_Disconnect( qfalse );
 		CL_FlushMemory();
+		// If a demo was playing and the user has queued another one via
+		// the "nextdemo" cvar, start it now instead of leaving the user
+		// stranded at the menu after a drop error mid-demo.
+		if ( wasDemoPlaying ) {
+			char next[ MAX_CVAR_VALUE_STRING ];
+			Cvar_VariableStringBuffer( "nextdemo", next, sizeof( next ) );
+			if ( next[0] != '\0' ) {
+				Cvar_Set( "nextdemo", "" );
+				Cbuf_AddText( next );
+				Cbuf_AddText( "\n" );
+			}
+		}
 #endif
 		VM_Forced_Unload_Done();
 
@@ -613,10 +634,16 @@ void Com_StartupVariable( const char *match ) {
 
 		name = Cmd_Argv( 1 );
 		if ( !match || Q_stricmp( name, match ) == 0 ) {
-			if ( Cvar_Flags( name ) == CVAR_NONEXISTENT )
-				Cvar_Get( name, Cmd_ArgsFrom( 2 ), CVAR_USER_CREATED );
-			else
+			if ( Cvar_Flags( name ) == CVAR_NONEXISTENT ) {
+				Cvar_Get( name, Cmd_ArgsFrom( 2 ), CVAR_USER_CREATED | CVAR_CMDLINE_CREATED );
+			} else {
+				cvar_t *cv;
 				Cvar_Set2( name, Cmd_ArgsFrom( 2 ), qfalse );
+				cv = Cvar_Get( name, "", 0 );
+				if ( cv != NULL ) {
+					cv->flags |= CVAR_CMDLINE_CREATED;
+				}
+			}
 		}
 	}
 }
@@ -3906,6 +3933,9 @@ void Com_Init( char *commandLine ) {
 
 	FS_InitFilesystem();
 
+	// initialize BSP format registry (FEAT_BSP_ABSTRACTION)
+	BSP_Init();
+
 	com_logfile = Cvar_Get( "logfile", "0", CVAR_TEMP );
 	Cvar_CheckRange( com_logfile, "0", "4", CV_INTEGER );
 	Cvar_SetDescription( com_logfile, "System console logging:\n"
@@ -3954,10 +3984,33 @@ void Com_Init( char *commandLine ) {
 	com_maxfpsUnfocused = Cvar_Get( "com_maxfpsUnfocused", "60", CVAR_ARCHIVE_ND );
 	Cvar_CheckRange( com_maxfpsUnfocused, "0", "1000", CV_INTEGER );
 	Cvar_SetDescription( com_maxfpsUnfocused, "Sets maximum frames per second in unfocused game window." );
+	com_maxfpsMinimized = Cvar_Get( "com_maxfpsMinimized", "5", CVAR_ARCHIVE_ND );
+	Cvar_CheckRange( com_maxfpsMinimized, "1", "30", CV_INTEGER );
+	Cvar_SetDescription( com_maxfpsMinimized,
+		"Sets maximum frames per second while the game window is minimized.\n"
+		" Lower values reduce CPU/GPU use when the user is not looking at the game.\n"
+		" Takes precedence over com_maxfpsUnfocused when minimized (CNQ3 port)." );
 	com_yieldCPU = Cvar_Get( "com_yieldCPU", "1", CVAR_ARCHIVE_ND );
 	Cvar_CheckRange( com_yieldCPU, "0", "16", CV_INTEGER );
 	Cvar_SetDescription( com_yieldCPU, "Attempt to sleep specified amount of time between rendered frames when game is active, this will greatly reduce CPU load. Use 0 only if you're experiencing some lag." );
 #endif
+
+	// com_busyWait: choose the frame limiter strategy.
+	//   0: sleep most of the frame then busy-wait the last 2 ms (default)
+	//   1: pure busy-wait (highest precision, pegs a CPU core)
+	// When enabled, overrides com_yieldCPU because busy-waiting implies we
+	// don't want to yield to the OS.
+	com_busyWait = Cvar_Get( "com_busyWait", "0", CVAR_ARCHIVE_ND );
+	Cvar_CheckRange( com_busyWait, "0", "1", CV_INTEGER );
+	Cvar_SetDescription( com_busyWait,
+		"Frame rate limiter strategy:\n"
+		" 0: hybrid sleep + 2 ms busy-wait (low CPU)\n"
+		" 1: pure busy-wait (highest precision, pegs a core)\n"
+		"Setting this to 1 overrides com_yieldCPU." );
+
+	// Crash reporter — must be initialised before Sys_Init so that the
+	// platform-specific handler installer can find com_crashReport.
+	Crash_Init();
 
 #ifdef USE_AFFINITY_MASK
 	com_affinityMask = Cvar_Get( "com_affinityMask", "", CVAR_ARCHIVE_ND );
@@ -4031,6 +4084,8 @@ void Com_Init( char *commandLine ) {
 	Cmd_SetCommandCompletionFunc( "writeconfig", Cmd_CompleteWriteCfgName );
 	Cmd_AddCommand( "game_restart", Com_GameRestart_f );
 
+	Help_Init();
+
 	s = va( "%s %s %s", Q3_VERSION, PLATFORM_STRING, __DATE__ );
 	com_version = Cvar_Get( "version", s, CVAR_PROTECTED | CVAR_ROM | CVAR_SERVERINFO );
 	Cvar_SetDescription( com_version, "Read-only CVAR to see the version of the game." );
@@ -4039,6 +4094,9 @@ void Com_Init( char *commandLine ) {
 	Cvar_Get( "//trap_GetValue", va( "%i", COM_TRAP_GETVALUE ), CVAR_PROTECTED | CVAR_ROM | CVAR_NOTABCOMPLETE );
 
 	Sys_Init();
+
+	// Install platform crash handlers once the system layer is ready.
+	Crash_InstallHandlers();
 
 	// CPU detection
 	Cvar_Get( "sys_cpustring", "detect", CVAR_PROTECTED | CVAR_ROM | CVAR_NORESTART );
@@ -4154,7 +4212,36 @@ static void Com_WriteConfigToFile( const char *filename ) {
 #ifndef DEDICATED
 	Key_WriteBindings( f );
 #endif
-	Cvar_WriteVariables( f );
+	Cvar_WriteVariables( f, qfalse );
+	FS_FCloseFile( f );
+}
+
+
+/*
+===============
+Com_WriteConfigToFileForced
+
+Write a config file that also includes every non-default, non-read-only
+cvar.  Used by "writeconfig -f" to dump a full snapshot of the engine
+state into a named config file.
+===============
+*/
+static void Com_WriteConfigToFileForced( const char *filename ) {
+	fileHandle_t	f;
+
+	f = FS_FOpenFileWrite( filename );
+	if ( f == FS_INVALID_HANDLE ) {
+		if ( !FS_ResetReadOnlyAttribute( filename ) || ( f = FS_FOpenFileWrite( filename ) ) == FS_INVALID_HANDLE ) {
+			Com_Printf( "Couldn't write %s.\n", filename );
+			return;
+		}
+	}
+
+	FS_Printf( f, "// generated by quake (full dump), do not modify" Q_NEWLINE );
+#ifndef DEDICATED
+	Key_WriteBindings( f );
+#endif
+	Cvar_WriteVariables( f, qtrue );
 	FS_FCloseFile( f );
 }
 
@@ -4206,13 +4293,29 @@ Write the config file to a specific name
 static void Com_WriteConfig_f( void ) {
 	char	filename[MAX_QPATH];
 	const char *ext;
+	const char *nameArg;
+	qboolean writeAll = qfalse;
+	int argc = Cmd_Argc();
 
-	if ( Cmd_Argc() != 2 ) {
-		Com_Printf( "Usage: writeconfig <filename>\n" );
+	if ( argc != 2 && argc != 3 ) {
+		Com_Printf( "Usage: writeconfig [-f] <filename>\n"
+		            "  -f   also write non-archived (non-default) cvars\n" );
 		return;
 	}
 
-	Q_strncpyz( filename, Cmd_Argv(1), sizeof( filename ) );
+	if ( argc == 3 ) {
+		if ( !strcmp( Cmd_Argv( 1 ), "-f" ) ) {
+			writeAll = qtrue;
+			nameArg = Cmd_Argv( 2 );
+		} else {
+			Com_Printf( "Usage: writeconfig [-f] <filename>\n" );
+			return;
+		}
+	} else {
+		nameArg = Cmd_Argv( 1 );
+	}
+
+	Q_strncpyz( filename, nameArg, sizeof( filename ) );
 	COM_DefaultExtension( filename, sizeof( filename ), ".cfg" );
 
 	if ( !FS_AllowedExtension( filename, qfalse, &ext ) ) {
@@ -4220,8 +4323,12 @@ static void Com_WriteConfig_f( void ) {
 		return;
 	}
 
-	Com_Printf( "Writing %s.\n", filename );
-	Com_WriteConfigToFile( filename );
+	Com_Printf( "Writing %s%s.\n", filename, writeAll ? " (full dump)" : "" );
+	if ( writeAll ) {
+		Com_WriteConfigToFileForced( filename );
+	} else {
+		Com_WriteConfigToFile( filename );
+	}
 }
 
 
@@ -4328,6 +4435,9 @@ void Com_Frame( qboolean noDelay ) {
 	int	timeAfter;
 
 	if ( Q_setjmp( abortframe ) ) {
+#ifndef DEDICATED
+		CL_AbortFrame();	// reset SCR_UpdateScreen guard on ERR_DROP recovery
+#endif
 		return;			// an ERR_DROP was thrown
 	}
 
@@ -4380,6 +4490,14 @@ void Com_Frame( qboolean noDelay ) {
 			minMsec = 0;
 			bias = 0;
 		} else {
+			// Frame pacing priority (CNQ3 port):
+			//   1. Window minimized     -> com_maxfpsMinimized (default 5)
+			//   2. Window unfocused     -> com_maxfpsUnfocused (default 60)
+			//   3. Normal / focused     -> com_maxfps
+			//   4. No cap               -> minMsec = 1
+			if ( gw_minimized && com_maxfpsMinimized->integer > 0 )
+				minMsec = 1000 / com_maxfpsMinimized->integer;
+			else
 			if ( !gw_active && com_maxfpsUnfocused->integer > 0 )
 				minMsec = 1000 / com_maxfpsUnfocused->integer;
 			else
@@ -4402,6 +4520,12 @@ void Com_Frame( qboolean noDelay ) {
 	}
 
 	// waiting for incoming packets
+	//
+	// Frame limiter strategy, controlled by com_busyWait (CNQ3 port):
+	//   0: hybrid — sleep for (timeVal-2) ms, busy-wait the final 2 ms
+	//   1: pure busy-wait (highest precision, pegs a core)
+	// Busy-wait mode overrides com_yieldCPU because the whole point is to
+	// not yield to the OS.
 	if ( noDelay == qfalse )
 	do {
 		if ( com_sv_running->integer ) {
@@ -4412,14 +4536,31 @@ void Com_Frame( qboolean noDelay ) {
 		} else {
 			timeVal = Com_TimeVal( minMsec );
 		}
-		sleepMsec = timeVal;
+
+		if ( com_busyWait->integer ) {
+			// Pure busy-wait: never sleep, just poll events and spin.
 #ifndef DEDICATED
-		if ( !gw_minimized && timeVal > com_yieldCPU->integer )
-			sleepMsec = com_yieldCPU->integer;
-		if ( timeVal > sleepMsec )
 			Com_EventLoop();
 #endif
-		NET_Sleep( sleepMsec * 1000 - 500 );
+			// NET_Sleep with a tiny timeout lets us pull incoming packets
+			// without actually yielding for a measurable period.
+			NET_Sleep( 0 );
+		} else {
+			sleepMsec = timeVal;
+#ifndef DEDICATED
+			if ( !gw_minimized && timeVal > com_yieldCPU->integer )
+				sleepMsec = com_yieldCPU->integer;
+			// Reserve the last 2 ms for a busy-wait to tighten the frame
+			// boundary; sleep the rest via NET_Sleep as before.
+			if ( sleepMsec > 2 )
+				sleepMsec -= 2;
+			else if ( sleepMsec > 0 )
+				sleepMsec = 0;
+			if ( timeVal > sleepMsec )
+				Com_EventLoop();
+#endif
+			NET_Sleep( sleepMsec * 1000 - 500 );
+		}
 	} while( Com_TimeVal( minMsec ) );
 
 	lastTime = com_frameTime;
@@ -4588,6 +4729,11 @@ void Field_Clear( field_t *edit ) {
 	memset( edit->buffer, 0, sizeof( edit->buffer ) );
 	edit->cursor = 0;
 	edit->scroll = 0;
+	/* CNQ3 backport Phase 6: clearing the buffer also invalidates any
+	 * active cycling-completion state. */
+	edit->acOffset = 0;
+	edit->acLength = 0;
+	edit->acMatchIndex = 0;
 }
 
 static const char *completionString;
@@ -4595,6 +4741,18 @@ static char shortestMatch[MAX_TOKEN_CHARS];
 static int	matchCount;
 // field we are working on, passed to Field_AutoComplete(&g_consoleCommand for instance)
 static field_t *completionField;
+
+/* CNQ3 backport Phase 6: match list for cycling auto-completion
+ * (con_completionStyle 1).  Populated on the first Tab of a cycle,
+ * indexed through on each subsequent Tab until the input line changes.
+ * Each entry stores a cvar or command name so MAX_CYCLE_TOKEN is plenty. */
+#define MAX_CYCLE_MATCHES 2048
+#define MAX_CYCLE_TOKEN   128
+static char cycleMatches[MAX_CYCLE_MATCHES][MAX_CYCLE_TOKEN];
+static int  cycleMatchCount;
+static qboolean cycleCollecting; /* true while FindMatches should store hits */
+
+static cvar_t *con_completionStyle;
 
 /*
 ===============
@@ -4607,6 +4765,15 @@ static void FindMatches( const char *s ) {
 	if ( Q_stricmpn( s, completionString, strlen( completionString ) ) ) {
 		return;
 	}
+
+	/* CNQ3 backport Phase 6: during a cycling-completion pass we also
+	 * accumulate every matching string so the Tab handler can step
+	 * through them on subsequent presses. */
+	if ( cycleCollecting && cycleMatchCount < MAX_CYCLE_MATCHES ) {
+		Q_strncpyz( cycleMatches[cycleMatchCount], s, sizeof( cycleMatches[0] ) );
+		cycleMatchCount++;
+	}
+
 	matchCount++;
 	if ( matchCount == 1 ) {
 		Q_strncpyz( shortestMatch, s, sizeof( shortestMatch ) );
@@ -4696,11 +4863,26 @@ Field_Complete
 static qboolean Field_Complete( void )
 {
 	int completionOffset;
+	const int styleCycle = ( cycleCollecting && con_completionStyle && con_completionStyle->integer == 1 ) ? 1 : 0;
 
 	if( matchCount == 0 )
 		return qtrue;
 
 	completionOffset = strlen( completionField->buffer ) - strlen( completionString );
+
+	if ( styleCycle && matchCount >= 2 ) {
+		/* Cycling tab: insert the first collected match in full (not the
+		 * shortest common prefix), record the cycle offset so subsequent
+		 * tabs can replace it in-place.  No match list is printed. */
+		Q_strncpyz( &completionField->buffer[ completionOffset ],
+			cycleMatches[0],
+			sizeof( completionField->buffer ) - completionOffset );
+		completionField->cursor = (int)strlen( completionField->buffer );
+		completionField->acOffset = completionOffset;
+		completionField->acLength = (int)strlen( cycleMatches[0] );
+		completionField->acMatchIndex = 0;
+		return qtrue;
+	}
 
 	Q_strncpyz( &completionField->buffer[ completionOffset ], shortestMatch,
 		sizeof( completionField->buffer ) - completionOffset );
@@ -4721,6 +4903,50 @@ static qboolean Field_Complete( void )
 
 /*
 ===============
+Field_AdvanceCycle
+
+CNQ3 backport Phase 6: replaces the currently cycling token with the next
+entry from the match list.  Returns qtrue when a cycle step was performed.
+===============
+*/
+static qboolean Field_AdvanceCycle( field_t *field )
+{
+	int index;
+	int offset;
+	int newLen;
+
+	if ( field->acOffset <= 0 || cycleMatchCount < 2 ) {
+		return qfalse;
+	}
+
+	/* clamp previous index in case the list size shifted (defensive) */
+	if ( field->acMatchIndex < 0 || field->acMatchIndex >= cycleMatchCount ) {
+		field->acMatchIndex = 0;
+	}
+
+	index = ( field->acMatchIndex + 1 ) % cycleMatchCount;
+	field->acMatchIndex = index;
+
+	offset = field->acOffset;
+	if ( offset > (int)sizeof( field->buffer ) - 1 ) {
+		return qfalse;
+	}
+
+	newLen = (int)strlen( cycleMatches[index] );
+	if ( offset + newLen >= (int)sizeof( field->buffer ) ) {
+		return qfalse;
+	}
+
+	Q_strncpyz( field->buffer + offset, cycleMatches[index],
+		sizeof( field->buffer ) - offset );
+	field->cursor = offset + newLen;
+	field->acLength = newLen;
+	return qtrue;
+}
+
+
+/*
+===============
 Field_CompleteKeyname
 ===============
 */
@@ -4733,6 +4959,30 @@ void Field_CompleteKeyname( void )
 
 	if ( !Field_Complete() )
 		Key_KeynameCompletion( PrintMatches );
+}
+
+
+/*
+===============
+Field_CompleteList
+
+CNQ3 backport Phase 6: completes the current argument against an arbitrary
+list produced by an enumeration callback.  The enumeration function must
+call the supplied callback once per candidate string.
+===============
+*/
+void Field_CompleteList( void (*enumerate)( void (*cb)( const char *s ) ) )
+{
+	if ( enumerate == NULL )
+		return;
+
+	matchCount = 0;
+	shortestMatch[ 0 ] = '\0';
+
+	enumerate( FindMatches );
+
+	if ( !Field_Complete() )
+		enumerate( PrintMatches );
 }
 
 
@@ -4948,6 +5198,26 @@ void Field_CompleteCommand( const char *cmd, qboolean doCommands, qboolean doCva
 
 /*
 ===============
+Field_ResetCompletionCycle
+
+CNQ3 backport Phase 6: drop any cached cycling-completion state on the
+field so the next Tab starts a new match list.  Called by the key event
+handler whenever a non-Tab key is pressed.
+===============
+*/
+void Field_ResetCompletionCycle( field_t *field )
+{
+	if ( field == NULL ) {
+		return;
+	}
+	field->acOffset = 0;
+	field->acLength = 0;
+	field->acMatchIndex = 0;
+}
+
+
+/*
+===============
 Field_AutoComplete
 
 Perform Tab expansion
@@ -4955,9 +5225,57 @@ Perform Tab expansion
 */
 void Field_AutoComplete( field_t *field )
 {
+	int style;
+	qboolean cycleValid;
+
 	completionField = field;
 
+	/* CNQ3 backport Phase 6: lazily register con_completionStyle so the
+	 * cvar is available the very first time the user hits Tab. */
+	if ( con_completionStyle == NULL ) {
+		con_completionStyle = Cvar_Get( "con_completionStyle", "0", CVAR_ARCHIVE );
+		Cvar_CheckRange( con_completionStyle, "0", "1", CV_INTEGER );
+		Cvar_SetDescription( con_completionStyle,
+			"Console auto-completion behaviour:\n"
+			"  0 = print every match and complete to the common prefix (Q3 default)\n"
+			"  1 = cycle through matches on repeated Tab presses (Enemy Territory style)" );
+	}
+
+	style = con_completionStyle->integer;
+
+	/* If a cycle is already in progress, verify the buffer still holds
+	 * the last inserted match at acOffset.  When it doesn't (because the
+	 * user edited the line, or the platform-specific input loop did not
+	 * route through Field_ResetCompletionCycle), drop the stale cycle
+	 * and start a fresh completion pass. */
+	cycleValid = qfalse;
+	if ( style == 1 && field->acOffset > 0 && cycleMatchCount >= 2
+		&& field->acMatchIndex >= 0 && field->acMatchIndex < cycleMatchCount ) {
+		const int bufLen = (int)strlen( field->buffer );
+		const int expected = field->acOffset + field->acLength;
+		if ( bufLen == expected
+			&& field->acOffset < bufLen
+			&& Q_stricmp( field->buffer + field->acOffset,
+				cycleMatches[field->acMatchIndex] ) == 0 ) {
+			cycleValid = qtrue;
+		}
+	}
+
+	if ( cycleValid ) {
+		if ( Field_AdvanceCycle( field ) ) {
+			return;
+		}
+	}
+
+	/* Starting a fresh completion pass.  Reset cycle state; when style 1
+	 * is active, mark collection so FindMatches populates cycleMatches. */
+	Field_ResetCompletionCycle( field );
+	cycleMatchCount = 0;
+	cycleCollecting = ( style == 1 ) ? qtrue : qfalse;
+
 	Field_CompleteCommand( completionField->buffer, qtrue, qtrue );
+
+	cycleCollecting = qfalse;
 }
 
 

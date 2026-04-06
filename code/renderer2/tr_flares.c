@@ -495,6 +495,10 @@ void RB_RenderFlares (void) {
 
 //	RB_AddDlightFlares();
 
+#if FEAT_CORONA
+	RB_AddCoronaFlares();
+#endif
+
 	// perform z buffer readback on each flare in this view
 	draw = qfalse;
 	prev = &r_activeFlares;
@@ -550,8 +554,3 @@ void RB_RenderFlares (void) {
 	GL_SetProjectionMatrix(oldprojection);
 	GL_SetModelviewMatrix(oldmodelview);
 }
-
-
-
-
-

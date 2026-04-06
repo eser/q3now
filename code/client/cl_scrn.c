@@ -29,6 +29,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/cl_wired_text.h"
 
 static qboolean	scr_initialized;		// ready to draw
+static qboolean	scr_updateActive;		// are we currently inside SCR_UpdateScreen?
 
 cvar_t		*cl_timegraph;
 static cvar_t		*cl_debuggraph;
@@ -571,8 +572,14 @@ This is called every frame, and can also be called explicitly to flush
 text to the screen.
 ==================
 */
+void CL_AbortFrame( void ) {
+	// Reset the SCR_UpdateScreen guard flag.
+	// Called from Com_Frame's longjmp recovery path so that an ERR_DROP
+	// thrown mid-render does not leave us permanently "in an update".
+	scr_updateActive = qfalse;
+}
+
 void SCR_UpdateScreen( void ) {
-	static int recursive;
 	static int framecount;
 	static int next_frametime;
 
@@ -591,10 +598,19 @@ void SCR_UpdateScreen( void ) {
 		framecount = cls.framecount;
 	}
 
-	if ( ++recursive > 2 ) {
-		Com_Error( ERR_FATAL, "SCR_UpdateScreen: recursively called" );
+	// There are several legitimate cases where SCR_UpdateScreen is reached
+	// twice in one frame (e.g. connect -> kicked -> connect). Instead of a
+	// fatal error on recursion, just bail out silently.
+	//
+	// Why set to 1 and 0 explicitly (not increment/decrement)?
+	// Because one of the calls below might invoke Com_Error, which will in
+	// turn call longjmp and abort the current frame, meaning the end of
+	// this function is not always reached. Com_Frame's longjmp handler
+	// calls CL_AbortFrame() to reset this flag on that path.
+	if ( scr_updateActive ) {
+		return;
 	}
-	recursive = 1;
+	scr_updateActive = qtrue;
 
 	// If there is no VM, there are also no rendering commands issued. Stop the renderer in
 	// that case.
@@ -617,5 +633,5 @@ void SCR_UpdateScreen( void ) {
 		}
 	}
 
-	recursive = 0;
+	scr_updateActive = qfalse;
 }

@@ -905,7 +905,17 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 	lc = MSG_ReadByte(msg);
 
 	if ( lc > numFields || lc < 0 ) {
-		Com_Error( ERR_DROP, "invalid entityState field count" );
+		// Corrupt delta (seen on some old recorded demos). Warn instead
+		// of erroring so a single bad frame does not tear down the whole
+		// demo playback (and cannot snowball into an ERR_FATAL via the
+		// "solid stream of ERR_DROP" escalation).
+		Com_Printf( S_COLOR_YELLOW "WARNING: invalid entityState field count %d (max %d), clamping\n",
+			lc, numFields );
+		if ( lc < 0 ) {
+			lc = 0;
+		} else if ( lc > numFields ) {
+			lc = numFields;
+		}
 	}
 
 	to->number = number;
@@ -1247,7 +1257,17 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 	lc = MSG_ReadByte(msg);
 
 	if ( lc > numFields || lc < 0 ) {
-		Com_Error( ERR_DROP, "invalid playerState field count" );
+		// Corrupt delta (seen on some old recorded demos). Warn instead
+		// of erroring so a single bad frame does not tear down the whole
+		// demo playback (and cannot snowball into an ERR_FATAL via the
+		// "solid stream of ERR_DROP" escalation).
+		Com_Printf( S_COLOR_YELLOW "WARNING: invalid playerState field count %d (max %d), clamping\n",
+			lc, numFields );
+		if ( lc < 0 ) {
+			lc = 0;
+		} else if ( lc > numFields ) {
+			lc = numFields;
+		}
 	}
 
 	for ( i = 0, field = playerStateFields ; i < lc ; i++, field++ ) {

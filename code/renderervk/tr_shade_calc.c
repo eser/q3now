@@ -54,9 +54,19 @@ static float *TableForFunc( genFunc_t func )
 **
 ** Evaluates a given waveForm_t, referencing backEnd.refdef.time directly
 */
-static float EvalWaveForm( const waveForm_t *wf ) 
+static float EvalWaveForm( const waveForm_t *wf )
 {
 	float	*table;
+
+	if ( wf->func == GF_NOISE ) {
+		return wf->base + R_NoiseGet4f( 0, 0, 0, ( tess.shaderTime + wf->phase ) * wf->frequency ) * wf->amplitude;
+	}
+	if ( wf->func == GF_RANDOM ) {
+		unsigned int seed = (unsigned int)tr.frameCount * 2654435761u
+			+ (unsigned int)( wf->phase * 1000.0f );
+		float r = (float)( ( seed >> 8 ) & 0xFFFF ) / 65535.0f;
+		return wf->base + r * wf->amplitude;
+	}
 
 	table = TableForFunc( wf->func );
 
@@ -686,10 +696,9 @@ void RB_CalcWaveColor( const waveForm_t *wf, unsigned char *dstColors )
 	uint32_t *colors = ( uint32_t * ) dstColors;
 	color4ub_t color;
 
-	if ( wf->func == GF_NOISE ) {
-		glow = wf->base + R_NoiseGet4f( 0, 0, 0, ( tess.shaderTime + wf->phase ) * wf->frequency ) * wf->amplitude;
-	} else {
-		glow = EvalWaveForm( wf ) * tr.identityLight;
+	glow = EvalWaveForm( wf );
+	if ( wf->func != GF_NOISE && wf->func != GF_RANDOM ) {
+		glow *= tr.identityLight;
 	}
 
 	v = myftol( 255 * glow );

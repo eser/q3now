@@ -150,7 +150,7 @@ R_GetCommandBuffer
 returns NULL if there is not enough space for important commands
 =============
 */
-static void *R_GetCommandBuffer( int bytes ) {
+void *R_GetCommandBuffer( int bytes ) {
 	return R_GetCommandBufferReserved( bytes, PAD( sizeof( swapBuffersCommand_t ), sizeof(void *) ) );
 }
 
