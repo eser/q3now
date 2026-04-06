@@ -1,14 +1,33 @@
 ## Build Instructions
 
-### windows/msvc
+### First-time setup
 
-Install Visual Studio Community Edition 2017 or later and compile `quake3e` project from solution
+After cloning, initialize submodules:
 
-`code/win32/msvc2017/quake3e.sln`
+```
+git submodule update --init --recursive
+```
 
-Copy resulting exe from `code/win32/msvc2017/output` directory
+This pulls in `src/libs/luajit`, `src/libs/mpack`, `src/libs/picoquic`, and `src/libs/picotls`. Skip this and the build will fail with missing headers.
 
-To compile with Vulkan backend - clean solution, right click on `quake3e` project, find `Project Dependencies` and select `renderervk` instead of `renderer`
+---
+
+### windows/cmake
+
+q3now uses CMake as its build system. The legacy MSVC solution file from the upstream Quake3e project is not maintained for q3now.
+
+**Using CMake + Visual Studio:**
+```
+cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+```
+
+**Using `make` from MSYS2 MINGW64:**
+```
+make
+```
+
+Copy resulting binaries from the created `build` directory.
 
 ---
 
@@ -92,6 +111,7 @@ Copy the resulting binaries from created `build` directory or use command:
 ### macos
 
 * `brew install sdl3 molten-vk` (SDL3 required; MoltenVK needed for Vulkan renderer)
+* `git submodule update --init --recursive` (required on first clone)
 
 Build with: `make`
 

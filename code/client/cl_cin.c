@@ -32,7 +32,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *****************************************************************************/
 
 #include "client.h"
-#include "wired/cl_wired_ui.h"
+#include "wired/ui/cl_wired_ui.h"
 #include "snd_local.h"
 
 #define MAXSIZE				8

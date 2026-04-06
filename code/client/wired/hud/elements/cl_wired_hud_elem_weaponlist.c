@@ -1,0 +1,287 @@
+#include "../../../client.h"
+#include "../cl_wired_hud_compat.h"
+#include "cl_wired_text.h"
+#include "../cl_wired_hud_private.h"
+
+#if FEAT_WIRED_UI
+
+/* maximum weapon slots for local arrays — matches wiredHudState_t capacity */
+#define WLIST_MAX_SLOTS  (int)(sizeof(wiredHud->weaponList) / sizeof(wiredHud->weaponList[0]))
+
+typedef struct
+{
+	superhudConfig_t config;
+	superhudConfig_t tmp_config;
+	superhudTextContext_t position;
+	float x;
+	float y;
+	float w;
+	float h;
+	float ammoWidth;
+	int ammoMax;
+	int weaponNum;
+	char ammo[16][8];                     /* generic buffer (>= WLIST_MAX_SLOTS) */
+	vec4_t border[16];
+	vec4_t borderColor[16];
+	superhudDrawContext_t back[16];
+	superhudDrawContext_t weaponIcon[16];
+	superhudTextContext_t ammoCount[16];
+
+} shudElementWeaponList_t;
+
+void* CG_SHUDElementWeaponListCreate(const superhudConfig_t* config)
+{
+	shudElementWeaponList_t* element;
+
+	SHUD_ELEMENT_INIT(element, config);
+
+	if (!element->config.textAlign.isSet)
+	{
+		element->config.textAlign.isSet = qtrue;
+		element->config.textAlign.value = SUPERHUD_ALIGNH_CENTER;
+	}
+	memcpy(&element->tmp_config, &element->config, sizeof(element->tmp_config));
+
+	element->x = element->config.rect.value[0];
+	element->y = element->config.rect.value[1];
+	element->w = element->config.rect.value[2];
+	element->h = element->config.rect.value[3];
+
+	CG_SHUDTextMakeContext(&element->tmp_config, &element->ammoCount[0]);
+
+	element->ammoMax = -1;
+
+	return element;
+}
+
+static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, superhudAlignH_t align)
+{
+	int wpi;
+	int x, y, w, h;
+	int total;
+	int ammo_max = 0;
+	float offsetX, offsetY;
+	int count;
+
+	if (!wiredHud || !wiredHud->valid) return;
+
+	count = wiredHud->weaponListCount;
+	if (count > WLIST_MAX_SLOTS) count = WLIST_MAX_SLOTS;
+	if (count > 16) count = 16;
+
+	/* update max ammo width */
+	for (wpi = 0; wpi < count; ++wpi)
+	{
+		int ammoVal = wiredHud->weaponList[wpi].ammo;
+		if (ammo_max < ammoVal)
+		{
+			ammo_max = ammoVal;
+		}
+	}
+
+	if (ammo_max > element->ammoMax)
+	{
+		element->ammoMax = ammo_max;
+		element->ammoWidth = (int)Text_Measure(va(" %d", ammo_max), WiredFont_ToFontId(element->ammoCount[0].fontIndex), element->ammoCount[0].coord.named.w);
+	}
+
+	total = count;
+
+	if (align == SUPERHUD_ALIGNH_CENTER)
+	{
+		x = element->x - total * (element->w + element->ammoWidth) / 2;
+		y = element->y;
+	}
+	else
+	{
+		x = element->x;
+		y = element->y - total * element->h / 2;
+	}
+	w = element->w;
+	h = element->h;
+
+	element->weaponNum = 0;
+
+	for (wpi = 0; wpi < count; ++wpi)
+	{
+		int ammo;
+
+		/* icon */
+		element->tmp_config.alignV.value = SUPERHUD_ALIGNV_TOP;
+		element->tmp_config.alignV.isSet = qtrue;
+
+		if (align != SUPERHUD_ALIGNH_RIGHT)
+		{
+			element->tmp_config.alignH.value = SUPERHUD_ALIGNH_LEFT;
+			element->tmp_config.alignH.isSet = qtrue;
+		}
+		else
+		{
+			element->tmp_config.alignH.value = SUPERHUD_ALIGNH_RIGHT;
+			element->tmp_config.alignH.isSet = qtrue;
+		}
+
+		element->tmp_config.rect.value[0] = x;
+		element->tmp_config.rect.value[1] = y;
+		element->tmp_config.rect.value[2] = w;
+		element->tmp_config.rect.value[3] = h;
+		CG_SHUDDrawMakeContext(&element->tmp_config, &element->weaponIcon[element->weaponNum]);
+		element->weaponIcon[element->weaponNum].image = wiredHud->weaponList[wpi].icon;
+
+		/* selection and background */
+		element->tmp_config.rect.value[0] = x;
+		if (align == SUPERHUD_ALIGNH_RIGHT)
+		{
+			element->tmp_config.rect.value[0] -= element->ammoWidth;
+		}
+		element->tmp_config.rect.value[1] = y;
+		element->tmp_config.rect.value[2] = w + element->ammoWidth;
+		element->tmp_config.rect.value[3] = h;
+		CG_SHUDDrawMakeContext(&element->tmp_config, &element->back[element->weaponNum]);
+		if (!wiredHud->weaponList[wpi].selected)
+		{
+			if (element->config.bgcolor.isSet)
+			{
+				CG_SHUDConfigPickBgColor(&element->tmp_config, element->back[element->weaponNum].color, qfalse);
+			}
+			else
+			{
+				memset(element->back[element->weaponNum].color, 0, sizeof(element->back[element->weaponNum].color));
+			}
+		}
+		else
+		{
+			if (element->config.color2.isSet)
+			{
+				Vector4Copy(element->tmp_config.color2.value.rgba, element->back[element->weaponNum].color);
+			}
+			else
+			{
+				memset(element->back[element->weaponNum].color, 0, sizeof(element->back[element->weaponNum].color));
+			}
+		}
+
+		if (wiredHud->weaponList[wpi].selected)
+		{
+			if (element->config.border.isSet)
+			{
+				Vector4Copy(element->config.border.value, element->border[element->weaponNum]);
+			}
+			else
+			{
+				Vector4Set(element->border[element->weaponNum], 0, 0, 0, 0);
+			}
+
+			if (element->config.borderColor.isSet)
+			{
+				CG_SHUDConfigPickBorderColor(&element->config, element->borderColor[element->weaponNum], qfalse);
+			}
+			else
+			{
+				Vector4Set(element->borderColor[element->weaponNum], 1, 1, 1, 0);
+			}
+		}
+		else
+		{
+			Vector4Set(element->border[element->weaponNum], 0, 0, 0, 0);
+			Vector4Set(element->borderColor[element->weaponNum], 0, 0, 0, 0);
+		}
+
+		/* ammo */
+		if (align != SUPERHUD_ALIGNH_RIGHT)
+		{
+			element->tmp_config.rect.value[0] = x + w;
+			element->tmp_config.textAlign.value = SUPERHUD_ALIGNH_LEFT;
+			element->tmp_config.textAlign.isSet = qtrue;
+		}
+		else
+		{
+			element->tmp_config.rect.value[0] = x;
+			element->tmp_config.textAlign.value = SUPERHUD_ALIGNH_RIGHT;
+			element->tmp_config.textAlign.isSet = qtrue;
+		}
+		element->tmp_config.rect.value[1] = y;
+		element->tmp_config.rect.value[2] = w;
+		element->tmp_config.rect.value[3] = h;
+
+		element->tmp_config.alignV.value = SUPERHUD_ALIGNV_CENTER;
+		element->tmp_config.alignV.isSet = qtrue;
+
+		element->tmp_config.alignH.value = SUPERHUD_ALIGNH_LEFT;
+		element->tmp_config.alignH.isSet = qtrue;
+
+		offsetX = element->tmp_config.fontsize.value[0] / 8;
+		offsetY = element->tmp_config.fontsize.value[1] / 16;
+
+		if (align == SUPERHUD_ALIGNH_RIGHT)
+		{
+			element->tmp_config.rect.value[0] += (offsetX + offsetX);
+		}
+		else
+		{
+			element->tmp_config.rect.value[0] -= offsetX;
+			element->tmp_config.rect.value[1] -= offsetY;
+		}
+
+		CG_SHUDTextMakeContext(&element->tmp_config, &element->ammoCount[element->weaponNum]);
+		element->ammoCount[element->weaponNum].text = &element->ammo[element->weaponNum][0];
+
+		ammo = wiredHud->weaponList[wpi].ammo;
+
+		if (align != SUPERHUD_ALIGNH_RIGHT)
+		{
+			Com_sprintf(&element->ammo[element->weaponNum][0], 8, " %i", ammo);
+		}
+		else
+		{
+			Com_sprintf(&element->ammo[element->weaponNum][0], 8, "%i ", ammo);
+		}
+
+		if (ammo == 0)
+		{
+			vec4_t tmpColor;
+			Vector4Copy(colorRed, tmpColor);
+			tmpColor[3] = element->tmp_config.color.value.rgba[3];
+			Vector4Copy(tmpColor, element->ammoCount[element->weaponNum].color);
+		}
+		else
+		{
+			Vector4Copy(element->tmp_config.color.value.rgba, element->ammoCount[element->weaponNum].color);
+		}
+
+		if (align == SUPERHUD_ALIGNH_CENTER)
+		{
+			x += w + element->ammoWidth;
+		}
+		else
+		{
+			y += h + 2;
+		}
+		++element->weaponNum;
+	}
+}
+
+void CG_SHUDElementWeaponListRoutine(void* context)
+{
+	shudElementWeaponList_t* element = (shudElementWeaponList_t*)context;
+	int i;
+
+	CG_SHUDElementWeaponListSetup(element, element->config.textAlign.value);
+
+	for (i = 0; i < element->weaponNum; ++i)
+	{
+		CG_SHUDFillWithColor(&element->back[i].coord, element->back[i].color);
+		CG_SHUDDrawStretchPicCtx(&element->config, &element->weaponIcon[i]);
+		CG_SHUDTextPrintNew(&element->config, &element->ammoCount[i], qfalse);
+		CG_SHUDDrawBorderDirect(&element->back[i].coord, element->border[i], element->borderColor[i]);
+	}
+}
+
+void CG_SHUDElementWeaponListDestroy(void* context)
+{
+	if (context)
+	{
+		Z_Free(context);
+	}
+}
+#endif /* FEAT_WIRED_UI */

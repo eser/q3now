@@ -41,8 +41,8 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_view.c
     ${SOURCE_DIR}/cgame/cg_weapons.c
     ${SOURCE_DIR}/cgame/cg_znudge.c
-    ${SOURCE_DIR}/cgame/cg_wired_bridge.c
-    ${SOURCE_DIR}/cgame/cg_wired_store.c
+    ${SOURCE_DIR}/cgame/wired/cg_wired_bridge.c
+    ${SOURCE_DIR}/cgame/wired/cg_wired_store.c
 )
 
 set(CGAME_BINARY_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.c)
@@ -127,6 +127,7 @@ if(BUILD_GAME_LIBRARIES)
 
     add_library(                ${CGAME_MODULE_BINARY_BASEGAME} SHARED ${CGAME_SOURCES_BASEGAME} ${CGAME_BINARY_SOURCES})
     target_compile_definitions( ${CGAME_MODULE_BINARY_BASEGAME} PRIVATE CGAME)
+    target_include_directories( ${CGAME_MODULE_BINARY_BASEGAME} PRIVATE ${SOURCE_DIR}/cgame)
     target_link_libraries(      ${CGAME_MODULE_BINARY_BASEGAME} PRIVATE ${COMMON_LIBRARIES})
     set_target_properties(      ${CGAME_MODULE_BINARY_BASEGAME} PROPERTIES OUTPUT_NAME "${CGAME_MODULE_BINARY}${_GAME_ARCH}" PREFIX "")
     set_output_dirs(            ${CGAME_MODULE_BINARY_BASEGAME} SUBDIRECTORY ${BASEGAME})

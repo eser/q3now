@@ -13,16 +13,16 @@ on:
     paths:
       - 'code/client/snd_miniaudio*.c'
       - 'code/client/snd_public.h'
-      - 'code/client/wired/cl_wired_hud_elem_audio_waveform.c'
-      - 'code/client/wired/cl_wired_populate.c'
+      - 'code/client/wired/hud/elements/cl_wired_hud_elem_audio_waveform.c'
+      - 'code/client/wired/ui/cl_wired_populate.c'
       - 'tools/check_audio_callback.sh'
       - '.github/workflows/audio-test.yml'
   pull_request:
     paths:
       - 'code/client/snd_miniaudio*.c'
       - 'code/client/snd_public.h'
-      - 'code/client/wired/cl_wired_hud_elem_audio_waveform.c'
-      - 'code/client/wired/cl_wired_populate.c'
+      - 'code/client/wired/hud/elements/cl_wired_hud_elem_audio_waveform.c'
+      - 'code/client/wired/ui/cl_wired_populate.c'
       - 'tools/check_audio_callback.sh'
       - '.github/workflows/audio-test.yml'
 

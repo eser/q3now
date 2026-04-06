@@ -22,9 +22,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_cgame.c  -- client system interaction with client game
 
 #include "client.h"
-#include "wired/cl_wired_hud.h"
-#include "wired/cl_wired_text.h"
-#include "wired/cl_wired_store.h"
+#include "wired/hud/cl_wired_hud.h"
+#include "wired/ui/cl_wired_text.h"
+#include "wired/store/cl_wired_store.h"
 
 #include "../botlib/botlib.h"
 

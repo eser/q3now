@@ -22,11 +22,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_scrn.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "client.h"
-#include "wired/cl_wired_ui.h"
-#include "wired/cl_wired_hud.h"
-#include "wired/cl_wired_msdf.h"
-#include "wired/cl_wired_fonts.h"
-#include "wired/cl_wired_text.h"
+#include "wired/ui/cl_wired_ui.h"
+#include "wired/hud/cl_wired_hud.h"
+#include "wired/ui/cl_wired_msdf.h"
+#include "wired/ui/cl_wired_fonts.h"
+#include "wired/ui/cl_wired_text.h"
 
 static qboolean	scr_initialized;		// ready to draw
 static qboolean	scr_updateActive;		// are we currently inside SCR_UpdateScreen?

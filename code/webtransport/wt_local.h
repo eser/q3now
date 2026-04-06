@@ -13,8 +13,8 @@ Shared between wt_*.c files. Not included by engine code — use wt_public.h.
 #if FEAT_QUIC_TRANSPORT
 
 // picoquic headers
-#include "../libs/picoquic/picoquic/picoquic.h"
-#include "../libs/picoquic/picoquic/picoquic_utils.h"
+#include "picoquic.h"
+#include "picoquic_utils.h"
 
 // ───────────────────────────────────────────────────────────────────
 // QUIC context — singleton, created in QUIC_Init, destroyed in QUIC_Shutdown
