@@ -325,7 +325,7 @@ void SpectatorThink( gentity_t *ent, usercmd_t *ucmd ) {
 			client->ps.pm_type = PM_FREEZE;
 		}
 
-		client->ps.speed = 400;	// faster than normal
+		client->ps.speed = DEFAULT_MOVESPEED_SPECTATOR;
 
 		// set up for pmove
 		memset (&pm, 0, sizeof(pm));
@@ -765,10 +765,10 @@ void ClientThink_real( gentity_t *ent ) {
 
 	// set speed
 	if (g_excessive.integer) {
-		client->ps.speed = DEFAULT_MOVESPEED * 2;
+		client->ps.speed = DEFAULT_MOVESPEED_PLAYER * 2;
 	}
 	else {
-		client->ps.speed = DEFAULT_MOVESPEED;
+		client->ps.speed = DEFAULT_MOVESPEED_PLAYER;
 	}
 
 	// eser - weapon weights

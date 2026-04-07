@@ -1,0 +1,7 @@
+assetGlobalDef {
+    defaultSerifFont "sansman"
+    defaultSerifFontItalic "sansman-italic"
+    defaultSansFont "oxanium"
+    defaultSansFontMedium "oxanium-medium"
+    defaultMonoFont "sharetechmono"
+}

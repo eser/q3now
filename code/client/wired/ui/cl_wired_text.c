@@ -11,6 +11,7 @@ Alignment and drop shadow are handled here so callers don't need to.
 
 #include "../../client.h"
 #include "cl_wired_text.h"
+#include "cl_wired_ui.h"
 #include "cl_wired_msdf.h"
 #include "cl_wired_fonts.h"
 
@@ -46,14 +47,43 @@ void Text_Init( void )
 
 static const fontFace_t *Text_ResolveFace( int fontId )
 {
+	wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
+	const char *serif = ( ag && ag->defaultSerifFontName[0] ) ? ag->defaultSerifFontName : "sansman";
+	const char *serifItalic = ( ag && ag->defaultSerifFontItalicName[0] ) ? ag->defaultSerifFontItalicName : "sansman-italic";
+	const char *sans = ( ag && ag->defaultSansFontName[0] ) ? ag->defaultSansFontName : "oxanium";
+	const char *sansMedium = ( ag && ag->defaultSansFontMediumName[0] ) ? ag->defaultSansFontMediumName : "oxanium-medium";
+	const char *mono = ( ag && ag->defaultMonoFontName[0] ) ? ag->defaultMonoFontName : "sharetechmono";
+	const fontFace_t *face = NULL;
+
 	switch ( fontId ) {
-	case FONT_DISPLAY:        return WiredFont_Resolve( "sansman",       FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
-	case FONT_DISPLAY_ITALIC: return WiredFont_Resolve( "sansman",       FONT_WEIGHT_REGULAR, FONT_STYLE_ITALIC );
-	case FONT_DISPLAY_BOLD:   return WiredFont_Resolve( "sansman",       FONT_WEIGHT_BOLD,    FONT_STYLE_NORMAL );
-	case FONT_UI:             return WiredFont_Resolve( "oxanium",       FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
-	case FONT_UI_MEDIUM:      return WiredFont_Resolve( "oxanium",       FONT_WEIGHT_MEDIUM,  FONT_STYLE_NORMAL );
-	case FONT_MONO:           return WiredFont_Resolve( "sharetechmono", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
-	default:                  return WiredFont_Resolve( "oxanium",       FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+	case FONT_DISPLAY:
+		face = WiredFont_ResolveByName( serif );
+		if ( !face ) face = WiredFont_Resolve( "sansman", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+		return face;
+	case FONT_DISPLAY_ITALIC:
+		face = WiredFont_ResolveByName( serifItalic );
+		if ( !face ) face = WiredFont_Resolve( "sansman", FONT_WEIGHT_REGULAR, FONT_STYLE_ITALIC );
+		return face;
+	case FONT_DISPLAY_BOLD:
+		face = WiredFont_ResolveByName( serif );
+		if ( !face ) face = WiredFont_Resolve( "sansman", FONT_WEIGHT_BOLD, FONT_STYLE_NORMAL );
+		return face;
+	case FONT_UI:
+		face = WiredFont_ResolveByName( sans );
+		if ( !face ) face = WiredFont_Resolve( "oxanium", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+		return face;
+	case FONT_UI_MEDIUM:
+		face = WiredFont_ResolveByName( sansMedium );
+		if ( !face ) face = WiredFont_Resolve( "oxanium", FONT_WEIGHT_MEDIUM, FONT_STYLE_NORMAL );
+		return face;
+	case FONT_MONO:
+		face = WiredFont_ResolveByName( mono );
+		if ( !face ) face = WiredFont_Resolve( "sharetechmono", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+		return face;
+	default:
+		face = WiredFont_ResolveByName( sans );
+		if ( !face ) face = WiredFont_Resolve( "oxanium", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+		return face;
 	}
 }
 

@@ -51,30 +51,28 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // feature flags — single source of truth for all modules
 #include "../qcommon/q_feats.h"
 
-#define	DEFAULT_GRAVITY		800
-#define	DEFAULT_MOVESPEED	320
-#define	JUMP_VELOCITY		270
-#define WALLJUMP_BOOST      240
-#define MAX_WALLJUMPS       3
+#define	DEFAULT_GRAVITY				800
+#define	DEFAULT_MOVESPEED_PLAYER	320
+#define	DEFAULT_MOVESPEED_SPECTATOR	480
+#define	JUMP_VELOCITY				270
+#define WALLJUMP_BOOST      		240
+#define MAX_WALLJUMPS       		3
 
-#define	QUAD_FACTOR			4
-#define MAX_HEALTH			100
-#define MAX_ARMOR			200
+#define	QUAD_FACTOR					4
+#define MAX_HEALTH					100
+#define MAX_ARMOR					200
 
-#define	GIB_HEALTH			-40
-#define	GIB_VELOCITY	    350
-#define	GIB_JUMP		    150
+#define	GIB_HEALTH					-40
+#define	GIB_VELOCITY	    		350
+#define	GIB_JUMP		    		150
 
-#define	MAX_ITEMS			256
+#define	MAX_ITEMS					256
 
-#define	RANK_TIED_FLAG		0x4000
+#define	RANK_TIED_FLAG				0x4000
 
-#define DEFAULT_SHOTGUN_SPREAD	600
-#define DEFAULT_SHOTGUN_COUNT	16
+#define DEFAULT_SHOTGUN_SPREAD		600
+#define DEFAULT_SHOTGUN_COUNT		16
 #define DEFAULT_SHOTGUN_DOUBLE_BLAST_SPREAD	1000
-
-#define	DEFAULT_TEAM_MODEL		"visor"
-#define	DEFAULT_TEAM_HEAD		"visor"
 
 #define DEFAULT_REDTEAM_NAME		"Stroggs"
 #define DEFAULT_BLUETEAM_NAME		"Pagans"
@@ -216,6 +214,7 @@ extern	ggametype_t	bg_gametypelist[];
 
 int			BG_GametypeBits( const char *token );		// single token → bitmask of matching gametypes
 int			BG_GametypeForToken( const char *token );	// single token → gametype_t, or -1 if not found
+qboolean	BG_IsTeamGametype( gametype_t gametype );
 
 typedef enum { GENDER_MALE, GENDER_FEMALE, GENDER_NEUTER } gender_t;
 

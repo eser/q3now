@@ -391,6 +391,7 @@ typedef struct {
 	int				location;		// location index for team mode
 	int				health;			// you only get this info about your teammates
 	int				armor;
+	int				armorClass;
 	int				curWeapon;
 
 	int				wins, losses;	// in duel mode
@@ -411,8 +412,6 @@ typedef struct {
 	// gameplay
 	char			modelName[MAX_QPATH];
 	char			skinName[MAX_QPATH];
-	char			headModelName[MAX_QPATH];
-	char			headSkinName[MAX_QPATH];
 	char			redTeam[MAX_TEAMNAME];
 	char			blueTeam[MAX_TEAMNAME];
 	qboolean		deferred;
@@ -711,6 +710,9 @@ typedef struct {
 	float		headStartYaw;
 	int			headStartTime;
 
+	vec3_t		kick_angles;	// weapon kicks
+	vec3_t		kick_origin;
+
 	// view movement
 	float		v_dmg_time;
 	float		v_dmg_pitch;
@@ -840,6 +842,10 @@ typedef struct {
 	qhandle_t	lightningArcShader;
 
 	qhandle_t	friendShader;
+	qhandle_t	friendFlagShaderNeutral;
+	qhandle_t	friendFlagShaderBlue;
+	qhandle_t	friendFlagShaderRed;
+	qhandle_t	friendColorShaders[6];
 
 	qhandle_t	balloonShader;
 	qhandle_t	connectionShader;
@@ -1132,6 +1138,7 @@ typedef struct {
 
 	// parsed from serverinfo
 	gametype_t		gametype;
+	qboolean		gametypeIsTeamGame;
 	int				noFootsteps;
 	int             kothGhosts;
 	int				scorelimit;
@@ -1283,7 +1290,7 @@ extern	vmCvar_t		cg_synchronousClients;
 extern	vmCvar_t		cg_teamChatTime;
 extern	vmCvar_t		cg_teamChatHeight;
 extern	vmCvar_t		cg_stats;
-extern	vmCvar_t 		cg_forceModel;
+extern	vmCvar_t 		cg_forceSameModel;
 extern	vmCvar_t 		cg_buildScript;
 extern	vmCvar_t		cg_paused;
 extern	vmCvar_t		cg_blood;

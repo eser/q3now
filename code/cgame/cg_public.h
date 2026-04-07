@@ -380,7 +380,7 @@ typedef struct {
 	// client info
 	struct {
 		char        name[MAX_QPATH];
-		int         team, health, armor, weapon, location;
+		int         team, health, armor, armorClass, weapon, location;
 		int         curWeapon;
 		qboolean    infoValid;
 	} clients[WIRED_HUD_MAX_CLIENTS];

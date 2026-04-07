@@ -70,15 +70,15 @@ typedef struct {
 // Load MSDF fonts (sansman, sansman-italic, oxanium, oxanium-medium, sharetechmono).
 void            WiredFonts_InitMSDF( void );
 
-// Look up an MSDF font by name. Returns NULL for unknown/bitmap-only fonts.
-msdfFont_t *WiredFonts_GetMSDF( const char *fontName );
-
 // Resolve a font face by family name, weight, and style (CSS-like matching).
 const fontFace_t *WiredFont_Resolve(
 	const char   *familyName,
 	fontWeight_t  weight,
 	fontStyle_t   style
 );
+
+// Resolve either family name or full face name (e.g. "sansman-italic").
+const fontFace_t *WiredFont_ResolveByName( const char *name );
 
 // hex color parsing
 qboolean CG_Hex16GetColor( const char *str, float *color );

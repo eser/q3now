@@ -2188,7 +2188,7 @@ TeamPlayIsOn
 ==================
 */
 int TeamPlayIsOn(void) {
-	return ( gametype >= GT_TDM );
+	return g_gametypeIsTeamGame;
 }
 
 /*
@@ -2776,8 +2776,8 @@ int BotSameTeam(bot_state_t *bs, int entnum) {
 
         return qtrue;
     }
-    
-    if (gametype >= GT_TDM) {
+
+    if (g_gametypeIsTeamGame) {
         if (level.clients[bs->client].sess.sessionTeam == level.clients[entnum].sess.sessionTeam) {
             return qtrue;
         }
@@ -5356,7 +5356,7 @@ static void BotTeamCallout( bot_state_t *bs )
 	int team;
 
 	// only in team games
-	if ( gametype < GT_TDM ) return;
+	if ( !g_gametypeIsTeamGame ) return;
 
 	team = bs->cur_ps.persistant[PERS_TEAM];
 	if ( team < 0 || team >= TEAM_NUM_TEAMS ) return;

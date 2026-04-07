@@ -103,7 +103,7 @@ menuDef {
 	itemDef { name "prefsAdvanced" type 12 text "Team Overlay:" rect 0.045 0.270 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_drawTeamOverlay" cvarFloatList { "Off" 0 "Upper Right" 1 "Lower Right" 2 "Lower Left" 3 } visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Show Timer:" rect 0.045 0.335 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_drawTimer" visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Dynamic Lights:" rect 0.045 0.400 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "r_dynamiclight" visible 0 }
-	itemDef { name "prefsAdvanced" type 11 text "Force Player Models:" rect 0.045 0.465 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_forceModel" visible 0 }
+	itemDef { name "prefsAdvanced" type 11 text "Force Player Models:" rect 0.045 0.465 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_forceSameModel" visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Low Quality Sky:" rect 0.045 0.530 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "r_fastsky" visible 0 }
 
 	itemDef { name "prefsAdvanced" type 12 text "Ejecting Brass:" rect 0.445 0.270 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_brassTime" cvarFloatList { "High" 2500 "Medium" 1250 "Off" 0 } visible 0 }

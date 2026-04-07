@@ -660,6 +660,8 @@ void Touch_DoorTrigger( gentity_t *ent, gentity_t *other, trace_t *trace );
 // g_trigger.c
 //
 void trigger_teleporter_touch (gentity_t *self, gentity_t *other, trace_t *trace );
+void hurt_touch( gentity_t *self, gentity_t *other, trace_t *trace );
+void G_SetTeleporterDestinations(void);
 
 
 //
@@ -838,6 +840,8 @@ extern	level_locals_t	level;
 extern	gentity_t		g_entities[MAX_GENTITIES];
 
 #define	FOFS(x) ((size_t)&(((gentity_t *)0)->x))
+
+extern	qboolean	g_gametypeIsTeamGame;
 
 extern	vmCvar_t	g_gametype;
 extern	vmCvar_t	g_dedicated;

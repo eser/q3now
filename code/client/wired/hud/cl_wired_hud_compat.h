@@ -114,7 +114,7 @@ extern wiredCgCompat_t wired_cg;
 typedef struct {
 	char        name[MAX_QPATH];
 	int         team;
-	int         health, armor;
+	int         health, armor, armorClass;
 	int         curWeapon;
 	int         location;
 	int         powerups;

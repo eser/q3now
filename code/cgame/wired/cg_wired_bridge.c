@@ -78,7 +78,7 @@ void CG_WiredHudPushState( void ) {
 		state.ourActiveTeam = activeTeam;
 		state.isOurTeamBlue = ( activeTeam == TEAM_BLUE );
 		state.isSpectator   = ( cgs.clientinfo[cg.clientNum].team == TEAM_SPECTATOR );
-		state.isTeamGame    = ( cgs.gametype >= GT_TDM );
+		state.isTeamGame    = ( cgs.gametypeIsTeamGame );
 		state.isDuel        = ( cgs.gametype == GT_DUEL );
 
 		if ( cgs.gametype >= 0 && cgs.gametype < GT_MAX_GAME_TYPE ) {
@@ -177,13 +177,14 @@ void CG_WiredHudPushState( void ) {
 	for ( i = 0; i < cgs.maxclients && i < WIRED_HUD_MAX_CLIENTS; i++ ) {
 		if ( cgs.clientinfo[i].infoValid ) {
 			Q_strncpyz( state.clients[i].name, cgs.clientinfo[i].name, sizeof( state.clients[i].name ) );
-			state.clients[i].team      = cgs.clientinfo[i].team;
-			state.clients[i].health    = cgs.clientinfo[i].health;
-			state.clients[i].armor     = cgs.clientinfo[i].armor;
-			state.clients[i].weapon    = cgs.clientinfo[i].curWeapon;
-			state.clients[i].curWeapon = cgs.clientinfo[i].curWeapon;
-			state.clients[i].location  = cgs.clientinfo[i].location;
-			state.clients[i].infoValid = qtrue;
+			state.clients[i].team        = cgs.clientinfo[i].team;
+			state.clients[i].health      = cgs.clientinfo[i].health;
+			state.clients[i].armor       = cgs.clientinfo[i].armor;
+			state.clients[i].armorClass  = cgs.clientinfo[i].armorClass;
+			state.clients[i].weapon      = cgs.clientinfo[i].curWeapon;
+			state.clients[i].curWeapon   = cgs.clientinfo[i].curWeapon;
+			state.clients[i].location    = cgs.clientinfo[i].location;
+			state.clients[i].infoValid   = qtrue;
 		}
 	}
 
@@ -678,7 +679,7 @@ void CG_WiredHudPushState( void ) {
 				isTeammate = ( targetTeam != TEAM_FREE && targetTeam == myTeam );
 
 				/* showName: hide enemy names in team games when cvar == 2 */
-				if ( cgs.gametype >= GT_TDM && cg_drawCrosshairNames.integer == 2 ) {
+				if ( cgs.gametypeIsTeamGame && cg_drawCrosshairNames.integer == 2 ) {
 					if ( targetTeam != myTeam ) {
 						showName = qfalse;
 					}
@@ -764,18 +765,18 @@ void CG_WiredHudPushState( void ) {
 
 		if ( cgs.blueflag == 2 /* FLAG_TAKEN_RED */ )   f |= 0x00000001; // CG_SHOW_BLUE_TEAM_HAS_REDFLAG
 		if ( cgs.redflag == 1 /* FLAG_TAKEN_BLUE */ )   f |= 0x00000002; // CG_SHOW_RED_TEAM_HAS_BLUEFLAG
-		if ( cgs.gametype >= GT_TDM )                   f |= 0x00000004; // CG_SHOW_ANYTEAMGAME
-		if ( cgs.gametype == GT_HARVESTER )              f |= 0x00000008; // CG_SHOW_HARVESTER
-		if ( cgs.gametype == GT_1FCTF )                  f |= 0x00000010; // CG_SHOW_ONEFLAG
-		if ( cgs.gametype == GT_CTF )                    f |= 0x00000020; // CG_SHOW_CTF
-		if ( cgs.gametype == GT_OBELISK )                f |= 0x00000040; // CG_SHOW_OBELISK
-		if ( state.health < 25 )                         f |= 0x00000080; // CG_SHOW_HEALTHCRITICAL
-		// if ( cgs.gametype == GT_SINGLE_PLAYER )          f |= 0x00000100; // CG_SHOW_SINGLEPLAYER
-		if ( cgs.gametype == GT_DUEL )                   f |= 0x00000200; // CG_SHOW_DUEL
-		if ( state.health >= 25 )                        f |= 0x00004000; // CG_SHOW_HEALTHOK
+		if ( cgs.gametypeIsTeamGame )                   f |= 0x00000004; // CG_SHOW_ANYTEAMGAME
+		if ( cgs.gametype == GT_HARVESTER )             f |= 0x00000008; // CG_SHOW_HARVESTER
+		if ( cgs.gametype == GT_1FCTF )                 f |= 0x00000010; // CG_SHOW_ONEFLAG
+		if ( cgs.gametype == GT_CTF )                   f |= 0x00000020; // CG_SHOW_CTF
+		if ( cgs.gametype == GT_OBELISK )               f |= 0x00000040; // CG_SHOW_OBELISK
+		if ( state.health < 25 )                        f |= 0x00000080; // CG_SHOW_HEALTHCRITICAL
+		// if ( cgs.gametype == GT_SINGLE_PLAYER )         f |= 0x00000100; // CG_SHOW_SINGLEPLAYER
+		if ( cgs.gametype == GT_DUEL )                  f |= 0x00000200; // CG_SHOW_DUEL
+		if ( state.health >= 25 )                       f |= 0x00004000; // CG_SHOW_HEALTHOK
 		if ( cg.snap->ps.powerups[PW_REDFLAG] ||
-		     cg.snap->ps.powerups[PW_BLUEFLAG] )         f |= 0x00000800; // CG_SHOW_IF_PLAYER_HAS_FLAG
-		if ( cgs.gametype < GT_TDM )                    f |= 0x00080000; // CG_SHOW_ANYNONTEAMGAME
+		     cg.snap->ps.powerups[PW_BLUEFLAG] )        f |= 0x00000800; // CG_SHOW_IF_PLAYER_HAS_FLAG
+		if ( !cgs.gametypeIsTeamGame )                  f |= 0x00080000; // CG_SHOW_ANYNONTEAMGAME
 
 		state.cgShowFlags = f;
 	}
@@ -786,9 +787,9 @@ void CG_WiredHudPushState( void ) {
 		int myScore = cg.snap->ps.persistant[PERS_SCORE];
 		// simple leader check: are we #1?
 		if ( myScore >= state.scores1 && myScore > 0 )   uf |= 0x00000001; // UI_SHOW_LEADER
-		if ( myScore < state.scores1 )                    uf |= 0x00000002; // UI_SHOW_NOTLEADER
-		if ( cgs.gametype < GT_TDM )                     uf |= 0x00000008; // UI_SHOW_ANYNONTEAMGAME
-		if ( cgs.gametype >= GT_TDM )                    uf |= 0x00000010; // UI_SHOW_ANYTEAMGAME
+		if ( myScore < state.scores1 )                   uf |= 0x00000002; // UI_SHOW_NOTLEADER
+		if ( !cgs.gametypeIsTeamGame )                   uf |= 0x00000008; // UI_SHOW_ANYNONTEAMGAME
+		if ( cgs.gametypeIsTeamGame )                    uf |= 0x00000010; // UI_SHOW_ANYTEAMGAME
 
 		state.uiShowFlags = uf;
 	}

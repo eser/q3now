@@ -189,6 +189,7 @@ static maplocation_t *maplocations = NULL;
 static campspot_t *campspots = NULL;
 //the game type
 static int g_gametype = 0;
+static qboolean g_gametypeIsTeamGame = qfalse;
 //single player mode flag (replaces GT_SINGLE_PLAYER gametype check)
 static int g_singlePlayer = 0;
 //additional dropped item weight
@@ -876,7 +877,7 @@ int BotGetLevelItemGoal(int index, const char *name, bot_goal_t *goal)
 		if (g_singlePlayer) {
 			if (li->flags & IFL_NOTSINGLE) continue;
 		}
-		if (g_gametype >= GT_TDM) {
+		if (g_gametypeIsTeamGame) {
 			if (li->flags & IFL_NOTTEAM) continue;
 		}
 		else {
@@ -1096,7 +1097,7 @@ void BotUpdateEntityItems(void)
 			if (g_singlePlayer) {
 				if (li->flags & IFL_NOTSINGLE) continue;
 			}
-			if (g_gametype >= GT_TDM) {
+			if (g_gametypeIsTeamGame) {
 				if (li->flags & IFL_NOTTEAM) continue;
 			}
 			else {
@@ -1330,7 +1331,7 @@ int BotChooseLTGItem(int goalstate, vec3_t origin, int *inventory, int travelfla
 			if (li->flags & IFL_NOTSINGLE)
 				continue;
 		}
-		if (g_gametype >= GT_TDM) {
+		if (g_gametypeIsTeamGame) {
 			if (li->flags & IFL_NOTTEAM)
 				continue;
 		}
@@ -1501,7 +1502,7 @@ int BotChooseNBGItem(int goalstate, vec3_t origin, int *inventory, int travelfla
 			if (li->flags & IFL_NOTSINGLE)
 				continue;
 		}
-		if (g_gametype >= GT_TDM) {
+		if (g_gametypeIsTeamGame) {
 			if (li->flags & IFL_NOTTEAM)
 				continue;
 		}
@@ -1783,6 +1784,7 @@ int BotSetupGoalAI(void)
 
 	//check if teamplay is on
 	g_gametype = LibVarValue("g_gametype", "0");
+	g_gametypeIsTeamGame = g_gametype >= GT_TDM; // BG_IsTeamGametype(g_gametype);
 	g_singlePlayer = LibVarValue("g_singlePlayer", "0");
 	//item configuration file
 	filename = LibVarString("itemconfig", "items.c");

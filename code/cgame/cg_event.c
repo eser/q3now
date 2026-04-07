@@ -212,7 +212,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	if ( attacker == cg.snap->ps.clientNum ) {
 		const char	*s;
 
-		if ( cgs.gametype < GT_TDM ) {
+		if ( !cgs.gametypeIsTeamGame ) {
 			s = va("You fragged %s\n%s place with %i", CG_ClientNameByNum( target ),
 				CG_PlaceString( cg.snap->ps.persistant[PERS_RANK] + 1 ),
 				cg.snap->ps.persistant[PERS_SCORE] );
@@ -222,7 +222,7 @@ static void CG_Obituary( entityState_t *ent ) {
 
 		if (!cg_cameraOrbit.integer) {
 #if FEAT_WIRED_UI
-			if ( cgs.gametype < GT_TDM ) {
+			if ( !cgs.gametypeIsTeamGame ) {
 				trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK,
 					va( "You fragged %s|%s place with %i",
 						CG_ClientNameByNum( target ),

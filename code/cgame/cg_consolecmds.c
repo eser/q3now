@@ -108,10 +108,6 @@ static void CG_spLose_f( void) {
     CG_CenterPrint("YOU LOSE...", 144, 0);
 }
 
-static void CG_ReloadHud_f( void ) {
-	CG_Printf("HUD reload (no-op: SuperHUD removed).\n");
-}
-
 static void CG_TellTarget_f( void ) {
 	int		clientNum;
 	char	command[128];
@@ -390,7 +386,6 @@ static consoleCommand_t	commands[] = {
 	{ "weapongrabbed", CG_WeaponGrabbed_f },
 	{ "tcmd", CG_TargetCommand_f },
 	{ "tell_target", CG_TellTarget_f },
-	{ "reloadhud", CG_ReloadHud_f },
 #if FEAT_STATS_WINDOW
 	{ "+stats", CG_StatsDown_f },
 	{ "-stats", CG_StatsUp_f },

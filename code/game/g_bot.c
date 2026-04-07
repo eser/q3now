@@ -654,7 +654,6 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	const char		*s;
 	const char		*botname;
 	const char		*model;
-	const char		*headmodel;
 	char			userinfo[MAX_INFO_STRING];
 
 	// have the server allocate a client slot
@@ -738,17 +737,6 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 		model = "visor/default";
 	}
 	Info_SetValueForKey( userinfo, key, model );
-	key = "team_model";
-	Info_SetValueForKey( userinfo, key, model );
-
-	key = "headmodel";
-	headmodel = Info_ValueForKey( botinfo, key );
-	if ( !*headmodel ) {
-		headmodel = model;
-	}
-	Info_SetValueForKey( userinfo, key, headmodel );
-	key = "team_headmodel";
-	Info_SetValueForKey( userinfo, key, headmodel );
 
 	key = "color1";
 	s = Info_ValueForKey( botinfo, key );

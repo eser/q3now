@@ -138,3 +138,7 @@ int BG_GametypeForToken( const char *token ) {
 
 	return -1;
 }
+
+qboolean BG_IsTeamGametype( gametype_t gametype ) {
+	return gametype >= GT_TDM;
+}

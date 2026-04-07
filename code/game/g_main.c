@@ -43,6 +43,8 @@ typedef struct {
 gentity_t		g_entities[MAX_GENTITIES];
 gclient_t		g_clients[MAX_CLIENTS];
 
+qboolean	g_gametypeIsTeamGame;
+
 vmCvar_t	g_gametype;
 vmCvar_t	g_scorelimit;
 vmCvar_t	g_timelimit;
@@ -503,6 +505,8 @@ void G_RegisterCvars( void ) {
 		trap_Cvar_Update( &g_gametype );
 	}
 
+	g_gametypeIsTeamGame = BG_IsTeamGametype( g_gametype.integer );
+
 	level.minPlayersModificationCount = g_minPlayers.modificationCount;
 }
 
@@ -685,6 +689,8 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	// parse the key/value pairs and spawn gentities
 	G_SpawnEntitiesFromString();
+
+	G_SetTeleporterDestinations();
 
 	// general initialization
 	G_FindTeams();
@@ -1432,7 +1438,7 @@ void LogExit( const char *string ) {
 		ping = cl->ps.ping < 999 ? cl->ps.ping : 999;
 
 		G_LogPrintf( "score: %i  ping: %i  client: %i %s\n", cl->ps.persistant[PERS_SCORE], ping, level.sortedClients[i],	cl->pers.netname );
-		if (g_singlePlayer.integer && g_gametype.integer < GT_TDM) {
+		if (g_singlePlayer.integer && !g_gametypeIsTeamGame) {
 			if (g_entities[cl - level.clients].r.svFlags & SVF_BOT && cl->ps.persistant[PERS_RANK] == 0) {
 				won = qfalse;
 			}
@@ -2393,7 +2399,7 @@ void G_CheckTeamBalance( void ) {
 	if ( !g_teamBalance.integer ) {
 		return;
 	}
-	if ( g_gametype.integer < GT_TDM ) {
+	if ( !g_gametypeIsTeamGame ) {
 		return;
 	}
 	// only check every g_teamBalanceDelay seconds
@@ -2467,7 +2473,7 @@ void G_CheckElimination( void ) {
 	if ( !g_elimination.integer ) {
 		return;
 	}
-	if ( g_gametype.integer < GT_TDM ) {
+	if ( !g_gametypeIsTeamGame ) {
 		return;
 	}
 	if ( level.intermissiontime ) {

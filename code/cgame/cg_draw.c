@@ -848,7 +848,7 @@ static void CG_DrawUpperRight(stereoFrame_t stereoFrame)
 
 	CG_SetScreenPlacement( PLACE_RIGHT, PLACE_TOP );
 
-	if ( cgs.gametype >= GT_TDM && cg_drawTeamOverlay.integer == 1 ) {
+	if ( cgs.gametypeIsTeamGame && cg_drawTeamOverlay.integer == 1 ) {
 		y = CG_DrawTeamOverlay( y, qtrue, qtrue );
 	}
 	if ( cg_drawSnapshot.integer ) {
@@ -897,7 +897,7 @@ static float CG_DrawScores( float y ) {
 	y1 = y;
 
 	// draw from the right side to left
-	if ( cgs.gametype >= GT_TDM ) {
+	if ( cgs.gametypeIsTeamGame ) {
 		x = 640;
 		color[0] = 0.0f;
 		color[1] = 0.0f;
@@ -1143,7 +1143,7 @@ static void CG_DrawLowerRight( void ) {
 
 	CG_SetScreenPlacement( PLACE_RIGHT, PLACE_BOTTOM );
 
-	if ( cgs.gametype >= GT_TDM && cg_drawTeamOverlay.integer == 2 ) {
+	if ( cgs.gametypeIsTeamGame && cg_drawTeamOverlay.integer == 2 ) {
 		y = CG_DrawTeamOverlay( y, qtrue, qfalse );
 	}
 
@@ -1206,7 +1206,7 @@ static void CG_DrawLowerLeft( void ) {
 
 	CG_SetScreenPlacement( PLACE_LEFT, PLACE_BOTTOM );
 
-	if ( cgs.gametype >= GT_TDM && cg_drawTeamOverlay.integer == 3 ) {
+	if ( cgs.gametypeIsTeamGame && cg_drawTeamOverlay.integer == 3 ) {
 		y = CG_DrawTeamOverlay( y, qfalse, qfalse );
 	}
 
@@ -1848,19 +1848,44 @@ static void CG_ScanForCrosshairEntity( void ) {
 	trace_t		trace;
 	vec3_t		start, end;
 	int			content;
+	qboolean	throughwall = cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR;
+	qboolean	lookedThroughWall = qfalse;
+	int			clientNum;
 	centity_t	*cent;
 
 	VectorCopy( cg.refdef.vieworg, start );
 	VectorMA( start, 131072, cg.refdef.viewaxis[0], end );
 
-	CG_Trace( &trace, start, vec3_origin, vec3_origin, end, 
+	CG_Trace( &trace, start, vec3_origin, vec3_origin, end,
 		cg.snap->ps.clientNum, CONTENTS_SOLID|CONTENTS_BODY );
 	if ( trace.entityNum >= MAX_CLIENTS ) {
-		return;
+		if ( throughwall ) {
+			CG_Trace( &trace, start, vec3_origin, vec3_origin, end,
+				cg.snap->ps.clientNum, CONTENTS_BODY );
+
+			if ( trace.entityNum >= MAX_CLIENTS ) {
+				return;
+			}
+
+			lookedThroughWall = qtrue;
+		} else {
+			return;
+		}
+	} else {
+		clientNum = trace.entityNum;
+	}
+
+	if (trace.entityNum >= MAX_CLIENTS) {
+		clientNum = cg_entities[trace.entityNum].currentState.clientNum;
+		if (clientNum < 0 || clientNum >= MAX_CLIENTS) {
+			return;
+		}
+	} else {
+		clientNum = trace.entityNum;
 	}
 
 	// if the player is in fog, don't show it
-	content = CG_PointContents( trace.endpos, 0 );
+	content = CG_PointContents( trace.endpos, cg.snap->ps.clientNum );
 	if ( content & CONTENTS_FOG ) {
 		return;
 	}
@@ -1870,6 +1895,21 @@ static void CG_ScanForCrosshairEntity( void ) {
 	// if the player is invisible, don't show it
 	if ( CG_IsPlayerInvisible(cent) ) {
 		return;
+	}
+
+	if (throughwall && lookedThroughWall) {
+		// XXX: technically, this could give an enemy's position away
+		// when he obscures the position of a friend
+		clientInfo_t	*ci;
+		ci = &cgs.clientinfo[clientNum];
+
+		if (!ci->infoValid) {
+			return;
+		}
+
+		if (ci->team != cg.snap->ps.persistant[PERS_TEAM]) {
+			return;
+		}
 	}
 
 	// update the fade timer
@@ -1928,7 +1968,7 @@ static void CG_DrawSpectator(void) {
 	if ( cgs.gametype == GT_DUEL ) {
 		trap_R_DrawTextNorm( "waiting to play", (float)(320 - 15 * 8) * NORM_HSCALE, 460.0f * NORM_VSCALE, FONT_DISPLAY, (float)BIGCHAR_HEIGHT * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 	}
-	else if ( cgs.gametype >= GT_TDM ) {
+	else if ( cgs.gametypeIsTeamGame ) {
 		trap_R_DrawTextNorm( "press ESC and use the JOIN menu to play", (float)(320 - 39 * 8) * NORM_HSCALE, 460.0f * NORM_VSCALE, FONT_DISPLAY, (float)BIGCHAR_HEIGHT * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 	}
 }
@@ -2045,7 +2085,7 @@ static qboolean CG_DrawScoreboard( void ) {
 	}
 
 	if (menuScoreboard == NULL) {
-		if ( cgs.gametype >= GT_TDM ) {
+		if ( cgs.gametypeIsTeamGame ) {
 			menuScoreboard = Menus_FindByName("teamscore_menu");
 		} else {
 			menuScoreboard = Menus_FindByName("score_menu");
@@ -2069,7 +2109,7 @@ static qboolean CG_DrawScoreboard( void ) {
 #else
 	if ( cgs.gametype == GT_DUEL )
 		return CG_ModernDrawDuelScoreboard();
-	if ( cgs.gametype >= GT_TDM )
+	if ( cgs.gametypeIsTeamGame )
 		return CG_ModernDrawScoretable();
 
 		return CG_ModernDrawFFAScoreboard();
@@ -2468,7 +2508,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		}
 	}
 
-	if ( cgs.gametype >= GT_TDM ) {
+	if ( cgs.gametypeIsTeamGame ) {
 		CG_DrawTeamInfo();
 	}
 

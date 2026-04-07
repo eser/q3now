@@ -3,6 +3,8 @@
 	// Switch to this theme: /set ui_theme "ta" ; /menu_reload
 
 	// ── our core menus (keep our advanced layouts) ──────────────────
+	loadMenu { "ui/assets.wmenu" }
+	loadMenu { "ui/themes/ta/assets.wmenu" }
 	loadMenu { "ui/main.wmenu" }
 	loadMenu { "ui/ingame.wmenu" }
 	loadMenu { "ui/options.wmenu" }

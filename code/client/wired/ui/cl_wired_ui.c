@@ -108,6 +108,29 @@ wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void ) {
 	return &wired_assetGlobals;
 }
 
+void WiredUI_ResetAssetGlobalsDefaults( void ) {
+	Com_Memset( &wired_assetGlobals, 0, sizeof( wired_assetGlobals ) );
+
+	Q_strncpyz( wired_assetGlobals.cursor, "ui/assets/3_cursor3", sizeof( wired_assetGlobals.cursor ) );
+	Q_strncpyz( wired_assetGlobals.gradientBar, "ui/assets/gradientbar2.tga", sizeof( wired_assetGlobals.gradientBar ) );
+
+	Q_strncpyz( wired_assetGlobals.defaultSerifFontName, "sansman", sizeof( wired_assetGlobals.defaultSerifFontName ) );
+	Q_strncpyz( wired_assetGlobals.defaultSerifFontItalicName, "sansman-italic", sizeof( wired_assetGlobals.defaultSerifFontItalicName ) );
+	Q_strncpyz( wired_assetGlobals.defaultSansFontName, "oxanium", sizeof( wired_assetGlobals.defaultSansFontName ) );
+	Q_strncpyz( wired_assetGlobals.defaultSansFontMediumName, "oxanium-medium", sizeof( wired_assetGlobals.defaultSansFontMediumName ) );
+	Q_strncpyz( wired_assetGlobals.defaultMonoFontName, "sharetechmono", sizeof( wired_assetGlobals.defaultMonoFontName ) );
+
+	wired_assetGlobals.fadeClamp = 1.0f;
+	wired_assetGlobals.fadeCycle = 1;
+	wired_assetGlobals.fadeAmount = 0.2f;
+	Vector4Set( wired_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
+	Q_strncpyz( wired_assetGlobals.focusSound, "sound/misc/menu2.opus", sizeof( wired_assetGlobals.focusSound ) );
+	Vector4Set( wired_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );
+	wired_assetGlobals.shadowX = 1.0f;
+	wired_assetGlobals.shadowY = 1.0f;
+	Vector4Set( wired_assetGlobals.gradientBarColor, 0, 0, 0, 0 );
+}
+
 // ── theme system ────────────────────────────────────────────────────
 // Returns the manifest path based on ui_theme cvar.
 // Empty ui_theme → "ui/menus.txt" (default)
@@ -728,6 +751,8 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// Lives in cl_wired_populate.c so additions don't churn this file.
 	WiredUI_RegisterCorePopulateCallbacks();
 
+	WiredUI_ResetAssetGlobalsDefaults();
+
 	// load menu files from manifest (theme-aware)
 	WiredUI_ClearMenus();
 	WiredUI_LoadMenus( WiredUI_GetManifestPath() );
@@ -750,27 +775,6 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	// dev: cycle through all menus for visual verification
 	Cmd_AddCommand( "ui_testall", WiredUI_TestAll_f );
-
-	// initialize asset globals with TA-style defaults
-	memset( &wired_assetGlobals, 0, sizeof( wired_assetGlobals ) );
-	Q_strncpyz( wired_assetGlobals.cursor, "ui/assets/3_cursor3", sizeof( wired_assetGlobals.cursor ) );
-	Q_strncpyz( wired_assetGlobals.gradientBar, "ui/assets/gradientbar2.tga", sizeof( wired_assetGlobals.gradientBar ) );
-	Q_strncpyz( wired_assetGlobals.defaultFontName, "oxanium", sizeof( wired_assetGlobals.defaultFontName ) );
-	wired_assetGlobals.defaultFontSize = 16.0f;
-	Q_strncpyz( wired_assetGlobals.defaultHeadingFontName, "sansman", sizeof( wired_assetGlobals.defaultHeadingFontName ) );
-	wired_assetGlobals.defaultHeadingFontSize = 20.0f;
-	Q_strncpyz( wired_assetGlobals.defaultConsoleFontName, "sharetechmono", sizeof( wired_assetGlobals.defaultConsoleFontName ) );
-	wired_assetGlobals.defaultConsoleFontSize = 12.0f;
-	wired_assetGlobals.fadeClamp = 1.0f;
-	wired_assetGlobals.fadeCycle = 1;
-	wired_assetGlobals.fadeAmount = 0.2f;  // fast 150ms transitions
-	Vector4Set( wired_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
-	Q_strncpyz( wired_assetGlobals.focusSound, "sound/misc/menu2.opus", sizeof( wired_assetGlobals.focusSound ) );
-	Vector4Set( wired_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );  // TA gold
-	wired_assetGlobals.shadowX = 1.0f;
-	wired_assetGlobals.shadowY = 1.0f;
-	Vector4Set( wired_assetGlobals.gradientBarColor, 0, 0, 0, 0 );  // no color by default
-	// radialGlowShader, defaultFont/Heading/ConsoleFont: zeroed by memset (empty = no override)
 
 	WiredUI_RegisterAssets();
 
