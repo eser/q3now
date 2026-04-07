@@ -50,9 +50,7 @@ extern "C" {
 #endif
 
 // Modern text/font system (implemented in cl_wired_fonts.c)
-void CG_LoadFonts( void );
-int CG_FontIndexFromName( const char *name );
-int  WiredFont_ToFontId( int fontIndex );
+int  WiredFont_IdFromName( const char *name );
 int  WiredFont_ToAlignment( int dsFlags );
 int  WiredFont_ToTextFlags( int dsFlags );
 qboolean CG_Hex16GetColor( const char *str, float *color );
@@ -765,7 +763,7 @@ typedef struct
 	vec4_t border;
 	vec4_t borderColor;
 	int width;
-	int fontIndex;
+	int fontId;
 	const char* text;
 } superhudTextContext_t;
 

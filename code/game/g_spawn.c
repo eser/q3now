@@ -475,21 +475,21 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 		}
 	}
 
-#if FEAT_TA_UI
-	G_SpawnInt( "notta", "0", &i );
-	if ( i ) {
-		ADJUST_AREAPORTAL();
-		G_FreeEntity( ent );
-		return;
-	}
-#else
-	G_SpawnInt( "notq3a", "0", &i );
-	if ( i ) {
-		ADJUST_AREAPORTAL();
-		G_FreeEntity( ent );
-		return;
-	}
-#endif
+// #if FEAT_TA_UI
+// 	G_SpawnInt( "notta", "0", &i );
+// 	if ( i ) {
+// 		ADJUST_AREAPORTAL();
+// 		G_FreeEntity( ent );
+// 		return;
+// 	}
+// #else
+// 	G_SpawnInt( "notq3a", "0", &i );
+// 	if ( i ) {
+// 		ADJUST_AREAPORTAL();
+// 		G_FreeEntity( ent );
+// 		return;
+// 	}
+// #endif
 
 	if( G_SpawnString( "gametype", NULL, &value ) ) {
 		if( g_gametype.integer >= GT_DEATHMATCH && g_gametype.integer < GT_MAX_GAME_TYPE ) {

@@ -34,9 +34,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent, int mod ) {
 	trace_t		tr;
 	int			damage, i, passent;
 	gentity_t	*traceEnt;
-#if FEAT_PW_INVULNERABILITY
 	vec3_t		impactpoint, bouncedir;
-#endif
 	vec3_t		tr_start, tr_end;
 	qboolean	hitClient = qfalse;
 
@@ -54,7 +52,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent, int mod ) {
 
 		if ( traceEnt->takedamage ) {
 			damage = DEFAULT_SHOTGUN_DAMAGE * s_quadFactor;
-#if FEAT_PW_INVULNERABILITY
+
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( tr_start, impactpoint, bouncedir, tr_end );
@@ -68,7 +66,7 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent, int mod ) {
 				}
 				continue;
 			}
-#endif
+
 			if( LogAccuracyHit( traceEnt, ent ) ) {
 				hitClient = qtrue;
 			}

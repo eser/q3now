@@ -25,6 +25,7 @@ Provides:
 #include "../../../game/bg_public.h"
 #include "cl_wired_hud.h"
 #include "cl_wired_fonts.h"
+#include "../ui/cl_wired_text.h"
 
 // ── renderer trap → direct re.* calls ─────────────────────────────────
 

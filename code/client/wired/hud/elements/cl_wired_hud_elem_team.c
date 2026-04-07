@@ -214,7 +214,7 @@ void CG_SHUDElementTeamRoutine(void* context)
 	Text_Draw( element->ctxHealthArmor.text,
 	           element->ctxHealthArmor.coord.named.x,
 	           element->ctxHealthArmor.coord.named.y,
-	           WiredFont_ToFontId( element->ctxHealthArmor.fontIndex ),
+	           element->ctxHealthArmor.fontId,
 	           element->ctxHealthArmor.coord.named.h,
 	           element->ctxHealthArmor.color,
 	           WiredFont_ToAlignment( element->ctxHealthArmor.flags ),

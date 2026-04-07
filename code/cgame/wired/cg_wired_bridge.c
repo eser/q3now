@@ -756,8 +756,6 @@ void CG_WiredHudPushState( void ) {
 	}
 	state.localServer = cgs.localServer;
 
-	state.wiredUIActive = ( cg_wiredUI.integer != 0 );
-
 	// ── TA compat: CG_SHOW_* display flags ──────────────────────────
 	// These use the actual hex values from menudef.h that TA .menu files embed
 	{

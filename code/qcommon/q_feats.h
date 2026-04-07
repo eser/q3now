@@ -69,6 +69,7 @@
 #define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
 #define FEAT_MOVEMENT_KEYS                0   // show followed player's movement keys (spectator HUD)
 #define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + SuperHUD)
+#define FEAT_LEGACY_UI                    0   // legacy TA menu/HUD code paths (compile-time hard cut)
 
 // ── engine internals (testing) ────────────────────────────────────────
 #define FEAT_BSP_ABSTRACTION              1   // Pluggable BSP format loaders
@@ -147,7 +148,7 @@
 #define FEAT_TA_TEAM_ORDERS               1   // team orders & squad commands (order teammates, accept/deny)
 #define FEAT_HARVESTER                    1   // Harvester game mode (skull/cube collection)
 #define FEAT_OVERLOAD                     1   // Overload game mode (obelisk control)
-#define FEAT_PW_INVULNERABILITY           1   // Invulnerability shield (sphere, railgun bounce)
+#define FEAT_PW_PORTAL                    1   // Invulnerability shield (sphere, railgun bounce)
 #else
 #define FEAT_TA_UI                        0
 #define FEAT_TA_VOICECHAT                 0
@@ -155,7 +156,7 @@
 #define FEAT_TA_TEAM_ORDERS               0
 #define FEAT_HARVESTER                    0
 #define FEAT_OVERLOAD                     0
-#define FEAT_PW_INVULNERABILITY           0
+#define FEAT_PW_PORTAL                    0
 #endif
 
 #endif // _Q_FEATS_H

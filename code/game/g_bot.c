@@ -222,7 +222,7 @@ static void PlayerIntroSound( const char *modelAndSkin ) {
 		skin = model;
 	}
 
-	trap_SendConsoleCommand( EXEC_APPEND, va( "play sound/player/announce/%s.wav\n", skin ) );
+	trap_SendConsoleCommand( EXEC_APPEND, va( "play sound/player/announce/%s.opus\n", skin ) );
 }
 
 /*
@@ -847,7 +847,7 @@ void Svcmd_AddBot_f( void ) {
 	// go ahead and load the bot's media immediately
 	if ( level.time - level.startTime > 1000 &&
 		trap_Cvar_VariableIntegerValue( "cl_running" ) ) {
-		trap_SendServerCommand( -1, "loaddefered\n" );	// FIXME: spelled wrong, but not changing for demo
+		trap_SendServerCommand( -1, "loaddeferred\n" );
 	}
 }
 

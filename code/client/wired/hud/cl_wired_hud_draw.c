@@ -270,7 +270,7 @@ void CG_SHUDTextMakeContext(const superhudConfig_t* in, superhudTextContext_t* o
 		Vector4Copy(config.shadowColor.value, out->shadowColor);
 	}
 
-	out->fontIndex = CG_FontIndexFromName(config.font.isSet ? config.font.value : "sansman");
+	out->fontId = WiredFont_IdFromName(config.font.isSet ? config.font.value : "sansman");
 	out->width = (float)cls.glconfig.vidWidth;
 
 
@@ -502,7 +502,7 @@ void CG_SHUDTextPrint(const superhudConfig_t* cfg, superhudTextContext_t* ctx)
 	Text_Draw( ctx->text,
 	           ctx->coord.named.x,
 	           ctx->coord.named.y,
-	           WiredFont_ToFontId( ctx->fontIndex ),
+	           ctx->fontId,
 	           ctx->coord.named.h,
 	           ctx->color,
 	           WiredFont_ToAlignment( ctx->flags ),
@@ -521,7 +521,7 @@ void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx
 	Text_Draw( ctx->text,
 	           ctx->coord.named.x,
 	           ctx->coord.named.y,
-	           WiredFont_ToFontId( ctx->fontIndex ),
+	           ctx->fontId,
 	           ctx->coord.named.h,
 	           ctx->color,
 	           WiredFont_ToAlignment( ctx->flags ),

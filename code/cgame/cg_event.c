@@ -220,24 +220,21 @@ static void CG_Obituary( entityState_t *ent ) {
 			s = va("You fragged %s", CG_ClientNameByNum( target ) );
 		}
 
-        if (!cg_cameraOrbit.integer) {
+		if (!cg_cameraOrbit.integer) {
 #if FEAT_WIRED_UI
-			if ( cg_wiredUI.integer ) {
-				if ( cgs.gametype < GT_TDM ) {
-					trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK,
-						va( "You fragged %s|%s place with %i",
-							CG_ClientNameByNum( target ),
-							CG_PlaceString( cg.snap->ps.persistant[PERS_RANK] + 1 ),
-							cg.snap->ps.persistant[PERS_SCORE] ) );
-				} else {
-					trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK,
-						va( "You fragged %s", CG_ClientNameByNum( target ) ) );
-				}
-			} else
-#endif
-			{
-				CG_CenterPrint( s, 144, BIGCHAR_WIDTH );
+			if ( cgs.gametype < GT_TDM ) {
+				trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK,
+					va( "You fragged %s|%s place with %i",
+						CG_ClientNameByNum( target ),
+						CG_PlaceString( cg.snap->ps.persistant[PERS_RANK] + 1 ),
+						cg.snap->ps.persistant[PERS_SCORE] ) );
+			} else {
+				trap_WiredUI_PushEvent( WIRED_EVENT_FRAG_RANK,
+					va( "You fragged %s", CG_ClientNameByNum( target ) ) );
 			}
+#else
+			CG_CenterPrint( s, 144, BIGCHAR_WIDTH );
+#endif
 		}
 	}
 
@@ -385,13 +382,14 @@ static void CG_UseItem( centity_t *cent ) {
 	case HI_KAMIKAZE:
 		break;
 
-#if FEAT_TA_UI
+#if FEAT_PW_PORTAL
 	case HI_PORTAL:
 		break;
+#endif
+
 	case HI_INVULNERABILITY:
 		trap_S_StartSound (NULL, es->number, CHAN_BODY, cgs.media.useInvulnerabilitySound );
 		break;
-#endif
 	}
 
 }
@@ -487,20 +485,20 @@ void CG_PainEvent( centity_t *cent, int health ) {
 	}
 
 	if ( health < 25 ) {
-		snd = "*pain25_1.wav";
+		snd = "*pain25_1.opus";
 	} else if ( health < 50 ) {
-		snd = "*pain50_1.wav";
+		snd = "*pain50_1.opus";
 	} else if ( health < 75 ) {
-		snd = "*pain75_1.wav";
+		snd = "*pain75_1.opus";
 	} else {
-		snd = "*pain100_1.wav";
+		snd = "*pain100_1.opus";
 	}
 	// play a gurp sound instead of a normal pain sound
 	if (CG_WaterLevel(cent) == 3) {
 		if (rand()&1) {
-			trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, CG_CustomSound(cent->currentState.number, "sound/player/gurp1.wav"));
+			trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, CG_CustomSound(cent->currentState.number, "sound/player/gurp1.opus"));
 		} else {
-			trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, CG_CustomSound(cent->currentState.number, "sound/player/gurp2.wav"));
+			trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, CG_CustomSound(cent->currentState.number, "sound/player/gurp2.opus"));
 		}
 	} else {
 		trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, CG_CustomSound(cent->currentState.number, snd));
@@ -606,7 +604,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_FALL_MEDIUM");
 		if (hasSound) {
 			// use normal pain sound
-			trap_S_StartSound( NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*pain100_1.wav" ) );
+			trap_S_StartSound( NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*pain100_1.opus" ) );
 		}
 		if ( clientNum == cg.predictedPlayerState.clientNum ) {
 			// smooth landing z changes
@@ -617,7 +615,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_FALL_FAR:
 		DEBUGNAME("EV_FALL_FAR");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, CG_CustomSound( es->number, "*fall1.wav" ) );
+			trap_S_StartSound (NULL, es->number, CHAN_AUTO, CG_CustomSound( es->number, "*fall1.opus" ) );
 		}
 		cent->pe.painTime = cg.time;	// don't play a pain sound right after this
 		if ( clientNum == cg.predictedPlayerState.clientNum ) {
@@ -681,18 +679,18 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 		// boing sound at origin, jump sound on player
 		trap_S_StartSound ( cent->lerpOrigin, -1, CHAN_VOICE, cgs.media.jumpPadSound );
-		trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*jump1.wav" ) );
+		trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*jump1.opus" ) );
 		break;
 
 	case EV_JUMP:
 		DEBUGNAME("EV_JUMP");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*jump1.wav" ) );
+			trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*jump1.opus" ) );
 		}
 		break;
 	case EV_TAUNT:
 		DEBUGNAME("EV_TAUNT");
-		trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*taunt.wav" ) );
+		trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*taunt.opus" ) );
 		break;
 #if FEAT_TA_TEAM_ORDERS
 	case EV_TAUNT_YES:
@@ -741,7 +739,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_WATER_CLEAR:
 		DEBUGNAME("EV_WATER_CLEAR");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, CG_CustomSound( es->number, "*gasp.wav" ) );
+			trap_S_StartSound (NULL, es->number, CHAN_AUTO, CG_CustomSound( es->number, "*gasp.opus" ) );
 		}
 		break;
 
@@ -822,13 +820,13 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		// gauntlet lunge: play whoosh sound
 		if ( cent->currentState.weapon == WP_GAUNTLET ) {
 			trap_S_StartSound( NULL, cent->currentState.number, CHAN_WEAPON,
-				trap_S_RegisterSound( "sound/weapons/melee/fstatck.wav", qfalse ) );
+				trap_S_RegisterSound( "sound/weapons/melee/fstatck.opus", qfalse ) );
 		}
 		// shotgun double-blast: play sawed-off blast sound
 		if ( cent->currentState.weapon == WP_SHOTGUN ) {
 			// use existing shotgun sound as placeholder — distinct sound is v2
 			trap_S_StartSound( NULL, cent->currentState.number, CHAN_WEAPON,
-				trap_S_RegisterSound( "sound/weapons/shotgun/sshotf1b.wav", qfalse ) );
+				trap_S_RegisterSound( "sound/weapons/shotgun/sshotf1b.opus", qfalse ) );
 			// trigger screen shake for local player
 			if ( cent->currentState.number == cg.snap->ps.clientNum ) {
 				cg.doubleBlastKickTime = cg.time;
@@ -941,7 +939,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_KAMIKAZE");
 		CG_KamikazeEffect( cent->lerpOrigin );
 		break;
-#if FEAT_TA_UI
+#if FEAT_OVERLOAD
 	case EV_OBELISKEXPLODE:
 		DEBUGNAME("EV_OBELISKEXPLODE");
 		CG_ObeliskExplode( cent->lerpOrigin, es->eventParm );
@@ -950,6 +948,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_OBELISKPAIN");
 		CG_ObeliskPain( cent->lerpOrigin );
 		break;
+#endif
 	case EV_INVUL_IMPACT:
 		DEBUGNAME("EV_INVUL_IMPACT");
 		CG_InvulnerabilityImpact( cent->lerpOrigin, cent->currentState.angles );
@@ -958,7 +957,6 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_JUICED");
 		CG_InvulnerabilityJuiced( cent->lerpOrigin );
 		break;
-#endif
 	case EV_LIGHTNINGBOLT:
 		DEBUGNAME("EV_LIGHTNINGBOLT");
 		CG_LightningBoltBeam(es->origin2, es->pos.trBase);
@@ -1221,9 +1219,9 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_DEATHx");
 
 		if (CG_WaterLevel(cent) == 3) {
-			trap_S_StartSound(NULL, es->number, CHAN_VOICE, CG_CustomSound(es->number, "*drown.wav"));
+			trap_S_StartSound(NULL, es->number, CHAN_VOICE, CG_CustomSound(es->number, "*drown.opus"));
 		} else {
-			trap_S_StartSound(NULL, es->number, CHAN_VOICE, CG_CustomSound(es->number, va("*death%i.wav", event - EV_DEATH1 + 1)));
+			trap_S_StartSound(NULL, es->number, CHAN_VOICE, CG_CustomSound(es->number, va("*death%i.opus", event - EV_DEATH1 + 1)));
 		}
 
 		break;

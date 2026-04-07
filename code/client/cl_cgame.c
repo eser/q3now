@@ -369,8 +369,19 @@ Just adds default parameters that cgame doesn't need to know about
 */
 static void CL_CM_LoadMap( const char *mapname ) {
 	int		checksum;
+	bspFile_t	*bsp;
 
 	CM_LoadMap( mapname, qtrue, &checksum );
+
+	if ( cls.cgameBsp ) {
+		BSP_Free( cls.cgameBsp );
+		cls.cgameBsp = NULL;
+	}
+
+	if ( !BSP_Load( mapname, &bsp ) ) {
+		Com_Error( ERR_DROP, "%s: couldn't load %s", __func__, mapname );
+	}
+	cls.cgameBsp = bsp;
 }
 
 
@@ -401,6 +412,11 @@ void CL_ShutdownCGame( void ) {
 	// cgame QVM is gone. These are tracked internally as "function==NULL"
 	// stub entries installed by CL_AddCgameCommand.
 	Cmd_RemoveCgameCommands();
+
+	if ( cls.cgameBsp ) {
+		BSP_Free( cls.cgameBsp );
+		cls.cgameBsp = NULL;
+	}
 }
 
 
@@ -658,7 +674,10 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		S_StartBackgroundTrack( VMA(1), VMA(2) );
 		return 0;
 	case CG_R_LOADWORLDMAP:
-		re.LoadWorld( VMA(1) );
+		if ( !cls.cgameBsp ) {
+			Com_Error( ERR_DROP, "%s: world BSP was not loaded", __func__ );
+		}
+		re.LoadWorld( cls.cgameBsp );
 		CL_LoadingYield( "loading BSP" );
 		return 0;
 	case CG_R_REGISTERMODEL: {

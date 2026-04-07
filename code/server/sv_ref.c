@@ -522,8 +522,15 @@ side and guarantees the collision database is loaded after the
 refexport_t entry point returns.
 ====================
 */
-static void SVR_LoadWorld( const char *name ) {
+static void SVR_LoadWorld( const bspFile_t *bsp ) {
+	const char *name;
 	int checksum = 0;
+
+	if ( !bsp ) {
+		return;
+	}
+
+	name = bsp->name;
 	if ( !name || !name[0] ) {
 		return;
 	}

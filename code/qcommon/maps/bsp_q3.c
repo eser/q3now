@@ -33,8 +33,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // symmetrically with matching Z_Free calls, independent of the hunk
 // state.
 
-#include "q_shared.h"
-#include "qcommon.h"
+#include "../q_shared.h"
+#include "../qcommon.h"
 #include "bsp.h"
 
 // Lightmap page dimensions (matches id's stock Q3 lightmap layout).
@@ -385,6 +385,26 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 			}
 			out->patchWidth = LittleLong( in->patchWidth );
 			out->patchHeight = LittleLong( in->patchHeight );
+		}
+	}
+
+	// ---- Fogs ----
+	{
+		const lump_t *l = &header.lumps[LUMP_FOGS];
+		const dfog_t *in = (const dfog_t *)( base + l->fileofs );
+		dfog_t *out;
+		if ( l->filelen % sizeof( *in ) ) {
+			Com_Printf( "BSP_Q3_Load: %s funny fogs lump size\n", name );
+			BSP_Free( bsp );
+			return qfalse;
+		}
+		bsp->numFogs = l->filelen / sizeof( *in );
+		bsp->fogs = BSP_ZAlloc( bsp->numFogs * sizeof( *bsp->fogs ) );
+		out = bsp->fogs;
+		for ( i = 0; i < bsp->numFogs; i++, in++, out++ ) {
+			Q_strncpyz( out->shader, in->shader, sizeof( out->shader ) );
+			out->brushNum = LittleLong( in->brushNum );
+			out->visibleSide = LittleLong( in->visibleSide );
 		}
 	}
 

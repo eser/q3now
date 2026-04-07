@@ -1649,7 +1649,7 @@ void		RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clie
 
 void		RE_BeginFrame( stereoFrame_t stereoFrame );
 void		RE_BeginRegistration( glconfig_t *glconfig );
-void		RE_LoadWorldMap( const char *mapname );
+void		RE_LoadWorldMap( const bspFile_t *bsp );
 void		RE_SetWorldVisData( const byte *vis );
 qhandle_t	RE_RegisterModel( const char *name );
 qhandle_t	RE_RegisterSkin( const char *name );

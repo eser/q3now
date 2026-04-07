@@ -2281,6 +2281,22 @@ static const imageExtToLoaderMap_t imageLoaders[ ] =
 
 static const int numImageLoaders = ARRAY_LEN( imageLoaders );
 
+static qboolean R_ShouldPreferLegacyImages( void ) {
+	char profile[16];
+	int version;
+
+	ri.Cvar_VariableStringBuffer( "com_mapAssetProfile", profile, sizeof( profile ) );
+	if ( !Q_stricmp( profile, "legacy" ) ) {
+		return qtrue;
+	}
+	if ( !Q_stricmp( profile, "modern" ) ) {
+		return qfalse;
+	}
+
+	version = ri.Cvar_VariableIntegerValue( "com_mapBspVersion" );
+	return ( version > 0 && ( version <= 46 || version == 68 ) ) ? qtrue : qfalse;
+}
+
 /*
 =================
 R_LoadImage
@@ -2307,6 +2323,23 @@ static void R_LoadImage( const char *name, byte **pic, int *width, int *height, 
 	Q_strncpyz( localName, name, sizeof( localName ) );
 
 	ext = COM_GetExtension( localName );
+
+	if ( !*ext ) {
+		const char *preferredExt = R_ShouldPreferLegacyImages() ? "tga" : "png";
+		for ( i = 0; i < numImageLoaders; i++ ) {
+			if ( Q_stricmp( imageLoaders[i].ext, preferredExt ) ) {
+				continue;
+			}
+
+			altName = va( "%s.%s", localName, imageLoaders[i].ext );
+			imageLoaders[i].ImageLoader( altName, pic, width, height );
+			if ( *pic ) {
+				return;
+			}
+
+			break;
+		}
+	}
 
 	// If compressed textures are enabled, try loading a DDS first, it'll load fastest
 	if (r_ext_compressed_textures->integer)
@@ -3241,5 +3274,3 @@ void	R_SkinList_f( void ) {
 	}
 	ri.Printf (PRINT_ALL, "------------------\n");
 }
-
-

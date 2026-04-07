@@ -24,10 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // executed by a key binding
 
 #include "cg_local.h"
-#if FEAT_TA_UI
-#include "ui_shared.h"
-extern menuDef_t *menuScoreboard;
-#endif
 
 
 
@@ -90,48 +86,6 @@ static void CG_ScoresUp_f( void ) {
 	}
 }
 
-#if FEAT_TA_UI
-extern menuDef_t *menuScoreboard;
-void Menu_Reset( void );			// FIXME: add to right include file
-
-static void CG_LoadHud_f( void) {
-  char buff[1024];
-	const char *hudSet;
-  memset(buff, 0, sizeof(buff));
-
-	String_Init();
-	Menu_Reset();
-	
-	trap_Cvar_VariableStringBuffer("cg_hudFiles", buff, sizeof(buff));
-	hudSet = buff;
-	if (hudSet[0] == '\0') {
-		hudSet = "ui/hud.txt";
-	}
-
-	CG_LoadMenus(hudSet);
-  menuScoreboard = NULL;
-}
-
-
-static void CG_scrollScoresDown_f( void) {
-	if (menuScoreboard && cg.scoreBoardShowing) {
-		Menu_ScrollFeeder(menuScoreboard, FEEDER_SCOREBOARD, qtrue);
-		Menu_ScrollFeeder(menuScoreboard, FEEDER_REDTEAM_LIST, qtrue);
-		Menu_ScrollFeeder(menuScoreboard, FEEDER_BLUETEAM_LIST, qtrue);
-	}
-}
-
-
-static void CG_scrollScoresUp_f( void) {
-	if (menuScoreboard && cg.scoreBoardShowing) {
-		Menu_ScrollFeeder(menuScoreboard, FEEDER_SCOREBOARD, qfalse);
-		Menu_ScrollFeeder(menuScoreboard, FEEDER_REDTEAM_LIST, qfalse);
-		Menu_ScrollFeeder(menuScoreboard, FEEDER_BLUETEAM_LIST, qfalse);
-	}
-}
-
-#endif
-
 static void CG_spWin_f( void) {
     trap_Cvar_Set("cg_cameraOrbit", "2");
     trap_Cvar_Set("cg_cameraOrbitDelay", "35");
@@ -172,6 +126,7 @@ static void CG_TellTarget_f( void ) {
 	Com_sprintf( command, 128, "tell %i %s", clientNum, message );
 	trap_SendClientCommand( command );
 }
+
 
 #if FEAT_TA_UI
 static void CG_VoiceTellTarget_f( void ) {
@@ -441,16 +396,11 @@ static consoleCommand_t	commands[] = {
 	{ "-stats", CG_StatsUp_f },
 #endif
 #if FEAT_TA_UI
-	{ "loadhud", CG_LoadHud_f },
 	{ "nextTeamMember", CG_NextTeamMember_f },
 	{ "prevTeamMember", CG_PrevTeamMember_f },
 	{ "nextOrder", CG_NextOrder_f },
 	{ "confirmOrder", CG_ConfirmOrder_f },
 	{ "denyOrder", CG_DenyOrder_f },
-	{ "scoresDown", CG_scrollScoresDown_f },
-	{ "scoresUp", CG_scrollScoresUp_f },
-#endif
-#if FEAT_TA_UI
 	{ "vtell_target", CG_VoiceTellTarget_f },
 	{ "taskOffense", CG_TaskOffense_f },
 	{ "taskDefense", CG_TaskDefense_f },
@@ -560,5 +510,5 @@ void CG_InitConsoleCommands( void ) {
 	trap_AddCommand ("ready");
 #endif
 	trap_AddCommand ("teamtask");
-	trap_AddCommand ("loaddefered");	// spelled wrong, but not changing for demo
+	trap_AddCommand ("loaddeferred");
 }

@@ -229,7 +229,6 @@ Key digits:
 #define QGR_KEY_PICKUP_UNKNOWN			1111021109
 #define QGR_KEY_TIME_UNKNOWN			1111021110
 
-#if FEAT_TA_UI
 // ammo keys
 #define QGR_KEY_BOXES					1111030000
 #define QGR_KEY_ROUNDS					1111030001
@@ -296,14 +295,14 @@ Key digits:
 #define QGR_KEY_KAMIKAZE				1111070200
 #define QGR_KEY_KAMIKAZE_USE			1111070201
 
-#if FEAT_TA_UI
+#if FEAT_PW_PORTAL
 // new to team arena
 #define QGR_KEY_PORTAL					1111070300
 #define QGR_KEY_PORTAL_USE				1111070301
+#endif
 // new to team arena
 #define QGR_KEY_INVULNERABILITY			1111070400
 #define QGR_KEY_INVULNERABILITY_USE		1111070401
-#endif /* MISSIONPACK */
 
 // hazard keys
 #define QGR_KEY_HAZARD_DEATH			1111080000

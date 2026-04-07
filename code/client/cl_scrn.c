@@ -484,7 +484,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 					CL_DrawLoadingScreen();
 				}
 #if FEAT_WIRED_UI
-				if ( !cl_loadFading && wiredHud->valid && wiredHud->wiredUIActive ) {
+				if ( !cl_loadFading && wiredHud->valid ) {
 					WiredHud_Routine( cls.realtime );
 				}
 #endif
@@ -545,7 +545,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 		case CA_ACTIVE:
 			CL_CGameRendering( stereoFrame );
 #if FEAT_WIRED_UI
-			if ( wiredHud->valid && wiredHud->wiredUIActive ) {
+			if ( wiredHud->valid ) {
 				WiredHud_Routine( cls.realtime );
 			}
 #endif

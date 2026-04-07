@@ -24,19 +24,19 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cg_local.h"
 
 char	*cg_customSoundNames[MAX_CUSTOM_SOUNDS] = {
-	"*death1.wav",
-	"*death2.wav",
-	"*death3.wav",
-	"*jump1.wav",
-	"*pain25_1.wav",
-	"*pain50_1.wav",
-	"*pain75_1.wav",
-	"*pain100_1.wav",
-	"*falling1.wav",
-	"*gasp.wav",
-	"*drown.wav",
-	"*fall1.wav",
-	"*taunt.wav"
+	"*death1.opus",
+	"*death2.opus",
+	"*death3.opus",
+	"*jump1.opus",
+	"*pain25_1.opus",
+	"*pain50_1.opus",
+	"*pain75_1.opus",
+	"*pain100_1.opus",
+	"*falling1.opus",
+	"*gasp.opus",
+	"*drown.opus",
+	"*fall1.opus",
+	"*taunt.opus"
 };
 
 
@@ -1756,7 +1756,6 @@ static void CG_HasteTrail( centity_t *cent ) {
 	smoke->leType = LE_SCALE_FADE;
 }
 
-#if FEAT_TA_UI
 /*
 ===============
 CG_BreathPuffs
@@ -1840,8 +1839,6 @@ static void CG_DustTrail( centity_t *cent ) {
 				  0,
 				  cgs.media.dustPuffShader );
 }
-
-#endif
 
 /*
 ===============
@@ -1986,7 +1983,7 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 }
 
 
-#if FEAT_TA_UI
+#if FEAT_HARVESTER
 /*
 ===============
 CG_PlayerTokens
@@ -2634,7 +2631,7 @@ void CG_Player( centity_t *cent ) {
 		renderfx |= RF_SHADOW_PLANE;
 	}
 	renderfx |= RF_LIGHTING_ORIGIN;			// use the same origin for all
-#if FEAT_TA_UI
+#if FEAT_HARVESTER
 	if( cgs.gametype == GT_HARVESTER ) {
 		CG_PlayerTokens( cent, renderfx );
 	}
@@ -2853,7 +2850,6 @@ void CG_Player( centity_t *cent ) {
 		}
 	}
 
-#if FEAT_TA_UI
 	if ( cent->currentState.powerups & ( 1 << PW_INVULNERABILITY ) ) {
 		if ( !ci->invulnerabilityStartTime ) {
 			ci->invulnerabilityStartTime = cg.time;
@@ -2918,7 +2914,6 @@ void CG_Player( centity_t *cent ) {
 		}
 		trap_R_AddRefEntityToScene( &powerup );
 	}
-#endif // MISSIONPACK
 
 	//
 	// add the head
@@ -2946,11 +2941,9 @@ void CG_Player( centity_t *cent ) {
 #endif
 	CG_AddRefEntityWithPowerups( cent, &head, &cent->currentState, qtrue, ci->team );
 
-#if FEAT_TA_UI
 	CG_BreathPuffs(cent, &head);
 
 	CG_DustTrail(cent);
-#endif
 
 	//
 	// add the gun / barrel / flash

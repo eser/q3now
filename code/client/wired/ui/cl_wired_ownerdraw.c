@@ -16,7 +16,7 @@ Tiered implementation:
 #include "../../client.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
-#include "cl_wired_fonts.h"
+#include "cl_wired_text.h"
 #include "cl_wired_draw.h"
 #include "cl_wired_background.h"
 #include "../../../qcommon/menudef.h"
@@ -67,10 +67,9 @@ static void WiredOD_PlayerHealth( float x, float y, float w, float h, vec4_t ite
 	} else {
 		Vector4Set( color, 1, 0, 0, 1 );
 	}
-	float scale = h > 20 ? 0.6f : 0.4f;
-	fontInfo_t *font = WiredUI_GetTAFont( TA_FONT_NORMAL );
-	float tw = WiredUI_TextWidth_TA( buf, scale, 0, font );
-	WiredUI_DrawText_TA( x + ( w - tw ) * 0.5f, y + h * 0.25f, scale, color, buf, 0, 3, font );
+	float charSize = h > 20.0f ? 12.0f : 8.0f;
+	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
+		FONT_DISPLAY, charSize, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
 }
 
 static void WiredOD_PlayerArmor( float x, float y, float w, float h, vec4_t itemColor ) {
@@ -85,10 +84,9 @@ static void WiredOD_PlayerArmor( float x, float y, float w, float h, vec4_t item
 	} else {
 		Vector4Set( color, 0.6f, 0.6f, 0.6f, 1 );
 	}
-	float scale = h > 20 ? 0.6f : 0.4f;
-	fontInfo_t *font = WiredUI_GetTAFont( TA_FONT_NORMAL );
-	float tw = WiredUI_TextWidth_TA( buf, scale, 0, font );
-	WiredUI_DrawText_TA( x + ( w - tw ) * 0.5f, y + h * 0.25f, scale, color, buf, 0, 3, font );
+	float charSize = h > 20.0f ? 12.0f : 8.0f;
+	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
+		FONT_DISPLAY, charSize, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
 }
 
 static void WiredOD_PlayerAmmoValue( float x, float y, float w, float h, vec4_t itemColor ) {
@@ -106,10 +104,9 @@ static void WiredOD_PlayerAmmoValue( float x, float y, float w, float h, vec4_t 
 	} else {
 		Vector4Set( color, 0.4f, 0.4f, 0.4f, 1 );
 	}
-	float scale = h > 20 ? 0.6f : 0.4f;
-	fontInfo_t *font = WiredUI_GetTAFont( TA_FONT_NORMAL );
-	float tw = WiredUI_TextWidth_TA( buf, scale, 0, font );
-	WiredUI_DrawText_TA( x + ( w - tw ) * 0.5f, y + h * 0.25f, scale, color, buf, 0, 3, font );
+	float charSize = h > 20.0f ? 12.0f : 8.0f;
+	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
+		FONT_DISPLAY, charSize, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
 }
 
 static void WiredOD_PlayerArmorIcon( float x, float y, float w, float h, vec4_t itemColor ) {
@@ -139,10 +136,9 @@ static void WiredOD_PlayerScore( float x, float y, float w, float h, vec4_t item
 	char buf[16];
 	Com_sprintf( buf, sizeof( buf ), "%d", score );
 	vec4_t color = { 1, 1, 1, 1 };
-	float scale = h > 20 ? 0.6f : 0.4f;
-	fontInfo_t *font = WiredUI_GetTAFont( TA_FONT_NORMAL );
-	float tw = WiredUI_TextWidth_TA( buf, scale, 0, font );
-	WiredUI_DrawText_TA( x + ( w - tw ) * 0.5f, y + h * 0.25f, scale, color, buf, 0, 3, font );
+	float charSize = h > 20.0f ? 12.0f : 8.0f;
+	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
+		FONT_DISPLAY, charSize, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
 }
 
 // ── P2 ownerdraw renderers ───────────────────────────────────────────
@@ -152,9 +148,9 @@ static void WiredOD_BlueScore( float x, float y, float w, float h, vec4_t itemCo
 	char buf[16];
 	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->scores2 );
 	vec4_t color = { 0.3f, 0.5f, 1.0f, 1.0f };
-	float scale = h > 20 ? 0.6f : 0.4f;
-	fontInfo_t *font = WiredUI_GetTAFont( TA_FONT_NORMAL );
-	WiredUI_DrawText_TA( x, y + h * 0.25f, scale, color, buf, 0, 3, font );
+	float charSize = h > 20.0f ? 12.0f : 8.0f;
+	Text_Draw( buf, x, y + h * 0.25f,
+		FONT_DISPLAY, charSize, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 }
 
 static void WiredOD_RedScore( float x, float y, float w, float h, vec4_t itemColor ) {
@@ -162,9 +158,9 @@ static void WiredOD_RedScore( float x, float y, float w, float h, vec4_t itemCol
 	char buf[16];
 	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->scores1 );
 	vec4_t color = { 1.0f, 0.3f, 0.3f, 1.0f };
-	float scale = h > 20 ? 0.6f : 0.4f;
-	fontInfo_t *font = WiredUI_GetTAFont( TA_FONT_NORMAL );
-	WiredUI_DrawText_TA( x, y + h * 0.25f, scale, color, buf, 0, 3, font );
+	float charSize = h > 20.0f ? 12.0f : 8.0f;
+	Text_Draw( buf, x, y + h * 0.25f,
+		FONT_DISPLAY, charSize, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 }
 
 static void WiredOD_Killer( float x, float y, float w, float h, vec4_t itemColor ) {
@@ -178,9 +174,9 @@ static void WiredOD_GameType( float x, float y, float w, float h, vec4_t itemCol
 	const char *gt;
 	gt = wiredHud->gametypeName;
 	vec4_t color = { 1, 1, 1, 1 };
-	float scale = 0.35f;
-	fontInfo_t *font = WiredUI_GetTAFont( TA_FONT_SMALL );
-	WiredUI_DrawText_TA( x, y + h * 0.25f, scale, color, gt, 0, 0, font );
+	float charSize = 8.0f;
+	Text_Draw( gt, x, y + h * 0.25f,
+		FONT_UI, charSize, color, TEXT_ALIGN_LEFT, 0 );
 }
 
 // ── background grid (scanlines) ──────────────────────────────────────

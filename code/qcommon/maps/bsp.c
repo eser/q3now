@@ -23,12 +23,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // bsp.c -- BSP format registry and loading (FEAT_BSP_ABSTRACTION)
 
-#include "q_shared.h"
-#include "qcommon.h"
+#include "../q_shared.h"
+#include "../qcommon.h"
 #include "bsp.h"
 
 static bspFormat_t const *bspFormats[MAX_BSP_FORMATS];
 static int numBspFormats = 0;
+
+#define MAX_BSP_FILES 2
+static bspFile_t *bspLoadedFiles[MAX_BSP_FILES];
 
 void BSP_Init( void ) {
 	numBspFormats = 0;
@@ -37,6 +40,7 @@ void BSP_Init( void ) {
 	// Register built-in formats
 	extern const bspFormat_t bspFormatQ3;
 	BSP_RegisterFormat( &bspFormatQ3 );
+	Com_Memset( bspLoadedFiles, 0, sizeof( bspLoadedFiles ) );
 }
 
 void BSP_RegisterFormat( const bspFormat_t *format ) {
@@ -52,8 +56,29 @@ qboolean BSP_Load( const char *name, bspFile_t **bspFile ) {
 	int			ident;
 	int			version;
 	int			i;
+	int			freeSlot;
 
 	*bspFile = NULL;
+	freeSlot = -1;
+
+	for ( i = 0; i < MAX_BSP_FILES; i++ ) {
+		if ( !bspLoadedFiles[i] ) {
+			if ( freeSlot < 0 ) {
+				freeSlot = i;
+			}
+			continue;
+		}
+
+		if ( !Q_stricmp( bspLoadedFiles[i]->name, name ) ) {
+			bspLoadedFiles[i]->references++;
+			*bspFile = bspLoadedFiles[i];
+			return qtrue;
+		}
+	}
+
+	if ( freeSlot < 0 ) {
+		Com_Error( ERR_DROP, "%s: no free BSP slots for '%s'", __func__, name );
+	}
 
 	length = FS_ReadFile( name, &buf );
 	if ( !buf ) {
@@ -72,6 +97,12 @@ qboolean BSP_Load( const char *name, bspFile_t **bspFile ) {
 		if ( bspFormats[i]->ident == ident && bspFormats[i]->version == version ) {
 			qboolean result = bspFormats[i]->loadFunction( bspFormats[i], name, buf, length, bspFile );
 			FS_FreeFile( buf );
+			if ( result && *bspFile ) {
+				(*bspFile)->ident = ident;
+				(*bspFile)->version = version;
+				(*bspFile)->references = 1;
+				bspLoadedFiles[freeSlot] = *bspFile;
+			}
 			return result;
 		}
 	}
@@ -82,8 +113,22 @@ qboolean BSP_Load( const char *name, bspFile_t **bspFile ) {
 }
 
 void BSP_Free( bspFile_t *bspFile ) {
+	int i;
+
 	if ( !bspFile ) {
 		return;
+	}
+
+	bspFile->references--;
+	if ( bspFile->references > 0 ) {
+		return;
+	}
+
+	for ( i = 0; i < MAX_BSP_FILES; i++ ) {
+		if ( bspLoadedFiles[i] == bspFile ) {
+			bspLoadedFiles[i] = NULL;
+			break;
+		}
 	}
 
 	// Every lump buffer populated by a format loader (e.g. bsp_q3.c) is
@@ -137,6 +182,47 @@ void BSP_Free( bspFile_t *bspFile ) {
 	if ( bspFile->lightGridData ) {
 		Z_Free( bspFile->lightGridData );
 	}
+	if ( bspFile->fogs ) {
+		Z_Free( bspFile->fogs );
+	}
 
 	Z_Free( bspFile );
+}
+
+void BSP_Shutdown( void ) {
+	int i;
+
+	for ( i = 0; i < MAX_BSP_FILES; i++ ) {
+		if ( !bspLoadedFiles[i] ) {
+			continue;
+		}
+
+		bspLoadedFiles[i]->references = 1;
+		BSP_Free( bspLoadedFiles[i] );
+		bspLoadedFiles[i] = NULL;
+	}
+}
+
+bspAssetProfile_t BSP_AssetProfileForVersion( int version ) {
+	if ( version <= BSP_VERSION || version == 68 ) {
+		return BSP_ASSET_PROFILE_LEGACY;
+	}
+
+	return BSP_ASSET_PROFILE_MODERN;
+}
+
+const char *BSP_DefaultSoundExtForProfile( bspAssetProfile_t profile ) {
+	if ( profile == BSP_ASSET_PROFILE_LEGACY ) {
+		return "wav";
+	}
+
+	return "opus";
+}
+
+const char *BSP_DefaultImageExtForProfile( bspAssetProfile_t profile ) {
+	if ( profile == BSP_ASSET_PROFILE_LEGACY ) {
+		return "tga";
+	}
+
+	return "png";
 }

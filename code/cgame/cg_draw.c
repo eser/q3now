@@ -364,7 +364,7 @@ CG_DrawStatusBar
 
 ================
 */
-#ifndef MISSIONPACK
+#if FEAT_LEGACY_UI && !defined(MISSIONPACK)
 static void CG_DrawStatusBar( void ) {
 	int			color;
 	centity_t	*cent;
@@ -1451,13 +1451,8 @@ static void CG_DrawDisconnect( void ) {
 		return;
 	}
 
-#if FEAT_TA_UI
 	x = 640 - 48;
 	y = 480 - 144;
-#else
-	x = 640 - 48;
-	y = 480 - 48;
-#endif
 
 	CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, 48 * NORM_HSCALE, 48 * NORM_VSCALE, trap_R_RegisterShader("gfx/2d/net.tga" ) );
 }
@@ -1488,13 +1483,8 @@ static void CG_DrawLagometer( void ) {
 	//
 {
 	float pixW, pixH;
-#if FEAT_TA_UI
 	x = (int)(640 - 48);
 	y = (int)(480 - 144);
-#else
-	x = (int)(640 - 48);
-	y = (int)(480 - 48);
-#endif
 
 	trap_R_SetColor( NULL );
 	CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, 48 * NORM_HSCALE, 48 * NORM_VSCALE, cgs.media.lagometerShader );
@@ -2010,18 +2000,16 @@ static qboolean CG_DrawScoreboard( void ) {
 #if FEAT_WIRED_UI
 	// when Wired UI is active, the client renders the scoreboard overlay
 	// cgame just reports whether the scoreboard should be "showing" (suppresses other HUD)
-	if ( cg_wiredUI.integer ) {
-		if ( cg.showScores || cg.predictedPlayerState.pm_type == PM_DEAD
-			 || cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
-			return qtrue;
-		}
-		if ( CG_FadeColor( cg.scoreFadeTime, FADE_TIME ) ) {
-			return qtrue;
-		}
-		return qfalse;
+	if ( cg.showScores || cg.predictedPlayerState.pm_type == PM_DEAD
+		 || cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
+		return qtrue;
 	}
+	if ( CG_FadeColor( cg.scoreFadeTime, FADE_TIME ) ) {
+		return qtrue;
+	}
+	return qfalse;
 #endif
-#if FEAT_TA_UI
+#if FEAT_TA_UI && FEAT_LEGACY_UI
 	static qboolean firstTime = qtrue;
 
 	if (menuScoreboard) {
@@ -2333,7 +2321,7 @@ static void CG_DrawWarmup( void ) {
 }
 
 //==================================================================================
-#if FEAT_TA_UI
+#if FEAT_TA_UI && FEAT_LEGACY_UI
 /* 
 =================
 CG_DrawTimedMenus
@@ -2410,12 +2398,10 @@ CG_Draw2D
 */
 static void CG_Draw2D(stereoFrame_t stereoFrame)
 {
-#if FEAT_TA_UI
-#if FEAT_TA_UI
+#if FEAT_TA_UI && FEAT_LEGACY_UI
 	if (cgs.orderPending && cg.time > cgs.orderTime) {
 		CG_CheckOrderPending();
 	}
-#endif
 #endif
 	// if we are taking a levelshot for the menu, don't draw anything
 	if ( cg.levelShot ) {
@@ -2442,20 +2428,18 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 #if FEAT_WIRED_UI
 	// Wired UI: always push game state to client
 	CG_WiredHudPushState();
-
-	// cg_wiredUI 1: client renders HUD — skip all cgame HUD drawing
-	if ( cg_wiredUI.integer ) {
-		CG_ScanForCrosshairEntity();  // updates crosshairClientNum for state bridge
-		// crosshair + crosshair names drawn by Wired UI elements
-		// (cl_wired_hud_elem_crosshair.c, cl_wired_hud_elem_target_name.c)
-		// route center print through Wired UI message queue instead of drawing directly
-		if ( cg.centerPrintTime && cg.centerPrint[0] ) {
-			trap_WiredUI_PushEvent( WIRED_EVENT_CENTERPRINT, cg.centerPrint );
-			cg.centerPrintTime = 0;  // consumed — don't push again
-		}
-		return;
+	CG_ScanForCrosshairEntity();  // updates crosshairClientNum for state bridge
+	// crosshair + crosshair names drawn by Wired UI elements
+	// (cl_wired_hud_elem_crosshair.c, cl_wired_hud_elem_target_name.c)
+	// route center print through Wired UI message queue instead of drawing directly
+	if ( cg.centerPrintTime && cg.centerPrint[0] ) {
+		trap_WiredUI_PushEvent( WIRED_EVENT_CENTERPRINT, cg.centerPrint );
+		cg.centerPrintTime = 0;  // consumed — don't push again
 	}
+	return;
 #endif
+
+#if FEAT_LEGACY_UI
 	// default HUD
 	if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
 		CG_DrawSpectator();
@@ -2468,16 +2452,9 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		// don't draw any status if dead or the scoreboard is being explicitly shown
 		if ( !cg.showScores && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
 
-#if FEAT_TA_UI
-#if FEAT_TA_UI
-			if ( cg_drawStatus.integer ) {
-				Menu_PaintAll();
-				CG_DrawTimedMenus();
-			}
-#endif
-#else
+			Menu_PaintAll();
+			CG_DrawTimedMenus();
 			CG_DrawStatusBar();
-#endif
 
 			CG_DrawAmmoWarning();
 
@@ -2486,17 +2463,13 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 			CG_DrawCrosshairNames();
 			CG_DrawWeaponSelect();
 
-#ifndef MISSIONPACK
 			CG_DrawHoldableItem();
-#endif
 			CG_DrawReward();
 		}
 	}
 
 	if ( cgs.gametype >= GT_TDM ) {
-#ifndef MISSIONPACK
 		CG_DrawTeamInfo();
-#endif
 	}
 
 	// classic HUD: draw vote, lagometer, upper/lower corners, etc.
@@ -2505,20 +2478,10 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 
 	CG_DrawLagometer();
 
-#if FEAT_TA_UI
-#if FEAT_TA_UI
-	if (!cg_paused.integer) {
-		CG_DrawUpperRight(stereoFrame);
-	}
-#endif
-#else
 	CG_DrawUpperRight(stereoFrame);
-#endif
 
-#ifndef MISSIONPACK
 	CG_DrawLowerRight();
 	CG_DrawLowerLeft();
-#endif
 
 	if ( !CG_DrawFollow() ) {
 		CG_DrawWarmup();
@@ -2533,6 +2496,7 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 #if FEAT_STATS_WINDOW
 	/* floating window overlays (stats, votes, bot orders) — drawn last, on top of everything */
 	CG_windowDraw();
+#endif
 #endif
 }
 
@@ -2551,9 +2515,8 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 		return;
 	}
 
-#if FEAT_WIRED_UI
-	if ( !cg_wiredUI.integer )
-#endif
+
+#if FEAT_LEGACY_UI
 	{
 		if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR &&
 			( cg.snap->ps.pm_flags & PMF_SCOREBOARD ) ) {
@@ -2561,6 +2524,7 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 			return;
 		}
 	}
+#endif
 
 	// clear around the rendered view if sized down
 	CG_TileClear();

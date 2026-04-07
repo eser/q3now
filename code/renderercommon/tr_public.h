@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_types.h"
 #include "vulkan/vulkan.h"
 
+typedef struct bspFile_s bspFile_t;
+
 #define	REF_API_VERSION		9
 
 #if !defined(REF_FOG_TYPE_DEFINED)
@@ -70,7 +72,7 @@ typedef struct {
 	qhandle_t (*RegisterShader)( const char *name );
 	qhandle_t (*RegisterShaderNoMip)( const char *name );
 	qhandle_t (*RegisterMSDFShader)( const char *name, float distanceRange, int atlasWidth, int atlasHeight );
-	void	(*LoadWorld)( const char *name );
+	void	(*LoadWorld)( const bspFile_t *bsp );
 
 	// the vis data is a large enough block of data that we go to the trouble
 	// of sharing it with the clipmodel subsystem

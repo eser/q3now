@@ -1415,6 +1415,7 @@ int HuffmanGetSymbol( unsigned int* symbol, const byte* buffer, int bitIndex );
 
 // BSP format abstraction (FEAT_BSP_ABSTRACTION)
 void BSP_Init( void );
+void BSP_Shutdown( void );
 
 // Headless Lua scripting runtime (FEAT_LUA)
 #if FEAT_LUA

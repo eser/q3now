@@ -28,6 +28,22 @@ static snd_codec_t *codecs;
 
 static void S_CodecRegister( snd_codec_t *codec );
 
+static qboolean S_CodecPreferLegacy( void ) {
+	char profile[16];
+	int version;
+
+	Cvar_VariableStringBuffer( "com_mapAssetProfile", profile, sizeof( profile ) );
+	if ( !Q_stricmp( profile, "legacy" ) ) {
+		return qtrue;
+	}
+	if ( !Q_stricmp( profile, "modern" ) ) {
+		return qfalse;
+	}
+
+	version = Cvar_VariableIntegerValue( "com_mapBspVersion" );
+	return ( version > 0 && ( version <= 46 || version == 68 ) ) ? qtrue : qfalse;
+}
+
 /*
 =================
 S_CodecGetSound
@@ -82,6 +98,31 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 				// Something loaded
 				return rtn;
 			}
+		}
+	}
+
+	// Try and find a suitable match using all
+	// the sound codecs supported
+	if ( !*ext ) {
+		const char *preferredExt = S_CodecPreferLegacy() ? "wav" : "opus";
+		Com_sprintf( altName, sizeof( altName ), "%s.%s", localName, preferredExt );
+
+		for ( codec = codecs; codec; codec = codec->next ) {
+			if ( Q_stricmp( codec->ext, preferredExt ) ) {
+				continue;
+			}
+
+			if ( info ) {
+				rtn = codec->load( altName, info );
+			} else {
+				rtn = codec->open( altName );
+			}
+
+			if ( rtn ) {
+				return rtn;
+			}
+
+			break;
 		}
 	}
 

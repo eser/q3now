@@ -66,15 +66,8 @@ typedef struct {
 #define DS_MAX_WIDTH_IS_CHARS 0x0100
 #endif
 
-// ── font init / selection ─────────────────────────────────────────────
-
-void    WiredFont_Init( void );                         // load all fonts from .cfg files
-void    WiredFont_Select( int index );                  // switch active font by index
-int     WiredFont_IndexFromName( const char *name );    // "sansman" → 2, "elite" → 9, etc.
-
 // ── MSDF font integration ────────────────────────────────────────────
 // Load MSDF fonts (sansman, sansman-italic, oxanium, oxanium-medium, sharetechmono).
-// Call once after CG_LoadFonts().
 void            WiredFonts_InitMSDF( void );
 
 // Look up an MSDF font by name. Returns NULL for unknown/bitmap-only fonts.
@@ -90,33 +83,13 @@ const fontFace_t *WiredFont_Resolve(
 // hex color parsing
 qboolean CG_Hex16GetColor( const char *str, float *color );
 
-// font loading (internal, called from WiredFont_Init)
-void CG_LoadFonts( void );
-int  CG_FontIndexFromName( const char *name );
+// font name to unified Text_Draw font id (FONT_*)
+int  WiredFont_IdFromName( const char *name );
 
-// font-index-to-Text_Draw helpers
-int  WiredFont_ToFontId( int fontIndex );
+// DS_* conversion helpers
 int  WiredFont_ToAlignment( int dsFlags );
 int  WiredFont_ToTextFlags( int dsFlags );
 
-// ── TA font system (fontInfo_t-based, for v6/TA menu compatibility) ──
-//
-// These load fonts via re.RegisterFont() using .dat metric files + .tga atlases.
-// Three sizes: small (12pt), normal (16pt), big (20pt) — matching TA's assetGlobalDef.
-
-typedef enum {
-	TA_FONT_SMALL,     // 12pt — smallFont
-	TA_FONT_NORMAL,    // 16pt — font
-	TA_FONT_BIG,       // 20pt — bigFont
-	TA_FONT_COUNT
-} taFontSize_t;
-
-void          WiredUI_LoadTAFonts( void );
-fontInfo_t   *WiredUI_GetTAFont( taFontSize_t size );
-void          WiredUI_DrawText_TA( float x, float y, float scale, const vec4_t color,
-                  const char *text, int limit, int style, fontInfo_t *font );
-float         WiredUI_TextWidth_TA( const char *text, float scale, int limit, fontInfo_t *font );
-float         WiredUI_TextHeight_TA( const char *text, float scale, int limit, fontInfo_t *font );
 
 #endif // FEAT_WIRED_UI
 #endif // CL_WIRED_FONTS_H

@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+#include "../qcommon/maps/bsp.h"
 #include "../renderercommon/tr_public.h"
 #include "../qcommon/vm_local.h"
 #include "../cgame/cg_public.h"
@@ -340,6 +341,7 @@ typedef struct {
 	int			soundMuted;
 
 	qboolean	startCgame;
+	bspFile_t	*cgameBsp;
 
 	int			captureWidth;
 	int			captureHeight;
