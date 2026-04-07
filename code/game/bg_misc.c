@@ -24,7 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
-#include "bg_promode.h" // CPM
 
 
 float BG_GetArmorProtection( int armorClass ) {
@@ -816,21 +815,12 @@ qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTim
 	BG_EvaluateTrajectory( &item->pos, atTime, origin );
 
 	// we are ignoring ducked differences here
-#if FEAT_ITEMSIZES
 	if ( ps->origin[0] - origin[0] > ITEM_PICKUP_SIZE + 8
 		|| ps->origin[0] - origin[0] < -(ITEM_PICKUP_SIZE + 14)
 		|| ps->origin[1] - origin[1] > ITEM_PICKUP_SIZE
 		|| ps->origin[1] - origin[1] < -ITEM_PICKUP_SIZE
 		|| ps->origin[2] - origin[2] > ITEM_PICKUP_SIZE
 		|| ps->origin[2] - origin[2] < -ITEM_PICKUP_SIZE ) {
-#else
-	if ( ps->origin[0] - origin[0] > 44
-		|| ps->origin[0] - origin[0] < -50
-		|| ps->origin[1] - origin[1] > 36
-		|| ps->origin[1] - origin[1] < -36
-		|| ps->origin[2] - origin[2] > 36
-		|| ps->origin[2] - origin[2] < -36 ) {
-#endif
 		return qfalse;
 	}
 

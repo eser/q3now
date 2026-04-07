@@ -52,13 +52,13 @@ void CG_WiredHudPushState( void ) {
 	state.gametype      = cgs.gametype;
 	state.scores1       = cgs.scores1;
 	state.scores2       = cgs.scores2;
-	state.fraglimit     = cgs.fraglimit;
-	state.capturelimit  = cgs.capturelimit;
+	state.scorelimit    = cgs.scorelimit;
 	state.timelimit     = cgs.timelimit;
 	state.maxclients    = cgs.maxclients;
 	state.warmup        = cg.warmup;
 	state.levelStartTime = cgs.levelStartTime;
-	state.showScores    = cg.showScores;
+	state.showScores    = ( cg.showScores || ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR &&
+		  ( cg.snap->ps.pm_flags & PMF_SCOREBOARD ) ) );
 	state.demoPlayback  = cg.demoPlayback;
 	state.intermission  = ( cg.snap->ps.pm_type == PM_INTERMISSION );
 

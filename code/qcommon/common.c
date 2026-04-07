@@ -478,9 +478,6 @@ quake3 set test blah + map test
 static int	com_numConsoleLines;
 static char	*com_consoleLines[MAX_CONSOLE_LINES];
 
-// master rcon password
-char	rconPassword2[MAX_CVAR_VALUE_STRING];
-
 /*
 ==================
 Com_ParseCommandLine
@@ -497,7 +494,6 @@ static void Com_ParseCommandLine( char *commandLine ) {
 
 	inq = 0;
 	com_consoleLines[0] = commandLine;
-	rconPassword2[0] = '\0';
 
 	while ( *commandLine ) {
 		if (*commandLine == '"') {
@@ -575,11 +571,6 @@ qboolean Com_EarlyParseCmdLine( char *commandLine, char *con_title, int title_si
 		if ( !Q_stricmp( Cmd_Argv(0), "vid_ypos" ) ) {
 			*vid_ypos = atoi( Cmd_Argv( 1 ) );
 			flags |= 2;
-			continue;
-		}
-		if ( !Q_stricmpn( Cmd_Argv(0), "set", 3 ) && !Q_stricmp( Cmd_Argv(1), "rconPassword2" ) ) {
-			com_consoleLines[i][0] = '\0';
-			Q_strncpyz( rconPassword2, Cmd_Argv( 2 ), sizeof( rconPassword2 ) );
 			continue;
 		}
 	}
@@ -3814,8 +3805,8 @@ static const struct {
 	{ "SV_FPS",             "sv_fps" },
 	{ "DEDICATED",          "dedicated" },
 	{ "G_GAMETYPE",         "g_gametype" },
-	{ "G_FRAGLIMIT",        "fraglimit" },
-	{ "G_TIMELIMIT",        "timelimit" },
+	{ "G_SCORELIMIT",       "g_scorelimit" },
+	{ "G_TIMELIMIT",        "g_timelimit" },
 	{ "NET_PORT",           "net_port" },
 	{ "COM_HUNKMEGS",       "com_hunkmegs" },
 	{ "SV_QUIC",            "sv_quic" },
@@ -3824,7 +3815,7 @@ static const struct {
 	{ "SV_QUICSTATERATE",   "sv_quicStateRate" },
 	{ "SV_QUICEVENTRATE",   "sv_quicEventRate" },
 	{ "SV_QUICRECORD",      "sv_quicRecord" },
-	{ "RCONPASSWORD",       "rconPassword" },
+	{ "RCONPASSWORD",       "sv_wiredRconPassword" },
 	{ "LOGFILE",            "logfile" },
 	{ NULL, NULL }
 };
@@ -3864,7 +3855,7 @@ void Com_Init( char *commandLine ) {
 	// get the initial time base
 	Sys_Milliseconds();
 
-	Com_Printf( "%s %s %s\n", Q3_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
+	Com_Printf( "%s %s %s\n", Q3NOW_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
 
 	if ( Q_setjmp( abortframe ) ) {
 		Sys_Error ("Error during initialization");
@@ -3935,6 +3926,10 @@ void Com_Init( char *commandLine ) {
 
 	// initialize BSP format registry (FEAT_BSP_ABSTRACTION)
 	BSP_Init();
+
+#if FEAT_LUA
+	WiredScript_Init();
+#endif
 
 	com_logfile = Cvar_Get( "logfile", "0", CVAR_TEMP );
 	Cvar_CheckRange( com_logfile, "0", "4", CV_INTEGER );
@@ -4086,7 +4081,7 @@ void Com_Init( char *commandLine ) {
 
 	Help_Init();
 
-	s = va( "%s %s %s", Q3_VERSION, PLATFORM_STRING, __DATE__ );
+	s = va( "%s %s %s", Q3NOW_ENGINE_VERSION, PLATFORM_STRING, __DATE__ );
 	com_version = Cvar_Get( "version", s, CVAR_PROTECTED | CVAR_ROM | CVAR_SERVERINFO );
 	Cvar_SetDescription( com_version, "Read-only CVAR to see the version of the game." );
 
@@ -4134,6 +4129,10 @@ void Com_Init( char *commandLine ) {
 		CL_Init();
 		// Sys_ShowConsole( com_viewlog->integer, qfalse ); // moved down
 	}
+#endif
+
+#if FEAT_LUA
+	WiredScript_PostInit();
 #endif
 
 	// add + commands from command line
@@ -4695,6 +4694,10 @@ Com_Shutdown
 =================
 */
 static void Com_Shutdown( void ) {
+#if FEAT_LUA
+	WiredScript_Shutdown();
+#endif
+
 	if ( logfile != FS_INVALID_HANDLE ) {
 		FS_FCloseFile( logfile );
 		logfile = FS_INVALID_HANDLE;

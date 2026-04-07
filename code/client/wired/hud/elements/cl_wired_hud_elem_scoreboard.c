@@ -63,7 +63,7 @@ void WiredHud_DrawScorelistWidget( float ox, float oy, float ow, float oh,
 
 	int teamFilter = -1;
 
-	if ( !wiredHud || !wiredHud->valid || wiredHud->numScores <= 0 ) return;
+	if ( !wiredHud || !wiredHud->valid ) return;
 
 	if ( feederID == 0x05 /* red team feeder */ )  teamFilter = 1; /* red */
 	if ( feederID == 0x06 /* blue team feeder */ ) teamFilter = 2; /* blue */
@@ -651,7 +651,7 @@ void WiredHud_DrawDuelBoard( float ox, float oy, float ow, float oh )
 	float panelAlpha = 1.0f;
 	float centerX;
 
-	if ( !wiredHud || !wiredHud->valid || wiredHud->numScores < 1 ) return;
+	if ( !wiredHud || !wiredHud->valid ) return;
 
 	/* intermission timing */
 	if ( wiredHud->intermission ) {

@@ -24,7 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // perform the server side effects of a weapon firing
 
 #include "g_local.h"
-#include "bg_promode.h" // CPM
 
 extern void Attack_LightningGun_ChainArc( gentity_t *ent );
 

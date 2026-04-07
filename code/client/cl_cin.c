@@ -1305,7 +1305,7 @@ static void RoQShutdown( void ) {
 		cls.state = CA_DISCONNECTED;
 		// we can't just do a vstr nextmap, because
 		// if we are aborting the intro cinematic with
-		// a devmap command, nextmap would be valid by
+		// a map command, nextmap would be valid by
 		// the time it was referenced
 		s = Cvar_VariableString( "nextmap" );
 		if ( s[0] ) {

@@ -676,6 +676,14 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 	SV_SetConfigstring( CS_SERVERINFO, Cvar_InfoString( CVAR_SERVERINFO, NULL ) );
 	cvar_modifiedFlags &= ~CVAR_SERVERINFO;
 
+	if (sv_cheats->modified) {
+		sv_cheats->modified = qfalse;
+
+		if (!sv_cheats->integer) {
+			Cvar_CheatsWereDisabled();
+		}
+	}
+
 	// any media configstring setting now should issue a warning
 	// and any configstring changes should be reliably transmitted
 	// to all clients
@@ -713,8 +721,8 @@ void SV_Init( void )
 
 	// serverinfo vars
 	Cvar_Get ("g_noFootsteps", "0", CVAR_SERVERINFO);
-	Cvar_Get ("fraglimit", "20", CVAR_SERVERINFO);
-	Cvar_Get ("timelimit", "0", CVAR_SERVERINFO);
+	Cvar_Get ("g_scorelimit", "20", CVAR_SERVERINFO);
+	Cvar_Get ("g_timelimit", "0", CVAR_SERVERINFO);
 	sv_gametype = Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_LATCH );
 	Cvar_SetDescription( sv_gametype, "Set the gametype to mod." );
 	Cvar_Get ("sv_keywords", "", CVAR_SERVERINFO);
@@ -749,10 +757,11 @@ void SV_Init( void )
 	Cvar_SetDescription( sv_floodProtect, "Toggle server flood protection to keep players from bringing the server down." );
 
 	// systeminfo
-	Cvar_Get( "sv_cheats", "1", CVAR_SYSTEMINFO | CVAR_ROM );
 	sv_serverid = Cvar_Get( "sv_serverid", "0", CVAR_SYSTEMINFO | CVAR_ROM );
 	sv_pure = Cvar_Get( "sv_pure", "1", CVAR_SYSTEMINFO | CVAR_LATCH );
 	Cvar_SetDescription( sv_pure, "Requires clients to only get data from pk3 files the server is using." );
+	sv_cheats = Cvar_Get( "sv_cheats", "0", CVAR_SYSTEMINFO | CVAR_LATCH );
+	Cvar_SetDescription( sv_cheats, "Cheats!" );
 	Cvar_Get( "sv_paks", "", CVAR_SYSTEMINFO | CVAR_ROM );
 	Cvar_Get( "sv_pakNames", "", CVAR_SYSTEMINFO | CVAR_ROM );
 	Cvar_Get( "sv_referencedPaks", "", CVAR_SYSTEMINFO | CVAR_ROM );
@@ -760,8 +769,6 @@ void SV_Init( void )
 	Cvar_SetDescription( sv_referencedPakNames, "Variable holds a list of all the pk3 files the server loaded data from." );
 
 	// server vars
-	sv_rconPassword = Cvar_Get ("rconPassword", "", CVAR_TEMP );
-	Cvar_SetDescription( sv_rconPassword, "Password for remote server commands." );
 	sv_privatePassword = Cvar_Get ("sv_privatePassword", "", CVAR_TEMP );
 	Cvar_SetDescription( sv_privatePassword, "Set password for private clients to login with." );
 	sv_fps = Cvar_Get ("sv_fps", "20", CVAR_TEMP );
@@ -845,6 +852,8 @@ void SV_Init( void )
 	SV_TrackCvarChanges();
 
 	SV_InitChallenger();
+	Com_Memset( svs.rconSessions, 0, sizeof( svs.rconSessions ) );
+	SV_RconLua_Init();
 
 #if FEAT_QUIC_TRANSPORT
 	QUIC_Init();
@@ -918,6 +927,7 @@ void SV_Shutdown( const char *finalmsg ) {
 	SV_RemoveOperatorCommands();
 	SV_MasterShutdown();
 	SV_ShutdownGameProgs();
+	SV_RconLua_Shutdown();
 	SV_InitChallenger();
 
 	// free current level

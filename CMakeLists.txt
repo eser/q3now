@@ -310,7 +310,6 @@ list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
 list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
 AUX_SOURCE_DIRECTORY(code/client/wired/ui          CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/store       CLIENT_SRCS)
-AUX_SOURCE_DIRECTORY(code/client/wired/scripting   CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/hud         CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/hud/elements CLIENT_SRCS)
 # bg_misc.c needed by Wired UI HUD elements (BG_FindItemForPowerup, bg_itemlist)
@@ -547,9 +546,22 @@ IF(USE_LUA)
 	set_target_properties(luajit PROPERTIES IMPORTED_LOCATION ${LUAJIT_LIB})
 	add_dependencies(luajit luajit_build)
 
+	# Headless Lua runtime lives in qcommon/scripting/ — used by both client and dedicated server
+	AUX_SOURCE_DIRECTORY(code/qcommon/scripting QCOMMON_SCRIPTING_SRCS)
+	TARGET_SOURCES(qcommon PRIVATE ${QCOMMON_SCRIPTING_SRCS})
+	TARGET_SOURCES(qcommon_ded PRIVATE ${QCOMMON_SCRIPTING_SRCS})
+
+	# FEAT_LUA=1 globally — enables #if FEAT_LUA guards in qcommon, client, and dedicated
+	ADD_COMPILE_DEFINITIONS(FEAT_LUA=1)
+
+	# LuaJIT headers needed by qcommon (both targets) and client
+	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${LUAJIT_DIR}/src)
+	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${LUAJIT_DIR}/src)
 	TARGET_INCLUDE_DIRECTORIES(client PRIVATE ${LUAJIT_DIR}/src)
+
+	# Link LuaJIT to both client and dedicated server executables
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} luajit)
-	TARGET_COMPILE_DEFINITIONS(client PRIVATE FEAT_LUA=1)
+	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} luajit)
 
 	MESSAGE(STATUS "LuaJIT scripting enabled (FEAT_LUA)")
 ENDIF()
@@ -621,13 +633,13 @@ IF(BUILD_GAME_LIBRARIES OR BUILD_GAME_QVMS)
 	ELSE()
 		SET(COMMON_LIBRARIES m ${CMAKE_DL_LIBS})
 	ENDIF()
-	# PRODUCT_DATE: ioquake3 game code uses this for version stamping
+	# Q3NOW_GAMEDATE: ioquake3 game code uses this for version stamping
 	# Use target_compile_definitions instead of add_compile_definitions to avoid
 	# passing the date string (with spaces) to windres on Windows, which breaks.
-	STRING(TIMESTAMP PRODUCT_DATE "%b %d %Y" UTC)
-	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE PRODUCT_DATE="${PRODUCT_DATE}")
-	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE PRODUCT_DATE="${PRODUCT_DATE}")
-	TARGET_COMPILE_DEFINITIONS(client PRIVATE PRODUCT_DATE="${PRODUCT_DATE}")
+	STRING(TIMESTAMP Q3NOW_GAMEDATE "%b %d %Y" UTC)
+	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
+	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
+	TARGET_COMPILE_DEFINITIONS(client PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
 	# Release channel suffix (e.g. "-preview", "-canary", or "" for public)
 	IF(DEFINED CHANNEL_SUFFIX)
 		ADD_COMPILE_DEFINITIONS(CHANNEL_SUFFIX="${CHANNEL_SUFFIX}")

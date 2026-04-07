@@ -140,10 +140,10 @@ void G_RankRunFrame()
 		}
 
 		// don't let ranked games last forever
-		if( ((g_fraglimit.integer == 0) || (g_fraglimit.integer > 100)) && 
+		if( ((g_scorelimit.integer == 0) || (g_scorelimit.integer > 100)) && 
 			((g_timelimit.integer == 0) || (g_timelimit.integer > 1000)) )
 		{
-			trap_Cvar_Set( "timelimit", "1000" );
+			trap_Cvar_Set( "g_timelimit", "1000" );
 		}
 	}
 
@@ -1102,12 +1102,12 @@ void G_RankGameOver( void )
 	num = trap_Cvar_VariableIntegerValue("g_gametype");
 	trap_RankReportInt( -1, -1, QGR_KEY_GAMETYPE, num, 0 );
 	
-	// fraglimit
-	num = trap_Cvar_VariableIntegerValue("fraglimit");
-	trap_RankReportInt( -1, -1, QGR_KEY_FRAGLIMIT, num, 0 );
+	// scorelimit
+	num = trap_Cvar_VariableIntegerValue("g_scorelimit");
+	trap_RankReportInt( -1, -1, QGR_KEY_SCORELIMIT, num, 0 );
 	
 	// timelimit
-	num = trap_Cvar_VariableIntegerValue("timelimit");
+	num = trap_Cvar_VariableIntegerValue("g_timelimit");
 	trap_RankReportInt( -1, -1, QGR_KEY_TIMELIMIT, num, 0 );
 
 	// maxclients

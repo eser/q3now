@@ -1230,9 +1230,9 @@ static void Con_DrawSolidConsole( float frac ) {
 	// draw the version number
 	{
 		float verVX = Con_NativeToVirtualX( (float)cls.glconfig.vidWidth
-		              - ( ARRAY_LEN( Q3_VERSION ) ) * con_textNativeCharW );
+		              - ( ARRAY_LEN( Q3NOW_ENGINE_VERSION ) ) * con_textNativeCharW );
 		float verVY = Con_NativeToVirtualY( (float)(lines - smallchar_height) );
-		Text_Draw( Q3_VERSION, verVX, verVY, FONT_MONO,
+		Text_Draw( Q3NOW_ENGINE_VERSION, verVX, verVY, FONT_MONO,
 		           con_textPointSize, colorWhite, TEXT_ALIGN_LEFT, 0 );
 	}
 

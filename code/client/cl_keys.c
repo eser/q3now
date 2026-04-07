@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/ui/cl_wired_fonts.h"
 #include "wired/ui/cl_wired_text.h"
 #if FEAT_LUA
-#include "wired/scripting/cl_wired_scripting.h"
+#include "../qcommon/scripting/wired_scripting.h"
 #endif
 
 /*

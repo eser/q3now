@@ -478,24 +478,24 @@ void CG_CheckLocalSounds( playerState_t *ps, playerState_t *ops ) {
 		}
 	}
 
-	// fraglimit warnings
-	if ( cgs.fraglimit > 0 && cgs.gametype < GT_CTF) {
+	// scorelimit warnings
+	if ( cgs.scorelimit > 0 && cgs.gametype < GT_CTF) {
 		highScore = cgs.scores1;
 
 		if (cgs.gametype == GT_TDM && cgs.scores2 > highScore) {
 			highScore = cgs.scores2;
 		}
 
-		if ( !( cg.fraglimitWarnings & 4 ) && highScore == (cgs.fraglimit - 1) ) {
-			cg.fraglimitWarnings |= 1 | 2 | 4;
+		if ( !( cg.scorelimitWarnings & 4 ) && highScore == (cgs.scorelimit - 1) ) {
+			cg.scorelimitWarnings |= 1 | 2 | 4;
 			CG_AddBufferedSound(cgs.media.oneFragSound);
 		}
-		else if ( cgs.fraglimit > 2 && !( cg.fraglimitWarnings & 2 ) && highScore == (cgs.fraglimit - 2) ) {
-			cg.fraglimitWarnings |= 1 | 2;
+		else if ( cgs.scorelimit > 2 && !( cg.scorelimitWarnings & 2 ) && highScore == (cgs.scorelimit - 2) ) {
+			cg.scorelimitWarnings |= 1 | 2;
 			CG_AddBufferedSound(cgs.media.twoFragSound);
 		}
-		else if ( cgs.fraglimit > 3 && !( cg.fraglimitWarnings & 1 ) && highScore == (cgs.fraglimit - 3) ) {
-			cg.fraglimitWarnings |= 1;
+		else if ( cgs.scorelimit > 3 && !( cg.scorelimitWarnings & 1 ) && highScore == (cgs.scorelimit - 3) ) {
+			cg.scorelimitWarnings |= 1;
 			CG_AddBufferedSound(cgs.media.threeFragSound);
 		}
 	}

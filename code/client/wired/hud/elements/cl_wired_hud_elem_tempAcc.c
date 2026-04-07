@@ -42,7 +42,7 @@ void CG_SHUDElementTempAccRoutine( void *context ) {
 	superhudGlobalContext_t *ctx = CG_SHUDGetContext();
 	int wp;
 	float acc;
-	int fadeTime = 3000;  // fade after 3 seconds of no updates
+	int fadeTime = 1500;  // fade after 3 seconds of no updates
 
 	if ( !element ) return;
 

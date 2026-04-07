@@ -22,7 +22,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
-#include "bg_promode.h" // CPM
 
 
 /*
@@ -234,11 +233,7 @@ void	G_TouchTriggers( gentity_t *ent ) {
 	gentity_t	*hit;
 	trace_t		trace;
 	vec3_t		mins, maxs;
-#if FEAT_ITEMSIZES
 	vec3_t		range = { ITEM_PICKUP_SIZE + 14, ITEM_PICKUP_SIZE + 4, ITEM_PICKUP_SIZE + 16 };
-#else
-	static vec3_t	range = { 40, 40, 52 };
-#endif
 
 	if ( !ent->client ) {
 		return;

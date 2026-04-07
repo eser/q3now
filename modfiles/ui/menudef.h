@@ -205,7 +205,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define CG_VOICE_NAME 63
 #define CG_PLAYER_HASFLAG2D 64
 #define CG_HARVESTER_SKULLS2D 65					// only shows in harvester
-#define CG_CAPFRAGLIMIT 66
+#define CG_CAPSCORELIMIT 66
 #define CG_1STPLACE 67
 #define CG_2NDPLACE 68
 #define CG_CAPTURES 69

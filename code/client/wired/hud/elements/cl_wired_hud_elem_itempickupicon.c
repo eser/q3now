@@ -23,7 +23,7 @@ void* CG_SHUDElementItemPickupIconCreate(const superhudConfig_t* config)
 	if (!element->config.time.isSet)
 	{
 		element->config.time.isSet = qtrue;
-		element->config.time.value = 1000;
+		element->config.time.value = 1500;
 	}
 
 	return element;

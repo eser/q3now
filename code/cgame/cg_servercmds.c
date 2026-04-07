@@ -25,7 +25,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // be a valid snapshot this frame
 
 #include "cg_local.h"
-#include "../game/bg_promode.h" // CPM
 #include "../qcommon/menudef.h"
 
 typedef struct {
@@ -213,11 +212,10 @@ void CG_ParseServerinfo( void ) {
 	info = CG_ConfigString( CS_SERVERINFO );
 	cgs.gametype = atoi( Info_ValueForKey( info, "g_gametype" ) );
 	trap_Cvar_Set("g_gametype", va("%i", cgs.gametype));
-	cgs.g_noFootsteps = atoi( Info_ValueForKey( info, "g_noFootsteps" ) );
-	cgs.g_kothGhosts = atoi( Info_ValueForKey( info, "g_kothGhosts" ) );
-	cgs.fraglimit = atoi( Info_ValueForKey( info, "fraglimit" ) );
-	cgs.capturelimit = atoi( Info_ValueForKey( info, "capturelimit" ) );
-	cgs.timelimit = atoi( Info_ValueForKey( info, "timelimit" ) );
+	cgs.noFootsteps = atoi( Info_ValueForKey( info, "g_noFootsteps" ) );
+	cgs.kothGhosts = atoi( Info_ValueForKey( info, "g_kothGhosts" ) );
+	cgs.scorelimit = atoi( Info_ValueForKey( info, "g_scorelimit" ) );
+	cgs.timelimit = atoi( Info_ValueForKey( info, "g_timelimit" ) );
 	cgs.maxclients = atoi( Info_ValueForKey( info, "sv_maxclients" ) );
 	mapname = Info_ValueForKey( info, "mapname" );
 	Com_sprintf( cgs.mapname, sizeof( cgs.mapname ), "maps/%s.bsp", mapname );
@@ -515,9 +513,9 @@ static void CG_MapRestart( void ) {
 	CG_ClearParticles ();
 
 	// make sure the "3 frags left" warnings play again
-	cg.fraglimitWarnings = 0;
-
+	cg.scorelimitWarnings = 0;
 	cg.timelimitWarnings = 0;
+
 	cg.rewardTime = 0;
 	cg.rewardStack = 0;
 	cg.intermissionStarted = qfalse;

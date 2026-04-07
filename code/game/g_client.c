@@ -21,7 +21,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
-#include "bg_promode.h" // CPM
 
 // g_client.c -- client functions that don't happen every frame
 
@@ -1025,7 +1024,7 @@ void ClientBegin( int clientNum ) {
 	client->ps.eFlags = flags;
 
     if (g_gametype.integer == GT_LASTMANSTANDING) {
-        ent->client->ps.persistant[PERS_SCORE] = level.initialFraglimit;
+        ent->client->ps.persistant[PERS_SCORE] = level.initialScorelimit;
         // client->sess.sessionTeam = TEAM_FREE;
     }
 

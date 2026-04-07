@@ -23,7 +23,7 @@ Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_loading_ui.c -- main loading screen renderer
 //
 // Layout (viewport-relative):
-//   Top bar (5.8%):       q3now · gametype · fraglimit · timelimit
+//   Top bar (5.8%):       q3now · gametype · scorelimit · timelimit
 //   Left panel (52%):     BSP wireframe preview with entity markers
 //   Right panel (48%):    Map info, streaming rows, overall bar, Vulkan badge
 
@@ -302,7 +302,7 @@ Loading_DrawTopBar
 Semi-transparent dark bar at top with game info.
 y=0, h=28.
 Left: "q3now" in accent color.
-Middle: gametype · fraglimit · timelimit.
+Middle: gametype · scorelimit · timelimit.
 Right: bot difficulty dots if g_autoBots is active.
 ================
 */
@@ -317,7 +317,7 @@ static void Loading_DrawTopBar( void ) {
 	vec4_t muted = { 1.0f, 1.0f, 1.0f, 0.5f };
 	char info[256];
 	const char *gtName;
-	int fraglimit, timelimit, gt;
+	int scorelimit, timelimit, gt;
 	float px;
 
 	// Dark semi-transparent bar
@@ -329,8 +329,8 @@ static void Loading_DrawTopBar( void ) {
 
 	// Separator dot and gametype + limits
 	gt = Cvar_VariableIntegerValue( "g_gametype" );
-	fraglimit = Cvar_VariableIntegerValue( "fraglimit" );
-	timelimit = Cvar_VariableIntegerValue( "timelimit" );
+	scorelimit = Cvar_VariableIntegerValue( "g_scorelimit" );
+	timelimit = Cvar_VariableIntegerValue( "g_timelimit" );
 
 	if ( gt >= 0 && gt < GT_MAX_GAME_TYPE ) {
 		gtName = bg_gametypelist[gt].name;
@@ -339,11 +339,11 @@ static void Loading_DrawTopBar( void ) {
 	}
 
 	// Build info string with pipe separators (bitmap font has no middle dot)
-	if ( fraglimit > 0 && timelimit > 0 ) {
-		Com_sprintf( info, sizeof( info ), "| %s | fraglimit %d | timelimit %d",
-					 gtName, fraglimit, timelimit );
-	} else if ( fraglimit > 0 ) {
-		Com_sprintf( info, sizeof( info ), "| %s | fraglimit %d", gtName, fraglimit );
+	if ( scorelimit > 0 && timelimit > 0 ) {
+		Com_sprintf( info, sizeof( info ), "| %s | scorelimit %d | timelimit %d",
+					 gtName, scorelimit, timelimit );
+	} else if ( scorelimit > 0 ) {
+		Com_sprintf( info, sizeof( info ), "| %s | scorelimit %d", gtName, scorelimit );
 	} else if ( timelimit > 0 ) {
 		Com_sprintf( info, sizeof( info ), "| %s | timelimit %d", gtName, timelimit );
 	} else {

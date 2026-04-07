@@ -26,7 +26,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "bg_local.h"
-#include "bg_promode.h" // CPM
 
 pmove_t		*pm;
 pml_t		pml;
@@ -36,23 +35,61 @@ float	pm_stopspeed = 100.0f;
 float	pm_duckScale = 0.25f;
 float	pm_swimScale = 0.50f;
 
-float	pm_accelerate = 10.0f;
+float	pm_accelerate = 15.0f;
 float	pm_airaccelerate = 1.0f;
 float	pm_wateraccelerate = 4.0f;
 float	pm_flyaccelerate = 8.0f;
 
-float	pm_friction = 6.0f;
+float	pm_friction = 8.0f;
 float	pm_waterfriction = 1.0f;
 float	pm_flightfriction = 3.0f;
 float	pm_spectatorfriction = 5.0f;
+
+float   pm_jump_z = 100; // enable double-jump
+int     pm_walljumps = 1;
+
+// Physics
+float	pm_airstopaccelerate = 2.5;
+float	pm_aircontrol = 150;
+float	pm_strafeaccelerate = 70;
+float	pm_wishspeed = 30;
+
+// Weapon switching
+float	pm_weapondrop = 0; // 200;
+float	pm_weaponraise = 250;
+float	pm_outofammodelay = 500;
+
+// Backpacks
+int		pm_backpacks = 1;
+
+// Radius Damage Fix
+int		pm_radiusdamagefix = 1;
+
+// Respawn delay
+float	pm_clientrespawndelay = 1700;
+
+// Lava damage
+float	pm_lavadamage = 30;
+float	pm_slimedamage = 10;
+float	pm_lavafrequency = 700;
 
 int		c_pmove = 0;
 
 
 /*
 ===============
-PM_AddEvent
+PM_UpdateSettings
+===============
+*/
+void PM_UpdateSettings(int gametype)
+{
+	pm_backpacks = 1;
+}
 
+
+/*
+===============
+PM_AddEvent
 ===============
 */
 void PM_AddEvent( int newEvent ) {
@@ -276,6 +313,39 @@ static void PM_Accelerate( vec3_t wishdir, float wishspeed, float accel ) {
 #endif
 }
 
+/*
+==================
+PM_Aircontrol
+==================
+*/
+void PM_Aircontrol(pmove_t *pm, vec3_t wishdir, float wishspeed)
+{
+    float	zspeed, speed, dot, k;
+    int		i;
+
+    if ((pm->ps->movementDir && pm->ps->movementDir != 4) || wishspeed == 0.0)
+        return; // can't control movement if not moveing forward or backward
+
+    zspeed = pm->ps->velocity[2];
+    pm->ps->velocity[2] = 0;
+    speed = VectorNormalize(pm->ps->velocity);
+
+    dot = DotProduct(pm->ps->velocity, wishdir);
+    k = 32;
+    k *= pm_aircontrol*dot*dot*pml.frametime;
+
+
+    if (dot > 0) {	// we can't change direction while slowing down
+        for (i = 0; i < 2; i++)
+            pm->ps->velocity[i] = pm->ps->velocity[i] * speed + wishdir[i] * k;
+        VectorNormalize(pm->ps->velocity);
+    }
+
+    for (i = 0; i < 2; i++)
+        pm->ps->velocity[i] *= speed;
+
+    pm->ps->velocity[2] = zspeed;
+}
 
 
 /*
@@ -380,15 +450,14 @@ static qboolean PM_CheckJump( void ) {
 	pm->ps->groundEntityNum = ENTITYNUM_NONE;
 	pm->ps->velocity[2] = JUMP_VELOCITY;
 
-    // CPM: check for double-jump
-    if (cpm_pm_jump_z) {
+    // PM: check for double-jump
+    if (pm_jump_z) {
         if (pm->ps->stats[STAT_JUMPTIME] > 0) {
-            pm->ps->velocity[2] += cpm_pm_jump_z;
+            pm->ps->velocity[2] += pm_jump_z;
         }
 
         pm->ps->stats[STAT_JUMPTIME] = 400;
     }
-    // !CPM
 
     PM_AddEvent( EV_JUMP );
 
@@ -741,29 +810,27 @@ static void PM_AirMove(pmove_t *pmove) {
 	wishspeed = VectorNormalize(wishdir);
 	wishspeed *= scale;
 
-    // CPM: Air Control
+    // PM: Air Control
     wishspeed2 = wishspeed;
     if (DotProduct(pm->ps->velocity, wishdir) < 0)
-        accel = cpm_pm_airstopaccelerate;
+        accel = pm_airstopaccelerate;
     else
         accel = pm_airaccelerate;
     if (pm->ps->movementDir == 2 || pm->ps->movementDir == 6)
     {
-        if (wishspeed > cpm_pm_wishspeed)
-            wishspeed = cpm_pm_wishspeed;
-        accel = cpm_pm_strafeaccelerate;
+        if (wishspeed > pm_wishspeed)
+            wishspeed = pm_wishspeed;
+        accel = pm_strafeaccelerate;
     }
-    // !CPM
 
 	// not on ground, so little effect on velocity
 	// PM_Accelerate (wishdir, wishspeed, pm_airaccelerate);
 
-    // CPM: Air control
+    // PM: Air control
     PM_Accelerate(wishdir, wishspeed, accel);
-    if (cpm_pm_aircontrol) {
-        CPM_PM_Aircontrol(pm, wishdir, wishspeed2);
+    if (pm_aircontrol) {
+        PM_Aircontrol(pm, wishdir, wishspeed2);
     }
-    // !CPM
 
 	// we may have a ground plane that is very steep, even
 	// though we don't have a groundentity
@@ -1132,11 +1199,9 @@ static void PM_CrashLand( void ) {
 		// } else {
 		//	PM_AddEvent( PM_FootstepForSurface() );
 		// }
-        // CPM
         } else if (!pm->noFootsteps) {
             PM_AddEvent(PM_FootstepForSurface());
         }
-        // !CPM
 	}
 
 	// start footstep cycle over
@@ -1651,8 +1716,8 @@ static void PM_BeginWeaponChange( int weapon ) {
     }
 #endif
 
-	if (cpm_weapondrop > 0) {
-        pm->ps->weaponTime += cpm_weapondrop;
+	if (pm_weapondrop > 0) {
+        pm->ps->weaponTime += pm_weapondrop;
 
         PM_StartTorsoAnim(TORSO_DROP);
     }
@@ -1699,8 +1764,8 @@ static void PM_FinishWeaponChange( void ) {
 	pm->ps->weapon = weapon;
 	pm->ps->weaponstate = WEAPON_RAISING;
 
-    if (cpm_weaponraise > 0) {
-        pm->ps->weaponTime += cpm_weaponraise;
+    if (pm_weaponraise > 0) {
+        pm->ps->weaponTime += pm_weaponraise;
         PM_StartTorsoAnim(TORSO_RAISE);
     }
 }
@@ -1773,7 +1838,7 @@ qboolean PM_MG_Burst_Think( pmove_t *pm ) {
 	if ( !pm->ps->ammo[ pm->ps->weapon ] ) {
 		pm->ps->burstRoundsRemaining = 0;
 		PM_AddEvent( EV_NOAMMO );
-		pm->ps->weaponTime += cpm_outofammodelay;
+		pm->ps->weaponTime += pm_outofammodelay;
 		PM_OutOfAmmoChange();
 		return qtrue;
 	}
@@ -2071,12 +2136,11 @@ static void PM_Weapon( void ) {
 		pm->ps->pm_flags &= ~PMF_USE_ITEM_HELD;
 	}
 
-    // CPM: Fix railgun switch
+    // PM: Fix railgun switch
     if (pm->ps->stats[STAT_RAILTIME] > 0)
     {
         pm->ps->stats[STAT_RAILTIME] -= pml.msec;
     }
-    // !CPM
 
 	// make weapon function
 	if ( pm->ps->weaponTime > 0 ) {
@@ -2133,14 +2197,13 @@ static void PM_Weapon( void ) {
         return;
     }
 
-    // CPM
+    // PM
     if (pm->ps->weapon == WP_RAILGUN && pm->ps->stats[STAT_RAILTIME] > 0) {
         return;
     }
-    // !CPM
 
 	if ( pm->ps->weaponstate == WEAPON_RAISING ) {
-        // CPM: allow weapon switch settings
+        // PM: allow weapon switch settings
         if ((pm->ps->weapon == WP_RAILGUN) && (pm->ps->stats[STAT_RAILTIME] > 0))
         {
             // the player has switched back to railgun before it has reloaded
@@ -2149,7 +2212,6 @@ static void PM_Weapon( void ) {
             pm->ps->weaponstate = WEAPON_FIRING;
             return;
         }
-        // !CPM
 
 		pm->ps->weaponstate = WEAPON_READY;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
@@ -2203,8 +2265,7 @@ static void PM_Weapon( void ) {
 	// check for out of ammo
 	if ( ! pm->ps->ammo[ pm->ps->weapon ] ) {
 		PM_AddEvent( EV_NOAMMO );
-		// pm->ps->weaponTime += 500;
-        pm->ps->weaponTime += cpm_outofammodelay; // CPM: Shorter delay in pro mode
+        pm->ps->weaponTime += pm_outofammodelay;
 		PM_OutOfAmmoChange();
 		return;
 	}
@@ -2521,11 +2582,10 @@ void PmoveSingle (pmove_t *pmove) {
 
 	PM_DropTimers();
 
-    // CPM: Double-jump timer
+    // PM: Double-jump timer
     if (pm->ps->stats[STAT_JUMPTIME] > 0) {
         pm->ps->stats[STAT_JUMPTIME] -= pml.msec;
     }
-    // !CPM
 
 #if FEAT_PW_INVULNERABILITY
 	if ( pm->ps->powerups[PW_INVULNERABILITY] ) {

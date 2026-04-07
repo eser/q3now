@@ -21,7 +21,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
-#include "bg_promode.h" // CPM
 
 /*
 
@@ -172,7 +171,7 @@ int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 	int		quantity;
 
-    // CPM: Check for backpack
+    // PM: Check for backpack
     if (ent->s.eFlags & EF_BACKPACK)
     {
         int a1, a2, a3, a4, a5, a6, a7;
@@ -210,7 +209,6 @@ int Pickup_Weapon (gentity_t *ent, gentity_t *other) {
 
         return 1; // this value doesn't matter, only it isn't 0
     }
-    // !CPM
 
 	// dropped items
     if (ent->s.eFlags & EF_DROPPED_ITEM) {
@@ -310,7 +308,7 @@ void RespawnItem( gentity_t *ent ) {
 	ent->r.contents = CONTENTS_TRIGGER;
 	ent->s.eFlags &= ~EF_NODRAW;
 	ent->r.svFlags &= ~SVF_NOCLIENT;
-    ent->s.eFlags &= ~EF_BACKPACK; // CPM: Make sure the item no longer is a backpack
+    ent->s.eFlags &= ~EF_BACKPACK; // PM: Make sure the item no longer is a backpack
 	trap_LinkEntity (ent);
 
 	if ( ent->item->giType == IT_POWERUP ) {

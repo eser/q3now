@@ -26,9 +26,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // q_shared.h -- included first by ALL program modules.
 // A user mod should never modify this file
 
-#define Q3_VERSION            "q3now 0.80"
-#ifndef Q3_RELEASE_VERSION
-  #define Q3_RELEASE_VERSION Q3_VERSION
+#define Q3NOW_ENGINE_VERSION  "q3now 0.80"
+#ifndef Q3NOW_ENGINE_RELEASE_VERSION
+  #define Q3NOW_ENGINE_RELEASE_VERSION Q3NOW_ENGINE_VERSION
 #endif
 #ifdef CHANNEL_SUFFIX
 #define CLIENT_WINDOW_TITLE   "q3now" CHANNEL_SUFFIX

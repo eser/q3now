@@ -25,7 +25,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "cg_modern_private.h"
-#include "../game/bg_promode.h" // CPM
 
 int drawTeamOverlayModificationCount = -1;
 
@@ -949,11 +948,7 @@ static float CG_DrawScores( float y ) {
 			}
 		}
 
-		if ( cgs.gametype >= GT_CTF ) {
-			v = cgs.capturelimit;
-		} else {
-			v = cgs.fraglimit;
-		}
+		v = cgs.scorelimit;
 		if ( v ) {
 			s = va( "%2i", v );
 			w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH + 8;
@@ -1015,8 +1010,8 @@ static float CG_DrawScores( float y ) {
 			trap_R_DrawTextNorm( s, (float)(x + 4) * NORM_HSCALE, (float)y * NORM_VSCALE, FONT_DISPLAY, (float)BIGCHAR_HEIGHT * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 		}
 
-		if ( cgs.fraglimit ) {
-			s = va( "%2i", cgs.fraglimit );
+		if ( cgs.scorelimit ) {
+			s = va( "%2i", cgs.scorelimit );
 			w = CG_DrawStrlen( s ) * BIGCHAR_WIDTH + 8;
 			x -= w;
 			trap_R_DrawTextNorm( s, (float)(x + 4) * NORM_HSCALE, (float)y * NORM_VSCALE, FONT_DISPLAY, (float)BIGCHAR_HEIGHT * NORM_VSCALE, colorWhite, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
@@ -2046,7 +2041,7 @@ static qboolean CG_DrawScoreboard( void ) {
 	}
 
 	// don't draw scoreboard during death while warmup up
-	if ( cg.warmup && !cg.showScores ) {
+	if ( !cg.showScores ) {
 		return qfalse;
 	}
 
@@ -2556,11 +2551,15 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 		return;
 	}
 
-	// optionally draw the tournement scoreboard instead
-	if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR &&
-		( cg.snap->ps.pm_flags & PMF_SCOREBOARD ) ) {
-		CG_DrawDuelScoreboard();
-		return;
+#if FEAT_WIRED_UI
+	if ( !cg_wiredUI.integer )
+#endif
+	{
+		if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR &&
+			( cg.snap->ps.pm_flags & PMF_SCOREBOARD ) ) {
+			CG_DrawDuelScoreboard();
+			return;
+		}
 	}
 
 	// clear around the rendered view if sized down

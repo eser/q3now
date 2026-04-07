@@ -179,13 +179,6 @@ static void SV_Map_f( void ) {
 	// force latched values to get set
 	Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_USERINFO | CVAR_LATCH );
 
-	cmd = Cmd_Argv(0);
-	if ( !Q_stricmp( cmd, "devmap" ) ) {
-		cheat = qtrue;
-	} else {
-		cheat = qfalse;
-	}
-
 	// save the map name here cause on a map restart we reload the q3config.cfg
 	// and thus nuke the arguments of the map command
 	Q_strncpyz(mapname, map, sizeof(mapname));
@@ -193,16 +186,6 @@ static void SV_Map_f( void ) {
 	// start up the map
 	// FIXME(@eser) second argument "killBots" should be enabled in single player
 	SV_SpawnServer( mapname, qfalse );
-
-	// set the cheat value
-	// if the level was started with "map <levelname>", then
-	// cheats will not be allowed.  If started with "devmap <levelname>"
-	// then cheats will be allowed
-	if ( cheat ) {
-		Cvar_Set( "sv_cheats", "1" );
-	} else {
-		Cvar_Set( "sv_cheats", "0" );
-	}
 }
 
 
@@ -242,7 +225,7 @@ static void SV_MapRestart_f( void ) {
 		delay = 5;
 	}
 
-	if ( delay != 0 && Cvar_VariableIntegerValue( "g_doWarmup" ) == 0 ) {
+	if ( delay != 0 && Cvar_VariableIntegerValue( "g_minPlayers" ) == 0 ) {
 		sv.restartTime = sv.time + delay * 1000;
 		if ( sv.restartTime == 0 ) {
 			sv.restartTime = 1;
@@ -1592,14 +1575,6 @@ void SV_AddOperatorCommands( void ) {
 	Cmd_AddCommand ("sectorlist", SV_SectorList_f);
 	Cmd_AddCommand ("map", SV_Map_f);
 	Cmd_SetCommandCompletionFunc( "map", SV_CompleteMapName );
-#ifndef PRE_RELEASE_DEMO
-	Cmd_AddCommand ("devmap", SV_Map_f);
-	Cmd_SetCommandCompletionFunc( "devmap", SV_CompleteMapName );
-	Cmd_AddCommand ("spmap", SV_Map_f);
-	Cmd_SetCommandCompletionFunc( "spmap", SV_CompleteMapName );
-	Cmd_AddCommand ("spdevmap", SV_Map_f);
-	Cmd_SetCommandCompletionFunc( "spdevmap", SV_CompleteMapName );
-#endif
 	Cmd_AddCommand ("killserver", SV_KillServer_f);
 #ifdef USE_BANS	
 	Cmd_AddCommand("rehashbans", SV_RehashBans_f);

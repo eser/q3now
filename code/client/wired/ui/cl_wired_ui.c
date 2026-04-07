@@ -16,7 +16,6 @@ code/ui/ui_shared.c in subsequent phases.
 #include "cl_wired_draw.h"
 #include "cl_wired_store.h"
 #include "cl_wired_theme.h"
-#include "cl_wired_scripting.h"
 #include "../../../qcommon/menudef.h"
 
 #if FEAT_WIRED_UI
@@ -745,11 +744,6 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// Phase 4: semantic state theme system
 	WiredTheme_Init();
 
-#if FEAT_LUA
-	// Phase 5: LuaJIT scripting (REPL console, cvar bridge, store API)
-	WiredScript_Init();
-#endif
-
 	// hot reload commands
 	Cmd_AddCommand( "hud_reload", WiredUI_ReloadHud );
 	Cmd_AddCommand( "menu_reload", WiredUI_ReloadMenus );
@@ -871,9 +865,6 @@ void WiredUI_Shutdown( void ) {
 		Cvar_Set( "wired_activeMenuSaved", va( "%d", wired_activeMenu ) );
 	}
 
-#if FEAT_LUA
-	WiredScript_Shutdown();
-#endif
 	WiredTheme_Shutdown();
 	WiredHud_DestroyAllElements();
 	Cmd_RemoveCommand( "hud_reload" );
@@ -1931,7 +1922,7 @@ static void WiredScript_SetFocus( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 void WiredUI_UpdateMapPoolButton( void );
 
 // ── per-gametype cvar persistence ─────────────────────────────────────
-// Saves/restores fraglimit, timelimit, capturelimit, friendlyfire when
+// Saves/restores scorelimit, timelimit, friendlyfire when
 // switching game types — same pattern as q3_ui's ServerOptions_Cache.
 
 int wired_lastSavedGameType = -1;
@@ -1950,10 +1941,9 @@ void WiredUI_SaveGameTypeSettings( void ) {
 		default: return;
 	}
 
-	Cvar_Set( va( "%s_fraglimit", prefix ), Cvar_VariableString( "fraglimit" ) );
-	Cvar_Set( va( "%s_timelimit", prefix ), Cvar_VariableString( "timelimit" ) );
-	if ( gt == 6 ) Cvar_Set( "ui_ctf_capturelimit", Cvar_VariableString( "capturelimit" ) );
-	if ( gt >= 5 ) Cvar_Set( va( "%s_friendly", prefix ), Cvar_VariableString( "g_friendlyfire" ) );
+	Cvar_Set( va( "%s_g_scorelimit", prefix ), Cvar_VariableString( "g_scorelimit" ) );
+	Cvar_Set( va( "%s_g_timelimit", prefix ), Cvar_VariableString( "g_timelimit" ) );
+	if ( gt >= 5 ) Cvar_Set( va( "%s_g_friendlyfire", prefix ), Cvar_VariableString( "g_friendlyfire" ) );
 
 	// save map rotation per gametype
 	{
@@ -1981,19 +1971,14 @@ void WiredUI_LoadGameTypeSettings( void ) {
 	}
 
 	// restore saved values — use "0" default when cvar was never saved
-	Cvar_VariableStringBuffer( va( "%s_fraglimit", prefix ), buf, sizeof( buf ) );
-	Cvar_Set( "fraglimit", buf[0] ? buf : "0" );
+	Cvar_VariableStringBuffer( va( "%s_g_scorelimit", prefix ), buf, sizeof( buf ) );
+	Cvar_Set( "g_scorelimit", buf[0] ? buf : "0" );
 
-	Cvar_VariableStringBuffer( va( "%s_timelimit", prefix ), buf, sizeof( buf ) );
-	Cvar_Set( "timelimit", buf[0] ? buf : "0" );
-
-	if ( gt == 6 ) {
-		Cvar_VariableStringBuffer( "ui_ctf_capturelimit", buf, sizeof( buf ) );
-		Cvar_Set( "capturelimit", buf[0] ? buf : "8" );
-	}
+	Cvar_VariableStringBuffer( va( "%s_g_timelimit", prefix ), buf, sizeof( buf ) );
+	Cvar_Set( "g_timelimit", buf[0] ? buf : "0" );
 
 	if ( gt >= 5 ) {
-		Cvar_VariableStringBuffer( va( "%s_friendly", prefix ), buf, sizeof( buf ) );
+		Cvar_VariableStringBuffer( va( "%s_g_friendlyfire", prefix ), buf, sizeof( buf ) );
 		Cvar_Set( "g_friendlyfire", buf[0] ? buf : "0" );
 	}
 
@@ -2205,8 +2190,8 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 	WiredUI_SaveGameTypeSettings();
 
 	// apply server cvars from menu selections
-	// cvar-bound items (fraglimit, timelimit, capturelimit, sv_maxclients,
-	// sv_pure, sv_allowDownload, g_doWarmup, g_friendlyfire,
+	// cvar-bound items (scorelimit, timelimit, sv_maxclients,
+	// sv_pure, sv_allowDownload, g_minPlayers, g_friendlyfire,
 	// g_teamForceBalance, g_allowvote) are set directly by menu items
 	Cvar_Set( "g_gametype", Cvar_VariableString( "ui_netGameType" ) );
 

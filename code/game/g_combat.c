@@ -23,7 +23,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_combat.c
 
 #include "g_local.h"
-#include "bg_promode.h" // CPM
 
 #if FEAT_BOT_IMPROVEMENTS
 void BotAutoCalibrate_RecordKill( int attacker, int victim );
@@ -137,15 +136,14 @@ void TossClientItems( gentity_t *self ) {
 
     // CPM
     if (g_gametype.integer != GT_KINGOFTHEHILL && weapon >= WP_MACHINEGUN &&
-        (self->client->ps.ammo[weapon] || cpm_backpacks)) {
+        (self->client->ps.ammo[weapon] || pm_backpacks)) {
         // find the item type for this weapon
         item = BG_FindItemForWeapon(weapon);
 
         // spawn the item
         drop = Drop_Item(self, item, 0); // CPM
 
-        // CPM: fix backpacks
-        if (cpm_backpacks)
+        if (pm_backpacks)
         {
             // set the backpack flag
             drop->s.eFlags |= EF_BACKPACK;
@@ -167,7 +165,6 @@ void TossClientItems( gentity_t *self ) {
             drop->count = self->client->ps.ammo[weapon];
         }
     }
-    // !CPM
 
 	// drop all the powerups if not in teamplay
 	if ( g_gametype.integer != GT_TDM ) {
@@ -472,6 +469,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	int			killer;
 	int			i;
 	char		*killerName, *obit;
+	int			attIdx;
 
 	if ( self->client->ps.pm_type == PM_DEAD ) {
 		return;
@@ -682,14 +680,12 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	}
 
 	// per-attack kill/death tracking
-	{
-		int att = G_AttackFromMOD( meansOfDeath );
-		if ( att > ATT_NONE && att < ATT_NUM_ATTACKS ) {
-			if ( attacker && attacker->client && attacker != self ) {
-				attacker->client->attackStats[att].kills++;
-			}
-			self->client->attackStats[att].deaths++;
+	attIdx = G_AttackFromMOD( meansOfDeath );
+	if ( attIdx > ATT_NONE && attIdx < ATT_NUM_ATTACKS ) {
+		if ( attacker && attacker->client && attacker != self ) {
+			attacker->client->attackStats[attIdx].kills++;
 		}
+		self->client->attackStats[attIdx].deaths++;
 	}
 
 	// Add team bonuses
@@ -754,8 +750,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	// don't allow respawn until the death anim is done
 	// g_forcerespawn may force spawning at some later time
-	// self->client->respawnTime = level.time + 1700;
-    self->client->respawnTime = level.time + cpm_clientrespawndelay; // CPM
+    self->client->respawnTime = level.time + pm_clientrespawndelay;
 
 	// remove powerups
 	memset( self->client->ps.powerups, 0, sizeof(self->client->ps.powerups) );
@@ -977,7 +972,6 @@ int G_AttackFromMOD( int mod ) {
 
 void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			   vec3_t dir, vec3_t point, int damage, int dflags, int mod ) {
-	gclient_t	*client;
 	int			take;
 	int			asave;
 	int			knockback;
@@ -986,6 +980,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 #if FEAT_PW_INVULNERABILITY
 	vec3_t		bouncedir, impactpoint;
 #endif
+	int			attIdx;
 
 	if (!targ->takedamage) {
 		return;
@@ -996,7 +991,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	if ( level.intermissionQueued ) {
 		return;
 	}
-#if FEAT_PW_INVULNERABILITY
+
+	attIdx = G_AttackFromMOD( mod );
+
+	#if FEAT_PW_INVULNERABILITY
 	if ( targ->client ) {
 		if ( targ->client->invulnerabilityTime > level.time) {
 			if ( dir && point ) {
@@ -1032,12 +1030,8 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		damage = damage * max / 100;
 	}
 
-	client = targ->client;
-
-	if ( client ) {
-		if ( client->noclip ) {
-			return;
-		}
+	if ( targ->client && targ->client->noclip ) {
+		return;
 	}
 
 	if ( !dir ) {
@@ -1060,86 +1054,59 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		knockback = 0;
 	}
 
-	// figure momentum add, even if the damage won't be taken
-	if ( knockback && targ->client ) {
-		vec3_t	kvel;
-		int		weapIdx = WP_NONE;
-		float   knockbackScale;
+	if ( targ->client ) {
+		// figure momentum add, even if the damage won't be taken
+		if ( knockback ) {
+			vec3_t	kvel;
+			float   knockbackScale;
 
-		// map MOD to weapon index
-		switch ( mod ) {
-		case MOD_GAUNTLET:
-		case MOD_GAUNTLET_LUNGE:       weapIdx = WP_GAUNTLET; break;
-		case MOD_MACHINEGUN:
-		case MOD_MACHINEGUN_BURST:     weapIdx = WP_MACHINEGUN; break;
-		case MOD_SHOTGUN:
-		case MOD_SHOTGUN_DOUBLE_BLAST: weapIdx = WP_SHOTGUN; break;
-		case MOD_GRENADE:
-		case MOD_GRENADE_SPLASH: weapIdx = WP_GRENADE_LAUNCHER; break;
-		case MOD_ROCKET:
-		case MOD_ROCKET_SPLASH:
-		case MOD_ROCKET_MORTAR:
-		case MOD_ROCKET_MORTAR_SPLASH: weapIdx = WP_ROCKET_LAUNCHER; break;
-		case MOD_LIGHTNING:
-		case MOD_LIGHTNING_CHAIN_ARC: weapIdx = WP_LIGHTNING_GUN; break;
-		case MOD_RAILGUN:        weapIdx = WP_RAILGUN; break;
-		case MOD_PLASMA:         weapIdx = WP_PLASMA_RIFLE; break;
-		default: break;
-		}
-
-		if (targ != attacker) {
-			if (g_instagib.integer) {
-				switch (mod) {
-				case MOD_GAUNTLET:
-				case MOD_GAUNTLET_LUNGE:
-				case MOD_GRENADE:
-				case MOD_ROCKET:
-				case MOD_ROCKET_MORTAR:
-				case MOD_RAILGUN:
-					damage = INFINITE;
+			if (targ != attacker) {
+				if (g_instagib.integer) {
+					switch (mod) {
+					case MOD_GAUNTLET:
+					case MOD_GAUNTLET_LUNGE:
+					case MOD_GRENADE:
+					case MOD_ROCKET:
+					case MOD_ROCKET_MORTAR:
+					case MOD_RAILGUN:
+						damage = INFINITE;
+					}
 				}
 			}
-		}
 
-		// q3now table-based: fixed per-attack knockback (uses MOD to find correct attack)
-		{
-			int attIdx = G_AttackFromMOD( mod );
-			if ( attIdx <= ATT_NONE || attIdx >= ATT_NUM_ATTACKS ) {
-				attIdx = bg_weaponlist[weapIdx].attack;  // fallback to primary
-			}
 			knockbackScale = ( targ == attacker ) ?
 				bg_attacklist[attIdx].selfKnockbackScale :
 				bg_attacklist[attIdx].knockbackScale;
+
+			if ( g_excessive.integer && targ != attacker ) {
+				knockbackScale *= 2;
+			}
+
+			VectorScale( dir, (float)knockback * knockbackScale, kvel );
+			VectorAdd( targ->client->ps.velocity, kvel, targ->client->ps.velocity );
+
+			// set the timer so that the other client can't cancel
+			// out the movement immediately
+			if ( !targ->client->ps.pm_time ) {
+				int		t;
+
+				t = knockback * 2;
+				// no knockback boundaries
+				// if ( t < 50 ) {
+				// 	t = 50;
+				// }
+				// if ( t > 200 ) {
+				// 	t = 200;
+				// }
+				targ->client->ps.pm_time = t;
+				targ->client->ps.pm_flags |= PMF_TIME_KNOCKBACK;
+			}
 		}
 
-		if ( g_excessive.integer && targ != attacker ) {
-			knockbackScale *= 2;
+		// attacker hook release
+		if (targ->client->hook && targ->client->hook->enemy == attacker) {
+			Offhand_Grapple_Free(targ->client->hook);
 		}
-
-		VectorScale( dir, (float)knockback * knockbackScale, kvel );
-		VectorAdd( targ->client->ps.velocity, kvel, targ->client->ps.velocity );
-
-		// set the timer so that the other client can't cancel
-		// out the movement immediately
-		if ( !targ->client->ps.pm_time ) {
-			int		t;
-
-			t = knockback * 2;
-			// no knockback boundaries
-			// if ( t < 50 ) {
-			// 	t = 50;
-			// }
-			// if ( t > 200 ) {
-			// 	t = 200;
-			// }
-			targ->client->ps.pm_time = t;
-			targ->client->ps.pm_flags |= PMF_TIME_KNOCKBACK;
-		}
-	}
-
-	// attacker hook release
-	if (targ->client && targ->client->hook && (targ->client->hook->enemy == attacker)) {
-		Offhand_Grapple_Free(targ->client->hook);
 	}
 
 	// check for completely getting out of the damage
@@ -1160,10 +1127,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 #if FEAT_SPAWN_PROTECTION
 		// spawn protection (2B): block damage for g_spawnProtect * 1000ms after respawn
-		if ( g_spawnProtect.integer > 0 && client && client->spawnprotected ) {
-			if ( level.time > client->respawnTime + ( g_spawnProtect.integer * 1000 ) ) {
-				client->spawnprotected = qfalse;
-				client->ps.eFlags &= ~EF_SPAWN_PROTECT;
+		if ( g_spawnProtect.integer > 0 && targ->client && targ->client->spawnprotected ) {
+			if ( level.time > targ->client->respawnTime + ( g_spawnProtect.integer * 1000 ) ) {
+				targ->client->spawnprotected = qfalse;
+				targ->client->ps.eFlags &= ~EF_SPAWN_PROTECT;
 			} else {
 				// FIXME(@eser) absorb damage (let it through) but prevent score award
 				//              attacker gets no points for spawnkills
@@ -1177,7 +1144,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 	// battlesuit protects from all radius damage (but takes knockback)
 	// and protects 75% against all damage
-	if ( client && client->ps.powerups[PW_BATTLESUIT] ) {
+	if ( targ->client && targ->client->ps.powerups[PW_BATTLESUIT] ) {
 		G_AddEvent( targ, EV_POWERUP_BATTLESUIT, 0 );
 		if ( ( dflags & DAMAGE_RADIUS ) || ( mod == MOD_FALLING ) ) {
 			return;
@@ -1187,7 +1154,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	// add to the attacker's hit counter (if the target isn't a general entity like a prox mine)
-	if ( attacker->client && client
+	if ( attacker->client && targ->client
 			&& targ != attacker && targ->health > 0
 			&& targ->s.eType != ET_MISSILE
 			&& targ->s.eType != ET_GENERAL) {
@@ -1209,9 +1176,14 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 	take = damage;
 
-	// save some from armor
-	asave = CheckArmor(targ, take, dflags);
-	take -= asave;
+	if ( bg_attacklist[attIdx].armorPiercing ) {
+		// armor piercing
+		asave = 0;
+	} else {
+		// save some from armor
+		asave = CheckArmor(targ, take, dflags);
+		take -= asave;
+	}
 
 	if ( g_debugDamage.integer ) {
 		G_Printf( "%i: client:%i health:%i damage:%i armor:%i\n", level.time, targ->s.number,
@@ -1221,21 +1193,21 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// add to the damage inflicted on a player this frame
 	// the total will be turned into screen blends and view angle kicks
 	// at the end of the frame
-	if ( client ) {
+	if ( targ->client ) {
 		if ( attacker ) {
-			client->ps.persistant[PERS_LAST_ATTACKER] = attacker->s.number;
+			targ->client->ps.persistant[PERS_LAST_ATTACKER] = attacker->s.number;
 		} else {
-			client->ps.persistant[PERS_LAST_ATTACKER] = ENTITYNUM_WORLD;
+			targ->client->ps.persistant[PERS_LAST_ATTACKER] = ENTITYNUM_WORLD;
 		}
-		client->damage_armor += asave;
-		client->damage_blood += take;
-		client->damage_knockback += knockback;
+		targ->client->damage_armor += asave;
+		targ->client->damage_blood += take;
+		targ->client->damage_knockback += knockback;
 		if ( dir ) {
-			VectorCopy ( dir, client->damage_from );
-			client->damage_fromWorld = qfalse;
+			VectorCopy ( dir, targ->client->damage_from );
+			targ->client->damage_fromWorld = qfalse;
 		} else {
-			VectorCopy ( targ->r.currentOrigin, client->damage_from );
-			client->damage_fromWorld = qtrue;
+			VectorCopy ( targ->r.currentOrigin, targ->client->damage_from );
+			targ->client->damage_fromWorld = qtrue;
 		}
 	}
 
@@ -1263,8 +1235,6 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 #endif
 
 	if ( attacker && attacker->client ) {
-		int att;
-
 		// berserk
 		if ( attacker->client->ps.powerups[PW_BERSERK]
 			&& attacker != targ
@@ -1279,9 +1249,8 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		}
 
 		// per-attack damage tracking
-		att = G_AttackFromMOD( mod );
-		if ( att > ATT_NONE && att < ATT_NUM_ATTACKS ) {
-			attacker->client->attackStats[att].damage += take;
+		if ( attIdx > ATT_NONE && attIdx < ATT_NUM_ATTACKS ) {
+			attacker->client->attackStats[attIdx].damage += take;
 		}
 	}
 
@@ -1302,7 +1271,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 #endif
 
 	if ( targ->health <= 0 ) {
-		if ( client )
+		if ( targ->client )
 			targ->flags |= FL_NO_KNOCKBACK;
 
 		if (targ->health < -999)
@@ -1492,14 +1461,13 @@ qboolean G_RadiusDamage ( vec3_t origin, gentity_t *attacker, float damage, floa
 			// get knocked into the air more
 			// dir[2] += 24;
 
-            // CPM: Add some extra knockback
+            // PM: Add some extra knockback
             if (ent == attacker) { // rjumps are same as in normal Q3A
                 dir[2] += 24;
             }
             else {
                 dir[2] += 40; // additional vertical velocity for combo potential
             }
-            // !CPM
 
 			if (mod == MOD_ROCKET_MORTAR || mod == MOD_ROCKET_MORTAR_SPLASH) {
 				dir[2] += 40;
@@ -1513,7 +1481,7 @@ qboolean G_RadiusDamage ( vec3_t origin, gentity_t *attacker, float damage, floa
 }
 
 // New radius damage function (called if radiusDamageFix is enabled)
-qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float radius,
+qboolean PM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float radius,
     gentity_t *ignore, int mod, vec3_t viewpoint) {
     float		points, dist;
     gentity_t	*ent;
@@ -1579,15 +1547,15 @@ qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, floa
             VectorSubtract(ent->r.currentOrigin, origin, dir);
             // push the center of mass higher than the origin so players
             // get knocked into the air more
-            // CPM: Add some extra knockback
+            // PM: Add some extra knockback
             if (ent == attacker) { // rjumps are same as in normal Q3A
                 dir[2] += 24;
             }
             else {
                 dir[2] += 40; // additional vertical velocity for combo potential
             }
-            // !CPM
-            G_Damage(ent, NULL, attacker, dir, origin, (int)points, DAMAGE_RADIUS, mod);
+
+			G_Damage(ent, NULL, attacker, dir, origin, (int)points, DAMAGE_RADIUS, mod);
         }
     }
 

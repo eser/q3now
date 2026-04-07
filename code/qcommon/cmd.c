@@ -725,8 +725,7 @@ void Cmd_ArgsBuffer( char *buffer, int bufferLength ) {
 ============
 Cmd_Cmd
 
-Retrieve the unmodified command string
-For rcon use when you want to transmit without altering quoting
+Retrieve the unmodified command string.
 https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=543
 ============
 */

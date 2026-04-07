@@ -1,7 +1,6 @@
 // ingame.wmenu - Wired UI in-game ESC menu
 // Flex column layout -- vertical positioning handled by the layout engine.
 // Shown when ESC is pressed during gameplay.
-// q3now additions: Call Vote (FEAT_CALLVOTE_MENU)
 
 #include "ui/wmenumacros.h"
 

@@ -16,8 +16,8 @@ ARGS="$ARGS +set sv_allowDownload 1"
 [ -n "$Q3_RCONPASSWORD" ] && ARGS="$ARGS +set rconpassword \"$Q3_RCONPASSWORD\""
 
 # Game rules
-[ -n "$Q3_FRAGLIMIT" ]    && ARGS="$ARGS +set fraglimit $Q3_FRAGLIMIT"
-[ -n "$Q3_TIMELIMIT" ]    && ARGS="$ARGS +set timelimit $Q3_TIMELIMIT"
+[ -n "$Q3_SCORELIMIT" ]   && ARGS="$ARGS +set g_scorelimit $Q3_SCORELIMIT"
+[ -n "$Q3_TIMELIMIT" ]    && ARGS="$ARGS +set g_timelimit $Q3_TIMELIMIT"
 [ -n "$Q3_GAMETYPE" ]     && ARGS="$ARGS +set g_gametype $Q3_GAMETYPE"
 [ -n "$Q3_MAPROTATION" ]  && ARGS="$ARGS +set g_maprotation \"$Q3_MAPROTATION\""
 

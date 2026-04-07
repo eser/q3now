@@ -1049,7 +1049,7 @@ G_InitBots
 ===============
 */
 void G_InitBots( qboolean restart ) {
-	int			fragLimit;
+	int			scoreLimit;
 	int			timeLimit;
 	const char	*arenainfo;
 	const char	*strValue;
@@ -1071,27 +1071,27 @@ void G_InitBots( qboolean restart ) {
 			return;
 		}
 
-		strValue = Info_ValueForKey( arenainfo, "fraglimit" );
-		fragLimit = atoi( strValue );
-		if ( fragLimit ) {
-			trap_Cvar_Set( "fraglimit", strValue );
+		strValue = Info_ValueForKey( arenainfo, "g_scorelimit" );
+		scoreLimit = atoi( strValue );
+		if ( scoreLimit ) {
+			trap_Cvar_Set( "g_scorelimit", strValue );
 		}
 		else {
-			trap_Cvar_Set( "fraglimit", "0" );
+			trap_Cvar_Set( "g_scorelimit", "0" );
 		}
 
-		strValue = Info_ValueForKey( arenainfo, "timelimit" );
+		strValue = Info_ValueForKey( arenainfo, "g_timelimit" );
 		timeLimit = atoi( strValue );
 		if ( timeLimit ) {
-			trap_Cvar_Set( "timelimit", strValue );
+			trap_Cvar_Set( "g_timelimit", strValue );
 		}
 		else {
-			trap_Cvar_Set( "timelimit", "0" );
+			trap_Cvar_Set( "g_timelimit", "0" );
 		}
 
-		if ( !fragLimit && !timeLimit ) {
-			trap_Cvar_Set( "fraglimit", "10" );
-			trap_Cvar_Set( "timelimit", "0" );
+		if ( !scoreLimit && !timeLimit ) {
+			trap_Cvar_Set( "g_scorelimit", "10" );
+			trap_Cvar_Set( "g_timelimit", "0" );
 		}
 
 		basedelay = BOT_BEGIN_DELAY_BASE;

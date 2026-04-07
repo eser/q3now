@@ -227,14 +227,6 @@ void CG_DrawInformation( void ) {
 		y += PROP_HEIGHT;
 	}
 
-	// cheats warning
-	s = Info_ValueForKey( sysInfo, "sv_cheats" );
-	if ( s[0] == '1' ) {
-		UI_DrawProportionalString( 320, y, "CHEATS ARE ENABLED",
-			UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, colorWhite );
-		y += PROP_HEIGHT;
-	}
-
 	// game type
 	if (cgs.gametype >= 0 && cgs.gametype < GT_MAX_GAME_TYPE) {
 		s = bg_gametypelist[cgs.gametype].name;
@@ -245,28 +237,18 @@ void CG_DrawInformation( void ) {
 		UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, colorWhite );
 	y += PROP_HEIGHT;
 		
-	value = atoi( Info_ValueForKey( info, "timelimit" ) );
+	value = atoi( Info_ValueForKey( info, "g_scorelimit" ) );
 	if ( value ) {
-		UI_DrawProportionalString( 320, y, va( "timelimit %i", value ),
+		UI_DrawProportionalString( 320, y, va( "scorelimit %i", value ),
 			UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, colorWhite );
 		y += PROP_HEIGHT;
 	}
 
-	if (cgs.gametype < GT_CTF ) {
-		value = atoi( Info_ValueForKey( info, "fraglimit" ) );
-		if ( value ) {
-			UI_DrawProportionalString( 320, y, va( "fraglimit %i", value ),
-				UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, colorWhite );
-			y += PROP_HEIGHT;
-		}
-	}
-
-	if (cgs.gametype >= GT_CTF) {
-		value = atoi( Info_ValueForKey( info, "capturelimit" ) );
-		if ( value ) {
-			UI_DrawProportionalString( 320, y, va( "capturelimit %i", value ),
-				UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, colorWhite );
-		}
+	value = atoi( Info_ValueForKey( info, "g_timelimit" ) );
+	if ( value ) {
+		UI_DrawProportionalString( 320, y, va( "timelimit %i", value ),
+			UI_CENTER|UI_SMALLFONT|UI_DROPSHADOW, colorWhite );
+		y += PROP_HEIGHT;
 	}
 
 	/* restore previous screen placement */

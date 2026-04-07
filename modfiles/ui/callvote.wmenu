@@ -1,7 +1,6 @@
 // callvote.wmenu - Wired UI callvote dialog
 // Absolute positioning -- form layout with vote options.
 // Coordinates faithfully converted from callvote.menu (640x480 -> normalized).
-// q3now addition (FEAT_CALLVOTE_MENU)
 
 #include "ui/wmenumacros.h"
 
@@ -44,18 +43,18 @@ menuDef {
 
 	itemDef {
 		type 12
-		text "Fraglimit:"
+		text "Scorelimit:"
 		rect 0.067 0.721 0.867 0.071
 		font "oxanium" 14
 		forecolor WCOLOR_TEXT
-		cvar "ui_voteFraglimit"
+		cvar "ui_voteScorelimit"
 		cvarFloatList { "10" 10 "20" 20 "30" 30 "50" 50 "100" 100 }
 		visible 1
 		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
 		mouseExit { setcolor forecolor WCOLOR_TEXT }
 	}
 
-	WBUTTON(0.067, 0.814, 0.867, 0.071, "Vote Fraglimit", 17, exec "callvote fraglimit" ; close)
+	WBUTTON(0.067, 0.814, 0.867, 0.071, "Vote Scorelimit", 17, exec "callvote scorelimit" ; close)
 
 	WSEPARATOR(0.053, 0.921, 0.893)
 	WBUTTON(0.067, 0.964, 0.867, 0.071, "Cancel", 19, close)

@@ -253,10 +253,10 @@ all available environment variables.
 | -------------------- | ----------------- | --------------------------- |
 | `Q3_HOSTNAME`        | `sv_hostname`     | Server name                 |
 | `Q3_MAXCLIENTS`      | `sv_maxclients`   | Max players                 |
-| `Q3_RCONPASSWORD`    | `rconpassword`    | Remote console password     |
+| `Q3_RCONPASSWORD`    | `sv_wiredRconPassword` | Wired RCON password     |
 | `Q3_GAMETYPE`        | `g_gametype`      | 0=DM, 1=Duel, 3=TDM, 4=CTF  |
-| `Q3_FRAGLIMIT`       | `fraglimit`       | Frag limit                  |
-| `Q3_TIMELIMIT`       | `timelimit`       | Time limit (minutes)        |
+| `Q3_SCORELIMIT`      | `g_scorelimit`    | Score limit                 |
+| `Q3_TIMELIMIT`       | `g_timelimit`     | Time limit (minutes)        |
 | `Q3_QUIC`            | `sv_quic`         | Enable QUIC transport       |
 | `Q3_EXEC`            | `+exec`           | Execute a config file       |
 | `Q3_EXTRA_ARGS`      | _(verbatim)_      | Arbitrary engine arguments  |

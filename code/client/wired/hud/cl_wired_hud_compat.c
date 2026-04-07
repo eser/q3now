@@ -115,8 +115,7 @@ void WiredHud_SyncCompat( void ) {
 	wired_cgs.gametype       = wiredHud->gametype;
 	wired_cgs.scores1        = wiredHud->scores1;
 	wired_cgs.scores2        = wiredHud->scores2;
-	wired_cgs.fraglimit      = wiredHud->fraglimit;
-	wired_cgs.capturelimit   = wiredHud->capturelimit;
+	wired_cgs.scorelimit     = wiredHud->scorelimit;
 	wired_cgs.timelimit      = wiredHud->timelimit;
 	wired_cgs.maxclients     = wiredHud->maxclients;
 	wired_cgs.levelStartTime = wiredHud->levelStartTime;

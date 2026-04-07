@@ -174,6 +174,10 @@ typedef struct {
 
 	int			challenge;					// from the server to use for connecting
 	int			checksumFeed;				// from the server for checksum calculations
+	qboolean	wiredRconAuthed;
+	qboolean	wiredRconHasChallenge;
+	char		wiredRconChallenge[65];
+	netadr_t	wiredRconAddress;
 
 	// these are our reliable messages that go to the server
 	int			reliableSequence;
@@ -497,7 +501,6 @@ void Field_BigDraw( field_t *edit, int x, int y, int width, qboolean showCursor,
 // cl_parse.c
 //
 extern int cl_connectedToPureServer;
-extern int cl_connectedToCheatServer;
 
 void CL_ParseServerMessage( msg_t *msg );
 
