@@ -23,7 +23,7 @@
 #   make run-launcher       build + assemble + codesign + open launcher
 #   make run-game                     run engine (main menu)
 #   make run-game DEV=1               developer mode (debug build)
-#   make run-game DEV=1 MAP=q3dm17    devmap with debug
+#   make run-game DEV=1 MAP=q3dm17    map with debug
 #   make run-game VM=1 MAP=q3dm17     VM modules + map
 #   make release            build + assemble + codesign + package
 #
@@ -582,13 +582,13 @@ endif
 # Variables:
 #   DEV=1    debug build, developer mode                       (default: 0)
 #   VM=1     use VM game modules instead of native dylibs      (default: 0)
-#   MAP=X    load map X; uses +devmap when DEV=1, +map otherwise
+#   MAP=X    load map X; uses +map when DEV=1, +map otherwise
 #
 # Examples:
 #   make run-game                    main menu (native dylibs)
 #   make run-game MAP=q3dm17         load q3dm17
 #   make run-game DEV=1              debug build, developer mode
-#   make run-game DEV=1 MAP=q3dm17   debug build, devmap q3dm17
+#   make run-game DEV=1 MAP=q3dm17   debug build, map q3dm17
 #   make run-game VM=1 MAP=q3dm17    VM modules, load q3dm17
 
 # Build the right target based on DEV flag
@@ -608,14 +608,10 @@ endif
 # Compose command-line arguments
 _RUN_GAME_ARGS := $(_RUN_VM_ARGS)
 ifeq ($(DEV),1)
-_RUN_GAME_ARGS += +set developer 1
+_RUN_GAME_ARGS += +set developer 1 +set g_cheats 1
 endif
 ifneq ($(MAP),)
-ifeq ($(DEV),1)
-_RUN_GAME_ARGS += +devmap $(MAP)
-else
 _RUN_GAME_ARGS += +map $(MAP)
-endif
 endif
 
 # Copy VM modules into .app when VM=1
@@ -703,7 +699,7 @@ else
 endif
 
 # ── test-features ────────────────────────────────────────────────────────────
-# Starts devmap with ALL feature cvars enabled, spawns 3 bots, runs 30s.
+# Starts map with ALL feature cvars enabled, spawns 3 bots, runs 30s.
 
 test-features: copy-all
 ifeq ($(UNAME_S),Darwin)
@@ -714,7 +710,7 @@ ifeq ($(UNAME_S),Darwin)
 	  +set g_spawnProtect 2 \
 	  +set cg_scorePlums 2 \
 	  +set developer 1 +set ttycon 0 \
-	  +devmap $(MAP) +addbot Doom 3 +addbot Bones 3 +addbot Slash 3 \
+	  +map $(MAP) +addbot Doom 3 +addbot Bones 3 +addbot Slash 3 \
 	  +wait 900 +quit > /tmp/q3now-test-features.log 2>&1 || true
 	@if grep -q "Unknown event\|Error\|FATAL\|Signal caught" /tmp/q3now-test-features.log; then \
 	  echo "FAIL: Feature test detected errors"; \
@@ -796,7 +792,7 @@ help:
 	@echo "    make run-launcher       build + assemble + codesign + open launcher"
 	@echo "    make run-game                     run engine (main menu)"
 	@echo "    make run-game DEV=1               developer mode (debug build)"
-	@echo "    make run-game DEV=1 MAP=q3dm17    devmap with debug"
+	@echo "    make run-game DEV=1 MAP=q3dm17    map with debug"
 	@echo "    make run-game VM=1 MAP=q3dm17     VM modules + map"
 	@echo "    make release            build + assemble + codesign + package"
 	@echo ""

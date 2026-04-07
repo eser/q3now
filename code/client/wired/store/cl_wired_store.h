@@ -62,6 +62,10 @@ void             WiredStore_ForEach( const char *prefix,
                                      void (*fn)( wuiStoreEntry_t *entry, void *userData ),
                                      void *userData );
 
+/* ── Lua binding registration (client-side) ────────────────────────── */
+
+void             WiredStoreLua_Init( void );
+
 #endif /* FEAT_WIRED_UI */
 
 #endif /* CL_WIRED_STORE_H */

@@ -1,6 +1,5 @@
 // g_gauntlet.c -- Gauntlet weapon implementation
 #include "../g_local.h"
-#include "../bg_promode.h"
 
 extern float s_quadFactor;
 extern vec3_t forward, right, up;

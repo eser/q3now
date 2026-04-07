@@ -245,14 +245,14 @@ menuDef {
 		mouseExit { setcolor forecolor 1 1 1 1 }
 	}
 
-	// Frag Limit: rect 412 104 212 20 → 0.644 0.217 0.331 0.042
+	// Score Limit: rect 412 104 212 20 → 0.644 0.217 0.331 0.042
 	itemDef {
 		type 12
-		text "Frag Limit:"
+		text "Score Limit:"
 		rect 0.644 0.217 0.331 0.042
 		font "oxanium" 14
 		forecolor 1 1 1 1
-		cvar "fraglimit"
+		cvar "g_scorelimit"
 		cvarFloatList { "None" 0 "10" 10 "20" 20 "30" 30 "50" 50 "100" 100 }
 		visible 1
 		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
@@ -266,7 +266,7 @@ menuDef {
 		rect 0.644 0.267 0.331 0.042
 		font "oxanium" 14
 		forecolor 1 1 1 1
-		cvar "timelimit"
+		cvar "g_timelimit"
 		cvarFloatList { "None" 0 "5" 5 "10" 10 "15" 15 "20" 20 "30" 30 }
 		visible 1
 		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
@@ -281,17 +281,6 @@ menuDef {
 		font "oxanium" 14
 		forecolor 1 1 1 1
 		cvar "sv_pure"
-		visible 1
-		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
-		mouseExit { setcolor forecolor 1 1 1 1 }
-	}
-	itemDef {
-		type 11
-		text "Warmup:"
-		rect 0.809 0.317 0.166 0.042
-		font "oxanium" 14
-		forecolor 1 1 1 1
-		cvar "g_doWarmup"
 		visible 1
 		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
 		mouseExit { setcolor forecolor 1 1 1 1 }
@@ -319,22 +308,6 @@ menuDef {
 		font "oxanium" 14
 		forecolor 1 1 1 1
 		cvar "sv_allowDownload"
-		visible 1
-		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
-		mouseExit { setcolor forecolor 1 1 1 1 }
-	}
-
-	// Cap Limit (CTF): rect 412 224 212 20 → 0.644 0.467 0.331 0.042
-	itemDef {
-		type 12
-		text "Cap Limit:"
-		rect 0.644 0.467 0.331 0.042
-		font "oxanium" 14
-		forecolor 1 1 1 1
-		cvar "capturelimit"
-		cvarFloatList { "None" 0 "3" 3 "5" 5 "8" 8 "10" 10 }
-		cvarTest "ui_netGameType"
-		showCvar { "5" }
 		visible 1
 		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }
 		mouseExit { setcolor forecolor 1 1 1 1 }

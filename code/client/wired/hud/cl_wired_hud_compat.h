@@ -127,7 +127,7 @@ typedef wiredClientInfoCompat_t clientInfo_t;
 typedef struct {
 	int         gametype;
 	int         scores1, scores2;
-	int         fraglimit, capturelimit, timelimit;
+	int         scorelimit, timelimit;
 	int         maxclients;
 	int         levelStartTime;
 	int         blueflag, redflag;

@@ -556,7 +556,7 @@ typedef struct {
 	int			physicsTime;	// either cg.snap->time or cg.nextSnap->time
 
 	int			timelimitWarnings;	// 5 min, 1 min, overtime
-	int			fraglimitWarnings;
+	int			scorelimitWarnings;
 
 	qboolean	mapRestart;			// set on a map restart to set back the weapon
 
@@ -1102,10 +1102,8 @@ typedef struct {
 	sfxHandle_t	hgrenb1aSound;
 	sfxHandle_t	hgrenb2aSound;
 
-    // CPM: Backpack gfx
     qhandle_t	backpackModel;
     qhandle_t	backpackIcon;
-    // !CPM
 } cgMedia_t;
 
 
@@ -1138,10 +1136,9 @@ typedef struct {
 
 	// parsed from serverinfo
 	gametype_t		gametype;
-	int				g_noFootsteps;
-	int             g_kothGhosts;
-	int				fraglimit;
-	int				capturelimit;
+	int				noFootsteps;
+	int             kothGhosts;
+	int				scorelimit;
 	int				timelimit;
 	int				maxclients;
 	char			mapname[MAX_QPATH];

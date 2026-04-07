@@ -389,7 +389,7 @@ void CL_SystemInfoChanged( qboolean onlyGame ) {
 	s = Info_ValueForKey( systemInfo, "sv_cheats" );
 	cl_connectedToCheatServer = atoi( s );
 	if ( !cl_connectedToCheatServer ) {
-		Cvar_SetCheatState();
+		Cvar_CheatsWereDisabled();
 	}
 
 	if ( com_sv_running->integer ) {

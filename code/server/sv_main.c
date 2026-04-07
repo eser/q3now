@@ -34,7 +34,6 @@ vm_t			*gvm = NULL;		// game virtual machine
 cvar_t	*sv_fps;				// time rate for running non-clients
 cvar_t	*sv_timeout;			// seconds without any message
 cvar_t	*sv_zombietime;			// seconds to sink messages after disconnect
-cvar_t	*sv_rconPassword;		// password for remote server commands
 cvar_t	*sv_privatePassword;	// password for the privateClient slots
 cvar_t	*sv_allowDownload;
 cvar_t	*sv_maxclients;
@@ -56,6 +55,7 @@ cvar_t	*sv_maxRate;
 cvar_t	*sv_dlRate;
 cvar_t	*sv_gametype;
 cvar_t	*sv_pure;
+cvar_t	*sv_cheats;
 cvar_t	*sv_floodProtect;
 cvar_t	*sv_lanForceRate; // dedicated 1 (LAN) server forces local client rates to 99999 (bug #491)
 
@@ -811,103 +811,6 @@ static void SVC_Info( const netadr_t *from ) {
 
 
 /*
-================
-SV_FlushRedirect
-================
-*/
-static netadr_t redirectAddress; // for rcon return messages
-
-static void SV_FlushRedirect( const char *outputbuf )
-{
-	if ( *outputbuf )
-	{
-		NET_OutOfBandPrint( NS_SERVER, &redirectAddress, "print\n%s", outputbuf );
-	}
-}
-
-
-/*
-===============
-SVC_RemoteCommand
-
-An rcon packet arrived from the network.
-Shift down the remaining args
-Redirect all printfs
-===============
-*/
-static void SVC_RemoteCommand( const netadr_t *from ) {
-	static rateLimit_t bucket;
-	qboolean	valid;
-	// TTimo - scaled down to accumulate, but not overflow anything network wise, print wise etc.
-	// (OOB messages are the bottleneck here)
-	char		sv_outputbuf[1024 - 16];
-	const char	*cmd_aux, *pw;
-
-	// Prevent using rcon as an amplifier and make dictionary attacks impractical
-	if ( SVC_RateLimitAddress( from, 10, 1000 ) ) {
-		if ( com_developer->integer ) {
-			Com_Printf( "SVC_RemoteCommand: rate limit from %s exceeded, dropping request\n",
-				NET_AdrToString( from ) );
-		}
-		return;
-	}
-
-	pw = Cmd_Argv( 1 );
-	if ( ( sv_rconPassword->string[0] && strcmp( pw, sv_rconPassword->string ) == 0 ) ||
-		( rconPassword2[0] && strcmp( pw, rconPassword2 ) == 0 ) ) {
-		valid = qtrue;
-		Com_Printf( "Rcon from %s: %s\n", NET_AdrToString( from ), Cmd_ArgsFrom( 2 ) );
-	} else {
-		// Make DoS via rcon impractical
-		if ( SVC_RateLimit( &bucket, 10, 1000 ) ) {
-			Com_DPrintf( "SVC_RemoteCommand: rate limit exceeded, dropping request\n" );
-			return;
-		}
-
-		valid = qfalse;
-		Com_Printf( "Bad rcon from %s: %s\n", NET_AdrToString( from ), Cmd_ArgsFrom( 2 ) );
-	}
-
-	// start redirecting all print outputs to the packet
-	redirectAddress = *from;
-	Com_BeginRedirect( sv_outputbuf, sizeof( sv_outputbuf ), SV_FlushRedirect );
-
-	if ( !sv_rconPassword->string[0] && !rconPassword2[0] ) {
-		Com_Printf( "No rconpassword set on the server.\n" );
-	} else if ( !valid ) {
-		Com_Printf( "Bad rconpassword.\n" );
-	} else {
-		// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=543
-		// get the command directly, "rcon <pass> <command>" to avoid quoting issues
-		// extract the command by walking
-		// since the cmd formatting can fuckup (amount of spaces), using a dumb step by step parsing
-		cmd_aux = Cmd_Cmd();
-		while ( *cmd_aux && *cmd_aux <= ' ' ) // skip whitespace
-			cmd_aux++;
-		cmd_aux += 4; // "rcon"
-		while ( *cmd_aux == ' ' )
-			cmd_aux++;
-		if ( *cmd_aux == '"' ) {
-			cmd_aux++;
-			while ( *cmd_aux && *cmd_aux != '"' ) // quoted password
-				cmd_aux++;
-			if ( *cmd_aux == '"' )
-				cmd_aux++;
-		} else {
-			while ( *cmd_aux && *cmd_aux != ' ' ) // password
-				cmd_aux++;
-		}
-		while ( *cmd_aux == ' ' )
-			cmd_aux++;
-
-		Cmd_ExecuteString( cmd_aux );
-	}
-
-	Com_EndRedirect();
-}
-
-
-/*
 =================
 SV_ConnectionlessPacket
 
@@ -943,11 +846,6 @@ static void SV_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		Com_Printf( "SV packet %s : %s\n", NET_AdrToString( from ), c );
 	}
 
-	if ( !Q_stricmp(c, "rcon") ) {
-		SVC_RemoteCommand( from );
-		return;
-	}
-
 	if ( !com_sv_running->integer ) {
 		return;
 	}
@@ -962,6 +860,16 @@ static void SV_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		SV_DirectConnect( from );
 	// Phase 6.4: legacy "ipAuthorize" handler removed — q3now never sends a
 	// getIpAuthorize request, so we never need to receive a reply.
+	} else if ( !Q_stricmp( c, "rcon_auth" ) ) {
+		SV_RconAuth( from );
+	} else if ( !Q_stricmp( c, "rcon_verify" ) ) {
+		SV_RconVerify( from, Cmd_Argv( 1 ) );
+	} else if ( !Q_stricmp( c, "rcon" ) ) {
+		if ( SV_RconAuthorized( from ) ) {
+			SV_RconExecute( from, Cmd_ArgsFrom( 1 ) );
+		} else {
+			NET_OutOfBandPrint( NS_SERVER, from, "print\nPlaintext rcon disabled. Use rcon_login.\n" );
+		}
 	} else if (!Q_stricmp(c, "disconnect")) {
 		// if a client starts up a local server, we may see some spurious
 		// server disconnect messages when their new server sees our final
@@ -1452,6 +1360,7 @@ void SV_Frame( int msec ) {
 
 	// check timeouts
 	SV_CheckTimeouts();
+	SV_RconCleanupSessions();
 
 	// reset current and build new snapshot on first query
 	SV_IssueNewSnapshot();

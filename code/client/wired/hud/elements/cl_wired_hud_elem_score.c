@@ -65,15 +65,7 @@ void* CG_SHUDElementScoreMAXCreate(const superhudConfig_t* config)
 
 static qboolean CG_SHUDScoresGetMax(int* scores)
 {
-	/* use pre-computed isTeamGame flag + capturelimit vs fraglimit */
-	if (wiredHud->isTeamGame && wiredHud->capturelimit > 0)
-	{
-		*scores = cgs.capturelimit;
-	}
-	else
-	{
-		*scores = cgs.fraglimit;
-	}
+	*scores = cgs.scorelimit;
 
 	return *scores > 0;
 }

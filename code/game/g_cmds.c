@@ -21,7 +21,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
-#include "bg_promode.h" // CPM
 
 #if FEAT_TA_VOICECHAT
 #include "../qcommon/menudef.h"			// for the voice chats
@@ -1429,9 +1428,9 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 	} else if ( !Q_stricmp( arg1, "g_gametype" ) ) {
 	} else if ( !Q_stricmp( arg1, "kick" ) ) {
 	} else if ( !Q_stricmp( arg1, "clientkick" ) ) {
-	} else if ( !Q_stricmp( arg1, "g_warmup" ) ) {
-	} else if ( !Q_stricmp( arg1, "timelimit" ) ) {
-	} else if ( !Q_stricmp( arg1, "fraglimit" ) ) {
+	} else if ( !Q_stricmp( arg1, "g_minPlayers" ) ) {
+	} else if ( !Q_stricmp( arg1, "g_scorelimit" ) ) {
+	} else if ( !Q_stricmp( arg1, "g_timelimit" ) ) {
 	// eser - team shuffle command
 	} else if ( !Q_stricmp( arg1, "shuffle" ) ) {
 	// eser - team shuffle command
@@ -1443,7 +1442,7 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 #endif
 	} else {
 		trap_SendServerCommand( ent-g_entities, "print \"Invalid vote string.\n\"" );
-		trap_SendServerCommand( ent-g_entities, "print \"Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_warmup, timelimit <time>, fraglimit <frags>, shuffle, g_unlagged <0|1>"
+		trap_SendServerCommand( ent-g_entities, "print \"Vote commands are: map_restart, nextmap, map <mapname>, g_gametype <n>, kick <player>, clientkick <clientnum>, g_minPlayers <n>, g_scorelimit <frags>, g_timelimit <time>, shuffle, g_unlagged <0|1>"
 #if FEAT_ATMOSPHERIC
 			" and weather <rain|snow|clean>"
 #endif

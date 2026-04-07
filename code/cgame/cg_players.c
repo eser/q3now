@@ -2150,7 +2150,7 @@ static void CG_PlayerFloatSprite( centity_t *cent, qhandle_t shader ) {
 	ent.reType = RT_SPRITE;
 	ent.customShader = shader;
 	ent.radius = 10;
-	ent.renderfx = rf;
+	ent.renderfx = rf | RF_DEPTHHACK;
 	ent.shaderRGBA[0] = 255;
 	ent.shaderRGBA[1] = 255;
 	ent.shaderRGBA[2] = 255;

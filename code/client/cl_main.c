@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
+#include "wired/store/cl_wired_store.h"
+#include "../qcommon/crypto.h"
 #include <limits.h>
 
 cvar_t	*cl_noprint;
@@ -32,9 +34,6 @@ cvar_t	*cl_motd;
 #ifdef USE_RENDERER_DLOPEN
 static cvar_t *cl_renderer;
 #endif
-
-cvar_t	*rcon_client_password;
-cvar_t	*rconAddress;
 
 cvar_t	*cl_timeout;
 cvar_t	*cl_autoNudge;
@@ -111,8 +110,6 @@ clientStatic_t		cls;
 clLoadProgress_t	cl_loadProgress;
 vm_t				*cgvm = NULL;
 
-netadr_t			rcon_address;
-
 char				cl_oldGame[ MAX_QPATH ];
 qboolean			cl_oldGameSet;
 static	qboolean	noGameRestart = qfalse;
@@ -157,8 +154,12 @@ static void CL_Ping_f( void );
 static void CL_InitRef( void );
 static void CL_ShutdownRef( refShutdownCode_t code );
 static void CL_InitGLimp_Cvars( void );
+static void CL_RconLogin_f( void );
+static void CL_Rcon_f( void );
 
 static void CL_NextDemo( void );
+
+static cvar_t *cl_wiredRconPassword;
 
 qboolean CL_DemoPlaying( void ) {
 	return clc.demoplaying;
@@ -1304,11 +1305,9 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 
 	// wipe the client connection
 	Com_Memset( &clc, 0, sizeof( clc ) );
+	clc.wiredRconChallenge[0] = '\0';
 
 	cls.state = CA_DISCONNECTED;
-
-	// allow cheats locally
-	Cvar_Set( "sv_cheats", "1" );
 
 	// not connected to a pure server anymore
 	cl_connectedToPureServer = 0;
@@ -1432,6 +1431,61 @@ static void CL_ForwardToServer_f( void ) {
 
 	// don't forward the first argument
 	CL_AddReliableCommand( Cmd_ArgsFrom( 1 ), qfalse );
+}
+
+static void CL_RconLogin_f( void ) {
+	if ( Cmd_Argc() > 1 ) {
+		Cvar_Set( "cl_wiredRconPassword", Cmd_Argv( 1 ) );
+	}
+
+	if ( !cl_wiredRconPassword ) {
+		cl_wiredRconPassword = Cvar_Get( "cl_wiredRconPassword", "", CVAR_TEMP );
+		Cvar_SetDescription( cl_wiredRconPassword, "Wired RCON password used for challenge-response authentication." );
+	}
+
+	if ( !cl_wiredRconPassword->string[0] ) {
+		Com_Printf( "Usage: rcon_login <password>\n" );
+		return;
+	}
+
+	if ( clc.serverAddress.type == NA_BAD ) {
+		Com_Printf( "Not connected to a server.\n" );
+		return;
+	}
+
+	clc.wiredRconAuthed = qfalse;
+	clc.wiredRconHasChallenge = qfalse;
+	clc.wiredRconChallenge[0] = '\0';
+	clc.wiredRconAddress = clc.serverAddress;
+
+	NET_OutOfBandPrint( NS_CLIENT, &clc.serverAddress, "rcon_auth" );
+	Com_Printf( "Wired RCON: requesting challenge...\n" );
+}
+
+static void CL_Rcon_f( void ) {
+	char cmd[2048];
+
+	if ( Cmd_Argc() < 2 ) {
+		Com_Printf( "Usage: rcon <lua code>\n" );
+		return;
+	}
+
+	if ( Cmd_Argc() >= 2 && !Q_stricmp( Cmd_Argv( 1 ), "login" ) ) {
+		if ( Cmd_Argc() >= 3 ) {
+			Cbuf_AddText( va( "rcon_login %s\n", Cmd_Argv( 2 ) ) );
+		} else {
+			Cbuf_AddText( "rcon_login\n" );
+		}
+		return;
+	}
+
+	if ( !clc.wiredRconAuthed ) {
+		Com_Printf( "Plaintext rcon disabled. Use rcon_login.\n" );
+		return;
+	}
+
+	Com_sprintf( cmd, sizeof( cmd ), "rcon %s", Cmd_ArgsFrom( 1 ) );
+	NET_OutOfBandPrint( NS_CLIENT, &clc.wiredRconAddress, "%s", cmd );
 }
 
 
@@ -1611,79 +1665,6 @@ static void CL_Connect_f( void ) {
 
 	// server connection string
 	Cvar_Set( "cl_currentServerAddress", server );
-}
-
-#define MAX_RCON_MESSAGE (MAX_STRING_CHARS+4)
-
-/*
-==================
-CL_CompleteRcon
-==================
-*/
-static void CL_CompleteRcon(const char *args, int argNum )
-{
-	if ( argNum >= 2 )
-	{
-		// Skip "rcon "
-		const char *p = Com_SkipTokens( args, 1, " " );
-
-		if ( p > args )
-			Field_CompleteCommand( p, qtrue, qtrue );
-	}
-}
-
-
-/*
-=====================
-CL_Rcon_f
-
-Send the rest of the command line over as
-an unconnected command.
-=====================
-*/
-static void CL_Rcon_f( void ) {
-	char message[MAX_RCON_MESSAGE];
-	const char *sp;
-	int len;
-
-	if ( !rcon_client_password->string[0] ) {
-		Com_Printf( "You must set 'rconpassword' before\n"
-			"issuing an rcon command.\n" );
-		return;
-	}
-
-	if ( cls.state >= CA_CONNECTED ) {
-		rcon_address = clc.netchan.remoteAddress;
-	} else {
-		if ( !rconAddress->string[0] ) {
-			Com_Printf( "You must either be connected,\n"
-				"or set the 'rconAddress' cvar\n"
-				"to issue rcon commands\n" );
-			return;
-		}
-		if ( !NET_StringToAdr( rconAddress->string, &rcon_address, NA_UNSPEC ) ) {
-			return;
-		}
-		if ( rcon_address.port == 0 ) {
-			rcon_address.port = BigShort( PORT_SERVER );
-		}
-	}
-
-	message[0] = -1;
-	message[1] = -1;
-	message[2] = -1;
-	message[3] = -1;
-	message[4] = '\0';
-
-	// we may need to quote password if it contains spaces
-	sp = strchr( rcon_client_password->string, ' ' );
-
-	len = Com_sprintf( message+4, sizeof( message )-4,
-		sp ? "rcon \"%s\" %s" : "rcon %s %s",
-		rcon_client_password->string,
-		Cmd_Cmd() + 5 ) + 4 + 1; // including OOB marker and '\0'
-
-	NET_SendPacket( NS_CLIENT, len, message, &rcon_address );
 }
 
 
@@ -2277,7 +2258,7 @@ static void CL_CheckForResend( void ) {
 
 		// for now - this will be used to inform server about q3msgboom fix
 		// this is optional key so will not trigger oversize warning
-		Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "client", Q3_VERSION );
+		Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "client", Q3NOW_ENGINE_VERSION );
 
 		if ( !notOverflowed ) {
 			Com_Printf( S_COLOR_YELLOW "WARNING: oversize userinfo, you might be not able to join remote server!\n" );
@@ -2612,6 +2593,41 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		return qtrue;
 	}
 
+	if ( !Q_stricmp( c, "rconChallenge" ) ) {
+		const char *challengeStr = Cmd_Argv( 1 );
+		char hmacHex[ COM_SHA256_HEX_LEN + 1 ];
+
+		if ( !cl_wiredRconPassword ) {
+			cl_wiredRconPassword = Cvar_Get( "cl_wiredRconPassword", "", CVAR_TEMP );
+			Cvar_SetDescription( cl_wiredRconPassword, "Wired RCON password used for challenge-response authentication." );
+		}
+
+		if ( !challengeStr || strlen( challengeStr ) != 64 ) {
+			Com_Printf( "Wired RCON: invalid challenge received.\n" );
+			return qfalse;
+		}
+
+		Q_strncpyz( clc.wiredRconChallenge, challengeStr, sizeof( clc.wiredRconChallenge ) );
+		clc.wiredRconHasChallenge = qtrue;
+		clc.wiredRconAddress = *from;
+
+		Com_HMAC_SHA256_Hex( cl_wiredRconPassword ? cl_wiredRconPassword->string : "", clc.wiredRconChallenge, hmacHex );
+		NET_OutOfBandPrint( NS_CLIENT, &clc.wiredRconAddress, "rcon_verify %s", hmacHex );
+		return qfalse;
+	}
+
+	if ( !Q_stricmp( c, "rconAuthResult" ) ) {
+		const char *result = Cmd_Argv( 1 );
+		if ( !Q_stricmp( result, "ok" ) ) {
+			clc.wiredRconAuthed = qtrue;
+			Com_Printf( "Wired RCON: authenticated.\n" );
+		} else {
+			clc.wiredRconAuthed = qfalse;
+			Com_Printf( "Wired RCON: authentication failed.\n" );
+		}
+		return qfalse;
+	}
+
 	// server connection
 	if ( !Q_stricmp(c, "connectResponse") ) {
 		if ( cls.state >= CA_CONNECTED ) {
@@ -2663,7 +2679,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 	// echo request from server
 	if ( !Q_stricmp(c, "echo") ) {
 		// NOTE: we may have to add exceptions for auth and update servers
-		if ( (fromserver = NET_CompareAdr( from, &clc.serverAddress )) != qfalse || NET_CompareAdr( from, &rcon_address ) ) {
+		if ( (fromserver = NET_CompareAdr( from, &clc.serverAddress )) != qfalse ) {
 			NET_OutOfBandPrint( NS_CLIENT, from, "%s", Cmd_Argv(1) );
 		}
 		return fromserver;
@@ -2681,7 +2697,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 	// print string from server
 	if ( !Q_stricmp(c, "print") ) {
 		// NOTE: we may have to add exceptions for auth and update servers
-		if ( (fromserver = NET_CompareAdr( from, &clc.serverAddress )) != qfalse || NET_CompareAdr( from, &rcon_address ) ) {
+		if ( (fromserver = NET_CompareAdr( from, &clc.serverAddress )) != qfalse ) {
 			s = MSG_ReadString( msg );
 			Q_strncpyz( clc.serverMessage, s, sizeof( clc.serverMessage ) );
 			Com_Printf( "%s", s );
@@ -3201,6 +3217,8 @@ static void CL_InitRenderer( void ) {
 	// Wired UI owns font + menu subsystem — initialize here
 	// so text works before cgame loads.
 	WiredUI_Init( cls.state >= CA_AUTHORIZING && cls.state < CA_ACTIVE );
+	// Register store Lua bindings (queued; run by WiredScript_PostInit)
+	WiredStoreLua_Init();
 #endif
 
 	Con_CheckResize();
@@ -3908,8 +3926,6 @@ void CL_Init( void ) {
 	Cvar_SetDescription( cl_shownet, "Toggle the display of current network status." );
 	cl_showTimeDelta = Cvar_Get ("cl_showTimeDelta", "0", CVAR_TEMP );
 	Cvar_SetDescription( cl_showTimeDelta, "Prints the time delta of each packet to the console (the time delta between server updates)." );
-	rcon_client_password = Cvar_Get ("rconPassword", "", CVAR_TEMP );
-	Cvar_SetDescription( rcon_client_password, "Sets a remote console password so clients may change server settings without direct access to the server console." );
 	cl_activeAction = Cvar_Get( "activeAction", "", CVAR_TEMP );
 	Cvar_SetDescription( cl_activeAction, "Contents of this variable will be executed upon first frame of play.\nNote: It is cleared every time it is executed." );
 
@@ -3931,9 +3947,6 @@ void CL_Init( void ) {
 		"-bf 2 -c:a aac -strict -2 -b:a 160k -movflags faststart",
 		CVAR_ARCHIVE );
 	Cvar_SetDescription( cl_aviPipeFormat, "Encoder parameters used for \\video-pipe." );
-
-	rconAddress = Cvar_Get ("rconAddress", "", 0);
-	Cvar_SetDescription( rconAddress, "The IP address of the remote console you wish to connect to." );
 
 	cl_allowDownload = Cvar_Get( "cl_allowDownload", "1", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( cl_allowDownload, "Enables downloading of content needed in server. Valid bitmask flags:\n 1: Downloading enabled\n 2: Do not use HTTP/FTP downloads\n 4: Do not use UDP downloads" );
@@ -3999,6 +4012,8 @@ void CL_Init( void ) {
 	Cvar_SetDescription( cl_dlDirectory, s );
 
 	cl_reconnectArgs = Cvar_Get( "cl_reconnectArgs", "", CVAR_ARCHIVE_ND | CVAR_NOTABCOMPLETE );
+	cl_wiredRconPassword = Cvar_Get( "cl_wiredRconPassword", "", CVAR_TEMP );
+	Cvar_SetDescription( cl_wiredRconPassword, "Wired RCON password used for challenge-response authentication." );
 
 	// userinfo
 	Cvar_Get ("name", "UnnamedPlayer", CVAR_USERINFO | CVAR_ARCHIVE_ND );
@@ -4039,10 +4054,10 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("stoprecord", CL_StopRecord_f);
 	Cmd_AddCommand ("connect", CL_Connect_f);
 	Cmd_AddCommand ("reconnect", CL_Reconnect_f);
+	Cmd_AddCommand ("rcon_login", CL_RconLogin_f);
+	Cmd_AddCommand ("rcon", CL_Rcon_f);
 	Cmd_AddCommand ("localservers", CL_LocalServers_f);
 	Cmd_AddCommand ("globalservers", CL_GlobalServers_f);
-	Cmd_AddCommand ("rcon", CL_Rcon_f);
-	Cmd_SetCommandCompletionFunc( "rcon", CL_CompleteRcon );
 	Cmd_AddCommand ("ping", CL_Ping_f );
 	Cmd_AddCommand ("serverstatus", CL_ServerStatus_f );
 	Cmd_AddCommand ("showip", CL_ShowIP_f );
@@ -4120,9 +4135,10 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	Cmd_RemoveCommand ("stoprecord");
 	Cmd_RemoveCommand ("connect");
 	Cmd_RemoveCommand ("reconnect");
+	Cmd_RemoveCommand ("rcon_login");
+	Cmd_RemoveCommand ("rcon");
 	Cmd_RemoveCommand ("localservers");
 	Cmd_RemoveCommand ("globalservers");
-	Cmd_RemoveCommand ("rcon");
 	Cmd_RemoveCommand ("ping");
 	Cmd_RemoveCommand ("serverstatus");
 	Cmd_RemoveCommand ("showip");

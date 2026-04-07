@@ -39,7 +39,7 @@ Channel architecture:
  */
 #define WT_PERM_PLAYER     (1 << 0)   // connection type: game client
 #define WT_PERM_LEADER     (1 << 1)   // team role: coaching / team commands
-#define WT_PERM_ADMIN      (1 << 2)   // authority: rcon, kick, map change
+#define WT_PERM_ADMIN      (1 << 2)   // authority: kick, map change
 
 // Common presets
 #define WT_PERM_OBSERVER_MEMBER_USER   0                                          // 0b000

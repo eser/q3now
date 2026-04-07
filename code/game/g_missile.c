@@ -21,7 +21,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
-#include "bg_promode.h" // CPM
 
 #define	MISSILE_PRESTEP_TIME	50
 #if FEAT_TELEPORTING_MISSILES
@@ -205,9 +204,8 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 		return;
 	}
 
-    // CPM: copy velocity for special radius damage
+    // PM: copy velocity for special radius damage
     BG_EvaluateTrajectoryDelta(&ent->s.pos, level.time, vec2);
-    // !CPM
 
 	// check for bounce
 	if ( !other->takedamage &&
@@ -361,8 +359,8 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 		//	}
 		// }
 
-        // CPM: check new radius damage rules
-        if (cpm_radiusdamagefix)
+        // PM: check new radius damage rules
+        if (pm_radiusdamagefix)
         {
             // find "viewpoint" for explosion
             // backtrace 10 units
@@ -370,7 +368,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
             VectorScale(vec2, 10, vec2);
             VectorSubtract(trace->endpos, vec2, vec2);
             // use new radius damage
-            if (CPM_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath, vec2)) {
+            if (PM_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath, vec2)) {
 				int att;
 
 				att = G_AttackFromMOD( ent->splashMethodOfDeath );
@@ -391,7 +389,6 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
                 if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
             }
         }
-        // !CPM
 	}
 
 	trap_LinkEntity( ent );

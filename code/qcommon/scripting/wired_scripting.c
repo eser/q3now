@@ -1,17 +1,19 @@
 /*
 ===========================================================================
-cl_wired_scripting.c -- Wired Scripting: LuaJIT integration
+wired_scripting.c -- Headless LuaJIT runtime for q3now
 
-Phase 5: LuaJIT console, cvar metatable bridge, store Lua API, sandbox.
-No Lua in the render path -- Lua runs only on:
-  - Console input (user types Lua expression)
-  - File execution (dofile / exec autoexec.lua)
+Core Lua scripting: VM lifecycle, sandbox, cvar metatable bridge,
+print -> Com_Printf, cmd() -> Cbuf_ExecuteText, file execution.
+
+This is the engine-level runtime shared by client and dedicated server.
+Subsystems register additional Lua bindings via
+WiredScript_RegisterBindings(); they are invoked in WiredScript_PostInit().
 ===========================================================================
 */
 
-#include "../../client.h"
-#include "cl_wired_scripting.h"
-#include "cl_wired_store.h"
+#include "../q_shared.h"
+#include "../qcommon.h"
+#include "wired_scripting.h"
 
 #if FEAT_LUA
 
@@ -21,10 +23,13 @@ No Lua in the render path -- Lua runs only on:
 
 static lua_State *wired_lua = NULL;
 
+#define MAX_BINDING_REGISTRARS 8
+static WiredScript_BindingFn bindingRegistrars[MAX_BINDING_REGISTRARS];
+static int numBindingRegistrars = 0;
+
 /* ---- helpers --------------------------------------------------------- */
 
-/* LuaJIT 2.1 (Lua 5.1 API) has no luaL_tolstring.
-   Push a human-readable string for the value at idx. */
+/* LuaJIT 2.1 (Lua 5.1 API) has no luaL_tolstring. */
 static const char *WiredScript_ToString( lua_State *L, int idx ) {
 	if ( luaL_callmeta( L, idx, "__tostring" ) ) {
 		if ( !lua_isstring( L, -1 ) ) {
@@ -49,176 +54,32 @@ static const char *WiredScript_ToString( lua_State *L, int idx ) {
 	}
 }
 
-/* ---- Store API -------------------------------------------------------- */
-
-/* store.get(key) -> string or nil */
-static int WiredScript_StoreGet( lua_State *L ) {
-	const char *key = luaL_checkstring( L, 1 );
-	wuiStoreEntry_t *e = WiredStore_Get( key );
-	if ( e && e->text[0] ) {
-		lua_pushstring( L, e->text );
-	} else {
-		lua_pushnil( L );
-	}
-	return 1;
-}
-
-/* store.set(key, value) -- writes text + value to store */
-static int WiredScript_StoreSet( lua_State *L ) {
-	const char *key = luaL_checkstring( L, 1 );
-	wuiStoreEntry_t *e = WiredStore_Set( key );
-	if ( !e ) {
-		return luaL_error( L, "store full, cannot set '%s'", key );
-	}
-	if ( lua_type( L, 2 ) == LUA_TNUMBER ) {
-		float val = (float)lua_tonumber( L, 2 );
-		char buf[64];
-		e->value = val;
-		Com_sprintf( buf, sizeof( buf ), "%g", (double)val );
-		Q_strncpyz( e->text, buf, sizeof( e->text ) );
-	} else {
-		const char *val = luaL_checkstring( L, 2 );
-		Q_strncpyz( e->text, val, sizeof( e->text ) );
-	}
-	e->flags |= WUI_STORE_FLAG_DIRTY;
-	return 0;
-}
-
-/* store.getvalue(key) -> number or nil */
-static int WiredScript_StoreGetValue( lua_State *L ) {
-	const char *key = luaL_checkstring( L, 1 );
-	wuiStoreEntry_t *e = WiredStore_Get( key );
-	if ( e ) {
-		lua_pushnumber( L, e->value );
-	} else {
-		lua_pushnil( L );
-	}
-	return 1;
-}
-
-/* store.getcolor(key) -> r, g, b, a or nil */
-static int WiredScript_StoreGetColor( lua_State *L ) {
-	const char *key = luaL_checkstring( L, 1 );
-	wuiStoreEntry_t *e = WiredStore_Get( key );
-	if ( e ) {
-		lua_pushnumber( L, e->color[0] );
-		lua_pushnumber( L, e->color[1] );
-		lua_pushnumber( L, e->color[2] );
-		lua_pushnumber( L, e->color[3] );
-		return 4;
-	}
-	lua_pushnil( L );
-	return 1;
-}
-
-/* ---- store.pairs(prefix) — stateless iterator ----------------------- */
-
-/* Collector callback: pushes key and text onto a Lua table */
-typedef struct {
-	lua_State *L;
-	int index;
-} storePairsCtx_t;
-
-static void WiredScript_StorePairsCollect( wuiStoreEntry_t *entry, void *userData ) {
-	storePairsCtx_t *ctx = (storePairsCtx_t *)userData;
-	lua_State *L = ctx->L;
-
-	/* t[index] = { key, text } as two values at sequential indices */
-	ctx->index++;
-	lua_pushinteger( L, ctx->index );
-	lua_newtable( L );
-	lua_pushstring( L, entry->key );
-	lua_setfield( L, -2, "key" );
-	lua_pushstring( L, entry->text );
-	lua_setfield( L, -2, "text" );
-	lua_pushnumber( L, entry->value );
-	lua_setfield( L, -2, "value" );
-	lua_rawset( L, -3 ); /* t[index] = entry_table */
-}
-
-/* Iterator function: upvalue 1 = collected array, upvalue 2 = current index */
-static int WiredScript_StorePairsNext( lua_State *L ) {
-	int idx;
-
-	/* increment index */
-	idx = (int)lua_tointeger( L, lua_upvalueindex( 2 ) ) + 1;
-	lua_pushinteger( L, idx );
-	lua_replace( L, lua_upvalueindex( 2 ) );
-
-	/* get collected[idx] */
-	lua_rawgeti( L, lua_upvalueindex( 1 ), idx );
-	if ( lua_isnil( L, -1 ) ) {
-		return 0; /* end of iteration */
-	}
-
-	/* extract key and text from the entry table */
-	lua_getfield( L, -1, "key" );
-	lua_getfield( L, -2, "text" );
-	lua_remove( L, -3 ); /* remove the entry table, leaving key and text */
-	return 2; /* return key, text */
-}
-
-/* store.pairs(prefix) → iterator, nil, nil (for generic for) */
-static int WiredScript_StorePairs( lua_State *L ) {
-	const char *prefix;
-	storePairsCtx_t ctx;
-
-	prefix = luaL_optstring( L, 1, "" );
-
-	/* Collect all matching entries into a Lua table */
-	lua_newtable( L );              /* upvalue 1: collected array */
-	ctx.L = L;
-	ctx.index = 0;
-	WiredStore_ForEach( prefix, WiredScript_StorePairsCollect, &ctx );
-
-	lua_pushinteger( L, 0 );       /* upvalue 2: current index */
-	lua_pushcclosure( L, WiredScript_StorePairsNext, 2 );
-	return 1; /* return iterator function */
-}
-
-static const luaL_Reg storeLib[] = {
-	{ "get",      WiredScript_StoreGet },
-	{ "set",      WiredScript_StoreSet },
-	{ "getvalue", WiredScript_StoreGetValue },
-	{ "getcolor", WiredScript_StoreGetColor },
-	{ "pairs",    WiredScript_StorePairs },
-	{ NULL, NULL }
-};
-
 /* ---- Cvar metatable bridge ------------------------------------------- */
-/* Global table with __index/__newindex metamethods:
-   sensitivity = 3.5   -> Cvar_Set("sensitivity", "3.5")
-   print(sensitivity)   -> Cvar_Get("sensitivity") */
+/* _G metatable: variable reads -> Cvar_Get, writes -> Cvar_Set */
 
 static int WiredScript_CvarIndex( lua_State *L ) {
-	/* __index receives (table, key) at stack positions 1 and 2 */
 	const char *name;
 	char buf[1024];
 
-	/* First check if it's a real global (function, table, etc.)
-	   lua_rawget consumes the key from stack, so push a copy first */
-	lua_pushvalue( L, 2 );             /* duplicate key onto stack top */
-	lua_rawget( L, 1 );               /* pops key copy, pushes value */
+	lua_pushvalue( L, 2 );
+	lua_rawget( L, 1 );
 	if ( !lua_isnil( L, -1 ) ) {
-		return 1; /* found a real global, return it */
+		return 1;
 	}
-	lua_pop( L, 1 );                  /* pop the nil */
+	lua_pop( L, 1 );
 
-	/* Key is still at position 2 — read it */
 	name = lua_tostring( L, 2 );
 	if ( !name ) {
 		lua_pushnil( L );
 		return 1;
 	}
 
-	/* Try as cvar */
 	Cvar_VariableStringBuffer( name, buf, sizeof( buf ) );
 	if ( buf[0] == '\0' ) {
 		lua_pushnil( L );
 		return 1;
 	}
 
-	/* Return as number if parseable, string otherwise */
 	{
 		char *endptr;
 		double val = strtod( buf, &endptr );
@@ -235,13 +96,11 @@ static int WiredScript_CvarNewIndex( lua_State *L ) {
 	const char *name = lua_tostring( L, 2 );
 	if ( !name ) return 0;
 
-	/* Check if setting a real global (function, table) -- allow it */
 	if ( lua_type( L, 3 ) == LUA_TFUNCTION || lua_type( L, 3 ) == LUA_TTABLE ) {
 		lua_rawset( L, 1 );
 		return 0;
 	}
 
-	/* Set cvar */
 	if ( lua_type( L, 3 ) == LUA_TNUMBER ) {
 		char buf[64];
 		Com_sprintf( buf, sizeof( buf ), "%g", lua_tonumber( L, 3 ) );
@@ -254,7 +113,7 @@ static int WiredScript_CvarNewIndex( lua_State *L ) {
 	return 0;
 }
 
-/* ---- Sandbox print -> Com_Printf ------------------------------------- */
+/* ---- print -> Com_Printf --------------------------------------------- */
 
 static int WiredScript_Print( lua_State *L ) {
 	int n = lua_gettop( L );
@@ -263,13 +122,13 @@ static int WiredScript_Print( lua_State *L ) {
 		const char *s = WiredScript_ToString( L, i );
 		if ( i > 1 ) Com_Printf( "\t" );
 		Com_Printf( "%s", s ? s : "nil" );
-		lua_pop( L, 1 ); /* pop the string from WiredScript_ToString */
+		lua_pop( L, 1 );
 	}
 	Com_Printf( "\n" );
 	return 0;
 }
 
-/* ---- Engine command execution from Lua -------------------------------- */
+/* ---- cmd() -> Cbuf_ExecuteText --------------------------------------- */
 
 static int WiredScript_Cmd( lua_State *L ) {
 	const char *cmd = luaL_checkstring( L, 1 );
@@ -296,7 +155,6 @@ static void WiredScript_Cmd_Eval( void ) {
 		return;
 	}
 
-	/* concatenate all args into a single string */
 	text[0] = '\0';
 	for ( i = 1; i < Cmd_Argc(); i++ ) {
 		if ( i > 1 ) Q_strcat( text, sizeof( text ), " " );
@@ -306,7 +164,7 @@ static void WiredScript_Cmd_Eval( void ) {
 	WiredScript_TryEval( text );
 }
 
-/* ---- Initialization --------------------------------------------------- */
+/* ---- Lifecycle -------------------------------------------------------- */
 
 void WiredScript_Init( void ) {
 	lua_State *L;
@@ -321,47 +179,38 @@ void WiredScript_Init( void ) {
 		return;
 	}
 
-	/* Open SAFE standard libraries only -- remove os, io, debug after */
 	luaL_openlibs( L );
 
-	/* Remove unsafe modules */
+	/* Sandbox: remove unsafe modules */
 	lua_pushnil( L ); lua_setglobal( L, "os" );
 	lua_pushnil( L ); lua_setglobal( L, "io" );
 	lua_pushnil( L ); lua_setglobal( L, "debug" );
 	lua_pushnil( L ); lua_setglobal( L, "loadfile" );
 	lua_pushnil( L ); lua_setglobal( L, "dofile" );
 
-	/* Register store module */
-	luaL_newlib( L, storeLib );
-	lua_setglobal( L, "store" );
-
-	/* Override print */
 	lua_pushcfunction( L, WiredScript_Print );
 	lua_setglobal( L, "print" );
 
-	/* Add cmd() function for engine commands */
 	lua_pushcfunction( L, WiredScript_Cmd );
 	lua_setglobal( L, "cmd" );
 
-	/* Set up cvar metatable on _G (Lua 5.1 API: use LUA_GLOBALSINDEX) */
-	lua_pushvalue( L, LUA_GLOBALSINDEX );  /* push _G */
-	lua_newtable( L );                     /* push metatable */
+	/* Cvar metatable on _G (Lua 5.1 API: LUA_GLOBALSINDEX) */
+	lua_pushvalue( L, LUA_GLOBALSINDEX );
+	lua_newtable( L );
 	lua_pushcfunction( L, WiredScript_CvarIndex );
 	lua_setfield( L, -2, "__index" );
 	lua_pushcfunction( L, WiredScript_CvarNewIndex );
 	lua_setfield( L, -2, "__newindex" );
-	lua_setmetatable( L, -2 );             /* setmetatable(_G, mt) */
-	lua_pop( L, 1 );                       /* pop _G */
+	lua_setmetatable( L, -2 );
+	lua_pop( L, 1 );
 
 	wired_lua = L;
 
-	/* Register console commands */
 	Cmd_AddCommand( "lua_exec", WiredScript_Cmd_Exec );
 	Cmd_AddCommand( "lua_eval", WiredScript_Cmd_Eval );
 
 	Com_Printf( "WiredScript: LuaJIT initialized (sandbox active)\n" );
 
-	/* Try to execute autoexec.lua */
 	WiredScript_ExecFile( "autoexec.lua" );
 }
 
@@ -384,7 +233,6 @@ qboolean WiredScript_TryEval( const char *text ) {
 		return qfalse;
 	}
 
-	/* Skip lines that look like traditional commands (start with / or \) */
 	if ( text[0] == '/' || text[0] == '\\' ) {
 		return qfalse;
 	}
@@ -397,7 +245,6 @@ qboolean WiredScript_TryEval( const char *text ) {
 		if ( status == 0 ) {
 			status = lua_pcall( wired_lua, 0, LUA_MULTRET, 0 );
 			if ( status == 0 ) {
-				/* Print results */
 				int nresults = lua_gettop( wired_lua );
 				if ( nresults > 0 ) {
 					int i;
@@ -405,23 +252,22 @@ qboolean WiredScript_TryEval( const char *text ) {
 						const char *s = WiredScript_ToString( wired_lua, i );
 						if ( i > 1 ) Com_Printf( "\t" );
 						Com_Printf( "%s", s ? s : "nil" );
-						lua_pop( wired_lua, 1 ); /* pop the string */
+						lua_pop( wired_lua, 1 );
 					}
 					Com_Printf( "\n" );
 				}
 				lua_settop( wired_lua, 0 );
 				return qtrue;
 			}
-			lua_pop( wired_lua, 1 ); /* pop error */
+			lua_pop( wired_lua, 1 );
 		} else {
-			lua_pop( wired_lua, 1 ); /* pop error from loadstring */
+			lua_pop( wired_lua, 1 );
 		}
 	}
 
 	/* Try as statement */
 	status = luaL_loadstring( wired_lua, text );
 	if ( status != 0 ) {
-		/* Not valid Lua -- fall through to old command system */
 		lua_pop( wired_lua, 1 );
 		return qfalse;
 	}
@@ -446,7 +292,6 @@ void WiredScript_ExecFile( const char *filename ) {
 
 	if ( !wired_lua ) return;
 
-	/* Only allow .lua files */
 	{
 		const char *ext = strrchr( filename, '.' );
 		if ( !ext || Q_stricmp( ext, ".lua" ) != 0 ) {
@@ -457,7 +302,6 @@ void WiredScript_ExecFile( const char *filename ) {
 
 	len = FS_FOpenFileRead( filename, &f, qfalse );
 	if ( len <= 0 || f == 0 ) {
-		/* File not found -- silent for autoexec.lua, warn for explicit exec */
 		if ( Q_stricmp( filename, "autoexec.lua" ) != 0 ) {
 			Com_Printf( S_COLOR_YELLOW "WiredScript: file not found '%s'\n", filename );
 		}
@@ -469,7 +313,6 @@ void WiredScript_ExecFile( const char *filename ) {
 	buf[len] = '\0';
 	FS_FCloseFile( f );
 
-	/* Load and execute */
 	{
 		char chunkName[256];
 		Com_sprintf( chunkName, sizeof( chunkName ), "@%s", filename );
@@ -493,6 +336,37 @@ void WiredScript_ExecFile( const char *filename ) {
 	}
 
 	Com_Printf( "WiredScript: executed '%s'\n", filename );
+}
+
+/* ---- Binding registration --------------------------------------------- */
+
+void WiredScript_RegisterBindings( WiredScript_BindingFn fn ) {
+	if ( numBindingRegistrars >= MAX_BINDING_REGISTRARS ) {
+		Com_Printf( S_COLOR_RED "WiredScript: binding registrar table full\n" );
+		return;
+	}
+	bindingRegistrars[numBindingRegistrars++] = fn;
+}
+
+void WiredScript_PostInit( void ) {
+	int i;
+
+	if ( !wired_lua ) {
+		return;
+	}
+
+	for ( i = 0; i < numBindingRegistrars; i++ ) {
+		bindingRegistrars[i]( wired_lua );
+	}
+	if ( numBindingRegistrars ) {
+		Com_Printf( "WiredScript: %d binding registrar(s) applied\n", numBindingRegistrars );
+	}
+}
+
+/* ---- Extension point -------------------------------------------------- */
+
+lua_State *WiredScript_GetState( void ) {
+	return wired_lua;
 }
 
 #endif /* FEAT_LUA */

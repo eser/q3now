@@ -1428,7 +1428,7 @@ static void create_instance( void )
 
 	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	appInfo.pNext = NULL;
-	appInfo.pApplicationName = NULL; // Q3_VERSION;
+	appInfo.pApplicationName = NULL; // Q3NOW_ENGINE_VERSION;
 	appInfo.applicationVersion = 0x0;
 	appInfo.pEngineName = NULL;
 	appInfo.engineVersion = 0x0;

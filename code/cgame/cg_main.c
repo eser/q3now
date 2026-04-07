@@ -22,7 +22,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // cg_main.c -- initialization and primary entry point for cgame
 #include "cg_local.h"
-#include "../game/bg_promode.h" // CPM
 
 /* TA UI display context removed -- Wired UI handles menus/HUD */
 
@@ -518,7 +517,7 @@ qboolean CG_IsPlayerInvisible( centity_t *cent ) {
 		return qtrue;
 	}
 
-	if ( cgs.gametype == GT_KINGOFTHEHILL && cgs.g_kothGhosts ) {
+	if ( cgs.gametype == GT_KINGOFTHEHILL && cgs.kothGhosts ) {
 		if ( !(cent->currentState.powerups & ( 1 << PW_KING )) &&
 			cent->muzzleFlashTime + GHOST_FLASH_TIME < cg.time ) {
 			return qtrue;
@@ -1158,12 +1157,8 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.flagShaders[2] = trap_R_RegisterShaderNoMip("ui/assets/statusbar/flag_missing.tga");
 #endif
 
-    // CPM: Register graphics
-    // cgs.media.backpackModel = trap_R_RegisterModel("models/backpack.md3");
-    // cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/icon_backpack");
     cgs.media.backpackModel = trap_R_RegisterModel("models/powerups/armor/shard.md3");
     cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/iconr_shard");
-    // !CPM
 
     cgs.media.lightningShader = trap_R_RegisterShader("lightningBoltNew");
 	cgs.media.lightningArcShader = trap_R_RegisterShader( "lightningArc" );
@@ -1364,9 +1359,8 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	CG_ParseServerinfo();
 
-    // CPM: Setup according to the physics settings
-    CPM_UpdateSettings(cgs.gametype);
-    // !CPM
+    // PM: Setup according to the physics settings
+    PM_UpdateSettings(cgs.gametype);
 
 	// load the new map
 	CG_LoadingString( "collision map" );

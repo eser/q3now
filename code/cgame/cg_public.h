@@ -331,7 +331,7 @@ typedef struct {
 	// match state
 	int         gametype;
 	int         scores1, scores2;
-	int         fraglimit, capturelimit, timelimit;
+	int         scorelimit, timelimit;
 	int         maxclients;
 	int         warmup, levelStartTime;
 	qboolean    showScores, demoPlayback, intermission;

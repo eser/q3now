@@ -22,11 +22,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
-#include "bg_promode.h" // CPM
 
-// PRODUCT_DATE is injected by cmake for native builds; QVM builds fall back to unknown
-#ifndef PRODUCT_DATE
-#define PRODUCT_DATE "unknown"
+// Q3NOW_GAMEDATE is injected by cmake for native builds; QVM builds fall back to unknown
+#ifndef Q3NOW_GAMEDATE
+#define Q3NOW_GAMEDATE "unknown"
 #endif
 
 level_locals_t	level;
@@ -45,9 +44,9 @@ gentity_t		g_entities[MAX_GENTITIES];
 gclient_t		g_clients[MAX_CLIENTS];
 
 vmCvar_t	g_gametype;
-vmCvar_t	g_fraglimit;
+vmCvar_t	g_scorelimit;
 vmCvar_t	g_timelimit;
-vmCvar_t	g_capturelimit;
+vmCvar_t	g_overtime;
 vmCvar_t	g_password;
 vmCvar_t	g_needpass;
 vmCvar_t	g_maxclients;
@@ -62,7 +61,6 @@ vmCvar_t	g_debugDamage;
 vmCvar_t	g_debugAlloc;
 vmCvar_t	g_motd;
 vmCvar_t	g_synchronousClients;
-vmCvar_t	g_warmup;
 vmCvar_t	g_restarted;
 vmCvar_t	g_logfile;
 vmCvar_t	g_logfileSync;
@@ -87,9 +85,6 @@ vmCvar_t	g_enableDust;
 vmCvar_t	g_enableBreath;
 #endif
 
-#define Q3NOW_VERSION "1.0"
-
-vmCvar_t	g_q3now;
 vmCvar_t	g_spawnWeapons;
 vmCvar_t	g_grapple;
 vmCvar_t	g_instagib;
@@ -122,9 +117,6 @@ vmCvar_t	g_maprotationMode;
 #endif
 #if FEAT_FAST_WEAPON_SWITCH
 vmCvar_t	g_fastWeaponSwitch;
-#endif
-#if FEAT_OVERTIME
-vmCvar_t	g_overtime;
 #endif
 #if FEAT_AUTO_DEMO
 vmCvar_t	g_autoDemo;
@@ -186,9 +178,10 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_cheats, "sv_cheats", "", 0, 0, qfalse },
 
 	// noset vars
-	{ NULL, "gamename", GAMEVERSION , CVAR_SERVERINFO | CVAR_ROM, 0, qfalse  },
-	{ NULL, "gamedate", PRODUCT_DATE , CVAR_ROM, 0, qfalse  },
+	{ NULL, "gamename", Q3NOW_GAMENAME , CVAR_SERVERINFO | CVAR_ROM, 0, qfalse  },
+	{ NULL, "gamedate", Q3NOW_GAMEDATE , CVAR_ROM, 0, qfalse  },
 	{ &g_restarted, "g_restarted", "0", CVAR_ROM, 0, qfalse  },
+	// { NULL, "sv_mapname", "", CVAR_SERVERINFO | CVAR_ROM, 0, qfalse  },
 
 	// latched vars
 	{ &g_gametype, "g_gametype", "0", CVAR_SERVERINFO | CVAR_USERINFO | CVAR_LATCH, 0, qfalse  },
@@ -197,9 +190,9 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_maxGameClients, "g_maxGameClients", "0", CVAR_SERVERINFO | CVAR_LATCH | CVAR_ARCHIVE, 0, qfalse  },
 
 	// change anytime vars
-	{ &g_fraglimit, "fraglimit", "20", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
-	{ &g_timelimit, "timelimit", "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
-	{ &g_capturelimit, "capturelimit", "8", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	{ &g_scorelimit, "g_scorelimit", "20", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	{ &g_timelimit, "g_timelimit", "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
+	{ &g_overtime, "g_overtime", "1", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_NORESTART, 0, qtrue },
 
 	{ &g_synchronousClients, "g_synchronousClients", "0", CVAR_SYSTEMINFO, 0, qfalse  },
 
@@ -208,7 +201,6 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_teamAutoJoin, "g_teamAutoJoin", "0", CVAR_ARCHIVE  },
 	{ &g_teamForceBalance, "g_teamForceBalance", "0", CVAR_ARCHIVE  },
 
-	{ &g_warmup, "g_warmup", "0", CVAR_ARCHIVE, 0, qtrue  },
 	{ &g_logfile, "g_log", "games.log", CVAR_ARCHIVE, 0, qfalse  },
 	{ &g_logfileSync, "g_logsync", "0", CVAR_ARCHIVE, 0, qfalse  },
 
@@ -250,7 +242,6 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
 	{ &g_localTeamPref, "g_localTeamPref", "", 0, 0, qfalse },
 
-	{ &g_q3now, "g_q3now", Q3NOW_VERSION, CVAR_SERVERINFO | CVAR_ROM, 0, qfalse },
     { &g_instagib, "g_instagib", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
 	{ &g_excessive, "g_excessive", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
     { &g_spawnWeapons, "g_spawnWeapons", "0", CVAR_SERVERINFO | CVAR_LATCH, 0, qtrue },
@@ -282,9 +273,6 @@ static cvarTable_t		gameCvarTable[] = {
 #endif
 #if FEAT_FAST_WEAPON_SWITCH
     { &g_fastWeaponSwitch,        "g_fastWeaponSwitch",        "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
-#endif
-#if FEAT_OVERTIME
-    { &g_overtime,                "g_overtime",                "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
 #endif
 #if FEAT_AUTO_DEMO
     { &g_autoDemo,                "g_autoDemo",                "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
@@ -511,7 +499,7 @@ void G_RegisterCvars( void ) {
 		trap_Cvar_Update( &g_gametype );
 	}
 
-	level.warmupModificationCount = g_warmup.modificationCount;
+	level.minPlayersModificationCount = g_minPlayers.modificationCount;
 }
 
 /*
@@ -558,8 +546,8 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	int					i;
 
 	G_Printf ("------- Game Initialization -------\n");
-	G_Printf ("gamename: %s\n", GAMEVERSION);
-	G_Printf ("gamedate: %s\n", PRODUCT_DATE);
+	G_Printf ("gamename: %s\n", Q3NOW_GAMENAME);
+	G_Printf ("gamedate: %s\n", Q3NOW_GAMEDATE);
 
 	srand( randomSeed );
 
@@ -569,9 +557,8 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	G_InitMemory();
 
-    // CPM: Initialize
     // Update all settings
-    CPM_UpdateSettings(g_gametype.integer);
+    PM_UpdateSettings(g_gametype.integer);
 
     // q3now: print mod version and active feature flags
     {
@@ -699,10 +686,10 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	G_FindTeams();
 
     if (g_gametype.integer == GT_LASTMANSTANDING) {
-        level.initialFraglimit = g_fraglimit.integer;
+        level.initialScorelimit = g_scorelimit.integer;
 
-        if (level.initialFraglimit < 1) {
-            level.initialFraglimit = 1;
+        if (level.initialScorelimit < 1) {
+            level.initialScorelimit = 1;
         }
     }
 
@@ -1618,47 +1605,22 @@ void CheckExitRules( void ) {
         return;
     }
 
-	if ( g_timelimit.integer < 0 || g_timelimit.integer > INT_MAX / 60000 ) {
-		G_Printf( "timelimit %i is out of range, defaulting to 0\n", g_timelimit.integer );
-		trap_Cvar_Set( "timelimit", "0" );
-		trap_Cvar_Update( &g_timelimit );
+	if ( g_scorelimit.integer < 0 ) {
+		G_Printf( "g_scorelimit %i is out of range, defaulting to 0\n", g_scorelimit.integer );
+		trap_Cvar_Set( "g_scorelimit", "0" );
+		trap_Cvar_Update( &g_scorelimit );
 	}
 
-	if ( g_timelimit.integer ) {
-		if ( level.time - level.startTime >= g_timelimit.integer*60000 ) {
-#if FEAT_OVERTIME
-			// overtime (10D): extend timelimit when score is tied
-			if ( g_overtime.integer > 0 && ScoreIsTied() ) {
-				level.overtimeCount++;
-				trap_Cvar_Set( "timelimit", va( "%i", g_timelimit.integer + g_overtime.integer ) );
-				trap_Cvar_Update( &g_timelimit );
-				trap_SendServerCommand( -1, va( "print \"Score tied! Overtime #%d (%d min).\n\"",
-					level.overtimeCount, g_overtime.integer ) );
-				return;
-			}
-#endif
-			trap_SendServerCommand( -1, "print \"Timelimit hit.\n\"");
-			LogExit( "Timelimit hit." );
-			return;
-		}
-	}
-
-	if ( g_fraglimit.integer < 0 ) {
-		G_Printf( "fraglimit %i is out of range, defaulting to 0\n", g_fraglimit.integer );
-		trap_Cvar_Set( "fraglimit", "0" );
-		trap_Cvar_Update( &g_fraglimit );
-	}
-
-	if ( g_gametype.integer < GT_CTF && g_fraglimit.integer ) {
-		if ( level.teamScores[TEAM_RED] >= g_fraglimit.integer ) {
-			trap_SendServerCommand( -1, "print \"Red hit the fraglimit.\n\"" );
-			LogExit( "Fraglimit hit." );
+	if ( g_gametype.integer < GT_CTF && g_scorelimit.integer ) {
+		if ( level.teamScores[TEAM_RED] >= g_scorelimit.integer ) {
+			trap_SendServerCommand( -1, "print \"Red hit the scorelimit.\n\"" );
+			LogExit( "Scorelimit hit." );
 			return;
 		}
 
-		if ( level.teamScores[TEAM_BLUE] >= g_fraglimit.integer ) {
-			trap_SendServerCommand( -1, "print \"Blue hit the fraglimit.\n\"" );
-			LogExit( "Fraglimit hit." );
+		if ( level.teamScores[TEAM_BLUE] >= g_scorelimit.integer ) {
+			trap_SendServerCommand( -1, "print \"Blue hit the scorelimit.\n\"" );
+			LogExit( "Scorelimit hit." );
 			return;
 		}
 
@@ -1681,9 +1643,9 @@ void CheckExitRules( void ) {
                 }
             }
             else {
-                if (cl->ps.persistant[PERS_SCORE] >= g_fraglimit.integer) {
-                    LogExit("Fraglimit hit.");
-                    trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
+                if (cl->ps.persistant[PERS_SCORE] >= g_scorelimit.integer) {
+                    LogExit("Scorelimit hit.");
+                    trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " hit the scorelimit.\n\"",
                         cl->pers.netname));
                     return;
                 }
@@ -1698,7 +1660,7 @@ void CheckExitRules( void ) {
                 }
 
                 if (cl->sess.sessionTeam == TEAM_FREE && cl->ps.persistant[PERS_SCORE] > 0) {
-                    trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " hit the fraglimit.\n\"",
+                    trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " hit the scorelimit.\n\"",
                         cl->pers.netname));
 
                     cl->sess.wins++;
@@ -1709,28 +1671,31 @@ void CheckExitRules( void ) {
             }
 
             // FIXME draw
-            LogExit("Fraglimit hit.");
+            LogExit("Scorelimit hit.");
             return;
         }
 	}
 
-	if ( g_capturelimit.integer < 0 ) {
-		G_Printf( "capturelimit %i is out of range, defaulting to 0\n", g_capturelimit.integer );
-		trap_Cvar_Set( "capturelimit", "0" );
-		trap_Cvar_Update( &g_capturelimit );
+	if ( g_timelimit.integer < 0 || g_timelimit.integer > INT_MAX / 60000 ) {
+		G_Printf( "g_timelimit %i is out of range, defaulting to 0\n", g_timelimit.integer );
+		trap_Cvar_Set( "g_timelimit", "0" );
+		trap_Cvar_Update( &g_timelimit );
 	}
 
-	if ( g_gametype.integer >= GT_CTF && g_capturelimit.integer ) {
+	if ( g_timelimit.integer ) {
+		if ( level.time - level.startTime >= g_timelimit.integer*60000 ) {
+			// overtime (10D): extend timelimit when score is tied
+			if ( g_overtime.integer > 0 && ScoreIsTied() ) {
+				level.overtimeCount++;
+				trap_Cvar_Set( "g_timelimit", va( "%i", g_timelimit.integer + g_overtime.integer ) );
+				trap_Cvar_Update( &g_timelimit );
+				trap_SendServerCommand( -1, va( "print \"Score tied! Overtime #%d (%d min).\n\"",
+					level.overtimeCount, g_overtime.integer ) );
+				return;
+			}
 
-		if ( level.teamScores[TEAM_RED] >= g_capturelimit.integer ) {
-			trap_SendServerCommand( -1, "print \"Red hit the capturelimit.\n\"" );
-			LogExit( "Capturelimit hit." );
-			return;
-		}
-
-		if ( level.teamScores[TEAM_BLUE] >= g_capturelimit.integer ) {
-			trap_SendServerCommand( -1, "print \"Blue hit the capturelimit.\n\"" );
-			LogExit( "Capturelimit hit." );
+			trap_SendServerCommand( -1, "print \"Timelimit hit.\n\"");
+			LogExit( "Timelimit hit." );
 			return;
 		}
 	}
@@ -1885,7 +1850,7 @@ void CheckDuel( void ) {
 	}
 
 	if ( g_gametype.integer == GT_DUEL ) {
-		int minNeeded = ( g_minPlayers.integer > 0 ) ? g_minPlayers.integer : 2;
+		int minNeeded = 2;
 
 		// pull in a spectator if needed
 		if ( level.numPlayingClients < minNeeded ) {
@@ -1906,9 +1871,9 @@ void CheckDuel( void ) {
 			return;
 		}
 
-		// if the warmup is changed at the console, restart it
-		if ( g_warmup.modificationCount != level.warmupModificationCount ) {
-			level.warmupModificationCount = g_warmup.modificationCount;
+		// if the g_minPlayers is changed at the console, restart it
+		if ( g_minPlayers.modificationCount != level.minPlayersModificationCount ) {
+			level.minPlayersModificationCount = g_minPlayers.modificationCount;
 			level.warmupTime = -1;
 		}
 
@@ -1922,11 +1887,7 @@ void CheckDuel( void ) {
 				}
 #endif
 				// fudge by -1 to account for extra delays
-				if ( g_warmup.integer > 1 ) {
-					level.warmupTime = level.time + ( g_warmup.integer - 1 ) * 1000;
-				} else {
-					level.warmupTime = 0;
-				}
+				level.warmupTime = level.time + ( WARMUP_TIME - 1 ) * 1000;
 
 				trap_SetConfigstring( CS_WARMUP, va("%i", level.warmupTime) );
 			}
@@ -1971,9 +1932,12 @@ void CheckDuel( void ) {
 		}
 
 		// if the warmup is changed at the console, restart it
-		if ( g_warmup.modificationCount != level.warmupModificationCount ) {
-			level.warmupModificationCount = g_warmup.modificationCount;
-			level.warmupTime = -1;
+		if ( g_minPlayers.modificationCount != level.minPlayersModificationCount ) {
+			level.minPlayersModificationCount = g_minPlayers.modificationCount;
+
+			if ( level.numPlayingClients < g_minPlayers.integer ) {
+				level.warmupTime = -1;
+			}
 		}
 
 		// if all players have arrived, start the countdown
@@ -1985,11 +1949,7 @@ void CheckDuel( void ) {
 			}
 #endif
 			// fudge by -1 to account for extra delays
-			if ( g_warmup.integer > 1 ) {
-				level.warmupTime = level.time + ( g_warmup.integer - 1 ) * 1000;
-			} else {
-				level.warmupTime = 0;
-			}
+			level.warmupTime = level.time + ( WARMUP_TIME - 1 ) * 1000;
 
 			trap_SetConfigstring( CS_WARMUP, va("%i", level.warmupTime) );
 			return;

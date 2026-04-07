@@ -103,8 +103,8 @@ void G_WriteStatsJSON( void ) {
 	// match info
 	json_write( f, "  " ); json_writestring( f, "server", serverId ); json_write( f, ",\n" );
 	json_write( f, "  " ); json_writeint( f, "gametype", g_gametype.integer ); json_write( f, ",\n" );
+	json_write( f, "  " ); json_writeint( f, "scorelimit", g_scorelimit.integer ); json_write( f, ",\n" );
 	json_write( f, "  " ); json_writeint( f, "timelimit", g_timelimit.integer ); json_write( f, ",\n" );
-	json_write( f, "  " ); json_writeint( f, "fraglimit", g_fraglimit.integer ); json_write( f, ",\n" );
 
 	{
 		char mapname[MAX_QPATH];

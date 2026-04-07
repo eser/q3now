@@ -26,6 +26,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/vm_local.h"
 #include "../game/g_public.h"
 #include "../game/bg_public.h"
+#include "sv_wired_rcon_lua.h"
+
+typedef struct lua_State lua_State;
 
 //=============================================================================
 
@@ -231,6 +234,28 @@ typedef struct client_s {
 
 } client_t;
 
+#define MAX_RCON_SESSIONS 8
+#define RCON_CHALLENGE_LEN 64
+#define RCON_SESSION_TIMEOUT 900000
+#define RCON_MAX_FAILURES 5
+#define RCON_LOCKOUT_TIME 30000
+
+typedef struct {
+	netadr_t addr;
+	char challenge[ RCON_CHALLENGE_LEN + 1 ];
+	int challengeTime;
+	qboolean authenticated;
+	int lastActivity;
+	int failCount;
+	int lastFailTime;
+} rconSession_t;
+
+typedef struct {
+	lua_State *L;
+	qboolean initialized;
+	netadr_t currentClient;
+} rconLua_t;
+
 //=============================================================================
 
 
@@ -258,6 +283,8 @@ typedef struct {
 	int			lastValidFrame;			// updated with each snapshot built
 	snapshotFrame_t	snapFrames[ NUM_SNAPSHOT_FRAMES ];
 	snapshotFrame_t	*currFrame; // current frame that clients can refer
+	rconSession_t rconSessions[ MAX_RCON_SESSIONS ];
+	rconLua_t rconLua;
 
 } serverStatic_t;
 
@@ -283,7 +310,6 @@ extern	vm_t			*gvm;				// game virtual machine
 extern	cvar_t	*sv_fps;
 extern	cvar_t	*sv_timeout;
 extern	cvar_t	*sv_zombietime;
-extern	cvar_t	*sv_rconPassword;
 extern	cvar_t	*sv_privatePassword;
 extern	cvar_t	*sv_allowDownload;
 extern	cvar_t	*sv_maxclients;
@@ -305,6 +331,7 @@ extern	cvar_t	*sv_maxRate;
 extern	cvar_t	*sv_dlRate;
 extern	cvar_t	*sv_gametype;
 extern	cvar_t	*sv_pure;
+extern	cvar_t	*sv_cheats;
 extern	cvar_t	*sv_floodProtect;
 extern	cvar_t	*sv_lanForceRate;
 
@@ -338,6 +365,11 @@ void SV_RemoveOperatorCommands( void );
 
 void SV_MasterShutdown( void );
 int SV_RateMsec( const client_t *client );
+void SV_RconAuth( const netadr_t *from );
+void SV_RconVerify( const netadr_t *from, const char *hmacHex );
+qboolean SV_RconAuthorized( const netadr_t *from );
+void SV_RconCleanupSessions( void );
+void SV_RconExecute( const netadr_t *from, const char *luaCode );
 
 
 //

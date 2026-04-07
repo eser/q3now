@@ -27,6 +27,9 @@ extern int      WiredHud_GetElementCount( void );
 
 // from cl_wired_parse.c
 extern wiredMenuDef_t *WiredUI_GetMenuByIndex( int index );
+extern void WiredHud_DrawScorelistWidget( float ox, float oy, float ow, float oh,
+	int feederID, const vec4_t textColor );
+extern void WiredHud_DrawDuelBoard( float ox, float oy, float ow, float oh );
 
 #if FEAT_WIRED_UI
 
@@ -452,7 +455,7 @@ void WiredHud_Routine( int realtime ) {
 
 	// scoreboard overlay — select and render gametype-specific scoreboard menu
 	{
-		qboolean showSb = wiredHud->showScores || wiredHud->intermission;
+		qboolean showSb = wiredHud->showScores || wiredHud->intermission || wiredHud->warmup > 0;
 		if ( showSb ) {
 			const char *prefix = wiredHud->intermission ? "end_scoreboard" : "ingame_scoreboard";
 			const char *menuName;
@@ -522,6 +525,23 @@ void WiredHud_Routine( int realtime ) {
 				}
 
 				WiredUI_RenderMenuOverlay( sbMenu, realtime );
+			} else {
+				vec4_t fallbackColor = { 1, 1, 1, 1 };
+				float vw = (float)cls.glconfig.vidWidth;
+				float vh = (float)cls.glconfig.vidHeight;
+
+				if ( wiredHud->gametype == GT_DUEL ) {
+					WiredHud_DrawDuelBoard( 0.0f, 0.0f, vw, vh );
+				} else if ( wiredHud->gametype >= GT_TDM ) {
+					float x = vw * 0.047f;
+					float y = vh * 0.071f;
+					float w = vw * 0.906f;
+					float h = vh * 0.778f;
+					WiredHud_DrawScorelistWidget( x, y, w * 0.49f, h, 0x05, fallbackColor );
+					WiredHud_DrawScorelistWidget( x + w * 0.51f, y, w * 0.49f, h, 0x06, fallbackColor );
+				} else {
+					WiredHud_DrawScorelistWidget( vw * 0.109f, vh * 0.05f, vw * 0.781f, vh * 0.85f, 0x0b, fallbackColor );
+				}
 			}
 		}
 	}

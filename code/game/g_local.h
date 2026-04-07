@@ -29,7 +29,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //==================================================================
 
 // the "gameversion" client command will print this plus compile date
-#define	GAMEVERSION	BASEGAME
+#define	Q3NOW_GAMENAME	BASEGAME
 
 #define BODY_QUEUE_SIZE		8
 
@@ -461,7 +461,7 @@ typedef struct {
 
 	int			snd_fry;				// sound index for standing in lava
 
-	int			warmupModificationCount;	// for detecting if g_warmup is changed
+	int			minPlayersModificationCount;	// for detecting if g_minPlayers is changed
 
 	// voting state
 	char		voteString[MAX_STRING_CHARS];
@@ -505,9 +505,7 @@ typedef struct {
 #if FEAT_MAP_ROTATION
 	int			rotationIndex;			// current position in map rotation (6D)
 #endif
-#if FEAT_OVERTIME
 	int			overtimeCount;			// number of overtime extensions applied (10D)
-#endif
 #if FEAT_TOURNAMENT_PAUSE
 	qboolean	paused;					// game is paused (10C)
 	int			pauseTime;				// level.time when paused (10C)
@@ -531,7 +529,7 @@ typedef struct {
 #endif
 
     int			mapWeapons;
-    int         initialFraglimit;
+    int         initialScorelimit;
 
 #if FEAT_UNLAGGED
     int         frameStartTime;     // actual time this server frame started
@@ -629,9 +627,9 @@ void TossClientCubes( gentity_t *self );
 void DamagePlum( gentity_t *attacker, gentity_t *target, int damage );
 #endif
 
-// CPM: Radius Damage Fix
-qboolean CPM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, vec3_t viewpoint);
-// !CPM
+// PM: Radius Damage Fix
+qboolean	PM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, vec3_t viewpoint);
+
 
 // damage flags
 #define DAMAGE_RADIUS				0x00000001	// damage was indirect
@@ -849,9 +847,9 @@ extern	vmCvar_t	g_maxclients;			// allow this many total, including spectators
 extern	vmCvar_t	g_maxGameClients;		// allow this many active
 extern	vmCvar_t	g_restarted;
 
-extern	vmCvar_t	g_fraglimit;
+extern	vmCvar_t	g_scorelimit;
 extern	vmCvar_t	g_timelimit;
-extern	vmCvar_t	g_capturelimit;
+extern	vmCvar_t	g_overtime;
 extern	vmCvar_t	g_password;
 extern	vmCvar_t	g_needpass;
 extern	vmCvar_t	g_gravity;
@@ -862,7 +860,6 @@ extern	vmCvar_t	g_debugAlloc;
 extern	vmCvar_t	g_debugDamage;
 extern	vmCvar_t	g_synchronousClients;
 extern	vmCvar_t	g_motd;
-extern	vmCvar_t	g_warmup;
 extern	vmCvar_t	g_blood;
 extern	vmCvar_t	g_allowVote;
 extern	vmCvar_t	g_teamAutoJoin;
@@ -920,9 +917,6 @@ void	G_ShuffleTeams( void );
 // eser - team shuffle command
 #if FEAT_FAST_WEAPON_SWITCH
 extern  vmCvar_t	g_fastWeaponSwitch;
-#endif
-#if FEAT_OVERTIME
-extern  vmCvar_t	g_overtime;
 #endif
 #if FEAT_AUTO_DEMO
 extern  vmCvar_t	g_autoDemo;

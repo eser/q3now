@@ -51,7 +51,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define XSTRING(x)	STRING(x)
 #define STRING(x)	#x
 
-//#define	PRE_RELEASE_DEMO
 #define DELAY_WRITECONFIG
 
 //============================================================================
@@ -637,7 +636,7 @@ void	Cvar_CommandCompletion( void(*callback)(const char *s) );
 void 	Cvar_Reset( const char *var_name );
 void 	Cvar_ForceReset(const char *var_name);
 
-void	Cvar_SetCheatState( void );
+void	Cvar_CheatsWereDisabled( void );
 // reset all testing vars to a safe value
 
 qboolean Cvar_Command( void );
@@ -1099,8 +1098,6 @@ extern	qboolean	com_errorEntered;
 
 extern	fileHandle_t	com_journalDataFile;
 
-extern	char	rconPassword2[ MAX_CVAR_VALUE_STRING ];
-
 typedef enum {
 	TAG_FREE,
 	TAG_GENERAL,
@@ -1418,5 +1415,10 @@ int HuffmanGetSymbol( unsigned int* symbol, const byte* buffer, int bitIndex );
 
 // BSP format abstraction (FEAT_BSP_ABSTRACTION)
 void BSP_Init( void );
+
+// Headless Lua scripting runtime (FEAT_LUA)
+#if FEAT_LUA
+#include "scripting/wired_scripting.h"
+#endif
 
 #endif // _QCOMMON_H_

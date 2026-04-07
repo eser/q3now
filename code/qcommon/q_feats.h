@@ -13,7 +13,6 @@
 // ── mature (stable, shipped) ────────────────────────────────────────────
 #define FEAT_ATMOSPHERIC                  1   // 3B  rain & snow particles
 #define FEAT_BOT_IMPROVEMENTS             1   // advanced bot AI: dodge, awareness, strafejump, item timing, weapon selection
-#define FEAT_CALLVOTE_MENU                1   // 6C  GUI callvote from ESC menu
 #define FEAT_CRON_JOBS                    1   // 11  timed server-side tasks
 #define FEAT_DAMAGE_PLUMS                 1   // 2A  floating damage numbers
 #define FEAT_FAST_WEAPON_SWITCH           1   // 5A  fast weapon switch (0=normal, 1=skip drop, 2=instant)
@@ -33,7 +32,6 @@
 #define FEAT_DESTROYABLE_MISSILES         0   // 11B shoot down rockets/grenades/plasma
 #define FEAT_DROP_ITEMS                   0   // 11D /drop command for items
 #define FEAT_FREEZETAG                    0   // 7A  freeze on death, thaw by proximity
-#define FEAT_ITEMSIZES                    0   // dynamic item pickup bounding box via ITEM_PICKUP_SIZE
 #define FEAT_GRAPPLE_DAMAGE               0   // 5D  hook deals damage while pulling
 #define FEAT_PROJECTILE_BOUNCE            0   // 10H projectile reflection off shields
 #define FEAT_SHOTGUN_PATTERN              1   // fixed pellet ring pattern (replaces random spread)
@@ -53,7 +51,6 @@
 #define FEAT_CLAN_ARENA                   0   // 11  clan arena game mode
 #define FEAT_ELIMINATION                  0   // 10B round-based elimination modifier
 #define FEAT_ELO_TRACKING                 0   // 10J per-player skill rating
-#define FEAT_OVERTIME                     0   // 10D auto-extend on tied score
 #define FEAT_RANKED_QUEUE                 0   // 10M matchmaking queue (needs ELO)
 #define FEAT_READY_UP                     0   // 4E  /ready warmup system
 #define FEAT_RTF                          0   // 11  return the flag mode
@@ -61,7 +58,6 @@
 #define FEAT_TOURNAMENT_PAUSE             0   // 10C mid-game pause/timeout
 
 // ── visual / UI (testing) ───────────────────────────────────────────────
-#define FEAT_DYNAMIC_MENU                 0   // 6A  callback-driven submenu system
 #define FEAT_ENV_LIGHTS                   0   // colored dlights from lava/slime/water surfaces (KEX-style)
 #define FEAT_IMPACT_SPARKS                0   // 11A spark particles on player hit
 #define FEAT_MAP_ROTATION                 1   // 6D  server-side map rotation list
@@ -73,28 +69,22 @@
 #define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
 #define FEAT_MOVEMENT_KEYS                0   // show followed player's movement keys (spectator HUD)
 #define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + SuperHUD)
-#ifndef FEAT_LUA
-#define FEAT_LUA                          0   // LuaJIT scripting: REPL console, cvar bridge, store API
-#endif
 
 // ── engine internals (testing) ────────────────────────────────────────
 #define FEAT_BSP_ABSTRACTION              1   // Pluggable BSP format loaders
 #define FEAT_LEGACY_FORMATS_AUDIO         1   // WAV, OGG Vorbis, ADPCM audio codecs (retire by setting to 0; Opus remains)
 #define FEAT_LEGACY_FORMATS_IMAGE         1   // BMP, PCX, TGA image loaders (retire by setting to 0; PNG+JPG remain)
-#ifndef FEAT_WASM
 #define FEAT_WASM                         1   // WASM VM backend via WAMR (replaces QVM over time)
-#endif
 #define FEAT_LEGACY_QVM                   0   // QVM bytecode interpreter + JIT (retire by setting to 0)
 
 // ── model formats ────────────────────────────────────────────────────
 #define FEAT_IQM                          1   // IQM (Inter-Quake Model) skeletal mesh format
 
 // ── renderer (from CNQ3) ───────────────────────────────────────────────
-#define FEAT_FOG_SYSTEM                   1   // Enhanced fog types (linear, exp, exp2) — Spearmint adaptation
-#define FEAT_CORONA                       1   // Corona/lens flare entities via flare pipeline — Spearmint adaptation
-#define FEAT_HEADLESS_RENDERER            1   // Dedicated server renderer stub (sv_ref.c) — Spearmint adaptation
+#define FEAT_FOG_SYSTEM                   0   // Enhanced fog types (linear, exp, exp2)
+#define FEAT_CORONA                       0   // Corona/lens flare entities via flare pipeline
+#define FEAT_HEADLESS_RENDERER            0   // Dedicated server renderer stub (sv_ref.c)
 #define FEAT_DEPTH_CLAMP                  0   // disable near-plane vertex clipping at high FOV
-// UPSCALE_BLIT: already in Quake3e via r_fbo + r_renderScale cvars, no flag needed
 #define FEAT_DEPTH_FADE                   0   // soft particle edges (explosions, smoke, blood)
 #define FEAT_PARALLAX_MAPPING             0   // steep parallax mapping with normalmap (height in alpha)
 #define FEAT_SSAO                         1   // screen-space ambient occlusion (embedded in gamma pass)

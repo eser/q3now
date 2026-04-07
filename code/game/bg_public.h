@@ -112,10 +112,10 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 };
 #endif
 
+#define WARMUP_TIME         15
+
 #define	ITEM_RADIUS			15		// item sizes are needed for client side pickup detection
-#if FEAT_ITEMSIZES
 #define ITEM_PICKUP_SIZE    66
-#endif
 
 #define	LIGHTNING_RANGE		768
 
@@ -163,7 +163,7 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 
 #define	CS_GAME_VERSION			20
 #define	CS_LEVEL_START_TIME		21		// so the timer only shows the current level
-#define	CS_INTERMISSION			22		// when 1, fraglimit/timelimit has been hit and intermission will start in a second or two
+#define	CS_INTERMISSION			22		// when 1, scorelimit/timelimit has been hit and intermission will start in a second or two
 #define CS_FLAGSTATUS			23		// string indicating flag status in CTF
 #define CS_SHADERSTATE			24
 #define CS_BOTINFO				25
@@ -309,6 +309,17 @@ typedef struct {
 void PM_UpdateViewAngles( playerState_t *ps, const usercmd_t *cmd );
 void Pmove (pmove_t *pmove);
 
+void 		PM_UpdateSettings(int gametype);
+
+// Backpacks
+extern int		pm_backpacks;
+
+// Radius Damage Fix
+extern int		pm_radiusdamagefix;
+
+// Respawn delay
+extern float	pm_clientrespawndelay;
+
 //===================================================================================
 
 
@@ -323,10 +334,8 @@ typedef enum {
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
 
-// CPM
     STAT_JUMPTIME,
-    STAT_RAILTIME,                  // CPM: Added for allowchange
-// !CPM
+    STAT_RAILTIME,                  // PM: Added for allowchange
 
     STAT_WALLJUMPS,
 #if FEAT_FREEZETAG
@@ -413,7 +422,7 @@ typedef enum {
 #define EF_GRENADE_BOUNCE	0x00800000		// Q1/Q2-style grenade bounce (0.5x normal restitution)
 
 
-#define	EF_BACKPACK			0x00000001		// CPM: Backpack indicator bit
+#define	EF_BACKPACK			0x00000001		// PM: Backpack indicator bit
 
 // NOTE: may not have more than 16
 typedef enum {
@@ -846,6 +855,7 @@ typedef struct gattack_s {
 	char        *name;
 	int			weapon;
 	float       maxDamageDistance;
+	qboolean    armorPiercing;
 	float       knockbackScale;
 	float       selfKnockbackScale;
 	float       recoilKick;
