@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 /* TA UI display context removed -- Wired UI handles menus/HUD */
 
-int forceModelModificationCount = -1;
+int forceSameModelModificationCount = -1;
 
 void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum );
 void CG_Shutdown( void );
@@ -158,7 +158,7 @@ vmCvar_t 	cg_teamChatTime;
 vmCvar_t 	cg_teamChatHeight;
 vmCvar_t 	cg_stats;
 vmCvar_t 	cg_buildScript;
-vmCvar_t 	cg_forceModel;
+vmCvar_t 	cg_forceSameModel;
 vmCvar_t	cg_paused;
 vmCvar_t	cg_blood;
 vmCvar_t	cg_predictItems;
@@ -320,7 +320,7 @@ static cvarTable_t cvarTable[] = {
 #endif
 	{ &cg_teamChatTime, "cg_teamChatTime", "3000", CVAR_ARCHIVE  },
 	{ &cg_teamChatHeight, "cg_teamChatHeight", "0", CVAR_ARCHIVE  },
-	{ &cg_forceModel, "cg_forceModel", "0", CVAR_ARCHIVE  },
+	{ &cg_forceSameModel, "cg_forceSameModel", "0", CVAR_ARCHIVE  },
 	{ &cg_predictItems, "cg_predictItems", "1", CVAR_ARCHIVE },
 	{ &cg_deferPlayers, "cg_deferPlayers", "0", CVAR_ARCHIVE },
 	{ &cg_drawTeamOverlay, "cg_drawTeamOverlay", "0", CVAR_ARCHIVE },
@@ -431,20 +431,17 @@ void CG_RegisterCvars( void ) {
 	trap_Cvar_VariableStringBuffer( "sv_running", var, sizeof( var ) );
 	cgs.localServer = atoi( var );
 
-	forceModelModificationCount = cg_forceModel.modificationCount;
+	forceSameModelModificationCount = cg_forceSameModel.modificationCount;
 
 	trap_Cvar_Register(NULL, "model", DEFAULT_MODEL, CVAR_USERINFO | CVAR_ARCHIVE );
-	trap_Cvar_Register(NULL, "headmodel", DEFAULT_MODEL, CVAR_USERINFO | CVAR_ARCHIVE );
-	trap_Cvar_Register(NULL, "team_model", DEFAULT_TEAM_MODEL, CVAR_USERINFO | CVAR_ARCHIVE );
-	trap_Cvar_Register(NULL, "team_headmodel", DEFAULT_TEAM_HEAD, CVAR_USERINFO | CVAR_ARCHIVE );
 }
 
-/*																																			
+/*
 ===================
-CG_ForceModelChange
+CG_ForceSameModelChange
 ===================
 */
-static void CG_ForceModelChange( void ) {
+static void CG_ForceSameModelChange( void ) {
 	int		i;
 
 	for (i=0 ; i<MAX_CLIENTS ; i++) {
@@ -485,10 +482,10 @@ void CG_UpdateCvars( void ) {
 		}
 	}
 
-	// if force model changed
-	if ( forceModelModificationCount != cg_forceModel.modificationCount ) {
-		forceModelModificationCount = cg_forceModel.modificationCount;
-		CG_ForceModelChange();
+	// if force same model changed
+	if ( forceSameModelModificationCount != cg_forceSameModel.modificationCount ) {
+		forceSameModelModificationCount = cg_forceSameModel.modificationCount;
+		CG_ForceSameModelChange();
 	}
 }
 
@@ -659,7 +656,7 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.countPrepareSound = trap_S_RegisterSound( "sound/feedback/prepare.opus", qtrue );
 	cgs.media.countPrepareTeamSound = trap_S_RegisterSound( "sound/feedback/prepare_team.opus", qtrue );
 
-	if ( cgs.gametype >= GT_TDM || cg_buildScript.integer ) {
+	if ( cgs.gametypeIsTeamGame || cg_buildScript.integer ) {
 
 		cgs.media.captureAwardSound = trap_S_RegisterSound( "sound/teamplay/flagcapture_yourteam.opus", qtrue );
 		cgs.media.redLeadsSound = trap_S_RegisterSound( "sound/feedback/redleads.opus", qtrue );
@@ -989,11 +986,22 @@ static void CG_RegisterGraphics( void ) {
 #endif
 	cgs.media.redKamikazeShader = trap_R_RegisterShader( "models/weaphits/kamikred" );
 
-    if (cgs.gametype == GT_KINGOFTHEHILL || cgs.gametype >= GT_TDM || cg_buildScript.integer) {
+    if (cgs.gametype == GT_KINGOFTHEHILL || cgs.gametypeIsTeamGame || cg_buildScript.integer) {
         cgs.media.friendShader = trap_R_RegisterShader("sprites/foe");
+
+		cgs.media.friendFlagShaderNeutral = trap_R_RegisterShaderNoMip("sprites/flagINeutral.tga");
+		cgs.media.friendFlagShaderRed = trap_R_RegisterShaderNoMip("sprites/flagIRed.tga");
+		cgs.media.friendFlagShaderBlue = trap_R_RegisterShaderNoMip("sprites/flagIBlue.tga");
+
+		cgs.media.friendColorShaders[0] = trap_R_RegisterShader("sprites/friendIBlue.tga");
+		cgs.media.friendColorShaders[1] = trap_R_RegisterShader("sprites/friendICyan.tga");
+		cgs.media.friendColorShaders[2] = trap_R_RegisterShader("sprites/friendIGreen.tga");
+		cgs.media.friendColorShaders[3] = trap_R_RegisterShader("sprites/friendIYellow.tga");
+		cgs.media.friendColorShaders[4] = trap_R_RegisterShader("sprites/friendIOrange.tga");
+		cgs.media.friendColorShaders[5] = trap_R_RegisterShader("sprites/friendIRed.tga");
     }
 
-	if ( cgs.gametype >= GT_TDM || cg_buildScript.integer ) {
+	if ( cgs.gametypeIsTeamGame || cg_buildScript.integer ) {
 		cgs.media.redQuadShader = trap_R_RegisterShader("powerups/blueflag" );
 		cgs.media.teamStatusBar = trap_R_RegisterShader( "gfx/2d/colorbar.tga" );
 		cgs.media.blueKamikazeShader = trap_R_RegisterShader( "models/weaphits/kamikblu" );

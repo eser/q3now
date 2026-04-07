@@ -450,13 +450,13 @@ static void WT_McpHandleBotGetState( wt_connection_t *conn, uint64_t stream_id, 
 	Com_sprintf( resp, sizeof(resp),
 		"{\"jsonrpc\":\"2.0\",\"result\":[{\"type\":\"text\",\"text\":\""
 		"{\\\"id\\\":%d,\\\"name\\\":\\\"%s\\\","
-		"\\\"health\\\":%d,\\\"armor\\\":%d,"
+		"\\\"health\\\":%d,\\\"armor\\\":%d,\\\"armorClass\\\":%d,"
 		"\\\"weapon\\\":%d,"
 		"\\\"pos\\\":[%.0f,%.0f,%.0f],"
 		"\\\"vel\\\":[%.0f,%.0f,%.0f],"
 		"\\\"alive\\\":%s}\"}],\"id\":%d}",
 		bot_id, cl->name,
-		ps->stats[STAT_HEALTH], ps->stats[STAT_ARMOR],
+		ps->stats[STAT_HEALTH], ps->stats[STAT_ARMOR], ps->stats[STAT_ARMORCLASS],
 		ps->weapon,
 		ps->origin[0], ps->origin[1], ps->origin[2],
 		ps->velocity[0], ps->velocity[1], ps->velocity[2],

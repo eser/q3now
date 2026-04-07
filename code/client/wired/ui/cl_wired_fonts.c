@@ -13,14 +13,6 @@ Runs in the CLIENT -- uses re.* directly instead of trap_R_*.
 
 #if FEAT_WIRED_UI
 
-/* ── MSDF font integration ─────────────────────────────────────────── */
-
-static msdfFont_t *msdf_sansman = NULL;
-static msdfFont_t *msdf_sansman_italic = NULL;
-static msdfFont_t *msdf_oxanium = NULL;
-static msdfFont_t *msdf_oxanium_medium = NULL;
-static msdfFont_t *msdf_console = NULL;
-
 /* ── Font family registration table ───────────────────────────────── */
 
 static fontFamily_t s_fontFamilies[] = {
@@ -88,39 +80,6 @@ void WiredFonts_InitMSDF( void ) {
 			face->atlas = atlas;
 		}
 	}
-
-	/* ── Legacy static pointers (for WiredFonts_GetMSDF compat) ──── */
-	msdf_sansman        = s_fontFamilies[0].faces[2].atlas;  /* sansman-bold */
-	msdf_sansman_italic = s_fontFamilies[0].faces[3].atlas;  /* sansman-italic */
-	msdf_oxanium        = s_fontFamilies[1].faces[0].atlas;  /* oxanium-regular */
-	msdf_oxanium_medium = s_fontFamilies[1].faces[1].atlas;  /* oxanium-medium */
-	msdf_console        = s_fontFamilies[2].faces[0].atlas;  /* sharetechmono */
-}
-
-msdfFont_t *WiredFonts_GetMSDF( const char *fontName ) {
-	/* Primary MSDF fonts */
-	if ( !Q_stricmp( fontName, "sansman" ) )         return msdf_sansman;
-	if ( !Q_stricmp( fontName, "sansman-italic" ) )   return msdf_sansman_italic;
-	if ( !Q_stricmp( fontName, "oxanium" ) )          return msdf_oxanium;
-	if ( !Q_stricmp( fontName, "oxanium-medium" ) )   return msdf_oxanium_medium;
-	if ( !Q_stricmp( fontName, "console" ) )          return msdf_console;
-	if ( !Q_stricmp( fontName, "sharetechmono" ) )    return msdf_console;
-
-	/* Legacy bitmap names -> MSDF equivalents */
-	if ( !Q_stricmp( fontName, "id" ) )               return msdf_console;
-	if ( !Q_stricmp( fontName, "idblock" ) )          return msdf_console;
-	if ( !Q_stricmp( fontName, "cpma" ) )             return msdf_oxanium_medium;
-	if ( !Q_stricmp( fontName, "m1rage" ) )           return msdf_oxanium;
-	if ( !Q_stricmp( fontName, "elite" ) )            return msdf_oxanium;
-	if ( !Q_stricmp( fontName, "elitebigchars" ) )    return msdf_sansman;
-	if ( !Q_stricmp( fontName, "qlnumbers" ) )        return msdf_sansman;
-	if ( !Q_stricmp( fontName, "eternal" ) )          return msdf_oxanium_medium;
-	if ( !Q_stricmp( fontName, "diablo" ) )           return msdf_oxanium_medium;
-	if ( !Q_stricmp( fontName, "elite_emoji" ) )      return msdf_oxanium;
-
-	/* Unknown font -- use oxanium as safe default */
-	Com_Printf( S_COLOR_YELLOW "WiredFonts_GetMSDF: unknown font '%s', using oxanium\n", fontName );
-	return msdf_oxanium;
 }
 
 /*
@@ -231,6 +190,30 @@ const fontFace_t *WiredFont_Resolve(
 	return best;
 }
 
+const fontFace_t *WiredFont_ResolveByName( const char *name )
+{
+	int i, j;
+
+	if ( !name || !name[0] ) {
+		return NULL;
+	}
+
+	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
+		const fontFamily_t *family = &s_fontFamilies[i];
+		if ( !Q_stricmp( name, family->familyName ) ) {
+			return WiredFont_Resolve( family->familyName, FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
+		}
+		for ( j = 0; j < family->faceCount; j++ ) {
+			const fontFace_t *face = &family->faces[j];
+			if ( !Q_stricmp( name, face->name ) || !Q_stricmp( name, face->atlasName ) ) {
+				return face;
+			}
+		}
+	}
+
+	return NULL;
+}
+
 // border frame drawing
 void WiredFont_DrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled ) {
 	if ( !border || !borderColor ) return;
@@ -268,6 +251,20 @@ int WiredFont_IdFromName( const char *name )
 		return FONT_DISPLAY;
 	}
 
+	if ( !Q_stricmp( name, "defaultSerifFont" ) ) return FONT_DISPLAY;
+	if ( !Q_stricmp( name, "defaultSerifFontItalic" ) ) return FONT_DISPLAY_ITALIC;
+	if ( !Q_stricmp( name, "defaultSerifFontBold" ) ) return FONT_DISPLAY_BOLD;
+	if ( !Q_stricmp( name, "defaultSansFont" ) ) return FONT_UI;
+	if ( !Q_stricmp( name, "defaultSansFontMedium" ) ) return FONT_UI_MEDIUM;
+	if ( !Q_stricmp( name, "defaultMonoFont" ) ) return FONT_MONO;
+
+	if ( !Q_stricmp( name, "display" ) ) return FONT_DISPLAY;
+	if ( !Q_stricmp( name, "displayItalic" ) ) return FONT_DISPLAY_ITALIC;
+	if ( !Q_stricmp( name, "displayBold" ) ) return FONT_DISPLAY_BOLD;
+	if ( !Q_stricmp( name, "ui" ) ) return FONT_UI;
+	if ( !Q_stricmp( name, "uiMedium" ) ) return FONT_UI_MEDIUM;
+	if ( !Q_stricmp( name, "mono" ) ) return FONT_MONO;
+
 	/* Native MSDF family/face names */
 	if ( !Q_stricmp( name, "sansman" ) ) return FONT_DISPLAY;
 	if ( !Q_stricmp( name, "sansman-regular" ) ) return FONT_DISPLAY;
@@ -282,19 +279,6 @@ int WiredFont_IdFromName( const char *name )
 
 	if ( !Q_stricmp( name, "sharetechmono" ) ) return FONT_MONO;
 	if ( !Q_stricmp( name, "sharetechmono-regular" ) ) return FONT_MONO;
-	if ( !Q_stricmp( name, "console" ) ) return FONT_MONO;
-
-	/* Legacy bitmap names preserved for SuperHUD compatibility */
-	if ( !Q_stricmp( name, "id" ) ) return FONT_MONO;
-	if ( !Q_stricmp( name, "idblock" ) ) return FONT_MONO;
-	if ( !Q_stricmp( name, "cpma" ) ) return FONT_UI_MEDIUM;
-	if ( !Q_stricmp( name, "m1rage" ) ) return FONT_UI;
-	if ( !Q_stricmp( name, "elite_emoji" ) ) return FONT_UI;
-	if ( !Q_stricmp( name, "diablo" ) ) return FONT_UI_MEDIUM;
-	if ( !Q_stricmp( name, "eternal" ) ) return FONT_UI_MEDIUM;
-	if ( !Q_stricmp( name, "qlnumbers" ) ) return FONT_DISPLAY;
-	if ( !Q_stricmp( name, "elite" ) ) return FONT_UI;
-	if ( !Q_stricmp( name, "elitebigchars" ) ) return FONT_DISPLAY;
 
 	return FONT_UI;
 }

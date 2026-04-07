@@ -969,7 +969,7 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 	char		text[MAX_SAY_TEXT];
 	char		location[64];
 
-	if ( g_gametype.integer < GT_TDM && mode == SAY_TEAM ) {
+	if ( !g_gametypeIsTeamGame && mode == SAY_TEAM ) {
 		mode = SAY_ALL;
 	}
 
@@ -1145,7 +1145,7 @@ void G_Voice( gentity_t *ent, gentity_t *target, int mode, const char *id, qbool
 	int			j;
 	gentity_t	*other;
 
-	if ( g_gametype.integer < GT_TDM && mode == SAY_TEAM ) {
+	if ( !g_gametypeIsTeamGame && mode == SAY_TEAM ) {
 		mode = SAY_ALL;
 	}
 

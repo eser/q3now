@@ -1529,23 +1529,25 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 					if ( WiredPC_ReadToken( handle, &token ) )
 						Q_strncpyz( ag->radialGlowShader, token.string, sizeof( ag->radialGlowShader ) );
 				}
-				else if ( !Q_stricmp( token.string, "defaultFont" ) ) {
+				else if ( !Q_stricmp( token.string, "defaultSerifFont" ) ) {
 					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->defaultFontName, token.string, sizeof( ag->defaultFontName ) );
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->defaultFontSize = atof( token.string );
+						Q_strncpyz( ag->defaultSerifFontName, token.string, sizeof( ag->defaultSerifFontName ) );
 				}
-				else if ( !Q_stricmp( token.string, "defaultHeadingFont" ) ) {
+				else if ( !Q_stricmp( token.string, "defaultSerifFontItalic" ) ) {
 					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->defaultHeadingFontName, token.string, sizeof( ag->defaultHeadingFontName ) );
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->defaultHeadingFontSize = atof( token.string );
+						Q_strncpyz( ag->defaultSerifFontItalicName, token.string, sizeof( ag->defaultSerifFontItalicName ) );
 				}
-				else if ( !Q_stricmp( token.string, "defaultConsoleFont" ) ) {
+				else if ( !Q_stricmp( token.string, "defaultSansFont" ) ) {
 					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->defaultConsoleFontName, token.string, sizeof( ag->defaultConsoleFontName ) );
+						Q_strncpyz( ag->defaultSansFontName, token.string, sizeof( ag->defaultSansFontName ) );
+				}
+				else if ( !Q_stricmp( token.string, "defaultSansFontMedium" ) ) {
 					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->defaultConsoleFontSize = atof( token.string );
+						Q_strncpyz( ag->defaultSansFontMediumName, token.string, sizeof( ag->defaultSansFontMediumName ) );
+				}
+				else if ( !Q_stricmp( token.string, "defaultMonoFont" ) ) {
+					if ( WiredPC_ReadToken( handle, &token ) )
+						Q_strncpyz( ag->defaultMonoFontName, token.string, sizeof( ag->defaultMonoFontName ) );
 				}
 				// skip unknown keywords gracefully
 			}
@@ -1644,6 +1646,7 @@ typedef struct {
 	int              poolUsed;
 	wiredMenuDef_t  *menus[WIRED_MAX_MENUS];
 	int              menuCount;
+	wiredAssetGlobals_t assetGlobals;
 } wiredMenuBackup_t;
 
 static wiredMenuBackup_t *wired_backup = NULL;  // heap-allocated on demand
@@ -1659,8 +1662,10 @@ qboolean WiredUI_SafeReload( const char *manifestFile ) {
 	wired_backup->poolUsed = wired_menuPoolUsed;
 	Com_Memcpy( wired_backup->menus, wired_menus, sizeof( wired_menus[0] ) * wired_menuCount );
 	wired_backup->menuCount = wired_menuCount;
+	wired_backup->assetGlobals = *WiredUI_GetAssetGlobals();
 
 	// phase 2: clear and reparse
+	WiredUI_ResetAssetGlobalsDefaults();
 	WiredUI_ClearMenus();
 	qboolean ok = WiredUI_LoadMenus( manifestFile );
 
@@ -1671,6 +1676,7 @@ qboolean WiredUI_SafeReload( const char *manifestFile ) {
 		wired_menuPoolUsed = wired_backup->poolUsed;
 		Com_Memcpy( wired_menus, wired_backup->menus, sizeof( wired_menus[0] ) * wired_backup->menuCount );
 		wired_menuCount = wired_backup->menuCount;
+		*WiredUI_GetAssetGlobals() = wired_backup->assetGlobals;
 		return qfalse;
 	}
 

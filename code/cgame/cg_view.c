@@ -362,6 +362,7 @@ static void CG_OffsetFirstPersonView( void ) {
 	float			f;
 	vec3_t			predictedVelocity;
 	int				timeDelta;
+	vec_t			groundViewLevel;
 	
 	if ( cg.snap->ps.pm_type == PM_INTERMISSION ) {
 		return;
@@ -381,6 +382,9 @@ static void CG_OffsetFirstPersonView( void ) {
 
 	// add angles based on damage kick
 	if ( cg_viewkick.integer && cg.damageTime ) {
+		// add angles based on weapon kick
+		VectorAdd (angles, cg.kick_angles, angles);
+
 		ratio = cg.time - cg.damageTime;
 		if ( ratio < DAMAGE_DEFLECT_TIME ) {
 			ratio /= DAMAGE_DEFLECT_TIME;
@@ -451,8 +455,15 @@ static void CG_OffsetFirstPersonView( void ) {
 
 //===================================
 
+	groundViewLevel = origin[2] + MINS_Z + 6;
+
 	// add view height
 	origin[2] += cg.predictedPlayerState.viewheight;
+
+	if (origin[2] < groundViewLevel) {
+		// server wanted this low a height...
+		groundViewLevel = origin[2];
+	}
 
 	// smooth out duck height changes
 	timeDelta = cg.time - cg.duckTime;
@@ -484,6 +495,15 @@ static void CG_OffsetFirstPersonView( void ) {
 
 	// add step offset
 	CG_StepOffset();
+
+	if (origin[2] < groundViewLevel) {
+		// make sure we don't look through the ground
+		origin[2] = groundViewLevel;
+	}
+
+	// add kick offset
+
+	VectorAdd (origin, cg.kick_origin, origin);
 
 	// pivot the eye based on a neck length
 #if 0

@@ -480,16 +480,16 @@ typedef struct {
 	vec4_t          gradientBarColor;          // gradient bar decoration color
 	char            radialGlowShader[MAX_QPATH]; // shader name for radial glow effect
 
-	// Default MSDF fonts
-	char            defaultFontName[MAX_QPATH];         // default body font name
-	float           defaultFontSize;                    // default body font point size
-	char            defaultHeadingFontName[MAX_QPATH];  // default heading font name
-	float           defaultHeadingFontSize;             // default heading font point size
-	char            defaultConsoleFontName[MAX_QPATH];  // default console font name
-	float           defaultConsoleFontSize;             // default console font point size
+	// Theme font slots (MSDF only)
+	char            defaultSerifFontName[MAX_QPATH];        // FONT_DISPLAY / FONT_DISPLAY_BOLD
+	char            defaultSerifFontItalicName[MAX_QPATH];  // FONT_DISPLAY_ITALIC
+	char            defaultSansFontName[MAX_QPATH];         // FONT_UI
+	char            defaultSansFontMediumName[MAX_QPATH];   // FONT_UI_MEDIUM
+	char            defaultMonoFontName[MAX_QPATH];         // FONT_MONO
 } wiredAssetGlobals_t;
 
 wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void );
+void WiredUI_ResetAssetGlobalsDefaults( void );
 
 // ── parser (cl_wired_parse.c) ─────────────────────────────────────────
 

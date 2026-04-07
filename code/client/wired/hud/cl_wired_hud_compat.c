@@ -147,12 +147,13 @@ void WiredHud_SyncCompat( void ) {
 	// clientinfo
 	for ( i = 0; i < WIRED_HUD_MAX_CLIENTS; i++ ) {
 		Q_strncpyz( wired_cgs.clientinfo[i].name, wiredHud->clients[i].name, MAX_QPATH );
-		wired_cgs.clientinfo[i].team      = wiredHud->clients[i].team;
-		wired_cgs.clientinfo[i].health    = wiredHud->clients[i].health;
-		wired_cgs.clientinfo[i].armor     = wiredHud->clients[i].armor;
-		wired_cgs.clientinfo[i].curWeapon = wiredHud->clients[i].curWeapon;
-		wired_cgs.clientinfo[i].location  = wiredHud->clients[i].location;
-		wired_cgs.clientinfo[i].infoValid = wiredHud->clients[i].infoValid;
+		wired_cgs.clientinfo[i].team        = wiredHud->clients[i].team;
+		wired_cgs.clientinfo[i].health      = wiredHud->clients[i].health;
+		wired_cgs.clientinfo[i].armor       = wiredHud->clients[i].armor;
+		wired_cgs.clientinfo[i].armorClass  = wiredHud->clients[i].armorClass;
+		wired_cgs.clientinfo[i].curWeapon   = wiredHud->clients[i].curWeapon;
+		wired_cgs.clientinfo[i].location    = wiredHud->clients[i].location;
+		wired_cgs.clientinfo[i].infoValid   = wiredHud->clients[i].infoValid;
 	}
 
 	// team overlay sorting

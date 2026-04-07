@@ -182,20 +182,20 @@ menuDef {
 	}
 
 	// ── Chat Lines ──────────────────────────────────────────
-	itemDef { hudElement "chat8"  anchor BOTTOM_LEFT  rect 0.006 0.671 0.469 0.025  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
-	itemDef { hudElement "chat7"  anchor BOTTOM_LEFT  rect 0.006 0.696 0.469 0.025  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
-	itemDef { hudElement "chat6"  anchor BOTTOM_LEFT  rect 0.006 0.721 0.469 0.025  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
-	itemDef { hudElement "chat5"  anchor BOTTOM_LEFT  rect 0.006 0.746 0.469 0.025  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
-	itemDef { hudElement "chat4"  anchor BOTTOM_LEFT  rect 0.006 0.771 0.469 0.025  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
-	itemDef { hudElement "chat3"  anchor BOTTOM_LEFT  rect 0.006 0.796 0.469 0.025  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
-	itemDef { hudElement "chat2"  anchor BOTTOM_LEFT  rect 0.006 0.821 0.469 0.025  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
-	itemDef { hudElement "chat1"  anchor BOTTOM_LEFT  rect 0.006 0.846 0.469 0.025  font "id"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat8"  anchor BOTTOM_LEFT  rect 0.006 0.671 0.469 0.025  font "defaultMonoFont"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat7"  anchor BOTTOM_LEFT  rect 0.006 0.696 0.469 0.025  font "defaultMonoFont"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat6"  anchor BOTTOM_LEFT  rect 0.006 0.721 0.469 0.025  font "defaultMonoFont"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat5"  anchor BOTTOM_LEFT  rect 0.006 0.746 0.469 0.025  font "defaultMonoFont"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat4"  anchor BOTTOM_LEFT  rect 0.006 0.771 0.469 0.025  font "defaultMonoFont"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat3"  anchor BOTTOM_LEFT  rect 0.006 0.796 0.469 0.025  font "defaultMonoFont"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat2"  anchor BOTTOM_LEFT  rect 0.006 0.821 0.469 0.025  font "defaultMonoFont"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
+	itemDef { hudElement "chat1"  anchor BOTTOM_LEFT  rect 0.006 0.846 0.469 0.025  font "defaultMonoFont"  fontsize 6 9  monospace  forecolor 1 1 1 0.7  time 8000  fadedelay 2000  fade 1 1 1 0 }
 
 	// ── Vote ────────────────────────────────────────────────
 	itemDef { hudElement "votemessageworld"
 		anchor CENTER_LEFT
 		rect 0.003 0.125 0 0.025
-		font "id"
+		font "defaultMonoFont"
 		fontsize 6 10
 		textalign 0
 		forecolor 1 1 0 1
@@ -275,14 +275,14 @@ menuDef {
 	}
 
 	// ── Team Overlay ────────────────────────────────────────
-	itemDef { hudElement "team8"   anchor BOTTOM_LEFT  rect 0.006 0.708 0 0.021  font "id"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
-	itemDef { hudElement "team7"   anchor BOTTOM_LEFT  rect 0.006 0.729 0 0.021  font "id"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
-	itemDef { hudElement "team6"   anchor BOTTOM_LEFT  rect 0.006 0.750 0 0.021  font "id"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
-	itemDef { hudElement "team5"   anchor BOTTOM_LEFT  rect 0.006 0.771 0 0.021  font "id"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
-	itemDef { hudElement "team4"   anchor BOTTOM_LEFT  rect 0.006 0.792 0 0.021  font "id"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
-	itemDef { hudElement "team3"   anchor BOTTOM_LEFT  rect 0.006 0.813 0 0.021  font "id"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
-	itemDef { hudElement "team2"   anchor BOTTOM_LEFT  rect 0.006 0.833 0 0.021  font "id"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
-	itemDef { hudElement "team1"   anchor BOTTOM_LEFT  rect 0.006 0.854 0 0.021  font "id"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team8"   anchor BOTTOM_LEFT  rect 0.006 0.708 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team7"   anchor BOTTOM_LEFT  rect 0.006 0.729 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team6"   anchor BOTTOM_LEFT  rect 0.006 0.750 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team5"   anchor BOTTOM_LEFT  rect 0.006 0.771 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team4"   anchor BOTTOM_LEFT  rect 0.006 0.792 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team3"   anchor BOTTOM_LEFT  rect 0.006 0.813 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team2"   anchor BOTTOM_LEFT  rect 0.006 0.833 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team1"   anchor BOTTOM_LEFT  rect 0.006 0.854 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
 
 	// ── Awards ──────────────────────────────────────────────
 	itemDef { hudElement "awards"

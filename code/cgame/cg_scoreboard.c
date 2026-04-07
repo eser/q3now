@@ -249,7 +249,7 @@ static void CG_DrawClientScore(int y, score_t *score, float *color, float fade, 
 		localClient = qtrue;
 
 		if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR
-		        || cgs.gametype >= GT_TDM)
+		        || cgs.gametypeIsTeamGame)
 		{
 			rank = -1;
 		}
@@ -405,7 +405,7 @@ static void CG_BEDrawClientScore(int y, score_t *score, float *color, float fade
 		int rank;
 
 		localClient = qtrue;
-		if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR || cgs.gametype >= GT_TDM)
+		if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR || cgs.gametypeIsTeamGame)
 			rank = -1;
 		else
 			rank = cg.snap->ps.persistant[PERS_RANK] & ~RANK_TIED_FLAG;
@@ -549,7 +549,7 @@ qboolean CG_DrawOldScoreboard(void)
 	}
 
 	// current rank
-	if (cgs.gametype < GT_TDM)
+	if (!cgs.gametypeIsTeamGame)
 	{
 		if (cg.snap->ps.persistant[PERS_TEAM] != TEAM_SPECTATOR)
 		{
@@ -605,7 +605,7 @@ qboolean CG_DrawOldScoreboard(void)
 
 	localClient = qfalse;
 
-	if (cgs.gametype >= GT_TDM)
+	if (cgs.gametypeIsTeamGame)
 	{
 		//
 		// teamplay scoreboard
@@ -1367,7 +1367,7 @@ void CG_DrawDuelScoreboard(void)
 	// print the two scores
 
 	y = 160;
-	if (cgs.gametype >= GT_TDM)
+	if (cgs.gametypeIsTeamGame)
 	{
 		//
 		// teamplay scoreboard

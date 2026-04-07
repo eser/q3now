@@ -191,8 +191,9 @@ static void CG_ParseTeamInfo( void ) {
 		cgs.clientinfo[ client ].location = atoi( CG_Argv( i * 6 + 3 ) );
 		cgs.clientinfo[ client ].health = atoi( CG_Argv( i * 6 + 4 ) );
 		cgs.clientinfo[ client ].armor = atoi( CG_Argv( i * 6 + 5 ) );
-		cgs.clientinfo[ client ].curWeapon = atoi( CG_Argv( i * 6 + 6 ) );
-		cgs.clientinfo[ client ].powerups = atoi( CG_Argv( i * 6 + 7 ) );
+		cgs.clientinfo[ client ].armorClass = atoi( CG_Argv( i * 6 + 6 ) );
+		cgs.clientinfo[ client ].curWeapon = atoi( CG_Argv( i * 6 + 7 ) );
+		cgs.clientinfo[ client ].powerups = atoi( CG_Argv( i * 6 + 8 ) );
 	}
 }
 
@@ -211,6 +212,7 @@ void CG_ParseServerinfo( void ) {
 
 	info = CG_ConfigString( CS_SERVERINFO );
 	cgs.gametype = atoi( Info_ValueForKey( info, "g_gametype" ) );
+	cgs.gametypeIsTeamGame = BG_IsTeamGametype( cgs.gametype );
 	trap_Cvar_Set("g_gametype", va("%i", cgs.gametype));
 	cgs.noFootsteps = atoi( Info_ValueForKey( info, "g_noFootsteps" ) );
 	cgs.kothGhosts = atoi( Info_ValueForKey( info, "g_kothGhosts" ) );
@@ -790,20 +792,10 @@ voiceChatList_t *CG_VoiceChatListForClient( int clientNum ) {
 
 	for ( k = 0; k < 2; k++ ) {
 		if ( k == 0 ) {
-			if (ci->headModelName[0] == '*') {
-				Com_sprintf( headModelName, sizeof(headModelName), "%s/%s", ci->headModelName+1, ci->headSkinName );
-			}
-			else {
-				Com_sprintf( headModelName, sizeof(headModelName), "%s/%s", ci->headModelName, ci->headSkinName );
-			}
+			Com_sprintf( headModelName, sizeof(headModelName), "%s/%s", ci->modelName, ci->skinName );
 		}
 		else {
-			if (ci->headModelName[0] == '*') {
-				Com_sprintf( headModelName, sizeof(headModelName), "%s", ci->headModelName+1 );
-			}
-			else {
-				Com_sprintf( headModelName, sizeof(headModelName), "%s", ci->headModelName );
-			}
+			Com_sprintf( headModelName, sizeof(headModelName), "%s", ci->modelName );
 		}
 		// find the voice file for the head model the client uses
 		for ( i = 0; i < MAX_HEADMODELS; i++ ) {
@@ -965,7 +957,7 @@ void CG_VoiceChatLocal( int mode, qboolean voiceOnly, int clientNum, int color, 
 		return;
 	}
 
-	if ( mode == SAY_ALL && cgs.gametype >= GT_TDM && cg_teamChatsOnly.integer ) {
+	if ( mode == SAY_ALL && cgs.gametypeIsTeamGame && cg_teamChatsOnly.integer ) {
 		return;
 	}
 
@@ -1094,7 +1086,7 @@ static void CG_ServerCommand( void ) {
 	}
 
 	if ( !strcmp( cmd, "chat" ) ) {
-		if ( cgs.gametype >= GT_TDM && cg_teamChatsOnly.integer ) {
+		if ( cgs.gametypeIsTeamGame && cg_teamChatsOnly.integer ) {
 			return;
 		}
 #if FEAT_CHAT_FILTER

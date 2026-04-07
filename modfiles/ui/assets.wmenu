@@ -5,13 +5,12 @@ assetGlobalDef {
     // Cursor
     cursor "ui/assets/cursor"
 
-    // Default fonts (MSDF)
-    defaultFont "oxanium" 12
-    defaultHeadingFont "sansman" 18
-    defaultConsoleFont "console" 10
-
-    // Legacy font references (for shim compatibility)
-    font "oxanium" 16
+    // Default font slots (MSDF)
+    defaultSerifFont "sansman"
+    defaultSerifFontItalic "sansman-italic"
+    defaultSansFont "oxanium"
+    defaultSansFontMedium "oxanium-medium"
+    defaultMonoFont "sharetechmono"
 
     // Shadow
     shadowX 1

@@ -525,7 +525,7 @@ void WiredHud_Routine( int realtime ) {
 
 				if ( wiredHud->gametype == GT_DUEL ) {
 					WiredHud_DrawDuelBoard( 0.0f, 0.0f, vw, vh );
-				} else if ( wiredHud->gametype >= GT_TDM ) {
+				} else if ( wiredHud->isTeamGame ) {
 					float x = vw * 0.047f;
 					float y = vh * 0.071f;
 					float w = vw * 0.906f;

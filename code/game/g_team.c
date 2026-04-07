@@ -175,7 +175,7 @@ qboolean OnSameTeam( gentity_t *ent1, gentity_t *ent2 ) {
         return qtrue;
     }
 
-	if ( g_gametype.integer < GT_TDM ) {
+	if ( !g_gametypeIsTeamGame ) {
 		return qfalse;
 	}
 
@@ -1052,7 +1052,7 @@ void TeamplayInfoMessage( gentity_t *ent ) {
 	int			i, j;
 	gentity_t	*player;
 	int			cnt;
-	int			h, a;
+	int			h, a, ac;
 	int			clients[TEAM_MAXOVERLAY];
 	int			team;
 
@@ -1097,13 +1097,14 @@ void TeamplayInfoMessage( gentity_t *ent ) {
 
 			h = player->client->ps.stats[STAT_HEALTH];
 			a = player->client->ps.stats[STAT_ARMOR];
+			ac = player->client->ps.stats[STAT_ARMORCLASS];
 			if (h < 0) h = 0;
 			if (a < 0) a = 0;
 
 			Com_sprintf (entry, sizeof(entry),
-				" %i %i %i %i %i %i", 
-//				level.sortedClients[i], player->client->pers.teamState.location, h, a, 
-				i, player->client->pers.teamState.location, h, a, 
+				" %i %i %i %i %i %i %i", 
+//				level.sortedClients[i], player->client->pers.teamState.location, h, a, ac,
+				i, player->client->pers.teamState.location, h, a, ac,
 				player->client->ps.weapon, player->s.powerups);
 			j = strlen(entry);
 			if (stringlength + j >= sizeof(string))

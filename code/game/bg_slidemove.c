@@ -301,7 +301,15 @@ void PM_StepSlideMove( qboolean gravity ) {
 		VectorCopy (trace.endpos, pm->ps->origin);
 	}
 	if ( trace.fraction < 1.0 ) {
-		PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
+		// PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
+		if ( !(pm->ps->pm_flags & PMF_RESPAWNED) &&
+			 !(pm->cmd.upmove < 10) &&
+			 !(pm->ps->pm_flags & PMF_JUMP_HELD) &&
+			 (pm->ps->stats[STAT_JUMPTIME] > 0) ) {
+			PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
+		} else {
+			PM_OneSidedClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
+		}
 	}
 
 #if 0
@@ -337,4 +345,3 @@ void PM_StepSlideMove( qboolean gravity ) {
 		}
 	}
 }
-
