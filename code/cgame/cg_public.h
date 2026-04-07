@@ -428,7 +428,6 @@ typedef struct {
 	wiredLagometer_t lagometer;
 	qboolean    localServer;        // cgs.localServer — skip lagometer on local
 
-	qboolean    wiredUIActive;  // cg_wiredUI.integer — client uses this to enable/disable rendering
 	qboolean    valid;
 
 	// TA compat: CG_SHOW_* / UI_SHOW_* display flags for ownerdrawFlag evaluation

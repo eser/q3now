@@ -26,8 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #ifndef __BSP_H
 #define __BSP_H
 
-#include "q_shared.h"
-#include "qfiles.h"
+#include "../q_shared.h"
+#include "../qfiles.h"
 
 // Maximum registered BSP formats
 #define MAX_BSP_FORMATS 8
@@ -36,9 +36,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 typedef struct bspFormat_s bspFormat_t;
 typedef struct bspFile_s bspFile_t;
 
+typedef enum {
+	BSP_ASSET_PROFILE_MODERN = 0,
+	BSP_ASSET_PROFILE_LEGACY
+} bspAssetProfile_t;
+
 // BSP file - parsed representation of a BSP map
 typedef struct bspFile_s {
 	char		name[MAX_QPATH];
+	int			ident;
+	int			version;
+	int			references;
 
 	int			checksum;
 
@@ -86,6 +94,10 @@ typedef struct bspFile_s {
 	int			numSurfaces;
 	dsurface_t	*surfaces;
 
+	// Fogs
+	int			numFogs;
+	dfog_t		*fogs;
+
 	// Draw verts
 	int			numDrawVerts;
 	drawVert_t	*drawVerts;
@@ -128,5 +140,9 @@ void		BSP_Init( void );
 void		BSP_RegisterFormat( const bspFormat_t *format );
 qboolean	BSP_Load( const char *name, bspFile_t **bspFile );
 void		BSP_Free( bspFile_t *bspFile );
+void		BSP_Shutdown( void );
+bspAssetProfile_t BSP_AssetProfileForVersion( int version );
+const char	*BSP_DefaultSoundExtForProfile( bspAssetProfile_t profile );
+const char	*BSP_DefaultImageExtForProfile( bspAssetProfile_t profile );
 
 #endif // __BSP_H

@@ -24,6 +24,7 @@ OPTION(USE_LUA "Enable LuaJIT scripting (FEAT_LUA)" ON)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
+AUX_SOURCE_DIRECTORY(code/qcommon/maps QCOMMON_SRCS)
 
 # LZ4 decoder (for SW3Z archive reader)
 list(APPEND QCOMMON_SRCS src/libs/lz4/lz4.c src/libs/lz4/lz4frame.c src/libs/lz4/xxhash.c src/libs/lz4/lz4hc.c)

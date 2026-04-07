@@ -1483,24 +1483,6 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 					if ( WiredPC_ReadToken( handle, &token ) )
 						Q_strncpyz( ag->gradientBar, token.string, sizeof( ag->gradientBar ) );
 				}
-				else if ( !Q_stricmp( token.string, "font" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->font, token.string, sizeof( ag->font ) );
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->fontSize = atoi( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "smallFont" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->smallFont, token.string, sizeof( ag->smallFont ) );
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->smallFontSize = atoi( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "bigFont" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->bigFont, token.string, sizeof( ag->bigFont ) );
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->bigFontSize = atoi( token.string );
-				}
 				else if ( !Q_stricmp( token.string, "fadeClamp" ) ) {
 					if ( WiredPC_ReadToken( handle, &token ) )
 						ag->fadeClamp = atof( token.string );

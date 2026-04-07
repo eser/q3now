@@ -123,7 +123,7 @@ base game is a variable to allow mods based on other mods
 (such as baseq3 + missionpack content combination in a mod for instance)
 BASEGAME is the hardcoded base game ("baseq3")
 
-e.g. the qpath "sound/newstuff/test.wav" would be searched for in the following places:
+e.g. the qpath "sound/newstuff/test.opus" would be searched for in the following places:
 
 home path + current game's zip files
 home path + current game's directory

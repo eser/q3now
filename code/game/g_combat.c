@@ -892,7 +892,6 @@ int RaySphereIntersections( vec3_t origin, float radius, vec3_t point, vec3_t di
 	return 0;
 }
 
-#if FEAT_PW_INVULNERABILITY
 /*
 ================
 G_InvulnerabilityEffect
@@ -929,7 +928,7 @@ int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t i
 		return qfalse;
 	}
 }
-#endif
+
 /*
 ============
 G_Damage
@@ -977,9 +976,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	int			knockback;
 	int			max;
 	int			wp;
-#if FEAT_PW_INVULNERABILITY
 	vec3_t		bouncedir, impactpoint;
-#endif
 	int			attIdx;
 
 	if (!targ->takedamage) {
@@ -994,7 +991,6 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 
 	attIdx = G_AttackFromMOD( mod );
 
-	#if FEAT_PW_INVULNERABILITY
 	if ( targ->client ) {
 		if ( targ->client->invulnerabilityTime > level.time) {
 			if ( dir && point ) {
@@ -1003,7 +999,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			return;
 		}
 	}
-#endif
+
 	if ( !inflictor ) {
 		inflictor = &g_entities[ENTITYNUM_WORLD];
 	}

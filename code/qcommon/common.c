@@ -3926,6 +3926,8 @@ void Com_Init( char *commandLine ) {
 
 	// initialize BSP format registry (FEAT_BSP_ABSTRACTION)
 	BSP_Init();
+	Cvar_Get( "com_mapAssetProfile", "modern", CVAR_ROM );
+	Cvar_Get( "com_mapBspVersion", "0", CVAR_ROM );
 
 #if FEAT_LUA
 	WiredScript_Init();
@@ -4697,6 +4699,8 @@ static void Com_Shutdown( void ) {
 #if FEAT_LUA
 	WiredScript_Shutdown();
 #endif
+
+	BSP_Shutdown();
 
 	if ( logfile != FS_INVALID_HANDLE ) {
 		FS_FCloseFile( logfile );

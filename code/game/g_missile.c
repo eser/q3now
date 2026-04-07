@@ -191,10 +191,8 @@ G_MissileImpact
 void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 	gentity_t		*other;
 	qboolean		hitClient = qfalse;
-#if FEAT_PW_INVULNERABILITY
 	vec3_t			forward, impactpoint, bouncedir;
 	int				eFlags;
-#endif
     vec3_t	vec2; // CPM
 
 	other = &g_entities[trace->entityNum];
@@ -232,7 +230,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 		return;
 	}
 #endif
-#if FEAT_PW_INVULNERABILITY
+
 	if ( other->takedamage ) {
 		if ( other->client && other->client->invulnerabilityTime > level.time ) {
 			//
@@ -249,7 +247,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 			return;
 		}
 	}
-#endif
+
 	// impact damage
 	if (other->takedamage) {
 		// FIXME: wrong damage direction?

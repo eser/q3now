@@ -212,8 +212,21 @@ void SP_target_speaker( gentity_t *ent ) {
 		ent->spawnflags |= 8;
 	}
 
-	if (!strstr( s, ".wav" )) {
-		Com_sprintf (buffer, sizeof(buffer), "%s.wav", s );
+	// FIXME(@eser) it's for backward compatibility for old Q3A/Q3TA maps
+	if ( !COM_GetExtension( s )[0] ) {
+		char mapAssetProfile[16];
+		int mapVersion;
+		const char *defaultExt;
+
+		trap_Cvar_VariableStringBuffer( "com_mapAssetProfile", mapAssetProfile, sizeof( mapAssetProfile ) );
+		mapVersion = trap_Cvar_VariableIntegerValue( "com_mapBspVersion" );
+		if ( !Q_stricmp( mapAssetProfile, "legacy" ) ) {
+			defaultExt = "wav";
+		} else {
+			defaultExt = ( mapVersion > 0 && ( mapVersion <= 46 || mapVersion == 68 ) ) ? "wav" : "opus";
+		}
+
+		Com_sprintf( buffer, sizeof( buffer ), "%s.%s", s, defaultExt );
 	} else {
 		Q_strncpyz( buffer, s, sizeof(buffer) );
 	}
@@ -464,4 +477,3 @@ void SP_target_location( gentity_t *self ){
 
 	G_SetOrigin( self, self->s.origin );
 }
-

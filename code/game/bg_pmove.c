@@ -614,7 +614,6 @@ static void PM_WaterMove( void ) {
 	PM_SlideMove( qfalse );
 }
 
-#if FEAT_PW_INVULNERABILITY
 /*
 ===================
 PM_InvulnerabilityMove
@@ -628,7 +627,6 @@ static void PM_InvulnerabilityMove( void ) {
 	pm->cmd.upmove = 0;
 	VectorClear(pm->ps->velocity);
 }
-#endif
 
 /*
 ===================
@@ -2587,12 +2585,9 @@ void PmoveSingle (pmove_t *pmove) {
         pm->ps->stats[STAT_JUMPTIME] -= pml.msec;
     }
 
-#if FEAT_PW_INVULNERABILITY
 	if ( pm->ps->powerups[PW_INVULNERABILITY] ) {
 		PM_InvulnerabilityMove();
-	} else
-#endif
-	if ( pm->ps->powerups[PW_FLIGHT] ) {
+	} else if ( pm->ps->powerups[PW_FLIGHT] ) {
 		// flight powerup doesn't allow jump and has different friction
 		PM_FlyMove();
 	} else if (pm->ps->pm_flags & PMF_GRAPPLE_PULL) {

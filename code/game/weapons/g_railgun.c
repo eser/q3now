@@ -15,9 +15,7 @@ Attack_Railgun_Primary
 #define	MAX_RAIL_HITS	4
 void Attack_Railgun_Primary (gentity_t *ent) {
 	vec3_t		end;
-#if FEAT_PW_INVULNERABILITY
 	vec3_t impactpoint, bouncedir;
-#endif
 	trace_t		trace;
 	gentity_t	*tent;
 	gentity_t	*traceEnt;
@@ -48,7 +46,6 @@ void Attack_Railgun_Primary (gentity_t *ent) {
 		}
 		traceEnt = &g_entities[ trace.entityNum ];
 		if ( traceEnt->takedamage ) {
-#if FEAT_PW_INVULNERABILITY
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if ( G_InvulnerabilityEffect( traceEnt, forward, trace.endpos, impactpoint, bouncedir ) ) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
@@ -72,7 +69,6 @@ void Attack_Railgun_Primary (gentity_t *ent) {
 					passent = ENTITYNUM_NONE;
 				}
 			}
-#endif
 
 			{
 				int	sDamage = damage;

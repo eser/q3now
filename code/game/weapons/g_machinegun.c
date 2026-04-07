@@ -12,9 +12,7 @@ extern void SnapVectorTowards( vec3_t v, vec3_t to );
 void Attack_Machinegun_Primary ( gentity_t *ent ) {
 	trace_t		tr;
 	vec3_t		end;
-#if FEAT_PW_INVULNERABILITY
 	vec3_t		impactpoint, bouncedir;
-#endif
 	float		r;
 	float		u;
 	gentity_t	*tent;
@@ -66,7 +64,6 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 		tent->s.otherEntityNum = ent->s.number;
 
 		if ( traceEnt->takedamage) {
-#if FEAT_PW_INVULNERABILITY
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
@@ -79,10 +76,7 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 					passent = traceEnt->s.number;
 				}
 				continue;
-			}
-			else {
-#endif
-			{
+			} else {
 				int	bDamage = damage;
 
 				// eser - damage falloff
@@ -91,9 +85,6 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 
 				G_Damage( traceEnt, ent, ent, forward, tr.endpos, bDamage, 0, MOD_MACHINEGUN);
 			}
-#if FEAT_PW_INVULNERABILITY
-			}
-#endif
 		}
 		break;
 	}
@@ -104,9 +95,7 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 void Attack_Machinegun_Burst( gentity_t *ent ) {
 	trace_t		tr;
 	vec3_t		end;
-#if FEAT_PW_INVULNERABILITY
 	vec3_t		impactpoint, bouncedir;
-#endif
 	float		r;
 	float		u;
 	gentity_t	*tent;
@@ -158,7 +147,6 @@ void Attack_Machinegun_Burst( gentity_t *ent ) {
 		tent->s.otherEntityNum = ent->s.number;
 
 		if ( traceEnt->takedamage) {
-#if FEAT_PW_INVULNERABILITY
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
@@ -171,10 +159,7 @@ void Attack_Machinegun_Burst( gentity_t *ent ) {
 					passent = traceEnt->s.number;
 				}
 				continue;
-			}
-			else {
-#endif
-			{
+			} else {
 				int	bDamage = damage;
 
 				// eser - damage falloff
@@ -183,9 +168,6 @@ void Attack_Machinegun_Burst( gentity_t *ent ) {
 
 				G_Damage( traceEnt, ent, ent, forward, tr.endpos, bDamage, 0, MOD_MACHINEGUN_BURST);
 			}
-#if FEAT_PW_INVULNERABILITY
-			}
-#endif
 		}
 		break;
 	}

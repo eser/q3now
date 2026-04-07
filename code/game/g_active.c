@@ -557,15 +557,14 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			break;
 
 		case EV_USE_ITEM3:		// kamikaze
-#if FEAT_PW_INVULNERABILITY
 			// make sure the invulnerability is off
 			ent->client->invulnerabilityTime = 0;
-#endif
+
 			// start the kamikze
 			G_StartKamikaze( ent );
 			break;
 
-#if FEAT_PW_INVULNERABILITY
+#if FEAT_PW_PORTAL
 		case EV_USE_ITEM4:		// portal
 			if( ent->client->portalID ) {
 				DropPortalSource( ent );
@@ -574,11 +573,11 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 				DropPortalDestination( ent );
 			}
 			break;
+#endif
 
 		case EV_USE_ITEM5:		// invulnerability
 			ent->client->invulnerabilityTime = level.time + 10000;
 			break;
-#endif
 
 		default:
 			break;
@@ -587,7 +586,6 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 
 }
 
-#if FEAT_PW_INVULNERABILITY
 /*
 ==============
 StuckInOtherClient
@@ -628,7 +626,6 @@ static int StuckInOtherClient(gentity_t *ent) {
 	}
 	return qfalse;
 }
-#endif
 
 void BotTestSolid(vec3_t origin);
 
@@ -801,7 +798,6 @@ void ClientThink_real( gentity_t *ent ) {
 		ent->client->pers.cmd.buttons |= BUTTON_GESTURE;
 	}
 
-#if FEAT_PW_INVULNERABILITY
 	// check for invulnerability expansion before doing the Pmove
 	if (client->ps.powerups[PW_INVULNERABILITY] ) {
 		if ( !(client->ps.pm_flags & PMF_INVULEXPAND) ) {
@@ -826,7 +822,6 @@ void ClientThink_real( gentity_t *ent ) {
 			trap_LinkEntity(ent);
 		}
 	}
-#endif
 
 	pm.ps = &client->ps;
 	pm.cmd = *ucmd;
@@ -1173,11 +1168,9 @@ void ClientEndFrame( gentity_t *ent ) {
 	}
 #endif
 
-#if FEAT_PW_INVULNERABILITY
 	if ( ent->client->invulnerabilityTime > level.time ) {
 		ent->client->ps.powerups[PW_INVULNERABILITY] = level.time;
 	}
-#endif
 
 	// save network bandwidth
 #if 0

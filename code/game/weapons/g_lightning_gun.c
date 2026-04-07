@@ -10,9 +10,7 @@ extern void SnapVectorTowards( vec3_t v, vec3_t to );
 void Attack_LightningGun_Primary( gentity_t *ent ) {
 	trace_t		tr;
 	vec3_t		end;
-#if FEAT_PW_INVULNERABILITY
 	vec3_t impactpoint, bouncedir;
-#endif
 	gentity_t	*traceEnt, *tent;
 	int			damage, i, passent;
 
@@ -61,7 +59,6 @@ void Attack_LightningGun_Primary( gentity_t *ent ) {
 		}
 // eser - lightning push
 
-#if FEAT_PW_INVULNERABILITY
 		// if not the first trace (the lightning bounced of an invulnerability sphere)
 		if (i) {
 			// add bounced off lightning bolt temp entity
@@ -72,7 +69,7 @@ void Attack_LightningGun_Primary( gentity_t *ent ) {
 			SnapVector( end );
 			VectorCopy( end, tent->s.origin2 );
 		}
-#endif
+
 		if ( tr.entityNum == ENTITYNUM_NONE ) {
 			return;
 		}
@@ -80,7 +77,6 @@ void Attack_LightningGun_Primary( gentity_t *ent ) {
 		traceEnt = &g_entities[ tr.entityNum ];
 
 		if ( traceEnt->takedamage) {
-#if FEAT_PW_INVULNERABILITY
 			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
 				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
@@ -96,7 +92,7 @@ void Attack_LightningGun_Primary( gentity_t *ent ) {
 				}
 				continue;
 			}
-#endif
+
 			if( LogAccuracyHit( traceEnt, ent ) ) {
 				ent->client->accuracy_hits++;
 				if (ent->client) ent->client->attackStats[ATT_LIGHTNING_GUN_PRIMARY].hits++;

@@ -278,10 +278,8 @@ typedef enum {
 	LE_PING_LOCATION,		// team ping marker (4G)
 #endif
 	LE_KAMIKAZE,
-#if FEAT_TA_UI
 	LE_INVULIMPACT,
 	LE_INVULJUICED,
-#endif
 	LE_SHOWREFENTITY
 } leType_t;
 
@@ -636,7 +634,7 @@ typedef struct {
 	int				spectatorOffset;										// current offset from start
 	int				spectatorPaintLen; 									// current offset from start
 
-#if FEAT_TA_UI
+#if FEAT_HARVESTER
 	// skull trails
 	skulltrail_t	skulltrails[MAX_CLIENTS];
 #endif
@@ -762,7 +760,7 @@ typedef struct {
 	qhandle_t	charsetPropB;
 	qhandle_t	whiteShader;
 
-#if FEAT_TA_UI
+#if FEAT_HARVESTER
 	qhandle_t	redCubeModel;
 	qhandle_t	blueCubeModel;
 	qhandle_t	redCubeIcon;
@@ -786,12 +784,14 @@ typedef struct {
 	qhandle_t	blueFlagBaseModel;
 	qhandle_t	neutralFlagBaseModel;
 
-#if FEAT_TA_UI
+#if FEAT_OVERLOAD
 	qhandle_t	overloadBaseModel;
 	qhandle_t	overloadTargetModel;
 	qhandle_t	overloadLightsModel;
 	qhandle_t	overloadEnergyModel;
+#endif
 
+#if FEAT_HARVESTER
 	qhandle_t	harvesterModel;
 	qhandle_t	harvesterRedSkin;
 	qhandle_t	harvesterBlueSkin;
@@ -918,14 +918,12 @@ typedef struct {
 	qhandle_t	kamikazeShockWave;
 	qhandle_t	kamikazeHeadModel;
 	qhandle_t	kamikazeHeadTrail;
-#if FEAT_TA_UI
 	qhandle_t	invulnerabilityImpactModel;
 	qhandle_t	invulnerabilityJuicedModel;
 	qhandle_t	medkitUsageModel;
 	qhandle_t	dustPuffShader;
 	qhandle_t	heartShader;
 	qhandle_t	invulnerabilityPowerupModel;
-#endif
 
 	// scoreboard headers
 	qhandle_t	scoreboardName;
@@ -966,7 +964,6 @@ typedef struct {
 	sfxHandle_t kamikazeExplodeSound;
 	sfxHandle_t kamikazeImplodeSound;
 	sfxHandle_t kamikazeFarSound;
-#if FEAT_TA_UI
 	sfxHandle_t	sfx_nghit;
 	sfxHandle_t	sfx_nghitflesh;
 	sfxHandle_t	sfx_nghitmetal;
@@ -978,13 +975,14 @@ typedef struct {
 	sfxHandle_t invulnerabilityImpactSound2;
 	sfxHandle_t invulnerabilityImpactSound3;
 	sfxHandle_t invulnerabilityJuicedSound;
+#if FEAT_OVERLOAD
 	sfxHandle_t obeliskHitSound1;
 	sfxHandle_t obeliskHitSound2;
 	sfxHandle_t obeliskHitSound3;
 	sfxHandle_t	obeliskRespawnSound;
+#endif
 	sfxHandle_t	winnerSound;
 	sfxHandle_t	loserSound;
-#endif
 	sfxHandle_t	gibSound;
 	sfxHandle_t	gibBounce1Sound;
 	sfxHandle_t	gibBounce2Sound;
@@ -1037,9 +1035,7 @@ typedef struct {
 	sfxHandle_t flightSound;
 	sfxHandle_t medkitSound;
 
-#if FEAT_TA_UI
 	sfxHandle_t weaponHoverSound;
-#endif
 
 	// teamplay sounds
 	sfxHandle_t captureAwardSound;
@@ -1247,9 +1243,7 @@ extern	vmCvar_t		cg_crosshairSize;
 extern	vmCvar_t		cg_crosshairHealth;
 extern	vmCvar_t		cg_crosshairColor;
 extern	vmCvar_t		cg_crosshairAlpha;
-extern	vmCvar_t		cg_drawStatus;
 extern	vmCvar_t		cg_draw2D;
-extern	vmCvar_t		cg_wiredUI;
 extern	vmCvar_t		cg_animSpeed;
 extern	vmCvar_t		cg_debugAnim;
 extern	vmCvar_t		cg_debugPosition;
@@ -1336,10 +1330,6 @@ extern	vmCvar_t		cg_timescaleFadeEnd;
 extern	vmCvar_t		cg_timescaleFadeSpeed;
 extern	vmCvar_t		cg_timescale;
 extern	vmCvar_t		cg_cameraMode;
-#if FEAT_TA_UI
-extern  vmCvar_t		cg_smallFont;
-extern  vmCvar_t		cg_bigFont;
-#endif
 extern	vmCvar_t		cg_noTaunt;
 extern	vmCvar_t		cg_noProjectileTrail;
 #if FEAT_TA_UI
@@ -1347,8 +1337,10 @@ extern	vmCvar_t		cg_redTeamName;
 extern	vmCvar_t		cg_blueTeamName;
 extern	vmCvar_t		cg_currentSelectedPlayer;
 extern	vmCvar_t		cg_currentSelectedPlayerName;
+#endif
 extern	vmCvar_t		cg_enableDust;
 extern	vmCvar_t		cg_enableBreath;
+#if FEAT_OVERLOAD
 extern	vmCvar_t		cg_obeliskRespawnDelay;
 #endif
 extern	vmCvar_t		cg_singlePlayer;
@@ -1422,11 +1414,6 @@ void            CG_voteNotification( const char *msg );
 void            CG_botOrderConfirmation( const char *bot, const char *order );
 #endif
 
-extern	vmCvar_t		cg_hudFile;
-
-// cg_moderntext.c — Modern font/text rendering system
-void	CG_LoadFonts( void );
-
 // cg_wired_bridge.c — Wired UI: push game state to client for HUD rendering
 #if FEAT_WIRED_UI
 void	CG_WiredHudPushState( void );
@@ -1461,13 +1448,10 @@ void CG_UpdateCvars( void );
 qboolean CG_IsPlayerInvisible( centity_t *cent );
 int CG_CrosshairPlayer( void );
 int CG_LastAttacker( void );
-void CG_LoadMenus(const char *menuFile);
 void CG_KeyEvent(int key, qboolean down);
 void CG_MouseEvent(int x, int y);
 void CG_EventHandling(int type);
 void CG_RankRunFrame( void );
-void CG_SetScoreSelection(void *menu);
-score_t *CG_GetSelectedScore( void );
 void CG_BuildSpectatorString( void );
 
 
@@ -1688,12 +1672,12 @@ localEntity_t *CG_SmokePuff( const vec3_t p,
 void CG_BubbleTrail( vec3_t start, vec3_t end, float spacing );
 void CG_SpawnEffect( vec3_t org );
 void CG_KamikazeEffect( vec3_t org );
-#if FEAT_TA_UI
+#if FEAT_OVERLOAD
 void CG_ObeliskExplode( vec3_t org, int entityNum );
 void CG_ObeliskPain( vec3_t org );
+#endif
 void CG_InvulnerabilityImpact( vec3_t org, vec3_t angles );
 void CG_InvulnerabilityJuiced( vec3_t org );
-#endif
 void CG_LightningBoltBeam( vec3_t start, vec3_t end );
 void CG_LightningArcBeam( vec3_t start, vec3_t end );
 void CG_ScorePlum( int client, vec3_t org, int score );

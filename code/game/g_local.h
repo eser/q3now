@@ -365,13 +365,11 @@ struct gclient_s {
 	// like health / armor countdowns and regeneration
 	int			timeResidual;
 
-#if FEAT_TA_UI
+#if FEAT_PW_PORTAL
 	int			portalID;
 #endif
 	int			ammoTimes[WP_NUM_WEAPONS];
-#if FEAT_PW_INVULNERABILITY
 	int			invulnerabilityTime;
-#endif
 
 	char		*areabits;
 
@@ -668,7 +666,7 @@ void trigger_teleporter_touch (gentity_t *self, gentity_t *other, trace_t *trace
 // g_misc.c
 //
 void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles );
-#if FEAT_TA_UI
+#if FEAT_PW_PORTAL
 void DropPortalSource( gentity_t *ent );
 void DropPortalDestination( gentity_t *ent );
 #endif
@@ -677,6 +675,7 @@ void DropPortalDestination( gentity_t *ent );
 //
 // g_weapon.c
 //
+void G_BounceProjectile( vec3_t start, vec3_t impact, vec3_t dir, vec3_t endout );
 qboolean LogAccuracyHit( gentity_t *target, gentity_t *attacker );
 void CalcMuzzlePoint ( gentity_t *ent, vec3_t forward, vec3_t right, vec3_t up, vec3_t muzzlePoint );
 void SnapVectorTowards( vec3_t v, vec3_t to );

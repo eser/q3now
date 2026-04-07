@@ -310,7 +310,7 @@ void CG_KamikazeEffect( vec3_t org ) {
 
 }
 
-#if FEAT_TA_UI
+#if FEAT_OVERLOAD
 /*
 ==================
 CG_ObeliskExplode
@@ -353,7 +353,7 @@ void CG_ObeliskPain( vec3_t org ) {
 	}
 	trap_S_StartSound ( org, ENTITYNUM_NONE, CHAN_BODY, sfx );
 }
-
+#endif
 
 /*
 ==================
@@ -428,8 +428,6 @@ void CG_InvulnerabilityJuiced( vec3_t org ) {
 
 	trap_S_StartSound (org, ENTITYNUM_NONE, CHAN_BODY, cgs.media.invulnerabilityJuicedSound );
 }
-
-#endif
 
 // cg_scorePlums bitmask
 #define SCOREPLUMS_SCORES	1	// bit 0: show score plums

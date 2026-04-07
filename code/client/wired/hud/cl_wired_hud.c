@@ -11,7 +11,6 @@ the wiredHud global instead of cgame globals.
 #include "../../client.h"
 #include "cl_wired_hud.h"
 #include "cl_wired_ui.h"
-#include "cl_wired_fonts.h"
 #include "cl_wired_text.h"
 #include "cl_wired_hud_private.h"
 
@@ -37,6 +36,7 @@ extern void WiredHud_DrawDuelBoard( float ox, float oy, float ow, float oh );
 
 wiredHudState_t  wired_hudStateStorage;
 wiredHudState_t *wiredHud = &wired_hudStateStorage;
+static qboolean wiredHud_elementsLoaded = qfalse;
 
 // from cl_wired_hud_compat.c
 extern superhudGlobalContext_t* CG_SHUDGetContext( void );
@@ -184,18 +184,16 @@ const wiredHudBinding_t *WiredHud_FindBinding( const char *name ) {
 
 // ── init / shutdown ──────────────────────────────────────────────────
 
-static qboolean wiredHud_fontsLoaded = qfalse;
-
 void WiredHud_Init( void ) {
 	Com_Memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
-	wiredHud_fontsLoaded = qfalse;
+	wiredHud_elementsLoaded = qfalse;
 	Com_Printf( "WiredHud: initialized (Phase 3)\n" );
 }
 
 void WiredHud_Shutdown( void ) {
 	WiredHud_DestroyAllElements();
 	Com_Memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
-	wiredHud_fontsLoaded = qfalse;  // force re-init on next map load
+	wiredHud_elementsLoaded = qfalse;
 }
 
 // ── prototype FPS element ─────────────────────────────────────────────
@@ -387,8 +385,6 @@ static void WiredHud_ItemToConfig( const wiredItemDef_t *item, superhudConfig_t 
 // Scans all loaded menus with hudOverlay=1, finds items with hudElement
 // set, and creates SuperHUD elements from them.
 
-static qboolean wiredHud_elementsLoaded = qfalse;
-
 void WiredHud_LoadFromMenus( void ) {
 	int menuCount = WiredUI_GetMenuCount();
 	int i, j;
@@ -429,6 +425,7 @@ void WiredHud_LoadFromMenus( void ) {
 	}
 
 	Com_Printf( "WiredHud: %d hudOverlay menus, %d elements created\n", hudOverlayMenus, created );
+	wiredHud_elementsLoaded = qtrue;
 }
 
 // ── per-frame HUD rendering ─────────────────────────────────────────
@@ -436,15 +433,11 @@ void WiredHud_LoadFromMenus( void ) {
 void WiredHud_Routine( int realtime ) {
 	if ( !wiredHud->valid ) return;
 
-	// lazy init — deferred from WiredUI_Init to avoid Z_CheckHeap crash
-	if ( !wiredHud_fontsLoaded ) {
-		CG_LoadFonts();
-		wiredHud_fontsLoaded = qtrue;
-
-		// load HUD elements from any hudOverlay menus
+	// lazy element init — deferred from WiredUI_Init to avoid Z_CheckHeap crash
+	if ( !wiredHud_elementsLoaded ) {
 		WiredHud_LoadFromMenus();
-
-		Com_Printf( "WiredHud: fonts loaded, %d elements active\n", WiredHud_GetElementCount() );
+		wiredHud_elementsLoaded = qtrue;
+		Com_Printf( "WiredHud: %d elements active\n", WiredHud_GetElementCount() );
 	}
 
 	// sync compat structs so element code sees cg.*/cgs.* patterns

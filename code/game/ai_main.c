@@ -1703,9 +1703,6 @@ int BotInitLibrary(void) {
 	trap_Cvar_VariableStringBuffer("fs_game", buf, sizeof(buf));
 	if (strlen(buf)) trap_BotLibVarSet("gamedir", buf);
 	//
-#if FEAT_TA_UI
-	trap_BotLibDefine("MISSIONPACK");
-#endif
 	//setup the bot library
 	return trap_BotLibSetup();
 }

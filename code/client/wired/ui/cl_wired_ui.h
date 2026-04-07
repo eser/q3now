@@ -465,12 +465,6 @@ wiredMenuDef_t *WiredUI_GetActiveMenu( void );
 typedef struct {
 	char            cursor[MAX_QPATH];         // cursor shader path
 	char            gradientBar[MAX_QPATH];    // gradient bar shader path
-	char            font[MAX_QPATH];           // primary font path
-	int             fontSize;                  // primary font size (default 16)
-	char            smallFont[MAX_QPATH];      // small font path
-	int             smallFontSize;             // small font size (default 12)
-	char            bigFont[MAX_QPATH];        // big font path
-	int             bigFontSize;               // big font size (default 20)
 	float           fadeClamp;                 // max fade alpha (default 1.0)
 	int             fadeCycle;                 // fade cycle time ms (default 1)
 	float           fadeAmount;                // fade step per cycle (default 0.2)

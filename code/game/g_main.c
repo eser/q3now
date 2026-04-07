@@ -77,13 +77,15 @@ vmCvar_t	pmove_overbounce;
 vmCvar_t	g_rankings;
 vmCvar_t	g_listEntity;
 vmCvar_t	g_localTeamPref;
-#if FEAT_TA_UI
+#if FEAT_OVERLOAD
 vmCvar_t	g_obeliskRespawnDelay;
+#endif
+#if FEAT_TA_UI
 vmCvar_t	g_redteam;
 vmCvar_t	g_blueteam;
+#endif
 vmCvar_t	g_enableDust;
 vmCvar_t	g_enableBreath;
-#endif
 
 vmCvar_t	g_spawnWeapons;
 vmCvar_t	g_grapple;
@@ -225,15 +227,17 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_allowVote, "g_allowVote", "1", CVAR_ARCHIVE, 0, qfalse },
 	{ &g_listEntity, "g_listEntity", "0", 0, 0, qfalse },
 
-#if FEAT_TA_UI
+#if FEAT_OVERLOAD
 	{ &g_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", CVAR_SERVERINFO, 0, qfalse },
-
+#endif
+	
+#if FEAT_TA_UI
 	{ &g_redteam, "g_redteam", "Stroggs", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO , 0, qtrue, qtrue },
 	{ &g_blueteam, "g_blueteam", "Pagans", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_USERINFO , 0, qtrue, qtrue  },
+#endif
 
 	{ &g_enableDust, "g_enableDust", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
 	{ &g_enableBreath, "g_enableBreath", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
-#endif
 	{ &g_smoothClients, "g_smoothClients", "1", 0, 0, qfalse},
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO, 0, qfalse},
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO, 0, qfalse},
@@ -575,7 +579,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	level.time = levelTime;
 	level.startTime = levelTime;
 
-	level.snd_fry = G_SoundIndex("sound/player/fry.wav");	// FIXME standing in lava / slime
+	level.snd_fry = G_SoundIndex("sound/player/fry.opus");	// FIXME standing in lava / slime
 
 	if ( g_logfile.string[0] ) {
 		if ( g_logfileSync.integer ) {

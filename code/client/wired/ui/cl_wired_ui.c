@@ -606,10 +606,10 @@ essentially free outside of hunk-clear transitions.
 */
 static void WiredUI_RegisterAssets( void ) {
 	// sounds
-	wired_sfxFocus     = S_RegisterSound( "sound/misc/menu2.wav", qfalse );
-	wired_sfxAction    = S_RegisterSound( "sound/misc/menu1.wav", qfalse );
-	wired_sfxMenuOpen  = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
-	wired_sfxMenuClose = S_RegisterSound( "sound/misc/menu3.wav", qfalse );
+	wired_sfxFocus     = S_RegisterSound( "sound/misc/menu2.opus", qfalse );
+	wired_sfxAction    = S_RegisterSound( "sound/misc/menu1.opus", qfalse );
+	wired_sfxMenuOpen  = S_RegisterSound( "sound/misc/menu3.opus", qfalse );
+	wired_sfxMenuClose = S_RegisterSound( "sound/misc/menu3.opus", qfalse );
 
 	// cursor shader — try cvar override, then assetGlobals, then legacy fallback
 	wired_cursorShader = 0;
@@ -755,17 +755,17 @@ void WiredUI_Init( qboolean inGameUI ) {
 	memset( &wired_assetGlobals, 0, sizeof( wired_assetGlobals ) );
 	Q_strncpyz( wired_assetGlobals.cursor, "ui/assets/3_cursor3", sizeof( wired_assetGlobals.cursor ) );
 	Q_strncpyz( wired_assetGlobals.gradientBar, "ui/assets/gradientbar2.tga", sizeof( wired_assetGlobals.gradientBar ) );
-	Q_strncpyz( wired_assetGlobals.font, "fonts/font", sizeof( wired_assetGlobals.font ) );
-	wired_assetGlobals.fontSize = 16;
-	Q_strncpyz( wired_assetGlobals.smallFont, "fonts/smallfont", sizeof( wired_assetGlobals.smallFont ) );
-	wired_assetGlobals.smallFontSize = 12;
-	Q_strncpyz( wired_assetGlobals.bigFont, "fonts/bigfont", sizeof( wired_assetGlobals.bigFont ) );
-	wired_assetGlobals.bigFontSize = 20;
+	Q_strncpyz( wired_assetGlobals.defaultFontName, "oxanium", sizeof( wired_assetGlobals.defaultFontName ) );
+	wired_assetGlobals.defaultFontSize = 16.0f;
+	Q_strncpyz( wired_assetGlobals.defaultHeadingFontName, "sansman", sizeof( wired_assetGlobals.defaultHeadingFontName ) );
+	wired_assetGlobals.defaultHeadingFontSize = 20.0f;
+	Q_strncpyz( wired_assetGlobals.defaultConsoleFontName, "sharetechmono", sizeof( wired_assetGlobals.defaultConsoleFontName ) );
+	wired_assetGlobals.defaultConsoleFontSize = 12.0f;
 	wired_assetGlobals.fadeClamp = 1.0f;
 	wired_assetGlobals.fadeCycle = 1;
 	wired_assetGlobals.fadeAmount = 0.2f;  // fast 150ms transitions
 	Vector4Set( wired_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
-	Q_strncpyz( wired_assetGlobals.focusSound, "sound/misc/menu2.wav", sizeof( wired_assetGlobals.focusSound ) );
+	Q_strncpyz( wired_assetGlobals.focusSound, "sound/misc/menu2.opus", sizeof( wired_assetGlobals.focusSound ) );
 	Vector4Set( wired_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );  // TA gold
 	wired_assetGlobals.shadowX = 1.0f;
 	wired_assetGlobals.shadowY = 1.0f;
@@ -778,9 +778,6 @@ void WiredUI_Init( qboolean inGameUI ) {
 	if ( Cvar_VariableIntegerValue( "g_spSkill" ) < 1 ) {
 		Cvar_Set( "g_spSkill", "3" );  // default to "Competitive"
 	}
-
-	// load TA fonts (fontInfo_t-based, for v6/TA menu text rendering)
-	WiredUI_LoadTAFonts();
 
 	wired_activeMenu = UIMENU_NONE;
 	wired_initialized = qtrue;

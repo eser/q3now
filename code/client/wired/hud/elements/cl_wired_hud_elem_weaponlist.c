@@ -82,7 +82,7 @@ static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, supe
 	if (ammo_max > element->ammoMax)
 	{
 		element->ammoMax = ammo_max;
-		element->ammoWidth = (int)Text_Measure(va(" %d", ammo_max), WiredFont_ToFontId(element->ammoCount[0].fontIndex), element->ammoCount[0].coord.named.w);
+		element->ammoWidth = (int)Text_Measure(va(" %d", ammo_max), element->ammoCount[0].fontId, element->ammoCount[0].coord.named.w);
 	}
 
 	total = count;
