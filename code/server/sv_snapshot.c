@@ -21,6 +21,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "server.h"
+#if FEAT_QUIC_TRANSPORT && FEAT_QUIC_GAME
+#include "../webtransport/wt_public.h"  /* QUIC_GetConnHandleByAddr, transport */
+#endif
 
 
 /*
@@ -693,7 +696,32 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageSent = svs.msgTime;
 	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageAcked = 0;
 
-	// send the datagram
+#if FEAT_QUIC_TRANSPORT && FEAT_QUIC_GAME
+	/* For QUIC game clients: skip netchan, prepend tick header and send as datagram.
+	 * Format: [server_tick:u32le][baseline_tick:u32le][delta_payload] */
+	if ( NET_IS_QUIC( client->netchan.remoteAddress.type ) ) {
+		conn_handle_t conn = QUIC_GetConnHandleByAddr( &client->netchan.remoteAddress );
+		if ( conn != CONN_INVALID && transport ) {
+			byte        tickbuf[8 + MAX_MSGLEN_BUF];
+			uint32_t    srv_tick  = (uint32_t)sv.time;
+			uint32_t    base_tick = (uint32_t)client->lastSnapshotTime;
+
+			tickbuf[0] = (byte)( srv_tick         & 0xFF );
+			tickbuf[1] = (byte)( (srv_tick >>  8) & 0xFF );
+			tickbuf[2] = (byte)( (srv_tick >> 16) & 0xFF );
+			tickbuf[3] = (byte)( (srv_tick >> 24) & 0xFF );
+			tickbuf[4] = (byte)( base_tick         & 0xFF );
+			tickbuf[5] = (byte)( (base_tick >>  8) & 0xFF );
+			tickbuf[6] = (byte)( (base_tick >> 16) & 0xFF );
+			tickbuf[7] = (byte)( (base_tick >> 24) & 0xFF );
+
+			Com_Memcpy( tickbuf + 8, msg->data, msg->cursize );
+			transport->send_unreliable( conn, tickbuf, 8 + msg->cursize );
+			return;
+		}
+	}
+#endif
+
 	SV_Netchan_Transmit( client, msg );
 }
 
