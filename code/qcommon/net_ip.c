@@ -183,6 +183,14 @@ static cvar_t	*net_mcast6iface;
 #endif
 static cvar_t	*net_dropsim;
 
+#if FEAT_QUIC_GAME
+// Controls which game transport new outgoing connections use.
+// "udp"  — legacy Q3 netchan over raw UDP (default during transition)
+// "quic" — QUIC datagrams + stream handshake
+// "auto" — prefer QUIC when available, fall back to UDP
+static cvar_t	*net_transport;
+#endif
+
 static sockaddr_t socksRelayAddr;
 
 static SOCKET	ip_socket = INVALID_SOCKET;
@@ -294,12 +302,14 @@ static void NetadrToSockadr( const netadr_t *a, sockaddr_t *s ) {
 			s->v4.sin_addr.s_addr = INADDR_BROADCAST;
 			break;
 		case NA_IP:
+		case NA_QUIC:
 			s->v4.sin_family = AF_INET;
 			memcpy( &s->v4.sin_addr.s_addr, a->ipv._4, sizeof( s->v4.sin_addr.s_addr ) );
 			s->v4.sin_port = a->port;
 			break;
 #if FEAT_IPV6
 		case NA_IP6:
+		case NA_QUIC6:
 			s->v6.sin6_family = AF_INET6;
 			memcpy( &s->v6.sin6_addr, a->ipv._6, sizeof( s->v6.sin6_addr ) );
 			s->v6.sin6_port = a->port;
@@ -515,7 +525,7 @@ qboolean NET_CompareBaseAdrMask( const netadr_t *a, const netadr_t *b, unsigned 
 	if (a->type == NA_LOOPBACK)
 		return qtrue;
 
-	if (a->type == NA_IP)
+	if (a->type == NA_IP || a->type == NA_QUIC)
 	{
 		addra = (byte *) &a->ipv._4;
 		addrb = (byte *) &b->ipv._4;
@@ -524,7 +534,7 @@ qboolean NET_CompareBaseAdrMask( const netadr_t *a, const netadr_t *b, unsigned 
 			netmask = 32;
 	}
 #if FEAT_IPV6
-	else if (a->type == NA_IP6)
+	else if (a->type == NA_IP6 || a->type == NA_QUIC6)
 	{
 		addra = (byte *) &a->ipv._6;
 		addrb = (byte *) &b->ipv._6;
@@ -591,6 +601,28 @@ const char *NET_AdrToString( const netadr_t *a )
 		NetadrToSockadr( a, &sadr );
 		Sys_SockaddrToString( s, sizeof(s), &sadr );
 	}
+	else if (a->type == NA_QUIC)
+	{
+		char ipstr[NET_ADDRSTRMAXLEN];
+		netadr_t tmp = *a;
+		sockaddr_t sadr;
+		tmp.type = NA_IP;
+		NetadrToSockadr( &tmp, &sadr );
+		Sys_SockaddrToString( ipstr, sizeof(ipstr), &sadr );
+		Com_sprintf( s, sizeof(s), "quic:%s", ipstr );
+	}
+#if FEAT_IPV6
+	else if (a->type == NA_QUIC6)
+	{
+		char ipstr[NET_ADDRSTRMAXLEN];
+		netadr_t tmp = *a;
+		sockaddr_t sadr;
+		tmp.type = NA_IP6;
+		NetadrToSockadr( &tmp, &sadr );
+		Sys_SockaddrToString( ipstr, sizeof(ipstr), &sadr );
+		Com_sprintf( s, sizeof(s), "quic6:%s", ipstr );
+	}
+#endif
 
 	return s;
 }
@@ -606,9 +638,21 @@ const char *NET_AdrToStringwPort( const netadr_t *a )
 		strcpy( s, "bot" );
 	else if(a->type == NA_IP)
 		Com_sprintf(s, sizeof(s), "%s:%hu", NET_AdrToString(a), ntohs(a->port));
+	else if(a->type == NA_QUIC)
+		Com_sprintf(s, sizeof(s), "%s:%hu", NET_AdrToString(a), ntohs(a->port));
 #if FEAT_IPV6
 	else if(a->type == NA_IP6)
 		Com_sprintf(s, sizeof(s), "[%s]:%hu", NET_AdrToString(a), ntohs(a->port));
+	else if(a->type == NA_QUIC6)
+	{
+		char ipstr[NET_ADDRSTRMAXLEN];
+		netadr_t tmp = *a;
+		sockaddr_t sadr;
+		tmp.type = NA_IP6;
+		NetadrToSockadr( &tmp, &sadr );
+		Sys_SockaddrToString( ipstr, sizeof(ipstr), &sadr );
+		Com_sprintf( s, sizeof(s), "quic6:[%s]:%hu", ipstr, ntohs(a->port) );
+	}
 #endif
 
 	return s;
@@ -621,9 +665,9 @@ qboolean NET_CompareAdr( const netadr_t *a, const netadr_t *b )
 		return qfalse;
 
 #if FEAT_IPV6
-	if (a->type == NA_IP || a->type == NA_IP6)
+	if (a->type == NA_IP || a->type == NA_IP6 || a->type == NA_QUIC || a->type == NA_QUIC6)
 #else
-	if (a->type == NA_IP)
+	if (a->type == NA_IP || a->type == NA_QUIC)
 #endif
 	{
 		if (a->port == b->port)
@@ -714,6 +758,12 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 			}
 #endif
 
+#if !FEAT_UDP
+			// UDP game transport is disabled — drop all non-QUIC packets.
+			// QUIC rides over this socket; pure Q3/UDP netchan is not accepted.
+			return qfalse;
+#endif
+
 			net_message->cursize = ret;
 			return qtrue;
 		}
@@ -755,6 +805,10 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 					return qfalse;
 				}
 			}
+#endif
+
+#if !FEAT_UDP
+			return qfalse;
 #endif
 
 			net_message->cursize = ret;
@@ -799,6 +853,10 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 			}
 #endif
 
+#if !FEAT_UDP
+			return qfalse;
+#endif
+
 			net_message->cursize = ret;
 			return qtrue;
 		}
@@ -819,6 +877,13 @@ Sys_SendPacket
 void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 	int ret = SOCKET_ERROR;
 	sockaddr_t addr;
+
+#if FEAT_QUIC_GAME
+	if ( to->type == NA_QUIC || to->type == NA_QUIC6 ) {
+		QUIC_SendGamePacketToAddr( to, data, length );
+		return;
+	}
+#endif
 
 	switch ( to->type ) {
 		case NA_BROADCAST:
@@ -908,7 +973,7 @@ qboolean Sys_IsLANAddress( const netadr_t *adr ) {
 		return qtrue;
 	}
 
-	if( adr->type == NA_IP )
+	if( adr->type == NA_IP || adr->type == NA_QUIC )
 	{
 		// RFC1918:
 		// 10.0.0.0        -   10.255.255.255  (10/8 prefix)
@@ -925,7 +990,7 @@ qboolean Sys_IsLANAddress( const netadr_t *adr ) {
 			return qtrue;
 	}
 #if FEAT_IPV6
-	else if(adr->type == NA_IP6)
+	else if(adr->type == NA_IP6 || adr->type == NA_QUIC6)
 	{
 		if(adr->ipv._6[0] == 0xfe && (adr->ipv._6[1] & 0xc0) == 0x80)
 			return qtrue;
@@ -937,9 +1002,14 @@ qboolean Sys_IsLANAddress( const netadr_t *adr ) {
 	// Now compare against the networks this computer is member of.
 	for ( index = 0; index < numIP; index++ )
 	{
-		if ( localIP[index].type == adr->type )
+		if ( localIP[index].type == adr->type ||
+		     (adr->type == NA_QUIC  && localIP[index].type == NA_IP)
+#if FEAT_IPV6
+		  || (adr->type == NA_QUIC6 && localIP[index].type == NA_IP6)
+#endif
+		)
 		{
-			if ( adr->type == NA_IP )
+			if ( adr->type == NA_IP || adr->type == NA_QUIC )
 			{
 				compareip = (byte *) &((struct sockaddr_in *) &localIP[index].addr)->sin_addr.s_addr;
 				comparemask = (byte *) &((struct sockaddr_in *) &localIP[index].netmask)->sin_addr.s_addr;
@@ -948,7 +1018,7 @@ qboolean Sys_IsLANAddress( const netadr_t *adr ) {
 				addrsize = sizeof(adr->ipv._4);
 			}
 #if FEAT_IPV6
-			else if ( adr->type == NA_IP6 || adr->type == NA_MULTICAST6 )
+			else if ( adr->type == NA_IP6 || adr->type == NA_MULTICAST6 || adr->type == NA_QUIC6 )
 			{
 				// TODO? should we check the scope_id here?
 
@@ -1726,6 +1796,19 @@ static qboolean NET_GetCvars( void ) {
 	net_dropsim = Cvar_Get( "net_dropsim", "", CVAR_TEMP );
 	Cvar_SetDescription( net_dropsim, "Simulated packet drops." );
 
+#if FEAT_QUIC_GAME
+#if FEAT_UDP
+	net_transport = Cvar_Get( "net_transport", "udp", CVAR_ARCHIVE_ND );
+#else
+	net_transport = Cvar_Get( "net_transport", "quic", CVAR_ARCHIVE_ND );
+#endif
+	Cvar_SetDescription( net_transport,
+		"Game transport for new outgoing connections.\n"
+		"\"udp\"  — legacy Q3 netchan over raw UDP\n"
+		"\"quic\" — QUIC datagrams + stream handshake (requires QUIC certs)\n"
+		"\"auto\" — prefer QUIC when available, fall back to UDP" );
+#endif
+
 	return modified ? qtrue : qfalse;
 }
 
@@ -1904,6 +1987,33 @@ static void NET_Event( const fd_set *fdr )
 			break;
 		}
 	}
+
+#if FEAT_QUIC_GAME
+	/* Pump client QUIC timers (non-dedicated: drive TLS handshake + ACKs) */
+#if !defined(DEDICATED)
+	QUIC_ClientFrame();
+#endif
+
+	/* Drain QUIC game datagrams that were queued while picoquic processed
+	   UDP packets above.  Each call dequeues one netchan packet and sets
+	   net_from->type to NA_QUIC / NA_QUIC6 so the dispatch path routes it
+	   through the normal SV_PacketEvent / CL_PacketEvent handlers. */
+	while ( 1 ) {
+		MSG_Init( &netmsg, bufData, MAX_MSGLEN );
+
+		if ( !QUIC_GetGamePacket( &from, &netmsg ) )
+			break;
+
+#ifdef DEDICATED
+		Com_RunAndTimeServerPacket( &from, &netmsg );
+#else
+		if ( com_sv_running->integer || com_dedicated->integer )
+			Com_RunAndTimeServerPacket( &from, &netmsg );
+		else
+			CL_PacketEvent( &from, &netmsg );
+#endif
+	}
+#endif
 }
 
 

@@ -15,10 +15,12 @@ OPTION(USE_VULKAN "" ON)
 OPTION(USE_SYSTEM_JPEG "" OFF)
 OPTION(USE_RENDERER_DLOPEN "" ON)
 OPTION(USE_WASM "Enable WASM VM backend via WAMR" OFF)
-OPTION(USE_QUIC "Enable QUIC transport via picoquic (FEAT_QUIC_TRANSPORT)" OFF)
-OPTION(USE_QUIC_OBSERVE "Enable QUIC game state observation (FEAT_QUIC_OBSERVE, implies USE_QUIC)" OFF)
-OPTION(USE_QUIC_CONTROL "Enable QUIC MCP/command channel (FEAT_QUIC_CONTROL, implies USE_QUIC_OBSERVE)" OFF)
-OPTION(USE_QUIC_HTTP "Enable QUIC HTTP endpoints (FEAT_QUIC_HTTP, implies USE_QUIC)" OFF)
+OPTION(USE_QUIC "Enable QUIC transport via picoquic (FEAT_QUIC_TRANSPORT)" ON)
+OPTION(USE_QUIC_OBSERVE "Enable QUIC game state observation (FEAT_QUIC_OBSERVE, implies USE_QUIC)" ON)
+OPTION(USE_QUIC_CONTROL "Enable QUIC MCP/command channel (FEAT_QUIC_CONTROL, implies USE_QUIC_OBSERVE)" ON)
+OPTION(USE_QUIC_HTTP "Enable QUIC HTTP endpoints (FEAT_QUIC_HTTP, implies USE_QUIC)" ON)
+OPTION(USE_QUIC_GAME "Enable QUIC game transport — replaces UDP netchan (FEAT_QUIC_GAME, implies USE_QUIC)" ON)
+OPTION(USE_UDP "Enable legacy UDP game transport (FEAT_UDP); kept OFF — UDP is sunset" OFF)
 OPTION(USE_LUA "Enable LuaJIT scripting (FEAT_LUA)" ON)
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -130,8 +132,11 @@ IF(NO_VM_COMPILED)
 ENDIF()
 
 # ── QUIC Transport (picoquic) ─────────────────────────────────────
-# Layered: USE_QUIC_CONTROL → USE_QUIC_OBSERVE → USE_QUIC
+# Layered: USE_QUIC_GAME → USE_QUIC_CONTROL → USE_QUIC_OBSERVE → USE_QUIC
 # Each higher layer auto-enables its prerequisites.
+IF(USE_QUIC_GAME)
+	SET(USE_QUIC_OBSERVE ON)
+ENDIF()
 IF(USE_QUIC_CONTROL)
 	SET(USE_QUIC_OBSERVE ON)
 ENDIF()
@@ -140,6 +145,15 @@ IF(USE_QUIC_OBSERVE)
 ENDIF()
 IF(USE_QUIC_HTTP)
 	SET(USE_QUIC ON)
+ENDIF()
+
+# ── UDP transport ─────────────────────────────────────────────────
+# USE_UDP=OFF (default): legacy Q3 netchan-over-UDP is disabled (Phase 4+).
+# USE_UDP=ON:  re-enable for fallback/compatibility testing only.
+IF(USE_UDP)
+	ADD_COMPILE_DEFINITIONS(FEAT_UDP=1)
+ELSE()
+	ADD_COMPILE_DEFINITIONS(FEAT_UDP=0)
 ENDIF()
 
 IF(USE_QUIC)
@@ -153,6 +167,11 @@ IF(USE_QUIC)
 	ENDIF()
 	IF(USE_QUIC_HTTP)
 		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_HTTP=1)
+	ENDIF()
+	IF(USE_QUIC_GAME)
+		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_GAME=1)
+	ELSE()
+		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_GAME=0)
 	ENDIF()
 
 	# picoquic + picotls + mpack sources
@@ -219,10 +238,21 @@ IF(USE_QUIC)
 	IF(USE_QUIC_HTTP)
 		MESSAGE(STATUS "  + QUIC HTTP (/health, /metrics)")
 	ENDIF()
+	IF(USE_QUIC_GAME)
+		MESSAGE(STATUS "  + QUIC game transport (replaces UDP netchan)")
+	ENDIF()
 ELSE()
 	# When QUIC is disabled, override all FEAT_QUIC flags to 0
 	# (q_feats.h defaults are already 0, but this ensures consistency)
 	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_TRANSPORT=0)
+	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_GAME=0)
+ENDIF()
+
+IF(NOT USE_UDP)
+	IF(NOT USE_QUIC_GAME)
+		MESSAGE(FATAL_ERROR "USE_UDP=OFF requires USE_QUIC_GAME=ON — at least one game transport must be enabled")
+	ENDIF()
+	MESSAGE(STATUS "UDP game transport disabled (USE_UDP=OFF) — QUIC is the sole game transport")
 ENDIF()
 
 # ── libogg (Ogg container format) ─────────────────────────────────

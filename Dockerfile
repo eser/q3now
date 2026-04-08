@@ -8,6 +8,8 @@
 #     -v ./baseq3:/home/q3now/baseq3 \
 #     eserozvataf/q3now +map q3dm17
 #
+# One UDP port serves all clients — QUIC (WebTransport) and legacy Q3 protocol
+# share port 27960/udp via in-engine packet demultiplexing.
 # Game assets (pak0.pk3, custom maps, server.cfg) go in the mounted volume.
 # See docker/docker-compose.yml for a complete example.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -48,7 +50,8 @@ COPY . .
 
 # Configure: dedicated server only (no SDL, no renderers)
 # WASM enabled for portable game module support
-# QUIC enabled for transport + HTTP health endpoint
+# QUIC enabled for transport + HTTP health endpoint; UDP game transport disabled (Phase 4)
+# (USE_QUIC_* and USE_QUIC_GAME are now ON by default; USE_UDP is OFF by default)
 RUN cmake -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DUSE_SDL=OFF \
@@ -58,7 +61,10 @@ RUN cmake -S . -B build -G Ninja \
     -DUSE_WASM=ON \
     -DUSE_QUIC=ON \
     -DUSE_QUIC_OBSERVE=ON \
+    -DUSE_QUIC_CONTROL=ON \
     -DUSE_QUIC_HTTP=ON \
+    -DUSE_QUIC_GAME=ON \
+    -DUSE_UDP=OFF \
     -DWASI_SDK_PREFIX=/opt/wasi-sdk
 
 # Build only the dedicated server + game modules (skip client which needs
@@ -83,6 +89,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libcurl4 \
         libssl3 \
+        openssl \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 q3now \
@@ -106,7 +113,8 @@ RUN chmod +x /opt/q3now/entrypoint.sh /opt/q3now/q3now-ded
 RUN mkdir -p /home/q3now/baseq3 /home/q3now/certs \
     && chown -R q3now:q3now /home/q3now
 
-# Game traffic (UDP) — also used by QUIC transport
+# Single UDP port for all traffic — QUIC and the legacy Q3 protocol share
+# the same socket; the engine demultiplexes on the first bytes of each packet.
 EXPOSE 27960/udp
 
 USER q3now
