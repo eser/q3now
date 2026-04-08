@@ -396,6 +396,21 @@ typedef enum {
 	BOTLIB_PC_READ_TOKEN,
 	BOTLIB_PC_SOURCE_FILE_AND_LINE,
 
+	BOTLUA_LOAD_CHARACTER = 710,
+	BOTLUA_FREE_CHARACTER,
+	BOTLUA_CHARACTERISTIC_FLOAT,
+	BOTLUA_CHARACTERISTIC_BFLOAT,
+	BOTLUA_CHARACTERISTIC_INTEGER,
+	BOTLUA_CHARACTERISTIC_BINTEGER,
+	BOTLUA_CHARACTERISTIC_STRING,
+	BOTLUA_BIND_BOT,
+	BOTLUA_BOT_THINK,
+	BOTLUA_BOT_PROFILE_FIELD,
+	BOTLUA_BOT_PICK_WEAPON,
+	BOTLUA_BOT_EVAL_ITEM,
+	BOTLUA_BOT_DECIDE,
+	BOTLUA_BOT_ON_CHAT,
+
 	// engine extensions
 	G_CVAR_SETDESCRIPTION,
 	G_TRAP_GETVALUE = COM_TRAP_GETVALUE,
@@ -410,7 +425,14 @@ typedef enum {
 	G_QUIC_EMIT_CHAT,              // ( int client, const char *msg, qboolean teamOnly )
 	G_QUIC_EMIT_MATCH_EVENT,       // ( const char *type, const char *data )
 	G_QUIC_EMIT_DELAG,             // ( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos )
-	G_QUIC_EMIT_BOT_EVENT          // ( int bot_id, const char *event_type, int param1, int param2, vec3_t pos )
+	G_QUIC_EMIT_BOT_EVENT,         // ( int bot_id, const char *event_type, int param1, int param2, vec3_t pos )
+
+	// QUIC congestion-control metrics — require FEAT_QUIC_TRANSPORT.
+	// Loss is returned as integer per-mille (0–1000) to avoid float in
+	// the QVM trap interface.
+	G_QUIC_GET_PING,               // ( int clientNum ) -> int ms; -1 if unknown
+	G_QUIC_GET_LOSS,               // ( int clientNum ) -> int loss*1000 (‰); 0 if unknown
+	G_QUIC_GET_BANDWIDTH           // ( int clientNum ) -> int kbps; 0 if unknown
 
 } gameImport_t;
 

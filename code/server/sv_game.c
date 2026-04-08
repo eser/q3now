@@ -930,6 +930,45 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case BOTLIB_AI_GENETIC_PARENTS_AND_CHILD_SELECTION:
 		return botlib_export->ai.GeneticParentsAndChildSelection(args[1], VMA(2), VMA(3), VMA(4), VMA(5));
 
+	case BOTLUA_LOAD_CHARACTER:
+		return SV_Lua_LoadCharacter( VMA(1), VMF(2) );
+	case BOTLUA_FREE_CHARACTER:
+		SV_Lua_FreeCharacter( args[1] );
+		return 0;
+	case BOTLUA_CHARACTERISTIC_FLOAT:
+		return FloatAsInt( SV_Lua_CharacteristicBFloat( args[1], args[2], 0.0f, 1.0f ) );
+	case BOTLUA_CHARACTERISTIC_BFLOAT:
+		return FloatAsInt( SV_Lua_CharacteristicBFloat( args[1], args[2], VMF(3), VMF(4) ) );
+	case BOTLUA_CHARACTERISTIC_INTEGER:
+		return (int)SV_Lua_CharacteristicBFloat( args[1], args[2], 0.0f, 1.0f );
+	case BOTLUA_CHARACTERISTIC_BINTEGER:
+		return (int)SV_Lua_CharacteristicBFloat( args[1], args[2], (float)args[3], (float)args[4] );
+	case BOTLUA_CHARACTERISTIC_STRING:
+		VM_CHECKBOUNDS( gvm, args[3], args[4] );
+		SV_Lua_CharacteristicString( args[1], args[2], VMA(3), args[4] );
+		return 0;
+	case BOTLUA_BIND_BOT:
+		return SV_Lua_BindBot( args[1], args[2] );
+	case BOTLUA_BOT_THINK:
+		return SV_Lua_BotThink( args[1], VMF(2) );
+	case BOTLUA_BOT_PROFILE_FIELD:
+		return FloatAsInt( SV_Lua_BotProfileField( args[1], args[2] ) );
+	case BOTLUA_BOT_PICK_WEAPON:
+		VM_CHECKBOUNDS( gvm, args[2], sizeof( botLuaCombatCtx_t ) );
+		VM_CHECKBOUNDS( gvm, args[3], args[4] );
+		return SV_Lua_BotPickWeapon( args[1], VMA(2), VMA(3), args[4] );
+	case BOTLUA_BOT_EVAL_ITEM:
+		VM_CHECKBOUNDS( gvm, args[2], sizeof( botLuaItemEvalCtx_t ) );
+		return SV_Lua_BotEvalItem( args[1], VMA(2) );
+	case BOTLUA_BOT_DECIDE:
+		VM_CHECKBOUNDS( gvm, args[2], sizeof( botLuaDecideCtx_t ) );
+		VM_CHECKBOUNDS( gvm, args[3], args[4] );
+		return SV_Lua_BotDecide( args[1], VMA(2), VMA(3), args[4] );
+	case BOTLUA_BOT_ON_CHAT:
+		VM_CHECKBOUNDS( gvm, args[3], sizeof( botLuaChatCtx_t ) );
+		VM_CHECKBOUNDS( gvm, args[4], args[5] );
+		return SV_Lua_BotOnChat( args[1], VMA(2), VMA(3), VMA(4), args[5] );
+
 	// shared syscalls
 
 	case TRAP_MEMSET:
@@ -1021,6 +1060,35 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		QUIC_EmitBotEvent( args[1], VMA(2), args[3], args[4], VMA(5) );
 		return 0;
 #endif
+#endif
+
+#if FEAT_QUIC_TRANSPORT
+	case G_QUIC_GET_PING:
+		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
+			conn_handle_t conn = QUIC_GetConnHandleByAddr(
+				&svs.clients[ args[1] ].netchan.remoteAddress );
+			if ( conn != CONN_INVALID )
+				return transport ? transport->get_ping( conn ) : -1;
+		}
+		return -1;
+
+	case G_QUIC_GET_LOSS:
+		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
+			conn_handle_t conn = QUIC_GetConnHandleByAddr(
+				&svs.clients[ args[1] ].netchan.remoteAddress );
+			if ( conn != CONN_INVALID && transport )
+				return (int)( transport->get_loss( conn ) * 1000.0f );
+		}
+		return 0;
+
+	case G_QUIC_GET_BANDWIDTH:
+		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
+			conn_handle_t conn = QUIC_GetConnHandleByAddr(
+				&svs.clients[ args[1] ].netchan.remoteAddress );
+			if ( conn != CONN_INVALID && transport )
+				return transport->get_bandwidth( conn );
+		}
+		return 0;
 #endif
 
 	default:
