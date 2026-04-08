@@ -61,7 +61,11 @@ static int WT_NetadrToSockaddr( const netadr_t *a, struct sockaddr_storage *s )
 {
 	memset( s, 0, sizeof( *s ) );
 
-	if ( a->type == NA_IP || a->type == NA_BROADCAST ) {
+	if ( a->type == NA_IP || a->type == NA_BROADCAST
+#if FEAT_QUIC_GAME
+	     || a->type == NA_QUIC
+#endif
+	   ) {
 		struct sockaddr_in *v4 = (struct sockaddr_in *)s;
 		v4->sin_family = AF_INET;
 		memcpy( &v4->sin_addr.s_addr, a->ipv._4, 4 );
@@ -69,7 +73,11 @@ static int WT_NetadrToSockaddr( const netadr_t *a, struct sockaddr_storage *s )
 		return sizeof( struct sockaddr_in );
 	}
 #if FEAT_IPV6
-	if ( a->type == NA_IP6 || a->type == NA_MULTICAST6 ) {
+	if ( a->type == NA_IP6 || a->type == NA_MULTICAST6
+#if FEAT_QUIC_GAME
+	     || a->type == NA_QUIC6
+#endif
+	   ) {
 		struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)s;
 		v6->sin6_family = AF_INET6;
 		memcpy( &v6->sin6_addr, a->ipv._6, 16 );
@@ -158,6 +166,14 @@ static int WT_PicoquicCallback(
 			break;
 		}
 
+#if FEAT_QUIC_GAME
+		// Stream 0x01 = game handshake (player connect/refuse)
+		if ( stream_id == QUIC_GAME_STREAM_ID ) {
+			WT_GameHandleHandshake( conn, stream_id, bytes, (int)length );
+			break;
+		}
+#endif
+
 		// Route other client-initiated bidi streams by content sniffing:
 		// HTTP requests start with "GET " or "POST ", everything else is MCP (JSON-RPC).
 		if ( (stream_id & 0x03) == 0x00 && stream_id >= 0x04 ) {
@@ -188,6 +204,10 @@ static int WT_PicoquicCallback(
 			Com_sprintf( reason, sizeof(reason), "event=%d local=%llu remote=%llu",
 				(int)event, (unsigned long long)err_code, (unsigned long long)remote_err );
 			WT_LogDisconnect( conn, reason );
+#if FEAT_QUIC_GAME
+			if ( conn->game_conn )
+				WT_GameFreeConn( conn->game_conn );
+#endif
 			WT_FreeConnection( conn );
 		}
 		picoquic_set_callback( cnx, NULL, NULL );
@@ -214,7 +234,10 @@ static int WT_PicoquicCallback(
 		break;
 
 	case picoquic_callback_datagram:
-		// Client→server datagrams (not used in v0 — server sends datagrams)
+#if FEAT_QUIC_GAME
+		if ( conn && conn->active && conn->game_conn )
+			WT_GameHandleDatagram( conn, bytes, (int)length );
+#endif
 		break;
 
 	case picoquic_callback_prepare_datagram:
@@ -333,6 +356,9 @@ void QUIC_Init( void )
 
 	Com_Printf( "QUIC transport initialized. ALPN: %s, max clients: %d\n",
 		WT_ALPN, wt.sv_quicMaxClients->integer );
+
+	/* Publish the transport vtable so engine code can route through it */
+	transport = &quic_transport;
 }
 
 
@@ -554,6 +580,11 @@ qboolean QUIC_CheckPacket( netadr_t *from, byte *buf, int len )
 		// exceeding QUIC's 25ms max_ack_delay and causing unnecessary retransmits.
 		Com_DPrintf( "QUIC: dual-flush after incoming packet\n" );
 		QUIC_FlushOutbound();
+
+		// Also feed the client QUIC context (when running as non-dedicated client)
+#if FEAT_QUIC_GAME && !defined(DEDICATED)
+		QUIC_ClientCheckPacket( from, buf, len );
+#endif
 
 		return qtrue;
 	}
