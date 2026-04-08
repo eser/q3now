@@ -218,7 +218,7 @@ PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax21.$(PAK_EXT)
         copy-libs copy-build copy-build-debug copy-packs copy-all copy-all-debug \
         bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
         run-launcher run-game release \
-        check smoke test-features test-vm bench diff-api help
+        check smoke test-features test-vm test-quic-game bench diff-api help
 
 all: build
 
@@ -723,6 +723,11 @@ else
 	@echo "test-features: not yet implemented for Linux"
 endif
 
+# ── QUIC game transport smoke test ───────────────────────────────────────────
+
+test-quic-game:
+	@bash tests/smoke-quic-game.sh
+
 # ── VM smoke test ────────────────────────────────────────────────────────────
 
 test-vm:
@@ -800,6 +805,7 @@ help:
 	@echo "    make check              verify all outputs present"
 	@echo "    make smoke              headless gameplay test"
 	@echo "    make test-features      all features enabled stress test"
+	@echo "    make test-quic-game     QUIC game transport smoke test"
 	@echo "    make bench              timedemo benchmark"
 	@echo "    make diff-api           diff API headers vs upstream"
 	@echo ""
