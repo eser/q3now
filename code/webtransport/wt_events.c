@@ -38,6 +38,21 @@ void WT_EventRingPush( const byte *data, int len )
 
 	// Write to recording file if active
 	WT_RecordEvent( data, len );
+
+	/* Also push to game clients on reliable stream 2 (CHAN_EVENTS) */
+#if FEAT_QUIC_GAME
+	{
+		int i;
+		for ( i = 0; i < WT_MAX_CLIENTS; i++ ) {
+			wt_game_conn_t *gc = &wt.game_conns[i];
+			if ( gc->active && gc->conn && gc->conn->cnx &&
+			     gc->hs_state == WT_GAME_HS_ACCEPTED ) {
+				picoquic_add_to_stream( gc->conn->cnx, CHAN_EVENTS,
+				    (const uint8_t *)data, (size_t)len, 0 );
+			}
+		}
+	}
+#endif
 }
 
 
