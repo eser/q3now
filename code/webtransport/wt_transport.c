@@ -828,8 +828,45 @@ static void QT_SendUnreliable( conn_handle_t conn, const byte *data, int len )
 
 static qboolean QT_RecvUnreliable( conn_handle_t *conn_out, byte *buf, int *len_out )
 {
-	/* Phase B: implement; Phase A still uses QUIC_GetGamePacket path */
-	(void)conn_out; (void)buf; (void)len_out;
+	int i;
+	/* Server-side: drain game_conns recv queues */
+	for ( i = 0; i < WT_MAX_CLIENTS; i++ ) {
+		wt_game_conn_t *gc  = &wt.game_conns[i];
+		wt_game_pkt_t  *pkt;
+
+		if ( !gc->active || gc->recv_tail == gc->recv_head )
+			continue;
+
+		pkt = &gc->recv_queue[gc->recv_tail];
+		if ( pkt->len > *len_out ) {
+			/* oversized — discard */
+			gc->recv_tail = ( gc->recv_tail + 1 ) % WT_GAME_QUEUE_SIZE;
+			continue;
+		}
+
+		*conn_out = (conn_handle_t)(i + 1);
+		*len_out  = pkt->len;
+		Com_Memcpy( buf, pkt->data, pkt->len );
+		gc->recv_tail = ( gc->recv_tail + 1 ) % WT_GAME_QUEUE_SIZE;
+		return qtrue;
+	}
+
+#if !defined(DEDICATED)
+	/* Client-side: drain wtcl recv queue */
+	if ( wtcl.initialized && wtcl.recv_tail != wtcl.recv_head ) {
+		wt_game_pkt_t *pkt = &wtcl.recv_queue[wtcl.recv_tail];
+		if ( pkt->len <= *len_out ) {
+			*conn_out = CONN_CLIENT_HANDLE;
+			*len_out  = pkt->len;
+			Com_Memcpy( buf, pkt->data, pkt->len );
+			wtcl.recv_tail = ( wtcl.recv_tail + 1 ) % WT_GAME_QUEUE_SIZE;
+			return qtrue;
+		}
+		/* oversized — discard */
+		wtcl.recv_tail = ( wtcl.recv_tail + 1 ) % WT_GAME_QUEUE_SIZE;
+	}
+#endif
+
 	return qfalse;
 }
 
