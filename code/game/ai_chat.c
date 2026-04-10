@@ -46,6 +46,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_chat.h"
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
+#include "g_bot_lua.h"
 //
 #include "chars.h"				//characteristics
 #include "inv.h"				//indexes into the inventory
@@ -57,7 +58,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/menudef.h"
 #endif
 
-#define TIME_BETWEENCHATTING	25
 
 
 /*
@@ -242,6 +242,66 @@ char *BotMapTitle(void) {
 	return mapname;
 }
 
+static void BotLua_InitChatCtx( bot_state_t *bs, botLuaChatCtx_t *ctx ) {
+	if ( !ctx ) {
+		return;
+	}
+
+	Com_Memset( ctx, 0, sizeof( *ctx ) );
+
+	if ( !bs ) {
+		return;
+	}
+
+	if ( bs->client >= 0 && bs->client < MAX_CLIENTS ) {
+		ClientName( bs->client, ctx->sender, sizeof( ctx->sender ) );
+		ctx->score = g_entities[bs->client].client ? g_entities[bs->client].client->ps.persistant[PERS_SCORE] : 0;
+	}
+
+	Q_strncpyz( ctx->map, BotMapTitle(), sizeof( ctx->map ) );
+
+	switch ( gametype ) {
+		case GT_DEATHMATCH: Q_strncpyz( ctx->gametype, "ffa", sizeof( ctx->gametype ) ); break;
+		case GT_DUEL: Q_strncpyz( ctx->gametype, "duel", sizeof( ctx->gametype ) ); break;
+		case GT_TDM: Q_strncpyz( ctx->gametype, "tdm", sizeof( ctx->gametype ) ); break;
+		case GT_CTF: Q_strncpyz( ctx->gametype, "ctf", sizeof( ctx->gametype ) ); break;
+		case GT_1FCTF: Q_strncpyz( ctx->gametype, "1fctf", sizeof( ctx->gametype ) ); break;
+		default: Q_strncpyz( ctx->gametype, "other", sizeof( ctx->gametype ) ); break;
+	}
+}
+
+
+/*
+==================
+BotLuaWeaponKeyForMOD
+Returns a short Lua-dispatch key for a means-of-death.
+Non-weapon deaths use descriptive keys; weapons use shortnames.
+==================
+*/
+static const char *BotLuaWeaponKeyForMOD(int mod) {
+	int att, wp;
+
+	switch (mod) {
+		case MOD_WATER: case MOD_SLIME: return "slime";
+		case MOD_LAVA:                  return "lava";
+		case MOD_FALLING:               return "fall";
+		case MOD_TELEFRAG:              return "telefrag";
+		case MOD_CRUSH:                 return "crush";
+		case MOD_SUICIDE:
+		case MOD_TRIGGER_HURT:          return "suicide";
+		case MOD_KAMIKAZE:              return "kamikaze";
+		default: break;
+	}
+
+	att = G_AttackFromMOD(mod);
+	if (att > ATT_NONE && att < ATT_NUM_ATTACKS) {
+		wp = bg_attacklist[att].weapon;
+		if (wp > WP_NONE && wp < WP_NUM_WEAPONS && bg_weaponlist[wp].shortname) {
+			return bg_weaponlist[wp].shortname;
+		}
+	}
+	return "";
+}
 
 /*
 ==================
@@ -369,6 +429,12 @@ int BotChat_EnterGame(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		return BotLua_Chat( bs, "game_enter", &ctx );
+	}
+
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	//don't chat in teamplay
@@ -401,6 +467,12 @@ BotChat_ExitGame
 int BotChat_ExitGame(bot_state_t *bs) {
 	char name[32];
 	float rnd;
+
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		return BotLua_Chat( bs, "game_exit", &ctx );
+	}
 
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
@@ -435,6 +507,12 @@ int BotChat_StartLevel(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		return BotLua_Chat( bs, "level_start", &ctx );
+	}
+
 	if (bot_nochat.integer) return qfalse;
 	if (BotIsObserver(bs)) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
@@ -468,6 +546,13 @@ BotChat_EndLevel
 int BotChat_EndLevel(bot_state_t *bs) {
 	char name[32];
 	float rnd;
+
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		ctx.won = BotIsFirstInRankings( bs ) ? 1 : ( BotIsLastInRankings( bs ) ? -1 : 0 );
+		return BotLua_Chat( bs, "level_end", &ctx );
+	}
 
 	if (bot_nochat.integer) return qfalse;
 	if (BotIsObserver(bs)) return qfalse;
@@ -530,6 +615,17 @@ BotChat_Death
 int BotChat_Death(bot_state_t *bs) {
 	char name[32];
 	float rnd;
+
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		ctx.team = ( TeamPlayIsOn() && BotSameTeam( bs, bs->lastkilledby ) ) ? 1 : 0;
+		if ( bs->lastkilledby >= 0 && bs->lastkilledby < MAX_CLIENTS ) {
+			ClientName( bs->lastkilledby, ctx.killer, sizeof( ctx.killer ) );
+		}
+		Q_strncpyz( ctx.weapon, BotLuaWeaponKeyForMOD( bs->botdeathtype ), sizeof( ctx.weapon ) );
+		return BotLua_Chat( bs, "death", &ctx );
+	}
 
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
@@ -625,6 +721,17 @@ int BotChat_Kill(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		ctx.team = ( TeamPlayIsOn() && BotSameTeam( bs, bs->lastkilledplayer ) ) ? 1 : 0;
+		if ( bs->lastkilledplayer >= 0 && bs->lastkilledplayer < MAX_CLIENTS ) {
+			ClientName( bs->lastkilledplayer, ctx.victim, sizeof( ctx.victim ) );
+		}
+		Q_strncpyz( ctx.weapon, BotLuaWeaponKeyForMOD( bs->enemydeathtype ), sizeof( ctx.weapon ) );
+		return BotLua_Chat( bs, "kill", &ctx );
+	}
+
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	rnd = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CHAT_KILL, 0, 1);
@@ -689,6 +796,15 @@ int BotChat_EnemySuicide(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		if ( bs->enemy >= 0 && bs->enemy < MAX_CLIENTS ) {
+			ClientName( bs->enemy, ctx.victim, sizeof( ctx.victim ) );
+		}
+		return BotLua_Chat( bs, "enemy_suicide", &ctx );
+	}
+
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	if (BotNumActivePlayers() <= 1) return qfalse;
@@ -723,6 +839,12 @@ int BotChat_HitTalking(bot_state_t *bs) {
 	char name[32], *weap;
 	int lasthurt_client;
 	float rnd;
+
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		return BotLua_Chat( bs, "hit_talking", &ctx );
+	}
 
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
@@ -763,6 +885,12 @@ int BotChat_HitNoDeath(bot_state_t *bs) {
 	float rnd;
 	int lasthurt_client;
 	aas_entityinfo_t entinfo;
+
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		return BotLua_Chat( bs, "hit_nodeath", &ctx );
+	}
 
 	lasthurt_client = g_entities[bs->client].client->lasthurt_client;
 	if (!lasthurt_client) return qfalse;
@@ -808,6 +936,12 @@ int BotChat_HitNoKill(bot_state_t *bs) {
 	float rnd;
 	aas_entityinfo_t entinfo;
 
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		return BotLua_Chat( bs, "hit_nokill", &ctx );
+	}
+
 	if (bot_nochat.integer) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	if (BotNumActivePlayers() <= 1) return qfalse;
@@ -844,6 +978,12 @@ BotChat_Random
 int BotChat_Random(bot_state_t *bs) {
 	float rnd;
 	char name[32];
+
+	if ( bs->luaCharacterActive ) {
+		botLuaChatCtx_t ctx;
+		BotLua_InitChatCtx( bs, &ctx );
+		return BotLua_Chat( bs, "random", &ctx );
+	}
 
 	if (bot_nochat.integer) return qfalse;
 	if (BotIsObserver(bs)) return qfalse;
@@ -913,6 +1053,8 @@ BotChatTime
 float BotChatTime(bot_state_t *bs) {
 	//int cpm;
 
+	if ( bs->luaCharacterActive ) return 0.0f;
+
 	//cpm = trap_Characteristic_BInteger(bs->character, CHARACTERISTIC_CHAT_CPM, 1, 4000);
 
 	return 2.0;	//(float) trap_BotChatLength(bs->cs) * 30 / cpm;
@@ -928,6 +1070,8 @@ void BotChatTest(bot_state_t *bs) {
 	char name[32];
 	char *weap;
 	int num, i;
+
+	if ( bs->luaCharacterActive ) return;
 
 	num = trap_BotNumInitialChats(bs->cs, "game_enter");
 	for (i = 0; i < num; i++)

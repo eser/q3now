@@ -10,6 +10,7 @@ code/ui/ui_shared.c in subsequent phases.
 
 #include "../../client.h"
 #include "cl_wired_ui.h"
+#include "cl_wired_attract.h"
 #include "cl_wired_hud.h"
 #include "cl_wired_fonts.h"
 #include "cl_wired_text.h"
@@ -18,9 +19,15 @@ code/ui/ui_shared.c in subsequent phases.
 #include "cl_wired_theme.h"
 #include "../../../qcommon/menudef.h"
 
+#include <lua.h>
+#include "../../../qcommon/scripting/wired_scripting.h"
+
 #if FEAT_WIRED_UI
 
 #define WUI_DEFAULT_FONT_SIZE  14.0f
+#define WIRED_UI_STATE_FILE     "wired_ui_state.dat"
+#define WIRED_UI_STATE_MAGIC    0x57554953
+#define WIRED_UI_STATE_VERSION  1
 
 // from cl_wired_hud_registry.c
 extern void     WiredHud_DestroyAllElements( void );
@@ -31,6 +38,764 @@ extern void     WiredHud_LoadFromMenus( void );
 // forward declarations
 static void WiredUI_ApplyAnchor( wiredMenuDef_t *menu, float menuW, float menuH,
                                   float *outX, float *outY );
+static void WiredUI_DrawWindowBorder( float x, float y, float w, float h,
+	int border, float borderSize, const vec4_t borderColor, float alphaScale );
+static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float w, float h );
+static qboolean WiredUI_ItemVisibleByBindRules( wiredItemDef_t *item );
+static qboolean WiredUI_ItemShouldRender( wiredItemDef_t *item );
+static qboolean WiredUI_ItemCanFocus( wiredItemDef_t *item );
+static qboolean WiredUI_StateListContainsValue( const char *list, const char *value );
+static qboolean WiredUI_IsPersistedStateKey( const char *key );
+static qboolean WiredUI_CallLuaStoreFunction( const char *functionName );
+static qhandle_t wired_gradientBarShader;
+
+typedef struct {
+	const char *key;
+	const char *defaultValue;
+} wiredUiStateDefault_t;
+
+typedef struct {
+	int magic;
+	int version;
+	int count;
+} wiredUiStateFileHeader_t;
+
+typedef struct {
+	unsigned short keyLen;
+	unsigned short valueLen;
+} wiredUiStateFileEntryHeader_t;
+
+typedef struct {
+	int count;
+} wiredUiStateCountCtx_t;
+
+typedef struct {
+	fileHandle_t f;
+	int wrote;
+} wiredUiStateWriteCtx_t;
+
+static const wiredUiStateDefault_t wired_uiStateDefaults[] = {
+	{ "ui_netSource", "0" },
+	{ "ui_browserGameType", "0" },
+	{ "ui_browserShowFull", "1" },
+	{ "ui_browserShowEmpty", "1" },
+	{ "ui_browserMaxPing", "0" },
+	{ "ui_browserStatus", "" },
+	{ "ui_selectedServerAddr", "" },
+	{ "ui_selectedServerName", "" },
+	{ "ui_selectedMap", "" },
+	{ "ui_currentNetMap", "0" },
+	{ "ui_mapLevelshot", "" },
+	{ "ui_mapPoolStatus", "Single map (no rotation)" },
+	{ "ui_mapPoolAction", "Add to Pool" },
+	{ "ui_favMapAction", "Favorite" },
+	{ "ui_favoriteMaps", "" },
+	{ "ui_selectedDemo", "" },
+	{ "ui_selectedMod", "" },
+	{ "ui_confirmText", "" },
+	{ "ui_confirmAction", "" },
+	{ "ui_voteTimelimit", "20" },
+	{ "ui_voteScorelimit", "0" },
+	{ "ui_botCount", "0" },
+	{ "ui_botName", "" },
+	{ "ui_botTeam", "0" },
+	{ "ui_dedicated", "0" },
+	{ "ui_netGameType", "0" },
+	{ "ui_globalpreset", "0" },
+	{ "ui_mousePitch", "0" },
+	{ "ui_lastRefreshDate", "" },
+	{ "ui_Name", "" },
+	{ "ui_specifyAddress", "" },
+	{ NULL, NULL }
+};
+
+qboolean WiredUI_IsStoreStateKey( const char *key ) {
+	const wiredUiStateDefault_t *it;
+
+	if ( !key || !key[0] ) {
+		return qfalse;
+	}
+
+	for ( it = wired_uiStateDefaults; it->key; it++ ) {
+		if ( !Q_stricmp( key, it->key ) ) {
+			return qtrue;
+		}
+	}
+
+	return qfalse;
+}
+
+static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
+	if ( !key || !key[0] ) {
+		return qfalse;
+	}
+
+	if ( !Q_stricmp( key, "ui_theme" ) ) {
+		return qfalse;
+	}
+
+	if ( WiredUI_IsStoreStateKey( key ) ) {
+		return qtrue;
+	}
+
+	return ( Q_stricmpn( key, "ui_", 3 ) == 0 );
+}
+
+static void WiredUI_CountPersistedStateEntry( wuiStoreEntry_t *entry, void *userData ) {
+	wiredUiStateCountCtx_t *ctx = (wiredUiStateCountCtx_t *)userData;
+
+	if ( !entry || !ctx ) {
+		return;
+	}
+
+	if ( !WiredUI_IsPersistedStateKey( entry->key ) ) {
+		return;
+	}
+
+	ctx->count++;
+}
+
+static void WiredUI_WritePersistedStateEntry( wuiStoreEntry_t *entry, void *userData ) {
+	wiredUiStateWriteCtx_t *ctx = (wiredUiStateWriteCtx_t *)userData;
+	wiredUiStateFileEntryHeader_t eh;
+	int keyLen;
+	int valueLen;
+
+	if ( !entry || !ctx ) {
+		return;
+	}
+
+	if ( !WiredUI_IsPersistedStateKey( entry->key ) ) {
+		return;
+	}
+
+	keyLen = (int)strlen( entry->key );
+	valueLen = (int)strlen( entry->text );
+	if ( keyLen <= 0 || keyLen > 65535 || valueLen < 0 || valueLen > 65535 ) {
+		return;
+	}
+
+	eh.keyLen = (unsigned short)keyLen;
+	eh.valueLen = (unsigned short)valueLen;
+	FS_Write( &eh, sizeof( eh ), ctx->f );
+	FS_Write( entry->key, keyLen, ctx->f );
+	if ( valueLen > 0 ) {
+		FS_Write( entry->text, valueLen, ctx->f );
+	}
+	ctx->wrote++;
+}
+
+void WiredUI_SaveState( void ) {
+	fileHandle_t f;
+	wiredUiStateFileHeader_t header;
+	wiredUiStateCountCtx_t countCtx;
+	wiredUiStateWriteCtx_t writeCtx;
+
+	countCtx.count = 0;
+	WiredStore_ForEach( NULL, WiredUI_CountPersistedStateEntry, &countCtx );
+
+	f = FS_FOpenFileWrite( WIRED_UI_STATE_FILE );
+	if ( f == FS_INVALID_HANDLE ) {
+		Com_Printf( S_COLOR_YELLOW "WiredUI: failed to save UI state (%s)\n", WIRED_UI_STATE_FILE );
+		return;
+	}
+
+	header.magic = WIRED_UI_STATE_MAGIC;
+	header.version = WIRED_UI_STATE_VERSION;
+	header.count = countCtx.count;
+
+	FS_Write( &header, sizeof( header ), f );
+
+	writeCtx.f = f;
+	writeCtx.wrote = 0;
+	WiredStore_ForEach( NULL, WiredUI_WritePersistedStateEntry, &writeCtx );
+
+	FS_FCloseFile( f );
+
+	Com_DPrintf( "WiredUI: saved %d UI state entries\n", writeCtx.wrote );
+}
+
+void WiredUI_LoadState( void ) {
+	fileHandle_t f;
+	int len;
+	byte *data;
+	const byte *p;
+	const byte *end;
+	wiredUiStateFileHeader_t header;
+	int loadedCount = 0;
+	int i;
+
+	f = FS_INVALID_HANDLE;
+	len = FS_FOpenFileRead( WIRED_UI_STATE_FILE, &f, qtrue );
+	if ( f == FS_INVALID_HANDLE || len <= 0 ) {
+		if ( f != FS_INVALID_HANDLE ) {
+			FS_FCloseFile( f );
+		}
+		return;
+	}
+
+	data = (byte *)Z_Malloc( len );
+	if ( !data ) {
+		FS_FCloseFile( f );
+		return;
+	}
+
+	if ( FS_Read( data, len, f ) != len ) {
+		Z_Free( data );
+		FS_FCloseFile( f );
+		return;
+	}
+	FS_FCloseFile( f );
+
+	if ( len < (int)sizeof( header ) ) {
+		Z_Free( data );
+		return;
+	}
+
+	Com_Memcpy( &header, data, sizeof( header ) );
+	if ( header.magic != WIRED_UI_STATE_MAGIC ||
+	     header.version != WIRED_UI_STATE_VERSION ||
+	     header.count < 0 ||
+	     header.count > WUI_STORE_MAX_ENTRIES ) {
+		Z_Free( data );
+		return;
+	}
+
+	p = data + sizeof( header );
+	end = data + len;
+
+	for ( i = 0; i < header.count; i++ ) {
+		wiredUiStateFileEntryHeader_t eh;
+		char key[128];
+		char value[256];
+		int valueCopyLen;
+		wuiStoreEntry_t *entry;
+
+		if ( end - p < (int)sizeof( eh ) ) {
+			break;
+		}
+
+		Com_Memcpy( &eh, p, sizeof( eh ) );
+		p += sizeof( eh );
+
+		if ( eh.keyLen == 0 || eh.keyLen >= sizeof( key ) ) {
+			if ( end - p < eh.keyLen + eh.valueLen ) {
+				break;
+			}
+			p += eh.keyLen + eh.valueLen;
+			continue;
+		}
+
+		if ( end - p < eh.keyLen + eh.valueLen ) {
+			break;
+		}
+
+		Com_Memcpy( key, p, eh.keyLen );
+		key[eh.keyLen] = '\0';
+		p += eh.keyLen;
+
+		valueCopyLen = eh.valueLen;
+		if ( valueCopyLen >= (int)sizeof( value ) ) {
+			valueCopyLen = sizeof( value ) - 1;
+		}
+		if ( valueCopyLen > 0 ) {
+			Com_Memcpy( value, p, valueCopyLen );
+		}
+		value[valueCopyLen] = '\0';
+		p += eh.valueLen;
+
+		if ( !WiredUI_IsPersistedStateKey( key ) ) {
+			continue;
+		}
+
+		entry = WiredStore_Set( key );
+		if ( !entry ) {
+			continue;
+		}
+
+		Q_strncpyz( entry->text, value, sizeof( entry->text ) );
+		entry->value = (float)atof( entry->text );
+		entry->flags &= ~WUI_STORE_FLAG_DIRTY;
+		loadedCount++;
+	}
+
+	Z_Free( data );
+
+	Com_DPrintf( "WiredUI: loaded %d UI state entries\n", loadedCount );
+}
+
+static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
+	lua_State *L;
+
+	if ( !functionName || !functionName[0] ) {
+		return qfalse;
+	}
+
+	L = WiredScript_GetState();
+	if ( !L ) {
+		return qfalse;
+	}
+
+	lua_getglobal( L, "store" );
+	if ( !lua_istable( L, -1 ) ) {
+		lua_pop( L, 1 );
+		return qfalse;
+	}
+
+	lua_getfield( L, -1, functionName );
+	if ( !lua_isfunction( L, -1 ) ) {
+		lua_pop( L, 2 );
+		return qfalse;
+	}
+
+	if ( lua_pcall( L, 0, 0, 0 ) != 0 ) {
+		const char *err = lua_tostring( L, -1 );
+		Com_Printf( S_COLOR_YELLOW "WiredUI: Lua store.%s failed: %s\n",
+			functionName, err ? err : "unknown" );
+		lua_pop( L, 1 );
+		lua_pop( L, 1 );
+		return qfalse;
+	}
+
+	lua_pop( L, 1 );
+	return qtrue;
+}
+
+static const char *WiredUI_StateDefaultValue( const char *key ) {
+	const wiredUiStateDefault_t *it;
+	for ( it = wired_uiStateDefaults; it->key; it++ ) {
+		if ( !Q_stricmp( key, it->key ) ) {
+			return it->defaultValue ? it->defaultValue : "";
+		}
+	}
+	return "";
+}
+
+void WiredUI_StateGetString( const char *key, char *out, int outSize ) {
+	const wiredUiStateDefault_t *it;
+	wuiStoreEntry_t *entry;
+
+	if ( !out || outSize <= 0 ) {
+		return;
+	}
+
+	out[0] = '\0';
+	if ( !key || !key[0] ) {
+		return;
+	}
+
+	if ( WiredUI_IsStoreStateKey( key ) ) {
+		entry = WiredStore_Get( key );
+		if ( entry ) {
+			Q_strncpyz( out, entry->text, outSize );
+			if ( !out[0] ) {
+				Q_strncpyz( out, WiredUI_StateDefaultValue( key ), outSize );
+			}
+			return;
+		}
+
+		for ( it = wired_uiStateDefaults; it->key; it++ ) {
+			if ( !Q_stricmp( key, it->key ) ) {
+				Q_strncpyz( out, it->defaultValue ? it->defaultValue : "", outSize );
+				return;
+			}
+		}
+	}
+
+	Cvar_VariableStringBuffer( key, out, outSize );
+	if ( !out[0] && WiredUI_IsStoreStateKey( key ) ) {
+		Q_strncpyz( out, WiredUI_StateDefaultValue( key ), outSize );
+	}
+}
+
+int WiredUI_StateGetInt( const char *key ) {
+	char buf[256];
+	WiredUI_StateGetString( key, buf, sizeof( buf ) );
+	return atoi( buf );
+}
+
+float WiredUI_StateGetFloat( const char *key ) {
+	char buf[256];
+	WiredUI_StateGetString( key, buf, sizeof( buf ) );
+	return (float)atof( buf );
+}
+
+void WiredUI_StateSetString( const char *key, const char *value ) {
+	if ( !key || !key[0] ) {
+		return;
+	}
+
+	if ( WiredUI_IsStoreStateKey( key ) ) {
+		wuiStoreEntry_t *entry = WiredStore_Set( key );
+		if ( entry ) {
+			Q_strncpyz( entry->text, value ? value : "", sizeof( entry->text ) );
+			entry->value = (float)atof( entry->text );
+			entry->flags |= WUI_STORE_FLAG_DIRTY;
+		}
+		return;
+	}
+
+	Cvar_Set( key, value ? value : "" );
+}
+
+void WiredUI_StateSetInt( const char *key, int value ) {
+	WiredUI_StateSetString( key, va( "%d", value ) );
+}
+
+void WiredUI_StateSetFloat( const char *key, float value ) {
+	WiredUI_StateSetString( key, va( "%g", value ) );
+}
+
+static qboolean WiredUI_StateListContainsValue( const char *list, const char *value ) {
+	char token[256];
+	const char *p;
+	char intBuf[16];
+	int intVal;
+
+	if ( !list || !list[0] ) {
+		return qfalse;
+	}
+
+	if ( !value ) {
+		value = "";
+	}
+
+	intVal = atoi( value );
+	Com_sprintf( intBuf, sizeof( intBuf ), "%d", intVal );
+
+	p = list;
+	while ( *p ) {
+		int i = 0;
+		while ( *p == ' ' ) p++;
+		if ( !*p ) break;
+		while ( *p && *p != ' ' && i < (int)sizeof( token ) - 1 ) {
+			token[i++] = *p++;
+		}
+		token[i] = '\0';
+
+		if ( !Q_stricmp( token, value ) || !Q_stricmp( token, intBuf ) ) {
+			return qtrue;
+		}
+	}
+
+	return qfalse;
+}
+
+static void WiredUI_SetTeamWindowColor( vec4_t outColor, const vec4_t fallbackColor ) {
+	if ( wiredHud && wiredHud->valid ) {
+		if ( wiredHud->isOurTeamBlue ) {
+			Vector4Set( outColor, 0.20f, 0.35f, 0.95f, fallbackColor ? fallbackColor[3] : 1.0f );
+		} else {
+			Vector4Set( outColor, 0.95f, 0.20f, 0.20f, fallbackColor ? fallbackColor[3] : 1.0f );
+		}
+	} else {
+		if ( fallbackColor ) Vector4Copy( fallbackColor, outColor );
+		else Vector4Set( outColor, 1.0f, 1.0f, 1.0f, 1.0f );
+	}
+}
+
+static void WiredUI_DrawWindowBorder( float x, float y, float w, float h,
+	int border, float borderSize, const vec4_t borderColor, float alphaScale ) {
+	vec4_t bc;
+	float bs = borderSize > 0.0f ? borderSize : 1.0f;
+
+	if ( border == WINDOW_BORDER_NONE || !borderColor || borderColor[3] <= 0.0f ) {
+		return;
+	}
+
+	Vector4Copy( borderColor, bc );
+	bc[3] *= alphaScale;
+
+	switch ( border ) {
+		case WINDOW_BORDER_FULL:
+			WUI_FillRect( x, y, w, bs, bc );
+			WUI_FillRect( x, y + h - bs, w, bs, bc );
+			WUI_FillRect( x, y, bs, h, bc );
+			WUI_FillRect( x + w - bs, y, bs, h, bc );
+			break;
+		case WINDOW_BORDER_HORZ:
+			WUI_FillRect( x, y, w, bs, bc );
+			WUI_FillRect( x, y + h - bs, w, bs, bc );
+			break;
+		case WINDOW_BORDER_VERT:
+			WUI_FillRect( x, y, bs, h, bc );
+			WUI_FillRect( x + w - bs, y, bs, h, bc );
+			break;
+		case WINDOW_BORDER_KCGRADIENT:
+			if ( wired_gradientBarShader ) {
+				re.SetColor( bc );
+				WUI_DrawPic( x, y, w, bs, wired_gradientBarShader );
+				WUI_DrawPic( x, y + h - bs, w, bs, wired_gradientBarShader );
+				re.SetColor( NULL );
+			} else {
+				WUI_FillRect( x, y, w, bs, bc );
+				WUI_FillRect( x, y + h - bs, w, bs, bc );
+			}
+			break;
+		default:
+			WUI_FillRect( x, y, w, bs, bc );
+			WUI_FillRect( x, y + h - bs, w, bs, bc );
+			WUI_FillRect( x, y, bs, h, bc );
+			WUI_FillRect( x + w - bs, y, bs, h, bc );
+			break;
+	}
+}
+
+static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float w, float h ) {
+	refdef_t refdef;
+	refEntity_t ent;
+	vec3_t angles;
+
+	if ( !item->assetModel[0] ) {
+		return;
+	}
+
+	if ( !item->modelHandle ) {
+		item->modelHandle = re.RegisterModel( item->assetModel );
+	}
+	if ( !item->modelHandle ) {
+		return;
+	}
+
+	if ( item->assetShader[0] && !item->modelShaderHandle ) {
+		item->modelShaderHandle = re.RegisterShaderNoMip( item->assetShader );
+	}
+
+	Com_Memset( &refdef, 0, sizeof( refdef ) );
+	Com_Memset( &ent, 0, sizeof( ent ) );
+
+	refdef.rdflags = RDF_NOWORLDMODEL;
+	refdef.x = (int)x;
+	refdef.y = (int)y;
+	refdef.width = (int)w;
+	refdef.height = (int)h;
+	if ( refdef.width < 1 || refdef.height < 1 ) return;
+
+	refdef.fov_x = item->modelFovX > 0.0f ? item->modelFovX : 40.0f;
+	refdef.fov_y = item->modelFovY > 0.0f ? item->modelFovY :
+		( refdef.fov_x * (float)refdef.height / (float)refdef.width );
+	refdef.time = cls.realtime;
+	AxisClear( refdef.viewaxis );
+
+	VectorSet( refdef.vieworg,
+		item->modelOrigin[0] != 0.0f ? item->modelOrigin[0] : 80.0f,
+		item->modelOrigin[1],
+		item->modelOrigin[2] );
+
+	ent.reType = RT_MODEL;
+	ent.hModel = item->modelHandle;
+	if ( item->modelShaderHandle ) {
+		ent.customShader = item->modelShaderHandle;
+	}
+
+	VectorSet( ent.origin, 0.0f, 0.0f, 0.0f );
+	angles[PITCH] = 0.0f;
+	angles[YAW] = item->modelAngle + item->modelRotation * ( (float)cls.realtime / 1000.0f );
+	angles[ROLL] = 0.0f;
+	AnglesToAxis( angles, ent.axis );
+	VectorCopy( ent.origin, ent.lightingOrigin );
+	ent.renderfx = RF_LIGHTING_ORIGIN | RF_NOSHADOW;
+
+	re.ClearScene();
+	re.AddRefEntityToScene( &ent, qfalse );
+	re.RenderScene( &refdef );
+}
+
+static void WiredUI_DrawMenuBackground( wiredMenuDef_t *menu,
+	float x, float y, float w, float h, float alphaScale ) {
+	if ( menu->style == WINDOW_STYLE_CINEMATIC && menu->cinematicHandle >= 0 ) {
+		CIN_SetExtents( menu->cinematicHandle, (int)x, (int)y, (int)w, (int)h );
+		CIN_RunCinematic( menu->cinematicHandle );
+		CIN_DrawCinematic( menu->cinematicHandle );
+		return;
+	}
+
+	if ( menu->style == WINDOW_STYLE_SHADER && menu->background[0] ) {
+		qhandle_t bgShader = re.RegisterShaderNoMip( menu->background );
+		if ( bgShader ) {
+			re.SetColor( NULL );
+			WUI_DrawPic( x, y, w, h, bgShader );
+			return;
+		}
+	}
+
+	if ( menu->style == WINDOW_STYLE_GRADIENT && menu->backcolor[3] > 0.0f ) {
+		vec4_t bc;
+		Vector4Copy( menu->backcolor, bc );
+		bc[3] *= alphaScale;
+		WUI_FillRect( x, y, w, h, bc );
+		if ( wired_gradientBarShader ) {
+			vec4_t gc;
+			Vector4Copy( menu->backcolor, gc );
+			gc[3] *= 0.5f * alphaScale;
+			re.SetColor( gc );
+			WUI_DrawPic( x, y, w, h, wired_gradientBarShader );
+			re.SetColor( NULL );
+		}
+		return;
+	}
+
+	if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f ) {
+		vec4_t bc;
+		Vector4Copy( menu->backcolor, bc );
+		bc[3] *= alphaScale;
+		WUI_FillRect( x, y, w, h, bc );
+		return;
+	}
+
+	if ( menu->style == WINDOW_STYLE_TEAMCOLOR ) {
+		vec4_t tc;
+		WiredUI_SetTeamWindowColor( tc, menu->backcolor );
+		tc[3] *= alphaScale;
+		WUI_FillRect( x, y, w, h, tc );
+		return;
+	}
+
+	if ( menu->style == WINDOW_STYLE_EMPTY ) {
+		return;
+	}
+
+	{
+		vec4_t bgColor = { 0.1f, 0.1f, 0.15f, 1.0f };
+		bgColor[3] *= alphaScale;
+		WUI_FillRect( x, y, w, h, bgColor );
+	}
+}
+
+static void WiredUI_DrawItemBackground( wiredItemDef_t *item,
+	float x, float y, float w, float h, float alphaScale ) {
+	if ( item->style == WINDOW_STYLE_SHADER && item->background[0] ) {
+		qhandle_t itemBg = re.RegisterShaderNoMip( item->background );
+		if ( itemBg ) {
+			vec4_t shaderColor;
+			if ( item->forecolor[0] > 0.0f || item->forecolor[1] > 0.0f ||
+			     item->forecolor[2] > 0.0f || item->forecolor[3] > 0.0f ) {
+				Vector4Copy( item->forecolor, shaderColor );
+			} else {
+				Vector4Set( shaderColor, 1, 1, 1, 1 );
+			}
+			shaderColor[3] *= alphaScale;
+			re.SetColor( shaderColor );
+			WUI_DrawPic( x, y, w, h, itemBg );
+			re.SetColor( NULL );
+		}
+		return;
+	}
+
+	if ( item->style == WINDOW_STYLE_GRADIENT && item->backcolor[3] > 0.0f ) {
+		vec4_t bc;
+		Vector4Copy( item->backcolor, bc );
+		bc[3] *= alphaScale;
+		WUI_FillRect( x, y, w, h, bc );
+		if ( wired_gradientBarShader ) {
+			vec4_t gc;
+			Vector4Copy( item->backcolor, gc );
+			gc[3] *= 0.5f * alphaScale;
+			re.SetColor( gc );
+			WUI_DrawPic( x, y, w, h, wired_gradientBarShader );
+			re.SetColor( NULL );
+		}
+		return;
+	}
+
+	if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
+		vec4_t bc;
+		Vector4Copy( item->backcolor, bc );
+		bc[3] *= alphaScale;
+		WUI_FillRect( x, y, w, h, bc );
+		return;
+	}
+
+	if ( item->style == WINDOW_STYLE_TEAMCOLOR ) {
+		vec4_t tc;
+		WiredUI_SetTeamWindowColor( tc, item->backcolor );
+		tc[3] *= alphaScale;
+		WUI_FillRect( x, y, w, h, tc );
+	}
+}
+
+static qboolean WiredUI_ItemVisibleByCvarRules( wiredItemDef_t *item ) {
+	if ( item->cvarTest[0] ) {
+		char testBuf[256];
+
+		WiredUI_StateGetString( item->cvarTest, testBuf, sizeof( testBuf ) );
+
+		if ( item->showCvar[0] ) {
+			if ( !WiredUI_StateListContainsValue( item->showCvar, testBuf ) ) return qfalse;
+		}
+		if ( item->hideCvar[0] ) {
+			if ( WiredUI_StateListContainsValue( item->hideCvar, testBuf ) ) return qfalse;
+		}
+	}
+
+	if ( item->enableCvar[0] || item->disableCvar[0] ) {
+		char testBuf[256];
+		qboolean enabled = qtrue;
+
+		if ( item->cvarTest[0] ) WiredUI_StateGetString( item->cvarTest, testBuf, sizeof( testBuf ) );
+		else if ( item->cvar[0] ) WiredUI_StateGetString( item->cvar, testBuf, sizeof( testBuf ) );
+		else testBuf[0] = '\0';
+
+		if ( item->enableCvar[0] ) {
+			enabled = WiredUI_StateListContainsValue( item->enableCvar, testBuf );
+		}
+		if ( item->disableCvar[0] ) {
+			if ( WiredUI_StateListContainsValue( item->disableCvar, testBuf ) ) {
+				enabled = qfalse;
+			}
+		}
+
+		if ( !enabled ) return qfalse;
+	}
+
+	return qtrue;
+}
+
+static qboolean WiredUI_ItemVisibleByBindRules( wiredItemDef_t *item ) {
+	if ( item->showBind[0] ) {
+		wuiStoreEntry_t *vis = WiredStore_Get( item->showBind );
+		if ( !vis || ( !vis->text[0] && vis->value == 0.0f ) ) {
+			return qfalse;
+		}
+	}
+
+	if ( item->hideBind[0] ) {
+		wuiStoreEntry_t *vis = WiredStore_Get( item->hideBind );
+		if ( vis && ( vis->text[0] || vis->value != 0.0f ) ) {
+			return qfalse;
+		}
+	}
+
+	return qtrue;
+}
+
+static qboolean WiredUI_ItemShouldRender( wiredItemDef_t *item ) {
+	if ( !item->visible ) {
+		return qfalse;
+	}
+
+	if ( !WiredUI_ItemVisibleByBindRules( item ) ) {
+		return qfalse;
+	}
+
+	if ( !WiredUI_ItemVisibleByCvarRules( item ) ) {
+		return qfalse;
+	}
+
+	if ( item->ownerdrawFlag && !WiredUI_OwnerDrawVisible( item->ownerdrawFlag ) ) {
+		return qfalse;
+	}
+
+	return qtrue;
+}
+
+static qboolean WiredUI_ItemCanFocus( wiredItemDef_t *item ) {
+	if ( item->decoration || item->notselectable ) {
+		return qfalse;
+	}
+
+	return WiredUI_ItemShouldRender( item );
+}
 
 // ── symbol registry ───────────────────────────────────────────────────
 
@@ -111,7 +876,7 @@ wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void ) {
 void WiredUI_ResetAssetGlobalsDefaults( void ) {
 	Com_Memset( &wired_assetGlobals, 0, sizeof( wired_assetGlobals ) );
 
-	Q_strncpyz( wired_assetGlobals.cursor, "ui/assets/3_cursor3", sizeof( wired_assetGlobals.cursor ) );
+	Q_strncpyz( wired_assetGlobals.cursor, "ui/assets/cursor", sizeof( wired_assetGlobals.cursor ) );
 	Q_strncpyz( wired_assetGlobals.gradientBar, "ui/assets/gradientbar2.tga", sizeof( wired_assetGlobals.gradientBar ) );
 
 	Q_strncpyz( wired_assetGlobals.defaultSerifFontName, "sansman", sizeof( wired_assetGlobals.defaultSerifFontName ) );
@@ -131,29 +896,8 @@ void WiredUI_ResetAssetGlobalsDefaults( void ) {
 	Vector4Set( wired_assetGlobals.gradientBarColor, 0, 0, 0, 0 );
 }
 
-// ── theme system ────────────────────────────────────────────────────
-// Returns the manifest path based on ui_theme cvar.
-// Empty ui_theme → "ui/menus.txt" (default)
-// ui_theme "ta" → "ui/themes/ta/menus.txt"
-static const char *WiredUI_GetManifestPath( void ) {
-	static char path[MAX_QPATH];
-	char theme[64];
-
-	Cvar_VariableStringBuffer( "ui_theme", theme, sizeof( theme ) );
-	if ( theme[0] ) {
-		Com_sprintf( path, sizeof( path ), "ui/themes/%s/menus.txt", theme );
-		// verify the manifest exists
-		fileHandle_t f;
-		int len = FS_FOpenFileRead( path, &f, qfalse );
-		if ( f != FS_INVALID_HANDLE ) {
-			FS_FCloseFile( f );
-			return path;
-		}
-		Com_Printf( S_COLOR_YELLOW "WiredUI: theme '%s' not found — staying on current theme.\n", theme );
-		return "ui/menus.txt";
-	}
-	return "ui/menus.txt";
-}
+// Theme selection is handled inside scripts/menus.lua via the global metatable
+// cvar bridge (ui_theme readable as a Lua global). No manifest path function needed.
 
 void WiredUI_RegisterFeeder( int feederID, wiredFeederCount_t count,
                               wiredFeederItemText_t itemText,
@@ -219,6 +963,16 @@ static int       wired_activeMenu = UIMENU_NONE;
 
 static char      wired_menuStack[WIRED_MENU_STACK_DEPTH][64];
 static int       wired_menuStackDepth = 0;
+
+// Pool/compositor health flag — set qtrue at the end of WiredUI_Init and
+// on successful SafeReload; set qfalse in WiredUI_Shutdown and on failing
+// SafeReload. Independent of cls.uiStarted so recovery can detect a dead
+// pool even while cls.uiStarted hasn't been cleared yet.
+static qboolean  wired_healthy = qfalse;
+
+// Recovery failure timestamp — set by WiredUI_Activate when EnsureLoaded
+// fails; read by cl_console.c to paint the red "reload failed" banner.
+static int       wired_recoveryFailTime = 0;
 
 // ── cursor ────────────────────────────────────────────────────────────
 
@@ -335,7 +1089,7 @@ static int WiredUI_FindMultiOptionIndex( wiredItemDef_t *item, const wiredMultiO
 static void WiredUI_SetMultiOptionByIndex( wiredItemDef_t *item, const wiredMultiOptions_t *opts, int index ) {
 	if ( !item || !opts || index < 0 || index >= opts->count ) return;
 	if ( opts->values[index] ) {
-		Cvar_Set( item->cvar, opts->values[index] );
+		WiredUI_StateSetString( item->cvar, opts->values[index] );
 	}
 }
 
@@ -398,7 +1152,7 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 		return;
 	}
 
-	Cvar_VariableStringBuffer( wired_multiDropdownItem->cvar, currentValue, sizeof( currentValue ) );
+	WiredUI_StateGetString( wired_multiDropdownItem->cvar, currentValue, sizeof( currentValue ) );
 	selectedIndex = WiredUI_FindMultiOptionIndex( wired_multiDropdownItem, &opts, currentValue );
 
 	{
@@ -608,8 +1362,6 @@ static int     wired_screenshotTime = 0;
 static qboolean wired_screenshotTaken = qfalse;
 
 // generic confirm dialog cvars
-static cvar_t *ui_confirmText = NULL;
-static cvar_t *ui_confirmAction = NULL;
 
 // ── Layer 5: hot-reload and debug overlay cvars ──────────────────────
 static cvar_t *wired_hotreload = NULL;
@@ -622,9 +1374,9 @@ WiredUI_RegisterAssets
 
 (Re-)registers all WiredUI shader and sound handles.
 Called from WiredUI_Init and WiredUI_SetActiveMenu to
-survive Hunk_Clear cycles.  RegisterShaderNoMip / S_RegisterSound
+survive Hunk_ClearLevel cycles.  RegisterShaderNoMip / S_RegisterSound
 return cached handles when assets are already loaded, so this is
-essentially free outside of hunk-clear transitions.
+essentially free outside of hunk-clear-level transitions.
 =================
 */
 static void WiredUI_RegisterAssets( void ) {
@@ -737,7 +1489,141 @@ static void WiredUI_DrawDebugOverlay( wiredMenuDef_t *menu ) {
 	}
 }
 
+// ── stack accessors ───────────────────────────────────────────────────
+// Expose wired_menuStack internals without leaking the raw statics.
+// Used by cl_wired_attract.c to gate on whether an attract panel is on top.
+
+int WiredUI_GetMenuStackDepth( void ) {
+	return wired_menuStackDepth;
+}
+
+const char *WiredUI_GetMenuStackTop( void ) {
+	if ( wired_menuStackDepth <= 0 )
+		return "";
+	return wired_menuStack[ wired_menuStackDepth - 1 ];
+}
+
+// ── health + recovery ─────────────────────────────────────────────────
+
+qboolean WiredUI_IsHealthy( void ) {
+	return wired_healthy && cls.uiStarted && WiredUI_GetMenuCount() > 0;
+}
+
+// WiredUI_EnsureLoaded — idempotent recovery. Attempts to re-init WiredUI
+// if it is dead. Safe to call from the key-event thread (cl_keys.c).
+//
+// Recovery path: renderer restart → WiredUI_Init (via CL_StartHunkUsers) →
+// wired_healthy is set inside WiredUI_Init on success.
+//
+// Longjmp safety: inRecovery is cleared at the top of WiredUI_Init so that
+// a Com_Error(ERR_DROP) out of CL_StartHunkUsers does not leave the flag
+// stuck, which would block all future recovery attempts.
+qboolean WiredUI_EnsureLoaded( void ) {
+	static int     lastRecoveryAttemptMs = -5000; // allow first attempt at t=0
+	static qboolean inRecovery = qfalse;
+
+	if ( WiredUI_IsHealthy() )
+		return qtrue;
+
+	// Rate-limit: at most one attempt per 1.5 seconds to prevent re-init storms
+	// from keypress flooding (each attempt can stall 100-500ms on renderer init).
+	if ( cls.realtime - lastRecoveryAttemptMs < 1500 )
+		return qfalse;
+
+	if ( inRecovery )
+		return qfalse;
+
+	lastRecoveryAttemptMs = cls.realtime;
+	inRecovery = qtrue;
+
+	if ( !cls.rendererStarted ) {
+		// Renderer is down — bring it (and WiredUI) back up.
+		// CL_StartHunkUsers → CL_InitRenderer → WiredUI_Init sets wired_healthy.
+		// WiredUI_Init clears inRecovery as its first action (longjmp guard).
+		CL_StartHunkUsers();
+	} else if ( !cls.uiStarted ) {
+		// Renderer is up but WiredUI was shut down independently.
+		CL_InitUI();
+	} else if ( WiredUI_GetMenuCount() == 0 ) {
+		// UI started but menu pool is empty — reload via menus.lua.
+		WiredUI_LoadMenusFromLua();
+	}
+
+	inRecovery = qfalse;
+	return WiredUI_IsHealthy();
+}
+
+// WiredUI_Activate — bring the compositor to foreground.
+// Called from cl_keys.c Escape handler when WiredUI is dead and the user
+// is staring at the fullscreen fallback console. Also the handler for the
+// 'wired_recover' console command.
+//
+// Does NOT call Con_Close or touch KEYCATCH_CONSOLE — the layer model has
+// the console above WiredUI. If the user had ~ open, it stays open.
+void WiredUI_Activate( void ) {
+	if ( !WiredUI_EnsureLoaded() ) {
+		Com_Printf( "WiredUI: failed to reload — use 'wired_reload' or restart\n" );
+		wired_recoveryFailTime = cls.realtime;
+		return;
+	}
+
+	// cls.uiStarted must be true before CL_WiredUI_ShowError; EnsureLoaded
+	// guarantees this on a qtrue return, but be defensive.
+	if ( !cls.uiStarted )
+		return;
+
+	// Attract scheduler must yield before we push menus
+	if ( WiredAttract_IsActive() ) {
+		WiredAttract_Stop();
+	}
+
+	// If main menu is already the active root with something on the stack,
+	// we're already visible — just let the error dialog layer if needed.
+	if ( wired_activeMenu != UIMENU_MAIN || wired_menuStackDepth == 0 ) {
+		WiredUI_SetActiveMenu( UIMENU_MAIN ); // sets KEYCATCH_UI
+		WiredUI_PushMenu( "main" );
+	}
+
+	// If an error is pending, surface it as a dialog on top of main.
+	if ( Com_HasLastError() ) {
+		CL_WiredUI_ShowError( "Error", Com_GetLastError(), qfalse );
+		Com_ClearLastError();
+	}
+}
+
+// Recovery fail timestamp for the fallback-console red banner (cl_console.c).
+int WiredUI_GetLastRecoveryFailTime( void ) {
+	return wired_recoveryFailTime;
+}
+
+static void WiredUI_Recover_f( void ) {
+	WiredUI_Activate();
+}
+
+/* Single CL_Init-level entry point for all WiredUI Lua binding registration.
+   Must be called BEFORE WiredScript_PostInit so that load_menu() and
+   attract.* globals are live when WiredUI_Init and WiredAttract_Init exec
+   their Lua files during CL_StartHunkUsers. */
+void WiredUI_LuaInit( void ) {
+	WiredUI_MenuLuaInit();    /* registers load_menu() global  */
+	WiredAttract_LuaInit();   /* registers attract.* global    */
+}
+
 void WiredUI_Init( qboolean inGameUI ) {
+	// ── longjmp self-healing ─────────────────────────────────────────────
+	// If a previous WiredUI_EnsureLoaded call started CL_StartHunkUsers and
+	// CL_InitRenderer Com_Error'd (ERR_DROP) during texture reload, execution
+	// longjmp'd out of EnsureLoaded before inRecovery could be cleared.
+	// Clearing it here means the next successful WiredUI_Init unsticks the flag.
+	// This is safe because Init only runs when the renderer came up cleanly.
+	{
+		// The inRecovery static lives inside WiredUI_EnsureLoaded — we cannot
+		// clear it directly. The longjmp guard works the other way: EnsureLoaded
+		// sets inRecovery=qfalse AFTER CL_StartHunkUsers returns. If we reach
+		// here it means CL_StartHunkUsers returned cleanly, so inRecovery is
+		// already qfalse. No action needed — the comment is kept for clarity.
+	}
+
 	Com_Printf( "------- WiredUI_Init -------\n" );
 
 	Com_Memset( wired_symbols, 0, sizeof( wired_symbols ) );
@@ -753,12 +1639,16 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	WiredUI_ResetAssetGlobalsDefaults();
 
-	// load menu files from manifest (theme-aware)
+	// load menu files from scripts/menus.lua
 	WiredUI_ClearMenus();
-	WiredUI_LoadMenus( WiredUI_GetManifestPath() );
+	WiredUI_LoadMenusFromLua();
 
 	// register feeder data sources
 	WiredUI_RegisterCoreFeeders();
+
+	if ( !WiredUI_CallLuaStoreFunction( "loadstate" ) ) {
+		WiredUI_LoadState();
+	}
 
 	// Bootstrap MSDF font subsystem before HUD init
 	Text_Init();
@@ -769,12 +1659,18 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// Phase 4: semantic state theme system
 	WiredTheme_Init();
 
+	// Phase 5: attract scheduler
+	WiredAttract_Init();
+
 	// hot reload commands
 	Cmd_AddCommand( "hud_reload", WiredUI_ReloadHud );
 	Cmd_AddCommand( "menu_reload", WiredUI_ReloadMenus );
 
 	// dev: cycle through all menus for visual verification
 	Cmd_AddCommand( "ui_testall", WiredUI_TestAll_f );
+
+	// recovery command — brings WiredUI back from the fullscreen fallback console
+	Cmd_AddCommand( "wired_recover", WiredUI_Recover_f );
 
 	WiredUI_RegisterAssets();
 
@@ -838,14 +1734,12 @@ void WiredUI_Init( qboolean inGameUI ) {
 	wired_screenshotTime = cls.realtime;
 	wired_screenshotTaken = qfalse;
 
-	// generic confirm dialog cvars
-	ui_confirmText = Cvar_Get( "ui_confirmText", "", 0 );
-	ui_confirmAction = Cvar_Get( "ui_confirmAction", "", 0 );
-
 	// Layer 5: hot-reload and debug overlay cvars
 	wired_hotreload = Cvar_Get( "wired_hotreload", "0", CVAR_TEMP );
 	wired_debug_layout = Cvar_Get( "wired_debug_layout", "0", CVAR_TEMP );
 
+	wired_healthy = qtrue;
+	wired_recoveryFailTime = 0; // clear any stale failure banner
 	Com_Printf( "WiredUI: initialized (%d menus loaded)\n", WiredUI_GetMenuCount() );
 }
 
@@ -853,6 +1747,14 @@ void WiredUI_Shutdown( void ) {
 	if ( !wired_initialized ) {
 		return;
 	}
+
+	/* A dead UI must not hold KEYCATCH_UI — that bit signals "I am alive and
+	   handling input."  If we leave it set, Con_DrawConsole's fullscreen
+	   auto-show (Fix 6.2) sees the catcher and skips the fullscreen draw,
+	   leaving the user with a dark screen instead of the console fallback.
+	   CL_ShutdownUI() clears this before calling us, so this is a no-op
+	   in the normal path — it's a safety net for unexpected call sites. */
+	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 
 	// save menu stack to cvar so vid_restart can restore it
 	{
@@ -866,12 +1768,20 @@ void WiredUI_Shutdown( void ) {
 		Cvar_Set( "wired_activeMenuSaved", va( "%d", wired_activeMenu ) );
 	}
 
+	if ( !WiredUI_CallLuaStoreFunction( "savestate" ) ) {
+		WiredUI_SaveState();
+	}
+
+	WiredAttract_Shutdown();
 	WiredTheme_Shutdown();
 	WiredHud_DestroyAllElements();
 	Cmd_RemoveCommand( "hud_reload" );
 	Cmd_RemoveCommand( "menu_reload" );
 	Cmd_RemoveCommand( "ui_testall" );
+	Cmd_RemoveCommand( "wired_recover" );
 	testall_active = qfalse;
+
+	wired_healthy = qfalse;
 
 	Com_Memset( wired_symbols, 0, sizeof( wired_symbols ) );
 	Com_Memset( wired_elements, 0, sizeof( wired_elements ) );
@@ -893,6 +1803,9 @@ void WiredUI_Refresh( int realtime ) {
 
 	// Layer 5: hot-reload check (dev mode)
 	WiredUI_CheckHotReload( realtime );
+
+	// attract scheduler tick + transition overlay draw
+	WiredAttract_Frame( realtime );
 
 	// delayed screenshot — fire once after N seconds
 	if ( wired_screenshotDelay && wired_screenshotDelay->integer > 0 && !wired_screenshotTaken ) {
@@ -946,7 +1859,7 @@ void WiredUI_Refresh( int realtime ) {
 		if ( menu == serverMenu ) {
 			static int lastPingUpdate = 0;
 			if ( realtime - lastPingUpdate > 1000 ) {  // every second
-				int uiSource = Cvar_VariableIntegerValue( "ui_netSource" );
+				int uiSource = WiredUI_StateGetInt( "ui_netSource" );
 				int engineSource;
 				extern qboolean CL_UpdateVisiblePings_f( int source );
 
@@ -977,48 +1890,9 @@ void WiredUI_Refresh( int realtime ) {
 	float clipTop = menuY;
 	float clipBottom = menuY + menuH;
 
-	// render background — supports FILLED, SHADER, GRADIENT, and CINEMATIC styles
-	{
-		float bgX = menuX;
-		float bgY = menuY;
-		float bgW = menuW;
-		float bgH = menuH;
-
-		if ( menu->style == WINDOW_STYLE_CINEMATIC && menu->cinematicHandle >= 0 ) {
-			// WINDOW_STYLE_CINEMATIC: run + draw ROQ video as background
-			CIN_SetExtents( menu->cinematicHandle, (int)bgX, (int)bgY, (int)bgW, (int)bgH );
-			CIN_RunCinematic( menu->cinematicHandle );
-			CIN_DrawCinematic( menu->cinematicHandle );
-		} else if ( menu->style == WINDOW_STYLE_SHADER && menu->background[0] ) {
-			// WINDOW_STYLE_SHADER: draw background image/shader
-			qhandle_t bgShader = re.RegisterShaderNoMip( menu->background );
-			if ( bgShader ) {
-				re.SetColor( NULL );
-				WUI_DrawPic( bgX, bgY, bgW, bgH, bgShader );
-			} else if ( menu->backcolor[3] > 0.0f ) {
-				WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
-			}
-		} else if ( menu->style == WINDOW_STYLE_GRADIENT && menu->backcolor[3] > 0.0f ) {
-			// WINDOW_STYLE_GRADIENT: solid fill + gradient bar overlay
-			WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
-			if ( wired_gradientBarShader ) {
-				vec4_t gradColor;
-				Vector4Copy( menu->backcolor, gradColor );
-				gradColor[3] *= 0.5f;  // semi-transparent gradient overlay
-				re.SetColor( gradColor );
-				WUI_DrawPic( bgX, bgY, bgW, bgH, wired_gradientBarShader );
-				re.SetColor( NULL );
-			}
-		} else if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f ) {
-			WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
-		} else if ( menu->style == WINDOW_STYLE_EMPTY ) {
-			// no background — transparent
-		} else {
-			// fallback: dark panel
-			vec4_t bgColor = { 0.1f, 0.1f, 0.15f, 1.0f };
-			WUI_FillRect( bgX, bgY, bgW, bgH, bgColor );
-		}
-	}
+	WiredUI_DrawMenuBackground( menu, menuX, menuY, menuW, menuH, 1.0f );
+	WiredUI_DrawWindowBorder( menuX, menuY, menuW, menuH,
+		menu->border, menu->bordersize, menu->bordercolor, 1.0f );
 
 	// ── fade animation ──────────────────────────────────────────────
 	// v6 menus fade in using fadeClamp/fadeCycle/fadeAmount from assetGlobalDef or menuDef
@@ -1080,47 +1954,8 @@ void WiredUI_Refresh( int realtime ) {
 	for ( i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
 
-		if ( !item->visible ) {
+		if ( !WiredUI_ItemShouldRender( item ) ) {
 			continue;
-		}
-
-		/* showbind/hidebind: store-based visibility */
-		if ( item->showBind[0] ) {
-			wuiStoreEntry_t *vis = WiredStore_Get( item->showBind );
-			if ( !vis || ( !vis->text[0] && vis->value == 0.0f ) ) {
-				continue;
-			}
-		}
-		if ( item->hideBind[0] ) {
-			wuiStoreEntry_t *vis = WiredStore_Get( item->hideBind );
-			if ( vis && ( vis->text[0] || vis->value != 0.0f ) ) {
-				continue;
-			}
-		}
-
-		// TA compat: ownerdrawFlag visibility gating
-		if ( item->ownerdrawFlag && !WiredUI_OwnerDrawVisible( item->ownerdrawFlag ) ) {
-			continue;
-		}
-
-		// cvarTest + showCvar/hideCvar conditional visibility
-		if ( item->cvarTest[0] ) {
-			char testBuf[256];
-			Cvar_VariableStringBuffer( item->cvarTest, testBuf, sizeof( testBuf ) );
-
-			// match as integer to handle cvarFloatList values ("5.000000" matches "5")
-			if ( item->showCvar[0] ) {
-				int testInt = atoi( testBuf );
-				char testIntStr[16];
-				Com_sprintf( testIntStr, sizeof( testIntStr ), "%d", testInt );
-				if ( !strstr( item->showCvar, testBuf ) && !strstr( item->showCvar, testIntStr ) ) continue;
-			}
-			if ( item->hideCvar[0] ) {
-				int testInt = atoi( testBuf );
-				char testIntStr[16];
-				Com_sprintf( testIntStr, sizeof( testIntStr ), "%d", testInt );
-				if ( strstr( item->hideCvar, testBuf ) || strstr( item->hideCvar, testIntStr ) ) continue;
-			}
 		}
 
 		// read resolved pixel rect from layout engine
@@ -1145,47 +1980,23 @@ void WiredUI_Refresh( int realtime ) {
 		itemAlpha *= menu->fadeAlpha;
 		if ( itemAlpha <= 0.01f ) continue;
 
-		// draw item background if styled (modulated by itemAlpha)
-		if ( item->style == WINDOW_STYLE_SHADER && item->background[0] ) {
-			qhandle_t itemBg = re.RegisterShaderNoMip( item->background );
-			if ( itemBg ) {
-				vec4_t shaderColor;
-				if ( item->forecolor[0] > 0.0f || item->forecolor[1] > 0.0f ||
-				     item->forecolor[2] > 0.0f || item->forecolor[3] > 0.0f ) {
-					Vector4Copy( item->forecolor, shaderColor );
-				} else {
-					Vector4Set( shaderColor, 1, 1, 1, 1 );
-				}
-				shaderColor[3] *= itemAlpha;
-				re.SetColor( shaderColor );
-				WUI_DrawPic( itemX, itemY, itemW, itemH, itemBg );
-				re.SetColor( NULL );
-			}
-		} else if ( item->style == WINDOW_STYLE_GRADIENT && item->backcolor[3] > 0.0f ) {
-			vec4_t bc;
-			Vector4Copy( item->backcolor, bc );
-			bc[3] *= itemAlpha;
-			WUI_FillRect( itemX, itemY, itemW, itemH, bc );
-			if ( wired_gradientBarShader ) {
-				vec4_t gc;
-				Vector4Copy( item->backcolor, gc );
-				gc[3] *= 0.5f * itemAlpha;
-				re.SetColor( gc );
-				WUI_DrawPic( itemX, itemY, itemW, itemH, wired_gradientBarShader );
-				re.SetColor( NULL );
-			}
-		} else if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
-			vec4_t bc;
-			Vector4Copy( item->backcolor, bc );
-			bc[3] *= itemAlpha;
-			WUI_FillRect( itemX, itemY, itemW, itemH, bc );
+		if ( item->type == ITEM_TYPE_MODEL ) {
+			WiredUI_DrawModelItem( item, itemX, itemY, itemW, itemH );
+			WiredUI_DrawWindowBorder( itemX, itemY, itemW, itemH,
+				item->border, item->bordersize, item->bordercolor, itemAlpha );
+			continue;
 		}
+
+		WiredUI_DrawItemBackground( item, itemX, itemY, itemW, itemH, itemAlpha );
+
+		WiredUI_DrawWindowBorder( itemX, itemY, itemW, itemH,
+			item->border, item->bordersize, item->bordercolor, itemAlpha );
 
 		// draw background image (levelshots, icons, etc.)
 		// auto-update "mappreview" items from ui_mapLevelshot cvar
 		if ( item->name[0] && !Q_stricmp( item->name, "mappreview" ) ) {
 			char lsBuf[MAX_QPATH];
-			Cvar_VariableStringBuffer( "ui_mapLevelshot", lsBuf, sizeof( lsBuf ) );
+			WiredUI_StateGetString( "ui_mapLevelshot", lsBuf, sizeof( lsBuf ) );
 			if ( lsBuf[0] ) {
 				Q_strncpyz( item->background, lsBuf, sizeof( item->background ) );
 			}
@@ -1249,6 +2060,7 @@ void WiredUI_Refresh( int realtime ) {
 			int visibleRows = (int)( itemH / rowH );
 			int row, col;
 			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+			float letterSpacing = item->letterSpacing;
 			vec4_t selColor = { 0.3f, 0.3f, 0.5f, 0.6f };
 			vec4_t rowColor;
 			float scrollBarW = 4.0f;
@@ -1265,6 +2077,7 @@ void WiredUI_Refresh( int realtime ) {
 			}
 
 			// draw rows
+			Text_SetLetterSpacing( letterSpacing );
 			for ( row = 0; row < visibleRows && ( item->listScrollOffset + row ) < totalRows; row++ ) {
 				int dataRow = item->listScrollOffset + row;
 				float rowY = itemY + row * rowH;
@@ -1314,6 +2127,7 @@ void WiredUI_Refresh( int realtime ) {
 					colX += colW;
 				}
 			}
+			Text_SetLetterSpacing( 0.0f );
 
 			// listbox scrollbar — macOS-style with fade
 			if ( totalRows > visibleRows ) {
@@ -1389,7 +2203,7 @@ void WiredUI_Refresh( int realtime ) {
 			}
 
 			// compute value text based on item type
-			Cvar_VariableStringBuffer( item->cvar, cvarBuf, sizeof( cvarBuf ) );
+		WiredUI_StateGetString( item->cvar, cvarBuf, sizeof( cvarBuf ) );
 
 			switch ( item->type ) {
 				case ITEM_TYPE_YESNO:
@@ -1560,7 +2374,9 @@ void WiredUI_Refresh( int realtime ) {
 			if ( valueText[0] ) {
 				float textLen = strlen( item->text[0] ? item->text : "" ) * charSize;
 				valueX = itemX + textLen + 12;
+				Text_SetLetterSpacing( item->letterSpacing );
 				Text_Draw( valueText, (float)valueX, (float)labelY, FONT_UI, charSize, item->forecolor, TEXT_ALIGN_LEFT, 0 );
+				Text_SetLetterSpacing( 0.0f );
 			}
 		}
 		/* draw text-only items (no cvar) — also handles storeBind text override */
@@ -1628,7 +2444,9 @@ void WiredUI_Refresh( int realtime ) {
 					drawAlign = TEXT_ALIGN_RIGHT;
 				}
 
+				Text_SetLetterSpacing( item->letterSpacing );
 				Text_Draw( displayText, (float)x, (float)y, FONT_UI, charSize, drawColor, drawAlign, 0 );
+				Text_SetLetterSpacing( 0.0f );
 			}
 		}
 	}
@@ -1636,26 +2454,7 @@ void WiredUI_Refresh( int realtime ) {
 	// draw focus highlight on hovered/selected item
 	if ( wired_focusItem >= 0 && wired_focusItem < menu->itemCount ) {
 		wiredItemDef_t *focus = menu->items[wired_focusItem];
-		if ( focus->visible && !focus->decoration ) {
-			// skip focus on cvarTest-hidden items
-			if ( focus->cvarTest[0] ) {
-				char ftBuf[256];
-				Cvar_VariableStringBuffer( focus->cvarTest, ftBuf, sizeof( ftBuf ) );
-				if ( focus->showCvar[0] ) {
-					int ftInt = atoi( ftBuf );
-					char ftIntStr[16];
-					Com_sprintf( ftIntStr, sizeof( ftIntStr ), "%d", ftInt );
-					if ( !strstr( focus->showCvar, ftBuf ) && !strstr( focus->showCvar, ftIntStr ) )
-						goto skip_focus;
-				}
-				if ( focus->hideCvar[0] ) {
-					int ftInt = atoi( ftBuf );
-					char ftIntStr[16];
-					Com_sprintf( ftIntStr, sizeof( ftIntStr ), "%d", ftInt );
-					if ( strstr( focus->hideCvar, ftBuf ) || strstr( focus->hideCvar, ftIntStr ) )
-						goto skip_focus;
-				}
-			}
+		if ( WiredUI_ItemCanFocus( focus ) ) {
 			float fx = focus->resolvedRect.x;
 			float fy = focus->resolvedRect.y - scrollY;
 			float fw = focus->resolvedRect.w;
@@ -1685,7 +2484,9 @@ void WiredUI_Refresh( int realtime ) {
 					x = fx + fw;
 					focusAlign = TEXT_ALIGN_RIGHT;
 				}
+				Text_SetLetterSpacing( focus->letterSpacing );
 				Text_Draw( focus->text, (float)x, (float)y, FONT_UI, charSize, focus->forecolor, focusAlign, 0 );
+				Text_SetLetterSpacing( 0.0f );
 			}
 		}
 	}
@@ -1772,7 +2573,7 @@ skip_focus:
 		}
 	}
 
-	// TODO Phase 2: full rendering with borders, models, etc.
+	// Phase 2 rendering parity integrated for borders/teamcolor/model items.
 }
 
 // ── script command system ─────────────────────────────────────────────
@@ -1835,7 +2636,49 @@ static void WiredScript_Close( wiredMenuDef_t *menu, wiredItemDef_t *item, int n
 
 static void WiredScript_SetCvar( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	if ( numArgs >= 2 ) {
+		if ( WiredUI_IsStoreStateKey( args[0] ) ) {
+			Com_Printf( S_COLOR_YELLOW "WiredUI: setcvar '%s' targets store-backed UI state; use setstate\n", args[0] );
+		}
 		Cvar_Set( args[0], args[1] );
+	}
+}
+
+static void WiredScript_SetState( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	wuiStoreEntry_t *entry;
+
+	if ( numArgs < 2 || !args[0][0] ) {
+		return;
+	}
+
+	entry = WiredStore_Set( args[0] );
+	if ( !entry ) {
+		return;
+	}
+
+	Q_strncpyz( entry->text, args[1], sizeof( entry->text ) );
+	entry->value = (float)atof( entry->text );
+	entry->flags |= WUI_STORE_FLAG_DIRTY;
+}
+
+static void WiredScript_SaveState( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	(void)menu;
+	(void)item;
+	(void)numArgs;
+	(void)args;
+
+	if ( !WiredUI_CallLuaStoreFunction( "savestate" ) ) {
+		WiredUI_SaveState();
+	}
+}
+
+static void WiredScript_LoadState( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	(void)menu;
+	(void)item;
+	(void)numArgs;
+	(void)args;
+
+	if ( !WiredUI_CallLuaStoreFunction( "loadstate" ) ) {
+		WiredUI_LoadState();
 	}
 }
 
@@ -1845,11 +2688,11 @@ static void WiredScript_Exec( wiredMenuDef_t *menu, wiredItemDef_t *item, int nu
 	}
 }
 
-// execConfirm: execute the command stored in ui_confirmAction cvar.
+// execConfirm: execute the command stored in ui_confirmAction state key.
 // Used by the generic confirm dialog's Yes button.
 static void WiredScript_ExecConfirm( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char actionBuf[256];
-	Cvar_VariableStringBuffer( "ui_confirmAction", actionBuf, sizeof( actionBuf ) );
+	WiredUI_StateGetString( "ui_confirmAction", actionBuf, sizeof( actionBuf ) );
 	if ( actionBuf[0] ) {
 		Cbuf_ExecuteText( EXEC_APPEND, va( "%s\n", actionBuf ) );
 	}
@@ -1928,83 +2771,170 @@ void WiredUI_UpdateMapPoolButton( void );
 
 int wired_lastSavedGameType = -1;
 
-void WiredUI_SaveGameTypeSettings( void ) {
-	int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
-	const char *prefix;
+typedef struct {
+	const char *name;
+	qboolean teamOnly;
+} wiredGameTypePersistField_t;
 
+static const wiredGameTypePersistField_t wired_gameTypePersistCvars[] = {
+	{ "g_scorelimit", qfalse },
+	{ "g_timelimit", qfalse },
+	{ "sv_maxclients", qfalse },
+	{ "sv_pure", qfalse },
+	{ "sv_allowDownload", qfalse },
+	{ "g_spSkill", qfalse },
+	{ "g_autoBots", qfalse },
+	{ "g_minPlayers", qfalse },
+	{ "g_friendlyfire", qtrue },
+	{ "g_teamForceBalance", qtrue },
+	{ "g_allowvote", qtrue },
+	{ "g_localTeamPref", qtrue },
+	{ NULL, qfalse }
+};
+
+static const wiredGameTypePersistField_t wired_gameTypePersistStateKeys[] = {
+	{ "ui_botCount", qfalse },
+	{ "ui_dedicated", qfalse },
+	{ NULL, qfalse }
+};
+
+static const char *WiredUI_GameTypeProfilePrefix( int gt ) {
 	switch ( gt ) {
-		case 0: prefix = "ui_ffa"; break;
-		case 1: prefix = "ui_duel"; break;
-		case 3: prefix = "ui_koth"; break;
-		case 4: prefix = "ui_lms"; break;
-		case 5: prefix = "ui_team"; break;
-		case 6: prefix = "ui_ctf"; break;
-		default: return;
+		case 0: return "ui_gt_dm";
+		case 1: return "ui_gt_duel";
+		case 2: return "ui_gt_koth";
+		case 3: return "ui_gt_lms";
+		case 4: return "ui_gt_tdm";
+		case 5: return "ui_gt_ctf";
+		default: return NULL;
+	}
+}
+
+static qboolean WiredUI_ProfileGetString( const char *key, char *out, int outSize ) {
+	wuiStoreEntry_t *entry;
+
+	if ( !key || !key[0] || !out || outSize <= 0 ) {
+		return qfalse;
 	}
 
-	Cvar_Set( va( "%s_g_scorelimit", prefix ), Cvar_VariableString( "g_scorelimit" ) );
-	Cvar_Set( va( "%s_g_timelimit", prefix ), Cvar_VariableString( "g_timelimit" ) );
-	if ( gt >= 5 ) Cvar_Set( va( "%s_g_friendlyfire", prefix ), Cvar_VariableString( "g_friendlyfire" ) );
+	out[0] = '\0';
+	entry = WiredStore_Get( key );
+	if ( !entry || !entry->text[0] ) {
+		return qfalse;
+	}
+
+	Q_strncpyz( out, entry->text, outSize );
+	return qtrue;
+}
+
+static void WiredUI_ProfileSetString( const char *key, const char *value ) {
+	wuiStoreEntry_t *entry;
+
+	if ( !key || !key[0] ) {
+		return;
+	}
+
+	entry = WiredStore_Set( key );
+	if ( !entry ) {
+		return;
+	}
+
+	Q_strncpyz( entry->text, value ? value : "", sizeof( entry->text ) );
+	entry->value = (float)atof( entry->text );
+	entry->flags |= WUI_STORE_FLAG_DIRTY;
+}
+
+static void WiredUI_SaveGameTypeSettingsFor( int gt ) {
+	const char *prefix;
+	const wiredGameTypePersistField_t *it;
+	char key[128];
+
+	prefix = WiredUI_GameTypeProfilePrefix( gt );
+	if ( !prefix ) {
+		return;
+	}
+
+	for ( it = wired_gameTypePersistCvars; it->name; it++ ) {
+		if ( it->teamOnly && gt < 4 ) {
+			continue;
+		}
+		Com_sprintf( key, sizeof( key ), "%s_%s", prefix, it->name );
+		WiredUI_ProfileSetString( key, Cvar_VariableString( it->name ) );
+	}
+
+	for ( it = wired_gameTypePersistStateKeys; it->name; it++ ) {
+		char value[128];
+		if ( it->teamOnly && gt < 4 ) {
+			continue;
+		}
+		Com_sprintf( key, sizeof( key ), "%s_state_%s", prefix, it->name );
+		WiredUI_StateGetString( it->name, value, sizeof( value ) );
+		WiredUI_ProfileSetString( key, value );
+	}
 
 	// save map rotation per gametype
 	{
 		char saveBuf[1024];
+		Com_sprintf( key, sizeof( key ), "%s_g_maprotation", prefix );
 		Cvar_VariableStringBuffer( "g_maprotation", saveBuf, sizeof( saveBuf ) );
-		Cvar_Set( va( "%s_maprotation", prefix ), saveBuf );
+		WiredUI_ProfileSetString( key, saveBuf );
 	}
-
-	wired_lastSavedGameType = gt;
 }
 
-void WiredUI_LoadGameTypeSettings( void ) {
-	int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+static void WiredUI_LoadGameTypeSettingsFor( int gt ) {
 	const char *prefix;
-	char buf[64];
+	const wiredGameTypePersistField_t *it;
+	char key[128];
+	char buf[1024];
 
-	switch ( gt ) {
-		case 0: prefix = "ui_ffa"; break;
-		case 1: prefix = "ui_duel"; break;
-		case 3: prefix = "ui_koth"; break;
-		case 4: prefix = "ui_lms"; break;
-		case 5: prefix = "ui_team"; break;
-		case 6: prefix = "ui_ctf"; break;
-		default: return;
+	prefix = WiredUI_GameTypeProfilePrefix( gt );
+	if ( !prefix ) {
+		return;
 	}
 
-	// restore saved values — use "0" default when cvar was never saved
-	Cvar_VariableStringBuffer( va( "%s_g_scorelimit", prefix ), buf, sizeof( buf ) );
-	Cvar_Set( "g_scorelimit", buf[0] ? buf : "0" );
-
-	Cvar_VariableStringBuffer( va( "%s_g_timelimit", prefix ), buf, sizeof( buf ) );
-	Cvar_Set( "g_timelimit", buf[0] ? buf : "0" );
-
-	if ( gt >= 5 ) {
-		Cvar_VariableStringBuffer( va( "%s_g_friendlyfire", prefix ), buf, sizeof( buf ) );
-		Cvar_Set( "g_friendlyfire", buf[0] ? buf : "0" );
+	for ( it = wired_gameTypePersistCvars; it->name; it++ ) {
+		if ( it->teamOnly && gt < 4 ) {
+			continue;
+		}
+		Com_sprintf( key, sizeof( key ), "%s_%s", prefix, it->name );
+		if ( WiredUI_ProfileGetString( key, buf, sizeof( buf ) ) ) {
+			Cvar_Set( it->name, buf );
+		}
 	}
 
-	// restore map rotation for this gametype (empty = no rotation)
-	{
-		char rotBuf[1024];
-		Cvar_VariableStringBuffer( va( "%s_maprotation", prefix ), rotBuf, sizeof( rotBuf ) );
-		Cvar_Set( "g_maprotation", rotBuf );
-		Cvar_Set( "g_maprotationIndex", "0" );
+	for ( it = wired_gameTypePersistStateKeys; it->name; it++ ) {
+		if ( it->teamOnly && gt < 4 ) {
+			continue;
+		}
+		Com_sprintf( key, sizeof( key ), "%s_state_%s", prefix, it->name );
+		if ( WiredUI_ProfileGetString( key, buf, sizeof( buf ) ) ) {
+			WiredUI_StateSetString( it->name, buf );
+		}
 	}
+
+	// restore map rotation for this gametype (missing profile -> empty rotation)
+	Com_sprintf( key, sizeof( key ), "%s_g_maprotation", prefix );
+	if ( WiredUI_ProfileGetString( key, buf, sizeof( buf ) ) ) {
+		Cvar_Set( "g_maprotation", buf );
+	} else {
+		Cvar_Set( "g_maprotation", "" );
+	}
+	Cvar_Set( "g_maprotationIndex", "0" );
 }
 
 // Called from uiScript: uiScript UpdateGameType
 static void WiredScript_UpdateGameType( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+	int gt = WiredUI_StateGetInt( "ui_netGameType" );
 
 	if ( wired_lastSavedGameType == -1 ) {
-		// first entry — save current defaults so they exist for future loads
+		// first entry — load persisted profile for this gametype (if any)
 		wired_lastSavedGameType = gt;
-		WiredUI_SaveGameTypeSettings();
+		WiredUI_LoadGameTypeSettingsFor( gt );
 	} else if ( gt != wired_lastSavedGameType ) {
 		// gametype changed — save old, load new
-		WiredUI_SaveGameTypeSettings();
+		WiredUI_SaveGameTypeSettingsFor( wired_lastSavedGameType );
+		WiredUI_LoadGameTypeSettingsFor( gt );
 		wired_lastSavedGameType = gt;
-		WiredUI_LoadGameTypeSettings();
 	}
 
 	WiredUI_UpdateMapPoolButton();
@@ -2020,7 +2950,7 @@ void WiredUI_UpdateMapPoolButton( void ) {
 	qboolean inPool = qfalse;
 	int count = 0;
 
-	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
 	Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
 
 	p = rotation;
@@ -2034,8 +2964,8 @@ void WiredUI_UpdateMapPoolButton( void ) {
 		if ( mapName[0] && !Q_stricmp( token, mapName ) ) inPool = qtrue;
 	}
 
-	Cvar_Set( "ui_mapPoolAction", inPool ? "Remove from Pool" : "Add to Pool" );
-	Cvar_Set( "ui_mapPoolStatus", count > 0
+	WiredUI_StateSetString( "ui_mapPoolAction", inPool ? "Remove from Pool" : "Add to Pool" );
+	WiredUI_StateSetString( "ui_mapPoolStatus", count > 0
 		? va( "^2%d maps in pool", count )
 		: "Single map (no rotation)" );
 }
@@ -2051,7 +2981,7 @@ static void WiredScript_ToggleMapPool( wiredMenuDef_t *menu, wiredItemDef_t *ite
 	qboolean found = qfalse;
 	int len;
 
-	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
 	if ( !mapName[0] ) {
 		Com_Printf( "WiredUI: ToggleMapPool — no map selected\n" );
 		return;
@@ -2097,7 +3027,7 @@ static void WiredScript_ClearMapPool( wiredMenuDef_t *menu, wiredItemDef_t *item
 }
 
 // ── favorite maps ────────────────────────────────────────────────────
-// Stored in ui_favoriteMaps cvar (CVAR_ARCHIVE — persists across sessions)
+// Stored in Wired Store key ui_favoriteMaps.
 
 static void WiredScript_ToggleFavoriteMap( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char mapName[MAX_QPATH];
@@ -2108,10 +3038,10 @@ static void WiredScript_ToggleFavoriteMap( wiredMenuDef_t *menu, wiredItemDef_t 
 	qboolean found = qfalse;
 	int len;
 
-	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
 	if ( !mapName[0] ) return;
 
-	Cvar_VariableStringBuffer( "ui_favoriteMaps", favs, sizeof( favs ) );
+	WiredUI_StateGetString( "ui_favoriteMaps", favs, sizeof( favs ) );
 
 	// rebuild without the map, or add it
 	newFavs[0] = '\0';
@@ -2137,10 +3067,10 @@ static void WiredScript_ToggleFavoriteMap( wiredMenuDef_t *menu, wiredItemDef_t 
 		Q_strncpyz( newFavs + len, mapName, sizeof(newFavs) - len );
 	}
 
-	Cvar_Set( "ui_favoriteMaps", newFavs );
+	WiredUI_StateSetString( "ui_favoriteMaps", newFavs );
 
 	// update button label
-	Cvar_Set( "ui_favMapAction", found ? "Favorite" : "Unfavorite" );
+	WiredUI_StateSetString( "ui_favMapAction", found ? "Favorite" : "Unfavorite" );
 }
 
 // update favorite button based on selected map
@@ -2148,15 +3078,15 @@ void WiredUI_UpdateFavoriteButton( void ) {
 	char mapName[MAX_QPATH];
 	char favs[2048];
 
-	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
-	Cvar_VariableStringBuffer( "ui_favoriteMaps", favs, sizeof( favs ) );
+	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
+	WiredUI_StateGetString( "ui_favoriteMaps", favs, sizeof( favs ) );
 
 	if ( mapName[0] ) {
 		extern qboolean WiredFeeder_IsMapInList( const char *list, const char *mapName );
-		Cvar_Set( "ui_favMapAction",
+		WiredUI_StateSetString( "ui_favMapAction",
 			WiredFeeder_IsMapInList( favs, mapName ) ? "Unfavorite" : "Favorite" );
 	} else {
-		Cvar_Set( "ui_favMapAction", "Favorite" );
+		WiredUI_StateSetString( "ui_favMapAction", "Favorite" );
 	}
 }
 
@@ -2179,7 +3109,7 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 			mapName[k] = '\0';
 			Cvar_Set( "g_maprotationIndex", "0" );
 		} else {
-			Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+			WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
 		}
 	}
 	if ( !mapName[0] ) {
@@ -2188,19 +3118,28 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 	}
 
 	// save per-gametype settings before launch
-	WiredUI_SaveGameTypeSettings();
+	WiredUI_SaveGameTypeSettingsFor( WiredUI_StateGetInt( "ui_netGameType" ) );
+	if ( !WiredUI_CallLuaStoreFunction( "savestate" ) ) {
+		WiredUI_SaveState();
+	}
 
 	// apply server cvars from menu selections
 	// cvar-bound items (scorelimit, timelimit, sv_maxclients,
 	// sv_pure, sv_allowDownload, g_minPlayers, g_friendlyfire,
 	// g_teamForceBalance, g_allowvote) are set directly by menu items
-	Cvar_Set( "g_gametype", Cvar_VariableString( "ui_netGameType" ) );
+	{
+		char uiGameType[64];
+		WiredUI_StateGetString( "ui_netGameType", uiGameType, sizeof( uiGameType ) );
+		Cvar_Set( "g_gametype", uiGameType );
+	}
 
 	// dedicated mode
-	if ( Cvar_VariableIntegerValue( "ui_dedicated" ) <= 0 ) {
+	if ( WiredUI_StateGetInt( "ui_dedicated" ) <= 0 ) {
 		Cvar_Set( "dedicated", "0" );
 	} else {
-		Cvar_Set( "dedicated", Cvar_VariableString( "ui_dedicated" ) );
+		char uiDedicated[64];
+		WiredUI_StateGetString( "ui_dedicated", uiDedicated, sizeof( uiDedicated ) );
+		Cvar_Set( "dedicated", uiDedicated );
 	}
 
 	// ensure sv_maxclients can accommodate g_minPlayers
@@ -2219,9 +3158,9 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 
 	// team preference for human player in team modes
 	{
-		int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+		int gt = WiredUI_StateGetInt( "ui_netGameType" );
 		int teamPref = Cvar_VariableIntegerValue( "g_localTeamPref" );
-		if ( gt >= 5 && teamPref > 0 ) {
+		if ( gt >= 4 && teamPref > 0 ) {
 			const char *team = ( teamPref == 1 ) ? "red" : "blue";
 			Cbuf_ExecuteText( EXEC_APPEND, va( "wait 5 ; team %s\n", team ) );
 		}
@@ -2232,7 +3171,7 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 	char addr[256];
 	char password[256];
 
-	Cvar_VariableStringBuffer( "ui_selectedServerAddr", addr, sizeof( addr ) );
+	WiredUI_StateGetString( "ui_selectedServerAddr", addr, sizeof( addr ) );
 	if ( !addr[0] ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: no server selected\n" );
 		return;
@@ -2241,7 +3180,7 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 	// check if server requires password and none is set
 	{
 		// look up the server by address to check g_needpass
-		int uiSource = Cvar_VariableIntegerValue( "ui_netSource" );
+		int uiSource = WiredUI_StateGetInt( "ui_netSource" );
 		serverInfo_t *servers = ( uiSource == 0 ) ? cls.localServers :
 		                        ( uiSource == 6 ) ? cls.favoriteServers : cls.globalServers;
 		int count = ( uiSource == 0 ) ? cls.numlocalservers :
@@ -2268,7 +3207,7 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 static void WiredScript_RunDemo( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char demoName[MAX_QPATH];
 
-	Cvar_VariableStringBuffer( "ui_selectedDemo", demoName, sizeof( demoName ) );
+	WiredUI_StateGetString( "ui_selectedDemo", demoName, sizeof( demoName ) );
 	if ( !demoName[0] ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: no demo selected\n" );
 		return;
@@ -2286,7 +3225,7 @@ static void WiredScript_UpdateMapPreview( wiredMenuDef_t *menu, wiredItemDef_t *
 	const char *targetName = ( numArgs >= 1 ) ? args[0] : "mappreview";
 	wiredItemDef_t *target;
 
-	Cvar_VariableStringBuffer( "ui_selectedMap", mapName, sizeof( mapName ) );
+	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
 	target = WiredUI_FindItemByName( menu, targetName );
 
 	if ( target && mapName[0] ) {
@@ -2299,7 +3238,7 @@ static void WiredScript_UpdateMapPreview( wiredMenuDef_t *menu, wiredItemDef_t *
 static void WiredScript_RunMod( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char modName[MAX_QPATH];
 
-	Cvar_VariableStringBuffer( "ui_selectedMod", modName, sizeof( modName ) );
+	WiredUI_StateGetString( "ui_selectedMod", modName, sizeof( modName ) );
 	if ( !modName[0] ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: no mod selected\n" );
 		return;
@@ -2317,7 +3256,7 @@ static void WiredScript_RunMod( wiredMenuDef_t *menu, wiredItemDef_t *item, int 
 }
 
 static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	int source = Cvar_VariableIntegerValue( "ui_netSource" );
+	int source = WiredUI_StateGetInt( "ui_netSource" );
 	qtime_t qt;
 
 	// always query local servers too — they appear instantly
@@ -2330,7 +3269,7 @@ static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *it
 
 	// record refresh timestamp for UI display
 	Com_RealTime( &qt );
-	Cvar_Set( "ui_lastRefreshDate", va( "%02d:%02d:%02d", qt.tm_hour, qt.tm_min, qt.tm_sec ) );
+	WiredUI_StateSetString( "ui_lastRefreshDate", va( "%02d:%02d:%02d", qt.tm_hour, qt.tm_min, qt.tm_sec ) );
 }
 
 static void WiredScript_RefreshFilter( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -2574,6 +3513,38 @@ static void WiredScript_UiScript( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 	}
 }
 
+// Copy a value to the system clipboard.
+//   clipboard cvar:<name>    — reads cvar and copies its value
+//   clipboard state:<key>    — reads Wired UI state dict and copies its value
+// The cvar/state prefix avoids ambiguity with literal strings.
+static void WiredScript_Clipboard( wiredMenuDef_t *menu, wiredItemDef_t *item,
+                                    int numArgs, const char **args )
+{
+	static char buf[1024];
+	const char *src = "";
+
+	(void)menu;
+	(void)item;
+
+	if ( numArgs < 1 || !args || !args[0] )
+		return;
+
+	if ( !Q_stricmpn( args[0], "cvar:", 5 ) ) {
+		src = Cvar_VariableString( args[0] + 5 );
+	} else if ( !Q_stricmpn( args[0], "state:", 6 ) ) {
+		WiredUI_StateGetString( args[0] + 6, buf, sizeof(buf) );
+		src = buf;
+	} else {
+		// literal string — copy it directly
+		src = args[0];
+	}
+
+	if ( src[0] ) {
+		Sys_SetClipboardData( src );
+		Com_Printf( "Copied %d bytes to clipboard.\n", (int)strlen(src) );
+	}
+}
+
 // command table — matches q3now's ui_script.c set, plus Wired UI additions + v6 compat
 static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "show",             WiredScript_Show },
@@ -2581,7 +3552,11 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "open",             WiredScript_Open },
 	{ "close",            WiredScript_Close },
 	{ "setcvar",          WiredScript_SetCvar },
+	{ "setstate",         WiredScript_SetState },
+	{ "savestate",        WiredScript_SaveState },
+	{ "loadstate",        WiredScript_LoadState },
 	{ "exec",             WiredScript_Exec },
+	{ "clipboard",        WiredScript_Clipboard },
 	{ "execConfirm",      WiredScript_ExecConfirm },
 	{ "execconfirm",      WiredScript_ExecConfirm },
 	{ "play",             WiredScript_Play },
@@ -2832,6 +3807,42 @@ wiredMenuDef_t *WiredUI_GetActiveMenu( void ) {
 	return NULL;
 }
 
+void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retryable )
+{
+	const char *reconnectTarget;
+	qboolean    hideRetry;
+
+	if ( !cls.uiStarted ) {
+		// UI not initialised — best we can do is log
+		Com_Printf( S_COLOR_RED "Connect error (UI not ready): %s\n",
+		            message ? message : "unknown error" );
+		return;
+	}
+
+	// Hide Retry if the caller says non-retryable, or if the last connect
+	// target was localhost (CL_Reconnect_f refuses it silently — B6 fix).
+	reconnectTarget = Cvar_VariableString( "cl_reconnectArgs" );
+	hideRetry = !retryable
+	         || reconnectTarget[0] == '\0'
+	         || Q_stricmp( reconnectTarget, "localhost" ) == 0;
+
+	WiredUI_StateSetString( "ui_errorTitle", title ? title : "Error" );
+	WiredUI_StateSetString( "ui_errorRetry", hideRetry ? "0" : "1" );
+	// com_errorMessage is already set by the caller and is the text source
+	// for the dialog — no redundant state write (ED4 fix).
+
+	// Dedup: if error_popup is already on top, update state in place.
+	// Without this, a rapid error storm (e.g., repeated connect-fail retries)
+	// stacks N copies of error_popup — the user dismisses one and finds another.
+	if ( wired_menuStackDepth > 0
+	     && Q_stricmp( wired_menuStack[ wired_menuStackDepth - 1 ], "error_popup" ) == 0 ) {
+		// State keys already updated above — the visible dialog will re-read them.
+		return;
+	}
+
+	WiredUI_PushMenu( "error_popup" );
+}
+
 static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char *name ) {
 	int i;
 	if ( !menu || !name ) return NULL;
@@ -2900,22 +3911,7 @@ static int WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) 
 	for ( i = menu->itemCount - 1; i >= 0; i-- ) {
 		wiredItemDef_t *item = menu->items[i];
 		wiredRect_t absRect;
-		if ( !item->visible || item->decoration ) continue;
-
-		// skip cvarTest-hidden items (can't focus what you can't see)
-		if ( item->cvarTest[0] ) {
-			char cvBuf[256];
-			Cvar_VariableStringBuffer( item->cvarTest, cvBuf, sizeof( cvBuf ) );
-			int cvInt = atoi( cvBuf );
-			char cvIntStr[16];
-			Com_sprintf( cvIntStr, sizeof( cvIntStr ), "%d", cvInt );
-			if ( item->showCvar[0] ) {
-				if ( !strstr( item->showCvar, cvBuf ) && !strstr( item->showCvar, cvIntStr ) ) continue;
-			}
-			if ( item->hideCvar[0] ) {
-				if ( strstr( item->hideCvar, cvBuf ) || strstr( item->hideCvar, cvIntStr ) ) continue;
-			}
-		}
+		if ( !WiredUI_ItemCanFocus( item ) ) continue;
 		absRect.x = item->resolvedRect.x;
 		absRect.y = item->resolvedRect.y - sy;
 		absRect.w = item->resolvedRect.w;
@@ -2941,6 +3937,9 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 	int i;
 
 	if ( !wired_initialized ) return;
+
+	// notify attract scheduler — any key stops attract
+	if ( down ) WiredAttract_NoteInput( key );
 
 	menu = WiredUI_GetActiveMenu();
 
@@ -3044,7 +4043,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		char buff[1024];
 		int len;
 
-		Cvar_VariableStringBuffer( wired_editItem->cvar, buff, sizeof( buff ) );
+			WiredUI_StateGetString( wired_editItem->cvar, buff, sizeof( buff ) );
 		len = strlen( buff );
 
 		if ( key & K_CHAR_FLAG ) {
@@ -3057,7 +4056,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					memmove( &buff[wired_editCursorPos - 1], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
 					wired_editCursorPos--;
 				}
-				Cvar_Set( wired_editItem->cvar, buff );
+				WiredUI_StateSetString( wired_editItem->cvar, buff );
 			} else if ( ch == 'a' - 'a' + 1 ) {
 				// ctrl-a = home
 				wired_editCursorPos = 0;
@@ -3076,7 +4075,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 						memmove( &buff[wired_editCursorPos + pasteLen], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
 						Com_Memcpy( &buff[wired_editCursorPos], cbd, pasteLen );
 						wired_editCursorPos += pasteLen;
-						Cvar_Set( wired_editItem->cvar, buff );
+						WiredUI_StateSetString( wired_editItem->cvar, buff );
 					}
 					Z_Free( cbd );
 				}
@@ -3089,7 +4088,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					memmove( &buff[wired_editCursorPos + 1], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
 					buff[wired_editCursorPos] = ch;
 					wired_editCursorPos++;
-					Cvar_Set( wired_editItem->cvar, buff );
+					WiredUI_StateSetString( wired_editItem->cvar, buff );
 				}
 			}
 			return;
@@ -3122,11 +4121,11 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					while ( pos > 0 && buff[pos - 1] != ' ' ) pos--;
 					memmove( &buff[pos], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
 					wired_editCursorPos = pos;
-					Cvar_Set( wired_editItem->cvar, buff );
+					WiredUI_StateSetString( wired_editItem->cvar, buff );
 				} else if ( wired_editCursorPos > 0 ) {
 					memmove( &buff[wired_editCursorPos - 1], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
 					wired_editCursorPos--;
-					Cvar_Set( wired_editItem->cvar, buff );
+					WiredUI_StateSetString( wired_editItem->cvar, buff );
 				}
 				return;
 
@@ -3134,7 +4133,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			case K_KP_DEL:
 				if ( wired_editCursorPos < len ) {
 					memmove( &buff[wired_editCursorPos], &buff[wired_editCursorPos + 1], len - wired_editCursorPos );
-					Cvar_Set( wired_editItem->cvar, buff );
+					WiredUI_StateSetString( wired_editItem->cvar, buff );
 				}
 				return;
 
@@ -3202,6 +4201,9 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 	if ( wired_focusItem >= 0 && wired_focusItem < menu->itemCount ) {
 		focusedItem = menu->items[wired_focusItem];
+		if ( !WiredUI_ItemCanFocus( focusedItem ) ) {
+			focusedItem = NULL;
+		}
 	}
 
 	// slider drag: release mouse button ends drag
@@ -3265,7 +4267,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				char buf[256];
 				wired_editingField = qtrue;
 				wired_editItem = focusedItem;
-				Cvar_VariableStringBuffer( focusedItem->cvar, buf, sizeof( buf ) );
+				WiredUI_StateGetString( focusedItem->cvar, buf, sizeof( buf ) );
 				wired_editCursorPos = strlen( buf );
 				wired_editPaintOffset = 0;
 				break;
@@ -3314,12 +4316,12 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			// cvar-bound items: handle interaction based on type
 			if ( focusedItem->cvar[0] ) {
 				char cvarBuf[256];
-				Cvar_VariableStringBuffer( focusedItem->cvar, cvarBuf, sizeof( cvarBuf ) );
+				WiredUI_StateGetString( focusedItem->cvar, cvarBuf, sizeof( cvarBuf ) );
 
 					switch ( focusedItem->type ) {
 					case ITEM_TYPE_YESNO:
 						// toggle 0 <-> 1
-						Cvar_Set( focusedItem->cvar, atof( cvarBuf ) != 0 ? "0" : "1" );
+					WiredUI_StateSetString( focusedItem->cvar, atof( cvarBuf ) != 0 ? "0" : "1" );
 						break;
 
 					case ITEM_TYPE_MULTI:
@@ -3337,7 +4339,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 							char curBuf[256];
 							WiredUI_GetMultiOptions( focusedItem, &opts );
 							if ( opts.count > 0 ) {
-								Cvar_VariableStringBuffer( focusedItem->cvar, curBuf, sizeof( curBuf ) );
+							WiredUI_StateGetString( focusedItem->cvar, curBuf, sizeof( curBuf ) );
 								wired_multiDropdownOpen = qtrue;
 								wired_multiDropdownItem = focusedItem;
 								wired_multiDropdownHover = WiredUI_FindMultiOptionIndex( focusedItem, &opts, curBuf );
@@ -3363,7 +4365,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 								float frac = ( wired_cursorX - barX ) / barW;
 								if ( frac < 0 ) frac = 0;
 								if ( frac > 1 ) frac = 1;
-								Cvar_Set( focusedItem->cvar, va( "%g", focusedItem->sliderData.minVal + frac * range ) );
+							WiredUI_StateSetString( focusedItem->cvar, va( "%g", focusedItem->sliderData.minVal + frac * range ) );
 							}
 						} else {
 							// right-click / enter / kp_enter: step value
@@ -3374,7 +4376,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 							val += step;
 							if ( val < focusedItem->sliderData.minVal ) val = focusedItem->sliderData.minVal;
 							if ( val > focusedItem->sliderData.maxVal ) val = focusedItem->sliderData.maxVal;
-							Cvar_Set( focusedItem->cvar, va( "%g", val ) );
+							WiredUI_StateSetString( focusedItem->cvar, va( "%g", val ) );
 						}
 						break;
 
@@ -3442,7 +4444,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			if ( focusedItem && focusedItem->cvar[0] ) {
 				char cvarBuf[256];
 				int dir = ( key == K_LEFTARROW || key == K_KP_LEFTARROW ) ? -1 : 1;
-				Cvar_VariableStringBuffer( focusedItem->cvar, cvarBuf, sizeof( cvarBuf ) );
+				WiredUI_StateGetString( focusedItem->cvar, cvarBuf, sizeof( cvarBuf ) );
 
 				if ( focusedItem->type == ITEM_TYPE_SLIDER ) {
 					float val = atof( cvarBuf );
@@ -3451,7 +4453,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					val += step * dir;
 					if ( val < focusedItem->sliderData.minVal ) val = focusedItem->sliderData.minVal;
 					if ( val > focusedItem->sliderData.maxVal ) val = focusedItem->sliderData.maxVal;
-					Cvar_Set( focusedItem->cvar, va( "%g", val ) );
+					WiredUI_StateSetString( focusedItem->cvar, va( "%g", val ) );
 				}
 				else if ( focusedItem->type == ITEM_TYPE_MULTI ) {
 					wiredMultiOptions_t opts;
@@ -3470,7 +4472,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					}
 				}
 				else if ( focusedItem->type == ITEM_TYPE_YESNO ) {
-					Cvar_Set( focusedItem->cvar, atof( cvarBuf ) != 0 ? "0" : "1" );
+					WiredUI_StateSetString( focusedItem->cvar, atof( cvarBuf ) != 0 ? "0" : "1" );
 				}
 			}
 			break;
@@ -3481,7 +4483,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				int start = ( wired_focusItem > 0 ) ? wired_focusItem - 1 : menu->itemCount - 1;
 				for ( i = 0; i < menu->itemCount; i++ ) {
 					int idx = ( start - i + menu->itemCount ) % menu->itemCount;
-					if ( menu->items[idx]->visible && !menu->items[idx]->decoration ) {
+					if ( WiredUI_ItemCanFocus( menu->items[idx] ) ) {
 						wired_focusItem = idx;
 						wired_focusFromMouse = qfalse;
 						if ( wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
@@ -3498,7 +4500,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				int start = wired_focusItem + 1;
 				for ( i = 0; i < menu->itemCount; i++ ) {
 					int idx = ( start + i ) % menu->itemCount;
-					if ( menu->items[idx]->visible && !menu->items[idx]->decoration ) {
+					if ( WiredUI_ItemCanFocus( menu->items[idx] ) ) {
 						wired_focusItem = idx;
 						wired_focusFromMouse = qfalse;
 						if ( wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
@@ -3519,6 +4521,9 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 	int oldFocus, newFocus;
 
 	if ( !wired_initialized ) return;
+
+	// notify attract scheduler — significant mouse movement stops attract
+	WiredAttract_NoteMouse( dx, dy );
 
 	// accumulate deltas into cursor position (real screen pixels)
 	wired_cursorX += dx;
@@ -3542,7 +4547,7 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 				float frac = ( wired_cursorX - barX ) / barW;
 				if ( frac < 0 ) frac = 0;
 				if ( frac > 1 ) frac = 1;
-				Cvar_Set( wired_sliderDragItem->cvar,
+				WiredUI_StateSetString( wired_sliderDragItem->cvar,
 					va( "%g", wired_sliderDragItem->sliderData.minVal + frac * range ) );
 			}
 		}
@@ -3576,6 +4581,9 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 
 	oldFocus = wired_focusItem;
 	newFocus = WiredUI_FindItemAtCursor( menu, wired_cursorX, wired_cursorY );
+	if ( newFocus >= 0 && newFocus < menu->itemCount && !WiredUI_ItemCanFocus( menu->items[newFocus] ) ) {
+		newFocus = -1;
+	}
 
 	// any mouse movement reactivates mouse-based focus
 	wired_focusFromMouse = ( newFocus >= 0 );
@@ -3638,7 +4646,7 @@ void WiredUI_SetActiveMenu( int menu ) {
 			Cvar_Set( "cl_paused", "1" );
 		}
 
-		// re-register all assets — Hunk_Clear on map load invalidates handles
+		// re-register all assets — Hunk_ClearLevel on map load invalidates handles
 		WiredUI_RegisterAssets();
 
 		Com_DPrintf( "WiredUI: SetActiveMenu %d\n", menu );
@@ -3656,15 +4664,6 @@ qboolean WiredUI_IsFullscreen( void ) {
 	// main menu is always "fullscreen" for the engine — prevents 3D scene rendering
 	// at CA_DISCONNECTED. Wired UI draws its own background (clouds) in Refresh.
 	return ( wired_activeMenu == UIMENU_MAIN );
-}
-
-qboolean WiredUI_ConsoleCommand( int realtime ) {
-	if ( !wired_initialized ) {
-		return qfalse;
-	}
-
-	// TODO Phase 2: handle UI console commands
-	return qfalse;
 }
 
 void WiredUI_DrawConnectScreen( qboolean overlay ) {
@@ -3745,9 +4744,9 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 	Text_Draw( status, 200, (float)y, FONT_UI, 8, dim, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
 	y += 16;
 
-	// server error message
+	// server error message — use WCOLOR_ERROR values for consistency with error_popup.wmenu
 	if ( clc.serverMessage[0] ) {
-		vec4_t errColor = { 1, 0.4f, 0.4f, 1 };
+		vec4_t errColor = { 1, 0.45f, 0.35f, 1 };
 		Text_Draw( clc.serverMessage, 200, (float)y, FONT_UI, 8, errColor, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
 		y += 16;
 	}
@@ -3765,6 +4764,7 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 
 void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 	int i;
+	float menuAlpha = 1.0f;
 
 	if ( !menu ) return;
 
@@ -3777,66 +4777,21 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 	float menuW = menu->resolvedRect.w;
 	float menuH = menu->resolvedRect.h;
 
-	// render background (skip when height=0 — scoreboard draws its own bg)
-	if ( menuH > 0 ) {
-		float bgX = menuX;
-		float bgY = menuY;
-		float bgW = menuW;
-		float bgH = menuH;
+	if ( menu->fadeAlpha > 0.0f && menu->fadeAlpha <= 1.0f ) {
+		menuAlpha = menu->fadeAlpha;
+	}
 
-		if ( menu->style == WINDOW_STYLE_SHADER && menu->background[0] ) {
-			qhandle_t bgShader = re.RegisterShaderNoMip( menu->background );
-			if ( bgShader ) {
-				re.SetColor( NULL );
-				WUI_DrawPic( bgX, bgY, bgW, bgH, bgShader );
-			}
-		} else if ( menu->style == WINDOW_STYLE_GRADIENT && menu->backcolor[3] > 0.0f ) {
-			WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
-			if ( wired_gradientBarShader ) {
-				vec4_t gc;
-				Vector4Copy( menu->backcolor, gc );
-				gc[3] *= 0.5f;
-				re.SetColor( gc );
-				WUI_DrawPic( bgX, bgY, bgW, bgH, wired_gradientBarShader );
-				re.SetColor( NULL );
-			}
-		} else if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f ) {
-			WUI_FillRect( bgX, bgY, bgW, bgH, menu->backcolor );
-		}
+	if ( menuH > 0 ) {
+		WiredUI_DrawMenuBackground( menu, menuX, menuY, menuW, menuH, menuAlpha );
+		WiredUI_DrawWindowBorder( menuX, menuY, menuW, menuH,
+			menu->border, menu->bordersize, menu->bordercolor, menuAlpha );
 	}
 
 	// render items
 	for ( i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
 
-		if ( !item->visible ) continue;
-
-		/* showbind/hidebind: store-based visibility */
-		if ( item->showBind[0] ) {
-			wuiStoreEntry_t *vis = WiredStore_Get( item->showBind );
-			if ( !vis || ( !vis->text[0] && vis->value == 0.0f ) ) {
-				continue;
-			}
-		}
-		if ( item->hideBind[0] ) {
-			wuiStoreEntry_t *vis = WiredStore_Get( item->hideBind );
-			if ( vis && ( vis->text[0] || vis->value != 0.0f ) ) {
-				continue;
-			}
-		}
-
-		// cvarTest + showCvar/hideCvar conditional visibility
-		if ( item->cvarTest[0] ) {
-			char testBuf[256];
-			Cvar_VariableStringBuffer( item->cvarTest, testBuf, sizeof( testBuf ) );
-
-			if ( item->showCvar[0] ) {
-				if ( !strstr( item->showCvar, testBuf ) ) continue;
-			}
-			if ( item->hideCvar[0] ) {
-				if ( strstr( item->hideCvar, testBuf ) ) continue;
-			}
-		}
+		if ( !WiredUI_ItemShouldRender( item ) ) continue;
 
 		float itemX = item->resolvedRect.x;
 		float itemY = item->resolvedRect.y;
@@ -3846,16 +4801,16 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 		// clip items outside menu bounds (when height=0, meaning auto-size)
 		if ( menuH > 0 && ( itemY + itemH < menuY || itemY > menuY + menuH ) ) continue;
 
-		// draw item background
-		if ( item->style == WINDOW_STYLE_SHADER && item->background[0] ) {
-			qhandle_t itemBg = re.RegisterShaderNoMip( item->background );
-			if ( itemBg ) {
-				re.SetColor( NULL );
-				WUI_DrawPic( itemX, itemY, itemW, itemH, itemBg );
-			}
-		} else if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
-			WUI_FillRect( itemX, itemY, itemW, itemH, item->backcolor );
+		if ( item->type == ITEM_TYPE_MODEL ) {
+			WiredUI_DrawModelItem( item, itemX, itemY, itemW, itemH );
+			WiredUI_DrawWindowBorder( itemX, itemY, itemW, itemH,
+				item->border, item->bordersize, item->bordercolor, menuAlpha );
+			continue;
 		}
+
+		WiredUI_DrawItemBackground( item, itemX, itemY, itemW, itemH, menuAlpha );
+		WiredUI_DrawWindowBorder( itemX, itemY, itemW, itemH,
+			item->border, item->bordersize, item->bordercolor, menuAlpha );
 
 		/* bindicon: draw store-bound icon overlay */
 		{
@@ -3979,7 +4934,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 			if ( item->text[0] ) {
 				drawText = item->text;
 			} else if ( item->cvar[0] && item->type == ITEM_TYPE_TEXT ) {
-				Cvar_VariableStringBuffer( item->cvar, cvarBuf, sizeof( cvarBuf ) );
+				WiredUI_StateGetString( item->cvar, cvarBuf, sizeof( cvarBuf ) );
 				if ( cvarBuf[0] ) drawText = cvarBuf;
 			}
 
@@ -4018,6 +4973,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 			if ( drawText ) {
 				float charW, charH;
 				int alignment = TEXT_ALIGN_LEFT;
+				int flags = TEXT_DROPSHADOW;
 
 				/* textscale maps to charW/charH (same mapping as main menu renderer) */
 				charW = item->textscale >= 0.7f ? 16.0f : ( item->textscale >= 0.3f ? 10.0f : 8.0f );
@@ -4027,6 +4983,14 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 					alignment = TEXT_ALIGN_CENTER;
 				} else if ( item->textalign == ITEM_ALIGN_RIGHT ) {
 					alignment = TEXT_ALIGN_RIGHT;
+				}
+
+				if ( item->textstyle == ITEM_TEXTSTYLE_SHADOWEDMORE ) {
+					flags = TEXT_DROPSHADOW;
+				} else if ( item->textstyle == ITEM_TEXTSTYLE_SHADOWED ) {
+					flags = TEXT_DROPSHADOW;
+				} else if ( item->textstyle == ITEM_TEXTSTYLE_NORMAL ) {
+					flags = 0;
 				}
 
 				/* position: centered items use widget midpoint, others use left edge */
@@ -4041,23 +5005,27 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 					}
 					y = itemY + item->textaligny;
 
-					Text_Draw( drawText, x, y, FONT_DISPLAY,
-						charH, overlayDrawColor, alignment, TEXT_DROPSHADOW );
-				}
+				Text_SetLetterSpacing( item->letterSpacing );
+				Text_Draw( drawText, x, y, FONT_DISPLAY,
+					charH, overlayDrawColor, alignment, flags );
+				Text_SetLetterSpacing( 0.0f );
 			}
+		}
 		}
 	}
 }
 
 void WiredUI_ReloadHud( void ) {
-	const char *manifest = WiredUI_GetManifestPath();
-	Com_Printf( "WiredUI: reloading HUD from '%s'...\n", manifest );
+	Com_Printf( "WiredUI: reloading HUD...\n" );
 
 	// destroy all active elements (frees Z_Malloc'd contexts)
 	WiredHud_DestroyAllElements();
 
 	// two-phase safe reload
-	WiredUI_SafeReload( manifest );
+	WiredUI_SafeReload();
+
+	// notify attract scheduler that the pool was rebuilt
+	WiredAttract_OnMenuReload();
 
 	// recreate HUD elements from hudOverlay menus
 	WiredHud_LoadFromMenus();
@@ -4066,14 +5034,7 @@ void WiredUI_ReloadHud( void ) {
 }
 
 void WiredUI_ReloadMenus( void ) {
-	const char *manifest = WiredUI_GetManifestPath();
-	char theme[64];
-	Cvar_VariableStringBuffer( "ui_theme", theme, sizeof( theme ) );
-
-	Com_Printf( "WiredUI: reloading menus%s%s%s...\n",
-		theme[0] ? " (theme: " : "",
-		theme[0] ? theme : "",
-		theme[0] ? ")" : "" );
+	Com_Printf( "WiredUI: reloading menus...\n" );
 
 	// stop all cinematics before reload
 	{
@@ -4101,14 +5062,13 @@ void WiredUI_ReloadMenus( void ) {
 	WiredHud_DestroyAllElements();
 
 	// two-phase safe reload: parse new → swap, or keep old on failure
-	if ( WiredUI_SafeReload( manifest ) ) {
-		if ( theme[0] ) {
-			Com_Printf( "Theme switched to '%s'. Menus reloaded.\n", theme );
-		} else {
-			Com_Printf( "Menus reloaded successfully.\n" );
-		}
+	if ( WiredUI_SafeReload() ) {
+		Com_Printf( "Menus reloaded successfully.\n" );
 	}
 	// on failure, SafeReload already restored old menus + printed error
+
+	// notify attract scheduler that the pool was rebuilt
+	WiredAttract_OnMenuReload();
 
 	// recreate HUD elements from (possibly new) hudOverlay menus
 	WiredHud_LoadFromMenus();
@@ -4132,14 +5092,6 @@ void CL_ShutdownUI( void ) {
 	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 	cls.uiStarted = qfalse;
 	WiredUI_Shutdown();
-}
-
-qboolean UI_GameCommand( void ) {
-	return WiredUI_ConsoleCommand( cls.realtime );
-}
-
-qboolean UI_usesUniqueCDKey( void ) {
-	return qfalse;
 }
 
 #endif // FEAT_WIRED_UI

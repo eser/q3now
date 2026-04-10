@@ -18,7 +18,7 @@ ASSETS_DIR="${Q3_BASEPATH:-/Users/eser/q3now/old-q3}"
 
 if [ ! -f "$BINARY" ]; then
     echo "ERROR: Binary not found at $BINARY"
-    echo "Build first: cd build/quic-test && cmake ../.. -DUSE_QUIC=ON -DUSE_QUIC_OBSERVE=ON -DUSE_QUIC_CONTROL=ON -DUSE_QUIC_HTTP=ON -DUSE_WASM=OFF && make -j$(sysctl -n hw.ncpu)"
+    echo "Build first: cd build/quic-test && cmake ../.. -DUSE_WASM=OFF && make -j$(sysctl -n hw.ncpu)"
     exit 1
 fi
 

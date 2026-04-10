@@ -199,6 +199,7 @@ typedef struct bot_state_s
 	int setupcount;									//true when the bot has just been setup
 	int map_restart;									//true when the map is being restarted
 	int entergamechat;								//true when the bot used an enter game chat
+	qboolean luaCharacterActive;						// true when character comes from BOTLUA path
 	int num_deaths;									//number of time this bot died
 	int num_kills;									//number of kills of this bot
 	int revenge_enemy;								//the revenge enemy
@@ -207,6 +208,7 @@ typedef struct bot_state_s
 	int lasthitcount;								//number of hits last frame
 	int chatto;										//chat to all or team
 	float walker;									//walker charactertic
+	float luaSkillNormalized;
 	float ltime;									//local bot time
 	float entergame_time;							//time the bot entered the game
 	float ltg_time;									//long term goal time

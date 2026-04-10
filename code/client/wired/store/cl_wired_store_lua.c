@@ -2,8 +2,9 @@
 #include "../../../qcommon/qcommon.h"
 #include "../../../qcommon/scripting/wired_scripting.h"
 #include "cl_wired_store.h"
+#include "../ui/cl_wired_ui.h"
 
-#if FEAT_LUA && FEAT_WIRED_UI
+#if FEAT_WIRED_UI
 
 #include <lua.h>
 #include <lualib.h>
@@ -120,22 +121,35 @@ static int WiredStoreLua_Pairs( lua_State *L ) {
 	return 1;
 }
 
+static int WiredStoreLua_SaveState( lua_State *L ) {
+	WiredUI_SaveState();
+	return 0;
+}
+
+static int WiredStoreLua_LoadState( lua_State *L ) {
+	WiredUI_LoadState();
+	return 0;
+}
+
 static const luaL_Reg wiredStoreLib[] = {
 	{ "get",      WiredStoreLua_Get },
 	{ "set",      WiredStoreLua_Set },
 	{ "getvalue", WiredStoreLua_GetValue },
 	{ "getcolor", WiredStoreLua_GetColor },
 	{ "pairs",    WiredStoreLua_Pairs },
+	{ "savestate", WiredStoreLua_SaveState },
+	{ "loadstate", WiredStoreLua_LoadState },
 	{ NULL, NULL }
 };
 
 static void WiredStoreLua_Register( lua_State *L ) {
 	luaL_newlib( L, wiredStoreLib );
 	lua_setglobal( L, "store" );
+	Com_Printf( "WiredScript: store module registered\n" );
 }
 
 void WiredStoreLua_Init( void ) {
 	WiredScript_RegisterBindings( WiredStoreLua_Register );
 }
 
-#endif /* FEAT_LUA && FEAT_WIRED_UI */
+#endif /* FEAT_WIRED_UI */

@@ -25,6 +25,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "snd_codec.h"
 #include "snd_local.h"
 #include "snd_public.h"
+#include "../qcommon/arena.h"
+
+/* ---- Audio_Arena (Step 3.4) -----------------------------------------------
+   The audio subsystem uses static globals and backend-internal allocations,
+   not hunk memory.  Audio_Arena is a lifecycle-tracking arena: it is created
+   at S_Init time and destroyed at S_Shutdown (process exit only), making the
+   lifetime boundary explicit and visible in /meminfo.
+   --------------------------------------------------------------------------*/
+static arena_t *s_audioArena = NULL;
+#define AUDIO_ARENA_SIZE 4096  /* header only — no subsystem data in bump pool */
 
 cvar_t *s_volume;
 cvar_t *s_musicVolume;
@@ -446,6 +456,10 @@ void S_Init( void )
 	cvar_t		*cv;
 	qboolean	started = qfalse;
 
+	if ( !s_audioArena ) {
+		s_audioArena = Arena_Create( "Audio", AUDIO_ARENA_SIZE );
+	}
+
 	Com_Printf( "------ Initializing Sound ------\n" );
 
 	s_volume = Cvar_Get( "s_volume", "0.8", CVAR_ARCHIVE );
@@ -533,6 +547,11 @@ void S_Shutdown( void )
 	Cmd_RemoveCommand( "s_info" );
 
 	S_CodecShutdown();
+
+	if ( s_audioArena ) {
+		Arena_Destroy( s_audioArena );
+		s_audioArena = NULL;
+	}
 
 	cls.soundStarted = qfalse;
 }

@@ -140,8 +140,8 @@ void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius )
 	bs->aware[bs->num_aware].visual = qfalse;
 	bs->num_aware++;
 
-#if FEAT_QUIC_OBSERVE
-	trap_QUIC_EmitBotEvent( bs->entitynum, "aware", entnum, (int)dist, bs->origin );
+#if FEAT_WIREDNET_OBSERVE
+	trap_WiredNet_EmitBotEvent( bs->entitynum, "aware", entnum, (int)dist, bs->origin );
 #endif
 }
 

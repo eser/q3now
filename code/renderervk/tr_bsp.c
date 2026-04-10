@@ -42,127 +42,6 @@ static	byte		*fileBase;
 
 static int	c_gridVerts;
 
-static void R_CopyBspLump( byte *dst, int lump, const bspFile_t *bsp ) {
-	switch ( lump ) {
-	case LUMP_ENTITIES:
-		Com_Memcpy( dst, bsp->entityString, bsp->entityStringLength );
-		break;
-	case LUMP_SHADERS:
-		Com_Memcpy( dst, bsp->shaders, bsp->numShaders * sizeof( dshader_t ) );
-		break;
-	case LUMP_PLANES:
-		Com_Memcpy( dst, bsp->planes, bsp->numPlanes * sizeof( dplane_t ) );
-		break;
-	case LUMP_NODES:
-		Com_Memcpy( dst, bsp->nodes, bsp->numNodes * sizeof( dnode_t ) );
-		break;
-	case LUMP_LEAFS:
-		Com_Memcpy( dst, bsp->leafs, bsp->numLeafs * sizeof( dleaf_t ) );
-		break;
-	case LUMP_LEAFSURFACES:
-		Com_Memcpy( dst, bsp->leafSurfaces, bsp->numLeafSurfaces * sizeof( int ) );
-		break;
-	case LUMP_LEAFBRUSHES:
-		Com_Memcpy( dst, bsp->leafBrushes, bsp->numLeafBrushes * sizeof( int ) );
-		break;
-	case LUMP_MODELS:
-		Com_Memcpy( dst, bsp->subModels, bsp->numSubModels * sizeof( dmodel_t ) );
-		break;
-	case LUMP_BRUSHES:
-		Com_Memcpy( dst, bsp->brushes, bsp->numBrushes * sizeof( dbrush_t ) );
-		break;
-	case LUMP_BRUSHSIDES:
-		Com_Memcpy( dst, bsp->brushSides, bsp->numBrushSides * sizeof( dbrushside_t ) );
-		break;
-	case LUMP_DRAWVERTS:
-		Com_Memcpy( dst, bsp->drawVerts, bsp->numDrawVerts * sizeof( drawVert_t ) );
-		break;
-	case LUMP_DRAWINDEXES:
-		Com_Memcpy( dst, bsp->drawIndexes, bsp->numDrawIndexes * sizeof( int ) );
-		break;
-	case LUMP_FOGS:
-		Com_Memcpy( dst, bsp->fogs, bsp->numFogs * sizeof( dfog_t ) );
-		break;
-	case LUMP_SURFACES:
-		Com_Memcpy( dst, bsp->surfaces, bsp->numSurfaces * sizeof( dsurface_t ) );
-		break;
-	case LUMP_LIGHTMAPS:
-		Com_Memcpy( dst, bsp->lightmapData, bsp->numLightmapPages * bsp->lightmapPageSize );
-		break;
-	case LUMP_LIGHTGRID:
-		Com_Memcpy( dst, bsp->lightGridData, bsp->numGridPoints * 8 );
-		break;
-	case LUMP_VISIBILITY:
-		((int *)dst)[0] = bsp->numClusters;
-		((int *)dst)[1] = bsp->clusterBytes;
-		if ( bsp->visibilityLength > 0 ) {
-			Com_Memcpy( dst + VIS_HEADER, bsp->visibility, bsp->visibilityLength );
-		}
-		break;
-	default:
-		break;
-	}
-}
-
-static int R_BuildBspBuffer( const bspFile_t *bsp, void **bufferOut ) {
-	size_t lumpLens[HEADER_LUMPS];
-	size_t total;
-	byte *buffer;
-	dheader_t *header;
-	int i;
-	int ofs;
-
-	Com_Memset( lumpLens, 0, sizeof( lumpLens ) );
-
-	if ( bsp->entityStringLength > 0 ) lumpLens[LUMP_ENTITIES] = (size_t)bsp->entityStringLength;
-	if ( bsp->numShaders > 0 ) lumpLens[LUMP_SHADERS] = (size_t)bsp->numShaders * sizeof( dshader_t );
-	if ( bsp->numPlanes > 0 ) lumpLens[LUMP_PLANES] = (size_t)bsp->numPlanes * sizeof( dplane_t );
-	if ( bsp->numNodes > 0 ) lumpLens[LUMP_NODES] = (size_t)bsp->numNodes * sizeof( dnode_t );
-	if ( bsp->numLeafs > 0 ) lumpLens[LUMP_LEAFS] = (size_t)bsp->numLeafs * sizeof( dleaf_t );
-	if ( bsp->numLeafSurfaces > 0 ) lumpLens[LUMP_LEAFSURFACES] = (size_t)bsp->numLeafSurfaces * sizeof( int );
-	if ( bsp->numLeafBrushes > 0 ) lumpLens[LUMP_LEAFBRUSHES] = (size_t)bsp->numLeafBrushes * sizeof( int );
-	if ( bsp->numSubModels > 0 ) lumpLens[LUMP_MODELS] = (size_t)bsp->numSubModels * sizeof( dmodel_t );
-	if ( bsp->numBrushes > 0 ) lumpLens[LUMP_BRUSHES] = (size_t)bsp->numBrushes * sizeof( dbrush_t );
-	if ( bsp->numBrushSides > 0 ) lumpLens[LUMP_BRUSHSIDES] = (size_t)bsp->numBrushSides * sizeof( dbrushside_t );
-	if ( bsp->numDrawVerts > 0 ) lumpLens[LUMP_DRAWVERTS] = (size_t)bsp->numDrawVerts * sizeof( drawVert_t );
-	if ( bsp->numDrawIndexes > 0 ) lumpLens[LUMP_DRAWINDEXES] = (size_t)bsp->numDrawIndexes * sizeof( int );
-	if ( bsp->numFogs > 0 ) lumpLens[LUMP_FOGS] = (size_t)bsp->numFogs * sizeof( dfog_t );
-	if ( bsp->numSurfaces > 0 ) lumpLens[LUMP_SURFACES] = (size_t)bsp->numSurfaces * sizeof( dsurface_t );
-	if ( bsp->numLightmapPages > 0 && bsp->lightmapPageSize > 0 ) lumpLens[LUMP_LIGHTMAPS] = (size_t)bsp->numLightmapPages * (size_t)bsp->lightmapPageSize;
-	if ( bsp->numGridPoints > 0 ) lumpLens[LUMP_LIGHTGRID] = (size_t)bsp->numGridPoints * 8;
-	if ( bsp->visibilityLength > 0 ) lumpLens[LUMP_VISIBILITY] = (size_t)VIS_HEADER + (size_t)bsp->visibilityLength;
-
-	total = sizeof( dheader_t );
-	for ( i = 0; i < HEADER_LUMPS; i++ ) {
-		if ( lumpLens[i] > (size_t)INT_MAX || total > (size_t)INT_MAX - lumpLens[i] ) {
-			return -1;
-		}
-		total += lumpLens[i];
-	}
-
-	buffer = ri.Malloc( (int)total );
-	if ( !buffer ) {
-		return -1;
-	}
-
-	Com_Memset( buffer, 0, total );
-	header = (dheader_t *)buffer;
-	header->ident = bsp->ident;
-	header->version = bsp->version;
-
-	ofs = sizeof( dheader_t );
-	for ( i = 0; i < HEADER_LUMPS; i++ ) {
-		header->lumps[i].fileofs = ofs;
-		header->lumps[i].filelen = (int)lumpLens[i];
-		if ( lumpLens[i] ) {
-			R_CopyBspLump( buffer + ofs, i, bsp );
-			ofs += (int)lumpLens[i];
-		}
-	}
-
-	*bufferOut = buffer;
-	return (int)total;
-}
 
 //===============================================================================
 
@@ -2548,10 +2427,10 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 
 	tr.worldMapLoaded = qtrue;
 
-	// build a transient raw BSP view so existing lump loaders can consume it
-	size = R_BuildBspBuffer( bsp, &buffer.v );
-	if ( size <= 0 || !buffer.b ) {
-		ri.Error( ERR_DROP, "%s: couldn't build BSP buffer for %s", __func__, name );
+	buffer.b = bsp->rawData;
+	size = bsp->rawLength;
+	if ( !buffer.b || size <= 0 ) {
+		ri.Error( ERR_DROP, "%s: %s has no raw BSP data", __func__, name );
 	}
 	if ( size < sizeof( dheader_t ) ) {
 		ri.Error( ERR_DROP, "%s: %s has truncated header", __func__, name );
@@ -2613,5 +2492,4 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	// only set tr.world now that we know the entire level has loaded properly
 	tr.world = &s_worldData;
 
-	ri.Free( buffer.v );
 }

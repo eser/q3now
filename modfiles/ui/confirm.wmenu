@@ -1,6 +1,6 @@
 // confirm.wmenu - Wired UI generic confirmation dialog
 // Flex column layout -- vertical positioning handled by the layout engine.
-// Callers set ui_confirmText and ui_confirmAction cvars, then open this menu.
+// Callers set ui_confirmText and ui_confirmAction state keys, then open this menu.
 
 #include "ui/wmenumacros.h"
 
@@ -19,7 +19,7 @@ menuDef {
 	gap 0.01
 	justify center
 
-	// display text from ui_confirmText cvar
+	// display text from ui_confirmText state key
 	itemDef {
 		type 0
 		rect 0 0 1.0 0.042

@@ -1,0 +1,78 @@
+// error_popup.wmenu -- Wired UI network / engine error dialog
+// Three-button modal: Copy error / Retry / Back to menu.
+// Bound to com_errorMessage for message text; ui_errorTitle for the title.
+// Retry button visibility gated by ui_errorRetry state key (set by CL_WiredUI_ShowError).
+//
+// Note: NO outOfBoundsClick — an error dialog must be dismissed deliberately.
+// The user may need to read the error text before acting.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "error_popup"
+	rect 0.25 0.35 0.5 0.30
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0 0 0 0.85
+	focuscolor 1 0.75 0 0.15
+	popup
+	layout column
+	padding 0.05
+	gap 0.01
+	justify center
+
+	// Title — red to signal an error (WCOLOR_ERROR)
+	itemDef {
+		type 0
+		rect 0 0 1.0 0.050
+		textalign 1
+		font "oxanium" WM_FONT_HEADING
+		forecolor WCOLOR_ERROR
+		cvar "ui_errorTitle"
+		decoration
+		visible 1
+		grow 0
+	}
+
+	// Message — bound directly to com_errorMessage (single source of truth; ED4 fix)
+	itemDef {
+		type 0
+		rect 0 0 1.0 0.080
+		textalign 1
+		font "oxanium" WM_FONT_BODY
+		forecolor WCOLOR_TEXT
+		cvar "com_errorMessage"
+		decoration
+		visible 1
+		grow 0
+	}
+
+	// Copy error to clipboard using the cvar: prefix so the handler
+	// reads com_errorMessage directly via Cvar_VariableString (B3 fix).
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Copy error",
+	        WM_FONT_BODY, clipboard cvar:com_errorMessage)
+
+	// Retry — gated by ui_errorRetry state key.
+	// Hidden when retryable == qfalse or last target was localhost (B6 fix).
+	itemDef {
+		rect 0 0 1.0 WM_BUTTON_H
+		type 1
+		text "Retry"
+		textalign 1
+		font "oxanium" WM_FONT_BODY
+		forecolor WCOLOR_ACCENT
+		visible 1
+		grow 0
+		cvarTest "ui_errorRetry"
+		showCvar { "1" }
+		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }
+		mouseExit  { setcolor forecolor WCOLOR_ACCENT }
+		action { exec reconnect ; close }
+	}
+
+	// Back to menu — always visible; mapped to disconnect which already
+	// transitions to UIMENU_MAIN.
+	WBUTTON(0, 0, 1.0, WM_BUTTON_H, "Back to menu",
+	        WM_FONT_BODY, exec disconnect ; close)
+}

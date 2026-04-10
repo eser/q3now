@@ -49,6 +49,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
 #include "ai_vcmd.h"
+#include "g_bot_lua.h"
 
 //
 #include "chars.h"
@@ -219,6 +220,11 @@ void QDECL BotAI_BotInitialChat( bot_state_t *bs, char *type, ... ) {
 	va_list	ap;
 	char	*p;
 	char	*vars[MAX_MATCHVARIABLES];
+
+	// Lua bots use event-driven Lua chat functions; skip legacy template pipeline entirely
+	if ( bs->luaCharacterActive ) {
+		return;
+	}
 
 	memset(vars, 0, sizeof(vars));
 	va_start(ap, type);
@@ -765,8 +771,8 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 	if (bs->ideal_viewangles[PITCH] > 180) bs->ideal_viewangles[PITCH] -= 360;
 	//
 	if (bs->enemy >= 0) {
-		factor = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_VIEW_FACTOR, 0.01f, 1);
-		maxchange = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_VIEW_MAXCHANGE, 1, 1800);
+		factor = Com_Clamp( 0.01f, 1.0f, BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_TRACKING, 0.5f ) );
+		maxchange = 240.0f + 1560.0f * BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
 	}
 	else {
 		factor = 0.05f;
@@ -1238,9 +1244,7 @@ BotAISetupClient
 ==============
 */
 int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean restart) {
-	char filename[144], name[144];
 	bot_state_t *bs;
-	int errnum;
 
 	if (!botstates[client]) botstates[client] = G_Alloc(sizeof(bot_state_t));
 	bs = botstates[client];
@@ -1265,37 +1269,41 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 		BotAI_Print(PRT_FATAL, "couldn't load skill %f from %s\n", settings->skill, settings->characterfile);
 		return qfalse;
 	}
+	bs->luaCharacterActive = (bs->character < 0) ? qtrue : qfalse;
+	if ( !bs->luaCharacterActive ) {
+		BotAI_Print(PRT_FATAL, "legacy bot character backend is disabled: %s\n", settings->characterfile);
+		trap_BotFreeCharacter( bs->character );
+		return qfalse;
+	}
+	bs->luaSkillNormalized = settings->skill;
+	if ( bs->luaSkillNormalized < 0.0f || bs->luaSkillNormalized > 1.0f ) {
+		bs->luaSkillNormalized = ( Com_Clamp( 1.0f, 5.0f, settings->skill ) - 1.0f ) / 4.0f;
+	}
+	if ( !trap_BotLuaBindBot( client, -bs->character ) ) {
+		trap_BotFreeCharacter( bs->character );
+		return qfalse;
+	}
 	//copy the settings
 	memcpy(&bs->settings, settings, sizeof(bot_settings_t));
 	//allocate a goal state
 	bs->gs = trap_BotAllocGoalState(client);
-	//load the item weights
-	trap_Characteristic_String(bs->character, CHARACTERISTIC_ITEMWEIGHTS, filename, sizeof(filename));
-	errnum = trap_BotLoadItemWeights(bs->gs, filename);
-	if (errnum != BLERR_NOERROR) {
-		trap_BotFreeGoalState(bs->gs);
+	if (!bs->gs) {
+		trap_BotFreeCharacter( bs->character );
 		return qfalse;
 	}
 	//allocate a weapon state
 	bs->ws = trap_BotAllocWeaponState();
-	//load the weapon weights
-	trap_Characteristic_String(bs->character, CHARACTERISTIC_WEAPONWEIGHTS, filename, sizeof(filename));
-	errnum = trap_BotLoadWeaponWeights(bs->ws, filename);
-	if (errnum != BLERR_NOERROR) {
+	if (!bs->ws) {
 		trap_BotFreeGoalState(bs->gs);
-		trap_BotFreeWeaponState(bs->ws);
+		trap_BotFreeCharacter( bs->character );
 		return qfalse;
 	}
 	//allocate a chat state
 	bs->cs = trap_BotAllocChatState();
-	//load the chat file
-	trap_Characteristic_String(bs->character, CHARACTERISTIC_CHAT_FILE, filename, sizeof(filename));
-	trap_Characteristic_String(bs->character, CHARACTERISTIC_CHAT_NAME, name, sizeof(name));
-	errnum = trap_BotLoadChatFile(bs->cs, filename, name);
-	if (errnum != BLERR_NOERROR) {
-		trap_BotFreeChatState(bs->cs);
+	if (!bs->cs) {
 		trap_BotFreeGoalState(bs->gs);
 		trap_BotFreeWeaponState(bs->ws);
+		trap_BotFreeCharacter( bs->character );
 		return qfalse;
 	}
 	//set the gender for reply chat gender-specific keys
@@ -1307,7 +1315,7 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 	bs->setupcount = 4;
 	bs->entergame_time = FloatTime();
 	bs->ms = trap_BotAllocMoveState();
-	bs->walker = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_WALKER, 0, 1);
+	bs->walker = 0.0f;
 	numbots++;
 
 	if (trap_Cvar_VariableIntegerValue("bot_testichat")) {
@@ -1346,7 +1354,7 @@ int BotAIShutdownClient(int client, qboolean restart) {
 		BotWriteSessionData(bs);
 	}
 
-	if (BotChat_ExitGame(bs)) {
+	if (!bs->luaCharacterActive && BotChat_ExitGame(bs)) {
 		trap_BotEnterChat(bs->cs, bs->client, CHAT_ALL);
 	}
 
@@ -1617,6 +1625,10 @@ int BotAIStartFrame(int time) {
 			botstates[i]->botthink_residual -= thinktime;
 
 			if (!trap_AAS_Initialized()) return qfalse;
+
+			if ( botstates[i]->luaCharacterActive ) {
+				trap_BotLuaBotThink( botstates[i]->client, (float)thinktime / 1000.0f );
+			}
 
 			if (g_entities[i].client->pers.connected == CON_CONNECTED) {
 				BotAI(i, (float) thinktime / 1000);

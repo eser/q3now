@@ -376,6 +376,7 @@ typedef struct {
 	int         voteTime, voteYes, voteNo;
 	qboolean    voteModified;
 	char        voteString[256];
+	char        killerName[MAX_QPATH];
 
 	// client info
 	struct {

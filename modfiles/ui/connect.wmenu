@@ -22,9 +22,24 @@ menuDef {
 		grow 1
 	}
 
-	WLABEL(0, 0, 1.0, 0.050, "Connecting...", 24, 1)
+	// "Connecting..." — hidden when com_errorMessage is set (CD1 fix:
+	// prevents two contradictory status lines when the error_popup.wmenu
+	// modal floats on top of this screen).
+	itemDef {
+		type 0
+		text "Connecting..."
+		rect 0 0 1.0 0.050
+		textalign 1
+		font "oxanium" 24
+		forecolor WCOLOR_TEXT
+		decoration
+		visible 1
+		grow 0
+		cvarTest "com_errorMessage"
+		showCvar { "" }
+	}
 
-	// dimmed "Please wait" label
+	// dimmed "Please wait" label — also hidden when error is set
 	itemDef {
 		type 0
 		text "Please wait"
@@ -35,6 +50,8 @@ menuDef {
 		decoration
 		visible 1
 		grow 0
+		cvarTest "com_errorMessage"
+		showCvar { "" }
 	}
 
 	itemDef {

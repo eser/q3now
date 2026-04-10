@@ -24,6 +24,17 @@ Feeders implemented:
 // forward declarations
 static int WiredFeeder_ServerSortCompare( const void *a, const void *b );
 
+#define WiredFeeder_StateSetString WiredUI_StateSetString
+#define WiredFeeder_StateSetInt WiredUI_StateSetInt
+#define WiredFeeder_StateGetString WiredUI_StateGetString
+
+static int WiredFeeder_StateGetInt( const char *key, int defaultValue ) {
+	char buf[64];
+	WiredUI_StateGetString( key, buf, sizeof( buf ) );
+	if ( !buf[0] ) return defaultValue;
+	return atoi( buf );
+}
+
 // ── server browser feeder ─────────────────────────────────────────────
 // Data source: cls.globalServers[], cls.localServers[], cls.favoriteServers[]
 // Controlled by ui_netSource cvar (0=local, 1-5=internet masters, 6=favorites)
@@ -35,7 +46,7 @@ static int  wired_serverDisplayCount = 0;
 
 // Map ui_netSource cvar (0=local, 1=internet, 6=favorites) to engine arrays
 static void WiredFeeder_GetServerList( serverInfo_t **servers, int *count ) {
-	int uiSource = Cvar_VariableIntegerValue( "ui_netSource" );
+	int uiSource = WiredFeeder_StateGetInt( "ui_netSource", 0 );
 
 	if ( uiSource == 0 ) {
 		*servers = cls.localServers;
@@ -62,10 +73,10 @@ static serverInfo_t *WiredFeeder_GetServerPtr( int index ) {
 static int wired_serverLastRawCount = 0;  // track raw count for rebuild detection
 
 static qboolean WiredFeeder_ServerPassesFilter( serverInfo_t *s ) {
-	int filterGameType = Cvar_VariableIntegerValue( "ui_browserGameType" );
-	int showFull      = Cvar_VariableIntegerValue( "ui_browserShowFull" );
-	int showEmpty     = Cvar_VariableIntegerValue( "ui_browserShowEmpty" );
-	int maxPing       = Cvar_VariableIntegerValue( "ui_browserMaxPing" );
+	int filterGameType = WiredFeeder_StateGetInt( "ui_browserGameType", 0 );
+	int showFull      = WiredFeeder_StateGetInt( "ui_browserShowFull", 1 );
+	int showEmpty     = WiredFeeder_StateGetInt( "ui_browserShowEmpty", 1 );
+	int maxPing       = WiredFeeder_StateGetInt( "ui_browserMaxPing", 0 );
 
 	// game type filter (0 = all)
 	if ( filterGameType > 0 && s->gameType != ( filterGameType - 1 ) ) return qfalse;
@@ -99,7 +110,7 @@ void WiredFeeder_RebuildServerDisplayList( void ) {
 	wired_serverLastRawCount = count;
 
 	// update status cvar for .menu display
-	Cvar_Set( "ui_browserStatus", va( "%d servers (%d total)", wired_serverDisplayCount, count ) );
+	WiredFeeder_StateSetString( "ui_browserStatus", va( "%d servers (%d total)", wired_serverDisplayCount, count ) );
 }
 
 static int WiredFeeder_ServerCount( int feederID ) {
@@ -211,15 +222,15 @@ void WiredFeeder_SortServers( int column ) {
 	}
 
 	// export sort state to cvars for menu sort-direction indicators
-	Cvar_Set( "ui_serverSortKey", va( "%d", wired_serverSortKey ) );
-	Cvar_Set( "ui_serverSortDir", va( "%d", wired_serverSortDir ) );
+	WiredFeeder_StateSetInt( "ui_serverSortKey", wired_serverSortKey );
+	WiredFeeder_StateSetInt( "ui_serverSortDir", wired_serverSortDir );
 
 	// set per-column indicator cvars (arrow for active column, empty for others)
 	{
 		const char *arrow = wired_serverSortDir ? "v" : "^";
 		int col;
 		for ( col = 0; col < 5; col++ ) {
-			Cvar_Set( va( "ui_sortInd%d", col ),
+			WiredFeeder_StateSetString( va( "ui_sortInd%d", col ),
 				( col == wired_serverSortKey ) ? arrow : "" );
 		}
 	}
@@ -233,10 +244,10 @@ static void WiredFeeder_ServerSelection( int feederID, int index ) {
 	wired_selectedServer = realIndex;
 	if ( s ) {
 		// store address in cvar so connect action can use it
-		Cvar_Set( "ui_selectedServerAddr", NET_AdrToStringwPort( &s->adr ) );
-		Cvar_Set( "ui_selectedServerName", s->hostName );
+		WiredFeeder_StateSetString( "ui_selectedServerAddr", NET_AdrToStringwPort( &s->adr ) );
+		WiredFeeder_StateSetString( "ui_selectedServerName", s->hostName );
 		// update map preview levelshot
-		Cvar_Set( "ui_mapLevelshot", va( "levelshots/%s", s->mapName ) );
+		WiredFeeder_StateSetString( "ui_mapLevelshot", va( "levelshots/%s", s->mapName ) );
 	}
 }
 
@@ -284,7 +295,7 @@ static int wired_selectedDemo = -1;
 static void WiredFeeder_DemoSelection( int feederID, int index ) {
 	wired_selectedDemo = index;
 	if ( index >= 0 && index < wired_demoCount ) {
-		Cvar_Set( "ui_selectedDemo", wired_demoList[index] );
+		WiredFeeder_StateSetString( "ui_selectedDemo", wired_demoList[index] );
 	}
 }
 
@@ -353,7 +364,7 @@ static int wired_selectedMod = -1;
 static void WiredFeeder_ModSelection( int feederID, int index ) {
 	wired_selectedMod = index;
 	if ( index >= 0 && index < wired_modCount ) {
-		Cvar_Set( "ui_selectedMod", wired_modList[index] );
+		WiredFeeder_StateSetString( "ui_selectedMod", wired_modList[index] );
 	}
 }
 
@@ -560,30 +571,29 @@ void WiredFeeder_LoadMaps( void ) {
 
 	// select first map by default and set levelshot
 	if ( wired_mapCount > 0 ) {
-		Cvar_Set( "ui_selectedMap", wired_maps[0].mapLoadName );
-		Cvar_Set( "ui_mapLevelshot", va( "levelshots/%s", wired_maps[0].mapLoadName ) );
-		Cvar_Set( "ui_currentNetMap", "0" );
+		WiredFeeder_StateSetString( "ui_selectedMap", wired_maps[0].mapLoadName );
+		WiredFeeder_StateSetString( "ui_mapLevelshot", va( "levelshots/%s", wired_maps[0].mapLoadName ) );
+		WiredFeeder_StateSetString( "ui_currentNetMap", "0" );
 	}
 
 	// ensure cvars are initialized
-	if ( !Cvar_VariableString( "ui_netGameType" )[0] ) {
-		Cvar_Set( "ui_netGameType", "0" );
+	if ( WiredFeeder_StateGetInt( "ui_netGameType", -1 ) < 0 ) {
+		WiredFeeder_StateSetString( "ui_netGameType", "0" );
 	}
 	if ( !Cvar_VariableString( "g_maprotation" )[0] ) {
 		Cvar_Set( "g_maprotation", "" );
 	}
-	Cvar_Set( "ui_mapPoolStatus", "Single map (no rotation)" );
-	Cvar_Set( "ui_mapPoolAction", "Add to Pool" );
-	Cvar_Set( "ui_favMapAction", "Favorite" );
-	// ensure ui_favoriteMaps exists (ARCHIVE so it persists)
-	Cvar_Get( "ui_favoriteMaps", "", CVAR_ARCHIVE );
+	WiredFeeder_StateSetString( "ui_mapPoolStatus", "Single map (no rotation)" );
+	WiredFeeder_StateSetString( "ui_mapPoolAction", "Add to Pool" );
+	WiredFeeder_StateSetString( "ui_favMapAction", "Favorite" );
+	WiredFeeder_StateSetString( "ui_favoriteMaps", "" );
 
 	Com_Printf( "WiredUI: %d maps loaded, %d arena files parsed\n", wired_mapCount, arenaCount );
 }
 
 static void WiredFeeder_FilterMaps( void ) {
 	int i;
-	int gameType = Cvar_VariableIntegerValue( "ui_netGameType" );
+	int gameType = WiredFeeder_StateGetInt( "ui_netGameType", 0 );
 	int typeBit = ( 1 << gameType );
 
 	wired_filteredMapCount = 0;
@@ -598,7 +608,7 @@ static int wired_lastFilterGameType = -1;
 
 static int WiredFeeder_MapCount( int feederID ) {
 	// only re-filter when game type changes (preserves sort order)
-	int gt = Cvar_VariableIntegerValue( "ui_netGameType" );
+	int gt = WiredFeeder_StateGetInt( "ui_netGameType", 0 );
 	if ( gt != wired_lastFilterGameType ) {
 		WiredFeeder_FilterMaps();
 		wired_lastFilterGameType = gt;
@@ -644,7 +654,7 @@ static const char *WiredFeeder_MapItemText( int feederID, int index, int column 
 		case 3: {
 			// favorite star
 			char favs[2048];
-			Cvar_VariableStringBuffer( "ui_favoriteMaps", favs, sizeof( favs ) );
+			WiredFeeder_StateGetString( "ui_favoriteMaps", favs, sizeof( favs ) );
 			if ( WiredFeeder_IsMapInList( favs, wired_maps[mapIdx].mapLoadName ) ) {
 				return "^3*";
 			}
@@ -660,11 +670,11 @@ static void WiredFeeder_MapSelection( int feederID, int index ) {
 	if ( index >= 0 && index < wired_filteredMapCount ) {
 		int mapIdx = wired_filteredMaps[index];
 		wired_selectedMap = mapIdx;
-		Cvar_Set( "ui_selectedMap", wired_maps[mapIdx].mapLoadName );
-		Cvar_Set( "ui_currentNetMap", va( "%d", mapIdx ) );
+		WiredFeeder_StateSetString( "ui_selectedMap", wired_maps[mapIdx].mapLoadName );
+		WiredFeeder_StateSetString( "ui_currentNetMap", va( "%d", mapIdx ) );
 
 		// set levelshot path for map preview (menu reads this cvar)
-		Cvar_Set( "ui_mapLevelshot", va( "levelshots/%s", wired_maps[mapIdx].mapLoadName ) );
+		WiredFeeder_StateSetString( "ui_mapLevelshot", va( "levelshots/%s", wired_maps[mapIdx].mapLoadName ) );
 
 		// update pool + favorite button states
 		{
@@ -714,7 +724,7 @@ static int WiredFeeder_MapSortByColumn( const void *a, const void *b ) {
 			// sort by favorite status (favorites first)
 			char favs[2048];
 			qboolean fa, fb;
-			Cvar_VariableStringBuffer( "ui_favoriteMaps", favs, sizeof( favs ) );
+			WiredFeeder_StateGetString( "ui_favoriteMaps", favs, sizeof( favs ) );
 			fa = WiredFeeder_IsMapInList( favs, wired_maps[ia].mapLoadName );
 			fb = WiredFeeder_IsMapInList( favs, wired_maps[ib].mapLoadName );
 			result = (int)fb - (int)fa;

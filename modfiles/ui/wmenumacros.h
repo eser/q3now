@@ -26,6 +26,8 @@
 #define WCOLOR_BG_HIGHLIGHT  0.1 0.1 0.1 0.9
 #define WCOLOR_SEPARATOR     0.3 0.3 0.3 0.5
 #define WCOLOR_SECTION       0.85 0.55 0.1 0.8
+#define WCOLOR_ERROR         1 0.45 0.35 1
+#define WCOLOR_ERROR_DIM     0.6 0.25 0.2 0.8
 
 // ── layout constants (normalized) ───────────────────────────────────
 // All heights are fractions of screen height (480 = 1.0).

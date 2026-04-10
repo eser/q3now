@@ -1780,21 +1780,20 @@ void BotFreeGoalState(int handle)
 //===========================================================================
 int BotSetupGoalAI(void)
 {
-	const char *filename;
-
 	//check if teamplay is on
 	g_gametype = LibVarValue("g_gametype", "0");
 	g_gametypeIsTeamGame = g_gametype >= GT_TDM; // BG_IsTeamGametype(g_gametype);
 	g_singlePlayer = LibVarValue("g_singlePlayer", "0");
 	//item configuration file
-	filename = LibVarString("itemconfig", "items.c");
-	//load the item configuration
-	itemconfig = LoadItemConfig(filename);
-	if (!itemconfig)
 	{
-		botimport.Print(PRT_FATAL, "couldn't load item config\n");
-		return BLERR_CANNOTLOADITEMCONFIG;
-	} //end if
+		const char *filename = LibVarString("itemconfig", "items.c");
+		itemconfig = LoadItemConfig(filename);
+		if (!itemconfig)
+		{
+			botimport.Print(PRT_FATAL, "couldn't load item config\n");
+			return BLERR_CANNOTLOADITEMCONFIG;
+		} //end if
+	}
 	//
 	droppedweight = LibVar("droppedweight", "1000");
 	//everything went ok

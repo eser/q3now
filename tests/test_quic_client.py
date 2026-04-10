@@ -194,7 +194,7 @@ async def test_datagrams(client: Q3QuicClient) -> bool:
 
     if not client.datagrams:
         info("No datagrams received (server may not be sending yet)")
-        return True  # not a failure — server needs QUIC_SendDatagrams implementation
+        return True  # not a failure — server needs WiredNet_SendDatagrams implementation
 
     ok(f"Received {len(client.datagrams)} datagrams")
     if msgpack:

@@ -24,9 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "server.h"
 #include "../qcommon/q_feats.h"
 
-#if FEAT_QUIC_TRANSPORT
-#include "../webtransport/wt_public.h"
-#endif
+#include "../wired/net/wn_public.h"
 
 #include "../botlib/botlib.h"
 
@@ -1030,66 +1028,64 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		VM_CHECKBOUNDS( gvm, args[1], args[2] );
 		return SV_GetValue( VMA(1), args[2], VMA(3) );
 
-#if FEAT_QUIC_OBSERVE
+#if FEAT_WIREDNET_OBSERVE
 	// ── QUIC event emission syscalls ────────────────────────────
 	// Game code (g_combat.c, g_items.c, g_cmds.c) calls these via
-	// trap_QUIC_Emit*() which triggers a VM syscall to this handler.
-	case G_QUIC_EMIT_KILL:
-		QUIC_EmitKill( args[1], args[2], args[3], VMA(4), VMA(5) );
+	// trap_WN_Emit*() which triggers a VM syscall to this handler.
+	case G_WIREDNET_EMIT_KILL:
+		WN_EmitKill( args[1], args[2], args[3], VMA(4), VMA(5) );
 		return 0;
-	case G_QUIC_EMIT_DAMAGE:
-		QUIC_EmitDamage( args[1], args[2], args[3], args[4], VMA(5), VMA(6) );
+	case G_WIREDNET_EMIT_DAMAGE:
+		WN_EmitDamage( args[1], args[2], args[3], args[4], VMA(5), VMA(6) );
 		return 0;
-	case G_QUIC_EMIT_ITEM_PICKUP:
-		QUIC_EmitItemPickup( args[1], VMA(2), VMA(3) );
+	case G_WIREDNET_EMIT_ITEM_PICKUP:
+		WN_EmitItemPickup( args[1], VMA(2), VMA(3) );
 		return 0;
-	case G_QUIC_EMIT_CHAT:
-		QUIC_EmitChat( args[1], VMA(2), args[3] );
+	case G_WIREDNET_EMIT_CHAT:
+		WN_EmitChat( args[1], VMA(2), args[3] );
 		return 0;
-	case G_QUIC_EMIT_MATCH_EVENT:
-		QUIC_EmitMatchEvent( VMA(1), VMA(2) );
+	case G_WIREDNET_EMIT_MATCH_EVENT:
+		WN_EmitMatchEvent( VMA(1), VMA(2) );
 		return 0;
-	case G_QUIC_EMIT_DELAG:
+	case G_WIREDNET_EMIT_DELAG:
 		// delag event: shooter, target, timeDelta, shooterPos, targetPos
 		// Currently a no-op on the server side — the event is logged
 		// but no dedicated QUIC handler exists yet. The trap exists so
 		// game code can emit the event when one is wired up.
 		return 0;
 #if FEAT_BOT_IMPROVEMENTS
-	case G_QUIC_EMIT_BOT_EVENT:
-		QUIC_EmitBotEvent( args[1], VMA(2), args[3], args[4], VMA(5) );
+	case G_WIREDNET_EMIT_BOT_EVENT:
+		WN_EmitBotEvent( args[1], VMA(2), args[3], args[4], VMA(5) );
 		return 0;
 #endif
 #endif
 
-#if FEAT_QUIC_TRANSPORT
-	case G_QUIC_GET_PING:
+	case G_WIREDNET_GET_PING:
 		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
-			conn_handle_t conn = QUIC_GetConnHandleByAddr(
+			conn_handle_t conn = WN_GetConnHandleByAddr(
 				&svs.clients[ args[1] ].netchan.remoteAddress );
 			if ( conn != CONN_INVALID )
 				return transport ? transport->get_ping( conn ) : -1;
 		}
 		return -1;
 
-	case G_QUIC_GET_LOSS:
+	case G_WIREDNET_GET_LOSS:
 		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
-			conn_handle_t conn = QUIC_GetConnHandleByAddr(
+			conn_handle_t conn = WN_GetConnHandleByAddr(
 				&svs.clients[ args[1] ].netchan.remoteAddress );
 			if ( conn != CONN_INVALID && transport )
 				return (int)( transport->get_loss( conn ) * 1000.0f );
 		}
 		return 0;
 
-	case G_QUIC_GET_BANDWIDTH:
+	case G_WIREDNET_GET_BANDWIDTH:
 		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
-			conn_handle_t conn = QUIC_GetConnHandleByAddr(
+			conn_handle_t conn = WN_GetConnHandleByAddr(
 				&svs.clients[ args[1] ].netchan.remoteAddress );
 			if ( conn != CONN_INVALID && transport )
 				return transport->get_bandwidth( conn );
 		}
 		return 0;
-#endif
 
 	default:
 		Com_Error( ERR_DROP, "Bad game system trap: %ld", (long int) args[0] );

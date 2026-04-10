@@ -649,7 +649,7 @@ CM_ClearTriangleSoups
 
 Reset the runtime triangle-soup table. The patchCollide_t payloads live
 in the hunk (h_high), so they are automatically released on the next
-CM_ClearMap / Hunk_Clear cycle.
+CM_ClearMap / Hunk_ClearLevel cycle.
 ====================
 */
 void CM_ClearTriangleSoups( void ) {

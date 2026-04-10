@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
+#include "../wired/net/wn_public.h"
 
 static unsigned frame_msec;
 static int old_com_frameTime;
@@ -782,11 +783,76 @@ void CL_WritePacket( int repeat ) {
 
 	// write any unacknowledged clientCommands
 	n = clc.reliableSequence - clc.reliableAcknowledge;
+	if ( clc.quic_conn != CONN_INVALID && transport ) {
+		/* QUIC path: send each unacked command on the reliable game-command channel.
+		 * Stream guarantees delivery — acknowledge all immediately so
+		 * the netchan loop below sends nothing. */
+		int ridx;
+		for ( ridx = clc.reliableAcknowledge + 1; ridx <= clc.reliableSequence; ridx++ ) {
+			const char *cmd = clc.reliableCommands[ridx & (MAX_RELIABLE_COMMANDS - 1)];
+			transport->send_reliable( clc.quic_conn, CHAN_COMMANDS,
+				(byte *)cmd, (int)strlen( cmd ) + 1 );
+		}
+		clc.reliableAcknowledge = clc.reliableSequence;
+		n = 0; /* skip netchan embedding */
+	}
 	for ( i = 0; i < n; i++ ) {
 		const int index = clc.reliableAcknowledge + 1 + i;
 		MSG_WriteByte( &buf, clc_clientCommand );
 		MSG_WriteLong( &buf, index );
 		MSG_WriteString( &buf, clc.reliableCommands[ index & ( MAX_RELIABLE_COMMANDS - 1 ) ] );
+	}
+
+	if ( clc.quic_conn != CONN_INVALID && transport ) {
+		/* QUIC usercmd datagram format:
+		 *   [client_tick:u32]    — cl.cmdNumber (newest cmd in this packet)
+		 *   [snapshot_ack:u32]   — clc.serverMessageSequence (last snapshot received)
+		 *   [serverCmd_ack:u32]  — clc.serverCommandSequence (last server command processed)
+		 *   [cmd_count:u8]       — number of delta-compressed cmds following (1-3)
+		 *   [delta-cmds...]      — MSG_WriteDeltaUsercmdKey key=0 from nullcmd
+		 * Always packs current tick + 2 redundant previous ticks.
+		 * key=0 — TLS provides confidentiality; no netchan XOR needed. */
+		byte  udg_data[2048];
+		msg_t udg;
+		int   qi, qj, qcount;
+
+		qcount = 3;
+		if ( cl.cmdNumber < 3 )
+			qcount = cl.cmdNumber > 0 ? cl.cmdNumber : 1;
+
+		MSG_Init( &udg, udg_data, sizeof(udg_data) );
+		MSG_Bitstream( &udg );
+		/* client_tick:u32 — client's current command number */
+		MSG_WriteLong( &udg, cl.cmdNumber );
+		/* snapshot_ack:u32 — last server snapshot received (enables delta compression) */
+		MSG_WriteLong( &udg, clc.serverMessageSequence );
+		/* serverCmd_ack:u32 — last server command processed by client;
+		 * server advances reliableAcknowledge to stop re-embedding processed commands */
+		MSG_WriteLong( &udg, clc.serverCommandSequence );
+		WN_DBG( "usercmd send: snapshot_ack=%d serverCmd_ack=%d\n",
+			clc.serverMessageSequence, clc.serverCommandSequence );
+		MSG_WriteByte( &udg, qcount );
+
+		oldcmd = &nullcmd;
+		for ( qi = 0; qi < qcount; qi++ ) {
+			qj  = (cl.cmdNumber - qcount + qi + 1) & CMD_MASK;
+			cmd = &cl.cmds[qj];
+			MSG_WriteDeltaUsercmdKey( &udg, 0, oldcmd, cmd );
+			oldcmd = cmd;
+		}
+
+		if ( !udg.overflowed ) {
+			transport->send_unreliable( clc.quic_conn, udg.data, udg.cursize );
+		}
+
+		/* keep outPackets ring valid for snapshot interpolation + next-frame count */
+		packetNum = clc.netchan.outgoingSequence & PACKET_MASK;
+		cl.outPackets[packetNum].p_realtime   = cls.realtime;
+		cl.outPackets[packetNum].p_serverTime = oldcmd->serverTime;
+		cl.outPackets[packetNum].p_cmdNumber  = cl.cmdNumber;
+		clc.lastPacketSentTime                = cls.realtime;
+		clc.netchan.outgoingSequence++;
+		return;
 	}
 
 	// we want to send all the usercmds that were generated in the last
@@ -852,12 +918,7 @@ void CL_WritePacket( int repeat ) {
 		Com_Error( ERR_DROP, "%s: message overflowed", __func__ );
 	}
 
-	if ( repeat == 0 || clc.netchan.remoteAddress.type == NA_LOOPBACK ) {
-		CL_Netchan_Transmit( &clc.netchan, &buf );
-	} else {
-		CL_Netchan_Enqueue( &clc.netchan, &buf, repeat + 1 );
-		NET_FlushPacketQueue( 0 );
-	}
+	/* Phase D: netchan transmit removed — QUIC datagram path returned early above */
 }
 
 

@@ -23,9 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "server.h"
 #include "../qcommon/q_feats.h"
 
-#if FEAT_QUIC_TRANSPORT
-#include "../webtransport/wt_public.h"
-#endif
+#include "../wired/net/wn_public.h"
 
 serverStatic_t	svs;				// persistant server info
 server_t		sv;					// local server
@@ -62,6 +60,7 @@ cvar_t	*sv_lanForceRate; // dedicated 1 (LAN) server forces local client rates t
 cvar_t *sv_levelTimeReset;
 cvar_t *sv_filter;
 cvar_t *sv_minRestartDelay;
+cvar_t *sv_snapshotTransport;
 
 // Scheduled server restart state (CNQ3 port).
 // sv_startRealTime is Sys_Milliseconds() at the moment the server first came
@@ -172,15 +171,25 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 	// we check == instead of >= so a broadcast print added by SV_DropClient()
 	// doesn't cause a recursive drop client
 	if ( client->reliableSequence - client->reliableAcknowledge == MAX_RELIABLE_COMMANDS + 1 ) {
-		Com_Printf( "===== pending server commands =====\n" );
-		n = client->reliableSequence - client->reliableAcknowledge;
-		for ( i = 0; i < n; i++ ) {
-			const int idx = client->reliableAcknowledge + 1 + i;
-			Com_Printf( "cmd %5d: %s\n", i, client->reliableCommands[ idx & ( MAX_RELIABLE_COMMANDS - 1 ) ] );
+		if ( client->quic_conn != CONN_INVALID ) {
+			/* QUIC: reliable delivery is guaranteed at the transport layer.
+			 * The netchan overflow guard does not apply — the client acks via
+			 * serverCmd_ack in each usercmd datagram.  If the queue is full it
+			 * means acks haven't arrived yet; drop the oldest command to make
+			 * room rather than dropping the connection. */
+			client->reliableAcknowledge++;
+			Com_DPrintf( "QUIC: server command queue full for %s — dropping oldest\n", client->name );
+		} else {
+			Com_Printf( "===== pending server commands =====\n" );
+			n = client->reliableSequence - client->reliableAcknowledge;
+			for ( i = 0; i < n; i++ ) {
+				const int idx = client->reliableAcknowledge + 1 + i;
+				Com_Printf( "cmd %5d: %s\n", i, client->reliableCommands[ idx & ( MAX_RELIABLE_COMMANDS - 1 ) ] );
+			}
+			Com_Printf( "cmd %5d: %s\n", i, cmd );
+			SV_DropClient( client, "Server command overflow" );
+			return;
 		}
-		Com_Printf( "cmd %5d: %s\n", i, cmd );
-		SV_DropClient( client, "Server command overflow" );
-		return;
 	}
 	index = client->reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
 	Q_strncpyz( client->reliableCommands[ index ], cmd, sizeof( client->reliableCommands[ index ] ) );
@@ -450,7 +459,8 @@ static leakyBucket_t *SVC_BucketForAddress( const netadr_t *address, int burst, 
 	for ( bucket = bucketHashes[ hash ], n = 0; bucket; bucket = bucket->next, n++ ) {
 		switch ( bucket->type ) {
 			case NA_IP:
-				if ( memcmp( bucket->ipv._4, address->ipv._4, 4 ) == 0 ) {
+				if ( address->type == NA_IP &&
+				     memcmp( bucket->ipv._4, address->ipv._4, 4 ) == 0 ) {
 					if ( n > 8 ) {
 						SVC_RelinkToHead( bucket, hash );
 					}
@@ -459,7 +469,8 @@ static leakyBucket_t *SVC_BucketForAddress( const netadr_t *address, int burst, 
 				break;
 #if FEAT_IPV6
 			case NA_IP6:
-				if ( memcmp( bucket->ipv._6, address->ipv._6, 16 ) == 0 ) {
+				if ( address->type == NA_IP6 &&
+				     memcmp( bucket->ipv._6, address->ipv._6, 16 ) == 0 ) {
 					if ( n > 8 ) {
 						SVC_RelinkToHead( bucket, hash );
 					}
@@ -854,10 +865,7 @@ static void SV_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		SVC_Status( from );
 	} else if (!Q_stricmp(c, "getinfo")) {
 		SVC_Info( from );
-	} else if (!Q_stricmp(c, "getchallenge")) {
-		SV_GetChallenge( from );
-	} else if (!Q_stricmp(c, "connect")) {
-		SV_DirectConnect( from );
+	// Phase D: "getchallenge" and "connect" removed — QUIC handles connection setup.
 	// Phase 6.4: legacy "ipAuthorize" handler removed — q3now never sends a
 	// getIpAuthorize request, so we never need to receive a reply.
 	} else if ( !Q_stricmp( c, "rcon_auth" ) ) {
@@ -890,61 +898,13 @@ SV_PacketEvent
 =================
 */
 void SV_PacketEvent( const netadr_t *from, msg_t *msg ) {
-	int			i;
-	client_t	*cl;
-	int			qport;
-
-	if ( msg->cursize < 6 ) // too short for anything
+	if ( msg->cursize < 4 )
 		return;
 
-	// check for connectionless packet (0xffffffff) first
+	/* Phase D: Only connectionless OOB packets (getstatus/getinfo for server browser)
+	   reach here. QUIC handles all game traffic internally via picoquic. */
 	if ( *(int32_t *)msg->data == -1 ) {
 		SV_ConnectionlessPacket( from, msg );
-		return;
-	}
-
-	if ( sv.state == SS_DEAD ) {
-		return;
-	}
-
-	// read the qport out of the message so we can fix up
-	// stupid address translating routers
-	MSG_BeginReadingOOB( msg );
-	MSG_ReadLong( msg ); // sequence number
-	qport = MSG_ReadShort( msg ) & 0xffff;
-
-	// find which client the message is from
-	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
-		if ( cl->state == CS_FREE ) {
-			continue;
-		}
-		if ( !NET_CompareBaseAdr( from, &cl->netchan.remoteAddress ) ) {
-			continue;
-		}
-		// it is possible to have multiple clients from a single IP
-		// address, so they are differentiated by the qport variable
-		if ( cl->netchan.qport != qport ) {
-			continue;
-		}
-
-		// make sure it is a valid, in sequence packet
-		if ( SV_Netchan_Process( cl, msg ) ) {
-			// the IP port can't be used to differentiate clients, because
-			// some address translating routers periodically change UDP
-			// port assignments
-			if ( cl->netchan.remoteAddress.port != from->port ) {
-				Com_Printf( "SV_PacketEvent: fixing up a translated port\n" );
-				cl->netchan.remoteAddress.port = from->port;
-			}
-			// zombie clients still need to do the Netchan_Process
-			// to make sure they don't need to retransmit the final
-			// reliable message, but they don't do any other processing
-			if ( cl->state != CS_ZOMBIE ) {
-				cl->lastPacketTime = svs.time;	// don't timeout
-				SV_ExecuteClientMessage( cl, msg );
-			}
-			return;
-		}
 	}
 }
 
@@ -1233,15 +1193,24 @@ void SV_Frame( int msec ) {
 		return;
 	}
 
-#if FEAT_QUIC_TRANSPORT
-	// QUIC: process timers and flush outbound packets EVERY frame, regardless
-	// of the server frame rate limiter. picoquic needs frequent polling to
-	// maintain connections (ACK timing, keep-alive, retransmits).
-	if ( Cvar_VariableIntegerValue( "sv_quic" ) ) {
-		QUIC_ProcessTimers();
-		QUIC_FlushOutbound();
+	// QUIC transport timers run every frame — picoquic needs frequent polling
+	// for ACK timing, keep-alive, and retransmits.  Safe during spawn because
+	// WN_ProcessTimers/FlushOutbound do not access gvm.
+	WN_FlushOutbound();
+
+	// Spawn machine owns the server during P1..P5.
+	// Between P1 (SV_ShutdownGameProgs) and P3 (SV_InitGameProgs), gvm == NULL
+	// and any VM_Call would crash.  Return here; the QUIC timer block above still
+	// runs to keep transport alive during spawn.
+	if ( svs.spawn.phase != SPAWN_IDLE ) {
+		return;
 	}
-#endif
+
+	// QUIC game drains: safe only when gvm != NULL (SPAWN_IDLE guarantees that).
+	WN_DrainPendingConnects();
+	SV_DrainQUICUsercmds();
+	SV_DrainQUICReliableCommands();
+	WN_DrainPendingReady();
 
 	// allow pause if only the local client is connected
 	if ( SV_CheckPaused() ) {
@@ -1368,21 +1337,16 @@ void SV_Frame( int msec ) {
 	// send messages back to the clients
 	SV_SendClientMessages();
 
-#if FEAT_QUIC_TRANSPORT
 	// QUIC transport frame processing — after game logic and client messages.
 	// Timer-driven: retransmits, keepalives, idle timeouts.
 	// Data-driven: push game state datagrams + events to QUIC observers.
-	if ( Cvar_VariableIntegerValue( "sv_quic" ) ) {
-		QUIC_ProcessTimers();
-		QUIC_FlushOutbound();
-#if FEAT_QUIC_OBSERVE
-		QUIC_SendDatagrams();
-		QUIC_PushEvents();
+	WN_FlushOutbound();
+#if FEAT_WIREDNET_OBSERVE
+	WN_SendDatagrams();
+	WN_PushEvents();
 #endif
-#if FEAT_QUIC_CONTROL
-		QUIC_ProcessCommandQueue();
-#endif
-	}
+#if FEAT_WIREDNET_CONTROL
+	WN_ProcessCommandQueue();
 #endif
 
 	// send a heartbeat to the master if needed
@@ -1404,28 +1368,9 @@ a client based on its rate settings
 
 int SV_RateMsec( const client_t *client )
 {
-	int rate, rateMsec;
-	int messageSize;
-	
-	if ( !client->rate )
-		return 0;
-
-	messageSize = client->netchan.lastSentSize;
-
-#if FEAT_IPV6
-	if ( client->netchan.remoteAddress.type == NA_IP6 )
-		messageSize += UDPIP6_HEADER_SIZE;
-	else
-#endif
-		messageSize += UDPIP_HEADER_SIZE;
-		
-	rateMsec = messageSize * 1000 / ((int) (client->rate * com_timescale->value));
-	rate = Sys_Milliseconds() - client->netchan.lastSentTime;
-	
-	if ( rate > rateMsec )
-		return 0;
-	else
-		return rateMsec - rate;
+	/* Phase D: QUIC congestion control replaces application-level rate throttling. */
+	(void)client;
+	return 0;
 }
 
 

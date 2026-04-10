@@ -47,6 +47,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
 #include "ai_team.h"
+#include "g_bot_lua.h"
 //data file headers
 #include "chars.h"			//characteristics
 #include "inv.h"			//indexes into the inventory
@@ -207,7 +208,11 @@ int BotNearbyGoal(bot_state_t *bs, int tfl, bot_goal_t *ltg, float range) {
 		}
 	}
 	//
-	ret = trap_BotChooseNBGItem(bs->gs, bs->origin, bs->inventory, tfl, ltg, range);
+	if ( bs->luaCharacterActive ) {
+		ret = BotLua_ChooseNBGItem( bs, tfl, ltg, range );
+	} else {
+		ret = trap_BotChooseNBGItem(bs->gs, bs->origin, bs->inventory, tfl, ltg, range);
+	}
 	/*
 	if (ret)
 	{
@@ -297,7 +302,7 @@ int BotGetItemLongTermGoal(bot_state_t *bs, int tfl, bot_goal_t *goal) {
 		//BotAI_Print(PRT_MESSAGE, "%s: choosing new ltg\n", ClientName(bs->client, netname, sizeof(netname)));
 		//choose a new goal
 		//BotAI_Print(PRT_MESSAGE, "%6.1f client %d: BotChooseLTGItem\n", FloatTime(), bs->client);
-		if (trap_BotChooseLTGItem(bs->gs, bs->origin, bs->inventory, tfl)) {
+		if ( bs->luaCharacterActive ? BotLua_ChooseLTGItem( bs, tfl ) : trap_BotChooseLTGItem(bs->gs, bs->origin, bs->inventory, tfl) ) {
 			/*
 			char buf[128];
 			//get the goal at the top of the stack
@@ -442,7 +447,11 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 				//check if the bot wants to crouch
 				//don't crouch if crouched less than 5 seconds ago
 				if (bs->attackcrouch_time < FloatTime() - 5) {
-					croucher = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CROUCHER, 0, 1);
+					if ( bs->luaCharacterActive ) {
+						croucher = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_DODGE_ON_FIRE, 0.2f );
+					} else {
+						croucher = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CROUCHER, 0, 1);
+					}
 					if (random() < bs->thinktime * croucher) {
 						bs->attackcrouch_time = FloatTime() + 5 + croucher * 15;
 					}
@@ -663,7 +672,11 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			//check if the bot wants to crouch
 			//don't crouch if crouched less than 5 seconds ago
 			if (bs->attackcrouch_time < FloatTime() - 5) {
-				croucher = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CROUCHER, 0, 1);
+				if ( bs->luaCharacterActive ) {
+					croucher = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_DODGE_ON_FIRE, 0.2f );
+				} else {
+					croucher = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CROUCHER, 0, 1);
+				}
 				if (random() < bs->thinktime * croucher) {
 					bs->attackcrouch_time = FloatTime() + 5 + croucher * 15;
 				}
@@ -1134,7 +1147,9 @@ void AIEnter_Intermission(bot_state_t *bs, char *s) {
 	BotResetState(bs);
 	//check for end level chat
 	if (BotChat_EndLevel(bs)) {
-		trap_BotEnterChat(bs->cs, 0, bs->chatto);
+		if ( !bs->luaCharacterActive ) {
+			trap_BotEnterChat(bs->cs, 0, bs->chatto);
+		}
 	}
 	bs->ainode = AINode_Intermission;
 }
@@ -1219,7 +1234,9 @@ int AINode_Stand(bot_state_t *bs) {
 	trap_EA_Talk(bs->client);
 	// when done standing
 	if (bs->stand_time < FloatTime()) {
-		trap_BotEnterChat(bs->cs, 0, bs->chatto);
+		if ( !bs->luaCharacterActive ) {
+			trap_BotEnterChat(bs->cs, 0, bs->chatto);
+		}
 		AIEnter_Seek_LTG(bs, "stand: time out");
 		return qfalse;
 	}
@@ -1241,8 +1258,13 @@ void AIEnter_Respawn(bot_state_t *bs, char *s) {
 	trap_BotResetAvoidReach(bs->ms);
 	//if the bot wants to chat
 	if (BotChat_Death(bs)) {
-		bs->respawn_time = FloatTime() + BotChatTime(bs);
-		bs->respawnchat_time = FloatTime();
+		if ( bs->luaCharacterActive ) {
+			bs->respawn_time = FloatTime() + 0.2f;
+			bs->respawnchat_time = 0;
+		} else {
+			bs->respawn_time = FloatTime() + BotChatTime(bs);
+			bs->respawnchat_time = FloatTime();
+		}
 	}
 	else {
 		bs->respawn_time = FloatTime() + 1 + random();
@@ -1274,7 +1296,7 @@ int AINode_Respawn(bot_state_t *bs) {
 		// elementary action respawn
 		trap_EA_Respawn(bs->client);
 		//
-		if (bs->respawnchat_time) {
+		if (!bs->luaCharacterActive && bs->respawnchat_time) {
 			trap_BotEnterChat(bs->cs, 0, bs->chatto);
 			bs->enemy = -1;
 		}
@@ -2393,7 +2415,11 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	}
 	else if (!(moveresult.flags & MOVERESULT_MOVEMENTVIEWSET)
 				&& !(bs->flags & BFL_IDEALVIEWSET) ) {
-		attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
+		if ( bs->luaCharacterActive ) {
+			attack_skill = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_AGGRESSION, 0.5f );
+		} else {
+			attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
+		}
 		//if the bot is skilled enough
 		if (attack_skill > 0.3) {
 			BotAimAtEnemy(bs);
@@ -2539,7 +2565,11 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	}
 	else if (!(moveresult.flags & MOVERESULT_MOVEMENTVIEWSET)
 				&& !(bs->flags & BFL_IDEALVIEWSET)) {
-		attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
+		if ( bs->luaCharacterActive ) {
+			attack_skill = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_AGGRESSION, 0.5f );
+		} else {
+			attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
+		}
 		//if the bot is skilled enough and the enemy is visible
 		if (attack_skill > 0.3) {
 			//&& BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, 360, bs->enemy)

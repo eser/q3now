@@ -49,6 +49,8 @@ typedef struct bspFile_s {
 	int			references;
 
 	int			checksum;
+	int			rawLength;
+	byte		*rawData;
 
 	// Entity string
 	int			entityStringLength;

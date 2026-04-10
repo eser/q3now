@@ -299,42 +299,15 @@ void CL_LoadMapInfo( const char *mapname ) {
 	// --- Fallback: extract from BSP entity lump ---
 	if ( !cl_mapInfo.hasMetaFile || cl_mapInfo.longName[0] == '\0' || cl_mapInfo.sky[0] == '\0' ) {
 		char bspPath[MAX_QPATH];
-		dheader_t header;
-		int i;
+		bspFile_t *bsp;
 
 		Com_sprintf( bspPath, sizeof( bspPath ), "maps/%s.bsp", mapname );
-		fileLen = FS_FOpenFileRead( bspPath, &f, qtrue );
-
-		if ( f && fileLen >= (int)sizeof( dheader_t ) ) {
-			if ( FS_Read( &header, sizeof( header ), f ) == sizeof( header ) ) {
-				// Validate BSP
-				if ( LittleLong( header.ident ) == BSP_IDENT &&
-				     LittleLong( header.version ) == BSP_VERSION ) {
-					// Byte-swap lump directory
-					for ( i = 0; i < HEADER_LUMPS; i++ ) {
-						header.lumps[i].fileofs = LittleLong( header.lumps[i].fileofs );
-						header.lumps[i].filelen = LittleLong( header.lumps[i].filelen );
-					}
-
-					// Read entity lump
-					if ( header.lumps[LUMP_ENTITIES].filelen > 0 ) {
-						int entLen = header.lumps[LUMP_ENTITIES].filelen;
-						char *entityString = (char *)Z_Malloc( entLen + 1 );
-
-						FS_Seek( f, header.lumps[LUMP_ENTITIES].fileofs, FS_SEEK_SET );
-						if ( FS_Read( entityString, entLen, f ) == entLen ) {
-							entityString[entLen] = '\0';
-							CL_MapInfo_ParseWorldspawn( entityString, entLen );
-						}
-						Z_Free( entityString );
-					}
-				}
+		if ( BSP_Load( bspPath, &bsp ) ) {
+			if ( bsp->entityString && bsp->entityStringLength > 0 ) {
+				CL_MapInfo_ParseWorldspawn( bsp->entityString, bsp->entityStringLength );
 			}
-			FS_FCloseFile( f );
+			BSP_Free( bsp );
 		} else {
-			if ( f ) {
-				FS_FCloseFile( f );
-			}
 			Com_DPrintf( "CL_LoadMapInfo: no BSP found at %s\n", bspPath );
 		}
 	}

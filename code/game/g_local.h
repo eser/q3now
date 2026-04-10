@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "g_public.h"
+#include "g_bot_lua_shared.h"
 
 //==================================================================
 
@@ -806,8 +807,6 @@ void UpdateTournamentInfo( void );
 // g_bot.c
 //
 void G_InitBots( qboolean restart );
-char *G_GetBotInfoByNumber( int num );
-char *G_GetBotInfoByName( const char *name );
 void G_CheckBotSpawn( void );
 void G_RemoveQueuedBotBegin( int clientNum );
 qboolean G_BotConnect( int clientNum, qboolean restart );
@@ -1095,6 +1094,14 @@ void	trap_EA_EndRegular(int client, float thinktime);
 void	trap_EA_GetInput(int client, float thinktime, void /* struct bot_input_s */ *input);
 void	trap_EA_ResetInput(int client);
 
+int		trap_BotLuaBindBot(int client, int characterHandle);
+int		trap_BotLuaBotThink(int client, float thinktime);
+float	trap_BotLuaBotProfileField(int client, int field);
+int		trap_BotLuaBotPickWeapon(int client, const botLuaCombatCtx_t *ctx, char *weaponKey, int weaponKeySize);
+int		trap_BotLuaBotEvalItem(int client, const botLuaItemEvalCtx_t *ctx);
+int		trap_BotLuaBotDecide(int client, const botLuaDecideCtx_t *ctx, char *decision, int decisionSize);
+int		trap_BotLuaBotOnChat(int client, const char *eventName, const botLuaChatCtx_t *ctx, char *outChat, int outChatSize);
+
 
 int		trap_BotLoadCharacter(char *charfile, float skill);
 void	trap_BotFreeCharacter(int character);
@@ -1206,16 +1213,16 @@ void G_UnTimeShiftClient( gentity_t *ent );
 #endif
 
 // QUIC transport event emission (g_syscalls.c)
-#if FEAT_QUIC_OBSERVE
-void trap_QUIC_EmitKill( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos );
-void trap_QUIC_EmitDamage( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos );
-void trap_QUIC_EmitItemPickup( int client, const char *item, vec3_t pos );
-void trap_QUIC_EmitChat( int client, const char *msg, qboolean teamOnly );
-void trap_QUIC_EmitMatchEvent( const char *type, const char *data );
+#if FEAT_WIREDNET_OBSERVE
+void trap_WiredNet_EmitKill( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos );
+void trap_WiredNet_EmitDamage( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos );
+void trap_WiredNet_EmitItemPickup( int client, const char *item, vec3_t pos );
+void trap_WiredNet_EmitChat( int client, const char *msg, qboolean teamOnly );
+void trap_WiredNet_EmitMatchEvent( const char *type, const char *data );
 #if FEAT_UNLAGGED
-void trap_QUIC_EmitDelag( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos );
+void trap_WiredNet_EmitDelag( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos );
 #endif
 #if FEAT_BOT_IMPROVEMENTS
-void trap_QUIC_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos );
+void trap_WiredNet_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos );
 #endif
 #endif

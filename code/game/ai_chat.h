@@ -30,6 +30,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  *****************************************************************************/
 
+typedef struct bot_state_s bot_state_t;
+
+#define TIME_BETWEENCHATTING	25
+
 //
 int BotChat_EnterGame(bot_state_t *bs);
 //
@@ -58,4 +62,5 @@ float BotChatTime(bot_state_t *bs);
 int BotValidChatPosition(bot_state_t *bs);
 // test the initial bot chats
 void BotChatTest(bot_state_t *bs);
-
+// current map title
+char *BotMapTitle(void);

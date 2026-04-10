@@ -249,17 +249,22 @@ Mount your game assets (`pak0.pk3`, custom maps, `server.cfg`) into the
 `baseq3` volume. See `docker/docker-compose.yml` for a complete example with
 all available environment variables.
 
-| Environment Variable | Engine Cvar       | Description                 |
-| -------------------- | ----------------- | --------------------------- |
-| `Q3_HOSTNAME`        | `sv_hostname`     | Server name                 |
-| `Q3_MAXCLIENTS`      | `sv_maxclients`   | Max players                 |
-| `Q3_RCONPASSWORD`    | `sv_wiredRconPassword` | Wired RCON password     |
-| `Q3_GAMETYPE`        | `g_gametype`      | 0=DM, 1=Duel, 3=TDM, 4=CTF  |
-| `Q3_SCORELIMIT`      | `g_scorelimit`    | Score limit                 |
-| `Q3_TIMELIMIT`       | `g_timelimit`     | Time limit (minutes)        |
-| `Q3_QUIC`            | `sv_quic`         | Enable QUIC transport       |
-| `Q3_EXEC`            | `+exec`           | Execute a config file       |
-| `Q3_EXTRA_ARGS`      | _(verbatim)_      | Arbitrary engine arguments  |
+QUIC transport is enabled by default. A self-signed TLS certificate is
+auto-generated in `/home/q3now/certs/` on first start. For production,
+mount a real cert via `Q3_WIREDNET_CERT` / `Q3_WIREDNET_KEY`.
+
+| Environment Variable | Engine Cvar            | Description                           |
+| -------------------- | ---------------------- | ------------------------------------- |
+| `Q3_HOSTNAME`        | `sv_hostname`          | Server name                           |
+| `Q3_MAXCLIENTS`      | `sv_maxclients`        | Max players                           |
+| `Q3_RCONPASSWORD`    | `sv_wiredRconPassword` | Wired RCON password                   |
+| `Q3_GAMETYPE`        | `g_gametype`           | 0=DM, 1=Duel, 3=TDM, 4=CTF           |
+| `Q3_SCORELIMIT`      | `g_scorelimit`         | Score limit                           |
+| `Q3_TIMELIMIT`       | `g_timelimit`          | Time limit (minutes)                  |
+| `Q3_WIREDNET_CERT`       | `sv_wirednetCertFile`      | Path to TLS certificate (PEM)         |
+| `Q3_WIREDNET_KEY`        | `sv_wirednetKeyFile`       | Path to TLS private key (PEM)         |
+| `Q3_EXEC`            | `+exec`                | Execute a config file                 |
+| `Q3_EXTRA_ARGS`      | _(verbatim)_           | Arbitrary engine arguments            |
 
 ## [Build Instructions](BUILD.md)
 

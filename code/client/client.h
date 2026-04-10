@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+#include "../qcommon/net_transport.h"
 #include "../qcommon/maps/bsp.h"
 #include "../renderercommon/tr_public.h"
 #include "../qcommon/vm_local.h"
@@ -179,6 +180,12 @@ typedef struct {
 	qboolean	wiredRconHasChallenge;
 	char		wiredRconChallenge[65];
 	netadr_t	wiredRconAddress;
+
+	/* QUIC connection handle for this client session.
+	 * Set by transport->connect() on CA_CONNECTING, cleared (zeroed) in
+	 * CL_Disconnect (via Com_Memset).  Use (clc.quic_conn != CONN_INVALID)
+	 * as the authoritative test for "we are on a QUIC connection". */
+	conn_handle_t quic_conn;
 
 	// these are our reliable messages that go to the server
 	int			reliableSequence;
@@ -505,6 +512,8 @@ void Field_BigDraw( field_t *edit, int x, int y, int width, qboolean showCursor,
 extern int cl_connectedToPureServer;
 
 void CL_ParseServerMessage( msg_t *msg );
+void CL_CheckReliableStreams( void );
+void CL_CheckSnapshotDatagrams( void );
 
 //====================================================================
 
@@ -530,6 +539,7 @@ void Con_PageDown( int lines );
 void Con_Top( void );
 void Con_Bottom( void );
 void Con_Close( void );
+void Con_SoftClose( void );     /* collapse visually, preserve KEYCATCH_CONSOLE */
 
 // console search
 void Con_SearchOpen( void );
@@ -612,12 +622,6 @@ int Key_GetCatcher( void );
 void Key_SetCatcher( int catcher );
 
 
-//
-// cl_net_chan.c
-//
-void CL_Netchan_Transmit( netchan_t *chan, msg_t *msg );
-void CL_Netchan_Enqueue( netchan_t *chan, msg_t *msg, int times );
-qboolean CL_Netchan_Process( netchan_t *chan, msg_t *msg );
 
 //
 // cl_avi.c

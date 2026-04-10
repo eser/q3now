@@ -1587,6 +1587,8 @@ void SV_AddOperatorCommands( void ) {
 #endif
 	Cmd_AddCommand( "filter", SV_AddFilter_f );
 	Cmd_AddCommand( "filtercmd", SV_AddFilterCmd_f );
+	Cmd_AddCommand( "bot_verify_character", SV_BotVerifyCharacter_f );
+	Cmd_AddCommand( "bot_debug_weapons", SV_BotDebugWeapons_f );
 }
 
 

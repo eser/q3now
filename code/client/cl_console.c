@@ -22,8 +22,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // console.c
 
 #include "client.h"
+#include "../qcommon/arena.h"
 
 #include "wired/ui/cl_wired_text.h"
+#ifndef DEDICATED
+#include "wired/ui/cl_wired_ui.h"
+#endif
 
 #define  DEFAULT_CONSOLE_WIDTH 78
 #define  MAX_CONSOLE_WIDTH 120
@@ -145,7 +149,13 @@ qboolean Con_IsMarkActive( void );
 qboolean Con_MarkKey( int key, qboolean ctrlDown, qboolean shiftDown );
 qboolean Con_MarkCellIsSelected( int row, int col );
 
-console_t	con;
+/* Console state lives in a persistent arena so it survives Hunk_ClearLevel().
+   All code uses `con.field` — the macro expands to (*s_con).field which is
+   an lvalue, so assignments (con.field = ...) compile correctly.           */
+#define CONSOLE_ARENA_SIZE ( sizeof(console_t) + 4096 )   /* struct + padding */
+static arena_t    *s_conArena = NULL;
+static console_t  *s_con      = NULL;
+#define con (*s_con)
 
 cvar_t		*con_conspeed;
 cvar_t		*con_autoclear;
@@ -635,6 +645,21 @@ Con_Init
 */
 void Con_Init( void )
 {
+	/* Allocate console state from the persistent arena if not already done.
+	   May have been lazily allocated by CL_ConsolePrint before this call.
+	   The arena survives Hunk_ClearLevel() so text and scroll position are
+	   preserved across map transitions.  On re-entry (renderer restart),
+	   the arena already exists — just re-init cvars and commands below. */
+	if ( !s_conArena ) {
+		s_conArena = Arena_Create( "Console", CONSOLE_ARENA_SIZE );
+		s_con = Arena_AllocType( s_conArena, console_t );
+		Com_Memset( s_con, 0, sizeof( console_t ) );
+	} else if ( !s_con ) {
+		/* arena was created by lazy init, s_con was set there; shouldn't be NULL here */
+		s_con = Arena_AllocType( s_conArena, console_t );
+		Com_Memset( s_con, 0, sizeof( console_t ) );
+	}
+
 	con_notifytime = Cvar_Get( "con_notifytime", "3", 0 );
 	Cvar_SetDescription( con_notifytime, "Defines how long messages (from players or the system) are on the screen (in seconds)." );
 	con_conspeed = Cvar_Get( "scr_conspeed", "3", 0 );
@@ -795,7 +820,20 @@ void CL_ConsolePrint( const char *txt ) {
 	if ( cl_noprint && cl_noprint->integer ) {
 		return;
 	}
-	
+
+	/* Lazily allocate the arena on first print (may happen before Con_Init
+	   due to early Com_Printf calls at engine startup).  Con_Init completes
+	   the setup (cvars, cvar-based colors, cmd registration) later. */
+	if ( !s_con ) {
+		if ( !s_conArena ) {
+			s_conArena = Arena_Create( "Console", CONSOLE_ARENA_SIZE );
+			s_con = Arena_AllocType( s_conArena, console_t );
+			Com_Memset( s_con, 0, sizeof( console_t ) );
+		} else {
+			return;   /* arena exists but s_con is NULL — shouldn't happen */
+		}
+	}
+
 	if ( !con.initialized ) {
 		static cvar_t null_cvar = { 0 };
 		con.color[0] =
@@ -1329,6 +1367,33 @@ static void Con_DrawSolidConsole( float frac ) {
 		}
 	}
 
+	// ── WiredUI recovery banners ─────────────────────────────────────────
+	// Only in fullscreen console (frac==1.0) while disconnected — that is
+	// exactly when the user is staring at the Layer-0 fallback surface.
+	// The yellow banner tells them the menus are offline and how to recover.
+	// The red banner appears for 3 seconds after a failed recovery attempt.
+#ifndef DEDICATED
+	if ( frac >= 1.0f && cls.state < CA_ACTIVE ) {
+		if ( !WiredUI_IsHealthy() ) {
+			static const vec4_t colorOffline = { 1.0f, 0.85f, 0.0f, 1.0f };
+			float bx = Con_NativeToVirtualX( con.xadjust + con_textNativeCharW );
+			float by = Con_NativeToVirtualY( (float)(lines - smallchar_height) );
+			Text_Draw( "[WiredUI offline]  Press Escape or type 'wired_recover' to reload menus.",
+			           bx, by, FONT_MONO, con_textPointSize, colorOffline, TEXT_ALIGN_LEFT, 0 );
+		}
+		{
+			int failTime = WiredUI_GetLastRecoveryFailTime();
+			if ( failTime != 0 && ( cls.realtime - failTime ) < 3000 ) {
+				static const vec4_t colorFail = { 1.0f, 0.25f, 0.2f, 1.0f };
+				float bx = Con_NativeToVirtualX( con.xadjust + con_textNativeCharW );
+				float by = Con_NativeToVirtualY( (float)(lines - smallchar_height * 2) );
+				Text_Draw( "[WiredUI reload failed.  Type 'wired_reload' or 'wired_recover' to retry.]",
+				           bx, by, FONT_MONO, con_textPointSize, colorFail, TEXT_ALIGN_LEFT, 0 );
+			}
+		}
+	}
+#endif
+
 	// draw the input prompt, user text, and cursor if desired
 	Con_DrawInput();
 
@@ -1346,11 +1411,23 @@ void Con_DrawConsole( void ) {
 	// check for console width changes from a vid mode change
 	Con_CheckResize();
 
-	// if disconnected, render console full screen
-	if ( cls.state == CA_DISCONNECTED ) {
-		if ( !( Key_GetCatcher( ) & (KEYCATCH_UI | KEYCATCH_CGAME)) ) {
-			Con_DrawSolidConsole( 1.0 );
-			return;
+	// For all pre-active states (except cinematic), render the console fullscreen
+	// so the log wall is visible during connecting and spawn phases.
+	// Three cases where we skip this auto-expand — WiredUI owns the background:
+	//   KEYCATCH_UI / KEYCATCH_CGAME: an interactive UI/cgame element is rendered.
+	//   CA_LOADING / CA_PRIMED:       the WiredUI loading screen is rendered.
+	//   cl_loadProgress.startTime > 0: the WiredUI loading screen is rendered
+	//                                  even in pre-LOADING states (e.g. CA_CONNECTED
+	//                                  during async spawn phases).
+	// In all these cases the console is still openable via ~ — it draws at the
+	// user's current con.displayFrac and is never blocked, just not auto-expanded.
+	if ( cls.state < CA_ACTIVE && cls.state != CA_CINEMATIC ) {
+		if ( !( Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CGAME) ) ) {
+			if ( cls.state != CA_LOADING && cls.state != CA_PRIMED
+			     && cl_loadProgress.startTime <= 0 ) {
+				Con_DrawSolidConsole( 1.0 );
+				return;
+			}
 		}
 	}
 
@@ -1448,6 +1525,29 @@ void Con_Close( void )
 	Key_SetCatcher( Key_GetCatcher( ) & ~KEYCATCH_CONSOLE );
 	con.finalFrac = 0.0;			// none visible
 	con.displayFrac = 0.0;
+}
+
+
+/*
+================
+Con_SoftClose
+
+Collapses the console visually (displayFrac/finalFrac = 0) and clears
+notify lines, but preserves the KEYCATCH_CONSOLE bit so the user does
+not have to re-open the console after a map transition.  Use this in
+place of Con_Close() on any code path that is NOT a deliberate "hide
+the console from the user" action (e.g. map-change, cgame init).
+================
+*/
+void Con_SoftClose( void )
+{
+	if ( !com_cl_running->integer )
+		return;
+
+	con.finalFrac   = 0.0f;
+	con.displayFrac = 0.0f;
+	Con_ClearNotify();
+	/* KEYCATCH_CONSOLE deliberately preserved */
 }
 
 

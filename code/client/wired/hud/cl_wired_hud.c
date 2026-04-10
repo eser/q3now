@@ -321,6 +321,18 @@ static void WiredHud_ItemToConfig( const wiredItemDef_t *item, superhudConfig_t 
 		Q_strncpyz( cfg->font.value, item->fontName, sizeof( cfg->font.value ) );
 	}
 
+	// fontweight (currently regular/medium/bold routing)
+	if ( item->fontWeight > 0 ) {
+		cfg->fontWeight.isSet = qtrue;
+		cfg->fontWeight.value = item->fontWeight;
+	}
+
+	// letterspacing
+	if ( item->letterSpacing != 0.0f ) {
+		cfg->letterspacing.isSet = qtrue;
+		cfg->letterspacing.value = item->letterSpacing;
+	}
+
 	// direction (bar direction: L2R, R2L, T2B, B2T)
 	if ( item->direction >= 0 ) {
 		cfg->direction.isSet = qtrue;

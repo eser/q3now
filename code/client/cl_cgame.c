@@ -1040,8 +1040,9 @@ void CL_InitCGame( void ) {
 	loadYield_shaderCount = 0;
 	loadYield_soundCount = 0;
 
-	// put away the console
-	Con_Close();
+	// Soft-close the console: collapse visually but preserve KEYCATCH_CONSOLE
+	// so the user does not have to re-open it after the level finishes loading.
+	Con_SoftClose();
 
 	// find the current mapname
 	info = cl.gameState.stringData + cl.gameState.stringOffsets[ CS_SERVERINFO ];

@@ -9,6 +9,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_NONE
 	{
 		/* name                 */ "None",
+		/* shortname            */ "",
 		/* weapon				*/ WP_NONE,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -26,6 +27,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_GAUNTLET_PRIMARY
 	{
 		/* name                 */ "Gauntlet Primary",
+		/* shortname            */ "g1",
 		/* weapon				*/ WP_GAUNTLET,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -43,6 +45,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_GAUNTLET_LUNGE
 	{
 		/* name                 */ "Gauntlet Lunge",
+		/* shortname            */ "g2",
 		/* weapon				*/ WP_GAUNTLET,
 		/* maxDamageDistance    */ 80.0f,
 		/* armorPiercing        */ qfalse,
@@ -66,6 +69,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_MACHINEGUN_PRIMARY
 	{
 		/* name                 */ "Machinegun Primary",
+		/* shortname            */ "mg1",
 		/* weapon				*/ WP_MACHINEGUN,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -83,6 +87,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_MACHINEGUN_BURST
 	{
 		/* name                 */ "Machinegun Burst",
+		/* shortname            */ "mg2",
 		/* weapon				*/ WP_MACHINEGUN,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -106,6 +111,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_SHOTGUN_PRIMARY
 	{
 		/* name                 */ "Shotgun Primary",
+		/* shortname            */ "sg1",
 		/* weapon				*/ WP_SHOTGUN,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -123,6 +129,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_SHOTGUN_DOUBLE_BLAST
 	{
 		/* name                 */ "Shotgun Double Blast",
+		/* shortname            */ "sg2",
 		/* weapon				*/ WP_SHOTGUN,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -146,6 +153,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_GRENADE_LAUNCHER_PRIMARY
 	{
 		/* name                 */ "Grenade Launcher Primary",
+		/* shortname            */ "gl1",
 		/* weapon				*/ WP_GRENADE_LAUNCHER,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -163,6 +171,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_ROCKET_LAUNCHER_PRIMARY
 	{
 		/* name                 */ "Rocket Launcher Primary",
+		/* shortname            */ "rl1",
 		/* weapon				*/ WP_ROCKET_LAUNCHER,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -180,6 +189,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_ROCKET_LAUNCHER_MORTAR
 	{
 		/* name                 */ "Rocket Launcher Mortar",
+		/* shortname            */ "rl2",
 		/* weapon				*/ WP_ROCKET_LAUNCHER,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -197,6 +207,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_LIGHTNING_GUN_PRIMARY
 	{
 		/* name                 */ "Lightning Gun Primary",
+		/* shortname            */ "lg1",
 		/* weapon				*/ WP_LIGHTNING_GUN,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -214,6 +225,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_LIGHTNING_GUN_CHAIN_ARC
 	{
 		/* name                 */ "Lightning Gun Chain Arc",
+		/* shortname            */ "lg2",
 		/* weapon				*/ WP_LIGHTNING_GUN,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -237,6 +249,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_RAILGUN_PRIMARY
 	{
 		/* name                 */ "Railgun Primary",
+		/* shortname            */ "rg1",
 		/* weapon				*/ WP_RAILGUN,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qtrue,
@@ -254,6 +267,7 @@ gattack_t	bg_attacklist[] =
 	// ATT_PLASMA_RIFLE_PRIMARY
 	{
 		/* name                 */ "Plasma Rifle Primary",
+		/* shortname            */ "pr1",
 		/* weapon				*/ WP_PLASMA_RIFLE,
 		/* maxDamageDistance    */ 0,
 		/* armorPiercing        */ qfalse,
@@ -268,6 +282,17 @@ gattack_t	bg_attacklist[] =
 		/* onAltFireRelease     */ NULL,
 	},
 };
+
+int BG_AttackByShortname( const char *shortname ) {
+	int i;
+	int count = (int)( sizeof( bg_attacklist ) / sizeof( bg_attacklist[0] ) );
+	for ( i = 0; i < count; i++ ) {
+		if ( bg_attacklist[i].shortname[0] && Q_stricmp( bg_attacklist[i].shortname, shortname ) == 0 ) {
+			return i;
+		}
+	}
+	return ATT_NONE;
+}
 
 // Weapon definitions
 gweapon_t	bg_weaponlist[] =

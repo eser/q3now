@@ -1786,6 +1786,20 @@ R_InitImages
 */
 void R_InitImages( void ) {
 
+	// Clean up any GPU textures and zone memory preserved across a
+	// REF_KEEP_CONTEXT shutdown (Step 3.3).
+	//
+	// Vulkan ordering: destroy VkImages first, THEN free VkDeviceMemory
+	// (image_chunks).  Reversing the order corrupts MoltenVK's internal
+	// bookkeeping and causes destroyPresentableSwapchainImage crashes.
+	if ( tr.numImages > 0 ) {
+		R_DeleteTextures();             // 1. destroy VkImage objects
+#ifdef USE_VULKAN
+		vk_release_resources();         // 2. free GPU memory (image_chunks, world pipelines, descriptor pool)
+#endif
+	}
+	ri.FreeAll();                       // 3. free zone memory (image_t structs)
+
 #ifdef USE_VULKAN
 	// initialize linear gamma table before setting color mappings for the first time
 	int i;

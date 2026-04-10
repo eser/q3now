@@ -182,6 +182,9 @@ void BSP_Free( bspFile_t *bspFile ) {
 	if ( bspFile->lightGridData ) {
 		Z_Free( bspFile->lightGridData );
 	}
+	if ( bspFile->rawData ) {
+		Z_Free( bspFile->rawData );
+	}
 	if ( bspFile->fogs ) {
 		Z_Free( bspFile->fogs );
 	}

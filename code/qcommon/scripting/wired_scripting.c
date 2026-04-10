@@ -13,19 +13,28 @@ WiredScript_RegisterBindings(); they are invoked in WiredScript_PostInit().
 
 #include "../q_shared.h"
 #include "../qcommon.h"
+#include "../arena.h"
 #include "wired_scripting.h"
-
-#if FEAT_LUA
 
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
 
-static lua_State *wired_lua = NULL;
+/* ---- Persistent arena ------------------------------------------------ */
+/* Engine-side control block for the LuaJIT runtime.  Lives in a persistent
+   arena so it shows up in /meminfo and outlives Hunk_ClearLevel(). */
 
 #define MAX_BINDING_REGISTRARS 8
-static WiredScript_BindingFn bindingRegistrars[MAX_BINDING_REGISTRARS];
-static int numBindingRegistrars = 0;
+#define WIREDSCRIPT_ARENA_SIZE (16 * 1024)  /* 16 KB — header + registrar table */
+
+typedef struct {
+    lua_State            *lua;
+    WiredScript_BindingFn registrars[MAX_BINDING_REGISTRARS];
+    int                   numRegistrars;
+} WiredScriptState_t;
+
+static arena_t            *s_wsArena = NULL;
+static WiredScriptState_t *s_ws      = NULL;
 
 /* ---- helpers --------------------------------------------------------- */
 
@@ -169,9 +178,21 @@ static void WiredScript_Cmd_Eval( void ) {
 void WiredScript_Init( void ) {
 	lua_State *L;
 
-	if ( wired_lua ) {
+	/* Create the persistent arena once at engine startup.  On a second call
+	   (unexpected but safe), the arena already exists — just re-initialize
+	   the state struct fields inside it. */
+	if ( !s_wsArena ) {
+		s_wsArena = Arena_Create( "WiredScript", WIREDSCRIPT_ARENA_SIZE );
+		s_ws = Arena_AllocType( s_wsArena, WiredScriptState_t );
+		Com_Memset( s_ws, 0, sizeof( WiredScriptState_t ) );
+	}
+
+	if ( s_ws->lua ) {
 		WiredScript_Shutdown();
 	}
+
+	/* Reset registrar count so PostInit is idempotent on re-init */
+	s_ws->numRegistrars = 0;
 
 	L = luaL_newstate();
 	if ( !L ) {
@@ -204,22 +225,26 @@ void WiredScript_Init( void ) {
 	lua_setmetatable( L, -2 );
 	lua_pop( L, 1 );
 
-	wired_lua = L;
+	s_ws->lua = L;
 
 	Cmd_AddCommand( "lua_exec", WiredScript_Cmd_Exec );
 	Cmd_AddCommand( "lua_eval", WiredScript_Cmd_Eval );
 
 	Com_Printf( "WiredScript: LuaJIT initialized (sandbox active)\n" );
 
+	/* autoexec.lua runs at VM creation time, before WiredScript_PostInit.
+	   Only baseline globals are available: print, cmd, cvar bridge.
+	   Subsystem bindings (store.*, attract.*, load_menu) are NOT available here —
+	   they are registered during CL_Init and applied at PostInit. */
 	WiredScript_ExecFile( "autoexec.lua" );
 }
 
 void WiredScript_Shutdown( void ) {
-	if ( wired_lua ) {
+	if ( s_ws && s_ws->lua ) {
 		Cmd_RemoveCommand( "lua_exec" );
 		Cmd_RemoveCommand( "lua_eval" );
-		lua_close( wired_lua );
-		wired_lua = NULL;
+		lua_close( s_ws->lua );
+		s_ws->lua = NULL;
 		Com_Printf( "WiredScript: shutdown\n" );
 	}
 }
@@ -229,7 +254,7 @@ void WiredScript_Shutdown( void ) {
 qboolean WiredScript_TryEval( const char *text ) {
 	int status;
 
-	if ( !wired_lua || !text || !text[0] ) {
+	if ( !s_ws || !s_ws->lua || !text || !text[0] ) {
 		return qfalse;
 	}
 
@@ -241,44 +266,44 @@ qboolean WiredScript_TryEval( const char *text ) {
 	{
 		char expr[2048];
 		Com_sprintf( expr, sizeof( expr ), "return %s", text );
-		status = luaL_loadstring( wired_lua, expr );
+		status = luaL_loadstring( s_ws->lua, expr );
 		if ( status == 0 ) {
-			status = lua_pcall( wired_lua, 0, LUA_MULTRET, 0 );
+			status = lua_pcall( s_ws->lua, 0, LUA_MULTRET, 0 );
 			if ( status == 0 ) {
-				int nresults = lua_gettop( wired_lua );
+				int nresults = lua_gettop( s_ws->lua );
 				if ( nresults > 0 ) {
 					int i;
 					for ( i = 1; i <= nresults; i++ ) {
-						const char *s = WiredScript_ToString( wired_lua, i );
+						const char *s = WiredScript_ToString( s_ws->lua, i );
 						if ( i > 1 ) Com_Printf( "\t" );
 						Com_Printf( "%s", s ? s : "nil" );
-						lua_pop( wired_lua, 1 );
+						lua_pop( s_ws->lua, 1 );
 					}
 					Com_Printf( "\n" );
 				}
-				lua_settop( wired_lua, 0 );
+				lua_settop( s_ws->lua, 0 );
 				return qtrue;
 			}
-			lua_pop( wired_lua, 1 );
+			lua_pop( s_ws->lua, 1 );
 		} else {
-			lua_pop( wired_lua, 1 );
+			lua_pop( s_ws->lua, 1 );
 		}
 	}
 
 	/* Try as statement */
-	status = luaL_loadstring( wired_lua, text );
+	status = luaL_loadstring( s_ws->lua, text );
 	if ( status != 0 ) {
-		lua_pop( wired_lua, 1 );
+		lua_pop( s_ws->lua, 1 );
 		return qfalse;
 	}
 
-	status = lua_pcall( wired_lua, 0, 0, 0 );
+	status = lua_pcall( s_ws->lua, 0, 0, 0 );
 	if ( status != 0 ) {
-		const char *err = lua_tostring( wired_lua, -1 );
+		const char *err = lua_tostring( s_ws->lua, -1 );
 		Com_Printf( S_COLOR_RED "Lua error: %s\n", err ? err : "unknown" );
-		lua_pop( wired_lua, 1 );
+		lua_pop( s_ws->lua, 1 );
 	}
-	lua_settop( wired_lua, 0 );
+	lua_settop( s_ws->lua, 0 );
 	return qtrue;
 }
 
@@ -290,7 +315,7 @@ void WiredScript_ExecFile( const char *filename ) {
 	char *buf;
 	int status;
 
-	if ( !wired_lua ) return;
+	if ( !s_ws || !s_ws->lua ) return;
 
 	{
 		const char *ext = strrchr( filename, '.' );
@@ -316,22 +341,22 @@ void WiredScript_ExecFile( const char *filename ) {
 	{
 		char chunkName[256];
 		Com_sprintf( chunkName, sizeof( chunkName ), "@%s", filename );
-		status = luaL_loadbuffer( wired_lua, buf, len, chunkName );
+		status = luaL_loadbuffer( s_ws->lua, buf, len, chunkName );
 	}
 	Z_Free( buf );
 
 	if ( status != 0 ) {
-		const char *err = lua_tostring( wired_lua, -1 );
+		const char *err = lua_tostring( s_ws->lua, -1 );
 		Com_Printf( S_COLOR_RED "Lua load error (%s): %s\n", filename, err ? err : "unknown" );
-		lua_pop( wired_lua, 1 );
+		lua_pop( s_ws->lua, 1 );
 		return;
 	}
 
-	status = lua_pcall( wired_lua, 0, 0, 0 );
+	status = lua_pcall( s_ws->lua, 0, 0, 0 );
 	if ( status != 0 ) {
-		const char *err = lua_tostring( wired_lua, -1 );
+		const char *err = lua_tostring( s_ws->lua, -1 );
 		Com_Printf( S_COLOR_RED "Lua exec error (%s): %s\n", filename, err ? err : "unknown" );
-		lua_pop( wired_lua, 1 );
+		lua_pop( s_ws->lua, 1 );
 		return;
 	}
 
@@ -341,32 +366,34 @@ void WiredScript_ExecFile( const char *filename ) {
 /* ---- Binding registration --------------------------------------------- */
 
 void WiredScript_RegisterBindings( WiredScript_BindingFn fn ) {
-	if ( numBindingRegistrars >= MAX_BINDING_REGISTRARS ) {
+	if ( !s_ws ) {
+		Com_Printf( S_COLOR_RED "WiredScript: RegisterBindings called before Init\n" );
+		return;
+	}
+	if ( s_ws->numRegistrars >= MAX_BINDING_REGISTRARS ) {
 		Com_Printf( S_COLOR_RED "WiredScript: binding registrar table full\n" );
 		return;
 	}
-	bindingRegistrars[numBindingRegistrars++] = fn;
+	s_ws->registrars[s_ws->numRegistrars++] = fn;
 }
 
 void WiredScript_PostInit( void ) {
 	int i;
 
-	if ( !wired_lua ) {
+	if ( !s_ws || !s_ws->lua ) {
 		return;
 	}
 
-	for ( i = 0; i < numBindingRegistrars; i++ ) {
-		bindingRegistrars[i]( wired_lua );
+	for ( i = 0; i < s_ws->numRegistrars; i++ ) {
+		s_ws->registrars[i]( s_ws->lua );
 	}
-	if ( numBindingRegistrars ) {
-		Com_Printf( "WiredScript: %d binding registrar(s) applied\n", numBindingRegistrars );
+	if ( s_ws->numRegistrars ) {
+		Com_Printf( "WiredScript: %d binding registrar(s) applied\n", s_ws->numRegistrars );
 	}
 }
 
 /* ---- Extension point -------------------------------------------------- */
 
 lua_State *WiredScript_GetState( void ) {
-	return wired_lua;
+	return s_ws ? s_ws->lua : NULL;
 }
-
-#endif /* FEAT_LUA */

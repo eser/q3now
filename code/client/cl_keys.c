@@ -24,9 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/ui/cl_wired_msdf.h"
 #include "wired/ui/cl_wired_fonts.h"
 #include "wired/ui/cl_wired_text.h"
-#if FEAT_LUA
 #include "../qcommon/scripting/wired_scripting.h"
-#endif
 
 /*
 
@@ -505,11 +503,9 @@ static void Console_Key( int key ) {
 			if ( !g_consoleField.buffer[0] ) {
 				return;	// empty lines just scroll the console without adding to history
 			}
-#if FEAT_LUA
 			else if ( WiredScript_TryEval( g_consoleField.buffer ) ) {
 				/* Lua handled it -- skip chat dispatch */
 			}
-#endif
 			else {
 				Cbuf_AddText( "cmd say " );
 				Cbuf_AddText( g_consoleField.buffer );
@@ -690,6 +686,18 @@ static void CL_KeyDownEvent( int key, unsigned time )
 
 	// escape is always handled special
 	if ( key == K_ESCAPE ) {
+		// Recovery: if WiredUI is dead and the user is in the fullscreen fallback
+		// console (no KEYCATCH_UI/CGAME, no intentional ~ console open), try to
+		// bring WiredUI back. Mirrors the Con_DrawConsole fullscreen-fallback gate
+		// at cl_console.c:1386 — triggers only when the user is looking at that screen.
+		if ( cls.state == CA_DISCONNECTED
+		     && !( Key_GetCatcher() & KEYCATCH_CONSOLE )
+		     && !( Key_GetCatcher() & ( KEYCATCH_UI | KEYCATCH_CGAME ) )
+		     && !WiredUI_IsHealthy() ) {
+			WiredUI_Activate();
+			return;
+		}
+
 #ifdef USE_CURL
 		if ( Com_DL_InProgress( &download ) && download.mapAutoDownload ) {
 			Com_DL_Cleanup( &download );
@@ -729,7 +737,7 @@ static void CL_KeyDownEvent( int key, unsigned time )
 				S_StopAllSounds();
 #else
 				Cmd_Clear();
-				Cvar_Set( "com_errorMessage", "" );
+				Com_ClearLastError();
 				if ( cls.state == CA_CINEMATIC ) {
 					SCR_StopCinematic();
 				} else if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already

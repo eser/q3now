@@ -14,8 +14,6 @@ before WiredScript_PostInit() runs them against the live VM.
 #ifndef WIRED_SCRIPTING_H
 #define WIRED_SCRIPTING_H
 
-#if FEAT_LUA
-
 /* Forward-declare lua_State so subsystems can extend the VM without
    pulling in the full Lua headers. */
 typedef struct lua_State lua_State;
@@ -50,7 +48,5 @@ void WiredScript_RegisterBindings( WiredScript_BindingFn fn );
 /* Return the active Lua state so subsystems can register
    additional bindings.  Returns NULL when Lua is not initialised. */
 lua_State *WiredScript_GetState( void );
-
-#endif /* FEAT_LUA */
 
 #endif /* WIRED_SCRIPTING_H */

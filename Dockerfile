@@ -50,8 +50,6 @@ COPY . .
 
 # Configure: dedicated server only (no SDL, no renderers)
 # WASM enabled for portable game module support
-# QUIC enabled for transport + HTTP health endpoint; UDP game transport disabled (Phase 4)
-# (USE_QUIC_* and USE_QUIC_GAME are now ON by default; USE_UDP is OFF by default)
 RUN cmake -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DUSE_SDL=OFF \
@@ -59,12 +57,6 @@ RUN cmake -S . -B build -G Ninja \
     -DUSE_VULKAN=OFF \
     -DUSE_RENDERER_DLOPEN=OFF \
     -DUSE_WASM=ON \
-    -DUSE_QUIC=ON \
-    -DUSE_QUIC_OBSERVE=ON \
-    -DUSE_QUIC_CONTROL=ON \
-    -DUSE_QUIC_HTTP=ON \
-    -DUSE_QUIC_GAME=ON \
-    -DUSE_UDP=OFF \
     -DWASI_SDK_PREFIX=/opt/wasi-sdk
 
 # Build only the dedicated server + game modules (skip client which needs

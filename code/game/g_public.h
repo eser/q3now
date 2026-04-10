@@ -418,21 +418,21 @@ typedef enum {
 	// ── QUIC transport event emission (q3now extension) ──────────
 	// Game code calls these via syscall traps to emit structured
 	// events to the QUIC event stream. Only functional when
-	// FEAT_QUIC_OBSERVE is enabled; otherwise handled as no-ops.
-	G_QUIC_EMIT_KILL = 800,        // ( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos )
-	G_QUIC_EMIT_DAMAGE,            // ( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos )
-	G_QUIC_EMIT_ITEM_PICKUP,       // ( int client, const char *item, vec3_t pos )
-	G_QUIC_EMIT_CHAT,              // ( int client, const char *msg, qboolean teamOnly )
-	G_QUIC_EMIT_MATCH_EVENT,       // ( const char *type, const char *data )
-	G_QUIC_EMIT_DELAG,             // ( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos )
-	G_QUIC_EMIT_BOT_EVENT,         // ( int bot_id, const char *event_type, int param1, int param2, vec3_t pos )
+	// FEAT_WIREDNET_OBSERVE is enabled; otherwise handled as no-ops.
+	G_WIREDNET_EMIT_KILL = 800,        // ( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos )
+	G_WIREDNET_EMIT_DAMAGE,            // ( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos )
+	G_WIREDNET_EMIT_ITEM_PICKUP,       // ( int client, const char *item, vec3_t pos )
+	G_WIREDNET_EMIT_CHAT,              // ( int client, const char *msg, qboolean teamOnly )
+	G_WIREDNET_EMIT_MATCH_EVENT,       // ( const char *type, const char *data )
+	G_WIREDNET_EMIT_DELAG,             // ( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos )
+	G_WIREDNET_EMIT_BOT_EVENT,         // ( int bot_id, const char *event_type, int param1, int param2, vec3_t pos )
 
-	// QUIC congestion-control metrics — require FEAT_QUIC_TRANSPORT.
+	// QUIC congestion-control metrics
 	// Loss is returned as integer per-mille (0–1000) to avoid float in
 	// the QVM trap interface.
-	G_QUIC_GET_PING,               // ( int clientNum ) -> int ms; -1 if unknown
-	G_QUIC_GET_LOSS,               // ( int clientNum ) -> int loss*1000 (‰); 0 if unknown
-	G_QUIC_GET_BANDWIDTH           // ( int clientNum ) -> int kbps; 0 if unknown
+	G_WIREDNET_GET_PING,               // ( int clientNum ) -> int ms; -1 if unknown
+	G_WIREDNET_GET_LOSS,               // ( int clientNum ) -> int loss*1000 (‰); 0 if unknown
+	G_WIREDNET_GET_BANDWIDTH           // ( int clientNum ) -> int kbps; 0 if unknown
 
 } gameImport_t;
 
