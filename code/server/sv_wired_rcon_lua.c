@@ -1,7 +1,5 @@
 #include "server.h"
 
-#if FEAT_LUA
-
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
@@ -573,23 +571,3 @@ qboolean SV_RconLua_Execute( const char *code, char *output, int outputLen ) {
 	s_capture = NULL;
 	return qtrue;
 }
-
-#else
-
-void SV_RconLua_Init( void ) {
-	Com_Memset( &svs.rconLua, 0, sizeof( svs.rconLua ) );
-}
-
-void SV_RconLua_Shutdown( void ) {
-	Com_Memset( &svs.rconLua, 0, sizeof( svs.rconLua ) );
-}
-
-qboolean SV_RconLua_Execute( const char *code, char *output, int outputLen ) {
-	(void)code;
-	if ( output && outputLen > 0 ) {
-		Q_strncpyz( output, "Lua support is disabled in this build", outputLen );
-	}
-	return qfalse;
-}
-
-#endif

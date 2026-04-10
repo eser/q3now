@@ -164,9 +164,27 @@ static void WiredOD_RedScore( float x, float y, float w, float h, vec4_t itemCol
 }
 
 static void WiredOD_Killer( float x, float y, float w, float h, vec4_t itemColor ) {
-	// The "who killed you" text — uses killerName from the bridge
 	if ( !wiredHud || !wiredHud->valid ) return;
-	// TODO: add killerName to wiredHudState_t — for now, stub
+	if ( !wiredHud->killerName[0] ) return;
+
+	{
+		char msg[256];
+		vec4_t color;
+		float charSize;
+
+		Com_sprintf( msg, sizeof( msg ), "Fragged by %s", wiredHud->killerName );
+		Vector4Set( color, 1.0f, 1.0f, 0.2f, 1.0f );
+		charSize = h > 20.0f ? 12.0f : 8.0f;
+
+		Text_Draw( msg,
+			x + w * 0.5f,
+			y + h * 0.25f,
+			FONT_DISPLAY,
+			charSize,
+			color,
+			TEXT_ALIGN_CENTER,
+			TEXT_DROPSHADOW );
+	}
 }
 
 static void WiredOD_GameType( float x, float y, float w, float h, vec4_t itemColor ) {
@@ -214,7 +232,7 @@ static void WiredOD_NetMapPreview( float x, float y, float w, float h, vec4_t it
 	char lsBuf[MAX_QPATH];
 	qhandle_t shader;
 
-	Cvar_VariableStringBuffer( "ui_mapLevelshot", lsBuf, sizeof( lsBuf ) );
+	WiredUI_StateGetString( "ui_mapLevelshot", lsBuf, sizeof( lsBuf ) );
 	if ( !lsBuf[0] ) return;
 
 	shader = re.RegisterShaderNoMip( lsBuf );

@@ -24,11 +24,26 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/qcommon.h"
 #include "q_feats.h"
 
-#if FEAT_QUIC_TRANSPORT
-#include "../webtransport/wt_public.h"
+#include "../wired/net/wn_public.h"
 // Set to qtrue when QUIC consumed a packet — tells NET_Event to keep draining
 static qboolean net_quicConsumedPacket;
-#endif
+
+// Last sendto error string — written by Sys_SendPacket, polled by WN_ClientFlushOutbound.
+// Clear-before-send contract: consumer must call NET_ClearLastSendError() before the send
+// loop, then NET_HasLastSendError() after.  No timestamp needed.
+static char net_lastSendError[512];
+
+void NET_ClearLastSendError( void ) {
+	net_lastSendError[0] = '\0';
+}
+
+qboolean NET_HasLastSendError( void ) {
+	return net_lastSendError[0] != '\0';
+}
+
+const char *NET_LastSendError( void ) {
+	return net_lastSendError;
+}
 
 #ifdef _WIN32
 #	include <winsock2.h>
@@ -182,14 +197,6 @@ static cvar_t	*net_mcast6addr;
 static cvar_t	*net_mcast6iface;
 #endif
 static cvar_t	*net_dropsim;
-
-#if FEAT_QUIC_GAME
-// Controls which game transport new outgoing connections use.
-// "udp"  — legacy Q3 netchan over raw UDP (default during transition)
-// "quic" — QUIC datagrams + stream handshake
-// "auto" — prefer QUIC when available, fall back to UDP
-static cvar_t	*net_transport;
-#endif
 
 static sockaddr_t socksRelayAddr;
 
@@ -609,7 +616,7 @@ const char *NET_AdrToString( const netadr_t *a )
 		tmp.type = NA_IP;
 		NetadrToSockadr( &tmp, &sadr );
 		Sys_SockaddrToString( ipstr, sizeof(ipstr), &sadr );
-		Com_sprintf( s, sizeof(s), "quic:%s", ipstr );
+		Com_sprintf( s, sizeof(s), "wirednet:%s", ipstr );
 	}
 #if FEAT_IPV6
 	else if (a->type == NA_QUIC6)
@@ -620,7 +627,7 @@ const char *NET_AdrToString( const netadr_t *a )
 		tmp.type = NA_IP6;
 		NetadrToSockadr( &tmp, &sadr );
 		Sys_SockaddrToString( ipstr, sizeof(ipstr), &sadr );
-		Com_sprintf( s, sizeof(s), "quic6:%s", ipstr );
+		Com_sprintf( s, sizeof(s), "wirednet6:%s", ipstr );
 	}
 #endif
 
@@ -651,7 +658,7 @@ const char *NET_AdrToStringwPort( const netadr_t *a )
 		tmp.type = NA_IP6;
 		NetadrToSockadr( &tmp, &sadr );
 		Sys_SockaddrToString( ipstr, sizeof(ipstr), &sadr );
-		Com_sprintf( s, sizeof(s), "quic6:[%s]:%hu", ipstr, ntohs(a->port) );
+		Com_sprintf( s, sizeof(s), "wirednet6:[%s]:%hu", ipstr, ntohs(a->port) );
 	}
 #endif
 
@@ -740,7 +747,6 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 				return qfalse;
 			}
 
-#if FEAT_QUIC_TRANSPORT
 			// QUIC demux — check first byte AFTER SOCKS header processing.
 			// Must check 4-byte Q3 connectionless marker (0xFFFFFFFF) BEFORE
 			// single-byte QUIC header check, because both start with 0xFF.
@@ -750,22 +756,16 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 				// Skip Q3 connectionless packets (4 bytes of 0xFF)
 				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
 					// Not QUIC — fall through to Netchan
-				} else if ( QUIC_CheckPacket( net_from, pkt_data, pkt_len ) ) {
+				} else if ( WN_CheckPacket( net_from, pkt_data, pkt_len ) ) {
 					// Consumed by QUIC — do not process as Netchan
 					net_quicConsumedPacket = qtrue;
 					return qfalse;
 				}
 			}
-#endif
 
-#if !FEAT_UDP
 			// UDP game transport is disabled — drop all non-QUIC packets.
 			// QUIC rides over this socket; pure Q3/UDP netchan is not accepted.
 			return qfalse;
-#endif
-
-			net_message->cursize = ret;
-			return qtrue;
 		}
 	}
 
@@ -794,25 +794,18 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 				return qfalse;
 			}
 
-#if FEAT_QUIC_TRANSPORT
 			// QUIC demux — IPv6 path (same logic as IPv4)
 			{
 				byte *pkt_data = net_message->data + net_message->readcount;
 				int   pkt_len  = ret - net_message->readcount;
 				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
 					// Q3 connectionless — not QUIC
-				} else if ( QUIC_CheckPacket( net_from, pkt_data, pkt_len ) ) {
+				} else if ( WN_CheckPacket( net_from, pkt_data, pkt_len ) ) {
 					return qfalse;
 				}
 			}
-#endif
 
-#if !FEAT_UDP
 			return qfalse;
-#endif
-
-			net_message->cursize = ret;
-			return qtrue;
 		}
 	}
 
@@ -840,25 +833,18 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 				return qfalse;
 			}
 
-#if FEAT_QUIC_TRANSPORT
 			// QUIC demux — multicast6 path (same logic as IPv4/IPv6)
 			{
 				byte *pkt_data = net_message->data + net_message->readcount;
 				int   pkt_len  = ret - net_message->readcount;
 				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
 					// Q3 connectionless — not QUIC
-				} else if ( QUIC_CheckPacket( net_from, pkt_data, pkt_len ) ) {
+				} else if ( WN_CheckPacket( net_from, pkt_data, pkt_len ) ) {
 					return qfalse;
 				}
 			}
-#endif
 
-#if !FEAT_UDP
 			return qfalse;
-#endif
-
-			net_message->cursize = ret;
-			return qtrue;
 		}
 	}
 #endif // FEAT_IPV6
@@ -878,12 +864,10 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 	int ret = SOCKET_ERROR;
 	sockaddr_t addr;
 
-#if FEAT_QUIC_GAME
 	if ( to->type == NA_QUIC || to->type == NA_QUIC6 ) {
-		QUIC_SendGamePacketToAddr( to, data, length );
+		WN_SendGamePacketToAddr( to, data, length );
 		return;
 	}
-#endif
 
 	switch ( to->type ) {
 		case NA_BROADCAST:
@@ -913,6 +897,22 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 #endif
 
 	NetadrToSockadr( to, &addr );
+
+#ifndef NDEBUG
+	{
+		int forcedErrno = Cvar_VariableIntegerValue( "net_forceSendError" );
+		if ( forcedErrno != 0 ) {
+			// Synthetic fault injection — one-shot, resets to 0 after firing.
+			// Use from console: net_forceSendError 49   (EADDRNOTAVAIL on macOS)
+			Q_strncpyz( net_lastSendError,
+			            va( "Synthetic fault (net_forceSendError=%d)", forcedErrno ),
+			            sizeof( net_lastSendError ) );
+			Cvar_Set( "net_forceSendError", "0" );
+			Com_Printf( "Sys_SendPacket: %s\n", net_lastSendError );
+			return;
+		}
+	}
+#endif
 
 	if ( usingSocks && to->type == NA_IP ) {
 		socks5_udp_request_t cmd;
@@ -950,6 +950,7 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 			return;
 		}
 
+		Q_strncpyz( net_lastSendError, NET_ErrorString(), sizeof( net_lastSendError ) );
 		Com_Printf( "Sys_SendPacket: %s\n", NET_ErrorString() );
 	}
 }
@@ -1796,19 +1797,6 @@ static qboolean NET_GetCvars( void ) {
 	net_dropsim = Cvar_Get( "net_dropsim", "", CVAR_TEMP );
 	Cvar_SetDescription( net_dropsim, "Simulated packet drops." );
 
-#if FEAT_QUIC_GAME
-#if FEAT_UDP
-	net_transport = Cvar_Get( "net_transport", "udp", CVAR_ARCHIVE_ND );
-#else
-	net_transport = Cvar_Get( "net_transport", "quic", CVAR_ARCHIVE_ND );
-#endif
-	Cvar_SetDescription( net_transport,
-		"Game transport for new outgoing connections.\n"
-		"\"udp\"  — legacy Q3 netchan over raw UDP\n"
-		"\"quic\" — QUIC datagrams + stream handshake (requires QUIC certs)\n"
-		"\"auto\" — prefer QUIC when available, fall back to UDP" );
-#endif
-
 	return modified ? qtrue : qfalse;
 }
 
@@ -1977,31 +1965,33 @@ static void NET_Event( const fd_set *fdr )
 		}
 		else
 		{
-#if FEAT_QUIC_TRANSPORT
 			// QUIC consumed the packet — keep draining, there may be more
 			if ( net_quicConsumedPacket ) {
 				net_quicConsumedPacket = qfalse;
 				continue;
 			}
-#endif
 			break;
 		}
 	}
 
-#if FEAT_QUIC_GAME
 	/* Pump client QUIC timers (non-dedicated: drive TLS handshake + ACKs) */
 #if !defined(DEDICATED)
-	QUIC_ClientFrame();
+	WN_ClientFrame();
+	/* Poll reliable game streams (bootstrap/downloads/events) */
+	CL_CheckReliableStreams();
+	/* Poll unreliable datagrams (snapshot delivery) */
+	CL_CheckSnapshotDatagrams();
 #endif
 
-	/* Drain QUIC game datagrams that were queued while picoquic processed
-	   UDP packets above.  Each call dequeues one netchan packet and sets
-	   net_from->type to NA_QUIC / NA_QUIC6 so the dispatch path routes it
-	   through the normal SV_PacketEvent / CL_PacketEvent handlers. */
+	/* QUIC game packet drain — kept for compatibility; WN_GetGamePacket now
+	   always returns qfalse.  Server usercmd datagrams are consumed by
+	   SV_DrainQUICUsercmds; client snapshot datagrams by CL_CheckSnapshotDatagrams.
+	   Draining either queue here would starve the real consumer and break
+	   delta sequencing ("Delta request from out of date packet"). */
 	while ( 1 ) {
 		MSG_Init( &netmsg, bufData, MAX_MSGLEN );
 
-		if ( !QUIC_GetGamePacket( &from, &netmsg ) )
+		if ( !WN_GetGamePacket( &from, &netmsg ) )
 			break;
 
 #ifdef DEDICATED
@@ -2013,7 +2003,6 @@ static void NET_Event( const fd_set *fdr )
 			CL_PacketEvent( &from, &netmsg );
 #endif
 	}
-#endif
 }
 
 
@@ -2100,4 +2089,287 @@ NET_Restart_f
 static void NET_Restart_f( void )
 {
 	NET_Config( qtrue );
+}
+
+
+/*
+===========================================================================
+Packet send / loopback / OOB / DNS utilities
+(moved here from net_chan.c; no netchan framing — pure UDP/loopback plumbing)
+===========================================================================
+*/
+
+/*
+=============================================================================
+LOOPBACK BUFFERS FOR LOCAL PLAYER
+=============================================================================
+*/
+#ifndef DEDICATED
+
+#define	MAX_LOOPBACK	32
+
+typedef struct {
+	byte	data[MAX_PACKETLEN];
+	int		datalen;
+} loopmsg_t;
+
+typedef struct {
+	loopmsg_t	msgs[MAX_LOOPBACK];
+	int			get, send;
+} loopback_t;
+
+static loopback_t	loopbacks[2]; /* NS_CLIENT, NS_SERVER */
+
+qboolean NET_GetLoopPacket( netsrc_t sock, netadr_t *net_from, msg_t *net_message )
+{
+	int		i;
+	loopback_t	*loop;
+
+	loop = &loopbacks[sock];
+
+	if ( loop->send - loop->get > MAX_LOOPBACK )
+		loop->get = loop->send - MAX_LOOPBACK;
+
+	if ( loop->send - loop->get <= 0 )
+		return qfalse;
+
+	i = loop->get & (MAX_LOOPBACK-1);
+	loop->get++;
+
+	Com_Memcpy( net_message->data, loop->msgs[i].data, loop->msgs[i].datalen );
+	net_message->cursize = loop->msgs[i].datalen;
+	Com_Memset( net_from, 0, sizeof(*net_from) );
+	net_from->type = NA_LOOPBACK;
+	return qtrue;
+}
+
+static void NET_SendLoopPacket( netsrc_t sock, int length, const void *data )
+{
+	int		i;
+	loopback_t	*loop;
+
+	loop = &loopbacks[sock ^ 1];
+
+	i = loop->send & (MAX_LOOPBACK-1);
+	loop->send++;
+
+	Com_Memcpy( loop->msgs[i].data, data, length );
+	loop->msgs[i].datalen = length;
+}
+
+#endif /* !DEDICATED */
+
+/*
+=============================================================================
+PACKET DELAY QUEUE
+=============================================================================
+*/
+
+typedef struct packetQueue_s {
+	struct packetQueue_s *next;
+	struct packetQueue_s *prev;
+	int length;
+	byte *data;
+	netadr_t to;
+	netsrc_t sock;
+	int release;
+} packetQueue_t;
+
+static packetQueue_t *packetQueue = NULL;
+
+static packetQueue_t *PQ_Remove( packetQueue_t *head, packetQueue_t *item ) {
+	if ( item->next != item ) {
+		item->next->prev = item->prev;
+		item->prev->next = item->next;
+	} else {
+		item->next = item->prev = NULL;
+	}
+	return item == head ? item->next : head;
+}
+
+static packetQueue_t *PQ_Insert( packetQueue_t *head, packetQueue_t *item ) {
+	if ( head ) {
+		packetQueue_t *prev = head->prev;
+		packetQueue_t *next = head;
+		prev->next = item;
+		next->prev = item;
+		item->prev = prev;
+		item->next = next;
+		return head;
+	} else {
+		item->prev = item->next = item;
+		return item;
+	}
+}
+
+static packetQueue_t *PQ_Process( packetQueue_t *head, const int time_diff ) {
+	packetQueue_t *item = head;
+	int do_break = 0;
+	int now;
+
+	do {
+		if ( head == NULL ) break;
+		if ( head->prev == item ) do_break = 1;
+
+		now = Sys_Milliseconds();
+		if ( now - item->release >= time_diff ) {
+			packetQueue_t *next = item->next;
+#ifndef DEDICATED
+			if ( item->to.type == NA_LOOPBACK )
+				NET_SendLoopPacket( item->sock, item->length, item->data );
+			else
+#endif
+				Sys_SendPacket( item->length, item->data, &item->to );
+			head = PQ_Remove( head, item );
+			Z_Free( item );
+			item = next;
+		} else {
+			item = item->next;
+		}
+	} while ( do_break == 0 );
+
+	return head;
+}
+
+void NET_QueuePacket( netsrc_t sock, int length, const void *data,
+                      const netadr_t *to, int offset )
+{
+	packetQueue_t *pkt;
+
+	if ( to->type == NA_BOT || to->type == NA_BAD ) return;
+	if ( com_timescale->value == 0.0f ) return;
+	if ( offset > 999 ) offset = 999;
+
+	pkt = S_Malloc( sizeof(*pkt) + length );
+	pkt->data = (byte *)( pkt + 1 );
+	Com_Memcpy( pkt->data, data, length );
+	pkt->length  = length;
+	pkt->to      = *to;
+	pkt->sock    = sock;
+	pkt->release = Sys_Milliseconds() + (int)( (float)offset / com_timescale->value );
+	pkt->next    = NULL;
+
+	packetQueue = PQ_Insert( packetQueue, pkt );
+}
+
+void NET_FlushPacketQueue( int time_diff ) {
+	packetQueue = PQ_Process( packetQueue, time_diff );
+}
+
+void NET_SendPacket( netsrc_t sock, int length, const void *data, const netadr_t *to )
+{
+	if ( to->type == NA_BOT || to->type == NA_BAD ) return;
+
+#ifndef DEDICATED
+	if ( sock == NS_CLIENT && cl_packetdelay->integer > 0 ) {
+		NET_QueuePacket( sock, length, data, to, cl_packetdelay->integer );
+	} else
+#endif
+	if ( sock == NS_SERVER && sv_packetdelay->integer > 0 ) {
+		NET_QueuePacket( sock, length, data, to, sv_packetdelay->integer );
+	}
+#ifndef DEDICATED
+	else if ( to->type == NA_LOOPBACK ) {
+		NET_SendLoopPacket( sock, length, data );
+	}
+#endif
+	else {
+		Sys_SendPacket( length, data, to );
+	}
+}
+
+/*
+===============
+NET_OutOfBandPrint
+Sends a text message in an out-of-band datagram
+================
+*/
+void QDECL NET_OutOfBandPrint( netsrc_t sock, const netadr_t *adr,
+                                const char *format, ... )
+{
+	va_list	argptr;
+	char	string[MAX_PACKETLEN];
+	int		len;
+
+	string[0] = -1; string[1] = -1; string[2] = -1; string[3] = -1;
+
+	va_start( argptr, format );
+	len = Q_vsnprintf( string + 4, sizeof(string) - 4, format, argptr ) + 4;
+	va_end( argptr );
+
+	NET_SendPacket( sock, len, string, adr );
+}
+
+/*
+===============
+NET_OutOfBandCompress
+Sends a compressed message in an out-of-band datagram
+================
+*/
+void NET_OutOfBandCompress( netsrc_t sock, const netadr_t *adr,
+                             const byte *data, int len )
+{
+	byte	string[MAX_INFO_STRING * 2];
+	int		i;
+	msg_t	mbuf;
+
+	string[0] = 0xff; string[1] = 0xff; string[2] = 0xff; string[3] = 0xff;
+	for ( i = 0; i < len; i++ )
+		string[i + 4] = data[i];
+
+	mbuf.data    = string;
+	mbuf.cursize = len + 4;
+	Huff_Compress( &mbuf, 12 );
+
+	NET_SendPacket( sock, mbuf.cursize, mbuf.data, adr );
+}
+
+/*
+=============
+NET_StringToAdr
+Traps "localhost" for loopback; passes everything else to Sys_StringToAdr.
+Returns 0 on failure, 1 if port was given, 2 if port was absent.
+=============
+*/
+int NET_StringToAdr( const char *s, netadr_t *a, netadrtype_t family )
+{
+	char	base[MAX_STRING_CHARS], *search;
+	char	*port = NULL;
+
+	if ( !strcmp( s, "localhost" ) ) {
+		Com_Memset( a, 0, sizeof(*a) );
+		a->type = NA_LOOPBACK;
+		a->port = BigShort( PORT_SERVER );
+		return 2;
+	}
+
+	Q_strncpyz( base, s, sizeof(base) );
+
+	if ( *base == '[' || Q_CountChar( base, ':' ) > 1 ) {
+		/* IPv6 */
+		search = strchr( base, ']' );
+		if ( search ) {
+			*search = '\0';
+			search++;
+			if ( *search == ':' ) port = search + 1;
+		}
+		search = ( *base == '[' ) ? base + 1 : base;
+	} else {
+		port = strchr( base, ':' );
+		if ( port ) { *port = '\0'; port++; }
+		search = base;
+	}
+
+	if ( !Sys_StringToAdr( search, a, family ) ) {
+		a->type = NA_BAD;
+		return 0;
+	}
+
+	if ( port ) {
+		a->port = BigShort( (short)atoi( port ) );
+		return 1;
+	} else {
+		a->port = BigShort( PORT_SERVER );
+		return 2;
+	}
 }

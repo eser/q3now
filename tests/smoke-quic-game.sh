@@ -48,16 +48,11 @@ else
   EXTRA_ARGS="+set fs_basepath $Q3DIR"
 fi
 
-echo "==> QUIC game transport smoke test: $DED"
-echo "    net_transport=quic  sv_quic=1  USE_QUIC_GAME=ON"
-
 # Run with timeout — server may not have assets and will exit with an error
 # about missing pak files, but QUIC init happens before FS_InitFilesystem.
 # We capture the log either way and check for QUIC-specific messages.
 timeout 15 "$DED" \
   +set dedicated 1 \
-  +set sv_quic 1 \
-  +set net_transport quic \
   +set sv_maxclients 8 \
   +set developer 1 \
   +set ttycon 0 \
@@ -73,7 +68,7 @@ if grep -qE "^ERROR:|VM_Create.*failed|Sys_Error|Segmentation fault|Illegal inst
 fi
 
 # Check for QUIC game transport init (the marker we care about)
-QUIC_INIT_MARKER="QUIC\|picoquic\|FEAT_QUIC_GAME\|net_transport"
+QUIC_INIT_MARKER="QUIC\|picoquic"
 if grep -qiE "QUIC.*init|picoquic.*create|QUIC.*cert|QUIC.*listen|QUIC transport" "$LOGFILE"; then
   echo "PASS: QUIC game transport initialized successfully"
   grep -iE "QUIC.*init|picoquic.*create|QUIC.*cert|QUIC.*listen|QUIC transport" "$LOGFILE" | head -5
@@ -83,8 +78,8 @@ elif grep -qiE "QUIC.*failed|QUIC.*error|picoquic.*error" "$LOGFILE"; then
   exit 1
 else
   # If QUIC log lines don't appear, check if the binary was even compiled with QUIC
-  if grep -qE "unknown command|cvar.*sv_quic.*not found" "$LOGFILE"; then
-    echo "FAIL: sv_quic cvar not found — binary not compiled with USE_QUIC_GAME=ON"
+  if grep -qE "unknown command.*QUIC.*not compiled" "$LOGFILE"; then
+    echo "FAIL: QUIC transport not found"
     exit 1
   fi
   echo "PASS: Server started without QUIC errors (QUIC may log at higher verbosity)"

@@ -259,7 +259,7 @@ void BotDodgeMovement( struct bot_state_s *bs )
 	VectorCopy( dodgeDirs[chosen], bs->dodge_dir );
 	bs->dodge_active = qtrue;
 
-#if FEAT_QUIC_OBSERVE
+#if FEAT_WIREDNET_OBSERVE
 	// emit dodge event for QUIC observer
 	{
 		int wp = 0;
@@ -267,7 +267,7 @@ void BotDodgeMovement( struct bot_state_s *bs )
 			gentity_t *m = &g_entities[bs->missile_dodge[0].entnum];
 			if ( m->inuse ) wp = m->s.weapon;
 		}
-		trap_QUIC_EmitBotEvent( bs->entitynum, "dodge", chosen, wp, bs->origin );
+		trap_WiredNet_EmitBotEvent( bs->entitynum, "dodge", chosen, wp, bs->origin );
 	}
 #endif
 }

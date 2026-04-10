@@ -165,6 +165,44 @@ void Com_EndRedirect( void )
 
 /*
 =============
+Com_SetLastError / Com_GetLastError / Com_HasLastError / Com_ClearLastError
+
+Application-level error API. Wraps the existing com_errorMessage buffer
+(above, line 127) and its com_errorMessage CVAR_ROM cvar. Both this API
+and Com_Error write to the same buffer; error_popup.wmenu reads the cvar
+and renders one dialog regardless of which path wrote it.
+
+Do NOT route Com_Error through this API — Com_SetLastError calls Com_Printf
+which can in some paths re-enter Com_Error, creating a recursion loop.
+=============
+*/
+void FORMAT_PRINTF(1, 2) QDECL Com_SetLastError( const char *fmt, ... ) {
+	va_list argptr;
+
+	va_start( argptr, fmt );
+	Q_vsnprintf( com_errorMessage, sizeof( com_errorMessage ), fmt, argptr );
+	va_end( argptr );
+
+	Cvar_Set( "com_errorMessage", com_errorMessage );
+	Com_Printf( "^1Error: %s\n", com_errorMessage );
+}
+
+const char *Com_GetLastError( void ) {
+	return com_errorMessage;
+}
+
+qboolean Com_HasLastError( void ) {
+	return com_errorMessage[0] != '\0';
+}
+
+void Com_ClearLastError( void ) {
+	com_errorMessage[0] = '\0';
+	Cvar_Set( "com_errorMessage", "" );
+}
+
+
+/*
+=============
 Com_Printf
 
 Both client and server can use this, and it will output
@@ -1984,6 +2022,10 @@ static void Com_Meminfo_f( void ) {
 	if ( st.freeBlocks > 1 ) {
 		Com_Printf( "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n", st.freeLargest, st.freeSmallest );
 	}
+
+	/* Persistent arena allocators */
+	Com_Printf( "\n--- Persistent Arenas (survive map changes) ---\n" );
+	Arena_PrintStats();
 }
 
 
@@ -2202,7 +2244,7 @@ static void Com_InitHunkMemory( void ) {
 
 	// cacheline align
 	s_hunkData = PADP( s_hunkData, 64 );
-	Hunk_Clear();
+	Hunk_ClearLevel();
 
 	Cmd_AddCommand( "meminfo", Com_Meminfo_f );
 #ifdef ZONE_DEBUG
@@ -2274,12 +2316,14 @@ void SV_ShutdownGameProgs( void );
 
 /*
 =================
-Hunk_Clear
+Hunk_ClearLevel
 
-The server calls this before shutting down or loading a new map
+Called on every map transition to reset the level-scoped portion of the hunk.
+Persistent subsystems (WiredScript_Arena, Console_Arena, Audio_Arena, renderer
+backEndData) live outside the hunk and are NOT affected by this call.
 =================
 */
-void Hunk_Clear( void ) {
+void Hunk_ClearLevel( void ) {
 
 #ifndef DEDICATED
 	CL_ShutdownCGame();
@@ -2302,7 +2346,7 @@ void Hunk_Clear( void ) {
 	hunk_permanent = &hunk_low;
 	hunk_temp = &hunk_high;
 
-	Com_Printf( "Hunk_Clear: reset the hunk ok\n" );
+	Com_Printf( "Hunk_ClearLevel: reset the hunk ok\n" );
 	VM_Clear();
 #ifdef HUNK_DEBUG
 	hunkblocks = NULL;
@@ -3048,7 +3092,7 @@ void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 		{
 			CL_Disconnect( qfalse );
 			CL_ShutdownAll();
-			CL_ClearMemory(); // Hunk_Clear(); // -EC-
+			CL_ClearMemory(); // Hunk_ClearLevel(); // -EC-
 		}
 #endif
 
@@ -3177,117 +3221,6 @@ qboolean Com_CDKeyValidate( const char *key, const char *checksum ) {
 	return qfalse;
 #endif
 }
-
-
-/*
-=================
-Com_ReadCDKey
-=================
-*/
-void Com_ReadCDKey( const char *filename ) {
-	fileHandle_t	f;
-	char			buffer[33];
-	char			fbuffer[MAX_OSPATH];
-
-	Com_sprintf( fbuffer, sizeof( fbuffer ), "%s/q3key", filename );
-
-	FS_SV_FOpenFileRead( fbuffer, &f );
-	if ( f == FS_INVALID_HANDLE ) {
-		Q_strncpyz( cl_cdkey, "                ", 17 );
-		return;
-	}
-
-	Com_Memset( buffer, 0, sizeof( buffer ) );
-
-	FS_Read( buffer, 16, f );
-	FS_FCloseFile( f );
-
-	if ( Com_CDKeyValidate(buffer, NULL) ) {
-		Q_strncpyz( cl_cdkey, buffer, 17 );
-	} else {
-		Q_strncpyz( cl_cdkey, "                ", 17 );
-	}
-}
-
-
-/*
-=================
-Com_AppendCDKey
-=================
-*/
-void Com_AppendCDKey( const char *filename ) {
-	fileHandle_t	f;
-	char			buffer[33];
-	char			fbuffer[MAX_OSPATH];
-
-	Com_sprintf(fbuffer, sizeof(fbuffer), "%s/q3key", filename);
-
-	FS_SV_FOpenFileRead( fbuffer, &f );
-	if ( f == FS_INVALID_HANDLE ) {
-		Q_strncpyz( &cl_cdkey[16], "                ", 17 );
-		return;
-	}
-
-	Com_Memset( buffer, 0, sizeof(buffer) );
-
-	FS_Read( buffer, 16, f );
-	FS_FCloseFile( f );
-
-	if ( Com_CDKeyValidate(buffer, NULL)) {
-		strcat( &cl_cdkey[16], buffer );
-	} else {
-		Q_strncpyz( &cl_cdkey[16], "                ", 17 );
-	}
-}
-
-
-#ifndef DEDICATED // bk001204
-/*
-=================
-Com_WriteCDKey
-=================
-*/
-static void Com_WriteCDKey( const char *filename, const char *ikey ) {
-	fileHandle_t	f;
-	char			fbuffer[MAX_OSPATH];
-	char			key[17];
-#ifndef _WIN32
-	mode_t			savedumask;
-#endif
-
-	Com_sprintf( fbuffer, sizeof(fbuffer), "%s/q3key", filename );
-
-	Q_strncpyz( key, ikey, 17 );
-
-	if( !Com_CDKeyValidate(key, NULL) ) {
-		return;
-	}
-
-#ifndef _WIN32
-	savedumask = umask(0077);
-#endif
-	f = FS_SV_FOpenFileWrite( fbuffer );
-	if ( f == FS_INVALID_HANDLE ) {
-		Com_Printf( "Couldn't write CD key to %s.\n", fbuffer );
-		goto out;
-	}
-
-	FS_Write( key, 16, f );
-
-	FS_Printf( f, Q_NEWLINE "// generated by quake, do not modify" Q_NEWLINE );
-	FS_Printf( f, "// Do not give this file to ANYONE." Q_NEWLINE );
-	FS_Printf( f, "// id Software and Activision will NOT ask you to send this file to them." Q_NEWLINE );
-
-	FS_FCloseFile( f );
-out:
-#ifndef _WIN32
-	umask(savedumask);
-#else
-	;
-#endif
-}
-#endif
-
 
 /*
 ** --------------------------------------------------------------------------------
@@ -3784,8 +3717,8 @@ Docker, systemd, k8s, or any 12-factor deployment:
   export Q3_SV_MAXCLIENTS=16
   export Q3_G_GAMETYPE=4
   export Q3_MAP=q3dm17
-  export Q3_SV_QUIC=1
-  export Q3_SV_QUICAUTHTOKEN="observer:member:user:abc123"
+  export Q3_SV_WIREDNET=1  # deprecated (ignored)
+  export Q3_SV_WIREDNETAUTHTOKEN="observer:member:user:abc123"
   ./q3now-ded
 
 Special vars:
@@ -3798,7 +3731,7 @@ Special vars:
 static const struct {
 	const char *env;      // env var name (after Q3_ prefix)
 	const char *cvar;     // cvar name
-} wt_env_map[] = {
+} wn_env_map[] = {
 	{ "SV_HOSTNAME",        "sv_hostname" },
 	{ "SV_MAXCLIENTS",      "sv_maxclients" },
 	{ "SV_PURE",            "sv_pure" },
@@ -3809,12 +3742,11 @@ static const struct {
 	{ "G_TIMELIMIT",        "g_timelimit" },
 	{ "NET_PORT",           "net_port" },
 	{ "COM_HUNKMEGS",       "com_hunkmegs" },
-	{ "SV_QUIC",            "sv_quic" },
-	{ "SV_QUICAUTHTOKEN",   "sv_quicAuthToken" },
-	{ "SV_QUICMAXCLIENTS",  "sv_quicMaxClients" },
-	{ "SV_QUICSTATERATE",   "sv_quicStateRate" },
-	{ "SV_QUICEVENTRATE",   "sv_quicEventRate" },
-	{ "SV_QUICRECORD",      "sv_quicRecord" },
+	{ "SV_WIREDNETAUTHTOKEN",   "sv_wirednetAuthToken" },
+	{ "SV_WIREDNETMAXCLIENTS",  "sv_wirednetMaxClients" },
+	{ "SV_WIREDNETSTATERATE",   "sv_wirednetStateRate" },
+	{ "SV_WIRDNETEVENTRATE",   "sv_wirednetEventRate" },
+	{ "SV_WIREDNETRECORD",      "sv_wirednetRecord" },
 	{ "RCONPASSWORD",       "sv_wiredRconPassword" },
 	{ "LOGFILE",            "logfile" },
 	{ NULL, NULL }
@@ -3826,13 +3758,13 @@ static void Com_SetCvarsFromEnvironment( void )
 	const char *val;
 	int count = 0;
 
-	for ( i = 0; wt_env_map[i].env != NULL; i++ ) {
+	for ( i = 0; wn_env_map[i].env != NULL; i++ ) {
 		char envname[128];
-		Com_sprintf( envname, sizeof(envname), "Q3_%s", wt_env_map[i].env );
+		Com_sprintf( envname, sizeof(envname), "Q3_%s", wn_env_map[i].env );
 		val = getenv( envname );
 		if ( val && *val ) {
-			Cvar_Set( wt_env_map[i].cvar, val );
-			Com_Printf( "ENV: %s = \"%s\" → %s\n", envname, val, wt_env_map[i].cvar );
+			Cvar_Set( wn_env_map[i].cvar, val );
+			Com_Printf( "ENV: %s = \"%s\" → %s\n", envname, val, wn_env_map[i].cvar );
 			count++;
 		}
 	}
@@ -3929,9 +3861,7 @@ void Com_Init( char *commandLine ) {
 	Cvar_Get( "com_mapAssetProfile", "modern", CVAR_ROM );
 	Cvar_Get( "com_mapBspVersion", "0", CVAR_ROM );
 
-#if FEAT_LUA
 	WiredScript_Init();
-#endif
 
 	com_logfile = Cvar_Get( "logfile", "0", CVAR_TEMP );
 	Cvar_CheckRange( com_logfile, "0", "4", CV_INTEGER );
@@ -4119,7 +4049,7 @@ void Com_Init( char *commandLine ) {
 
 	// Pick a random port value
 	Com_RandomBytes( (byte*)&qport, sizeof( qport ) );
-	Netchan_Init( qport & 0xffff );
+	/* Netchan_Init removed — Phase D: netchan replaced by QUIC transport */
 
 	VM_Init();
 	SV_Init();
@@ -4133,9 +4063,7 @@ void Com_Init( char *commandLine ) {
 	}
 #endif
 
-#if FEAT_LUA
 	WiredScript_PostInit();
-#endif
 
 	// add + commands from command line
 	if ( !Com_AddStartupCommands() ) {
@@ -4275,11 +4203,6 @@ void Com_WriteConfiguration( void ) {
 #ifndef DEDICATED
 	gamedir = FS_GetCurrentGameDir();
 	basegame = FS_GetBaseGameDir();
-	if ( UI_usesUniqueCDKey() && gamedir[0] && Q_stricmp( basegame, gamedir ) ) {
-		Com_WriteCDKey( gamedir, &cl_cdkey[16] );
-	} else {
-		Com_WriteCDKey( basegame, cl_cdkey );
-	}
 #endif
 }
 
@@ -4580,6 +4503,10 @@ void Com_Frame( qboolean noDelay ) {
 		timeBeforeServer = Sys_Milliseconds();
 	}
 
+	// Advance one phase of the async spawn state machine.
+	// Must run before SV_Frame so SV_Frame sees a consistent spawn state.
+	SV_SpawnServer_Tick();
+
 	SV_Frame( msec );
 
 	// if "dedicated" has been modified, start up
@@ -4696,9 +4623,7 @@ Com_Shutdown
 =================
 */
 static void Com_Shutdown( void ) {
-#if FEAT_LUA
 	WiredScript_Shutdown();
-#endif
 
 	BSP_Shutdown();
 

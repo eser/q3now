@@ -25,6 +25,9 @@
 #   make run-game DEV=1               developer mode (debug build)
 #   make run-game DEV=1 MAP=q3dm17    map with debug
 #   make run-game VM=1 MAP=q3dm17     VM modules + map
+#   make run-ded                      run dedicated server (no client)
+#   make run-ded DEV=1                dedicated + debug build + developer mode
+#   make run-ded DEV=1 MAP=q3dm17     dedicated + debug + load map
 #   make release            build + assemble + codesign + package
 #
 # VARIABLES (override on command line or env)
@@ -157,8 +160,8 @@ endif
 
 CMAKE_EXTRA_FLAGS ?=
 CMAKE_CHANNEL_FLAG := -DCHANNEL_SUFFIX="$(CHANNEL_SUFFIX)"
-CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
-CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
 CMAKE_BUILD_RELEASE     := cmake --build $(BUILD_DIR_RELEASE) --parallel $(JOBS)
 CMAKE_BUILD_DEBUG       := cmake --build $(BUILD_DIR_DEBUG) --parallel $(JOBS)
 
@@ -218,7 +221,7 @@ PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax21.$(PAK_EXT)
         copy-libs copy-build copy-build-debug copy-packs copy-all copy-all-debug \
         bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
         run-launcher run-game release \
-        check smoke test-features test-vm test-quic-game bench diff-api help
+        check smoke test-features test-vm test-quic-game bench diff-api lint help
 
 all: build
 
@@ -640,6 +643,22 @@ else
 	"$(Q3DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" $(_RUN_GAME_ARGS)
 endif
 
+# Compose dedicated-server args (dedicated 2 = no client, VM + map as run-game)
+_RUN_DED_ARGS := +set dedicated 2 $(_RUN_VM_ARGS)
+ifeq ($(DEV),1)
+_RUN_DED_ARGS += +set developer 1 +set g_cheats 1
+endif
+ifneq ($(MAP),)
+_RUN_DED_ARGS += +map $(MAP)
+endif
+
+run-ded: $(_RUN_GAME_DEP)
+ifeq ($(UNAME_S),Darwin)
+	"$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)-ded" $(_RUN_DED_ARGS)
+else
+	"$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" $(_RUN_DED_ARGS)
+endif
+
 
 # ── release ──────────────────────────────────────────────────────────────────
 # Verify outputs, build launcher + engine + paks, assemble .app, codesign,
@@ -762,6 +781,47 @@ diff-api:
 	@echo "--- cg_public.h ---"
 	@git diff $(UPSTREAM_REF) -- code/cgame/cg_public.h
 
+# ── lint ─────────────────────────────────────────────────────────────────────
+# Static analysis via clang-tidy.  Requires a compile_commands.json — run
+# "make configure" first if the build directory doesn't exist yet.
+# Override LINT_JOBS to control parallelism (default: CPU count).
+# Override LINT_SRCS to lint specific files: make lint LINT_SRCS="code/server/sv_main.c"
+
+CLANG_TIDY      ?= clang-tidy
+RUN_CLANG_TIDY  ?= $(shell command -v run-clang-tidy 2>/dev/null || echo /opt/homebrew/opt/llvm/bin/run-clang-tidy)
+LINT_JOBS       ?= $(JOBS)
+LINT_SRCS       ?=
+
+# macOS: Homebrew clang-tidy needs the SDK sysroot to find system headers
+ifeq ($(UNAME_S),Darwin)
+  LINT_EXTRA_ARGS := --extra-arg=-isysroot$(shell xcrun --show-sdk-path)
+else
+  LINT_EXTRA_ARGS :=
+endif
+
+lint: $(BUILD_DIR_RELEASE)/CMakeCache.txt
+	@if [ ! -f "$(BUILD_DIR_RELEASE)/compile_commands.json" ]; then \
+	  echo "ERROR: compile_commands.json not found — run 'make configure' first"; \
+	  exit 1; \
+	fi
+	@if [ -n "$(LINT_SRCS)" ]; then \
+	  echo "==> clang-tidy ($(LINT_SRCS))"; \
+	  $(CLANG_TIDY) -p $(BUILD_DIR_RELEASE) $(LINT_EXTRA_ARGS) $(LINT_SRCS); \
+	elif [ -x "$(RUN_CLANG_TIDY)" ]; then \
+	  echo "==> run-clang-tidy -j$(LINT_JOBS) (all project sources)"; \
+	  $(RUN_CLANG_TIDY) -p $(BUILD_DIR_RELEASE) -j $(LINT_JOBS) \
+	    -clang-tidy-binary $(CLANG_TIDY) \
+	    -extra-arg='-isysroot$(shell xcrun --show-sdk-path 2>/dev/null)' \
+	    -header-filter='^code/.*' \
+	    'code/.*\.c$$'; \
+	else \
+	  echo "==> clang-tidy (sequential — install run-clang-tidy for parallel)"; \
+	  find code -name '*.c' -not -path '*/asm/*' | sort | while read -r f; do \
+	    echo "  $$f"; \
+	    $(CLANG_TIDY) -p $(BUILD_DIR_RELEASE) $(LINT_EXTRA_ARGS) "$$f" || true; \
+	  done; \
+	fi
+
 # ══════════════════════════════════════════════════════════════════════════════
 # HELP
 # ══════════════════════════════════════════════════════════════════════════════
@@ -799,6 +859,8 @@ help:
 	@echo "    make run-game DEV=1               developer mode (debug build)"
 	@echo "    make run-game DEV=1 MAP=q3dm17    map with debug"
 	@echo "    make run-game VM=1 MAP=q3dm17     VM modules + map"
+	@echo "    make run-ded                      run dedicated server"
+	@echo "    make run-ded DEV=1 MAP=q3dm17     dedicated + debug + map"
 	@echo "    make release            build + assemble + codesign + package"
 	@echo ""
 	@echo "  Testing:"
@@ -808,6 +870,8 @@ help:
 	@echo "    make test-quic-game     QUIC game transport smoke test"
 	@echo "    make bench              timedemo benchmark"
 	@echo "    make diff-api           diff API headers vs upstream"
+	@echo "    make lint               static analysis via clang-tidy"
+	@echo "    make lint LINT_SRCS=f   lint specific file(s)"
 	@echo ""
 	@echo "  Variables:"
 	@echo "    Q3DIR=$(Q3DIR)"

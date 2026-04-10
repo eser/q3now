@@ -228,12 +228,10 @@ loading screen preview.  Only MST_PLANAR surfaces are included.
 ================
 */
 void CL_BuildBspPreview( const char *mapname ) {
-	fileHandle_t f;
-	int fileLen;
-	dheader_t header;
-	dsurface_t *surfaces = NULL;
-	drawVert_t *drawVerts = NULL;
-	char *entityString = NULL;
+	bspFile_t *bsp;
+	dsurface_t *surfaces;
+	drawVert_t *drawVerts;
+	const char *entityString;
 	int numSurfaces, numDrawVerts;
 	int i, j;
 	char bspPath[MAX_QPATH];
@@ -248,85 +246,27 @@ void CL_BuildBspPreview( const char *mapname ) {
 	// Build BSP path
 	Com_sprintf( bspPath, sizeof( bspPath ), "maps/%s.bsp", mapname );
 
-	// Open the BSP file
-	fileLen = FS_FOpenFileRead( bspPath, &f, qtrue );
-	if ( !f || fileLen < (int)sizeof( dheader_t ) ) {
-		if ( f ) {
-			FS_FCloseFile( f );
-		}
+	if ( !BSP_Load( bspPath, &bsp ) ) {
 		Com_DPrintf( "CL_BuildBspPreview: could not open %s\n", bspPath );
 		return;
 	}
 
-	// Read the BSP header
-	if ( FS_Read( &header, sizeof( header ), f ) != sizeof( header ) ) {
-		FS_FCloseFile( f );
-		Com_DPrintf( "CL_BuildBspPreview: failed to read header from %s\n", bspPath );
-		return;
-	}
+	drawVerts = bsp->drawVerts;
+	numDrawVerts = bsp->numDrawVerts;
+	surfaces = bsp->surfaces;
+	numSurfaces = bsp->numSurfaces;
+	entityString = bsp->entityString;
 
-	// Validate BSP ident and version
-	if ( LittleLong( header.ident ) != BSP_IDENT ||
-	     LittleLong( header.version ) != BSP_VERSION ) {
-		FS_FCloseFile( f );
-		Com_DPrintf( "CL_BuildBspPreview: %s has wrong ident/version\n", bspPath );
-		return;
-	}
-
-	// Byte-swap lump directory
-	for ( i = 0; i < HEADER_LUMPS; i++ ) {
-		header.lumps[i].fileofs = LittleLong( header.lumps[i].fileofs );
-		header.lumps[i].filelen = LittleLong( header.lumps[i].filelen );
-	}
-
-	// --- Read LUMP_DRAWVERTS ---
-	numDrawVerts = header.lumps[LUMP_DRAWVERTS].filelen / sizeof( drawVert_t );
-	if ( numDrawVerts <= 0 || header.lumps[LUMP_DRAWVERTS].filelen <= 0 ) {
-		FS_FCloseFile( f );
+	if ( numDrawVerts <= 0 || !drawVerts ) {
+		BSP_Free( bsp );
 		Com_DPrintf( "CL_BuildBspPreview: no draw verts in %s\n", bspPath );
 		return;
 	}
 
-	drawVerts = (drawVert_t *)Z_Malloc( header.lumps[LUMP_DRAWVERTS].filelen );
-	FS_Seek( f, header.lumps[LUMP_DRAWVERTS].fileofs, FS_SEEK_SET );
-	if ( FS_Read( drawVerts, header.lumps[LUMP_DRAWVERTS].filelen, f ) != header.lumps[LUMP_DRAWVERTS].filelen ) {
-		Z_Free( drawVerts );
-		FS_FCloseFile( f );
-		Com_DPrintf( "CL_BuildBspPreview: failed to read draw verts from %s\n", bspPath );
-		return;
-	}
-
-	// Byte-swap vertex positions (only xyz needed)
-	for ( i = 0; i < numDrawVerts; i++ ) {
-		drawVerts[i].xyz[0] = LittleFloat( drawVerts[i].xyz[0] );
-		drawVerts[i].xyz[1] = LittleFloat( drawVerts[i].xyz[1] );
-		// xyz[2] (Z) not needed for top-down projection
-	}
-
-	// --- Read LUMP_SURFACES ---
-	numSurfaces = header.lumps[LUMP_SURFACES].filelen / sizeof( dsurface_t );
-	if ( numSurfaces <= 0 || header.lumps[LUMP_SURFACES].filelen <= 0 ) {
-		Z_Free( drawVerts );
-		FS_FCloseFile( f );
+	if ( numSurfaces <= 0 || !surfaces ) {
+		BSP_Free( bsp );
 		Com_DPrintf( "CL_BuildBspPreview: no surfaces in %s\n", bspPath );
 		return;
-	}
-
-	surfaces = (dsurface_t *)Z_Malloc( header.lumps[LUMP_SURFACES].filelen );
-	FS_Seek( f, header.lumps[LUMP_SURFACES].fileofs, FS_SEEK_SET );
-	if ( FS_Read( surfaces, header.lumps[LUMP_SURFACES].filelen, f ) != header.lumps[LUMP_SURFACES].filelen ) {
-		Z_Free( drawVerts );
-		Z_Free( surfaces );
-		FS_FCloseFile( f );
-		Com_DPrintf( "CL_BuildBspPreview: failed to read surfaces from %s\n", bspPath );
-		return;
-	}
-
-	// Byte-swap surface fields
-	for ( i = 0; i < numSurfaces; i++ ) {
-		surfaces[i].surfaceType = LittleLong( surfaces[i].surfaceType );
-		surfaces[i].firstVert = LittleLong( surfaces[i].firstVert );
-		surfaces[i].numVerts = LittleLong( surfaces[i].numVerts );
 	}
 
 	// --- Pass 1: Compute total XY bounds across all planar surfaces ---
@@ -454,16 +394,8 @@ void CL_BuildBspPreview( const char *mapname ) {
 	}
 
 	// --- Read LUMP_ENTITIES ---
-	if ( header.lumps[LUMP_ENTITIES].filelen > 0 ) {
-		int entLen = header.lumps[LUMP_ENTITIES].filelen;
-
-		entityString = (char *)Z_Malloc( entLen + 1 );
-		FS_Seek( f, header.lumps[LUMP_ENTITIES].fileofs, FS_SEEK_SET );
-		if ( FS_Read( entityString, entLen, f ) == entLen ) {
-			entityString[entLen] = '\0';
-			CL_BspPreview_ParseEntities( entityString, entLen );
-		}
-		Z_Free( entityString );
+	if ( entityString && bsp->entityStringLength > 0 ) {
+		CL_BspPreview_ParseEntities( entityString, bsp->entityStringLength );
 	}
 
 	// Expand bounds to include markers
@@ -485,10 +417,7 @@ void CL_BuildBspPreview( const char *mapname ) {
 		}
 	}
 
-	// Clean up
-	Z_Free( drawVerts );
-	Z_Free( surfaces );
-	FS_FCloseFile( f );
+	BSP_Free( bsp );
 
 	if ( cl_bspPreview.numEdges > 0 || cl_bspPreview.numMarkers > 0 ) {
 		cl_bspPreview.valid = qtrue;

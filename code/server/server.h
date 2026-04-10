@@ -27,6 +27,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../game/g_public.h"
 #include "../game/bg_public.h"
 #include "sv_wired_rcon_lua.h"
+#include "sv_lua.h"
+#include "../qcommon/net_transport.h"
 
 typedef struct lua_State lua_State;
 
@@ -54,6 +56,22 @@ typedef enum {
 	SS_LOADING,			// spawning level entities
 	SS_GAME				// actively running
 } serverState_t;
+
+/* ---- Async spawn state machine (Step 5) --------------------------------- */
+typedef enum {
+	SPAWN_IDLE = 0,             /* not spawning — normal server frame */
+	SPAWN_P1_TEARDOWN_SETUP,    /* ShutdownGameProgs, CL_ShutdownLevel, HunkClearLevel */
+	SPAWN_P2_BSP_LOAD,          /* CM_LoadMap */
+	SPAWN_P3_GAME_VM_INIT,      /* SV_InitGameProgs */
+	SPAWN_P4_SETTLE_BASELINE,   /* 3× GAME_RUN_FRAME + SV_CreateBaseline */
+	SPAWN_P5_RECONNECT_FINALIZE /* client reconnect loop, pak touch, SS_GAME */
+} sv_spawn_phase_t;
+
+typedef struct {
+	sv_spawn_phase_t phase;
+	qboolean         killBots;
+	char             mapname[MAX_QPATH];
+} sv_spawn_state_t;
 
 // we might not use all MAX_GENTITIES every frame
 // so leave more room for slow-snaps clients etc.
@@ -123,12 +141,7 @@ typedef enum {
 	CS_ACTIVE		// client is fully in game
 } clientState_t;
 
-typedef struct netchan_buffer_s {
-	msg_t           msg;
-	byte            msgBuffer[MAX_MSGLEN];
-	char		clientCommandString[MAX_STRING_CHARS];
-	struct netchan_buffer_s *next;
-} netchan_buffer_t;
+/* netchan_buffer_t removed — Phase D: netchan fragmentation queue deleted */
 
 typedef struct rateLimit_s {
 	int			lastTime;
@@ -169,7 +182,6 @@ typedef struct client_s {
 	int				messageAcknowledge;
 
 	int				gamestateMessageNum;	// netchan->outgoingSequence of gamestate
-	int				challenge;
 
 	usercmd_t		lastUsercmd;
 	int				lastClientCommand;	// reliable client message sequence
@@ -208,12 +220,6 @@ typedef struct client_s {
 	qboolean		pureAuthentic;
 	qboolean		gotCP;				// TTimo - additional flag to distinguish between a bad pure checksum, and no cp command at all
 	netchan_t		netchan;
-	// TTimo
-	// queuing outgoing fragmented messages to send them properly, without udp packet bursts
-	// in case large fragmented messages are stacking up
-	// buffer them into this queue, and hand them out to netchan as needed
-	netchan_buffer_t *netchan_start_queue;
-	netchan_buffer_t **netchan_end_queue;
 
 	int				oldServerTime;
 	qboolean		csUpdated[MAX_CONFIGSTRINGS];
@@ -231,6 +237,10 @@ typedef struct client_s {
 
 	char			tld[3]; // "XX\0"
 	const char		*country;
+
+	uint32_t        wn_outgoing_sequence; /* WiredNet snapshot sequence counter (replaces netchan.outgoingSequence) */
+
+	conn_handle_t	quic_conn;            /* QUIC connection handle — replaces netchan.remoteAddress for QUIC clients */
 
 } client_t;
 
@@ -286,6 +296,9 @@ typedef struct {
 	rconSession_t rconSessions[ MAX_RCON_SESSIONS ];
 	rconLua_t rconLua;
 
+	/* Async spawn state machine — see sv_spawn_phase_t above */
+	sv_spawn_state_t spawn;
+
 } serverStatic_t;
 
 #ifdef USE_BANS
@@ -308,6 +321,7 @@ extern	server_t		sv;					// cleared each map
 extern	vm_t			*gvm;				// game virtual machine
 
 extern	cvar_t	*sv_fps;
+extern	cvar_t	*sv_snapshotTransport;
 extern	cvar_t	*sv_timeout;
 extern	cvar_t	*sv_zombietime;
 extern	cvar_t	*sv_privatePassword;
@@ -383,16 +397,17 @@ void SV_SetUserinfo( int index, const char *val );
 void SV_GetUserinfo( int index, char *buffer, int bufferSize );
 
 void SV_SpawnServer( const char *mapname, qboolean killBots );
+void SV_SpawnServer_Tick( void );
 
 
 
 //
 // sv_client.c
 //
-void SV_GetChallenge( const netadr_t *from );
-void SV_InitChallenger( void );
-
-void SV_DirectConnect( const netadr_t *from );
+void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo );
+void SV_OnPlayerReady( conn_handle_t conn );
+void SV_DrainQUICUsercmds( void );
+void SV_DrainQUICReliableCommands( void );
 void SV_PrintClientStateChange( const client_t *cl, clientState_t newState );
 
 void SV_ExecuteClientMessage( client_t *cl, msg_t *msg );
@@ -517,13 +532,6 @@ void SV_Trace( trace_t *results, const vec3_t start, const vec3_t mins, const ve
 void SV_ClipToEntity( trace_t *trace, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int entityNum, int contentmask, qboolean capsule );
 // clip to a specific entity
 
-//
-// sv_net_chan.c
-//
-void SV_Netchan_Transmit( client_t *client, msg_t *msg);
-int SV_Netchan_TransmitNextFragment( client_t *client );
-qboolean SV_Netchan_Process( client_t *client, msg_t *msg );
-void SV_Netchan_FreeQueue( client_t *client );
 
 //
 // sv_filter.c

@@ -4,20 +4,23 @@ net_transport.h — Game transport vtable abstraction
 
 Decouples engine networking from the underlying protocol (QUIC).
 All engine code routes sends and receives through transport->* function
-pointers. Only code/webtransport/wt_transport.c touches picoquic directly.
+pointers. Only code/wired/net/wn_transport.c touches picoquic directly.
 
 conn_handle_t
   Opaque 64-bit connection identifier. Replaces netadr_t + NA_QUIC routing.
     CONN_INVALID (0)   — no connection
-    1..WT_MAX_CLIENTS  — server-side game-client connection (slot index 1-based)
+    1..WN_MAX_CLIENTS  — server-side game-client connection (slot index 1-based)
     CONN_CLIENT        — the single outgoing client connection (non-dedicated only)
 
 reliable_channel_t
-  Semantic stream identifier; maps to QUIC stream IDs in wt_transport.c.
-    CHAN_SESSION  = 0   Stream 0: connect / accept / disconnect / heartbeat
-    CHAN_EVENTS   = 2   Stream 2: game events srv→cli (reliable, ordered)
-    CHAN_INIT     = 4   Stream 4: configstrings + baselines at connect time
-    CHAN_COMMANDS = 6   Stream 6: reliable client requests cli→srv
+  Semantic reliable message channel.
+
+  For QUIC/WebTransport:
+    CHAN_SESSION stays on stream 0 for session TLVs.
+    Other game-reliable messages use fresh QUIC streams with a tiny
+    application header carrying version + semantic channel.
+    This keeps stream IDs transport-private and avoids coupling app
+    routing to QUIC stream numbering.
 ===========================================================================
 */
 #ifndef NET_TRANSPORT_H
@@ -29,13 +32,43 @@ typedef uint64_t conn_handle_t;
 #define CONN_INVALID ((conn_handle_t)0)
 
 typedef enum {
-	CHAN_SESSION  = 0,     /* Stream 0  – session control (bidi) */
-	CHAN_EVENTS   = 2,     /* Stream 2  – game events, srv→cli */
-	CHAN_INIT     = 4,     /* Stream 4  – initial state, srv→cli */
-	CHAN_COMMANDS = 6,     /* Stream 6  – reliable client commands, cli→srv */
-	CHAN_OBSERVE  = 0x03,  /* observe stream (existing) */
-	CHAN_MCP      = 0x08,  /* MCP / JSON-RPC stream (existing) */
+	/* Game Protocol (0x00–0x0F) — engine core */
+	CHAN_SESSION            = 0x00, /* Session control TLVs on stream 0                              */
+	CHAN_EVENTS             = 0x02, /* srv→cli  Kill, damage, chat, vote (reliable, MessagePack)     */
+	CHAN_BOOTSTRAP          = 0x04, /* srv→cli  Configstrings + baselines at connect (reliable)      */
+	CHAN_COMMANDS           = 0x06, /* cli→srv  say, callvote, buy — reliable client requests        */
+	CHAN_SNAPSHOT_RELIABLE  = 0x08, /* srv→cli  Oversize snapshots on reliable stream (mode 1)       */
+	/* 0x0A–0x0F: game protocol expansion (voice, replay, …)                                        */
+
+	/* Content Delivery (0x20–0x2F) */
+	CHAN_DOWNLOAD           = 0x20, /* srv→cli  File download blocks (reliable)                      */
+	/* 0x22–0x2F: content delivery expansion                                                        */
+
+	/* Observation (0x40–0x4F) — spectator / dashboard */
+	CHAN_OBSERVE            = 0x40, /* srv→cli  Observer state push (MessagePack)                    */
+	/* 0x42–0x4F: observation expansion                                                             */
+
+	/* Services (0x60–0x6F) — fully independent layers */
+	CHAN_MCP                = 0x60, /* bidi  JSON-RPC 2.0, AI coaching, bot control                  */
+	/* 0x62–0x6F: services expansion                                                                */
 } reliable_channel_t;
+
+typedef enum {
+	WN_BOOTSTRAP_MSG_STATE = 1,
+} wn_bootstrap_msg_type_t;
+
+typedef enum {
+	WN_BOOTSTRAP_SEC_ACK = 1,
+	WN_BOOTSTRAP_SEC_SERVER_CMDS = 2,
+	WN_BOOTSTRAP_SEC_CONFIGSTRINGS = 3,
+	WN_BOOTSTRAP_SEC_BASELINES = 4,
+	WN_BOOTSTRAP_SEC_CLIENT_INFO = 5,
+} wn_bootstrap_section_t;
+
+typedef enum {
+	WN_DOWNLOAD_MSG_BLOCK = 1,
+	WN_DOWNLOAD_MSG_ERROR = 2,
+} wn_download_msg_type_t;
 
 typedef struct {
 	/* ── Lifecycle ──────────────────────────────────────────────── */
@@ -52,6 +85,12 @@ typedef struct {
 	 * Set to NULL until Phase B wires in SV_OnPlayerConnect.
 	 */
 	void          (*accept_callback)( conn_handle_t conn, const char *userinfo );
+	/*
+	 * ready_callback: called when a connected game-client sends TLV 0x05 READY,
+	 * signalling it has processed the gamestate and is ready to enter the world.
+	 * Set to NULL until Phase B2 wires in SV_OnPlayerReady.
+	 */
+	void          (*ready_callback)( conn_handle_t conn );
 	void          (*drop_client)( conn_handle_t conn, const char *reason );
 
 	/* ── Client ─────────────────────────────────────────────────── */
@@ -76,7 +115,7 @@ typedef struct {
 } transport_t;
 
 /*
- * Global transport pointer.  Set to &quic_transport during QUIC_Init().
+ * Global transport pointer.  Set to &quic_transport during WN_Init().
  * NULL until the transport is initialized.
  */
 extern transport_t *transport;

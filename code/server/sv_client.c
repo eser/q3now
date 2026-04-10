@@ -22,126 +22,202 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // sv_client.c -- server code for dealing with clients
 
 #include "server.h"
+#include "../wired/net/wn_public.h"
 
 static void SV_CloseDownload( client_t *cl );
 
-//
-// Server-side Stateless Challenges
-// backported from https://github.com/JACoders/OpenJK/pull/832
-//
-
-#define TS_SHIFT 14 // ~16 seconds to reply to the challenge
-
-/*
-=================
-SV_CreateChallenge
-
-Create an unforgeable, temporal challenge for the given client address
-=================
-*/
-static int SV_CreateChallenge( int timestamp, const netadr_t *from )
+static qboolean SV_WiredNetWriteU16( byte *buf, int bufsize, int *offset, uint16_t value )
 {
-	int challenge;
-
-	// Create an unforgeable, temporal challenge for this client using HMAC(secretKey, clientParams + timestamp)
-	// Use first 4 bytes of the HMAC digest as an int (client only deals with numeric challenges)
-	// The most-significant bit stores whether the timestamp is odd or even. This lets later verification code handle the
-	// case where the engine timestamp has incremented between the time this challenge is sent and the client replies.
-	challenge = Com_MD5Addr( from, timestamp );
-	challenge &= (1U << 31) - 1;
-	challenge |= (unsigned int)(timestamp & 0x1) << 31;
-
-	return challenge;
+	if ( *offset + 2 > bufsize ) return qfalse;
+	buf[(*offset)++] = (byte)( value & 0xFF );
+	buf[(*offset)++] = (byte)( ( value >> 8 ) & 0xFF );
+	return qtrue;
 }
 
-
-/*
-=================
-SV_CreateChallenge
-
-Verify a challenge received by the client matches the expected challenge
-=================
-*/
-static qboolean SV_VerifyChallenge( int receivedChallenge, const netadr_t *from )
+static qboolean SV_WiredNetWriteU32( byte *buf, int bufsize, int *offset, uint32_t value )
 {
-	int currentTimestamp = svs.time >> TS_SHIFT;
-	int currentPeriod = currentTimestamp & 0x1;
-
-	// Use the current timestamp for verification if the current period matches the client challenge's period.
-	// Otherwise, use the previous timestamp in case the current timestamp incremented in the time between the
-	// client being sent a challenge and the client's reply that's being verified now.
-	int challengePeriod = ((unsigned int)receivedChallenge >> 31) & 0x1;
-	int challengeTimestamp = currentTimestamp - ( currentPeriod ^ challengePeriod );
-
-	int expectedChallenge = SV_CreateChallenge( challengeTimestamp, from );
-
-	return (receivedChallenge == expectedChallenge) ? qtrue : qfalse;
+	if ( *offset + 4 > bufsize ) return qfalse;
+	buf[(*offset)++] = (byte)( value & 0xFF );
+	buf[(*offset)++] = (byte)( ( value >> 8 ) & 0xFF );
+	buf[(*offset)++] = (byte)( ( value >> 16 ) & 0xFF );
+	buf[(*offset)++] = (byte)( ( value >> 24 ) & 0xFF );
+	return qtrue;
 }
 
-
-/*
-=================
-SV_InitChallenger
-=================
-*/
-void SV_InitChallenger( void )
+static qboolean SV_WiredNetWriteS32( byte *buf, int bufsize, int *offset, int value )
 {
-	Com_MD5Init();
+	return SV_WiredNetWriteU32( buf, bufsize, offset, (uint32_t)value );
 }
 
+static qboolean SV_WiredNetWriteBytes( byte *buf, int bufsize, int *offset, const void *data, int len )
+{
+	if ( *offset + len > bufsize ) return qfalse;
+	Com_Memcpy( buf + *offset, data, (size_t)len );
+	*offset += len;
+	return qtrue;
+}
 
-/*
-=================
-SV_GetChallenge
+static qboolean SV_WiredNetWriteString( byte *buf, int bufsize, int *offset, const char *s )
+{
+	int len = (int)strlen( s ) + 1;
+	return SV_WiredNetWriteU16( buf, bufsize, offset, (uint16_t)len )
+		&& SV_WiredNetWriteBytes( buf, bufsize, offset, s, len );
+}
 
-A "getchallenge" OOB command has been received
-Returns a challenge number that can be used
-in a subsequent connectResponse command.
-We do this to prevent denial of service attacks that
-flood the server with invalid connection IPs.  With a
-challenge, they must give a valid IP address.
+static qboolean SV_WiredNetWriteFloat( byte *buf, int bufsize, int *offset, float value )
+{
+	uint32_t bits;
+	Com_Memcpy( &bits, &value, sizeof( bits ) );
+	return SV_WiredNetWriteU32( buf, bufsize, offset, bits );
+}
 
-Phase 6.4: q3now is standalone — there is no authorize server round-trip.
-Challenge responses go directly back to the requesting client.
-
-ioquake3: we added a possibility for clients to add a challenge
-to their packets, to make it more difficult for malicious servers
-to hi-jack client connections.
-=================
-*/
-void SV_GetChallenge( const netadr_t *from ) {
-	int		challenge;
-	int		clientChallenge;
-
-	// ignore if we are in single player
-#ifndef DEDICATED
-	if ( Cvar_VariableIntegerValue("ui_singlePlayerActive")) {
-		return;
+static qboolean SV_WiredNetWriteTrajectory( byte *buf, int bufsize, int *offset, const trajectory_t *tr )
+{
+	int i;
+	if ( !SV_WiredNetWriteS32( buf, bufsize, offset, tr->trType ) ||
+		!SV_WiredNetWriteS32( buf, bufsize, offset, tr->trTime ) ||
+		!SV_WiredNetWriteS32( buf, bufsize, offset, tr->trDuration ) ) {
+		return qfalse;
 	}
-#endif
+	for ( i = 0; i < 3; i++ ) if ( !SV_WiredNetWriteFloat( buf, bufsize, offset, tr->trBase[i] ) ) return qfalse;
+	for ( i = 0; i < 3; i++ ) if ( !SV_WiredNetWriteFloat( buf, bufsize, offset, tr->trDelta[i] ) ) return qfalse;
+	return qtrue;
+}
 
-	// Prevent using getchallenge as an amplifier
-	if ( SVC_RateLimitAddress( from, 10, 1000 ) ) {
-		if ( com_developer->integer ) {
-			Com_Printf( "SV_GetChallenge: rate limit from %s exceeded, dropping request\n",
-				NET_AdrToString( from ) );
+static qboolean SV_WiredNetWriteEntityState( byte *buf, int bufsize, int *offset, const entityState_t *es )
+{
+	int i;
+	if ( !SV_WiredNetWriteS32( buf, bufsize, offset, es->number ) ||
+		!SV_WiredNetWriteS32( buf, bufsize, offset, es->eType ) ||
+		!SV_WiredNetWriteS32( buf, bufsize, offset, es->eFlags ) ||
+		!SV_WiredNetWriteTrajectory( buf, bufsize, offset, &es->pos ) ||
+		!SV_WiredNetWriteTrajectory( buf, bufsize, offset, &es->apos ) ||
+		!SV_WiredNetWriteS32( buf, bufsize, offset, es->time ) ||
+		!SV_WiredNetWriteS32( buf, bufsize, offset, es->time2 ) ) {
+		return qfalse;
+	}
+	for ( i = 0; i < 3; i++ ) if ( !SV_WiredNetWriteFloat( buf, bufsize, offset, es->origin[i] ) ) return qfalse;
+	for ( i = 0; i < 3; i++ ) if ( !SV_WiredNetWriteFloat( buf, bufsize, offset, es->origin2[i] ) ) return qfalse;
+	for ( i = 0; i < 3; i++ ) if ( !SV_WiredNetWriteFloat( buf, bufsize, offset, es->angles[i] ) ) return qfalse;
+	for ( i = 0; i < 3; i++ ) if ( !SV_WiredNetWriteFloat( buf, bufsize, offset, es->angles2[i] ) ) return qfalse;
+	return SV_WiredNetWriteS32( buf, bufsize, offset, es->otherEntityNum )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->otherEntityNum2 )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->groundEntityNum )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->constantLight )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->loopSound )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->modelindex )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->modelindex2 )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->clientNum )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->frame )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->solid )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->event )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->eventParm )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->powerups )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->weapon )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->legsAnim )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->torsoAnim )
+		&& SV_WiredNetWriteS32( buf, bufsize, offset, es->generic1 );
+}
+
+static qboolean SV_WiredNetBeginSection( byte *buf, int bufsize, int *offset, int type, int *lenPos )
+{
+	if ( *offset + 5 > bufsize ) return qfalse;
+	buf[(*offset)++] = (byte)type;
+	*lenPos = *offset;
+	*offset += 4;
+	return qtrue;
+}
+
+static void SV_WiredNetFinishSection( byte *buf, int lenPos, int sectionStart, int offset )
+{
+	uint32_t len = (uint32_t)( offset - sectionStart );
+	buf[lenPos + 0] = (byte)( len & 0xFF );
+	buf[lenPos + 1] = (byte)( ( len >> 8 ) & 0xFF );
+	buf[lenPos + 2] = (byte)( ( len >> 16 ) & 0xFF );
+	buf[lenPos + 3] = (byte)( ( len >> 24 ) & 0xFF );
+}
+
+static qboolean SV_WiredNetWriteBootstrap( client_t *client, byte *buf, int bufsize, int *outLen )
+{
+	int offset = 0;
+	int lenPos;
+	int sectionStart;
+	int start;
+	const svEntity_t *svEnt;
+	char systemInfo[BIG_INFO_STRING];
+	int count;
+
+	buf[offset++] = WN_BOOTSTRAP_MSG_STATE;
+
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_ACK, &lenPos ) ) return qfalse;
+	sectionStart = offset;
+	if ( !SV_WiredNetWriteS32( buf, bufsize, &offset, client->lastClientCommand ) ) return qfalse;
+	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
+
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_SERVER_CMDS, &lenPos ) ) return qfalse;
+	sectionStart = offset;
+	count = client->reliableSequence - client->reliableAcknowledge;
+	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) return qfalse;
+	for ( start = 0; start < count; start++ ) {
+		const int index = client->reliableAcknowledge + 1 + start;
+		if ( !SV_WiredNetWriteS32( buf, bufsize, &offset, index ) ||
+			!SV_WiredNetWriteString( buf, bufsize, &offset,
+				client->reliableCommands[index & (MAX_RELIABLE_COMMANDS-1)] ) ) {
+			return qfalse;
 		}
-		return;
 	}
+	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
 
-	// Create a unique challenge for this client without storing state on the server
-	challenge = SV_CreateChallenge( svs.time >> TS_SHIFT, from );
-
-	if ( Cmd_Argc() < 2 ) {
-		// legacy client query, don't send unneeded information
-		NET_OutOfBandPrint( NS_SERVER, from, "challengeResponse %i", challenge );
-	} else {
-		// Grab the client's challenge to echo back (if given)
-		clientChallenge = atoi( Cmd_Argv( 1 ) );
-
-		NET_OutOfBandPrint( NS_SERVER, from, "challengeResponse %i %i %i",
-			challenge, clientChallenge, com_protocol->integer );
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CONFIGSTRINGS, &lenPos ) ) return qfalse;
+	sectionStart = offset;
+	count = 0;
+	for ( start = 0; start < MAX_CONFIGSTRINGS; start++ ) {
+		if ( *sv.configstrings[start] != '\0' ) count++;
 	}
+	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) return qfalse;
+	for ( start = 0; start < MAX_CONFIGSTRINGS; start++ ) {
+		const char *value;
+		if ( *sv.configstrings[start] == '\0' ) continue;
+		value = sv.configstrings[start];
+		if ( start == CS_SYSTEMINFO && sv.pure != sv_pure->integer ) {
+			Q_strncpyz( systemInfo, value, sizeof( systemInfo ) );
+			Info_SetValueForKey_s( systemInfo, sizeof( systemInfo ), "sv_pure", va( "%i", sv.pure ) );
+			value = systemInfo;
+		}
+		if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)start ) ||
+			!SV_WiredNetWriteString( buf, bufsize, &offset, value ) ) {
+			return qfalse;
+		}
+	}
+	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
+
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_BASELINES, &lenPos ) ) return qfalse;
+	sectionStart = offset;
+	count = 0;
+	for ( start = 0; start < MAX_GENTITIES; start++ ) {
+		if ( sv.baselineUsed[start] ) count++;
+	}
+	if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)count ) ) return qfalse;
+	for ( start = 0; start < MAX_GENTITIES; start++ ) {
+		if ( !sv.baselineUsed[start] ) continue;
+		svEnt = &sv.svEntities[start];
+		if ( !SV_WiredNetWriteU16( buf, bufsize, &offset, (uint16_t)start ) ||
+			!SV_WiredNetWriteEntityState( buf, bufsize, &offset, &svEnt->baseline ) ) {
+			return qfalse;
+		}
+	}
+	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
+
+	if ( !SV_WiredNetBeginSection( buf, bufsize, &offset, WN_BOOTSTRAP_SEC_CLIENT_INFO, &lenPos ) ) return qfalse;
+	sectionStart = offset;
+	if ( !SV_WiredNetWriteS32( buf, bufsize, &offset, client - svs.clients ) ||
+		!SV_WiredNetWriteS32( buf, bufsize, &offset, sv.checksumFeed ) ) {
+		return qfalse;
+	}
+	SV_WiredNetFinishSection( buf, lenPos, sectionStart, offset );
+
+	*outLen = offset;
+	return qtrue;
 }
 
 
@@ -452,359 +528,345 @@ void SV_PrintClientStateChange( const client_t *cl, clientState_t newState ) {
 
 /*
 ==================
-SV_DirectConnect
+SV_OnPlayerConnect
 
-A "connect" OOB command has been received
+Called on the main thread (from WN_DrainPendingConnects) when a QUIC game
+client has completed the Stream 0 binary TLV handshake. TLV ACCEPT was already
+sent by WN_GameHandleHandshake — this function finalises the slot and notifies
+the game VM.
+
+Lean first-pass: fresh slot allocation, no IP-based reconnect detection.
+Reconnect detection will use conn_handle_t (picoquic callback_close + new) —
+added after Phase B passes its test gate.
 ==================
 */
-void SV_DirectConnect( const netadr_t *from ) {
-	static		rateLimit_t bucket;
-	char		userinfo[MAX_INFO_STRING], tld[3];
-	int			i, n;
-	client_t	*cl, *newcl;
-	//sharedEntity_t *ent;
-	int			clientNum;
-	int			qport;
-	int			challenge;
-	const char		*password;
-	int			startIndex;
-	intptr_t	denied;
-	int			count;
-	int			cl_proto;
-	const char	*ip, *info, *v;
-	qboolean	longstr;
+/* Forward declaration: SV_SendClientGameState is defined later in this file
+ * but must be called from SV_OnPlayerConnect for the QUIC fast-path. */
+static void SV_SendClientGameState( client_t *client );
 
-	Com_DPrintf( "SVC_DirectConnect()\n" );
+void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
+{
+	char        tld[3];
+	client_t   *cl, *newcl;
+	int         i, clientNum, count;
+	intptr_t    denied;
+	netadr_t    from;
 
-#ifdef USE_BANS
-	// Check whether this client is banned.
-	if(SV_IsBanned(from, qfalse))
-	{
-		NET_OutOfBandPrint(NS_SERVER, &from, "print\nYou are banned from this server.\n");
-		return;
-	}
-#endif
-
-	// Prevent using connect as an amplifier
-	if ( SVC_RateLimitAddress( from, 10, 1000 ) ) {
-		if ( com_developer->integer ) {
-			Com_Printf( "SV_DirectConnect: rate limit from %s exceeded, dropping request\n",
-				NET_AdrToString( from ) );
-		}
+	/* R4 guard: server is mid-spawn — gvm may be NULL (P1..P2) or baselines
+	   not yet built (P3..P4).  Re-queue the connection so it is retried each
+	   frame until svs.spawn.phase reaches SPAWN_IDLE (end of P5).
+	   The QUIC connection stays alive; WN_DrainPendingConnects calls us
+	   again next frame. */
+	if ( svs.spawn.phase != SPAWN_IDLE ) {
+		Com_Printf( "SV_OnPlayerConnect: spawn in progress (phase %d), deferring conn %llu\n",
+			(int)svs.spawn.phase, (unsigned long long)conn );
+		WN_RequeueConnect( conn, userinfo );
 		return;
 	}
 
-	// check for concurrent connections
-	for ( i = 0, n = 0; i < sv.maxclients; i++ ) {
-		const netadr_t *addr = &svs.clients[ i ].netchan.remoteAddress;
-		if ( addr->type != NA_BOT && NET_CompareBaseAdr( addr, from ) ) {
-			if ( svs.clients[ i ].state >= CS_CONNECTED && !svs.clients[ i ].justConnected ) {
-				if ( ++n >= sv_maxclientsPerIP->integer ) {
-					// avoid excessive outgoing traffic
-					if ( !SVC_RateLimit( &bucket, 10, 200 ) ) {
-						NET_OutOfBandPrint( NS_SERVER, from, "print\nToo many connections.\n" );
-					}
-					return;
-				}
-			}
-		}
-	}
+	Com_DPrintf( "SV_OnPlayerConnect: conn=%llu\n", (unsigned long long)conn );
 
-	// verify challenge in first place
-	info = Cmd_Argv( 1 );
-	v = Info_ValueForKey( info, "challenge" );
-	if ( *v == '\0' )
-	{
-		if ( !SVC_RateLimit( &bucket, 10, 200 ) )
-		{
-			NET_OutOfBandPrint( NS_SERVER, from, "print\nMissing challenge in userinfo.\n" );
-		}
+	if ( !WN_GetAddrByConnHandle( conn, &from ) ) {
+		Com_Printf( S_COLOR_YELLOW "SV_OnPlayerConnect: unknown conn handle %llu\n",
+			(unsigned long long)conn );
 		return;
 	}
-	challenge = atoi( v );
-
-	// see if the challenge is valid (localhost clients don't need to challenge)
-	if ( !NET_IsLocalAddress( from ) )
-	{
-		// Verify the received challenge against the expected challenge
-		if ( !SV_VerifyChallenge( challenge, from ) )
-		{
-			// avoid excessive outgoing traffic
-			if ( !SVC_RateLimit( &bucket, 10, 200 ) )
-			{
-				NET_OutOfBandPrint( NS_SERVER, from, "print\nIncorrect challenge, please reconnect.\n" );
-			}
-			return;
-		}
-	}
-
-	Q_strncpyz( userinfo, info, sizeof( userinfo ) );
-
-	v = Info_ValueForKey( userinfo, "protocol" );
-	if ( *v == '\0' )
-	{
-		if ( !SVC_RateLimit( &bucket, 10, 200 ) )
-		{
-			NET_OutOfBandPrint( NS_SERVER, from, "print\nMissing protocol in userinfo.\n" );
-		}
-		return;
-	}
-	cl_proto = atoi( v );
-
-	if ( cl_proto != com_protocol->integer )
-	{
-		// avoid excessive outgoing traffic
-		if ( !SVC_RateLimit( &bucket, 10, 200 ) )
-		{
-			NET_OutOfBandPrint( NS_SERVER, from, "print\nServer uses protocol version %i "
-				"(yours is %i).\n", com_protocol->integer, cl_proto );
-		}
-		Com_DPrintf( "    rejected connect from version %i\n", cl_proto );
-		return;
-	}
-
-	v = Info_ValueForKey( userinfo, "qport" );
-	if ( *v == '\0' )
-	{
-		if ( !SVC_RateLimit( &bucket, 10, 200 ) )
-		{
-			NET_OutOfBandPrint( NS_SERVER, from, "print\nMissing qport in userinfo.\n" );
-		}
-		return;
-	}
-	qport = atoi( Info_ValueForKey( userinfo, "qport" ) );
-
-	// if "client" is present in userinfo and it is a modern client
-	// then assume it can properly decode long strings and protocol extensions
-	if ( *Info_ValueForKey( userinfo, "client" ) != '\0' ) {
-		longstr = qtrue;
-	} else {
-		longstr = qfalse;
-	}
-
-	// we don't need these keys after connection, release some space in userinfo
-	Info_RemoveKey( userinfo, "challenge" );
-	Info_RemoveKey( userinfo, "qport" );
-	Info_RemoveKey( userinfo, "protocol" );
-	Info_RemoveKey( userinfo, "client" );
-
-	// don't let "ip" overflow userinfo string
-	if ( NET_IsLocalAddress( from ) )
-		ip = "localhost";
-	else
-		ip = NET_AdrToString( from );
-
-	if ( !Info_SetValueForKey( userinfo, "ip", ip ) ) {
-		// avoid excessive outgoing traffic
-		if ( !SVC_RateLimit( &bucket, 10, 200 ) ) {
-			NET_OutOfBandPrint( NS_SERVER, from, "print\nUserinfo string length exceeded.  "
-				"Try removing setu cvars from your config.\n" );
-		}
-		return;
-	}
-
-	// run userinfo filter
-	SV_SetTLD( tld, from, Sys_IsLANAddress( from ) );
-	Info_SetValueForKey( userinfo, "tld", tld );
-	v = SV_RunFilters( userinfo, from );
-	if ( *v != '\0' ) {
-		NET_OutOfBandPrint( NS_SERVER, from, "print\n%s\n", v );
-		Com_DPrintf( "Engine rejected a connection: %s.\n", v );
-		return;
-	}
-
-	// restore burst capacity
-	SVC_RateRestoreBurstAddress( from, 10, 1000 );
-
-	// quick reject
+	/* Find a free slot (select least-recently-freed) */
 	newcl = NULL;
-	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
-		if ( NET_CompareAdr( from, &cl->netchan.remoteAddress ) ) {
-			int elapsed = svs.time - cl->lastConnectTime;
-			if ( elapsed < ( sv_reconnectlimit->integer * 1000 ) && elapsed >= 0 ) {
-				int remains = ( ( sv_reconnectlimit->integer * 1000 ) - elapsed + 999 ) / 1000;
-				if ( com_developer->integer ) {
-					Com_Printf( "%s:reconnect rejected : too soon\n", NET_AdrToString( from ) );
-				}
-				// avoid excessive outgoing traffic
-				if ( !SVC_RateLimit( &bucket, 10, 200 ) ) {
-					NET_OutOfBandPrint( NS_SERVER, from, "print\nReconnecting, please wait %i second%s.\n",
-						remains, (remains != 1) ? "s" : "" );
-				}
-				return;
-			}
-			newcl = cl; // we may reuse this slot
-			break;
-		}
-	}
-
-	// if there is already a slot for this ip, reuse it
-	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
-		if ( cl->state == CS_FREE ) {
-			continue;
-		}
-		if ( NET_CompareAdr( from, &cl->netchan.remoteAddress ) && cl->netchan.qport == qport ) {
-			// both qport and netport should match for a reconnecting client
-			Com_Printf( "%s:reconnect\n", NET_AdrToString( from ) );
-			newcl = cl;
-
-			if ( newcl->state >= CS_CONNECTED ) {
-				// call QVM disconnect function before calling connect again
-				// fixes issues such as disappearing CTF flags in unpatched mods
-				VM_Call( gvm, 1, GAME_CLIENT_DISCONNECT, newcl - svs.clients );
-
-				// don't leak memory or file handles due to e.g. downloads in progress
-				SV_FreeClient( newcl );
-			}
-
-			goto gotnewcl;
-		}
-	}
-
-	// find a client slot
-	// if "sv_privateClients" is set > 0, then that number
-	// of client slots will be reserved for connections that
-	// have "password" set to the value of "sv_privatePassword"
-	// Info requests will report the maxclients as if the private
-	// slots didn't exist, to prevent people from trying to connect
-	// to a full server.
-	// This is to allow us to reserve a couple slots here on our
-	// servers so we can play without having to kick people.
-
-	// check for privateClient password
-	password = Info_ValueForKey( userinfo, "password" );
-	if ( *password && !strcmp( password, sv_privatePassword->string ) ) {
-		startIndex = 0;
-	} else {
-		// skip past the reserved slots
-		startIndex = sv_privateClients->integer;
-	}
-
-	if ( newcl && newcl >= svs.clients + startIndex && newcl->state == CS_FREE ) {
-		Com_Printf( "%s: reuse slot %i\n", NET_AdrToString( from ), (int)(newcl - svs.clients) );
-		goto gotnewcl;
-	}
-
-	// select least used free slot
-	n = 0;
-	newcl = NULL;
-	for ( i = startIndex; i < sv.maxclients; i++ ) {
+	for ( i = 0; i < sv.maxclients; i++ ) {
 		cl = &svs.clients[i];
-		if ( cl->state == CS_FREE && ( newcl == NULL || svs.time - cl->lastDisconnectTime > n ) ) {
-			n = svs.time - cl->lastDisconnectTime;
-			newcl = cl;
+		if ( cl->state == CS_FREE ) {
+			if ( newcl == NULL ||
+			     svs.time - cl->lastDisconnectTime > svs.time - newcl->lastDisconnectTime )
+				newcl = cl;
 		}
 	}
-
 	if ( !newcl ) {
-		if ( NET_IsLocalAddress( from ) ) {
-			count = 0;
-			for ( i = startIndex; i < sv.maxclients; i++ ) {
-				cl = &svs.clients[i];
-				if (cl->netchan.remoteAddress.type == NA_BOT) {
-					count++;
-				}
-			}
-			// if they're all bots
-			if (count >= sv.maxclients - startIndex) {
-				SV_DropClient(&svs.clients[sv.maxclients - 1], "only bots on server");
-				newcl = &svs.clients[sv.maxclients - 1];
-			}
-			else {
-				Com_Error( ERR_DROP, "server is full on local connect" );
-				return;
-			}
-		}
-		else {
-			NET_OutOfBandPrint( NS_SERVER, from, "print\nServer is full.\n" );
-			Com_DPrintf ("Rejected a connection.\n");
-			return;
-		}
+		Com_Printf( "SV_OnPlayerConnect: server full, dropping conn %llu\n",
+			(unsigned long long)conn );
+		if ( transport )
+			transport->drop_client( conn, "server full" );
+		return;
 	}
 
-gotnewcl:
-	// build a new connection
-	// accept the new client
-	// this is the only place a client_t is ever initialized
-	// we got a newcl, so reset the reliableSequence and reliableAcknowledge
-	Com_Memset( newcl, 0, sizeof( *newcl ) );
-	clientNum = newcl - svs.clients;
-#if 0 // skip this until CS_PRIMED
-	//ent = SV_GentityNum( clientNum );
-	//newcl->gentity = ent;
-#endif
+	clientNum = (int)( newcl - svs.clients );
+	Com_Memset( newcl, 0, sizeof(*newcl) );
 
-	// save the challenge
-	newcl->challenge = challenge;
+	/* Store QUIC connection handle — used by all future transport calls */
+	newcl->quic_conn = conn;
 
-	// save the address
-	Netchan_Setup( NS_SERVER, &newcl->netchan, from, qport, challenge );
+	/* Phase D: netchan replaced by QUIC — only keep the fields still referenced downstream. */
+	newcl->netchan.remoteAddress  = from;
+	newcl->wn_outgoing_sequence = 0;
+	newcl->netchan.incomingSequence = 0;
+	newcl->netchan.isLANAddress   = Sys_IsLANAddress( &from );
 
-	// init the netchan queue
-	newcl->netchan_end_queue = &newcl->netchan_start_queue;
-
-	// save the userinfo
 	Q_strncpyz( newcl->userinfo, userinfo, sizeof(newcl->userinfo) );
+	newcl->longstr = qtrue; /* QUIC clients always support long strings */
 
-	newcl->longstr = longstr;
-
-	strcpy( newcl->tld, tld );
+	SV_SetTLD( tld, &from, Sys_IsLANAddress( &from ) );
+	Q_strncpyz( newcl->tld, tld, sizeof(newcl->tld) );
 	newcl->country = SV_FindCountry( newcl->tld );
 
-	SV_UserinfoChanged( newcl, qtrue, qfalse ); // update userinfo, do not run filter
+	SV_UserinfoChanged( newcl, qtrue, qfalse );
 
-	if ( sv_clientTLD->integer ) {
+	if ( sv_clientTLD->integer )
 		SV_SaveSequences();
-	}
 
-	// get the game a chance to reject this connection or modify the userinfo
-	denied = VM_Call( gvm, 3, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse ); // firstTime = qtrue
+	/* Let the game VM accept or reject */
+	denied = VM_Call( gvm, 3, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse );
 	if ( denied ) {
-		// we can't just use VM_ArgPtr, because that is only valid inside a VM_Call
-		const char *str = GVM_ArgPtr( denied );
-
-		NET_OutOfBandPrint( NS_SERVER, from, "print\n%s\n", str );
-		Com_DPrintf( "Game rejected a connection: %s.\n", str );
+		const char *reason = GVM_ArgPtr( denied );
+		Com_Printf( "QUIC: game rejected connection from %s: %s\n",
+			NET_AdrToString( &from ), reason );
+		if ( transport )
+			transport->drop_client( conn, reason );
+		Com_Memset( newcl, 0, sizeof(*newcl) );
 		return;
 	}
 
-	if ( sv_clientTLD->integer ) {
+	if ( sv_clientTLD->integer )
 		SV_InjectLocation( newcl->tld, newcl->country );
-	}
-
-	// send the connect packet to the client
-	if ( longstr ) {
-		NET_OutOfBandPrint( NS_SERVER, from, "connectResponse %d %d", challenge, com_protocol->integer );
-	} else {
-		NET_OutOfBandPrint( NS_SERVER, from, "connectResponse %d", challenge );
-	}
 
 	SV_PrintClientStateChange( newcl, CS_CONNECTED );
-
-	newcl->state = CS_CONNECTED;
-	newcl->lastSnapshotTime = svs.time - 9999; // generate a snapshot immediately
-	newcl->lastPacketTime = svs.time;
-	newcl->lastConnectTime = svs.time;
+	newcl->state              = CS_CONNECTED;
+	newcl->lastSnapshotTime   = svs.time - 9999;
+	newcl->lastPacketTime     = svs.time;
+	newcl->lastConnectTime    = svs.time;
 	newcl->lastDisconnectTime = svs.time;
+	/* QUIC clients are authenticated by TLS — the justConnected anti-spoofing
+	 * timer is redundant and would fire before the gamestate exchange completes.
+	 * Skip it entirely. */
+	newcl->justConnected      = qfalse;
+	/* Force gamestate retransmit on first snapshot */
+	newcl->gamestateMessageNum = newcl->messageAcknowledge - 1;
 
-	SVC_RateRestoreToxicAddress( &newcl->netchan.remoteAddress, 10, 1000 );
-	newcl->justConnected = qtrue;
+	/* Send gamestate immediately: there is no usercmd exchange to trigger it
+	 * from SV_ExecuteClientMessage (client is waiting for gamestate to exit
+	 * CA_CONNECTING — a deadlock without this direct call). */
+	SV_SendClientGameState( newcl );
 
-	// when we receive the first packet from the client, we will
-	// notice that it is from a different serverid and that the
-	// gamestate message was not just sent, forcing a retransmit
-	newcl->gamestateMessageNum = newcl->messageAcknowledge - 1; // force gamestate retransmit
+	Com_DPrintf( "SV_OnPlayerConnect: slot %d assigned to conn=%llu (%s)\n",
+		clientNum, (unsigned long long)conn, NET_AdrToString( &from ) );
 
-	// if this was the first client on the server, or the last client
-	// the server can hold, send a heartbeat to the master.
+	/* Heartbeat to master if first or last slot filled */
 	count = 0;
-	for ( i = 0, cl = svs.clients ; i < sv.maxclients; i++, cl++) {
-		if ( svs.clients[i].state >= CS_CONNECTED ) {
+	for ( i = 0; i < sv.maxclients; i++ ) {
+		if ( svs.clients[i].state >= CS_CONNECTED )
 			count++;
+	}
+	if ( count == 1 || count == sv.maxclients )
+		SV_Heartbeat_f();
+}
+
+/*
+==================
+SV_OnPlayerReady
+
+Called on the main thread (from WN_DrainPendingReady) when a QUIC game
+client sends TLV 0x05 READY, signalling it has processed the gamestate.
+Finds the CS_PRIMED client slot matching the conn handle and calls
+SV_ClientEnterWorld to transition it to CS_ACTIVE.
+==================
+*/
+void SV_OnPlayerReady( conn_handle_t conn )
+{
+	int       i;
+	client_t *cl;
+
+	for ( i = 0; i < sv_maxclients->integer; i++ ) {
+		cl = &svs.clients[i];
+		if ( cl->state == CS_PRIMED && cl->quic_conn == conn ) {
+			Com_DPrintf( "QUIC: SV_OnPlayerReady — slot %d (%s)\n", i, cl->name );
+			SV_ClientEnterWorld( cl );
+			return;
 		}
 	}
-	if ( count == 1 || count == sv.maxclients ) {
-		SV_Heartbeat_f();
+	Com_DPrintf( "QUIC: SV_OnPlayerReady: no CS_PRIMED client for conn %llu\n",
+		(unsigned long long)conn );
+}
+
+/*
+==================
+SV_DrainQUICUsercmds
+
+Drain all pending usercmd datagrams sent by QUIC game clients.
+Datagram format (written by CL_WritePacket QUIC path, key=0, bitstream):
+  [client_tick:u32]  — client's current cmdNumber (newest cmd)
+  [snapshot_ack:u32] — last srv_tick the client received (for delta snapshots)
+  [cmd_count:u8]     — number of cmds (1–3)
+  [delta-cmds]       — MSG_WriteDeltaUsercmdKey with key=0 from nullcmd
+
+Called once per server frame from sv_main.c before SV_DrainQUICReliableCommands.
+==================
+*/
+void SV_DrainQUICUsercmds( void )
+{
+	byte          dgbuf[2048];
+	int           dglen;
+	conn_handle_t dgconn;
+	int           i;
+	client_t     *cl;
+
+	/* Use WN_ServerRecvUsercmd directly — NOT transport->recv_unreliable.
+	 * In loopback, transport->recv_unreliable is the client snapshot path
+	 * (reads wtcl.recv_queue).  Server user commands live in gc->recv_queue
+	 * and must be drained via the dedicated server function. */
+	if ( !transport )
+		return;
+
+	dglen = (int)sizeof( dgbuf );
+	while ( WN_ServerRecvUsercmd( &dgconn, dgbuf, &dglen ) ) {
+		if ( dglen >= 13 ) {  /* client_tick(4) + snapshot_ack(4) + serverCmd_ack(4) + cmd_count(1) minimum */
+			msg_t         msg;
+			int           snapshotAck;
+			int           serverCmdAck;
+			int           cmdCount;
+			int           j;
+			static const usercmd_t nullcmd = { 0 };
+			usercmd_t     cmds[MAX_PACKET_USERCMDS];
+			const usercmd_t *oldcmd;
+
+			cl = NULL;
+			for ( j = 0; j < sv_maxclients->integer; j++ ) {
+				if ( svs.clients[j].state >= CS_CONNECTED &&
+				     svs.clients[j].quic_conn == dgconn ) {
+					cl = &svs.clients[j];
+					break;
+				}
+			}
+
+			if ( !cl ) {
+				dglen = (int)sizeof( dgbuf );
+				continue;
+			}
+
+			MSG_Init( &msg, dgbuf, dglen );
+			msg.cursize = dglen;
+			MSG_Bitstream( &msg );
+
+			/* client_tick:u32 — client cmdNumber, informational */
+			(void)MSG_ReadLong( &msg );
+			/* snapshot_ack:u32 — last srv snapshot received by client */
+			snapshotAck   = MSG_ReadLong( &msg );
+			/* serverCmd_ack:u32 — last server command processed by client;
+			 * advance reliableAcknowledge so processed commands stop being
+			 * re-embedded in snapshots and the overflow guard never fires. */
+			serverCmdAck  = MSG_ReadLong( &msg );
+			/* cmd_count:u8 */
+			cmdCount      = MSG_ReadByte( &msg );
+
+			if ( cmdCount < 1 || cmdCount > MAX_PACKET_USERCMDS ) {
+				dglen = (int)sizeof( dgbuf );
+				continue;
+			}
+
+			/* refresh keep-alive so SV_CheckTimeouts doesn't drop the QUIC client;
+			 * netchan clients do this in SV_ExecuteClientMessage but QUIC never goes there */
+			cl->lastPacketTime = svs.time;
+
+			/* update snapshot delta baseline — enables delta-compressed snapshots */
+			cl->messageAcknowledge = snapshotAck;
+			cl->deltaMessage       = snapshotAck;
+
+			/* advance reliableAcknowledge — prevents re-embedding already-processed
+			 * server commands and keeps the queue from hitting the overflow guard */
+			if ( serverCmdAck - cl->reliableAcknowledge > 0 &&
+			     serverCmdAck - cl->reliableSequence <= 0 ) {
+				cl->reliableAcknowledge = serverCmdAck;
+			}
+
+			WN_DBG( "usercmd recv: client=%s snapAck=%u cmdAck=%d → deltaMessage=%d reliableAck=%d\n",
+				cl->name, snapshotAck, serverCmdAck, cl->deltaMessage, cl->reliableAcknowledge );
+
+			/* decode cmds with key=0 (TLS handles confidentiality) */
+			oldcmd = &nullcmd;
+			for ( i = 0; i < cmdCount; i++ ) {
+				MSG_ReadDeltaUsercmdKey( &msg, 0, oldcmd, &cmds[i] );
+				oldcmd = &cmds[i];
+			}
+
+			if ( cl->state != CS_ACTIVE ) {
+				dglen = (int)sizeof( dgbuf );
+				continue;
+			}
+
+			/* run cmds — skip duplicates already processed */
+			for ( i = 0; i < cmdCount; i++ ) {
+				if ( cmds[i].serverTime - cmds[cmdCount-1].serverTime > 0 )
+					continue;
+				if ( cmds[i].serverTime - cl->lastUsercmd.serverTime <= 0 )
+					continue;
+				SV_ClientThink( cl, &cmds[i] );
+			}
+		}
+		dglen = (int)sizeof( dgbuf );
+	}
+}
+
+/*
+==================
+SV_DrainQUICReliableCommands
+
+Drain all pending reliable game-command messages from connected QUIC
+game clients.  Called once per server frame from sv_main.c.
+Reliable commands arrive as null-terminated strings; each is dispatched
+to SV_ExecuteClientCommand exactly as if it had come over the netchan
+reliable command queue.
+==================
+*/
+void SV_DrainQUICReliableCommands( void )
+{
+	byte          buf[MAX_MSGLEN];
+	int           len;
+	conn_handle_t rconn;
+	int           rchan;
+	int           i;
+	client_t     *cl;
+
+	if ( !transport )
+		return;
+
+	len = (int)sizeof( buf );
+	while ( WN_ServerRecvReliable( &rconn, &rchan, buf, &len ) ) {
+		if ( rchan == CHAN_COMMANDS ) {
+			/* null-terminate defensively */
+			buf[ len < (int)sizeof(buf) ? len : (int)sizeof(buf) - 1 ] = '\0';
+
+			cl = NULL;
+			for ( i = 0; i < sv_maxclients->integer; i++ ) {
+				if ( svs.clients[i].state >= CS_CONNECTED &&
+				     svs.clients[i].quic_conn == rconn ) {
+					cl = &svs.clients[i];
+					break;
+				}
+			}
+
+			if ( cl ) {
+				/* Legacy netchan tracked per-command sequence numbers and drove
+				 * lastClientCommand off the wire seq in SV_ClientCommand. QUIC
+				 * streams carry the payload only, so we synthesise the ack by
+				 * bumping lastClientCommand once per drained message. This keeps
+				 * sv_snapshot.c:822 writing a non-stale value to the client's
+				 * reliableAcknowledge field, preventing a retransmit loop where
+				 * the client keeps re-sending the same userinfo/say command. */
+				cl->lastClientCommand++;
+				Q_strncpyz( cl->lastClientCommandString, (char *)buf,
+					sizeof( cl->lastClientCommandString ) );
+				SV_ExecuteClientCommand( cl, (char *)buf );
+			} else {
+				Com_DPrintf( "QUIC: CHAN_COMMANDS for unknown conn %llu — dropped\n",
+					(unsigned long long)rconn );
+			}
+		} else if ( rchan == CHAN_MCP ) {
+			/* MCP JSON-RPC payload from client via reliable channel.
+			 * The primary MCP path is the bidi-stream content-sniff in wn_main.c;
+			 * this channel path is for clients that explicitly frame MCP on CHAN_MCP. */
+			Com_DPrintf( "QUIC: CHAN_MCP from conn %llu len=%d\n",
+				(unsigned long long)rconn, len );
+			/* Future: route to WN_ProcessMcpChannelMessage(rconn, buf, len) */
+		}
+		len = (int)sizeof( buf );
 	}
 }
 
@@ -818,7 +880,6 @@ Destructor for data allocated in a client structure
 */
 void SV_FreeClient(client_t *client)
 {
-	SV_Netchan_FreeQueue(client);
 	SV_CloseDownload(client);
 }
 
@@ -1014,7 +1075,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	// when we receive the first packet from the client, we will
 	// notice that it is from a different serverid and that the
 	// gamestate message was not just sent, forcing a retransmit
-	client->gamestateMessageNum = client->netchan.outgoingSequence;
+	client->gamestateMessageNum = client->wn_outgoing_sequence;
 
 	// accept usercmds starting from current server time only
 	Com_Memset( &client->lastUsercmd, 0x0, sizeof( client->lastUsercmd ) );
@@ -1102,6 +1163,18 @@ static void SV_SendClientGameState( client_t *client ) {
 	}
 
 	// deliver this to the client
+	if ( client->quic_conn != CONN_INVALID && transport ) {
+		byte bootbuf[MAX_MSGLEN];
+		int bootlen = 0;
+		/* WiredNet QUIC client: send typed bootstrap sections on the reliable
+		 * bootstrap channel. */
+		if ( !SV_WiredNetWriteBootstrap( client, bootbuf, sizeof( bootbuf ), &bootlen ) ) {
+			Com_Error( ERR_DROP, "WiredNet bootstrap overflow" );
+		}
+		transport->send_reliable( client->quic_conn, CHAN_BOOTSTRAP, bootbuf, bootlen );
+		return;
+	}
+
 	SV_SendMessageToClient( &msg, client );
 }
 
@@ -1141,7 +1214,17 @@ void SV_ClientEnterWorld( client_t *client ) {
 	ent->s.number = clientNum;
 	client->gentity = ent;
 
-	client->deltaMessage = client->netchan.outgoingSequence - (PACKET_BACKUP + 1); // force delta reset
+	/* Force delta reset so the first snapshot is a full snapshot.
+	 *
+	 * QUIC clients: set deltaMessage = 0, not (wn_outgoing_sequence - PACKET_BACKUP+1).
+	 * The latter is negative early in a session; cast to uint32 it sets bit 31 of the
+	 * wire delta_base field, which collides with the fragment flag (0x80000000).
+	 * deltaMessage=0 delta-compresses from frame[0] (zeroed) = full snapshot on wire. */
+	if ( client->quic_conn != CONN_INVALID ) {
+		client->deltaMessage = 0;
+	} else {
+		client->deltaMessage = client->wn_outgoing_sequence - (PACKET_BACKUP + 1);
+	}
 	client->lastSnapshotTime = svs.time - 9999; // generate a snapshot immediately
 
 	// call the game begin function
@@ -1380,7 +1463,19 @@ static int SV_WriteDownloadToClient( client_t *cl )
 			MSG_WriteString( &msg, errorMessage );
 
 			MSG_WriteByte( &msg, svc_EOF );
-			SV_Netchan_Transmit( cl, &msg );
+			if ( cl->quic_conn != CONN_INVALID && transport ) {
+				byte dlbuf[1024 + 16];
+				int  msglen = 0;
+				int  errlen = (int)strlen( errorMessage );
+				if ( errlen > 1023 )
+					errlen = 1023;
+				dlbuf[msglen++] = WN_DOWNLOAD_MSG_ERROR;
+				dlbuf[msglen++] = (byte)( errlen & 0xFF );
+				dlbuf[msglen++] = (byte)( ( errlen >> 8 ) & 0xFF );
+				Com_Memcpy( dlbuf + msglen, errorMessage, (size_t)errlen );
+				msglen += errlen;
+				transport->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );
+			}
 
 			*cl->downloadName = '\0';
 
@@ -1467,7 +1562,28 @@ static int SV_WriteDownloadToClient( client_t *cl )
 		MSG_WriteData( &msg, cl->downloadBlocks[curindex], cl->downloadBlockSize[curindex] );
 
 	MSG_WriteByte( &msg, svc_EOF );
-	SV_Netchan_Transmit( cl, &msg );
+
+	if ( cl->quic_conn != CONN_INVALID && transport ) {
+		byte dlbuf[MAX_DOWNLOAD_BLKSIZE + 16];
+		int  msglen = 0;
+		int  blockSize = cl->downloadBlockSize[curindex];
+		dlbuf[msglen++] = WN_DOWNLOAD_MSG_BLOCK;
+		dlbuf[msglen++] = (byte)( cl->downloadXmitBlock & 0xFF );
+		dlbuf[msglen++] = (byte)( ( cl->downloadXmitBlock >> 8 ) & 0xFF );
+		dlbuf[msglen++] = (byte)( blockSize & 0xFF );
+		dlbuf[msglen++] = (byte)( ( blockSize >> 8 ) & 0xFF );
+		if ( cl->downloadXmitBlock == 0 ) {
+			dlbuf[msglen++] = (byte)( cl->downloadSize & 0xFF );
+			dlbuf[msglen++] = (byte)( ( cl->downloadSize >> 8 ) & 0xFF );
+			dlbuf[msglen++] = (byte)( ( cl->downloadSize >> 16 ) & 0xFF );
+			dlbuf[msglen++] = (byte)( ( cl->downloadSize >> 24 ) & 0xFF );
+		}
+		if ( blockSize > 0 ) {
+			Com_Memcpy( dlbuf + msglen, cl->downloadBlocks[curindex], (size_t)blockSize );
+			msglen += blockSize;
+		}
+		transport->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );
+	}
 
 	Com_DPrintf( "clientDownload: %d : writing block %d\n", (int) (cl - svs.clients), cl->downloadXmitBlock );
 
@@ -1490,26 +1606,9 @@ Return the shortest time interval for sending next packet to client
 */
 int SV_SendQueuedMessages( void )
 {
-	int i, retval = -1, nextFragT;
-	client_t *cl;
-
-	for( i = 0; i < sv.maxclients; i++ )
-	{
-		cl = &svs.clients[i];
-
-		if ( cl->state )
-		{
-			nextFragT = SV_RateMsec(cl);
-
-			if(!nextFragT)
-				nextFragT = SV_Netchan_TransmitNextFragment(cl);
-
-			if(nextFragT >= 0 && (retval == -1 || retval > nextFragT))
-				retval = nextFragT;
-		}
-	}
-
-	return retval;
+	/* Phase D: QUIC handles fragmentation and flow control internally.
+	   No application-level fragment queue exists. */
+	return -1;
 }
 
 
@@ -1564,7 +1663,7 @@ This routine would be a bit simpler with a goto but i abstained
 =================
 */
 static void SV_VerifyPaks_f( client_t *cl ) {
-	int nChkSum1, nChkSum2, nClientPaks, i, j, nCurArg;
+	int nChkSum1, nClientPaks, i, j, nCurArg;
 	int nClientChkSum[512];
 	const char *pArg;
 	qboolean bGood = qtrue;
@@ -1575,11 +1674,11 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 	//
 	if ( sv.pure != 0 ) {
 
-		nChkSum1 = nChkSum2 = 0;
+		nChkSum1 = 0;
 
-		// we run the game, so determine which cgame and ui the client "should" be running
+		// we run the game, so determine which cgame the client "should" be running
 		bGood = FS_FileIsInPAK( "vm/cgame.qvm", &nChkSum1, NULL );
-		bGood &= FS_FileIsInPAK( "vm/ui.qvm", &nChkSum2, NULL );
+		// bGood &= FS_FileIsInPAK( "vm/ui.qvm", &nChkSum2, NULL );
 
 		nClientPaks = Cmd_Argc();
 
@@ -1614,12 +1713,6 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 			// verify first to be the cgame checksum
 			pArg = Cmd_Argv(nCurArg++);
 			if ( !*pArg || *pArg == '@' || atoi(pArg) != nChkSum1 ) {
-				bGood = qfalse;
-				break;
-			}
-			// verify the second to be the ui checksum
-			pArg = Cmd_Argv(nCurArg++);
-			if ( !*pArg || *pArg == '@' || atoi(pArg) != nChkSum2 ) {
 				bGood = qfalse;
 				break;
 			}
@@ -2096,7 +2189,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	if ( delta ) {
 		cl->deltaMessage = cl->messageAcknowledge;
 	} else {
-		cl->deltaMessage = cl->netchan.outgoingSequence - ( PACKET_BACKUP + 1 ); // force delta reset
+		cl->deltaMessage = cl->wn_outgoing_sequence - ( PACKET_BACKUP + 1 ); // force delta reset
 	}
 
 	cmdCount = MSG_ReadByte( msg );
@@ -2152,7 +2245,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	}
 
 	if ( cl->state != CS_ACTIVE ) {
-		cl->deltaMessage = cl->netchan.outgoingSequence - ( PACKET_BACKUP + 1 ); // force delta reset
+		cl->deltaMessage = cl->wn_outgoing_sequence - ( PACKET_BACKUP + 1 ); // force delta reset
 		return;
 	}
 
@@ -2229,7 +2322,7 @@ void SV_ExecuteClientMessage( client_t *cl, msg_t *msg ) {
 	cl->messageAcknowledge = MSG_ReadLong( msg );
 
 	//if ( cl->messageAcknowledge < 0 ) {
-	if ( cl->netchan.outgoingSequence - cl->messageAcknowledge <= 0 ) {
+	if ( cl->wn_outgoing_sequence - cl->messageAcknowledge <= 0 ) {
 		// usually only hackers create messages like this
 		// it is more annoying for them to let them hanging
 #ifdef _DEBUG

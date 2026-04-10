@@ -1199,11 +1199,6 @@ void Cmd_ExecuteString( const char *text ) {
 	}
 
 #ifndef DEDICATED
-	// check ui commands
-	if ( com_cl_running && com_cl_running->integer && UI_GameCommand() ) {
-		return;
-	}
-
 	// send it as a server command if we are connected
 	// this will usually result in a chat message
 	CL_ForwardCommandToServer( text );

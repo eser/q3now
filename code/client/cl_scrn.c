@@ -448,7 +448,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	// for several frames — without this guard the old framebuffer content
 	// (levelshot) bleeds through.
 	if ( cl_loadProgress.startTime > 0 ) {
-		if ( cls.state == CA_LOADING || cls.state == CA_PRIMED ) {
+		if ( cls.rendererStarted && cls.state >= CA_CONNECTING && cls.state <= CA_PRIMED ) {
 			if ( !cl_loadFading || cl_loadFadeAlpha <= 0.0f ) {
 				cl_loadFadeAlpha = 1.0f;
 				cl_loadFading = qfalse;
@@ -497,11 +497,16 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			}
 		} else {
 			// CA_DISCONNECTED / CA_CONNECTING / CA_CHALLENGING / CA_CONNECTED:
-			// dark fill while waiting for CA_LOADING
-			vec4_t dark = { 0.031f, 0.047f, 0.063f, 1.0f };
-			re.SetColor( dark );
-			re.DrawStretchPic( 0, 0, cls.glconfig.vidWidth, cls.glconfig.vidHeight, 0, 0, 0, 0, cls.whiteShader );
-			re.SetColor( NULL );
+			// Only paint a dark fill when a UI or cgame catcher is active.
+			// When neither catcher is set, Con_DrawConsole (called below) renders
+			// the console fullscreen and its own background covers this region —
+			// painting here would be an overdraw with no visible effect.
+			if ( Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CGAME) ) {
+				vec4_t dark = { 0.031f, 0.047f, 0.063f, 1.0f };
+				re.SetColor( dark );
+				re.DrawStretchPic( 0, 0, cls.glconfig.vidWidth, cls.glconfig.vidHeight, 0, 0, 0, 0, cls.whiteShader );
+				re.SetColor( NULL );
+			}
 		}
 	}
 	// ── Normal UI / game rendering (when not loading) ──

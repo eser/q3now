@@ -136,6 +136,11 @@ static weaponconfig_t *weaponconfig;
 //========================================================================
 static int BotValidWeaponNumber(int weaponnum)
 {
+	if (!weaponconfig)
+	{
+		return qtrue;
+	} //end if
+
 	if (weaponnum <= 0 || weaponnum > weaponconfig->numweapons)
 	{
 		botimport.Print(PRT_ERROR, "weapon number out of range\n");
@@ -378,6 +383,9 @@ void BotGetWeaponInfo(int weaponstate, int weapon, weaponinfo_t *weaponinfo)
 {
 	bot_weaponstate_t *ws;
 
+	Com_Memset(weaponinfo, 0, sizeof(weaponinfo_t));
+	weaponinfo->number = weapon;
+
 	if (!BotValidWeaponNumber(weapon)) return;
 	ws = BotWeaponStateFromHandle(weaponstate);
 	if (!ws) return;
@@ -480,20 +488,7 @@ void BotFreeWeaponState(int handle)
 //===========================================================================
 int BotSetupWeaponAI(void)
 {
-	const char *file;
-
-	file = LibVarString("weaponconfig", "weapons.c");
-	weaponconfig = LoadWeaponConfig(file);
-	if (!weaponconfig)
-	{
-		botimport.Print(PRT_FATAL, "couldn't load the weapon config\n");
-		return BLERR_CANNOTLOADWEAPONCONFIG;
-	} //end if
-
-#ifdef DEBUG_AI_WEAP
-	DumpWeaponConfig(weaponconfig);
-#endif //DEBUG_AI_WEAP
-	//
+	weaponconfig = NULL;
 	return BLERR_NOERROR;
 } //end of the function BotSetupWeaponAI
 //===========================================================================
@@ -517,4 +512,3 @@ void BotShutdownWeaponAI(void)
 		} //end if
 	} //end for
 } //end of the function BotShutdownWeaponAI
-

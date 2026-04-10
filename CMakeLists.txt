@@ -15,18 +15,15 @@ OPTION(USE_VULKAN "" ON)
 OPTION(USE_SYSTEM_JPEG "" OFF)
 OPTION(USE_RENDERER_DLOPEN "" ON)
 OPTION(USE_WASM "Enable WASM VM backend via WAMR" OFF)
-OPTION(USE_QUIC "Enable QUIC transport via picoquic (FEAT_QUIC_TRANSPORT)" ON)
-OPTION(USE_QUIC_OBSERVE "Enable QUIC game state observation (FEAT_QUIC_OBSERVE, implies USE_QUIC)" ON)
-OPTION(USE_QUIC_CONTROL "Enable QUIC MCP/command channel (FEAT_QUIC_CONTROL, implies USE_QUIC_OBSERVE)" ON)
-OPTION(USE_QUIC_HTTP "Enable QUIC HTTP endpoints (FEAT_QUIC_HTTP, implies USE_QUIC)" ON)
-OPTION(USE_QUIC_GAME "Enable QUIC game transport — replaces UDP netchan (FEAT_QUIC_GAME, implies USE_QUIC)" ON)
-OPTION(USE_UDP "Enable legacy UDP game transport (FEAT_UDP); kept OFF — UDP is sunset" OFF)
-OPTION(USE_LUA "Enable LuaJIT scripting (FEAT_LUA)" ON)
+OPTION(USE_LUA "Enable LuaJIT scripting" ON)
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
 AUX_SOURCE_DIRECTORY(code/qcommon/maps QCOMMON_SRCS)
+
+# Arena allocator (must be explicit — AUX_SOURCE_DIRECTORY is configure-time only)
+list(APPEND QCOMMON_SRCS code/qcommon/arena.c)
 
 # LZ4 decoder (for SW3Z archive reader)
 list(APPEND QCOMMON_SRCS src/libs/lz4/lz4.c src/libs/lz4/lz4frame.c src/libs/lz4/xxhash.c src/libs/lz4/lz4hc.c)
@@ -131,129 +128,61 @@ IF(NO_VM_COMPILED)
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE NO_VM_COMPILED)
 ENDIF()
 
-# ── QUIC Transport (picoquic) ─────────────────────────────────────
-# Layered: USE_QUIC_GAME → USE_QUIC_CONTROL → USE_QUIC_OBSERVE → USE_QUIC
-# Each higher layer auto-enables its prerequisites.
-IF(USE_QUIC_GAME)
-	SET(USE_QUIC_OBSERVE ON)
-ENDIF()
-IF(USE_QUIC_CONTROL)
-	SET(USE_QUIC_OBSERVE ON)
-ENDIF()
-IF(USE_QUIC_OBSERVE)
-	SET(USE_QUIC ON)
-ENDIF()
-IF(USE_QUIC_HTTP)
-	SET(USE_QUIC ON)
-ENDIF()
+# ── WiredNet ──────────────────────────────────────────────────────
+# picoquic + picotls + mpack sources
+# These are added as git submodules under src/libs/
+FILE(GLOB PICOQUIC_SRCS src/libs/picoquic/picoquic/*.c)
 
-# ── UDP transport ─────────────────────────────────────────────────
-# USE_UDP=OFF (default): legacy Q3 netchan-over-UDP is disabled (Phase 4+).
-# USE_UDP=ON:  re-enable for fallback/compatibility testing only.
-IF(USE_UDP)
-	ADD_COMPILE_DEFINITIONS(FEAT_UDP=1)
-ELSE()
-	ADD_COMPILE_DEFINITIONS(FEAT_UDP=0)
-ENDIF()
+# Exclude optional picoquic TLS backend adapters — we only use OpenSSL
+list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*minicrypto.*")
+list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*mbedtls.*")
 
-IF(USE_QUIC)
-	# Feature flag defines — passed to compiler, override q_feats.h defaults
-	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_TRANSPORT=1)
-	IF(USE_QUIC_OBSERVE)
-		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_OBSERVE=1)
-	ENDIF()
-	IF(USE_QUIC_CONTROL)
-		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_CONTROL=1)
-	ENDIF()
-	IF(USE_QUIC_HTTP)
-		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_HTTP=1)
-	ENDIF()
-	IF(USE_QUIC_GAME)
-		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_GAME=1)
-	ELSE()
-		ADD_COMPILE_DEFINITIONS(FEAT_QUIC_GAME=0)
-	ENDIF()
+# Exclude picoquic's fusion TLS backend on all platforms — we don't compile
+# the picotls fusion source (lib/fusion.c), so the symbols are unresolved.
+# Our wt_picoquic_stubs.c provides a no-op stub instead.
+list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*fusion.*")
 
-	# picoquic + picotls + mpack sources
-	# These are added as git submodules under src/libs/
-	FILE(GLOB PICOQUIC_SRCS src/libs/picoquic/picoquic/*.c)
+# Exclude qlog (optional logging, pulls in file I/O we don't need)
+list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*qlog.*")
 
-	# Exclude optional picoquic TLS backend adapters — we only use OpenSSL
-	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*minicrypto.*")
-	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*mbedtls.*")
+# picotls — only compile the core + OpenSSL backend.
+# Skip optional backends (cifra, mbedtls, brotli, fusion, uecc, minicrypto)
+# to avoid pulling in dependencies we don't have.
+SET(PICOTLS_SRCS
+	src/libs/picotls/lib/picotls.c
+	src/libs/picotls/lib/openssl.c
+	src/libs/picotls/lib/pembase64.c
+	src/libs/picotls/lib/asn1.c
+	src/libs/picotls/lib/hpke.c
+)
 
-	# Exclude picoquic's fusion TLS backend on all platforms — we don't compile
-	# the picotls fusion source (lib/fusion.c), so the symbols are unresolved.
-	# Our wt_picoquic_stubs.c provides a no-op stub instead.
-	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*fusion.*")
+FILE(GLOB MPACK_SRCS    src/libs/mpack/src/mpack/*.c)
 
-	# Exclude qlog (optional logging, pulls in file I/O we don't need)
-	list(FILTER PICOQUIC_SRCS EXCLUDE REGEX ".*qlog.*")
+# wired/net module — WiredNet transport layer
+FILE(GLOB WN_SRCS code/wired/net/*.c)
 
-	# picotls — only compile the core + OpenSSL backend.
-	# Skip optional backends (cifra, mbedtls, brotli, fusion, uecc, minicrypto)
-	# to avoid pulling in dependencies we don't have.
-	SET(PICOTLS_SRCS
-		src/libs/picotls/lib/picotls.c
-		src/libs/picotls/lib/openssl.c
-		src/libs/picotls/lib/pembase64.c
-		src/libs/picotls/lib/asn1.c
-		src/libs/picotls/lib/hpke.c
-	)
+SET(WIREDNET_ALL_SRCS ${PICOQUIC_SRCS} ${PICOTLS_SRCS} ${MPACK_SRCS} ${WN_SRCS})
 
-	FILE(GLOB MPACK_SRCS    src/libs/mpack/src/mpack/*.c)
+# Include paths
+SET(WIREDNET_INCLUDE_DIRS
+	src/libs/picoquic/picoquic
+	src/libs/picotls/include
+	src/libs/mpack/src/mpack
+	code/wired/net
+)
 
-	# webtransport module — our integration code
-	FILE(GLOB WT_SRCS code/webtransport/*.c)
+# OpenSSL (required by picotls for crypto primitives)
+FIND_PACKAGE(OpenSSL REQUIRED)
 
-	SET(QUIC_ALL_SRCS ${PICOQUIC_SRCS} ${PICOTLS_SRCS} ${MPACK_SRCS} ${WT_SRCS})
+# Add to qcommon (client) and qcommon_ded (dedicated server)
+TARGET_SOURCES(qcommon PRIVATE ${WIREDNET_ALL_SRCS})
+TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${WIREDNET_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(qcommon PRIVATE OpenSSL::Crypto)
 
-	# Include paths
-	SET(QUIC_INCLUDE_DIRS
-		src/libs/picoquic/picoquic
-		src/libs/picotls/include
-		src/libs/mpack/src/mpack
-		code/webtransport
-	)
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIREDNET_ALL_SRCS})
+TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${WIREDNET_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE OpenSSL::Crypto)
 
-	# OpenSSL (required by picotls for crypto primitives)
-	FIND_PACKAGE(OpenSSL REQUIRED)
-
-	# Add to qcommon (client) and qcommon_ded (dedicated server)
-	TARGET_SOURCES(qcommon PRIVATE ${QUIC_ALL_SRCS})
-	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${QUIC_INCLUDE_DIRS})
-	TARGET_LINK_LIBRARIES(qcommon PRIVATE OpenSSL::Crypto)
-
-	TARGET_SOURCES(qcommon_ded PRIVATE ${QUIC_ALL_SRCS})
-	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${QUIC_INCLUDE_DIRS})
-	TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE OpenSSL::Crypto)
-
-	MESSAGE(STATUS "QUIC transport enabled (picoquic)")
-	IF(USE_QUIC_OBSERVE)
-		MESSAGE(STATUS "  + QUIC observation (game state + events)")
-	ENDIF()
-	IF(USE_QUIC_CONTROL)
-		MESSAGE(STATUS "  + QUIC control (MCP + commands)")
-	ENDIF()
-	IF(USE_QUIC_HTTP)
-		MESSAGE(STATUS "  + QUIC HTTP (/health, /metrics)")
-	ENDIF()
-	IF(USE_QUIC_GAME)
-		MESSAGE(STATUS "  + QUIC game transport (replaces UDP netchan)")
-	ENDIF()
-ELSE()
-	# When QUIC is disabled, override all FEAT_QUIC flags to 0
-	# (q_feats.h defaults are already 0, but this ensures consistency)
-	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_TRANSPORT=0)
-	ADD_COMPILE_DEFINITIONS(FEAT_QUIC_GAME=0)
-ENDIF()
-
-IF(NOT USE_UDP)
-	IF(NOT USE_QUIC_GAME)
-		MESSAGE(FATAL_ERROR "USE_UDP=OFF requires USE_QUIC_GAME=ON — at least one game transport must be enabled")
-	ENDIF()
-	MESSAGE(STATUS "UDP game transport disabled (USE_UDP=OFF) — QUIC is the sole game transport")
-ENDIF()
 
 # ── libogg (Ogg container format) ─────────────────────────────────
 set(OGG_SRCS src/libs/ogg/src/bitwise.c src/libs/ogg/src/framing.c)
@@ -582,9 +511,6 @@ IF(USE_LUA)
 	TARGET_SOURCES(qcommon PRIVATE ${QCOMMON_SCRIPTING_SRCS})
 	TARGET_SOURCES(qcommon_ded PRIVATE ${QCOMMON_SCRIPTING_SRCS})
 
-	# FEAT_LUA=1 globally — enables #if FEAT_LUA guards in qcommon, client, and dedicated
-	ADD_COMPILE_DEFINITIONS(FEAT_LUA=1)
-
 	# LuaJIT headers needed by qcommon (both targets) and client
 	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${LUAJIT_DIR}/src)
 	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${LUAJIT_DIR}/src)
@@ -594,7 +520,7 @@ IF(USE_LUA)
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} luajit)
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} luajit)
 
-	MESSAGE(STATUS "LuaJIT scripting enabled (FEAT_LUA)")
+	MESSAGE(STATUS "LuaJIT scripting enabled")
 ENDIF()
 
 #TARGET_LINK_OPTIONS(${DNAME} PRIVATE -fno-pie) # v3.13+

@@ -1,0 +1,38 @@
+# q3now clang-tidy configuration
+#
+# Focused on bug-finding and safety checks suitable for a C game engine.
+# Style enforcement is intentionally minimal — the codebase has its own
+# well-established conventions inherited from id Software / Quake3e.
+
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  misc-redundant-expression,
+  misc-unused-using-decls,
+  performance-*,
+  portability-*,
+  readability-duplicate-include,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-reserved-identifier,
+  -bugprone-signal-handler,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-suspicious-include,
+  -bugprone-switch-missing-default-case,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-casting-through-void,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-security.insecureAPI.strcpy,
+  -clang-analyzer-deadcode.DeadStores,
+  -performance-no-int-to-ptr,
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: '^code/.*'
+
+CheckOptions:
+  - key: bugprone-suspicious-string-compare.WarnOnImplicitComparison
+    value: true

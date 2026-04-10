@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_parse.c  -- parse a message received from the server
 
 #include "client.h"
+#include "../wired/net/wn_public.h"
 
 static const char *svc_strings[] = {
 	"svc_bad",
@@ -515,7 +516,7 @@ static void CL_ParseGamestate( msg_t *msg ) {
 	Com_Memset( &nullstate, 0, sizeof( nullstate ) );
 
 	// clear old error message
-	Cvar_Set( "com_errorMessage", "" );
+	Com_ClearLastError();
 
 	// wipe local client state
 	CL_ClearState();
@@ -673,10 +674,8 @@ CL_ParseDownload
 A download message has been received from the server
 =====================
 */
-static void CL_ParseDownload( msg_t *msg ) {
-	int		size;
-	unsigned char data[ MAX_MSGLEN ];
-	uint16_t block;
+static void CL_HandleDownloadBlock( uint16_t block, int size, const byte *data,
+	qboolean hasSize, int downloadSize, const char *errorMessage ) {
 
 	if (!*clc.downloadTempName) {
 		Com_Printf("Server sending download, but no download was requested\n");
@@ -688,31 +687,25 @@ static void CL_ParseDownload( msg_t *msg ) {
 		CL_StopRecord_f();
 	}
 
-	// read the data
-	block = MSG_ReadShort ( msg );
-
-	if(!block && !clc.downloadBlock)
+	if ( hasSize && !block && !clc.downloadBlock )
 	{
 		// block zero is special, contains file size
-		clc.downloadSize = MSG_ReadLong ( msg );
+		clc.downloadSize = downloadSize;
 
 		Cvar_SetIntegerValue( "cl_downloadSize", clc.downloadSize );
 
 		if (clc.downloadSize < 0)
 		{
-			Com_Error( ERR_DROP, "%s", MSG_ReadString( msg ) );
+			Com_Error( ERR_DROP, "%s", errorMessage ? errorMessage : "download error" );
 			return;
 		}
 	}
 
-	size = MSG_ReadShort ( msg );
 	if (size < 0 || size > sizeof(data))
 	{
 		Com_Error(ERR_DROP, "CL_ParseDownload: Invalid size %d for download chunk", size);
 		return;
 	}
-
-	MSG_ReadData(msg, data, size);
 
 	if((clc.downloadBlock & 0xFFFF) != block)
 	{
@@ -779,6 +772,418 @@ static void CL_ParseDownload( msg_t *msg ) {
 	}
 }
 
+static void CL_ParseDownload( msg_t *msg ) {
+	int		size;
+	unsigned char data[ MAX_MSGLEN ];
+	uint16_t block;
+	int         downloadSize = 0;
+
+	// read the data
+	block = MSG_ReadShort ( msg );
+
+	if(!block && !clc.downloadBlock)
+	{
+		downloadSize = MSG_ReadLong ( msg );
+	}
+
+	size = MSG_ReadShort ( msg );
+	MSG_ReadData(msg, data, size);
+	CL_HandleDownloadBlock( block, size, data,
+		( !block && !clc.downloadBlock ) ? qtrue : qfalse,
+		downloadSize, NULL );
+}
+
+static int CL_WiredNetReadU16( const byte *buf, int len, int *offset, uint16_t *out )
+{
+	if ( *offset + 2 > len ) {
+		return 0;
+	}
+	*out = (uint16_t)( buf[*offset] | ( (uint16_t)buf[*offset + 1] << 8 ) );
+	*offset += 2;
+	return 1;
+}
+
+static int CL_WiredNetReadU32( const byte *buf, int len, int *offset, uint32_t *out )
+{
+	if ( *offset + 4 > len ) {
+		return 0;
+	}
+	*out = (uint32_t)buf[*offset]
+		| ( (uint32_t)buf[*offset + 1] << 8 )
+		| ( (uint32_t)buf[*offset + 2] << 16 )
+		| ( (uint32_t)buf[*offset + 3] << 24 );
+	*offset += 4;
+	return 1;
+}
+
+static int CL_WiredNetReadS32( const byte *buf, int len, int *offset, int *out )
+{
+	uint32_t v;
+	if ( !CL_WiredNetReadU32( buf, len, offset, &v ) ) {
+		return 0;
+	}
+	*out = (int)v;
+	return 1;
+}
+
+static int CL_WiredNetReadBytes( const byte *buf, int len, int *offset, byte *out, int count )
+{
+	if ( *offset + count > len ) {
+		return 0;
+	}
+	Com_Memcpy( out, buf + *offset, (size_t)count );
+	*offset += count;
+	return 1;
+}
+
+static int CL_WiredNetReadString( const byte *buf, int len, int *offset,
+	char *out, int outSize )
+{
+	uint16_t slen;
+	if ( !CL_WiredNetReadU16( buf, len, offset, &slen ) ) {
+		return 0;
+	}
+	if ( slen <= 0 || *offset + slen > len || slen > outSize ) {
+		return 0;
+	}
+	Com_Memcpy( out, buf + *offset, (size_t)slen );
+	*offset += slen;
+	if ( out[slen - 1] != '\0' ) {
+		return 0;
+	}
+	return 1;
+}
+
+static int CL_WiredNetReadFloat( const byte *buf, int len, int *offset, float *out )
+{
+	uint32_t bits;
+	if ( !CL_WiredNetReadU32( buf, len, offset, &bits ) ) {
+		return 0;
+	}
+	Com_Memcpy( out, &bits, sizeof( bits ) );
+	return 1;
+}
+
+static int CL_WiredNetReadTrajectory( const byte *buf, int len, int *offset, trajectory_t *tr )
+{
+	int i;
+	int trType;
+	if ( !CL_WiredNetReadS32( buf, len, offset, &trType ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &tr->trTime ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &tr->trDuration ) ) {
+		return 0;
+	}
+	tr->trType = (trType_t)trType;
+	for ( i = 0; i < 3; i++ ) {
+		if ( !CL_WiredNetReadFloat( buf, len, offset, &tr->trBase[i] ) ) {
+			return 0;
+		}
+	}
+	for ( i = 0; i < 3; i++ ) {
+		if ( !CL_WiredNetReadFloat( buf, len, offset, &tr->trDelta[i] ) ) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int CL_WiredNetReadEntityState( const byte *buf, int len, int *offset, entityState_t *es )
+{
+	int i;
+	if ( !CL_WiredNetReadS32( buf, len, offset, &es->number ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->eType ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->eFlags ) ||
+		!CL_WiredNetReadTrajectory( buf, len, offset, &es->pos ) ||
+		!CL_WiredNetReadTrajectory( buf, len, offset, &es->apos ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->time ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->time2 ) ) {
+		return 0;
+	}
+	for ( i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->origin[i] ) ) return 0;
+	for ( i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->origin2[i] ) ) return 0;
+	for ( i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->angles[i] ) ) return 0;
+	for ( i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->angles2[i] ) ) return 0;
+	if ( !CL_WiredNetReadS32( buf, len, offset, &es->otherEntityNum ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->otherEntityNum2 ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->groundEntityNum ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->constantLight ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->loopSound ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->modelindex ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->modelindex2 ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->clientNum ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->frame ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->solid ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->event ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->eventParm ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->powerups ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->weapon ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->legsAnim ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->torsoAnim ) ||
+		!CL_WiredNetReadS32( buf, len, offset, &es->generic1 ) ) {
+		return 0;
+	}
+	return 1;
+}
+
+static void CL_WiredNetBootstrapResetState( void )
+{
+	int i;
+	const char *s;
+	Con_Close();
+	clc.connectPacketCount = 0;
+	Com_ClearLastError();
+	CL_ClearState();
+	for ( i = 0; i < MAX_RELIABLE_COMMANDS; i++ ) {
+		s = clc.serverCommands[i];
+		if ( !strncmp( s, "cs ", 3 ) || !strncmp( s, "bcs0 ", 5 ) ||
+			!strncmp( s, "bcs1 ", 5 ) || !strncmp( s, "bcs2 ", 5 ) ) {
+			clc.serverCommandsIgnore[i] = qtrue;
+		}
+	}
+	cl.gameState.dataCount = 1;
+	Com_Memset( cl.baselineUsed, 0, sizeof( cl.baselineUsed ) );
+	Com_Memset( cl.entityBaselines, 0, sizeof( cl.entityBaselines ) );
+}
+
+static qboolean CL_WiredNetApplyServerCommand( int seq, const char *s )
+{
+	int index;
+	if ( clc.serverCommandSequence - seq >= 0 ) {
+		return qtrue;
+	}
+	clc.serverCommandSequence = seq;
+	index = seq & ( MAX_RELIABLE_COMMANDS - 1 );
+	Q_strncpyz( clc.serverCommands[index], s, sizeof( clc.serverCommands[index] ) );
+	clc.serverCommandsIgnore[index] = qfalse;
+	return qtrue;
+}
+
+static qboolean CL_WiredNetApplyConfigstring( int index, const char *s )
+{
+	int slen;
+	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
+		return qfalse;
+	}
+	slen = (int)strlen( s );
+	if ( slen + 1 + cl.gameState.dataCount > MAX_GAMESTATE_CHARS ) {
+		return qfalse;
+	}
+	cl.gameState.stringOffsets[index] = cl.gameState.dataCount;
+	Com_Memcpy( cl.gameState.stringData + cl.gameState.dataCount, s, (size_t)slen + 1 );
+	cl.gameState.dataCount += slen + 1;
+	return qtrue;
+}
+
+static qboolean CL_WiredNetApplyBaseline( int entityNum, const entityState_t *es )
+{
+	if ( entityNum < 0 || entityNum >= MAX_GENTITIES ) {
+		return qfalse;
+	}
+	cl.entityBaselines[entityNum] = *es;
+	cl.baselineUsed[entityNum] = 1;
+	return qtrue;
+}
+
+static void CL_WiredNetBootstrapFinalize( int clientNum, int checksumFeed )
+{
+	char oldGame[MAX_QPATH];
+	char reconnectArgs[MAX_CVAR_VALUE_STRING];
+	qboolean gamedirModified;
+	clc.eventMask |= EM_GAMESTATE;
+	clc.clientNum = clientNum;
+	clc.checksumFeed = checksumFeed;
+	Cvar_VariableStringBuffer( "fs_game", oldGame, sizeof( oldGame ) );
+	CL_ParseServerInfo();
+	CL_SystemInfoChanged( qtrue );
+	if ( cl_autoRecordDemo->integer && clc.demorecording && !clc.demoplaying ) {
+		CL_StopRecord_f();
+	}
+	gamedirModified = ( Cvar_Flags( "fs_game" ) & CVAR_MODIFIED ) ? qtrue : qfalse;
+	if ( !cl_oldGameSet && gamedirModified ) {
+		cl_oldGameSet = qtrue;
+		Q_strncpyz( cl_oldGame, oldGame, sizeof( cl_oldGame ) );
+	}
+	cls.gameSwitch = gamedirModified;
+	if ( gamedirModified ) {
+		Cvar_VariableStringBuffer( "cl_reconnectArgs", reconnectArgs, sizeof( reconnectArgs ) );
+	}
+	FS_ConditionalRestart( clc.checksumFeed, gamedirModified );
+	if ( gamedirModified ) {
+		Cvar_Set( "cl_reconnectArgs", reconnectArgs );
+	}
+	cls.gameSwitch = qfalse;
+	CL_InitDownloads();
+	Cvar_Set( "cl_paused", "0" );
+}
+
+static void CL_ParseTypedBootstrap( const byte *buf, int len )
+{
+	int offset = 0;
+	qboolean sawAck = qfalse;
+	qboolean sawCmds = qfalse;
+	qboolean sawConfig = qfalse;
+	qboolean sawBaselines = qfalse;
+	qboolean sawClientInfo = qfalse;
+	int clientNum = -1;
+	int checksumFeed = 0;
+
+	if ( len < 1 || buf[0] != WN_BOOTSTRAP_MSG_STATE ) {
+		Com_Printf( S_COLOR_YELLOW "WiredNet bootstrap: invalid message\n" );
+		return;
+	}
+	CL_WiredNetBootstrapResetState();
+	offset = 1;
+	while ( offset < len ) {
+		uint32_t sectionLen;
+		int sectionEnd;
+		int sectionType = buf[offset++];
+		uint16_t count;
+		if ( !CL_WiredNetReadU32( buf, len, &offset, &sectionLen ) ) {
+			Com_Printf( S_COLOR_YELLOW "WiredNet bootstrap: short section header\n" );
+			return;
+		}
+		sectionEnd = offset + (int)sectionLen;
+		if ( sectionEnd > len ) {
+			Com_Printf( S_COLOR_YELLOW "WiredNet bootstrap: truncated section\n" );
+			return;
+		}
+		switch ( sectionType ) {
+		case WN_BOOTSTRAP_SEC_ACK:
+			if ( sawAck || !CL_WiredNetReadS32( buf, sectionEnd, &offset, &clc.reliableAcknowledge ) ) return;
+			sawAck = qtrue;
+			break;
+		case WN_BOOTSTRAP_SEC_SERVER_CMDS:
+			if ( sawCmds || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) return;
+			while ( count-- ) {
+				int seq;
+				char cmd[MAX_STRING_CHARS];
+				if ( !CL_WiredNetReadS32( buf, sectionEnd, &offset, &seq ) ||
+					!CL_WiredNetReadString( buf, sectionEnd, &offset, cmd, sizeof( cmd ) ) ||
+					!CL_WiredNetApplyServerCommand( seq, cmd ) ) {
+					return;
+				}
+			}
+			sawCmds = qtrue;
+			break;
+		case WN_BOOTSTRAP_SEC_CONFIGSTRINGS:
+			if ( sawConfig || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) return;
+			while ( count-- ) {
+				uint16_t index;
+				char value[BIG_INFO_STRING];
+				if ( !CL_WiredNetReadU16( buf, sectionEnd, &offset, &index ) ||
+					!CL_WiredNetReadString( buf, sectionEnd, &offset, value, sizeof( value ) ) ||
+					!CL_WiredNetApplyConfigstring( index, value ) ) {
+					return;
+				}
+			}
+			sawConfig = qtrue;
+			break;
+		case WN_BOOTSTRAP_SEC_BASELINES:
+			if ( sawBaselines || !CL_WiredNetReadU16( buf, sectionEnd, &offset, &count ) ) return;
+			while ( count-- ) {
+				uint16_t entityNum;
+				entityState_t es;
+				Com_Memset( &es, 0, sizeof( es ) );
+				if ( !CL_WiredNetReadU16( buf, sectionEnd, &offset, &entityNum ) ||
+					!CL_WiredNetReadEntityState( buf, sectionEnd, &offset, &es ) ||
+					!CL_WiredNetApplyBaseline( entityNum, &es ) ) {
+					return;
+				}
+			}
+			sawBaselines = qtrue;
+			break;
+		case WN_BOOTSTRAP_SEC_CLIENT_INFO:
+			if ( sawClientInfo ||
+				!CL_WiredNetReadS32( buf, sectionEnd, &offset, &clientNum ) ||
+				!CL_WiredNetReadS32( buf, sectionEnd, &offset, &checksumFeed ) ) {
+				return;
+			}
+			sawClientInfo = qtrue;
+			break;
+		default:
+			Com_Printf( S_COLOR_YELLOW "WiredNet bootstrap: unknown section %d\n", sectionType );
+			return;
+		}
+		if ( offset != sectionEnd ) {
+			Com_Printf( S_COLOR_YELLOW "WiredNet bootstrap: section length mismatch\n" );
+			return;
+		}
+	}
+	if ( !sawAck || !sawCmds || !sawConfig || !sawBaselines || !sawClientInfo ) {
+		Com_Printf( S_COLOR_YELLOW "WiredNet bootstrap: missing required section\n" );
+		return;
+	}
+	CL_WiredNetBootstrapFinalize( clientNum, checksumFeed );
+}
+
+static void CL_ParseTypedDownload( const byte *buf, int len )
+{
+	uint16_t block;
+	uint16_t size;
+	int      downloadSize = 0;
+	const byte *payload;
+
+	if ( len < 1 ) {
+		Com_Printf( S_COLOR_YELLOW "WiredNet download: short message\n" );
+		return;
+	}
+
+	switch ( buf[0] ) {
+	case WN_DOWNLOAD_MSG_ERROR:
+		if ( len < 3 ) {
+			Com_Printf( S_COLOR_YELLOW "WiredNet download: short error\n" );
+			return;
+		}
+		{
+			int errlen = (int)( buf[1] | ( (uint16_t)buf[2] << 8 ) );
+			char reason[1024];
+			if ( errlen > len - 3 )
+				errlen = len - 3;
+			if ( errlen >= (int)sizeof(reason) )
+				errlen = (int)sizeof(reason) - 1;
+			Com_Memcpy( reason, buf + 3, (size_t)errlen );
+			reason[errlen] = '\0';
+			Com_Error( ERR_DROP, "%s", reason );
+		}
+		return;
+
+	case WN_DOWNLOAD_MSG_BLOCK:
+		if ( len < 5 ) {
+			Com_Printf( S_COLOR_YELLOW "WiredNet download: short block header\n" );
+			return;
+		}
+		block = (uint16_t)( buf[1] | ( (uint16_t)buf[2] << 8 ) );
+		size  = (uint16_t)( buf[3] | ( (uint16_t)buf[4] << 8 ) );
+		payload = buf + 5;
+		if ( block == 0 && clc.downloadBlock == 0 ) {
+			if ( len < 9 ) {
+				Com_Printf( S_COLOR_YELLOW "WiredNet download: short initial block\n" );
+				return;
+			}
+			downloadSize = (int)( buf[5]
+				| ( (uint32_t)buf[6] << 8 )
+				| ( (uint32_t)buf[7] << 16 )
+				| ( (uint32_t)buf[8] << 24 ) );
+			payload = buf + 9;
+			if ( size > len - 9 ) {
+				Com_Printf( S_COLOR_YELLOW "WiredNet download: block payload truncated\n" );
+				return;
+			}
+			CL_HandleDownloadBlock( block, size, payload, qtrue, downloadSize, NULL );
+			return;
+		}
+		if ( size > len - 5 ) {
+			Com_Printf( S_COLOR_YELLOW "WiredNet download: block payload truncated\n" );
+			return;
+		}
+		CL_HandleDownloadBlock( block, size, payload, qfalse, 0, NULL );
+		return;
+	default:
+		Com_Printf( S_COLOR_YELLOW "WiredNet download: unknown msg type %d\n", buf[0] );
+		return;
+	}
+}
+
 
 /*
 =====================
@@ -819,7 +1224,7 @@ static void CL_ParseCommandString( msg_t *msg ) {
 		Cmd_TokenizeString( s );
 		if ( !Q_stricmp( Cmd_Argv(0), "disconnect" ) ) {
 			text = ( Cmd_Argc() > 1 ) ? va( "Server disconnected: %s", Cmd_Argv( 1 ) ) : "Server disconnected.";
-			Cvar_Set( "com_errorMessage", text );
+			Com_SetLastError( "%s", text );
 			Com_Printf( "%s\n", text );
 			if ( !CL_Disconnect( qtrue ) ) { // restart client if not done already
 				CL_FlushMemory();
@@ -850,18 +1255,34 @@ void CL_ParseServerMessage( msg_t *msg ) {
 	MSG_Bitstream( msg );
 
 	// get the reliable sequence acknowledge number
-	clc.reliableAcknowledge = MSG_ReadLong( msg );
-
-	if ( clc.reliableSequence - clc.reliableAcknowledge > MAX_RELIABLE_COMMANDS ) {
-		if ( !clc.demoplaying ) {
-			Com_Printf( S_COLOR_YELLOW "WARNING: dropping %i commands from server\n", clc.reliableSequence - clc.reliableAcknowledge );
-		}
-		clc.reliableAcknowledge = clc.reliableSequence;
-	} else if ( clc.reliableSequence - clc.reliableAcknowledge < 0 ) {
-		if ( clc.demoplaying ) {
-			clc.reliableSequence = clc.reliableAcknowledge;
+	{
+		int wire_ack = MSG_ReadLong( msg );
+		if ( clc.quic_conn != CONN_INVALID ) {
+			/* QUIC client path: reliable commands are delivered via QUIC streams
+			 * (send_reliable on CHAN_COMMANDS) and acknowledged LOCALLY the moment
+			 * they enter the stream (cl_input.c sets reliableAcknowledge =
+			 * reliableSequence after the call). QUIC guarantees per-stream delivery,
+			 * so the wire ack the server writes into each snapshot is redundant —
+			 * worse, it races: the first snapshot often arrives before the server's
+			 * SV_DrainQUICReliableCommands bumps lastClientCommand, making the wire
+			 * value stale and clobbering the client's correct local state. Read the
+			 * LONG to stay aligned with the Q3 snapshot framing, then discard it. */
+			(void)wire_ack;
 		} else {
-			Com_Error( ERR_DROP, "%s: incorrect reliable sequence acknowledge number", __func__ );
+			clc.reliableAcknowledge = wire_ack;
+
+			if ( clc.reliableSequence - clc.reliableAcknowledge > MAX_RELIABLE_COMMANDS ) {
+				if ( !clc.demoplaying ) {
+					Com_Printf( S_COLOR_YELLOW "WARNING: dropping %i commands from server\n", clc.reliableSequence - clc.reliableAcknowledge );
+				}
+				clc.reliableAcknowledge = clc.reliableSequence;
+			} else if ( clc.reliableSequence - clc.reliableAcknowledge < 0 ) {
+				if ( clc.demoplaying ) {
+					clc.reliableSequence = clc.reliableAcknowledge;
+				} else {
+					Com_Error( ERR_DROP, "%s: incorrect reliable sequence acknowledge number", __func__ );
+				}
+			}
 		}
 	}
 
@@ -874,7 +1295,12 @@ void CL_ParseServerMessage( msg_t *msg ) {
 
 		cmd = MSG_ReadByte( msg );
 
-		if ( cmd == svc_EOF ) {
+		/* In Huffman mode, MSG_ReadByte returns -1 when the post-decode
+		 * readcount crosses cursize — even when the symbol decoded
+		 * correctly (e.g. svc_EOF exactly fitting the last byte).
+		 * Check -1 first (original Q3 behaviour), then svc_EOF as a
+		 * belt-and-suspenders for any future OOB-mode callers. */
+		if ( cmd == -1 || cmd == svc_EOF ) {
 			SHOWNET( msg, "END OF MESSAGE" );
 			break;
 		}
@@ -923,5 +1349,180 @@ void CL_ParseServerMessage( msg_t *msg ) {
 			return;
 #endif
 		}
+	}
+}
+
+/*
+==================
+CL_CheckReliableStreams
+
+Poll the WiredNet reliable recv queue each frame. `CHAN_BOOTSTRAP` carries
+bootstrap state and `CHAN_DOWNLOAD` carries typed reliable download payloads.
+Bootstrap currently reuses the standard Quake 3 server-message layout:
+  [reliableAck:4][server cmds...][svc_gamestate][reliableSeq:4][configstrings/baselines][svc_EOF][clientNum:4][checksumFeed:4]
+so we feed it to CL_ParseServerMessage which strips the header and
+ dispatches to CL_ParseGamestate internally.  Client READY is sent later,
+ after loading completes and the client has entered CA_PRIMED.
+==================
+*/
+
+/* ── Fragment reassembly state (one pending snapshot at a time) ─────────────
+ * If a new wn_sequence arrives before the previous is complete, the incomplete
+ * set is discarded — it's stale. Memory is bounded to MAX_MSGLEN at all times. */
+typedef struct {
+	uint32_t wn_sequence;          /* snapshot sequence being assembled         */
+	uint32_t delta_base;           /* delta baseline (informational, not parsed) */
+	uint8_t  frag_total;           /* total fragments expected                   */
+	uint8_t  frag_received_mask;   /* bitmask of received fragment indices (≤8)  */
+	byte     data[MAX_MSGLEN];     /* reassembly buffer                          */
+	int      frag_sizes[8];        /* byte count of each received fragment       */
+} snapshot_reassembly_t;
+
+static snapshot_reassembly_t s_snap_reassembly;
+
+void CL_CheckReliableStreams( void )
+{
+	byte          buf[MAX_MSGLEN];
+	int           len;
+	int           rchan;
+
+	len = (int)sizeof( buf );
+	while ( WN_ClientRecvReliable( &rchan, buf, &len ) ) {
+		if ( rchan == CHAN_BOOTSTRAP ) {
+			CL_ParseTypedBootstrap( buf, len );
+		} else if ( rchan == CHAN_DOWNLOAD ) {
+			CL_ParseTypedDownload( buf, len );
+		} else if ( rchan == CHAN_MCP ) {
+			/* MCP JSON-RPC push from server via reliable channel.
+			 * Primary MCP path is client-initiated bidi streams in wn_main.c;
+			 * this handles server-initiated MCP messages if the server uses CHAN_MCP. */
+			Com_DPrintf( "QUIC: CHAN_MCP from server len=%d\n", len );
+			/* Future: route to client-side MCP handler */
+		} else if ( rchan == CHAN_SNAPSHOT_RELIABLE ) {
+			/* Reliable snapshot: [wn_sequence:u32le][delta_base:u32le][snapshot_data...]
+			 * Parse identically to a single-datagram snapshot. */
+			if ( len > 8 ) {
+				uint32_t srv_tick;
+				msg_t    rmsg;
+				srv_tick = (uint32_t)buf[0]
+				         | ( (uint32_t)buf[1] <<  8 )
+				         | ( (uint32_t)buf[2] << 16 )
+				         | ( (uint32_t)buf[3] << 24 );
+				clc.serverMessageSequence = (int)srv_tick;
+				MSG_Init( &rmsg, buf + 8, len - 8 );
+				rmsg.cursize   = len - 8;
+				rmsg.readcount = 0;
+				clc.lastPacketTime = cls.realtime;
+				CL_ParseServerMessage( &rmsg );
+			}
+		}
+		len = (int)sizeof( buf );
+	}
+}
+
+/*
+==================
+CL_CheckSnapshotDatagrams
+
+Poll the QUIC unreliable recv queue for snapshot datagrams each frame.
+
+Single-datagram format:
+  [wn_sequence:u32le] [delta_base:u32le] [snapshot_data...]
+  delta_base high bit = 0 → this is a complete snapshot.
+
+Fragmented-datagram format (high bit of delta_base set):
+  [wn_sequence:u32le] [delta_base|0x80000000:u32le] [frag_total:u8] [frag_index:u8] [fragment_data...]
+  All fragments must arrive before the snapshot is assembled and parsed.
+  If any fragment is lost the snapshot is silently dropped (Q3 unreliable semantics).
+==================
+*/
+void CL_CheckSnapshotDatagrams( void )
+{
+	byte          dgbuf[MAX_MSGLEN_BUF];
+	int           dglen;
+	conn_handle_t dgconn;
+
+	if ( !transport || !transport->recv_unreliable )
+		return;
+
+	dglen = (int)sizeof( dgbuf );
+	while ( transport->recv_unreliable( &dgconn, dgbuf, &dglen ) ) {
+		if ( dglen >= 8 ) {
+			uint32_t srv_tick  = (uint32_t)dgbuf[0]
+			                   | ( (uint32_t)dgbuf[1] <<  8 )
+			                   | ( (uint32_t)dgbuf[2] << 16 )
+			                   | ( (uint32_t)dgbuf[3] << 24 );
+			uint32_t raw_base  = (uint32_t)dgbuf[4]
+			                   | ( (uint32_t)dgbuf[5] <<  8 )
+			                   | ( (uint32_t)dgbuf[6] << 16 )
+			                   | ( (uint32_t)dgbuf[7] << 24 );
+			qboolean is_frag   = ( raw_base & 0x80000000u ) != 0;
+
+			if ( !is_frag ) {
+				/* Single complete datagram — fast path. */
+				if ( dglen > 8 ) {
+					msg_t msg;
+					clc.serverMessageSequence = (int)srv_tick;
+					WN_DBG( "snapshot recv: wn_seq=%u delta_base=%u → serverMessageSequence=%d\n",
+						srv_tick, raw_base & 0x7FFFFFFFu, clc.serverMessageSequence );
+					MSG_Init( &msg, dgbuf + 8, dglen - 8 );
+					msg.cursize   = dglen - 8;
+					msg.readcount = 0;
+					clc.lastPacketTime = cls.realtime;
+					CL_ParseServerMessage( &msg );
+				}
+			} else if ( dglen >= 10 ) {
+				/* Fragment — reassemble before parsing. */
+				uint8_t frag_total = dgbuf[8];
+				uint8_t frag_index = dgbuf[9];
+				int     frag_len   = dglen - 10;
+				uint32_t base_tick = raw_base & 0x7FFFFFFFu;
+				int      offset;
+				uint8_t  all_mask;
+
+				if ( frag_total < 2 || frag_total > 8 || frag_index >= frag_total || frag_len <= 0 ) {
+					/* Malformed fragment — discard. */
+					dglen = (int)sizeof( dgbuf );
+					continue;
+				}
+
+				/* If this is for a different snapshot, discard old and start fresh. */
+				if ( s_snap_reassembly.wn_sequence != srv_tick ) {
+					Com_Memset( &s_snap_reassembly, 0, sizeof(s_snap_reassembly) );
+					s_snap_reassembly.wn_sequence = srv_tick;
+					s_snap_reassembly.delta_base  = base_tick;
+					s_snap_reassembly.frag_total  = frag_total;
+				}
+
+				offset = frag_index * WN_FRAG_PAYLOAD;
+				if ( !( s_snap_reassembly.frag_received_mask & ( 1 << frag_index ) ) &&
+				     offset + frag_len <= (int)sizeof(s_snap_reassembly.data) ) {
+					Com_Memcpy( s_snap_reassembly.data + offset, dgbuf + 10, frag_len );
+					s_snap_reassembly.frag_sizes[frag_index] = frag_len;
+					s_snap_reassembly.frag_received_mask |= (uint8_t)( 1 << frag_index );
+				}
+
+				/* Check if all fragments are in. */
+				all_mask = ( frag_total == 8 ) ? 0xFF : (uint8_t)( ( 1 << frag_total ) - 1 );
+				if ( s_snap_reassembly.frag_received_mask == all_mask ) {
+					int   total_len = 0;
+					int   i;
+					msg_t msg;
+					for ( i = 0; i < (int)frag_total; i++ )
+						total_len += s_snap_reassembly.frag_sizes[i];
+					clc.serverMessageSequence = (int)s_snap_reassembly.wn_sequence;
+					WN_DBG( "snapshot recv: wn_seq=%u delta_base=%u (reassembled %d bytes) → serverMessageSequence=%d\n",
+						s_snap_reassembly.wn_sequence, s_snap_reassembly.delta_base,
+						total_len, clc.serverMessageSequence );
+					MSG_Init( &msg, s_snap_reassembly.data, total_len );
+					msg.cursize   = total_len;
+					msg.readcount = 0;
+					clc.lastPacketTime = cls.realtime;
+					CL_ParseServerMessage( &msg );
+					Com_Memset( &s_snap_reassembly, 0, sizeof(s_snap_reassembly) );
+				}
+			}
+		}
+		dglen = (int)sizeof( dgbuf );
 	}
 }

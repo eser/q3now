@@ -1,0 +1,116 @@
+// attract_leaderboard.wmenu — attract mode leaderboard splash panel
+// Shows a static top-times list while the game is idle. Hardcoded
+// placeholder times; swap for a real feeder binding when the backend exists.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "attract_leaderboard"
+	rect 0.2 0.1 0.6 0.8
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0 0 0 0.88
+	layout column
+	padding 0.04
+	gap 0.015
+	justify center
+
+	// heading
+	itemDef {
+		type 0
+		text "Top Times"
+		rect 0 0 1.0 0.065
+		textalign 1
+		font "sansman" WM_FONT_HEADING
+		forecolor WCOLOR_ACCENT
+		decoration
+		visible 1
+		grow 0
+	}
+
+	// separator
+	itemDef {
+		type 0
+		rect 0 0 1.0 WM_SEPARATOR_H
+		style 1
+		backcolor WCOLOR_SEPARATOR
+		decoration
+		visible 1
+		grow 0
+	}
+
+	// placeholder rows — replaced by feeder when backend ships
+	itemDef {
+		type 0
+		text "1.  Ranger         12:34.5"
+		rect 0 0 1.0 0.038
+		textalign 0
+		font "mono" WM_FONT_BODY
+		forecolor WCOLOR_TEXT
+		decoration
+		visible 1
+		grow 0
+	}
+
+	itemDef {
+		type 0
+		text "2.  Keel           13:01.2"
+		rect 0 0 1.0 0.038
+		textalign 0
+		font "mono" WM_FONT_BODY
+		forecolor WCOLOR_TEXT_DIM
+		decoration
+		visible 1
+		grow 0
+	}
+
+	itemDef {
+		type 0
+		text "3.  Slash          13:48.8"
+		rect 0 0 1.0 0.038
+		textalign 0
+		font "mono" WM_FONT_BODY
+		forecolor WCOLOR_TEXT_DIM
+		decoration
+		visible 1
+		grow 0
+	}
+
+	itemDef {
+		type 0
+		text "4.  Anarki         14:12.1"
+		rect 0 0 1.0 0.038
+		textalign 0
+		font "mono" WM_FONT_BODY
+		forecolor WCOLOR_TEXT_DIM
+		decoration
+		visible 1
+		grow 0
+	}
+
+	itemDef {
+		type 0
+		text "5.  Sorlag         14:59.3"
+		rect 0 0 1.0 0.038
+		textalign 0
+		font "mono" WM_FONT_BODY
+		forecolor WCOLOR_TEXT_DIM
+		decoration
+		visible 1
+		grow 0
+	}
+
+	// footer hint
+	itemDef {
+		type 0
+		text "Press any key to return"
+		rect 0 0 1.0 0.033
+		textalign 1
+		font "oxanium" WM_FONT_SMALL
+		forecolor WCOLOR_TEXT_DIM
+		decoration
+		visible 1
+		grow 0
+	}
+}

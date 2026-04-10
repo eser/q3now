@@ -573,7 +573,7 @@ static qboolean	CG_RegisterClientSkin( clientInfo_t *ci, const char *teamName, c
 		Com_Printf( "Torso skin load failure: %s\n", filename );
 	}
 
-	if ( CG_FindClientModelFile( filename, sizeof(filename), ci, teamName, modelName, modelName, "head", "skin" ) ) {
+	if ( CG_FindClientModelFile( filename, sizeof(filename), ci, teamName, modelName, skinName, "head", "skin" ) ) {
 		ci->headSkin = trap_R_RegisterSkin( filename );
 	}
 	if (!ci->headSkin) {

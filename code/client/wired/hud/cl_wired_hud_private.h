@@ -200,9 +200,19 @@ typedef struct
 	} font;
 	struct
 	{
+		int value;
+		qboolean isSet;
+	} fontWeight;
+	struct
+	{
 		vec2_t value;
 		qboolean isSet;
 	} fontsize;
+	struct
+	{
+		float value;
+		qboolean isSet;
+	} letterspacing;
 	struct
 	{
 		char value[MAX_QPATH];
@@ -764,6 +774,7 @@ typedef struct
 	vec4_t borderColor;
 	int width;
 	int fontId;
+	float letterSpacing;
 	const char* text;
 } superhudTextContext_t;
 

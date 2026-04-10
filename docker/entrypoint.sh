@@ -24,8 +24,30 @@ ARGS="$ARGS +set sv_allowDownload 1"
 # Engine tuning
 [ -n "$Q3_HUNKMEGS" ]     && ARGS="$ARGS +set com_hunkmegs $Q3_HUNKMEGS"
 
-# QUIC transport
-[ -n "$Q3_QUIC" ]         && ARGS="$ARGS +set sv_quic $Q3_QUIC"
+# QUIC transport — always enabled
+# Override TLS certificate and key paths via env vars (paths relative to fs_homepath).
+[ -n "$Q3_QUIC_CERT" ]    && ARGS="$ARGS +set sv_quicCertFile \"$Q3_QUIC_CERT\""
+[ -n "$Q3_QUIC_KEY" ]     && ARGS="$ARGS +set sv_quicKeyFile \"$Q3_QUIC_KEY\""
+
+# ── Auto-generate self-signed TLS cert for QUIC if none is present ────────────
+# The engine looks for certs/cert.pem and certs/key.pem under fs_homepath.
+# If the operator didn't mount a real cert, generate a self-signed one so QUIC
+# starts cleanly. Replace with a CA-signed cert for production deployments.
+CERT_DIR="/home/q3now/certs"
+CERT_FILE="$CERT_DIR/cert.pem"
+KEY_FILE="$CERT_DIR/key.pem"
+if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+    mkdir -p "$CERT_DIR"
+    openssl req -x509 -newkey ec \
+        -pkeyopt ec_paramgen_curve:P-256 \
+        -keyout "$KEY_FILE" \
+        -out "$CERT_FILE" \
+        -days 3650 \
+        -nodes \
+        -subj "/CN=q3now-server" \
+        2>/dev/null
+    echo "q3now: generated self-signed TLS cert at $CERT_FILE (replace for production)"
+fi
 
 # Downloads
 [ -n "$Q3_DOWNLOAD_URL" ] && ARGS="$ARGS +set sv_dlURL \"$Q3_DOWNLOAD_URL\""

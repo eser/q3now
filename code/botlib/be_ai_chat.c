@@ -3088,30 +3088,11 @@ void BotFreeChatState(int handle)
 //===========================================================================
 int BotSetupChatAI(void)
 {
-	const char *file;
-
-#ifdef DEBUG
-	int starttime = Sys_MilliSeconds();
-#endif //DEBUG
-
-	file = LibVarString("synfile", "syn.c");
-	synonyms = BotLoadSynonyms(file);
-	file = LibVarString("rndfile", "rnd.c");
-	randomstrings = BotLoadRandomStrings(file);
-	file = LibVarString("matchfile", "match.c");
-	matchtemplates = BotLoadMatchTemplates(file);
-	//
-	if (!LibVarValue("nochat", "0"))
-	{
-		file = LibVarString("rchatfile", "rchat.c");
-		replychats = BotLoadReplyChat(file);
-	} //end if
-
+	synonyms = NULL;
+	randomstrings = NULL;
+	matchtemplates = NULL;
+	replychats = NULL;
 	InitConsoleMessageHeap();
-
-#ifdef DEBUG
-	botimport.Print(PRT_MESSAGE, "setup chat AI %d msec\n", Sys_MilliSeconds() - starttime);
-#endif //DEBUG
 	return BLERR_NOERROR;
 } //end of the function BotSetupChatAI
 //===========================================================================

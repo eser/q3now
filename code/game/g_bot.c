@@ -23,10 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_bot.c
 
 #include "g_local.h"
-
-
-static int		g_numBots;
-static char		*g_botInfos[MAX_BOTS];
+#include "g_character.h"
 
 
 int				g_numArenas;
@@ -148,7 +145,6 @@ G_LoadArenas
 */
 static void G_LoadArenas( void ) {
 	int			numdirs;
-	vmCvar_t	arenasFile;
 	char		filename[128];
 	char		dirlist[1024];
 	char*		dirptr;
@@ -157,13 +153,7 @@ static void G_LoadArenas( void ) {
 
 	g_numArenas = 0;
 
-	trap_Cvar_Register( &arenasFile, "g_arenasFile", "", CVAR_INIT|CVAR_ROM );
-	if( *arenasFile.string ) {
-		G_LoadArenasFromFile(arenasFile.string);
-	}
-	else {
-		G_LoadArenasFromFile("scripts/arenas.txt");
-	}
+	G_LoadArenasFromFile("scripts/arenas.txt");
 
 	// get all arenas from .arena files
 	numdirs = trap_FS_GetFileList("scripts", ".arena", dirlist, 1024 );
@@ -260,31 +250,40 @@ int G_CountBotPlayersByName( const char *name, int team ) {
 
 /*
 ===============
-G_SelectRandomBotInfo
+G_SelectRandomCharacterIndex
 
-Get random least used bot info on team or whole server if team is -1.
+Get random least used character on team or whole server if team is -1.
 ===============
 */
-int G_SelectRandomBotInfo( int team ) {
+static int G_SelectRandomCharacterIndex( int team ) {
 	int		selection[MAX_BOTS];
 	int		n, num;
 	int		count, bestCount;
-	const char	*value;
+	int		numCharacters;
+	const g_characterInfo_t *characterInfo;
 
-	// don't add duplicate bots to the server if there are less bots than bot types
-	if ( team != -1 && G_CountBotPlayersByName( NULL, -1 ) < g_numBots ) {
+	numCharacters = G_Characters_Count();
+	if ( numCharacters <= 0 ) {
+		return -1;
+	}
+	if ( numCharacters > MAX_BOTS ) {
+		numCharacters = MAX_BOTS;
+	}
+
+	// don't add duplicate bots to a team if alternatives are available server-wide
+	if ( team != -1 && G_CountBotPlayersByName( NULL, -1 ) < numCharacters ) {
 		team = -1;
 	}
 
 	num = 0;
 	bestCount = MAX_CLIENTS;
-	for ( n = 0; n < g_numBots ; n++ ) {
-		value = Info_ValueForKey( g_botInfos[n], "funname" );
-		if ( !value[0] ) {
-			value = Info_ValueForKey( g_botInfos[n], "name" );
+	for ( n = 0; n < numCharacters; n++ ) {
+		characterInfo = G_Character_GetByIndex( n );
+		if ( !characterInfo ) {
+			continue;
 		}
-		//
-		count = G_CountBotPlayersByName( value, team );
+
+		count = G_CountBotPlayersByName( characterInfo->name, team );
 
 		if ( count < bestCount ) {
 			bestCount = count;
@@ -293,7 +292,6 @@ int G_SelectRandomBotInfo( int team ) {
 
 		if ( count == bestCount ) {
 			selection[num++] = n;
-
 			if ( num == MAX_BOTS ) {
 				break;
 			}
@@ -301,8 +299,7 @@ int G_SelectRandomBotInfo( int team ) {
 	}
 
 	if ( num > 0 ) {
-		num = random() * ( num - 1 );
-		return selection[num];
+		return selection[(int)( random() * num ) % num];
 	}
 
 	return -1;
@@ -318,6 +315,11 @@ void G_AddRandomBot( int team ) {
 	float	skill;
 
 	skill = trap_Cvar_VariableValue( "g_spSkill" );
+	if ( skill < 1.0f ) {
+		skill = 1.0f;
+	} else if ( skill > 5.0f ) {
+		skill = 5.0f;
+	}
 	if (team == TEAM_RED) teamstr = "red";
 	else if (team == TEAM_BLUE) teamstr = "blue";
 	else teamstr = "free";
@@ -648,12 +650,9 @@ G_AddBot
 static void G_AddBot( const char *name, float skill, const char *team, int delay, char *altname) {
 	int				clientNum;
 	int				teamNum;
-	int				botinfoNum;
-	char			*botinfo;
-	const char		*key;
-	const char		*s;
+	int				characterIndex;
+	const g_characterInfo_t *characterInfo;
 	const char		*botname;
-	const char		*model;
 	char			userinfo[MAX_INFO_STRING];
 
 	// have the server allocate a client slot
@@ -679,7 +678,9 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 		}
 	}
 
-	// get the botinfo from bots.txt
+	characterInfo = NULL;
+
+	// choose a character
 	if ( Q_stricmp( name, "random" ) == 0 ) {
 		if ( Q_stricmp( team, "red" ) == 0 || Q_stricmp( team, "r" ) == 0 ) {
 			teamNum = TEAM_RED;
@@ -694,71 +695,36 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 			teamNum = TEAM_FREE;
 		}
 
-		botinfoNum = G_SelectRandomBotInfo( teamNum );
-
-		if ( botinfoNum < 0 ) {
-			G_Printf( S_COLOR_RED "Error: Cannot add random bot, no bot info available.\n" );
-			trap_BotFreeClient( clientNum );
-			return;
+		characterIndex = G_SelectRandomCharacterIndex( teamNum );
+		if ( characterIndex >= 0 ) {
+			characterInfo = G_Character_GetByIndex( characterIndex );
 		}
-
-		botinfo = G_GetBotInfoByNumber( botinfoNum );
 	}
 	else {
-		botinfo = G_GetBotInfoByName( name );
+		characterInfo = G_Character_GetByName( name );
 	}
 
-	if ( !botinfo ) {
-		G_Printf( S_COLOR_RED "Error: Bot '%s' not defined\n", name );
+	if ( !characterInfo ) {
+		G_Printf( S_COLOR_RED "Error: Character '%s' not defined\n", name );
 		trap_BotFreeClient( clientNum );
 		return;
 	}
 
-	// create the bot's userinfo
 	userinfo[0] = '\0';
 
-	botname = Info_ValueForKey( botinfo, "funname" );
-	if( !botname[0] ) {
-		botname = Info_ValueForKey( botinfo, "name" );
-	}
-	// check for an alternative name
+	botname = characterInfo->name;
 	if (altname && altname[0]) {
 		botname = altname;
 	}
 	Info_SetValueForKey( userinfo, "name", botname );
 	Info_SetValueForKey( userinfo, "rate", "25000" );
 	Info_SetValueForKey( userinfo, "snaps", "20" );
-	Info_SetValueForKey( userinfo, "skill", va("%.2f", skill) );
+	Info_SetValueForKey( userinfo, "skill", va("%.2f", 1.0f + 4.0f * skill) );
 	Info_SetValueForKey( userinfo, "teampref", team );
-
-	key = "model";
-	model = Info_ValueForKey( botinfo, key );
-	if ( !*model ) {
-		model = "visor/default";
-	}
-	Info_SetValueForKey( userinfo, key, model );
-
-	key = "color1";
-	s = Info_ValueForKey( botinfo, key );
-	if ( !*s ) {
-		s = "4";
-	}
-	Info_SetValueForKey( userinfo, key, s );
-
-	key = "color2";
-	s = Info_ValueForKey( botinfo, key );
-	if ( !*s ) {
-		s = "5";
-	}
-	Info_SetValueForKey( userinfo, key, s );
-
-	s = Info_ValueForKey(botinfo, "aifile");
-	if (!*s ) {
-		trap_Print( S_COLOR_RED "Error: bot has no aifile specified\n" );
-		trap_BotFreeClient( clientNum );
-		return;
-	}
-	Info_SetValueForKey( userinfo, "characterfile", s );
+	Info_SetValueForKey( userinfo, "model", characterInfo->model );
+	Info_SetValueForKey( userinfo, "color1", "4" );
+	Info_SetValueForKey( userinfo, "color2", "5" );
+	Info_SetValueForKey( userinfo, "characterfile", characterInfo->profilePath );
 
 	// don't send tinfo to bots, they don't parse it
 	Info_SetValueForKey( userinfo, "teamoverlay", "0" );
@@ -813,6 +779,7 @@ void Svcmd_AddBot_f( void ) {
 	else {
 		skill = Com_Clamp( 1, 5, atof( string ) );
 	}
+	skill = ( skill - 1.0f ) / 4.0f;
 
 	// team
 	trap_Argv( 3, team, sizeof( team ) );
@@ -847,29 +814,17 @@ Svcmd_BotList_f
 void Svcmd_BotList_f( void ) {
 	int i;
 	char name[MAX_TOKEN_CHARS];
-	char funname[MAX_TOKEN_CHARS];
-	char model[MAX_TOKEN_CHARS];
-	char aifile[MAX_TOKEN_CHARS];
+	const g_characterInfo_t *characterInfo;
 
-	trap_Print("^1name             model            aifile              funname\n");
-	for (i = 0; i < g_numBots; i++) {
-		Q_strncpyz(name, Info_ValueForKey( g_botInfos[i], "name" ), sizeof( name ));
-		if ( !*name ) {
-			strcpy(name, "UnnamedPlayer");
+	trap_Print("^1name             model            characterfile\n");
+
+	for ( i = 0; i < G_Characters_Count(); i++ ) {
+		characterInfo = G_Character_GetByIndex( i );
+		if ( !characterInfo ) {
+			continue;
 		}
-		Q_strncpyz(funname, Info_ValueForKey( g_botInfos[i], "funname" ), sizeof( funname ));
-		if ( !*funname ) {
-			strcpy(funname, "");
-		}
-		Q_strncpyz(model, Info_ValueForKey( g_botInfos[i], "model" ), sizeof( model ));
-		if ( !*model ) {
-			strcpy(model, "visor/default");
-		}
-		Q_strncpyz(aifile, Info_ValueForKey( g_botInfos[i], "aifile"), sizeof( aifile ));
-		if (!*aifile ) {
-			strcpy(aifile, "bots/default_c.c");
-		}
-		trap_Print(va("%-16s %-16s %-20s %-20s\n", name, model, aifile, funname));
+		Q_strncpyz( name, characterInfo->name, sizeof( name ) );
+		trap_Print(va("%-16s %-16s %-20s\n", name, characterInfo->model, characterInfo->profilePath));
 	}
 }
 
@@ -895,6 +850,7 @@ static void G_SpawnBots( const char *botList, int baseDelay ) {
 		trap_Cvar_Set( "g_spSkill", "5" );
 		skill = 5;
 	}
+	skill = ( skill - 1.0f ) / 4.0f;
 
 	Q_strncpyz( bots, botList, sizeof(bots) );
 	p = &bots[0];
@@ -921,7 +877,7 @@ static void G_SpawnBots( const char *botList, int baseDelay ) {
 
 		// we must add the bot this way, calling G_AddBot directly at this stage
 		// does "Bad Things"
-		trap_SendConsoleCommand( EXEC_INSERT, va("addbot %s %f free %i\n", bot, skill, delay) );
+		trap_SendConsoleCommand( EXEC_INSERT, va("addbot %s %f free %i\n", bot, 1.0f + 4.0f * skill, delay) );
 
 		delay += BOT_BEGIN_DELAY_INCREMENT;
 	}
@@ -930,105 +886,14 @@ static void G_SpawnBots( const char *botList, int baseDelay ) {
 
 /*
 ===============
-G_LoadBotsFromFile
-===============
-*/
-static void G_LoadBotsFromFile( char *filename ) {
-	int				len;
-	fileHandle_t	f;
-	char			buf[MAX_BOTS_TEXT];
-
-	len = trap_FS_FOpenFile( filename, &f, FS_READ );
-	if ( !f ) {
-		trap_Print( va( S_COLOR_RED "file not found: %s\n", filename ) );
-		return;
-	}
-	if ( len >= MAX_BOTS_TEXT ) {
-		trap_Print( va( S_COLOR_RED "file too large: %s is %i, max allowed is %i\n", filename, len, MAX_BOTS_TEXT ) );
-		trap_FS_FCloseFile( f );
-		return;
-	}
-
-	trap_FS_Read( buf, len, f );
-	buf[len] = 0;
-	trap_FS_FCloseFile( f );
-
-	g_numBots += G_ParseInfos( buf, MAX_BOTS - g_numBots, &g_botInfos[g_numBots] );
-}
-
-/*
-===============
 G_LoadBots
 ===============
 */
 static void G_LoadBots( void ) {
-	vmCvar_t	botsFile;
-	int			numdirs;
-	char		filename[128];
-	char		dirlist[1024];
-	char*		dirptr;
-	int			i;
-	int			dirlen;
-
 	if ( !trap_Cvar_VariableIntegerValue( "bot_enable" ) ) {
 		return;
 	}
-
-	g_numBots = 0;
-
-	trap_Cvar_Register( &botsFile, "g_botsFile", "", CVAR_INIT|CVAR_ROM );
-	if( *botsFile.string ) {
-		G_LoadBotsFromFile(botsFile.string);
-	}
-	else {
-		G_LoadBotsFromFile("scripts/bots.txt");
-	}
-
-	// get all bots from .bot files
-	numdirs = trap_FS_GetFileList("scripts", ".bot", dirlist, 1024 );
-	dirptr  = dirlist;
-	for (i = 0; i < numdirs; i++, dirptr += dirlen+1) {
-		dirlen = strlen(dirptr);
-		strcpy(filename, "scripts/");
-		strcat(filename, dirptr);
-		G_LoadBotsFromFile(filename);
-	}
-	trap_Print( va( "%i bots parsed\n", g_numBots ) );
-}
-
-
-
-/*
-===============
-G_GetBotInfoByNumber
-===============
-*/
-char *G_GetBotInfoByNumber( int num ) {
-	if( num < 0 || num >= g_numBots ) {
-		trap_Print( va( S_COLOR_RED "Invalid bot number: %i\n", num ) );
-		return NULL;
-	}
-	return g_botInfos[num];
-}
-
-
-/*
-===============
-G_GetBotInfoByName
-===============
-*/
-char *G_GetBotInfoByName( const char *name ) {
-	int		n;
-	const char	*value;
-
-	for ( n = 0; n < g_numBots ; n++ ) {
-		value = Info_ValueForKey( g_botInfos[n], "name" );
-		if ( !Q_stricmp( value, name ) ) {
-			return g_botInfos[n];
-		}
-	}
-
-	return NULL;
+	G_Characters_Init();
 }
 
 /*

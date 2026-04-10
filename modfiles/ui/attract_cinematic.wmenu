@@ -1,0 +1,23 @@
+// attract_cinematic.wmenu — attract mode cinematic background panel
+// Uses WINDOW_STYLE_CINEMATIC (style 5) to fill the screen with a looping
+// .roq video. Pushed by WiredAttract_Frame when dispatching ATTRACT_ITEM_CINEMATIC.
+//
+// MVP: hardcoded to video/idlogo.roq.
+// Future: drive the cinematic path from the attract.cinematic.file state key
+// once the wmenu parser supports state-key substitution in the cinematic keyword.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "attract_cinematic"
+	rect 0 0 1.0 1.0
+	fullScreen 1
+	visible 1
+	style 5
+	cinematic "video/idlogo.roq"
+	backcolor 0 0 0 1
+
+	// No interactive items — attract is a passive display surface.
+	// Any key press is caught by WiredAttract_NoteInput before it
+	// reaches WiredUI item dispatch, stopping attract cleanly.
+}

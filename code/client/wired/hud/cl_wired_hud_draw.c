@@ -270,12 +270,21 @@ void CG_SHUDTextMakeContext(const superhudConfig_t* in, superhudTextContext_t* o
 		Vector4Copy(config.shadowColor.value, out->shadowColor);
 	}
 
-	out->fontId = WiredFont_IdFromName(config.font.isSet ? config.font.value : "sansman");
+	out->fontId = WiredFont_IdFromName(config.font.isSet ? config.font.value : "defaultSansFont");
+	if ( config.fontWeight.isSet ) {
+		if ( config.fontWeight.value >= 700 ) {
+			if ( out->fontId == FONT_DISPLAY ) out->fontId = FONT_DISPLAY_BOLD;
+			else if ( out->fontId == FONT_UI ) out->fontId = FONT_UI_MEDIUM;
+		} else if ( config.fontWeight.value >= 500 ) {
+			if ( out->fontId == FONT_UI ) out->fontId = FONT_UI_MEDIUM;
+		}
+	}
 	out->width = (float)cls.glconfig.vidWidth;
 
 
 	CG_SHUDConfigPickColor(&config, out->color, qtrue);
 	Vector4Copy(out->color, out->color_origin);
+	out->letterSpacing = config.letterspacing.isSet ? config.letterspacing.value : 0.0f;
 }
 
 
@@ -498,6 +507,7 @@ void CG_SHUDTextPrint(const superhudConfig_t* cfg, superhudTextContext_t* ctx)
 	}
 
 	CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
+	Text_SetLetterSpacing( ctx->letterSpacing );
 
 	Text_Draw( ctx->text,
 	           ctx->coord.named.x,
@@ -507,6 +517,7 @@ void CG_SHUDTextPrint(const superhudConfig_t* cfg, superhudTextContext_t* ctx)
 	           ctx->color,
 	           WiredFont_ToAlignment( ctx->flags ),
 	           WiredFont_ToTextFlags( ctx->flags ) );
+	Text_SetLetterSpacing( 0.0f );
 }
 
 void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx, qboolean colorOverride)
@@ -517,6 +528,7 @@ void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx
 	}
 	if (colorOverride)
 		CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
+	Text_SetLetterSpacing( ctx->letterSpacing );
 
 	Text_Draw( ctx->text,
 	           ctx->coord.named.x,
@@ -526,6 +538,7 @@ void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx
 	           ctx->color,
 	           WiredFont_ToAlignment( ctx->flags ),
 	           WiredFont_ToTextFlags( ctx->flags ) );
+	Text_SetLetterSpacing( 0.0f );
 }
 
 static void CG_SHUDBarPreparePrintLTR(const superhudBarContext_t* ctx, float value, drawBarCoords_t* coords)

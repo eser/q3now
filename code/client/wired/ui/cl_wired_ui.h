@@ -42,8 +42,17 @@ void     WiredUI_KeyEvent( int key, qboolean down );
 void     WiredUI_MouseEvent( int dx, int dy );
 void     WiredUI_SetActiveMenu( int menu );       // UIMENU_NONE, UIMENU_MAIN, UIMENU_INGAME
 qboolean WiredUI_IsFullscreen( void );
-qboolean WiredUI_ConsoleCommand( int realtime );
 void     WiredUI_DrawConnectScreen( qboolean overlay );
+
+// ── health / recovery ─────────────────────────────────────────────────
+// See cl_wired_ui.c for the three-layer model and recovery semantics.
+
+int      WiredUI_GetMenuStackDepth( void );       // 0 = nothing on stack
+const char *WiredUI_GetMenuStackTop( void );      // "" if stack is empty
+qboolean WiredUI_IsHealthy( void );               // pool + uiStarted + menus loaded
+qboolean WiredUI_EnsureLoaded( void );            // idempotent re-init; rate-limited
+void     WiredUI_Activate( void );                // brings compositor to foreground
+int      WiredUI_GetLastRecoveryFailTime( void ); // ms timestamp of last failed EnsureLoaded
 
 // ── hot reload ────────────────────────────────────────────────────────
 
@@ -270,8 +279,8 @@ typedef struct wiredItemDef_s {
 	float           textoffsetX;            // normalized text offset X (replaces textalignx)
 	float           textoffsetY;            // normalized text offset Y (replaces textaligny)
 	float           fontPointSize;          // font size in points (native format "font" keyword)
-	fontWeight_t    fontWeight;             // font weight (FONT_WEIGHT_BOLD default, .whud "fontweight")
-	float           letterSpacing;          // extra pixels between glyphs (0.0 default, .whud "letterspacing")
+	int             fontWeight;             // requested weight (fontweight)
+	float           letterSpacing;          // extra pixels between glyphs ("letterspacing")
 
 	// SuperHUD-specific properties (Phase 3: hudElement items)
 	char            fontName[MAX_QPATH];    // font name ("sansman", "id", etc.)
@@ -286,6 +295,18 @@ typedef struct wiredItemDef_s {
 	int             timeMs;                 // element display duration (ms)
 	char            image[MAX_QPATH];       // image/shader name (SuperHUD "image" keyword)
 	char            bind[32];               // data binding name ("health", "armor", "ammo")
+
+	// Legacy ITEM_TYPE_MODEL support (Phase 2 rendering parity)
+	char            assetModel[MAX_QPATH];
+	char            assetShader[MAX_QPATH];
+	vec3_t          modelOrigin;
+	float           modelFovX;
+	float           modelFovY;
+	float           modelRotation;
+	float           modelAngle;
+	int             modelWidescreen;
+	qhandle_t       modelHandle;
+	qhandle_t       modelShaderHandle;
 
 	/* Wired Store data bindings (Phase 4) */
 	char            storeBind[128];         /* store key for text override (e.g. "player.health.text") */
@@ -417,6 +438,17 @@ typedef struct wiredMenuDef_s {
 // ── overlay rendering (for in-game overlays like scoreboard) ──────────
 void     WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime );
 
+// ── UI state access (Wired Store-backed for ui_* keys) ───────────────
+qboolean WiredUI_IsStoreStateKey( const char *key );
+void     WiredUI_StateGetString( const char *key, char *out, int outSize );
+int      WiredUI_StateGetInt( const char *key );
+float    WiredUI_StateGetFloat( const char *key );
+void     WiredUI_StateSetString( const char *key, const char *value );
+void     WiredUI_StateSetInt( const char *key, int value );
+void     WiredUI_StateSetFloat( const char *key, float value );
+void     WiredUI_SaveState( void );
+void     WiredUI_LoadState( void );
+
 // ── feeder system ─────────────────────────────────────────────────────
 //
 // Feeders provide data for ITEM_TYPE_LISTBOX items. Each feeder has an ID
@@ -456,6 +488,21 @@ void     WiredUI_PopMenu( void );
 void     WiredUI_CloseAllMenus( void );
 wiredMenuDef_t *WiredUI_GetActiveMenu( void );
 
+// ── error dialog ─────────────────────────────────────────────────────
+//
+// Show the error_popup.wmenu modal.  Writes ui_errorTitle and ui_errorRetry
+// state keys, then pushes the menu.  com_errorMessage must be set by the
+// caller before this is invoked (it is the dialog's text source).
+//
+// retryable: if qfalse or the last connect target was localhost, the Retry
+// button is hidden (ui_errorRetry = "0").
+//
+// Safe to call with cls.uiStarted == qfalse — falls back to Com_Printf.
+
+void     CL_WiredUI_ShowError( const char *title,
+                                const char *message,
+                                qboolean    retryable );
+
 // ── asset globals (assetGlobalDef from .menu files) ──────────────────
 //
 // These values are set by parsing the assetGlobalDef {} block in menus.txt.
@@ -493,14 +540,21 @@ void WiredUI_ResetAssetGlobalsDefaults( void );
 
 // ── parser (cl_wired_parse.c) ─────────────────────────────────────────
 
-qboolean WiredUI_LoadMenus( const char *manifestFile );
 qboolean WiredUI_LoadMenuFile( const char *filename );
 int      WiredUI_GetMenuCount( void );
 wiredMenuDef_t *WiredUI_GetMenuByIndex( int index );
 wiredMenuDef_t *WiredUI_FindMenu( const char *name );
 void     WiredUI_ClearMenus( void );
 void     WiredUI_ResetPool( void );
-qboolean WiredUI_SafeReload( const char *manifestFile );  // two-phase: parse new → swap or keep old
+qboolean WiredUI_SafeReload( void );   // two-phase: exec menus.lua → swap or keep old
+// Single pre-PostInit Lua binding registration point (call from CL_Init).
+// Registers load_menu() and attract.* globals so they are live when
+// WiredUI_Init and WiredAttract_Init exec their Lua files.
+void     WiredUI_LuaInit( void );
+// (WiredUI-internal — called only by WiredUI_LuaInit, defined in cl_wired_parse.c)
+void     WiredUI_MenuLuaInit( void );
+// Execute scripts/menus.lua to populate the menu pool.
+void     WiredUI_LoadMenusFromLua( void );
 
 // ── ownerdraw system (cl_wired_ownerdraw.c) ──────────────────────────
 
@@ -510,7 +564,7 @@ void     WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
 
 // ── memory pool ───────────────────────────────────────────────────────
 
-#define WIRED_MENU_POOL_SIZE   (8 * 1024 * 1024)  // 8MB for menus
+#define WIRED_MENU_POOL_SIZE   (16 * 1024 * 1024) // 16MB for menus
 #define WIRED_HUD_POOL_SIZE    (512 * 1024)        // 512KB for HUD overlays
 
 // ── dispatch macros ───────────────────────────────────────────────────
@@ -525,7 +579,6 @@ void     WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
 #define UI_CALL_SET_ACTIVE(m)   WiredUI_SetActiveMenu(m)
 #define UI_CALL_IS_FULLSCREEN() WiredUI_IsFullscreen()
 #define UI_CALL_CONNECT(o)      WiredUI_DrawConnectScreen(o)
-#define UI_CALL_CONSOLE_CMD(rt) WiredUI_ConsoleCommand(rt)
 
 #endif // FEAT_WIRED_UI
 #endif // CL_WIRED_UI_H

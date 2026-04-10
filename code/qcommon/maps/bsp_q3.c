@@ -98,6 +98,9 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 	Com_Memset( bsp, 0, sizeof( *bsp ) );
 	Q_strncpyz( bsp->name, name, sizeof( bsp->name ) );
 	bsp->checksum = LittleLong( Com_BlockChecksum( data, length ) );
+	bsp->rawLength = length;
+	bsp->rawData = BSP_ZAlloc( length );
+	Com_Memcpy( bsp->rawData, data, length );
 
 	// ---- Entity string ----
 	{

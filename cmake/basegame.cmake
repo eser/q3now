@@ -69,6 +69,8 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_active.c
     ${SOURCE_DIR}/game/g_arenas.c
     ${SOURCE_DIR}/game/g_bot.c
+    ${SOURCE_DIR}/game/g_bot_lua.c
+    ${SOURCE_DIR}/game/g_character.c
     ${SOURCE_DIR}/game/g_client.c
     ${SOURCE_DIR}/game/g_cmds.c
     ${SOURCE_DIR}/game/g_combat.c

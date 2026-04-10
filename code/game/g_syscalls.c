@@ -21,6 +21,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+#include "bg_public.h"
+#include "inv.h"
+#ifndef MAX_STRINGFIELD
+#define MAX_STRINGFIELD 80
+#endif
+#include "../botlib/be_ai_weap.h"
 
 // this file is only included when building a dll
 // g_syscalls.asm is included instead when building a qvm
@@ -43,6 +49,35 @@ int PASSFLOAT( float x ) {
 	floatint_t fi;
 	fi.f = x;
 	return fi.i;
+}
+
+static qboolean Trap_ParseLuaCharacterName( const char *charfile, char *out, int outSize ) {
+	const char *prefix = "characters/";
+	const char *start;
+	const char *slash;
+
+	if ( !charfile || !out || outSize <= 0 ) {
+		return qfalse;
+	}
+
+	if ( Q_stricmpn( charfile, prefix, strlen( prefix ) ) ) {
+		return qfalse;
+	}
+
+	start = charfile + strlen( prefix );
+	slash = strchr( start, '/' );
+	if ( !slash || slash == start ) {
+		return qfalse;
+	}
+
+	Q_strncpyz( out, start, outSize );
+	out[ slash - start ] = '\0';
+
+	if ( !out[0] ) {
+		return qfalse;
+	}
+
+	return qtrue;
 }
 
 void	trap_Print( const char *text ) {
@@ -473,35 +508,183 @@ void trap_EA_ResetInput(int client) {
 	syscall( BOTLIB_EA_RESET_INPUT, client );
 }
 
+int trap_BotLuaBindBot(int client, int characterHandle) {
+	return syscall( BOTLUA_BIND_BOT, client, characterHandle );
+}
+
+int trap_BotLuaBotThink(int client, float thinktime) {
+	return syscall( BOTLUA_BOT_THINK, client, PASSFLOAT(thinktime) );
+}
+
+float trap_BotLuaBotProfileField(int client, int field) {
+	floatint_t fi;
+	fi.i = syscall( BOTLUA_BOT_PROFILE_FIELD, client, field );
+	return fi.f;
+}
+
+int trap_BotLuaBotPickWeapon(int client, const botLuaCombatCtx_t *ctx, char *weaponKey, int weaponKeySize) {
+	return syscall( BOTLUA_BOT_PICK_WEAPON, client, ctx, weaponKey, weaponKeySize );
+}
+
+int trap_BotLuaBotEvalItem(int client, const botLuaItemEvalCtx_t *ctx) {
+	return syscall( BOTLUA_BOT_EVAL_ITEM, client, ctx );
+}
+
+int trap_BotLuaBotDecide(int client, const botLuaDecideCtx_t *ctx, char *decision, int decisionSize) {
+	return syscall( BOTLUA_BOT_DECIDE, client, ctx, decision, decisionSize );
+}
+
+int trap_BotLuaBotOnChat(int client, const char *eventName, const botLuaChatCtx_t *ctx, char *outChat, int outChatSize) {
+	return syscall( BOTLUA_BOT_ON_CHAT, client, eventName, ctx, outChat, outChatSize );
+}
+
+static void Trap_BotFillWeaponInfoFromGame( int weapon, weaponinfo_t *weaponinfo ) {
+	if ( !weaponinfo ) {
+		return;
+	}
+
+	Com_Memset( weaponinfo, 0, sizeof( *weaponinfo ) );
+
+	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
+		return;
+	}
+
+	weaponinfo->valid = qtrue;
+	weaponinfo->number = weapon;
+	weaponinfo->weaponindex = weapon;
+
+	if ( bg_weaponlist[weapon].name ) {
+		Q_strncpyz( weaponinfo->name, bg_weaponlist[weapon].name, sizeof( weaponinfo->name ) );
+	}
+
+	if ( bg_weaponlist[weapon].shortname ) {
+		Q_strncpyz( weaponinfo->projectile, bg_weaponlist[weapon].shortname, sizeof( weaponinfo->projectile ) );
+	}
+
+	weaponinfo->flags = 0;
+	weaponinfo->proj.damage = 0;
+	weaponinfo->proj.radius = 0.0f;
+	weaponinfo->proj.damagetype = 0;
+	weaponinfo->speed = 0.0f;
+	weaponinfo->reload = 0.1f;
+
+	switch ( weapon ) {
+		case WP_GAUNTLET:
+			weaponinfo->reload = 0.4f;
+			weaponinfo->proj.damage = 50;
+			break;
+		case WP_MACHINEGUN:
+			weaponinfo->hspread = 250.0f;
+			weaponinfo->vspread = 250.0f;
+			weaponinfo->reload = 0.1f;
+			weaponinfo->proj.damage = 8;
+			break;
+		case WP_SHOTGUN:
+			weaponinfo->hspread = DEFAULT_SHOTGUN_SPREAD;
+			weaponinfo->vspread = DEFAULT_SHOTGUN_SPREAD;
+			weaponinfo->numprojectiles = DEFAULT_SHOTGUN_COUNT;
+			weaponinfo->reload = 1.0f;
+			weaponinfo->proj.damage = 8;
+			break;
+		case WP_GRENADE_LAUNCHER:
+			weaponinfo->reload = 0.6f;
+			weaponinfo->proj.damage = 120;
+			weaponinfo->proj.radius = g_excessive.integer ? 300.0f : 160.0f;
+			weaponinfo->proj.damagetype = DAMAGETYPE_RADIAL;
+			weaponinfo->speed = g_excessive.integer ? 1200.0f : 600.0f;
+			break;
+		case WP_ROCKET_LAUNCHER:
+			weaponinfo->reload = 0.8f;
+			weaponinfo->proj.damage = 120;
+			weaponinfo->proj.radius = g_excessive.integer ? 240.0f : 120.0f;
+			weaponinfo->proj.damagetype = DAMAGETYPE_RADIAL;
+			weaponinfo->speed = g_excessive.integer ? 2000.0f : 1000.0f;
+			break;
+		case WP_LIGHTNING_GUN:
+			weaponinfo->reload = 0.05f;
+			weaponinfo->proj.damage = 8;
+			break;
+		case WP_RAILGUN:
+			weaponinfo->reload = 1.0f;
+			weaponinfo->proj.damage = 100;
+			break;
+		case WP_PLASMA_RIFLE:
+			weaponinfo->reload = 1.0f;
+			weaponinfo->numprojectiles = 15;
+			weaponinfo->proj.damage = 20;
+			weaponinfo->speed = g_excessive.integer ? 3200.0f : 2355.0f;
+			break;
+		default:
+			break;
+	}
+}
+
 int trap_BotLoadCharacter(char *charfile, float skill) {
-	return syscall( BOTLIB_AI_LOAD_CHARACTER, charfile, PASSFLOAT(skill));
+	char characterName[MAX_QPATH];
+	if ( Trap_ParseLuaCharacterName( charfile, characterName, sizeof( characterName ) ) ) {
+		float luaSkill = skill;
+		if ( luaSkill < 0.0f || luaSkill > 1.0f ) {
+			luaSkill = Com_Clamp( 1.0f, 5.0f, luaSkill );
+			luaSkill = ( luaSkill - 1.0f ) / 4.0f;
+		}
+		{
+			int handle = syscall( BOTLUA_LOAD_CHARACTER, characterName, PASSFLOAT(luaSkill) );
+			if ( handle > 0 ) {
+				return -handle;
+			}
+		}
+	}
+	Com_Printf( S_COLOR_RED "Unsupported legacy bot character file: %s\n", charfile ? charfile : "<null>" );
+	return 0;
 }
 
 void trap_BotFreeCharacter(int character) {
+	if ( character < 0 ) {
+		syscall( BOTLUA_FREE_CHARACTER, -character );
+		return;
+	}
 	syscall( BOTLIB_AI_FREE_CHARACTER, character );
 }
 
 float trap_Characteristic_Float(int character, int index) {
 	floatint_t fi;
+	if ( character < 0 ) {
+		fi.i = syscall( BOTLUA_CHARACTERISTIC_FLOAT, -character, index );
+		return fi.f;
+	}
 	fi.i = syscall( BOTLIB_AI_CHARACTERISTIC_FLOAT, character, index );
 	return fi.f;
 }
 
 float trap_Characteristic_BFloat(int character, int index, float min, float max) {
 	floatint_t fi;
+	if ( character < 0 ) {
+		fi.i = syscall( BOTLUA_CHARACTERISTIC_BFLOAT, -character, index, PASSFLOAT(min), PASSFLOAT(max) );
+		return fi.f;
+	}
 	fi.i = syscall( BOTLIB_AI_CHARACTERISTIC_BFLOAT, character, index, PASSFLOAT(min), PASSFLOAT(max) );
 	return fi.f;
 }
 
 int trap_Characteristic_Integer(int character, int index) {
+	if ( character < 0 ) {
+		return syscall( BOTLUA_CHARACTERISTIC_INTEGER, -character, index );
+	}
 	return syscall( BOTLIB_AI_CHARACTERISTIC_INTEGER, character, index );
 }
 
 int trap_Characteristic_BInteger(int character, int index, int min, int max) {
+	if ( character < 0 ) {
+		return syscall( BOTLUA_CHARACTERISTIC_BINTEGER, -character, index, min, max );
+	}
 	return syscall( BOTLIB_AI_CHARACTERISTIC_BINTEGER, character, index, min, max );
 }
 
 void trap_Characteristic_String(int character, int index, char *buf, int size) {
+	if ( character < 0 ) {
+		syscall( BOTLUA_CHARACTERISTIC_STRING, -character, index, buf, size );
+		return;
+	}
 	syscall( BOTLIB_AI_CHARACTERISTIC_STRING, character, index, buf, size );
 }
 
@@ -574,7 +757,10 @@ void trap_BotReplaceSynonyms(char *string, unsigned long int context) {
 }
 
 int trap_BotLoadChatFile(int chatstate, char *chatfile, char *chatname) {
-	return syscall( BOTLIB_AI_LOAD_CHAT_FILE, chatstate, chatfile, chatname );
+	(void)chatstate;
+	(void)chatfile;
+	(void)chatname;
+	return 0;
 }
 
 void trap_BotSetChatGender(int chatstate, int gender) {
@@ -676,7 +862,9 @@ void trap_BotUpdateEntityItems(void) {
 }
 
 int trap_BotLoadItemWeights(int goalstate, char *filename) {
-	return syscall( BOTLIB_AI_LOAD_ITEM_WEIGHTS, goalstate, filename );
+	(void)goalstate;
+	(void)filename;
+	return 0;
 }
 
 void trap_BotFreeItemWeights(int goalstate) {
@@ -752,15 +940,50 @@ void trap_BotInitMoveState(int handle, void /* struct bot_initmove_s */ *initmov
 }
 
 int trap_BotChooseBestFightWeapon(int weaponstate, int *inventory) {
-	return syscall( BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON, weaponstate, inventory );
+	(void)weaponstate;
+
+	if ( !inventory ) {
+		return WP_MACHINEGUN;
+	}
+
+	if ( inventory[INVENTORY_ROCKET_LAUNCHER] > 0 && inventory[INVENTORY_ROCKETS] > 0 ) {
+		return WP_ROCKET_LAUNCHER;
+	}
+	if ( inventory[INVENTORY_RAILGUN] > 0 && inventory[INVENTORY_SLUGS] > 0 ) {
+		return WP_RAILGUN;
+	}
+	if ( inventory[INVENTORY_LIGHTNING_GUN] > 0 && inventory[INVENTORY_LIGHTNING] > 0 ) {
+		return WP_LIGHTNING_GUN;
+	}
+	if ( inventory[INVENTORY_PLASMA_RIFLE] > 0 && inventory[INVENTORY_CELLS] > 0 ) {
+		return WP_PLASMA_RIFLE;
+	}
+	if ( inventory[INVENTORY_SHOTGUN] > 0 && inventory[INVENTORY_SHELLS] > 0 ) {
+		return WP_SHOTGUN;
+	}
+	if ( inventory[INVENTORY_GRENADE_LAUNCHER] > 0 && inventory[INVENTORY_GRENADES] > 0 ) {
+		return WP_GRENADE_LAUNCHER;
+	}
+	if ( inventory[INVENTORY_MACHINEGUN] > 0 && inventory[INVENTORY_BULLETS] > 0 ) {
+		return WP_MACHINEGUN;
+	}
+
+	if ( inventory[INVENTORY_GAUNTLET] > 0 ) {
+		return WP_GAUNTLET;
+	}
+
+	return WP_MACHINEGUN;
 }
 
 void trap_BotGetWeaponInfo(int weaponstate, int weapon, void /* struct weaponinfo_s */ *weaponinfo) {
-	syscall( BOTLIB_AI_GET_WEAPON_INFO, weaponstate, weapon, weaponinfo );
+	(void)weaponstate;
+	Trap_BotFillWeaponInfoFromGame( weapon, (weaponinfo_t *)weaponinfo );
 }
 
 int trap_BotLoadWeaponWeights(int weaponstate, char *filename) {
-	return syscall( BOTLIB_AI_LOAD_WEAPON_WEIGHTS, weaponstate, filename );
+	(void)weaponstate;
+	(void)filename;
+	return 0;
 }
 
 int trap_BotAllocWeaponState(void) {
@@ -796,36 +1019,36 @@ int trap_PC_SourceFileAndLine( int handle, char *filename, int *line ) {
 }
 
 // ── QUIC transport event emission ────────────────────────────────
-#if FEAT_QUIC_OBSERVE
-void trap_QUIC_EmitKill( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos ) {
-	syscall( G_QUIC_EMIT_KILL, attacker, victim, mod, att_pos, vic_pos );
+#if FEAT_WIREDNET_OBSERVE
+void trap_WiredNet_EmitKill( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos ) {
+	syscall( G_WIREDNET_EMIT_KILL, attacker, victim, mod, att_pos, vic_pos );
 }
 
-void trap_QUIC_EmitDamage( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos ) {
-	syscall( G_QUIC_EMIT_DAMAGE, attacker, victim, damage, mod, att_pos, vic_pos );
+void trap_WiredNet_EmitDamage( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos ) {
+	syscall( G_WIREDNET_EMIT_DAMAGE, attacker, victim, damage, mod, att_pos, vic_pos );
 }
 
-void trap_QUIC_EmitItemPickup( int client, const char *item, vec3_t pos ) {
-	syscall( G_QUIC_EMIT_ITEM_PICKUP, client, item, pos );
+void trap_WiredNet_EmitItemPickup( int client, const char *item, vec3_t pos ) {
+	syscall( G_WIREDNET_EMIT_ITEM_PICKUP, client, item, pos );
 }
 
-void trap_QUIC_EmitChat( int client, const char *msg, qboolean teamOnly ) {
-	syscall( G_QUIC_EMIT_CHAT, client, msg, teamOnly );
+void trap_WiredNet_EmitChat( int client, const char *msg, qboolean teamOnly ) {
+	syscall( G_WIREDNET_EMIT_CHAT, client, msg, teamOnly );
 }
 
-void trap_QUIC_EmitMatchEvent( const char *type, const char *data ) {
-	syscall( G_QUIC_EMIT_MATCH_EVENT, type, data );
+void trap_WiredNet_EmitMatchEvent( const char *type, const char *data ) {
+	syscall( G_WIREDNET_EMIT_MATCH_EVENT, type, data );
 }
 
 #if FEAT_UNLAGGED
-void trap_QUIC_EmitDelag( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos ) {
-	syscall( G_QUIC_EMIT_DELAG, shooter, target, timeDelta, shooterPos, targetPos );
+void trap_WiredNet_EmitDelag( int shooter, int target, int timeDelta, vec3_t shooterPos, vec3_t targetPos ) {
+	syscall( G_WIREDNET_EMIT_DELAG, shooter, target, timeDelta, shooterPos, targetPos );
 }
 #endif
 
 #if FEAT_BOT_IMPROVEMENTS
-void trap_QUIC_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos ) {
-	syscall( G_QUIC_EMIT_BOT_EVENT, bot_id, event_type, param1, param2, pos );
+void trap_WiredNet_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos ) {
+	syscall( G_WIREDNET_EMIT_BOT_EVENT, bot_id, event_type, param1, param2, pos );
 }
 #endif
 #endif

@@ -22,6 +22,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
+#include <stdlib.h>
+
+/* ---- Persistent backend storage (Step 3.6 — Renderer_Arena) -------------
+   backEndData must survive Hunk_ClearLevel across async spawn phases.
+   It is NOT allocated from the hunk — it lives in a plain malloc block
+   so map transitions cannot free it.  Freed only at REF_DESTROY_WINDOW.
+   -----------------------------------------------------------------------*/
+static void  *s_backEndStorage     = NULL;
+static size_t s_backEndStorageSize = 0;
 
 glconfig_t	glConfig;
 
@@ -2069,7 +2078,22 @@ void R_Init( void ) {
 	max_polys = r_maxpolys->integer;
 	max_polyverts = r_maxpolyverts->integer;
 
-	ptr = ri.Hunk_Alloc( sizeof( *backEndData ) + sizeof(srfPoly_t) * max_polys + sizeof(polyVert_t) * max_polyverts, h_low);
+	// Allocate backEndData in persistent heap storage so it survives
+	// Hunk_ClearLevel between async spawn phases (Step 3.6).
+	{
+		size_t bdSize = sizeof( *backEndData )
+			+ sizeof( srfPoly_t ) * max_polys
+			+ sizeof( polyVert_t ) * max_polyverts;
+		if ( !s_backEndStorage || s_backEndStorageSize < bdSize ) {
+			free( s_backEndStorage );
+			s_backEndStorage     = malloc( bdSize );
+			s_backEndStorageSize = bdSize;
+			if ( !s_backEndStorage ) {
+				ri.Error( ERR_FATAL, "R_Init: failed to allocate backEndData (%zu bytes)", bdSize );
+			}
+		}
+		ptr = (byte*)s_backEndStorage;
+	}
 	backEndData = (backEndData_t *) ptr;
 	backEndData->polys = (srfPoly_t *) ((char *) ptr + sizeof( *backEndData ));
 	backEndData->polyVerts = (polyVert_t *) ((char *) ptr + sizeof( *backEndData ) + sizeof(srfPoly_t) * max_polys);
@@ -2132,16 +2156,28 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	ri.Cmd_RemoveCommand( "vkinfo" );
 #endif
 
+	// For REF_KEEP_CONTEXT (map transition during async spawn), preserve GPU
+	// textures and FreeType state so the frame loop can draw the console and
+	// fonts between spawn phases.  R_InitImages will clean up old resources
+	// via R_DeleteTextures + vk_release_resources + ri.FreeAll when the
+	// renderer re-initialises on the next map.
+	//
+	// Vulkan ordering rule: VkImages must be destroyed BEFORE their backing
+	// VkDeviceMemory (image_chunks) is freed.  Guard vk_release_resources()
+	// together with R_DeleteTextures() so the ordering is always correct.
 	//if ( tr.registered ) {
 		//R_IssuePendingRenderCommands();
+	if ( code != REF_KEEP_CONTEXT ) {
 		R_DeleteTextures();
+#ifdef USE_VULKAN
+		vk_release_resources();
+#endif
+	}
 	//}
 
-#ifdef USE_VULKAN
-	vk_release_resources();
-#endif
-
-	R_DoneFreeType();
+	if ( code != REF_KEEP_CONTEXT ) {
+		R_DoneFreeType();
+	}
 
 #ifdef USE_VULKAN
 	if ( r_device->modified ) {
@@ -2175,7 +2211,13 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 #endif
 	}
 
-	ri.FreeAll();
+	if ( code != REF_KEEP_CONTEXT ) {
+		ri.FreeAll();
+		// Also release the persistent backEndData storage.
+		free( s_backEndStorage );
+		s_backEndStorage     = NULL;
+		s_backEndStorageSize = 0;
+	}
 
 	tr.registered = qfalse;
 	tr.inited = qfalse;

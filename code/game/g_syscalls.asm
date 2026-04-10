@@ -222,4 +222,19 @@ equ trap_BotLibLoadSource				-579
 equ trap_BotLibFreeSource				-580
 equ trap_BotLibReadToken				-581
 equ trap_BotLibSourceFileAndLine		-582
+
+equ trap_BotLuaLoadCharacter			-711
+equ trap_BotLuaFreeCharacter			-712
+equ trap_BotLuaCharacteristicFloat	-713
+equ trap_BotLuaCharacteristicBFloat	-714
+equ trap_BotLuaCharacteristicInteger	-715
+equ trap_BotLuaCharacteristicBInteger	-716
+equ trap_BotLuaCharacteristicString	-717
+equ trap_BotLuaBindBot				-718
+equ trap_BotLuaBotThink				-719
+equ trap_BotLuaBotProfileField		-720
+equ trap_BotLuaBotPickWeapon		-721
+equ trap_BotLuaBotEvalItem			-722
+equ trap_BotLuaBotDecide			-723
+equ trap_BotLuaBotOnChat			-724
  

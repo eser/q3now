@@ -354,8 +354,13 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 	item->textoffsetX = 0;
 	item->textoffsetY = 0;
 	item->fontPointSize = 0;
-	item->fontWeight = FONT_WEIGHT_BOLD;  // backward compat: current Sansman Bold rendering
+	item->fontWeight = 0;
 	item->letterSpacing = 0.0f;
+	item->modelFovX = 40.0f;
+	item->modelFovY = 40.0f;
+	item->modelRotation = 0.0f;
+	item->modelAngle = 0.0f;
+	item->modelWidescreen = 0;
 	item->flexChild.shrink = 1.0f;  // default shrink for flex children
 
 	if ( !WiredUI_ParseItemProperties( handle, item ) ) {
@@ -572,7 +577,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			WiredPC_Int( handle, &et ); // LISTBOX_TEXT or LISTBOX_IMAGE — store if needed
 		}
 		else if ( !Q_stricmp( token.string, "notselectable" ) ) {
-			item->decoration = qtrue; // treat same as decoration for interaction
+			item->notselectable = qtrue;
 		}
 		else if ( !Q_stricmp( token.string, "wrapped" ) || !Q_stricmp( token.string, "autowrapped" ) ) {
 			// text wrapping — noted, not yet rendered
@@ -642,16 +647,32 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 				Q_strcat( dest2, destSize2, token.string );
 			}
 		}
-		else if ( !Q_stricmp( token.string, "asset_model" ) || !Q_stricmp( token.string, "asset_shader" ) ||
-		          !Q_stricmp( token.string, "model_origin" ) || !Q_stricmp( token.string, "model_fovx" ) ||
-		          !Q_stricmp( token.string, "model_fovy" ) || !Q_stricmp( token.string, "model_rotation" ) ||
-		          !Q_stricmp( token.string, "model_angle" ) ) {
-			// model keywords — consume value, not yet rendered (type 7 MODEL)
-			if ( !Q_stricmp( token.string, "model_origin" ) ) {
-				float dummy; WiredPC_Float( handle, &dummy ); WiredPC_Float( handle, &dummy ); WiredPC_Float( handle, &dummy );
-			} else {
-				WiredPC_ReadToken( handle, &token ); // consume single value
+		else if ( !Q_stricmp( token.string, "asset_model" ) ) {
+			if ( WiredPC_String( handle, &str ) ) {
+				Q_strncpyz( item->assetModel, str, sizeof( item->assetModel ) );
 			}
+		}
+		else if ( !Q_stricmp( token.string, "asset_shader" ) ) {
+			if ( WiredPC_String( handle, &str ) ) {
+				Q_strncpyz( item->assetShader, str, sizeof( item->assetShader ) );
+			}
+		}
+		else if ( !Q_stricmp( token.string, "model_origin" ) ) {
+			WiredPC_Float( handle, &item->modelOrigin[0] );
+			WiredPC_Float( handle, &item->modelOrigin[1] );
+			WiredPC_Float( handle, &item->modelOrigin[2] );
+		}
+		else if ( !Q_stricmp( token.string, "model_fovx" ) ) {
+			WiredPC_Float( handle, &item->modelFovX );
+		}
+		else if ( !Q_stricmp( token.string, "model_fovy" ) ) {
+			WiredPC_Float( handle, &item->modelFovY );
+		}
+		else if ( !Q_stricmp( token.string, "model_rotation" ) ) {
+			WiredPC_Float( handle, &item->modelRotation );
+		}
+		else if ( !Q_stricmp( token.string, "model_angle" ) ) {
+			WiredPC_Float( handle, &item->modelAngle );
 		}
 		else if ( !Q_stricmp( token.string, "textfont" ) ) {
 			WiredPC_ReadToken( handle, &token ); // consume font name (not yet stored)
@@ -660,7 +681,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			WiredPC_ReadToken( handle, &token ); // consume video name
 		}
 		else if ( !Q_stricmp( token.string, "widescreen" ) ) {
-			int dummy; WiredPC_Int( handle, &dummy ); // consume widescreen mode (QL-specific)
+			WiredPC_Int( handle, &item->modelWidescreen );
 		}
 		else if ( !Q_stricmp( token.string, "hudElement" ) ) {
 			if ( WiredPC_String( handle, &str ) )
@@ -710,16 +731,13 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		}
 		else if ( !Q_stricmp( token.string, "fontweight" ) ) {
 			if ( WiredPC_String( handle, &str ) ) {
-				if ( !Q_stricmp( str, "light" ) )          item->fontWeight = FONT_WEIGHT_LIGHT;
-				else if ( !Q_stricmp( str, "regular" ) )   item->fontWeight = FONT_WEIGHT_REGULAR;
-				else if ( !Q_stricmp( str, "medium" ) )    item->fontWeight = FONT_WEIGHT_MEDIUM;
-				else if ( !Q_stricmp( str, "semibold" ) )  item->fontWeight = FONT_WEIGHT_SEMIBOLD;
-				else if ( !Q_stricmp( str, "bold" ) )      item->fontWeight = FONT_WEIGHT_BOLD;
-				else if ( !Q_stricmp( str, "extrabold" ) ) item->fontWeight = FONT_WEIGHT_EXTRABOLD;
-				else {
-					Com_Printf( S_COLOR_YELLOW "WiredUI: unknown fontweight '%s'\n", str );
-					item->fontWeight = FONT_WEIGHT_BOLD;
-				}
+				if ( !Q_stricmp( str, "light" ) )          item->fontWeight = 300;
+				else if ( !Q_stricmp( str, "regular" ) )   item->fontWeight = 400;
+				else if ( !Q_stricmp( str, "medium" ) )    item->fontWeight = 500;
+				else if ( !Q_stricmp( str, "semibold" ) )  item->fontWeight = 600;
+				else if ( !Q_stricmp( str, "bold" ) )      item->fontWeight = 700;
+				else if ( !Q_stricmp( str, "extrabold" ) ) item->fontWeight = 800;
+				else                                         item->fontWeight = atoi( str );
 			}
 		}
 		else if ( !Q_stricmp( token.string, "letterspacing" ) ) {
@@ -1565,51 +1583,8 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 	return qtrue;
 }
 
-// ── manifest loader ───────────────────────────────────────────────────
-
-qboolean WiredUI_LoadMenus( const char *manifestFile ) {
-	int         handle;
-	pc_token_t  token;
-
-	handle = WiredPC_LoadSource( manifestFile );
-	if ( !handle ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: could not load manifest '%s'\n", manifestFile );
-		return qfalse;
-	}
-
-	while ( 1 ) {
-		if ( !WiredPC_ReadToken( handle, &token ) ) {
-			break;
-		}
-
-		if ( !Q_stricmp( token.string, "{" ) ) {
-			continue;  // opening brace of manifest
-		}
-		if ( !Q_stricmp( token.string, "}" ) ) {
-			break;     // closing brace of manifest
-		}
-
-		if ( !Q_stricmp( token.string, "loadMenu" ) ) {
-			// loadMenu { "ui/filename.menu" }
-			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) continue;
-			if ( !WiredPC_ReadToken( handle, &token ) ) continue;
-			WiredUI_LoadMenuFile( token.string );
-			// consume closing }
-			WiredPC_ReadToken( handle, &token );
-			continue;
-		}
-
-		// unknown token in manifest — warn and skip
-		if ( Q_stricmp( token.string, "{" ) && Q_stricmp( token.string, "}" ) ) {
-			Com_Printf( S_COLOR_YELLOW "WiredUI: unknown manifest token '%s'\n", token.string );
-		}
-	}
-
-	WiredPC_FreeSource( handle );
-
-	Com_Printf( "WiredUI: loaded %d menus from '%s'\n", wired_menuCount, manifestFile );
-	return qtrue;
-}
+// menus.txt parser removed — menus are now loaded exclusively from
+// scripts/menus.lua via WiredUI_LoadMenusFromLua / load_menu() Lua binding.
 
 // ── public accessors ──────────────────────────────────────────────────
 
@@ -1651,7 +1626,7 @@ typedef struct {
 
 static wiredMenuBackup_t *wired_backup = NULL;  // heap-allocated on demand
 
-qboolean WiredUI_SafeReload( const char *manifestFile ) {
+qboolean WiredUI_SafeReload( void ) {
 	// allocate backup on first use (8MB+ — too large for stack)
 	if ( !wired_backup ) {
 		wired_backup = Z_Malloc( sizeof( wiredMenuBackup_t ) );
@@ -1664,12 +1639,13 @@ qboolean WiredUI_SafeReload( const char *manifestFile ) {
 	wired_backup->menuCount = wired_menuCount;
 	wired_backup->assetGlobals = *WiredUI_GetAssetGlobals();
 
-	// phase 2: clear and reparse
+	// phase 2: clear and reparse from menus.lua
 	WiredUI_ResetAssetGlobalsDefaults();
 	WiredUI_ClearMenus();
-	qboolean ok = WiredUI_LoadMenus( manifestFile );
+	WiredUI_LoadMenusFromLua();
+	qboolean ok = ( wired_menuCount > 0 );
 
-	if ( !ok || wired_menuCount == 0 ) {
+	if ( !ok ) {
 		// parse failed — restore old menus
 		Com_Printf( S_COLOR_YELLOW "Menu reload failed — keeping old menus.\n" );
 		Com_Memcpy( wired_menuPool, wired_backup->pool, wired_backup->poolUsed );
@@ -1682,6 +1658,43 @@ qboolean WiredUI_SafeReload( const char *manifestFile ) {
 
 	// parse succeeded — new menus are now active
 	return qtrue;
+}
+
+// ── menus.lua support ─────────────────────────────────────────────────
+// load_menu(path) Lua binding. Registered before WiredScript_PostInit so
+// it is available when scripts/menus.lua executes during WiredUI_Init.
+
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
+#include "../../../qcommon/scripting/wired_scripting.h"
+
+static int WiredMenuLua_LoadMenu( lua_State *L ) {
+	const char *path = luaL_checkstring( L, 1 );
+	if ( path[0] == '\0' || strlen( path ) >= MAX_QPATH ) {
+		return luaL_error( L, "load_menu: invalid path" );
+	}
+	WiredUI_LoadMenuFile( path );
+	return 0;
+}
+
+static const luaL_Reg s_menuLuaLib[] = {
+	{ NULL, NULL }
+};
+
+static void WiredMenuLua_Register( lua_State *L ) {
+	/* Expose load_menu as a plain global function, not a table method. */
+	lua_pushcfunction( L, WiredMenuLua_LoadMenu );
+	lua_setglobal( L, "load_menu" );
+}
+
+void WiredUI_MenuLuaInit( void ) {
+	WiredScript_RegisterBindings( WiredMenuLua_Register );
+}
+
+/* Execute scripts/menus.lua to populate the menu pool. */
+void WiredUI_LoadMenusFromLua( void ) {
+	WiredScript_ExecFile( "scripts/menus.lua" );
 }
 
 #endif // FEAT_WIRED_UI

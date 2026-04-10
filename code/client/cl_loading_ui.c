@@ -257,7 +257,7 @@ static void Loading_DrawBackground( void ) {
 		110.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f   // #6e1a1a
 	};
 
-	// Re-register every frame — Hunk_Clear between maps invalidates
+	// Re-register every frame — Hunk_ClearLevel between maps invalidates
 	// cached handles, and RegisterShaderNoMip is a fast hash lookup
 	// when the shader is already loaded.
 	s_glowShader = re.RegisterShaderNoMip( "gfx/loading/glow_radial" );

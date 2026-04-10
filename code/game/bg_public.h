@@ -852,6 +852,7 @@ typedef enum {
 
 typedef struct gattack_s {
 	char        *name;
+	char         shortname[16];  // Lua bot shortname (e.g. "lg1", "rl2")
 	int			weapon;
 	float       maxDamageDistance;
 	qboolean    armorPiercing;
@@ -896,6 +897,7 @@ qboolean PM_LG_ChainArc_Think( pmove_t *pm );
 void     PM_LG_ChainArc_Release( pmove_t *pm );
 
 extern	gattack_t	bg_attacklist[];
+int BG_AttackByShortname( const char *shortname );  // returns ATT_NONE if not found
 
 // Weapons
 typedef struct gweapon_s {

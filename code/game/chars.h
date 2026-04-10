@@ -129,3 +129,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define CHARACTERISTIC_ALERTNESS					46	//float [0, 1]
 //how much the bot fires its weapon
 #define CHARACTERISTIC_FIRETHROTTLE					47	//float [0, 1]
+//weapon specific aim skill (extended set)
+#define CHARACTERISTIC_AIM_SKILL_MACHINEGUN			49	//float [0, 1]
+#define CHARACTERISTIC_AIM_SKILL_SHOTGUN			50	//float [0, 1]
+#define CHARACTERISTIC_AIM_SKILL_LIGHTNING			51	//float [0, 1]
+#define CHARACTERISTIC_AIM_SKILL_RAILGUN			52	//float [0, 1]

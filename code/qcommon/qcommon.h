@@ -161,12 +161,24 @@ typedef enum {
 	NA_LOOPBACK,
 	NA_BROADCAST,
 	NA_IP,
+	NA_QUIC,					// QUIC/WebTransport game transport (IPv4 endpoint)
 #if FEAT_IPV6
 	NA_IP6,
 	NA_MULTICAST6,
+	NA_QUIC6,					// QUIC/WebTransport game transport (IPv6 endpoint)
 #endif
 	NA_UNSPEC
 } netadrtype_t;
+
+// Address-type helpers — avoid scattered type == NA_IP || type == NA_QUIC chains
+#define NET_IS_IPV4(t)      ((t) == NA_IP  || (t) == NA_QUIC)
+#if FEAT_IPV6
+# define NET_IS_QUIC(t)     ((t) == NA_QUIC || (t) == NA_QUIC6)
+# define NET_IS_IPV6(t)     ((t) == NA_IP6 || (t) == NA_QUIC6)
+#else
+# define NET_IS_QUIC(t)     ((t) == NA_QUIC)
+# define NET_IS_IPV6(t)     0
+#endif
 
 
 typedef enum {
@@ -197,6 +209,11 @@ void		NET_FlushPacketQueue( int time_diff );
 void		NET_QueuePacket( netsrc_t sock, int length, const void *data, const netadr_t *to, int offset );
 void		NET_SendPacket( netsrc_t sock, int length, const void *data, const netadr_t *to );
 void		QDECL NET_OutOfBandPrint( netsrc_t net_socket, const netadr_t *adr, const char *format, ...) __attribute__ ((format (printf, 3, 4)));
+
+// Last sendto error — clear-before-send contract (see net_ip.c)
+void		NET_ClearLastSendError( void );
+qboolean	NET_HasLastSendError( void );
+const char	*NET_LastSendError( void );
 void		NET_OutOfBandCompress( netsrc_t sock, const netadr_t *adr, const byte *data, int len );
 
 qboolean	NET_CompareAdr( const netadr_t *a, const netadr_t *b );
@@ -233,46 +250,15 @@ qboolean	NET_Sleep( int timeout );
 Netchan handles packet fragmentation and out of order / duplicate suppression
 */
 
+/* Phase D: netchan_t retains only the address/sequence fields still
+ * referenced by QUIC-path code.  All netchan protocol logic (fragmentation,
+ * OOB sequencing, rate-limit fields) is removed with net_chan.c. */
 typedef struct {
-	netsrc_t	sock;
-
-	int			dropped;			// between last packet and previous
-
 	netadr_t	remoteAddress;
-	int			qport;				// qport value to write when transmitting
-
-	// sequencing variables
-	int			incomingSequence;
 	int			outgoingSequence;
-
-	// incoming fragment assembly buffer
-	int			fragmentSequence;
-	int			fragmentLength;	
-	byte		fragmentBuffer[MAX_MSGLEN];
-
-	// outgoing fragment buffer
-	// we need to space out the sending of large fragmented messages
-	qboolean	unsentFragments;
-	int			unsentFragmentStart;
-	int			unsentLength;
-	byte		unsentBuffer[MAX_MSGLEN];
-
-	int			challenge;
-	int			lastSentTime;
-	int			lastSentSize;
-
+	int			incomingSequence;
 	qboolean	isLANAddress;
-
 } netchan_t;
-
-void Netchan_Init( int qport );
-void Netchan_Setup( netsrc_t sock, netchan_t *chan, const netadr_t *adr, int port, int challenge );
-
-void Netchan_Transmit( netchan_t *chan, int length, const byte *data );
-void Netchan_TransmitNextFragment( netchan_t *chan );
-void Netchan_Enqueue( netchan_t *chan, int length, const byte *data );
-
-qboolean Netchan_Process( netchan_t *chan, msg_t *msg );
 
 
 /*
@@ -1000,6 +986,14 @@ void		Com_EndRedirect( void );
 void 		QDECL Com_Printf( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
 void 		QDECL Com_DPrintf( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
 void 		Com_Quit_f( void );
+
+// Com_LastError API — wraps the existing com_errorMessage buffer + cvar.
+// Both this API and Com_Error write to the same buffer; the error_popup.wmenu
+// dialog reads the cvar and renders one dialog regardless of which path set it.
+void		QDECL Com_SetLastError( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
+const char	*Com_GetLastError( void );
+qboolean	Com_HasLastError( void );
+void		Com_ClearLastError( void );
 void		Com_GameRestart( int checksumFeed, qboolean clientRestart );
 
 int			Com_EventLoop( void );
@@ -1153,7 +1147,7 @@ int Z_FreeTags( memtag_t tag );
 int Z_AvailableMemory( void );
 void Z_LogHeap( void );
 
-void Hunk_Clear( void );
+void Hunk_ClearLevel( void );
 void Hunk_ClearToMark( void );
 void Hunk_SetMark( void );
 qboolean Hunk_CheckMark( void );
@@ -1164,6 +1158,10 @@ int	Hunk_MemoryRemaining( void );
 void Hunk_Log( void);
 
 unsigned int Com_TouchMemory( void );
+
+/* Per-subsystem persistent arena allocators.
+   Use instead of Hunk_Alloc for state that must survive Hunk_ClearLevel(). */
+#include "arena.h"
 
 // commandLine should not include the executable name (argv[0])
 void Com_Init( char *commandLine );
@@ -1199,6 +1197,10 @@ void CL_MouseEvent( int dx, int dy /*, int time*/ );
 void CL_JoystickEvent( int axis, int value, int time );
 
 void CL_PacketEvent( const netadr_t *from, msg_t *msg );
+#if !defined(DEDICATED)
+void CL_CheckReliableStreams( void );
+void CL_CheckSnapshotDatagrams( void );
+#endif
 
 void CL_ConsolePrint( const char *text );
 
@@ -1216,8 +1218,16 @@ void	CL_ForwardCommandToServer( const char *string );
 void CL_CDDialog( void );
 // bring up the "need a cd to play" dialog
 
+void CL_ShutdownLevel( void );
+// level-scoped teardown only: cgame VM, level renderer resources, level audio.
+// Does NOT touch the Wired UI VM, renderer device/context, font atlases, or
+// console state.  Safe to call on every map transition.  Called from
+// SV_SpawnServer P1 and any other map-change path.
+
 void CL_ShutdownAll( void );
-// shutdown all the client stuff
+// full client teardown: calls CL_ShutdownLevel(), then destroys all persistent
+// state (Wired UI VM, renderer device, fonts, console, audio mixer).
+// Call ONLY on engine quit / fatal error — not on map transitions.
 
 void CL_ClearMemory( void );
 // clear memory
@@ -1251,6 +1261,7 @@ qboolean CL_GameSwitch( void );
 //
 void SV_Init( void );
 void SV_Shutdown( const char *finalmsg );
+void SV_SpawnServer_Tick( void ); /* advance one phase of the async spawn machine */
 void SV_Frame( int msec );
 void SV_TrackCvarChanges( void );
 void SV_PacketEvent( const netadr_t *from, msg_t *msg );
@@ -1260,13 +1271,6 @@ int SV_SendQueuedPackets( void );
 
 void SV_AddDedicatedCommands( void );
 void SV_RemoveDedicatedCommands( void );
-
-
-//
-// UI interface
-//
-qboolean UI_GameCommand( void );
-qboolean UI_usesUniqueCDKey(void);
 
 /*
 ==============================================================
@@ -1417,9 +1421,7 @@ int HuffmanGetSymbol( unsigned int* symbol, const byte* buffer, int bitIndex );
 void BSP_Init( void );
 void BSP_Shutdown( void );
 
-// Headless Lua scripting runtime (FEAT_LUA)
-#if FEAT_LUA
+// Headless Lua scripting runtime
 #include "scripting/wired_scripting.h"
-#endif
 
 #endif // _QCOMMON_H_

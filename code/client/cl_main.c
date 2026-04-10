@@ -23,8 +23,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
+#include "wired/ui/cl_wired_attract.h"
 #include "wired/store/cl_wired_store.h"
 #include "../qcommon/crypto.h"
+#include "../wired/net/wn_public.h"
 #include <limits.h>
 
 cvar_t	*cl_noprint;
@@ -696,6 +698,9 @@ static void CL_DemoCompleted( void ) {
 	}
 
 	CL_Disconnect( qtrue );
+	if ( WiredAttract_OnDemoCompleted() ) {
+		return; /* attract scheduler handled the advance */
+	}
 	CL_NextDemo();
 }
 
@@ -998,9 +1003,60 @@ static void CL_ShutdownVMs( void )
 
 /*
 =====================
-Called by Com_GameRestart, CL_FlushMemory and SV_SpawnServer
+CL_ShutdownLevel
+
+Level-scoped client teardown.  Tears down the cgame VM and frees level-scoped
+renderer resources (world surfaces, lightmaps, level models, level audio), but
+does NOT touch the Wired UI VM, Vulkan device/context, font atlas, console
+buffers, or any other persistent subsystem.
+
+Called from SV_SpawnServer P1 (map transition).
+Must NOT be called from process-exit paths — use CL_ShutdownAll for those.
+=====================
+*/
+void CL_ShutdownLevel( void ) {
+	if ( com_dedicated->integer ) {
+		return;
+	}
+
+	// mute level sounds; audio mixer and device stay alive
+	S_DisableSounds();
+
+	// cgame VM is level-scoped; shut it down.
+	// Wired UI VM is persistent — do NOT call CL_ShutdownUI() here.
+	CL_ShutdownCGame();
+
+	// Release level-scoped renderer resources.  REF_KEEP_CONTEXT preserves
+	// the Vulkan device, GPU textures (font atlas, base shaders), and zone
+	// memory so they remain valid between async spawn phases.
+	// R_InitImages will destroy and re-register them when CL_InitRenderer
+	// runs on client reconnect (P5).
+	if ( re.Shutdown ) {
+		re.Shutdown( REF_KEEP_CONTEXT );
+	}
+	// Signal CL_StartHunkUsers → CL_InitRenderer → RE_BeginRegistration so the
+	// renderer is properly re-initialized (new backEndData, fresh shaders, new
+	// font atlas) for the incoming map.
+	cls.rendererStarted = qfalse;
+
+	// sounds must be re-registered after each map load
+	cls.soundRegistered = qfalse;
+
+	// do NOT call SCR_Done() — screen state must stay alive for inter-phase frames
+}
+
+
+/*
+=====================
+Called by Com_GameRestart, CL_FlushMemory and engine quit / fatal error paths.
 
 CL_ShutdownAll
+
+Full client teardown.  Calls CL_ShutdownLevel() first for the level-scoped
+work, then destroys all persistent state: Wired UI VM, renderer device, font
+atlases, console, audio mixer.
+
+Do NOT call this on map transitions — use CL_ShutdownLevel() instead.
 =====================
 */
 void CL_ShutdownAll( void ) {
@@ -1009,19 +1065,18 @@ void CL_ShutdownAll( void ) {
 	CL_cURL_Shutdown();
 #endif
 
-	// clear and mute all sounds until next registration
-	S_DisableSounds();
+	// level-scoped teardown first (mutes sounds, kills cgame, frees level geo)
+	CL_ShutdownLevel();
 
-	// shutdown VMs
-	CL_ShutdownVMs();
+	// shutdown remaining persistent VMs — Wired UI VM
+	CL_ShutdownUI();
 
-	// shutdown the renderer
-	if ( re.Shutdown ) {
-		if ( CL_GameSwitch() ) {
-			CL_ShutdownRef( REF_DESTROY_WINDOW ); // shutdown renderer & GLimp
-		} else {
-			re.Shutdown( REF_KEEP_CONTEXT ); // don't destroy window or context
-		}
+	// CL_ShutdownLevel already called re.Shutdown(REF_KEEP_CONTEXT) to release
+	// level resources.  For a game-switch, also destroy the window and GL/Vk
+	// context entirely.  For the non-switch path, the REF_KEEP_CONTEXT call
+	// from CL_ShutdownLevel is sufficient — don't call it again.
+	if ( re.Shutdown && CL_GameSwitch() ) {
+		CL_ShutdownRef( REF_DESTROY_WINDOW );
 	}
 
 	cls.rendererStarted = qfalse;
@@ -1039,8 +1094,8 @@ CL_ClearMemory
 void CL_ClearMemory( void ) {
 	// if not running a server clear the whole hunk
 	if ( !com_sv_running->integer ) {
-		// clear the whole hunk
-		Hunk_Clear();
+		// clear the level-scoped hunk (persistent arenas survive)
+		Hunk_ClearLevel();
 		// clear collision map data
 		CM_ClearMap();
 	} else {
@@ -1091,8 +1146,11 @@ void CL_MapLoading( const char *mapname ) {
 		return;
 	}
 
-	Con_Close();
-	Key_SetCatcher( 0 );
+	// Soft-close: collapse console visually but preserve KEYCATCH_CONSOLE so
+	// the user sees the log wall throughout the async spawn phases (Fix 6.1).
+	Con_SoftClose();
+	// Preserve the console catcher; drop all others (UI, cgame, etc.).
+	Key_SetCatcher( Key_GetCatcher() & KEYCATCH_CONSOLE );
 
 	localReconnect = ( cls.state >= CA_CONNECTED && !Q_stricmp( cls.servername, "localhost" ) );
 
@@ -1108,8 +1166,8 @@ void CL_MapLoading( const char *mapname ) {
 		Cvar_Set( "nextmap", "" );
 		CL_Disconnect( qtrue );
 		Q_strncpyz( cls.servername, "localhost", sizeof(cls.servername) );
-		cls.state = CA_CHALLENGING;		// so the connect screen is drawn
-		Key_SetCatcher( 0 );
+		cls.state = CA_CONNECTING;		// so the connect screen is drawn
+		Key_SetCatcher( Key_GetCatcher() & KEYCATCH_CONSOLE );
 	}
 
 	Com_Memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
@@ -1304,6 +1362,11 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 	CL_ClearBspPreview();
 
 	// wipe the client connection
+	// Tear down client QUIC connection before wiping clc
+	Com_Printf( "*** CL_Disconnect: state=%d showMainMenu=%d initialized=%d ***\n",
+		(int)cls.state, (int)showMainMenu, (int)WN_ClientIsConnecting() );
+	WN_ClientDisconnect();
+
 	Com_Memset( &clc, 0, sizeof( clc ) );
 	clc.wiredRconChallenge[0] = '\0';
 
@@ -1323,6 +1386,26 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 		cl_restarted = CL_RestoreOldGame();
 
 	cl_disconnecting = qfalse;
+
+#ifndef DEDICATED
+	// Plan C hook: surface any ERR_DROP error as a Wired UI dialog.
+	// Four guards prevent reentry and false positives:
+	//   showMainMenu  — only when we are going back to the menu, not during
+	//                   silent disconnects (map change, demo end, etc.)
+	//   cls.uiStarted — UI must be running (early-boot disconnects skip this)
+	//   !com_errorEntered — ERR_DROP longjmp is still in progress when this
+	//                       is set; calling into UI would crash mid-teardown
+	//   com_errorMessage  — nothing to show if there's no error text
+	{
+		const char *errMsg = Cvar_VariableString( "com_errorMessage" );
+		if ( showMainMenu
+		  && cls.uiStarted
+		  && !com_errorEntered
+		  && errMsg && errMsg[0] ) {
+			CL_WiredUI_ShowError( "Disconnected", errMsg, qtrue );
+		}
+	}
+#endif
 
 	return cl_restarted;
 }
@@ -1509,7 +1592,7 @@ void CL_Disconnect_f( void ) {
 			} else {
 				Com_Printf( "Disconnected from %s\n", cls.servername );
 			}
-			Cvar_Set( "com_errorMessage", "" );
+			Com_ClearLastError();
 			if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
 				CL_FlushMemory();
 			}
@@ -1645,17 +1728,9 @@ static void CL_Connect_f( void ) {
 	else
 		CL_UpdateGUID( NULL, 0 );
 
-	// if we aren't playing on a lan, we need to authenticate
-	// with the cd key
-	if ( NET_IsLocalAddress( &clc.serverAddress ) ) {
-		cls.state = CA_CHALLENGING;
-	} else {
-		cls.state = CA_CONNECTING;
-
-		// Set a client challenge number that ideally is mirrored back by the server.
-		//clc.challenge = ((rand() << 16) ^ rand()) ^ Com_Milliseconds();
-		Com_RandomBytes( (byte*)&clc.challenge, sizeof( clc.challenge ) );
-	}
+	// QUIC handles auth via TLS; LAN no longer needs the UDP challenge round-trip.
+	cls.state = CA_CONNECTING;
+	Com_RandomBytes( (byte*)&clc.challenge, sizeof( clc.challenge ) );
 
 	Key_SetCatcher( 0 );
 	clc.connectTime = -99999;	// CL_CheckForResend() will fire immediately
@@ -1978,6 +2053,7 @@ static void CL_DownloadsComplete( void ) {
 
 	// set pure checksums
 	CL_SendPureChecksums();
+	WN_ClientSendReady();
 
 	CL_WritePacket( 2 );
 }
@@ -2119,6 +2195,29 @@ void CL_NextDownload( void )
 
 /*
 =================
+CL_SetupQuicNetchan
+
+Phase D removed the UDP netchan handshake, but the client still uses the
+trimmed netchan state for packet pacing, packet-history bookkeeping, and to
+select the QUIC send path in CL_WritePacket. Seed the same fields that the old
+Netchan_Setup path used to initialize.
+
+Note: address type is left as-is (NA_IP, NA_IP6, NA_LOOPBACK).  NA_QUIC /
+NA_QUIC6 are transport-internal types; use (clc.quic_conn != CONN_INVALID) to
+test whether we are on a QUIC connection.
+=================
+*/
+static void CL_SetupQuicNetchan( void )
+{
+	clc.netchan.remoteAddress = clc.serverAddress;
+	clc.netchan.incomingSequence = 0;
+	clc.netchan.outgoingSequence = 1;
+	clc.netchan.isLANAddress = Sys_IsLANAddress( &clc.netchan.remoteAddress );
+}
+
+
+/*
+=================
 CL_InitDownloads
 
 After receiving a valid game state, we valid the cgame and local zip files here
@@ -2192,11 +2291,6 @@ Resend a connect message if the last one has timed out
 =================
 */
 static void CL_CheckForResend( void ) {
-	int		port, len;
-	char	info[MAX_INFO_STRING*2]; // larger buffer to detect overflows
-	char	data[MAX_INFO_STRING];
-	qboolean	notOverflowed;
-	qboolean	infoTruncated;
 
 	// don't send anything if playing back a demo
 	if ( clc.demoplaying ) {
@@ -2204,7 +2298,7 @@ static void CL_CheckForResend( void ) {
 	}
 
 	// resend if we haven't gotten a reply yet
-	if ( cls.state != CA_CONNECTING && cls.state != CA_CHALLENGING ) {
+	if ( cls.state != CA_CONNECTING ) {
 		return;
 	}
 
@@ -2217,68 +2311,43 @@ static void CL_CheckForResend( void ) {
 
 	switch ( cls.state ) {
 	case CA_CONNECTING:
-		// Phase 6.4: skip the authorize server round-trip — q3now is standalone.
-		// The challenge request shall be followed by a client challenge so no malicious server can hijack this connection.
-		NET_OutOfBandPrint( NS_CLIENT, &clc.serverAddress, "getchallenge %d %s", clc.challenge, GAMENAME_FOR_MASTER );
-		break;
+		// QUIC path: skip the UDP challenge round-trip.
+		// Build userinfo with challenge included (so server echoes it back in connectResponse),
+		// then initiate QUIC handshake via transport->connect() if not already started.
+		// "loopback" address string is handled inside wn_connect → WN_ClientConnect,
+		// which maps it to 127.0.0.1 so picoquic can send real UDP datagrams.
+		if ( !WN_ClientIsConnecting() ) {
+			char   info[MAX_INFO_STRING * 2];
+			int    qport;
+			qboolean truncated = qfalse;
 
-	case CA_CHALLENGING:
-		// sending back the challenge
-		port = Cvar_VariableIntegerValue( "net_qport" );
+			qport = Cvar_VariableIntegerValue( "net_qport" );
+			Q_strncpyz( info, Cvar_InfoString( CVAR_USERINFO, &truncated ), sizeof( info ) );
 
-		infoTruncated = qfalse;
-		Q_strncpyz( info, Cvar_InfoString( CVAR_USERINFO, &infoTruncated ), sizeof( info ) );
+			// Embed client challenge so server echoes it back in connectResponse.
+			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "challenge",
+									va( "%i", clc.challenge ) );
+			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "protocol",
+									com_protocol->string );
+			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "qport",
+									va( "%i", qport ) );
 
-		// remove some non-important keys that may cause overflow during connection
-		if ( strlen( info ) > MAX_USERINFO_LENGTH - 64 ) {
-			infoTruncated |= Info_RemoveKey( info, "xp_name" ) ? qtrue : qfalse;
-			infoTruncated |= Info_RemoveKey( info, "xp_country" ) ? qtrue : qfalse;
-		}
-
-		len = strlen( info );
-		if ( len > MAX_USERINFO_LENGTH ) {
-			notOverflowed = qfalse;
+			CL_SetupQuicNetchan();
+			if ( transport ) {
+				clc.quic_conn = transport->connect(
+					NET_AdrToString( &clc.serverAddress ),
+					(int)ntohs( clc.serverAddress.port ),
+					info );
+			}
 		} else {
-			notOverflowed = qtrue;
-		}
-
-		if ( com_protocol->integer != PROTOCOL_VERSION ) {
-			notOverflowed &= Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "protocol",
-				com_protocol->string );
-		} else {
-			notOverflowed &= Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "protocol",
-				XSTRING( PROTOCOL_VERSION ) );
-		}
-
-		notOverflowed &= Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "qport",
-			va( "%i", port ) );
-
-		notOverflowed &= Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "challenge",
-			va( "%i", clc.challenge ) );
-
-		// for now - this will be used to inform server about q3msgboom fix
-		// this is optional key so will not trigger oversize warning
-		Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "client", Q3NOW_ENGINE_VERSION );
-
-		if ( !notOverflowed ) {
-			Com_Printf( S_COLOR_YELLOW "WARNING: oversize userinfo, you might be not able to join remote server!\n" );
-		}
-
-		len = Com_sprintf( data, sizeof( data ), "connect \"%s\"", info );
-		// NOTE TTimo don't forget to set the right data length!
-		NET_OutOfBandCompress( NS_CLIENT, &clc.serverAddress, (byte *) &data[0], len );
-		// the most current userinfo has been sent, so watch for any
-		// newer changes to userinfo variables
-		cvar_modifiedFlags &= ~CVAR_USERINFO;
-
-		// ... but force re-send if userinfo was truncated in any way
-		if ( infoTruncated || !notOverflowed ) {
-			cvar_modifiedFlags |= CVAR_USERINFO;
+			// Already connecting — just pump timers (WN_ClientFrame is
+			// also called from NET_Event, but belt-and-suspenders here).
+			WN_ClientFrame();
 		}
 		break;
 
 	default:
-		Com_Error( ERR_FATAL, "CL_CheckForResend: bad cls.state" );
+		break;
 	}
 }
 
@@ -2628,41 +2697,9 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		return qfalse;
 	}
 
-	// server connection
-	if ( !Q_stricmp(c, "connectResponse") ) {
-		if ( cls.state >= CA_CONNECTED ) {
-			Com_Printf( "Dup connect received. Ignored.\n" );
-			return qfalse;
-		}
-		if ( cls.state != CA_CHALLENGING ) {
-			Com_Printf( "connectResponse packet while not connecting. Ignored.\n" );
-			return qfalse;
-		}
-		if ( !NET_CompareAdr( from, &clc.serverAddress ) ) {
-			Com_Printf( "connectResponse from wrong address. Ignored.\n" );
-			return qfalse;
-		}
-
-		// first argument: challenge response
-		c = Cmd_Argv( 1 );
-		if ( *c != '\0' ) {
-			challenge = atoi( c );
-		} else {
-			Com_Printf( "Bad connectResponse received. Ignored.\n" );
-			return qfalse;
-		}
-
-		if ( challenge != clc.challenge ) {
-			Com_Printf( "ConnectResponse with bad challenge received. Ignored.\n" );
-			return qfalse;
-		}
-
-		Netchan_Setup( NS_CLIENT, &clc.netchan, from, Cvar_VariableIntegerValue( "net_qport" ), clc.challenge );
-
-		cls.state = CA_CONNECTED;
-		clc.lastPacketSentTime = cls.realtime - 9999; // send first packet immediately
-		return qtrue;
-	}
+	/* Phase D: "connectResponse" OOB handler removed — QUIC uses TLV ACCEPT on stream 0.
+	   CA_CONNECTED is set by CL_InitDownloads when bootstrap state arrives on
+	   the reliable bootstrap channel. */
 
 	// server responding to an info broadcast
 	if ( !Q_stricmp(c, "infoResponse") ) {
@@ -2730,56 +2767,14 @@ A packet has arrived from the main event loop
 =================
 */
 void CL_PacketEvent( const netadr_t *from, msg_t *msg ) {
-	int		headerBytes;
-
-	if ( msg->cursize < 5 ) {
-		Com_DPrintf( "%s: Runt packet\n", NET_AdrToStringwPort( from ) );
+	if ( msg->cursize < 4 )
 		return;
-	}
 
+	/* Phase D: Only OOB packets (server browser infoResponse/statusResponse) are handled here.
+	   All game traffic flows through QUIC streams and datagrams. */
 	if ( *(int *)msg->data == -1 ) {
 		if ( CL_ConnectionlessPacket( from, msg ) )
 			clc.lastPacketTime = cls.realtime;
-		return;
-	}
-
-	if ( cls.state < CA_CONNECTED ) {
-		return;		// can't be a valid sequenced packet
-	}
-
-	//
-	// packet from server
-	//
-	if ( !NET_CompareAdr( from, &clc.netchan.remoteAddress ) ) {
-		if ( com_developer->integer ) {
-			Com_Printf( "%s:sequenced packet without connection\n",
-				NET_AdrToStringwPort( from ) );
-		}
-		// FIXME: send a client disconnect?
-		return;
-	}
-
-	if ( !CL_Netchan_Process( &clc.netchan, msg ) ) {
-		return;		// out of order, duplicated, etc
-	}
-
-	// the header is different lengths for reliable and unreliable messages
-	headerBytes = msg->readcount;
-
-	// track the last message received so it can be returned in
-	// client messages, allowing the server to detect a dropped
-	// gamestate
-	clc.serverMessageSequence = LittleLong( *(int32_t *)msg->data );
-
-	clc.lastPacketTime = cls.realtime;
-	CL_ParseServerMessage( msg );
-
-	//
-	// we don't know if it is ok to save a demo message until
-	// after we have parsed the frame
-	//
-	if ( clc.demorecording && !clc.demowaiting && !clc.demoplaying ) {
-		CL_WriteDemoMessage( msg, headerBytes );
 	}
 }
 
@@ -2798,7 +2793,7 @@ static void CL_CheckTimeout( void ) {
 		&& cls.realtime - clc.lastPacketTime > cl_timeout->integer * 1000 ) {
 		if ( ++cl.timeoutcount > 5 ) { // timeoutcount saves debugger
 			Com_Printf( "\nServer connection timed out.\n" );
-			Cvar_Set( "com_errorMessage", "Server connection timed out." );
+			Com_SetLastError( "Server connection timed out." );
 			if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
 				CL_FlushMemory();
 			}
@@ -2977,6 +2972,79 @@ static void CL_CheckMatchAlerts( void )
 
 
 /*
+===================
+CL_WuiTestError_f
+===================
+Dev command: `wui_testerror [message]`
+Directly exercises the error_popup.wmenu dialog without requiring a real
+network failure.  Only compiled in debug builds.
+*/
+#ifndef NDEBUG
+static void CL_WuiTestError_f( void )
+{
+	const char *msg;
+	if ( Cmd_Argc() > 1 )
+		msg = Cmd_ArgsFrom( 1 );
+	else
+		msg = "Synthetic test error — Copy, Retry, Back to menu all work";
+	Com_SetLastError( "%s", msg );
+	CL_WiredUI_ShowError( "Test Error", msg, qtrue );
+}
+#endif
+
+/*
+=====================
+CL_CheckConnectError
+=====================
+Polls QUIC client for a deferred connect-phase failure and surfaces it as
+an error_popup.wmenu modal.  Called every frame just before CL_CheckTimeout,
+which only fires at CA_CONNECTED+ and would otherwise never see these.
+
+Two cases after CL_Disconnect(qfalse):
+
+  cls.uiStarted == qtrue  — remote connect, no local server was started.
+      The renderer and UI survived.  Call CL_WiredUI_ShowError directly.
+
+  cls.uiStarted == qfalse — SV_SpawnServer called CL_ShutdownAll, which
+      shut down the renderer and WiredUI.  The screen is black; nobody will
+      call CL_StartHunkUsers unless we do it explicitly.  Store the error
+      in cl_pendingConnectError and call CL_FlushMemory() to restart the
+      renderer and UI — the deferred check inside CL_StartHunkUsers fires
+      and shows the dialog as soon as WiredUI is back up.
+*/
+static char cl_pendingConnectError[512];
+
+static void CL_CheckConnectError( void )
+{
+	char msg[512];
+
+	// EB7: guard covers CA_CONNECTING + CA_CHALLENGING and any state
+	// between disconnected and fully active.
+	if ( cls.state <= CA_DISCONNECTED || cls.state >= CA_ACTIVE )
+		return;
+	if ( !WN_ClientHasError( msg, sizeof(msg) ) )
+		return;
+
+	// Consume before CL_Disconnect so the error slot is clean on retry.
+	WN_ClientClearError();
+
+	Com_Printf( S_COLOR_YELLOW "Connect failed: %s\n", msg );
+	Com_SetLastError( "%s", msg );
+	CL_Disconnect( qfalse );
+
+	if ( cls.uiStarted ) {
+		// UI is still up — show the error dialog directly.
+		UI_CALL_SET_ACTIVE( UIMENU_MAIN );
+		CL_WiredUI_ShowError( "Connection Failed", msg, qtrue );
+	} else {
+		// Renderer is down (SV_SpawnServer wiped it).  Restart everything
+		// and let the deferred check in CL_StartHunkUsers show the dialog.
+		Q_strncpyz( cl_pendingConnectError, msg, sizeof( cl_pendingConnectError ) );
+		CL_FlushMemory();
+	}
+}
+
+/*
 ==================
 CL_Frame
 ==================
@@ -2992,6 +3060,10 @@ void CL_Frame( int msec, int realMsec ) {
 	if ( !com_cl_running->integer ) {
 		return;
 	}
+
+#if FEAT_WIRED_UI
+	WiredStore_BeginFrame();
+#endif
 
 	// save the msec before checking pause
 	cls.realFrametime = realMsec;
@@ -3095,6 +3167,11 @@ void CL_Frame( int msec, int realMsec ) {
 
 	// see if we need to update any userinfo
 	CL_CheckUserinfo();
+
+	// surface deferred QUIC connect-phase errors before the timeout check
+	if ( !clc.demoplaying ) {
+		CL_CheckConnectError();
+	}
 
 	// if we haven't gotten a packet in a long time, drop the connection
 	if ( !clc.demoplaying ) {
@@ -3217,8 +3294,6 @@ static void CL_InitRenderer( void ) {
 	// Wired UI owns font + menu subsystem — initialize here
 	// so text works before cgame loads.
 	WiredUI_Init( cls.state >= CA_AUTHORIZING && cls.state < CA_ACTIVE );
-	// Register store Lua bindings (queued; run by WiredScript_PostInit)
-	WiredStoreLua_Init();
 #endif
 
 	Con_CheckResize();
@@ -3296,6 +3371,16 @@ void CL_StartHunkUsers( void ) {
 	if ( !cls.uiStarted ) {
 		cls.uiStarted = qtrue;
 		CL_InitUI();
+
+		// Show any connect error that was deferred across the UI restart
+		// triggered by CL_Disconnect() inside CL_CheckConnectError.
+		if ( cl_pendingConnectError[0] ) {
+			char pendingMsg[512];
+			Q_strncpyz( pendingMsg, cl_pendingConnectError, sizeof( pendingMsg ) );
+			cl_pendingConnectError[0] = '\0';
+			UI_CALL_SET_ACTIVE( UIMENU_MAIN );
+			CL_WiredUI_ShowError( "Connection Failed", pendingMsg, qtrue );
+		}
 	}
 }
 
@@ -3902,6 +3987,14 @@ void CL_Init( void ) {
 
 	CL_InitInput();
 
+#if FEAT_WIRED_UI
+	WiredStore_Init();
+	WiredStoreLua_Init();
+	/* Single entry point: registers all WiredUI Lua globals (load_menu,
+	   attract.*) before WiredScript_PostInit runs them against the VM. */
+	WiredUI_LuaInit();
+#endif
+
 	//
 	// register client variables
 	//
@@ -4073,6 +4166,11 @@ void CL_Init( void ) {
 #endif
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
 
+#ifndef NDEBUG
+	Cmd_AddCommand( "wui_testerror", CL_WuiTestError_f );
+	Cvar_Get( "net_forceSendError", "0", CVAR_TEMP );
+#endif
+
 	Cvar_Set( "cl_running", "1" );
 #ifdef USE_MD5
 	CL_GenerateQKey();
@@ -4147,6 +4245,10 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	Cmd_RemoveCommand ("systeminfo");
 	Cmd_RemoveCommand ("modelist");
 
+#ifndef NDEBUG
+	Cmd_RemoveCommand( "wui_testerror" );
+#endif
+
 #ifdef USE_CURL
 	Com_DL_Cleanup( &download );
 
@@ -4155,6 +4257,10 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 #endif
 
 	CL_ClearInput();
+
+#if FEAT_WIRED_UI
+	WiredStore_Shutdown();
+#endif
 
 	Cvar_Set( "cl_running", "0" );
 

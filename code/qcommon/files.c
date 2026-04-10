@@ -334,9 +334,6 @@ int	fs_lastPakIndex;
 static FILE*		missingFiles = NULL;
 #endif
 
-void Com_AppendCDKey( const char *filename );
-void Com_ReadCDKey( const char *filename );
-
 static int FS_GetModList( char *listbuf, int bufsize );
 static void FS_CheckIdPaks( void );
 void FS_Reload( void );
@@ -1457,8 +1454,8 @@ static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pak
 			case 2: compName = "zstd"; break;
 			default: compName = "other"; break;
 		}
-		Com_DPrintf( "SW3Z_Open: '%s' entry=%d size=%d compression=%s\n",
-			pakFile->name, entryIdx, size, compName );
+		// Com_DPrintf( "SW3Z_Open: '%s' entry=%d size=%d compression=%s\n",
+		// 	pakFile->name, entryIdx, size, compName );
 	}
 
 	if ( size == 0 ) {
@@ -1523,9 +1520,6 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 	}
 	if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( pakFile->name, "vm/cgame.qvm" ) ) {
 		pak->referenced |= FS_CGAME_REF;
-	}
-	if ( !( pak->referenced & FS_UI_REF ) && !strcmp( pakFile->name, "vm/ui.qvm" ) ) {
-		pak->referenced |= FS_UI_REF;
 	}
 
 	if ( !PACK_ZIP_HANDLE(pak) ) {
@@ -1677,13 +1671,6 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 		return -1;
 	}
 
-	// make sure the q3key file is only readable by the quake3.exe at initialization
-	// any other time the key should only be accessed in memory using the provided functions
-	if ( com_fullyInitialized && strstr( filename, "q3key" ) ) {
-		*file = FS_INVALID_HANDLE;
-		return -1;
-	}
-
 	//
 	// search through the path, one element at a time
 	//
@@ -1783,9 +1770,6 @@ void FS_TouchFileInPak( const char *filename ) {
 					}
 					if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( filename, "vm/cgame.qvm" ) ) {
 						pak->referenced |= FS_CGAME_REF;
-					}
-					if ( !( pak->referenced & FS_UI_REF ) && !strcmp( filename, "vm/ui.qvm" ) ) {
-						pak->referenced |= FS_UI_REF;
 					}
 					return;
 				}
@@ -5196,11 +5180,6 @@ static void FS_Startup( void ) {
 	FS_LoadedPakPureChecksums();
 
 	end = Sys_Milliseconds();
-
-	Com_ReadCDKey( basegame );
-	if ( !FS_IsBaseGame( fs_gamedirvar->string ) ) {
-		Com_AppendCDKey( fs_gamedirvar->string );
-	}
 
 	// add our commands
 	Cmd_AddCommand( "path", FS_Path_f );

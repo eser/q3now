@@ -100,45 +100,6 @@
 #define FEAT_FORCE_ENTITY_VERTEX_ALPHA    1   // per-entity alpha override + dynamic pipeline swap
 #define FEAT_FBO_DEBUG                    0   // verbose FBO pipeline diagnostics (format, layout, passes)
 
-// ── networking / transport (testing) ─────────────────────────────
-// Layered flags — each layer depends on the one above it.
-// FEAT_QUIC_TRANSPORT is the foundation; higher layers require it.
-//
-//   TRANSPORT ──► OBSERVE ──► CONTROL
-//       │
-//       └──────► HTTP
-//
-#ifndef FEAT_QUIC_TRANSPORT
-#define FEAT_QUIC_TRANSPORT               0   // picoquic integration, demux, handshake, QUIC datagrams
-#endif
-#ifndef FEAT_QUIC_OBSERVE
-#define FEAT_QUIC_OBSERVE                 0   // structured game state datagrams + event stream (requires TRANSPORT)
-#endif
-#ifndef FEAT_QUIC_CONTROL
-#define FEAT_QUIC_CONTROL                 0   // command channel + MCP server (requires OBSERVE)
-#endif
-#ifndef FEAT_QUIC_HTTP
-#define FEAT_QUIC_HTTP                    0   // HTTP endpoints: /health, /metrics (requires TRANSPORT)
-#endif
-
-// dependency enforcement — higher layers silently enable their prerequisites
-#if FEAT_QUIC_OBSERVE && !FEAT_QUIC_TRANSPORT
-#undef  FEAT_QUIC_TRANSPORT
-#define FEAT_QUIC_TRANSPORT               1
-#endif
-#if FEAT_QUIC_CONTROL && !FEAT_QUIC_OBSERVE
-#undef  FEAT_QUIC_OBSERVE
-#define FEAT_QUIC_OBSERVE                 1
-#endif
-#if FEAT_QUIC_CONTROL && !FEAT_QUIC_TRANSPORT
-#undef  FEAT_QUIC_TRANSPORT
-#define FEAT_QUIC_TRANSPORT               1
-#endif
-#if FEAT_QUIC_HTTP && !FEAT_QUIC_TRANSPORT
-#undef  FEAT_QUIC_TRANSPORT
-#define FEAT_QUIC_TRANSPORT               1
-#endif
-
 // ── missionpack (Team Arena features, individually toggleable) ────────
 #ifdef MISSIONPACK
 // backward compat: MISSIONPACK enables everything

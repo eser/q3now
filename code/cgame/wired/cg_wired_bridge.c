@@ -172,6 +172,7 @@ void CG_WiredHudPushState( void ) {
 	state.voteNo       = cgs.voteNo;
 	state.voteModified = cgs.voteModified;
 	Q_strncpyz( state.voteString, cgs.voteString, sizeof( state.voteString ) );
+	Q_strncpyz( state.killerName, cg.killerName, sizeof( state.killerName ) );
 
 	// ── client info ──────────────────────────────────────────────────
 	for ( i = 0; i < cgs.maxclients && i < WIRED_HUD_MAX_CLIENTS; i++ ) {

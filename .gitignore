@@ -27,4 +27,5 @@ cmake-*
 baseq3/
 
 # todos
+docs/
 TODOS.md
