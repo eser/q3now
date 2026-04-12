@@ -20,7 +20,7 @@ code/ui/ui_shared.c in subsequent phases.
 #include "../../../qcommon/menudef.h"
 
 #include <lua.h>
-#include "../../../qcommon/scripting/wired_scripting.h"
+#include "../../../qcommon/wired/scripting/wired_scripting.h"
 
 #if FEAT_WIRED_UI
 
@@ -1341,7 +1341,7 @@ wuiPopulateCallback_t WiredUI_GetPopulateCallback( const char *name ) {
 }
 
 // ── batch registration stubs ──────────────────────────────────────────
-// These will be filled in Phase 3 when SuperHUD elements are wrapped.
+// These will be filled in Phase 3 when ModernHUD elements are wrapped.
 
 void WiredUI_RegisterCoreSymbols( void ) {
 	Com_Printf( "WiredUI: core symbols registered (stub — Phase 3)\n" );
@@ -1367,6 +1367,10 @@ static qboolean wired_screenshotTaken = qfalse;
 static cvar_t *wired_hotreload = NULL;
 static int     wired_lastReloadCheck = 0;
 static cvar_t *wired_debug_layout = NULL;
+
+// ── hud cvar — selects which .whud file to load ───────────────────────
+static cvar_t *wired_hud = NULL;                            // basename only, e.g. "hud_default" → ui/hud_default.whud
+static char    wired_hud_lastLoaded[MAX_CVAR_VALUE_STRING]; // last value we actually loaded — string diff drives reloads
 
 /*
 =================
@@ -1407,6 +1411,15 @@ static void WiredUI_RegisterAssets( void ) {
 	if ( wired_assetGlobals.gradientBar[0] ) {
 		wired_gradientBarShader = re.RegisterShaderNoMip( wired_assetGlobals.gradientBar );
 	}
+}
+
+// ── hud cvar helper ───────────────────────────────────────────────────
+// Loads ui/<hud>.whud when the 'hud' cvar is non-empty.
+static void WiredUI_LoadHudFromCvar( void ) {
+	if ( !wired_hud || !wired_hud->string[0] ) return;
+	char path[MAX_QPATH];
+	Com_sprintf( path, sizeof(path), "ui/%s.whud", wired_hud->string );
+	WiredUI_LoadMenuFile( path );
 }
 
 // ── ui_testall command handler ────────────────────────────────────────
@@ -1639,9 +1652,14 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	WiredUI_ResetAssetGlobalsDefaults();
 
+	// register 'hud' cvar before menu load so WiredUI_LoadHudFromCvar is safe to call
+	wired_hud = Cvar_Get( "hud", "default", CVAR_ARCHIVE );
+	Q_strncpyz( wired_hud_lastLoaded, wired_hud->string, sizeof( wired_hud_lastLoaded ) );
+
 	// load menu files from scripts/menus.lua
 	WiredUI_ClearMenus();
 	WiredUI_LoadMenusFromLua();
+	WiredUI_LoadHudFromCvar();
 
 	// register feeder data sources
 	WiredUI_RegisterCoreFeeders();
@@ -1798,6 +1816,13 @@ void WiredUI_Refresh( int realtime ) {
 	int i;
 
 	if ( !wired_initialized ) {
+		return;
+	}
+
+	// live 'hud' cvar change: reload only when the value actually differs
+	if ( wired_hud && strcmp( wired_hud->string, wired_hud_lastLoaded ) != 0 ) {
+		Q_strncpyz( wired_hud_lastLoaded, wired_hud->string, sizeof( wired_hud_lastLoaded ) );
+		WiredUI_ReloadHud();
 		return;
 	}
 
@@ -4916,7 +4941,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 			continue;
 		}
 
-		// draw DUELBOARD widget — CPMA-style two-panel duel scoreboard
+		// draw DUELBOARD widget — Pro-style two-panel duel scoreboard
 		if ( item->type == ITEM_TYPE_DUELBOARD ) {
 			extern void WiredHud_DrawDuelBoard( float x, float y, float w, float h );
 			WiredHud_DrawDuelBoard( itemX, itemY, itemW, itemH );
@@ -5024,6 +5049,9 @@ void WiredUI_ReloadHud( void ) {
 	// two-phase safe reload
 	WiredUI_SafeReload();
 
+	// load HUD file from 'hud' cvar (menus.lua no longer contains the whud load)
+	WiredUI_LoadHudFromCvar();
+
 	// notify attract scheduler that the pool was rebuilt
 	WiredAttract_OnMenuReload();
 
@@ -5066,6 +5094,9 @@ void WiredUI_ReloadMenus( void ) {
 		Com_Printf( "Menus reloaded successfully.\n" );
 	}
 	// on failure, SafeReload already restored old menus + printed error
+
+	// load HUD file from 'hud' cvar (menus.lua no longer contains the whud load)
+	WiredUI_LoadHudFromCvar();
 
 	// notify attract scheduler that the pool was rebuilt
 	WiredAttract_OnMenuReload();

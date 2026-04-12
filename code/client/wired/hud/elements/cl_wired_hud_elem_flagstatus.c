@@ -9,24 +9,24 @@
 
 enum flagType_t
 {
-	SHUDFLTYPE_OWN,
-	SHUDFLTYPE_NME,
+	ModernHUDFLTYPE_OWN,
+	ModernHUDFLTYPE_NME,
 } flagType;
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudDrawContext_t ctx;
+	modernhudConfig_t config;
+	modernhudDrawContext_t ctx;
 	enum flagType_t flagType;
-} shudElementFlagStatus_t;
+} modernHudElementFlagStatus_t;
 
-static void* CG_SHUDElementFlagStatusCreate(const superhudConfig_t* config, enum flagType_t flagType)
+static void* CG_ModernHUDElementFlagStatusCreate(const modernhudConfig_t* config, enum flagType_t flagType)
 {
-	shudElementFlagStatus_t* element;
+	modernHudElementFlagStatus_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDDrawMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDDrawMakeContext(&element->config, &element->ctx);
 	Vector4Copy(colorWhite, element->ctx.color);
 
 	element->flagType = flagType;
@@ -34,26 +34,26 @@ static void* CG_SHUDElementFlagStatusCreate(const superhudConfig_t* config, enum
 	return element;
 }
 
-void* CG_SHUDElementFlagStatusNMECreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementFlagStatusNMECreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementFlagStatusCreate(config, SHUDFLTYPE_NME);
+	return CG_ModernHUDElementFlagStatusCreate(config, ModernHUDFLTYPE_NME);
 }
 
-void* CG_SHUDElementFlagStatusOWNCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementFlagStatusOWNCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementFlagStatusCreate(config, SHUDFLTYPE_OWN);
+	return CG_ModernHUDElementFlagStatusCreate(config, ModernHUDFLTYPE_OWN);
 }
 
-void CG_SHUDElementFlagStatusRoutine(void* context)
+void CG_ModernHUDElementFlagStatusRoutine(void* context)
 {
-	shudElementFlagStatus_t* element = (shudElementFlagStatus_t*)context;
+	modernHudElementFlagStatus_t* element = (modernHudElementFlagStatus_t*)context;
 	int side;
 
 	if (!wiredHud || !wiredHud->valid) return;
 
 	side = cgs.clientinfo[cg.snap->ps.clientNum].team;
 
-	if (element->flagType == SHUDFLTYPE_NME)
+	if (element->flagType == ModernHUDFLTYPE_NME)
 	{
 		switch (side)
 		{
@@ -85,16 +85,16 @@ void CG_SHUDElementFlagStatusRoutine(void* context)
 		return;
 	}
 
-	CG_SHUDFill(&element->config);
-	CG_SHUDDrawBorder(&element->config);
+	CG_ModernHUDFill(&element->config);
+	CG_ModernHUDDrawBorder(&element->config);
 
 	if (element->ctx.image)
 	{
-		CG_SHUDDrawStretchPic(element->ctx.coord, element->ctx.coordPicture, element->ctx.color, element->ctx.image);
+		CG_ModernHUDDrawStretchPic(element->ctx.coord, element->ctx.coordPicture, element->ctx.color, element->ctx.image);
 	}
 }
 
-void CG_SHUDElementFlagStatusDestroy(void* context)
+void CG_ModernHUDElementFlagStatusDestroy(void* context)
 {
 	if (context)
 	{

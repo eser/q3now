@@ -40,22 +40,22 @@ stereo sine for ~2 seconds.
 
 typedef struct
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	float            levels[WAVEFORM_BAR_COUNT];
-} shudElementAudioWaveform_t;
+} modernHudElementAudioWaveform_t;
 
-void *CG_SHUDElementAudioWaveformCreate( const superhudConfig_t *config )
+void *CG_ModernHUDElementAudioWaveformCreate( const modernhudConfig_t *config )
 {
-	shudElementAudioWaveform_t *element;
+	modernHudElementAudioWaveform_t *element;
 
-	SHUD_ELEMENT_INIT( element, config );
+	ModernHUD_ELEMENT_INIT( element, config );
 
 	return element;
 }
 
-void CG_SHUDElementAudioWaveformRoutine( void *context )
+void CG_ModernHUDElementAudioWaveformRoutine( void *context )
 {
-	shudElementAudioWaveform_t *element = (shudElementAudioWaveform_t *)context;
+	modernHudElementAudioWaveform_t *element = (modernHudElementAudioWaveform_t *)context;
 	float  x, y, w, h;
 	float  barWidth;
 	float  baseY;
@@ -67,8 +67,8 @@ void CG_SHUDElementAudioWaveformRoutine( void *context )
 	vec4_t redColor   = { 0.95f, 0.35f, 0.30f, 0.95f };
 
 	/* Paint the element background + border if the author set one. */
-	CG_SHUDFill( &element->config );
-	CG_SHUDDrawBorder( &element->config );
+	CG_ModernHUDFill( &element->config );
+	CG_ModernHUDDrawBorder( &element->config );
 
 	x = element->config.rect.value[0];
 	y = element->config.rect.value[1];
@@ -108,12 +108,12 @@ void CG_SHUDElementAudioWaveformRoutine( void *context )
 		baseColor[3] = 0.50f;
 	}
 	{
-		superhudCoord_t baseline;
+		modernhudCoord_t baseline;
 		baseline.named.x = x;
 		baseline.named.y = y + h - 1.0f;
 		baseline.named.w = w;
 		baseline.named.h = 1.0f;
-		CG_SHUDFillWithColor( &baseline, baseColor );
+		CG_ModernHUDFillWithColor( &baseline, baseColor );
 	}
 
 	/* Draw each bar from left (oldest) to right (newest). The RMS
@@ -125,7 +125,7 @@ void CG_SHUDElementAudioWaveformRoutine( void *context )
 		float level = element->levels[i] * WAVEFORM_GAIN;
 		float barH;
 		float bx;
-		superhudCoord_t bar;
+		modernhudCoord_t bar;
 		float *color;
 
 		if ( level < 0.0f )
@@ -151,11 +151,11 @@ void CG_SHUDElementAudioWaveformRoutine( void *context )
 		else
 			color = greenColor;
 
-		CG_SHUDFillWithColor( &bar, color );
+		CG_ModernHUDFillWithColor( &bar, color );
 	}
 }
 
-void CG_SHUDElementAudioWaveformDestroy( void *context )
+void CG_ModernHUDElementAudioWaveformDestroy( void *context )
 {
 	if ( context )
 	{

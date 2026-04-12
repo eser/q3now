@@ -29,8 +29,6 @@ Skill scaling:
 #include "ai_main.h"
 #include "ai_dodge.h"
 
-#if FEAT_BOT_IMPROVEMENTS
-
 #define DODGE_LOOKAHEAD		0.7f	// seconds to predict ahead
 #define DODGE_NUM_DIRS		9		// 8 cardinal + maintain heading
 #define DODGE_BEST_DIRS		3		// pick from N safest directions
@@ -259,7 +257,7 @@ void BotDodgeMovement( struct bot_state_s *bs )
 	VectorCopy( dodgeDirs[chosen], bs->dodge_dir );
 	bs->dodge_active = qtrue;
 
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	// emit dodge event for QUIC observer
 	{
 		int wp = 0;
@@ -271,5 +269,3 @@ void BotDodgeMovement( struct bot_state_s *bs )
 	}
 #endif
 }
-
-#endif // FEAT_BOT_IMPROVEMENTS

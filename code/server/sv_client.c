@@ -22,7 +22,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // sv_client.c -- server code for dealing with clients
 
 #include "server.h"
-#include "../wired/net/wn_public.h"
+#include "../qcommon/wired/net/wn_public.h"
+
+/* WiredNet bootstrap is a reliable QUIC stream — no UDP MTU limit.
+ * Size must hold all configstrings + entity baselines for the largest maps.
+ * 256 KB covers q3dm7-scale maps (typical usage < 64 KB). */
+#define WN_BOOTSTRAP_MAX (256 * 1024)
 
 static void SV_CloseDownload( client_t *cl );
 
@@ -1164,14 +1169,17 @@ static void SV_SendClientGameState( client_t *client ) {
 
 	// deliver this to the client
 	if ( client->quic_conn != CONN_INVALID && transport ) {
-		byte bootbuf[MAX_MSGLEN];
+		byte *bootbuf = (byte *)Z_Malloc( WN_BOOTSTRAP_MAX );
 		int bootlen = 0;
 		/* WiredNet QUIC client: send typed bootstrap sections on the reliable
-		 * bootstrap channel. */
-		if ( !SV_WiredNetWriteBootstrap( client, bootbuf, sizeof( bootbuf ), &bootlen ) ) {
+		 * bootstrap channel. Buffer is heap-allocated: reliable QUIC stream has
+		 * no UDP MTU limit, so we can pack all configstrings + baselines. */
+		if ( !SV_WiredNetWriteBootstrap( client, bootbuf, WN_BOOTSTRAP_MAX, &bootlen ) ) {
+			Z_Free( bootbuf );
 			Com_Error( ERR_DROP, "WiredNet bootstrap overflow" );
 		}
 		transport->send_reliable( client->quic_conn, CHAN_BOOTSTRAP, bootbuf, bootlen );
+		Z_Free( bootbuf );
 		return;
 	}
 

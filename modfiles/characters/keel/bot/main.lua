@@ -50,14 +50,14 @@ return {
   },
 
   attacks = {
-    "rl1",   -- rocket: primary destruction tool
-    "lg1",   -- lightning: sustained heavy DPS
-    "gl1",   -- grenades: area saturation
-    "rl2",   -- mortar: long-range harassment
-    "rg1",   -- rail: methodical long shots
-    "sg1",   -- shotgun: close-range punish
-    "pr1",   -- plasma: suppression spray
-    "mg1",
+    { "rl1", aim_height = 0  },  -- rocket: primary destruction tool, aim at feet
+    { "lg1", aim_height = 28 },  -- lightning: sustained heavy DPS
+    { "gl1", aim_height = 0  },  -- grenades: area saturation, aim at feet
+    { "rl2", aim_height = 0  },  -- mortar: long-range harassment, aim at feet
+    { "rg1", aim_height = 36 },  -- rail: methodical long shots
+    { "sg1", aim_height = 28 },  -- shotgun: close-range punish
+    { "pr1", aim_height = 28 },  -- plasma: suppression spray
+    { "mg1", aim_height = 28 },
   },
 
   items = {

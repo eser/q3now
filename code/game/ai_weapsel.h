@@ -8,8 +8,6 @@ ai_weapsel.h — DPS-based weapon selection for bot AI improvements
 
 #include "../qcommon/q_feats.h"
 
-#if FEAT_BOT_IMPROVEMENTS
-
 struct bot_state_s;
 
 // update per-weapon accuracy stats after combat (called each frame during combat)
@@ -22,5 +20,4 @@ void BotChooseWeaponDPS( struct bot_state_s *bs );
 // return combat zone index (ZONE_NEAR..ZONE_VERYFAR) for a given distance
 int BotCombatZone( float dist );
 
-#endif // FEAT_BOT_IMPROVEMENTS
 #endif // AI_WEAPSEL_H

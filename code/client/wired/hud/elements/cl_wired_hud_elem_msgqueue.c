@@ -22,24 +22,24 @@ Messages display one at a time with fade-in (300ms) and fade-out (500ms).
 #define MSGQ_FADE_OUT_MS  500
 
 typedef struct {
-	superhudConfig_t config;
-} shudElementMsgQueue_t;
+	modernhudConfig_t config;
+} modernHudElementMsgQueue_t;
 
-void *CG_SHUDElementMsgQueueCreate( const superhudConfig_t *config ) {
-	shudElementMsgQueue_t *element;
-	SHUD_ELEMENT_INIT( element, config );
+void *CG_ModernHUDElementMsgQueueCreate( const modernhudConfig_t *config ) {
+	modernHudElementMsgQueue_t *element;
+	ModernHUD_ELEMENT_INIT( element, config );
 	return element;
 }
 
 // find the highest-priority unshown entry in the queue
-static int MsgQueue_FindBest( superhudMsgQueue_t *q ) {
+static int MsgQueue_FindBest( modernhudMsgQueue_t *q ) {
 	int best = -1;
-	superhudMsgPriority_t bestPrio = SHUD_MSG_LOW;
+	modernhudMsgPriority_t bestPrio = ModernHUD_MSG_LOW;
 	int i;
 
 	for ( i = 0; i < q->writeIndex; i++ ) {
-		int idx = i % SHUD_MSG_QUEUE_SIZE;
-		superhudMsgEntry_t *e = &q->entries[idx];
+		int idx = i % ModernHUD_MSG_QUEUE_SIZE;
+		modernhudMsgEntry_t *e = &q->entries[idx];
 		if ( e->shown ) continue;
 		if ( !e->line1[0] ) continue;
 		if ( best < 0 || e->priority > bestPrio ) {
@@ -51,16 +51,16 @@ static int MsgQueue_FindBest( superhudMsgQueue_t *q ) {
 }
 
 // check if a higher-priority message arrived that should preempt current
-static qboolean MsgQueue_ShouldPreempt( superhudMsgQueue_t *q ) {
+static qboolean MsgQueue_ShouldPreempt( modernhudMsgQueue_t *q ) {
 	int i;
-	superhudMsgEntry_t *current;
+	modernhudMsgEntry_t *current;
 
 	if ( q->currentIndex < 0 ) return qfalse;
-	current = &q->entries[q->currentIndex % SHUD_MSG_QUEUE_SIZE];
+	current = &q->entries[q->currentIndex % ModernHUD_MSG_QUEUE_SIZE];
 
 	for ( i = q->currentIndex + 1; i < q->writeIndex; i++ ) {
-		int idx = i % SHUD_MSG_QUEUE_SIZE;
-		superhudMsgEntry_t *e = &q->entries[idx];
+		int idx = i % ModernHUD_MSG_QUEUE_SIZE;
+		modernhudMsgEntry_t *e = &q->entries[idx];
 		if ( e->shown ) continue;
 		if ( !e->line1[0] ) continue;
 		if ( e->priority > current->priority ) return qtrue;
@@ -68,11 +68,11 @@ static qboolean MsgQueue_ShouldPreempt( superhudMsgQueue_t *q ) {
 	return qfalse;
 }
 
-void CG_SHUDElementMsgQueueRoutine( void *context ) {
-	shudElementMsgQueue_t *element = (shudElementMsgQueue_t *)context;
-	superhudGlobalContext_t *gctx = CG_SHUDGetContext();
-	superhudMsgQueue_t *q = &gctx->msgQueue;
-	superhudMsgEntry_t *current;
+void CG_ModernHUDElementMsgQueueRoutine( void *context ) {
+	modernHudElementMsgQueue_t *element = (modernHudElementMsgQueue_t *)context;
+	modernhudGlobalContext_t *gctx = CG_ModernHUDGetContext();
+	modernhudMsgQueue_t *q = &gctx->msgQueue;
+	modernhudMsgEntry_t *current;
 	int now = wiredHud->time;
 	float alpha = 1.0f;
 
@@ -80,7 +80,7 @@ void CG_SHUDElementMsgQueueRoutine( void *context ) {
 
 	// currently showing something?
 	if ( q->showStartTime > 0 && q->currentIndex >= 0 ) {
-		current = &q->entries[q->currentIndex % SHUD_MSG_QUEUE_SIZE];
+		current = &q->entries[q->currentIndex % ModernHUD_MSG_QUEUE_SIZE];
 		int elapsed = now - q->showStartTime;
 		int displayTime = current->displayTime > 0 ? current->displayTime : 2500;
 
@@ -118,7 +118,7 @@ void CG_SHUDElementMsgQueueRoutine( void *context ) {
 
 	// render current message
 	if ( q->currentIndex < 0 ) return;
-	current = &q->entries[q->currentIndex % SHUD_MSG_QUEUE_SIZE];
+	current = &q->entries[q->currentIndex % ModernHUD_MSG_QUEUE_SIZE];
 	if ( !current->line1[0] ) return;
 	if ( alpha <= 0.0f ) return;
 
@@ -152,7 +152,7 @@ void CG_SHUDElementMsgQueueRoutine( void *context ) {
 	}
 }
 
-void CG_SHUDElementMsgQueueDestroy( void *context ) {
+void CG_ModernHUDElementMsgQueueDestroy( void *context ) {
 	if ( context ) Z_Free( context );
 }
 

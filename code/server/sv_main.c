@@ -23,7 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "server.h"
 #include "../qcommon/q_feats.h"
 
-#include "../wired/net/wn_public.h"
+#include "../qcommon/wired/net/wn_public.h"
 
 serverStatic_t	svs;				// persistant server info
 server_t		sv;					// local server
@@ -1341,9 +1341,10 @@ void SV_Frame( int msec ) {
 	// Timer-driven: retransmits, keepalives, idle timeouts.
 	// Data-driven: push game state datagrams + events to QUIC observers.
 	WN_FlushOutbound();
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	WN_SendDatagrams();
 	WN_PushEvents();
+	WN_TcpFrame();
 #endif
 #if FEAT_WIREDNET_CONTROL
 	WN_ProcessCommandQueue();

@@ -81,13 +81,13 @@ const char *WiredUI_ResolveSymbol( const char *name ); // returns "???" if not f
 
 // ── element registration (called from cgame via trap) ─────────────────
 //
-// HUD elements are the SuperHUD element types (fps, weaponlist, etc.)
+// HUD elements are the ModernHUD element types (fps, weaponlist, etc.)
 // that .hud files reference via the hudElement keyword.
 //
 // Example:
-//   WiredUI_RegisterElement("fps", &CG_SHUDElementFPSCreate,
-//                                   &CG_SHUDElementFPSRoutine,
-//                                   &CG_SHUDElementFPSDestroy);
+//   WiredUI_RegisterElement("fps", &CG_ModernHUDElementFPSCreate,
+//                                   &CG_ModernHUDElementFPSRoutine,
+//                                   &CG_ModernHUDElementFPSDestroy);
 //
 // In a .hud file:
 //   itemDef { hudElement "fps" rect 620 2 0 0 ... }
@@ -152,7 +152,7 @@ void                     WiredUI_RegisterCorePopulateCallbacks( void );
 // After this call, the client can safely parse .hud files.
 
 void     WiredUI_RegisterCoreSymbols( void );     // batch: health, armor, ammo, etc.
-void     WiredUI_RegisterCoreElements( void );    // batch: all 167 SuperHUD element types
+void     WiredUI_RegisterCoreElements( void );    // batch: all 167 ModernHUD element types
 
 // ── types ─────────────────────────────────────────────────────────────
 
@@ -282,7 +282,7 @@ typedef struct wiredItemDef_s {
 	int             fontWeight;             // requested weight (fontweight)
 	float           letterSpacing;          // extra pixels between glyphs ("letterspacing")
 
-	// SuperHUD-specific properties (Phase 3: hudElement items)
+	// ModernHUD-specific properties (Phase 3: hudElement items)
 	char            fontName[MAX_QPATH];    // font name ("sansman", "id", etc.)
 	vec2_t          fontSize;               // fontsize W H (separate from textscale)
 	int             direction;              // 0=L2R, 1=R2L, 2=T2B, 3=B2T
@@ -293,7 +293,7 @@ typedef struct wiredItemDef_s {
 	vec4_t          fadeColor;              // fade target color
 	int             fadeDelay;              // ms before fade starts
 	int             timeMs;                 // element display duration (ms)
-	char            image[MAX_QPATH];       // image/shader name (SuperHUD "image" keyword)
+	char            image[MAX_QPATH];       // image/shader name (ModernHUD "image" keyword)
 	char            bind[32];               // data binding name ("health", "armor", "ammo")
 
 	// Legacy ITEM_TYPE_MODEL support (Phase 2 rendering parity)

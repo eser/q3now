@@ -8,26 +8,26 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementPlayerName;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementPlayerName;
 
-void* CG_SHUDElementPlayerNameCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementPlayerNameCreate(const modernhudConfig_t* config)
 {
-	shudElementPlayerName* element;
+	modernHudElementPlayerName* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
 
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementPlayerNameRoutine(void* context)
+void CG_ModernHUDElementPlayerNameRoutine(void* context)
 {
-	shudElementPlayerName* element = (shudElementPlayerName*)context;
+	modernHudElementPlayerName* element = (modernHudElementPlayerName*)context;
 
 	char textBuffer[MAX_QPATH];
 
@@ -44,11 +44,11 @@ void CG_SHUDElementPlayerNameRoutine(void* context)
 
 	element->ctx.text = textBuffer;
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
 
-void CG_SHUDElementPlayerNameDestroy(void* context)
+void CG_ModernHUDElementPlayerNameDestroy(void* context)
 {
 	if (context)
 	{

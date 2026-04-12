@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // this file holds commands that can be executed by the server console, but not remote clients
 
 #include "g_local.h"
+#include "wired/bots/g_wiredbots.h"
 
 
 /*
@@ -460,6 +461,33 @@ static void Svcmd_Q3nowEngine_f( void ) {
     G_Printf( "com_maxfps:  %s\n", buf );
 }
 
+// Called by the MCP bot_say tool via Cbuf_ExecuteText("bot_say_console ...").
+// Passes the message to WiredBots with senderClient = -1 (console authority),
+// which bypasses BotAuthorizeOrder team checks and targets all bots.
+static void Svcmd_BotSayConsole_f( void ) {
+	const char     *msg;
+	wbParseResult_t result;
+
+	if ( trap_Argc() < 2 ) {
+		G_Printf( "Usage: bot_say_console <message>\n" );
+		return;
+	}
+
+	msg = ConcatArgs( 1 );
+	if ( !msg || !msg[0] ) return;
+
+	/* Default ACK — overwritten by BotReceiveDirective if a bot accepts/rejects */
+	trap_Cvar_Set( "wiredbot_ack", "no @mention matched any active bot" );
+
+	WiredBots_ProcessChat( -1, msg, &result );
+
+	/* If an @mention was parsed but no bot client matched the name, say so */
+	if ( result.hasMentions && result.numRecipients == 0 ) {
+		trap_Cvar_Set( "wiredbot_ack",
+		               va( "no active bot named '%s'", result.recipientMention ) );
+	}
+}
+
 qboolean	ConsoleCommand( void ) {
 	char	cmd[MAX_TOKEN_CHARS];
 
@@ -510,6 +538,22 @@ qboolean	ConsoleCommand( void ) {
 		return qtrue;
 	}
 
+	if ( Q_stricmp( cmd, "bot_order" ) == 0 ) {
+		char botname[MAX_NETNAME];
+		if ( trap_Argc() < 3 ) {
+			G_Printf( "Usage: bot_order <botname> <order>\n" );
+			return qtrue;
+		}
+		trap_Argv( 1, botname, sizeof( botname ) );
+		BotDirective_ConsoleOrder( botname, ConcatArgs( 2 ) );
+		return qtrue;
+	}
+
+	if ( Q_stricmp( cmd, "bot_say_console" ) == 0 ) {
+		Svcmd_BotSayConsole_f();
+		return qtrue;
+	}
+
 	if (g_dedicated.integer) {
 		if (Q_stricmp (cmd, "say") == 0) {
 			trap_SendServerCommand( -1, va("print \"server: %s\n\"", ConcatArgs(1) ) );
@@ -522,4 +566,3 @@ qboolean	ConsoleCommand( void ) {
 
 	return qfalse;
 }
-

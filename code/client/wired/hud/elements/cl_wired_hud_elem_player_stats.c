@@ -9,14 +9,14 @@
 #if FEAT_WIRED_UI
 
 typedef struct {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
 	int mode;  // 0=DG, 1=DR, 2=DG icon, 3=DR icon, 4=ratio
-} shudElementPlayerStats_t;
+} modernHudElementPlayerStats_t;
 
-static void *PlayerStats_Create( const superhudConfig_t *config, int mode ) {
-	shudElementPlayerStats_t *element;
-	SHUD_ELEMENT_INIT( element, config );
+static void *PlayerStats_Create( const modernhudConfig_t *config, int mode ) {
+	modernHudElementPlayerStats_t *element;
+	ModernHUD_ELEMENT_INIT( element, config );
 	element->mode = mode;
 
 	if ( mode <= 1 || mode == 4 ) {
@@ -24,21 +24,21 @@ static void *PlayerStats_Create( const superhudConfig_t *config, int mode ) {
 			element->config.text.isSet = qtrue;
 			Q_strncpyz( element->config.text.value, "%i", sizeof( element->config.text.value ) );
 		}
-		CG_SHUDTextMakeContext( &element->config, &element->ctx );
-		CG_SHUDFillAndFrameForText( &element->config, &element->ctx );
+		CG_ModernHUDTextMakeContext( &element->config, &element->ctx );
+		CG_ModernHUDFillAndFrameForText( &element->config, &element->ctx );
 	}
 
 	return element;
 }
 
-void *CG_SHUDElementCreatePlayerStatsDG( const superhudConfig_t *config )          { return PlayerStats_Create( config, 0 ); }
-void *CG_SHUDElementCreatePlayerStatsDR( const superhudConfig_t *config )          { return PlayerStats_Create( config, 1 ); }
-void *CG_SHUDElementCreatePlayerStatsDGIcon( const superhudConfig_t *config )      { return PlayerStats_Create( config, 2 ); }
-void *CG_SHUDElementCreatePlayerStatsDRIcon( const superhudConfig_t *config )      { return PlayerStats_Create( config, 3 ); }
-void *CG_SHUDElementCreatePlayerStatsDamageRatio( const superhudConfig_t *config ) { return PlayerStats_Create( config, 4 ); }
+void *CG_ModernHUDElementCreatePlayerStatsDG( const modernhudConfig_t *config )          { return PlayerStats_Create( config, 0 ); }
+void *CG_ModernHUDElementCreatePlayerStatsDR( const modernhudConfig_t *config )          { return PlayerStats_Create( config, 1 ); }
+void *CG_ModernHUDElementCreatePlayerStatsDGIcon( const modernhudConfig_t *config )      { return PlayerStats_Create( config, 2 ); }
+void *CG_ModernHUDElementCreatePlayerStatsDRIcon( const modernhudConfig_t *config )      { return PlayerStats_Create( config, 3 ); }
+void *CG_ModernHUDElementCreatePlayerStatsDamageRatio( const modernhudConfig_t *config ) { return PlayerStats_Create( config, 4 ); }
 
-void CG_SHUDElementPlayerStatsRoutine( void *context ) {
-	shudElementPlayerStats_t *element = (shudElementPlayerStats_t *)context;
+void CG_ModernHUDElementPlayerStatsRoutine( void *context ) {
+	modernHudElementPlayerStats_t *element = (modernHudElementPlayerStats_t *)context;
 	int i, totalDG = 0, totalKills = 0, totalDeaths = 0;
 	float ratio;
 
@@ -53,23 +53,23 @@ void CG_SHUDElementPlayerStatsRoutine( void *context ) {
 
 	switch ( element->mode ) {
 		case 0: // DG — damage given
-			if ( totalDG <= 0 && !SHUD_CHECK_SHOW_EMPTY( element ) ) return;
+			if ( totalDG <= 0 && !ModernHUD_CHECK_SHOW_EMPTY( element ) ) return;
 			element->ctx.text = va( element->config.text.value, totalDG );
-			CG_SHUDTextPrint( &element->config, &element->ctx );
+			CG_ModernHUDTextPrint( &element->config, &element->ctx );
 			break;
 
 		case 1: // DR — damage received (deaths × 100 as proxy)
 		{
 			int dr = totalDeaths * 100;  // rough proxy since exact DR isn't tracked
-			if ( dr <= 0 && !SHUD_CHECK_SHOW_EMPTY( element ) ) return;
+			if ( dr <= 0 && !ModernHUD_CHECK_SHOW_EMPTY( element ) ) return;
 			element->ctx.text = va( element->config.text.value, dr );
-			CG_SHUDTextPrint( &element->config, &element->ctx );
+			CG_ModernHUDTextPrint( &element->config, &element->ctx );
 			break;
 		}
 
 		case 2: // DG icon
 		case 3: // DR icon
-			CG_SHUDFill( &element->config );
+			CG_ModernHUDFill( &element->config );
 			break;
 
 		case 4: // damage ratio (DG / DR)
@@ -81,13 +81,13 @@ void CG_SHUDElementPlayerStatsRoutine( void *context ) {
 				ratio = ( totalDG > 0 ) ? 99.9f : 0.0f;
 			}
 			element->ctx.text = va( "%.1f", ratio );
-			CG_SHUDTextPrint( &element->config, &element->ctx );
+			CG_ModernHUDTextPrint( &element->config, &element->ctx );
 			break;
 		}
 	}
 }
 
-void CG_SHUDElementPlayerStatsDestroy( void *context ) {
+void CG_ModernHUDElementPlayerStatsDestroy( void *context ) {
 	if ( context ) {
 		Z_Free( context );
 	}

@@ -43,7 +43,10 @@ int smallchar_height;
 
 /* ── Text_Draw console metrics ────────────────────────────────────── */
 
-static float con_textPointSize = 0;     /* real-pixel size for FONT_MONO */
+cvar_t		*con_lineheight;
+
+static float con_textPointSize = 0;                    /* real-pixel size for FONT_MONO (glyph height) */
+static float con_lineAdvance   = SMALLCHAR_HEIGHT;     /* line-to-line advance = con_textPointSize * con_lineheight */
 static float con_textCharWidth = 0;     /* monospace width in real pixels */
 static float con_textNativeCharW = 0;   /* monospace width in real screen pixels */
 
@@ -61,6 +64,7 @@ static void Con_UpdateTextMetrics( void ) {
 
 	/* smallchar_height is already in real screen pixels */
 	con_textPointSize = (float)smallchar_height;
+	con_lineAdvance   = con_textPointSize * ( con_lineheight ? con_lineheight->value : 1.0f );
 
 	/* measure a monospace character for grid width (real pixels) */
 	con_textCharWidth = Text_Measure( "M", FONT_MONO, con_textPointSize );
@@ -402,7 +406,7 @@ void Con_CheckResize( void )
 	int		vispage;
 	float	scale;
 
-	if ( con.viswidth == cls.glconfig.vidWidth && !con_scale->modified ) {
+	if ( con.viswidth == cls.glconfig.vidWidth && !con_scale->modified && !con_lineheight->modified ) {
 		return;
 	}
 
@@ -442,7 +446,7 @@ void Con_CheckResize( void )
 		if ( width > MAX_CONSOLE_WIDTH )
 			width = MAX_CONSOLE_WIDTH;
 
-		vispage = cls.glconfig.vidHeight / ( smallchar_height * 2 ) - 1;
+		vispage = cls.glconfig.vidHeight / ( (int)con_lineAdvance * 2 ) - 1;
 
 		if ( old_vispage == vispage && old_width == width )
 			return;
@@ -491,6 +495,7 @@ void Con_CheckResize( void )
 	con.display = con.current;
 
 	con_scale->modified = qfalse;
+	con_lineheight->modified = qfalse;
 }
 
 
@@ -660,7 +665,7 @@ void Con_Init( void )
 		Com_Memset( s_con, 0, sizeof( console_t ) );
 	}
 
-	con_notifytime = Cvar_Get( "con_notifytime", "3", 0 );
+	con_notifytime = Cvar_Get( "con_notifytime", "5", 0 );
 	Cvar_SetDescription( con_notifytime, "Defines how long messages (from players or the system) are on the screen (in seconds)." );
 	con_conspeed = Cvar_Get( "scr_conspeed", "3", 0 );
 	Cvar_SetDescription( con_conspeed, "Console opening/closing scroll speed." );
@@ -669,6 +674,9 @@ void Con_Init( void )
 	con_scale = Cvar_Get( "con_scale", "1", CVAR_ARCHIVE_ND );
 	Cvar_CheckRange( con_scale, "0.5", "8", CV_FLOAT );
 	Cvar_SetDescription( con_scale, "Console font size scale." );
+	con_lineheight = Cvar_Get( "con_lineheight", "1", CVAR_ARCHIVE_ND );
+	Cvar_CheckRange( con_lineheight, "0.5", "4", CV_FLOAT );
+	Cvar_SetDescription( con_lineheight, "Notify/console line height multiplier (1.0 = tight, 2.0 = double-spaced)." );
 
 	/* CNQ3 backport: per-element console colors */
 	con_colBG     = Cvar_Get( "con_colBG",     "101013F6", CVAR_ARCHIVE );
@@ -845,6 +853,9 @@ void CL_ConsolePrint( const char *txt ) {
 		con_scale = &null_cvar;
 		con_scale->value = 1.0f;
 		con_scale->modified = qtrue;
+		con_lineheight = &null_cvar;
+		con_lineheight->value = 1.0f;
+		con_lineheight->modified = qtrue;
 		Con_CheckResize();
 		con.initialized = qtrue;
 	}
@@ -937,7 +948,7 @@ static void Con_DrawInput( void ) {
 		return;
 	}
 
-	y = con.vislines - ( smallchar_height * 3 );
+	y = con.vislines - ( (int)con_lineAdvance * 3 );
 
 	cw = con_textNativeCharW;
 	vcw = con_textCharWidth;
@@ -1053,7 +1064,7 @@ static void Con_DrawInput( void ) {
 				if ( tokenStartCharOffset >= 0 && highlightColor != NULL ) {
 					float tx = con.xadjust + (2 + tokenStartCharOffset) * cw;
 					float tw = tokLen * cw;
-					float ty = y + smallchar_height - 2;
+					float ty = y + (int)con_textPointSize - 2;
 					re.SetColor( highlightColor );
 					re.DrawStretchPic( tx, ty, tw, 2, 0, 0, 1, 1, cls.whiteShader );
 					re.SetColor( NULL );
@@ -1062,7 +1073,7 @@ static void Con_DrawInput( void ) {
 
 			/* draw the help panel one line below the input */
 			if ( tokLen > 0 && Help_LookupText( token, helpText, sizeof( helpText ) ) ) {
-				float hy = (float)( y + smallchar_height + 2 );
+				float hy = (float)( y + (int)con_lineAdvance + 2 );
 				float hvy = Con_NativeToVirtualY( hy );
 				int hi;
 				int hLen = (int)strlen( helpText );
@@ -1138,7 +1149,7 @@ static void Con_DrawNotify( void )
 			}
 		}
 
-		v += smallchar_height;
+		v += (int)con_lineAdvance;
 	}
 
 	re.SetColor( NULL );
@@ -1269,7 +1280,7 @@ static void Con_DrawSolidConsole( float frac ) {
 	{
 		float verVX = Con_NativeToVirtualX( (float)cls.glconfig.vidWidth
 		              - ( ARRAY_LEN( Q3NOW_ENGINE_VERSION ) ) * con_textNativeCharW );
-		float verVY = Con_NativeToVirtualY( (float)(lines - smallchar_height) );
+		float verVY = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance) );
 		Text_Draw( Q3NOW_ENGINE_VERSION, verVX, verVY, FONT_MONO,
 		           con_textPointSize, colorWhite, TEXT_ALIGN_LEFT, 0 );
 	}
@@ -1278,7 +1289,7 @@ static void Con_DrawSolidConsole( float frac ) {
 	con.vislines = lines;
 	rows = lines / smallchar_width - 1;	// rows of text to draw
 
-	y = lines - (smallchar_height * 4);
+	y = lines - ((int)con_lineAdvance * 4);
 
 	row = con.display;
 
@@ -1294,14 +1305,14 @@ static void Con_DrawSolidConsole( float frac ) {
 			for ( x = 0 ; x < con.linewidth ; x += 4 )
 				Text_DrawChar( '^', vxa + (x+1)*vcw, vy,
 				               FONT_MONO, con_textPointSize, g_color_table[ ColorIndex( COLOR_RED ) ] );
-			y -= smallchar_height;
+			y -= (int)con_lineAdvance;
 			row--;
 		}
 
 #ifdef USE_CURL
 		if ( download.progress[ 0 ] )
 		{
-			float dlVY = Con_NativeToVirtualY( (float)(lines - smallchar_height) );
+			float dlVY = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance) );
 			i = strlen( download.progress );
 			for ( x = 0 ; x < i ; x++ )
 			{
@@ -1311,7 +1322,7 @@ static void Con_DrawSolidConsole( float frac ) {
 		}
 #endif
 
-		for ( i = 0 ; i < rows ; i++, y -= smallchar_height, row-- )
+		for ( i = 0 ; i < rows ; i++, y -= (int)con_lineAdvance, row-- )
 		{
 			float vy;
 			if ( row < 0 )
@@ -1326,7 +1337,7 @@ static void Con_DrawSolidConsole( float frac ) {
 			if ( con.searchActive && con.searchLine >= 0 && row == con.searchLine ) {
 				static vec4_t searchBg = { 0.3f, 0.3f, 0.0f, 0.5f };
 				re.SetColor( searchBg );
-				re.DrawStretchPic( con.xadjust, y, wf, smallchar_height, 0, 0, 1, 1, cls.whiteShader );
+				re.DrawStretchPic( con.xadjust, y, wf, (int)con_lineAdvance, 0, 0, 1, 1, cls.whiteShader );
 			}
 
 			// mark-mode selection highlight: draw contiguous selected spans
@@ -1345,7 +1356,7 @@ static void Con_DrawSolidConsole( float frac ) {
 						float px = con.xadjust + (runStart + 1) * vcw;
 						float pw = (cx - runStart) * vcw;
 						re.SetColor( markBg );
-						re.DrawStretchPic( px, y, pw, smallchar_height,
+						re.DrawStretchPic( px, y, pw, (int)con_lineAdvance,
 						                   0, 0, 1, 1, cls.whiteShader );
 						runStart = -1;
 					}
@@ -1377,7 +1388,7 @@ static void Con_DrawSolidConsole( float frac ) {
 		if ( !WiredUI_IsHealthy() ) {
 			static const vec4_t colorOffline = { 1.0f, 0.85f, 0.0f, 1.0f };
 			float bx = Con_NativeToVirtualX( con.xadjust + con_textNativeCharW );
-			float by = Con_NativeToVirtualY( (float)(lines - smallchar_height) );
+			float by = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance) );
 			Text_Draw( "[WiredUI offline]  Press Escape or type 'wired_recover' to reload menus.",
 			           bx, by, FONT_MONO, con_textPointSize, colorOffline, TEXT_ALIGN_LEFT, 0 );
 		}
@@ -1386,7 +1397,7 @@ static void Con_DrawSolidConsole( float frac ) {
 			if ( failTime != 0 && ( cls.realtime - failTime ) < 3000 ) {
 				static const vec4_t colorFail = { 1.0f, 0.25f, 0.2f, 1.0f };
 				float bx = Con_NativeToVirtualX( con.xadjust + con_textNativeCharW );
-				float by = Con_NativeToVirtualY( (float)(lines - smallchar_height * 2) );
+				float by = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance * 2) );
 				Text_Draw( "[WiredUI reload failed.  Type 'wired_reload' or 'wired_recover' to retry.]",
 				           bx, by, FONT_MONO, con_textPointSize, colorFail, TEXT_ALIGN_LEFT, 0 );
 			}

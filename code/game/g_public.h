@@ -396,20 +396,21 @@ typedef enum {
 	BOTLIB_PC_READ_TOKEN,
 	BOTLIB_PC_SOURCE_FILE_AND_LINE,
 
-	BOTLUA_LOAD_CHARACTER = 710,
-	BOTLUA_FREE_CHARACTER,
-	BOTLUA_CHARACTERISTIC_FLOAT,
-	BOTLUA_CHARACTERISTIC_BFLOAT,
-	BOTLUA_CHARACTERISTIC_INTEGER,
-	BOTLUA_CHARACTERISTIC_BINTEGER,
-	BOTLUA_CHARACTERISTIC_STRING,
-	BOTLUA_BIND_BOT,
-	BOTLUA_BOT_THINK,
-	BOTLUA_BOT_PROFILE_FIELD,
-	BOTLUA_BOT_PICK_WEAPON,
-	BOTLUA_BOT_EVAL_ITEM,
-	BOTLUA_BOT_DECIDE,
-	BOTLUA_BOT_ON_CHAT,
+	WB_LOAD_CHARACTER = 710,
+	WB_FREE_CHARACTER,
+	WB_CHARACTERISTIC_FLOAT,
+	WB_CHARACTERISTIC_BFLOAT,
+	WB_CHARACTERISTIC_INTEGER,
+	WB_CHARACTERISTIC_BINTEGER,
+	WB_CHARACTERISTIC_STRING,
+	WB_BIND_BOT,
+	WB_BOT_THINK,
+	WB_BOT_PROFILE_FIELD,
+	WB_BOT_PICK_WEAPON,
+	WB_BOT_GET_ATTACK_AIM_HEIGHT,
+	WB_BOT_EVAL_ITEM,
+	WB_BOT_DECIDE,
+	WB_BOT_ON_CHAT,
 
 	// engine extensions
 	G_CVAR_SETDESCRIPTION,
@@ -418,7 +419,7 @@ typedef enum {
 	// ── QUIC transport event emission (q3now extension) ──────────
 	// Game code calls these via syscall traps to emit structured
 	// events to the QUIC event stream. Only functional when
-	// FEAT_WIREDNET_OBSERVE is enabled; otherwise handled as no-ops.
+	// FEAT_WIREDNET_OBSERVER is enabled; otherwise handled as no-ops.
 	G_WIREDNET_EMIT_KILL = 800,        // ( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos )
 	G_WIREDNET_EMIT_DAMAGE,            // ( int attacker, int victim, int damage, int mod, vec3_t att_pos, vec3_t vic_pos )
 	G_WIREDNET_EMIT_ITEM_PICKUP,       // ( int client, const char *item, vec3_t pos )

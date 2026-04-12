@@ -17,21 +17,21 @@ cgame computes the percentage and color — client just draws the bar.
 #if FEAT_WIRED_UI
 
 typedef struct {
-	superhudConfig_t    config;
-	superhudBarContext_t ctx;
-} shudElementStatusbarBar_t;
+	modernhudConfig_t    config;
+	modernhudBarContext_t ctx;
+} modernHudElementStatusbarBar_t;
 
-void *CG_SHUDElementStatusbarBarCreate( const superhudConfig_t *config ) {
-	shudElementStatusbarBar_t *element;
+void *CG_ModernHUDElementStatusbarBarCreate( const modernhudConfig_t *config ) {
+	modernHudElementStatusbarBar_t *element;
 
-	SHUD_ELEMENT_INIT( element, config );
-	CG_SHUDBarMakeContext( &element->config, &element->ctx, 100 );
+	ModernHUD_ELEMENT_INIT( element, config );
+	CG_ModernHUDBarMakeContext( &element->config, &element->ctx, 100 );
 
 	return element;
 }
 
-void CG_SHUDElementStatusbarBarRoutine( void *context ) {
-	shudElementStatusbarBar_t *element = (shudElementStatusbarBar_t *)context;
+void CG_ModernHUDElementStatusbarBarRoutine( void *context ) {
+	modernHudElementStatusbarBar_t *element = (modernHudElementStatusbarBar_t *)context;
 
 	if ( !element->config.bind.isSet ) return;
 
@@ -43,10 +43,10 @@ void CG_SHUDElementStatusbarBarRoutine( void *context ) {
 		Com_sprintf( pctKey, sizeof( pctKey ), "player.%s.percent", element->config.bind.value );
 		storeEntry = WiredStore_Get( pctKey );
 		if ( storeEntry ) {
-			CG_SHUDFill( &element->config );
-			CG_SHUDDrawBorder( &element->config );
+			CG_ModernHUDFill( &element->config );
+			CG_ModernHUDDrawBorder( &element->config );
 			/* bar uses its own forecolor from .hud, store provides fill percentage (0-1) */
-			CG_SHUDBarPrint( &element->config, &element->ctx, storeEntry->value * 100.0f );
+			CG_ModernHUDBarPrint( &element->config, &element->ctx, storeEntry->value * 100.0f );
 			return;
 		}
 	}
@@ -58,15 +58,15 @@ void CG_SHUDElementStatusbarBarRoutine( void *context ) {
 		binding = WiredHud_FindBinding( element->config.bind.value );
 		if ( !binding || !binding->visible ) return;
 
-		CG_SHUDFill( &element->config );
-		CG_SHUDDrawBorder( &element->config );
+		CG_ModernHUDFill( &element->config );
+		CG_ModernHUDDrawBorder( &element->config );
 		/* bar uses its own forecolor from .hud (typically white), NOT the binding color */
 		/* binding only provides the fill percentage */
-		CG_SHUDBarPrint( &element->config, &element->ctx, binding->percent * 100.0f );
+		CG_ModernHUDBarPrint( &element->config, &element->ctx, binding->percent * 100.0f );
 	}
 }
 
-void CG_SHUDElementStatusbarBarDestroy( void *context ) {
+void CG_ModernHUDElementStatusbarBarDestroy( void *context ) {
 	if ( context ) Z_Free( context );
 }
 

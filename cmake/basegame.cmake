@@ -57,6 +57,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/ai_dodge.c
     ${SOURCE_DIR}/game/ai_itemtime.c
     ${SOURCE_DIR}/game/ai_main.c
+    ${SOURCE_DIR}/game/ai_movement.c
     ${SOURCE_DIR}/game/ai_team.c
     ${SOURCE_DIR}/game/ai_vcmd.c
     ${SOURCE_DIR}/game/ai_weapsel.c
@@ -69,7 +70,8 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_active.c
     ${SOURCE_DIR}/game/g_arenas.c
     ${SOURCE_DIR}/game/g_bot.c
-    ${SOURCE_DIR}/game/g_bot_lua.c
+    ${SOURCE_DIR}/game/wired/bots/g_bot_scripts.c
+    ${SOURCE_DIR}/game/wired/bots/g_wiredbots.c
     ${SOURCE_DIR}/game/g_character.c
     ${SOURCE_DIR}/game/g_client.c
     ${SOURCE_DIR}/game/g_cmds.c
@@ -134,6 +136,7 @@ if(BUILD_GAME_LIBRARIES)
 
     add_library(                ${GAME_MODULE_BINARY_BASEGAME} SHARED ${GAME_SOURCES_BASEGAME} ${GAME_BINARY_SOURCES})
     target_compile_definitions( ${GAME_MODULE_BINARY_BASEGAME} PRIVATE QAGAME)
+    target_include_directories( ${GAME_MODULE_BINARY_BASEGAME} PRIVATE ${SOURCE_DIR}/game ${SOURCE_DIR}/botlib)
     target_link_libraries(      ${GAME_MODULE_BINARY_BASEGAME} PRIVATE ${COMMON_LIBRARIES})
     set_target_properties(      ${GAME_MODULE_BINARY_BASEGAME} PROPERTIES OUTPUT_NAME "${GAME_MODULE_BINARY}${_GAME_ARCH}" PREFIX "")
     set_output_dirs(            ${GAME_MODULE_BINARY_BASEGAME} SUBDIRECTORY ${BASEGAME})

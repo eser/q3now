@@ -8,26 +8,26 @@
 
 typedef struct
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	int timePrev;
-	superhudTextContext_t ctx;
-} shudElementGameType_t;
+	modernhudTextContext_t ctx;
+} modernHudElementGameType_t;
 
-void* CG_SHUDElementGameTypeCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementGameTypeCreate(const modernhudConfig_t* config)
 {
-	shudElementGameType_t* element;
+	modernHudElementGameType_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementGameTypeRoutine(void* context)
+void CG_ModernHUDElementGameTypeRoutine(void* context)
 {
-	shudElementGameType_t* element = (shudElementGameType_t*)context;
+	modernHudElementGameType_t* element = (modernHudElementGameType_t*)context;
 	char str[512];
 
 	int sec = cg.warmup;
@@ -74,10 +74,10 @@ void CG_SHUDElementGameTypeRoutine(void* context)
 		return;
 	}
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementGameTypeDestroy(void* context)
+void CG_ModernHUDElementGameTypeDestroy(void* context)
 {
 	if (context)
 	{

@@ -24,9 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "g_local.h"
 
-#if FEAT_BOT_IMPROVEMENTS
 void BotAutoCalibrate_RecordKill( int attacker, int victim );
-#endif
 
 /*
 ============
@@ -535,15 +533,13 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		killer, self->s.number, meansOfDeath, killerName,
 		self->client->pers.netname, obit );
 
-#if FEAT_BOT_IMPROVEMENTS
 	BotAutoCalibrate_RecordKill( killer, self->s.number );
-#endif
 
 #if FEAT_UNLAGGED
 	G_UnTimeShiftClient( self );
 #endif
 
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	// QUIC event: kill with positions for spatial-aware coaching
 	{
 		vec3_t att_pos = {0, 0, 0};
@@ -1256,7 +1252,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		targ->client->ps.stats[STAT_HEALTH] = targ->health;
 	}
 
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	// QUIC event: damage with positions
 	if ( take > 0 && attacker ) {
 		vec3_t att_pos = {0, 0, 0};

@@ -8,22 +8,22 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
 	qboolean enemy;
-} shudElementStatusbarTeamCount;
+} modernHudElementStatusbarTeamCount;
 
-void* CG_SHUDElementTeamCountCreate(const superhudConfig_t* config, qboolean enemy)
+void* CG_ModernHUDElementTeamCountCreate(const modernhudConfig_t* config, qboolean enemy)
 {
-	shudElementStatusbarTeamCount* element;
+	modernHudElementStatusbarTeamCount* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	//load defaults
 	if (!element->config.color.isSet)
 	{
 		element->config.color.isSet = qtrue;
-		element->config.color.value.type = SUPERHUD_COLOR_RGBA;
+		element->config.color.value.type = MODERNHUD_COLOR_RGBA;
 		Vector4Set(element->config.color.value.rgba, 1, 0.7, 0, 1);
 	}
 
@@ -33,27 +33,27 @@ void* CG_SHUDElementTeamCountCreate(const superhudConfig_t* config, qboolean ene
 		Q_strncpyz(element->config.text.value, "%i", sizeof(element->config.text.value));
 	}
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	element->enemy = enemy;
 
 	return element;
 }
 
-void* CG_SHUDElementTeamCountOWNCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeamCountOWNCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCountCreate(config, qfalse);
+	return CG_ModernHUDElementTeamCountCreate(config, qfalse);
 }
 
-void* CG_SHUDElementTeamCountNMECreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeamCountNMECreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCountCreate(config, qtrue);
+	return CG_ModernHUDElementTeamCountCreate(config, qtrue);
 }
 
-void CG_SHUDElementTeamCountRoutine(void* context)
+void CG_ModernHUDElementTeamCountRoutine(void* context)
 {
-	shudElementStatusbarTeamCount* element = (shudElementStatusbarTeamCount*)context;
+	modernHudElementStatusbarTeamCount* element = (modernHudElementStatusbarTeamCount*)context;
 	int count;
 
 	if ( !wiredHud->isTeamGame ) {
@@ -66,12 +66,12 @@ void CG_SHUDElementTeamCountRoutine(void* context)
 	if (count >= 0)
 	{
 		element->ctx.text = va(element->config.text.value, count);
-		CG_SHUDTextPrint(&element->config, &element->ctx);
+		CG_ModernHUDTextPrint(&element->config, &element->ctx);
 	}
 
 }
 
-void CG_SHUDElementTeamCountDestroy(void* context)
+void CG_ModernHUDElementTeamCountDestroy(void* context)
 {
 	if (context)
 	{

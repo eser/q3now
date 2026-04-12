@@ -50,13 +50,13 @@ return {
   },
 
   attacks = {
-    "rg1",   -- rail: defender's sniper shot
-    "rl1",   -- rocket: hold the area
-    "lg1",   -- lightning: punish rushers
-    "sg1",   -- shotgun: doorway defense
-    "gl1",   -- grenades: corridor traps
-    "pr1",   -- plasma: suppression
-    "mg1",
+    { "rg1", aim_height = 36 },  -- rail: defender's sniper shot
+    { "rl1", aim_height = 0  },  -- rocket: hold the area, aim at feet
+    { "lg1", aim_height = 28 },  -- lightning: punish rushers
+    { "sg1", aim_height = 28 },  -- shotgun: doorway defense
+    { "gl1", aim_height = 0  },  -- grenades: corridor traps, aim at feet
+    { "pr1", aim_height = 28 },  -- plasma: suppression
+    { "mg1", aim_height = 28 },
   },
 
   items = {

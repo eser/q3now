@@ -21,7 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "server.h"
-#include "../wired/net/wn_public.h"  /* WN_DATAGRAM_MTU, WN_FRAG_PAYLOAD, sv_snapshotTransport */
+#include "../qcommon/wired/net/wn_public.h"  /* WN_DATAGRAM_MTU, WN_FRAG_PAYLOAD, sv_snapshotTransport */
 
 
 /*

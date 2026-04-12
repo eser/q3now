@@ -1183,7 +1183,7 @@ static int CG_DrawPickupItem( int y ) {
 			CG_RegisterItemVisuals( value );
 			trap_R_SetColor( fadeColor );
 			CG_DrawPicNorm( 8 * NORM_HSCALE, y * NORM_VSCALE, ICON_SIZE * NORM_HSCALE, ICON_SIZE * NORM_VSCALE, cg_items[ value ].icon );
-			trap_R_DrawTextNorm( bg_itemlist[ value ].pickup_name, (float)(ICON_SIZE + 16) * NORM_HSCALE, (float)(y + (ICON_SIZE/2 - BIGCHAR_HEIGHT/2)) * NORM_VSCALE, FONT_DISPLAY, (float)BIGCHAR_HEIGHT * NORM_VSCALE, fadeColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
+			trap_R_DrawTextNorm( bg_itemlist[ value ].pickup_name, (float)(ICON_SIZE + 16) * NORM_HSCALE, (float)(y + (ICON_SIZE/2 - BIGCHAR_HEIGHT*3/4)) * NORM_VSCALE, FONT_DISPLAY, (float)(BIGCHAR_HEIGHT*3/2) * NORM_VSCALE, fadeColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 			trap_R_SetColor( NULL );
 		}
 	}
@@ -1654,10 +1654,10 @@ static void CG_DrawCenterString( void ) {
 		}
 		linebuffer[l] = 0;
 
-		w = (int)(trap_R_MeasureTextNorm( linebuffer, FONT_UI, (float)((int)(cg.centerPrintCharWidth * 1.5)) * NORM_VSCALE ) / NORM_HSCALE);
+		w = (int)(trap_R_MeasureTextNorm( linebuffer, FONT_UI, (float)((int)(cg.centerPrintCharWidth * 2.0)) * NORM_VSCALE ) / NORM_HSCALE);
 		x = ( 640 - w ) / 2;
-		trap_R_DrawTextNorm( linebuffer, (float)x * NORM_HSCALE, (float)y * NORM_VSCALE, FONT_UI, (float)((int)(cg.centerPrintCharWidth * 1.5)) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
-		y += cg.centerPrintCharWidth * 1.5;
+		trap_R_DrawTextNorm( linebuffer, (float)x * NORM_HSCALE, (float)y * NORM_VSCALE, FONT_UI, (float)((int)(cg.centerPrintCharWidth * 2.0)) * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
+		y += cg.centerPrintCharWidth * 2.0;
 		while ( *start && ( *start != '\n' ) ) {
 			start++;
 		}
@@ -2459,6 +2459,9 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 
 	// camp detection overlay (drawn before HUD so UI elements render on top)
 	CG_DrawCampOverlay();
+
+	// bot directive text above heads — must be 2D pass (after trap_R_RenderScene)
+	CG_Draw2DBotDirectives();
 
 /*
 	if (cg.cameraMode) {

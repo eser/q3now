@@ -601,7 +601,7 @@ void MSDF_ReregisterShaders( void )
 	}
 
 	if ( msdfFontCount > 0 ) {
-		Com_Printf( "MSDF_ReregisterShaders: re-registered %d font(s)\n", msdfFontCount );
+		Com_DPrintf( "MSDF_ReregisterShaders: re-registered %d font(s)\n", msdfFontCount );
 	}
 }
 
@@ -754,6 +754,14 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 			break;
 		}
 
+		/* handle newline — advance to next line */
+		if ( *p == '\n' ) {
+			curX = x;
+			y += font->lineHeight * pixelSize;
+			p++;
+			continue;
+		}
+
 		/* handle ^^ (literal caret) */
 		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
 			msdfGlyph_t *caretGlyph;
@@ -801,15 +809,17 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
                           const char *str, int maxChars, float letterSpacing )
 {
 	float       pixelSize;
-	float       width;
+	float       lineWidth;   /* accumulator for the current line */
+	float       maxWidth;    /* maximum width seen across all lines */
 	int         counted;
 	const char *p;
 
 	if ( !font || !font->loaded || !str || !str[0] ) return 0.0f;
 
 	pixelSize = MSDF_PointToPixels( size );
-	width = 0.0f;
-	counted = 0;
+	lineWidth = 0.0f;
+	maxWidth  = 0.0f;
+	counted   = 0;
 
 	for ( p = str; *p; ) {
 		int skip;
@@ -818,13 +828,21 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 			break;
 		}
 
+		/* newline: \n itself is zero-width; commit current line and reset */
+		if ( *p == '\n' ) {
+			if ( lineWidth > maxWidth ) maxWidth = lineWidth;
+			lineWidth = 0.0f;
+			p++;
+			continue;
+		}
+
 		/* ^^ literal caret */
 		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
 			msdfGlyph_t *caretGlyph = MSDF_FindGlyph( font, Q_COLOR_ESCAPE );
 			if ( caretGlyph ) {
-				width += caretGlyph->advance * pixelSize + letterSpacing;
+				lineWidth += caretGlyph->advance * pixelSize + letterSpacing;
 			} else {
-				width += 0.5f * pixelSize + letterSpacing;
+				lineWidth += 0.5f * pixelSize + letterSpacing;
 			}
 			counted++;
 			p += 2;
@@ -842,9 +860,9 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 		{
 			msdfGlyph_t *charGlyph = MSDF_FindGlyph( font, (unsigned char)*p );
 			if ( charGlyph ) {
-				width += charGlyph->advance * pixelSize + letterSpacing;
+				lineWidth += charGlyph->advance * pixelSize + letterSpacing;
 			} else {
-				width += 0.5f * pixelSize + letterSpacing;
+				lineWidth += 0.5f * pixelSize + letterSpacing;
 			}
 		}
 
@@ -852,7 +870,10 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 		p++;
 	}
 
-	return width;
+	/* commit the final line (no trailing \n required) */
+	if ( lineWidth > maxWidth ) maxWidth = lineWidth;
+
+	return maxWidth;
 }
 
 #endif /* FEAT_WIRED_UI */

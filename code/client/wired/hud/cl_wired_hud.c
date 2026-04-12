@@ -2,7 +2,7 @@
 ===========================================================================
 cl_wired_hud.c — Wired UI HUD: client-side element rendering
 
-Phase 3: SuperHUD elements run in the client. Game state is pushed by
+Phase 3: ModernHUD elements run in the client. Game state is pushed by
 cgame each frame via trap_WiredUI_PushHudState(). Elements read from
 the wiredHud global instead of cgame globals.
 ===========================================================================
@@ -19,7 +19,7 @@ extern void WiredHud_SyncCompat( void );
 
 
 // from cl_wired_hud_registry.c
-extern qboolean WiredHud_CreateElement( const char *name, const superhudConfig_t *config );
+extern qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *config );
 extern void     WiredHud_DestroyAllElements( void );
 extern void     WiredHud_RenderElements( void );
 extern int      WiredHud_GetElementCount( void );
@@ -39,24 +39,24 @@ wiredHudState_t *wiredHud = &wired_hudStateStorage;
 static qboolean wiredHud_elementsLoaded = qfalse;
 
 // from cl_wired_hud_compat.c
-extern superhudGlobalContext_t* CG_SHUDGetContext( void );
+extern modernhudGlobalContext_t* CG_ModernHUDGetContext( void );
 
 // ── event receiver (called from cl_cgame.c trap handler) ─────────────
 
 void WiredHud_ReceiveEvent( int type, const char *data ) {
-	superhudGlobalContext_t *ctx = CG_SHUDGetContext();
+	modernhudGlobalContext_t *ctx = CG_ModernHUDGetContext();
 	if ( !data ) return;
 
 	switch ( type ) {
 		case WIRED_EVENT_CHAT: {
-			int index = ctx->chat.index % SHUD_MAX_CHAT_LINES;
+			int index = ctx->chat.index % ModernHUD_MAX_CHAT_LINES;
 			Q_strncpyz( ctx->chat.line[index].message, data, MAX_SAY_TEXT );
 			ctx->chat.line[index].time = wiredHud->time;
 			ctx->chat.index++;
 			break;
 		}
 		case WIRED_EVENT_TEAMCHAT: {
-			int index = ctx->chat.index % SHUD_MAX_CHAT_LINES;
+			int index = ctx->chat.index % ModernHUD_MAX_CHAT_LINES;
 			Q_strncpyz( ctx->chat.line[index].message, data, MAX_SAY_TEXT );
 			ctx->chat.line[index].time = wiredHud->time;
 			ctx->chat.index++;
@@ -72,40 +72,40 @@ void WiredHud_ReceiveEvent( int type, const char *data ) {
 			break;
 		case WIRED_EVENT_FRAG_RANK: {
 			// combined frag+rank atomic pair — enqueue into message queue
-			int idx = ctx->msgQueue.writeIndex % SHUD_MSG_QUEUE_SIZE;
-			superhudMsgEntry_t *entry = &ctx->msgQueue.entries[idx];
+			int idx = ctx->msgQueue.writeIndex % ModernHUD_MSG_QUEUE_SIZE;
+			modernhudMsgEntry_t *entry = &ctx->msgQueue.entries[idx];
 			const char *sep = strchr( data, '|' );
 			if ( sep ) {
-				Q_strncpyz( entry->line1, data, MIN( (int)(sep - data) + 1, SHUD_MSG_MAX_LEN ) );
-				Q_strncpyz( entry->line2, sep + 1, SHUD_MSG_MAX_LEN );
+				Q_strncpyz( entry->line1, data, MIN( (int)(sep - data) + 1, ModernHUD_MSG_MAX_LEN ) );
+				Q_strncpyz( entry->line2, sep + 1, ModernHUD_MSG_MAX_LEN );
 			} else {
-				Q_strncpyz( entry->line1, data, SHUD_MSG_MAX_LEN );
+				Q_strncpyz( entry->line1, data, ModernHUD_MSG_MAX_LEN );
 				entry->line2[0] = '\0';
 			}
 			entry->arriveTime = wiredHud->time;
 			entry->displayTime = 2000;
-			entry->priority = SHUD_MSG_HIGH;
+			entry->priority = ModernHUD_MSG_HIGH;
 			entry->shown = qfalse;
 			ctx->msgQueue.writeIndex++;
 			break;
 		}
 		case WIRED_EVENT_CENTERPRINT: {
 			// center print — enqueue with NORMAL priority
-			int idx = ctx->msgQueue.writeIndex % SHUD_MSG_QUEUE_SIZE;
-			superhudMsgEntry_t *entry = &ctx->msgQueue.entries[idx];
-			Q_strncpyz( entry->line1, data, SHUD_MSG_MAX_LEN );
+			int idx = ctx->msgQueue.writeIndex % ModernHUD_MSG_QUEUE_SIZE;
+			modernhudMsgEntry_t *entry = &ctx->msgQueue.entries[idx];
+			Q_strncpyz( entry->line1, data, ModernHUD_MSG_MAX_LEN );
 			entry->line2[0] = '\0';
 			entry->arriveTime = wiredHud->time;
 			entry->displayTime = 3000;
-			entry->priority = SHUD_MSG_NORMAL;
+			entry->priority = ModernHUD_MSG_NORMAL;
 			entry->shown = qfalse;
 			ctx->msgQueue.writeIndex++;
 			break;
 		}
 		case WIRED_EVENT_AWARD: {
 			// format: "name|shader_path|count"
-			int idx = ctx->awards.writeIndex % SHUD_MAX_AWARD_QUEUE;
-			superhudAwardEntry_t *entry = &ctx->awards.entries[idx];
+			int idx = ctx->awards.writeIndex % ModernHUD_MAX_AWARD_QUEUE;
+			modernhudAwardEntry_t *entry = &ctx->awards.entries[idx];
 			const char *p = data;
 			const char *sep1, *sep2;
 
@@ -123,8 +123,8 @@ void WiredHud_ReceiveEvent( int type, const char *data ) {
 		}
 		case WIRED_EVENT_OBITUARY: {
 			// format: "attacker|target|mod|unfrozen"
-			int idx = ctx->obituaries.index % SHUD_MAX_OBITUARIES_LINES;
-			superhudObituariesEntry_t *entry = &ctx->obituaries.line[idx];
+			int idx = ctx->obituaries.index % ModernHUD_MAX_OBITUARIES_LINES;
+			modernhudObituariesEntry_t *entry = &ctx->obituaries.line[idx];
 			int attacker, target, mod, unfrozen;
 
 			if ( sscanf( data, "%d|%d|%d|%d", &attacker, &target, &mod, &unfrozen ) != 4 ) break;
@@ -187,7 +187,7 @@ const wiredHudBinding_t *WiredHud_FindBinding( const char *name ) {
 void WiredHud_Init( void ) {
 	Com_Memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
 	wiredHud_elementsLoaded = qfalse;
-	Com_Printf( "WiredHud: initialized (Phase 3)\n" );
+	Com_DPrintf( "WiredHud: initialized (Phase 3)\n" );
 }
 
 void WiredHud_Shutdown( void ) {
@@ -198,7 +198,7 @@ void WiredHud_Shutdown( void ) {
 
 // ── prototype FPS element ─────────────────────────────────────────────
 // Minimal fps counter to prove the state bridge + client rendering pipeline.
-// This will be replaced by the full SuperHUD element migration in Step 4.
+// This will be replaced by the full ModernHUD element migration in Step 4.
 
 #define WIREDHUD_FPS_FRAMES  4
 
@@ -215,7 +215,7 @@ static void WiredHud_DrawFps( int realtime ) {
 	float x, y, charSize;
 	vec4_t color = { 1.0f, 1.0f, 1.0f, 0.5f };
 
-	// fps calculation (same algorithm as SuperHUD fps element)
+	// fps calculation (same algorithm as ModernHUD fps element)
 	if ( wiredHudFps.timePrev == 0 ) {
 		wiredHudFps.timePrev = realtime;
 		return;
@@ -236,22 +236,22 @@ static void WiredHud_DrawFps( int realtime ) {
 
 	Com_sprintf( buf, sizeof( buf ), "%dfps", fps_int );
 
-	// draw below SuperHUD fps — using proper font system
+	// draw below ModernHUD fps — using proper font system
 	charSize = 8.0f;
 	x = (float)cls.glconfig.vidWidth - 2.0f;  // right-aligned
 	y = 16.0f;
 
-	// green tint to distinguish from SuperHUD's white fps
+	// green tint to distinguish from ModernHUD's white fps
 	color[0] = 0.2f; color[1] = 1.0f; color[2] = 0.4f; color[3] = 0.8f;
 
 	Text_Draw( buf, x, y, FONT_DISPLAY, charSize, color, TEXT_ALIGN_RIGHT, 0 );
 }
 
-// ── wiredItemDef_t → superhudConfig_t conversion ─────────────────────
-// Converts Wired UI parsed item properties to SuperHUD config format
+// ── wiredItemDef_t → modernhudConfig_t conversion ─────────────────────
+// Converts Wired UI parsed item properties to ModernHUD config format
 // so that elements can be created from .hud file definitions.
 
-static void WiredHud_ItemToConfig( const wiredItemDef_t *item, superhudConfig_t *cfg ) {
+static void WiredHud_ItemToConfig( const wiredItemDef_t *item, modernhudConfig_t *cfg ) {
 	Com_Memset( cfg, 0, sizeof( *cfg ) );
 
 	// rect
@@ -266,14 +266,14 @@ static void WiredHud_ItemToConfig( const wiredItemDef_t *item, superhudConfig_t 
 	// forecolor → color
 	if ( item->forecolor[3] > 0 ) {
 		cfg->color.isSet = qtrue;
-		cfg->color.value.type = SUPERHUD_COLOR_RGBA;
+		cfg->color.value.type = MODERNHUD_COLOR_RGBA;
 		Vector4Copy( item->forecolor, cfg->color.value.rgba );
 	}
 
 	// backcolor → bgcolor
 	if ( item->backcolor[3] > 0 ) {
 		cfg->bgcolor.isSet = qtrue;
-		cfg->bgcolor.value.type = SUPERHUD_COLOR_RGBA;
+		cfg->bgcolor.value.type = MODERNHUD_COLOR_RGBA;
 		Vector4Copy( item->backcolor, cfg->bgcolor.value.rgba );
 	}
 
@@ -291,7 +291,7 @@ static void WiredHud_ItemToConfig( const wiredItemDef_t *item, superhudConfig_t 
 	// textalign → textAlign (sentinel -1 = not set)
 	if ( item->textalign >= 0 ) {
 		cfg->textAlign.isSet = qtrue;
-		cfg->textAlign.value = (superhudAlignH_t)item->textalign;
+		cfg->textAlign.value = (modernhudAlignH_t)item->textalign;
 	}
 
 	// text
@@ -336,7 +336,7 @@ static void WiredHud_ItemToConfig( const wiredItemDef_t *item, superhudConfig_t 
 	// direction (bar direction: L2R, R2L, T2B, B2T)
 	if ( item->direction >= 0 ) {
 		cfg->direction.isSet = qtrue;
-		cfg->direction.value = (superhudDirection_t)item->direction;
+		cfg->direction.value = (modernhudDirection_t)item->direction;
 	}
 
 	// fill
@@ -352,14 +352,14 @@ static void WiredHud_ItemToConfig( const wiredItemDef_t *item, superhudConfig_t 
 	// color2
 	if ( item->color2[3] > 0 ) {
 		cfg->color2.isSet = qtrue;
-		cfg->color2.value.type = SUPERHUD_COLOR_RGBA;
+		cfg->color2.value.type = MODERNHUD_COLOR_RGBA;
 		Vector4Copy( item->color2, cfg->color2.value.rgba );
 	}
 
 	// alignV (sentinel -1 = not set)
 	if ( item->alignV >= 0 ) {
 		cfg->alignV.isSet = qtrue;
-		cfg->alignV.value = (superhudAlignV_t)item->alignV;
+		cfg->alignV.value = (modernhudAlignV_t)item->alignV;
 	}
 
 	// fade
@@ -395,7 +395,7 @@ static void WiredHud_ItemToConfig( const wiredItemDef_t *item, superhudConfig_t 
 
 // ── load HUD elements from hudOverlay menus ──────────────────────────
 // Scans all loaded menus with hudOverlay=1, finds items with hudElement
-// set, and creates SuperHUD elements from them.
+// set, and creates ModernHUD elements from them.
 
 void WiredHud_LoadFromMenus( void ) {
 	int menuCount = WiredUI_GetMenuCount();
@@ -403,14 +403,14 @@ void WiredHud_LoadFromMenus( void ) {
 	int created = 0;
 	int hudOverlayMenus = 0;
 
-	Com_Printf( "WiredHud: scanning %d menus for hudOverlay...\n", menuCount );
+	Com_DPrintf( "WiredHud: scanning %d menus for hudOverlay...\n", menuCount );
 
 	// iterate all loaded menus
 	for ( i = 0; i < menuCount; i++ ) {
 		wiredMenuDef_t *menu = WiredUI_GetMenuByIndex( i );
 		if ( !menu ) continue;
 
-		Com_Printf( "WiredHud: menu[%d] = '%s' hudOverlay=%d items=%d\n",
+		Com_DPrintf( "WiredHud: menu[%d] = '%s' hudOverlay=%d items=%d\n",
 			i, menu->name, menu->hudOverlay, menu->itemCount );
 
 		if ( !menu->hudOverlay ) {
@@ -418,14 +418,14 @@ void WiredHud_LoadFromMenus( void ) {
 		}
 
 		hudOverlayMenus++;
-		Com_Printf( "WiredHud: found hudOverlay menu '%s' with %d items\n", menu->name, menu->itemCount );
+		Com_DPrintf( "WiredHud: found hudOverlay menu '%s' with %d items\n", menu->name, menu->itemCount );
 
 		// this is a HUD overlay menu — create elements from its items
 		for ( j = 0; j < menu->itemCount; j++ ) {
 			wiredItemDef_t *item = menu->items[j];
 			if ( !item->hudElement[0] ) continue;
 
-			superhudConfig_t cfg;
+			modernhudConfig_t cfg;
 			WiredHud_ItemToConfig( item, &cfg );
 
 			if ( WiredHud_CreateElement( item->hudElement, &cfg ) ) {
@@ -436,7 +436,7 @@ void WiredHud_LoadFromMenus( void ) {
 		}
 	}
 
-	Com_Printf( "WiredHud: %d hudOverlay menus, %d elements created\n", hudOverlayMenus, created );
+	Com_DPrintf( "WiredHud: %d hudOverlay menus, %d elements created\n", hudOverlayMenus, created );
 	wiredHud_elementsLoaded = qtrue;
 }
 
@@ -449,13 +449,13 @@ void WiredHud_Routine( int realtime ) {
 	if ( !wiredHud_elementsLoaded ) {
 		WiredHud_LoadFromMenus();
 		wiredHud_elementsLoaded = qtrue;
-		Com_Printf( "WiredHud: %d elements active\n", WiredHud_GetElementCount() );
+		Com_DPrintf( "WiredHud: %d elements active\n", WiredHud_GetElementCount() );
 	}
 
 	// sync compat structs so element code sees cg.*/cgs.* patterns
 	WiredHud_SyncCompat();
 
-	// render all active HUD elements through SuperHUD lifecycle
+	// render all active HUD elements through ModernHUD lifecycle
 	WiredHud_RenderElements();
 
 	// scoreboard overlay — select and render gametype-specific scoreboard menu

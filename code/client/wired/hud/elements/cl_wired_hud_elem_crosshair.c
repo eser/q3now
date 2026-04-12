@@ -15,23 +15,23 @@ No game logic — armor classes, health formulas stay in cgame.
 #if FEAT_WIRED_UI
 
 typedef struct {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	qhandle_t        shader;
-} shudElementCrosshair_t;
+} modernHudElementCrosshair_t;
 
-void *CG_SHUDElementCrosshairCreate( const superhudConfig_t *config ) {
-	shudElementCrosshair_t *element;
+void *CG_ModernHUDElementCrosshairCreate( const modernhudConfig_t *config ) {
+	modernHudElementCrosshair_t *element;
 	int i;
 
-	SHUD_ELEMENT_INIT( element, config );
+	ModernHUD_ELEMENT_INIT( element, config );
 
 	element->shader = re.RegisterShader( "gfx/2d/crosshairMisc" );
 
 	return element;
 }
 
-void CG_SHUDElementCrosshairRoutine( void *context ) {
-	shudElementCrosshair_t *element = (shudElementCrosshair_t *)context;
+void CG_ModernHUDElementCrosshairRoutine( void *context ) {
+	modernHudElementCrosshair_t *element = (modernHudElementCrosshair_t *)context;
 	int idx;
 	qhandle_t shader;
 	float w, h, x, y;
@@ -59,7 +59,7 @@ void CG_SHUDElementCrosshairRoutine( void *context ) {
 	re.SetColor( NULL );
 }
 
-void CG_SHUDElementCrosshairDestroy( void *context ) {
+void CG_ModernHUDElementCrosshairDestroy( void *context ) {
 	if ( context ) {
 		Z_Free( context );
 	}

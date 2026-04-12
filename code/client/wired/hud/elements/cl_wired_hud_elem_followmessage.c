@@ -8,26 +8,26 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementFollowMessage_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementFollowMessage_t;
 
-void* CG_SHUDElementFollowMessageCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementFollowMessageCreate(const modernhudConfig_t* config)
 {
-	shudElementFollowMessage_t* element;
+	modernHudElementFollowMessage_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementFollowMessageRoutine(void* context)
+void CG_ModernHUDElementFollowMessageRoutine(void* context)
 {
-	shudElementFollowMessage_t* element = (shudElementFollowMessage_t*)context;
+	modernHudElementFollowMessage_t* element = (modernHudElementFollowMessage_t*)context;
 	const char* str;
 
 	if (!CG_IsFollowing())
@@ -38,10 +38,10 @@ void CG_SHUDElementFollowMessageRoutine(void* context)
 	str = cgs.clientinfo[cg.snap->ps.clientNum].name;
 	element->ctx.text = va("Following ^7%s", str);
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementFollowMessageDestroy(void* context)
+void CG_ModernHUDElementFollowMessageDestroy(void* context)
 {
 	if (context)
 	{

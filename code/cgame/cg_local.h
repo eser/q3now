@@ -446,6 +446,13 @@ typedef struct {
 #endif // FEAT_IQM
 } clientInfo_t;
 
+// Per-bot directive display state, populated from CS_BOTDIRECTIVES configstrings.
+// Mirrors the server-side directiveType_t enum (g_wiredbots.h) as raw ints.
+typedef struct {
+	int		type;				// directive type; 0 = none
+	char	targetName[64];		// display name ("Heavy Armor", "Keel", etc.)
+	int		updateTime;			// cg.time when last changed (for fade effects)
+} botDirectiveDisplay_t;
 
 // each WP_* weapon enum has an associated weaponInfo_t
 // that contains media references necessary to present the
@@ -1222,6 +1229,7 @@ extern	cg_t			cg;
 extern	centity_t		cg_entities[MAX_GENTITIES];
 extern	weaponInfo_t	cg_weapons[MAX_WEAPONS];
 extern	itemInfo_t		cg_items[MAX_ITEMS];
+extern	botDirectiveDisplay_t	cg_botDirectives[MAX_CLIENTS];
 extern	markPoly_t		cg_markPolys[MAX_MARK_POLYS];
 
 extern	vmCvar_t		cg_centertime;
@@ -1357,6 +1365,7 @@ extern	vmCvar_t		cg_fovAspectAdjust;
 extern	vmCvar_t		cg_viewbob;
 extern	vmCvar_t		cg_viewkick;
 extern	vmCvar_t		cg_drawSpeed;
+extern	vmCvar_t		cg_drawBotDirectives;
 extern	vmCvar_t		cg_hitSounds;
 #if FEAT_FOLLOW_KILLER
 extern	vmCvar_t		cg_followKiller;
@@ -1739,6 +1748,11 @@ void CG_DrawDuelScoreboard( void );
 //
 qboolean CG_ConsoleCommand( void );
 void CG_InitConsoleCommands( void );
+
+//
+// cg_players.c
+//
+void CG_Draw2DBotDirectives( void );
 
 //
 // cg_servercmds.c

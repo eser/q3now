@@ -9,28 +9,28 @@
 
 typedef enum
 {
-	SHUD_ELEMENT_SCORE_OWN,
-	SHUD_ELEMENT_SCORE_NME,
-	SHUD_ELEMENT_SCORE_MAX,
-} shudElementScoreType_t;
+	ModernHUD_ELEMENT_SCORE_OWN,
+	ModernHUD_ELEMENT_SCORE_NME,
+	ModernHUD_ELEMENT_SCORE_MAX,
+} modernHudElementScoreType_t;
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-	shudElementScoreType_t type;
-} shudElementScore;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+	modernHudElementScoreType_t type;
+} modernHudElementScore;
 
-static void* CG_SHUDElementScoreCreate(const superhudConfig_t* config, shudElementScoreType_t type)
+static void* CG_ModernHUDElementScoreCreate(const modernhudConfig_t* config, modernHudElementScoreType_t type)
 {
-	shudElementScore* element;
+	modernHudElementScore* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	if (!element->config.color.isSet)
 	{
 		element->config.color.isSet = qtrue;
-		element->config.color.value.type = SUPERHUD_COLOR_RGBA;
+		element->config.color.value.type = MODERNHUD_COLOR_RGBA;
 		Vector4Set(element->config.color.value.rgba, 1, 0.7, 0, 1);
 	}
 
@@ -40,39 +40,39 @@ static void* CG_SHUDElementScoreCreate(const superhudConfig_t* config, shudEleme
 		Q_strncpyz(element->config.text.value, "%i", sizeof(element->config.text.value));
 	}
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	element->type = type;
 
 	return element;
 }
 
-void* CG_SHUDElementScoreOWNCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementScoreOWNCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementScoreCreate(config, SHUD_ELEMENT_SCORE_OWN);
+	return CG_ModernHUDElementScoreCreate(config, ModernHUD_ELEMENT_SCORE_OWN);
 }
 
-void* CG_SHUDElementScoreNMECreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementScoreNMECreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementScoreCreate(config, SHUD_ELEMENT_SCORE_NME);
+	return CG_ModernHUDElementScoreCreate(config, ModernHUD_ELEMENT_SCORE_NME);
 }
 
-void* CG_SHUDElementScoreMAXCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementScoreMAXCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementScoreCreate(config, SHUD_ELEMENT_SCORE_MAX);
+	return CG_ModernHUDElementScoreCreate(config, ModernHUD_ELEMENT_SCORE_MAX);
 }
 
-static qboolean CG_SHUDScoresGetMax(int* scores)
+static qboolean CG_ModernHUDScoresGetMax(int* scores)
 {
 	*scores = cgs.scorelimit;
 
 	return *scores > 0;
 }
 
-static qboolean CG_SHUDScoresGetOWN(int* scores)
+static qboolean CG_ModernHUDScoresGetOWN(int* scores)
 {
-	int side = (int)CG_SHUDGetOurActiveTeam();
+	int side = (int)CG_ModernHUDGetOurActiveTeam();
 
 	switch (side)
 	{
@@ -91,9 +91,9 @@ static qboolean CG_SHUDScoresGetOWN(int* scores)
 	return qfalse;
 }
 
-static qboolean CG_SHUDScoresGetNME(int* scores)
+static qboolean CG_ModernHUDScoresGetNME(int* scores)
 {
-	int side = (int)CG_SHUDGetOurActiveTeam();
+	int side = (int)CG_ModernHUDGetOurActiveTeam();
 
 	switch (side)
 	{
@@ -118,9 +118,9 @@ static qboolean CG_SHUDScoresGetNME(int* scores)
 	return qfalse;
 }
 
-static qboolean CG_SHUDScoresShouldUseColor2(shudElementScoreType_t type)
+static qboolean CG_ModernHUDScoresShouldUseColor2(modernHudElementScoreType_t type)
 {
-	int side = (int)CG_SHUDGetOurActiveTeam();
+	int side = (int)CG_ModernHUDGetOurActiveTeam();
 	int playerScore;
 
 	if (side != 0 /* free */)
@@ -130,10 +130,10 @@ static qboolean CG_SHUDScoresShouldUseColor2(shudElementScoreType_t type)
 
 	switch (type)
 	{
-		case SHUD_ELEMENT_SCORE_OWN:
+		case ModernHUD_ELEMENT_SCORE_OWN:
 			return (playerScore == cgs.scores1);
 
-		case SHUD_ELEMENT_SCORE_NME:
+		case ModernHUD_ELEMENT_SCORE_NME:
 			return (cgs.scores1 != playerScore);
 
 		default:
@@ -141,31 +141,31 @@ static qboolean CG_SHUDScoresShouldUseColor2(shudElementScoreType_t type)
 	}
 }
 
-void CG_SHUDElementScoreRoutine(void* context)
+void CG_ModernHUDElementScoreRoutine(void* context)
 {
-	shudElementScore* element = (shudElementScore*)context;
+	modernHudElementScore* element = (modernHudElementScore*)context;
 	int scores;
 	qboolean result = qfalse;
 
 	switch (element->type)
 	{
-		case SHUD_ELEMENT_SCORE_OWN:
-			result = CG_SHUDScoresGetOWN(&scores);
+		case ModernHUD_ELEMENT_SCORE_OWN:
+			result = CG_ModernHUDScoresGetOWN(&scores);
 			break;
 
-		case SHUD_ELEMENT_SCORE_NME:
-			result = CG_SHUDScoresGetNME(&scores);
+		case ModernHUD_ELEMENT_SCORE_NME:
+			result = CG_ModernHUDScoresGetNME(&scores);
 
-			if (!result && SHUD_CHECK_SHOW_EMPTY(element) &&
-			        (int)CG_SHUDGetOurActiveTeam() == 0 /* free */)
+			if (!result && ModernHUD_CHECK_SHOW_EMPTY(element) &&
+			        (int)CG_ModernHUDGetOurActiveTeam() == 0 /* free */)
 			{
 				scores = 0;
 				result = qtrue;
 			}
 			break;
 
-		case SHUD_ELEMENT_SCORE_MAX:
-			result = CG_SHUDScoresGetMax(&scores);
+		case ModernHUD_ELEMENT_SCORE_MAX:
+			result = CG_ModernHUDScoresGetMax(&scores);
 			break;
 	}
 
@@ -174,19 +174,19 @@ void CG_SHUDElementScoreRoutine(void* context)
 
 	element->ctx.text = va(element->config.text.value, scores);
 
-	if (element->config.color2.isSet && CG_SHUDScoresShouldUseColor2(element->type))
+	if (element->config.color2.isSet && CG_ModernHUDScoresShouldUseColor2(element->type))
 	{
 		Vector4Copy(element->config.color2.value.rgba, element->ctx.color);
-		CG_SHUDTextPrintNew(&element->config, &element->ctx, qfalse);
+		CG_ModernHUDTextPrintNew(&element->config, &element->ctx, qfalse);
 	}
 	else
 	{
-		CG_SHUDTextPrint(&element->config, &element->ctx);
+		CG_ModernHUDTextPrint(&element->config, &element->ctx);
 	}
 }
 
 
-void CG_SHUDElementScoreDestroy(void* context)
+void CG_ModernHUDElementScoreDestroy(void* context)
 {
 	if (context)
 	{

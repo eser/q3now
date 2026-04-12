@@ -8,16 +8,16 @@
 #if FEAT_WIRED_UI
 
 typedef struct {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
 	qboolean isIcon;
 	float lastAcc;      // last displayed accuracy
 	int lastUpdateTime;  // when accuracy was last updated
-} shudElementTempAcc_t;
+} modernHudElementTempAcc_t;
 
-void *CG_SHUDElementTempAccTextCreate( const superhudConfig_t *config ) {
-	shudElementTempAcc_t *element;
-	SHUD_ELEMENT_INIT( element, config );
+void *CG_ModernHUDElementTempAccTextCreate( const modernhudConfig_t *config ) {
+	modernHudElementTempAcc_t *element;
+	ModernHUD_ELEMENT_INIT( element, config );
 	element->isIcon = qfalse;
 
 	if ( !element->config.text.isSet ) {
@@ -25,21 +25,21 @@ void *CG_SHUDElementTempAccTextCreate( const superhudConfig_t *config ) {
 		Q_strncpyz( element->config.text.value, "%i%%", sizeof( element->config.text.value ) );
 	}
 
-	CG_SHUDTextMakeContext( &element->config, &element->ctx );
-	CG_SHUDFillAndFrameForText( &element->config, &element->ctx );
+	CG_ModernHUDTextMakeContext( &element->config, &element->ctx );
+	CG_ModernHUDFillAndFrameForText( &element->config, &element->ctx );
 	return element;
 }
 
-void *CG_SHUDElementTempAccIconCreate( const superhudConfig_t *config ) {
-	shudElementTempAcc_t *element;
-	SHUD_ELEMENT_INIT( element, config );
+void *CG_ModernHUDElementTempAccIconCreate( const modernhudConfig_t *config ) {
+	modernHudElementTempAcc_t *element;
+	ModernHUD_ELEMENT_INIT( element, config );
 	element->isIcon = qtrue;
 	return element;
 }
 
-void CG_SHUDElementTempAccRoutine( void *context ) {
-	shudElementTempAcc_t *element = (shudElementTempAcc_t *)context;
-	superhudGlobalContext_t *ctx = CG_SHUDGetContext();
+void CG_ModernHUDElementTempAccRoutine( void *context ) {
+	modernHudElementTempAcc_t *element = (modernHudElementTempAcc_t *)context;
+	modernhudGlobalContext_t *ctx = CG_ModernHUDGetContext();
 	int wp;
 	float acc;
 	int fadeTime = 1500;  // fade after 3 seconds of no updates
@@ -61,7 +61,7 @@ void CG_SHUDElementTempAccRoutine( void *context ) {
 	// fade out after timeout
 	if ( element->lastUpdateTime == 0 ) return;
 	if ( wiredHud->time - element->lastUpdateTime > fadeTime ) {
-		if ( !SHUD_CHECK_SHOW_EMPTY( element ) ) return;
+		if ( !ModernHUD_CHECK_SHOW_EMPTY( element ) ) return;
 	}
 
 	if ( element->isIcon ) {
@@ -69,7 +69,7 @@ void CG_SHUDElementTempAccRoutine( void *context ) {
 		qhandle_t icon = cg_weapons[wp].weaponIcon;
 		if ( !icon ) return;
 
-		CG_SHUDFill( &element->config );
+		CG_ModernHUDFill( &element->config );
 
 		if ( element->config.rect.isSet ) {
 			float x = element->config.rect.value[0];
@@ -93,11 +93,11 @@ void CG_SHUDElementTempAccRoutine( void *context ) {
 		// draw accuracy percentage
 		int accPct = (int)( acc * 100.0f + 0.5f );
 		element->ctx.text = va( element->config.text.value, accPct );
-		CG_SHUDTextPrint( &element->config, &element->ctx );
+		CG_ModernHUDTextPrint( &element->config, &element->ctx );
 	}
 }
 
-void CG_SHUDElementTempAccDestroy( void *context ) {
+void CG_ModernHUDElementTempAccDestroy( void *context ) {
 	if ( context ) {
 		Z_Free( context );
 	}

@@ -509,33 +509,39 @@ void trap_EA_ResetInput(int client) {
 }
 
 int trap_BotLuaBindBot(int client, int characterHandle) {
-	return syscall( BOTLUA_BIND_BOT, client, characterHandle );
+	return syscall( WB_BIND_BOT, client, characterHandle );
 }
 
 int trap_BotLuaBotThink(int client, float thinktime) {
-	return syscall( BOTLUA_BOT_THINK, client, PASSFLOAT(thinktime) );
+	return syscall( WB_BOT_THINK, client, PASSFLOAT(thinktime) );
 }
 
 float trap_BotLuaBotProfileField(int client, int field) {
 	floatint_t fi;
-	fi.i = syscall( BOTLUA_BOT_PROFILE_FIELD, client, field );
+	fi.i = syscall( WB_BOT_PROFILE_FIELD, client, field );
 	return fi.f;
 }
 
-int trap_BotLuaBotPickWeapon(int client, const botLuaCombatCtx_t *ctx, char *weaponKey, int weaponKeySize) {
-	return syscall( BOTLUA_BOT_PICK_WEAPON, client, ctx, weaponKey, weaponKeySize );
+int trap_BotLuaBotPickWeapon(int client, const wbCombatCtx_t *ctx, char *weaponKey, int weaponKeySize) {
+	return syscall( WB_BOT_PICK_WEAPON, client, ctx, weaponKey, weaponKeySize );
 }
 
-int trap_BotLuaBotEvalItem(int client, const botLuaItemEvalCtx_t *ctx) {
-	return syscall( BOTLUA_BOT_EVAL_ITEM, client, ctx );
+float trap_BotLuaBotGetAttackAimHeight(int client, int weaponNum) {
+	floatint_t fi;
+	fi.i = syscall( WB_BOT_GET_ATTACK_AIM_HEIGHT, client, weaponNum );
+	return fi.f;
 }
 
-int trap_BotLuaBotDecide(int client, const botLuaDecideCtx_t *ctx, char *decision, int decisionSize) {
-	return syscall( BOTLUA_BOT_DECIDE, client, ctx, decision, decisionSize );
+int trap_BotLuaBotEvalItem(int client, const wbItemEvalCtx_t *ctx) {
+	return syscall( WB_BOT_EVAL_ITEM, client, ctx );
 }
 
-int trap_BotLuaBotOnChat(int client, const char *eventName, const botLuaChatCtx_t *ctx, char *outChat, int outChatSize) {
-	return syscall( BOTLUA_BOT_ON_CHAT, client, eventName, ctx, outChat, outChatSize );
+int trap_BotLuaBotDecide(int client, const wbDecideCtx_t *ctx, char *decision, int decisionSize) {
+	return syscall( WB_BOT_DECIDE, client, ctx, decision, decisionSize );
+}
+
+int trap_BotLuaBotOnChat(int client, const char *eventName, const wbChatCtx_t *ctx, char *outChat, int outChatSize) {
+	return syscall( WB_BOT_ON_CHAT, client, eventName, ctx, outChat, outChatSize );
 }
 
 static void Trap_BotFillWeaponInfoFromGame( int weapon, weaponinfo_t *weaponinfo ) {
@@ -628,7 +634,7 @@ int trap_BotLoadCharacter(char *charfile, float skill) {
 			luaSkill = ( luaSkill - 1.0f ) / 4.0f;
 		}
 		{
-			int handle = syscall( BOTLUA_LOAD_CHARACTER, characterName, PASSFLOAT(luaSkill) );
+			int handle = syscall( WB_LOAD_CHARACTER, characterName, PASSFLOAT(luaSkill) );
 			if ( handle > 0 ) {
 				return -handle;
 			}
@@ -640,7 +646,7 @@ int trap_BotLoadCharacter(char *charfile, float skill) {
 
 void trap_BotFreeCharacter(int character) {
 	if ( character < 0 ) {
-		syscall( BOTLUA_FREE_CHARACTER, -character );
+		syscall( WB_FREE_CHARACTER, -character );
 		return;
 	}
 	syscall( BOTLIB_AI_FREE_CHARACTER, character );
@@ -649,7 +655,7 @@ void trap_BotFreeCharacter(int character) {
 float trap_Characteristic_Float(int character, int index) {
 	floatint_t fi;
 	if ( character < 0 ) {
-		fi.i = syscall( BOTLUA_CHARACTERISTIC_FLOAT, -character, index );
+		fi.i = syscall( WB_CHARACTERISTIC_FLOAT, -character, index );
 		return fi.f;
 	}
 	fi.i = syscall( BOTLIB_AI_CHARACTERISTIC_FLOAT, character, index );
@@ -659,7 +665,7 @@ float trap_Characteristic_Float(int character, int index) {
 float trap_Characteristic_BFloat(int character, int index, float min, float max) {
 	floatint_t fi;
 	if ( character < 0 ) {
-		fi.i = syscall( BOTLUA_CHARACTERISTIC_BFLOAT, -character, index, PASSFLOAT(min), PASSFLOAT(max) );
+		fi.i = syscall( WB_CHARACTERISTIC_BFLOAT, -character, index, PASSFLOAT(min), PASSFLOAT(max) );
 		return fi.f;
 	}
 	fi.i = syscall( BOTLIB_AI_CHARACTERISTIC_BFLOAT, character, index, PASSFLOAT(min), PASSFLOAT(max) );
@@ -668,21 +674,21 @@ float trap_Characteristic_BFloat(int character, int index, float min, float max)
 
 int trap_Characteristic_Integer(int character, int index) {
 	if ( character < 0 ) {
-		return syscall( BOTLUA_CHARACTERISTIC_INTEGER, -character, index );
+		return syscall( WB_CHARACTERISTIC_INTEGER, -character, index );
 	}
 	return syscall( BOTLIB_AI_CHARACTERISTIC_INTEGER, character, index );
 }
 
 int trap_Characteristic_BInteger(int character, int index, int min, int max) {
 	if ( character < 0 ) {
-		return syscall( BOTLUA_CHARACTERISTIC_BINTEGER, -character, index, min, max );
+		return syscall( WB_CHARACTERISTIC_BINTEGER, -character, index, min, max );
 	}
 	return syscall( BOTLIB_AI_CHARACTERISTIC_BINTEGER, character, index, min, max );
 }
 
 void trap_Characteristic_String(int character, int index, char *buf, int size) {
 	if ( character < 0 ) {
-		syscall( BOTLUA_CHARACTERISTIC_STRING, -character, index, buf, size );
+		syscall( WB_CHARACTERISTIC_STRING, -character, index, buf, size );
 		return;
 	}
 	syscall( BOTLIB_AI_CHARACTERISTIC_STRING, character, index, buf, size );
@@ -1019,7 +1025,7 @@ int trap_PC_SourceFileAndLine( int handle, char *filename, int *line ) {
 }
 
 // ── QUIC transport event emission ────────────────────────────────
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 void trap_WiredNet_EmitKill( int attacker, int victim, int mod, vec3_t att_pos, vec3_t vic_pos ) {
 	syscall( G_WIREDNET_EMIT_KILL, attacker, victim, mod, att_pos, vic_pos );
 }
@@ -1046,9 +1052,7 @@ void trap_WiredNet_EmitDelag( int shooter, int target, int timeDelta, vec3_t sho
 }
 #endif
 
-#if FEAT_BOT_IMPROVEMENTS
 void trap_WiredNet_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos ) {
 	syscall( G_WIREDNET_EMIT_BOT_EVENT, bot_id, event_type, param1, param2, pos );
 }
-#endif
 #endif

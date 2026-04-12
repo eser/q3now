@@ -50,14 +50,14 @@ return {
   },
 
   attacks = {
-    "lg1",   -- lightning: primary damage tool
-    "rl1",   -- rocket: chaotic splash
-    "sg1",   -- shotgun: in-your-face opener
-    "sg2",   -- double blast: opening burst
-    "pr1",   -- plasma: spray suppression
-    "gl1",   -- grenades: chaotic lobbing
-    "mg1",
-    "rg1",   -- rail: rarely used, unpredictable
+    { "lg1", aim_height = 28 },  -- lightning: primary damage tool
+    { "rl1", aim_height = 0  },  -- rocket: chaotic splash, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: in-your-face opener
+    { "sg2", aim_height = 28 },  -- double blast: opening burst
+    { "pr1", aim_height = 28 },  -- plasma: spray suppression
+    { "gl1", aim_height = 0  },  -- grenades: chaotic lobbing, aim at feet
+    { "mg1", aim_height = 28 },
+    { "rg1", aim_height = 36 },  -- rail: rarely used, unpredictable
   },
 
   items = {

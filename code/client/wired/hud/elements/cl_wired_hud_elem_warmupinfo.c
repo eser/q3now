@@ -9,26 +9,26 @@
 
 typedef struct
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	int timePrev;
-	superhudTextContext_t ctx;
-} shudElementWarmupInfo_t;
+	modernhudTextContext_t ctx;
+} modernHudElementWarmupInfo_t;
 
-void* CG_SHUDElementWarmupInfoCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementWarmupInfoCreate(const modernhudConfig_t* config)
 {
-	shudElementWarmupInfo_t* element;
+	modernHudElementWarmupInfo_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementWarmupInfoRoutine(void* context)
+void CG_ModernHUDElementWarmupInfoRoutine(void* context)
 {
-	shudElementWarmupInfo_t* element = (shudElementWarmupInfo_t*)context;
+	modernHudElementWarmupInfo_t* element = (modernHudElementWarmupInfo_t*)context;
 	char str[256];
 
 	int sec = cg.warmup;
@@ -60,10 +60,10 @@ void CG_SHUDElementWarmupInfoRoutine(void* context)
 	{
 		return;
 	}
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementWarmupInfoDestroy(void* context)
+void CG_ModernHUDElementWarmupInfoDestroy(void* context)
 {
 	if (context)
 	{

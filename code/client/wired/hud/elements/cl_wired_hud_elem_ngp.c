@@ -8,25 +8,25 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementNGP_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementNGP_t;
 
-void* CG_SHUDElementNGPCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementNGPCreate(const modernhudConfig_t* config)
 {
-	shudElementNGP_t* element;
+	modernHudElementNGP_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementNGPRoutine(void* context)
+void CG_ModernHUDElementNGPRoutine(void* context)
 {
-	shudElementNGP_t* element = (shudElementNGP_t*)context;
+	modernHudElementNGP_t* element = (modernHudElementNGP_t*)context;
 	int ping;
 
 	if (cg.demoPlayback) return;
@@ -41,10 +41,10 @@ void CG_SHUDElementNGPRoutine(void* context)
 	}
 
 	element->ctx.text = va("%ims", ping);
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementNGPDestroy(void* context)
+void CG_ModernHUDElementNGPDestroy(void* context)
 {
 	if (context)
 	{

@@ -296,20 +296,20 @@ models/powerups/health/red_sphere
 
 // ── Lightning Gun Chain Arc beam shader ─────────────────────────────
 // Visually distinct from primary: bluer tint, more flicker, thinner appearance.
-// Uses existing gfx/misc/lightning1.tga — no new texture needed.
+// Uses existing gfx/misc/lightning1.jpg — no new texture needed.
 // Dual-pass additive with offset scroll creates crackling interference pattern.
 lightningArc
 {
 	cull none
 	{
-		map gfx/misc/lightning1.tga
+		map gfx/misc/lightning1.jpg
 		blendFunc GL_ONE GL_ONE
 		rgbGen wave inverseSawtooth 0 1 0 10
 		tcMod scroll 2.0 0
 		tcMod scale 1.5 1
 	}
 	{
-		map gfx/misc/lightning1.tga
+		map gfx/misc/lightning1.jpg
 		blendFunc GL_ONE GL_ONE
 		rgbGen wave sawtooth 0.3 0.7 0 7
 		tcMod scroll -3.0 0

@@ -8,8 +8,6 @@ ai_dodge.h — missile avoidance for bot AI improvements
 
 #include "../qcommon/q_feats.h"
 
-#if FEAT_BOT_IMPROVEMENTS
-
 // forward declaration
 struct bot_state_s;
 
@@ -25,5 +23,4 @@ float TrajectoryClosestDistSq( vec3_t p1, vec3_t v1,
                                vec3_t p2, vec3_t v2,
                                float lookahead );
 
-#endif // FEAT_BOT_IMPROVEMENTS
 #endif // AI_DODGE_H

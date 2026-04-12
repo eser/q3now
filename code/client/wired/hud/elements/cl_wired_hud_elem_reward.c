@@ -8,37 +8,37 @@
 
 typedef enum
 {
-	SHUD_REWARD_ICON,
-	SHUD_REWARD_COUNT,
-} shudRewardType_t;
+	ModernHUD_REWARD_ICON,
+	ModernHUD_REWARD_COUNT,
+} modernHudRewardType_t;
 
 typedef struct
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	union
 	{
-		superhudDrawContext_t d;
-		superhudTextContext_t t;
+		modernhudDrawContext_t d;
+		modernhudTextContext_t t;
 	} ctx;
-	shudRewardType_t type;
-} shudElementStatusbarRewards;
+	modernHudRewardType_t type;
+} modernHudElementStatusbarRewards;
 
-static void* CG_SHUDElementRewardCreate(const superhudConfig_t* config, shudRewardType_t type)
+static void* CG_ModernHUDElementRewardCreate(const modernhudConfig_t* config, modernHudRewardType_t type)
 {
-	shudElementStatusbarRewards* element;
+	modernHudElementStatusbarRewards* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	element->type = type;
 
-	if (type == SHUD_REWARD_ICON)
+	if (type == ModernHUD_REWARD_ICON)
 	{
-		CG_SHUDDrawMakeContext(&element->config, &element->ctx.d);
+		CG_ModernHUDDrawMakeContext(&element->config, &element->ctx.d);
 	}
 	else
 	{
-		CG_SHUDTextMakeContext(&element->config, &element->ctx.t);
-		CG_SHUDFillAndFrameForText(&element->config, &element->ctx.t);
+		CG_ModernHUDTextMakeContext(&element->config, &element->ctx.t);
+		CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx.t);
 	}
 
 	if (!element->config.text.isSet)
@@ -50,19 +50,19 @@ static void* CG_SHUDElementRewardCreate(const superhudConfig_t* config, shudRewa
 	return element;
 }
 
-void* CG_SHUDElementRewardIconCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementRewardIconCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementRewardCreate(config, SHUD_REWARD_ICON);
+	return CG_ModernHUDElementRewardCreate(config, ModernHUD_REWARD_ICON);
 }
 
-void* CG_SHUDElementRewardCountCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementRewardCountCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementRewardCreate(config, SHUD_REWARD_COUNT);
+	return CG_ModernHUDElementRewardCreate(config, ModernHUD_REWARD_COUNT);
 }
 
-void CG_SHUDElementRewardRoutine(void* context)
+void CG_ModernHUDElementRewardRoutine(void* context)
 {
-	shudElementStatusbarRewards* element = (shudElementStatusbarRewards*)context;
+	modernHudElementStatusbarRewards* element = (modernHudElementStatusbarRewards*)context;
 
 	int i;
 	float* color_origin;
@@ -73,7 +73,7 @@ void CG_SHUDElementRewardRoutine(void* context)
 		return;
 	}
 
-	if (element->type == SHUD_REWARD_ICON)
+	if (element->type == ModernHUD_REWARD_ICON)
 	{
 		color_origin = element->ctx.d.color_origin;
 		color = element->ctx.d.color;
@@ -84,7 +84,7 @@ void CG_SHUDElementRewardRoutine(void* context)
 		color = element->ctx.t.color;
 	}
 
-	if (!CG_SHUDGetFadeColor(color_origin, color, &element->config, cg.rewardTime))
+	if (!CG_ModernHUDGetFadeColor(color_origin, color, &element->config, cg.rewardTime))
 	{
 		if (cg.rewardStack > 0)
 		{
@@ -96,7 +96,7 @@ void CG_SHUDElementRewardRoutine(void* context)
 			}
 			cg.rewardTime = cg.time;
 			cg.rewardStack--;
-			CG_SHUDGetFadeColor(color_origin, color, &element->config, cg.rewardTime);
+			CG_ModernHUDGetFadeColor(color_origin, color, &element->config, cg.rewardTime);
 
 			if (!(cg_drawRewards.integer & DRAW_REWARDS_NOSOUND))
 			{
@@ -109,14 +109,14 @@ void CG_SHUDElementRewardRoutine(void* context)
 		}
 	}
 
-	if (element->type == SHUD_REWARD_ICON)
+	if (element->type == ModernHUD_REWARD_ICON)
 	{
 		if (!(cg_drawRewards.integer & DRAW_REWARDS_NOICON))
 		{
 			element->ctx.d.image = cg.rewardShader[0];
-			CG_SHUDFill(&element->config);
-			CG_SHUDDrawStretchPicCtx(&element->config, &element->ctx.d);
-			CG_SHUDDrawBorder(&element->config);
+			CG_ModernHUDFill(&element->config);
+			CG_ModernHUDDrawStretchPicCtx(&element->config, &element->ctx.d);
+			CG_ModernHUDDrawBorder(&element->config);
 		}
 	}
 	else
@@ -124,13 +124,13 @@ void CG_SHUDElementRewardRoutine(void* context)
 		if (cg.rewardCount[0] && !(cg_drawRewards.integer & DRAW_REWARDS_NOICON))
 		{
 			element->ctx.t.text = va(element->config.text.value, cg.rewardCount[0]);
-			CG_SHUDTextPrint(&element->config, &element->ctx.t);
+			CG_ModernHUDTextPrint(&element->config, &element->ctx.t);
 		}
 	}
 }
 
 
-void CG_SHUDElementRewardDestroy(void* context)
+void CG_ModernHUDElementRewardDestroy(void* context)
 {
 	if (context)
 	{

@@ -47,6 +47,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
 #include "ai_team.h"
+#include "wired/bots/g_wiredbots.h"
 //
 #include "chars.h"				//characteristics
 #include "inv.h"				//indexes into the inventory
@@ -402,7 +403,7 @@ int BotAddressedToBot(bot_state_t *bs, bot_match_t *match) {
 				trap_BotMatchVariable(&addresseematch, TEAMMATE, name, sizeof(name));
 				if (strlen(name)) {
 					if (stristr(botname, name)) return qtrue;
-					if (stristr(bs->subteam, name)) return qtrue;
+					if (stristr(bs->directives.subteam, name)) return qtrue;
 				}
 				trap_BotMatchVariable(&addresseematch, MORE, addressedto, MAX_MESSAGE_SIZE);
 			}
@@ -410,7 +411,7 @@ int BotAddressedToBot(bot_state_t *bs, bot_match_t *match) {
 				trap_BotMatchVariable(&addresseematch, TEAMMATE, name, MAX_MESSAGE_SIZE);
 				if (strlen(name)) {
 					if (stristr(botname, name)) return qtrue;
-					if (stristr(bs->subteam, name)) return qtrue;
+					if (stristr(bs->directives.subteam, name)) return qtrue;
 				}
 				break;
 			}
@@ -589,6 +590,7 @@ void BotMatch_HelpAccompany(bot_state_t *bs, bot_match_t *match) {
 		// remember last ordered task
 		BotRememberLastOrderedTask(bs);
 	}
+	BotDirective_IssueToDirect(bs, client, DIR_FOLLOW, bs->teammate, vec3_origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -637,6 +639,7 @@ void BotMatch_DefendKeyArea(bot_state_t *bs, bot_match_t *match) {
 	BotSetTeamStatus(bs);
 	// remember last ordered task
 	BotRememberLastOrderedTask(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_DEFEND_AREA, -1, bs->teamgoal.origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -677,6 +680,7 @@ void BotMatch_GetItem(bot_state_t *bs, bot_match_t *match) {
 	bs->teamgoal_time = FloatTime() + TEAM_GETITEM_TIME;
 	//
 	BotSetTeamStatus(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_SEEK_ITEM, -1, vec3_origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -769,6 +773,7 @@ void BotMatch_Camp(bot_state_t *bs, bot_match_t *match) {
 	BotSetTeamStatus(bs);
 	// remember last ordered task
 	BotRememberLastOrderedTask(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_CAMP_SPOT, -1, bs->teamgoal.origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -808,6 +813,7 @@ void BotMatch_Patrol(bot_state_t *bs, bot_match_t *match) {
 	BotSetTeamStatus(bs);
 	// remember last ordered task
 	BotRememberLastOrderedTask(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_PATROL, -1, vec3_origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -858,6 +864,9 @@ void BotMatch_GetFlag(bot_state_t *bs, bot_match_t *match) {
 	BotSetTeamStatus(bs);
 	// remember last ordered task
 	BotRememberLastOrderedTask(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_SEEK_ITEM, -1, vec3_origin);
+	Q_strncpyz(bs->directives.tactical.item_classname, "flag",
+	           sizeof(bs->directives.tactical.item_classname));
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -903,6 +912,7 @@ void BotMatch_AttackEnemyBase(bot_state_t *bs, bot_match_t *match) {
 	BotSetTeamStatus(bs);
 	// remember last ordered task
 	BotRememberLastOrderedTask(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_ATTACK_BASE, -1, vec3_origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -946,6 +956,7 @@ void BotMatch_Harvest(bot_state_t *bs, bot_match_t *match) {
 	BotSetTeamStatus(bs);
 	// remember last ordered task
 	BotRememberLastOrderedTask(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_HARVEST, -1, vec3_origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -991,6 +1002,7 @@ void BotMatch_RushBase(bot_state_t *bs, bot_match_t *match) {
 	bs->rushbaseaway_time = 0;
 	//
 	BotSetTeamStatus(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_RUSH_BASE, -1, vec3_origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -1007,7 +1019,7 @@ void BotMatch_TaskPreference(bot_state_t *bs, bot_match_t *match) {
 	int teammate, preference;
 
 	ClientName(bs->client, netname, sizeof(netname));
-	if (Q_stricmp(netname, bs->teamleader) != 0) return;
+	if (Q_stricmp(netname, bs->directives.teamleader) != 0) return;
 
 	trap_BotMatchVariable(match, NETNAME, teammatename, sizeof(teammatename));
 	teammate = ClientFromName(teammatename);
@@ -1075,6 +1087,7 @@ void BotMatch_ReturnFlag(bot_state_t *bs, bot_match_t *match) {
 	bs->rushbaseaway_time = 0;
 	//
 	BotSetTeamStatus(bs);
+	BotDirective_IssueToDirect(bs, client, DIR_RETURN_FLAG, -1, vec3_origin);
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -1096,7 +1109,7 @@ void BotMatch_JoinSubteam(bot_state_t *bs, bot_match_t *match) {
 	//get the sub team name
 	trap_BotMatchVariable(match, TEAMNAME, teammate, sizeof(teammate));
 	//set the sub team name
-	Q_strncpyz(bs->subteam, teammate, sizeof(bs->subteam));
+	Q_strncpyz(bs->directives.subteam, teammate, sizeof(bs->directives.subteam));
 	//
 	trap_BotMatchVariable(match, NETNAME, netname, sizeof(netname));
 	BotAI_BotInitialChat(bs, "joinedteam", teammate, NULL);
@@ -1117,14 +1130,14 @@ void BotMatch_LeaveSubteam(bot_state_t *bs, bot_match_t *match) {
 	//if not addressed to this bot
 	if (!BotAddressedToBot(bs, match)) return;
 	//
-	if (strlen(bs->subteam))
+	if (strlen(bs->directives.subteam))
 	{
-		BotAI_BotInitialChat(bs, "leftteam", bs->subteam, NULL);
+		BotAI_BotInitialChat(bs, "leftteam", bs->directives.subteam, NULL);
 		trap_BotMatchVariable(match, NETNAME, netname, sizeof(netname));
 		client = ClientFromName(netname);
 		trap_BotEnterChat(bs->cs, client, CHAT_TELL);
 	} //end if
-	strcpy(bs->subteam, "");
+	strcpy(bs->directives.subteam, "");
 }
 
 /*
@@ -1137,8 +1150,8 @@ void BotMatch_WhichTeam(bot_state_t *bs, bot_match_t *match) {
 	//if not addressed to this bot
 	if (!BotAddressedToBot(bs, match)) return;
 	//
-	if (strlen(bs->subteam)) {
-		BotAI_BotInitialChat(bs, "inteam", bs->subteam, NULL);
+	if (strlen(bs->directives.subteam)) {
+		BotAI_BotInitialChat(bs, "inteam", bs->directives.subteam, NULL);
 	}
 	else {
 		BotAI_BotInitialChat(bs, "noteam", NULL);
@@ -1287,14 +1300,14 @@ void BotMatch_StartTeamLeaderShip(bot_state_t *bs, bot_match_t *match) {
 	if (match->subtype & ST_I) {
 		//get the team mate that will be the team leader
 		trap_BotMatchVariable(match, NETNAME, teammate, sizeof(teammate));
-		Q_strncpyz(bs->teamleader, teammate, sizeof(bs->teamleader));
+		Q_strncpyz(bs->directives.teamleader, teammate, sizeof(bs->directives.teamleader));
 	}
 	//chats for someone else
 	else {
 		//get the team mate that will be the team leader
 		trap_BotMatchVariable(match, TEAMMATE, teammate, sizeof(teammate));
 		client = FindClientByName(teammate);
-		if (client >= 0) ClientName(client, bs->teamleader, sizeof(bs->teamleader));
+		if (client >= 0) ClientName(client, bs->directives.teamleader, sizeof(bs->directives.teamleader));
 	}
 }
 
@@ -1321,8 +1334,8 @@ void BotMatch_StopTeamLeaderShip(bot_state_t *bs, bot_match_t *match) {
 		client = FindClientByName(teammate);
 	} //end else
 	if (client >= 0) {
-		if (!Q_stricmp(bs->teamleader, ClientName(client, netname, sizeof(netname)))) {
-			bs->teamleader[0] = '\0';
+		if (!Q_stricmp(bs->directives.teamleader, ClientName(client, netname, sizeof(netname)))) {
+			bs->directives.teamleader[0] = '\0';
 			notleader[client] = qtrue;
 		}
 	}
@@ -1340,7 +1353,7 @@ void BotMatch_WhoIsTeamLeader(bot_state_t *bs, bot_match_t *match) {
 
 	ClientName(bs->client, netname, sizeof(netname));
 	//if this bot IS the team leader
-	if (!Q_stricmp(netname, bs->teamleader)) {
+	if (!Q_stricmp(netname, bs->directives.teamleader)) {
 		trap_EA_SayTeam(bs->client, "I'm the team leader\n");
 	}
 }
@@ -1450,7 +1463,7 @@ void BotMatch_WhatIsMyCommand(bot_state_t *bs, bot_match_t *match) {
 	char netname[MAX_NETNAME];
 
 	ClientName(bs->client, netname, sizeof(netname));
-	if (Q_stricmp(netname, bs->teamleader) != 0) return;
+	if (Q_stricmp(netname, bs->directives.teamleader) != 0) return;
 	bs->forceorders = qtrue;
 }
 
@@ -1679,6 +1692,12 @@ void BotMatch_Kill(bot_state_t *bs, bot_match_t *match) {
 	bs->teamgoal_time = FloatTime() + TEAM_KILL_SOMEONE;
 	//
 	BotSetTeamStatus(bs);
+	{
+		char killissuername[MAX_MESSAGE_SIZE];
+		trap_BotMatchVariable(match, NETNAME, killissuername, sizeof(killissuername));
+		BotDirective_IssueToDirect(bs, ClientOnSameTeamFromName(bs, killissuername),
+		                           DIR_KILL_TARGET, client, vec3_origin);
+	}
 #ifdef DEBUG
 	BotPrintTeamGoal(bs);
 #endif //DEBUG
@@ -1755,7 +1774,7 @@ void BotMatch_NewLeader(bot_state_t *bs, bot_match_t *match) {
 	client = FindClientByName(netname);
 	if (!BotSameTeam(bs, client))
 		return;
-	Q_strncpyz(bs->teamleader, netname, sizeof(bs->teamleader));
+	Q_strncpyz(bs->directives.teamleader, netname, sizeof(bs->directives.teamleader));
 }
 
 /*

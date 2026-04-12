@@ -7,126 +7,126 @@
 
 #if FEAT_WIRED_UI
 
-enum shudPWType
+enum modernHudPWType
 {
-	SHUDPWTYPE_TIME,
-	SHUDPWTYPE_ICON,
+	ModernHUDPWTYPE_TIME,
+	ModernHUDPWTYPE_ICON,
 };
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t textCtx;
-	superhudDrawContext_t drawCtx;
-	enum shudPWType pwType;
+	modernhudConfig_t config;
+	modernhudTextContext_t textCtx;
+	modernhudDrawContext_t drawCtx;
+	enum modernHudPWType pwType;
 	int pwIndex;
-} shudElementPowerupContext;
+} modernHudElementPowerupContext;
 
-static void* CG_SHUDElementPwCreate(const superhudConfig_t* config, enum shudPWType pwType, int pwIndex)
+static void* CG_ModernHUDElementPwCreate(const modernhudConfig_t* config, enum modernHudPWType pwType, int pwIndex)
 {
-	shudElementPowerupContext* element;
+	modernHudElementPowerupContext* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	element->pwType = pwType;
 	element->pwIndex = pwIndex;
 
-	if (pwType == SHUDPWTYPE_TIME)
+	if (pwType == ModernHUDPWTYPE_TIME)
 	{
-		CG_SHUDTextMakeContext(&element->config, &element->textCtx);
-		CG_SHUDFillAndFrameForText(&element->config, &element->textCtx);
+		CG_ModernHUDTextMakeContext(&element->config, &element->textCtx);
+		CG_ModernHUDFillAndFrameForText(&element->config, &element->textCtx);
 	}
 	else
 	{
-		CG_SHUDDrawMakeContext(&element->config, &element->drawCtx);
+		CG_ModernHUDDrawMakeContext(&element->config, &element->drawCtx);
 	}
 
 	return element;
 }
 
-void* CG_SHUDElementPwTime1Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwTime1Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_TIME, 1);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 1);
 }
 
-void* CG_SHUDElementPwTime2Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwTime2Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_TIME, 2);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 2);
 }
 
-void* CG_SHUDElementPwTime3Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwTime3Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_TIME, 3);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 3);
 }
 
-void* CG_SHUDElementPwTime4Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwTime4Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_TIME, 4);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 4);
 }
 
-void* CG_SHUDElementPwTime5Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwTime5Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_TIME, 5);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 5);
 }
 
-void* CG_SHUDElementPwTime6Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwTime6Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_TIME, 6);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 6);
 }
 
-void* CG_SHUDElementPwTime7Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwTime7Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_TIME, 7);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 7);
 }
 
-void* CG_SHUDElementPwTime8Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwTime8Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_TIME, 8);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 8);
 }
 
-void* CG_SHUDElementPwIcon1Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwIcon1Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 1);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 1);
 }
 
-void* CG_SHUDElementPwIcon2Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwIcon2Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 2);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 2);
 }
 
-void* CG_SHUDElementPwIcon3Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwIcon3Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 3);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 3);
 }
 
-void* CG_SHUDElementPwIcon4Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwIcon4Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 4);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 4);
 }
 
-void* CG_SHUDElementPwIcon5Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwIcon5Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 5);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 5);
 }
 
-void* CG_SHUDElementPwIcon6Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwIcon6Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 6);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 6);
 }
 
-void* CG_SHUDElementPwIcon7Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwIcon7Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 7);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 7);
 }
 
-void* CG_SHUDElementPwIcon8Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementPwIcon8Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementPwCreate(config, SHUDPWTYPE_ICON, 8);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 8);
 }
 
-void CG_SHUDElementPwRoutine(void* context)
+void CG_ModernHUDElementPwRoutine(void* context)
 {
-	shudElementPowerupContext* element = (shudElementPowerupContext*)context;
+	modernHudElementPowerupContext* element = (modernHudElementPowerupContext*)context;
 	int maxPW;
 	int idx;
 
@@ -140,25 +140,25 @@ void CG_SHUDElementPwRoutine(void* context)
 		return;
 	}
 
-	CG_SHUDFill(&element->config);
-	CG_SHUDDrawBorder(&element->config);
+	CG_ModernHUDFill(&element->config);
+	CG_ModernHUDDrawBorder(&element->config);
 
-	if (element->pwType == SHUDPWTYPE_TIME)
+	if (element->pwType == ModernHUDPWTYPE_TIME)
 	{
 		if (!wiredHud->activePowerups[idx].isHoldable)
 		{
 			element->textCtx.text = va("%d", wiredHud->activePowerups[idx].timeLeft);
-			CG_SHUDTextPrint(&element->config, &element->textCtx);
+			CG_ModernHUDTextPrint(&element->config, &element->textCtx);
 		}
 	}
 	else
 	{
 		element->drawCtx.image = wiredHud->activePowerups[idx].icon;
-		CG_SHUDDrawStretchPicCtx(&element->config, &element->drawCtx);
+		CG_ModernHUDDrawStretchPicCtx(&element->config, &element->drawCtx);
 	}
 }
 
-void CG_SHUDElementPwDestroy(void* context)
+void CG_ModernHUDElementPwDestroy(void* context)
 {
 	if (context)
 	{

@@ -485,6 +485,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 				}
 #if FEAT_WIRED_UI
 				if ( !cl_loadFading && wiredHud->valid ) {
+					WiredUI_Refresh( cls.realtime );
 					WiredHud_Routine( cls.realtime );
 				}
 #endif
@@ -551,6 +552,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			CL_CGameRendering( stereoFrame );
 #if FEAT_WIRED_UI
 			if ( wiredHud->valid ) {
+				WiredUI_Refresh( cls.realtime );
 				WiredHud_Routine( cls.realtime );
 			}
 #endif

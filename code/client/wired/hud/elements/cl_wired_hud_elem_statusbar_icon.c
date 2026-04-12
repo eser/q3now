@@ -17,21 +17,21 @@ cgame selects the right icon (e.g., heavy/combat/jacket armor) — client just d
 #if FEAT_WIRED_UI
 
 typedef struct {
-	superhudConfig_t     config;
-	superhudDrawContext_t ctx;
-} shudElementStatusbarIcon_t;
+	modernhudConfig_t     config;
+	modernhudDrawContext_t ctx;
+} modernHudElementStatusbarIcon_t;
 
-void *CG_SHUDElementStatusbarIconCreate( const superhudConfig_t *config ) {
-	shudElementStatusbarIcon_t *element;
+void *CG_ModernHUDElementStatusbarIconCreate( const modernhudConfig_t *config ) {
+	modernHudElementStatusbarIcon_t *element;
 
-	SHUD_ELEMENT_INIT( element, config );
-	CG_SHUDDrawMakeContext( &element->config, &element->ctx );
+	ModernHUD_ELEMENT_INIT( element, config );
+	CG_ModernHUDDrawMakeContext( &element->config, &element->ctx );
 
 	return element;
 }
 
-void CG_SHUDElementStatusbarIconRoutine( void *context ) {
-	shudElementStatusbarIcon_t *element = (shudElementStatusbarIcon_t *)context;
+void CG_ModernHUDElementStatusbarIconRoutine( void *context ) {
+	modernHudElementStatusbarIcon_t *element = (modernHudElementStatusbarIcon_t *)context;
 
 	if ( !element->config.bind.isSet ) return;
 
@@ -44,7 +44,7 @@ void CG_SHUDElementStatusbarIconRoutine( void *context ) {
 		storeEntry = WiredStore_Get( iconKey );
 		if ( storeEntry && storeEntry->icon ) {
 			element->ctx.image = storeEntry->icon;
-			CG_SHUDDrawStretchPicCtx( &element->config, &element->ctx );
+			CG_ModernHUDDrawStretchPicCtx( &element->config, &element->ctx );
 			return;
 		}
 	}
@@ -57,11 +57,11 @@ void CG_SHUDElementStatusbarIconRoutine( void *context ) {
 		if ( !binding || !binding->visible || !binding->icon ) return;
 
 		element->ctx.image = binding->icon;
-		CG_SHUDDrawStretchPicCtx( &element->config, &element->ctx );
+		CG_ModernHUDDrawStretchPicCtx( &element->config, &element->ctx );
 	}
 }
 
-void CG_SHUDElementStatusbarIconDestroy( void *context ) {
+void CG_ModernHUDElementStatusbarIconDestroy( void *context ) {
 	if ( context ) Z_Free( context );
 }
 

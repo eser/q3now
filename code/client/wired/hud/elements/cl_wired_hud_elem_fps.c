@@ -9,28 +9,28 @@
 #define FPS_MAX_FRAMES  4
 typedef struct
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	float timeAverage;
 	int framesNum;
 	int timePrev;
-	superhudTextContext_t ctx;
-} shudElementFPS_t;
+	modernhudTextContext_t ctx;
+} modernHudElementFPS_t;
 
-void* CG_SHUDElementFPSCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementFPSCreate(const modernhudConfig_t* config)
 {
-	shudElementFPS_t* element;
+	modernHudElementFPS_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementFPSRoutine(void* context)
+void CG_ModernHUDElementFPSRoutine(void* context)
 {
-	shudElementFPS_t* element = (shudElementFPS_t*)context;
+	modernHudElementFPS_t* element = (modernHudElementFPS_t*)context;
 	float     fps_val;
 	int     fps_val_int;
 	int     t;
@@ -70,10 +70,10 @@ void CG_SHUDElementFPSRoutine(void* context)
 		element->ctx.text = va("%ifps", fps_val_int);
 	}
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementFPSDestroy(void* context)
+void CG_ModernHUDElementFPSDestroy(void* context)
 {
 	if (context)
 	{

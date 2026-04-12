@@ -8,8 +8,6 @@ ai_itemtime.h — item respawn timing for bot AI improvements
 
 #include "../qcommon/q_feats.h"
 
-#if FEAT_BOT_IMPROVEMENTS
-
 struct bot_state_s;
 
 // initialize item registry at level start (scan g_entities[])
@@ -22,5 +20,4 @@ void BotItemTimeUpdate( struct bot_state_s *bs );
 // returns qtrue if an item timing goal was set.
 qboolean BotItemTimingGoal( struct bot_state_s *bs );
 
-#endif // FEAT_BOT_IMPROVEMENTS
 #endif // AI_ITEMTIME_H

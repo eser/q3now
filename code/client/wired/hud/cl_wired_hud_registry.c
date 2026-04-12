@@ -2,8 +2,8 @@
 ===========================================================================
 cl_wired_hud_registry.c — Wired UI HUD: element registry + lifecycle
 
-Complete registry of all SuperHUD elements with create/routine/destroy
-function pointers. Auto-generated from cg_superhud_private.c.
+Complete registry of all ModernHUD elements with create/routine/destroy
+function pointers. Auto-generated from cg_modernhud_private.c.
 ===========================================================================
 */
 
@@ -15,264 +15,267 @@ function pointers. Auto-generated from cg_superhud_private.c.
 
 // ── forward declarations for all element functions ───────────────────
 
-extern void* CG_SHUDElementAmmoMessageCreate(const superhudConfig_t*);
-extern void CG_SHUDElementAmmoMessageDestroy(void*);
-extern void CG_SHUDElementAmmoMessageRoutine(void*);
-extern void* CG_SHUDElementAudioWaveformCreate(const superhudConfig_t*);
-extern void CG_SHUDElementAudioWaveformRoutine(void*);
-extern void CG_SHUDElementAudioWaveformDestroy(void*);
-extern void* CG_SHUDElementChat10Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat11Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat12Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat13Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat14Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat15Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat16Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat1Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat2Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat3Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat4Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat5Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat6Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat7Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat8Create(const superhudConfig_t*);
-extern void* CG_SHUDElementChat9Create(const superhudConfig_t*);
-extern void CG_SHUDElementChatDestroy(void*);
-extern void CG_SHUDElementChatRoutine(void*);
-extern void* CG_SHUDElementCreateCurrentWeapon(const superhudConfig_t*);
-extern void* CG_SHUDElementCreatePlayerStatsDG(const superhudConfig_t*);
-extern void* CG_SHUDElementCreatePlayerStatsDGIcon(const superhudConfig_t*);
-extern void* CG_SHUDElementCreatePlayerStatsDR(const superhudConfig_t*);
-extern void* CG_SHUDElementCreatePlayerStatsDRIcon(const superhudConfig_t*);
-extern void* CG_SHUDElementCreatePlayerStatsDamageRatio(const superhudConfig_t*);
-extern void* CG_SHUDElementDecorCreate(const superhudConfig_t*);
-extern void CG_SHUDElementDecorDestroy(void*);
-extern void CG_SHUDElementDecorRoutine(void*);
-extern void* CG_SHUDElementFPSCreate(const superhudConfig_t*);
-extern void CG_SHUDElementFPSDestroy(void*);
-extern void CG_SHUDElementFPSRoutine(void*);
-extern void CG_SHUDElementFlagStatusDestroy(void*);
-extern void* CG_SHUDElementFlagStatusNMECreate(const superhudConfig_t*);
-extern void* CG_SHUDElementFlagStatusOWNCreate(const superhudConfig_t*);
-extern void CG_SHUDElementFlagStatusRoutine(void*);
-extern void* CG_SHUDElementFollowMessageCreate(const superhudConfig_t*);
-extern void CG_SHUDElementFollowMessageDestroy(void*);
-extern void CG_SHUDElementFollowMessageRoutine(void*);
-extern void* CG_SHUDElementFragMessageCreate(const superhudConfig_t*);
-extern void CG_SHUDElementFragMessageDestroy(void*);
-extern void CG_SHUDElementFragMessageRoutine(void*);
+extern void* CG_ModernHUDElementAmmoMessageCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementAmmoMessageDestroy(void*);
+extern void CG_ModernHUDElementAmmoMessageRoutine(void*);
+extern void* CG_ModernHUDElementAudioWaveformCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementAudioWaveformRoutine(void*);
+extern void CG_ModernHUDElementAudioWaveformDestroy(void*);
+extern void* CG_ModernHUDElementChat10Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat11Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat12Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat13Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat14Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat15Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat16Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat1Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat2Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat3Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat4Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat5Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat6Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat7Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat8Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementChat9Create(const modernhudConfig_t*);
+extern void CG_ModernHUDElementChatDestroy(void*);
+extern void CG_ModernHUDElementChatRoutine(void*);
+extern void* CG_ModernHUDElementCreateCurrentWeapon(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementCreatePlayerStatsDG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementCreatePlayerStatsDGIcon(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementCreatePlayerStatsDR(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementCreatePlayerStatsDRIcon(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementCreatePlayerStatsDamageRatio(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementDecorCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementDecorDestroy(void*);
+extern void CG_ModernHUDElementDecorRoutine(void*);
+extern void* CG_ModernHUDElementFPSCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementFPSDestroy(void*);
+extern void CG_ModernHUDElementFPSRoutine(void*);
+extern void CG_ModernHUDElementFlagStatusDestroy(void*);
+extern void* CG_ModernHUDElementFlagStatusNMECreate(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementFlagStatusOWNCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementFlagStatusRoutine(void*);
+extern void* CG_ModernHUDElementFollowMessageCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementFollowMessageDestroy(void*);
+extern void CG_ModernHUDElementFollowMessageRoutine(void*);
+extern void* CG_ModernHUDElementFragMessageCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementFragMessageDestroy(void*);
+extern void CG_ModernHUDElementFragMessageRoutine(void*);
 
-extern void* CG_SHUDElementMsgQueueCreate(const superhudConfig_t*);
-extern void CG_SHUDElementMsgQueueDestroy(void*);
-extern void CG_SHUDElementMsgQueueRoutine(void*);
-extern void* CG_SHUDElementGameTimeCreate(const superhudConfig_t*);
-extern void CG_SHUDElementGameTimeDestroy(void*);
-extern void CG_SHUDElementGameTimeRoutine(void*);
-extern void* CG_SHUDElementGameTypeCreate(const superhudConfig_t*);
-extern void CG_SHUDElementGameTypeDestroy(void*);
-extern void CG_SHUDElementGameTypeRoutine(void*);
-extern void* CG_SHUDElementGridCreate(const superhudConfig_t*);
-extern void CG_SHUDElementGridDestroy(void*);
-extern void CG_SHUDElementGridRoutine(void*);
-extern void* CG_SHUDElementIconCreateCurrentWeapon(const superhudConfig_t*);
-extern void* CG_SHUDElementIconCreateGL(const superhudConfig_t*);
-extern void* CG_SHUDElementIconCreateLG(const superhudConfig_t*);
-extern void* CG_SHUDElementIconCreateMG(const superhudConfig_t*);
-extern void* CG_SHUDElementIconCreatePG(const superhudConfig_t*);
-extern void* CG_SHUDElementIconCreateRG(const superhudConfig_t*);
-extern void* CG_SHUDElementIconCreateRL(const superhudConfig_t*);
-extern void* CG_SHUDElementIconCreateSG(const superhudConfig_t*);
-extern void* CG_SHUDElementItemPickupCreate(const superhudConfig_t*);
-extern void CG_SHUDElementItemPickupDestroy(void*);
-extern void* CG_SHUDElementItemPickupIconCreate(const superhudConfig_t*);
-extern void CG_SHUDElementItemPickupIconDestroy(void*);
-extern void CG_SHUDElementItemPickupIconRoutine(void*);
-extern void CG_SHUDElementItemPickupRoutine(void*);
-extern void* CG_SHUDElementLocalDateCreate(const superhudConfig_t*);
-extern void* CG_SHUDElementLocalTimeCreate(const superhudConfig_t*);
-extern void CG_SHUDElementLocalTimeDestroy(void*);
-extern void CG_SHUDElementLocalTimeRoutine(void*);
-extern void* CG_SHUDElementLocationCreate(const superhudConfig_t*);
-extern void CG_SHUDElementLocationDestroy(void*);
-extern void CG_SHUDElementLocationRoutine(void*);
-extern void* CG_SHUDElementNGCreate(const superhudConfig_t*);
-extern void CG_SHUDElementNGDestroy(void*);
-extern void* CG_SHUDElementNGPCreate(const superhudConfig_t*);
-extern void CG_SHUDElementNGPDestroy(void*);
-extern void CG_SHUDElementNGPRoutine(void*);
-extern void CG_SHUDElementNGRoutine(void*);
-extern void CG_SHUDElementNameDestroy(void*);
-extern void* CG_SHUDElementNameNMECreate(const superhudConfig_t*);
-extern void* CG_SHUDElementNameOWNCreate(const superhudConfig_t*);
-extern void CG_SHUDElementNameRoutine(void*);
-extern void* CG_SHUDElementNetStatsCreate(const superhudConfig_t*);
-extern void CG_SHUDElementNetStatsDestroy(void*);
-extern void CG_SHUDElementNetStatsRoutine(void*);
-extern void* CG_SHUDElementObituaries1Create(const superhudConfig_t*);
-extern void* CG_SHUDElementObituaries2Create(const superhudConfig_t*);
-extern void* CG_SHUDElementObituaries3Create(const superhudConfig_t*);
-extern void* CG_SHUDElementObituaries4Create(const superhudConfig_t*);
-extern void* CG_SHUDElementObituaries5Create(const superhudConfig_t*);
-extern void* CG_SHUDElementObituaries6Create(const superhudConfig_t*);
-extern void* CG_SHUDElementObituaries7Create(const superhudConfig_t*);
-extern void* CG_SHUDElementObituaries8Create(const superhudConfig_t*);
-extern void CG_SHUDElementObituariesDestroy(void*);
-extern void CG_SHUDElementObituariesRoutine(void*);
-extern void* CG_SHUDElementPlayerNameCreate(const superhudConfig_t*);
-extern void CG_SHUDElementPlayerNameDestroy(void*);
-extern void CG_SHUDElementPlayerNameRoutine(void*);
-extern void* CG_SHUDElementPlayerSpeedCreate(const superhudConfig_t*);
-extern void CG_SHUDElementPlayerSpeedDestroy(void*);
-extern void CG_SHUDElementPlayerSpeedRoutine(void*);
-extern void CG_SHUDElementPlayerStatsDestroy(void*);
-extern void CG_SHUDElementPlayerStatsRoutine(void*);
-extern void CG_SHUDElementPwDestroy(void*);
-extern void* CG_SHUDElementPwIcon1Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwIcon2Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwIcon3Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwIcon4Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwIcon5Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwIcon6Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwIcon7Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwIcon8Create(const superhudConfig_t*);
-extern void CG_SHUDElementPwRoutine(void*);
-extern void* CG_SHUDElementPwTime1Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwTime2Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwTime3Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwTime4Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwTime5Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwTime6Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwTime7Create(const superhudConfig_t*);
-extern void* CG_SHUDElementPwTime8Create(const superhudConfig_t*);
-extern void* CG_SHUDElementRankMessageCreate(const superhudConfig_t*);
-extern void CG_SHUDElementRankMessageDestroy(void*);
-extern void CG_SHUDElementRankMessageRoutine(void*);
-extern void* CG_SHUDElementRewardCountCreate(const superhudConfig_t*);
-extern void CG_SHUDElementRewardDestroy(void*);
-extern void* CG_SHUDElementRewardIconCreate(const superhudConfig_t*);
-extern void CG_SHUDElementRewardRoutine(void*);
-extern void* CG_SHUDElementAwardsCreate(const superhudConfig_t*);
-extern void CG_SHUDElementAwardsRoutine(void*);
-extern void CG_SHUDElementAwardsDestroy(void*);
-extern void* CG_SHUDElementCrosshairCreate(const superhudConfig_t*);
-extern void CG_SHUDElementCrosshairRoutine(void*);
-extern void CG_SHUDElementCrosshairDestroy(void*);
-extern void* CG_SHUDElementStatusbarValueCreate(const superhudConfig_t*);
-extern void CG_SHUDElementStatusbarValueRoutine(void*);
-extern void CG_SHUDElementStatusbarValueDestroy(void*);
-extern void* CG_SHUDElementStatusbarIconCreate(const superhudConfig_t*);
-extern void CG_SHUDElementStatusbarIconRoutine(void*);
-extern void CG_SHUDElementStatusbarIconDestroy(void*);
-extern void* CG_SHUDElementStatusbarBarCreate(const superhudConfig_t*);
-extern void CG_SHUDElementStatusbarBarRoutine(void*);
-extern void CG_SHUDElementStatusbarBarDestroy(void*);
+extern void* CG_ModernHUDElementMsgQueueCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementMsgQueueDestroy(void*);
+extern void CG_ModernHUDElementMsgQueueRoutine(void*);
+extern void* CG_ModernHUDElementGameTimeCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementGameTimeDestroy(void*);
+extern void CG_ModernHUDElementGameTimeRoutine(void*);
+extern void* CG_ModernHUDElementGameTypeCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementGameTypeDestroy(void*);
+extern void CG_ModernHUDElementGameTypeRoutine(void*);
+extern void* CG_ModernHUDElementGridCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementGridDestroy(void*);
+extern void CG_ModernHUDElementGridRoutine(void*);
+extern void* CG_ModernHUDElementIconCreateCurrentWeapon(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementIconCreateGL(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementIconCreateLG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementIconCreateMG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementIconCreatePG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementIconCreateRG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementIconCreateRL(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementIconCreateSG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementItemPickupCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementItemPickupDestroy(void*);
+extern void* CG_ModernHUDElementItemPickupIconCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementItemPickupIconDestroy(void*);
+extern void CG_ModernHUDElementItemPickupIconRoutine(void*);
+extern void CG_ModernHUDElementItemPickupRoutine(void*);
+extern void* CG_ModernHUDElementLocalDateCreate(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementLocalTimeCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementLocalTimeDestroy(void*);
+extern void CG_ModernHUDElementLocalTimeRoutine(void*);
+extern void* CG_ModernHUDElementLocationCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementLocationDestroy(void*);
+extern void CG_ModernHUDElementLocationRoutine(void*);
+extern void* CG_ModernHUDElementNGCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementNGDestroy(void*);
+extern void* CG_ModernHUDElementNGPCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementNGPDestroy(void*);
+extern void CG_ModernHUDElementNGPRoutine(void*);
+extern void CG_ModernHUDElementNGRoutine(void*);
+extern void CG_ModernHUDElementNameDestroy(void*);
+extern void* CG_ModernHUDElementNameNMECreate(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementNameOWNCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementNameRoutine(void*);
+extern void* CG_ModernHUDElementNetStatsCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementNetStatsDestroy(void*);
+extern void CG_ModernHUDElementNetStatsRoutine(void*);
+extern void* CG_ModernHUDElementObituaries1Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementObituaries2Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementObituaries3Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementObituaries4Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementObituaries5Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementObituaries6Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementObituaries7Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementObituaries8Create(const modernhudConfig_t*);
+extern void CG_ModernHUDElementObituariesDestroy(void*);
+extern void CG_ModernHUDElementObituariesRoutine(void*);
+extern void* CG_ModernHUDElementPlayerNameCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementPlayerNameDestroy(void*);
+extern void CG_ModernHUDElementPlayerNameRoutine(void*);
+extern void* CG_ModernHUDElementPlayerSpeedCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementPlayerSpeedDestroy(void*);
+extern void CG_ModernHUDElementPlayerSpeedRoutine(void*);
+extern void CG_ModernHUDElementPlayerStatsDestroy(void*);
+extern void CG_ModernHUDElementPlayerStatsRoutine(void*);
+extern void CG_ModernHUDElementPwDestroy(void*);
+extern void* CG_ModernHUDElementPwIcon1Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwIcon2Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwIcon3Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwIcon4Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwIcon5Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwIcon6Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwIcon7Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwIcon8Create(const modernhudConfig_t*);
+extern void CG_ModernHUDElementPwRoutine(void*);
+extern void* CG_ModernHUDElementPwTime1Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwTime2Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwTime3Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwTime4Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwTime5Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwTime6Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwTime7Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementPwTime8Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementRankMessageCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementRankMessageDestroy(void*);
+extern void CG_ModernHUDElementRankMessageRoutine(void*);
+extern void* CG_ModernHUDElementRewardCountCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementRewardDestroy(void*);
+extern void* CG_ModernHUDElementRewardIconCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementRewardRoutine(void*);
+extern void* CG_ModernHUDElementAwardsCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementAwardsRoutine(void*);
+extern void CG_ModernHUDElementAwardsDestroy(void*);
+extern void* CG_ModernHUDElementCrosshairCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementCrosshairRoutine(void*);
+extern void CG_ModernHUDElementCrosshairDestroy(void*);
+extern void* CG_ModernHUDElementStatusbarValueCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementStatusbarValueRoutine(void*);
+extern void CG_ModernHUDElementStatusbarValueDestroy(void*);
+extern void* CG_ModernHUDElementStatusbarIconCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementStatusbarIconRoutine(void*);
+extern void CG_ModernHUDElementStatusbarIconDestroy(void*);
+extern void* CG_ModernHUDElementStatusbarBarCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementStatusbarBarRoutine(void*);
+extern void CG_ModernHUDElementStatusbarBarDestroy(void*);
 // old statusbar_health/armor/ammo count/icon/bar elements removed — replaced by generic bound elements
-extern void CG_SHUDElementScoreDestroy(void*);
-extern void* CG_SHUDElementScoreMAXCreate(const superhudConfig_t*);
-extern void* CG_SHUDElementScoreNMECreate(const superhudConfig_t*);
-extern void* CG_SHUDElementScoreOWNCreate(const superhudConfig_t*);
-extern void CG_SHUDElementScoreRoutine(void*);
-extern void* CG_SHUDElementSpecMessageCreate(const superhudConfig_t*);
-extern void CG_SHUDElementSpecMessageDestroy(void*);
-extern void CG_SHUDElementSpecMessageRoutine(void*);
-extern void* CG_SHUDElementSpectatorsCreate(const superhudConfig_t*);
-extern void CG_SHUDElementSpectatorsDestroy(void*);
-extern void CG_SHUDElementSpectatorsRoutine(void*);
-extern void* CG_SHUDElementTargetNameCreate(const superhudConfig_t*);
-extern void CG_SHUDElementTargetNameDestroy(void*);
-extern void CG_SHUDElementTargetNameRoutine(void*);
-extern void* CG_SHUDElementTargetStatusCreate(const superhudConfig_t*);
-extern void CG_SHUDElementTargetStatusDestroy(void*);
-extern void CG_SHUDElementTargetStatusRoutine(void*);
-extern void* CG_SHUDElementTeam10Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam11Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam12Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam13Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam14Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam15Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam16Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam1Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam2Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam3Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam4Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam5Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam6Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam7Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam8Create(const superhudConfig_t*);
-extern void* CG_SHUDElementTeam9Create(const superhudConfig_t*);
-extern void CG_SHUDElementTeamCountDestroy(void*);
-extern void* CG_SHUDElementTeamCountNMECreate(const superhudConfig_t*);
-extern void* CG_SHUDElementTeamCountOWNCreate(const superhudConfig_t*);
-extern void CG_SHUDElementTeamCountRoutine(void*);
-extern void CG_SHUDElementTeamDestroy(void*);
-extern void CG_SHUDElementTeamRoutine(void*);
-extern void CG_SHUDElementTempAccDestroy(void*);
-extern void* CG_SHUDElementTempAccIconCreate(const superhudConfig_t*);
-extern void CG_SHUDElementTempAccRoutine(void*);
-extern void* CG_SHUDElementTempAccTextCreate(const superhudConfig_t*);
-extern void* CG_SHUDElementVMWCreate(const superhudConfig_t*);
-extern void CG_SHUDElementVMWDestroy(void*);
-extern void CG_SHUDElementVMWRoutine(void*);
-extern void* CG_SHUDElementWarmupInfoCreate(const superhudConfig_t*);
-extern void CG_SHUDElementWarmupInfoDestroy(void*);
-extern void CG_SHUDElementWarmupInfoRoutine(void*);
-extern void* CG_SHUDElementWeaponListCreate(const superhudConfig_t*);
-extern void CG_SHUDElementWeaponListDestroy(void*);
-extern void CG_SHUDElementWeaponListRoutine(void*);
-extern void* CG_SHUDElementWeaponStatsCreateGL(const superhudConfig_t*);
-extern void* CG_SHUDElementWeaponStatsCreateLG(const superhudConfig_t*);
-extern void* CG_SHUDElementWeaponStatsCreateMG(const superhudConfig_t*);
-extern void* CG_SHUDElementWeaponStatsCreatePG(const superhudConfig_t*);
-extern void* CG_SHUDElementWeaponStatsCreateRG(const superhudConfig_t*);
-extern void* CG_SHUDElementWeaponStatsCreateRL(const superhudConfig_t*);
-extern void* CG_SHUDElementWeaponStatsCreateSG(const superhudConfig_t*);
-extern void CG_SHUDElementWeaponStatsDestroy(void*);
-extern void CG_SHUDElementWeaponStatsRoutine(void*);
+extern void CG_ModernHUDElementScoreDestroy(void*);
+extern void* CG_ModernHUDElementScoreMAXCreate(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementScoreNMECreate(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementScoreOWNCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementScoreRoutine(void*);
+extern void* CG_ModernHUDElementSpecMessageCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementSpecMessageDestroy(void*);
+extern void CG_ModernHUDElementSpecMessageRoutine(void*);
+extern void* CG_ModernHUDElementBotDirectivesCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementBotDirectivesDestroy(void*);
+extern void CG_ModernHUDElementBotDirectivesRoutine(void*);
+extern void* CG_ModernHUDElementSpectatorsCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementSpectatorsDestroy(void*);
+extern void CG_ModernHUDElementSpectatorsRoutine(void*);
+extern void* CG_ModernHUDElementTargetNameCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementTargetNameDestroy(void*);
+extern void CG_ModernHUDElementTargetNameRoutine(void*);
+extern void* CG_ModernHUDElementTargetStatusCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementTargetStatusDestroy(void*);
+extern void CG_ModernHUDElementTargetStatusRoutine(void*);
+extern void* CG_ModernHUDElementTeam10Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam11Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam12Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam13Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam14Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam15Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam16Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam1Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam2Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam3Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam4Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam5Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam6Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam7Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam8Create(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeam9Create(const modernhudConfig_t*);
+extern void CG_ModernHUDElementTeamCountDestroy(void*);
+extern void* CG_ModernHUDElementTeamCountNMECreate(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementTeamCountOWNCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementTeamCountRoutine(void*);
+extern void CG_ModernHUDElementTeamDestroy(void*);
+extern void CG_ModernHUDElementTeamRoutine(void*);
+extern void CG_ModernHUDElementTempAccDestroy(void*);
+extern void* CG_ModernHUDElementTempAccIconCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementTempAccRoutine(void*);
+extern void* CG_ModernHUDElementTempAccTextCreate(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementVMWCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementVMWDestroy(void*);
+extern void CG_ModernHUDElementVMWRoutine(void*);
+extern void* CG_ModernHUDElementWarmupInfoCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementWarmupInfoDestroy(void*);
+extern void CG_ModernHUDElementWarmupInfoRoutine(void*);
+extern void* CG_ModernHUDElementWeaponListCreate(const modernhudConfig_t*);
+extern void CG_ModernHUDElementWeaponListDestroy(void*);
+extern void CG_ModernHUDElementWeaponListRoutine(void*);
+extern void* CG_ModernHUDElementWeaponStatsCreateGL(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementWeaponStatsCreateLG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementWeaponStatsCreateMG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementWeaponStatsCreatePG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementWeaponStatsCreateRG(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementWeaponStatsCreateRL(const modernhudConfig_t*);
+extern void* CG_ModernHUDElementWeaponStatsCreateSG(const modernhudConfig_t*);
+extern void CG_ModernHUDElementWeaponStatsDestroy(void*);
+extern void CG_ModernHUDElementWeaponStatsRoutine(void*);
 
 // ── element registry ─────────────────────────────────────────────────
 
 typedef struct {
 	const char *name;
 	int         defaultVisibility;
-	void*       (*create)(const superhudConfig_t*);
+	void*       (*create)(const modernhudConfig_t*);
 	void        (*routine)(void*);
 	void        (*destroy)(void*);
 } wiredHudElementDef_t;
 
 static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "!default", 0, NULL, NULL, NULL },
-	{ "grid", 0, CG_SHUDElementGridCreate, CG_SHUDElementGridRoutine, CG_SHUDElementGridDestroy },
-	{ "predecorate", 0, CG_SHUDElementDecorCreate, CG_SHUDElementDecorRoutine, CG_SHUDElementDecorDestroy },
-	{ "ammomessage", 0, CG_SHUDElementAmmoMessageCreate, CG_SHUDElementAmmoMessageRoutine, CG_SHUDElementAmmoMessageDestroy },
-	{ "audio_waveform", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementAudioWaveformCreate, CG_SHUDElementAudioWaveformRoutine, CG_SHUDElementAudioWaveformDestroy },
+	{ "grid", 0, CG_ModernHUDElementGridCreate, CG_ModernHUDElementGridRoutine, CG_ModernHUDElementGridDestroy },
+	{ "predecorate", 0, CG_ModernHUDElementDecorCreate, CG_ModernHUDElementDecorRoutine, CG_ModernHUDElementDecorDestroy },
+	{ "ammomessage", 0, CG_ModernHUDElementAmmoMessageCreate, CG_ModernHUDElementAmmoMessageRoutine, CG_ModernHUDElementAmmoMessageDestroy },
+	{ "audio_waveform", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementAudioWaveformCreate, CG_ModernHUDElementAudioWaveformRoutine, CG_ModernHUDElementAudioWaveformDestroy },
 	{ "attackericon", 0, NULL, NULL, NULL },
 	{ "attackername", 0, NULL, NULL, NULL },
-	{ "chat1", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat1Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat2", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat2Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat3", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat3Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat4", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat4Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat5", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat5Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat6", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat6Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat7", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat7Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat8", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat8Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat9", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat9Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat10", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat10Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat11", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat11Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat12", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat12Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat13", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat13Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat14", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat14Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat15", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat15Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
-	{ "chat16", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementChat16Create, CG_SHUDElementChatRoutine, CG_SHUDElementChatDestroy },
+	{ "chat1", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat1Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat2", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat2Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat3", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat3Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat4", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat4Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat5", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat5Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat6", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat6Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat7", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat7Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat8", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat8Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat9", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat9Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat10", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat10Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat11", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat11Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat12", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat12Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat13", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat13Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat14", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat14Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat15", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat15Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
+	{ "chat16", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat16Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
 	{ "console", 0, NULL, NULL, NULL },
-	{ "flagstatus_nme", SE_SIDES_ONLY, CG_SHUDElementFlagStatusNMECreate, CG_SHUDElementFlagStatusRoutine, CG_SHUDElementFlagStatusDestroy },
-	{ "flagstatus_own", SE_SIDES_ONLY, CG_SHUDElementFlagStatusOWNCreate, CG_SHUDElementFlagStatusRoutine, CG_SHUDElementFlagStatusDestroy },
-	{ "followmessage", 0, CG_SHUDElementFollowMessageCreate, CG_SHUDElementFollowMessageRoutine, CG_SHUDElementFollowMessageDestroy },
-	{ "fps", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementFPSCreate, CG_SHUDElementFPSRoutine, CG_SHUDElementFPSDestroy },
-	{ "fragmessage", 0, CG_SHUDElementFragMessageCreate, CG_SHUDElementFragMessageRoutine, CG_SHUDElementFragMessageDestroy },
-	{ "gametime", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementGameTimeCreate, CG_SHUDElementGameTimeRoutine, CG_SHUDElementGameTimeDestroy },
-	{ "gametype", 0, CG_SHUDElementGameTypeCreate, CG_SHUDElementGameTypeRoutine, CG_SHUDElementGameTypeDestroy },
-	{ "itempickup", 0, CG_SHUDElementItemPickupCreate, CG_SHUDElementItemPickupRoutine, CG_SHUDElementItemPickupDestroy },
-	{ "itempickupicon", 0, CG_SHUDElementItemPickupIconCreate, CG_SHUDElementItemPickupIconRoutine, CG_SHUDElementItemPickupIconDestroy },
+	{ "flagstatus_nme", SE_SIDES_ONLY, CG_ModernHUDElementFlagStatusNMECreate, CG_ModernHUDElementFlagStatusRoutine, CG_ModernHUDElementFlagStatusDestroy },
+	{ "flagstatus_own", SE_SIDES_ONLY, CG_ModernHUDElementFlagStatusOWNCreate, CG_ModernHUDElementFlagStatusRoutine, CG_ModernHUDElementFlagStatusDestroy },
+	{ "followmessage", 0, CG_ModernHUDElementFollowMessageCreate, CG_ModernHUDElementFollowMessageRoutine, CG_ModernHUDElementFollowMessageDestroy },
+	{ "fps", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementFPSCreate, CG_ModernHUDElementFPSRoutine, CG_ModernHUDElementFPSDestroy },
+	{ "fragmessage", 0, CG_ModernHUDElementFragMessageCreate, CG_ModernHUDElementFragMessageRoutine, CG_ModernHUDElementFragMessageDestroy },
+	{ "gametime", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementGameTimeCreate, CG_ModernHUDElementGameTimeRoutine, CG_ModernHUDElementGameTimeDestroy },
+	{ "gametype", 0, CG_ModernHUDElementGameTypeCreate, CG_ModernHUDElementGameTypeRoutine, CG_ModernHUDElementGameTypeDestroy },
+	{ "itempickup", 0, CG_ModernHUDElementItemPickupCreate, CG_ModernHUDElementItemPickupRoutine, CG_ModernHUDElementItemPickupDestroy },
+	{ "itempickupicon", 0, CG_ModernHUDElementItemPickupIconCreate, CG_ModernHUDElementItemPickupIconRoutine, CG_ModernHUDElementItemPickupIconDestroy },
 	{ "itemtimers1_icons", 0, NULL, NULL, NULL },
 	{ "itemtimers2_icons", 0, NULL, NULL, NULL },
 	{ "itemtimers3_icons", 0, NULL, NULL, NULL },
@@ -282,26 +285,26 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "itemtimers3_times", 0, NULL, NULL, NULL },
 	{ "itemtimers4_times", 0, NULL, NULL, NULL },
 #if FEAT_MOVEMENT_KEYS
-	{ "keydown_attack", SE_SPECT, CG_SHUDElementKeyDownAttackCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_back", SE_SPECT, CG_SHUDElementKeyDownBackCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_crouch", SE_SPECT, CG_SHUDElementKeyDownCrouchCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_forward", SE_SPECT, CG_SHUDElementKeyDownForwardCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_gesture", SE_SPECT, CG_SHUDElementKeyDownGestureCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_jump", SE_SPECT, CG_SHUDElementKeyDownJumpCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_left", SE_SPECT, CG_SHUDElementKeyDownLeftCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_right", SE_SPECT, CG_SHUDElementKeyDownRightCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_use", SE_SPECT, CG_SHUDElementKeyDownUseCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keydown_walk", SE_SPECT, CG_SHUDElementKeyDownWalkCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_attack", SE_SPECT, CG_SHUDElementKeyUpAttackCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_back", SE_SPECT, CG_SHUDElementKeyUpBackCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_crouch", SE_SPECT, CG_SHUDElementKeyUpCrouchCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_forward", SE_SPECT, CG_SHUDElementKeyUpForwardCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_gesture", SE_SPECT, CG_SHUDElementKeyUpGestureCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_jump", SE_SPECT, CG_SHUDElementKeyUpJumpCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_left", SE_SPECT, CG_SHUDElementKeyUpLeftCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_right", SE_SPECT, CG_SHUDElementKeyUpRightCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_use", SE_SPECT, CG_SHUDElementKeyUpUseCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
-	{ "keyup_walk", SE_SPECT, CG_SHUDElementKeyUpWalkCreate, CG_SHUDElementKeyRoutine, CG_SHUDElementKeyDestroy },
+	{ "keydown_attack", SE_SPECT, CG_ModernHUDElementKeyDownAttackCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_back", SE_SPECT, CG_ModernHUDElementKeyDownBackCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_crouch", SE_SPECT, CG_ModernHUDElementKeyDownCrouchCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_forward", SE_SPECT, CG_ModernHUDElementKeyDownForwardCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_gesture", SE_SPECT, CG_ModernHUDElementKeyDownGestureCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_jump", SE_SPECT, CG_ModernHUDElementKeyDownJumpCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_left", SE_SPECT, CG_ModernHUDElementKeyDownLeftCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_right", SE_SPECT, CG_ModernHUDElementKeyDownRightCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_use", SE_SPECT, CG_ModernHUDElementKeyDownUseCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_walk", SE_SPECT, CG_ModernHUDElementKeyDownWalkCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_attack", SE_SPECT, CG_ModernHUDElementKeyUpAttackCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_back", SE_SPECT, CG_ModernHUDElementKeyUpBackCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_crouch", SE_SPECT, CG_ModernHUDElementKeyUpCrouchCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_forward", SE_SPECT, CG_ModernHUDElementKeyUpForwardCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_gesture", SE_SPECT, CG_ModernHUDElementKeyUpGestureCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_jump", SE_SPECT, CG_ModernHUDElementKeyUpJumpCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_left", SE_SPECT, CG_ModernHUDElementKeyUpLeftCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_right", SE_SPECT, CG_ModernHUDElementKeyUpRightCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_use", SE_SPECT, CG_ModernHUDElementKeyUpUseCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keyup_walk", SE_SPECT, CG_ModernHUDElementKeyUpWalkCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
 #else
 	{ "keydown_attack", 0, NULL, NULL, NULL },
 	{ "keydown_back", 0, NULL, NULL, NULL },
@@ -324,65 +327,66 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "keyup_use", 0, NULL, NULL, NULL },
 	{ "keyup_walk", 0, NULL, NULL, NULL },
 #endif
-	{ "localtime", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementLocalTimeCreate, CG_SHUDElementLocalTimeRoutine, CG_SHUDElementLocalTimeDestroy },
-	{ "localdate", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementLocalDateCreate, CG_SHUDElementLocalTimeRoutine, CG_SHUDElementLocalTimeDestroy },
-	{ "msgqueue", 0, CG_SHUDElementMsgQueueCreate, CG_SHUDElementMsgQueueRoutine, CG_SHUDElementMsgQueueDestroy },
+	{ "localtime", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementLocalTimeCreate, CG_ModernHUDElementLocalTimeRoutine, CG_ModernHUDElementLocalTimeDestroy },
+	{ "localdate", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementLocalDateCreate, CG_ModernHUDElementLocalTimeRoutine, CG_ModernHUDElementLocalTimeDestroy },
+	{ "msgqueue", 0, CG_ModernHUDElementMsgQueueCreate, CG_ModernHUDElementMsgQueueRoutine, CG_ModernHUDElementMsgQueueDestroy },
 	{ "multiview", 0, NULL, NULL, NULL },
-	{ "name_nme", 0, CG_SHUDElementNameNMECreate, CG_SHUDElementNameRoutine, CG_SHUDElementNameDestroy },
-	{ "name_own", 0, CG_SHUDElementNameOWNCreate, CG_SHUDElementNameRoutine, CG_SHUDElementNameDestroy },
-	{ "netgraph", SE_IM | SE_SPECT | SE_DEAD | SE_DEMO_HIDE, CG_SHUDElementNGCreate, CG_SHUDElementNGRoutine, CG_SHUDElementNGDestroy },
-	{ "netgraphping", SE_IM | SE_SPECT | SE_DEAD | SE_DEMO_HIDE, CG_SHUDElementNGPCreate, CG_SHUDElementNGPRoutine, CG_SHUDElementNGPDestroy },
-	{ "playerspeed", 0, CG_SHUDElementPlayerSpeedCreate, CG_SHUDElementPlayerSpeedRoutine, CG_SHUDElementPlayerSpeedDestroy },
-	{ "powerup1_icon", 0, CG_SHUDElementPwIcon1Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup2_icon", 0, CG_SHUDElementPwIcon2Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup3_icon", 0, CG_SHUDElementPwIcon3Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup4_icon", 0, CG_SHUDElementPwIcon4Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup5_icon", 0, CG_SHUDElementPwIcon5Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup6_icon", 0, CG_SHUDElementPwIcon6Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup7_icon", 0, CG_SHUDElementPwIcon7Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup8_icon", 0, CG_SHUDElementPwIcon8Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup1_time", 0, CG_SHUDElementPwTime1Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup2_time", 0, CG_SHUDElementPwTime2Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup3_time", 0, CG_SHUDElementPwTime3Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup4_time", 0, CG_SHUDElementPwTime4Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup5_time", 0, CG_SHUDElementPwTime5Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup6_time", 0, CG_SHUDElementPwTime6Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup7_time", 0, CG_SHUDElementPwTime7Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "powerup8_time", 0, CG_SHUDElementPwTime8Create, CG_SHUDElementPwRoutine, CG_SHUDElementPwDestroy },
-	{ "rankmessage", 0, CG_SHUDElementRankMessageCreate, CG_SHUDElementRankMessageRoutine, CG_SHUDElementRankMessageDestroy },
+	{ "name_nme", 0, CG_ModernHUDElementNameNMECreate, CG_ModernHUDElementNameRoutine, CG_ModernHUDElementNameDestroy },
+	{ "name_own", 0, CG_ModernHUDElementNameOWNCreate, CG_ModernHUDElementNameRoutine, CG_ModernHUDElementNameDestroy },
+	{ "netgraph", SE_IM | SE_SPECT | SE_DEAD | SE_DEMO_HIDE, CG_ModernHUDElementNGCreate, CG_ModernHUDElementNGRoutine, CG_ModernHUDElementNGDestroy },
+	{ "netgraphping", SE_IM | SE_SPECT | SE_DEAD | SE_DEMO_HIDE, CG_ModernHUDElementNGPCreate, CG_ModernHUDElementNGPRoutine, CG_ModernHUDElementNGPDestroy },
+	{ "playerspeed", 0, CG_ModernHUDElementPlayerSpeedCreate, CG_ModernHUDElementPlayerSpeedRoutine, CG_ModernHUDElementPlayerSpeedDestroy },
+	{ "powerup1_icon", 0, CG_ModernHUDElementPwIcon1Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup2_icon", 0, CG_ModernHUDElementPwIcon2Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup3_icon", 0, CG_ModernHUDElementPwIcon3Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup4_icon", 0, CG_ModernHUDElementPwIcon4Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup5_icon", 0, CG_ModernHUDElementPwIcon5Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup6_icon", 0, CG_ModernHUDElementPwIcon6Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup7_icon", 0, CG_ModernHUDElementPwIcon7Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup8_icon", 0, CG_ModernHUDElementPwIcon8Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup1_time", 0, CG_ModernHUDElementPwTime1Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup2_time", 0, CG_ModernHUDElementPwTime2Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup3_time", 0, CG_ModernHUDElementPwTime3Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup4_time", 0, CG_ModernHUDElementPwTime4Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup5_time", 0, CG_ModernHUDElementPwTime5Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup6_time", 0, CG_ModernHUDElementPwTime6Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup7_time", 0, CG_ModernHUDElementPwTime7Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "powerup8_time", 0, CG_ModernHUDElementPwTime8Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
+	{ "rankmessage", 0, CG_ModernHUDElementRankMessageCreate, CG_ModernHUDElementRankMessageRoutine, CG_ModernHUDElementRankMessageDestroy },
 	{ "recordingdemo", 0, NULL, NULL, NULL },
-	{ "score_limit", 0, CG_SHUDElementScoreMAXCreate, CG_SHUDElementScoreRoutine, CG_SHUDElementScoreDestroy },
-	{ "score_nme", 0, CG_SHUDElementScoreNMECreate, CG_SHUDElementScoreRoutine, CG_SHUDElementScoreDestroy },
-	{ "score_own", 0, CG_SHUDElementScoreOWNCreate, CG_SHUDElementScoreRoutine, CG_SHUDElementScoreDestroy },
-	{ "specmessage", SE_SPECT, CG_SHUDElementSpecMessageCreate, CG_SHUDElementSpecMessageRoutine, CG_SHUDElementSpecMessageDestroy },
-	{ "spectators", SE_IM, CG_SHUDElementSpectatorsCreate, CG_SHUDElementSpectatorsRoutine, CG_SHUDElementSpectatorsDestroy },
+	{ "score_limit", 0, CG_ModernHUDElementScoreMAXCreate, CG_ModernHUDElementScoreRoutine, CG_ModernHUDElementScoreDestroy },
+	{ "score_nme", 0, CG_ModernHUDElementScoreNMECreate, CG_ModernHUDElementScoreRoutine, CG_ModernHUDElementScoreDestroy },
+	{ "score_own", 0, CG_ModernHUDElementScoreOWNCreate, CG_ModernHUDElementScoreRoutine, CG_ModernHUDElementScoreDestroy },
+	{ "specmessage", SE_SPECT, CG_ModernHUDElementSpecMessageCreate, CG_ModernHUDElementSpecMessageRoutine, CG_ModernHUDElementSpecMessageDestroy },
+	{ "botdirectives", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementBotDirectivesCreate, CG_ModernHUDElementBotDirectivesRoutine, CG_ModernHUDElementBotDirectivesDestroy },
+	{ "spectators", SE_IM, CG_ModernHUDElementSpectatorsCreate, CG_ModernHUDElementSpectatorsRoutine, CG_ModernHUDElementSpectatorsDestroy },
 	// old statusbar_health/armor/ammo count/icon/bar entries removed — use statusbar_value/icon/bar + bind
-	{ "targetname", 0, CG_SHUDElementTargetNameCreate, CG_SHUDElementTargetNameRoutine, CG_SHUDElementTargetNameDestroy },
-	{ "targetstatus", SE_SIDES_ONLY, CG_SHUDElementTargetStatusCreate, CG_SHUDElementTargetStatusRoutine, CG_SHUDElementTargetStatusDestroy },
-	{ "teamcount_nme", SE_SIDES_ONLY, CG_SHUDElementTeamCountNMECreate, CG_SHUDElementTeamCountRoutine, CG_SHUDElementTeamCountDestroy },
-	{ "teamcount_own", SE_SIDES_ONLY, CG_SHUDElementTeamCountOWNCreate, CG_SHUDElementTeamCountRoutine, CG_SHUDElementTeamCountDestroy },
+	{ "targetname", 0, CG_ModernHUDElementTargetNameCreate, CG_ModernHUDElementTargetNameRoutine, CG_ModernHUDElementTargetNameDestroy },
+	{ "targetstatus", SE_SIDES_ONLY, CG_ModernHUDElementTargetStatusCreate, CG_ModernHUDElementTargetStatusRoutine, CG_ModernHUDElementTargetStatusDestroy },
+	{ "teamcount_nme", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountNMECreate, CG_ModernHUDElementTeamCountRoutine, CG_ModernHUDElementTeamCountDestroy },
+	{ "teamcount_own", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountOWNCreate, CG_ModernHUDElementTeamCountRoutine, CG_ModernHUDElementTeamCountDestroy },
 	{ "teamicon_nme", SE_SIDES_ONLY, NULL, NULL, NULL },
 	{ "teamicon_own", SE_SIDES_ONLY, NULL, NULL, NULL },
-	{ "team1", SE_SIDES_ONLY, CG_SHUDElementTeam1Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team2", SE_SIDES_ONLY, CG_SHUDElementTeam2Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team3", SE_SIDES_ONLY, CG_SHUDElementTeam3Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team4", SE_SIDES_ONLY, CG_SHUDElementTeam4Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team5", SE_SIDES_ONLY, CG_SHUDElementTeam5Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team6", SE_SIDES_ONLY, CG_SHUDElementTeam6Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team7", SE_SIDES_ONLY, CG_SHUDElementTeam7Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team8", SE_SIDES_ONLY, CG_SHUDElementTeam8Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team9", SE_SIDES_ONLY, CG_SHUDElementTeam9Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team10", SE_SIDES_ONLY, CG_SHUDElementTeam10Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team11", SE_SIDES_ONLY, CG_SHUDElementTeam11Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team12", SE_SIDES_ONLY, CG_SHUDElementTeam12Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team13", SE_SIDES_ONLY, CG_SHUDElementTeam13Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team14", SE_SIDES_ONLY, CG_SHUDElementTeam14Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team15", SE_SIDES_ONLY, CG_SHUDElementTeam15Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
-	{ "team16", SE_SIDES_ONLY, CG_SHUDElementTeam16Create, CG_SHUDElementTeamRoutine, CG_SHUDElementTeamDestroy },
+	{ "team1", SE_SIDES_ONLY, CG_ModernHUDElementTeam1Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team2", SE_SIDES_ONLY, CG_ModernHUDElementTeam2Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team3", SE_SIDES_ONLY, CG_ModernHUDElementTeam3Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team4", SE_SIDES_ONLY, CG_ModernHUDElementTeam4Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team5", SE_SIDES_ONLY, CG_ModernHUDElementTeam5Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team6", SE_SIDES_ONLY, CG_ModernHUDElementTeam6Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team7", SE_SIDES_ONLY, CG_ModernHUDElementTeam7Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team8", SE_SIDES_ONLY, CG_ModernHUDElementTeam8Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team9", SE_SIDES_ONLY, CG_ModernHUDElementTeam9Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team10", SE_SIDES_ONLY, CG_ModernHUDElementTeam10Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team11", SE_SIDES_ONLY, CG_ModernHUDElementTeam11Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team12", SE_SIDES_ONLY, CG_ModernHUDElementTeam12Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team13", SE_SIDES_ONLY, CG_ModernHUDElementTeam13Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team14", SE_SIDES_ONLY, CG_ModernHUDElementTeam14Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team15", SE_SIDES_ONLY, CG_ModernHUDElementTeam15Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
+	{ "team16", SE_SIDES_ONLY, CG_ModernHUDElementTeam16Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
 	{ "votemessagearena", 0, NULL, NULL, NULL },
-	{ "votemessageworld", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementVMWCreate, CG_SHUDElementVMWRoutine, CG_SHUDElementVMWDestroy },
-	{ "warmupinfo", 0, CG_SHUDElementWarmupInfoCreate, CG_SHUDElementWarmupInfoRoutine, CG_SHUDElementWarmupInfoDestroy },
-	{ "weaponlist", 0, CG_SHUDElementWeaponListCreate, CG_SHUDElementWeaponListRoutine, CG_SHUDElementWeaponListDestroy },
+	{ "votemessageworld", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementVMWCreate, CG_ModernHUDElementVMWRoutine, CG_ModernHUDElementVMWDestroy },
+	{ "warmupinfo", 0, CG_ModernHUDElementWarmupInfoCreate, CG_ModernHUDElementWarmupInfoRoutine, CG_ModernHUDElementWarmupInfoDestroy },
+	{ "weaponlist", 0, CG_ModernHUDElementWeaponListCreate, CG_ModernHUDElementWeaponListRoutine, CG_ModernHUDElementWeaponListDestroy },
 	{ "weaponselection", 0, NULL, NULL, NULL },
 	{ "weaponselectionname", 0, NULL, NULL, NULL },
 	{ "chat", 0, NULL, NULL, NULL },
@@ -395,48 +399,48 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "team6_NME", 0, NULL, NULL, NULL },
 	{ "team7_NME", 0, NULL, NULL, NULL },
 	{ "team8_NME", 0, NULL, NULL, NULL },
-	{ "rewardicons", 0, CG_SHUDElementRewardIconCreate, CG_SHUDElementRewardRoutine, CG_SHUDElementRewardDestroy },
-	{ "rewardnumbers", 0, CG_SHUDElementRewardCountCreate, CG_SHUDElementRewardRoutine, CG_SHUDElementRewardDestroy },
-	{ "awards", 0, CG_SHUDElementAwardsCreate, CG_SHUDElementAwardsRoutine, CG_SHUDElementAwardsDestroy },
-	{ "crosshair", 0, CG_SHUDElementCrosshairCreate, CG_SHUDElementCrosshairRoutine, CG_SHUDElementCrosshairDestroy },
-	{ "statusbar_value", 0, CG_SHUDElementStatusbarValueCreate, CG_SHUDElementStatusbarValueRoutine, CG_SHUDElementStatusbarValueDestroy },
-	{ "statusbar_icon", 0, CG_SHUDElementStatusbarIconCreate, CG_SHUDElementStatusbarIconRoutine, CG_SHUDElementStatusbarIconDestroy },
-	{ "statusbar_bar", 0, CG_SHUDElementStatusbarBarCreate, CG_SHUDElementStatusbarBarRoutine, CG_SHUDElementStatusbarBarDestroy },
-	{ "obituary1", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementObituaries1Create, CG_SHUDElementObituariesRoutine, CG_SHUDElementObituariesDestroy },
-	{ "obituary2", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementObituaries2Create, CG_SHUDElementObituariesRoutine, CG_SHUDElementObituariesDestroy },
-	{ "obituary3", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementObituaries3Create, CG_SHUDElementObituariesRoutine, CG_SHUDElementObituariesDestroy },
-	{ "obituary4", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementObituaries4Create, CG_SHUDElementObituariesRoutine, CG_SHUDElementObituariesDestroy },
-	{ "obituary5", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementObituaries5Create, CG_SHUDElementObituariesRoutine, CG_SHUDElementObituariesDestroy },
-	{ "obituary6", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementObituaries6Create, CG_SHUDElementObituariesRoutine, CG_SHUDElementObituariesDestroy },
-	{ "obituary7", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementObituaries7Create, CG_SHUDElementObituariesRoutine, CG_SHUDElementObituariesDestroy },
-	{ "obituary8", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementObituaries8Create, CG_SHUDElementObituariesRoutine, CG_SHUDElementObituariesDestroy },
-	{ "location", 0, CG_SHUDElementLocationCreate, CG_SHUDElementLocationRoutine, CG_SHUDElementLocationDestroy },
-	{ "tempAcc_current", SE_IM | SE_DEAD, CG_SHUDElementTempAccTextCreate, CG_SHUDElementTempAccRoutine, CG_SHUDElementTempAccDestroy },
-	{ "tempAcc_icon", SE_IM | SE_DEAD, CG_SHUDElementTempAccIconCreate, CG_SHUDElementTempAccRoutine, CG_SHUDElementTempAccDestroy },
-	{ "currentWeaponStats", SE_IM, CG_SHUDElementCreateCurrentWeapon, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_MG", SE_IM, CG_SHUDElementWeaponStatsCreateMG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_SG", SE_IM, CG_SHUDElementWeaponStatsCreateSG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_GL", SE_IM, CG_SHUDElementWeaponStatsCreateGL, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_RL", SE_IM, CG_SHUDElementWeaponStatsCreateRL, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_LG", SE_IM, CG_SHUDElementWeaponStatsCreateLG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_RG", SE_IM, CG_SHUDElementWeaponStatsCreateRG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_PG", SE_IM, CG_SHUDElementWeaponStatsCreatePG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "currentWeaponStats_icon", SE_IM, CG_SHUDElementIconCreateCurrentWeapon, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_MG_icon", SE_IM, CG_SHUDElementIconCreateMG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_SG_icon", SE_IM, CG_SHUDElementIconCreateSG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_GL_icon", SE_IM, CG_SHUDElementIconCreateGL, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_RL_icon", SE_IM, CG_SHUDElementIconCreateRL, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_LG_icon", SE_IM, CG_SHUDElementIconCreateLG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_RG_icon", SE_IM, CG_SHUDElementIconCreateRG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "weaponStats_PG_icon", SE_IM, CG_SHUDElementIconCreatePG, CG_SHUDElementWeaponStatsRoutine, CG_SHUDElementWeaponStatsDestroy },
-	{ "playerStats_DG", SE_IM, CG_SHUDElementCreatePlayerStatsDG, CG_SHUDElementPlayerStatsRoutine, CG_SHUDElementPlayerStatsDestroy },
-	{ "playerStats_DR", SE_IM, CG_SHUDElementCreatePlayerStatsDR, CG_SHUDElementPlayerStatsRoutine, CG_SHUDElementPlayerStatsDestroy },
-	{ "playerStats_DG_icon", SE_IM, CG_SHUDElementCreatePlayerStatsDGIcon, CG_SHUDElementPlayerStatsRoutine, CG_SHUDElementPlayerStatsDestroy },
-	{ "playerStats_DR_icon", SE_IM, CG_SHUDElementCreatePlayerStatsDRIcon, CG_SHUDElementPlayerStatsRoutine, CG_SHUDElementPlayerStatsDestroy },
-	{ "playerStats_damageRatio", SE_IM, CG_SHUDElementCreatePlayerStatsDamageRatio, CG_SHUDElementPlayerStatsRoutine, CG_SHUDElementPlayerStatsDestroy },
-	{ "player_name", 0, CG_SHUDElementPlayerNameCreate, CG_SHUDElementPlayerNameRoutine, CG_SHUDElementPlayerNameDestroy },
-	{ "postdecorate", 0, CG_SHUDElementDecorCreate, CG_SHUDElementDecorRoutine, CG_SHUDElementDecorDestroy },
-	{ "netstats", SE_IM | SE_SPECT | SE_DEAD, CG_SHUDElementNetStatsCreate, CG_SHUDElementNetStatsRoutine, CG_SHUDElementNetStatsDestroy },
+	{ "rewardicons", 0, CG_ModernHUDElementRewardIconCreate, CG_ModernHUDElementRewardRoutine, CG_ModernHUDElementRewardDestroy },
+	{ "rewardnumbers", 0, CG_ModernHUDElementRewardCountCreate, CG_ModernHUDElementRewardRoutine, CG_ModernHUDElementRewardDestroy },
+	{ "awards", 0, CG_ModernHUDElementAwardsCreate, CG_ModernHUDElementAwardsRoutine, CG_ModernHUDElementAwardsDestroy },
+	{ "crosshair", 0, CG_ModernHUDElementCrosshairCreate, CG_ModernHUDElementCrosshairRoutine, CG_ModernHUDElementCrosshairDestroy },
+	{ "statusbar_value", 0, CG_ModernHUDElementStatusbarValueCreate, CG_ModernHUDElementStatusbarValueRoutine, CG_ModernHUDElementStatusbarValueDestroy },
+	{ "statusbar_icon", 0, CG_ModernHUDElementStatusbarIconCreate, CG_ModernHUDElementStatusbarIconRoutine, CG_ModernHUDElementStatusbarIconDestroy },
+	{ "statusbar_bar", 0, CG_ModernHUDElementStatusbarBarCreate, CG_ModernHUDElementStatusbarBarRoutine, CG_ModernHUDElementStatusbarBarDestroy },
+	{ "obituary1", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementObituaries1Create, CG_ModernHUDElementObituariesRoutine, CG_ModernHUDElementObituariesDestroy },
+	{ "obituary2", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementObituaries2Create, CG_ModernHUDElementObituariesRoutine, CG_ModernHUDElementObituariesDestroy },
+	{ "obituary3", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementObituaries3Create, CG_ModernHUDElementObituariesRoutine, CG_ModernHUDElementObituariesDestroy },
+	{ "obituary4", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementObituaries4Create, CG_ModernHUDElementObituariesRoutine, CG_ModernHUDElementObituariesDestroy },
+	{ "obituary5", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementObituaries5Create, CG_ModernHUDElementObituariesRoutine, CG_ModernHUDElementObituariesDestroy },
+	{ "obituary6", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementObituaries6Create, CG_ModernHUDElementObituariesRoutine, CG_ModernHUDElementObituariesDestroy },
+	{ "obituary7", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementObituaries7Create, CG_ModernHUDElementObituariesRoutine, CG_ModernHUDElementObituariesDestroy },
+	{ "obituary8", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementObituaries8Create, CG_ModernHUDElementObituariesRoutine, CG_ModernHUDElementObituariesDestroy },
+	{ "location", 0, CG_ModernHUDElementLocationCreate, CG_ModernHUDElementLocationRoutine, CG_ModernHUDElementLocationDestroy },
+	{ "tempAcc_current", SE_IM | SE_DEAD, CG_ModernHUDElementTempAccTextCreate, CG_ModernHUDElementTempAccRoutine, CG_ModernHUDElementTempAccDestroy },
+	{ "tempAcc_icon", SE_IM | SE_DEAD, CG_ModernHUDElementTempAccIconCreate, CG_ModernHUDElementTempAccRoutine, CG_ModernHUDElementTempAccDestroy },
+	{ "currentWeaponStats", SE_IM, CG_ModernHUDElementCreateCurrentWeapon, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_MG", SE_IM, CG_ModernHUDElementWeaponStatsCreateMG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_SG", SE_IM, CG_ModernHUDElementWeaponStatsCreateSG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_GL", SE_IM, CG_ModernHUDElementWeaponStatsCreateGL, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_RL", SE_IM, CG_ModernHUDElementWeaponStatsCreateRL, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_LG", SE_IM, CG_ModernHUDElementWeaponStatsCreateLG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_RG", SE_IM, CG_ModernHUDElementWeaponStatsCreateRG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_PG", SE_IM, CG_ModernHUDElementWeaponStatsCreatePG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "currentWeaponStats_icon", SE_IM, CG_ModernHUDElementIconCreateCurrentWeapon, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_MG_icon", SE_IM, CG_ModernHUDElementIconCreateMG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_SG_icon", SE_IM, CG_ModernHUDElementIconCreateSG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_GL_icon", SE_IM, CG_ModernHUDElementIconCreateGL, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_RL_icon", SE_IM, CG_ModernHUDElementIconCreateRL, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_LG_icon", SE_IM, CG_ModernHUDElementIconCreateLG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_RG_icon", SE_IM, CG_ModernHUDElementIconCreateRG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "weaponStats_PG_icon", SE_IM, CG_ModernHUDElementIconCreatePG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
+	{ "playerStats_DG", SE_IM, CG_ModernHUDElementCreatePlayerStatsDG, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
+	{ "playerStats_DR", SE_IM, CG_ModernHUDElementCreatePlayerStatsDR, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
+	{ "playerStats_DG_icon", SE_IM, CG_ModernHUDElementCreatePlayerStatsDGIcon, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
+	{ "playerStats_DR_icon", SE_IM, CG_ModernHUDElementCreatePlayerStatsDRIcon, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
+	{ "playerStats_damageRatio", SE_IM, CG_ModernHUDElementCreatePlayerStatsDamageRatio, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
+	{ "player_name", 0, CG_ModernHUDElementPlayerNameCreate, CG_ModernHUDElementPlayerNameRoutine, CG_ModernHUDElementPlayerNameDestroy },
+	{ "postdecorate", 0, CG_ModernHUDElementDecorCreate, CG_ModernHUDElementDecorRoutine, CG_ModernHUDElementDecorDestroy },
+	{ "netstats", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementNetStatsCreate, CG_ModernHUDElementNetStatsRoutine, CG_ModernHUDElementNetStatsDestroy },
 	{ NULL, 0, NULL, NULL, NULL }
 };
 
@@ -469,7 +473,7 @@ const wiredHudElementDef_t *WiredHud_FindElementDef( const char *name ) {
 	return NULL;
 }
 
-qboolean WiredHud_CreateElement( const char *name, const superhudConfig_t *config ) {
+qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *config ) {
 	const wiredHudElementDef_t *def;
 	wiredHudActiveElement_t *elem;
 	void *ctx;

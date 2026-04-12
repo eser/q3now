@@ -46,7 +46,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_chat.h"
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
-#include "g_bot_lua.h"
+#include "wired/bots/g_bot_scripts.h"
+#include "wired/bots/g_wiredbots.h"
 //
 #include "chars.h"				//characteristics
 #include "inv.h"				//indexes into the inventory
@@ -242,7 +243,7 @@ char *BotMapTitle(void) {
 	return mapname;
 }
 
-static void BotLua_InitChatCtx( bot_state_t *bs, botLuaChatCtx_t *ctx ) {
+static void WiredBots_InitChatCtx( bot_state_t *bs, wbChatCtx_t *ctx ) {
 	if ( !ctx ) {
 		return;
 	}
@@ -429,10 +430,10 @@ int BotChat_EnterGame(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
-		return BotLua_Chat( bs, "game_enter", &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
+		return WiredBots_Chat( bs, "game_enter", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -468,10 +469,10 @@ int BotChat_ExitGame(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
-		return BotLua_Chat( bs, "game_exit", &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
+		return WiredBots_Chat( bs, "game_exit", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -507,10 +508,11 @@ int BotChat_StartLevel(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
-		return BotLua_Chat( bs, "level_start", &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
+		if ( TeamPlayIsOn() ) WiredBots_Announce( bs, WB_TAUNT_GENERIC, NULL );
+		return WiredBots_Chat( bs, "level_start", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -518,9 +520,6 @@ int BotChat_StartLevel(bot_state_t *bs) {
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	//don't chat in teamplay
 	if (TeamPlayIsOn()) {
-#if FEAT_TA_VOICECHAT
-	    trap_EA_Command(bs->client, "vtaunt");
-#endif
 	    return qfalse;
 	}
 	// don't chat in duel mode
@@ -547,24 +546,20 @@ int BotChat_EndLevel(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
 		ctx.won = BotIsFirstInRankings( bs ) ? 1 : ( BotIsLastInRankings( bs ) ? -1 : 0 );
-		return BotLua_Chat( bs, "level_end", &ctx );
+		if ( TeamPlayIsOn() && BotIsFirstInRankings( bs ) ) WiredBots_Announce( bs, WB_TAUNT_PRAISE, NULL );
+		return WiredBots_Chat( bs, "level_end", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
 	if (BotIsObserver(bs)) return qfalse;
 	if (bs->lastchat_time > FloatTime() - TIME_BETWEENCHATTING) return qfalse;
 	// teamplay
-	if (TeamPlayIsOn()) 
+	if (TeamPlayIsOn())
 	{
-#if FEAT_TA_VOICECHAT
-		if (BotIsFirstInRankings(bs)) {
-			trap_EA_Command(bs->client, "vtaunt");
-		}
-#endif
 		return qtrue;
 	}
 	// don't chat in duel mode
@@ -616,15 +611,16 @@ int BotChat_Death(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
 		ctx.team = ( TeamPlayIsOn() && BotSameTeam( bs, bs->lastkilledby ) ) ? 1 : 0;
 		if ( bs->lastkilledby >= 0 && bs->lastkilledby < MAX_CLIENTS ) {
 			ClientName( bs->lastkilledby, ctx.killer, sizeof( ctx.killer ) );
 		}
 		Q_strncpyz( ctx.weapon, BotLuaWeaponKeyForMOD( bs->botdeathtype ), sizeof( ctx.weapon ) );
-		return BotLua_Chat( bs, "death", &ctx );
+		if ( TeamPlayIsOn() ) WiredBots_Announce( bs, WB_TAUNT_DEATH, NULL );
+		return WiredBots_Chat( bs, "death", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -652,9 +648,6 @@ int BotChat_Death(bot_state_t *bs) {
 	{
 		//teamplay
 		if (TeamPlayIsOn()) {
-#if FEAT_TA_VOICECHAT
-			trap_EA_Command(bs->client, "vtaunt");
-#endif
 			return qtrue;
 		}
 		//
@@ -721,15 +714,16 @@ int BotChat_Kill(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
 		ctx.team = ( TeamPlayIsOn() && BotSameTeam( bs, bs->lastkilledplayer ) ) ? 1 : 0;
 		if ( bs->lastkilledplayer >= 0 && bs->lastkilledplayer < MAX_CLIENTS ) {
 			ClientName( bs->lastkilledplayer, ctx.victim, sizeof( ctx.victim ) );
 		}
 		Q_strncpyz( ctx.weapon, BotLuaWeaponKeyForMOD( bs->enemydeathtype ), sizeof( ctx.weapon ) );
-		return BotLua_Chat( bs, "kill", &ctx );
+		if ( TeamPlayIsOn() ) WiredBots_Announce( bs, WB_TAUNT_KILL, NULL );
+		return WiredBots_Chat( bs, "kill", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -758,9 +752,6 @@ int BotChat_Kill(bot_state_t *bs) {
 	{
 		//don't chat in teamplay
 		if (TeamPlayIsOn()) {
-#if FEAT_TA_VOICECHAT
-			trap_EA_Command(bs->client, "vtaunt");
-#endif
 			return qfalse;			// don't wait
 		}
 		//
@@ -796,13 +787,13 @@ int BotChat_EnemySuicide(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
 		if ( bs->enemy >= 0 && bs->enemy < MAX_CLIENTS ) {
 			ClientName( bs->enemy, ctx.victim, sizeof( ctx.victim ) );
 		}
-		return BotLua_Chat( bs, "enemy_suicide", &ctx );
+		return WiredBots_Chat( bs, "enemy_suicide", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -840,10 +831,10 @@ int BotChat_HitTalking(bot_state_t *bs) {
 	int lasthurt_client;
 	float rnd;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
-		return BotLua_Chat( bs, "hit_talking", &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
+		return WiredBots_Chat( bs, "hit_talking", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -886,10 +877,10 @@ int BotChat_HitNoDeath(bot_state_t *bs) {
 	int lasthurt_client;
 	aas_entityinfo_t entinfo;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
-		return BotLua_Chat( bs, "hit_nodeath", &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
+		return WiredBots_Chat( bs, "hit_nodeath", &ctx );
 	}
 
 	lasthurt_client = g_entities[bs->client].client->lasthurt_client;
@@ -936,10 +927,10 @@ int BotChat_HitNoKill(bot_state_t *bs) {
 	float rnd;
 	aas_entityinfo_t entinfo;
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
-		return BotLua_Chat( bs, "hit_nokill", &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
+		return WiredBots_Chat( bs, "hit_nokill", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -979,10 +970,11 @@ int BotChat_Random(bot_state_t *bs) {
 	float rnd;
 	char name[32];
 
-	if ( bs->luaCharacterActive ) {
-		botLuaChatCtx_t ctx;
-		BotLua_InitChatCtx( bs, &ctx );
-		return BotLua_Chat( bs, "random", &ctx );
+	if ( bs->wiredBotsActive ) {
+		wbChatCtx_t ctx;
+		WiredBots_InitChatCtx( bs, &ctx );
+		if ( TeamPlayIsOn() ) WiredBots_Announce( bs, WB_TAUNT_GENERIC, NULL );
+		return WiredBots_Chat( bs, "random", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -1014,9 +1006,6 @@ int BotChat_Random(bot_state_t *bs) {
 		EasyClientName(bs->lastkilledplayer, name, sizeof(name));
 	}
 	if (TeamPlayIsOn()) {
-#if FEAT_TA_VOICECHAT
-		trap_EA_Command(bs->client, "vtaunt");
-#endif
 		return qfalse;			// don't wait
 	}
 	//
@@ -1053,7 +1042,7 @@ BotChatTime
 float BotChatTime(bot_state_t *bs) {
 	//int cpm;
 
-	if ( bs->luaCharacterActive ) return 0.0f;
+	if ( bs->wiredBotsActive ) return 0.0f;
 
 	//cpm = trap_Characteristic_BInteger(bs->character, CHARACTERISTIC_CHAT_CPM, 1, 4000);
 
@@ -1071,7 +1060,7 @@ void BotChatTest(bot_state_t *bs) {
 	char *weap;
 	int num, i;
 
-	if ( bs->luaCharacterActive ) return;
+	if ( bs->wiredBotsActive ) return;
 
 	num = trap_BotNumInitialChats(bs->cs, "game_enter");
 	for (i = 0; i < num; i++)

@@ -8,24 +8,24 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudDrawContext_t drawCtx;
-} shudElementGridContext;
+	modernhudConfig_t config;
+	modernhudDrawContext_t drawCtx;
+} modernHudElementGridContext;
 
-void* CG_SHUDElementGridCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementGridCreate(const modernhudConfig_t* config)
 {
-	shudElementGridContext* element;
+	modernHudElementGridContext* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDDrawMakeContext(&element->config, &element->drawCtx);
+	CG_ModernHUDDrawMakeContext(&element->config, &element->drawCtx);
 
 	return element;
 }
 
-void CG_SHUDElementGridRoutine(void* context)
+void CG_ModernHUDElementGridRoutine(void* context)
 {
-	shudElementGridContext* element = (shudElementGridContext*)context;
+	modernHudElementGridContext* element = (modernHudElementGridContext*)context;
 	int index;
 	float x = element->config.rect.value[0];
 	float y = element->config.rect.value[1];
@@ -34,7 +34,7 @@ void CG_SHUDElementGridRoutine(void* context)
 	vec4_t color1, color2;
 	float col, row;
 	float startCol, startRow;
-	superhudCoord_t coord;
+	modernhudCoord_t coord;
 	qboolean hasColor2 = element->config.color2.isSet;
 
 	Vector4Copy(element->config.color.value.rgba, color1);
@@ -65,11 +65,11 @@ void CG_SHUDElementGridRoutine(void* context)
 
 		if (hasColor2 && (index & 1))
 		{
-			CG_SHUDFillWithColor(&coord, color2);
+			CG_ModernHUDFillWithColor(&coord, color2);
 		}
 		else
 		{
-			CG_SHUDFillWithColor(&coord, color1);
+			CG_ModernHUDFillWithColor(&coord, color1);
 		}
 	}
 
@@ -83,16 +83,16 @@ void CG_SHUDElementGridRoutine(void* context)
 
 		if (hasColor2 && (index & 1))
 		{
-			CG_SHUDFillWithColor(&coord, color2);
+			CG_ModernHUDFillWithColor(&coord, color2);
 		}
 		else
 		{
-			CG_SHUDFillWithColor(&coord, color1);
+			CG_ModernHUDFillWithColor(&coord, color1);
 		}
 	}
 }
 
-void CG_SHUDElementGridDestroy(void* context)
+void CG_ModernHUDElementGridDestroy(void* context)
 {
 	if (context)
 	{

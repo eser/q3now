@@ -1,6 +1,6 @@
 // ingame_scoreboard_duel.wmenu - In-game Duel/Tournament scoreboard (TAB overlay)
 // Absolute positioning -- single full-screen duel board widget.
-// Uses ITEM_TYPE_DUELBOARD (type 21) for CPMA-style two-panel fighter layout.
+// Uses ITEM_TYPE_DUELBOARD (type 21) for Pro-style two-panel fighter layout.
 
 #include "ui/wmenumacros.h"
 

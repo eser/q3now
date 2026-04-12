@@ -50,16 +50,16 @@ return {
   },
 
   attacks = {
-    "g2",    -- gauntlet lunge: suicidal opener at high skill
-    "g1",    -- gauntlet primary: dramatic statement
-    "lg1",   -- lightning: close-range DPS
-    "rl1",   -- rocket: self-splash accepted
-    "sg1",   -- shotgun: point blank
-    "sg2",   -- double blast: close charge
-    "pr1",   -- plasma: suppression
-    "gl1",   -- grenades: trailing explosions
-    "mg1",
-    "rg1",   -- rail: last resort
+    { "g2",  aim_height = 28 },  -- gauntlet lunge: suicidal opener at high skill
+    { "g1",  aim_height = 28 },  -- gauntlet primary: dramatic statement
+    { "lg1", aim_height = 28 },  -- lightning: close-range DPS
+    { "rl1", aim_height = 0  },  -- rocket: self-splash accepted, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: point blank
+    { "sg2", aim_height = 28 },  -- double blast: close charge
+    { "pr1", aim_height = 28 },  -- plasma: suppression
+    { "gl1", aim_height = 0  },  -- grenades: trailing explosions, aim at feet
+    { "mg1", aim_height = 28 },
+    { "rg1", aim_height = 36 },  -- rail: last resort
   },
 
   items = {

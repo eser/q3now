@@ -8,25 +8,25 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementAmmoMessage_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementAmmoMessage_t;
 
-void* CG_SHUDElementAmmoMessageCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementAmmoMessageCreate(const modernhudConfig_t* config)
 {
-	shudElementAmmoMessage_t* element;
+	modernHudElementAmmoMessage_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementAmmoMessageRoutine(void* context)
+void CG_ModernHUDElementAmmoMessageRoutine(void* context)
 {
-	shudElementAmmoMessage_t* element = (shudElementAmmoMessage_t*)context;
+	modernHudElementAmmoMessage_t* element = (modernHudElementAmmoMessage_t*)context;
 
 	if (cg_drawAmmoWarning.integer == 0)
 	{
@@ -46,10 +46,10 @@ void CG_SHUDElementAmmoMessageRoutine(void* context)
 	{
 		element->ctx.text = "LOW AMMO WARNING";
 	}
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementAmmoMessageDestroy(void* context)
+void CG_ModernHUDElementAmmoMessageDestroy(void* context)
 {
 	if (context)
 	{

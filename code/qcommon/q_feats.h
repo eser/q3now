@@ -12,7 +12,6 @@
 
 // ── mature (stable, shipped) ────────────────────────────────────────────
 #define FEAT_ATMOSPHERIC                  1   // 3B  rain & snow particles
-#define FEAT_BOT_IMPROVEMENTS             1   // advanced bot AI: dodge, awareness, strafejump, item timing, weapon selection
 #define FEAT_CRON_JOBS                    1   // 11  timed server-side tasks
 #define FEAT_DAMAGE_PLUMS                 1   // 2A  floating damage numbers
 #define FEAT_FAST_WEAPON_SWITCH           1   // 5A  fast weapon switch (0=normal, 1=skip drop, 2=instant)
@@ -68,7 +67,7 @@
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
 #define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
 #define FEAT_MOVEMENT_KEYS                0   // show followed player's movement keys (spectator HUD)
-#define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + SuperHUD)
+#define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + ModernHUD)
 #define FEAT_LEGACY_UI                    0   // legacy TA menu/HUD code paths (compile-time hard cut)
 
 // ── engine internals (testing) ────────────────────────────────────────
@@ -77,6 +76,8 @@
 #define FEAT_LEGACY_FORMATS_IMAGE         1   // BMP, PCX, TGA image loaders (retire by setting to 0; PNG+JPG remain)
 #define FEAT_WASM                         1   // WASM VM backend via WAMR (replaces QVM over time)
 #define FEAT_LEGACY_QVM                   0   // QVM bytecode interpreter + JIT (retire by setting to 0)
+#define FEAT_WIREDNET_OBSERVER            1   // HTTP observer: /status.json, JSON event ring, static web UI
+#define FEAT_WIREDNET_CONTROL             1   // MCP/JSON-RPC control channel over QUIC + HTTP POST /mcp
 
 // ── model formats ────────────────────────────────────────────────────
 #define FEAT_IQM                          1   // IQM (Inter-Quake Model) skeletal mesh format
@@ -106,7 +107,6 @@
 #define FEAT_TA_UI                        1   // Team Arena UI framework, HUD, menus
 #define FEAT_TA_VOICECHAT                 1   // vsay/vtell voice commands (bots use when enabled)
 #define FEAT_TA_TEAM_OVERLAYS             1   // team status overlay HUD (health/armor/weapon of teammates)
-#define FEAT_TA_TEAM_ORDERS               1   // team orders & squad commands (order teammates, accept/deny)
 #define FEAT_HARVESTER                    1   // Harvester game mode (skull/cube collection)
 #define FEAT_OVERLOAD                     1   // Overload game mode (obelisk control)
 #define FEAT_PW_PORTAL                    1   // Invulnerability shield (sphere, railgun bounce)
@@ -114,7 +114,6 @@
 #define FEAT_TA_UI                        0
 #define FEAT_TA_VOICECHAT                 0
 #define FEAT_TA_TEAM_OVERLAYS             0
-#define FEAT_TA_TEAM_ORDERS               0
 #define FEAT_HARVESTER                    0
 #define FEAT_OVERLOAD                     0
 #define FEAT_PW_PORTAL                    0

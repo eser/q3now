@@ -9,25 +9,25 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementTargetStatus_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementTargetStatus_t;
 
-void* CG_SHUDElementTargetStatusCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementTargetStatusCreate(const modernhudConfig_t* config)
 {
-	shudElementTargetStatus_t* element;
+	modernHudElementTargetStatus_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementTargetStatusRoutine(void* context)
+void CG_ModernHUDElementTargetStatusRoutine(void* context)
 {
-	shudElementTargetStatus_t* element = (shudElementTargetStatus_t*)context;
+	modernHudElementTargetStatus_t* element = (modernHudElementTargetStatus_t*)context;
 	char    s[1024];
 	clientInfo_t* ci;
 
@@ -40,7 +40,7 @@ void CG_SHUDElementTargetStatusRoutine(void* context)
 	if (cg.crosshairClientTime == 0) return;
 
 
-	if (!CG_SHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.crosshairClientTime))
+	if (!CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.crosshairClientTime))
 	{
 		cg.crosshairClientTime = 0;
 		return;
@@ -66,7 +66,7 @@ void CG_SHUDElementTargetStatusRoutine(void* context)
 			{
 				element->ctx.color[3] = element->config.color.value.rgba[3];
 			}
-			CG_SHUDTextPrintNew(&element->config, &element->ctx, qfalse);
+			CG_ModernHUDTextPrintNew(&element->config, &element->ctx, qfalse);
 
 			element->ctx.text = NULL;
 		}
@@ -74,7 +74,7 @@ void CG_SHUDElementTargetStatusRoutine(void* context)
 
 }
 
-void CG_SHUDElementTargetStatusDestroy(void* context)
+void CG_ModernHUDElementTargetStatusDestroy(void* context)
 {
 	if (context)
 	{

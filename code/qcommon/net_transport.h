@@ -4,7 +4,7 @@ net_transport.h — Game transport vtable abstraction
 
 Decouples engine networking from the underlying protocol (QUIC).
 All engine code routes sends and receives through transport->* function
-pointers. Only code/wired/net/wn_transport.c touches picoquic directly.
+pointers. Only code/qcommon/wired/net/wn_transport.c touches picoquic directly.
 
 conn_handle_t
   Opaque 64-bit connection identifier. Replaces netadr_t + NA_QUIC routing.

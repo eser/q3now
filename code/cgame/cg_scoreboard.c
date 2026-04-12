@@ -962,7 +962,7 @@ qboolean CG_ModernDrawFFAScoreboard(void)
 =================
 CG_ModernDrawDuelScoreboard
 
-CPMA-style tournament scoreboard with per-attack stats.
+Pro-style tournament scoreboard with per-attack stats.
 =================
 */
 

@@ -50,14 +50,14 @@ return {
   },
 
   attacks = {
-    "lg1",   -- lightning: primary close-range weapon
-    "rl1",   -- rocket: charge in and fire
-    "sg1",   -- shotgun: point-blank destruction
-    "sg2",   -- double blast: opening charge burst
-    "pr1",   -- plasma: suppress then close
-    "gl1",   -- grenades: thrown while rushing
-    "mg1",
-    "rg1",   -- rail: rarely used
+    { "lg1", aim_height = 28 },  -- lightning: primary close-range weapon
+    { "rl1", aim_height = 0  },  -- rocket: charge in and fire, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: point-blank destruction
+    { "sg2", aim_height = 28 },  -- double blast: opening charge burst
+    { "pr1", aim_height = 28 },  -- plasma: suppress then close
+    { "gl1", aim_height = 0  },  -- grenades: thrown while rushing, aim at feet
+    { "mg1", aim_height = 28 },
+    { "rg1", aim_height = 36 },  -- rail: rarely used
   },
 
   items = {

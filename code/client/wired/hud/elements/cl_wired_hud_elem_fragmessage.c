@@ -8,17 +8,17 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
 	int* time;
-} shudElementFragMessage_t;
+} modernHudElementFragMessage_t;
 
-void* CG_SHUDElementFragMessageCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementFragMessageCreate(const modernhudConfig_t* config)
 {
-	shudElementFragMessage_t* element;
-	superhudGlobalContext_t* gctx;
+	modernHudElementFragMessage_t* element;
+	modernhudGlobalContext_t* gctx;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	if (!element->config.time.isSet)
 	{
@@ -26,36 +26,36 @@ void* CG_SHUDElementFragMessageCreate(const superhudConfig_t* config)
 		element->config.time.value = 2000;
 	}
 
-	gctx = CG_SHUDGetContext();
+	gctx = CG_ModernHUDGetContext();
 	element->time = &gctx->fragmessage.time;
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	element->ctx.text = gctx->fragmessage.message;
 
 	return element;
 }
 
-void CG_SHUDElementFragMessageRoutine(void* context)
+void CG_ModernHUDElementFragMessageRoutine(void* context)
 {
-	shudElementFragMessage_t* element = (shudElementFragMessage_t*)context;
+	modernHudElementFragMessage_t* element = (modernHudElementFragMessage_t*)context;
 
 	if (!*element->time)
 	{
 		return;
 	}
 
-	if (!CG_SHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, *element->time))
+	if (!CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, *element->time))
 	{
 		*element->time = 0;
 		return;
 	}
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementFragMessageDestroy(void* context)
+void CG_ModernHUDElementFragMessageDestroy(void* context)
 {
 	if (context)
 	{

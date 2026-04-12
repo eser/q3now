@@ -79,6 +79,7 @@ cgs_t				cgs;
 centity_t			cg_entities[MAX_GENTITIES];
 weaponInfo_t		cg_weapons[MAX_WEAPONS];
 itemInfo_t			cg_items[MAX_ITEMS];
+botDirectiveDisplay_t	cg_botDirectives[MAX_CLIENTS];
 
 
 vmCvar_t	cg_centertime;
@@ -220,6 +221,7 @@ vmCvar_t	cg_fovAspectAdjust;
 vmCvar_t	cg_viewbob;
 vmCvar_t	cg_viewkick;
 vmCvar_t	cg_drawSpeed;
+vmCvar_t	cg_drawBotDirectives;
 #if FEAT_FOLLOW_KILLER
 vmCvar_t	cg_followKiller;
 #endif
@@ -260,7 +262,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_drawCrosshair, "cg_drawCrosshair", "4", CVAR_ARCHIVE },
 	{ &cg_drawCrosshairNames, "cg_drawCrosshairNames", "1", CVAR_ARCHIVE },
 	{ &cg_drawRewards, "cg_drawRewards", "1", CVAR_ARCHIVE },
-	{ &cg_crosshairSize, "cg_crosshairSize", "24", CVAR_ARCHIVE },
+	{ &cg_crosshairSize, "cg_crosshairSize", "48", CVAR_ARCHIVE },
 	{ &cg_crosshairHealth, "cg_crosshairHealth", "1", CVAR_ARCHIVE },
 	{ &cg_crosshairColor, "cg_crosshairColor", "white", CVAR_ARCHIVE },
 	{ &cg_crosshairAlpha, "cg_crosshairAlpha", "1.0", CVAR_ARCHIVE },
@@ -393,7 +395,8 @@ static cvarTable_t cvarTable[] = {
     { &cg_fovAspectAdjust, "cg_fovAspectAdjust", "1", CVAR_ARCHIVE },
     { &cg_viewbob, "cg_viewbob", "1", CVAR_ARCHIVE },
     { &cg_viewkick, "cg_viewkick", "1", CVAR_ARCHIVE },
-	{ &cg_drawSpeed,   "cg_drawSpeed",   "0", CVAR_ARCHIVE },
+	{ &cg_drawSpeed,          "cg_drawSpeed",          "0", CVAR_ARCHIVE },
+	{ &cg_drawBotDirectives,  "cg_drawBotDirectives",  "1", CVAR_ARCHIVE },
 	{ &cg_hitSounds, "cg_hitSounds", "1", CVAR_ARCHIVE },
 #if FEAT_FOLLOW_KILLER
 	{ &cg_followKiller, "cg_followKiller", "0", CVAR_ARCHIVE },

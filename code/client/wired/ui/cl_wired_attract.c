@@ -27,7 +27,7 @@ Integration hooks (called from cl_wired_ui.c):
 #include "../../client.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_attract.h"
-#include "../../../qcommon/scripting/wired_scripting.h"
+#include "../../../qcommon/wired/scripting/wired_scripting.h"
 
 #if FEAT_WIRED_UI
 

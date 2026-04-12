@@ -1,9 +1,9 @@
 /*
 ===========================================================================
-cl_wired_hud_compat.h — Compatibility shim for SuperHUD element migration
+cl_wired_hud_compat.h — Compatibility shim for ModernHUD element migration
 
 This header maps cgame API patterns to client equivalents so that
-SuperHUD element files can be moved to the client with MINIMAL changes.
+ModernHUD element files can be moved to the client with MINIMAL changes.
 Each element file only needs: #include "cg_local.h" → #include "cl_wired_hud_compat.h"
 
 Provides:

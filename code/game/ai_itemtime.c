@@ -26,8 +26,6 @@ Skill scaling: only skill 4+ actively times items.
 #include "ai_main.h"
 #include "ai_itemtime.h"
 
-#if FEAT_BOT_IMPROVEMENTS
-
 // mirror g_items.c respawn values (seconds)
 #define RESPAWN_ARMOR		30
 #define RESPAWN_HEALTH		30
@@ -206,5 +204,3 @@ qboolean BotItemTimingGoal( struct bot_state_s *bs )
 
 	return ( bestItem >= 0 ) ? qtrue : qfalse;
 }
-
-#endif // FEAT_BOT_IMPROVEMENTS

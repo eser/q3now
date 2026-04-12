@@ -9,23 +9,23 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementSpectators_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementSpectators_t;
 
-void* CG_SHUDElementSpectatorsCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementSpectatorsCreate(const modernhudConfig_t* config)
 {
-	shudElementSpectators_t* element;
+	modernHudElementSpectators_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-static qboolean CG_SHUD_SpectatorsBuildString(char* out, int outSize, const superhudConfig_t* config)
+static qboolean CG_ModernHUD_SpectatorsBuildString(char* out, int outSize, const modernhudConfig_t* config)
 {
 	wuiStoreEntry_t *e;
 	int len = 0;
@@ -51,14 +51,14 @@ static qboolean CG_SHUD_SpectatorsBuildString(char* out, int outSize, const supe
 	return qtrue;
 }
 
-void CG_SHUDElementSpectatorsRoutine(void* context)
+void CG_ModernHUDElementSpectatorsRoutine(void* context)
 {
-	shudElementSpectators_t* element = (shudElementSpectators_t*)context;
+	modernHudElementSpectators_t* element = (modernHudElementSpectators_t*)context;
 	static char buffer[MAX_STRING_CHARS];
 
-	if (!CG_SHUD_SpectatorsBuildString(buffer, sizeof(buffer), &element->config))
+	if (!CG_ModernHUD_SpectatorsBuildString(buffer, sizeof(buffer), &element->config))
 	{
-		if (!SHUD_CHECK_SHOW_EMPTY(element))
+		if (!ModernHUD_CHECK_SHOW_EMPTY(element))
 		{
 			return;
 		}
@@ -73,10 +73,10 @@ void CG_SHUDElementSpectatorsRoutine(void* context)
 	}
 
 	element->ctx.text = buffer;
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementSpectatorsDestroy(void* context)
+void CG_ModernHUDElementSpectatorsDestroy(void* context)
 {
 	if (context)
 	{

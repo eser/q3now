@@ -9,25 +9,25 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementTargetName_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementTargetName_t;
 
-void* CG_SHUDElementTargetNameCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementTargetNameCreate(const modernhudConfig_t* config)
 {
-	shudElementTargetName_t* element;
+	modernHudElementTargetName_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementTargetNameRoutine(void* context)
+void CG_ModernHUDElementTargetNameRoutine(void* context)
 {
-	shudElementTargetName_t* element = (shudElementTargetName_t*)context;
+	modernHudElementTargetName_t* element = (modernHudElementTargetName_t*)context;
 	char    s[1024];
 	clientInfo_t* ci;
 	int clientNum;
@@ -36,7 +36,7 @@ void CG_SHUDElementTargetNameRoutine(void* context)
 	if ( wiredHud->renderingThirdPerson ) return;
 	if ( wiredHud->crosshairClientTime == 0 ) return;
 
-	if ( !CG_SHUDGetFadeColor( element->ctx.color_origin, element->ctx.color,
+	if ( !CG_ModernHUDGetFadeColor( element->ctx.color_origin, element->ctx.color,
 			&element->config, wiredHud->crosshairClientTime ) )
 	{
 		return;
@@ -56,11 +56,11 @@ void CG_SHUDElementTargetNameRoutine(void* context)
 
 	Com_sprintf( s, sizeof(s), "%s", ci->name );
 	element->ctx.text = s;
-	CG_SHUDTextPrint( &element->config, &element->ctx );
+	CG_ModernHUDTextPrint( &element->config, &element->ctx );
 	element->ctx.text = NULL;
 }
 
-void CG_SHUDElementTargetNameDestroy(void* context)
+void CG_ModernHUDElementTargetNameDestroy(void* context)
 {
 	if (context)
 	{

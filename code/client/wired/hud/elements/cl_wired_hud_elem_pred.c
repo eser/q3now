@@ -9,18 +9,18 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudDrawContext_t drawCtx;
-	superhudTextContext_t textCtx;
-} shudElementStatusbarDecorate;
+	modernhudConfig_t config;
+	modernhudDrawContext_t drawCtx;
+	modernhudTextContext_t textCtx;
+} modernHudElementStatusbarDecorate;
 
-void* CG_SHUDElementDecorCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementDecorCreate(const modernhudConfig_t* config)
 {
-	shudElementStatusbarDecorate* element;
+	modernHudElementStatusbarDecorate* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDDrawMakeContext(&element->config, &element->drawCtx);
+	CG_ModernHUDDrawMakeContext(&element->config, &element->drawCtx);
 
 	if (config->image.isSet)
 	{
@@ -33,34 +33,34 @@ void* CG_SHUDElementDecorCreate(const superhudConfig_t* config)
 
 	if (config->text.isSet)
 	{
-		CG_SHUDTextMakeContext(&element->config, &element->textCtx);
+		CG_ModernHUDTextMakeContext(&element->config, &element->textCtx);
 		element->textCtx.text = config->text.value;
-		CG_SHUDFillAndFrameForText(&element->config, &element->textCtx);
+		CG_ModernHUDFillAndFrameForText(&element->config, &element->textCtx);
 	}
 
 	return element;
 }
 
-void CG_SHUDElementDecorRoutine(void* context)
+void CG_ModernHUDElementDecorRoutine(void* context)
 {
-	shudElementStatusbarDecorate* element = (shudElementStatusbarDecorate*)context;
+	modernHudElementStatusbarDecorate* element = (modernHudElementStatusbarDecorate*)context;
 
-	if (!CG_SHUDFill(&element->config))
+	if (!CG_ModernHUDFill(&element->config))
 	{
 		if (element->drawCtx.image)
 		{
-			CG_SHUDDrawStretchPicCtx(&element->config, &element->drawCtx);
+			CG_ModernHUDDrawStretchPicCtx(&element->config, &element->drawCtx);
 		}
 		if (element->textCtx.text)
 		{
-			CG_SHUDTextPrint(&element->config, &element->textCtx);
+			CG_ModernHUDTextPrint(&element->config, &element->textCtx);
 		}
 	}
 
-	CG_SHUDDrawBorder(&element->config);
+	CG_ModernHUDDrawBorder(&element->config);
 }
 
-void CG_SHUDElementDecorDestroy(void* context)
+void CG_ModernHUDElementDecorDestroy(void* context)
 {
 	if (context)
 	{

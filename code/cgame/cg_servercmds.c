@@ -414,6 +414,26 @@ static void CG_ConfigStringModified( void ) {
 	else if ( num == CS_SHADERSTATE ) {
 		CG_ShaderStateChanged();
 	}
+	else if ( num >= CS_BOTDIRECTIVES && num < CS_BOTDIRECTIVES + MAX_CLIENTS ) {
+		int slot = num - CS_BOTDIRECTIVES;
+		botDirectiveDisplay_t *bd = &cg_botDirectives[slot];
+		const char *sep;
+
+		if ( !str[0] ) {
+			bd->type = 0;
+			bd->targetName[0] = '\0';
+			return;
+		}
+
+		bd->type = atoi( str );
+		sep = strchr( str, '\\' );
+		if ( sep ) {
+			Q_strncpyz( bd->targetName, sep + 1, sizeof( bd->targetName ) );
+		} else {
+			bd->targetName[0] = '\0';
+		}
+		bd->updateTime = cg.time;
+	}
 }
 
 
@@ -706,7 +726,12 @@ void CG_LoadVoiceChats( void ) {
 	CG_ParseVoiceChats( "scripts/male3.voice", &voiceChatLists[5], MAX_VOICECHATS );
 	CG_ParseVoiceChats( "scripts/male4.voice", &voiceChatLists[6], MAX_VOICECHATS );
 	CG_ParseVoiceChats( "scripts/male5.voice", &voiceChatLists[7], MAX_VOICECHATS );
-	CG_Printf("voice chat memory size = %d\n", size - trap_MemoryRemaining());
+	{
+		char devBuf[8];
+		trap_Cvar_VariableStringBuffer( "developer", devBuf, sizeof(devBuf) );
+		if ( atoi(devBuf) )
+			CG_Printf("voice chat memory size = %d\n", size - trap_MemoryRemaining());
+	}
 }
 
 /*

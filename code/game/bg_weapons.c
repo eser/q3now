@@ -513,3 +513,47 @@ gweapon_t	bg_weaponlist[] =
 		/* weight               */ 1.0f
 	}
 };
+
+
+/*
+====================
+BG_ModShortName
+
+Return a short ASCII weapon tag for a means-of-death value.
+Used for event encoding and coaching tools.
+====================
+*/
+const char *BG_ModShortName( meansOfDeath_t mod )
+{
+	switch ( mod ) {
+	case MOD_SHOTGUN:               return "sg";
+	case MOD_SHOTGUN_DOUBLE_BLAST:  return "sg";
+	case MOD_GAUNTLET:              return "gauntlet";
+	case MOD_GAUNTLET_LUNGE:        return "gauntlet";
+	case MOD_MACHINEGUN:            return "mg";
+	case MOD_MACHINEGUN_BURST:      return "mg";
+	case MOD_GRENADE:               return "gl";
+	case MOD_GRENADE_SPLASH:        return "gl";
+	case MOD_ROCKET:                return "rl";
+	case MOD_ROCKET_SPLASH:         return "rl";
+	case MOD_ROCKET_MORTAR:         return "rl";
+	case MOD_ROCKET_MORTAR_SPLASH:  return "rl";
+	case MOD_PLASMA:                return "pg";
+	case MOD_RAILGUN:               return "rg";
+	case MOD_LIGHTNING:             return "lg";
+	case MOD_LIGHTNING_DISCHARGE:   return "lg";
+	case MOD_LIGHTNING_CHAIN_ARC:   return "lg";
+	case MOD_GRAPPLE:               return "grapple";
+	case MOD_TELEFRAG:              return "telefrag";
+	case MOD_FALLING:               return "falling";
+	case MOD_SUICIDE:               return "suicide";
+	case MOD_WATER:                 return "water";
+	case MOD_SLIME:                 return "slime";
+	case MOD_LAVA:                  return "lava";
+	case MOD_CRUSH:                 return "crush";
+	case MOD_TARGET_LASER:          return "laser";
+	case MOD_TRIGGER_HURT:          return "hurt";
+	case MOD_KAMIKAZE:              return "kamikaze";
+	default:                        return "world";
+	}
+}

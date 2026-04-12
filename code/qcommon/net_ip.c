@@ -24,7 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/qcommon.h"
 #include "q_feats.h"
 
-#include "../wired/net/wn_public.h"
+#include "wired/net/wn_public.h"
 // Set to qtrue when QUIC consumed a packet — tells NET_Event to keep draining
 static qboolean net_quicConsumedPacket;
 
