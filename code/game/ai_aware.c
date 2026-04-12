@@ -27,8 +27,6 @@ react_time delay before bot can act on awareness.
 #include "ai_main.h"
 #include "ai_aware.h"
 
-#if FEAT_BOT_IMPROVEMENTS
-
 #define AWARE_BASE_RADIUS		1500.0f	// base detection radius (units)
 #define AWARE_REACT_BASE		0.8f	// base reaction time (seconds)
 #define AWARE_EXPIRE_TIME		5.0f	// seconds before awareness expires
@@ -140,7 +138,7 @@ void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius )
 	bs->aware[bs->num_aware].visual = qfalse;
 	bs->num_aware++;
 
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	trap_WiredNet_EmitBotEvent( bs->entitynum, "aware", entnum, (int)dist, bs->origin );
 #endif
 }
@@ -180,5 +178,3 @@ int BotBestAwareEnemy( struct bot_state_s *bs )
 
 	return best;
 }
-
-#endif // FEAT_BOT_IMPROVEMENTS

@@ -10,9 +10,9 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudConfig_t tmp_config;
-	superhudTextContext_t position;
+	modernhudConfig_t config;
+	modernhudConfig_t tmp_config;
+	modernhudTextContext_t position;
 	float x;
 	float y;
 	float w;
@@ -23,22 +23,22 @@ typedef struct
 	char ammo[16][8];                     /* generic buffer (>= WLIST_MAX_SLOTS) */
 	vec4_t border[16];
 	vec4_t borderColor[16];
-	superhudDrawContext_t back[16];
-	superhudDrawContext_t weaponIcon[16];
-	superhudTextContext_t ammoCount[16];
+	modernhudDrawContext_t back[16];
+	modernhudDrawContext_t weaponIcon[16];
+	modernhudTextContext_t ammoCount[16];
 
-} shudElementWeaponList_t;
+} modernHudElementWeaponList_t;
 
-void* CG_SHUDElementWeaponListCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementWeaponListCreate(const modernhudConfig_t* config)
 {
-	shudElementWeaponList_t* element;
+	modernHudElementWeaponList_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	if (!element->config.textAlign.isSet)
 	{
 		element->config.textAlign.isSet = qtrue;
-		element->config.textAlign.value = SUPERHUD_ALIGNH_CENTER;
+		element->config.textAlign.value = MODERNHUD_ALIGNH_CENTER;
 	}
 	memcpy(&element->tmp_config, &element->config, sizeof(element->tmp_config));
 
@@ -47,20 +47,20 @@ void* CG_SHUDElementWeaponListCreate(const superhudConfig_t* config)
 	element->w = element->config.rect.value[2];
 	element->h = element->config.rect.value[3];
 
-	CG_SHUDTextMakeContext(&element->tmp_config, &element->ammoCount[0]);
+	CG_ModernHUDTextMakeContext(&element->tmp_config, &element->ammoCount[0]);
 
 	element->ammoMax = -1;
 
 	return element;
 }
 
-static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, superhudAlignH_t align)
+static void CG_ModernHUDElementWeaponListSetup(modernHudElementWeaponList_t* element, modernhudAlignH_t align)
 {
 	int wpi;
-	int x, y, w, h;
+	int x, y, h;
 	int total;
 	int ammo_max = 0;
-	float offsetX, offsetY;
+	float offsetX;
 	int count;
 
 	if (!wiredHud || !wiredHud->valid) return;
@@ -82,14 +82,14 @@ static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, supe
 	if (ammo_max > element->ammoMax)
 	{
 		element->ammoMax = ammo_max;
-		element->ammoWidth = (int)Text_Measure(va(" %d", ammo_max), element->ammoCount[0].fontId, element->ammoCount[0].coord.named.w);
+		element->ammoWidth = (int)Text_Measure(va(" %d", ammo_max), element->ammoCount[0].fontId, element->ammoCount[0].coord.named.h);
 	}
 
 	total = count;
 
-	if (align == SUPERHUD_ALIGNH_CENTER)
+	if (align == MODERNHUD_ALIGNH_CENTER)
 	{
-		x = element->x - total * (element->w + element->ammoWidth) / 2;
+		x = element->x - total * (element->h + element->ammoWidth) / 2;
 		y = element->y;
 	}
 	else
@@ -97,7 +97,6 @@ static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, supe
 		x = element->x;
 		y = element->y - total * element->h / 2;
 	}
-	w = element->w;
 	h = element->h;
 
 	element->weaponNum = 0;
@@ -107,42 +106,42 @@ static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, supe
 		int ammo;
 
 		/* icon */
-		element->tmp_config.alignV.value = SUPERHUD_ALIGNV_TOP;
+		element->tmp_config.alignV.value = MODERNHUD_ALIGNV_TOP;
 		element->tmp_config.alignV.isSet = qtrue;
 
-		if (align != SUPERHUD_ALIGNH_RIGHT)
+		if (align != MODERNHUD_ALIGNH_RIGHT)
 		{
-			element->tmp_config.alignH.value = SUPERHUD_ALIGNH_LEFT;
+			element->tmp_config.alignH.value = MODERNHUD_ALIGNH_LEFT;
 			element->tmp_config.alignH.isSet = qtrue;
 		}
 		else
 		{
-			element->tmp_config.alignH.value = SUPERHUD_ALIGNH_RIGHT;
+			element->tmp_config.alignH.value = MODERNHUD_ALIGNH_RIGHT;
 			element->tmp_config.alignH.isSet = qtrue;
 		}
 
 		element->tmp_config.rect.value[0] = x;
 		element->tmp_config.rect.value[1] = y;
-		element->tmp_config.rect.value[2] = w;
+		element->tmp_config.rect.value[2] = h;
 		element->tmp_config.rect.value[3] = h;
-		CG_SHUDDrawMakeContext(&element->tmp_config, &element->weaponIcon[element->weaponNum]);
+		CG_ModernHUDDrawMakeContext(&element->tmp_config, &element->weaponIcon[element->weaponNum]);
 		element->weaponIcon[element->weaponNum].image = wiredHud->weaponList[wpi].icon;
 
 		/* selection and background */
 		element->tmp_config.rect.value[0] = x;
-		if (align == SUPERHUD_ALIGNH_RIGHT)
+		if (align == MODERNHUD_ALIGNH_RIGHT)
 		{
 			element->tmp_config.rect.value[0] -= element->ammoWidth;
 		}
 		element->tmp_config.rect.value[1] = y;
-		element->tmp_config.rect.value[2] = w + element->ammoWidth;
+		element->tmp_config.rect.value[2] = h + element->ammoWidth;
 		element->tmp_config.rect.value[3] = h;
-		CG_SHUDDrawMakeContext(&element->tmp_config, &element->back[element->weaponNum]);
+		CG_ModernHUDDrawMakeContext(&element->tmp_config, &element->back[element->weaponNum]);
 		if (!wiredHud->weaponList[wpi].selected)
 		{
 			if (element->config.bgcolor.isSet)
 			{
-				CG_SHUDConfigPickBgColor(&element->tmp_config, element->back[element->weaponNum].color, qfalse);
+				CG_ModernHUDConfigPickBgColor(&element->tmp_config, element->back[element->weaponNum].color, qfalse);
 			}
 			else
 			{
@@ -174,7 +173,7 @@ static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, supe
 
 			if (element->config.borderColor.isSet)
 			{
-				CG_SHUDConfigPickBorderColor(&element->config, element->borderColor[element->weaponNum], qfalse);
+				CG_ModernHUDConfigPickBorderColor(&element->config, element->borderColor[element->weaponNum], qfalse);
 			}
 			else
 			{
@@ -188,47 +187,47 @@ static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, supe
 		}
 
 		/* ammo */
-		if (align != SUPERHUD_ALIGNH_RIGHT)
+		if (align != MODERNHUD_ALIGNH_RIGHT)
 		{
-			element->tmp_config.rect.value[0] = x + w;
-			element->tmp_config.textAlign.value = SUPERHUD_ALIGNH_LEFT;
+			element->tmp_config.rect.value[0] = x + h;
+			element->tmp_config.textAlign.value = MODERNHUD_ALIGNH_LEFT;
 			element->tmp_config.textAlign.isSet = qtrue;
 		}
 		else
 		{
 			element->tmp_config.rect.value[0] = x;
-			element->tmp_config.textAlign.value = SUPERHUD_ALIGNH_RIGHT;
+			element->tmp_config.textAlign.value = MODERNHUD_ALIGNH_RIGHT;
 			element->tmp_config.textAlign.isSet = qtrue;
 		}
-		element->tmp_config.rect.value[1] = y;
-		element->tmp_config.rect.value[2] = w;
+		/* position text top so it is visually centered in the slot:
+		   MSDF y = em-top (glyph drawn downward), so offset = (slot_h - font_h) / 2 */
+		element->tmp_config.rect.value[1] = y + (h - element->tmp_config.fontsize.value[1]) * 0.5f;
+		element->tmp_config.rect.value[2] = element->ammoWidth;
 		element->tmp_config.rect.value[3] = h;
 
-		element->tmp_config.alignV.value = SUPERHUD_ALIGNV_CENTER;
+		element->tmp_config.alignV.value = MODERNHUD_ALIGNV_TOP;
 		element->tmp_config.alignV.isSet = qtrue;
 
-		element->tmp_config.alignH.value = SUPERHUD_ALIGNH_LEFT;
+		element->tmp_config.alignH.value = MODERNHUD_ALIGNH_LEFT;
 		element->tmp_config.alignH.isSet = qtrue;
 
 		offsetX = element->tmp_config.fontsize.value[0] / 8;
-		offsetY = element->tmp_config.fontsize.value[1] / 16;
 
-		if (align == SUPERHUD_ALIGNH_RIGHT)
+		if (align == MODERNHUD_ALIGNH_RIGHT)
 		{
 			element->tmp_config.rect.value[0] += (offsetX + offsetX);
 		}
 		else
 		{
 			element->tmp_config.rect.value[0] -= offsetX;
-			element->tmp_config.rect.value[1] -= offsetY;
 		}
 
-		CG_SHUDTextMakeContext(&element->tmp_config, &element->ammoCount[element->weaponNum]);
+		CG_ModernHUDTextMakeContext(&element->tmp_config, &element->ammoCount[element->weaponNum]);
 		element->ammoCount[element->weaponNum].text = &element->ammo[element->weaponNum][0];
 
 		ammo = wiredHud->weaponList[wpi].ammo;
 
-		if (align != SUPERHUD_ALIGNH_RIGHT)
+		if (align != MODERNHUD_ALIGNH_RIGHT)
 		{
 			Com_sprintf(&element->ammo[element->weaponNum][0], 8, " %i", ammo);
 		}
@@ -249,9 +248,9 @@ static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, supe
 			Vector4Copy(element->tmp_config.color.value.rgba, element->ammoCount[element->weaponNum].color);
 		}
 
-		if (align == SUPERHUD_ALIGNH_CENTER)
+		if (align == MODERNHUD_ALIGNH_CENTER)
 		{
-			x += w + element->ammoWidth;
+			x += h + element->ammoWidth;
 		}
 		else
 		{
@@ -261,23 +260,23 @@ static void CG_SHUDElementWeaponListSetup(shudElementWeaponList_t* element, supe
 	}
 }
 
-void CG_SHUDElementWeaponListRoutine(void* context)
+void CG_ModernHUDElementWeaponListRoutine(void* context)
 {
-	shudElementWeaponList_t* element = (shudElementWeaponList_t*)context;
+	modernHudElementWeaponList_t* element = (modernHudElementWeaponList_t*)context;
 	int i;
 
-	CG_SHUDElementWeaponListSetup(element, element->config.textAlign.value);
+	CG_ModernHUDElementWeaponListSetup(element, element->config.textAlign.value);
 
 	for (i = 0; i < element->weaponNum; ++i)
 	{
-		CG_SHUDFillWithColor(&element->back[i].coord, element->back[i].color);
-		CG_SHUDDrawStretchPicCtx(&element->config, &element->weaponIcon[i]);
-		CG_SHUDTextPrintNew(&element->config, &element->ammoCount[i], qfalse);
-		CG_SHUDDrawBorderDirect(&element->back[i].coord, element->border[i], element->borderColor[i]);
+		CG_ModernHUDFillWithColor(&element->back[i].coord, element->back[i].color);
+		CG_ModernHUDDrawStretchPicCtx(&element->config, &element->weaponIcon[i]);
+		CG_ModernHUDTextPrintNew(&element->config, &element->ammoCount[i], qfalse);
+		CG_ModernHUDDrawBorderDirect(&element->back[i].coord, element->border[i], element->borderColor[i]);
 	}
 }
 
-void CG_SHUDElementWeaponListDestroy(void* context)
+void CG_ModernHUDElementWeaponListDestroy(void* context)
 {
 	if (context)
 	{

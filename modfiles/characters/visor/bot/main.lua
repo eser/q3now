@@ -50,14 +50,14 @@ return {
   },
 
   attacks = {
-    "rg1",   -- rail: the duelist's signature
-    "lg1",   -- lightning: dominant close range
-    "lg2",   -- chain arc: punish groups
-    "rl1",   -- rocket: medium support
-    "sg1",   -- shotgun: close desperation
-    "pr1",   -- plasma: suppression
-    "gl1",   -- grenades: area denial
-    "mg1",
+    { "rg1", aim_height = 36 },  -- rail: the duelist's signature — upper body
+    { "lg1", aim_height = 28 },  -- lightning: dominant close range
+    { "lg2", aim_height = 28 },  -- chain arc: punish groups
+    { "rl1", aim_height = 0  },  -- rocket: medium support, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: close desperation
+    { "pr1", aim_height = 28 },  -- plasma: suppression
+    { "gl1", aim_height = 0  },  -- grenades: area denial, aim at feet
+    { "mg1", aim_height = 28 },
   },
 
   items = {

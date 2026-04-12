@@ -50,13 +50,13 @@ return {
   },
 
   attacks = {
-    "rl1",   -- rocket: jump fuel and main damage tool
-    "rg1",   -- rail: precision finisher
-    "lg1",   -- lightning: close pursuit
-    "gl1",   -- grenades: traps mid-air
-    "sg1",   -- shotgun: landing shot
-    "pr1",   -- plasma: suppression
-    "mg1",
+    { "rl1", aim_height = 0  },  -- rocket: jump fuel and main damage tool, aim at feet
+    { "rg1", aim_height = 36 },  -- rail: precision finisher
+    { "lg1", aim_height = 28 },  -- lightning: close pursuit
+    { "gl1", aim_height = 0  },  -- grenades: traps mid-air, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: landing shot
+    { "pr1", aim_height = 28 },  -- plasma: suppression
+    { "mg1", aim_height = 28 },
   },
 
   items = {

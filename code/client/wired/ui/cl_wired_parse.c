@@ -713,10 +713,10 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			if ( WiredPC_String( handle, &str ) )
 				Q_strncpyz( item->hideBind, str, sizeof( item->hideBind ) );
 		}
-		// ── SuperHUD element properties (Phase 3) ────────────────────
+		// ── ModernHUD element properties (Phase 3) ────────────────────
 		else if ( !Q_stricmp( token.string, "font" ) ) {
 			// font "name" [pointsize]
-			// SuperHUD items: font name only (fontsize parsed separately)
+			// ModernHUD items: font name only (fontsize parsed separately)
 			// Native format (.wmenu/.whud): font "name" pointsize
 			if ( WiredPC_String( handle, &str ) )
 				Q_strncpyz( item->fontName, str, sizeof( item->fontName ) );
@@ -1455,7 +1455,7 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 
 	if ( wired_menuCount < WIRED_MAX_MENUS ) {
 		wired_menus[wired_menuCount++] = menu;
-		Com_Printf( "WiredUI: loaded menu '%s' (%d items)\n", menu->name, menu->itemCount );
+		Com_DPrintf( "WiredUI: loaded menu '%s' (%d items)\n", menu->name, menu->itemCount );
 	}
 
 	return qtrue;
@@ -1667,7 +1667,7 @@ qboolean WiredUI_SafeReload( void ) {
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
-#include "../../../qcommon/scripting/wired_scripting.h"
+#include "../../../qcommon/wired/scripting/wired_scripting.h"
 
 static int WiredMenuLua_LoadMenu( lua_State *L ) {
 	const char *path = luaL_checkstring( L, 1 );

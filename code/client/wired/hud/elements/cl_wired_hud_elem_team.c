@@ -11,67 +11,67 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudDrawContext_t ctxPowerup;
-	superhudTextContext_t ctxName;
-	superhudTextContext_t ctxHealthArmor;
-	superhudDrawContext_t ctxWeapon;
-	superhudTextContext_t ctxLocation;
+	modernhudConfig_t config;
+	modernhudDrawContext_t ctxPowerup;
+	modernhudTextContext_t ctxName;
+	modernhudTextContext_t ctxHealthArmor;
+	modernhudDrawContext_t ctxWeapon;
+	modernhudTextContext_t ctxLocation;
 	int index;
-} shudElementTeam_t;
+} modernHudElementTeam_t;
 
 
-static void* CG_SHUDElementTeamCreate(const superhudConfig_t* config, int line)
+static void* CG_ModernHUDElementTeamCreate(const modernhudConfig_t* config, int line)
 {
-	shudTeamOverlay_t teamOverlay;
+	modernHudTeamOverlay_t teamOverlay;
 
-	superhudConfig_t lcfg;
+	modernhudConfig_t lcfg;
 
-	shudElementTeam_t* element;
+	modernHudElementTeam_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	element->index = line;
 
 	//force aligin settings
 	element->config.textAlign.isSet = qtrue;
-	element->config.textAlign.value = SUPERHUD_ALIGNH_LEFT;
+	element->config.textAlign.value = MODERNHUD_ALIGNH_LEFT;
 	element->config.alignH.isSet = qtrue;
-	element->config.alignH.value = SUPERHUD_ALIGNH_LEFT;
+	element->config.alignH.value = MODERNHUD_ALIGNH_LEFT;
 	element->config.alignV.isSet = qtrue;
-	element->config.alignV.value = SUPERHUD_ALIGNV_CENTER;
+	element->config.alignV.value = MODERNHUD_ALIGNV_CENTER;
 
-	CG_SHUDElementCompileTeamOverlayConfig(config->fontsize.value[0], &teamOverlay);
+	CG_ModernHUDElementCompileTeamOverlayConfig(config->fontsize.value[0], &teamOverlay);
 
 	memcpy(&lcfg, &element->config, sizeof(element->config));
 
 	// setup powerup
 	lcfg.rect.value[0] = config->rect.value[0] + teamOverlay.powerupOffsetPix;
 	lcfg.rect.value[2] = teamOverlay.powerupLenPix;
-	CG_SHUDDrawMakeContext(&lcfg, &element->ctxPowerup);
+	CG_ModernHUDDrawMakeContext(&lcfg, &element->ctxPowerup);
 
 	// setup name
 	lcfg.rect.value[0] = config->rect.value[0] + teamOverlay.nameOffsetPix;
 	lcfg.rect.value[2] = teamOverlay.nameLenPix;
-	CG_SHUDTextMakeContext(&lcfg, &element->ctxName);
+	CG_ModernHUDTextMakeContext(&lcfg, &element->ctxName);
 	element->ctxName.width = teamOverlay.nameLenPix;
 
 	// setup health and armor
 	lcfg.rect.value[0] = config->rect.value[0] + teamOverlay.healthAndArmorOffsetPix;
 	lcfg.rect.value[2] = teamOverlay.healthAndArmorLenPix;
-	CG_SHUDTextMakeContext(&lcfg, &element->ctxHealthArmor);
+	CG_ModernHUDTextMakeContext(&lcfg, &element->ctxHealthArmor);
 	element->ctxHealthArmor.width = teamOverlay.healthAndArmorLenPix;
 	element->ctxHealthArmor.flags |= DS_FORCE_COLOR;
 
 	// setup weapon
 	lcfg.rect.value[0] = config->rect.value[0] + teamOverlay.weaponOffsetPix;
 	lcfg.rect.value[2] = teamOverlay.weaponLenPix;
-	CG_SHUDDrawMakeContext(&lcfg, &element->ctxWeapon);
+	CG_ModernHUDDrawMakeContext(&lcfg, &element->ctxWeapon);
 
 	// setup location
 	lcfg.rect.value[0] = config->rect.value[0] + teamOverlay.locationOffsetPix;
 	lcfg.rect.value[2] = teamOverlay.locationLenPix;
-	CG_SHUDTextMakeContext(&lcfg, &element->ctxLocation);
+	CG_ModernHUDTextMakeContext(&lcfg, &element->ctxLocation);
 	element->ctxLocation.width = teamOverlay.locationLenPix;
 
 	// setup width of element
@@ -80,89 +80,89 @@ static void* CG_SHUDElementTeamCreate(const superhudConfig_t* config, int line)
 	return element;
 }
 
-void* CG_SHUDElementTeam1Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam1Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 1);
+	return CG_ModernHUDElementTeamCreate(config, 1);
 }
 
-void* CG_SHUDElementTeam2Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam2Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 2);
+	return CG_ModernHUDElementTeamCreate(config, 2);
 }
 
-void* CG_SHUDElementTeam3Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam3Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 3);
+	return CG_ModernHUDElementTeamCreate(config, 3);
 }
 
-void* CG_SHUDElementTeam4Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam4Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 4);
+	return CG_ModernHUDElementTeamCreate(config, 4);
 }
 
-void* CG_SHUDElementTeam5Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam5Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 5);
+	return CG_ModernHUDElementTeamCreate(config, 5);
 }
 
-void* CG_SHUDElementTeam6Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam6Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 6);
+	return CG_ModernHUDElementTeamCreate(config, 6);
 }
 
-void* CG_SHUDElementTeam7Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam7Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 7);
+	return CG_ModernHUDElementTeamCreate(config, 7);
 }
 
-void* CG_SHUDElementTeam8Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam8Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 8);
+	return CG_ModernHUDElementTeamCreate(config, 8);
 }
 
-void* CG_SHUDElementTeam9Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam9Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 9);
+	return CG_ModernHUDElementTeamCreate(config, 9);
 }
 
-void* CG_SHUDElementTeam10Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam10Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 10);
+	return CG_ModernHUDElementTeamCreate(config, 10);
 }
 
-void* CG_SHUDElementTeam11Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam11Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 11);
+	return CG_ModernHUDElementTeamCreate(config, 11);
 }
 
-void* CG_SHUDElementTeam12Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam12Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 12);
+	return CG_ModernHUDElementTeamCreate(config, 12);
 }
 
-void* CG_SHUDElementTeam13Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam13Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 13);
+	return CG_ModernHUDElementTeamCreate(config, 13);
 }
 
-void* CG_SHUDElementTeam14Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam14Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 14);
+	return CG_ModernHUDElementTeamCreate(config, 14);
 }
 
-void* CG_SHUDElementTeam15Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam15Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 15);
+	return CG_ModernHUDElementTeamCreate(config, 15);
 }
 
-void* CG_SHUDElementTeam16Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementTeam16Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementTeamCreate(config, 16);
+	return CG_ModernHUDElementTeamCreate(config, 16);
 }
 
-void CG_SHUDElementTeamRoutine(void* context)
+void CG_ModernHUDElementTeamRoutine(void* context)
 {
-	shudElementTeam_t* element = (shudElementTeam_t*)context;
+	modernHudElementTeam_t* element = (modernHudElementTeam_t*)context;
 	clientInfo_t* ci;
 	int cnt = 0;
 	int index;
@@ -198,14 +198,14 @@ void CG_SHUDElementTeamRoutine(void* context)
 		//no elements
 		return;
 	}
-	CG_SHUDFill(&element->config);
+	CG_ModernHUDFill(&element->config);
 
 	//get player
 	ci = &cgs.clientinfo[sortedTeamPlayers[index]];
 
 	// draw name
 	element->ctxName.text = ci->name;
-	CG_SHUDTextPrint(&element->config, &element->ctxName);
+	CG_ModernHUDTextPrint(&element->config, &element->ctxName);
 
 	// draw health and armor
 	wired_GetColorForAmount(ci->health, element->ctxHealthArmor.color);
@@ -222,7 +222,7 @@ void CG_SHUDElementTeamRoutine(void* context)
 
 	// draw weapon
 	element->ctxWeapon.image = cg_weapons[ci->curWeapon].ammoIcon ?  cg_weapons[ci->curWeapon].ammoIcon : cgs.media.deferShader;
-	CG_SHUDDrawStretchPicCtx(&element->config, &element->ctxWeapon);
+	CG_ModernHUDDrawStretchPicCtx(&element->config, &element->ctxWeapon);
 
 	// draw powerup
 	{
@@ -234,7 +234,7 @@ void CG_SHUDElementTeamRoutine(void* context)
 			if (qfalse && ci->health <= 0)
 			{
 				element->ctxPowerup.image = cgs.media.noammoShader;
-				CG_SHUDDrawStretchPicCtx(&element->config, &element->ctxPowerup);
+				CG_ModernHUDDrawStretchPicCtx(&element->config, &element->ctxPowerup);
 				break;
 			}
 			else if (ci->powerups & (1 << k))
@@ -243,7 +243,7 @@ void CG_SHUDElementTeamRoutine(void* context)
 				if (gi)
 				{
 					element->ctxPowerup.image = trap_R_RegisterShader(gi->icon);
-					CG_SHUDDrawStretchPicCtx(&element->config, &element->ctxPowerup);
+					CG_ModernHUDDrawStretchPicCtx(&element->config, &element->ctxPowerup);
 				}
 			}
 		}
@@ -258,11 +258,11 @@ void CG_SHUDElementTeamRoutine(void* context)
 			element->ctxLocation.text = "unknown";
 		}
 
-		CG_SHUDTextPrint(&element->config, &element->ctxLocation);
+		CG_ModernHUDTextPrint(&element->config, &element->ctxLocation);
 	}
 }
 
-void CG_SHUDElementTeamDestroy(void* context)
+void CG_ModernHUDElementTeamDestroy(void* context)
 {
 	if (context)
 	{

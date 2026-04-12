@@ -33,8 +33,6 @@ Skill scaling: lower skill blends fuzzy weights + tracked accuracy.
 #include "ai_weapsel.h"
 #include "inv.h"
 
-#if FEAT_BOT_IMPROVEMENTS
-
 // static weapon stats table — mirrors g_weapon.c / g_missile.c values
 typedef struct {
 	int		damage;			// direct hit damage
@@ -263,5 +261,3 @@ void BotChooseWeaponDPS( struct bot_state_s *bs )
 		bs->weaponnum = bs->best_weapon;
 	}
 }
-
-#endif // FEAT_BOT_IMPROVEMENTS

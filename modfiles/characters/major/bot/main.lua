@@ -50,13 +50,13 @@ return {
   },
 
   attacks = {
-    "rg1",   -- rail: methodical precision
-    "rl1",   -- rocket: area control
-    "lg1",   -- lightning: close follow-through
-    "gl1",   -- grenades: patient area denial
-    "sg1",   -- shotgun: close punish
-    "pr1",   -- plasma: suppression
-    "mg1",
+    { "rg1", aim_height = 36 },  -- rail: methodical precision
+    { "rl1", aim_height = 0  },  -- rocket: area control, aim at feet
+    { "lg1", aim_height = 28 },  -- lightning: close follow-through
+    { "gl1", aim_height = 0  },  -- grenades: patient area denial, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: close punish
+    { "pr1", aim_height = 28 },  -- plasma: suppression
+    { "mg1", aim_height = 28 },
   },
 
   items = {

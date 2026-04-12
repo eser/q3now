@@ -399,7 +399,7 @@ BotVoiceChat_StartLeader
 ==================
 */
 void BotVoiceChat_StartLeader(bot_state_t *bs, int client, int mode) {
-	ClientName(client, bs->teamleader, sizeof(bs->teamleader));
+	ClientName(client, bs->directives.teamleader, sizeof(bs->directives.teamleader));
 }
 
 /*
@@ -410,8 +410,8 @@ BotVoiceChat_StopLeader
 void BotVoiceChat_StopLeader(bot_state_t *bs, int client, int mode) {
 	char netname[MAX_MESSAGE_SIZE];
 
-	if (!Q_stricmp(bs->teamleader, ClientName(client, netname, sizeof(netname)))) {
-		bs->teamleader[0] = '\0';
+	if (!Q_stricmp(bs->directives.teamleader, ClientName(client, netname, sizeof(netname)))) {
+		bs->directives.teamleader[0] = '\0';
 		notleader[client] = qtrue;
 	}
 }
@@ -428,7 +428,7 @@ void BotVoiceChat_WhoIsLeader(bot_state_t *bs, int client, int mode) {
 
 	ClientName(bs->client, netname, sizeof(netname));
 	//if this bot IS the team leader
-	if (!Q_stricmp(netname, bs->teamleader)) {
+	if (!Q_stricmp(netname, bs->directives.teamleader)) {
 		BotAI_BotInitialChat(bs, "iamteamleader", NULL);
 		trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
 		BotVoiceChatOnly(bs, -1, VOICECHAT_STARTLEADER);

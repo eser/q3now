@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+#include "wired/bots/g_wiredbots.h"
 
 #if FEAT_TA_VOICECHAT
 #include "../qcommon/menudef.h"			// for the voice chats
@@ -614,6 +615,12 @@ void SetTeam( gentity_t *ent, const char *s ) {
 	//
 	client = ent->client;
 
+	// stateless clients are permanently spectators — reject all team changes
+	if ( client->sess.isStatelessClient ) {
+		trap_SendServerCommand( ent->s.number, "print \"Stateless clients cannot join a team.\n\"" );
+		return;
+	}
+
 	clientNum = client - level.clients;
 	specClient = 0;
 	specState = SPECTATOR_NOT;
@@ -1003,6 +1010,18 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 
 	Q_strncpyz( text, chatText, sizeof(text) );
 
+	// WiredBots: process @-addressed directives and colorize mentions before relay
+	if ( text[0] == '@' ) {
+		wbParseResult_t wbResult;
+		WiredBots_ProcessChat( ent->s.number, text, &wbResult );
+		if ( wbResult.hasMentions ) {
+			char colorized[MAX_SAY_TEXT];
+			WiredBots_ColorizeMentions( text, colorized, sizeof(colorized),
+			                            wbResult.recipientMention, wbResult.targetMention );
+			Q_strncpyz( text, colorized, sizeof(text) );
+		}
+	}
+
 	if ( target ) {
 		G_SayTo( ent, target, mode, color, name, text );
 		return;
@@ -1054,7 +1073,7 @@ static void Cmd_Say_f( gentity_t *ent, int mode, qboolean arg0 ) {
 
 	SanitizeChatText( p );
 
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	// WiredNet event: chat message
 	trap_WiredNet_EmitChat( ent->s.number, p, (mode == SAY_TEAM) );
 #endif
@@ -2005,6 +2024,36 @@ void Cmd_BStats_f( gentity_t *ent ) {
 
 /*
 =================
+Cmd_BotSay_f
+=================
+Stateless-client-only command: routes a chat message to WiredBots without
+going through the normal G_Say path.  The message must start with '@'.
+Regular clients attempting this command are rejected.
+*/
+static void Cmd_BotSay_f( gentity_t *ent ) {
+	char msg[MAX_SAY_TEXT];
+	wbParseResult_t result;
+	const char *args;
+
+	if ( !ent->client || !ent->client->sess.isStatelessClient ) {
+		trap_SendServerCommand( ent->s.number, "print \"bot_say: stateless client only\n\"" );
+		return;
+	}
+
+	args = ConcatArgs( 1 );
+	if ( !args || !args[0] ) {
+		return;
+	}
+	Q_strncpyz( msg, args, sizeof( msg ) );
+
+	WiredBots_ProcessChat( ent->s.number, msg, &result );
+
+	/* echo to sender so it can confirm the command was received */
+	trap_SendServerCommand( ent->s.number, va( "print \"[cmd] %s\n\"", msg ) );
+}
+
+/*
+=================
 ClientCommand
 =================
 */
@@ -2034,6 +2083,10 @@ void ClientCommand( int clientNum ) {
 	}
 	if (Q_stricmp (cmd, "say_team") == 0) {
 		Cmd_Say_f (ent, SAY_TEAM, qfalse);
+		return;
+	}
+	if (Q_stricmp (cmd, "bot_say") == 0) {
+		Cmd_BotSay_f (ent);
 		return;
 	}
 	if (Q_stricmp (cmd, "tell") == 0) {

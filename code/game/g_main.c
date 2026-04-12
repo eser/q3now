@@ -1050,6 +1050,10 @@ void CalculateRanks( void ) {
 
 	for ( i = 0 ; i < level.maxclients ; i++ ) {
 		if ( level.clients[i].pers.connected != CON_DISCONNECTED ) {
+			/* stateless clients are hidden — not counted or listed */
+			if ( level.clients[i].sess.isStatelessClient ) {
+				continue;
+			}
 			level.sortedClients[level.numConnectedClients] = i;
 			level.numConnectedClients++;
 

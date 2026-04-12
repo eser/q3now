@@ -51,8 +51,8 @@ if theme and theme ~= "" then
 end
 
 -- ── HUD and scoreboards ───────────────────────────────────────────────
+-- HUD file is loaded by WiredUI_Init via the 'hud' cvar (e.g. \hud hud_default)
 
-load_menu("ui/hud_default.whud")
 load_menu("ui/ingame_scoreboard_ffa.wmenu")
 load_menu("ui/ingame_scoreboard_duel.wmenu")
 load_menu("ui/ingame_scoreboard_tdm.wmenu")

@@ -1,4 +1,4 @@
-// Wired UI: SuperHUD drawing helpers migrated from cg_superhud_util.c
+// Wired UI: ModernHUD drawing helpers migrated from cg_modernhud_util.c
 #include "../../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_text.h"
@@ -14,18 +14,18 @@ typedef struct
 	vec4_t bar2_bottom;
 } drawBarCoords_t;
 
-/* Old CG_SHUDConfigPickColor / CG_SHUDConfigPickBgColor removed --
-   replaced by CG_SHUDConfigPickColorGeneric below. */
+/* Old CG_ModernHUDConfigPickColor / CG_ModernHUDConfigPickBgColor removed --
+   replaced by CG_ModernHUDConfigPickColorGeneric below. */
 
-static void CG_SHUDConfigPickColorGeneric(
+static void CG_ModernHUDConfigPickColorGeneric(
     const qboolean* mainIsSet,
-    const superhudColor_t* mainValue,
+    const modernhudColor_t* mainValue,
     const qboolean* altIsSet,
-    const superhudColor_t* altValue,
+    const modernhudColor_t* altValue,
     float* color,
     qboolean alphaOverride)
 {
-	const superhudColor_t* in = mainValue;
+	const modernhudColor_t* in = mainValue;
 	const float* target;
 	float finalAlpha = 1.0f;
 
@@ -44,26 +44,26 @@ static void CG_SHUDConfigPickColorGeneric(
 
 	switch (in->type)
 	{
-		case SUPERHUD_COLOR_RGBA:
+		case MODERNHUD_COLOR_RGBA:
 			target = in->rgba;
 			finalAlpha = in->rgba[3];
 			break;
 
-		case SUPERHUD_COLOR_T:
+		case MODERNHUD_COLOR_T:
 			target = wiredHud->isOurTeamBlue ? colorBlue : colorRed;
 			break;
 
-		case SUPERHUD_COLOR_E:
+		case MODERNHUD_COLOR_E:
 			target = wiredHud->isOurTeamBlue ? colorRed : colorBlue;
 			break;
 
-		case SUPERHUD_COLOR_I:
+		case MODERNHUD_COLOR_I:
 		default:
 			target = colorWhite;
 			break;
 	}
 
-	if ((*altIsSet) && in->type != SUPERHUD_COLOR_RGBA)
+	if ((*altIsSet) && in->type != MODERNHUD_COLOR_RGBA)
 	{
 		finalAlpha = altValue->rgba[3];
 	}
@@ -83,30 +83,30 @@ static void CG_SHUDConfigPickColorGeneric(
 		color[3] = finalAlpha;
 	}
 }
-void CG_SHUDConfigPickColor(const superhudConfig_t* config, float* color, qboolean alphaOverride)
+void CG_ModernHUDConfigPickColor(const modernhudConfig_t* config, float* color, qboolean alphaOverride)
 {
-	CG_SHUDConfigPickColorGeneric(&config->color.isSet, &config->color.value,
+	CG_ModernHUDConfigPickColorGeneric(&config->color.isSet, &config->color.value,
 	                              &config->color2.isSet, &config->color2.value,
 	                              color, alphaOverride);
 }
 
-void CG_SHUDConfigPickBgColor(const superhudConfig_t* config, float* color, qboolean alphaOverride)
+void CG_ModernHUDConfigPickBgColor(const modernhudConfig_t* config, float* color, qboolean alphaOverride)
 {
-	CG_SHUDConfigPickColorGeneric(&config->bgcolor.isSet, &config->bgcolor.value,
+	CG_ModernHUDConfigPickColorGeneric(&config->bgcolor.isSet, &config->bgcolor.value,
 	                              &config->bgcolor2.isSet, &config->bgcolor2.value,
 	                              color, alphaOverride);
 }
 
-void CG_SHUDConfigPickBorderColor(const superhudConfig_t* config, float* color, qboolean alphaOverride)
+void CG_ModernHUDConfigPickBorderColor(const modernhudConfig_t* config, float* color, qboolean alphaOverride)
 {
-	CG_SHUDConfigPickColorGeneric(&config->borderColor.isSet, &config->borderColor.value,
+	CG_ModernHUDConfigPickColorGeneric(&config->borderColor.isSet, &config->borderColor.value,
 	                              &config->borderColor2.isSet, &config->borderColor2.value,
 	                              color, alphaOverride);
 }
 
 
 
-static void CG_SHUDConfigDefaultsCheck(superhudConfig_t* config)
+static void CG_ModernHUDConfigDefaultsCheck(modernhudConfig_t* config)
 {
 	if (!config->rect.isSet)
 	{
@@ -119,7 +119,7 @@ static void CG_SHUDConfigDefaultsCheck(superhudConfig_t* config)
 
 	if (!config->textAlign.isSet)
 	{
-		config->textAlign.value = SUPERHUD_ALIGNH_LEFT;
+		config->textAlign.value = MODERNHUD_ALIGNH_LEFT;
 		config->textAlign.isSet = qtrue;
 	}
 
@@ -140,15 +140,15 @@ static void CG_SHUDConfigDefaultsCheck(superhudConfig_t* config)
 	if (!config->color.isSet)
 	{
 		Vector4Copy(colorWhite, config->color.value.rgba);
-		config->color.value.type = SUPERHUD_COLOR_RGBA;
+		config->color.value.type = MODERNHUD_COLOR_RGBA;
 		config->color.isSet = qtrue;
 	}
 }
 
-static void CG_SHUDTextMakeAdjustCoords(const superhudConfig_t* in, float* out_x, float* out_y)
+static void CG_ModernHUDTextMakeAdjustCoords(const modernhudConfig_t* in, float* out_x, float* out_y)
 {
-	superhudAlignH_t h;
-	superhudAlignV_t v;
+	modernhudAlignH_t h;
+	modernhudAlignV_t v;
 
 	if (!in->rect.isSet)
 	{
@@ -157,7 +157,7 @@ static void CG_SHUDTextMakeAdjustCoords(const superhudConfig_t* in, float* out_x
 
 	if (!in->alignH.isSet)
 	{
-		h = SUPERHUD_ALIGNH_LEFT;
+		h = MODERNHUD_ALIGNH_LEFT;
 	}
 	else
 	{
@@ -166,7 +166,7 @@ static void CG_SHUDTextMakeAdjustCoords(const superhudConfig_t* in, float* out_x
 
 	if (!in->alignV.isSet)
 	{
-		v = SUPERHUD_ALIGNV_CENTER;
+		v = MODERNHUD_ALIGNV_CENTER;
 	}
 	else
 	{
@@ -175,15 +175,15 @@ static void CG_SHUDTextMakeAdjustCoords(const superhudConfig_t* in, float* out_x
 
 	switch (h)
 	{
-		case SUPERHUD_ALIGNH_LEFT:
+		case MODERNHUD_ALIGNH_LEFT:
 			//allready x
 			*out_x = in->rect.value[0];
 			break;
-		case SUPERHUD_ALIGNH_CENTER:
+		case MODERNHUD_ALIGNH_CENTER:
 			// x + width/2
 			*out_x = in->rect.value[0] + in->rect.value[2] / 2.0f;
 			break;
-		case SUPERHUD_ALIGNH_RIGHT:
+		case MODERNHUD_ALIGNH_RIGHT:
 			// x + width
 			*out_x = in->rect.value[0] + in->rect.value[2];
 			break;
@@ -191,39 +191,39 @@ static void CG_SHUDTextMakeAdjustCoords(const superhudConfig_t* in, float* out_x
 
 	switch (v)
 	{
-		case SUPERHUD_ALIGNV_TOP:
+		case MODERNHUD_ALIGNV_TOP:
 			*out_y = in->rect.value[1];
 			break;
-		case SUPERHUD_ALIGNV_CENTER:
+		case MODERNHUD_ALIGNV_CENTER:
 			*out_y = in->rect.value[1] + in->rect.value[3] / 2.0f;
 			break;
-		case SUPERHUD_ALIGNV_BOTTOM:
+		case MODERNHUD_ALIGNV_BOTTOM:
 			*out_y = in->rect.value[1] + in->rect.value[3];
 			break;
 	}
 
 }
 
-void CG_SHUDTextMakeContext(const superhudConfig_t* in, superhudTextContext_t* out)
+void CG_ModernHUDTextMakeContext(const modernhudConfig_t* in, modernhudTextContext_t* out)
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	memset(out, 0, sizeof(*out));
 	memcpy(&config, in, sizeof(config));
 
-	CG_SHUDConfigDefaultsCheck(&config);
+	CG_ModernHUDConfigDefaultsCheck(&config);
 
-	CG_SHUDTextMakeAdjustCoords(in, &out->coord.named.x, &out->coord.named.y);
+	CG_ModernHUDTextMakeAdjustCoords(in, &out->coord.named.x, &out->coord.named.y);
 
 	switch (config.textAlign.value)
 	{
 		default:
-		case SUPERHUD_ALIGNH_LEFT:
+		case MODERNHUD_ALIGNH_LEFT:
 			out->flags |= DS_HLEFT;
 			break;
-		case SUPERHUD_ALIGNH_CENTER:
+		case MODERNHUD_ALIGNH_CENTER:
 			out->flags |= DS_HCENTER;
 			break;
-		case SUPERHUD_ALIGNH_RIGHT:
+		case MODERNHUD_ALIGNH_RIGHT:
 			out->flags |= DS_HRIGHT;
 			break;
 	}
@@ -236,13 +236,13 @@ void CG_SHUDTextMakeContext(const superhudConfig_t* in, superhudTextContext_t* o
 		switch (config.alignV.value)
 		{
 			default:
-			case SUPERHUD_ALIGNV_TOP:
+			case MODERNHUD_ALIGNV_TOP:
 				out->flags |= DS_VTOP;
 				break;
-			case SUPERHUD_ALIGNV_CENTER:
+			case MODERNHUD_ALIGNV_CENTER:
 				out->flags |= DS_VCENTER;
 				break;
-			case SUPERHUD_ALIGNV_BOTTOM:
+			case MODERNHUD_ALIGNV_BOTTOM:
 				out->flags |= DS_VBOTTOM;
 				break;
 		}
@@ -282,19 +282,19 @@ void CG_SHUDTextMakeContext(const superhudConfig_t* in, superhudTextContext_t* o
 	out->width = (float)cls.glconfig.vidWidth;
 
 
-	CG_SHUDConfigPickColor(&config, out->color, qtrue);
+	CG_ModernHUDConfigPickColor(&config, out->color, qtrue);
 	Vector4Copy(out->color, out->color_origin);
 	out->letterSpacing = config.letterspacing.isSet ? config.letterspacing.value : 0.0f;
 }
 
 
-void CG_SHUDDrawMakeContext(const superhudConfig_t* in, superhudDrawContext_t* out)
+void CG_ModernHUDDrawMakeContext(const modernhudConfig_t* in, modernhudDrawContext_t* out)
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	memset(out, 0, sizeof(*out));
 	memcpy(&config, in, sizeof(config));
 
-	CG_SHUDConfigDefaultsCheck(&config);
+	CG_ModernHUDConfigDefaultsCheck(&config);
 
 	out->coord.named.x = config.rect.value[0];
 	out->coord.named.y = config.rect.value[1];
@@ -306,24 +306,24 @@ void CG_SHUDDrawMakeContext(const superhudConfig_t* in, superhudDrawContext_t* o
 	out->coordPicture.named.w = 1.0f;
 	out->coordPicture.named.h = 1.0f;
 
-	CG_SHUDConfigPickColor(&config, out->color, qtrue);
+	CG_ModernHUDConfigPickColor(&config, out->color, qtrue);
 	Vector4Copy(out->color, out->color_origin);
 }
 
-void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out, float max)
+void CG_ModernHUDBarMakeContext(const modernhudConfig_t* in, modernhudBarContext_t* out, float max)
 {
 	float x = 0, y = 0;
 	float bar_height, bar_width;
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	memset(out, 0, sizeof(*out));
 	memcpy(&config, in, sizeof(config));
 
-	CG_SHUDConfigDefaultsCheck(&config);
+	CG_ModernHUDConfigDefaultsCheck(&config);
 
 	if (!config.direction.isSet)
 	{
 		config.direction.isSet = qtrue;
-		config.direction.value = SUPERHUD_DIR_LEFT_TO_RIGHT;
+		config.direction.value = MODERNHUD_DIR_LEFT_TO_RIGHT;
 	}
 
 	if (!config.style.isSet) // set default style
@@ -345,7 +345,7 @@ void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out
 	{
 		static const float bar_gap = 4;
 		out->two_bars = qtrue;
-		if (out->direction == SUPERHUD_DIR_LEFT_TO_RIGHT || out->direction == SUPERHUD_DIR_RIGHT_TO_LEFT)
+		if (out->direction == MODERNHUD_DIR_LEFT_TO_RIGHT || out->direction == MODERNHUD_DIR_RIGHT_TO_LEFT)
 		{
 			if (config.style.value == 1)    // style 1 - default: split into two bars
 			{
@@ -410,7 +410,7 @@ void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out
 		out->bar[0][1] = y;
 		out->bar[0][2] = config.rect.value[2];
 		out->bar[0][3] = config.rect.value[3];
-		if (out->direction == SUPERHUD_DIR_LEFT_TO_RIGHT || out->direction == SUPERHUD_DIR_RIGHT_TO_LEFT)
+		if (out->direction == MODERNHUD_DIR_LEFT_TO_RIGHT || out->direction == MODERNHUD_DIR_RIGHT_TO_LEFT)
 		{
 			out->max = out->bar[0][2]; // max / width
 		}
@@ -421,7 +421,7 @@ void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out
 		out->koeff = out->max / max;
 	}
 
-	CG_SHUDConfigPickColor(&config, out->color_top, qtrue);
+	CG_ModernHUDConfigPickColor(&config, out->color_top, qtrue);
 	if (config.bgcolor.isSet)
 	{
 		Vector4Copy(config.bgcolor.value.rgba, out->color_back);
@@ -432,7 +432,7 @@ void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out
 	}
 }
 
-qboolean CG_SHUDIsTimeOut(const superhudConfig_t* cfg, int startTime)
+qboolean CG_ModernHUDIsTimeOut(const modernhudConfig_t* cfg, int startTime)
 {
 	if (!startTime)
 	{
@@ -453,13 +453,13 @@ qboolean CG_SHUDIsTimeOut(const superhudConfig_t* cfg, int startTime)
    *  Затухание
    *  возвращает qfalse если элемент потух
    */
-qboolean CG_SHUDGetFadeColor(const vec4_t from_color, vec4_t out, const superhudConfig_t* cfg, int startTime)
+qboolean CG_ModernHUDGetFadeColor(const vec4_t from_color, vec4_t out, const modernhudConfig_t* cfg, int startTime)
 {
 	int time = 0;
 
 	Vector4Copy(from_color, out);
 
-	if (!CG_SHUDIsTimeOut(cfg, startTime))
+	if (!CG_ModernHUDIsTimeOut(cfg, startTime))
 	{
 		return qtrue;
 	}
@@ -472,7 +472,7 @@ qboolean CG_SHUDGetFadeColor(const vec4_t from_color, vec4_t out, const superhud
 	if (cfg->fade.isSet)
 	{
 		int fadetime;
-		float fadedelay = SUPERHUD_DEFAULT_FADEDELAY;
+		float fadedelay = MODERNHUD_DEFAULT_FADEDELAY;
 
 		fadetime = cg.time - startTime - time;
 
@@ -499,14 +499,14 @@ qboolean CG_SHUDGetFadeColor(const vec4_t from_color, vec4_t out, const superhud
 	return qfalse;
 }
 
-void CG_SHUDTextPrint(const superhudConfig_t* cfg, superhudTextContext_t* ctx)
+void CG_ModernHUDTextPrint(const modernhudConfig_t* cfg, modernhudTextContext_t* ctx)
 {
 	if (!ctx->text || !ctx->text[0])
 	{
 		return;
 	}
 
-	CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
+	CG_ModernHUDConfigPickColor(cfg, ctx->color, qfalse);
 	Text_SetLetterSpacing( ctx->letterSpacing );
 
 	Text_Draw( ctx->text,
@@ -520,14 +520,14 @@ void CG_SHUDTextPrint(const superhudConfig_t* cfg, superhudTextContext_t* ctx)
 	Text_SetLetterSpacing( 0.0f );
 }
 
-void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx, qboolean colorOverride)
+void CG_ModernHUDTextPrintNew(const modernhudConfig_t* cfg, modernhudTextContext_t* ctx, qboolean colorOverride)
 {
 	if (!ctx->text || !ctx->text[0])
 	{
 		return;
 	}
 	if (colorOverride)
-		CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
+		CG_ModernHUDConfigPickColor(cfg, ctx->color, qfalse);
 	Text_SetLetterSpacing( ctx->letterSpacing );
 
 	Text_Draw( ctx->text,
@@ -541,7 +541,7 @@ void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* ctx
 	Text_SetLetterSpacing( 0.0f );
 }
 
-static void CG_SHUDBarPreparePrintLTR(const superhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
+static void CG_ModernHUDBarPreparePrintLTR(const modernhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
 {
 	if (ctx->two_bars)
 	{
@@ -592,16 +592,16 @@ static void CG_SHUDBarPreparePrintLTR(const superhudBarContext_t* ctx, float val
 	}
 }
 
-static void CG_SHUDBarPreparePrintRTL(const superhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
+static void CG_ModernHUDBarPreparePrintRTL(const modernhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
 {
 	//Just make left-to-right and mirror it
-	CG_SHUDBarPreparePrintLTR(ctx, value, coords);
+	CG_ModernHUDBarPreparePrintLTR(ctx, value, coords);
 
 	coords->bar1_value[0] = coords->bar1_value[0] + ctx->bar[0][2] - coords->bar1_value[2]; //x = x + max_width - width
 	coords->bar2_value[0] = coords->bar2_value[0] + ctx->bar[1][2] - coords->bar2_value[2]; //x = x + max_width - width
 }
 
-static void CG_SHUDBarPreparePrintTTB(const superhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
+static void CG_ModernHUDBarPreparePrintTTB(const modernhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
 {
 	if (ctx->two_bars)
 	{
@@ -656,16 +656,16 @@ static void CG_SHUDBarPreparePrintTTB(const superhudBarContext_t* ctx, float val
 	}
 }
 
-static void CG_SHUDBarPreparePrintBTT(const superhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
+static void CG_ModernHUDBarPreparePrintBTT(const modernhudBarContext_t* ctx, float value, drawBarCoords_t* coords)
 {
 	//Just make top to bottom and mirror it
-	CG_SHUDBarPreparePrintTTB(ctx, value, coords);
+	CG_ModernHUDBarPreparePrintTTB(ctx, value, coords);
 
 	coords->bar1_value[1] += ctx->bar[0][3] - coords->bar1_value[3]; //y = y + max_height - height
 	coords->bar2_value[1] += ctx->bar[1][3] - coords->bar2_value[3]; //y = y + max_height - height
 }
 
-void CG_SHUDBarPrint(const superhudConfig_t* cfg, superhudBarContext_t* ctx, float value)
+void CG_ModernHUDBarPrint(const modernhudConfig_t* cfg, modernhudBarContext_t* ctx, float value)
 {
 	drawBarCoords_t coords;
 
@@ -674,17 +674,17 @@ void CG_SHUDBarPrint(const superhudConfig_t* cfg, superhudBarContext_t* ctx, flo
 	switch (ctx->direction)
 	{
 		default:
-		case SUPERHUD_DIR_LEFT_TO_RIGHT:
-			CG_SHUDBarPreparePrintLTR(ctx, value, &coords);
+		case MODERNHUD_DIR_LEFT_TO_RIGHT:
+			CG_ModernHUDBarPreparePrintLTR(ctx, value, &coords);
 			break;
-		case SUPERHUD_DIR_RIGHT_TO_LEFT:
-			CG_SHUDBarPreparePrintRTL(ctx, value, &coords);
+		case MODERNHUD_DIR_RIGHT_TO_LEFT:
+			CG_ModernHUDBarPreparePrintRTL(ctx, value, &coords);
 			break;
-		case SUPERHUD_DIR_TOP_TO_BOTTOM:
-			CG_SHUDBarPreparePrintTTB(ctx, value, &coords);
+		case MODERNHUD_DIR_TOP_TO_BOTTOM:
+			CG_ModernHUDBarPreparePrintTTB(ctx, value, &coords);
 			break;
-		case SUPERHUD_DIR_BOTTOM_TO_TOP:
-			CG_SHUDBarPreparePrintBTT(ctx, value, &coords);
+		case MODERNHUD_DIR_BOTTOM_TO_TOP:
+			CG_ModernHUDBarPreparePrintBTT(ctx, value, &coords);
 			break;
 	}
 
@@ -716,12 +716,12 @@ void CG_SHUDBarPrint(const superhudConfig_t* cfg, superhudBarContext_t* ctx, flo
 	trap_R_SetColor(NULL);
 }
 
-team_t CG_SHUDGetOurActiveTeam(void)
+team_t CG_ModernHUDGetOurActiveTeam(void)
 {
 	return (team_t)wiredHud->ourActiveTeam;
 }
 
-void CG_SHUDFillWithColor(const superhudCoord_t* coord, const float* color)
+void CG_ModernHUDFillWithColor(const modernhudCoord_t* coord, const float* color)
 {
 	float x, y, w, h;
 
@@ -734,7 +734,7 @@ void CG_SHUDFillWithColor(const superhudCoord_t* coord, const float* color)
 	trap_R_SetColor(NULL);
 }
 
-qboolean CG_SHUDFill(const superhudConfig_t* cfg)
+qboolean CG_ModernHUDFill(const modernhudConfig_t* cfg)
 {
 	float x, y, w, h;
 	vec4_t bgColor;
@@ -750,7 +750,7 @@ qboolean CG_SHUDFill(const superhudConfig_t* cfg)
 
 	if (cfg->bgcolor.isSet)
 	{
-		CG_SHUDConfigPickBgColor(cfg, bgColor, qfalse);
+		CG_ModernHUDConfigPickBgColor(cfg, bgColor, qfalse);
 
 		trap_R_SetColor(bgColor);
 		Wired_DrawPic(x, y, w, h, 0, 0, 0, 0, cgs.media.whiteShader);
@@ -767,7 +767,7 @@ qboolean CG_SHUDFill(const superhudConfig_t* cfg)
 			return qfalse;
 		}
 
-		CG_SHUDConfigPickColor(cfg, color, qfalse);
+		CG_ModernHUDConfigPickColor(cfg, color, qfalse);
 
 		trap_R_SetColor(color);
 		Wired_DrawPic(x, y, w, h, 0, 0, 1, 1, image);
@@ -780,7 +780,7 @@ qboolean CG_SHUDFill(const superhudConfig_t* cfg)
 
 
 
-void CG_SHUDElementCompileTeamOverlayConfig(int fontWidth, shudTeamOverlay_t* configOut)
+void CG_ModernHUDElementCompileTeamOverlayConfig(int fontWidth, modernHudTeamOverlay_t* configOut)
 {
 	configOut->powerupOffsetChar = 0;
 	configOut->powerupOffsetPix = configOut->powerupOffsetChar * fontWidth;
@@ -825,7 +825,7 @@ void CG_SHUDElementCompileTeamOverlayConfig(int fontWidth, shudTeamOverlay_t* co
 // float *color  Use this color
 // qhandle_t shader Shader
 //
-void CG_SHUDDrawStretchPic(superhudCoord_t coord, const superhudCoord_t coordPicture, const float* color, qhandle_t shader)
+void CG_ModernHUDDrawStretchPic(modernhudCoord_t coord, const modernhudCoord_t coordPicture, const float* color, qhandle_t shader)
 {
 	if (!shader) return;
 
@@ -842,7 +842,7 @@ void CG_SHUDDrawStretchPic(superhudCoord_t coord, const superhudCoord_t coordPic
 	trap_R_SetColor(NULL);
 }
 
-void CG_SHUDDrawBorderDirect(const superhudCoord_t* coord, const vec4_t border, const vec4_t borderColor)
+void CG_ModernHUDDrawBorderDirect(const modernhudCoord_t* coord, const vec4_t border, const vec4_t borderColor)
 {
 	vec4_t tmpCoord;
 	if (coord == 0)
@@ -857,7 +857,7 @@ void CG_SHUDDrawBorderDirect(const superhudCoord_t* coord, const vec4_t border, 
 
 }
 
-qboolean CG_SHUDDrawBorder(const superhudConfig_t* cfg)
+qboolean CG_ModernHUDDrawBorder(const modernhudConfig_t* cfg)
 {
 	vec4_t coord;
 	vec4_t borderColor;
@@ -869,7 +869,7 @@ qboolean CG_SHUDDrawBorder(const superhudConfig_t* cfg)
 
 	Vector4Copy(cfg->rect.value, coord);
 
-	CG_SHUDConfigPickBorderColor(cfg, borderColor, qfalse);
+	CG_ModernHUDConfigPickBorderColor(cfg, borderColor, qfalse);
 
 	CG_ModernDrawFrame(coord[0], coord[1], coord[2], coord[3],
 	                (float*)cfg->border.value, borderColor, qfalse);
@@ -877,7 +877,7 @@ qboolean CG_SHUDDrawBorder(const superhudConfig_t* cfg)
 	return qtrue;
 }
 
-void CG_SHUDFillAndFrameForText(superhudConfig_t* cfg, superhudTextContext_t* ctx)
+void CG_ModernHUDFillAndFrameForText(modernhudConfig_t* cfg, modernhudTextContext_t* ctx)
 {
 	qboolean drawBackground = (cfg->bgcolor.isSet && cfg->fill.isSet);
 	qboolean drawBorder = (cfg->border.isSet && cfg->borderColor.isSet);
@@ -889,24 +889,24 @@ void CG_SHUDFillAndFrameForText(superhudConfig_t* cfg, superhudTextContext_t* ct
 
 	if (drawBackground)
 	{
-		CG_SHUDConfigPickBgColor(cfg, ctx->background, qfalse);
+		CG_ModernHUDConfigPickBgColor(cfg, ctx->background, qfalse);
 	}
 
 	if (drawBorder)
 	{
 		Vector4Copy(cfg->border.value, ctx->border);
-		CG_SHUDConfigPickBorderColor(cfg, ctx->borderColor, qfalse);
+		CG_ModernHUDConfigPickBorderColor(cfg, ctx->borderColor, qfalse);
 	}
 }
 
-void CG_SHUDDrawStretchPicCtx(const superhudConfig_t* cfg, superhudDrawContext_t* ctx)
+void CG_ModernHUDDrawStretchPicCtx(const modernhudConfig_t* cfg, modernhudDrawContext_t* ctx)
 {
 	// we have to pick color again, because team could changed
-	CG_SHUDConfigPickColor(cfg, ctx->color, qfalse);
-	CG_SHUDDrawStretchPic(ctx->coord, ctx->coordPicture, ctx->color, ctx->image);
+	CG_ModernHUDConfigPickColor(cfg, ctx->color, qfalse);
+	CG_ModernHUDDrawStretchPic(ctx->coord, ctx->coordPicture, ctx->color, ctx->image);
 }
 
-int CG_SHUDGetAmmo(int wpi)
+int CG_ModernHUDGetAmmo(int wpi)
 {
 	int ammo = cg.snap->ps.ammo[wpi];
 

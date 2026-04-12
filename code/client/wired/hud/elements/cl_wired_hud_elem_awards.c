@@ -34,14 +34,14 @@ typedef struct {
 } awardNotification_t;
 
 typedef struct {
-	superhudConfig_t    config;
+	modernhudConfig_t    config;
 	awardNotification_t visible[MAX_VISIBLE_AWARDS];
 	int                 lastReadIndex;
 	float               iconW;
 	float               iconH;
 	float               anchorX;    // center X from config
 	float               anchorY;    // top Y from config
-} shudElementAwards_t;
+} modernHudElementAwards_t;
 
 // ── ease functions ──────────────────────────────────────────────────────
 
@@ -61,10 +61,10 @@ static float clampf( float v, float lo, float hi ) {
 
 // ── element lifecycle ───────────────────────────────────────────────────
 
-void *CG_SHUDElementAwardsCreate( const superhudConfig_t *config ) {
-	shudElementAwards_t *element;
+void *CG_ModernHUDElementAwardsCreate( const modernhudConfig_t *config ) {
+	modernHudElementAwards_t *element;
 
-	SHUD_ELEMENT_INIT( element, config );
+	ModernHUD_ELEMENT_INIT( element, config );
 
 	element->anchorX = config->rect.value[0];   // center X
 	element->anchorY = config->rect.value[1];   // top Y
@@ -80,9 +80,9 @@ void *CG_SHUDElementAwardsCreate( const superhudConfig_t *config ) {
 	return element;
 }
 
-void CG_SHUDElementAwardsRoutine( void *context ) {
-	shudElementAwards_t *element = (shudElementAwards_t *)context;
-	superhudGlobalContext_t *gctx = CG_SHUDGetContext();
+void CG_ModernHUDElementAwardsRoutine( void *context ) {
+	modernHudElementAwards_t *element = (modernHudElementAwards_t *)context;
+	modernhudGlobalContext_t *gctx = CG_ModernHUDGetContext();
 	int now = cg.time;
 	int i, activeCount;
 	float totalWidth, startX;
@@ -90,8 +90,8 @@ void CG_SHUDElementAwardsRoutine( void *context ) {
 	// ── 1. Consume new awards from queue ──────────────────────────────
 
 	while ( element->lastReadIndex < gctx->awards.writeIndex ) {
-		int qIdx = element->lastReadIndex % SHUD_MAX_AWARD_QUEUE;
-		superhudAwardEntry_t *entry = &gctx->awards.entries[qIdx];
+		int qIdx = element->lastReadIndex % ModernHUD_MAX_AWARD_QUEUE;
+		modernhudAwardEntry_t *entry = &gctx->awards.entries[qIdx];
 
 		// find an inactive slot
 		int slot = -1;
@@ -242,7 +242,7 @@ void CG_SHUDElementAwardsRoutine( void *context ) {
 	}
 }
 
-void CG_SHUDElementAwardsDestroy( void *context ) {
+void CG_ModernHUDElementAwardsDestroy( void *context ) {
 	if ( context ) {
 		Z_Free( context );
 	}

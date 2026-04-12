@@ -8,18 +8,18 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
 	int* time;
 	const char* msg;
-} shudElementRankMessage_t;
+} modernHudElementRankMessage_t;
 
-void* CG_SHUDElementRankMessageCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementRankMessageCreate(const modernhudConfig_t* config)
 {
-	shudElementRankMessage_t* element;
-	superhudGlobalContext_t* gctx;
+	modernHudElementRankMessage_t* element;
+	modernhudGlobalContext_t* gctx;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	if (!element->config.time.isSet)
 	{
@@ -27,10 +27,10 @@ void* CG_SHUDElementRankMessageCreate(const superhudConfig_t* config)
 		element->config.time.value = 2000;
 	}
 
-	gctx = CG_SHUDGetContext();
+	gctx = CG_ModernHUDGetContext();
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	element->time = &gctx->rankmessage.time;
 	element->ctx.text = gctx->rankmessage.message;
@@ -38,25 +38,25 @@ void* CG_SHUDElementRankMessageCreate(const superhudConfig_t* config)
 	return element;
 }
 
-void CG_SHUDElementRankMessageRoutine(void* context)
+void CG_ModernHUDElementRankMessageRoutine(void* context)
 {
-	shudElementRankMessage_t* element = (shudElementRankMessage_t*)context;
+	modernHudElementRankMessage_t* element = (modernHudElementRankMessage_t*)context;
 
 	if (!*element->time)
 	{
 		return;
 	}
 
-	if (!CG_SHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, *element->time))
+	if (!CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, *element->time))
 	{
 		*element->time = 0;
 		return;
 	}
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementRankMessageDestroy(void* context)
+void CG_ModernHUDElementRankMessageDestroy(void* context)
 {
 	if (context)
 	{

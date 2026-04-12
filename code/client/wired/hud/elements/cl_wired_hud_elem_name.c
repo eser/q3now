@@ -8,44 +8,44 @@
 
 #if FEAT_WIRED_UI
 
-enum shudElementNameType_t
+enum modernHudElementNameType_t
 {
-	SHUDENAME_TYPE_OWN,
-	SHUDENAME_TYPE_NME,
+	ModernHUDENAME_TYPE_OWN,
+	ModernHUDENAME_TYPE_NME,
 };
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-	enum shudElementNameType_t type;
-} shudElementName_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+	enum modernHudElementNameType_t type;
+} modernHudElementName_t;
 
-static void* CG_SHUDElementNameCreate(const superhudConfig_t* config, enum shudElementNameType_t type)
+static void* CG_ModernHUDElementNameCreate(const modernhudConfig_t* config, enum modernHudElementNameType_t type)
 {
-	shudElementName_t* element;
+	modernHudElementName_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	element->type = type;
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void* CG_SHUDElementNameOWNCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementNameOWNCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementNameCreate(config, SHUDENAME_TYPE_OWN);
+	return CG_ModernHUDElementNameCreate(config, ModernHUDENAME_TYPE_OWN);
 }
 
-void* CG_SHUDElementNameNMECreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementNameNMECreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementNameCreate(config, SHUDENAME_TYPE_NME);
+	return CG_ModernHUDElementNameCreate(config, ModernHUDENAME_TYPE_NME);
 }
 
-static void CG_SHUDElementNameGetPairFFA(const char** own, const char** nme)
+static void CG_ModernHUDElementNameGetPairFFA(const char** own, const char** nme)
 {
 	int clientNum;
 	const char* info;
@@ -75,7 +75,7 @@ static void CG_SHUDElementNameGetPairFFA(const char** own, const char** nme)
 	*nme = Info_ValueForKey(info, "n");
 }
 
-static void CG_SHUDElementNameGetPairDuel(const char** own, const char** nme)
+static void CG_ModernHUDElementNameGetPairDuel(const char** own, const char** nme)
 {
 	int i;
 	int k;
@@ -112,7 +112,7 @@ static void CG_SHUDElementNameGetPairDuel(const char** own, const char** nme)
 	}
 }
 
-static void CG_SHUDElementNameGetPairSides(const char** own, const char** nme)
+static void CG_ModernHUDElementNameGetPairSides(const char** own, const char** nme)
 {
 	int our_side;
 
@@ -139,7 +139,7 @@ static void CG_SHUDElementNameGetPairSides(const char** own, const char** nme)
 	}
 }
 
-static void CG_SHUDElementNameGetPair(const char** own, const char** nme)
+static void CG_ModernHUDElementNameGetPair(const char** own, const char** nme)
 {
 	int gt = cgs.gametype;
 	*own = "";
@@ -147,28 +147,28 @@ static void CG_SHUDElementNameGetPair(const char** own, const char** nme)
 
 	if (wiredHud->isTeamGame)
 	{
-		CG_SHUDElementNameGetPairSides(own, nme);
+		CG_ModernHUDElementNameGetPairSides(own, nme);
 	}
 	else if (wiredHud->isDuel)
 	{
-		CG_SHUDElementNameGetPairDuel(own, nme);
+		CG_ModernHUDElementNameGetPairDuel(own, nme);
 	}
 	else
 	{
 		/* FFA / default */
-		CG_SHUDElementNameGetPairFFA(own, nme);
+		CG_ModernHUDElementNameGetPairFFA(own, nme);
 	}
 }
 
-void CG_SHUDElementNameRoutine(void* context)
+void CG_ModernHUDElementNameRoutine(void* context)
 {
-	shudElementName_t* element = (shudElementName_t*)context;
+	modernHudElementName_t* element = (modernHudElementName_t*)context;
 	const char*  own;
 	const char*  nme;
 
-	CG_SHUDElementNameGetPair(&own, &nme);
+	CG_ModernHUDElementNameGetPair(&own, &nme);
 
-	if (element->type == SHUDENAME_TYPE_OWN)
+	if (element->type == ModernHUDENAME_TYPE_OWN)
 	{
 		element->ctx.text = own;
 	}
@@ -177,10 +177,10 @@ void CG_SHUDElementNameRoutine(void* context)
 		element->ctx.text = nme;
 	}
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementNameDestroy(void* context)
+void CG_ModernHUDElementNameDestroy(void* context)
 {
 	if (context)
 	{

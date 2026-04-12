@@ -50,13 +50,13 @@ return {
   },
 
   attacks = {
-    "rg1",   -- rail: the precision veteran's weapon
-    "lg1",   -- lightning: controlled close DPS
-    "rl1",   -- rocket: deliberate placement
-    "sg1",   -- shotgun: close-quarters punish
-    "gl1",   -- grenades: patient area control
-    "pr1",   -- plasma: defensive suppression
-    "mg1",
+    { "rg1", aim_height = 36 },  -- rail: the precision veteran's weapon
+    { "lg1", aim_height = 28 },  -- lightning: controlled close DPS
+    { "rl1", aim_height = 0  },  -- rocket: deliberate placement, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: close-quarters punish
+    { "gl1", aim_height = 0  },  -- grenades: patient area control, aim at feet
+    { "pr1", aim_height = 28 },  -- plasma: defensive suppression
+    { "mg1", aim_height = 28 },
   },
 
   items = {

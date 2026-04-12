@@ -8,8 +8,6 @@ ai_aware.h — entity/sound awareness for bot AI improvements
 
 #include "../qcommon/q_feats.h"
 
-#if FEAT_BOT_IMPROVEMENTS
-
 struct bot_state_s;
 
 // process events and update awareness list each frame
@@ -21,5 +19,4 @@ void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius );
 // return entity number of the best aware-but-not-visible enemy, or -1
 int BotBestAwareEnemy( struct bot_state_s *bs );
 
-#endif // FEAT_BOT_IMPROVEMENTS
 #endif // AI_AWARE_H

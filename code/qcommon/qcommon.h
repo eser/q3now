@@ -1422,6 +1422,6 @@ void BSP_Init( void );
 void BSP_Shutdown( void );
 
 // Headless Lua scripting runtime
-#include "scripting/wired_scripting.h"
+#include "wired/scripting/wired_scripting.h"
 
 #endif // _QCOMMON_H_

@@ -24,7 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "server.h"
 #include "../qcommon/q_feats.h"
 
-#include "../wired/net/wn_public.h"
+#include "../qcommon/wired/net/wn_public.h"
 
 #include "../botlib/botlib.h"
 
@@ -928,42 +928,44 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case BOTLIB_AI_GENETIC_PARENTS_AND_CHILD_SELECTION:
 		return botlib_export->ai.GeneticParentsAndChildSelection(args[1], VMA(2), VMA(3), VMA(4), VMA(5));
 
-	case BOTLUA_LOAD_CHARACTER:
+	case WB_LOAD_CHARACTER:
 		return SV_Lua_LoadCharacter( VMA(1), VMF(2) );
-	case BOTLUA_FREE_CHARACTER:
+	case WB_FREE_CHARACTER:
 		SV_Lua_FreeCharacter( args[1] );
 		return 0;
-	case BOTLUA_CHARACTERISTIC_FLOAT:
+	case WB_CHARACTERISTIC_FLOAT:
 		return FloatAsInt( SV_Lua_CharacteristicBFloat( args[1], args[2], 0.0f, 1.0f ) );
-	case BOTLUA_CHARACTERISTIC_BFLOAT:
+	case WB_CHARACTERISTIC_BFLOAT:
 		return FloatAsInt( SV_Lua_CharacteristicBFloat( args[1], args[2], VMF(3), VMF(4) ) );
-	case BOTLUA_CHARACTERISTIC_INTEGER:
+	case WB_CHARACTERISTIC_INTEGER:
 		return (int)SV_Lua_CharacteristicBFloat( args[1], args[2], 0.0f, 1.0f );
-	case BOTLUA_CHARACTERISTIC_BINTEGER:
+	case WB_CHARACTERISTIC_BINTEGER:
 		return (int)SV_Lua_CharacteristicBFloat( args[1], args[2], (float)args[3], (float)args[4] );
-	case BOTLUA_CHARACTERISTIC_STRING:
+	case WB_CHARACTERISTIC_STRING:
 		VM_CHECKBOUNDS( gvm, args[3], args[4] );
 		SV_Lua_CharacteristicString( args[1], args[2], VMA(3), args[4] );
 		return 0;
-	case BOTLUA_BIND_BOT:
+	case WB_BIND_BOT:
 		return SV_Lua_BindBot( args[1], args[2] );
-	case BOTLUA_BOT_THINK:
+	case WB_BOT_THINK:
 		return SV_Lua_BotThink( args[1], VMF(2) );
-	case BOTLUA_BOT_PROFILE_FIELD:
+	case WB_BOT_PROFILE_FIELD:
 		return FloatAsInt( SV_Lua_BotProfileField( args[1], args[2] ) );
-	case BOTLUA_BOT_PICK_WEAPON:
-		VM_CHECKBOUNDS( gvm, args[2], sizeof( botLuaCombatCtx_t ) );
+	case WB_BOT_PICK_WEAPON:
+		VM_CHECKBOUNDS( gvm, args[2], sizeof( wbCombatCtx_t ) );
 		VM_CHECKBOUNDS( gvm, args[3], args[4] );
 		return SV_Lua_BotPickWeapon( args[1], VMA(2), VMA(3), args[4] );
-	case BOTLUA_BOT_EVAL_ITEM:
-		VM_CHECKBOUNDS( gvm, args[2], sizeof( botLuaItemEvalCtx_t ) );
+	case WB_BOT_GET_ATTACK_AIM_HEIGHT:
+		return FloatAsInt( SV_Lua_BotGetAttackAimHeight( args[1], args[2] ) );
+	case WB_BOT_EVAL_ITEM:
+		VM_CHECKBOUNDS( gvm, args[2], sizeof( wbItemEvalCtx_t ) );
 		return SV_Lua_BotEvalItem( args[1], VMA(2) );
-	case BOTLUA_BOT_DECIDE:
-		VM_CHECKBOUNDS( gvm, args[2], sizeof( botLuaDecideCtx_t ) );
+	case WB_BOT_DECIDE:
+		VM_CHECKBOUNDS( gvm, args[2], sizeof( wbDecideCtx_t ) );
 		VM_CHECKBOUNDS( gvm, args[3], args[4] );
 		return SV_Lua_BotDecide( args[1], VMA(2), VMA(3), args[4] );
-	case BOTLUA_BOT_ON_CHAT:
-		VM_CHECKBOUNDS( gvm, args[3], sizeof( botLuaChatCtx_t ) );
+	case WB_BOT_ON_CHAT:
+		VM_CHECKBOUNDS( gvm, args[3], sizeof( wbChatCtx_t ) );
 		VM_CHECKBOUNDS( gvm, args[4], args[5] );
 		return SV_Lua_BotOnChat( args[1], VMA(2), VMA(3), VMA(4), args[5] );
 
@@ -1028,7 +1030,7 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		VM_CHECKBOUNDS( gvm, args[1], args[2] );
 		return SV_GetValue( VMA(1), args[2], VMA(3) );
 
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	// ── QUIC event emission syscalls ────────────────────────────
 	// Game code (g_combat.c, g_items.c, g_cmds.c) calls these via
 	// trap_WN_Emit*() which triggers a VM syscall to this handler.
@@ -1053,11 +1055,9 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		// but no dedicated QUIC handler exists yet. The trap exists so
 		// game code can emit the event when one is wired up.
 		return 0;
-#if FEAT_BOT_IMPROVEMENTS
 	case G_WIREDNET_EMIT_BOT_EVENT:
 		WN_EmitBotEvent( args[1], VMA(2), args[3], args[4], VMA(5) );
 		return 0;
-#endif
 #endif
 
 	case G_WIREDNET_GET_PING:

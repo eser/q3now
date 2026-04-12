@@ -8,17 +8,17 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudDrawContext_t ctx;
-} shudElementStatusbarItemPickupIcon;
+	modernhudConfig_t config;
+	modernhudDrawContext_t ctx;
+} modernHudElementStatusbarItemPickupIcon;
 
-void* CG_SHUDElementItemPickupIconCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementItemPickupIconCreate(const modernhudConfig_t* config)
 {
-	shudElementStatusbarItemPickupIcon* element;
+	modernHudElementStatusbarItemPickupIcon* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDDrawMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDDrawMakeContext(&element->config, &element->ctx);
 
 	if (!element->config.time.isSet)
 	{
@@ -29,22 +29,22 @@ void* CG_SHUDElementItemPickupIconCreate(const superhudConfig_t* config)
 	return element;
 }
 
-void CG_SHUDElementItemPickupIconRoutine(void* context)
+void CG_ModernHUDElementItemPickupIconRoutine(void* context)
 {
-	shudElementStatusbarItemPickupIcon* element = (shudElementStatusbarItemPickupIcon*)context;
+	modernHudElementStatusbarItemPickupIcon* element = (modernHudElementStatusbarItemPickupIcon*)context;
 
-	if (CG_SHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.itemPickupTime))
+	if (CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.itemPickupTime))
 	{
 		element->ctx.image = cg_items[cg.itemPickup].icon;
-		CG_SHUDFill(&element->config);
-		CG_SHUDDrawBorder(&element->config);
+		CG_ModernHUDFill(&element->config);
+		CG_ModernHUDDrawBorder(&element->config);
 
 		CG_RegisterItemVisuals(cg.itemPickup);
-		CG_SHUDDrawStretchPicCtx(&element->config, &element->ctx);
+		CG_ModernHUDDrawStretchPicCtx(&element->config, &element->ctx);
 	}
 }
 
-void CG_SHUDElementItemPickupIconDestroy(void* context)
+void CG_ModernHUDElementItemPickupIconDestroy(void* context)
 {
 	if (context)
 	{

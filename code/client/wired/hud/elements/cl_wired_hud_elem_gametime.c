@@ -8,26 +8,26 @@
 
 typedef struct
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	int timePrev;
-	superhudTextContext_t ctx;
-} shudElementGameTime_t;
+	modernhudTextContext_t ctx;
+} modernHudElementGameTime_t;
 
-void* CG_SHUDElementGameTimeCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementGameTimeCreate(const modernhudConfig_t* config)
 {
-	shudElementGameTime_t* element;
+	modernHudElementGameTime_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementGameTimeRoutine(void* context)
+void CG_ModernHUDElementGameTimeRoutine(void* context)
 {
-	shudElementGameTime_t* element = (shudElementGameTime_t*)context;
+	modernHudElementGameTime_t* element = (modernHudElementGameTime_t*)context;
 
 
 	if (cg_drawTimer.integer)
@@ -45,12 +45,12 @@ void CG_SHUDElementGameTimeRoutine(void* context)
 		seconds -= tens * 10;
 
 		element->ctx.text = va("%i:%i%i", mins, tens, seconds);
-		CG_SHUDTextPrint(&element->config, &element->ctx);
+		CG_ModernHUDTextPrint(&element->config, &element->ctx);
 	}
 
 }
 
-void CG_SHUDElementGameTimeDestroy(void* context)
+void CG_ModernHUDElementGameTimeDestroy(void* context)
 {
 	if (context)
 	{

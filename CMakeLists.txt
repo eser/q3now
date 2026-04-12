@@ -85,6 +85,11 @@ TARGET_COMPILE_DEFINITIONS(botlib PRIVATE BOTLIB)
 AUX_SOURCE_DIRECTORY(code/server SERVER_SRCS)
 list(REMOVE_ITEM SERVER_SRCS code/server/sv_rankings.c)
 
+# bg_weapons.c, bg_misc.c and bg_gametypes.c go into qcommon so the dedicated
+# server can access bg_weaponlist, bg_itemlist and bg_gametypelist
+# (e.g. for MCP tools like game.items, coaching.tick)
+list(APPEND QCOMMON_SRCS code/game/bg_weapons.c code/game/bg_misc.c code/game/bg_gametypes.c)
+
 # universal binary
 ADD_LIBRARY(qcommon OBJECT ${QCOMMON_SRCS} ${SERVER_SRCS})
 
@@ -159,7 +164,7 @@ SET(PICOTLS_SRCS
 FILE(GLOB MPACK_SRCS    src/libs/mpack/src/mpack/*.c)
 
 # wired/net module — WiredNet transport layer
-FILE(GLOB WN_SRCS code/wired/net/*.c)
+FILE(GLOB WN_SRCS code/qcommon/wired/net/*.c)
 
 SET(WIREDNET_ALL_SRCS ${PICOQUIC_SRCS} ${PICOTLS_SRCS} ${MPACK_SRCS} ${WN_SRCS})
 
@@ -168,7 +173,7 @@ SET(WIREDNET_INCLUDE_DIRS
 	src/libs/picoquic/picoquic
 	src/libs/picotls/include
 	src/libs/mpack/src/mpack
-	code/wired/net
+	code/qcommon/wired/net
 )
 
 # OpenSSL (required by picotls for crypto primitives)
@@ -272,8 +277,7 @@ AUX_SOURCE_DIRECTORY(code/client/wired/ui          CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/store       CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/hud         CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/hud/elements CLIENT_SRCS)
-# bg_misc.c needed by Wired UI HUD elements (BG_FindItemForPowerup, bg_itemlist)
-list(APPEND CLIENT_SRCS code/game/bg_misc.c code/game/bg_weapons.c code/game/bg_gametypes.c)
+# bg_misc.c, bg_weapons.c and bg_gametypes.c are in QCOMMON_SRCS (shared with dedicated server); not duplicated here
 IF(NOT USE_CURL)
 	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_curl.c)
 ENDIF()
@@ -506,8 +510,8 @@ IF(USE_LUA)
 	set_target_properties(luajit PROPERTIES IMPORTED_LOCATION ${LUAJIT_LIB})
 	add_dependencies(luajit luajit_build)
 
-	# Headless Lua runtime lives in qcommon/scripting/ — used by both client and dedicated server
-	AUX_SOURCE_DIRECTORY(code/qcommon/scripting QCOMMON_SCRIPTING_SRCS)
+	# Headless Lua runtime lives in qcommon/wired/scripting/ — used by both client and dedicated server
+	AUX_SOURCE_DIRECTORY(code/qcommon/wired/scripting QCOMMON_SCRIPTING_SRCS)
 	TARGET_SOURCES(qcommon PRIVATE ${QCOMMON_SCRIPTING_SRCS})
 	TARGET_SOURCES(qcommon_ded PRIVATE ${QCOMMON_SCRIPTING_SRCS})
 

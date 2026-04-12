@@ -23,7 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
-#include "../wired/net/wn_public.h"
+#include "../qcommon/wired/net/wn_public.h"
 
 static unsigned frame_msec;
 static int old_com_frameTime;

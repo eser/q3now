@@ -14,17 +14,17 @@
 /* ---- shared element struct ----------------------------------------- */
 
 typedef struct {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
 	int weaponId;       /* numeric weapon index, or -1 for current weapon */
 	qboolean isIcon;    /* qtrue = draw weapon icon, qfalse = draw text stats */
-} shudElementWeaponStats_t;
+} modernHudElementWeaponStats_t;
 
 /* ---- create helpers ------------------------------------------------ */
 
-static void *WeaponStats_CreateText( const superhudConfig_t *config, int wp ) {
-	shudElementWeaponStats_t *element;
-	SHUD_ELEMENT_INIT( element, config );
+static void *WeaponStats_CreateText( const modernhudConfig_t *config, int wp ) {
+	modernHudElementWeaponStats_t *element;
+	ModernHUD_ELEMENT_INIT( element, config );
 	element->weaponId = wp;
 	element->isIcon = qfalse;
 
@@ -33,14 +33,14 @@ static void *WeaponStats_CreateText( const superhudConfig_t *config, int wp ) {
 		Q_strncpyz( element->config.text.value, "%i/%i", sizeof( element->config.text.value ) );
 	}
 
-	CG_SHUDTextMakeContext( &element->config, &element->ctx );
-	CG_SHUDFillAndFrameForText( &element->config, &element->ctx );
+	CG_ModernHUDTextMakeContext( &element->config, &element->ctx );
+	CG_ModernHUDFillAndFrameForText( &element->config, &element->ctx );
 	return element;
 }
 
-static void *WeaponStats_CreateIcon( const superhudConfig_t *config, int wp ) {
-	shudElementWeaponStats_t *element;
-	SHUD_ELEMENT_INIT( element, config );
+static void *WeaponStats_CreateIcon( const modernhudConfig_t *config, int wp ) {
+	modernHudElementWeaponStats_t *element;
+	ModernHUD_ELEMENT_INIT( element, config );
 	element->weaponId = wp;
 	element->isIcon = qtrue;
 	return element;
@@ -49,30 +49,30 @@ static void *WeaponStats_CreateIcon( const superhudConfig_t *config, int wp ) {
 /* ---- text Create functions ----------------------------------------- */
 /* Weapon IDs: 2=MG, 3=SG, 4=GL, 5=RL, 6=LG, 7=RG, 8=PG             */
 
-void *CG_SHUDElementCreateCurrentWeapon( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, -1 ); }
-void *CG_SHUDElementWeaponStatsCreateMG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, 2 ); }
-void *CG_SHUDElementWeaponStatsCreateSG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, 3 ); }
-void *CG_SHUDElementWeaponStatsCreateGL( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, 4 ); }
-void *CG_SHUDElementWeaponStatsCreateRL( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, 5 ); }
-void *CG_SHUDElementWeaponStatsCreateLG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, 6 ); }
-void *CG_SHUDElementWeaponStatsCreateRG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, 7 ); }
-void *CG_SHUDElementWeaponStatsCreatePG( const superhudConfig_t *config )     { return WeaponStats_CreateText( config, 8 ); }
+void *CG_ModernHUDElementCreateCurrentWeapon( const modernhudConfig_t *config )     { return WeaponStats_CreateText( config, -1 ); }
+void *CG_ModernHUDElementWeaponStatsCreateMG( const modernhudConfig_t *config )     { return WeaponStats_CreateText( config, 2 ); }
+void *CG_ModernHUDElementWeaponStatsCreateSG( const modernhudConfig_t *config )     { return WeaponStats_CreateText( config, 3 ); }
+void *CG_ModernHUDElementWeaponStatsCreateGL( const modernhudConfig_t *config )     { return WeaponStats_CreateText( config, 4 ); }
+void *CG_ModernHUDElementWeaponStatsCreateRL( const modernhudConfig_t *config )     { return WeaponStats_CreateText( config, 5 ); }
+void *CG_ModernHUDElementWeaponStatsCreateLG( const modernhudConfig_t *config )     { return WeaponStats_CreateText( config, 6 ); }
+void *CG_ModernHUDElementWeaponStatsCreateRG( const modernhudConfig_t *config )     { return WeaponStats_CreateText( config, 7 ); }
+void *CG_ModernHUDElementWeaponStatsCreatePG( const modernhudConfig_t *config )     { return WeaponStats_CreateText( config, 8 ); }
 
 /* ---- icon Create functions ----------------------------------------- */
 
-void *CG_SHUDElementIconCreateCurrentWeapon( const superhudConfig_t *config ) { return WeaponStats_CreateIcon( config, -1 ); }
-void *CG_SHUDElementIconCreateMG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 2 ); }
-void *CG_SHUDElementIconCreateSG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 3 ); }
-void *CG_SHUDElementIconCreateGL( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 4 ); }
-void *CG_SHUDElementIconCreateRL( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 5 ); }
-void *CG_SHUDElementIconCreateLG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 6 ); }
-void *CG_SHUDElementIconCreateRG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 7 ); }
-void *CG_SHUDElementIconCreatePG( const superhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 8 ); }
+void *CG_ModernHUDElementIconCreateCurrentWeapon( const modernhudConfig_t *config ) { return WeaponStats_CreateIcon( config, -1 ); }
+void *CG_ModernHUDElementIconCreateMG( const modernhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 2 ); }
+void *CG_ModernHUDElementIconCreateSG( const modernhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 3 ); }
+void *CG_ModernHUDElementIconCreateGL( const modernhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 4 ); }
+void *CG_ModernHUDElementIconCreateRL( const modernhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 5 ); }
+void *CG_ModernHUDElementIconCreateLG( const modernhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 6 ); }
+void *CG_ModernHUDElementIconCreateRG( const modernhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 7 ); }
+void *CG_ModernHUDElementIconCreatePG( const modernhudConfig_t *config )            { return WeaponStats_CreateIcon( config, 8 ); }
 
 /* ---- shared Routine ------------------------------------------------ */
 
-void CG_SHUDElementWeaponStatsRoutine( void *context ) {
-	shudElementWeaponStats_t *element = (shudElementWeaponStats_t *)context;
+void CG_ModernHUDElementWeaponStatsRoutine( void *context ) {
+	modernHudElementWeaponStats_t *element = (modernHudElementWeaponStats_t *)context;
 	int wp;
 	int hits, shots, acc;
 	int maxSlots;
@@ -101,7 +101,7 @@ void CG_SHUDElementWeaponStatsRoutine( void *context ) {
 		icon = cg_weapons[wp].weaponIcon;
 		if ( !icon ) return;
 
-		CG_SHUDFill( &element->config );
+		CG_ModernHUDFill( &element->config );
 
 		if ( element->config.rect.isSet ) {
 			float x = element->config.rect.value[0];
@@ -117,7 +117,7 @@ void CG_SHUDElementWeaponStatsRoutine( void *context ) {
 		}
 	} else {
 		/* draw text stats */
-		if ( shots <= 0 && !SHUD_CHECK_SHOW_EMPTY( element ) ) return;
+		if ( shots <= 0 && !ModernHUD_CHECK_SHOW_EMPTY( element ) ) return;
 
 		if ( element->config.style.isSet && element->config.style.value == 1 ) {
 			element->ctx.text = va( "%i%%", acc );
@@ -125,11 +125,11 @@ void CG_SHUDElementWeaponStatsRoutine( void *context ) {
 			element->ctx.text = va( element->config.text.value, hits, shots );
 		}
 
-		CG_SHUDTextPrint( &element->config, &element->ctx );
+		CG_ModernHUDTextPrint( &element->config, &element->ctx );
 	}
 }
 
-void CG_SHUDElementWeaponStatsDestroy( void *context ) {
+void CG_ModernHUDElementWeaponStatsDestroy( void *context ) {
 	if ( context ) {
 		Z_Free( context );
 	}

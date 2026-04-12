@@ -377,7 +377,7 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 
 	G_LogPrintf( "Item: %i %s\n", other->s.number, ent->item->classnames[0] );
 
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	// QUIC event: item pickup with position
 	trap_WiredNet_EmitItemPickup( other->s.number, ent->item->classnames[0], other->r.currentOrigin );
 #endif

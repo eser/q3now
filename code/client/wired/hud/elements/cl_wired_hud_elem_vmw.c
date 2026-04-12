@@ -8,25 +8,25 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementVMW_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementVMW_t;
 
-void* CG_SHUDElementVMWCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementVMWCreate(const modernhudConfig_t* config)
 {
-	shudElementVMW_t* element;
+	modernHudElementVMW_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementVMWRoutine(void* context)
+void CG_ModernHUDElementVMWRoutine(void* context)
 {
-	shudElementVMW_t* element = (shudElementVMW_t*)context;
+	modernHudElementVMW_t* element = (modernHudElementVMW_t*)context;
 	int time;
 
 	if (cgs.voteTime == 0) return;
@@ -45,10 +45,10 @@ void CG_SHUDElementVMWRoutine(void* context)
 	}
 	element->ctx.text = va("VOTE(%i):%s yes(F1):%i no(F2):%i", time, cgs.voteString, cgs.voteYes, cgs.voteNo);
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementVMWDestroy(void* context)
+void CG_ModernHUDElementVMWDestroy(void* context)
 {
 	if (context)
 	{

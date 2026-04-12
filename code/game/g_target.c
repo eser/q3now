@@ -220,10 +220,10 @@ void SP_target_speaker( gentity_t *ent ) {
 
 		trap_Cvar_VariableStringBuffer( "com_mapAssetProfile", mapAssetProfile, sizeof( mapAssetProfile ) );
 		mapVersion = trap_Cvar_VariableIntegerValue( "com_mapBspVersion" );
-		if ( !Q_stricmp( mapAssetProfile, "legacy" ) ) {
+		if ( !Q_stricmp( mapAssetProfile, "legacy" ) || ( mapVersion > 0 && ( mapVersion <= 46 || mapVersion == 68 ) ) ) {
 			defaultExt = "wav";
 		} else {
-			defaultExt = ( mapVersion > 0 && ( mapVersion <= 46 || mapVersion == 68 ) ) ? "wav" : "opus";
+			defaultExt = "opus";
 		}
 
 		Com_sprintf( buffer, sizeof( buffer ), "%s.%s", s, defaultExt );

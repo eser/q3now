@@ -168,13 +168,12 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 
 #define	CS_ITEMS				27		// string of 0's and 1's that tell which items are present
 
-// #define CS_PRO_MODE             28
-
 #define	CS_MODELS				32
 #define	CS_SOUNDS				(CS_MODELS+MAX_MODELS)
 #define	CS_PLAYERS				(CS_SOUNDS+MAX_SOUNDS)
-#define CS_LOCATIONS			(CS_PLAYERS+MAX_CLIENTS)
-#define CS_PARTICLES			(CS_LOCATIONS+MAX_LOCATIONS) 
+#define CS_BOTDIRECTIVES		(CS_PLAYERS+MAX_CLIENTS)	// one slot per client; server→client directive display
+#define CS_LOCATIONS			(CS_BOTDIRECTIVES+MAX_CLIENTS)
+#define CS_PARTICLES			(CS_LOCATIONS+MAX_LOCATIONS)
 
 #define CS_MAX					(CS_PARTICLES+MAX_LOCATIONS)
 
@@ -207,7 +206,7 @@ typedef struct ggametype_s {
 	char		*name;
 	char		*shortname;
 	char		**parseTokens;		// NULL-terminated token list for arena/BSP matching
-	char		*hudToken;			// SuperHUD visibility token (e.g. "gt_ffa"), "" if none
+	char		*hudToken;			// ModernHUD visibility token (e.g. "gt_ffa"), "" if none
 } ggametype_t;
 
 extern	ggametype_t	bg_gametypelist[];
@@ -389,7 +388,11 @@ typedef enum {
 	PERS_KILLING_SPREE_COUNT,		// 5-kill streaks
 	PERS_RAMPAGE_COUNT,				// 10-kill streaks
 	PERS_MASSACRE_COUNT,			// 15-kill streaks
-	PERS_UNSTOPPABLE_COUNT			// 20-kill streaks
+	PERS_UNSTOPPABLE_COUNT,			// 20-kill streaks
+	// observer/web stats (synced each frame by ClientEndFrame)
+	PERS_TOTAL_SHOTS,				// total shots fired across all weapons
+	PERS_TOTAL_HITS,				// total hits across all weapons
+	PERS_TOTAL_DAMAGE,				// total damage dealt
 } persEnum_t;
 
 
@@ -786,6 +789,8 @@ typedef enum {
 
 
 //---------------------------------------------------------
+
+const char *BG_ModShortName( meansOfDeath_t mod );
 
 float BG_GetArmorProtection( int armorClass );
 int BG_GetEffectiveHealth( int health, int armorClass, int armor );

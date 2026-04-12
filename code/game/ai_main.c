@@ -49,7 +49,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
 #include "ai_vcmd.h"
-#include "g_bot_lua.h"
+#include "wired/bots/g_bot_scripts.h"
 
 //
 #include "chars.h"
@@ -222,7 +222,7 @@ void QDECL BotAI_BotInitialChat( bot_state_t *bs, char *type, ... ) {
 	char	*vars[MAX_MATCHVARIABLES];
 
 	// Lua bots use event-driven Lua chat functions; skip legacy template pipeline entirely
-	if ( bs->luaCharacterActive ) {
+	if ( bs->wiredBotsActive ) {
 		return;
 	}
 
@@ -284,7 +284,7 @@ void BotReportStatus(bot_state_t *bs) {
 	char *leader, flagstatus[32];
 	//
 	ClientName(bs->client, netname, sizeof(netname));
-	if (Q_stricmp(netname, bs->teamleader) == 0) leader = "L";
+	if (Q_stricmp(netname, bs->directives.teamleader) == 0) leader = "L";
 	else leader = " ";
 
 	strcpy(flagstatus, "  ");
@@ -435,7 +435,7 @@ void BotSetInfoConfigString(bot_state_t *bs) {
 	bot_goal_t goal;
 	//
 	ClientName(bs->client, netname, sizeof(netname));
-	if (Q_stricmp(netname, bs->teamleader) == 0) leader = "L";
+	if (Q_stricmp(netname, bs->directives.teamleader) == 0) leader = "L";
 	else leader = " ";
 
 	strcpy(carrying, "  ");
@@ -708,7 +708,7 @@ BotTeamLeader
 int BotTeamLeader(bot_state_t *bs) {
 	int leader;
 
-	leader = ClientFromName(bs->teamleader);
+	leader = ClientFromName(bs->directives.teamleader);
 	if (leader < 0) return qfalse;
 	if (!botstates[leader] || !botstates[leader]->inuse) return qfalse;
 	return qtrue;
@@ -770,9 +770,29 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 
 	if (bs->ideal_viewangles[PITCH] > 180) bs->ideal_viewangles[PITCH] -= 360;
 	//
+	// Lua bots roaming (no current enemy): sweep ideal_viewangles ±45° around the
+	// movement direction so the bot visually scans while detecting out-of-path targets.
+	// Triangle-wave period ~4 s, phase-shifted per client to avoid synchronised panning.
+	if ( bs->wiredBotsActive && bs->enemy < 0 ) {
+		float sc = ( FloatTime() + bs->client * 1.3f ) * 0.25f;
+		sc -= (int)sc;  // fractional part [0, 1)
+		float scanOfs = ( sc < 0.5f ) ? ( sc * 4.0f - 1.0f ) : ( 3.0f - sc * 4.0f );
+		bs->ideal_viewangles[YAW] += scanOfs * 45.0f;
+		bs->ideal_viewangles[YAW] = AngleMod( bs->ideal_viewangles[YAW] );
+	}
+	if ( bs->wiredBotsActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+		static int s_viewLogTick[MAX_CLIENTS];
+		if ( ++s_viewLogTick[bs->client] % 6 == 0 ) {
+			G_Printf( "^3[ViewAngle] c=%d view=(%.1f %.1f) ideal=(%.1f %.1f) spd=(%.1f %.1f)\n",
+				bs->client,
+				bs->viewangles[PITCH], bs->viewangles[YAW],
+				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW],
+				bs->viewanglespeed[PITCH], bs->viewanglespeed[YAW] );
+		}
+	}
 	if (bs->enemy >= 0) {
-		factor = Com_Clamp( 0.01f, 1.0f, BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_TRACKING, 0.5f ) );
-		maxchange = 240.0f + 1560.0f * BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
+		factor = Com_Clamp( 0.01f, 1.0f, WiredBots_ProfileFieldOr( bs, WB_PROFILE_TRACKING, 0.5f ) );
+		maxchange = 240.0f + 1560.0f * WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
 	}
 	else {
 		factor = 0.05f;
@@ -1061,6 +1081,8 @@ int BotAI(int client, float thinktime) {
 	bs->eye[2] += bs->cur_ps.viewheight;
 	//get the area the bot is in
 	bs->areanum = BotPointAreaNum(bs->origin);
+	//translate active WiredBots directive into ltgtype / teamgoal before AI runs
+	BotDirective_FrameUpdate(bs);
 	//the real AI
 	BotDeathmatchAI(bs, thinktime);
 	//set the weapon selection every AI frame
@@ -1269,8 +1291,8 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 		BotAI_Print(PRT_FATAL, "couldn't load skill %f from %s\n", settings->skill, settings->characterfile);
 		return qfalse;
 	}
-	bs->luaCharacterActive = (bs->character < 0) ? qtrue : qfalse;
-	if ( !bs->luaCharacterActive ) {
+	bs->wiredBotsActive = (bs->character < 0) ? qtrue : qfalse;
+	if ( !bs->wiredBotsActive ) {
 		BotAI_Print(PRT_FATAL, "legacy bot character backend is disabled: %s\n", settings->characterfile);
 		trap_BotFreeCharacter( bs->character );
 		return qfalse;
@@ -1313,6 +1335,7 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 	bs->client = client;
 	bs->entitynum = client;
 	bs->setupcount = 4;
+	BotDirective_Init(&bs->directives);
 	bs->entergame_time = FloatTime();
 	bs->ms = trap_BotAllocMoveState();
 	bs->walker = 0.0f;
@@ -1354,7 +1377,7 @@ int BotAIShutdownClient(int client, qboolean restart) {
 		BotWriteSessionData(bs);
 	}
 
-	if (!bs->luaCharacterActive && BotChat_ExitGame(bs)) {
+	if (!bs->wiredBotsActive && BotChat_ExitGame(bs)) {
 		trap_BotEnterChat(bs->cs, bs->client, CHAT_ALL);
 	}
 
@@ -1487,9 +1510,7 @@ int BotAIStartFrame(int time) {
 	trap_Cvar_Update(&bot_saveroutingcache);
 	trap_Cvar_Update(&bot_pause);
 	trap_Cvar_Update(&bot_report);
-#if FEAT_BOT_IMPROVEMENTS
 	trap_Cvar_Update(&bot_autoskill);
-#endif
 
 	if (bot_report.integer) {
 //		BotTeamplayReport();
@@ -1626,7 +1647,7 @@ int BotAIStartFrame(int time) {
 
 			if (!trap_AAS_Initialized()) return qfalse;
 
-			if ( botstates[i]->luaCharacterActive ) {
+			if ( botstates[i]->wiredBotsActive ) {
 				trap_BotLuaBotThink( botstates[i]->client, (float)thinktime / 1000.0f );
 			}
 

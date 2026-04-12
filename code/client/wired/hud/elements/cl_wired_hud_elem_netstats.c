@@ -9,25 +9,25 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementNetStats_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementNetStats_t;
 
-void* CG_SHUDElementNetStatsCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementNetStatsCreate(const modernhudConfig_t* config)
 {
-	shudElementNetStats_t* element;
+	modernHudElementNetStats_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementNetStatsRoutine(void* context)
+void CG_ModernHUDElementNetStatsRoutine(void* context)
 {
-	shudElementNetStats_t* element = (shudElementNetStats_t*)context;
+	modernHudElementNetStats_t* element = (modernHudElementNetStats_t*)context;
 	int ping;
 	int delag;
 
@@ -52,10 +52,10 @@ void CG_SHUDElementNetStatsRoutine(void* context)
 		element->ctx.text = va("%ims delag:%ims", ping, delag);
 	}
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementNetStatsDestroy(void* context)
+void CG_ModernHUDElementNetStatsDestroy(void* context)
 {
 	if (context) {
 		Z_Free(context);

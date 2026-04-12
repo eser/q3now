@@ -8,17 +8,17 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t lastLocation;
+	modernhudConfig_t config;
+	modernhudTextContext_t lastLocation;
 	int time;
-} shudElementLocation_t;
+} modernHudElementLocation_t;
 
-void* CG_SHUDElementLocationCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementLocationCreate(const modernhudConfig_t* config)
 {
-	shudElementLocation_t* element;
-	superhudGlobalContext_t* gctx;
+	modernHudElementLocation_t* element;
+	modernhudGlobalContext_t* gctx;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	if (!element->config.time.isSet)
 	{
@@ -26,17 +26,17 @@ void* CG_SHUDElementLocationCreate(const superhudConfig_t* config)
 		element->config.time.value = 2000;
 	}
 
-	gctx = CG_SHUDGetContext();
+	gctx = CG_ModernHUDGetContext();
 
-	CG_SHUDTextMakeContext(&element->config, &element->lastLocation);
-	CG_SHUDFillAndFrameForText(&element->config, &element->lastLocation);
+	CG_ModernHUDTextMakeContext(&element->config, &element->lastLocation);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->lastLocation);
 
 	return element;
 }
 
-void CG_SHUDElementLocationRoutine(void* context)
+void CG_ModernHUDElementLocationRoutine(void* context)
 {
-	shudElementLocation_t* element = (shudElementLocation_t*)context;
+	modernHudElementLocation_t* element = (modernHudElementLocation_t*)context;
 	clientInfo_t* ci;
 	const char* newLocation;
 
@@ -52,7 +52,7 @@ void CG_SHUDElementLocationRoutine(void* context)
 	{
 		element->time = cg.time;
 	}
-	else if (!CG_SHUDGetFadeColor(element->lastLocation.color_origin, element->lastLocation.color, &element->config, element->time))
+	else if (!CG_ModernHUDGetFadeColor(element->lastLocation.color_origin, element->lastLocation.color, &element->config, element->time))
 	{
 		element->time = 0;
 		return;
@@ -60,10 +60,10 @@ void CG_SHUDElementLocationRoutine(void* context)
 
 	element->lastLocation.text = newLocation;
 
-	CG_SHUDTextPrint(&element->config, &element->lastLocation);
+	CG_ModernHUDTextPrint(&element->config, &element->lastLocation);
 }
 
-void CG_SHUDElementLocationDestroy(void* context)
+void CG_ModernHUDElementLocationDestroy(void* context)
 {
 	if (context)
 	{

@@ -720,6 +720,42 @@ void CG_WiredHudPushState( void ) {
 			WUI_Stage_SetString( "game.spectators.list", specList );
 		}
 
+		/* ── bot coaching directives ──────────────────────────────────── */
+		{
+			static char dirList[MAX_STRING_CHARS];
+			int len = 0;
+			int ci;
+			dirList[0] = '\0';
+			if ( cg_drawBotDirectives.integer )
+			for ( ci = 0; ci < MAX_CLIENTS; ci++ ) {
+				const char *dirText;
+				char line[128];
+				if ( !cgs.clientinfo[ci].infoValid || !cgs.clientinfo[ci].botSkill ) continue;
+				switch ( cg_botDirectives[ci].type ) {
+					case 0:  dirText = "^7-";             break;
+					case 1:  Com_sprintf( line, sizeof(line), "^6@ %s", cg_botDirectives[ci].targetName ); dirText = line; break;
+					case 2:  dirText = "^5# Defend";      break;
+					case 3:  dirText = "^5# Camp";        break;
+					case 4:  dirText = "^5# Patrol";      break;
+					case 5:  Com_sprintf( line, sizeof(line), "^3> %s", cg_botDirectives[ci].targetName ); dirText = line; break;
+					case 6:  dirText = "^2< Rush Base";   break;
+					case 7:  dirText = "^2< Return Flag"; break;
+					case 8:  dirText = "^1X Attack Base"; break;
+					case 9:  Com_sprintf( line, sizeof(line), "^1X %s", cg_botDirectives[ci].targetName ); dirText = line; break;
+					case 10: dirText = "^3# Harvest";     break;
+					default: continue;
+				}
+				{
+					char entry[160];
+					Com_sprintf( entry, sizeof(entry), "%s  %s\n", cgs.clientinfo[ci].name, dirText );
+					Q_strncpyz( dirList + len, entry, sizeof(dirList) - len );
+					len = strlen( dirList );
+					if ( len >= (int)sizeof(dirList) - 1 ) break;
+				}
+			}
+			WUI_Stage_SetString( "game.bots.directives", dirList );
+		}
+
 		/* Flush all staged entries in one batch syscall */
 		WUI_Stage_Flush();
 	}

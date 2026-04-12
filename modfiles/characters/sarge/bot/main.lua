@@ -50,13 +50,13 @@ return {
   },
 
   attacks = {
-    "rg1",   -- rail: veteran's bread and butter
-    "rl1",   -- rocket: preferred for room control
-    "lg1",   -- lightning: close backup
-    "gl1",   -- grenades: area denial
-    "sg1",   -- shotgun: last resort close range
-    "pr1",   -- plasma: suppression
-    "mg1",
+    { "rg1", aim_height = 36 },  -- rail: veteran's bread and butter
+    { "rl1", aim_height = 0  },  -- rocket: preferred for room control, aim at feet
+    { "lg1", aim_height = 28 },  -- lightning: close backup
+    { "gl1", aim_height = 0  },  -- grenades: area denial, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: last resort close range
+    { "pr1", aim_height = 28 },  -- plasma: suppression
+    { "mg1", aim_height = 28 },
   },
 
   items = {

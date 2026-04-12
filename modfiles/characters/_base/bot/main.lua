@@ -6,6 +6,9 @@
 -- Trait/aim values:    number = constant | {low, high} = lerp by skill (0..1)
 -- Movement thresholds: number = minimum skill to enable | true/false = always
 -- attacks:             ordered list — first attack whose weapon is carried wins
+--                      string entry: { shortname }  →  default aim_height = 28
+--                      table entry:  { "shortname", aim_height = N }  where N is
+--                        units above entity origin (0=feet/splash, 28=center mass, 36=upper body)
 -- items:               ordered list — bot prioritizes picking items in this order
 -- chats.file:          CHARACTERISTIC_CHAT_FILE passthrough (CHAT_NAME comes from nicknames[1] in main.lua)
 
@@ -68,13 +71,13 @@ return {
   -- Ordered list of attack shortnames.  Bot walks the list and fires the first
   -- attack whose parent weapon is currently held (and has ammo).
   attacks = {
-    "rg1",  -- railgun: precision finisher at range
-    "lg1",  -- lightning: close-range DPS
-    "rl1",  -- rocket: medium-range splash
-    "gl1",  -- grenades: area denial
-    "sg1",  -- shotgun: backup
-    "pr1",  -- plasma: suppression
-    "mg1",  -- machinegun: always available
+    { "rg1", aim_height = 36 },  -- railgun: upper body for clean hit detection
+    { "lg1", aim_height = 28 },  -- lightning: center mass hitscan
+    { "rl1", aim_height = 0  },  -- rocket: aim at feet for splash
+    { "gl1", aim_height = 0  },  -- grenades: aim at feet for bounce/splash
+    { "sg1", aim_height = 28 },  -- shotgun: center mass hitscan
+    { "pr1", aim_height = 28 },  -- plasma: center mass
+    { "mg1", aim_height = 28 },  -- machinegun: center mass
   },
 
   -- ── Item priority ──────────────────────────────────────────────────────────

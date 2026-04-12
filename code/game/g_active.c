@@ -1214,6 +1214,17 @@ void ClientEndFrame( gentity_t *ent ) {
 	}
 	SendPendingPredictableEvents( &ent->client->ps );
 
+	// sync aggregate stats to persistant slots for observer/web UI (wn_http.c reads these)
+	{
+		gclient_t *cl = ent->client;
+		int totalDamage = 0, att;
+		for ( att = ATT_NONE + 1; att < ATT_NUM_ATTACKS; att++ )
+			totalDamage += cl->attackStats[att].damage;
+		cl->ps.persistant[PERS_TOTAL_SHOTS]  = cl->accuracy_shots;
+		cl->ps.persistant[PERS_TOTAL_HITS]   = cl->accuracy_hits;
+		cl->ps.persistant[PERS_TOTAL_DAMAGE] = totalDamage;
+	}
+
 	// set the bit for the reachability area the client is currently in
 //	i = trap_AAS_PointReachabilityAreaIndex( ent->client->ps.origin );
 //	ent->client->areabits[i >> 3] |= 1 << (i & 7);

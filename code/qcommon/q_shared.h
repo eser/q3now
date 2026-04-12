@@ -43,6 +43,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define BASEGAME				"baseq3"
 
+#define MAX_NETNAME				36
 #define MAX_TEAMNAME            32
 #define MAX_MASTER_SERVERS      5	// number of supported master servers
 
@@ -1212,7 +1213,7 @@ typedef struct {
 
 // bit field limits
 #define	MAX_STATS				16
-#define	MAX_PERSISTANT			20		// increased from 16 for kill spree tier counters
+#define	MAX_PERSISTANT			24		// increased from 20 for observer/web stat slots
 #define	MAX_POWERUPS			16
 #define	MAX_WEAPONS				16
 #define	MAX_ATTACKS				32

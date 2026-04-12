@@ -22,7 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_parse.c  -- parse a message received from the server
 
 #include "client.h"
-#include "../wired/net/wn_public.h"
+#include "../qcommon/wired/net/wn_public.h"
 
 static const char *svc_strings[] = {
 	"svc_bad",
@@ -1386,11 +1386,18 @@ void CL_CheckReliableStreams( void )
 	int           len;
 	int           rchan;
 
+	/* CHAN_BOOTSTRAP exceeds MAX_MSGLEN; it uses a dedicated large buffer. */
+	{
+		const byte *bdata;
+		int         blen;
+		if ( WN_ClientConsumeBootstrap( &bdata, &blen ) ) {
+			CL_ParseTypedBootstrap( bdata, blen );
+		}
+	}
+
 	len = (int)sizeof( buf );
 	while ( WN_ClientRecvReliable( &rchan, buf, &len ) ) {
-		if ( rchan == CHAN_BOOTSTRAP ) {
-			CL_ParseTypedBootstrap( buf, len );
-		} else if ( rchan == CHAN_DOWNLOAD ) {
+		if ( rchan == CHAN_DOWNLOAD ) {
 			CL_ParseTypedDownload( buf, len );
 		} else if ( rchan == CHAN_MCP ) {
 			/* MCP JSON-RPC push from server via reliable channel.

@@ -8,54 +8,54 @@
 
 typedef enum
 {
-	SHUD_ELEMENT_LOCAL_TIME,
-	SHUD_ELEMENT_LOCAL_DATE,
-} shudElementLocalTimeType_t;
+	ModernHUD_ELEMENT_LOCAL_TIME,
+	ModernHUD_ELEMENT_LOCAL_DATE,
+} modernHudElementLocalTimeType_t;
 
 typedef struct
 {
-	superhudConfig_t config;
+	modernhudConfig_t config;
 	int timePrev;
 	char s[MAX_QPATH];
-	superhudTextContext_t ctx;
-	shudElementLocalTimeType_t type;
-} shudElementLocalTime_t;
+	modernhudTextContext_t ctx;
+	modernHudElementLocalTimeType_t type;
+} modernHudElementLocalTime_t;
 
-void* CG_SHUDElementCreateDateTime(const superhudConfig_t* config, shudElementLocalTimeType_t type)
+void* CG_ModernHUDElementCreateDateTime(const modernhudConfig_t* config, modernHudElementLocalTimeType_t type)
 {
-	shudElementLocalTime_t* element;
+	modernHudElementLocalTime_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	element->type = type;
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 	element->ctx.text = &element->s[0];
 
 	return element;
 }
 
-void* CG_SHUDElementLocalTimeCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementLocalTimeCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementCreateDateTime(config, SHUD_ELEMENT_LOCAL_TIME);
+	return CG_ModernHUDElementCreateDateTime(config, ModernHUD_ELEMENT_LOCAL_TIME);
 }
 
-void* CG_SHUDElementLocalDateCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementLocalDateCreate(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementCreateDateTime(config, SHUD_ELEMENT_LOCAL_DATE);
+	return CG_ModernHUDElementCreateDateTime(config, ModernHUD_ELEMENT_LOCAL_DATE);
 }
 
-void CG_SHUDElementLocalTimeRoutine(void* context)
+void CG_ModernHUDElementLocalTimeRoutine(void* context)
 {
-	shudElementLocalTime_t* element = (shudElementLocalTime_t*)context;
+	modernHudElementLocalTime_t* element = (modernHudElementLocalTime_t*)context;
 	qtime_t qtime;
 
 	if (cg.time - element->timePrev > 1000)
 	{
 		element->timePrev = cg.time;
 		trap_RealTime(&qtime);
-		if (element->type == SHUD_ELEMENT_LOCAL_TIME)
+		if (element->type == ModernHUD_ELEMENT_LOCAL_TIME)
 		{
 			if (element->config.style.isSet && element->config.style.value == 1)
 			{
@@ -80,7 +80,7 @@ void CG_SHUDElementLocalTimeRoutine(void* context)
 				Com_sprintf(element->s, MAX_QPATH, "%02d:%02d", qtime.tm_hour, qtime.tm_min);
 			}
 		}
-		else if (element->type == SHUD_ELEMENT_LOCAL_DATE)
+		else if (element->type == ModernHUD_ELEMENT_LOCAL_DATE)
 		{
 			if (element->config.style.isSet && element->config.style.value == 1)
 			{
@@ -99,10 +99,10 @@ void CG_SHUDElementLocalTimeRoutine(void* context)
 		}
 
 	}
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementLocalTimeDestroy(void* context)
+void CG_ModernHUDElementLocalTimeDestroy(void* context)
 {
 	if (context)
 	{

@@ -34,6 +34,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define CTF
 
 #include "../qcommon/q_feats.h"
+#include "wired/bots/g_wiredbots.h"
+#include "ai_movement.h"
 
 #define MAX_ITEMS					256
 //bot flags
@@ -89,7 +91,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define PRESENCE_NORMAL				2
 #define PRESENCE_CROUCH				4
 
-#if FEAT_BOT_IMPROVEMENTS
 // ── bot AI improvements: shared types ─────────────────────────────────
 
 // entity reference with type validation (guards against entity slot reuse)
@@ -133,8 +134,6 @@ typedef struct {
 	int				respawnTime;	// respawn interval in ms
 	int				pickupTime;		// level.time when picked up (0 = available or unknown)
 } bot_itemtime_t;
-
-#endif // FEAT_BOT_IMPROVEMENTS
 
 //check points
 typedef struct bot_waypoint_s
@@ -199,7 +198,7 @@ typedef struct bot_state_s
 	int setupcount;									//true when the bot has just been setup
 	int map_restart;									//true when the map is being restarted
 	int entergamechat;								//true when the bot used an enter game chat
-	qboolean luaCharacterActive;						// true when character comes from BOTLUA path
+	qboolean wiredBotsActive;						// true when character comes from BOTLUA path
 	int num_deaths;									//number of time this bot died
 	int num_kills;									//number of kills of this bot
 	int revenge_enemy;								//the revenge enemy
@@ -281,7 +280,7 @@ typedef struct bot_state_s
 	float teammessage_time;							//time to message team mates what the bot is doing
 	float teamgoal_time;							//time to stop helping team mate
 	float teammatevisible_time;						//last time the team mate was NOT visible
-	int teamtaskpreference;							//team task preference
+	/* teamtaskpreference moved to bs->directives.preference */
 	// last ordered team goal
 	int lastgoal_decisionmaker;
 	int lastgoal_ltgtype;
@@ -295,7 +294,7 @@ typedef struct bot_state_s
 	float leadmessage_time;							//last time a messaged was sent to the team mate
 	float leadbackup_time;							//time backing up towards team mate
 	//
-	char teamleader[MAX_NETNAME];					//netname of the team leader
+	/* teamleader moved to bs->directives.teamleader */
 	float askteamleader_time;						//time asked for team leader
 	float becometeamleader_time;					//time the bot will become the team leader
 	float teamgiveorders_time;						//time to give team orders
@@ -308,7 +307,7 @@ typedef struct bot_state_s
 	int forceorders;								//true if forced to give orders
 	int flagcarrier;								//team mate carrying the enemy flag
 	int ctfstrategy;								//ctf strategy
-	char subteam[32];								//sub team name
+	/* subteam moved to bs->directives.subteam */
 	float formation_dist;							//formation team mate intervening space
 
 	bot_activategoal_t *activatestack;				//first activate goal on the stack
@@ -319,7 +318,6 @@ typedef struct bot_state_s
 	bot_waypoint_t *curpatrolpoint;					//current patrol point the bot is going for
 	int patrolflags;								//patrol flags
 
-#if FEAT_BOT_IMPROVEMENTS
 	// ── missile avoidance ─────────────────────────────────────────────
 	tracked_ent_t	missile_dodge[MAX_MISSILE_DODGE];
 	int				num_missiles;			// number of tracked missiles this frame
@@ -333,6 +331,14 @@ typedef struct bot_state_s
 	qboolean		strafejump_active;		// currently strafejumping
 	int				strafejump_side;		// alternating left(-1) / right(1)
 	qboolean		strafejump_landed;		// qtrue after side flip on this landing
+
+	// ── advanced movement ─────────────────────────────────────────────
+	bot_doublejump_t	doublejump;			// double-jump sequence state
+	bot_walljump_t		walljump;			// wall-jump detection/execution state
+	float			edge_block_until;		// FloatTime() deadline: back away from detected void edge
+	vec3_t			last_ground_pos;		// last position where bot was on solid ground (for void avoid spots)
+	vec3_t			void_spots[8];			// persistent ledge positions that caused void deaths this session
+	int			num_void_spots;			// number of entries in void_spots[]
 
 	// ── item respawn timing ───────────────────────────────────────────
 	bot_itemtime_t	timed_items[MAX_TIMED_ITEMS];
@@ -354,12 +360,12 @@ typedef struct bot_state_s
 	// ── dodge direction for current frame ─────────────────────────────
 	vec3_t			dodge_dir;				// computed dodge direction (zero if no dodge)
 	qboolean		dodge_active;			// qtrue if dodging this frame
-#endif // FEAT_BOT_IMPROVEMENTS
+
+	// ── WiredBots directive state ─────────────────────────────────────
+	botDirectiveState_t directives;			// active tactical directive and tactic
 } bot_state_t;
 
-#if FEAT_BOT_IMPROVEMENTS
 extern bot_state_t *botstates[MAX_CLIENTS];
-#endif
 
 //resets the whole bot state
 void BotResetState(bot_state_t *bs);

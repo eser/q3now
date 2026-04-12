@@ -66,63 +66,63 @@ extern vmCvar_t cg_MaxlocationWidth;
 #define DRAW_REWARDS_NOICON   0x04
 #endif
 
-#define SUPERHUD_DEFAULT_FADEDELAY 1000.0
+#define MODERNHUD_DEFAULT_FADEDELAY 1000.0
 
 typedef enum
 {
-	SUPERHUD_ALIGNH_LEFT,
-	SUPERHUD_ALIGNH_CENTER,
-	SUPERHUD_ALIGNH_RIGHT,
-} superhudAlignH_t;
+	MODERNHUD_ALIGNH_LEFT,
+	MODERNHUD_ALIGNH_CENTER,
+	MODERNHUD_ALIGNH_RIGHT,
+} modernhudAlignH_t;
 
 typedef enum
 {
-	SUPERHUD_ALIGNV_TOP,
-	SUPERHUD_ALIGNV_CENTER,
-	SUPERHUD_ALIGNV_BOTTOM,
-} superhudAlignV_t;
+	MODERNHUD_ALIGNV_TOP,
+	MODERNHUD_ALIGNV_CENTER,
+	MODERNHUD_ALIGNV_BOTTOM,
+} modernhudAlignV_t;
 
 typedef enum
 {
-	SUPERHUD_COLOR_RGBA,
-	SUPERHUD_COLOR_T,
-	SUPERHUD_COLOR_E,
-	SUPERHUD_COLOR_I,
-} superhudColorType_t;
+	MODERNHUD_COLOR_RGBA,
+	MODERNHUD_COLOR_T,
+	MODERNHUD_COLOR_E,
+	MODERNHUD_COLOR_I,
+} modernhudColorType_t;
 
 typedef struct
 {
-	superhudColorType_t type;
+	modernhudColorType_t type;
 	vec4_t rgba;
-} superhudColor_t;
+} modernhudColor_t;
 
 typedef enum
 {
-	SUPERHUD_DIR_LEFT_TO_RIGHT,
-	SUPERHUD_DIR_RIGHT_TO_LEFT,
-	SUPERHUD_DIR_TOP_TO_BOTTOM,
-	SUPERHUD_DIR_BOTTOM_TO_TOP,
-} superhudDirection_t;
+	MODERNHUD_DIR_LEFT_TO_RIGHT,
+	MODERNHUD_DIR_RIGHT_TO_LEFT,
+	MODERNHUD_DIR_TOP_TO_BOTTOM,
+	MODERNHUD_DIR_BOTTOM_TO_TOP,
+} modernhudDirection_t;
 
 typedef enum
 {
-	SUPERHUD_ITSIDE_BLUE,
-	SUPERHUD_ITSIDE_RED,
-	SUPERHUD_ITSIDE_NEUTRAL,
-	SUPERHUD_ITSIDE_OWN,
-	SUPERHUD_ITSIDE_ENEMY,
-} superhudItTeam_t;
+	MODERNHUD_ITSIDE_BLUE,
+	MODERNHUD_ITSIDE_RED,
+	MODERNHUD_ITSIDE_NEUTRAL,
+	MODERNHUD_ITSIDE_OWN,
+	MODERNHUD_ITSIDE_ENEMY,
+} modernhudItTeam_t;
 
 typedef struct
 {
 	struct
 	{
-		superhudAlignH_t value;
+		modernhudAlignH_t value;
 		qboolean isSet;
 	} alignH;
 	struct
 	{
-		superhudAlignV_t value;
+		modernhudAlignV_t value;
 		qboolean isSet;
 	} alignV;
 	struct
@@ -132,12 +132,12 @@ typedef struct
 	} angles;
 	struct
 	{
-		superhudColor_t value;
+		modernhudColor_t value;
 		qboolean isSet;
 	} bgcolor;
 	struct
 	{
-		superhudColor_t value;
+		modernhudColor_t value;
 		qboolean isSet;
 	} bgcolor2;
 	struct
@@ -147,12 +147,12 @@ typedef struct
 	} border;
 	struct
 	{
-		superhudColor_t value;
+		modernhudColor_t value;
 		qboolean isSet;
 	} borderColor;
 	struct
 	{
-		superhudColor_t value;
+		modernhudColor_t value;
 		qboolean isSet;
 	} borderColor2;
 	struct
@@ -162,17 +162,17 @@ typedef struct
 	} hlcolor;
 	struct
 	{
-		superhudColor_t value;
+		modernhudColor_t value;
 		qboolean isSet;
 	} color;
 	struct
 	{
-		superhudColor_t value;
+		modernhudColor_t value;
 		qboolean isSet;
 	} color2;
 	struct
 	{
-		superhudDirection_t value;
+		modernhudDirection_t value;
 		qboolean isSet;
 	} direction;
 	struct
@@ -225,7 +225,7 @@ typedef struct
 	} imagetc;
 	struct
 	{
-		superhudItTeam_t value;
+		modernhudItTeam_t value;
 		qboolean isSet;
 	} itTeam;
 	struct
@@ -269,7 +269,7 @@ typedef struct
 	} text;
 	struct
 	{
-		superhudAlignH_t value;
+		modernhudAlignH_t value;
 		qboolean isSet;
 	} textAlign;
 	struct
@@ -307,24 +307,24 @@ typedef struct
 		char value[32];
 		qboolean isSet;
 	} bind;
-} superhudConfig_t;
+} modernhudConfig_t;
 
-typedef superhudConfig_t superhudElementDefault_t;
+typedef modernhudConfig_t modernhudElementDefault_t;
 
 typedef enum
 {
-	SUPERHUD_ELEMENT_TYPE_DEFAULTS,
+	MODERNHUD_ELEMENT_TYPE_DEFAULTS,
 }
-superhudElementType_t;
+modernhudElementType_t;
 
 typedef struct
 {
 	union
 	{
-		superhudElementDefault_t def; //todo remove it, default have no content
+		modernhudElementDefault_t def; //todo remove it, default have no content
 	} value;
-	superhudElementType_t type;
-} superhudElementContent_t;
+	modernhudElementType_t type;
+} modernhudElementContent_t;
 
 typedef struct configFileLine_s
 {
@@ -343,14 +343,14 @@ typedef struct configFileInfo_s
 
 typedef enum
 {
-	SUPERHUD_CONFIG_OK,
-	SUPERHUD_CONFIG_UNEXPECTED_CHARACTER,
-	SUPERHUD_CONFIG_END_OF_FILE,
-	SUPERHUD_CONFIG_END_OF_ELEMENT,
-	SUPERHUD_CONFIG_WRONG_ELEMENT_NAME,
-	SUPERHUD_CONFIG_WRONG_COMMAND_NAME,
-	SUPERHUD_CONFIG_LOST_ELEMENT_BODY,
-} superhudConfigParseStatus_t;
+	MODERNHUD_CONFIG_OK,
+	MODERNHUD_CONFIG_UNEXPECTED_CHARACTER,
+	MODERNHUD_CONFIG_END_OF_FILE,
+	MODERNHUD_CONFIG_END_OF_ELEMENT,
+	MODERNHUD_CONFIG_WRONG_ELEMENT_NAME,
+	MODERNHUD_CONFIG_WRONG_COMMAND_NAME,
+	MODERNHUD_CONFIG_LOST_ELEMENT_BODY,
+} modernhudConfigParseStatus_t;
 
 #define SE_IM         (1 << 0)  // 0x00000001
 #define SE_IM_STR "im"
@@ -378,59 +378,59 @@ typedef enum
 // bit positions are sequential from SE_MODE_BASE_BIT, one per unique hudToken
 #define SE_MODE_BASE_BIT  11
 
-#define SHUD_CHECK_SHOW_EMPTY(element) ( \
+#define ModernHUD_CHECK_SHOW_EMPTY(element) ( \
     ((element) != NULL) && \
     ((element)->config.visflags.isSet) && \
     (((element)->config.visflags.value & SE_SHOW_EMPTY) != 0) \
 )
 
-typedef struct superHUDConfigElement_s
+typedef struct modernHUDConfigElement_s
 {
 	const char* name;
 	int visibility;
-	void* (*create)(const superhudConfig_t* config);
+	void* (*create)(const modernhudConfig_t* config);
 	void (*routine)(void* context);
 	void (*destroy)(void* context);
 	void* context;
 	int order;
-} superHUDConfigElement_t;
+} modernHUDConfigElement_t;
 
-typedef struct superhudElementDictMember_s
+typedef struct modernhudElementDictMember_s
 {
-	const superHUDConfigElement_t* element;
-	struct superhudElementDictMember_s* next;
+	const modernHUDConfigElement_t* element;
+	struct modernhudElementDictMember_s* next;
 }
-superhudElementDictMember_t;
+modernhudElementDictMember_t;
 
-typedef struct superhudElement_s
+typedef struct modernhudElement_s
 {
-	superHUDConfigElement_t element;
-	superhudConfig_t config;
-	superhudElementContent_t content;
-	struct superhudElement_s* next;
+	modernHUDConfigElement_t element;
+	modernhudConfig_t config;
+	modernhudElementContent_t content;
+	struct modernhudElement_s* next;
 }
-superhudElement_t;
+modernhudElement_t;
 
-typedef struct superHUDConfigCommand_s
+typedef struct modernHUDConfigCommand_s
 {
 	const char* name;
-	superhudConfigParseStatus_t (*parse)(configFileInfo_t* finfo, superhudConfig_t* config);
-	struct superHUDConfigCommand_s* next;
-} superHUDConfigCommand_t;
+	modernhudConfigParseStatus_t (*parse)(configFileInfo_t* finfo, modernhudConfig_t* config);
+	struct modernHUDConfigCommand_s* next;
+} modernHUDConfigCommand_t;
 
 typedef struct
 {
-	const superHUDConfigCommand_t* item;
-	superhudConfigParseStatus_t status;
-} superhudConfigParseCommand_t;
+	const modernHUDConfigCommand_t* item;
+	modernhudConfigParseStatus_t status;
+} modernhudConfigParseCommand_t;
 
 typedef struct
 {
-	const superHUDConfigElement_t* item;
-	superhudConfigParseStatus_t status;
-} superhudConfigParseElement_t;
+	const modernHUDConfigElement_t* item;
+	modernhudConfigParseStatus_t status;
+} modernhudConfigParseElement_t;
 
-#define SHUD_ELEMENT_INIT(E, CFG)                     \
+#define ModernHUD_ELEMENT_INIT(E, CFG)                     \
     do{                                                 \
         E = Z_Malloc(sizeof(*E));                         \
         OSP_MEMORY_CHECK(E);                              \
@@ -438,317 +438,317 @@ typedef struct
         memcpy(&E->config, CFG, sizeof(element->config)); \
     }while(0)
 
-void CG_SHUDParserInit(void);
-const superHUDConfigElement_t* CG_SHUDFindConfigElementItem(const char* name);
-const superHUDConfigCommand_t* CG_SHUDFindConfigCommandItem(const char* name);
+void CG_ModernHUDParserInit(void);
+const modernHUDConfigElement_t* CG_ModernHUDFindConfigElementItem(const char* name);
+const modernHUDConfigCommand_t* CG_ModernHUDFindConfigCommandItem(const char* name);
 
-qboolean CG_SHUDFileInfoInit(configFileInfo_t* info, const char* fileContent);
-void CG_SHUDFileInfoTeardown(configFileInfo_t* cfi);
+qboolean CG_ModernHUDFileInfoInit(configFileInfo_t* info, const char* fileContent);
+void CG_ModernHUDFileInfoTeardown(configFileInfo_t* cfi);
 
-qboolean CG_SHUDFileInfoGoToChar(configFileInfo_t* cfi, char to, qboolean next);
-void CG_SHUDFileInfoSkipSpaces(configFileInfo_t* cfi);
-qboolean CG_SHUDFileInfoSkipCommandEnd(configFileInfo_t* cfi);
-superhudConfigParseElement_t CG_SHUDFileInfoGetElementItem(configFileInfo_t* cfi);
-superhudConfigParseCommand_t CG_SHUDFileInfoGetCommandItem(configFileInfo_t* cfi);
+qboolean CG_ModernHUDFileInfoGoToChar(configFileInfo_t* cfi, char to, qboolean next);
+void CG_ModernHUDFileInfoSkipSpaces(configFileInfo_t* cfi);
+qboolean CG_ModernHUDFileInfoSkipCommandEnd(configFileInfo_t* cfi);
+modernhudConfigParseElement_t CG_ModernHUDFileInfoGetElementItem(configFileInfo_t* cfi);
+modernhudConfigParseCommand_t CG_ModernHUDFileInfoGetCommandItem(configFileInfo_t* cfi);
 
-void* CG_SHUDElementFPSCreate(const superhudConfig_t* config);
-void CG_SHUDElementFPSRoutine(void* context);
-void CG_SHUDElementFPSDestroy(void* context);
+void* CG_ModernHUDElementFPSCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementFPSRoutine(void* context);
+void CG_ModernHUDElementFPSDestroy(void* context);
 
 #if FEAT_MOVEMENT_KEYS
 // shared routine/destroy for all key elements
-void CG_SHUDElementKeyRoutine(void* context);
-void CG_SHUDElementKeyDestroy(void* context);
+void CG_ModernHUDElementKeyRoutine(void* context);
+void CG_ModernHUDElementKeyDestroy(void* context);
 // keydown factories
-void* CG_SHUDElementKeyDownForwardCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownBackCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownLeftCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownRightCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownJumpCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownCrouchCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownAttackCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownUseCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownWalkCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyDownGestureCreate(const superhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownForwardCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownBackCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownLeftCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownRightCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownJumpCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownCrouchCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownAttackCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownUseCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownWalkCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyDownGestureCreate(const modernhudConfig_t* c);
 // keyup factories
-void* CG_SHUDElementKeyUpForwardCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpBackCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpLeftCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpRightCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpJumpCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpCrouchCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpAttackCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpUseCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpWalkCreate(const superhudConfig_t* c);
-void* CG_SHUDElementKeyUpGestureCreate(const superhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpForwardCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpBackCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpLeftCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpRightCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpJumpCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpCrouchCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpAttackCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpUseCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpWalkCreate(const modernhudConfig_t* c);
+void* CG_ModernHUDElementKeyUpGestureCreate(const modernhudConfig_t* c);
 #endif
 
 #if FEAT_UNLAGGED
-void* CG_SHUDElementNetStatsCreate(const superhudConfig_t* config);
-void CG_SHUDElementNetStatsRoutine(void* context);
-void CG_SHUDElementNetStatsDestroy(void* context);
+void* CG_ModernHUDElementNetStatsCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementNetStatsRoutine(void* context);
+void CG_ModernHUDElementNetStatsDestroy(void* context);
 #endif
 
-void* CG_SHUDElementSBHCCreate(const superhudConfig_t* config);
-void CG_SHUDElementSBHCRoutine(void* context);
-void CG_SHUDElementSBHCDestroy(void* context);
+void* CG_ModernHUDElementSBHCCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBHCRoutine(void* context);
+void CG_ModernHUDElementSBHCDestroy(void* context);
 
-void* CG_SHUDElementSBHBCreate(const superhudConfig_t* config);
-void CG_SHUDElementSBHBRoutine(void* context);
-void CG_SHUDElementSBHBDestroy(void* context);
+void* CG_ModernHUDElementSBHBCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBHBRoutine(void* context);
+void CG_ModernHUDElementSBHBDestroy(void* context);
 
-void* CG_SHUDElementSBHICreate(const superhudConfig_t* config);
-void CG_SHUDElementSBHIRoutine(void* context);
-void CG_SHUDElementSBHIDestroy(void* context);
+void* CG_ModernHUDElementSBHICreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBHIRoutine(void* context);
+void CG_ModernHUDElementSBHIDestroy(void* context);
 
-void* CG_SHUDElementSBACCreate(const superhudConfig_t* config);
-void CG_SHUDElementSBACRoutine(void* context);
-void CG_SHUDElementSBACDestroy(void* context);
+void* CG_ModernHUDElementSBACCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBACRoutine(void* context);
+void CG_ModernHUDElementSBACDestroy(void* context);
 
-void* CG_SHUDElementSBABCreate(const superhudConfig_t* config);
-void CG_SHUDElementSBABRoutine(void* context);
-void CG_SHUDElementSBABDestroy(void* context);
+void* CG_ModernHUDElementSBABCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBABRoutine(void* context);
+void CG_ModernHUDElementSBABDestroy(void* context);
 
-void* CG_SHUDElementSBAICreate(const superhudConfig_t* config);
-void CG_SHUDElementSBAIRoutine(void* context);
-void CG_SHUDElementSBAIDestroy(void* context);
+void* CG_ModernHUDElementSBAICreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBAIRoutine(void* context);
+void CG_ModernHUDElementSBAIDestroy(void* context);
 
-void* CG_SHUDElementSBAmBCreate(const superhudConfig_t* config);
-void CG_SHUDElementSBAmBRoutine(void* context);
-void CG_SHUDElementSBAmBDestroy(void* context);
+void* CG_ModernHUDElementSBAmBCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBAmBRoutine(void* context);
+void CG_ModernHUDElementSBAmBDestroy(void* context);
 
-void* CG_SHUDElementSBAmCCreate(const superhudConfig_t* config);
-void CG_SHUDElementSBAmCRoutine(void* context);
-void CG_SHUDElementSBAmCDestroy(void* context);
+void* CG_ModernHUDElementSBAmCCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBAmCRoutine(void* context);
+void CG_ModernHUDElementSBAmCDestroy(void* context);
 
-void* CG_SHUDElementSBAmICreate(const superhudConfig_t* config);
-void CG_SHUDElementSBAmIRoutine(void* context);
-void CG_SHUDElementSBAmIDestroy(void* context);
+void* CG_ModernHUDElementSBAmICreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSBAmIRoutine(void* context);
+void CG_ModernHUDElementSBAmIDestroy(void* context);
 
-void* CG_SHUDElementTargetNameCreate(const superhudConfig_t* config);
-void CG_SHUDElementTargetNameRoutine(void* context);
-void CG_SHUDElementTargetNameDestroy(void* context);
+void* CG_ModernHUDElementTargetNameCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementTargetNameRoutine(void* context);
+void CG_ModernHUDElementTargetNameDestroy(void* context);
 
-void* CG_SHUDElementTargetStatusCreate(const superhudConfig_t* config);
-void CG_SHUDElementTargetStatusRoutine(void* context);
-void CG_SHUDElementTargetStatusDestroy(void* context);
+void* CG_ModernHUDElementTargetStatusCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementTargetStatusRoutine(void* context);
+void CG_ModernHUDElementTargetStatusDestroy(void* context);
 
-void* CG_SHUDElementVMWCreate(const superhudConfig_t* config);
-void CG_SHUDElementVMWRoutine(void* context);
-void CG_SHUDElementVMWDestroy(void* context);
+void* CG_ModernHUDElementVMWCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementVMWRoutine(void* context);
+void CG_ModernHUDElementVMWDestroy(void* context);
 
-void* CG_SHUDElementFragMessageCreate(const superhudConfig_t* config);
-void CG_SHUDElementFragMessageRoutine(void* context);
-void CG_SHUDElementFragMessageDestroy(void* context);
+void* CG_ModernHUDElementFragMessageCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementFragMessageRoutine(void* context);
+void CG_ModernHUDElementFragMessageDestroy(void* context);
 
-void* CG_SHUDElementRankMessageCreate(const superhudConfig_t* config);
-void CG_SHUDElementRankMessageRoutine(void* context);
-void CG_SHUDElementRankMessageDestroy(void* context);
+void* CG_ModernHUDElementRankMessageCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementRankMessageRoutine(void* context);
+void CG_ModernHUDElementRankMessageDestroy(void* context);
 
-void* CG_SHUDElementNGPCreate(const superhudConfig_t* config);
-void CG_SHUDElementNGPRoutine(void* context);
-void CG_SHUDElementNGPDestroy(void* context);
+void* CG_ModernHUDElementNGPCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementNGPRoutine(void* context);
+void CG_ModernHUDElementNGPDestroy(void* context);
 
-void* CG_SHUDElementNGCreate(const superhudConfig_t* config);
-void CG_SHUDElementNGRoutine(void* context);
-void CG_SHUDElementNGDestroy(void* context);
+void* CG_ModernHUDElementNGCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementNGRoutine(void* context);
+void CG_ModernHUDElementNGDestroy(void* context);
 
-void* CG_SHUDElementDecorCreate(const superhudConfig_t* config);
-void CG_SHUDElementDecorRoutine(void* context);
-void CG_SHUDElementDecorDestroy(void* context);
+void* CG_ModernHUDElementDecorCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementDecorRoutine(void* context);
+void CG_ModernHUDElementDecorDestroy(void* context);
 
-void* CG_SHUDElementPlayerSpeedCreate(const superhudConfig_t* config);
-void CG_SHUDElementPlayerSpeedRoutine(void* context);
-void CG_SHUDElementPlayerSpeedDestroy(void* context);
+void* CG_ModernHUDElementPlayerSpeedCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementPlayerSpeedRoutine(void* context);
+void CG_ModernHUDElementPlayerSpeedDestroy(void* context);
 
-void* CG_SHUDElementLocalTimeCreate(const superhudConfig_t* config);
-void* CG_SHUDElementLocalDateCreate(const superhudConfig_t* config);
-void CG_SHUDElementLocalTimeRoutine(void* context);
-void CG_SHUDElementLocalTimeDestroy(void* context);
+void* CG_ModernHUDElementLocalTimeCreate(const modernhudConfig_t* config);
+void* CG_ModernHUDElementLocalDateCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementLocalTimeRoutine(void* context);
+void CG_ModernHUDElementLocalTimeDestroy(void* context);
 
-void* CG_SHUDElementAmmoMessageCreate(const superhudConfig_t* config);
-void CG_SHUDElementAmmoMessageRoutine(void* context);
-void CG_SHUDElementAmmoMessageDestroy(void* context);
+void* CG_ModernHUDElementAmmoMessageCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementAmmoMessageRoutine(void* context);
+void CG_ModernHUDElementAmmoMessageDestroy(void* context);
 
-void* CG_SHUDElementChat1Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat2Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat3Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat4Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat5Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat6Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat7Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat8Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat9Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat10Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat11Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat12Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat13Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat14Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat15Create(const superhudConfig_t* config);
-void* CG_SHUDElementChat16Create(const superhudConfig_t* config);
-void CG_SHUDElementChatRoutine(void* context);
-void CG_SHUDElementChatDestroy(void* context);
+void* CG_ModernHUDElementChat1Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat2Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat3Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat4Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat5Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat6Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat7Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat8Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat9Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat10Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat11Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat12Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat13Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat14Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat15Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChat16Create(const modernhudConfig_t* config);
+void CG_ModernHUDElementChatRoutine(void* context);
+void CG_ModernHUDElementChatDestroy(void* context);
 
-void* CG_SHUDElementSpecMessageCreate(const superhudConfig_t* config);
-void CG_SHUDElementSpecMessageRoutine(void* context);
-void CG_SHUDElementSpecMessageDestroy(void* context);
+void* CG_ModernHUDElementSpecMessageCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSpecMessageRoutine(void* context);
+void CG_ModernHUDElementSpecMessageDestroy(void* context);
 
-void* CG_SHUDElementSpectatorsCreate(const superhudConfig_t* config);
-void CG_SHUDElementSpectatorsRoutine(void* context);
-void CG_SHUDElementSpectatorsDestroy(void* context);
+void* CG_ModernHUDElementSpectatorsCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementSpectatorsRoutine(void* context);
+void CG_ModernHUDElementSpectatorsDestroy(void* context);
 
-void* CG_SHUDElementFollowMessageCreate(const superhudConfig_t* config);
-void CG_SHUDElementFollowMessageRoutine(void* context);
-void CG_SHUDElementFollowMessageDestroy(void* context);
+void* CG_ModernHUDElementFollowMessageCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementFollowMessageRoutine(void* context);
+void CG_ModernHUDElementFollowMessageDestroy(void* context);
 
-void* CG_SHUDElementGameTimeCreate(const superhudConfig_t* config);
-void CG_SHUDElementGameTimeRoutine(void* context);
-void CG_SHUDElementGameTimeDestroy(void* context);
+void* CG_ModernHUDElementGameTimeCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementGameTimeRoutine(void* context);
+void CG_ModernHUDElementGameTimeDestroy(void* context);
 
-void* CG_SHUDElementItemPickupCreate(const superhudConfig_t* config);
-void CG_SHUDElementItemPickupRoutine(void* context);
-void CG_SHUDElementItemPickupDestroy(void* context);
+void* CG_ModernHUDElementItemPickupCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementItemPickupRoutine(void* context);
+void CG_ModernHUDElementItemPickupDestroy(void* context);
 
-void* CG_SHUDElementItemPickupIconCreate(const superhudConfig_t* config);
-void CG_SHUDElementItemPickupIconRoutine(void* context);
-void CG_SHUDElementItemPickupIconDestroy(void* context);
+void* CG_ModernHUDElementItemPickupIconCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementItemPickupIconRoutine(void* context);
+void CG_ModernHUDElementItemPickupIconDestroy(void* context);
 
-void* CG_SHUDElementFlagStatusNMECreate(const superhudConfig_t* config);
-void* CG_SHUDElementFlagStatusOWNCreate(const superhudConfig_t* config);
-void CG_SHUDElementFlagStatusRoutine(void* context);
-void CG_SHUDElementFlagStatusDestroy(void* context);
+void* CG_ModernHUDElementFlagStatusNMECreate(const modernhudConfig_t* config);
+void* CG_ModernHUDElementFlagStatusOWNCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementFlagStatusRoutine(void* context);
+void CG_ModernHUDElementFlagStatusDestroy(void* context);
 
-void* CG_SHUDElementPlayerNameCreate(const superhudConfig_t* config);
-void CG_SHUDElementPlayerNameRoutine(void* context);
-void CG_SHUDElementPlayerNameDestroy(void* context);
+void* CG_ModernHUDElementPlayerNameCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementPlayerNameRoutine(void* context);
+void CG_ModernHUDElementPlayerNameDestroy(void* context);
 
-#define SUPERHUD_UPDATE_TIME 50
+#define MODERNHUD_UPDATE_TIME 50
 
-void* CG_SHUDElementPwTime1Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwTime2Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwTime3Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwTime4Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwTime5Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwTime6Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwTime7Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwTime8Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwIcon1Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwIcon2Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwIcon3Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwIcon4Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwIcon5Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwIcon6Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwIcon7Create(const superhudConfig_t* config);
-void* CG_SHUDElementPwIcon8Create(const superhudConfig_t* config);
-void CG_SHUDElementPwRoutine(void* context);
-void CG_SHUDElementPwDestroy(void* context);
+void* CG_ModernHUDElementPwTime1Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwTime2Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwTime3Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwTime4Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwTime5Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwTime6Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwTime7Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwTime8Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwIcon1Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwIcon2Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwIcon3Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwIcon4Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwIcon5Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwIcon6Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwIcon7Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwIcon8Create(const modernhudConfig_t* config);
+void CG_ModernHUDElementPwRoutine(void* context);
+void CG_ModernHUDElementPwDestroy(void* context);
 
-void* CG_SHUDElementNameNMECreate(const superhudConfig_t* config);
-void* CG_SHUDElementNameOWNCreate(const superhudConfig_t* config);
-void CG_SHUDElementNameRoutine(void* context);
-void CG_SHUDElementNameDestroy(void* context);
+void* CG_ModernHUDElementNameNMECreate(const modernhudConfig_t* config);
+void* CG_ModernHUDElementNameOWNCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementNameRoutine(void* context);
+void CG_ModernHUDElementNameDestroy(void* context);
 
-void* CG_SHUDElementScoreNMECreate(const superhudConfig_t* config);
-void* CG_SHUDElementScoreOWNCreate(const superhudConfig_t* config);
-void* CG_SHUDElementScoreMAXCreate(const superhudConfig_t* config);
-void CG_SHUDElementScoreRoutine(void* context);
-void CG_SHUDElementScoreDestroy(void* context);
+void* CG_ModernHUDElementScoreNMECreate(const modernhudConfig_t* config);
+void* CG_ModernHUDElementScoreOWNCreate(const modernhudConfig_t* config);
+void* CG_ModernHUDElementScoreMAXCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementScoreRoutine(void* context);
+void CG_ModernHUDElementScoreDestroy(void* context);
 
-void* CG_SHUDElementRewardIconCreate(const superhudConfig_t* config);
-void* CG_SHUDElementRewardCountCreate(const superhudConfig_t* config);
-void CG_SHUDElementRewardRoutine(void* context);
-void CG_SHUDElementRewardDestroy(void* context);
+void* CG_ModernHUDElementRewardIconCreate(const modernhudConfig_t* config);
+void* CG_ModernHUDElementRewardCountCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementRewardRoutine(void* context);
+void CG_ModernHUDElementRewardDestroy(void* context);
 
-void* CG_SHUDElementTeamCountOWNCreate(const superhudConfig_t* config);
-void* CG_SHUDElementTeamCountNMECreate(const superhudConfig_t* config);
-void CG_SHUDElementTeamCountRoutine(void* context);
-void CG_SHUDElementTeamCountDestroy(void* context);
+void* CG_ModernHUDElementTeamCountOWNCreate(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeamCountNMECreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementTeamCountRoutine(void* context);
+void CG_ModernHUDElementTeamCountDestroy(void* context);
 
-void* CG_SHUDElementTeam1Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam2Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam3Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam4Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam5Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam6Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam7Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam8Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam9Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam10Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam11Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam12Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam13Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam14Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam15Create(const superhudConfig_t* config);
-void* CG_SHUDElementTeam16Create(const superhudConfig_t* config);
-void CG_SHUDElementTeamRoutine(void* context);
-void CG_SHUDElementTeamDestroy(void* context);
+void* CG_ModernHUDElementTeam1Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam2Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam3Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam4Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam5Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam6Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam7Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam8Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam9Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam10Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam11Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam12Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam13Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam14Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam15Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeam16Create(const modernhudConfig_t* config);
+void CG_ModernHUDElementTeamRoutine(void* context);
+void CG_ModernHUDElementTeamDestroy(void* context);
 
-void* CG_SHUDElementWeaponListCreate(const superhudConfig_t* config);
-void CG_SHUDElementWeaponListRoutine(void* context);
-void CG_SHUDElementWeaponListDestroy(void* context);
+void* CG_ModernHUDElementWeaponListCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementWeaponListRoutine(void* context);
+void CG_ModernHUDElementWeaponListDestroy(void* context);
 
-void* CG_SHUDElementObituaries1Create(const superhudConfig_t* config);
-void* CG_SHUDElementObituaries2Create(const superhudConfig_t* config);
-void* CG_SHUDElementObituaries3Create(const superhudConfig_t* config);
-void* CG_SHUDElementObituaries4Create(const superhudConfig_t* config);
-void* CG_SHUDElementObituaries5Create(const superhudConfig_t* config);
-void* CG_SHUDElementObituaries6Create(const superhudConfig_t* config);
-void* CG_SHUDElementObituaries7Create(const superhudConfig_t* config);
-void* CG_SHUDElementObituaries8Create(const superhudConfig_t* config);
-void CG_SHUDElementObituariesRoutine(void* context);
-void CG_SHUDElementObituariesDestroy(void* context);
-
-
-void* CG_SHUDElementTempAccTextCreate(const superhudConfig_t* config);
-void* CG_SHUDElementTempAccIconCreate(const superhudConfig_t* config);
-void CG_SHUDElementTempAccRoutine(void* context);
-void CG_SHUDElementTempAccDestroy(void* context);
-
-void* CG_SHUDElementWarmupInfoCreate(const superhudConfig_t* config);
-void CG_SHUDElementWarmupInfoRoutine(void* context);
-void CG_SHUDElementWarmupInfoDestroy(void* context);
-void* CG_SHUDElementGameTypeCreate(const superhudConfig_t* config);
-void CG_SHUDElementGameTypeRoutine(void* context);
-void CG_SHUDElementGameTypeDestroy(void* context);
-
-void* CG_SHUDElementLocationCreate(const superhudConfig_t* config);
-void CG_SHUDElementLocationRoutine(void* context);
-void CG_SHUDElementLocationDestroy(void* context);
-
-void* CG_SHUDElementCreateCurrentWeapon(const superhudConfig_t* config);
-void* CG_SHUDElementWeaponStatsCreateMG(const superhudConfig_t* config);
-void* CG_SHUDElementWeaponStatsCreateSG(const superhudConfig_t* config);
-void* CG_SHUDElementWeaponStatsCreateGL(const superhudConfig_t* config);
-void* CG_SHUDElementWeaponStatsCreateRL(const superhudConfig_t* config);
-void* CG_SHUDElementWeaponStatsCreateLG(const superhudConfig_t* config);
-void* CG_SHUDElementWeaponStatsCreateRG(const superhudConfig_t* config);
-void* CG_SHUDElementWeaponStatsCreatePG(const superhudConfig_t* config);
-void* CG_SHUDElementIconCreateCurrentWeapon(const superhudConfig_t* config);
-void* CG_SHUDElementIconCreateMG(const superhudConfig_t* config);
-void* CG_SHUDElementIconCreateSG(const superhudConfig_t* config);
-void* CG_SHUDElementIconCreateGL(const superhudConfig_t* config);
-void* CG_SHUDElementIconCreateRL(const superhudConfig_t* config);
-void* CG_SHUDElementIconCreateLG(const superhudConfig_t* config);
-void* CG_SHUDElementIconCreateRG(const superhudConfig_t* config);
-void* CG_SHUDElementIconCreatePG(const superhudConfig_t* config);
-void CG_SHUDElementWeaponStatsRoutine(void* context);
-void CG_SHUDElementWeaponStatsDestroy(void* context);
+void* CG_ModernHUDElementObituaries1Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementObituaries2Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementObituaries3Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementObituaries4Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementObituaries5Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementObituaries6Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementObituaries7Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementObituaries8Create(const modernhudConfig_t* config);
+void CG_ModernHUDElementObituariesRoutine(void* context);
+void CG_ModernHUDElementObituariesDestroy(void* context);
 
 
-void* CG_SHUDElementCreatePlayerStatsDG(const superhudConfig_t* config);
-void* CG_SHUDElementCreatePlayerStatsDR(const superhudConfig_t* config);
-void* CG_SHUDElementCreatePlayerStatsDamageRatio(const superhudConfig_t* config);
-void* CG_SHUDElementCreatePlayerStatsDRIcon(const superhudConfig_t* config);
-void* CG_SHUDElementCreatePlayerStatsDGIcon(const superhudConfig_t* config);
-void CG_SHUDElementPlayerStatsRoutine(void* context);
-void CG_SHUDElementPlayerStatsDestroy(void* context);
+void* CG_ModernHUDElementTempAccTextCreate(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTempAccIconCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementTempAccRoutine(void* context);
+void CG_ModernHUDElementTempAccDestroy(void* context);
 
-void* CG_SHUDElementGridCreate(const superhudConfig_t* config);
-void CG_SHUDElementGridRoutine(void* context);
-void CG_SHUDElementGridDestroy(void* context);
+void* CG_ModernHUDElementWarmupInfoCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementWarmupInfoRoutine(void* context);
+void CG_ModernHUDElementWarmupInfoDestroy(void* context);
+void* CG_ModernHUDElementGameTypeCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementGameTypeRoutine(void* context);
+void CG_ModernHUDElementGameTypeDestroy(void* context);
+
+void* CG_ModernHUDElementLocationCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementLocationRoutine(void* context);
+void CG_ModernHUDElementLocationDestroy(void* context);
+
+void* CG_ModernHUDElementCreateCurrentWeapon(const modernhudConfig_t* config);
+void* CG_ModernHUDElementWeaponStatsCreateMG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementWeaponStatsCreateSG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementWeaponStatsCreateGL(const modernhudConfig_t* config);
+void* CG_ModernHUDElementWeaponStatsCreateRL(const modernhudConfig_t* config);
+void* CG_ModernHUDElementWeaponStatsCreateLG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementWeaponStatsCreateRG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementWeaponStatsCreatePG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementIconCreateCurrentWeapon(const modernhudConfig_t* config);
+void* CG_ModernHUDElementIconCreateMG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementIconCreateSG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementIconCreateGL(const modernhudConfig_t* config);
+void* CG_ModernHUDElementIconCreateRL(const modernhudConfig_t* config);
+void* CG_ModernHUDElementIconCreateLG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementIconCreateRG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementIconCreatePG(const modernhudConfig_t* config);
+void CG_ModernHUDElementWeaponStatsRoutine(void* context);
+void CG_ModernHUDElementWeaponStatsDestroy(void* context);
+
+
+void* CG_ModernHUDElementCreatePlayerStatsDG(const modernhudConfig_t* config);
+void* CG_ModernHUDElementCreatePlayerStatsDR(const modernhudConfig_t* config);
+void* CG_ModernHUDElementCreatePlayerStatsDamageRatio(const modernhudConfig_t* config);
+void* CG_ModernHUDElementCreatePlayerStatsDRIcon(const modernhudConfig_t* config);
+void* CG_ModernHUDElementCreatePlayerStatsDGIcon(const modernhudConfig_t* config);
+void CG_ModernHUDElementPlayerStatsRoutine(void* context);
+void CG_ModernHUDElementPlayerStatsDestroy(void* context);
+
+void* CG_ModernHUDElementGridCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementGridRoutine(void* context);
+void CG_ModernHUDElementGridDestroy(void* context);
 
 /*
- * cg_superhud_util.c
+ * cg_modernhud_util.c
  */
 typedef union
 {
@@ -760,11 +760,11 @@ typedef union
 		float h;
 	} named;
 	vec4_t arr;
-} superhudCoord_t;
+} modernhudCoord_t;
 
 typedef struct
 {
-	superhudCoord_t coord;
+	modernhudCoord_t coord;
 	int flags;
 	vec4_t color_origin;
 	vec4_t color;
@@ -776,20 +776,20 @@ typedef struct
 	int fontId;
 	float letterSpacing;
 	const char* text;
-} superhudTextContext_t;
+} modernhudTextContext_t;
 
 typedef struct
 {
-	superhudCoord_t coord;
-	superhudCoord_t coordPicture;
+	modernhudCoord_t coord;
+	modernhudCoord_t coordPicture;
 	qhandle_t image;
 	vec4_t color;
 	vec4_t color_origin;
-} superhudDrawContext_t;
+} modernhudDrawContext_t;
 
 typedef struct
 {
-	superhudDirection_t direction;
+	modernhudDirection_t direction;
 	float max; // maximum coord for bar
 	float koeff; //multiplier
 	vec4_t bar[2]; // coord of two bars
@@ -797,7 +797,7 @@ typedef struct
 	vec4_t color2_top; // color of top bar of doublebar
 	vec4_t color_back; // color of background
 	qboolean two_bars; // one or two bars
-} superhudBarContext_t;
+} modernhudBarContext_t;
 
 #define OSPHUD_TEAMOVERLAY_STR_SIZE 128
 typedef struct
@@ -829,31 +829,31 @@ typedef struct
 
 	int overlayWidthChar;
 	float overlayWidthPix;
-} shudTeamOverlay_t;
+} modernHudTeamOverlay_t;
 
-void CG_SHUDBarMakeContext(const superhudConfig_t* in, superhudBarContext_t* out, float max);
-void CG_SHUDTextMakeContext(const superhudConfig_t* in, superhudTextContext_t* out);
-void CG_SHUDDrawStretchPic(superhudCoord_t coord, const superhudCoord_t coordPicture, const float* color, qhandle_t shader);
-void CG_SHUDDrawMakeContext(const superhudConfig_t* cfg, superhudDrawContext_t* out);
+void CG_ModernHUDBarMakeContext(const modernhudConfig_t* in, modernhudBarContext_t* out, float max);
+void CG_ModernHUDTextMakeContext(const modernhudConfig_t* in, modernhudTextContext_t* out);
+void CG_ModernHUDDrawStretchPic(modernhudCoord_t coord, const modernhudCoord_t coordPicture, const float* color, qhandle_t shader);
+void CG_ModernHUDDrawMakeContext(const modernhudConfig_t* cfg, modernhudDrawContext_t* out);
 
-void CG_SHUDTextPrint(const superhudConfig_t* cfg, superhudTextContext_t* pos);
-void CG_SHUDTextPrintNew(const superhudConfig_t* cfg, superhudTextContext_t* pos, qboolean colorOverride);
-void CG_SHUDDrawStretchPicCtx(const superhudConfig_t* cfg, superhudDrawContext_t* out);
-void CG_SHUDBarPrint(const superhudConfig_t* cfg, superhudBarContext_t* ctx, float value);
-qboolean CG_SHUDFill(const superhudConfig_t* cfg);
+void CG_ModernHUDTextPrint(const modernhudConfig_t* cfg, modernhudTextContext_t* pos);
+void CG_ModernHUDTextPrintNew(const modernhudConfig_t* cfg, modernhudTextContext_t* pos, qboolean colorOverride);
+void CG_ModernHUDDrawStretchPicCtx(const modernhudConfig_t* cfg, modernhudDrawContext_t* out);
+void CG_ModernHUDBarPrint(const modernhudConfig_t* cfg, modernhudBarContext_t* ctx, float value);
+qboolean CG_ModernHUDFill(const modernhudConfig_t* cfg);
 
-team_t CG_SHUDGetOurActiveTeam(void);
-qboolean CG_SHUDGetFadeColor(const vec4_t from_color, vec4_t out, const superhudConfig_t* cfg, int startTime);
-void CG_SHUDFillWithColor(const superhudCoord_t* coord, const float* color);
-void CG_SHUDElementCompileTeamOverlayConfig(int fontWidth, shudTeamOverlay_t* configOut);
-void CG_SHUDConfigPickBgColor(const superhudConfig_t* config, float* color, qboolean alphaOverride);
+team_t CG_ModernHUDGetOurActiveTeam(void);
+qboolean CG_ModernHUDGetFadeColor(const vec4_t from_color, vec4_t out, const modernhudConfig_t* cfg, int startTime);
+void CG_ModernHUDFillWithColor(const modernhudCoord_t* coord, const float* color);
+void CG_ModernHUDElementCompileTeamOverlayConfig(int fontWidth, modernHudTeamOverlay_t* configOut);
+void CG_ModernHUDConfigPickBgColor(const modernhudConfig_t* config, float* color, qboolean alphaOverride);
 
 
 typedef struct
 {
 	char message[MAX_SAY_TEXT];
 	int time;
-} superhudChatEntry_t;
+} modernhudChatEntry_t;
 
 typedef struct
 {
@@ -879,12 +879,12 @@ typedef struct
 		float spacing;
 		int maxNameLenPix;
 	} runtime;
-} superhudObituariesEntry_t;
+} modernhudObituariesEntry_t;
 
 typedef struct
 {
 	float tempAccuracy;
-} superhudTempAccEntry_t;
+} modernhudTempAccEntry_t;
 
 typedef struct
 {
@@ -903,10 +903,10 @@ typedef struct
 	} stats[WIRED_WEAPON_BUFFER_SIZE];
 } customStats_t;
 
-#define SHUD_MAX_OBITUARIES_LINES 8
-#define SHUD_MAX_CHAT_LINES 16
-#define SHUD_MAX_POWERUPS 8
-#define SHUD_MAX_AWARD_QUEUE 8
+#define ModernHUD_MAX_OBITUARIES_LINES 8
+#define ModernHUD_MAX_CHAT_LINES 16
+#define ModernHUD_MAX_POWERUPS 8
+#define ModernHUD_MAX_AWARD_QUEUE 8
 
 // award notification queue entry (for WIRED_EVENT_AWARD)
 typedef struct {
@@ -914,41 +914,41 @@ typedef struct {
 	char        shaderPath[64]; // "medal_impressive", "menu/medals/medal_rampage"
 	int         count;          // cumulative count (×3)
 	int         arriveTime;     // wiredHud->time when received
-} superhudAwardEntry_t;
+} modernhudAwardEntry_t;
 
 // circular buffer for award notifications
 typedef struct {
-	superhudAwardEntry_t entries[SHUD_MAX_AWARD_QUEUE];
+	modernhudAwardEntry_t entries[ModernHUD_MAX_AWARD_QUEUE];
 	int                  writeIndex;
-} superhudAwardQueue_t;
+} modernhudAwardQueue_t;
 
 // ── unified message queue (frag messages + center prints) ─────────────
 // Priority-ordered: HIGH (frags) preempt NORMAL (center prints) preempt LOW (warmup)
 
-#define SHUD_MSG_QUEUE_SIZE  8
-#define SHUD_MSG_MAX_LEN     256
+#define ModernHUD_MSG_QUEUE_SIZE  8
+#define ModernHUD_MSG_MAX_LEN     256
 
 typedef enum {
-	SHUD_MSG_LOW,       // warmup countdown, non-urgent info
-	SHUD_MSG_NORMAL,    // center prints (Rampage!, spree announcements)
-	SHUD_MSG_HIGH       // frag messages (most important immediate feedback)
-} superhudMsgPriority_t;
+	ModernHUD_MSG_LOW,       // warmup countdown, non-urgent info
+	ModernHUD_MSG_NORMAL,    // center prints (Rampage!, spree announcements)
+	ModernHUD_MSG_HIGH       // frag messages (most important immediate feedback)
+} modernhudMsgPriority_t;
 
 typedef struct {
-	char                    line1[SHUD_MSG_MAX_LEN];   // primary text
-	char                    line2[SHUD_MSG_MAX_LEN];   // secondary text (rank line, or empty)
+	char                    line1[ModernHUD_MSG_MAX_LEN];   // primary text
+	char                    line2[ModernHUD_MSG_MAX_LEN];   // secondary text (rank line, or empty)
 	int                     arriveTime;                // when enqueued (ms)
 	int                     displayTime;               // how long to show (ms)
-	superhudMsgPriority_t   priority;
+	modernhudMsgPriority_t   priority;
 	qboolean                shown;                     // already displayed and expired
-} superhudMsgEntry_t;
+} modernhudMsgEntry_t;
 
 typedef struct {
-	superhudMsgEntry_t entries[SHUD_MSG_QUEUE_SIZE];
+	modernhudMsgEntry_t entries[ModernHUD_MSG_QUEUE_SIZE];
 	int     writeIndex;      // next write slot (circular)
 	int     currentIndex;    // currently displaying entry (-1 = none)
 	int     showStartTime;   // when current message started (0 = none showing)
-} superhudMsgQueue_t;
+} modernhudMsgQueue_t;
 
 typedef struct
 {
@@ -964,44 +964,44 @@ typedef struct
 	} rankmessage;
 	struct
 	{
-		superhudChatEntry_t line[SHUD_MAX_CHAT_LINES];
+		modernhudChatEntry_t line[ModernHUD_MAX_CHAT_LINES];
 		unsigned int index;
 	} chat;
 	struct
 	{
-		superhudObituariesEntry_t line[SHUD_MAX_OBITUARIES_LINES];
+		modernhudObituariesEntry_t line[ModernHUD_MAX_OBITUARIES_LINES];
 		unsigned int index;
 	} obituaries;
-	struct superhudPowerupsCache_t
+	struct modernhudPowerupsCache_t
 	{
-		struct superhudPowerupElement_t
+		struct modernhudPowerupElement_t
 		{
 			int time;
 			int powerup;
 			qboolean isHoldable;
-		} element[SHUD_MAX_POWERUPS];
+		} element[ModernHUD_MAX_POWERUPS];
 		int numberOfActive;
 		int lastUpdateTime;
 	} powerupsCache;
 	struct
 	{
-		superhudTempAccEntry_t weapon[WIRED_WEAPON_BUFFER_SIZE];
+		modernhudTempAccEntry_t weapon[WIRED_WEAPON_BUFFER_SIZE];
 	} tempAcc;
 	customStats_t customStats;
-	superhudAwardQueue_t awards;
-	superhudMsgQueue_t msgQueue;
-} superhudGlobalContext_t;
+	modernhudAwardQueue_t awards;
+	modernhudMsgQueue_t msgQueue;
+} modernhudGlobalContext_t;
 
-superhudGlobalContext_t* CG_SHUDGetContext(void);
-void CG_SHUDAvailableElementsInit(void);
-const superHUDConfigElement_t* CG_SHUDAvailableElementsGet(void);
+modernhudGlobalContext_t* CG_ModernHUDGetContext(void);
+void CG_ModernHUDAvailableElementsInit(void);
+const modernHUDConfigElement_t* CG_ModernHUDAvailableElementsGet(void);
 
-int CG_SHUDGetAmmo(int wpi);
+int CG_ModernHUDGetAmmo(int wpi);
 
-void CG_SHUDFillAndFrameForText(superhudConfig_t* cfg, superhudTextContext_t* ctx);
-qboolean CG_SHUDDrawBorder(const superhudConfig_t* cfg);
-void CG_SHUDConfigPickBorderColor(const superhudConfig_t* config, float* color, qboolean alphaOverride);
-void CG_SHUDDrawBorderDirect(const superhudCoord_t* coord, const vec4_t border, const vec4_t borderColor);
+void CG_ModernHUDFillAndFrameForText(modernhudConfig_t* cfg, modernhudTextContext_t* ctx);
+qboolean CG_ModernHUDDrawBorder(const modernhudConfig_t* cfg);
+void CG_ModernHUDConfigPickBorderColor(const modernhudConfig_t* config, float* color, qboolean alphaOverride);
+void CG_ModernHUDDrawBorderDirect(const modernhudCoord_t* coord, const vec4_t border, const vec4_t borderColor);
 
 #ifdef __cplusplus
 }

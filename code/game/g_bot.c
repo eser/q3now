@@ -913,6 +913,19 @@ void G_InitBots( qboolean restart ) {
 	G_LoadBots();
 	G_LoadArenas();
 
+	// expose map long name to qcommon for web observer (wn_http.c reads sv_maplongname)
+	{
+		char mapinfo[MAX_INFO_STRING];
+		char mapname[MAX_QPATH];
+		const char *arenainfo;
+		const char *longname;
+		trap_GetServerinfo( mapinfo, sizeof(mapinfo) );
+		Q_strncpyz( mapname, Info_ValueForKey( mapinfo, "mapname" ), sizeof(mapname) );
+		arenainfo = G_GetArenaInfoByMap( mapname );
+		longname  = arenainfo ? Info_ValueForKey( arenainfo, "longname" ) : "";
+		trap_Cvar_Set( "sv_maplongname", longname[0] ? longname : mapname );
+	}
+
 	trap_Cvar_Register( &g_minPlayers, "g_minPlayers", "2", CVAR_SERVERINFO | CVAR_ARCHIVE );
 	trap_Cvar_Register( &g_autoBots, "g_autoBots", "1", CVAR_SERVERINFO | CVAR_ARCHIVE );
 

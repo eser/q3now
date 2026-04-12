@@ -8,114 +8,114 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-	superhudGlobalContext_t* gctx;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+	modernhudGlobalContext_t* gctx;
 	int index;
-} shudElementChat_t;
+} modernHudElementChat_t;
 
-static void* CG_SHUDElementChatCreate(const superhudConfig_t* config, int line)
+static void* CG_ModernHUDElementChatCreate(const modernhudConfig_t* config, int line)
 {
-	shudElementChat_t* element;
+	modernHudElementChat_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	element->gctx = CG_SHUDGetContext();
+	element->gctx = CG_ModernHUDGetContext();
 	element->index = line;
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 	element->ctx.width = (int)config->rect.value[2];
 
 	return element;
 }
 
-void* CG_SHUDElementChat1Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat1Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 1);
+	return CG_ModernHUDElementChatCreate(config, 1);
 }
 
-void* CG_SHUDElementChat2Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat2Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 2);
+	return CG_ModernHUDElementChatCreate(config, 2);
 }
 
-void* CG_SHUDElementChat3Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat3Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 3);
+	return CG_ModernHUDElementChatCreate(config, 3);
 }
 
-void* CG_SHUDElementChat4Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat4Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 4);
+	return CG_ModernHUDElementChatCreate(config, 4);
 }
 
-void* CG_SHUDElementChat5Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat5Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 5);
+	return CG_ModernHUDElementChatCreate(config, 5);
 }
 
-void* CG_SHUDElementChat6Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat6Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 6);
+	return CG_ModernHUDElementChatCreate(config, 6);
 }
 
-void* CG_SHUDElementChat7Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat7Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 7);
+	return CG_ModernHUDElementChatCreate(config, 7);
 }
 
-void* CG_SHUDElementChat8Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat8Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 8);
+	return CG_ModernHUDElementChatCreate(config, 8);
 }
 
-void* CG_SHUDElementChat9Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat9Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 9);
+	return CG_ModernHUDElementChatCreate(config, 9);
 }
 
-void* CG_SHUDElementChat10Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat10Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 10);
+	return CG_ModernHUDElementChatCreate(config, 10);
 }
 
-void* CG_SHUDElementChat11Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat11Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 11);
+	return CG_ModernHUDElementChatCreate(config, 11);
 }
 
-void* CG_SHUDElementChat12Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat12Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 12);
+	return CG_ModernHUDElementChatCreate(config, 12);
 }
 
-void* CG_SHUDElementChat13Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat13Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 13);
+	return CG_ModernHUDElementChatCreate(config, 13);
 }
 
-void* CG_SHUDElementChat14Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat14Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 14);
+	return CG_ModernHUDElementChatCreate(config, 14);
 }
 
-void* CG_SHUDElementChat15Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat15Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 15);
+	return CG_ModernHUDElementChatCreate(config, 15);
 }
 
-void* CG_SHUDElementChat16Create(const superhudConfig_t* config)
+void* CG_ModernHUDElementChat16Create(const modernhudConfig_t* config)
 {
-	return CG_SHUDElementChatCreate(config, 16);
+	return CG_ModernHUDElementChatCreate(config, 16);
 }
 
-void CG_SHUDElementChatRoutine(void* context)
+void CG_ModernHUDElementChatRoutine(void* context)
 {
-	shudElementChat_t* element = (shudElementChat_t*)context;
-	superhudChatEntry_t* entry;
+	modernHudElementChat_t* element = (modernHudElementChat_t*)context;
+	modernhudChatEntry_t* entry;
 	int index;
 
-	index = ((element->gctx->chat.index - 1) - (element->index - 1)) % SHUD_MAX_CHAT_LINES;
+	index = ((element->gctx->chat.index - 1) - (element->index - 1)) % ModernHUD_MAX_CHAT_LINES;
 
 	entry = &element->gctx->chat.line[index];
 
@@ -131,17 +131,17 @@ void CG_SHUDElementChatRoutine(void* context)
 		return;
 	}
 
-	if (!CG_SHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, entry->time))
+	if (!CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, entry->time))
 	{
 		entry->time = 0;
 		return;
 	}
 
 	element->ctx.text = entry->message;
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementChatDestroy(void* context)
+void CG_ModernHUDElementChatDestroy(void* context)
 {
 	if (context)
 	{

@@ -23,20 +23,20 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cg_players.c -- handle the media and animation for player entities
 #include "cg_local.h"
 
-char	*cg_customSoundNames[MAX_CUSTOM_SOUNDS] = {
-	"*death1.opus",
-	"*death2.opus",
-	"*death3.opus",
-	"*jump1.opus",
-	"*pain25_1.opus",
-	"*pain50_1.opus",
-	"*pain75_1.opus",
-	"*pain100_1.opus",
-	"*falling1.opus",
-	"*gasp.opus",
-	"*drown.opus",
-	"*fall1.opus",
-	"*taunt.opus"
+char	*cg_customSoundNames[MAX_CUSTOM_SOUNDS][2] = {
+	{ "*death1.opus", "*death1.wav" },
+	{ "*death2.opus", "*death2.wav" },
+	{ "*death3.opus", "*death3.wav" },
+	{ "*jump1.opus", "*jump1.wav" },
+	{ "*pain25_1.opus", "*pain25_1.wav" },
+	{ "*pain50_1.opus", "*pain50_1.wav" },
+	{ "*pain75_1.opus", "*pain75_1.wav" },
+	{ "*pain100_1.opus", "*pain100_1.wav" },
+	{ "*falling1.opus", "*falling1.wav" },
+	{ "*gasp.opus", "*gasp.wav" },
+	{ "*drown.opus", "*drown.wav" },
+	{ "*fall1.opus", "*fall1.wav" },
+	{ "*taunt.opus", "*taunt.wav" },
 };
 
 
@@ -59,13 +59,16 @@ sfxHandle_t	CG_CustomSound( int clientNum, const char *soundName ) {
 	}
 	ci = &cgs.clientinfo[ clientNum ];
 
-	for ( i = 0 ; i < MAX_CUSTOM_SOUNDS && cg_customSoundNames[i] ; i++ ) {
-		if ( !strcmp( soundName, cg_customSoundNames[i] ) ) {
+	for ( i = 0 ; i < MAX_CUSTOM_SOUNDS && cg_customSoundNames[i][0] ; i++ ) {
+		if ( !strcmp( soundName, cg_customSoundNames[i][0] ) || !strcmp( soundName, cg_customSoundNames[i][1] ) ) {
 			return ci->sounds[i];
 		}
 	}
 
-	CG_Error( "Unknown custom sound: %s", soundName );
+	// Missing custom sound is non-fatal: player model may not have loaded all assets.
+	// Return 0 (silent) rather than crashing the session.
+	CG_Printf( "^3Warning: unknown custom sound '%s' for client %d (no sound played)\n",
+		soundName, clientNum );
 	return 0;
 }
 
@@ -787,14 +790,18 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 
 		// fall back to default team name
 		if( cgs.gametypeIsTeamGame ) {
-			// keep skin name
+			// Build team prefix with trailing "/" so CG_FindClientModelFile constructs
+			// "models/players/visor/Pagans/lower_blue.skin" not "Paganslower_blue.skin".
 			if( ci->team == TEAM_BLUE ) {
-				Q_strncpyz(teamname, DEFAULT_BLUETEAM_NAME, sizeof(teamname) );
+				Com_sprintf( teamname, sizeof(teamname), "%s/", DEFAULT_BLUETEAM_NAME );
 			} else {
-				Q_strncpyz(teamname, DEFAULT_REDTEAM_NAME, sizeof(teamname) );
+				Com_sprintf( teamname, sizeof(teamname), "%s/", DEFAULT_REDTEAM_NAME );
 			}
 			if ( !CG_RegisterClientModelname( ci, DEFAULT_MODEL, ci->skinName, teamname ) ) {
-				CG_Error( "DEFAULT_MODEL / skin (%s/%s) failed to register", DEFAULT_MODEL, ci->skinName );
+				// Team-specific skin absent — retry with bare default (no team prefix).
+				if ( !CG_RegisterClientModelname( ci, DEFAULT_MODEL, "default", "" ) ) {
+					CG_Error( "DEFAULT_MODEL / skin (%s/%s) failed to register", DEFAULT_MODEL, ci->skinName );
+				}
 			}
 		} else {
 			if ( !CG_RegisterClientModelname( ci, DEFAULT_MODEL, "default", teamname ) ) {
@@ -818,7 +825,7 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 	fallback = DEFAULT_MODEL;
 
 	for ( i = 0 ; i < MAX_CUSTOM_SOUNDS ; i++ ) {
-		s = cg_customSoundNames[i];
+		s = cg_customSoundNames[i][0];
 		if ( !s ) {
 			break;
 		}
@@ -2111,6 +2118,138 @@ qboolean CG_OnSameTeam( centity_t *cent ) {
     }
 
 	return qfalse;
+}
+
+/*
+===============
+CG_WorldToScreen
+
+Projects a 3D world point into virtual 640x480 screen coordinates.
+Returns qfalse if the point is behind the camera.
+===============
+*/
+static qboolean CG_WorldToScreen( vec3_t point, float *x, float *y ) {
+	vec3_t	trans;
+	float	px, py, z;
+
+	px = (float)tan( cg.refdef.fov_x * M_PI / 360.0 );
+	py = (float)tan( cg.refdef.fov_y * M_PI / 360.0 );
+
+	VectorSubtract( point, cg.refdef.vieworg, trans );
+	z = DotProduct( trans, cg.refdef.viewaxis[0] );
+	if ( z <= 0.001f ) {
+		return qfalse;
+	}
+
+	*x = 320.0f - DotProduct( trans, cg.refdef.viewaxis[1] ) * 320.0f / ( z * px );
+	*y = 240.0f - DotProduct( trans, cg.refdef.viewaxis[2] ) * 240.0f / ( z * py );
+	return qtrue;
+}
+
+/*
+================
+CG_Draw2DBotDirectives
+
+2D pass: called from CG_Draw2D (AFTER trap_R_RenderScene) so that
+trap_R_DrawTextNorm is called while the renderer is in 2D mode.
+Iterates all clients, projects their lerpOrigin to screen, draws directive text.
+lerpOrigins are already updated by CG_AddPacketEntities before this runs.
+================
+*/
+void CG_Draw2DBotDirectives( void ) {
+	int					i;
+	botDirectiveDisplay_t	*bd;
+	centity_t			*cent;
+	vec3_t				origin;
+	float				x, y, dist;
+	char				text[128];
+	vec4_t				color;
+
+	if ( !cg.snap ) {
+		return;
+	}
+
+	for ( i = 0; i < MAX_CLIENTS; i++ ) {
+		// only bots
+		if ( !cgs.clientinfo[i].infoValid || !cgs.clientinfo[i].botSkill ) {
+			continue;
+		}
+
+		bd = &cg_botDirectives[i];
+		if ( !bd->type ) {
+			continue;
+		}
+
+		cent = &cg_entities[i];
+
+		// skip dead entities
+		if ( cent->currentState.eFlags & EF_DEAD ) {
+			continue;
+		}
+
+		// distance cull — beyond 1500 units text is too small to read
+		dist = Distance( cg.refdef.vieworg, cent->lerpOrigin );
+		if ( dist > 1500.0f ) {
+			continue;
+		}
+
+		// project origin above head
+		VectorCopy( cent->lerpOrigin, origin );
+		origin[2] += 56;	// slightly above where sprites float (48)
+
+		if ( !CG_WorldToScreen( origin, &x, &y ) ) {
+			continue;
+		}
+
+		// build display text; color prefix encodes directive category
+		switch ( bd->type ) {
+			case 5:		// DIR_SEEK_ITEM
+				Com_sprintf( text, sizeof( text ), "^3> %s", bd->targetName );
+				break;
+			case 9:		// DIR_KILL_TARGET
+				Com_sprintf( text, sizeof( text ), "^1X %s", bd->targetName );
+				break;
+			case 2:		// DIR_DEFEND_AREA
+				Com_sprintf( text, sizeof( text ), "^5# DEFEND" );
+				break;
+			case 3:		// DIR_CAMP_SPOT
+				Com_sprintf( text, sizeof( text ), "^5# CAMP" );
+				break;
+			case 4:		// DIR_PATROL
+				Com_sprintf( text, sizeof( text ), "^5# PATROL" );
+				break;
+			case 6:		// DIR_RUSH_BASE
+				Com_sprintf( text, sizeof( text ), "^2< RUSH BASE" );
+				break;
+			case 7:		// DIR_RETURN_FLAG
+				Com_sprintf( text, sizeof( text ), "^2< RETURN FLAG" );
+				break;
+			case 8:		// DIR_ATTACK_BASE
+				Com_sprintf( text, sizeof( text ), "^1X ATTACK" );
+				break;
+			case 10:	// DIR_HARVEST
+				Com_sprintf( text, sizeof( text ), "^3# HARVEST" );
+				break;
+			case 1:		// DIR_FOLLOW
+				Com_sprintf( text, sizeof( text ), "^6@ %s", bd->targetName );
+				break;
+			default:
+				continue;
+		}
+
+		Vector4Set( color, 1.0f, 1.0f, 1.0f, 0.85f );
+
+		trap_R_DrawTextNorm(
+			text,
+			x * NORM_HSCALE,
+			y * NORM_VSCALE,
+			FONT_UI,
+			(float)SMALLCHAR_HEIGHT * NORM_VSCALE,
+			color,
+			TEXT_ALIGN_CENTER,
+			TEXT_DROPSHADOW
+		);
+	}
 }
 
 /*

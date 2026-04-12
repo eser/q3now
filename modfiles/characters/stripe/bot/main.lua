@@ -50,14 +50,14 @@ return {
   },
 
   attacks = {
-    "rl1",   -- rocket: jump tool + main damage
-    "rl2",   -- mortar: long-range rocket harassment
-    "rg1",   -- rail: careful potshot
-    "lg1",   -- lightning: reluctant close range
-    "gl1",   -- grenades: parting gifts while retreating
-    "sg1",   -- shotgun: close panic shot
-    "pr1",   -- plasma: suppression while fleeing
-    "mg1",
+    { "rl1", aim_height = 0  },  -- rocket: jump tool + main damage, aim at feet
+    { "rl2", aim_height = 0  },  -- mortar: long-range harassment, aim at feet
+    { "rg1", aim_height = 36 },  -- rail: careful potshot
+    { "lg1", aim_height = 28 },  -- lightning: reluctant close range
+    { "gl1", aim_height = 0  },  -- grenades: parting gifts while retreating, aim at feet
+    { "sg1", aim_height = 28 },  -- shotgun: close panic shot
+    { "pr1", aim_height = 28 },  -- plasma: suppression while fleeing
+    { "mg1", aim_height = 28 },
   },
 
   items = {

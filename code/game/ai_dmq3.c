@@ -41,6 +41,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../botlib/be_ai_goal.h"
 #include "../botlib/be_ai_move.h"
 #include "../botlib/be_ai_weap.h"
+#include "ai_movement.h"
 //
 #include "ai_main.h"
 #include "ai_dmq3.h"
@@ -52,7 +53,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_aware.h"
 #include "ai_itemtime.h"
 #include "ai_weapsel.h"
-#include "g_bot_lua.h"
+#include "wired/bots/g_bot_scripts.h"
 //
 #include "chars.h"				//characteristics
 #include "inv.h"				//indexes into the inventory
@@ -86,6 +87,7 @@ vmCvar_t bot_testrchat;
 vmCvar_t bot_challenge;
 vmCvar_t bot_predictobstacles;
 vmCvar_t g_spSkill;
+vmCvar_t sv_botDirectiveTTL;     /* minimum directive lifetime in ms; default 30000 */
 
 extern vmCvar_t bot_developer;
 
@@ -374,7 +376,6 @@ BotSetTeamStatus
 ==================
 */
 void BotSetTeamStatus(bot_state_t *bs) {
-#if FEAT_TA_TEAM_ORDERS
 	int teamtask;
 	aas_entityinfo_t entinfo;
 
@@ -386,7 +387,10 @@ void BotSetTeamStatus(bot_state_t *bs) {
 		case LTG_TEAMACCOMPANY:
 			BotEntityInfo(bs->teammate, &entinfo);
 			if ( ( (gametype == GT_CTF || gametype == GT_1FCTF) && EntityCarriesFlag(&entinfo))
-				|| ( gametype == GT_HARVESTER && EntityCarriesCubes(&entinfo)) ) {
+#if FEAT_HARVESTER
+				|| ( gametype == GT_HARVESTER && EntityCarriesCubes(&entinfo))
+#endif
+				) {
 				teamtask = TEAMTASK_ESCORT;
 			}
 			else {
@@ -429,7 +433,6 @@ void BotSetTeamStatus(bot_state_t *bs) {
 			break;
 	}
 	BotSetUserInfo(bs, "teamtask", va("%d", teamtask));
-#endif
 }
 
 /*
@@ -734,8 +737,8 @@ void BotCTFSeekGoals(bot_state_t *bs) {
 	//set the time to send a message to the team mates
 	bs->teammessage_time = FloatTime() + 2 * random();
 	//
-	if (bs->teamtaskpreference & (TEAMTP_ATTACKER|TEAMTP_DEFENDER)) {
-		if (bs->teamtaskpreference & TEAMTP_ATTACKER) {
+	if (bs->directives.preference & (TEAMTP_ATTACKER|TEAMTP_DEFENDER)) {
+		if (bs->directives.preference & TEAMTP_ATTACKER) {
 			l1 = 0.7f;
 		}
 		else {
@@ -980,8 +983,8 @@ void Bot1FCTFSeekGoals(bot_state_t *bs) {
 	//set the time to send a message to the team mates
 	bs->teammessage_time = FloatTime() + 2 * random();
 	//
-	if (bs->teamtaskpreference & (TEAMTP_ATTACKER|TEAMTP_DEFENDER)) {
-		if (bs->teamtaskpreference & TEAMTP_ATTACKER) {
+	if (bs->directives.preference & (TEAMTP_ATTACKER|TEAMTP_DEFENDER)) {
+		if (bs->directives.preference & TEAMTP_ATTACKER) {
 			l1 = 0.7f;
 		}
 		else {
@@ -1095,8 +1098,8 @@ void BotObeliskSeekGoals(bot_state_t *bs) {
 	//set the time to send a message to the team mates
 	bs->teammessage_time = FloatTime() + 2 * random();
 	//
-	if (bs->teamtaskpreference & (TEAMTP_ATTACKER|TEAMTP_DEFENDER)) {
-		if (bs->teamtaskpreference & TEAMTP_ATTACKER) {
+	if (bs->directives.preference & (TEAMTP_ATTACKER|TEAMTP_DEFENDER)) {
+		if (bs->directives.preference & TEAMTP_ATTACKER) {
 			l1 = 0.7f;
 		}
 		else {
@@ -1272,8 +1275,8 @@ void BotHarvesterSeekGoals(bot_state_t *bs) {
 		}
 	}
 	//
-	if (bs->teamtaskpreference & (TEAMTP_ATTACKER|TEAMTP_DEFENDER)) {
-		if (bs->teamtaskpreference & TEAMTP_ATTACKER) {
+	if (bs->directives.preference & (TEAMTP_ATTACKER|TEAMTP_DEFENDER)) {
+		if (bs->directives.preference & TEAMTP_ATTACKER) {
 			l1 = 0.7f;
 		}
 		else {
@@ -1590,25 +1593,23 @@ BotChooseWeapon
 */
 void BotChooseWeapon(bot_state_t *bs) {
 	int newweaponnum;
-
-	newweaponnum = bs->weaponnum;
+	// Save the final weapon chosen last frame BEFORE DPS analysis can clobber bs->weaponnum.
+	// BotChooseWeaponDPS writes bs->weaponnum internally, so comparing bs->weaponnum after
+	// DPS would always differ from the Lua pick, stamping weaponchange_time every frame.
+	int prevweaponnum = bs->weaponnum;
 
 	if (bs->cur_ps.weaponstate == WEAPON_RAISING ||
 			bs->cur_ps.weaponstate == WEAPON_DROPPING) {
 		trap_EA_SelectWeapon(bs->client, bs->weaponnum);
 	}
 	else {
-#if FEAT_BOT_IMPROVEMENTS
 		BotAccuracyUpdate(bs);
 		BotChooseWeaponDPS(bs);
 		newweaponnum = bs->weaponnum;
-#else
-		newweaponnum = trap_BotChooseBestFightWeapon(bs->ws, bs->inventory);
-#endif
-		if ( bs->luaCharacterActive ) {
-			newweaponnum = BotLua_ChooseWeapon( bs, newweaponnum );
+		if ( bs->wiredBotsActive ) {
+			newweaponnum = WiredBots_ChooseWeapon( bs, newweaponnum );
 		}
-		if (bs->weaponnum != newweaponnum) bs->weaponchange_time = FloatTime();
+		if (prevweaponnum != newweaponnum) bs->weaponchange_time = FloatTime();
 		bs->weaponnum = newweaponnum;
 		//BotAI_Print(PRT_MESSAGE, "bs->weaponnum = %d\n", bs->weaponnum);
 		trap_EA_SelectWeapon(bs->client, bs->weaponnum);
@@ -1658,7 +1659,6 @@ BotCheckItemPickup
 ==================
 */
 void BotCheckItemPickup(bot_state_t *bs, int *oldinventory) {
-#if FEAT_TA_TEAM_ORDERS
 	int offence, leader;
 
 	if (gametype <= GT_TDM)
@@ -1674,9 +1674,9 @@ void BotCheckItemPickup(bot_state_t *bs, int *oldinventory) {
 	}
 
 	if (offence >= 0) {
-		leader = ClientFromName(bs->teamleader);
+		leader = ClientFromName(bs->directives.teamleader);
 		if (offence) {
-			if (!(bs->teamtaskpreference & TEAMTP_ATTACKER)) {
+			if (!(bs->directives.preference & TEAMTP_ATTACKER)) {
 				// if we have a bot team leader
 				if (BotTeamLeader(bs)) {
 					// tell the leader we want to be on offence
@@ -1698,12 +1698,12 @@ void BotCheckItemPickup(bot_state_t *bs, int *oldinventory) {
 						}
 					}
 				}
-				bs->teamtaskpreference |= TEAMTP_ATTACKER;
+				bs->directives.preference |= TEAMTP_ATTACKER;
 			}
-			bs->teamtaskpreference &= ~TEAMTP_DEFENDER;
+			bs->directives.preference &= ~TEAMTP_DEFENDER;
 		}
 		else {
-			if (!(bs->teamtaskpreference & TEAMTP_DEFENDER)) {
+			if (!(bs->directives.preference & TEAMTP_DEFENDER)) {
 				// if we have a bot team leader
 				if (BotTeamLeader(bs)) {
 					// tell the leader we want to be on defense
@@ -1723,12 +1723,11 @@ void BotCheckItemPickup(bot_state_t *bs, int *oldinventory) {
 						}
 					}
 				}
-				bs->teamtaskpreference |= TEAMTP_DEFENDER;
+				bs->directives.preference |= TEAMTP_DEFENDER;
 			}
-			bs->teamtaskpreference &= ~TEAMTP_ATTACKER;
+			bs->directives.preference &= ~TEAMTP_ATTACKER;
 		}
 	}
-#endif
 }
 
 /*
@@ -1764,10 +1763,8 @@ void BotUpdateInventory(bot_state_t *bs) {
 	bs->inventory[INVENTORY_TELEPORTER] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_TELEPORTER;
 	bs->inventory[INVENTORY_MEDKIT] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_MEDKIT;
 	bs->inventory[INVENTORY_KAMIKAZE] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_KAMIKAZE;
-#if FEAT_TA_TEAM_ORDERS
 	bs->inventory[INVENTORY_PORTAL] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_PORTAL;
 	bs->inventory[INVENTORY_INVULNERABILITY] = bs->cur_ps.stats[STAT_HOLDABLE_ITEM] == MODELINDEX_INVULNERABILITY;
-#endif
 	bs->inventory[INVENTORY_QUAD] = bs->cur_ps.powerups[PW_QUAD] != 0;
 	bs->inventory[INVENTORY_BERSERK] = bs->cur_ps.powerups[PW_BERSERK] != 0;
 	bs->inventory[INVENTORY_ENVIRONMENTSUIT] = bs->cur_ps.powerups[PW_BATTLESUIT] != 0;
@@ -1922,7 +1919,6 @@ void BotUseKamikaze(bot_state_t *bs) {
 	}
 }
 
-#if FEAT_TA_TEAM_ORDERS
 /*
 ==================
 BotUseInvulnerability
@@ -2005,6 +2001,7 @@ void BotUseInvulnerability(bot_state_t *bs) {
 			}
 		}
 	}
+#if FEAT_HARVESTER
 	else if (gametype == GT_HARVESTER) {
 		//
 		if (BotHarvesterCarryingCubes(bs))
@@ -2029,8 +2026,8 @@ void BotUseInvulnerability(bot_state_t *bs) {
 			}
 		}
 	}
-}
 #endif
+}
 
 /*
 ==================
@@ -2055,9 +2052,7 @@ void BotBattleUseItems(bot_state_t *bs) {
 		}
 	}
 	BotUseKamikaze(bs);
-#if FEAT_TA_TEAM_ORDERS
 	BotUseInvulnerability(bs);
-#endif
 }
 
 /*
@@ -2203,8 +2198,8 @@ BotAggression
 ==================
 */
 float BotAggression(bot_state_t *bs) {
-	if ( bs->luaCharacterActive ) {
-		return BotLua_Aggression( bs );
+	if ( bs->wiredBotsActive ) {
+		return WiredBots_Aggression( bs );
 	}
 
 	//if the bot has quad
@@ -2275,8 +2270,13 @@ BotWantsToRetreat
 int BotWantsToRetreat(bot_state_t *bs) {
 	aas_entityinfo_t entinfo;
 
-	if ( bs->luaCharacterActive ) {
-		return BotLua_WantsToRetreat( bs );
+	/* WiredBots tactic: RETREAT forces the bot to always fall back */
+	if ( bs->directives.tactic == TACTIC_RETREAT && bs->directives.tactic_active ) {
+		return qtrue;
+	}
+
+	if ( bs->wiredBotsActive ) {
+		return WiredBots_WantsToRetreat( bs );
 	}
 
 	if (gametype == GT_CTF) {
@@ -2337,8 +2337,8 @@ BotWantsToChase
 int BotWantsToChase(bot_state_t *bs) {
 	aas_entityinfo_t entinfo;
 
-	if ( bs->luaCharacterActive ) {
-		return BotLua_WantsToChase( bs );
+	if ( bs->wiredBotsActive ) {
+		return WiredBots_WantsToChase( bs );
 	}
 
 	if (gametype == GT_CTF) {
@@ -2421,8 +2421,8 @@ int BotCanAndWantsToRocketJump(bot_state_t *bs) {
 		//if the bot has insufficient armor
 		if (bs->inventory[INVENTORY_ARMOR] < 40) return qfalse;
 	}
-	if ( bs->luaCharacterActive ) {
-		rocketjumper = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ROCKET_JUMP, 0.0f ) > 0.5f ? 1.0f : 0.0f;
+	if ( bs->wiredBotsActive ) {
+		rocketjumper = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ROCKET_JUMP, 0.0f ) > 0.5f ? 1.0f : 0.0f;
 	} else {
 		rocketjumper = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_WEAPONJUMPING, 0, 1);
 	}
@@ -2474,8 +2474,8 @@ void BotGoCamp(bot_state_t *bs, bot_goal_t *goal) {
 	//set the team goal
 	memcpy(&bs->teamgoal, goal, sizeof(bot_goal_t));
 	//get the team goal time
-	if ( bs->luaCharacterActive ) {
-		camper = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_CAMP_TENDENCY, 0.5f );
+	if ( bs->wiredBotsActive ) {
+		camper = WiredBots_ProfileFieldOr( bs, WB_PROFILE_CAMP_TENDENCY, 0.5f );
 	} else {
 		camper = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CAMPER, 0, 1);
 	}
@@ -2499,8 +2499,8 @@ int BotWantsToCamp(bot_state_t *bs) {
 	int cs, traveltime, besttraveltime;
 	bot_goal_t goal, bestgoal;
 
-	if ( bs->luaCharacterActive ) {
-		camper = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_CAMP_TENDENCY, 0.5f );
+	if ( bs->wiredBotsActive ) {
+		camper = WiredBots_ProfileFieldOr( bs, WB_PROFILE_CAMP_TENDENCY, 0.5f );
 	} else {
 		camper = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CAMPER, 0, 1);
 	}
@@ -2665,15 +2665,16 @@ bot_moveresult_t BotAttackMove(bot_state_t *bs, int tfl) {
 		BotSetupForMovement(bs);
 		//move towards the goal
 		trap_BotMoveToGoal(&moveresult, bs->ms, &goal, tfl);
+		BotMovementThink(bs, &moveresult);
 		return moveresult;
 	}
 	//
 	memset(&moveresult, 0, sizeof(bot_moveresult_t));
 	//
-	if ( bs->luaCharacterActive ) {
-		attack_skill = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_AGGRESSION, 0.5f );
-		jumper = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_BUNNY_HOP, 0.3f );
-		croucher = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_DODGE_ON_FIRE, 0.2f );
+	if ( bs->wiredBotsActive ) {
+		attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_AGGRESSION, 0.5f );
+		jumper = WiredBots_ProfileFieldOr( bs, WB_PROFILE_BUNNY_HOP, 0.3f );
+		croucher = WiredBots_ProfileFieldOr( bs, WB_PROFILE_DODGE_ON_FIRE, 0.2f );
 	} else {
 		attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
 		jumper = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_JUMPER, 0, 1);
@@ -2889,14 +2890,17 @@ float BotEntityVisible(int viewer, vec3_t eye, vec3_t viewangles, float fov, int
 		//if the point is not in potential visible sight
 		//if (!AAS_inPVS(eye, middle)) continue;
 		//
-		contents_mask = CONTENTS_SOLID|CONTENTS_PLAYERCLIP;
+		// Use MASK_OPAQUE (CONTENTS_SOLID|CONTENTS_SLIME|CONTENTS_LAVA) for LOS checks.
+		// CONTENTS_PLAYERCLIP (MASK_DEADSOLID) blocks invisible movement-barrier brushes
+		// that are placed by mappers to seal ledges/pits — these must NOT block visibility.
+		contents_mask = MASK_OPAQUE;
 		passent = viewer;
 		hitent = ent;
 		VectorCopy(eye, start);
 		VectorCopy(middle, end);
 		//if the entity is in water, lava or slime
 		if (trap_AAS_PointContents(middle) & (CONTENTS_LAVA|CONTENTS_SLIME|CONTENTS_WATER)) {
-			contents_mask |= (CONTENTS_LAVA|CONTENTS_SLIME|CONTENTS_WATER);
+			contents_mask |= CONTENTS_WATER;
 		}
 		//if eye is in water, lava or slime
 		if (inwater) {
@@ -2956,9 +2960,13 @@ float BotEntityVisible(int viewer, vec3_t eye, vec3_t viewangles, float fov, int
 			//if pretty much no fog
 			if (bestvis >= 0.95) return bestvis;
 		}
-		//check bottom and top of bounding box as well
-		if (i == 0) middle[2] += entinfo.mins[2];
-		else if (i == 1) middle[2] += entinfo.maxs[2] - entinfo.mins[2];
+		//check eye-level and top of bounding box as well
+		// NOTE: iteration 0 ends at bbox center (origin+4).
+		// Previously iteration 1 used mins[2] offset (-24) which went underground
+		// (origin-20) and was always trace-blocked. Now we trace to approximate
+		// eye level (origin+26) and top of head (origin+maxs[2]) instead.
+		if (i == 0) middle[2] = entinfo.origin[2] + 26;         // approx eye height
+		else if (i == 1) middle[2] = entinfo.origin[2] + entinfo.maxs[2]; // top of head
 	}
 	return bestvis;
 }
@@ -2975,12 +2983,24 @@ int BotFindEnemy(bot_state_t *bs, int curenemy) {
 	aas_entityinfo_t entinfo, curenemyinfo;
 	vec3_t dir, angles;
 
-	if ( bs->luaCharacterActive ) {
-		alertness = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_TRACKING, 0.5f );
-		easyfragger = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_AGGRESSION, 0.5f );
+	if ( bs->wiredBotsActive ) {
+		alertness = WiredBots_ProfileFieldOr( bs, WB_PROFILE_TRACKING, 0.5f );
+		easyfragger = WiredBots_ProfileFieldOr( bs, WB_PROFILE_AGGRESSION, 0.5f );
 	} else {
 		alertness = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ALERTNESS, 0, 1);
 		easyfragger = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_EASY_FRAGGER, 0, 1);
+	}
+
+	if ( trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+		static float s_fovLog[MAX_CLIENTS];
+		if ( FloatTime() - s_fovLog[bs->client] > 5.0f ) {
+			s_fovLog[bs->client] = FloatTime();
+			float viewfactor = bs->wiredBotsActive ? alertness :
+				trap_Characteristic_BFloat( bs->character, CHARACTERISTIC_VIEW_FACTOR, 0, 1 );
+			G_Printf( "^5[BotFOV] cl=%d alertness=%.2f viewfactor=%.2f alertFov=%.0f (lua=%d)\n",
+				bs->client, alertness, viewfactor, 90.0f + alertness * 90.0f,
+				bs->wiredBotsActive );
+		}
 	}
 	//check if the health decreased
 	healthdecrease = bs->lasthealth > bs->inventory[INVENTORY_HEALTH];
@@ -2996,6 +3016,32 @@ int BotFindEnemy(bot_state_t *bs, int curenemy) {
 	else {
 		cursquaredist = 0;
 	}
+
+	/* WiredBots tactic: HUNT — if a specific target is visible, engage them
+	   first regardless of distance, bypassing the normal candidate loop. */
+	if ( bs->directives.tactic == TACTIC_HUNT && bs->directives.tactic_active ) {
+		int hunt_target = bs->directives.tactic_target;
+		if ( hunt_target >= 0 && hunt_target < MAX_CLIENTS &&
+		     hunt_target != bs->client &&
+		     level.clients[hunt_target].pers.connected == CON_CONNECTED &&
+		     !BotSameTeam( bs, hunt_target ) ) {
+			aas_entityinfo_t huntinfo;
+			BotEntityInfo( hunt_target, &huntinfo );
+			if ( huntinfo.valid && !EntityIsDead( &huntinfo ) ) {
+				float vis = BotEntityVisible( bs->entitynum, bs->eye,
+				                              bs->viewangles, 360, hunt_target );
+				if ( vis > 0 ) {
+					bs->enemy             = hunt_target;
+					bs->enemysight_time   = FloatTime();
+					bs->enemysuicide      = qfalse;
+					bs->enemydeath_time   = 0;
+					bs->enemyvisible_time = FloatTime();
+					return qtrue;
+				}
+			}
+		}
+	}
+
 #if FEAT_OVERLOAD
 	if (gametype == GT_OBELISK) {
 		vec3_t target;
@@ -3063,14 +3109,78 @@ int BotFindEnemy(bot_state_t *bs, int curenemy) {
 		if (squaredist > Square(900.0 + alertness * 4000.0)) continue;
 		//if on the same team
 		if (BotSameTeam(bs, i)) continue;
-		//if the bot's health decreased or the enemy is shooting
-		if (curenemy < 0 && (healthdecrease || EntityIsShooting(&entinfo)))
+		//stateless clients have no game presence — never a valid enemy
+		if ( level.clients[i].sess.isStatelessClient ) continue;
+		/* WiredBots tactic: AVOID — skip the designated target unless it is
+		   actively hurting us (health decrease = we must engage to survive). */
+		if ( bs->directives.tactic == TACTIC_AVOID && bs->directives.tactic_active &&
+		     i == bs->directives.tactic_target && !healthdecrease ) {
+			continue;
+		}
+		//if the bot's health decreased, the enemy is shooting, or the enemy is
+		// within hearing range (~350 units — simulates footstep/breathing awareness)
+		if (curenemy < 0 && (healthdecrease || EntityIsShooting(&entinfo) || squaredist < Square(350.0f)))
 			f = 360;
-		else
-			f = 90 + 90 - (90 - (squaredist > Square(810) ? Square(810) : squaredist) / (810 * 9));
+		else {
+			// Distance-based FOV grows from 90° (close) to 180° (810+ units).
+			// alertness provides a floor so aware bots don't miss point-blank enemies.
+			// alertness=0.5 (default) → floor=135°; alertness=0.8 → floor=162°.
+			float distFov  = 90.0f + ( squaredist > Square( 810.0f ) ? Square( 810.0f ) : squaredist ) / ( 810.0f * 9.0f );
+			float alertFov = 90.0f + alertness * 90.0f;
+			f = distFov > alertFov ? distFov : alertFov;
+		}
 		//check if the enemy is visible
-		vis = BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, f, i);
-		if (vis <= 0) continue;
+		// During proactive scanning (no current enemy), remove the view-direction gate so
+		// any in-LOS enemy is detectable regardless of which way the bot faces.
+		// The FOV gate only applies in combat (curenemy >= 0) to simulate tunnel-vision.
+		vis = BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, curenemy < 0 ? 360.0f : f, i);
+		if (vis <= 0) {
+			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+				static float s_visLog[MAX_CLIENTS];
+				if ( FloatTime() - s_visLog[bs->client] > 1.5f ) {
+					s_visLog[bs->client] = FloatTime();
+					vec3_t toEnemy, entAng;
+					VectorSubtract( entinfo.origin, bs->eye, toEnemy );
+					vectoangles( toEnemy, entAng );
+					qboolean fovResult = InFieldOfVision( bs->viewangles, f, entAng );
+					// Compute the 3 trace targets (same formula as BotEntityVisible)
+					vec3_t eMid, eCenter, eEyeLevel, eTop;
+					VectorAdd( entinfo.mins, entinfo.maxs, eMid );
+					VectorScale( eMid, 0.5f, eMid );
+					VectorAdd( entinfo.origin, eMid, eCenter );
+					VectorCopy( eCenter, eEyeLevel ); eEyeLevel[2] = entinfo.origin[2] + 26;
+					VectorCopy( eCenter, eTop ); eTop[2] = entinfo.origin[2] + entinfo.maxs[2];
+					// Run the same 3 traces to get concrete fraction/ent results
+					bsp_trace_t t0, t1, t2;
+					int cmask = MASK_OPAQUE; // must match BotEntityVisible
+					BotAI_Trace( &t0, bs->eye, NULL, NULL, eCenter,    bs->entitynum, cmask );
+					BotAI_Trace( &t1, bs->eye, NULL, NULL, eEyeLevel,  bs->entitynum, cmask );
+					BotAI_Trace( &t2, bs->eye, NULL, NULL, eTop,       bs->entitynum, cmask );
+					G_Printf( "^3[FindEnemy] cl=%d cand=%d VIS_FAIL f=%.0f dist=%.0f fov=%s\n"
+						"  shooter  eye=(%.1f %.1f %.1f) "
+						"ps.orig=(%.1f %.1f %.1f) r.cur=(%.1f %.1f %.1f) viewht=%d\n"
+						"  enemy    entinfo.orig=(%.1f %.1f %.1f) "
+						"enemy_dir=(%.0f %.0f)\n"
+						"  t0 center  ->(%.1f %.1f %.1f) frac=%.3f ent=%d\n"
+						"  t1 eyelevel->(%.1f %.1f %.1f) frac=%.3f ent=%d\n"
+						"  t2 top     ->(%.1f %.1f %.1f) frac=%.3f ent=%d\n",
+						bs->client, i, f, sqrtf( squaredist ),
+						fovResult ? "pass" : "FAIL",
+						bs->eye[0], bs->eye[1], bs->eye[2],
+						bs->cur_ps.origin[0], bs->cur_ps.origin[1], bs->cur_ps.origin[2],
+						g_entities[bs->client].r.currentOrigin[0],
+						g_entities[bs->client].r.currentOrigin[1],
+						g_entities[bs->client].r.currentOrigin[2],
+						bs->cur_ps.viewheight,
+						entinfo.origin[0], entinfo.origin[1], entinfo.origin[2],
+						entAng[PITCH], entAng[YAW],
+						eCenter[0],   eCenter[1],   eCenter[2],   t0.fraction, t0.ent,
+						eEyeLevel[0], eEyeLevel[1], eEyeLevel[2], t1.fraction, t1.ent,
+						eTop[0],      eTop[1],      eTop[2],      t2.fraction, t2.ent );
+				}
+			}
+			continue;
+		}
 		//if the enemy is quite far away, not shooting and the bot is not damaged
 		if (curenemy < 0 && squaredist > Square(100) && !healthdecrease && !EntityIsShooting(&entinfo))
 		{
@@ -3082,11 +3192,21 @@ int BotFindEnemy(bot_state_t *bs, int curenemy) {
 				//update some stuff for this enemy
 				BotUpdateBattleInventory(bs, i);
 				//if the bot doesn't really want to fight
-				if (BotWantsToRetreat(bs)) continue;
+				if (BotWantsToRetreat(bs)) {
+					if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+						G_Printf( "^1[FindEnemy] cl=%d cand=%d SKIP:retreat dist=%.0f\n",
+							bs->client, i, sqrtf( squaredist ) );
+					}
+					continue;
+				}
 			}
 		}
 		//found an enemy
 		bs->enemy = entinfo.number;
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+			G_Printf( "^2[FindEnemy] cl=%d FOUND enemy=%d dist=%.0f hpdec=%d f=%.0f\n",
+				bs->client, i, sqrtf( squaredist ), healthdecrease, f );
+		}
 		if (curenemy >= 0) bs->enemysight_time = FloatTime() - 2;
 		else bs->enemysight_time = FloatTime();
 		bs->enemysuicide = qfalse;
@@ -3311,7 +3431,7 @@ BotAimAtEnemy
 */
 void BotAimAtEnemy(bot_state_t *bs) {
 	int i, enemyvisible;
-	float dist, f, aim_skill, aim_accuracy, speed, reactiontime;
+	float dist, f, aim_skill, aim_accuracy, aimHeight, speed, reactiontime;
 	vec3_t dir, bestorigin, end, start, groundtarget, cmdmove, enemyvelocity;
 	vec3_t mins = {-4,-4,-4}, maxs = {4, 4, 4};
 	weaponinfo_t wi;
@@ -3347,18 +3467,20 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	//
 	//BotAI_Print(PRT_MESSAGE, "client %d: aiming at client %d\n", bs->entitynum, bs->enemy);
 	//
-	if ( bs->luaCharacterActive ) {
-		aim_skill = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_LEAD_SKILL, 0.5f );
-		aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
+	if ( bs->wiredBotsActive ) {
+		aim_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_LEAD_SKILL, 0.5f );
+		aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
+		aimHeight = WiredBots_GetCurrentAttackAimHeight( bs );
 	} else {
 		aim_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_SKILL, 0, 1);
 		aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY, 0, 1);
+		aimHeight = 28.0f;
 	}
 	//
 	if (aim_skill > 0.95) {
 		//don't aim too early
-		if ( bs->luaCharacterActive ) {
-			reactiontime = 0.5f * BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_REACTION_TIME, 0.5f );
+		if ( bs->wiredBotsActive ) {
+			reactiontime = 0.5f * WiredBots_ProfileFieldOr( bs, WB_PROFILE_REACTION_TIME, 0.5f );
 		} else {
 			reactiontime = 0.5f * trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_REACTIONTIME, 0, 1);
 		}
@@ -3370,55 +3492,55 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	trap_BotGetWeaponInfo(bs->ws, bs->weaponnum, &wi);
 	//get the weapon specific aim accuracy and or aim skill
 	if (wi.number == WP_MACHINEGUN) {
-		if ( bs->luaCharacterActive ) {
-			aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
+		if ( bs->wiredBotsActive ) {
+			aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
 		} else {
 			aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_MACHINEGUN, 0, 1);
 		}
 	}
 	else if (wi.number == WP_SHOTGUN) {
-		if ( bs->luaCharacterActive ) {
-			aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
+		if ( bs->wiredBotsActive ) {
+			aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
 		} else {
 			aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_SHOTGUN, 0, 1);
 		}
 	}
 	else if (wi.number == WP_GRENADE_LAUNCHER) {
-		if ( bs->luaCharacterActive ) {
-			aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
-			aim_skill = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_LEAD_SKILL, 0.5f );
+		if ( bs->wiredBotsActive ) {
+			aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
+			aim_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_LEAD_SKILL, 0.5f );
 		} else {
 			aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_GRENADELAUNCHER, 0, 1);
 			aim_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_SKILL_GRENADELAUNCHER, 0, 1);
 		}
 	}
 	else if (wi.number == WP_ROCKET_LAUNCHER) {
-		if ( bs->luaCharacterActive ) {
-			aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
-			aim_skill = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_LEAD_SKILL, 0.5f );
+		if ( bs->wiredBotsActive ) {
+			aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
+			aim_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_LEAD_SKILL, 0.5f );
 		} else {
 			aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_ROCKETLAUNCHER, 0, 1);
 			aim_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_SKILL_ROCKETLAUNCHER, 0, 1);
 		}
 	}
 	else if (wi.number == WP_LIGHTNING_GUN) {
-		if ( bs->luaCharacterActive ) {
-			aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
+		if ( bs->wiredBotsActive ) {
+			aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
 		} else {
 			aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_LIGHTNING, 0, 1);
 		}
 	}
 	else if (wi.number == WP_RAILGUN) {
-		if ( bs->luaCharacterActive ) {
-			aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
+		if ( bs->wiredBotsActive ) {
+			aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
 		} else {
 			aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_RAILGUN, 0, 1);
 		}
 	}
 	else if (wi.number == WP_PLASMA_RIFLE) {
-		if ( bs->luaCharacterActive ) {
-			aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
-			aim_skill = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_LEAD_SKILL, 0.5f );
+		if ( bs->wiredBotsActive ) {
+			aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
+			aim_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_LEAD_SKILL, 0.5f );
 		} else {
 			aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY_PLASMAGUN, 0, 1);
 			aim_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_SKILL_PLASMAGUN, 0, 1);
@@ -3460,7 +3582,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	if (enemyvisible) {
 		//
 		VectorCopy(entinfo.origin, bestorigin);
-		bestorigin[2] += 8;
+		bestorigin[2] += aimHeight; // per-attack aim height (0=feet/splash, 28=center mass, 36=upper body)
 		//get the start point shooting from
 		//NOTE: the x and y projectile start offsets are ignored
 		VectorCopy(bs->origin, start);
@@ -3468,8 +3590,8 @@ void BotAimAtEnemy(bot_state_t *bs) {
 		start[2] += wi.offset[2];
 		//
 		BotAI_Trace(&trace, start, mins, maxs, bestorigin, bs->entitynum, MASK_SHOT);
-		//if the enemy is NOT hit
-		if (trace.fraction <= 1 && trace.ent != entinfo.number) {
+		//if the enemy is NOT hit (something obstructed the path)
+		if (trace.fraction < 1 && trace.ent != entinfo.number) {
 			bestorigin[2] += 16;
 		}
 		//if it is not an instant hit weapon the bot might want to predict the enemy
@@ -3505,6 +3627,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 														dir, cmdmove, 0,
 														dist * 10 / wi.speed, 0.1f, 0, 0, qfalse);
 					VectorCopy(move.endpos, bestorigin);
+					bestorigin[2] += aimHeight; // restore per-attack aim height after prediction overwrites Z
 					//BotAI_Print(PRT_MESSAGE, "%1.1f predicted speed = %f, frames = %f\n", FloatTime(), VectorLength(dir), dist * 10 / wi.speed);
 				}
 				//if not that skilled do linear prediction
@@ -3518,8 +3641,9 @@ void BotAimAtEnemy(bot_state_t *bs) {
 					//
 					speed = VectorNormalize(dir) / entinfo.update_time;
 					//botimport.Print(PRT_MESSAGE, "speed = %f, wi->speed = %f\n", speed, wi->speed);
-					//best spot to aim at
+					//best spot to aim at (apply per-attack aim height after prediction overwrites Z)
 					VectorMA(entinfo.origin, (dist / wi.speed) * speed, dir, bestorigin);
+					bestorigin[2] += aimHeight;
 				}
 			}
 		}
@@ -3564,7 +3688,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	else {
 		//
 		VectorCopy(bs->lastenemyorigin, bestorigin);
-		bestorigin[2] += 8;
+		bestorigin[2] += aimHeight; // per-attack aim height
 		//if the bot is skilled enough
 		if (aim_skill > 0.5) {
 			//do prediction shots around corners
@@ -3616,11 +3740,29 @@ void BotAimAtEnemy(bot_state_t *bs) {
 	}
 	//set the ideal view angles
 	vectoangles(dir, bs->ideal_viewangles);
+	if ( trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+		static int s_aimLogTick[MAX_CLIENTS];
+		if ( ++s_aimLogTick[bs->client] % 30 == 0 ) {
+			G_Printf( "^6[BotAim] client=%d lua=%d aim_skill=%.3f aim_accuracy=%.3f "
+				"visible=%d bestorigin=(%.1f %.1f %.1f) ideal=(%.1f %.1f)\n",
+				bs->client, bs->wiredBotsActive,
+				aim_skill, aim_accuracy,
+				enemyvisible,
+				bestorigin[0], bestorigin[1], bestorigin[2],
+				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW] );
+		}
+	}
 	//take the weapon spread into account for lower skilled bots
-	bs->ideal_viewangles[PITCH] += 6 * wi.vspread * crandom() * (1 - aim_accuracy);
-	bs->ideal_viewangles[PITCH] = AngleMod(bs->ideal_viewangles[PITCH]);
-	bs->ideal_viewangles[YAW] += 6 * wi.hspread * crandom() * (1 - aim_accuracy);
-	bs->ideal_viewangles[YAW] = AngleMod(bs->ideal_viewangles[YAW]);
+	// Lua bots: skip vspread/hspread noise — g_syscalls.c sets these to game-world
+	// units (e.g. 600 for shotgun) not botlib-style "degrees from middle", so the
+	// formula would inject ±1700° of noise per frame. Direction-vector noise on the
+	// lines above already handles inaccuracy for Lua bots.
+	if ( !bs->wiredBotsActive ) {
+		bs->ideal_viewangles[PITCH] += 6 * wi.vspread * crandom() * (1 - aim_accuracy);
+		bs->ideal_viewangles[PITCH] = AngleMod(bs->ideal_viewangles[PITCH]);
+		bs->ideal_viewangles[YAW] += 6 * wi.hspread * crandom() * (1 - aim_accuracy);
+		bs->ideal_viewangles[YAW] = AngleMod(bs->ideal_viewangles[YAW]);
+	}
 	//if the bots should be really challenging
 	if (bot_challenge.integer) {
 		//if the bot is really accurate and has the enemy in view for some time
@@ -3650,6 +3792,21 @@ void BotCheckAttack(bot_state_t *bs) {
 	vec3_t mins = {-8, -8, -8}, maxs = {8, 8, 8};
 
 	attackentity = bs->enemy;
+	if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+		static int s_caLogTick[MAX_CLIENTS];
+		if ( ++s_caLogTick[bs->client] % 30 == 0 ) {
+			G_Printf( "^5[CheckAttack] cl=%d enemy=%d wpn=%d ammo=%d "
+				"sight_dt=%.2f tele_dt=%.2f wpnchg_dt=%.2f ftwait=%.2f ftshoot=%.2f\n",
+				bs->client, attackentity, bs->weaponnum,
+				(bs->weaponnum >= 0 && bs->weaponnum < MAX_WEAPONS)
+					? bs->cur_ps.ammo[bs->weaponnum] : -1,
+				FloatTime() - bs->enemysight_time,
+				FloatTime() - bs->teleport_time,
+				FloatTime() - bs->weaponchange_time,
+				bs->firethrottlewait_time - FloatTime(),
+				bs->firethrottleshoot_time - FloatTime() );
+		}
+	}
 	//
 	BotEntityInfo(attackentity, &entinfo);
 	// if not attacking a player
@@ -3667,19 +3824,51 @@ void BotCheckAttack(bot_state_t *bs) {
 #endif
 	}
 	//
-	if ( bs->luaCharacterActive ) {
-		reactiontime = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_REACTION_TIME, 0.5f );
+	if ( bs->wiredBotsActive ) {
+		reactiontime = WiredBots_ProfileFieldOr( bs, WB_PROFILE_REACTION_TIME, 0.5f );
 	} else {
 		reactiontime = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_REACTIONTIME, 0, 1);
 	}
-	if (bs->enemysight_time > FloatTime() - reactiontime) return;
-	if (bs->teleport_time > FloatTime() - reactiontime) return;
+	if (bs->enemysight_time > FloatTime() - reactiontime) {
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+			static int s_rLog[MAX_CLIENTS];
+			if ( ++s_rLog[bs->client] % 30 == 0 )
+				G_Printf( "^1[CheckAttack] cl=%d BLOCKED:reaction rt=%.2f sdt=%.2f\n",
+					bs->client, reactiontime, FloatTime() - bs->enemysight_time );
+		}
+		return;
+	}
+	if (bs->teleport_time > FloatTime() - reactiontime) {
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+			static int s_tpLog[MAX_CLIENTS];
+			if ( ++s_tpLog[bs->client] % 30 == 0 )
+				G_Printf( "^1[CheckAttack] cl=%d BLOCKED:teleport tdt=%.2f\n",
+					bs->client, FloatTime() - bs->teleport_time );
+		}
+		return;
+	}
 	//if changing weapons
-	if (bs->weaponchange_time > FloatTime() - 0.1) return;
+	if (bs->weaponchange_time > FloatTime() - 0.1) {
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+			static int s_wcLog[MAX_CLIENTS];
+			if ( ++s_wcLog[bs->client] % 30 == 0 )
+				G_Printf( "^1[CheckAttack] cl=%d BLOCKED:wpnchange wdt=%.2f\n",
+					bs->client, FloatTime() - bs->weaponchange_time );
+		}
+		return;
+	}
 	//check fire throttle characteristic
-	if (bs->firethrottlewait_time > FloatTime()) return;
-	if ( bs->luaCharacterActive ) {
-		firethrottle = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_OPPORTUNISM, 0.5f );
+	if (bs->firethrottlewait_time > FloatTime()) {
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+			static int s_ftLog[MAX_CLIENTS];
+			if ( ++s_ftLog[bs->client] % 30 == 0 )
+				G_Printf( "^1[CheckAttack] cl=%d BLOCKED:firethrottle wait=%.2f\n",
+					bs->client, bs->firethrottlewait_time - FloatTime() );
+		}
+		return;
+	}
+	if ( bs->wiredBotsActive ) {
+		firethrottle = WiredBots_ProfileFieldOr( bs, WB_PROFILE_FIRETHROTTLE, 0.5f );
 	} else {
 		firethrottle = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_FIRETHROTTLE, 0, 1);
 	}
@@ -3699,6 +3888,12 @@ void BotCheckAttack(bot_state_t *bs) {
 	//
 	if (bs->weaponnum == WP_GAUNTLET) {
 		if (VectorLengthSquared(dir) > Square(60)) {
+			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+				static int s_gLog[MAX_CLIENTS];
+				if ( ++s_gLog[bs->client] % 30 == 0 )
+					G_Printf( "^1[CheckAttack] cl=%d BLOCKED:gauntlet dist=%.0f\n",
+						bs->client, VectorLength(dir) );
+			}
 			return;
 		}
 	}
@@ -3708,11 +3903,36 @@ void BotCheckAttack(bot_state_t *bs) {
 		fov = 50;
 	//
 	vectoangles(dir, angles);
-	if (!InFieldOfVision(bs->viewangles, fov, angles))
+	if (!InFieldOfVision(bs->viewangles, fov, angles)) {
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+			static int s_fovMissLog[MAX_CLIENTS];
+			if ( ++s_fovMissLog[bs->client] % 30 == 0 ) {
+				G_Printf( "^1[Attack] cl=%d FOV_MISS fov=%.0f view=(%.1f %.1f) aim=(%.1f %.1f)\n",
+					bs->client, fov,
+					bs->viewangles[PITCH], bs->viewangles[YAW],
+					angles[PITCH], angles[YAW] );
+			}
+		}
 		return;
-	BotAI_Trace(&bsptrace, bs->eye, NULL, NULL, bs->aimtarget, bs->client, CONTENTS_SOLID|CONTENTS_PLAYERCLIP);
-	if (bsptrace.fraction < 1 && bsptrace.ent != attackentity)
+	}
+	// MASK_OPAQUE: only solid/lava/slime surfaces block shots — playerclip (invisible)
+	// movement barriers must not gate firing; they are not real walls.
+	BotAI_Trace(&bsptrace, bs->eye, NULL, NULL, bs->aimtarget, bs->client, MASK_OPAQUE);
+	if (bsptrace.fraction < 1 && bsptrace.ent != attackentity) {
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+			static int s_fgLog[MAX_CLIENTS];
+			if ( ++s_fgLog[bs->client] % 30 == 0 ) {
+				G_Printf( "^1[Attack] cl=%d FIREGATE_BLOCKED "
+					"eye=(%.1f %.1f %.1f) aim=(%.1f %.1f %.1f) "
+					"frac=%.3f ent=%d (enemy=%d)\n",
+					bs->client,
+					bs->eye[0], bs->eye[1], bs->eye[2],
+					bs->aimtarget[0], bs->aimtarget[1], bs->aimtarget[2],
+					bsptrace.fraction, bsptrace.ent, attackentity );
+			}
+		}
 		return;
+	}
 
 	//get the weapon info
 	trap_BotGetWeaponInfo(bs->ws, bs->weaponnum, &wi);
@@ -3886,8 +4106,8 @@ void BotMapScripts(bot_state_t *bs) {
 			bs->flags |= BFL_IDEALVIEWSET;
 			VectorSubtract(buttonorg, bs->eye, dir);
 			vectoangles(dir, bs->ideal_viewangles);
-			if ( bs->luaCharacterActive ) {
-				aim_accuracy = BotLua_ProfileFieldOr( bs, BOTLUA_PROFILE_ACCURACY, 0.5f );
+			if ( bs->wiredBotsActive ) {
+				aim_accuracy = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
 			} else {
 				aim_accuracy = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_AIM_ACCURACY, 0, 1);
 			}
@@ -4766,7 +4986,7 @@ void BotCheckConsoleMessages(bot_state_t *bs) {
 	bot_consolemessage_t m;
 	bot_match_t match;
 
-	if ( bs->luaCharacterActive ) {
+	if ( bs->wiredBotsActive ) {
 		while((handle = trap_BotNextConsoleMessage(bs->cs, &m)) != 0) {
 			ptr = m.message;
 			if (m.type == CMS_CHAT) {
@@ -4778,7 +4998,7 @@ void BotCheckConsoleMessages(bot_state_t *bs) {
 				trap_BotReplaceSynonyms(ptr, context);
 
 				if (trap_BotFindMatch(m.message, &match, MTCONTEXT_REPLYCHAT)) {
-					botLuaChatCtx_t chatCtx;
+					wbChatCtx_t chatCtx;
 					int fromClient;
 
 					Com_Memset( &chatCtx, 0, sizeof( chatCtx ) );
@@ -4802,7 +5022,7 @@ void BotCheckConsoleMessages(bot_state_t *bs) {
 						default: Q_strncpyz( chatCtx.gametype, "other", sizeof( chatCtx.gametype ) ); break;
 					}
 
-					BotLua_Chat( bs, "message", &chatCtx );
+					WiredBots_Chat( bs, "message", &chatCtx );
 				}
 			}
 
@@ -4837,6 +5057,14 @@ void BotCheckConsoleMessages(bot_state_t *bs) {
 		trap_BotReplaceSynonyms(ptr, context);
 		//if there's no match
 		if (!BotMatchMessage(bs, m.message)) {
+			if (m.type == CMS_CHAT) {
+				int talker = -1;
+				if (trap_BotFindMatch(m.message, &match, MTCONTEXT_REPLYCHAT)) {
+					trap_BotMatchVariable(&match, NETNAME, netname, sizeof(netname));
+					talker = ClientOnSameTeamFromName(bs, netname);
+				}
+				BotDirective_ParseChatOrder(bs, talker, m.message);
+			}
 			//if it is a chat message
 			if (m.type == CMS_CHAT && !bot_nochat.integer) {
 				//
@@ -5363,8 +5591,6 @@ void BotSetupAlternativeRouteGoals(void) {
 	altroutegoals_setup = qtrue;
 }
 
-#if FEAT_BOT_IMPROVEMENTS
-
 vmCvar_t bot_autoskill;
 
 /*
@@ -5626,11 +5852,10 @@ void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult )
 	trap_EA_MoveForward( bs->client );
 	trap_EA_Jump( bs->client );
 
-#if FEAT_WIREDNET_OBSERVE
+#if FEAT_WIREDNET_OBSERVER
 	trap_WiredNet_EmitBotEvent( bs->entitynum, "strafejump", 1, (int)speed, bs->origin );
 #endif
 }
-#endif // FEAT_BOT_IMPROVEMENTS
 
 /*
 ==================
@@ -5670,7 +5895,6 @@ void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 		BotCheckSnapshot(bs);
 		//check for air
 		BotCheckAir(bs);
-#if FEAT_BOT_IMPROVEMENTS
 		//scan for incoming missiles
 		BotScanMissiles(bs);
 		//update entity awareness (tracks enemies via missiles, teleports, sounds)
@@ -5683,7 +5907,6 @@ void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 		BotAutoCalibrate(bs);
 		//tactical team voice callouts
 		BotTeamCallout(bs);
-#endif
 	}
 	//check the console messages
 	BotCheckConsoleMessages(bs);
@@ -5699,7 +5922,7 @@ void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 	//if the bot entered the game less than 8 seconds ago
 	if (!bs->entergamechat && bs->entergame_time > FloatTime() - 8) {
 		if (BotChat_EnterGame(bs)) {
-			if ( !bs->luaCharacterActive ) {
+			if ( !bs->wiredBotsActive ) {
 				bs->stand_time = FloatTime() + BotChatTime(bs);
 				AIEnter_Stand(bs, "BotDeathmatchAI: chat enter game");
 			}
@@ -5721,6 +5944,21 @@ void BotDeathmatchAI(bot_state_t *bs, float thinktime) {
 		BotDumpNodeSwitches(bs);
 		ClientName(bs->client, name, sizeof(name));
 		BotAI_Print(PRT_ERROR, "%s at %1.1f switched more than %d AI nodes\n", name, FloatTime(), MAX_NODESWITCHES);
+	}
+	//
+	if ( trap_Cvar_VariableIntegerValue( "sv_botDebugMove" ) ) {
+		static float s_moveLogTime[MAX_CLIENTS];
+		if ( FloatTime() - s_moveLogTime[bs->client] > 5.0f ) {
+			s_moveLogTime[bs->client] = FloatTime();
+			float speed = VectorLength( bs->cur_ps.velocity );
+			G_Printf( "^3[BotMove] client=%d origin=(%.0f %.0f %.0f) speed=%.1f enemy=%d wp=%d hp=%d\n",
+				bs->client,
+				bs->origin[0], bs->origin[1], bs->origin[2],
+				speed,
+				bs->enemy,
+				bs->weaponnum,
+				bs->inventory[INVENTORY_HEALTH] );
+		}
 	}
 	//
 	bs->lastframe_health = bs->inventory[INVENTORY_HEALTH];
@@ -5859,10 +6097,9 @@ void BotSetupDeathmatchAI(void) {
 	trap_Cvar_Register(&bot_testrchat, "bot_testrchat", "0", 0);
 	trap_Cvar_Register(&bot_challenge, "bot_challenge", "0", 0);
 	trap_Cvar_Register(&bot_predictobstacles, "bot_predictobstacles", "1", 0);
-#if FEAT_BOT_IMPROVEMENTS
 	trap_Cvar_Register(&bot_autoskill, "bot_autoskill", "0", 0);
-#endif
-	trap_Cvar_Register(&g_spSkill, "g_spSkill", "2", 0);
+	trap_Cvar_Register(&g_spSkill, "g_spSkill", "3", 0);
+	trap_Cvar_Register(&sv_botDirectiveTTL, "sv_botDirectiveTTL", "30000", CVAR_ARCHIVE);
 	//
 	if (gametype == GT_CTF) {
 		if (trap_BotGetLevelItemGoal(-1, "Red Flag", &ctf_redflag) < 0)

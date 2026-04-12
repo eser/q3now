@@ -12,21 +12,21 @@
 #define MAX_LAGOMETER_RANGE  300
 
 typedef struct {
-	superhudConfig_t config;
-} shudElementNG_t;
+	modernhudConfig_t config;
+} modernHudElementNG_t;
 
-void* CG_SHUDElementNGCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementNGCreate(const modernhudConfig_t* config)
 {
-	shudElementNG_t* element;
+	modernHudElementNG_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
 	return element;
 }
 
-void CG_SHUDElementNGRoutine(void* context)
+void CG_ModernHUDElementNGRoutine(void* context)
 {
-	shudElementNG_t* element = (shudElementNG_t*)context;
+	modernHudElementNG_t* element = (modernHudElementNG_t*)context;
 	const wiredLagometer_t *lag;
 	float x, y, w, h;
 	float ax, ay, aw, ah;
@@ -42,7 +42,7 @@ void CG_SHUDElementNGRoutine(void* context)
 	lag = &wiredHud->lagometer;
 	white = wiredHud->whiteShader;
 
-	// use SuperHUD config rect, or default to bottom-right 48x48
+	// use ModernHUD config rect, or default to bottom-right 48x48
 	if ( element->config.rect.isSet ) {
 		x = element->config.rect.value[0];
 		y = element->config.rect.value[1];
@@ -56,7 +56,7 @@ void CG_SHUDElementNGRoutine(void* context)
 	}
 
 	// draw background
-	CG_SHUDFill( &element->config );
+	CG_ModernHUDFill( &element->config );
 
 	// coordinates are already real screen pixels
 	ax = x; ay = y; aw = w; ah = h;
@@ -124,7 +124,7 @@ void CG_SHUDElementNGRoutine(void* context)
 	re.SetColor( NULL );
 }
 
-void CG_SHUDElementNGDestroy(void* context)
+void CG_ModernHUDElementNGDestroy(void* context)
 {
 	if ( context ) {
 		Z_Free( context );

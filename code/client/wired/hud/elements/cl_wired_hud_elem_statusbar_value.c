@@ -17,28 +17,28 @@ cgame pre-computes everything — this is a pure renderer.
 #if FEAT_WIRED_UI
 
 typedef struct {
-	superhudConfig_t    config;
-	superhudTextContext_t ctx;
-} shudElementStatusbarValue_t;
+	modernhudConfig_t    config;
+	modernhudTextContext_t ctx;
+} modernHudElementStatusbarValue_t;
 
-void *CG_SHUDElementStatusbarValueCreate( const superhudConfig_t *config ) {
-	shudElementStatusbarValue_t *element;
+void *CG_ModernHUDElementStatusbarValueCreate( const modernhudConfig_t *config ) {
+	modernHudElementStatusbarValue_t *element;
 
-	SHUD_ELEMENT_INIT( element, config );
+	ModernHUD_ELEMENT_INIT( element, config );
 
 	if ( !element->config.text.isSet ) {
 		Q_strncpyz( element->config.text.value, "%s", sizeof( element->config.text.value ) );
 	}
 
-	CG_SHUDTextMakeContext( &element->config, &element->ctx );
-	CG_SHUDFillAndFrameForText( &element->config, &element->ctx );
+	CG_ModernHUDTextMakeContext( &element->config, &element->ctx );
+	CG_ModernHUDFillAndFrameForText( &element->config, &element->ctx );
 	element->ctx.flags |= DS_FORCE_COLOR;
 
 	return element;
 }
 
-void CG_SHUDElementStatusbarValueRoutine( void *context ) {
-	shudElementStatusbarValue_t *element = (shudElementStatusbarValue_t *)context;
+void CG_ModernHUDElementStatusbarValueRoutine( void *context ) {
+	modernHudElementStatusbarValue_t *element = (modernHudElementStatusbarValue_t *)context;
 
 	if ( !element->config.bind.isSet ) return;
 
@@ -59,8 +59,8 @@ void CG_SHUDElementStatusbarValueRoutine( void *context ) {
 			}
 
 			element->ctx.text = storeEntry->text;
-			CG_SHUDFill( &element->config );
-			CG_SHUDTextPrint( &element->config, &element->ctx );
+			CG_ModernHUDFill( &element->config );
+			CG_ModernHUDTextPrint( &element->config, &element->ctx );
 			return;
 		}
 	}
@@ -75,12 +75,12 @@ void CG_SHUDElementStatusbarValueRoutine( void *context ) {
 		element->ctx.text = (char *)binding->text;
 		Vector4Copy( binding->color, element->config.color.value.rgba );
 
-		CG_SHUDFill( &element->config );
-		CG_SHUDTextPrint( &element->config, &element->ctx );
+		CG_ModernHUDFill( &element->config );
+		CG_ModernHUDTextPrint( &element->config, &element->ctx );
 	}
 }
 
-void CG_SHUDElementStatusbarValueDestroy( void *context ) {
+void CG_ModernHUDElementStatusbarValueDestroy( void *context ) {
 	if ( context ) Z_Free( context );
 }
 

@@ -8,34 +8,34 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementPlayerSpeed_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementPlayerSpeed_t;
 
-void* CG_SHUDElementPlayerSpeedCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementPlayerSpeedCreate(const modernhudConfig_t* config)
 {
-	shudElementPlayerSpeed_t* element;
+	modernHudElementPlayerSpeed_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	return element;
 }
 
-void CG_SHUDElementPlayerSpeedRoutine(void* context)
+void CG_ModernHUDElementPlayerSpeedRoutine(void* context)
 {
-	shudElementPlayerSpeed_t* element = (shudElementPlayerSpeed_t*)context;
+	modernHudElementPlayerSpeed_t* element = (modernHudElementPlayerSpeed_t*)context;
 
 
 	element->ctx.text = va("%dups", (int)cg.xyspeed);
 
 
-	CG_SHUDTextPrint(&element->config, &element->ctx);
+	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_SHUDElementPlayerSpeedDestroy(void* context)
+void CG_ModernHUDElementPlayerSpeedDestroy(void* context)
 {
 	if (context)
 	{

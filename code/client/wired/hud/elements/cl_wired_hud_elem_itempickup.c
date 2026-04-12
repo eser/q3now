@@ -8,18 +8,18 @@
 
 typedef struct
 {
-	superhudConfig_t config;
-	superhudTextContext_t ctx;
-} shudElementItemPickup_t;
+	modernhudConfig_t config;
+	modernhudTextContext_t ctx;
+} modernHudElementItemPickup_t;
 
-void* CG_SHUDElementItemPickupCreate(const superhudConfig_t* config)
+void* CG_ModernHUDElementItemPickupCreate(const modernhudConfig_t* config)
 {
-	shudElementItemPickup_t* element;
+	modernHudElementItemPickup_t* element;
 
-	SHUD_ELEMENT_INIT(element, config);
+	ModernHUD_ELEMENT_INIT(element, config);
 
-	CG_SHUDTextMakeContext(&element->config, &element->ctx);
-	CG_SHUDFillAndFrameForText(&element->config, &element->ctx);
+	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
+	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
 
 	if (!element->config.time.isSet)
 	{
@@ -30,12 +30,12 @@ void* CG_SHUDElementItemPickupCreate(const superhudConfig_t* config)
 	return element;
 }
 
-void CG_SHUDElementItemPickupRoutine(void* context)
+void CG_ModernHUDElementItemPickupRoutine(void* context)
 {
-	shudElementItemPickup_t* element = (shudElementItemPickup_t*)context;
+	modernHudElementItemPickup_t* element = (modernHudElementItemPickup_t*)context;
 	qboolean visible;
 
-	visible = CG_SHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.itemPickupTime);
+	visible = CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.itemPickupTime);
 
 	if (visible)
 	{
@@ -59,12 +59,12 @@ void CG_SHUDElementItemPickupRoutine(void* context)
 				element->ctx.text = va("%i:%i%i %s", mins, tens, seconds, bg_itemlist[cg.itemPickup].pickup_name);
 			}
 
-			CG_SHUDTextPrint(&element->config, &element->ctx);
+			CG_ModernHUDTextPrint(&element->config, &element->ctx);
 		}
 	}
 }
 
-void CG_SHUDElementItemPickupDestroy(void* context)
+void CG_ModernHUDElementItemPickupDestroy(void* context)
 {
 	if (context)
 	{

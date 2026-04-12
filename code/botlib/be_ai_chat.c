@@ -176,7 +176,7 @@ typedef struct bot_stringlist_s
 typedef struct bot_chatstate_s
 {
 	int client;											//client number
-	char name[32];										//name of the bot
+	char name[MAX_NETNAME];								//name of the bot
 	char chatmessage[MAX_MESSAGE_SIZE];
 	int handle;
 	//the console messages visible to the bot

@@ -196,14 +196,12 @@ extern vmCvar_t bot_nochat;
 extern vmCvar_t bot_testrchat;
 extern vmCvar_t bot_challenge;
 
-#if FEAT_BOT_IMPROVEMENTS
 //check and apply strafejump during navigation
 void BotStrafeJumpCheck( bot_state_t *bs, bot_moveresult_t *moveresult );
 //record kill for auto-calibration K/D tracking
 void BotAutoCalibrate_RecordKill( int attacker, int victim );
 //auto-skill cvar
 extern vmCvar_t bot_autoskill;
-#endif
 
 extern bot_goal_t ctf_redflag;
 extern bot_goal_t ctf_blueflag;

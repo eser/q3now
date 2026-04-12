@@ -2075,7 +2075,7 @@ unsigned int Com_TouchMemory( void ) {
 
 	end = Sys_Milliseconds();
 
-	Com_Printf( "Com_TouchMemory: %i msec\n", end - start );
+	Com_DPrintf( "Com_TouchMemory: %i msec\n", end - start );
 
 	return sum; // just to silent compiler warning
 }

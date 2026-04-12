@@ -26,7 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/ui/cl_wired_attract.h"
 #include "wired/store/cl_wired_store.h"
 #include "../qcommon/crypto.h"
-#include "../wired/net/wn_public.h"
+#include "../qcommon/wired/net/wn_public.h"
 #include <limits.h>
 
 cvar_t	*cl_noprint;

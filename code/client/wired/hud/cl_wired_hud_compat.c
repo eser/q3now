@@ -45,20 +45,20 @@ vmCvar_t wired_crosshairHealth;
 int wired_numSortedTeamPlayers;
 int wired_sortedTeamPlayers[WIRED_HUD_MAX_TEAMOVERLAY];
 
-// ── SuperHUD global context (event state) ────────────────────────────
+// ── ModernHUD global context (event state) ────────────────────────────
 // This holds chat/frag/obituary/powerup event state — pushed from cgame
 // via separate events (not the per-frame state bridge).
 // For now, a static instance — events will be wired in a later step.
 
 #include "cl_wired_hud_private.h"
 
-static superhudGlobalContext_t wired_superhudContext;
+static modernhudGlobalContext_t wired_modernhudContext;
 
-superhudGlobalContext_t* CG_SHUDGetContext( void ) {
-	return &wired_superhudContext;
+modernhudGlobalContext_t* CG_ModernHUDGetContext( void ) {
+	return &wired_modernhudContext;
 }
 
-// CG_SHUDGetAmmo provided by cl_wired_hud_draw.c (migrated from cg_superhud_util.c)
+// CG_ModernHUDGetAmmo provided by cl_wired_hud_draw.c (migrated from cg_modernhud_util.c)
 
 // bg_misc.c trap stub — it declares trap_Cvar_VariableStringBuffer as extern
 // In client context, route to Cvar_VariableStringBuffer directly
