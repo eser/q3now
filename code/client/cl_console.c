@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "../qcommon/arena.h"
+#include <time.h>
 
 #include "wired/ui/cl_wired_text.h"
 #ifndef DEDICATED
@@ -166,6 +167,10 @@ cvar_t		*con_autoclear;
 cvar_t		*con_notifytime;
 cvar_t		*con_notifylines;
 cvar_t		*con_scale;
+cvar_t		*con_anim;
+cvar_t		*con_clock;
+cvar_t		*con_fade;
+cvar_t		*con_fps;
 
 /* CNQ3 backport: per-element console colors.  Each cvar stores a hex
    string in the form "RRGGBB" or "RRGGBBAA"; we parse them lazily every
@@ -682,6 +687,15 @@ void Con_Init( void )
 	Cvar_CheckRange( con_lineheight, "0.5", "4", CV_FLOAT );
 	Cvar_SetDescription( con_lineheight, "Notify/console line height multiplier (1.0 = tight, 2.0 = double-spaced)." );
 
+	con_anim  = Cvar_Get( "con_anim",  "1", CVAR_ARCHIVE_ND );
+	Cvar_SetDescription( con_anim,  "Animate console open/close. 0 = instant snap." );
+	con_clock = Cvar_Get( "con_clock", "1", CVAR_ARCHIVE_ND );
+	Cvar_SetDescription( con_clock, "Draw wall-clock HH:MM:SS in the top-right corner of the console." );
+	con_fade  = Cvar_Get( "con_fade",  "1", CVAR_ARCHIVE_ND );
+	Cvar_SetDescription( con_fade,  "Fade notify lines to transparent before they expire instead of popping." );
+	con_fps   = Cvar_Get( "con_fps",   "1", CVAR_ARCHIVE_ND );
+	Cvar_SetDescription( con_fps,   "Draw current FPS in the top-right corner of the console." );
+
 	/* CNQ3 backport: per-element console colors */
 	con_colBG     = Cvar_Get( "con_colBG",     "101013F6", CVAR_ARCHIVE );
 	Cvar_SetDescription( con_colBG, "Console background color (hex RRGGBB or RRGGBBAA)." );
@@ -1142,16 +1156,31 @@ static void Con_DrawNotify( void )
 		}
 
 		{
-			float vxa = Con_NativeToVirtualX( cl_conXOffset->integer + con.xadjust );
-			float vy = Con_NativeToVirtualY( (float)v );
+			float notifyAlpha = 1.0f;
+			float vxa, vy;
+
+			if ( con_fade->integer ) {
+				float total     = con_notifytime->value * 1000.0f;
+				float fadeStart = total * 0.75f;
+				if ( (float)time >= fadeStart ) {
+					notifyAlpha = 1.0f - ( (float)time - fadeStart ) / ( total - fadeStart );
+					if ( notifyAlpha < 0.0f ) notifyAlpha = 0.0f;
+				}
+			}
+
+			vxa = Con_NativeToVirtualX( cl_conXOffset->integer + con.xadjust );
+			vy = Con_NativeToVirtualY( (float)v );
 			for (x = 0 ; x < con.linewidth ; x++) {
+				vec4_t drawColor;
 				if ( ( text[x] & 0xff ) == ' ' ) {
 					continue;
 				}
 				colorIndex = ( text[x] >> 8 ) & 63;
 				currentColorIndex = colorIndex;
+				Vector4Copy( g_color_table[ colorIndex ], drawColor );
+				drawColor[3] *= notifyAlpha;
 				Text_DrawChar( text[x] & 0xff, vxa + (x+1)*vcw, vy,
-				               FONT_MONO, con_textPointSize, g_color_table[ colorIndex ] );
+				               FONT_MONO, con_textPointSize, drawColor );
 				linelength++;
 			}
 		}
@@ -1197,6 +1226,81 @@ static void Con_DrawNotify( void )
 	}
 }
 
+
+/*
+================
+Con_ComputeFPS
+
+Client-side 4-frame rolling FPS counter for con_fps.
+Mirrors CG_DrawFPS (code/cgame/cg_draw.c) but calls Sys_Milliseconds
+directly — the console is not inside a cgame VM.
+================
+*/
+static int Con_ComputeFPS( void ) {
+	enum { CON_FPS_FRAMES = 4 };
+	static int      samples[4];
+	static int      head;
+	static int      previous;
+	static qboolean seeded;
+	int now, dt, i, total;
+
+	now = Sys_Milliseconds();
+	if ( !seeded ) {
+		previous = now;
+		seeded   = qtrue;
+		return 0;
+	}
+	dt = now - previous;
+	previous = now;
+	samples[ head++ % CON_FPS_FRAMES ] = dt;
+	total = 0;
+	for ( i = 0; i < CON_FPS_FRAMES; i++ ) total += samples[i];
+	if ( total <= 0 ) total = 1;
+	return 1000 * CON_FPS_FRAMES / total;
+}
+
+/*
+================
+Con_DrawStatus
+
+Draws clock (con_clock) and/or FPS (con_fps) right-aligned at the
+top-right of the open console background.  Stacks from the right:
+FPS rightmost, clock immediately left of it.
+================
+*/
+static void Con_DrawStatus( void ) {
+	char              buf[32];
+	float             x;
+	const float       y    = Con_NativeToVirtualY( 2.0f );
+	const float       gap  = con_textNativeCharW * 2.0f;
+	static const vec4_t statusColor = { 0.6f, 0.6f, 0.6f, 0.9f };
+
+	if ( !con_fps->integer && !con_clock->integer )
+		return;
+
+	x = (float)cls.glconfig.vidWidth - con_textNativeCharW;
+
+	if ( con_fps->integer ) {
+		int fps = Con_ComputeFPS();
+		Com_sprintf( buf, sizeof(buf), "%d fps", fps );
+		x -= Text_Measure( buf, FONT_MONO, con_textPointSize );
+		Text_Draw( buf, Con_NativeToVirtualX( x ), y, FONT_MONO,
+		           con_textPointSize, statusColor, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
+		x -= gap;
+	}
+
+	if ( con_clock->integer ) {
+		time_t    ts;
+		struct tm *lt;
+		ts = time( NULL );
+		lt = localtime( &ts );
+		Com_sprintf( buf, sizeof(buf), "%02d:%02d:%02d",
+		             lt->tm_hour, lt->tm_min, lt->tm_sec );
+		x -= Text_Measure( buf, FONT_MONO, con_textPointSize );
+		Text_Draw( buf, Con_NativeToVirtualX( x ), y, FONT_MONO,
+		           con_textPointSize, statusColor, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
+	}
+}
 
 /*
 ================
@@ -1417,6 +1521,8 @@ static void Con_DrawSolidConsole( float frac ) {
 	// draw the input prompt, user text, and cursor if desired
 	Con_DrawInput();
 
+	Con_DrawStatus();
+
 	re.SetColor( NULL );
 }
 
@@ -1478,6 +1584,12 @@ void Con_RunConsole( void )
 	else
 		con.finalFrac = 0.0;	// none visible
 	
+	// instant snap when animation is disabled
+	if ( !con_anim->integer ) {
+		con.displayFrac = con.finalFrac;
+		return;
+	}
+
 	// scroll towards the destination height
 	if ( con.finalFrac < con.displayFrac )
 	{

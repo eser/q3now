@@ -177,7 +177,7 @@ void CG_SpawnEffect( vec3_t org ) {
 	le->leFlags = 0;
 	le->leType = LE_FADE_RGB;
 	le->startTime = cg.time;
-	le->endTime = cg.time + 500;
+	le->endTime = cg.time + 1200; // 500
 	le->lifeRate = 1.0 / ( le->endTime - le->startTime );
 
 	le->color[0] = le->color[1] = le->color[2] = le->color[3] = 1.0;
@@ -187,18 +187,12 @@ void CG_SpawnEffect( vec3_t org ) {
 	re->reType = RT_MODEL;
 	re->shaderTime.f =cg.time / 1000.0f;
 
-#ifndef MISSIONPACK
 	re->customShader = cgs.media.teleportEffectShader;
-#endif
 	re->hModel = cgs.media.teleportEffectModel;
 	AxisClear( re->axis );
 
 	VectorCopy( org, re->origin );
-#if FEAT_TA_UI
-	re->origin[2] += 16;
-#else
 	re->origin[2] -= 24;
-#endif
 }
 
 // eser - lightning discharge
