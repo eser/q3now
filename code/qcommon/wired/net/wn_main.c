@@ -362,6 +362,10 @@ void WN_Init( void )
 {
 	uint64_t current_time;
 
+	if ( wn.initialized ) {
+		return;
+	}
+
 	Com_Memset( &wn, 0, sizeof( wn ) );
 #if FEAT_WIREDNET_OBSERVER
 	wn.tcp4_fd = -1;

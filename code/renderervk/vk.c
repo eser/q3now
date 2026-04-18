@@ -5905,6 +5905,9 @@ static void vk_destroy_swapchain( void ) {
 	}
 
 	qvkDestroySwapchainKHR( vk.device, vk.swapchain, NULL );
+	vk.swapchain = VK_NULL_HANDLE;
+	Com_Memset( vk.swapchain_images, 0, sizeof( vk.swapchain_images ) );
+	vk.swapchain_image_count = 0;
 }
 
 static void vk_destroy_attachments( void );
