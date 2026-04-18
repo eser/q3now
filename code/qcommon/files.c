@@ -1395,8 +1395,8 @@ static qboolean FS_GeneralRef( const char *filename )
 
 	if ( FS_HasExt( filename, extList, ARRAY_LEN( extList ) ) )
 		return qfalse;
-	
-	if ( !Q_stricmp( filename, "vm/qagame.qvm" ) )
+
+	if ( !Q_stricmp( filename, "vm/qagame.wasm" ) )
 		return qfalse;
 
 	if ( strstr( filename, "levelshots" ) )
@@ -1518,7 +1518,7 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 	if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( pakFile->name ) ) {
 		pak->referenced |= FS_GENERAL_REF;
 	}
-	if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( pakFile->name, "vm/cgame.qvm" ) ) {
+	if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( pakFile->name, "vm/cgame.wasm" ) ) {
 		pak->referenced |= FS_CGAME_REF;
 	}
 
@@ -1768,7 +1768,7 @@ void FS_TouchFileInPak( const char *filename ) {
 					if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( filename ) ) {
 						pak->referenced |= FS_GENERAL_REF;
 					}
-					if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( filename, "vm/cgame.qvm" ) ) {
+					if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( filename, "vm/cgame.wasm" ) ) {
 						pak->referenced |= FS_CGAME_REF;
 					}
 					return;
@@ -1988,81 +1988,61 @@ int FS_Seek( fileHandle_t f, long offset, fsOrigin_t origin ) {
 
 #if FEAT_SW3Z
 	if ( fsh[f].sw3zData ) {
-		int newPos;
+		long newPos;
 		switch ( origin ) {
-		case FS_SEEK_SET: newPos = (int)offset; break;
-		case FS_SEEK_CUR: newPos = fsh[f].sw3zPos + (int)offset; break;
-		case FS_SEEK_END: newPos = fsh[f].sw3zSize + (int)offset; break;
+		case FS_SEEK_SET: newPos = offset; break;
+		case FS_SEEK_CUR: newPos = fsh[f].sw3zPos + offset; break;
+		case FS_SEEK_END: newPos = fsh[f].sw3zSize + offset; break;
 		default:
 			Com_Error( ERR_FATAL, "Bad origin in FS_Seek" );
 			return -1;
 		}
 		if ( newPos < 0 ) newPos = 0;
 		if ( newPos > fsh[f].sw3zSize ) newPos = fsh[f].sw3zSize;
-		fsh[f].sw3zPos = newPos;
+		fsh[f].sw3zPos = (int)newPos;
 		return 0;
 	}
 #endif
 
 	if ( fsh[f].zipFile == qtrue ) {
-		//FIXME: this is really, really crappy
-		//(but better than what was here before)
+		int		currentPosition = unztell( fsh[f].handleFiles.file.z );
+		long	targetOffset;
+		long	remainder;
 		byte	buffer[PK3_SEEK_BUFFER_SIZE];
-		int		remainder;
-		int		currentPosition = FS_FTell( f );
 
-		// change negative offsets into FS_SEEK_SET
-		if ( offset < 0 ) {
-			switch( origin ) {
-				case FS_SEEK_END:
-					remainder = fsh[f].zipFileLen + offset;
-					break;
+		switch ( origin ) {
+		case FS_SEEK_SET:
+			targetOffset = offset;
+			break;
+		case FS_SEEK_CUR:
+			targetOffset = (long)currentPosition + offset;
+			break;
+		case FS_SEEK_END:
+			targetOffset = (long)fsh[f].zipFileLen + offset;
+			break;
+		default:
+			Com_Error( ERR_FATAL, "Bad origin in FS_Seek" );
+			return -1;
+		}
+		if ( targetOffset < 0 ) targetOffset = 0;
+		if ( targetOffset > fsh[f].zipFileLen ) targetOffset = fsh[f].zipFileLen;
 
-				case FS_SEEK_CUR:
-					remainder = currentPosition + offset;
-					break;
-
-				case FS_SEEK_SET:
-				default:
-					remainder = 0;
-					break;
-			}
-
-			if ( remainder < 0 ) {
-				remainder = 0;
-			}
-
-			origin = FS_SEEK_SET;
+		if ( targetOffset < currentPosition ) {
+			remainder = targetOffset;
+			unzSetCurrentFileInfoPosition( fsh[f].handleFiles.file.z, fsh[f].zipFilePos );
+			unzOpenCurrentFile( fsh[f].handleFiles.file.z );
 		} else {
-			if ( origin == FS_SEEK_END ) {
-				remainder = fsh[f].zipFileLen - currentPosition + offset;
-			} else {
-				remainder = offset;
+			remainder = targetOffset - currentPosition;
+		}
+
+		while ( remainder > 0 ) {
+			int r = unzReadCurrentFile( fsh[f].handleFiles.file.z, buffer, MIN( remainder, PK3_SEEK_BUFFER_SIZE ) );
+			if ( r < 0 ) {
+				return r;
 			}
+			remainder -= r;
 		}
-
-		switch( origin ) {
-			case FS_SEEK_SET:
-				if ( remainder == currentPosition ) {
-					return offset;
-				}
-				unzSetCurrentFileInfoPosition( fsh[f].handleFiles.file.z, fsh[f].zipFilePos );
-				unzOpenCurrentFile( fsh[f].handleFiles.file.z );
-				//fallthrough
-
-			case FS_SEEK_END:
-			case FS_SEEK_CUR:
-				while( remainder > PK3_SEEK_BUFFER_SIZE ) {
-					FS_Read( buffer, PK3_SEEK_BUFFER_SIZE, f );
-					remainder -= PK3_SEEK_BUFFER_SIZE;
-				}
-				FS_Read( buffer, remainder, f );
-				return offset;
-
-			default:
-				Com_Error( ERR_FATAL, "Bad origin in FS_Seek" );
-				return -1;
-		}
+		return 0;
 	} else {
 		FILE *file;
 		file = FS_FileForHandle( f );

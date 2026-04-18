@@ -140,21 +140,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
  **********************************************************************/
 
-#ifdef Q3_VM
-
-// q3now: bg_lib.h uses Q_PRINTF_FUNC/Q_SCANF_FUNC — define them as no-ops before include
-// (LCC is a C89 compiler; it doesn't support GCC format attributes)
-#ifndef Q_PRINTF_FUNC
-#define Q_PRINTF_FUNC(x, y)
-#endif
-#ifndef Q_SCANF_FUNC
-#define Q_SCANF_FUNC(x, y)
-#endif
-
-#include "../game/bg_lib.h"
-
-#else
-
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -165,8 +150,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <time.h>
 #include <ctype.h>
 #include <limits.h>
-
-#endif
 
 //endianness
 short ShortSwap( short l );
@@ -179,29 +162,25 @@ void CopyLongSwap( void *dest, void *src );
 
 //=============================================================
 
-#ifdef Q3_VM
-	typedef int intptr_t;
+#if defined (_MSC_VER) && !defined(__clang__)
+	typedef __int64 int64_t;
+	typedef __int32 int32_t;
+	typedef __int16 int16_t;
+	typedef signed __int8 int8_t;
+	typedef unsigned __int64 uint64_t;
+	typedef unsigned __int32 uint32_t;
+	typedef unsigned __int16 uint16_t;
+	typedef unsigned __int8 uint8_t;
 #else
-	#if defined (_MSC_VER) && !defined(__clang__)
-		typedef __int64 int64_t;
-		typedef __int32 int32_t;
-		typedef __int16 int16_t;
-		typedef signed __int8 int8_t;
-		typedef unsigned __int64 uint64_t;
-		typedef unsigned __int32 uint32_t;
-		typedef unsigned __int16 uint16_t;
-		typedef unsigned __int8 uint8_t;
-	#else
-		#include <stdint.h>
-	#endif
+	#include <stdint.h>
+#endif
 
-	#ifdef _WIN32
-		// vsnprintf is ISO/IEC 9899:1999
-		// abstracting this to make it portable
-		int Q_vsnprintf( char *str, size_t size, const char *format, va_list ap );
-	#else
-		#define Q_vsnprintf vsnprintf
-	#endif
+#ifdef _WIN32
+	// vsnprintf is ISO/IEC 9899:1999
+	// abstracting this to make it portable
+	int Q_vsnprintf( char *str, size_t size, const char *format, va_list ap );
+#else
+	#define Q_vsnprintf vsnprintf
 #endif
 
 #if defined (_WIN32)
@@ -230,13 +209,8 @@ typedef enum { qfalse = 0, qtrue } qboolean;
 
 typedef union floatint_u
 {
-#ifdef Q3_VM
-	int i;          // LCC (C89) compat — no int32_t
-	unsigned int u;
-#else
 	int32_t i;
 	uint32_t u;
-#endif
 	float f;
 	byte b[4];
 }
@@ -244,11 +218,7 @@ floatint_t;
 
 typedef union {
 	byte rgba[4];
-#ifdef Q3_VM
-	unsigned int u32;  // LCC (C89) compat — no uint32_t
-#else
 	uint32_t u32;
-#endif
 } color4ub_t;
 
 
@@ -309,7 +279,8 @@ typedef int		clipHandle_t;
 #define	MAX_OSPATH			256		// max length of a filesystem pathname
 #endif
 
-#define	MAX_NAME_LENGTH		32		// max length of a client name
+#define	MAX_NAME_LENGTH			32		// max length of a client name
+#define	MAX_HOSTNAME_LENGTH		80
 
 #define	MAX_SAY_TEXT	150
 
@@ -572,17 +543,6 @@ void ByteToDir( int b, vec3_t dir );
 
 #endif
 
-#ifdef Q3_VM
-#ifdef VectorCopy
-#undef VectorCopy
-// this is a little hack to get more efficient copies in our interpreter
-typedef struct {
-	float	v[3];
-} vec3struct_t;
-#define VectorCopy(a,b)	(*(vec3struct_t *)b=*(vec3struct_t *)a)
-#endif
-#endif
-
 #define VectorClear(a)			((a)[0]=(a)[1]=(a)[2]=0)
 #define VectorNegate(a,b)		((b)[0]=-(a)[0],(b)[1]=-(a)[1],(b)[2]=-(a)[2])
 #define VectorSet(v, x, y, z)	((v)[0]=(x), (v)[1]=(y), (v)[2]=(z))
@@ -611,7 +571,6 @@ float RadiusFromBounds( const vec3_t mins, const vec3_t maxs );
 void ClearBounds( vec3_t mins, vec3_t maxs );
 void AddPointToBounds( const vec3_t v, vec3_t mins, vec3_t maxs );
 
-#if !defined( Q3_VM ) || ( defined( Q3_VM ) && defined( __Q3_VM_MATH ) )
 static ID_INLINE int VectorCompare( const vec3_t v1, const vec3_t v2 ) {
 	if (v1[0] != v2[0] || v1[1] != v2[1] || v1[2] != v2[2]) {
 		return 0;
@@ -620,11 +579,7 @@ static ID_INLINE int VectorCompare( const vec3_t v1, const vec3_t v2 ) {
 }
 
 static ID_INLINE vec_t VectorLength( const vec3_t v ) {
-#ifdef Q3_VM
-	return (vec_t)sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
-#else
 	return (vec_t)sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
-#endif
 }
 
 static ID_INLINE vec_t VectorLengthSquared( const vec3_t v ) {
@@ -670,24 +625,7 @@ static ID_INLINE void CrossProduct( const vec3_t v1, const vec3_t v2, vec3_t cro
 	cross[2] = v1[0]*v2[1] - v1[1]*v2[0];
 }
 
-#else
-int VectorCompare( const vec3_t v1, const vec3_t v2 );
 
-vec_t VectorLength( const vec3_t v );
-
-vec_t VectorLengthSquared( const vec3_t v );
-
-vec_t Distance( const vec3_t p1, const vec3_t p2 );
-
-vec_t DistanceSquared( const vec3_t p1, const vec3_t p2 );
-
-void VectorNormalizeFast( vec3_t v );
-
-void VectorInverse( vec3_t v );
-
-void CrossProduct( const vec3_t v1, const vec3_t v2, vec3_t cross );
-
-#endif
 
 vec_t VectorNormalize (vec3_t v);		// returns vector length
 vec_t VectorNormalize2( const vec3_t v, vec3_t out );
@@ -770,12 +708,6 @@ void	COM_BeginParseSession( const char *name );
 int		COM_GetCurrentParseLine( void );
 const char	*COM_Parse( const char **data_p );
 const char	*COM_ParseExt( const char **data_p, qboolean allowLineBreak );
-#ifdef Q3_VM
-// LCC (C89) compat: game code uses char** but COM_Parse takes const char**.
-// The parenthesized form (COM_Parse) prevents recursive macro expansion.
-#define COM_Parse(x)    (COM_Parse)((const char **)(x))
-#define COM_ParseExt(x,y) (COM_ParseExt)((const char **)(x),(y))
-#endif
 int		COM_Compress( char *data_p );
 void	COM_ParseError( const char *format, ... ) __attribute__ ((format (printf, 1, 2)));
 void	COM_ParseWarning( const char *format, ... ) __attribute__ ((format (printf, 1, 2)));
@@ -923,12 +855,7 @@ float	LittleFloat (const float *l);
 
 void	Swap_Init (void);
 */
-#ifdef Q3_VM
-// LCC (C89) compat: return char* so existing game code can assign to char* without const errors
-char *QDECL va( const char *format, ... );
-#else
 const char *QDECL va( const char *format, ... ) FORMAT_PRINTF(1, 2);
-#endif
 
 #define TRUNCATE_LENGTH	64
 void Com_TruncateLongString( char *buffer, const char *s );

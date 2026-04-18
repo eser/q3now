@@ -1684,9 +1684,9 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 
 		nChkSum1 = 0;
 
-		// we run the game, so determine which cgame the client "should" be running
-		bGood = FS_FileIsInPAK( "vm/cgame.qvm", &nChkSum1, NULL );
-		// bGood &= FS_FileIsInPAK( "vm/ui.qvm", &nChkSum2, NULL );
+		// verify the cgame WASM the client "should" be running
+		bGood = FS_FileIsInPAK( "vm/cgame.wasm", &nChkSum1, NULL );
+		// bGood &= FS_FileIsInPAK( "vm/ui.wasm", &nChkSum2, NULL );
 
 		nClientPaks = Cmd_Argc();
 

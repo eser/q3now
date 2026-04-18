@@ -25,6 +25,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #	include <SDL3/SDL_vulkan.h>
 #endif
 
+#define MINSDL_MAJOR 3
+#define MINSDL_MINOR 2
+#define MINSDL_MICRO 0
+
 #include "../client/client.h"
 #include "../renderercommon/tr_public.h"
 #include "sdl_glw.h"
@@ -658,9 +662,22 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 			return RSERR_FATAL_ERROR;
 		}
 
-		driverName = SDL_GetCurrentVideoDriver();
-
-		Com_Printf( "SDL version: %d.%d.%d\n", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION );
+		{
+			int sdlver = SDL_GetVersion();
+			int sdlmaj = SDL_VERSIONNUM_MAJOR( sdlver );
+			int sdlmin = SDL_VERSIONNUM_MINOR( sdlver );
+			int sdlmic = SDL_VERSIONNUM_MICRO( sdlver );
+			if ( sdlver < SDL_VERSIONNUM( MINSDL_MAJOR, MINSDL_MINOR, MINSDL_MICRO ) )
+			{
+				Com_Error( ERR_FATAL, "SDL3 runtime version %d.%d.%d is older than required %d.%d.%d",
+					sdlmaj, sdlmin, sdlmic,
+					MINSDL_MAJOR, MINSDL_MINOR, MINSDL_MICRO );
+			}
+			driverName = SDL_GetCurrentVideoDriver();
+			Com_Printf( "SDL version: %d.%d.%d (compiled against %d.%d.%d)\n",
+				sdlmaj, sdlmin, sdlmic,
+				SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION );
+		}
 		Com_Printf( "SDL using driver \"%s\"\n", driverName );
 	}
 

@@ -1767,7 +1767,7 @@ static const void *RB_SwapBuffers( const void *data ) {
 
 	cmd = (const swapBuffersCommand_t *)data;
 
-	if ( backEnd.doneSurfaces && !glState.finishCalled ) {
+	if ( r_finish->integer && backEnd.doneSurfaces && !glState.finishCalled ) {
 		qglFinish();
 	}
 
@@ -1902,6 +1902,10 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		case RC_SET_MSDF_OUTLINE:
 		{
 			const setMsdfOutlineCommand_t *oc = (const setMsdfOutlineCommand_t *)data;
+			tr.msdfOutlineWidth = oc->outlineWidth;
+			Com_Memcpy( tr.msdfOutlineColor, oc->outlineColor, sizeof( tr.msdfOutlineColor ) );
+			tr.msdfGlowWidth = oc->glowWidth;
+			Com_Memcpy( tr.msdfGlowColor, oc->glowColor, sizeof( tr.msdfGlowColor ) );
 			data = (const void *)( oc + 1 );
 			break;
 		}

@@ -19,7 +19,7 @@ along with Quake III Arena source code; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
-//
+
 #include "g_local.h"
 #include "bg_public.h"
 #include "inv.h"
@@ -27,12 +27,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MAX_STRINGFIELD 80
 #endif
 #include "../botlib/be_ai_weap.h"
-
-// this file is only included when building a dll
-// g_syscalls.asm is included instead when building a qvm
-#ifdef Q3_VM
-#error "Do not use in VM build"
-#endif
 
 #ifdef WASM_MODULE
 extern intptr_t QDECL syscall( intptr_t arg, ... );

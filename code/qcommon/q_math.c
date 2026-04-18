@@ -22,13 +22,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // q_math.c -- stateless support routines that are included in each code module
 
-// Some of the vector functions are static inline in q_shared.h. q3asm
-// doesn't understand static functions though, so we only want them in
-// one file. That's what this is about.
-#ifdef Q3_VM
-#define __Q3_VM_MATH
-#endif
-
 #include "q_shared.h"
 
 const vec3_t	vec3_origin = {0,0,0};
@@ -498,9 +491,8 @@ void ProjectPointOnPlane( vec3_t dst, const vec3_t p, const vec3_t normal )
 	float inv_denom;
 
 	inv_denom =  DotProduct( normal, normal );
-#ifndef Q3_VM
+
 	assert( Q_fabs(inv_denom) != 0.0f ); // zero vectors get here
-#endif
 	inv_denom = 1.0f / inv_denom;
 
 	d = DotProduct( normal, p ) * inv_denom;
@@ -1126,10 +1118,6 @@ float Q_atof( const char *str )
 Q_log2f
 ================
 */
-/* Q3_VM: Q_log2f and Q_exp2f use logf/powf which are not available in the QVM
- * standard lib (bg_lib.c). These functions are not called by any game module,
- * so we simply exclude them from QVM builds. */
-#ifndef Q3_VM
 float Q_log2f( float f )
 {
 	const float v = logf( f );
@@ -1146,10 +1134,8 @@ float Q_exp2f( float f )
 {
 	return powf( 2.0f, f );
 }
-#endif /* !Q3_VM */
 
 
-#ifndef Q3_VM
 /*
 =====================
 Q_acos
@@ -1175,4 +1161,3 @@ float Q_acos(float c) {
 	}
 	return angle;
 }
-#endif

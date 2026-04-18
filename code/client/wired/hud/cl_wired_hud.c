@@ -447,21 +447,24 @@ void WiredHud_Routine( int realtime ) {
 
 	// lazy element init — deferred from WiredUI_Init to avoid Z_CheckHeap crash
 	if ( !wiredHud_elementsLoaded ) {
+		int64_t _wld_t0 = Sys_Microseconds();
 		WiredHud_LoadFromMenus();
+		cl_prof.whud_load += (int)(Sys_Microseconds() - _wld_t0);
 		wiredHud_elementsLoaded = qtrue;
 		Com_DPrintf( "WiredHud: %d elements active\n", WiredHud_GetElementCount() );
 	}
 
 	// sync compat structs so element code sees cg.*/cgs.* patterns
-	WiredHud_SyncCompat();
+	CL_PROF( whud_sync, WiredHud_SyncCompat() );
 
 	// render all active HUD elements through ModernHUD lifecycle
-	WiredHud_RenderElements();
+	CL_PROF( whud_render, WiredHud_RenderElements() );
 
 	// scoreboard overlay — select and render gametype-specific scoreboard menu
 	{
 		qboolean showSb = wiredHud->showScores || wiredHud->intermission || wiredHud->warmup > 0;
 		if ( showSb ) {
+			int64_t _wsb_t0 = Sys_Microseconds();
 			const char *prefix = wiredHud->intermission ? "end_scoreboard" : "ingame_scoreboard";
 			const char *menuName;
 			wiredMenuDef_t *sbMenu;
@@ -548,6 +551,7 @@ void WiredHud_Routine( int realtime ) {
 					WiredHud_DrawScorelistWidget( vw * 0.109f, vh * 0.05f, vw * 0.781f, vh * 0.85f, 0x0b, fallbackColor );
 				}
 			}
+			cl_prof.whud_score += (int)(Sys_Microseconds() - _wsb_t0);
 		}
 	}
 }

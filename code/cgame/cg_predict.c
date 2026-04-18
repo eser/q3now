@@ -482,7 +482,12 @@ void CG_PredictPlayerState( void ) {
 	// the server time is beyond our current cg.time,
 	// because predicted player positions are going to 
 	// be ahead of everything else anyway
+#if FEAT_FPS_IMPROVEMENTS
+	if ( cg.nextSnap && !cg.nextFrameTeleport && !cg.thisFrameTeleport
+			&& cg.nextSnap->serverTime > cg.snap->serverTime ) {
+#else
 	if ( cg.nextSnap && !cg.nextFrameTeleport && !cg.thisFrameTeleport ) {
+#endif
 		cg.predictedPlayerState = cg.nextSnap->ps;
 		cg.physicsTime = cg.nextSnap->serverTime;
 	} else {

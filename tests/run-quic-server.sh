@@ -38,7 +38,7 @@ export Q3_SV_QUICMAXCLIENTS="${Q3_SV_QUICMAXCLIENTS:-8}"
 export Q3_MAP="${Q3_MAP:-q3dm17}"
 export Q3_DEDICATED="${Q3_DEDICATED:-1}"
 export Q3_NET_PORT="${Q3_NET_PORT:-27960}"
-export Q3_COM_HUNKMEGS="${Q3_COM_HUNKMEGS:-64}"
+export Q3_COM_HUNKMEGS="${Q3_COM_HUNKMEGS:-128}"
 
 echo "════════════════════════════════════════════════════════════"
 echo " q3now Dedicated Server (QUIC Transport Enabled)"

@@ -42,19 +42,9 @@ const int demo_protocols[] = { PROTOCOL_VERSION, 0 };
 
 #define USE_MULTI_SEGMENT // allocate additional zone segments on demand
 
-#ifdef DEDICATED
 #define MIN_COMHUNKMEGS		128
-#define DEF_COMHUNKMEGS		128
-#else
-#define MIN_COMHUNKMEGS		128
-#define DEF_COMHUNKMEGS		128
-#endif
-
-#ifdef USE_MULTI_SEGMENT
+#define DEF_COMHUNKMEGS		512
 #define DEF_COMZONEMEGS		48
-#else
-#define DEF_COMZONEMEGS		48
-#endif
 
 static jmp_buf abortframe;	// an ERR_DROP occurred, exit the entire frame
 
@@ -110,9 +100,12 @@ cvar_t	*com_noErrorInterrupt;
 int		time_game;
 int		time_frontend;		// renderer frontend time
 int		time_backend;		// renderer backend time
+clProfile_t	cl_prof;
 
-static int	lastTime;
-int			com_frameTime;
+static int		lastTime;
+static int64_t	lastTimeUsec;
+int				com_frameTime;
+int64_t			com_frameTimeUsec;
 static int	com_frameNumber;
 
 qboolean	com_errorEntered = qfalse;
@@ -2887,9 +2880,9 @@ void Com_RunAndTimeServerPacket( const netadr_t *evFrom, msg_t *buf ) {
 	if ( com_speeds->integer ) {
 		t2 = Sys_Milliseconds ();
 		msec = t2 - t1;
-		if ( com_speeds->integer == 3 ) {
-			Com_Printf( "SV_PacketEvent time: %i\n", msec );
-		}
+		// if ( com_speeds->integer == 3 ) {
+		// 	Com_Printf( "SV_PacketEvent time: %i\n", msec );
+		// }
 	}
 }
 
@@ -3786,6 +3779,7 @@ void Com_Init( char *commandLine ) {
 
 	// get the initial time base
 	Sys_Milliseconds();
+	Sys_SetMainThreadPolicy();
 
 	Com_Printf( "%s %s %s\n", Q3NOW_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
 
@@ -3824,13 +3818,6 @@ void Com_Init( char *commandLine ) {
 	Com_StartupVariable( "developer" );
 	com_developer = Cvar_Get( "developer", "0", CVAR_TEMP );
 	Cvar_CheckRange( com_developer, NULL, NULL, CV_INTEGER );
-
-	Com_StartupVariable( "vm_rtChecks" );
-	vm_rtChecks = Cvar_Get( "vm_rtChecks", "15", CVAR_INIT | CVAR_PROTECTED );
-	Cvar_CheckRange( vm_rtChecks, "0", "15", CV_INTEGER );
-	Cvar_SetDescription( vm_rtChecks,
-		"Runtime checks in compiled vm code, bitmask:\n 1 - program stack overflow\n" \
-		" 2 - opcode stack overflow\n 4 - jump target range\n 8 - data read/write range" );
 
 	Com_StartupVariable( "journal" );
 	com_journal = Cvar_Get( "journal", "0", CVAR_INIT | CVAR_PROTECTED );
@@ -3905,7 +3892,7 @@ void Com_Init( char *commandLine ) {
 	// init commands and vars
 	//
 #ifndef DEDICATED
-	com_maxfps = Cvar_Get( "com_maxfps", "125", 0 ); // try to force that in some light way
+	com_maxfps = Cvar_Get( "com_maxfps", "250", 0 ); // try to force that in some light way
 	Cvar_CheckRange( com_maxfps, "0", "1000", CV_INTEGER );
 	Cvar_SetDescription( com_maxfps, "Sets maximum frames per second." );
 	com_maxfpsUnfocused = Cvar_Get( "com_maxfpsUnfocused", "60", CVAR_ARCHIVE_ND );
@@ -4327,6 +4314,15 @@ static int Com_TimeVal( int minMsec )
 	return timeVal;
 }
 
+
+static int Com_TimeValUsec( int minUsec )
+{
+	int timeVal = (int)( Sys_Microseconds() - com_frameTimeUsec );
+	if ( timeVal >= minUsec )
+		return 0;
+	return minUsec - timeVal;
+}
+
 /*
 =================
 Com_FrameInit
@@ -4335,6 +4331,7 @@ Com_FrameInit
 void Com_FrameInit( void )
 {
 	lastTime = com_frameTime = Com_Milliseconds();
+	lastTimeUsec = com_frameTimeUsec = Sys_Microseconds();
 }
 
 /*
@@ -4345,11 +4342,12 @@ Com_Frame
 void Com_Frame( qboolean noDelay ) {
 
 #ifndef DEDICATED
-	static int bias = 0;
+	static int biasUsec = 0;
 #endif
-	int	msec, realMsec, minMsec;
-	int	sleepMsec;
-	int	timeVal;
+	int	msec, realMsec;
+	int	minUsec;
+	int	sleepUsec;
+	int	timeValUsec;
 	int	timeValSV;
 
 	int	timeBeforeFirstEvents;
@@ -4365,7 +4363,7 @@ void Com_Frame( qboolean noDelay ) {
 		return;			// an ERR_DROP was thrown
 	}
 
-	minMsec = 0; // silent compiler warning
+	minUsec = 0; // silent compiler warning
 
 	// bk001204 - init to zero.
 	//  also:  might be clobbered by `longjmp' or `vfork'
@@ -4374,6 +4372,7 @@ void Com_Frame( qboolean noDelay ) {
 	timeBeforeEvents = 0;
 	timeBeforeClient = 0;
 	timeAfter = 0;
+	Com_Memset( &cl_prof, 0, sizeof( cl_prof ) );
 
 	// write config file if anything changed
 #ifndef DELAY_WRITECONFIG
@@ -4404,41 +4403,43 @@ void Com_Frame( qboolean noDelay ) {
 
 	// we may want to spin here if things are going too fast
 	if ( com_dedicated->integer ) {
-		minMsec = SV_FrameMsec();
+		minUsec = SV_FrameMsec() * 1000;
 #ifndef DEDICATED
-		bias = 0;
+		biasUsec = 0;
 #endif
 	} else {
 #ifndef DEDICATED
 		if ( noDelay ) {
-			minMsec = 0;
-			bias = 0;
+			minUsec = 0;
+			biasUsec = 0;
 		} else {
+			int targetUsec;
+			int elapsedUsec;
 			// Frame pacing priority (CNQ3 port):
 			//   1. Window minimized     -> com_maxfpsMinimized (default 5)
 			//   2. Window unfocused     -> com_maxfpsUnfocused (default 60)
 			//   3. Normal / focused     -> com_maxfps
-			//   4. No cap               -> minMsec = 1
+			//   4. No cap               -> minUsec = 1000 (1ms)
 			if ( gw_minimized && com_maxfpsMinimized->integer > 0 )
-				minMsec = 1000 / com_maxfpsMinimized->integer;
+				targetUsec = 1000000 / com_maxfpsMinimized->integer;
 			else
 			if ( !gw_active && com_maxfpsUnfocused->integer > 0 )
-				minMsec = 1000 / com_maxfpsUnfocused->integer;
+				targetUsec = 1000000 / com_maxfpsUnfocused->integer;
 			else
 			if ( com_maxfps->integer > 0 )
-				minMsec = 1000 / com_maxfps->integer;
+				targetUsec = 1000000 / com_maxfps->integer;
 			else
-				minMsec = 1;
+				targetUsec = 1000;
 
-			timeVal = com_frameTime - lastTime;
-			bias += timeVal - minMsec;
+			elapsedUsec = (int)( com_frameTimeUsec - lastTimeUsec );
+			biasUsec += elapsedUsec - targetUsec;
 
-			if ( bias > minMsec )
-				bias = minMsec;
+			if ( biasUsec > targetUsec )
+				biasUsec = targetUsec;
 
-			// Adjust minMsec if previous frame took too long to render so
+			// Adjust minUsec if previous frame took too long to render so
 			// that framerate is stable at the requested value.
-			minMsec -= bias;
+			minUsec = targetUsec - biasUsec;
 		}
 #endif
 	}
@@ -4446,7 +4447,7 @@ void Com_Frame( qboolean noDelay ) {
 	// waiting for incoming packets
 	//
 	// Frame limiter strategy, controlled by com_busyWait (CNQ3 port):
-	//   0: hybrid — sleep for (timeVal-2) ms, busy-wait the final 2 ms
+	//   0: hybrid — sleep for (timeValUsec-2000) µs, busy-wait the final 2 ms
 	//   1: pure busy-wait (highest precision, pegs a core)
 	// Busy-wait mode overrides com_yieldCPU because the whole point is to
 	// not yield to the OS.
@@ -4454,11 +4455,11 @@ void Com_Frame( qboolean noDelay ) {
 	do {
 		if ( com_sv_running->integer ) {
 			timeValSV = SV_SendQueuedPackets();
-			timeVal = Com_TimeVal( minMsec );
-			if ( timeValSV < timeVal )
-				timeVal = timeValSV;
+			timeValUsec = Com_TimeValUsec( minUsec );
+			if ( timeValSV * 1000 < timeValUsec )
+				timeValUsec = timeValSV * 1000;
 		} else {
-			timeVal = Com_TimeVal( minMsec );
+			timeValUsec = Com_TimeValUsec( minUsec );
 		}
 
 		if ( com_busyWait->integer ) {
@@ -4470,25 +4471,27 @@ void Com_Frame( qboolean noDelay ) {
 			// without actually yielding for a measurable period.
 			NET_Sleep( 0 );
 		} else {
-			sleepMsec = timeVal;
+			sleepUsec = timeValUsec;
 #ifndef DEDICATED
-			if ( !gw_minimized && timeVal > com_yieldCPU->integer )
-				sleepMsec = com_yieldCPU->integer;
+			if ( !gw_minimized && timeValUsec > com_yieldCPU->integer * 1000 )
+				sleepUsec = com_yieldCPU->integer * 1000;
 			// Reserve the last 2 ms for a busy-wait to tighten the frame
 			// boundary; sleep the rest via NET_Sleep as before.
-			if ( sleepMsec > 2 )
-				sleepMsec -= 2;
-			else if ( sleepMsec > 0 )
-				sleepMsec = 0;
-			if ( timeVal > sleepMsec )
+			if ( sleepUsec > 2000 )
+				sleepUsec -= 2000;
+			else if ( sleepUsec > 0 )
+				sleepUsec = 0;
+			if ( timeValUsec > sleepUsec )
 				Com_EventLoop();
 #endif
-			NET_Sleep( sleepMsec * 1000 - 500 );
+			NET_Sleep( sleepUsec - 500 );
 		}
-	} while( Com_TimeVal( minMsec ) );
+	} while( Com_TimeValUsec( minUsec ) );
 
 	lastTime = com_frameTime;
+	lastTimeUsec = com_frameTimeUsec;
 	com_frameTime = Com_EventLoop();
+	com_frameTimeUsec = Sys_Microseconds();
 	realMsec = com_frameTime - lastTime;
 
 	Cbuf_Execute();
@@ -4559,6 +4562,10 @@ void Com_Frame( qboolean noDelay ) {
 		}
 		Com_EventLoop();
 
+		// drain QUIC socket so snapshots sent by SV_Frame above reach
+		// cgame this frame — mirrors vanilla NET_GetLoopPacket timing
+		NET_Sleep( 0 );
+
 		Cbuf_Execute();
 
 		//
@@ -4593,8 +4600,21 @@ void Com_Frame( qboolean noDelay ) {
 		sv -= time_game;
 		cl -= time_frontend + time_backend;
 
-		Com_Printf ("frame:%i all:%3i sv:%3i ev:%3i cl:%3i gm:%3i rf:%3i bk:%3i\n",
-					 com_frameNumber, all, sv, ev, cl, time_game, time_frontend, time_backend );
+		if ( com_speeds->integer < 2 || all >= com_speeds->integer ) {
+			Com_Printf ("frame:%i all:%3i sv:%3i ev:%3i cl:%3i gm:%3i rf:%3i bk:%3i\n",
+						com_frameNumber, all, sv, ev, cl, time_game, time_frontend, time_backend );
+			if ( com_speeds->integer >= 2 ) {
+				Com_Printf("  cl: store:%d send:%d resend:%d cgtime:%d cgr:%d whud:%d wui:%d cons:%d snd:%d scr:%d end:%d ui:%d misc:%d (us)\n",
+					cl_prof.store, cl_prof.send, cl_prof.resend, cl_prof.cgtime,
+					cl_prof.cgr, cl_prof.whud, cl_prof.wui, cl_prof.cons,
+					cl_prof.sound, cl_prof.scrextra, cl_prof.endframe,
+					cl_prof.userinfo, cl_prof.misc);
+				Com_Printf("  ev: wnframe:%d relstr:%d snapdg:%d chkpkt:%d (us)\n",
+					cl_prof.wnframe, cl_prof.relstr, cl_prof.snapdg, cl_prof.chkpkt);
+				Com_Printf("  whud: load:%d sync:%d render:%d score:%d (us)\n",
+					cl_prof.whud_load, cl_prof.whud_sync, cl_prof.whud_render, cl_prof.whud_score);
+			}
+		}
 	}
 
 	//

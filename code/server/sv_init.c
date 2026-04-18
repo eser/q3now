@@ -616,11 +616,11 @@ void SV_SpawnServer_Tick( void ) {
 		SV_BotFrame( sv.time );
 		svs.time += 100;
 
-		FS_TouchFileInPak( "vm/cgame.qvm" );
+		FS_TouchFileInPak( "vm/cgame.wasm" );
 
 		p = FS_ReferencedPakNames();
 		if ( FS_ExcludeReference() ) {
-			FS_TouchFileInPak( "vm/cgame.qvm" );
+			FS_TouchFileInPak( "vm/cgame.wasm" );
 			p = FS_ReferencedPakNames();
 		}
 		Cvar_Set( "sv_referencedPakNames", p );
@@ -778,7 +778,7 @@ void SV_Init( void )
 	sv_privatePassword = Cvar_Get ("sv_privatePassword", "", CVAR_TEMP );
 	Cvar_SetDescription( sv_privatePassword, "Set password for private clients to login with." );
 	sv_fps = Cvar_Get ("sv_fps", "20", CVAR_TEMP );
-	Cvar_CheckRange( sv_fps, "10", "125", CV_INTEGER );
+	Cvar_CheckRange( sv_fps, "10", "250", CV_INTEGER );
 	Cvar_SetDescription( sv_fps, "Set the max frames per second the server sends the client." );
 	sv_snapshotTransport = Cvar_Get( "sv_snapshotTransport", "0", CVAR_ARCHIVE );
 	Cvar_CheckRange( sv_snapshotTransport, "0", "1", CV_INTEGER );
@@ -794,11 +794,6 @@ void SV_Init( void )
 	sv_allowDownload = Cvar_Get ("sv_allowDownload", "1", CVAR_SERVERINFO);
 	Cvar_SetDescription( sv_allowDownload, "Toggle the ability for clients to download files maps etc. from server." );
 	Cvar_Get ("sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE);
-
-	// moved to Com_Init()
-	//sv_master[0] = Cvar_Get( "sv_master1", MASTER_SERVER_NAME, CVAR_INIT | CVAR_ARCHIVE_ND );
-	//sv_master[1] = Cvar_Get( "sv_master2", "master.ioquake3.org", CVAR_INIT | CVAR_ARCHIVE_ND );
-	//sv_master[2] = Cvar_Get( "sv_master3", "master.maverickservers.com", CVAR_INIT | CVAR_ARCHIVE_ND );
 
 	for ( index = 0; index < MAX_MASTER_SERVERS; index++ )
 		sv_master[ index ] = Cvar_Get( va( "sv_master%d", index + 1 ), "", CVAR_ARCHIVE_ND );

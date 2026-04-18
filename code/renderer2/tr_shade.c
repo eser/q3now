@@ -1112,6 +1112,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			msdfParams[3] = 0.0f;
 			GLSL_SetUniformMat4(sp, UNIFORM_MODELVIEWPROJECTIONMATRIX, glState.modelviewProjection);
 			GLSL_SetUniformVec4(sp, UNIFORM_COLOR, msdfParams);
+			GLSL_SetUniformFloat(sp, UNIFORM_MSDF_OUTLINE_WIDTH, tr.msdfOutlineWidth);
+			GLSL_SetUniformVec4( sp, UNIFORM_MSDF_OUTLINE_COLOR, tr.msdfOutlineColor);
+			GLSL_SetUniformFloat(sp, UNIFORM_MSDF_GLOW_WIDTH,    tr.msdfGlowWidth);
+			GLSL_SetUniformVec4( sp, UNIFORM_MSDF_GLOW_COLOR,    tr.msdfGlowColor);
 
 			if ( pStage->bundle[TB_DIFFUSEMAP].image[0] )
 				R_BindAnimatedImageToTMU( &pStage->bundle[TB_DIFFUSEMAP], TB_DIFFUSEMAP );

@@ -428,11 +428,24 @@ static void CG_OffsetFirstPersonView( void ) {
 #endif
 
 	// add angles based on velocity
+#if FEAT_FPS_IMPROVEMENTS
+	// Low-pass filter predicted velocity before projecting onto view axes.
+	// Per-frame flips between snap/nextSnap prediction base cause 1-frame
+	// velocity spikes; the EMA damps them while preserving real acceleration.
+	{
+		static vec3_t s_smoothedVel;
+		int i;
+		for ( i = 0; i < 3; i++ )
+			s_smoothedVel[i] = 0.3f * cg.predictedPlayerState.velocity[i] + 0.7f * s_smoothedVel[i];
+		VectorCopy( s_smoothedVel, predictedVelocity );
+	}
+#else
 	VectorCopy( cg.predictedPlayerState.velocity, predictedVelocity );
+#endif
 
 	delta = DotProduct ( predictedVelocity, cg.refdef.viewaxis[0]);
 	angles[PITCH] += delta * cg_runpitch.value;
-	
+
 	delta = DotProduct ( predictedVelocity, cg.refdef.viewaxis[1]);
 	angles[ROLL] -= delta * cg_runroll.value;
 
@@ -743,8 +756,18 @@ static int CG_CalcViewValues( void ) {
 
 	cg.bobcycle = ( ps->bobCycle & 128 ) >> 7;
 	cg.bobfracsin = fabs( sin( ( ps->bobCycle & 127 ) / 127.0 * M_PI ) );
+#if FEAT_FPS_IMPROVEMENTS
+	{
+		static float s_smoothedXYSpeed;
+		float rawXY = sqrt( ps->velocity[0] * ps->velocity[0] +
+			ps->velocity[1] * ps->velocity[1] );
+		s_smoothedXYSpeed = 0.3f * rawXY + 0.7f * s_smoothedXYSpeed;
+		cg.xyspeed = s_smoothedXYSpeed;
+	}
+#else
 	cg.xyspeed = sqrt( ps->velocity[0] * ps->velocity[0] +
 		ps->velocity[1] * ps->velocity[1] );
+#endif
 
 
 	VectorCopy( ps->origin, cg.refdef.vieworg );

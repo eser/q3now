@@ -1692,11 +1692,6 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	WiredUI_RegisterAssets();
 
-	// ensure cvar defaults for menu dropdowns
-	if ( Cvar_VariableIntegerValue( "g_spSkill" ) < 1 ) {
-		Cvar_Set( "g_spSkill", "3" );  // default to "Competitive"
-	}
-
 	wired_activeMenu = UIMENU_NONE;
 	wired_initialized = qtrue;
 

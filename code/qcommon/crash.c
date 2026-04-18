@@ -66,14 +66,14 @@ static const char *Crash_GetVMName( vmIndex_t vmIndex )
 	}
 }
 
-void Crash_SaveQVMPointer( vmIndex_t vmIndex, vm_t *vm )
+void Crash_SaveVMPointer( vmIndex_t vmIndex, vm_t *vm )
 {
 	if ( Crash_IsVMIndexValid( vmIndex ) ) {
 		s_crash.vm[ vmIndex ].vm = vm;
 	}
 }
 
-void Crash_SaveQVMChecksum( vmIndex_t vmIndex, unsigned int crc32 )
+void Crash_SaveVMChecksum( vmIndex_t vmIndex, unsigned int crc32 )
 {
 	if ( Crash_IsVMIndexValid( vmIndex ) ) {
 		s_crash.vm[ vmIndex ].crc32 = crc32;
@@ -288,9 +288,6 @@ static void Crash_WriteVMs( void )
 			VM_GetCallStack( vm, callStack, (int)sizeof( callStack ) );
 			JSON_StringValue( "call_stack", callStack );
 			JSON_IntegerValue( "call_level", vm->callLevel );
-#if FEAT_LEGACY_QVM
-			JSON_IntegerValue( "instruction_count", vm->instructionCount );
-#endif
 			JSON_HexValue( "program_stack", (unsigned long long)(unsigned int)vm->programStack );
 		}
 		JSON_EndObject();

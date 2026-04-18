@@ -3062,7 +3062,7 @@ void CL_Frame( int msec, int realMsec ) {
 	}
 
 #if FEAT_WIRED_UI
-	WiredStore_BeginFrame();
+	CL_PROF(store, WiredStore_BeginFrame());
 #endif
 
 	// save the msec before checking pause
@@ -3165,43 +3165,18 @@ void CL_Frame( int msec, int realMsec ) {
 		SCR_DebugGraph( msec * 0.25f );
 	}
 
-	// see if we need to update any userinfo
-	CL_CheckUserinfo();
-
-	// surface deferred QUIC connect-phase errors before the timeout check
-	if ( !clc.demoplaying ) {
-		CL_CheckConnectError();
-	}
-
-	// if we haven't gotten a packet in a long time, drop the connection
-	if ( !clc.demoplaying ) {
-		CL_CheckTimeout();
-	}
-
-	// send intentions now
-	CL_SendCmd();
-
-	// resend a connection request if necessary
-	CL_CheckForResend();
-
-	// decide on the serverTime to render
-	CL_SetCGameTime();
-
-	// CNQ3 backport: check for match start and raise an alert if the
-	// user is not currently paying attention to the window
-	CL_CheckMatchAlerts();
-
-	// update the screen
+	CL_PROF(userinfo, CL_CheckUserinfo());
+	if ( !clc.demoplaying ) { CL_PROF(misc, CL_CheckConnectError()); }
+	if ( !clc.demoplaying ) { CL_PROF(misc, CL_CheckTimeout()); }
+	CL_PROF(send,    CL_SendCmd());
+	CL_PROF(resend,  CL_CheckForResend());
+	CL_PROF(cgtime,  CL_SetCGameTime());
+	CL_PROF(misc,    CL_CheckMatchAlerts());
 	cls.framecount++;
 	SCR_UpdateScreen();
-
-	// update audio
-	S_Update( realMsec );
-
-	// advance local effects for next frame
-	SCR_RunCinematic();
-
-	Con_RunConsole();
+	CL_PROF(sound,   S_Update( realMsec ));
+	CL_PROF(misc,    SCR_RunCinematic());
+	CL_PROF(misc,    Con_RunConsole());
 }
 
 
@@ -4112,8 +4087,6 @@ void CL_Init( void ) {
 	Cvar_Get ("rate", "25000", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("snaps", "40", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("model", DEFAULT_MODEL, CVAR_USERINFO | CVAR_ARCHIVE_ND );
-//	Cvar_Get ("g_redTeam", "Stroggs", CVAR_SERVERINFO | CVAR_ARCHIVE);
-//	Cvar_Get ("g_blueTeam", "Pagans", CVAR_SERVERINFO | CVAR_ARCHIVE);
 	Cvar_Get ("color1", "4", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("color2", "5", CVAR_USERINFO | CVAR_ARCHIVE );
 //	Cvar_Get ("teamtask", "0", CVAR_USERINFO );
@@ -4276,7 +4249,7 @@ static void CL_SetServerInfo(serverInfo_t *server, const char *info, int ping) {
 	if (server) {
 		if (info) {
 			server->clients = atoi(Info_ValueForKey(info, "clients"));
-			Q_strncpyz(server->hostName,Info_ValueForKey(info, "hostname"), MAX_NAME_LENGTH);
+			Q_strncpyz(server->hostName,Info_ValueForKey(info, "hostname"), MAX_HOSTNAME_LENGTH);
 			Q_strncpyz(server->mapName, Info_ValueForKey(info, "mapname"), MAX_NAME_LENGTH);
 			server->maxClients = atoi(Info_ValueForKey(info, "sv_maxclients"));
 			Q_strncpyz(server->game,Info_ValueForKey(info, "game"), MAX_NAME_LENGTH);

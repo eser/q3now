@@ -1976,11 +1976,11 @@ static void NET_Event( const fd_set *fdr )
 
 	/* Pump client QUIC timers (non-dedicated: drive TLS handshake + ACKs) */
 #if !defined(DEDICATED)
-	WN_ClientFrame();
+	CL_PROF(wnframe, WN_ClientFrame());
 	/* Poll reliable game streams (bootstrap/downloads/events) */
-	CL_CheckReliableStreams();
+	CL_PROF(relstr, CL_CheckReliableStreams());
 	/* Poll unreliable datagrams (snapshot delivery) */
-	CL_CheckSnapshotDatagrams();
+	CL_PROF(snapdg, CL_CheckSnapshotDatagrams());
 #endif
 
 	/* QUIC game packet drain — kept for compatibility; WN_GetGamePacket now

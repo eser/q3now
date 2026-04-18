@@ -209,6 +209,7 @@ static char gl_extensions[ 32768 ];
 	QGL_VBO_PROCS;
 	QGL_FBO_PROCS;
 	QGL_FBO_OPT_PROCS;
+	QGL_MSDF_GLSL_PROCS;
 #undef GLE
 
 typedef struct {
@@ -223,6 +224,7 @@ static sym_t arb_procs[] = { QGL_ARB_PROGRAM_PROCS };
 static sym_t vbo_procs[] = { QGL_VBO_PROCS };
 static sym_t fbo_procs[] = { QGL_FBO_PROCS };
 static sym_t fbo_opt_procs[] = { QGL_FBO_OPT_PROCS };
+static sym_t msdf_glsl_procs[] = { QGL_MSDF_GLSL_PROCS };
 #undef GLE
 
 
@@ -266,6 +268,7 @@ static void R_ClearSymTables( void )
 	R_ClearSymbols( vbo_procs, ARRAY_LEN( vbo_procs ) );
 	R_ClearSymbols( fbo_procs, ARRAY_LEN( fbo_procs ) );
 	R_ClearSymbols( fbo_opt_procs, ARRAY_LEN( fbo_opt_procs ) );
+	R_ClearSymbols( msdf_glsl_procs, ARRAY_LEN( msdf_glsl_procs ) );
 }
 
 
@@ -542,6 +545,12 @@ static void R_InitExtensions( void )
 		{
 			ri.Printf( PRINT_ALL, "...using ARB vertex/fragment programs\n" );
 		}
+	}
+
+	// Resolve GLSL 2.0 core procs unconditionally — used as MSDF fallback when ARB is unavailable.
+	if ( gl_version >= 20 )
+	{
+		R_ResolveSymbols( msdf_glsl_procs, ARRAY_LEN( msdf_glsl_procs ) );
 	}
 
 #ifdef USE_VBO
@@ -1696,7 +1705,11 @@ static void R_Register( void )
 
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_dlightBacks, "Whether or not dynamic lights should light up back-face culled geometry, affects only VQ3 dynamic lights." );
+#ifdef __APPLE__
 	r_finish = ri.Cvar_Get( "r_finish", "0", CVAR_ARCHIVE_ND );
+#else
+	r_finish = ri.Cvar_Get( "r_finish", "1", CVAR_ARCHIVE_ND );
+#endif
 	ri.Cvar_SetDescription( r_finish, "Force a glFinish call after rendering a scene." );
 	r_textureMode = ri.Cvar_Get( "r_textureMode", "GL_LINEAR_MIPMAP_NEAREST", CVAR_ARCHIVE );
 	ri.Cvar_SetDescription( r_textureMode, "Texture interpolation mode:\n GL_NEAREST: Nearest neighbor interpolation and will therefore appear similar to Quake II except with the added colored lighting\n GL_LINEAR: Linear interpolation and will appear to blend in objects that are closer than the resolution that the textures are set as\n GL_NEAREST_MIPMAP_NEAREST: Nearest neighbor interpolation with mipmapping for bilinear hardware, mipmapping will blend objects that are farther away than the resolution that they are set as\n GL_LINEAR_MIPMAP_NEAREST: Linear interpolation with mipmapping for bilinear hardware\n GL_NEAREST_MIPMAP_LINEAR: Nearest neighbor interpolation with mipmapping for trilinear hardware\n GL_LINEAR_MIPMAP_LINEAR: Linear interpolation with mipmapping for trilinear hardware" );

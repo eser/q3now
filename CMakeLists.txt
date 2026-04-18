@@ -28,14 +28,11 @@ list(APPEND QCOMMON_SRCS code/qcommon/arena.c)
 # LZ4 decoder (for SW3Z archive reader)
 list(APPEND QCOMMON_SRCS src/libs/lz4/lz4.c src/libs/lz4/lz4frame.c src/libs/lz4/xxhash.c src/libs/lz4/lz4hc.c)
 
-# exclude platform-dependent QVM bytecode compilers
-list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alxp].*.c")
 # When WASM is disabled, override FEAT_WASM=0 so vm_wasm.c compiles to empty
 # and vm.c skips WASM code paths (q_feats.h hardcodes FEAT_WASM=1).
 IF(NOT USE_WASM)
 	ADD_COMPILE_DEFINITIONS(FEAT_WASM=0)
 ENDIF()
-# add platform-dependent QVM bytecode compilers
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
 	IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
 		IF(WIN32)
@@ -48,7 +45,6 @@ IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
 		#SET(BINEXT .x86)
 		SET(RENDEXT _x86)
 	ENDIF()
-	list(APPEND QCOMMON_SRCS code/qcommon/vm_x86.c)
 ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES aarch64|arm64)
 	IF(APPLE)
 		SET(BINEXT .arm64)
@@ -57,24 +53,9 @@ ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES aarch64|arm64)
 		SET(BINEXT .aarch64)
 		SET(RENDEXT _aarch64)
 	ENDIF()
-	list(APPEND QCOMMON_SRCS code/qcommon/vm_aarch64.c)
 ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES arm*)
 	SET(BINEXT .arm)
 	SET(RENDEXT _arm)
-	list(APPEND QCOMMON_SRCS code/qcommon/vm_armv7l.c)
-ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le|ppc64")
-	IF(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-		SET(BINEXT .ppc64le)
-		SET(RENDEXT _ppc64le)
-		list(APPEND QCOMMON_SRCS code/qcommon/vm_powerpc.c)
-	ELSE()
-		SET(BINEXT .ppc64)
-		SET(RENDEXT _ppc64)
-		list(APPEND QCOMMON_SRCS code/qcommon/vm_powerpc.c)
-	ENDIF()
-ELSE()
-	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE -DNO_VM_COMPILED)
-	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE -DNO_VM_COMPILED)
 ENDIF()
 
 # botlib
@@ -104,8 +85,15 @@ TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE src/libs/lz4)
 # WAMR (WebAssembly Micro Runtime) for WASM VM backend
 IF(USE_WASM)
 	SET(WAMR_BUILD_INTERP 1)
+	SET(WAMR_BUILD_FAST_INTERP 1)
 	SET(WAMR_BUILD_AOT 1)
 	SET(WAMR_BUILD_JIT 0)
+	# Fast JIT: WAMR's own x86_64 JIT (no LLVM). Skip on other arches — not supported.
+	IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+		SET(WAMR_BUILD_FAST_JIT 1)
+	ELSE()
+		SET(WAMR_BUILD_FAST_JIT 0)
+	ENDIF()
 	SET(WAMR_BUILD_LIBC_BUILTIN 0)
 	SET(WAMR_BUILD_LIBC_WASI 1)
 	SET(WAMR_BUILD_SHARED_MEMORY 0)
@@ -205,10 +193,7 @@ set(OPUS_SRC_SRCS
     src/libs/opus/src/opus_multistream.c
     src/libs/opus/src/opus_multistream_decoder.c
     src/libs/opus/src/opus_multistream_encoder.c
-    src/libs/opus/src/opus_projection_decoder.c
-    src/libs/opus/src/opus_projection_encoder.c
     src/libs/opus/src/repacketizer.c
-    src/libs/opus/src/mapping_matrix.c
     src/libs/opus/src/analysis.c
     src/libs/opus/src/mlp.c
     src/libs/opus/src/mlp_data.c
@@ -325,7 +310,32 @@ target_include_directories(client PRIVATE
 # renderers
 AUX_SOURCE_DIRECTORY(code/renderercommon RENDERER_COMMON_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
+AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)
+
+# GL2: stringify is a host tool, not a library source — remove it from the list
+LIST(REMOVE_ITEM RENDERER_GL2_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/renderer2/stringify.c)
+
+# GL2: build the stringify tool and use it to generate fallback C strings from GLSL files
+ADD_EXECUTABLE(stringify code/renderer2/stringify.c)
+
+FILE(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/renderer2_glsl")
+FILE(GLOB RENDERER_GL2_GLSL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/code/renderer2/glsl/*.glsl")
+# MSDF shaders are already inlined as static strings in tr_glsl.c; skip them here
+LIST(FILTER RENDERER_GL2_GLSL_FILES EXCLUDE REGEX "msdf_")
+
+SET(RENDERER_GL2_FALLBACK_SRCS)
+FOREACH(GLSL_FILE ${RENDERER_GL2_GLSL_FILES})
+	GET_FILENAME_COMPONENT(GLSL_BASE ${GLSL_FILE} NAME_WE)
+	SET(GENERATED_C "${CMAKE_CURRENT_BINARY_DIR}/renderer2_glsl/${GLSL_BASE}.c")
+	ADD_CUSTOM_COMMAND(
+		OUTPUT ${GENERATED_C}
+		COMMAND stringify ${GLSL_FILE} ${GENERATED_C}
+		DEPENDS stringify ${GLSL_FILE}
+		COMMENT "Generating fallbackShader_${GLSL_BASE}"
+	)
+	LIST(APPEND RENDERER_GL2_FALLBACK_SRCS ${GENERATED_C})
+ENDFOREACH()
 
 IF(USE_RENDERER_DLOPEN)
 	SET(AUX_SRCS
@@ -339,6 +349,10 @@ IF(USE_RENDERER_DLOPEN)
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl${RENDEXT} PROPERTIES PREFIX "")
 
+	ADD_LIBRARY(${RENDERER_PREFIX}_opengl2${RENDEXT} SHARED ${RENDERER_GL2_SRCS} ${RENDERER_GL2_FALLBACK_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
+	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
+	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PROPERTIES PREFIX "")
+
 	ADD_LIBRARY(${RENDERER_PREFIX}_vulkan${RENDEXT} SHARED ${RENDERER_VK_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PROPERTIES PREFIX "")
@@ -347,8 +361,10 @@ IF(USE_RENDERER_DLOPEN)
 	# and are dlopen'd at runtime, so allow host-process symbols to remain undefined.
 	IF(UNIX AND NOT APPLE)
 		TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_opengl${RENDEXT} m)
+		TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_opengl2${RENDEXT} m)
 		TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_vulkan${RENDEXT} m)
 		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
+		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
 		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
 	ENDIF()
 ELSE()
@@ -391,6 +407,7 @@ IF(UNIX)
 		SET(MACOSX_BUNDLE_ICON_FILE quake3_flat.icns)
 		SET(MACOSX_BUNDLE_GUI_IDENTIFIER "com.eser.q3now")
 		SET(MACOSX_BUNDLE_BUNDLE_NAME "q3now")
+		list(APPEND Q3_SRCS code/macosx/macosx_main.c)
 	ENDIF()
 ELSEIF(WIN32)
 	SET(EXE_TYPE WIN32)
@@ -582,9 +599,8 @@ ENDIF()
 # ============================================================
 
 OPTION(BUILD_GAME_LIBRARIES "Build game native shared libraries (.dylib/.so)" ON)
-OPTION(BUILD_GAME_QVMS "Build game QVM bytecode (.qvm)" OFF)
 
-IF(BUILD_GAME_LIBRARIES OR BUILD_GAME_QVMS)
+IF(BUILD_GAME_LIBRARIES)
 	SET(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/code)
 	SET(BASEGAME "baseq3")
 	SET(CGAME_MODULE "cgame")

@@ -455,8 +455,6 @@ static void Svcmd_Q3nowEngine_f( void ) {
     G_Printf( "Engine:      %s\n", buf );
     trap_Cvar_VariableStringBuffer( "cl_renderer", buf, sizeof(buf) );
     G_Printf( "Renderer:    %s\n", buf );
-    trap_Cvar_VariableStringBuffer( "vm_rtChecks", buf, sizeof(buf) );
-    G_Printf( "vm_rtChecks: %s\n", buf );
     trap_Cvar_VariableStringBuffer( "com_maxfps", buf, sizeof(buf) );
     G_Printf( "com_maxfps:  %s\n", buf );
 }

@@ -725,6 +725,11 @@ typedef enum
 
 	UNIFORM_BONEMATRIX,
 
+	UNIFORM_MSDF_OUTLINE_WIDTH,
+	UNIFORM_MSDF_OUTLINE_COLOR,
+	UNIFORM_MSDF_GLOW_WIDTH,
+	UNIFORM_MSDF_GLOW_COLOR,
+
 	UNIFORM_COUNT
 } uniform_t;
 
@@ -1741,6 +1746,11 @@ typedef struct {
 #if FEAT_CORONA
 	int						coronaShader;
 #endif
+
+	float					msdfOutlineWidth;
+	float					msdfOutlineColor[4];
+	float					msdfGlowWidth;
+	float					msdfGlowColor[4];
 } trGlobals_t;
 
 extern backEndState_t	backEnd;
@@ -2038,8 +2048,8 @@ void	GL_Cull( int cullType );
 
 #define GLS_DEFAULT			GLS_DEPTHMASK_TRUE
 
-void	RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty );
-void	RE_UploadCinematic( int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty );
+void	RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, int client, qboolean dirty );
+void	RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int client, qboolean dirty );
 
 void		RE_BeginFrame( stereoFrame_t stereoFrame );
 void		RE_BeginRegistration( glconfig_t *glconfig );
