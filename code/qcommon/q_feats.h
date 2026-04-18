@@ -11,21 +11,22 @@
 //
 
 // ── mature (stable, shipped) ────────────────────────────────────────────
-#define FEAT_ATMOSPHERIC                  1   // 3B  rain & snow particles
+#define FEAT_ATMOSPHERIC                  0   // 3B  rain & snow particles
 #define FEAT_CRON_JOBS                    1   // 11  timed server-side tasks
 #define FEAT_DAMAGE_PLUMS                 1   // 2A  floating damage numbers
 #define FEAT_FAST_WEAPON_SWITCH           1   // 5A  fast weapon switch (0=normal, 1=skip drop, 2=instant)
 #define FEAT_FS_PRECEDENCE                1   // archive dedup: basename desc, dir > ext precedence
 #define FEAT_IPV6                         1   // IPv6 support
-#define FEAT_JSON_STATS                   1   // 7B  post-match JSON export
-#define FEAT_LENS_FLARES                  1   // 9A  map + missile lens flares (JUHOX)
+#define FEAT_JSON_STATS                   0   // 7B  post-match JSON export
+#define FEAT_LENS_FLARES                  0   // 9A  map + missile lens flares (JUHOX)
 #define FEAT_MATCH_SUMMARY                1   // 8B  intermission stats overlay
 #define FEAT_SPAWN_PROTECTION             1   // 2B  attacker gets no points for spawnkills
 #define FEAT_SPECTATOR_OUTLINES           1   // 8A  player outlines for spectators
 #define FEAT_SW3Z                         1   // SW3Z archive format (.sw3z)
 #define FEAT_THIRD_PERSON                 1   // third-person camera with proximity fade & shoulder cam
 #define FEAT_UNLAGGED                     1   // 1B  server-side lag compensation (hitscan + projectile nudge)
-#define FEAT_ZNUDGE                       1   // 1C  client-side forward extrapolation (player/missile prediction)
+#define FEAT_ZNUDGE                       0   // 1C  client-side forward extrapolation (player/missile prediction)
+#define FEAT_FPS_IMPROVEMENTS             0
 
 // ── gameplay (testing) ──────────────────────────────────────────────────
 #define FEAT_DESTROYABLE_MISSILES         0   // 11B shoot down rockets/grenades/plasma
@@ -46,7 +47,7 @@
 #define FEAT_BOUNCE_SOUND_LIMIT           0   // fix: unlimited grenade bounce sounds on movers
 
 // ── competitive (testing) ───────────────────────────────────────────────
-#define FEAT_AUTO_DEMO                    1   // 10K auto-record demos in tournament
+#define FEAT_AUTO_DEMO                    0   // 10K auto-record demos in tournament
 #define FEAT_CLAN_ARENA                   0   // 11  clan arena game mode
 #define FEAT_ELIMINATION                  0   // 10B round-based elimination modifier
 #define FEAT_ELO_TRACKING                 0   // 10J per-player skill rating
@@ -59,8 +60,8 @@
 // ── visual / UI (testing) ───────────────────────────────────────────────
 #define FEAT_ENV_LIGHTS                   0   // colored dlights from lava/slime/water surfaces (KEX-style)
 #define FEAT_IMPACT_SPARKS                0   // 11A spark particles on player hit
-#define FEAT_MAP_ROTATION                 1   // 6D  server-side map rotation list
-#define FEAT_STATS_WINDOW                 1   // floating stats overlay + window system
+#define FEAT_MAP_ROTATION                 0   // 6D  server-side map rotation list
+#define FEAT_STATS_WINDOW                 0   // floating stats overlay + window system
 #define FEAT_PING_LOCATION                0   // 4G  team coordination pings
 #define FEAT_TEAM_LEADERSHIP              0   // 11  particle trail library
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
@@ -74,8 +75,7 @@
 #define FEAT_BSP_ABSTRACTION              1   // Pluggable BSP format loaders
 #define FEAT_LEGACY_FORMATS_AUDIO         1   // WAV, OGG Vorbis, ADPCM audio codecs (retire by setting to 0; Opus remains)
 #define FEAT_LEGACY_FORMATS_IMAGE         1   // BMP, PCX, TGA image loaders (retire by setting to 0; PNG+JPG remain)
-#define FEAT_WASM                         1   // WASM VM backend via WAMR (replaces QVM over time)
-#define FEAT_LEGACY_QVM                   0   // QVM bytecode interpreter + JIT (retire by setting to 0)
+#define FEAT_WASM                         1   // WASM VM backend via WAMR
 #define FEAT_WIREDNET_OBSERVER            1   // HTTP observer: /status.json, JSON event ring, static web UI
 #define FEAT_WIREDNET_CONTROL             1   // MCP/JSON-RPC control channel over QUIC + HTTP POST /mcp
 
@@ -89,16 +89,16 @@
 #define FEAT_DEPTH_CLAMP                  0   // disable near-plane vertex clipping at high FOV
 #define FEAT_DEPTH_FADE                   0   // soft particle edges (explosions, smoke, blood)
 #define FEAT_PARALLAX_MAPPING             0   // steep parallax mapping with normalmap (height in alpha)
-#define FEAT_SSAO                         1   // screen-space ambient occlusion (embedded in gamma pass)
-#define FEAT_TONEMAP                      1   // HDR tone mapping (Reinhard/ACES/Uncharted2)
-#define FEAT_COLOR_GRADING                1   // color tint, saturation, contrast
-#define FEAT_FXAA                         1   // fast approximate anti-aliasing (embedded in gamma pass)
-#define FEAT_GODRAYS                      1   // screen-space crepuscular rays (depth-based sky detection)
-#define FEAT_ADVANCED_WATER               1   // screen-space refraction + Fresnel + ripple noise for water
-#define FEAT_SHADOW_MAPPING               1   // per-light shadow maps with PCF (1/5/9 samples)
-#define FEAT_PBR                          1   // physically based rendering (GGX/Schlick/Smith BRDF)
+#define FEAT_SSAO                         0   // screen-space ambient occlusion (embedded in gamma pass)
+#define FEAT_TONEMAP                      0   // HDR tone mapping (Reinhard/ACES/Uncharted2)
+#define FEAT_COLOR_GRADING                0   // color tint, saturation, contrast
+#define FEAT_FXAA                         0   // fast approximate anti-aliasing (embedded in gamma pass)
+#define FEAT_GODRAYS                      0   // screen-space crepuscular rays (depth-based sky detection)
+#define FEAT_ADVANCED_WATER               0   // screen-space refraction + Fresnel + ripple noise for water
+#define FEAT_SHADOW_MAPPING               0   // per-light shadow maps with PCF (1/5/9 samples)
+#define FEAT_PBR                          0   // physically based rendering (GGX/Schlick/Smith BRDF)
 #define FEAT_SMAA                         0   // sub-pixel morphological anti-aliasing (deferred)
-#define FEAT_FORCE_ENTITY_VERTEX_ALPHA    1   // per-entity alpha override + dynamic pipeline swap
+#define FEAT_FORCE_ENTITY_VERTEX_ALPHA    0   // per-entity alpha override + dynamic pipeline swap
 #define FEAT_FBO_DEBUG                    0   // verbose FBO pipeline diagnostics (format, layout, passes)
 
 // ── missionpack (Team Arena features, individually toggleable) ────────

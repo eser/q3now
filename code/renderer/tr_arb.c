@@ -23,6 +23,52 @@ static GLuint current_fp;
 static int programCompiled = 0;
 static int programEnabled	= 0;
 
+// MSDF GLSL fallback — used when GL_ARB_fragment_program is unavailable (e.g. macOS core/compat profile).
+static GLuint msdfGlslProg       = 0;
+static GLint  msdfLoc_texture    = -1;
+static GLint  msdfLoc_scrPxRange = -1;
+static GLint  msdfLoc_outWidth   = -1;
+static GLint  msdfLoc_outColor   = -1;
+static GLint  msdfLoc_glwWidth   = -1;
+static GLint  msdfLoc_glwColor   = -1;
+static int    msdfGlslActive     = 0;
+
+static const char *msdfGlslVP =
+	"#version 120\n"
+	"void main() {\n"
+	"    gl_TexCoord[0] = gl_MultiTexCoord0;\n"
+	"    gl_FrontColor  = gl_Color;\n"
+	"    gl_Position    = ftransform();\n"
+	"}\n";
+
+static const char *msdfGlslFP =
+	"#version 120\n"
+	"uniform sampler2D u_Tex;\n"
+	"uniform float u_ScrPxRange;\n"
+	"uniform float u_OutlineWidth;\n"
+	"uniform vec4  u_OutlineColor;\n"
+	"uniform float u_GlowWidth;\n"
+	"uniform vec4  u_GlowColor;\n"
+	"float median3(float r, float g, float b) {\n"
+	"    return max(min(r, g), min(max(r, g), b));\n"
+	"}\n"
+	"void main() {\n"
+	"    vec4  msd   = texture2D(u_Tex, gl_TexCoord[0].st);\n"
+	"    float sd    = median3(msd.r, msd.g, msd.b) - 0.5;\n"
+	"    float spr   = u_ScrPxRange;\n"
+	"    float fillA = clamp(spr * sd + 0.5, 0.0, 1.0) * gl_Color.a;\n"
+	"    float outA  = clamp(spr * (sd + u_OutlineWidth) + 0.5, 0.0, 1.0) * u_OutlineColor.a;\n"
+	"    float glwA  = clamp(spr * (sd + u_OutlineWidth + u_GlowWidth) + 0.5, 0.0, 1.0)\n"
+	"                  * u_GlowColor.a * (1.0 - outA);\n"
+	"    vec3  col = u_GlowColor.rgb * glwA;\n"
+	"    float a   = glwA;\n"
+	"    col = col * (1.0 - outA) + u_OutlineColor.rgb * outA;\n"
+	"    a   = a   * (1.0 - outA) + outA;\n"
+	"    col = col * (1.0 - fillA) + gl_Color.rgb * fillA;\n"
+	"    a   = a   * (1.0 - fillA) + fillA;\n"
+	"    gl_FragColor = vec4(col, a);\n"
+	"}\n";
+
 qboolean fboEnabled = qfalse;
 qboolean fboBloomInited = qfalse;
 int      fboReadIndex = 0;
@@ -139,15 +185,39 @@ void GL_ProgramEnable( void )
 
 
 /*
- * ARB_MSDF_Enable -- bind the MSDF fragment program and set screenPxRange.
+ * ARB_MSDF_Enable -- bind the MSDF fragment program and upload all params.
+ * local[0] = (screenPxRange, -, -, -)
+ * local[1] = (outlineWidth, glowWidth, -, -)
+ * local[2] = outlineColor RGBA
+ * local[3] = glowColor RGBA
  */
-void ARB_MSDF_Enable( float screenPxRange )
+void ARB_MSDF_Enable( float screenPxRange, float outlineWidth, const float *outlineColor,
+                      float glowWidth, const float *glowColor )
 {
-	if ( !programCompiled )
-		return;
-	ARB_ProgramEnable( DUMMY_VERTEX, MSDF_FRAGMENT );
-	qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 0,
-		screenPxRange, 0.0f, 0.0f, 0.0f );
+	static const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	const float *oc = outlineColor ? outlineColor : zero;
+	const float *gc = glowColor    ? glowColor    : zero;
+
+	if ( programCompiled ) {
+		ARB_ProgramEnable( DUMMY_VERTEX, MSDF_FRAGMENT );
+		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 0,
+			screenPxRange, 0.0f, 0.0f, 0.0f );
+		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 1,
+			outlineWidth, glowWidth, 0.0f, 0.0f );
+		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 2,
+			oc[0], oc[1], oc[2], oc[3] );
+		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 3,
+			gc[0], gc[1], gc[2], gc[3] );
+	} else if ( msdfGlslProg ) {
+		qglUseProgram( msdfGlslProg );
+		qglUniform1i ( msdfLoc_texture,    0 );
+		qglUniform1f ( msdfLoc_scrPxRange, screenPxRange );
+		qglUniform1f ( msdfLoc_outWidth,   outlineWidth );
+		qglUniform4fv( msdfLoc_outColor,   1, oc );
+		qglUniform1f ( msdfLoc_glwWidth,   glowWidth );
+		qglUniform4fv( msdfLoc_glwColor,   1, gc );
+		msdfGlslActive = 1;
+	}
 }
 
 
@@ -158,7 +228,85 @@ void ARB_MSDF_Disable( void )
 {
 	if ( programEnabled ) {
 		ARB_ProgramDisable();
+	} else if ( msdfGlslActive ) {
+		qglUseProgram( 0 );
+		msdfGlslActive = 0;
 	}
+}
+
+
+qboolean MSDF_Available( void )
+{
+	return (qboolean)( programCompiled || msdfGlslProg != 0 );
+}
+
+
+static void MSDF_GLSL_Init( void )
+{
+	GLuint vs, fs;
+	GLint  ok;
+	char   log[512];
+
+	if ( !qglCreateShader )
+		return;
+
+	vs = qglCreateShader( GL_VERTEX_SHADER );
+	qglShaderSource( vs, 1, (const GLchar *const *)&msdfGlslVP, NULL );
+	qglCompileShader( vs );
+	qglGetShaderiv( vs, GL_COMPILE_STATUS, &ok );
+	if ( !ok ) {
+		qglGetShaderInfoLog( vs, sizeof( log ), NULL, log );
+		ri.Printf( PRINT_WARNING, "MSDF GLSL VP: %s\n", log );
+		qglDeleteShader( vs );
+		return;
+	}
+
+	fs = qglCreateShader( GL_FRAGMENT_SHADER );
+	qglShaderSource( fs, 1, (const GLchar *const *)&msdfGlslFP, NULL );
+	qglCompileShader( fs );
+	qglGetShaderiv( fs, GL_COMPILE_STATUS, &ok );
+	if ( !ok ) {
+		qglGetShaderInfoLog( fs, sizeof( log ), NULL, log );
+		ri.Printf( PRINT_WARNING, "MSDF GLSL FP: %s\n", log );
+		qglDeleteShader( vs );
+		qglDeleteShader( fs );
+		return;
+	}
+
+	msdfGlslProg = qglCreateProgram();
+	qglAttachShader( msdfGlslProg, vs );
+	qglAttachShader( msdfGlslProg, fs );
+	qglLinkProgram( msdfGlslProg );
+	qglDeleteShader( vs );
+	qglDeleteShader( fs );
+
+	qglGetProgramiv( msdfGlslProg, GL_LINK_STATUS, &ok );
+	if ( !ok ) {
+		qglGetProgramInfoLog( msdfGlslProg, sizeof( log ), NULL, log );
+		ri.Printf( PRINT_WARNING, "MSDF GLSL link: %s\n", log );
+		qglDeleteProgram( msdfGlslProg );
+		msdfGlslProg = 0;
+		return;
+	}
+
+	msdfLoc_texture    = qglGetUniformLocation( msdfGlslProg, "u_Tex" );
+	msdfLoc_scrPxRange = qglGetUniformLocation( msdfGlslProg, "u_ScrPxRange" );
+	msdfLoc_outWidth   = qglGetUniformLocation( msdfGlslProg, "u_OutlineWidth" );
+	msdfLoc_outColor   = qglGetUniformLocation( msdfGlslProg, "u_OutlineColor" );
+	msdfLoc_glwWidth   = qglGetUniformLocation( msdfGlslProg, "u_GlowWidth" );
+	msdfLoc_glwColor   = qglGetUniformLocation( msdfGlslProg, "u_GlowColor" );
+
+	ri.Printf( PRINT_ALL, "...MSDF GLSL fallback ready\n" );
+}
+
+
+static void MSDF_GLSL_Done( void )
+{
+	if ( msdfGlslProg ) {
+		qglDeleteProgram( msdfGlslProg );
+		msdfGlslProg = 0;
+	}
+	msdfGlslActive = 0;
 }
 
 
@@ -656,30 +804,69 @@ static const char *spriteFP = {
 
 
 /*
- * MSDF fragment program -- computes median(R,G,B) from the atlas texture
- * and applies smoothstep antialiasing.  screenPxRange is passed via
- * program.local[0].x from the CPU side.
+ * MSDF fragment program -- three-layer composite: fill + outline + glow.
+ *   local[0].x = screenPxRange  (computed CPU-side from distanceRange)
+ *   local[1].xy = (outlineWidth, glowWidth)  in SDF units
+ *   local[2]    = outlineColor RGBA
+ *   local[3]    = glowColor RGBA
+ * Fill color / alpha come from fragment.color (vertex-interpolated).
  */
 static const char *msdfFP = {
 	"!!ARBfp1.0 \n"
 	"OPTION ARB_precision_hint_fastest; \n"
-	"TEMP msd, t; \n"
-	"PARAM screenPxRange = program.local[0]; \n"
+	"TEMP msd, sd, tmp, fillA, outA, glowA, col, a; \n"
+	"PARAM spr    = program.local[0]; \n"
+	"PARAM widths = program.local[1]; \n"
+	"PARAM outCol = program.local[2]; \n"
+	"PARAM glwCol = program.local[3]; \n"
 	"TEX msd, fragment.texcoord[0], texture[0], 2D; \n"
-	"# median(r, g, b) = max(min(r,g), min(max(r,g), b)) \n"
-	"MIN t.x, msd.r, msd.g; \n"
-	"MAX t.y, msd.r, msd.g; \n"
-	"MIN t.z, t.y, msd.b; \n"
-	"MAX t.x, t.x, t.z; \n"
-	"# opacity = clamp(screenPxRange * (sd - 0.5) + 0.5, 0, 1) \n"
-	"SUB t.x, t.x, 0.5; \n"
-	"MUL t.x, t.x, screenPxRange.x; \n"
-	"ADD t.x, t.x, 0.5; \n"
-	"MAX t.x, t.x, 0.0; \n"
-	"MIN t.x, t.x, 1.0; \n"
-	"# Apply to alpha, keep vertex color \n"
-	"MOV_SAT result.color, fragment.color; \n"
-	"MUL result.color.a, fragment.color.a, t.x; \n"
+	"# median(r,g,b) -> sd.x \n"
+	"MIN tmp.x, msd.r, msd.g; \n"
+	"MAX tmp.y, msd.r, msd.g; \n"
+	"MIN tmp.z, tmp.y, msd.b; \n"
+	"MAX sd.x,  tmp.x, tmp.z; \n"
+	"# (sd - 0.5) stored in sd.x \n"
+	"SUB sd.x, sd.x, 0.5; \n"
+	"# fillA = clamp(spr*(sd-0.5)+0.5, 0,1) * vertex.a \n"
+	"MUL tmp.x, sd.x, spr.x; \n"
+	"ADD tmp.x, tmp.x, 0.5; \n"
+	"MAX tmp.x, tmp.x, 0.0; \n"
+	"MIN tmp.x, tmp.x, 1.0; \n"
+	"MUL fillA.x, tmp.x, fragment.color.a; \n"
+	"# outA = clamp(spr*(sd-0.5+outW)+0.5, 0,1) * outlineColor.a \n"
+	"ADD tmp.y, sd.x, widths.x; \n"
+	"MUL tmp.y, tmp.y, spr.x; \n"
+	"ADD tmp.y, tmp.y, 0.5; \n"
+	"MAX tmp.y, tmp.y, 0.0; \n"
+	"MIN tmp.y, tmp.y, 1.0; \n"
+	"MUL outA.x, tmp.y, outCol.a; \n"
+	"# glowA = clamp(spr*(sd-0.5+outW+glowW)+0.5, 0,1) * glowColor.a * (1-outA) \n"
+	"ADD tmp.z, sd.x, widths.x; \n"
+	"ADD tmp.z, tmp.z, widths.y; \n"
+	"MUL tmp.z, tmp.z, spr.x; \n"
+	"ADD tmp.z, tmp.z, 0.5; \n"
+	"MAX tmp.z, tmp.z, 0.0; \n"
+	"MIN tmp.z, tmp.z, 1.0; \n"
+	"MUL tmp.z, tmp.z, glwCol.a; \n"
+	"SUB tmp.w, 1.0, outA.x; \n"
+	"MUL glowA.x, tmp.z, tmp.w; \n"
+	"# back-to-front composite: start with glow \n"
+	"MUL col.rgb, glwCol.rgb, glowA.x; \n"
+	"MOV a.x,     glowA.x; \n"
+	"# blend outline over glow \n"
+	"SUB tmp.x, 1.0, outA.x; \n"
+	"MUL col.rgb, col.rgb,    tmp.x; \n"
+	"MAD col.rgb, outCol.rgb, outA.x, col.rgb; \n"
+	"MUL a.x,     a.x,        tmp.x; \n"
+	"ADD a.x,     a.x,        outA.x; \n"
+	"# blend fill over (outline+glow) \n"
+	"SUB tmp.x, 1.0, fillA.x; \n"
+	"MUL col.rgb, col.rgb,          tmp.x; \n"
+	"MAD col.rgb, fragment.color.rgb, fillA.x, col.rgb; \n"
+	"MUL a.x,     a.x,               tmp.x; \n"
+	"ADD a.x,     a.x,               fillA.x; \n"
+	"MOV result.color.rgb, col; \n"
+	"MOV result.color.a,   a; \n"
 	"END \n"
 };
 
@@ -2255,6 +2442,7 @@ void QGL_InitFBO( void )
 void QGL_InitARB( void )
 {
 	ARB_UpdatePrograms();
+	MSDF_GLSL_Init();
 #ifdef USE_FBO
 	QGL_SetRenderScale( qtrue );
 	QGL_InitFBO();
@@ -2273,4 +2461,5 @@ void QGL_DoneARB( void )
 		ARB_ProgramDisable();
 		ARB_DeletePrograms();
 	}
+	MSDF_GLSL_Done();
 }

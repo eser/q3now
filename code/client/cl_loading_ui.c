@@ -319,6 +319,7 @@ static void Loading_DrawTopBar( void ) {
 	const char *gtName;
 	int scorelimit, timelimit, gt;
 	float px;
+	const char *serverInfo = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
 
 	// Dark semi-transparent bar
 	Loading_FillRect( 0, 0, vpW, barH, barColor );
@@ -328,9 +329,9 @@ static void Loading_DrawTopBar( void ) {
 					   cl_loadingTheme.accentColor );
 
 	// Separator dot and gametype + limits
-	gt = Cvar_VariableIntegerValue( "g_gametype" );
-	scorelimit = Cvar_VariableIntegerValue( "g_scorelimit" );
-	timelimit = Cvar_VariableIntegerValue( "g_timelimit" );
+	gt = atoi( Info_ValueForKey( serverInfo, "g_gametype" ) );
+	scorelimit = atoi( Info_ValueForKey( serverInfo, "g_scorelimit" ) );
+	timelimit = atoi( Info_ValueForKey( serverInfo, "g_timelimit" ) );
 
 	if ( gt >= 0 && gt < GT_MAX_GAME_TYPE ) {
 		gtName = bg_gametypelist[gt].name;
@@ -354,30 +355,30 @@ static void Loading_DrawTopBar( void ) {
 	px = pad + 5 * fontSize + vpW * 0.006f;  // after "q3now" (5 chars) + small gap
 	Loading_DrawStringFaded( (int)px, (int)pad, fontSize, info, muted );
 
-	// Bot difficulty dots (right side) — if g_autoBots is set
-	{
-		int autoBots = Cvar_VariableIntegerValue( "g_autoBots" );
-		if ( autoBots > 0 ) {
-			int skill = Cvar_VariableIntegerValue( "g_spSkill" );
-			int i;
-			float dotSize = vpH * 0.0083f;   // ~4/480
-			float dotGap  = vpW * 0.0109f;   // ~7/640
-			vec4_t dotOn, dotOff;
-			dotOn[0] = cl_loadingTheme.accentColor[0];
-			dotOn[1] = cl_loadingTheme.accentColor[1];
-			dotOn[2] = cl_loadingTheme.accentColor[2];
-			dotOn[3] = 0.9f;
-			dotOff[0] = cl_loadingTheme.accentColor[0];
-			dotOff[1] = cl_loadingTheme.accentColor[1];
-			dotOff[2] = cl_loadingTheme.accentColor[2];
-			dotOff[3] = 0.2f;
-			for ( i = 0; i < 5; i++ ) {
-				float dx = vpW * 0.9375f + i * dotGap;
-				Loading_FillRect( dx, vpH * 0.025f, dotSize, dotSize,
-							  ( i < skill ) ? dotOn : dotOff );
-			}
-		}
-	}
+	// // Bot difficulty dots (right side) — if g_autoBots is set
+	// {
+	// 	int autoBots = Cvar_VariableIntegerValue( "g_autoBots" );
+	// 	if ( autoBots > 0 ) {
+	// 		int skill = Cvar_VariableIntegerValue( "g_spSkill" );
+	// 		int i;
+	// 		float dotSize = vpH * 0.0083f;   // ~4/480
+	// 		float dotGap  = vpW * 0.0109f;   // ~7/640
+	// 		vec4_t dotOn, dotOff;
+	// 		dotOn[0] = cl_loadingTheme.accentColor[0];
+	// 		dotOn[1] = cl_loadingTheme.accentColor[1];
+	// 		dotOn[2] = cl_loadingTheme.accentColor[2];
+	// 		dotOn[3] = 0.9f;
+	// 		dotOff[0] = cl_loadingTheme.accentColor[0];
+	// 		dotOff[1] = cl_loadingTheme.accentColor[1];
+	// 		dotOff[2] = cl_loadingTheme.accentColor[2];
+	// 		dotOff[3] = 0.2f;
+	// 		for ( i = 0; i < 5; i++ ) {
+	// 			float dx = vpW * 0.9375f + i * dotGap;
+	// 			Loading_FillRect( dx, vpH * 0.025f, dotSize, dotSize,
+	// 						  ( i < skill ) ? dotOn : dotOff );
+	// 		}
+	// 	}
+	// }
 }
 
 /*
@@ -690,9 +691,10 @@ static void Loading_DrawMapInfo( void ) {
 	const float rw = vpW * 0.436f;     // right panel usable width (was 279/640)
 	float y = vpH * 0.1f;              // was 48/480
 	float pad = vpH * 0.0167f;         // general padding (~8/480)
+	const char *info = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 ) {
-		const char *mapCvar = Cvar_VariableString( "mapname" );
+		const char *mapCvar = Info_ValueForKey( info, "mapname" );
 		Com_DPrintf( "DIAG MapInfo: mapname=\"%s\" longName=\"%s\" author=\"%s\" "
 			"quote=\"%s\" sky=\"%s\" players=%d-%d weapon=\"%s\" items=%d hasMeta=%d\n",
 			mapCvar ? mapCvar : "(null)",
@@ -716,7 +718,7 @@ static void Loading_DrawMapInfo( void ) {
 
 	// --- Archetype tag (small label, cyan) ---
 	// Format: "GAMETYPE | ARCHETYPE"
-	gt = Cvar_VariableIntegerValue( "g_gametype" );
+	gt = atoi( Info_ValueForKey( info, "g_gametype" ) );
 	if ( gt >= 0 && gt < GT_MAX_GAME_TYPE ) {
 		gtName = bg_gametypelist[gt].name;
 	} else {
@@ -740,7 +742,7 @@ static void Loading_DrawMapInfo( void ) {
 	y = vpH * 0.129f;  // was 62/480
 	{
 		char mapUp[128];
-		const char *mapCvar = Cvar_VariableString( "mapname" );
+		const char *mapCvar = Info_ValueForKey( info, "mapname" );
 		int nameLen;
 		float charSize;
 

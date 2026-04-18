@@ -142,13 +142,38 @@ void NORETURN Sys_Quit( void ) {
 
 
 /*
+=================
+Sys_ReplaceNonPrintableChars
+=================
+*/
+static void Sys_ReplaceNonPrintableChars( char *str )
+{
+	char *p;
+
+	for ( p = str; *p != '\0'; p++ )
+	{
+		unsigned char c = (unsigned char)*p;
+		if ( !( c >= ' ' && c <= '~' ) && *p != '\n' )
+		{
+			*p = '.';
+		}
+	}
+}
+
+
+/*
 ==============
 Sys_Print
 ==============
 */
 void Sys_Print( const char *msg )
 {
-	Conbuf_AppendText( msg );
+	char clean_msg[ MAXPRINTMSG ];
+
+	Q_strncpyz( clean_msg, msg, sizeof( clean_msg ) );
+	Sys_ReplaceNonPrintableChars( clean_msg );
+
+	Conbuf_AppendText( clean_msg );
 }
 
 

@@ -23,8 +23,8 @@ void Crash_WriteReport( const char *reason, const char *address, const char *mod
 void Crash_InstallHandlers( void );
 
 // Per-VM state tracking (called by vm.c when VMs load / unload).
-void Crash_SaveQVMPointer( vmIndex_t vmIndex, vm_t *vm );
-void Crash_SaveQVMChecksum( vmIndex_t vmIndex, unsigned int crc32 );
+void Crash_SaveVMPointer( vmIndex_t vmIndex, vm_t *vm );
+void Crash_SaveVMChecksum( vmIndex_t vmIndex, unsigned int crc32 );
 
 // Async-signal-safe stack trace print (POSIX signal handlers).
 #if !defined( _WIN32 )

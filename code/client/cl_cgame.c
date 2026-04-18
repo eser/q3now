@@ -1052,11 +1052,11 @@ void CL_InitCGame( void ) {
 	// allow vertex lighting for in-game elements
 	re.VertexLighting( qtrue );
 
-	// load the dll or bytecode
+	// load native DLL or WASM module per vm_cgame cvar (0=native, 1=WASM interp, 2=WASM AOT)
 	interpret = Cvar_VariableIntegerValue( "vm_cgame" );
 	if ( cl_connectedToPureServer )
 	{
-		// if sv_pure is set we only allow qvms to be loaded
+		// pure server: force WASM (native DLLs bypass pak integrity checks)
 		if ( interpret != VMI_COMPILED && interpret != VMI_BYTECODE )
 			interpret = VMI_COMPILED;
 	}

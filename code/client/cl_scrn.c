@@ -423,6 +423,8 @@ This will be called twice if rendering in stereo mode
 ==================
 */
 static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
+	int64_t scr_t0 = Sys_Microseconds();
+	int scr_buckets_begin = cl_prof.cgr + cl_prof.whud + cl_prof.wui + cl_prof.cons;
 	qboolean uiFullscreen;
 
 	re.BeginFrame( stereoFrame );
@@ -454,21 +456,21 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 				cl_loadFading = qfalse;
 			}
 			if ( cgvm && cls.state == CA_PRIMED ) {
-				CL_CGameRendering( stereoFrame );
+				CL_PROF(cgr, CL_CGameRendering( stereoFrame ));
 			}
 			CL_DrawLoadingScreen();
 		} else if ( cls.state == CA_ACTIVE ) {
 			if ( cls.realtime - cl_loadProgress.startTime < 0 ) { // ( com_developer->integer ? 1500 : 350 )
 				// Still within minimum display time — draw loading screen at full opacity
 				cl_loadFadeAlpha = 1.0f;
-				CL_CGameRendering( stereoFrame );
+				CL_PROF(cgr, CL_CGameRendering( stereoFrame ));
 				CL_DrawLoadingScreen();
 			} else if ( !cl_loadFading ) {
 				// Minimum display time expired — start fade transition
 				cl_loadFading = qtrue;
 				cl_loadFadeAlpha = 1.0f;
 				// Render game frame underneath, loading screen overlay on top
-				CL_CGameRendering( stereoFrame );
+				CL_PROF(cgr, CL_CGameRendering( stereoFrame ));
 				CL_DrawLoadingScreen();
 			} else {
 				// Fade in progress — game renders first, loading screen dissolves on top
@@ -479,14 +481,14 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 					cl_loadFading = qfalse;
 					CL_LoadingScreenFinished();
 				}
-				CL_CGameRendering( stereoFrame );
+				CL_PROF(cgr, CL_CGameRendering( stereoFrame ));
 				if ( cl_loadFading ) {
 					CL_DrawLoadingScreen();
 				}
 #if FEAT_WIRED_UI
 				if ( !cl_loadFading && wiredHud->valid ) {
-					WiredUI_Refresh( cls.realtime );
-					WiredHud_Routine( cls.realtime );
+					CL_PROF(wui, WiredUI_Refresh( cls.realtime ));
+					CL_PROF(whud, WiredHud_Routine( cls.realtime ));
 				}
 #endif
 				if ( !cl_loadFading ) {
@@ -545,15 +547,15 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			// (localhost loading is handled by the priority block above)
 			CL_DrawLoadingScreen();
 			if ( cgvm && cls.state == CA_PRIMED ) {
-				CL_CGameRendering( stereoFrame );
+				CL_PROF(cgr, CL_CGameRendering( stereoFrame ));
 			}
 			break;
 		case CA_ACTIVE:
-			CL_CGameRendering( stereoFrame );
+			CL_PROF(cgr, CL_CGameRendering( stereoFrame ));
 #if FEAT_WIRED_UI
 			if ( wiredHud->valid ) {
-				WiredUI_Refresh( cls.realtime );
-				WiredHud_Routine( cls.realtime );
+				CL_PROF(wui, WiredUI_Refresh( cls.realtime ));
+				CL_PROF(whud, WiredHud_Routine( cls.realtime ));
 			}
 #endif
 			SCR_DrawDemoRecording();
@@ -566,16 +568,18 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 
 	// the menu draws next
 	if ( Key_GetCatcher( ) & KEYCATCH_UI && UI_VM_ACTIVE ) {
-		UI_CALL_REFRESH( cls.realtime );
+		CL_PROF(wui, UI_CALL_REFRESH( cls.realtime ));
 	}
 
 	// console draws next
-	Con_DrawConsole ();
+	CL_PROF(cons, Con_DrawConsole ());
 
 	// debug graph can be drawn on top of anything
 	if ( cl_debuggraph->integer || cl_timegraph->integer || cl_debugMove->integer ) {
 		SCR_DrawDebugGraph ();
 	}
+	cl_prof.scrextra += (int)(Sys_Microseconds() - scr_t0)
+	                  - (cl_prof.cgr + cl_prof.whud + cl_prof.wui + cl_prof.cons - scr_buckets_begin);
 }
 
 
@@ -642,9 +646,9 @@ void SCR_UpdateScreen( void ) {
 		}
 
 		if ( com_speeds->integer ) {
-			re.EndFrame( &time_frontend, &time_backend );
+			CL_PROF(endframe, re.EndFrame( &time_frontend, &time_backend ));
 		} else {
-			re.EndFrame( NULL, NULL );
+			CL_PROF(endframe, re.EndFrame( NULL, NULL ));
 		}
 	}
 

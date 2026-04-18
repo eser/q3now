@@ -32,7 +32,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define  DEFAULT_CONSOLE_WIDTH 78
 #define  MAX_CONSOLE_WIDTH 120
 
-#define  NUM_CON_TIMES  4
+#define  NUM_CON_TIMES  17
 
 #define  CON_TEXTSIZE   65536
 
@@ -164,6 +164,7 @@ static console_t  *s_con      = NULL;
 cvar_t		*con_conspeed;
 cvar_t		*con_autoclear;
 cvar_t		*con_notifytime;
+cvar_t		*con_notifylines;
 cvar_t		*con_scale;
 
 /* CNQ3 backport: per-element console colors.  Each cvar stores a hex
@@ -665,9 +666,12 @@ void Con_Init( void )
 		Com_Memset( s_con, 0, sizeof( console_t ) );
 	}
 
-	con_notifytime = Cvar_Get( "con_notifytime", "5", 0 );
+	con_notifytime = Cvar_Get( "con_notifytime", "5", CVAR_ARCHIVE );
 	Cvar_SetDescription( con_notifytime, "Defines how long messages (from players or the system) are on the screen (in seconds)." );
-	con_conspeed = Cvar_Get( "scr_conspeed", "3", 0 );
+	con_notifylines = Cvar_Get ( "con_notifylines", "3", CVAR_ARCHIVE );
+	Cvar_CheckRange(con_notifylines, "1", va( "%i", NUM_CON_TIMES - 1), CV_INTEGER);
+	Cvar_SetDescription( con_notifylines, "Defines the number of lines to display in the notify area." );
+	con_conspeed = Cvar_Get( "scr_conspeed", "3", CVAR_ARCHIVE );
 	Cvar_SetDescription( con_conspeed, "Console opening/closing scroll speed." );
 	con_autoclear = Cvar_Get("con_autoclear", "1", CVAR_ARCHIVE_ND);
 	Cvar_SetDescription( con_autoclear, "Enable/disable clearing console input text when console is closed." );
@@ -1119,8 +1123,10 @@ static void Con_DrawNotify( void )
 	re.SetColor( g_color_table[ currentColorIndex ] );
 
 	v = 0;
-	for (i= con.current-NUM_CON_TIMES+1 ; i<=con.current ; i++)
+	for (i= con.current-con_notifylines->integer ; i<=con.current ; i++)
 	{
+		int linelength = 0;
+
 		if (i < 0)
 			continue;
 		time = con.times[i % NUM_CON_TIMES];
@@ -1146,10 +1152,13 @@ static void Con_DrawNotify( void )
 				currentColorIndex = colorIndex;
 				Text_DrawChar( text[x] & 0xff, vxa + (x+1)*vcw, vy,
 				               FONT_MONO, con_textPointSize, g_color_table[ colorIndex ] );
+				linelength++;
 			}
 		}
 
-		v += (int)con_lineAdvance;
+		if (linelength > 0) {
+			v += (int)con_lineAdvance;
+		}
 	}
 
 	re.SetColor( NULL );

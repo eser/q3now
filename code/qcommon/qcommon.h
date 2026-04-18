@@ -339,9 +339,9 @@ VIRTUAL MACHINE
 typedef struct vm_s vm_t;
 
 typedef enum {
-	VMI_NATIVE     = 0,
-	VMI_BYTECODE   = 1,   // QVM interpreted (requires FEAT_LEGACY_QVM)
-	VMI_COMPILED   = 2,   // QVM JIT-compiled (requires FEAT_LEGACY_QVM)
+	VMI_NATIVE     = 0,   // native shared library (.dll/.dylib/.so)
+	VMI_BYTECODE   = 1,   // WASM interpreter (WAMR classic interp / fast interp)
+	VMI_COMPILED   = 2,   // WASM AOT/JIT (WAMR AOT)
 } vmInterpret_t;
 
 typedef enum {
@@ -1081,6 +1081,19 @@ extern	int		time_game;
 extern	int		time_frontend;
 extern	int		time_backend;		// renderer backend time
 
+typedef struct {
+	int store, send, resend, cgtime, sound, misc, userinfo;
+	int cgr, whud, wui, cons, scrextra, endframe;
+	int whud_load, whud_sync, whud_render, whud_score;
+	int wnframe, relstr, snapdg, chkpkt;
+} clProfile_t;
+extern clProfile_t cl_prof;
+
+#define CL_PROF(field, call) do { \
+	int64_t _clp_t0 = Sys_Microseconds(); call; \
+	cl_prof.field += (int)(Sys_Microseconds() - _clp_t0); \
+} while (0)
+
 extern	int		com_frameTime;
 
 #ifndef DEDICATED
@@ -1383,6 +1396,7 @@ qboolean Sys_GetFileStats( const char *filename, fileOffset_t *size, fileTime_t 
 
 void Sys_BeginProfiling( void );
 void Sys_EndProfiling( void );
+void Sys_SetMainThreadPolicy( void );
 
 qboolean Sys_LowPhysicalMemory( void );
 

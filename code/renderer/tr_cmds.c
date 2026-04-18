@@ -562,7 +562,20 @@ const glconfig_t *RE_GetConfig( void )
 void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
                          float glowWidth, const float *glowColor )
 {
-	/* MSDF outline not supported in GL1 renderer */
+	setMsdfOutlineCommand_t *cmd;
+	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
+	if ( !cmd ) return;
+	cmd->commandId = RC_SET_MSDF_OUTLINE;
+	cmd->outlineWidth = outlineWidth;
+	if ( outlineColor )
+		Com_Memcpy( cmd->outlineColor, outlineColor, sizeof( cmd->outlineColor ) );
+	else
+		Com_Memset( cmd->outlineColor, 0, sizeof( cmd->outlineColor ) );
+	cmd->glowWidth = glowWidth;
+	if ( glowColor )
+		Com_Memcpy( cmd->glowColor, glowColor, sizeof( cmd->glowColor ) );
+	else
+		Com_Memset( cmd->glowColor, 0, sizeof( cmd->glowColor ) );
 }
 
 

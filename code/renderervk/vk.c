@@ -500,6 +500,7 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 	qboolean mailbox_supported = qfalse;
 	qboolean immediate_supported = qfalse;
 	qboolean fifo_relaxed_supported = qfalse;
+	qboolean fifo_latest_ready_supported = qfalse;
 	int v;
 
 	VK_CHECK( qvkGetPhysicalDeviceSurfaceCapabilitiesKHR( physical_device, surface, &surface_caps ) );
@@ -543,6 +544,8 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 			immediate_supported = qtrue;
 		else if ( present_modes[i] == VK_PRESENT_MODE_FIFO_RELAXED_KHR )
 			fifo_relaxed_supported = qtrue;
+		else if ( present_modes[i] == VK_PRESENT_MODE_FIFO_LATEST_READY_EXT )
+			fifo_latest_ready_supported = qtrue;
 	}
 	if ( verbose ) {
 		ri.Printf( PRINT_ALL, "\n" );
@@ -565,6 +568,11 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 		} else if ( mailbox_supported ) {
 			present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
 			image_count = MAX( MIN_SWAPCHAIN_IMAGES_MAILBOX, surface_caps.minImageCount );
+		} else if ( fifo_latest_ready_supported ) {
+			/* macOS/MoltenVK: presents most-recently-completed frame at vblank,
+			   avoiding the 16ms FIFO stall while remaining tear-free */
+			present_mode = VK_PRESENT_MODE_FIFO_LATEST_READY_EXT;
+			image_count = MAX( MIN_SWAPCHAIN_IMAGES_FIFO_LATEST_READY, surface_caps.minImageCount );
 		} else if ( fifo_relaxed_supported ) {
 			present_mode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
 			image_count = MAX( MIN_SWAPCHAIN_IMAGES_FIFO, surface_caps.minImageCount );
@@ -10536,11 +10544,40 @@ void vk_end_frame( void )
 				vk_end_render_pass();
 			}
 
+		}
+
+		if ( !ri.CL_IsMinimized() )
+		{
 			vk.renderWidth = gls.windowWidth;
 			vk.renderHeight = gls.windowHeight;
 
 			vk.renderScaleX = 1.0;
 			vk.renderScaleY = 1.0;
+
+#ifdef __APPLE__
+			// MoltenVK/TBDR: subpass external deps don't flush tile cache across render passes.
+			// Explicit barrier ensures color_image writes (main or post_bloom) are visible
+			// to the gamma pass fragment shader before sampling begins.
+			{
+				VkImageMemoryBarrier b;
+				Com_Memset( &b, 0, sizeof( b ) );
+				b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+				b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+				b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				b.image = vk.color_image;
+				b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				b.subresourceRange.levelCount = 1;
+				b.subresourceRange.layerCount = 1;
+				qvkCmdPipelineBarrier( vk.cmd->command_buffer,
+					VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+					0, 0, NULL, 0, NULL, 1, &b );
+			}
+#endif
 
 			vk_begin_render_pass( vk.render_pass.gamma, vk.framebuffers.gamma[ vk.cmd->swapchain_image_index ], qfalse, vk.renderWidth, vk.renderHeight );
 			{
@@ -10597,9 +10634,11 @@ void vk_end_frame( void )
 	}
 
 	// End whatever render pass is active.
-	// When SMAA ran and we're minimized (no gamma pass started), there is
-	// no active render pass, so skip the end call to avoid a validation error.
-	if ( !( vk.smaa.active && vk.fboActive && ri.CL_IsMinimized() && !( backEnd.screenshotMask && vk.capture.image ) ) ) {
+	// Skip the call when no render pass is open:
+	//   (a) SMAA + FBO + minimized + no capture — SMAA already ended its pass.
+	//   (b) FBO + not minimized + acquire failed — gamma pass was never started.
+	if ( !( vk.fboActive && !vk.cmd->swapchain_image_acquired && !ri.CL_IsMinimized() ) &&
+	     !( vk.smaa.active && vk.fboActive && ri.CL_IsMinimized() && !( backEnd.screenshotMask && vk.capture.image ) ) ) {
 		vk_end_render_pass();
 	}
 
@@ -10609,7 +10648,7 @@ void vk_end_frame( void )
 	submit_info.pNext = NULL;
 	submit_info.commandBufferCount = 1;
 	submit_info.pCommandBuffers = &vk.cmd->command_buffer;
-	if ( !ri.CL_IsMinimized() ) {
+	if ( !ri.CL_IsMinimized() && vk.cmd->swapchain_image_acquired ) {
 #ifdef USE_UPLOAD_QUEUE
 		if ( vk.image_uploaded != VK_NULL_HANDLE ) {
 			waits[0] = vk.cmd->image_acquired;
@@ -10715,6 +10754,7 @@ void vk_present_frame( void )
 	vk.cmd_index++;
 	vk.cmd_index %= NUM_COMMAND_BUFFERS;
 	vk.cmd = &vk.tess[ vk.cmd_index ];
+
 }
 
 
@@ -11115,6 +11155,30 @@ qboolean vk_bloom( void )
 	}
 
 	vk_end_render_pass(); // end main
+
+#ifdef __APPLE__
+	// MoltenVK/TBDR: subpass external deps alone don't flush tile cache on Apple Silicon.
+	// Explicit barrier makes main-pass writes to color_image visible to bloom_extract's sampler.
+	{
+		VkImageMemoryBarrier b;
+		Com_Memset( &b, 0, sizeof( b ) );
+		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.image = vk.color_image;
+		b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		b.subresourceRange.levelCount = 1;
+		b.subresourceRange.layerCount = 1;
+		qvkCmdPipelineBarrier( vk.cmd->command_buffer,
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			0, 0, NULL, 0, NULL, 1, &b );
+	}
+#endif
 
 	// bloom extraction
 	vk_begin_bloom_extract_render_pass();

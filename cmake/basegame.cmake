@@ -1,8 +1,7 @@
-if(NOT BUILD_GAME_LIBRARIES AND NOT BUILD_GAME_QVMS)
+if(NOT BUILD_GAME_LIBRARIES)
     return()
 endif()
 
-include(utils/qvm_tools)
 include(utils/set_output_dirs)
 
 set(CGAME_SOURCES
@@ -12,7 +11,6 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/game/bg_gametypes.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c
-    ${SOURCE_DIR}/game/bg_lib.c
     ${SOURCE_DIR}/cgame/cg_alloc.c
     ${SOURCE_DIR}/cgame/cg_atmospheric.c
     ${SOURCE_DIR}/cgame/cg_chatfilter.c
@@ -45,7 +43,6 @@ set(CGAME_SOURCES
 )
 
 set(CGAME_BINARY_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.c)
-set(CGAME_QVM_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.asm)
 
 set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_main.c
@@ -66,7 +63,6 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/bg_gametypes.c
     ${SOURCE_DIR}/game/bg_pmove.c
     ${SOURCE_DIR}/game/bg_slidemove.c
-    ${SOURCE_DIR}/game/bg_lib.c
     ${SOURCE_DIR}/game/g_active.c
     ${SOURCE_DIR}/game/g_arenas.c
     ${SOURCE_DIR}/game/g_bot.c
@@ -104,7 +100,6 @@ set(GAME_SOURCES
 )
 
 set(GAME_BINARY_SOURCES ${SOURCE_DIR}/game/g_syscalls.c)
-set(GAME_QVM_SOURCES ${SOURCE_DIR}/game/g_syscalls.asm)
 
 # Legacy UI module (q3_ui) removed — Wired UI replaces it
 
@@ -140,24 +135,6 @@ if(BUILD_GAME_LIBRARIES)
     target_link_libraries(      ${GAME_MODULE_BINARY_BASEGAME} PRIVATE ${COMMON_LIBRARIES})
     set_target_properties(      ${GAME_MODULE_BINARY_BASEGAME} PROPERTIES OUTPUT_NAME "${GAME_MODULE_BINARY}${_GAME_ARCH}" PREFIX "")
     set_output_dirs(            ${GAME_MODULE_BINARY_BASEGAME} SUBDIRECTORY ${BASEGAME})
-
-endif()
-
-if(BUILD_GAME_QVMS)
-    set(CGAME_MODULE_QVM_BASEGAME ${CGAME_MODULE}qvm_${BASEGAME})
-    set(GAME_MODULE_QVM_BASEGAME ${GAME_MODULE}qvm_${BASEGAME})
-
-    add_qvm(${CGAME_MODULE_QVM_BASEGAME}
-        DEFINITIONS CGAME
-        OUTPUT_NAME ${CGAME_MODULE}
-        OUTPUT_DIRECTORY ${BASEGAME}/vm
-        SOURCES ${CGAME_SOURCES_BASEGAME} ${CGAME_QVM_SOURCES})
-
-    add_qvm(${GAME_MODULE_QVM_BASEGAME}
-        DEFINITIONS QAGAME
-        OUTPUT_NAME ${GAME_MODULE}
-        OUTPUT_DIRECTORY ${BASEGAME}/vm
-        SOURCES ${GAME_SOURCES_BASEGAME} ${GAME_QVM_SOURCES})
 
 endif()
 

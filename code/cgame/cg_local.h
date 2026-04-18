@@ -383,7 +383,7 @@ typedef struct {
 
 	vec3_t			color1;
 	vec3_t			color2;
-	
+
 	byte c1RGBA[4];
 	byte c2RGBA[4];
 
@@ -1348,8 +1348,6 @@ extern	vmCvar_t		cg_cameraMode;
 extern	vmCvar_t		cg_noTaunt;
 extern	vmCvar_t		cg_noProjectileTrail;
 #if FEAT_TA_UI
-extern	vmCvar_t		cg_redTeamName;
-extern	vmCvar_t		cg_blueTeamName;
 extern	vmCvar_t		cg_currentSelectedPlayer;
 extern	vmCvar_t		cg_currentSelectedPlayerName;
 #endif

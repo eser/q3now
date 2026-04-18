@@ -76,6 +76,10 @@ static const char *fallbackShader_msdf_vp =
 static const char *fallbackShader_msdf_fp =
 "uniform sampler2D u_DiffuseMap;\n"
 "uniform vec4      u_Color;\n"
+"uniform float     u_MsdfOutlineWidth;\n"
+"uniform vec4      u_MsdfOutlineColor;\n"
+"uniform float     u_MsdfGlowWidth;\n"
+"uniform vec4      u_MsdfGlowColor;\n"
 "\n"
 "varying vec2      var_Tex1;\n"
 "varying vec4      var_Color;\n"
@@ -86,17 +90,27 @@ static const char *fallbackShader_msdf_fp =
 "\n"
 "void main()\n"
 "{\n"
-"    vec3 msd = texture2D(u_DiffuseMap, var_Tex1).rgb;\n"
-"    float sd = median(msd.r, msd.g, msd.b);\n"
+"    vec3  msd = texture2D(u_DiffuseMap, var_Tex1).rgb;\n"
+"    float sd  = median(msd.r, msd.g, msd.b);\n"
 "\n"
-"    vec2 unitRange = vec2(u_Color.x) / vec2(u_Color.y, u_Color.z);\n"
-"    vec2 screenTexSize = vec2(1.0) / fwidth(var_Tex1);\n"
-"    float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);\n"
+"    vec2  unitRange    = vec2(u_Color.x) / vec2(u_Color.y, u_Color.z);\n"
+"    vec2  screenTex    = vec2(1.0) / fwidth(var_Tex1);\n"
+"    float spr          = max(0.5 * dot(unitRange, screenTex), 1.0);\n"
 "\n"
-"    float screenPxDistance = screenPxRange * (sd - 0.5);\n"
-"    float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);\n"
+"    float sd05         = sd - 0.5;\n"
+"    float fillA        = clamp(spr * sd05 + 0.5, 0.0, 1.0) * var_Color.a;\n"
+"    float outA         = clamp(spr * (sd05 + u_MsdfOutlineWidth)  + 0.5, 0.0, 1.0) * u_MsdfOutlineColor.a;\n"
+"    float glowRaw      = clamp(spr * (sd05 + u_MsdfOutlineWidth + u_MsdfGlowWidth) + 0.5, 0.0, 1.0);\n"
+"    float glowA        = glowRaw * u_MsdfGlowColor.a * (1.0 - outA);\n"
 "\n"
-"    gl_FragColor = vec4(var_Color.rgb, var_Color.a * opacity);\n"
+"    vec3  col = u_MsdfGlowColor.rgb * glowA;\n"
+"    float a   = glowA;\n"
+"    col = col * (1.0 - outA) + u_MsdfOutlineColor.rgb * outA;\n"
+"    a   = a   * (1.0 - outA) + outA;\n"
+"    col = col * (1.0 - fillA) + var_Color.rgb * fillA;\n"
+"    a   = a   * (1.0 - fillA) + fillA;\n"
+"\n"
+"    gl_FragColor = vec4(col, a);\n"
 "}\n";
 
 typedef struct uniformInfo_s
@@ -196,6 +210,11 @@ static uniformInfo_t uniformsInfo[] =
 	{ "u_AlphaTest", GLSL_INT },
 
 	{ "u_BoneMatrix", GLSL_MAT16_BONEMATRIX },
+
+	{ "u_MsdfOutlineWidth", GLSL_FLOAT },
+	{ "u_MsdfOutlineColor", GLSL_VEC4  },
+	{ "u_MsdfGlowWidth",    GLSL_FLOAT },
+	{ "u_MsdfGlowColor",    GLSL_VEC4  },
 };
 
 typedef enum

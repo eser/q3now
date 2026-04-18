@@ -899,11 +899,13 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			//
 			// draw
 			//
-			if ( tess.shader->msdf && GL_ProgramAvailable() ) {
-				// MSDF rendering: enable MSDF fragment program with screenPxRange
+			if ( tess.shader->msdf && MSDF_Available() ) {
+				// MSDF rendering: enable MSDF fragment program with screenPxRange + outline/glow
 				float screenPxRange = tess.shader->msdfDistanceRange * 2.0f;
 				if ( screenPxRange < 1.0f ) screenPxRange = 1.0f;
-				ARB_MSDF_Enable( screenPxRange );
+				ARB_MSDF_Enable( screenPxRange,
+				                 tr.msdfOutlineWidth, tr.msdfOutlineColor,
+				                 tr.msdfGlowWidth,   tr.msdfGlowColor );
 				R_DrawElements( input->numIndexes, input->indexes );
 				ARB_MSDF_Disable();
 			} else {

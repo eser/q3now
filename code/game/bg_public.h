@@ -74,9 +74,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define DEFAULT_SHOTGUN_COUNT		16
 #define DEFAULT_SHOTGUN_DOUBLE_BLAST_SPREAD	1000
 
-#define DEFAULT_REDTEAM_NAME		"Stroggs"
-#define DEFAULT_BLUETEAM_NAME		"Pagans"
-
 #if FEAT_SHOTGUN_PATTERN
 // Fixed pellet pattern: 1 center + 5 inner ring + 10 outer ring = 16 total
 // Each entry is { normalized_radius, base_angle_in_radians }.
@@ -123,11 +120,11 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 
 #define PLAYER_WIDTH		15
 #define	MINS_Z				-24
-#define DEFAULT_HEIGHT		32
+#define MAXS_Z				32
 #define	DEFAULT_VIEWHEIGHT	26
-#define CROUCH_HEIGHT		16
+#define CROUCH_MAXS_Z		16
 #define CROUCH_VIEWHEIGHT	12
-#define DEAD_HEIGHT			-8
+#define DEAD_MAXS_Z			-8
 #define	DEAD_VIEWHEIGHT		-16
 #define INVUL_RADIUS		42
 
@@ -260,6 +257,12 @@ typedef enum {
 #define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
+
+// pmove->waterlevel
+#define WATERLEVEL_NONE			0	// no water at all
+#define WATERLEVEL_FEET			1	// just the feet are under water
+#define WATERLEVEL_HALFWAY		2 	// wading / swimming at surface
+#define WATERLEVEL_SUBMERGED	3 	// fully underwater (max possible waterlevel)
 
 #define	MAXTOUCH	32
 typedef struct {

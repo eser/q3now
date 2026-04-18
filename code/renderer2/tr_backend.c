@@ -675,7 +675,7 @@ Stretches a raw 32 bit power of 2 bitmap image over the given screen rectangle.
 Used for cinematics.
 =============
 */
-void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty ) {
+void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, int client, qboolean dirty ) {
 	int			i, j;
 	int			start, end;
 	vec4_t quadVerts[4];
@@ -741,7 +741,7 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *
 	RB_InstantQuad2(quadVerts, texCoords);
 }
 
-void RE_UploadCinematic (int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty) {
+void RE_UploadCinematic (int w, int h, int cols, int rows, byte *data, int client, qboolean dirty) {
 	GLuint texture;
 
 	if (!tr.scratchImage[client])
@@ -2037,6 +2037,10 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		case RC_SET_MSDF_OUTLINE:
 		{
 			const setMsdfOutlineCommand_t *oc = (const setMsdfOutlineCommand_t *)data;
+			tr.msdfOutlineWidth = oc->outlineWidth;
+			Com_Memcpy( tr.msdfOutlineColor, oc->outlineColor, sizeof( tr.msdfOutlineColor ) );
+			tr.msdfGlowWidth = oc->glowWidth;
+			Com_Memcpy( tr.msdfGlowColor, oc->glowColor, sizeof( tr.msdfGlowColor ) );
 			data = (const void *)( oc + 1 );
 			break;
 		}

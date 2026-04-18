@@ -1276,6 +1276,11 @@ typedef struct {
 	int						coronaShader;
 #endif
 
+	float					msdfOutlineWidth;
+	float					msdfOutlineColor[4];
+	float					msdfGlowWidth;
+	float					msdfGlowColor[4];
+
 } trGlobals_t;
 
 extern backEndState_t	backEnd;
@@ -2102,7 +2107,10 @@ void R_BloomScreen( void );
 	QGL_VBO_PROCS;
 	QGL_FBO_PROCS;
 	QGL_FBO_OPT_PROCS;
+	QGL_MSDF_GLSL_PROCS;
 #undef GLE
+
+qboolean MSDF_Available( void );
 
 // VBO functions
 #ifdef USE_VBO
@@ -2176,7 +2184,8 @@ extern const char *fogInVPCode;
 qboolean ARB_CompileProgram( programType ptype, const char *text, GLuint program );
 void ARB_ProgramEnableExt( GLuint vertexProgram, GLuint fragmentProgram );
 
-void ARB_MSDF_Enable( float screenPxRange );
+void ARB_MSDF_Enable( float screenPxRange, float outlineWidth, const float *outlineColor,
+                      float glowWidth, const float *glowColor );
 void ARB_MSDF_Disable( void );
 
 void QGL_SetRenderScale( qboolean verbose );

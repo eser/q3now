@@ -190,7 +190,7 @@ gitem_t	bg_itemlist[] =
 		"sound/misc/w_pkup.opus",
         { "models/weapons2/gauntlet/gauntlet.md3",
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_gauntlet",
+/* icon */		"weapons/gauntlet/icon",
 /* pickup */	"Gauntlet",
 		0,
 		IT_WEAPON,
@@ -206,7 +206,7 @@ gitem_t	bg_itemlist[] =
 		"sound/misc/w_pkup.opus",
         { "models/weapons2/shotgun/shotgun.md3", 
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_shotgun",
+/* icon */		"weapons/shotgun/icon",
 /* pickup */	"Shotgun",
 		10,
 		IT_WEAPON,
@@ -222,7 +222,7 @@ gitem_t	bg_itemlist[] =
 		"sound/misc/w_pkup.opus",
         { "models/weapons2/machinegun/machinegun.md3", 
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_machinegun",
+/* icon */		"weapons/machinegun/icon",
 /* pickup */	"Machinegun",
 		40,
 		IT_WEAPON,
@@ -239,7 +239,7 @@ gitem_t	bg_itemlist[] =
         // { "models/weapons/proxmine/proxmine.md3", 
 		{ "models/weapons2/grenadel/grenadel.md3", 
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_grenade",
+/* icon */		"weapons/grenade_launcher/icon",
 /* pickup */	"Grenade Launcher",
 		10,
 		IT_WEAPON,
@@ -255,7 +255,7 @@ gitem_t	bg_itemlist[] =
 		"sound/misc/w_pkup.opus",
         { "models/weapons2/rocketl/rocketl.md3", 
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_rocket",
+/* icon */		"weapons/rocket_launcher/icon",
 /* pickup */	"Rocket Launcher",
 		10,
 		IT_WEAPON,
@@ -271,7 +271,7 @@ gitem_t	bg_itemlist[] =
 		"sound/misc/w_pkup.opus",
         { "models/weapons2/lightning/lightning.md3", 
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_lightning",
+/* icon */		"weapons/lightning_gun/icon",
 /* pickup */	"Lightning Gun",
 		100,
 		IT_WEAPON,
@@ -287,7 +287,7 @@ gitem_t	bg_itemlist[] =
 		"sound/misc/w_pkup.opus",
         { "models/weapons2/railgun/railgun.md3", 
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_railgun",
+/* icon */		"weapons/railgun/icon",
 /* pickup */	"Railgun",
 		10,
 		IT_WEAPON,
@@ -303,7 +303,7 @@ gitem_t	bg_itemlist[] =
 		"sound/misc/w_pkup.opus",
         { "models/weapons2/plasma/plasma.md3", 
 		NULL, NULL, NULL},
-/* icon */		"icons/iconw_plasma",
+/* icon */		"weapons/plasma_rifle/icon",
 /* pickup */	"Plasma Rifle",
 		50,
 		IT_WEAPON,
@@ -960,10 +960,8 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
         case IT_BAD:
             Com_Error( ERR_DROP, "BG_CanItemBeGrabbed: IT_BAD" );
         default:
-#ifndef Q3_VM
 #ifndef NDEBUG
           Com_Printf("BG_CanItemBeGrabbed: unknown enum %d\n", item->giType );
-#endif
 #endif
          break;
 	}

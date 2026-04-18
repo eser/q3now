@@ -200,21 +200,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #endif // __APPLE__
 
-// ================================ Q3VM ===================================
-
-#ifdef Q3_VM
-
-#define OS_STRING "q3vm"
-#define ID_INLINE
-
-#define ARCH_STRING "bytecode"
-#define Q3_LITTLE_ENDIAN
-
-#undef DLL_EXT
-#define DLL_EXT ".qvm"
-
-#endif
-
 // ================================ WASM ===================================
 
 #ifdef WASM_MODULE
@@ -316,8 +301,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define PRIz "I64"
 #elif (defined _WIN32)
 #define PRIz "I32"
-#elif (defined Q3_VM)
-#define PRIz ""
 #else
 #define PRIz "z"
 #endif

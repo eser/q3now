@@ -601,7 +601,7 @@ else
 _RUN_GAME_DEP := copy-all
 endif
 
-# VM mode: 0=native dylibs (default), 1=VM modules (sv_pure 1)
+# VM mode: 0=native dylibs (default), 1=WASM AOT modules with sv_pure
 ifeq ($(VM),1)
 _RUN_VM_ARGS := +set sv_pure 1 +set vm_game 2 +set vm_cgame 2
 else

@@ -775,6 +775,7 @@ qboolean WN_CheckPacket( netadr_t *from, byte *buf, int len )
 		WN_ClientCheckPacket( from, buf, len );
 #endif
 
+		cl_prof.chkpkt += (int)(Sys_Microseconds() - current_time);
 		return qtrue;
 	}
 

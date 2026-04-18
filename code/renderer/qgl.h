@@ -138,7 +138,31 @@ typedef ptrdiff_t GLintptrARB;
 typedef char GLchar;
 #define GL_MAX_TEXTURE_IMAGE_UNITS          0x8872
 #define GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS 0x8B4D
+#define GL_FRAGMENT_SHADER                  0x8B30
+#define GL_VERTEX_SHADER                    0x8B31
+#define GL_COMPILE_STATUS                   0x8B81
+#define GL_LINK_STATUS                      0x8B82
+#define GL_INFO_LOG_LENGTH                  0x8B84
 #endif
+
+#define QGL_MSDF_GLSL_PROCS \
+	GLE( GLuint, glCreateShader, GLenum type ) \
+	GLE( void,   glShaderSource, GLuint shader, GLsizei count, const GLchar *const *string, const GLint *length ) \
+	GLE( void,   glCompileShader, GLuint shader ) \
+	GLE( void,   glGetShaderiv, GLuint shader, GLenum pname, GLint *params ) \
+	GLE( void,   glGetShaderInfoLog, GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog ) \
+	GLE( GLuint, glCreateProgram, void ) \
+	GLE( void,   glAttachShader, GLuint program, GLuint shader ) \
+	GLE( void,   glLinkProgram, GLuint program ) \
+	GLE( void,   glGetProgramiv, GLuint program, GLenum pname, GLint *params ) \
+	GLE( void,   glGetProgramInfoLog, GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog ) \
+	GLE( void,   glDeleteShader, GLuint shader ) \
+	GLE( void,   glDeleteProgram, GLuint program ) \
+	GLE( void,   glUseProgram, GLuint program ) \
+	GLE( GLint,  glGetUniformLocation, GLuint program, const GLchar *name ) \
+	GLE( void,   glUniform1f, GLint location, GLfloat v0 ) \
+	GLE( void,   glUniform1i, GLint location, GLint v0 ) \
+	GLE( void,   glUniform4fv, GLint location, GLsizei count, const GLfloat *value )
 
 #ifndef GL_VERSION_3_0
 #define GL_VERSION_3_0 1

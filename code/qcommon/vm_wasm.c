@@ -19,7 +19,7 @@ GNU General Public License for more details.
 /*
  * vm_wasm.c — WASM VM backend via WAMR (WebAssembly Micro Runtime)
  *
- * Slots in as a peer to vm_interpreted.c and vm_x86.c:
+ * Sole non-native VM backend (QVM removed):
  *   VM_WasmLoad()    — load .aot or .wasm module
  *   VM_CallWasm()    — call vmMain
  *   VM_WasmDestroy() — cleanup
