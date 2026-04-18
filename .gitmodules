@@ -13,3 +13,9 @@
 [submodule "tools/msdf-atlas-gen"]
 	path = tools/msdf-atlas-gen
 	url = https://github.com/Chlumsky/msdf-atlas-gen.git
+[submodule "src/libs/zlib-ng"]
+	path = src/libs/zlib-ng
+	url = https://github.com/zlib-ng/zlib-ng.git
+[submodule "src/libs/libjpeg-turbo"]
+	path = src/libs/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git

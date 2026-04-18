@@ -171,6 +171,9 @@ cvar_t		*con_anim;
 cvar_t		*con_clock;
 cvar_t		*con_fade;
 cvar_t		*con_fps;
+cvar_t		*cl_consoleHeight;
+cvar_t		*cl_consoleType;
+cvar_t		*con_timestamp;
 
 /* CNQ3 backport: per-element console colors.  Each cvar stores a hex
    string in the form "RRGGBB" or "RRGGBBAA"; we parse them lazily every
@@ -689,12 +692,20 @@ void Con_Init( void )
 
 	con_anim  = Cvar_Get( "con_anim",  "1", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( con_anim,  "Animate console open/close. 0 = instant snap." );
+	cl_consoleHeight = Cvar_Get( "cl_consoleHeight", "0.5", CVAR_ARCHIVE );
+	Cvar_CheckRange( cl_consoleHeight, "0.1", "1", CV_FLOAT );
+	Cvar_SetDescription( cl_consoleHeight, "Fraction of screen height covered by the console when open (0.1-1.0)." );
+	cl_consoleType = Cvar_Get( "cl_consoleType", "0", CVAR_ARCHIVE );
+	Cvar_CheckRange( cl_consoleType, "0", "1", CV_INTEGER );
+	Cvar_SetDescription( cl_consoleType, "Console background style: 0=themed (con_colBG), 1=classic Q3 shader." );
 	con_clock = Cvar_Get( "con_clock", "1", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( con_clock, "Draw wall-clock HH:MM:SS in the top-right corner of the console." );
 	con_fade  = Cvar_Get( "con_fade",  "1", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( con_fade,  "Fade notify lines to transparent before they expire instead of popping." );
 	con_fps   = Cvar_Get( "con_fps",   "1", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( con_fps,   "Draw current FPS in the top-right corner of the console." );
+	con_timestamp = Cvar_Get( "con_timestamp", "1", CVAR_ARCHIVE_ND );
+	Cvar_SetDescription( con_timestamp, "Prefix each console line with a HH:MM:SS timestamp." );
 
 	/* CNQ3 backport: per-element console colors */
 	con_colBG     = Cvar_Get( "con_colBG",     "101013F6", CVAR_ARCHIVE );
@@ -914,6 +925,18 @@ void CL_ConsolePrint( const char *txt ) {
 				Con_NewLine();
 				Con_Fixup();
 				con.newline = qfalse;
+				if ( con_timestamp && con_timestamp->integer ) {
+					qtime_t now;
+					char ts[12];
+					int tslen, ti;
+					Com_RealTime( &now );
+					tslen = Com_sprintf( ts, sizeof(ts), "%02d:%02d:%02d ", now.tm_hour, now.tm_min, now.tm_sec );
+					for ( ti = 0; ti < tslen && con.x < con.linewidth; ti++ ) {
+						y = con.current % con.totallines;
+						con.text[y * con.linewidth + con.x] = (ColorIndex(COLOR_CYAN) << 8) | ( (unsigned char)ts[ti] );
+						con.x++;
+					}
+				}
 			}
 			// display character and advance
 			y = con.current % con.totallines;
@@ -1136,7 +1159,7 @@ static void Con_DrawNotify( void )
 	currentColorIndex = ColorIndex( COLOR_WHITE );
 	re.SetColor( g_color_table[ currentColorIndex ] );
 
-	v = 0;
+	v = cl_conYOffset->integer;
 	for (i= con.current-con_notifylines->integer ; i<=con.current ; i++)
 	{
 		int linelength = 0;
@@ -1351,8 +1374,12 @@ static void Con_DrawSolidConsole( float frac ) {
 	} else {
 		/* Prefer the per-element con_colBG when present; fall back to
 		   cl_conColor (legacy 4-integer RGBA form) and finally to the
-		   stock console background shader. */
-		if ( con_colBG && con_colBG->string[0] ) {
+		   stock console background shader. cl_consoleType 1 forces the
+		   classic Q3 shader regardless of color cvars. */
+		if ( cl_consoleType->integer == 1 ) {
+			re.SetColor( g_color_table[ ColorIndex( COLOR_WHITE ) ] );
+			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.consoleShader );
+		} else if ( con_colBG && con_colBG->string[0] ) {
 			re.SetColor( con_bgColor );
 			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.whiteShader );
 		} else if ( cl_conColor->string[0] ) {
@@ -1580,7 +1607,7 @@ void Con_RunConsole( void )
 {
 	// decide on the destination height of the console
 	if ( Key_GetCatcher( ) & KEYCATCH_CONSOLE )
-		con.finalFrac = 0.5;	// half screen
+		con.finalFrac = cl_consoleHeight->value;
 	else
 		con.finalFrac = 0.0;	// none visible
 	

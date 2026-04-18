@@ -80,6 +80,7 @@ typedef struct unz_file_info_internal_s
     unsigned long offset_curfile;/* relative offset of static header 4 unsigned chars */
 } unz_file_info_internal;
 
+#ifdef FEAT_LEGACY_ZLIB
 typedef void* (*alloc_func) (void* opaque, unsigned int items, unsigned int size);
 typedef void   (*free_func) (void* opaque, void* address);
 
@@ -107,6 +108,9 @@ typedef struct z_stream_s {
 } z_stream;
 
 typedef z_stream *z_streamp;
+#else
+#   include <zlib.h>  /* z_stream, alloc_func, free_func from zlib-ng compat */
+#endif /* FEAT_LEGACY_ZLIB */
 
 
 /* file_in_zip_read_info_s contain internal information about a file in zipfile,

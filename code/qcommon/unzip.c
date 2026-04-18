@@ -9,6 +9,17 @@
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+
+#ifndef FEAT_LEGACY_ZLIB
+#   include <zlib.h>  /* zlib-ng compat: provides z_stream, Z_OK, inflate, etc. */
+#   ifndef OF
+#       define OF(args) args
+#   endif
+#   ifndef F_OPEN
+#       define F_OPEN(name, mode) Sys_FOpen((name), (mode))
+#   endif
+#endif
+
 #include "unzip.h"
 
 /* unzip.h -- IO for uncompress .zip files using zlib 
@@ -50,6 +61,8 @@
       ftp://ftp.cdrom.com/pub/infozip/doc/appnote-970311-iz.zip
    PkWare has also a specification at :
       ftp://ftp.pkware.com/probdesc.zip */
+
+#ifdef FEAT_LEGACY_ZLIB
 
 /* zlib.h -- interface of the 'zlib' general purpose compression library
   version 1.1.3, July 9th, 1998
@@ -1048,6 +1061,8 @@ static void   zcfree  OF((voidp opaque, voidp ptr));
            (*((strm)->zalloc))((strm)->opaque, (items), (size))
 #define ZFREE(strm, addr)  (*((strm)->zfree))((strm)->opaque, (voidp)(addr))
 #define TRY_FREE(s, p) {if (p) ZFREE(s, p);}
+
+#endif /* FEAT_LEGACY_ZLIB */
 
 
 #if !defined(unix) && !defined(CASESENSITIVITYDEFAULT_YES) && \
@@ -2292,6 +2307,8 @@ extern int unzGetGlobalComment (unzFile file, char *szComment, uLong uSizeBuf)
 		*(szComment+s->gi.size_comment)='\0';
 	return (int)uReadThis;
 }
+
+#ifdef FEAT_LEGACY_ZLIB
 
 /* infblock.h -- header to use infblock.c
  * Copyright (C) 1995-1998 Mark Adler
@@ -4346,3 +4363,5 @@ void  zcfree (voidp opaque, voidp ptr)
     Z_Free(ptr);
     if (opaque) return; /* make compiler happy */
 }
+
+#endif /* FEAT_LEGACY_ZLIB */

@@ -170,6 +170,27 @@ void Sys_Print( const char *msg )
 {
 	char clean_msg[ MAXPRINTMSG ];
 
+	if ( Cvar_VariableIntegerValue( "con_timestamp" ) ) {
+		static qboolean atLineStart = qtrue;
+		static char stamped[ MAXPRINTMSG ];
+		qtime_t now;
+		char ts[12];
+		const char *src = msg;
+		char *w = stamped, *end = stamped + sizeof(stamped) - 1;
+		Com_RealTime( &now );
+		Com_sprintf( ts, sizeof(ts), "%02d:%02d:%02d ", now.tm_hour, now.tm_min, now.tm_sec );
+		while ( *src && w < end ) {
+			if ( atLineStart && *src != '\n' ) {
+				const char *t = ts;
+				while ( *t && w < end ) *w++ = *t++;
+				atLineStart = qfalse;
+			}
+			if ( ( *w++ = *src++ ) == '\n' ) atLineStart = qtrue;
+		}
+		*w = '\0';
+		msg = stamped;
+	}
+
 	Q_strncpyz( clean_msg, msg, sizeof( clean_msg ) );
 	Sys_ReplaceNonPrintableChars( clean_msg );
 

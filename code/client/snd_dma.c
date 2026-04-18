@@ -669,7 +669,9 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 		ch->fixed_origin = qfalse;
 	}
 
-	ch->master_vol = MASTER_VOL;
+	ch->master_vol = entchannel == CHAN_ANNOUNCER
+		? (int)( MASTER_VOL * s_announcerVolume->value )
+		: MASTER_VOL;
 	ch->entnum = entityNum;
 	ch->thesfx = sfx;
 	ch->startSample = START_SAMPLE_IMMEDIATE;

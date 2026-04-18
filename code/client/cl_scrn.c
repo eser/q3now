@@ -37,6 +37,12 @@ static cvar_t		*cl_graphheight;
 static cvar_t		*cl_graphscale;
 static cvar_t		*cl_graphshift;
 
+/* net-stats overlay — defined in cl_net_stats.c */
+void SCR_NetStatsInit( void );
+void SCR_DrawPing( void );
+void SCR_DrawSnaps( void );
+void SCR_DrawPackets( void );
+
 /*
 ================
 SCR_DrawNamedPic
@@ -399,6 +405,7 @@ void SCR_Init( void ) {
 	cl_graphscale = Cvar_Get ("graphscale", "1", CVAR_CHEAT);
 	cl_graphshift = Cvar_Get ("graphshift", "0", CVAR_CHEAT);
 
+	SCR_NetStatsInit();
 	scr_initialized = qtrue;
 }
 
@@ -578,6 +585,9 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	if ( cl_debuggraph->integer || cl_timegraph->integer || cl_debugMove->integer ) {
 		SCR_DrawDebugGraph ();
 	}
+	SCR_DrawPing();
+	SCR_DrawSnaps();
+	SCR_DrawPackets();
 	cl_prof.scrextra += (int)(Sys_Microseconds() - scr_t0)
 	                  - (cl_prof.cgr + cl_prof.whud + cl_prof.wui + cl_prof.cons - scr_buckets_begin);
 }

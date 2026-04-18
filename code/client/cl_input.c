@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/ui/cl_wired_ui.h"
 #include "../qcommon/wired/net/wn_public.h"
 
+extern int cl_sent; /* net-stats packet counter — defined in cl_net_stats.c */
+
 static unsigned frame_msec;
 static int old_com_frameTime;
 
@@ -904,6 +906,7 @@ void CL_WritePacket( int repeat ) {
 	cl.outPackets[ packetNum ].p_serverTime = oldcmd->serverTime;
 	cl.outPackets[ packetNum ].p_cmdNumber = cl.cmdNumber;
 	clc.lastPacketSentTime = cls.realtime;
+	cl_sent++;
 
 	if ( cl_showSend->integer ) {
 		Com_Printf( "%i ", buf.cursize );
