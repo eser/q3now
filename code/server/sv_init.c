@@ -318,6 +318,8 @@ static void SV_Startup( void ) {
 #if FEAT_IPV6
 	NET_JoinMulticast6();
 #endif
+
+	WN_Init();
 }
 
 
