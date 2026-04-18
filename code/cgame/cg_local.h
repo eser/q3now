@@ -201,6 +201,7 @@ typedef struct {
 	float			barrelAngle;
 	int				barrelTime;
 	qboolean		barrelSpinning;
+	int				barrelWeapon;	// weapon whose spin state is stored above; WP_NONE = uninitialised
 
     int				grappleFiring;
 } playerEntity_t;
@@ -490,7 +491,8 @@ typedef struct weaponInfo_s {
 	float			wiTrailTime;
 
 	sfxHandle_t		readySound;
-	sfxHandle_t		firingSound;
+	sfxHandle_t		firingPriSound;
+	sfxHandle_t		firingSecSound;
 } weaponInfo_t;
 
 

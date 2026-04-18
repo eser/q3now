@@ -348,7 +348,7 @@ void SpectatorThink( gentity_t *ent, usercmd_t *ucmd ) {
 	client->buttons = ucmd->buttons;
 
 	// attack button cycles through spectators
-	if ( ( client->buttons & BUTTON_ATTACK ) && ! ( client->oldbuttons & BUTTON_ATTACK ) ) {
+	if ( ( client->buttons & BUTTON_ATTACK_PRI ) && ! ( client->oldbuttons & BUTTON_ATTACK_PRI ) ) {
 		Cmd_FollowCycle_f( ent, 1 );
 	}
 }
@@ -371,7 +371,9 @@ qboolean ClientInactivityTimer( gclient_t *client ) {
 	} else if ( client->pers.cmd.forwardmove ||
 		client->pers.cmd.rightmove ||
 		client->pers.cmd.upmove ||
-		(client->pers.cmd.buttons & BUTTON_ATTACK) ) {
+		(client->pers.cmd.buttons & BUTTON_ATTACK_PRI) ||
+		(client->pers.cmd.buttons & BUTTON_ATTACK_SEC)
+	) {
 		client->inactivityTime = level.time + g_inactivity.integer * 1000;
 		client->inactivityWarning = qfalse;
 	} else if ( !client->pers.localClient ) {
@@ -434,7 +436,7 @@ ClientIntermissionThink
 */
 void ClientIntermissionThink( gclient_t *client ) {
 	client->ps.eFlags &= ~EF_TALK;
-	client->ps.eFlags &= ~EF_FIRING;
+	client->ps.eFlags &= ~(EF_FIRING_PRI | EF_FIRING_SEC);
     client->ps.eFlags &= ~EF_GRAPPLE;
 
 	// the level will exit when everyone wants to or after timeouts
@@ -442,7 +444,7 @@ void ClientIntermissionThink( gclient_t *client ) {
 	// swap and latch button actions
 	client->oldbuttons = client->buttons;
 	client->buttons = client->pers.cmd.buttons;
-	if ( client->buttons & ( BUTTON_ATTACK | BUTTON_USE_HOLDABLE ) & ( client->oldbuttons ^ client->buttons ) ) {
+	if ( client->buttons & ( BUTTON_ATTACK_PRI | BUTTON_ATTACK_SEC | BUTTON_USE_HOLDABLE ) & ( client->oldbuttons ^ client->buttons ) ) {
 		// this used to be an ^1 but once a player says ready, it should stick
 		client->readyToExit = 1;
 	}
@@ -490,11 +492,11 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
             G_Damage(ent, NULL, NULL, NULL, NULL, damage, DAMAGE_NO_ARMOR, MOD_FALLING);
 			break;
 
-		case EV_FIRE_WEAPON:
+		case EV_FIRE_WEAPON_PRI:
 			FireWeapon( ent, 0 );
 			break;
 
-		case EV_FIRE_WEAPON_ALT:
+		case EV_FIRE_WEAPON_SEC:
 			FireWeapon( ent, 1 );
 			break;
 
@@ -789,7 +791,7 @@ void ClientThink_real( gentity_t *ent ) {
 	// check for the hit-scan gauntlet, don't let the action
 	// go through as an attack unless it actually hits something
 	if ( client->ps.weapon == WP_GAUNTLET && !( ucmd->buttons & BUTTON_TALK ) &&
-		( ucmd->buttons & BUTTON_ATTACK ) && client->ps.weaponTime <= 0 ) {
+		( ucmd->buttons & BUTTON_ATTACK_PRI || ucmd->buttons & BUTTON_ATTACK_SEC ) && client->ps.weaponTime <= 0 ) {
 		pm.gauntletHit = CheckGauntletAttack( ent );
 	}
 
@@ -963,7 +965,7 @@ void ClientThink_real( gentity_t *ent ) {
 			}
 
 			// pressing attack or use is the normal respawn method
-			if ( ucmd->buttons & ( BUTTON_ATTACK | BUTTON_USE_HOLDABLE ) ) {
+			if ( ucmd->buttons & ( BUTTON_ATTACK_PRI | BUTTON_ATTACK_SEC | BUTTON_USE_HOLDABLE ) ) {
 				ClientRespawn( ent );
 			}
 		}
@@ -1069,8 +1071,9 @@ void SpectatorClientEndFrame( gentity_t *ent ) {
 					if ( cmd->rightmove > 0 )              keys |= KEYS_RIGHT;
 					if ( cmd->upmove > 0 )                 keys |= KEYS_JUMP;
 					if ( cmd->upmove < 0 )                 keys |= KEYS_CROUCH;
-					if ( cmd->buttons & BUTTON_ATTACK )    keys |= KEYS_ATTACK;
-					if ( cmd->buttons & BUTTON_USE_HOLDABLE ) keys |= KEYS_USE;
+					if ( cmd->buttons & BUTTON_ATTACK_PRI )    keys |= KEYS_ATTACK_PRI;
+					if ( cmd->buttons & BUTTON_ATTACK_SEC )    keys |= KEYS_ATTACK_SEC;
+					if ( cmd->buttons & BUTTON_USE_HOLDABLE )  keys |= KEYS_USE;
 					if ( cmd->buttons & BUTTON_WALKING )   keys |= KEYS_WALK;
 					if ( cmd->buttons & BUTTON_GESTURE )   keys |= KEYS_GESTURE;
 					ent->client->ps.stats[STAT_KEYS] = keys;

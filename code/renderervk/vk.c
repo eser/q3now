@@ -8566,8 +8566,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	frag_spec_info.pData = &frag_spec_data[0];
 
 	// MSDF fragment shader has its own specialization layout (constant_id=0 is
-	// msdf_distance_range, not alpha-test-function), so skip the generic spec
-	// constants and let the shader use its compiled-in default (4.0).
+	// msdf_distance_range, not alpha-test-function). Shader compiled-in default
+	// is 8.0, matching all shipped atlases (pxrange 8). Pass NULL to use default.
 	if ( def->shader_type == TYPE_MSDF )
 		shader_stages[1].pSpecializationInfo = NULL;
 	else

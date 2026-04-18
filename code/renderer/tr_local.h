@@ -2184,7 +2184,8 @@ extern const char *fogInVPCode;
 qboolean ARB_CompileProgram( programType ptype, const char *text, GLuint program );
 void ARB_ProgramEnableExt( GLuint vertexProgram, GLuint fragmentProgram );
 
-void ARB_MSDF_Enable( float screenPxRange, float outlineWidth, const float *outlineColor,
+void ARB_MSDF_Enable( float distanceRange, int atlasW, int atlasH,
+                      float outlineWidth, const float *outlineColor,
                       float glowWidth, const float *glowColor );
 void ARB_MSDF_Disable( void );
 

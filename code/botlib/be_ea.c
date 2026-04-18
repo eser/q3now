@@ -163,7 +163,7 @@ void EA_Attack(int client)
 
 	bi = &botinputs[client];
 
-	bi->actionflags |= ACTION_ATTACK;
+	bi->actionflags |= ACTION_ATTACK_PRI;
 } //end of the function EA_Attack
 //===========================================================================
 //

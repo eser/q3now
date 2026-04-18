@@ -409,8 +409,8 @@ typedef enum {
 #define	EF_BOUNCE_HALF		0x00000020		// for missiles
 #define	EF_AWARD_GAUNTLET	0x00000040		// draw a gauntlet sprite
 #define	EF_NODRAW			0x00000080		// may have an event, but no model (unspawned items)
-#define	EF_FIRING			0x00000100		// for lightning gun
-#define	EF_KAMIKAZE			0x00000200
+#define	EF_FIRING_PRI		0x00000100		// for lightning gun
+#define	EF_FIRING_SEC		0x00000200
 #define	EF_MOVER_STOP		0x00000400		// will push otherwise
 #define EF_AWARD_CAP		0x00000800		// draw the capture sprite
 #define	EF_TALK				0x00001000		// draw a talk balloon
@@ -425,6 +425,7 @@ typedef enum {
 #define EF_SPAWN_PROTECT	0x00200000		// spawn protection white shell (2B)
 #define EF_FROZEN			0x00400000		// frozen in freezetag — ice shell (7A)
 #define EF_GRENADE_BOUNCE	0x00800000		// Q1/Q2-style grenade bounce (0.5x normal restitution)
+#define EF_KAMIKAZE			0x01000000		// alt-fire button held and weapon has alt-fire
 
 
 #define	EF_BACKPACK			0x00000001		// PM: Backpack indicator bit
@@ -542,8 +543,8 @@ typedef enum {
 
 	EV_NOAMMO,
 	EV_CHANGE_WEAPON,
-	EV_FIRE_WEAPON,
-	EV_FIRE_WEAPON_ALT,
+	EV_FIRE_WEAPON_PRI,
+	EV_FIRE_WEAPON_SEC,
 
 	EV_USE_ITEM0,
 	EV_USE_ITEM1,

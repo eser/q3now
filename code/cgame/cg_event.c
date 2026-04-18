@@ -805,13 +805,13 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_CHANGE_WEAPON");
 		trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.selectSound );
 		break;
-	case EV_FIRE_WEAPON:
-		DEBUGNAME("EV_FIRE_WEAPON");
+	case EV_FIRE_WEAPON_PRI:
+		DEBUGNAME("EV_FIRE_WEAPON_PRI");
 		CG_FireWeapon( cent );
 		break;
 
-	case EV_FIRE_WEAPON_ALT:
-		DEBUGNAME("EV_FIRE_WEAPON_ALT");
+	case EV_FIRE_WEAPON_SEC:
+		DEBUGNAME("EV_FIRE_WEAPON_SEC");
 		CG_FireWeapon( cent );
 		// gauntlet lunge: play whoosh sound
 		if ( cent->currentState.weapon == WP_GAUNTLET ) {
