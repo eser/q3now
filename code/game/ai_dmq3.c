@@ -257,9 +257,10 @@ EntityIsShooting
 ==================
 */
 qboolean EntityIsShooting(aas_entityinfo_t *entinfo) {
-	if (entinfo->flags & EF_FIRING) {
+	if (entinfo->flags & EF_FIRING_PRI || entinfo->flags & EF_FIRING_SEC) {
 		return qtrue;
 	}
+
 	return qfalse;
 }
 
@@ -4032,7 +4033,7 @@ void BotCheckAttack(bot_state_t *bs) {
 		}
 
 		if ( useAlt ) {
-			trap_EA_Action(bs->client, ACTION_ATTACK_ALT);
+			trap_EA_Action(bs->client, ACTION_ATTACK_SEC);
 		} else {
 			trap_EA_Attack(bs->client);
 		}
@@ -5375,7 +5376,8 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 		case EV_GLOBAL_ITEM_PICKUP:
 		case EV_NOAMMO:
 		case EV_CHANGE_WEAPON:
-		case EV_FIRE_WEAPON:
+		case EV_FIRE_WEAPON_PRI:
+		case EV_FIRE_WEAPON_SEC:
 			//FIXME: either add to sound queue or mark player as someone making noise
 			break;
 		case EV_USE_ITEM0:

@@ -857,9 +857,9 @@ void BotInputToUserCommand(bot_input_t *bi, usercmd_t *ucmd, int delta_angles[3]
 		bi->actionflags &= ~ACTION_DELAYEDJUMP;
 	}
 	//set the buttons
-	if (bi->actionflags & ACTION_RESPAWN) ucmd->buttons = BUTTON_ATTACK;
-	if (bi->actionflags & ACTION_ATTACK) ucmd->buttons |= BUTTON_ATTACK;
-	if (bi->actionflags & ACTION_ATTACK_ALT) ucmd->buttons |= BUTTON_ATTACK_ALT;
+	if (bi->actionflags & ACTION_RESPAWN) ucmd->buttons = BUTTON_ATTACK_PRI;
+	if (bi->actionflags & ACTION_ATTACK_PRI) ucmd->buttons |= BUTTON_ATTACK_PRI;
+	if (bi->actionflags & ACTION_ATTACK_SEC) ucmd->buttons |= BUTTON_ATTACK_SEC;
 	if (bi->actionflags & ACTION_TALK) ucmd->buttons |= BUTTON_TALK;
 	if (bi->actionflags & ACTION_GESTURE) ucmd->buttons |= BUTTON_GESTURE;
 	if (bi->actionflags & ACTION_USE) ucmd->buttons |= BUTTON_USE_HOLDABLE;
@@ -952,7 +952,8 @@ void BotUpdateInput(bot_state_t *bs, int time, int elapsed_time) {
 	trap_EA_GetInput(bs->client, (float) time / 1000, &bi);
 	//respawn hack
 	if (bi.actionflags & ACTION_RESPAWN) {
-		if (bs->lastucmd.buttons & BUTTON_ATTACK) bi.actionflags &= ~(ACTION_RESPAWN|ACTION_ATTACK);
+		if (bs->lastucmd.buttons & (BUTTON_ATTACK_PRI | BUTTON_ATTACK_SEC | ACTION_USE))
+			bi.actionflags &= ~(ACTION_RESPAWN|ACTION_ATTACK_PRI|ACTION_ATTACK_SEC|ACTION_USE);
 	}
 	//convert the bot input to a usercmd
 	BotInputToUserCommand(&bi, &bs->lastucmd, bs->cur_ps.delta_angles, time);

@@ -1826,7 +1826,7 @@ qboolean PM_MG_Burst_Start( pmove_t *pm ) {
 	}
 	pm->ps->burstRoundsRemaining = maxRounds - 1;  // -1: first round fires now
 	PM_StartTorsoAnim( TORSO_ATTACK2 );
-	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	PM_AddEvent( EV_FIRE_WEAPON_SEC );
 	pm->ps->weaponstate = WEAPON_FIRING;
 
 	if ( pm->ps->burstRoundsRemaining > 0 ) {
@@ -1847,7 +1847,7 @@ qboolean PM_MG_Burst_Think( pmove_t *pm ) {
 		return qfalse;
 	}
 	// interruptible: cancel if alt-fire released
-	if ( !( pm->cmd.buttons & BUTTON_ATTACK_ALT ) ) {
+	if ( !( pm->cmd.buttons & BUTTON_ATTACK_SEC ) ) {
 		pm->ps->burstRoundsRemaining = 0;
 		pm->ps->weaponTime = 0;
 		pm->ps->weaponstate = WEAPON_READY;
@@ -1873,7 +1873,7 @@ qboolean PM_MG_Burst_Think( pmove_t *pm ) {
 	}
 	pm->ps->burstRoundsRemaining--;
 	PM_StartTorsoAnim( TORSO_ATTACK2 );
-	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	PM_AddEvent( EV_FIRE_WEAPON_SEC );
 	pm->ps->weaponstate = WEAPON_FIRING;
 
 	if ( pm->ps->burstRoundsRemaining > 0 ) {
@@ -1931,7 +1931,7 @@ qboolean PM_Gauntlet_Lunge_Think( pmove_t *pm ) {
 	}
 
 	// alt-fire button released: trigger lunge if charged enough
-	if ( !( pm->cmd.buttons & BUTTON_ATTACK_ALT ) ) {
+	if ( !( pm->cmd.buttons & BUTTON_ATTACK_SEC ) ) {
 		chargeTime = pm->cmd.serverTime - pm->ps->chargeStartTime;
 		pm->ps->chargeStartTime = 0;
 
@@ -1941,7 +1941,7 @@ qboolean PM_Gauntlet_Lunge_Think( pmove_t *pm ) {
 			VectorMA( pm->ps->velocity, GAUNTLET_LUNGE_SPEED, forward, pm->ps->velocity );
 
 			// fire event for server-side damage trace
-			PM_AddEvent( EV_FIRE_WEAPON_ALT );
+			PM_AddEvent( EV_FIRE_WEAPON_SEC );
 			PM_StartTorsoAnim( TORSO_ATTACK2 );
 
 			// set cooldown (blocks all fire for 1.5s)
@@ -1988,7 +1988,7 @@ qboolean PM_SG_DoubleBlast_Start( pmove_t *pm ) {
 	// fire first blast
 	pm->ps->doubleBlastState = 1;  // waiting for second blast
 	PM_StartTorsoAnim( TORSO_ATTACK2 );
-	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	PM_AddEvent( EV_FIRE_WEAPON_SEC );
 	pm->ps->weaponstate = WEAPON_FIRING;
 
 	// check if we have ammo for second blast
@@ -2033,7 +2033,7 @@ qboolean PM_SG_DoubleBlast_Think( pmove_t *pm ) {
 	}
 	pm->ps->doubleBlastState = 0;
 	PM_StartTorsoAnim( TORSO_ATTACK2 );
-	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	PM_AddEvent( EV_FIRE_WEAPON_SEC );
 	pm->ps->weaponstate = WEAPON_FIRING;
 
 	// apply full cooldown after second blast
@@ -2066,7 +2066,7 @@ qboolean PM_LG_ChainArc_Start( pmove_t *pm ) {
 	pm->ps->ammo[pm->ps->weapon] -= 2;
 
 	// Fire the first chain arc tick
-	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	PM_AddEvent( EV_FIRE_WEAPON_SEC );
 	PM_StartTorsoAnim( TORSO_ATTACK2 );
 	pm->ps->weaponstate = WEAPON_FIRING;
 	pm->ps->weaponTime += 50;  // same timing as primary LG
@@ -2081,7 +2081,7 @@ Handles 2x ammo drain by consuming extra cell per tick.
 */
 qboolean PM_LG_ChainArc_Think( pmove_t *pm ) {
 	// Only active while alt-fire is held
-	if ( !( pm->cmd.buttons & BUTTON_ATTACK_ALT ) ) {
+	if ( !( pm->cmd.buttons & BUTTON_ATTACK_SEC ) ) {
 		return qfalse;  // let release path handle cleanup
 	}
 
@@ -2098,7 +2098,7 @@ qboolean PM_LG_ChainArc_Think( pmove_t *pm ) {
 	pm->ps->ammo[pm->ps->weapon] -= 2;
 
 	// Generate fire event so server calls Attack_LightningGun_ChainArc()
-	PM_AddEvent( EV_FIRE_WEAPON_ALT );
+	PM_AddEvent( EV_FIRE_WEAPON_SEC );
 	pm->ps->weaponstate = WEAPON_FIRING;
 	pm->ps->weaponTime += 50;  // same timing as primary LG
 	PM_StartTorsoAnim( TORSO_ATTACK2 );
@@ -2126,7 +2126,9 @@ Generates weapon events and modifes the weapon counter
 ==============
 */
 static void PM_Weapon( void ) {
+	int 	attIdx, eventIdx;
 	int		addTime;
+	int		buttons;
 
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
@@ -2172,6 +2174,7 @@ static void PM_Weapon( void ) {
 		pm->ps->weaponTime -= pml.msec;
 	}
 
+	buttons = pm->cmd.buttons;
 	// check for weapon change
 	// can't change if weapon is firing, but can change
 	// again if lowering or raising
@@ -2248,7 +2251,7 @@ static void PM_Weapon( void ) {
 	}
 
 	// ignore +attackalt if the weapon has no alt-fire
-	if ( (pm->cmd.buttons & BUTTON_ATTACK_ALT) && !( pm->cmd.buttons & BUTTON_ATTACK ) ) {
+	if ( (buttons & BUTTON_ATTACK_SEC) && !( buttons & BUTTON_ATTACK_PRI ) ) {
 		if ( bg_weaponlist[pm->ps->weapon].attackAlt == ATT_NONE ) {
 			pm->ps->weaponTime = 0;
 			pm->ps->weaponstate = WEAPON_READY;
@@ -2257,7 +2260,7 @@ static void PM_Weapon( void ) {
 	}
 
 	// check for fire (primary or secondary)
-	if ( ! (pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_ATTACK_ALT)) ) {
+	if ( ! (buttons & (BUTTON_ATTACK_PRI | BUTTON_ATTACK_SEC)) ) {
 		// alt-fire release callback
 		{
 			int altIdx = bg_weaponlist[pm->ps->weapon].attackAlt;
@@ -2273,7 +2276,7 @@ static void PM_Weapon( void ) {
 	// start the animation even if out of ammo
 	if ( pm->ps->weapon == WP_GAUNTLET ) {
 		// skip gauntlet hit check for alt-fire (lunge charges regardless of hit)
-		if ( !( pm->cmd.buttons & BUTTON_ATTACK_ALT ) ) {
+		if ( !( buttons & BUTTON_ATTACK_SEC ) ) {
 			if ( !pm->gauntletHit ) {
 				pm->ps->weaponTime = 0;
 				pm->ps->weaponstate = WEAPON_READY;
@@ -2295,31 +2298,36 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
+	if ( buttons & BUTTON_ATTACK_PRI ) {
+		attIdx = bg_weaponlist[pm->ps->weapon].attack;
+		eventIdx = EV_FIRE_WEAPON_PRI;
+	} else if ( buttons & BUTTON_ATTACK_SEC ) {
+		attIdx = bg_weaponlist[pm->ps->weapon].attackAlt;
+		eventIdx = EV_FIRE_WEAPON_SEC;
+	} else {
+		return;
+	}
+
+	if ( attIdx == ATT_NONE ) {
+		return;
+	}
+
 	// take an ammo away if not infinite
 	if ( pm->ps->ammo[ pm->ps->weapon ] != -1 ) {
 		pm->ps->ammo[ pm->ps->weapon ]--;
 	}
 
-	// alt-fire start callback: initiate alt-fire behavior
-	if ( pm->cmd.buttons & BUTTON_ATTACK_ALT ) {
-		int altIdx = bg_weaponlist[pm->ps->weapon].attackAlt;
-		if ( altIdx != ATT_NONE && bg_attacklist[altIdx].onAltFireStart ) {
-			if ( bg_attacklist[altIdx].onAltFireStart( pm ) ) {
-				return;
-			}
+	if ( (buttons & BUTTON_ATTACK_SEC) && bg_attacklist[attIdx].onAltFireStart ) {
+		if ( bg_attacklist[attIdx].onAltFireStart( pm ) ) {
+			return;
 		}
 	}
 
-	// fire weapon (primary or secondary)
-	PM_AddEvent( (pm->cmd.buttons & BUTTON_ATTACK_ALT) ? EV_FIRE_WEAPON_ALT : EV_FIRE_WEAPON );
+	PM_AddEvent( eventIdx );
 
-    {
-        int attIdx = (pm->cmd.buttons & BUTTON_ATTACK_ALT) ?
-            bg_weaponlist[pm->ps->weapon].attackAlt :
-            bg_weaponlist[pm->ps->weapon].attack;
-        addTime = bg_attacklist[attIdx].reloadTime;
-    }
-    if (pm->ps->weapon == WP_RAILGUN) {
+	addTime = bg_attacklist[attIdx].reloadTime;
+
+	if (pm->ps->weapon == WP_RAILGUN) {
         pm->ps->stats[STAT_RAILTIME] = addTime; // CPM
     }
 
@@ -2486,16 +2494,21 @@ void PmoveSingle (pmove_t *pmove) {
 		pm->ps->eFlags &= ~EF_TALK;
 	}
 
-	// set the firing flag for continuous beam weapons
+	// EF_FIRING_PRI: primary button held; EF_FIRING_SEC: secondary button held.
+	// Both require ammo and a live player. Separate flags let cgame distinguish
+	// which mode drives beam/barrel effects without a separate latch field.
 	{
-		qboolean wantFire = ( pm->cmd.buttons & BUTTON_ATTACK ) ? qtrue : qfalse;
-		if ( !wantFire && ( pm->cmd.buttons & BUTTON_ATTACK_ALT ) && bg_weaponlist[pm->ps->weapon].attackAlt != ATT_NONE )
-			wantFire = qtrue;
-		if ( !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && pm->ps->pm_type != PM_NOCLIP
-			&& wantFire && pm->ps->ammo[ pm->ps->weapon ] ) {
-			pm->ps->eFlags |= EF_FIRING;
+		qboolean canFire = !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION
+			&& pm->ps->pm_type != PM_NOCLIP && pm->ps->ammo[ pm->ps->weapon ];
+		if ( canFire && ( pm->cmd.buttons & BUTTON_ATTACK_PRI ) ) {
+			pm->ps->eFlags |= EF_FIRING_PRI;
 		} else {
-			pm->ps->eFlags &= ~EF_FIRING;
+			pm->ps->eFlags &= ~EF_FIRING_PRI;
+		}
+		if ( canFire && ( pm->cmd.buttons & BUTTON_ATTACK_SEC ) && bg_weaponlist[pm->ps->weapon].attackAlt != ATT_NONE ) {
+			pm->ps->eFlags |= EF_FIRING_SEC;
+		} else {
+			pm->ps->eFlags &= ~EF_FIRING_SEC;
 		}
 	}
 
@@ -2509,7 +2522,7 @@ void PmoveSingle (pmove_t *pmove) {
 
 	// clear the respawned flag if attack and use are cleared
 	if ( pm->ps->stats[STAT_HEALTH] > 0 &&
-		!( pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_ATTACK_ALT | BUTTON_USE_HOLDABLE) ) ) {
+		!( pm->cmd.buttons & (BUTTON_ATTACK_PRI | BUTTON_ATTACK_SEC | BUTTON_USE_HOLDABLE) ) ) {
 		pm->ps->pm_flags &= ~PMF_RESPAWNED;
 	}
 

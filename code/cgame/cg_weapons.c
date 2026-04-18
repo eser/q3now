@@ -1124,7 +1124,8 @@ void CG_RegisterWeapon( int weaponNum ) {
 	case WP_GAUNTLET:
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 0 );
 
-		weaponInfo->firingSound = trap_S_RegisterSound( "sound/weapons/melee/fstrun.opus", qfalse );
+		weaponInfo->firingPriSound = trap_S_RegisterSound( "sound/weapons/melee/fstrun.opus", qfalse );
+		weaponInfo->firingSecSound = trap_S_RegisterSound( "sound/weapons/melee/fstrun.opus", qfalse );
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/melee/fstatck.opus", qfalse );
 		break;
 
@@ -1178,7 +1179,8 @@ void CG_RegisterWeapon( int weaponNum ) {
 		MAKERGB( weaponInfo->flashDlightColor, 0.6f, 0.6f, 1.0f );
 
 		weaponInfo->readySound = trap_S_RegisterSound( "sound/weapons/melee/fsthum.opus", qfalse );
-		weaponInfo->firingSound = trap_S_RegisterSound( "sound/weapons/lightning/lg_hum.opus", qfalse );
+		weaponInfo->firingPriSound = trap_S_RegisterSound( "sound/weapons/lightning/lg_hum.opus", qfalse );
+		weaponInfo->firingSecSound = trap_S_RegisterSound( "sound/weapons/lightning/lg_hum.opus", qfalse );
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/lightning/lg_fire.opus", qfalse );
 
 		// cgs.media.lightningShader = trap_R_RegisterShader( "lightningBoltNew");
@@ -1583,15 +1585,25 @@ static void CG_SpawnRailTrail(centity_t *cent, vec3_t origin) {
 
 /*
 ======================
-CG_MachinegunSpinAngle
+CG_BarrelSpinAngle
 ======================
 */
 #define		SPIN_SPEED	0.9
 #define		COAST_TIME	1000
-static float	CG_MachinegunSpinAngle( centity_t *cent ) {
+static float	CG_BarrelSpinAngle( centity_t *cent ) {
 	int		delta;
 	float	angle;
 	float	speed;
+
+	// EF_FIRING_* stays asserted across WEAPON_DROPPING/WEAPON_RAISING while
+	// the trigger is held, so weapon-change detection is the only reliable
+	// way to give a freshly-equipped weapon's barrel a clean starting state.
+	if ( cent->pe.barrelWeapon != cent->currentState.weapon ) {
+		cent->pe.barrelWeapon   = cent->currentState.weapon;
+		cent->pe.barrelSpinning = qfalse;
+		cent->pe.barrelAngle    = 0.0f;
+		cent->pe.barrelTime     = cg.time;
+	}
 
 	delta = cg.time - cent->pe.barrelTime;
 	if ( cent->pe.barrelSpinning ) {
@@ -1605,10 +1617,21 @@ static float	CG_MachinegunSpinAngle( centity_t *cent ) {
 		angle = cent->pe.barrelAngle + delta * speed;
 	}
 
-	if ( cent->pe.barrelSpinning == !(cent->currentState.eFlags & EF_FIRING) ) {
-		cent->pe.barrelTime = cg.time;
-		cent->pe.barrelAngle = AngleMod( angle );
-		cent->pe.barrelSpinning = !!(cent->currentState.eFlags & EF_FIRING);
+	if ( cent->pe.barrelSpinning == !(cent->currentState.eFlags & EF_FIRING_PRI || cent->currentState.eFlags & EF_FIRING_SEC) ) {
+		qboolean newSpinning = !!( cent->currentState.eFlags & EF_FIRING_PRI || cent->currentState.eFlags & EF_FIRING_SEC );
+		// Don't start spinning while the local player's weapon is still being raised
+		// or dropped — EF_FIRING_* leaks across weapon transitions.
+		if ( newSpinning && cent->currentState.number == cg.predictedPlayerEntity.currentState.number ) {
+			int ws = cg.predictedPlayerState.weaponstate;
+			if ( ws == WEAPON_RAISING || ws == WEAPON_DROPPING ) {
+				newSpinning = qfalse;
+			}
+		}
+		if ( cent->pe.barrelSpinning != newSpinning ) {
+			cent->pe.barrelTime    = cg.time;
+			cent->pe.barrelAngle   = AngleMod( angle );
+			cent->pe.barrelSpinning = newSpinning;
+		}
 	}
 
 	return angle;
@@ -1719,9 +1742,13 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
             cent->pe.grappleFiring = qtrue;
         }
 
-		if ( ( cent->currentState.eFlags & EF_FIRING ) && weapon->firingSound ) {
-			// lightning gun and guantlet make a different sound when fire is held down
-			trap_S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, weapon->firingSound );
+		if ( ( cent->currentState.eFlags & EF_FIRING_PRI ) && weapon->firingPriSound ) {
+			// lightning gun and guantlet make a different sound when primary fire is held down
+			trap_S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, weapon->firingPriSound );
+			cent->pe.lightningFiring = qtrue;
+		} else if ( ( cent->currentState.eFlags & EF_FIRING_SEC ) && weapon->firingSecSound ) {
+			// lightning gun and guantlet make a different sound when secondary fire is held down
+			trap_S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, weapon->firingSecSound );
 			cent->pe.lightningFiring = qtrue;
 		} else if ( weapon->readySound ) {
 			trap_S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, weapon->readySound );
@@ -1780,12 +1807,16 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 		barrel.hModel = weapon->barrelModel;
 		angles[YAW] = 0;
 		angles[PITCH] = 0;
-		angles[ROLL] = CG_MachinegunSpinAngle( cent );
+		angles[ROLL] = CG_BarrelSpinAngle( cent );
 		AnglesToAxis( angles, barrel.axis );
 
 		CG_PositionRotatedEntityOnTag( &barrel, &gun, weapon->weaponModel, "tag_barrel" );
 
 		CG_AddWeaponWithPowerups( cent, &barrel, cent->currentState.powerups );
+	} else {
+		// No barrel model: invalidate ownership so the next barrel-equipped weapon
+		// always gets a clean reset regardless of which weapon came before.
+		cent->pe.barrelWeapon = WP_NONE;
 	}
 
 	// make sure we aren't looking at cg.predictedPlayerEntity for LG
@@ -1799,11 +1830,10 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	}
 
 	// add the flash
-	if ( ( weaponNum == WP_LIGHTNING_GUN || weaponNum == WP_GAUNTLET )
-		&& ( nonPredictedCent->currentState.eFlags & EF_FIRING )
-		&& !( weaponNum == WP_GAUNTLET && cg.predictedPlayerState.chargeStartTime > 0 ) )
-	{
-		// continuous flash (suppress during gauntlet lunge charge)
+	if ( ( weaponNum == WP_LIGHTNING_GUN || weaponNum == WP_GAUNTLET ) && ( nonPredictedCent->currentState.eFlags & EF_FIRING_PRI ) ) {
+		// continuous flash
+	} else if ( ( weaponNum == WP_LIGHTNING_GUN ) && ( nonPredictedCent->currentState.eFlags & EF_FIRING_SEC ) ) {
+		// continuous flash
 	} else {
 		// impulse flash
         if (cg.time - cent->muzzleFlashTime > MUZZLE_FLASH_TIME && !cent->pe.railgunFlash) {
@@ -1936,7 +1966,7 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	if ( !cg_drawGun.integer ) {
 		vec3_t		origin;
 
-		if ( cg.predictedPlayerState.eFlags & EF_FIRING ) {
+		if ( cg.predictedPlayerState.eFlags & EF_FIRING_PRI || cg.predictedPlayerState.eFlags & EF_FIRING_SEC ) {
 			// special hack for lightning gun...
 			VectorCopy( cg.refdef.vieworg, origin );
 			VectorMA( origin, -8, cg.refdef.viewaxis[2], origin );
@@ -2339,7 +2369,7 @@ WEAPON EVENTS
 ================
 CG_FireWeapon
 
-Caused by an EV_FIRE_WEAPON event
+Caused by an EV_FIRE_WEAPON_* events
 ================
 */
 void CG_FireWeapon( centity_t *cent ) {

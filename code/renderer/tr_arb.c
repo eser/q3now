@@ -24,14 +24,14 @@ static int programCompiled = 0;
 static int programEnabled	= 0;
 
 // MSDF GLSL fallback — used when GL_ARB_fragment_program is unavailable (e.g. macOS core/compat profile).
-static GLuint msdfGlslProg       = 0;
-static GLint  msdfLoc_texture    = -1;
-static GLint  msdfLoc_scrPxRange = -1;
-static GLint  msdfLoc_outWidth   = -1;
-static GLint  msdfLoc_outColor   = -1;
-static GLint  msdfLoc_glwWidth   = -1;
-static GLint  msdfLoc_glwColor   = -1;
-static int    msdfGlslActive     = 0;
+static GLuint msdfGlslProg      = 0;
+static GLint  msdfLoc_texture   = -1;
+static GLint  msdfLoc_unitRange = -1;   // vec2: distanceRange / atlas_size_xy
+static GLint  msdfLoc_outWidth  = -1;
+static GLint  msdfLoc_outColor  = -1;
+static GLint  msdfLoc_glwWidth  = -1;
+static GLint  msdfLoc_glwColor  = -1;
+static int    msdfGlslActive    = 0;
 
 static const char *msdfGlslVP =
 	"#version 120\n"
@@ -41,10 +41,13 @@ static const char *msdfGlslVP =
 	"    gl_Position    = ftransform();\n"
 	"}\n";
 
+// Derivative-based screenPxRange matches the Vulkan msdf.frag formula exactly.
+// u_UnitRange = distanceRange / atlasSize (scalar; atlas is always square).
 static const char *msdfGlslFP =
 	"#version 120\n"
+	"#extension GL_OES_standard_derivatives : enable\n"
 	"uniform sampler2D u_Tex;\n"
-	"uniform float u_ScrPxRange;\n"
+	"uniform float u_UnitRange;\n"
 	"uniform float u_OutlineWidth;\n"
 	"uniform vec4  u_OutlineColor;\n"
 	"uniform float u_GlowWidth;\n"
@@ -53,9 +56,11 @@ static const char *msdfGlslFP =
 	"    return max(min(r, g), min(max(r, g), b));\n"
 	"}\n"
 	"void main() {\n"
-	"    vec4  msd   = texture2D(u_Tex, gl_TexCoord[0].st);\n"
+	"    vec2  uv    = gl_TexCoord[0].st;\n"
+	"    vec4  msd   = texture2D(u_Tex, uv);\n"
 	"    float sd    = median3(msd.r, msd.g, msd.b) - 0.5;\n"
-	"    float spr   = u_ScrPxRange;\n"
+	"    vec2  screenTexSize = vec2(1.0) / fwidth(uv);\n"
+	"    float spr   = max(0.5 * u_UnitRange * (screenTexSize.x + screenTexSize.y), 1.0);\n"
 	"    float fillA = clamp(spr * sd + 0.5, 0.0, 1.0) * gl_Color.a;\n"
 	"    float outA  = clamp(spr * (sd + u_OutlineWidth) + 0.5, 0.0, 1.0) * u_OutlineColor.a;\n"
 	"    float glwA  = clamp(spr * (sd + u_OutlineWidth + u_GlowWidth) + 0.5, 0.0, 1.0)\n"
@@ -186,22 +191,29 @@ void GL_ProgramEnable( void )
 
 /*
  * ARB_MSDF_Enable -- bind the MSDF fragment program and upload all params.
- * local[0] = (screenPxRange, -, -, -)
- * local[1] = (outlineWidth, glowWidth, -, -)
- * local[2] = outlineColor RGBA
- * local[3] = glowColor RGBA
+ * local[0].xy = unitRange (= distanceRange / atlasW, distanceRange / atlasH)
+ * local[1]    = (outlineWidth, glowWidth, -, -)
+ * local[2]    = outlineColor RGBA
+ * local[3]    = glowColor RGBA
+ *
+ * Note: ARBfp1.0 has no derivative instructions, so local[0].x is used directly as screenPxRange
+ * (equals distanceRange — correct at atlas-native render size; GLSL path uses fwidth() instead).
  */
-void ARB_MSDF_Enable( float screenPxRange, float outlineWidth, const float *outlineColor,
+void ARB_MSDF_Enable( float distanceRange, int atlasW, int atlasH,
+                      float outlineWidth, const float *outlineColor,
                       float glowWidth, const float *glowColor )
 {
 	static const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	const float *oc = outlineColor ? outlineColor : zero;
 	const float *gc = glowColor    ? glowColor    : zero;
+	// atlas is always square; use atlasW as size
+	float unitRange = atlasW > 0 ? distanceRange / (float)atlasW : 0.0078125f;
 
 	if ( programCompiled ) {
+		// ARBfp1.0 has no derivatives; pass distanceRange as screenPxRange (correct at atlas-native size)
 		ARB_ProgramEnable( DUMMY_VERTEX, MSDF_FRAGMENT );
 		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 0,
-			screenPxRange, 0.0f, 0.0f, 0.0f );
+			distanceRange, 0.0f, 0.0f, 0.0f );
 		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 1,
 			outlineWidth, glowWidth, 0.0f, 0.0f );
 		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 2,
@@ -211,7 +223,7 @@ void ARB_MSDF_Enable( float screenPxRange, float outlineWidth, const float *outl
 	} else if ( msdfGlslProg ) {
 		qglUseProgram( msdfGlslProg );
 		qglUniform1i ( msdfLoc_texture,    0 );
-		qglUniform1f ( msdfLoc_scrPxRange, screenPxRange );
+		qglUniform1f ( msdfLoc_unitRange,  unitRange );
 		qglUniform1f ( msdfLoc_outWidth,   outlineWidth );
 		qglUniform4fv( msdfLoc_outColor,   1, oc );
 		qglUniform1f ( msdfLoc_glwWidth,   glowWidth );
@@ -290,7 +302,7 @@ static void MSDF_GLSL_Init( void )
 	}
 
 	msdfLoc_texture    = qglGetUniformLocation( msdfGlslProg, "u_Tex" );
-	msdfLoc_scrPxRange = qglGetUniformLocation( msdfGlslProg, "u_ScrPxRange" );
+	msdfLoc_unitRange  = qglGetUniformLocation( msdfGlslProg, "u_UnitRange" );
 	msdfLoc_outWidth   = qglGetUniformLocation( msdfGlslProg, "u_OutlineWidth" );
 	msdfLoc_outColor   = qglGetUniformLocation( msdfGlslProg, "u_OutlineColor" );
 	msdfLoc_glwWidth   = qglGetUniformLocation( msdfGlslProg, "u_GlowWidth" );

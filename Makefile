@@ -317,14 +317,14 @@ build-fonts: $(MSDF_ATLAS_GEN)
 	$(FONT_WEIGHT_TRANSFORM) $(FONT_SRC)/entsans.ttf $(FONT_BUILD_TMP)/sansman-medium.ttf $(SANSMAN_MEDIUM_DELTA)
 	$(FONT_WEIGHT_TRANSFORM) $(FONT_SRC)/entsani.ttf $(FONT_BUILD_TMP)/sansman-italic.ttf $(SANSMAN_REGULAR_DELTA)
 	@echo "==> Generating MSDF atlases..."
-	$(MSDF_ATLAS_GEN) -font $(FONT_BUILD_TMP)/sansman-regular.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-regular.png -json $(FONT_OUT)/sansman-regular.json
-	$(MSDF_ATLAS_GEN) -font $(FONT_BUILD_TMP)/sansman-medium.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-medium.png -json $(FONT_OUT)/sansman-medium.json
-	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/entsans.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-bold.png -json $(FONT_OUT)/sansman-bold.json
-	$(MSDF_ATLAS_GEN) -font $(FONT_BUILD_TMP)/sansman-italic.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-italic.png -json $(FONT_OUT)/sansman-italic.json
-	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/entsani.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-bold-italic.png -json $(FONT_OUT)/sansman-bold-italic.json
-	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/Oxanium-Regular.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/oxanium.png -json $(FONT_OUT)/oxanium.json
-	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/Oxanium-Medium.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 48 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/oxanium-medium.png -json $(FONT_OUT)/oxanium-medium.json
-	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/ShareTechMono-Regular.ttf -charset $(FONT_SRC)/charset_console.txt -type msdf -format png -size 48 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sharetechmono.png -json $(FONT_OUT)/sharetechmono.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_BUILD_TMP)/sansman-regular.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 72 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-regular.png -json $(FONT_OUT)/sansman-regular.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_BUILD_TMP)/sansman-medium.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 72 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-medium.png -json $(FONT_OUT)/sansman-medium.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/entsans.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 72 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-bold.png -json $(FONT_OUT)/sansman-bold.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_BUILD_TMP)/sansman-italic.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 72 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-italic.png -json $(FONT_OUT)/sansman-italic.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/entsani.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 72 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sansman-bold-italic.png -json $(FONT_OUT)/sansman-bold-italic.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/Oxanium-Regular.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 72 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/oxanium.png -json $(FONT_OUT)/oxanium.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/Oxanium-Medium.ttf -charset $(FONT_SRC)/charset_latin.txt -type msdf -format png -size 72 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/oxanium-medium.png -json $(FONT_OUT)/oxanium-medium.json
+	$(MSDF_ATLAS_GEN) -font $(FONT_SRC)/ShareTechMono-Regular.ttf -charset $(FONT_SRC)/charset_console.txt -type msdf -format png -size 72 -pxrange 8 -dimensions 1024 1024 -imageout $(FONT_OUT)/sharetechmono.png -json $(FONT_OUT)/sharetechmono.json
 	@rm -rf $(FONT_BUILD_TMP)
 	@echo "==> Generated 10 MSDF font atlases in $(FONT_OUT)/"
 

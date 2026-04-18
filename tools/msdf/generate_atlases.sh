@@ -15,8 +15,8 @@ CHARSET_CONSOLE="${SCRIPT_DIR}/charset_console.txt"
 
 # Atlas generation parameters
 ATLAS_SIZE=1024
-FONT_SIZE=48
-DISTANCE_RANGE=4
+FONT_SIZE=72
+DISTANCE_RANGE=8
 TYPE=msdf
 
 # Check for msdf-atlas-gen

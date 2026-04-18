@@ -307,7 +307,7 @@ void Use_Shooter( gentity_t *ent, gentity_t *other, gentity_t *activator ) {
 	//	break;
 	}
 
-	G_AddEvent( ent, EV_FIRE_WEAPON, 0 );
+	G_AddEvent( ent, EV_FIRE_WEAPON_PRI, 0 );
 }
 
 

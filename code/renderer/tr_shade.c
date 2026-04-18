@@ -900,10 +900,11 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			// draw
 			//
 			if ( tess.shader->msdf && MSDF_Available() ) {
-				// MSDF rendering: enable MSDF fragment program with screenPxRange + outline/glow
-				float screenPxRange = tess.shader->msdfDistanceRange * 2.0f;
-				if ( screenPxRange < 1.0f ) screenPxRange = 1.0f;
-				ARB_MSDF_Enable( screenPxRange,
+				// MSDF rendering: pass atlas dimensions so the shader derives screenPxRange via fwidth()
+				image_t *atlasImg = tess.shader->stages[0]->bundle[0].image[0];
+				int atlasW = atlasImg ? atlasImg->uploadWidth  : 1024;
+				int atlasH = atlasImg ? atlasImg->uploadHeight : 1024;
+				ARB_MSDF_Enable( tess.shader->msdfDistanceRange, atlasW, atlasH,
 				                 tr.msdfOutlineWidth, tr.msdfOutlineColor,
 				                 tr.msdfGlowWidth,   tr.msdfGlowColor );
 				R_DrawElements( input->numIndexes, input->indexes );
