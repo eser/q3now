@@ -60,6 +60,7 @@ cvar_t	*cl_allowDownload;
 cvar_t	*cl_mapAutoDownload;
 #endif
 cvar_t	*cl_conXOffset;
+cvar_t	*cl_conYOffset;
 cvar_t	*cl_conColor;
 cvar_t	*cl_inGameVideo;
 
@@ -4028,6 +4029,8 @@ void CL_Init( void ) {
 
 	cl_conXOffset = Cvar_Get ("cl_conXOffset", "0", 0);
 	Cvar_SetDescription( cl_conXOffset, "Console notifications X-offset." );
+	cl_conYOffset = Cvar_Get ("cl_conYOffset", "0", 0);
+	Cvar_SetDescription( cl_conYOffset, "Console notifications Y-offset." );
 	cl_conColor = Cvar_Get( "cl_conColor", "", 0 );
 	Cvar_SetDescription( cl_conColor, "Console background color, set as R G B A values from 0-255, use with \\seta to save in config." );
 

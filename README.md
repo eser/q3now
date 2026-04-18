@@ -6,12 +6,22 @@ A modern fork of id Software's Quake III Arena engine (idTech 3).
 
 ## q3now vs Quake III Arena
 
-|  | Quake III Arena (1999) | q3now (2026) |
-|---|---|---|
-| **Packages** | Legacy pk3 | SW3Z archives with LZ4 compression |
-| **Renderer** | OpenGL 1.1 | Vulkan (+ OpenGL fallback) |
-| **VM System** | Legacy QVM | WASM via WAMR (+ legacy fallback) |
-| **Gameplay** | Vanilla Quake 3 | q3now competitive gameplay |
+|                  | Quake III Arena (1999)   | q3now (2026)                     |
+|------------------|--------------------------|----------------------------------|
+| Gameplay         | Vanilla Quake 3          | New q3now Competitive Gameplay   |
+| Model Formats    | MD3                      | IQM, MD3                         |
+| Image Formats    | JPEGLIB, Targa, PCX, BMP | PNG, JPEG Turbo, Targa, PCX, BMP |
+| Sound Formats    | Wave                     | Ogg Opus, Wave                   |
+| Archive Formats  | PK3                      | SW3z, PK3                        |
+| Compression      | ZIP Deflate              | LZ4, Zlib-NG                     |
+| Fonts            | Bitmap Fonts             | MSDF Fonts                       |
+| Network Protocol | UDP                      | HTTP/3                           |
+| Virtual Machine  | QVM                      | WASM                             |
+| Scripting        | Quake Scripts            | LUA Scripting (LuaJIT)           |
+| Window System    | Win32 + XLib             | SDL3                             |
+| Input System     | DirectInput + X11        | SDL3 Input                       |
+| Sound System     | DMA (DirectSound + OSS)  | miniaudio (WASAPI + PulseAudio)  |
+| Renderer         | OpenGL                   | Vulkan, OpenGL2, OpenGL          |
 
 ## Gameplay Features
 
@@ -54,7 +64,7 @@ A modern fork of id Software's Quake III Arena engine (idTech 3).
 - **Lens flares** — Lens flares on missiles and light areas
 - **Detailed scoreboards** — Keeps the weapon-specific stats
 
-## Engine
+## Engine Features
 
 Built on [Quake3e](https://github.com/ec-/Quake3e), with significant additions:
 
@@ -94,47 +104,6 @@ q3now uses a normalized menu format (`.wmenu` for menus, `.whud` for HUD definit
 
 ### Legacy compatibility
 Legacy `.menu`/`.hud` files are automatically converted at load time through a shim (coordinates divided by 640/480, textscale multiplied by 48). Third-party and Team Arena menu files continue to work without modification.
-
-### MSDF Fonts
-Three MSDF fonts are available:
-- **Sansman** (`"sansman"`) — Display/heading font
-- **Oxanium** (`"oxanium"`) — UI labels and body text
-- **Share Tech Mono** (`"console"`) — Console and monospace text
-
-Font atlases are generated at build time via `tools/msdf/generate_atlases.sh`. See `tools/msdf/fonts/README.md` for licensing.
-
-## Audio backend
-
-q3now uses [miniaudio](https://github.com/mackron/miniaudio) (single-header, vendored at
-`code/client/miniaudio.h`) as its single cross-platform audio output backend, replacing
-the legacy `win_snd.c` (DirectSound), `linux_snd.c` (ALSA/OSS), and `sdl_snd.c` (SDL2 Audio)
-that were inherited from the Quake3e fork.
-
-### Supported platforms
-
-- **Windows**: WASAPI (loaded dynamically by miniaudio)
-- **macOS**: CoreAudio + AudioToolbox
-- **Linux**: PulseAudio with ALSA fallback (PipeWire works through PulseAudio compat)
-
-### Cvars
-
-In addition to the existing `s_volume`, `s_musicvolume`, `s_separation`, `s_mixahead`,
-and `s_khz`, three new cvars expose miniaudio configuration:
-
-| Cvar | Default | Range | Purpose |
-|---|---|---|---|
-| `s_device` | `""` (system default) | any device name | Override audio output device. Empty string uses the system default. The Wired UI audio panel populates this from a live device dropdown. |
-| `s_latency` | `6` | `2`–`20` ms | Period size hint in milliseconds. Lower = lower latency, higher = more underrun headroom. Requires `snd_restart` to take effect. |
-| `s_underruns` | `0` | read-only counter | Increments when the audio callback runs out of painted data. Useful for diagnosing audio stuttering. |
-
-### Architecture
-
-The miniaudio backend follows the existing engine mixer's `SNDDMA_*` interface and stays
-strictly lock-free in the audio callback (verified by `tools/check_audio_callback.sh`).
-The mixer (`snd_mix.c`) and spatial audio model (`S_SpatializeOrigin`) are unchanged from
-their classic id Software / Quake3e form.
-
-The dedicated server build excludes the entire audio path via `#ifndef DEDICATED`.
 
 ## Vulkan renderer
 
@@ -200,23 +169,23 @@ git submodule update --init --recursive
 ```
 
 
-| Command                      | What it does                                                     |
-| ---------------------------- | ---------------------------------------------------------------- |
-| `make`                       | Configure + build Release (native + VM modules)                  |
-| `make build-debug`           | Configure + build Debug                                          |
-| `make create-launcher`       | Build the Go/Wails launcher                                      |
-| `make create-packs`          | Package modfiles/ + VM modules into mod pack                     |
-| `make run-launcher`          | Build + assemble + codesign + open launcher                      |
-| `make run-game`              | Build + assemble + run engine (main menu)                        |
-| `make run-game MAP=q3dm17`   | Build + run + load map                                           |
-| `make run-game DEV=1`        | Debug build, native dylibs, developer mode                       |
-| `make run-game VM=1`         | VM game modules (sv_pure 1)                                      |
-| `make check`                 | Verify VM modules, dylibs, mod pack, codesign, JIT entitlement   |
-| `make release`               | Full pipeline: check + assemble + codesign + DMG/tar.gz          |
-| `make bundle-dmg`            | Package signed `q3now-<version>-<arch>.dmg` (macOS)              |
-| `make bundle-tar`            | Package `q3now-<version>-<arch>.tar.gz` (Linux)                  |
-| `make bundle-docker`         | Build Docker image for dedicated server                          |
-| `make bench DEMO=four`       | Timedemo benchmark                                               |
+| Command                    | What it does                                                   |
+|----------------------------|----------------------------------------------------------------|
+| `make`                     | Configure + build Release (native + VM modules)                |
+| `make build-debug`         | Configure + build Debug                                        |
+| `make create-launcher`     | Build the Go/Wails launcher                                    |
+| `make create-packs`        | Package modfiles/ + VM modules into mod pack                   |
+| `make run-launcher`        | Build + assemble + codesign + open launcher                    |
+| `make run-game`            | Build + assemble + run engine (main menu)                      |
+| `make run-game MAP=q3dm17` | Build + run + load map                                         |
+| `make run-game DEV=1`      | Debug build, native dylibs, developer mode                     |
+| `make run-game VM=1`       | VM game modules (sv_pure 1)                                    |
+| `make check`               | Verify VM modules, dylibs, mod pack, codesign, JIT entitlement |
+| `make release`             | Full pipeline: check + assemble + codesign + DMG/tar.gz        |
+| `make bundle-dmg`          | Package signed `q3now-<version>-<arch>.dmg` (macOS)            |
+| `make bundle-tar`          | Package `q3now-<version>-<arch>.tar.gz` (Linux)                |
+| `make bundle-docker`       | Build Docker image for dedicated server                        |
+| `make bench DEMO=four`     | Timedemo benchmark                                             |
 
 **VM backend:** Set `USE_WASM=1` to compile VM game modules via WAMR.
 See [WASM.md](WASM.md) for architecture, build instructions, and design
@@ -253,18 +222,18 @@ QUIC transport is enabled by default. A self-signed TLS certificate is
 auto-generated in `/home/q3now/certs/` on first start. For production,
 mount a real cert via `Q3_WIREDNET_CERT` / `Q3_WIREDNET_KEY`.
 
-| Environment Variable | Engine Cvar            | Description                           |
-| -------------------- | ---------------------- | ------------------------------------- |
-| `Q3_HOSTNAME`        | `sv_hostname`          | Server name                           |
-| `Q3_MAXCLIENTS`      | `sv_maxclients`        | Max players                           |
-| `Q3_RCONPASSWORD`    | `sv_wiredRconPassword` | Wired RCON password                   |
-| `Q3_GAMETYPE`        | `g_gametype`           | 0=DM, 1=Duel, 3=TDM, 4=CTF           |
-| `Q3_SCORELIMIT`      | `g_scorelimit`         | Score limit                           |
-| `Q3_TIMELIMIT`       | `g_timelimit`          | Time limit (minutes)                  |
-| `Q3_WIREDNET_CERT`       | `sv_wirednetCertFile`      | Path to TLS certificate (PEM)         |
-| `Q3_WIREDNET_KEY`        | `sv_wirednetKeyFile`       | Path to TLS private key (PEM)         |
-| `Q3_EXEC`            | `+exec`                | Execute a config file                 |
-| `Q3_EXTRA_ARGS`      | _(verbatim)_           | Arbitrary engine arguments            |
+| Environment Variable | Engine Cvar            | Description                   |
+|----------------------|------------------------|-------------------------------|
+| `Q3_HOSTNAME`        | `sv_hostname`          | Server name                   |
+| `Q3_MAXCLIENTS`      | `sv_maxclients`        | Max players                   |
+| `Q3_RCONPASSWORD`    | `sv_wiredRconPassword` | Wired RCON password           |
+| `Q3_GAMETYPE`        | `g_gametype`           | 0=DM, 1=Duel, 3=TDM, 4=CTF    |
+| `Q3_SCORELIMIT`      | `g_scorelimit`         | Score limit                   |
+| `Q3_TIMELIMIT`       | `g_timelimit`          | Time limit (minutes)          |
+| `Q3_WIREDNET_CERT`   | `sv_wirednetCertFile`  | Path to TLS certificate (PEM) |
+| `Q3_WIREDNET_KEY`    | `sv_wirednetKeyFile`   | Path to TLS private key (PEM) |
+| `Q3_EXEC`            | `+exec`                | Execute a config file         |
+| `Q3_EXTRA_ARGS`      | _(verbatim)_           | Arbitrary engine arguments    |
 
 ## [Build Instructions](BUILD.md)
 

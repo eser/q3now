@@ -32,14 +32,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  * You may also wish to include "jerror.h".
  */
 
-#ifdef USE_SYSTEM_JPEG
+#ifdef FEAT_LEGACY_LIBJPEG
+#	define JPEG_INTERNALS
+#	include "jpeglib.h"
+#elif defined(USE_SYSTEM_JPEG)
 #	include <jpeglib.h>
 #	if JPEG_LIB_VERSION < 80 && !defined(MEM_SRCDST_SUPPORTED)
 #		error Need system libjpeg >= 80 or jpeg_mem_ support
 #	endif
 #else
-#	define JPEG_INTERNALS
-#	include "jpeglib.h"
+#	include "jpeglib.h"  /* libjpeg-turbo (default); drop-in compatible public API */
 #endif
 
 /* Catching errors, as done in libjpeg's example.c */

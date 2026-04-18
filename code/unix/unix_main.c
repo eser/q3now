@@ -840,6 +840,27 @@ void Sys_Print( const char *msg )
 	char printmsg[ MAXPRINTMSG ];
 	size_t len;
 
+	if ( Cvar_VariableIntegerValue( "con_timestamp" ) ) {
+		static qboolean atLineStart = qtrue;
+		static char stamped[ MAXPRINTMSG ];
+		qtime_t now;
+		char ts[12];
+		const char *src = msg;
+		char *w = stamped, *end = stamped + sizeof(stamped) - 1;
+		Com_RealTime( &now );
+		Com_sprintf( ts, sizeof(ts), "%02d:%02d:%02d ", now.tm_hour, now.tm_min, now.tm_sec );
+		while ( *src && w < end ) {
+			if ( atLineStart && *src != '\n' ) {
+				const char *t = ts;
+				while ( *t && w < end ) *w++ = *t++;
+				atLineStart = qfalse;
+			}
+			if ( ( *w++ = *src++ ) == '\n' ) atLineStart = qtrue;
+		}
+		*w = '\0';
+		msg = stamped;
+	}
+
 	if ( ttycon_on )
 	{
 		tty_Hide();

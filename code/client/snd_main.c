@@ -38,6 +38,7 @@ static arena_t *s_audioArena = NULL;
 
 cvar_t *s_volume;
 cvar_t *s_musicVolume;
+cvar_t *s_announcerVolume;
 cvar_t *s_doppler;
 cvar_t *s_muteWhenMinimized;
 cvar_t *s_muteWhenUnfocused;
@@ -468,6 +469,9 @@ void S_Init( void )
 	s_musicVolume = Cvar_Get( "s_musicVolume", "0.25", CVAR_ARCHIVE );
 	Cvar_CheckRange( s_musicVolume, "0", "1", CV_FLOAT );
 	Cvar_SetDescription( s_musicVolume, "Sets volume for in-game music only." );
+	s_announcerVolume = Cvar_Get( "s_announcerVolume", "1.0", CVAR_ARCHIVE );
+	Cvar_CheckRange( s_announcerVolume, "0", "2", CV_FLOAT );
+	Cvar_SetDescription( s_announcerVolume, "Volume multiplier for announcer sounds (0=silent, 1=normal, 2=double)." );
 	s_doppler = Cvar_Get( "s_doppler", "1", CVAR_ARCHIVE_ND );
 	Cvar_CheckRange( s_doppler, "0", "1", CV_INTEGER );
 	Cvar_SetDescription( s_doppler, "Enables doppler effect on moving projectiles." );

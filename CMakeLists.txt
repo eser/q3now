@@ -13,6 +13,8 @@ OPTION(USE_CURL "" ON)
 OPTION(USE_OPENGL "" ON)
 OPTION(USE_VULKAN "" ON)
 OPTION(USE_SYSTEM_JPEG "" OFF)
+OPTION(USE_JPEG_TURBO "" ON)
+OPTION(USE_ZLIB_NG "" ON)
 OPTION(USE_RENDERER_DLOPEN "" ON)
 OPTION(USE_WASM "Enable WASM VM backend via WAMR" OFF)
 OPTION(USE_LUA "Enable LuaJIT scripting" ON)
@@ -81,6 +83,27 @@ TARGET_COMPILE_DEFINITIONS(qcommon_ded PUBLIC DEDICATED)
 # LZ4 include path (for SW3Z archive reader)
 TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE src/libs/lz4)
 TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE src/libs/lz4)
+
+# ── zlib-ng (faster inflate for pk3 decompression) ────────────────
+# Replaces the embedded zlib in unzip.c via USE_ZLIB_NG guard.
+# Submodule: src/libs/zlib-ng  —  cmake -B build -DUSE_ZLIB_NG=ON
+IF(USE_ZLIB_NG)
+    SET(ZLIB_COMPAT         ON  CACHE BOOL "" FORCE)
+    SET(ZLIB_ENABLE_TESTS   OFF CACHE BOOL "" FORCE)
+    SET(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    ADD_SUBDIRECTORY(src/libs/zlib-ng EXCLUDE_FROM_ALL)
+    TARGET_INCLUDE_DIRECTORIES(qcommon     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/zlib-ng
+        ${CMAKE_CURRENT_BINARY_DIR}/src/libs/zlib-ng)
+    TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/zlib-ng
+        ${CMAKE_CURRENT_BINARY_DIR}/src/libs/zlib-ng)
+    TARGET_LINK_LIBRARIES(qcommon     PRIVATE zlibstatic)
+    TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE zlibstatic)
+ELSE()
+    TARGET_COMPILE_DEFINITIONS(qcommon     PRIVATE FEAT_LEGACY_ZLIB)
+    TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE FEAT_LEGACY_ZLIB)
+ENDIF()
 
 # WAMR (WebAssembly Micro Runtime) for WASM VM backend
 IF(USE_WASM)
@@ -280,23 +303,46 @@ ENDIF()
 
 #ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
 
-# jpeg
+# ── JPEG codec ────────────────────────────────────────────────────
+# Default: libjpeg-turbo submodule (src/libs/libjpeg-turbo).
+# Override: USE_SYSTEM_JPEG=ON uses the system libjpeg.
+# Legacy:   USE_JPEG_TURBO=OFF falls back to the embedded libjpeg in
+#           src/libs/jpeg (fenced with FEAT_LEGACY_LIBJPEG; remove later).
 IF(USE_SYSTEM_JPEG)
 	ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
-	find_package(JPEG REQUIRED)
-	TARGET_COMPILE_DEFINITIONS(client PRIVATE -DUSE_SYSTEM_JPEG)
-	TARGET_LINK_LIBRARIES(client ${JPEG_LIBRARIES})
+	FIND_PACKAGE(JPEG REQUIRED)
+	TARGET_COMPILE_DEFINITIONS(client PRIVATE USE_SYSTEM_JPEG)
+	TARGET_LINK_LIBRARIES(client PRIVATE ${JPEG_LIBRARIES})
+ELSEIF(USE_JPEG_TURBO)
+	# Submodule: src/libs/libjpeg-turbo
+	SET(ENABLE_SHARED        OFF CACHE BOOL   "" FORCE)
+	SET(WITH_TOOLS           OFF CACHE BOOL   "" FORCE)
+	SET(WITH_TESTS           OFF CACHE BOOL   "" FORCE)
+	SET(WITH_SIMD            ON  CACHE BOOL   "" FORCE)
+	SET(REQUIRE_SIMD         OFF CACHE BOOL   "" FORCE)
+	# libjpeg-turbo validates these install dirs; set defaults so subdirectory configure passes
+	SET(CMAKE_INSTALL_BINDIR     "bin"                     CACHE STRING "" FORCE)
+	SET(CMAKE_INSTALL_LIBDIR     "lib"                     CACHE STRING "" FORCE)
+	SET(CMAKE_INSTALL_INCLUDEDIR "include"                 CACHE STRING "" FORCE)
+	SET(CMAKE_INSTALL_DOCDIR     "share/doc/libjpeg-turbo" CACHE STRING "" FORCE)
+	SET(CMAKE_INSTALL_MANDIR     "share/man"               CACHE STRING "" FORCE)
+	ADD_SUBDIRECTORY(src/libs/libjpeg-turbo EXCLUDE_FROM_ALL)
+	ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
+	TARGET_INCLUDE_DIRECTORIES(client PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/src/libs/libjpeg-turbo/src
+		${CMAKE_CURRENT_SOURCE_DIR}/src/libs/libjpeg-turbo
+		${CMAKE_CURRENT_BINARY_DIR}/src/libs/libjpeg-turbo)
+	TARGET_LINK_LIBRARIES(client PRIVATE jpeg-static)
 ELSE()
+	# Legacy embedded libjpeg — fenced with FEAT_LEGACY_LIBJPEG; safe to remove
 	AUX_SOURCE_DIRECTORY(src/libs/jpeg JPEG_SRCS)
-	#ADD_LIBRARY(jpeg ${JPEG_SRCS})
-	#TARGET_LINK_LIBRARIES(client jpeg)
 	ADD_LIBRARY(client OBJECT ${CLIENT_SRCS} ${JPEG_SRCS})
+	TARGET_COMPILE_DEFINITIONS(client PRIVATE FEAT_LEGACY_LIBJPEG)
+	TARGET_INCLUDE_DIRECTORIES(client PRIVATE src/libs/jpeg)
 ENDIF()
 
-# jpeg (vendored) + Opus codec: client needs these include paths
-# wired bucket dirs: bare #include "cl_wired_*.h" works across buckets
+# Opus codec + wired bucket dirs: bare #include "cl_wired_*.h" works across buckets
 target_include_directories(client PRIVATE
-    src/libs/jpeg
     src/libs/opusfile/include
     src/libs/ogg/include
     src/libs/opus/include
