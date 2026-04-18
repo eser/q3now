@@ -742,17 +742,26 @@ static void Loading_DrawMapInfo( void ) {
 	y = vpH * 0.129f;  // was 62/480
 	{
 		char mapUp[128];
+		char shortUp[64];
 		const char *mapCvar = Info_ValueForKey( info, "mapname" );
+		const char *shortName;
 		int nameLen;
 		float charSize;
 
-		if ( mapCvar && mapCvar[0] ) {
-			Q_strncpyz( mapUp, mapCvar, sizeof(mapUp) );
+		shortName = ( mapCvar && mapCvar[0] ) ? mapCvar : cl_mapInfo.mapName;
+
+		if ( shortName[0] && cl_mapInfo.longName[0] ) {
+			Q_strncpyz( shortUp, shortName, sizeof(shortUp) );
+			Q_strupr( shortUp );
+			Com_sprintf( mapUp, sizeof(mapUp), "%s - %s", shortUp, cl_mapInfo.longName );
+		} else if ( shortName[0] ) {
+			Q_strncpyz( mapUp, shortName, sizeof(mapUp) );
+			Q_strupr( mapUp );
+		// } else if ( cl_mapInfo.longName[0] ) {
+		// 	Q_strncpyz( mapUp, cl_mapInfo.longName, sizeof(mapUp) );
 		} else {
-			name = cl_mapInfo.longName[0] ? cl_mapInfo.longName : cl_mapInfo.mapName;
-			Q_strncpyz( mapUp, name[0] ? name : "LOADING", sizeof(mapUp) );
+			Q_strncpyz( mapUp, "LOADING", sizeof(mapUp) );
 		}
-		Q_strupr( mapUp );
 		nameLen = (int)strlen( mapUp );
 
 		// Progressive scaling to fit panel width

@@ -263,12 +263,64 @@ gentity_t *SelectRandomFurthestSpawnPoint ( vec3_t avoidPoint, vec3_t origin, ve
 
 /*
 ===========
+SelectRandomTelefragSpawnPoint
+
+Q1/QW-style spawn: if any deathmatch spawn would telefrag a living
+player, pick one of those at random. Returns NULL when no spot
+would telefrag, so the caller can fall back to the furthest-spawn
+logic. Fills origin/angles identically to
+SelectRandomFurthestSpawnPoint so the caller contract is unchanged.
+============
+*/
+gentity_t *SelectRandomTelefragSpawnPoint( vec3_t origin, vec3_t angles, qboolean isbot ) {
+	gentity_t	*spot;
+	gentity_t	*spots[MAX_SPAWN_POINTS];
+	int			count, selection;
+
+	count = 0;
+	spot = NULL;
+
+	while ( (spot = G_Find( spot, FOFS(classname), "info_player_deathmatch" )) != NULL
+			&& count < MAX_SPAWN_POINTS ) {
+		if ( !SpotWouldTelefrag( spot ) ) {
+			continue;
+		}
+
+		if ( ((spot->flags & FL_NO_BOTS) && isbot) ||
+			 ((spot->flags & FL_NO_HUMANS) && !isbot) ) {
+			continue;
+		}
+
+		spots[count++] = spot;
+	}
+
+	if ( !count ) {
+		return NULL;
+	}
+
+	selection = rand() % count;
+	spot = spots[selection];
+
+	VectorCopy( spot->s.origin, origin );
+	origin[2] += 9;
+	VectorCopy( spot->s.angles, angles );
+	return spot;
+}
+
+/*
+===========
 SelectSpawnPoint
 
-Chooses a player start, deathmatch start, etc
+Chooses a player start, deathmatch start, etc.
+Prefers a telefrag opportunity (Q1/QW behavior); falls back to the
+furthest-from-avoid spawn when no spot would telefrag.
 ============
 */
 gentity_t *SelectSpawnPoint ( vec3_t avoidPoint, vec3_t origin, vec3_t angles, qboolean isbot ) {
+	gentity_t *spot = SelectRandomTelefragSpawnPoint( origin, angles, isbot );
+	if ( spot ) {
+		return spot;
+	}
 	return SelectRandomFurthestSpawnPoint( avoidPoint, origin, angles, isbot );
 
 	/*

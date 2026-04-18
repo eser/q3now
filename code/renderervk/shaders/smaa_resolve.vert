@@ -13,7 +13,7 @@ out gl_PerVertex { vec4 gl_Position; };
 void main() {
 	vec2 pos = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
 	gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
-	texcoord = vec2(pos.x, 1.0 - pos.y);
+	texcoord = pos;
 
 	offset = texcoord.xyxy + rtMetrics.xyxy * vec4(1.0, 0.0, 0.0, 1.0);
 }

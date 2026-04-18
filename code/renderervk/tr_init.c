@@ -107,6 +107,10 @@ cvar_t	*r_vbo;
 cvar_t	*r_fbo;
 cvar_t	*r_hdr;
 cvar_t	*r_bloom;
+cvar_t	*r_bloom_passes;
+#ifdef __APPLE__
+cvar_t	*r_vkApplePinkBarrier;
+#endif
 cvar_t	*r_bloom_threshold;
 cvar_t	*r_bloom_intensity;
 cvar_t	*r_bloom_threshold_mode;
@@ -1896,6 +1900,13 @@ static void R_Register( void )
 	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
+	r_bloom_passes = ri.Cvar_Get( "r_bloom_passes", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_bloom_passes, "1", "4", CV_INTEGER );
+	ri.Cvar_SetDescription( r_bloom_passes, "Number of bloom blur levels (1-4). Lower = fewer GPU render passes = higher FPS. Default 2 is a good balance between quality and performance." );
+#ifdef __APPLE__
+	r_vkApplePinkBarrier = ri.Cvar_Get( "r_vkApplePinkBarrier", "1", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_vkApplePinkBarrier, "MoltenVK: emit explicit tile-cache barrier between main and gamma passes. Disable (0) to test FPS impact; re-enable (1) if pink glitch appears." );
+#endif
 
 	r_ext_multisample = ri.Cvar_Get( "r_ext_multisample", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_multisample, "0", "64", CV_INTEGER );

@@ -652,6 +652,15 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 			Com_sprintf( moltenVKPath, sizeof( moltenVKPath ), "%s/libMoltenVK.dylib", Sys_DefaultAppPath() );
 			SDL_SetHint( SDL_HINT_VULKAN_LIBRARY, moltenVKPath );
 			Com_Printf( "SDL Vulkan: requesting MoltenVK from %s\n", moltenVKPath );
+			// MoltenVK default: synchronous queue submits (vkQueueSubmit blocks until GPU
+			// finishes, serializing CPU+GPU and halving throughput). Force async so the
+			// CPU and GPU overlap frames. Respect any explicit user override.
+			setenv( "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "0", 0 );
+			// MoltenVK default: present is encoded into the app's render CB, coupling
+			// CAMetalLayer drawable return to the app fence. Setting to 0 uses a separate
+			// internal CB for present, freeing nextDrawable for the next acquire immediately
+			// after present rather than after fence signal — eliminates acquire stalls.
+			setenv( "MVK_CONFIG_PRESENT_WITH_COMMAND_BUFFER", "0", 0 );
 		}
 #endif
 

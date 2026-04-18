@@ -28,6 +28,10 @@ static VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 VkDebugReportCallbackEXT vk_debug_callback = VK_NULL_HANDLE;
 #endif
 
+static int vk_diag_fence_ms, vk_diag_submit_ms, vk_diag_present_ms, vk_diag_acquire_ms, vk_diag_frames;
+static int vk_diag_drawcalls, vk_diag_pipebinds, vk_diag_msdf_draws, vk_diag_msdf_binds;
+static qboolean vk_diag_msdf_active;
+
 //
 // Vulkan API functions used by the renderer.
 //
@@ -803,10 +807,10 @@ static void vk_create_render_passes( void )
 
 	deps[2].srcSubpass = VK_SUBPASS_EXTERNAL;
 	deps[2].dstSubpass = 0;
-	deps[2].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;	// What pipeline stage is waiting on the dependency
-	deps[2].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;	// What pipeline stage is waiting on the dependency
-	deps[2].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;			// What access scopes are influence the dependency
-	deps[2].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;			// What access scopes are waiting on the dependency
+	deps[2].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	deps[2].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	deps[2].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	deps[2].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 	deps[2].dependencyFlags = 0;
 
 	if ( r_fbo->integer == 0 )
@@ -7438,7 +7442,20 @@ void vk_destroy_image_resources( VkImage *image, VkImageView *imageView )
 {
 	if ( image != NULL ) {
 		if ( *image != VK_NULL_HANDLE ) {
-			qvkDestroyImage( vk.device, *image, NULL );
+			// MoltenVK guard: swapchain images are owned by the swapchain and must
+			// not be passed to vkDestroyImage — doing so crashes via
+			// destroyPresentableSwapchainImage when handle aliasing occurs.
+			qboolean is_swapchain = qfalse;
+			uint32_t sci;
+			for ( sci = 0; sci < vk.swapchain_image_count; sci++ ) {
+				if ( *image == vk.swapchain_images[ sci ] ) {
+					is_swapchain = qtrue;
+					break;
+				}
+			}
+			if ( !is_swapchain ) {
+				qvkDestroyImage( vk.device, *image, NULL );
+			}
 			*image = VK_NULL_HANDLE;
 		}
 	}
@@ -9790,6 +9807,10 @@ void vk_bind_pipeline( uint32_t pipeline ) {
 	if ( vkpipe != vk.cmd->last_pipeline ) {
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipe );
 		vk.cmd->last_pipeline = vkpipe;
+		vk_diag_pipebinds++;
+		vk_diag_msdf_active = ( pipeline == vk.msdf_pipeline );
+		if ( vk_diag_msdf_active )
+			vk_diag_msdf_binds++;
 	}
 
 	vk_world.dirty_depth_attachment |= ( vk.pipelines[ pipeline ].def.state_bits & GLS_DEPTHMASK_TRUE );
@@ -9839,6 +9860,9 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 	} else {
 		qvkCmdDraw( vk.cmd->command_buffer, tess.numVertexes, 1, 0, 0 );
 	}
+	vk_diag_drawcalls++;
+	if ( vk_diag_msdf_active )
+		vk_diag_msdf_draws++;
 }
 
 
@@ -10344,22 +10368,35 @@ void vk_begin_frame( void )
 
 	vk.cmd = &vk.tess[ vk.cmd_index ];
 
-	if ( vk.cmd->waitForFence ) {
-		vk.cmd->waitForFence = qfalse;
-		res = qvkWaitForFences( vk.device, 1, &vk.cmd->rendering_finished_fence, VK_FALSE, 1e10 );
-		if ( res != VK_SUCCESS ) {
-			if ( res == VK_ERROR_DEVICE_LOST ) {
-				// silently discard previous command buffer
-				ri.Printf( PRINT_WARNING, "Vulkan: %s returned %s", "vkWaitForFences", vk_result_string( res ) );
+	{
+		int t_diag = ri.Milliseconds();
+		if ( vk.cmd->waitForFence ) {
+			vk.cmd->waitForFence = qfalse;
+			res = qvkWaitForFences( vk.device, 1, &vk.cmd->rendering_finished_fence, VK_FALSE, 1e10 );
+			if ( res != VK_SUCCESS ) {
+				if ( res == VK_ERROR_DEVICE_LOST ) {
+					// silently discard previous command buffer
+					ri.Printf( PRINT_WARNING, "Vulkan: %s returned %s", "vkWaitForFences", vk_result_string( res ) );
+				}
+				else {
+					ri.Error( ERR_FATAL, "Vulkan: %s returned %s", "vkWaitForFences", vk_result_string( res ) );
+				}
 			}
-			else {
-				ri.Error( ERR_FATAL, "Vulkan: %s returned %s", "vkWaitForFences", vk_result_string( res ) );
-			}
+			VK_CHECK( qvkResetFences( vk.device, 1, &vk.cmd->rendering_finished_fence ) );
 		}
-		VK_CHECK( qvkResetFences( vk.device, 1, &vk.cmd->rendering_finished_fence ) );
+		vk_diag_fence_ms += ri.Milliseconds() - t_diag;
+		if ( ++vk_diag_frames >= 200 ) {
+			ri.Printf( PRINT_DEVELOPER, "vk timing (200f avg): fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
+				vk_diag_fence_ms / 200, vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
+				vk_diag_drawcalls / 200, vk_diag_msdf_draws / 200,
+				vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200 );
+			vk_diag_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
+			vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
+		}
 	}
 
 	if ( !ri.CL_IsMinimized() && !vk.cmd->swapchain_image_acquired ) {
+		int t_acquire = ri.Milliseconds();
 		qboolean retry = qfalse;
 _retry:
 		res = qvkAcquireNextImageKHR( vk.device, vk.swapchain, 1 * 1000000000ULL, vk.cmd->image_acquired, VK_NULL_HANDLE, &vk.cmd->swapchain_image_index );
@@ -10376,6 +10413,7 @@ _retry:
 			}
 		}
 		vk.cmd->swapchain_image_acquired = qtrue;
+		vk_diag_acquire_ms += ri.Milliseconds() - t_acquire;
 	}
 
 	begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -10555,10 +10593,9 @@ void vk_end_frame( void )
 			vk.renderScaleY = 1.0;
 
 #ifdef __APPLE__
-			// MoltenVK/TBDR: subpass external deps don't flush tile cache across render passes.
-			// Explicit barrier ensures color_image writes (main or post_bloom) are visible
-			// to the gamma pass fragment shader before sampling begins.
-			{
+			// MoltenVK/TBDR: flush tile cache so gamma pass sees color_image writes (main pass or bloom composition).
+			// Gate under r_vkApplePinkBarrier to measure FPS impact; set to 0 to test, 1 to restore pink-glitch fix.
+			if ( vk.fboActive && r_vkApplePinkBarrier->integer ) {
 				VkImageMemoryBarrier b;
 				Com_Memset( &b, 0, sizeof( b ) );
 				b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -10663,18 +10700,6 @@ void vk_end_frame( void )
 
 			vk.rendering_finished = vk.cmd->rendering_finished2;
 			vk.image_uploaded = VK_NULL_HANDLE;
-		} else if ( vk.rendering_finished != VK_NULL_HANDLE ) {
-			waits[0] = vk.cmd->image_acquired;
-			waits[1] = vk.rendering_finished;
-			submit_info.waitSemaphoreCount = 2;
-			submit_info.pWaitSemaphores = &waits[0];
-			submit_info.pWaitDstStageMask = &wait_dst_stage_mask[0];
-			signals[0] = vk.swapchain_rendering_finished[ vk.cmd->swapchain_image_index ];
-			signals[1] = vk.cmd->rendering_finished2;
-			submit_info.signalSemaphoreCount = 2;
-			submit_info.pSignalSemaphores = &signals[0];
-
-			vk.rendering_finished = vk.cmd->rendering_finished2;
 		} else {
 			submit_info.waitSemaphoreCount = 1;
 			submit_info.pWaitSemaphores = &vk.cmd->image_acquired;
@@ -10697,7 +10722,11 @@ void vk_end_frame( void )
 		submit_info.pSignalSemaphores = NULL;
 	}
 
-	VK_CHECK( qvkQueueSubmit( vk.queue, 1, &submit_info, vk.cmd->rendering_finished_fence ) );
+	{
+		int t_submit = ri.Milliseconds();
+		VK_CHECK( qvkQueueSubmit( vk.queue, 1, &submit_info, vk.cmd->rendering_finished_fence ) );
+		vk_diag_submit_ms += ri.Milliseconds() - t_submit;
+	}
 	vk.cmd->waitForFence = qtrue;
 
 	// presentation may take undefined time to complete, we can't measure it in a reliable way
@@ -10732,7 +10761,11 @@ void vk_present_frame( void )
 
 	vk.cmd->swapchain_image_acquired = qfalse;
 
-	res = qvkQueuePresentKHR( vk.queue, &present_info );
+	{
+		int t_present = ri.Milliseconds();
+		res = qvkQueuePresentKHR( vk.queue, &present_info );
+		vk_diag_present_ms += ri.Milliseconds() - t_present;
+	}
 	switch ( res ) {
 		case VK_SUCCESS:
 			break;
@@ -11159,7 +11192,7 @@ qboolean vk_bloom( void )
 #ifdef __APPLE__
 	// MoltenVK/TBDR: subpass external deps alone don't flush tile cache on Apple Silicon.
 	// Explicit barrier makes main-pass writes to color_image visible to bloom_extract's sampler.
-	{
+	if ( r_vkApplePinkBarrier->integer ) {
 		VkImageMemoryBarrier b;
 		Com_Memset( &b, 0, sizeof( b ) );
 		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -11187,7 +11220,10 @@ qboolean vk_bloom( void )
 	qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 	vk_end_render_pass();
 
-	for ( i = 0; i < VK_NUM_BLOOM_PASSES*2; i+=2 ) {
+	{
+	const int num_bloom_passes = Com_Clamp( 1, VK_NUM_BLOOM_PASSES, r_bloom_passes->integer );
+
+	for ( i = 0; i < num_bloom_passes*2; i+=2 ) {
 		// horizontal blur
 		vk_begin_blur_render_pass( i+0 );
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.blur_pipeline[i+0] );
@@ -11224,7 +11260,9 @@ qboolean vk_bloom( void )
 
 		for ( i = 0; i < VK_NUM_BLOOM_PASSES; i++ )
 		{
-			dset[i] = vk.bloom_image_descriptor[(i+1)*2];
+			// pad unused slots with the last active (most diffuse) blur level
+			int src = (i < num_bloom_passes) ? i : (num_bloom_passes - 1);
+			dset[i] = vk.bloom_image_descriptor[(src+1)*2];
 		}
 
 		// blend downscaled buffers to main fbo
@@ -11232,6 +11270,7 @@ qboolean vk_bloom( void )
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_blend, 0, ARRAY_LEN(dset), dset, 0, NULL );
 		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 	}
+	} // num_bloom_passes scope
 
 	// invalidate pipeline state cache
 	//vk.cmd->last_pipeline = VK_NULL_HANDLE;
