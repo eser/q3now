@@ -1,11 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_elem_statusbar_icon.c — Generic bound icon element
-
-Looks up a named binding and renders its icon shader handle.
-The .hud file specifies: hudElement "statusbar_icon" bind "armor"
-cgame selects the right icon (e.g., heavy/combat/jacket armor) — client just draws.
-===========================================================================
+cl_wired_hud_elem_statusbar_icon.c — Generic bound icon element.
 */
 
 #include "../../../client.h"

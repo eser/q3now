@@ -1,28 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_elem_audio_waveform.c — Wired UI HUD element: audio waveform
-
-Renders a bar-graph visualization of recent audio RMS levels, pulled from
-the lock-free ring buffer that the miniaudio callback writes in
-snd_miniaudio.c (via S_GetRecentLevels).
-
-Layout:
-  - Reads up to WAVEFORM_BAR_COUNT recent RMS levels from the audio thread.
-  - Draws one vertical bar per level inside the element's rect.
-  - Bar height is proportional to level, scaled for perceptibility.
-  - Bar colour classifies the level:
-      level <  0.5  → green  (normal)
-      0.5 ≤ level < 0.8 → amber  (loud)
-      level >= 0.8 → red    (near-clipping)
-
-The element is stateless between frames: each routine call refreshes the
-level snapshot and redraws. When no audio is playing the levels are zero
-and the widget shows a flat baseline.
-
-Used primarily by the Wired UI audio settings panel (modfiles/ui/sound.wmenu)
-in combination with the `snd_test` console command which plays a 1 kHz
-stereo sine for ~2 seconds.
-===========================================================================
+cl_wired_hud_elem_audio_waveform.c — Bar-graph RMS waveform element (reads S_GetRecentLevels).
 */
 
 #include "../../../client.h"

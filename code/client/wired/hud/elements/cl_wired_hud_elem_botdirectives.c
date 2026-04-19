@@ -1,16 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_elem_botdirectives.c — Wired UI HUD: bot coaching directive list
-
-Renders a text panel listing every active bot and their current coaching
-directive.  Data is pushed from cgame via WiredStore key
-"game.bots.directives" each frame.
-
-Example output:
-  Sarge   ^3> Heavy Armor
-  Keel    ^1X Visor
-  Sorlag  ^5# Defend
-===========================================================================
+cl_wired_hud_elem_botdirectives.c — Bot coaching directive list from WiredStore.
 */
 
 #include "../../../client.h"
@@ -30,10 +19,7 @@ void* CG_ModernHUDElementBotDirectivesCreate(const modernhudConfig_t* config)
 {
 	modernHudElementBotDirectives_t* element;
 
-	ModernHUD_ELEMENT_INIT(element, config);
-
-	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
-	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
+	WHUD_ELEMENT_INIT_TEXT( element, config );
 
 	return element;
 }

@@ -1,14 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_scoreboard.c — Scoreboard widget renderers
-
-All layout is relative to the widget rect (ox, oy, ow, oh) received from
-the layout engine. Sizes and offsets are fractions of ow (width) or oh
-(height). No magic pixel numbers. No 640x480 references.
-
-ITEM_TYPE_SCORELIST  (type 20): FFA/TDM scoreboard with stat columns.
-ITEM_TYPE_DUELBOARD  (type 21): two-panel duel scoreboard.
-===========================================================================
+cl_wired_hud_scoreboard.c — Scoreboard widget renderers (SCORELIST and DUELBOARD)
 */
 
 #include "../../client.h"

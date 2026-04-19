@@ -1,11 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_elem_awards.c
-
-Renders a centered horizontal row of medal icons with scale-in/out animation.
-New medals scale up from zero; expiring medals scale down to zero and remaining
-medals shift toward center. Count displayed below each icon.
-===========================================================================
+cl_wired_hud_elem_awards.c — Animated medal icon row with scale-in/out and centering.
 */
 
 #include "../../../client.h"

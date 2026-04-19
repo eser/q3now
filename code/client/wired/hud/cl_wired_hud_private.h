@@ -439,7 +439,7 @@ typedef struct
     }while(0)
 
 // Alloc + init + wire text context; requires element to have a 'ctx' field of type modernhudTextContext_t.
-#define WHUD_ELEMENT_INIT_TEXT( E, T, CFG ) do { \
+#define WHUD_ELEMENT_INIT_TEXT( E, CFG ) do { \
     ModernHUD_ELEMENT_INIT( E, CFG ); \
     CG_ModernHUDTextMakeContext( &(E)->config, &(E)->ctx ); \
     CG_ModernHUDFillAndFrameForText( &(E)->config, &(E)->ctx ); \

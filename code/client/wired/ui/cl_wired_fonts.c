@@ -1,10 +1,5 @@
 /*
-===========================================================================
 cl_wired_fonts.c -- Wired UI font system (migrated from cg_moderntext.c)
-
-Provides: font loading, text compilation, WiredFont_DrawString.
-Runs in the CLIENT -- uses re.* directly instead of trap_R_*.
-===========================================================================
 */
 #include "../../client.h"
 #include "cl_wired_fonts.h"
@@ -126,64 +121,20 @@ const fontFace_t *WiredFont_Resolve(
 		}
 	}
 
-	/* Pass 2: nearest weight with CSS-like preference direction */
+	/* Pass 2: score = wrong-side penalty (1000) + abs(diff); pick lowest */
 	for ( j = 0; j < family->faceCount; j++ ) {
 		const fontFace_t *f = &family->faces[j];
-		int diff, dist;
+		int diff, score, pref;
 
-		if ( f->style != style ) {
-			continue;
-		}
+		if ( f->style != style ) continue;
 
-		diff = (int)f->weight - (int)weight;
-		dist = diff < 0 ? -diff : diff;
+		diff  = (int)f->weight - (int)weight;
+		pref  = ( (int)weight >= 500 ) ? 1 : -1;
+		score = ( ( diff > 0 ? 1 : -1 ) != pref ? 1000 : 0 ) + ( diff < 0 ? -diff : diff );
 
-		if ( !best ) {
-			best = f;
-			bestDist = dist;
-			continue;
-		}
-
-		if ( (int)weight >= 500 ) {
-			/* Prefer heavier (positive diff), then nearest */
-			if ( diff >= 0 && ( (int)best->weight - (int)weight ) < 0 ) {
-				/* f is heavier, best is lighter — take f */
-				best = f;
-				bestDist = dist;
-			} else if ( diff >= 0 && ( (int)best->weight - (int)weight ) >= 0 ) {
-				/* Both heavier — pick nearest */
-				if ( dist < bestDist ) {
-					best = f;
-					bestDist = dist;
-				}
-			} else if ( diff < 0 && ( (int)best->weight - (int)weight ) < 0 ) {
-				/* Both lighter — pick nearest */
-				if ( dist < bestDist ) {
-					best = f;
-					bestDist = dist;
-				}
-			}
-			/* diff < 0 and best is heavier: keep best */
-		} else {
-			/* Prefer lighter (negative diff), then nearest */
-			if ( diff <= 0 && ( (int)best->weight - (int)weight ) > 0 ) {
-				/* f is lighter, best is heavier — take f */
-				best = f;
-				bestDist = dist;
-			} else if ( diff <= 0 && ( (int)best->weight - (int)weight ) <= 0 ) {
-				/* Both lighter — pick nearest */
-				if ( dist < bestDist ) {
-					best = f;
-					bestDist = dist;
-				}
-			} else if ( diff > 0 && ( (int)best->weight - (int)weight ) > 0 ) {
-				/* Both heavier — pick nearest */
-				if ( dist < bestDist ) {
-					best = f;
-					bestDist = dist;
-				}
-			}
-			/* diff > 0 and best is lighter: keep best */
+		if ( !best || score < bestDist ) {
+			best     = f;
+			bestDist = score;
 		}
 	}
 
@@ -247,39 +198,38 @@ qboolean CG_Hex16GetColor(const char *str, float *color)
 
 int WiredFont_IdFromName( const char *name )
 {
-	if ( !name || !name[0] ) {
-		return FONT_DISPLAY;
+	static const struct { const char *k; int id; } map[] = {
+		{ "defaultSerifFont",       FONT_DISPLAY        },
+		{ "defaultSerifFontItalic", FONT_DISPLAY_ITALIC },
+		{ "defaultSerifFontBold",   FONT_DISPLAY_BOLD   },
+		{ "defaultSansFont",        FONT_UI             },
+		{ "defaultSansFontMedium",  FONT_UI_MEDIUM      },
+		{ "defaultMonoFont",        FONT_MONO           },
+		{ "display",                FONT_DISPLAY        },
+		{ "displayItalic",          FONT_DISPLAY_ITALIC },
+		{ "displayBold",            FONT_DISPLAY_BOLD   },
+		{ "ui",                     FONT_UI             },
+		{ "uiMedium",               FONT_UI_MEDIUM      },
+		{ "mono",                   FONT_MONO           },
+		{ "sansman",                FONT_DISPLAY        },
+		{ "sansman-regular",        FONT_DISPLAY        },
+		{ "sansman-medium",         FONT_DISPLAY        },
+		{ "sansman-bold",           FONT_DISPLAY_BOLD   },
+		{ "sansman-italic",         FONT_DISPLAY_ITALIC },
+		{ "sansman-bold-italic",    FONT_DISPLAY_ITALIC },
+		{ "oxanium",                FONT_UI             },
+		{ "oxanium-regular",        FONT_UI             },
+		{ "oxanium-medium",         FONT_UI_MEDIUM      },
+		{ "sharetechmono",          FONT_MONO           },
+		{ "sharetechmono-regular",  FONT_MONO           },
+		{ NULL, 0 }
+	};
+	int i;
+
+	if ( !name || !name[0] ) return FONT_DISPLAY;
+	for ( i = 0; map[i].k; i++ ) {
+		if ( !Q_stricmp( name, map[i].k ) ) return map[i].id;
 	}
-
-	if ( !Q_stricmp( name, "defaultSerifFont" ) ) return FONT_DISPLAY;
-	if ( !Q_stricmp( name, "defaultSerifFontItalic" ) ) return FONT_DISPLAY_ITALIC;
-	if ( !Q_stricmp( name, "defaultSerifFontBold" ) ) return FONT_DISPLAY_BOLD;
-	if ( !Q_stricmp( name, "defaultSansFont" ) ) return FONT_UI;
-	if ( !Q_stricmp( name, "defaultSansFontMedium" ) ) return FONT_UI_MEDIUM;
-	if ( !Q_stricmp( name, "defaultMonoFont" ) ) return FONT_MONO;
-
-	if ( !Q_stricmp( name, "display" ) ) return FONT_DISPLAY;
-	if ( !Q_stricmp( name, "displayItalic" ) ) return FONT_DISPLAY_ITALIC;
-	if ( !Q_stricmp( name, "displayBold" ) ) return FONT_DISPLAY_BOLD;
-	if ( !Q_stricmp( name, "ui" ) ) return FONT_UI;
-	if ( !Q_stricmp( name, "uiMedium" ) ) return FONT_UI_MEDIUM;
-	if ( !Q_stricmp( name, "mono" ) ) return FONT_MONO;
-
-	/* Native MSDF family/face names */
-	if ( !Q_stricmp( name, "sansman" ) ) return FONT_DISPLAY;
-	if ( !Q_stricmp( name, "sansman-regular" ) ) return FONT_DISPLAY;
-	if ( !Q_stricmp( name, "sansman-medium" ) ) return FONT_DISPLAY;
-	if ( !Q_stricmp( name, "sansman-bold" ) ) return FONT_DISPLAY_BOLD;
-	if ( !Q_stricmp( name, "sansman-italic" ) ) return FONT_DISPLAY_ITALIC;
-	if ( !Q_stricmp( name, "sansman-bold-italic" ) ) return FONT_DISPLAY_ITALIC;
-
-	if ( !Q_stricmp( name, "oxanium" ) ) return FONT_UI;
-	if ( !Q_stricmp( name, "oxanium-regular" ) ) return FONT_UI;
-	if ( !Q_stricmp( name, "oxanium-medium" ) ) return FONT_UI_MEDIUM;
-
-	if ( !Q_stricmp( name, "sharetechmono" ) ) return FONT_MONO;
-	if ( !Q_stricmp( name, "sharetechmono-regular" ) ) return FONT_MONO;
-
 	return FONT_UI;
 }
 

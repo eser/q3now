@@ -1,10 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_compat.c — Compatibility layer implementation
-
-Syncs wired_cg / wired_cgs compat structs from wiredHudState_t each frame.
-Provides stub implementations of cgame helper functions.
-===========================================================================
+cl_wired_hud_compat.c — Compatibility layer: syncs wired_cg/wired_cgs from wiredHudState_t each frame.
 */
 
 #include "../../client.h"

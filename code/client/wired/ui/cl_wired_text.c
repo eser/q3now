@@ -1,12 +1,5 @@
 /*
-===========================================================================
 cl_wired_text.c — Unified text rendering implementation
-
-Maps fontId to loaded MSDF font handles and delegates to
-MSDF_DrawString / MSDF_DrawChar / MSDF_MeasureString.
-
-Alignment and drop shadow are handled here so callers don't need to.
-===========================================================================
 */
 
 #include "../../client.h"
@@ -22,6 +15,11 @@ Alignment and drop shadow are handled here so callers don't need to.
 static float text_letterSpacing = 0.0f;
 
 static cvar_t *cl_wiredTextShadow = NULL;
+
+/* ── face cache (per FONT_* slot, invalidated at Text_Init) ────────── */
+
+#define TEXT_FACE_CACHE_SIZE 6
+static const fontFace_t *s_faceCache[TEXT_FACE_CACHE_SIZE];
 
 void Text_SetLetterSpacing( float spacing )
 {
@@ -43,6 +41,7 @@ void Text_Init( void )
 {
 	cl_wiredTextShadow = Cvar_Get( "cl_wiredTextShadow", "0", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( cl_wiredTextShadow, "Enable drop-shadow on Wired UI text. 0: off (default). 1: on." );
+	Com_Memset( (void *)s_faceCache, 0, sizeof( s_faceCache ) );
 	MSDF_ReregisterShaders();
 	WiredFonts_InitMSDF();
 }
@@ -51,44 +50,57 @@ void Text_Init( void )
 
 static const fontFace_t *Text_ResolveFace( int fontId )
 {
-	wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
-	const char *serif = ag->defaultSerifFontName[0] ? ag->defaultSerifFontName : "sansman";
-	const char *serifItalic = ag->defaultSerifFontItalicName[0] ? ag->defaultSerifFontItalicName : "sansman-italic";
-	const char *sans = ag->defaultSansFontName[0] ? ag->defaultSansFontName : "oxanium";
-	const char *sansMedium = ag->defaultSansFontMediumName[0] ? ag->defaultSansFontMediumName : "oxanium-medium";
-	const char *mono = ag->defaultMonoFontName[0] ? ag->defaultMonoFontName : "sharetechmono";
-	const fontFace_t *face = NULL;
+	wiredAssetGlobals_t *ag;
+	const char *serif, *serifItalic, *sans, *sansMedium, *mono;
+	const fontFace_t *face;
+
+	if ( fontId >= 0 && fontId < TEXT_FACE_CACHE_SIZE && s_faceCache[fontId] ) {
+		return s_faceCache[fontId];
+	}
+
+	ag = WiredUI_GetAssetGlobals();
+	serif = ag->defaultSerifFontName[0] ? ag->defaultSerifFontName : "sansman";
+	serifItalic = ag->defaultSerifFontItalicName[0] ? ag->defaultSerifFontItalicName : "sansman-italic";
+	sans = ag->defaultSansFontName[0] ? ag->defaultSansFontName : "oxanium";
+	sansMedium = ag->defaultSansFontMediumName[0] ? ag->defaultSansFontMediumName : "oxanium-medium";
+	mono = ag->defaultMonoFontName[0] ? ag->defaultMonoFontName : "sharetechmono";
+	face = NULL;
 
 	switch ( fontId ) {
 	case FONT_DISPLAY:
 		face = WiredFont_ResolveByName( serif );
 		if ( !face ) face = WiredFont_Resolve( "sansman", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
-		return face;
+		break;
 	case FONT_DISPLAY_ITALIC:
 		face = WiredFont_ResolveByName( serifItalic );
 		if ( !face ) face = WiredFont_Resolve( "sansman", FONT_WEIGHT_REGULAR, FONT_STYLE_ITALIC );
-		return face;
+		break;
 	case FONT_DISPLAY_BOLD:
 		face = WiredFont_ResolveByName( serif );
 		if ( !face ) face = WiredFont_Resolve( "sansman", FONT_WEIGHT_BOLD, FONT_STYLE_NORMAL );
-		return face;
+		break;
 	case FONT_UI:
 		face = WiredFont_ResolveByName( sans );
 		if ( !face ) face = WiredFont_Resolve( "oxanium", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
-		return face;
+		break;
 	case FONT_UI_MEDIUM:
 		face = WiredFont_ResolveByName( sansMedium );
 		if ( !face ) face = WiredFont_Resolve( "oxanium", FONT_WEIGHT_MEDIUM, FONT_STYLE_NORMAL );
-		return face;
+		break;
 	case FONT_MONO:
 		face = WiredFont_ResolveByName( mono );
 		if ( !face ) face = WiredFont_Resolve( "sharetechmono", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
-		return face;
+		break;
 	default:
 		face = WiredFont_ResolveByName( sans );
 		if ( !face ) face = WiredFont_Resolve( "oxanium", FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
-		return face;
+		break;
 	}
+
+	if ( fontId >= 0 && fontId < TEXT_FACE_CACHE_SIZE && face ) {
+		s_faceCache[fontId] = face;
+	}
+	return face;
 }
 
 /* ── Text_Draw ─────────────────────────────────────────────────────── */

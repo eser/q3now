@@ -15,6 +15,7 @@ code/ui/ui_shared.c in subsequent phases.
 #include "cl_wired_fonts.h"
 #include "cl_wired_text.h"
 #include "cl_wired_draw.h"
+#include "cl_wired_background.h"
 #include "cl_wired_store.h"
 #include "cl_wired_theme.h"
 #include "../../../qcommon/menudef.h"
@@ -1411,6 +1412,8 @@ static void WiredUI_RegisterAssets( void ) {
 	if ( wired_assetGlobals.gradientBar[0] ) {
 		wired_gradientBarShader = re.RegisterShaderNoMip( wired_assetGlobals.gradientBar );
 	}
+
+	WUI_BackgroundInit();
 }
 
 // ── hud cvar helper ───────────────────────────────────────────────────
@@ -2074,114 +2077,171 @@ void WiredUI_Refresh( int realtime ) {
 
 		// draw LISTBOX items — feeder-driven scrollable list
 		if ( item->type == ITEM_TYPE_LISTBOX && item->feeder != 0 ) {
-			int feederID = (int)item->feeder;
-			int totalRows = WiredUI_FeederCount( feederID );
-			float rowH = item->elementheight > 0 ? item->elementheight : 16.0f;
-			int visibleRows = (int)( itemH / rowH );
-			int row, col;
+			int feederID   = (int)item->feeder;
+			int totalItems = WiredUI_FeederCount( feederID );
 			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
 			float letterSpacing = item->letterSpacing;
 			vec4_t selColor = { 0.3f, 0.3f, 0.5f, 0.6f };
-			vec4_t rowColor;
-			float scrollBarW = 4.0f;
-			float contentW = itemW;
 
-			// reserve space for scrollbar when content overflows
-			if ( totalRows > visibleRows ) {
-				contentW -= scrollBarW + 2.0f;
-			}
-
-			// draw list background
 			if ( item->backcolor[3] > 0 ) {
 				WUI_FillRect( itemX, itemY, itemW, itemH, item->backcolor );
 			}
 
-			// draw rows
-			Text_SetLetterSpacing( letterSpacing );
-			for ( row = 0; row < visibleRows && ( item->listScrollOffset + row ) < totalRows; row++ ) {
-				int dataRow = item->listScrollOffset + row;
-				float rowY = itemY + row * rowH;
+			if ( item->horizontalScroll ) {
+				/* horizontal axis: items flow left→right */
+				float colW        = item->elementheight > 0 ? item->elementheight : 64.0f;
+				int   visibleCols = (int)( itemW / colW );
+				float scrollBarH  = 4.0f;
+				float contentH    = itemH;
+				int   col;
 
-				// highlight selected row
-				if ( dataRow == item->listSelectedRow ) {
-					WUI_FillRect( itemX, rowY, contentW, rowH, selColor );
+				if ( totalItems > visibleCols ) {
+					contentH -= scrollBarH + 2.0f;
 				}
 
-				// draw columns — clip text to column width
-				Vector4Copy( item->forecolor, rowColor );
-				float colX = itemX + 4;
-				for ( col = 0; col < ( item->columns > 0 ? item->columns : 1 ); col++ ) {
-					const char *text = WiredUI_FeederItemText( feederID, dataRow, col );
-					float colW = ( col < item->columns && item->columnWidths[col] > 0 )
-						? item->columnWidths[col] : contentW;
+				Text_SetLetterSpacing( letterSpacing );
+				for ( col = 0; col < visibleCols && ( item->listScrollOffset + col ) < totalItems; col++ ) {
+					int   dataIdx = item->listScrollOffset + col;
+					float colX    = itemX + col * colW;
+					const char *text = WiredUI_FeederItemText( feederID, dataIdx, 0 );
+
+					if ( dataIdx == item->listSelectedRow ) {
+						WUI_FillRect( colX, itemY, colW, contentH, selColor );
+					}
+
 					if ( text && text[0] ) {
-						// truncate to fit column width (account for ^X color codes)
-						int maxChars = (int)( ( colW - 4 ) / charSize );
-						int visChars = 0, ti;
-						if ( maxChars < 1 ) maxChars = 1;
-						// count visible (non-color-code) chars
-						for ( ti = 0; text[ti]; ti++ ) {
-							if ( Q_IsColorString( &text[ti] ) ) { ti++; continue; }
-							visChars++;
-						}
-						if ( visChars > maxChars ) {
-							char clipped[128];
-							int ci = 0, vc = 0;
-							// copy up to maxChars visible chars, preserving color codes
-							for ( ti = 0; text[ti] && ci < (int)sizeof(clipped) - 1; ti++ ) {
-								if ( Q_IsColorString( &text[ti] ) ) {
-									clipped[ci++] = text[ti++];
-									if ( text[ti] ) clipped[ci++] = text[ti];
-									continue;
-								}
-								if ( vc >= maxChars ) break;
-								clipped[ci++] = text[ti];
-								vc++;
-							}
-							clipped[ci] = '\0';
-							Text_Draw( clipped, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
+						float centerX = colX + colW * 0.5f;
+						Text_Draw( text, centerX, itemY + ( contentH - charSize ) * 0.5f,
+						           FONT_UI, charSize, item->forecolor, TEXT_ALIGN_CENTER, 0 );
+					}
+				}
+				Text_SetLetterSpacing( 0.0f );
+
+				/* horizontal scrollbar at bottom, macOS-style fade */
+				if ( totalItems > visibleCols ) {
+					float trackX       = itemX + 1.0f;
+					float trackY       = itemY + itemH - scrollBarH - 1.0f;
+					float trackW       = itemW - 2.0f;
+					float visibleFrac  = (float)visibleCols / (float)totalItems;
+					float thumbW       = trackW * visibleFrac;
+					float maxScroll    = (float)( totalItems - visibleCols );
+					float thumbX       = trackX;
+					float alpha        = 0.0f;
+
+					if ( thumbW < 16.0f ) thumbW = 16.0f;
+					if ( maxScroll > 0 ) {
+						thumbX += ( trackW - thumbW ) * ( (float)item->listScrollOffset / maxScroll );
+					}
+
+					if ( item->listScrollFadeTime > 0 ) {
+						int elapsed = realtime - item->listScrollFadeTime;
+						if ( elapsed < 1500 ) {
+							alpha = 1.0f;
 						} else {
-							Text_Draw( text, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
+							alpha = 1.0f - (float)( elapsed - 1500 ) / 500.0f;
+							if ( alpha < 0 ) alpha = 0;
 						}
 					}
-					colX += colW;
-				}
-			}
-			Text_SetLetterSpacing( 0.0f );
 
-			// listbox scrollbar — macOS-style with fade
-			if ( totalRows > visibleRows ) {
-				float trackX = itemX + itemW - scrollBarW - 1.0f;
-				float trackY = itemY + 1.0f;
-				float trackH = itemH - 2.0f;
-				float visibleFrac = (float)visibleRows / (float)totalRows;
-				float thumbH = trackH * visibleFrac;
-				float maxScroll = (float)( totalRows - visibleRows );
-				float thumbY;
-				float alpha = 0.0f;
-
-				if ( thumbH < 16.0f ) thumbH = 16.0f;
-				thumbY = trackY;
-				if ( maxScroll > 0 ) {
-					thumbY += ( trackH - thumbH ) * ( (float)item->listScrollOffset / maxScroll );
-				}
-
-				// fade out after 1.5s of inactivity (same as menu scrollbar)
-				if ( item->listScrollFadeTime > 0 ) {
-					int elapsed = realtime - item->listScrollFadeTime;
-					if ( elapsed < 1500 ) {
-						alpha = 1.0f;
-					} else {
-						alpha = 1.0f - (float)( elapsed - 1500 ) / 500.0f;
-						if ( alpha < 0 ) alpha = 0;
+					if ( alpha > 0 ) {
+						vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.15f * alpha };
+						vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.5f * alpha };
+						WUI_FillRect( trackX, trackY, trackW, scrollBarH, trackColor );
+						WUI_FillRect( thumbX, trackY, thumbW, scrollBarH, thumbColor );
 					}
 				}
+			} else {
+				/* vertical axis (default) */
+				float rowH       = item->elementheight > 0 ? item->elementheight : 16.0f;
+				int   visibleRows = (int)( itemH / rowH );
+				float scrollBarW = 4.0f;
+				float contentW   = itemW;
+				int   row, col;
+				vec4_t rowColor;
 
-				if ( alpha > 0 ) {
-					vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.15f * alpha };
-					vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.5f * alpha };
-					WUI_FillRect( trackX, trackY, scrollBarW, trackH, trackColor );
-					WUI_FillRect( trackX, thumbY, scrollBarW, thumbH, thumbColor );
+				if ( totalItems > visibleRows ) {
+					contentW -= scrollBarW + 2.0f;
+				}
+
+				Text_SetLetterSpacing( letterSpacing );
+				for ( row = 0; row < visibleRows && ( item->listScrollOffset + row ) < totalItems; row++ ) {
+					int   dataRow = item->listScrollOffset + row;
+					float rowY    = itemY + row * rowH;
+					float colX    = itemX + 4;
+
+					if ( dataRow == item->listSelectedRow ) {
+						WUI_FillRect( itemX, rowY, contentW, rowH, selColor );
+					}
+
+					Vector4Copy( item->forecolor, rowColor );
+					for ( col = 0; col < ( item->columns > 0 ? item->columns : 1 ); col++ ) {
+						const char *text = WiredUI_FeederItemText( feederID, dataRow, col );
+						float colW = ( col < item->columns && item->columnWidths[col] > 0 )
+							? item->columnWidths[col] : contentW;
+						if ( text && text[0] ) {
+							int maxChars = (int)( ( colW - 4 ) / charSize );
+							int visChars = 0, ti;
+							if ( maxChars < 1 ) maxChars = 1;
+							for ( ti = 0; text[ti]; ti++ ) {
+								if ( Q_IsColorString( &text[ti] ) ) { ti++; continue; }
+								visChars++;
+							}
+							if ( visChars > maxChars ) {
+								char clipped[128];
+								int ci = 0, vc = 0;
+								for ( ti = 0; text[ti] && ci < (int)sizeof(clipped) - 1; ti++ ) {
+									if ( Q_IsColorString( &text[ti] ) ) {
+										clipped[ci++] = text[ti++];
+										if ( text[ti] ) clipped[ci++] = text[ti];
+										continue;
+									}
+									if ( vc >= maxChars ) break;
+									clipped[ci++] = text[ti];
+									vc++;
+								}
+								clipped[ci] = '\0';
+								Text_Draw( clipped, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
+							} else {
+								Text_Draw( text, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
+							}
+						}
+						colX += colW;
+					}
+				}
+				Text_SetLetterSpacing( 0.0f );
+
+				/* vertical scrollbar on right, macOS-style fade */
+				if ( totalItems > visibleRows ) {
+					float trackX      = itemX + itemW - scrollBarW - 1.0f;
+					float trackY      = itemY + 1.0f;
+					float trackH      = itemH - 2.0f;
+					float visibleFrac = (float)visibleRows / (float)totalItems;
+					float thumbH      = trackH * visibleFrac;
+					float maxScroll   = (float)( totalItems - visibleRows );
+					float thumbY      = trackY;
+					float alpha       = 0.0f;
+
+					if ( thumbH < 16.0f ) thumbH = 16.0f;
+					if ( maxScroll > 0 ) {
+						thumbY += ( trackH - thumbH ) * ( (float)item->listScrollOffset / maxScroll );
+					}
+
+					if ( item->listScrollFadeTime > 0 ) {
+						int elapsed = realtime - item->listScrollFadeTime;
+						if ( elapsed < 1500 ) {
+							alpha = 1.0f;
+						} else {
+							alpha = 1.0f - (float)( elapsed - 1500 ) / 500.0f;
+							if ( alpha < 0 ) alpha = 0;
+						}
+					}
+
+					if ( alpha > 0 ) {
+						vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.15f * alpha };
+						vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.5f * alpha };
+						WUI_FillRect( trackX, trackY, scrollBarW, trackH, trackColor );
+						WUI_FillRect( trackX, thumbY, scrollBarW, thumbH, thumbColor );
+					}
 				}
 			}
 
@@ -4387,7 +4447,6 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 		case K_MWHEELUP:
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX ) {
-				// adaptive scroll: 1 row for small lists, 3 for large
 				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
 				int step = ( total > 20 ) ? 3 : 1;
 				if ( focusedItem->listScrollOffset > 0 ) focusedItem->listScrollOffset -= step;
@@ -4407,14 +4466,19 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 		case K_MWHEELDOWN:
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX && focusedItem->feeder != 0 ) {
-				// adaptive scroll: 1 row for small lists, 3 for large
 				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
-				float rowH = focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f;
-				int visibleRows = (int)( focusedItem->rect.h / rowH );
-				int step = ( total > 20 ) ? 3 : 1;
+				int visible, step;
+				if ( focusedItem->horizontalScroll ) {
+					float colW = focusedItem->elementheight > 0 ? focusedItem->elementheight : 64.0f;
+					visible = (int)( focusedItem->rect.w / colW );
+				} else {
+					float rowH = focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f;
+					visible = (int)( focusedItem->rect.h / rowH );
+				}
+				step = ( total > 20 ) ? 3 : 1;
 				focusedItem->listScrollOffset += step;
-				if ( focusedItem->listScrollOffset > total - visibleRows )
-					focusedItem->listScrollOffset = total - visibleRows;
+				if ( focusedItem->listScrollOffset > total - visible )
+					focusedItem->listScrollOffset = total - visible;
 				if ( focusedItem->listScrollOffset < 0 ) focusedItem->listScrollOffset = 0;
 				focusedItem->listScrollFadeTime = cls.realtime;
 			} else {
@@ -4433,8 +4497,22 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_KP_LEFTARROW:
 		case K_RIGHTARROW:
 		case K_KP_RIGHTARROW:
-			// left/right adjusts sliders and cycles multi items
-			if ( focusedItem && focusedItem->cvar[0] ) {
+			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX
+			     && focusedItem->horizontalScroll && focusedItem->feeder != 0 ) {
+				/* horizontal listbox: left/right scrolls items */
+				int total   = WiredUI_FeederCount( (int)focusedItem->feeder );
+				float colW  = focusedItem->elementheight > 0 ? focusedItem->elementheight : 64.0f;
+				int visible = (int)( focusedItem->rect.w / colW );
+				int dir     = ( key == K_LEFTARROW || key == K_KP_LEFTARROW ) ? -1 : 1;
+				focusedItem->listScrollOffset += dir;
+				if ( focusedItem->listScrollOffset < 0 ) focusedItem->listScrollOffset = 0;
+				if ( focusedItem->listScrollOffset > total - visible )
+					focusedItem->listScrollOffset = total - visible;
+				if ( focusedItem->listScrollOffset < 0 ) focusedItem->listScrollOffset = 0;
+				focusedItem->listScrollFadeTime = cls.realtime;
+			}
+			else if ( focusedItem && focusedItem->cvar[0] ) {
+				/* left/right adjusts sliders and cycles multi items */
 				char cvarBuf[256];
 				int dir = ( key == K_LEFTARROW || key == K_KP_LEFTARROW ) ? -1 : 1;
 				WiredUI_StateGetString( focusedItem->cvar, cvarBuf, sizeof( cvarBuf ) );

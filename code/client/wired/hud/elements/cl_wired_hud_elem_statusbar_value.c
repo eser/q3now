@@ -1,11 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_elem_statusbar_value.c — Generic bound text value element
-
-Looks up a named binding from the state bridge and renders its text + color.
-The .hud file specifies: hudElement "statusbar_value" bind "health"
-cgame pre-computes everything — this is a pure renderer.
-===========================================================================
+cl_wired_hud_elem_statusbar_value.c — Generic bound text-value element.
 */
 
 #include "../../../client.h"
