@@ -77,12 +77,4 @@ void CG_ModernHUDElementGameTypeRoutine(void* context)
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_ModernHUDElementGameTypeDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI

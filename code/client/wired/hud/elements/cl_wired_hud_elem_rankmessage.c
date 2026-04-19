@@ -47,20 +47,7 @@ void CG_ModernHUDElementRankMessageRoutine(void* context)
 		return;
 	}
 
-	if (!CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, *element->time))
-	{
-		*element->time = 0;
-		return;
-	}
-
-	CG_ModernHUDTextPrint(&element->config, &element->ctx);
+	WHUD_FADE_AND_PRINT( &element->config, &element->ctx, element->time );
 }
 
-void CG_ModernHUDElementRankMessageDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
 #endif // FEAT_WIRED_UI

@@ -442,32 +442,24 @@ void WiredHud_Routine( int realtime ) {
 		qboolean showSb = wiredHud->showScores || wiredHud->intermission || wiredHud->warmup > 0;
 		if ( showSb ) {
 			int64_t _wsb_t0 = Sys_Microseconds();
+			static const struct { int gt; const char *suffix; } s_sbSuffix[] = {
+				{ GT_DUEL,           "duel" },
+				{ GT_TDM,            "tdm"  },
+				{ GT_CTF,            "ctf"  },
+				{ GT_1FCTF,          "ctf"  },
+				{ GT_OBELISK,        "tdm"  },
+				{ GT_HARVESTER,      "tdm"  },
+				{ -1, NULL }
+			};
 			const char *prefix = wiredHud->intermission ? "end_scoreboard" : "ingame_scoreboard";
+			const char *suffix = "ffa";
 			const char *menuName;
 			wiredMenuDef_t *sbMenu;
-
-			switch ( wiredHud->gametype ) {
-				case GT_DUEL:
-					menuName = va( "%s_duel", prefix );
-					break;
-				case GT_TDM:
-					menuName = va( "%s_tdm", prefix );
-					break;
-				case GT_CTF:
-				case GT_1FCTF:
-					menuName = va( "%s_ctf", prefix );
-					break;
-				case GT_OBELISK:
-				case GT_HARVESTER:
-					menuName = va( "%s_tdm", prefix );
-					break;
-				case GT_DEATHMATCH:
-				case GT_KINGOFTHEHILL:
-				case GT_LASTMANSTANDING:
-				default:
-					menuName = va( "%s_ffa", prefix );
-					break;
+			int _si;
+			for ( _si = 0; s_sbSuffix[_si].gt >= 0; _si++ ) {
+				if ( s_sbSuffix[_si].gt == wiredHud->gametype ) { suffix = s_sbSuffix[_si].suffix; break; }
 			}
+			menuName = va( "%s_%s", prefix, suffix );
 
 			sbMenu = WiredUI_FindMenu( menuName );
 			if ( !sbMenu ) {

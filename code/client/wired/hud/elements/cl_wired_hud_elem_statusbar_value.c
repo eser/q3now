@@ -80,8 +80,4 @@ void CG_ModernHUDElementStatusbarValueRoutine( void *context ) {
 	}
 }
 
-void CG_ModernHUDElementStatusbarValueDestroy( void *context ) {
-	if ( context ) Z_Free( context );
-}
-
 #endif // FEAT_WIRED_UI

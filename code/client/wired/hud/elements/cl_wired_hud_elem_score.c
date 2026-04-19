@@ -185,13 +185,4 @@ void CG_ModernHUDElementScoreRoutine(void* context)
 	}
 }
 
-
-void CG_ModernHUDElementScoreDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif /* FEAT_WIRED_UI */

@@ -23,6 +23,50 @@ Tiered implementation:
 
 #if FEAT_WIRED_UI
 
+/* ── color ramp helper ─────────────────────────────────────────────── */
+
+#define WUI_RAMP_END (-9999)
+
+typedef struct {
+	int   threshold;
+	float color[4];
+} wuiColorRamp_t;
+
+static void WUI_RampColor( int value, const wuiColorRamp_t *ramp, vec4_t out ) {
+	for ( ; ramp->threshold != WUI_RAMP_END; ramp++ ) {
+		if ( value > ramp->threshold ) {
+			Vector4Copy( ramp->color, out );
+			return;
+		}
+	}
+	Vector4Copy( ramp->color, out );
+}
+
+static const wuiColorRamp_t healthRamp[] = {
+	{ 100, { 1,     1,     1,    1 } },
+	{  50, { 1,     0.85f, 0,    1 } },
+	{  25, { 1,     0.3f,  0,    1 } },
+	{ WUI_RAMP_END, { 1, 0, 0, 1 } },
+};
+static const wuiColorRamp_t armorRamp[] = {
+	{ 100, { 1,     1,     1,    1    } },
+	{  50, { 1,     0.85f, 0,    1    } },
+	{ WUI_RAMP_END, { 0.6f, 0.6f, 0.6f, 1 } },
+};
+static const wuiColorRamp_t ammoRamp[] = {
+	{  10, { 1,     0.85f, 0,    1    } },
+	{   0, { 1,     0,     0,    1    } },
+	{ WUI_RAMP_END, { 0.4f, 0.4f, 0.4f, 1 } },
+};
+
+/* ── centered number/text renderer ────────────────────────────────── */
+
+static void WUI_OD_DrawNumber( float x, float y, float w, float h,
+                               const char *buf, const vec4_t color ) {
+	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
+		FONT_DISPLAY, h * 0.5f, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
+}
+
 // ── ownerdrawFlag evaluation ──────────────────────────────────────────
 // Returns qtrue if the item should be visible given current game state.
 // TA menus use ownerdrawFlag with CG_SHOW_* or UI_SHOW_* hex values.
@@ -54,59 +98,34 @@ qboolean WiredUI_OwnerDrawVisible( int flags ) {
 // ── P1 ownerdraw renderers ───────────────────────────────────────────
 
 static void WiredOD_PlayerHealth( float x, float y, float w, float h, vec4_t itemColor ) {
-	if ( !wiredHud || !wiredHud->valid ) return;
 	char buf[16];
-	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->health );
 	vec4_t color;
-	if ( wiredHud->health > 100 ) {
-		Vector4Set( color, 1, 1, 1, 1 );
-	} else if ( wiredHud->health > 50 ) {
-		Vector4Set( color, 1, 0.85f, 0, 1 );
-	} else if ( wiredHud->health > 25 ) {
-		Vector4Set( color, 1, 0.3f, 0, 1 );
-	} else {
-		Vector4Set( color, 1, 0, 0, 1 );
-	}
-	float charSize = h > 20.0f ? 12.0f : 8.0f;
-	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
-		FONT_DISPLAY, charSize, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
+	if ( !wiredHud || !wiredHud->valid ) return;
+	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->health );
+	WUI_RampColor( wiredHud->health, healthRamp, color );
+	WUI_OD_DrawNumber( x, y, w, h, buf, color );
 }
 
 static void WiredOD_PlayerArmor( float x, float y, float w, float h, vec4_t itemColor ) {
-	if ( !wiredHud || !wiredHud->valid ) return;
 	char buf[16];
-	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->armor );
 	vec4_t color;
-	if ( wiredHud->armor > 100 ) {
-		Vector4Set( color, 1, 1, 1, 1 );
-	} else if ( wiredHud->armor > 50 ) {
-		Vector4Set( color, 1, 0.85f, 0, 1 );
-	} else {
-		Vector4Set( color, 0.6f, 0.6f, 0.6f, 1 );
-	}
-	float charSize = h > 20.0f ? 12.0f : 8.0f;
-	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
-		FONT_DISPLAY, charSize, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
+	if ( !wiredHud || !wiredHud->valid ) return;
+	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->armor );
+	WUI_RampColor( wiredHud->armor, armorRamp, color );
+	WUI_OD_DrawNumber( x, y, w, h, buf, color );
 }
 
 static void WiredOD_PlayerAmmoValue( float x, float y, float w, float h, vec4_t itemColor ) {
-	if ( !wiredHud || !wiredHud->valid ) return;
-	int weapon = wiredHud->weapon;
-	if ( weapon <= 0 || weapon >= (int)(sizeof(wiredHud->ammo) / sizeof(wiredHud->ammo[0])) ) return;
-	int ammo = wiredHud->ammo[weapon];
+	int weapon, ammo;
 	char buf[16];
-	Com_sprintf( buf, sizeof( buf ), "%d", ammo );
 	vec4_t color;
-	if ( ammo > 10 ) {
-		Vector4Set( color, 1, 0.85f, 0, 1 );
-	} else if ( ammo > 0 ) {
-		Vector4Set( color, 1, 0, 0, 1 );
-	} else {
-		Vector4Set( color, 0.4f, 0.4f, 0.4f, 1 );
-	}
-	float charSize = h > 20.0f ? 12.0f : 8.0f;
-	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
-		FONT_DISPLAY, charSize, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
+	if ( !wiredHud || !wiredHud->valid ) return;
+	weapon = wiredHud->weapon;
+	if ( weapon <= 0 || weapon >= (int)(sizeof(wiredHud->ammo) / sizeof(wiredHud->ammo[0])) ) return;
+	ammo = wiredHud->ammo[weapon];
+	Com_sprintf( buf, sizeof( buf ), "%d", ammo );
+	WUI_RampColor( ammo, ammoRamp, color );
+	WUI_OD_DrawNumber( x, y, w, h, buf, color );
 }
 
 static void WiredOD_PlayerArmorIcon( float x, float y, float w, float h, vec4_t itemColor ) {
@@ -131,60 +150,40 @@ static void WiredOD_PlayerAmmoIcon( float x, float y, float w, float h, vec4_t i
 }
 
 static void WiredOD_PlayerScore( float x, float y, float w, float h, vec4_t itemColor ) {
-	if ( !wiredHud || !wiredHud->valid ) return;
-	int score = wiredHud->persistant[PERS_SCORE];
 	char buf[16];
-	Com_sprintf( buf, sizeof( buf ), "%d", score );
 	vec4_t color = { 1, 1, 1, 1 };
-	float charSize = h > 20.0f ? 12.0f : 8.0f;
-	Text_Draw( buf, x + w * 0.5f, y + h * 0.25f,
-		FONT_DISPLAY, charSize, color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
+	if ( !wiredHud || !wiredHud->valid ) return;
+	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->persistant[PERS_SCORE] );
+	WUI_OD_DrawNumber( x, y, w, h, buf, color );
 }
 
 // ── P2 ownerdraw renderers ───────────────────────────────────────────
 
 static void WiredOD_BlueScore( float x, float y, float w, float h, vec4_t itemColor ) {
-	if ( !wiredHud || !wiredHud->valid ) return;
 	char buf[16];
-	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->scores2 );
 	vec4_t color = { 0.3f, 0.5f, 1.0f, 1.0f };
-	float charSize = h > 20.0f ? 12.0f : 8.0f;
+	if ( !wiredHud || !wiredHud->valid ) return;
+	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->scores2 );
 	Text_Draw( buf, x, y + h * 0.25f,
-		FONT_DISPLAY, charSize, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
+		FONT_DISPLAY, h * 0.5f, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 }
 
 static void WiredOD_RedScore( float x, float y, float w, float h, vec4_t itemColor ) {
-	if ( !wiredHud || !wiredHud->valid ) return;
 	char buf[16];
-	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->scores1 );
 	vec4_t color = { 1.0f, 0.3f, 0.3f, 1.0f };
-	float charSize = h > 20.0f ? 12.0f : 8.0f;
+	if ( !wiredHud || !wiredHud->valid ) return;
+	Com_sprintf( buf, sizeof( buf ), "%d", wiredHud->scores1 );
 	Text_Draw( buf, x, y + h * 0.25f,
-		FONT_DISPLAY, charSize, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
+		FONT_DISPLAY, h * 0.5f, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 }
 
 static void WiredOD_Killer( float x, float y, float w, float h, vec4_t itemColor ) {
+	char msg[256];
+	vec4_t color = { 1.0f, 1.0f, 0.2f, 1.0f };
 	if ( !wiredHud || !wiredHud->valid ) return;
 	if ( !wiredHud->killerName[0] ) return;
-
-	{
-		char msg[256];
-		vec4_t color;
-		float charSize;
-
-		Com_sprintf( msg, sizeof( msg ), "Fragged by %s", wiredHud->killerName );
-		Vector4Set( color, 1.0f, 1.0f, 0.2f, 1.0f );
-		charSize = h > 20.0f ? 12.0f : 8.0f;
-
-		Text_Draw( msg,
-			x + w * 0.5f,
-			y + h * 0.25f,
-			FONT_DISPLAY,
-			charSize,
-			color,
-			TEXT_ALIGN_CENTER,
-			TEXT_DROPSHADOW );
-	}
+	Com_sprintf( msg, sizeof( msg ), "Fragged by %s", wiredHud->killerName );
+	WUI_OD_DrawNumber( x, y, w, h, msg, color );
 }
 
 static void WiredOD_GameType( float x, float y, float w, float h, vec4_t itemColor ) {

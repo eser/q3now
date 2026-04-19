@@ -49,8 +49,6 @@ void CG_ModernHUDElementFlagStatusRoutine(void* context)
 	modernHudElementFlagStatus_t* element = (modernHudElementFlagStatus_t*)context;
 	int side;
 
-	if (!wiredHud || !wiredHud->valid) return;
-
 	side = cgs.clientinfo[cg.snap->ps.clientNum].team;
 
 	if (element->flagType == ModernHUDFLTYPE_NME)
@@ -91,14 +89,6 @@ void CG_ModernHUDElementFlagStatusRoutine(void* context)
 	if (element->ctx.image)
 	{
 		CG_ModernHUDDrawStretchPic(element->ctx.coord, element->ctx.coordPicture, element->ctx.color, element->ctx.image);
-	}
-}
-
-void CG_ModernHUDElementFlagStatusDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
 	}
 }
 

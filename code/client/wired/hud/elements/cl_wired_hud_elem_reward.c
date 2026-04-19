@@ -129,13 +129,4 @@ void CG_ModernHUDElementRewardRoutine(void* context)
 	}
 }
 
-
-void CG_ModernHUDElementRewardDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI

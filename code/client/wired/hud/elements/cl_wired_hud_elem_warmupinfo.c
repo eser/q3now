@@ -62,12 +62,4 @@ void CG_ModernHUDElementWarmupInfoRoutine(void* context)
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_ModernHUDElementWarmupInfoDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI

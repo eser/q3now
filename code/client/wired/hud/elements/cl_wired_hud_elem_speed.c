@@ -35,11 +35,4 @@ void CG_ModernHUDElementPlayerSpeedRoutine(void* context)
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_ModernHUDElementPlayerSpeedDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
 #endif // FEAT_WIRED_UI

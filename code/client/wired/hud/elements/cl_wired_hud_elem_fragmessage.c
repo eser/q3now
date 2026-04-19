@@ -46,21 +46,7 @@ void CG_ModernHUDElementFragMessageRoutine(void* context)
 		return;
 	}
 
-	if (!CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, *element->time))
-	{
-		*element->time = 0;
-		return;
-	}
-
-	CG_ModernHUDTextPrint(&element->config, &element->ctx);
-}
-
-void CG_ModernHUDElementFragMessageDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
+	WHUD_FADE_AND_PRINT( &element->config, &element->ctx, element->time );
 }
 
 

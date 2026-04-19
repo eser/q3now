@@ -44,13 +44,5 @@ void CG_ModernHUDElementNGPRoutine(void* context)
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_ModernHUDElementNGPDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 
 #endif // FEAT_WIRED_UI

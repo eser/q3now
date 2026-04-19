@@ -155,12 +155,4 @@ void CG_ModernHUDElementAudioWaveformRoutine( void *context )
 	}
 }
 
-void CG_ModernHUDElementAudioWaveformDestroy( void *context )
-{
-	if ( context )
-	{
-		Z_Free( context );
-	}
-}
-
 #endif // FEAT_WIRED_UI

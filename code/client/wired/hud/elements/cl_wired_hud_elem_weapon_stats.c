@@ -129,10 +129,4 @@ void CG_ModernHUDElementWeaponStatsRoutine( void *context ) {
 	}
 }
 
-void CG_ModernHUDElementWeaponStatsDestroy( void *context ) {
-	if ( context ) {
-		Z_Free( context );
-	}
-}
-
 #endif /* FEAT_WIRED_UI */

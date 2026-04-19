@@ -48,12 +48,4 @@ void CG_ModernHUDElementVMWRoutine(void* context)
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_ModernHUDElementVMWDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI

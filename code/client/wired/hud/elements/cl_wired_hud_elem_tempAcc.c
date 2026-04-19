@@ -97,10 +97,4 @@ void CG_ModernHUDElementTempAccRoutine( void *context ) {
 	}
 }
 
-void CG_ModernHUDElementTempAccDestroy( void *context ) {
-	if ( context ) {
-		Z_Free( context );
-	}
-}
-
 #endif // FEAT_WIRED_UI

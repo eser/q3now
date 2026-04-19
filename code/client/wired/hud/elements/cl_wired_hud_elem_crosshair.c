@@ -59,10 +59,4 @@ void CG_ModernHUDElementCrosshairRoutine( void *context ) {
 	re.SetColor( NULL );
 }
 
-void CG_ModernHUDElementCrosshairDestroy( void *context ) {
-	if ( context ) {
-		Z_Free( context );
-	}
-}
-
 #endif // FEAT_WIRED_UI

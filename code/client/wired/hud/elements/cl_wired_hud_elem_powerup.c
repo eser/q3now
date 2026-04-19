@@ -44,84 +44,14 @@ static void* CG_ModernHUDElementPwCreate(const modernhudConfig_t* config, enum m
 	return element;
 }
 
-void* CG_ModernHUDElementPwTime1Create(const modernhudConfig_t* config)
+void* CG_ModernHUDElementPwTimeCreate(const modernhudConfig_t* config, int index)
 {
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 1);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, index);
 }
 
-void* CG_ModernHUDElementPwTime2Create(const modernhudConfig_t* config)
+void* CG_ModernHUDElementPwIconCreate(const modernhudConfig_t* config, int index)
 {
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 2);
-}
-
-void* CG_ModernHUDElementPwTime3Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 3);
-}
-
-void* CG_ModernHUDElementPwTime4Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 4);
-}
-
-void* CG_ModernHUDElementPwTime5Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 5);
-}
-
-void* CG_ModernHUDElementPwTime6Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 6);
-}
-
-void* CG_ModernHUDElementPwTime7Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 7);
-}
-
-void* CG_ModernHUDElementPwTime8Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_TIME, 8);
-}
-
-void* CG_ModernHUDElementPwIcon1Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 1);
-}
-
-void* CG_ModernHUDElementPwIcon2Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 2);
-}
-
-void* CG_ModernHUDElementPwIcon3Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 3);
-}
-
-void* CG_ModernHUDElementPwIcon4Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 4);
-}
-
-void* CG_ModernHUDElementPwIcon5Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 5);
-}
-
-void* CG_ModernHUDElementPwIcon6Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 6);
-}
-
-void* CG_ModernHUDElementPwIcon7Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 7);
-}
-
-void* CG_ModernHUDElementPwIcon8Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, 8);
+	return CG_ModernHUDElementPwCreate(config, ModernHUDPWTYPE_ICON, index);
 }
 
 void CG_ModernHUDElementPwRoutine(void* context)
@@ -129,8 +59,6 @@ void CG_ModernHUDElementPwRoutine(void* context)
 	modernHudElementPowerupContext* element = (modernHudElementPowerupContext*)context;
 	int maxPW;
 	int idx;
-
-	if (!wiredHud || !wiredHud->valid) return;
 
 	maxPW = wiredHud->activePowerupCount;
 	idx = element->pwIndex - 1;   /* pwIndex is 1-based */
@@ -158,11 +86,4 @@ void CG_ModernHUDElementPwRoutine(void* context)
 	}
 }
 
-void CG_ModernHUDElementPwDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
 #endif /* FEAT_WIRED_UI */

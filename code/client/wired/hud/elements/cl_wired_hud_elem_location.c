@@ -63,13 +63,5 @@ void CG_ModernHUDElementLocationRoutine(void* context)
 	CG_ModernHUDTextPrint(&element->config, &element->lastLocation);
 }
 
-void CG_ModernHUDElementLocationDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 
 #endif // FEAT_WIRED_UI
