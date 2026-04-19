@@ -97,6 +97,7 @@ typedef struct {
 	void	(*SetColor)( const float *rgba );	// NULL = 1,1,1,1
 	void	(*SetMSDFOutline)( float outlineWidth, const float *outlineColor,
 		float glowWidth, const float *glowColor );
+	void	(*SetMSDFShadow)( float offsetX, float offsetY, const float *color );
 	void	(*SetClipRegion)( const float *region );	// NULL = clear clip region; non-NULL = {x,y,w,h}
 	void	(*DrawStretchPic) ( float x, float y, float w, float h,
 		float s1, float t1, float s2, float t2, qhandle_t hShader );	// 0 = white

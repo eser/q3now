@@ -1358,6 +1358,8 @@ typedef struct {
 	float					msdfOutlineColor[4];	// current MSDF outline color (RGBA)
 	float					msdfGlowWidth;			// current MSDF glow width (SDF units)
 	float					msdfGlowColor[4];		// current MSDF glow color (RGBA)
+	float					msdfShadowOffset[2];	// shadow pixel offset (0,0 = disabled)
+	float					msdfShadowColor[4];		// shadow color (a=0 = disabled)
 
 #if FEAT_FOG_SYSTEM
 	int						globalFog;
@@ -1479,6 +1481,8 @@ extern	cvar_t	*r_norefresh;			// bypasses the ref rendering
 extern	cvar_t	*r_drawentities;		// disable/enable entity rendering
 extern	cvar_t	*r_drawworld;			// disable/enable world rendering
 extern	cvar_t	*r_speeds;				// various levels of information display
+extern	cvar_t	*r_gpuSpeeds;			// per-pass GPU timestamp report
+extern	cvar_t	*r_frameSpikeUs;		// per-frame host-side stage-timing spike report
 extern  cvar_t	*r_detailTextures;		// enables/disables detail texturing stages
 extern	cvar_t	*r_novis;				// disable/enable usage of PVS
 extern	cvar_t	*r_nocull;
@@ -2100,6 +2104,12 @@ typedef struct {
 } setMsdfOutlineCommand_t;
 
 typedef struct {
+	int   commandId;
+	float shadowOffset[2];
+	float shadowColor[4];
+} setMsdfShadowCommand_t;
+
+typedef struct {
 	int		commandId;
 	shader_t	*shader;
 	float	x, y;
@@ -2129,7 +2139,8 @@ typedef enum {
 	RC_COLORMASK,
 	RC_CLEARDEPTH,
 	RC_CLEARCOLOR,
-	RC_SET_MSDF_OUTLINE
+	RC_SET_MSDF_OUTLINE,
+	RC_SET_MSDF_SHADOW
 } renderCommand_t;
 
 
@@ -2175,6 +2186,7 @@ void RE_SetColor( const float *rgba );
 void RE_SetClipRegion( const float *region );
 void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
                          float glowWidth, const float *glowColor );
+void RE_SetMSDFShadow( float offsetX, float offsetY, const float *color );
 void RE_StretchPic ( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, qhandle_t hShader );
 void RE_RotatedPic( float x, float y, float w, float h,

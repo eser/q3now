@@ -152,6 +152,8 @@ cvar_t	*r_norefresh;
 cvar_t	*r_drawentities;
 cvar_t	*r_drawworld;
 cvar_t	*r_speeds;
+cvar_t	*r_gpuSpeeds;
+cvar_t	*r_frameSpikeUs;
 cvar_t	*r_fullbright;
 cvar_t	*r_novis;
 cvar_t	*r_nocull;
@@ -1806,6 +1808,10 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_showcluster, "Shows current cluster index." );
 	r_speeds = ri.Cvar_Get ("r_speeds", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
+	r_gpuSpeeds = ri.Cvar_Get( "r_gpuSpeeds", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_gpuSpeeds, "Per-pass GPU timestamp report.\n 0: off\n 1: 200-frame averages\n N(>=2): only frames where total GPU time >= N ms" );
+	r_frameSpikeUs = ri.Cvar_Get( "r_frameSpikeUs", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_frameSpikeUs, "Per-frame host-side stage-timing report (CPU side of the Vulkan pipeline).\n 0: off\n N>0: print stage breakdown for each frame whose total host time >= N us\n Recommended: 12000 (>12ms is a perceptible spike at 120Hz)" );
 	r_debugSurface = ri.Cvar_Get ("r_debugSurface", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_debugSurface, "Backend visual debugging tool for bezier mesh surfaces." );
 	r_nobind = ri.Cvar_Get ("r_nobind", "0", CVAR_CHEAT);
@@ -1900,7 +1906,7 @@ static void R_Register( void )
 	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
-	r_bloom_passes = ri.Cvar_Get( "r_bloom_passes", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_bloom_passes = ri.Cvar_Get( "r_bloom_passes", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom_passes, "1", "4", CV_INTEGER );
 	ri.Cvar_SetDescription( r_bloom_passes, "Number of bloom blur levels (1-4). Lower = fewer GPU render passes = higher FPS. Default 2 is a good balance between quality and performance." );
 #ifdef __APPLE__
@@ -2321,6 +2327,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.SetColor = RE_SetColor;
 	re.SetClipRegion = RE_SetClipRegion;
 	re.SetMSDFOutline = RE_SetMSDFOutline;
+	re.SetMSDFShadow  = RE_SetMSDFShadow;
 	re.DrawStretchPic = RE_StretchPic;
 	re.DrawRotatedPic = RE_RotatedPic;
 	re.DrawLine = RE_DrawLine;

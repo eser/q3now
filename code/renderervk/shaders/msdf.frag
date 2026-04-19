@@ -6,11 +6,12 @@ layout(set = 1, binding = 0) uniform sampler2D texture0;
 // Layout satisfies std430: vec4 requires 16-byte alignment.
 // Floats packed first, then vec4s at 16-byte-aligned offsets.
 layout(push_constant) uniform PushConstants {
-    layout(offset = 64) float outlineWidth;    // 0.0 = no outline, SDF units
-    layout(offset = 68) float glowWidth;       // 0.0 = no glow, SDF units
-    // 8 bytes implicit pad (offsets 72-79)
-    layout(offset = 80) vec4  outlineColor;    // RGBA
-    layout(offset = 96) vec4  glowColor;       // RGBA
+    layout(offset = 64)  float outlineWidth;   // 0.0 = no outline, SDF units
+    layout(offset = 68)  float glowWidth;      // 0.0 = no glow, SDF units
+    layout(offset = 72)  vec2  shadowOffset;   // shadow shift in atlas pixels (0,0 = no shadow)
+    layout(offset = 80)  vec4  outlineColor;   // RGBA
+    layout(offset = 96)  vec4  glowColor;      // RGBA
+    layout(offset = 112) vec4  shadowColor;    // RGBA (a=0 disables shadow — branchless no-op)
 } pc;
 
 layout(location = 0) in vec4 frag_color0;
@@ -43,14 +44,25 @@ void main() {
     float outlineAlpha = clamp(outlineDist + 0.5, 0.0, 1.0);
     float glowAlpha    = clamp(glowDist + 0.5, 0.0, 1.0);
 
-    // Composite: glow behind outline behind fill
+    // Shadow layer: sample atlas shifted opposite to offset direction.
+    // shadowColor.a == 0 makes the shadow term a no-op (branchless).
+    vec2 shadowUV  = frag_tex_coord0 - pc.shadowOffset / vec2(textureSize(texture0, 0));
+    vec3 shadowMsd = texture(texture0, shadowUV).rgb;
+    float shadowSd = median(shadowMsd.r, shadowMsd.g, shadowMsd.b);
+    float shadowAlpha = clamp(screenPxRange * (shadowSd - 0.5) + 0.5, 0.0, 1.0) * pc.shadowColor.a;
+
+    // Composite: shadow (backmost) -> glow -> outline -> fill (front)
     vec4 fill    = vec4(frag_color0.rgb, frag_color0.a * fillAlpha);
     vec4 outline = vec4(pc.outlineColor.rgb, pc.outlineColor.a * outlineAlpha);
     vec4 glow    = vec4(pc.glowColor.rgb, pc.glowColor.a * glowAlpha * (1.0 - outlineAlpha));
+    vec4 shadow  = vec4(pc.shadowColor.rgb, shadowAlpha);
 
     // Layer compositing (back to front)
-    vec3 col = glow.rgb * glow.a;
-    float a  = glow.a;
+    vec3 col = shadow.rgb * shadow.a;
+    float a  = shadow.a;
+
+    col = col * (1.0 - glow.a) + glow.rgb * glow.a;
+    a   = a   * (1.0 - glow.a) + glow.a;
 
     col = col * (1.0 - outline.a) + outline.rgb * outline.a;
     a   = a   * (1.0 - outline.a) + outline.a;
