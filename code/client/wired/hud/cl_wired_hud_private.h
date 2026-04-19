@@ -687,16 +687,6 @@ void* CG_ModernHUDElementWeaponListCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementWeaponListRoutine(void* context);
 void CG_ModernHUDElementWeaponListDestroy(void* context);
 
-void* CG_ModernHUDElementObituaries1Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementObituaries2Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementObituaries3Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementObituaries4Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementObituaries5Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementObituaries6Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementObituaries7Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementObituaries8Create(const modernhudConfig_t* config);
-void CG_ModernHUDElementObituariesRoutine(void* context);
-void CG_ModernHUDElementObituariesDestroy(void* context);
 
 
 void* CG_ModernHUDElementTempAccTextCreate(const modernhudConfig_t* config);
@@ -746,6 +736,38 @@ void CG_ModernHUDElementPlayerStatsDestroy(void* context);
 void* CG_ModernHUDElementGridCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementGridRoutine(void* context);
 void CG_ModernHUDElementGridDestroy(void* context);
+
+void* CG_ModernHUDElementAudioWaveformCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementAudioWaveformRoutine(void* context);
+void CG_ModernHUDElementAudioWaveformDestroy(void* context);
+
+void* CG_ModernHUDElementMsgQueueCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementMsgQueueRoutine(void* context);
+void CG_ModernHUDElementMsgQueueDestroy(void* context);
+
+void* CG_ModernHUDElementBotDirectivesCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementBotDirectivesRoutine(void* context);
+void CG_ModernHUDElementBotDirectivesDestroy(void* context);
+
+void* CG_ModernHUDElementAwardsCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementAwardsRoutine(void* context);
+void CG_ModernHUDElementAwardsDestroy(void* context);
+
+void* CG_ModernHUDElementCrosshairCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementCrosshairRoutine(void* context);
+void CG_ModernHUDElementCrosshairDestroy(void* context);
+
+void* CG_ModernHUDElementStatusbarValueCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementStatusbarValueRoutine(void* context);
+void CG_ModernHUDElementStatusbarValueDestroy(void* context);
+
+void* CG_ModernHUDElementStatusbarIconCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementStatusbarIconRoutine(void* context);
+void CG_ModernHUDElementStatusbarIconDestroy(void* context);
+
+void* CG_ModernHUDElementStatusbarBarCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementStatusbarBarRoutine(void* context);
+void CG_ModernHUDElementStatusbarBarDestroy(void* context);
 
 /*
  * cg_modernhud_util.c
@@ -855,31 +877,6 @@ typedef struct
 	int time;
 } modernhudChatEntry_t;
 
-typedef struct
-{
-	int time;
-	int attacker;
-	int target;
-	int attackerTeam;
-	int targetTeam;
-	int mod;
-	qboolean unfrozen;
-	struct
-	{
-		qboolean isInitialized;
-		qhandle_t iconShader;
-		vec4_t attackerColor;
-		vec4_t targetColor;
-		char attackerName[MAX_QPATH];
-		char targetName[MAX_QPATH];
-		int maxVisibleChars;
-		float baseX;
-		float attackerWidth;
-		float targetWidth;
-		float spacing;
-		int maxNameLenPix;
-	} runtime;
-} modernhudObituariesEntry_t;
 
 typedef struct
 {
@@ -903,7 +900,6 @@ typedef struct
 	} stats[WIRED_WEAPON_BUFFER_SIZE];
 } customStats_t;
 
-#define ModernHUD_MAX_OBITUARIES_LINES 8
 #define ModernHUD_MAX_CHAT_LINES 16
 #define ModernHUD_MAX_POWERUPS 8
 #define ModernHUD_MAX_AWARD_QUEUE 8
@@ -967,11 +963,6 @@ typedef struct
 		modernhudChatEntry_t line[ModernHUD_MAX_CHAT_LINES];
 		unsigned int index;
 	} chat;
-	struct
-	{
-		modernhudObituariesEntry_t line[ModernHUD_MAX_OBITUARIES_LINES];
-		unsigned int index;
-	} obituaries;
 	struct modernhudPowerupsCache_t
 	{
 		struct modernhudPowerupElement_t

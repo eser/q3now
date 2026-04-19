@@ -26,7 +26,7 @@
 #define FEAT_THIRD_PERSON                 1   // third-person camera with proximity fade & shoulder cam
 #define FEAT_UNLAGGED                     1   // 1B  server-side lag compensation (hitscan + projectile nudge)
 #define FEAT_ZNUDGE                       0   // 1C  client-side forward extrapolation (player/missile prediction)
-#define FEAT_FPS_IMPROVEMENTS             0
+#define FEAT_FPS_IMPROVEMENTS             1
 
 // ── gameplay (testing) ──────────────────────────────────────────────────
 #define FEAT_DESTROYABLE_MISSILES         0   // 11B shoot down rockets/grenades/plasma

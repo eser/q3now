@@ -134,6 +134,69 @@ void Text_Draw( const char *text, float x, float y, int fontId,
 	}
 }
 
+/* ── Text_DrawClipped ──────────────────────────────────────────────── */
+
+void Text_DrawClipped( const char *text, float x, float y, float maxWidth,
+                       int fontId, float size,
+                       const vec4_t color, int alignment, int flags )
+{
+	const fontFace_t *face;
+	float             ls, fullWidth, drawX;
+	qboolean          shadow, forceColor;
+
+	if ( !text || !text[0] ) return;
+
+	face = Text_ResolveFace( fontId );
+	if ( !face || !face->atlas ) return;
+
+	ls        = text_letterSpacing;
+	fullWidth = MSDF_MeasureString( face->atlas, size, text, -1, ls );
+
+	if ( maxWidth <= 0.0f || fullWidth <= maxWidth ) {
+		/* fits — anchor against full width, draw in one pass */
+		drawX = x;
+		if      ( alignment == TEXT_ALIGN_CENTER ) drawX -= fullWidth * 0.5f;
+		else if ( alignment == TEXT_ALIGN_RIGHT  ) drawX -= fullWidth;
+
+		shadow    = ( flags & TEXT_DROPSHADOW ) && cl_wiredTextShadow && cl_wiredTextShadow->integer;
+		forceColor = ( flags & TEXT_FORCECOLOR ) ? qtrue : qfalse;
+
+		if ( shadow ) {
+			vec4_t sc    = { 0, 0, 0, color ? color[3] * 0.8f : 0.8f };
+			float  off   = size * 0.06f < 1.0f ? 1.0f : size * 0.06f;
+			re.SetMSDFShadow( off, off, sc );
+		}
+		MSDF_DrawString( face->atlas, drawX, y, size, color, text, -1, ls, forceColor );
+		if ( shadow ) re.SetMSDFShadow( 0.0f, 0.0f, NULL );
+		return;
+	}
+
+	/* clamped path — glyph-accurate prefix + ".." */
+	{
+		float ellipsisW   = MSDF_MeasureString( face->atlas, size, "..", -1, ls );
+		float prefixWidth;
+		int   prefixChars = MSDF_ClampToWidth( face->atlas, size, text,
+		                                       maxWidth - ellipsisW, ls, &prefixWidth );
+		float effectiveW  = prefixWidth + ellipsisW;
+
+		drawX = x;
+		if      ( alignment == TEXT_ALIGN_CENTER ) drawX -= effectiveW * 0.5f;
+		else if ( alignment == TEXT_ALIGN_RIGHT  ) drawX -= effectiveW;
+
+		shadow     = ( flags & TEXT_DROPSHADOW ) && cl_wiredTextShadow && cl_wiredTextShadow->integer;
+		forceColor = ( flags & TEXT_FORCECOLOR ) ? qtrue : qfalse;
+
+		if ( shadow ) {
+			vec4_t sc  = { 0, 0, 0, color ? color[3] * 0.8f : 0.8f };
+			float  off = size * 0.06f < 1.0f ? 1.0f : size * 0.06f;
+			re.SetMSDFShadow( off, off, sc );
+		}
+		MSDF_DrawString( face->atlas, drawX,                y, size, color, text, prefixChars, ls, forceColor );
+		MSDF_DrawString( face->atlas, drawX + prefixWidth,  y, size, color, "..", -1,          ls, forceColor );
+		if ( shadow ) re.SetMSDFShadow( 0.0f, 0.0f, NULL );
+	}
+}
+
 /* ── Text_Measure ──────────────────────────────────────────────────── */
 
 float Text_Measure( const char *text, int fontId, float size )

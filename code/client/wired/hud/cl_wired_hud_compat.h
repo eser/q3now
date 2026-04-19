@@ -181,10 +181,6 @@ qboolean wired_IsSpectator( void );
 #define CG_IsFollowing()          wired_IsFollowing()
 #define CG_IsSpectator()          wired_IsSpectator()
 
-// CG_ModernIsGameTypeFreeze
-qboolean wired_IsGameTypeFreeze( void );
-#define CG_ModernIsGameTypeFreeze()  wired_IsGameTypeFreeze()
-
 // CG_RegisterItemVisuals — stub (not needed for HUD drawing)
 #define CG_RegisterItemVisuals(x)
 

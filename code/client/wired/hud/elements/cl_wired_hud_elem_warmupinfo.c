@@ -49,7 +49,6 @@ void CG_ModernHUDElementWarmupInfoRoutine(void* context)
 			sec = (sec - cg.time) / 1000;
 			if (sec < 0)
 			{
-				cg.warmup = 0;
 				sec = 0;
 			}
 			Com_sprintf(str, 256, "Starts in: %i", sec + 1);

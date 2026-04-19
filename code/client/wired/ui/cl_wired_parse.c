@@ -579,9 +579,6 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		else if ( !Q_stricmp( token.string, "notselectable" ) ) {
 			item->notselectable = qtrue;
 		}
-		else if ( !Q_stricmp( token.string, "wrapped" ) || !Q_stricmp( token.string, "autowrapped" ) ) {
-			// text wrapping — noted, not yet rendered
-		}
 		else if ( !Q_stricmp( token.string, "horizontalscroll" ) ) {
 			// horizontal scroll — noted, not yet rendered
 		}
@@ -673,12 +670,6 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		}
 		else if ( !Q_stricmp( token.string, "model_angle" ) ) {
 			WiredPC_Float( handle, &item->modelAngle );
-		}
-		else if ( !Q_stricmp( token.string, "textfont" ) ) {
-			WiredPC_ReadToken( handle, &token ); // consume font name (not yet stored)
-		}
-		else if ( !Q_stricmp( token.string, "cinematic" ) ) {
-			WiredPC_ReadToken( handle, &token ); // consume video name
 		}
 		else if ( !Q_stricmp( token.string, "widescreen" ) ) {
 			WiredPC_Int( handle, &item->modelWidescreen );
@@ -1311,9 +1302,6 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		}
 		else if ( !Q_stricmp( token.string, "disablecolor" ) ) {
 			WiredPC_Color( handle, &menu->disablecolor );
-		}
-		else if ( !Q_stricmp( token.string, "outlinecolor" ) ) {
-			vec4_t oc; WiredPC_Color( handle, &oc ); // consume, not stored on menu
 		}
 		else if ( !Q_stricmp( token.string, "font" ) ) {
 			if ( WiredPC_String( handle, &str ) )

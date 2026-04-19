@@ -36,6 +36,16 @@ void  Text_Init( void );
 void  Text_Draw( const char *text, float x, float y, int fontId,
                  float size, const vec4_t color, int alignment, int flags );
 
+/* Text_DrawClipped — draw text inside a pixel-width rect.
+ * Truncates with ".." using glyph-accurate metrics when the string exceeds
+ * maxWidth. Alignment is resolved against the effective (clamped) width so
+ * centered items stay visually centered. If maxWidth <= 0, identical to
+ * Text_Draw. Callers must pass a stable per-string pointer — not a reused
+ * stack buffer — to keep the measurement cache correct. */
+void  Text_DrawClipped( const char *text, float x, float y, float maxWidth,
+                        int fontId, float size,
+                        const vec4_t color, int alignment, int flags );
+
 float Text_Measure( const char *text, int fontId, float size );
 
 void  Text_DrawChar( int ch, float x, float y, int fontId,

@@ -168,14 +168,7 @@ void CG_ModernHUDElementTeamRoutine(void* context)
 	int index;
 	int ourTeam;
 
-	if (CG_ModernIsGameTypeFreeze())
-	{
-		ourTeam = cgs.clientinfo[cg.clientNum].team;
-	}
-	else
-	{
-		ourTeam = cg.snap->ps.persistant[PERS_TEAM];
-	}
+	ourTeam = cg.snap->ps.persistant[PERS_TEAM];
 
 	for (index = 0; index < numSortedTeamPlayers; ++index)
 	{
