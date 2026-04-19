@@ -1,13 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_elem_msgqueue.c -- Unified message queue HUD element
-
-Replaces separate fragmessage + rankmessage elements with a single
-priority-ordered queue. Frag messages (HIGH) preempt center prints
-(NORMAL) which preempt warmup messages (LOW).
-
-Messages display one at a time with fade-in (300ms) and fade-out (500ms).
-===========================================================================
+cl_wired_hud_elem_msgqueue.c -- Priority-ordered message queue with fade-in/out.
 */
 
 #include "../../../client.h"

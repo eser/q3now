@@ -4,8 +4,6 @@
 
 #if FEAT_WIRED_UI
 
-
-
 #define FPS_MAX_FRAMES  4
 typedef struct
 {
@@ -20,10 +18,7 @@ void* CG_ModernHUDElementFPSCreate(const modernhudConfig_t* config)
 {
 	modernHudElementFPS_t* element;
 
-	ModernHUD_ELEMENT_INIT(element, config);
-
-	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
-	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
+	WHUD_ELEMENT_INIT_TEXT( element, config );
 
 	return element;
 }

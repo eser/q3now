@@ -1,11 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_elem_statusbar_bar.c — Generic bound bar element
-
-Looks up a named binding and renders a fill bar at the binding's percent.
-The .hud file specifies: hudElement "statusbar_bar" bind "health" direction R
-cgame computes the percentage and color — client just draws the bar.
-===========================================================================
+cl_wired_hud_elem_statusbar_bar.c — Generic bound fill-bar element.
 */
 
 #include "../../../client.h"

@@ -339,9 +339,10 @@ typedef struct wiredItemDef_s {
 	// listbox data (for ITEM_TYPE_LISTBOX)
 	int             columns;                // number of columns
 	int             columnWidths[8];        // width per column (max 8)
-	int             listScrollOffset;       // first visible row
+	int             listScrollOffset;       // first visible row (vertical) or first visible column (horizontal)
 	int             listSelectedRow;        // selected row index (-1 = none)
 	int             listScrollFadeTime;     // cls.realtime when last scrolled (for scrollbar fade)
+	qboolean        horizontalScroll;       // axis-flip: items flow left-to-right instead of top-to-bottom
 
 	// transition animation state (Phase 2.5)
 	wiredRect_t     transFrom;              // start rect

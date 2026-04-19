@@ -1,18 +1,5 @@
 /*
-===========================================================================
 cl_wired_msdf.c -- MSDF font loading and rendering
-
-Loads msdf-atlas-gen JSON metrics + atlas PNG for multi-channel signed
-distance field fonts.  Renders via the standard Q3 renderer interface
-(re.SetColor / re.DrawStretchPic).
-
-Coordinates are in real screen pixels and are submitted directly
-to the renderer without virtual-to-real conversion.
-
-The MSDF fragment shader (task 2) replaces the default shader later.
-Until then, the atlas renders with standard bilinear filtering -- UVs
-and geometry will be correct, but glyph edges will appear blurred.
-===========================================================================
 */
 
 #include "../../client.h"
@@ -724,6 +711,14 @@ static int MSDF_HandleColorCode( const char *p, float *outColor )
 	return 2;
 }
 
+/* ── glyph advance helper ───────────────────────────────────────────── */
+
+static float MSDF_GlyphAdvancePx( msdfFont_t *font, int ch,
+                                   float pixelSize, float letterSpacing ) {
+	msdfGlyph_t *g = MSDF_FindGlyph( font, ch );
+	return ( g ? g->advance : 0.5f ) * pixelSize + letterSpacing;
+}
+
 /* ── string drawing ─────────────────────────────────────────────────── */
 
 void MSDF_DrawString( msdfFont_t *font, float x, float y,
@@ -767,10 +762,8 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 
 		/* handle ^^ (literal caret) */
 		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
-			msdfGlyph_t *caretGlyph;
 			MSDF_DrawChar( font, curX, y, size, curColor, Q_COLOR_ESCAPE );
-			caretGlyph = MSDF_FindGlyph( font, Q_COLOR_ESCAPE );
-			curX += ( caretGlyph ? caretGlyph->advance : 0.5f ) * pixelSize + letterSpacing;
+			curX += MSDF_GlyphAdvancePx( font, Q_COLOR_ESCAPE, pixelSize, letterSpacing );
 			drawn++;
 			p += 2;
 			continue;
@@ -784,19 +777,8 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 		}
 
 		/* regular character */
-		{
-			msdfGlyph_t *charGlyph;
-			MSDF_DrawChar( font, curX, y, size, curColor, (unsigned char)*p );
-
-			/* advance cursor */
-			charGlyph = MSDF_FindGlyph( font, (unsigned char)*p );
-			if ( charGlyph ) {
-				curX += charGlyph->advance * pixelSize + letterSpacing;
-			} else {
-				/* fallback: advance by half an em for unknown glyphs */
-				curX += 0.5f * pixelSize + letterSpacing;
-			}
-		}
+		MSDF_DrawChar( font, curX, y, size, curColor, (unsigned char)*p );
+		curX += MSDF_GlyphAdvancePx( font, (unsigned char)*p, pixelSize, letterSpacing );
 
 		drawn++;
 		p++;
@@ -854,12 +836,7 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 
 		/* ^^ literal caret */
 		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
-			msdfGlyph_t *caretGlyph = MSDF_FindGlyph( font, Q_COLOR_ESCAPE );
-			if ( caretGlyph ) {
-				lineWidth += caretGlyph->advance * pixelSize + letterSpacing;
-			} else {
-				lineWidth += 0.5f * pixelSize + letterSpacing;
-			}
+			lineWidth += MSDF_GlyphAdvancePx( font, Q_COLOR_ESCAPE, pixelSize, letterSpacing );
 			counted++;
 			p += 2;
 			continue;
@@ -873,14 +850,7 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 		}
 
 		/* regular character */
-		{
-			msdfGlyph_t *charGlyph = MSDF_FindGlyph( font, (unsigned char)*p );
-			if ( charGlyph ) {
-				lineWidth += charGlyph->advance * pixelSize + letterSpacing;
-			} else {
-				lineWidth += 0.5f * pixelSize + letterSpacing;
-			}
-		}
+		lineWidth += MSDF_GlyphAdvancePx( font, (unsigned char)*p, pixelSize, letterSpacing );
 
 		counted++;
 		p++;
@@ -922,13 +892,11 @@ int MSDF_ClampToWidth( msdfFont_t *font, float size,
 		return 0;
 
 	for ( p = str; *p; ) {
-		float       advance;
-		int         skip;
-		msdfGlyph_t *g;
+		float advance;
+		int   skip;
 
 		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
-			g       = MSDF_FindGlyph( font, Q_COLOR_ESCAPE );
-			advance = ( g ? g->advance : 0.5f ) * pixelSize + letterSpacing;
+			advance = MSDF_GlyphAdvancePx( font, Q_COLOR_ESCAPE, pixelSize, letterSpacing );
 			if ( curWidth + advance > maxPixels ) break;
 			curWidth += advance;
 			counted++;
@@ -939,8 +907,7 @@ int MSDF_ClampToWidth( msdfFont_t *font, float size,
 		skip = MSDF_HandleColorCode( p, NULL );
 		if ( skip > 0 ) { p += skip; continue; }
 
-		g       = MSDF_FindGlyph( font, (unsigned char)*p );
-		advance = ( g ? g->advance : 0.5f ) * pixelSize + letterSpacing;
+		advance = MSDF_GlyphAdvancePx( font, (unsigned char)*p, pixelSize, letterSpacing );
 		if ( curWidth + advance > maxPixels ) break;
 		curWidth += advance;
 		counted++;

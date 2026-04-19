@@ -1,27 +1,5 @@
 /*
-===========================================================================
 cl_wired_attract.c — Wired Attract scheduler
-
-Fills idle time (disconnected + attract_delay seconds of inactivity) with
-a Lua-authored playlist of cinematics, .wmenu panels, and demo playbacks.
-
-State machine:
-  IDLE         → not initialized or no playlist
-  WAITING      → post-disconnect, counting attract_delay
-  STARTING     → dispatching the next playlist item
-  PLAYING      → item is currently visible
-  TRANSITIONING→ 250ms fade-out + 250ms fade-in black overlay
-  STOPPED      → manually stopped; waits for next idle trigger
-
-Integration hooks (called from cl_wired_ui.c):
-  WiredUI_Init         → WiredAttract_Init
-  WiredUI_Shutdown     → WiredAttract_Shutdown
-  WiredUI_Refresh      → WiredAttract_Frame   (before early-return guard)
-  WiredUI_KeyEvent     → WiredAttract_NoteInput
-  WiredUI_MouseEvent   → WiredAttract_NoteMouse
-  WiredUI_SafeReload   → WiredAttract_OnMenuReload  (post-swap)
-  cl_main.c:CL_DemoCompleted → WiredAttract_OnDemoCompleted
-===========================================================================
 */
 
 #include "../../client.h"

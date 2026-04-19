@@ -1,11 +1,5 @@
 /*
-===========================================================================
 cl_wired_hud.c — Wired UI HUD: client-side element rendering
-
-Phase 3: ModernHUD elements run in the client. Game state is pushed by
-cgame each frame via trap_WiredUI_PushHudState(). Elements read from
-the wiredHud global instead of cgame globals.
-===========================================================================
 */
 
 #include "../../client.h"

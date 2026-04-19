@@ -580,7 +580,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			item->notselectable = qtrue;
 		}
 		else if ( !Q_stricmp( token.string, "horizontalscroll" ) ) {
-			// horizontal scroll — noted, not yet rendered
+			item->horizontalScroll = qtrue;
 		}
 		else if ( !Q_stricmp( token.string, "outlinecolor" ) ) {
 			WiredPC_Color( handle, &item->outlinecolor );

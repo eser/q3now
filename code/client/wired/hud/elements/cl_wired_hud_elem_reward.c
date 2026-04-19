@@ -4,8 +4,6 @@
 
 #if FEAT_WIRED_UI
 
-
-
 typedef enum
 {
 	ModernHUD_REWARD_ICON,

@@ -1,10 +1,5 @@
 /*
-===========================================================================
-cl_wired_hud_elem_table.c -- Wired UI: TABLE widget renderer
-
-Phase 4: Generic data-driven table. Reads row data from the Wired Store.
-cgame pre-computes all formatting and colors; this widget just displays.
-===========================================================================
+cl_wired_hud_elem_table.c -- Generic data-driven TABLE widget renderer.
 */
 
 #include "../../../client.h"

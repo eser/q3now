@@ -326,6 +326,18 @@ ELSEIF(USE_JPEG_TURBO)
 	SET(CMAKE_INSTALL_INCLUDEDIR "include"                 CACHE STRING "" FORCE)
 	SET(CMAKE_INSTALL_DOCDIR     "share/doc/libjpeg-turbo" CACHE STRING "" FORCE)
 	SET(CMAKE_INSTALL_MANDIR     "share/man"               CACHE STRING "" FORCE)
+	# libjpeg-turbo upstream refuses add_subdirectory() via a FATAL_ERROR guard.
+	# Neutralize the guard at configure time so the vendored submodule builds
+	# without maintaining a fork. Idempotent: no write if already patched.
+	SET(_JPEGTURBO_CML "${CMAKE_CURRENT_SOURCE_DIR}/src/libs/libjpeg-turbo/CMakeLists.txt")
+	FILE(READ "${_JPEGTURBO_CML}" _JPEGTURBO_SRC)
+	STRING(REPLACE
+		"if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)"
+		"if(FALSE) # q3now: add_subdirectory() guard neutralized"
+		_JPEGTURBO_PATCHED "${_JPEGTURBO_SRC}")
+	IF(NOT _JPEGTURBO_PATCHED STREQUAL _JPEGTURBO_SRC)
+		FILE(WRITE "${_JPEGTURBO_CML}" "${_JPEGTURBO_PATCHED}")
+	ENDIF()
 	ADD_SUBDIRECTORY(src/libs/libjpeg-turbo EXCLUDE_FROM_ALL)
 	ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
 	TARGET_INCLUDE_DIRECTORIES(client PRIVATE

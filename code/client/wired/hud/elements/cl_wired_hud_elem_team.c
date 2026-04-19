@@ -6,9 +6,6 @@
 
 #if FEAT_WIRED_UI
 
-
-
-
 typedef struct
 {
 	modernhudConfig_t config;

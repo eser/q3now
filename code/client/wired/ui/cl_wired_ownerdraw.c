@@ -1,16 +1,5 @@
 /*
-===========================================================================
 cl_wired_ownerdraw.c — TA ownerdraw dispatch table + rendering callbacks
-
-Evaluates CG_SHOW / UI_SHOW visibility flags and renders CG_OWNERDRAW
-item types for Team Arena menu compatibility. Each callback receives the
-item's rect and renders within it using data from wiredHudState_t.
-
-Tiered implementation:
-  P1: health, armor, ammo, powerups, head, score (most-used in TA menus)
-  P2: killer, CTF powerup, flag status, gametype
-  P3: everything else (stub: log once, render nothing)
-===========================================================================
 */
 
 #include "../../client.h"
@@ -199,22 +188,14 @@ static void WiredOD_GameType( float x, float y, float w, float h, vec4_t itemCol
 // ── background grid (scanlines) ──────────────────────────────────────
 
 static void WiredOD_BackgroundGrid( float x, float y, float w, float h, vec4_t itemColor ) {
-	// Draw horizontal scanlines every 48 pixels across the full
-	// screen.  Uses the item's forecolor for tint and alpha,
-	// falling back to white 3% alpha if no color is provided.
 	vec4_t lineColor;
 	if ( itemColor && ( itemColor[0] > 0.0f || itemColor[1] > 0.0f || itemColor[2] > 0.0f ) ) {
 		Vector4Copy( itemColor, lineColor );
 	} else {
 		Vector4Set( lineColor, 1, 1, 1, 0.03f );
 	}
-	float lineH   = 1.0f;   // 1 virtual pixel height
-	float spacing = 48.0f;
-	float sy;
-
-	for ( sy = 0; sy < (float)cls.glconfig.vidHeight; sy += spacing ) {
-		WUI_FillRect( 0, sy, (float)cls.glconfig.vidWidth, lineH, lineColor );
-	}
+	WUI_DrawScanlines( 0, 0, (float)cls.glconfig.vidWidth, (float)cls.glconfig.vidHeight,
+	                   lineColor, 48.0f );
 }
 
 // ── background full (3-layer) ─────────────────────────────────────────

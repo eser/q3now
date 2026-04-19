@@ -5,8 +5,6 @@
 
 #if FEAT_WIRED_UI
 
-
-
 typedef struct
 {
 	modernhudConfig_t config;
@@ -18,10 +16,7 @@ void* CG_ModernHUDElementWarmupInfoCreate(const modernhudConfig_t* config)
 {
 	modernHudElementWarmupInfo_t* element;
 
-	ModernHUD_ELEMENT_INIT(element, config);
-
-	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
-	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
+	WHUD_ELEMENT_INIT_TEXT( element, config );
 
 	return element;
 }

@@ -4,7 +4,6 @@
 
 #if FEAT_WIRED_UI
 
-
 #if FEAT_UNLAGGED
 
 typedef struct
@@ -17,10 +16,7 @@ void* CG_ModernHUDElementNetStatsCreate(const modernhudConfig_t* config)
 {
 	modernHudElementNetStats_t* element;
 
-	ModernHUD_ELEMENT_INIT(element, config);
-
-	CG_ModernHUDTextMakeContext(&element->config, &element->ctx);
-	CG_ModernHUDFillAndFrameForText(&element->config, &element->ctx);
+	WHUD_ELEMENT_INIT_TEXT( element, config );
 
 	return element;
 }
