@@ -32,6 +32,23 @@ static float msdf_outlineColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 static float msdf_glowWidth = 0.0f;
 static float msdf_glowColor[4] = { 1.0f, 1.0f, 1.0f, 0.3f };
 
+/* ── per-frame string measurement cache (B.8) ──────────────────────── */
+
+#define MSDF_MEAS_CACHE_SIZE 16
+
+typedef struct {
+	const char *str;
+	msdfFont_t *font;
+	float       size;
+	float       letterSpacing;
+	int         maxChars;
+	float       result;
+	int         frame;
+} msdf_meas_entry_t;
+
+static msdf_meas_entry_t s_meas_cache[MSDF_MEAS_CACHE_SIZE];
+static int                s_meas_cache_idx = 0;
+
 void MSDF_SetOutline( float outlineWidth, const float *outlineColor,
                        float glowWidth, const float *glowColor )
 {
@@ -813,8 +830,21 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 	float       maxWidth;    /* maximum width seen across all lines */
 	int         counted;
 	const char *p;
+	int         i;
 
 	if ( !font || !font->loaded || !str || !str[0] ) return 0.0f;
+
+	/* per-frame cache: avoid re-iterating the same string within one frame */
+	for ( i = 0; i < MSDF_MEAS_CACHE_SIZE; i++ ) {
+		if ( s_meas_cache[i].frame == cls.realtime &&
+		     s_meas_cache[i].str == str &&
+		     s_meas_cache[i].font == font &&
+		     s_meas_cache[i].size == size &&
+		     s_meas_cache[i].letterSpacing == letterSpacing &&
+		     s_meas_cache[i].maxChars == maxChars ) {
+			return s_meas_cache[i].result;
+		}
+	}
 
 	pixelSize = MSDF_PointToPixels( size );
 	lineWidth = 0.0f;
@@ -872,6 +902,19 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 
 	/* commit the final line (no trailing \n required) */
 	if ( lineWidth > maxWidth ) maxWidth = lineWidth;
+
+	/* store result in per-frame ring cache */
+	{
+		int idx = s_meas_cache_idx % MSDF_MEAS_CACHE_SIZE;
+		s_meas_cache[idx].str          = str;
+		s_meas_cache[idx].font         = font;
+		s_meas_cache[idx].size         = size;
+		s_meas_cache[idx].letterSpacing = letterSpacing;
+		s_meas_cache[idx].maxChars     = maxChars;
+		s_meas_cache[idx].result       = maxWidth;
+		s_meas_cache[idx].frame        = cls.realtime;
+		s_meas_cache_idx++;
+	}
 
 	return maxWidth;
 }

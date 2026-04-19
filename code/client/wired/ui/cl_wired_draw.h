@@ -22,11 +22,11 @@ static ID_INLINE void WUI_DrawPic( float x, float y, float w, float h, qhandle_t
 	re.DrawStretchPic( x, y, w, h, 0, 0, 1, 1, shader );
 }
 
-/* Fill a rect at real screen pixel coordinates (no AdjustFrom640). */
+/* Fill a rect at real screen pixel coordinates (no AdjustFrom640).
+ * Does NOT reset color to white afterwards; caller or B.7 dedup handles state. */
 static ID_INLINE void WUI_FillRect( float x, float y, float w, float h, const float *color ) {
 	re.SetColor( color );
 	re.DrawStretchPic( x, y, w, h, 0, 0, 0, 0, cls.whiteShader );
-	re.SetColor( NULL );
 }
 
 /* Draw a stretched pic at real screen pixel coordinates (no AdjustFrom640). */

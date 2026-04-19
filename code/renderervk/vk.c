@@ -1,5 +1,8 @@
 #include "tr_local.h"
 #include "vk.h"
+#ifndef _WIN32
+#include <pthread.h>
+#endif
 #include "smaa_area_texture.h"
 #include "smaa_search_texture.h"
 #include "../qcommon/q_feats.h"
@@ -29,8 +32,22 @@ VkDebugReportCallbackEXT vk_debug_callback = VK_NULL_HANDLE;
 #endif
 
 static int vk_diag_fence_ms, vk_diag_submit_ms, vk_diag_present_ms, vk_diag_acquire_ms, vk_diag_frames;
+static int vk_diag_ft_fence_ms; // background fence thread: accumulated vkWaitForFences duration
 static int vk_diag_drawcalls, vk_diag_pipebinds, vk_diag_msdf_draws, vk_diag_msdf_binds;
 static qboolean vk_diag_msdf_active;
+
+// Per-frame µs timestamps for r_frameSpikeUs profiler (single-threaded, main thread only).
+static int64_t vk_frame_t_start;
+static int64_t vk_frame_t_after_fence;
+static int64_t vk_frame_t_after_acquire;
+static int64_t vk_frame_t_after_begincb;
+static int64_t vk_frame_t_rec_start;
+static int64_t vk_frame_t_rec_end;
+static int64_t vk_frame_t_submit_start;
+static int64_t vk_frame_t_after_submit;
+static int64_t vk_frame_t_present_start;
+static int64_t vk_frame_t_after_present;
+static qboolean vk_frame_present_done;
 
 //
 // Vulkan API functions used by the renderer.
@@ -80,9 +97,11 @@ static PFN_vkCmdEndRenderPass							qvkCmdEndRenderPass;
 static PFN_vkCmdNextSubpass								qvkCmdNextSubpass;
 static PFN_vkCmdPipelineBarrier							qvkCmdPipelineBarrier;
 static PFN_vkCmdPushConstants							qvkCmdPushConstants;
+static PFN_vkCmdResetQueryPool							qvkCmdResetQueryPool;
 static PFN_vkCmdSetDepthBias							qvkCmdSetDepthBias;
 static PFN_vkCmdSetScissor								qvkCmdSetScissor;
 static PFN_vkCmdSetViewport								qvkCmdSetViewport;
+static PFN_vkCmdWriteTimestamp							qvkCmdWriteTimestamp;
 static PFN_vkCreateBuffer								qvkCreateBuffer;
 static PFN_vkCreateCommandPool							qvkCreateCommandPool;
 static PFN_vkCreateDescriptorPool						qvkCreateDescriptorPool;
@@ -94,6 +113,7 @@ static PFN_vkCreateGraphicsPipelines					qvkCreateGraphicsPipelines;
 static PFN_vkCreateImage								qvkCreateImage;
 static PFN_vkCreateImageView							qvkCreateImageView;
 static PFN_vkCreatePipelineLayout						qvkCreatePipelineLayout;
+static PFN_vkCreateQueryPool							qvkCreateQueryPool;
 static PFN_vkCreatePipelineCache						qvkCreatePipelineCache;
 static PFN_vkCreateRenderPass							qvkCreateRenderPass;
 static PFN_vkCreateSampler								qvkCreateSampler;
@@ -111,6 +131,7 @@ static PFN_vkDestroyImageView							qvkDestroyImageView;
 static PFN_vkDestroyPipeline							qvkDestroyPipeline;
 static PFN_vkDestroyPipelineCache						qvkDestroyPipelineCache;
 static PFN_vkDestroyPipelineLayout						qvkDestroyPipelineLayout;
+static PFN_vkDestroyQueryPool							qvkDestroyQueryPool;
 static PFN_vkDestroyRenderPass							qvkDestroyRenderPass;
 static PFN_vkDestroySampler								qvkDestroySampler;
 static PFN_vkDestroySemaphore							qvkDestroySemaphore;
@@ -125,6 +146,7 @@ static PFN_vkGetBufferMemoryRequirements				qvkGetBufferMemoryRequirements;
 static PFN_vkGetDeviceQueue								qvkGetDeviceQueue;
 static PFN_vkGetImageMemoryRequirements					qvkGetImageMemoryRequirements;
 static PFN_vkGetImageSubresourceLayout					qvkGetImageSubresourceLayout;
+static PFN_vkGetQueryPoolResults						qvkGetQueryPoolResults;
 static PFN_vkInvalidateMappedMemoryRanges				qvkInvalidateMappedMemoryRanges;
 static PFN_vkMapMemory									qvkMapMemory;
 static PFN_vkQueueSubmit								qvkQueueSubmit;
@@ -2153,9 +2175,11 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkCmdNextSubpass)
 	INIT_DEVICE_FUNCTION(vkCmdPipelineBarrier)
 	INIT_DEVICE_FUNCTION(vkCmdPushConstants)
+	INIT_DEVICE_FUNCTION(vkCmdResetQueryPool)
 	INIT_DEVICE_FUNCTION(vkCmdSetDepthBias)
 	INIT_DEVICE_FUNCTION(vkCmdSetScissor)
 	INIT_DEVICE_FUNCTION(vkCmdSetViewport)
+	INIT_DEVICE_FUNCTION(vkCmdWriteTimestamp)
 	INIT_DEVICE_FUNCTION(vkCreateBuffer)
 	INIT_DEVICE_FUNCTION(vkCreateCommandPool)
 	INIT_DEVICE_FUNCTION(vkCreateDescriptorPool)
@@ -2168,6 +2192,7 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkCreateImageView)
 	INIT_DEVICE_FUNCTION(vkCreatePipelineCache)
 	INIT_DEVICE_FUNCTION(vkCreatePipelineLayout)
+	INIT_DEVICE_FUNCTION(vkCreateQueryPool)
 	INIT_DEVICE_FUNCTION(vkCreateRenderPass)
 	INIT_DEVICE_FUNCTION(vkCreateSampler)
 	INIT_DEVICE_FUNCTION(vkCreateSemaphore)
@@ -2184,6 +2209,7 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkDestroyPipeline)
 	INIT_DEVICE_FUNCTION(vkDestroyPipelineCache)
 	INIT_DEVICE_FUNCTION(vkDestroyPipelineLayout)
+	INIT_DEVICE_FUNCTION(vkDestroyQueryPool)
 	INIT_DEVICE_FUNCTION(vkDestroyRenderPass)
 	INIT_DEVICE_FUNCTION(vkDestroySampler)
 	INIT_DEVICE_FUNCTION(vkDestroySemaphore)
@@ -2198,6 +2224,7 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkGetDeviceQueue)
 	INIT_DEVICE_FUNCTION(vkGetImageMemoryRequirements)
 	INIT_DEVICE_FUNCTION(vkGetImageSubresourceLayout)
+	INIT_DEVICE_FUNCTION(vkGetQueryPoolResults)
 	INIT_DEVICE_FUNCTION(vkInvalidateMappedMemoryRanges)
 	INIT_DEVICE_FUNCTION(vkMapMemory)
 	INIT_DEVICE_FUNCTION(vkQueueSubmit)
@@ -2285,9 +2312,11 @@ static void deinit_device_functions( void )
 	qvkCmdNextSubpass							= NULL;
 	qvkCmdPipelineBarrier						= NULL;
 	qvkCmdPushConstants							= NULL;
+	qvkCmdResetQueryPool						= NULL;
 	qvkCmdSetDepthBias							= NULL;
 	qvkCmdSetScissor							= NULL;
 	qvkCmdSetViewport							= NULL;
+	qvkCmdWriteTimestamp						= NULL;
 	qvkCreateBuffer								= NULL;
 	qvkCreateCommandPool						= NULL;
 	qvkCreateDescriptorPool						= NULL;
@@ -2300,6 +2329,7 @@ static void deinit_device_functions( void )
 	qvkCreateImageView							= NULL;
 	qvkCreatePipelineCache						= NULL;
 	qvkCreatePipelineLayout						= NULL;
+	qvkCreateQueryPool							= NULL;
 	qvkCreateRenderPass							= NULL;
 	qvkCreateSampler							= NULL;
 	qvkCreateSemaphore							= NULL;
@@ -2316,6 +2346,7 @@ static void deinit_device_functions( void )
 	qvkDestroyPipeline							= NULL;
 	qvkDestroyPipelineCache						= NULL;
 	qvkDestroyPipelineLayout					= NULL;
+	qvkDestroyQueryPool							= NULL;
 	qvkDestroyRenderPass						= NULL;
 	qvkDestroySampler							= NULL;
 	qvkDestroySemaphore							= NULL;
@@ -2330,6 +2361,7 @@ static void deinit_device_functions( void )
 	qvkGetDeviceQueue							= NULL;
 	qvkGetImageMemoryRequirements				= NULL;
 	qvkGetImageSubresourceLayout				= NULL;
+	qvkGetQueryPoolResults						= NULL;
 	qvkInvalidateMappedMemoryRanges				= NULL;
 	qvkMapMemory								= NULL;
 	qvkQueueSubmit								= NULL;
@@ -5998,6 +6030,12 @@ static void vk_set_render_scale( void )
 }
 
 
+static void vk_fence_thread_start( void );
+static void vk_fence_thread_stop( void );
+static void vk_gpu_ts_init( void );
+static void vk_gpu_ts_shutdown( void );
+static void vk_gpu_ts_write( const char *label );
+
 void vk_initialize( void )
 {
 	char buf[64], driver_version[64];
@@ -6023,6 +6061,9 @@ void vk_initialize( void )
 	vk.storage_alignment = MAX( props.limits.minStorageBufferOffsetAlignment, sizeof( uint32_t ) );
 
 	vk.maxAnisotropy = props.limits.maxSamplerAnisotropy;
+
+	vk.timestampPeriodNs  = props.limits.timestampPeriod;
+	vk.timestampSupported = ( props.limits.timestampComputeAndGraphics && vk.timestampPeriodNs > 0.0f ) ? qtrue : qfalse;
 
 	vk.blitFilter = GL_NEAREST;
 	vk.windowAdjusted = qfalse;
@@ -6409,12 +6450,12 @@ void vk_initialize( void )
 
 		VK_CHECK(qvkCreatePipelineLayout(vk.device, &desc, NULL, &vk.pipeline_layout));
 
-		// MSDF pipeline layout: 112 bytes (64 MVP + 48 outline/glow params), VERTEX|FRAGMENT
+		// MSDF pipeline layout: 128 bytes (64 MVP + 64 outline/glow/shadow params), VERTEX|FRAGMENT
 		{
 			VkPushConstantRange msdfPush;
 			msdfPush.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 			msdfPush.offset = 0;
-			msdfPush.size = 112; // 64 (mat4 mvp) + 4 (outlineWidth) + 4 (glowWidth) + 8 (pad) + 16 (outlineColor) + 16 (glowColor)
+			msdfPush.size = 128; // 64 (mat4 mvp) + 4 (outlineWidth) + 4 (glowWidth) + 8 (shadowOffset) + 16 (outlineColor) + 16 (glowColor) + 16 (shadowColor)
 
 			VkPipelineLayoutCreateInfo msdfLayoutInfo;
 			Com_Memset(&msdfLayoutInfo, 0, sizeof(msdfLayoutInfo));
@@ -6558,6 +6599,9 @@ void vk_initialize( void )
 	if ( vk.defaults.staging_size == STAGING_BUFFER_SIZE_HI ) {
 		vk_alloc_staging_buffer( vk.defaults.staging_size );
 	}
+
+	vk_fence_thread_start();
+	vk_gpu_ts_init();
 
 	vk.active = qtrue;
 }
@@ -6842,6 +6886,12 @@ void vk_shutdown( refShutdownCode_t code )
 	if ( qvkQueuePresentKHR == NULL ) { // not fully initialized
 		goto __cleanup;
 	}
+
+	// Drain GPU work so all pending fences are signaled, then stop the fence
+	// thread before any Vulkan resources (fences, device) are destroyed.
+	qvkQueueWaitIdle( vk.queue );
+	vk_fence_thread_stop();
+	vk_gpu_ts_shutdown();
 
 	vk_destroy_framebuffers();
 
@@ -9483,7 +9533,8 @@ void vk_update_fog_push( const vec4_t color, int fogType, float density, float f
 
 
 void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
-                              float glowWidth, const float *glowColor )
+                              float glowWidth, const float *glowColor,
+                              const float *shadowOffset, const float *shadowColor )
 {
 	// Re-push MVP (bytes 0-63) via the MSDF layout so push constants are valid
 	// for the currently bound MSDF pipeline.
@@ -9493,30 +9544,26 @@ void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 		0, sizeof( mvp ), mvp );
 
-	// Push outline/glow params at offset 64 (48 bytes, std430 aligned)
-	// Layout: float outlineWidth (4) + float glowWidth (4) + pad (8) + vec4 outlineColor (16) + vec4 glowColor (16)
+	// Push outline/glow/shadow params at offset 64 (64 bytes, std430 aligned)
+	// Layout: outlineWidth(4) + glowWidth(4) + shadowOffset(8) + outlineColor(16) + glowColor(16) + shadowColor(16)
 	struct {
 		float outlineWidth;
 		float glowWidth;
-		float _pad[2];
+		float shadowOffset[2];
 		float outlineColor[4];
 		float glowColor[4];
+		float shadowColor[4];
 	} params;
 
-	params.outlineWidth = outlineWidth;
-	params.glowWidth = glowWidth;
-	params._pad[0] = 0.0f;
-	params._pad[1] = 0.0f;
-	if ( outlineColor ) {
-		Com_Memcpy( params.outlineColor, outlineColor, sizeof( params.outlineColor ) );
-	} else {
-		Com_Memset( params.outlineColor, 0, sizeof( params.outlineColor ) );
-	}
-	if ( glowColor ) {
-		Com_Memcpy( params.glowColor, glowColor, sizeof( params.glowColor ) );
-	} else {
-		Com_Memset( params.glowColor, 0, sizeof( params.glowColor ) );
-	}
+	static const float zero4[4] = { 0, 0, 0, 0 };
+	static const float zero2[2] = { 0, 0 };
+
+	params.outlineWidth    = outlineWidth;
+	params.glowWidth       = glowWidth;
+	Com_Memcpy( params.shadowOffset, shadowOffset ? shadowOffset : zero2, sizeof( params.shadowOffset ) );
+	Com_Memcpy( params.outlineColor, outlineColor ? outlineColor : zero4, sizeof( params.outlineColor ) );
+	Com_Memcpy( params.glowColor,    glowColor    ? glowColor    : zero4, sizeof( params.glowColor ) );
+	Com_Memcpy( params.shadowColor,  shadowColor  ? shadowColor  : zero4, sizeof( params.shadowColor ) );
 
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_msdf,
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -10111,6 +10158,7 @@ void vk_smaa( void )
 
 	// end current render pass
 	vk_end_render_pass();
+	vk_gpu_ts_write( "smaa" ); // outside render pass — MoltenVK timestamps only resolve at encoder boundaries
 
 	// --- Step 0: Copy color_image -> input_image ---
 
@@ -10353,9 +10401,317 @@ static qboolean vk_find_screenmap_drawsurfs( void )
 }
 
 
+// ---------------------------------------------------------------------------
+// Background fence-wait thread
+// Moves vkWaitForFences + vkResetFences off the main thread so game simulation
+// and command recording are not blocked by Metal's drawable-release latency.
+// With NUM_COMMAND_BUFFERS=3 at 100 FPS (10ms frames), each slot is reused after
+// 30ms. Metal releases the drawable after ~16.67ms. The thread finishes its wait
+// ~13ms before the main thread ever needs the slot — making the main-thread wait
+// effectively 0ms in steady state.
+// ---------------------------------------------------------------------------
+#ifndef _WIN32
+typedef struct {
+	int     slot;
+	VkFence fence;
+} vk_fence_work_t;
+
+static pthread_t         vk_ft_thread;
+static pthread_mutex_t   vk_ft_mutex  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t    vk_ft_cwork  = PTHREAD_COND_INITIALIZER;  // main -> thread: new fence
+static pthread_cond_t    vk_ft_cready = PTHREAD_COND_INITIALIZER;  // thread -> main: slot free
+static qboolean          vk_ft_running;
+static qboolean          vk_slot_ready[ NUM_COMMAND_BUFFERS ];
+static vk_fence_work_t   vk_ft_queue[ NUM_COMMAND_BUFFERS * 2 ];
+static int               vk_ft_head;
+static int               vk_ft_tail;
+
+static void *vk_fence_worker( void *arg )
+{
+	int     slot;
+	VkFence fen;
+
+	pthread_mutex_lock( &vk_ft_mutex );
+	while ( vk_ft_running || vk_ft_head != vk_ft_tail ) {
+		while ( vk_ft_head == vk_ft_tail && vk_ft_running )
+			pthread_cond_wait( &vk_ft_cwork, &vk_ft_mutex );
+
+		if ( vk_ft_head == vk_ft_tail )
+			break;
+
+		slot = vk_ft_queue[ vk_ft_head ].slot;
+		fen  = vk_ft_queue[ vk_ft_head ].fence;
+		vk_ft_head = ( vk_ft_head + 1 ) % ( NUM_COMMAND_BUFFERS * 2 );
+		pthread_mutex_unlock( &vk_ft_mutex );
+
+		{
+			int t0 = ri.Milliseconds();
+			qvkWaitForFences( vk.device, 1, &fen, VK_FALSE, (uint64_t)10000000000ULL );
+			qvkResetFences( vk.device, 1, &fen );
+			pthread_mutex_lock( &vk_ft_mutex );
+			vk_diag_ft_fence_ms += ri.Milliseconds() - t0;
+		}
+		vk_slot_ready[ slot ] = qtrue;
+		pthread_cond_broadcast( &vk_ft_cready );
+	}
+	pthread_mutex_unlock( &vk_ft_mutex );
+	return NULL;
+}
+
+static void vk_fence_thread_start( void )
+{
+	int i;
+	pthread_attr_t attr;
+	vk_ft_head = vk_ft_tail = 0;
+	vk_ft_running = qtrue;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
+		vk_slot_ready[ i ] = qfalse; // set to qtrue by fence thread after each vkResetFences
+	pthread_attr_init( &attr );
+#ifdef __APPLE__
+	// Boost to user-interactive QoS so macOS schedules this thread on a performance
+	// core and preempts it promptly — prevents the main thread from arriving at
+	// vk_slot_wait before the fence thread has had a chance to run vkWaitForFences.
+	pthread_attr_set_qos_class_np( &attr, QOS_CLASS_USER_INTERACTIVE, 0 );
+#endif
+	pthread_create( &vk_ft_thread, &attr, vk_fence_worker, NULL );
+	pthread_attr_destroy( &attr );
+}
+
+static void vk_fence_thread_stop( void )
+{
+	pthread_mutex_lock( &vk_ft_mutex );
+	vk_ft_running = qfalse;
+	pthread_cond_signal( &vk_ft_cwork );
+	pthread_mutex_unlock( &vk_ft_mutex );
+	pthread_join( vk_ft_thread, NULL );
+}
+
+// Called after vkQueueSubmit: hand fence to background thread.
+static void vk_fence_submit( int slot, VkFence fence )
+{
+	pthread_mutex_lock( &vk_ft_mutex );
+	vk_ft_queue[ vk_ft_tail ].slot  = slot;
+	vk_ft_queue[ vk_ft_tail ].fence = fence;
+	vk_ft_tail = ( vk_ft_tail + 1 ) % ( NUM_COMMAND_BUFFERS * 2 );
+	pthread_cond_signal( &vk_ft_cwork );
+	pthread_mutex_unlock( &vk_ft_mutex );
+}
+
+// Called at start of vk_begin_frame: wait (usually instant) for slot to be free.
+static void vk_slot_wait( int slot )
+{
+	pthread_mutex_lock( &vk_ft_mutex );
+	while ( !vk_slot_ready[ slot ] )
+		pthread_cond_wait( &vk_ft_cready, &vk_ft_mutex );
+	vk_slot_ready[ slot ] = qfalse;
+	pthread_mutex_unlock( &vk_ft_mutex );
+}
+
+#else
+// Windows: no pthread — the thread functions are stubs; fence wait happens
+// synchronously in vk_begin_frame via the original vkWaitForFences path.
+static void vk_fence_thread_start( void ) {}
+static void vk_fence_thread_stop( void )  {}
+static void vk_fence_submit( int slot, VkFence fence ) { (void)slot; (void)fence; }
+static void vk_slot_wait( int slot ) { (void)slot; }
+#endif  // !_WIN32
+
 #ifndef UINT64_MAX
 #define UINT64_MAX 0xFFFFFFFFFFFFFFFFULL
 #endif
+
+// ---------------------------------------------------------------------------
+// GPU per-pass timestamp module
+// Usage: r_gpuSpeeds 0=off 1=200f-avg N>=2=per-frame when total>=N ms
+// ---------------------------------------------------------------------------
+
+#define VK_GPU_TS_MAX 16
+
+static qboolean    vk_gpu_ts_active;
+static VkQueryPool vk_gpu_ts_pool;
+static uint32_t    vk_gpu_ts_count;
+static const char *vk_gpu_ts_labels[ VK_GPU_TS_MAX ];
+
+static struct {
+	qboolean    pending;
+	uint32_t    base;
+	uint32_t    count;
+	const char *labels[ VK_GPU_TS_MAX ];
+} vk_gpu_ts_inflight[ NUM_COMMAND_BUFFERS ];
+
+static double      vk_gpu_ts_accum_ms[ VK_GPU_TS_MAX ];
+static const char *vk_gpu_ts_accum_labels[ VK_GPU_TS_MAX ];
+static uint32_t    vk_gpu_ts_accum_slots;
+static uint32_t    vk_gpu_ts_accum_frames;
+
+static void vk_gpu_ts_init( void )
+{
+	VkQueryPoolCreateInfo info;
+	int i;
+
+	vk_gpu_ts_active = qfalse;
+	vk_gpu_ts_pool = VK_NULL_HANDLE;
+	vk_gpu_ts_count = 0;
+	vk_gpu_ts_accum_slots = 0;
+	vk_gpu_ts_accum_frames = 0;
+	Com_Memset( vk_gpu_ts_inflight, 0, sizeof( vk_gpu_ts_inflight ) );
+	Com_Memset( vk_gpu_ts_accum_ms, 0, sizeof( vk_gpu_ts_accum_ms ) );
+
+	if ( !vk.timestampSupported ) {
+		ri.Printf( PRINT_DEVELOPER, "r_gpuSpeeds: device lacks timestampComputeAndGraphics, disabled\n" );
+		return;
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		vk_gpu_ts_inflight[ i ].base = i * VK_GPU_TS_MAX;
+	}
+
+	Com_Memset( &info, 0, sizeof( info ) );
+	info.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+	info.queryType  = VK_QUERY_TYPE_TIMESTAMP;
+	info.queryCount = VK_GPU_TS_MAX * NUM_COMMAND_BUFFERS;
+
+	if ( qvkCreateQueryPool( vk.device, &info, NULL, &vk_gpu_ts_pool ) != VK_SUCCESS ) {
+		ri.Printf( PRINT_WARNING, "r_gpuSpeeds: vkCreateQueryPool failed\n" );
+		return;
+	}
+
+	vk_gpu_ts_active = qtrue;
+}
+
+static void vk_gpu_ts_shutdown( void )
+{
+	if ( vk_gpu_ts_pool != VK_NULL_HANDLE ) {
+		qvkDestroyQueryPool( vk.device, vk_gpu_ts_pool, NULL );
+		vk_gpu_ts_pool = VK_NULL_HANDLE;
+	}
+	vk_gpu_ts_active = qfalse;
+}
+
+static void vk_gpu_ts_frame_begin( void )
+{
+	// host-side readback of the previous frame's results for this command-buffer slot
+	uint64_t results[ 2 * VK_GPU_TS_MAX ];  // (value, availability) pairs
+	int slot;
+	double total_ms;
+	uint32_t i;
+	int gate;
+
+	if ( !vk_gpu_ts_active )
+		return;
+
+	if ( !r_gpuSpeeds || !r_gpuSpeeds->integer )
+		return;
+
+	gate = r_gpuSpeeds->integer;
+	slot = vk.cmd_index;
+
+	if ( vk_gpu_ts_inflight[ slot ].pending && vk_gpu_ts_inflight[ slot ].count >= 2 ) {
+		Com_Memset( results, 0, sizeof( results ) );
+		qvkGetQueryPoolResults( vk.device, vk_gpu_ts_pool,
+			vk_gpu_ts_inflight[ slot ].base,
+			vk_gpu_ts_inflight[ slot ].count,
+			vk_gpu_ts_inflight[ slot ].count * 2 * sizeof( uint64_t ), results,
+			2 * sizeof( uint64_t ),
+			VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT );
+
+		// accumulate inter-timestamp deltas: label[i] covers [i-1 .. i]
+		// Only update slots/labels on first valid readback so we never print null labels.
+		for ( i = 1; i < vk_gpu_ts_inflight[ slot ].count; i++ ) {
+			if ( results[ 2*i + 1 ] && results[ 2*(i-1) + 1 ] ) {
+				double delta_ns = (double)( results[ 2*i ] - results[ 2*(i-1) ] ) * (double)vk.timestampPeriodNs;
+				vk_gpu_ts_accum_ms[ i - 1 ] += delta_ns * 1e-6;
+				vk_gpu_ts_accum_labels[ i - 1 ] = vk_gpu_ts_inflight[ slot ].labels[ i ];
+				if ( i - 1 >= vk_gpu_ts_accum_slots )
+					vk_gpu_ts_accum_slots = i;  // = i, not i-1, since slots is 1-based count
+			}
+		}
+	}
+
+	vk_gpu_ts_inflight[ slot ].pending = qfalse;
+
+	++vk_gpu_ts_accum_frames;
+
+	// print in averaged mode (gate==1) or threshold mode (gate>=2, per-frame)
+	if ( gate == 1 && vk_gpu_ts_accum_frames < 200 )
+		return;
+
+	total_ms = 0.0;
+	for ( i = 0; i < vk_gpu_ts_accum_slots; i++ )
+		total_ms += vk_gpu_ts_accum_ms[ i ];
+
+	if ( gate >= 2 ) {
+		// per-frame threshold: only print if total >= gate ms
+		if ( vk_gpu_ts_accum_frames < 1 || total_ms < (double)gate )
+			goto reset_accum;
+		ri.Printf( PRINT_DEVELOPER, "gpu (ms):" );
+		for ( i = 0; i < vk_gpu_ts_accum_slots; i++ )
+			ri.Printf( PRINT_DEVELOPER, "  %s=%.2f", vk_gpu_ts_accum_labels[ i ], vk_gpu_ts_accum_ms[ i ] );
+		ri.Printf( PRINT_DEVELOPER, "  total=%.2f\n", total_ms );
+	} else {
+		// averaged mode
+		double n = (double)vk_gpu_ts_accum_frames;
+		ri.Printf( PRINT_DEVELOPER, "gpu (%df avg, ms):", vk_gpu_ts_accum_frames );
+		for ( i = 0; i < vk_gpu_ts_accum_slots; i++ )
+			ri.Printf( PRINT_DEVELOPER, "  %s=%.2f", vk_gpu_ts_accum_labels[ i ], vk_gpu_ts_accum_ms[ i ] / n );
+		ri.Printf( PRINT_DEVELOPER, "  total=%.2f\n", total_ms / n );
+	}
+
+reset_accum:
+	Com_Memset( vk_gpu_ts_accum_ms, 0, sizeof( vk_gpu_ts_accum_ms ) );
+	vk_gpu_ts_accum_slots = 0;
+	vk_gpu_ts_accum_frames = 0;
+}
+
+static void vk_gpu_ts_pool_reset( void )
+{
+	// CB-side reset + first "acquire" timestamp — must run after qvkBeginCommandBuffer
+	if ( !vk_gpu_ts_active || !r_gpuSpeeds || !r_gpuSpeeds->integer )
+		return;
+
+	qvkCmdResetQueryPool( vk.cmd->command_buffer, vk_gpu_ts_pool,
+		vk_gpu_ts_inflight[ vk.cmd_index ].base, VK_GPU_TS_MAX );
+
+	vk_gpu_ts_count = 0;
+	qvkCmdWriteTimestamp( vk.cmd->command_buffer,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+		vk_gpu_ts_pool,
+		vk_gpu_ts_inflight[ vk.cmd_index ].base + vk_gpu_ts_count );
+	vk_gpu_ts_labels[ vk_gpu_ts_count ] = "acquire";
+	vk_gpu_ts_count++;
+}
+
+static void vk_gpu_ts_write( const char *label )
+{
+	if ( !vk_gpu_ts_active || !r_gpuSpeeds || !r_gpuSpeeds->integer )
+		return;
+	if ( vk_gpu_ts_count >= VK_GPU_TS_MAX )
+		return;
+
+	qvkCmdWriteTimestamp( vk.cmd->command_buffer,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+		vk_gpu_ts_pool,
+		vk_gpu_ts_inflight[ vk.cmd_index ].base + vk_gpu_ts_count );
+	vk_gpu_ts_labels[ vk_gpu_ts_count ] = label;
+	vk_gpu_ts_count++;
+}
+
+static void vk_gpu_ts_frame_end( void )
+{
+	uint32_t i;
+
+	if ( !vk_gpu_ts_active || !r_gpuSpeeds || !r_gpuSpeeds->integer )
+		return;
+
+	vk_gpu_ts_inflight[ vk.cmd_index ].count   = vk_gpu_ts_count;
+	vk_gpu_ts_inflight[ vk.cmd_index ].pending  = qtrue;
+	for ( i = 0; i < vk_gpu_ts_count; i++ )
+		vk_gpu_ts_inflight[ vk.cmd_index ].labels[ i ] = vk_gpu_ts_labels[ i ];
+
+	vk_gpu_ts_count = 0;
+}
+
+// ---------------------------------------------------------------------------
 
 void vk_begin_frame( void )
 {
@@ -10364,6 +10720,9 @@ void vk_begin_frame( void )
 
 	if ( vk.frame_count++ ) // might happen during stereo rendering
 		return;
+
+	vk_frame_t_start = ri.Microseconds();
+	vk_frame_present_done = qfalse;
 
 #ifdef USE_UPLOAD_QUEUE
 	vk_flush_staging_buffer( qtrue );
@@ -10375,28 +10734,44 @@ void vk_begin_frame( void )
 		int t_diag = ri.Milliseconds();
 		if ( vk.cmd->waitForFence ) {
 			vk.cmd->waitForFence = qfalse;
+#ifdef _WIN32
+			// Windows: no background fence thread — wait synchronously
 			res = qvkWaitForFences( vk.device, 1, &vk.cmd->rendering_finished_fence, VK_FALSE, 1e10 );
 			if ( res != VK_SUCCESS ) {
 				if ( res == VK_ERROR_DEVICE_LOST ) {
-					// silently discard previous command buffer
 					ri.Printf( PRINT_WARNING, "Vulkan: %s returned %s", "vkWaitForFences", vk_result_string( res ) );
-				}
-				else {
+				} else {
 					ri.Error( ERR_FATAL, "Vulkan: %s returned %s", "vkWaitForFences", vk_result_string( res ) );
 				}
 			}
 			VK_CHECK( qvkResetFences( vk.device, 1, &vk.cmd->rendering_finished_fence ) );
+#else
+			// Background fence thread already waited + reset the fence.
+			// This call is nearly instant: with 3 buffers, the slot was freed
+			// ~13ms before we need it again.
+			vk_slot_wait( vk.cmd_index );
+#endif
 		}
-		vk_diag_fence_ms += ri.Milliseconds() - t_diag;
+		{
+			int fence_ms = ri.Milliseconds() - t_diag;
+			vk_diag_fence_ms += fence_ms;
+			if ( r_gpuSpeeds && r_gpuSpeeds->integer >= 2 && fence_ms >= r_gpuSpeeds->integer )
+				ri.Printf( PRINT_DEVELOPER, "fence spike: %dms\n", fence_ms );
+		}
+		vk_frame_t_after_fence = ri.Microseconds();
 		if ( ++vk_diag_frames >= 200 ) {
-			ri.Printf( PRINT_DEVELOPER, "vk timing (200f avg): fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
-				vk_diag_fence_ms / 200, vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
+			ri.Printf( PRINT_DEVELOPER, "vk timing (200f avg): fence=%dms/f  ft_fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
+				vk_diag_fence_ms / 200, vk_diag_ft_fence_ms / 200,
+				vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
 				vk_diag_drawcalls / 200, vk_diag_msdf_draws / 200,
 				vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200 );
-			vk_diag_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
+			vk_diag_fence_ms = vk_diag_ft_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
 			vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
 		}
 	}
+
+	// GPU timestamp readback: fence above guarantees this slot's GPU work is done.
+	vk_gpu_ts_frame_begin();
 
 	if ( !ri.CL_IsMinimized() && !vk.cmd->swapchain_image_acquired ) {
 		int t_acquire = ri.Milliseconds();
@@ -10418,6 +10793,7 @@ _retry:
 		vk.cmd->swapchain_image_acquired = qtrue;
 		vk_diag_acquire_ms += ri.Milliseconds() - t_acquire;
 	}
+	vk_frame_t_after_acquire = ri.Microseconds();
 
 	begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	begin_info.pNext = NULL;
@@ -10425,6 +10801,9 @@ _retry:
 	begin_info.pInheritanceInfo = NULL;
 
 	VK_CHECK( qvkBeginCommandBuffer( vk.cmd->command_buffer, &begin_info ) );
+	vk_frame_t_after_begincb = ri.Microseconds();
+
+	vk_gpu_ts_pool_reset();
 
 	// Ensure visibility of geometry buffers writes.
 	//record_buffer_memory_barrier( vk.cmd->command_buffer, vk.cmd->vertex_buffer, vk.geometry_buffer_size, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT );
@@ -10489,6 +10868,7 @@ _retry:
 
 	// other stats
 	vk.stats.push_size = 0;
+	vk_frame_t_rec_start = ri.Microseconds();
 }
 
 
@@ -10530,6 +10910,7 @@ void vk_end_frame( void )
 		return;
 
 	vk.frame_count = 0;
+	vk_frame_t_rec_end = ri.Microseconds();
 
 	if ( vk.geometry_buffer_size_new )
 	{
@@ -10682,6 +11063,9 @@ void vk_end_frame( void )
 		vk_end_render_pass();
 	}
 
+	vk_gpu_ts_write( "present_prep" ); // must be before EndCommandBuffer; render passes are all closed above
+	vk_gpu_ts_frame_end();
+
 	VK_CHECK( qvkEndCommandBuffer( vk.cmd->command_buffer ) );
 
 	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -10727,9 +11111,14 @@ void vk_end_frame( void )
 
 	{
 		int t_submit = ri.Milliseconds();
+		vk_frame_t_submit_start = ri.Microseconds();
 		VK_CHECK( qvkQueueSubmit( vk.queue, 1, &submit_info, vk.cmd->rendering_finished_fence ) );
 		vk_diag_submit_ms += ri.Milliseconds() - t_submit;
+		vk_frame_t_after_submit = ri.Microseconds();
 	}
+	// Hand this slot's fence to the background thread: it will vkWaitForFences +
+	// vkResetFences off the main thread, then signal vk_slot_ready[cmd_index].
+	vk_fence_submit( vk.cmd_index, vk.cmd->rendering_finished_fence );
 	vk.cmd->waitForFence = qtrue;
 
 	// presentation may take undefined time to complete, we can't measure it in a reliable way
@@ -10766,8 +11155,11 @@ void vk_present_frame( void )
 
 	{
 		int t_present = ri.Milliseconds();
+		vk_frame_t_present_start = ri.Microseconds();
 		res = qvkQueuePresentKHR( vk.queue, &present_info );
 		vk_diag_present_ms += ri.Milliseconds() - t_present;
+		vk_frame_t_after_present = ri.Microseconds();
+		vk_frame_present_done = qtrue;
 	}
 	switch ( res ) {
 		case VK_SUCCESS:
@@ -10791,6 +11183,23 @@ void vk_present_frame( void )
 	vk.cmd_index %= NUM_COMMAND_BUFFERS;
 	vk.cmd = &vk.tess[ vk.cmd_index ];
 
+	if ( vk_frame_present_done && r_frameSpikeUs && r_frameSpikeUs->integer > 0 ) {
+		int64_t total = vk_frame_t_after_present - vk_frame_t_start;
+		if ( total >= (int64_t)r_frameSpikeUs->integer ) {
+			ri.Printf( PRINT_DEVELOPER,
+				"spike total=%lldus  fence=%lld  acquire=%lld  cb_setup=%lld  "
+				"begin_passes=%lld  record=%lld  post_passes=%lld  submit=%lld  present=%lld\n",
+				(long long)total,
+				(long long)( vk_frame_t_after_fence    - vk_frame_t_start ),
+				(long long)( vk_frame_t_after_acquire  - vk_frame_t_after_fence ),
+				(long long)( vk_frame_t_after_begincb  - vk_frame_t_after_acquire ),
+				(long long)( vk_frame_t_rec_start      - vk_frame_t_after_begincb ),
+				(long long)( vk_frame_t_rec_end        - vk_frame_t_rec_start ),
+				(long long)( vk_frame_t_submit_start   - vk_frame_t_rec_end ),
+				(long long)( vk_frame_t_after_submit   - vk_frame_t_submit_start ),
+				(long long)( vk_frame_t_after_present  - vk_frame_t_present_start ) );
+		}
+	}
 }
 
 
@@ -11191,6 +11600,7 @@ qboolean vk_bloom( void )
 	}
 
 	vk_end_render_pass(); // end main
+	vk_gpu_ts_write( "world_done" ); // outside render pass — MoltenVK timestamps only resolve at encoder boundaries
 
 #ifdef __APPLE__
 	// MoltenVK/TBDR: subpass external deps alone don't flush tile cache on Apple Silicon.

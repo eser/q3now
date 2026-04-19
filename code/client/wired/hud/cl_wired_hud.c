@@ -36,7 +36,8 @@ extern void WiredHud_DrawDuelBoard( float ox, float oy, float ow, float oh );
 
 wiredHudState_t  wired_hudStateStorage;
 wiredHudState_t *wiredHud = &wired_hudStateStorage;
-static qboolean wiredHud_elementsLoaded = qfalse;
+static qboolean  wiredHud_elementsLoaded = qfalse;
+static cvar_t   *cl_drawHud             = NULL;
 
 // from cl_wired_hud_compat.c
 extern modernhudGlobalContext_t* CG_ModernHUDGetContext( void );
@@ -185,6 +186,8 @@ const wiredHudBinding_t *WiredHud_FindBinding( const char *name ) {
 // ── init / shutdown ──────────────────────────────────────────────────
 
 void WiredHud_Init( void ) {
+	cl_drawHud = Cvar_Get( "cl_drawHud", "1", CVAR_ARCHIVE_ND );
+	Cvar_SetDescription( cl_drawHud, "Draw the Wired HUD. 0: off. 1: on (default)." );
 	Com_Memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
 	wiredHud_elementsLoaded = qfalse;
 	Com_DPrintf( "WiredHud: initialized (Phase 3)\n" );
@@ -444,6 +447,7 @@ void WiredHud_LoadFromMenus( void ) {
 
 void WiredHud_Routine( int realtime ) {
 	if ( !wiredHud->valid ) return;
+	if ( cl_drawHud && !cl_drawHud->integer ) return;
 
 	// lazy element init — deferred from WiredUI_Init to avoid Z_CheckHeap crash
 	if ( !wiredHud_elementsLoaded ) {

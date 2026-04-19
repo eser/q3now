@@ -2146,6 +2146,15 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			data = (const void *)( oc + 1 );
 			break;
 		}
+		case RC_SET_MSDF_SHADOW:
+		{
+			const setMsdfShadowCommand_t *sc = (const setMsdfShadowCommand_t *)data;
+			tr.msdfShadowOffset[0] = sc->shadowOffset[0];
+			tr.msdfShadowOffset[1] = sc->shadowOffset[1];
+			Com_Memcpy( tr.msdfShadowColor, sc->shadowColor, sizeof( tr.msdfShadowColor ) );
+			data = (const void *)( sc + 1 );
+			break;
+		}
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering

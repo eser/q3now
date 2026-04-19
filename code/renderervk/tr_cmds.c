@@ -21,6 +21,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "tr_local.h"
 
+// Per-frame shadow of the last-emitted 2D color and MSDF outline state.
+// Sentinel value -1.0 is never a valid color float; reset each frame.
+static float re_last_rgba[4]            = { -1.0f, -1.0f, -1.0f, -1.0f };
+static float re_last_outline[10]        = { -1.0f };  // outlineW, outlineColor[4], glowW, glowColor[4]
+static float re_last_shadow[6]          = { -1.0f };  // offsetX, offsetY, color[4]
+
 /*
 =====================
 R_PerformanceCounters
@@ -186,20 +192,21 @@ Passing NULL will set the color to white
 =============
 */
 void RE_SetColor( const float *rgba ) {
-	setColorCommand_t	*cmd;
+	setColorCommand_t *cmd;
 
-	if ( !tr.registered ) {
+	if ( !tr.registered ) return;
+	if ( !rgba ) rgba = colorWhite;
+
+	if ( re_last_rgba[0] == rgba[0] && re_last_rgba[1] == rgba[1] &&
+	     re_last_rgba[2] == rgba[2] && re_last_rgba[3] == rgba[3] ) {
 		return;
 	}
+	re_last_rgba[0] = rgba[0]; re_last_rgba[1] = rgba[1];
+	re_last_rgba[2] = rgba[2]; re_last_rgba[3] = rgba[3];
+
 	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
-	if ( !cmd ) {
-		return;
-	}
+	if ( !cmd ) return;
 	cmd->commandId = RC_SET_COLOR;
-	if ( !rgba ) {
-		rgba = colorWhite;
-	}
-
 	cmd->color[0] = rgba[0];
 	cmd->color[1] = rgba[1];
 	cmd->color[2] = rgba[2];
@@ -327,6 +334,9 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 #endif
 
 	backEnd.color2D.u32 = ~0U;
+	re_last_rgba[0]    = -1.0f;   // reset dedup sentinels for new frame
+	re_last_outline[0] = -1.0f;
+	re_last_shadow[0]  = -1.0f;
 
 	tr.frameCount++;
 	tr.frameSceneNum = 0;
@@ -513,20 +523,61 @@ const glconfig_t *RE_GetConfig( void )
 void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
                          float glowWidth, const float *glowColor )
 {
+	static const float zero4[4] = { 0, 0, 0, 0 };
+	const float *oc = outlineColor ? outlineColor : zero4;
+	const float *gc = glowColor    ? glowColor    : zero4;
 	setMsdfOutlineCommand_t *cmd;
+
+	if ( re_last_outline[0] == outlineWidth &&
+	     re_last_outline[1] == oc[0] && re_last_outline[2] == oc[1] &&
+	     re_last_outline[3] == oc[2] && re_last_outline[4] == oc[3] &&
+	     re_last_outline[5] == glowWidth &&
+	     re_last_outline[6] == gc[0] && re_last_outline[7] == gc[1] &&
+	     re_last_outline[8] == gc[2] && re_last_outline[9] == gc[3] ) {
+		return;
+	}
+	re_last_outline[0] = outlineWidth;
+	re_last_outline[1] = oc[0]; re_last_outline[2] = oc[1];
+	re_last_outline[3] = oc[2]; re_last_outline[4] = oc[3];
+	re_last_outline[5] = glowWidth;
+	re_last_outline[6] = gc[0]; re_last_outline[7] = gc[1];
+	re_last_outline[8] = gc[2]; re_last_outline[9] = gc[3];
+
 	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
 	if ( !cmd ) return;
 	cmd->commandId = RC_SET_MSDF_OUTLINE;
 	cmd->outlineWidth = outlineWidth;
-	if ( outlineColor )
-		Com_Memcpy( cmd->outlineColor, outlineColor, sizeof( cmd->outlineColor ) );
-	else
-		Com_Memset( cmd->outlineColor, 0, sizeof( cmd->outlineColor ) );
+	Com_Memcpy( cmd->outlineColor, oc, sizeof( cmd->outlineColor ) );
 	cmd->glowWidth = glowWidth;
-	if ( glowColor )
-		Com_Memcpy( cmd->glowColor, glowColor, sizeof( cmd->glowColor ) );
-	else
-		Com_Memset( cmd->glowColor, 0, sizeof( cmd->glowColor ) );
+	Com_Memcpy( cmd->glowColor, gc, sizeof( cmd->glowColor ) );
+}
+
+
+void RE_SetMSDFShadow( float offsetX, float offsetY, const float *color )
+{
+	static const float zero4[4] = { 0, 0, 0, 0 };
+	const float *sc = color ? color : zero4;
+	setMsdfShadowCommand_t *cmd;
+
+	if ( re_last_shadow[0] == offsetX && re_last_shadow[1] == offsetY &&
+	     re_last_shadow[2] == sc[0] && re_last_shadow[3] == sc[1] &&
+	     re_last_shadow[4] == sc[2] && re_last_shadow[5] == sc[3] ) {
+		return;
+	}
+	re_last_shadow[0] = offsetX; re_last_shadow[1] = offsetY;
+	re_last_shadow[2] = sc[0];   re_last_shadow[3] = sc[1];
+	re_last_shadow[4] = sc[2];   re_last_shadow[5] = sc[3];
+
+	tr.msdfShadowOffset[0] = offsetX;
+	tr.msdfShadowOffset[1] = offsetY;
+	Com_Memcpy( tr.msdfShadowColor, sc, sizeof( tr.msdfShadowColor ) );
+
+	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
+	if ( !cmd ) return;
+	cmd->commandId        = RC_SET_MSDF_SHADOW;
+	cmd->shadowOffset[0]  = offsetX;
+	cmd->shadowOffset[1]  = offsetY;
+	Com_Memcpy( cmd->shadowColor, sc, sizeof( cmd->shadowColor ) );
 }
 
 

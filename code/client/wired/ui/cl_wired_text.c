@@ -21,6 +21,8 @@ Alignment and drop shadow are handled here so callers don't need to.
 
 static float text_letterSpacing = 0.0f;
 
+static cvar_t *cl_wiredTextShadow = NULL;
+
 void Text_SetLetterSpacing( float spacing )
 {
 	text_letterSpacing = spacing;
@@ -39,6 +41,8 @@ float Text_GetLetterSpacing( void )
  */
 void Text_Init( void )
 {
+	cl_wiredTextShadow = Cvar_Get( "cl_wiredTextShadow", "0", CVAR_ARCHIVE_ND );
+	Cvar_SetDescription( cl_wiredTextShadow, "Enable drop-shadow on Wired UI text. 0: off (default). 1: on." );
 	MSDF_ReregisterShaders();
 	WiredFonts_InitMSDF();
 }
@@ -111,20 +115,23 @@ void Text_Draw( const char *text, float x, float y, int fontId,
 		drawX -= MSDF_MeasureString( face->atlas, size, text, -1, ls );
 	}
 
-	/* drop shadow */
-	if ( flags & TEXT_DROPSHADOW ) {
+	/* drop shadow: single pass via in-shader offset sample */
+	if ( (flags & TEXT_DROPSHADOW) && cl_wiredTextShadow && cl_wiredTextShadow->integer ) {
 		vec4_t shadowColor = { 0, 0, 0, 0.8f };
 		float offset = size * 0.06f;
 		if ( offset < 1.0f ) offset = 1.0f;
 		if ( color ) {
 			shadowColor[3] = color[3] * 0.8f;
 		}
-		MSDF_DrawString( face->atlas, drawX + offset, drawY + offset,
-		                 size, shadowColor, text, -1, ls, qtrue );
+		re.SetMSDFShadow( offset, offset, shadowColor );
 	}
 
 	MSDF_DrawString( face->atlas, drawX, drawY, size, color, text, -1, ls,
 	                 ( flags & TEXT_FORCECOLOR ) ? qtrue : qfalse );
+
+	if ( (flags & TEXT_DROPSHADOW) && cl_wiredTextShadow && cl_wiredTextShadow->integer ) {
+		re.SetMSDFShadow( 0.0f, 0.0f, NULL );
+	}
 }
 
 /* ── Text_Measure ──────────────────────────────────────────────────── */

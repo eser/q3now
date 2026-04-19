@@ -23,7 +23,7 @@
 #define IMAGE_CHUNK_SIZE (32 * 1024 * 1024)
 #define MAX_IMAGE_CHUNKS 56
 
-#define NUM_COMMAND_BUFFERS 2	// number of command buffers / render semaphores / framebuffer sets
+#define NUM_COMMAND_BUFFERS 2	// double-buffered: paces CPU with GPU per-frame, prevents race-ahead bursting (matches MoltenVK's 3-drawable cap)
 
 #define USE_REVERSED_DEPTH
 
@@ -332,7 +332,8 @@ void vk_update_fog_push( const vec4_t color, int fogType, float density, float f
 // the fullscreen scissor (equivalent to "no clip region").
 void vk_set_2d_scissor( const int *rect );
 void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
-                              float glowWidth, const float *glowColor );
+                              float glowWidth, const float *glowColor,
+                              const float *shadowOffset, const float *shadowColor );
 
 uint32_t vk_tess_index( uint32_t numIndexes, const void *src );
 void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset );
@@ -640,6 +641,9 @@ typedef struct {
 	uint32_t uniform_item_size;
 	uint32_t uniform_alignment;
 	uint32_t storage_alignment;
+
+	float    timestampPeriodNs;     // ns per timestamp tick, from VkPhysicalDeviceLimits
+	qboolean timestampSupported;    // device supports CmdWriteTimestamp on graphics queue
 
 	struct {
 		VkBuffer vertex_buffer;
