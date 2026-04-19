@@ -40,9 +40,6 @@ void CG_ModernHUDElementKeyRoutine(void* context) {
 	CG_ModernHUDTextPrint(&el->config, &el->ctx);
 }
 
-void CG_ModernHUDElementKeyDestroy(void* context) {
-	if (context) Z_Free(context);
-}
 
 // ── keydown factories ────────────────────────────────────────────────────
 

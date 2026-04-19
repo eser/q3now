@@ -92,14 +92,6 @@ void CG_ModernHUDElementGridRoutine(void* context)
 	}
 }
 
-void CG_ModernHUDElementGridDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 
 
 #endif // FEAT_WIRED_UI

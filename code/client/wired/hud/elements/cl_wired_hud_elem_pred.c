@@ -60,12 +60,4 @@ void CG_ModernHUDElementDecorRoutine(void* context)
 	CG_ModernHUDDrawBorder(&element->config);
 }
 
-void CG_ModernHUDElementDecorDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI

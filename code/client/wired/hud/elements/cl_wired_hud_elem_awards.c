@@ -242,10 +242,4 @@ void CG_ModernHUDElementAwardsRoutine( void *context ) {
 	}
 }
 
-void CG_ModernHUDElementAwardsDestroy( void *context ) {
-	if ( context ) {
-		Z_Free( context );
-	}
-}
-
 #endif // FEAT_WIRED_UI

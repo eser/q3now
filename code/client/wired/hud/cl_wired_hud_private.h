@@ -438,6 +438,21 @@ typedef struct
         memcpy(&E->config, CFG, sizeof(element->config)); \
     }while(0)
 
+// Alloc + init + wire text context; requires element to have a 'ctx' field of type modernhudTextContext_t.
+#define WHUD_ELEMENT_INIT_TEXT( E, T, CFG ) do { \
+    ModernHUD_ELEMENT_INIT( E, CFG ); \
+    CG_ModernHUDTextMakeContext( &(E)->config, &(E)->ctx ); \
+    CG_ModernHUDFillAndFrameForText( &(E)->config, &(E)->ctx ); \
+} while(0)
+
+// Evaluate fade color, clear time-ref and return when fully faded, then print.
+#define WHUD_FADE_AND_PRINT( config, ctx, timeRef ) do { \
+    if ( !CG_ModernHUDGetFadeColor( (ctx)->color_origin, (ctx)->color, (config), *(timeRef) ) ) { \
+        *(timeRef) = 0; return; \
+    } \
+    CG_ModernHUDTextPrint( (config), (ctx) ); \
+} while(0)
+
 void CG_ModernHUDParserInit(void);
 const modernHUDConfigElement_t* CG_ModernHUDFindConfigElementItem(const char* name);
 const modernHUDConfigCommand_t* CG_ModernHUDFindConfigCommandItem(const char* name);
@@ -453,12 +468,10 @@ modernhudConfigParseCommand_t CG_ModernHUDFileInfoGetCommandItem(configFileInfo_
 
 void* CG_ModernHUDElementFPSCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementFPSRoutine(void* context);
-void CG_ModernHUDElementFPSDestroy(void* context);
 
 #if FEAT_MOVEMENT_KEYS
 // shared routine/destroy for all key elements
 void CG_ModernHUDElementKeyRoutine(void* context);
-void CG_ModernHUDElementKeyDestroy(void* context);
 // keydown factories
 void* CG_ModernHUDElementKeyDownForwardCreate(const modernhudConfig_t* c);
 void* CG_ModernHUDElementKeyDownBackCreate(const modernhudConfig_t* c);
@@ -486,7 +499,6 @@ void* CG_ModernHUDElementKeyUpGestureCreate(const modernhudConfig_t* c);
 #if FEAT_UNLAGGED
 void* CG_ModernHUDElementNetStatsCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementNetStatsRoutine(void* context);
-void CG_ModernHUDElementNetStatsDestroy(void* context);
 #endif
 
 void* CG_ModernHUDElementSBHCCreate(const modernhudConfig_t* config);
@@ -527,183 +539,108 @@ void CG_ModernHUDElementSBAmIDestroy(void* context);
 
 void* CG_ModernHUDElementTargetNameCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementTargetNameRoutine(void* context);
-void CG_ModernHUDElementTargetNameDestroy(void* context);
 
 void* CG_ModernHUDElementTargetStatusCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementTargetStatusRoutine(void* context);
-void CG_ModernHUDElementTargetStatusDestroy(void* context);
 
 void* CG_ModernHUDElementVMWCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementVMWRoutine(void* context);
-void CG_ModernHUDElementVMWDestroy(void* context);
 
 void* CG_ModernHUDElementFragMessageCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementFragMessageRoutine(void* context);
-void CG_ModernHUDElementFragMessageDestroy(void* context);
 
 void* CG_ModernHUDElementRankMessageCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementRankMessageRoutine(void* context);
-void CG_ModernHUDElementRankMessageDestroy(void* context);
 
 void* CG_ModernHUDElementNGPCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementNGPRoutine(void* context);
-void CG_ModernHUDElementNGPDestroy(void* context);
 
 void* CG_ModernHUDElementNGCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementNGRoutine(void* context);
-void CG_ModernHUDElementNGDestroy(void* context);
 
 void* CG_ModernHUDElementDecorCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementDecorRoutine(void* context);
-void CG_ModernHUDElementDecorDestroy(void* context);
 
 void* CG_ModernHUDElementPlayerSpeedCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementPlayerSpeedRoutine(void* context);
-void CG_ModernHUDElementPlayerSpeedDestroy(void* context);
 
 void* CG_ModernHUDElementLocalTimeCreate(const modernhudConfig_t* config);
 void* CG_ModernHUDElementLocalDateCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementLocalTimeRoutine(void* context);
-void CG_ModernHUDElementLocalTimeDestroy(void* context);
 
 void* CG_ModernHUDElementAmmoMessageCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementAmmoMessageRoutine(void* context);
-void CG_ModernHUDElementAmmoMessageDestroy(void* context);
 
-void* CG_ModernHUDElementChat1Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat2Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat3Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat4Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat5Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat6Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat7Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat8Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat9Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat10Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat11Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat12Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat13Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat14Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat15Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementChat16Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementChatCreate(const modernhudConfig_t* config, int index);
 void CG_ModernHUDElementChatRoutine(void* context);
-void CG_ModernHUDElementChatDestroy(void* context);
 
 void* CG_ModernHUDElementSpecMessageCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementSpecMessageRoutine(void* context);
-void CG_ModernHUDElementSpecMessageDestroy(void* context);
 
 void* CG_ModernHUDElementSpectatorsCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementSpectatorsRoutine(void* context);
-void CG_ModernHUDElementSpectatorsDestroy(void* context);
 
 void* CG_ModernHUDElementFollowMessageCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementFollowMessageRoutine(void* context);
-void CG_ModernHUDElementFollowMessageDestroy(void* context);
 
 void* CG_ModernHUDElementGameTimeCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementGameTimeRoutine(void* context);
-void CG_ModernHUDElementGameTimeDestroy(void* context);
 
 void* CG_ModernHUDElementItemPickupCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementItemPickupRoutine(void* context);
-void CG_ModernHUDElementItemPickupDestroy(void* context);
 
 void* CG_ModernHUDElementItemPickupIconCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementItemPickupIconRoutine(void* context);
-void CG_ModernHUDElementItemPickupIconDestroy(void* context);
 
 void* CG_ModernHUDElementFlagStatusNMECreate(const modernhudConfig_t* config);
 void* CG_ModernHUDElementFlagStatusOWNCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementFlagStatusRoutine(void* context);
-void CG_ModernHUDElementFlagStatusDestroy(void* context);
 
 void* CG_ModernHUDElementPlayerNameCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementPlayerNameRoutine(void* context);
-void CG_ModernHUDElementPlayerNameDestroy(void* context);
 
 #define MODERNHUD_UPDATE_TIME 50
 
-void* CG_ModernHUDElementPwTime1Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwTime2Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwTime3Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwTime4Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwTime5Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwTime6Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwTime7Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwTime8Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwIcon1Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwIcon2Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwIcon3Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwIcon4Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwIcon5Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwIcon6Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwIcon7Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementPwIcon8Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementPwTimeCreate(const modernhudConfig_t* config, int index);
+void* CG_ModernHUDElementPwIconCreate(const modernhudConfig_t* config, int index);
 void CG_ModernHUDElementPwRoutine(void* context);
-void CG_ModernHUDElementPwDestroy(void* context);
 
 void* CG_ModernHUDElementNameNMECreate(const modernhudConfig_t* config);
 void* CG_ModernHUDElementNameOWNCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementNameRoutine(void* context);
-void CG_ModernHUDElementNameDestroy(void* context);
 
 void* CG_ModernHUDElementScoreNMECreate(const modernhudConfig_t* config);
 void* CG_ModernHUDElementScoreOWNCreate(const modernhudConfig_t* config);
 void* CG_ModernHUDElementScoreMAXCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementScoreRoutine(void* context);
-void CG_ModernHUDElementScoreDestroy(void* context);
 
 void* CG_ModernHUDElementRewardIconCreate(const modernhudConfig_t* config);
 void* CG_ModernHUDElementRewardCountCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementRewardRoutine(void* context);
-void CG_ModernHUDElementRewardDestroy(void* context);
 
 void* CG_ModernHUDElementTeamCountOWNCreate(const modernhudConfig_t* config);
 void* CG_ModernHUDElementTeamCountNMECreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementTeamCountRoutine(void* context);
-void CG_ModernHUDElementTeamCountDestroy(void* context);
 
-void* CG_ModernHUDElementTeam1Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam2Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam3Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam4Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam5Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam6Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam7Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam8Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam9Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam10Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam11Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam12Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam13Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam14Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam15Create(const modernhudConfig_t* config);
-void* CG_ModernHUDElementTeam16Create(const modernhudConfig_t* config);
+void* CG_ModernHUDElementTeamCreate(const modernhudConfig_t* config, int index);
 void CG_ModernHUDElementTeamRoutine(void* context);
-void CG_ModernHUDElementTeamDestroy(void* context);
 
 void* CG_ModernHUDElementWeaponListCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementWeaponListRoutine(void* context);
-void CG_ModernHUDElementWeaponListDestroy(void* context);
 
 
 
 void* CG_ModernHUDElementTempAccTextCreate(const modernhudConfig_t* config);
 void* CG_ModernHUDElementTempAccIconCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementTempAccRoutine(void* context);
-void CG_ModernHUDElementTempAccDestroy(void* context);
 
 void* CG_ModernHUDElementWarmupInfoCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementWarmupInfoRoutine(void* context);
-void CG_ModernHUDElementWarmupInfoDestroy(void* context);
 void* CG_ModernHUDElementGameTypeCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementGameTypeRoutine(void* context);
-void CG_ModernHUDElementGameTypeDestroy(void* context);
 
 void* CG_ModernHUDElementLocationCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementLocationRoutine(void* context);
-void CG_ModernHUDElementLocationDestroy(void* context);
 
 void* CG_ModernHUDElementCreateCurrentWeapon(const modernhudConfig_t* config);
 void* CG_ModernHUDElementWeaponStatsCreateMG(const modernhudConfig_t* config);
@@ -722,7 +659,6 @@ void* CG_ModernHUDElementIconCreateLG(const modernhudConfig_t* config);
 void* CG_ModernHUDElementIconCreateRG(const modernhudConfig_t* config);
 void* CG_ModernHUDElementIconCreatePG(const modernhudConfig_t* config);
 void CG_ModernHUDElementWeaponStatsRoutine(void* context);
-void CG_ModernHUDElementWeaponStatsDestroy(void* context);
 
 
 void* CG_ModernHUDElementCreatePlayerStatsDG(const modernhudConfig_t* config);
@@ -731,43 +667,33 @@ void* CG_ModernHUDElementCreatePlayerStatsDamageRatio(const modernhudConfig_t* c
 void* CG_ModernHUDElementCreatePlayerStatsDRIcon(const modernhudConfig_t* config);
 void* CG_ModernHUDElementCreatePlayerStatsDGIcon(const modernhudConfig_t* config);
 void CG_ModernHUDElementPlayerStatsRoutine(void* context);
-void CG_ModernHUDElementPlayerStatsDestroy(void* context);
 
 void* CG_ModernHUDElementGridCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementGridRoutine(void* context);
-void CG_ModernHUDElementGridDestroy(void* context);
 
 void* CG_ModernHUDElementAudioWaveformCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementAudioWaveformRoutine(void* context);
-void CG_ModernHUDElementAudioWaveformDestroy(void* context);
 
 void* CG_ModernHUDElementMsgQueueCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementMsgQueueRoutine(void* context);
-void CG_ModernHUDElementMsgQueueDestroy(void* context);
 
 void* CG_ModernHUDElementBotDirectivesCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementBotDirectivesRoutine(void* context);
-void CG_ModernHUDElementBotDirectivesDestroy(void* context);
 
 void* CG_ModernHUDElementAwardsCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementAwardsRoutine(void* context);
-void CG_ModernHUDElementAwardsDestroy(void* context);
 
 void* CG_ModernHUDElementCrosshairCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementCrosshairRoutine(void* context);
-void CG_ModernHUDElementCrosshairDestroy(void* context);
 
 void* CG_ModernHUDElementStatusbarValueCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementStatusbarValueRoutine(void* context);
-void CG_ModernHUDElementStatusbarValueDestroy(void* context);
 
 void* CG_ModernHUDElementStatusbarIconCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementStatusbarIconRoutine(void* context);
-void CG_ModernHUDElementStatusbarIconDestroy(void* context);
 
 void* CG_ModernHUDElementStatusbarBarCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementStatusbarBarRoutine(void* context);
-void CG_ModernHUDElementStatusbarBarDestroy(void* context);
 
 /*
  * cg_modernhud_util.c

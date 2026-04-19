@@ -21,7 +21,7 @@ typedef struct
 } modernHudElementTeam_t;
 
 
-static void* CG_ModernHUDElementTeamCreate(const modernhudConfig_t* config, int line)
+void* CG_ModernHUDElementTeamCreate(const modernhudConfig_t* config, int line)
 {
 	modernHudTeamOverlay_t teamOverlay;
 
@@ -78,86 +78,6 @@ static void* CG_ModernHUDElementTeamCreate(const modernhudConfig_t* config, int 
 	element->config.rect.value[2] = teamOverlay.overlayWidthPix;
 
 	return element;
-}
-
-void* CG_ModernHUDElementTeam1Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 1);
-}
-
-void* CG_ModernHUDElementTeam2Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 2);
-}
-
-void* CG_ModernHUDElementTeam3Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 3);
-}
-
-void* CG_ModernHUDElementTeam4Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 4);
-}
-
-void* CG_ModernHUDElementTeam5Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 5);
-}
-
-void* CG_ModernHUDElementTeam6Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 6);
-}
-
-void* CG_ModernHUDElementTeam7Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 7);
-}
-
-void* CG_ModernHUDElementTeam8Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 8);
-}
-
-void* CG_ModernHUDElementTeam9Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 9);
-}
-
-void* CG_ModernHUDElementTeam10Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 10);
-}
-
-void* CG_ModernHUDElementTeam11Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 11);
-}
-
-void* CG_ModernHUDElementTeam12Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 12);
-}
-
-void* CG_ModernHUDElementTeam13Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 13);
-}
-
-void* CG_ModernHUDElementTeam14Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 14);
-}
-
-void* CG_ModernHUDElementTeam15Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 15);
-}
-
-void* CG_ModernHUDElementTeam16Create(const modernhudConfig_t* config)
-{
-	return CG_ModernHUDElementTeamCreate(config, 16);
 }
 
 void CG_ModernHUDElementTeamRoutine(void* context)
@@ -255,11 +175,4 @@ void CG_ModernHUDElementTeamRoutine(void* context)
 	}
 }
 
-void CG_ModernHUDElementTeamDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
 #endif // FEAT_WIRED_UI

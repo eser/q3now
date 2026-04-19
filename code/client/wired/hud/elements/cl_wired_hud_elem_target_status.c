@@ -69,12 +69,4 @@ void CG_ModernHUDElementTargetStatusRoutine(void* context)
 
 }
 
-void CG_ModernHUDElementTargetStatusDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI

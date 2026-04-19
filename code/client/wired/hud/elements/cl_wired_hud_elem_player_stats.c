@@ -87,10 +87,4 @@ void CG_ModernHUDElementPlayerStatsRoutine( void *context ) {
 	}
 }
 
-void CG_ModernHUDElementPlayerStatsDestroy( void *context ) {
-	if ( context ) {
-		Z_Free( context );
-	}
-}
-
 #endif // FEAT_WIRED_UI

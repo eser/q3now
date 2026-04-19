@@ -63,8 +63,6 @@ static void CG_ModernHUDElementWeaponListSetup(modernHudElementWeaponList_t* ele
 	float offsetX;
 	int count;
 
-	if (!wiredHud || !wiredHud->valid) return;
-
 	count = wiredHud->weaponListCount;
 	if (count > WLIST_MAX_SLOTS) count = WLIST_MAX_SLOTS;
 	if (count > 16) count = 16;
@@ -276,11 +274,4 @@ void CG_ModernHUDElementWeaponListRoutine(void* context)
 	}
 }
 
-void CG_ModernHUDElementWeaponListDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
 #endif /* FEAT_WIRED_UI */

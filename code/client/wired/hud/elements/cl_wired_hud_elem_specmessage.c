@@ -35,11 +35,4 @@ void CG_ModernHUDElementSpecMessageRoutine(void* context)
 	}
 }
 
-void CG_ModernHUDElementSpecMessageDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
 #endif // FEAT_WIRED_UI

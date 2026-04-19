@@ -122,7 +122,7 @@ void CG_ModernHUDElementMsgQueueRoutine( void *context ) {
 	if ( !current->line1[0] ) return;
 	if ( alpha <= 0.0f ) return;
 
-	// get position from config
+	// renders two lines with independent sizes and alpha — bypasses CG_ModernHUDTextPrint intentionally
 	{
 		float x, y;
 		float charW, charH;
@@ -150,10 +150,6 @@ void CG_ModernHUDElementMsgQueueRoutine( void *context ) {
 				charH2, color2, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
 		}
 	}
-}
-
-void CG_ModernHUDElementMsgQueueDestroy( void *context ) {
-	if ( context ) Z_Free( context );
 }
 
 #endif // FEAT_WIRED_UI

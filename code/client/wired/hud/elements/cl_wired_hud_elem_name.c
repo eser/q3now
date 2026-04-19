@@ -180,11 +180,4 @@ void CG_ModernHUDElementNameRoutine(void* context)
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 
-void CG_ModernHUDElementNameDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
 #endif /* FEAT_WIRED_UI */

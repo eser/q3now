@@ -60,12 +60,4 @@ void CG_ModernHUDElementTargetNameRoutine(void* context)
 	element->ctx.text = NULL;
 }
 
-void CG_ModernHUDElementTargetNameDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI

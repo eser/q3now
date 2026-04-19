@@ -1,6 +1,6 @@
 /*
 ===========================================================================
-cl_wired_hud_elem_scoreboard.c — Scoreboard widget renderers
+cl_wired_hud_scoreboard.c — Scoreboard widget renderers
 
 All layout is relative to the widget rect (ox, oy, ow, oh) received from
 the layout engine. Sizes and offsets are fractions of ow (width) or oh
@@ -11,12 +11,12 @@ ITEM_TYPE_DUELBOARD  (type 21): two-panel duel scoreboard.
 ===========================================================================
 */
 
-#include "../../../client.h"
+#include "../../client.h"
 #include "cl_wired_hud.h"
-#include "../cl_wired_hud_private.h"
+#include "cl_wired_hud_private.h"
 #include "cl_wired_text.h"
 #include "cl_wired_draw.h"
-#include "../../../../qcommon/menudef.h"
+#include "../../../qcommon/menudef.h"
 
 #if FEAT_WIRED_UI
 

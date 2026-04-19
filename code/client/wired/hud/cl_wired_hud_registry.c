@@ -19,56 +19,40 @@ typedef struct {
 
 static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "!default", 0, NULL, NULL, NULL },
-	{ "grid", 0, CG_ModernHUDElementGridCreate, CG_ModernHUDElementGridRoutine, CG_ModernHUDElementGridDestroy },
-	{ "predecorate", 0, CG_ModernHUDElementDecorCreate, CG_ModernHUDElementDecorRoutine, CG_ModernHUDElementDecorDestroy },
-	{ "ammomessage", 0, CG_ModernHUDElementAmmoMessageCreate, CG_ModernHUDElementAmmoMessageRoutine, CG_ModernHUDElementAmmoMessageDestroy },
-	{ "audio_waveform", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementAudioWaveformCreate, CG_ModernHUDElementAudioWaveformRoutine, CG_ModernHUDElementAudioWaveformDestroy },
-	{ "chat1", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat1Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat2", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat2Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat3", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat3Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat4", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat4Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat5", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat5Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat6", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat6Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat7", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat7Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat8", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat8Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat9", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat9Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat10", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat10Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat11", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat11Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat12", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat12Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat13", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat13Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat14", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat14Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat15", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat15Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "chat16", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChat16Create, CG_ModernHUDElementChatRoutine, CG_ModernHUDElementChatDestroy },
-	{ "flagstatus_nme", SE_SIDES_ONLY, CG_ModernHUDElementFlagStatusNMECreate, CG_ModernHUDElementFlagStatusRoutine, CG_ModernHUDElementFlagStatusDestroy },
-	{ "flagstatus_own", SE_SIDES_ONLY, CG_ModernHUDElementFlagStatusOWNCreate, CG_ModernHUDElementFlagStatusRoutine, CG_ModernHUDElementFlagStatusDestroy },
-	{ "followmessage", 0, CG_ModernHUDElementFollowMessageCreate, CG_ModernHUDElementFollowMessageRoutine, CG_ModernHUDElementFollowMessageDestroy },
-	{ "fps", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementFPSCreate, CG_ModernHUDElementFPSRoutine, CG_ModernHUDElementFPSDestroy },
-	{ "fragmessage", 0, CG_ModernHUDElementFragMessageCreate, CG_ModernHUDElementFragMessageRoutine, CG_ModernHUDElementFragMessageDestroy },
-	{ "gametime", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementGameTimeCreate, CG_ModernHUDElementGameTimeRoutine, CG_ModernHUDElementGameTimeDestroy },
-	{ "gametype", 0, CG_ModernHUDElementGameTypeCreate, CG_ModernHUDElementGameTypeRoutine, CG_ModernHUDElementGameTypeDestroy },
-	{ "itempickup", 0, CG_ModernHUDElementItemPickupCreate, CG_ModernHUDElementItemPickupRoutine, CG_ModernHUDElementItemPickupDestroy },
-	{ "itempickupicon", 0, CG_ModernHUDElementItemPickupIconCreate, CG_ModernHUDElementItemPickupIconRoutine, CG_ModernHUDElementItemPickupIconDestroy },
+	{ "grid", 0, CG_ModernHUDElementGridCreate, CG_ModernHUDElementGridRoutine, NULL },
+	{ "predecorate", 0, CG_ModernHUDElementDecorCreate, CG_ModernHUDElementDecorRoutine, NULL },
+	{ "ammomessage", 0, CG_ModernHUDElementAmmoMessageCreate, CG_ModernHUDElementAmmoMessageRoutine, NULL },
+	{ "audio_waveform", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementAudioWaveformCreate, CG_ModernHUDElementAudioWaveformRoutine, NULL },
+	{ "flagstatus_nme", SE_SIDES_ONLY, CG_ModernHUDElementFlagStatusNMECreate, CG_ModernHUDElementFlagStatusRoutine, NULL },
+	{ "flagstatus_own", SE_SIDES_ONLY, CG_ModernHUDElementFlagStatusOWNCreate, CG_ModernHUDElementFlagStatusRoutine, NULL },
+	{ "followmessage", 0, CG_ModernHUDElementFollowMessageCreate, CG_ModernHUDElementFollowMessageRoutine, NULL },
+	{ "fps", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementFPSCreate, CG_ModernHUDElementFPSRoutine, NULL },
+	{ "fragmessage", 0, CG_ModernHUDElementFragMessageCreate, CG_ModernHUDElementFragMessageRoutine, NULL },
+	{ "gametime", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementGameTimeCreate, CG_ModernHUDElementGameTimeRoutine, NULL },
+	{ "gametype", 0, CG_ModernHUDElementGameTypeCreate, CG_ModernHUDElementGameTypeRoutine, NULL },
+	{ "itempickup", 0, CG_ModernHUDElementItemPickupCreate, CG_ModernHUDElementItemPickupRoutine, NULL },
+	{ "itempickupicon", 0, CG_ModernHUDElementItemPickupIconCreate, CG_ModernHUDElementItemPickupIconRoutine, NULL },
 #if FEAT_MOVEMENT_KEYS
-	{ "keydown_attack", SE_SPECT, CG_ModernHUDElementKeyDownAttackCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_back", SE_SPECT, CG_ModernHUDElementKeyDownBackCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_crouch", SE_SPECT, CG_ModernHUDElementKeyDownCrouchCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_forward", SE_SPECT, CG_ModernHUDElementKeyDownForwardCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_gesture", SE_SPECT, CG_ModernHUDElementKeyDownGestureCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_jump", SE_SPECT, CG_ModernHUDElementKeyDownJumpCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_left", SE_SPECT, CG_ModernHUDElementKeyDownLeftCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_right", SE_SPECT, CG_ModernHUDElementKeyDownRightCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_use", SE_SPECT, CG_ModernHUDElementKeyDownUseCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keydown_walk", SE_SPECT, CG_ModernHUDElementKeyDownWalkCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_attack", SE_SPECT, CG_ModernHUDElementKeyUpAttackCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_back", SE_SPECT, CG_ModernHUDElementKeyUpBackCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_crouch", SE_SPECT, CG_ModernHUDElementKeyUpCrouchCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_forward", SE_SPECT, CG_ModernHUDElementKeyUpForwardCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_gesture", SE_SPECT, CG_ModernHUDElementKeyUpGestureCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_jump", SE_SPECT, CG_ModernHUDElementKeyUpJumpCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_left", SE_SPECT, CG_ModernHUDElementKeyUpLeftCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_right", SE_SPECT, CG_ModernHUDElementKeyUpRightCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_use", SE_SPECT, CG_ModernHUDElementKeyUpUseCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
-	{ "keyup_walk", SE_SPECT, CG_ModernHUDElementKeyUpWalkCreate, CG_ModernHUDElementKeyRoutine, CG_ModernHUDElementKeyDestroy },
+	{ "keydown_attack", SE_SPECT, CG_ModernHUDElementKeyDownAttackCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_back", SE_SPECT, CG_ModernHUDElementKeyDownBackCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_crouch", SE_SPECT, CG_ModernHUDElementKeyDownCrouchCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_forward", SE_SPECT, CG_ModernHUDElementKeyDownForwardCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_gesture", SE_SPECT, CG_ModernHUDElementKeyDownGestureCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_jump", SE_SPECT, CG_ModernHUDElementKeyDownJumpCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_left", SE_SPECT, CG_ModernHUDElementKeyDownLeftCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_right", SE_SPECT, CG_ModernHUDElementKeyDownRightCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_use", SE_SPECT, CG_ModernHUDElementKeyDownUseCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keydown_walk", SE_SPECT, CG_ModernHUDElementKeyDownWalkCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_attack", SE_SPECT, CG_ModernHUDElementKeyUpAttackCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_back", SE_SPECT, CG_ModernHUDElementKeyUpBackCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_crouch", SE_SPECT, CG_ModernHUDElementKeyUpCrouchCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_forward", SE_SPECT, CG_ModernHUDElementKeyUpForwardCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_gesture", SE_SPECT, CG_ModernHUDElementKeyUpGestureCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_jump", SE_SPECT, CG_ModernHUDElementKeyUpJumpCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_left", SE_SPECT, CG_ModernHUDElementKeyUpLeftCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_right", SE_SPECT, CG_ModernHUDElementKeyUpRightCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_use", SE_SPECT, CG_ModernHUDElementKeyUpUseCreate, CG_ModernHUDElementKeyRoutine, NULL },
+	{ "keyup_walk", SE_SPECT, CG_ModernHUDElementKeyUpWalkCreate, CG_ModernHUDElementKeyRoutine, NULL },
 #else
 	{ "keydown_attack", 0, NULL, NULL, NULL },
 	{ "keydown_back", 0, NULL, NULL, NULL },
@@ -91,96 +75,107 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "keyup_use", 0, NULL, NULL, NULL },
 	{ "keyup_walk", 0, NULL, NULL, NULL },
 #endif
-	{ "localtime", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementLocalTimeCreate, CG_ModernHUDElementLocalTimeRoutine, CG_ModernHUDElementLocalTimeDestroy },
-	{ "localdate", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementLocalDateCreate, CG_ModernHUDElementLocalTimeRoutine, CG_ModernHUDElementLocalTimeDestroy },
-	{ "msgqueue", 0, CG_ModernHUDElementMsgQueueCreate, CG_ModernHUDElementMsgQueueRoutine, CG_ModernHUDElementMsgQueueDestroy },
-	{ "name_nme", 0, CG_ModernHUDElementNameNMECreate, CG_ModernHUDElementNameRoutine, CG_ModernHUDElementNameDestroy },
-	{ "name_own", 0, CG_ModernHUDElementNameOWNCreate, CG_ModernHUDElementNameRoutine, CG_ModernHUDElementNameDestroy },
-	{ "netgraph", SE_IM | SE_SPECT | SE_DEAD | SE_DEMO_HIDE, CG_ModernHUDElementNGCreate, CG_ModernHUDElementNGRoutine, CG_ModernHUDElementNGDestroy },
-	{ "netgraphping", SE_IM | SE_SPECT | SE_DEAD | SE_DEMO_HIDE, CG_ModernHUDElementNGPCreate, CG_ModernHUDElementNGPRoutine, CG_ModernHUDElementNGPDestroy },
-	{ "playerspeed", 0, CG_ModernHUDElementPlayerSpeedCreate, CG_ModernHUDElementPlayerSpeedRoutine, CG_ModernHUDElementPlayerSpeedDestroy },
-	{ "powerup1_icon", 0, CG_ModernHUDElementPwIcon1Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup2_icon", 0, CG_ModernHUDElementPwIcon2Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup3_icon", 0, CG_ModernHUDElementPwIcon3Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup4_icon", 0, CG_ModernHUDElementPwIcon4Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup5_icon", 0, CG_ModernHUDElementPwIcon5Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup6_icon", 0, CG_ModernHUDElementPwIcon6Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup7_icon", 0, CG_ModernHUDElementPwIcon7Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup8_icon", 0, CG_ModernHUDElementPwIcon8Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup1_time", 0, CG_ModernHUDElementPwTime1Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup2_time", 0, CG_ModernHUDElementPwTime2Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup3_time", 0, CG_ModernHUDElementPwTime3Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup4_time", 0, CG_ModernHUDElementPwTime4Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup5_time", 0, CG_ModernHUDElementPwTime5Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup6_time", 0, CG_ModernHUDElementPwTime6Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup7_time", 0, CG_ModernHUDElementPwTime7Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "powerup8_time", 0, CG_ModernHUDElementPwTime8Create, CG_ModernHUDElementPwRoutine, CG_ModernHUDElementPwDestroy },
-	{ "rankmessage", 0, CG_ModernHUDElementRankMessageCreate, CG_ModernHUDElementRankMessageRoutine, CG_ModernHUDElementRankMessageDestroy },
-	{ "score_limit", 0, CG_ModernHUDElementScoreMAXCreate, CG_ModernHUDElementScoreRoutine, CG_ModernHUDElementScoreDestroy },
-	{ "score_nme", 0, CG_ModernHUDElementScoreNMECreate, CG_ModernHUDElementScoreRoutine, CG_ModernHUDElementScoreDestroy },
-	{ "score_own", 0, CG_ModernHUDElementScoreOWNCreate, CG_ModernHUDElementScoreRoutine, CG_ModernHUDElementScoreDestroy },
-	{ "specmessage", SE_SPECT, CG_ModernHUDElementSpecMessageCreate, CG_ModernHUDElementSpecMessageRoutine, CG_ModernHUDElementSpecMessageDestroy },
-	{ "botdirectives", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementBotDirectivesCreate, CG_ModernHUDElementBotDirectivesRoutine, CG_ModernHUDElementBotDirectivesDestroy },
-	{ "spectators", SE_IM, CG_ModernHUDElementSpectatorsCreate, CG_ModernHUDElementSpectatorsRoutine, CG_ModernHUDElementSpectatorsDestroy },
-	{ "targetname", 0, CG_ModernHUDElementTargetNameCreate, CG_ModernHUDElementTargetNameRoutine, CG_ModernHUDElementTargetNameDestroy },
-	{ "targetstatus", SE_SIDES_ONLY, CG_ModernHUDElementTargetStatusCreate, CG_ModernHUDElementTargetStatusRoutine, CG_ModernHUDElementTargetStatusDestroy },
-	{ "teamcount_nme", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountNMECreate, CG_ModernHUDElementTeamCountRoutine, CG_ModernHUDElementTeamCountDestroy },
-	{ "teamcount_own", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountOWNCreate, CG_ModernHUDElementTeamCountRoutine, CG_ModernHUDElementTeamCountDestroy },
-	{ "team1", SE_SIDES_ONLY, CG_ModernHUDElementTeam1Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team2", SE_SIDES_ONLY, CG_ModernHUDElementTeam2Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team3", SE_SIDES_ONLY, CG_ModernHUDElementTeam3Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team4", SE_SIDES_ONLY, CG_ModernHUDElementTeam4Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team5", SE_SIDES_ONLY, CG_ModernHUDElementTeam5Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team6", SE_SIDES_ONLY, CG_ModernHUDElementTeam6Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team7", SE_SIDES_ONLY, CG_ModernHUDElementTeam7Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team8", SE_SIDES_ONLY, CG_ModernHUDElementTeam8Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team9", SE_SIDES_ONLY, CG_ModernHUDElementTeam9Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team10", SE_SIDES_ONLY, CG_ModernHUDElementTeam10Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team11", SE_SIDES_ONLY, CG_ModernHUDElementTeam11Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team12", SE_SIDES_ONLY, CG_ModernHUDElementTeam12Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team13", SE_SIDES_ONLY, CG_ModernHUDElementTeam13Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team14", SE_SIDES_ONLY, CG_ModernHUDElementTeam14Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team15", SE_SIDES_ONLY, CG_ModernHUDElementTeam15Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "team16", SE_SIDES_ONLY, CG_ModernHUDElementTeam16Create, CG_ModernHUDElementTeamRoutine, CG_ModernHUDElementTeamDestroy },
-	{ "votemessageworld", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementVMWCreate, CG_ModernHUDElementVMWRoutine, CG_ModernHUDElementVMWDestroy },
-	{ "warmupinfo", 0, CG_ModernHUDElementWarmupInfoCreate, CG_ModernHUDElementWarmupInfoRoutine, CG_ModernHUDElementWarmupInfoDestroy },
-	{ "weaponlist", 0, CG_ModernHUDElementWeaponListCreate, CG_ModernHUDElementWeaponListRoutine, CG_ModernHUDElementWeaponListDestroy },
-	{ "rewardicons", 0, CG_ModernHUDElementRewardIconCreate, CG_ModernHUDElementRewardRoutine, CG_ModernHUDElementRewardDestroy },
-	{ "rewardnumbers", 0, CG_ModernHUDElementRewardCountCreate, CG_ModernHUDElementRewardRoutine, CG_ModernHUDElementRewardDestroy },
-	{ "awards", 0, CG_ModernHUDElementAwardsCreate, CG_ModernHUDElementAwardsRoutine, CG_ModernHUDElementAwardsDestroy },
-	{ "crosshair", 0, CG_ModernHUDElementCrosshairCreate, CG_ModernHUDElementCrosshairRoutine, CG_ModernHUDElementCrosshairDestroy },
-	{ "statusbar_value", 0, CG_ModernHUDElementStatusbarValueCreate, CG_ModernHUDElementStatusbarValueRoutine, CG_ModernHUDElementStatusbarValueDestroy },
-	{ "statusbar_icon", 0, CG_ModernHUDElementStatusbarIconCreate, CG_ModernHUDElementStatusbarIconRoutine, CG_ModernHUDElementStatusbarIconDestroy },
-	{ "statusbar_bar", 0, CG_ModernHUDElementStatusbarBarCreate, CG_ModernHUDElementStatusbarBarRoutine, CG_ModernHUDElementStatusbarBarDestroy },
-	{ "location", 0, CG_ModernHUDElementLocationCreate, CG_ModernHUDElementLocationRoutine, CG_ModernHUDElementLocationDestroy },
-	{ "tempAcc_current", SE_IM | SE_DEAD, CG_ModernHUDElementTempAccTextCreate, CG_ModernHUDElementTempAccRoutine, CG_ModernHUDElementTempAccDestroy },
-	{ "tempAcc_icon", SE_IM | SE_DEAD, CG_ModernHUDElementTempAccIconCreate, CG_ModernHUDElementTempAccRoutine, CG_ModernHUDElementTempAccDestroy },
-	{ "currentWeaponStats", SE_IM, CG_ModernHUDElementCreateCurrentWeapon, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_MG", SE_IM, CG_ModernHUDElementWeaponStatsCreateMG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_SG", SE_IM, CG_ModernHUDElementWeaponStatsCreateSG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_GL", SE_IM, CG_ModernHUDElementWeaponStatsCreateGL, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_RL", SE_IM, CG_ModernHUDElementWeaponStatsCreateRL, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_LG", SE_IM, CG_ModernHUDElementWeaponStatsCreateLG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_RG", SE_IM, CG_ModernHUDElementWeaponStatsCreateRG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_PG", SE_IM, CG_ModernHUDElementWeaponStatsCreatePG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "currentWeaponStats_icon", SE_IM, CG_ModernHUDElementIconCreateCurrentWeapon, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_MG_icon", SE_IM, CG_ModernHUDElementIconCreateMG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_SG_icon", SE_IM, CG_ModernHUDElementIconCreateSG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_GL_icon", SE_IM, CG_ModernHUDElementIconCreateGL, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_RL_icon", SE_IM, CG_ModernHUDElementIconCreateRL, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_LG_icon", SE_IM, CG_ModernHUDElementIconCreateLG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_RG_icon", SE_IM, CG_ModernHUDElementIconCreateRG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "weaponStats_PG_icon", SE_IM, CG_ModernHUDElementIconCreatePG, CG_ModernHUDElementWeaponStatsRoutine, CG_ModernHUDElementWeaponStatsDestroy },
-	{ "playerStats_DG", SE_IM, CG_ModernHUDElementCreatePlayerStatsDG, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
-	{ "playerStats_DR", SE_IM, CG_ModernHUDElementCreatePlayerStatsDR, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
-	{ "playerStats_DG_icon", SE_IM, CG_ModernHUDElementCreatePlayerStatsDGIcon, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
-	{ "playerStats_DR_icon", SE_IM, CG_ModernHUDElementCreatePlayerStatsDRIcon, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
-	{ "playerStats_damageRatio", SE_IM, CG_ModernHUDElementCreatePlayerStatsDamageRatio, CG_ModernHUDElementPlayerStatsRoutine, CG_ModernHUDElementPlayerStatsDestroy },
-	{ "player_name", 0, CG_ModernHUDElementPlayerNameCreate, CG_ModernHUDElementPlayerNameRoutine, CG_ModernHUDElementPlayerNameDestroy },
-	{ "postdecorate", 0, CG_ModernHUDElementDecorCreate, CG_ModernHUDElementDecorRoutine, CG_ModernHUDElementDecorDestroy },
-	{ "netstats", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementNetStatsCreate, CG_ModernHUDElementNetStatsRoutine, CG_ModernHUDElementNetStatsDestroy },
+	{ "localtime", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementLocalTimeCreate, CG_ModernHUDElementLocalTimeRoutine, NULL },
+	{ "localdate", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementLocalDateCreate, CG_ModernHUDElementLocalTimeRoutine, NULL },
+	{ "msgqueue", 0, CG_ModernHUDElementMsgQueueCreate, CG_ModernHUDElementMsgQueueRoutine, NULL },
+	{ "name_nme", 0, CG_ModernHUDElementNameNMECreate, CG_ModernHUDElementNameRoutine, NULL },
+	{ "name_own", 0, CG_ModernHUDElementNameOWNCreate, CG_ModernHUDElementNameRoutine, NULL },
+	{ "netgraph", SE_IM | SE_SPECT | SE_DEAD | SE_DEMO_HIDE, CG_ModernHUDElementNGCreate, CG_ModernHUDElementNGRoutine, NULL },
+	{ "netgraphping", SE_IM | SE_SPECT | SE_DEAD | SE_DEMO_HIDE, CG_ModernHUDElementNGPCreate, CG_ModernHUDElementNGPRoutine, NULL },
+	{ "playerspeed", 0, CG_ModernHUDElementPlayerSpeedCreate, CG_ModernHUDElementPlayerSpeedRoutine, NULL },
+	{ "rankmessage", 0, CG_ModernHUDElementRankMessageCreate, CG_ModernHUDElementRankMessageRoutine, NULL },
+	{ "score_limit", 0, CG_ModernHUDElementScoreMAXCreate, CG_ModernHUDElementScoreRoutine, NULL },
+	{ "score_nme", 0, CG_ModernHUDElementScoreNMECreate, CG_ModernHUDElementScoreRoutine, NULL },
+	{ "score_own", 0, CG_ModernHUDElementScoreOWNCreate, CG_ModernHUDElementScoreRoutine, NULL },
+	{ "specmessage", SE_SPECT, CG_ModernHUDElementSpecMessageCreate, CG_ModernHUDElementSpecMessageRoutine, NULL },
+	{ "botdirectives", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementBotDirectivesCreate, CG_ModernHUDElementBotDirectivesRoutine, NULL },
+	{ "spectators", SE_IM, CG_ModernHUDElementSpectatorsCreate, CG_ModernHUDElementSpectatorsRoutine, NULL },
+	{ "targetname", 0, CG_ModernHUDElementTargetNameCreate, CG_ModernHUDElementTargetNameRoutine, NULL },
+	{ "targetstatus", SE_SIDES_ONLY, CG_ModernHUDElementTargetStatusCreate, CG_ModernHUDElementTargetStatusRoutine, NULL },
+	{ "teamcount_nme", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountNMECreate, CG_ModernHUDElementTeamCountRoutine, NULL },
+	{ "teamcount_own", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountOWNCreate, CG_ModernHUDElementTeamCountRoutine, NULL },
+	{ "votemessageworld", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementVMWCreate, CG_ModernHUDElementVMWRoutine, NULL },
+	{ "warmupinfo", 0, CG_ModernHUDElementWarmupInfoCreate, CG_ModernHUDElementWarmupInfoRoutine, NULL },
+	{ "weaponlist", 0, CG_ModernHUDElementWeaponListCreate, CG_ModernHUDElementWeaponListRoutine, NULL },
+	{ "rewardicons", 0, CG_ModernHUDElementRewardIconCreate, CG_ModernHUDElementRewardRoutine, NULL },
+	{ "rewardnumbers", 0, CG_ModernHUDElementRewardCountCreate, CG_ModernHUDElementRewardRoutine, NULL },
+	{ "awards", 0, CG_ModernHUDElementAwardsCreate, CG_ModernHUDElementAwardsRoutine, NULL },
+	{ "crosshair", 0, CG_ModernHUDElementCrosshairCreate, CG_ModernHUDElementCrosshairRoutine, NULL },
+	{ "statusbar_value", 0, CG_ModernHUDElementStatusbarValueCreate, CG_ModernHUDElementStatusbarValueRoutine, NULL },
+	{ "statusbar_icon", 0, CG_ModernHUDElementStatusbarIconCreate, CG_ModernHUDElementStatusbarIconRoutine, NULL },
+	{ "statusbar_bar", 0, CG_ModernHUDElementStatusbarBarCreate, CG_ModernHUDElementStatusbarBarRoutine, NULL },
+	{ "location", 0, CG_ModernHUDElementLocationCreate, CG_ModernHUDElementLocationRoutine, NULL },
+	{ "tempAcc_current", SE_IM | SE_DEAD, CG_ModernHUDElementTempAccTextCreate, CG_ModernHUDElementTempAccRoutine, NULL },
+	{ "tempAcc_icon", SE_IM | SE_DEAD, CG_ModernHUDElementTempAccIconCreate, CG_ModernHUDElementTempAccRoutine, NULL },
+	{ "currentWeaponStats", SE_IM, CG_ModernHUDElementCreateCurrentWeapon, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_MG", SE_IM, CG_ModernHUDElementWeaponStatsCreateMG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_SG", SE_IM, CG_ModernHUDElementWeaponStatsCreateSG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_GL", SE_IM, CG_ModernHUDElementWeaponStatsCreateGL, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_RL", SE_IM, CG_ModernHUDElementWeaponStatsCreateRL, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_LG", SE_IM, CG_ModernHUDElementWeaponStatsCreateLG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_RG", SE_IM, CG_ModernHUDElementWeaponStatsCreateRG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_PG", SE_IM, CG_ModernHUDElementWeaponStatsCreatePG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "currentWeaponStats_icon", SE_IM, CG_ModernHUDElementIconCreateCurrentWeapon, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_MG_icon", SE_IM, CG_ModernHUDElementIconCreateMG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_SG_icon", SE_IM, CG_ModernHUDElementIconCreateSG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_GL_icon", SE_IM, CG_ModernHUDElementIconCreateGL, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_RL_icon", SE_IM, CG_ModernHUDElementIconCreateRL, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_LG_icon", SE_IM, CG_ModernHUDElementIconCreateLG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_RG_icon", SE_IM, CG_ModernHUDElementIconCreateRG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "weaponStats_PG_icon", SE_IM, CG_ModernHUDElementIconCreatePG, CG_ModernHUDElementWeaponStatsRoutine, NULL },
+	{ "playerStats_DG", SE_IM, CG_ModernHUDElementCreatePlayerStatsDG, CG_ModernHUDElementPlayerStatsRoutine, NULL },
+	{ "playerStats_DR", SE_IM, CG_ModernHUDElementCreatePlayerStatsDR, CG_ModernHUDElementPlayerStatsRoutine, NULL },
+	{ "playerStats_DG_icon", SE_IM, CG_ModernHUDElementCreatePlayerStatsDGIcon, CG_ModernHUDElementPlayerStatsRoutine, NULL },
+	{ "playerStats_DR_icon", SE_IM, CG_ModernHUDElementCreatePlayerStatsDRIcon, CG_ModernHUDElementPlayerStatsRoutine, NULL },
+	{ "playerStats_damageRatio", SE_IM, CG_ModernHUDElementCreatePlayerStatsDamageRatio, CG_ModernHUDElementPlayerStatsRoutine, NULL },
+	{ "player_name", 0, CG_ModernHUDElementPlayerNameCreate, CG_ModernHUDElementPlayerNameRoutine, NULL },
+	{ "postdecorate", 0, CG_ModernHUDElementDecorCreate, CG_ModernHUDElementDecorRoutine, NULL },
+	{ "netstats", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementNetStatsCreate, CG_ModernHUDElementNetStatsRoutine, NULL },
 	{ NULL, 0, NULL, NULL, NULL }
 };
+
+// ── family registry (indexed families: chat<N>, team<N>, powerup<N>_icon, powerup<N>_time) ─
+
+typedef struct {
+	const char *family;
+	int         defaultVisibility;
+	void*       (*createIndexed)(const modernhudConfig_t*, int);
+	void        (*routine)(void*);
+	void        (*destroy)(void*);
+} wiredHudFamilyDef_t;
+
+static const wiredHudFamilyDef_t wiredHudFamilyDefs[] = {
+	{ "chat",         SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementChatCreate,   CG_ModernHUDElementChatRoutine, NULL },
+	{ "team",         SE_SIDES_ONLY,              CG_ModernHUDElementTeamCreate,   CG_ModernHUDElementTeamRoutine, NULL },
+	{ "powerup_icon", 0,                          CG_ModernHUDElementPwIconCreate, CG_ModernHUDElementPwRoutine,   NULL },
+	{ "powerup_time", 0,                          CG_ModernHUDElementPwTimeCreate, CG_ModernHUDElementPwRoutine,   NULL },
+	{ NULL, 0, NULL, NULL, NULL }
+};
+
+// Parses "chat8" → family="chat", index=8
+// Parses "powerup1_icon" → family="powerup_icon", index=1
+// Returns qfalse if name contains no digit run or index out of [1..16].
+static qboolean WhudParseFamilyIndex( const char *name, char *familyBuf, int familyBufSize, int *outIndex ) {
+	const char *p = name;
+	const char *digitStart;
+	int index = 0;
+
+	while ( *p && !( *p >= '0' && *p <= '9' ) ) p++;
+	if ( !*p ) return qfalse;
+
+	digitStart = p;
+	while ( *p >= '0' && *p <= '9' ) { index = index * 10 + ( *p - '0' ); p++; }
+
+	if ( index < 1 || index > 16 ) {
+		Com_DPrintf( "WiredHud: family index out of range in '%s'\n", name );
+		return qfalse;
+	}
+
+	// family = prefix + role-suffix (e.g. "powerup" + "_icon" = "powerup_icon")
+	Com_sprintf( familyBuf, familyBufSize, "%.*s%s", (int)( digitStart - name ), name, p );
+	*outIndex = index;
+	return qtrue;
+}
 
 // ── active element list ──────────────────────────────────────────────
 
@@ -215,6 +210,9 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 	const wiredHudElementDef_t *def;
 	wiredHudActiveElement_t *elem;
 	void *ctx;
+	char familyName[64];
+	int familyIndex;
+	int i;
 
 	if ( wired_hudElementCount >= WIRED_HUD_MAX_ACTIVE_ELEMENTS ) {
 		Com_Printf( S_COLOR_YELLOW "WiredHud: too many active elements\n" );
@@ -222,12 +220,35 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 	}
 
 	def = WiredHud_FindElementDef( name );
-	if ( !def || !def->create ) {
+	if ( def && def->create ) {
+		ctx = def->create( config );
+	} else if ( WhudParseFamilyIndex( name, familyName, sizeof( familyName ), &familyIndex ) ) {
+		const wiredHudFamilyDef_t *fam = NULL;
+		for ( i = 0; wiredHudFamilyDefs[i].family; i++ ) {
+			if ( !Q_stricmp( wiredHudFamilyDefs[i].family, familyName ) ) {
+				fam = &wiredHudFamilyDefs[i];
+				break;
+			}
+		}
+		if ( !fam ) {
+			Com_DPrintf( "WiredHud: unknown element '%s'\n", name );
+			return qfalse;
+		}
+		ctx = fam->createIndexed( config, familyIndex );
+		if ( !ctx ) return qfalse;
+		elem = &wired_hudElements[wired_hudElementCount++];
+		elem->name       = name;
+		elem->context    = ctx;
+		elem->routine    = fam->routine;
+		elem->destroy    = fam->destroy;
+		elem->visibility = fam->defaultVisibility;
+		elem->order      = wired_hudElementCount;
+		elem->active     = qtrue;
+		return qtrue;
+	} else {
 		Com_DPrintf( "WiredHud: unknown element '%s'\n", name );
 		return qfalse;
 	}
-
-	ctx = def->create( config );
 	if ( !ctx ) return qfalse;
 
 	elem = &wired_hudElements[wired_hudElementCount++];
@@ -245,8 +266,11 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 void WiredHud_DestroyAllElements( void ) {
 	int i;
 	for ( i = 0; i < wired_hudElementCount; i++ ) {
-		if ( wired_hudElements[i].active && wired_hudElements[i].destroy && wired_hudElements[i].context ) {
-			wired_hudElements[i].destroy( wired_hudElements[i].context );
+		if ( wired_hudElements[i].active && wired_hudElements[i].context ) {
+			if ( wired_hudElements[i].destroy )
+				wired_hudElements[i].destroy( wired_hudElements[i].context );
+			else
+				Z_Free( wired_hudElements[i].context );
 		}
 		wired_hudElements[i].active = qfalse;
 		wired_hudElements[i].context = NULL;

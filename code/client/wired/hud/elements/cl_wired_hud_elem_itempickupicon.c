@@ -44,11 +44,4 @@ void CG_ModernHUDElementItemPickupIconRoutine(void* context)
 	}
 }
 
-void CG_ModernHUDElementItemPickupIconDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
 #endif // FEAT_WIRED_UI

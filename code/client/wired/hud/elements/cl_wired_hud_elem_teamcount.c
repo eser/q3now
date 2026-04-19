@@ -71,12 +71,4 @@ void CG_ModernHUDElementTeamCountRoutine(void* context)
 
 }
 
-void CG_ModernHUDElementTeamCountDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI

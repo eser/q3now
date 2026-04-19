@@ -52,11 +52,11 @@ void Text_Init( void )
 static const fontFace_t *Text_ResolveFace( int fontId )
 {
 	wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
-	const char *serif = ( ag && ag->defaultSerifFontName[0] ) ? ag->defaultSerifFontName : "sansman";
-	const char *serifItalic = ( ag && ag->defaultSerifFontItalicName[0] ) ? ag->defaultSerifFontItalicName : "sansman-italic";
-	const char *sans = ( ag && ag->defaultSansFontName[0] ) ? ag->defaultSansFontName : "oxanium";
-	const char *sansMedium = ( ag && ag->defaultSansFontMediumName[0] ) ? ag->defaultSansFontMediumName : "oxanium-medium";
-	const char *mono = ( ag && ag->defaultMonoFontName[0] ) ? ag->defaultMonoFontName : "sharetechmono";
+	const char *serif = ag->defaultSerifFontName[0] ? ag->defaultSerifFontName : "sansman";
+	const char *serifItalic = ag->defaultSerifFontItalicName[0] ? ag->defaultSerifFontItalicName : "sansman-italic";
+	const char *sans = ag->defaultSansFontName[0] ? ag->defaultSansFontName : "oxanium";
+	const char *sansMedium = ag->defaultSansFontMediumName[0] ? ag->defaultSansFontMediumName : "oxanium-medium";
+	const char *mono = ag->defaultMonoFontName[0] ? ag->defaultMonoFontName : "sharetechmono";
 	const fontFace_t *face = NULL;
 
 	switch ( fontId ) {

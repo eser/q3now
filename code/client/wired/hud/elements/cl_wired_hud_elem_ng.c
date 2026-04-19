@@ -124,10 +124,4 @@ void CG_ModernHUDElementNGRoutine(void* context)
 	re.SetColor( NULL );
 }
 
-void CG_ModernHUDElementNGDestroy(void* context)
-{
-	if ( context ) {
-		Z_Free( context );
-	}
-}
 #endif // FEAT_WIRED_UI

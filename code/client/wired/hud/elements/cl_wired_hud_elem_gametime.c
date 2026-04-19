@@ -50,12 +50,4 @@ void CG_ModernHUDElementGameTimeRoutine(void* context)
 
 }
 
-void CG_ModernHUDElementGameTimeDestroy(void* context)
-{
-	if (context)
-	{
-		Z_Free(context);
-	}
-}
-
 #endif // FEAT_WIRED_UI
