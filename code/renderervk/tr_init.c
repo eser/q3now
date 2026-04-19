@@ -153,6 +153,7 @@ cvar_t	*r_drawentities;
 cvar_t	*r_drawworld;
 cvar_t	*r_speeds;
 cvar_t	*r_gpuSpeeds;
+cvar_t	*r_vkDebugTiming;
 cvar_t	*r_frameSpikeUs;
 cvar_t	*r_fullbright;
 cvar_t	*r_novis;
@@ -1810,6 +1811,8 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
 	r_gpuSpeeds = ri.Cvar_Get( "r_gpuSpeeds", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_gpuSpeeds, "Per-pass GPU timestamp report.\n 0: off\n 1: 200-frame averages\n N(>=2): only frames where total GPU time >= N ms" );
+	r_vkDebugTiming = ri.Cvar_Get( "r_vkDebugTiming", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_vkDebugTiming, "Print Vulkan host-side timing averages every 200 frames.\n 0: off\n 1: on (fence, acquire, submit, present, draw calls, pipeline binds)" );
 	r_frameSpikeUs = ri.Cvar_Get( "r_frameSpikeUs", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_frameSpikeUs, "Per-frame host-side stage-timing report (CPU side of the Vulkan pipeline).\n 0: off\n N>0: print stage breakdown for each frame whose total host time >= N us\n Recommended: 12000 (>12ms is a perceptible spike at 120Hz)" );
 	r_debugSurface = ri.Cvar_Get ("r_debugSurface", "0", CVAR_CHEAT);
@@ -1906,7 +1909,7 @@ static void R_Register( void )
 	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
-	r_bloom_passes = ri.Cvar_Get( "r_bloom_passes", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_bloom_passes = ri.Cvar_Get( "r_bloom_passes", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom_passes, "1", "4", CV_INTEGER );
 	ri.Cvar_SetDescription( r_bloom_passes, "Number of bloom blur levels (1-4). Lower = fewer GPU render passes = higher FPS. Default 2 is a good balance between quality and performance." );
 #ifdef __APPLE__

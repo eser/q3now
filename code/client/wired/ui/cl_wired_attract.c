@@ -613,9 +613,8 @@ qboolean WiredAttract_OnDemoCompleted( void ) {
 	return qtrue;
 }
 
+
 qboolean WiredAttract_OnCinematicCompleted( void ) {
-	/* MVP: cinematic items use explicit durationMs — natural completion
-	   is not relied on. This hook is a no-op placeholder for future use. */
 	return qfalse;
 }
 

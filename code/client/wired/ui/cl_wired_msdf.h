@@ -121,6 +121,18 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
                           const char *str, int maxChars, float letterSpacing );
 
 /*
+ * MSDF_ClampToWidth
+ *   Walk the string glyph-by-glyph and return the number of visible
+ *   (non-color-code) chars that fit within maxPixels.  totalWidthOut
+ *   (may be NULL) receives the accumulated pixel advance of those chars.
+ *   Caller must separately account for the ellipsis width when maxPixels
+ *   is meant to leave room for it.
+ */
+int MSDF_ClampToWidth( msdfFont_t *font, float size,
+                       const char *str, float maxPixels,
+                       float letterSpacing, float *totalWidthOut );
+
+/*
  * MSDF_SetOutline
  *   Set outline and glow parameters for subsequent MSDF draws.
  *   outlineWidth/glowWidth are in SDF units (0.0 = disabled).

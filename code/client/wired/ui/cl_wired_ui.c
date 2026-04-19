@@ -2188,23 +2188,6 @@ void WiredUI_Refresh( int realtime ) {
 			continue; // skip normal text rendering for listbox
 		}
 
-		// ── text truncation helper ──────────────────────────────────
-		// If text is wider than the item rect, truncate with ".." suffix.
-		// buf is reused below for cvar-bound items too.
-		#define WIRED_TRUNCATE_TEXT(src, charSz, maxW, outBuf, outBufSz) do { \
-			if ( (maxW) > 0 && strlen(src) * (charSz) > (maxW) ) { \
-				int maxChars = (int)((maxW) / (charSz)); \
-				if ( maxChars > 2 ) { \
-					Q_strncpyz( (outBuf), (src), MIN( maxChars - 1, (outBufSz) - 1 ) ); \
-					Q_strcat( (outBuf), (outBufSz), ".." ); \
-				} else { \
-					Q_strncpyz( (outBuf), (src), MIN( maxChars + 1, (outBufSz) ) ); \
-				} \
-			} else { \
-				Q_strncpyz( (outBuf), (src), (outBufSz) ); \
-			} \
-		} while(0)
-
 		// draw cvar-bound item value (right side of label)
 		if ( item->cvar[0] && item->type != ITEM_TYPE_TEXT && item->type != ITEM_TYPE_BUTTON ) {
 			char cvarBuf[256];
@@ -2407,8 +2390,6 @@ void WiredUI_Refresh( int realtime ) {
 			float x = itemX + item->textalignx;
 			float y = itemY + textVCenter;
 			int drawAlign = TEXT_ALIGN_LEFT;
-			char truncBuf[256];
-			const char *displayText;
 			const char *sourceText;
 			vec4_t drawColor;
 
@@ -2448,14 +2429,6 @@ void WiredUI_Refresh( int realtime ) {
 			}
 
 			if ( sourceText[0] ) {
-				/* truncate if wider than rect */
-				if ( itemW > 0 ) {
-					WIRED_TRUNCATE_TEXT( sourceText, charSize, itemW, truncBuf, sizeof( truncBuf ) );
-					displayText = truncBuf;
-				} else {
-					displayText = sourceText;
-				}
-
 				if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
 					x = itemX + itemW * 0.5f;
 					drawAlign = TEXT_ALIGN_CENTER;
@@ -2465,7 +2438,7 @@ void WiredUI_Refresh( int realtime ) {
 				}
 
 				Text_SetLetterSpacing( item->letterSpacing );
-				Text_Draw( displayText, (float)x, (float)y, FONT_UI, charSize, drawColor, drawAlign, 0 );
+				Text_DrawClipped( sourceText, (float)x, (float)y, (float)itemW, FONT_UI, charSize, drawColor, drawAlign, 0 );
 				Text_SetLetterSpacing( 0.0f );
 			}
 		}
@@ -2505,7 +2478,7 @@ void WiredUI_Refresh( int realtime ) {
 					focusAlign = TEXT_ALIGN_RIGHT;
 				}
 				Text_SetLetterSpacing( focus->letterSpacing );
-				Text_Draw( focus->text, (float)x, (float)y, FONT_UI, charSize, focus->forecolor, focusAlign, 0 );
+				Text_DrawClipped( focus->text, (float)x, (float)y, (float)fw, FONT_UI, charSize, focus->forecolor, focusAlign, 0 );
 				Text_SetLetterSpacing( 0.0f );
 			}
 		}

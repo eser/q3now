@@ -622,20 +622,6 @@ void MSDF_ReregisterShaders( void )
 	}
 }
 
-/* ── point-to-pixel conversion ──────────────────────────────────────── */
-/*
- * Convert point size to screen pixels.
- *
- * Point sizes come from the parser shim (textscale * 48) or from native
- * .wmenu files (direct point values like 12, 14, 22).
- *
- * Coordinates are now in real screen pixels directly.
- */
-static float MSDF_PointToPixels( float pointSize )
-{
-	return pointSize;
-}
-
 /* ── character drawing ──────────────────────────────────────────────── */
 
 void MSDF_DrawChar( msdfFont_t *font, float x, float y,
@@ -661,7 +647,7 @@ void MSDF_DrawChar( msdfFont_t *font, float x, float y,
 		return;
 	}
 
-	pixelSize = MSDF_PointToPixels( size );  /* 1 em = pixelSize virtual pixels */
+	pixelSize = size;  /* 1 em = pixelSize virtual pixels */
 
 	/*
 	 * UV coordinates: atlas bounds (pixels) -> normalised 0..1.
@@ -759,7 +745,7 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 	curColor[2] = color ? color[2] : 1.0f;
 	curColor[3] = color ? color[3] : 1.0f;
 
-	pixelSize = MSDF_PointToPixels( size );
+	pixelSize = size;
 	curX = x;
 	drawn = 0;
 
@@ -846,7 +832,7 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 		}
 	}
 
-	pixelSize = MSDF_PointToPixels( size );
+	pixelSize = size;
 	lineWidth = 0.0f;
 	maxWidth  = 0.0f;
 	counted   = 0;
@@ -917,6 +903,52 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 	}
 
 	return maxWidth;
+}
+
+/* ── clamped char count ─────────────────────────────────────────────── */
+
+int MSDF_ClampToWidth( msdfFont_t *font, float size,
+                       const char *str, float maxPixels,
+                       float letterSpacing, float *totalWidthOut )
+{
+	float       pixelSize = size;
+	float       curWidth  = 0.0f;
+	int         counted   = 0;
+	const char *p;
+
+	if ( totalWidthOut ) *totalWidthOut = 0.0f;
+
+	if ( !font || !font->loaded || !str || !str[0] || maxPixels <= 0.0f )
+		return 0;
+
+	for ( p = str; *p; ) {
+		float       advance;
+		int         skip;
+		msdfGlyph_t *g;
+
+		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
+			g       = MSDF_FindGlyph( font, Q_COLOR_ESCAPE );
+			advance = ( g ? g->advance : 0.5f ) * pixelSize + letterSpacing;
+			if ( curWidth + advance > maxPixels ) break;
+			curWidth += advance;
+			counted++;
+			p += 2;
+			continue;
+		}
+
+		skip = MSDF_HandleColorCode( p, NULL );
+		if ( skip > 0 ) { p += skip; continue; }
+
+		g       = MSDF_FindGlyph( font, (unsigned char)*p );
+		advance = ( g ? g->advance : 0.5f ) * pixelSize + letterSpacing;
+		if ( curWidth + advance > maxPixels ) break;
+		curWidth += advance;
+		counted++;
+		p++;
+	}
+
+	if ( totalWidthOut ) *totalWidthOut = curWidth;
+	return counted;
 }
 
 #endif /* FEAT_WIRED_UI */

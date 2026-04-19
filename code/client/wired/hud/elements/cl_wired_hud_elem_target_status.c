@@ -34,15 +34,10 @@ void CG_ModernHUDElementTargetStatusRoutine(void* context)
 	if (cg_drawCrosshair.integer == 0) return;
 	if (cg_drawCrosshairNames.integer == 0) return;
 	if (cg.renderingThirdPerson != 0) return;
-	if (0 > 1) return;
-
-	
 	if (cg.crosshairClientTime == 0) return;
-
 
 	if (!CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.crosshairClientTime))
 	{
-		cg.crosshairClientTime = 0;
 		return;
 	}
 

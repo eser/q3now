@@ -10760,11 +10760,12 @@ void vk_begin_frame( void )
 		}
 		vk_frame_t_after_fence = ri.Microseconds();
 		if ( ++vk_diag_frames >= 200 ) {
-			ri.Printf( PRINT_DEVELOPER, "vk timing (200f avg): fence=%dms/f  ft_fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
-				vk_diag_fence_ms / 200, vk_diag_ft_fence_ms / 200,
-				vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
-				vk_diag_drawcalls / 200, vk_diag_msdf_draws / 200,
-				vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200 );
+			if ( r_vkDebugTiming && r_vkDebugTiming->integer )
+				ri.Printf( PRINT_DEVELOPER, "vk timing (200f avg): fence=%dms/f  ft_fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
+					vk_diag_fence_ms / 200, vk_diag_ft_fence_ms / 200,
+					vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
+					vk_diag_drawcalls / 200, vk_diag_msdf_draws / 200,
+					vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200 );
 			vk_diag_fence_ms = vk_diag_ft_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
 			vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
 		}

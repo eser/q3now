@@ -46,7 +46,7 @@ int wired_numSortedTeamPlayers;
 int wired_sortedTeamPlayers[WIRED_HUD_MAX_TEAMOVERLAY];
 
 // ── ModernHUD global context (event state) ────────────────────────────
-// This holds chat/frag/obituary/powerup event state — pushed from cgame
+// This holds chat/frag/powerup event state — pushed from cgame
 // via separate events (not the per-frame state bridge).
 // For now, a static instance — events will be wired in a later step.
 
@@ -208,9 +208,5 @@ qboolean wired_IsSpectator( void ) {
 	return wiredHud->isSpectator;
 }
 
-qboolean wired_IsGameTypeFreeze( void ) {
-	// check g_freeze cvar — if set and team game, it's freeze tag
-	return qfalse;  // simplified — full check needs g_freeze cvar state
-}
 
 #endif // FEAT_WIRED_UI

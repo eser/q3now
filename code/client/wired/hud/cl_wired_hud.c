@@ -122,33 +122,6 @@ void WiredHud_ReceiveEvent( int type, const char *data ) {
 			ctx->awards.writeIndex++;
 			break;
 		}
-		case WIRED_EVENT_OBITUARY: {
-			// format: "attacker|target|mod|unfrozen"
-			int idx = ctx->obituaries.index % ModernHUD_MAX_OBITUARIES_LINES;
-			modernhudObituariesEntry_t *entry = &ctx->obituaries.line[idx];
-			int attacker, target, mod, unfrozen;
-
-			if ( sscanf( data, "%d|%d|%d|%d", &attacker, &target, &mod, &unfrozen ) != 4 ) break;
-
-			Com_Memset( entry, 0, sizeof( *entry ) );
-			entry->attacker = attacker;
-			entry->target   = target;
-			entry->mod      = mod;
-			entry->unfrozen = (qboolean)unfrozen;
-			entry->time     = wiredHud->time;
-
-			// fill team info from pushed client data
-			if ( attacker >= 0 && attacker < WIRED_HUD_MAX_CLIENTS ) {
-				entry->attackerTeam = wiredHud->clients[attacker].team;
-			}
-			if ( target >= 0 && target < WIRED_HUD_MAX_CLIENTS ) {
-				entry->targetTeam = wiredHud->clients[target].team;
-			}
-
-			entry->runtime.isInitialized = qfalse;
-			ctx->obituaries.index++;
-			break;
-		}
 		case WIRED_EVENT_TEMPACC: {
 			// format: "weapon|accuracy"
 			int wp;
