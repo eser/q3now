@@ -123,7 +123,7 @@ qboolean QGL_Init( const char *dllname )
 #else
 		Q_strncpyz( libName, dllname, sizeof( libName ) );
 #endif
-		Q_strcat( libName, sizeof( libName ), ".dll" );
+		{ qstring_t _lb_qs = QS_WrapExisting( libName, sizeof( libName ) ); QS_Append( &_lb_qs, ".dll" ); }
 		glw_state.OpenGLLib = Sys_LoadLibrary( libName );
 		if ( glw_state.OpenGLLib == NULL )
 		{

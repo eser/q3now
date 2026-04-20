@@ -78,6 +78,7 @@
 #define FEAT_WASM                         1   // WASM VM backend via WAMR
 #define FEAT_WIREDNET_OBSERVER            1   // HTTP observer: /status.json, JSON event ring, static web UI
 #define FEAT_WIREDNET_CONTROL             1   // MCP/JSON-RPC control channel over QUIC + HTTP POST /mcp
+#define FEAT_MEMSTATS                     1   // per-subsystem allocation accounting + meminfo commands
 
 // ── model formats ────────────────────────────────────────────────────
 #define FEAT_IQM                          1   // IQM (Inter-Quake Model) skeletal mesh format

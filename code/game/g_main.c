@@ -528,12 +528,11 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
     // q3now: print mod version and active feature flags
     {
-        char features[256];
-        features[0] = '\0';
-        if ( g_instagib.integer )    Q_strcat( features, sizeof(features), " instagib" );
-        if ( g_excessive.integer )   Q_strcat( features, sizeof(features), " excessive" );
-        if ( g_grapple.integer )     Q_strcat( features, sizeof(features), " grapple" );
-        G_Printf( "q3now | active:%s\n", features[0] ? features : " (none)" );
+        QS_LOCAL(features, 256);
+        if ( g_instagib.integer )    QS_Append( &features, " instagib" );
+        if ( g_excessive.integer )   QS_Append( &features, " excessive" );
+        if ( g_grapple.integer )     QS_Append( &features, " grapple" );
+        G_Printf( "q3now | active:%s\n", QS_Empty(&features) ? " (none)" : QS_CStr(&features) );
     }
 
 	// set some level globals
@@ -2014,19 +2013,17 @@ const char *G_PeekRotationMap( void ) {
 	int numMaps, i;
 	char *p;
 	const char *token;
+	ComParser parser = { 0 };
 
 	trap_Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
 	if ( !rotation[0] ) {
 		return NULL;
 	}
 
-	/* tokenize the space-separated map list, copying each token
-	   into a persistent buffer (COM_Parse uses a static buffer
-	   that gets overwritten on each call) */
 	numMaps = 0;
 	p = rotation;
 	while ( numMaps < 64 ) {
-		token = COM_Parse( (const char **)&p );
+		token = COM_Parse( &parser, (const char **)&p );
 		if ( !token[0] ) break;
 		Q_strncpyz( mapBuf[numMaps], token, MAX_QPATH );
 		numMaps++;

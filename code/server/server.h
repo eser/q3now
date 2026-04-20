@@ -431,6 +431,9 @@ void SV_PrintLocations_f( client_t *client );
 //
 void SV_Heartbeat_f( void );
 client_t *SV_GetPlayerByHandle( void );
+#if FEAT_MEMSTATS
+clientMemStats_t SV_GetClientMemStats( int clientNum );
+#endif
 
 //
 // sv_snapshot.c

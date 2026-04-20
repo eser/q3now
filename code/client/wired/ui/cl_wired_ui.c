@@ -1772,13 +1772,13 @@ void WiredUI_Shutdown( void ) {
 
 	// save menu stack to cvar so vid_restart can restore it
 	{
-		char stackBuf[512] = "";
+		QS_LOCAL( stackBuf, 512 );
 		int i;
 		for ( i = 0; i < wui_menuStackDepth; i++ ) {
-			if ( i > 0 ) Q_strcat( stackBuf, sizeof( stackBuf ), ";" );
-			Q_strcat( stackBuf, sizeof( stackBuf ), wui_menuStack[i] );
+			if ( i > 0 ) QS_AppendChar( &stackBuf, ';' );
+			QS_Append( &stackBuf, wui_menuStack[i] );
 		}
-		Cvar_Set( "wui_menuStackSaved", stackBuf );
+		Cvar_Set( "wui_menuStackSaved", QS_CStr( &stackBuf ) );
 		Cvar_Set( "wui_activeMenuSaved", va( "%d", wui_activeMenu ) );
 	}
 
@@ -2415,9 +2415,11 @@ void WiredUI_Refresh( int realtime ) {
 
 						if ( curPos > (int)strlen( cvarBuf ) ) curPos = strlen( cvarBuf );
 						Q_strncpyz( editBuf, cvarBuf, curPos + 1 );
-						if ( showCursor ) Q_strcat( editBuf, sizeof(editBuf), "_" );
-						else Q_strcat( editBuf, sizeof(editBuf), " " );
-						Q_strcat( editBuf, sizeof(editBuf), &cvarBuf[curPos] );
+						{
+							qstring_t eb_qs = QS_WrapExisting( editBuf, sizeof(editBuf) );
+							QS_AppendChar( &eb_qs, showCursor ? '_' : ' ' );
+							QS_Append( &eb_qs, &cvarBuf[curPos] );
+						}
 						valueText = editBuf;
 					} else {
 						valueText = cvarBuf;
@@ -3713,10 +3715,13 @@ static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const
 		if ( !handled ) {
 			char cmdBuf[1024];
 			Com_sprintf( cmdBuf, sizeof(cmdBuf), "%s", token );
-			for ( i = 0; i < numArgs; i++ ) {
-				Q_strcat( cmdBuf, sizeof(cmdBuf), va( " \"%s\"", args[i] ) );
+			{
+				qstring_t cmd_qs = QS_WrapExisting( cmdBuf, sizeof(cmdBuf) );
+				for ( i = 0; i < numArgs; i++ ) {
+					QS_Appendf( &cmd_qs, " \"%s\"", args[i] );
+				}
+				QS_AppendChar( &cmd_qs, '\n' );
 			}
-			Q_strcat( cmdBuf, sizeof(cmdBuf), "\n" );
 			Cbuf_ExecuteText( EXEC_APPEND, cmdBuf );
 		}
 	}

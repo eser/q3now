@@ -56,15 +56,12 @@ static struct mdfour *m;
 static void mdfour64(uint32_t *M)
 {
 	int j;
-	uint32_t AA, BB, CC, DD;
 	uint32_t X[16];
-	uint32_t A,B,C,D;
-
 	for (j=0;j<16;j++)
 		X[j] = M[j];
 
-	A = m->A; B = m->B; C = m->C; D = m->D;
-	AA = A; BB = B; CC = C; DD = D;
+	uint32_t A = m->A, B = m->B, C = m->C, D = m->D;
+	uint32_t AA = A, BB = B, CC = C, DD = D;
 
         ROUND1(A,B,C,D,  0,  3);  ROUND1(D,A,B,C,  1,  7);
 	ROUND1(C,D,A,B,  2, 11);  ROUND1(B,C,D,A,  3, 19);
@@ -103,9 +100,7 @@ static void mdfour64(uint32_t *M)
 
 static void copy64(uint32_t *M, const byte *in)
 {
-	int i;
-
-	for (i=0;i<16;i++)
+	for (int i=0;i<16;i++)
 		M[i] =
 			((uint32_t)in[i*4+3] << 24) |
 			((uint32_t)in[i*4+2] << 16) |
@@ -134,17 +129,16 @@ void mdfour_begin(struct mdfour *md)
 static void mdfour_tail(const byte *in, int n)
 {
 	byte buf[128];
-	uint32_t M[16];
-	uint32_t b;
 
 	m->totalN += n;
 
-	b = m->totalN * 8;
+	uint32_t b = m->totalN * 8;
 
 	memset(buf, 0, 128);
 	if (n) memcpy(buf, in, n);
 	buf[n] = 0x80;
 
+	uint32_t M[16];
 	if (n <= 55) {
 		copy4(buf+56, b);
 		copy64(M, buf);
@@ -160,12 +154,11 @@ static void mdfour_tail(const byte *in, int n)
 
 static void mdfour_update(struct mdfour *md, const byte *in, int n)
 {
-	uint32_t M[16];
-
 	m = md;
 
 	if (n == 0) mdfour_tail(in, n);
 
+	uint32_t M[16];
 	while (n >= 64) {
 		copy64(M, in);
 		mdfour64(M);
@@ -198,12 +191,10 @@ static void mdfour(byte *out, const byte *in, int n)
 
 unsigned Com_BlockChecksum (const void *buffer, int length)
 {
-	int				digest[4];
-	unsigned	val;
-
+	int digest[4];
 	mdfour( (byte *)digest, (byte *)buffer, length );
-	
-	val = digest[0] ^ digest[1] ^ digest[2] ^ digest[3];
+
+	unsigned val = digest[0] ^ digest[1] ^ digest[2] ^ digest[3];
 
 	return val;
 }

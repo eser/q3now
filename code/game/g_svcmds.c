@@ -136,10 +136,8 @@ static void UpdateIPBans (void)
 	byte	b[4] = {0};
 	byte	m[4] = {0};
 	int		i,j;
-	char	iplist_final[MAX_CVAR_VALUE_STRING] = {0};
-	char	ip[64] = {0};
-
-	*iplist_final = 0;
+	QS_LOCAL(iplist_final, MAX_CVAR_VALUE_STRING);
+	QS_LOCAL(ip, 64);
 	for (i = 0 ; i < numIPFilters ; i++)
 	{
 		if (ipFilters[i].compare == 0xffffffff)
@@ -147,18 +145,18 @@ static void UpdateIPBans (void)
 
 		*(unsigned *)b = ipFilters[i].compare;
 		*(unsigned *)m = ipFilters[i].mask;
-		*ip = 0;
+		QS_Clear(&ip);
 		for (j = 0 ; j < 4 ; j++)
 		{
 			if (m[j]!=255)
-				Q_strcat(ip, sizeof(ip), "*");
+				QS_Append(&ip, "*");
 			else
-				Q_strcat(ip, sizeof(ip), va("%i", b[j]));
-			Q_strcat(ip, sizeof(ip), (j<3) ? "." : " ");
-		}		
-		if (strlen(iplist_final)+strlen(ip) < MAX_CVAR_VALUE_STRING)
+				QS_Appendf(&ip, "%i", b[j]);
+			QS_Append(&ip, (j<3) ? "." : " ");
+		}
+		if (QS_Remaining(&iplist_final) >= QS_Len(&ip))
 		{
-			Q_strcat( iplist_final, sizeof(iplist_final), ip);
+			QS_Append(&iplist_final, QS_CStr(&ip));
 		}
 		else
 		{
@@ -167,7 +165,7 @@ static void UpdateIPBans (void)
 		}
 	}
 
-	trap_Cvar_Set( "g_banIPs", iplist_final );
+	trap_Cvar_Set( "g_banIPs", QS_CStr(&iplist_final) );
 }
 
 /*

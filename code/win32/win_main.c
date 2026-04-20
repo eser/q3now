@@ -399,7 +399,7 @@ static int Sys_ListExtFiles( const char *directory, const char *subdir, const ch
 		_findclose( findhandle );
 	}
 
-	Q_strcat( search, sizeof( search ), extension );
+	{ qstring_t _sr_qs = QS_WrapExisting( search, sizeof( search ) ); QS_Append( &_sr_qs, extension ); }
 
 	findhandle = _findfirst( search, &findinfo );
 	if ( findhandle == -1 ) {

@@ -255,9 +255,6 @@ Cvar_Validate
 static const char *Cvar_Validate( cvar_t *var, const char *value, qboolean warn )
 {
 	static char intbuf[ 32 ];
-	const char *limit;
-	float valuef;
-	int	  valuei;
 
 	if ( var->validator == CV_NONE )
 		return value;
@@ -265,7 +262,7 @@ static const char *Cvar_Validate( cvar_t *var, const char *value, qboolean warn 
 	if ( !value )
 		return value;
 
-	limit = NULL;
+	const char *limit = NULL;
 
 	if ( var->validator == CV_INTEGER || var->validator == CV_FLOAT ) {
 		if ( !Q_isanumber( value ) ) {
@@ -280,14 +277,14 @@ static const char *Cvar_Validate( cvar_t *var, const char *value, qboolean warn 
 					sprintf( intbuf, "%i", atoi( value ) );
 					value = intbuf; // new value
 				}
-				valuei = atoi( value );
+				int valuei = atoi( value );
 				if ( var->mins && valuei < atoi( var->mins ) ) {
 					limit = var->mins;
 				} else if ( var->maxs && valuei > atoi( var->maxs ) ) {
 					limit = var->maxs;
 				}
 			} else { // CV_FLOAT
-				valuef = Q_atof( value );
+				float valuef = Q_atof( value );
 				if ( var->mins && valuef < Q_atof( var->mins ) ) {
 					limit = var->mins;
 				} else if ( var->maxs && valuef > Q_atof( var->maxs ) ) {
@@ -542,13 +539,8 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 
 static void Cvar_QSortByName( cvar_t **a, int n )
 {
-	cvar_t *temp;
-	cvar_t *m;
-	int i, j;
-
-	i = 0;
-	j = n;
-	m = a[ n>>1 ];
+	cvar_t *m = a[ n>>1 ];
+	int i = 0, j = n;
 
 	do {
 		// sort in descending order
@@ -556,7 +548,7 @@ static void Cvar_QSortByName( cvar_t **a, int n )
 		while ( strcmp( a[j]->name, m->name ) < 0 ) j--;
 
 		if ( i <= j ) {
-			temp = a[i];
+			cvar_t *temp = a[i];
 			a[i] = a[j];
 			a[j] = temp;
 			i++;
@@ -571,11 +563,10 @@ static void Cvar_QSortByName( cvar_t **a, int n )
 
 static void Cvar_Sort( void )
 {
-	cvar_t *list[ MAX_CVARS ], *var;
-	int count;
-	int i;
+	cvar_t *list[ MAX_CVARS ];
+	int count = 0;
 
-	for ( count = 0, var = cvar_vars; var; var = var->next ) {
+	for ( cvar_t *var = cvar_vars; var; var = var->next ) {
 		if ( var->name ) {
 			list[ count++ ] = var;
 		} else {
@@ -592,8 +583,8 @@ static void Cvar_Sort( void )
 	cvar_vars = NULL;
 
 	// relink cvars
-	for ( i = 0; i < count; i++ ) {
-		var = list[ i ];
+	for ( int i = 0; i < count; i++ ) {
+		cvar_t *var = list[ i ];
 		// link the variable in
 		var->next = cvar_vars;
 		if ( cvar_vars )
@@ -1238,8 +1229,8 @@ static qboolean AllowEmptyCvar( funcType_t ftype )
 
 static void Cvar_Op( funcType_t ftype, int *ival, float *fval )
 {
-	int icap, imod;
-	float fcap, fmod;
+	int imod;
+	float fmod;
 
 	GetValue( 3, &imod, &fmod ); // index 3: value
 
@@ -1283,12 +1274,14 @@ static void Cvar_Op( funcType_t ftype, int *ival, float *fval )
 	}
 
 	if ( Cmd_Argc() > 4 ) { // low bound
+		int icap; float fcap;
 		if ( GetValue( 4, &icap, &fcap ) ) {
 			if ( *ival < icap ) *ival = icap;
 			if ( *fval < fcap ) *fval = fcap;
 		}
 	}
 	if ( Cmd_Argc() > 5 ) { // high bound
+		int icap; float fcap;
 		if ( GetValue( 5, &icap, &fcap ) ) {
 			if ( *ival > icap ) *ival = icap;
 			if ( *fval > fcap ) *fval = fcap;
@@ -1299,19 +1292,18 @@ static void Cvar_Op( funcType_t ftype, int *ival, float *fval )
 
 static void Cvar_Rand( int *ival, float *fval )
 {
-	int icap;
-	float fcap;
-
 	*ival = rand();
 	*fval = *ival;
 
 	if ( Cmd_Argc() > 3 ) { // base
+		int icap; float fcap;
 		if ( GetValue( 3, &icap, &fcap ) ) {
 			*ival += icap;
 			*fval = *ival;
 		}
 	}
 	if ( Cmd_Argc() > 4 ) { // modulus
+		int icap; float fcap;
 		if ( GetValue( 4, &icap, &fcap ) ) {
 			if ( icap ) {
 				*ival %= icap;
@@ -1323,13 +1315,6 @@ static void Cvar_Rand( int *ival, float *fval )
 
 
 static void Cvar_Func_f( void ) {
-
-	funcType_t	ftype;
-	const char	*cvar_name;
-	char		value[ 64 ];
-	cvar_t		*cvar;
-	int			ival;
-	float		fval;
 
 	if ( Cmd_Argc() < 3 ) {
 		Com_Printf( "usage: \n" \
@@ -1343,14 +1328,14 @@ static void Cvar_Func_f( void ) {
 
 	// \varfunc rand <cvar> [base] [modulus]
 
-	ftype = GetFuncType(); // index 1: function type
+	funcType_t ftype = GetFuncType(); // index 1: function type
 	if ( ftype == FT_BAD ) {
 		Com_Printf( "%s: unknown function %s\n", Cmd_Argv( 0 ), Cmd_Argv( 1 ) );
 		return;
 	}
 
-	cvar_name = Cmd_Argv( 2 ); // index 2: cvar name
-	cvar = Cvar_FindVar( cvar_name );
+	const char *cvar_name = Cmd_Argv( 2 ); // index 2: cvar name
+	cvar_t *cvar = Cvar_FindVar( cvar_name );
 	if ( !cvar ) {
 		if ( !AllowEmptyCvar( ftype ) )	{
 			Com_Printf( "Cvar '%s' does not exist.\n", cvar_name );
@@ -1361,6 +1346,8 @@ static void Cvar_Func_f( void ) {
 		return;
 	}
 
+	int ival;
+	float fval;
 	if ( cvar ) {
 		fval = cvar->value;
 		ival = cvar->integer;
@@ -1374,6 +1361,7 @@ static void Cvar_Func_f( void ) {
 	else
 		Cvar_Op( ftype, &ival, &fval ); // apply modification
 
+	char value[ 64 ];
 	if ( cvar && cvar->validator == CV_INTEGER ) {
 		sprintf( value, "%i", ival );
 	} else {
@@ -1401,16 +1389,12 @@ complete engine state.
 */
 void Cvar_WriteVariables( fileHandle_t f, qboolean writeAll )
 {
-	cvar_t	*var;
-	char	buffer[MAX_CMD_LINE];
-	const char	*value;
-
 	if ( cvar_sort ) {
 		cvar_sort = qfalse;
 		Cvar_Sort();
 	}
 
-	for (var = cvar_vars; var; var = var->next)
+	for (cvar_t *var = cvar_vars; var; var = var->next)
 	{
 		if ( !var->name || Q_stricmp( var->name, "cl_cdkey" ) == 0 )
 			continue;
@@ -1421,9 +1405,10 @@ void Cvar_WriteVariables( fileHandle_t f, qboolean writeAll )
 			continue;
 
 		if ( writeAll || (var->flags & CVAR_ARCHIVE) ) {
-			int len;
 			// write the latched value, even if it hasn't taken effect yet
-			value = var->latchedString ? var->latchedString : var->string;
+			const char *value = var->latchedString ? var->latchedString : var->string;
+			char buffer[MAX_CMD_LINE];
+			int len;
 			if ( strlen( var->name ) + strlen( value ) + 10 > sizeof( buffer ) ) {
 				Com_Printf( S_COLOR_YELLOW "WARNING: %svalue of variable \"%s\" too long to write to file\n",
 					value == var->latchedString ? "latched " : "", var->name );
@@ -1813,9 +1798,8 @@ static void Cvar_Trim_f( void )
 {
 	qboolean forced = qfalse;
 	qboolean verbose = qtrue;
-	int i;
 
-	for ( i = 1; i < Cmd_Argc(); i++ )
+	for ( int i = 1; i < Cmd_Argc(); i++ )
 	{
 		const char *s = Cmd_Argv( i );
 		if ( *s == '-' )
@@ -1863,11 +1847,6 @@ const char *Cvar_InfoString( int bit, qboolean *truncated )
 	static char	info[ MAX_INFO_STRING ];
 	const cvar_t *user_vars[ MAX_CVARS ];
 	const cvar_t *vm_vars[ MAX_CVARS ];
-	const cvar_t *var;
-	int user_count;
-	int vm_count;
-	int i;
-	qboolean allSet;
 
 	// sort to get more predictable output
 	if ( cvar_sort )
@@ -1877,11 +1856,11 @@ const char *Cvar_InfoString( int bit, qboolean *truncated )
 	}
 
 	info[0] = '\0';
-	user_count = 0;
-	vm_count = 0;
-	allSet = qtrue; // this will be qfalse on overflow
+	int user_count = 0;
+	int vm_count = 0;
+	qboolean allSet = qtrue; // this will be qfalse on overflow
 
-	for ( var = cvar_vars; var; var = var->next )
+	for ( const cvar_t *var = cvar_vars; var; var = var->next )
 	{
 		if ( var->name && ( var->flags & bit ) )
 		{
@@ -1901,16 +1880,16 @@ const char *Cvar_InfoString( int bit, qboolean *truncated )
 	}
 
 	// add vm-created cvars
-	for ( i = 0; i < vm_count; i++ )
+	for ( int i = 0; i < vm_count; i++ )
 	{
-		var = vm_vars[ i ];
+		const cvar_t *var = vm_vars[ i ];
 		allSet &= Info_SetValueForKey( info, var->name, var->string );
 	}
 
 	// add user-created cvars
-	for ( i = 0; i < user_count; i++ )
+	for ( int i = 0; i < user_count; i++ )
 	{
-		var = user_vars[ i ];
+		const cvar_t *var = user_vars[ i ];
 		allSet &= Info_SetValueForKey( info, var->name, var->string );
 	}
 
@@ -1933,13 +1912,11 @@ Cvar_InfoString_Big
 const char *Cvar_InfoString_Big( int bit, qboolean *truncated )
 {
 	static char	info[BIG_INFO_STRING];
-	const cvar_t *var;
-	qboolean allSet;
 
 	info[0] = '\0';
-	allSet = qtrue;
+	qboolean allSet = qtrue;
 
-	for ( var = cvar_vars; var; var = var->next )
+	for ( const cvar_t *var = cvar_vars; var; var = var->next )
 	{
 		if ( var->name && (var->flags & bit) )
 			allSet &= Info_SetValueForKey_s( info, sizeof( info ), var->name, var->string );

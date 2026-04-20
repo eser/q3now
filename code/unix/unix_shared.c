@@ -398,7 +398,7 @@ const char *Sys_DefaultHomePath( void )
 	if ( (p = getenv("HOME")) != NULL ) 
 	{
 		Q_strncpyz( homePath, p, sizeof( homePath ) );
-		Q_strcat( homePath, sizeof( homePath ), "/q3now" CHANNEL_SUFFIX );
+		{ qstring_t _hp_qs = QS_WrapExisting( homePath, sizeof( homePath ) ); QS_Append( &_hp_qs, "/q3now" CHANNEL_SUFFIX ); }
 		if ( mkdir( homePath, 0750 ) ) 
 		{
 			if ( errno != EEXIST ) 

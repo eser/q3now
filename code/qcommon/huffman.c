@@ -72,18 +72,16 @@ static void add_bit (char bit, byte *fout) {
 
 /* Receive one bit from the input file (buffered) */
 static int get_bit (byte *fin) {
-	int t;
-	t = (fin[(bloc>>3)] >> (bloc&7)) & 0x1;
+	int t = (fin[(bloc>>3)] >> (bloc&7)) & 0x1;
 	bloc++;
 	return t;
 }
 
 static node_t **get_ppnode(huff_t* huff) {
-	node_t **tppnode;
 	if (!huff->freelist) {
 		return &(huff->nodePtrs[huff->blocPtrs++]);
 	} else {
-		tppnode = huff->freelist;
+		node_t **tppnode = huff->freelist;
 		huff->freelist = (node_t **)*tppnode;
 		return tppnode;
 	}
@@ -159,14 +157,12 @@ static void swaplist(node_t *node1, node_t *node2) {
 
 /* Do the increments */
 static void increment(huff_t* huff, node_t *node) {
-	node_t *lnode;
-
 	if (!node) {
 		return;
 	}
 
 	if (node->next != NULL && node->next->weight == node->weight) {
-	    lnode = *node->head;
+	    node_t *lnode = *node->head;
 		if (lnode != node->parent) {
 			swap(huff, lnode, node);
 		}
@@ -197,10 +193,9 @@ static void increment(huff_t* huff, node_t *node) {
 }
 
 static void Huff_addRef(huff_t* huff, byte ch) {
-	node_t *tnode, *tnode2;
 	if (huff->loc[ch] == NULL) { /* if this is the first transmission of this node */
-		tnode = &(huff->nodeList[huff->blocNode++]);
-		tnode2 = &(huff->nodeList[huff->blocNode++]);
+		node_t *tnode = &(huff->nodeList[huff->blocNode++]);
+		node_t *tnode2 = &(huff->nodeList[huff->blocNode++]);
 
 		tnode2->symbol = INTERNAL_NODE;
 		tnode2->weight = 1;
@@ -297,11 +292,10 @@ static void send(node_t *node, node_t *child, byte *fout) {
 
 /* Send a symbol */
 static void Huff_transmit( huff_t *huff, int ch, byte *fout ) {
-	int i;
-	if (huff->loc[ch] == NULL) { 
+	if (huff->loc[ch] == NULL) {
 		/* node_t hasn't been transmitted, send a NYT, then the symbol */
 		Huff_transmit(huff, NYT, fout);
-		for (i = 7; i >= 0; i--) {
+		for (int i = 7; i >= 0; i--) {
 			add_bit((char)((ch >> i) & 0x1), fout);
 		}
 	} else {
@@ -310,38 +304,36 @@ static void Huff_transmit( huff_t *huff, int ch, byte *fout ) {
 }
 
 void Huff_Decompress(msg_t *mbuf, int offset) {
-	int			ch, cch, i, j, size;
 	byte		seq[MAX_INFO_STRING*2];
-	byte*		buffer;
 	huff_t		huff;
 
-	size = mbuf->cursize - offset;
-	buffer = mbuf->data + offset;
+	int size = mbuf->cursize - offset;
+	byte *buffer = mbuf->data + offset;
 
 	if ( size < 2 ) {
 		return;
 	}
 
 	memset(&huff, 0, sizeof(huff_t));
-	// Initialize the tree & list with the NYT node 
+	// Initialize the tree & list with the NYT node
 	huff.tree = huff.lhead = huff.ltail = huff.loc[NYT] = &(huff.nodeList[huff.blocNode++]);
 	huff.tree->symbol = NYT;
 	huff.tree->weight = 0;
 	huff.lhead->next = huff.lhead->prev = NULL;
 	huff.tree->parent = huff.tree->left = huff.tree->right = NULL;
 
-	cch = buffer[0]*256 + buffer[1];
+	int cch = buffer[0]*256 + buffer[1];
 	// don't overflow with bad messages
 	if ( cch > mbuf->maxsize - offset ) {
 		cch = mbuf->maxsize - offset;
 	}
-	if ( cch > sizeof( seq ) ) {
-		cch = sizeof( seq );
+	if ( cch > (int)sizeof( seq ) ) {
+		cch = (int)sizeof( seq );
 	}
 	bloc = 16;
 
-	for ( j = 0; j < cch; j++ ) {
-		ch = 0;
+	for ( int j = 0; j < cch; j++ ) {
+		int ch = 0;
 		// don't overflow reading from the messages
 		// FIXME: would it be better to have an overflow check in get_bit ?
 		if ( (bloc >> 3) > size ) {
@@ -351,7 +343,7 @@ void Huff_Decompress(msg_t *mbuf, int offset) {
 		Huff_Receive(huff.tree, &ch, buffer);				/* Get a character */
 		if ( ch == NYT ) {								/* We got a NYT, get the symbol associated with it */
 			ch = 0;
-			for ( i = 0; i < 8; i++ ) {
+			for ( int i = 0; i < 8; i++ ) {
 				ch = (ch<<1) + get_bit(buffer);
 			}
 		}
@@ -366,14 +358,12 @@ void Huff_Decompress(msg_t *mbuf, int offset) {
 
 
 void Huff_Compress(msg_t *mbuf, int offset) {
-	int			i, ch, size;
 	// worst compression ratio is ~1.2x (rounded up to 2x) plus 2 plus 256 of possible NYT's
 	byte		seq[MAX_INFO_STRING*4 + 2 + 256];
-	byte*		buffer;
 	huff_t		huff;
 
-	size = mbuf->cursize - offset;
-	buffer = mbuf->data + offset;
+	int size = mbuf->cursize - offset;
+	byte *buffer = mbuf->data + offset;
 
 	if ( size <= 0 ) {
 		return;
@@ -395,8 +385,8 @@ void Huff_Compress(msg_t *mbuf, int offset) {
 
 	bloc = 16;
 
-	for (i=0; i<size; i++ ) {
-		ch = buffer[i];
+	for (int i=0; i<size; i++ ) {
+		int ch = buffer[i];
 		Huff_transmit(&huff, ch, seq);						/* Transmit symbol */
 		Huff_addRef(&huff, (byte)ch);								/* Do update */
 	}

@@ -95,9 +95,8 @@ static int   s_jsonCommaStack[ 16 ];
 
 static void JSON_Indent( void )
 {
-	int i;
 	if ( !s_jsonFile ) return;
-	for ( i = 0; i < s_jsonIndent; i++ ) {
+	for ( int i = 0; i < s_jsonIndent; i++ ) {
 		fputs( "\t", s_jsonFile );
 	}
 }
@@ -117,11 +116,10 @@ static void JSON_Comma( void )
 
 static void JSON_WriteEscapedString( const char *s )
 {
-	const char *p;
 	if ( !s_jsonFile ) return;
 	fputc( '"', s_jsonFile );
 	if ( s ) {
-		for ( p = s; *p; p++ ) {
+		for ( const char *p = s; *p; p++ ) {
 			unsigned char c = (unsigned char)*p;
 			switch ( c ) {
 				case '"':  fputs( "\\\"", s_jsonFile ); break;
@@ -146,10 +144,9 @@ static void JSON_WriteEscapedString( const char *s )
 
 static void JSON_Begin( FILE *f )
 {
-	int i;
 	s_jsonFile = f;
 	s_jsonIndent = 0;
-	for ( i = 0; i < (int)( sizeof( s_jsonCommaStack ) / sizeof( s_jsonCommaStack[ 0 ] ) ); i++ ) {
+	for ( int i = 0; i < (int)( sizeof( s_jsonCommaStack ) / sizeof( s_jsonCommaStack[ 0 ] ) ); i++ ) {
 		s_jsonCommaStack[ i ] = 0;
 	}
 	fputs( "{", s_jsonFile );
@@ -264,11 +261,8 @@ Crash report content
 */
 static void Crash_WriteVMs( void )
 {
-	int  i;
-	char callStack[ 4096 ];
-
 	JSON_BeginNamedArray( "vms" );
-	for ( i = 0; i < CRASH_VM_COUNT; i++ ) {
+	for ( int i = 0; i < CRASH_VM_COUNT; i++ ) {
 		vm_t *vm = s_crash.vm[ i ].vm;
 		unsigned int crc32 = s_crash.vm[ i ].crc32;
 
@@ -285,6 +279,7 @@ static void Crash_WriteVMs( void )
 		}
 
 		if ( vm != NULL ) {
+			char callStack[ 4096 ];
 			VM_GetCallStack( vm, callStack, (int)sizeof( callStack ) );
 			JSON_StringValue( "call_stack", callStack );
 			JSON_IntegerValue( "call_level", vm->callLevel );
@@ -379,31 +374,28 @@ the integrity of the engine state beyond the basics.
 */
 void Crash_WriteReport( const char *reason, const char *address, const char *module )
 {
-	char     filename[ MAX_OSPATH ];
-	char     fullpath[ MAX_OSPATH * 2 ];
-	FILE    *file;
-	qtime_t  tm;
-	const char *basepath;
-
 	// com_crashReport may be NULL if we crashed before Crash_Init ran.
 	if ( com_crashReport != NULL && com_crashReport->integer == 0 ) {
 		return;
 	}
 
+	qtime_t tm;
 	Com_RealTime( &tm );
+	char filename[ MAX_OSPATH ];
 	Com_sprintf( filename, sizeof( filename ),
 		"crash_%04d%02d%02d_%02d%02d%02d.json",
 		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec );
 
-	basepath = Cvar_VariableString( "fs_basepath" );
+	const char *basepath = Cvar_VariableString( "fs_basepath" );
+	char fullpath[ MAX_OSPATH * 2 ];
 	if ( basepath == NULL || basepath[ 0 ] == '\0' ) {
 		Q_strncpyz( fullpath, filename, sizeof( fullpath ) );
 	} else {
 		Com_sprintf( fullpath, sizeof( fullpath ), "%s%c%s", basepath, PATH_SEP, filename );
 	}
 
-	file = fopen( fullpath, "wb" );
+	FILE *file = fopen( fullpath, "wb" );
 	if ( file == NULL ) {
 		// Fallback: current working directory.
 		file = fopen( filename, "wb" );
@@ -454,9 +446,8 @@ buffers.
 
 static void ASS_Write( int fd, const char *s )
 {
-	size_t len;
 	if ( s == NULL || fd < 0 ) return;
-	len = strlen( s );
+	size_t len = strlen( s );
 	if ( write( fd, s, len ) < 0 ) {
 		/* ignored: we're already crashing */
 	}
@@ -482,10 +473,8 @@ static void ASS_WriteHex( int fd, unsigned long value )
 
 void Crash_PrintVMStackTracesASS( int fd )
 {
-	int i;
-
 	ASS_Write( fd, "VM state at signal:\r\n" );
-	for ( i = 0; i < CRASH_VM_COUNT; i++ ) {
+	for ( int i = 0; i < CRASH_VM_COUNT; i++ ) {
 		vm_t *vm = s_crash.vm[ i ].vm;
 		unsigned int crc32 = s_crash.vm[ i ].crc32;
 

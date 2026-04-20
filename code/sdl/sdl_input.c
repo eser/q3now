@@ -567,7 +567,7 @@ static void IN_InitJoystick( void )
 	cvar_t *cv;
 	int i = 0;
 	int total = 0;
-	char buf[16384] = "";
+	QS_LOCAL(buf, 16384);
 	SDL_JoystickID *joysticks = NULL;
 
 	if (gamepad)
@@ -611,11 +611,11 @@ static void IN_InitJoystick( void )
 	// Print list and build cvar to allow ui to select joystick.
 	for (i = 0; i < total; i++)
 	{
-		Q_strcat(buf, sizeof(buf), SDL_GetJoystickNameForID(joysticks[i]));
-		Q_strcat(buf, sizeof(buf), "\n");
+		QS_Append(&buf, SDL_GetJoystickNameForID(joysticks[i]));
+		QS_AppendChar(&buf, '\n');
 	}
 
-	cv = Cvar_Get( "in_availableJoysticks", buf, CVAR_ROM );
+	cv = Cvar_Get( "in_availableJoysticks", QS_CStr(&buf), CVAR_ROM );
 	Cvar_SetDescription( cv, "List of available joysticks." );
 
 	if( !in_joystick->integer ) {

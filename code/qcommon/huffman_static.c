@@ -177,14 +177,12 @@ void HuffmanPutBit( byte* fout, int32_t bitIndex, int bit )
 
 int HuffmanPutSymbol( byte* fout, uint32_t offset, int symbol )
 {
-	int32_t bits;
-	uint32_t i;
 	const uint16_t result = HuffmanEncoderTable[ symbol ];
 	const uint16_t bitCount = result & 15;
 	const uint16_t code = (result >> 4) & 0x7FF;
 
-	bits = (int32_t)code;
-	for( i = 0; i < bitCount; ++i )
+	int32_t bits = (int32_t)code;
+	for( uint32_t i = 0; i < bitCount; ++i )
 	{
 		HuffmanPutBit( fout, offset + i, bits & 1 );
 		bits >>= 1;

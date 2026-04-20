@@ -1105,15 +1105,15 @@ void CG_RegisterWeapon( int weaponNum ) {
 	}
 
 	COM_StripExtension( item->world_model[0], path, sizeof(path) );
-	Q_strcat( path, sizeof(path), "_flash.md3" );
+	{ qstring_t _p_qs = QS_WrapExisting(path, sizeof(path)); QS_Append(&_p_qs, "_flash.md3"); }
 	weaponInfo->flashModel = trap_R_RegisterModel( path );
 
 	COM_StripExtension( item->world_model[0], path, sizeof(path) );
-	Q_strcat( path, sizeof(path), "_barrel.md3" );
+	{ qstring_t _p_qs = QS_WrapExisting(path, sizeof(path)); QS_Append(&_p_qs, "_barrel.md3"); }
 	weaponInfo->barrelModel = trap_R_RegisterModel( path );
 
 	COM_StripExtension( item->world_model[0], path, sizeof(path) );
-	Q_strcat( path, sizeof(path), "_hand.md3" );
+	{ qstring_t _p_qs = QS_WrapExisting(path, sizeof(path)); QS_Append(&_p_qs, "_hand.md3"); }
 	weaponInfo->handsModel = trap_R_RegisterModel( path );
 
 	if ( !weaponInfo->handsModel ) {
@@ -2112,81 +2112,6 @@ WEAPON SELECTION
 
 ==============================================================================
 */
-
-/*
-===================
-CG_DrawWeaponSelect
-===================
-*/
-void CG_DrawWeaponSelect( void ) {
-	int		i;
-	int		bits;
-	int		count;
-	int		x, y, w;
-	char	*name;
-	float	*color;
-
-	// don't display if dead
-	if ( cg.predictedPlayerState.stats[STAT_HEALTH] <= 0 ) {
-		return;
-	}
-
-	color = CG_FadeColor( cg.weaponSelectTime, WEAPON_SELECT_TIME );
-	if ( !color ) {
-		return;
-	}
-	trap_R_SetColor( color );
-
-	// showing weapon select clears pickup item display, but not the blend blob
-	cg.itemPickupTime = 0;
-
-	// count the number of weapons owned
-	bits = cg.snap->ps.stats[ STAT_WEAPONS ];
-	count = 0;
-	for ( i = WP_NONE + 1 ; i < WP_NUM_WEAPONS ; i++ ) {
-		if ( bits & ( 1 << i ) ) {
-			count++;
-		}
-	}
-
-	x = 320 - count * 20;
-	y = 380;
-
-	for ( i = WP_NONE + 1 ; i < WP_NUM_WEAPONS ; i++ ) {
-		if ( !( bits & ( 1 << i ) ) ) {
-			continue;
-		}
-
-		CG_RegisterWeapon( i );
-
-		// draw weapon icon
-		CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, 32 * NORM_HSCALE, 32 * NORM_VSCALE, cg_weapons[i].weaponIcon );
-
-		// draw selection marker
-		if ( i == cg.weaponSelect ) {
-			CG_DrawPicNorm( (x-4) * NORM_HSCALE, (y-4) * NORM_VSCALE, 40 * NORM_HSCALE, 40 * NORM_VSCALE, cgs.media.selectShader );
-		}
-
-		// no ammo cross on top
-		if ( !cg.snap->ps.ammo[ i ] ) {
-			CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, 32 * NORM_HSCALE, 32 * NORM_VSCALE, cgs.media.noammoShader );
-		}
-
-		x += 40;
-	}
-
-	// draw the selected name
-	if ( cg_weapons[ cg.weaponSelect ].item ) {
-		name = cg_weapons[ cg.weaponSelect ].item->pickup_name;
-		if ( name ) {
-			w = CG_DrawStrlen( name ) * BIGCHAR_WIDTH;
-			x = ( 640 - w ) / 2;
-			trap_R_DrawTextNorm( name, (float)x * NORM_HSCALE, (float)( y - 22 ) * NORM_VSCALE, FONT_DISPLAY, 16.0f * NORM_VSCALE, color, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
-		}
-	}
-
-	trap_R_SetColor( NULL );
-}
 
 /*
 ===============

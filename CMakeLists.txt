@@ -402,6 +402,7 @@ ENDFOREACH()
 IF(USE_RENDERER_DLOPEN)
 	SET(AUX_SRCS
 		code/qcommon/q_shared.c
+		code/qcommon/q_string.c
 		code/qcommon/puff.c
 		code/qcommon/q_math.c
 	)

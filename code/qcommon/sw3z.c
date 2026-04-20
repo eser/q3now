@@ -32,10 +32,9 @@ static uint32_t sw3z_crc32c_table[256];
 static qboolean sw3z_crc32c_init = qfalse;
 
 static void SW3Z_InitCRC32C( void ) {
-	int i, j;
-	for ( i = 0; i < 256; i++ ) {
+	for ( int i = 0; i < 256; i++ ) {
 		uint32_t crc = (uint32_t)i;
-		for ( j = 0; j < 8; j++ ) {
+		for ( int j = 0; j < 8; j++ ) {
 			if ( crc & 1 )
 				crc = (crc >> 1) ^ 0x82F63B78U;
 			else
@@ -49,12 +48,11 @@ static void SW3Z_InitCRC32C( void ) {
 uint32_t SW3Z_CRC32C( const void *data, size_t len ) {
 	const byte *p = (const byte *)data;
 	uint32_t crc = 0xFFFFFFFFU;
-	size_t i;
 
 	if ( !sw3z_crc32c_init )
 		SW3Z_InitCRC32C();
 
-	for ( i = 0; i < len; i++ )
+	for ( size_t i = 0; i < len; i++ )
 		crc = sw3z_crc32c_table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
 
 	return crc ^ 0xFFFFFFFFU;
@@ -91,27 +89,7 @@ uint64_t SW3Z_FNV1a64( const char *path ) {
  * (same pattern as FS_LoadZipFile in files.c).
  */
 pack_t *SW3Z_LoadArchive( const char *filename ) {
-	FILE			*f;
-	byte			headerBuf[SW3Z_HEADER_SIZE];
-	sw3zHeader_t	header;
-	unsigned int	indexSize;
-	long			fileSize;
-	unsigned long	dataOffset;
-	int				hashSize;
-	int				i;
-	long			allocSize;
-	byte			*mem;
-	pack_t			*pack;
-	sw3zEntry_t		*entries;
-	char			*stringTable;
-	fileInPack_t	**hashTable;
-	fileInPack_t	*buildBuffer;
-	char			*nameBuffer;
-	unsigned long	hash;
-	int				nameLen;
-	int				numValidFiles;
-
-	f = fopen( filename, "rb" );
+	FILE *f = fopen( filename, "rb" );
 	if ( !f ) {
 		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: cannot open '%s'\n", filename );
 		return NULL;
@@ -119,7 +97,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 
 	/* get file size for validation */
 	fseek( f, 0, SEEK_END );
-	fileSize = ftell( f );
+	long fileSize = ftell( f );
 	fseek( f, 0, SEEK_SET );
 
 	if ( fileSize < SW3Z_HEADER_SIZE ) {
@@ -130,6 +108,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	}
 
 	/* ── read and validate header ── */
+	byte headerBuf[SW3Z_HEADER_SIZE];
 	if ( fread( headerBuf, 1, SW3Z_HEADER_SIZE, f ) != SW3Z_HEADER_SIZE ) {
 		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: failed to read header from '%s'\n", filename );
 		fclose( f );
@@ -137,6 +116,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	}
 
 	/* parse header fields with endian conversion */
+	sw3zHeader_t header;
 	header.magic          = LittleLong( *(unsigned int *)( headerBuf + 0 ) );
 	header.version        = LittleShort( *(unsigned short *)( headerBuf + 4 ) );
 	header.flags          = LittleShort( *(unsigned short *)( headerBuf + 6 ) );
@@ -165,10 +145,10 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 		fclose( f );
 		return NULL;
 	}
-	dataOffset = (unsigned long)header.dataOffsetLo;
+	unsigned long dataOffset = (unsigned long)header.dataOffsetLo;
 
 	/* ── security: validate entryCount against file size ── */
-	indexSize = header.entryCount * SW3Z_ENTRY_SIZE;
+	unsigned int indexSize = header.entryCount * SW3Z_ENTRY_SIZE;
 	if ( header.entryCount > 0 &&
 		indexSize / SW3Z_ENTRY_SIZE != header.entryCount ) {
 		/* integer overflow */
@@ -184,7 +164,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	}
 
 	/* ── read index ── */
-	entries = NULL;
+	sw3zEntry_t *entries = NULL;
 	if ( header.entryCount > 0 ) {
 		entries = (sw3zEntry_t *)Z_Malloc( indexSize );
 		if ( fread( entries, 1, indexSize, f ) != indexSize ) {
@@ -196,7 +176,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	}
 
 	/* ── read string table ── */
-	stringTable = NULL;
+	char *stringTable = NULL;
 	if ( header.stringTableSize > 0 ) {
 		stringTable = (char *)Z_Malloc( header.stringTableSize );
 		if ( fread( stringTable, 1, header.stringTableSize, f ) != header.stringTableSize ) {
@@ -209,9 +189,9 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	}
 
 	/* ── validate all entries and compute total name buffer size ── */
-	numValidFiles = 0;
-	nameLen = 0;
-	for ( i = 0; i < (int)header.entryCount; i++ ) {
+	int numValidFiles = 0;
+	int nameLen = 0;
+	for ( int i = 0; i < (int)header.entryCount; i++ ) {
 		sw3zEntry_t *e = &entries[i];
 
 		/* endian convert entry fields */
@@ -243,29 +223,30 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	}
 
 	/* ── compute hash table size (power of 2, same logic as FS_LoadZipFile) ── */
+	int hashSize;
 	for ( hashSize = 1; hashSize < numValidFiles; hashSize <<= 1 )
 		;
 
 	/* ── allocate pack structure ── */
-	allocSize = sizeof( pack_t )
+	long allocSize = sizeof( pack_t )
 		+ hashSize * (long)sizeof( fileInPack_t * )
 		+ numValidFiles * (long)sizeof( fileInPack_t )
 		+ nameLen
 		+ (long)strlen( filename ) + 1;
 
-	mem = (byte *)Z_TagMalloc( (int)allocSize, TAG_SEARCH_PACK );
+	byte *mem = (byte *)Z_TagMalloc( (int)allocSize, TAG_SEARCH_PACK );
 	memset( mem, 0, (int)allocSize );
 
-	pack = (pack_t *)mem;
+	pack_t *pack = (pack_t *)mem;
 	mem += sizeof( pack_t );
 
-	hashTable = (fileInPack_t **)mem;
+	fileInPack_t **hashTable = (fileInPack_t **)mem;
 	mem += hashSize * sizeof( fileInPack_t * );
 
-	buildBuffer = (fileInPack_t *)mem;
+	fileInPack_t *buildBuffer = (fileInPack_t *)mem;
 	mem += numValidFiles * sizeof( fileInPack_t );
 
-	nameBuffer = (char *)mem;
+	char *nameBuffer = (char *)mem;
 	mem += nameLen;
 
 	pack->pakFilename = (char *)mem;
@@ -300,7 +281,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	/* ── build fileInPack_t hash table ── */
 	{
 		int fi = 0;
-		for ( i = 0; i < (int)header.entryCount; i++ ) {
+		for ( int i = 0; i < (int)header.entryCount; i++ ) {
 			sw3zEntry_t *e = &entries[i];
 
 			/* skip directory entries */
@@ -318,7 +299,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 			buildBuffer[fi].size = (unsigned long)e->uncompressedSize;
 
 			/* insert into hash table (chaining, same as FS_LoadZipFile) */
-			hash = Com_GenerateHashValue( buildBuffer[fi].name, (unsigned int)hashSize );
+			unsigned long hash = Com_GenerateHashValue( buildBuffer[fi].name, (unsigned int)hashSize );
 			buildBuffer[fi].next = hashTable[hash];
 			hashTable[hash] = &buildBuffer[fi];
 
@@ -338,7 +319,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	pack->headerLongs[0] = 0; /* placeholder — set by files.c */
 	{
 		int hi = 1;
-		for ( i = 0; i < (int)header.entryCount; i++ ) {
+		for ( int i = 0; i < (int)header.entryCount; i++ ) {
 			if ( entries[i].uncompressedSize == 0 && entries[i].compressedSize == 0 )
 				continue;
 			pack->headerLongs[hi++] = LittleLong( entries[i].crc32c );
@@ -385,11 +366,6 @@ void SW3Z_CloseArchive( pack_t *pack ) {
  *   fseek → fread compressed → [LZ4F_decompress | raw copy] → CRC32C verify
  */
 int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
-	sw3zEntry_t		*e;
-	unsigned long	seekPos;
-	byte			*compBuf;
-	uint32_t		crc;
-
 	if ( !pack || !PACK_FILE_HANDLE(pack) || !buf )
 		return -1;
 
@@ -400,7 +376,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 		return -1;
 	}
 
-	e = &pack->entries[entryIndex];
+	sw3zEntry_t *e = &pack->entries[entryIndex];
 
 	/* buffer size check */
 	if ( bufSize < (int)e->uncompressedSize ) {
@@ -421,7 +397,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 	}
 
 	/* entry data_offset is absolute from file start (per spec) */
-	seekPos = (unsigned long)e->dataOffsetLo;
+	unsigned long seekPos = (unsigned long)e->dataOffsetLo;
 	if ( fseek( PACK_FILE_HANDLE(pack), (long)seekPos, SEEK_SET ) != 0 ) {
 		Com_Printf( S_COLOR_RED "ERROR: SW3Z: seek failed in '%s'\n", pack->pakFilename );
 		return -1;
@@ -441,11 +417,10 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 		}
 	} else if ( e->compression == SW3Z_COMP_LZ4 ) {
 		/* ── LZ4 Frame Format ── */
-		LZ4F_dctx		*dctx = NULL;
-		LZ4F_errorCode_t err;
-		size_t			srcSize, dstSize, result;
+		LZ4F_dctx *dctx = NULL;
+		size_t dstSize;
 
-		compBuf = (byte *)Z_Malloc( e->compressedSize );
+		byte *compBuf = (byte *)Z_Malloc( e->compressedSize );
 		if ( fread( compBuf, 1, e->compressedSize, PACK_FILE_HANDLE(pack) ) != e->compressedSize ) {
 			Com_Printf( S_COLOR_RED "ERROR: SW3Z: fread compressed data failed in '%s'\n",
 				pack->pakFilename );
@@ -453,7 +428,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 			return -1;
 		}
 
-		err = LZ4F_createDecompressionContext( &dctx, LZ4F_VERSION );
+		LZ4F_errorCode_t err = LZ4F_createDecompressionContext( &dctx, LZ4F_VERSION );
 		if ( LZ4F_isError( err ) ) {
 			Com_Printf( S_COLOR_RED "ERROR: SW3Z: LZ4F_createDecompressionContext failed: %s\n",
 				LZ4F_getErrorName( err ) );
@@ -469,9 +444,9 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 			size_t      srcRemain = e->compressedSize;
 			size_t      dstRemain = e->uncompressedSize;
 
-			result = 1; /* non-zero to enter loop */
+			size_t result = 1; /* non-zero to enter loop */
 			while ( result != 0 && dstRemain > 0 ) {
-				srcSize = srcRemain;
+				size_t srcSize = srcRemain;
 				dstSize = dstRemain;
 				result = LZ4F_decompress( dctx, dstPtr, &dstSize, srcPtr, &srcSize, NULL );
 				if ( LZ4F_isError( result ) ) {
@@ -509,7 +484,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 	}
 
 	/* ── CRC32C verification ── */
-	crc = SW3Z_CRC32C( buf, e->uncompressedSize );
+	uint32_t crc = SW3Z_CRC32C( buf, e->uncompressedSize );
 	if ( crc != e->crc32c ) {
 		Com_Printf( S_COLOR_RED "ERROR: SW3Z: CRC32C mismatch (got 0x%08X, expected 0x%08X) in '%s'\n",
 			crc, e->crc32c, pack->pakFilename );

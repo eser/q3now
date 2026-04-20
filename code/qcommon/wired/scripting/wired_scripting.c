@@ -164,7 +164,7 @@ static void WiredScript_Cmd_Exec( void ) {
 }
 
 static void WiredScript_Cmd_Eval( void ) {
-	char text[2048];
+	QS_LOCAL( text, 2048 );
 	int i;
 
 	if ( Cmd_Argc() < 2 ) {
@@ -172,13 +172,12 @@ static void WiredScript_Cmd_Eval( void ) {
 		return;
 	}
 
-	text[0] = '\0';
 	for ( i = 1; i < Cmd_Argc(); i++ ) {
-		if ( i > 1 ) Q_strcat( text, sizeof( text ), " " );
-		Q_strcat( text, sizeof( text ), Cmd_Argv( i ) );
+		if ( i > 1 ) QS_AppendChar( &text, ' ' );
+		QS_Append( &text, Cmd_Argv( i ) );
 	}
 
-	WiredScript_TryEval( text );
+	WiredScript_TryEval( QS_CStr( &text ) );
 }
 
 /* ---- Lifecycle -------------------------------------------------------- */

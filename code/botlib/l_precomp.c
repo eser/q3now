@@ -987,6 +987,7 @@ static int PC_Directive_include(source_t *source)
 	script_t *script;
 	token_t token;
 	char path[MAX_PATH];
+	qstring_t path_qs;
 #ifdef QUAKE
 	foundfile_t file;
 #endif //QUAKE
@@ -1011,13 +1012,15 @@ static int PC_Directive_include(source_t *source)
 		if (!script)
 		{
 			Q_strncpyz(path, source->includepath, sizeof(path));
-			Q_strcat(path, sizeof(path), token.string);
+			path_qs = QS_WrapExisting(path, sizeof(path));
+			QS_Append(&path_qs, token.string);
 			script = LoadScriptFile(path);
 		} //end if
 	} //end if
 	else if (token.type == TT_PUNCTUATION && *token.string == '<')
 	{
 		Q_strncpyz(path, source->includepath, sizeof(path));
+		path_qs = QS_WrapExisting(path, sizeof(path));
 		while(PC_ReadSourceToken(source, &token))
 		{
 			if (token.linescrossed > 0)
@@ -1026,13 +1029,13 @@ static int PC_Directive_include(source_t *source)
 				break;
 			} //end if
 			if (token.type == TT_PUNCTUATION && *token.string == '>') break;
-			Q_strcat(path, sizeof(path), token.string);
+			QS_Append(&path_qs, token.string);
 		} //end while
 		if (*token.string != '>')
 		{
 			SourceWarning(source, "#include missing trailing >");
 		} //end if
-		if (!strlen(path))
+		if (QS_Empty(&path_qs))
 		{
 			SourceError(source, "#include without file name between < >");
 			return qfalse;

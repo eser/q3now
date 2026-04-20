@@ -614,11 +614,14 @@ static void WN_HttpHandleRegister( wn_http_ctx_t *ctx, const char *req, int req_
 	Q_strncpyz( resp, "{\"client_id\":\"q3now-mcp-client\","
 		"\"client_id_issued_at\":0,"
 		"\"redirect_uris\":", sizeof(resp) );
-	Q_strcat( resp, sizeof(resp), redirect_uris );
-	Q_strcat( resp, sizeof(resp), ","
-		"\"grant_types\":[\"authorization_code\"],"
-		"\"token_endpoint_auth_method\":\"none\","
-		"\"response_types\":[\"code\"]}" );
+	{
+		qstring_t resp_qs = QS_WrapExisting( resp, sizeof(resp) );
+		QS_Append( &resp_qs, redirect_uris );
+		QS_Append( &resp_qs, ","
+			"\"grant_types\":[\"authorization_code\"],"
+			"\"token_endpoint_auth_method\":\"none\","
+			"\"response_types\":[\"code\"]}" );
+	}
 
 	WN_HttpCtxSendStr( ctx, 201, "Created", "application/json", resp );
 }

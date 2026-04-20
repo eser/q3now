@@ -880,8 +880,6 @@ typedef struct {
 
 	qhandle_t	sparkShader;
 
-	qhandle_t	numberShaders[11];
-
 	qhandle_t	shadowMarkShader;
 
 	qhandle_t	botSkillShaders[5];
@@ -1483,47 +1481,12 @@ void CG_AddBufferedSound( sfxHandle_t sfx);
 
 void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback );
 
-
-//
-// cg_drawtools.c
-//
-#ifndef HAVE_SCREEN_PLACEMENT
-#define HAVE_SCREEN_PLACEMENT
-typedef enum {
-	PLACE_STRETCH,
-	PLACE_CENTER,
-
-	// horizontal only
-	PLACE_LEFT,
-	PLACE_RIGHT,
-
-	// vertical only
-	PLACE_TOP,
-	PLACE_BOTTOM
-} screenPlacement_e;
-#endif
-
-void CG_SetScreenPlacement(screenPlacement_e hpos, screenPlacement_e vpos);
-void CG_PopScreenPlacement(void);
-screenPlacement_e CG_GetScreenHorizontalPlacement(void);
-screenPlacement_e CG_GetScreenVerticalPlacement(void);
-void CG_AdjustPlacement( float *x, float *y, float *w, float *h );
-
 // Normalized-coordinate draw helpers (0.0-1.0 screen space)
-void CG_DrawPicNorm( float nx, float ny, float nw, float nh, qhandle_t hShader );
 void CG_FillRectNorm( float nx, float ny, float nw, float nh, const float *color );
 
 // Virtual-to-normalized conversion scales
 #define NORM_HSCALE  0.001562500f
 #define NORM_VSCALE  0.002083333f
-
-int CG_DrawStrlen( const char *str );
-
-float *CG_ColorFromAlpha( float alpha );
-float *CG_FadeColor( int startMsec, int totalMsec );
-float *CG_TeamColor( int team );
-void CG_TileClear( void );
-void CG_GetColorForAmount( int health, int armor, vec4_t hcolor );
 
 //
 // cg_draw.c, cg_newDraw.c
@@ -1538,34 +1501,14 @@ extern  char teamChat2[256];
 void CG_AddLagometerFrameInfo( void );
 void CG_AddLagometerSnapshotInfo( snapshot_t *snap );
 void CG_CenterPrint( const char *str, int y, int charWidth );
-void CG_DrawHead( float x, float y, float w, float h, int clientNum, vec3_t headAngles );
 void CG_DrawActive( stereoFrame_t stereoView );
-void CG_DrawFlagModel( float x, float y, float w, float h, int team, qboolean force2D );
-void CG_DrawTeamBackground( int x, int y, int w, int h, float alpha, int team );
-void CG_OwnerDraw(float x, float y, float w, float h, float text_x, float text_y, int ownerDraw, int ownerDrawFlags, int align, float special, float scale, vec4_t color, qhandle_t shader, int textStyle);
-void CG_Text_Paint(float x, float y, float scale, vec4_t color, const char *text, float adjust, int limit, int style);
-int CG_Text_Width(const char *text, float scale, int limit);
-int CG_Text_Height(const char *text, float scale, int limit);
 void CG_SelectPrevPlayer( void );
 void CG_SelectNextPlayer( void );
-float CG_GetValue(int ownerDraw);
-qboolean CG_OwnerDrawVisible(int flags);
-void CG_RunMenuScript(char **args);
 #if FEAT_TA_UI
 void CG_ShowResponseHead( void );
 #endif
-void CG_SetPrintString(int type, const char *p);
-void CG_InitTeamChat( void );
-void CG_GetTeamColor(vec4_t *color);
-const char *CG_GetGameStatusText( void );
-const char *CG_GetKillerText( void );
-void CG_Draw3DModel(float x, float y, float w, float h, qhandle_t model, qhandle_t skin, vec3_t origin, vec3_t angles);
-void CG_Text_PaintChar(float x, float y, float width, float height, float scale, float s, float t, float s2, float t2, qhandle_t hShader);
-void CG_CheckOrderPending( void );
-const char *CG_GameTypeString( void );
 qboolean CG_YourTeamHasFlag( void );
 qboolean CG_OtherTeamHasFlag( void );
-qhandle_t CG_StatusHandle(int task);
 
 
 
@@ -1644,7 +1587,6 @@ void CG_ClearRailTrails( void );
 void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi );
 void CG_AddViewWeapon (playerState_t *ps);
 void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent, int team );
-void CG_DrawWeaponSelect( void );
 
 void CG_OutOfAmmoChange( void );	// should this be in pmove?
 
@@ -1666,6 +1608,7 @@ void	CG_ImpactMark( qhandle_t markShader,
 void	CG_InitLocalEntities( void );
 localEntity_t	*CG_AllocLocalEntity( void );
 void	CG_AddLocalEntities( void );
+void	CG_DrawPlumOverlays( void );
 
 //
 // cg_effects.c
@@ -1719,15 +1662,6 @@ void CG_Lightning_Discharge(vec3_t origin, int msec);
 //
 void CG_ProcessSnapshots( void );
 
-//
-// cg_scoreboard.c
-//
-qboolean CG_DrawOldScoreboard( void );
-qboolean CG_ModernDrawFFAScoreboard( void );
-qboolean CG_ModernDrawDuelScoreboard( void );
-qboolean CG_ModernDrawScoretable( void );
-qboolean CG_BEDrawTeamScoretable( void );
-void CG_DrawDuelScoreboard( void );
 
 //
 // cg_consolecmds.c
@@ -1738,6 +1672,7 @@ void CG_InitConsoleCommands( void );
 //
 // cg_players.c
 //
+qboolean CG_WorldToScreen( vec3_t point, float *x, float *y );
 void CG_Draw2DBotDirectives( void );
 
 //

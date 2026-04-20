@@ -89,12 +89,7 @@ static void MD5Copy( struct MD5Context *to, const struct MD5Context *from )
  */
 static void MD5Transform( uint32_t buf[4], uint32_t const in[16] )
 {
-	uint32_t a, b, c, d;
-
-	a = buf[0];
-	b = buf[1];
-	c = buf[2];
-	d = buf[3];
+	uint32_t a = buf[0], b = buf[1], c = buf[2], d = buf[3];
 
 	MD5STEP(F1, a, b, c, d, in[0] + 0xd76aa478, 7);
 	MD5STEP(F1, d, a, b, c, in[1] + 0xe8c7b756, 12);
@@ -177,11 +172,8 @@ static void MD5Transform( uint32_t buf[4], uint32_t const in[16] )
 static void MD5Update(struct MD5Context *ctx, unsigned char const *buf,
 	unsigned len)
 {
-	uint32_t t;
-
 	/* Update bitcount */
-
-	t = ctx->bits[0];
+	uint32_t t = ctx->bits[0];
 	if ((ctx->bits[0] = t + ((uint32_t) len << 3)) < t)
 		ctx->bits[1]++;		/* Carry from low to high */
 	ctx->bits[1] += len >> 29;
@@ -226,15 +218,12 @@ static void MD5Update(struct MD5Context *ctx, unsigned char const *buf,
  */
 static void MD5Final(struct MD5Context *ctx, unsigned char *digest)
 {
-	unsigned count;
-	unsigned char *p;
-
 	/* Compute number of bytes mod 64 */
-	count = (ctx->bits[0] >> 3) & 0x3F;
+	unsigned count = (ctx->bits[0] >> 3) & 0x3F;
 
 	/* Set the first char of padding to 0x80.  This is safe since there is
 		always at least one byte free */
-	p = ctx->in.b + count;
+	unsigned char *p = ctx->in.b + count;
 	*p++ = 0x80;
 
 	/* Bytes of padding needed to make 64 bytes */
@@ -272,18 +261,11 @@ static void MD5Final(struct MD5Context *ctx, unsigned char *digest)
 char *Com_MD5File( const char *fn, int length, const char *prefix, int prefix_len )
 {
 	static char final[MD5_DIGEST_SIZE*2+1];
-	unsigned char digest[MD5_DIGEST_SIZE];
+
+	qstring_t final_qs = QS_Wrap( final, sizeof( final ) );
+
 	fileHandle_t f;
-	MD5_CTX md5;
-	byte buffer[2048];
-	int i;
-	int filelen = 0;
-	int r;
-	int total = 0;
-
-	final[0] = '\0';
-
-	filelen = FS_SV_FOpenFileRead( fn, &f );
+	int filelen = FS_SV_FOpenFileRead( fn, &f );
 
 	if ( f == FS_INVALID_HANDLE ) {
 		return final;
@@ -298,13 +280,16 @@ char *Com_MD5File( const char *fn, int length, const char *prefix, int prefix_le
 		length = filelen;
 	}
 
+	MD5_CTX md5;
 	MD5Init( &md5 );
 
 	if ( prefix_len && *prefix )
 		MD5Update( &md5, (unsigned char *)prefix, prefix_len );
 
+	byte buffer[2048];
+	int total = 0;
 	for ( ;; ) {
-		r = FS_Read( buffer, sizeof( buffer ), f );
+		int r = FS_Read( buffer, sizeof( buffer ), f );
 		if ( r < 1 )
 			break;
 		if ( r + total > length )
@@ -315,11 +300,11 @@ char *Com_MD5File( const char *fn, int length, const char *prefix, int prefix_le
 			break;
 	}
 	FS_FCloseFile( f );
+	unsigned char digest[MD5_DIGEST_SIZE];
 	MD5Final( &md5, digest );
 
-	final[0] = '\0';
-	for ( i = 0; i < sizeof( digest ); i++ ) {
-		Q_strcat( final, sizeof( final ), va( "%02X", digest[i] & 0xFF ) );
+	for ( int i = 0; i < (int)sizeof( digest ); i++ ) {
+		QS_Appendf( &final_qs, "%02X", digest[i] & 0xFF );
 	}
 
 	return final;
@@ -329,10 +314,8 @@ char *Com_MD5File( const char *fn, int length, const char *prefix, int prefix_le
 char *Com_MD5Buf( const char *data, int length, const char *data2, int length2 )
 {
 	static char final_buf[MD5_DIGEST_SIZE*2+1];
-	unsigned char digest[MD5_DIGEST_SIZE];
-	unsigned i;
-	MD5_CTX md5;
 
+	MD5_CTX md5;
 	MD5Init( &md5 );
 
 	if ( data && length > 0 )
@@ -341,11 +324,12 @@ char *Com_MD5Buf( const char *data, int length, const char *data2, int length2 )
 	if (data2 && length2 > 0)
 		MD5Update( &md5 , (unsigned char *)data2, length2 );
 
+	unsigned char digest[MD5_DIGEST_SIZE];
 	MD5Final( &md5, digest );
 
-	final_buf[0] = '\0';
-	for ( i = 0; i < sizeof( digest ); i++ ) {
-		Q_strcat( final_buf, sizeof( final_buf ), va( "%02X", digest[i] & 0xFF ) );
+	qstring_t final_buf_qs = QS_Wrap( final_buf, sizeof( final_buf ) );
+	for ( unsigned i = 0; i < sizeof( digest ); i++ ) {
+		QS_Appendf( &final_buf_qs, "%02X", digest[i] & 0xFF );
 	}
 
 	return final_buf;

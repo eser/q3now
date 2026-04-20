@@ -1116,8 +1116,67 @@ typedef enum {
 	TAG_CLIENTS,
 	TAG_SMALL,
 	TAG_STATIC,
+	TAG_SOUND,
 	TAG_COUNT
 } memtag_t;
+
+#if FEAT_MEMSTATS
+typedef enum {
+	MEMTAG_GENERAL = 0,
+	MEMTAG_RENDERER,
+	MEMTAG_SOUND,
+	MEMTAG_NETWORK,
+	MEMTAG_BOTAI,
+	MEMTAG_GAME,
+	MEMTAG_CGAME,
+	MEMTAG_UI,
+	MEMTAG_FILESYSTEM,
+	MEMTAG_SCRIPTING,
+	MEMTAG_COLLISION,
+	MEMTAG_TEMP,
+	MEMTAG_COUNT
+} memTag_t;
+
+typedef struct {
+	int64_t currentBytes;
+	int64_t peakBytes;
+	int32_t currentCount;
+	int32_t totalCount;
+} memTagStats_t;
+
+typedef struct {
+	int totalBytes;
+	int permanentLowBytes;
+	int permanentHighBytes;
+	int tempBytes;
+	int freeBytes;
+	int peakUsedBytes;
+} hunkStats_t;
+
+typedef struct {
+	int totalBytes;
+	int usedBytes;
+	int freeBytes;
+	int freeBlockCount;
+	int largestFreeBlock;
+	int allocCount;
+} zoneStats_t;
+
+extern memTagStats_t memStats[MEMTAG_COUNT];
+extern const char *MemTag_Names[MEMTAG_COUNT];
+
+typedef struct {
+	int snapshotBytes;
+	int downloadBytes;
+	int totalBytes;
+} clientMemStats_t;
+
+void MemStats_Alloc( memTag_t tag, int size );
+void MemStats_Free( memTag_t tag, int size );
+void MemStats_Reset( void );
+hunkStats_t Hunk_GetStats( void );
+zoneStats_t Zone_GetStats( void );
+#endif // FEAT_MEMSTATS
 
 /*
 

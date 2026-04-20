@@ -627,7 +627,7 @@ static void CL_Record_f( void ) {
 	Com_Printf( "recording to %s.\n", name );
 
 	// start new record with temporary extension
-	Q_strcat( name, sizeof( name ), ".tmp" );
+	{ qstring_t _nm_qs = QS_WrapExisting( name, sizeof( name ) ); QS_Append( &_nm_qs, ".tmp" ); }
 
 	// open the demo file
 	clc.recordfile = FS_FOpenFileWrite( name );
@@ -4664,10 +4664,13 @@ static void CL_GlobalServers_f( void ) {
 #endif
 		Com_sprintf( command, sizeof( command ), "getservers %s", Cmd_Argv(2) );
 
-	for ( i = 3; i < count; i++ )
 	{
-		Q_strcat( command, sizeof( command ), " " );
-		Q_strcat( command, sizeof( command ), Cmd_Argv( i ) );
+		qstring_t cmd_qs = QS_WrapExisting( command, sizeof( command ) );
+		for ( i = 3; i < count; i++ )
+		{
+			QS_AppendChar( &cmd_qs, ' ' );
+			QS_Append( &cmd_qs, Cmd_Argv( i ) );
+		}
 	}
 
 	NET_OutOfBandPrint( NS_SERVER, &to, "%s", command );

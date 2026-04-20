@@ -765,7 +765,7 @@ static int Com_DL_CallbackProgress( void *data, double dltotal, double dlnow, do
 	if ( dl->func.easy_getinfo( dl->cURL, CURLINFO_SPEED_DOWNLOAD, &speed ) == CURLE_OK )
 #endif
 	{
-		Q_strcat( dl->progress, sizeof( dl->progress ), va( " %s/s", sizeToString( (int)speed ) ) );
+		{ qstring_t pg_qs = QS_WrapExisting( dl->progress, sizeof( dl->progress ) ); QS_Appendf( &pg_qs, " %s/s", sizeToString( (int)speed ) ); }
 	}
 
 	return 0;
@@ -942,9 +942,12 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 
 		if ( !Q_replace( "%1", escapedName, dl->URL, sizeof( dl->URL ) ) )
 		{
-			if ( dl->URL[strlen(dl->URL)] != '/' )
-				Q_strcat( dl->URL, sizeof( dl->URL ), "/" );
-			Q_strcat( dl->URL, sizeof( dl->URL ), escapedName );
+			{
+				qstring_t url_qs = QS_WrapExisting( dl->URL, sizeof( dl->URL ) );
+				if ( dl->URL[strlen(dl->URL)] != '/' )
+					QS_AppendChar( &url_qs, '/' );
+				QS_Append( &url_qs, escapedName );
+			}
 			dl->headerCheck = qfalse;
 		}
 		else

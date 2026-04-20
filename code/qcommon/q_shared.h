@@ -904,6 +904,51 @@ int         Q_UTF8_Encode( int codepoint, char *out );
 const char *Q_UTF8_Advance( const char *str, int n );
 
 //=============================================
+// qstring_t — bounded string with tracked length
+
+typedef struct {
+	char    *data;
+	int     len;
+	int     capacity;
+} qstring_t;
+
+// Declare a stack-local qstring_t. size must be a compile-time constant.
+#define QS_LOCAL( name, size ) \
+	char _##name##_buf[size]; \
+	qstring_t name = QS_Wrap( _##name##_buf, size )
+
+static ID_INLINE int         QS_Len( const qstring_t *qs )       { return qs->len; }
+static ID_INLINE const char *QS_CStr( const qstring_t *qs )      { return qs->data; }
+static ID_INLINE int         QS_Remaining( const qstring_t *qs ) { return qs->capacity - qs->len - 1; }
+static ID_INLINE qboolean    QS_Empty( const qstring_t *qs )     { return (qboolean)(qs->len == 0); }
+
+qstring_t QS_Wrap( char *buffer, int capacity );
+qstring_t QS_WrapFrom( char *buffer, int capacity, const char *initial );
+qstring_t QS_WrapExisting( char *buffer, int capacity );
+
+void      QS_Set( qstring_t *qs, const char *src );
+void      QS_Append( qstring_t *qs, const char *src );
+void      QS_AppendChar( qstring_t *qs, char c );
+void      QS_AppendN( qstring_t *qs, const char *src, int n );
+void      QS_Clear( qstring_t *qs );
+void      QS_Truncate( qstring_t *qs, int maxLen );
+
+#ifdef __GNUC__
+void      QS_Setf( qstring_t *qs, const char *fmt, ... ) __attribute__((format(printf, 2, 3)));
+void      QS_Appendf( qstring_t *qs, const char *fmt, ... ) __attribute__((format(printf, 2, 3)));
+#else
+void      QS_Setf( qstring_t *qs, const char *fmt, ... );
+void      QS_Appendf( qstring_t *qs, const char *fmt, ... );
+#endif
+
+qboolean  QS_Equal( const qstring_t *a, const qstring_t *b );
+qboolean  QS_EqualI( const qstring_t *a, const qstring_t *b );
+qboolean  QS_EqualStr( const qstring_t *qs, const char *str );
+qboolean  QS_EqualStrI( const qstring_t *qs, const char *str );
+
+void      QS_CopyTo( const qstring_t *qs, char *dest, int destsize );
+
+//=============================================
 
 // 64-bit integers for global rankings interface
 // implemented as a struct for qvm compatibility

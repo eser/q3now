@@ -1065,18 +1065,18 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 		//
 		else if ( !Q_stricmp( token, "tcMod" ) )
 		{
-			char buffer[1024] = "";
+			QS_LOCAL( buffer, 1024 );
 
 			while ( 1 )
 			{
 				token = COM_ParseExt( parser, text, qfalse );
 				if ( token[0] == 0 )
 					break;
-				Q_strcat( buffer, sizeof (buffer), token );
-				Q_strcat( buffer, sizeof (buffer), " " );
+				QS_Append( &buffer, token );
+				QS_AppendChar( &buffer, ' ' );
 			}
 
-			ParseTexMod( parser, buffer, stage );
+			ParseTexMod( parser, QS_CStr( &buffer ), stage );
 
 			continue;
 		}

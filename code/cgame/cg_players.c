@@ -2055,7 +2055,7 @@ Projects a 3D world point into virtual 640x480 screen coordinates.
 Returns qfalse if the point is behind the camera.
 ===============
 */
-static qboolean CG_WorldToScreen( vec3_t point, float *x, float *y ) {
+qboolean CG_WorldToScreen( vec3_t point, float *x, float *y ) {
 	vec3_t	trans;
 	float	px, py, z;
 

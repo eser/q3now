@@ -492,9 +492,7 @@ static int SV_Lua_Q3NowLoad( lua_State *L ) {
 static int SV_Lua_Q3NowPrint( lua_State *L ) {
 	int i;
 	int nargs = lua_gettop( L );
-	char message[1024];
-
-	message[0] = '\0';
+	QS_LOCAL(message, 1024);
 
 	for ( i = 1; i <= nargs; i++ ) {
 		const char *argText;
@@ -511,15 +509,15 @@ static int SV_Lua_Q3NowPrint( lua_State *L ) {
 			}
 		}
 		if ( i > 1 ) {
-			Q_strcat( message, sizeof( message ), "\t" );
+			QS_AppendChar( &message, '\t' );
 		}
-		Q_strcat( message, sizeof( message ), argText );
+		QS_Append( &message, argText );
 		if ( lua_gettop( L ) > nargs ) {
 			lua_pop( L, 1 );
 		}
 	}
 
-	Com_Printf( "BotLua: %s\n", message );
+	Com_Printf( "BotLua: %s\n", QS_CStr(&message) );
 	return 0;
 }
 

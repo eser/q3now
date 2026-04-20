@@ -1360,18 +1360,18 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 		//
 		else if ( !Q_stricmp( token, "tcMod" ) )
 		{
-			char buffer[1024] = "";
+			QS_LOCAL( buffer, 1024 );
 
 			while ( 1 )
 			{
 				token = COM_ParseExt( parser, text, qfalse );
 				if ( token[0] == 0 )
 					break;
-				Q_strcat( buffer, sizeof (buffer), token );
-				Q_strcat( buffer, sizeof (buffer), " " );
+				QS_Append( &buffer, token );
+				QS_AppendChar( &buffer, ' ' );
 			}
 
-			ParseTexMod( parser, buffer, stage );
+			ParseTexMod( parser, QS_CStr( &buffer ), stage );
 
 			continue;
 		}
@@ -2555,7 +2555,7 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 
 			// try a normalheight image first
 			COM_StripExtension(diffuseImg->imgName, normalName, MAX_QPATH);
-			Q_strcat(normalName, MAX_QPATH, "_nh");
+			{ qstring_t _nh_qs = QS_WrapExisting(normalName, MAX_QPATH); QS_Append(&_nh_qs, "_nh"); }
 
 			normalImg = R_FindImageFile(normalName, IMGTYPE_NORMALHEIGHT, normalFlags);
 
@@ -2600,7 +2600,7 @@ static void CollapseStagesToLightall(shaderStage_t *diffuse,
 			imgFlags_t specularFlags = (diffuseImg->flags & ~IMGFLAG_GENNORMALMAP) | IMGFLAG_NOLIGHTSCALE;
 
 			COM_StripExtension(diffuseImg->imgName, specularName, MAX_QPATH);
-			Q_strcat(specularName, MAX_QPATH, "_s");
+			{ qstring_t _s_qs = QS_WrapExisting(specularName, MAX_QPATH); QS_Append(&_s_qs, "_s"); }
 
 			specularImg = R_FindImageFile(specularName, IMGTYPE_COLORALPHA, specularFlags);
 

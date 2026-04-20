@@ -104,10 +104,6 @@ static void CG_ParseScores( void ) {
 
 		cg.scores[i].team = cgs.clientinfo[cg.scores[i].client].team;
 	}
-#if FEAT_TA_UI && FEAT_LEGACY_UI
-	CG_SetScoreSelection(NULL);
-#endif
-
 }
 
 /*

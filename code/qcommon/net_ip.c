@@ -396,17 +396,15 @@ Sys_StringToSockaddr
 */
 static qboolean Sys_StringToSockaddr( const char *s, sockaddr_t *sadr, int sadr_len, sa_family_t family, int type )
 {
-	struct addrinfo hint;
 	struct addrinfo *res = NULL;
-	int retval;
 
 	memset( sadr, 0x0, sadr_len );
-	memset( &hint, 0x0, sizeof( hint ) );
+	struct addrinfo hint = {0};
 
 	hint.ai_family = family;
 	hint.ai_socktype = type;
 
-	retval = getaddrinfo( s, NULL, &hint, &res );
+	int retval = getaddrinfo( s, NULL, &hint, &res );
 
 	if ( retval == 0 )
 	{
@@ -523,8 +521,7 @@ Compare without port, and up to the bit number given in netmask.
 */
 qboolean NET_CompareBaseAdrMask( const netadr_t *a, const netadr_t *b, unsigned int netmask )
 {
-	byte cmpmask, *addra, *addrb;
-	int curbyte;
+	byte *addra, *addrb;
 
 	if (a->type != b->type)
 		return qfalse;
@@ -556,7 +553,7 @@ qboolean NET_CompareBaseAdrMask( const netadr_t *a, const netadr_t *b, unsigned 
 		return qfalse;
 	}
 
-	curbyte = netmask >> 3;
+	int curbyte = netmask >> 3;
 
 	if(curbyte && memcmp(addra, addrb, curbyte))
 		return qfalse;
@@ -564,7 +561,7 @@ qboolean NET_CompareBaseAdrMask( const netadr_t *a, const netadr_t *b, unsigned 
 	netmask &= 0x07;
 	if(netmask)
 	{
-		cmpmask = (1 << netmask) - 1;
+		byte cmpmask = (1 << netmask) - 1;
 		cmpmask <<= 8 - netmask;
 
 		if((addra[curbyte] & cmpmask) == (addrb[curbyte] & cmpmask))
@@ -966,8 +963,7 @@ LAN clients will have their rate var ignored
 ==================
 */
 qboolean Sys_IsLANAddress( const netadr_t *adr ) {
-	int		index, run, addrsize;
-	qboolean differed;
+	int		addrsize;
 	const byte *compareadr, *comparemask, *compareip;
 
 	if( adr->type == NA_LOOPBACK ) {
@@ -1001,7 +997,7 @@ qboolean Sys_IsLANAddress( const netadr_t *adr ) {
 #endif
 
 	// Now compare against the networks this computer is member of.
-	for ( index = 0; index < numIP; index++ )
+	for ( int index = 0; index < numIP; index++ )
 	{
 		if ( localIP[index].type == adr->type ||
 		     (adr->type == NA_QUIC  && localIP[index].type == NA_IP)
@@ -1033,8 +1029,8 @@ qboolean Sys_IsLANAddress( const netadr_t *adr ) {
 			else
 				continue;
 
-			differed = qfalse;
-			for ( run = 0; run < addrsize; run++ )
+			qboolean differed = qfalse;
+			for ( int run = 0; run < addrsize; run++ )
 			{
 				if ((compareip[run] & comparemask[run]) != (compareadr[run] & comparemask[run]))
 				{
@@ -1058,10 +1054,9 @@ Sys_ShowIP
 ==================
 */
 void Sys_ShowIP( void ) {
-	int i;
 	char addrbuf[NET_ADDRSTRMAXLEN];
 
-	for(i = 0; i < numIP; i++)
+	for(int i = 0; i < numIP; i++)
 	{
 		Sys_SockaddrToString( addrbuf, sizeof(addrbuf), &localIP[i].addr );
 
@@ -1087,7 +1082,6 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 	SOCKET				newsocket;
 	struct sockaddr_in	address;
 	ioctlarg_t			_true = 1;
-	int					i = 1;
 
 	*err = 0;
 
@@ -1112,6 +1106,7 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 	}
 
 	// make it broadcast capable
+	int i = 1;
 	if( setsockopt( newsocket, SOL_SOCKET, SO_BROADCAST, (char *) &i, sizeof(i) ) == SOCKET_ERROR ) {
 		Com_Printf( "WARNING: NET_IPSocket: setsockopt SO_BROADCAST: %s\n", NET_ErrorString() );
 	}
@@ -1412,12 +1407,9 @@ static void NET_OpenSocks( int port ) {
 
 	// do username/password authentication if needed
 	if ( buf[1] == 2 ) {
-		int		ulen;
-		int		plen;
-
 		// build the request
-		ulen = strlen( net_socksUsername->string );
-		plen = strlen( net_socksPassword->string );
+		int ulen = strlen( net_socksUsername->string );
+		int plen = strlen( net_socksPassword->string );
 		if ( ulen > 255 ) {
 			ulen = 255;
 		}
@@ -1503,13 +1495,12 @@ NET_AddLocalAddress
 static void NET_AddLocalAddress( const char *ifname, const struct sockaddr *addr, const struct sockaddr *netmask )
 {
 	int addrlen;
-	sa_family_t family;
-	
+
 	// only add addresses that have all required info.
 	if (!addr || !netmask || !ifname)
 		return;
-	
-	family = addr->sa_family;
+
+	sa_family_t family = addr->sa_family;
 
 	if(numIP < MAX_IPS)
 	{
@@ -1634,16 +1625,11 @@ NET_OpenIP
 ====================
 */
 static void NET_OpenIP( void ) {
-	int		i;
 	int		err;
-	int		port;
-#if FEAT_IPV6
-	int		port6;
-#endif
 
-	port = net_port->integer;
+	int port = net_port->integer;
 #if FEAT_IPV6
-	port6 = net_port6->integer;
+	int port6 = net_port6->integer;
 #endif
 
 	NET_GetLocalAddress();
@@ -1654,7 +1640,7 @@ static void NET_OpenIP( void ) {
 #if FEAT_IPV6
 	if ( net_enabled->integer & NET_ENABLEV6 )
 	{
-		for( i = 0 ; i < 10 ; i++ )
+		for( int i = 0 ; i < 10 ; i++ )
 		{
 			ip6_socket = NET_IP6Socket(net_ip6->string, port6 + i, &boundto, &err);
 			if (ip6_socket != INVALID_SOCKET)
@@ -1675,7 +1661,7 @@ static void NET_OpenIP( void ) {
 
 	if(net_enabled->integer & NET_ENABLEV4)
 	{
-		for( i = 0 ; i < 10 ; i++ ) {
+		for( int i = 0 ; i < 10 ; i++ ) {
 			ip_socket = NET_IPSocket( net_ip->string, port + i, &err );
 			if (ip_socket != INVALID_SOCKET) {
 				Cvar_SetIntegerValue( "net_port", port + i );
@@ -1707,7 +1693,6 @@ NET_GetCvars
 ====================
 */
 static qboolean NET_GetCvars( void ) {
-	int modified;
 
 #if FEAT_IPV6
 	net_enabled = Cvar_Get( "net_enabled", "7", CVAR_LATCH | CVAR_ARCHIVE_ND | CVAR_NORESTART );
@@ -1725,7 +1710,7 @@ static qboolean NET_GetCvars( void ) {
 		);
 
 	Cvar_CheckRange( net_enabled, NULL, NULL, CV_INTEGER );
-	modified = net_enabled->modified;
+	int modified = net_enabled->modified;
 	net_enabled->modified = qfalse;
 
 	net_ip = Cvar_Get( "net_ip", "0.0.0.0", CVAR_LATCH );
@@ -1807,12 +1792,11 @@ NET_Config
 ====================
 */
 static void NET_Config( qboolean enableNetworking ) {
-	qboolean	modified;
 	qboolean	stop;
 	qboolean	start;
 
 	// get any latched changes to cvars
-	modified = NET_GetCvars();
+	qboolean modified = NET_GetCvars();
 
 	if( !net_enabled->integer ) {
 		enableNetworking = qfalse;
@@ -2019,7 +2003,6 @@ qboolean NET_Sleep( int timeout )
 {
 	struct timeval tv;
 	fd_set fdr;
-	int retval;
 	SOCKET highestfd = INVALID_SOCKET;
 
 	if ( timeout < 0 )
@@ -2062,7 +2045,7 @@ qboolean NET_Sleep( int timeout )
 	tv.tv_sec = timeout / 1000000;
 	tv.tv_usec = timeout - tv.tv_sec * 1000000;
 
-	retval = select( highestfd + 1, &fdr, NULL, NULL, &tv );
+	int retval = select( highestfd + 1, &fdr, NULL, NULL, &tv );
 
 	if ( retval > 0 ) {
 		NET_Event( &fdr );
@@ -2122,10 +2105,7 @@ static loopback_t	loopbacks[2]; /* NS_CLIENT, NS_SERVER */
 
 qboolean NET_GetLoopPacket( netsrc_t sock, netadr_t *net_from, msg_t *net_message )
 {
-	int		i;
-	loopback_t	*loop;
-
-	loop = &loopbacks[sock];
+	loopback_t *loop = &loopbacks[sock];
 
 	if ( loop->send - loop->get > MAX_LOOPBACK )
 		loop->get = loop->send - MAX_LOOPBACK;
@@ -2133,7 +2113,7 @@ qboolean NET_GetLoopPacket( netsrc_t sock, netadr_t *net_from, msg_t *net_messag
 	if ( loop->send - loop->get <= 0 )
 		return qfalse;
 
-	i = loop->get & (MAX_LOOPBACK-1);
+	int i = loop->get & (MAX_LOOPBACK-1);
 	loop->get++;
 
 	memcpy( net_message->data, loop->msgs[i].data, loop->msgs[i].datalen );
@@ -2145,12 +2125,9 @@ qboolean NET_GetLoopPacket( netsrc_t sock, netadr_t *net_from, msg_t *net_messag
 
 static void NET_SendLoopPacket( netsrc_t sock, int length, const void *data )
 {
-	int		i;
-	loopback_t	*loop;
+	loopback_t *loop = &loopbacks[sock ^ 1];
 
-	loop = &loopbacks[sock ^ 1];
-
-	i = loop->send & (MAX_LOOPBACK-1);
+	int i = loop->send & (MAX_LOOPBACK-1);
 	loop->send++;
 
 	memcpy( loop->msgs[i].data, data, length );
@@ -2205,13 +2182,12 @@ static packetQueue_t *PQ_Insert( packetQueue_t *head, packetQueue_t *item ) {
 static packetQueue_t *PQ_Process( packetQueue_t *head, const int time_diff ) {
 	packetQueue_t *item = head;
 	int do_break = 0;
-	int now;
 
 	do {
 		if ( head == NULL ) break;
 		if ( head->prev == item ) do_break = 1;
 
-		now = Sys_Milliseconds();
+		int now = Sys_Milliseconds();
 		if ( now - item->release >= time_diff ) {
 			packetQueue_t *next = item->next;
 #ifndef DEDICATED
@@ -2289,12 +2265,11 @@ void QDECL NET_OutOfBandPrint( netsrc_t sock, const netadr_t *adr,
 {
 	va_list	argptr;
 	char	string[MAX_PACKETLEN];
-	int		len;
 
 	string[0] = -1; string[1] = -1; string[2] = -1; string[3] = -1;
 
 	va_start( argptr, format );
-	len = vsnprintf( string + 4, sizeof(string) - 4, format, argptr ) + 4;
+	int len = vsnprintf( string + 4, sizeof(string) - 4, format, argptr ) + 4;
 	va_end( argptr );
 
 	NET_SendPacket( sock, len, string, adr );
@@ -2310,11 +2285,10 @@ void NET_OutOfBandCompress( netsrc_t sock, const netadr_t *adr,
                              const byte *data, int len )
 {
 	byte	string[MAX_INFO_STRING * 2];
-	int		i;
 	msg_t	mbuf;
 
 	string[0] = 0xff; string[1] = 0xff; string[2] = 0xff; string[3] = 0xff;
-	for ( i = 0; i < len; i++ )
+	for ( int i = 0; i < len; i++ )
 		string[i + 4] = data[i];
 
 	mbuf.data    = string;
