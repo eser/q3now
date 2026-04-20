@@ -33,31 +33,22 @@ botlib_export_t	*botlib_export;
 // these functions must be used instead of pointer arithmetic, because
 // the game allocates gentities with private information after the server shared part
 int	SV_NumForGentity( sharedEntity_t *ent ) {
-	int		num;
-
-	num = ( (byte *)ent - (byte *)sv.gentities ) / sv.gentitySize;
-
+	int num = ( (byte *)ent - (byte *)sv.gentities ) / sv.gentitySize;
 	return num;
 }
 
 
 sharedEntity_t *SV_GentityNum( int num ) {
-	sharedEntity_t *ent;
-
 	if ( num < 0 || num >= MAX_GENTITIES ) {
 		Com_Error( ERR_DROP, "%s: bad num %d", __func__, num );
 	}
-	ent = (sharedEntity_t *)((byte *)sv.gentities + sv.gentitySize*(num));
-
+	sharedEntity_t *ent = (sharedEntity_t *)((byte *)sv.gentities + sv.gentitySize*(num));
 	return ent;
 }
 
 
 playerState_t *SV_GameClientNum( int num ) {
-	playerState_t	*ps;
-
-	ps = (playerState_t *)((byte *)sv.gameClients + sv.gameClientSize*(num));
-
+	playerState_t *ps = (playerState_t *)((byte *)sv.gameClients + sv.gameClientSize*(num));
 	return ps;
 }
 
@@ -71,9 +62,7 @@ svEntity_t	*SV_SvEntityForGentity( sharedEntity_t *gEnt ) {
 
 
 sharedEntity_t *SV_GEntityForSvEntity( svEntity_t *svEnt ) {
-	int		num;
-
-	num = svEnt - sv.svEntities;
+	int num = svEnt - sv.svEntities;
 	return SV_GentityNum( num );
 }
 
@@ -120,9 +109,6 @@ sets mins and maxs for inline bmodels
 =================
 */
 static void SV_SetBrushModel( sharedEntity_t *ent, const char *name ) {
-	clipHandle_t	h;
-	vec3_t			mins, maxs;
-
 	if ( !name ) {
 		Com_Error( ERR_DROP, "SV_SetBrushModel: NULL" );
 	}
@@ -133,7 +119,8 @@ static void SV_SetBrushModel( sharedEntity_t *ent, const char *name ) {
 
 	ent->s.modelindex = atoi( name + 1 );
 
-	h = CM_InlineModel( ent->s.modelindex );
+	clipHandle_t h = CM_InlineModel( ent->s.modelindex );
+	vec3_t mins, maxs;
 	CM_ModelBounds( h, mins, maxs );
 	VectorCopy (mins, ent->r.mins);
 	VectorCopy (maxs, ent->r.maxs);
@@ -154,23 +141,18 @@ Also checks portalareas so that doors block sight
 */
 qboolean SV_inPVS( const vec3_t p1, const vec3_t p2 )
 {
-	int		leafnum;
-	int		cluster;
-	int		area1, area2;
-	byte	*mask;
-
-	leafnum = CM_PointLeafnum (p1);
-	cluster = CM_LeafCluster (leafnum);
+	int leafnum = CM_PointLeafnum (p1);
+	int cluster = CM_LeafCluster (leafnum);
 	if ( cluster < 0 )
 		return qfalse;
-	area1 = CM_LeafArea (leafnum);
-	mask = CM_ClusterPVS (cluster);
+	int area1 = CM_LeafArea (leafnum);
+	byte *mask = CM_ClusterPVS (cluster);
 
 	leafnum = CM_PointLeafnum (p2);
 	cluster = CM_LeafCluster (leafnum);
 	if ( cluster < 0 )
 		return qfalse;
-	area2 = CM_LeafArea (leafnum);
+	int area2 = CM_LeafArea (leafnum);
 	if ( mask && (!(mask[cluster>>3] & (1<<(cluster&7)) ) ) )
 		return qfalse;
 	if (!CM_AreasConnected (area1, area2))
@@ -188,15 +170,11 @@ Does NOT check portalareas
 */
 static qboolean SV_inPVSIgnorePortals( const vec3_t p1, const vec3_t p2 )
 {
-	int		leafnum;
-	int		cluster;
-	byte	*mask;
-
-	leafnum = CM_PointLeafnum (p1);
-	cluster = CM_LeafCluster (leafnum);
+	int leafnum = CM_PointLeafnum (p1);
+	int cluster = CM_LeafCluster (leafnum);
 	if ( cluster < 0 )
 		return qfalse;
-	mask = CM_ClusterPVS (cluster);
+	byte *mask = CM_ClusterPVS (cluster);
 
 	leafnum = CM_PointLeafnum (p2);
 	cluster = CM_LeafCluster (leafnum);
@@ -216,9 +194,7 @@ SV_AdjustAreaPortalState
 ========================
 */
 static void SV_AdjustAreaPortalState( sharedEntity_t *ent, qboolean open ) {
-	svEntity_t	*svEnt;
-
-	svEnt = SV_SvEntityForGentity( ent );
+	svEntity_t *svEnt = SV_SvEntityForGentity( ent );
 	if ( svEnt->areanum2 == -1 ) {
 		return;
 	}
@@ -232,15 +208,11 @@ SV_EntityContact
 ==================
 */
 static qboolean SV_EntityContact( const vec3_t mins, const vec3_t maxs, const sharedEntity_t *gEnt, const int capsule ) {
-	const float	*origin, *angles;
-	clipHandle_t	ch;
-	trace_t			trace;
-
 	// check for exact collision
-	origin = gEnt->r.currentOrigin;
-	angles = gEnt->r.currentAngles;
-
-	ch = SV_ClipHandleForEntity( gEnt );
+	const float *origin = gEnt->r.currentOrigin;
+	const float *angles = gEnt->r.currentAngles;
+	clipHandle_t ch = SV_ClipHandleForEntity( gEnt );
+	trace_t trace;
 	CM_TransformedBoxTrace( &trace, vec3_origin, vec3_origin, mins, maxs, ch, -1, origin, angles, capsule );
 
 	return trace.startsolid;
@@ -1102,13 +1074,12 @@ SV_DllSyscall
 */
 static intptr_t QDECL SV_DllSyscall( intptr_t arg, ... ) {
 #if !id386 || defined __clang__
-	intptr_t	args[14]; // max.count for qagame
-	va_list	ap;
-	int i;
+	intptr_t args[14]; // max.count for qagame
+	va_list ap;
 
 	args[0] = arg;
 	va_start( ap, arg );
-	for (i = 1; i < ARRAY_LEN( args ); i++ )
+	for (int i = 1; i < ARRAY_LEN( args ); i++ )
 		args[ i ] = va_arg( ap, intptr_t );
 	va_end( ap );
 
@@ -1145,8 +1116,6 @@ Called for both a full init and a restart
 ==================
 */
 static void SV_InitGameVM( qboolean restart ) {
-	int		i;
-
 	// start the entity parsing at the beginning
 	sv.entityParsePoint = CM_EntityString();
 
@@ -1154,7 +1123,7 @@ static void SV_InitGameVM( qboolean restart ) {
 	// a previous level
 	// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=522
 	// now done before GAME_INIT call
-	for ( i = 0; i < sv.maxclients; i++ ) {
+	for ( int i = 0; i < sv.maxclients; i++ ) {
 		svs.clients[i].gentity = NULL;
 	}
 	
@@ -1198,11 +1167,10 @@ Called on a normal map change, not on a map_restart
 ===============
 */
 void SV_InitGameProgs( void ) {
-	cvar_t	*var;
 	//FIXME these are temp while I make bots run in vm
-	extern int	bot_enable;
+	extern int bot_enable;
 
-	var = Cvar_Get( "bot_enable", "1", CVAR_LATCH );
+	cvar_t *var = Cvar_Get( "bot_enable", "1", CVAR_LATCH );
 	if ( var ) {
 		bot_enable = var->integer;
 	}

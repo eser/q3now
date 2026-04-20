@@ -78,6 +78,16 @@ menuDef {
 		rect 0.500 0.500 0 0
 	}
 
+	// ── Disconnect warning (top center) ─────────────────────
+	itemDef { hudElement "disconnect"
+		anchor TOP_CENTER
+		rect 0.500 0.210 0 0
+		font "sansman"
+		fontsize 24 28
+		textalign 1
+		forecolor 1 1 1 1
+	}
+
 	// ── FPS (top right) ──────────────────────────────────────
 	itemDef { hudElement "fps"
 		anchor TOP_RIGHT

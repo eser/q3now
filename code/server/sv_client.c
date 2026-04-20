@@ -321,11 +321,9 @@ Loads geoip database into memory
 static qboolean SV_LoadIP4DB( const char *filename )
 {
 	fileHandle_t fh = FS_INVALID_HANDLE;
-	uint32_t last_ip;
 	void *buf;
-	int len, res, i;
 
-	len = FS_SV_FOpenFileRead( filename, &fh );
+	int len = FS_SV_FOpenFileRead( filename, &fh );
 
 	if ( len <= 0 )
 	{
@@ -346,7 +344,7 @@ static qboolean SV_LoadIP4DB( const char *filename )
 
 	buf = Z_Malloc( len );
 
-	res = FS_Read( buf, len, fh );
+	int res = FS_Read( buf, len, fh );
 	FS_FCloseFile( fh );
 
 	if ( res != len ) {
@@ -355,7 +353,7 @@ static qboolean SV_LoadIP4DB( const char *filename )
 	}
 
 	// check integrity of loaded database
-	last_ip = 0;
+	uint32_t last_ip = 0;
 	num_tlds = len / 10;
 
 	// database format:
@@ -365,6 +363,7 @@ static qboolean SV_LoadIP4DB( const char *filename )
 	ipdb_range = (iprange_t*)buf;
 	ipdb_tld = (iprange_tld_t*)(ipdb_range + num_tlds);
 
+	int i;
 	for ( i = 0; i < num_tlds; i++ )
 	{
 		ipdb_range[i].from = BigLong( ipdb_range[i].from );
@@ -551,8 +550,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 {
 	char        tld[3];
 	client_t   *cl, *newcl;
-	int         i, clientNum, count;
-	intptr_t    denied;
+	int         i;
 	netadr_t    from;
 
 	/* R4 guard: server is mid-spawn — gvm may be NULL (P1..P2) or baselines
@@ -592,7 +590,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 		return;
 	}
 
-	clientNum = (int)( newcl - svs.clients );
+	int clientNum = (int)( newcl - svs.clients );
 	memset( newcl, 0, sizeof(*newcl) );
 
 	/* Store QUIC connection handle — used by all future transport calls */
@@ -617,7 +615,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 		SV_SaveSequences();
 
 	/* Let the game VM accept or reject */
-	denied = VM_Call( gvm, 3, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse );
+	intptr_t denied = VM_Call( gvm, 3, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse );
 	if ( denied ) {
 		const char *reason = GVM_ArgPtr( denied );
 		Com_Printf( "QUIC: game rejected connection from %s: %s\n",
@@ -653,7 +651,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 		clientNum, (unsigned long long)conn, NET_AdrToString( &from ) );
 
 	/* Heartbeat to master if first or last slot filled */
-	count = 0;
+	int count = 0;
 	for ( i = 0; i < sv.maxclients; i++ ) {
 		if ( svs.clients[i].state >= CS_CONNECTED )
 			count++;
@@ -898,14 +896,13 @@ or crashing -- SV_FinalMessage() will handle that
 */
 void SV_DropClient( client_t *drop, const char *reason ) {
 	char	name[ sizeof( drop->name ) ];
-	qboolean isBot;
 	int		i;
 
 	if ( drop->state == CS_ZOMBIE ) {
 		return;		// already dropped
 	}
 
-	isBot = drop->netchan.remoteAddress.type == NA_BOT;
+	qboolean isBot = drop->netchan.remoteAddress.type == NA_BOT;
 
 	Q_strncpyz( name, drop->name, sizeof( name ) );	// for further DPrintf() because drop->name will be nuked in SV_SetUserinfo()
 
@@ -973,10 +970,8 @@ estimates free space available for additional systeminfo keys
 */
 int SV_RemainingGameState( void )
 {
-	int			len;
 	int			start, i;
 	entityState_t nullstate;
-	const svEntity_t *svEnt;
 	msg_t		msg;
 	byte		msgBuffer[ MAX_MSGLEN_BUF ];
 
@@ -1018,7 +1013,7 @@ int SV_RemainingGameState( void )
 		if ( !sv.baselineUsed[ start ] ) {
 			continue;
 		}
-		svEnt = &sv.svEntities[ start ];
+		const svEntity_t *svEnt = &sv.svEntities[ start ];
 		MSG_WriteByte( &msg, svc_baseline );
 		MSG_WriteDeltaEntity( &msg, &nullstate, &svEnt->baseline, qtrue );
 	}
@@ -1033,7 +1028,7 @@ int SV_RemainingGameState( void )
 	// finalize packet
 	MSG_WriteByte( &msg, svc_EOF );
 
-	len = PAD( msg.bit, 8 ) / 8;
+	int len = PAD( msg.bit, 8 ) / 8;
 
 	// reserve some space for potential userinfo expansion
 	len += 512;
@@ -1056,10 +1051,8 @@ the wrong gamestate.
 static void SV_SendClientGameState( client_t *client ) {
 	int			start;
 	entityState_t nullstate;
-	const svEntity_t *svEnt;
 	msg_t		msg;
 	byte		msgBuffer[ MAX_MSGLEN_BUF ];
-	qboolean	csUpdated;
 
 	Com_DPrintf( "SV_SendClientGameState() for %s\n", client->name );
 
@@ -1101,7 +1094,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	MSG_WriteLong( &msg, client->reliableSequence );
 
 	// write the configstrings
-	csUpdated = qfalse;
+	qboolean csUpdated = qfalse;
 	for ( start = 0 ; start < MAX_CONFIGSTRINGS ; start++ ) {
 		if ( *sv.configstrings[ start ] != '\0' ) {
 			MSG_WriteByte( &msg, svc_configstring );
@@ -1140,7 +1133,7 @@ static void SV_SendClientGameState( client_t *client ) {
 		if ( !sv.baselineUsed[ start ] ) {
 			continue;
 		}
-		svEnt = &sv.svEntities[ start ];
+		const svEntity_t *svEnt = &sv.svEntities[ start ];
 		MSG_WriteByte( &msg, svc_baseline );
 		MSG_WriteDeltaEntity( &msg, &nullstate, &svEnt->baseline, qtrue );
 	}
@@ -1191,11 +1184,7 @@ SV_ClientEnterWorld
 ==================
 */
 void SV_ClientEnterWorld( client_t *client ) {
-	sharedEntity_t *ent;
-	qboolean isBot;
-	int clientNum;
-
-	isBot = client->netchan.remoteAddress.type == NA_BOT;
+	qboolean isBot = client->netchan.remoteAddress.type == NA_BOT;
 
 	if ( !isBot ) {
 		SV_PrintClientStateChange( client, CS_ACTIVE );
@@ -1215,8 +1204,8 @@ void SV_ClientEnterWorld( client_t *client ) {
 	}
 
 	// set up the entity for the client
-	clientNum = client - svs.clients;
-	ent = SV_GentityNum( clientNum );
+	int clientNum = client - svs.clients;
+	sharedEntity_t *ent = SV_GentityNum( clientNum );
 	ent->s.number = clientNum;
 	client->gentity = ent;
 
@@ -2054,8 +2043,6 @@ Also called by bot code
 */
 qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 	const ucmd_t *ucmd;
-	qboolean bFloodProtect;
-	qboolean isBot;
 
 	Cmd_TokenizeString( s );
 
@@ -2067,8 +2054,8 @@ qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 
 	// We don't do this when the client hasn't been active yet since it's
 	// normal to spam a lot of commands when downloading
-	isBot = cl->netchan.remoteAddress.type == NA_BOT ? qtrue: qfalse;
-	bFloodProtect = !isBot && cl->state >= CS_ACTIVE;
+	qboolean isBot = cl->netchan.remoteAddress.type == NA_BOT ? qtrue: qfalse;
+	qboolean bFloodProtect = !isBot && cl->state >= CS_ACTIVE;
 
 	// see if it is a server level command
 	for ( ucmd = ucmds; ucmd->name; ucmd++ ) {
@@ -2186,8 +2173,6 @@ each of the backup packets.
 ==================
 */
 static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
-	int			i, key;
-	int			cmdCount;
 	static const usercmd_t nullcmd = { 0 };
 	usercmd_t	cmds[MAX_PACKET_USERCMDS], *cmd;
 	const usercmd_t *oldcmd;
@@ -2198,7 +2183,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 		cl->deltaMessage = cl->wn_outgoing_sequence - ( PACKET_BACKUP + 1 ); // force delta reset
 	}
 
-	cmdCount = MSG_ReadByte( msg );
+	int cmdCount = MSG_ReadByte( msg );
 
 	if ( cmdCount < 1 ) {
 		Com_Printf( "cmdCount < 1\n" );
@@ -2211,14 +2196,14 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	}
 
 	// use the checksum feed in the key
-	key = sv.checksumFeed;
+	int key = sv.checksumFeed;
 	// also use the message acknowledge
 	key ^= cl->messageAcknowledge;
 	// also use the last acknowledged server command in the key
 	key ^= MSG_HashKey(cl->reliableCommands[ cl->reliableAcknowledge & (MAX_RELIABLE_COMMANDS-1) ], 32);
 
 	oldcmd = &nullcmd;
-	for ( i = 0 ; i < cmdCount ; i++ ) {
+	for ( int i = 0 ; i < cmdCount ; i++ ) {
 		cmd = &cmds[i];
 		MSG_ReadDeltaUsercmdKey( msg, key, oldcmd, cmd );
 		oldcmd = cmd;
@@ -2258,7 +2243,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	// usually, the first couple commands will be duplicates
 	// of ones we have previously received, but the servertimes
 	// in the commands will cause them to be immediately discarded
-	for ( i = 0; i < cmdCount; i++ ) {
+	for ( int i = 0; i < cmdCount; i++ ) {
 		// if this is a cmd from before a map_restart ignore it
 		if ( cmds[i].serverTime - cmds[cmdCount-1].serverTime > 0 ) {
 			continue;
@@ -2318,12 +2303,10 @@ Parse a client packet
 */
 void SV_ExecuteClientMessage( client_t *cl, msg_t *msg ) {
 	int	c;
-	int	serverId;
-	int reliableAcknowledge;
 
 	MSG_Bitstream( msg );
 
-	serverId = MSG_ReadLong( msg );
+	int serverId = MSG_ReadLong( msg );
 
 	cl->messageAcknowledge = MSG_ReadLong( msg );
 
@@ -2337,7 +2320,7 @@ void SV_ExecuteClientMessage( client_t *cl, msg_t *msg ) {
 		return;
 	}
 
-	reliableAcknowledge = MSG_ReadLong( msg );
+	int reliableAcknowledge = MSG_ReadLong( msg );
 
 	if ( cl->reliableSequence - reliableAcknowledge < 0 ) {
 #ifdef _DEBUG

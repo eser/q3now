@@ -521,9 +521,9 @@ extern	vec4_t		colorWhite;
 extern	vec4_t		colorLtGrey;
 extern	vec4_t		colorMdGrey;
 extern	vec4_t		colorDkGrey;
-extern	vec4_t		colorOrange;	// q3now (ioquake3 extension)
-extern	vec4_t		colorIndigo;	// q3now (ioquake3 extension)
-extern	vec4_t		colorSkyBlue;	// q3now (ioquake3 extension)
+extern	vec4_t		colorOrange;	// q3now
+extern	vec4_t		colorIndigo;	// q3now
+extern	vec4_t		colorSkyBlue;	// q3now
 
 #define Q_COLOR_ESCAPE	'^'
 #define Q_IsColorString(p) ( *(p) == Q_COLOR_ESCAPE && *((p)+1) && *((p)+1) != Q_COLOR_ESCAPE )
@@ -883,7 +883,6 @@ qboolean Q_isintegral( float f );
 
 // buffer size safe library replacements
 void	Q_strncpyz( char *dest, const char *src, int destsize );
-void	Q_strcat( char *dest, int size, const char *src );
 
 int     Q_replace( const char *str1, const char *str2, char *src, int max_len );
 
@@ -1406,7 +1405,7 @@ typedef enum {
 	TR_LINEAR_STOP,
 	TR_SINE,					// value = base + sin( time / duration ) * delta
 	TR_GRAVITY,
-	// q3now (ioquake3 extension): additional trajectory types used by bg_misc.c
+	// q3now: additional trajectory types used by bg_misc.c
 	TR_GRAVITY_DOUBLE,			// double strength gravity
 	TR_ACCELERATE,				// accelerating linear
 	TR_SMALL_GRAVITY,			// half strength gravity

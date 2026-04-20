@@ -7,8 +7,8 @@ export DBUILD_SERVER="${DBUILD_SERVER:-1}"
 export DUSE_HTTP="${DUSE_HTTP:-1}"
 export DUSE_CODEC_OPUS="${DUSE_CODEC_OPUS:-1}"
 export DUSE_VOIP="${DUSE_VOIP:-1}"
-export DCMAKE_INSTALL_PREFIX="${DCMAKE_INSTALL_PREFIX:-~/ioquake3}"
-IOQ3REMOTE="${IOQ3REMOTE:-https://github.com/ioquake/ioq3.git}"
+export DCMAKE_INSTALL_PREFIX="${DCMAKE_INSTALL_PREFIX:-~/q3now}"
+Q3NOWREMOTE="${Q3NOWREMOTE:-https://github.com/eser/q3now.git}"
 CMAKE_OPTS="${CMAKE_OPTS:-}"
 
 if ! [ -x "$(command -v git)" ] || ! [ -x "$(command -v cmake)" ]; then
@@ -17,26 +17,24 @@ if ! [ -x "$(command -v git)" ] || ! [ -x "$(command -v cmake)" ]; then
         exit 1
 fi
 
-echo " This build process requires all of the ioquake3 dependencies necessary for an ioquake3 server.
+echo " This build process requires all of the q3now dependencies necessary for an q3now server.
  If you do not have the necessary dependencies the build will fail.
 
- Please post a message to https://discourse.ioquake.org/ asking for help and include whatever error messages you received during the compile phase.
-
- We will be building from the git repo at ${IOQ3REMOTE}
+ We will be building from the git repo at ${Q3NOWREMOTE}
  The resulting binary will be installed to ${DCMAKE_INSTALL_PREFIX}
 
  If you need to change these, please set variables as follows:
 
- IOQ3REMOTE=https://github.com/something/something.git DCMAKE_INSTALL_PREFIX=~/somewhere $0"
+ Q3NOWREMOTE=https://github.com/something/something.git DCMAKE_INSTALL_PREFIX=~/somewhere $0"
 
 BUILD_DIR="$(mktemp -d)"
 trap "rm -rf $BUILD_DIR" EXIT
 
 while true; do
-        read -p "Are you ready to compile ioquake3 from ${IOQ3REMOTE}, and have it installed into $DCMAKE_INSTALL_PREFIX? " yn
+        read -p "Are you ready to compile q3now from ${Q3NOWREMOTE}, and have it installed into $DCMAKE_INSTALL_PREFIX? " yn
         case $yn in
                 [Yy]*)
-                        git clone $IOQ3REMOTE $BUILD_DIR/ioq3
+                        git clone $Q3NOWREMOTE $BUILD_DIR/ioq3
                         cd $BUILD_DIR/ioq3
                         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
                         -DBUILD_CLIENT="$DBUILD_CLIENT" \

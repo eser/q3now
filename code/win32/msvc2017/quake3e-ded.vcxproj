@@ -27,7 +27,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectName>quake3e-ded</ProjectName>
+    <ProjectName>q3now-ded</ProjectName>
     <ProjectGuid>{81CB51C4-B434-4E12-B69B-BAEE102F2853}</ProjectGuid>
     <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
@@ -76,40 +76,40 @@
     <IntDir>.\build\$(ProjectName)_$(Configuration)_$(PlatformTarget)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
     <EmbedManifest>false</EmbedManifest>
-    <TargetName>quake3e.ded-debug</TargetName>
+    <TargetName>q3now.ded-debug</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>.\output\</OutDir>
     <IntDir>.\build\$(ProjectName)_$(Configuration)_$(PlatformTarget)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
     <EmbedManifest>false</EmbedManifest>
-    <TargetName>quake3e.ded-debug.x64</TargetName>
+    <TargetName>q3now.ded-debug.x64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <LinkIncremental>true</LinkIncremental>
     <EmbedManifest>false</EmbedManifest>
     <OutDir>.\output\</OutDir>
     <IntDir>.\build\$(ProjectName)_$(Configuration)_$(PlatformTarget)\</IntDir>
-    <TargetName>quake3e.ded-debug.arm64</TargetName>
+    <TargetName>q3now.ded-debug.arm64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>.\output\</OutDir>
     <IntDir>.\build\$(ProjectName)_$(Configuration)_$(PlatformTarget)\</IntDir>
     <GenerateManifest>false</GenerateManifest>
     <EmbedManifest>false</EmbedManifest>
-    <TargetName>quake3e.ded</TargetName>
+    <TargetName>q3now.ded</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>.\output\</OutDir>
     <IntDir>.\build\$(ProjectName)_$(Configuration)_$(PlatformTarget)\</IntDir>
     <EmbedManifest>false</EmbedManifest>
-    <TargetName>quake3e.ded.x64</TargetName>
+    <TargetName>q3now.ded.x64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <EmbedManifest>false</EmbedManifest>
     <OutDir>.\output\</OutDir>
     <IntDir>.\build\$(ProjectName)_$(Configuration)_$(PlatformTarget)\</IntDir>
-    <TargetName>quake3e.ded.arm64</TargetName>
+    <TargetName>q3now.ded.arm64</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -132,9 +132,9 @@
       <AdditionalDependencies>advapi32.lib;gdi32.lib;user32.lib;comctl32.lib;winmm.lib;wsock32.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(IntDir)quake3e.ded-debug.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>$(IntDir)q3now.ded-debug.pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
-      <MapFileName>$(IntDir)quake3e.ded-debug.map</MapFileName>
+      <MapFileName>$(IntDir)q3now.ded-debug.map</MapFileName>
       <StackReserveSize>4194304</StackReserveSize>
       <SubSystem>Windows</SubSystem>
       <MinimumRequiredVersion />
@@ -160,9 +160,9 @@
       <AdditionalDependencies>advapi32.lib;gdi32.lib;user32.lib;comctl32.lib;winmm.lib;wsock32.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(IntDir)quake3e.ded-debug.x64.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>$(IntDir)q3now.ded-debug.x64.pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
-      <MapFileName>$(IntDir)quake3e.ded-debug.x64.map</MapFileName>
+      <MapFileName>$(IntDir)q3now.ded-debug.x64.map</MapFileName>
       <StackReserveSize>4194304</StackReserveSize>
       <SubSystem>Windows</SubSystem>
     </Link>
@@ -187,9 +187,9 @@
       <AdditionalDependencies>advapi32.lib;gdi32.lib;user32.lib;comctl32.lib;winmm.lib;wsock32.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(IntDir)quake3e.ded-debug.arm64.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>$(IntDir)q3now.ded-debug.arm64.pdb</ProgramDatabaseFile>
       <GenerateMapFile>true</GenerateMapFile>
-      <MapFileName>$(IntDir)quake3e.ded-debug.arm64.map</MapFileName>
+      <MapFileName>$(IntDir)q3now.ded-debug.arm64.map</MapFileName>
       <StackReserveSize>4194304</StackReserveSize>
       <SubSystem>Windows</SubSystem>
     </Link>
@@ -206,7 +206,7 @@
       <AdditionalDependencies>advapi32.lib;gdi32.lib;user32.lib;comctl32.lib;winmm.lib;wsock32.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <GenerateMapFile>true</GenerateMapFile>
-      <MapFileName>$(IntDir)quake3e.ded.map</MapFileName>
+      <MapFileName>$(IntDir)q3now.ded.map</MapFileName>
       <StackReserveSize>4194304</StackReserveSize>
       <OptimizeReferences>true</OptimizeReferences>
       <SetChecksum>true</SetChecksum>
@@ -229,7 +229,7 @@
       <AdditionalDependencies>advapi32.lib;gdi32.lib;user32.lib;comctl32.lib;winmm.lib;wsock32.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <GenerateMapFile>true</GenerateMapFile>
-      <MapFileName>$(IntDir)quake3e.ded.x64.map</MapFileName>
+      <MapFileName>$(IntDir)q3now.ded.x64.map</MapFileName>
       <StackReserveSize>4194304</StackReserveSize>
       <OptimizeReferences>true</OptimizeReferences>
       <SetChecksum>true</SetChecksum>
@@ -249,7 +249,7 @@
       <AdditionalDependencies>advapi32.lib;gdi32.lib;user32.lib;comctl32.lib;winmm.lib;wsock32.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <GenerateMapFile>true</GenerateMapFile>
-      <MapFileName>$(IntDir)quake3e.ded.arm64.map</MapFileName>
+      <MapFileName>$(IntDir)q3now.ded.arm64.map</MapFileName>
       <StackReserveSize>4194304</StackReserveSize>
       <OptimizeReferences>true</OptimizeReferences>
       <SetChecksum>true</SetChecksum>

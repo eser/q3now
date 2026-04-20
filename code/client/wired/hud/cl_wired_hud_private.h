@@ -469,6 +469,9 @@ modernhudConfigParseCommand_t CG_ModernHUDFileInfoGetCommandItem(configFileInfo_
 void* CG_ModernHUDElementFPSCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementFPSRoutine(void* context);
 
+void* CG_ModernHUDElementDisconnectCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementDisconnectRoutine(void* context);
+
 #if FEAT_MOVEMENT_KEYS
 // shared routine/destroy for all key elements
 void CG_ModernHUDElementKeyRoutine(void* context);

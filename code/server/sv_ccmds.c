@@ -40,11 +40,6 @@ Returns the player with player id or name from Cmd_Argv(1)
 ==================
 */
 client_t *SV_GetPlayerByHandle( void ) {
-	client_t	*cl;
-	int			i;
-	const char		*s;
-	char		cleanName[ MAX_NAME_LENGTH ];
-
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
 		return NULL;
@@ -55,11 +50,12 @@ client_t *SV_GetPlayerByHandle( void ) {
 		return NULL;
 	}
 
-	s = Cmd_Argv(1);
+	const char *s = Cmd_Argv(1);
 
 	// Check whether this is a numeric player handle
+	int i;
 	for(i = 0; s[i] >= '0' && s[i] <= '9'; i++);
-	
+
 	if(!s[i])
 	{
 		int plid = atoi(s);
@@ -67,15 +63,17 @@ client_t *SV_GetPlayerByHandle( void ) {
 		// Check for numeric playerid match
 		if(plid >= 0 && plid < sv.maxclients)
 		{
-			cl = &svs.clients[plid];
-			
+			client_t *cl = &svs.clients[plid];
+
 			if (cl->state >= CS_CONNECTED)
 				return cl;
 		}
 	}
 
 	// check for a name match
-	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+	char cleanName[ MAX_NAME_LENGTH ];
+	client_t *cl = svs.clients;
+	for ( i = 0; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state < CS_CONNECTED ) {
 			continue;
 		}
@@ -104,11 +102,6 @@ Returns the player with idnum from Cmd_Argv(1)
 ==================
 */
 static client_t *SV_GetPlayerByNum( void ) {
-	client_t	*cl;
-	int			i;
-	int			idnum;
-	const char		*s;
-
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
 		return NULL;
@@ -119,21 +112,21 @@ static client_t *SV_GetPlayerByNum( void ) {
 		return NULL;
 	}
 
-	s = Cmd_Argv(1);
+	const char *s = Cmd_Argv(1);
 
-	for (i = 0; s[i]; i++) {
+	for (int i = 0; s[i]; i++) {
 		if (s[i] < '0' || s[i] > '9') {
 			Com_Printf( "Bad slot number: %s\n", s);
 			return NULL;
 		}
 	}
-	idnum = atoi( s );
+	int idnum = atoi( s );
 	if ( idnum < 0 || idnum >= sv.maxclients ) {
 		Com_Printf( "Bad client slot: %i\n", idnum );
 		return NULL;
 	}
 
-	cl = &svs.clients[idnum];
+	client_t *cl = &svs.clients[idnum];
 	if ( cl->state < CS_CONNECTED ) {
 		Com_Printf( "Client %i is not active\n", idnum );
 		return NULL;
@@ -152,24 +145,18 @@ Restart the server on a different map
 ==================
 */
 static void SV_Map_f( void ) {
-	const char		*cmd;
-	const char		*map;
-	qboolean	cheat;
-	char		expanded[MAX_QPATH];
-	char		mapname[MAX_QPATH];
-	int			len;
-
-	map = Cmd_Argv(1);
+	const char *map = Cmd_Argv(1);
 	if ( !map || !*map ) {
 		return;
 	}
 
 	// make sure the level exists before trying to change, so that
 	// a typo at the server console won't end the game
+	char expanded[MAX_QPATH];
 	Com_sprintf( expanded, sizeof( expanded ), "maps/%s.bsp", map );
 	// bypass pure check so we can open downloaded map
 	FS_BypassPure();
-	len = FS_FOpenFileRead( expanded, NULL, qfalse );
+	int len = FS_FOpenFileRead( expanded, NULL, qfalse );
 	FS_RestorePure();
 	if ( len == -1 ) {
 		Com_Printf( "Can't find map %s\n", expanded );
@@ -181,6 +168,7 @@ static void SV_Map_f( void ) {
 
 	// save the map name here cause on a map restart we reload the q3config.cfg
 	// and thus nuke the arguments of the map command
+	char mapname[MAX_QPATH];
 	Q_strncpyz(mapname, map, sizeof(mapname));
 
 	// start up the map
@@ -198,12 +186,6 @@ This allows fair starts with variable load times.
 ================
 */
 static void SV_MapRestart_f( void ) {
-	int			i;
-	client_t	*client;
-	const char		*denied;
-	qboolean	isBot;
-	int			delay;
-
 	// make sure we aren't restarting twice in the same frame
 	if ( com_frameTime == sv.restartedServerId ) {
 		return;
@@ -219,11 +201,7 @@ static void SV_MapRestart_f( void ) {
 		return;
 	}
 
-	if ( Cmd_Argc() > 1 ) {
-		delay = atoi( Cmd_Argv(1) );
-	} else {
-		delay = 5;
-	}
+	int delay = (Cmd_Argc() > 1) ? atoi( Cmd_Argv(1) ) : 5;
 
 	if ( delay != 0 && Cvar_VariableIntegerValue( "g_minPlayers" ) == 0 ) {
 		sv.restartTime = sv.time + delay * 1000;
@@ -257,6 +235,7 @@ static void SV_MapRestart_f( void ) {
 	// if a map_restart occurs while a client is changing maps, we need
 	// to give them the correct time so that when they finish loading
 	// they don't violate the backwards time check in cl_cgame.c
+	int i;
 	for ( i = 0; i < sv.maxclients; i++ ) {
 		if ( svs.clients[i].state == CS_PRIMED ) {
 			svs.clients[i].oldServerTime = sv.restartTime;
@@ -275,7 +254,7 @@ static void SV_MapRestart_f( void ) {
 	SV_RestartGameProgs();
 
 	// run a few frames to allow everything to settle
-	for ( i = 0; i < 3; i++ )
+	for ( int i = 0; i < 3; i++ )
 	{
 		Cbuf_Wait();
 		sv.time += 100;
@@ -287,24 +266,20 @@ static void SV_MapRestart_f( void ) {
 
 	// connect and begin all the clients
 	for ( i = 0; i < sv.maxclients; i++ ) {
-		client = &svs.clients[i];
+		client_t *client = &svs.clients[i];
 
 		// send the new gamestate to all connected clients
 		if ( client->state < CS_CONNECTED ) {
 			continue;
 		}
 
-		if ( client->netchan.remoteAddress.type == NA_BOT ) {
-			isBot = qtrue;
-		} else {
-			isBot = qfalse;
-		}
+		qboolean isBot = (client->netchan.remoteAddress.type == NA_BOT) ? qtrue : qfalse;
 
 		// add the map_restart command
 		SV_AddServerCommand( client, "map_restart\n" );
 
 		// connect the client again, without the firstTime flag
-		denied = GVM_ArgPtr( VM_Call( gvm, 3, GAME_CLIENT_CONNECT, i, qfalse, isBot ) );
+		const char *denied = GVM_ArgPtr( VM_Call( gvm, 3, GAME_CLIENT_CONNECT, i, qfalse, isBot ) );
 		if ( denied ) {
 			// this generally shouldn't happen, because the client
 			// was connected before the level change
@@ -325,7 +300,7 @@ static void SV_MapRestart_f( void ) {
 	svs.time += 100;
 
 	for ( i = 0; i < sv.maxclients; i++ ) {
-		client = &svs.clients[i];
+		client_t *client = &svs.clients[i];
 		if ( client->state >= CS_PRIMED ) {
 			// accept usercmds starting from current server time only
 			// to emulate original behavior which dropped pre-restart commands via serverid check
@@ -344,9 +319,6 @@ Kick a user off of the server  FIXME: move to game
 ==================
 */
 static void SV_Kick_f( void ) {
-	client_t	*cl;
-	int			i;
-
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
 		Com_Printf( "Server is not running.\n" );
@@ -358,30 +330,32 @@ static void SV_Kick_f( void ) {
 		return;
 	}
 
-	cl = SV_GetPlayerByHandle();
+	client_t *cl = SV_GetPlayerByHandle();
 	if ( !cl ) {
 		if ( !Q_stricmp( Cmd_Argv( 1 ), "all" ) ) {
-			for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
-				if ( cl->state < CS_CONNECTED ) {
+			client_t *iter = svs.clients;
+			for ( int i = 0; i < sv.maxclients; i++, iter++ ) {
+				if ( iter->state < CS_CONNECTED ) {
 					continue;
 				}
-				if ( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
+				if ( iter->netchan.remoteAddress.type == NA_LOOPBACK ) {
 					continue;
 				}
-				SV_DropClient( cl, "was kicked" );
-				cl->lastPacketTime = svs.time;	// in case there is a funny zombie
+				SV_DropClient( iter, "was kicked" );
+				iter->lastPacketTime = svs.time;	// in case there is a funny zombie
 			}
 		}
 		else if ( !Q_stricmp( Cmd_Argv( 1 ), "allbots" ) ) {
-			for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
-				if ( cl->state < CS_CONNECTED ) {
+			client_t *iter = svs.clients;
+			for ( int i = 0; i < sv.maxclients; i++, iter++ ) {
+				if ( iter->state < CS_CONNECTED ) {
 					continue;
 				}
-				if ( cl->netchan.remoteAddress.type != NA_BOT ) {
+				if ( iter->netchan.remoteAddress.type != NA_BOT ) {
 					continue;
 				}
-				SV_DropClient( cl, "was kicked" );
-				cl->lastPacketTime = svs.time;	// in case there is a funny zombie
+				SV_DropClient( iter, "was kicked" );
+				iter->lastPacketTime = svs.time;	// in case there is a funny zombie
 			}
 		}
 		return;
@@ -403,16 +377,14 @@ Kick all bots off of the server
 ==================
 */
 static void SV_KickBots_f( void ) {
-	client_t	*cl;
-	int			i;
-
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
 		Com_Printf("Server is not running.\n");
 		return;
 	}
 
-	for( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+	client_t *cl = svs.clients;
+	for( int i = 0; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state < CS_CONNECTED ) {
 			continue;
 		}
@@ -433,16 +405,14 @@ Kick all users off of the server
 ==================
 */
 static void SV_KickAll_f( void ) {
-	client_t *cl;
-	int i;
-
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
 		Com_Printf( "Server is not running.\n" );
 		return;
 	}
 
-	for( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+	client_t *cl = svs.clients;
+	for( int i = 0; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state < CS_CONNECTED ) {
 			continue;
 		}
@@ -581,25 +551,22 @@ Load saved bans from file.
 */
 static void SV_RehashBans_f(void)
 {
-	int index, filelen, res;
-	fileHandle_t readfrom;
-	char *textbuf, *curpos, *maskpos, *newlinepos;
-	const char *endpos;
-	char filepath[MAX_QPATH];
-	
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
 		return;
 	}
-	
+
 	serverBansCount = 0;
-	
+
 	if(!sv_banFile->string || !*sv_banFile->string)
 		return;
 
+	char filepath[MAX_QPATH];
 	Com_sprintf(filepath, sizeof(filepath), "%s/%s", FS_GetCurrentGameDir(), sv_banFile->string);
 
-	if((filelen = FS_SV_FOpenFileRead(filepath, &readfrom)) >= 0)
+	fileHandle_t readfrom;
+	int filelen = FS_SV_FOpenFileRead(filepath, &readfrom);
+	if(filelen >= 0)
 	{
 		if(filelen < 2)
 		{
@@ -608,35 +575,39 @@ static void SV_RehashBans_f(void)
 			return;
 		}
 
-		curpos = textbuf = Z_Malloc(filelen);
-		
-		res = FS_Read(textbuf, filelen, readfrom);
+		char *textbuf = Z_Malloc(filelen);
+		char *curpos = textbuf;
+
+		int res = FS_Read(textbuf, filelen, readfrom);
 		FS_FCloseFile(readfrom);
 
 		if (res != filelen) {
 			Z_Free(textbuf);
 			return;
 		}
-		
-		endpos = textbuf + filelen;
-		
+
+		const char *endpos = textbuf + filelen;
+
+		int index;
 		for(index = 0; index < SERVER_MAXBANS && curpos + 2 < endpos; index++)
 		{
 			// find the end of the address string
+			char *maskpos;
 			for(maskpos = curpos + 2; maskpos < endpos && *maskpos != ' '; maskpos++);
-			
+
 			if(maskpos + 1 >= endpos)
 				break;
 
 			*maskpos = '\0';
 			maskpos++;
-			
+
 			// find the end of the subnet specifier
+			char *newlinepos;
 			for(newlinepos = maskpos; newlinepos < endpos && *newlinepos != '\n'; newlinepos++);
-			
+
 			if(newlinepos >= endpos)
 				break;
-			
+
 			*newlinepos = '\0';
 			
 			if(NET_StringToAdr(curpos + 2, &serverBans[index].ip, NA_UNSPEC))
@@ -674,21 +645,19 @@ Save bans to file.
 */
 static void SV_WriteBans(void)
 {
-	int index;
-	fileHandle_t writeto;
-	char filepath[MAX_QPATH];
-	
 	if(!sv_banFile->string || !*sv_banFile->string)
 		return;
-	
+
+	char filepath[MAX_QPATH];
 	Com_sprintf(filepath, sizeof(filepath), "%s/%s", FS_GetCurrentGameDir(), sv_banFile->string);
 
-	if((writeto = FS_SV_FOpenFileWrite(filepath)))
+	fileHandle_t writeto = FS_SV_FOpenFileWrite(filepath);
+	if(writeto)
 	{
 		char writebuf[128];
 		serverBan_t *curban;
-		
-		for(index = 0; index < serverBansCount; index++)
+
+		for(int index = 0; index < serverBansCount; index++)
 		{
 			curban = &serverBans[index];
 			
@@ -779,10 +748,9 @@ Ban a user from being able to play on this server based on his ip address.
 
 static void SV_AddBanToList(qboolean isexception)
 {
-	const char *banstring;
 	char addy2[NET_ADDRSTRMAXLEN];
 	netadr_t ip;
-	int index, argc, mask;
+	int mask;
 	serverBan_t *curban;
 
 	// make sure server is running
@@ -791,8 +759,8 @@ static void SV_AddBanToList(qboolean isexception)
 		return;
 	}
 
-	argc = Cmd_Argc();
-	
+	int argc = Cmd_Argc();
+
 	if(argc < 2 || argc > 3)
 	{
 		Com_Printf ("Usage: %s (ip[/subnet] | clientnum [subnet])\n", Cmd_Argv(0));
@@ -805,7 +773,7 @@ static void SV_AddBanToList(qboolean isexception)
 		return;
 	}
 
-	banstring = Cmd_Argv(1);
+	const char *banstring = Cmd_Argv(1);
 	
 	if(strchr(banstring, '.') || strchr(banstring, ':'))
 	{
@@ -859,16 +827,16 @@ static void SV_AddBanToList(qboolean isexception)
 	}
 
 	// first check whether a conflicting ban exists that would supersede the new one.
-	for(index = 0; index < serverBansCount; index++)
+	for(int index = 0; index < serverBansCount; index++)
 	{
 		curban = &serverBans[index];
-		
+
 		if(curban->subnet <= mask)
 		{
 			if((curban->isexception || !isexception) && NET_CompareBaseAdrMask(&curban->ip, ip, &curban->subnet))
 			{
 				Q_strncpyz(addy2, NET_AdrToString(&ip), sizeof(addy2));
-				
+
 				Com_Printf("Error: %s %s/%d supersedes %s %s/%d\n", curban->isexception ? "Exception" : "Ban",
 					   NET_AdrToString(&curban->ip), curban->subnet,
 					   isexception ? "exception" : "ban", addy2, mask);
@@ -880,7 +848,7 @@ static void SV_AddBanToList(qboolean isexception)
 			if(!curban->isexception && isexception && NET_CompareBaseAdrMask(&curban->ip, &ip, mask))
 			{
 				Q_strncpyz(addy2, NET_AdrToString(&curban->ip), sizeof(addy2));
-			
+
 				Com_Printf("Error: %s %s/%d supersedes already existing %s %s/%d\n", isexception ? "Exception" : "Ban",
 					   NET_AdrToString(&ip), mask,
 					   curban->isexception ? "exception" : "ban", addy2, curban->subnet);
@@ -890,7 +858,7 @@ static void SV_AddBanToList(qboolean isexception)
 	}
 
 	// now delete bans that are superseded by the new one
-	index = 0;
+	int index = 0;
 	while(index < serverBansCount)
 	{
 		curban = &serverBans[index];
@@ -923,40 +891,39 @@ Remove a ban or an exception from the list.
 
 static void SV_DelBanFromList(qboolean isexception)
 {
-	int index, count = 0, todel, mask;
+	int count = 0, mask;
 	netadr_t ip;
-	const char *banstring;
-	
+
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
 		Com_Printf( "Server is not running.\n" );
 		return;
 	}
-	
+
 	if(Cmd_Argc() != 2)
 	{
 		Com_Printf ("Usage: %s (ip[/subnet] | num)\n", Cmd_Argv(0));
 		return;
 	}
 
-	banstring = Cmd_Argv(1);
-	
+	const char *banstring = Cmd_Argv(1);
+
 	if(strchr(banstring, '.') || strchr(banstring, ':'))
 	{
 		serverBan_t *curban;
-		
+
 		if(SV_ParseCIDRNotation(&ip, &mask, banstring))
 		{
 			Com_Printf("Error: Invalid address %s\n", banstring);
 			return;
 		}
-		
-		index = 0;
-		
+
+		int index = 0;
+
 		while(index < serverBansCount)
 		{
 			curban = &serverBans[index];
-			
+
 			if(curban->isexception == isexception		&&
 			   curban->subnet >= mask 			&&
 			   NET_CompareBaseAdrMask(&curban->ip, &ip, mask))
@@ -964,7 +931,7 @@ static void SV_DelBanFromList(qboolean isexception)
 				Com_Printf("Deleting %s %s/%d\n",
 					   isexception ? "exception" : "ban",
 					   NET_AdrToString(&curban->ip), curban->subnet);
-					   
+
 				SV_DelBanEntryFromList(index);
 			}
 			else
@@ -973,15 +940,15 @@ static void SV_DelBanFromList(qboolean isexception)
 	}
 	else
 	{
-		todel = atoi(Cmd_Argv(1));
+		int todel = atoi(Cmd_Argv(1));
 
 		if(todel < 1 || todel > serverBansCount)
 		{
 			Com_Printf("Error: Invalid ban number given\n");
 			return;
 		}
-	
-		for(index = 0; index < serverBansCount; index++)
+
+		for(int index = 0; index < serverBansCount; index++)
 		{
 			if(serverBans[index].isexception == isexception)
 			{
@@ -1015,19 +982,18 @@ List all bans and exceptions on console
 
 static void SV_ListBans_f(void)
 {
-	int index, count;
-	serverBan_t *ban;
+	int count;
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
 		Com_Printf( "Server is not running.\n" );
 		return;
 	}
-	
+
 	// List all bans
-	for(index = count = 0; index < serverBansCount; index++)
+	for(int index = count = 0; index < serverBansCount; index++)
 	{
-		ban = &serverBans[index];
+		serverBan_t *ban = &serverBans[index];
 		if(!ban->isexception)
 		{
 			count++;
@@ -1037,9 +1003,9 @@ static void SV_ListBans_f(void)
 		}
 	}
 	// List all exceptions
-	for(index = count = 0; index < serverBansCount; index++)
+	for(int index = count = 0; index < serverBansCount; index++)
 	{
-		ban = &serverBans[index];
+		serverBan_t *ban = &serverBans[index];
 		if(ban->isexception)
 		{
 			count++;
@@ -1124,7 +1090,6 @@ SV_Status_f
 static void SV_Status_f( void ) {
 	int i, j, l;
 	const client_t *cl;
-	const playerState_t *ps;
 	const char *s;
 	int max_namelength;
 	int max_addrlength;
@@ -1200,7 +1165,7 @@ static void SV_Status_f( void ) {
 			continue;
 
 		Com_Printf( "%2i ", i ); // id
-		ps = SV_GameClientNum( i );
+		const playerState_t *ps = SV_GameClientNum( i );
 		Com_Printf( "%5i ", ps->persistant[PERS_SCORE] );
 
 		// ping/status
@@ -1241,9 +1206,7 @@ SV_ConSay_f
 ==================
 */
 static void SV_ConSay_f( void ) {
-	char	*p;
 	char	text[MAX_STRING_CHARS];
-	int		len;
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
@@ -1255,8 +1218,8 @@ static void SV_ConSay_f( void ) {
 		return;
 	}
 
-	p = Cmd_ArgsFrom( 1 );
-	len = (int)strlen( p );
+	char *p = Cmd_ArgsFrom( 1 );
+	int len = (int)strlen( p );
 
 	if ( len > 1000 ) {
 		return;
@@ -1280,10 +1243,7 @@ SV_ConTell_f
 ==================
 */
 static void SV_ConTell_f( void ) {
-	char	*p;
 	char	text[MAX_STRING_CHARS];
-	client_t	*cl;
-	int		len;
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
@@ -1296,13 +1256,13 @@ static void SV_ConTell_f( void ) {
 		return;
 	}
 
-	cl = SV_GetPlayerByNum();
+	client_t *cl = SV_GetPlayerByNum();
 	if ( !cl ) {
 		return;
 	}
 
-	p = Cmd_ArgsFrom( 2 );
-	len = (int)strlen( p );
+	char *p = Cmd_ArgsFrom( 2 );
+	int len = (int)strlen( p );
 
 	if ( len > 1000 ) {
 		return;
@@ -1469,9 +1429,6 @@ invokes the supplied callback once per name.  Used by the tab-completion
 handler of admin commands like kick, banUser, dumpuser and clientkick.
 ==================*/
 static void SV_ClientNameCompletion( void (*callback)( const char *s ) ) {
-	int i;
-	int maxClients;
-
 	if ( callback == NULL ) {
 		return;
 	}
@@ -1486,7 +1443,7 @@ static void SV_ClientNameCompletion( void (*callback)( const char *s ) ) {
 		return;
 	}
 
-	maxClients = sv.maxclients;
+	int maxClients = sv.maxclients;
 	if ( maxClients <= 0 && sv_maxclients != NULL ) {
 		maxClients = sv_maxclients->integer;
 	}
@@ -1497,7 +1454,7 @@ static void SV_ClientNameCompletion( void (*callback)( const char *s ) ) {
 		maxClients = MAX_CLIENTS;
 	}
 
-	for ( i = 0; i < maxClients; i++ ) {
+	for ( int i = 0; i < maxClients; i++ ) {
 		const client_t *cl = &svs.clients[i];
 		if ( cl->state < CS_CONNECTED ) {
 			continue;
@@ -1534,21 +1491,19 @@ SV_GetClientMemStats
 */
 clientMemStats_t SV_GetClientMemStats( int clientNum ) {
 	clientMemStats_t s;
-	const client_t *cl;
-	int i;
 
 	memset( &s, 0, sizeof( s ) );
 	if ( clientNum < 0 || clientNum >= sv.maxclients ) {
 		return s;
 	}
-	cl = &svs.clients[clientNum];
+	const client_t *cl = &svs.clients[clientNum];
 	if ( cl->state == CS_FREE ) {
 		return s;
 	}
 
 	s.snapshotBytes = cl->frames[cl->deltaMessage & PACKET_MASK].messageSize;
 
-	for ( i = 0; i < MAX_DOWNLOAD_WINDOW; i++ ) {
+	for ( int i = 0; i < MAX_DOWNLOAD_WINDOW; i++ ) {
 		if ( cl->downloadBlocks[i] ) {
 			s.downloadBytes += MAX_DOWNLOAD_BLKSIZE;
 		}
@@ -1565,19 +1520,16 @@ SV_MemInfoClients_f
 ======================
 */
 static void SV_MemInfoClients_f( void ) {
-	int i, connected;
-	const client_t *cl;
-	clientMemStats_t ms;
 	int totalSnap = 0, totalDl = 0, totalAll = 0;
-	float avgSnap, avgDl, avgAll;
 
 	if ( !com_sv_running->integer ) {
 		Com_Printf( "Server is not running.\n" );
 		return;
 	}
 
-	connected = 0;
-	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+	int connected = 0;
+	const client_t *cl = svs.clients;
+	for ( int i = 0; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state >= CS_CONNECTED ) connected++;
 	}
 
@@ -1586,9 +1538,10 @@ static void SV_MemInfoClients_f( void ) {
 	Com_Printf( "  %-3s  %-20s  %8s  %8s  %8s\n",
 		"#", "Name", "Snapshot", "Download", "Total" );
 
-	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+	cl = svs.clients;
+	for ( int i = 0; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state < CS_CONNECTED ) continue;
-		ms = SV_GetClientMemStats( i );
+		clientMemStats_t ms = SV_GetClientMemStats( i );
 
 		Com_Printf( "  %-3i  %-20s  %6.1f KB  %6.1f KB  %6.1f KB\n",
 			i, cl->name,
@@ -1608,9 +1561,9 @@ static void SV_MemInfoClients_f( void ) {
 		totalAll  / 1024.0f );
 
 	if ( connected > 0 ) {
-		avgSnap = totalSnap / (float)connected;
-		avgDl   = totalDl   / (float)connected;
-		avgAll  = totalAll  / (float)connected;
+		float avgSnap = totalSnap / (float)connected;
+		float avgDl   = totalDl   / (float)connected;
+		float avgAll  = totalAll  / (float)connected;
 		Com_Printf( "  Projected (128p): snap %.0f KB  dl %.0f KB  total %.0f KB\n",
 			avgSnap * 128.0f / 1024.0f,
 			avgDl   * 128.0f / 1024.0f,

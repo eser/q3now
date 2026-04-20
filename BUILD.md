@@ -74,21 +74,21 @@ Copy the resulting binaries from created `build` directory or use command:
 
 ### Arch Linux
 
-The package `quake3e-git` can either be installed through your favourite AUR helper, or manually using these commands:
+The package `q3now-git` can either be installed through your favourite AUR helper, or manually using these commands:
 
 Download the snapshot from AUR:
 
-`curl -O https://aur.archlinux.org/cgit/aur.git/snapshot/quake3e-git.tar.gz`
+`curl -O https://aur.archlinux.org/cgit/aur.git/snapshot/q3now-git.tar.gz`
 
 Extract the snapshot:
 
-`tar xfz quake3e-git.tar.gz`
+`tar xfz q3now-git.tar.gz`
 
 Enter the extracted directory:
 
-`cd quake3e-git`
+`cd q3now-git`
 
-Build and install `quake3e-git`:
+Build and install `q3now-git`:
 
 `makepkg -risc`
 

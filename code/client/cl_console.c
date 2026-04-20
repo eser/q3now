@@ -1255,8 +1255,7 @@ static void Con_DrawNotify( void )
 Con_ComputeFPS
 
 Client-side 4-frame rolling FPS counter for con_fps.
-Mirrors CG_DrawFPS (code/cgame/cg_draw.c) but calls Sys_Milliseconds
-directly — the console is not inside a cgame VM.
+Uses Sys_Milliseconds directly since the console is not inside a cgame VM.
 ================
 */
 static int Con_ComputeFPS( void ) {
