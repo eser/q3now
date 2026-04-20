@@ -37,68 +37,6 @@ char teamChat2[256];
 
 /* TA UI text painting functions removed -- now handled by Wired UI text system */
 
-/*
-==============
-CG_DrawField
-
-Draws large numbers for status bar and powerups
-==============
-*/
-#ifndef MISSIONPACK
-static void CG_DrawField (int x, int y, int width, int value) {
-	char	num[16], *ptr;
-	int		l;
-	int		frame;
-
-	if ( width < 1 ) {
-		return;
-	}
-
-	// draw number string
-	if ( width > 5 ) {
-		width = 5;
-	}
-
-	switch ( width ) {
-	case 1:
-		value = value > 9 ? 9 : value;
-		value = value < 0 ? 0 : value;
-		break;
-	case 2:
-		value = value > 99 ? 99 : value;
-		value = value < -9 ? -9 : value;
-		break;
-	case 3:
-		value = value > 999 ? 999 : value;
-		value = value < -99 ? -99 : value;
-		break;
-	case 4:
-		value = value > 9999 ? 9999 : value;
-		value = value < -999 ? -999 : value;
-		break;
-	}
-
-	Com_sprintf (num, sizeof(num), "%i", value);
-	l = strlen(num);
-	if (l > width)
-		l = width;
-	x += 2 + CHAR_WIDTH*(width - l);
-
-	ptr = num;
-	while (*ptr && l)
-	{
-		if (*ptr == '-')
-			frame = STAT_MINUS;
-		else
-			frame = *ptr -'0';
-
-		CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, CHAR_WIDTH * NORM_HSCALE, CHAR_HEIGHT * NORM_VSCALE, cgs.media.numberShaders[frame] );
-		x += CHAR_WIDTH;
-		ptr++;
-		l--;
-	}
-}
-#endif // MISSIONPACK
 
 /*
 ================
@@ -259,77 +197,6 @@ void CG_DrawFlagModel( float x, float y, float w, float h, int team, qboolean fo
 	}
 }
 
-/*
-================
-CG_DrawStatusBarHead
-
-================
-*/
-#ifndef MISSIONPACK
-
-static void CG_DrawStatusBarHead( float x ) {
-	vec3_t		angles;
-	float		size, stretch;
-	float		frac;
-
-	VectorClear( angles );
-
-	if ( cg.damageTime && cg.time - cg.damageTime < DAMAGE_TIME ) {
-		frac = (float)(cg.time - cg.damageTime ) / DAMAGE_TIME;
-		size = ICON_SIZE * 1.25 * ( 1.5 - frac * 0.5 );
-
-		stretch = size - ICON_SIZE * 1.25;
-		// kick in the direction of damage
-		x -= stretch * 0.5 + cg.damageX * stretch * 0.5;
-
-		cg.headStartYaw = 180 + cg.damageX * 45;
-
-		cg.headEndYaw = 180 + 20 * cos( crandom()*M_PI );
-		cg.headEndPitch = 5 * cos( crandom()*M_PI );
-
-		cg.headStartTime = cg.time;
-		cg.headEndTime = cg.time + 100 + random() * 2000;
-	} else {
-		if ( cg.time >= cg.headEndTime ) {
-			// select a new head angle
-			cg.headStartYaw = cg.headEndYaw;
-			cg.headStartPitch = cg.headEndPitch;
-			cg.headStartTime = cg.headEndTime;
-			cg.headEndTime = cg.time + 100 + random() * 2000;
-
-			cg.headEndYaw = 180 + 20 * cos( crandom()*M_PI );
-			cg.headEndPitch = 5 * cos( crandom()*M_PI );
-		}
-
-		size = ICON_SIZE * 1.25;
-	}
-
-	// if the server was frozen for a while we may have a bad head start time
-	if ( cg.headStartTime > cg.time ) {
-		cg.headStartTime = cg.time;
-	}
-
-	frac = ( cg.time - cg.headStartTime ) / (float)( cg.headEndTime - cg.headStartTime );
-	frac = frac * frac * ( 3 - 2 * frac );
-	angles[YAW] = cg.headStartYaw + ( cg.headEndYaw - cg.headStartYaw ) * frac;
-	angles[PITCH] = cg.headStartPitch + ( cg.headEndPitch - cg.headStartPitch ) * frac;
-
-	CG_DrawHead( x, 480 - size, size, size,
-				cg.snap->ps.clientNum, angles );
-}
-#endif // MISSIONPACK
-
-/*
-================
-CG_DrawStatusBarFlag
-
-================
-*/
-#ifndef MISSIONPACK
-static void CG_DrawStatusBarFlag( float x, int team ) {
-	CG_DrawFlagModel( x, 480 - ICON_SIZE, ICON_SIZE, ICON_SIZE, team, qfalse );
-}
-#endif // MISSIONPACK
 
 /*
 ================
@@ -357,181 +224,6 @@ void CG_DrawTeamBackground( int x, int y, int w, int h, float alpha, int team )
 	CG_DrawPicNorm( x * NORM_HSCALE, y * NORM_VSCALE, w * NORM_HSCALE, h * NORM_VSCALE, cgs.media.teamStatusBar );
 	trap_R_SetColor( NULL );
 }
-
-/*
-================
-CG_DrawStatusBar
-
-================
-*/
-#if FEAT_LEGACY_UI && !defined(MISSIONPACK)
-static void CG_DrawStatusBar( void ) {
-	int			color;
-	centity_t	*cent;
-	playerState_t	*ps;
-	int			value;
-	vec4_t		hcolor;
-	vec3_t		angles;
-	vec3_t		origin;
-
-	static float colors[4][4] = { 
-//		{ 0.2, 1.0, 0.2, 1.0 } , { 1.0, 0.2, 0.2, 1.0 }, {0.5, 0.5, 0.5, 1} };
-		{ 1.0f, 0.69f, 0.0f, 1.0f },    // normal
-		{ 1.0f, 0.2f, 0.2f, 1.0f },     // low health
-		{ 0.5f, 0.5f, 0.5f, 1.0f },     // weapon firing
-		{ 1.0f, 1.0f, 1.0f, 1.0f } };   // health > 100
-
-	if ( cg_drawStatus.integer == 0 ) {
-		return;
-	}
-
-	// draw the team background
-	CG_DrawTeamBackground( 0, 420, 640, 60, 0.33f, cg.snap->ps.persistant[PERS_TEAM] );
-
-	cent = &cg_entities[cg.snap->ps.clientNum];
-	ps = &cg.snap->ps;
-
-	VectorClear( angles );
-
-	// draw any 3D icons first, so the changes back to 2D are minimized
-	if ( cent->currentState.weapon && cg_weapons[ cent->currentState.weapon ].ammoModel ) {
-		origin[0] = 70;
-		origin[1] = 0;
-		origin[2] = 0;
-		angles[YAW] = 90 + 20 * sin( cg.time / 1000.0 );
-		CG_Draw3DModel( CHAR_WIDTH*3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
-					   cg_weapons[ cent->currentState.weapon ].ammoModel, 0, origin, angles );
-	}
-
-	CG_DrawStatusBarHead( 185 + CHAR_WIDTH*3 + TEXT_ICON_SPACE );
-
-	if( cg.predictedPlayerState.powerups[PW_REDFLAG] ) {
-		CG_DrawStatusBarFlag( 185 + CHAR_WIDTH*3 + TEXT_ICON_SPACE + ICON_SIZE, TEAM_RED );
-	} else if( cg.predictedPlayerState.powerups[PW_BLUEFLAG] ) {
-		CG_DrawStatusBarFlag( 185 + CHAR_WIDTH*3 + TEXT_ICON_SPACE + ICON_SIZE, TEAM_BLUE );
-	} else if( cg.predictedPlayerState.powerups[PW_NEUTRALFLAG] ) {
-		CG_DrawStatusBarFlag( 185 + CHAR_WIDTH*3 + TEXT_ICON_SPACE + ICON_SIZE, TEAM_FREE );
-	}
-
-    if (cgs.gametype == GT_KINGOFTHEHILL && ps->powerups[PW_KING]) {
-        CG_DrawPicNorm((185 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE + ICON_SIZE) * NORM_HSCALE, (480 - ICON_SIZE) * NORM_VSCALE, ICON_SIZE * NORM_HSCALE, ICON_SIZE * NORM_VSCALE, cgs.media.medalExcellent);
-    }
-
-    if (ps->stats[STAT_ARMORCLASS] > ARM_NONE && ps->stats[STAT_ARMOR]) {
-        qhandle_t *model;
-        
-        switch (ps->stats[STAT_ARMORCLASS]) {
-        case ARM_HEAVY:
-            model = &cgs.media.heavyArmorModel;
-            break;
-        case ARM_COMBAT:
-            model = &cgs.media.combatArmorModel;
-            break;
-        case ARM_JACKET:
-            model = &cgs.media.jacketArmorModel;
-            break;
-        default:
-            model = NULL;
-        }
-
-		origin[0] = 90;
-		origin[1] = 0;
-		origin[2] = -10;
-		angles[YAW] = ( cg.time & 2047 ) * 360 / 2048.0;
-		// CG_Draw3DModel( 370 + CHAR_WIDTH*3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
-		//			   cgs.media.armorModel, 0, origin, angles );
-        if (model) {
-            CG_Draw3DModel(370 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE, 432, ICON_SIZE, ICON_SIZE,
-                *model, 0, origin, angles); // CPM
-        }
-	}
-	//
-	// ammo
-	//
-	if ( cent->currentState.weapon ) {
-		value = ps->ammo[cent->currentState.weapon];
-		if ( value > -1 ) {
-			if ( cg.predictedPlayerState.weaponstate == WEAPON_FIRING
-				&& cg.predictedPlayerState.weaponTime > 100 ) {
-				// draw as dark grey when reloading
-				color = 2;	// dark grey
-			} else {
-				if ( value >= 0 ) {
-					color = 0;	// green
-				} else {
-					color = 1;	// red
-				}
-			}
-			trap_R_SetColor( colors[color] );
-			
-			CG_DrawField (0, 432, 3, value);
-			trap_R_SetColor( NULL );
-
-			// if we didn't draw a 3D icon, draw a 2D icon for ammo
-			if ( !cg_draw3dIcons.integer && cg_drawIcons.integer ) {
-				qhandle_t	icon;
-
-				icon = cg_weapons[ cg.predictedPlayerState.weapon ].ammoIcon;
-				if ( icon ) {
-					CG_DrawPicNorm( (CHAR_WIDTH*3 + TEXT_ICON_SPACE) * NORM_HSCALE, 432 * NORM_VSCALE, ICON_SIZE * NORM_HSCALE, ICON_SIZE * NORM_VSCALE, icon );
-				}
-			}
-		}
-	}
-
-	//
-	// health
-	//
-	value = ps->stats[STAT_HEALTH];
-	if ( value > 100 ) {
-		trap_R_SetColor( colors[3] );		// white
-	} else if (value > 25) {
-		trap_R_SetColor( colors[0] );	// green
-	} else if (value > 0) {
-		color = (cg.time >> 8) & 1;	// flash
-		trap_R_SetColor( colors[color] );
-	} else {
-		trap_R_SetColor( colors[1] );	// red
-	}
-
-	// stretch the health up when taking damage
-	CG_DrawField ( 185, 432, 3, value);
-	CG_GetColorForAmount( cg.snap->ps.stats[STAT_HEALTH], cg.snap->ps.stats[STAT_ARMOR], hcolor );
-	trap_R_SetColor( hcolor );
-
-
-	//
-	// armor
-	//
-	value = ps->stats[STAT_ARMOR];
-    if (ps->stats[STAT_ARMORCLASS] > ARM_NONE && value > 0) {
-        qhandle_t *shader;
-
-        switch (ps->stats[STAT_ARMORCLASS]) {
-        case ARM_HEAVY:
-            shader = &cgs.media.heavyArmorIcon;
-            break;
-        case ARM_COMBAT:
-            shader = &cgs.media.combatArmorIcon;
-            break;
-        case ARM_JACKET:
-            shader = &cgs.media.jacketArmorIcon;
-            break;
-        default:
-            shader = NULL;
-        }
-
-		trap_R_SetColor( colors[0] );
-		CG_DrawField (370, 432, 3, value);
-		trap_R_SetColor( NULL );
-		// if we didn't draw a 3D icon, draw a 2D icon for armor
-		if ( shader && !cg_draw3dIcons.integer && cg_drawIcons.integer ) {
-            CG_DrawPicNorm((370 + CHAR_WIDTH * 3 + TEXT_ICON_SPACE) * NORM_HSCALE, 432 * NORM_VSCALE, ICON_SIZE * NORM_HSCALE, ICON_SIZE * NORM_VSCALE, *shader);
-		}
-
-	}
-}
-#endif
 
 /*
 ===========================================================================================
@@ -1096,8 +788,10 @@ static float CG_DrawPowerups( float y ) {
 
 		  y -= ICON_SIZE;
 
-		  trap_R_SetColor( colors[color] );
-		  CG_DrawField( x, y, 2, sortedTime[ i ] / 1000 );
+		  trap_R_DrawTextNorm( va( "%d", sortedTime[ i ] / 1000 ),
+			  (float)(x + CHAR_WIDTH * 2) * NORM_HSCALE, (float)y * NORM_VSCALE,
+			  FONT_DISPLAY, (float)CHAR_HEIGHT * NORM_VSCALE,
+			  colors[color], TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW );
 
 		  t = ps->powerups[ sorted[i] ];
 		  if ( t - cg.time >= POWERUP_BLINKS * POWERUP_BLINK_TIME ) {
@@ -2049,71 +1743,12 @@ static qboolean CG_DrawScoreboard( void ) {
 	}
 	return qfalse;
 #endif
-#if FEAT_TA_UI && FEAT_LEGACY_UI
-	static qboolean firstTime = qtrue;
-
-	if (menuScoreboard) {
-		menuScoreboard->window.flags &= ~WINDOW_FORCED;
-	}
-	if (cg_paused.integer) {
-		cg.deferredPlayerLoading = 0;
-		firstTime = qtrue;
-		return qfalse;
-	}
-
-	// should never happen in Team Arena
-	if (cg_singlePlayer.integer && cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
-		cg.deferredPlayerLoading = 0;
-		firstTime = qtrue;
-		return qfalse;
-	}
-
-	// don't draw scoreboard during death while warmup up
-	if ( !cg.showScores ) {
-		return qfalse;
-	}
-
-	if ( cg.showScores || cg.predictedPlayerState.pm_type == PM_DEAD || cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
-	} else {
-		if ( !CG_FadeColor( cg.scoreFadeTime, FADE_TIME ) ) {
-			// next time scoreboard comes up, don't print killer
-			cg.deferredPlayerLoading = 0;
-			cg.killerName[0] = 0;
-			firstTime = qtrue;
-			return qfalse;
-		}
-	}
-
-	if (menuScoreboard == NULL) {
-		if ( cgs.gametypeIsTeamGame ) {
-			menuScoreboard = Menus_FindByName("teamscore_menu");
-		} else {
-			menuScoreboard = Menus_FindByName("score_menu");
-		}
-	}
-
-	if (menuScoreboard) {
-		if (firstTime) {
-			CG_SetScoreSelection(menuScoreboard);
-			firstTime = qfalse;
-		}
-		Menu_Paint(menuScoreboard, qtrue);
-	}
-
-	// load any models that have been deferred
-	if ( ++cg.deferredPlayerLoading > 10 ) {
-		CG_LoadDeferredPlayers();
-	}
-
-	return qtrue;
-#else
 	if ( cgs.gametype == GT_DUEL )
 		return CG_ModernDrawDuelScoreboard();
 	if ( cgs.gametypeIsTeamGame )
 		return CG_ModernDrawScoretable();
 
 		return CG_ModernDrawFFAScoreboard();
-#endif
 }
 
 #if FEAT_MATCH_SUMMARY
@@ -2361,23 +1996,6 @@ static void CG_DrawWarmup( void ) {
 }
 
 //==================================================================================
-#if FEAT_TA_UI && FEAT_LEGACY_UI
-/* 
-=================
-CG_DrawTimedMenus
-=================
-*/
-void CG_DrawTimedMenus( void ) {
-	if (cg.voiceTime) {
-		int t = cg.time - cg.voiceTime;
-		if ( t > 2500 ) {
-			Menus_CloseByName("voiceMenu");
-			trap_Cvar_Set("cl_conXOffset", "0");
-			cg.voiceTime = 0;
-		}
-	}
-}
-#endif
 /*
 =================
 CG_DrawCampOverlay
@@ -2438,11 +2056,6 @@ CG_Draw2D
 */
 static void CG_Draw2D(stereoFrame_t stereoFrame)
 {
-#if FEAT_TA_UI && FEAT_LEGACY_UI
-	if (cgs.orderPending && cg.time > cgs.orderTime) {
-		CG_CheckOrderPending();
-	}
-#endif
 	// if we are taking a levelshot for the menu, don't draw anything
 	if ( cg.levelShot ) {
 		return;
@@ -2482,65 +2095,6 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 	return;
 #endif
 
-#if FEAT_LEGACY_UI
-	// default HUD
-	if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
-		CG_DrawSpectator();
-
-		if(stereoFrame == STEREO_CENTER)
-			CG_DrawCrosshair();
-
-		CG_DrawCrosshairNames();
-	} else {
-		// don't draw any status if dead or the scoreboard is being explicitly shown
-		if ( !cg.showScores && cg.snap->ps.stats[STAT_HEALTH] > 0 ) {
-
-			Menu_PaintAll();
-			CG_DrawTimedMenus();
-			CG_DrawStatusBar();
-
-			CG_DrawAmmoWarning();
-
-			if(stereoFrame == STEREO_CENTER)
-				CG_DrawCrosshair();
-			CG_DrawCrosshairNames();
-			CG_DrawWeaponSelect();
-
-			CG_DrawHoldableItem();
-			CG_DrawReward();
-		}
-	}
-
-	if ( cgs.gametypeIsTeamGame ) {
-		CG_DrawTeamInfo();
-	}
-
-	// classic HUD: draw vote, lagometer, upper/lower corners, etc.
-	CG_DrawVote();
-	CG_DrawTeamVote();
-
-	CG_DrawLagometer();
-
-	CG_DrawUpperRight(stereoFrame);
-
-	CG_DrawLowerRight();
-	CG_DrawLowerLeft();
-
-	if ( !CG_DrawFollow() ) {
-		CG_DrawWarmup();
-	}
-
-	// don't draw center string if scoreboard is up
-	cg.scoreBoardShowing = CG_DrawScoreboard();
-	if ( !cg.scoreBoardShowing) {
-		CG_DrawCenterString();
-	}
-
-#if FEAT_STATS_WINDOW
-	/* floating window overlays (stats, votes, bot orders) — drawn last, on top of everything */
-	CG_windowDraw();
-#endif
-#endif
 }
 
 
@@ -2552,22 +2106,11 @@ Perform all drawing needed to completely fill the screen
 =====================
 */
 void CG_DrawActive( stereoFrame_t stereoView ) {
-	// optionally draw the info screen instead
 	if ( !cg.snap ) {
-		CG_DrawInformation();
 		return;
 	}
 
 
-#if FEAT_LEGACY_UI
-	{
-		if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR &&
-			( cg.snap->ps.pm_flags & PMF_SCOREBOARD ) ) {
-			CG_DrawDuelScoreboard();
-			return;
-		}
-	}
-#endif
 
 	// clear around the rendered view if sized down
 	CG_TileClear();

@@ -1066,6 +1066,79 @@ static void Loading_DrawVulkanBadge( void ) {
 					   buf, textColor );
 }
 
+/*
+================
+Loading_DrawServerInfoStrip
+
+Remote-only: hostname, PURE badge, MOTD.
+Skipped for localhost/LAN/listen servers.
+Placed in the right panel between streaming rows and the overall bar.
+================
+*/
+static void Loading_DrawServerInfoStrip( void ) {
+	float vpW = (float)cls.glconfig.vidWidth;
+	float vpH = (float)cls.glconfig.vidHeight;
+	const float rx = vpW * 0.542f;     // right panel x (matches other right-panel helpers)
+	const float rw = vpW * 0.436f;     // right panel usable width
+	float y = vpH * 0.63f;
+	const char *info, *sysInfo, *motd, *hostname, *pureFl;
+	char cleanHost[256];
+	vec4_t hostColor = { 0.91f, 0.96f, 0.99f, 0.70f };   // near-white @ 70%
+	vec4_t pureColor = { 0.00f, 0.71f, 0.85f, 0.80f };   // cyan accent
+	vec4_t motdColor = { 0.29f, 0.42f, 0.53f, 0.80f };   // muted blue
+
+	if ( !Q_stricmp( cls.servername, "localhost" ) ) {
+		return;
+	}
+
+	info    = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
+	sysInfo = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SYSTEMINFO];
+	motd    = cl.gameState.stringData + cl.gameState.stringOffsets[CS_MOTD];
+
+	hostname = Info_ValueForKey( info, "sv_hostname" );
+	if ( hostname && hostname[0] ) {
+		Q_strncpyz( cleanHost, hostname, sizeof( cleanHost ) );
+		Q_CleanStr( cleanHost );
+		Loading_DrawStringFaded( (int)rx, (int)y, LOADING_FONT_LABEL, cleanHost, hostColor );
+		y += LOADING_FONT_LABEL * 1.6f;
+	}
+
+	pureFl = Info_ValueForKey( sysInfo, "sv_pure" );
+	if ( pureFl && pureFl[0] == '1' ) {
+		Loading_DrawStringFaded( (int)rx, (int)y, LOADING_FONT_SMALL, "PURE SERVER", pureColor );
+		y += LOADING_FONT_SMALL * 1.6f;
+	}
+
+	if ( motd && motd[0] ) {
+		int maxChars = (int)( rw / LOADING_FONT_SMALL );
+		int len = (int)strlen( motd );
+
+		if ( len > maxChars ) {
+			char line1[256], line2[256];
+			int splitAt = maxChars;
+			while ( splitAt > 0 && motd[splitAt] != ' ' ) {
+				splitAt--;
+			}
+			if ( splitAt == 0 ) {
+				splitAt = maxChars;
+			}
+			Q_strncpyz( line1, motd, splitAt + 1 );
+			Q_strncpyz( line2, motd + splitAt + 1, sizeof( line2 ) );
+			if ( (int)strlen( line2 ) > maxChars ) {
+				line2[maxChars - 3] = '.';
+				line2[maxChars - 2] = '.';
+				line2[maxChars - 1] = '.';
+				line2[maxChars] = '\0';
+			}
+			Loading_DrawStringFaded( (int)rx, (int)y, LOADING_FONT_SMALL, line1, motdColor );
+			y += LOADING_FONT_SMALL * 1.5f;
+			Loading_DrawStringFaded( (int)rx, (int)y, LOADING_FONT_SMALL, line2, motdColor );
+		} else {
+			Loading_DrawStringFaded( (int)rx, (int)y, LOADING_FONT_SMALL, motd, motdColor );
+		}
+	}
+}
+
 // -----------------------------------------------------------------------
 // Main entry point
 // -----------------------------------------------------------------------
@@ -1121,6 +1194,9 @@ void CL_DrawLoadingScreen( void ) {
 
 	// Right panel: streaming progress rows
 	Loading_DrawStreamingRows();
+
+	// Right panel: server info strip (remote connections only)
+	Loading_DrawServerInfoStrip();
 
 	// Right panel: overall bar with phase label and pulse dot
 	Loading_DrawOverallBar();

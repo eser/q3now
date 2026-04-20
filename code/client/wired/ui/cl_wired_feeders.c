@@ -394,9 +394,10 @@ static int WiredFeeder_GametypeBits( const char *string ) {
 	int         bits = 0;
 	const char  *p = string;
 	const char  *token;
+	ComParser   parser = { 0 };
 
 	while ( 1 ) {
-		token = COM_ParseExt( &p, qfalse );
+		token = COM_ParseExt( &parser, &p, qfalse );
 		if ( !token[0] ) break;
 		bits |= BG_GametypeBits( token );
 	}
@@ -425,9 +426,10 @@ static void WiredFeeder_ParseArenaBuffer( const char *buf ) {
 	char        arenaLongname[64];
 	char        arenaType[64];
 	wiredMapInfo_t *entry;
+	ComParser   parser = { 0 };
 
 	while ( 1 ) {
-		token = COM_Parse( &p );
+		token = COM_Parse( &parser, &p );
 		if ( !token[0] ) break;
 		if ( strcmp( token, "{" ) != 0 ) break;
 
@@ -437,11 +439,11 @@ static void WiredFeeder_ParseArenaBuffer( const char *buf ) {
 
 		// parse key-value pairs until closing brace
 		while ( 1 ) {
-			token = COM_ParseExt( &p, qtrue );
+			token = COM_ParseExt( &parser, &p, qtrue );
 			if ( !token[0] || !strcmp( token, "}" ) ) break;
 
 			Q_strncpyz( key, token, sizeof( key ) );
-			token = COM_ParseExt( &p, qfalse );
+			token = COM_ParseExt( &parser, &p, qfalse );
 
 			if ( Q_stricmp( key, "map" ) == 0 ) {
 				Q_strncpyz( arenaMap, token, sizeof( arenaMap ) );

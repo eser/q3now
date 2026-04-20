@@ -1611,10 +1611,11 @@ static qboolean SV_BotVerifyParseOldFile(
 	curSkill = -1;
 	inBlock = 0;
 
-	while ( *(tok = COM_ParseExt( &p, qtrue )) ) {
+	ComParser parser = { 0 };
+	while ( *(tok = COM_ParseExt( &parser, &p, qtrue )) ) {
 		// Skip preprocessor directives (#include etc.)
 		if ( tok[0] == '#' ) {
-			COM_ParseExt( &p, qfalse );
+			COM_ParseExt( &parser, &p, qfalse );
 			continue;
 		}
 
@@ -1629,7 +1630,7 @@ static qboolean SV_BotVerifyParseOldFile(
 		}
 
 		if ( !inBlock && !strcmp( tok, "skill" ) ) {
-			const char *numStr = COM_ParseExt( &p, qfalse );
+			const char *numStr = COM_ParseExt( &parser, &p, qfalse );
 			if ( numStr && *numStr ) {
 				int sn = atoi( numStr );
 				if ( sn >= 1 && sn <= 5 ) {
@@ -1643,7 +1644,7 @@ static qboolean SV_BotVerifyParseOldFile(
 		if ( inBlock && curSkill >= 1 && curSkill <= 5 ) {
 			idx = SV_BotVerifyCharNameToIndex( tok );
 			// Read value token (COM_ParseExt strips quotes from strings)
-			const char *valStr = COM_ParseExt( &p, qfalse );
+			const char *valStr = COM_ParseExt( &parser, &p, qfalse );
 			if ( !valStr || !*valStr ) {
 				break;
 			}

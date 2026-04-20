@@ -352,6 +352,15 @@ typedef int		clipHandle_t;
 #define	MAX_INFO_KEY		1024
 #define	MAX_INFO_VALUE		1024
 
+#define MAX_INFO_TOKENS ((MAX_INFO_STRING/3)+2)
+
+typedef struct {
+	char        buffer[MAX_INFO_STRING];
+	const char  *keys[MAX_INFO_TOKENS];
+	const char  *values[MAX_INFO_TOKENS];
+	int         count;
+} InfoTokens;
+
 #define MAX_USERINFO_LENGTH (MAX_INFO_STRING-13) // incl. length of 'connect ""' or 'userinfo ""' and reserving one byte to avoid q3msgboom
 													
 #define	BIG_INFO_STRING		8192  // used for system info key only
@@ -412,14 +421,6 @@ typedef enum {
 #define	DEFAULT_MODEL			"visor"
 
 // font rendering values used by ui and cgame
-
-#define PROP_GAP_WIDTH			3
-#define PROP_SPACE_WIDTH		8
-#define PROP_HEIGHT				27
-#define PROP_SMALL_SIZE_SCALE	0.75
-
-#define BLINK_DIVISOR			200
-#define PULSE_DIVISOR			75
 
 #define UI_LEFT			0x00000000	// default
 #define UI_CENTER		0x00000001
@@ -500,11 +501,6 @@ __asm__(".symver memcpy,memcpy@GLIBC_2.2.5");
 #define NUMVERTEXNORMALS	162
 extern	vec3_t	bytedirs[NUMVERTEXNORMALS];
 
-// DEPRECATED -- Wired UI and cgame use normalized coordinates (0.0-1.0).
-// Only kept for server/renderer backward compatibility.
-#define	SCREEN_WIDTH		640
-#define	SCREEN_HEIGHT		480
-
 #define TINYCHAR_WIDTH		(SMALLCHAR_WIDTH)
 #define TINYCHAR_HEIGHT		(SMALLCHAR_HEIGHT/2)
 
@@ -513,9 +509,6 @@ extern	vec3_t	bytedirs[NUMVERTEXNORMALS];
 
 #define BIGCHAR_WIDTH		16
 #define BIGCHAR_HEIGHT		16
-
-#define	GIANTCHAR_WIDTH		32
-#define	GIANTCHAR_HEIGHT	48
 
 extern	vec4_t		colorBlack;
 extern	vec4_t		colorRed;
@@ -779,17 +772,6 @@ void	COM_DefaultExtension( char *path, int maxSize, const char *extension );
 
 unsigned long Com_GenerateHashValue( const char *fname, const unsigned int size );
 
-void	COM_BeginParseSession( const char *name );
-int		COM_GetCurrentParseLine( void );
-const char	*COM_Parse( const char **data_p );
-const char	*COM_ParseExt( const char **data_p, qboolean allowLineBreak );
-int		COM_Compress( char *data_p );
-void	COM_ParseError( const char *format, ... ) __attribute__ ((format (printf, 1, 2)));
-void	COM_ParseWarning( const char *format, ... ) __attribute__ ((format (printf, 1, 2)));
-//int		COM_ParseInfos( const char *buf, int max, char infos[][MAX_INFO_STRING] );
-
-char	*COM_ParseComplex( const char **data_p, qboolean allowLineBreak );
-
 typedef enum {
 	TK_GENEGIC = 0, // for single-char tokens
 	TK_STRING,
@@ -809,7 +791,24 @@ typedef enum {
 	TK_EOF,
 } tokenType_t;
 
-extern tokenType_t com_tokentype;
+typedef struct {
+	char        token[MAX_TOKEN_CHARS];
+	char        parsename[MAX_TOKEN_CHARS];
+	int         lines;
+	int         tokenline;
+	tokenType_t tokentype;
+} ComParser;
+
+void	COM_BeginParseSession( ComParser *parser, const char *name );
+int		COM_GetCurrentParseLine( const ComParser *parser );
+const char	*COM_Parse( ComParser *parser, const char **data_p );
+const char	*COM_ParseExt( ComParser *parser, const char **data_p, qboolean allowLineBreak );
+int		COM_Compress( char *data_p );
+void	COM_ParseError( const ComParser *parser, const char *format, ... ) __attribute__ ((format (printf, 2, 3)));
+void	COM_ParseWarning( const ComParser *parser, const char *format, ... ) __attribute__ ((format (printf, 2, 3)));
+//int		COM_ParseInfos( const char *buf, int max, char infos[][MAX_INFO_STRING] );
+
+char	*COM_ParseComplex( ComParser *parser, const char **data_p, qboolean allowLineBreak );
 
 #define MAX_TOKENLENGTH		1024
 
@@ -833,12 +832,12 @@ typedef struct pc_token_s
 
 // data is an in/out parm, returns a parsed out token
 
-qboolean SkipBracedSection( const char **program, int depth );
-void SkipRestOfLine( const char **data );
+qboolean SkipBracedSection( ComParser *parser, const char **program, int depth );
+void SkipRestOfLine( ComParser *parser, const char **data );
 
-void Parse1DMatrix( const char **buf_p, int x, float *m);
-void Parse2DMatrix( const char **buf_p, int y, int x, float *m);
-void Parse3DMatrix( const char **buf_p, int z, int y, int x, float *m);
+void Parse1DMatrix( ComParser *parser, const char **buf_p, int x, float *m);
+void Parse2DMatrix( ComParser *parser, const char **buf_p, int y, int x, float *m);
+void Parse3DMatrix( ComParser *parser, const char **buf_p, int z, int y, int x, float *m);
 
 int QDECL Com_sprintf( char *dest, int size, const char *fmt, ... ) __attribute__ ((format (printf, 3, 4)));
 
@@ -944,8 +943,8 @@ void Com_TruncateLongString( char *buffer, const char *s );
 // key / value info strings
 //
 const char *Info_ValueForKey( const char *s, const char *key );
-void Info_Tokenize( const char *s );
-const char *Info_ValueForKeyToken( const char *key );
+void Info_Tokenize( InfoTokens *tokens, const char *s );
+const char *Info_ValueForKeyToken( const InfoTokens *tokens, const char *key );
 #define Info_SetValueForKey( buf, key, value ) Info_SetValueForKey_s( (buf), MAX_INFO_STRING, (key), (value) )
 qboolean Info_SetValueForKey_s( char *s, int slen, const char *key, const char *value );
 qboolean Info_Validate( const char *s );

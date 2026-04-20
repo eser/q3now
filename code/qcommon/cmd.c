@@ -72,14 +72,12 @@ Usage: waitms <milliseconds>
 ============
 */
 static void Cmd_WaitMs_f( void ) {
-	int duration;
-
 	if ( Cmd_Argc() != 2 ) {
 		Com_Printf( "usage: waitms <milliseconds>\n" );
 		return;
 	}
 
-	duration = atoi( Cmd_Argv( 1 ) );
+	int duration = atoi( Cmd_Argv( 1 ) );
 	if ( duration <= 0 ) {
 		Com_Printf( "waitms: invalid duration\n" );
 		return;
@@ -150,7 +148,6 @@ void Cbuf_NestedAdd( const char *text ) {
 	int len = (int)strlen( text );
 	int pos = nestedCmdOffset;
 	qboolean separate = qfalse;
-	int i;
 
 	if ( len <= 0 ) {
 		nestedCmdOffset = cmd_text.cursize;
@@ -192,7 +189,7 @@ void Cbuf_NestedAdd( const char *text ) {
 	}
 
 	// move the existing command text
-	for ( i = cmd_text.cursize - 1; i >= pos; i-- ) {
+	for ( int i = cmd_text.cursize - 1; i >= pos; i-- ) {
 		cmd_text.data[i + len] = cmd_text.data[i];
 	}
 
@@ -220,10 +217,7 @@ Adds a \n to the text
 ============
 */
 void Cbuf_InsertText( const char *text ) {
-	int		len;
-	int		i;
-
-	len = strlen( text ) + 1;
+	int len = strlen( text ) + 1;
 
 	if ( len + cmd_text.cursize > cmd_text.maxsize ) {
 		Com_Printf( "Cbuf_InsertText overflowed\n" );
@@ -231,7 +225,7 @@ void Cbuf_InsertText( const char *text ) {
 	}
 
 	// move the existing command text
-	for ( i = cmd_text.cursize - 1 ; i >= 0 ; i-- ) {
+	for ( int i = cmd_text.cursize - 1 ; i >= 0 ; i-- ) {
 		cmd_text.data[ i + len ] = cmd_text.data[ i ];
 	}
 
@@ -305,11 +299,6 @@ Cbuf_Execute
 */
 void Cbuf_Execute( void )
 {
-	char line[MAX_CMD_LINE], *text;
-	int i, n, quotes;
-	qboolean in_star_comment;
-	qboolean in_slash_comment;
-
 	if ( cmd_wait > 0 ) {
 		// delay command buffer execution
 		return;
@@ -325,15 +314,17 @@ void Cbuf_Execute( void )
 	// This will keep // style comments all on one line by not breaking on
 	// a semicolon.  It will keep /* ... */ style comments all on one line by not
 	// breaking it for semicolon or newline.
-	in_star_comment = qfalse;
-	in_slash_comment = qfalse;
+	qboolean in_star_comment = qfalse;
+	qboolean in_slash_comment = qfalse;
 
 	while ( cmd_text.cursize > 0 )
 	{
 		// find a \n or ; line break or comment: // or /* */
-		text = (char *)cmd_text.data;
+		char *text = (char *)cmd_text.data;
+		char line[MAX_CMD_LINE];
 
-		quotes = 0;
+		int quotes = 0;
+		int i;
 		for ( i = 0 ; i< cmd_text.cursize ; i++ )
 		{
 			if (text[i] == '"')
@@ -364,10 +355,7 @@ void Cbuf_Execute( void )
 		}
 
 		// copy up to (MAX_CMD_LINE - 1) chars but keep buffer position intact to prevent parsing truncated leftover
-		if ( i > (MAX_CMD_LINE - 1) )
-			n = MAX_CMD_LINE - 1;
-		else
-			n = i;
+		int n = ( i > (MAX_CMD_LINE - 1) ) ? MAX_CMD_LINE - 1 : i;
 
 		memcpy( line, text, n );
 		line[n] = '\0';
@@ -438,14 +426,7 @@ Cmd_Exec_f
 ===============
 */
 static void Cmd_Exec_f( void ) {
-	qboolean quiet;
-	union {
-		char *c;
-		void *v;
-	} f;
-	char filename[MAX_QPATH];
-
-	quiet = !Q_stricmp(Cmd_Argv(0), "execq");
+	qboolean quiet = !Q_stricmp(Cmd_Argv(0), "execq");
 
 	if (Cmd_Argc () != 2) {
 		Com_Printf ("exec%s <filename> : execute a script file%s\n",
@@ -453,6 +434,11 @@ static void Cmd_Exec_f( void ) {
 		return;
 	}
 
+	union {
+		char *c;
+		void *v;
+	} f;
+	char filename[MAX_QPATH];
 	Q_strncpyz( filename, Cmd_Argv(1), sizeof( filename ) );
 	COM_DefaultExtension( filename, sizeof( filename ), ".cfg" );
 	FS_BypassPure();
@@ -485,14 +471,12 @@ Inserts the current value of a variable as command text
 ===============
 */
 static void Cmd_Vstr_f( void ) {
-	const char *v;
-
 	if ( Cmd_Argc () != 2 ) {
 		Com_Printf( "vstr <variablename> : execute a variable command\n" );
 		return;
 	}
 
-	v = Cvar_VariableString( Cmd_Argv( 1 ) );
+	const char *v = Cvar_VariableString( Cmd_Argv( 1 ) );
 	Cbuf_InsertText( v );
 }
 
@@ -514,9 +498,6 @@ arrived without a matching press (e.g. alt-tab focus loss).
 static qboolean vstrKeyPressed[ MAX_VSTR_KEYS ];
 
 static void Cmd_VstrDown_f( void ) {
-	int key;
-	const char *v;
-
 	if ( Cmd_Argc() < 3 ) {
 		Com_Printf( "+vstr <press cvar> <release cvar> : press/release variable commands\n" );
 		return;
@@ -526,7 +507,7 @@ static void Cmd_VstrDown_f( void ) {
 	// extra argument by Key_ParseBinding (e.g. "+vstr a b 32 1234").
 	// When invoked manually from the console there is no keynum, so we
 	// use a sentinel slot (0) that is always considered "pressed".
-	key = 0;
+	int key = 0;
 	if ( Cmd_Argc() >= 4 ) {
 		key = atoi( Cmd_Argv( 3 ) );
 		if ( key < 0 || key >= MAX_VSTR_KEYS ) {
@@ -536,20 +517,17 @@ static void Cmd_VstrDown_f( void ) {
 
 	vstrKeyPressed[ key ] = qtrue;
 
-	v = Cvar_VariableString( Cmd_Argv( 1 ) );
+	const char *v = Cvar_VariableString( Cmd_Argv( 1 ) );
 	Cbuf_InsertText( v );
 }
 
 static void Cmd_VstrUp_f( void ) {
-	int key;
-	const char *v;
-
 	if ( Cmd_Argc() < 3 ) {
 		Com_Printf( "-vstr <press cvar> <release cvar> : press/release variable commands\n" );
 		return;
 	}
 
-	key = 0;
+	int key = 0;
 	if ( Cmd_Argc() >= 4 ) {
 		key = atoi( Cmd_Argv( 3 ) );
 		if ( key < 0 || key >= MAX_VSTR_KEYS ) {
@@ -563,7 +541,7 @@ static void Cmd_VstrUp_f( void ) {
 	}
 	vstrKeyPressed[ key ] = qfalse;
 
-	v = Cvar_VariableString( Cmd_Argv( 2 ) );
+	const char *v = Cvar_VariableString( Cmd_Argv( 2 ) );
 	Cbuf_InsertText( v );
 }
 
@@ -691,13 +669,12 @@ Returns a single string containing argv(arg) to argv(argc()-1)
 */
 char *Cmd_ArgsFrom( int arg ) {
 	static char cmd_args[BIG_INFO_STRING], *s;
-	int i;
 
 	s = cmd_args;
 	*s = '\0';
 	if (arg < 0)
 		arg = 0;
-	for ( i = arg ; i < cmd_argc ; i++ ) {
+	for ( int i = arg ; i < cmd_argc ; i++ ) {
 		s = Q_stradd( s, cmd_argv[i] );
 		if ( i != cmd_argc-1 ) {
 			s = Q_stradd( s, " " );
@@ -743,9 +720,7 @@ char *Cmd_Cmd( void )
 */
 void Cmd_Args_Sanitize( const char *separators )
 {
-	int i;
-
-	for( i = 1; i < cmd_argc; i++ )
+	for( int i = 1; i < cmd_argc; i++ )
 	{
 		char *c = cmd_argv[i];
 
@@ -770,9 +745,6 @@ will point into this temporary buffer.
 // NOTE TTimo define that to track tokenization issues
 //#define TKN_DBG
 static void Cmd_TokenizeString2( const char *text_in, qboolean ignoreQuotes ) {
-	const char *text;
-	char *textOut;
-
 #ifdef TKN_DBG
 	// FIXME TTimo blunt hook to try to find the tokenization of userinfo
 	Com_DPrintf("Cmd_TokenizeString: %s\n", text_in);
@@ -788,8 +760,8 @@ static void Cmd_TokenizeString2( const char *text_in, qboolean ignoreQuotes ) {
 
 	Q_strncpyz( cmd_cmd, text_in, sizeof( cmd_cmd ) );
 
-	text = cmd_cmd; // read from safe-length buffer
-	textOut = cmd_tokenized;
+	const char *text = cmd_cmd; // read from safe-length buffer
+	char *textOut = cmd_tokenized;
 
 	while ( 1 ) {
 		if ( cmd_argc >= ARRAY_LEN( cmd_argv ) ) {
@@ -905,8 +877,7 @@ Cmd_FindCommand
 */
 static cmd_function_t *Cmd_FindCommand( const char *cmd_name )
 {
-	cmd_function_t *cmd;
-	for( cmd = cmd_functions; cmd; cmd = cmd->next )
+	for( cmd_function_t *cmd = cmd_functions; cmd; cmd = cmd->next )
 		if( !Q_stricmp( cmd_name, cmd->name ) )
 			return cmd;
 	return NULL;
@@ -919,8 +890,6 @@ Cmd_AddCommand
 ============
 */
 static void Cmd_AddCommandInternal( const char *cmd_name, xcommand_t function, qboolean cgame ) {
-	cmd_function_t *cmd;
-
 	// fail if the command already exists
 	if ( Cmd_FindCommand( cmd_name ) )
 	{
@@ -931,7 +900,7 @@ static void Cmd_AddCommandInternal( const char *cmd_name, xcommand_t function, q
 	}
 
 	// use a small malloc to avoid zone fragmentation
-	cmd = S_Malloc( sizeof( *cmd ) );
+	cmd_function_t *cmd = S_Malloc( sizeof( *cmd ) );
 	cmd->name = CopyString( cmd_name );
 	cmd->function = function;
 	cmd->complete = NULL;
@@ -955,9 +924,7 @@ Cmd_SetCommandCompletionFunc
 ============
 */
 void Cmd_SetCommandCompletionFunc( const char *command, completionFunc_t complete ) {
-	cmd_function_t *cmd;
-
-	for( cmd = cmd_functions; cmd; cmd = cmd->next ) {
+	for( cmd_function_t *cmd = cmd_functions; cmd; cmd = cmd->next ) {
 		if( !Q_stricmp( command, cmd->name ) ) {
 			cmd->complete = complete;
 			return;
@@ -976,9 +943,7 @@ query a command's completion function without triggering it.
 ============
 */
 completionFunc_t Cmd_GetCommandCompletionFunc( const char *command ) {
-	const cmd_function_t *cmd;
-
-	for ( cmd = cmd_functions; cmd; cmd = cmd->next ) {
+	for ( const cmd_function_t *cmd = cmd_functions; cmd; cmd = cmd->next ) {
 		if ( !Q_stricmp( command, cmd->name ) ) {
 			return cmd->complete;
 		}
@@ -994,11 +959,9 @@ Cmd_RemoveCommand
 ============
 */
 void Cmd_RemoveCommand( const char *cmd_name ) {
-	cmd_function_t *cmd, **back;
-
-	back = &cmd_functions;
+	cmd_function_t **back = &cmd_functions;
 	while( 1 ) {
-		cmd = *back;
+		cmd_function_t *cmd = *back;
 		if ( !cmd ) {
 			// command wasn't active
 			return;
@@ -1110,12 +1073,10 @@ Used by the searchhelp command to enumerate every command.
 */
 void Cmd_ForEachName( void (*callback)( const char *cmd_name, void *userdata ), void *userdata )
 {
-	const cmd_function_t *cmd;
-
 	if ( callback == NULL )
 		return;
 
-	for ( cmd = cmd_functions ; cmd ; cmd = cmd->next ) {
+	for ( const cmd_function_t *cmd = cmd_functions ; cmd ; cmd = cmd->next ) {
 		if ( cmd->name ) {
 			callback( cmd->name, userdata );
 		}
@@ -1129,9 +1090,7 @@ Cmd_CompleteArgument
 ============
 */
 qboolean Cmd_CompleteArgument( const char *command, const char *args, int argNum ) {
-	const cmd_function_t *cmd;
-
-	for( cmd = cmd_functions; cmd; cmd = cmd->next ) {
+	for( const cmd_function_t *cmd = cmd_functions; cmd; cmd = cmd->next ) {
 		if ( !Q_stricmp( command, cmd->name ) ) {
 			if ( cmd->complete ) {
 				cmd->complete( args, argNum );
@@ -1152,8 +1111,6 @@ A complete command line has been parsed, so try to execute it
 ============
 */
 void Cmd_ExecuteString( const char *text ) {
-	cmd_function_t *cmd, **prev;
-
 	// execute the command line
 	Cmd_TokenizeString( text );
 	if ( !Cmd_Argc() ) {
@@ -1161,6 +1118,7 @@ void Cmd_ExecuteString( const char *text ) {
 	}
 
 	// check registered command functions
+	cmd_function_t *cmd, **prev;
 	for ( prev = &cmd_functions ; *prev ; prev = &cmd->next ) {
 		cmd = *prev;
 		if ( !Q_stricmp( cmd_argv[0], cmd->name ) ) {
@@ -1213,18 +1171,9 @@ Cmd_List_f
 */
 static void Cmd_List_f( void )
 {
-	const cmd_function_t *cmd;
-	const char *match;
-	int i;
-
-	if ( Cmd_Argc() > 1 ) {
-		match = Cmd_Argv( 1 );
-	} else {
-		match = NULL;
-	}
-
-	i = 0;
-	for ( cmd = cmd_functions ; cmd ; cmd=cmd->next ) {
+	const char *match = ( Cmd_Argc() > 1 ) ? Cmd_Argv( 1 ) : NULL;
+	int i = 0;
+	for ( const cmd_function_t *cmd = cmd_functions ; cmd ; cmd=cmd->next ) {
 		if ( match && !Com_Filter( match, cmd->name ) )
 			continue;
 		Com_Printf( "%s\n", cmd->name );

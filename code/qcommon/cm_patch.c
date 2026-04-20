@@ -104,10 +104,8 @@ CM_SignbitsForNormal
 =================
 */
 static int CM_SignbitsForNormal( const vec3_t normal ) {
-	int	bits, j;
-
-	bits = 0;
-	for (j=0 ; j<3 ; j++) {
+	int bits = 0;
+	for (int j=0 ; j<3 ; j++) {
 		if ( normal[j] < 0 ) {
 			bits |= 1<<j;
 		}
@@ -158,22 +156,20 @@ static qboolean	CM_NeedsSubdivision( const vec3_t a, const vec3_t b, const vec3_
 	vec3_t		cmid;
 	vec3_t		lmid;
 	vec3_t		delta;
-	float		dist;
-	int			i;
 
 	// calculate the linear midpoint
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		lmid[i] = 0.5*(a[i] + c[i]);
 	}
 
 	// calculate the exact curve midpoint
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		cmid[i] = 0.5 * ( 0.5*(a[i] + b[i]) + 0.5*(b[i] + c[i]) );
 	}
 
 	// see if the curve is far enough away from the linear mid
 	VectorSubtract( cmid, lmid, delta );
-	dist = VectorLength( delta );
+	float dist = VectorLength( delta );
 
 	return dist >= SUBDIVIDE_DISTANCE;
 }
@@ -188,9 +184,7 @@ the subdivided sequence will be: a, out1, out2, out3, c
 ===============
 */
 static void CM_Subdivide( const vec3_t a, const vec3_t b, const vec3_t c, vec3_t out1, vec3_t out2, vec3_t out3 ) {
-	int		i;
-
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		out1[i] = 0.5 * (a[i] + b[i]);
 		out3[i] = 0.5 * (b[i] + c[i]);
 		out2[i] = 0.5 * (out1[i] + out3[i]);
@@ -206,13 +200,11 @@ Swaps the rows and columns in place
 =================
 */
 static void CM_TransposeGrid( cGrid_t *grid ) {
-	int			i, j, l;
 	vec3_t		temp;
-	qboolean	tempWrap;
 
 	if ( grid->width > grid->height ) {
-		for ( i = 0 ; i < grid->height ; i++ ) {
-			for ( j = i + 1 ; j < grid->width ; j++ ) {
+		for ( int i = 0 ; i < grid->height ; i++ ) {
+			for ( int j = i + 1 ; j < grid->width ; j++ ) {
 				if ( j < grid->height ) {
 					// swap the value
 					VectorCopy( grid->points[i][j], temp );
@@ -225,8 +217,8 @@ static void CM_TransposeGrid( cGrid_t *grid ) {
 			}
 		}
 	} else {
-		for ( i = 0 ; i < grid->width ; i++ ) {
-			for ( j = i + 1 ; j < grid->height ; j++ ) {
+		for ( int i = 0 ; i < grid->width ; i++ ) {
+			for ( int j = i + 1 ; j < grid->height ; j++ ) {
 				if ( j < grid->width ) {
 					// swap the value
 					VectorCopy( grid->points[j][i], temp );
@@ -240,11 +232,11 @@ static void CM_TransposeGrid( cGrid_t *grid ) {
 		}
 	}
 
-	l = grid->width;
+	int l = grid->width;
 	grid->width = grid->height;
 	grid->height = l;
 
-	tempWrap = grid->wrapWidth;
+	qboolean tempWrap = grid->wrapWidth;
 	grid->wrapWidth = grid->wrapHeight;
 	grid->wrapHeight = tempWrap;
 }
@@ -259,11 +251,10 @@ If the left and right columns are exactly equal, set grid->wrapWidth qtrue
 */
 static void CM_SetGridWrapWidth( cGrid_t *grid ) {
 	int		i, j;
-	float	d;
 
 	for ( i = 0 ; i < grid->height ; i++ ) {
 		for ( j = 0 ; j < 3 ; j++ ) {
-			d = grid->points[0][i][j] - grid->points[grid->width-1][i][j];
+			float d = grid->points[0][i][j] - grid->points[grid->width-1][i][j];
 			if ( d < -WRAP_POINT_EPSILON || d > WRAP_POINT_EPSILON ) {
 				break;
 			}
@@ -290,12 +281,11 @@ from the true curve
 =================
 */
 static void CM_SubdivideGridColumns( cGrid_t *grid ) {
-	int		i, j, k;
-
-	for ( i = 0 ; i < grid->width - 2 ;  ) {
+	for ( int i = 0 ; i < grid->width - 2 ;  ) {
 		// grid->points[i][x] is an interpolating control point
 		// grid->points[i+1][x] is an approximating control point
 		// grid->points[i+2][x] is an interpolating control point
+		int j;
 
 		//
 		// first see if we can collapse the approximating column away
@@ -310,7 +300,7 @@ static void CM_SubdivideGridColumns( cGrid_t *grid ) {
 			// that we can collapse the entire column away
 			for ( j = 0 ; j < grid->height ; j++ ) {
 				// remove the column
-				for ( k = i + 2 ; k < grid->width ; k++ ) {
+				for ( int k = i + 2 ; k < grid->width ; k++ ) {
 					VectorCopy( grid->points[k][j], grid->points[k-1][j] );
 				}
 			}
@@ -336,7 +326,7 @@ static void CM_SubdivideGridColumns( cGrid_t *grid ) {
 			// make room for two additional columns in the grid
 			// columns i+1 will be replaced, column i+2 will become i+4
 			// i+1, i+2, and i+3 will be generated
-			for ( k = grid->width - 1 ; k > i + 1 ; k-- ) {
+			for ( int k = grid->width - 1 ; k > i + 1 ; k-- ) {
 				VectorCopy( grid->points[k][j], grid->points[k+2][j] );
 			}
 
@@ -359,9 +349,7 @@ CM_ComparePoints
 */
 #define	POINT_EPSILON	0.1
 static qboolean CM_ComparePoints( const float *a, const float *b ) {
-	float		d;
-
-	d = a[0] - b[0];
+	float d = a[0] - b[0];
 	if ( d < -POINT_EPSILON || d > POINT_EPSILON ) {
 		return qfalse;
 	}
@@ -385,9 +373,8 @@ If there are any identical columns, remove them
 =================
 */
 static void CM_RemoveDegenerateColumns( cGrid_t *grid ) {
-	int		i, j, k;
-
-	for ( i = 0 ; i < grid->width - 1 ; i++ ) {
+	for ( int i = 0 ; i < grid->width - 1 ; i++ ) {
+		int j;
 		for ( j = 0 ; j < grid->height ; j++ ) {
 			if ( !CM_ComparePoints( grid->points[i][j], grid->points[i+1][j] ) ) {
 				break;
@@ -400,7 +387,7 @@ static void CM_RemoveDegenerateColumns( cGrid_t *grid ) {
 
 		for ( j = 0 ; j < grid->height ; j++ ) {
 			// remove the column
-			for ( k = i + 2 ; k < grid->width ; k++ ) {
+			for ( int k = i + 2 ; k < grid->width ; k++ ) {
 				VectorCopy( grid->points[k][j], grid->points[k-1][j] );
 			}
 		}
@@ -434,8 +421,6 @@ CM_PlaneEqual
 ==================
 */
 static qboolean CM_PlaneEqual( const patchPlane_t *p, const float plane[4], int *flipped ) {
-	float invplane[4];
-
 	if (
 	   fabs(p->plane[0] - plane[0]) < NORMAL_EPSILON
 	&& fabs(p->plane[1] - plane[1]) < NORMAL_EPSILON
@@ -446,6 +431,7 @@ static qboolean CM_PlaneEqual( const patchPlane_t *p, const float plane[4], int 
 		return qtrue;
 	}
 
+	float invplane[4];
 	VectorNegate(plane, invplane);
 	invplane[3] = -plane[3];
 
@@ -469,9 +455,7 @@ CM_SnapVector
 ==================
 */
 static void CM_SnapVector( vec3_t normal ) {
-	int		i;
-
-	for (i=0 ; i<3 ; i++)
+	for (int i=0 ; i<3 ; i++)
 	{
 		if ( fabs(normal[i] - 1) < NORMAL_EPSILON )
 		{
@@ -495,10 +479,8 @@ CM_FindPlane2
 ==================
 */
 static int CM_FindPlane2( const float plane[4], int *flipped ) {
-	int i;
-
 	// see if the points are close enough to an existing plane
-	for ( i = 0 ; i < numPlanes ; i++ ) {
+	for ( int i = 0 ; i < numPlanes ; i++ ) {
 		if (CM_PlaneEqual(&planes[i], plane, flipped)) return i;
 	}
 
@@ -525,20 +507,18 @@ CM_FindPlane
 */
 static int CM_FindPlane( const float *p1, const float *p2, const float *p3 ) {
 	float	plane[4];
-	int		i;
-	float	d;
 
 	if ( !CM_PlaneFromPoints( plane, p1, p2, p3 ) ) {
 		return -1;
 	}
 
 	// see if the points are close enough to an existing plane
-	for ( i = 0 ; i < numPlanes ; i++ ) {
+	for ( int i = 0 ; i < numPlanes ; i++ ) {
 		if ( DotProduct( plane, planes[i].plane ) < 0 ) {
 			continue;	// allow backwards planes?
 		}
 
-		d = DotProduct( p1, planes[i].plane ) - planes[i].plane[3];
+		float d = DotProduct( p1, planes[i].plane ) - planes[i].plane[3];
 		if ( d < -PLANE_TRI_EPSILON || d > PLANE_TRI_EPSILON ) {
 			continue;
 		}
@@ -577,15 +557,11 @@ CM_PointOnPlaneSide
 ==================
 */
 static int CM_PointOnPlaneSide( const float *p, int planeNum ) {
-	const float *plane;
-	double	d;
-
 	if ( planeNum == -1 ) {
 		return SIDE_ON;
 	}
-	plane = planes[ planeNum ].plane;
-
-	d = DotProductDPf( p, plane ) - plane[3];
+	const float *plane = planes[ planeNum ].plane;
+	double d = DotProductDPf( p, plane ) - plane[3];
 
 	if ( d > PLANE_TRI_EPSILON ) {
 		return SIDE_FRONT;
@@ -605,9 +581,7 @@ CM_GridPlane
 ==================
 */
 static int	CM_GridPlane( int gridPlanes[MAX_GRID_SIZE][MAX_GRID_SIZE][2], int i, int j, int tri ) {
-	int		p;
-
-	p = gridPlanes[i][j][tri];
+	int p = gridPlanes[i][j][tri];
 	if ( p != -1 ) {
 		return p;
 	}
@@ -707,7 +681,6 @@ CM_SetBorderInward
 */
 static void CM_SetBorderInward( facet_t *facet, const cGrid_t *grid, int gridPlanes[MAX_GRID_SIZE][MAX_GRID_SIZE][2],
 						  int i, int j, int which ) {
-	int		k, l;
 	const float *points[4];
 	int		numPoints;
 
@@ -737,13 +710,13 @@ static void CM_SetBorderInward( facet_t *facet, const cGrid_t *grid, int gridPla
 		break;
 	}
 
-	for ( k = 0 ; k < facet->numBorders ; k++ ) {
+	for ( int k = 0 ; k < facet->numBorders ; k++ ) {
 		int		front, back;
 
 		front = 0;
 		back = 0;
 
-		for ( l = 0 ; l < numPoints ; l++ ) {
+		for ( int l = 0 ; l < numPoints ; l++ ) {
 			int		side;
 
 			side = CM_PointOnPlaneSide( points[l], facet->borderPlanes[k] );
@@ -785,18 +758,14 @@ If the facet isn't bounded by its borders, we screwed up.
 ==================
 */
 static qboolean CM_ValidateFacet( const facet_t *facet ) {
-	float		plane[4];
-	int			j;
-	winding_t	*w;
-	vec3_t		bounds[2];
-
 	if ( facet->surfacePlane == -1 ) {
 		return qfalse;
 	}
 
+	float		plane[4];
 	Vector4Copy( planes[ facet->surfacePlane ].plane, plane );
-	w = BaseWindingForPlane( plane,  plane[3] );
-	for ( j = 0 ; j < facet->numBorders && w ; j++ ) {
+	winding_t *w = BaseWindingForPlane( plane,  plane[3] );
+	for ( int j = 0 ; j < facet->numBorders && w ; j++ ) {
 		if ( facet->borderPlanes[j] == -1 ) {
 			FreeWinding( w );
 			return qfalse;
@@ -814,10 +783,11 @@ static qboolean CM_ValidateFacet( const facet_t *facet ) {
 	}
 
 	// see if the facet is unreasonably large
+	vec3_t bounds[2];
 	WindingBounds( w, bounds[0], bounds[1] );
 	FreeWinding( w );
 
-	for ( j = 0 ; j < 3 ; j++ ) {
+	for ( int j = 0 ; j < 3 ; j++ ) {
 		if ( bounds[1][j] - bounds[0][j] > MAX_MAP_BOUNDS ) {
 			return qfalse;		// we must be missing a plane
 		}
@@ -1024,22 +994,17 @@ CM_PatchCollideFromGrid
 ==================
 */
 static void CM_PatchCollideFromGrid( const cGrid_t *grid, patchCollide_t *pf ) {
-	int				i, j;
-	const float		*p1, *p2, *p3;
 	int				gridPlanes[MAX_GRID_SIZE][MAX_GRID_SIZE][2];
-	facet_t			*facet;
-	int				borders[4];
-	qboolean		noAdjust[4];
 
 	numPlanes = 0;
 	numFacets = 0;
 
 	// find the planes for each triangle of the grid
-	for ( i = 0 ; i < grid->width - 1 ; i++ ) {
-		for ( j = 0 ; j < grid->height - 1 ; j++ ) {
-			p1 = grid->points[i][j];
-			p2 = grid->points[i+1][j];
-			p3 = grid->points[i+1][j+1];
+	for ( int i = 0 ; i < grid->width - 1 ; i++ ) {
+		for ( int j = 0 ; j < grid->height - 1 ; j++ ) {
+			const float *p1 = grid->points[i][j];
+			const float *p2 = grid->points[i+1][j];
+			const float *p3 = grid->points[i+1][j+1];
 			gridPlanes[i][j][0] = CM_FindPlane( p1, p2, p3 );
 
 			p1 = grid->points[i+1][j+1];
@@ -1050,8 +1015,10 @@ static void CM_PatchCollideFromGrid( const cGrid_t *grid, patchCollide_t *pf ) {
 	}
 
 	// create the borders for each facet
-	for ( i = 0 ; i < grid->width - 1 ; i++ ) {
-		for ( j = 0 ; j < grid->height - 1 ; j++ ) {
+	for ( int i = 0 ; i < grid->width - 1 ; i++ ) {
+		for ( int j = 0 ; j < grid->height - 1 ; j++ ) {
+			int borders[4];
+			qboolean noAdjust[4];
 
 			borders[EN_TOP] = -1;
 			if ( j > 0 ) {
@@ -1100,7 +1067,7 @@ static void CM_PatchCollideFromGrid( const cGrid_t *grid, patchCollide_t *pf ) {
 			if ( numFacets == MAX_FACETS ) {
 				Com_Error( ERR_DROP, "MAX_FACETS" );
 			}
-			facet = &facets[numFacets];
+			facet_t *facet = &facets[numFacets];
 			memset( facet, 0, sizeof( *facet ) );
 
 			if ( gridPlanes[i][j][0] == gridPlanes[i][j][1] ) {
@@ -1566,20 +1533,17 @@ CM_PositionTestInPatchCollide
 ====================
 */
 qboolean CM_PositionTestInPatchCollide( traceWork_t *tw, const struct patchCollide_s *pc ) {
-	int i, j;
-	float offset, t;
-	patchPlane_t *pp;
-	facet_t	*facet;
-	float plane[4];
-	vec3_t startp;
-
 	if (tw->isPoint) {
 		return qfalse;
 	}
 	//
-	facet = pc->facets;
-	for ( i = 0 ; i < pc->numFacets ; i++, facet++ ) {
-		pp = &pc->planes[ facet->surfacePlane ];
+	facet_t *facet = pc->facets;
+	for ( int i = 0 ; i < pc->numFacets ; i++, facet++ ) {
+		float plane[4];
+		vec3_t startp;
+		float offset, t;
+		int j;
+		patchPlane_t *pp = &pc->planes[ facet->surfacePlane ];
 		VectorCopy(pp->plane, plane);
 		plane[3] = pp->plane[3];
 		if ( tw->sphere.use ) {
@@ -1850,20 +1814,19 @@ used by CM_SetBorderInward for patches.
 ===================
 */
 static void CM_SetTriangleSoupBorderInward( facet_t *facet, float *p1, float *p2, float *p3 ) {
-	int		k, l;
 	float	*points[3];
 
 	points[0] = p1;
 	points[1] = p2;
 	points[2] = p3;
 
-	for ( k = 0 ; k < facet->numBorders ; k++ ) {
+	for ( int k = 0 ; k < facet->numBorders ; k++ ) {
 		int		front, back;
 
 		front = 0;
 		back = 0;
 
-		for ( l = 0 ; l < 3 ; l++ ) {
+		for ( int l = 0 ; l < 3 ; l++ ) {
 			int		side;
 
 			side = CM_PointOnPlaneSide( points[l], facet->borderPlanes[k] );
@@ -1916,20 +1879,16 @@ planes/facets into the provided patchCollide_t using Hunk_Alloc.
 ==================
 */
 static void CM_PatchCollideFromTriangleSoup( int numTriangles, vec3_t *vertexes, int *indexes, patchCollide_t *pf ) {
-	int		i;
-	float	*p1, *p2, *p3;
-	facet_t	*facet;
-
 	numPlanes = 0;
 	numFacets = 0;
 
 	// create the borders for each triangle
-	for ( i = 0 ; i < numTriangles ; i++ ) {
+	for ( int i = 0 ; i < numTriangles ; i++ ) {
 		int		trianglePlane;
 
-		p1 = vertexes[indexes[i * 3 + 0]];
-		p2 = vertexes[indexes[i * 3 + 1]];
-		p3 = vertexes[indexes[i * 3 + 2]];
+		float *p1 = vertexes[indexes[i * 3 + 0]];
+		float *p2 = vertexes[indexes[i * 3 + 1]];
+		float *p3 = vertexes[indexes[i * 3 + 2]];
 
 		trianglePlane = CM_FindPlane( p1, p2, p3 );
 		if ( trianglePlane == -1 ) {
@@ -1940,7 +1899,7 @@ static void CM_PatchCollideFromTriangleSoup( int numTriangles, vec3_t *vertexes,
 		if ( numFacets == MAX_FACETS ) {
 			Com_Error( ERR_DROP, "MAX_FACETS" );
 		}
-		facet = &facets[numFacets];
+		facet_t *facet = &facets[numFacets];
 		memset( facet, 0, sizeof( *facet ) );
 
 		facet->surfacePlane = trianglePlane;

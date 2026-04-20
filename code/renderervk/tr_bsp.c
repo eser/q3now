@@ -2285,6 +2285,7 @@ static void R_LoadEntities( const lump_t *l ) {
 	char keyname[MAX_TOKEN_CHARS];
 	char value[MAX_TOKEN_CHARS], *v[3];
 	world_t	*w;
+	ComParser parser = { 0 };
 
 	w = &s_worldData;
 	w->lightGridSize[0] = 64;
@@ -2298,15 +2299,15 @@ static void R_LoadEntities( const lump_t *l ) {
 	w->entityParsePoint = w->entityString;
 
 	p = w->entityString;
-	token = COM_ParseExt( &p, qtrue );
+	token = COM_ParseExt( &parser, &p, qtrue );
 	if (*token != '{') {
 		return;
 	}
 
 	// only parse the world spawn
-	while ( 1 ) {	
+	while ( 1 ) {
 		// parse key
-		token = COM_ParseExt( &p, qtrue );
+		token = COM_ParseExt( &parser, &p, qtrue );
 
 		if ( !*token || *token == '}' ) {
 			break;
@@ -2314,7 +2315,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		Q_strncpyz(keyname, token, sizeof(keyname));
 
 		// parse value
-		token = COM_ParseExt( &p, qtrue );
+		token = COM_ParseExt( &parser, &p, qtrue );
 
 		if ( !*token || *token == '}' ) {
 			break;
@@ -2367,8 +2368,9 @@ RE_GetEntityToken
 */
 qboolean RE_GetEntityToken( char *buffer, int size ) {
 	const char	*s;
+	ComParser   parser = { 0 };
 
-	s = COM_Parse( &s_worldData.entityParsePoint );
+	s = COM_Parse( &parser, &s_worldData.entityParsePoint );
 	Q_strncpyz( buffer, s, size );
 	if ( !s_worldData.entityParsePoint && !s[0] ) {
 		s_worldData.entityParsePoint = s_worldData.entityString;

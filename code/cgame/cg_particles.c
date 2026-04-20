@@ -1324,6 +1324,7 @@ int CG_NewParticleArea (int num)
 	const char *str;
 	const char *token;
 	int type;
+	ComParser parser = { 0 };
 	vec3_t origin, origin2;
 	int		i;
 	float range = 0;
@@ -1336,7 +1337,7 @@ int CG_NewParticleArea (int num)
 		return (0);
 	
 	// returns type 128 64 or 32
-	token = COM_Parse (&str);
+	token = COM_Parse (&parser, &str);
 	type = atoi (token);
 	
 	if (type == 1)
@@ -1359,23 +1360,23 @@ int CG_NewParticleArea (int num)
 
 	for (i=0; i<3; i++)
 	{
-		token = COM_Parse (&str);
+		token = COM_Parse (&parser, &str);
 		origin[i] = atof (token);
 	}
 
 	for (i=0; i<3; i++)
 	{
-		token = COM_Parse (&str);
+		token = COM_Parse (&parser, &str);
 		origin2[i] = atof (token);
 	}
 		
-	token = COM_Parse (&str);
+	token = COM_Parse (&parser, &str);
 	numparticles = atoi (token);
 	
-	token = COM_Parse (&str);
+	token = COM_Parse (&parser, &str);
 	turb = atoi (token);
 
-	token = COM_Parse (&str);
+	token = COM_Parse (&parser, &str);
 	snum = atoi (token);
 	
 	for (i=0; i<numparticles; i++)

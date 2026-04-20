@@ -453,11 +453,7 @@ This is used to cull non-visible entities from snapshots
 */
 int CM_WriteAreaBits (byte *buffer, int area)
 {
-	int		i;
-	int		floodnum;
-	int		bytes;
-
-	bytes = (cm.numAreas+7)>>3;
+	int bytes = (cm.numAreas+7)>>3;
 
 #ifndef BSPC
 	if (cm_noAreas->integer || area == -1)
@@ -469,8 +465,8 @@ int CM_WriteAreaBits (byte *buffer, int area)
 	}
 	else
 	{
-		floodnum = cm.areas[area].floodnum;
-		for (i=0 ; i<cm.numAreas ; i++)
+		int floodnum = cm.areas[area].floodnum;
+		for (int i=0 ; i<cm.numAreas ; i++)
 		{
 			if (cm.areas[i].floodnum == floodnum)
 				buffer[i>>3] |= 1<<(i&7);

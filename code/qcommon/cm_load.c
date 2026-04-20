@@ -90,9 +90,7 @@ CMod_LoadShaders
 =================
 */
 static void CMod_LoadShaders( void ) {
-	int count;
-
-	count = cm_bsp->numShaders;
+	int count = cm_bsp->numShaders;
 	if ( count < 1 ) {
 		Com_Error( ERR_DROP, "%s: map with no shaders", __func__ );
 	}
@@ -282,22 +280,17 @@ CMod_LoadLeafs
 */
 static void CMod_LoadLeafs( void )
 {
-	int			i;
-	cLeaf_t		*out;
-	dleaf_t 	*in;
-	int			count;
 	unsigned	firstLeafBrush, numLeafBrushes, firstLeafSurface, numLeafSurfaces;
-
-	in = cm_bsp->leafs;
-	count = cm_bsp->numLeafs;
+	dleaf_t *in = cm_bsp->leafs;
+	int count = cm_bsp->numLeafs;
 	if ( count < 1 )
 		Com_Error( ERR_DROP, "%s: map with no leafs", __func__ );
 
 	cm.leafs = Hunk_Alloc( ( BOX_LEAFS + count ) * sizeof( *cm.leafs ), h_high );
 	cm.numLeafs = count;
 
-	out = cm.leafs;
-	for ( i = 0; i < count; i++, in++, out++ )
+	cLeaf_t *out = cm.leafs;
+	for ( int i = 0; i < count; i++, in++, out++ )
 	{
 		out->cluster = in->cluster;
 		if ( out->cluster + 1U > INT_MAX - 63U )
@@ -341,26 +334,20 @@ CMod_LoadPlanes
 */
 static void CMod_LoadPlanes( void )
 {
-	int			i, j;
-	cplane_t	*out;
-	dplane_t 	*in;
-	int			count;
-	int			bits;
-
-	in = cm_bsp->planes;
-	count = cm_bsp->numPlanes;
+	dplane_t *in = cm_bsp->planes;
+	int count = cm_bsp->numPlanes;
 	if ( count < 1 )
 		Com_Error( ERR_DROP, "%s: map with no planes", __func__ );
 
 	cm.planes = Hunk_Alloc( ( BOX_PLANES + count ) * sizeof( *cm.planes ), h_high );
 	cm.numPlanes = count;
 
-	out = cm.planes;
+	cplane_t *out = cm.planes;
 
-	for ( i = 0; i < count; i++, in++, out++ )
+	for ( int i = 0; i < count; i++, in++, out++ )
 	{
-		bits = 0;
-		for ( j = 0; j < 3; j++ )
+		int bits = 0;
+		for ( int j = 0; j < 3; j++ )
 		{
 			out->normal[j] = in->normal[j];
 			if ( out->normal[j] < 0 )
@@ -381,20 +368,15 @@ CMod_LoadLeafBrushes
 */
 static void CMod_LoadLeafBrushes( void )
 {
-	int i;
-	int *out;
-	int *in;
-	int count;
-
-	in = cm_bsp->leafBrushes;
-	count = cm_bsp->numLeafBrushes;
+	int *in = cm_bsp->leafBrushes;
+	int count = cm_bsp->numLeafBrushes;
 
 	cm.leafbrushes = Hunk_Alloc( (count + BOX_BRUSHES) * sizeof( *cm.leafbrushes ), h_high );
 	cm.numLeafBrushes = count;
 
-	out = cm.leafbrushes;
+	int *out = cm.leafbrushes;
 
-	for ( i = 0; i < count; i++, in++, out++ ) {
+	for ( int i = 0; i < count; i++, in++, out++ ) {
 		unsigned j = *in;
 		if ( j >= cm.numBrushes )
 			Com_Error( ERR_DROP, "%s: bad brush", __func__ );
@@ -410,20 +392,15 @@ CMod_LoadLeafSurfaces
 */
 static void CMod_LoadLeafSurfaces( void )
 {
-	int i;
-	int *out;
-	int *in;
-	int count;
-
-	in = cm_bsp->leafSurfaces;
-	count = cm_bsp->numLeafSurfaces;
+	int *in = cm_bsp->leafSurfaces;
+	int count = cm_bsp->numLeafSurfaces;
 
 	cm.leafsurfaces = Hunk_Alloc( count * sizeof( *cm.leafsurfaces ), h_high );
 	cm.numLeafSurfaces = count;
 
-	out = cm.leafsurfaces;
+	int *out = cm.leafsurfaces;
 
-	for ( i = 0; i < count; i++, in++, out++ ) {
+	for ( int i = 0; i < count; i++, in++, out++ ) {
 		unsigned j = *in;
 		if ( j >= cm.numSurfaces )
 			Com_Error( ERR_DROP, "%s: bad surface", __func__ );
@@ -439,22 +416,16 @@ CMod_LoadBrushSides
 */
 static void CMod_LoadBrushSides( void )
 {
-	int				i;
-	cbrushside_t	*out;
-	dbrushside_t	*in;
-	int				count;
-	unsigned		num;
-
-	in = cm_bsp->brushSides;
-	count = cm_bsp->numBrushSides;
+	dbrushside_t *in = cm_bsp->brushSides;
+	int count = cm_bsp->numBrushSides;
 
 	cm.brushsides = Hunk_Alloc( ( BOX_SIDES + count ) * sizeof( *cm.brushsides ), h_high );
 	cm.numBrushSides = count;
 
-	out = cm.brushsides;
+	cbrushside_t *out = cm.brushsides;
 
-	for ( i= 0; i < count; i++, in++, out++ ) {
-		num = in->planeNum;
+	for ( int i = 0; i < count; i++, in++, out++ ) {
+		unsigned num = in->planeNum;
 		if ( num >= cm.numPlanes ) {
 			Com_Error( ERR_DROP, "%s: bad planeNum", __func__ );
 		}
@@ -526,54 +497,48 @@ CMod_LoadPatches
 */
 #define	MAX_PATCH_VERTS		1024
 static void CMod_LoadPatches( void ) {
-	drawVert_t	*dv, *dv_p;
-	dsurface_t	*in;
-	int			count;
-	int			i, j;
-	unsigned	firstVert, numVerts, totalVerts;
-	cPatch_t	*patch;
-	vec3_t		points[MAX_PATCH_VERTS];
-	unsigned	width, height;
-	unsigned	shaderNum;
+	dsurface_t *in = cm_bsp->surfaces;
+	int count = cm_bsp->numSurfaces;
+	vec3_t points[MAX_PATCH_VERTS];
 
-	in = cm_bsp->surfaces;
-	cm.numSurfaces = count = cm_bsp->numSurfaces;
+	cm.numSurfaces = count;
 	cm.surfaces = Hunk_Alloc( cm.numSurfaces * sizeof( cm.surfaces[0] ), h_high );
 
-	dv = cm_bsp->drawVerts;
-	totalVerts = cm_bsp->numDrawVerts;
+	drawVert_t *dv = cm_bsp->drawVerts;
+	unsigned totalVerts = cm_bsp->numDrawVerts;
 
 	// scan through all the surfaces, but only load patches,
 	// not planar faces
-	for ( i = 0 ; i < count ; i++, in++ ) {
+	for ( int i = 0 ; i < count ; i++, in++ ) {
 		if ( in->surfaceType != MST_PATCH ) {
 			continue;		// ignore other surfaces
 		}
 		// FIXME: check for non-colliding patches
 
-		cm.surfaces[ i ] = patch = Hunk_Alloc( sizeof( *patch ), h_high );
+		cPatch_t *patch = Hunk_Alloc( sizeof( *patch ), h_high );
+		cm.surfaces[ i ] = patch;
 
 		// load the full drawverts onto the stack
-		width = in->patchWidth;
-		height = in->patchHeight;
+		unsigned width = in->patchWidth;
+		unsigned height = in->patchHeight;
 		if ( (uint64_t)width * height > MAX_PATCH_VERTS ) {
 			Com_Error( ERR_DROP, "%s: MAX_PATCH_VERTS", __func__ );
 		}
 
-		firstVert = in->firstVert;
-		numVerts = width * height;
+		unsigned firstVert = in->firstVert;
+		unsigned numVerts = width * height;
 		if ( (uint64_t)firstVert + numVerts > totalVerts ) {
 			Com_Error( ERR_DROP, "%s: bad firstVert", __func__ );
 		}
 
-		dv_p = dv + firstVert;
-		for ( j = 0 ; j < numVerts ; j++, dv_p++ ) {
+		drawVert_t *dv_p = dv + firstVert;
+		for ( int j = 0 ; j < numVerts ; j++, dv_p++ ) {
 			points[j][0] = dv_p->xyz[0];
 			points[j][1] = dv_p->xyz[1];
 			points[j][2] = dv_p->xyz[2];
 		}
 
-		shaderNum = in->shaderNum;
+		unsigned shaderNum = in->shaderNum;
 		if ( shaderNum >= cm.numShaders ) {
 			Com_Error( ERR_DROP, "%s: bad shaderNum", __func__ );
 		}
@@ -666,9 +631,7 @@ Return an existing tri-soup handle if one is already registered for
 ====================
 */
 static clipHandle_t CM_FindTriSoupByName( const char *name ) {
-	int i;
-
-	for ( i = 0; i < MAX_TRI_SOUPS; i++ ) {
+	for ( int i = 0; i < MAX_TRI_SOUPS; i++ ) {
 		cTriSoup_t *ts = &cm.triSoups[i];
 		if ( !ts->inUse ) {
 			continue;
@@ -692,14 +655,6 @@ Returns 0 on failure.
 */
 clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 	int numVertexes, const int *indexes, int numIndexes ) {
-	int				slot;
-	cTriSoup_t		*ts;
-	struct patchCollide_s *pc;
-	vec3_t			*mutableVerts;
-	int				*mutableIndexes;
-	clipHandle_t	handle;
-	int				i, j;
-
 	if ( !name || !name[0] ) {
 		return 0;
 	}
@@ -713,14 +668,14 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 	}
 
 	// Reuse existing slot if already registered.
-	handle = CM_FindTriSoupByName( name );
+	clipHandle_t handle = CM_FindTriSoupByName( name );
 	if ( handle ) {
 		return handle;
 	}
 
 	// Find a free slot.
-	slot = -1;
-	for ( i = 0; i < MAX_TRI_SOUPS; i++ ) {
+	int slot = -1;
+	for ( int i = 0; i < MAX_TRI_SOUPS; i++ ) {
 		if ( !cm.triSoups[i].inUse ) {
 			slot = i;
 			break;
@@ -735,12 +690,12 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 	// CM_GenerateTriangleSoupCollide takes non-const pointers (it never
 	// modifies them, but the signature is historical). Duplicate onto
 	// temporary hunk memory to honor the const contract at our API.
-	mutableVerts = Hunk_AllocateTempMemory( numVertexes * sizeof( vec3_t ) );
-	mutableIndexes = Hunk_AllocateTempMemory( numIndexes * sizeof( int ) );
+	vec3_t *mutableVerts = Hunk_AllocateTempMemory( numVertexes * sizeof( vec3_t ) );
+	int *mutableIndexes = Hunk_AllocateTempMemory( numIndexes * sizeof( int ) );
 	memcpy( mutableVerts, vertexes, numVertexes * sizeof( vec3_t ) );
 	memcpy( mutableIndexes, indexes, numIndexes * sizeof( int ) );
 
-	pc = CM_GenerateTriangleSoupCollide( numVertexes, mutableVerts,
+	struct patchCollide_s *pc = CM_GenerateTriangleSoupCollide( numVertexes, mutableVerts,
 		numIndexes, mutableIndexes );
 
 	Hunk_FreeTempMemory( mutableIndexes );
@@ -750,14 +705,14 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 		return 0;
 	}
 
-	ts = &cm.triSoups[slot];
+	cTriSoup_t *ts = &cm.triSoups[slot];
 	memset( ts, 0, sizeof( *ts ) );
 	ts->inUse = qtrue;
 	Q_strncpyz( ts->name, name, sizeof( ts->name ) );
 	ts->pc = pc;
 
 	// Populate bounds on the embedded cmodel_t so CM_ModelBounds works.
-	for ( j = 0; j < 3; j++ ) {
+	for ( int j = 0; j < 3; j++ ) {
 		ts->cmod.mins[j] = pc->bounds[0][j];
 		ts->cmod.maxs[j] = pc->bounds[1][j];
 	}
@@ -782,12 +737,11 @@ static uint16_t CM_IqmReadUShort( const byte *p ) {
 }
 
 static void CM_IqmReadFloat3( const byte *p, vec3_t out ) {
-	int i;
 	union {
 		uint32_t u;
 		float f;
 	} v;
-	for ( i = 0; i < 3; i++ ) {
+	for ( int i = 0; i < 3; i++ ) {
 		v.u = (uint32_t)p[0] | ( (uint32_t)p[1] << 8 )
 			| ( (uint32_t)p[2] << 16 ) | ( (uint32_t)p[3] << 24 );
 		out[i] = v.f;
@@ -814,36 +768,24 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 #define IQM_POSITION_ATTR	0
 #define IQM_FLOAT_FORMAT	7
 
-	union {
-		const byte	*b;
-		void		*v;
-	} buf;
-	int				fileSize;
-	clipHandle_t	handle;
-	const byte		*base;
-	uint32_t		version, filesize;
-	uint32_t		num_vertexes, num_vertexarrays, ofs_vertexarrays;
-	uint32_t		num_triangles, ofs_triangles;
-	uint32_t		posOffset;
-	qboolean		posFound;
-	vec3_t			*verts;
-	int				*tris;
-	int				i;
-
 	if ( !name || !name[0] ) {
 		return 0;
 	}
 
-	handle = CM_FindTriSoupByName( name );
+	clipHandle_t handle = CM_FindTriSoupByName( name );
 	if ( handle ) {
 		return handle;
 	}
 
-	fileSize = FS_ReadFile( name, &buf.v );
+	union {
+		const byte	*b;
+		void		*v;
+	} buf;
+	int fileSize = FS_ReadFile( name, &buf.v );
 	if ( !buf.v || fileSize <= 0 ) {
 		return 0;
 	}
-	base = buf.b;
+	const byte *base = buf.b;
 
 	if ( fileSize < 16 + 27 * 4 ) {
 		Com_DPrintf( "CM_LoadIQMGeometry: %s truncated header\n", name );
@@ -856,6 +798,9 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 		return 0;
 	}
 
+	uint32_t		version, filesize;
+	uint32_t		num_vertexes, num_vertexarrays, ofs_vertexarrays;
+	uint32_t		num_triangles, ofs_triangles;
 	{
 		const byte *h = base + 16;
 		version = LittleLong( *(const uint32_t *)( h +  0 ) );
@@ -882,11 +827,11 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 	}
 
 	// Locate the position vertex array (type == 0, format == float, size == 3).
-	posFound = qfalse;
-	posOffset = 0;
+	qboolean posFound = qfalse;
+	uint32_t posOffset = 0;
 	{
 		const byte *va = base + ofs_vertexarrays;
-		for ( i = 0; i < (int)num_vertexarrays; i++ ) {
+		for ( int i = 0; i < (int)num_vertexarrays; i++ ) {
 			uint32_t type, format, size, offset;
 			if ( (uint64_t)ofs_vertexarrays + (uint64_t)( i + 1 ) * 20 > filesize ) {
 				break;
@@ -921,19 +866,19 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 	}
 
 	// Copy positions to a temporary vec3_t array.
-	verts = Hunk_AllocateTempMemory( num_vertexes * sizeof( vec3_t ) );
+	vec3_t *verts = Hunk_AllocateTempMemory( num_vertexes * sizeof( vec3_t ) );
 	{
 		const byte *p = base + posOffset;
-		for ( i = 0; i < (int)num_vertexes; i++, p += 12 ) {
+		for ( int i = 0; i < (int)num_vertexes; i++, p += 12 ) {
 			CM_IqmReadFloat3( p, verts[i] );
 		}
 	}
 
 	// Copy triangle indexes to a temporary int array.
-	tris = Hunk_AllocateTempMemory( num_triangles * 3 * sizeof( int ) );
+	int *tris = Hunk_AllocateTempMemory( num_triangles * 3 * sizeof( int ) );
 	{
 		const byte *p = base + ofs_triangles;
-		for ( i = 0; i < (int)num_triangles; i++, p += 12 ) {
+		for ( int i = 0; i < (int)num_triangles; i++, p += 12 ) {
 			tris[i * 3 + 0] = (int)LittleLong( *(const uint32_t *)( p + 0 ) );
 			tris[i * 3 + 1] = (int)LittleLong( *(const uint32_t *)( p + 4 ) );
 			tris[i * 3 + 2] = (int)LittleLong( *(const uint32_t *)( p + 8 ) );
@@ -964,8 +909,6 @@ Loads in the map and all submodels
 ==================
 */
 void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
-	int				bspVersion;
-
 	if ( !name || !name[0] ) {
 		Com_Error( ERR_DROP, "%s: NULL name", __func__ );
 	}
@@ -1006,7 +949,7 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 
 	*checksum = cm.checksum = cm_bsp->checksum;
 
-	bspVersion = cm_bsp->version;
+	int bspVersion = cm_bsp->version;
 	if ( BSP_AssetProfileForVersion( bspVersion ) == BSP_ASSET_PROFILE_LEGACY ) {
 		Cvar_Set( "com_mapAssetProfile", "legacy" );
 	} else {
@@ -1161,11 +1104,6 @@ can just be stored out and get a proper clipping hull structure.
 */
 static void CM_InitBoxHull( void )
 {
-	int			i;
-	int			side;
-	cplane_t	*p;
-	cbrushside_t	*s;
-
 	box_planes = &cm.planes[cm.numPlanes];
 
 	box_brush = &cm.brushes[cm.numBrushes];
@@ -1178,17 +1116,17 @@ static void CM_InitBoxHull( void )
 	box_model.leaf.firstLeafBrush = cm.numLeafBrushes;
 	cm.leafbrushes[cm.numLeafBrushes] = cm.numBrushes;
 
-	for ( i = 0; i < 6; i++ )
+	for ( int i = 0; i < 6; i++ )
 	{
-		side = i & 1;
+		int side = i & 1;
 
 		// brush sides
-		s = &cm.brushsides[cm.numBrushSides + i];
+		cbrushside_t *s = &cm.brushsides[cm.numBrushSides + i];
 		s->plane = cm.planes + ( cm.numPlanes + i * 2 + side );
 		s->surfaceFlags = 0;
 
 		// planes
-		p = &box_planes[i * 2];
+		cplane_t *p = &box_planes[i * 2];
 		p->type = i >> 1;
 		p->signbits = 0;
 		VectorClear( p->normal );

@@ -518,7 +518,8 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return 0;
 	case G_GET_ENTITY_TOKEN:
 		{
-			char *s = (char*)COM_Parse( &sv.entityParsePoint );
+			ComParser parser = { 0 };
+			char *s = (char*)COM_Parse( &parser, &sv.entityParsePoint );
 			VM_CHECKBOUNDS( gvm, args[1], args[2] );
 			//Q_strncpyz( VMA(1), s, args[2] );
 			// we can't use our optimized Q_strncpyz() function

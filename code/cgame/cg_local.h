@@ -612,9 +612,6 @@ typedef struct {
 	float		fovTransitionFrom;	// FOV value when transition started
 	int			fovTransitionTime;	// timestamp when transition started
 
-	// information screen text during loading
-	char		infoScreenText[MAX_STRING_CHARS];
-
 	// scoreboard
 	int			scoresRequestTime;
 	int			numScores;
@@ -1528,9 +1525,6 @@ float *CG_TeamColor( int team );
 void CG_TileClear( void );
 void CG_GetColorForAmount( int health, int armor, vec4_t hcolor );
 
-void UI_DrawProportionalString( int x, int y, const char* str, int style, vec4_t color );
-
-
 //
 // cg_draw.c, cg_newDraw.c
 //
@@ -1724,14 +1718,6 @@ void CG_Lightning_Discharge(vec3_t origin, int msec);
 // cg_snapshot.c
 //
 void CG_ProcessSnapshots( void );
-
-//
-// cg_info.c
-//
-void CG_LoadingString( const char *s );
-void CG_LoadingItem( int itemNum );
-void CG_LoadingClient( int clientNum );
-void CG_DrawInformation( void );
 
 //
 // cg_scoreboard.c
