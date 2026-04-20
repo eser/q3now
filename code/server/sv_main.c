@@ -93,9 +93,7 @@ Converts newlines to "\n" so a line prints nicer
 */
 static const char *SV_ExpandNewlines( const char *in ) {
 	static char string[MAX_STRING_CHARS*2];
-	int		l;
-
-	l = 0;
+	int l = 0;
 	while ( *in && l < sizeof(string) - 3 ) {
 		if ( *in == '\n' ) {
 			string[l++] = '\\';
@@ -153,7 +151,6 @@ not have future snapshot_t executed before it is executed
 ======================
 */
 void SV_AddServerCommand( client_t *client, const char *cmd ) {
-	int		index, i, n;
 
 	// this is very ugly but it's also a waste to for instance send multiple config string updates
 	// for the same config string index in one snapshot
@@ -181,7 +178,8 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 			Com_DPrintf( "QUIC: server command queue full for %s — dropping oldest\n", client->name );
 		} else {
 			Com_Printf( "===== pending server commands =====\n" );
-			n = client->reliableSequence - client->reliableAcknowledge;
+			int n = client->reliableSequence - client->reliableAcknowledge;
+			int i;
 			for ( i = 0; i < n; i++ ) {
 				const int idx = client->reliableAcknowledge + 1 + i;
 				Com_Printf( "cmd %5d: %s\n", i, client->reliableCommands[ idx & ( MAX_RELIABLE_COMMANDS - 1 ) ] );
@@ -191,7 +189,7 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 			return;
 		}
 	}
-	index = client->reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
+	int index = client->reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
 	Q_strncpyz( client->reliableCommands[ index ], cmd, sizeof( client->reliableCommands[ index ] ) );
 }
 
@@ -206,13 +204,11 @@ A NULL client will broadcast to all clients
 =================
 */
 void QDECL SV_SendServerCommand( client_t *cl, const char *fmt, ... ) {
-	va_list		argptr;
-	char		message[MAX_STRING_CHARS+128]; // slightly larger than allowed, to detect overflows
-	client_t	*client;
-	int			j, len;
-	
+	va_list argptr;
+	char message[MAX_STRING_CHARS+128]; // slightly larger than allowed, to detect overflows
+
 	va_start( argptr, fmt );
-	len = vsnprintf( message, sizeof( message ), fmt, argptr );
+	int len = vsnprintf( message, sizeof( message ), fmt, argptr );
 	va_end( argptr );
 
 	if ( cl != NULL ) {
@@ -230,7 +226,8 @@ void QDECL SV_SendServerCommand( client_t *cl, const char *fmt, ... ) {
 	}
 
 	// send the data to all relevant clients
-	for ( j = 0, client = svs.clients; j < sv.maxclients; j++, client++ ) {
+	client_t *client = svs.clients;
+	for ( int j = 0; j < sv.maxclients; j++, client++ ) {
 		if ( len <= 1022 || client->longstr ) {
 			SV_AddServerCommand( client, message );
 		}
@@ -390,10 +387,9 @@ SVC_HashForAddress
 ================
 */
 static int SVC_HashForAddress( const netadr_t *address ) {
-	const byte	*ip = NULL;
-	int			size = 0;
-	int			hash = 0;
-	int			i;
+	const byte *ip = NULL;
+	int size = 0;
+	int hash = 0;
 
 	switch ( address->type ) {
 		case NA_IP:  ip = address->ipv._4; size = 4;  break;
@@ -403,7 +399,7 @@ static int SVC_HashForAddress( const netadr_t *address ) {
 		default: break;
 	}
 
-	for ( i = 0; i < size; i++ ) {
+	for ( int i = 0; i < size; i++ ) {
 		hash += (int)( ip[ i ] ) * ( i + 119 );
 	}
 
@@ -450,11 +446,11 @@ Find or allocate a bucket for an address
 */
 static leakyBucket_t *SVC_BucketForAddress( const netadr_t *address, int burst, int period ) {
 	static leakyBucket_t dummy = { 0 };
-	static int		start = 0;
-	const int		hash = SVC_HashForAddress( address );
-	const int		now = Sys_Milliseconds();
-	leakyBucket_t	*bucket;
-	int				i, n;
+	static int start = 0;
+	const int hash = SVC_HashForAddress( address );
+	const int now = Sys_Milliseconds();
+	leakyBucket_t *bucket;
+	int n = 0;
 
 	for ( bucket = bucketHashes[ hash ], n = 0; bucket; bucket = bucket->next, n++ ) {
 		switch ( bucket->type ) {
@@ -483,7 +479,7 @@ static leakyBucket_t *SVC_BucketForAddress( const netadr_t *address, int burst, 
 		}
 	}
 
-	for ( i = 0; i < MAX_BUCKETS; i++ ) {
+	for ( int i = 0; i < MAX_BUCKETS; i++ ) {
 		int interval;
 
 		if ( start >= MAX_BUCKETS )
@@ -674,15 +670,9 @@ the simple info query.
 ================
 */
 static void SVC_Status( const netadr_t *from ) {
-	char	player[MAX_NAME_LENGTH + 32]; // score + ping + name
-	char	status[MAX_PACKETLEN];
-	char	*s;
-	int		i;
-	client_t	*cl;
-	playerState_t	*ps;
-	int		statusLength;
-	int		playerLength;
-	char	infostring[MAX_INFO_STRING+160]; // add some space for challenge string
+	char player[MAX_NAME_LENGTH + 32]; // score + ping + name
+	char status[MAX_PACKETLEN];
+	char infostring[MAX_INFO_STRING+160]; // add some space for challenge string
 
 	// ignore if we are in single player
 #ifndef DEDICATED
@@ -717,16 +707,16 @@ static void SVC_Status( const netadr_t *from ) {
 	// to prevent timed spoofed reply packets that add ghost servers
 	Info_SetValueForKey( infostring, "challenge", Cmd_Argv( 1 ) );
 
-	s = status;
+	char *s = status;
 	status[0] = '\0';
-	statusLength = strlen( infostring ) + 16; // strlen( "statusResponse\n\n" )
+	int statusLength = strlen( infostring ) + 16; // strlen( "statusResponse\n\n" )
 
-	for ( i = 0; i < sv.maxclients; i++ ) {
-		cl = &svs.clients[i];
+	for ( int i = 0; i < sv.maxclients; i++ ) {
+		client_t *cl = &svs.clients[i];
 		if ( cl->state >= CS_CONNECTED ) {
 
-			ps = SV_GameClientNum( i );
-			playerLength = Com_sprintf( player, sizeof( player ), "%i %i \"%s\"\n", 
+			playerState_t *ps = SV_GameClientNum( i );
+			int playerLength = Com_sprintf( player, sizeof( player ), "%i %i \"%s\"\n",
 				ps->persistant[ PERS_SCORE ], cl->ping, cl->name );
 			
 			if ( statusLength + playerLength >= MAX_PACKETLEN-4 )
@@ -750,9 +740,7 @@ if a user is interested in a server to do a full status
 ================
 */
 static void SVC_Info( const netadr_t *from ) {
-	int		i, count, humans;
-	const char	*gamedir;
-	char	infostring[MAX_INFO_STRING];
+	char infostring[MAX_INFO_STRING];
 
 	// ignore if we are in single player
 #ifndef DEDICATED
@@ -787,8 +775,9 @@ static void SVC_Info( const netadr_t *from ) {
 		return;
 
 	// don't count privateclients
-	count = humans = 0;
-	for ( i = sv_privateClients->integer; i < sv.maxclients; i++ ) {
+	int count = 0;
+	int humans = 0;
+	for ( int i = sv_privateClients->integer; i < sv.maxclients; i++ ) {
 		if ( svs.clients[i].state >= CS_CONNECTED ) {
 			count++;
 			if (svs.clients[i].netchan.remoteAddress.type != NA_BOT) {
@@ -812,7 +801,7 @@ static void SVC_Info( const netadr_t *from ) {
 	Info_SetValueForKey( infostring, "gametype", va( "%i", sv_gametype->integer ) );
 	Info_SetValueForKey( infostring, "pure", va( "%i", sv.pure ) );
 	Info_SetValueForKey( infostring, "g_needpass", va( "%d", Cvar_VariableIntegerValue( "g_needpass" ) ) );
-	gamedir = Cvar_VariableString( "fs_game" );
+	const char *gamedir = Cvar_VariableString( "fs_game" );
 	if ( *gamedir != '\0' ) {
 		Info_SetValueForKey( infostring, "game", gamedir );
 	}
@@ -917,14 +906,8 @@ Updates the cl->ping variables
 ===================
 */
 static void SV_CalcPings( void ) {
-	int			i, j;
-	client_t	*cl;
-	int			total, count;
-	int			delta;
-	playerState_t	*ps;
-
-	for ( i = 0; i < sv.maxclients; i++ ) {
-		cl = &svs.clients[i];
+	for ( int i = 0; i < sv.maxclients; i++ ) {
+		client_t *cl = &svs.clients[i];
 		if ( cl->state != CS_ACTIVE ) {
 			cl->ping = 999;
 			continue;
@@ -938,13 +921,13 @@ static void SV_CalcPings( void ) {
 			continue;
 		}
 
-		total = 0;
-		count = 0;
-		for ( j = 0 ; j < PACKET_BACKUP ; j++ ) {
+		int total = 0;
+		int count = 0;
+		for ( int j = 0 ; j < PACKET_BACKUP ; j++ ) {
 			if ( cl->frames[j].messageAcked == 0 ) {
 				continue;
 			}
-			delta = cl->frames[j].messageAcked - cl->frames[j].messageSent;
+			int delta = cl->frames[j].messageAcked - cl->frames[j].messageSent;
 			count++;
 			total += delta;
 		}
@@ -958,7 +941,7 @@ static void SV_CalcPings( void ) {
 		}
 
 		// let the game dll know about the ping
-		ps = SV_GameClientNum( i );
+		playerState_t *ps = SV_GameClientNum( i );
 		ps->ping = cl->ping;
 	}
 }
@@ -977,15 +960,11 @@ if necessary
 ==================
 */
 static void SV_CheckTimeouts( void ) {
-	int		i;
-	client_t	*cl;
-	int			droppoint;
-	int			zombiepoint;
+	int droppoint = svs.time - 1000 * sv_timeout->integer;
+	int zombiepoint = svs.time - 1000 * sv_zombietime->integer;
 
-	droppoint = svs.time - 1000 * sv_timeout->integer;
-	zombiepoint = svs.time - 1000 * sv_zombietime->integer;
-
-	for ( i = 0, cl = svs.clients ; i < sv.maxclients; i++, cl++ ) {
+	client_t *cl = svs.clients;
+	for ( int i = 0 ; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state == CS_FREE ) {
 			continue;
 		}
@@ -1038,17 +1017,14 @@ static qboolean SV_CheckPaused( void ) {
 	// can't pause on dedicated servers
 	return qfalse;
 #else
-	const client_t *cl;
-	int	count;
-	int	i;
-
 	if ( !cl_paused->integer ) {
 		return qfalse;
 	}
 
 	// only pause if there is just a single client connected
-	count = 0;
-	for ( i = 0, cl = svs.clients ; i < sv.maxclients; i++, cl++ ) {
+	int count = 0;
+	const client_t *cl = svs.clients;
+	for ( int i = 0 ; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state >= CS_CONNECTED && cl->netchan.remoteAddress.type != NA_BOT ) {
 			count++;
 		}
@@ -1100,9 +1076,6 @@ SV_TrackCvarChanges
 */
 void SV_TrackCvarChanges( void )
 {
-	client_t *cl;
-	int i;
-
 	if ( sv_maxRate->integer && sv_maxRate->integer < 1000 ) {
 		Cvar_Set( "sv_maxRate", "1000" );
 		Com_DPrintf( "sv_maxRate adjusted to 1000\n" );
@@ -1118,7 +1091,8 @@ void SV_TrackCvarChanges( void )
 	if ( sv.state == SS_DEAD || !svs.clients )
 		return;
 
-	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+	client_t *cl = svs.clients;
+	for ( int i = 0; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state >= CS_CONNECTED ) {
 			SV_UserinfoChanged( cl, qfalse, qfalse ); // do not update userinfo, do not run filter
 		}
@@ -1134,11 +1108,10 @@ SV_Restart
 static void SV_Restart( const char *reason ) {
 	qboolean sv_shutdown = qfalse;
 	char mapName[ MAX_CVAR_VALUE_STRING ];
-	int i;
 
 	if ( svs.clients ) {
 		// check if we can reset map time without full server shutdown
-		for ( i = 0; i < sv.maxclients; i++ ) {
+		for ( int i = 0; i < sv.maxclients; i++ ) {
 			if ( svs.clients[i].state >= CS_CONNECTED ) {
 				sv_shutdown = qtrue;
 				break;
@@ -1168,9 +1141,7 @@ happen before SV_Frame is called
 ==================
 */
 void SV_Frame( int msec ) {
-	int		frameMsec;
-	int		startTime;
-	int		i;
+	int startTime;
 
 	if ( Cvar_CheckGroup( CVG_SERVER ) )
 		SV_TrackCvarChanges(); // update rate settings, etc.
@@ -1219,7 +1190,7 @@ void SV_Frame( int msec ) {
 
 	// if it isn't time for the next frame, do nothing
 
-	frameMsec = (1000 / sv_fps->integer) * com_timescale->value;
+	int frameMsec = (1000 / sv_fps->integer) * com_timescale->value;
 	// don't let it scale below 1ms
 	if (frameMsec < 1)
 	{
@@ -1245,6 +1216,7 @@ void SV_Frame( int msec ) {
 	// try to do silent restart earlier if possible
 	if ( sv.time > (12*3600*1000) && ( sv_levelTimeReset->integer == 0 || sv.time > 0x40000000 ) ) {
 		if ( svs.clients ) {
+			int i;
 			for ( i = 0; i < sv.maxclients; i++ ) {
 				// FIXME: deal with bots (reconnect?)
 				if ( svs.clients[i].state != CS_FREE && svs.clients[i].netchan.remoteAddress.type != NA_BOT ) {
@@ -1272,7 +1244,7 @@ void SV_Frame( int msec ) {
 		}
 		if ( sv_restartPending && svs.clients != NULL ) {
 			int humans = 0;
-			for ( i = 0; i < sv.maxclients; i++ ) {
+			for ( int i = 0; i < sv.maxclients; i++ ) {
 				const client_t *cl = &svs.clients[ i ];
 				if ( cl->state < CS_CONNECTED ) continue;
 				if ( cl->netchan.remoteAddress.type == NA_BOT ) continue;
@@ -1386,13 +1358,11 @@ Return the time in msec until we expect to be called next
 */
 int SV_SendQueuedPackets( void )
 {
-	int numBlocks;
-	int dlStart, deltaT, delayT;
 	static int dlNextRound = 0;
 	int timeVal = INT_MAX;
 
 	// Send out fragmented packets now that we're idle
-	delayT = SV_SendQueuedMessages();
+	int delayT = SV_SendQueuedMessages();
 	if(delayT >= 0)
 		timeVal = delayT;
 
@@ -1400,8 +1370,8 @@ int SV_SendQueuedPackets( void )
 	{
 		// Rate limiting. This is very imprecise for high
 		// download rates due to millisecond timedelta resolution
-		dlStart = Sys_Milliseconds();
-		deltaT = dlNextRound - dlStart;
+		int dlStart = Sys_Milliseconds();
+		int deltaT = dlNextRound - dlStart;
 
 		if(deltaT > 0)
 		{
@@ -1410,7 +1380,7 @@ int SV_SendQueuedPackets( void )
 		}
 		else
 		{
-			numBlocks = SV_SendDownloadMessages();
+			int numBlocks = SV_SendDownloadMessages();
 
 			if(numBlocks)
 			{

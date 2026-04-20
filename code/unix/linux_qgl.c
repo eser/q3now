@@ -139,8 +139,9 @@ qboolean QGL_Init( const char *dllname )
 			{
 				if ( getcwd( fn, sizeof( fn ) ) )
 				{
-					Q_strcat( fn, sizeof( fn ), "/" );
-					Q_strcat( fn, sizeof( fn ), dllname );
+					qstring_t fn_qs = QS_WrapExisting( fn, sizeof( fn ) );
+					QS_Append( &fn_qs, "/" );
+					QS_Append( &fn_qs, dllname );
 					glw_state.OpenGLLib = dlopen( fn, RTLD_NOW );
 				}
 

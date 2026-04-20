@@ -26,6 +26,7 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "flagstatus_nme", SE_SIDES_ONLY, CG_ModernHUDElementFlagStatusNMECreate, CG_ModernHUDElementFlagStatusRoutine, NULL },
 	{ "flagstatus_own", SE_SIDES_ONLY, CG_ModernHUDElementFlagStatusOWNCreate, CG_ModernHUDElementFlagStatusRoutine, NULL },
 	{ "followmessage", 0, CG_ModernHUDElementFollowMessageCreate, CG_ModernHUDElementFollowMessageRoutine, NULL },
+	{ "disconnect", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementDisconnectCreate, CG_ModernHUDElementDisconnectRoutine, NULL },
 	{ "fps", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementFPSCreate, CG_ModernHUDElementFPSRoutine, NULL },
 	{ "fragmessage", 0, CG_ModernHUDElementFragMessageCreate, CG_ModernHUDElementFragMessageRoutine, NULL },
 	{ "gametime", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementGameTimeCreate, CG_ModernHUDElementGameTimeRoutine, NULL },

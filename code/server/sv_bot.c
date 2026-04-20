@@ -102,8 +102,6 @@ BotDrawDebugPolygons
 */
 void BotDrawDebugPolygons(void (*drawPoly)(int color, int numPoints, float *points), int value) {
 	static cvar_t *bot_debug, *bot_groundonly, *bot_reachability, *bot_highlightarea;
-	bot_debugpoly_t *poly;
-	int i, parm0;
 
 	if (!debugpolygons)
 		return;
@@ -118,17 +116,17 @@ void BotDrawDebugPolygons(void (*drawPoly)(int color, int numPoints, float *poin
 		//get the hightlight area
 		if (!bot_highlightarea) bot_highlightarea = Cvar_Get("bot_highlightarea", "0", 0);
 		//
-		parm0 = 0;
+		int parm0 = 0;
 		if (svs.clients[0].lastUsercmd.buttons & BUTTON_ATTACK_PRI || svs.clients[0].lastUsercmd.buttons & BUTTON_ATTACK_SEC) parm0 |= 1;
 		if (bot_reachability->integer) parm0 |= 2;
 		if (bot_groundonly->integer) parm0 |= 4;
 		botlib_export->BotLibVarSet("bot_highlightarea", bot_highlightarea->string);
-		botlib_export->Test(parm0, NULL, svs.clients[0].gentity->r.currentOrigin, 
+		botlib_export->Test(parm0, NULL, svs.clients[0].gentity->r.currentOrigin,
 			svs.clients[0].gentity->r.currentAngles);
 	} //end if
 	//draw all debug polys
-	for (i = 0; i < bot_maxdebugpolys; i++) {
-		poly = &debugpolygons[i];
+	for (int i = 0; i < bot_maxdebugpolys; i++) {
+		bot_debugpoly_t *poly = &debugpolygons[i];
 		if (!poly->inuse) continue;
 		drawPoly(poly->color, poly->numPoints, (float *) poly->points);
 		//Com_Printf("poly %i, numpoints = %d\n", i, poly->numPoints);
@@ -267,19 +265,14 @@ BotImport_BSPModelMinsMaxsOrigin
 ==================
 */
 static void BotImport_BSPModelMinsMaxsOrigin(int modelnum, vec3_t angles, vec3_t outmins, vec3_t outmaxs, vec3_t origin) {
-	clipHandle_t h;
 	vec3_t mins, maxs;
-	float max;
-	int	i;
-
-	h = CM_InlineModel(modelnum);
+	clipHandle_t h = CM_InlineModel(modelnum);
 	CM_ModelBounds(h, mins, maxs);
 	//if the model is rotated
 	if ((angles[0] || angles[1] || angles[2])) {
 		// expand for rotation
-
-		max = RadiusFromBounds(mins, maxs);
-		for (i = 0; i < 3; i++) {
+		float max = RadiusFromBounds(mins, maxs);
+		for (int i = 0; i < 3; i++) {
 			mins[i] = -max;
 			maxs[i] = max;
 		}
@@ -295,9 +288,7 @@ BotImport_GetMemory
 ==================
 */
 static void *BotImport_GetMemory(size_t size) {
-	void *ptr;
-
-	ptr = Z_TagMalloc( size, TAG_BOTLIB );
+	void *ptr = Z_TagMalloc( size, TAG_BOTLIB );
 	return ptr;
 }
 
@@ -328,19 +319,17 @@ BotImport_DebugPolygonCreate
 ==================
 */
 int BotImport_DebugPolygonCreate(int color, int numPoints, vec3_t *points) {
-	bot_debugpoly_t *poly;
-	int i;
-
 	if (!debugpolygons)
 		return 0;
 
+	int i;
 	for (i = 1; i < bot_maxdebugpolys; i++) 	{
 		if (!debugpolygons[i].inuse)
 			break;
 	}
 	if (i >= bot_maxdebugpolys)
 		return 0;
-	poly = &debugpolygons[i];
+	bot_debugpoly_t *poly = &debugpolygons[i];
 	poly->inuse = qtrue;
 	poly->color = color;
 	poly->numPoints = numPoints;
@@ -502,12 +491,10 @@ SV_BotInitCvars
 ==================
 */
 void SV_BotInitCvars(void) {
-	cvar_t *cv;
-
 	Cvar_Get("bot_enable", "1", 0);						//enable the bot
 	Cvar_Get("bot_developer", "0", CVAR_CHEAT);			//bot developer mode
 	Cvar_Get("bot_debug", "0", CVAR_CHEAT);				//enable bot debugging
-	cv = Cvar_Get("bot_maxdebugpolys", "2", 0);			//maximum number of debug polys
+	cvar_t *cv = Cvar_Get("bot_maxdebugpolys", "2", 0);			//maximum number of debug polys
 	Cvar_Get("bot_groundonly", "1", 0);					//only show ground faces of areas
 	Cvar_Get("bot_reachability", "0", 0);				//show all reachabilities to other areas
 	Cvar_Get("bot_visualizejumppads", "0", CVAR_CHEAT);	//show jumppads

@@ -307,7 +307,7 @@ enum svc_ops_e {
 	svc_snapshot,
 	svc_EOF,
 
-	// new commands, supported only by ioquake3 protocol but not legacy
+	// new commands, supported only by modern protocol but not legacy
 	svc_voipSpeex,     // not wrapped in USE_VOIP, so this value is reserved.
 	svc_voipOpus,      //
 };
@@ -324,7 +324,7 @@ enum clc_ops_e {
 	clc_clientCommand,		// [string] message
 	clc_EOF,
 
-	// new commands, supported only by ioquake3 protocol but not legacy
+	// new commands, supported only by modern protocol but not legacy
 	clc_voipSpeex,   // not wrapped in USE_VOIP, so this value is reserved.
 	clc_voipOpus,    //
 };

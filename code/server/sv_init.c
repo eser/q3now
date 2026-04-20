@@ -37,9 +37,7 @@ given client
 static void SV_SendConfigstring(client_t *client, int index)
 {
 	int maxChunkSize = MAX_STRING_CHARS - 24;
-	int len;
-
-	len = strlen(sv.configstrings[index]);
+	int len = strlen(sv.configstrings[index]);
 
 	if( len >= maxChunkSize ) {
 		int		sent = 0;
@@ -83,9 +81,7 @@ Configstring indexes that have changed while the client was in CS_PRIMED
 */
 void SV_UpdateConfigstrings(client_t *client)
 {
-	int index;
-
-	for( index = 0; index < MAX_CONFIGSTRINGS; index++ ) {
+	for( int index = 0; index < MAX_CONFIGSTRINGS; index++ ) {
 		// if the CS hasn't changed since we went to CS_PRIMED, ignore
 		if(!client->csUpdated[index])
 			continue;
@@ -107,9 +103,6 @@ SV_SetConfigstring
 ===============
 */
 void SV_SetConfigstring (int index, const char *val) {
-	int		i;
-	client_t	*client;
-
 	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
 		Com_Error (ERR_DROP, "SV_SetConfigstring: bad index %i", index);
 	}
@@ -132,7 +125,8 @@ void SV_SetConfigstring (int index, const char *val) {
 	if ( sv.state == SS_GAME || sv.restarting ) {
 
 		// send the data to all relevant clients
-		for (i = 0, client = svs.clients; i < sv.maxclients; i++, client++) {
+		client_t *client = svs.clients;
+		for (int i = 0; i < sv.maxclients; i++, client++) {
 			if ( client->state < CS_ACTIVE ) {
 				if ( client->state == CS_PRIMED || client->state == CS_CONNECTED ) {
 					// track CS_CONNECTED clients as well to optimize gamestate acknowledge after downloading/retransmission
@@ -220,11 +214,8 @@ baseline will be transmitted
 ================
 */
 static void SV_CreateBaseline( void ) {
-	sharedEntity_t *ent;
-	int				entnum;
-
-	for ( entnum = 0; entnum < sv.num_entities ; entnum++ ) {
-		ent = SV_GentityNum( entnum );
+	for ( int entnum = 0; entnum < sv.num_entities ; entnum++ ) {
+		sharedEntity_t *ent = SV_GentityNum( entnum );
 		if ( !ent->r.linked ) {
 			continue;
 		}
@@ -329,14 +320,9 @@ SV_ChangeMaxClients
 ==================
 */
 static void SV_ChangeMaxClients( void ) {
-	client_t *oldClients;
-	int		maxclients;
-	int		count;
-	int		i;
-
 	// get the highest client number in use
-	count = 0;
-	for ( i = 0; i < sv.maxclients; i++ ) {
+	int count = 0;
+	for ( int i = 0; i < sv.maxclients; i++ ) {
 		if ( svs.clients[i].state >= CS_CONNECTED ) {
 			if ( i > count ) {
 				count = i;
@@ -346,16 +332,16 @@ static void SV_ChangeMaxClients( void ) {
 	count++;
 
 	// never go below the highest client number in use
-	maxclients = SV_BoundMaxClients( count );
+	int maxclients = SV_BoundMaxClients( count );
 
 	// if still the same
 	if ( maxclients == sv.maxclients ) {
 		return;
 	}
 
-	oldClients = Hunk_AllocateTempMemory( count * sizeof(client_t) );
+	client_t *oldClients = Hunk_AllocateTempMemory( count * sizeof(client_t) );
 	// copy the clients to hunk memory
-	for ( i = 0; i < count; i++ ) {
+	for ( int i = 0; i < count; i++ ) {
 		if ( svs.clients[i].state >= CS_CONNECTED ) {
 			oldClients[i] = svs.clients[i];
 		} else {
@@ -370,7 +356,7 @@ static void SV_ChangeMaxClients( void ) {
 	SV_AllocClients( maxclients );
 
 	// copy the clients over
-	for ( i = 0; i < count; i++ ) {
+	for ( int i = 0; i < count; i++ ) {
 		if ( oldClients[i].state >= CS_CONNECTED ) {
 			svs.clients[i] = oldClients[i];
 		}
@@ -432,8 +418,6 @@ Phase order:
 =================
 */
 void SV_SpawnServer_Tick( void ) {
-	int i;
-
 	switch ( svs.spawn.phase ) {
 
 	case SPAWN_IDLE:
@@ -484,6 +468,7 @@ void SV_SpawnServer_Tick( void ) {
 		Cvar_Set( "nextmap", "map_restart 0" );
 
 		if ( !sv_levelTimeReset->integer && !sv.restartTime ) {
+			int i;
 			for ( i = 0; i < sv.maxclients; i++ ) {
 				if ( svs.clients[i].state >= CS_CONNECTED ) {
 					break;
@@ -494,7 +479,7 @@ void SV_SpawnServer_Tick( void ) {
 			}
 		}
 
-		for ( i = 0; i < sv.maxclients; i++ ) {
+		for ( int i = 0; i < sv.maxclients; i++ ) {
 			if ( svs.clients[i].state >= CS_CONNECTED && sv_levelTimeReset->integer ) {
 				svs.clients[i].oldServerTime = sv.time;
 			} else {
@@ -502,10 +487,10 @@ void SV_SpawnServer_Tick( void ) {
 			}
 		}
 
-		i = sv.maxclients;
+		int i = sv.maxclients;
 		SV_ClearServer();
 		sv.maxclients = i;
-		for ( i = 0; i < MAX_CONFIGSTRINGS; i++ ) {
+		for ( int i = 0; i < MAX_CONFIGSTRINGS; i++ ) {
 			sv.configstrings[i] = CopyString("");
 		}
 
@@ -563,7 +548,7 @@ void SV_SpawnServer_Tick( void ) {
 	/* ---- Phase 4: Settle + Baseline ---------------------------------------- */
 	case SPAWN_P4_SETTLE_BASELINE:
 	{
-		for ( i = 0; i < 3; i++ ) {
+		for ( int i = 0; i < 3; i++ ) {
 			Cbuf_Wait();
 			sv.time += 100;
 			VM_Call( gvm, 1, GAME_RUN_FRAME, sv.time );
@@ -583,7 +568,7 @@ void SV_SpawnServer_Tick( void ) {
 		qboolean isBot;
 		const char *p;
 
-		for ( i = 0; i < sv.maxclients; i++ ) {
+		for ( int i = 0; i < sv.maxclients; i++ ) {
 			if ( svs.clients[i].state >= CS_CONNECTED ) {
 				const char *denied;
 
@@ -720,8 +705,6 @@ Only called at main exe startup, not for each game
 */
 void SV_Init( void )
 {
-	int index;
-
 	SV_AddOperatorCommands();
 
 	if ( com_dedicated->integer )
@@ -797,7 +780,7 @@ void SV_Init( void )
 	Cvar_SetDescription( sv_allowDownload, "Toggle the ability for clients to download files maps etc. from server." );
 	Cvar_Get ("sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE);
 
-	for ( index = 0; index < MAX_MASTER_SERVERS; index++ )
+	for ( int index = 0; index < MAX_MASTER_SERVERS; index++ )
 		sv_master[ index ] = Cvar_Get( va( "sv_master%d", index + 1 ), "", CVAR_ARCHIVE_ND );
 
 	sv_reconnectlimit = Cvar_Get( "sv_reconnectlimit", "3", 0 );
@@ -884,12 +867,10 @@ to totally exit after returning from this function.
 ==================
 */
 static void SV_FinalMessage( const char *message ) {
-	int			i, j;
-	client_t	*cl;
-
 	// send it twice, ignoring rate
-	for ( j = 0 ; j < 2 ; j++ ) {
-		for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++) {
+	for ( int j = 0 ; j < 2 ; j++ ) {
+		client_t *cl = svs.clients;
+		for ( int i = 0; i < sv.maxclients; i++, cl++) {
 			if (cl->state >= CS_CONNECTED ) {
 				// don't send a disconnect to a local client
 				if ( cl->netchan.remoteAddress.type != NA_LOOPBACK ) {
@@ -946,9 +927,7 @@ void SV_Shutdown( const char *finalmsg ) {
 
 	// free server static data
 	if ( svs.clients ) {
-		int index;
-
-		for ( index = 0; index < sv.maxclients; index++ )
+		for ( int index = 0; index < sv.maxclients; index++ )
 			SV_FreeClient( &svs.clients[ index ] );
 
 		Z_Free( svs.clients );

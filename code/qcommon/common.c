@@ -125,20 +125,16 @@ void CIN_CloseAllVideos( void );
 
 //============================================================================
 
-static char	*rd_buffer;
-static int	rd_buffersize;
-static qboolean rd_flushing = qfalse;
-static void	(*rd_flush)( const char *buffer );
+static qstring_t rd_qs;
+static qboolean  rd_flushing = qfalse;
+static void      (*rd_flush)( const char *buffer );
 
 void Com_BeginRedirect( char *buffer, int buffersize, void (*flush)(const char *) )
 {
 	if (!buffer || !buffersize || !flush)
 		return;
-	rd_buffer = buffer;
-	rd_buffersize = buffersize;
+	rd_qs    = QS_Wrap( buffer, buffersize );
 	rd_flush = flush;
-
-	*rd_buffer = '\0';
 }
 
 
@@ -146,12 +142,11 @@ void Com_EndRedirect( void )
 {
 	if ( rd_flush ) {
 		rd_flushing = qtrue;
-		rd_flush( rd_buffer );
+		rd_flush( rd_qs.data );
 		rd_flushing = qfalse;
 	}
 
-	rd_buffer = NULL;
-	rd_buffersize = 0;
+	rd_qs    = (qstring_t){ NULL, 0, 0 };
 	rd_flush = NULL;
 }
 
@@ -214,17 +209,14 @@ void FORMAT_PRINTF(1, 2) QDECL Com_Printf( const char *fmt, ... ) {
 	len = vsnprintf( msg, sizeof( msg ), fmt, argptr );
 	va_end( argptr );
 
-	if ( rd_buffer && !rd_flushing ) {
-		if ( len + (int)strlen( rd_buffer ) > ( rd_buffersize - 1 ) ) {
+	if ( rd_qs.data && !rd_flushing ) {
+		if ( len > QS_Remaining( &rd_qs ) ) {
 			rd_flushing = qtrue;
-			rd_flush( rd_buffer );
+			rd_flush( rd_qs.data );
 			rd_flushing = qfalse;
-			*rd_buffer = '\0';
+			QS_Clear( &rd_qs );
 		}
-		Q_strcat( rd_buffer, rd_buffersize, msg );
-		// TTimo nooo .. that would defeat the purpose
-		//rd_flush(rd_buffer);
-		//*rd_buffer = '\0';
+		QS_Append( &rd_qs, msg );
 		return;
 	}
 
@@ -3959,12 +3951,8 @@ void Com_Init( char *commandLine ) {
 	Cvar_SetDescription( com_journal, "When enabled, writes events and its data to 'journal.dat' and 'journaldata.dat'.");
 
 	Com_StartupVariable( "sv_master1" );
-	Com_StartupVariable( "sv_master2" );
-	Com_StartupVariable( "sv_master3" );
 	Cvar_Get( "sv_master1", MASTER_SERVER_NAME, CVAR_INIT );
-	Cvar_Get( "sv_master2", "directory.ioquake3.org", CVAR_INIT );
-	Cvar_Get( "sv_master3", "master.maverickservers.com", CVAR_INIT );
-
+	
 	com_protocol = Cvar_Get( "protocol", XSTRING( PROTOCOL_VERSION ), 0 );
 	Cvar_SetDescription( com_protocol, "Specify network protocol version number.");
 

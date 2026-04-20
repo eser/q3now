@@ -1494,9 +1494,6 @@ void CG_FillRectNorm( float nx, float ny, float nw, float nh, const float *color
 extern	int sortedTeamPlayers[TEAM_MAXOVERLAY];
 extern	int	numSortedTeamPlayers;
 extern	int drawTeamOverlayModificationCount;
-extern  char systemChat[256];
-extern  char teamChat1[256];
-extern  char teamChat2[256];
 
 void CG_AddLagometerFrameInfo( void );
 void CG_AddLagometerSnapshotInfo( snapshot_t *snap );

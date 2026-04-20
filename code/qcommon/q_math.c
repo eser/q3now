@@ -39,9 +39,9 @@ vec4_t		colorWhite	= {1, 1, 1, 1};
 vec4_t		colorLtGrey	= {0.75, 0.75, 0.75, 1};
 vec4_t		colorMdGrey	= {0.5, 0.5, 0.5, 1};
 vec4_t		colorDkGrey	= {0.25, 0.25, 0.25, 1};
-vec4_t		colorOrange	= {1, 0.5, 0, 1};	// q3now (ioquake3 extension)
-vec4_t		colorIndigo	= {0.25f, 0.25f, 0.25f, 1.00f};	// q3now (ioquake3 extension)
-vec4_t		colorSkyBlue= {0.01f, 0.50f, 1.00f, 1.00f};	// q3now (ioquake3 extension)
+vec4_t		colorOrange	= {1, 0.5, 0, 1};	// q3now
+vec4_t		colorIndigo	= {0.25f, 0.25f, 0.25f, 1.00f};	// q3now
+vec4_t		colorSkyBlue= {0.01f, 0.50f, 1.00f, 1.00f};	// q3now
 
 // actually there are 35 colors but we want to use bitmask safely
 const vec4_t g_color_table[ 64 ] = {

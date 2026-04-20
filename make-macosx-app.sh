@@ -143,13 +143,13 @@ fi
 
 AVAILABLE_ARCHS=""
 
-Q3E_VERSION="1.32e"
-Q3E_CLIENT_ARCHS=""
-Q3E_SERVER_ARCHS=""
+Q3NOW_VERSION="1.32e"
+Q3NOW_CLIENT_ARCHS=""
+Q3NOW_SERVER_ARCHS=""
 
 BASEDIR="baseq3"
 
-DEDICATED_NAME="quake3e.ded"
+DEDICATED_NAME="q3now.ded"
 
 ICNSDIR="code/unix"
 ICNS="quake3_flat.icns"
@@ -157,7 +157,7 @@ PKGINFO="APPLQ3E"
 
 OBJROOT="build"
 #BUILT_PRODUCTS_DIR="${OBJROOT}/${TARGET_NAME}-darwin-${CURRENT_ARCH}"
-PRODUCT_NAME="quake3e"
+PRODUCT_NAME="q3now"
 WRAPPER_EXTENSION="app"
 WRAPPER_NAME="${PRODUCT_NAME}.${WRAPPER_EXTENSION}"
 CONTENTS_FOLDER_PATH="${WRAPPER_NAME}/Contents"
@@ -169,8 +169,8 @@ EXECUTABLE_NAME="${PRODUCT_NAME}"
 for ARCH in $SEARCH_ARCHS; do
 	CURRENT_ARCH=${ARCH}
 	BUILT_PRODUCTS_DIR="${OBJROOT}/${TARGET_NAME}-darwin-${CURRENT_ARCH}"
-	Q3E_CLIENT="${EXECUTABLE_NAME}.${CURRENT_ARCH}"
-	Q3E_SERVER="${DEDICATED_NAME}.${CURRENT_ARCH}"
+	Q3NOW_CLIENT="${EXECUTABLE_NAME}.${CURRENT_ARCH}"
+	Q3NOW_SERVER="${DEDICATED_NAME}.${CURRENT_ARCH}"
 
 	if [ ! -d ${BUILT_PRODUCTS_DIR} ]; then
 		CURRENT_ARCH=""
@@ -179,14 +179,14 @@ for ARCH in $SEARCH_ARCHS; do
 	fi
 
 	# executables
-	if [ -e ${BUILT_PRODUCTS_DIR}/${Q3E_CLIENT} ]; then
-		Q3E_CLIENT_ARCHS="${BUILT_PRODUCTS_DIR}/${Q3E_CLIENT} ${Q3E_CLIENT_ARCHS}"
+	if [ -e ${BUILT_PRODUCTS_DIR}/${Q3NOW_CLIENT} ]; then
+		Q3NOW_CLIENT_ARCHS="${BUILT_PRODUCTS_DIR}/${Q3NOW_CLIENT} ${Q3NOW_CLIENT_ARCHS}"
 		VALID_ARCHS="${ARCH} ${VALID_ARCHS}"
 	else
 		continue
 	fi
-	if [ -e ${BUILT_PRODUCTS_DIR}/${Q3E_SERVER} ]; then
-		Q3E_SERVER_ARCHS="${BUILT_PRODUCTS_DIR}/${Q3E_SERVER} ${Q3E_SERVER_ARCHS}"
+	if [ -e ${BUILT_PRODUCTS_DIR}/${Q3NOW_SERVER} ]; then
+		Q3NOW_SERVER_ARCHS="${BUILT_PRODUCTS_DIR}/${Q3NOW_SERVER} ${Q3NOW_SERVER_ARCHS}"
 	fi
 
 	#echo "valid arch: ${ARCH}"
@@ -196,12 +196,12 @@ done
 cd `dirname $0`
 
 if [ ! -f Makefile ]; then
-	echo "$0 must be run from the quake3e build directory"
+	echo "$0 must be run from the q3now build directory"
 	exit 1
 fi
 
-if [ "${Q3E_CLIENT_ARCHS}" == "" ]; then
-	echo "$0: no quake3e binary architectures were found for target '${TARGET_NAME}'"
+if [ "${Q3NOW_CLIENT_ARCHS}" == "" ]; then
+	echo "$0: no q3now binary architectures were found for target '${TARGET_NAME}'"
 	exit 1
 fi
 
@@ -251,7 +251,7 @@ PLIST="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
     <key>CFBundleIconFile</key>
     <string>quake3_flat</string>
     <key>CFBundleIdentifier</key>
-    <string>org.quake3e.${PRODUCT_NAME}</string>
+    <string>com.q3now.${PRODUCT_NAME}</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -259,11 +259,11 @@ PLIST="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>${Q3E_VERSION}</string>
+    <string>${Q3NOW_VERSION}</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleVersion</key>
-    <string>${Q3E_VERSION}</string>
+    <string>${Q3NOW_VERSION}</string>
     <key>CGDisableCoalescedUpdates</key>
     <true/>
     <key>LSMinimumSystemVersion</key>
@@ -313,5 +313,5 @@ function action()
 #
 
 # executables
-action "${BUNDLEBINDIR}/${EXECUTABLE_NAME}"				"${Q3E_CLIENT_ARCHS}"
-action "${BUNDLEBINDIR}/${DEDICATED_NAME}"				"${Q3E_SERVER_ARCHS}"
+action "${BUNDLEBINDIR}/${EXECUTABLE_NAME}"				"${Q3NOW_CLIENT_ARCHS}"
+action "${BUNDLEBINDIR}/${DEDICATED_NAME}"				"${Q3NOW_SERVER_ARCHS}"

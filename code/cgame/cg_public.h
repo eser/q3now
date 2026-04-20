@@ -335,6 +335,7 @@ typedef struct {
 	int         maxclients;
 	int         warmup, levelStartTime;
 	qboolean    showScores, demoPlayback, intermission;
+	qboolean    connectionInterrupted; // client commands fell past CMD_BACKUP without ack
 
 	// team
 	int         ourTeam;

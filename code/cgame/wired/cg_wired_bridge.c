@@ -62,6 +62,15 @@ void CG_WiredHudPushState( void ) {
 	state.demoPlayback  = cg.demoPlayback;
 	state.intermission  = ( cg.snap->ps.pm_type == PM_INTERMISSION );
 
+	{
+		int cmdNum;
+		usercmd_t cmd;
+		cmdNum = trap_GetCurrentCmdNumber() - CMD_BACKUP + 1;
+		trap_GetUserCmd( cmdNum, &cmd );
+		state.connectionInterrupted = ( cmd.serverTime > cg.snap->ps.commandTime
+		                                && cmd.serverTime <= cg.time );
+	}
+
 	// ── team ─────────────────────────────────────────────────────────
 	state.ourTeam = cgs.clientinfo[cg.clientNum].team;
 	state.blueflag = cgs.blueflag;
