@@ -851,20 +851,6 @@ This function may execute for a couple of minutes with a slow disk.
 static void CG_RegisterGraphics( void ) {
 	int			i;
 	char		items[MAX_ITEMS+1];
-	static char		*sb_nums[11] = {
-		"gfx/2d/numbers/zero_32b",
-		"gfx/2d/numbers/one_32b",
-		"gfx/2d/numbers/two_32b",
-		"gfx/2d/numbers/three_32b",
-		"gfx/2d/numbers/four_32b",
-		"gfx/2d/numbers/five_32b",
-		"gfx/2d/numbers/six_32b",
-		"gfx/2d/numbers/seven_32b",
-		"gfx/2d/numbers/eight_32b",
-		"gfx/2d/numbers/nine_32b",
-		"gfx/2d/numbers/minus_32b",
-	};
-
 	// clear any references to old media
 	memset( &cg.refdef, 0, sizeof( cg.refdef ) );
 	trap_R_ClearScene();
@@ -872,13 +858,6 @@ static void CG_RegisterGraphics( void ) {
 	trap_UpdateScreen();
 
 	trap_R_LoadWorldMap( cgs.mapname );
-
-	// precache status bar pics
-	trap_UpdateScreen();
-
-	for ( i=0 ; i<11 ; i++) {
-		cgs.media.numberShaders[i] = trap_R_RegisterShader( sb_nums[i] );
-	}
 
 	cgs.media.viewBloodShader = trap_R_RegisterShader( "viewBloodBlend" );
 
@@ -1166,13 +1145,15 @@ CG_BuildSpectatorString
 */
 void CG_BuildSpectatorString(void) {
 	int i;
-	cg.spectatorList[0] = 0;
-	for (i = 0; i < MAX_CLIENTS; i++) {
-		if (cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team == TEAM_SPECTATOR ) {
-			Q_strcat(cg.spectatorList, sizeof(cg.spectatorList), va("%s     ", cgs.clientinfo[i].name));
+	{
+		qstring_t sl_qs = QS_Wrap( cg.spectatorList, sizeof( cg.spectatorList ) );
+		for (i = 0; i < MAX_CLIENTS; i++) {
+			if (cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team == TEAM_SPECTATOR ) {
+				QS_Appendf( &sl_qs, "%s     ", cgs.clientinfo[i].name );
+			}
 		}
+		i = QS_Len( &sl_qs );
 	}
-	i = strlen(cg.spectatorList);
 	if (i != cg.spectatorLen) {
 		cg.spectatorLen = i;
 		cg.spectatorWidth = -1;

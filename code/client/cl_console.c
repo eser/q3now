@@ -377,7 +377,7 @@ static void Con_Dump_f( void )
 			else
 				break;
 		}
-		Q_strcat( buffer, bufferlen, Q_NEWLINE );
+		{ qstring_t _b_qs = QS_WrapExisting( buffer, bufferlen ); QS_Append( &_b_qs, Q_NEWLINE ); }
 		FS_Write( buffer, strlen( buffer ), f );
 	}
 

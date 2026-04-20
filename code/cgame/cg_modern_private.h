@@ -1,7 +1,7 @@
 /*
  * cg_modern_private.h -- Modern text rendering types and draw style flags.
  *
- * Shared by cg_moderntext.c, cg_scoreboard.c, cg_drawtools.c, cg_utils.c
+ * Shared by cg_moderntext.c, cg_drawtools.c, cg_utils.c
  * and any other cgame code that uses the CG_ModernDraw* API.
  */
 #ifndef CG_MODERN_PRIVATE_H

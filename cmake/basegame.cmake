@@ -21,7 +21,6 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/game/bg_tracemap.c
     ${SOURCE_DIR}/cgame/cg_consolecmds.c
     ${SOURCE_DIR}/cgame/cg_draw.c
-    ${SOURCE_DIR}/cgame/cg_drawtools.c
     ${SOURCE_DIR}/cgame/cg_effects.c
     ${SOURCE_DIR}/cgame/cg_ents.c
     ${SOURCE_DIR}/cgame/cg_event.c
@@ -31,7 +30,6 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_players.c
     ${SOURCE_DIR}/cgame/cg_playerstate.c
     ${SOURCE_DIR}/cgame/cg_predict.c
-    ${SOURCE_DIR}/cgame/cg_scoreboard.c
     ${SOURCE_DIR}/cgame/cg_servercmds.c
     ${SOURCE_DIR}/cgame/cg_snapshot.c
     ${SOURCE_DIR}/cgame/cg_view.c
@@ -105,6 +103,7 @@ set(GAME_BINARY_SOURCES ${SOURCE_DIR}/game/g_syscalls.c)
 set(GAME_MODULE_SHARED_SOURCES
     ${SOURCE_DIR}/qcommon/q_math.c
     ${SOURCE_DIR}/qcommon/q_shared.c
+    ${SOURCE_DIR}/qcommon/q_string.c
 )
 
 set(CGAME_SOURCES_BASEGAME ${CGAME_SOURCES} ${GAME_MODULE_SHARED_SOURCES})

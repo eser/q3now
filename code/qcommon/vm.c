@@ -121,8 +121,7 @@ Cmd_ReloadWasm_f — force reload WASM modules
 ==============
 */
 static void Cmd_ReloadWasm_f( void ) {
-	int i;
-	for ( i = 0; i < VM_COUNT; i++ ) {
+	for ( int i = 0; i < VM_COUNT; i++ ) {
 		vm_t *vm = &vmTable[i];
 		if ( vm->name && vm->isWasm ) {
 			Com_Printf( "Reloading %s...\n", vm->name );
@@ -162,10 +161,9 @@ Assumes a program counter value
 ===============
 */
 const char *VM_ValueToSymbol( vm_t *vm, int value ) {
-	vmSymbol_t	*sym;
 	static char		text[MAX_TOKEN_CHARS];
 
-	sym = vm->symbols;
+	vmSymbol_t *sym = vm->symbols;
 	if ( !sym ) {
 		return "NO SYMBOLS";
 	}
@@ -193,10 +191,9 @@ For profiling, find the symbol behind this value
 ===============
 */
 vmSymbol_t *VM_ValueToFunctionSymbol( vm_t *vm, int value ) {
-	vmSymbol_t	*sym;
 	static vmSymbol_t	nullSym;
 
-	sym = vm->symbols;
+	vmSymbol_t *sym = vm->symbols;
 	if ( !sym ) {
 		return &nullSym;
 	}
@@ -215,9 +212,7 @@ VM_SymbolToValue
 ===============
 */
 int VM_SymbolToValue( vm_t *vm, const char *symbol ) {
-	vmSymbol_t	*sym;
-
-	for ( sym = vm->symbols ; sym ; sym = sym->next ) {
+	for ( vmSymbol_t *sym = vm->symbols ; sym ; sym = sym->next ) {
 		if ( !strcmp( symbol, sym->symName ) ) {
 			return sym->symValue;
 		}
@@ -232,10 +227,8 @@ ParseHex
 ===============
 */
 static int	ParseHex( const char *text ) {
-	int		value;
-	int		c;
-
-	value = 0;
+	int value = 0;
+	int c;
 	while ( ( c = *text++ ) != 0 ) {
 		if ( c >= '0' && c <= '9' ) {
 			value = value * 16 + c - '0';
@@ -265,21 +258,15 @@ static void VM_LoadSymbols( vm_t *vm ) {
 		char	*c;
 		void	*v;
 	} mapfile;
-	const char *text_p, *token;
-	char	name[MAX_QPATH];
-	char	symbols[MAX_QPATH];
-	vmSymbol_t	**prev, *sym;
-	int		count;
-	int		value;
-	int		chars;
-	int		segment;
 
 	// don't load symbols if not developer
 	if ( !com_developer->integer ) {
 		return;
 	}
 
+	char name[MAX_QPATH];
 	COM_StripExtension(vm->name, name, sizeof(name));
+	char symbols[MAX_QPATH];
 	Com_sprintf( symbols, sizeof( symbols ), "vm/%s.map", name );
 	FS_ReadFile( symbols, &mapfile.v );
 	if ( !mapfile.c ) {
@@ -288,17 +275,17 @@ static void VM_LoadSymbols( vm_t *vm ) {
 	}
 
 	// parse the symbols
-	text_p = mapfile.c;
-	prev = &vm->symbols;
-	count = 0;
+	const char *text_p = mapfile.c;
+	vmSymbol_t **prev = &vm->symbols;
+	int count = 0;
 
 	ComParser parser = { 0 };
 	while ( 1 ) {
-		token = COM_Parse( &parser, &text_p );
+		const char *token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			break;
 		}
-		segment = ParseHex( token );
+		int segment = ParseHex( token );
 		if ( segment ) {
 			COM_Parse( &parser, &text_p );
 			COM_Parse( &parser, &text_p );
@@ -310,15 +297,15 @@ static void VM_LoadSymbols( vm_t *vm ) {
 			Com_Printf( "WARNING: incomplete line at end of file\n" );
 			break;
 		}
-		value = ParseHex( token );
+		int value = ParseHex( token );
 
 		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			Com_Printf( "WARNING: incomplete line at end of file\n" );
 			break;
 		}
-		chars = strlen( token );
-		sym = Hunk_Alloc( sizeof( *sym ) + chars, h_high );
+		int chars = strlen( token );
+		vmSymbol_t *sym = Hunk_Alloc( sizeof( *sym ) + chars, h_high );
 		*prev = sym;
 		prev = &sym->next;
 		sym->next = NULL;
@@ -385,13 +372,9 @@ This allows a server to do a map_restart without changing memory allocation
 vm_t *VM_Restart( vm_t *vm ) {
 	// DLL's can't be restarted in place
 	if ( vm->dllHandle ) {
-		syscall_t		systemCall;
-		dllSyscall_t	dllSyscall;
-		vmIndex_t		index;
-
-		index = vm->index;
-		systemCall = vm->systemCall;
-		dllSyscall = vm->dllSyscall;
+		vmIndex_t index = vm->index;
+		syscall_t systemCall = vm->systemCall;
+		dllSyscall_t dllSyscall = vm->dllSyscall;
 
 		VM_Free( vm );
 
@@ -415,14 +398,10 @@ TTimo: added some verbosity in debug
 =================
 */
 static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllSyscall_t systemcalls ) {
-
-	char		filename[ MAX_QPATH ];
-	void		*libHandle;
-	dllEntry_t	dllEntry;
-
+	char filename[ MAX_QPATH ];
 	Com_sprintf( filename, sizeof( filename ), "%s" ARCH_STRING DLL_EXT, name );
 
-	libHandle = FS_LoadLibrary( filename );
+	void *libHandle = FS_LoadLibrary( filename );
 
 	if ( !libHandle ) {
 		Com_DPrintf( "VM_LoadDLL '%s' failed\n", filename );
@@ -431,7 +410,7 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 
 	Com_DPrintf( "VM_LoadDLL '%s' ok\n", filename );
 
-	dllEntry = /* ( dllEntry_t ) */ Sys_LoadFunction( libHandle, "dllEntry" );
+	dllEntry_t dllEntry = /* ( dllEntry_t ) */ Sys_LoadFunction( libHandle, "dllEntry" );
 	*entryPoint = /* ( dllSyscall_t ) */ Sys_LoadFunction( libHandle, "vmMain" );
 	if ( !*entryPoint || !dllEntry ) {
 		Sys_UnloadLibrary( libHandle );
@@ -455,10 +434,6 @@ Loads a native shared library (VMI_NATIVE) or a WASM module
 ================
 */
 vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret ) {
-	int			remaining;
-	const char	*name;
-	vm_t		*vm;
-
 	if ( !systemCalls ) {
 		Com_Error( ERR_FATAL, "VM_Create: bad parms" );
 	}
@@ -467,9 +442,9 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 		Com_Error( ERR_DROP, "VM_Create: bad vm index %i", index );
 	}
 
-	remaining = Hunk_MemoryRemaining();
+	int remaining = Hunk_MemoryRemaining();
 
-	vm = &vmTable[ index ];
+	vm_t *vm = &vmTable[ index ];
 
 	// see if we already have the VM
 	if ( vm->name ) {
@@ -480,7 +455,7 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 		return vm;
 	}
 
-	name = vmName[ index ];
+	const char *name = vmName[ index ];
 
 	vm->name = name;
 	vm->index = index;
@@ -566,8 +541,7 @@ void VM_Free( vm_t *vm ) {
 
 
 void VM_Clear( void ) {
-	int i;
-	for ( i = 0; i < VM_COUNT; i++ ) {
+	for ( int i = 0; i < VM_COUNT; i++ ) {
 		VM_Free( &vmTable[ i ] );
 	}
 }
@@ -613,24 +587,22 @@ void VM_GetCallStack( vm_t *vm, char *buf, int bufSize )
 	}
 
 	Q_strncpyz( buf, vm->name ? vm->name : "?", bufSize );
-	Q_strcat( buf, bufSize, ": " );
+	{
+		qstring_t buf_qs = QS_WrapExisting( buf, bufSize );
+		QS_Append( &buf_qs, ": " );
 
-	if ( vm->entryPoint != NULL || vm->dllHandle != NULL ) {
-		Q_strcat( buf, bufSize, "native" );
-		return;
-	}
+		if ( vm->entryPoint != NULL || vm->dllHandle != NULL ) {
+			QS_Append( &buf_qs, "native" );
+			return;
+		}
 
 #if FEAT_WASM
-	{
-		char frame[ 64 ];
-		Com_sprintf( frame, sizeof( frame ), "wasm level=%d stack=0x%x",
-			vm->callLevel, (unsigned)vm->programStack );
-		Q_strcat( buf, bufSize, frame );
+		QS_Appendf( &buf_qs, "wasm level=%d stack=0x%x", vm->callLevel, (unsigned)vm->programStack );
 		return;
-	}
 #else
-	Q_strcat( buf, bufSize, "unknown" );
+		QS_Append( &buf_qs, "unknown" );
 #endif
+	}
 }
 
 
@@ -662,7 +634,6 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 {
 	//vm_t	*oldVM;
 	intptr_t r;
-	int i;
 
 	if ( !vm ) {
 		Com_Error( ERR_FATAL, "VM_Call with NULL vm" );
@@ -694,7 +665,7 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 		memset( wasm_args, 0, sizeof( wasm_args ) );
 		wasm_args[0] = callnum;
 		va_start( wasm_ap, callnum );
-		for ( i = 0; i < nargs; i++ ) {
+		for ( int i = 0; i < nargs; i++ ) {
 			wasm_args[i+1] = va_arg( wasm_ap, int32_t );
 		}
 		va_end( wasm_ap );
@@ -713,7 +684,7 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 		if ( nargs > 0 ) {
 			va_list ap;
 			va_start( ap, callnum );
-			for ( i = 0; i < nargs; i++ ) {
+			for ( int i = 0; i < nargs; i++ ) {
 				args[i] = va_arg( ap, int32_t );
 			}
 			va_end( ap );
@@ -739,12 +710,9 @@ VM_VmInfo_f
 ==============
 */
 static void VM_VmInfo_f( void ) {
-	const vm_t	*vm;
-	int		i;
-
 	Com_Printf( "Registered virtual machines:\n" );
-	for ( i = 0 ; i < VM_COUNT ; i++ ) {
-		vm = &vmTable[i];
+	for ( int i = 0 ; i < VM_COUNT ; i++ ) {
+		const vm_t *vm = &vmTable[i];
 		if ( !vm->name ) {
 			continue;
 		}

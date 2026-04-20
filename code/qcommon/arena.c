@@ -40,20 +40,17 @@ Arena_Create
 */
 arena_t *Arena_Create( const char *name, size_t size )
 {
-    arena_t *a;
-    byte    *block;
-
     if ( !name || size == 0 ) {
         Com_Error( ERR_FATAL, "Arena_Create: bad parameters" );
     }
 
     /* Allocate the arena header and the data block together for locality */
-    block = (byte *)malloc( sizeof(arena_t) + size );
+    byte *block = (byte *)malloc( sizeof(arena_t) + size );
     if ( !block ) {
         Com_Error( ERR_FATAL, "Arena_Create: failed to allocate %zu bytes for '%s'", size, name );
     }
 
-    a = (arena_t *)block;
+    arena_t *a = (arena_t *)block;
     memset( a, 0, sizeof(arena_t) );
     Q_strncpyz( a->name, name, sizeof(a->name) );
     a->base  = block + sizeof(arena_t);
@@ -90,9 +87,6 @@ Arena_Alloc
 */
 void *Arena_Alloc( arena_t *arena, size_t size, size_t alignment )
 {
-    byte   *aligned;
-    size_t  pad;
-
     if ( !arena || arena->magic != ARENA_GUARD_MAGIC ) {
         Com_Error( ERR_FATAL, "Arena_Alloc: invalid arena" );
     }
@@ -110,8 +104,8 @@ void *Arena_Alloc( arena_t *arena, size_t size, size_t alignment )
 #endif
 
     /* Align the bump pointer */
-    pad = (alignment - ((size_t)(arena->ptr) & (alignment - 1))) & (alignment - 1);
-    aligned = arena->ptr + pad;
+    size_t pad = (alignment - ((size_t)(arena->ptr) & (alignment - 1))) & (alignment - 1);
+    byte *aligned = arena->ptr + pad;
 
     if ( aligned + size > arena->end ) {
         Com_Error( ERR_FATAL, "Arena_Alloc: arena '%s' out of space (used %zu / %zu, requested %zu)",
@@ -232,8 +226,7 @@ void Arena_Register( arena_t *arena )
 
 void Arena_Unregister( arena_t *arena )
 {
-    int i;
-    for ( i = 0; i < s_registryCount; i++ ) {
+    for ( int i = 0; i < s_registryCount; i++ ) {
         if ( s_registry[i] == arena ) {
             s_registry[i] = s_registry[--s_registryCount];
             s_registry[s_registryCount] = NULL;
@@ -251,7 +244,6 @@ Called by /memstats console command.
 */
 void Arena_PrintStats( void )
 {
-    int    i;
     size_t totalUsed = 0, totalSize = 0;
 
     if ( s_registryCount == 0 ) {
@@ -264,7 +256,7 @@ void Arena_PrintStats( void )
         "------------------------",
         "--------", "--------", "--------", "---" );
 
-    for ( i = 0; i < s_registryCount; i++ ) {
+    for ( int i = 0; i < s_registryCount; i++ ) {
         arena_t *a = s_registry[i];
         size_t size = Arena_Size( a );
         size_t used = Arena_Used( a );

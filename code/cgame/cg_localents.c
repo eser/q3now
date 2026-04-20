@@ -706,62 +706,39 @@ void CG_AddRefEntity( localEntity_t *le ) {
 	trap_R_AddRefEntityToScene( &le->refEntity );
 }
 
+// Deferred 2D plum overlay buffer — written during scene setup, drawn in 2D pass
+#define MAX_PLUM_OVERLAYS 32
+
+typedef struct {
+	float	x, y;		// 640x480 virtual screen coords
+	vec4_t	color;		// includes alpha
+	char	text[16];
+} plumOverlay_t;
+
+static plumOverlay_t	cg_plumOverlays[MAX_PLUM_OVERLAYS];
+static int				cg_numPlumOverlays;
+
 /*
 ===================
 CG_AddScorePlum
 ===================
 */
-#define NUMBER_SIZE		8
-
 void CG_AddScorePlum( localEntity_t *le ) {
-	refEntity_t	*re;
 	vec3_t		origin, delta, dir, vec, up = {0, 0, 1};
-	float		c, len;
-	int			i, score, digits[10], numdigits, negative;
-
-	re = &le->refEntity;
+	float		c, len, x, y;
+	int			score;
+	plumOverlay_t *po;
 
 	c = ( le->endTime - cg.time ) * le->lifeRate;
 
-	score = le->radius;
-	if (score < 0) {
-		re->shaderRGBA[0] = 0xff;
-		re->shaderRGBA[1] = 0x11;
-		re->shaderRGBA[2] = 0x11;
-	}
-	else {
-		re->shaderRGBA[0] = 0xff;
-		re->shaderRGBA[1] = 0xff;
-		re->shaderRGBA[2] = 0xff;
-		if (score >= 50) {
-			re->shaderRGBA[1] = 0;
-		} else if (score >= 20) {
-			re->shaderRGBA[0] = re->shaderRGBA[1] = 0;
-		} else if (score >= 10) {
-			re->shaderRGBA[2] = 0;
-		} else if (score >= 2) {
-			re->shaderRGBA[0] = re->shaderRGBA[2] = 0;
-		}
-
-	}
-	if (c < 0.25)
-		re->shaderRGBA[3] = 0xff * 4 * c;
-	else
-		re->shaderRGBA[3] = 0xff;
-
-	re->radius = NUMBER_SIZE / 2;
-
-	VectorCopy(le->pos.trBase, origin);
+	VectorCopy( le->pos.trBase, origin );
 	origin[2] += 110 - c * 100;
 
-	VectorSubtract(cg.refdef.vieworg, origin, dir);
-	CrossProduct(dir, up, vec);
-	VectorNormalize(vec);
+	VectorSubtract( cg.refdef.vieworg, origin, dir );
+	CrossProduct( dir, up, vec );
+	VectorNormalize( vec );
+	VectorMA( origin, -10 + 20 * sin( c * 2 * M_PI ), vec, origin );
 
-	VectorMA(origin, -10 + 20 * sin(c * 2 * M_PI), vec, origin);
-
-	// if the view would be "inside" the sprite, kill the sprite
-	// so it doesn't add too much overdraw
 	VectorSubtract( origin, cg.refdef.vieworg, delta );
 	len = VectorLength( delta );
 	if ( len < 20 ) {
@@ -769,26 +746,35 @@ void CG_AddScorePlum( localEntity_t *le ) {
 		return;
 	}
 
-	negative = qfalse;
-	if (score < 0) {
-		negative = qtrue;
-		score = -score;
+	if ( !CG_WorldToScreen( origin, &x, &y ) ) {
+		return;
+	}
+	if ( cg_numPlumOverlays >= MAX_PLUM_OVERLAYS ) {
+		return;
 	}
 
-	for (numdigits = 0; !(numdigits && !score); numdigits++) {
-		digits[numdigits] = score % 10;
-		score = score / 10;
-	}
+	score = (int)le->radius;
+	po = &cg_plumOverlays[cg_numPlumOverlays++];
+	po->x = x;
+	po->y = y;
+	po->color[3] = ( c < 0.25f ) ? c * 4.0f : 1.0f;
 
-	if (negative) {
-		digits[numdigits] = 10;
-		numdigits++;
-	}
-
-	for (i = 0; i < numdigits; i++) {
-		VectorMA(origin, (float) (((float) numdigits / 2) - i) * NUMBER_SIZE, vec, re->origin);
-		re->customShader = cgs.media.numberShaders[digits[numdigits-1-i]];
-		trap_R_AddRefEntityToScene( re );
+	if ( score < 0 ) {
+		po->color[0] = 1.0f; po->color[1] = 0.067f; po->color[2] = 0.067f;
+		Com_sprintf( po->text, sizeof( po->text ), "%d", score );
+	} else {
+		if ( score >= 50 ) {
+			po->color[0] = 1.0f; po->color[1] = 0.0f; po->color[2] = 1.0f;
+		} else if ( score >= 20 ) {
+			po->color[0] = 0.0f; po->color[1] = 0.0f; po->color[2] = 1.0f;
+		} else if ( score >= 10 ) {
+			po->color[0] = 1.0f; po->color[1] = 1.0f; po->color[2] = 0.0f;
+		} else if ( score >= 2 ) {
+			po->color[0] = 0.0f; po->color[1] = 1.0f; po->color[2] = 0.0f;
+		} else {
+			po->color[0] = po->color[1] = po->color[2] = 1.0f;
+		}
+		Com_sprintf( po->text, sizeof( po->text ), "+%d", score );
 	}
 }
 
@@ -800,25 +786,15 @@ Floating damage number (red), shown only to the attacker. (2A)
 ===================
 */
 void CG_AddDamagePlum( localEntity_t *le ) {
-	refEntity_t	*re;
 	vec3_t		origin, delta, dir, vec, up = {0, 0, 1};
-	float		c, len;
-	int			dmg, digits[10], numdigits, i;
+	float		c, len, x, y;
+	int			dmg;
+	plumOverlay_t *po;
 
-	re = &le->refEntity;
 	c = ( le->endTime - cg.time ) * le->lifeRate;
 
-	// red color, fades out
-	re->shaderRGBA[0] = 0xff;
-	re->shaderRGBA[1] = 0x33;
-	re->shaderRGBA[2] = 0x33;
-	re->shaderRGBA[3] = ( c < 0.25f ) ? (byte)( 0xff * 4 * c ) : 0xff;
-
-	re->radius = NUMBER_SIZE / 2;
-
-	// float upward along the drift path
 	BG_EvaluateTrajectory( &le->pos, cg.time, origin );
-	origin[2] += 40 - c * 40;	// rise as c goes from 1 → 0
+	origin[2] += 40 - c * 40;
 
 	VectorSubtract( cg.refdef.vieworg, origin, dir );
 	CrossProduct( dir, up, vec );
@@ -832,21 +808,45 @@ void CG_AddDamagePlum( localEntity_t *le ) {
 		return;
 	}
 
+	if ( !CG_WorldToScreen( origin, &x, &y ) ) {
+		return;
+	}
+	if ( cg_numPlumOverlays >= MAX_PLUM_OVERLAYS ) {
+		return;
+	}
+
 	dmg = (int)le->radius;
 	if ( dmg <= 0 ) dmg = 1;
 
-	for ( numdigits = 0; !( numdigits && !dmg ); numdigits++ ) {
-		digits[numdigits] = dmg % 10;
-		dmg = dmg / 10;
-	}
-
-	for ( i = 0; i < numdigits; i++ ) {
-		VectorMA( origin, (float)( ( (float)numdigits / 2 ) - i ) * NUMBER_SIZE, vec, re->origin );
-		re->customShader = cgs.media.numberShaders[digits[numdigits - 1 - i]];
-		trap_R_AddRefEntityToScene( re );
-	}
+	po = &cg_plumOverlays[cg_numPlumOverlays++];
+	po->x = x;
+	po->y = y;
+	po->color[0] = 1.0f; po->color[1] = 0.2f; po->color[2] = 0.2f;
+	po->color[3] = ( c < 0.25f ) ? c * 4.0f : 1.0f;
+	Com_sprintf( po->text, sizeof( po->text ), "%d", dmg );
 }
 #endif
+
+/*
+===================
+CG_DrawPlumOverlays
+2D pass: draw all deferred plum overlays with MSDF text, then clear buffer.
+Called from CG_Draw2D after trap_R_RenderScene.
+===================
+*/
+void CG_DrawPlumOverlays( void ) {
+	int				i;
+	plumOverlay_t	*po;
+
+	for ( i = 0; i < cg_numPlumOverlays; i++ ) {
+		po = &cg_plumOverlays[i];
+		trap_R_DrawTextNorm( po->text,
+			po->x * NORM_HSCALE, po->y * NORM_VSCALE,
+			FONT_UI, (float)SMALLCHAR_HEIGHT * NORM_VSCALE,
+			po->color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
+	}
+	cg_numPlumOverlays = 0;
+}
 
 
 //==============================================================================

@@ -115,7 +115,7 @@ const char *Sys_DefaultHomePath( void )
 	}
 
 	Q_strncpyz( path, userProfile, sizeof( path ) );
-	Q_strcat( path, sizeof( path ), "\\q3now" CHANNEL_SUFFIX );
+	{ qstring_t _ph_qs = QS_WrapExisting( path, sizeof( path ) ); QS_Append( &_ph_qs, "\\q3now" CHANNEL_SUFFIX ); }
 
 	if ( !CreateDirectory( path, NULL ) )
 	{

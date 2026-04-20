@@ -153,6 +153,7 @@ static int WiredPC_ReadTokenEval( int handle, pc_token_t *token ) {
 		start++; // skip (
 
 		Q_strncpyz( exprBuf, start, sizeof( exprBuf ) );
+		qstring_t exprBuf_qs = QS_WrapExisting( exprBuf, sizeof(exprBuf) );
 
 		// count parens — the initial $evalfloat( adds 1
 		depth = 1;
@@ -173,7 +174,7 @@ static int WiredPC_ReadTokenEval( int handle, pc_token_t *token ) {
 			while ( depth > 0 ) {
 				pc_token_t next;
 				if ( !WiredPC_ReadToken( handle, &next ) ) break;
-				Q_strcat( exprBuf, sizeof(exprBuf), next.string );
+				QS_Append( &exprBuf_qs, next.string );
 				{
 					const char *c;
 					for ( c = next.string; *c; c++ ) {
@@ -342,14 +343,15 @@ static qboolean WiredPC_CaptureBracedScript( int handle, char *dest, int destSiz
 		return qfalse;
 	}
 	depth = 1;
-	if ( dest ) dest[0] = '\0';
+	qstring_t dest_qs = { NULL, 0, 0 };
+	if ( dest && destSize > 0 ) { dest[0] = '\0'; dest_qs = QS_Wrap( dest, destSize ); }
 	while ( depth > 0 ) {
 		if ( !WiredPC_ReadToken( handle, &token ) ) break;
 		if ( !Q_stricmp( token.string, "{" ) ) { depth++; continue; }
 		if ( !Q_stricmp( token.string, "}" ) ) { depth--; continue; }
-		if ( dest && destSize > 0 ) {
-			if ( dest[0] ) Q_strcat( dest, destSize, " " );
-			Q_strcat( dest, destSize, token.string );
+		if ( dest_qs.data ) {
+			if ( !QS_Empty( &dest_qs ) ) QS_AppendChar( &dest_qs, ' ' );
+			QS_Append( &dest_qs, token.string );
 		}
 	}
 	return qtrue;

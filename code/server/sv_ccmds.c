@@ -1526,6 +1526,101 @@ static void SV_CompleteClientName( const char *args, int argNum ) {
 }
 
 
+#if FEAT_MEMSTATS
+/*
+======================
+SV_GetClientMemStats
+======================
+*/
+clientMemStats_t SV_GetClientMemStats( int clientNum ) {
+	clientMemStats_t s;
+	const client_t *cl;
+	int i;
+
+	memset( &s, 0, sizeof( s ) );
+	if ( clientNum < 0 || clientNum >= sv.maxclients ) {
+		return s;
+	}
+	cl = &svs.clients[clientNum];
+	if ( cl->state == CS_FREE ) {
+		return s;
+	}
+
+	s.snapshotBytes = cl->frames[cl->deltaMessage & PACKET_MASK].messageSize;
+
+	for ( i = 0; i < MAX_DOWNLOAD_WINDOW; i++ ) {
+		if ( cl->downloadBlocks[i] ) {
+			s.downloadBytes += MAX_DOWNLOAD_BLKSIZE;
+		}
+	}
+
+	s.totalBytes = s.snapshotBytes + s.downloadBytes;
+	return s;
+}
+
+
+/*
+======================
+SV_MemInfoClients_f
+======================
+*/
+static void SV_MemInfoClients_f( void ) {
+	int i, connected;
+	const client_t *cl;
+	clientMemStats_t ms;
+	int totalSnap = 0, totalDl = 0, totalAll = 0;
+	float avgSnap, avgDl, avgAll;
+
+	if ( !com_sv_running->integer ) {
+		Com_Printf( "Server is not running.\n" );
+		return;
+	}
+
+	connected = 0;
+	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+		if ( cl->state >= CS_CONNECTED ) connected++;
+	}
+
+	Com_Printf( "──────────────────────────────────────────\n" );
+	Com_Printf( "CLIENT MEMORY (%i connected):\n", connected );
+	Com_Printf( "  %-3s  %-20s  %8s  %8s  %8s\n",
+		"#", "Name", "Snapshot", "Download", "Total" );
+
+	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+		if ( cl->state < CS_CONNECTED ) continue;
+		ms = SV_GetClientMemStats( i );
+
+		Com_Printf( "  %-3i  %-20s  %6.1f KB  %6.1f KB  %6.1f KB\n",
+			i, cl->name,
+			ms.snapshotBytes / 1024.0f,
+			ms.downloadBytes / 1024.0f,
+			ms.totalBytes    / 1024.0f );
+
+		totalSnap += ms.snapshotBytes;
+		totalDl   += ms.downloadBytes;
+		totalAll  += ms.totalBytes;
+	}
+
+	Com_Printf( "  %-3s  %-20s  %6.1f KB  %6.1f KB  %6.1f KB\n",
+		"---", "Total",
+		totalSnap / 1024.0f,
+		totalDl   / 1024.0f,
+		totalAll  / 1024.0f );
+
+	if ( connected > 0 ) {
+		avgSnap = totalSnap / (float)connected;
+		avgDl   = totalDl   / (float)connected;
+		avgAll  = totalAll  / (float)connected;
+		Com_Printf( "  Projected (128p): snap %.0f KB  dl %.0f KB  total %.0f KB\n",
+			avgSnap * 128.0f / 1024.0f,
+			avgDl   * 128.0f / 1024.0f,
+			avgAll  * 128.0f / 1024.0f );
+	}
+	Com_Printf( "──────────────────────────────────────────\n" );
+}
+#endif // FEAT_MEMSTATS
+
+
 /*
 ==================
 SV_AddOperatorCommands
@@ -1589,6 +1684,9 @@ void SV_AddOperatorCommands( void ) {
 	Cmd_AddCommand( "filtercmd", SV_AddFilterCmd_f );
 	Cmd_AddCommand( "bot_verify_character", SV_BotVerifyCharacter_f );
 	Cmd_AddCommand( "bot_debug_weapons", SV_BotDebugWeapons_f );
+#if FEAT_MEMSTATS
+	Cmd_AddCommand( "meminfo_clients", SV_MemInfoClients_f );
+#endif
 }
 
 

@@ -67,9 +67,8 @@ wasm_syscall_bridge_raw( wasm_exec_env_t exec_env, uint64_t *argv )
 {
 	vm_t *vm = (vm_t *)wasm_runtime_get_user_data( exec_env );
 	intptr_t args[WASM_MAX_SYSCALL_ARGS];
-	int i;
 
-	for ( i = 0; i < WASM_MAX_SYSCALL_ARGS; i++ ) {
+	for ( int i = 0; i < WASM_MAX_SYSCALL_ARGS; i++ ) {
 		args[i] = (intptr_t)(uint32_t)argv[i];
 	}
 
@@ -122,29 +121,18 @@ static void VM_WasmInitRuntime( void )
 
 qboolean VM_WasmLoad( vm_t *vm )
 {
-	char                    filename[MAX_QPATH];
-	byte                   *buf = NULL;
-	int                     fileLen;
-	char                    errorBuf[WASM_ERROR_BUF_SIZE];
-	wasm_module_t           module = NULL;
-	wasm_module_inst_t      moduleInst = NULL;
-	wasm_exec_env_t         execEnv = NULL;
-	wasm_function_inst_t    funcVmMain = NULL;
-	wasm_memory_inst_t      memoryInst;
-	uint64_t                memPages;
-	uint32_t                memSize;
-	qboolean                isAot = qfalse;
-	int                     startTime;
-
 	VM_WasmInitRuntime();
 	if ( !wamr_initialized )
 		return qfalse;
 
-	startTime = Sys_Milliseconds();
+	int startTime = Sys_Milliseconds();
+	qboolean isAot = qfalse;
 
 	/* ── Try .aot first (AOT-compiled, near-native speed) ────────── */
+	char filename[MAX_QPATH];
 	Com_sprintf( filename, sizeof( filename ), "vm/%s.aot", vm->name );
-	fileLen = FS_ReadFile( filename, (void **)&buf );
+	byte *buf = NULL;
+	int fileLen = FS_ReadFile( filename, (void **)&buf );
 	if ( fileLen > 0 && buf ) {
 		isAot = qtrue;
 	} else {
@@ -157,8 +145,9 @@ qboolean VM_WasmLoad( vm_t *vm )
 	}
 
 	/* ── Load module ─────────────────────────────────────────────── */
+	char errorBuf[WASM_ERROR_BUF_SIZE];
 	errorBuf[0] = '\0';
-	module = wasm_runtime_load( buf, (uint32_t)fileLen, errorBuf, sizeof( errorBuf ) );
+	wasm_module_t module = wasm_runtime_load( buf, (uint32_t)fileLen, errorBuf, sizeof( errorBuf ) );
 	if ( !module ) {
 		Com_Printf( S_COLOR_YELLOW "WASM: failed to load %s: %s\n", filename, errorBuf );
 		FS_FreeFile( buf );
@@ -201,7 +190,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 
 	/* ── Instantiate ─────────────────────────────────────────────── */
 	errorBuf[0] = '\0';
-	moduleInst = wasm_runtime_instantiate( module, WASM_STACK_SIZE, WASM_HEAP_SIZE,
+	wasm_module_inst_t moduleInst = wasm_runtime_instantiate( module, WASM_STACK_SIZE, WASM_HEAP_SIZE,
 	                                       errorBuf, sizeof( errorBuf ) );
 	if ( !moduleInst ) {
 		Com_Printf( S_COLOR_YELLOW "WASM: failed to instantiate %s: %s\n", filename, errorBuf );
@@ -211,7 +200,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 	}
 
 	/* ── Look up vmMain export ───────────────────────────────────── */
-	funcVmMain = wasm_runtime_lookup_function( moduleInst, "vmMain" );
+	wasm_function_inst_t funcVmMain = wasm_runtime_lookup_function( moduleInst, "vmMain" );
 	if ( !funcVmMain ) {
 		Com_Printf( S_COLOR_YELLOW "WASM: %s does not export vmMain\n", filename );
 		wasm_runtime_deinstantiate( moduleInst );
@@ -221,7 +210,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 	}
 
 	/* ── Create execution environment ────────────────────────────── */
-	execEnv = wasm_runtime_create_exec_env( moduleInst, WASM_STACK_SIZE );
+	wasm_exec_env_t execEnv = wasm_runtime_create_exec_env( moduleInst, WASM_STACK_SIZE );
 	if ( !execEnv ) {
 		Com_Printf( S_COLOR_YELLOW "WASM: failed to create exec env for %s\n", filename );
 		wasm_runtime_deinstantiate( moduleInst );
@@ -234,9 +223,10 @@ qboolean VM_WasmLoad( vm_t *vm )
 	wasm_runtime_set_user_data( execEnv, vm );
 
 	/* ── Set up linear memory for VMA() translation ──────────────── */
-	memoryInst = wasm_runtime_get_default_memory( moduleInst );
+	wasm_memory_inst_t memoryInst = wasm_runtime_get_default_memory( moduleInst );
+	uint32_t memSize = 0;
 	if ( memoryInst ) {
-		memPages = wasm_memory_get_cur_page_count( memoryInst );
+		uint64_t memPages = wasm_memory_get_cur_page_count( memoryInst );
 		memSize = (uint32_t)( memPages * 65536 );
 		vm->dataBase = (byte *)wasm_runtime_addr_app_to_native( moduleInst, 0 );
 		vm->dataMask = memSize - 1;
@@ -284,9 +274,6 @@ int32_t VM_CallWasm( vm_t *vm, int nargs, int32_t *args )
 	wasm_function_inst_t func = (wasm_function_inst_t)vm->wasmFuncVmMain;
 	wasm_module_inst_t inst = (wasm_module_inst_t)vm->wasmModuleInst;
 
-	uint32_t argv[MAX_VMMAIN_CALL_ARGS];
-	int i;
-
 	/* Guard: module not loaded or destroyed */
 	if ( !execEnv || !func || !inst ) {
 		Com_Printf( S_COLOR_YELLOW "WASM: %s call skipped (module not loaded)\n", vm->name );
@@ -296,7 +283,8 @@ int32_t VM_CallWasm( vm_t *vm, int nargs, int32_t *args )
 	/* Clear any lingering exception */
 	wasm_runtime_clear_exception( inst );
 
-	for ( i = 0; i < nargs && i < MAX_VMMAIN_CALL_ARGS; i++ ) {
+	uint32_t argv[MAX_VMMAIN_CALL_ARGS];
+	for ( int i = 0; i < nargs && i < MAX_VMMAIN_CALL_ARGS; i++ ) {
 		argv[i] = (uint32_t)args[i];
 	}
 

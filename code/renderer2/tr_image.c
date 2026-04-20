@@ -2347,7 +2347,7 @@ static void R_LoadImage( const char *name, byte **pic, int *width, int *height, 
 		char ddsName[MAX_QPATH];
 
 		COM_StripExtension(name, ddsName, MAX_QPATH);
-		Q_strcat(ddsName, MAX_QPATH, ".dds");
+		{ qstring_t _dds_qs = QS_WrapExisting(ddsName, MAX_QPATH); QS_Append(&_dds_qs, ".dds"); }
 
 		R_LoadDDS(ddsName, pic, width, height, picFormat, numMips);
 
@@ -2474,7 +2474,7 @@ image_t	*R_FindImageFile( const char *name, imgType_t type, imgFlags_t flags )
 		normalFlags = (flags & ~IMGFLAG_GENNORMALMAP) | IMGFLAG_NOLIGHTSCALE;
 
 		COM_StripExtension(name, normalName, MAX_QPATH);
-		Q_strcat(normalName, MAX_QPATH, "_n");
+		{ qstring_t _n_qs = QS_WrapExisting(normalName, MAX_QPATH); QS_Append(&_n_qs, "_n"); }
 
 		// find normalmap in case it's there
 		normalImage = R_FindImageFile(normalName, IMGTYPE_NORMAL, normalFlags);

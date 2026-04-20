@@ -137,17 +137,14 @@ help <name>  /  man <name>
 static void Cmd_Help_f( void )
 {
 	const char *arg0 = Cmd_Argv( 0 );
-	const char *name;
-	cvar_t *var;
 
 	if ( Cmd_Argc() != 2 ) {
 		Com_Printf( "usage: %s <cvar|cmd>\n", arg0 );
 		return;
 	}
 
-	name = Cmd_Argv( 1 );
-
-	var = Cvar_FindVarPublic( name );
+	const char *name = Cmd_Argv( 1 );
+	cvar_t *var = Cvar_FindVarPublic( name );
 	if ( var != NULL ) {
 		Help_PrintCvar( var );
 		return;
@@ -246,12 +243,6 @@ Style is controlled by con_drawHelp's bit flags:
 */
 qboolean Help_LookupText( const char *token, char *out, int outSize )
 {
-	cvar_t *var;
-	int flags;
-	qboolean haveText;
-	char attribBuf[32];
-	int ap = 0;
-
 	if ( out == NULL || outSize <= 0 )
 		return qfalse;
 	out[0] = '\0';
@@ -262,19 +253,20 @@ qboolean Help_LookupText( const char *token, char *out, int outSize )
 	if ( con_drawHelp == NULL )
 		return qfalse;
 
-	flags = con_drawHelp->integer;
+	int flags = con_drawHelp->integer;
 	if ( !( flags & HELP_FLAG_ENABLE ) )
 		return qfalse;
 
-	var = Cvar_FindVarPublic( token );
+	cvar_t *var = Cvar_FindVarPublic( token );
 	if ( var != NULL ) {
-		haveText = ( var->description && var->description[0] ) ? qtrue : qfalse;
+		qboolean haveText = ( var->description && var->description[0] ) ? qtrue : qfalse;
 		if ( !haveText && !( flags & HELP_FLAG_ALWAYS ) )
 			return qfalse;
 
+		char attribBuf[32];
 		attribBuf[0] = '\0';
 		if ( flags & HELP_FLAG_ATTRIBS ) {
-			ap = 0;
+			int ap = 0;
 			if ( var->flags & CVAR_ARCHIVE )  attribBuf[ap++] = 'A';
 			if ( var->flags & CVAR_LATCH )    attribBuf[ap++] = 'L';
 			if ( var->flags & CVAR_ROM )      attribBuf[ap++] = 'R';

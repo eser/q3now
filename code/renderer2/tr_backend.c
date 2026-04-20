@@ -1955,7 +1955,7 @@ static const void *RB_ExportCubemaps(const void *data)
 			if (cubemap->name[0])
 			{
 				COM_StripExtension(cubemap->name, filename, MAX_QPATH);
-				Q_strcat(filename, MAX_QPATH, ".dds");
+				{ qstring_t _f_qs = QS_WrapExisting(filename, MAX_QPATH); QS_Append(&_f_qs, ".dds"); }
 			}
 			else
 			{

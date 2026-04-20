@@ -315,8 +315,6 @@ to be configured even if they don't have defined names.
 ===================
 */
 int Key_StringToKeynum( const char *str ) {
-	const keyname_t	*kn;
-
 	if ( !str || str[0] == '\0' ) {
 		return -1;
 	}
@@ -338,7 +336,7 @@ int Key_StringToKeynum( const char *str ) {
 	}
 
 	// scan for a text match
-	for ( kn = keynames ; kn->name ; kn++ ) {
+	for ( const keyname_t *kn = keynames ; kn->name ; kn++ ) {
 		if ( !Q_stricmp( str, kn->name ) )
 			return kn->keynum;
 	}
@@ -356,9 +354,7 @@ given keynum.
 ===================
 */
 const char *Key_KeynumToString( int keynum ) {
-	const keyname_t *kn;
 	static char tinystr[5];
-	int i, j;
 
 	if ( keynum == -1 ) {
 		return "<KEY NOT FOUND>";
@@ -376,15 +372,15 @@ const char *Key_KeynumToString( int keynum ) {
 	}
 
 	// check for a key string
-	for ( kn = keynames ; kn->name ; kn++ ) {
+	for ( const keyname_t *kn = keynames ; kn->name ; kn++ ) {
 		if ( keynum == kn->keynum ) {
 			return kn->name;
 		}
 	}
 
 	// make a hex string
-	i = keynum >> 4;
-	j = keynum & 15;
+	int i = keynum >> 4;
+	int j = keynum & 15;
 
 	tinystr[0] = '0';
 	tinystr[1] = 'x';
@@ -440,10 +436,8 @@ Key_GetKey
 ===================
 */
 int Key_GetKey( const char *binding ) {
-	int i;
-
 	if ( binding ) {
-		for ( i = 0 ; i < MAX_KEYS ; i++ ) {
+		for ( int i = 0 ; i < MAX_KEYS ; i++ ) {
 			if ( keys[i].binding && Q_stricmp( binding, keys[i].binding ) == 0 ) {
 				return i;
 			}
@@ -460,15 +454,13 @@ Key_Unbind_f
 */
 static void Key_Unbind_f( void )
 {
-	int		b;
-
 	if ( Cmd_Argc() != 2 )
 	{
 		Com_Printf( "unbind <key> : remove commands from a key\n" );
 		return;
 	}
 
-	b = Key_StringToKeynum( Cmd_Argv( 1 ) );
+	int b = Key_StringToKeynum( Cmd_Argv( 1 ) );
 	if ( b == -1 )
 	{
 		Com_Printf( "\"%s\" isn't a valid key\n", Cmd_Argv( 1 ) );
@@ -486,9 +478,7 @@ Key_Unbindall_f
 */
 static void Key_Unbindall_f( void )
 {
-	int		i;
-
-	for ( i = 0 ; i < MAX_KEYS; i++ )
+	for ( int i = 0 ; i < MAX_KEYS; i++ )
 	{
 		if ( keys[i].binding )
 		{
@@ -505,9 +495,7 @@ Key_Bind_f
 */
 static void Key_Bind_f( void )
 {
-	int c, b;
-
-	c = Cmd_Argc();
+	int c = Cmd_Argc();
 
 	if ( c < 2 )
 	{
@@ -515,7 +503,7 @@ static void Key_Bind_f( void )
 		return;
 	}
 
-	b = Key_StringToKeynum( Cmd_Argv( 1 ) );
+	int b = Key_StringToKeynum( Cmd_Argv( 1 ) );
 	if ( b == -1 )
 	{
 		Com_Printf( "\"%s\" isn't a valid key\n", Cmd_Argv( 1 ) );
@@ -544,11 +532,9 @@ Writes lines containing "bind key value"
 ============
 */
 void Key_WriteBindings( fileHandle_t f ) {
-	int		i;
-
 	FS_Printf( f, "unbindall" Q_NEWLINE );
 
-	for ( i = 0 ; i < MAX_KEYS ; i++ ) {
+	for ( int i = 0 ; i < MAX_KEYS ; i++ ) {
 		if ( keys[i].binding && keys[i].binding[0] ) {
 			FS_Printf( f, "bind %s \"%s\"" Q_NEWLINE, Key_KeynumToString(i), keys[i].binding );
 		}
@@ -562,9 +548,7 @@ Key_Bindlist_f
 ============
 */
 static void Key_Bindlist_f( void ) {
-	int		i;
-
-	for ( i = 0 ; i < MAX_KEYS ; i++ ) {
+	for ( int i = 0 ; i < MAX_KEYS ; i++ ) {
 		if ( keys[i].binding && keys[i].binding[0] ) {
 			Com_Printf( "%s \"%s\"\n", Key_KeynumToString(i), keys[i].binding );
 		}
@@ -578,9 +562,7 @@ Key_KeynameCompletion
 ============
 */
 void Key_KeynameCompletion( void(*callback)(const char *s) ) {
-	int	i;
-
-	for( i = 0; keynames[ i ].name != NULL; i++ )
+	for( int i = 0; keynames[ i ].name != NULL; i++ )
 		callback( keynames[ i ].name );
 }
 
@@ -592,12 +574,10 @@ Key_CompleteBind
 */
 static void Key_CompleteBind( const char *args, int argNum )
 {
-	const char *p;
-
 	if ( argNum == 2 )
 	{
 		// Skip "bind "
-		p = Com_SkipTokens( args, 1, " " );
+		const char *p = Com_SkipTokens( args, 1, " " );
 
 		if ( p > args )
 			Field_CompleteKeyname();
@@ -606,7 +586,7 @@ static void Key_CompleteBind( const char *args, int argNum )
 	{
 		int key;
 		// Skip "bind <key> "
-		p = Com_SkipTokens( args, 2, " " );
+		const char *p = Com_SkipTokens( args, 2, " " );
 		if ( *p == '\0' && ( key = Key_StringToKeynum( Cmd_Argv( 1 ) ) ) >= 0 ) {
 			Field_CompleteKeyBind( key );
 		} else if ( p > args ) {

@@ -807,27 +807,26 @@ void Sys_ANSIColorify( const char *msg, char *buffer, int bufferSize )
 
   msgLength = strlen( msg );
   i = 0;
-  buffer[ 0 ] = '\0';
+  qstring_t qs = QS_Wrap( buffer, bufferSize );
 
   while ( i < msgLength )
   {
     if ( msg[ i ] == '\n' )
     {
       Com_sprintf( tempBuffer, sizeof( tempBuffer ), "%c[0m\n", 0x1B );
-      Q_strcat( buffer, bufferSize, tempBuffer );
+      QS_Append( &qs, tempBuffer );
       i += 1;
     }
     else if ( msg[ i ] == Q_COLOR_ESCAPE && ( ANSIcolor = getANSIcolor( msg[ i+1 ] ) ) != NULL )
     {
       Com_sprintf( tempBuffer, sizeof( tempBuffer ), "%c[%sm", 0x1B, ANSIcolor );
-      Q_strcat( buffer, bufferSize, tempBuffer );
+      QS_Append( &qs, tempBuffer );
       i += 2;
     }
     else
     {
       if ( printableChar( msg[ i ] ) ) {
-        Com_sprintf( tempBuffer, sizeof( tempBuffer ), "%c", msg[ i ] );
-        Q_strcat( buffer, bufferSize, tempBuffer );
+        QS_AppendChar( &qs, msg[ i ] );
       }
       i += 1;
     }

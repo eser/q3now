@@ -969,7 +969,8 @@ void SV_AddFilter_f( void )
 {
 	filter_node_t *node;
 	client_t *cl;
-	char cmd[ 4096 ], buf[MAX_CMD_LINE], date[32];
+	QS_LOCAL(cmd, 4096);
+	char buf[MAX_CMD_LINE], date[32];
 	const char *v, *s;
 	const char *reason;
 	qtime_t t;
@@ -998,7 +999,7 @@ void SV_AddFilter_f( void )
 
 	Com_RealTime( &t );
 	date[0] = '\0';
-	cmd[0] = '\0';
+	QS_Clear(&cmd);
 	keys = 0;
 	reason = "";
 
@@ -1068,33 +1069,33 @@ void SV_AddFilter_f( void )
 			continue;
 
 		Com_sprintf( buf, sizeof( buf ), " %s \"%s\"", v, s );
-		Q_strcat( cmd, sizeof( cmd ), buf );
+		QS_Append( &cmd, buf );
 		keys++;
 	}
 
 	if ( !keys ) // add default key(s)
 	{
-		Com_sprintf( buf, sizeof( cmd ), " ip \"%s\"", Info_ValueForKeyToken( &tokens, "ip" ) );
-		Q_strcat( cmd, sizeof( cmd ), buf );
+		Com_sprintf( buf, sizeof( buf ), " ip \"%s\"", Info_ValueForKeyToken( &tokens, "ip" ) );
+		QS_Append( &cmd, buf );
 	}
 
 	if ( date[0] )
-		Q_strcat( cmd, sizeof( cmd ), date );
+		QS_Append( &cmd, date );
 
 	if ( *reason )
 		Com_sprintf( buf, sizeof( buf ), " drop \"%s\"", reason );
 	else
 		strcpy( buf, " drop" );
 
-	Q_strcat( cmd, sizeof( cmd ), buf );
+	QS_Append( &cmd, buf );
 
-	Com_DPrintf( "bancmd: `%s`\n", cmd );
+	Com_DPrintf( "bancmd: `%s`\n", QS_CStr(&cmd) );
 
 	node = NULL;
 	{
 		ComParser parser;
 		COM_BeginParseSession( &parser, "command" );
-		s = parse_section( &parser, cmd, 0, &node, qtrue ); // level=0,in_scope=qtrue
+		s = parse_section( &parser, QS_CStr(&cmd), 0, &node, qtrue ); // level=0,in_scope=qtrue
 	}
 	if ( s == NULL ) // syntax error
 	{

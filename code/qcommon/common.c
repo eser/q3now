@@ -321,7 +321,6 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 	static int	lastErrorTime;
 	static int	errorCount;
 	static qboolean	calledSysError = qfalse;
-	int			currentTime;
 
 #if defined(_WIN32) && defined(_DEBUG)
 	if ( code != ERR_DISCONNECT && code != ERR_NEED_CD ) {
@@ -350,7 +349,7 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 	}
 
 	// if we are getting a solid stream of ERR_DROP, do an ERR_FATAL
-	currentTime = Sys_Milliseconds();
+	int currentTime = Sys_Milliseconds();
 	if ( currentTime - lastErrorTime < 100 ) {
 		if ( ++errorCount > 3 ) {
 			code = ERR_FATAL;
@@ -518,12 +517,11 @@ Break it up into multiple console lines
 */
 static void Com_ParseCommandLine( char *commandLine ) {
 	static int parsed = 0;
-	int inq;
 
 	if ( parsed )
 		return;
 
-	inq = 0;
+	int inq = 0;
 	com_consoleLines[0] = commandLine;
 
 	while ( *commandLine ) {
@@ -930,13 +928,10 @@ Com_RealTime
 ================
 */
 int Com_RealTime(qtime_t *qtime) {
-	time_t t;
-	struct tm *tms;
-
-	t = time(NULL);
+	time_t t = time(NULL);
 	if (!qtime)
 		return t;
-	tms = localtime(&t);
+	struct tm *tms = localtime(&t);
 	if (tms) {
 		qtime->tm_sec = tms->tm_sec;
 		qtime->tm_min = tms->tm_min;
@@ -1321,6 +1316,10 @@ static void MergeBlock( memblock_t *curr_free, const memblock_t *next )
 }
 
 
+#if FEAT_MEMSTATS
+static memTag_t ZoneTagToMemTag( memtag_t tag );
+#endif
+
 /*
 ========================
 Z_Free
@@ -1328,9 +1327,6 @@ Z_Free
 */
 void Z_Free( void *ptr )
 {
-	memblock_t *block, *other;
-	memzone_t *zone;
-
 	if ( ptr == NULL ) {
 #ifdef _DEBUG
 		Com_Error( ERR_DROP, "Z_Free: NULL pointer" );
@@ -1339,7 +1335,7 @@ void Z_Free( void *ptr )
 #endif
 	}
 
-	block = (memblock_t *)((byte *)ptr - sizeof( memblock_t ));
+	memblock_t *block = (memblock_t *)((byte *)ptr - sizeof( memblock_t ));
 
 #ifdef USE_ZONE_ID
 	if ( block->id != ZONE_ID ) {
@@ -1364,9 +1360,13 @@ void Z_Free( void *ptr )
 	}
 #endif
 
-	zone = (block->tag == TAG_SMALL) ? smallzone : mainzone;
+	memzone_t *zone = ( block->tag == TAG_SMALL || block->tag == TAG_SOUND ) ? smallzone : mainzone;
 
 	zone->used -= block->size;
+
+#if FEAT_MEMSTATS
+	MemStats_Free( ZoneTagToMemTag( block->tag ), (int)block->size );
+#endif
 
 	// set the block to something that should cause problems
 	// if it is referenced...
@@ -1379,7 +1379,7 @@ void Z_Free( void *ptr )
 	block->id = ZONE_ID;
 #endif
 
-	other = block->prev;
+	memblock_t *other = block->prev;
 	if ( other->tag == TAG_FREE ) {
 #ifdef USE_MULTI_SEGMENT
 		RemoveFree( other );
@@ -1420,24 +1420,19 @@ Z_FreeTags
 */
 int Z_FreeTags( memtag_t tag )
 {
-	int			count;
-	memzone_t *zone;
-	memblock_t *block, *freed;
-
 	if ( tag == TAG_STATIC ) {
 		Com_Error( ERR_FATAL, "Z_FreeTags( TAG_STATIC )" );
 		return 0;
-	} else {
-		zone = (tag == TAG_SMALL) ? smallzone : mainzone;
 	}
-
-	count = 0;
-	for ( block = zone->blocklist.next; ; ) {
+	memzone_t *zone = (tag == TAG_SMALL) ? smallzone : mainzone;
+	int count = 0;
+	for ( memblock_t *block = zone->blocklist.next; ; ) {
 #ifdef USE_ZONE_ID
 		if ( block->tag == tag && block->id == ZONE_ID ) {
 #else
 		if ( block->tag == tag && block->size != 0 ) {
 #endif
+			memblock_t *freed;
 			if ( block->prev->tag == TAG_FREE )
 				freed = block->prev;  // current block will be merged with previous
 			else
@@ -1467,12 +1462,10 @@ void *Z_TagMallocDebug( size_t size, memtag_t tag, const char *label, const char
 #else
 void *Z_TagMalloc( size_t size, memtag_t tag ) {
 #endif
-	size_t		extra;
 #ifndef USE_MULTI_SEGMENT
 	memblock_t	*start, *rover;
 #endif
 	memblock_t *base;
-	memzone_t *zone;
 
 	if ( tag == TAG_FREE ) {
 		Com_Error( ERR_FATAL, "Z_TagMalloc: tried to use with TAG_FREE" );
@@ -1482,11 +1475,7 @@ void *Z_TagMalloc( size_t size, memtag_t tag ) {
 		Com_Error( ERR_FATAL, "Z_TagMalloc: %"PRIz"u > INT_MAX", size );
 	}
 
-	if ( tag == TAG_SMALL ) {
-		zone = smallzone;
-	} else {
-		zone = mainzone;
-	}
+	memzone_t *zone = ( tag == TAG_SMALL || tag == TAG_SOUND ) ? smallzone : mainzone;
 
 #ifdef ZONE_DEBUG
 	allocSize = size;
@@ -1541,7 +1530,7 @@ void *Z_TagMalloc( size_t size, memtag_t tag ) {
 	//
 	// found a block big enough
 	//
-	extra = base->size - size;
+	size_t extra = base->size - size;
 	if ( extra >= minfragment ) {
 		memblock_t *fragment = SplitBlock( base, size, extra );
 #ifdef USE_MULTI_SEGMENT
@@ -1573,6 +1562,10 @@ void *Z_TagMalloc( size_t size, memtag_t tag ) {
 #ifdef USE_TRASH_TEST
 	// marker for memory trash testing
 	*(int *)((byte *)base + base->size - 4) = TRASH_ID;
+#endif
+
+#if FEAT_MEMSTATS
+	MemStats_Alloc( ZoneTagToMemTag( tag ), (int)base->size );
 #endif
 
 	return (void *)(base + 1);
@@ -1611,11 +1604,11 @@ S_Malloc
 */
 #ifdef ZONE_DEBUG
 void *S_MallocDebug( size_t size, const char *label, const char *file, int line ) {
-	return Z_TagMallocDebug( size, TAG_SMALL, label, file, line );
+	return Z_TagMallocDebug( size, TAG_SOUND, label, file, line );
 }
 #else
 void *S_Malloc( size_t size ) {
-	return Z_TagMalloc( size, TAG_SMALL );
+	return Z_TagMalloc( size, TAG_SOUND );
 }
 #endif
 
@@ -1670,21 +1663,15 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 	char dump[32], *ptr;
 	int  i, j;
 #endif
-	memblock_t	*block;
-	char		buf[4096];
-	size_t size, allocSize, numBlocks;
-	int len;
-
 	if ( logfile == FS_INVALID_HANDLE || !FS_Initialized() )
 		return;
 
-	size = numBlocks = 0;
-#ifdef ZONE_DEBUG
-	allocSize = 0;
-#endif
-	len = Com_sprintf( buf, sizeof(buf), "\r\n================\r\n%s log\r\n================\r\n", name );
+	size_t size = 0, numBlocks = 0;
+	size_t allocSize = 0;
+	char buf[4096];
+	int len = Com_sprintf( buf, sizeof(buf), "\r\n================\r\n%s log\r\n================\r\n", name );
 	FS_Write( buf, len, logfile );
-	for ( block = zone->blocklist.next ; ; ) {
+	for ( memblock_t *block = zone->blocklist.next ; ; ) {
 		if ( block->tag != TAG_FREE ) {
 #ifdef ZONE_DEBUG
 			ptr = ((char *) block) + sizeof(memblock_t);
@@ -1869,8 +1856,122 @@ static const char *tagName[ TAG_COUNT ] = {
 	"RENDERER",
 	"CLIENTS",
 	"SMALL",
-	"STATIC"
+	"STATIC",
+	"SOUND"
 };
+
+#if FEAT_MEMSTATS
+memTagStats_t memStats[MEMTAG_COUNT];
+
+const char *MemTag_Names[MEMTAG_COUNT] = {
+	"general", "renderer", "sound", "network", "botai",
+	"game", "cgame", "ui", "filesystem", "scripting",
+	"collision", "temp"
+};
+
+static memTag_t ZoneTagToMemTag( memtag_t tag ) {
+	switch ( tag ) {
+		case TAG_BOTLIB:      return MEMTAG_BOTAI;
+		case TAG_RENDERER:    return MEMTAG_RENDERER;
+		case TAG_CLIENTS:     return MEMTAG_NETWORK;
+		case TAG_PACK:
+		case TAG_SEARCH_PATH:
+		case TAG_SEARCH_PACK:
+		case TAG_SEARCH_DIR:  return MEMTAG_FILESYSTEM;
+		case TAG_SOUND:       return MEMTAG_SOUND;
+		default:              return MEMTAG_GENERAL;
+	}
+}
+
+typedef enum {
+	MEMBUDGET_OK = 0,
+	MEMBUDGET_WARN,
+	MEMBUDGET_EXCEEDED
+} memBudgetState_t;
+
+static memBudgetState_t memBudgetState[MEMTAG_COUNT];
+static cvar_t *memBudgetCvars[MEMTAG_COUNT];
+static cvar_t *mem_budget_enforce;
+
+static void MemStats_CheckBudget( memTag_t tag ) {
+	float         budgetMB;
+	int64_t       budgetBytes, used;
+	memBudgetState_t newState;
+
+	if ( !mem_budget_enforce || !mem_budget_enforce->integer ) return;
+	if ( !memBudgetCvars[tag] ) return;
+
+	budgetMB = memBudgetCvars[tag]->value;
+	if ( budgetMB <= 0.0f ) return;
+
+	budgetBytes = (int64_t)( budgetMB * 1024.0f * 1024.0f );
+	used        = memStats[tag].currentBytes;
+
+	if ( used >= budgetBytes ) {
+		newState = MEMBUDGET_EXCEEDED;
+	} else if ( used * 10 >= budgetBytes * 8 ) {
+		newState = MEMBUDGET_WARN;
+	} else {
+		memBudgetState[tag] = MEMBUDGET_OK;
+		return;
+	}
+
+	if ( newState <= memBudgetState[tag] ) return; // already at or past this level
+	memBudgetState[tag] = newState;
+
+	if ( newState == MEMBUDGET_EXCEEDED ) {
+		if ( mem_budget_enforce->integer >= 2 ) {
+			Com_Error( ERR_DROP, "mem budget exceeded: %s %.1f/%.0f MB",
+				MemTag_Names[tag],
+				used / (1024.0f * 1024.0f), budgetMB );
+		}
+		Com_Printf( "^1WARNING: mem budget exceeded: %s %.1f/%.0f MB\n",
+			MemTag_Names[tag], used / (1024.0f * 1024.0f), budgetMB );
+	} else {
+		Com_Printf( "^3WARNING: mem budget 80%%: %s %.1f/%.0f MB\n",
+			MemTag_Names[tag], used / (1024.0f * 1024.0f), budgetMB );
+	}
+}
+
+void MemStats_Alloc( memTag_t tag, int size ) {
+	memStats[tag].currentBytes += size;
+	memStats[tag].currentCount++;
+	memStats[tag].totalCount++;
+	if ( memStats[tag].currentBytes > memStats[tag].peakBytes ) {
+		memStats[tag].peakBytes = memStats[tag].currentBytes;
+	}
+	MemStats_CheckBudget( tag );
+}
+
+void MemStats_Free( memTag_t tag, int size ) {
+	int64_t budgetBytes, used;
+	float   budgetMB;
+
+	memStats[tag].currentBytes -= size;
+	memStats[tag].currentCount--;
+
+	// Reset budget state when usage drops back below thresholds
+	if ( memBudgetState[tag] != MEMBUDGET_OK && memBudgetCvars[tag] ) {
+		budgetMB = memBudgetCvars[tag]->value;
+		if ( budgetMB > 0.0f ) {
+			budgetBytes = (int64_t)( budgetMB * 1024.0f * 1024.0f );
+			used        = memStats[tag].currentBytes;
+			if ( used * 10 < budgetBytes * 8 ) {
+				memBudgetState[tag] = MEMBUDGET_OK;
+			} else if ( memBudgetState[tag] == MEMBUDGET_EXCEEDED && used < budgetBytes ) {
+				memBudgetState[tag] = MEMBUDGET_WARN;
+			}
+		}
+	}
+}
+
+void MemStats_Reset( void ) {
+	int i;
+	for ( i = 0; i < MEMTAG_COUNT; i++ ) {
+		memStats[i].peakBytes = memStats[i].currentBytes;
+	}
+}
+#endif // FEAT_MEMSTATS
 
 typedef struct zone_stats_s {
 	size_t zoneSegments;
@@ -1959,6 +2060,37 @@ static void Zone_Stats( const memzone_t *z, qboolean printDetails, zone_stats_t 
 }
 
 
+#if FEAT_MEMSTATS
+hunkStats_t Hunk_GetStats( void ) {
+	hunkStats_t s;
+	int low  = hunk_low.permanent  > hunk_low.temp  ? hunk_low.permanent  : hunk_low.temp;
+	int high = hunk_high.permanent > hunk_high.temp ? hunk_high.permanent : hunk_high.temp;
+	s.totalBytes         = s_hunkTotal;
+	s.permanentLowBytes  = hunk_low.permanent;
+	s.permanentHighBytes = hunk_high.permanent;
+	s.tempBytes          = hunk_low.temp + hunk_high.temp - hunk_low.permanent - hunk_high.permanent;
+	if ( s.tempBytes < 0 ) s.tempBytes = 0;
+	s.freeBytes          = s_hunkTotal - ( low + high );
+	s.peakUsedBytes      = hunk_low.tempHighwater + hunk_high.tempHighwater;
+	return s;
+}
+
+zoneStats_t Zone_GetStats( void ) {
+	zone_stats_t raw;
+	zoneStats_t  s;
+	memset( &s, 0, sizeof( s ) );
+	Zone_Stats( mainzone, qfalse, &raw );
+	s.totalBytes       = (int)mainzone->size;
+	s.usedBytes        = (int)raw.zoneBytes;
+	s.freeBytes        = (int)raw.freeBytes;
+	s.freeBlockCount   = (int)raw.freeBlocks;
+	s.largestFreeBlock = (int)raw.freeLargest;
+	s.allocCount       = (int)raw.zoneBlocks;
+	return s;
+}
+#endif // FEAT_MEMSTATS
+
+
 /*
 =================
 Com_Meminfo_f
@@ -1968,6 +2100,7 @@ static void Com_Meminfo_f( void ) {
 	zone_stats_t st;
 	int		unused;
 
+	Com_Printf( "──────────────────────────────────────────\n" );
 	Com_Printf( "%8i bytes total hunk\n", s_hunkTotal );
 	Com_Printf( "\n" );
 	Com_Printf( "%8i low mark\n", hunk_low.mark );
@@ -2019,7 +2152,53 @@ static void Com_Meminfo_f( void ) {
 	/* Persistent arena allocators */
 	Com_Printf( "\n--- Persistent Arenas (survive map changes) ---\n" );
 	Arena_PrintStats();
+
+#if FEAT_MEMSTATS
+	{
+		int i;
+		Com_Printf( "\nTAG BREAKDOWN (current / peak):\n" );
+		for ( i = 0; i < MEMTAG_COUNT; i++ ) {
+			if ( memStats[i].currentBytes == 0 && memStats[i].peakBytes == 0 ) continue;
+			Com_Printf( "  %-12s %7.1f MB / %7.1f MB   %5i allocs\n",
+				MemTag_Names[i],
+				memStats[i].currentBytes / (1024.0f * 1024.0f),
+				memStats[i].peakBytes    / (1024.0f * 1024.0f),
+				memStats[i].currentCount );
+		}
+	}
+#endif
+	Com_Printf( "──────────────────────────────────────────\n" );
 }
+
+
+#if FEAT_MEMSTATS
+static void Com_MemInfoReset_f( void ) {
+	MemStats_Reset();
+	Com_Printf( "Peak memory counters reset.\n" );
+}
+
+static void Com_MemInfoJson_f( void ) {
+	hunkStats_t  hs = Hunk_GetStats();
+	zoneStats_t  zs = Zone_GetStats();
+	int i;
+
+	Com_Printf( "{\"hunk\":{\"total\":%i,\"low\":%i,\"high\":%i,\"temp\":%i,\"free\":%i,\"peak\":%i}",
+		hs.totalBytes, hs.permanentLowBytes, hs.permanentHighBytes,
+		hs.tempBytes, hs.freeBytes, hs.peakUsedBytes );
+	Com_Printf( ",\"zone\":{\"total\":%i,\"used\":%i,\"free\":%i,\"freeBlocks\":%i,\"largestFree\":%i,\"allocs\":%i}",
+		zs.totalBytes, zs.usedBytes, zs.freeBytes,
+		zs.freeBlockCount, zs.largestFreeBlock, zs.allocCount );
+	Com_Printf( ",\"tags\":{" );
+	for ( i = 0; i < MEMTAG_COUNT; i++ ) {
+		Com_Printf( "%s\"%s\":{\"current\":%lli,\"peak\":%lli,\"count\":%i,\"total\":%i}",
+			i > 0 ? "," : "",
+			MemTag_Names[i],
+			(long long)memStats[i].currentBytes, (long long)memStats[i].peakBytes,
+			memStats[i].currentCount, memStats[i].totalCount );
+	}
+	Com_Printf( "}}\n" );
+}
+#endif // FEAT_MEMSTATS
 
 
 /*
@@ -2131,18 +2310,14 @@ Hunk_Log
 =================
 */
 void Hunk_Log( void ) {
-	hunkblock_t	*block;
-	char		buf[4096];
-	int size, numBlocks;
-
 	if ( logfile == FS_INVALID_HANDLE || !FS_Initialized() )
 		return;
 
-	size = 0;
-	numBlocks = 0;
+	int size = 0, numBlocks = 0;
+	char buf[4096];
 	Com_sprintf(buf, sizeof(buf), "\r\n================\r\nHunk log\r\n================\r\n");
 	FS_Write(buf, strlen(buf), logfile);
-	for (block = hunkblocks ; block; block = block->next) {
+	for (hunkblock_t *block = hunkblocks ; block; block = block->next) {
 #ifdef HUNK_DEBUG
 		Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s)\r\n", block->size, block->file, block->line, block->label);
 		FS_Write(buf, strlen(buf), logfile);
@@ -2164,26 +2339,22 @@ Hunk_SmallLog
 */
 #ifdef HUNK_DEBUG
 void Hunk_SmallLog( void ) {
-	hunkblock_t	*block, *block2;
-	char		buf[4096];
-	int size, locsize, numBlocks;
-
 	if ( logfile == FS_INVALID_HANDLE || !FS_Initialized() )
 		return;
 
-	for (block = hunkblocks ; block; block = block->next) {
+	for (hunkblock_t *block = hunkblocks ; block; block = block->next) {
 		block->printed = qfalse;
 	}
-	size = 0;
-	numBlocks = 0;
+	int size = 0, numBlocks = 0;
+	char buf[4096];
 	Com_sprintf(buf, sizeof(buf), "\r\n================\r\nHunk Small log\r\n================\r\n");
 	FS_Write(buf, strlen(buf), logfile);
-	for (block = hunkblocks; block; block = block->next) {
+	for (hunkblock_t *block = hunkblocks; block; block = block->next) {
 		if (block->printed) {
 			continue;
 		}
-		locsize = block->size;
-		for (block2 = block->next; block2; block2 = block2->next) {
+		int locsize = block->size;
+		for (hunkblock_t *block2 = block->next; block2; block2 = block2->next) {
 			if (block->line != block2->line) {
 				continue;
 			}
@@ -2240,6 +2411,19 @@ static void Com_InitHunkMemory( void ) {
 	Hunk_ClearLevel();
 
 	Cmd_AddCommand( "meminfo", Com_Meminfo_f );
+#if FEAT_MEMSTATS
+	Cmd_AddCommand( "meminfo_reset", Com_MemInfoReset_f );
+	Cmd_AddCommand( "meminfo_json",  Com_MemInfoJson_f );
+	{
+		int  i;
+		char cvarName[64];
+		mem_budget_enforce = Cvar_Get( "mem_budget_enforce", "1", CVAR_ARCHIVE );
+		for ( i = 0; i < MEMTAG_COUNT; i++ ) {
+			Com_sprintf( cvarName, sizeof( cvarName ), "mem_budget_%s", MemTag_Names[i] );
+			memBudgetCvars[i] = Cvar_Get( cvarName, "0", CVAR_ARCHIVE );
+		}
+	}
+#endif
 #ifdef ZONE_DEBUG
 	Cmd_AddCommand( "zonelog", Z_LogHeap );
 #endif
@@ -2338,6 +2522,13 @@ void Hunk_ClearLevel( void ) {
 
 	hunk_permanent = &hunk_low;
 	hunk_temp = &hunk_high;
+
+#if FEAT_MEMSTATS
+	memStats[MEMTAG_GENERAL].currentBytes = 0;
+	memStats[MEMTAG_GENERAL].currentCount = 0;
+	memStats[MEMTAG_TEMP].currentBytes = 0;
+	memStats[MEMTAG_TEMP].currentCount = 0;
+#endif
 
 	Com_Printf( "Hunk_ClearLevel: reset the hunk ok\n" );
 	VM_Clear();
@@ -2448,6 +2639,9 @@ void *Hunk_Alloc( size_t size, ha_pref preference ) {
 		buf = ((byte *) buf) + sizeof(hunkblock_t);
 	}
 #endif
+#if FEAT_MEMSTATS
+	MemStats_Alloc( MEMTAG_GENERAL, (int)size );
+#endif
 	return buf;
 }
 
@@ -2504,6 +2698,10 @@ void *Hunk_AllocateTempMemory( size_t size ) {
 	hdr->magic = HUNK_MAGIC;
 	hdr->size = size;
 
+#if FEAT_MEMSTATS
+	MemStats_Alloc( MEMTAG_TEMP, (int)size );
+#endif
+
 	// don't bother clearing, because we are going to load a file over it
 	return buf;
 }
@@ -2531,6 +2729,10 @@ void Hunk_FreeTempMemory( void *buf ) {
 	if ( hdr->magic != HUNK_MAGIC ) {
 		Com_Error( ERR_FATAL, "Hunk_FreeTempMemory: bad magic" );
 	}
+
+#if FEAT_MEMSTATS
+	MemStats_Free( MEMTAG_TEMP, (int)hdr->size );
+#endif
 
 	hdr->magic = HUNK_FREE_MAGIC;
 
@@ -4276,17 +4478,6 @@ void Com_Frame( qboolean noDelay ) {
 #ifndef DEDICATED
 	static int biasUsec = 0;
 #endif
-	int	msec, realMsec;
-	int	minUsec;
-	int	sleepUsec;
-	int	timeValUsec;
-	int	timeValSV;
-
-	int	timeBeforeFirstEvents;
-	int	timeBeforeServer;
-	int	timeBeforeEvents;
-	int	timeBeforeClient;
-	int	timeAfter;
 
 	if ( Q_setjmp( abortframe ) ) {
 #ifndef DEDICATED
@@ -4295,15 +4486,15 @@ void Com_Frame( qboolean noDelay ) {
 		return;			// an ERR_DROP was thrown
 	}
 
-	minUsec = 0; // silent compiler warning
+	int minUsec = 0; // silent compiler warning
 
 	// bk001204 - init to zero.
 	//  also:  might be clobbered by `longjmp' or `vfork'
-	timeBeforeFirstEvents = 0;
-	timeBeforeServer = 0;
-	timeBeforeEvents = 0;
-	timeBeforeClient = 0;
-	timeAfter = 0;
+	int timeBeforeFirstEvents = 0;
+	int timeBeforeServer = 0;
+	int timeBeforeEvents = 0;
+	int timeBeforeClient = 0;
+	int timeAfter = 0;
 	memset( &cl_prof, 0, sizeof( cl_prof ) );
 
 	// write config file if anything changed
@@ -4383,6 +4574,9 @@ void Com_Frame( qboolean noDelay ) {
 	//   1: pure busy-wait (highest precision, pegs a core)
 	// Busy-wait mode overrides com_yieldCPU because the whole point is to
 	// not yield to the OS.
+	int timeValUsec;
+	int timeValSV;
+	int sleepUsec;
 	if ( noDelay == qfalse )
 	do {
 		if ( com_sv_running->integer ) {
@@ -4424,12 +4618,12 @@ void Com_Frame( qboolean noDelay ) {
 	lastTimeUsec = com_frameTimeUsec;
 	com_frameTime = Com_EventLoop();
 	com_frameTimeUsec = Sys_Microseconds();
-	realMsec = com_frameTime - lastTime;
+	int realMsec = com_frameTime - lastTime;
 
 	Cbuf_Execute();
 
 	// mess with msec if needed
-	msec = Com_ModifyMsec( realMsec );
+	int msec = Com_ModifyMsec( realMsec );
 
 	//
 	// server side
@@ -4795,10 +4989,6 @@ entry from the match list.  Returns qtrue when a cycle step was performed.
 */
 static qboolean Field_AdvanceCycle( field_t *field )
 {
-	int index;
-	int offset;
-	int newLen;
-
 	if ( field->acOffset <= 0 || cycleMatchCount < 2 ) {
 		return qfalse;
 	}
@@ -4808,15 +4998,15 @@ static qboolean Field_AdvanceCycle( field_t *field )
 		field->acMatchIndex = 0;
 	}
 
-	index = ( field->acMatchIndex + 1 ) % cycleMatchCount;
+	int index = ( field->acMatchIndex + 1 ) % cycleMatchCount;
 	field->acMatchIndex = index;
 
-	offset = field->acOffset;
+	int offset = field->acOffset;
 	if ( offset > (int)sizeof( field->buffer ) - 1 ) {
 		return qfalse;
 	}
 
-	newLen = (int)strlen( cycleMatches[index] );
+	int newLen = (int)strlen( cycleMatches[index] );
 	if ( offset + newLen >= (int)sizeof( field->buffer ) ) {
 		return qfalse;
 	}
@@ -4877,16 +5067,12 @@ Field_CompleteKeyBind
 */
 void Field_CompleteKeyBind( int key )
 {
-	const char *value;
-	int vlen;
-	int blen;
-
-	value = Key_GetBinding( key );
+	const char *value = Key_GetBinding( key );
 	if ( value == NULL || *value == '\0' )
 		return;
 
-	blen = (int)strlen( completionField->buffer );
-	vlen = (int)strlen( value );
+	int blen = (int)strlen( completionField->buffer );
+	int vlen = (int)strlen( value );
 
 	if ( Field_FindFirstSeparator( (char*)value ) )
 	{
@@ -4909,14 +5095,11 @@ void Field_CompleteKeyBind( int key )
 
 static void Field_CompleteCvarValue( const char *value, const char *current )
 {
-	int vlen;
-	int blen;
-
 	if ( *value == '\0' )
 		return;
 
-	blen = (int)strlen( completionField->buffer );
-	vlen = (int)strlen( value );
+	int blen = (int)strlen( completionField->buffer );
+	int vlen = (int)strlen( value );
 
 	if ( *current != '\0' )
 	{
