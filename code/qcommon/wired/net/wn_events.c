@@ -80,7 +80,7 @@ void WN_EventRingPush( const byte *data, int len )
 	if ( len > (int)sizeof(evt->data) )
 		len = (int)sizeof(evt->data);
 
-	Com_Memcpy( evt->data, data, len );
+	memcpy( evt->data, data, len );
 	evt->data_len = len;
 
 	wn.event_write_idx++;

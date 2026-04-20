@@ -159,7 +159,7 @@ static void SV_Lua_BotSetDefaultProfile( float *profileValues ) {
 		return;
 	}
 
-	Com_Memset( profileValues, 0, sizeof( float ) * WB_PROFILE_MAX );
+	memset( profileValues, 0, sizeof( float ) * WB_PROFILE_MAX );
 
 	profileValues[WB_PROFILE_REACTION_TIME] = 0.3f;
 	profileValues[WB_PROFILE_FOV] = 150.0f;
@@ -626,13 +626,13 @@ static void SV_Lua_ResetState( void ) {
 		s_characters[i].skillNormalized = 0.0f;
 		s_characters[i].profileRef = LUA_NOREF;
 		s_characters[i].botRef = LUA_NOREF;
-		Com_Memset( s_characters[i].stringValues, 0, sizeof( s_characters[i].stringValues ) );
-		Com_Memset( s_characters[i].floatValues, 0, sizeof( s_characters[i].floatValues ) );
-		Com_Memset( s_characters[i].floatValid, 0, sizeof( s_characters[i].floatValid ) );
+		memset( s_characters[i].stringValues, 0, sizeof( s_characters[i].stringValues ) );
+		memset( s_characters[i].floatValues, 0, sizeof( s_characters[i].floatValues ) );
+		memset( s_characters[i].floatValid, 0, sizeof( s_characters[i].floatValid ) );
 		s_characters[i].cachedAttackCount = 0;
 	}
 
-	Com_Memset( s_bots, 0, sizeof( s_bots ) );
+	memset( s_bots, 0, sizeof( s_bots ) );
 	for ( i = 0; i < MAX_CLIENTS; i++ ) {
 		SV_Lua_BotSetDefaultProfile( s_bots[i].profileValues );
 	}
@@ -655,8 +655,8 @@ static int SV_Lua_GetOrCreateCharacterHandle( const char *characterName, float s
 	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
 		if ( s_characters[i].inuse && !Q_stricmp( s_characters[i].name, characterName ) ) {
 			s_characters[i].skillNormalized = skillNormalized;
-			Com_Memset( s_characters[i].floatValues, 0, sizeof( s_characters[i].floatValues ) );
-			Com_Memset( s_characters[i].floatValid, 0, sizeof( s_characters[i].floatValid ) );
+			memset( s_characters[i].floatValues, 0, sizeof( s_characters[i].floatValues ) );
+			memset( s_characters[i].floatValid, 0, sizeof( s_characters[i].floatValid ) );
 			s_characters[i].cachedAttackCount = 0;
 			SV_Lua_InitCharacterStrings( &s_characters[i], characterName );
 			return i;
@@ -670,8 +670,8 @@ static int SV_Lua_GetOrCreateCharacterHandle( const char *characterName, float s
 			s_characters[i].skillNormalized = skillNormalized;
 			s_characters[i].profileRef = LUA_NOREF;
 			s_characters[i].botRef = LUA_NOREF;
-			Com_Memset( s_characters[i].floatValues, 0, sizeof( s_characters[i].floatValues ) );
-			Com_Memset( s_characters[i].floatValid, 0, sizeof( s_characters[i].floatValid ) );
+			memset( s_characters[i].floatValues, 0, sizeof( s_characters[i].floatValues ) );
+			memset( s_characters[i].floatValid, 0, sizeof( s_characters[i].floatValid ) );
 			s_characters[i].cachedAttackCount = 0;
 			SV_Lua_InitCharacterStrings( &s_characters[i], characterName );
 			return i;
@@ -838,8 +838,8 @@ static void SV_Lua_CacheAttacks( lua_State *L, int botTableIndex, int handle ) {
 // s_characteristicNames[] to get CHARACTERISTIC_* indices.  {lo,hi} pairs
 // are resolved to a single float at the character's current skillNormalized.
 static void SV_Lua_LoadCharacterFloatValues( lua_State *L, int botTableIndex, int handle ) {
-	Com_Memset( s_characters[handle].floatValues, 0, sizeof( s_characters[handle].floatValues ) );
-	Com_Memset( s_characters[handle].floatValid, 0, sizeof( s_characters[handle].floatValid ) );
+	memset( s_characters[handle].floatValues, 0, sizeof( s_characters[handle].floatValues ) );
+	memset( s_characters[handle].floatValid, 0, sizeof( s_characters[handle].floatValid ) );
 
 	SV_Lua_LoadBotSubTable( L, botTableIndex, "traits", handle );
 	SV_Lua_LoadBotSubTable( L, botTableIndex, "aim",    handle );
@@ -1056,7 +1056,7 @@ void SV_Lua_FreeCharacter( int characterHandle ) {
 		}
 	}
 
-	Com_Memset( &s_characters[characterHandle], 0, sizeof( s_characters[characterHandle] ) );
+	memset( &s_characters[characterHandle], 0, sizeof( s_characters[characterHandle] ) );
 	s_characters[characterHandle].profileRef = LUA_NOREF;
 }
 
@@ -1603,9 +1603,9 @@ static qboolean SV_BotVerifyParseOldFile(
 		return qfalse;
 	}
 
-	Com_Memset( blocks, 0, sizeof( blocks ) );
-	Com_Memset( bValid, 0, sizeof( bValid ) );
-	Com_Memset( bPresent, 0, sizeof( bPresent ) );
+	memset( blocks, 0, sizeof( blocks ) );
+	memset( bValid, 0, sizeof( bValid ) );
+	memset( bPresent, 0, sizeof( bPresent ) );
 
 	p = fileData;
 	curSkill = -1;
@@ -1683,8 +1683,8 @@ static qboolean SV_BotVerifyParseOldFile(
 		t = ( lowerSkill == upperSkill ) ? 0.0f
 		    : (float)( requestedSkill - lowerSkill ) / (float)( upperSkill - lowerSkill );
 
-		Com_Memset( outVals, 0, sizeof( float ) * SV_WB_MAX_INDEX );
-		Com_Memset( outValid, 0, sizeof( qboolean ) * SV_WB_MAX_INDEX );
+		memset( outVals, 0, sizeof( float ) * SV_WB_MAX_INDEX );
+		memset( outValid, 0, sizeof( qboolean ) * SV_WB_MAX_INDEX );
 
 		for ( idx = 0; idx < SV_WB_MAX_INDEX; idx++ ) {
 			qboolean inLo = bValid[lowerSkill - 1][idx];
@@ -1742,8 +1742,8 @@ static qboolean SV_BotVerifyLoadLuaValues(
 		return qfalse;
 	}
 
-	Com_Memset( newVals, 0, sizeof( float ) * SV_WB_MAX_INDEX );
-	Com_Memset( newValid, 0, sizeof( qboolean ) * SV_WB_MAX_INDEX );
+	memset( newVals, 0, sizeof( float ) * SV_WB_MAX_INDEX );
+	memset( newValid, 0, sizeof( qboolean ) * SV_WB_MAX_INDEX );
 
 	lua_getfield( L, -1, "characteristic_values" );
 	if ( lua_istable( L, -1 ) ) {

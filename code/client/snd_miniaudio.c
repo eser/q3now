@@ -570,7 +570,7 @@ qboolean SNDDMA_Init( void )
 	mixerSamples -= mixerSamples % channels;
 	mixerSamples = (ma_uint32)log2pad( mixerSamples, 1 );
 
-	Com_Memset( &dma, 0, sizeof( dma ) );
+	memset( &dma, 0, sizeof( dma ) );
 	dma.speed            = (int)sampleRate;
 	dma.channels         = channels;
 	dma.samplebits       = 16;

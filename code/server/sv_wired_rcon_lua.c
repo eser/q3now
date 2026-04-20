@@ -507,14 +507,14 @@ void SV_RconLua_Init( void ) {
 
 	svs.rconLua.L = L;
 	svs.rconLua.initialized = qtrue;
-	Com_Memset( &svs.rconLua.currentClient, 0, sizeof( svs.rconLua.currentClient ) );
+	memset( &svs.rconLua.currentClient, 0, sizeof( svs.rconLua.currentClient ) );
 }
 
 void SV_RconLua_Shutdown( void ) {
 	if ( svs.rconLua.L ) {
 		lua_close( svs.rconLua.L );
 	}
-	Com_Memset( &svs.rconLua, 0, sizeof( svs.rconLua ) );
+	memset( &svs.rconLua, 0, sizeof( svs.rconLua ) );
 	s_capture = NULL;
 	s_rconLuaMem.used = 0;
 }

@@ -96,7 +96,7 @@ void QDECL BotAI_Print(int type, char *fmt, ...) {
 	va_list ap;
 
 	va_start(ap, fmt);
-	Q_vsnprintf(str, sizeof(str), fmt, ap);
+	vsnprintf(str, sizeof(str), fmt, ap);
 	va_end(ap);
 
 	switch(type) {
@@ -1239,7 +1239,7 @@ static int BotDetermineGender( int client ) {
 	p = strstr( buf, "\nsex " );
 	if ( !p ) {
 		// check if it starts at beginning of file
-		if ( Q_strncmp( buf, "sex ", 4 ) == 0 ) {
+		if ( strncmp( buf, "sex ", 4 ) == 0 ) {
 			p = buf - 1; // will be incremented below
 		} else {
 			return CHAT_GENDERLESS;

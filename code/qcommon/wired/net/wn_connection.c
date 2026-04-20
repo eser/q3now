@@ -38,7 +38,7 @@ wn_connection_t *WN_AllocConnection( picoquic_cnx_t *cnx, netadr_t *from )
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		if ( !wn.connections[i].active ) {
 			wn_connection_t *conn = &wn.connections[i];
-			Com_Memset( conn, 0, sizeof( *conn ) );
+			memset( conn, 0, sizeof( *conn ) );
 			conn->cnx = cnx;
 			conn->active = qtrue;
 			conn->connect_time = Sys_Microseconds();

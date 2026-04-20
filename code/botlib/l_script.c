@@ -180,7 +180,7 @@ static void PS_CreatePunctuationTable(script_t *script, punctuation_t *punctuati
 	//get memory for the table
 	if (!script->punctuationtable) script->punctuationtable = (punctuation_t **)
 												GetMemory(256 * sizeof(punctuation_t *));
-	Com_Memset(script->punctuationtable, 0, 256 * sizeof(punctuation_t *));
+	memset(script->punctuationtable, 0, 256 * sizeof(punctuation_t *));
 	//add the punctuations in the list to the punctuation table
 	for (i = 0; punctuations[i].p; i++)
 	{
@@ -236,7 +236,7 @@ void QDECL ScriptError(script_t *script, const char *fmt, ...)
 	if (script->flags & SCFL_NOERRORS) return;
 
 	va_start(ap, fmt);
-	Q_vsnprintf(text, sizeof(text), fmt, ap);
+	vsnprintf(text, sizeof(text), fmt, ap);
 	va_end(ap);
 #ifdef BOTLIB
 	botimport.Print(PRT_ERROR, "file %s, line %d: %s\n", script->filename, script->line, text);
@@ -262,7 +262,7 @@ static void QDECL ScriptWarning(script_t *script, const char *fmt, ...)
 	if (script->flags & SCFL_NOWARNINGS) return;
 
 	va_start(ap, fmt);
-	Q_vsnprintf(text, sizeof(text), fmt, ap);
+	vsnprintf(text, sizeof(text), fmt, ap);
 	va_end(ap);
 #ifdef BOTLIB
 	botimport.Print(PRT_WARNING, "file %s, line %d: %s\n", script->filename, script->line, text);
@@ -845,7 +845,7 @@ static int PS_ReadPrimitive(script_t *script, token_t *token)
 	} //end while
 	token->string[len] = 0;
 	//copy the token into the script structure
-	Com_Memcpy(&script->token, token, sizeof(token_t));
+	memcpy(&script->token, token, sizeof(token_t));
 	//primitive reading successful
 	return 1;
 } //end of the function PS_ReadPrimitive
@@ -861,7 +861,7 @@ int PS_ReadToken(script_t *script, token_t *token)
 	if (script->tokenavailable)
 	{
 		script->tokenavailable = 0;
-		Com_Memcpy(token, &script->token, sizeof(token_t));
+		memcpy(token, &script->token, sizeof(token_t));
 		return 1;
 	} //end if
 	//save script pointer
@@ -869,7 +869,7 @@ int PS_ReadToken(script_t *script, token_t *token)
 	//save line counter
 	script->lastline = script->line;
 	//clear the token stuff
-	Com_Memset(token, 0, sizeof(token_t));
+	memset(token, 0, sizeof(token_t));
 	//start of the white space
 	script->whitespace_p = script->script_p;
 	token->whitespace_p = script->script_p;
@@ -919,7 +919,7 @@ int PS_ReadToken(script_t *script, token_t *token)
 		return 0;
 	} //end if
 	//copy the token into the script structure
-	Com_Memcpy(&script->token, token, sizeof(token_t));
+	memcpy(&script->token, token, sizeof(token_t));
 	//successfully read a token
 	return 1;
 } //end of the function PS_ReadToken
@@ -1059,7 +1059,7 @@ int PS_CheckTokenType(script_t *script, int type, int subtype, token_t *token)
 	if (tok.type == type &&
 			(tok.subtype & subtype) == subtype)
 	{
-		Com_Memcpy(token, &tok, sizeof(token_t));
+		memcpy(token, &tok, sizeof(token_t));
 		return 1;
 	} //end if
 	//token is not available
@@ -1102,7 +1102,7 @@ void PS_UnreadLastToken(script_t *script)
 //============================================================================
 void PS_UnreadToken(script_t *script, token_t *token)
 {
-	Com_Memcpy(&script->token, token, sizeof(token_t));
+	memcpy(&script->token, token, sizeof(token_t));
 	script->tokenavailable = 1;
 } //end of the function UnreadToken
 //============================================================================
@@ -1265,7 +1265,7 @@ void ResetScript(script_t *script)
 	script->line = 1;
 	script->lastline = 1;
 	//clear the saved token
-	Com_Memset(&script->token, 0, sizeof(token_t));
+	memset(&script->token, 0, sizeof(token_t));
 } //end of the function ResetScript
 #endif
 //============================================================================
@@ -1372,7 +1372,7 @@ script_t *LoadScriptFile(const char *filename)
 
 	buffer = GetClearedMemory(sizeof(script_t) + length + 1);
 	script = (script_t *) buffer;
-	Com_Memset(script, 0, sizeof(script_t));
+	memset(script, 0, sizeof(script_t));
 	Q_strncpyz(script->filename, filename, sizeof(script->filename));
 	script->buffer = (char *) buffer + sizeof(script_t);
 	script->buffer[length] = 0;
@@ -1422,7 +1422,7 @@ script_t *LoadScriptMemory(const char *ptr, int length, const char *name)
 
 	buffer = GetClearedMemory(sizeof(script_t) + length + 1);
 	script = (script_t *) buffer;
-	Com_Memset(script, 0, sizeof(script_t));
+	memset(script, 0, sizeof(script_t));
 	Q_strncpyz(script->filename, name, sizeof(script->filename));
 	script->buffer = (char *) buffer + sizeof(script_t);
 	script->buffer[length] = 0;
@@ -1441,7 +1441,7 @@ script_t *LoadScriptMemory(const char *ptr, int length, const char *name)
 	//
 	SetScriptPunctuations(script, NULL);
 	//
-	Com_Memcpy(script->buffer, ptr, length);
+	memcpy(script->buffer, ptr, length);
 	//
 	return script;
 } //end of the function LoadScriptMemory
@@ -1469,4 +1469,3 @@ void PS_SetBaseFolder( const char *path )
 {
 	Q_strncpyz( basefolder, path, sizeof( basefolder ) );
 } //end of the function PS_SetBaseFolder
-

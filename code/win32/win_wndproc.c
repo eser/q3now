@@ -823,7 +823,7 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 			WINDOWPLACEMENT wp;
 
 			// set minimized flag as early as possible
-			Com_Memset( &wp, 0, sizeof( wp ) );
+			memset( &wp, 0, sizeof( wp ) );
 			wp.length = sizeof( WINDOWPLACEMENT );
 			if ( GetWindowPlacement( hWnd, &wp ) && wp.showCmd == SW_SHOWMINIMIZED )
 				gw_minimized = qtrue;
@@ -1055,7 +1055,7 @@ void Sys_FlashWindow( void )
 		return;
 	}
 
-	Com_Memset( &fi, 0, sizeof( fi ) );
+	memset( &fi, 0, sizeof( fi ) );
 	fi.cbSize    = sizeof( fi );
 	fi.hwnd      = g_wv.hWnd;
 	fi.dwFlags   = FLASHW_TRAY | FLASHW_TIMERNOFG;

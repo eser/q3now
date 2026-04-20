@@ -17,15 +17,15 @@ void CG_WiredHudPushState( void ) {
 	wiredHudState_t state;
 	int i;
 
-	Com_Memset( &state, 0, sizeof( state ) );
+	memset( &state, 0, sizeof( state ) );
 
 	if ( !cg.snap ) return;
 
 	// ── player state ─────────────────────────────────────────────────
-	Com_Memcpy( state.stats, cg.snap->ps.stats, sizeof( state.stats ) );
-	Com_Memcpy( state.persistant, cg.snap->ps.persistant, sizeof( state.persistant ) );
-	Com_Memcpy( state.powerups, cg.snap->ps.powerups, sizeof( state.powerups ) );
-	Com_Memcpy( state.ammo, cg.snap->ps.ammo, sizeof( state.ammo ) );
+	memcpy( state.stats, cg.snap->ps.stats, sizeof( state.stats ) );
+	memcpy( state.persistant, cg.snap->ps.persistant, sizeof( state.persistant ) );
+	memcpy( state.powerups, cg.snap->ps.powerups, sizeof( state.powerups ) );
+	memcpy( state.ammo, cg.snap->ps.ammo, sizeof( state.ammo ) );
 	state.weapon      = cg.snap->ps.weapon;
 	state.weaponstate = cg.snap->ps.weaponstate;
 	state.clientNum   = cg.snap->ps.clientNum;
@@ -155,7 +155,7 @@ void CG_WiredHudPushState( void ) {
 	// ── player extras ────────────────────────────────────────────────
 	state.lowAmmoWarning        = cg.lowAmmoWarning;
 	state.renderingThirdPerson  = cg.renderingThirdPerson;
-	Com_Memcpy( &state.predictedPlayerState, &cg.predictedPlayerState, sizeof( playerState_t ) );
+	memcpy( &state.predictedPlayerState, &cg.predictedPlayerState, sizeof( playerState_t ) );
 
 	// ── rewards ──────────────────────────────────────────────────────
 	state.rewardStack = cg.rewardStack;
@@ -786,10 +786,10 @@ void CG_WiredHudPushState( void ) {
 		} lagometer_t;
 		extern lagometer_t lagometer;
 
-		Com_Memcpy( state.lagometer.frameSamples, lagometer.frameSamples, sizeof( state.lagometer.frameSamples ) );
+		memcpy( state.lagometer.frameSamples, lagometer.frameSamples, sizeof( state.lagometer.frameSamples ) );
 		state.lagometer.frameCount = lagometer.frameCount;
-		Com_Memcpy( state.lagometer.snapshotFlags, lagometer.snapshotFlags, sizeof( state.lagometer.snapshotFlags ) );
-		Com_Memcpy( state.lagometer.snapshotSamples, lagometer.snapshotSamples, sizeof( state.lagometer.snapshotSamples ) );
+		memcpy( state.lagometer.snapshotFlags, lagometer.snapshotFlags, sizeof( state.lagometer.snapshotFlags ) );
+		memcpy( state.lagometer.snapshotSamples, lagometer.snapshotSamples, sizeof( state.lagometer.snapshotSamples ) );
 		state.lagometer.snapshotCount = lagometer.snapshotCount;
 	}
 	state.localServer = cgs.localServer;

@@ -255,7 +255,7 @@ static int WiredBots_WeaponFromKey( const char *weaponKey ) {
 static void WiredBots_FillCombatCtx( bot_state_t *bs, wbCombatCtx_t *ctx ) {
 	int weapon;
 
-	Com_Memset( ctx, 0, sizeof( *ctx ) );
+	memset( ctx, 0, sizeof( *ctx ) );
 	ctx->enemyDist = fabsf( (float)bs->inventory[ENEMY_HORIZONTAL_DIST] );
 	ctx->enemyHealth = -1;
 	ctx->selfHealth = bs->inventory[INVENTORY_HEALTH];
@@ -422,7 +422,7 @@ static int WiredBots_Decide( bot_state_t *bs, char *decision, int decisionSize )
 		return qfalse;
 	}
 
-	Com_Memset( &ctx, 0, sizeof( ctx ) );
+	memset( &ctx, 0, sizeof( ctx ) );
 	ctx.health = bs->inventory[INVENTORY_HEALTH];
 	ctx.armor = bs->inventory[INVENTORY_ARMOR];
 	ctx.enemyVisible = ( bs->enemy >= 0 && BotEntityVisible( bs->entitynum, bs->eye, bs->viewangles, 360, bs->enemy ) > 0.0f ) ? 1 : 0;
@@ -628,7 +628,7 @@ static int WiredBots_EvalItemGoal( bot_state_t *bs, const gitem_t *item, const b
 		return 0;
 	}
 
-	Com_Memset( &ctx, 0, sizeof( ctx ) );
+	memset( &ctx, 0, sizeof( ctx ) );
 	WiredBots_ItemTypeName( item, ctx.itemType, sizeof( ctx.itemType ) );
 	VectorCopy( goal->origin, ctx.itemOrigin );
 	ctx.itemRespawn = 0.0f;

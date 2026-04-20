@@ -2325,7 +2325,7 @@ static qboolean CollapseMultitexture( shaderStage_t *st0, shaderStage_t *st1, in
 		memmove( st1, st1+1, sizeof( stages[0] ) * ( num_stages - 2 ) );
 	}
 
-	Com_Memset( st0 + num_stages - 1, 0, sizeof( stages[0] ) );
+	memset( st0 + num_stages - 1, 0, sizeof( stages[0] ) );
 
 	return qtrue;
 }
@@ -2716,7 +2716,7 @@ static shader_t *GeneratePermanentShader( void ) {
 			size = newShader->stages[i]->bundle[b].numTexMods * sizeof( texModInfo_t );
 			if ( size ) {
 				newShader->stages[i]->bundle[b].texMods = ri.Hunk_Alloc( size, h_low );
-				Com_Memcpy( newShader->stages[i]->bundle[b].texMods, stages[i].bundle[b].texMods, size );
+				memcpy( newShader->stages[i]->bundle[b].texMods, stages[i].bundle[b].texMods, size );
 			}
 		}
 	}
@@ -2827,7 +2827,7 @@ static void VertexLightingCollapse( void ) {
 			break;
 		}
 
-		Com_Memset( pStage, 0, sizeof( *pStage ) );
+		memset( pStage, 0, sizeof( *pStage ) );
 	}
 }
 
@@ -2841,8 +2841,8 @@ static void InitShader( const char *name, int lightmapIndex ) {
 	int i;
 
 	// clear the global shader
-	Com_Memset( &shader, 0, sizeof( shader ) );
-	Com_Memset( &stages, 0, sizeof( stages ) );
+	memset( &shader, 0, sizeof( shader ) );
+	memset( &stages, 0, sizeof( stages ) );
 
 	Q_strncpyz( shader.name, name, sizeof( shader.name ) );
 	shader.lightmapIndex = lightmapIndex;
@@ -2978,7 +2978,7 @@ static shader_t *FinishShader( void ) {
 				if(stage + 1 < MAX_SHADER_STAGES)
 					memmove(pStage, pStage + 1, sizeof(*pStage) * (index - stage - 1));
 
-				Com_Memset(&stages[index - 1], 0, sizeof(*stages));
+				memset(&stages[index - 1], 0, sizeof(*stages));
 			}
 
 			continue;
@@ -3907,7 +3907,7 @@ static void ScanAndLoadShaderFiles( void )
 		ri.FS_FreeFileList( shaderFiles );
 
 	//COM_Compress( s_shaderText );
-	Com_Memset( shaderTextHashTableSizes, 0, sizeof( shaderTextHashTableSizes ) );
+	memset( shaderTextHashTableSizes, 0, sizeof( shaderTextHashTableSizes ) );
 	size = 0;
 
 	p = s_shaderText;
@@ -4026,7 +4026,7 @@ R_InitShaders
 void R_InitShaders( void ) {
 	ri.Printf( PRINT_ALL, "Initializing Shaders\n" );
 
-	Com_Memset(hashTable, 0, sizeof(hashTable));
+	memset(hashTable, 0, sizeof(hashTable));
 
 	CreateInternalShaders();
 

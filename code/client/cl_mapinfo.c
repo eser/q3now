@@ -32,7 +32,7 @@ CL_ClearMapInfo
 ================
 */
 void CL_ClearMapInfo( void ) {
-	Com_Memset( &cl_mapInfo, 0, sizeof( cl_mapInfo ) );
+	memset( &cl_mapInfo, 0, sizeof( cl_mapInfo ) );
 }
 
 /*
@@ -91,7 +91,7 @@ static void CL_MapInfo_ParseMeta( const char *text, int len ) {
 			if ( keyLen <= 0 || keyLen >= (int)sizeof(key) ) {
 				continue;
 			}
-			Com_Memcpy( key, line, keyLen );
+			memcpy( key, line, keyLen );
 			key[keyLen] = '\0';
 
 			valLen = lineLen - keyLen - 1;
@@ -102,7 +102,7 @@ static void CL_MapInfo_ParseMeta( const char *text, int len ) {
 				valLen = (int)sizeof(value) - 1;
 			}
 			if ( valLen > 0 ) {
-				Com_Memcpy( value, eq + 1, valLen );
+				memcpy( value, eq + 1, valLen );
 			}
 			value[valLen] = '\0';
 		}

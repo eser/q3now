@@ -64,7 +64,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #if defined( _M_IX86 ) || defined( __i386__ )
 #define ARCH_STRING "x86"
-#define Q3_LITTLE_ENDIAN
 #undef id386
 #define id386 1
 #ifndef __WORDSIZE
@@ -74,7 +73,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #if defined( _M_AMD64 ) || defined( __x86_64__ ) || defined( __amd64__ )
 #define ARCH_STRING "x86_64"
-#define Q3_LITTLE_ENDIAN
 #undef idx64
 #define idx64 1
 //#define UNICODE
@@ -85,7 +83,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #if defined( _M_ARM64 )
 #define ARCH_STRING "arm64"
-#define Q3_LITTLE_ENDIAN
 #undef arm64
 #define arm64 1
 #ifndef __WORDSIZE
@@ -95,7 +92,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #if defined( _M_ARM )
 #define ARCH_STRING "arm32"
-#define Q3_LITTLE_ENDIAN
 #undef arm32
 #define arm32 1
 #endif
@@ -111,21 +107,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #if defined (__i386__)
 #define ARCH_STRING "i386"
-#define Q3_LITTLE_ENDIAN
 #undef id386
 #define id386 1
 #endif // __i386__
 
 #if defined (__x86_64__) || defined (__amd64__)
 #define ARCH_STRING "x86_64"
-#define Q3_LITTLE_ENDIAN
 #undef idx64
 #define idx64 1
 #endif // __x86_64__ || __amd64__
 
 #if defined (__arm__)
 #define ARCH_STRING "arm"
-#define Q3_LITTLE_ENDIAN
 #undef arm32
 #define arm32 1
 #endif // __arm__
@@ -136,7 +129,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #else
 #define ARCH_STRING "aarch64"
 #endif
-#define Q3_LITTLE_ENDIAN
 #undef arm64
 #define arm64 1
 #endif // __arm64__
@@ -144,10 +136,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #if defined (__PPC64__)
 #if defined (__LITTLE_ENDIAN__) || defined (__LITTLE_ENDIAN)
 #define ARCH_STRING "ppc64le"
-#define Q3_LITTLE_ENDIAN
 #else
 #define ARCH_STRING "ppc64"
-#define Q3_BIG_ENDIAN
 #endif // !__LITTLE_ENDIAN__
 #endif // __PPC64__
 
@@ -180,13 +170,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define OS_STRING "openbsd"
 #endif
 
-#define ID_INLINE inline
-#if BYTE_ORDER == BIG_ENDIAN
-#define Q3_BIG_ENDIAN
-#else
-#define Q3_LITTLE_ENDIAN
-#endif
-
 #endif // __FreeBSD__ || __NetBSD__ || __OpenBSD__
 
 // ================================ APPLE ===================================
@@ -208,7 +191,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define ID_INLINE inline
 
 #define ARCH_STRING "wasm32"
-#define Q3_LITTLE_ENDIAN
 
 #define PATH_SEP '/'
 #define PATH_SEP_FOREIGN '\\'
@@ -243,40 +225,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #ifndef DLL_EXT
 #error "DLL_EXT not defined"
-#endif
-
-// Endianess
-
-#if defined( Q3_BIG_ENDIAN ) && defined( Q3_LITTLE_ENDIAN )
-
-#error "Endianness defined as both big and little"
-
-#elif defined( Q3_BIG_ENDIAN )
-
-#define CopyLittleShort(dest, src) CopyShortSwap(dest, src)
-#define CopyLittleLong(dest, src) CopyLongSwap(dest, src)
-#define LittleShort(x) ShortSwap(x)
-#define LittleLong(x) LongSwap(x)
-#define LittleFloat(x) FloatSwap(&x)
-#define BigShort
-#define BigLong
-#define BigFloat
-
-#elif defined( Q3_LITTLE_ENDIAN )
-
-#define CopyLittleShort(dest, src) Com_Memcpy(dest, src, 2)
-#define CopyLittleLong(dest, src) Com_Memcpy(dest, src, 4)
-#define LittleShort
-#define LittleLong
-#define LittleFloat
-#define BigShort(x) ShortSwap(x)
-#define BigLong(x) LongSwap(x)
-#define BigFloat(x) FloatSwap(&x)
-
-#else
-
-#error "Endianness not defined"
-
 #endif
 
 // Platform string

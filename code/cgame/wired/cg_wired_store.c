@@ -39,7 +39,7 @@ static wuiStagedEntry_t *WUI_Stage_Find( const char *key ) {
 		return NULL;
 	}
 
-	Com_Memset( &wui_stage[wui_stageCount], 0, sizeof( wuiStagedEntry_t ) );
+	memset( &wui_stage[wui_stageCount], 0, sizeof( wuiStagedEntry_t ) );
 	Q_strncpyz( wui_stage[wui_stageCount].key, key, sizeof( wui_stage[0].key ) );
 	return &wui_stage[wui_stageCount++];
 }

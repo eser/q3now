@@ -1534,7 +1534,7 @@ static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inou
 		if (scaled_width != width || scaled_height != height)
 			ResampleTexture (*data, width, height, *resampledBuffer, scaled_width, scaled_height);
 		else
-			Com_Memcpy(*resampledBuffer, *data, width * height * 4);
+			memcpy(*resampledBuffer, *data, width * height * 4);
 
 		if (type == IMGTYPE_COLORALPHA)
 			RGBAtoYCoCgA(*resampledBuffer, *resampledBuffer, scaled_width, scaled_height);
@@ -2715,7 +2715,7 @@ static void R_CreateDefaultImage( void ) {
 	byte	data[DEFAULT_SIZE][DEFAULT_SIZE][4];
 
 	// the default image will be a box, to allow you to see the mapping coordinates
-	Com_Memset( data, 32, sizeof( data ) );
+	memset( data, 32, sizeof( data ) );
 	for ( x = 0 ; x < DEFAULT_SIZE ; x++ ) {
 		data[0][x][0] =
 		data[0][x][1] =
@@ -2752,7 +2752,7 @@ static void R_CreateBuiltinImages( void ) {
 	R_CreateDefaultImage();
 
 	// we use a solid white image instead of disabling texturing
-	Com_Memset( data, 255, sizeof( data ) );
+	memset( data, 255, sizeof( data ) );
 	tr.whiteImage = R_CreateImage("*white", (byte *)data, 8, 8, IMGTYPE_COLORALPHA, IMGFLAG_NONE, 0);
 
 	if (r_dlightMode->integer >= 2)
@@ -2958,7 +2958,7 @@ R_InitImages
 ===============
 */
 void R_InitImages( void ) {
-	Com_Memset(hashTable, 0, sizeof(hashTable));
+	memset(hashTable, 0, sizeof(hashTable));
 	// build brightness translation tables
 	R_SetColorMappings();
 
@@ -2978,7 +2978,7 @@ void R_DeleteTextures( void ) {
 	for ( i=0; i<tr.numImages ; i++ ) {
 		qglDeleteTextures( 1, &tr.images[i]->texnum );
 	}
-	Com_Memset( tr.images, 0, sizeof( tr.images ) );
+	memset( tr.images, 0, sizeof( tr.images ) );
 
 	tr.numImages = 0;
 

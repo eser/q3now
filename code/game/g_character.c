@@ -74,7 +74,7 @@ void G_Characters_Init( void ) {
 	int i;
 	int dirlen;
 
-	Com_Memset( s_characters, 0, sizeof( s_characters ) );
+	memset( s_characters, 0, sizeof( s_characters ) );
 	s_numCharacters = 0;
 
 	numdirs = trap_FS_GetFileList( "characters", ".lua", dirlist, sizeof( dirlist ) );

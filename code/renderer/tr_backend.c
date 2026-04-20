@@ -1903,9 +1903,9 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		{
 			const setMsdfOutlineCommand_t *oc = (const setMsdfOutlineCommand_t *)data;
 			tr.msdfOutlineWidth = oc->outlineWidth;
-			Com_Memcpy( tr.msdfOutlineColor, oc->outlineColor, sizeof( tr.msdfOutlineColor ) );
+			memcpy( tr.msdfOutlineColor, oc->outlineColor, sizeof( tr.msdfOutlineColor ) );
 			tr.msdfGlowWidth = oc->glowWidth;
-			Com_Memcpy( tr.msdfGlowColor, oc->glowColor, sizeof( tr.msdfGlowColor ) );
+			memcpy( tr.msdfGlowColor, oc->glowColor, sizeof( tr.msdfGlowColor ) );
 			data = (const void *)( oc + 1 );
 			break;
 		}

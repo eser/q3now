@@ -32,7 +32,7 @@ CL_ClearBspPreview
 ================
 */
 void CL_ClearBspPreview( void ) {
-	Com_Memset( &cl_bspPreview, 0, sizeof( cl_bspPreview ) );
+	memset( &cl_bspPreview, 0, sizeof( cl_bspPreview ) );
 }
 
 /*

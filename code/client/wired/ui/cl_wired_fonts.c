@@ -10,7 +10,7 @@ cl_wired_fonts.c -- Wired UI font system (migrated from cg_moderntext.c)
 
 /* ── Font family registration table ───────────────────────────────── */
 
-static fontFamily_t s_fontFamilies[] = {
+static fontFamily_t wui_fontFamilies[] = {
 	// ── Enter Sansman ──────────────────────────────────────────────
 	// Each weight is a separate atlas from a FontForge-transformed TTF.
 	// Source: entsans.ttf (Bold), entsani.ttf (Bold Italic)
@@ -41,14 +41,14 @@ static fontFamily_t s_fontFamilies[] = {
 	},
 };
 
-#define FONT_FAMILY_COUNT (sizeof(s_fontFamilies) / sizeof(s_fontFamilies[0]))
+#define FONT_FAMILY_COUNT (sizeof(wui_fontFamilies) / sizeof(wui_fontFamilies[0]))
 
 void WiredFonts_InitMSDF( void ) {
 	int i, j;
 
 	/* ── Family-based loading: iterate families and faces ─────────── */
 	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
-		fontFamily_t *fam = &s_fontFamilies[i];
+		fontFamily_t *fam = &wui_fontFamilies[i];
 		for ( j = 0; j < fam->faceCount; j++ ) {
 			fontFace_t *face = &fam->faces[j];
 			msdfFont_t *atlas = NULL;
@@ -56,7 +56,7 @@ void WiredFonts_InitMSDF( void ) {
 
 			/* Check if this atlas is already loaded by a previous face */
 			for ( k = 0; k < i + 1; k++ ) {
-				fontFamily_t *prev = &s_fontFamilies[k];
+				fontFamily_t *prev = &wui_fontFamilies[k];
 				int limit = ( k == i ) ? j : prev->faceCount;
 				for ( m = 0; m < limit; m++ ) {
 					if ( !Q_stricmp( prev->faces[m].atlasName, face->atlasName ) &&
@@ -100,8 +100,8 @@ const fontFace_t *WiredFont_Resolve(
 
 	/* Find the family */
 	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
-		if ( !Q_stricmp( familyName, s_fontFamilies[i].familyName ) ) {
-			family = &s_fontFamilies[i];
+		if ( !Q_stricmp( familyName, wui_fontFamilies[i].familyName ) ) {
+			family = &wui_fontFamilies[i];
 			break;
 		}
 	}
@@ -150,7 +150,7 @@ const fontFace_t *WiredFont_ResolveByName( const char *name )
 	}
 
 	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
-		const fontFamily_t *family = &s_fontFamilies[i];
+		const fontFamily_t *family = &wui_fontFamilies[i];
 		if ( !Q_stricmp( name, family->familyName ) ) {
 			return WiredFont_Resolve( family->familyName, FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
 		}

@@ -208,7 +208,7 @@ static void DrawNormals( const shaderCommands_t *input ) {
 		tess.numIndexes += 2;
 	}
 	tess.numVertexes *= 2;
-	Com_Memset( tess.svars.colors[0][0].rgba, tr.identityLightByte, tess.numVertexes * sizeof( color4ub_t ) );
+	memset( tess.svars.colors[0][0].rgba, tr.identityLightByte, tess.numVertexes * sizeof( color4ub_t ) );
 
 	vk_bind_pipeline( vk.normals_debug_pipeline );
 	vk_bind_index();
@@ -641,17 +641,17 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 	switch ( pStage->bundle[b].rgbGen )
 	{
 		case CGEN_IDENTITY:
-			Com_Memset( dest, 0xff, tess.numVertexes * 4 );
+			memset( dest, 0xff, tess.numVertexes * 4 );
 			break;
 		default:
 		case CGEN_IDENTITY_LIGHTING:
-			Com_Memset( dest, tr.identityLightByte, tess.numVertexes * 4 );
+			memset( dest, tr.identityLightByte, tess.numVertexes * 4 );
 			break;
 		case CGEN_LIGHTING_DIFFUSE:
 			RB_CalcDiffuseColor( ( unsigned char * ) dest );
 			break;
 		case CGEN_EXACT_VERTEX:
-			Com_Memcpy( dest, tess.vertexColors, tess.numVertexes * sizeof( tess.vertexColors[0] ) );
+			memcpy( dest, tess.vertexColors, tess.numVertexes * sizeof( tess.vertexColors[0] ) );
 			break;
 		case CGEN_CONST:
 			for ( i = 0; i < tess.numVertexes; i++ ) {
@@ -661,7 +661,7 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 		case CGEN_VERTEX:
 			if ( tr.identityLight == 1 )
 			{
-				Com_Memcpy( dest, tess.vertexColors, tess.numVertexes * sizeof( tess.vertexColors[0] ) );
+				memcpy( dest, tess.vertexColors, tess.numVertexes * sizeof( tess.vertexColors[0] ) );
 			}
 			else
 			{
@@ -1213,7 +1213,7 @@ uint32_t VK_PushUniform( const vkUniform_t *uniform ) {
 		return ~0U;
 
 	// push uniform
-	Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, uniform, sizeof( *uniform ) );
+	memcpy( vk.cmd->vertex_buffer_ptr + offset, uniform, sizeof( *uniform ) );
 	vk.cmd->vertex_buffer_offset = offset + vk.uniform_item_size;
 
 	vk_reset_descriptor( VK_DESC_UNIFORM );

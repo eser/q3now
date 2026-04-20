@@ -1387,12 +1387,12 @@ static void RB_SurfaceAxis( void ) {
 	RB_EndSurface();
 
 	GL_Bind( tr.whiteImage );
-	Com_Memset( tess.xyz, 0, 6 * sizeof( tess.xyz[0] ) );
+	memset( tess.xyz, 0, 6 * sizeof( tess.xyz[0] ) );
 	tess.xyz[1][0] = 16.0;
 	tess.xyz[3][1] = 16.0;
 	tess.xyz[5][2] = 16.0;
 
-	Com_Memset( tess.svars.colors[0], 0, 6 * sizeof( color4ub_t ) );
+	memset( tess.svars.colors[0], 0, 6 * sizeof( color4ub_t ) );
 	for ( i = 0; i < 6; i++ )
 		tess.svars.colors[0][i].rgba[3] = 255;
 
@@ -1423,12 +1423,12 @@ static void RB_SurfaceAxis( void ) {
 
 	qglLineWidth( 3 );
 
-	Com_Memset( xyz, 0, sizeof( xyz ) );
+	memset( xyz, 0, sizeof( xyz ) );
 	xyz[1][0] = 16.0;
 	xyz[3][1] = 16.0;
 	xyz[5][2] = 16.0;
 
-	Com_Memset( colors, 0, sizeof( colors ) );
+	memset( colors, 0, sizeof( colors ) );
 	for ( i = 0; i < 6; i++ ) {
 		colors[i].rgba[3] = 255;
 	}

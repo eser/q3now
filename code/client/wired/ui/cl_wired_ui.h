@@ -1,25 +1,5 @@
 /*
-===========================================================================
 cl_wired_ui.h — Wired UI: unified menu/HUD system (client-side)
-
-When FEAT_WIRED_UI is enabled, this replaces the traditional UI VM (q3_ui
-or Team Arena ui) with an embedded menu parser that runs directly in the
-client. Menus are defined in .menu files, HUD in .hud files, and (Phase 5)
-in-game surface GUIs in .gui files — all sharing the same parser.
-
-Architecture:
-  ┌────────────────────────────┐     ┌──────────────────────────┐
-  │  CLIENT (engine)           │     │  CGAME (mod-replaceable)  │
-  │  ├─ Wired parser+renderer  │     │                          │
-  │  ├─ data binding engine    │◄────│  WiredUI_RegisterSymbol() │
-  │  │   {{ name }} → callback │     │  WiredUI_RegisterElement()│
-  │  └─ hot reload             │     │                          │
-  └────────────────────────────┘     └──────────────────────────┘
-
-cgame registers data symbols (health, armor, etc.) and HUD element types
-(fps, weaponlist, etc.) at init. The client parser resolves {{ symbol }}
-references and calls registered element routines during rendering.
-===========================================================================
 */
 
 #ifndef CL_WIRED_UI_H
@@ -556,6 +536,8 @@ void     WiredUI_LuaInit( void );
 void     WiredUI_MenuLuaInit( void );
 // Execute scripts/menus.lua to populate the menu pool.
 void     WiredUI_LoadMenusFromLua( void );
+// Read g_maprotation cvar into caller-supplied buffer.
+void     WiredUI_GetMapRotation( char *buf, int size );
 
 // ── ownerdraw system (cl_wired_ownerdraw.c) ──────────────────────────
 

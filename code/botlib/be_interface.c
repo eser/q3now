@@ -840,7 +840,7 @@ botlib_export_t *GetBotLibAPI(int apiVersion, botlib_import_t *import) {
 	botimport = *import;
 	assert(botimport.Print);
 
-	Com_Memset( &be_botlib_export, 0, sizeof( be_botlib_export ) );
+	memset( &be_botlib_export, 0, sizeof( be_botlib_export ) );
 
 	if ( apiVersion != BOTLIB_API_VERSION ) {
 		botimport.Print( PRT_ERROR, "Mismatched BOTLIB_API_VERSION: expected %i, got %i\n", BOTLIB_API_VERSION, apiVersion );

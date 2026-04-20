@@ -833,7 +833,7 @@ static LONG ApplyDisplaySettings( DEVMODE *dm )
 	LONG lResult;
 	BOOL bResult;
 
-	Com_Memset( &curr, 0, sizeof( curr ) );
+	memset( &curr, 0, sizeof( curr ) );
 	curr.dmSize = sizeof( DEVMODE );
 
 	// Get current display mode on current monitor
@@ -1138,7 +1138,7 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 				for ( modeNum = 0 ; ; modeNum++ ) {
 					BOOL bResult;
 
-					Com_Memset( &devmode, 0, sizeof( devmode ) );
+					memset( &devmode, 0, sizeof( devmode ) );
 					devmode.dmSize = sizeof( DEVMODE );
 
 					if ( glw_state.displayName[0] )

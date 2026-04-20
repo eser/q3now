@@ -173,7 +173,7 @@ void FORMAT_PRINTF(1, 2) QDECL Com_SetLastError( const char *fmt, ... ) {
 	va_list argptr;
 
 	va_start( argptr, fmt );
-	Q_vsnprintf( com_errorMessage, sizeof( com_errorMessage ), fmt, argptr );
+	vsnprintf( com_errorMessage, sizeof( com_errorMessage ), fmt, argptr );
 	va_end( argptr );
 
 	Cvar_Set( "com_errorMessage", com_errorMessage );
@@ -211,7 +211,7 @@ void FORMAT_PRINTF(1, 2) QDECL Com_Printf( const char *fmt, ... ) {
 	int			len;
 
 	va_start( argptr, fmt );
-	len = Q_vsnprintf( msg, sizeof( msg ), fmt, argptr );
+	len = vsnprintf( msg, sizeof( msg ), fmt, argptr );
 	va_end( argptr );
 
 	if ( rd_buffer && !rd_flushing ) {
@@ -301,7 +301,7 @@ void FORMAT_PRINTF(1, 2) QDECL Com_DPrintf( const char *fmt, ... ) {
 	}
 
 	va_start( argptr,fmt );
-	Q_vsnprintf( msg, sizeof( msg ), fmt, argptr );
+	vsnprintf( msg, sizeof( msg ), fmt, argptr );
 	va_end( argptr );
 
 	Com_Printf( S_COLOR_DEVEL "%s", msg );
@@ -361,7 +361,7 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 	lastErrorTime = currentTime;
 
 	va_start( argptr, fmt );
-	Q_vsnprintf( com_errorMessage, sizeof( com_errorMessage ), fmt, argptr );
+	vsnprintf( com_errorMessage, sizeof( com_errorMessage ), fmt, argptr );
 	va_end( argptr );
 
 	if ( code != ERR_DISCONNECT && code != ERR_NEED_CD ) {
@@ -1167,7 +1167,7 @@ static memblock_t *NewBlock( memzone_t *zone, uint32_t size )
 			size, zone->name );
 		return NULL;
 	}
-	Com_Memset( sep, 0x0, sizeof( *sep ) + sizeof( *block ) );
+	memset( sep, 0x0, sizeof( *sep ) + sizeof( *block ) );
 	block = sep + 1;
 
 	// link separator with prev
@@ -1235,7 +1235,7 @@ static void Z_Init( memzone_t *zone, uint32_t size, const char *name )
 	memblock_t *block;
 	int i, n, min_fragment;
 
-	Com_Memset( zone, 0x0, sizeof( *zone ) + sizeof( *block ) );
+	memset( zone, 0x0, sizeof( *zone ) + sizeof( *block ) );
 
 	zone->name = name;
 
@@ -1371,7 +1371,7 @@ void Z_Free( void *ptr )
 	// set the block to something that should cause problems
 	// if it is referenced...
 #ifdef ZONE_DEBUG
-	Com_Memset( ptr, 0xaa, block->size - sizeof( *block ) );
+	memset( ptr, 0xaa, block->size - sizeof( *block ) );
 #endif
 
 	block->tag = TAG_FREE; // mark as free
@@ -1598,7 +1598,7 @@ void *Z_Malloc( size_t size ) {
 #else
 	buf = Z_TagMalloc( size, TAG_GENERAL );
 #endif
-	Com_Memset( buf, 0, size );
+	memset( buf, 0, size );
 
 	return buf;
 }
@@ -2084,7 +2084,7 @@ static void Com_InitSmallZoneMemory( void ) {
 	int smallZoneSize;
 
 	smallZoneSize = sizeof( s_buf );
-	Com_Memset( s_buf, 0, smallZoneSize );
+	memset( s_buf, 0, smallZoneSize );
 	smallzone = (memzone_t *)s_buf;
 	Z_Init( smallzone, smallZoneSize, "small" );
 }
@@ -2432,7 +2432,7 @@ void *Hunk_Alloc( size_t size, ha_pref preference ) {
 
 	hunk_permanent->temp = hunk_permanent->permanent;
 
-	Com_Memset( buf, 0, size );
+	memset( buf, 0, size );
 
 #ifdef HUNK_DEBUG
 	{
@@ -3146,74 +3146,6 @@ char	cl_cdkey[34] = "                                ";
 #else
 char	cl_cdkey[34] = "123456789";
 #endif
-
-/*
-=================
-bool CL_CDKeyValidate
-=================
-*/
-qboolean Com_CDKeyValidate( const char *key, const char *checksum ) {
-#ifdef STANDALONE
-	return qtrue;
-#else
-	char	ch;
-	byte	sum;
-	char	chs[10];
-	int i, len;
-
-	len = strlen(key);
-	if( len != CDKEY_LEN ) {
-		return qfalse;
-	}
-
-	if( checksum && strlen( checksum ) != CDCHKSUM_LEN ) {
-		return qfalse;
-	}
-
-	sum = 0;
-	// for loop gets rid of conditional assignment warning
-	for (i = 0; i < len; i++) {
-		ch = *key++;
-		if (ch>='a' && ch<='z') {
-			ch -= 32;
-		}
-		switch( ch ) {
-		case '2':
-		case '3':
-		case '7':
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'G':
-		case 'H':
-		case 'J':
-		case 'L':
-		case 'P':
-		case 'R':
-		case 'S':
-		case 'T':
-		case 'W':
-			sum += ch;
-			continue;
-		default:
-			return qfalse;
-		}
-	}
-
-	sprintf(chs, "%02x", sum);
-
-	if (checksum && !Q_stricmp(chs, checksum)) {
-		return qtrue;
-	}
-
-	if (!checksum) {
-		return qtrue;
-	}
-
-	return qfalse;
-#endif
-}
 
 /*
 ** --------------------------------------------------------------------------------
@@ -4372,7 +4304,7 @@ void Com_Frame( qboolean noDelay ) {
 	timeBeforeEvents = 0;
 	timeBeforeClient = 0;
 	timeAfter = 0;
-	Com_Memset( &cl_prof, 0, sizeof( cl_prof ) );
+	memset( &cl_prof, 0, sizeof( cl_prof ) );
 
 	// write config file if anything changed
 #ifndef DELAY_WRITECONFIG

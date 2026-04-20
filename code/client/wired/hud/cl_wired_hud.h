@@ -1,11 +1,5 @@
 /*
-===========================================================================
 cl_wired_hud.h — Wired UI HUD: client-side HUD element rendering
-
-Phase 3: ModernHUD elements live in the client. The wiredHudState_t struct
-(defined in cg_public.h) is pushed by cgame each frame. This header provides
-the client-side API.
-===========================================================================
 */
 
 #ifndef CL_WIRED_HUD_H

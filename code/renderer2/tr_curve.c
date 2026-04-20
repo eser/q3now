@@ -319,7 +319,7 @@ static void InvertErrorTable( float errorTable[2][MAX_GRID_SIZE], int width, int
 	int		i;
 	float	copy[2][MAX_GRID_SIZE];
 
-	Com_Memcpy( copy, errorTable, sizeof( copy ) );
+	memcpy( copy, errorTable, sizeof( copy ) );
 
 	for ( i = 0 ; i < width ; i++ ) {
 		errorTable[1][i] = copy[0][i];	//[width-1-i];
@@ -372,31 +372,31 @@ static void R_CreateSurfaceGridMesh(srfBspSurface_t *grid, int width, int height
 	vec3_t		tmpVec;
 
 	// copy the results out to a grid
-	Com_Memset(grid, 0, sizeof(*grid));
+	memset(grid, 0, sizeof(*grid));
 
 #ifdef PATCH_STITCHING
 	grid->widthLodError = /*ri.Hunk_Alloc*/ ri.Malloc( width * 4 );
-	Com_Memcpy( grid->widthLodError, errorTable[0], width * 4 );
+	memcpy( grid->widthLodError, errorTable[0], width * 4 );
 
 	grid->heightLodError = /*ri.Hunk_Alloc*/ ri.Malloc( height * 4 );
-	Com_Memcpy( grid->heightLodError, errorTable[1], height * 4 );
+	memcpy( grid->heightLodError, errorTable[1], height * 4 );
 
 	grid->numIndexes = numIndexes;
 	grid->indexes = ri.Malloc(grid->numIndexes * sizeof(glIndex_t));
-	Com_Memcpy(grid->indexes, indexes, numIndexes * sizeof(glIndex_t));
+	memcpy(grid->indexes, indexes, numIndexes * sizeof(glIndex_t));
 
 	grid->numVerts = (width * height);
 	grid->verts = ri.Malloc(grid->numVerts * sizeof(srfVert_t));
 #else
 	grid->widthLodError = ri.Hunk_Alloc( width * 4 );
-	Com_Memcpy( grid->widthLodError, errorTable[0], width * 4 );
+	memcpy( grid->widthLodError, errorTable[0], width * 4 );
 
 	grid->heightLodError = ri.Hunk_Alloc( height * 4 );
-	Com_Memcpy( grid->heightLodError, errorTable[1], height * 4 );
+	memcpy( grid->heightLodError, errorTable[1], height * 4 );
 
 	grid->numIndexes = numIndexes;
 	grid->indexes = ri.Hunk_Alloc(grid->numIndexes * sizeof(glIndex_t), h_low);
-	Com_Memcpy(grid->indexes, indexes, numIndexes * sizeof(glIndex_t));
+	memcpy(grid->indexes, indexes, numIndexes * sizeof(glIndex_t));
 
 	grid->numVerts = (width * height);
 	grid->verts = ri.Hunk_Alloc(grid->numVerts * sizeof(srfVert_t), h_low);

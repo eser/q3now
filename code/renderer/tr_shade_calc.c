@@ -912,7 +912,7 @@ const fogProgramParms_t *RB_CalcFogProgramParms( void )
 	const fog_t	*fog;
 	vec3_t		local;
 
-	Com_Memset( parm.fogDepthVector, 0, sizeof( parm.fogDepthVector ) );
+	memset( parm.fogDepthVector, 0, sizeof( parm.fogDepthVector ) );
 
 	fog = tr.world->fogs + tess.fogNum;
 

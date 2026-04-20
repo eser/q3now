@@ -776,13 +776,13 @@ static void vk_create_render_passes( void )
 	depthRef0.attachment = 1;
 	depthRef0.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-	Com_Memset( &subpass, 0, sizeof( subpass ) );
+	memset( &subpass, 0, sizeof( subpass ) );
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	subpass.colorAttachmentCount = 1;
 	subpass.pColorAttachments = &colorRef0;
 	subpass.pDepthStencilAttachment = &depthRef0;
 
-	Com_Memset( &desc, 0, sizeof( desc ) );
+	memset( &desc, 0, sizeof( desc ) );
 	desc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 	desc.pNext = NULL;
 	desc.flags = 0;
@@ -825,7 +825,7 @@ static void vk_create_render_passes( void )
 
 	// subpass dependencies
 
-	Com_Memset( &deps, 0, sizeof( deps ) );
+	memset( &deps, 0, sizeof( deps ) );
 
 	deps[2].srcSubpass = VK_SUBPASS_EXTERNAL;
 	deps[2].dstSubpass = 0;
@@ -933,7 +933,7 @@ static void vk_create_render_passes( void )
 		colorRef0.attachment = 0;
 		colorRef0.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		Com_Memset( &subpass, 0, sizeof( subpass ) );
+		memset( &subpass, 0, sizeof( subpass ) );
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorRef0;
@@ -968,7 +968,7 @@ static void vk_create_render_passes( void )
 		colorRef0.attachment = 0;
 		colorRef0.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-		Com_Memset( &subpass, 0, sizeof( subpass ) );
+		memset( &subpass, 0, sizeof( subpass ) );
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorRef0;
@@ -1011,7 +1011,7 @@ static void vk_create_render_passes( void )
 	// capture render pass
 	if ( vk.capture.image )
 	{
-		Com_Memset( &subpass, 0, sizeof( subpass ) );
+		memset( &subpass, 0, sizeof( subpass ) );
 
 		attachments[0].flags = 0;
 		attachments[0].format = vk.capture_format;
@@ -1047,7 +1047,7 @@ static void vk_create_render_passes( void )
 
 	desc.attachmentCount = 1;
 
-	Com_Memset( &subpass, 0, sizeof( subpass ) );
+	memset( &subpass, 0, sizeof( subpass ) );
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	subpass.colorAttachmentCount = 1;
 	subpass.pColorAttachments = &colorRef0;
@@ -1106,13 +1106,13 @@ static void vk_create_render_passes( void )
 	depthRef0.attachment = 1;
 	depthRef0.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-	Com_Memset( &subpass, 0, sizeof( subpass ) );
+	memset( &subpass, 0, sizeof( subpass ) );
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	subpass.colorAttachmentCount = 1;
 	subpass.pColorAttachments = &colorRef0;
 	subpass.pDepthStencilAttachment = &depthRef0;
 
-	Com_Memset( &desc, 0, sizeof( desc ) );
+	memset( &desc, 0, sizeof( desc ) );
 	desc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 	desc.pNext = NULL;
 	desc.flags = 0;
@@ -1906,7 +1906,7 @@ static qboolean vk_create_device( VkPhysicalDevice physical_device, int device_i
 		queue_desc.queueCount = 1;
 		queue_desc.pQueuePriorities = &priority;
 
-		Com_Memset( &features, 0, sizeof( features ) );
+		memset( &features, 0, sizeof( features ) );
 		features.fillModeNonSolid = VK_TRUE;
 
 #ifdef _DEBUG
@@ -2047,7 +2047,7 @@ static void init_vulkan_library( void )
 	int device_index, i;
 	VkResult res;
 
-	Com_Memset( &vk, 0, sizeof( vk ) );
+	memset( &vk, 0, sizeof( vk ) );
 
 	if ( vk_instance == VK_NULL_HANDLE ) {
 
@@ -2583,7 +2583,7 @@ void vk_update_attachment_descriptors( void ) {
 		VkWriteDescriptorSet desc;
 		Vk_Sampler_Def sd;
 
-		Com_Memset( &sd, 0, sizeof( sd ) );
+		memset( &sd, 0, sizeof( sd ) );
 		sd.gl_mag_filter = sd.gl_min_filter = vk.blitFilter;
 		sd.address_mode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		sd.max_lod_1_0 = qtrue;
@@ -2800,19 +2800,19 @@ void vk_init_descriptors( void )
 		uint32_t j;
 
 		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			Com_Memset( &boneAlloc, 0, sizeof( boneAlloc ) );
+			memset( &boneAlloc, 0, sizeof( boneAlloc ) );
 			boneAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 			boneAlloc.descriptorPool = vk.descriptor_pool;
 			boneAlloc.descriptorSetCount = 1;
 			boneAlloc.pSetLayouts = &vk.iqmGpu.set_layout_bones;
 			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &boneAlloc, &vk.iqmGpu.bone_descriptor[j] ) );
 
-			Com_Memset( &boneBufDesc, 0, sizeof( boneBufDesc ) );
+			memset( &boneBufDesc, 0, sizeof( boneBufDesc ) );
 			boneBufDesc.buffer = vk.iqmGpu.bone_buffer[j];
 			boneBufDesc.offset = 0;
 			boneBufDesc.range = IQM_BONE_UBO_SIZE;
 
-			Com_Memset( &boneWriteDesc, 0, sizeof( boneWriteDesc ) );
+			memset( &boneWriteDesc, 0, sizeof( boneWriteDesc ) );
 			boneWriteDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			boneWriteDesc.dstSet = vk.iqmGpu.bone_descriptor[j];
 			boneWriteDesc.dstBinding = 0;
@@ -2860,7 +2860,7 @@ static void vk_create_geometry_buffers( VkDeviceSize size )
 	desc.queueFamilyIndexCount = 0;
 	desc.pQueueFamilyIndices = NULL;
 
-	Com_Memset( &vb_memory_requirements, 0, sizeof( vb_memory_requirements ) );
+	memset( &vb_memory_requirements, 0, sizeof( vb_memory_requirements ) );
 
 	for ( i = 0 ; i < NUM_COMMAND_BUFFERS; i++ ) {
 		desc.size = size;
@@ -2896,7 +2896,7 @@ static void vk_create_geometry_buffers( VkDeviceSize size )
 
 	vk.geometry_buffer_size = vb_memory_requirements.size;
 
-	Com_Memset( &vk.stats, 0, sizeof( vk.stats ) );
+	memset( &vk.stats, 0, sizeof( vk.stats ) );
 }
 
 
@@ -2915,7 +2915,7 @@ static void vk_create_storage_buffer( uint32_t size )
 	desc.queueFamilyIndexCount = 0;
 	desc.pQueueFamilyIndices = NULL;
 
-	Com_Memset( &memory_requirements, 0, sizeof( memory_requirements ) );
+	memset( &memory_requirements, 0, sizeof( memory_requirements ) );
 
 	desc.size = size;
 	desc.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
@@ -2934,7 +2934,7 @@ static void vk_create_storage_buffer( uint32_t size )
 	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.storage.memory ) );
 	VK_CHECK( qvkMapMemory( vk.device, vk.storage.memory, 0, VK_WHOLE_SIZE, 0, (void**)&vk.storage.buffer_ptr ) );
 
-	Com_Memset( vk.storage.buffer_ptr, 0, memory_requirements.size );
+	memset( vk.storage.buffer_ptr, 0, memory_requirements.size );
 
 	qvkBindBufferMemory( vk.device, vk.storage.buffer, vk.storage.memory, 0 );
 
@@ -3026,7 +3026,7 @@ static VkPipeline vk_create_compute_pipeline( VkShaderModule compModule, VkPipel
 	VkComputePipelineCreateInfo info;
 	VkPipeline pipeline;
 
-	Com_Memset( &info, 0, sizeof( info ) );
+	memset( &info, 0, sizeof( info ) );
 	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -3067,7 +3067,7 @@ void vk_init_rail_compute( void ) {
 
 	outputSize = RAIL_GPU_MAX_VERTS * RAIL_GPU_VERTEX_SIZE;
 
-	Com_Memset( &bufInfo, 0, sizeof( bufInfo ) );
+	memset( &bufInfo, 0, sizeof( bufInfo ) );
 	bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	bufInfo.size = RAIL_GPU_PARAMS_SIZE;
 	bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
@@ -3078,7 +3078,7 @@ void vk_init_rail_compute( void ) {
 	memType = find_memory_type( memReq.memoryTypeBits,
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
 
-	Com_Memset( &allocInfo, 0, sizeof( allocInfo ) );
+	memset( &allocInfo, 0, sizeof( allocInfo ) );
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocInfo.allocationSize = memReq.size;
 	allocInfo.memoryTypeIndex = memType;
@@ -3110,7 +3110,7 @@ void vk_init_rail_compute( void ) {
 	}
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		Com_Memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
 		dsAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		dsAlloc.descriptorPool = vk.descriptor_pool;
 		dsAlloc.descriptorSetCount = 1;
@@ -3118,7 +3118,7 @@ void vk_init_rail_compute( void ) {
 
 		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.rail.descriptor[i] ) );
 
-		Com_Memset( bufInfos, 0, sizeof( bufInfos ) );
+		memset( bufInfos, 0, sizeof( bufInfos ) );
 		bufInfos[0].buffer = vk.rail.params_buffer;
 		bufInfos[0].offset = 0;
 		bufInfos[0].range = RAIL_GPU_PARAMS_SIZE;
@@ -3127,7 +3127,7 @@ void vk_init_rail_compute( void ) {
 		bufInfos[1].offset = 0;
 		bufInfos[1].range = outputSize;
 
-		Com_Memset( writes, 0, sizeof( writes ) );
+		memset( writes, 0, sizeof( writes ) );
 		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[0].dstSet = vk.rail.descriptor[i];
 		writes[0].dstBinding = 0;
@@ -3165,8 +3165,8 @@ void vk_init_rail_compute( void ) {
 		VkViewport viewport;
 		VkRect2D scissor;
 
-		Com_Memset( &gpInfo, 0, sizeof( gpInfo ) );
-		Com_Memset( stages, 0, sizeof( stages ) );
+		memset( &gpInfo, 0, sizeof( gpInfo ) );
+		memset( stages, 0, sizeof( stages ) );
 
 		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -3178,55 +3178,55 @@ void vk_init_rail_compute( void ) {
 		stages[1].module = vk.modules.rail_helix_fs;
 		stages[1].pName = "main";
 
-		Com_Memset( &vertexInput, 0, sizeof( vertexInput ) );
+		memset( &vertexInput, 0, sizeof( vertexInput ) );
 		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
-		Com_Memset( &inputAssembly, 0, sizeof( inputAssembly ) );
+		memset( &inputAssembly, 0, sizeof( inputAssembly ) );
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
 		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
 		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
 
-		Com_Memset( &dynamicState, 0, sizeof( dynamicState ) );
+		memset( &dynamicState, 0, sizeof( dynamicState ) );
 		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 		dynamicState.dynamicStateCount = 2;
 		dynamicState.pDynamicStates = dynStates;
 
-		Com_Memset( &viewport, 0, sizeof( viewport ) );
+		memset( &viewport, 0, sizeof( viewport ) );
 		viewport.width = (float)vk.renderWidth;
 		viewport.height = (float)vk.renderHeight;
 		viewport.maxDepth = 1.0f;
 
-		Com_Memset( &scissor, 0, sizeof( scissor ) );
+		memset( &scissor, 0, sizeof( scissor ) );
 		scissor.extent.width = vk.renderWidth;
 		scissor.extent.height = vk.renderHeight;
 
-		Com_Memset( &viewportState, 0, sizeof( viewportState ) );
+		memset( &viewportState, 0, sizeof( viewportState ) );
 		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		viewportState.viewportCount = 1;
 		viewportState.pViewports = &viewport;
 		viewportState.scissorCount = 1;
 		viewportState.pScissors = &scissor;
 
-		Com_Memset( &rasterizer, 0, sizeof( rasterizer ) );
+		memset( &rasterizer, 0, sizeof( rasterizer ) );
 		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
 		rasterizer.lineWidth = 1.0f;
 		rasterizer.cullMode = VK_CULL_MODE_NONE;
 		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
-		Com_Memset( &multisampling, 0, sizeof( multisampling ) );
+		memset( &multisampling, 0, sizeof( multisampling ) );
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampling.rasterizationSamples = vk.msaaActive ? vkSamples : VK_SAMPLE_COUNT_1_BIT;
 
-		Com_Memset( &depthStencil, 0, sizeof( depthStencil ) );
+		memset( &depthStencil, 0, sizeof( depthStencil ) );
 		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 		depthStencil.depthTestEnable = VK_TRUE;
 		depthStencil.depthWriteEnable = VK_FALSE;
 		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
-		Com_Memset( &blendAttach, 0, sizeof( blendAttach ) );
+		memset( &blendAttach, 0, sizeof( blendAttach ) );
 		blendAttach.blendEnable = VK_TRUE;
 		blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
 		blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -3237,7 +3237,7 @@ void vk_init_rail_compute( void ) {
 		blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
 			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-		Com_Memset( &colorBlend, 0, sizeof( colorBlend ) );
+		memset( &colorBlend, 0, sizeof( colorBlend ) );
 		colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 		colorBlend.attachmentCount = 1;
 		colorBlend.pAttachments = &blendAttach;
@@ -3338,12 +3338,12 @@ void RB_DrawRailTrailGPU( int numSegments ) {
 		VkViewport viewport;
 		VkRect2D scissor;
 
-		Com_Memset( &viewport, 0, sizeof( viewport ) );
+		memset( &viewport, 0, sizeof( viewport ) );
 		viewport.width = (float)glConfig.vidWidth;
 		viewport.height = (float)glConfig.vidHeight;
 		viewport.maxDepth = 1.0f;
 
-		Com_Memset( &scissor, 0, sizeof( scissor ) );
+		memset( &scissor, 0, sizeof( scissor ) );
 		scissor.extent.width = glConfig.vidWidth;
 		scissor.extent.height = glConfig.vidHeight;
 
@@ -3385,7 +3385,7 @@ static void vk_dispatch_rail_compute( void ) {
 
 		{
 			VkBufferMemoryBarrier barrier;
-			Com_Memset( &barrier, 0, sizeof( barrier ) );
+			memset( &barrier, 0, sizeof( barrier ) );
 			barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
 			barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -3437,14 +3437,14 @@ void vk_init_iqm_gpu_skinning( void )
 	vk.iqmGpu.available = qfalse;
 
 	// descriptor set layout for bone matrices (set 0, binding 0, UBO)
-	Com_Memset( binds, 0, sizeof( binds ) );
+	memset( binds, 0, sizeof( binds ) );
 	binds[0].binding = 0;
 	binds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	binds[0].descriptorCount = 1;
 	binds[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	binds[0].pImmutableSamplers = NULL;
 
-	Com_Memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	layoutInfo.bindingCount = 1;
 	layoutInfo.pBindings = binds;
@@ -3459,7 +3459,7 @@ void vk_init_iqm_gpu_skinning( void )
 	setLayouts[0] = vk.iqmGpu.set_layout_bones;
 	setLayouts[1] = vk.set_layout_sampler;
 
-	Com_Memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
+	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
 	pipeLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pipeLayoutInfo.setLayoutCount = 2;
 	pipeLayoutInfo.pSetLayouts = setLayouts;
@@ -3469,7 +3469,7 @@ void vk_init_iqm_gpu_skinning( void )
 	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.iqmGpu.pipeline_layout ) );
 
 	// per-frame bone UBOs (host-visible, persistently mapped)
-	Com_Memset( &bufInfo, 0, sizeof( bufInfo ) );
+	memset( &bufInfo, 0, sizeof( bufInfo ) );
 	bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	bufInfo.size = IQM_BONE_UBO_SIZE;
 	bufInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
@@ -3480,7 +3480,7 @@ void vk_init_iqm_gpu_skinning( void )
 
 		qvkGetBufferMemoryRequirements( vk.device, vk.iqmGpu.bone_buffer[i], &memReqs );
 
-		Com_Memset( &allocInfo, 0, sizeof( allocInfo ) );
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
 		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 		allocInfo.allocationSize = memReqs.size;
 		allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits,
@@ -3491,7 +3491,7 @@ void vk_init_iqm_gpu_skinning( void )
 		VK_CHECK( qvkMapMemory( vk.device, vk.iqmGpu.bone_memory[i], 0, IQM_BONE_UBO_SIZE, 0, (void **)&vk.iqmGpu.bone_ptr[i] ) );
 
 		// allocate descriptor set
-		Com_Memset( &allocDesc, 0, sizeof( allocDesc ) );
+		memset( &allocDesc, 0, sizeof( allocDesc ) );
 		allocDesc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		allocDesc.descriptorPool = vk.descriptor_pool;
 		allocDesc.descriptorSetCount = 1;
@@ -3500,12 +3500,12 @@ void vk_init_iqm_gpu_skinning( void )
 		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &allocDesc, &vk.iqmGpu.bone_descriptor[i] ) );
 
 		// update descriptor to point at bone UBO
-		Com_Memset( &bufDesc, 0, sizeof( bufDesc ) );
+		memset( &bufDesc, 0, sizeof( bufDesc ) );
 		bufDesc.buffer = vk.iqmGpu.bone_buffer[i];
 		bufDesc.offset = 0;
 		bufDesc.range = IQM_BONE_UBO_SIZE;
 
-		Com_Memset( &writeDesc, 0, sizeof( writeDesc ) );
+		memset( &writeDesc, 0, sizeof( writeDesc ) );
 		writeDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writeDesc.dstSet = vk.iqmGpu.bone_descriptor[i];
 		writeDesc.dstBinding = 0;
@@ -3540,8 +3540,8 @@ void vk_init_iqm_gpu_skinning( void )
 		// stride = 3*4 + 3*4 + 2*4 + 4*4 + 4*4 + 4*1 = 12+12+8+16+16+4 = 68 bytes
 		uint32_t stride = 68;
 
-		Com_Memset( &gpInfo, 0, sizeof( gpInfo ) );
-		Com_Memset( stages, 0, sizeof( stages ) );
+		memset( &gpInfo, 0, sizeof( gpInfo ) );
+		memset( stages, 0, sizeof( stages ) );
 
 		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -3594,53 +3594,53 @@ void vk_init_iqm_gpu_skinning( void )
 		iqmAttribs[5].format = VK_FORMAT_R8G8B8A8_UINT;
 		iqmAttribs[5].offset = 64;
 
-		Com_Memset( &vertexInput, 0, sizeof( vertexInput ) );
+		memset( &vertexInput, 0, sizeof( vertexInput ) );
 		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 		vertexInput.vertexBindingDescriptionCount = 1;
 		vertexInput.pVertexBindingDescriptions = iqmBindings;
 		vertexInput.vertexAttributeDescriptionCount = 6;
 		vertexInput.pVertexAttributeDescriptions = iqmAttribs;
 
-		Com_Memset( &inputAssembly, 0, sizeof( inputAssembly ) );
+		memset( &inputAssembly, 0, sizeof( inputAssembly ) );
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
 		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
 		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
 
-		Com_Memset( &dynamicState, 0, sizeof( dynamicState ) );
+		memset( &dynamicState, 0, sizeof( dynamicState ) );
 		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 		dynamicState.dynamicStateCount = 2;
 		dynamicState.pDynamicStates = dynStates;
 
-		Com_Memset( &viewport, 0, sizeof( viewport ) );
+		memset( &viewport, 0, sizeof( viewport ) );
 		viewport.width = (float)vk.renderWidth;
 		viewport.height = (float)vk.renderHeight;
 		viewport.maxDepth = 1.0f;
 
-		Com_Memset( &scissor, 0, sizeof( scissor ) );
+		memset( &scissor, 0, sizeof( scissor ) );
 		scissor.extent.width = vk.renderWidth;
 		scissor.extent.height = vk.renderHeight;
 
-		Com_Memset( &viewportState, 0, sizeof( viewportState ) );
+		memset( &viewportState, 0, sizeof( viewportState ) );
 		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		viewportState.viewportCount = 1;
 		viewportState.pViewports = &viewport;
 		viewportState.scissorCount = 1;
 		viewportState.pScissors = &scissor;
 
-		Com_Memset( &rasterizer, 0, sizeof( rasterizer ) );
+		memset( &rasterizer, 0, sizeof( rasterizer ) );
 		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
 		rasterizer.lineWidth = 1.0f;
 		rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT;
 		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
-		Com_Memset( &multisampling, 0, sizeof( multisampling ) );
+		memset( &multisampling, 0, sizeof( multisampling ) );
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampling.rasterizationSamples = vk.msaaActive ? vkSamples : VK_SAMPLE_COUNT_1_BIT;
 
-		Com_Memset( &depthStencil, 0, sizeof( depthStencil ) );
+		memset( &depthStencil, 0, sizeof( depthStencil ) );
 		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 		depthStencil.depthTestEnable = VK_TRUE;
 		depthStencil.depthWriteEnable = VK_TRUE;
@@ -3650,12 +3650,12 @@ void vk_init_iqm_gpu_skinning( void )
 		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 #endif
 
-		Com_Memset( &blendAttach, 0, sizeof( blendAttach ) );
+		memset( &blendAttach, 0, sizeof( blendAttach ) );
 		blendAttach.blendEnable = VK_FALSE;
 		blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
 			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-		Com_Memset( &colorBlend, 0, sizeof( colorBlend ) );
+		memset( &colorBlend, 0, sizeof( colorBlend ) );
 		colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 		colorBlend.attachmentCount = 1;
 		colorBlend.pAttachments = &blendAttach;
@@ -3753,7 +3753,7 @@ qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
 	}
 
 	// create device-local vertex buffer
-	Com_Memset( &bufDesc, 0, sizeof( bufDesc ) );
+	memset( &bufDesc, 0, sizeof( bufDesc ) );
 	bufDesc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	bufDesc.size = vertSize;
 	bufDesc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
@@ -3761,7 +3761,7 @@ qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
 	VK_CHECK( qvkCreateBuffer( vk.device, &bufDesc, NULL, outVertBuf ) );
 
 	qvkGetBufferMemoryRequirements( vk.device, *outVertBuf, &memReqs );
-	Com_Memset( &allocInfo, 0, sizeof( allocInfo ) );
+	memset( &allocInfo, 0, sizeof( allocInfo ) );
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocInfo.allocationSize = memReqs.size;
 	allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
@@ -3787,26 +3787,26 @@ qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
 		VkFence fence;
 		VkFenceCreateInfo fenceInfo;
 
-		Com_Memset( &cmdAlloc, 0, sizeof( cmdAlloc ) );
+		memset( &cmdAlloc, 0, sizeof( cmdAlloc ) );
 		cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		cmdAlloc.commandPool = vk.command_pool;
 		cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		cmdAlloc.commandBufferCount = 1;
 		VK_CHECK( qvkAllocateCommandBuffers( vk.device, &cmdAlloc, &cmdBuf ) );
 
-		Com_Memset( &beginInfo, 0, sizeof( beginInfo ) );
+		memset( &beginInfo, 0, sizeof( beginInfo ) );
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		VK_CHECK( qvkBeginCommandBuffer( cmdBuf, &beginInfo ) );
 
 		// copy vertex data to staging, then staging to device
-		Com_Memcpy( vk.staging_buffer.ptr, vertData, vertSize );
-		Com_Memset( &copyRegion, 0, sizeof( copyRegion ) );
+		memcpy( vk.staging_buffer.ptr, vertData, vertSize );
+		memset( &copyRegion, 0, sizeof( copyRegion ) );
 		copyRegion.size = vertSize;
 		qvkCmdCopyBuffer( cmdBuf, vk.staging_buffer.handle, *outVertBuf, 1, &copyRegion );
 
 		// copy index data to staging, then staging to device
-		Com_Memcpy( vk.staging_buffer.ptr + vertSize, idxData, idxSize );
+		memcpy( vk.staging_buffer.ptr + vertSize, idxData, idxSize );
 		copyRegion.srcOffset = vertSize;
 		copyRegion.dstOffset = 0;
 		copyRegion.size = idxSize;
@@ -3814,11 +3814,11 @@ qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
 
 		VK_CHECK( qvkEndCommandBuffer( cmdBuf ) );
 
-		Com_Memset( &fenceInfo, 0, sizeof( fenceInfo ) );
+		memset( &fenceInfo, 0, sizeof( fenceInfo ) );
 		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 		VK_CHECK( qvkCreateFence( vk.device, &fenceInfo, NULL, &fence ) );
 
-		Com_Memset( &submitInfo, 0, sizeof( submitInfo ) );
+		memset( &submitInfo, 0, sizeof( submitInfo ) );
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &cmdBuf;
@@ -3892,7 +3892,7 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 
 	// upload bone matrices to per-frame UBO
 	// each bone is 3 * vec4 = 48 bytes
-	Com_Memcpy( vk.iqmGpu.bone_ptr[frameIdx], boneMats, numBones * 3 * sizeof( vec4_t ) );
+	memcpy( vk.iqmGpu.bone_ptr[frameIdx], boneMats, numBones * 3 * sizeof( vec4_t ) );
 
 	// bind IQM skinning pipeline
 	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.iqmGpu.pipeline );
@@ -3919,7 +3919,7 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 	qvkCmdBindIndexBuffer( cmd, idxBuffer, 0, VK_INDEX_TYPE_UINT32 );
 
 	// set viewport and scissor
-	Com_Memset( &viewport, 0, sizeof( viewport ) );
+	memset( &viewport, 0, sizeof( viewport ) );
 	viewport.x = (float)backEnd.viewParms.viewportX;
 	viewport.y = (float)backEnd.viewParms.viewportY;
 	viewport.width = (float)backEnd.viewParms.viewportWidth;
@@ -3927,7 +3927,7 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 	viewport.maxDepth = 1.0f;
 	qvkCmdSetViewport( cmd, 0, 1, &viewport );
 
-	Com_Memset( &scissor, 0, sizeof( scissor ) );
+	memset( &scissor, 0, sizeof( scissor ) );
 	scissor.offset.x = backEnd.viewParms.viewportX;
 	scissor.offset.y = backEnd.viewParms.viewportY;
 	scissor.extent.width = backEnd.viewParms.viewportWidth;
@@ -3941,7 +3941,7 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 	// rebinds correctly (we bound a different pipeline layout)
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
 	vk.cmd->depth_range = DEPTH_RANGE_COUNT; // force viewport/scissor update
-	Com_Memset( vk.cmd->descriptor_set.current, 0, sizeof( vk.cmd->descriptor_set.current ) );
+	memset( vk.cmd->descriptor_set.current, 0, sizeof( vk.cmd->descriptor_set.current ) );
 	vk.cmd->descriptor_set.start = ~0U;
 	vk.cmd->descriptor_set.end = 0;
 }
@@ -4294,7 +4294,7 @@ static void vk_create_shader_modules( void )
 	vk.modules.gamma_vs = SHADER_MODULE( gamma_vert_spv );
 
 	// Load compiled gamma post-process variants
-	Com_Memset( vk.gamma_variant_fs, 0, sizeof( vk.gamma_variant_fs ) );
+	memset( vk.gamma_variant_fs, 0, sizeof( vk.gamma_variant_fs ) );
 #if FEAT_SSAO
 	vk.gamma_variant_fs[ GAMMA_VAR_SSAO ] = SHADER_MODULE( gamma_ssao_frag_spv );
 #endif
@@ -4359,7 +4359,7 @@ static void vk_alloc_persistent_pipelines( void )
 
 	// skybox
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.shader_type = TYPE_SIGNLE_TEXTURE_FIXED_COLOR;
 		def.color.rgb = tr.identityLightByte;
 		def.color.alpha = tr.identityLightByte;
@@ -4375,7 +4375,7 @@ static void vk_alloc_persistent_pipelines( void )
 		qboolean mirror_flags[2] = { qfalse, qtrue };
 		int i, j;
 
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.polygon_offset = qfalse;
 		def.state_bits = 0;
 		def.shader_type = TYPE_SIGNLE_TEXTURE;
@@ -4390,7 +4390,7 @@ static void vk_alloc_persistent_pipelines( void )
 		}
 	}
 	{
-		Com_Memset( &def, 0, sizeof( def ) );
+		memset( &def, 0, sizeof( def ) );
 		def.face_culling = CT_FRONT_SIDED;
 		def.polygon_offset = qfalse;
 		def.state_bits = GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO;
@@ -4417,7 +4417,7 @@ static void vk_alloc_persistent_pipelines( void )
 		int l;
 #endif
 
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.shader_type = TYPE_SIGNLE_TEXTURE;
 		def.mirror = qfalse;
 
@@ -4475,7 +4475,7 @@ static void vk_alloc_persistent_pipelines( void )
 
 	// RT_BEAM surface
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE;
 		def.face_culling = CT_FRONT_SIDED;
 		def.primitives = TRIANGLE_STRIP;
@@ -4484,7 +4484,7 @@ static void vk_alloc_persistent_pipelines( void )
 
 	// axis for missing models
 	{
-		Com_Memset( &def, 0, sizeof( def ) );
+		memset( &def, 0, sizeof( def ) );
 		def.state_bits = GLS_DEFAULT;
 		def.shader_type = TYPE_SIGNLE_TEXTURE;
 		def.face_culling = CT_TWO_SIDED;
@@ -4497,7 +4497,7 @@ static void vk_alloc_persistent_pipelines( void )
 	// flare visibility test dot
 	if ( vk.fragmentStores )
 	{
-		Com_Memset( &def, 0, sizeof( def ) );
+		memset( &def, 0, sizeof( def ) );
 		//def.state_bits = GLS_DEFAULT;
 		def.face_culling = CT_TWO_SIDED;
 		def.shader_type = TYPE_DOT;
@@ -4507,7 +4507,7 @@ static void vk_alloc_persistent_pipelines( void )
 
 	// MSDF text rendering pipeline
 	{
-		Com_Memset( &def, 0, sizeof( def ) );
+		memset( &def, 0, sizeof( def ) );
 		def.state_bits = GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
 		def.face_culling = CT_TWO_SIDED;
 		def.shader_type = TYPE_MSDF;
@@ -4517,42 +4517,42 @@ static void vk_alloc_persistent_pipelines( void )
 	// DrawTris()
 	state_bits = GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE;
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = state_bits;
 		def.shader_type = TYPE_COLOR_WHITE;
 		def.face_culling = CT_FRONT_SIDED;
 		vk.tris_debug_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 	}
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = state_bits;
 		def.shader_type = TYPE_COLOR_WHITE;
 		def.face_culling = CT_BACK_SIDED;
 		vk.tris_mirror_debug_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 	}
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = state_bits;
 		def.shader_type = TYPE_COLOR_GREEN;
 		def.face_culling = CT_FRONT_SIDED;
 		vk.tris_debug_green_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 	}
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = state_bits;
 		def.shader_type = TYPE_COLOR_GREEN;
 		def.face_culling = CT_BACK_SIDED;
 		vk.tris_mirror_debug_green_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 	}
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = state_bits;
 		def.shader_type = TYPE_COLOR_RED;
 		def.face_culling = CT_FRONT_SIDED;
 		vk.tris_debug_red_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 	}
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = state_bits;
 		def.shader_type = TYPE_COLOR_RED;
 		def.face_culling = CT_BACK_SIDED;
@@ -4561,7 +4561,7 @@ static void vk_alloc_persistent_pipelines( void )
 
 	// DrawNormals()
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = GLS_DEPTHMASK_TRUE;
 		def.shader_type = TYPE_SIGNLE_TEXTURE;
 		def.primitives = LINE_LIST;
@@ -4570,13 +4570,13 @@ static void vk_alloc_persistent_pipelines( void )
 
 	// RB_DebugPolygon()
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE;
 		def.shader_type = TYPE_SIGNLE_TEXTURE;
 		vk.surface_debug_pipeline_solid = vk_find_pipeline_ext( 0, &def, qfalse );
 	}
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE;
 		def.shader_type = TYPE_SIGNLE_TEXTURE;
 		def.primitives = LINE_LIST;
@@ -4585,7 +4585,7 @@ static void vk_alloc_persistent_pipelines( void )
 
 	// RB_ShowImages
 	{
-		Com_Memset(&def, 0, sizeof(def));
+		memset(&def, 0, sizeof(def));
 		def.state_bits = GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
 		def.shader_type = TYPE_SIGNLE_TEXTURE;
 		def.primitives = TRIANGLE_STRIP;
@@ -4704,7 +4704,7 @@ static void vk_create_smaa_pipelines( void )
 	multisample_state.alphaToCoverageEnable = VK_FALSE;
 	multisample_state.alphaToOneEnable = VK_FALSE;
 
-	Com_Memset( &attachment_blend_state, 0, sizeof( attachment_blend_state ) );
+	memset( &attachment_blend_state, 0, sizeof( attachment_blend_state ) );
 	attachment_blend_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 	attachment_blend_state.blendEnable = VK_FALSE;
 
@@ -4720,14 +4720,14 @@ static void vk_create_smaa_pipelines( void )
 	blend_state.blendConstants[2] = 0.0f;
 	blend_state.blendConstants[3] = 0.0f;
 
-	Com_Memset( &depth_stencil_state, 0, sizeof( depth_stencil_state ) );
+	memset( &depth_stencil_state, 0, sizeof( depth_stencil_state ) );
 	depth_stencil_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 	depth_stencil_state.depthTestEnable = VK_FALSE;
 	depth_stencil_state.depthWriteEnable = VK_FALSE;
 	depth_stencil_state.depthCompareOp = VK_COMPARE_OP_NEVER;
 	depth_stencil_state.stencilTestEnable = VK_FALSE;
 
-	Com_Memset( &create_info, 0, sizeof( create_info ) );
+	memset( &create_info, 0, sizeof( create_info ) );
 	create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	create_info.stageCount = 2;
 	create_info.pStages = shader_stages;
@@ -4970,7 +4970,7 @@ static void vk_alloc_attachments( void )
 
 	if ( num_attachments == 1 ) {
 		if ( vk.dedicatedAllocation ) {
-			Com_Memset( &alloc_info2, 0, sizeof( alloc_info2 ) );
+			memset( &alloc_info2, 0, sizeof( alloc_info2 ) );
 			alloc_info2.sType =  VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR;
 			alloc_info2.image = attachments[ 0 ].descriptor;
 			alloc_info.pNext = &alloc_info2;
@@ -5047,14 +5047,14 @@ static void vk_get_image_memory_erquirements( VkImage image, VkMemoryRequirement
 		VkImageMemoryRequirementsInfo2KHR image_requirements2;
 		VkMemoryDedicatedRequirementsKHR mem_req2;
 
-		Com_Memset( &mem_req2, 0, sizeof( mem_req2 ) );
+		memset( &mem_req2, 0, sizeof( mem_req2 ) );
 		mem_req2.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS_KHR;
 
 		image_requirements2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2_KHR;
 		image_requirements2.image = image;
 		image_requirements2.pNext = NULL;
 
-		Com_Memset( &memory_requirements2, 0, sizeof( memory_requirements2 ) );
+		memset( &memory_requirements2, 0, sizeof( memory_requirements2 ) );
 		memory_requirements2.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2_KHR;
 		memory_requirements2.pNext = &mem_req2;
 
@@ -5232,7 +5232,7 @@ static void vk_create_attachments( void )
 		uint32_t mem_type;
 
 		// depth copy image (transfer dst + sampled)
-		Com_Memset( &img_desc, 0, sizeof( img_desc ) );
+		memset( &img_desc, 0, sizeof( img_desc ) );
 		img_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		img_desc.imageType = VK_IMAGE_TYPE_2D;
 		img_desc.format = vk.depth_format;
@@ -5262,7 +5262,7 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkBindImageMemory( vk.device, vk.depthFade.image, vk.depthFade.memory, 0 ) );
 
 		// image view (depth-only aspect)
-		Com_Memset( &view_desc, 0, sizeof( view_desc ) );
+		memset( &view_desc, 0, sizeof( view_desc ) );
 		view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		view_desc.image = vk.depthFade.image;
 		view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -5274,7 +5274,7 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.depthFade.view ) );
 
 		// nearest-neighbor sampler
-		Com_Memset( &sampler_desc, 0, sizeof( sampler_desc ) );
+		memset( &sampler_desc, 0, sizeof( sampler_desc ) );
 		sampler_desc.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 		sampler_desc.magFilter = VK_FILTER_NEAREST;
 		sampler_desc.minFilter = VK_FILTER_NEAREST;
@@ -5307,7 +5307,7 @@ static void vk_create_attachments( void )
 		uint32_t mem_type;
 
 		// depth image
-		Com_Memset( &img_desc, 0, sizeof( img_desc ) );
+		memset( &img_desc, 0, sizeof( img_desc ) );
 		img_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		img_desc.imageType = VK_IMAGE_TYPE_2D;
 		img_desc.format = vk.depth_format;
@@ -5333,7 +5333,7 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkBindImageMemory( vk.device, vk.shadowMap.image, vk.shadowMap.memory, 0 ) );
 
 		// image view
-		Com_Memset( &view_desc, 0, sizeof( view_desc ) );
+		memset( &view_desc, 0, sizeof( view_desc ) );
 		view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		view_desc.image = vk.shadowMap.image;
 		view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -5344,7 +5344,7 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.shadowMap.view ) );
 
 		// nearest sampler with border clamp (outside shadow map = lit)
-		Com_Memset( &sampler_desc, 0, sizeof( sampler_desc ) );
+		memset( &sampler_desc, 0, sizeof( sampler_desc ) );
 		sampler_desc.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 		sampler_desc.magFilter = VK_FILTER_NEAREST;
 		sampler_desc.minFilter = VK_FILTER_NEAREST;
@@ -5355,7 +5355,7 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkCreateSampler( vk.device, &sampler_desc, NULL, &vk.shadowMap.sampler ) );
 
 		// render pass (depth-only, clear on begin)
-		Com_Memset( &att, 0, sizeof( att ) );
+		memset( &att, 0, sizeof( att ) );
 		att.format = vk.depth_format;
 		att.samples = VK_SAMPLE_COUNT_1_BIT;
 		att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -5368,11 +5368,11 @@ static void vk_create_attachments( void )
 		depthRef.attachment = 0;
 		depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-		Com_Memset( &subpass, 0, sizeof( subpass ) );
+		memset( &subpass, 0, sizeof( subpass ) );
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpass.pDepthStencilAttachment = &depthRef;
 
-		Com_Memset( &rpDesc, 0, sizeof( rpDesc ) );
+		memset( &rpDesc, 0, sizeof( rpDesc ) );
 		rpDesc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 		rpDesc.attachmentCount = 1;
 		rpDesc.pAttachments = &att;
@@ -5381,7 +5381,7 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkCreateRenderPass( vk.device, &rpDesc, NULL, &vk.shadowMap.renderPass ) );
 
 		// framebuffer
-		Com_Memset( &fbDesc, 0, sizeof( fbDesc ) );
+		memset( &fbDesc, 0, sizeof( fbDesc ) );
 		fbDesc.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		fbDesc.renderPass = vk.shadowMap.renderPass;
 		fbDesc.attachmentCount = 1;
@@ -5396,7 +5396,7 @@ static void vk_create_attachments( void )
 		pushRange.offset = 0;
 		pushRange.size = 64; // mat4
 
-		Com_Memset( &plDesc, 0, sizeof( plDesc ) );
+		memset( &plDesc, 0, sizeof( plDesc ) );
 		plDesc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		plDesc.pushConstantRangeCount = 1;
 		plDesc.pPushConstantRanges = &pushRange;
@@ -5471,7 +5471,7 @@ static void vk_create_attachments( void )
 		uint32_t mem_type;
 
 		// --- Area texture (160x560, R8G8) ---
-		Com_Memset( &img_desc, 0, sizeof( img_desc ) );
+		memset( &img_desc, 0, sizeof( img_desc ) );
 		img_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		img_desc.imageType = VK_IMAGE_TYPE_2D;
 		img_desc.format = VK_FORMAT_R8G8_UNORM;
@@ -5498,7 +5498,7 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.smaa.area_memory ) );
 		VK_CHECK( qvkBindImageMemory( vk.device, vk.smaa.area_image, vk.smaa.area_memory, 0 ) );
 
-		Com_Memset( &view_desc, 0, sizeof( view_desc ) );
+		memset( &view_desc, 0, sizeof( view_desc ) );
 		view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		view_desc.image = vk.smaa.area_image;
 		view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -5530,7 +5530,7 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.smaa.search_view ) );
 
 		// --- Samplers ---
-		Com_Memset( &sampler_desc, 0, sizeof( sampler_desc ) );
+		memset( &sampler_desc, 0, sizeof( sampler_desc ) );
 		sampler_desc.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 		sampler_desc.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		sampler_desc.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -5549,7 +5549,7 @@ static void vk_create_attachments( void )
 		// --- Upload LUT data via staging buffer ---
 		staging_size = AREATEX_SIZE + SEARCHTEX_SIZE;
 
-		Com_Memset( &buf_desc, 0, sizeof( buf_desc ) );
+		memset( &buf_desc, 0, sizeof( buf_desc ) );
 		buf_desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		buf_desc.size = staging_size;
 		buf_desc.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -5566,8 +5566,8 @@ static void vk_create_attachments( void )
 		VK_CHECK( qvkBindBufferMemory( vk.device, staging_buf, staging_mem, 0 ) );
 
 		VK_CHECK( qvkMapMemory( vk.device, staging_mem, 0, VK_WHOLE_SIZE, 0, (void **)&mapped ) );
-		Com_Memcpy( mapped, areaTexBytes, AREATEX_SIZE );
-		Com_Memcpy( mapped + AREATEX_SIZE, searchTexBytes, SEARCHTEX_SIZE );
+		memcpy( mapped, areaTexBytes, AREATEX_SIZE );
+		memcpy( mapped + AREATEX_SIZE, searchTexBytes, SEARCHTEX_SIZE );
 		qvkUnmapMemory( vk.device, staging_mem );
 
 		// record copy commands
@@ -5584,7 +5584,7 @@ static void vk_create_attachments( void )
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0 );
 
 		// copy area texture
-		Com_Memset( &region, 0, sizeof( region ) );
+		memset( &region, 0, sizeof( region ) );
 		region.bufferOffset = 0;
 		region.bufferRowLength = 0;
 		region.bufferImageHeight = 0;
@@ -5938,7 +5938,7 @@ static void vk_destroy_swapchain( void ) {
 
 	qvkDestroySwapchainKHR( vk.device, vk.swapchain, NULL );
 	vk.swapchain = VK_NULL_HANDLE;
-	Com_Memset( vk.swapchain_images, 0, sizeof( vk.swapchain_images ) );
+	memset( vk.swapchain_images, 0, sizeof( vk.swapchain_images ) );
 	vk.swapchain_image_count = 0;
 }
 
@@ -6458,7 +6458,7 @@ void vk_initialize( void )
 			msdfPush.size = 128; // 64 (mat4 mvp) + 4 (outlineWidth) + 4 (glowWidth) + 8 (shadowOffset) + 16 (outlineColor) + 16 (glowColor) + 16 (shadowColor)
 
 			VkPipelineLayoutCreateInfo msdfLayoutInfo;
-			Com_Memset(&msdfLayoutInfo, 0, sizeof(msdfLayoutInfo));
+			memset(&msdfLayoutInfo, 0, sizeof(msdfLayoutInfo));
 			msdfLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 			msdfLayoutInfo.setLayoutCount = desc.setLayoutCount;
 			msdfLayoutInfo.pSetLayouts = set_layouts;
@@ -6574,7 +6574,7 @@ void vk_initialize( void )
 
 	{
 		VkPipelineCacheCreateInfo ci;
-		Com_Memset( &ci, 0, sizeof( ci ) );
+		memset( &ci, 0, sizeof( ci ) );
 		ci.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
 		VK_CHECK( qvkCreatePipelineCache( vk.device, &ci, NULL, &vk.pipelineCache ) );
 	}
@@ -6669,7 +6669,7 @@ static void vk_destroy_attachments( void )
 		qvkDestroyPipelineLayout( vk.device, vk.shadowMap.depthLayout, NULL );
 		if ( vk.shadowMap.depthPipeline )
 			qvkDestroyPipeline( vk.device, vk.shadowMap.depthPipeline, NULL );
-		Com_Memset( &vk.shadowMap, 0, sizeof( vk.shadowMap ) );
+		memset( &vk.shadowMap, 0, sizeof( vk.shadowMap ) );
 	}
 #endif
 
@@ -6833,7 +6833,7 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 	}
 
 	if ( resetCounter ) {
-		Com_Memset( &vk.pipelines, 0, sizeof( vk.pipelines ) );
+		memset( &vk.pipelines, 0, sizeof( vk.pipelines ) );
 		vk.pipelines_count = 0;
 	}
 
@@ -7065,8 +7065,8 @@ __cleanup:
 
 	deinit_device_functions();
 
-	Com_Memset( &vk, 0, sizeof( vk ) );
-	Com_Memset( &vk_world, 0, sizeof( vk_world ) );
+	memset( &vk, 0, sizeof( vk ) );
+	memset( &vk_world, 0, sizeof( vk_world ) );
 	
 	if ( code != REF_KEEP_CONTEXT ) {
 		vk_destroy_instance();
@@ -7124,7 +7124,7 @@ void vk_release_resources( void ) {
 				vk.pipeline_create_count--;
 			}
 		}
-		Com_Memset( &vk.pipelines[i], 0, sizeof( vk.pipelines[0] ) );
+		memset( &vk.pipelines[i], 0, sizeof( vk.pipelines[0] ) );
 	}
 	vk.pipelines_count = vk.pipelines_world_base;
 
@@ -7143,7 +7143,7 @@ void vk_release_resources( void ) {
 	}
 #endif
 
-	Com_Memset( &vk_world, 0, sizeof( vk_world ) );
+	memset( &vk_world, 0, sizeof( vk_world ) );
 
 	// Reset geometry buffers offsets
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
@@ -7151,10 +7151,10 @@ void vk_release_resources( void ) {
 		vk.tess[i].vertex_buffer_offset = 0;
 	}
 
-	Com_Memset( vk.cmd->buf_offset, 0, sizeof( vk.cmd->buf_offset ) );
-	Com_Memset( vk.cmd->vbo_offset, 0, sizeof( vk.cmd->vbo_offset ) );
+	memset( vk.cmd->buf_offset, 0, sizeof( vk.cmd->buf_offset ) );
+	memset( vk.cmd->vbo_offset, 0, sizeof( vk.cmd->vbo_offset ) );
 
-	Com_Memset( &vk.stats, 0, sizeof( vk.stats ) );
+	memset( &vk.stats, 0, sizeof( vk.stats ) );
 }
 
 #if 0
@@ -7350,7 +7350,7 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 	buf = resample_image_data( image->internalFormat, pixels, size, &n /*bpp*/ );
 
 	while (qtrue) {
-		Com_Memset(&region, 0, sizeof(region));
+		memset(&region, 0, sizeof(region));
 		region.bufferOffset = buffer_size;
 		region.bufferRowLength = 0;
 		region.bufferImageHeight = 0;
@@ -7402,7 +7402,7 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 		regions[n].bufferOffset += vk.staging_buffer.offset;
 	}
 
-	Com_Memcpy( vk.staging_buffer.ptr + vk.staging_buffer.offset, buf, buffer_size );
+	memcpy( vk.staging_buffer.ptr + vk.staging_buffer.offset, buf, buffer_size );
 
 	if ( vk.staging_buffer.offset == 0 ) {
 		VkCommandBufferBeginInfo begin_info;
@@ -7433,7 +7433,7 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 		vk_alloc_staging_buffer( buffer_size );
 	}
 
-	Com_Memcpy( vk.staging_buffer.ptr, buf, buffer_size );
+	memcpy( vk.staging_buffer.ptr, buf, buffer_size );
 
 	command_buffer = begin_command_buffer();
 	// record_buffer_memory_barrier( command_buffer, vk_world.staging_buffer, VK_WHOLE_SIZE, 0, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT );
@@ -7458,7 +7458,7 @@ void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 	VkDescriptorImageInfo image_info;
 	VkWriteDescriptorSet descriptor_write;
 
-	Com_Memset( &sampler_def, 0, sizeof( sampler_def ) );
+	memset( &sampler_def, 0, sizeof( sampler_def ) );
 
 	sampler_def.address_mode = image->wrapClampMode;
 
@@ -7826,7 +7826,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	multisample_state.alphaToCoverageEnable = VK_FALSE;
 	multisample_state.alphaToOneEnable = VK_FALSE;
 
-	Com_Memset(&attachment_blend_state, 0, sizeof(attachment_blend_state));
+	memset(&attachment_blend_state, 0, sizeof(attachment_blend_state));
 	attachment_blend_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 	if ( blend ) {
 		attachment_blend_state.blendEnable = VK_TRUE;
@@ -7848,7 +7848,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	blend_state.blendConstants[2] = 0.0f;
 	blend_state.blendConstants[3] = 0.0f;
 
-	Com_Memset( &depth_stencil_state, 0, sizeof( depth_stencil_state ) );
+	memset( &depth_stencil_state, 0, sizeof( depth_stencil_state ) );
 
 	depth_stencil_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 	depth_stencil_state.pNext = NULL;
@@ -8019,7 +8019,7 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 	multisample_state.alphaToCoverageEnable = VK_FALSE;
 	multisample_state.alphaToOneEnable = VK_FALSE;
 
-	Com_Memset(&attachment_blend_state, 0, sizeof(attachment_blend_state));
+	memset(&attachment_blend_state, 0, sizeof(attachment_blend_state));
 	attachment_blend_state.blendEnable = VK_FALSE;
 	attachment_blend_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
@@ -8387,8 +8387,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	set_shader_stage_desc(shader_stages+0, VK_SHADER_STAGE_VERTEX_BIT, *vs_module, "main");
 	set_shader_stage_desc(shader_stages+1, VK_SHADER_STAGE_FRAGMENT_BIT, *fs_module, "main");
 
-	//Com_Memset( vert_spec_data, 0, sizeof( vert_spec_data ) );
-	Com_Memset( frag_spec_data, 0, sizeof( frag_spec_data ) );
+	//memset( vert_spec_data, 0, sizeof( vert_spec_data ) );
+	memset( frag_spec_data, 0, sizeof( frag_spec_data ) );
 
 	//vert_spec_data[0] = def->clipping_plane ? 1 : 0;
 
@@ -8999,7 +8999,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	multisample_state.alphaToCoverageEnable = alphaToCoverage;
 	multisample_state.alphaToOneEnable = VK_FALSE;
 
-	Com_Memset( &depth_stencil_state, 0, sizeof( depth_stencil_state ) );
+	memset( &depth_stencil_state, 0, sizeof( depth_stencil_state ) );
 
 	depth_stencil_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 	depth_stencil_state.pNext = NULL;
@@ -9040,7 +9040,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	depth_stencil_state.minDepthBounds = 0.0f;
 	depth_stencil_state.maxDepthBounds = 1.0f;
 
-	Com_Memset(&attachment_blend_state, 0, sizeof(attachment_blend_state));
+	memset(&attachment_blend_state, 0, sizeof(attachment_blend_state));
 	attachment_blend_state.blendEnable = (state_bits & (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)) ? VK_TRUE : VK_FALSE;
 
 	if (def->shadow_phase == SHADOW_EDGES || def->shader_type == TYPE_SIGNLE_TEXTURE_DF)
@@ -9240,9 +9240,9 @@ found:
 
 void vk_get_pipeline_def( uint32_t pipeline, Vk_Pipeline_Def *def ) {
 	if ( pipeline >= vk.pipelines_count ) {
-		Com_Memset( def, 0, sizeof( *def ) );
+		memset( def, 0, sizeof( *def ) );
 	} else {
-		Com_Memcpy( def, &vk.pipelines[ pipeline ].def, sizeof( *def ) );
+		memcpy( def, &vk.pipelines[ pipeline ].def, sizeof( *def ) );
 	}
 }
 
@@ -9362,7 +9362,7 @@ static void get_mvp_transform( float *mvp )
 	{
 		const float *p = backEnd.viewParms.projectionMatrix;
 		float proj[16];
-		Com_Memcpy( proj, p, 64 );
+		memcpy( proj, p, 64 );
 
 		// update q3's proj matrix (opengl) to vulkan conventions: z - [0, 1] instead of [-1, 1] and invert y direction
 		proj[5] = -p[5];
@@ -9435,7 +9435,7 @@ void vk_update_mvp( const float *m ) {
 	// Specify push constants.
 	//
 	if ( m )
-		Com_Memcpy( push_constants, m, sizeof( push_constants ) );
+		memcpy( push_constants, m, sizeof( push_constants ) );
 	else
 		get_mvp_transform( push_constants );
 
@@ -9560,10 +9560,10 @@ void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
 
 	params.outlineWidth    = outlineWidth;
 	params.glowWidth       = glowWidth;
-	Com_Memcpy( params.shadowOffset, shadowOffset ? shadowOffset : zero2, sizeof( params.shadowOffset ) );
-	Com_Memcpy( params.outlineColor, outlineColor ? outlineColor : zero4, sizeof( params.outlineColor ) );
-	Com_Memcpy( params.glowColor,    glowColor    ? glowColor    : zero4, sizeof( params.glowColor ) );
-	Com_Memcpy( params.shadowColor,  shadowColor  ? shadowColor  : zero4, sizeof( params.shadowColor ) );
+	memcpy( params.shadowOffset, shadowOffset ? shadowOffset : zero2, sizeof( params.shadowOffset ) );
+	memcpy( params.outlineColor, outlineColor ? outlineColor : zero4, sizeof( params.outlineColor ) );
+	memcpy( params.glowColor,    glowColor    ? glowColor    : zero4, sizeof( params.glowColor ) );
+	memcpy( params.shadowColor,  shadowColor  ? shadowColor  : zero4, sizeof( params.shadowColor ) );
 
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_msdf,
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -9597,7 +9597,7 @@ static void vk_bind_attr( int index, unsigned int item_size, const void *src ) {
 		vk.geometry_buffer_size_new = log2pad( offset + size, 1 );
 	} else {
 		vk.cmd->buf_offset[ index ] = offset;
-		Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
+		memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
 		vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
 	}
 
@@ -9614,7 +9614,7 @@ uint32_t vk_tess_index( uint32_t numIndexes, const void *src ) {
 		vk.geometry_buffer_size_new = log2pad( offset + size, 1 );
 		return ~0U;
 	} else {
-		Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
+		memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
 		vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
 		return offset;
 	}
@@ -9953,7 +9953,7 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 		// [0] - resolve/color/presentation
 		// [1] - depth/stencil
 		// [2] - multisampled color, optional
-		Com_Memset( clear_values, 0, sizeof( clear_values ) );
+		memset( clear_values, 0, sizeof( clear_values ) );
 #ifndef USE_REVERSED_DEPTH
 		clear_values[1].depthStencil.depth = 1.0;
 #endif
@@ -10028,7 +10028,7 @@ void vk_depth_fade_copy( void )
 	qvkCmdEndRenderPass( vk.cmd->command_buffer );
 
 	// barrier: depth attachment -> transfer src
-	Com_Memset( barriers, 0, sizeof( barriers ) );
+	memset( barriers, 0, sizeof( barriers ) );
 
 	barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barriers[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
@@ -10068,7 +10068,7 @@ void vk_depth_fade_copy( void )
 		// fallback: just copy (will work for non-MSAA depth, which is what we have when fboActive && !msaa)
 		// TODO: handle MSAA depth resolve if hardware supports VK_KHR_depth_stencil_resolve
 		VkImageCopy region;
-		Com_Memset( &region, 0, sizeof( region ) );
+		memset( &region, 0, sizeof( region ) );
 		region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 		region.srcSubresource.layerCount = 1;
 		region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -10082,7 +10082,7 @@ void vk_depth_fade_copy( void )
 			1, &region );
 	} else {
 		VkImageCopy region;
-		Com_Memset( &region, 0, sizeof( region ) );
+		memset( &region, 0, sizeof( region ) );
 		region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 		region.srcSubresource.layerCount = 1;
 		region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -10163,7 +10163,7 @@ void vk_smaa( void )
 	// --- Step 0: Copy color_image -> input_image ---
 
 	// barrier: color_image SHADER_READ -> TRANSFER_SRC, input_image SHADER_READ -> TRANSFER_DST
-	Com_Memset( barriers, 0, sizeof( barriers ) );
+	memset( barriers, 0, sizeof( barriers ) );
 
 	barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barriers[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -10195,7 +10195,7 @@ void vk_smaa( void )
 		0, 0, NULL, 0, NULL, 2, barriers );
 
 	// copy
-	Com_Memset( &copy_region, 0, sizeof( copy_region ) );
+	memset( &copy_region, 0, sizeof( copy_region ) );
 	copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	copy_region.srcSubresource.layerCount = 1;
 	copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -10226,10 +10226,10 @@ void vk_smaa( void )
 		0, 0, NULL, 0, NULL, 2, barriers );
 
 	// --- Pass 1: Edge detection ---
-	Com_Memset( &clear_value, 0, sizeof( clear_value ) );
+	memset( &clear_value, 0, sizeof( clear_value ) );
 	{
 		VkRenderPassBeginInfo rp_info;
-		Com_Memset( &rp_info, 0, sizeof( rp_info ) );
+		memset( &rp_info, 0, sizeof( rp_info ) );
 		rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 		rp_info.renderPass = vk.render_pass.smaa_edge;
 		rp_info.framebuffer = vk.framebuffers.smaa_edge;
@@ -10255,7 +10255,7 @@ void vk_smaa( void )
 	// --- Pass 2: Blend weight calculation ---
 	{
 		VkRenderPassBeginInfo rp_info;
-		Com_Memset( &rp_info, 0, sizeof( rp_info ) );
+		memset( &rp_info, 0, sizeof( rp_info ) );
 		rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 		rp_info.renderPass = vk.render_pass.smaa_blend;
 		rp_info.framebuffer = vk.framebuffers.smaa_blend;
@@ -10288,8 +10288,8 @@ void vk_smaa( void )
 	{
 		VkRenderPassBeginInfo rp_info;
 		VkClearValue resolve_clear;
-		Com_Memset( &resolve_clear, 0, sizeof( resolve_clear ) );
-		Com_Memset( &rp_info, 0, sizeof( rp_info ) );
+		memset( &resolve_clear, 0, sizeof( resolve_clear ) );
+		memset( &rp_info, 0, sizeof( rp_info ) );
 		rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 		rp_info.renderPass = vk.render_pass.smaa_resolve;
 		rp_info.framebuffer = vk.framebuffers.smaa_resolve;
@@ -10554,8 +10554,8 @@ static void vk_gpu_ts_init( void )
 	vk_gpu_ts_count = 0;
 	vk_gpu_ts_accum_slots = 0;
 	vk_gpu_ts_accum_frames = 0;
-	Com_Memset( vk_gpu_ts_inflight, 0, sizeof( vk_gpu_ts_inflight ) );
-	Com_Memset( vk_gpu_ts_accum_ms, 0, sizeof( vk_gpu_ts_accum_ms ) );
+	memset( vk_gpu_ts_inflight, 0, sizeof( vk_gpu_ts_inflight ) );
+	memset( vk_gpu_ts_accum_ms, 0, sizeof( vk_gpu_ts_accum_ms ) );
 
 	if ( !vk.timestampSupported ) {
 		ri.Printf( PRINT_DEVELOPER, "r_gpuSpeeds: device lacks timestampComputeAndGraphics, disabled\n" );
@@ -10566,7 +10566,7 @@ static void vk_gpu_ts_init( void )
 		vk_gpu_ts_inflight[ i ].base = i * VK_GPU_TS_MAX;
 	}
 
-	Com_Memset( &info, 0, sizeof( info ) );
+	memset( &info, 0, sizeof( info ) );
 	info.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
 	info.queryType  = VK_QUERY_TYPE_TIMESTAMP;
 	info.queryCount = VK_GPU_TS_MAX * NUM_COMMAND_BUFFERS;
@@ -10607,7 +10607,7 @@ static void vk_gpu_ts_frame_begin( void )
 	slot = vk.cmd_index;
 
 	if ( vk_gpu_ts_inflight[ slot ].pending && vk_gpu_ts_inflight[ slot ].count >= 2 ) {
-		Com_Memset( results, 0, sizeof( results ) );
+		memset( results, 0, sizeof( results ) );
 		qvkGetQueryPoolResults( vk.device, vk_gpu_ts_pool,
 			vk_gpu_ts_inflight[ slot ].base,
 			vk_gpu_ts_inflight[ slot ].count,
@@ -10658,7 +10658,7 @@ static void vk_gpu_ts_frame_begin( void )
 	}
 
 reset_accum:
-	Com_Memset( vk_gpu_ts_accum_ms, 0, sizeof( vk_gpu_ts_accum_ms ) );
+	memset( vk_gpu_ts_accum_ms, 0, sizeof( vk_gpu_ts_accum_ms ) );
 	vk_gpu_ts_accum_slots = 0;
 	vk_gpu_ts_accum_frames = 0;
 }
@@ -10855,17 +10855,17 @@ _retry:
 	// dynamic vertex buffer layout
 	vk.cmd->uniform_read_offset = 0;
 	vk.cmd->vertex_buffer_offset = 0;
-	Com_Memset( vk.cmd->buf_offset, 0, sizeof( vk.cmd->buf_offset ) );
-	Com_Memset( vk.cmd->vbo_offset, 0, sizeof( vk.cmd->vbo_offset ) );
+	memset( vk.cmd->buf_offset, 0, sizeof( vk.cmd->buf_offset ) );
+	memset( vk.cmd->vbo_offset, 0, sizeof( vk.cmd->vbo_offset ) );
 	vk.cmd->curr_index_buffer = VK_NULL_HANDLE;
 	vk.cmd->curr_index_offset = 0;
 	vk.cmd->num_indexes = 0;
 
-	Com_Memset( &vk.cmd->descriptor_set, 0, sizeof( vk.cmd->descriptor_set ) );
+	memset( &vk.cmd->descriptor_set, 0, sizeof( vk.cmd->descriptor_set ) );
 	vk.cmd->descriptor_set.start = ~0U;
 	//vk.cmd->descriptor_set.end = 0;
 
-	Com_Memset( &vk.cmd->scissor_rect, 0, sizeof( vk.cmd->scissor_rect ) );
+	memset( &vk.cmd->scissor_rect, 0, sizeof( vk.cmd->scissor_rect ) );
 
 	// other stats
 	vk.stats.push_size = 0;
@@ -10982,7 +10982,7 @@ void vk_end_frame( void )
 			// Gate under r_vkApplePinkBarrier to measure FPS impact; set to 0 to test, 1 to restore pink-glitch fix.
 			if ( vk.fboActive && r_vkApplePinkBarrier->integer ) {
 				VkImageMemoryBarrier b;
-				Com_Memset( &b, 0, sizeof( b ) );
+				memset( &b, 0, sizeof( b ) );
 				b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 				b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 				b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -11255,7 +11255,7 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 		srcImage = vk.swapchain_images[ vk.cmd->swapchain_image_index ];
 	}
 
-	Com_Memset( &desc, 0, sizeof( desc ) );
+	memset( &desc, 0, sizeof( desc ) );
 
 	// Create image in host visible memory to serve as a destination for framebuffer pixels.
 	desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -11412,7 +11412,7 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 
 			case 4: {
 				for ( n = 0; n < width; n++ ) {
-					Com_Memcpy( &buffer_ptr[n*3], &data[n*4], 3 );
+					memcpy( &buffer_ptr[n*3], &data[n*4], 3 );
 					//buffer_ptr[n*3+0] = data[n*4+0];
 					//buffer_ptr[n*3+1] = data[n*4+1];
 					//buffer_ptr[n*3+2] = data[n*4+2];
@@ -11511,7 +11511,7 @@ void vk_render_shadow_map( const dlight_t *dl ) {
 	{
 		float l = -radius, r2 = radius, b = -radius, t = radius;
 		float n = 1.0f, f = radius * 2.0f;
-		Com_Memset( lightProj, 0, sizeof( lightProj ) );
+		memset( lightProj, 0, sizeof( lightProj ) );
 		lightProj[0]  = 2.0f / (r2 - l);
 		lightProj[5]  = 2.0f / (t - b);
 		lightProj[10] = -1.0f / (f - n);
@@ -11535,7 +11535,7 @@ void vk_render_shadow_map( const dlight_t *dl ) {
 	}
 
 	// Begin shadow render pass
-	Com_Memset( &clearVal, 0, sizeof( clearVal ) );
+	memset( &clearVal, 0, sizeof( clearVal ) );
 	clearVal.depthStencil.depth = 1.0f;
 
 	rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -11608,7 +11608,7 @@ qboolean vk_bloom( void )
 	// Explicit barrier makes main-pass writes to color_image visible to bloom_extract's sampler.
 	if ( r_vkApplePinkBarrier->integer ) {
 		VkImageMemoryBarrier b;
-		Com_Memset( &b, 0, sizeof( b ) );
+		memset( &b, 0, sizeof( b ) );
 		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 		b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;

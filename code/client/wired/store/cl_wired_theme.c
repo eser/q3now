@@ -144,7 +144,7 @@ static void WiredTheme_Cmd_Set( void ) {
 /* ── init / shutdown ───────────────────────────────────────────────── */
 
 void WiredTheme_Init( void ) {
-    Com_Memset( &wired_theme, 0, sizeof( wired_theme ) );
+    memset( &wired_theme, 0, sizeof( wired_theme ) );
     Q_strncpyz( wired_theme.name, "default", sizeof( wired_theme.name ) );
 
     WiredTheme_LoadDefaults();
@@ -159,7 +159,7 @@ void WiredTheme_Init( void ) {
 void WiredTheme_Shutdown( void ) {
     Cmd_RemoveCommand( "wui_theme_list" );
     Cmd_RemoveCommand( "wui_theme_set" );
-    Com_Memset( &wired_theme, 0, sizeof( wired_theme ) );
+    memset( &wired_theme, 0, sizeof( wired_theme ) );
 }
 
 #endif /* FEAT_WIRED_UI */

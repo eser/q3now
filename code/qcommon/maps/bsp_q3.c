@@ -69,7 +69,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 	}
 
 	// Byteswap the fixed-size header in place on a local copy.
-	Com_Memcpy( &header, data, sizeof( dheader_t ) );
+	memcpy( &header, data, sizeof( dheader_t ) );
 	header.ident = LittleLong( header.ident );
 	header.version = LittleLong( header.version );
 	for ( i = 0; i < HEADER_LUMPS; i++ ) {
@@ -95,12 +95,12 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 	base = (const byte *)data;
 
 	bsp = BSP_ZAlloc( sizeof( *bsp ) );
-	Com_Memset( bsp, 0, sizeof( *bsp ) );
+	memset( bsp, 0, sizeof( *bsp ) );
 	Q_strncpyz( bsp->name, name, sizeof( bsp->name ) );
 	bsp->checksum = LittleLong( Com_BlockChecksum( data, length ) );
 	bsp->rawLength = length;
 	bsp->rawData = BSP_ZAlloc( length );
-	Com_Memcpy( bsp->rawData, data, length );
+	memcpy( bsp->rawData, data, length );
 
 	// ---- Entity string ----
 	{
@@ -108,7 +108,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		bsp->entityStringLength = l->filelen;
 		bsp->entityString = BSP_ZAlloc( l->filelen + 1 );
 		if ( l->filelen ) {
-			Com_Memcpy( bsp->entityString, base + l->fileofs, l->filelen );
+			memcpy( bsp->entityString, base + l->fileofs, l->filelen );
 		}
 		bsp->entityString[l->filelen] = 0;
 	}
@@ -421,7 +421,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 			bsp->visibilityLength = l->filelen - VIS_HEADER;
 			if ( bsp->visibilityLength > 0 ) {
 				bsp->visibility = BSP_ZAlloc( bsp->visibilityLength );
-				Com_Memcpy( bsp->visibility, in + VIS_HEADER, bsp->visibilityLength );
+				memcpy( bsp->visibility, in + VIS_HEADER, bsp->visibilityLength );
 			}
 		}
 	}
@@ -439,7 +439,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 			bsp->numLightmapPages = l->filelen / BSP_LIGHTMAP_PAGE_SIZE;
 			bsp->lightmapPageSize = BSP_LIGHTMAP_PAGE_SIZE;
 			bsp->lightmapData = BSP_ZAlloc( l->filelen );
-			Com_Memcpy( bsp->lightmapData, base + l->fileofs, l->filelen );
+			memcpy( bsp->lightmapData, base + l->fileofs, l->filelen );
 		}
 	}
 
@@ -455,7 +455,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 			}
 			bsp->numGridPoints = l->filelen / BSP_LIGHTGRID_ENTRY_SIZE;
 			bsp->lightGridData = BSP_ZAlloc( l->filelen );
-			Com_Memcpy( bsp->lightGridData, base + l->fileofs, l->filelen );
+			memcpy( bsp->lightGridData, base + l->fileofs, l->filelen );
 		}
 	}
 

@@ -543,7 +543,7 @@ static void Trap_BotFillWeaponInfoFromGame( int weapon, weaponinfo_t *weaponinfo
 		return;
 	}
 
-	Com_Memset( weaponinfo, 0, sizeof( *weaponinfo ) );
+	memset( weaponinfo, 0, sizeof( *weaponinfo ) );
 
 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
 		return;

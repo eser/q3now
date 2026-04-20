@@ -2424,7 +2424,7 @@ static int CollapseMultitexture( unsigned int st0bits, shaderStage_t *st0, shade
 		memmove( st1, st1+1, sizeof( stages[0] ) * ( num_stages - 2 ) );
 	}
 
-	Com_Memset( st0 + num_stages - 1, 0, sizeof( stages[0] ) );
+	memset( st0 + num_stages - 1, 0, sizeof( stages[0] ) );
 
 #ifdef USE_VULKAN
 	if ( vk.maxBoundDescriptorSets >= 8 && num_stages >= 3 && !st0->mtEnv3 )
@@ -2985,7 +2985,7 @@ static shader_t *GeneratePermanentShader( void ) {
 			size = newShader->stages[i]->bundle[b].numTexMods * sizeof( texModInfo_t );
 			if ( size ) {
 				newShader->stages[i]->bundle[b].texMods = ri.Hunk_Alloc( size, h_low );
-				Com_Memcpy( newShader->stages[i]->bundle[b].texMods, stages[i].bundle[b].texMods, size );
+				memcpy( newShader->stages[i]->bundle[b].texMods, stages[i].bundle[b].texMods, size );
 			}
 		}
 	}
@@ -3096,7 +3096,7 @@ static void VertexLightingCollapse( void ) {
 			break;
 		}
 
-		Com_Memset( pStage, 0, sizeof( *pStage ) );
+		memset( pStage, 0, sizeof( *pStage ) );
 	}
 }
 
@@ -3110,8 +3110,8 @@ static void InitShader( const char *name, int lightmapIndex ) {
 	int i;
 
 	// clear the global shader
-	Com_Memset( &shader, 0, sizeof( shader ) );
-	Com_Memset( &stages, 0, sizeof( stages ) );
+	memset( &shader, 0, sizeof( shader ) );
+	memset( &stages, 0, sizeof( stages ) );
 
 	Q_strncpyz( shader.name, name, sizeof( shader.name ) );
 	shader.lightmapIndex = lightmapIndex;
@@ -3265,7 +3265,7 @@ static shader_t *FinishShader( void ) {
 				if(stage + 1 < MAX_SHADER_STAGES)
 					memmove(pStage, pStage + 1, sizeof(*pStage) * (index - stage - 1));
 
-				Com_Memset(&stages[index - 1], 0, sizeof(*stages));
+				memset(&stages[index - 1], 0, sizeof(*stages));
 			}
 
 			continue;
@@ -3503,7 +3503,7 @@ static shader_t *FinishShader( void ) {
 	{
 		Vk_Pipeline_Def def;
 
-		Com_Memset( &def, 0, sizeof( def ) );
+		memset( &def, 0, sizeof( def ) );
 		def.face_culling = shader.cullType;
 		def.polygon_offset = shader.polygonOffset;
 
@@ -3749,7 +3749,7 @@ static shader_t *FinishShader( void ) {
 
 #if 1
 	// try to avoid redundant per-stage computations
-	Com_Memset( lastStage, 0, sizeof( lastStage ) );
+	memset( lastStage, 0, sizeof( lastStage ) );
 	for ( i = 0; i < shader.numUnfoggedPasses - 1; i++ ) {
 		if ( !stages[ i+1 ].active )
 			break;
@@ -4513,7 +4513,7 @@ static void ScanAndLoadShaderFiles( void )
 		ri.FS_FreeFileList( shaderFiles );
 
 	//COM_Compress( s_shaderText );
-	Com_Memset( shaderTextHashTableSizes, 0, sizeof( shaderTextHashTableSizes ) );
+	memset( shaderTextHashTableSizes, 0, sizeof( shaderTextHashTableSizes ) );
 	size = 0;
 
 	p = s_shaderText;
@@ -4632,7 +4632,7 @@ R_InitShaders
 void R_InitShaders( void ) {
 	ri.Printf( PRINT_ALL, "Initializing Shaders\n" );
 
-	Com_Memset(hashTable, 0, sizeof(hashTable));
+	memset(hashTable, 0, sizeof(hashTable));
 
 	CreateInternalShaders();
 

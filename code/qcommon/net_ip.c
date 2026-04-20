@@ -2136,9 +2136,9 @@ qboolean NET_GetLoopPacket( netsrc_t sock, netadr_t *net_from, msg_t *net_messag
 	i = loop->get & (MAX_LOOPBACK-1);
 	loop->get++;
 
-	Com_Memcpy( net_message->data, loop->msgs[i].data, loop->msgs[i].datalen );
+	memcpy( net_message->data, loop->msgs[i].data, loop->msgs[i].datalen );
 	net_message->cursize = loop->msgs[i].datalen;
-	Com_Memset( net_from, 0, sizeof(*net_from) );
+	memset( net_from, 0, sizeof(*net_from) );
 	net_from->type = NA_LOOPBACK;
 	return qtrue;
 }
@@ -2153,7 +2153,7 @@ static void NET_SendLoopPacket( netsrc_t sock, int length, const void *data )
 	i = loop->send & (MAX_LOOPBACK-1);
 	loop->send++;
 
-	Com_Memcpy( loop->msgs[i].data, data, length );
+	memcpy( loop->msgs[i].data, data, length );
 	loop->msgs[i].datalen = length;
 }
 
@@ -2242,7 +2242,7 @@ void NET_QueuePacket( netsrc_t sock, int length, const void *data,
 
 	pkt = S_Malloc( sizeof(*pkt) + length );
 	pkt->data = (byte *)( pkt + 1 );
-	Com_Memcpy( pkt->data, data, length );
+	memcpy( pkt->data, data, length );
 	pkt->length  = length;
 	pkt->to      = *to;
 	pkt->sock    = sock;
@@ -2294,7 +2294,7 @@ void QDECL NET_OutOfBandPrint( netsrc_t sock, const netadr_t *adr,
 	string[0] = -1; string[1] = -1; string[2] = -1; string[3] = -1;
 
 	va_start( argptr, format );
-	len = Q_vsnprintf( string + 4, sizeof(string) - 4, format, argptr ) + 4;
+	len = vsnprintf( string + 4, sizeof(string) - 4, format, argptr ) + 4;
 	va_end( argptr );
 
 	NET_SendPacket( sock, len, string, adr );
@@ -2337,7 +2337,7 @@ int NET_StringToAdr( const char *s, netadr_t *a, netadrtype_t family )
 	char	*port = NULL;
 
 	if ( !strcmp( s, "localhost" ) ) {
-		Com_Memset( a, 0, sizeof(*a) );
+		memset( a, 0, sizeof(*a) );
 		a->type = NA_LOOPBACK;
 		a->port = BigShort( PORT_SERVER );
 		return 2;

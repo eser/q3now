@@ -37,10 +37,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_curl.h"
 #endif
 
-// file full of random crap that gets used to create cl_guid
-#define QKEY_FILE "qkey"
-#define QKEY_SIZE 2048
-
 #define	RETRANSMIT_TIMEOUT	3000	// time between connection packet retransmits
 
 // snapshots are a view of the server at a given time
@@ -183,7 +179,7 @@ typedef struct {
 
 	/* QUIC connection handle for this client session.
 	 * Set by transport->connect() on CA_CONNECTING, cleared (zeroed) in
-	 * CL_Disconnect (via Com_Memset).  Use (clc.quic_conn != CONN_INVALID)
+	 * CL_Disconnect (via memset).  Use (clc.quic_conn != CONN_INVALID)
 	 * as the authoritative test for "we are on a QUIC connection". */
 	conn_handle_t quic_conn;
 

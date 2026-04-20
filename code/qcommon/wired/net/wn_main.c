@@ -366,7 +366,7 @@ void WN_Init( void )
 		return;
 	}
 
-	Com_Memset( &wn, 0, sizeof( wn ) );
+	memset( &wn, 0, sizeof( wn ) );
 #if FEAT_WIREDNET_OBSERVER
 	wn.tcp4_fd = -1;
 	wn.tcp6_fd = -1;
@@ -397,7 +397,7 @@ void WN_Init( void )
 			int                fd  = (int)socket( AF_INET, SOCK_STREAM, 0 );
 			if ( fd >= 0 ) {
 				setsockopt( fd, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, sizeof(yes) );
-				Com_Memset( &sa, 0, sizeof(sa) );
+				memset( &sa, 0, sizeof(sa) );
 				sa.sin_family      = AF_INET;
 				sa.sin_addr.s_addr = htonl( INADDR_ANY );
 				sa.sin_port        = htons( (unsigned short)port );
@@ -667,7 +667,7 @@ void WN_FlushOutbound( void )
 			break;
 
 		// Convert sockaddr_storage to Q3 netadr_t
-		Com_Memset( &to, 0, sizeof(to) );
+		memset( &to, 0, sizeof(to) );
 		if ( addr_to.ss_family == AF_INET ) {
 			struct sockaddr_in *v4 = (struct sockaddr_in *)&addr_to;
 			to.type = NA_IP;
@@ -736,7 +736,7 @@ qboolean WN_CheckPacket( netadr_t *from, byte *buf, int len )
 			wn.dropped_packets++;
 			return qtrue;  // consumed (dropped)
 		}
-		Com_Memcpy( wn.recv_buf, buf, len );
+		memcpy( wn.recv_buf, buf, len );
 
 		// Convert netadr_t to sockaddr for picoquic
 		{
@@ -827,7 +827,7 @@ static void WN_Status_f( void )
 		auth      = WN_HasPermAdmin(c->perm)    ? "ADMIN"    : "USER";
 
 		// Get RTT and loss stats from picoquic
-		Com_Memset( &quality, 0, sizeof(quality) );
+		memset( &quality, 0, sizeof(quality) );
 		if ( c->cnx ) {
 			picoquic_get_path_quality( c->cnx, 0, &quality );
 		}

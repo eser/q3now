@@ -165,7 +165,7 @@ static int Sys_ListExtFiles( const char *directory, const char *subdir, const ch
 		if (st.st_mode & S_IFDIR) {
 			// handle recursion
 			if ( subdirs > 0 ) {
-				if ( !Q_streq( d->d_name, "." ) && !Q_streq( d->d_name, ".." ) ) {
+				if ( strcmp( d->d_name, "." ) && strcmp( d->d_name, ".." ) ) {
 					char subdir2[MAX_OSPATH * 2 + MAX_QPATH + 1];
 					if ( *subdir != '\0' ) {
 						Com_sprintf( subdir2, sizeof( subdir2 ), "%s/%s", subdir, d->d_name );
@@ -244,7 +244,7 @@ char** Sys_ListFiles( const char *directory, const char *extension, const char *
 	if ( nfiles > 1 ) {
 		Com_SortList( listCopy, nfiles - 1 );
 		if ( nfiles > 2 ) {
-			if ( Q_streq( listCopy[0], "." ) && Q_streq( listCopy[1], ".." ) ) {
+			if ( strcmp( listCopy[0], "." ) == 0 && strcmp( listCopy[1], ".." ) == 0 ) {
 				// emulate old strgtr() function sort behavior for special entries
 				char* dot1 = listCopy[0];
 				char* dot2 = listCopy[1];

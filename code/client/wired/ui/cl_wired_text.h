@@ -1,15 +1,5 @@
 /*
-===========================================================================
 cl_wired_text.h — Unified text rendering API
-
-Single entry point for all text drawing in the engine. Wraps the MSDF
-font system. No bitmap font fallbacks — MSDF is the only path.
-
-Callable from anywhere in the client. Owned by Wired UI.
-
-Font IDs, alignment, and flag constants are defined in cg_public.h
-(shared between client and cgame).
-===========================================================================
 */
 
 #ifndef CL_WIRED_TEXT_H

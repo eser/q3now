@@ -946,7 +946,7 @@ void GLSL_SetUniformMat4BoneMatrix(shaderProgram_t *program, int uniformNum, /*c
 		return;
 	}
 
-	Com_Memcpy(compare, matrix, numMatricies * sizeof(mat4_t));
+	memcpy(compare, matrix, numMatricies * sizeof(mat4_t));
 
 	qglProgramUniformMatrix4fvEXT(program->program, uniforms[uniformNum], numMatricies, GL_FALSE, &matrix[0][0]);
 }
@@ -974,7 +974,7 @@ static void GLSL_DeleteGPUShader(shaderProgram_t *program)
 			ri.Free(program->uniformBuffer);
 		}
 
-		Com_Memset(program, 0, sizeof(*program));
+		memset(program, 0, sizeof(*program));
 	}
 }
 

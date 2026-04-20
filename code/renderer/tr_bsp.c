@@ -491,7 +491,7 @@ static void R_LoadVisibility( const lump_t *l ) {
 
 	len = PAD( s_worldData.numClusters, 64 ) >> 3;
 	s_worldData.novis = ri.Hunk_Alloc( len, h_low );
-	Com_Memset( s_worldData.novis, 0xff, len );
+	memset( s_worldData.novis, 0xff, len );
 
 	len = l->filelen;
 	if ( !len ) {
@@ -530,7 +530,7 @@ static void R_LoadVisibility( const lump_t *l ) {
 		byte	*dest;
 
 		dest = ri.Hunk_Alloc( len, h_low );
-		Com_Memcpy( dest, buf, len );
+		memcpy( dest, buf, len );
 		s_worldData.vis = dest;
 	}
 }
@@ -1610,13 +1610,13 @@ static void R_MovePatchSurfacesToHunk( void ) {
 		}
 
 		hunkgrid = ri.Hunk_Alloc( size, h_low );
-		Com_Memcpy(hunkgrid, grid, size);
+		memcpy(hunkgrid, grid, size);
 
 		hunkgrid->widthLodError = ri.Hunk_Alloc( grid->width * 4, h_low );
-		Com_Memcpy( hunkgrid->widthLodError, grid->widthLodError, grid->width * 4 );
+		memcpy( hunkgrid->widthLodError, grid->widthLodError, grid->width * 4 );
 
 		hunkgrid->heightLodError = ri.Hunk_Alloc( grid->height * 4, h_low );
-		Com_Memcpy( hunkgrid->heightLodError, grid->heightLodError, grid->height * 4 );
+		memcpy( hunkgrid->heightLodError, grid->heightLodError, grid->height * 4 );
 
 		R_FreeSurfaceGridMesh( grid );
 
@@ -1948,7 +1948,7 @@ static void R_LoadShaders( const lump_t *l ) {
 	s_worldData.shaders = out;
 	s_worldData.numShaders = count;
 
-	Com_Memcpy( out, in, count*sizeof(*out) );
+	memcpy( out, in, count*sizeof(*out) );
 
 	R_ReplaceMapShaders( out, count );
 
@@ -2205,7 +2205,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 	}
 
 	w->lightGridData = ri.Hunk_Alloc( l->filelen, h_low );
-	Com_Memcpy( w->lightGridData, (void *)(fileBase + l->fileofs), l->filelen );
+	memcpy( w->lightGridData, (void *)(fileBase + l->fileofs), l->filelen );
 
 	// deal with overbright bits
 	for ( i = 0 ; i < numGridPoints ; i++ ) {
@@ -2263,7 +2263,7 @@ static void R_LoadEntities( const lump_t *l ) {
 
 		// check for remapping of shaders for vertex lighting
 		s = "vertexremapshader";
-		if (!Q_strncmp(keyname, s, strlen(s)) ) {
+		if (!strncmp(keyname, s, strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
 				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in vertexshaderremap '%s'\n", value );
@@ -2277,7 +2277,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		}
 		// check for remapping of shaders
 		s = "remapshader";
-		if (!Q_strncmp(keyname, s, (int)strlen(s)) ) {
+		if (!strncmp(keyname, s, (int)strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
 				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in shaderremap '%s'\n", value );
@@ -2382,7 +2382,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	// try will not look at the partially loaded version
 	tr.world = NULL;
 
-	Com_Memset( &s_worldData, 0, sizeof( s_worldData ) );
+	memset( &s_worldData, 0, sizeof( s_worldData ) );
 	Q_strncpyz( s_worldData.name, name, sizeof( s_worldData.name ) );
 
 	Q_strncpyz( s_worldData.baseName, COM_SkipPath( s_worldData.name ), sizeof( s_worldData.name ) );

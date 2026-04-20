@@ -1,7 +1,6 @@
-/* cl_wired_hud_elem_name.c -- Player name HUD elements (OWN / NME)
-   Displays player names based on gametype using pre-computed fields
-   from the bridge (wiredHud). Numeric team and gametype IDs avoid
-   direct use of game enum constants. */
+/*
+cl_wired_hud_elem_name.c — Player name HUD elements (OWN / NME)
+*/
 #include "../../../client.h"
 #include "../cl_wired_hud_compat.h"
 #include "../cl_wired_hud_private.h"

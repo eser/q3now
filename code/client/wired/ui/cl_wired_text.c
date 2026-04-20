@@ -19,7 +19,7 @@ static cvar_t *cl_wiredTextShadow = NULL;
 /* ── face cache (per FONT_* slot, invalidated at Text_Init) ────────── */
 
 #define TEXT_FACE_CACHE_SIZE 6
-static const fontFace_t *s_faceCache[TEXT_FACE_CACHE_SIZE];
+static const fontFace_t *wui_faceCache[TEXT_FACE_CACHE_SIZE];
 
 void Text_SetLetterSpacing( float spacing )
 {
@@ -41,7 +41,7 @@ void Text_Init( void )
 {
 	cl_wiredTextShadow = Cvar_Get( "cl_wiredTextShadow", "0", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( cl_wiredTextShadow, "Enable drop-shadow on Wired UI text. 0: off (default). 1: on." );
-	Com_Memset( (void *)s_faceCache, 0, sizeof( s_faceCache ) );
+	memset( (void *)wui_faceCache, 0, sizeof( wui_faceCache ) );
 	MSDF_ReregisterShaders();
 	WiredFonts_InitMSDF();
 }
@@ -54,8 +54,8 @@ static const fontFace_t *Text_ResolveFace( int fontId )
 	const char *serif, *serifItalic, *sans, *sansMedium, *mono;
 	const fontFace_t *face;
 
-	if ( fontId >= 0 && fontId < TEXT_FACE_CACHE_SIZE && s_faceCache[fontId] ) {
-		return s_faceCache[fontId];
+	if ( fontId >= 0 && fontId < TEXT_FACE_CACHE_SIZE && wui_faceCache[fontId] ) {
+		return wui_faceCache[fontId];
 	}
 
 	ag = WiredUI_GetAssetGlobals();
@@ -98,7 +98,7 @@ static const fontFace_t *Text_ResolveFace( int fontId )
 	}
 
 	if ( fontId >= 0 && fontId < TEXT_FACE_CACHE_SIZE && face ) {
-		s_faceCache[fontId] = face;
+		wui_faceCache[fontId] = face;
 	}
 	return face;
 }

@@ -92,7 +92,7 @@ static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int 
 		Com_Error( ERR_DROP, "drawLen >= MAX_STRING_CHARS" );
 	}
 
-	Com_Memcpy( str, edit->buffer + prestep, drawLen );
+	memcpy( str, edit->buffer + prestep, drawLen );
 	str[ drawLen ] = '\0';
 
 	// color tracking

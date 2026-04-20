@@ -94,7 +94,7 @@ static void VM_WasmInitRuntime( void )
 	if ( wamr_initialized )
 		return;
 
-	Com_Memset( &init_args, 0, sizeof( init_args ) );
+	memset( &init_args, 0, sizeof( init_args ) );
 	init_args.mem_alloc_type = Alloc_With_System_Allocator;
 
 	if ( !wasm_runtime_full_init( &init_args ) ) {
@@ -186,7 +186,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 			char verStr[16];
 			int ver;
 			int copyLen = sectionLen < sizeof( verStr ) - 1 ? (int)sectionLen : (int)sizeof( verStr ) - 1;
-			Com_Memcpy( verStr, section, copyLen );
+			memcpy( verStr, section, copyLen );
 			verStr[copyLen] = '\0';
 			ver = atoi( verStr );
 			if ( ver > Q3NOW_WASM_API_VERSION ) {

@@ -88,7 +88,7 @@ static void WN_RecordStart( void )
 
 	// Write header
 	start_time = (uint64_t)Sys_Microseconds();
-	Com_Memcpy( header, WN_RECORD_MAGIC, 4 );
+	memcpy( header, WN_RECORD_MAGIC, 4 );
 	header[4] = (WN_RECORD_VERSION >> 24) & 0xFF;
 	header[5] = (WN_RECORD_VERSION >> 16) & 0xFF;
 	header[6] = (WN_RECORD_VERSION >> 8) & 0xFF;

@@ -398,7 +398,7 @@ static qboolean R_LoadMD3( model_t *mod, int lod, void *buffer, int fileSize, co
 	mod->dataSize += size;
 	mod->md3[lod] = ri.Hunk_Alloc( size, h_low );
 
-	Com_Memcpy( mod->md3[lod], buffer, size );
+	memcpy( mod->md3[lod], buffer, size );
 
 	hdr = mod->md3[lod];
 

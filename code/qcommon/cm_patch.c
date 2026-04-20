@@ -1101,7 +1101,7 @@ static void CM_PatchCollideFromGrid( const cGrid_t *grid, patchCollide_t *pf ) {
 				Com_Error( ERR_DROP, "MAX_FACETS" );
 			}
 			facet = &facets[numFacets];
-			Com_Memset( facet, 0, sizeof( *facet ) );
+			memset( facet, 0, sizeof( *facet ) );
 
 			if ( gridPlanes[i][j][0] == gridPlanes[i][j][1] ) {
 				if ( gridPlanes[i][j][0] == -1 ) {
@@ -1147,7 +1147,7 @@ static void CM_PatchCollideFromGrid( const cGrid_t *grid, patchCollide_t *pf ) {
 					Com_Error( ERR_DROP, "MAX_FACETS" );
 				}
 				facet = &facets[numFacets];
-				Com_Memset( facet, 0, sizeof( *facet ) );
+				memset( facet, 0, sizeof( *facet ) );
 
 				facet->surfacePlane = gridPlanes[i][j][1];
 				facet->numBorders = 3;
@@ -1175,9 +1175,9 @@ static void CM_PatchCollideFromGrid( const cGrid_t *grid, patchCollide_t *pf ) {
 	pf->numPlanes = numPlanes;
 	pf->numFacets = numFacets;
 	pf->facets = Hunk_Alloc( numFacets * sizeof( *pf->facets ), h_high );
-	Com_Memcpy( pf->facets, facets, numFacets * sizeof( *pf->facets ) );
+	memcpy( pf->facets, facets, numFacets * sizeof( *pf->facets ) );
 	pf->planes = Hunk_Alloc( numPlanes * sizeof( *pf->planes ), h_high );
-	Com_Memcpy( pf->planes, planes, numPlanes * sizeof( *pf->planes ) );
+	memcpy( pf->planes, planes, numPlanes * sizeof( *pf->planes ) );
 }
 
 
@@ -1941,7 +1941,7 @@ static void CM_PatchCollideFromTriangleSoup( int numTriangles, vec3_t *vertexes,
 			Com_Error( ERR_DROP, "MAX_FACETS" );
 		}
 		facet = &facets[numFacets];
-		Com_Memset( facet, 0, sizeof( *facet ) );
+		memset( facet, 0, sizeof( *facet ) );
 
 		facet->surfacePlane = trianglePlane;
 		facet->numBorders = 3;
@@ -1966,9 +1966,9 @@ static void CM_PatchCollideFromTriangleSoup( int numTriangles, vec3_t *vertexes,
 	pf->numPlanes = numPlanes;
 	pf->numFacets = numFacets;
 	pf->facets = Hunk_Alloc( numFacets * sizeof( *pf->facets ), h_high );
-	Com_Memcpy( pf->facets, facets, numFacets * sizeof( *pf->facets ) );
+	memcpy( pf->facets, facets, numFacets * sizeof( *pf->facets ) );
 	pf->planes = Hunk_Alloc( numPlanes * sizeof( *pf->planes ), h_high );
-	Com_Memcpy( pf->planes, planes, numPlanes * sizeof( *pf->planes ) );
+	memcpy( pf->planes, planes, numPlanes * sizeof( *pf->planes ) );
 }
 
 /*

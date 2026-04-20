@@ -119,7 +119,7 @@ int AAS_AlternativeRouteGoals(vec3_t start, int startareanum, vec3_t goal, int g
 	//travel time towards the goal area
 	goaltraveltime = AAS_AreaTravelTimeToGoalArea(startareanum, start, goalareanum, travelflags);
 	//clear the midrange areas
-	Com_Memset(midrangeareas, 0, aasworld.numareas * sizeof(midrangearea_t));
+	memset(midrangeareas, 0, aasworld.numareas * sizeof(midrangearea_t));
 	numaltroutegoals = 0;
 	//
 	nummidrangeareas = 0;

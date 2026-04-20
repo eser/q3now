@@ -96,7 +96,7 @@ void R_ClearFlares( void ) {
 	if ( !vk.fragmentStores )
 		return;
 
-	Com_Memset( r_flareStructs, 0, sizeof( r_flareStructs ) );
+	memset( r_flareStructs, 0, sizeof( r_flareStructs ) );
 	r_activeFlares = NULL;
 	r_inactiveFlares = NULL;
 
@@ -353,7 +353,7 @@ static void RB_TestFlare( flare_t *f ) {
 	vk_bind_geometry( TESS_XYZ );
 	vk_draw_dot( offset );
 
-	//Com_Memcpy( vk_world.modelview_transform, modelMatrix_original, sizeof( modelMatrix_original ) );
+	//memcpy( vk_world.modelview_transform, modelMatrix_original, sizeof( modelMatrix_original ) );
 	//vk_update_mvp( NULL );
 
 	if ( visible ) {
@@ -557,6 +557,6 @@ void RB_RenderFlares( void ) {
 		}
 	}
 
-	//Com_Memcpy( vk_world.modelview_transform, modelMatrix_original, sizeof( modelMatrix_original ) );
+	//memcpy( vk_world.modelview_transform, modelMatrix_original, sizeof( modelMatrix_original ) );
 	//vk_update_mvp( NULL );
 }

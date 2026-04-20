@@ -1351,12 +1351,12 @@ static void RB_SurfaceAxis( void ) {
 
 	qglLineWidth( 3 );
 
-	Com_Memset( xyz, 0, sizeof( xyz ) );
+	memset( xyz, 0, sizeof( xyz ) );
 	xyz[1][0] = 16.0;
 	xyz[3][1] = 16.0;
 	xyz[5][2] = 16.0;
 
-	Com_Memset( colors, 0, sizeof( colors ) );
+	memset( colors, 0, sizeof( colors ) );
 	for ( i = 0; i < 6; i++ ) {
 		colors[i].rgba[3] = 255;
 	}

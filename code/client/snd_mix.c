@@ -774,15 +774,15 @@ void S_PaintChannels( int endtime ) {
 			buffer = dma_buffer2;
 			if ( !muted ) {
 				/* switching to muted, clear hardware buffer */
-				Com_Memset( dma.buffer, 0, dma.samples * dma.samplebits/8 );
+				memset( dma.buffer, 0, dma.samples * dma.samplebits/8 );
 			}
 			muted = qtrue;
 		} else {
 			buffer = dma.buffer;
 			/* switching to unmuted, clear both buffers */
 			if ( muted ) {
-				Com_Memset( dma.buffer, 0, dma.samples * dma.samplebits/8 );
-				Com_Memset( dma_buffer2, 0, dma.samples * dma.samplebits/8 );
+				memset( dma.buffer, 0, dma.samples * dma.samplebits/8 );
+				memset( dma_buffer2, 0, dma.samples * dma.samplebits/8 );
 			}
 			muted = qfalse;
 		}
@@ -798,7 +798,7 @@ void S_PaintChannels( int endtime ) {
 		}
 
 		// clear the paint buffer and mix any raw samples...
-		Com_Memset( paintbuffer, 0, sizeof( paintbuffer ) );
+		memset( paintbuffer, 0, sizeof( paintbuffer ) );
 		if ( s_rawend - s_paintedtime >= 0 ) {
 			// copy from the streaming sound source
 			const int stop = (end < s_rawend) ? end : s_rawend;

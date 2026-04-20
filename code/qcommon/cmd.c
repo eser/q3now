@@ -127,7 +127,7 @@ void Cbuf_AddText( const char *text ) {
 		return;
 	}
 
-	Com_Memcpy(&cmd_text.data[cmd_text.cursize], text, l);
+	memcpy(&cmd_text.data[cmd_text.cursize], text, l);
 	cmd_text.cursize += l;
 }
 
@@ -198,11 +198,11 @@ void Cbuf_NestedAdd( const char *text ) {
 
 	if ( separate ) {
 		// copy the new text in + add a \n
-		Com_Memcpy( cmd_text.data + pos, text, len - 1 );
+		memcpy( cmd_text.data + pos, text, len - 1 );
 		cmd_text.data[pos + len - 1] = '\n';
 	} else {
 		// copy the new text in
-		Com_Memcpy( cmd_text.data + pos, text, len );
+		memcpy( cmd_text.data + pos, text, len );
 	}
 
 	cmd_text.cursize += len;
@@ -236,7 +236,7 @@ void Cbuf_InsertText( const char *text ) {
 	}
 
 	// copy the new text in
-	Com_Memcpy( cmd_text.data, text, len - 1 );
+	memcpy( cmd_text.data, text, len - 1 );
 
 	// add a \n
 	cmd_text.data[ len - 1 ] = '\n';
@@ -369,7 +369,7 @@ void Cbuf_Execute( void )
 		else
 			n = i;
 
-		Com_Memcpy( line, text, n );
+		memcpy( line, text, n );
 		line[n] = '\0';
 
 		// delete the text from the command buffer and move remaining commands down
@@ -623,16 +623,16 @@ static cmdContext_t savedCmd;
 
 void Cmd_SaveCmdContext( void ) {
 	savedCmd.argc = cmd_argc;
-	Com_Memcpy( savedCmd.argv, cmd_argv, sizeof( cmd_argv ) );
-	Com_Memcpy( savedCmd.tokenized, cmd_tokenized, sizeof( cmd_tokenized ) );
-	Com_Memcpy( savedCmd.cmd, cmd_cmd, sizeof( cmd_cmd ) );
+	memcpy( savedCmd.argv, cmd_argv, sizeof( cmd_argv ) );
+	memcpy( savedCmd.tokenized, cmd_tokenized, sizeof( cmd_tokenized ) );
+	memcpy( savedCmd.cmd, cmd_cmd, sizeof( cmd_cmd ) );
 }
 
 void Cmd_RestoreCmdContext( void ) {
 	cmd_argc = savedCmd.argc;
-	Com_Memcpy( cmd_argv, savedCmd.argv, sizeof( cmd_argv ) );
-	Com_Memcpy( cmd_tokenized, savedCmd.tokenized, sizeof( cmd_tokenized ) );
-	Com_Memcpy( cmd_cmd, savedCmd.cmd, sizeof( cmd_cmd ) );
+	memcpy( cmd_argv, savedCmd.argv, sizeof( cmd_argv ) );
+	memcpy( cmd_tokenized, savedCmd.tokenized, sizeof( cmd_tokenized ) );
+	memcpy( cmd_cmd, savedCmd.cmd, sizeof( cmd_cmd ) );
 }
 
 /*

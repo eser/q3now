@@ -403,7 +403,7 @@ static void R_RotateForViewer( void )
 	float	viewerMatrix[16];
 	vec3_t	origin;
 
-	Com_Memset (&tr.or, 0, sizeof(tr.or));
+	memset (&tr.or, 0, sizeof(tr.or));
 	tr.or.axis[0][0] = 1;
 	tr.or.axis[1][1] = 1;
 	tr.or.axis[2][2] = 1;
@@ -707,7 +707,7 @@ static void R_PlaneForSurface( const surfaceType_t *surfType, cplane_t *plane ) 
 	vec4_t			plane4;
 
 	if (!surfType) {
-		Com_Memset (plane, 0, sizeof(*plane));
+		memset (plane, 0, sizeof(*plane));
 		plane->normal[0] = 1;
 		return;
 	}
@@ -731,7 +731,7 @@ static void R_PlaneForSurface( const surfaceType_t *surfType, cplane_t *plane ) 
 		plane->dist = plane4[3];
 		return;
 	default:
-		Com_Memset (plane, 0, sizeof(*plane));
+		memset (plane, 0, sizeof(*plane));
 		plane->normal[0] = 1;
 		return;
 	}
@@ -1271,7 +1271,7 @@ Radix sort with 4 byte size buckets
 static void R_RadixSort( drawSurf_t *source, int size )
 {
   static drawSurf_t scratch[ MAX_DRAWSURFS ];
-#ifdef Q3_LITTLE_ENDIAN
+#if !Q_BIG_ENDIAN
   R_Radix( 0, size, source, scratch );
   R_Radix( 1, size, scratch, source );
   R_Radix( 2, size, source, scratch );
@@ -1281,7 +1281,7 @@ static void R_RadixSort( drawSurf_t *source, int size )
   R_Radix( 2, size, scratch, source );
   R_Radix( 1, size, source, scratch );
   R_Radix( 0, size, scratch, source );
-#endif //Q3_LITTLE_ENDIAN
+#endif
 }
 
 

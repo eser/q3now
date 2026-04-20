@@ -60,7 +60,7 @@ void QDECL AAS_Error(char *fmt, ...)
 	va_list arglist;
 
 	va_start(arglist, fmt);
-	Q_vsnprintf(str, sizeof(str), fmt, arglist);
+	vsnprintf(str, sizeof(str), fmt, arglist);
 	va_end(arglist);
 	botimport.Print(PRT_FATAL, "%s", str);
 } //end of the function AAS_Error
@@ -329,7 +329,7 @@ void AAS_Shutdown(void)
 	//free the entities
 	if (aasworld.entities) FreeMemory(aasworld.entities);
 	//clear the aasworld structure
-	Com_Memset(&aasworld, 0, sizeof(aas_t));
+	memset(&aasworld, 0, sizeof(aas_t));
 	//aas has not been initialized
 	aasworld.initialized = qfalse;
 	//NOTE: as soon as a new .bsp file is loaded the .bsp file memory is

@@ -1,17 +1,5 @@
 /*
-===========================================================================
 cl_wired_draw.h — Wired UI draw helpers (real screen pixel coordinates)
-
-SCR_DrawPic / SCR_FillRect assume 640x480 virtual coordinates and call
-SCR_AdjustFrom640 internally to scale to the actual resolution.  Wired UI
-stores REAL SCREEN PIXELS in item->rect (via WUI_BackfillToScreen), so
-calling SCR_* functions causes a double conversion.
-
-These inline helpers call the renderer directly, bypassing AdjustFrom640.
-Include this header in any client-side file that draws Wired UI geometry.
-
-Requires: client.h must be included BEFORE this header (provides re, cls).
-===========================================================================
 */
 
 #ifndef CL_WIRED_DRAW_H

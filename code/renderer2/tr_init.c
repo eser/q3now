@@ -233,7 +233,7 @@ void QDECL Com_Error( errorParm_t code, const char *fmt, ... )
 	char buf[ 4096 ];
 	va_list	argptr;
 	va_start( argptr, fmt );
-	Q_vsnprintf( buf, sizeof( buf ), fmt, argptr );
+	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
 	ri.Error( code, "%s", buf );
 }
@@ -243,7 +243,7 @@ void QDECL Com_Printf( const char *fmt, ... )
 	char buf[ MAXPRINTMSG ];
 	va_list	argptr;
 	va_start( argptr, fmt );
-	Q_vsnprintf( buf, sizeof( buf ), fmt, argptr );
+	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
 
 	ri.Printf( PRINT_ALL, "%s", buf );
@@ -451,7 +451,7 @@ static void RB_TakeScreenshot(int x, int y, int width, int height, const char *f
 	allbuf = RB_ReadPixels(x, y, width, height, &offset, &padlen);
 	buffer = allbuf + offset - 18;
 	
-	Com_Memset (buffer, 0, 18);
+	memset (buffer, 0, 18);
 	buffer[2] = 2;		// uncompressed type
 	buffer[12] = width & 255;
 	buffer[13] = width >> 8;
@@ -617,7 +617,7 @@ static void R_LevelShot( void ) {
 	source = allsource + offset;
 
 	buffer = ri.Hunk_AllocateTempMemory(128 * 128*3 + 18);
-	Com_Memset (buffer, 0, 18);
+	memset (buffer, 0, 18);
 	buffer[2] = 2;		// uncompressed type
 	buffer[12] = 128;
 	buffer[14] = 128;
@@ -828,7 +828,7 @@ const void *RB_TakeVideoFrameCmd( const void *data )
 				srcptr += 3;
 			}
 			
-			Com_Memset(destptr, '\0', avipadlen);
+			memset(destptr, '\0', avipadlen);
 			destptr += avipadlen;
 			
 			srcptr += padlen;
@@ -1423,9 +1423,9 @@ void R_Init( void ) {
 	ri.Printf( PRINT_ALL, "----- R_Init -----\n" );
 
 	// clear all our internal state
-	Com_Memset( &tr, 0, sizeof( tr ) );
-	Com_Memset( &backEnd, 0, sizeof( backEnd ) );
-	Com_Memset( &tess, 0, sizeof( tess ) );
+	memset( &tr, 0, sizeof( tr ) );
+	memset( &backEnd, 0, sizeof( backEnd ) );
+	memset( &tess, 0, sizeof( tess ) );
 
 	if(sizeof(glconfig_t) != 11332)
 		ri.Error( ERR_FATAL, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11332", (unsigned int) sizeof(glconfig_t));
@@ -1433,7 +1433,7 @@ void R_Init( void ) {
 	if ( (intptr_t)tess.xyz & 15 ) {
 		ri.Printf( PRINT_WARNING, "tess.xyz not 16 byte aligned\n" );
 	}
-	//Com_Memset( tess.constantColor255, 255, sizeof( tess.constantColor255 ) );
+	//memset( tess.constantColor255, 255, sizeof( tess.constantColor255 ) );
 
 	//
 	// init function tables
@@ -1554,13 +1554,13 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 			ri.GLimp_Shutdown( code == REF_UNLOAD_DLL ? qtrue: qfalse );
 		}
 
-		Com_Memset( &glConfig, 0, sizeof( glConfig ) );
-		Com_Memset( &glRefConfig, 0, sizeof( glRefConfig ) );
+		memset( &glConfig, 0, sizeof( glConfig ) );
+		memset( &glRefConfig, 0, sizeof( glRefConfig ) );
 
 		textureFilterAnisotropic = qfalse;
 		maxAnisotropy = 0;
 
-		Com_Memset( &glState, 0, sizeof( glState ) );
+		memset( &glState, 0, sizeof( glState ) );
 	}
 
 	ri.FreeAll();
@@ -1600,7 +1600,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 
 	ri = *rimp;
 
-	Com_Memset( &re, 0, sizeof( re ) );
+	memset( &re, 0, sizeof( re ) );
 
 	if ( apiVersion != REF_API_VERSION ) {
 		ri.Printf(PRINT_ALL, "Mismatched REF_API_VERSION: expected %i, got %i\n", 

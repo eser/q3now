@@ -1,11 +1,5 @@
 /*
-===========================================================================
 cl_wired_hud_elem_crosshair.c — Wired UI crosshair element
-
-Thin renderer: cgame pre-computes color, size, visibility each frame.
-This element just reads the final values from wiredHudState_t and draws.
-No game logic — armor classes, health formulas stay in cgame.
-===========================================================================
 */
 
 #include "../../../client.h"

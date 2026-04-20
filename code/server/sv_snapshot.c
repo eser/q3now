@@ -460,7 +460,7 @@ SV_InitSnapshotStorage
 void SV_InitSnapshotStorage( void ) 
 {
 	// initialize snapshot storage
-	Com_Memset( svs.snapFrames, 0, sizeof( svs.snapFrames ) );
+	memset( svs.snapFrames, 0, sizeof( svs.snapFrames ) );
 	svs.freeStorageEntities = svs.numSnapshotEntities;
 	svs.currentStoragePosition = 0;
 
@@ -611,7 +611,7 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 	cl = client - svs.clients;
 
 	// clear everything in this snapshot
-	Com_Memset( frame->areabits, 0, sizeof( frame->areabits ) );
+	memset( frame->areabits, 0, sizeof( frame->areabits ) );
 	frame->areabytes = 0;
 
 	// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=62
@@ -733,7 +733,7 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 				dgbuf[5] = (byte)( (base_tick >>  8)  & 0xFF );
 				dgbuf[6] = (byte)( (base_tick >> 16)  & 0xFF );
 				dgbuf[7] = (byte)( (base_tick >> 24)  & 0xFF );
-				Com_Memcpy( dgbuf + 8, msg->data, snap_len );
+				memcpy( dgbuf + 8, msg->data, snap_len );
 				transport->send_unreliable( conn, dgbuf, 8 + snap_len );
 			} else {
 				/* Snapshot exceeds single-datagram MTU. */
@@ -754,7 +754,7 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 					rbuf[5] = (byte)( (base_tick >>  8)  & 0xFF );
 					rbuf[6] = (byte)( (base_tick >> 16)  & 0xFF );
 					rbuf[7] = (byte)( (base_tick >> 24)  & 0xFF );
-					Com_Memcpy( rbuf + 8, msg->data, snap_len );
+					memcpy( rbuf + 8, msg->data, snap_len );
 					transport->send_reliable( conn, CHAN_SNAPSHOT_RELIABLE, rbuf, 8 + snap_len );
 				} else {
 					/* App-level datagram fragmentation (default, mode 0). */
@@ -777,7 +777,7 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 						fbuf[7] = (byte)( (flagged_base >> 24) & 0xFF );
 						fbuf[8] = (byte)frag_total;
 						fbuf[9] = (byte)i;
-						Com_Memcpy( fbuf + 10, msg->data + offset, frag_len );
+						memcpy( fbuf + 10, msg->data + offset, frag_len );
 						transport->send_unreliable( conn, fbuf, 10 + frag_len );
 					}
 				}

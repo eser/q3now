@@ -535,8 +535,8 @@ static int AAS_ClientMovementPrediction( aas_clientmove_t *move,
 	phys_maxsteepness = aassettings.phys_maxsteepness;
 	phys_jumpvel = aassettings.phys_jumpvel * frametime;
 	//
-	Com_Memset( move, 0, sizeof( *move ) );
-	Com_Memset( &trace, 0, sizeof( trace ) );
+	memset( move, 0, sizeof( *move ) );
+	memset( &trace, 0, sizeof( trace ) );
 	//start at the current origin
 	VectorCopy(origin, org);
 	org[2] += 0.25;

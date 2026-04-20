@@ -110,7 +110,7 @@ void SND_setup( void )
 	if ( buffer == NULL ) {
 		Com_Error( ERR_FATAL, "Error allocating %i bytes for sound buffer", sz );
 	} else {
-		Com_Memset( buffer, 0, sz );
+		memset( buffer, 0, sz );
 	}
 
 	sz = SND_CHUNK_SIZE * sizeof(short) * 4;
@@ -125,7 +125,7 @@ void SND_setup( void )
 	if ( sfxScratchBuffer == NULL ) {
 		Com_Error( ERR_FATAL, "Error allocating %i bytes for sfxScratchBuffer",	sz );
 	} else {
-		Com_Memset( sfxScratchBuffer, 0, sz );
+		memset( sfxScratchBuffer, 0, sz );
 	}
 
 	sfxScratchPointer = NULL;

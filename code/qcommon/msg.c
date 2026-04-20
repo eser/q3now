@@ -33,7 +33,7 @@ Handles byte ordering and avoids alignment errors
 ==============================================================================
 */
 void MSG_Init( msg_t *buf, byte *data, int length ) {
-	Com_Memset (buf, 0, sizeof(*buf));
+	memset (buf, 0, sizeof(*buf));
 	buf->data = data;
 	buf->maxsize = length;
 	buf->maxbits = length * 8;
@@ -41,7 +41,7 @@ void MSG_Init( msg_t *buf, byte *data, int length ) {
 
 
 void MSG_InitOOB( msg_t *buf, byte *data, int length ) {
-	Com_Memset (buf, 0, sizeof(*buf));
+	memset (buf, 0, sizeof(*buf));
 	buf->data = data;
 	buf->maxsize = length;
 	buf->maxbits = length * 8;
@@ -80,9 +80,9 @@ void MSG_Copy(msg_t *buf, byte *data, int length, const msg_t *src)
 	if (length<src->cursize) {
 		Com_Error( ERR_DROP, "MSG_Copy: can't copy into a smaller msg_t buffer");
 	}
-	Com_Memcpy(buf, src, sizeof(msg_t));
+	memcpy(buf, src, sizeof(msg_t));
 	buf->data = data;
-	Com_Memcpy(buf->data, src->data, src->cursize);
+	memcpy(buf->data, src->data, src->cursize);
 }
 
 /*
@@ -113,13 +113,15 @@ void MSG_WriteBits( msg_t *msg, int value, int bits ) {
 			msg->cursize += 1;
 			msg->bit += 8;
 		} else if ( bits == 16 ) {
-			short temp = value;
-			
-			CopyLittleShort(&msg->data[msg->cursize], &temp);
+			short temp = LittleShort( (short)value );
+
+			memcpy( &msg->data[msg->cursize], &temp, 2 );
 			msg->cursize += 2;
 			msg->bit += 16;
-		} else if ( bits==32 ) {
-			CopyLittleLong(&msg->data[msg->cursize], &value);
+		} else if ( bits == 32 ) {
+			int temp32 = LittleLong( value );
+
+			memcpy( &msg->data[msg->cursize], &temp32, 4 );
 			msg->cursize += 4;
 			msg->bit += 32;
 		} else {
@@ -181,14 +183,15 @@ static int MSG_ReadBits( msg_t *msg, int bits ) {
 		else if ( bits == 16 )
 		{
 			short temp;
-			CopyLittleShort( &temp, buffer + msg->readcount );
-			value = temp;
+			memcpy( &temp, buffer + msg->readcount, 2 );
+			value = LittleShort( temp );
 			msg->readcount += 2;
 			msg->bit += 16;
 		}
 		else if ( bits == 32 )
 		{
-			CopyLittleLong( &value, buffer + msg->readcount );
+			memcpy( &value, buffer + msg->readcount, 4 );
+			value = LittleLong( value );
 			msg->readcount += 4;
 			msg->bit += 32;
 		}
@@ -884,7 +887,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 
 	// check for a remove
 	if ( MSG_ReadBits( msg, 1 ) == 1 ) {
-		Com_Memset( to, 0, sizeof( *to ) );	
+		memset( to, 0, sizeof( *to ) );	
 		to->number = MAX_GENTITIES - 1;
 #ifndef DEDICATED
 		if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -1 ) ) {
@@ -1230,7 +1233,7 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 
 	if ( !from ) {
 		from = &dummy;
-		Com_Memset( &dummy, 0, sizeof( dummy ) );
+		memset( &dummy, 0, sizeof( dummy ) );
 	}
 	*to = *from;
 

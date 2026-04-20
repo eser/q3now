@@ -29,8 +29,8 @@ R_PerformanceCounters
 static void R_PerformanceCounters( void ) {
 	if ( !r_speeds->integer ) {
 		// clear the counters even if we aren't printing
-		Com_Memset( &tr.pc, 0, sizeof( tr.pc ) );
-		Com_Memset( &backEnd.pc, 0, sizeof( backEnd.pc ) );
+		memset( &tr.pc, 0, sizeof( tr.pc ) );
+		memset( &backEnd.pc, 0, sizeof( backEnd.pc ) );
 		return;
 	}
 
@@ -65,8 +65,8 @@ static void R_PerformanceCounters( void ) {
 			backEnd.pc.c_flareAdds, backEnd.pc.c_flareTests, backEnd.pc.c_flareRenders );
 	}
 
-	Com_Memset( &tr.pc, 0, sizeof( tr.pc ) );
-	Com_Memset( &backEnd.pc, 0, sizeof( backEnd.pc ) );
+	memset( &tr.pc, 0, sizeof( tr.pc ) );
+	memset( &backEnd.pc, 0, sizeof( backEnd.pc ) );
 }
 
 
@@ -357,7 +357,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 			{
 				clrcmd = R_GetCommandBuffer( sizeof( *clrcmd ) );
 				if ( clrcmd ) {
-					Com_Memset( clrcmd, 0, sizeof( *clrcmd ) );
+					memset( clrcmd, 0, sizeof( *clrcmd ) );
 					clrcmd->commandId = RC_CLEARCOLOR;
 				} else {
 					return;
@@ -415,7 +415,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 			if ( !clrcmd ) {
 				clrcmd = R_GetCommandBuffer( sizeof( *clrcmd ) );
 				if ( clrcmd ) {
-					Com_Memset( clrcmd, 0, sizeof( *clrcmd ) );
+					memset( clrcmd, 0, sizeof( *clrcmd ) );
 					clrcmd->commandId = RC_CLEARCOLOR;
 				} else {
 					return;
@@ -568,14 +568,14 @@ void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
 	cmd->commandId = RC_SET_MSDF_OUTLINE;
 	cmd->outlineWidth = outlineWidth;
 	if ( outlineColor )
-		Com_Memcpy( cmd->outlineColor, outlineColor, sizeof( cmd->outlineColor ) );
+		memcpy( cmd->outlineColor, outlineColor, sizeof( cmd->outlineColor ) );
 	else
-		Com_Memset( cmd->outlineColor, 0, sizeof( cmd->outlineColor ) );
+		memset( cmd->outlineColor, 0, sizeof( cmd->outlineColor ) );
 	cmd->glowWidth = glowWidth;
 	if ( glowColor )
-		Com_Memcpy( cmd->glowColor, glowColor, sizeof( cmd->glowColor ) );
+		memcpy( cmd->glowColor, glowColor, sizeof( cmd->glowColor ) );
 	else
-		Com_Memset( cmd->glowColor, 0, sizeof( cmd->glowColor ) );
+		memset( cmd->glowColor, 0, sizeof( cmd->glowColor ) );
 }
 
 

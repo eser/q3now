@@ -125,7 +125,7 @@ static int SV_ReplacePendingServerCommands( client_t *client, const char *cmd ) 
 	for ( i = client->reliableSent+1; i <= client->reliableSequence; i++ ) {
 		index = i & ( MAX_RELIABLE_COMMANDS - 1 );
 		//
-		if ( !Q_strncmp(cmd, client->reliableCommands[ index ], strlen("cs")) ) {
+		if ( !strncmp(cmd, client->reliableCommands[ index ], strlen("cs")) ) {
 			sscanf(cmd, "cs %i", &csnum1);
 			sscanf(client->reliableCommands[ index ], "cs %i", &csnum2);
 			if ( csnum1 == csnum2 ) {
@@ -212,7 +212,7 @@ void QDECL SV_SendServerCommand( client_t *cl, const char *fmt, ... ) {
 	int			j, len;
 	
 	va_start( argptr, fmt );
-	len = Q_vsnprintf( message, sizeof( message ), fmt, argptr );
+	len = vsnprintf( message, sizeof( message ), fmt, argptr );
 	va_end( argptr );
 
 	if ( cl != NULL ) {
@@ -509,9 +509,9 @@ static leakyBucket_t *SVC_BucketForAddress( const netadr_t *address, int burst, 
 		if ( bucket->type == NA_BAD ) {
 			bucket->type = address->type;
 			switch ( address->type ) {
-				case NA_IP:  Com_Memcpy( bucket->ipv._4, address->ipv._4, 4 );  break;
+				case NA_IP:  memcpy( bucket->ipv._4, address->ipv._4, 4 );  break;
 #if FEAT_IPV6
-				case NA_IP6: Com_Memcpy( bucket->ipv._6, address->ipv._6, 16 ); break;
+				case NA_IP6: memcpy( bucket->ipv._6, address->ipv._6, 16 ); break;
 #endif
 				default: break;
 			}

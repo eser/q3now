@@ -177,7 +177,7 @@ qboolean AAS_EntityCollision(int entnum,
 	botimport.EntityTrace(&enttrace, start, boxmins, boxmaxs, end, entnum, contentmask);
 	if (enttrace.fraction < trace->fraction)
 	{
-		Com_Memcpy(trace, &enttrace, sizeof(bsp_trace_t));
+		memcpy(trace, &enttrace, sizeof(bsp_trace_t));
 		return qtrue;
 	} //end if
 	return qfalse;
@@ -469,7 +469,7 @@ void AAS_DumpBSPData(void)
 	bspworld.entdatasize = 0;
 	//
 	bspworld.loaded = qfalse;
-	Com_Memset( &bspworld, 0, sizeof(bspworld) );
+	memset( &bspworld, 0, sizeof(bspworld) );
 } //end of the function AAS_DumpBSPData
 //===========================================================================
 // load a .bsp file
@@ -483,9 +483,8 @@ int AAS_LoadBSPFile(void)
 	AAS_DumpBSPData();
 	bspworld.entdatasize = strlen(botimport.BSPEntityData()) + 1;
 	bspworld.dentdata = (char *) GetClearedHunkMemory(bspworld.entdatasize);
-	Com_Memcpy(bspworld.dentdata, botimport.BSPEntityData(), bspworld.entdatasize);
+	memcpy(bspworld.dentdata, botimport.BSPEntityData(), bspworld.entdatasize);
 	AAS_ParseBSPEntities();
 	bspworld.loaded = qtrue;
 	return BLERR_NOERROR;
 } //end of the function AAS_LoadBSPFile
-

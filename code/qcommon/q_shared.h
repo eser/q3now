@@ -150,15 +150,119 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <time.h>
 #include <ctype.h>
 #include <limits.h>
-
-//endianness
-short ShortSwap( short l );
-int LongSwap( int l );
-float FloatSwap( const float *f );
-void CopyShortSwap( void *dest, void *src );
-void CopyLongSwap( void *dest, void *src );
+#include <stdint.h>
 
 #include "q_platform.h"
+
+/*
+============================================================================
+
+                    BYTE ORDER FUNCTIONS
+
+============================================================================
+*/
+
+/*
+ * Compile-time endianness detection.
+ * Q_BIG_ENDIAN evaluates to 1 on big-endian, 0 on little-endian.
+ */
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__)
+  #define Q_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#elif defined(_BIG_ENDIAN) || defined(__BIG_ENDIAN__)
+  #define Q_BIG_ENDIAN 1
+#elif defined(__LITTLE_ENDIAN__) || defined(_LITTLE_ENDIAN) \
+   || defined(_M_IX86) || defined(_M_X64) || defined(_M_AMD64) \
+   || defined(__x86_64__) || defined(__i386__) \
+   || defined(__aarch64__) || defined(__arm__) \
+   || defined(__EMSCRIPTEN__) || defined(__wasm__)
+  #define Q_BIG_ENDIAN 0
+#else
+  #error "Cannot determine endianness - add your platform here"
+#endif
+
+/* Low-level byte swap via compiler intrinsics (single instruction) */
+static ID_INLINE uint16_t Q_bswap16( uint16_t x )
+{
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_bswap16( x );
+#elif defined(_MSC_VER)
+    return _byteswap_ushort( x );
+#else
+    return (uint16_t)( (x >> 8) | (x << 8) );
+#endif
+}
+
+static ID_INLINE uint32_t Q_bswap32( uint32_t x )
+{
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_bswap32( x );
+#elif defined(_MSC_VER)
+    return _byteswap_ulong( x );
+#else
+    return ( x >> 24 )
+         | ( (x >> 8) & 0x0000FF00u )
+         | ( (x << 8) & 0x00FF0000u )
+         | ( x << 24 );
+#endif
+}
+
+static ID_INLINE uint64_t Q_bswap64( uint64_t x )
+{
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_bswap64( x );
+#elif defined(_MSC_VER)
+    return _byteswap_uint64( x );
+#else
+    x = ( (x & 0x00000000FFFFFFFFull) << 32 ) | ( (x & 0xFFFFFFFF00000000ull) >> 32 );
+    x = ( (x & 0x0000FFFF0000FFFFull) << 16 ) | ( (x & 0xFFFF0000FFFF0000ull) >> 16 );
+    x = ( (x & 0x00FF00FF00FF00FFull) << 8  ) | ( (x & 0xFF00FF00FF00FF00ull) >> 8  );
+    return x;
+#endif
+}
+
+/* float/int bit-cast union — needed by the endian swap helpers below */
+typedef union floatint_u { int32_t i; uint32_t u; float f; unsigned char b[4]; } floatint_t;
+
+/*
+ * Host <-> Little/Big endian conversion.
+ * Little-endian (x86, ARM, WASM): Little* is identity, Big* swaps.
+ * Big-endian: reversed.
+ */
+#if Q_BIG_ENDIAN
+
+static ID_INLINE short   LittleShort( short x )    { return (short)Q_bswap16( (uint16_t)x ); }
+static ID_INLINE int     LittleLong( int x )       { return (int)Q_bswap32( (uint32_t)x ); }
+static ID_INLINE int64_t LittleLong64( int64_t x ) { return (int64_t)Q_bswap64( (uint64_t)x ); }
+static ID_INLINE float   LittleFloat( float x ) {
+    floatint_t fi;
+    fi.f = x;
+    fi.i = (int)Q_bswap32( (uint32_t)fi.i );
+    return fi.f;
+}
+
+static ID_INLINE short   BigShort( short x )       { return x; }
+static ID_INLINE int     BigLong( int x )          { return x; }
+static ID_INLINE int64_t BigLong64( int64_t x )    { return x; }
+static ID_INLINE float   BigFloat( float x )       { return x; }
+
+#else /* little-endian */
+
+static ID_INLINE short   LittleShort( short x )    { return x; }
+static ID_INLINE int     LittleLong( int x )       { return x; }
+static ID_INLINE int64_t LittleLong64( int64_t x ) { return x; }
+static ID_INLINE float   LittleFloat( float x )    { return x; }
+
+static ID_INLINE short   BigShort( short x )       { return (short)Q_bswap16( (uint16_t)x ); }
+static ID_INLINE int     BigLong( int x )          { return (int)Q_bswap32( (uint32_t)x ); }
+static ID_INLINE int64_t BigLong64( int64_t x )    { return (int64_t)Q_bswap64( (uint64_t)x ); }
+static ID_INLINE float   BigFloat( float x ) {
+    floatint_t fi;
+    fi.f = x;
+    fi.i = (int)Q_bswap32( (uint32_t)fi.i );
+    return fi.f;
+}
+
+#endif
 
 //=============================================================
 
@@ -173,14 +277,6 @@ void CopyLongSwap( void *dest, void *src );
 	typedef unsigned __int8 uint8_t;
 #else
 	#include <stdint.h>
-#endif
-
-#ifdef _WIN32
-	// vsnprintf is ISO/IEC 9899:1999
-	// abstracting this to make it portable
-	int Q_vsnprintf( char *str, size_t size, const char *format, va_list ap );
-#else
-	#define Q_vsnprintf vsnprintf
 #endif
 
 #if defined (_WIN32)
@@ -206,15 +302,6 @@ int Q_longjmp_c(void *, int);
 typedef unsigned char byte;
 
 typedef enum { qfalse = 0, qtrue } qboolean;
-
-typedef union floatint_u
-{
-	int32_t i;
-	uint32_t u;
-	float f;
-	byte b[4];
-}
-floatint_t;
 
 typedef union {
 	byte rgba[4];
@@ -363,17 +450,6 @@ void *Hunk_AllocDebug( size_t size, ha_pref preference, const char *label, const
 void *Hunk_Alloc( size_t size, ha_pref preference );
 #endif
 
-#if defined(__GNUC__) && !defined(__MINGW32__) && !defined(MACOS_X)
-// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=371
-// custom Snd_Memset implementation for glibc memset bug workaround
-void Snd_Memset (void* dest, const int val, const size_t count);
-#else
-#define Snd_Memset Com_Memset
-#endif
-
-#define Com_Memset memset
-#define Com_Memcpy memcpy
-
 #define CIN_system	1
 #define CIN_loop	2
 #define	CIN_hold	4
@@ -500,7 +576,6 @@ extern	vec3_t	axisDefault[3];
 
 #define	IS_NAN(x) (((*(int *)&x)&nanmask)==nanmask)
 
-float Q_fabs( float f );
 float Q_rsqrt( float f );		// reciprocal square root
 
 float Q_log2f( float f );
@@ -797,11 +872,8 @@ int Q_islower( int c );
 int Q_isupper( int c );
 int Q_isalpha( int c );
 
-qboolean Q_streq( const char *s1, const char *s2 );
-
 // portable case insensitive compare
 int		Q_stricmp (const char *s1, const char *s2);
-int		Q_strncmp (const char *s1, const char *s2, int n);
 int		Q_stricmpn (const char *s1, const char *s2, int n);
 char	*Q_strlwr( char *s1 );
 char	*Q_strupr( char *s1 );
@@ -817,7 +889,7 @@ void	Q_strcat( char *dest, int size, const char *src );
 int     Q_replace( const char *str1, const char *str2, char *src, int max_len );
 
 char	*Q_stradd( char *dst, const char *src );
-char	*Q_strncpy( char *dest, char *src, int destsize );
+char	*Q_strncpy( char *dest, const char *src, int destsize );
 
 // strlen that discounts Quake color sequences
 int Q_PrintStrlen( const char *string );
@@ -825,6 +897,12 @@ int Q_PrintStrlen( const char *string );
 char *Q_CleanStr( char *string );
 // Count the number of char tocount encountered in string
 int Q_CountChar(const char *string, char tocount);
+
+// UTF-8 utilities
+int         Q_UTF8_NextCodepoint( const char *str, int *bytesRead );
+int         Q_UTF8_Strlen( const char *str );
+int         Q_UTF8_Encode( int codepoint, char *out );
+const char *Q_UTF8_Advance( const char *str, int n );
 
 //=============================================
 
@@ -1412,10 +1490,8 @@ typedef struct qtime_s {
 
 
 // server browser sources
-// TTimo: AS_MPLAYER is no longer used
-#define AS_LOCAL			0
-#define AS_MPLAYER		1
-#define AS_GLOBAL			2
+#define AS_LOCAL		0
+#define AS_GLOBAL		2
 #define AS_FAVORITES	3
 
 
@@ -1439,19 +1515,14 @@ typedef enum _flag_status {
 } flagStatus_t;
 
 
-
-#define	MAX_GLOBAL_SERVERS				4096
-#define	MAX_OTHER_SERVERS					128
-#define MAX_PINGREQUESTS					32
+#define	MAX_GLOBAL_SERVERS			4096
+#define	MAX_OTHER_SERVERS			128
+#define MAX_PINGREQUESTS			32
 #define MAX_SERVERSTATUSREQUESTS	16
 
 #define SAY_ALL		0
 #define SAY_TEAM	1
 #define SAY_TELL	2
-
-#define CDKEY_LEN 16
-#define CDCHKSUM_LEN 2
-
 
 #define LERP( a, b, w ) ( ( a ) * ( 1.0f - ( w ) ) + ( b ) * ( w ) )
 #define LUMA( red, green, blue ) ( 0.2126f * ( red ) + 0.7152f * ( green ) + 0.0722f * ( blue ) )

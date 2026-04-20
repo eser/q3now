@@ -8,10 +8,10 @@ cl_wired_background.c -- Shared 3-layer background: base fill, radial glows, gri
 
 #if FEAT_WIRED_UI
 
-static qhandle_t s_radialGlow = 0;
+static qhandle_t wui_radialGlow = 0;
 
 void WUI_BackgroundInit( void ) {
-	s_radialGlow = re.RegisterShaderNoMip( "gfx/ui/radial_glow" );
+	wui_radialGlow = re.RegisterShaderNoMip( "gfx/ui/radial_glow" );
 }
 
 void WUI_DrawBackground( float x, float y, float w, float h ) {
@@ -26,14 +26,14 @@ void WUI_DrawBackground( float x, float y, float w, float h ) {
 	}
 
 	/* Layer 2: radial glows */
-	if ( s_radialGlow ) {
+	if ( wui_radialGlow ) {
 		vec4_t leftColor  = { 0.102f, 0.227f, 0.431f, 0.6f  };
 		vec4_t rightColor = { 0.431f, 0.102f, 0.102f, 0.18f };
 
 		re.SetColor( leftColor );
-		re.DrawStretchPic( x - w*0.1f, y + h*0.1f, w*0.7f, h*0.8f, 0, 0, 1, 1, s_radialGlow );
+		re.DrawStretchPic( x - w*0.1f, y + h*0.1f, w*0.7f, h*0.8f, 0, 0, 1, 1, wui_radialGlow );
 		re.SetColor( rightColor );
-		re.DrawStretchPic( x + w*0.55f, y + h*0.1f, w*0.6f, h*0.8f, 0, 0, 1, 1, s_radialGlow );
+		re.DrawStretchPic( x + w*0.55f, y + h*0.1f, w*0.6f, h*0.8f, 0, 0, 1, 1, wui_radialGlow );
 		re.SetColor( NULL );
 	}
 

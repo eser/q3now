@@ -770,7 +770,7 @@ void VaoCache_Commit(void)
 			int indexesSize = surf->numIndexes * sizeof(glIndex_t);
 			int i, indexOffset = (vc.vertexOffset + vcq.vertexCommitSize) / sizeof(srfVert_t);
 
-			Com_Memcpy(dstVertex, surf->vertexes, vertexesSize);
+			memcpy(dstVertex, surf->vertexes, vertexesSize);
 			dstVertex += surf->numVerts;
 
 			vcq.vertexCommitSize += vertexesSize;

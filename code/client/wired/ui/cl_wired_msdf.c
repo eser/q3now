@@ -9,15 +9,15 @@ cl_wired_msdf.c -- MSDF font loading and rendering
 
 /* ── font pool ──────────────────────────────────────────────────────── */
 
-static msdfFont_t	msdfFonts[MAX_MSDF_FONTS];
-static int			msdfFontCount = 0;
+static msdfFont_t	wui_fonts[MAX_MSDF_FONTS];
+static int			wui_fontCount = 0;
 
 /* ── outline / glow state ──────────────────────────────────────────── */
 
-static float msdf_outlineWidth = 0.0f;
-static float msdf_outlineColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-static float msdf_glowWidth = 0.0f;
-static float msdf_glowColor[4] = { 1.0f, 1.0f, 1.0f, 0.3f };
+static float wui_outlineWidth = 0.0f;
+static float wui_outlineColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+static float wui_glowWidth = 0.0f;
+static float wui_glowColor[4] = { 1.0f, 1.0f, 1.0f, 0.3f };
 
 /* ── per-frame string measurement cache (B.8) ──────────────────────── */
 
@@ -33,18 +33,18 @@ typedef struct {
 	int         frame;
 } msdf_meas_entry_t;
 
-static msdf_meas_entry_t s_meas_cache[MSDF_MEAS_CACHE_SIZE];
-static int                s_meas_cache_idx = 0;
+static msdf_meas_entry_t wui_meas_cache[MSDF_MEAS_CACHE_SIZE];
+static int                wui_meas_cache_idx = 0;
 
 void MSDF_SetOutline( float outlineWidth, const float *outlineColor,
                        float glowWidth, const float *glowColor )
 {
-	msdf_outlineWidth = outlineWidth;
+	wui_outlineWidth = outlineWidth;
 	if ( outlineColor )
-		Com_Memcpy( msdf_outlineColor, outlineColor, sizeof( msdf_outlineColor ) );
-	msdf_glowWidth = glowWidth;
+		memcpy( wui_outlineColor, outlineColor, sizeof( wui_outlineColor ) );
+	wui_glowWidth = glowWidth;
 	if ( glowColor )
-		Com_Memcpy( msdf_glowColor, glowColor, sizeof( msdf_glowColor ) );
+		memcpy( wui_glowColor, glowColor, sizeof( wui_glowColor ) );
 }
 
 /* ── minimal JSON tokeniser ─────────────────────────────────────────── */
@@ -218,6 +218,23 @@ static qboolean JSON_Expect( jsonParser_t *jp, jsonTokenType_t expected )
 	return ( jp->type == expected ) ? qtrue : qfalse;
 }
 
+/* Advance to the next key-value pair in a JSON object.
+   Fills key and positions jp at the value token. Returns qfalse at '}' or EOF. */
+static qboolean JSON_NextMember( jsonParser_t *jp, char *key, int keySize )
+{
+	while ( jp->type != JTOK_RBRACE && jp->type != JTOK_EOF ) {
+		JSON_NextToken( jp );
+		if ( jp->type == JTOK_RBRACE ) return qfalse;
+		if ( jp->type == JTOK_STRING ) {
+			Q_strncpyz( key, jp->str, keySize );
+			if ( !JSON_Expect( jp, JTOK_COLON ) ) return qfalse;
+			JSON_NextToken( jp );
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
 /* ── JSON glyph/atlas parsing ───────────────────────────────────────── */
 
 /*
@@ -228,28 +245,13 @@ static qboolean MSDF_ParseBounds( jsonParser_t *jp,
                                   float *left, float *bottom,
                                   float *right, float *top )
 {
+	char key[64];
 	*left = *bottom = *right = *top = 0.0f;
-
-	while ( jp->type != JTOK_RBRACE && jp->type != JTOK_EOF ) {
-		JSON_NextToken( jp );
-
-		if ( jp->type == JTOK_RBRACE ) {
-			break;
-		}
-
-		if ( jp->type == JTOK_STRING ) {
-			char key[64];
-			Q_strncpyz( key, jp->str, sizeof(key) );
-
-			if ( !JSON_Expect( jp, JTOK_COLON ) ) return qfalse;
-			JSON_NextToken( jp );   /* value */
-
-			if ( Q_stricmp( key, "left" ) == 0 )        *left   = jp->num;
-			else if ( Q_stricmp( key, "bottom" ) == 0 )  *bottom = jp->num;
-			else if ( Q_stricmp( key, "right" ) == 0 )   *right  = jp->num;
-			else if ( Q_stricmp( key, "top" ) == 0 )     *top    = jp->num;
-		}
-		/* skip commas */
+	while ( JSON_NextMember( jp, key, sizeof(key) ) ) {
+		if      ( !Q_stricmp(key, "left")   ) *left   = jp->num;
+		else if ( !Q_stricmp(key, "bottom") ) *bottom = jp->num;
+		else if ( !Q_stricmp(key, "right")  ) *right  = jp->num;
+		else if ( !Q_stricmp(key, "top")    ) *top    = jp->num;
 	}
 	return qtrue;
 }
@@ -375,27 +377,13 @@ static qboolean MSDF_ParseGlyphsArray( jsonParser_t *jp, msdfFont_t *font )
  */
 static qboolean MSDF_ParseAtlasObject( jsonParser_t *jp, msdfFont_t *font )
 {
-	while ( jp->type != JTOK_RBRACE && jp->type != JTOK_EOF ) {
-		JSON_NextToken( jp );
-
-		if ( jp->type == JTOK_RBRACE ) {
-			break;
-		}
-
-		if ( jp->type == JTOK_STRING ) {
-			char key[64];
-			Q_strncpyz( key, jp->str, sizeof(key) );
-
-			if ( !JSON_Expect( jp, JTOK_COLON ) ) return qfalse;
-			JSON_NextToken( jp );   /* value */
-
-			if ( Q_stricmp( key, "width" ) == 0 )              font->atlasWidth     = (int)jp->num;
-			else if ( Q_stricmp( key, "height" ) == 0 )        font->atlasHeight    = (int)jp->num;
-			else if ( Q_stricmp( key, "size" ) == 0 )          font->atlasSize      = jp->num;
-			else if ( Q_stricmp( key, "distanceRange" ) == 0 ) font->distanceRange  = jp->num;
-			else                                                JSON_SkipValue( jp );
-		}
-		/* skip commas */
+	char key[64];
+	while ( JSON_NextMember( jp, key, sizeof(key) ) ) {
+		if      ( !Q_stricmp(key, "width")         ) font->atlasWidth    = (int)jp->num;
+		else if ( !Q_stricmp(key, "height")        ) font->atlasHeight   = (int)jp->num;
+		else if ( !Q_stricmp(key, "size")          ) font->atlasSize     = jp->num;
+		else if ( !Q_stricmp(key, "distanceRange") ) font->distanceRange = jp->num;
+		else                                          JSON_SkipValue( jp );
 	}
 	return qtrue;
 }
@@ -405,21 +393,12 @@ static qboolean MSDF_ParseAtlasObject( jsonParser_t *jp, msdfFont_t *font )
  */
 static qboolean MSDF_ParseMetricsObject( jsonParser_t *jp, msdfFont_t *font )
 {
-	while ( jp->type != JTOK_RBRACE && jp->type != JTOK_EOF ) {
-		JSON_NextToken( jp );
-		if ( jp->type == JTOK_RBRACE ) break;
-
-		if ( jp->type == JTOK_STRING ) {
-			char key[64];
-			Q_strncpyz( key, jp->str, sizeof(key) );
-			if ( !JSON_Expect( jp, JTOK_COLON ) ) return qfalse;
-			JSON_NextToken( jp );
-
-			if ( Q_stricmp( key, "ascender" ) == 0 )        font->ascender   = jp->num;
-			else if ( Q_stricmp( key, "descender" ) == 0 )   font->descender  = jp->num;
-			else if ( Q_stricmp( key, "lineHeight" ) == 0 )  font->lineHeight = jp->num;
-			else                                              JSON_SkipValue( jp );
-		}
+	char key[64];
+	while ( JSON_NextMember( jp, key, sizeof(key) ) ) {
+		if      ( !Q_stricmp(key, "ascender")   ) font->ascender   = jp->num;
+		else if ( !Q_stricmp(key, "descender")  ) font->descender  = jp->num;
+		else if ( !Q_stricmp(key, "lineHeight") ) font->lineHeight = jp->num;
+		else                                       JSON_SkipValue( jp );
 	}
 	return qtrue;
 }
@@ -432,7 +411,7 @@ static qboolean MSDF_ParseJSON( const char *text, msdfFont_t *font )
 {
 	jsonParser_t jp;
 
-	Com_Memset( &jp, 0, sizeof(jp) );
+	memset( &jp, 0, sizeof(jp) );
 	jp.p = text;
 
 	/* expect opening '{' */
@@ -517,21 +496,21 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 	}
 
 	/* check if already loaded */
-	for ( i = 0; i < msdfFontCount; i++ ) {
-		if ( msdfFonts[i].loaded && Q_stricmp( msdfFonts[i].name, fontName ) == 0 ) {
-			return &msdfFonts[i];
+	for ( i = 0; i < wui_fontCount; i++ ) {
+		if ( wui_fonts[i].loaded && Q_stricmp( wui_fonts[i].name, fontName ) == 0 ) {
+			return &wui_fonts[i];
 		}
 	}
 
 	/* find a free slot */
-	if ( msdfFontCount >= MAX_MSDF_FONTS ) {
+	if ( wui_fontCount >= MAX_MSDF_FONTS ) {
 		Com_Printf( S_COLOR_RED "MSDF_LoadFont: too many fonts (max %d)\n", MAX_MSDF_FONTS );
 		return NULL;
 	}
-	font = &msdfFonts[msdfFontCount];
+	font = &wui_fonts[wui_fontCount];
 
 	/* zero out the struct */
-	Com_Memset( font, 0, sizeof(*font) );
+	memset( font, 0, sizeof(*font) );
 	Q_strncpyz( font->name, fontName, sizeof(font->name) );
 
 	/* load JSON metrics */
@@ -571,7 +550,7 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 	}
 
 	font->loaded = qtrue;
-	msdfFontCount++;
+	wui_fontCount++;
 
 	Com_Printf( "MSDF_LoadFont: loaded '%s' (%dx%d atlas, %.0f px, %d glyphs)\n",
 	            fontName, font->atlasWidth, font->atlasHeight, font->atlasSize,
@@ -591,8 +570,8 @@ void MSDF_ReregisterShaders( void )
 	int i;
 	char shaderPath[MAX_QPATH];
 
-	for ( i = 0; i < msdfFontCount; i++ ) {
-		msdfFont_t *f = &msdfFonts[i];
+	for ( i = 0; i < wui_fontCount; i++ ) {
+		msdfFont_t *f = &wui_fonts[i];
 		if ( !f->loaded || f->name[0] == '\0' ) continue;
 
 		Com_sprintf( shaderPath, sizeof(shaderPath), "fonts/%s_atlas", f->name );
@@ -604,8 +583,8 @@ void MSDF_ReregisterShaders( void )
 		}
 	}
 
-	if ( msdfFontCount > 0 ) {
-		Com_DPrintf( "MSDF_ReregisterShaders: re-registered %d font(s)\n", msdfFontCount );
+	if ( wui_fontCount > 0 ) {
+		Com_DPrintf( "MSDF_ReregisterShaders: re-registered %d font(s)\n", wui_fontCount );
 	}
 }
 
@@ -668,8 +647,8 @@ void MSDF_DrawChar( msdfFont_t *font, float x, float y,
 	re.SetColor( color );
 
 	/* push outline/glow state into the render command stream */
-	re.SetMSDFOutline( msdf_outlineWidth, msdf_outlineColor,
-	                    msdf_glowWidth, msdf_glowColor );
+	re.SetMSDFOutline( wui_outlineWidth, wui_outlineColor,
+	                    wui_glowWidth, wui_glowColor );
 
 	/* coordinates are already real screen pixels */
 	re.DrawStretchPic( drawX, drawY, drawW, drawH, s0, t0, s1, t1, font->atlasShader );
@@ -719,6 +698,27 @@ static float MSDF_GlyphAdvancePx( msdfFont_t *font, int ch,
 	return ( g ? g->advance : 0.5f ) * pixelSize + letterSpacing;
 }
 
+/* ── character iterator ─────────────────────────────────────────────── */
+
+#define MSDF_CHAR_COLORCODE (-1)  /* color code consumed */
+#define MSDF_CHAR_NEWLINE   (-2)  /* newline consumed    */
+
+/* Consume one escape sequence or character from *pp and return a codepoint.
+   colorOut: if non-NULL, color codes update it; if NULL, they are silently skipped.
+   Returns: character codepoint (>0), MSDF_CHAR_COLORCODE, MSDF_CHAR_NEWLINE, or 0 (end). */
+static int MSDF_NextRenderableChar( const char **pp, float *colorOut )
+{
+	const char *p = *pp;
+	int skip;
+	if ( !*p ) return 0;
+	if ( *p == '\n' ) { *pp = p + 1; return MSDF_CHAR_NEWLINE; }
+	if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) { *pp = p + 2; return Q_COLOR_ESCAPE; }
+	skip = MSDF_HandleColorCode( p, colorOut );
+	if ( skip > 0 ) { *pp = p + skip; return MSDF_CHAR_COLORCODE; }
+	*pp = p + 1;
+	return (unsigned char)*p;
+}
+
 /* ── string drawing ─────────────────────────────────────────────────── */
 
 void MSDF_DrawString( msdfFont_t *font, float x, float y,
@@ -745,43 +745,14 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 	drawn = 0;
 
 	for ( p = str; *p; ) {
-		int skip;
-
-		/* check character limit */
-		if ( maxChars >= 0 && drawn >= maxChars ) {
-			break;
-		}
-
-		/* handle newline — advance to next line */
-		if ( *p == '\n' ) {
-			curX = x;
-			y += font->lineHeight * pixelSize;
-			p++;
-			continue;
-		}
-
-		/* handle ^^ (literal caret) */
-		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
-			MSDF_DrawChar( font, curX, y, size, curColor, Q_COLOR_ESCAPE );
-			curX += MSDF_GlyphAdvancePx( font, Q_COLOR_ESCAPE, pixelSize, letterSpacing );
-			drawn++;
-			p += 2;
-			continue;
-		}
-
-		/* handle color codes (^0 - ^9, ^a-^z, etc.) */
-		skip = MSDF_HandleColorCode( p, forceColor ? NULL : curColor );
-		if ( skip > 0 ) {
-			p += skip;
-			continue;   /* color codes don't count as drawn chars */
-		}
-
-		/* regular character */
-		MSDF_DrawChar( font, curX, y, size, curColor, (unsigned char)*p );
-		curX += MSDF_GlyphAdvancePx( font, (unsigned char)*p, pixelSize, letterSpacing );
-
+		int ch;
+		if ( maxChars >= 0 && drawn >= maxChars ) break;
+		ch = MSDF_NextRenderableChar( &p, forceColor ? NULL : curColor );
+		if ( ch == MSDF_CHAR_COLORCODE ) continue;
+		if ( ch == MSDF_CHAR_NEWLINE ) { curX = x; y += font->lineHeight * pixelSize; continue; }
+		MSDF_DrawChar( font, curX, y, size, curColor, ch );
+		curX += MSDF_GlyphAdvancePx( font, ch, pixelSize, letterSpacing );
 		drawn++;
-		p++;
 	}
 
 	/* reset color to avoid bleeding into subsequent draws */
@@ -804,13 +775,13 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 
 	/* per-frame cache: avoid re-iterating the same string within one frame */
 	for ( i = 0; i < MSDF_MEAS_CACHE_SIZE; i++ ) {
-		if ( s_meas_cache[i].frame == cls.realtime &&
-		     s_meas_cache[i].str == str &&
-		     s_meas_cache[i].font == font &&
-		     s_meas_cache[i].size == size &&
-		     s_meas_cache[i].letterSpacing == letterSpacing &&
-		     s_meas_cache[i].maxChars == maxChars ) {
-			return s_meas_cache[i].result;
+		if ( wui_meas_cache[i].frame == cls.realtime &&
+		     wui_meas_cache[i].str == str &&
+		     wui_meas_cache[i].font == font &&
+		     wui_meas_cache[i].size == size &&
+		     wui_meas_cache[i].letterSpacing == letterSpacing &&
+		     wui_meas_cache[i].maxChars == maxChars ) {
+			return wui_meas_cache[i].result;
 		}
 	}
 
@@ -820,40 +791,13 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 	counted   = 0;
 
 	for ( p = str; *p; ) {
-		int skip;
-
-		if ( maxChars >= 0 && counted >= maxChars ) {
-			break;
-		}
-
-		/* newline: \n itself is zero-width; commit current line and reset */
-		if ( *p == '\n' ) {
-			if ( lineWidth > maxWidth ) maxWidth = lineWidth;
-			lineWidth = 0.0f;
-			p++;
-			continue;
-		}
-
-		/* ^^ literal caret */
-		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
-			lineWidth += MSDF_GlyphAdvancePx( font, Q_COLOR_ESCAPE, pixelSize, letterSpacing );
-			counted++;
-			p += 2;
-			continue;
-		}
-
-		/* color codes are invisible */
-		skip = MSDF_HandleColorCode( p, NULL );
-		if ( skip > 0 ) {
-			p += skip;
-			continue;
-		}
-
-		/* regular character */
-		lineWidth += MSDF_GlyphAdvancePx( font, (unsigned char)*p, pixelSize, letterSpacing );
-
+		int ch;
+		if ( maxChars >= 0 && counted >= maxChars ) break;
+		ch = MSDF_NextRenderableChar( &p, NULL );
+		if ( ch == MSDF_CHAR_COLORCODE ) continue;
+		if ( ch == MSDF_CHAR_NEWLINE ) { if ( lineWidth > maxWidth ) maxWidth = lineWidth; lineWidth = 0.0f; continue; }
+		lineWidth += MSDF_GlyphAdvancePx( font, ch, pixelSize, letterSpacing );
 		counted++;
-		p++;
 	}
 
 	/* commit the final line (no trailing \n required) */
@@ -861,15 +805,15 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 
 	/* store result in per-frame ring cache */
 	{
-		int idx = s_meas_cache_idx % MSDF_MEAS_CACHE_SIZE;
-		s_meas_cache[idx].str          = str;
-		s_meas_cache[idx].font         = font;
-		s_meas_cache[idx].size         = size;
-		s_meas_cache[idx].letterSpacing = letterSpacing;
-		s_meas_cache[idx].maxChars     = maxChars;
-		s_meas_cache[idx].result       = maxWidth;
-		s_meas_cache[idx].frame        = cls.realtime;
-		s_meas_cache_idx++;
+		int idx = wui_meas_cache_idx % MSDF_MEAS_CACHE_SIZE;
+		wui_meas_cache[idx].str          = str;
+		wui_meas_cache[idx].font         = font;
+		wui_meas_cache[idx].size         = size;
+		wui_meas_cache[idx].letterSpacing = letterSpacing;
+		wui_meas_cache[idx].maxChars     = maxChars;
+		wui_meas_cache[idx].result       = maxWidth;
+		wui_meas_cache[idx].frame        = cls.realtime;
+		wui_meas_cache_idx++;
 	}
 
 	return maxWidth;

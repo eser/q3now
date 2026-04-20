@@ -192,7 +192,7 @@ void WiredScript_Init( void ) {
 	if ( !s_wsArena ) {
 		s_wsArena = Arena_Create( "WiredScript", WIREDSCRIPT_ARENA_SIZE );
 		s_ws = Arena_AllocType( s_wsArena, WiredScriptState_t );
-		Com_Memset( s_ws, 0, sizeof( WiredScriptState_t ) );
+		memset( s_ws, 0, sizeof( WiredScriptState_t ) );
 	}
 
 	if ( s_ws->lua ) {

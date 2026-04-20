@@ -224,8 +224,8 @@ static void WiredOD_NetMapPreview( float x, float y, float w, float h, vec4_t it
 
 // ── player model preview ──────────────────────────────────────────────
 
-static qhandle_t wiredOD_headModel = 0;
-static char      wiredOD_headModelName[MAX_QPATH];
+static qhandle_t wui_headModel = 0;
+static char      wui_headModelName[MAX_QPATH];
 
 static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t itemColor ) {
 	refdef_t    refdef;
@@ -243,14 +243,14 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 
 	// cache head model handle
 	Com_sprintf( headPath, sizeof( headPath ), "models/players/%s/head.md3", model );
-	if ( Q_stricmp( headPath, wiredOD_headModelName ) ) {
-		Q_strncpyz( wiredOD_headModelName, headPath, sizeof( wiredOD_headModelName ) );
-		wiredOD_headModel = re.RegisterModel( headPath );
+	if ( Q_stricmp( headPath, wui_headModelName ) ) {
+		Q_strncpyz( wui_headModelName, headPath, sizeof( wui_headModelName ) );
+		wui_headModel = re.RegisterModel( headPath );
 	}
-	if ( !wiredOD_headModel ) return;
+	if ( !wui_headModel ) return;
 
 	// coordinates are already real screen pixels
-	Com_Memset( &refdef, 0, sizeof( refdef ) );
+	memset( &refdef, 0, sizeof( refdef ) );
 	refdef.rdflags = RDF_NOWORLDMODEL;
 	refdef.x       = (int)x;
 	refdef.y       = (int)y;
@@ -266,9 +266,9 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 	VectorSet( refdef.vieworg, 80, 0, 0 );
 
 	// model entity — spinning head at origin
-	Com_Memset( &ent, 0, sizeof( ent ) );
+	memset( &ent, 0, sizeof( ent ) );
 	ent.reType  = RT_MODEL;
-	ent.hModel  = wiredOD_headModel;
+	ent.hModel  = wui_headModel;
 	ent.origin[2] = -5.0f;
 
 	angles[PITCH] = 0;
@@ -323,7 +323,7 @@ static const ownerDrawEntry_t ownerDrawTable[] = {
 };
 
 // track which ownerdraw IDs we've already warned about (log once per ID)
-static unsigned long long wired_odWarnedBits[2] = {0, 0};  // 128 bits = IDs 0-127
+static unsigned long long wui_odWarnedBits[2] = {0, 0};  // 128 bits = IDs 0-127
 
 void WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
                          vec4_t color, int style ) {
@@ -343,8 +343,8 @@ void WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
 	if ( ownerDraw < 128 ) {
 		int word = ownerDraw / 64;
 		unsigned long long bit = 1ULL << ( ownerDraw % 64 );
-		if ( !( wired_odWarnedBits[word] & bit ) ) {
-			wired_odWarnedBits[word] |= bit;
+		if ( !( wui_odWarnedBits[word] & bit ) ) {
+			wui_odWarnedBits[word] |= bit;
 			Com_DPrintf( "WiredUI: unimplemented ownerdraw %d\n", ownerDraw );
 		}
 	}

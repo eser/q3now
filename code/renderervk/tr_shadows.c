@@ -174,7 +174,7 @@ void RB_ShadowTessEnd( void ) {
 	}
 
 	// decide which triangles face the light
-	Com_Memset( numEdgeDefs, 0, tess.numVertexes * sizeof( numEdgeDefs[0] ) );
+	memset( numEdgeDefs, 0, tess.numVertexes * sizeof( numEdgeDefs[0] ) );
 
 	numTris = tess.numIndexes / 3;
 	for ( i = 0 ; i < numTris ; i++ ) {
@@ -325,8 +325,8 @@ void RB_ShadowFinish( void ) {
 
 	tess.numVertexes = 4;
 
-	Com_Memcpy( tmp, vk_world.modelview_transform, 64 );
-	Com_Memset( vk_world.modelview_transform, 0, 64 );
+	memcpy( tmp, vk_world.modelview_transform, 64 );
+	memset( vk_world.modelview_transform, 0, 64 );
 
 	vk_world.modelview_transform[0] = 1.0f;
 	vk_world.modelview_transform[5] = 1.0f;
@@ -340,7 +340,7 @@ void RB_ShadowFinish( void ) {
 	vk_bind_geometry( TESS_XYZ | TESS_RGBA0 /*| TESS_ST0 */ );
 	vk_draw_geometry( DEPTH_RANGE_NORMAL, qfalse );
 
-	Com_Memcpy( vk_world.modelview_transform, tmp, 64 );
+	memcpy( vk_world.modelview_transform, tmp, 64 );
 
 	tess.numIndexes = 0;
 	tess.numVertexes = 0;

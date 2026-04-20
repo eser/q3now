@@ -201,7 +201,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	}
 
 	header = (iqmHeader_t *)buffer;
-	if( Q_strncmp( header->magic, IQM_MAGIC, sizeof(header->magic) ) ) {
+	if( strncmp( header->magic, IQM_MAGIC, sizeof(header->magic) ) ) {
 		return qfalse;
 	}
 
@@ -826,22 +826,22 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 			switch( vertexarray->type ) {
 			case IQM_POSITION:
-				Com_Memcpy( iqmData->positions,
+				memcpy( iqmData->positions,
 					    (byte *)header + vertexarray->offset,
 					    n * sizeof(float) );
 				break;
 			case IQM_NORMAL:
-				Com_Memcpy( iqmData->normals,
+				memcpy( iqmData->normals,
 					    (byte *)header + vertexarray->offset,
 					    n * sizeof(float) );
 				break;
 			case IQM_TANGENT:
-				Com_Memcpy( iqmData->tangents,
+				memcpy( iqmData->tangents,
 					    (byte *)header + vertexarray->offset,
 					    n * sizeof(float) );
 				break;
 			case IQM_TEXCOORD:
-				Com_Memcpy( iqmData->texcoords,
+				memcpy( iqmData->texcoords,
 					    (byte *)header + vertexarray->offset,
 					    n * sizeof(float) );
 				break;
@@ -849,7 +849,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			case IQM_BLENDWEIGHTS:
 				break;
 			case IQM_COLOR:
-				Com_Memcpy( iqmData->colors,
+				memcpy( iqmData->colors,
 					    (byte *)header + vertexarray->offset,
 					    n * sizeof(byte) );
 				break;
@@ -928,7 +928,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			char *name = (char *)header + header->ofs_text +
 				joint->name;
 			int len = strlen( name ) + 1;
-			Com_Memcpy( str, name, len );
+			memcpy( str, name, len );
 			str += len;
 		}
 
@@ -959,9 +959,9 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			}
 			else
 			{
-				Com_Memcpy( mat, baseFrame,    sizeof(baseFrame)    );
+				memcpy( mat, baseFrame,    sizeof(baseFrame)    );
 				mat += 12;
-				Com_Memcpy( matInv, invBaseFrame, sizeof(invBaseFrame) );
+				memcpy( matInv, invBaseFrame, sizeof(invBaseFrame) );
 				matInv += 12;
 			}
 		}
@@ -1428,7 +1428,7 @@ static void ComputeJointMats( iqmData_t *data, int frame, int oldframe,
 	int	i;
 
 	if ( data->num_poses == 0 ) {
-		Com_Memcpy( mat, data->bindJoints, data->num_joints * 12 * sizeof(float) );
+		memcpy( mat, data->bindJoints, data->num_joints * 12 * sizeof(float) );
 		return;
 	}
 
@@ -1438,7 +1438,7 @@ static void ComputeJointMats( iqmData_t *data, int frame, int oldframe,
 		float outmat[12];
 		mat1 = mat + 12 * i;
 
-		Com_Memcpy(outmat, mat1, sizeof(outmat));
+		memcpy(outmat, mat1, sizeof(outmat));
 
 		Matrix34Multiply( outmat, data->bindJoints + 12*i, mat1 );
 	}
@@ -1683,9 +1683,9 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 	}
 
 	if ( color ) {
-		Com_Memcpy( outColor, color, surf->num_vertexes * sizeof( outColor[0] ) );
+		memcpy( outColor, color, surf->num_vertexes * sizeof( outColor[0] ) );
 	} else {
-		Com_Memset( outColor, 0, surf->num_vertexes * sizeof( outColor[0] ) );
+		memset( outColor, 0, surf->num_vertexes * sizeof( outColor[0] ) );
 	}
 
 	tri = data->triangles + 3 * surf->first_triangle;

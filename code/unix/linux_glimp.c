@@ -2175,7 +2175,7 @@ void Sys_FlashWindow( void )
 	if ( wm_state == None || demands_attention == None )
 		return;
 
-	Com_Memset( &ev, 0, sizeof( ev ) );
+	memset( &ev, 0, sizeof( ev ) );
 	ev.xclient.type = ClientMessage;
 	ev.xclient.window = win;
 	ev.xclient.message_type = wm_state;

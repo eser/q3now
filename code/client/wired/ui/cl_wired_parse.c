@@ -1,16 +1,5 @@
 /*
-===========================================================================
 cl_wired_parse.c — Wired UI: menu file parser
-
-Parses .menu and .hud files using the engine's botlib PC token parser.
-This is a simplified extraction of the v6 parser from code/ui/ui_shared.c,
-adapted to run directly in the client without a VM.
-
-File format reference:
-  menus.txt manifest → lists .menu files to load
-  .menu files → menuDef { properties... itemDef { properties... } }
-  .hud files → same syntax with hudOverlay flag (Phase 3)
-===========================================================================
 */
 
 #include "../../client.h"
@@ -30,27 +19,27 @@ extern botlib_export_t *botlib_export;
 
 // ── memory pool ───────────────────────────────────────────────────────
 
-static char wired_menuPool[WIRED_MENU_POOL_SIZE];
-static int  wired_menuPoolUsed = 0;
+static char wui_menuPool[WIRED_MENU_POOL_SIZE];
+static int  wui_menuPoolUsed = 0;
 
 static void *WiredUI_Alloc( int size ) {
 	char *p;
 
-	if ( wired_menuPoolUsed + size > WIRED_MENU_POOL_SIZE ) {
+	if ( wui_menuPoolUsed + size > WIRED_MENU_POOL_SIZE ) {
 		Com_Printf( S_COLOR_RED "WiredUI_Alloc: pool exhausted (%d + %d > %d)\n",
-			wired_menuPoolUsed, size, WIRED_MENU_POOL_SIZE );
+			wui_menuPoolUsed, size, WIRED_MENU_POOL_SIZE );
 		return NULL;
 	}
 
-	p = &wired_menuPool[wired_menuPoolUsed];
-	wired_menuPoolUsed += ( ( size + 31 ) & ~31 );  // 32-byte align
-	Com_Memset( p, 0, size );
+	p = &wui_menuPool[wui_menuPoolUsed];
+	wui_menuPoolUsed += ( ( size + 31 ) & ~31 );  // 32-byte align
+	memset( p, 0, size );
 	return p;
 }
 
 void WiredUI_ResetPool( void ) {
-	wired_menuPoolUsed = 0;
-	Com_Memset( wired_menuPool, 0, sizeof( wired_menuPool ) );
+	wui_menuPoolUsed = 0;
+	memset( wui_menuPool, 0, sizeof( wui_menuPool ) );
 }
 
 // ── PC parser wrappers ────────────────────────────────────────────────
@@ -65,21 +54,21 @@ static int WiredPC_FreeSource( int handle ) {
 }
 
 // One-token pushback buffer (botlib PC API has no unread function)
-static pc_token_t wired_pendingToken;
-static qboolean   wired_hasPendingToken = qfalse;
+static pc_token_t wui_pendingToken;
+static qboolean   wui_hasPendingToken = qfalse;
 
 static int WiredPC_ReadToken( int handle, pc_token_t *token ) {
-	if ( wired_hasPendingToken ) {
-		*token = wired_pendingToken;
-		wired_hasPendingToken = qfalse;
+	if ( wui_hasPendingToken ) {
+		*token = wui_pendingToken;
+		wui_hasPendingToken = qfalse;
 		return 1;
 	}
 	return botlib_export->PC_ReadTokenHandle( handle, token );
 }
 
 static void WiredPC_UnreadToken( pc_token_t *token ) {
-	wired_pendingToken = *token;
-	wired_hasPendingToken = qtrue;
+	wui_pendingToken = *token;
+	wui_hasPendingToken = qtrue;
 }
 
 static int WiredPC_AddDefine( const char *define ) {
@@ -151,7 +140,7 @@ static int WiredPC_ReadTokenEval( int handle, pc_token_t *token ) {
 	if ( !WiredPC_ReadToken( handle, token ) ) return 0;
 
 	if ( !Q_stricmpn( token->string, "$evalfloat(", 11 ) || !Q_stricmpn( token->string, "$evalint(", 9 ) ) {
-		qboolean isInt = ( token->string[5] == 'i' );
+		qboolean isInt = !Q_stricmpn( token->string, "$evalint(", 9 );
 		// the botlib tokenizer may split this across tokens — collect until closing )
 		char exprBuf[256];
 		int depth = 0;
@@ -268,6 +257,123 @@ static qboolean WiredPC_Color( int handle, vec4_t *color ) {
 	return qtrue;
 }
 
+// ── enum table lookup ─────────────────────────────────────────────────
+
+#define WUI_ENUM_UNKNOWN 0x7FFFFFFF
+
+typedef struct { const char *k; int v; } wuiEnumMap_t;
+
+static int WiredPC_LookupEnum( const wuiEnumMap_t *map, const char *str, int defaultVal ) {
+	int i;
+	for ( i = 0; map[i].k; i++ ) {
+		if ( !Q_stricmp( str, map[i].k ) ) return map[i].v;
+	}
+	return defaultVal;
+}
+
+static const wuiEnumMap_t s_anchorMap[] = {
+	{ "TOP_LEFT",      ANCHOR_TOP_LEFT      },
+	{ "TOP_CENTER",    ANCHOR_TOP_CENTER    },
+	{ "TOP_RIGHT",     ANCHOR_TOP_RIGHT     },
+	{ "CENTER_LEFT",   ANCHOR_CENTER_LEFT   },
+	{ "CENTER",        ANCHOR_CENTER        },
+	{ "CENTER_RIGHT",  ANCHOR_CENTER_RIGHT  },
+	{ "BOTTOM_LEFT",   ANCHOR_BOTTOM_LEFT   },
+	{ "BOTTOM_CENTER", ANCHOR_BOTTOM_CENTER },
+	{ "BOTTOM_RIGHT",  ANCHOR_BOTTOM_RIGHT  },
+	{ NULL, 0 }
+};
+
+static const wuiEnumMap_t s_fontWeightMap[] = {
+	{ "light",     300 },
+	{ "regular",   400 },
+	{ "medium",    500 },
+	{ "semibold",  600 },
+	{ "bold",      700 },
+	{ "extrabold", 800 },
+	{ NULL, 0 }
+};
+
+static const wuiEnumMap_t s_directionMap[] = {
+	{ "R", 0 }, { "right",  0 },
+	{ "L", 1 }, { "left",   1 },
+	{ "T", 2 }, { "top",    2 },
+	{ "B", 3 }, { "bottom", 3 },
+	{ NULL, 0 }
+};
+
+static const wuiEnumMap_t s_alignVMap[] = {
+	{ "T", 0 }, { "top",    0 },
+	{ "C", 1 }, { "center", 1 },
+	{ "B", 2 }, { "bottom", 2 },
+	{ NULL, 0 }
+};
+
+static const wuiEnumMap_t s_justifyMap[] = {
+	{ "start",         WUI_JUSTIFY_START        },
+	{ "center",        WUI_JUSTIFY_CENTER       },
+	{ "end",           WUI_JUSTIFY_END          },
+	{ "space-between", WUI_JUSTIFY_SPACE_BETWEEN },
+	{ NULL, 0 }
+};
+
+static const wuiEnumMap_t s_easingMap[] = {
+	{ "ease-in",     WUI_EASE_IN     },
+	{ "ease-out",    WUI_EASE_OUT    },
+	{ "ease-in-out", WUI_EASE_IN_OUT },
+	{ "linear",      WUI_EASE_LINEAR },
+	{ NULL, 0 }
+};
+
+static const wuiEnumMap_t s_alignMap[] = {
+	{ "start",   WUI_ALIGN_START   },
+	{ "center",  WUI_ALIGN_CENTER  },
+	{ "end",     WUI_ALIGN_END     },
+	{ "stretch", WUI_ALIGN_STRETCH },
+	{ NULL, 0 }
+};
+
+// ── brace-balanced script capture ─────────────────────────────────────
+
+static qboolean WiredPC_CaptureBracedScript( int handle, char *dest, int destSize ) {
+	pc_token_t token;
+	int depth;
+	if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
+		return qfalse;
+	}
+	depth = 1;
+	if ( dest ) dest[0] = '\0';
+	while ( depth > 0 ) {
+		if ( !WiredPC_ReadToken( handle, &token ) ) break;
+		if ( !Q_stricmp( token.string, "{" ) ) { depth++; continue; }
+		if ( !Q_stricmp( token.string, "}" ) ) { depth--; continue; }
+		if ( dest && destSize > 0 ) {
+			if ( dest[0] ) Q_strcat( dest, destSize, " " );
+			Q_strcat( dest, destSize, token.string );
+		}
+	}
+	return qtrue;
+}
+
+/* Consume one token and return qtrue only if it equals literal. */
+static qboolean WiredPC_Expect( int handle, const char *literal ) {
+	pc_token_t token;
+	if ( !WiredPC_ReadToken( handle, &token ) ) return qfalse;
+	return ( Q_stricmp( token.string, literal ) == 0 ) ? qtrue : qfalse;
+}
+
+/* Skip a brace-balanced block starting from '{'. The opening '{' must
+   already have been consumed by the caller before calling this. */
+static void WiredPC_SkipBracedBlock( int handle ) {
+	pc_token_t token;
+	int depth = 1;
+	while ( depth > 0 ) {
+		if ( !WiredPC_ReadToken( handle, &token ) ) break;
+		if      ( !Q_stricmp( token.string, "{" ) ) depth++;
+		else if ( !Q_stricmp( token.string, "}" ) ) depth--;
+	}
+}
+
 // ── unit-aware value parser ───────────────────────────────────────────
 // Parse a value with optional unit suffix: "0.5" (norm), "50vw", "50vh", "16px"
 
@@ -325,8 +431,68 @@ static float WUI_BackfillToScreen( wuiValue_t val, float screenDim ) {
 
 // ── global menu state ─────────────────────────────────────────────────
 
-static wiredMenuDef_t *wired_menus[WIRED_MAX_MENUS];
-static int              wired_menuCount = 0;
+static wiredMenuDef_t *wui_menus[WIRED_MAX_MENUS];
+static int              wui_menuCount = 0;
+
+// ── shared flex container keyword parser ──────────────────────────────
+/* Returns qtrue and consumes one keyword block if keyword names a flex prop. */
+static qboolean WiredPC_ParseFlexProps( int handle, const char *keyword,
+                                        wuiFlexContainer_t *fc, qboolean *isFlexContainer ) {
+	if ( !Q_stricmp( keyword, "layout" ) ) {
+		pc_token_t t;
+		if ( WiredPC_ReadTokenEval( handle, &t ) ) {
+			if      ( !Q_stricmp( t.string, "row"    ) ) { fc->direction = WUI_LAYOUT_ROW;    *isFlexContainer = qtrue; }
+			else if ( !Q_stricmp( t.string, "column" ) ) { fc->direction = WUI_LAYOUT_COLUMN; *isFlexContainer = qtrue; }
+			if ( WiredPC_ReadToken( handle, &t ) ) {
+				if ( !Q_stricmp( t.string, "wrap" ) ) fc->wrap = qtrue;
+				else WiredPC_UnreadToken( &t );
+			}
+		}
+		return qtrue;
+	}
+	if ( !Q_stricmp( keyword, "gap" ) ) {
+		fc->gap = WiredPC_ParseValue( handle );
+		return qtrue;
+	}
+	if ( !Q_stricmp( keyword, "padding" ) ) {
+		pc_token_t peek;
+		fc->padding[0] = WiredPC_ParseValue( handle );
+		if ( WiredPC_ReadToken( handle, &peek ) ) {
+			if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
+				WiredPC_UnreadToken( &peek );
+				fc->padding[1] = WiredPC_ParseValue( handle );
+				if ( WiredPC_ReadToken( handle, &peek ) ) {
+					if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
+						WiredPC_UnreadToken( &peek );
+						fc->padding[2] = WiredPC_ParseValue( handle );
+						fc->padding[3] = WiredPC_ParseValue( handle );
+					} else {
+						WiredPC_UnreadToken( &peek );
+						fc->padding[2] = fc->padding[0];
+						fc->padding[3] = fc->padding[1];
+					}
+				}
+			} else {
+				WiredPC_UnreadToken( &peek );
+				fc->padding[1] = fc->padding[2] = fc->padding[3] = fc->padding[0];
+			}
+		}
+		return qtrue;
+	}
+	if ( !Q_stricmp( keyword, "align" ) ) {
+		pc_token_t val;
+		if ( WiredPC_ReadTokenEval( handle, &val ) )
+			fc->align = (wuiAlign_t)WiredPC_LookupEnum( s_alignMap, val.string, WUI_ALIGN_START );
+		return qtrue;
+	}
+	if ( !Q_stricmp( keyword, "justify" ) ) {
+		pc_token_t val;
+		if ( WiredPC_ReadTokenEval( handle, &val ) )
+			fc->justify = (wuiJustify_t)WiredPC_LookupEnum( s_justifyMap, val.string, WUI_JUSTIFY_START );
+		return qtrue;
+	}
+	return qfalse;
+}
 
 // ── item property parser (shared between top-level and nested items) ──
 
@@ -374,13 +540,166 @@ static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
 	return qtrue;
 }
 
+static void WiredPC_ParseRectInto( int handle, wuiRect_t *wuiRect, wiredRect_t *rect ) {
+	wuiRect->x = WiredPC_ParseValue( handle );
+	wuiRect->y = WiredPC_ParseValue( handle );
+	wuiRect->w = WiredPC_ParseValue( handle );
+	wuiRect->h = WiredPC_ParseValue( handle );
+	rect->x = WUI_BackfillToScreen( wuiRect->x, (float)cls.glconfig.vidWidth );
+	rect->y = WUI_BackfillToScreen( wuiRect->y, (float)cls.glconfig.vidHeight );
+	rect->w = WUI_BackfillToScreen( wuiRect->w, (float)cls.glconfig.vidWidth );
+	rect->h = WUI_BackfillToScreen( wuiRect->h, (float)cls.glconfig.vidHeight );
+}
+
+static void WiredPC_ParseAnchorInto( int handle, wiredAnchor_t *anchor ) {
+	const char *str;
+	if ( WiredPC_String( handle, &str ) ) {
+		int a = WiredPC_LookupEnum( s_anchorMap, str, WUI_ENUM_UNKNOWN );
+		if ( a == WUI_ENUM_UNKNOWN ) {
+			Com_Printf( S_COLOR_YELLOW "WARNING: unknown anchor '%s'\n", str );
+			*anchor = ANCHOR_NONE;
+		} else {
+			*anchor = (wiredAnchor_t)a;
+		}
+	}
+}
+
+// ── descriptor-table property dispatch ────────────────────────────────
+
+typedef enum { WP_INT, WP_FLOAT, WP_STR, WP_COLOR, WP_FLAG } wuiPropType_t;
+typedef struct {
+	const char    *key;
+	wuiPropType_t  type;
+	int            off;
+	int            size;
+} wuiPropDef_t;
+
+static qboolean WiredPC_ApplyProp( int handle, void *base, const wuiPropDef_t *tbl, const char *key ) {
+	int i;
+	for ( i = 0; tbl[i].key; i++ ) {
+		if ( !Q_stricmp( key, tbl[i].key ) ) {
+			char *ptr = (char *)base + tbl[i].off;
+			switch ( tbl[i].type ) {
+			case WP_INT:   { int v = 0; WiredPC_Int( handle, &v ); *(int *)ptr = v; break; }
+			case WP_FLOAT: WiredPC_Float( handle, (float *)ptr ); break;
+			case WP_STR:   { const char *s; if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ptr, s, tbl[i].size ); break; }
+			case WP_COLOR: WiredPC_Color( handle, (vec4_t *)ptr ); break;
+			case WP_FLAG:  *(qboolean *)ptr = qtrue; break;
+			}
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
+#define WP_I(k,T,f)   { k, WP_INT,   offsetof(T,f), 0 }
+#define WP_F(k,T,f)   { k, WP_FLOAT, offsetof(T,f), 0 }
+#define WP_S(k,T,f)   { k, WP_STR,   offsetof(T,f), sizeof(((T*)0)->f) }
+#define WP_C(k,T,f)   { k, WP_COLOR, offsetof(T,f), 0 }
+#define WP_FL(k,T,f)  { k, WP_FLAG,  offsetof(T,f), 0 }
+
+static const wuiPropDef_t s_itemProps[] = {
+	/* strings */
+	WP_S( "name",             wiredItemDef_t, name             ),
+	WP_S( "text",             wiredItemDef_t, text             ),
+	WP_S( "group",            wiredItemDef_t, group            ),
+	WP_S( "background",       wiredItemDef_t, background       ),
+	WP_S( "cvar",             wiredItemDef_t, cvar             ),
+	WP_S( "cvarTest",         wiredItemDef_t, cvarTest         ),
+	WP_S( "populateCallback", wiredItemDef_t, populateCallback ),
+	WP_S( "asset_model",      wiredItemDef_t, assetModel       ),
+	WP_S( "asset_shader",     wiredItemDef_t, assetShader      ),
+	WP_S( "hudElement",       wiredItemDef_t, hudElement       ),
+	WP_S( "tooltip",          wiredItemDef_t, tooltip          ),
+	WP_S( "image",            wiredItemDef_t, image            ),
+	WP_S( "bindcolor",        wiredItemDef_t, storeBindColor   ),
+	WP_S( "bindicon",         wiredItemDef_t, storeBindIcon    ),
+	WP_S( "bindvalue",        wiredItemDef_t, storeBindValue   ),
+	WP_S( "showbind",         wiredItemDef_t, showBind         ),
+	WP_S( "hidebind",         wiredItemDef_t, hideBind         ),
+	WP_S( "source",           wiredItemDef_t, tableSource      ),
+	WP_S( "countbind",        wiredItemDef_t, tableCountBind   ),
+	/* ints */
+	WP_I( "type",             wiredItemDef_t, type             ),
+	WP_I( "style",            wiredItemDef_t, style            ),
+	WP_I( "textalign",        wiredItemDef_t, textalign        ),
+	WP_I( "textstyle",        wiredItemDef_t, textstyle        ),
+	WP_I( "border",           wiredItemDef_t, border           ),
+	WP_I( "ownerdraw",        wiredItemDef_t, ownerdraw        ),
+	WP_I( "ownerdrawFlag",    wiredItemDef_t, ownerdrawFlag    ),
+	WP_I( "maxChars",         wiredItemDef_t, maxChars         ),
+	WP_I( "maxPaintChars",    wiredItemDef_t, maxPaintChars    ),
+	WP_I( "fadedelay",        wiredItemDef_t, fadeDelay        ),
+	WP_I( "time",             wiredItemDef_t, timeMs           ),
+	WP_I( "widescreen",       wiredItemDef_t, modelWidescreen  ),
+	WP_I( "visible",          wiredItemDef_t, visible          ),
+	WP_I( "teamfilter",       wiredItemDef_t, tableTeamFilter  ),
+	/* floats */
+	WP_F( "textalignx",       wiredItemDef_t, textalignx       ),
+	WP_F( "textaligny",       wiredItemDef_t, textaligny       ),
+	WP_F( "textscale",        wiredItemDef_t, textscale        ),
+	WP_F( "bordersize",       wiredItemDef_t, bordersize       ),
+	WP_F( "special",          wiredItemDef_t, special          ),
+	WP_F( "feeder",           wiredItemDef_t, feeder           ),
+	WP_F( "elementwidth",     wiredItemDef_t, elementwidth     ),
+	WP_F( "elementheight",    wiredItemDef_t, elementheight    ),
+	WP_F( "letterspacing",    wiredItemDef_t, letterSpacing    ),
+	WP_F( "model_fovx",       wiredItemDef_t, modelFovX        ),
+	WP_F( "model_fovy",       wiredItemDef_t, modelFovY        ),
+	WP_F( "model_rotation",   wiredItemDef_t, modelRotation    ),
+	WP_F( "model_angle",      wiredItemDef_t, modelAngle       ),
+	/* colors */
+	WP_C( "forecolor",        wiredItemDef_t, forecolor        ),
+	WP_C( "backcolor",        wiredItemDef_t, backcolor        ),
+	WP_C( "bordercolor",      wiredItemDef_t, bordercolor      ),
+	WP_C( "outlinecolor",     wiredItemDef_t, outlinecolor     ),
+	WP_C( "color2",           wiredItemDef_t, color2           ),
+	WP_C( "fade",             wiredItemDef_t, fadeColor        ),
+	/* flags (no value token consumed) */
+	WP_FL( "decoration",      wiredItemDef_t, decoration       ),
+	WP_FL( "notselectable",   wiredItemDef_t, notselectable    ),
+	WP_FL( "horizontalscroll",wiredItemDef_t, horizontalScroll ),
+	WP_FL( "fill",            wiredItemDef_t, fillFlag         ),
+	WP_FL( "monospace",       wiredItemDef_t, monospace        ),
+	{ NULL, 0, 0, 0 }
+};
+
+static const wuiPropDef_t s_menuProps[] = {
+	/* strings */
+	WP_S( "name",             wiredMenuDef_t, name             ),
+	WP_S( "background",       wiredMenuDef_t, background       ),
+	WP_S( "soundLoop",        wiredMenuDef_t, soundLoop        ),
+	/* ints (qboolean fields are typedef int, WP_INT works) */
+	WP_I( "style",            wiredMenuDef_t, style            ),
+	WP_I( "border",           wiredMenuDef_t, border           ),
+	WP_I( "fadeCycle",        wiredMenuDef_t, fadeCycle        ),
+	WP_I( "fullscreen",       wiredMenuDef_t, fullscreen       ),
+	WP_I( "visible",          wiredMenuDef_t, visible          ),
+	WP_I( "hudOverlay",       wiredMenuDef_t, hudOverlay       ),
+	/* floats */
+	WP_F( "bordersize",       wiredMenuDef_t, bordersize       ),
+	WP_F( "fadeClamp",        wiredMenuDef_t, fadeClamp        ),
+	WP_F( "fadeAmount",       wiredMenuDef_t, fadeAmount       ),
+	/* colors */
+	WP_C( "forecolor",        wiredMenuDef_t, forecolor        ),
+	WP_C( "backcolor",        wiredMenuDef_t, backcolor        ),
+	WP_C( "focuscolor",       wiredMenuDef_t, focuscolor       ),
+	WP_C( "bordercolor",      wiredMenuDef_t, bordercolor      ),
+	WP_C( "disablecolor",     wiredMenuDef_t, disablecolor     ),
+	/* flags */
+	WP_FL( "modal",           wiredMenuDef_t, modal            ),
+	WP_FL( "alwaysontop",     wiredMenuDef_t, alwaysOnTop      ),
+	WP_FL( "popup",           wiredMenuDef_t, popup            ),
+	WP_FL( "outOfBoundsClick",wiredMenuDef_t, outOfBoundsClick ),
+	{ NULL, 0, 0, 0 }
+};
+
 static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) {
 	pc_token_t      token;
 	const char     *str;
-	int             depth;
 
 	// expect opening brace
-	if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
+	if ( !WiredPC_Expect( handle, "{" ) ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: expected '{' for itemDef\n" );
 		return qfalse;
 	}
@@ -394,96 +713,11 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		}
 
 		// ── item keywords ─────────────────────────────────────────
-		if ( !Q_stricmp( token.string, "name" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->name, str, sizeof( item->name ) );
-		}
-		else if ( !Q_stricmp( token.string, "text" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->text, str, sizeof( item->text ) );
-		}
-		else if ( !Q_stricmp( token.string, "group" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->group, str, sizeof( item->group ) );
-		}
-		else if ( !Q_stricmp( token.string, "type" ) ) {
-			WiredPC_Int( handle, &item->type );
+		if ( WiredPC_ApplyProp( handle, item, s_itemProps, token.string ) ) {
+			/* consumed by table */
 		}
 		else if ( !Q_stricmp( token.string, "rect" ) ) {
-			// .wmenu: parse with unit awareness
-			item->wuiRect.x = WiredPC_ParseValue( handle );
-			item->wuiRect.y = WiredPC_ParseValue( handle );
-			item->wuiRect.w = WiredPC_ParseValue( handle );
-			item->wuiRect.h = WiredPC_ParseValue( handle );
-			// Back-fill old rect for draw code (real screen pixels)
-			item->rect.x = WUI_BackfillToScreen( item->wuiRect.x, (float)cls.glconfig.vidWidth );
-			item->rect.y = WUI_BackfillToScreen( item->wuiRect.y, (float)cls.glconfig.vidHeight );
-			item->rect.w = WUI_BackfillToScreen( item->wuiRect.w, (float)cls.glconfig.vidWidth );
-			item->rect.h = WUI_BackfillToScreen( item->wuiRect.h, (float)cls.glconfig.vidHeight );
-		}
-		else if ( !Q_stricmp( token.string, "style" ) ) {
-			WiredPC_Int( handle, &item->style );
-		}
-		else if ( !Q_stricmp( token.string, "textalign" ) ) {
-			WiredPC_Int( handle, &item->textalign );
-		}
-		else if ( !Q_stricmp( token.string, "textalignx" ) ) {
-			WiredPC_Float( handle, &item->textalignx );
-			// Legacy .menu textalignx values are in pixels — keep as-is
-			// .wmenu uses textoffset instead, textalignx not used in native format
-		}
-		else if ( !Q_stricmp( token.string, "textaligny" ) ) {
-			WiredPC_Float( handle, &item->textaligny );
-			// Legacy .menu textaligny values are in pixels — keep as-is
-		}
-		else if ( !Q_stricmp( token.string, "textscale" ) ) {
-			WiredPC_Float( handle, &item->textscale );
-			// Legacy .menu textscale is 0.0-1.0 fraction — keep as-is for render loop
-			// .wmenu uses font "name" pointsize instead, textscale not used in native format
-		}
-		else if ( !Q_stricmp( token.string, "textstyle" ) ) {
-			WiredPC_Int( handle, &item->textstyle );
-		}
-		else if ( !Q_stricmp( token.string, "forecolor" ) ) {
-			WiredPC_Color( handle, &item->forecolor );
-		}
-		else if ( !Q_stricmp( token.string, "backcolor" ) ) {
-			WiredPC_Color( handle, &item->backcolor );
-		}
-		else if ( !Q_stricmp( token.string, "bordercolor" ) ) {
-			WiredPC_Color( handle, &item->bordercolor );
-		}
-		else if ( !Q_stricmp( token.string, "border" ) ) {
-			WiredPC_Int( handle, &item->border );
-		}
-		else if ( !Q_stricmp( token.string, "bordersize" ) ) {
-			WiredPC_Float( handle, &item->bordersize );
-		}
-		else if ( !Q_stricmp( token.string, "background" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->background, str, sizeof( item->background ) );
-		}
-		else if ( !Q_stricmp( token.string, "visible" ) ) {
-			int v;
-			WiredPC_Int( handle, &v );
-			item->visible = (qboolean)v;
-		}
-		else if ( !Q_stricmp( token.string, "decoration" ) ) {
-			item->decoration = qtrue;
-		}
-		else if ( !Q_stricmp( token.string, "ownerdraw" ) ) {
-			WiredPC_Int( handle, &item->ownerdraw );
-		}
-		else if ( !Q_stricmp( token.string, "ownerdrawFlag" ) ) {
-			WiredPC_Int( handle, &item->ownerdrawFlag );
-		}
-		else if ( !Q_stricmp( token.string, "cvar" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->cvar, str, sizeof( item->cvar ) );
-		}
-		else if ( !Q_stricmp( token.string, "cvarTest" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->cvarTest, str, sizeof( item->cvarTest ) );
+			WiredPC_ParseRectInto( handle, &item->wuiRect, &item->rect );
 		}
 		else if ( !Q_stricmp( token.string, "cvarFloat" ) ) {
 			// cvarFloat "cvarname" defVal minVal maxVal
@@ -499,7 +733,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			if ( item->multiData ) {
 				item->multiData->isStringList = qtrue;
 				item->multiData->count = 0;
-				if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) continue;
+				if ( !WiredPC_Expect( handle, "{" ) ) continue;
 				while ( item->multiData->count < WIRED_MAX_MULTI_CHOICES ) {
 					if ( !WiredPC_ReadToken( handle, &token ) ) break;
 					if ( !Q_stricmp( token.string, "}" ) ) break;
@@ -519,7 +753,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			if ( item->multiData ) {
 				item->multiData->isStringList = qfalse;
 				item->multiData->count = 0;
-				if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) continue;
+				if ( !WiredPC_Expect( handle, "{" ) ) continue;
 				while ( item->multiData->count < WIRED_MAX_MULTI_CHOICES ) {
 					if ( !WiredPC_ReadToken( handle, &token ) ) break;
 					if ( !Q_stricmp( token.string, "}" ) ) break;
@@ -531,32 +765,6 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 					item->multiData->count++;
 				}
 			}
-		}
-		else if ( !Q_stricmp( token.string, "populateCallback" ) ) {
-			// populateCallback "audio_devices"
-			//
-			// Marks an ITEM_TYPE_MULTI as dynamic: at render time the named
-			// callback (registered via WiredUI_RegisterPopulateCallback) is
-			// invoked to populate the option list. Replaces cvarFloatList /
-			// cvarStrList for runtime-discovered options.
-			if ( WiredPC_String( handle, &str ) ) {
-				Q_strncpyz( item->populateCallback, str, sizeof( item->populateCallback ) );
-			}
-		}
-		else if ( !Q_stricmp( token.string, "maxChars" ) ) {
-			WiredPC_Int( handle, &item->maxChars );
-		}
-		else if ( !Q_stricmp( token.string, "maxPaintChars" ) ) {
-			WiredPC_Int( handle, &item->maxPaintChars );
-		}
-		else if ( !Q_stricmp( token.string, "feeder" ) ) {
-			WiredPC_Float( handle, &item->feeder );
-		}
-		else if ( !Q_stricmp( token.string, "elementwidth" ) ) {
-			WiredPC_Float( handle, &item->elementwidth );
-		}
-		else if ( !Q_stricmp( token.string, "elementheight" ) ) {
-			WiredPC_Float( handle, &item->elementheight );
 		}
 		else if ( !Q_stricmp( token.string, "columns" ) ) {
 			// columns N pos1 width1 maxchars1 pos2 width2 maxchars2 ...
@@ -576,34 +784,8 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			int et;
 			WiredPC_Int( handle, &et ); // LISTBOX_TEXT or LISTBOX_IMAGE — store if needed
 		}
-		else if ( !Q_stricmp( token.string, "notselectable" ) ) {
-			item->notselectable = qtrue;
-		}
-		else if ( !Q_stricmp( token.string, "horizontalscroll" ) ) {
-			item->horizontalScroll = qtrue;
-		}
-		else if ( !Q_stricmp( token.string, "outlinecolor" ) ) {
-			WiredPC_Color( handle, &item->outlinecolor );
-		}
-		else if ( !Q_stricmp( token.string, "special" ) ) {
-			WiredPC_Float( handle, &item->special );
-		}
 		else if ( !Q_stricmp( token.string, "anchor" ) ) {
-			if ( WiredPC_String( handle, &str ) ) {
-				if      ( !Q_stricmp( str, "TOP_LEFT" ) )      item->anchor = ANCHOR_TOP_LEFT;
-				else if ( !Q_stricmp( str, "TOP_CENTER" ) )     item->anchor = ANCHOR_TOP_CENTER;
-				else if ( !Q_stricmp( str, "TOP_RIGHT" ) )      item->anchor = ANCHOR_TOP_RIGHT;
-				else if ( !Q_stricmp( str, "CENTER_LEFT" ) )    item->anchor = ANCHOR_CENTER_LEFT;
-				else if ( !Q_stricmp( str, "CENTER" ) )         item->anchor = ANCHOR_CENTER;
-				else if ( !Q_stricmp( str, "CENTER_RIGHT" ) )   item->anchor = ANCHOR_CENTER_RIGHT;
-				else if ( !Q_stricmp( str, "BOTTOM_LEFT" ) )    item->anchor = ANCHOR_BOTTOM_LEFT;
-				else if ( !Q_stricmp( str, "BOTTOM_CENTER" ) )  item->anchor = ANCHOR_BOTTOM_CENTER;
-				else if ( !Q_stricmp( str, "BOTTOM_RIGHT" ) )   item->anchor = ANCHOR_BOTTOM_RIGHT;
-				else {
-					Com_Printf( S_COLOR_YELLOW "WARNING: unknown anchor '%s'\n", str );
-					item->anchor = ANCHOR_NONE;
-				}
-			}
+			WiredPC_ParseAnchorInto( handle, &item->anchor );
 		}
 		else if ( !Q_stricmp( token.string, "textoffset" ) ) {
 			WiredPC_Float( handle, &item->textoffsetX );
@@ -623,60 +805,14 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			}
 		}
 		else if ( !Q_stricmp( token.string, "enableCvar" ) || !Q_stricmp( token.string, "disableCvar" ) ) {
-			char *dest2;
-			int destSize2;
-			int depth2 = 0;
-			if ( !Q_stricmp( token.string, "enableCvar" ) ) {
-				dest2 = item->enableCvar; destSize2 = sizeof( item->enableCvar );
-			} else {
-				dest2 = item->disableCvar; destSize2 = sizeof( item->disableCvar );
-			}
-			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
-				continue;
-			}
-			depth2 = 1;
-			dest2[0] = '\0';
-			while ( depth2 > 0 ) {
-				if ( !WiredPC_ReadToken( handle, &token ) ) break;
-				if ( !Q_stricmp( token.string, "{" ) ) { depth2++; continue; }
-				if ( !Q_stricmp( token.string, "}" ) ) { depth2--; continue; }
-				if ( dest2[0] ) Q_strcat( dest2, destSize2, " " );
-				Q_strcat( dest2, destSize2, token.string );
-			}
-		}
-		else if ( !Q_stricmp( token.string, "asset_model" ) ) {
-			if ( WiredPC_String( handle, &str ) ) {
-				Q_strncpyz( item->assetModel, str, sizeof( item->assetModel ) );
-			}
-		}
-		else if ( !Q_stricmp( token.string, "asset_shader" ) ) {
-			if ( WiredPC_String( handle, &str ) ) {
-				Q_strncpyz( item->assetShader, str, sizeof( item->assetShader ) );
-			}
+			char *dest2    = !Q_stricmp( token.string, "enableCvar" ) ? item->enableCvar  : item->disableCvar;
+			int destSize2  = !Q_stricmp( token.string, "enableCvar" ) ? sizeof( item->enableCvar ) : sizeof( item->disableCvar );
+			if ( !WiredPC_CaptureBracedScript( handle, dest2, destSize2 ) ) continue;
 		}
 		else if ( !Q_stricmp( token.string, "model_origin" ) ) {
 			WiredPC_Float( handle, &item->modelOrigin[0] );
 			WiredPC_Float( handle, &item->modelOrigin[1] );
 			WiredPC_Float( handle, &item->modelOrigin[2] );
-		}
-		else if ( !Q_stricmp( token.string, "model_fovx" ) ) {
-			WiredPC_Float( handle, &item->modelFovX );
-		}
-		else if ( !Q_stricmp( token.string, "model_fovy" ) ) {
-			WiredPC_Float( handle, &item->modelFovY );
-		}
-		else if ( !Q_stricmp( token.string, "model_rotation" ) ) {
-			WiredPC_Float( handle, &item->modelRotation );
-		}
-		else if ( !Q_stricmp( token.string, "model_angle" ) ) {
-			WiredPC_Float( handle, &item->modelAngle );
-		}
-		else if ( !Q_stricmp( token.string, "widescreen" ) ) {
-			WiredPC_Int( handle, &item->modelWidescreen );
-		}
-		else if ( !Q_stricmp( token.string, "hudElement" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->hudElement, str, sizeof( item->hudElement ) );
 		}
 		else if ( !Q_stricmp( token.string, "bind" ) ) {
 			if ( WiredPC_String( handle, &str ) ) {
@@ -684,27 +820,6 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 				Q_strncpyz( item->storeBind, str, sizeof( item->storeBind ) );
 			}
 		}
-		else if ( !Q_stricmp( token.string, "bindcolor" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->storeBindColor, str, sizeof( item->storeBindColor ) );
-		}
-		else if ( !Q_stricmp( token.string, "bindicon" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->storeBindIcon, str, sizeof( item->storeBindIcon ) );
-		}
-		else if ( !Q_stricmp( token.string, "bindvalue" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->storeBindValue, str, sizeof( item->storeBindValue ) );
-		}
-		else if ( !Q_stricmp( token.string, "showbind" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->showBind, str, sizeof( item->showBind ) );
-		}
-		else if ( !Q_stricmp( token.string, "hidebind" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->hideBind, str, sizeof( item->hideBind ) );
-		}
-		// ── ModernHUD element properties (Phase 3) ────────────────────
 		else if ( !Q_stricmp( token.string, "font" ) ) {
 			// font "name" [pointsize]
 			// ModernHUD items: font name only (fontsize parsed separately)
@@ -722,56 +837,21 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		}
 		else if ( !Q_stricmp( token.string, "fontweight" ) ) {
 			if ( WiredPC_String( handle, &str ) ) {
-				if ( !Q_stricmp( str, "light" ) )          item->fontWeight = 300;
-				else if ( !Q_stricmp( str, "regular" ) )   item->fontWeight = 400;
-				else if ( !Q_stricmp( str, "medium" ) )    item->fontWeight = 500;
-				else if ( !Q_stricmp( str, "semibold" ) )  item->fontWeight = 600;
-				else if ( !Q_stricmp( str, "bold" ) )      item->fontWeight = 700;
-				else if ( !Q_stricmp( str, "extrabold" ) ) item->fontWeight = 800;
-				else                                         item->fontWeight = atoi( str );
+				int w = WiredPC_LookupEnum( s_fontWeightMap, str, WUI_ENUM_UNKNOWN );
+				item->fontWeight = ( w != WUI_ENUM_UNKNOWN ) ? w : atoi( str );
 			}
-		}
-		else if ( !Q_stricmp( token.string, "letterspacing" ) ) {
-			WiredPC_Float( handle, &item->letterSpacing );
 		}
 		else if ( !Q_stricmp( token.string, "direction" ) ) {
 			if ( WiredPC_String( handle, &str ) ) {
-				if ( !Q_stricmp( str, "R" ) || !Q_stricmp( str, "right" ) )       item->direction = 0;
-				else if ( !Q_stricmp( str, "L" ) || !Q_stricmp( str, "left" ) )   item->direction = 1;
-				else if ( !Q_stricmp( str, "T" ) || !Q_stricmp( str, "top" ) )    item->direction = 2;
-				else if ( !Q_stricmp( str, "B" ) || !Q_stricmp( str, "bottom" ) ) item->direction = 3;
-				else item->direction = atoi( str );
+				int d = WiredPC_LookupEnum( s_directionMap, str, WUI_ENUM_UNKNOWN );
+				item->direction = ( d != WUI_ENUM_UNKNOWN ) ? d : atoi( str );
 			}
-		}
-		else if ( !Q_stricmp( token.string, "fill" ) ) {
-			item->fillFlag = qtrue;
-		}
-		else if ( !Q_stricmp( token.string, "monospace" ) ) {
-			item->monospace = qtrue;
-		}
-		else if ( !Q_stricmp( token.string, "color2" ) ) {
-			WiredPC_Color( handle, &item->color2 );
 		}
 		else if ( !Q_stricmp( token.string, "alignv" ) || !Q_stricmp( token.string, "alignV" ) ) {
 			if ( WiredPC_String( handle, &str ) ) {
-				if ( !Q_stricmp( str, "T" ) || !Q_stricmp( str, "top" ) )        item->alignV = 0;
-				else if ( !Q_stricmp( str, "C" ) || !Q_stricmp( str, "center" ) ) item->alignV = 1;
-				else if ( !Q_stricmp( str, "B" ) || !Q_stricmp( str, "bottom" ) ) item->alignV = 2;
-				else item->alignV = atoi( str );
+				int v = WiredPC_LookupEnum( s_alignVMap, str, WUI_ENUM_UNKNOWN );
+				item->alignV = ( v != WUI_ENUM_UNKNOWN ) ? v : atoi( str );
 			}
-		}
-		else if ( !Q_stricmp( token.string, "fade" ) ) {
-			WiredPC_Color( handle, &item->fadeColor );
-		}
-		else if ( !Q_stricmp( token.string, "fadedelay" ) ) {
-			WiredPC_Int( handle, &item->fadeDelay );
-		}
-		else if ( !Q_stricmp( token.string, "time" ) ) {
-			WiredPC_Int( handle, &item->timeMs );
-		}
-		else if ( !Q_stricmp( token.string, "image" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->image, str, sizeof( item->image ) );
 		}
 		else if ( !Q_stricmp( token.string, "action" ) ||
 		          !Q_stricmp( token.string, "onFocus" ) ||
@@ -796,148 +876,23 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			else if ( !Q_stricmp( token.string, "onTab" ) )   dest = item->onTab;
 			else if ( !Q_stricmp( token.string, "doubleclick" )) dest = item->doubleClick;
 
-			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
-				continue;
-			}
-			depth = 1;
-			if ( dest ) { dest[0] = '\0'; }
-			while ( depth > 0 ) {
-				if ( !WiredPC_ReadToken( handle, &token ) ) break;
-				if ( !Q_stricmp( token.string, "{" ) ) { depth++; continue; }
-				if ( !Q_stricmp( token.string, "}" ) ) { depth--; continue; }
-				if ( dest ) {
-					// append token to script string, space-separated
-					if ( dest[0] ) Q_strcat( dest, destSize, " " );
-					Q_strcat( dest, destSize, token.string );
-				}
-			}
+			if ( !WiredPC_CaptureBracedScript( handle, dest, destSize ) ) continue;
 		}
 		else if ( !Q_stricmp( token.string, "execKey" ) ) {
-			// ET:Legacy: execKey "key" { script }
 			const char *keyStr;
 			if ( WiredPC_String( handle, &keyStr ) ) {
-				item->execKeyCode = keyStr[0];  // single char key code
+				item->execKeyCode = keyStr[0];
 			}
-			// capture the action block
-			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
-				continue;
-			}
-			depth = 1;
-			item->execKeyAction[0] = '\0';
-			while ( depth > 0 ) {
-				if ( !WiredPC_ReadToken( handle, &token ) ) break;
-				if ( !Q_stricmp( token.string, "{" ) ) { depth++; continue; }
-				if ( !Q_stricmp( token.string, "}" ) ) { depth--; continue; }
-				if ( item->execKeyAction[0] ) Q_strcat( item->execKeyAction, WIRED_MAX_SCRIPT_LEN, " " );
-				Q_strcat( item->execKeyAction, WIRED_MAX_SCRIPT_LEN, token.string );
-			}
+			if ( !WiredPC_CaptureBracedScript( handle, item->execKeyAction, WIRED_MAX_SCRIPT_LEN ) ) continue;
 		}
-		else if ( !Q_stricmp( token.string, "tooltip" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->tooltip, str, sizeof( item->tooltip ) );
+		else if ( !Q_stricmp( token.string, "showCvar" ) || !Q_stricmp( token.string, "hideCvar" ) ) {
+			char *dest    = !Q_stricmp( token.string, "showCvar" ) ? item->showCvar  : item->hideCvar;
+			int destSize  = !Q_stricmp( token.string, "showCvar" ) ? sizeof( item->showCvar ) : sizeof( item->hideCvar );
+			if ( !WiredPC_CaptureBracedScript( handle, dest, destSize ) ) continue;
 		}
-		else if ( !Q_stricmp( token.string, "showCvar" ) || !Q_stricmp( token.string, "hideCvar" ) ||
-		          !Q_stricmp( token.string, "enableCvar" ) || !Q_stricmp( token.string, "disableCvar" ) ) {
-			// capture cvar value lists { "val1" "val2" ... } as space-separated string
-			char *dest = NULL;
-			int destSize = 0;
-			if ( !Q_stricmp( token.string, "showCvar" ) )       { dest = item->showCvar; destSize = sizeof( item->showCvar ); }
-			else if ( !Q_stricmp( token.string, "hideCvar" ) )   { dest = item->hideCvar; destSize = sizeof( item->hideCvar ); }
-
-			if ( dest ) dest[0] = '\0';
-
-			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
-				continue;
-			}
-			depth = 1;
-			while ( depth > 0 ) {
-				if ( !WiredPC_ReadToken( handle, &token ) ) break;
-				if ( !Q_stricmp( token.string, "{" ) ) { depth++; continue; }
-				if ( !Q_stricmp( token.string, "}" ) ) { depth--; continue; }
-				if ( dest && destSize > 0 ) {
-					if ( dest[0] ) Q_strcat( dest, destSize, " " );
-					Q_strcat( dest, destSize, token.string );
-				}
-			}
-		}
-		// ── Layer 2: flex container keywords ──────────────────────────
-		else if ( !Q_stricmp( token.string, "layout" ) ) {
-			pc_token_t layoutToken;
-			if ( WiredPC_ReadTokenEval( handle, &layoutToken ) ) {
-				if ( !Q_stricmp( layoutToken.string, "row" ) ) {
-					item->flexContainer.direction = WUI_LAYOUT_ROW;
-					item->isFlexContainer = qtrue;
-				} else if ( !Q_stricmp( layoutToken.string, "column" ) ) {
-					item->flexContainer.direction = WUI_LAYOUT_COLUMN;
-					item->isFlexContainer = qtrue;
-				}
-				// Check for "wrap" modifier
-				if ( WiredPC_ReadToken( handle, &layoutToken ) ) {
-					if ( !Q_stricmp( layoutToken.string, "wrap" ) ) {
-						item->flexContainer.wrap = qtrue;
-					} else {
-						WiredPC_UnreadToken( &layoutToken );
-					}
-				}
-			}
-		}
-		else if ( !Q_stricmp( token.string, "gap" ) ) {
-			item->flexContainer.gap = WiredPC_ParseValue( handle );
-		}
-		else if ( !Q_stricmp( token.string, "padding" ) ) {
-			// Support 1, 2, or 4 value forms
-			pc_token_t peek;
-			item->flexContainer.padding[0] = WiredPC_ParseValue( handle );
-			// Try reading more values
-			if ( WiredPC_ReadToken( handle, &peek ) ) {
-				if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
-					// At least 2 values
-					WiredPC_UnreadToken( &peek );
-					item->flexContainer.padding[1] = WiredPC_ParseValue( handle );
-					// Try 3rd and 4th
-					if ( WiredPC_ReadToken( handle, &peek ) ) {
-						if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
-							WiredPC_UnreadToken( &peek );
-							item->flexContainer.padding[2] = WiredPC_ParseValue( handle );
-							item->flexContainer.padding[3] = WiredPC_ParseValue( handle );
-						} else {
-							WiredPC_UnreadToken( &peek );
-							// 2-value form: top/bottom = [0], left/right = [1]
-							item->flexContainer.padding[2] = item->flexContainer.padding[0];
-							item->flexContainer.padding[3] = item->flexContainer.padding[1];
-						}
-					}
-				} else {
-					WiredPC_UnreadToken( &peek );
-					// 1-value form: all sides equal
-					item->flexContainer.padding[1] = item->flexContainer.padding[0];
-					item->flexContainer.padding[2] = item->flexContainer.padding[0];
-					item->flexContainer.padding[3] = item->flexContainer.padding[0];
-				}
-			}
-		}
-		else if ( !Q_stricmp( token.string, "align" ) ) {
-			// Native format: flex align keyword (overrides legacy int align)
-			pc_token_t val;
-			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
-				if ( !Q_stricmp( val.string, "start" ) ) item->flexContainer.align = WUI_ALIGN_START;
-				else if ( !Q_stricmp( val.string, "center" ) ) item->flexContainer.align = WUI_ALIGN_CENTER;
-				else if ( !Q_stricmp( val.string, "end" ) ) item->flexContainer.align = WUI_ALIGN_END;
-				else if ( !Q_stricmp( val.string, "stretch" ) ) item->flexContainer.align = WUI_ALIGN_STRETCH;
-				else {
-					// Legacy numeric align value in native format
-					item->align = atoi( val.string );
-				}
-			}
-		}
-		else if ( !Q_stricmp( token.string, "justify" ) ) {
-			pc_token_t val;
-			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
-				if ( !Q_stricmp( val.string, "start" ) ) item->flexContainer.justify = WUI_JUSTIFY_START;
-				else if ( !Q_stricmp( val.string, "center" ) ) item->flexContainer.justify = WUI_JUSTIFY_CENTER;
-				else if ( !Q_stricmp( val.string, "end" ) ) item->flexContainer.justify = WUI_JUSTIFY_END;
-				else if ( !Q_stricmp( val.string, "space-between" ) ) item->flexContainer.justify = WUI_JUSTIFY_SPACE_BETWEEN;
-			}
+		// ── flex container keywords ──────────────────────────────────
+		else if ( WiredPC_ParseFlexProps( handle, token.string, &item->flexContainer, &item->isFlexContainer ) ) {
+			/* consumed */
 		}
 		// ── positioning mode ──────────────────────────────────────────
 		else if ( !Q_stricmp( token.string, "position" ) ) {
@@ -963,10 +918,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		else if ( !Q_stricmp( token.string, "alignSelf" ) ) {
 			pc_token_t val;
 			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
-				if ( !Q_stricmp( val.string, "start" ) ) item->flexChild.alignSelf = WUI_ALIGN_START;
-				else if ( !Q_stricmp( val.string, "center" ) ) item->flexChild.alignSelf = WUI_ALIGN_CENTER;
-				else if ( !Q_stricmp( val.string, "end" ) ) item->flexChild.alignSelf = WUI_ALIGN_END;
-				else if ( !Q_stricmp( val.string, "stretch" ) ) item->flexChild.alignSelf = WUI_ALIGN_STRETCH;
+				item->flexChild.alignSelf = (wuiAlign_t)WiredPC_LookupEnum( s_alignMap, val.string, WUI_ALIGN_START );
 			}
 		}
 		else if ( !Q_stricmp( token.string, "aspect" ) ) {
@@ -1003,7 +955,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			if ( item->isFlexContainer && item->childCount < WIRED_MAX_ITEMS_PER_MENU ) {
 				wiredItemDef_t *child = (wiredItemDef_t *)WiredUI_Alloc( sizeof( wiredItemDef_t ) );
 				if ( child ) {
-					Com_Memset( child, 0, sizeof( *child ) );
+					memset( child, 0, sizeof( *child ) );
 					// defaults for nested child
 					child->visible = qtrue;
 					child->forecolor[0] = child->forecolor[1] = child->forecolor[2] = child->forecolor[3] = 1.0f;
@@ -1020,13 +972,8 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 				}
 			} else {
 				// Not a flex container or children full — skip the block
-				if ( WiredPC_ReadToken( handle, &token ) && !Q_stricmp( token.string, "{" ) ) {
-					int skipDepth = 1;
-					while ( skipDepth > 0 ) {
-						if ( !WiredPC_ReadToken( handle, &token ) ) break;
-						if ( !Q_stricmp( token.string, "{" ) ) skipDepth++;
-						else if ( !Q_stricmp( token.string, "}" ) ) skipDepth--;
-					}
+				if ( WiredPC_Expect( handle, "{" ) ) {
+					WiredPC_SkipBracedBlock( handle );
 				}
 			}
 		}
@@ -1036,12 +983,10 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
 				item->wuiTransition.duration = val.intvalue;
 			}
-			// Check for optional easing keyword
+			/* optional easing keyword — push back if not recognised */
 			if ( WiredPC_ReadToken( handle, &val ) ) {
-				if ( !Q_stricmp( val.string, "ease-in" ) ) item->wuiTransition.easing = WUI_EASE_IN;
-				else if ( !Q_stricmp( val.string, "ease-out" ) ) item->wuiTransition.easing = WUI_EASE_OUT;
-				else if ( !Q_stricmp( val.string, "ease-in-out" ) ) item->wuiTransition.easing = WUI_EASE_IN_OUT;
-				else if ( !Q_stricmp( val.string, "linear" ) ) item->wuiTransition.easing = WUI_EASE_LINEAR;
+				int e = WiredPC_LookupEnum( s_easingMap, val.string, WUI_ENUM_UNKNOWN );
+				if ( e != WUI_ENUM_UNKNOWN ) item->wuiTransition.easing = (wuiEasing_t)e;
 				else WiredPC_UnreadToken( &val );
 			}
 		}
@@ -1070,26 +1015,12 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 				item->breakpointCount++;
 			}
 		}
-		/* ── TABLE widget keywords ─────────────────────────────────── */
-		else if ( !Q_stricmp( token.string, "source" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->tableSource, str, sizeof( item->tableSource ) );
-		}
-		else if ( !Q_stricmp( token.string, "countbind" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( item->tableCountBind, str, sizeof( item->tableCountBind ) );
-		}
-		else if ( !Q_stricmp( token.string, "teamfilter" ) ) {
-			int v;
-			if ( WiredPC_Int( handle, &v ) )
-				item->tableTeamFilter = v;
-		}
 		else if ( !Q_stricmp( token.string, "column" ) ) {
 			/* column { field "name" header "Player" width 0.25 align 0 colorfield "namecolor" } */
 			if ( item->numTableColumns < WUI_TABLE_MAX_COLUMNS ) {
 				pc_token_t subToken;
 				wuiTableColumn_t *col = &item->tableColumns[item->numTableColumns];
-				Com_Memset( col, 0, sizeof( *col ) );
+				memset( col, 0, sizeof( *col ) );
 				col->align = 0; /* default left */
 
 				if ( WiredPC_ReadToken( handle, &subToken ) && !Q_stricmp( subToken.string, "{" ) ) {
@@ -1133,13 +1064,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			Com_DPrintf( "WiredUI: unknown item keyword '%s'\n", token.string );
 			if ( WiredPC_ReadToken( handle, &token ) ) {
 				if ( !Q_stricmp( token.string, "{" ) ) {
-					/* block parameter -- skip balanced braces */
-					int skipDepth = 1;
-					while ( skipDepth > 0 ) {
-						if ( !WiredPC_ReadToken( handle, &token ) ) break;
-						if ( !Q_stricmp( token.string, "{" ) ) skipDepth++;
-						else if ( !Q_stricmp( token.string, "}" ) ) skipDepth--;
-					}
+					WiredPC_SkipBracedBlock( handle );
 				}
 				/* else: consumed one token (the value) -- good enough */
 			}
@@ -1155,7 +1080,6 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 	pc_token_t       token;
 	wiredMenuDef_t  *menu;
 	const char      *str;
-	int              depth;
 
 	menu = (wiredMenuDef_t *)WiredUI_Alloc( sizeof( wiredMenuDef_t ) );
 	if ( !menu ) {
@@ -1172,7 +1096,7 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 	menu->focuscolor[3] = 1.0f;
 
 	// expect opening brace
-	if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
+	if ( !WiredPC_Expect( handle, "{" ) ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: expected '{' for menuDef\n" );
 		return qfalse;
 	}
@@ -1186,122 +1110,21 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		}
 
 		// ── menu keywords ─────────────────────────────────────────
-		if ( !Q_stricmp( token.string, "name" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( menu->name, str, sizeof( menu->name ) );
-		}
-		else if ( !Q_stricmp( token.string, "fullscreen" ) ) {
-			int v;
-			WiredPC_Int( handle, &v );
-			menu->fullscreen = (qboolean)v;
+		if ( WiredPC_ApplyProp( handle, menu, s_menuProps, token.string ) ) {
+			/* consumed by table */
 		}
 		else if ( !Q_stricmp( token.string, "rect" ) ) {
-			// .wmenu: parse with unit awareness
-			menu->wuiRect.x = WiredPC_ParseValue( handle );
-			menu->wuiRect.y = WiredPC_ParseValue( handle );
-			menu->wuiRect.w = WiredPC_ParseValue( handle );
-			menu->wuiRect.h = WiredPC_ParseValue( handle );
-			// Back-fill old rect for draw code (real screen pixels)
-			menu->rect.x = WUI_BackfillToScreen( menu->wuiRect.x, (float)cls.glconfig.vidWidth );
-			menu->rect.y = WUI_BackfillToScreen( menu->wuiRect.y, (float)cls.glconfig.vidHeight );
-			menu->rect.w = WUI_BackfillToScreen( menu->wuiRect.w, (float)cls.glconfig.vidWidth );
-			menu->rect.h = WUI_BackfillToScreen( menu->wuiRect.h, (float)cls.glconfig.vidHeight );
-		}
-		else if ( !Q_stricmp( token.string, "style" ) ) {
-			WiredPC_Int( handle, &menu->style );
-		}
-		else if ( !Q_stricmp( token.string, "visible" ) ) {
-			int v;
-			WiredPC_Int( handle, &v );
-			menu->visible = (qboolean)v;
-		}
-		else if ( !Q_stricmp( token.string, "forecolor" ) ) {
-			WiredPC_Color( handle, &menu->forecolor );
-		}
-		else if ( !Q_stricmp( token.string, "backcolor" ) ) {
-			WiredPC_Color( handle, &menu->backcolor );
-		}
-		else if ( !Q_stricmp( token.string, "focuscolor" ) ) {
-			WiredPC_Color( handle, &menu->focuscolor );
-		}
-		else if ( !Q_stricmp( token.string, "background" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( menu->background, str, sizeof( menu->background ) );
-		}
-		else if ( !Q_stricmp( token.string, "soundLoop" ) ) {
-			if ( WiredPC_String( handle, &str ) )
-				Q_strncpyz( menu->soundLoop, str, sizeof( menu->soundLoop ) );
-		}
-		else if ( !Q_stricmp( token.string, "hudOverlay" ) ) {
-			int v;
-			WiredPC_Int( handle, &v );
-			menu->hudOverlay = (qboolean)v;
+			WiredPC_ParseRectInto( handle, &menu->wuiRect, &menu->rect );
 		}
 		else if ( !Q_stricmp( token.string, "onOpen" ) ||
 		          !Q_stricmp( token.string, "onClose" ) ||
 		          !Q_stricmp( token.string, "onESC" ) ) {
-			// capture menu-level script blocks
-			char *dest = NULL;
-			int destSize = WIRED_MAX_SCRIPT_LEN;
-
-			if ( !Q_stricmp( token.string, "onOpen" ) )  dest = menu->onOpen;
-			else if ( !Q_stricmp( token.string, "onClose" ) ) dest = menu->onClose;
-			else if ( !Q_stricmp( token.string, "onESC" ) )  dest = menu->onESC;
-
-			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) continue;
-			depth = 1;
-			if ( dest ) { dest[0] = '\0'; }
-			while ( depth > 0 ) {
-				if ( !WiredPC_ReadToken( handle, &token ) ) break;
-				if ( !Q_stricmp( token.string, "{" ) ) { depth++; continue; }
-				if ( !Q_stricmp( token.string, "}" ) ) { depth--; continue; }
-				if ( dest ) {
-					if ( dest[0] ) Q_strcat( dest, destSize, " " );
-					Q_strcat( dest, destSize, token.string );
-				}
-			}
-		}
-		else if ( !Q_stricmp( token.string, "modal" ) ) {
-			menu->modal = qtrue;
-		}
-		else if ( !Q_stricmp( token.string, "alwaysontop" ) ) {
-			menu->alwaysOnTop = qtrue;
-		}
-		// ── Phase 2.5: additional menu-level keywords ────────────────
-		else if ( !Q_stricmp( token.string, "popup" ) ) {
-			menu->popup = qtrue;
-		}
-		else if ( !Q_stricmp( token.string, "outOfBoundsClick" ) ) {
-			menu->outOfBoundsClick = qtrue;
+			char *dest = !Q_stricmp( token.string, "onOpen" )  ? menu->onOpen  :
+			             !Q_stricmp( token.string, "onClose" ) ? menu->onClose : menu->onESC;
+			if ( !WiredPC_CaptureBracedScript( handle, dest, WIRED_MAX_SCRIPT_LEN ) ) continue;
 		}
 		else if ( !Q_stricmp( token.string, "anchor" ) ) {
-			if ( WiredPC_String( handle, &str ) ) {
-				if      ( !Q_stricmp( str, "TOP_LEFT" ) )      menu->anchor = ANCHOR_TOP_LEFT;
-				else if ( !Q_stricmp( str, "TOP_CENTER" ) )     menu->anchor = ANCHOR_TOP_CENTER;
-				else if ( !Q_stricmp( str, "TOP_RIGHT" ) )      menu->anchor = ANCHOR_TOP_RIGHT;
-				else if ( !Q_stricmp( str, "CENTER_LEFT" ) )    menu->anchor = ANCHOR_CENTER_LEFT;
-				else if ( !Q_stricmp( str, "CENTER" ) )         menu->anchor = ANCHOR_CENTER;
-				else if ( !Q_stricmp( str, "CENTER_RIGHT" ) )   menu->anchor = ANCHOR_CENTER_RIGHT;
-				else if ( !Q_stricmp( str, "BOTTOM_LEFT" ) )    menu->anchor = ANCHOR_BOTTOM_LEFT;
-				else if ( !Q_stricmp( str, "BOTTOM_CENTER" ) )  menu->anchor = ANCHOR_BOTTOM_CENTER;
-				else if ( !Q_stricmp( str, "BOTTOM_RIGHT" ) )   menu->anchor = ANCHOR_BOTTOM_RIGHT;
-				else {
-					Com_Printf( S_COLOR_YELLOW "WARNING: unknown anchor '%s'\n", str );
-					menu->anchor = ANCHOR_NONE;
-				}
-			}
-		}
-		else if ( !Q_stricmp( token.string, "border" ) ) {
-			WiredPC_Int( handle, &menu->border );
-		}
-		else if ( !Q_stricmp( token.string, "bordersize" ) ) {
-			WiredPC_Float( handle, &menu->bordersize );
-		}
-		else if ( !Q_stricmp( token.string, "bordercolor" ) ) {
-			WiredPC_Color( handle, &menu->bordercolor );
-		}
-		else if ( !Q_stricmp( token.string, "disablecolor" ) ) {
-			WiredPC_Color( handle, &menu->disablecolor );
+			WiredPC_ParseAnchorInto( handle, &menu->anchor );
 		}
 		else if ( !Q_stricmp( token.string, "font" ) ) {
 			if ( WiredPC_String( handle, &str ) )
@@ -1316,15 +1139,6 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 				}
 			}
 		}
-		else if ( !Q_stricmp( token.string, "fadeClamp" ) ) {
-			WiredPC_Float( handle, &menu->fadeClamp );
-		}
-		else if ( !Q_stricmp( token.string, "fadeCycle" ) ) {
-			WiredPC_Int( handle, &menu->fadeCycle );
-		}
-		else if ( !Q_stricmp( token.string, "fadeAmount" ) ) {
-			WiredPC_Float( handle, &menu->fadeAmount );
-		}
 		else if ( !Q_stricmp( token.string, "cinematic" ) ) {
 			if ( WiredPC_ReadToken( handle, &token ) )
 				Q_strncpyz( menu->cinematic, token.string, sizeof( menu->cinematic ) );
@@ -1335,74 +1149,9 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		else if ( !Q_stricmp( token.string, "ownerdrawFlag" ) ) {
 			int odf; WiredPC_Int( handle, &odf );
 		}
-		// ── Layer 2: flex container keywords (menu level) ────────────
-		else if ( !Q_stricmp( token.string, "layout" ) ) {
-			pc_token_t layoutToken;
-			if ( WiredPC_ReadTokenEval( handle, &layoutToken ) ) {
-				if ( !Q_stricmp( layoutToken.string, "row" ) ) {
-					menu->flexContainer.direction = WUI_LAYOUT_ROW;
-					menu->isFlexContainer = qtrue;
-				} else if ( !Q_stricmp( layoutToken.string, "column" ) ) {
-					menu->flexContainer.direction = WUI_LAYOUT_COLUMN;
-					menu->isFlexContainer = qtrue;
-				}
-				// Check for "wrap" modifier
-				if ( WiredPC_ReadToken( handle, &layoutToken ) ) {
-					if ( !Q_stricmp( layoutToken.string, "wrap" ) ) {
-						menu->flexContainer.wrap = qtrue;
-					} else {
-						WiredPC_UnreadToken( &layoutToken );
-					}
-				}
-			}
-		}
-		else if ( !Q_stricmp( token.string, "gap" ) ) {
-			menu->flexContainer.gap = WiredPC_ParseValue( handle );
-		}
-		else if ( !Q_stricmp( token.string, "padding" ) ) {
-			// Support 1, 2, or 4 value forms
-			pc_token_t peek;
-			menu->flexContainer.padding[0] = WiredPC_ParseValue( handle );
-			if ( WiredPC_ReadToken( handle, &peek ) ) {
-				if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
-					WiredPC_UnreadToken( &peek );
-					menu->flexContainer.padding[1] = WiredPC_ParseValue( handle );
-					if ( WiredPC_ReadToken( handle, &peek ) ) {
-						if ( peek.type == TT_NUMBER || peek.string[0] == '0' || peek.string[0] == '.' ) {
-							WiredPC_UnreadToken( &peek );
-							menu->flexContainer.padding[2] = WiredPC_ParseValue( handle );
-							menu->flexContainer.padding[3] = WiredPC_ParseValue( handle );
-						} else {
-							WiredPC_UnreadToken( &peek );
-							menu->flexContainer.padding[2] = menu->flexContainer.padding[0];
-							menu->flexContainer.padding[3] = menu->flexContainer.padding[1];
-						}
-					}
-				} else {
-					WiredPC_UnreadToken( &peek );
-					menu->flexContainer.padding[1] = menu->flexContainer.padding[0];
-					menu->flexContainer.padding[2] = menu->flexContainer.padding[0];
-					menu->flexContainer.padding[3] = menu->flexContainer.padding[0];
-				}
-			}
-		}
-		else if ( !Q_stricmp( token.string, "align" ) ) {
-			pc_token_t val;
-			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
-				if ( !Q_stricmp( val.string, "start" ) ) menu->flexContainer.align = WUI_ALIGN_START;
-				else if ( !Q_stricmp( val.string, "center" ) ) menu->flexContainer.align = WUI_ALIGN_CENTER;
-				else if ( !Q_stricmp( val.string, "end" ) ) menu->flexContainer.align = WUI_ALIGN_END;
-				else if ( !Q_stricmp( val.string, "stretch" ) ) menu->flexContainer.align = WUI_ALIGN_STRETCH;
-			}
-		}
-		else if ( !Q_stricmp( token.string, "justify" ) ) {
-			pc_token_t val;
-			if ( WiredPC_ReadTokenEval( handle, &val ) ) {
-				if ( !Q_stricmp( val.string, "start" ) ) menu->flexContainer.justify = WUI_JUSTIFY_START;
-				else if ( !Q_stricmp( val.string, "center" ) ) menu->flexContainer.justify = WUI_JUSTIFY_CENTER;
-				else if ( !Q_stricmp( val.string, "end" ) ) menu->flexContainer.justify = WUI_JUSTIFY_END;
-				else if ( !Q_stricmp( val.string, "space-between" ) ) menu->flexContainer.justify = WUI_JUSTIFY_SPACE_BETWEEN;
-			}
+		// ── flex container keywords ──────────────────────────────────
+		else if ( WiredPC_ParseFlexProps( handle, token.string, &menu->flexContainer, &menu->isFlexContainer ) ) {
+			/* consumed */
 		}
 		else if ( !Q_stricmp( token.string, "itemDef" ) ) {
 			if ( !WiredUI_ParseItem( handle, menu ) ) {
@@ -1414,13 +1163,7 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 			Com_DPrintf( "WiredUI: unknown menu keyword '%s'\n", token.string );
 			if ( WiredPC_ReadToken( handle, &token ) ) {
 				if ( !Q_stricmp( token.string, "{" ) ) {
-					// block parameter — skip balanced braces
-					int skipDepth = 1;
-					while ( skipDepth > 0 ) {
-						if ( !WiredPC_ReadToken( handle, &token ) ) break;
-						if ( !Q_stricmp( token.string, "{" ) ) skipDepth++;
-						else if ( !Q_stricmp( token.string, "}" ) ) skipDepth--;
-					}
+					WiredPC_SkipBracedBlock( handle );
 				}
 				// else: consumed one token value
 			}
@@ -1441,8 +1184,8 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		menu->scrollBarFadeTime = 0;
 	}
 
-	if ( wired_menuCount < WIRED_MAX_MENUS ) {
-		wired_menus[wired_menuCount++] = menu;
+	if ( wui_menuCount < WIRED_MAX_MENUS ) {
+		wui_menus[wui_menuCount++] = menu;
 		Com_DPrintf( "WiredUI: loaded menu '%s' (%d items)\n", menu->name, menu->itemCount );
 	}
 
@@ -1473,89 +1216,41 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 		}
 		else if ( !Q_stricmp( token.string, "assetGlobalDef" ) ) {
 			wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
-			if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
+			if ( !WiredPC_Expect( handle, "{" ) ) {
 				Com_Printf( S_COLOR_YELLOW "WiredUI: expected '{' for assetGlobalDef\n" );
 				continue;
 			}
 			while ( 1 ) {
+				const char *s;
 				if ( !WiredPC_ReadToken( handle, &token ) ) break;
 				if ( !Q_stricmp( token.string, "}" ) ) break;
 
-				if ( !Q_stricmp( token.string, "cursor" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->cursor, token.string, sizeof( ag->cursor ) );
-				}
-				else if ( !Q_stricmp( token.string, "gradientBar" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->gradientBar, token.string, sizeof( ag->gradientBar ) );
-				}
-				else if ( !Q_stricmp( token.string, "fadeClamp" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->fadeClamp = atof( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "fadeCycle" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->fadeCycle = atoi( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "fadeAmount" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->fadeAmount = atof( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "shadowColor" ) ) {
-					WiredPC_ReadToken( handle, &token ); ag->shadowColor[0] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->shadowColor[1] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->shadowColor[2] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->shadowColor[3] = atof( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "itemFocusSound" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->focusSound, token.string, sizeof( ag->focusSound ) );
-				}
-				else if ( !Q_stricmp( token.string, "focusColor" ) ) {
-					WiredPC_ReadToken( handle, &token ); ag->focusColor[0] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->focusColor[1] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->focusColor[2] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->focusColor[3] = atof( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "shadowX" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->shadowX = atof( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "shadowY" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						ag->shadowY = atof( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "gradientBarColor" ) ) {
-					WiredPC_ReadToken( handle, &token ); ag->gradientBarColor[0] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->gradientBarColor[1] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->gradientBarColor[2] = atof( token.string );
-					WiredPC_ReadToken( handle, &token ); ag->gradientBarColor[3] = atof( token.string );
-				}
-				else if ( !Q_stricmp( token.string, "radialGlow" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->radialGlowShader, token.string, sizeof( ag->radialGlowShader ) );
-				}
-				else if ( !Q_stricmp( token.string, "defaultSerifFont" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->defaultSerifFontName, token.string, sizeof( ag->defaultSerifFontName ) );
-				}
-				else if ( !Q_stricmp( token.string, "defaultSerifFontItalic" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->defaultSerifFontItalicName, token.string, sizeof( ag->defaultSerifFontItalicName ) );
-				}
-				else if ( !Q_stricmp( token.string, "defaultSansFont" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->defaultSansFontName, token.string, sizeof( ag->defaultSansFontName ) );
-				}
-				else if ( !Q_stricmp( token.string, "defaultSansFontMedium" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->defaultSansFontMediumName, token.string, sizeof( ag->defaultSansFontMediumName ) );
-				}
-				else if ( !Q_stricmp( token.string, "defaultMonoFont" ) ) {
-					if ( WiredPC_ReadToken( handle, &token ) )
-						Q_strncpyz( ag->defaultMonoFontName, token.string, sizeof( ag->defaultMonoFontName ) );
-				}
-				// skip unknown keywords gracefully
+				if      ( !Q_stricmp( token.string, "cursor" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->cursor, s, sizeof( ag->cursor ) ); }
+				else if ( !Q_stricmp( token.string, "gradientBar" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->gradientBar, s, sizeof( ag->gradientBar ) ); }
+				else if ( !Q_stricmp( token.string, "itemFocusSound" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->focusSound, s, sizeof( ag->focusSound ) ); }
+				else if ( !Q_stricmp( token.string, "radialGlow" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->radialGlowShader, s, sizeof( ag->radialGlowShader ) ); }
+				else if ( !Q_stricmp( token.string, "defaultSerifFont" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->defaultSerifFontName, s, sizeof( ag->defaultSerifFontName ) ); }
+				else if ( !Q_stricmp( token.string, "defaultSerifFontItalic" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->defaultSerifFontItalicName, s, sizeof( ag->defaultSerifFontItalicName ) ); }
+				else if ( !Q_stricmp( token.string, "defaultSansFont" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->defaultSansFontName, s, sizeof( ag->defaultSansFontName ) ); }
+				else if ( !Q_stricmp( token.string, "defaultSansFontMedium" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->defaultSansFontMediumName, s, sizeof( ag->defaultSansFontMediumName ) ); }
+				else if ( !Q_stricmp( token.string, "defaultMonoFont" ) )
+					{ if ( WiredPC_String( handle, &s ) ) Q_strncpyz( ag->defaultMonoFontName, s, sizeof( ag->defaultMonoFontName ) ); }
+				else if ( !Q_stricmp( token.string, "fadeClamp" ) )   WiredPC_Float( handle, &ag->fadeClamp );
+				else if ( !Q_stricmp( token.string, "fadeAmount" ) )  WiredPC_Float( handle, &ag->fadeAmount );
+				else if ( !Q_stricmp( token.string, "shadowX" ) )     WiredPC_Float( handle, &ag->shadowX );
+				else if ( !Q_stricmp( token.string, "shadowY" ) )     WiredPC_Float( handle, &ag->shadowY );
+				else if ( !Q_stricmp( token.string, "fadeCycle" ) )   WiredPC_Int( handle, &ag->fadeCycle );
+				else if ( !Q_stricmp( token.string, "shadowColor" ) )      WiredPC_Color( handle, &ag->shadowColor );
+				else if ( !Q_stricmp( token.string, "focusColor" ) )       WiredPC_Color( handle, &ag->focusColor );
+				else if ( !Q_stricmp( token.string, "gradientBarColor" ) ) WiredPC_Color( handle, &ag->gradientBarColor );
 			}
 			Com_DPrintf( "WiredUI: parsed assetGlobalDef (cursor=%s)\n", ag->cursor );
 		}
@@ -1577,26 +1272,26 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 // ── public accessors ──────────────────────────────────────────────────
 
 int WiredUI_GetMenuCount( void ) {
-	return wired_menuCount;
+	return wui_menuCount;
 }
 
 wiredMenuDef_t *WiredUI_GetMenuByIndex( int index ) {
-	if ( index < 0 || index >= wired_menuCount ) return NULL;
-	return wired_menus[index];
+	if ( index < 0 || index >= wui_menuCount ) return NULL;
+	return wui_menus[index];
 }
 
 wiredMenuDef_t *WiredUI_FindMenu( const char *name ) {
 	int i;
-	for ( i = 0; i < wired_menuCount; i++ ) {
-		if ( !Q_stricmp( wired_menus[i]->name, name ) ) {
-			return wired_menus[i];
+	for ( i = 0; i < wui_menuCount; i++ ) {
+		if ( !Q_stricmp( wui_menus[i]->name, name ) ) {
+			return wui_menus[i];
 		}
 	}
 	return NULL;
 }
 
 void WiredUI_ClearMenus( void ) {
-	wired_menuCount = 0;
+	wui_menuCount = 0;
 	WiredUI_ResetPool();
 }
 
@@ -1621,25 +1316,25 @@ qboolean WiredUI_SafeReload( void ) {
 	}
 
 	// phase 1: save current state
-	Com_Memcpy( wired_backup->pool, wired_menuPool, wired_menuPoolUsed );
-	wired_backup->poolUsed = wired_menuPoolUsed;
-	Com_Memcpy( wired_backup->menus, wired_menus, sizeof( wired_menus[0] ) * wired_menuCount );
-	wired_backup->menuCount = wired_menuCount;
+	memcpy( wired_backup->pool, wui_menuPool, wui_menuPoolUsed );
+	wired_backup->poolUsed = wui_menuPoolUsed;
+	memcpy( wired_backup->menus, wui_menus, sizeof( wui_menus[0] ) * wui_menuCount );
+	wired_backup->menuCount = wui_menuCount;
 	wired_backup->assetGlobals = *WiredUI_GetAssetGlobals();
 
 	// phase 2: clear and reparse from menus.lua
 	WiredUI_ResetAssetGlobalsDefaults();
 	WiredUI_ClearMenus();
 	WiredUI_LoadMenusFromLua();
-	qboolean ok = ( wired_menuCount > 0 );
+	qboolean ok = ( wui_menuCount > 0 );
 
 	if ( !ok ) {
 		// parse failed — restore old menus
 		Com_Printf( S_COLOR_YELLOW "Menu reload failed — keeping old menus.\n" );
-		Com_Memcpy( wired_menuPool, wired_backup->pool, wired_backup->poolUsed );
-		wired_menuPoolUsed = wired_backup->poolUsed;
-		Com_Memcpy( wired_menus, wired_backup->menus, sizeof( wired_menus[0] ) * wired_backup->menuCount );
-		wired_menuCount = wired_backup->menuCount;
+		memcpy( wui_menuPool, wired_backup->pool, wired_backup->poolUsed );
+		wui_menuPoolUsed = wired_backup->poolUsed;
+		memcpy( wui_menus, wired_backup->menus, sizeof( wui_menus[0] ) * wired_backup->menuCount );
+		wui_menuCount = wired_backup->menuCount;
 		*WiredUI_GetAssetGlobals() = wired_backup->assetGlobals;
 		return qfalse;
 	}

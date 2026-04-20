@@ -579,7 +579,7 @@ static void StringReplaceWords( char *string, int size, const char *synonym, con
 		{
 			memmove( str + replen, str + synlen, strlen( str + synlen ) + 1 );
 			//append the synonym replacement
-			Com_Memcpy( str, replacement, replen );
+			memcpy( str, replacement, replen );
 		}
 
 		//find the next synonym in the string
@@ -894,7 +894,7 @@ static void BotReplaceReplySynonyms( char *string, int size, unsigned long int c
 
 				memmove( str1 + replen, str1 + strlen( synonym->string ), strlen( str1 + strlen( synonym->string ) ) + 1 );
 				//append the synonym replacement
-				Com_Memcpy( str1, replacement, replen );
+				memcpy( str1, replacement, replen );
 				break;
 			}
 
@@ -2610,7 +2610,7 @@ void BotInitialChat(int chatstate, const char *type, int mcontext, const char *v
 		return;
 	} //end if
 	//
-	Com_Memset( &match, 0, sizeof( match ) );
+	memset( &match, 0, sizeof( match ) );
 	index = 0;
 	if ( var0 ) {
 		len = (int)strlen( var0 );
@@ -2746,7 +2746,7 @@ int BotReplyChat(int chatstate, const char *message, int mcontext, int vcontext,
 
 	cs = BotChatStateFromHandle(chatstate);
 	if (!cs) return qfalse;
-	Com_Memset( &match, 0, sizeof( match ) );
+	memset( &match, 0, sizeof( match ) );
 	Q_strncpyz( match.string, message, sizeof( match.string ) );
 	bestpriority = -1;
 	bestchatmessage = NULL;
@@ -2808,7 +2808,7 @@ int BotReplyChat(int chatstate, const char *message, int mcontext, int vcontext,
 				//if the reply chat has a message
 				if (m)
 				{
-					Com_Memcpy(&bestmatch, &match, sizeof(bot_match_t));
+					memcpy(&bestmatch, &match, sizeof(bot_match_t));
 					bestchatmessage = m;
 					bestrchat = rchat;
 					bestpriority = rchat->priority;

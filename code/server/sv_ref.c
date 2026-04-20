@@ -92,7 +92,7 @@ static void SVR_ClearModels( void ) {
 			svrModels[i].data = NULL;
 		}
 	}
-	Com_Memset( svrModels, 0, sizeof( svrModels ) );
+	memset( svrModels, 0, sizeof( svrModels ) );
 	svrNumModels = 1; /* handle 0 reserved as "bad" */
 }
 
@@ -133,7 +133,7 @@ static svrModel_t *SVR_AllocModel( const char *name, qhandle_t *outHandle ) {
 	}
 
 	mod = &svrModels[svrNumModels];
-	Com_Memset( mod, 0, sizeof( *mod ) );
+	memset( mod, 0, sizeof( *mod ) );
 	Q_strncpyz( mod->name, name, sizeof( mod->name ) );
 	*outHandle = svrNumModels;
 	svrNumModels++;
@@ -186,7 +186,7 @@ static qboolean SVR_LoadMD3( svrModel_t *mod, const byte *buffer, int fileSize, 
 	 * because this persists past the current frame but should be freed
 	 * on server shutdown. */
 	hdr = Z_Malloc( size );
-	Com_Memcpy( hdr, buffer, size );
+	memcpy( hdr, buffer, size );
 
 	LL( hdr->ident );
 	LL( hdr->version );
@@ -312,8 +312,8 @@ static qboolean SVR_LoadIQM( svrModel_t *mod, const byte *buffer, int fileSize, 
 		return qfalse;
 	}
 
-	Com_Memcpy( &header, buffer, sizeof( header ) );
-	if ( Q_strncmp( header.magic, SVR_IQM_MAGIC, sizeof( header.magic ) ) ) {
+	memcpy( &header, buffer, sizeof( header ) );
+	if ( strncmp( header.magic, SVR_IQM_MAGIC, sizeof( header.magic ) ) ) {
 		Com_DPrintf( "SVR_LoadIQM: %s wrong magic\n", name );
 		return qfalse;
 	}
@@ -336,7 +336,7 @@ static qboolean SVR_LoadIQM( svrModel_t *mod, const byte *buffer, int fileSize, 
 	if ( ofsBounds && header.num_frames > 0
 		&& ofsBounds + sizeof( svrIqmBounds_t ) <= header.filesize ) {
 		svrIqmBounds_t first;
-		Com_Memcpy( &first, buffer + ofsBounds, sizeof( first ) );
+		memcpy( &first, buffer + ofsBounds, sizeof( first ) );
 		first.bbmin[0] = LittleFloat( first.bbmin[0] );
 		first.bbmin[1] = LittleFloat( first.bbmin[1] );
 		first.bbmin[2] = LittleFloat( first.bbmin[2] );
@@ -412,7 +412,7 @@ static void SVR_BeginRegistration( glconfig_t *config ) {
 	 * a populated glconfig so shared code that inspects vidWidth /
 	 * windowAspect stays sane. */
 	if ( config ) {
-		Com_Memset( config, 0, sizeof( *config ) );
+		memset( config, 0, sizeof( *config ) );
 		config->vidWidth = 640;
 		config->vidHeight = 480;
 		config->windowAspect = 4.0f / 3.0f;
@@ -473,7 +473,7 @@ static qhandle_t SVR_RegisterModel( const char *name ) {
 #if FEAT_IQM
 		else {
 			/* IQM identifies by ASCII magic, not a numeric ident. */
-			if ( fileSize >= 16 && !Q_strncmp( (const char *)buf.v, SVR_IQM_MAGIC, 16 ) ) {
+			if ( fileSize >= 16 && !strncmp( (const char *)buf.v, SVR_IQM_MAGIC, 16 ) ) {
 				loaded = SVR_LoadIQM( mod, buf.b, fileSize, name );
 			}
 		}
@@ -485,7 +485,7 @@ static qhandle_t SVR_RegisterModel( const char *name ) {
 	if ( !loaded ) {
 		/* Roll back the allocation so later registrations can reuse
 		 * the slot. */
-		Com_Memset( mod, 0, sizeof( *mod ) );
+		memset( mod, 0, sizeof( *mod ) );
 		svrNumModels--;
 		return 0;
 	}
@@ -690,7 +690,7 @@ static void SVR_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
 
 static void SVR_RegisterFont( const char *fontName, int pointSize, fontInfo_t *font ) {
 	(void)fontName; (void)pointSize;
-	if ( font ) Com_Memset( font, 0, sizeof( *font ) );
+	if ( font ) memset( font, 0, sizeof( *font ) );
 }
 
 static void SVR_RemapShader( const char *oldShader, const char *newShader, const char *offsetTime ) {
@@ -771,7 +771,7 @@ renderer DLL.
 void GetRefAPI_Headless( refexport_t *re ) {
 	if ( !re ) return;
 
-	Com_Memset( re, 0, sizeof( *re ) );
+	memset( re, 0, sizeof( *re ) );
 
 	svr_glconfig.vidWidth = 640;
 	svr_glconfig.vidHeight = 480;

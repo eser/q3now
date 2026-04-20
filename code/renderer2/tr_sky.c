@@ -481,7 +481,7 @@ static void DrawSkyBox( const shader_t *shader )
 	sky_min = 0;
 	sky_max = 1;
 
-	Com_Memset( s_skyTexCoords, 0, sizeof( s_skyTexCoords ) );
+	memset( s_skyTexCoords, 0, sizeof( s_skyTexCoords ) );
 
 	for (i=0 ; i<6 ; i++)
 	{
@@ -900,8 +900,3 @@ void RB_StageIteratorSky( void ) {
 	// note that sky was drawn so we will draw a sun later
 	backEnd.skyRenderedThisView = qtrue;
 }
-
-
-
-
-

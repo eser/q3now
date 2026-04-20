@@ -61,7 +61,7 @@ static winding_t *AllocWinding( int points )
 
 	s = sizeof( *w ) - sizeof( w->p ) + sizeof( w->p[0] ) * points;
 	w = Z_Malloc( s );
-	Com_Memset( w, 0, s );
+	memset( w, 0, s );
 	return w;
 }
 
@@ -116,7 +116,7 @@ void	RemoveColinearPoints (winding_t *w)
 	//c_removed += w->numpoints - nump;
 
 	w->numpoints = nump;
-	Com_Memcpy (w->p, p, nump*sizeof(p[0]));
+	memcpy (w->p, p, nump*sizeof(p[0]));
 }
 
 /*
@@ -288,7 +288,7 @@ winding_t *CopyWinding( const winding_t *w )
 
 	c = AllocWinding( w->numpoints );
 	size = sizeof( *w ) - sizeof( w->p ) + sizeof( w->p[0] )* w->numpoints;
-	Com_Memcpy( c, w, size );
+	memcpy( c, w, size );
 	return c;
 }
 
@@ -331,8 +331,8 @@ static void ClipWindingEpsilon( winding_t *in, vec3_t normal, vec_t dist, vec_t 
 	int		maxpts;
 	
 	counts[0] = counts[1] = counts[2] = 0;
-	Com_Memset( dists, 0, sizeof( dists ) );
-	Com_Memset( sides, 0, sizeof( sides ) );
+	memset( dists, 0, sizeof( dists ) );
+	memset( sides, 0, sizeof( sides ) );
 
 	// determine sides for each point
 	for (i=0 ; i<in->numpoints ; i++)
@@ -449,8 +449,8 @@ void ChopWindingInPlace( winding_t **inout, const vec3_t normal, vec_t dist, vec
 
 	in = *inout;
 	counts[0] = counts[1] = counts[2] = 0;
-	Com_Memset( dists, 0, sizeof( dists ) );
-	Com_Memset( sides, 0, sizeof( sides ) );
+	memset( dists, 0, sizeof( dists ) );
+	memset( sides, 0, sizeof( sides ) );
 
 	// determine sides for each point
 	for (i=0 ; i<in->numpoints ; i++)
@@ -687,7 +687,7 @@ void	AddWindingToConvexHull( winding_t *w, winding_t **hull, vec3_t normal ) {
 	}
 
 	numHullPoints = (*hull)->numpoints;
-	Com_Memcpy( hullPoints, (*hull)->p, numHullPoints * sizeof(vec3_t) );
+	memcpy( hullPoints, (*hull)->p, numHullPoints * sizeof(vec3_t) );
 
 	for ( i = 0 ; i < w->numpoints ; i++ ) {
 		p = w->p[i];
@@ -746,12 +746,12 @@ void	AddWindingToConvexHull( winding_t *w, winding_t **hull, vec3_t normal ) {
 		}
 
 		numHullPoints = numNew;
-		Com_Memcpy( hullPoints, newHullPoints, numHullPoints * sizeof(vec3_t) );
+		memcpy( hullPoints, newHullPoints, numHullPoints * sizeof(vec3_t) );
 	}
 
 	FreeWinding( *hull );
 	w = AllocWinding( numHullPoints );
 	w->numpoints = numHullPoints;
 	*hull = w;
-	Com_Memcpy( w->p, hullPoints, numHullPoints * sizeof(vec3_t) );
+	memcpy( w->p, hullPoints, numHullPoints * sizeof(vec3_t) );
 }

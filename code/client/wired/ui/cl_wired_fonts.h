@@ -1,10 +1,5 @@
 /*
-===========================================================================
 cl_wired_fonts.h — Wired UI font system API
-
-Provides proportional font rendering with 11 fonts, color codes, shadows,
-and alignment. Migrated from cg_moderntext.c to run in the client directly.
-===========================================================================
 */
 
 #ifndef CL_WIRED_FONTS_H

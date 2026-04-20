@@ -235,7 +235,7 @@ static weaponconfig_t *LoadWeaponConfig(const char *filename)
 	{
 		if (!strcmp(token.string, "weaponinfo"))
 		{
-			Com_Memset(&weaponinfo, 0, sizeof(weaponinfo_t));
+			memset(&weaponinfo, 0, sizeof(weaponinfo_t));
 			if (!ReadStructure(source, &weaponinfo_struct, (char *) &weaponinfo))
 			{
 				FreeMemory(wc);
@@ -249,7 +249,7 @@ static weaponconfig_t *LoadWeaponConfig(const char *filename)
 				FreeSource(source);
 				return NULL;
 			} //end if
-			Com_Memcpy(&wc->weaponinfo[weaponinfo.number], &weaponinfo, sizeof(weaponinfo_t));
+			memcpy(&wc->weaponinfo[weaponinfo.number], &weaponinfo, sizeof(weaponinfo_t));
 			wc->weaponinfo[weaponinfo.number].valid = qtrue;
 		} //end if
 		else if (!strcmp(token.string, "projectileinfo"))
@@ -261,7 +261,7 @@ static weaponconfig_t *LoadWeaponConfig(const char *filename)
 				FreeSource(source);
 				return NULL;
 			} //end if
-			Com_Memset(&wc->projectileinfo[wc->numprojectiles], 0, sizeof(projectileinfo_t));
+			memset(&wc->projectileinfo[wc->numprojectiles], 0, sizeof(projectileinfo_t));
 			if (!ReadStructure(source, &projectileinfo_struct, (char *) &wc->projectileinfo[wc->numprojectiles]))
 			{
 				FreeMemory(wc);
@@ -300,7 +300,7 @@ static weaponconfig_t *LoadWeaponConfig(const char *filename)
 		{
 			if (!strcmp(wc->projectileinfo[j].name, wc->weaponinfo[i].projectile))
 			{
-				Com_Memcpy(&wc->weaponinfo[i].proj, &wc->projectileinfo[j], sizeof(projectileinfo_t));
+				memcpy(&wc->weaponinfo[i].proj, &wc->projectileinfo[j], sizeof(projectileinfo_t));
 				break;
 			} //end if
 		} //end for
@@ -383,14 +383,14 @@ void BotGetWeaponInfo(int weaponstate, int weapon, weaponinfo_t *weaponinfo)
 {
 	bot_weaponstate_t *ws;
 
-	Com_Memset(weaponinfo, 0, sizeof(weaponinfo_t));
+	memset(weaponinfo, 0, sizeof(weaponinfo_t));
 	weaponinfo->number = weapon;
 
 	if (!BotValidWeaponNumber(weapon)) return;
 	ws = BotWeaponStateFromHandle(weaponstate);
 	if (!ws) return;
 	if (!weaponconfig) return;
-	Com_Memcpy(weaponinfo, &weaponconfig->weaponinfo[weapon], sizeof(weaponinfo_t));
+	memcpy(weaponinfo, &weaponconfig->weaponinfo[weapon], sizeof(weaponinfo_t));
 } //end of the function BotGetWeaponInfo
 //===========================================================================
 //

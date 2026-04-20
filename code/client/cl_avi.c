@@ -96,7 +96,7 @@ WRITE_STRING
 */
 static ID_INLINE void WRITE_STRING( const char *s )
 {
-  Com_Memcpy( &buffer[ bufIndex ], s, strlen( s ) );
+  memcpy( &buffer[ bufIndex ], s, strlen( s ) );
   bufIndex += strlen( s );
 }
 
@@ -363,13 +363,13 @@ qboolean CL_OpenAVIForWriting( const char *fileName, qboolean pipe, qboolean reo
 		// keep currently allocated buffers
 		byte *cBuffer = afd.cBuffer;
 		byte *eBuffer = afd.eBuffer;
-		Com_Memset( &afd, 0, sizeof( aviFileData_t ) );
+		memset( &afd, 0, sizeof( aviFileData_t ) );
 		afd.cBuffer = cBuffer;
 		afd.eBuffer = eBuffer;
 	}
 	else
 	{
-		Com_Memset( &afd, 0, sizeof( aviFileData_t ) );
+		memset( &afd, 0, sizeof( aviFileData_t ) );
 	}
 
 	if ( pipe )
@@ -640,7 +640,7 @@ void CL_WriteAVIAudioFrame( const byte *pcmBuffer, int size )
 
 	if ( pcmBuffer ) 
 	{
-		Com_Memcpy( &pcmCaptureBuffer[ bytesInBuffer ], pcmBuffer, size );
+		memcpy( &pcmCaptureBuffer[ bytesInBuffer ], pcmBuffer, size );
 		bytesInBuffer += size;
 	}
 }
