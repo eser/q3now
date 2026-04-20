@@ -869,12 +869,12 @@ static void CG_RegisterGraphics( void ) {
 	memset( &cg.refdef, 0, sizeof( cg.refdef ) );
 	trap_R_ClearScene();
 
-	CG_LoadingString( cgs.mapname );
+	trap_UpdateScreen();
 
 	trap_R_LoadWorldMap( cgs.mapname );
 
 	// precache status bar pics
-	CG_LoadingString( "game media" );
+	trap_UpdateScreen();
 
 	for ( i=0 ; i<11 ; i++) {
 		cgs.media.numberShaders[i] = trap_R_RegisterShader( sb_nums[i] );
@@ -1075,7 +1075,7 @@ static void CG_RegisterGraphics( void ) {
 
 	for ( i = 1 ; i < bg_numItems ; i++ ) {
 		if ( items[ i ] == '1' || cg_buildScript.integer ) {
-			CG_LoadingItem( i );
+			trap_UpdateScreen();
 			CG_RegisterItemVisuals( i );
 		}
 	}
@@ -1180,7 +1180,7 @@ void CG_BuildSpectatorString(void) {
 }
 
 
-/*																																			
+/*
 ===================
 CG_RegisterClients
 ===================
@@ -1188,7 +1188,7 @@ CG_RegisterClients
 static void CG_RegisterClients( void ) {
 	int		i;
 
-	CG_LoadingClient(cg.clientNum);
+	trap_UpdateScreen();
 	CG_NewClientInfo(cg.clientNum);
 
 	for (i=0 ; i<MAX_CLIENTS ; i++) {
@@ -1202,7 +1202,7 @@ static void CG_RegisterClients( void ) {
 		if ( !clientInfo[0]) {
 			continue;
 		}
-		CG_LoadingClient( i );
+		trap_UpdateScreen();
 		CG_NewClientInfo( i );
 	}
 	CG_BuildSpectatorString();
@@ -1233,11 +1233,12 @@ CG_StartMusic
 void CG_StartMusic( void ) {
 	const char	*s;
 	char	parm1[MAX_QPATH], parm2[MAX_QPATH];
+	ComParser parser = { 0 };
 
 	// start the background music
 	s = CG_ConfigString( CS_MUSIC );
-	Q_strncpyz( parm1, COM_Parse( &s ), sizeof( parm1 ) );
-	Q_strncpyz( parm2, COM_Parse( &s ), sizeof( parm2 ) );
+	Q_strncpyz( parm1, COM_Parse( &parser, &s ), sizeof( parm1 ) );
+	Q_strncpyz( parm2, COM_Parse( &parser, &s ), sizeof( parm2 ) );
 
 	trap_S_StartBackgroundTrack( parm1, parm2 );
 }
@@ -1340,21 +1341,21 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
     PM_UpdateSettings(cgs.gametype);
 
 	// load the new map
-	CG_LoadingString( "collision map" );
+	trap_UpdateScreen();
 
 	trap_CM_LoadMap( cgs.mapname );
 
 	cg.loading = qtrue;		// force players to load instead of defer
 
-	CG_LoadingString( "sounds" );
+	trap_UpdateScreen();
 
 	CG_RegisterSounds();
 
-	CG_LoadingString( "graphics" );
+	trap_UpdateScreen();
 
 	CG_RegisterGraphics();
 
-	CG_LoadingString( "clients" );
+	trap_UpdateScreen();
 
 	CG_RegisterClients();		// if low on memory, some clients will be deferred
 
@@ -1374,15 +1375,12 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	CG_InitLensFlares();
 #endif
 
-	// remove the last loading update
-	cg.infoScreenText[0] = 0;
-
 	// Make sure we have update values (scores)
 	CG_SetConfigValues();
 
 	CG_StartMusic();
 
-	CG_LoadingString( "" );
+	trap_UpdateScreen();
 
 	CG_ShaderStateChanged();
 

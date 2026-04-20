@@ -268,6 +268,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	char		text[20000];
 	fileHandle_t	f;
 	animation_t *animations;
+	ComParser   parser = { 0 };
 
 	animations = ci->animations;
 
@@ -298,12 +299,12 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	// read optional parameters
 	while ( 1 ) {
 		prev = text_p;	// so we can unget
-		token = COM_Parse( &text_p );
+		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			break;
 		}
 		if ( !Q_stricmp( token, "footsteps" ) ) {
-			token = COM_Parse( &text_p );
+			token = COM_Parse( &parser, &text_p );
 			if ( !token[0] ) {
 				break;
 			}
@@ -323,7 +324,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 			continue;
 		} else if ( !Q_stricmp( token, "headoffset" ) ) {
 			for ( i = 0 ; i < 3 ; i++ ) {
-				token = COM_Parse( &text_p );
+				token = COM_Parse( &parser, &text_p );
 				if ( !token[0] ) {
 					break;
 				}
@@ -337,7 +338,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 			ci->fixedtorso = qtrue;
 			continue;
 		} else if ( !Q_stricmp( token, "sex" ) ) {
-			token = COM_Parse( &text_p );
+			token = COM_Parse( &parser, &text_p );
 			if ( !token[0] ) {
 				break;
 			}
@@ -362,7 +363,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	// read information for each frame
 	for ( i = 0 ; i < MAX_ANIMATIONS ; i++ ) {
 
-		token = COM_Parse( &text_p );
+		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			if( i >= TORSO_GETFLAG && i <= TORSO_NEGATIVE ) {
 				animations[i].firstFrame = animations[TORSO_GESTURE].firstFrame;
@@ -385,7 +386,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 			animations[i].firstFrame -= skip;
 		}
 
-		token = COM_Parse( &text_p );
+		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			break;
 		}
@@ -399,13 +400,13 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 			animations[i].reversed = qtrue;
 		}
 
-		token = COM_Parse( &text_p );
+		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			break;
 		}
 		animations[i].loopFrames = atoi( token );
 
-		token = COM_Parse( &text_p );
+		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			break;
 		}

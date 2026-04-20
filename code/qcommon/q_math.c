@@ -241,18 +241,15 @@ signed short ClampShort( int i ) {
 
 // this isn't a real cheap function to call!
 int DirToByte( vec3_t dir ) {
-	int		i, best;
-	float	d, bestd;
-
 	if ( !dir ) {
 		return 0;
 	}
 
-	bestd = 0;
-	best = 0;
-	for (i=0 ; i<NUMVERTEXNORMALS ; i++)
+	float bestd = 0;
+	int best = 0;
+	for (int i=0 ; i<NUMVERTEXNORMALS ; i++)
 	{
-		d = DotProduct (dir, bytedirs[i]);
+		float d = DotProduct (dir, bytedirs[i]);
 		if (d > bestd)
 		{
 			bestd = d;
@@ -273,8 +270,7 @@ void ByteToDir( int b, vec3_t dir ) {
 
 
 unsigned ColorBytes3 (float r, float g, float b) {
-	unsigned	i;
-
+	unsigned i;
 	( (byte *)&i )[0] = r * 255;
 	( (byte *)&i )[1] = g * 255;
 	( (byte *)&i )[2] = b * 255;
@@ -283,8 +279,7 @@ unsigned ColorBytes3 (float r, float g, float b) {
 }
 
 unsigned ColorBytes4 (float r, float g, float b, float a) {
-	unsigned	i;
-
+	unsigned i;
 	( (byte *)&i )[0] = r * 255;
 	( (byte *)&i )[1] = g * 255;
 	( (byte *)&i )[2] = b * 255;
@@ -294,9 +289,7 @@ unsigned ColorBytes4 (float r, float g, float b, float a) {
 }
 
 float NormalizeColor( const vec3_t in, vec3_t out ) {
-	float	max;
-	
-	max = in[0];
+	float max = in[0];
 	if ( in[1] > max ) {
 		max = in[1];
 	}
@@ -324,8 +317,7 @@ The normal will point out of the clock for clockwise ordered points
 =====================
 */
 qboolean PlaneFromPoints( vec4_t plane, const vec3_t a, const vec3_t b, const vec3_t c ) {
-	vec3_t	d1, d2;
-
+	vec3_t d1, d2;
 	VectorSubtract( b, a, d1 );
 	VectorSubtract( c, a, d2 );
 	CrossProduct( d2, d1, plane );
@@ -346,8 +338,7 @@ around this vector. Adapted from Mesa 3D.
 ==================
 */
 void SetupRotationMatrix( vec3_t matrix[3], const vec3_t dir, float degrees ) {
-	vec_t	angle, s, c, one_c, xx, yy, zz, xy, yz, zx, xs, ys, zs;
-
+	vec_t angle, s, c, one_c, xx, yy, zz, xy, yz, zx, xs, ys, zs;
 	angle = DEG2RAD(degrees);
 	s = sin(angle);
 	c = cos(angle);
@@ -384,7 +375,6 @@ RotatePointAroundVector
 void RotatePointAroundVector( vec3_t dst, const vec3_t dir, const vec3_t point,
 							 float degrees ) {
 	vec3_t matrix[3];
-
 	SetupRotationMatrix(matrix, dir, degrees);
 	VectorRotate(point, matrix, dst);
 }
@@ -414,9 +404,7 @@ void RotateAroundDirection( vec3_t axis[3], float yaw ) {
 
 
 void vectoangles( const vec3_t value1, vec3_t angles ) {
-	float	forward;
-	float	yaw, pitch;
-	
+	float yaw, pitch;
 	if ( value1[1] == 0 && value1[0] == 0 ) {
 		yaw = 0;
 		if ( value1[2] > 0 ) {
@@ -440,7 +428,7 @@ void vectoangles( const vec3_t value1, vec3_t angles ) {
 			yaw += 360;
 		}
 
-		forward = sqrt ( value1[0]*value1[0] + value1[1]*value1[1] );
+		float forward = sqrt ( value1[0]*value1[0] + value1[1]*value1[1] );
 		pitch = ( atan2(value1[2], forward) * 180 / M_PI );
 		if ( pitch < 0 ) {
 			pitch += 360;
@@ -459,8 +447,7 @@ AnglesToAxis
 =================
 */
 void AnglesToAxis( const vec3_t angles, vec3_t axis[3] ) {
-	vec3_t	right;
-
+	vec3_t right;
 	// angle vectors returns "right" instead of "y axis"
 	AngleVectors( angles, axis[0], right, axis[2] );
 	VectorSubtract( vec3_origin, right, axis[1] );
@@ -486,17 +473,14 @@ void AxisCopy( vec3_t in[3], vec3_t out[3] ) {
 
 void ProjectPointOnPlane( vec3_t dst, const vec3_t p, const vec3_t normal )
 {
-	float d;
-	vec3_t n;
-	float inv_denom;
-
-	inv_denom =  DotProduct( normal, normal );
+	float inv_denom = DotProduct( normal, normal );
 
 	assert( fabsf(inv_denom) != 0.0f ); // zero vectors get here
 	inv_denom = 1.0f / inv_denom;
 
-	d = DotProduct( normal, p ) * inv_denom;
+	float d = DotProduct( normal, p ) * inv_denom;
 
+	vec3_t n;
 	n[0] = normal[0] * inv_denom;
 	n[1] = normal[1] * inv_denom;
 	n[2] = normal[2] * inv_denom;
@@ -515,15 +499,13 @@ other perpendicular vectors
 ================
 */
 void MakeNormalVectors( const vec3_t forward, vec3_t right, vec3_t up) {
-	float		d;
-
 	// this rotate and negate guarantees a vector
 	// not colinear with the original
 	right[1] = -forward[0];
 	right[2] = forward[1];
 	right[0] = forward[2];
 
-	d = DotProduct (right, forward);
+	float d = DotProduct (right, forward);
 	VectorMA (right, -d, forward, right);
 	VectorNormalize (right);
 	CrossProduct (right, forward, up);
@@ -579,15 +561,13 @@ LerpAngle
 ===============
 */
 float LerpAngle (float from, float to, float frac) {
-	float	a;
-
 	if ( to - from > 180 ) {
 		to -= 360;
 	}
 	if ( to - from < -180 ) {
 		to += 360;
 	}
-	a = from + frac * (to - from);
+	float a = from + frac * (to - from);
 
 	return a;
 }
@@ -601,9 +581,7 @@ Always returns a value from -180 to 180
 =================
 */
 float AngleSubtract( float a1, float a2 ) {
-	float	a;
-
-	a = a1 - a2;
+	float a = a1 - a2;
 	while ( a > 180 ) {
 		a -= 360;
 	}
@@ -676,11 +654,9 @@ SetPlaneSignbits
 =================
 */
 void SetPlaneSignbits (cplane_t *out) {
-	int	bits, j;
-
 	// for fast box on planeside test
-	bits = 0;
-	for (j=0 ; j<3 ; j++) {
+	int bits = 0;
+	for (int j=0 ; j<3 ; j++) {
 		if (out->normal[j] < 0) {
 			bits |= 1<<j;
 		}
@@ -698,9 +674,6 @@ Returns 1, 2, or 1 + 2
 */
 int BoxOnPlaneSide(vec3_t emins, vec3_t emaxs, struct cplane_s *p)
 {
-	float	dist[2];
-	int		sides, b, i;
-
 	// fast axial cases
 	if (p->type < 3)
 	{
@@ -712,18 +685,19 @@ int BoxOnPlaneSide(vec3_t emins, vec3_t emaxs, struct cplane_s *p)
 	}
 
 	// general case
+	float dist[2];
 	dist[0] = dist[1] = 0;
 	if (p->signbits < 8) // >= 8: default case is original code (dist[0]=dist[1]=0)
 	{
-		for (i=0 ; i<3 ; i++)
+		for (int i=0 ; i<3 ; i++)
 		{
-			b = (p->signbits >> i) & 1;
+			int b = (p->signbits >> i) & 1;
 			dist[ b] += p->normal[i]*emaxs[i];
 			dist[!b] += p->normal[i]*emins[i];
 		}
 	}
 
-	sides = 0;
+	int sides = 0;
 	if (dist[0] >= p->dist)
 		sides = 1;
 	if (dist[1] < p->dist)
@@ -739,13 +713,10 @@ RadiusFromBounds
 =================
 */
 float RadiusFromBounds( const vec3_t mins, const vec3_t maxs ) {
-	int		i;
-	vec3_t	corner;
-	float	a, b;
-
-	for (i=0 ; i<3 ; i++) {
-		a = fabs( mins[i] );
-		b = fabs( maxs[i] );
+	vec3_t corner;
+	for (int i=0 ; i<3 ; i++) {
+		float a = fabs( mins[i] );
+		float b = fabs( maxs[i] );
 		corner[i] = a > b ? a : b;
 	}
 
@@ -831,13 +802,11 @@ qboolean BoundsIntersectPoint(const vec3_t mins, const vec3_t maxs,
 
 vec_t VectorNormalize( vec3_t v ) {
 	// NOTE: TTimo - Apple G4 altivec source uses double?
-	float	length, ilength;
-
-	length = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+	float length = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
 
 	if ( length ) {
 		/* writing it this way allows gcc to recognize that rsqrt can be used */
-		ilength = 1/(float)sqrt (length);
+		float ilength = 1/(float)sqrt (length);
 		/* sqrt(length) = length * (1 / sqrt(length)) */
 		length *= ilength;
 		v[0] *= ilength;
@@ -849,14 +818,12 @@ vec_t VectorNormalize( vec3_t v ) {
 }
 
 vec_t VectorNormalize2( const vec3_t v, vec3_t out) {
-	float	length, ilength;
-
-	length = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+	float length = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
 
 	if (length)
 	{
 		/* writing it this way allows gcc to recognize that rsqrt can be used */
-		ilength = 1/(float)sqrt (length);
+		float ilength = 1/(float)sqrt (length);
 		/* sqrt(length) = length * (1 / sqrt(length)) */
 		length *= ilength;
 		out[0] = v[0]*ilength;
@@ -914,9 +881,7 @@ void Vector4Scale( const vec4_t in, vec_t scale, vec4_t out ) {
 
 
 int Q_log2( int val ) {
-	int answer;
-
-	answer = 0;
+	int answer = 0;
 	while ( ( val>>=1 ) != 0 ) {
 		answer++;
 	}
@@ -972,11 +937,10 @@ void MatrixMultiply(float in1[3][3], float in2[3][3], float out[3][3]) {
 
 
 void AngleVectors( const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up) {
-	float		angle;
 	static float		sr, sp, sy, cr, cp, cy;
 	// static to help MS compiler fp bugs
 
-	angle = angles[YAW] * (M_PI*2 / 360);
+	float angle = angles[YAW] * (M_PI*2 / 360);
 	sy = sin(angle);
 	cy = cos(angle);
 	angle = angles[PITCH] * (M_PI*2 / 360);
@@ -1011,15 +975,13 @@ void AngleVectors( const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 */
 void PerpendicularVector( vec3_t dst, const vec3_t src )
 {
-	int	pos;
-	int i;
 	float minelem = 1.0F;
-	vec3_t tempvec;
+	int pos = 0;
 
 	/*
 	** find the smallest magnitude axially aligned vector
 	*/
-	for ( pos = 0, i = 0; i < 3; i++ )
+	for (int i=0 ; i < 3; i++ )
 	{
 		if ( fabs( src[i] ) < minelem )
 		{
@@ -1027,6 +989,7 @@ void PerpendicularVector( vec3_t dst, const vec3_t src )
 			minelem = fabs( src[i] );
 		}
 	}
+	vec3_t tempvec;
 	tempvec[0] = tempvec[1] = tempvec[2] = 0.0F;
 	tempvec[pos] = 1.0F;
 
@@ -1090,9 +1053,7 @@ Q_atof
 */
 float Q_atof( const char *str )
 {
-	float f;
-
-	f = atof( str );
+	float f = atof( str );
 
 	// modern C11-like implementations of atof() may return INF or NAN
 	// which breaks all FP code where such values getting passed
@@ -1140,9 +1101,7 @@ acos(*(float*) &i) == -1.#IND0
 =====================
 */
 float Q_acos(float c) {
-	float angle;
-
-	angle = acos(c);
+	float angle = acos(c);
 
 	if (angle > M_PI) {
 		return (float)M_PI;

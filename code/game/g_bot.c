@@ -64,11 +64,12 @@ int G_ParseInfos( const char *buf, int max, char *infos[] ) {
 	int		count;
 	char	key[MAX_TOKEN_CHARS];
 	char	info[MAX_INFO_STRING];
+	ComParser parser = { 0 };
 
 	count = 0;
 
 	while ( 1 ) {
-		token = COM_Parse( &buf );
+		token = COM_Parse( &parser, &buf );
 		if ( !token[0] ) {
 			break;
 		}
@@ -84,7 +85,7 @@ int G_ParseInfos( const char *buf, int max, char *infos[] ) {
 
 		info[0] = '\0';
 		while ( 1 ) {
-			token = COM_ParseExt( &buf, qtrue );
+			token = COM_ParseExt( &parser, &buf, qtrue );
 			if ( !token[0] ) {
 				Com_Printf( "Unexpected end of info file\n" );
 				break;
@@ -94,7 +95,7 @@ int G_ParseInfos( const char *buf, int max, char *infos[] ) {
 			}
 			Q_strncpyz( key, token, sizeof( key ) );
 
-			token = COM_ParseExt( &buf, qfalse );
+			token = COM_ParseExt( &parser, &buf, qfalse );
 			if ( !token[0] ) {
 				token = "<NULL>";
 			}

@@ -160,21 +160,22 @@ static void Con_LoadHistory( void )
 		consoleSaveBuffer[ consoleSaveBufferSize ] = '\0';
 		text_p = consoleSaveBuffer;
 
+		ComParser parser = { 0 };
 		for( i = COMMAND_HISTORY - 1; i >= 0; i-- )
 		{
-			if ( !*( token = COM_Parse( &text_p ) ) )
+			if ( !*( token = COM_Parse( &parser, &text_p ) ) )
 				break;
 
 			edit = &historyEditLines[ i ];
 
 			edit->cursor = atoi( token );
 
-			if ( !*( token = COM_Parse( &text_p ) ) )
+			if ( !*( token = COM_Parse( &parser, &text_p ) ) )
 				break;
 
 			edit->scroll = atoi( token );
 
-			if( !*( token = COM_Parse( &text_p ) ) )
+			if( !*( token = COM_Parse( &parser, &text_p ) ) )
 				break;
 
 			numChars = atoi( token );

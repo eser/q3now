@@ -552,7 +552,7 @@ static void CG_MapRestart( void ) {
 	// play the "fight" sound if this is a restart without warmup
 	if ( cg.warmup == 0 /* && cgs.gametype == GT_DUEL */) {
 		trap_S_StartLocalSound( cgs.media.countFightSound, CHAN_ANNOUNCER );
-		CG_CenterPrint( "FIGHT!", 120, GIANTCHAR_WIDTH*2 );
+		CG_CenterPrint( "FIGHT!", 120, BIGCHAR_WIDTH*2 );
 	}
 
 #if FEAT_AUTO_DEMO
@@ -617,6 +617,7 @@ int CG_ParseVoiceChats( const char *filename, voiceChatList_t *voiceChatList, in
 	voiceChat_t *voiceChats;
 	qboolean compress;
 	sfxHandle_t sound;
+	ComParser parser = { 0 };
 
 	compress = qtrue;
 	if (cg_buildScript.integer) {
@@ -646,7 +647,7 @@ int CG_ParseVoiceChats( const char *filename, voiceChatList_t *voiceChatList, in
 	for ( i = 0; i < maxVoiceChats; i++ ) {
 		voiceChats[i].id[0] = 0;
 	}
-	token = COM_ParseExt(p, qtrue);
+	token = COM_ParseExt(&parser, p, qtrue);
 	if (!token[0]) {
 		return qtrue;
 	}
@@ -666,19 +667,19 @@ int CG_ParseVoiceChats( const char *filename, voiceChatList_t *voiceChatList, in
 
 	voiceChatList->numVoiceChats = 0;
 	while ( 1 ) {
-		token = COM_ParseExt(p, qtrue);
+		token = COM_ParseExt(&parser, p, qtrue);
 		if (!token[0]) {
 			return qtrue;
 		}
 		Com_sprintf(voiceChats[voiceChatList->numVoiceChats].id, sizeof( voiceChats[voiceChatList->numVoiceChats].id ), "%s", token);
-		token = COM_ParseExt(p, qtrue);
+		token = COM_ParseExt(&parser, p, qtrue);
 		if (Q_stricmp(token, "{")) {
 			trap_Print( va( S_COLOR_RED "expected { found %s in voice chat file: %s\n", token, filename ) );
 			return qfalse;
 		}
 		voiceChats[voiceChatList->numVoiceChats].numSounds = 0;
 		while(1) {
-			token = COM_ParseExt(p, qtrue);
+			token = COM_ParseExt(&parser, p, qtrue);
 			if (!token[0]) {
 				return qtrue;
 			}
@@ -686,7 +687,7 @@ int CG_ParseVoiceChats( const char *filename, voiceChatList_t *voiceChatList, in
 				break;
 			sound = trap_S_RegisterSound( token, compress );
 			voiceChats[voiceChatList->numVoiceChats].sounds[voiceChats[voiceChatList->numVoiceChats].numSounds] = sound;
-			token = COM_ParseExt(p, qtrue);
+			token = COM_ParseExt(&parser, p, qtrue);
 			if (!token[0]) {
 				return qtrue;
 			}
@@ -740,6 +741,7 @@ int CG_HeadModelVoiceChats( char *filename ) {
 	char buf[MAX_VOICEFILESIZE];
 	const char **p, *ptr;
 	const char *token;
+	ComParser parser = { 0 };
 
 	len = trap_FS_FOpenFile( filename, &f, FS_READ );
 	if ( !f ) {
@@ -759,7 +761,7 @@ int CG_HeadModelVoiceChats( char *filename ) {
 	ptr = buf;
 	p = &ptr;
 
-	token = COM_ParseExt(p, qtrue);
+	token = COM_ParseExt(&parser, p, qtrue);
 	if ( !token[0] ) {
 		return -1;
 	}

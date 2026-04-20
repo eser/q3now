@@ -135,6 +135,7 @@ static qboolean IN_IsConsoleKey( keyNum_t key, int character )
 	if ( cl_consoleKeys->modified )
 	{
 		const char *text_p, *token;
+		ComParser parser = { 0 };
 
 		cl_consoleKeys->modified = qfalse;
 		text_p = cl_consoleKeys->string;
@@ -145,7 +146,7 @@ static qboolean IN_IsConsoleKey( keyNum_t key, int character )
 			consoleKey_t *c = &consoleKeys[ numConsoleKeys ];
 			int charCode = 0;
 
-			token = COM_Parse( &text_p );
+			token = COM_Parse( &parser, &text_p );
 			if( !token[ 0 ] )
 				break;
 

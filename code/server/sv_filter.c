@@ -113,7 +113,7 @@ static void free_nodes( filter_node_t *node )
 }
 
 
-static int eval_node( const filter_node_t *node )
+static int eval_node( const InfoTokens *tokens, const filter_node_t *node )
 {
 	if ( node->fop == FOP_DROP )
 	{
@@ -143,14 +143,14 @@ static int eval_node( const filter_node_t *node )
 		{
 			if ( filterName[0] == '\0' )
 			{
-				CleanStr( filterName, sizeof( filterName ), Info_ValueForKeyToken( "name" ) );
+				CleanStr( filterName, sizeof( filterName ), Info_ValueForKeyToken( tokens, "name" ) );
 			}
 			//value = node->p1; // p1 points on filterName
 			value = filterName;
 		}
 		else
 		{
-			value = Info_ValueForKeyToken( node->p1 ); 
+			value = Info_ValueForKeyToken( tokens, node->p1 );
 		}
 
 		if ( node->is_string )
@@ -281,14 +281,14 @@ static void dump_nodes( const filter_node_t *node, int level, int skip_tagged, F
 }
 
 
-static int walk_nodes( const filter_node_t *node )
+static int walk_nodes( const InfoTokens *tokens, const filter_node_t *node )
 {
 	while ( node != NULL )
 	{
 		int res;
-		if ( ( res = eval_node( node ) ) != 0 ) // evaluate current node
+		if ( ( res = eval_node( tokens, node ) ) != 0 ) // evaluate current node
 		{
-			if ( res < 0 || ( res = walk_nodes( node->child ) ) < 0 )
+			if ( res < 0 || ( res = walk_nodes( tokens, node->child ) ) < 0 )
 			{
 				return res;
 			}
@@ -342,13 +342,16 @@ static void clear_tags( filter_node_t *node )
 // try to find single expired date nodes
 static int tag_expired( filter_node_t *node )
 {
+	// only date nodes are evaluated here; tokens unused in the date branch
+	InfoTokens tokens = { 0 };
+
 	while ( node != NULL )
 	{
 		int res;
 
 		if ( node->is_date && node->fop == FOP_LT ) // it can expire
 		{
-			res = eval_node( node );
+			res = eval_node( &tokens, node );
 			if ( res == 0 )
 			{
 				tag_from( node );	// tag current and all descending nodes
@@ -414,7 +417,7 @@ static int is_integer( const char *s )
 }
 
 
-static filter_node_t *new_node( const char *p1, const char *p2, filter_op fop, int quoted )
+static filter_node_t *new_node( ComParser *parser, const char *p1, const char *p2, filter_op fop, int quoted )
 {
 	filter_node_t *node;
 	int len, len1, len2;
@@ -428,7 +431,7 @@ static filter_node_t *new_node( const char *p1, const char *p2, filter_op fop, i
 		len1 = 0; // p1 will point on a static date buffer
 		if ( !quoted )
 		{
-			COM_ParseError( "expecting quoted string with 'date' key" );
+			COM_ParseError( parser, "expecting quoted string with 'date' key" );
 			return NULL;
 		}
 	}
@@ -438,7 +441,7 @@ static filter_node_t *new_node( const char *p1, const char *p2, filter_op fop, i
 		len1 = 0; // p1 will point on a static filtered name buffer
 		if ( !quoted )
 		{
-			COM_ParseError( "expecting quoted string with 'fname' key" );
+			COM_ParseError( parser, "expecting quoted string with 'fname' key" );
 			return NULL;
 		}
 	}
@@ -513,7 +516,7 @@ static filter_node_t *new_node( const char *p1, const char *p2, filter_op fop, i
 }
 
 
-static const char *parse_section( const char *text, int level, filter_node_t **root, qboolean in_scope )
+static const char *parse_section( ComParser *parser, const char *text, int level, filter_node_t **root, qboolean in_scope )
 {
 	filter_node_t *curr, *ch;
 	filter_op fop;
@@ -526,16 +529,16 @@ static const char *parse_section( const char *text, int level, filter_node_t **r
 	for ( ;; )
 	{
 		// expecting new key/action
-		v0 = COM_ParseComplex( &text, in_scope );
-		if ( com_tokentype == TK_EOF ) 
+		v0 = COM_ParseComplex( parser, &text, in_scope );
+		if ( parser->tokentype == TK_EOF )
 			break;
 
 		// we are in child inline node
-		if ( com_tokentype == TK_NEWLINE )
+		if ( parser->tokentype == TK_NEWLINE )
 		{
-			if ( curr == NULL ) 
+			if ( curr == NULL )
 			{
-				COM_ParseError( "unexpected newline" );
+				COM_ParseError( parser, "unexpected newline" );
 				return NULL;
 			}
 			break; // exit from child node
@@ -545,9 +548,9 @@ static const char *parse_section( const char *text, int level, filter_node_t **r
 		if ( *v0 == '}' && curr && in_scope && level )
 			break;
 
-		if ( com_tokentype != TK_STRING /*&& com_tokentype != TK_QUOTED*/ )
+		if ( parser->tokentype != TK_STRING /*&& parser->tokentype != TK_QUOTED*/ )
 		{
-			COM_ParseError( "unexpected key/action '%s'", v0 );
+			COM_ParseError( parser, "unexpected key/action '%s'", v0 );
 			return NULL;
 		}
 
@@ -555,35 +558,35 @@ static const char *parse_section( const char *text, int level, filter_node_t **r
 		{
 			fop = FOP_DROP;
 			back = text; // backup
-			v0 = COM_ParseComplex( &text, qfalse );
-			if ( com_tokentype != TK_QUOTED )
+			v0 = COM_ParseComplex( parser, &text, qfalse );
+			if ( parser->tokentype != TK_QUOTED )
 			{
 				// "drop" action can have empty message (defaults to "Banned.")
-				if ( /*fop == FOP_DROP && */ ( com_tokentype == TK_NEWLINE || com_tokentype == TK_EOF || *v0 == '}' ) )
+				if ( /*fop == FOP_DROP && */ ( parser->tokentype == TK_NEWLINE || parser->tokentype == TK_EOF || *v0 == '}' ) )
 				{
-					if ( com_tokentype == TK_NEWLINE || com_tokentype == TK_EOF )
+					if ( parser->tokentype == TK_NEWLINE || parser->tokentype == TK_EOF )
 						v0 = "";
 					text = back; // restore backup
 				}
 				else
 				{
-					COM_ParseError( "unexpected '%s'", v0 );
+					COM_ParseError( parser, "unexpected '%s'", v0 );
 					return NULL;
 				}
 			}
-			ch = new_node( v0, "0", fop, 0 ); // action node, p2 = "0", quoted = 0
+			ch = new_node( parser, v0, "0", fop, 0 ); // action node, p2 = "0", quoted = 0
 		}
 		else
 		{
 			// save key
 			Q_strncpyz( lvalue, v0, sizeof( lvalue ) );
 			// expect operator or value
-			v0 = COM_ParseComplex( &text, qfalse );
+			v0 = COM_ParseComplex( parser, &text, qfalse );
 			// override default op
-			if ( com_tokentype >= TK_EQ && com_tokentype <= TK_MATCH )
+			if ( parser->tokentype >= TK_EQ && parser->tokentype <= TK_MATCH )
 			{
-				op = com_tokentype;
-				v0 = COM_ParseComplex( &text, qfalse ); // get rvalue
+				op = parser->tokentype;
+				v0 = COM_ParseComplex( parser, &text, qfalse ); // get rvalue
 			}
 			else
 			{
@@ -594,9 +597,9 @@ static const char *parse_section( const char *text, int level, filter_node_t **r
 			}
 
 			//  value must be sting or quoted string, `~` must be used with quoted strings only
-			if ( (com_tokentype != TK_STRING && com_tokentype != TK_QUOTED) || (op == TK_MATCH && com_tokentype != TK_QUOTED ) )
+			if ( (parser->tokentype != TK_STRING && parser->tokentype != TK_QUOTED) || (op == TK_MATCH && parser->tokentype != TK_QUOTED ) )
 			{
-				COM_ParseError( "expecting value for key '%s' instead of '%s'", lvalue, v0 );
+				COM_ParseError( parser, "expecting value for key '%s' instead of '%s'", lvalue, v0 );
 				return NULL;
 			}
 
@@ -610,37 +613,37 @@ static const char *parse_section( const char *text, int level, filter_node_t **r
 				case TK_GTE:   fop = FOP_GTE;   break;
 				case TK_MATCH: fop = FOP_MATCH; break;
 				default:
-					COM_ParseError( "bad operator #%i", op );
+					COM_ParseError( parser, "bad operator #%i", op );
 					return NULL;
 			}
 
 			//Com_Printf( "%i: KEY %s <%i> %s\n", level, lvalue, fop, v0 ); // debug
 
 			// allocate new filter node
-			ch = new_node( lvalue, v0, fop, (com_tokentype == TK_QUOTED) ); // quoted = x
+			ch = new_node( parser, lvalue, v0, fop, (parser->tokentype == TK_QUOTED) ); // quoted = x
 			if ( ch == NULL )
 				return NULL;
 
 			back = text;
-			v0 = COM_ParseComplex( &text, qfalse ); // check current line
+			v0 = COM_ParseComplex( parser, &text, qfalse ); // check current line
 			if ( *v0 == '{' ) // open new section
 			{
-				text = parse_section( text, level + 1, &ch->child, qtrue );
+				text = parse_section( parser, text, level + 1, &ch->child, qtrue );
 			}
-			else if ( com_tokentype == TK_STRING ) // new key/action on the same line, open new section
+			else if ( parser->tokentype == TK_STRING ) // new key/action on the same line, open new section
 			{
-				text = parse_section( back, level + 1, &ch->child, qfalse );
-			} 
-			else if ( com_tokentype == TK_NEWLINE || com_tokentype == TK_EOF )  // expect new section
+				text = parse_section( parser, back, level + 1, &ch->child, qfalse );
+			}
+			else if ( parser->tokentype == TK_NEWLINE || parser->tokentype == TK_EOF )  // expect new section
 			{
-				v0 = COM_ParseComplex( &text, qtrue );
+				v0 = COM_ParseComplex( parser, &text, qtrue );
 				if ( *v0 == '{' )
-				{ 
-					text = parse_section( text, level + 1, &ch->child, qtrue );
+				{
+					text = parse_section( parser, text, level + 1, &ch->child, qtrue );
 				}
 				else
 				{
-					COM_ParseError( "expecting new section/action node" );
+					COM_ParseError( parser, "expecting new section/action node" );
 					text = NULL;
 				}
 			} // else parse new key/action
@@ -649,7 +652,7 @@ static const char *parse_section( const char *text, int level, filter_node_t **r
 		// update node pointers
 		if ( curr == NULL )
 			*root = ch;
-		else 
+		else
 			curr->next = ch;
 
 		curr = ch;
@@ -706,9 +709,10 @@ static qboolean parse_file( const char *filename )
 	data[ size ] = '\0';
 	fclose( f );
 
-	COM_BeginParseSession( filename );
+	ComParser parser;
+	COM_BeginParseSession( &parser, filename );
 
-	text = parse_section( data, 0, &nodes, qtrue );
+	text = parse_section( &parser, data, 0, &nodes, qtrue );
 
 	if ( text == NULL ) // error
 	{
@@ -842,13 +846,14 @@ const char *SV_RunFilters( const char *userinfo, const netadr_t *addr )
 	if ( addr->type <= NA_LOOPBACK ) // cannot kick host player/bot
 		return "";
 
-	Info_Tokenize( userinfo );
+	InfoTokens tokens;
+	Info_Tokenize( &tokens, userinfo );
 
 	filterName[0] = '\0';
 	filterMessage[0] = '\0';
 	filterCurrMsec = Sys_Milliseconds();
 
-	if ( walk_nodes( nodes ) != 0 )
+	if ( walk_nodes( &tokens, nodes ) != 0 )
 	{
 		if ( filterMessage[0] )
 			return filterMessage;
@@ -969,6 +974,7 @@ void SV_AddFilter_f( void )
 	const char *reason;
 	qtime_t t;
 	int i, n, keys;
+	InfoTokens tokens;
 
 	if ( !sv_filter->string[0] )
 	{
@@ -996,7 +1002,7 @@ void SV_AddFilter_f( void )
 	keys = 0;
 	reason = "";
 
-	Info_Tokenize( cl->userinfo );
+	Info_Tokenize( &tokens, cl->userinfo );
 
 	// attach userinfo keys
 	for ( i = 2; i < Cmd_Argc(); i++ )
@@ -1057,7 +1063,7 @@ void SV_AddFilter_f( void )
 			continue;
 		}
 
-		s = Info_ValueForKeyToken( v );
+		s = Info_ValueForKeyToken( &tokens, v );
 		if ( *s == '\0' ) // skip empty keys
 			continue;
 
@@ -1068,7 +1074,7 @@ void SV_AddFilter_f( void )
 
 	if ( !keys ) // add default key(s)
 	{
-		Com_sprintf( buf, sizeof( cmd ), " ip \"%s\"", Info_ValueForKeyToken( "ip" ) );
+		Com_sprintf( buf, sizeof( cmd ), " ip \"%s\"", Info_ValueForKeyToken( &tokens, "ip" ) );
 		Q_strcat( cmd, sizeof( cmd ), buf );
 	}
 
@@ -1085,8 +1091,11 @@ void SV_AddFilter_f( void )
 	Com_DPrintf( "bancmd: `%s`\n", cmd );
 
 	node = NULL;
-	COM_BeginParseSession( "command" );
-	s = parse_section( cmd, 0, &node, qtrue ); // level=0,in_scope=qtrue
+	{
+		ComParser parser;
+		COM_BeginParseSession( &parser, "command" );
+		s = parse_section( &parser, cmd, 0, &node, qtrue ); // level=0,in_scope=qtrue
+	}
 	if ( s == NULL ) // syntax error
 	{
 		free_nodes( node );
@@ -1136,8 +1145,11 @@ void SV_AddFilterCmd_f( void )
 	cmd = Cmd_Cmd() + strlen( Cmd_Argv( 0 ) ) + 1;
 
 	node = NULL;
-	COM_BeginParseSession( "command" );
-	s = parse_section( cmd, 0, &node, qtrue ); // level=0,in_scope=qtrue
+	{
+		ComParser parser;
+		COM_BeginParseSession( &parser, "command" );
+		s = parse_section( &parser, cmd, 0, &node, qtrue ); // level=0,in_scope=qtrue
+	}
 	if ( s == NULL ) // syntax error
 	{
 		free_nodes( node );

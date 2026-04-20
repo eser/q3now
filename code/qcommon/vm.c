@@ -292,26 +292,27 @@ static void VM_LoadSymbols( vm_t *vm ) {
 	prev = &vm->symbols;
 	count = 0;
 
+	ComParser parser = { 0 };
 	while ( 1 ) {
-		token = COM_Parse( &text_p );
+		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			break;
 		}
 		segment = ParseHex( token );
 		if ( segment ) {
-			COM_Parse( &text_p );
-			COM_Parse( &text_p );
+			COM_Parse( &parser, &text_p );
+			COM_Parse( &parser, &text_p );
 			continue;		// only load code segment values
 		}
 
-		token = COM_Parse( &text_p );
+		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			Com_Printf( "WARNING: incomplete line at end of file\n" );
 			break;
 		}
 		value = ParseHex( token );
 
-		token = COM_Parse( &text_p );
+		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
 			Com_Printf( "WARNING: incomplete line at end of file\n" );
 			break;
