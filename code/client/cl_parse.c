@@ -212,7 +212,7 @@ static void CL_ParseSnapshot( msg_t *msg ) {
 
 	// read in the new snapshot to a temporary buffer
 	// we will only copy to cl.snap if it is valid
-	Com_Memset (&newSnap, 0, sizeof(newSnap));
+	memset (&newSnap, 0, sizeof(newSnap));
 
 	// we will have read any new server commands in this
 	// message before we got to svc_snapshot
@@ -513,7 +513,7 @@ static void CL_ParseGamestate( msg_t *msg ) {
 
 	clc.connectPacketCount = 0;
 
-	Com_Memset( &nullstate, 0, sizeof( nullstate ) );
+	memset( &nullstate, 0, sizeof( nullstate ) );
 
 	// clear old error message
 	Com_ClearLastError();
@@ -559,7 +559,7 @@ static void CL_ParseGamestate( msg_t *msg ) {
 
 			// append it to the gameState string buffer
 			cl.gameState.stringOffsets[ i ] = cl.gameState.dataCount;
-			Com_Memcpy( cl.gameState.stringData + cl.gameState.dataCount, s, len + 1 );
+			memcpy( cl.gameState.stringData + cl.gameState.dataCount, s, len + 1 );
 			cl.gameState.dataCount += len + 1;
 		} else if ( cmd == svc_baseline ) {
 			newnum = MSG_ReadEntitynum( msg );
@@ -831,7 +831,7 @@ static int CL_WiredNetReadBytes( const byte *buf, int len, int *offset, byte *ou
 	if ( *offset + count > len ) {
 		return 0;
 	}
-	Com_Memcpy( out, buf + *offset, (size_t)count );
+	memcpy( out, buf + *offset, (size_t)count );
 	*offset += count;
 	return 1;
 }
@@ -846,7 +846,7 @@ static int CL_WiredNetReadString( const byte *buf, int len, int *offset,
 	if ( slen <= 0 || *offset + slen > len || slen > outSize ) {
 		return 0;
 	}
-	Com_Memcpy( out, buf + *offset, (size_t)slen );
+	memcpy( out, buf + *offset, (size_t)slen );
 	*offset += slen;
 	if ( out[slen - 1] != '\0' ) {
 		return 0;
@@ -860,7 +860,7 @@ static int CL_WiredNetReadFloat( const byte *buf, int len, int *offset, float *o
 	if ( !CL_WiredNetReadU32( buf, len, offset, &bits ) ) {
 		return 0;
 	}
-	Com_Memcpy( out, &bits, sizeof( bits ) );
+	memcpy( out, &bits, sizeof( bits ) );
 	return 1;
 }
 
@@ -941,8 +941,8 @@ static void CL_WiredNetBootstrapResetState( void )
 		}
 	}
 	cl.gameState.dataCount = 1;
-	Com_Memset( cl.baselineUsed, 0, sizeof( cl.baselineUsed ) );
-	Com_Memset( cl.entityBaselines, 0, sizeof( cl.entityBaselines ) );
+	memset( cl.baselineUsed, 0, sizeof( cl.baselineUsed ) );
+	memset( cl.entityBaselines, 0, sizeof( cl.entityBaselines ) );
 }
 
 static qboolean CL_WiredNetApplyServerCommand( int seq, const char *s )
@@ -969,7 +969,7 @@ static qboolean CL_WiredNetApplyConfigstring( int index, const char *s )
 		return qfalse;
 	}
 	cl.gameState.stringOffsets[index] = cl.gameState.dataCount;
-	Com_Memcpy( cl.gameState.stringData + cl.gameState.dataCount, s, (size_t)slen + 1 );
+	memcpy( cl.gameState.stringData + cl.gameState.dataCount, s, (size_t)slen + 1 );
 	cl.gameState.dataCount += slen + 1;
 	return qtrue;
 }
@@ -1083,7 +1083,7 @@ static void CL_ParseTypedBootstrap( const byte *buf, int len )
 			while ( count-- ) {
 				uint16_t entityNum;
 				entityState_t es;
-				Com_Memset( &es, 0, sizeof( es ) );
+				memset( &es, 0, sizeof( es ) );
 				if ( !CL_WiredNetReadU16( buf, sectionEnd, &offset, &entityNum ) ||
 					!CL_WiredNetReadEntityState( buf, sectionEnd, &offset, &es ) ||
 					!CL_WiredNetApplyBaseline( entityNum, &es ) ) {
@@ -1141,7 +1141,7 @@ static void CL_ParseTypedDownload( const byte *buf, int len )
 				errlen = len - 3;
 			if ( errlen >= (int)sizeof(reason) )
 				errlen = (int)sizeof(reason) - 1;
-			Com_Memcpy( reason, buf + 3, (size_t)errlen );
+			memcpy( reason, buf + 3, (size_t)errlen );
 			reason[errlen] = '\0';
 			Com_Error( ERR_DROP, "%s", reason );
 		}
@@ -1495,7 +1495,7 @@ void CL_CheckSnapshotDatagrams( void )
 
 				/* If this is for a different snapshot, discard old and start fresh. */
 				if ( s_snap_reassembly.wn_sequence != srv_tick ) {
-					Com_Memset( &s_snap_reassembly, 0, sizeof(s_snap_reassembly) );
+					memset( &s_snap_reassembly, 0, sizeof(s_snap_reassembly) );
 					s_snap_reassembly.wn_sequence = srv_tick;
 					s_snap_reassembly.delta_base  = base_tick;
 					s_snap_reassembly.frag_total  = frag_total;
@@ -1504,7 +1504,7 @@ void CL_CheckSnapshotDatagrams( void )
 				offset = frag_index * WN_FRAG_PAYLOAD;
 				if ( !( s_snap_reassembly.frag_received_mask & ( 1 << frag_index ) ) &&
 				     offset + frag_len <= (int)sizeof(s_snap_reassembly.data) ) {
-					Com_Memcpy( s_snap_reassembly.data + offset, dgbuf + 10, frag_len );
+					memcpy( s_snap_reassembly.data + offset, dgbuf + 10, frag_len );
 					s_snap_reassembly.frag_sizes[frag_index] = frag_len;
 					s_snap_reassembly.frag_received_mask |= (uint8_t)( 1 << frag_index );
 				}
@@ -1526,7 +1526,7 @@ void CL_CheckSnapshotDatagrams( void )
 					msg.readcount = 0;
 					clc.lastPacketTime = cls.realtime;
 					CL_ParseServerMessage( &msg );
-					Com_Memset( &s_snap_reassembly, 0, sizeof(s_snap_reassembly) );
+					memset( &s_snap_reassembly, 0, sizeof(s_snap_reassembly) );
 				}
 			}
 		}

@@ -593,7 +593,7 @@ static	void R_LoadVisibility( const lump_t *l ) {
 		byte	*dest;
 
 		dest = ri.Hunk_Alloc( len - 8, h_low );
-		Com_Memcpy( dest, buf + 8, len - 8 );
+		memcpy( dest, buf + 8, len - 8 );
 		s_worldData.vis = dest;
 	}
 }
@@ -1689,22 +1689,22 @@ static void R_MovePatchSurfacesToHunk(void) {
 
 		copyFrom = grid->widthLodError;
 		grid->widthLodError = ri.Hunk_Alloc( grid->width * 4, h_low );
-		Com_Memcpy(grid->widthLodError, copyFrom, grid->width * 4);
+		memcpy(grid->widthLodError, copyFrom, grid->width * 4);
 		ri.Free(copyFrom);
 
 		copyFrom = grid->heightLodError;
 		grid->heightLodError = ri.Hunk_Alloc(grid->height * 4, h_low);
-		Com_Memcpy(grid->heightLodError, copyFrom, grid->height * 4);
+		memcpy(grid->heightLodError, copyFrom, grid->height * 4);
 		ri.Free(copyFrom);
 
 		copyFrom = grid->indexes;
 		grid->indexes = ri.Hunk_Alloc(grid->numIndexes * sizeof(glIndex_t), h_low);
-		Com_Memcpy(grid->indexes, copyFrom, grid->numIndexes * sizeof(glIndex_t));
+		memcpy(grid->indexes, copyFrom, grid->numIndexes * sizeof(glIndex_t));
 		ri.Free(copyFrom);
 
 		copyFrom = grid->verts;
 		grid->verts = ri.Hunk_Alloc(grid->numVerts * sizeof(srfVert_t), h_low);
-		Com_Memcpy(grid->verts, copyFrom, grid->numVerts * sizeof(srfVert_t));
+		memcpy(grid->verts, copyFrom, grid->numVerts * sizeof(srfVert_t));
 		ri.Free(copyFrom);
 	}
 }
@@ -2001,7 +2001,7 @@ static	void R_LoadShaders( const lump_t *l ) {
 	s_worldData.shaders = out;
 	s_worldData.numShaders = count;
 
-	Com_Memcpy( out, in, count*sizeof(*out) );
+	memcpy( out, in, count*sizeof(*out) );
 
 	for ( i=0 ; i<count ; i++ ) {
 		out[i].surfaceFlags = LittleLong( out[i].surfaceFlags );
@@ -2233,7 +2233,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 	}
 
 	w->lightGridData = ri.Hunk_Alloc( l->filelen, h_low );
-	Com_Memcpy( w->lightGridData, (void *)(fileBase + l->fileofs), l->filelen );
+	memcpy( w->lightGridData, (void *)(fileBase + l->fileofs), l->filelen );
 
 	// deal with overbright bits
 	for ( i = 0 ; i < numGridPoints ; i++ ) {
@@ -2352,7 +2352,7 @@ static void R_LoadEntities( const lump_t *l ) {
 
 		// check for remapping of shaders for vertex lighting
 		s = "vertexremapshader";
-		if (!Q_strncmp(keyname, s, strlen(s)) ) {
+		if (!strncmp(keyname, s, strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
 				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in vertexshaderremap '%s'\n", value );
@@ -2366,7 +2366,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		}
 		// check for remapping of shaders
 		s = "remapshader";
-		if (!Q_strncmp(keyname, s, strlen(s)) ) {
+		if (!strncmp(keyname, s, strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
 				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in shaderremap '%s'\n", value );
@@ -2806,7 +2806,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	// try will not look at the partially loaded version
 	tr.world = NULL;
 
-	Com_Memset( &s_worldData, 0, sizeof( s_worldData ) );
+	memset( &s_worldData, 0, sizeof( s_worldData ) );
 	Q_strncpyz( s_worldData.name, name, sizeof( s_worldData.name ) );
 
 	Q_strncpyz( s_worldData.baseName, COM_SkipPath( s_worldData.name ), sizeof( s_worldData.name ) );
@@ -2909,7 +2909,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 			uint8_t *in;
 			char fileName[MAX_QPATH];
 			
-			Com_Memset (buffer, 0, 18);
+			memset (buffer, 0, 18);
 			buffer[2] = 2;		// uncompressed type
 			buffer[12] = w->lightGridBounds[0] & 255;
 			buffer[13] = w->lightGridBounds[0] >> 8;

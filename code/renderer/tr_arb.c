@@ -1211,7 +1211,7 @@ static void ARB_BlurParams( int width, int height, int ksize, qboolean horizonta
 static void ARB_DeletePrograms( void )
 {
 	qglDeleteProgramsARB( ARRAY_LEN( programs ) - PROGRAM_BASE, programs + PROGRAM_BASE );
-	Com_Memset( programs, 0, sizeof( programs ) );
+	memset( programs, 0, sizeof( programs ) );
 	programCompiled = 0;
 }
 
@@ -1382,7 +1382,7 @@ void FBO_Clean( frameBuffer_t *fb )
 		qglDeleteFramebuffers( 1, &fb->fbo );
 		fb->fbo = 0;
 	}
-	Com_Memset( fb, 0, sizeof( *fb ) );
+	memset( fb, 0, sizeof( *fb ) );
 }
 
 

@@ -1,19 +1,5 @@
 /*
-===========================================================================
 cl_wired_hud_compat.h — Compatibility shim for ModernHUD element migration
-
-This header maps cgame API patterns to client equivalents so that
-ModernHUD element files can be moved to the client with MINIMAL changes.
-Each element file only needs: #include "cg_local.h" → #include "cl_wired_hud_compat.h"
-
-Provides:
-  - cg.* → wiredHud->* field mappings (as a struct with same field names)
-  - cgs.* → wiredHud->* or client equivalents
-  - trap_R_* → re.* direct renderer calls
-  - trap_FS_* → FS_* direct filesystem calls
-  - trap_Milliseconds → cls.realtime
-  - CG_* helper function mappings
-===========================================================================
 */
 
 #ifndef CL_WIRED_HUD_COMPAT_H

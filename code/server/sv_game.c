@@ -973,12 +973,12 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 
 	case TRAP_MEMSET:
 		VM_CHECKBOUNDS( gvm, args[1], args[3] );
-		Com_Memset( VMA(1), args[2], args[3] );
+		memset( VMA(1), args[2], args[3] );
 		return args[1];
 
 	case TRAP_MEMCPY:
 		VM_CHECKBOUNDS2( gvm, args[1], args[2], args[3] );
-		Com_Memcpy( VMA(1), VMA(2), args[3] );
+		memcpy( VMA(1), VMA(2), args[3] );
 		return args[1];
 
 	case TRAP_STRNCPY:

@@ -1274,7 +1274,7 @@ void IN_StartupJoystick (void) {
 	mmr = 0;
 	for (joy.id=0 ; joy.id<numdevs ; joy.id++)
 	{
-		Com_Memset (&joy.ji, 0, sizeof(joy.ji));
+		memset (&joy.ji, 0, sizeof(joy.ji));
 		joy.ji.dwSize = sizeof(joy.ji);
 		joy.ji.dwFlags = JOY_RETURNCENTERED;
 
@@ -1291,7 +1291,7 @@ void IN_StartupJoystick (void) {
 
 	// get the capabilities of the selected joystick
 	// abort startup if command fails
-	Com_Memset (&joy.jc, 0, sizeof(joy.jc));
+	memset (&joy.jc, 0, sizeof(joy.jc));
 	if ((mmr = joyGetDevCaps (joy.id, &joy.jc, sizeof(joy.jc))) != JOYERR_NOERROR)
 	{
 		Com_DPrintf ("joystick not found -- invalid joystick capabilities (%x)\n", mmr); 
@@ -1379,7 +1379,7 @@ void IN_JoyMove( void ) {
 	}
 
 	// collect the joystick data, if possible
-	Com_Memset (&joy.ji, 0, sizeof(joy.ji));
+	memset (&joy.ji, 0, sizeof(joy.ji));
 	joy.ji.dwSize = sizeof(joy.ji);
 	joy.ji.dwFlags = JOY_RETURNALL;
 
@@ -1603,6 +1603,6 @@ static void IN_ShutdownMIDI( void )
 	{
 		midiInClose( s_midiInfo.hMidiIn );
 	}
-	Com_Memset( &s_midiInfo, 0, sizeof( s_midiInfo ) );
+	memset( &s_midiInfo, 0, sizeof( s_midiInfo ) );
 }
 #endif

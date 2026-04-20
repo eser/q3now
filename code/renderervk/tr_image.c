@@ -457,7 +457,7 @@ static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, i
 	}
 
 	if ( out == in ) {
-		Com_Memcpy( out, temp, outWidth * outHeight * 4 );
+		memcpy( out, temp, outWidth * outHeight * 4 );
 		ri.Hunk_FreeTempMemory( temp );
 	}
 }
@@ -596,7 +596,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 	int mip_level_size;
 	int miplevel;
 
-	Com_Memset( upload_data, 0, sizeof( *upload_data ) );
+	memset( upload_data, 0, sizeof( *upload_data ) );
 
 	if ( image->flags & IMGFLAG_NOSCALE ) {
 		//
@@ -632,7 +632,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 
 	upload_data->buffer = (byte*) ri.Hunk_AllocateTempMemory( 2 * 4 * scaled_width * scaled_height );
 	if ( data == NULL ) {
-		Com_Memset( upload_data->buffer, 0, 2 * 4 * scaled_width * scaled_height );
+		memset( upload_data->buffer, 0, 2 * 4 * scaled_width * scaled_height );
 	}
 
 	if ( ( scaled_width != width || scaled_height != height ) && data ) {
@@ -684,7 +684,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 		upload_data->buffer_size = scaled_width * scaled_height * 4;
 
 		if ( data != NULL ) {
-			Com_Memcpy( upload_data->buffer, data, upload_data->buffer_size );
+			memcpy( upload_data->buffer, data, upload_data->buffer_size );
 		}
 
 		if ( resampled_buffer != NULL ) {
@@ -708,7 +708,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 	// At this point width == scaled_width and height == scaled_height.
 
 	scaled_buffer = (unsigned int*) ri.Hunk_AllocateTempMemory( sizeof( unsigned ) * scaled_width * scaled_height );
-	Com_Memcpy(scaled_buffer, data, scaled_width * scaled_height * 4);
+	memcpy(scaled_buffer, data, scaled_width * scaled_height * 4);
 
 	if ( !(image->flags & IMGFLAG_NOLIGHTSCALE ) ) {
 		R_LightScaleTexture( (byte*)scaled_buffer, scaled_width, scaled_height, !mipmap );
@@ -717,7 +717,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 	miplevel = 0;
 	mip_level_size = scaled_width * scaled_height * 4;
 
-	Com_Memcpy(upload_data->buffer, scaled_buffer, mip_level_size);
+	memcpy(upload_data->buffer, scaled_buffer, mip_level_size);
 	upload_data->buffer_size = mip_level_size;
 	
 	if ( mipmap ) {
@@ -737,7 +737,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 				R_BlendOverTexture( (byte *)scaled_buffer, scaled_width * scaled_height, miplevel );
 			}
 
-			Com_Memcpy(&upload_data->buffer[upload_data->buffer_size], scaled_buffer, mip_level_size);
+			memcpy(&upload_data->buffer[upload_data->buffer_size], scaled_buffer, mip_level_size);
 			upload_data->buffer_size += mip_level_size;
 		}
 	}
@@ -1587,7 +1587,7 @@ static void R_CreateDefaultImage( void ) {
 	}
 
 	// the default image will be a box, to allow you to see the mapping coordinates
-	Com_Memset( data, 32, sizeof( data ) );
+	memset( data, 32, sizeof( data ) );
 	for ( x = 0 ; x < DEFAULT_SIZE ; x++ ) {
 		data[0][x][0] =
 		data[0][x][1] =
@@ -1625,11 +1625,11 @@ static void R_CreateBuiltinImages( void ) {
 
 	R_CreateDefaultImage();
 
-	Com_Memset( data, 0, sizeof( data ) );
+	memset( data, 0, sizeof( data ) );
 	tr.blackImage = R_CreateImage( "*black", NULL, (byte *)data, 8, 8, IMGFLAG_NONE );
 
 	// we use a solid white image instead of disabling texturing
-	Com_Memset( data, 255, sizeof( data ) );
+	memset( data, 255, sizeof( data ) );
 	tr.whiteImage = R_CreateImage( "*white", NULL, (byte *)data, 8, 8, IMGFLAG_NONE );
 
 	// with overbright bits active, we need an image which is some fraction of full color,
@@ -1808,7 +1808,7 @@ void R_InitImages( void ) {
 		s_gammatable_linear[i] = (unsigned char)i;
 #endif
 
-	Com_Memset( hashTable, 0, sizeof( hashTable ) );
+	memset( hashTable, 0, sizeof( hashTable ) );
 
 	// build brightness translation tables
 	R_SetColorMappings();
@@ -1859,11 +1859,11 @@ void R_DeleteTextures( void ) {
 	}
 #endif
 
-	Com_Memset( tr.images, 0, sizeof( tr.images ) );
-	Com_Memset( tr.scratchImage, 0, sizeof( tr.scratchImage ) );
+	memset( tr.images, 0, sizeof( tr.images ) );
+	memset( tr.scratchImage, 0, sizeof( tr.scratchImage ) );
 	tr.numImages = 0;
 
-	Com_Memset( glState.currenttextures, 0, sizeof( glState.currenttextures ) );
+	memset( glState.currenttextures, 0, sizeof( glState.currenttextures ) );
 }
 
 

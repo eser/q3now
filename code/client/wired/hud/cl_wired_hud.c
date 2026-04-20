@@ -134,7 +134,7 @@ void WiredHud_ReceiveEvent( int type, const char *data ) {
 
 void WiredHud_ReceiveState( wiredHudState_t *state ) {
 	if ( !state ) return;
-	Com_Memcpy( &wired_hudStateStorage, state, sizeof( wiredHudState_t ) );
+	memcpy( &wired_hudStateStorage, state, sizeof( wiredHudState_t ) );
 	wired_hudStateStorage.valid = qtrue;
 }
 
@@ -155,14 +155,14 @@ const wiredHudBinding_t *WiredHud_FindBinding( const char *name ) {
 void WiredHud_Init( void ) {
 	cl_drawHud = Cvar_Get( "cl_drawHud", "1", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( cl_drawHud, "Draw the Wired HUD. 0: off. 1: on (default)." );
-	Com_Memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
+	memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
 	wiredHud_elementsLoaded = qfalse;
 	Com_DPrintf( "WiredHud: initialized (Phase 3)\n" );
 }
 
 void WiredHud_Shutdown( void ) {
 	WiredHud_DestroyAllElements();
-	Com_Memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
+	memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
 	wiredHud_elementsLoaded = qfalse;
 }
 
@@ -222,7 +222,7 @@ static void WiredHud_DrawFps( int realtime ) {
 // so that elements can be created from .hud file definitions.
 
 static void WiredHud_ItemToConfig( const wiredItemDef_t *item, modernhudConfig_t *cfg ) {
-	Com_Memset( cfg, 0, sizeof( *cfg ) );
+	memset( cfg, 0, sizeof( *cfg ) );
 
 	// rect
 	if ( item->rect.x != 0 || item->rect.y != 0 || item->rect.w != 0 || item->rect.h != 0 ) {

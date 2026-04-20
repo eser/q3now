@@ -82,15 +82,15 @@ void WiredHud_SyncCompat( void ) {
 	wired_cg.lowAmmoWarning       = wiredHud->lowAmmoWarning;
 	wired_cg.itemPickup           = wiredHud->itemPickup;
 	wired_cg.itemPickupTime       = wiredHud->itemPickupTime;
-	Com_Memcpy( &wired_cg.predictedPlayerState, &wiredHud->predictedPlayerState, sizeof( playerState_t ) );
+	memcpy( &wired_cg.predictedPlayerState, &wiredHud->predictedPlayerState, sizeof( playerState_t ) );
 
 	// cg.snap proxy — point to internal storage
-	Com_Memcpy( &wired_cg._snapData.ps, &wiredHud->predictedPlayerState, sizeof( playerState_t ) );
+	memcpy( &wired_cg._snapData.ps, &wiredHud->predictedPlayerState, sizeof( playerState_t ) );
 	// overlay actual snapshot stats (more accurate than predicted for HUD display)
-	Com_Memcpy( wired_cg._snapData.ps.stats, wiredHud->stats, sizeof( wiredHud->stats ) );
-	Com_Memcpy( wired_cg._snapData.ps.persistant, wiredHud->persistant, sizeof( wiredHud->persistant ) );
-	Com_Memcpy( wired_cg._snapData.ps.powerups, wiredHud->powerups, sizeof( wiredHud->powerups ) );
-	Com_Memcpy( wired_cg._snapData.ps.ammo, wiredHud->ammo, sizeof( wiredHud->ammo ) );
+	memcpy( wired_cg._snapData.ps.stats, wiredHud->stats, sizeof( wiredHud->stats ) );
+	memcpy( wired_cg._snapData.ps.persistant, wiredHud->persistant, sizeof( wiredHud->persistant ) );
+	memcpy( wired_cg._snapData.ps.powerups, wiredHud->powerups, sizeof( wiredHud->powerups ) );
+	memcpy( wired_cg._snapData.ps.ammo, wiredHud->ammo, sizeof( wiredHud->ammo ) );
 	wired_cg._snapData.ps.weapon      = wiredHud->weapon;
 	wired_cg._snapData.ps.weaponstate = wiredHud->weaponstate;
 	wired_cg._snapData.ps.clientNum   = wiredHud->clientNum;
@@ -123,7 +123,7 @@ void WiredHud_SyncCompat( void ) {
 	Q_strncpyz( wired_cgs.voteString, wiredHud->voteString, sizeof( wired_cgs.voteString ) );
 
 	// glconfig — copy from client
-	Com_Memcpy( &wired_cgs.glconfig, &cls.glconfig, sizeof( glconfig_t ) );
+	memcpy( &wired_cgs.glconfig, &cls.glconfig, sizeof( glconfig_t ) );
 
 	// media
 	wired_cgs.media.whiteShader       = wiredHud->whiteShader;

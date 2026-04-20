@@ -189,7 +189,7 @@ static wn_rel_partial_t *wn_reliable_alloc_partial( wn_rel_partial_t *partials,
 	int i;
 	for ( i = 0; i < WN_REL_PARTIAL_CAP; i++ ) {
 		if ( !partials[i].active ) {
-			Com_Memset( &partials[i], 0, sizeof( partials[i] ) );
+			memset( &partials[i], 0, sizeof( partials[i] ) );
 			partials[i].active       = qtrue;
 			partials[i].stream_id    = stream_id;
 			partials[i].channel      = -1; /* filled in once header is staged */
@@ -203,7 +203,7 @@ static wn_rel_partial_t *wn_reliable_alloc_partial( wn_rel_partial_t *partials,
 static void wn_reliable_free_partial( wn_rel_partial_t *partial )
 {
 	if ( partial ) {
-		Com_Memset( partial, 0, sizeof( *partial ) );
+		memset( partial, 0, sizeof( *partial ) );
 	}
 }
 
@@ -219,7 +219,7 @@ static qboolean wn_reliable_queue_push( wn_rel_msg_t *queue, volatile int *head,
 	msg = &queue[*head];
 	msg->channel = channel;
 	msg->len     = len;
-	Com_Memcpy( msg->data, data, (size_t)len );
+	memcpy( msg->data, data, (size_t)len );
 	*head = next_head;
 	return qtrue;
 }
@@ -241,7 +241,7 @@ static qboolean wn_reliable_queue_pop( wn_rel_msg_t *queue, volatile int *head,
 	}
 	*channel_out = msg->channel;
 	*len_out     = msg->len;
-	Com_Memcpy( buf, msg->data, (size_t)msg->len );
+	memcpy( buf, msg->data, (size_t)msg->len );
 	*tail = ( *tail + 1 ) % WN_REL_QUEUE_SIZE;
 	return qtrue;
 }
@@ -292,7 +292,7 @@ static void wn_reliable_server_consume_stream( wn_game_conn_t *gc, uint64_t stre
 		return;
 	}
 	if ( payload_len > 0 ) {
-		Com_Memcpy( partial->data + partial->len, payload, (size_t)payload_len );
+		memcpy( partial->data + partial->len, payload, (size_t)payload_len );
 		partial->len += payload_len;
 		WN_DBG( "QUIC game: partial slot for stream %llu: %d bytes (fin=%d)\n",
 			(unsigned long long)stream_id, partial->len, (int)fin );
@@ -364,7 +364,7 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 			return;
 		}
 		if ( payload_len > 0 ) {
-			Com_Memcpy( wtcl.bootstrap_recv_data + wtcl.bootstrap_recv_len,
+			memcpy( wtcl.bootstrap_recv_data + wtcl.bootstrap_recv_len,
 				payload, (size_t)payload_len );
 			wtcl.bootstrap_recv_len += payload_len;
 		}
@@ -382,7 +382,7 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 		return;
 	}
 	if ( payload_len > 0 ) {
-		Com_Memcpy( partial->data + partial->len, payload, (size_t)payload_len );
+		memcpy( partial->data + partial->len, payload, (size_t)payload_len );
 		partial->len += payload_len;
 		WN_DBG( "QUIC client: partial slot for stream %llu: %d bytes (fin=%d)\n",
 			(unsigned long long)stream_id, partial->len, (int)fin );
@@ -442,7 +442,7 @@ static int TLV_Write( byte *buf, int bufsize, uint8_t type,
 	buf[1] = (byte)( plen & 0xFF );
 	buf[2] = (byte)( (plen >> 8) & 0xFF );
 	if ( plen > 0 && payload )
-		Com_Memcpy( buf + 3, payload, plen );
+		memcpy( buf + 3, payload, plen );
 	return total;
 }
 
@@ -488,7 +488,7 @@ wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 	for ( i = 0; i < max_clients; i++ ) {
 		wn_game_conn_t *gc = &wn.game_conns[i];
 		if ( !gc->active ) {
-			Com_Memset( gc, 0, sizeof( wn_game_conn_t ) );
+			memset( gc, 0, sizeof( wn_game_conn_t ) );
 			gc->active   = qtrue;
 			gc->conn     = conn;
 			gc->hs_state = WN_GAME_HS_NONE;
@@ -510,7 +510,7 @@ void WN_GameFreeConn( wn_game_conn_t *gc )
 	if ( gc->conn )
 		gc->conn->game_conn = NULL;
 	Com_DPrintf( "WiredNet game: freed conn slot %td\n", gc - wn.game_conns );
-	Com_Memset( gc, 0, sizeof( wn_game_conn_t ) );
+	memset( gc, 0, sizeof( wn_game_conn_t ) );
 	if ( wn.num_game_conns > 0 )
 		wn.num_game_conns--;
 }
@@ -546,7 +546,7 @@ void WN_GameHandleDatagram( wn_connection_t *conn, const byte *data, int len )
 	pkt->from     = conn->addr;
 	pkt->from.type = ( conn->addr.type == NA_IP6 ) ? NA_QUIC6 : NA_QUIC;
 	pkt->len      = len;
-	Com_Memcpy( pkt->data, data, len );
+	memcpy( pkt->data, data, len );
 	gc->recv_head = next_head;
 }
 
@@ -612,7 +612,7 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 			userinfo_len = (uint16_t)( plen - 4 );
 		if ( userinfo_len >= (uint16_t)sizeof(userinfo) )
 			userinfo_len = (uint16_t)( sizeof(userinfo) - 1 );
-		Com_Memcpy( userinfo, payload + 4, userinfo_len );
+		memcpy( userinfo, payload + 4, userinfo_len );
 		userinfo[userinfo_len] = '\0';
 
 		gc = conn->game_conn;
@@ -625,7 +625,7 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 				byte        refuse_tlv[MAX_INFO_STRING + 8];
 				refuse_pl[0] = (byte)( rlen & 0xFF );
 				refuse_pl[1] = (byte)( (rlen >> 8) & 0xFF );
-				Com_Memcpy( refuse_pl + 2, reason, rlen );
+				memcpy( refuse_pl + 2, reason, rlen );
 				tlv_len = TLV_Write( refuse_tlv, (int)sizeof(refuse_tlv),
 					0x03, refuse_pl, (uint16_t)( rlen + 2 ) );
 				if ( tlv_len > 0 )
@@ -948,7 +948,7 @@ static int WN_ClientCallback(
 			connect_pl[2] = (byte)( ulen & 0xFF );
 			connect_pl[3] = (byte)( (ulen >> 8) & 0xFF );
 			if ( ulen > 0 )
-				Com_Memcpy( connect_pl + 4, wtcl.userinfo, ulen );
+				memcpy( connect_pl + 4, wtcl.userinfo, ulen );
 			tlv_len = TLV_Write( connect_tlv, (int)sizeof(connect_tlv),
 				0x01, connect_pl, (uint16_t)( 4 + ulen ) );
 			if ( tlv_len > 0 ) {
@@ -986,7 +986,7 @@ static int WN_ClientCallback(
 							rlen = (uint16_t)( plen - 2 );
 						if ( rlen >= (uint16_t)sizeof(reason) )
 							rlen = (uint16_t)( sizeof(reason) - 1 );
-						Com_Memcpy( reason, payload + 2, rlen );
+						memcpy( reason, payload + 2, rlen );
 						reason[rlen] = '\0';
 					}
 					Com_Printf( S_COLOR_YELLOW "QUIC connect refused: %s\n", reason );
@@ -1021,7 +1021,7 @@ static int WN_ClientCallback(
 			pkt->from      = wtcl.server_addr;
 			pkt->from.type = ( wtcl.server_addr.type == NA_IP6 ) ? NA_QUIC6 : NA_QUIC;
 			pkt->len       = (int)length;
-			Com_Memcpy( pkt->data, bytes, length );
+			memcpy( pkt->data, bytes, length );
 			wtcl.recv_head = next_head;
 		}
 		break;
@@ -1084,7 +1084,7 @@ static void WN_ClientFlushOutbound( void )
 		if ( ret != 0 || send_len == 0 )
 			break;
 
-		Com_Memset( &to, 0, sizeof(to) );
+		memset( &to, 0, sizeof(to) );
 		if ( addr_to.ss_family == AF_INET ) {
 			struct sockaddr_in *v4 = (struct sockaddr_in *)&addr_to;
 			to.type = NA_IP;
@@ -1286,7 +1286,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		return;
 	}
 
-	Com_Memset( &wtcl, 0, sizeof(wtcl) );
+	memset( &wtcl, 0, sizeof(wtcl) );
 	// Reset connect-error state so a retry starts clean (ED1 fix).
 	wtcl.connect_failed  = qfalse;
 	wtcl.connect_error[0] = '\0';
@@ -1458,7 +1458,7 @@ void WN_ClientDisconnect( void )
 	 * call sees wtcl.quic != NULL and calls picoquic_free a second time. */
 	cnx  = wtcl.cnx;
 	quic = wtcl.quic;
-	Com_Memset( &wtcl, 0, sizeof(wtcl) );   /* clears initialized, cnx, quic */
+	memset( &wtcl, 0, sizeof(wtcl) );   /* clears initialized, cnx, quic */
 
 	if ( cnx )
 		picoquic_close( cnx, 0 );
@@ -1508,7 +1508,7 @@ qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len )
 	ss_to.sin_port        = from->port;
 
 	current_time = Sys_Microseconds();
-	Com_Memcpy( wtcl.recv_buf, buf, len );
+	memcpy( wtcl.recv_buf, buf, len );
 
 	picoquic_incoming_packet(
 		wtcl.quic, wtcl.recv_buf, (size_t)len,
@@ -1589,7 +1589,7 @@ static conn_handle_t wn_connect( const char *address, int port, const char *user
 	/* "loopback" is returned by NET_AdrToString for NA_LOOPBACK addresses.
 	 * Pass it through as-is so WN_ClientConnect handles the 127.0.0.1 mapping. */
 	if ( !Q_stricmp( address, "loopback" ) ) {
-		Com_Memset( &adr, 0, sizeof(adr) );
+		memset( &adr, 0, sizeof(adr) );
 		adr.type = NA_LOOPBACK;
 	} else if ( !NET_StringToAdr( address, &adr, NA_IP ) ) {
 		return CONN_INVALID;
@@ -1653,7 +1653,7 @@ qboolean WN_ServerRecvUsercmd( conn_handle_t *conn_out, byte *buf, int *len_out 
 
 		*conn_out = (conn_handle_t)(i + 1);
 		*len_out  = pkt->len;
-		Com_Memcpy( buf, pkt->data, pkt->len );
+		memcpy( buf, pkt->data, pkt->len );
 		gc->recv_tail = ( gc->recv_tail + 1 ) % WN_GAME_QUEUE_SIZE;
 		return qtrue;
 	}
@@ -1674,7 +1674,7 @@ static qboolean wn_recv_unreliable( conn_handle_t *conn_out, byte *buf, int *len
 		if ( pkt->len <= *len_out ) {
 			*conn_out = CONN_CLIENT_HANDLE;
 			*len_out  = pkt->len;
-			Com_Memcpy( buf, pkt->data, pkt->len );
+			memcpy( buf, pkt->data, pkt->len );
 			wtcl.recv_tail = ( wtcl.recv_tail + 1 ) % WN_GAME_QUEUE_SIZE;
 			return qtrue;
 		}
@@ -1722,7 +1722,7 @@ static void wn_send_reliable( conn_handle_t conn, int channel,
 		}
 		framed[0] = WN_GAME_REL_VERSION;
 		framed[1] = (byte)channel;
-		Com_Memcpy( framed + 2, data, (size_t)len );
+		memcpy( framed + 2, data, (size_t)len );
 		send_data = framed;
 		send_len  = len + 2;
 	}

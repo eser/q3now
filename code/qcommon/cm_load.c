@@ -100,7 +100,7 @@ static void CMod_LoadShaders( void ) {
 	cm.shaders = Hunk_Alloc( count * sizeof( *cm.shaders ), h_high );
 	cm.numShaders = count;
 
-	Com_Memcpy( cm.shaders, cm_bsp->shaders, count * sizeof( *cm.shaders ) );
+	memcpy( cm.shaders, cm_bsp->shaders, count * sizeof( *cm.shaders ) );
 }
 
 
@@ -476,7 +476,7 @@ CMod_LoadEntityString
 static void CMod_LoadEntityString( void ) {
 	cm.entityString = Hunk_Alloc( cm_bsp->entityStringLength + 1, h_high );
 	cm.numEntityChars = cm_bsp->entityStringLength;
-	Com_Memcpy( cm.entityString, cm_bsp->entityString, cm_bsp->entityStringLength );
+	memcpy( cm.entityString, cm_bsp->entityString, cm_bsp->entityStringLength );
 	cm.entityString[cm_bsp->entityStringLength] = 0;
 }
 
@@ -491,7 +491,7 @@ static void CMod_LoadVisibility( void ) {
 
 	len = PAD( cm.numClusters, 64 ) >> 3;
 	cm.novis = Hunk_Alloc( len, h_high );
-	Com_Memset( cm.novis, 0xff, len );
+	memset( cm.novis, 0xff, len );
 
 	len = cm_bsp->visibilityLength;
 	if ( !len ) {
@@ -514,7 +514,7 @@ static void CMod_LoadVisibility( void ) {
 	cm.visibility = Hunk_Alloc( len, h_high );
 	cm.numClusters = numClusters;
 	cm.clusterBytes = clusterBytes;
-	Com_Memcpy( cm.visibility, cm_bsp->visibility, len );
+	memcpy( cm.visibility, cm_bsp->visibility, len );
 }
 
 //==================================================================
@@ -653,7 +653,7 @@ CM_ClearMap / Hunk_ClearLevel cycle.
 ====================
 */
 void CM_ClearTriangleSoups( void ) {
-	Com_Memset( cm.triSoups, 0, sizeof( cm.triSoups ) );
+	memset( cm.triSoups, 0, sizeof( cm.triSoups ) );
 	cm.numTriSoups = 0;
 }
 
@@ -737,8 +737,8 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 	// temporary hunk memory to honor the const contract at our API.
 	mutableVerts = Hunk_AllocateTempMemory( numVertexes * sizeof( vec3_t ) );
 	mutableIndexes = Hunk_AllocateTempMemory( numIndexes * sizeof( int ) );
-	Com_Memcpy( mutableVerts, vertexes, numVertexes * sizeof( vec3_t ) );
-	Com_Memcpy( mutableIndexes, indexes, numIndexes * sizeof( int ) );
+	memcpy( mutableVerts, vertexes, numVertexes * sizeof( vec3_t ) );
+	memcpy( mutableIndexes, indexes, numIndexes * sizeof( int ) );
 
 	pc = CM_GenerateTriangleSoupCollide( numVertexes, mutableVerts,
 		numIndexes, mutableIndexes );
@@ -751,7 +751,7 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 	}
 
 	ts = &cm.triSoups[slot];
-	Com_Memset( ts, 0, sizeof( *ts ) );
+	memset( ts, 0, sizeof( *ts ) );
 	ts->inUse = qtrue;
 	Q_strncpyz( ts->name, name, sizeof( ts->name ) );
 	ts->pc = pc;
@@ -850,7 +850,7 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 		FS_FreeFile( buf.v );
 		return 0;
 	}
-	if ( Q_strncmp( (const char *)base, IQM_MAGIC_STRING, 16 ) ) {
+	if ( strncmp( (const char *)base, IQM_MAGIC_STRING, 16 ) ) {
 		Com_DPrintf( "CM_LoadIQMGeometry: %s wrong magic\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
@@ -1064,7 +1064,7 @@ CM_ClearMap
 ==================
 */
 void CM_ClearMap( void ) {
-	Com_Memset( &cm, 0, sizeof( cm ) );
+	memset( &cm, 0, sizeof( cm ) );
 	CM_ClearLevelPatches();
 	CM_ClearTriangleSoups();
 

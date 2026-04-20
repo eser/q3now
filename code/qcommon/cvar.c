@@ -1698,7 +1698,7 @@ static cvar_t *Cvar_Unset( cvar_t *cv )
 	if ( cv->hashNext )
 		cv->hashNext->hashPrev = cv->hashPrev;
 
-	Com_Memset( cv, '\0', sizeof( *cv ) );
+	memset( cv, '\0', sizeof( *cv ) );
 
 	return next;
 }
@@ -2221,8 +2221,8 @@ Reads in all archived cvars
 */
 void Cvar_Init (void)
 {
-	Com_Memset(cvar_indexes, '\0', sizeof(cvar_indexes));
-	Com_Memset(hashTable, '\0', sizeof(hashTable));
+	memset(cvar_indexes, '\0', sizeof(cvar_indexes));
+	memset(hashTable, '\0', sizeof(hashTable));
 
 	cvar_developer = Cvar_Get( "developer", "0", CVAR_TEMP );
 	Cvar_SetDescription( cvar_developer, "Toggles developer mode. Prints more info to console and provides more commands." );

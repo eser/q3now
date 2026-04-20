@@ -1,23 +1,5 @@
 /*
-===========================================================================
 cl_wired_populate.c — Wired UI: dynamic-MULTI populate callbacks
-
-Hosts the runtime callbacks that fill dynamic-MULTI dropdowns at render
-time. Each callback is registered by name; .wmenu items reference it via
-the `populateCallback "name"` keyword.
-
-Currently registered:
-
-  audio_devices  → enumerates miniaudio playback devices for the audio
-                   settings panel (s_device dropdown).
-
-Adding a new callback:
-
-  1. Implement a static function with signature
-     `int CL_WiredXxxPopulate( wuiPopulateResult_t *out )`.
-  2. Register it from WiredUI_RegisterCorePopulateCallbacks() below.
-  3. Use the callback name in your .wmenu file's populateCallback property.
-===========================================================================
 */
 
 #include "../../client.h"

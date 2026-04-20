@@ -44,7 +44,7 @@ Zeroes the directive state and sets sentinel values.
 Called once during BotAISetupClient().
 */
 void BotDirective_Init( botDirectiveState_t *ds ) {
-    Com_Memset( ds, 0, sizeof( *ds ) );
+    memset( ds, 0, sizeof( *ds ) );
     ds->tactical.type          = DIR_NONE;
     ds->tactical.target_client = -1;
     ds->tactical.source_client = -1;
@@ -448,7 +448,7 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
                 const char *item_cn = BotPickupToClassname( resolved );
                 bot_goal_t item_goal;
                 int item_result;
-                Com_Memset( &item_goal, 0, sizeof( item_goal ) );
+                memset( &item_goal, 0, sizeof( item_goal ) );
                 item_result = trap_BotGetLevelItemGoal( -1, (char *)item_cn, &item_goal );
                 if ( item_result >= 0 && item_goal.areanum > 0 ) {
                     /* Store world position for pickup proximity detection */
@@ -489,7 +489,7 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
                                Set GFL_ITEM so BotReachedGoal uses item-proximity
                                logic, and provide a reasonable bounding box. */
                             qboolean first_seek = ( VectorLength( bs->directives.seekPosition ) < 1.0f );
-                            Com_Memset( &item_goal, 0, sizeof( item_goal ) );
+                            memset( &item_goal, 0, sizeof( item_goal ) );
                             VectorCopy( ent->r.currentOrigin, item_goal.origin );
                             item_goal.areanum   = area;
                             item_goal.entitynum = (int)( ent - g_entities );
@@ -795,7 +795,7 @@ void BotReceiveDirective( bot_state_t *bs, int issuer_client, const char *order 
         if ( toklen >= (int)sizeof( tok ) ) {
             toklen = (int)sizeof( tok ) - 1;
         }
-        Com_Memcpy( tok, order, toklen );
+        memcpy( tok, order, toklen );
         tok[toklen] = '\0';
         /* skip spaces between tok and rest */
         while ( *space == ' ' || *space == '\t' ) {
@@ -864,7 +864,7 @@ void BotReceiveDirective( bot_state_t *bs, int issuer_client, const char *order 
     }
 
     /* ── tactical directives ──────────────────────────────────────── */
-    Com_Memset( d, 0, sizeof( *d ) );
+    memset( d, 0, sizeof( *d ) );
     d->source_client = issuer_client;
     d->issue_time    = now;
     d->expire_time   = 0;
@@ -1050,7 +1050,7 @@ void BotDirective_IssueToDirect( bot_state_t *bs,
         return;
     }
 
-    Com_Memset( d, 0, sizeof( *d ) );
+    memset( d, 0, sizeof( *d ) );
     d->type          = type;
     d->source_client = issuer_client;
     d->issue_time    = now;
@@ -1243,7 +1243,7 @@ void BotDirective_OverrideGoal( bot_state_t *bs, bot_goal_t *goal ) {
         return;
     }
 
-    Com_Memset( goal, 0, sizeof( *goal ) );
+    memset( goal, 0, sizeof( *goal ) );
     VectorCopy( d->area_origin, goal->origin );
     goal->areanum  = BotPointAreaNum( d->area_origin );
     goal->entitynum = -1;
@@ -1861,7 +1861,7 @@ static void WiredBots_BuildFinalOrder( const char *cleanOrder,
         if ( verbLen >= (int)sizeof( verb ) ) {
             verbLen = (int)sizeof( verb ) - 1;
         }
-        Com_Memcpy( verb, cleanOrder, verbLen );
+        memcpy( verb, cleanOrder, verbLen );
         verb[verbLen] = '\0';
     } else {
         Q_strncpyz( verb, cleanOrder, sizeof( verb ) );
@@ -1934,7 +1934,7 @@ void WiredBots_ProcessChat( int senderClient, const char *message,
     int        *recipients;
     int         count, i;
 
-    Com_Memset( result, 0, sizeof( *result ) );
+    memset( result, 0, sizeof( *result ) );
 
     if ( !message || message[0] != '@' ) {
         return;

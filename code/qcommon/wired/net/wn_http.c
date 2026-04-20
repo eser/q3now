@@ -787,7 +787,7 @@ static void WN_HttpRoute( wn_http_ctx_t *ctx, const byte *data, int len )
 
 	if ( len >= (int)sizeof(req) )
 		len = (int)sizeof(req) - 1;
-	Com_Memcpy( req, data, len );
+	memcpy( req, data, len );
 	req[len] = '\0';
 
 	i = 0; j = 0;
@@ -867,7 +867,7 @@ void WN_HttpHandleRequest( wn_connection_t *conn, uint64_t stream_id,
 	if ( !conn || !conn->active )
 		return;
 
-	Com_Memset( &ctx, 0, sizeof(ctx) );
+	memset( &ctx, 0, sizeof(ctx) );
 	ctx.is_tcp    = qfalse;
 	ctx.conn      = conn;
 	ctx.stream_id = stream_id;
@@ -912,18 +912,18 @@ void WN_TcpFrame( void )
 			break;  // EAGAIN / EWOULDBLOCK — no more pending connections
 
 		// Build netadr_t for rate limiting (same pattern as WN_FlushOutbound)
-		Com_Memset( &addr, 0, sizeof(addr) );
+		memset( &addr, 0, sizeof(addr) );
 		if ( ss.ss_family == AF_INET ) {
 			struct sockaddr_in *v4 = (struct sockaddr_in *)&ss;
 			addr.type = NA_IP;
-			Com_Memcpy( addr.ipv._4, &v4->sin_addr.s_addr, 4 );
+			memcpy( addr.ipv._4, &v4->sin_addr.s_addr, 4 );
 			addr.port = v4->sin_port;
 		}
 #if FEAT_IPV6
 		else if ( ss.ss_family == AF_INET6 ) {
 			struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)&ss;
 			addr.type = NA_IP6;
-			Com_Memcpy( addr.ipv._6, &v6->sin6_addr, 16 );
+			memcpy( addr.ipv._6, &v6->sin6_addr, 16 );
 			addr.port = v6->sin6_port;
 		}
 #endif
@@ -935,7 +935,7 @@ void WN_TcpFrame( void )
 			continue;
 		}
 
-		Com_Memset( &ctx, 0, sizeof(ctx) );
+		memset( &ctx, 0, sizeof(ctx) );
 		ctx.is_tcp = qtrue;
 		ctx.tcp_fd = client_fd;
 		ctx.addr   = addr;

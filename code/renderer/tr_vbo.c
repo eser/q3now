@@ -946,7 +946,7 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	tess.numIndexes = 0;
 	tess.numVertexes = 0;
 
-	Com_Memset( &backEnd.viewParms, 0, sizeof( backEnd.viewParms ) );
+	memset( &backEnd.viewParms, 0, sizeof( backEnd.viewParms ) );
 	backEnd.currentEntity = &tr.worldEntity;
 
 	for ( i = 0; i < numStaticSurfaces; i++ )

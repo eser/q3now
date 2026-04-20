@@ -131,7 +131,7 @@ void WiredStore_Delete( const char *key ) {
 			}
 
 			/* clear the pool slot */
-			Com_Memset( e, 0, sizeof( *e ) );
+			memset( e, 0, sizeof( *e ) );
 			wired_store.numEntries--;
 			return;
 		}
@@ -148,8 +148,8 @@ Zero all entries and buckets but keep console commands registered.
 ==================
 */
 void WiredStore_Clear( void ) {
-	Com_Memset( wired_store.buckets, 0, sizeof( wired_store.buckets ) );
-	Com_Memset( wired_store.pool, 0, sizeof( wired_store.pool ) );
+	memset( wired_store.buckets, 0, sizeof( wired_store.buckets ) );
+	memset( wired_store.pool, 0, sizeof( wired_store.pool ) );
 	wired_store.numEntries = 0;
 	wired_store.generation = 0;
 }
@@ -393,7 +393,7 @@ WiredStore_Init
 ==================
 */
 void WiredStore_Init( void ) {
-	Com_Memset( &wired_store, 0, sizeof( wired_store ) );
+	memset( &wired_store, 0, sizeof( wired_store ) );
 
 	Cmd_AddCommand( "wui_store_get", WiredStore_Cmd_Get );
 	Cmd_AddCommand( "wui_store_dump", WiredStore_Cmd_Dump );
@@ -416,7 +416,7 @@ void WiredStore_Shutdown( void ) {
 	Cmd_RemoveCommand( "wui_store_watch" );
 	Cmd_RemoveCommand( "wui_store_stats" );
 
-	Com_Memset( &wired_store, 0, sizeof( wired_store ) );
+	memset( &wired_store, 0, sizeof( wired_store ) );
 }
 
 #endif /* FEAT_WIRED_UI */

@@ -483,7 +483,7 @@ void Con_CheckResize( void )
 		if ( numlines > con.totallines )
 			numlines = con.totallines;
 
-		Com_Memcpy( tbuf, con.text, CON_TEXTSIZE * sizeof( short ) );
+		memcpy( tbuf, con.text, CON_TEXTSIZE * sizeof( short ) );
 
 		for ( i = 0; i < CON_TEXTSIZE; i++ ) 
 			con.text[i] = (ColorIndex(COLOR_WHITE)<<8) | ' ';
@@ -667,11 +667,11 @@ void Con_Init( void )
 	if ( !s_conArena ) {
 		s_conArena = Arena_Create( "Console", CONSOLE_ARENA_SIZE );
 		s_con = Arena_AllocType( s_conArena, console_t );
-		Com_Memset( s_con, 0, sizeof( console_t ) );
+		memset( s_con, 0, sizeof( console_t ) );
 	} else if ( !s_con ) {
 		/* arena was created by lazy init, s_con was set there; shouldn't be NULL here */
 		s_con = Arena_AllocType( s_conArena, console_t );
-		Com_Memset( s_con, 0, sizeof( console_t ) );
+		memset( s_con, 0, sizeof( console_t ) );
 	}
 
 	con_notifytime = Cvar_Get( "con_notifytime", "5", CVAR_ARCHIVE );
@@ -848,7 +848,7 @@ void CL_ConsolePrint( const char *txt ) {
 
 	// TTimo - prefix for text that shows up in console but not in notify
 	// backported from RTCW
-	if ( !Q_strncmp( txt, "[skipnotify]", 12 ) ) {
+	if ( !strncmp( txt, "[skipnotify]", 12 ) ) {
 		skipnotify = qtrue;
 		txt += 12;
 	}
@@ -865,7 +865,7 @@ void CL_ConsolePrint( const char *txt ) {
 		if ( !s_conArena ) {
 			s_conArena = Arena_Create( "Console", CONSOLE_ARENA_SIZE );
 			s_con = Arena_AllocType( s_conArena, console_t );
-			Com_Memset( s_con, 0, sizeof( console_t ) );
+			memset( s_con, 0, sizeof( console_t ) );
 		} else {
 			return;   /* arena exists but s_con is NULL — shouldn't happen */
 		}

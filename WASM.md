@@ -170,7 +170,7 @@ is handled correctly as array stride.
 ### WASM platform block
 
 `q_platform.h` includes a `WASM_MODULE` block that defines `OS_STRING`,
-`ID_INLINE`, `ARCH_STRING`, `Q3_LITTLE_ENDIAN`, and path separators for the
+`ID_INLINE`, `ARCH_STRING`, `Q_BIG_ENDIAN`, and path separators for the
 wasm32 target. WASM is always little-endian per spec.
 
 ### wasi-sdk libc

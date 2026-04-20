@@ -121,7 +121,7 @@ static void SHA256_Final( sha256_ctx_t *ctx, byte out[ COM_SHA256_DIGEST_LEN ] )
 			ctx->data[i++] = 0;
 		}
 		SHA256_Transform( ctx, ctx->data );
-		Com_Memset( ctx->data, 0, 56 );
+		memset( ctx->data, 0, 56 );
 	}
 
 	bitlen = ctx->bitlen + (uint64_t)ctx->datalen * 8;
@@ -178,8 +178,8 @@ void Com_HMAC_SHA256( const byte *key, unsigned int keyLen, const byte *data, un
 		workKeyLen = COM_SHA256_DIGEST_LEN;
 	}
 
-	Com_Memset( kIpad, 0x36, sizeof( kIpad ) );
-	Com_Memset( kOpad, 0x5c, sizeof( kOpad ) );
+	memset( kIpad, 0x36, sizeof( kIpad ) );
+	memset( kOpad, 0x5c, sizeof( kOpad ) );
 
 	for ( i = 0; i < workKeyLen; i++ ) {
 		kIpad[i] ^= workKey[i];

@@ -248,7 +248,7 @@ static void WiredBots_InitChatCtx( bot_state_t *bs, wbChatCtx_t *ctx ) {
 		return;
 	}
 
-	Com_Memset( ctx, 0, sizeof( *ctx ) );
+	memset( ctx, 0, sizeof( *ctx ) );
 
 	if ( !bs ) {
 		return;

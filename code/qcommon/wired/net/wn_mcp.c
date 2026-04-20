@@ -429,7 +429,7 @@ int WN_McpDispatch( const char *json_in, int json_len,
 			"{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Request too large\"},\"id\":null}" );
 		return (int)strlen( response );
 	}
-	Com_Memcpy( json, json_in, json_len );
+	memcpy( json, json_in, json_len );
 	json[json_len] = '\0';
 
 	// Parse request ID
@@ -477,7 +477,7 @@ int WN_McpDispatch( const char *json_in, int json_len,
 			msg_val = WN_JsonFindString( json, "message", &msg_len );
 			if ( msg_val && msg_len > 0 ) {
 				int copy = msg_len < (int)sizeof(msg) - 1 ? msg_len : (int)sizeof(msg) - 1;
-				Com_Memcpy( msg, msg_val, copy );
+				memcpy( msg, msg_val, copy );
 				msg[copy] = '\0';
 			}
 			WN_McpHandleGameSay_Buf( response, response_size, req_id, msg );
@@ -505,7 +505,7 @@ int WN_McpDispatch( const char *json_in, int json_len,
 			msg_val = WN_JsonFindString( json, "message", &msg_len );
 			if ( msg_val && msg_len > 0 ) {
 				int copy = msg_len < (int)sizeof(msg) - 1 ? msg_len : (int)sizeof(msg) - 1;
-				Com_Memcpy( msg, msg_val, copy );
+				memcpy( msg, msg_val, copy );
 				msg[copy] = '\0';
 			}
 			WN_McpHandleBotCommand_Buf( response, response_size, req_id, msg );
@@ -523,7 +523,7 @@ int WN_McpDispatch( const char *json_in, int json_len,
 			name_val = WN_JsonFindString( args_section ? args_section : json, "name", &name_len );
 			if ( name_val && name_len > 0 ) {
 				int copy = name_len < (int)sizeof(botname) - 1 ? name_len : (int)sizeof(botname) - 1;
-				Com_Memcpy( botname, name_val, copy );
+				memcpy( botname, name_val, copy );
 				botname[copy] = '\0';
 			}
 			WN_JsonFindInt( args_section ? args_section : json, "skill", &skill );
@@ -533,7 +533,7 @@ int WN_McpDispatch( const char *json_in, int json_len,
 				char        teamname[8] = "";
 				team_val = WN_JsonFindString( args_section ? args_section : json, "team", &team_len );
 				if ( team_val && team_len > 0 && team_len < (int)sizeof(teamname) ) {
-					Com_Memcpy( teamname, team_val, team_len );
+					memcpy( teamname, team_val, team_len );
 					teamname[team_len] = '\0';
 				}
 				WN_McpHandleBotAdd_Buf( response, response_size, req_id, botname, skill, teamname );
@@ -551,7 +551,7 @@ int WN_McpDispatch( const char *json_in, int json_len,
 			lang_val = WN_JsonFindString( args_section ? args_section : json, "language", &lang_len );
 			if ( lang_val && lang_len > 0 ) {
 				int copy = lang_len < (int)sizeof(language) - 1 ? lang_len : (int)sizeof(language) - 1;
-				Com_Memcpy( language, lang_val, copy );
+				memcpy( language, lang_val, copy );
 				language[copy] = '\0';
 			}
 			WN_McpHandleStartCasting_Buf( response, response_size, req_id, language );
@@ -1919,7 +1919,7 @@ static void WN_McpHandleCoachingTick_Buf( char *out, int out_size, int req_id,
 	(void)conn;  // conn field reserved; cursor comes from client
 
 	if ( !prev_alive_init ) {
-		Com_Memset( prev_alive, -1, sizeof(prev_alive) );
+		memset( prev_alive, -1, sizeof(prev_alive) );
 		prev_alive_init = 1;
 	}
 
@@ -1954,8 +1954,8 @@ static void WN_McpHandleCoachingTick_Buf( char *out, int out_size, int req_id,
 			if ( type_val && type_len > 0 && msg_val && msg_len > 0 ) {
 				int tc = type_len < (int)sizeof(type_buf) - 1 ? type_len : (int)sizeof(type_buf) - 1;
 				int mc = msg_len  < (int)sizeof(msg_buf)  - 1 ? msg_len  : (int)sizeof(msg_buf)  - 1;
-				Com_Memcpy( type_buf, type_val, tc ); type_buf[tc] = '\0';
-				Com_Memcpy( msg_buf,  msg_val,  mc ); msg_buf[mc]  = '\0';
+				memcpy( type_buf, type_val, tc ); type_buf[tc] = '\0';
+				memcpy( msg_buf,  msg_val,  mc ); msg_buf[mc]  = '\0';
 
 				WN_SanitizeMsg( msg_buf, safe, sizeof(safe) );
 

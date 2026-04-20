@@ -1,10 +1,6 @@
-/* cl_wired_hud_elem_weapon_stats.c -- Per-weapon accuracy stats HUD elements
-   Text variants show "hits/shots (acc%)" for a specific weapon.
-   Icon variants show the weapon icon.
-   "CurrentWeapon" variants track the player's currently held weapon.
-
-   Weapon IDs are numeric indices into the bridge arrays. cgame defines
-   the mapping; the client only stores and displays the numeric ID. */
+/*
+cl_wired_hud_elem_weapon_stats.c — Per-weapon accuracy stats HUD elements
+*/
 #include "../../../client.h"
 #include "../cl_wired_hud_compat.h"
 #include "../cl_wired_hud_private.h"

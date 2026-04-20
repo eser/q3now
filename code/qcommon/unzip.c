@@ -1029,9 +1029,9 @@ typedef unsigned long  ulg;
 #  define zstrerror(errnum) ""
 #endif
 
-#define zmemcpy Com_Memcpy
+#define zmemcpy memcpy
 #define zmemcmp memcmp
-#define zmemzero(dest, len) Com_Memset(dest, 0, len)
+#define zmemzero(dest, len) memset(dest, 0, len)
 
 /* Diagnostic functions */
 #ifdef _ZIP_DEBUG_
@@ -1328,7 +1328,7 @@ extern unzFile unzReOpen (const char* path, unzFile file)
 		return NULL;
 
 	s=(unz_s*)ALLOC(sizeof(unz_s));
-	Com_Memcpy(s, (unz_s*)file, sizeof(unz_s));
+	memcpy(s, (unz_s*)file, sizeof(unz_s));
 
 	s->file = fin;
 	return (unzFile)s;	

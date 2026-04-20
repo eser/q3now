@@ -83,7 +83,7 @@ static void R_ChopPolyBehindPlane( int numInPoints, vec3_t inPoints[MAX_VERTS_ON
 	}
 	if ( !counts[1] ) {
 		*numOutPoints = numInPoints;
-		Com_Memcpy( outPoints, inPoints, numInPoints * sizeof(vec3_t) );
+		memcpy( outPoints, inPoints, numInPoints * sizeof(vec3_t) );
 		return;
 	}
 
@@ -245,7 +245,7 @@ static void R_AddMarkFragments(int numClipPoints, vec3_t clipPoints[2][MAX_VERTS
 	mf = fragmentBuffer + (*returnedFragments);
 	mf->firstPoint = (*returnedPoints);
 	mf->numPoints = numClipPoints;
-	Com_Memcpy( pointBuffer + (*returnedPoints) * 3, clipPoints[pingPong], numClipPoints * sizeof(vec3_t) );
+	memcpy( pointBuffer + (*returnedPoints) * 3, clipPoints[pingPong], numClipPoints * sizeof(vec3_t) );
 
 	(*returnedPoints) += numClipPoints;
 	(*returnedFragments)++;
@@ -470,4 +470,3 @@ int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projectio
 	}
 	return returnedFragments;
 }
-

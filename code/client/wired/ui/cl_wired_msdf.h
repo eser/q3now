@@ -1,15 +1,5 @@
 /*
-===========================================================================
-cl_wired_msdf.h -- MSDF font loading and rendering API
-
-Multi-channel Signed Distance Field font system.  Loads glyph metrics
-from msdf-atlas-gen JSON + atlas PNG, renders via the standard Q3
-renderer interface (re.SetColor / re.DrawStretchPic).
-
-The actual MSDF fragment shader is added separately (task 2).
-Until then the atlas renders with the default shader -- geometry and
-UVs will be correct, but edges will look soft/wrong.
-===========================================================================
+cl_wired_msdf.h — MSDF font loading and rendering API
 */
 
 #ifndef CL_WIRED_MSDF_H

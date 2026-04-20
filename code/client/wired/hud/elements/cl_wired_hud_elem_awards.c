@@ -69,7 +69,7 @@ void *CG_ModernHUDElementAwardsCreate( const modernhudConfig_t *config ) {
 	if ( element->iconW <= 0 ) element->iconW = 48;
 	if ( element->iconH <= 0 ) element->iconH = 48;
 
-	Com_Memset( element->visible, 0, sizeof( element->visible ) );
+	memset( element->visible, 0, sizeof( element->visible ) );
 
 	return element;
 }

@@ -62,7 +62,7 @@ static rconSession_t *SV_CreateRconSession( const netadr_t *from ) {
 		slot = &svs.rconSessions[0];
 	}
 
-	Com_Memset( slot, 0, sizeof( *slot ) );
+	memset( slot, 0, sizeof( *slot ) );
 	slot->addr = *from;
 	slot->challengeTime = svs.time;
 	slot->lastActivity = svs.time;
@@ -79,7 +79,7 @@ void SV_RconCleanupSessions( void ) {
 			continue;
 		}
 		if ( svs.time - s->lastActivity > RCON_SESSION_TIMEOUT ) {
-			Com_Memset( s, 0, sizeof( *s ) );
+			memset( s, 0, sizeof( *s ) );
 		}
 	}
 }
@@ -172,7 +172,7 @@ qboolean SV_RconAuthorized( const netadr_t *from ) {
 	}
 
 	if ( svs.time - session->lastActivity > RCON_SESSION_TIMEOUT ) {
-		Com_Memset( session, 0, sizeof( *session ) );
+		memset( session, 0, sizeof( *session ) );
 		return qfalse;
 	}
 

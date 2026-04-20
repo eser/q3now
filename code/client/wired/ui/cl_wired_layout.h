@@ -1,14 +1,5 @@
 /*
-===========================================================================
-cl_wired_layout.h -- Wired UI: resolution-independent coordinate types
-
-Layer 1 of the Wired UI layout system. Defines unit-aware value types
-(norm, vw, vh, px) and layout primitives (rect, flex container/child).
-
-The wuiRect_t fields store unit-aware source values from parsing.
-The layout engine resolves these to real pixel coordinates at render time.
-Legacy wiredRect_t rect fields are back-filled with real screen pixels.
-===========================================================================
+cl_wired_layout.h — Wired UI: resolution-independent coordinate types
 */
 
 #ifndef CL_WIRED_LAYOUT_H

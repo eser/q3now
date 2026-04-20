@@ -1,10 +1,5 @@
 /*
-===========================================================================
-cl_wired_layout.c -- Wired UI: resolution-independent coordinate resolver
-
-Layer 1 implementation. Converts unit-aware wuiValue_t values to real
-device pixels based on parent size and viewport dimensions.
-===========================================================================
+cl_wired_layout.c — Wired UI: resolution-independent coordinate resolver
 */
 
 #include "cl_wired_layout.h"

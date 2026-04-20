@@ -150,7 +150,7 @@ void VM_Init( void ) {
 	Cmd_AddCommand( "reload_wasm", Cmd_ReloadWasm_f );
 #endif
 
-	Com_Memset( vmTable, 0, sizeof( vmTable ) );
+	memset( vmTable, 0, sizeof( vmTable ) );
 }
 
 
@@ -560,7 +560,7 @@ void VM_Free( vm_t *vm ) {
 	Crash_SaveVMPointer( vm->index, NULL );
 	Crash_SaveVMChecksum( vm->index, 0 );
 
-	Com_Memset( vm, 0, sizeof( *vm ) );
+	memset( vm, 0, sizeof( *vm ) );
 }
 
 
@@ -690,7 +690,7 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 		int32_t wasm_args[MAX_VMMAIN_CALL_ARGS];
 		va_list wasm_ap;
 		int wasm_argc;
-		Com_Memset( wasm_args, 0, sizeof( wasm_args ) );
+		memset( wasm_args, 0, sizeof( wasm_args ) );
 		wasm_args[0] = callnum;
 		va_start( wasm_ap, callnum );
 		for ( i = 0; i < nargs; i++ ) {

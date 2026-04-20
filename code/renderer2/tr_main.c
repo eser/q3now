@@ -568,7 +568,7 @@ static void R_RotateForViewer (void)
 	float	viewerMatrix[16];
 	vec3_t	origin;
 
-	Com_Memset (&tr.or, 0, sizeof(tr.or));
+	memset (&tr.or, 0, sizeof(tr.or));
 	tr.or.axis[0][0] = 1;
 	tr.or.axis[1][1] = 1;
 	tr.or.axis[2][2] = 1;
@@ -974,7 +974,7 @@ static void R_PlaneForSurface (const surfaceType_t *surfType, cplane_t *plane) {
 	vec4_t			plane4;
 
 	if (!surfType) {
-		Com_Memset (plane, 0, sizeof(*plane));
+		memset (plane, 0, sizeof(*plane));
 		plane->normal[0] = 1;
 		return;
 	}
@@ -998,7 +998,7 @@ static void R_PlaneForSurface (const surfaceType_t *surfType, cplane_t *plane) {
 		plane->dist = plane4[3];
 		return;
 	default:
-		Com_Memset (plane, 0, sizeof(*plane));
+		memset (plane, 0, sizeof(*plane));
 		plane->normal[0] = 1;		
 		return;
 	}
@@ -1436,7 +1436,7 @@ Radix sort with 4 byte size buckets
 static void R_RadixSort( drawSurf_t *source, int size )
 {
   static drawSurf_t scratch[ MAX_DRAWSURFS ];
-#ifdef Q3_LITTLE_ENDIAN
+#if !Q_BIG_ENDIAN
   R_Radix( 0, size, source, scratch );
   R_Radix( 1, size, scratch, source );
   R_Radix( 2, size, source, scratch );
@@ -1446,7 +1446,7 @@ static void R_RadixSort( drawSurf_t *source, int size )
   R_Radix( 2, size, scratch, source );
   R_Radix( 1, size, source, scratch );
   R_Radix( 0, size, scratch, source );
-#endif //Q3_LITTLE_ENDIAN
+#endif
 }
 
 //==========================================================================================
@@ -1791,7 +1791,7 @@ void R_RenderDlightCubemaps(const refdef_t *fd)
 		if ((1 << i) & tr.refdef.dlightMask)
 			continue;
 
-		Com_Memset( &shadowParms, 0, sizeof( shadowParms ) );
+		memset( &shadowParms, 0, sizeof( shadowParms ) );
 
 		shadowParms.viewportX = tr.refdef.x;
 		shadowParms.viewportY = glConfig.vidHeight - ( tr.refdef.y + PSHADOW_MAP_SIZE );
@@ -2080,7 +2080,7 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 		pshadow_t *shadow = &tr.refdef.pshadows[i];
 		int j;
 
-		Com_Memset( &shadowParms, 0, sizeof( shadowParms ) );
+		memset( &shadowParms, 0, sizeof( shadowParms ) );
 
 		if (glRefConfig.framebufferObject)
 		{
@@ -2487,7 +2487,7 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 	{
 		int firstDrawSurf;
 
-		Com_Memset( &shadowParms, 0, sizeof( shadowParms ) );
+		memset( &shadowParms, 0, sizeof( shadowParms ) );
 
 		if (glRefConfig.framebufferObject)
 		{
@@ -2638,7 +2638,7 @@ void R_RenderCubemapSide( int cubemapIndex, int cubemapSide, qboolean subscene )
 		}
 	}
 
-	Com_Memset( &parms, 0, sizeof( parms ) );
+	memset( &parms, 0, sizeof( parms ) );
 
 	parms.viewportX = 0;
 	parms.viewportY = 0;

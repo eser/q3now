@@ -195,7 +195,7 @@ static void Con_LoadHistory( void )
 			else if ( edit->scroll < 0 )
 				edit->scroll = 0;
 
-			Com_Memcpy( edit->buffer, text_p, numChars );
+			memcpy( edit->buffer, text_p, numChars );
 			edit->buffer[ numChars ] = '\0';
 			text_p += numChars;
 

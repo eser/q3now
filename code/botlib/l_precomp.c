@@ -131,7 +131,7 @@ void QDECL SourceError(source_t *source, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	Q_vsnprintf(text, sizeof(text), fmt, ap);
+	vsnprintf(text, sizeof(text), fmt, ap);
 	va_end(ap);
 #ifdef BOTLIB
 	botimport.Print(PRT_ERROR, "file %s, line %d: %s\n", source->scriptstack->filename, source->scriptstack->line, text);
@@ -155,7 +155,7 @@ void QDECL SourceWarning(source_t *source, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	Q_vsnprintf(text, sizeof(text), fmt, ap);
+	vsnprintf(text, sizeof(text), fmt, ap);
 	va_end(ap);
 #ifdef BOTLIB
 	botimport.Print(PRT_WARNING, "file %s, line %d: %s\n", source->scriptstack->filename, source->scriptstack->line, text);
@@ -276,7 +276,7 @@ static token_t *PC_CopyToken(token_t *token)
 		return NULL;
 	} //end if
 //	freetokens = freetokens->next;
-	Com_Memcpy(t, token, sizeof(token_t));
+	memcpy(t, token, sizeof(token_t));
 	t->next = NULL;
 	numtokens++;
 	return t;
@@ -331,7 +331,7 @@ static int PC_ReadSourceToken(source_t *source, token_t *token)
 		FreeScript(script);
 	} //end while
 	//copy the already available token
-	Com_Memcpy(token, source->tokens, sizeof(token_t));
+	memcpy(token, source->tokens, sizeof(token_t));
 	//free the read token
 	t = source->tokens;
 	source->tokens = source->tokens->next;
@@ -697,7 +697,7 @@ static void PC_AddBuiltinDefines(source_t *source)
 	for (i = 0; builtin[i].string; i++)
 	{
 		define = (define_t *) GetMemory(sizeof(define_t));
-		Com_Memset(define, 0, sizeof(define_t));
+		memset(define, 0, sizeof(define_t));
 		define->name = (char *) GetMemory(strlen(builtin[i].string) + 1);
 		strcpy(define->name, builtin[i].string);
 		define->flags |= DEFINE_FIXED;
@@ -1048,7 +1048,7 @@ static int PC_Directive_include(source_t *source)
 #ifdef QUAKE
 	if (!script)
 	{
-		Com_Memset(&file, 0, sizeof(foundfile_t));
+		memset(&file, 0, sizeof(foundfile_t));
 		script = LoadScriptFile(path);
 		if (script) Q_strncpyz(script->filename, path, sizeof(script->filename));
 	} //end if
@@ -1226,7 +1226,7 @@ static int PC_Directive_define(source_t *source)
 	} //end if
 	//allocate define
 	define = (define_t *) GetMemory(sizeof(define_t));
-	Com_Memset(define, 0, sizeof(define_t));
+	memset(define, 0, sizeof(define_t));
 	define->name = (char *) GetMemory(strlen(token.string) + 1);
 	strcpy(define->name, token.string);
 	//add the define to the source
@@ -1337,7 +1337,7 @@ static define_t *PC_DefineFromString(const char *string)
 
 	script = LoadScriptMemory(string, strlen(string), "*extern");
 	//create a new source
-	Com_Memset(&src, 0, sizeof(source_t));
+	memset(&src, 0, sizeof(source_t));
 	Q_strncpyz( src.filename, "*extern", sizeof( src.filename ) );
 	src.scriptstack = script;
 #if DEFINEHASHING
@@ -2792,7 +2792,7 @@ int PC_ReadToken(source_t *source, token_t *token)
 			} //end if
 		} //end if
 		//copy token for unreading
-		Com_Memcpy(&source->token, token, sizeof(token_t));
+		memcpy(&source->token, token, sizeof(token_t));
 		//found a token
 		return qtrue;
 	} //end while
@@ -2925,7 +2925,7 @@ int PC_CheckTokenType(source_t *source, int type, int subtype, token_t *token)
 	if (tok.type == type &&
 			(tok.subtype & subtype) == subtype)
 	{
-		Com_Memcpy(token, &tok, sizeof(token_t));
+		memcpy(token, &tok, sizeof(token_t));
 		return qtrue;
 	} //end if
 	//
@@ -3020,7 +3020,7 @@ source_t *LoadSourceFile(const char *filename)
 	script->next = NULL;
 
 	source = (source_t *) GetMemory( sizeof( *source ) );
-	Com_Memset( source, 0, sizeof( *source ) );
+	memset( source, 0, sizeof( *source ) );
 
 	Q_strncpyz(source->filename, filename, sizeof(source->filename));
 	source->scriptstack = script;
@@ -3054,7 +3054,7 @@ source_t *LoadSourceMemory(const char *ptr, int length, const char *name)
 	script->next = NULL;
 
 	source = (source_t *) GetMemory(sizeof(source_t));
-	Com_Memset(source, 0, sizeof(source_t));
+	memset(source, 0, sizeof(source_t));
 
 	Q_strncpyz(source->filename, name, sizeof(source->filename));
 	source->scriptstack = script;
@@ -3255,4 +3255,3 @@ void PC_CheckOpenSourceHandles( void )
 		} //end if
 	} //end for
 } //end of the function PC_CheckOpenSourceHandles
-

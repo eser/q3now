@@ -29,7 +29,7 @@ typedef struct MD5Context {
 	} in;
 } MD5_CTX;
 
-#ifndef Q3_BIG_ENDIAN
+#if !Q_BIG_ENDIAN
 	#define byteReverse(buf, len)	/* Nothing */
 #else
 	static void byteReverse(unsigned char *buf, unsigned longs);
@@ -48,7 +48,7 @@ typedef struct MD5Context {
 				buf += 4;
 		} while (--longs);
 	}
-#endif // Q3_BIG_ENDIAN
+#endif // Q_BIG_ENDIAN
 
 /*
  * Start MD5 accumulation.  Set bit count to 0 and buffer to mysterious

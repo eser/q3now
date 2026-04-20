@@ -413,7 +413,7 @@ static qboolean AAS_AreaEntityCollision(int areanum, vec3_t start, vec3_t end,
 
 	AAS_PresenceTypeBoundingBox(presencetype, boxmins, boxmaxs);
 
-	Com_Memset(&bsptrace, 0, sizeof(bsp_trace_t)); //make compiler happy
+	memset(&bsptrace, 0, sizeof(bsp_trace_t)); //make compiler happy
 	//assume no collision
 	bsptrace.fraction = 1;
 	collision = qfalse;
@@ -459,7 +459,7 @@ aas_trace_t AAS_TraceClientBBox(vec3_t start, vec3_t end, int presencetype,
 	aas_trace_t trace;
 
 	//clear the trace structure
-	Com_Memset(&trace, 0, sizeof(aas_trace_t));
+	memset(&trace, 0, sizeof(aas_trace_t));
 
 	if (!aasworld.loaded) return trace;
 	

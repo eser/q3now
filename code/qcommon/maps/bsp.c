@@ -35,12 +35,12 @@ static bspFile_t *bspLoadedFiles[MAX_BSP_FILES];
 
 void BSP_Init( void ) {
 	numBspFormats = 0;
-	Com_Memset( bspFormats, 0, sizeof( bspFormats ) );
+	memset( bspFormats, 0, sizeof( bspFormats ) );
 
 	// Register built-in formats
 	extern const bspFormat_t bspFormatQ3;
 	BSP_RegisterFormat( &bspFormatQ3 );
-	Com_Memset( bspLoadedFiles, 0, sizeof( bspLoadedFiles ) );
+	memset( bspLoadedFiles, 0, sizeof( bspLoadedFiles ) );
 }
 
 void BSP_RegisterFormat( const bspFormat_t *format ) {

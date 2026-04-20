@@ -91,7 +91,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... ) {
 	MSG		msg;
 
 	va_start( argptr, error );
-	Q_vsnprintf( text, sizeof( text ), error, argptr );
+	vsnprintf( text, sizeof( text ), error, argptr );
 	va_end( argptr );
 
 #ifndef DEDICATED
@@ -381,7 +381,7 @@ static int Sys_ListExtFiles( const char *directory, const char *subdir, const ch
 		if ( findhandle != -1 ) {
 			do {
 				if ( findinfo.attrib & _A_SUBDIR ) {
-					if ( !Q_streq( findinfo.name, "." ) && !Q_streq( findinfo.name, ".." ) ) {
+					if ( strcmp( findinfo.name, "." ) && strcmp( findinfo.name, ".." ) ) {
 						char subdir2[MAX_OSPATH * 2 + MAX_QPATH + 1];
 						if ( *subdir != '\0' ) {
 							Com_sprintf( subdir2, sizeof( subdir2 ), "%s\\%s", subdir, findinfo.name );
@@ -466,7 +466,7 @@ char** Sys_ListFiles( const char *directory, const char *extension, const char *
 	if ( nfiles > 1 ) {
 		Com_SortList( listCopy, nfiles - 1 );
 		if ( nfiles > 2 ) {
-			if ( Q_streq( listCopy[0], "." ) && Q_streq( listCopy[1], ".." ) ) {
+			if ( strcmp( listCopy[0], "." ) == 0 && strcmp( listCopy[1], ".." ) == 0 ) {
 				// emulate old strgtr() function sort behavior for special entries
 				char* dot1 = listCopy[0];
 				char* dot2 = listCopy[1];

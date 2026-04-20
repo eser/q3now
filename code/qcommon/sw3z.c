@@ -254,7 +254,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 		+ (long)strlen( filename ) + 1;
 
 	mem = (byte *)Z_TagMalloc( (int)allocSize, TAG_SEARCH_PACK );
-	Com_Memset( mem, 0, (int)allocSize );
+	memset( mem, 0, (int)allocSize );
 
 	pack = (pack_t *)mem;
 	mem += sizeof( pack_t );
@@ -309,7 +309,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 
 			/* copy filename from string table (NUL-terminate) */
 			buildBuffer[fi].name = nameBuffer;
-			Com_Memcpy( nameBuffer, stringTable + e->stringOffset, e->stringLength );
+			memcpy( nameBuffer, stringTable + e->stringOffset, e->stringLength );
 			nameBuffer[e->stringLength] = '\0';
 			nameBuffer += e->stringLength + 1;
 

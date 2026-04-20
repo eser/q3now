@@ -150,7 +150,7 @@ void RB_ShadowTessEnd( void ) {
 	}
 
 	// decide which triangles face the light
-	Com_Memset( numEdgeDefs, 0, tess.numVertexes * sizeof( numEdgeDefs[0] ) );
+	memset( numEdgeDefs, 0, tess.numVertexes * sizeof( numEdgeDefs[0] ) );
 
 	numTris = tess.numIndexes / 3;
 	for ( i = 0 ; i < numTris ; i++ ) {

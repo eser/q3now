@@ -329,7 +329,7 @@ static void SV_MapRestart_f( void ) {
 		if ( client->state >= CS_PRIMED ) {
 			// accept usercmds starting from current server time only
 			// to emulate original behavior which dropped pre-restart commands via serverid check
-			Com_Memset( &client->lastUsercmd, 0x0, sizeof( client->lastUsercmd ) );
+			memset( &client->lastUsercmd, 0x0, sizeof( client->lastUsercmd ) );
 			client->lastUsercmd.serverTime = sv.time - 1;
 		}
 	}
@@ -1143,11 +1143,11 @@ static void SV_Status_f( void ) {
 	nc = names; *nc = '\0';
 	ac = addrs; *ac = '\0';
 
-	Com_Memset( np, 0, sizeof( np ) );
-	Com_Memset( nl, 0, sizeof( nl ) );
+	memset( np, 0, sizeof( np ) );
+	memset( nl, 0, sizeof( nl ) );
 
-	Com_Memset( ap, 0, sizeof( ap ) );
-	Com_Memset( al, 0, sizeof( al ) );
+	memset( ap, 0, sizeof( ap ) );
+	memset( al, 0, sizeof( al ) );
 
 	// first pass: save and determine max.lengths of name/address fields
 	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ )

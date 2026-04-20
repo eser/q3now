@@ -1,11 +1,5 @@
 /*
-===========================================================================
 cl_wired_ui.c — Wired UI: unified menu/HUD system implementation
-
-Phase 1 stub: establishes the integration points and symbol/element
-registration framework. Actual menu parsing will be extracted from
-code/ui/ui_shared.c in subsequent phases.
-===========================================================================
 */
 
 #include "../../client.h"
@@ -48,7 +42,7 @@ static qboolean WiredUI_ItemCanFocus( wiredItemDef_t *item );
 static qboolean WiredUI_StateListContainsValue( const char *list, const char *value );
 static qboolean WiredUI_IsPersistedStateKey( const char *key );
 static qboolean WiredUI_CallLuaStoreFunction( const char *functionName );
-static qhandle_t wired_gradientBarShader;
+static qhandle_t wui_gradientBarShader;
 
 typedef struct {
 	const char *key;
@@ -75,7 +69,7 @@ typedef struct {
 	int wrote;
 } wiredUiStateWriteCtx_t;
 
-static const wiredUiStateDefault_t wired_uiStateDefaults[] = {
+static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_netSource", "0" },
 	{ "ui_browserGameType", "0" },
 	{ "ui_browserShowFull", "1" },
@@ -117,7 +111,7 @@ qboolean WiredUI_IsStoreStateKey( const char *key ) {
 		return qfalse;
 	}
 
-	for ( it = wired_uiStateDefaults; it->key; it++ ) {
+	for ( it = wui_uiStateDefaults; it->key; it++ ) {
 		if ( !Q_stricmp( key, it->key ) ) {
 			return qtrue;
 		}
@@ -253,7 +247,7 @@ void WiredUI_LoadState( void ) {
 		return;
 	}
 
-	Com_Memcpy( &header, data, sizeof( header ) );
+	memcpy( &header, data, sizeof( header ) );
 	if ( header.magic != WIRED_UI_STATE_MAGIC ||
 	     header.version != WIRED_UI_STATE_VERSION ||
 	     header.count < 0 ||
@@ -276,7 +270,7 @@ void WiredUI_LoadState( void ) {
 			break;
 		}
 
-		Com_Memcpy( &eh, p, sizeof( eh ) );
+		memcpy( &eh, p, sizeof( eh ) );
 		p += sizeof( eh );
 
 		if ( eh.keyLen == 0 || eh.keyLen >= sizeof( key ) ) {
@@ -291,7 +285,7 @@ void WiredUI_LoadState( void ) {
 			break;
 		}
 
-		Com_Memcpy( key, p, eh.keyLen );
+		memcpy( key, p, eh.keyLen );
 		key[eh.keyLen] = '\0';
 		p += eh.keyLen;
 
@@ -300,7 +294,7 @@ void WiredUI_LoadState( void ) {
 			valueCopyLen = sizeof( value ) - 1;
 		}
 		if ( valueCopyLen > 0 ) {
-			Com_Memcpy( value, p, valueCopyLen );
+			memcpy( value, p, valueCopyLen );
 		}
 		value[valueCopyLen] = '\0';
 		p += eh.valueLen;
@@ -364,7 +358,7 @@ static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
 
 static const char *WiredUI_StateDefaultValue( const char *key ) {
 	const wiredUiStateDefault_t *it;
-	for ( it = wired_uiStateDefaults; it->key; it++ ) {
+	for ( it = wui_uiStateDefaults; it->key; it++ ) {
 		if ( !Q_stricmp( key, it->key ) ) {
 			return it->defaultValue ? it->defaultValue : "";
 		}
@@ -395,7 +389,7 @@ void WiredUI_StateGetString( const char *key, char *out, int outSize ) {
 			return;
 		}
 
-		for ( it = wired_uiStateDefaults; it->key; it++ ) {
+		for ( it = wui_uiStateDefaults; it->key; it++ ) {
 			if ( !Q_stricmp( key, it->key ) ) {
 				Q_strncpyz( out, it->defaultValue ? it->defaultValue : "", outSize );
 				return;
@@ -523,10 +517,10 @@ static void WiredUI_DrawWindowBorder( float x, float y, float w, float h,
 			WUI_FillRect( x + w - bs, y, bs, h, bc );
 			break;
 		case WINDOW_BORDER_KCGRADIENT:
-			if ( wired_gradientBarShader ) {
+			if ( wui_gradientBarShader ) {
 				re.SetColor( bc );
-				WUI_DrawPic( x, y, w, bs, wired_gradientBarShader );
-				WUI_DrawPic( x, y + h - bs, w, bs, wired_gradientBarShader );
+				WUI_DrawPic( x, y, w, bs, wui_gradientBarShader );
+				WUI_DrawPic( x, y + h - bs, w, bs, wui_gradientBarShader );
 				re.SetColor( NULL );
 			} else {
 				WUI_FillRect( x, y, w, bs, bc );
@@ -562,8 +556,8 @@ static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float
 		item->modelShaderHandle = re.RegisterShaderNoMip( item->assetShader );
 	}
 
-	Com_Memset( &refdef, 0, sizeof( refdef ) );
-	Com_Memset( &ent, 0, sizeof( ent ) );
+	memset( &refdef, 0, sizeof( refdef ) );
+	memset( &ent, 0, sizeof( ent ) );
 
 	refdef.rdflags = RDF_NOWORLDMODEL;
 	refdef.x = (int)x;
@@ -625,12 +619,12 @@ static void WiredUI_DrawMenuBackground( wiredMenuDef_t *menu,
 		Vector4Copy( menu->backcolor, bc );
 		bc[3] *= alphaScale;
 		WUI_FillRect( x, y, w, h, bc );
-		if ( wired_gradientBarShader ) {
+		if ( wui_gradientBarShader ) {
 			vec4_t gc;
 			Vector4Copy( menu->backcolor, gc );
 			gc[3] *= 0.5f * alphaScale;
 			re.SetColor( gc );
-			WUI_DrawPic( x, y, w, h, wired_gradientBarShader );
+			WUI_DrawPic( x, y, w, h, wui_gradientBarShader );
 			re.SetColor( NULL );
 		}
 		return;
@@ -688,12 +682,12 @@ static void WiredUI_DrawItemBackground( wiredItemDef_t *item,
 		Vector4Copy( item->backcolor, bc );
 		bc[3] *= alphaScale;
 		WUI_FillRect( x, y, w, h, bc );
-		if ( wired_gradientBarShader ) {
+		if ( wui_gradientBarShader ) {
 			vec4_t gc;
 			Vector4Copy( item->backcolor, gc );
 			gc[3] *= 0.5f * alphaScale;
 			re.SetColor( gc );
-			WUI_DrawPic( x, y, w, h, wired_gradientBarShader );
+			WUI_DrawPic( x, y, w, h, wui_gradientBarShader );
 			re.SetColor( NULL );
 		}
 		return;
@@ -809,8 +803,8 @@ typedef struct {
 	qboolean                active;
 } wiredSymbol_t;
 
-static wiredSymbol_t  wired_symbols[WIRED_MAX_SYMBOLS];
-static int            wired_numSymbols = 0;
+static wiredSymbol_t  wui_symbols[WIRED_MAX_SYMBOLS];
+static int            wui_numSymbols = 0;
 
 // ── element registry ──────────────────────────────────────────────────
 
@@ -824,8 +818,8 @@ typedef struct {
 	qboolean                 active;
 } wiredElement_t;
 
-static wiredElement_t  wired_elements[WIRED_MAX_ELEMENTS];
-static int             wired_numElements = 0;
+static wiredElement_t  wui_elements[WIRED_MAX_ELEMENTS];
+static int             wui_numElements = 0;
 
 // ── populate callback registry ───────────────────────────────────────
 // Used by dynamic-MULTI items (populateCallback "name" in .wmenu) to fill
@@ -841,8 +835,8 @@ typedef struct {
 	qboolean                 active;
 } wiredPopulateEntry_t;
 
-static wiredPopulateEntry_t wired_populateCallbacks[WIRED_MAX_POPULATE_CALLBACKS];
-static int                   wired_numPopulateCallbacks = 0;
+static wiredPopulateEntry_t wui_populateCallbacks[WIRED_MAX_POPULATE_CALLBACKS];
+static int                   wui_numPopulateCallbacks = 0;
 
 // ── feeder registry ───────────────────────────────────────────────────
 
@@ -854,47 +848,51 @@ typedef struct {
 	qboolean                  active;
 } wiredFeeder_t;
 
-static wiredFeeder_t  wired_feeders[WIRED_MAX_FEEDERS];
-static int            wired_numFeeders = 0;
+static wiredFeeder_t  wui_feeders[WIRED_MAX_FEEDERS];
+static int            wui_numFeeders = 0;
 
 // ── menu interaction sounds ──────────────────────────────────────────
-static sfxHandle_t    wired_sfxFocus;     // item gains focus (hover/arrow key)
-static sfxHandle_t    wired_sfxAction;    // button click / action execution
-static sfxHandle_t    wired_sfxMenuOpen;  // menu push onto stack
-static sfxHandle_t    wired_sfxMenuClose; // menu pop from stack
+static sfxHandle_t    wui_sfxFocus;     // item gains focus (hover/arrow key)
+static sfxHandle_t    wui_sfxAction;    // button click / action execution
+static sfxHandle_t    wui_sfxMenuOpen;  // menu push onto stack
+static sfxHandle_t    wui_sfxMenuClose; // menu pop from stack
 
 // ── cursor shader ────────────────────────────────────────────────────
-static qhandle_t      wired_cursorShader;
+static qhandle_t      wui_cursorShader;
 
 // ── asset globals (parsed from assetGlobalDef) ──────────────────────
-static wiredAssetGlobals_t wired_assetGlobals;
-static qhandle_t           wired_gradientBarShader;
+static wiredAssetGlobals_t wui_assetGlobals;
+static qhandle_t           wui_gradientBarShader;
 
 wiredAssetGlobals_t *WiredUI_GetAssetGlobals( void ) {
-	return &wired_assetGlobals;
+	return &wui_assetGlobals;
+}
+
+void WiredUI_GetMapRotation( char *buf, int size ) {
+	Cvar_VariableStringBuffer( "g_maprotation", buf, size );
 }
 
 void WiredUI_ResetAssetGlobalsDefaults( void ) {
-	Com_Memset( &wired_assetGlobals, 0, sizeof( wired_assetGlobals ) );
+	memset( &wui_assetGlobals, 0, sizeof( wui_assetGlobals ) );
 
-	Q_strncpyz( wired_assetGlobals.cursor, "ui/assets/cursor", sizeof( wired_assetGlobals.cursor ) );
-	Q_strncpyz( wired_assetGlobals.gradientBar, "ui/assets/gradientbar2.tga", sizeof( wired_assetGlobals.gradientBar ) );
+	Q_strncpyz( wui_assetGlobals.cursor, "ui/assets/cursor", sizeof( wui_assetGlobals.cursor ) );
+	Q_strncpyz( wui_assetGlobals.gradientBar, "ui/assets/gradientbar2.tga", sizeof( wui_assetGlobals.gradientBar ) );
 
-	Q_strncpyz( wired_assetGlobals.defaultSerifFontName, "sansman", sizeof( wired_assetGlobals.defaultSerifFontName ) );
-	Q_strncpyz( wired_assetGlobals.defaultSerifFontItalicName, "sansman-italic", sizeof( wired_assetGlobals.defaultSerifFontItalicName ) );
-	Q_strncpyz( wired_assetGlobals.defaultSansFontName, "oxanium", sizeof( wired_assetGlobals.defaultSansFontName ) );
-	Q_strncpyz( wired_assetGlobals.defaultSansFontMediumName, "oxanium-medium", sizeof( wired_assetGlobals.defaultSansFontMediumName ) );
-	Q_strncpyz( wired_assetGlobals.defaultMonoFontName, "sharetechmono", sizeof( wired_assetGlobals.defaultMonoFontName ) );
+	Q_strncpyz( wui_assetGlobals.defaultSerifFontName, "sansman", sizeof( wui_assetGlobals.defaultSerifFontName ) );
+	Q_strncpyz( wui_assetGlobals.defaultSerifFontItalicName, "sansman-italic", sizeof( wui_assetGlobals.defaultSerifFontItalicName ) );
+	Q_strncpyz( wui_assetGlobals.defaultSansFontName, "oxanium", sizeof( wui_assetGlobals.defaultSansFontName ) );
+	Q_strncpyz( wui_assetGlobals.defaultSansFontMediumName, "oxanium-medium", sizeof( wui_assetGlobals.defaultSansFontMediumName ) );
+	Q_strncpyz( wui_assetGlobals.defaultMonoFontName, "sharetechmono", sizeof( wui_assetGlobals.defaultMonoFontName ) );
 
-	wired_assetGlobals.fadeClamp = 1.0f;
-	wired_assetGlobals.fadeCycle = 1;
-	wired_assetGlobals.fadeAmount = 0.2f;
-	Vector4Set( wired_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
-	Q_strncpyz( wired_assetGlobals.focusSound, "sound/misc/menu2.opus", sizeof( wired_assetGlobals.focusSound ) );
-	Vector4Set( wired_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );
-	wired_assetGlobals.shadowX = 1.0f;
-	wired_assetGlobals.shadowY = 1.0f;
-	Vector4Set( wired_assetGlobals.gradientBarColor, 0, 0, 0, 0 );
+	wui_assetGlobals.fadeClamp = 1.0f;
+	wui_assetGlobals.fadeCycle = 1;
+	wui_assetGlobals.fadeAmount = 0.2f;
+	Vector4Set( wui_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
+	Q_strncpyz( wui_assetGlobals.focusSound, "sound/misc/menu2.opus", sizeof( wui_assetGlobals.focusSound ) );
+	Vector4Set( wui_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );
+	wui_assetGlobals.shadowX = 1.0f;
+	wui_assetGlobals.shadowY = 1.0f;
+	Vector4Set( wui_assetGlobals.gradientBarColor, 0, 0, 0, 0 );
 }
 
 // Theme selection is handled inside scripts/menus.lua via the global metatable
@@ -905,28 +903,28 @@ void WiredUI_RegisterFeeder( int feederID, wiredFeederCount_t count,
                               wiredFeederSelection_t selection ) {
 	int i;
 	// update existing
-	for ( i = 0; i < wired_numFeeders; i++ ) {
-		if ( wired_feeders[i].active && wired_feeders[i].feederID == feederID ) {
-			wired_feeders[i].count = count;
-			wired_feeders[i].itemText = itemText;
-			wired_feeders[i].selection = selection;
+	for ( i = 0; i < wui_numFeeders; i++ ) {
+		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID ) {
+			wui_feeders[i].count = count;
+			wui_feeders[i].itemText = itemText;
+			wui_feeders[i].selection = selection;
 			return;
 		}
 	}
-	if ( wired_numFeeders >= WIRED_MAX_FEEDERS ) return;
-	wired_feeders[wired_numFeeders].feederID = feederID;
-	wired_feeders[wired_numFeeders].count = count;
-	wired_feeders[wired_numFeeders].itemText = itemText;
-	wired_feeders[wired_numFeeders].selection = selection;
-	wired_feeders[wired_numFeeders].active = qtrue;
-	wired_numFeeders++;
+	if ( wui_numFeeders >= WIRED_MAX_FEEDERS ) return;
+	wui_feeders[wui_numFeeders].feederID = feederID;
+	wui_feeders[wui_numFeeders].count = count;
+	wui_feeders[wui_numFeeders].itemText = itemText;
+	wui_feeders[wui_numFeeders].selection = selection;
+	wui_feeders[wui_numFeeders].active = qtrue;
+	wui_numFeeders++;
 }
 
 int WiredUI_FeederCount( int feederID ) {
 	int i;
-	for ( i = 0; i < wired_numFeeders; i++ ) {
-		if ( wired_feeders[i].active && wired_feeders[i].feederID == feederID && wired_feeders[i].count ) {
-			return wired_feeders[i].count( feederID );
+	for ( i = 0; i < wui_numFeeders; i++ ) {
+		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID && wui_feeders[i].count ) {
+			return wui_feeders[i].count( feederID );
 		}
 	}
 	return 0;
@@ -934,9 +932,9 @@ int WiredUI_FeederCount( int feederID ) {
 
 const char *WiredUI_FeederItemText( int feederID, int index, int column ) {
 	int i;
-	for ( i = 0; i < wired_numFeeders; i++ ) {
-		if ( wired_feeders[i].active && wired_feeders[i].feederID == feederID && wired_feeders[i].itemText ) {
-			return wired_feeders[i].itemText( feederID, index, column );
+	for ( i = 0; i < wui_numFeeders; i++ ) {
+		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID && wui_feeders[i].itemText ) {
+			return wui_feeders[i].itemText( feederID, index, column );
 		}
 	}
 	return "";
@@ -944,9 +942,9 @@ const char *WiredUI_FeederItemText( int feederID, int index, int column ) {
 
 void WiredUI_FeederSelection( int feederID, int index ) {
 	int i;
-	for ( i = 0; i < wired_numFeeders; i++ ) {
-		if ( wired_feeders[i].active && wired_feeders[i].feederID == feederID && wired_feeders[i].selection ) {
-			wired_feeders[i].selection( feederID, index );
+	for ( i = 0; i < wui_numFeeders; i++ ) {
+		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID && wui_feeders[i].selection ) {
+			wui_feeders[i].selection( feederID, index );
 			return;
 		}
 	}
@@ -954,52 +952,52 @@ void WiredUI_FeederSelection( int feederID, int index ) {
 
 // ── state ─────────────────────────────────────────────────────────────
 
-static qboolean  wired_initialized = qfalse;
-static int       wired_activeMenu = UIMENU_NONE;
+static qboolean  wui_initialized = qfalse;
+static int       wui_activeMenu = UIMENU_NONE;
 
 // ── menu stack ────────────────────────────────────────────────────────
 // Supports open/close navigation between screens (e.g., Main → Options → Video).
 // Each entry is a menu name. ESC or "close" pops the stack.
 // The bottom of the stack is always the root menu (main or ingame).
 
-static char      wired_menuStack[WIRED_MENU_STACK_DEPTH][64];
-static int       wired_menuStackDepth = 0;
+static char      wui_menuStack[WIRED_MENU_STACK_DEPTH][64];
+static int       wui_menuStackDepth = 0;
 
 // Pool/compositor health flag — set qtrue at the end of WiredUI_Init and
 // on successful SafeReload; set qfalse in WiredUI_Shutdown and on failing
 // SafeReload. Independent of cls.uiStarted so recovery can detect a dead
 // pool even while cls.uiStarted hasn't been cleared yet.
-static qboolean  wired_healthy = qfalse;
+static qboolean  wui_healthy = qfalse;
 
 // Recovery failure timestamp — set by WiredUI_Activate when EnsureLoaded
 // fails; read by cl_console.c to paint the red "reload failed" banner.
-static int       wired_recoveryFailTime = 0;
+static int       wui_recoveryFailTime = 0;
 
 // ── cursor ────────────────────────────────────────────────────────────
 
 // ── key binding capture state ─────────────────────────────────────────
-static qboolean  wired_waitingForKey = qfalse;
-static wiredItemDef_t *wired_bindItem = NULL;
+static qboolean  wui_waitingForKey = qfalse;
+static wiredItemDef_t *wui_bindItem = NULL;
 
 // ── slider drag state ────────────────────────────────────────────────
-static qboolean       wired_sliderDragging = qfalse;
-static wiredItemDef_t *wired_sliderDragItem = NULL;
+static qboolean       wui_sliderDragging = qfalse;
+static wiredItemDef_t *wui_sliderDragItem = NULL;
 
 // ── text field editing state ──────────────────────────────────────────
-static qboolean       wired_editingField = qfalse;
-static wiredItemDef_t *wired_editItem = NULL;
-static int            wired_editCursorPos = 0;
-static int            wired_editPaintOffset = 0;
+static qboolean       wui_editingField = qfalse;
+static wiredItemDef_t *wui_editItem = NULL;
+static int            wui_editCursorPos = 0;
+static int            wui_editPaintOffset = 0;
 
-static float     wired_cursorX = 320.0f;
-static float     wired_cursorY = 240.0f;
-static int       wired_focusItem = -1;     // index of focused item
-static qboolean  wired_focusFromMouse = qfalse;  // qtrue if focus came from mouse hover
+static float     wui_cursorX = 320.0f;
+static float     wui_cursorY = 240.0f;
+static int       wui_focusItem = -1;     // index of focused item
+static qboolean  wui_focusFromMouse = qfalse;  // qtrue if focus came from mouse hover
 
 // ── tooltip delay ─────────────────────────────────────────────────────
 #define WIRED_TOOLTIP_DELAY_MS  500   // ms before tooltip appears
-static int       wired_tooltipStartTime = 0;  // realtime when hover started on tooltip item
-static int       wired_tooltipFocusItem = -1; // item index that started the tooltip timer
+static int       wui_tooltipStartTime = 0;  // realtime when hover started on tooltip item
+static int       wui_tooltipFocusItem = -1; // item index that started the tooltip timer
 
 // ── ui_testall dev command ────────────────────────────────────────────
 static qboolean  testall_active = qfalse;
@@ -1009,9 +1007,9 @@ static int       testall_delay = 2000;  // ms between menu switches
 
 // ── double-click detection ───────────────────────────────────────────
 #define WIRED_DOUBLECLICK_TIME  300   // ms
-static int       wired_lastClickTime = 0;
-static int       wired_lastClickRow = -1;
-static float     wired_lastClickFeeder = 0;
+static int       wui_lastClickTime = 0;
+static int       wui_lastClickRow = -1;
+static float     wui_lastClickFeeder = 0;
 
 typedef struct {
 	int count;
@@ -1021,28 +1019,28 @@ typedef struct {
 	char numericBuf[WIRED_MAX_MULTI_CHOICES][32];
 } wiredMultiOptions_t;
 
-static qboolean        wired_multiDropdownOpen = qfalse;
-static wiredItemDef_t *wired_multiDropdownItem = NULL;
-static int             wired_multiDropdownHover = -1;
-static int             wired_multiDropdownScroll = 0;
+static qboolean        wui_multiDropdownOpen = qfalse;
+static wiredItemDef_t *wui_multiDropdownItem = NULL;
+static int             wui_multiDropdownHover = -1;
+static int             wui_multiDropdownScroll = 0;
 
 static void WiredUI_CloseMultiDropdown( void ) {
-	wired_multiDropdownOpen = qfalse;
-	wired_multiDropdownItem = NULL;
-	wired_multiDropdownHover = -1;
-	wired_multiDropdownScroll = 0;
+	wui_multiDropdownOpen = qfalse;
+	wui_multiDropdownItem = NULL;
+	wui_multiDropdownHover = -1;
+	wui_multiDropdownScroll = 0;
 }
 
 static void WiredUI_GetMultiOptions( wiredItemDef_t *item, wiredMultiOptions_t *out ) {
 	int i;
-	Com_Memset( out, 0, sizeof( *out ) );
+	memset( out, 0, sizeof( *out ) );
 	if ( !item ) return;
 
 	if ( item->populateCallback[0] ) {
 		wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( item->populateCallback );
 		if ( pop ) {
 			wuiPopulateResult_t res;
-			Com_Memset( &res, 0, sizeof( res ) );
+			memset( &res, 0, sizeof( res ) );
 			pop( &res );
 			if ( ( res.state == WUI_POPULATE_SUCCESS || res.state == WUI_POPULATE_PARTIAL ) &&
 			     res.count > 0 && res.names && res.values ) {
@@ -1139,28 +1137,28 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 	vec4_t hoverColor = { 0.85f, 0.55f, 0.1f, 0.20f };
 	vec4_t selectedColor = { 0.85f, 0.55f, 0.1f, 0.32f };
 
-	if ( !wired_multiDropdownOpen || !menu || !wired_multiDropdownItem ) return;
+	if ( !wui_multiDropdownOpen || !menu || !wui_multiDropdownItem ) return;
 
-	WiredUI_GetMultiOptions( wired_multiDropdownItem, &opts );
+	WiredUI_GetMultiOptions( wui_multiDropdownItem, &opts );
 	if ( opts.count <= 0 ) {
 		WiredUI_CloseMultiDropdown();
 		return;
 	}
 
-	if ( !WiredUI_GetMultiDropdownRect( menu, wired_multiDropdownItem, opts.count,
+	if ( !WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, opts.count,
 		&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
 		WiredUI_CloseMultiDropdown();
 		return;
 	}
 
-	WiredUI_StateGetString( wired_multiDropdownItem->cvar, currentValue, sizeof( currentValue ) );
-	selectedIndex = WiredUI_FindMultiOptionIndex( wired_multiDropdownItem, &opts, currentValue );
+	WiredUI_StateGetString( wui_multiDropdownItem->cvar, currentValue, sizeof( currentValue ) );
+	selectedIndex = WiredUI_FindMultiOptionIndex( wui_multiDropdownItem, &opts, currentValue );
 
 	{
 		int maxScroll = opts.count - visibleRows;
 		if ( maxScroll < 0 ) maxScroll = 0;
-		if ( wired_multiDropdownScroll > maxScroll ) wired_multiDropdownScroll = maxScroll;
-		if ( wired_multiDropdownScroll < 0 ) wired_multiDropdownScroll = 0;
+		if ( wui_multiDropdownScroll > maxScroll ) wui_multiDropdownScroll = maxScroll;
+		if ( wui_multiDropdownScroll < 0 ) wui_multiDropdownScroll = 0;
 	}
 
 	WUI_FillRect( ddX, ddY, ddW, ddH, panelColor );
@@ -1170,23 +1168,23 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 	WUI_FillRect( ddX + ddW - 1.0f, ddY, 1.0f, ddH, borderColor );
 
 	for ( i = 0; i < visibleRows; i++ ) {
-		int idx = wired_multiDropdownScroll + i;
+		int idx = wui_multiDropdownScroll + i;
 		float rowY = ddY + rowH * i;
 		if ( idx >= opts.count ) break;
 
 		if ( idx == selectedIndex ) {
 			WUI_FillRect( ddX + 1.0f, rowY, ddW - 2.0f, rowH, selectedColor );
 		}
-		if ( idx == wired_multiDropdownHover ) {
+		if ( idx == wui_multiDropdownHover ) {
 			WUI_FillRect( ddX + 1.0f, rowY, ddW - 2.0f, rowH, hoverColor );
 		}
 
 		if ( opts.labels[idx] && opts.labels[idx][0] ) {
-			float charSize = wired_multiDropdownItem->fontPointSize > 0.0f
-				? wired_multiDropdownItem->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+			float charSize = wui_multiDropdownItem->fontPointSize > 0.0f
+				? wui_multiDropdownItem->fontPointSize : WUI_DEFAULT_FONT_SIZE;
 			float textY = rowY + ( rowH - charSize ) * 0.5f;
 			Text_Draw( opts.labels[idx], ddX + 10.0f, textY, FONT_UI, charSize,
-				wired_multiDropdownItem->forecolor, TEXT_ALIGN_LEFT, 0 );
+				wui_multiDropdownItem->forecolor, TEXT_ALIGN_LEFT, 0 );
 		}
 	}
 
@@ -1201,7 +1199,7 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 		vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.6f };
 		if ( thumbH < 16.0f ) thumbH = 16.0f;
 		thumbY = trackY + ( trackH - thumbH ) *
-			( (float)wired_multiDropdownScroll / (float)( opts.count - visibleRows ) );
+			( (float)wui_multiDropdownScroll / (float)( opts.count - visibleRows ) );
 		WUI_FillRect( trackX, trackY, trackW, trackH, trackColor );
 		WUI_FillRect( trackX, thumbY, trackW, thumbH, thumbColor );
 	}
@@ -1218,31 +1216,31 @@ void WiredUI_RegisterSymbol( const char *name, wiredSymbolCallback_t callback, v
 	}
 
 	// check for existing symbol (update in place)
-	for ( i = 0; i < wired_numSymbols; i++ ) {
-		if ( wired_symbols[i].active && !Q_stricmp( wired_symbols[i].name, name ) ) {
-			wired_symbols[i].callback = callback;
-			wired_symbols[i].userData = userData;
+	for ( i = 0; i < wui_numSymbols; i++ ) {
+		if ( wui_symbols[i].active && !Q_stricmp( wui_symbols[i].name, name ) ) {
+			wui_symbols[i].callback = callback;
+			wui_symbols[i].userData = userData;
 			return;
 		}
 	}
 
-	if ( wired_numSymbols >= WIRED_MAX_SYMBOLS ) {
+	if ( wui_numSymbols >= WIRED_MAX_SYMBOLS ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterSymbol: too many symbols (max %d)\n", WIRED_MAX_SYMBOLS );
 		return;
 	}
 
-	Q_strncpyz( wired_symbols[wired_numSymbols].name, name, sizeof( wired_symbols[0].name ) );
-	wired_symbols[wired_numSymbols].callback = callback;
-	wired_symbols[wired_numSymbols].userData = userData;
-	wired_symbols[wired_numSymbols].active = qtrue;
-	wired_numSymbols++;
+	Q_strncpyz( wui_symbols[wui_numSymbols].name, name, sizeof( wui_symbols[0].name ) );
+	wui_symbols[wui_numSymbols].callback = callback;
+	wui_symbols[wui_numSymbols].userData = userData;
+	wui_symbols[wui_numSymbols].active = qtrue;
+	wui_numSymbols++;
 }
 
 void WiredUI_UnregisterSymbol( const char *name ) {
 	int i;
-	for ( i = 0; i < wired_numSymbols; i++ ) {
-		if ( wired_symbols[i].active && !Q_stricmp( wired_symbols[i].name, name ) ) {
-			wired_symbols[i].active = qfalse;
+	for ( i = 0; i < wui_numSymbols; i++ ) {
+		if ( wui_symbols[i].active && !Q_stricmp( wui_symbols[i].name, name ) ) {
+			wui_symbols[i].active = qfalse;
 			return;
 		}
 	}
@@ -1250,9 +1248,9 @@ void WiredUI_UnregisterSymbol( const char *name ) {
 
 const char *WiredUI_ResolveSymbol( const char *name ) {
 	int i;
-	for ( i = 0; i < wired_numSymbols; i++ ) {
-		if ( wired_symbols[i].active && !Q_stricmp( wired_symbols[i].name, name ) ) {
-			return wired_symbols[i].callback( wired_symbols[i].userData );
+	for ( i = 0; i < wui_numSymbols; i++ ) {
+		if ( wui_symbols[i].active && !Q_stricmp( wui_symbols[i].name, name ) ) {
+			return wui_symbols[i].callback( wui_symbols[i].userData );
 		}
 	}
 	return "???";
@@ -1272,26 +1270,26 @@ void WiredUI_RegisterElement( const char *name,
 	}
 
 	// check for existing element (update in place)
-	for ( i = 0; i < wired_numElements; i++ ) {
-		if ( wired_elements[i].active && !Q_stricmp( wired_elements[i].name, name ) ) {
-			wired_elements[i].create = create;
-			wired_elements[i].routine = routine;
-			wired_elements[i].destroy = destroy;
+	for ( i = 0; i < wui_numElements; i++ ) {
+		if ( wui_elements[i].active && !Q_stricmp( wui_elements[i].name, name ) ) {
+			wui_elements[i].create = create;
+			wui_elements[i].routine = routine;
+			wui_elements[i].destroy = destroy;
 			return;
 		}
 	}
 
-	if ( wired_numElements >= WIRED_MAX_ELEMENTS ) {
+	if ( wui_numElements >= WIRED_MAX_ELEMENTS ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterElement: too many elements (max %d)\n", WIRED_MAX_ELEMENTS );
 		return;
 	}
 
-	Q_strncpyz( wired_elements[wired_numElements].name, name, sizeof( wired_elements[0].name ) );
-	wired_elements[wired_numElements].create = create;
-	wired_elements[wired_numElements].routine = routine;
-	wired_elements[wired_numElements].destroy = destroy;
-	wired_elements[wired_numElements].active = qtrue;
-	wired_numElements++;
+	Q_strncpyz( wui_elements[wui_numElements].name, name, sizeof( wui_elements[0].name ) );
+	wui_elements[wui_numElements].create = create;
+	wui_elements[wui_numElements].routine = routine;
+	wui_elements[wui_numElements].destroy = destroy;
+	wui_elements[wui_numElements].active = qtrue;
+	wui_numElements++;
 }
 
 // ── populate callback registration ────────────────────────────────────
@@ -1305,25 +1303,25 @@ void WiredUI_RegisterPopulateCallback( const char *name, wuiPopulateCallback_t f
 	}
 
 	// update existing entry in place
-	for ( i = 0; i < wired_numPopulateCallbacks; i++ ) {
-		if ( wired_populateCallbacks[i].active &&
-		     !Q_stricmp( wired_populateCallbacks[i].name, name ) ) {
-			wired_populateCallbacks[i].fn = fn;
+	for ( i = 0; i < wui_numPopulateCallbacks; i++ ) {
+		if ( wui_populateCallbacks[i].active &&
+		     !Q_stricmp( wui_populateCallbacks[i].name, name ) ) {
+			wui_populateCallbacks[i].fn = fn;
 			return;
 		}
 	}
 
-	if ( wired_numPopulateCallbacks >= WIRED_MAX_POPULATE_CALLBACKS ) {
+	if ( wui_numPopulateCallbacks >= WIRED_MAX_POPULATE_CALLBACKS ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterPopulateCallback: too many callbacks (max %d)\n",
 		            WIRED_MAX_POPULATE_CALLBACKS );
 		return;
 	}
 
-	Q_strncpyz( wired_populateCallbacks[wired_numPopulateCallbacks].name, name,
-	            sizeof( wired_populateCallbacks[0].name ) );
-	wired_populateCallbacks[wired_numPopulateCallbacks].fn = fn;
-	wired_populateCallbacks[wired_numPopulateCallbacks].active = qtrue;
-	wired_numPopulateCallbacks++;
+	Q_strncpyz( wui_populateCallbacks[wui_numPopulateCallbacks].name, name,
+	            sizeof( wui_populateCallbacks[0].name ) );
+	wui_populateCallbacks[wui_numPopulateCallbacks].fn = fn;
+	wui_populateCallbacks[wui_numPopulateCallbacks].active = qtrue;
+	wui_numPopulateCallbacks++;
 }
 
 wuiPopulateCallback_t WiredUI_GetPopulateCallback( const char *name ) {
@@ -1332,10 +1330,10 @@ wuiPopulateCallback_t WiredUI_GetPopulateCallback( const char *name ) {
 	if ( !name || !name[0] )
 		return NULL;
 
-	for ( i = 0; i < wired_numPopulateCallbacks; i++ ) {
-		if ( wired_populateCallbacks[i].active &&
-		     !Q_stricmp( wired_populateCallbacks[i].name, name ) ) {
-			return wired_populateCallbacks[i].fn;
+	for ( i = 0; i < wui_numPopulateCallbacks; i++ ) {
+		if ( wui_populateCallbacks[i].active &&
+		     !Q_stricmp( wui_populateCallbacks[i].name, name ) ) {
+			return wui_populateCallbacks[i].fn;
 		}
 	}
 	return NULL;
@@ -1359,19 +1357,19 @@ void WiredUI_RegisterCoreElements( void ) {
 // Useful for automated testing: make run-game DEV=1 +set wired_screenshotDelay 5
 
 static cvar_t *wired_screenshotDelay = NULL;
-static int     wired_screenshotTime = 0;
-static qboolean wired_screenshotTaken = qfalse;
+static int     wui_screenshotTime = 0;
+static qboolean wui_screenshotTaken = qfalse;
 
 // generic confirm dialog cvars
 
 // ── Layer 5: hot-reload and debug overlay cvars ──────────────────────
 static cvar_t *wired_hotreload = NULL;
-static int     wired_lastReloadCheck = 0;
+static int     wui_lastReloadCheck = 0;
 static cvar_t *wired_debug_layout = NULL;
 
 // ── hud cvar — selects which .whud file to load ───────────────────────
 static cvar_t *wired_hud = NULL;                            // basename only, e.g. "hud_default" → ui/hud_default.whud
-static char    wired_hud_lastLoaded[MAX_CVAR_VALUE_STRING]; // last value we actually loaded — string diff drives reloads
+static char    wui_hud_lastLoaded[MAX_CVAR_VALUE_STRING]; // last value we actually loaded — string diff drives reloads
 
 /*
 =================
@@ -1386,31 +1384,31 @@ essentially free outside of hunk-clear-level transitions.
 */
 static void WiredUI_RegisterAssets( void ) {
 	// sounds
-	wired_sfxFocus     = S_RegisterSound( "sound/misc/menu2.opus", qfalse );
-	wired_sfxAction    = S_RegisterSound( "sound/misc/menu1.opus", qfalse );
-	wired_sfxMenuOpen  = S_RegisterSound( "sound/misc/menu3.opus", qfalse );
-	wired_sfxMenuClose = S_RegisterSound( "sound/misc/menu3.opus", qfalse );
+	wui_sfxFocus     = S_RegisterSound( "sound/misc/menu2.opus", qfalse );
+	wui_sfxAction    = S_RegisterSound( "sound/misc/menu1.opus", qfalse );
+	wui_sfxMenuOpen  = S_RegisterSound( "sound/misc/menu3.opus", qfalse );
+	wui_sfxMenuClose = S_RegisterSound( "sound/misc/menu3.opus", qfalse );
 
 	// cursor shader — try cvar override, then assetGlobals, then legacy fallback
-	wired_cursorShader = 0;
+	wui_cursorShader = 0;
 	{
 		char cursorPath[MAX_QPATH];
-		Cvar_VariableStringBuffer( "wired_cursor", cursorPath, sizeof( cursorPath ) );
+		Cvar_VariableStringBuffer( "wui_cursor", cursorPath, sizeof( cursorPath ) );
 		if ( cursorPath[0] ) {
-			wired_cursorShader = re.RegisterShaderNoMip( cursorPath );
+			wui_cursorShader = re.RegisterShaderNoMip( cursorPath );
 		}
 	}
-	if ( !wired_cursorShader && wired_assetGlobals.cursor[0] ) {
-		wired_cursorShader = re.RegisterShaderNoMip( wired_assetGlobals.cursor );
+	if ( !wui_cursorShader && wui_assetGlobals.cursor[0] ) {
+		wui_cursorShader = re.RegisterShaderNoMip( wui_assetGlobals.cursor );
 	}
-	if ( !wired_cursorShader ) {
-		wired_cursorShader = re.RegisterShaderNoMip( "menu/art/3_cursor2" );
+	if ( !wui_cursorShader ) {
+		wui_cursorShader = re.RegisterShaderNoMip( "menu/art/3_cursor2" );
 	}
 
 	// gradient bar shader
-	wired_gradientBarShader = 0;
-	if ( wired_assetGlobals.gradientBar[0] ) {
-		wired_gradientBarShader = re.RegisterShaderNoMip( wired_assetGlobals.gradientBar );
+	wui_gradientBarShader = 0;
+	if ( wui_assetGlobals.gradientBar[0] ) {
+		wui_gradientBarShader = re.RegisterShaderNoMip( wui_assetGlobals.gradientBar );
 	}
 
 	WUI_BackgroundInit();
@@ -1452,8 +1450,8 @@ static void WiredUI_TestAll_f( void ) {
 // ── Layer 5: hot-reload check ─────────────────────────────────────────
 static void WiredUI_CheckHotReload( int realtime ) {
 	if ( !wired_hotreload || !wired_hotreload->integer ) return;
-	if ( realtime - wired_lastReloadCheck < 1000 ) return; // check once per second
-	wired_lastReloadCheck = realtime;
+	if ( realtime - wui_lastReloadCheck < 1000 ) return; // check once per second
+	wui_lastReloadCheck = realtime;
 
 	// Re-load all menus from manifest using the existing safe-reload path
 	Com_Printf( "Wired UI: hot-reload check\n" );
@@ -1506,30 +1504,30 @@ static void WiredUI_DrawDebugOverlay( wiredMenuDef_t *menu ) {
 }
 
 // ── stack accessors ───────────────────────────────────────────────────
-// Expose wired_menuStack internals without leaking the raw statics.
+// Expose wui_menuStack internals without leaking the raw statics.
 // Used by cl_wired_attract.c to gate on whether an attract panel is on top.
 
 int WiredUI_GetMenuStackDepth( void ) {
-	return wired_menuStackDepth;
+	return wui_menuStackDepth;
 }
 
 const char *WiredUI_GetMenuStackTop( void ) {
-	if ( wired_menuStackDepth <= 0 )
+	if ( wui_menuStackDepth <= 0 )
 		return "";
-	return wired_menuStack[ wired_menuStackDepth - 1 ];
+	return wui_menuStack[ wui_menuStackDepth - 1 ];
 }
 
 // ── health + recovery ─────────────────────────────────────────────────
 
 qboolean WiredUI_IsHealthy( void ) {
-	return wired_healthy && cls.uiStarted && WiredUI_GetMenuCount() > 0;
+	return wui_healthy && cls.uiStarted && WiredUI_GetMenuCount() > 0;
 }
 
 // WiredUI_EnsureLoaded — idempotent recovery. Attempts to re-init WiredUI
 // if it is dead. Safe to call from the key-event thread (cl_keys.c).
 //
 // Recovery path: renderer restart → WiredUI_Init (via CL_StartHunkUsers) →
-// wired_healthy is set inside WiredUI_Init on success.
+// wui_healthy is set inside WiredUI_Init on success.
 //
 // Longjmp safety: inRecovery is cleared at the top of WiredUI_Init so that
 // a Com_Error(ERR_DROP) out of CL_StartHunkUsers does not leave the flag
@@ -1554,7 +1552,7 @@ qboolean WiredUI_EnsureLoaded( void ) {
 
 	if ( !cls.rendererStarted ) {
 		// Renderer is down — bring it (and WiredUI) back up.
-		// CL_StartHunkUsers → CL_InitRenderer → WiredUI_Init sets wired_healthy.
+		// CL_StartHunkUsers → CL_InitRenderer → WiredUI_Init sets wui_healthy.
 		// WiredUI_Init clears inRecovery as its first action (longjmp guard).
 		CL_StartHunkUsers();
 	} else if ( !cls.uiStarted ) {
@@ -1579,7 +1577,7 @@ qboolean WiredUI_EnsureLoaded( void ) {
 void WiredUI_Activate( void ) {
 	if ( !WiredUI_EnsureLoaded() ) {
 		Com_Printf( "WiredUI: failed to reload — use 'wired_reload' or restart\n" );
-		wired_recoveryFailTime = cls.realtime;
+		wui_recoveryFailTime = cls.realtime;
 		return;
 	}
 
@@ -1595,7 +1593,7 @@ void WiredUI_Activate( void ) {
 
 	// If main menu is already the active root with something on the stack,
 	// we're already visible — just let the error dialog layer if needed.
-	if ( wired_activeMenu != UIMENU_MAIN || wired_menuStackDepth == 0 ) {
+	if ( wui_activeMenu != UIMENU_MAIN || wui_menuStackDepth == 0 ) {
 		WiredUI_SetActiveMenu( UIMENU_MAIN ); // sets KEYCATCH_UI
 		WiredUI_PushMenu( "main" );
 	}
@@ -1609,7 +1607,7 @@ void WiredUI_Activate( void ) {
 
 // Recovery fail timestamp for the fallback-console red banner (cl_console.c).
 int WiredUI_GetLastRecoveryFailTime( void ) {
-	return wired_recoveryFailTime;
+	return wui_recoveryFailTime;
 }
 
 static void WiredUI_Recover_f( void ) {
@@ -1642,12 +1640,12 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	Com_Printf( "------- WiredUI_Init -------\n" );
 
-	Com_Memset( wired_symbols, 0, sizeof( wired_symbols ) );
-	Com_Memset( wired_elements, 0, sizeof( wired_elements ) );
-	Com_Memset( wired_populateCallbacks, 0, sizeof( wired_populateCallbacks ) );
-	wired_numSymbols = 0;
-	wired_numElements = 0;
-	wired_numPopulateCallbacks = 0;
+	memset( wui_symbols, 0, sizeof( wui_symbols ) );
+	memset( wui_elements, 0, sizeof( wui_elements ) );
+	memset( wui_populateCallbacks, 0, sizeof( wui_populateCallbacks ) );
+	wui_numSymbols = 0;
+	wui_numElements = 0;
+	wui_numPopulateCallbacks = 0;
 
 	// Register dynamic-MULTI populate callbacks (audio_devices, etc.).
 	// Lives in cl_wired_populate.c so additions don't churn this file.
@@ -1657,7 +1655,7 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	// register 'hud' cvar before menu load so WiredUI_LoadHudFromCvar is safe to call
 	wired_hud = Cvar_Get( "hud", "default", CVAR_ARCHIVE );
-	Q_strncpyz( wired_hud_lastLoaded, wired_hud->string, sizeof( wired_hud_lastLoaded ) );
+	Q_strncpyz( wui_hud_lastLoaded, wired_hud->string, sizeof( wui_hud_lastLoaded ) );
 
 	// load menu files from scripts/menus.lua
 	WiredUI_ClearMenus();
@@ -1695,20 +1693,20 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	WiredUI_RegisterAssets();
 
-	wired_activeMenu = UIMENU_NONE;
-	wired_initialized = qtrue;
+	wui_activeMenu = UIMENU_NONE;
+	wui_initialized = qtrue;
 
 	// restore menu stack after vid_restart
 	{
 		char stackBuf[512];
-		Cvar_VariableStringBuffer( "wired_menuStackSaved", stackBuf, sizeof( stackBuf ) );
+		Cvar_VariableStringBuffer( "wui_menuStackSaved", stackBuf, sizeof( stackBuf ) );
 		if ( stackBuf[0] ) {
-			int savedMenu = Cvar_VariableIntegerValue( "wired_activeMenuSaved" );
+			int savedMenu = Cvar_VariableIntegerValue( "wui_activeMenuSaved" );
 			char *p = stackBuf;
 			char *tok;
 
 			if ( savedMenu > UIMENU_NONE ) {
-				wired_activeMenu = savedMenu;
+				wui_activeMenu = savedMenu;
 				Key_SetCatcher( KEYCATCH_UI );
 				if ( savedMenu == UIMENU_INGAME ) {
 					Cvar_Set( "cl_paused", "1" );
@@ -1728,39 +1726,39 @@ void WiredUI_Init( qboolean inGameUI ) {
 					Q_strncpyz( name, p, sizeof( name ) );
 					p += strlen( p );
 				}
-				if ( name[0] && WiredUI_FindMenu( name ) && wired_menuStackDepth < WIRED_MENU_STACK_DEPTH ) {
-					Q_strncpyz( wired_menuStack[wired_menuStackDepth], name, sizeof( wired_menuStack[0] ) );
-					wired_menuStackDepth++;
+				if ( name[0] && WiredUI_FindMenu( name ) && wui_menuStackDepth < WIRED_MENU_STACK_DEPTH ) {
+					Q_strncpyz( wui_menuStack[wui_menuStackDepth], name, sizeof( wui_menuStack[0] ) );
+					wui_menuStackDepth++;
 				}
 				if ( !*p ) break;
 			}
 
 			// clear saved state
-			Cvar_Set( "wired_menuStackSaved", "" );
-			Cvar_Set( "wired_activeMenuSaved", "0" );
+			Cvar_Set( "wui_menuStackSaved", "" );
+			Cvar_Set( "wui_activeMenuSaved", "0" );
 
-			if ( wired_menuStackDepth > 0 ) {
-				Com_Printf( "WiredUI: restored menu stack (depth %d)\n", wired_menuStackDepth );
+			if ( wui_menuStackDepth > 0 ) {
+				Com_Printf( "WiredUI: restored menu stack (depth %d)\n", wui_menuStackDepth );
 			}
 		}
 	}
 
 	// delayed screenshot support
 	wired_screenshotDelay = Cvar_Get( "wired_screenshotDelay", "0", 0 );
-	wired_screenshotTime = cls.realtime;
-	wired_screenshotTaken = qfalse;
+	wui_screenshotTime = cls.realtime;
+	wui_screenshotTaken = qfalse;
 
 	// Layer 5: hot-reload and debug overlay cvars
 	wired_hotreload = Cvar_Get( "wired_hotreload", "0", CVAR_TEMP );
 	wired_debug_layout = Cvar_Get( "wired_debug_layout", "0", CVAR_TEMP );
 
-	wired_healthy = qtrue;
-	wired_recoveryFailTime = 0; // clear any stale failure banner
+	wui_healthy = qtrue;
+	wui_recoveryFailTime = 0; // clear any stale failure banner
 	Com_Printf( "WiredUI: initialized (%d menus loaded)\n", WiredUI_GetMenuCount() );
 }
 
 void WiredUI_Shutdown( void ) {
-	if ( !wired_initialized ) {
+	if ( !wui_initialized ) {
 		return;
 	}
 
@@ -1776,12 +1774,12 @@ void WiredUI_Shutdown( void ) {
 	{
 		char stackBuf[512] = "";
 		int i;
-		for ( i = 0; i < wired_menuStackDepth; i++ ) {
+		for ( i = 0; i < wui_menuStackDepth; i++ ) {
 			if ( i > 0 ) Q_strcat( stackBuf, sizeof( stackBuf ), ";" );
-			Q_strcat( stackBuf, sizeof( stackBuf ), wired_menuStack[i] );
+			Q_strcat( stackBuf, sizeof( stackBuf ), wui_menuStack[i] );
 		}
-		Cvar_Set( "wired_menuStackSaved", stackBuf );
-		Cvar_Set( "wired_activeMenuSaved", va( "%d", wired_activeMenu ) );
+		Cvar_Set( "wui_menuStackSaved", stackBuf );
+		Cvar_Set( "wui_activeMenuSaved", va( "%d", wui_activeMenu ) );
 	}
 
 	if ( !WiredUI_CallLuaStoreFunction( "savestate" ) ) {
@@ -1797,14 +1795,14 @@ void WiredUI_Shutdown( void ) {
 	Cmd_RemoveCommand( "wired_recover" );
 	testall_active = qfalse;
 
-	wired_healthy = qfalse;
+	wui_healthy = qfalse;
 
-	Com_Memset( wired_symbols, 0, sizeof( wired_symbols ) );
-	Com_Memset( wired_elements, 0, sizeof( wired_elements ) );
-	wired_numSymbols = 0;
-	wired_numElements = 0;
-	wired_activeMenu = UIMENU_NONE;
-	wired_initialized = qfalse;
+	memset( wui_symbols, 0, sizeof( wui_symbols ) );
+	memset( wui_elements, 0, sizeof( wui_elements ) );
+	wui_numSymbols = 0;
+	wui_numElements = 0;
+	wui_activeMenu = UIMENU_NONE;
+	wui_initialized = qfalse;
 
 	Com_Printf( "WiredUI: shutdown\n" );
 }
@@ -1813,13 +1811,13 @@ void WiredUI_Refresh( int realtime ) {
 	wiredMenuDef_t *menu;
 	int i;
 
-	if ( !wired_initialized ) {
+	if ( !wui_initialized ) {
 		return;
 	}
 
 	// live 'hud' cvar change: reload only when the value actually differs
-	if ( wired_hud && strcmp( wired_hud->string, wired_hud_lastLoaded ) != 0 ) {
-		Q_strncpyz( wired_hud_lastLoaded, wired_hud->string, sizeof( wired_hud_lastLoaded ) );
+	if ( wired_hud && strcmp( wired_hud->string, wui_hud_lastLoaded ) != 0 ) {
+		Q_strncpyz( wui_hud_lastLoaded, wired_hud->string, sizeof( wui_hud_lastLoaded ) );
 		WiredUI_ReloadHud();
 		return;
 	}
@@ -1831,10 +1829,10 @@ void WiredUI_Refresh( int realtime ) {
 	WiredAttract_Frame( realtime );
 
 	// delayed screenshot — fire once after N seconds
-	if ( wired_screenshotDelay && wired_screenshotDelay->integer > 0 && !wired_screenshotTaken ) {
-		if ( realtime - wired_screenshotTime >= wired_screenshotDelay->integer * 1000 ) {
+	if ( wired_screenshotDelay && wired_screenshotDelay->integer > 0 && !wui_screenshotTaken ) {
+		if ( realtime - wui_screenshotTime >= wired_screenshotDelay->integer * 1000 ) {
 			Cbuf_ExecuteText( EXEC_APPEND, "screenshotJPEG\n" );
-			wired_screenshotTaken = qtrue;
+			wui_screenshotTaken = qtrue;
 			Com_Printf( "WiredUI: delayed screenshot taken\n" );
 		}
 	}
@@ -1851,7 +1849,7 @@ void WiredUI_Refresh( int realtime ) {
 				wiredMenuDef_t *m = WiredUI_GetMenuByIndex( testall_menuIndex );
 				if ( m ) {
 					// activate UI capture so the menu renders
-					wired_activeMenu = UIMENU_MAIN;
+					wui_activeMenu = UIMENU_MAIN;
 					Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
 
 					WiredUI_PushMenu( m->name );
@@ -1897,8 +1895,6 @@ void WiredUI_Refresh( int realtime ) {
 		}
 	}
 
-	// TODO: animated cloud background — deferred (tcmod scroll not animating in 2D path)
-	// See TODOS.md "Wired UI: animated cloud menu background"
 
 	// resolve layout tree: all items get resolvedRect in pixel coords
 	float vpW = (float)cls.glconfig.vidWidth;
@@ -2384,7 +2380,7 @@ void WiredUI_Refresh( int realtime ) {
 				case ITEM_TYPE_BIND:
 					{
 						static char bindBuf[128];
-						if ( wired_waitingForKey && wired_bindItem == item ) {
+						if ( wui_waitingForKey && wui_bindItem == item ) {
 							valueText = "Press a key...";
 						} else {
 							// find primary + alternate keys bound to this command
@@ -2411,10 +2407,10 @@ void WiredUI_Refresh( int realtime ) {
 
 				case ITEM_TYPE_EDITFIELD:
 				case ITEM_TYPE_NUMERICFIELD:
-					if ( wired_editingField && wired_editItem == item ) {
+					if ( wui_editingField && wui_editItem == item ) {
 						// show value with blinking cursor
 						static char editBuf[512];
-						int curPos = wired_editCursorPos;
+						int curPos = wui_editCursorPos;
 						qboolean showCursor = ( (int)( cls.realtime / 250 ) & 1 );
 
 						if ( curPos > (int)strlen( cvarBuf ) ) curPos = strlen( cvarBuf );
@@ -2505,8 +2501,8 @@ void WiredUI_Refresh( int realtime ) {
 	}
 
 	// draw focus highlight on hovered/selected item
-	if ( wired_focusItem >= 0 && wired_focusItem < menu->itemCount ) {
-		wiredItemDef_t *focus = menu->items[wired_focusItem];
+	if ( wui_focusItem >= 0 && wui_focusItem < menu->itemCount ) {
+		wiredItemDef_t *focus = menu->items[wui_focusItem];
 		if ( WiredUI_ItemCanFocus( focus ) ) {
 			float fx = focus->resolvedRect.x;
 			float fy = focus->resolvedRect.y - scrollY;
@@ -2515,9 +2511,9 @@ void WiredUI_Refresh( int realtime ) {
 			// don't draw focus highlight outside clip area
 			if ( fy + fh < clipTop || fy > clipBottom ) goto skip_focus;
 			// TA-style: gradient bar behind focused item, or solid fill as fallback
-			if ( wired_gradientBarShader ) {
+			if ( wui_gradientBarShader ) {
 				re.SetColor( menu->focuscolor );
-				WUI_DrawPic( fx, fy, fw, fh, wired_gradientBarShader );
+				WUI_DrawPic( fx, fy, fw, fh, wui_gradientBarShader );
 				re.SetColor( NULL );
 			} else {
 				WUI_FillRect( fx, fy, fw, fh, menu->focuscolor );
@@ -2548,12 +2544,12 @@ skip_focus:
 	// draw tooltip for mouse-hovered item only (ET:Legacy + QL)
 	// keyboard focus does NOT show tooltips — they anchor to the cursor
 	// tooltip only appears after WIRED_TOOLTIP_DELAY_MS of continuous hover
-	if ( wired_focusFromMouse && wired_focusItem >= 0 && wired_focusItem < menu->itemCount ) {
-		wiredItemDef_t *focus = menu->items[wired_focusItem];
-		if ( focus->tooltip[0] && wired_tooltipStartTime > 0 &&
-		     ( realtime - wired_tooltipStartTime ) >= WIRED_TOOLTIP_DELAY_MS ) {
-			float tx = wired_cursorX + 16;
-			float ty = wired_cursorY + 16;
+	if ( wui_focusFromMouse && wui_focusItem >= 0 && wui_focusItem < menu->itemCount ) {
+		wiredItemDef_t *focus = menu->items[wui_focusItem];
+		if ( focus->tooltip[0] && wui_tooltipStartTime > 0 &&
+		     ( realtime - wui_tooltipStartTime ) >= WIRED_TOOLTIP_DELAY_MS ) {
+			float tx = wui_cursorX + 16;
+			float ty = wui_cursorY + 16;
 			float tw = strlen( focus->tooltip ) * 8.0f + 8;
 			float th = 16.0f;
 			vec4_t tipBg = { 0.0f, 0.0f, 0.0f, 0.85f };
@@ -2561,7 +2557,7 @@ skip_focus:
 
 			// keep tooltip on screen
 			if ( tx + tw > (float)cls.glconfig.vidWidth ) tx = (float)cls.glconfig.vidWidth - tw;
-			if ( ty + th > (float)cls.glconfig.vidHeight ) ty = wired_cursorY - th - 4;
+			if ( ty + th > (float)cls.glconfig.vidHeight ) ty = wui_cursorY - th - 4;
 
 			WUI_FillRect( tx, ty, tw, th, tipBg );
 			Text_Draw( focus->tooltip, (float)(tx + 4), (float)(ty + 4), FONT_UI, 8.0f, tipFg, TEXT_ALIGN_LEFT, 0 );
@@ -2613,15 +2609,15 @@ skip_focus:
 
 	if ( Key_GetCatcher() & KEYCATCH_UI ) {
 		vec4_t cursorTint = { 0.85f, 0.55f, 0.1f, 1.0f };
-		if ( wired_cursorShader ) {
+		if ( wui_cursorShader ) {
 			re.SetColor( cursorTint );
-			WUI_DrawPic( wired_cursorX - 16, wired_cursorY - 16, 32, 32, wired_cursorShader );
+			WUI_DrawPic( wui_cursorX - 16, wui_cursorY - 16, 32, 32, wui_cursorShader );
 			re.SetColor( NULL );
 		} else {
 			vec4_t cursorColor = { 0.85f, 0.55f, 0.1f, 1.0f };
 			re.SetColor( cursorColor );
-			WUI_FillRect( wired_cursorX - 1, wired_cursorY - 8, 2, 16, cursorColor );
-			WUI_FillRect( wired_cursorX - 8, wired_cursorY - 1, 16, 2, cursorColor );
+			WUI_FillRect( wui_cursorX - 1, wui_cursorY - 8, 2, 16, cursorColor );
+			WUI_FillRect( wui_cursorX - 8, wui_cursorY - 1, 16, 2, cursorColor );
 			re.SetColor( NULL );
 		}
 	}
@@ -2809,27 +2805,27 @@ static void WiredScript_SetFocus( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 	if ( numArgs < 1 ) return;
 	for ( i = 0; i < menu->itemCount; i++ ) {
 		if ( !Q_stricmp( menu->items[i]->name, args[0] ) ) {
-			wired_focusItem = i;
+			wui_focusItem = i;
 			break;
 		}
 	}
 }
 
-// forward declaration (non-static — also called from cl_wired_feeders.c)
+// forward declaration (non-static — also called from cl_wui_feeders.c)
 void WiredUI_UpdateMapPoolButton( void );
 
 // ── per-gametype cvar persistence ─────────────────────────────────────
 // Saves/restores scorelimit, timelimit, friendlyfire when
 // switching game types — same pattern as q3_ui's ServerOptions_Cache.
 
-int wired_lastSavedGameType = -1;
+int wui_lastSavedGameType = -1;
 
 typedef struct {
 	const char *name;
 	qboolean teamOnly;
 } wiredGameTypePersistField_t;
 
-static const wiredGameTypePersistField_t wired_gameTypePersistCvars[] = {
+static const wiredGameTypePersistField_t wui_gameTypePersistCvars[] = {
 	{ "g_scorelimit", qfalse },
 	{ "g_timelimit", qfalse },
 	{ "sv_maxclients", qfalse },
@@ -2845,7 +2841,7 @@ static const wiredGameTypePersistField_t wired_gameTypePersistCvars[] = {
 	{ NULL, qfalse }
 };
 
-static const wiredGameTypePersistField_t wired_gameTypePersistStateKeys[] = {
+static const wiredGameTypePersistField_t wui_gameTypePersistStateKeys[] = {
 	{ "ui_botCount", qfalse },
 	{ "ui_dedicated", qfalse },
 	{ NULL, qfalse }
@@ -2907,7 +2903,7 @@ static void WiredUI_SaveGameTypeSettingsFor( int gt ) {
 		return;
 	}
 
-	for ( it = wired_gameTypePersistCvars; it->name; it++ ) {
+	for ( it = wui_gameTypePersistCvars; it->name; it++ ) {
 		if ( it->teamOnly && gt < 4 ) {
 			continue;
 		}
@@ -2915,7 +2911,7 @@ static void WiredUI_SaveGameTypeSettingsFor( int gt ) {
 		WiredUI_ProfileSetString( key, Cvar_VariableString( it->name ) );
 	}
 
-	for ( it = wired_gameTypePersistStateKeys; it->name; it++ ) {
+	for ( it = wui_gameTypePersistStateKeys; it->name; it++ ) {
 		char value[128];
 		if ( it->teamOnly && gt < 4 ) {
 			continue;
@@ -2929,7 +2925,7 @@ static void WiredUI_SaveGameTypeSettingsFor( int gt ) {
 	{
 		char saveBuf[1024];
 		Com_sprintf( key, sizeof( key ), "%s_g_maprotation", prefix );
-		Cvar_VariableStringBuffer( "g_maprotation", saveBuf, sizeof( saveBuf ) );
+		WiredUI_GetMapRotation( saveBuf, sizeof( saveBuf ) );
 		WiredUI_ProfileSetString( key, saveBuf );
 	}
 }
@@ -2945,7 +2941,7 @@ static void WiredUI_LoadGameTypeSettingsFor( int gt ) {
 		return;
 	}
 
-	for ( it = wired_gameTypePersistCvars; it->name; it++ ) {
+	for ( it = wui_gameTypePersistCvars; it->name; it++ ) {
 		if ( it->teamOnly && gt < 4 ) {
 			continue;
 		}
@@ -2955,7 +2951,7 @@ static void WiredUI_LoadGameTypeSettingsFor( int gt ) {
 		}
 	}
 
-	for ( it = wired_gameTypePersistStateKeys; it->name; it++ ) {
+	for ( it = wui_gameTypePersistStateKeys; it->name; it++ ) {
 		if ( it->teamOnly && gt < 4 ) {
 			continue;
 		}
@@ -2979,15 +2975,15 @@ static void WiredUI_LoadGameTypeSettingsFor( int gt ) {
 static void WiredScript_UpdateGameType( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	int gt = WiredUI_StateGetInt( "ui_netGameType" );
 
-	if ( wired_lastSavedGameType == -1 ) {
+	if ( wui_lastSavedGameType == -1 ) {
 		// first entry — load persisted profile for this gametype (if any)
-		wired_lastSavedGameType = gt;
+		wui_lastSavedGameType = gt;
 		WiredUI_LoadGameTypeSettingsFor( gt );
-	} else if ( gt != wired_lastSavedGameType ) {
+	} else if ( gt != wui_lastSavedGameType ) {
 		// gametype changed — save old, load new
-		WiredUI_SaveGameTypeSettingsFor( wired_lastSavedGameType );
+		WiredUI_SaveGameTypeSettingsFor( wui_lastSavedGameType );
 		WiredUI_LoadGameTypeSettingsFor( gt );
-		wired_lastSavedGameType = gt;
+		wui_lastSavedGameType = gt;
 	}
 
 	WiredUI_UpdateMapPoolButton();
@@ -3004,7 +3000,7 @@ void WiredUI_UpdateMapPoolButton( void ) {
 	int count = 0;
 
 	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
-	Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+	WiredUI_GetMapRotation( rotation, sizeof( rotation ) );
 
 	p = rotation;
 	while ( *p ) {
@@ -3041,7 +3037,7 @@ static void WiredScript_ToggleMapPool( wiredMenuDef_t *menu, wiredItemDef_t *ite
 	}
 
 	Com_Printf( "WiredUI: ToggleMapPool '%s'\n", mapName );
-	Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+	WiredUI_GetMapRotation( rotation, sizeof( rotation ) );
 
 	// rebuild rotation without the selected map (or add it if not found)
 	newRotation[0] = '\0';
@@ -3152,7 +3148,7 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 	// use first map from rotation pool if set, otherwise selected map
 	{
 		char rotation[1024];
-		Cvar_VariableStringBuffer( "g_maprotation", rotation, sizeof( rotation ) );
+		WiredUI_GetMapRotation( rotation, sizeof( rotation ) );
 		if ( rotation[0] ) {
 			// extract first map from rotation for initial launch
 			int k = 0;
@@ -3737,19 +3733,19 @@ void WiredUI_PushMenu( const char *name ) {
 		return;
 	}
 
-	if ( wired_menuStackDepth >= WIRED_MENU_STACK_DEPTH ) {
+	if ( wui_menuStackDepth >= WIRED_MENU_STACK_DEPTH ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: menu stack overflow (max %d)\n", WIRED_MENU_STACK_DEPTH );
 		return;
 	}
 
-	Q_strncpyz( wired_menuStack[wired_menuStackDepth], name, sizeof( wired_menuStack[0] ) );
-	wired_menuStackDepth++;
-	wired_focusItem = -1;
-	wired_focusFromMouse = qfalse;
-	wired_tooltipStartTime = 0;
-	wired_tooltipFocusItem = -1;
+	Q_strncpyz( wui_menuStack[wui_menuStackDepth], name, sizeof( wui_menuStack[0] ) );
+	wui_menuStackDepth++;
+	wui_focusItem = -1;
+	wui_focusFromMouse = qfalse;
+	wui_tooltipStartTime = 0;
+	wui_tooltipFocusItem = -1;
 	WiredUI_CloseMultiDropdown();
-	if ( wired_sfxMenuOpen ) S_StartLocalSound( wired_sfxMenuOpen, CHAN_LOCAL_SOUND );
+	if ( wui_sfxMenuOpen ) S_StartLocalSound( wui_sfxMenuOpen, CHAN_LOCAL_SOUND );
 
 	// reset fade animation for the new menu
 	{
@@ -3770,7 +3766,7 @@ void WiredUI_PushMenu( const char *name ) {
 		}
 	}
 
-	Com_DPrintf( "WiredUI: push menu '%s' (depth %d)\n", name, wired_menuStackDepth );
+	Com_DPrintf( "WiredUI: push menu '%s' (depth %d)\n", name, wui_menuStackDepth );
 
 	// run onOpen script if present
 	{
@@ -3782,9 +3778,9 @@ void WiredUI_PushMenu( const char *name ) {
 }
 
 void WiredUI_PopMenu( void ) {
-	if ( wired_menuStackDepth <= 0 ) {
+	if ( wui_menuStackDepth <= 0 ) {
 		// nothing to pop — close UI entirely
-		wired_activeMenu = UIMENU_NONE;
+		wui_activeMenu = UIMENU_NONE;
 		Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 		Cvar_Set( "cl_paused", "0" );
 		return;
@@ -3792,57 +3788,57 @@ void WiredUI_PopMenu( void ) {
 
 	// stop cinematic on the menu being popped (before decrement)
 	{
-		wiredMenuDef_t *popped = WiredUI_FindMenu( wired_menuStack[wired_menuStackDepth - 1] );
+		wiredMenuDef_t *popped = WiredUI_FindMenu( wui_menuStack[wui_menuStackDepth - 1] );
 		if ( popped && popped->cinematicHandle >= 0 ) {
 			CIN_StopCinematic( popped->cinematicHandle );
 			popped->cinematicHandle = -1;
 		}
 	}
 
-	wired_menuStackDepth--;
-	wired_focusItem = -1;
-	wired_focusFromMouse = qfalse;
-	wired_tooltipStartTime = 0;
-	wired_tooltipFocusItem = -1;
+	wui_menuStackDepth--;
+	wui_focusItem = -1;
+	wui_focusFromMouse = qfalse;
+	wui_tooltipStartTime = 0;
+	wui_tooltipFocusItem = -1;
 	WiredUI_CloseMultiDropdown();
-	if ( wired_sfxMenuClose ) S_StartLocalSound( wired_sfxMenuClose, CHAN_LOCAL_SOUND );
+	if ( wui_sfxMenuClose ) S_StartLocalSound( wui_sfxMenuClose, CHAN_LOCAL_SOUND );
 
-	if ( wired_menuStackDepth <= 0 ) {
+	if ( wui_menuStackDepth <= 0 ) {
 		// stack empty — return to root menu behavior
-		if ( wired_activeMenu == UIMENU_INGAME ) {
+		if ( wui_activeMenu == UIMENU_INGAME ) {
 			// close in-game menu entirely
-			wired_activeMenu = UIMENU_NONE;
+			wui_activeMenu = UIMENU_NONE;
 			Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 			Cvar_Set( "cl_paused", "0" );
 		}
 		// for UIMENU_MAIN, the root stays visible (can't close the main menu)
 	}
 
-	Com_DPrintf( "WiredUI: pop menu (depth %d)\n", wired_menuStackDepth );
+	Com_DPrintf( "WiredUI: pop menu (depth %d)\n", wui_menuStackDepth );
 }
 
 void WiredUI_CloseAllMenus( void ) {
 	int i;
 	// stop all active cinematics on the stack
-	for ( i = 0; i < wired_menuStackDepth; i++ ) {
-		wiredMenuDef_t *m = WiredUI_FindMenu( wired_menuStack[i] );
+	for ( i = 0; i < wui_menuStackDepth; i++ ) {
+		wiredMenuDef_t *m = WiredUI_FindMenu( wui_menuStack[i] );
 		if ( m && m->cinematicHandle >= 0 ) {
 			CIN_StopCinematic( m->cinematicHandle );
 			m->cinematicHandle = -1;
 		}
 	}
-	wired_menuStackDepth = 0;
-	wired_focusItem = -1;
-	wired_tooltipStartTime = 0;
-	wired_tooltipFocusItem = -1;
-	wired_activeMenu = UIMENU_NONE;
+	wui_menuStackDepth = 0;
+	wui_focusItem = -1;
+	wui_tooltipStartTime = 0;
+	wui_tooltipFocusItem = -1;
+	wui_activeMenu = UIMENU_NONE;
 	WiredUI_CloseMultiDropdown();
-	wired_waitingForKey = qfalse;
-	wired_bindItem = NULL;
-	wired_sliderDragging = qfalse;
-	wired_sliderDragItem = NULL;
-	wired_editingField = qfalse;
-	wired_editItem = NULL;
+	wui_waitingForKey = qfalse;
+	wui_bindItem = NULL;
+	wui_sliderDragging = qfalse;
+	wui_sliderDragItem = NULL;
+	wui_editingField = qfalse;
+	wui_editItem = NULL;
 	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 	Cvar_Set( "cl_paused", "0" );
 }
@@ -3851,12 +3847,12 @@ void WiredUI_CloseAllMenus( void ) {
 
 wiredMenuDef_t *WiredUI_GetActiveMenu( void ) {
 	// if there's a menu on the stack, show that
-	if ( wired_menuStackDepth > 0 ) {
-		return WiredUI_FindMenu( wired_menuStack[wired_menuStackDepth - 1] );
+	if ( wui_menuStackDepth > 0 ) {
+		return WiredUI_FindMenu( wui_menuStack[wui_menuStackDepth - 1] );
 	}
-	// otherwise show the root menu based on wired_activeMenu
-	if ( wired_activeMenu == UIMENU_MAIN )   return WiredUI_FindMenu( "main" );
-	if ( wired_activeMenu == UIMENU_INGAME ) return WiredUI_FindMenu( "ingame" );
+	// otherwise show the root menu based on wui_activeMenu
+	if ( wui_activeMenu == UIMENU_MAIN )   return WiredUI_FindMenu( "main" );
+	if ( wui_activeMenu == UIMENU_INGAME ) return WiredUI_FindMenu( "ingame" );
 	return NULL;
 }
 
@@ -3887,8 +3883,8 @@ void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retr
 	// Dedup: if error_popup is already on top, update state in place.
 	// Without this, a rapid error storm (e.g., repeated connect-fail retries)
 	// stacks N copies of error_popup — the user dismisses one and finds another.
-	if ( wired_menuStackDepth > 0
-	     && Q_stricmp( wired_menuStack[ wired_menuStackDepth - 1 ], "error_popup" ) == 0 ) {
+	if ( wui_menuStackDepth > 0
+	     && Q_stricmp( wui_menuStack[ wui_menuStackDepth - 1 ], "error_popup" ) == 0 ) {
 		// State keys already updated above — the visible dialog will re-read them.
 		return;
 	}
@@ -3989,28 +3985,28 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 	wiredItemDef_t *focusedItem = NULL;
 	int i;
 
-	if ( !wired_initialized ) return;
+	if ( !wui_initialized ) return;
 
 	// notify attract scheduler — any key stops attract
 	if ( down ) WiredAttract_NoteInput( key );
 
 	menu = WiredUI_GetActiveMenu();
 
-	if ( wired_multiDropdownOpen && down ) {
+	if ( wui_multiDropdownOpen && down ) {
 		wiredMultiOptions_t opts;
 		float ddX, ddY, ddW, ddH, rowH;
 		int visibleRows;
-		if ( !menu || !wired_multiDropdownItem ) {
+		if ( !menu || !wui_multiDropdownItem ) {
 			WiredUI_CloseMultiDropdown();
 			return;
 		}
 
-		WiredUI_GetMultiOptions( wired_multiDropdownItem, &opts );
+		WiredUI_GetMultiOptions( wui_multiDropdownItem, &opts );
 		if ( opts.count <= 0 ) {
 			WiredUI_CloseMultiDropdown();
 			return;
 		}
-		if ( !WiredUI_GetMultiDropdownRect( menu, wired_multiDropdownItem, opts.count,
+		if ( !WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, opts.count,
 			&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
 			WiredUI_CloseMultiDropdown();
 			return;
@@ -4022,38 +4018,38 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		}
 
 		if ( key == K_MWHEELUP ) {
-			if ( wired_multiDropdownScroll > 0 ) wired_multiDropdownScroll--;
+			if ( wui_multiDropdownScroll > 0 ) wui_multiDropdownScroll--;
 			return;
 		}
 		if ( key == K_MWHEELDOWN ) {
 			int maxScroll = opts.count - visibleRows;
 			if ( maxScroll < 0 ) maxScroll = 0;
-			if ( wired_multiDropdownScroll < maxScroll ) wired_multiDropdownScroll++;
+			if ( wui_multiDropdownScroll < maxScroll ) wui_multiDropdownScroll++;
 			return;
 		}
 
 		if ( key == K_UPARROW || key == K_KP_UPARROW ) {
-			if ( wired_multiDropdownHover < 0 ) wired_multiDropdownHover = 0;
-			wired_multiDropdownHover = ( wired_multiDropdownHover - 1 + opts.count ) % opts.count;
-			if ( wired_multiDropdownHover < wired_multiDropdownScroll ) {
-				wired_multiDropdownScroll = wired_multiDropdownHover;
+			if ( wui_multiDropdownHover < 0 ) wui_multiDropdownHover = 0;
+			wui_multiDropdownHover = ( wui_multiDropdownHover - 1 + opts.count ) % opts.count;
+			if ( wui_multiDropdownHover < wui_multiDropdownScroll ) {
+				wui_multiDropdownScroll = wui_multiDropdownHover;
 			}
 			return;
 		}
 		if ( key == K_DOWNARROW || key == K_KP_DOWNARROW ) {
-			if ( wired_multiDropdownHover < 0 ) wired_multiDropdownHover = 0;
-			wired_multiDropdownHover = ( wired_multiDropdownHover + 1 ) % opts.count;
-			if ( wired_multiDropdownHover >= wired_multiDropdownScroll + visibleRows ) {
-				wired_multiDropdownScroll = wired_multiDropdownHover - visibleRows + 1;
+			if ( wui_multiDropdownHover < 0 ) wui_multiDropdownHover = 0;
+			wui_multiDropdownHover = ( wui_multiDropdownHover + 1 ) % opts.count;
+			if ( wui_multiDropdownHover >= wui_multiDropdownScroll + visibleRows ) {
+				wui_multiDropdownScroll = wui_multiDropdownHover - visibleRows + 1;
 			}
 			return;
 		}
 
 		if ( key == K_ENTER || key == K_KP_ENTER ) {
-			if ( wired_multiDropdownHover >= 0 && wired_multiDropdownHover < opts.count ) {
-				WiredUI_SetMultiOptionByIndex( wired_multiDropdownItem, &opts, wired_multiDropdownHover );
-				if ( wired_multiDropdownItem->action[0] ) {
-					WiredUI_RunScript( menu, wired_multiDropdownItem, wired_multiDropdownItem->action );
+			if ( wui_multiDropdownHover >= 0 && wui_multiDropdownHover < opts.count ) {
+				WiredUI_SetMultiOptionByIndex( wui_multiDropdownItem, &opts, wui_multiDropdownHover );
+				if ( wui_multiDropdownItem->action[0] ) {
+					WiredUI_RunScript( menu, wui_multiDropdownItem, wui_multiDropdownItem->action );
 				}
 			}
 			WiredUI_CloseMultiDropdown();
@@ -4062,26 +4058,26 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 		if ( key == K_MOUSE1 ) {
 			wiredRect_t srcRect;
-			srcRect.x = wired_multiDropdownItem->resolvedRect.x;
-			srcRect.y = wired_multiDropdownItem->resolvedRect.y - menu->scrollOffset;
-			srcRect.w = wired_multiDropdownItem->resolvedRect.w;
-			srcRect.h = wired_multiDropdownItem->resolvedRect.h;
+			srcRect.x = wui_multiDropdownItem->resolvedRect.x;
+			srcRect.y = wui_multiDropdownItem->resolvedRect.y - menu->scrollOffset;
+			srcRect.w = wui_multiDropdownItem->resolvedRect.w;
+			srcRect.h = wui_multiDropdownItem->resolvedRect.h;
 
-			if ( wired_cursorX >= ddX && wired_cursorX < ddX + ddW &&
-			     wired_cursorY >= ddY && wired_cursorY < ddY + ddH ) {
-				int row = (int)( ( wired_cursorY - ddY ) / rowH );
-				int idx = wired_multiDropdownScroll + row;
+			if ( wui_cursorX >= ddX && wui_cursorX < ddX + ddW &&
+			     wui_cursorY >= ddY && wui_cursorY < ddY + ddH ) {
+				int row = (int)( ( wui_cursorY - ddY ) / rowH );
+				int idx = wui_multiDropdownScroll + row;
 				if ( idx >= 0 && idx < opts.count ) {
-					WiredUI_SetMultiOptionByIndex( wired_multiDropdownItem, &opts, idx );
-					if ( wired_multiDropdownItem->action[0] ) {
-						WiredUI_RunScript( menu, wired_multiDropdownItem, wired_multiDropdownItem->action );
+					WiredUI_SetMultiOptionByIndex( wui_multiDropdownItem, &opts, idx );
+					if ( wui_multiDropdownItem->action[0] ) {
+						WiredUI_RunScript( menu, wui_multiDropdownItem, wui_multiDropdownItem->action );
 					}
 				}
 				WiredUI_CloseMultiDropdown();
 				return;
 			}
 
-			if ( WiredUI_PointInRect( wired_cursorX, wired_cursorY, &srcRect ) ) {
+			if ( WiredUI_PointInRect( wui_cursorX, wui_cursorY, &srcRect ) ) {
 				WiredUI_CloseMultiDropdown();
 				return;
 			}
@@ -4092,11 +4088,11 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 	}
 
 	// text field editing mode — intercepts all keys while editing
-	if ( wired_editingField && wired_editItem && down ) {
+	if ( wui_editingField && wui_editItem && down ) {
 		char buff[1024];
 		int len;
 
-			WiredUI_StateGetString( wired_editItem->cvar, buff, sizeof( buff ) );
+			WiredUI_StateGetString( wui_editItem->cvar, buff, sizeof( buff ) );
 		len = strlen( buff );
 
 		if ( key & K_CHAR_FLAG ) {
@@ -4105,43 +4101,43 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 			if ( ch == 'h' - 'a' + 1 ) {
 				// ctrl-h = backspace
-				if ( wired_editCursorPos > 0 ) {
-					memmove( &buff[wired_editCursorPos - 1], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
-					wired_editCursorPos--;
+				if ( wui_editCursorPos > 0 ) {
+					memmove( &buff[wui_editCursorPos - 1], &buff[wui_editCursorPos], len + 1 - wui_editCursorPos );
+					wui_editCursorPos--;
 				}
-				WiredUI_StateSetString( wired_editItem->cvar, buff );
+				WiredUI_StateSetString( wui_editItem->cvar, buff );
 			} else if ( ch == 'a' - 'a' + 1 ) {
 				// ctrl-a = home
-				wired_editCursorPos = 0;
+				wui_editCursorPos = 0;
 			} else if ( ch == 'e' - 'a' + 1 ) {
 				// ctrl-e = end
-				wired_editCursorPos = len;
+				wui_editCursorPos = len;
 			} else if ( ch == 'v' - 'a' + 1 ) {
 				// ctrl-v = paste from clipboard
 				char *cbd = Sys_GetClipboardData();
 				if ( cbd ) {
-					int maxC = wired_editItem->maxChars > 0 ? wired_editItem->maxChars : 255;
+					int maxC = wui_editItem->maxChars > 0 ? wui_editItem->maxChars : 255;
 					int pasteLen = strlen( cbd );
 					int space = maxC - len;
 					if ( pasteLen > space ) pasteLen = space;
 					if ( pasteLen > 0 ) {
-						memmove( &buff[wired_editCursorPos + pasteLen], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
-						Com_Memcpy( &buff[wired_editCursorPos], cbd, pasteLen );
-						wired_editCursorPos += pasteLen;
-						WiredUI_StateSetString( wired_editItem->cvar, buff );
+						memmove( &buff[wui_editCursorPos + pasteLen], &buff[wui_editCursorPos], len + 1 - wui_editCursorPos );
+						memcpy( &buff[wui_editCursorPos], cbd, pasteLen );
+						wui_editCursorPos += pasteLen;
+						WiredUI_StateSetString( wui_editItem->cvar, buff );
 					}
 					Z_Free( cbd );
 				}
 			} else if ( ch >= 32 ) {
 				// printable character — insert at cursor
-				int maxC = wired_editItem->maxChars > 0 ? wired_editItem->maxChars : 255;
-				if ( wired_editItem->type == ITEM_TYPE_NUMERICFIELD && ( ch < '0' || ch > '9' ) && ch != '.' && ch != '-' ) {
+				int maxC = wui_editItem->maxChars > 0 ? wui_editItem->maxChars : 255;
+				if ( wui_editItem->type == ITEM_TYPE_NUMERICFIELD && ( ch < '0' || ch > '9' ) && ch != '.' && ch != '-' ) {
 					// reject non-numeric
 				} else if ( len < maxC ) {
-					memmove( &buff[wired_editCursorPos + 1], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
-					buff[wired_editCursorPos] = ch;
-					wired_editCursorPos++;
-					WiredUI_StateSetString( wired_editItem->cvar, buff );
+					memmove( &buff[wui_editCursorPos + 1], &buff[wui_editCursorPos], len + 1 - wui_editCursorPos );
+					buff[wui_editCursorPos] = ch;
+					wui_editCursorPos++;
+					WiredUI_StateSetString( wui_editItem->cvar, buff );
 				}
 			}
 			return;
@@ -4150,64 +4146,64 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		// non-character keys
 		switch ( key ) {
 			case K_ESCAPE:
-				wired_editingField = qfalse;
-				wired_editItem = NULL;
+				wui_editingField = qfalse;
+				wui_editItem = NULL;
 				return;
 
 			case K_ENTER:
 			case K_KP_ENTER:
-				wired_editingField = qfalse;
-				wired_editItem = NULL;
+				wui_editingField = qfalse;
+				wui_editItem = NULL;
 				return;
 
 			case K_TAB:
-				wired_editingField = qfalse;
-				wired_editItem = NULL;
+				wui_editingField = qfalse;
+				wui_editItem = NULL;
 				// fall through to normal key handling for focus change
 				break;
 
 			case K_BACKSPACE:
-				if ( keys[K_CTRL].down && wired_editCursorPos > 0 ) {
+				if ( keys[K_CTRL].down && wui_editCursorPos > 0 ) {
 					// ctrl+backspace: delete previous word
-					int pos = wired_editCursorPos;
+					int pos = wui_editCursorPos;
 					while ( pos > 0 && buff[pos - 1] == ' ' ) pos--;
 					while ( pos > 0 && buff[pos - 1] != ' ' ) pos--;
-					memmove( &buff[pos], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
-					wired_editCursorPos = pos;
-					WiredUI_StateSetString( wired_editItem->cvar, buff );
-				} else if ( wired_editCursorPos > 0 ) {
-					memmove( &buff[wired_editCursorPos - 1], &buff[wired_editCursorPos], len + 1 - wired_editCursorPos );
-					wired_editCursorPos--;
-					WiredUI_StateSetString( wired_editItem->cvar, buff );
+					memmove( &buff[pos], &buff[wui_editCursorPos], len + 1 - wui_editCursorPos );
+					wui_editCursorPos = pos;
+					WiredUI_StateSetString( wui_editItem->cvar, buff );
+				} else if ( wui_editCursorPos > 0 ) {
+					memmove( &buff[wui_editCursorPos - 1], &buff[wui_editCursorPos], len + 1 - wui_editCursorPos );
+					wui_editCursorPos--;
+					WiredUI_StateSetString( wui_editItem->cvar, buff );
 				}
 				return;
 
 			case K_DEL:
 			case K_KP_DEL:
-				if ( wired_editCursorPos < len ) {
-					memmove( &buff[wired_editCursorPos], &buff[wired_editCursorPos + 1], len - wired_editCursorPos );
-					WiredUI_StateSetString( wired_editItem->cvar, buff );
+				if ( wui_editCursorPos < len ) {
+					memmove( &buff[wui_editCursorPos], &buff[wui_editCursorPos + 1], len - wui_editCursorPos );
+					WiredUI_StateSetString( wui_editItem->cvar, buff );
 				}
 				return;
 
 			case K_LEFTARROW:
 			case K_KP_LEFTARROW:
-				if ( wired_editCursorPos > 0 ) wired_editCursorPos--;
+				if ( wui_editCursorPos > 0 ) wui_editCursorPos--;
 				return;
 
 			case K_RIGHTARROW:
 			case K_KP_RIGHTARROW:
-				if ( wired_editCursorPos < len ) wired_editCursorPos++;
+				if ( wui_editCursorPos < len ) wui_editCursorPos++;
 				return;
 
 			case K_HOME:
 			case K_KP_HOME:
-				wired_editCursorPos = 0;
+				wui_editCursorPos = 0;
 				return;
 
 			case K_END:
 			case K_KP_END:
-				wired_editCursorPos = len;
+				wui_editCursorPos = len;
 				return;
 
 			default:
@@ -4216,53 +4212,53 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 	}
 
 	// key binding capture mode — waiting for user to press a key
-	if ( wired_waitingForKey && down ) {
+	if ( wui_waitingForKey && down ) {
 		if ( key == K_ESCAPE ) {
 			// cancel binding
-			wired_waitingForKey = qfalse;
-			wired_bindItem = NULL;
+			wui_waitingForKey = qfalse;
+			wui_bindItem = NULL;
 		} else if ( key == K_BACKSPACE || key == K_DEL ) {
 			// clear all bindings for this command
-			if ( wired_bindItem && wired_bindItem->cvar[0] ) {
+			if ( wui_bindItem && wui_bindItem->cvar[0] ) {
 				int k;
 				for ( k = 0; k < MAX_KEYS; k++ ) {
 					const char *b = Key_GetBinding( k );
-					if ( b && !Q_stricmp( b, wired_bindItem->cvar ) ) {
+					if ( b && !Q_stricmp( b, wui_bindItem->cvar ) ) {
 						Key_SetBinding( k, "" );
 					}
 				}
 			}
-			wired_waitingForKey = qfalse;
-			wired_bindItem = NULL;
-		} else if ( wired_bindItem && wired_bindItem->cvar[0] ) {
+			wui_waitingForKey = qfalse;
+			wui_bindItem = NULL;
+		} else if ( wui_bindItem && wui_bindItem->cvar[0] ) {
 			// remove this key from any OTHER command (conflict resolution)
 			{
 				const char *existing = Key_GetBinding( key );
-				if ( existing && existing[0] && Q_stricmp( existing, wired_bindItem->cvar ) ) {
+				if ( existing && existing[0] && Q_stricmp( existing, wui_bindItem->cvar ) ) {
 					Key_SetBinding( key, "" );
 				}
 			}
 			// bind the key to this command
-			Key_SetBinding( key, wired_bindItem->cvar );
-			wired_waitingForKey = qfalse;
-			wired_bindItem = NULL;
+			Key_SetBinding( key, wui_bindItem->cvar );
+			wui_waitingForKey = qfalse;
+			wui_bindItem = NULL;
 		}
 		return;
 	}
 
 	if ( !menu ) return;
 
-	if ( wired_focusItem >= 0 && wired_focusItem < menu->itemCount ) {
-		focusedItem = menu->items[wired_focusItem];
+	if ( wui_focusItem >= 0 && wui_focusItem < menu->itemCount ) {
+		focusedItem = menu->items[wui_focusItem];
 		if ( !WiredUI_ItemCanFocus( focusedItem ) ) {
 			focusedItem = NULL;
 		}
 	}
 
 	// slider drag: release mouse button ends drag
-	if ( !down && ( key == K_MOUSE1 ) && wired_sliderDragging ) {
-		wired_sliderDragging = qfalse;
-		wired_sliderDragItem = NULL;
+	if ( !down && ( key == K_MOUSE1 ) && wui_sliderDragging ) {
+		wui_sliderDragging = qfalse;
+		wui_sliderDragItem = NULL;
 	}
 
 	// only process key-down for most actions
@@ -4318,11 +4314,11 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			if ( ( focusedItem->type == ITEM_TYPE_EDITFIELD || focusedItem->type == ITEM_TYPE_NUMERICFIELD )
 			     && focusedItem->cvar[0] ) {
 				char buf[256];
-				wired_editingField = qtrue;
-				wired_editItem = focusedItem;
+				wui_editingField = qtrue;
+				wui_editItem = focusedItem;
 				WiredUI_StateGetString( focusedItem->cvar, buf, sizeof( buf ) );
-				wired_editCursorPos = strlen( buf );
-				wired_editPaintOffset = 0;
+				wui_editCursorPos = strlen( buf );
+				wui_editPaintOffset = 0;
 				break;
 			}
 
@@ -4332,7 +4328,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				float menuOY = menu->fullscreen ? 0 : menu->rect.y;
 				float scrollOff = menu->scrollOffset;
 				float listAbsY = menuOY + focusedItem->rect.y - scrollOff;
-				int clickedRow = (int)( ( wired_cursorY - listAbsY ) / rowH ) + focusedItem->listScrollOffset;
+				int clickedRow = (int)( ( wui_cursorY - listAbsY ) / rowH ) + focusedItem->listScrollOffset;
 				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
 
 				if ( clickedRow >= 0 && clickedRow < total ) {
@@ -4341,19 +4337,19 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 					// double-click detection: same row + same feeder within threshold
 					if ( focusedItem->doubleClick[0] &&
-					     clickedRow == wired_lastClickRow &&
-					     focusedItem->feeder == wired_lastClickFeeder &&
-					     ( cls.realtime - wired_lastClickTime ) < WIRED_DOUBLECLICK_TIME ) {
+					     clickedRow == wui_lastClickRow &&
+					     focusedItem->feeder == wui_lastClickFeeder &&
+					     ( cls.realtime - wui_lastClickTime ) < WIRED_DOUBLECLICK_TIME ) {
 						WiredUI_RunScript( menu, focusedItem, focusedItem->doubleClick );
-						wired_lastClickTime = 0;  // consumed
+						wui_lastClickTime = 0;  // consumed
 					} else {
-						wired_lastClickTime = cls.realtime;
-						wired_lastClickRow = clickedRow;
-						wired_lastClickFeeder = focusedItem->feeder;
+						wui_lastClickTime = cls.realtime;
+						wui_lastClickRow = clickedRow;
+						wui_lastClickFeeder = focusedItem->feeder;
 					}
 				}
 				if ( focusedItem->action[0] && ( key == K_MOUSE1 || key == K_ENTER || key == K_KP_ENTER ) ) {
-					if ( wired_sfxAction ) S_StartLocalSound( wired_sfxAction, CHAN_LOCAL_SOUND );
+					if ( wui_sfxAction ) S_StartLocalSound( wui_sfxAction, CHAN_LOCAL_SOUND );
 					WiredUI_RunScript( menu, focusedItem, focusedItem->action );
 				}
 				break;
@@ -4361,8 +4357,8 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 			// BIND items: start key capture mode
 			if ( focusedItem->type == ITEM_TYPE_BIND && focusedItem->cvar[0] ) {
-				wired_waitingForKey = qtrue;
-				wired_bindItem = focusedItem;
+				wui_waitingForKey = qtrue;
+				wui_bindItem = focusedItem;
 				break;
 			}
 
@@ -4393,12 +4389,12 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 							WiredUI_GetMultiOptions( focusedItem, &opts );
 							if ( opts.count > 0 ) {
 							WiredUI_StateGetString( focusedItem->cvar, curBuf, sizeof( curBuf ) );
-								wired_multiDropdownOpen = qtrue;
-								wired_multiDropdownItem = focusedItem;
-								wired_multiDropdownHover = WiredUI_FindMultiOptionIndex( focusedItem, &opts, curBuf );
-								if ( wired_multiDropdownHover < 0 ) wired_multiDropdownHover = 0;
-								wired_multiDropdownScroll = wired_multiDropdownHover - 4;
-								if ( wired_multiDropdownScroll < 0 ) wired_multiDropdownScroll = 0;
+								wui_multiDropdownOpen = qtrue;
+								wui_multiDropdownItem = focusedItem;
+								wui_multiDropdownHover = WiredUI_FindMultiOptionIndex( focusedItem, &opts, curBuf );
+								if ( wui_multiDropdownHover < 0 ) wui_multiDropdownHover = 0;
+								wui_multiDropdownScroll = wui_multiDropdownHover - 4;
+								if ( wui_multiDropdownScroll < 0 ) wui_multiDropdownScroll = 0;
 								openedDropdown = qtrue;
 							}
 						}
@@ -4412,10 +4408,10 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 							float barX = absItemX + focusedItem->rect.w * 0.5f;
 							float barW = focusedItem->rect.w * 0.45f;
 							float range = focusedItem->sliderData.maxVal - focusedItem->sliderData.minVal;
-							wired_sliderDragging = qtrue;
-							wired_sliderDragItem = focusedItem;
+							wui_sliderDragging = qtrue;
+							wui_sliderDragItem = focusedItem;
 							if ( barW > 0 && range > 0 ) {
-								float frac = ( wired_cursorX - barX ) / barW;
+								float frac = ( wui_cursorX - barX ) / barW;
 								if ( frac < 0 ) frac = 0;
 								if ( frac > 1 ) frac = 1;
 							WiredUI_StateSetString( focusedItem->cvar, va( "%g", focusedItem->sliderData.minVal + frac * range ) );
@@ -4529,7 +4525,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				else if ( focusedItem->type == ITEM_TYPE_MULTI ) {
 					wiredMultiOptions_t opts;
 					int cur, next;
-					if ( wired_multiDropdownOpen ) {
+					if ( wui_multiDropdownOpen ) {
 						break;
 					}
 					WiredUI_GetMultiOptions( focusedItem, &opts );
@@ -4551,13 +4547,13 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_UPARROW:
 		case K_KP_UPARROW:
 			{
-				int start = ( wired_focusItem > 0 ) ? wired_focusItem - 1 : menu->itemCount - 1;
+				int start = ( wui_focusItem > 0 ) ? wui_focusItem - 1 : menu->itemCount - 1;
 				for ( i = 0; i < menu->itemCount; i++ ) {
 					int idx = ( start - i + menu->itemCount ) % menu->itemCount;
 					if ( WiredUI_ItemCanFocus( menu->items[idx] ) ) {
-						wired_focusItem = idx;
-						wired_focusFromMouse = qfalse;
-						if ( wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
+						wui_focusItem = idx;
+						wui_focusFromMouse = qfalse;
+						if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
 						break;
 					}
 				}
@@ -4568,13 +4564,13 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_DOWNARROW:
 		case K_KP_DOWNARROW:
 			{
-				int start = wired_focusItem + 1;
+				int start = wui_focusItem + 1;
 				for ( i = 0; i < menu->itemCount; i++ ) {
 					int idx = ( start + i ) % menu->itemCount;
 					if ( WiredUI_ItemCanFocus( menu->items[idx] ) ) {
-						wired_focusItem = idx;
-						wired_focusFromMouse = qfalse;
-						if ( wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
+						wui_focusItem = idx;
+						wui_focusFromMouse = qfalse;
+						if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
 						break;
 					}
 				}
@@ -4591,35 +4587,35 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 	wiredMenuDef_t *menu;
 	int oldFocus, newFocus;
 
-	if ( !wired_initialized ) return;
+	if ( !wui_initialized ) return;
 
 	// notify attract scheduler — significant mouse movement stops attract
 	WiredAttract_NoteMouse( dx, dy );
 
 	// accumulate deltas into cursor position (real screen pixels)
-	wired_cursorX += dx;
-	if ( wired_cursorX < 0 ) wired_cursorX = 0;
-	else if ( wired_cursorX > (float)cls.glconfig.vidWidth ) wired_cursorX = (float)cls.glconfig.vidWidth;
+	wui_cursorX += dx;
+	if ( wui_cursorX < 0 ) wui_cursorX = 0;
+	else if ( wui_cursorX > (float)cls.glconfig.vidWidth ) wui_cursorX = (float)cls.glconfig.vidWidth;
 
-	wired_cursorY += dy;
-	if ( wired_cursorY < 0 ) wired_cursorY = 0;
-	else if ( wired_cursorY > (float)cls.glconfig.vidHeight ) wired_cursorY = (float)cls.glconfig.vidHeight;
+	wui_cursorY += dy;
+	if ( wui_cursorY < 0 ) wui_cursorY = 0;
+	else if ( wui_cursorY > (float)cls.glconfig.vidHeight ) wui_cursorY = (float)cls.glconfig.vidHeight;
 
 	// slider drag: continuously update cvar while mouse1 is held
-	if ( wired_sliderDragging && wired_sliderDragItem && wired_sliderDragItem->cvar[0] ) {
+	if ( wui_sliderDragging && wui_sliderDragItem && wui_sliderDragItem->cvar[0] ) {
 		wiredMenuDef_t *dragMenu = WiredUI_GetActiveMenu();
 		if ( dragMenu ) {
 			float menuOX = dragMenu->fullscreen ? 0 : dragMenu->rect.x;
-			float absItemX = menuOX + wired_sliderDragItem->rect.x;
-			float barX = absItemX + wired_sliderDragItem->rect.w * 0.5f;
-			float barW = wired_sliderDragItem->rect.w * 0.45f;
-			float range = wired_sliderDragItem->sliderData.maxVal - wired_sliderDragItem->sliderData.minVal;
+			float absItemX = menuOX + wui_sliderDragItem->rect.x;
+			float barX = absItemX + wui_sliderDragItem->rect.w * 0.5f;
+			float barW = wui_sliderDragItem->rect.w * 0.45f;
+			float range = wui_sliderDragItem->sliderData.maxVal - wui_sliderDragItem->sliderData.minVal;
 			if ( barW > 0 && range > 0 ) {
-				float frac = ( wired_cursorX - barX ) / barW;
+				float frac = ( wui_cursorX - barX ) / barW;
 				if ( frac < 0 ) frac = 0;
 				if ( frac > 1 ) frac = 1;
-				WiredUI_StateSetString( wired_sliderDragItem->cvar,
-					va( "%g", wired_sliderDragItem->sliderData.minVal + frac * range ) );
+				WiredUI_StateSetString( wui_sliderDragItem->cvar,
+					va( "%g", wui_sliderDragItem->sliderData.minVal + frac * range ) );
 			}
 		}
 		return; // don't change focus while dragging
@@ -4628,36 +4624,36 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 	menu = WiredUI_GetActiveMenu();
 	if ( !menu ) return;
 
-	if ( wired_multiDropdownOpen && wired_multiDropdownItem ) {
+	if ( wui_multiDropdownOpen && wui_multiDropdownItem ) {
 		wiredMultiOptions_t opts;
 		float ddX, ddY, ddW, ddH, rowH;
 		int visibleRows;
-		WiredUI_GetMultiOptions( wired_multiDropdownItem, &opts );
+		WiredUI_GetMultiOptions( wui_multiDropdownItem, &opts );
 		if ( opts.count <= 0 ) {
 			WiredUI_CloseMultiDropdown();
-		} else if ( WiredUI_GetMultiDropdownRect( menu, wired_multiDropdownItem, opts.count,
+		} else if ( WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, opts.count,
 			&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
-			if ( wired_cursorX >= ddX && wired_cursorX < ddX + ddW &&
-			     wired_cursorY >= ddY && wired_cursorY < ddY + ddH ) {
-				int row = (int)( ( wired_cursorY - ddY ) / rowH );
-				int idx = wired_multiDropdownScroll + row;
+			if ( wui_cursorX >= ddX && wui_cursorX < ddX + ddW &&
+			     wui_cursorY >= ddY && wui_cursorY < ddY + ddH ) {
+				int row = (int)( ( wui_cursorY - ddY ) / rowH );
+				int idx = wui_multiDropdownScroll + row;
 				if ( idx >= 0 && idx < opts.count ) {
-					wired_multiDropdownHover = idx;
+					wui_multiDropdownHover = idx;
 				}
 			} else {
-				wired_multiDropdownHover = -1;
+				wui_multiDropdownHover = -1;
 			}
 		}
 	}
 
-	oldFocus = wired_focusItem;
-	newFocus = WiredUI_FindItemAtCursor( menu, wired_cursorX, wired_cursorY );
+	oldFocus = wui_focusItem;
+	newFocus = WiredUI_FindItemAtCursor( menu, wui_cursorX, wui_cursorY );
 	if ( newFocus >= 0 && newFocus < menu->itemCount && !WiredUI_ItemCanFocus( menu->items[newFocus] ) ) {
 		newFocus = -1;
 	}
 
 	// any mouse movement reactivates mouse-based focus
-	wired_focusFromMouse = ( newFocus >= 0 );
+	wui_focusFromMouse = ( newFocus >= 0 );
 
 	// fire mouseExit on old item, mouseEnter on new item
 	if ( newFocus != oldFocus ) {
@@ -4681,28 +4677,28 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 			}
 			// start tooltip delay timer if new item has a tooltip
 			if ( cur->tooltip[0] ) {
-				wired_tooltipStartTime = cls.realtime;
-				wired_tooltipFocusItem = newFocus;
+				wui_tooltipStartTime = cls.realtime;
+				wui_tooltipFocusItem = newFocus;
 			} else {
-				wired_tooltipStartTime = 0;
-				wired_tooltipFocusItem = -1;
+				wui_tooltipStartTime = 0;
+				wui_tooltipFocusItem = -1;
 			}
 		} else {
 			// cursor left all items — clear tooltip state
-			wired_tooltipStartTime = 0;
-			wired_tooltipFocusItem = -1;
+			wui_tooltipStartTime = 0;
+			wui_tooltipFocusItem = -1;
 		}
-		wired_focusItem = newFocus;
-		if ( newFocus >= 0 && wired_sfxFocus ) S_StartLocalSound( wired_sfxFocus, CHAN_LOCAL_SOUND );
+		wui_focusItem = newFocus;
+		if ( newFocus >= 0 && wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
 	}
 }
 
 void WiredUI_SetActiveMenu( int menu ) {
-	if ( !wired_initialized ) {
+	if ( !wui_initialized ) {
 		return;
 	}
 
-	wired_activeMenu = menu;
+	wui_activeMenu = menu;
 	if ( menu == UIMENU_NONE ) {
 		WiredUI_CloseMultiDropdown();
 	}
@@ -4728,13 +4724,13 @@ void WiredUI_SetActiveMenu( int menu ) {
 }
 
 qboolean WiredUI_IsFullscreen( void ) {
-	if ( !wired_initialized ) {
+	if ( !wui_initialized ) {
 		return qfalse;
 	}
 
 	// main menu is always "fullscreen" for the engine — prevents 3D scene rendering
 	// at CA_DISCONNECTED. Wired UI draws its own background (clouds) in Refresh.
-	return ( wired_activeMenu == UIMENU_MAIN );
+	return ( wui_activeMenu == UIMENU_MAIN );
 }
 
 void WiredUI_DrawConnectScreen( qboolean overlay ) {
@@ -4746,7 +4742,7 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 	vec4_t			dim   = { 0.6f, 0.6f, 0.6f, 1 };
 	float			y;
 
-	if ( !wired_initialized ) {
+	if ( !wui_initialized ) {
 		return;
 	}
 
@@ -5113,8 +5109,8 @@ void WiredUI_ReloadMenus( void ) {
 	// stop all cinematics before reload
 	{
 		int i;
-		for ( i = 0; i < wired_menuStackDepth; i++ ) {
-			wiredMenuDef_t *m = WiredUI_FindMenu( wired_menuStack[i] );
+		for ( i = 0; i < wui_menuStackDepth; i++ ) {
+			wiredMenuDef_t *m = WiredUI_FindMenu( wui_menuStack[i] );
 			if ( m && m->cinematicHandle >= 0 ) {
 				CIN_StopCinematic( m->cinematicHandle );
 				m->cinematicHandle = -1;
@@ -5124,13 +5120,13 @@ void WiredUI_ReloadMenus( void ) {
 
 	// save current menu name for re-open after reload
 	char currentMenu[64] = {0};
-	if ( wired_menuStackDepth > 0 ) {
-		Q_strncpyz( currentMenu, wired_menuStack[wired_menuStackDepth - 1], sizeof( currentMenu ) );
+	if ( wui_menuStackDepth > 0 ) {
+		Q_strncpyz( currentMenu, wui_menuStack[wui_menuStackDepth - 1], sizeof( currentMenu ) );
 	}
-	wired_menuStackDepth = 0;
-	wired_focusItem = -1;
-	wired_tooltipStartTime = 0;
-	wired_tooltipFocusItem = -1;
+	wui_menuStackDepth = 0;
+	wui_focusItem = -1;
+	wui_tooltipStartTime = 0;
+	wui_tooltipFocusItem = -1;
 
 	// destroy HUD elements (they'll be recreated after reload)
 	WiredHud_DestroyAllElements();

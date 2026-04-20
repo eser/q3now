@@ -280,7 +280,7 @@ SV_AllocClients
 static void SV_AllocClients( int count )
 {
 	svs.clients = Z_TagMalloc( count * sizeof( client_t ), TAG_CLIENTS );
-	Com_Memset( svs.clients, 0x0, count * sizeof( client_t ) );
+	memset( svs.clients, 0x0, count * sizeof( client_t ) );
 	sv.maxclients = count;
 	SV_SetSnapshotParams();
 }
@@ -359,7 +359,7 @@ static void SV_ChangeMaxClients( void ) {
 		if ( svs.clients[i].state >= CS_CONNECTED ) {
 			oldClients[i] = svs.clients[i];
 		} else {
-			Com_Memset(&oldClients[i], 0, sizeof(client_t));
+			memset(&oldClients[i], 0, sizeof(client_t));
 		}
 	}
 
@@ -397,10 +397,10 @@ static void SV_ClearServer( void ) {
 
 	if ( !sv_levelTimeReset->integer ) {
 		i = sv.time;
-		Com_Memset( &sv, 0, sizeof( sv ) );
+		memset( &sv, 0, sizeof( sv ) );
 		sv.time = i;
 	} else {
-		Com_Memset( &sv, 0, sizeof( sv ) );
+		memset( &sv, 0, sizeof( sv ) );
 	}
 }
 
@@ -857,7 +857,7 @@ void SV_Init( void )
 	// force initial check
 	SV_TrackCvarChanges();
 
-	Com_Memset( svs.rconSessions, 0, sizeof( svs.rconSessions ) );
+	memset( svs.rconSessions, 0, sizeof( svs.rconSessions ) );
 	SV_RconLua_Init();
 	SV_Lua_Init();
 
@@ -953,7 +953,7 @@ void SV_Shutdown( const char *finalmsg ) {
 
 		Z_Free( svs.clients );
 	}
-	Com_Memset( &svs, 0, sizeof( svs ) );
+	memset( &svs, 0, sizeof( svs ) );
 	sv.time = 0;
 
 	Cvar_Set( "sv_running", "0" );

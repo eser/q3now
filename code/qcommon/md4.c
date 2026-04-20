@@ -141,8 +141,8 @@ static void mdfour_tail(const byte *in, int n)
 
 	b = m->totalN * 8;
 
-	Com_Memset(buf, 0, 128);
-	if (n) Com_Memcpy(buf, in, n);
+	memset(buf, 0, 128);
+	if (n) memcpy(buf, in, n);
 	buf[n] = 0x80;
 
 	if (n <= 55) {

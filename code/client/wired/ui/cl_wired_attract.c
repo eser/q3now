@@ -42,7 +42,7 @@ static struct {
 	cvar_t               *cvEnabled;
 	cvar_t               *cvDelay;
 	cvar_t               *cvVolume;
-} s_attract;
+} wui_attract;
 
 /* ── forward declarations ────────────────────────────────────────────── */
 static void Attract_Teardown( void );
@@ -85,46 +85,46 @@ static qboolean Attract_ValidateSource( int kind, const char *src ) {
 
 /* ── teardown current item without advancing ─────────────────────────── */
 static void Attract_Teardown( void ) {
-	if ( s_attract.state == ATTRACT_STATE_IDLE ||
-	     s_attract.state == ATTRACT_STATE_WAITING ||
-	     s_attract.state == ATTRACT_STATE_STOPPED ) {
+	if ( wui_attract.state == ATTRACT_STATE_IDLE ||
+	     wui_attract.state == ATTRACT_STATE_WAITING ||
+	     wui_attract.state == ATTRACT_STATE_STOPPED ) {
 		return;
 	}
 
-	if ( s_attract.playlistCount == 0 ) return;
+	if ( wui_attract.playlistCount == 0 ) return;
 
 	{
-		int idx = s_attract.currentIndex;
-		if ( idx >= 0 && idx < s_attract.playlistCount ) {
-			wiredAttractItem_t *item = &s_attract.playlist[idx];
+		int idx = wui_attract.currentIndex;
+		if ( idx >= 0 && idx < wui_attract.playlistCount ) {
+			wiredAttractItem_t *item = &wui_attract.playlist[idx];
 
 			switch ( item->kind ) {
 			case ATTRACT_ITEM_PANEL:
-				if ( s_attract.pushedPanel[0] != '\0' ) {
+				if ( wui_attract.pushedPanel[0] != '\0' ) {
 					/* Only pop if our panel is still top of stack */
 					if ( WiredUI_GetMenuStackDepth() > 0 &&
-					     Q_stricmp( WiredUI_GetMenuStackTop(), s_attract.pushedPanel ) == 0 ) {
+					     Q_stricmp( WiredUI_GetMenuStackTop(), wui_attract.pushedPanel ) == 0 ) {
 						WiredUI_PopMenu();
 					}
-					s_attract.pushedPanel[0] = '\0';
+					wui_attract.pushedPanel[0] = '\0';
 				}
 				break;
 
 			case ATTRACT_ITEM_DEMO:
-				if ( s_attract.ownsDemo && clc.demoplaying ) {
+				if ( wui_attract.ownsDemo && clc.demoplaying ) {
 					CL_Disconnect( qtrue );
 				}
-				s_attract.ownsDemo = qfalse;
+				wui_attract.ownsDemo = qfalse;
 				break;
 
 			case ATTRACT_ITEM_CINEMATIC:
 				/* Cinematic runs inside attract_cinematic.wmenu — pop the panel */
-				if ( s_attract.pushedPanel[0] != '\0' ) {
+				if ( wui_attract.pushedPanel[0] != '\0' ) {
 					if ( WiredUI_GetMenuStackDepth() > 0 &&
-					     Q_stricmp( WiredUI_GetMenuStackTop(), s_attract.pushedPanel ) == 0 ) {
+					     Q_stricmp( WiredUI_GetMenuStackTop(), wui_attract.pushedPanel ) == 0 ) {
 						WiredUI_PopMenu();
 					}
-					s_attract.pushedPanel[0] = '\0';
+					wui_attract.pushedPanel[0] = '\0';
 				}
 				break;
 			}
@@ -136,15 +136,15 @@ static void Attract_Teardown( void ) {
 static void Attract_DispatchCurrent( void ) {
 	wiredAttractItem_t *item;
 
-	if ( s_attract.playlistCount == 0 ) {
-		s_attract.state = ATTRACT_STATE_IDLE;
+	if ( wui_attract.playlistCount == 0 ) {
+		wui_attract.state = ATTRACT_STATE_IDLE;
 		return;
 	}
 
-	item = &s_attract.playlist[s_attract.currentIndex];
-	s_attract.itemStartTime = cls.realtime;
-	s_attract.pushedPanel[0] = '\0';
-	s_attract.ownsDemo = qfalse;
+	item = &wui_attract.playlist[wui_attract.currentIndex];
+	wui_attract.itemStartTime = cls.realtime;
+	wui_attract.pushedPanel[0] = '\0';
+	wui_attract.ownsDemo = qfalse;
 
 	switch ( item->kind ) {
 	case ATTRACT_ITEM_PANEL:
@@ -154,11 +154,11 @@ static void Attract_DispatchCurrent( void ) {
 			return;
 		}
 		WiredUI_PushMenu( item->source );
-		Q_strncpyz( s_attract.pushedPanel, item->source, sizeof( s_attract.pushedPanel ) );
+		Q_strncpyz( wui_attract.pushedPanel, item->source, sizeof( wui_attract.pushedPanel ) );
 		break;
 
 	case ATTRACT_ITEM_DEMO:
-		s_attract.ownsDemo = qtrue;
+		wui_attract.ownsDemo = qtrue;
 		/* source is already validated — safe to use in command */
 		Cbuf_ExecuteText( EXEC_NOW, va( "demo %s\n", item->source ) );
 		break;
@@ -173,7 +173,7 @@ static void Attract_DispatchCurrent( void ) {
 			return;
 		}
 		WiredUI_PushMenu( "attract_cinematic" );
-		Q_strncpyz( s_attract.pushedPanel, "attract_cinematic", sizeof( s_attract.pushedPanel ) );
+		Q_strncpyz( wui_attract.pushedPanel, "attract_cinematic", sizeof( wui_attract.pushedPanel ) );
 		break;
 
 	default:
@@ -182,27 +182,27 @@ static void Attract_DispatchCurrent( void ) {
 		return;
 	}
 
-	s_attract.state = ATTRACT_STATE_PLAYING;
+	wui_attract.state = ATTRACT_STATE_PLAYING;
 }
 
 /* ── advance to the next item, beginning a transition ────────────────── */
 static void Attract_Advance( void ) {
 	Attract_Teardown();
 
-	s_attract.currentIndex++;
-	if ( s_attract.currentIndex >= s_attract.playlistCount ) {
-		if ( s_attract.loop ) {
-			s_attract.currentIndex = 0;
+	wui_attract.currentIndex++;
+	if ( wui_attract.currentIndex >= wui_attract.playlistCount ) {
+		if ( wui_attract.loop ) {
+			wui_attract.currentIndex = 0;
 		} else {
-			s_attract.state = ATTRACT_STATE_STOPPED;
+			wui_attract.state = ATTRACT_STATE_STOPPED;
 			return;
 		}
 	}
 
 	/* Kick off transition — frame tick will draw the black fade */
-	s_attract.state = ATTRACT_STATE_TRANSITIONING;
-	s_attract.transitionStartTime = cls.realtime;
-	s_attract.transitionEndTime   = cls.realtime + s_attract.transitionMs;
+	wui_attract.state = ATTRACT_STATE_TRANSITIONING;
+	wui_attract.transitionStartTime = cls.realtime;
+	wui_attract.transitionEndTime   = cls.realtime + wui_attract.transitionMs;
 }
 
 /* ── console commands ────────────────────────────────────────────────── */
@@ -212,7 +212,7 @@ static void Attract_Skip_f( void )  { WiredAttract_Skip(); }
 
 static void Attract_Restart_f( void ) {
 	WiredAttract_Stop();
-	s_attract.currentIndex = 0;
+	wui_attract.currentIndex = 0;
 	WiredAttract_Start();
 }
 
@@ -220,28 +220,28 @@ static void Attract_Status_f( void ) {
 	static const char *stateNames[] = {
 		"IDLE", "WAITING", "STARTING", "PLAYING", "TRANSITIONING", "STOPPED"
 	};
-	int state = (int)s_attract.state;
+	int state = (int)wui_attract.state;
 	const char *stateName = ( state >= 0 && state <= 5 ) ? stateNames[state] : "?";
 
 	Com_Printf( "attract_status:\n" );
 	Com_Printf( "  state         : %s\n", stateName );
 	Com_Printf( "  playlist      : %d items (loop=%d shuffle=%d)\n",
-	            s_attract.playlistCount, s_attract.loop, s_attract.shuffle );
-	Com_Printf( "  currentIndex  : %d\n", s_attract.currentIndex );
+	            wui_attract.playlistCount, wui_attract.loop, wui_attract.shuffle );
+	Com_Printf( "  currentIndex  : %d\n", wui_attract.currentIndex );
 	Com_Printf( "  itemElapsed   : %d ms\n",
-	            s_attract.state == ATTRACT_STATE_PLAYING
-	            ? (int)( cls.realtime - s_attract.itemStartTime ) : 0 );
+	            wui_attract.state == ATTRACT_STATE_PLAYING
+	            ? (int)( cls.realtime - wui_attract.itemStartTime ) : 0 );
 	Com_Printf( "  attract_delay : %d s\n",
-	            s_attract.cvDelay ? s_attract.cvDelay->integer : 0 );
+	            wui_attract.cvDelay ? wui_attract.cvDelay->integer : 0 );
 	Com_Printf( "  attract_volume: %.2f\n",
-	            s_attract.cvVolume ? s_attract.cvVolume->value : 0.0f );
+	            wui_attract.cvVolume ? wui_attract.cvVolume->value : 0.0f );
 	Com_Printf( "  ownsDemo      : %d (demoplaying=%d)\n",
-	            s_attract.ownsDemo, clc.demoplaying );
+	            wui_attract.ownsDemo, clc.demoplaying );
 	Com_Printf( "  wiredHealthy  : %d\n", WiredUI_IsHealthy() );
 	Com_Printf( "  recoveryFail  : %d ms ago\n",
 	            WiredUI_GetLastRecoveryFailTime() != 0
 	            ? (int)( cls.realtime - WiredUI_GetLastRecoveryFailTime() ) : -1 );
-	Com_Printf( "  prevHadError  : %d\n", s_attract.prevHadError );
+	Com_Printf( "  prevHadError  : %d\n", wui_attract.prevHadError );
 	Com_Printf( "  idle-detect   : keyboard only (mouse gated on KEYCATCH_UI)\n" );
 }
 
@@ -269,43 +269,43 @@ static int AttractLua_Add( lua_State *L ) {
 		return luaL_error( L, "attract.add: invalid source '%s' for kind '%s'", src, kindStr );
 	}
 
-	if ( s_attract.playlistCount >= WIRED_ATTRACT_MAX_ITEMS ) {
+	if ( wui_attract.playlistCount >= WIRED_ATTRACT_MAX_ITEMS ) {
 		return luaL_error( L, "attract.add: playlist full (%d items)", WIRED_ATTRACT_MAX_ITEMS );
 	}
 
-	item = &s_attract.playlist[s_attract.playlistCount];
+	item = &wui_attract.playlist[wui_attract.playlistCount];
 	item->kind       = kind;
 	item->durationMs = durationMs;
 	Q_strncpyz( item->source, src, sizeof( item->source ) );
-	s_attract.playlistCount++;
+	wui_attract.playlistCount++;
 	return 0;
 }
 
 static int AttractLua_Clear( lua_State *L ) {
 	(void)L;
-	s_attract.playlistCount = 0;
-	s_attract.currentIndex  = 0;
+	wui_attract.playlistCount = 0;
+	wui_attract.currentIndex  = 0;
 	return 0;
 }
 
 static int AttractLua_SetLoop( lua_State *L ) {
-	s_attract.loop = lua_toboolean( L, 1 ) ? qtrue : qfalse;
+	wui_attract.loop = lua_toboolean( L, 1 ) ? qtrue : qfalse;
 	return 0;
 }
 
 static int AttractLua_SetShuffle( lua_State *L ) {
-	s_attract.shuffle = lua_toboolean( L, 1 ) ? qtrue : qfalse;
+	wui_attract.shuffle = lua_toboolean( L, 1 ) ? qtrue : qfalse;
 	return 0;
 }
 
 static int AttractLua_SetTransition( lua_State *L ) {
 	int ms = (int)luaL_checkinteger( L, 1 );
 	if ( ms < 0 ) ms = 0;
-	s_attract.transitionMs = ms;
+	wui_attract.transitionMs = ms;
 	return 0;
 }
 
-static const luaL_Reg s_attractLib[] = {
+static const luaL_Reg wui_attractLib[] = {
 	{ "add",            AttractLua_Add },
 	{ "clear",          AttractLua_Clear },
 	{ "set_loop",       AttractLua_SetLoop },
@@ -315,7 +315,7 @@ static const luaL_Reg s_attractLib[] = {
 };
 
 static void Attract_LuaRegister( lua_State *L ) {
-	luaL_newlib( L, s_attractLib );
+	luaL_newlib( L, wui_attractLib );
 	lua_setglobal( L, "attract" );
 }
 
@@ -331,15 +331,15 @@ void WiredAttract_LuaInit( void ) {
 }
 
 void WiredAttract_Init( void ) {
-	Com_Memset( &s_attract, 0, sizeof( s_attract ) );
+	memset( &wui_attract, 0, sizeof( wui_attract ) );
 
-	s_attract.transitionMs = 500; /* 250ms out + 250ms in */
-	s_attract.loop         = qtrue;
-	s_attract.prevClientState = cls.state;
+	wui_attract.transitionMs = 500; /* 250ms out + 250ms in */
+	wui_attract.loop         = qtrue;
+	wui_attract.prevClientState = cls.state;
 
-	s_attract.cvEnabled = Cvar_Get( "attract_enabled", "1", CVAR_ARCHIVE );
-	s_attract.cvDelay   = Cvar_Get( "attract_delay",  "30", CVAR_ARCHIVE );
-	s_attract.cvVolume  = Cvar_Get( "attract_volume", "0.5", CVAR_ARCHIVE );
+	wui_attract.cvEnabled = Cvar_Get( "attract_enabled", "1", CVAR_ARCHIVE );
+	wui_attract.cvDelay   = Cvar_Get( "attract_delay",  "30", CVAR_ARCHIVE );
+	wui_attract.cvVolume  = Cvar_Get( "attract_volume", "0.5", CVAR_ARCHIVE );
 
 	Cmd_AddCommand( "attract_start",   Attract_Start_f );
 	Cmd_AddCommand( "attract_stop",    Attract_Stop_f );
@@ -351,13 +351,13 @@ void WiredAttract_Init( void ) {
 	   CL_Init before WiredScript_PostInit).  Just exec the playlist now. */
 	WiredScript_ExecFile( "scripts/attract.lua" );
 
-	s_attract.initialized = qtrue;
+	wui_attract.initialized = qtrue;
 	Com_Printf( "WiredAttract: initialized (%d items in playlist)\n",
-	            s_attract.playlistCount );
+	            wui_attract.playlistCount );
 }
 
 void WiredAttract_Shutdown( void ) {
-	if ( !s_attract.initialized ) return;
+	if ( !wui_attract.initialized ) return;
 
 	Attract_Teardown();
 
@@ -367,7 +367,7 @@ void WiredAttract_Shutdown( void ) {
 	Cmd_RemoveCommand( "attract_restart" );
 	Cmd_RemoveCommand( "attract_status" );
 
-	s_attract.initialized = qfalse;
+	wui_attract.initialized = qfalse;
 }
 
 /* ── per-frame tick ──────────────────────────────────────────────────── */
@@ -376,37 +376,37 @@ void WiredAttract_Frame( int msec ) {
 
 	(void)msec;
 
-	if ( !s_attract.initialized ) return;
-	if ( !s_attract.cvEnabled || !s_attract.cvEnabled->integer ) return;
+	if ( !wui_attract.initialized ) return;
+	if ( !wui_attract.cvEnabled || !wui_attract.cvEnabled->integer ) return;
 
 	/* ── edge detect cls.state (connect / disconnect) ─────────────── */
-	if ( s_attract.prevClientState == CA_ACTIVE && cls.state < CA_ACTIVE ) {
+	if ( wui_attract.prevClientState == CA_ACTIVE && cls.state < CA_ACTIVE ) {
 		/* Just disconnected — start idle timer */
-		s_attract.disconnectTime = cls.realtime;
-		if ( s_attract.state != ATTRACT_STATE_STOPPED ) {
-			s_attract.state = ATTRACT_STATE_WAITING;
+		wui_attract.disconnectTime = cls.realtime;
+		if ( wui_attract.state != ATTRACT_STATE_STOPPED ) {
+			wui_attract.state = ATTRACT_STATE_WAITING;
 		}
-	} else if ( s_attract.prevClientState < CA_ACTIVE && cls.state == CA_ACTIVE ) {
+	} else if ( wui_attract.prevClientState < CA_ACTIVE && cls.state == CA_ACTIVE ) {
 		/* Just connected — stop attract */
 		WiredAttract_Stop();
 	}
-	s_attract.prevClientState = cls.state;
+	wui_attract.prevClientState = cls.state;
 
 	/* ── edge detect Com_HasLastError — stop attract immediately ──── */
 	{
 		qboolean hasError = Com_HasLastError();
-		if ( !s_attract.prevHadError && hasError ) {
+		if ( !wui_attract.prevHadError && hasError ) {
 			Attract_Teardown();
-			s_attract.ownsDemo = qfalse;
-			s_attract.state    = ATTRACT_STATE_WAITING;
+			wui_attract.ownsDemo = qfalse;
+			wui_attract.state    = ATTRACT_STATE_WAITING;
 		}
-		s_attract.prevHadError = hasError;
+		wui_attract.prevHadError = hasError;
 	}
 
 	/* ── demo ownership sanity (handles /disconnect during attract) ── */
-	if ( s_attract.state == ATTRACT_STATE_PLAYING &&
-	     s_attract.ownsDemo && !clc.demoplaying ) {
-		s_attract.ownsDemo = qfalse;
+	if ( wui_attract.state == ATTRACT_STATE_PLAYING &&
+	     wui_attract.ownsDemo && !clc.demoplaying ) {
+		wui_attract.ownsDemo = qfalse;
 		Attract_Advance();
 		return;
 	}
@@ -420,8 +420,8 @@ void WiredAttract_Frame( int msec ) {
 		int depth = WiredUI_GetMenuStackDepth();
 		if ( depth > 0 ) {
 			const char *top = WiredUI_GetMenuStackTop();
-			if ( s_attract.pushedPanel[0] == '\0' ||
-			     Q_stricmp( top, s_attract.pushedPanel ) != 0 ) {
+			if ( wui_attract.pushedPanel[0] == '\0' ||
+			     Q_stricmp( top, wui_attract.pushedPanel ) != 0 ) {
 				/* A user menu is on top that we didn't push — back off */
 				goto draw_transition;
 			}
@@ -429,8 +429,8 @@ void WiredAttract_Frame( int msec ) {
 	}
 
 	/* ── state dispatch ──────────────────────────────────────────────── */
-	curState = (int)s_attract.state;
-	delayMs  = s_attract.cvDelay ? s_attract.cvDelay->integer * 1000 : 30000;
+	curState = (int)wui_attract.state;
+	delayMs  = wui_attract.cvDelay ? wui_attract.cvDelay->integer * 1000 : 30000;
 
 	switch ( curState ) {
 
@@ -439,10 +439,10 @@ void WiredAttract_Frame( int msec ) {
 		break;
 
 	case ATTRACT_STATE_WAITING:
-		if ( s_attract.playlistCount == 0 ) break;
+		if ( wui_attract.playlistCount == 0 ) break;
 		/* Require both disconnect-idle AND input-idle to have elapsed */
-		if ( (int)( cls.realtime - s_attract.disconnectTime ) >= delayMs &&
-		     (int)( cls.realtime - s_attract.lastInputTime )  >= delayMs ) {
+		if ( (int)( cls.realtime - wui_attract.disconnectTime ) >= delayMs &&
+		     (int)( cls.realtime - wui_attract.lastInputTime )  >= delayMs ) {
 			WiredAttract_Start();
 		}
 		break;
@@ -452,19 +452,19 @@ void WiredAttract_Frame( int msec ) {
 		break;
 
 	case ATTRACT_STATE_PLAYING:
-		if ( s_attract.playlistCount == 0 ) break;
+		if ( wui_attract.playlistCount == 0 ) break;
 		{
-			wiredAttractItem_t *item = &s_attract.playlist[s_attract.currentIndex];
+			wiredAttractItem_t *item = &wui_attract.playlist[wui_attract.currentIndex];
 			if ( item->durationMs > 0 &&
-			     (int)( cls.realtime - s_attract.itemStartTime ) >= item->durationMs ) {
+			     (int)( cls.realtime - wui_attract.itemStartTime ) >= item->durationMs ) {
 				Attract_Advance();
 			}
 		}
 		break;
 
 	case ATTRACT_STATE_TRANSITIONING:
-		if ( (int)( cls.realtime - s_attract.transitionStartTime ) >= s_attract.transitionMs ) {
-			s_attract.state = ATTRACT_STATE_STARTING;
+		if ( (int)( cls.realtime - wui_attract.transitionStartTime ) >= wui_attract.transitionMs ) {
+			wui_attract.state = ATTRACT_STATE_STARTING;
 		}
 		break;
 
@@ -475,9 +475,9 @@ void WiredAttract_Frame( int msec ) {
 
 draw_transition:
 	/* ── draw transition overlay ─────────────────────────────────────── */
-	if ( s_attract.state == ATTRACT_STATE_TRANSITIONING ) {
-		int   halfMs   = s_attract.transitionMs / 2;
-		int   elapsed  = (int)( cls.realtime - s_attract.transitionStartTime );
+	if ( wui_attract.state == ATTRACT_STATE_TRANSITIONING ) {
+		int   halfMs   = wui_attract.transitionMs / 2;
+		int   elapsed  = (int)( cls.realtime - wui_attract.transitionStartTime );
 		float alpha;
 		vec4_t c;
 
@@ -510,10 +510,10 @@ void WiredAttract_NoteInput( int key ) {
 		return;
 	}
 
-	s_attract.lastInputTime = cls.realtime;
+	wui_attract.lastInputTime = cls.realtime;
 
-	if ( s_attract.state == ATTRACT_STATE_PLAYING ||
-	     s_attract.state == ATTRACT_STATE_TRANSITIONING ) {
+	if ( wui_attract.state == ATTRACT_STATE_PLAYING ||
+	     wui_attract.state == ATTRACT_STATE_TRANSITIONING ) {
 		WiredAttract_Stop();
 	}
 }
@@ -522,10 +522,10 @@ void WiredAttract_NoteMouse( int dx, int dy ) {
 	/* 64 squared = 8px threshold — filters optical-mouse jitter */
 	if ( dx * dx + dy * dy <= 64 ) return;
 
-	s_attract.lastInputTime = cls.realtime;
+	wui_attract.lastInputTime = cls.realtime;
 
-	if ( s_attract.state == ATTRACT_STATE_PLAYING ||
-	     s_attract.state == ATTRACT_STATE_TRANSITIONING ) {
+	if ( wui_attract.state == ATTRACT_STATE_PLAYING ||
+	     wui_attract.state == ATTRACT_STATE_TRANSITIONING ) {
 		WiredAttract_Stop();
 	}
 }
@@ -535,58 +535,58 @@ void WiredAttract_OnMenuReload( void ) {
 	/* The pool was rebuilt — our pushedPanel pointer may be stale.
 	   Clear it and re-dispatch the current item on the next frame so
 	   the panel gets pushed against the fresh pool. */
-	if ( s_attract.state == ATTRACT_STATE_PLAYING &&
-	     s_attract.pushedPanel[0] != '\0' ) {
-		s_attract.pushedPanel[0] = '\0';
-		s_attract.state = ATTRACT_STATE_STARTING;
+	if ( wui_attract.state == ATTRACT_STATE_PLAYING &&
+	     wui_attract.pushedPanel[0] != '\0' ) {
+		wui_attract.pushedPanel[0] = '\0';
+		wui_attract.state = ATTRACT_STATE_STARTING;
 	}
 }
 
 /* ── control ─────────────────────────────────────────────────────────── */
 void WiredAttract_Start( void ) {
-	if ( !s_attract.initialized ) return;
-	if ( s_attract.playlistCount == 0 ) {
+	if ( !wui_attract.initialized ) return;
+	if ( wui_attract.playlistCount == 0 ) {
 		Com_Printf( "attract: playlist is empty\n" );
 		return;
 	}
-	s_attract.currentIndex  = 0;
-	s_attract.lastInputTime = cls.realtime;
-	s_attract.state         = ATTRACT_STATE_STARTING;
+	wui_attract.currentIndex  = 0;
+	wui_attract.lastInputTime = cls.realtime;
+	wui_attract.state         = ATTRACT_STATE_STARTING;
 }
 
 void WiredAttract_Stop( void ) {
-	if ( !s_attract.initialized ) return;
+	if ( !wui_attract.initialized ) return;
 	Attract_Teardown();
-	s_attract.state = ATTRACT_STATE_STOPPED;
+	wui_attract.state = ATTRACT_STATE_STOPPED;
 }
 
 void WiredAttract_Skip( void ) {
-	if ( !s_attract.initialized ) return;
-	if ( s_attract.state == ATTRACT_STATE_PLAYING ||
-	     s_attract.state == ATTRACT_STATE_STARTING ) {
+	if ( !wui_attract.initialized ) return;
+	if ( wui_attract.state == ATTRACT_STATE_PLAYING ||
+	     wui_attract.state == ATTRACT_STATE_STARTING ) {
 		Attract_Advance();
 	}
 }
 
 /* ── query ───────────────────────────────────────────────────────────── */
 wiredAttractState_t WiredAttract_GetState( void ) {
-	return s_attract.state;
+	return wui_attract.state;
 }
 
 qboolean WiredAttract_IsActive( void ) {
-	return s_attract.initialized &&
-	       ( s_attract.state == ATTRACT_STATE_PLAYING ||
-	         s_attract.state == ATTRACT_STATE_STARTING ||
-	         s_attract.state == ATTRACT_STATE_TRANSITIONING );
+	return wui_attract.initialized &&
+	       ( wui_attract.state == ATTRACT_STATE_PLAYING ||
+	         wui_attract.state == ATTRACT_STATE_STARTING ||
+	         wui_attract.state == ATTRACT_STATE_TRANSITIONING );
 }
 
 /* ── completion callbacks ────────────────────────────────────────────── */
 qboolean WiredAttract_OnDemoCompleted( void ) {
-	if ( !s_attract.initialized ) return qfalse;
-	if ( !s_attract.ownsDemo )    return qfalse;
-	if ( s_attract.state != ATTRACT_STATE_PLAYING ) return qfalse;
+	if ( !wui_attract.initialized ) return qfalse;
+	if ( !wui_attract.ownsDemo )    return qfalse;
+	if ( wui_attract.state != ATTRACT_STATE_PLAYING ) return qfalse;
 
-	s_attract.ownsDemo = qfalse;
+	wui_attract.ownsDemo = qfalse;
 	Attract_Advance();
 	return qtrue;
 }

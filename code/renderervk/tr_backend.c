@@ -487,7 +487,7 @@ static void RB_Hyperspace( void ) {
 
 static void SetViewportAndScissor( void ) {
 #ifdef USE_VULKAN
-	//Com_Memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
+	//memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
 	//vk_update_mvp();
 	// force depth range and viewport/scissor updates
 	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
@@ -723,7 +723,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			tess.shaderTime = backEnd.refdef.floatTime - tess.shader->timeOffset;
 
 #ifdef USE_VULKAN
-			Com_Memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
+			memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
 			tess.depthRange = depthRange ? DEPTH_RANGE_WEAPON : DEPTH_RANGE_NORMAL;
 			vk_update_mvp( NULL );
 #else
@@ -798,7 +798,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	// go back to the world modelview matrix
 #ifdef USE_VULKAN
-	Com_Memcpy( vk_world.modelview_transform, backEnd.viewParms.world.modelMatrix, 64 );
+	memcpy( vk_world.modelview_transform, backEnd.viewParms.world.modelMatrix, 64 );
 	tess.depthRange = DEPTH_RANGE_NORMAL;
 	//vk_update_mvp();
 #else
@@ -941,7 +941,7 @@ static void RB_RenderLitSurfList( dlight_t* dl ) {
 
 #ifdef USE_VULKAN
 			tess.depthRange = depthRange ? DEPTH_RANGE_WEAPON : DEPTH_RANGE_NORMAL;
-			Com_Memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
+			memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
 			vk_update_mvp( NULL );
 #else
 			qglLoadMatrixf( backEnd.or.modelMatrix );
@@ -1014,7 +1014,7 @@ static void RB_RenderLitSurfList( dlight_t* dl ) {
 
 	// go back to the world modelview matrix
 #ifdef USE_VULKAN
-	Com_Memcpy( vk_world.modelview_transform, backEnd.viewParms.world.modelMatrix, 64 );
+	memcpy( vk_world.modelview_transform, backEnd.viewParms.world.modelMatrix, 64 );
 	tess.depthRange = DEPTH_RANGE_NORMAL;
 	//vk_update_mvp();
 #else
@@ -1583,7 +1583,7 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 	vk_draw_geometry( DEPTH_RANGE_NORMAL, qtrue );
 
 	// Outline.
-	Com_Memset( tess.svars.colors[0], tr.identityLightByte, numPoints * 2 * sizeof( color4ub_t ) );
+	memset( tess.svars.colors[0], tr.identityLightByte, numPoints * 2 * sizeof( color4ub_t ) );
 
 	for ( i = 0; i < numPoints; i++ ) {
 		VectorCopy( &points[3*i], tess.xyz[2*i] );
@@ -2140,9 +2140,9 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		{
 			const setMsdfOutlineCommand_t *oc = (const setMsdfOutlineCommand_t *)data;
 			tr.msdfOutlineWidth = oc->outlineWidth;
-			Com_Memcpy( tr.msdfOutlineColor, oc->outlineColor, sizeof( tr.msdfOutlineColor ) );
+			memcpy( tr.msdfOutlineColor, oc->outlineColor, sizeof( tr.msdfOutlineColor ) );
 			tr.msdfGlowWidth = oc->glowWidth;
-			Com_Memcpy( tr.msdfGlowColor, oc->glowColor, sizeof( tr.msdfGlowColor ) );
+			memcpy( tr.msdfGlowColor, oc->glowColor, sizeof( tr.msdfGlowColor ) );
 			data = (const void *)( oc + 1 );
 			break;
 		}
@@ -2151,7 +2151,7 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			const setMsdfShadowCommand_t *sc = (const setMsdfShadowCommand_t *)data;
 			tr.msdfShadowOffset[0] = sc->shadowOffset[0];
 			tr.msdfShadowOffset[1] = sc->shadowOffset[1];
-			Com_Memcpy( tr.msdfShadowColor, sc->shadowColor, sizeof( tr.msdfShadowColor ) );
+			memcpy( tr.msdfShadowColor, sc->shadowColor, sizeof( tr.msdfShadowColor ) );
 			data = (const void *)( sc + 1 );
 			break;
 		}

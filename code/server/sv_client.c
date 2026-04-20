@@ -57,7 +57,7 @@ static qboolean SV_WiredNetWriteS32( byte *buf, int bufsize, int *offset, int va
 static qboolean SV_WiredNetWriteBytes( byte *buf, int bufsize, int *offset, const void *data, int len )
 {
 	if ( *offset + len > bufsize ) return qfalse;
-	Com_Memcpy( buf + *offset, data, (size_t)len );
+	memcpy( buf + *offset, data, (size_t)len );
 	*offset += len;
 	return qtrue;
 }
@@ -72,7 +72,7 @@ static qboolean SV_WiredNetWriteString( byte *buf, int bufsize, int *offset, con
 static qboolean SV_WiredNetWriteFloat( byte *buf, int bufsize, int *offset, float value )
 {
 	uint32_t bits;
-	Com_Memcpy( &bits, &value, sizeof( bits ) );
+	memcpy( &bits, &value, sizeof( bits ) );
 	return SV_WiredNetWriteU32( buf, bufsize, offset, bits );
 }
 
@@ -367,10 +367,8 @@ static qboolean SV_LoadIP4DB( const char *filename )
 
 	for ( i = 0; i < num_tlds; i++ )
 	{
-#ifdef Q3_LITTLE_ENDIAN
-		ipdb_range[i].from = LongSwap( ipdb_range[i].from );
-		ipdb_range[i].to = LongSwap( ipdb_range[i].to );
-#endif
+		ipdb_range[i].from = BigLong( ipdb_range[i].from );
+		ipdb_range[i].to = BigLong( ipdb_range[i].to );
 		if ( last_ip && last_ip >= ipdb_range[i].from )
 			break;
 		if ( ipdb_range[i].from > ipdb_range[i].to )
@@ -422,7 +420,7 @@ static void SV_SetTLD( char *str, const netadr_t *from, qboolean isLAN )
 	hi = num_tlds;
 
 	// big-endian to host-endian
-#ifdef Q3_LITTLE_ENDIAN
+#if !Q_BIG_ENDIAN
 	ip =  from->ipv._4[3] | from->ipv._4[2] << 8 | from->ipv._4[1] << 16 | from->ipv._4[0] << 24;
 #else
 	ip =  from->ipv._4[0] | from->ipv._4[1] << 8 | from->ipv._4[2] << 16 | from->ipv._4[3] << 24;
@@ -595,7 +593,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	}
 
 	clientNum = (int)( newcl - svs.clients );
-	Com_Memset( newcl, 0, sizeof(*newcl) );
+	memset( newcl, 0, sizeof(*newcl) );
 
 	/* Store QUIC connection handle — used by all future transport calls */
 	newcl->quic_conn = conn;
@@ -626,7 +624,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 			NET_AdrToString( &from ), reason );
 		if ( transport )
 			transport->drop_client( conn, reason );
-		Com_Memset( newcl, 0, sizeof(*newcl) );
+		memset( newcl, 0, sizeof(*newcl) );
 		return;
 	}
 
@@ -1015,7 +1013,7 @@ int SV_RemainingGameState( void )
 	}
 
 	// write the baselines
-	Com_Memset( &nullstate, 0, sizeof( nullstate ) );
+	memset( &nullstate, 0, sizeof( nullstate ) );
 	for ( start = 0 ; start < MAX_GENTITIES; start++ ) {
 		if ( !sv.baselineUsed[ start ] ) {
 			continue;
@@ -1083,7 +1081,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	client->gamestateMessageNum = client->wn_outgoing_sequence;
 
 	// accept usercmds starting from current server time only
-	Com_Memset( &client->lastUsercmd, 0x0, sizeof( client->lastUsercmd ) );
+	memset( &client->lastUsercmd, 0x0, sizeof( client->lastUsercmd ) );
 	client->lastUsercmd.serverTime = sv.time - 1;
 
 	MSG_Init( &msg, msgBuffer, MAX_MSGLEN );
@@ -1137,7 +1135,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	}
 
 	// write the baselines
-	Com_Memset( &nullstate, 0, sizeof( nullstate ) );
+	memset( &nullstate, 0, sizeof( nullstate ) );
 	for ( start = 0 ; start < MAX_GENTITIES; start++ ) {
 		if ( !sv.baselineUsed[ start ] ) {
 			continue;
@@ -1480,7 +1478,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 				dlbuf[msglen++] = WN_DOWNLOAD_MSG_ERROR;
 				dlbuf[msglen++] = (byte)( errlen & 0xFF );
 				dlbuf[msglen++] = (byte)( ( errlen >> 8 ) & 0xFF );
-				Com_Memcpy( dlbuf + msglen, errorMessage, (size_t)errlen );
+				memcpy( dlbuf + msglen, errorMessage, (size_t)errlen );
 				msglen += errlen;
 				transport->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );
 			}
@@ -1587,7 +1585,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 			dlbuf[msglen++] = (byte)( ( cl->downloadSize >> 24 ) & 0xFF );
 		}
 		if ( blockSize > 0 ) {
-			Com_Memcpy( dlbuf + msglen, cl->downloadBlocks[curindex], (size_t)blockSize );
+			memcpy( dlbuf + msglen, cl->downloadBlocks[curindex], (size_t)blockSize );
 			msglen += blockSize;
 		}
 		transport->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );

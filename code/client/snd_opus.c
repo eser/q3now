@@ -117,7 +117,7 @@ static int S_OpusChunkRead( const sfx_t *sc, int byteOffset,
 	while ( chunk && len > 0 ) {
 		int avail = chunk->size - byteOffset;
 		int n = ( len < avail ) ? len : avail;
-		Com_Memcpy( out + nread, (byte *)chunk->sndChunk + byteOffset, n );
+		memcpy( out + nread, (byte *)chunk->sndChunk + byteOffset, n );
 		nread += n;
 		len -= n;
 		byteOffset = 0;
@@ -158,7 +158,7 @@ static void S_OpusChunkWrite( sfx_t *sfx, sndBuffer **pChunk, int *pOffset,
 			int space = SND_CHUNK_SIZE_BYTE - *pOffset;
 			int n = ( len < space ) ? len : space;
 			byte *dst = (byte *)chunk->sndChunk + *pOffset;
-			Com_Memcpy( dst, data, n );
+			memcpy( dst, data, n );
 			*pOffset += n;
 			chunk->size = *pOffset;
 			data += n;
@@ -209,9 +209,9 @@ void S_OpusEncodeSound( sfx_t *sfx, short *samples )
 		int encBytes;
 		unsigned short frameLen;
 
-		Com_Memcpy( frameBuf, samples + offset, frameSamples * sizeof( short ) );
+		memcpy( frameBuf, samples + offset, frameSamples * sizeof( short ) );
 		if ( frameSamples < OPUS_INMEM_FRAME_SAMPLES ) {
-			Com_Memset( frameBuf + frameSamples, 0,
+			memset( frameBuf + frameSamples, 0,
 			            ( OPUS_INMEM_FRAME_SAMPLES - frameSamples ) * sizeof( short ) );
 		}
 
@@ -369,7 +369,7 @@ int S_OpusGetSamples( const sfx_t *sc, int sampleOffset, short *out, int count )
 			n = avail;
 		}
 
-		Com_Memcpy( out + written, s_opusDecodeBuf + intraOfs,
+		memcpy( out + written, s_opusDecodeBuf + intraOfs,
 		            n * sizeof( short ) );
 		written += n;
 	}

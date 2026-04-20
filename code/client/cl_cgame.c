@@ -135,7 +135,7 @@ static qboolean CL_GetSnapshot( int snapshotNumber, snapshot_t *snapshot ) {
 	snapshot->serverCommandSequence = clSnap->serverCommandNum;
 	snapshot->ping = clSnap->ping;
 	snapshot->serverTime = clSnap->serverTime;
-	Com_Memcpy( snapshot->areamask, clSnap->areamask, sizeof( snapshot->areamask ) );
+	memcpy( snapshot->areamask, clSnap->areamask, sizeof( snapshot->areamask ) );
 	snapshot->ps = clSnap->ps;
 	count = clSnap->numEntities;
 	if ( count > MAX_ENTITIES_IN_SNAPSHOT ) {
@@ -202,7 +202,7 @@ static void CL_ConfigstringModified( void ) {
 	// build the new gameState_t
 	oldGs = cl.gameState;
 
-	Com_Memset( &cl.gameState, 0, sizeof( cl.gameState ) );
+	memset( &cl.gameState, 0, sizeof( cl.gameState ) );
 
 	// leave the first 0 for uninitialized strings
 	cl.gameState.dataCount = 1;
@@ -225,7 +225,7 @@ static void CL_ConfigstringModified( void ) {
 
 		// append it to the gameState string buffer
 		cl.gameState.stringOffsets[ i ] = cl.gameState.dataCount;
-		Com_Memcpy( cl.gameState.stringData + cl.gameState.dataCount, dup, len + 1 );
+		memcpy( cl.gameState.stringData + cl.gameState.dataCount, dup, len + 1 );
 		cl.gameState.dataCount += len + 1;
 	}
 
@@ -329,7 +329,7 @@ rescan:
 		Con_ClearNotify();
 		// reparse the string, because Con_ClearNotify() may have done another Cmd_TokenizeString()
 		Cmd_TokenizeString( s );
-		Com_Memset( cl.cmds, 0, sizeof( cl.cmds ) );
+		memset( cl.cmds, 0, sizeof( cl.cmds ) );
 		cls.lastVidRestart = Sys_Milliseconds(); // vid_restart hack
 		return qtrue;
 	}
@@ -800,11 +800,11 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	// shared syscalls
 	case TRAP_MEMSET:
 		VM_CHECKBOUNDS( cgvm, args[1], args[3] );
-		Com_Memset( VMA(1), args[2], args[3] );
+		memset( VMA(1), args[2], args[3] );
 		return args[1];
 	case TRAP_MEMCPY:
 		VM_CHECKBOUNDS2( cgvm, args[1], args[2], args[3] );
-		Com_Memcpy( VMA(1), VMA(2), args[3] );
+		memcpy( VMA(1), VMA(2), args[3] );
 		return args[1];
 	case TRAP_STRNCPY:
 		VM_CHECKBOUNDS( cgvm, args[1], args[3] );
@@ -1033,7 +1033,7 @@ void CL_InitCGame( void ) {
 	t1 = Sys_Milliseconds();
 
 	// Reset loading progress tracking
-	Com_Memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
+	memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
 	cl_loadProgress.startTime = cls.realtime;
 	cl_loadProgress.phase = "initializing";
 	loadYield_modelCount = 0;

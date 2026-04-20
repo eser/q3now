@@ -231,7 +231,7 @@ void Sys_ConsoleInputShutdown( void )
 //		fcntl( STDIN_FILENO, F_SETFL, fcntl( STDIN_FILENO, F_GETFL, 0 ) & ~O_NONBLOCK );
 	}
 
-	Com_Memset( &tty_con, 0, sizeof( tty_con ) );
+	memset( &tty_con, 0, sizeof( tty_con ) );
 
 	stdin_active = qfalse;
 	ttycon_on = qfalse;
@@ -328,7 +328,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *format, ... )
 	}
 
 	va_start( argptr, format );
-	Q_vsnprintf( text, sizeof( text ), format, argptr );
+	vsnprintf( text, sizeof( text ), format, argptr );
 	va_end( argptr );
 
 #ifndef DEDICATED
@@ -1263,7 +1263,7 @@ int main( int argc, const char* argv[] )
 
 #ifdef __APPLE__
 	// This is passed if we are launched by double-clicking
-	if ( argc >= 2 && Q_strncmp( argv[1], "-psn", 4 ) == 0 ) {
+	if ( argc >= 2 && strncmp( argv[1], "-psn", 4 ) == 0 ) {
 		argc = 1;
 	}
 #endif

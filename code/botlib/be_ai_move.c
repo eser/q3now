@@ -513,7 +513,7 @@ void BotSetBrushModelTypes(void)
 	int ent, modelnum;
 	char classname[MAX_EPAIRKEY], model[MAX_EPAIRKEY];
 
-	Com_Memset(modeltypes, 0, MAX_MODELS * sizeof(int));
+	memset(modeltypes, 0, MAX_MODELS * sizeof(int));
 	//
 	for (ent = AAS_NextBSPEntity(0); ent; ent = AAS_NextBSPEntity(ent))
 	{
@@ -921,7 +921,7 @@ int BotPredictVisiblePosition(vec3_t origin, int areanum, bot_goal_t *goal, int 
 	//if the goal areanum is not valid
 	if (!goal->areanum) return qfalse;
 
-	Com_Memset(avoidreach, 0, MAX_AVOIDREACH * sizeof(int));
+	memset(avoidreach, 0, MAX_AVOIDREACH * sizeof(int));
 	lastgoalareanum = goal->areanum;
 	lastareanum = areanum;
 	VectorCopy(origin, end);
@@ -3273,7 +3273,7 @@ void BotMoveToGoal(bot_moveresult_t *result, int movestate, bot_goal_t *goal, in
 			else if (botDeveloper)
 			{
 				botimport.Print(PRT_MESSAGE, "goal not reachable\n");
-				Com_Memset(&reach, 0, sizeof(aas_reachability_t)); //make compiler happy
+				memset(&reach, 0, sizeof(aas_reachability_t)); //make compiler happy
 			} //end else
 			if (botDeveloper)
 			{
@@ -3340,7 +3340,7 @@ void BotMoveToGoal(bot_moveresult_t *result, int movestate, bot_goal_t *goal, in
 		{
 			result->failure = qtrue;
 			result->flags |= resultflags;
-			Com_Memset(&reach, 0, sizeof(aas_reachability_t));
+			memset(&reach, 0, sizeof(aas_reachability_t));
 		} //end else
 #ifdef DEBUG
 		if (botDeveloper)
@@ -3472,9 +3472,9 @@ void BotResetAvoidReach(int movestate)
 
 	ms = BotMoveStateFromHandle(movestate);
 	if (!ms) return;
-	Com_Memset(ms->avoidreach, 0, MAX_AVOIDREACH * sizeof(int));
-	Com_Memset(ms->avoidreachtimes, 0, MAX_AVOIDREACH * sizeof(float));
-	Com_Memset(ms->avoidreachtries, 0, MAX_AVOIDREACH * sizeof(int));
+	memset(ms->avoidreach, 0, MAX_AVOIDREACH * sizeof(int));
+	memset(ms->avoidreachtimes, 0, MAX_AVOIDREACH * sizeof(float));
+	memset(ms->avoidreachtries, 0, MAX_AVOIDREACH * sizeof(int));
 } //end of the function BotResetAvoidReach
 //===========================================================================
 //
@@ -3518,7 +3518,7 @@ void BotResetMoveState(int movestate)
 
 	ms = BotMoveStateFromHandle(movestate);
 	if (!ms) return;
-	Com_Memset(ms, 0, sizeof(bot_movestate_t));
+	memset(ms, 0, sizeof(bot_movestate_t));
 } //end of the function BotResetMoveState
 //===========================================================================
 //
@@ -3560,5 +3560,3 @@ void BotShutdownMoveAI(void)
 		} //end if
 	} //end for
 } //end of the function BotShutdownMoveAI
-
-

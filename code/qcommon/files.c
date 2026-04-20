@@ -1132,7 +1132,7 @@ void FS_FCloseFile( fileHandle_t f ) {
 		Z_Free( fd->sw3zData );
 		fd->sw3zData = NULL;
 	}
-	/* fall through to Com_Memset cleanup at bottom */
+	/* fall through to memset cleanup at bottom */
 #endif
 
 	if ( fd->zipFile && fd->pak ) {
@@ -1162,7 +1162,7 @@ void FS_FCloseFile( fileHandle_t f ) {
 		}
 	}
 
-	Com_Memset( fd, 0, sizeof( *fd ) );
+	memset( fd, 0, sizeof( *fd ) );
 }
 
 
@@ -1558,7 +1558,7 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 	// set the file position in the zip file (also sets the current file info)
 	unzSetCurrentFileInfoPosition( PACK_ZIP_HANDLE(pak), pakFile->pos );
 	// copy the file info into the unzip structure
-	Com_Memcpy( zfi, PACK_ZIP_HANDLE(pak), sizeof( *zfi ) );
+	memcpy( zfi, PACK_ZIP_HANDLE(pak), sizeof( *zfi ) );
 	// we copy this back into the structure
 	zfi->file = temp;
 	// open the file in the zip
@@ -1862,7 +1862,7 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 		avail = fsh[f].sw3zSize - fsh[f].sw3zPos;
 		if ( len > avail )
 			len = avail;
-		Com_Memcpy( buffer, fsh[f].sw3zData + fsh[f].sw3zPos, len );
+		memcpy( buffer, fsh[f].sw3zData + fsh[f].sw3zPos, len );
 		fsh[f].sw3zPos += len;
 		return len;
 	}
@@ -1964,7 +1964,7 @@ void QDECL FS_Printf( fileHandle_t h, const char *fmt, ... ) {
 	char		msg[MAXPRINTMSG];
 
 	va_start (argptr,fmt);
-	Q_vsnprintf (msg, sizeof(msg), fmt, argptr);
+	vsnprintf (msg, sizeof(msg), fmt, argptr);
 	va_end (argptr);
 
 	FS_Write(msg, strlen(msg), h);
@@ -2408,7 +2408,7 @@ static const byte cache_header[ 4 ] = {
 #else
 	0, //version
 #endif
-#ifdef Q3_LITTLE_ENDIAN
+#if !Q_BIG_ENDIAN
 	0x0,
 #else
 	0x1,
@@ -2796,7 +2796,7 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 	size += pk.numHeaderLongs * sizeof( pack->headerLongs[0] );
 
 	pack = Z_TagMalloc( size, TAG_PACK );
-	Com_Memset( pack, 0, size );
+	memset( pack, 0, size );
 
 #if FEAT_SW3Z
 	pack->type = (packType_t)pk.packType;
@@ -3122,7 +3122,7 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 	size += ( filecount + 1 ) * sizeof( fs_headerLongs[0] );
 #endif
 	pack = Z_TagMalloc( size, TAG_PACK );
-	Com_Memset( pack, 0, size );
+	memset( pack, 0, size );
 
 	pack->type = PACK_PK3;
 	PACK_ZIP_HANDLE(pack) = uf;
@@ -3145,8 +3145,8 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 	fs_numHeaderLongs = 0;
 	fs_headerLongs[ fs_numHeaderLongs++ ] = LittleLong( fs_checksumFeed );
 
-	Com_Memcpy( pack->pakFilename, zipfile, fileNameLen );
-	Com_Memcpy( pack->pakBasename, basename, baseNameLen );
+	memcpy( pack->pakFilename, zipfile, fileNameLen );
+	memcpy( pack->pakBasename, basename, baseNameLen );
 
 	// strip .pk3 if needed
 	FS_StripExt( pack->pakBasename, ".pk3" );
@@ -4243,7 +4243,7 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 	len = sizeof( *search ) + sizeof( *search->dir ) + path_len + dir_len;
 
 	search = Z_TagMalloc( len, TAG_SEARCH_PATH );
-	Com_Memset( search, 0, len );
+	memset( search, 0, len );
 	search->dir = (directory_t*)( search + 1 );
 	search->dir->path = (char*)( search->dir + 1 );
 	search->dir->gamedir = (char*)( search->dir->path + path_len );
@@ -4323,7 +4323,7 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 			fs_packCount++;
 
 			search = Z_TagMalloc( sizeof( *search ), TAG_SEARCH_PACK );
-			Com_Memset( search, 0, sizeof( *search ) );
+			memset( search, 0, sizeof( *search ) );
 			search->pack = pak;
 
 			search->next = fs_searchpaths;
@@ -4349,7 +4349,7 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 			len = sizeof( *search ) + sizeof( *search->dir ) + path_len + dir_len;
 
 			search = Z_TagMalloc( len, TAG_SEARCH_DIR );
-			Com_Memset( search, 0, len );
+			memset( search, 0, len );
 			search->dir = (directory_t*)(search + 1);
 			search->dir->path = (char*)( search->dir + 1 );
 			search->dir->gamedir = (char*)( search->dir->path + path_len );
@@ -4409,7 +4409,7 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 			fs_packCount++;
 
 			search = Z_TagMalloc( sizeof( *search ), TAG_SEARCH_PACK );
-			Com_Memset( search, 0, sizeof( *search ) );
+			memset( search, 0, sizeof( *search ) );
 			search->pack = pak;
 
 			search->next = fs_searchpaths;
@@ -6155,7 +6155,7 @@ void FS_PipeClose( fileHandle_t f )
 #endif
 	}
 
-	Com_Memset( &fsh[f], 0, sizeof( fsh[f] ) );
+	memset( &fsh[f], 0, sizeof( fsh[f] ) );
 }
 
 

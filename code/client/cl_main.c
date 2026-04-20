@@ -380,7 +380,7 @@ static void CL_WriteGamestate( qboolean initial )
 	}
 
 	// baselines
-	Com_Memset( &nullstate, 0, sizeof( nullstate ) );
+	memset( &nullstate, 0, sizeof( nullstate ) );
 	for ( i = 0; i < MAX_GENTITIES ; i++ ) {
 		if ( !cl.baselineUsed[ i ] )
 			continue;
@@ -1158,9 +1158,9 @@ void CL_MapLoading( const char *mapname ) {
 	// if we are already connected to the local host, stay connected
 	if ( localReconnect ) {
 		cls.state = CA_CONNECTED;		// so the connect screen is drawn
-		Com_Memset( cls.updateInfoString, 0, sizeof( cls.updateInfoString ) );
-		Com_Memset( clc.serverMessage, 0, sizeof( clc.serverMessage ) );
-		Com_Memset( &cl.gameState, 0, sizeof( cl.gameState ) );
+		memset( cls.updateInfoString, 0, sizeof( cls.updateInfoString ) );
+		memset( clc.serverMessage, 0, sizeof( clc.serverMessage ) );
+		memset( &cl.gameState, 0, sizeof( cl.gameState ) );
 		clc.lastPacketSentTime = cls.realtime - 9999;  // send packet immediately
 	} else {
 		// clear nextmap so the cinematic shutdown doesn't execute it
@@ -1171,7 +1171,7 @@ void CL_MapLoading( const char *mapname ) {
 		Key_SetCatcher( Key_GetCatcher() & KEYCATCH_CONSOLE );
 	}
 
-	Com_Memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
+	memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
 	CL_ResetLoadingScreenState();
 	CL_ClearMapInfo();
 	CL_ClearBspPreview();
@@ -1210,7 +1210,7 @@ void CL_ClearState( void ) {
 
 //	S_StopAllSounds();
 
-	Com_Memset( &cl, 0, sizeof( cl ) );
+	memset( &cl, 0, sizeof( cl ) );
 }
 
 
@@ -1218,26 +1218,12 @@ void CL_ClearState( void ) {
 ====================
 CL_UpdateGUID
 
-update cl_guid using QKEY_FILE and optional prefix
+update cl_guid using cdkey and optional prefix
 ====================
 */
 static void CL_UpdateGUID( const char *prefix, int prefix_len )
 {
-#ifdef USE_Q3KEY
-	fileHandle_t f;
-	int len;
-
-	len = FS_SV_FOpenFileRead( QKEY_FILE, &f );
-	FS_FCloseFile( f );
-
-	if( len != QKEY_SIZE )
-		Cvar_Set( "cl_guid", "" );
-	else
-		Cvar_Set( "cl_guid", Com_MD5File( QKEY_FILE, QKEY_SIZE,
-			prefix, prefix_len ) );
-#else
 	Cvar_Set( "cl_guid", Com_MD5Buf( &cl_cdkey[0], sizeof(cl_cdkey), prefix, prefix_len));
-#endif
 }
 
 
@@ -1357,7 +1343,7 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 	}
 
 	CL_ClearState();
-	Com_Memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
+	memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
 	CL_ResetLoadingScreenState();
 	CL_ClearMapInfo();
 	CL_ClearBspPreview();
@@ -1368,7 +1354,7 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 		(int)cls.state, (int)showMainMenu, (int)WN_ClientIsConnecting() );
 	WN_ClientDisconnect();
 
-	Com_Memset( &clc, 0, sizeof( clc ) );
+	memset( &clc, 0, sizeof( clc ) );
 	clc.wiredRconChallenge[0] = '\0';
 
 	cls.state = CA_DISCONNECTED;
@@ -2744,13 +2730,13 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 	}
 
 	// list of servers sent back by a master server (classic)
-	if ( !Q_strncmp(c, "getserversResponse", 18) ) {
+	if ( !strncmp(c, "getserversResponse", 18) ) {
 		CL_ServersResponsePacket( from, msg, qfalse );
 		return qfalse;
 	}
 
 	// list of servers sent back by a master server (extended)
-	if ( !Q_strncmp(c, "getserversExtResponse", 21) ) {
+	if ( !strncmp(c, "getserversExtResponse", 21) ) {
 		CL_ServersResponsePacket( from, msg, qtrue );
 		return qfalse;
 	}
@@ -3193,7 +3179,7 @@ static void FORMAT_PRINTF(2, 3) QDECL CL_RefPrintf( printParm_t level, const cha
 	char		msg[MAXPRINTMSG];
 
 	va_start( argptr, fmt );
-	Q_vsnprintf( msg, sizeof( msg ), fmt, argptr );
+	vsnprintf( msg, sizeof( msg ), fmt, argptr );
 	va_end( argptr );
 
 	switch ( level ) {
@@ -3240,7 +3226,7 @@ static void CL_ShutdownRef( refShutdownCode_t code ) {
 	}
 #endif
 
-	Com_Memset( &re, 0, sizeof( re ) );
+	memset( &re, 0, sizeof( re ) );
 
 	cls.rendererStarted = qfalse;
 }
@@ -3489,7 +3475,7 @@ static void CL_InitRef( void ) {
 	cl_renderer->modified = qfalse;
 #endif
 
-	Com_Memset( &rimp, 0, sizeof( rimp ) );
+	memset( &rimp, 0, sizeof( rimp ) );
 
 	rimp.Cmd_AddCommand = Cmd_AddCommand;
 	rimp.Cmd_RemoveCommand = Cmd_RemoveCommand;
@@ -3706,51 +3692,6 @@ static void CL_CompleteVideoName(const char *args, int argNum )
 		Field_CompleteFilename( "videos", ".avi", qtrue, FS_MATCH_EXTERN | FS_MATCH_STICK );
 	}
 }
-
-
-/*
-===============
-CL_GenerateQKey
-
-test to see if a valid QKEY_FILE exists.  If one does not, try to generate
-it by filling it with 2048 bytes of random data.
-===============
-*/
-#ifdef USE_Q3KEY
-static void CL_GenerateQKey(void)
-{
-	int len = 0;
-	unsigned char buff[ QKEY_SIZE ];
-	fileHandle_t f;
-
-	len = FS_SV_FOpenFileRead( QKEY_FILE, &f );
-	FS_FCloseFile( f );
-	if( len == QKEY_SIZE ) {
-		Com_Printf( "QKEY found.\n" );
-		return;
-	}
-	else {
-		if( len > 0 ) {
-			Com_Printf( "QKEY file size != %d, regenerating\n",
-				QKEY_SIZE );
-		}
-
-		Com_Printf( "QKEY building random string\n" );
-		Com_RandomBytes( buff, sizeof(buff) );
-
-		f = FS_SV_FOpenFileWrite( QKEY_FILE );
-		if( !f ) {
-			Com_Printf( "QKEY could not open %s for write\n",
-				QKEY_FILE );
-			return;
-		}
-		FS_Write( buff, sizeof(buff), f );
-		FS_FCloseFile( f );
-		Com_Printf( "QKEY generated\n" );
-	}
-}
-#endif
-
 
 /*
 ** CL_GetModeInfo
@@ -4148,9 +4089,6 @@ void CL_Init( void ) {
 #endif
 
 	Cvar_Set( "cl_running", "1" );
-#ifdef USE_MD5
-	CL_GenerateQKey();
-#endif
 	Cvar_Get( "cl_guid", "", CVAR_USERINFO | CVAR_ROM | CVAR_PROTECTED );
 	CL_UpdateGUID( NULL, 0 );
 
@@ -4242,7 +4180,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 
 	recursive = qfalse;
 
-	Com_Memset( &cls, 0, sizeof( cls ) );
+	memset( &cls, 0, sizeof( cls ) );
 	Key_SetCatcher( 0 );
 	Com_Printf( "-----------------------\n" );
 }
@@ -4604,10 +4542,10 @@ static void CL_LocalServers_f( void ) {
 
 	for (i = 0; i < MAX_OTHER_SERVERS; i++) {
 		qboolean b = cls.localServers[i].visible;
-		Com_Memset(&cls.localServers[i], 0, sizeof(cls.localServers[i]));
+		memset(&cls.localServers[i], 0, sizeof(cls.localServers[i]));
 		cls.localServers[i].visible = b;
 	}
-	Com_Memset( &to, 0, sizeof( to ) );
+	memset( &to, 0, sizeof( to ) );
 
 	// The 'xxx' in the message is a challenge that will be echoed back
 	// by the server.  We don't care about that here, but master servers
@@ -4931,7 +4869,7 @@ static void CL_Ping_f( void ) {
 		server = Cmd_Argv(2);
 	}
 
-	Com_Memset( &to, 0, sizeof( to ) );
+	memset( &to, 0, sizeof( to ) );
 
 	if ( !NET_StringToAdr( server, &to, family ) ) {
 		return;
@@ -5086,7 +5024,7 @@ static void CL_ServerStatus_f( void ) {
 
 	if ( !toptr )
 	{
-		Com_Memset( &to, 0, sizeof( to ) );
+		memset( &to, 0, sizeof( to ) );
 
 		if ( argc == 2 )
 			server = Cmd_Argv(1);

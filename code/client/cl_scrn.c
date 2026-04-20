@@ -166,7 +166,7 @@ void SCR_DrawSmallString( int x, int y, const char *s, int len ) {
 	if ( len >= (int)sizeof(buf) ) {
 		len = (int)sizeof(buf) - 1;
 	}
-	Com_Memcpy( buf, s, len );
+	memcpy( buf, s, len );
 	buf[len] = '\0';
 
 	Text_Draw( buf, (float)x, (float)y, FONT_MONO, (float)smallchar_height, white, TEXT_ALIGN_LEFT, 0 );

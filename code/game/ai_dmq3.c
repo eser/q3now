@@ -5002,7 +5002,7 @@ void BotCheckConsoleMessages(bot_state_t *bs) {
 					wbChatCtx_t chatCtx;
 					int fromClient;
 
-					Com_Memset( &chatCtx, 0, sizeof( chatCtx ) );
+					memset( &chatCtx, 0, sizeof( chatCtx ) );
 					trap_BotMatchVariable(&match, NETNAME, netname, sizeof(netname));
 					trap_BotMatchVariable(&match, MESSAGE, message, sizeof(message));
 

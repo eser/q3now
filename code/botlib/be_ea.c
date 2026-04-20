@@ -428,7 +428,7 @@ void EA_GetInput(int client, float thinktime, bot_input_t *input)
 
 	bi = &botinputs[client];
 	bi->thinktime = thinktime;
-	Com_Memcpy(input, bi, sizeof(bot_input_t));
+	memcpy(input, bi, sizeof(bot_input_t));
 } //end of the function EA_GetInput
 //===========================================================================
 //

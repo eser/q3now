@@ -96,7 +96,7 @@ static Q_PRINTF_FUNC(2, 3) void QDECL PrintMsg( gentity_t *ent, const char *fmt,
 	char		*p;
 	
 	va_start (argptr,fmt);
-	if (Q_vsnprintf (msg, sizeof(msg), fmt, argptr) >= sizeof(msg)) {
+	if (vsnprintf (msg, sizeof(msg), fmt, argptr) >= sizeof(msg)) {
 		G_Error ( "PrintMsg overrun" );
 	}
 	va_end (argptr);
