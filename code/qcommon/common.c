@@ -3829,6 +3829,13 @@ void Com_Init( char *commandLine ) {
 	Com_InitSmallZoneMemory();
 	Cvar_Init();
 
+	// TTY sink only needs cvars (con_severity / con_timestamp). Register it now
+	// so FS_InitFilesystem, BSP_Init, and WiredScript_Init all emit with a
+	// severity bracket and optional timestamp instead of raw fallback stderr.
+	Log_RegisterTtySink();
+	// Fallback served its purpose for the tiny pre-Cvar_Init window.
+	Log_UnregisterFallbackStderrSink();
+
 #if defined(_WIN32) && defined(_DEBUG)
 	com_noErrorInterrupt = Cvar_Get( "com_noErrorInterrupt", "0", 0 );
 #endif
@@ -3875,6 +3882,10 @@ void Com_Init( char *commandLine ) {
 
 	FS_InitFilesystem();
 
+	// File sink needs VFS (fs_homepath set inside FS_InitFilesystem).
+	// no-op if log_enabled == 0.
+	Log_RegisterFileSink();
+
 	// initialize BSP format registry (FEAT_BSP_ABSTRACTION)
 	BSP_Init();
 	Cvar_Get( "com_mapAssetProfile", "modern", CVAR_ROM );
@@ -3882,18 +3893,12 @@ void Com_Init( char *commandLine ) {
 
 	WiredScript_Init();
 
-	// Register real sinks now that cvars + filesystem are ready.
-	// log_enabled / log_mode / log_severity registered by Log_RegisterFileSink.
-	// Console sink compiled out in dedicated builds.
+	// Console sink registered late: it requires the ring buffer / Con_Init,
+	// which depends on renderer init. TTY and file sinks are already live.
+	// Compiled out in dedicated builds.
 #ifndef DEDICATED
 	Log_RegisterConsoleSink();
 #endif
-	Log_RegisterTtySink();
-	Log_RegisterFileSink(); // no-op if log_enabled == 0
-
-	// Fallback stderr sink served its purpose; real sinks take over.
-	// Drains in-flight dispatches before removing.
-	Log_UnregisterFallbackStderrSink();
 
 	Com_InitJournaling();
 
