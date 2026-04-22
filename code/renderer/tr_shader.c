@@ -655,7 +655,9 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 
 				if ( !stage->bundle[0].image[0] )
 				{
-					ri.Printf( PRINT_WARNING, "WARNING: R_FindImageFile could not find '%s' in shader '%s'\n", token, shader.name );
+					char stemBuf[ MAX_QPATH ];
+					COM_StripExtension( token, stemBuf, sizeof( stemBuf ) );
+					ri.AssetLog_Event( "image", stemBuf, "tga,jpg,png", shader.name, ASSET_LOG_WARN );
 					return qfalse;
 				}
 			}
@@ -700,7 +702,9 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 			stage->bundle[0].image[0] = R_FindImageFile( token, flags );
 			if ( !stage->bundle[0].image[0] )
 			{
-				ri.Printf( PRINT_WARNING, "WARNING: R_FindImageFile could not find '%s' in shader '%s'\n", token, shader.name );
+				char stemBuf[ MAX_QPATH ];
+				COM_StripExtension( token, stemBuf, sizeof( stemBuf ) );
+				ri.AssetLog_Event( "image", stemBuf, "tga,jpg,png", shader.name, ASSET_LOG_WARN );
 				return qfalse;
 			}
 		}
@@ -747,7 +751,9 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 					stage->bundle[0].image[num] = R_FindImageFile( token, flags );
 					if ( !stage->bundle[0].image[num] )
 					{
-						ri.Printf( PRINT_WARNING, "WARNING: R_FindImageFile could not find '%s' in shader '%s'\n", token, shader.name );
+						char stemBuf[ MAX_QPATH ];
+						COM_StripExtension( token, stemBuf, sizeof( stemBuf ) );
+						ri.AssetLog_Event( "image", stemBuf, "tga,jpg,png", shader.name, ASSET_LOG_WARN );
 						return qfalse;
 					}
 					stage->bundle[0].numImageAnimations++;
@@ -3441,7 +3447,11 @@ shader_t *R_FindShader( const char *name, int lightmapIndex, qboolean mipRawImag
 
 		image = R_FindImageFile( name, flags );
 		if ( !image ) {
-			ri.Printf( PRINT_DEVELOPER, "Couldn't find image file for shader %s\n", name );
+			{
+				char stemBuf[ MAX_QPATH ];
+				COM_StripExtension( name, stemBuf, sizeof( stemBuf ) );
+				ri.AssetLog_Event( "image", stemBuf, "tga,jpg,png", name, ASSET_LOG_INFO );
+			}
 			shader.defaultShader = qtrue;
 			return FinishShader();
 		}

@@ -47,9 +47,7 @@ void* CG_ModernHUDElementFlagStatusOWNCreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementFlagStatusRoutine(void* context)
 {
 	modernHudElementFlagStatus_t* element = (modernHudElementFlagStatus_t*)context;
-	int side;
-
-	side = cgs.clientinfo[cg.snap->ps.clientNum].team;
+	int side = cgs.clientinfo[cg.snap->ps.clientNum].team;
 
 	if (element->flagType == ModernHUDFLTYPE_NME)
 	{

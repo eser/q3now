@@ -115,8 +115,6 @@ If raw data was calculated, as with ADPCM, this should not be called.
 =================
 */
 static void S_ByteSwapRawSamples( int samples, int width, int s_channels, const byte *data ) {
-	int		i;
-
 	if ( width != 2 ) {
 		return;
 	}
@@ -127,7 +125,7 @@ static void S_ByteSwapRawSamples( int samples, int width, int s_channels, const 
 	if ( s_channels == 2 ) {
 		samples <<= 1;
 	}
-	for ( i = 0 ; i < samples ; i++ ) {
+	for ( int i = 0 ; i < samples ; i++ ) {
 		((short *)data)[i] = LittleShort( ((short *)data)[i] );
 	}
 }

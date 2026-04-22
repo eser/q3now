@@ -85,8 +85,7 @@ shutdown so we do not leak across server restarts.
 ====================
 */
 static void SVR_ClearModels( void ) {
-	int i;
-	for ( i = 0; i < svrNumModels; i++ ) {
+	for ( int i = 0; i < svrNumModels; i++ ) {
 		if ( svrModels[i].data ) {
 			Z_Free( svrModels[i].data );
 			svrModels[i].data = NULL;
@@ -105,8 +104,7 @@ not been registered yet.
 ====================
 */
 static svrModel_t *SVR_FindModel( const char *name ) {
-	int i;
-	for ( i = 1; i < svrNumModels; i++ ) {
+	for ( int i = 1; i < svrNumModels; i++ ) {
 		if ( !Q_stricmp( svrModels[i].name, name ) ) {
 			return &svrModels[i];
 		}
@@ -621,7 +619,6 @@ static int SVR_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, in
 	const md3Tag_t *start;
 	const md3Tag_t *end;
 	float frontLerp, backLerp;
-	int i;
 
 	if ( !tag ) {
 		return 0;
@@ -650,7 +647,7 @@ static int SVR_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, in
 	frontLerp = frac;
 	backLerp = 1.0f - frac;
 
-	for ( i = 0; i < 3; i++ ) {
+	for ( int i = 0; i < 3; i++ ) {
 		tag->origin[i]  = start->origin[i]  * backLerp + end->origin[i]  * frontLerp;
 		tag->axis[0][i] = start->axis[0][i] * backLerp + end->axis[0][i] * frontLerp;
 		tag->axis[1][i] = start->axis[1][i] * backLerp + end->axis[1][i] * frontLerp;

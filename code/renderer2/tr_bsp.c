@@ -47,13 +47,12 @@ static int	c_gridVerts;
 
 static void HSVtoRGB( float h, float s, float v, float rgb[3] )
 {
-	int i;
 	float f;
 	float p, q, t;
 
 	h *= 5;
 
-	i = floor( h );
+	int i = floor( h );
 	f = h - i;
 
 	p = v * ( 1 - s );
@@ -706,9 +705,7 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, float *hdr
 	srfBspSurface_t	*cv;
 	glIndex_t  *tri;
 	int			numVerts, numIndexes, badTriangles;
-	int realLightmapNum;
-
-	realLightmapNum = LittleLong( ds->lightmapNum );
+	int realLightmapNum = LittleLong( ds->lightmapNum );
 
 	// get fog volume
 	surf->fogIndex = LittleLong( ds->fogNum ) + 1;
@@ -834,9 +831,7 @@ static void ParseMesh ( const dsurface_t *ds, const drawVert_t *verts, float *hd
 	vec3_t			bounds[2];
 	vec3_t			tmpVec;
 	static surfaceType_t	skipData = SF_SKIP;
-	int realLightmapNum;
-
-	realLightmapNum = LittleLong( ds->lightmapNum );
+	int realLightmapNum = LittleLong( ds->lightmapNum );
 
 	// get fog volume
 	surf->fogIndex = LittleLong( ds->fogNum ) + 1;
@@ -1170,10 +1165,9 @@ If this is not the case this function will still do its job but won't fix the hi
 =================
 */
 static void R_FixSharedVertexLodError( void ) {
-	int i;
 	srfBspSurface_t *grid1;
 
-	for ( i = 0; i < s_worldData.numsurfaces; i++ ) {
+	for ( int i = 0; i < s_worldData.numsurfaces; i++ ) {
 		//
 		grid1 = (srfBspSurface_t *) s_worldData.surfaces[i].data;
 		// if this surface is not a grid
@@ -1675,10 +1669,9 @@ R_MovePatchSurfacesToHunk
 ===============
 */
 static void R_MovePatchSurfacesToHunk(void) {
-	int i;
 	srfBspSurface_t *grid;
 
-	for ( i = 0; i < s_worldData.numsurfaces; i++ ) {
+	for ( int i = 0; i < s_worldData.numsurfaces; i++ ) {
 		void *copyFrom;
 		//
 		grid = (srfBspSurface_t *) s_worldData.surfaces[i].data;
@@ -1754,12 +1747,11 @@ static	void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 	if (r_hdr->integer)
 	{
 		char filename[MAX_QPATH];
-		int size;
 
 		Com_sprintf( filename, sizeof( filename ), "maps/%s/vertlight.raw", s_worldData.baseName);
 		//ri.Printf(PRINT_ALL, "looking for %s\n", filename);
 
-		size = ri.FS_ReadFile(filename, (void **)&hdrVertColors);
+		int size = ri.FS_ReadFile(filename, (void **)&hdrVertColors);
 
 		if (hdrVertColors)
 		{
@@ -2246,12 +2238,11 @@ static void R_LoadLightGrid( const lump_t *l ) {
 	{
 		char filename[MAX_QPATH];
 		float *hdrLightGrid;
-		int size;
 
 		Com_sprintf( filename, sizeof( filename ), "maps/%s/lightgrid.raw", s_worldData.baseName);
 		//ri.Printf(PRINT_ALL, "looking for %s\n", filename);
 
-		size = ri.FS_ReadFile(filename, (void **)&hdrLightGrid);
+		int size = ri.FS_ReadFile(filename, (void **)&hdrLightGrid);
 
 		if (hdrLightGrid)
 		{
@@ -2536,7 +2527,6 @@ static void R_LoadEnvironmentJson(const char *baseName)
 	{
 		cubemap_t *cubemap = &tr.cubemaps[i];
 		const char *cubemapJson, *keyValueJson, *indexes[3];
-		int j;
 
 		cubemapJson = JSON_ArrayGetValue(cubemapArrayJson, bufferEnd, i);
 
@@ -2546,7 +2536,7 @@ static void R_LoadEnvironmentJson(const char *baseName)
 
 		keyValueJson = JSON_ObjectGetNamedValue(cubemapJson, bufferEnd, "Position");
 		JSON_ArrayGetIndex(keyValueJson, bufferEnd, indexes, 3);
-		for (j = 0; j < 3; j++)
+		for (int j = 0; j < 3; j++)
 			cubemap->origin[j] = JSON_ValueGetFloat(indexes[j], bufferEnd);
 
 		cubemap->parallaxRadius = 1000.0f;
@@ -2569,9 +2559,7 @@ static void R_LoadCubemapEntities(char *cubemapEntityName)
 	numCubemaps = 0;
 	while(R_ParseSpawnVars(spawnVarChars, sizeof(spawnVarChars), &numSpawnVars, spawnVars))
 	{
-		int i;
-
-		for (i = 0; i < numSpawnVars; i++)
+		for (int i = 0; i < numSpawnVars; i++)
 		{
 			if (!Q_stricmp(spawnVars[i][0], "classname") && !Q_stricmp(spawnVars[i][1], cubemapEntityName))
 				numCubemaps++;
@@ -2629,11 +2617,10 @@ static void R_LoadCubemapEntities(char *cubemapEntityName)
 static void R_AssignCubemapsToWorldSurfaces(void)
 {
 	world_t	*w;
-	int i;
 
 	w = &s_worldData;
 
-	for (i = 0; i < w->numsurfaces; i++)
+	for (int i = 0; i < w->numsurfaces; i++)
 	{
 		msurface_t *surf = &w->surfaces[i];
 		vec3_t surfOrigin;
@@ -2662,10 +2649,9 @@ static void R_AssignCubemapsToWorldSurfaces(void)
 
 static void R_LoadCubemaps(void)
 {
-	int i;
 	imgFlags_t flags = IMGFLAG_CLAMPTOEDGE | IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE | IMGFLAG_CUBEMAP;
 
-	for (i = 0; i < tr.numCubemaps; i++)
+	for (int i = 0; i < tr.numCubemaps; i++)
 	{
 		char filename[MAX_QPATH];
 		cubemap_t *cubemap = &tr.cubemaps[i];
@@ -2854,18 +2840,16 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	{
 		world_t	*w;
 		uint8_t *primaryLightGrid, *data;
-		int lightGridSize;
-		int i;
 
 		w = &s_worldData;
 
-		lightGridSize = w->lightGridBounds[0] * w->lightGridBounds[1] * w->lightGridBounds[2];
+		int lightGridSize = w->lightGridBounds[0] * w->lightGridBounds[1] * w->lightGridBounds[2];
 		primaryLightGrid = ri.Malloc(lightGridSize * sizeof(*primaryLightGrid));
 
 		memset(primaryLightGrid, 0, lightGridSize * sizeof(*primaryLightGrid));
 
 		data = w->lightGridData;
-		for (i = 0; i < lightGridSize; i++, data += 8)
+		for (int i = 0; i < lightGridSize; i++, data += 8)
 		{
 			int lat, lng;
 			vec3_t gridLightDir, gridLightCol;
@@ -2905,12 +2889,11 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 
 		if (0)
 		{
-			int i;
 			byte *buffer = ri.Malloc(w->lightGridBounds[0] * w->lightGridBounds[1] * 3 + 18);
 			byte *out;
 			uint8_t *in;
 			char fileName[MAX_QPATH];
-			
+
 			memset (buffer, 0, 18);
 			buffer[2] = 2;		// uncompressed type
 			buffer[12] = w->lightGridBounds[0] & 255;
@@ -2920,14 +2903,12 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 			buffer[16] = 24;	// pixel size
 
 			in = primaryLightGrid;
-			for (i = 0; i < w->lightGridBounds[2]; i++)
+			for (int i = 0; i < w->lightGridBounds[2]; i++)
 			{
-				int j;
-
 				sprintf(fileName, "primarylg%d.tga", i);
 
 				out = buffer + 18;
-				for (j = 0; j < w->lightGridBounds[0] * w->lightGridBounds[1]; j++)
+				for (int j = 0; j < w->lightGridBounds[0] * w->lightGridBounds[1]; j++)
 				{
 					if (*in == 1)
 					{

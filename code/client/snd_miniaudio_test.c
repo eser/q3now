@@ -55,17 +55,14 @@ static void rb_write_level( float rms )
  */
 static int rb_read_recent( float *outLevels, int outCount )
 {
-	uint32_t pos;
-	int i;
-
 	if ( outLevels == NULL || outCount <= 0 )
 		return 0;
 	if ( outCount > S_LEVELS_RING_SIZE )
 		outCount = S_LEVELS_RING_SIZE;
 
-	pos = atomic_load( &test_levelsRingPos );
+	uint32_t pos = atomic_load( &test_levelsRingPos );
 
-	for ( i = 0; i < outCount; i++ )
+	for ( int i = 0; i < outCount; i++ )
 	{
 		uint32_t idx = ( pos - 1 - (uint32_t)i ) % S_LEVELS_RING_SIZE;
 		outLevels[ outCount - 1 - i ] = test_levelsRing[ idx ];
@@ -96,14 +93,12 @@ static int g_failed = 0;
 static void test_initial_state( void )
 {
 	float buf[8];
-	int n;
-	int i;
 
 	TEST_BEGIN( "initial state reads zeros" );
 	rb_reset();
-	n = rb_read_recent( buf, 8 );
+	int n = rb_read_recent( buf, 8 );
 	TEST_ASSERT( n == 8, "initial read should return outCount" );
-	for ( i = 0; i < 8; i++ )
+	for ( int i = 0; i < 8; i++ )
 	{
 		TEST_ASSERT( buf[i] == 0.0f, "initial buffer should be all zeros" );
 	}
@@ -113,14 +108,13 @@ static void test_initial_state( void )
 static void test_basic_write_read( void )
 {
 	float buf[3];
-	int n;
 
 	TEST_BEGIN( "basic write then read" );
 	rb_reset();
 	rb_write_level( 0.5f );
 	rb_write_level( 0.7f );
 	rb_write_level( 0.3f );
-	n = rb_read_recent( buf, 3 );
+	int n = rb_read_recent( buf, 3 );
 	TEST_ASSERT( n == 3, "read should return 3" );
 	/* Reader stores oldest first, newest last (left-to-right draw order). */
 	TEST_ASSERT( buf[0] == 0.5f, "oldest should be first" );
@@ -132,14 +126,12 @@ static void test_basic_write_read( void )
 static void test_underrun( void )
 {
 	float buf[16];
-	int n;
-	int i;
 
 	TEST_BEGIN( "underrun: read with fewer writes than asked" );
 	rb_reset();
 	rb_write_level( 0.9f );
 	rb_write_level( 0.8f );
-	n = rb_read_recent( buf, 16 );
+	int n = rb_read_recent( buf, 16 );
 	TEST_ASSERT( n == 16, "read should still return full count" );
 	/* Newest two are at the tail; the rest are stale zeros from the
 	 * untouched ring slots. The algorithm intentionally returns the
@@ -147,7 +139,7 @@ static void test_underrun( void )
 	 * exactly what the production code in S_GetRecentLevels does. */
 	TEST_ASSERT( buf[15] == 0.8f, "newest sample at tail" );
 	TEST_ASSERT( buf[14] == 0.9f, "second-newest at tail-1" );
-	for ( i = 0; i < 14; i++ )
+	for ( int i = 0; i < 14; i++ )
 	{
 		TEST_ASSERT( buf[i] == 0.0f, "uninitialised slots stay zero" );
 	}
@@ -157,18 +149,16 @@ static void test_underrun( void )
 static void test_wraparound( void )
 {
 	float buf[10];
-	int n;
-	int i;
 
 	TEST_BEGIN( "wraparound past buffer end" );
 	rb_reset();
-	for ( i = 0; i < S_LEVELS_RING_SIZE + 5; i++ )
+	for ( int i = 0; i < S_LEVELS_RING_SIZE + 5; i++ )
 	{
 		rb_write_level( (float)i );
 	}
-	n = rb_read_recent( buf, 10 );
+	int n = rb_read_recent( buf, 10 );
 	TEST_ASSERT( n == 10, "read should return 10" );
-	for ( i = 0; i < 10; i++ )
+	for ( int i = 0; i < 10; i++ )
 	{
 		float expected = (float)( S_LEVELS_RING_SIZE + 5 - 10 + i );
 		if ( buf[i] != expected )
@@ -187,18 +177,16 @@ static void test_wraparound( void )
 static void test_overrun( void )
 {
 	float buf[S_LEVELS_RING_SIZE];
-	int n;
-	int i;
 
 	TEST_BEGIN( "overrun overwrites oldest data" );
 	rb_reset();
-	for ( i = 0; i < 3 * S_LEVELS_RING_SIZE; i++ )
+	for ( int i = 0; i < 3 * S_LEVELS_RING_SIZE; i++ )
 	{
 		rb_write_level( (float)i );
 	}
-	n = rb_read_recent( buf, S_LEVELS_RING_SIZE );
+	int n = rb_read_recent( buf, S_LEVELS_RING_SIZE );
 	TEST_ASSERT( n == S_LEVELS_RING_SIZE, "read should return RING_SIZE" );
-	for ( i = 0; i < S_LEVELS_RING_SIZE; i++ )
+	for ( int i = 0; i < S_LEVELS_RING_SIZE; i++ )
 	{
 		float expected = (float)( 3 * S_LEVELS_RING_SIZE - S_LEVELS_RING_SIZE + i );
 		if ( buf[i] != expected )
@@ -217,14 +205,12 @@ static void test_overrun( void )
 static void test_read_clamped( void )
 {
 	float buf[S_LEVELS_RING_SIZE * 2];
-	int n;
-	int i;
 
 	TEST_BEGIN( "read clamped to RING_SIZE" );
 	rb_reset();
-	for ( i = 0; i < S_LEVELS_RING_SIZE; i++ )
+	for ( int i = 0; i < S_LEVELS_RING_SIZE; i++ )
 		rb_write_level( (float)i );
-	n = rb_read_recent( buf, S_LEVELS_RING_SIZE * 2 );
+	int n = rb_read_recent( buf, S_LEVELS_RING_SIZE * 2 );
 	TEST_ASSERT( n == S_LEVELS_RING_SIZE, "should clamp to RING_SIZE" );
 	TEST_END();
 }
@@ -232,10 +218,9 @@ static void test_read_clamped( void )
 static void test_zero_count( void )
 {
 	float dummy = 0.0f;
-	int n;
 
 	TEST_BEGIN( "read with outCount=0" );
-	n = rb_read_recent( NULL, 0 );
+	int n = rb_read_recent( NULL, 0 );
 	TEST_ASSERT( n == 0, "zero count should return 0" );
 	n = rb_read_recent( &dummy, 0 );
 	TEST_ASSERT( n == 0, "zero count with valid ptr should return 0" );
@@ -244,10 +229,8 @@ static void test_zero_count( void )
 
 static void test_null_ptr( void )
 {
-	int n;
-
 	TEST_BEGIN( "read with null ptr" );
-	n = rb_read_recent( NULL, 5 );
+	int n = rb_read_recent( NULL, 5 );
 	TEST_ASSERT( n == 0, "null ptr should return 0" );
 	TEST_END();
 }
@@ -255,10 +238,9 @@ static void test_null_ptr( void )
 static void test_negative_count( void )
 {
 	float buf[4];
-	int n;
 
 	TEST_BEGIN( "read with negative outCount" );
-	n = rb_read_recent( buf, -3 );
+	int n = rb_read_recent( buf, -3 );
 	TEST_ASSERT( n == 0, "negative count should return 0" );
 	TEST_END();
 }
@@ -278,8 +260,7 @@ typedef struct {
 static void *writer_thread( void *arg )
 {
 	writer_arg_t *a = (writer_arg_t *)arg;
-	int i;
-	for ( i = 0; i < a->iterations && !a->stop; i++ )
+	for ( int i = 0; i < a->iterations && !a->stop; i++ )
 	{
 		rb_write_level( (float)i );
 	}
@@ -291,7 +272,6 @@ static void test_concurrent( void )
 	writer_arg_t arg;
 	pthread_t    thr;
 	float        buf[16];
-	int          i;
 
 	TEST_BEGIN( "concurrent reader/writer no crash" );
 	rb_reset();
@@ -302,7 +282,7 @@ static void test_concurrent( void )
 		TEST_FAIL( "pthread_create failed" );
 		return;
 	}
-	for ( i = 0; i < 100000; i++ )
+	for ( int i = 0; i < 100000; i++ )
 	{
 		int n = rb_read_recent( buf, 16 );
 		if ( n != 16 )
@@ -333,19 +313,12 @@ static void test_rms_known_input( void )
 	const int   channels   = 2;
 	int16_t     pcm[256 * 2];
 	double      sumSquares = 0.0;
-	int         totalSamples;
-	int         i;
-	float       s;
-	float       rms;
-	float       expected;
-	float       tolerance;
 	float       readBack[1];
-	int         n;
 
 	TEST_BEGIN( "RMS of 1 kHz sine matches A/sqrt(2)" );
 	rb_reset();
 
-	for ( i = 0; i < frameCount; i++ )
+	for ( int i = 0; i < frameCount; i++ )
 	{
 		float    t      = (float)i;
 		int16_t  sample = (int16_t)( amp * sinf( 2.0f * 3.14159265f * freq * t / (float)sampleRate ) );
@@ -353,18 +326,18 @@ static void test_rms_known_input( void )
 		pcm[i * 2 + 1]  = sample;
 	}
 
-	totalSamples = frameCount * channels;
-	for ( i = 0; i < totalSamples; i++ )
+	int totalSamples = frameCount * channels;
+	for ( int i = 0; i < totalSamples; i++ )
 	{
-		s = (float)pcm[i] * ( 1.0f / 32768.0f );
+		float s = (float)pcm[i] * ( 1.0f / 32768.0f );
 		sumSquares += (double)( s * s );
 	}
-	rms = (float)sqrt( sumSquares / (double)totalSamples );
+	float rms = (float)sqrt( sumSquares / (double)totalSamples );
 
 	rb_write_level( rms );
 
-	expected  = 0.25f / 1.41421356f;
-	tolerance = 0.01f;
+	float expected  = 0.25f / 1.41421356f;
+	float tolerance = 0.01f;
 	if ( rms < expected - tolerance || rms > expected + tolerance )
 	{
 		char msg[96];
@@ -375,7 +348,7 @@ static void test_rms_known_input( void )
 		return;
 	}
 
-	n = rb_read_recent( readBack, 1 );
+	int n = rb_read_recent( readBack, 1 );
 	if ( n != 1 || readBack[0] != rms )
 	{
 		TEST_FAIL( "ring did not echo the RMS we just wrote" );

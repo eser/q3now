@@ -132,7 +132,6 @@ ParseVector
 */
 static qboolean ParseVector( ComParser *parser, const char **text, int count, float *v ) {
 	const char	*token;
-	int		i;
 
 	// FIXME: spaces are currently required after parens, should change parseext...
 	token = COM_ParseExt( parser, text, qfalse );
@@ -141,7 +140,7 @@ static qboolean ParseVector( ComParser *parser, const char **text, int count, fl
 		return qfalse;
 	}
 
-	for ( i = 0 ; i < count ; i++ ) {
+	for ( int i = 0 ; i < count ; i++ ) {
 		token = COM_ParseExt( parser, text, qfalse );
 		if ( !token[0] ) {
 			ri.Printf( PRINT_WARNING, "WARNING: missing vector element in shader '%s'\n", shader.name );
@@ -1972,9 +1971,7 @@ static qboolean ParseShader( ComParser *parser, const char **text )
 	resultType res;
 	branchType branch;
 	const char *token;
-	int s;
-
-	s = 0;
+	int s = 0;
 
 	s_extendedShader = (*text >= s_extensionOffset);
 
@@ -3132,7 +3129,6 @@ Find proper stage for dlight pass
 #define GLS_BLEND_BITS (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)
 static void FindLightingStages( void )
 {
-	int i;
 	shader.lightingStage = -1;
 
 	// allow dynamic lights on transparent surfaces (SS_BLEND*, SS_DECAL,
@@ -3141,7 +3137,7 @@ static void FindLightingStages( void )
 	if ( shader.isSky || ( shader.surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) || shader.sort == SS_FOG )
 		return;
 
-	for ( i = 0; i < shader.numUnfoggedPasses; i++ ) {
+	for ( int i = 0; i < shader.numUnfoggedPasses; i++ ) {
 		if ( !stages[i].bundle[0].isLightmap ) {
 			if ( stages[i].bundle[0].tcGen != TCGEN_TEXTURE )
 				continue;
@@ -3254,8 +3250,6 @@ InitShader
 ===============
 */
 static void InitShader( const char *name, int lightmapIndex ) {
-	int i;
-
 	// clear the global shader
 	memset( &shader, 0, sizeof( shader ) );
 	memset( &stages, 0, sizeof( stages ) );
@@ -3268,7 +3262,7 @@ static void InitShader( const char *name, int lightmapIndex ) {
 	// otherwise they will fail and cause massive duplication
 	shader.lightmapSearchIndex = shader.lightmapIndex;
 
-	for ( i = 0 ; i < MAX_SHADER_STAGES ; i++ ) {
+	for ( int i = 0 ; i < MAX_SHADER_STAGES ; i++ ) {
 		stages[i].bundle[0].texMods = texMods[i];
 
 		// default normal/specular
@@ -3341,7 +3335,6 @@ static shader_t *FinishShader( void ) {
 		if ( pStage->isDetail && !r_detailTextures->integer )
 		{
 			int index;
-			
 			for(index = stage + 1; index < MAX_SHADER_STAGES; index++)
 			{
 				if(!stages[index].active)
@@ -4038,14 +4031,12 @@ static int loadShaderBuffers( char **shaderFiles, const int numShaderFiles, char
 	char shaderName[MAX_QPATH];
 	const char *p, *token;
 	long summand, sum = 0;
-	int shaderLine;
-	int i;
 	const char *shaderStart;
 	qboolean denyErrors;
 	ComParser parser;
 
 	// load and parse shader files
-	for ( i = 0; i < numShaderFiles; i++ )
+	for ( int i = 0; i < numShaderFiles; i++ )
 	{
 		Com_sprintf( filename, sizeof( filename ), "scripts/%s", shaderFiles[i] );
 		//ri.Printf( PRINT_DEVELOPER, "...loading '%s'\n", filename );
@@ -4089,7 +4080,7 @@ static int loadShaderBuffers( char **shaderFiles, const int numShaderFiles, char
 				break;
 
 			Q_strncpyz( shaderName, token, sizeof( shaderName ) );
-			shaderLine = COM_GetCurrentParseLine( &parser );
+			int shaderLine = COM_GetCurrentParseLine( &parser );
 
 			token = COM_ParseExt( &parser, &p, qtrue );
 			if ( token[0] != '{' || token[1] != '\0' )
@@ -4298,9 +4289,7 @@ static void CreateExternalShaders( void ) {
 	// in tr_flare.c already.
 	if(!tr.flareShader->defaultShader)
 	{
-		int index;
-		
-		for(index = 0; index < tr.flareShader->numUnfoggedPasses; index++)
+		for(int index = 0; index < tr.flareShader->numUnfoggedPasses; index++)
 		{
 			tr.flareShader->stages[index]->adjustColorsForFog = ACFF_NONE;
 			tr.flareShader->stages[index]->stateBits |= GLS_DEPTHTEST_DISABLE;

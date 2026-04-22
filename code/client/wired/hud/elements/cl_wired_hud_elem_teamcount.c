@@ -52,14 +52,13 @@ void* CG_ModernHUDElementTeamCountNMECreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementTeamCountRoutine(void* context)
 {
 	modernHudElementStatusbarTeamCount* element = (modernHudElementStatusbarTeamCount*)context;
-	int count;
 
 	if ( !wiredHud->isTeamGame ) {
 		return;
 	}
 
 	/* cgame pre-computes own and enemy team counts each frame */
-	count = element->enemy ? wiredHud->enemyTeamCount : wiredHud->ownTeamCount;
+	int count = element->enemy ? wiredHud->enemyTeamCount : wiredHud->ownTeamCount;
 
 	if (count >= 0)
 	{

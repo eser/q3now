@@ -181,10 +181,13 @@ static const byte hash_locase[ 256 ] =
 
 // hash_locase maps '.' to '\0' (path extension = hash terminator)
 // and '\\' to '/' (backslash = forward slash for path normalization)
+// Note: _Static_assert on array subscripts is a GCC extension; Clang rejects it
+#if !defined(__clang__)
 _Static_assert( hash_locase['.']  == '\0', "hash_locase: '.' must map to '\\0' (terminates hash at extension)" );
 _Static_assert( hash_locase['\\'] == '/',  "hash_locase: '\\\\' must map to '/' (path separator normalization)" );
 _Static_assert( hash_locase['A']  == 'a',  "hash_locase: uppercase must map to lowercase" );
 _Static_assert( hash_locase['a']  == 'a',  "hash_locase: lowercase must map to itself" );
+#endif
 
 unsigned long Com_GenerateHashValue( const char *fname, const unsigned int size )
 {
@@ -1462,14 +1465,14 @@ Stores the number of bytes consumed in *bytesRead (1-4).
 int Q_UTF8_NextCodepoint( const char *str, int *bytesRead )
 {
     const unsigned char *s = (const unsigned char *)str;
-    int cp;
-    int expect;
 
     if ( !s || !s[0] ) {
         if ( bytesRead ) *bytesRead = 0;
         return 0;
     }
 
+    int cp;
+    int expect;
     if ( s[0] < 0x80 ) {
         // ASCII
         if ( bytesRead ) *bytesRead = 1;

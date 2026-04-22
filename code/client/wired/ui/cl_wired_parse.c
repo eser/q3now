@@ -23,15 +23,13 @@ static char wui_menuPool[WIRED_MENU_POOL_SIZE];
 static int  wui_menuPoolUsed = 0;
 
 static void *WiredUI_Alloc( int size ) {
-	char *p;
-
 	if ( wui_menuPoolUsed + size > WIRED_MENU_POOL_SIZE ) {
 		Com_Printf( S_COLOR_RED "WiredUI_Alloc: pool exhausted (%d + %d > %d)\n",
 			wui_menuPoolUsed, size, WIRED_MENU_POOL_SIZE );
 		return NULL;
 	}
 
-	p = &wui_menuPool[wui_menuPoolUsed];
+	char *p = &wui_menuPool[wui_menuPoolUsed];
 	wui_menuPoolUsed += ( ( size + 31 ) & ~31 );  // 32-byte align
 	memset( p, 0, size );
 	return p;
@@ -246,10 +244,8 @@ static qboolean WiredPC_Float( int handle, float *out ) {
 }
 
 static qboolean WiredPC_Color( int handle, vec4_t *color ) {
-	int i;
-	float f;
-
-	for ( i = 0; i < 4; i++ ) {
+	for ( int i = 0; i < 4; i++ ) {
+		float f;
 		if ( !WiredPC_Float( handle, &f ) ) {
 			return qfalse;
 		}
@@ -265,8 +261,7 @@ static qboolean WiredPC_Color( int handle, vec4_t *color ) {
 typedef struct { const char *k; int v; } wuiEnumMap_t;
 
 static int WiredPC_LookupEnum( const wuiEnumMap_t *map, const char *str, int defaultVal ) {
-	int i;
-	for ( i = 0; map[i].k; i++ ) {
+	for ( int i = 0; map[i].k; i++ ) {
 		if ( !Q_stricmp( str, map[i].k ) ) return map[i].v;
 	}
 	return defaultVal;
@@ -338,11 +333,10 @@ static const wuiEnumMap_t s_alignMap[] = {
 
 static qboolean WiredPC_CaptureBracedScript( int handle, char *dest, int destSize ) {
 	pc_token_t token;
-	int depth;
 	if ( !WiredPC_ReadToken( handle, &token ) || Q_stricmp( token.string, "{" ) != 0 ) {
 		return qfalse;
 	}
-	depth = 1;
+	int depth = 1;
 	qstring_t dest_qs = { NULL, 0, 0 };
 	if ( dest && destSize > 0 ) { dest[0] = '\0'; dest_qs = QS_Wrap( dest, destSize ); }
 	while ( depth > 0 ) {
@@ -503,9 +497,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item );
 // ── item parser ───────────────────────────────────────────────────────
 
 static qboolean WiredUI_ParseItem( int handle, wiredMenuDef_t *menu ) {
-	wiredItemDef_t *item;
-
-	item = (wiredItemDef_t *)WiredUI_Alloc( sizeof( wiredItemDef_t ) );
+	wiredItemDef_t *item = (wiredItemDef_t *)WiredUI_Alloc( sizeof( wiredItemDef_t ) );
 	if ( !item ) {
 		return qfalse;
 	}
@@ -554,7 +546,7 @@ static void WiredPC_ParseRectInto( int handle, wuiRect_t *wuiRect, wiredRect_t *
 }
 
 static void WiredPC_ParseAnchorInto( int handle, wiredAnchor_t *anchor ) {
-	const char *str;
+	const char *str = NULL;
 	if ( WiredPC_String( handle, &str ) ) {
 		int a = WiredPC_LookupEnum( s_anchorMap, str, WUI_ENUM_UNKNOWN );
 		if ( a == WUI_ENUM_UNKNOWN ) {
@@ -577,8 +569,7 @@ typedef struct {
 } wuiPropDef_t;
 
 static qboolean WiredPC_ApplyProp( int handle, void *base, const wuiPropDef_t *tbl, const char *key ) {
-	int i;
-	for ( i = 0; tbl[i].key; i++ ) {
+	for ( int i = 0; tbl[i].key; i++ ) {
 		if ( !Q_stricmp( key, tbl[i].key ) ) {
 			char *ptr = (char *)base + tbl[i].off;
 			switch ( tbl[i].type ) {
@@ -770,11 +761,11 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		}
 		else if ( !Q_stricmp( token.string, "columns" ) ) {
 			// columns N pos1 width1 maxchars1 pos2 width2 maxchars2 ...
-			int numCols, c;
+			int numCols = 0;
 			WiredPC_Int( handle, &numCols );
 			if ( numCols > 8 ) numCols = 8;
 			item->columns = numCols;
-			for ( c = 0; c < numCols; c++ ) {
+			for ( int c = 0; c < numCols; c++ ) {
 				int pos, width, maxchars;
 				WiredPC_Int( handle, &pos );     // column position (unused for now)
 				WiredPC_Int( handle, &width );
@@ -783,7 +774,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			}
 		}
 		else if ( !Q_stricmp( token.string, "elementtype" ) ) {
-			int et;
+			int et = 0;
 			WiredPC_Int( handle, &et ); // LISTBOX_TEXT or LISTBOX_IMAGE — store if needed
 		}
 		else if ( !Q_stricmp( token.string, "anchor" ) ) {
@@ -1080,10 +1071,9 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 
 static qboolean WiredUI_ParseMenu( int handle ) {
 	pc_token_t       token;
-	wiredMenuDef_t  *menu;
 	const char      *str;
 
-	menu = (wiredMenuDef_t *)WiredUI_Alloc( sizeof( wiredMenuDef_t ) );
+	wiredMenuDef_t  *menu = (wiredMenuDef_t *)WiredUI_Alloc( sizeof( wiredMenuDef_t ) );
 	if ( !menu ) {
 		return qfalse;
 	}
@@ -1174,9 +1164,8 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 
 	// compute content height for scroll support
 	{
-		int ci;
 		float maxBottom = 0;
-		for ( ci = 0; ci < menu->itemCount; ci++ ) {
+		for ( int ci = 0; ci < menu->itemCount; ci++ ) {
 			float bottom = menu->items[ci]->rect.y + menu->items[ci]->rect.h;
 			if ( bottom > maxBottom ) maxBottom = bottom;
 		}
@@ -1197,10 +1186,9 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 // ── file loader ───────────────────────────────────────────────────────
 
 qboolean WiredUI_LoadMenuFile( const char *filename ) {
-	int         handle;
 	pc_token_t  token;
 
-	handle = WiredPC_LoadSource( filename );
+	int handle = WiredPC_LoadSource( filename );
 	if ( !handle ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: could not load '%s'\n", filename );
 		return qfalse;
@@ -1283,8 +1271,7 @@ wiredMenuDef_t *WiredUI_GetMenuByIndex( int index ) {
 }
 
 wiredMenuDef_t *WiredUI_FindMenu( const char *name ) {
-	int i;
-	for ( i = 0; i < wui_menuCount; i++ ) {
+	for ( int i = 0; i < wui_menuCount; i++ ) {
 		if ( !Q_stricmp( wui_menus[i]->name, name ) ) {
 			return wui_menus[i];
 		}
@@ -1380,6 +1367,11 @@ void WiredUI_MenuLuaInit( void ) {
 /* Execute scripts/menus.lua to populate the menu pool. */
 void WiredUI_LoadMenusFromLua( void ) {
 	WiredScript_ExecFile( "scripts/menus.lua" );
+
+	int totalItems = 0;
+	for ( int i = 0; i < wui_menuCount; i++ )
+		totalItems += wui_menus[i] ? wui_menus[i]->itemCount : 0;
+	Com_Printf( "WiredUI: loaded %d menus (%d items total)\n", wui_menuCount, totalItems );
 }
 
 #endif // FEAT_WIRED_UI

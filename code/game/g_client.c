@@ -90,11 +90,7 @@ qboolean SpotWouldTelefrag( gentity_t *spot ) {
 
 	for (i=0 ; i<num ; i++) {
 		hit = &g_entities[touch[i]];
-#if FEAT_TELEFRAG_FIX
 		if ( hit->client && hit->client->ps.stats[STAT_HEALTH] > 0 ) {
-#else
-		if ( hit->client) {
-#endif
 			return qtrue;
 		}
 
@@ -458,7 +454,6 @@ just like the existing corpse to leave behind.
 */
 void CopyToBodyQue( gentity_t *ent ) {
 	gentity_t	*e;
-	int i;
 	gentity_t		*body;
 	int			contents;
 
@@ -481,7 +476,7 @@ void CopyToBodyQue( gentity_t *ent ) {
 		body->s.eFlags |= EF_KAMIKAZE;
 
 		// check if there is a kamikaze timer around for this owner
-		for (i = 0; i < level.num_entities; i++) {
+		for (int i = 0; i < level.num_entities; i++) {
 			e = &g_entities[i];
 			if (!e->inuse)
 				continue;
@@ -739,7 +734,8 @@ void ClientUserinfoChanged( int clientNum ) {
 	gentity_t *ent;
 	int		teamTask, teamLeader, health;
 	const char	*s;
-	char	model[MAX_QPATH];
+	char	charNameBuf[MAX_QPATH];
+	char	skinBuf[MAX_QPATH];
 	char	oldname[MAX_STRING_CHARS];
 	gclient_t	*client;
 	char	c1[MAX_INFO_STRING];
@@ -795,29 +791,16 @@ void ClientUserinfoChanged( int clientNum ) {
 		}
 	}
 
-	// set model
-	Q_strncpyz( model, Info_ValueForKey (userinfo, "model"), sizeof( model ) );
+	// set char and skin
+	Q_strncpyz( charNameBuf, Info_ValueForKey( userinfo, "char" ), sizeof( charNameBuf ) );
+	Q_strncpyz( skinBuf, Info_ValueForKey( userinfo, "skin" ), sizeof( skinBuf ) );
+	if ( !charNameBuf[0] ) {
+		Q_strncpyz( charNameBuf, DEFAULT_MODEL, sizeof( charNameBuf ) );
+	}
+	if ( !skinBuf[0] ) {
+		Q_strncpyz( skinBuf, "default", sizeof( skinBuf ) );
+	}
 
-#if FEAT_TA_TEAM_OVERLAYS
-	if (g_gametype.integer >= GT_TDM && !(ent->r.svFlags & SVF_BOT)) {
-		client->pers.teamInfo = qtrue;
-	} else {
-		s = Info_ValueForKey( userinfo, "teamoverlay" );
-		if ( ! *s || atoi( s ) != 0 ) {
-			client->pers.teamInfo = qtrue;
-		} else {
-			client->pers.teamInfo = qfalse;
-		}
-	}
-#else
-	// teamInfo
-	s = Info_ValueForKey( userinfo, "teamoverlay" );
-	if ( ! *s || atoi( s ) != 0 ) {
-		client->pers.teamInfo = qtrue;
-	} else {
-		client->pers.teamInfo = qfalse;
-	}
-#endif
 	/*
 	s = Info_ValueForKey( userinfo, "cg_pmove_fixed" );
 	if ( !*s || atoi( s ) == 0 ) {
@@ -854,15 +837,15 @@ void ClientUserinfoChanged( int clientNum ) {
 	// print scoreboards, display models, and play custom sounds
 	if (ent->r.svFlags & SVF_BOT)
 	{
-		s = va("n\\%s\\t\\%i\\model\\%s\\c1\\%s\\c2\\%s\\w\\%i\\l\\%i\\skill\\%s\\tt\\%d\\tl\\%d",
-			client->pers.netname, client->sess.sessionTeam, model, c1, c2,
+		s = va("n\\%s\\t\\%i\\char\\%s\\skin\\%s\\c1\\%s\\c2\\%s\\w\\%i\\l\\%i\\skill\\%s\\tt\\%d\\tl\\%d",
+			client->pers.netname, client->sess.sessionTeam, charNameBuf, skinBuf, c1, c2,
 			client->sess.wins, client->sess.losses,
 			Info_ValueForKey( userinfo, "skill" ), teamTask, teamLeader );
 	}
 	else
 	{
-		s = va("n\\%s\\t\\%i\\model\\%s\\c1\\%s\\c2\\%s\\w\\%i\\l\\%i\\tt\\%d\\tl\\%d",
-			client->pers.netname, client->sess.sessionTeam, model, c1, c2, 
+		s = va("n\\%s\\t\\%i\\char\\%s\\skin\\%s\\c1\\%s\\c2\\%s\\w\\%i\\l\\%i\\tt\\%d\\tl\\%d",
+			client->pers.netname, client->sess.sessionTeam, charNameBuf, skinBuf, c1, c2,
 			client->sess.wins, client->sess.losses, teamTask, teamLeader);
 	}
 
@@ -924,6 +907,11 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 			return "Invalid password";
 		}
 	}
+#if FEAT_GAME_MEETING
+	if ( !isBot && g_meeting.integer && !level.meeting ) {
+		return "Game in progress. Wait for the next match.";
+	}
+#endif
 	// if a player reconnects quickly after a disconnect, the client disconnect may never be called, thus flag can get lost in the ether
 	if (ent->inuse) {
 		G_LogPrintf("Forcing disconnect on active client: %i\n", clientNum);
@@ -1064,7 +1052,6 @@ ClientPickWeapon
 */
 int ClientPickSpawnWeapon(gclient_t * client)
 {
-	int i;
 	static int weaponRanks[] =
 	{
 		WP_ROCKET_LAUNCHER,
@@ -1075,7 +1062,7 @@ int ClientPickSpawnWeapon(gclient_t * client)
 	};
 
 	// force the base weapon up
-	for (i = 0; weaponRanks[i] != WP_NONE; i++) {
+	for (int i = 0; weaponRanks[i] != WP_NONE; i++) {
 		if (client->ps.stats[STAT_WEAPONS] & (1 << weaponRanks[i])) {
 			return weaponRanks[i];
 		}

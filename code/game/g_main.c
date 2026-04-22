@@ -54,7 +54,7 @@ vmCvar_t	g_needpass;
 vmCvar_t	g_maxclients;
 vmCvar_t	g_maxGameClients;
 vmCvar_t	g_dedicated;
-vmCvar_t	g_gravity;
+vmCvar_t	g_envGravity;
 vmCvar_t	g_cheats;
 vmCvar_t	g_forceRespawn;
 vmCvar_t	g_inactivity;
@@ -82,8 +82,8 @@ vmCvar_t	g_localTeamPref;
 #if FEAT_OVERLOAD
 vmCvar_t	g_obeliskRespawnDelay;
 #endif
-vmCvar_t	g_enableDust;
-vmCvar_t	g_enableBreath;
+vmCvar_t	g_envGroundDusty;
+vmCvar_t	g_envTemperature;
 
 vmCvar_t	g_spawnWeapons;
 vmCvar_t	g_grapple;
@@ -128,7 +128,10 @@ vmCvar_t	g_allowTimeout;
 vmCvar_t	g_projectileBounce;
 #endif
 #if FEAT_ATMOSPHERIC
-vmCvar_t	g_weather;
+vmCvar_t	g_envWeather;
+#endif
+#if FEAT_GAME_MEETING
+vmCvar_t	g_meeting;
 #endif
 #if FEAT_TEAM_AUTOBALANCE
 vmCvar_t	g_teamBalance;
@@ -213,7 +216,7 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_dedicated, "dedicated", "0", 0, 0, qfalse  },
 
-	{ &g_gravity, "g_gravity", "800", 0, 0, qtrue  },
+	{ &g_envGravity, "g_envGravity", "800", 0, 0, qtrue  },
 	{ &g_forceRespawn, "g_forceRespawn", "0", 0, 0, qtrue },
 	{ &g_inactivity, "g_inactivity", "0", 0, 0, qtrue },
 	{ &g_debugMove, "g_debugMove", "0", 0, 0, qfalse },
@@ -229,8 +232,8 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", CVAR_SERVERINFO, 0, qfalse },
 #endif
 	
-	{ &g_enableDust, "g_enableDust", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
-	{ &g_enableBreath, "g_enableBreath", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
+	{ &g_envGroundDusty, "g_envGroundDusty", "0", CVAR_SERVERINFO, 0, qtrue, qfalse },
+	{ &g_envTemperature, "g_envTemperature", "20", CVAR_SERVERINFO, 0, qtrue, qfalse },
 	{ &g_smoothClients, "g_smoothClients", "1", 0, 0, qfalse},
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO, 0, qfalse},
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO, 0, qfalse},
@@ -281,7 +284,10 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_projectileBounce,        "g_projectileBounce",        "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
 #endif
 #if FEAT_ATMOSPHERIC
-    { &g_weather,                 "g_weather",                 "", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qtrue },
+    { &g_envWeather,              "g_envWeather",              "", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qtrue },
+#endif
+#if FEAT_GAME_MEETING
+    { &g_meeting,                 "g_meeting",                 "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qtrue },
 #endif
 #if FEAT_TEAM_AUTOBALANCE
     { &g_teamBalance,             "g_teamBalance",             "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
@@ -540,7 +546,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	level.time = levelTime;
 	level.startTime = levelTime;
 
-	level.snd_fry = G_SoundIndex("sound/player/fry.opus");	// FIXME standing in lava / slime
+	level.snd_fry = G_SoundIndex("sound/misc/fry.opus");	// FIXME standing in lava / slime
 
 	if ( g_logfile.string[0] ) {
 		if ( g_logfileSync.integer ) {
@@ -693,6 +699,12 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	}
 
 	trap_SetConfigstring( CS_INTERMISSION, "" );
+
+#if FEAT_GAME_MEETING
+	level.meeting = g_meeting.integer ? qtrue : qfalse;
+	trap_SetConfigstring( CS_MEETING, va( "%d", (int)level.meeting ) );
+	trap_SetConfigstring( CS_CLIENTS_READY, "" );
+#endif
 
 #if FEAT_AUTO_DEMO
 	// auto-demo (10K): start recording when match begins (warmup ended)
@@ -1474,9 +1486,18 @@ void CheckIntermissionExit( void ) {
 		}
 		cl->ps.stats[STAT_CLIENTS_READY] = readyMask;
 	}
+#if FEAT_GAME_MEETING
+	if ( level.meeting ) {
+		trap_SetConfigstring( CS_CLIENTS_READY, va("%d", readyMask) );
+	}
+#endif
 
-	// never exit in less than five seconds
+	// never exit in less than five seconds (skip timer in pre-match meeting)
+#if FEAT_GAME_MEETING
+	if ( !level.meeting && level.time < level.intermissiontime + 5000 ) {
+#else
 	if ( level.time < level.intermissiontime + 5000 ) {
+#endif
 		return;
 	}
 
@@ -1490,10 +1511,24 @@ void CheckIntermissionExit( void ) {
 
 		// if everyone wants to go, go now
 		if ( !notReady ) {
+#if FEAT_GAME_MEETING
+			if ( level.meeting ) {
+				level.meeting = qfalse;
+				trap_SetConfigstring( CS_MEETING, "0" );
+				trap_SetConfigstring( CS_CLIENTS_READY, "" );
+				return;
+			}
+#endif
 			ExitLevel();
 			return;
 		}
 	}
+#if FEAT_GAME_MEETING
+	else if ( level.meeting ) {
+		ExitLevel();
+		return;
+	}
+#endif
 
 	// the first person to ready starts the ten second timeout
 	if ( !level.readyToExit ) {
@@ -1687,13 +1722,12 @@ FindTheKing
 */
 gentity_t *FindTheKing() {
     gentity_t *ent;
-    int i;
 
     if (g_gametype.integer != GT_KINGOFTHEHILL) {
         return NULL;
     }
 
-    for (i = 0; i< g_maxclients.integer; i++) {
+    for (int i = 0; i< g_maxclients.integer; i++) {
         ent = g_entities + i;
         if (!ent->client) {
             continue;
@@ -1725,8 +1759,6 @@ HonorAsKing
 ==================
 */
 qboolean HonorAsKing(gentity_t *ent) {
-    int i;
-
     if (g_gametype.integer != GT_KINGOFTHEHILL) {
         return qfalse;
     }
@@ -1757,7 +1789,7 @@ qboolean HonorAsKing(gentity_t *ent) {
     ent->client->ps.stats[STAT_ARMOR] = MAX_ARMOR;
     ent->client->ps.stats[STAT_ARMORCLASS] = ARM_HEAVY;
 
-    for (i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++) {
+    for (int i = WP_NONE + 1; i < WP_NUM_WEAPONS; i++) {
         if (!bg_weaponlist[i].spawnWeapon && !(level.mapWeapons & (1 << i)) && g_spawnWeapons.integer <= 1) {
             continue;
         }
@@ -1778,13 +1810,12 @@ AssignAKing
 */
 gentity_t *AssignAKing(gentity_t *preferred) {
     gentity_t *ent;
-    int i;
 
     if (HonorAsKing(preferred)) {
         return preferred;
     }
 
-    for (i = 0; i< g_maxclients.integer; i++) {
+    for (int i = 0; i< g_maxclients.integer; i++) {
         ent = g_entities + i;
         if (ent == preferred) {
             continue;
@@ -2109,9 +2140,7 @@ PrintTeam
 ==================
 */
 void PrintTeam(int team, const char *message) {
-	int i;
-
-	for ( i = 0 ; i < level.maxclients ; i++ ) {
+	for ( int i = 0 ; i < level.maxclients ; i++ ) {
 		if (level.clients[i].sess.sessionTeam != team)
 			continue;
 		trap_SendServerCommand( i, message );
@@ -2127,10 +2156,9 @@ Returns qtrue if all non-spectator players are ready. (4E)
 ==================
 */
 qboolean G_AllPlayersReady( void ) {
-	int i;
 	gclient_t *cl;
 
-	for ( i = 0; i < level.maxclients; i++ ) {
+	for ( int i = 0; i < level.maxclients; i++ ) {
 		cl = level.clients + i;
 		if ( cl->pers.connected != CON_CONNECTED ) {
 			continue;
@@ -2190,8 +2218,6 @@ SetLeader
 ==================
 */
 void SetLeader(int team, int client) {
-	int i;
-
 	if ( level.clients[client].pers.connected == CON_DISCONNECTED ) {
         PrintTeam(team, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is not connected\n\"", level.clients[client].pers.netname));
 		return;
@@ -2200,7 +2226,7 @@ void SetLeader(int team, int client) {
         PrintTeam(team, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " is not on the team anymore\n\"", level.clients[client].pers.netname));
 		return;
 	}
-	for ( i = 0 ; i < level.maxclients ; i++ ) {
+	for ( int i = 0 ; i < level.maxclients ; i++ ) {
 		if (level.clients[i].sess.sessionTeam != team)
 			continue;
 		if (level.clients[i].sess.teamLeader) {
@@ -2505,10 +2531,9 @@ Respawn all dead players, reset health/ammo for all players.
 ================
 */
 void G_ResetRound( void ) {
-	int i;
 	gentity_t *ent;
 
-	for ( i = 0; i < level.maxclients; i++ ) {
+	for ( int i = 0; i < level.maxclients; i++ ) {
 		ent = &g_entities[i];
 		if ( !ent->inuse || !ent->client ) {
 			continue;
@@ -2669,6 +2694,27 @@ void G_CheckRankedQueue( void ) {
 
 /*
 ================
+G_FreezePlayerState
+================
+*/
+#if FEAT_SCREENSHOT_TOOLS
+static void G_FreezePlayerState( playerState_t *ps, int msec ) {
+	int i;
+
+	if ( ps->weaponTime )       ps->weaponTime += msec;
+	if ( ps->legsTimer )        ps->legsTimer += msec;
+	if ( ps->torsoTimer )       ps->torsoTimer += msec;
+	if ( ps->externalEvent )    ps->externalEventTime += msec;
+
+	for ( i = 0; i < PW_NUM_POWERUPS; i++ ) {
+		if ( !ps->powerups[i] ) continue;
+		ps->powerups[i] += msec;
+	}
+}
+#endif
+
+/*
+================
 G_RunFrame
 
 Advances the non-player objects in the world
@@ -2691,8 +2737,32 @@ void G_RunFrame( int levelTime ) {
 	level.frameStartTime = trap_Milliseconds();
 #endif
 
+#if FEAT_SCREENSHOT_TOOLS
+	if ( level.stopTime ) {
+		int msec = level.time - level.previousTime;
+		for ( i = 0; i < level.maxclients; i++ ) {
+			gclient_t *client = &level.clients[i];
+			if ( client->pers.connected != CON_CONNECTED ) continue;
+			G_FreezePlayerState( &client->ps, msec );
+		}
+		for ( i = MAX_CLIENTS; i < level.num_entities; i++ ) {
+			ent = &g_entities[i];
+			if ( !ent->inuse ) continue;
+			ent->timestamp += msec;
+			if ( ent->nextthink ) ent->nextthink += msec;
+		}
+	}
+#endif
+
 	// get any cvar changes
 	G_UpdateCvars();
+
+#if FEAT_GAME_MEETING
+	if ( level.meeting ) {
+		CheckIntermissionExit();
+		return;
+	}
+#endif
 
 	//
 	// go through all allocated objects
@@ -2750,6 +2820,9 @@ void G_RunFrame( int levelTime ) {
 		}
 
 		if ( i < MAX_CLIENTS ) {
+#if FEAT_SCREENSHOT_TOOLS
+			if ( level.stopTime && i > 0 ) continue;
+#endif
 			G_RunClient( ent );
 			continue;
 		}

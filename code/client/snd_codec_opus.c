@@ -207,16 +207,6 @@ S_OPUS_CodecOpenStream
 */
 snd_stream_t *S_OPUS_CodecOpenStream( const char *filename )
 {
-	snd_stream_t *stream;
-
-	// Opus codec control structure
-	OggOpusFile *of;
-
-	// some variables used to get informations about the Opus stream
-	const OpusHead *head;
-	ogg_int64_t numSamples;
-	int error;
-
 	// check if input is valid
 	if ( !filename )
 	{
@@ -224,14 +214,15 @@ snd_stream_t *S_OPUS_CodecOpenStream( const char *filename )
 	}
 
 	// Open the stream
-	stream = S_CodecUtilOpen( filename, &opus_codec );
+	snd_stream_t *stream = S_CodecUtilOpen( filename, &opus_codec );
 	if ( !stream )
 	{
 		return NULL;
 	}
 
 	// open the codec with our callbacks and stream as the generic pointer
-	of = op_open_callbacks( stream, &S_OPUS_Callbacks, NULL, 0, &error );
+	int error;
+	OggOpusFile *of = op_open_callbacks( stream, &S_OPUS_Callbacks, NULL, 0, &error );
 	if ( !of )
 	{
 		Com_DPrintf( "S_OPUS: Failed to open %s (error %d)\n", filename, error );
@@ -252,7 +243,7 @@ snd_stream_t *S_OPUS_CodecOpenStream( const char *filename )
 	}
 
 	// get the info about channels
-	head = op_head( of, -1 );
+	const OpusHead *head = op_head( of, -1 );
 	if ( !head )
 	{
 		op_free( of );
@@ -263,7 +254,7 @@ snd_stream_t *S_OPUS_CodecOpenStream( const char *filename )
 	}
 
 	// get the number of sample-frames in the Opus stream
-	numSamples = op_pcm_total( of, -1 );
+	ogg_int64_t numSamples = op_pcm_total( of, -1 );
 
 	// fill in the info-structure in the stream
 	// Opus always decodes to 48 kHz
@@ -279,8 +270,7 @@ snd_stream_t *S_OPUS_CodecOpenStream( const char *filename )
 		const OpusTags *tags = op_tags( of, -1 );
 		if ( tags )
 		{
-			int i;
-			for ( i = 0; i < tags->comments; i++ )
+			for ( int i = 0; i < tags->comments; i++ )
 			{
 				const char *comment = tags->user_comments[i];
 				if ( !Q_stricmpn( comment, "LOOPSTART=", 10 ) )
@@ -345,10 +335,6 @@ S_OPUS_CodecReadStream
 */
 int S_OPUS_CodecReadStream( snd_stream_t *stream, int bytes, void *buffer )
 {
-	// buffer handling
-	int samplesNeeded, samplesRead, totalSamples;
-	opus_int16 *bufPtr;
-
 	// check if input is valid
 	if ( !(stream && buffer) )
 	{
@@ -360,18 +346,18 @@ int S_OPUS_CodecReadStream( snd_stream_t *stream, int bytes, void *buffer )
 		return 0;
 	}
 
-	bufPtr = (opus_int16 *) buffer;
-	totalSamples = 0;
+	opus_int16 *bufPtr = (opus_int16 *) buffer;
+	int totalSamples = 0;
 
 	// op_read takes the total number of values (samples * channels) in the buffer,
 	// and returns the number of samples per channel read
-	samplesNeeded = bytes / ( stream->info.channels * OPUS_SAMPLEWIDTH );
+	int samplesNeeded = bytes / ( stream->info.channels * OPUS_SAMPLEWIDTH );
 
 	// cycle until we have the requested or all available samples read
 	while ( samplesNeeded > 0 )
 	{
 		// read some samples from the Opus codec
-		samplesRead = op_read( (OggOpusFile *) stream->ptr, bufPtr,
+		int samplesRead = op_read( (OggOpusFile *) stream->ptr, bufPtr,
 			samplesNeeded * stream->info.channels, NULL );
 
 		// no more samples are left
@@ -399,10 +385,6 @@ where we read the whole stream at once.
 */
 void *S_OPUS_CodecLoad( const char *filename, snd_info_t *info )
 {
-	snd_stream_t *stream;
-	byte *buffer;
-	int bytesRead;
-
 	// check if input is valid
 	if ( !(filename && info) )
 	{
@@ -410,7 +392,7 @@ void *S_OPUS_CodecLoad( const char *filename, snd_info_t *info )
 	}
 
 	// open the file as a stream
-	stream = S_OPUS_CodecOpenStream( filename );
+	snd_stream_t *stream = S_OPUS_CodecOpenStream( filename );
 	if ( !stream )
 	{
 		return NULL;
@@ -428,7 +410,7 @@ void *S_OPUS_CodecLoad( const char *filename, snd_info_t *info )
 
 	// allocate a buffer
 	// this buffer must be free-ed by the caller of this function
-	buffer = Hunk_AllocateTempMemory( info->size );
+	byte *buffer = Hunk_AllocateTempMemory( info->size );
 	if ( !buffer )
 	{
 		S_OPUS_CodecCloseStream( stream );
@@ -437,7 +419,7 @@ void *S_OPUS_CodecLoad( const char *filename, snd_info_t *info )
 	}
 
 	// fill the buffer
-	bytesRead = S_OPUS_CodecReadStream( stream, info->size, buffer );
+	int bytesRead = S_OPUS_CodecReadStream( stream, info->size, buffer );
 
 	// we don't even have read a single byte
 	if ( bytesRead <= 0 )

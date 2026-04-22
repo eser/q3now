@@ -56,19 +56,15 @@ void* CG_ModernHUDElementWeaponListCreate(const modernhudConfig_t* config)
 
 static void CG_ModernHUDElementWeaponListSetup(modernHudElementWeaponList_t* element, modernhudAlignH_t align)
 {
-	int wpi;
 	int x, y, h;
-	int total;
 	int ammo_max = 0;
-	float offsetX;
-	int count;
 
-	count = wiredHud->weaponListCount;
+	int count = wiredHud->weaponListCount;
 	if (count > WLIST_MAX_SLOTS) count = WLIST_MAX_SLOTS;
 	if (count > 16) count = 16;
 
 	/* update max ammo width */
-	for (wpi = 0; wpi < count; ++wpi)
+	for (int wpi = 0; wpi < count; ++wpi)
 	{
 		int ammoVal = wiredHud->weaponList[wpi].ammo;
 		if (ammo_max < ammoVal)
@@ -83,7 +79,7 @@ static void CG_ModernHUDElementWeaponListSetup(modernHudElementWeaponList_t* ele
 		element->ammoWidth = (int)Text_Measure(va(" %d", ammo_max), element->ammoCount[0].fontId, element->ammoCount[0].coord.named.h);
 	}
 
-	total = count;
+	int total = count;
 
 	if (align == MODERNHUD_ALIGNH_CENTER)
 	{
@@ -99,7 +95,7 @@ static void CG_ModernHUDElementWeaponListSetup(modernHudElementWeaponList_t* ele
 
 	element->weaponNum = 0;
 
-	for (wpi = 0; wpi < count; ++wpi)
+	for (int wpi = 0; wpi < count; ++wpi)
 	{
 		int ammo;
 
@@ -209,7 +205,7 @@ static void CG_ModernHUDElementWeaponListSetup(modernHudElementWeaponList_t* ele
 		element->tmp_config.alignH.value = MODERNHUD_ALIGNH_LEFT;
 		element->tmp_config.alignH.isSet = qtrue;
 
-		offsetX = element->tmp_config.fontsize.value[0] / 8;
+		float offsetX = element->tmp_config.fontsize.value[0] / 8;
 
 		if (align == MODERNHUD_ALIGNH_RIGHT)
 		{
@@ -261,11 +257,10 @@ static void CG_ModernHUDElementWeaponListSetup(modernHudElementWeaponList_t* ele
 void CG_ModernHUDElementWeaponListRoutine(void* context)
 {
 	modernHudElementWeaponList_t* element = (modernHudElementWeaponList_t*)context;
-	int i;
 
 	CG_ModernHUDElementWeaponListSetup(element, element->config.textAlign.value);
 
-	for (i = 0; i < element->weaponNum; ++i)
+	for (int i = 0; i < element->weaponNum; ++i)
 	{
 		CG_ModernHUDFillWithColor(&element->back[i].coord, element->back[i].color);
 		CG_ModernHUDDrawStretchPicCtx(&element->config, &element->weaponIcon[i]);

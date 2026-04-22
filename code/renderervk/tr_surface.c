@@ -622,11 +622,9 @@ static void DoRailDiscs( int numSegs, const vec3_t start, const vec3_t dir, cons
 
 	for ( i = 0; i < numSegs; i++ )
 	{
-		int j;
-
 		RB_CHECKOVERFLOW( 4, 6 );
 
-		for ( j = 0; j < 4; j++ )
+		for ( int j = 0; j < 4; j++ )
 		{
 			VectorCopy( pos[j], tess.xyz[tess.numVertexes] );
 			tess.texCoords[0][tess.numVertexes][0] = ( j < 2 );
@@ -1382,8 +1380,6 @@ Draws x/y/z lines from the origin for orientation debugging
 */
 static void RB_SurfaceAxis( void ) {
 #ifdef USE_VULKAN
-	int i;
-
 	RB_EndSurface();
 
 	GL_Bind( tr.whiteImage );
@@ -1393,7 +1389,7 @@ static void RB_SurfaceAxis( void ) {
 	tess.xyz[5][2] = 16.0;
 
 	memset( tess.svars.colors[0], 0, 6 * sizeof( color4ub_t ) );
-	for ( i = 0; i < 6; i++ )
+	for ( int i = 0; i < 6; i++ )
 		tess.svars.colors[0][i].rgba[3] = 255;
 
 	tess.svars.colors[0][0].rgba[0] = 255;
@@ -1414,7 +1410,6 @@ static void RB_SurfaceAxis( void ) {
 #else
 	vec3_t xyz[6];
 	color4ub_t colors[6];
-	int i;
 
 	GL_ClientState( 0, CLS_COLOR_ARRAY );
 
@@ -1429,7 +1424,7 @@ static void RB_SurfaceAxis( void ) {
 	xyz[5][2] = 16.0;
 
 	memset( colors, 0, sizeof( colors ) );
-	for ( i = 0; i < 6; i++ ) {
+	for ( int i = 0; i < 6; i++ ) {
 		colors[i].rgba[3] = 255;
 	}
 

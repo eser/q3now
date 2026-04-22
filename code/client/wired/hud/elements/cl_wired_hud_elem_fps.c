@@ -26,13 +26,10 @@ void* CG_ModernHUDElementFPSCreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementFPSRoutine(void* context)
 {
 	modernHudElementFPS_t* element = (modernHudElementFPS_t*)context;
-	float     fps_val;
-	int     fps_val_int;
-	int     t;
 
 	// don't use serverTime, because that will be drifting to
 	// correct for internet lag changes, timescales, timedemos, etc
-	t = trap_Milliseconds();
+	int t = trap_Milliseconds();
 	if (element->timePrev == 0)
 	{
 		// skip first measure result
@@ -49,8 +46,8 @@ void CG_ModernHUDElementFPSRoutine(void* context)
 		element->framesNum = FPS_MAX_FRAMES;
 	}
 
-	fps_val = 1000.0f / element->timeAverage;
-	fps_val_int = (int)fps_val;
+	float fps_val = 1000.0f / element->timeAverage;
+	int fps_val_int = (int)fps_val;
 	if (fps_val - (float)fps_val_int > 0.5f)
 	{
 		++fps_val_int;

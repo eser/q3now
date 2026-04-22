@@ -94,7 +94,6 @@ Add or refresh an entity in the awareness list.
 */
 void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius )
 {
-	int i;
 	gentity_t *ent;
 	float dist, skill, react;
 	vec3_t delta;
@@ -113,7 +112,7 @@ void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius )
 	if ( dist > radius ) return;
 
 	// check if already tracked
-	for ( i = 0; i < bs->num_aware; i++ ) {
+	for ( int i = 0; i < bs->num_aware; i++ ) {
 		if ( bs->aware[i].ent.entnum == entnum ) {
 			// refresh — don't reset react_time
 			return;

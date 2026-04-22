@@ -213,7 +213,7 @@ static void PlayerIntroSound( const char *modelAndSkin ) {
 		skin = model;
 	}
 
-	trap_SendConsoleCommand( EXEC_APPEND, va( "play sound/player/announce/%s.opus\n", skin ) );
+	trap_SendConsoleCommand( EXEC_APPEND, va( "play sounds/announcer/%s.opus\n", skin ) );
 }
 
 /*
@@ -333,10 +333,9 @@ G_RemoveRandomBot
 ===============
 */
 int G_RemoveRandomBot( int team ) {
-	int i;
 	gclient_t	*cl;
 
-	for ( i=0 ; i< g_maxclients.integer ; i++ ) {
+	for ( int i=0 ; i< g_maxclients.integer ; i++ ) {
 		cl = level.clients + i;
 		if ( cl->pers.connected != CON_CONNECTED ) {
 			continue;
@@ -713,7 +712,7 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 
 	userinfo[0] = '\0';
 
-	botname = characterInfo->name;
+	botname = characterInfo->display_name;
 	if (altname && altname[0]) {
 		botname = altname;
 	}
@@ -722,13 +721,11 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	Info_SetValueForKey( userinfo, "snaps", "20" );
 	Info_SetValueForKey( userinfo, "skill", va("%.2f", 1.0f + 4.0f * skill) );
 	Info_SetValueForKey( userinfo, "teampref", team );
-	Info_SetValueForKey( userinfo, "model", characterInfo->model );
+	Info_SetValueForKey( userinfo, "char", characterInfo->name );
+	Info_SetValueForKey( userinfo, "skin", characterInfo->skinName );
 	Info_SetValueForKey( userinfo, "color1", "4" );
 	Info_SetValueForKey( userinfo, "color2", "5" );
 	Info_SetValueForKey( userinfo, "characterfile", characterInfo->profilePath );
-
-	// don't send tinfo to bots, they don't parse it
-	Info_SetValueForKey( userinfo, "teamoverlay", "0" );
 
 	// register the userinfo
 	trap_SetUserinfo( clientNum, userinfo );
@@ -813,19 +810,18 @@ Svcmd_BotList_f
 ===============
 */
 void Svcmd_BotList_f( void ) {
-	int i;
 	char name[MAX_TOKEN_CHARS];
 	const g_characterInfo_t *characterInfo;
 
 	trap_Print("^1name             model            characterfile\n");
 
-	for ( i = 0; i < G_Characters_Count(); i++ ) {
+	for ( int i = 0; i < G_Characters_Count(); i++ ) {
 		characterInfo = G_Character_GetByIndex( i );
 		if ( !characterInfo ) {
 			continue;
 		}
 		Q_strncpyz( name, characterInfo->name, sizeof( name ) );
-		trap_Print(va("%-16s %-16s %-20s\n", name, characterInfo->model, characterInfo->profilePath));
+		trap_Print(va("%-16s %-16s %-20s\n", name, characterInfo->skinName, characterInfo->profilePath));
 	}
 }
 

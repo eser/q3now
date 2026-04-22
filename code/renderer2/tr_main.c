@@ -681,8 +681,7 @@ static void R_SetupFrustum (viewParms_t *dest, float xmin, float xmax, float yma
 {
 	vec3_t ofsorigin;
 	float oppleg, adjleg, length;
-	int i;
-	
+
 	if(stereoSep == 0 && xmin == -xmax)
 	{
 		// symmetric case can be simplified
@@ -725,7 +724,7 @@ static void R_SetupFrustum (viewParms_t *dest, float xmin, float xmax, float yma
 	VectorScale(dest->or.axis[0], oppleg, dest->frustum[3].normal);
 	VectorMA(dest->frustum[3].normal, -adjleg, dest->or.axis[2], dest->frustum[3].normal);
 	
-	for (i=0 ; i<4 ; i++) {
+	for (int i=0 ; i<4 ; i++) {
 		dest->frustum[i].type = PLANE_NON_AXIAL;
 		dest->frustum[i].dist = DotProduct (ofsorigin, dest->frustum[i].normal);
 		SetPlaneSignbits( &dest->frustum[i] );
@@ -862,7 +861,6 @@ static void R_SetupProjectionOrtho(viewParms_t *dest, vec3_t viewBounds[2])
 {
 	float xmin, xmax, ymin, ymax, znear, zfar;
 	//viewParms_t *dest = &tr.viewParms;
-	int i;
 	vec3_t pop;
 
 	// Quake3:   Projection:
@@ -919,7 +917,7 @@ static void R_SetupProjectionOrtho(viewParms_t *dest, vec3_t viewBounds[2])
 	VectorMA(dest->or.origin, -viewBounds[1][0], dest->frustum[4].normal, pop);
 	dest->frustum[4].dist = DotProduct(pop, dest->frustum[4].normal);
 	
-	for (i = 0; i < 5; i++)
+	for (int i = 0; i < 5; i++)
 	{
 		dest->frustum[i].type = PLANE_NON_AXIAL;
 		SetPlaneSignbits (&dest->frustum[i]);
@@ -1197,7 +1195,6 @@ static qboolean IsMirror( const drawSurf_t *drawSurf, int entityNum )
 static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, vec4_t clipDest[128] ) {
 	float shortest = 100000000;
 	int entityNum;
-	int numTriangles;
 	shader_t *shader;
 	int		fogNum;
 	int dlighted;
@@ -1217,12 +1214,11 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, vec4_t clipDest[128
 
 	for ( i = 0; i < tess.numVertexes; i++ )
 	{
-		int j;
 		unsigned int pointFlags = 0;
 
 		R_TransformModelToClip( tess.xyz[i], tr.or.modelMatrix, tr.viewParms.projectionMatrix, eye, clip );
 
-		for ( j = 0; j < 3; j++ )
+		for ( int j = 0; j < 3; j++ )
 		{
 			if ( clip[j] >= clip[3] )
 			{
@@ -1248,7 +1244,7 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, vec4_t clipDest[128
 	// based on vertex distance isn't 100% correct (we should be checking for
 	// range to the surface), but it's good enough for the types of portals
 	// we have in the game right now.
-	numTriangles = tess.numIndexes / 3;
+	int numTriangles = tess.numIndexes / 3;
 
 	for ( i = 0; i < tess.numIndexes; i += 3 )
 	{
@@ -1634,13 +1630,11 @@ R_AddEntitySurfaces
 =============
 */
 static void R_AddEntitySurfaces (void) {
-	int i;
-
 	if ( !r_drawentities->integer ) {
 		return;
 	}
 
-	for ( i = 0; i < tr.refdef.num_entities; i++)
+	for ( int i = 0; i < tr.refdef.num_entities; i++)
 		R_AddEntitySurface(i);
 }
 
@@ -1780,9 +1774,7 @@ void R_RenderView (const viewParms_t *parms) {
 
 void R_RenderDlightCubemaps(const refdef_t *fd)
 {
-	int i;
-
-	for (i = 0; i < tr.refdef.num_dlights; i++)
+	for (int i = 0; i < tr.refdef.num_dlights; i++)
 	{
 		viewParms_t		shadowParms;
 		int j;
@@ -1880,7 +1872,6 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 			float radius = 0.0f;
 			float scale = 1.0f;
 			vec3_t diff;
-			int j;
 
 			if (!model)
 				continue;
@@ -1948,7 +1939,7 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 			VectorCopy(ent->e.origin, shadow.entityOrigins[0]);
 			shadow.entityRadiuses[0] = radius;
 
-			for (j = 0; j < MAX_CALC_PSHADOWS; j++)
+			for (int j = 0; j < MAX_CALC_PSHADOWS; j++)
 			{
 				pshadow_t swap;
 
@@ -1975,9 +1966,8 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 	for ( i = 0; i < tr.refdef.num_pshadows; i++)
 	{
 		pshadow_t *ps1 = &tr.refdef.pshadows[i];
-		int j;
 
-		for (j = i + 1; j < tr.refdef.num_pshadows; j++)
+		for (int j = i + 1; j < tr.refdef.num_pshadows; j++)
 		{
 			pshadow_t *ps2 = &tr.refdef.pshadows[j];
 			int k;
@@ -2076,7 +2066,6 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 	// next, render shadowmaps
 	for ( i = 0; i < tr.refdef.num_pshadows; i++)
 	{
-		int firstDrawSurf;
 		pshadow_t *shadow = &tr.refdef.pshadows[i];
 		int j;
 
@@ -2119,7 +2108,7 @@ void R_RenderPshadowMaps(const refdef_t *fd)
 			tr.viewParms.frameSceneNum = tr.frameSceneNum;
 			tr.viewParms.frameCount = tr.frameCount;
 
-			firstDrawSurf = tr.refdef.numDrawSurfs;
+			int firstDrawSurf = tr.refdef.numDrawSurfs;
 
 			tr.viewCount++;
 
@@ -2485,8 +2474,6 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 	}
 
 	{
-		int firstDrawSurf;
-
 		memset( &shadowParms, 0, sizeof( shadowParms ) );
 
 		if (glRefConfig.framebufferObject)
@@ -2528,7 +2515,7 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 			tr.viewParms.frameSceneNum = tr.frameSceneNum;
 			tr.viewParms.frameCount = tr.frameCount;
 
-			firstDrawSurf = tr.refdef.numDrawSurfs;
+			int firstDrawSurf = tr.refdef.numDrawSurfs;
 
 			tr.viewCount++;
 

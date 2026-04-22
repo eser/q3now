@@ -356,9 +356,8 @@ FS_PakIsPure
 */
 static qboolean FS_PakIsPure( const pack_t *pack ) {
 #ifndef DEDICATED
-	int i;
 	if ( fs_numServerPaks ) {
-		for ( i = 0 ; i < fs_numServerPaks ; i++ ) {
+		for ( int i = 0 ; i < fs_numServerPaks ; i++ ) {
 			// FIXME: also use hashed file names
 			// NOTE TTimo: a pk3 with same checksum but different name would be validated too
 			//   I don't see this as allowing for any exploit, it would only happen if the client does manips of its file names 'not a bug'
@@ -1830,10 +1829,9 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 
 #if FEAT_SW3Z
 	if ( fsh[f].sw3zData ) {
-		int avail;
 		if ( len <= 0 )
 			return 0;
-		avail = fsh[f].sw3zSize - fsh[f].sw3zPos;
+		int avail = fsh[f].sw3zSize - fsh[f].sw3zPos;
 		if ( len > avail )
 			len = avail;
 		memcpy( buffer, fsh[f].sw3zData + fsh[f].sw3zPos, len );
@@ -3297,12 +3295,10 @@ FS_AddFileToList
 ==================
 */
 static int FS_AddFileToList( const char *name, char **list, int nfiles ) {
-	int		i;
-
 	if ( nfiles == MAX_FOUND_FILES - 1 ) {
 		return nfiles;
 	}
-	for ( i = 0 ; i < nfiles ; i++ ) {
+	for ( int i = 0 ; i < nfiles ; i++ ) {
 		if ( !Q_stricmp( name, list[i] ) ) {
 			return nfiles; // already in list
 		}
@@ -3530,8 +3526,6 @@ FS_FreeFileList
 =================
 */
 void FS_FreeFileList( char **list ) {
-	int		i;
-
 	if ( !fs_searchpaths ) {
 		Com_Error( ERR_FATAL, "Filesystem call made without initialization" );
 	}
@@ -3540,11 +3534,120 @@ void FS_FreeFileList( char **list ) {
 		return;
 	}
 
-	for ( i = 0 ; list[i] ; i++ ) {
+	for ( int i = 0 ; list[i] ; i++ ) {
 		Z_Free( list[i] );
 	}
 
 	Z_Free( list );
+}
+
+
+/*
+===================
+FS_ListDirectories
+
+Returns the names of all immediate subdirectories under `path`, merged across
+all mounted backends (pk3, sw3z, filesystem).
+
+Archive backends:  iterate stored file entries; for any entry whose path
+begins with  <path>/<X>/  extract the single component <X>.  No explicit
+directory entries needed.
+
+Filesystem backend:  opendir/readdir via Sys_ListFiles(..., "/", ...).
+
+Results are deduplicated, sorted alphabetically.  Caller frees via
+FS_FreeFileList.  Returns NULL (and *numDirs = 0) when no directories found.
+===================
+*/
+static void FS_SortFileList( char**, int );  // defined below
+
+char **FS_ListDirectories( const char *path, int *numDirs ) {
+	char			*list[MAX_FOUND_FILES];
+	char			**listCopy;
+	const searchpath_t	*search;
+	int			nfiles = 0;
+	int			pathLength;
+	int			i;
+
+	*numDirs = 0;
+
+	if ( !fs_searchpaths ) {
+		Com_Error( ERR_FATAL, "Filesystem call made without initialization" );
+	}
+
+	if ( !path || !path[0] ) {
+		return NULL;
+	}
+
+	pathLength = (int)strlen( path );
+	// strip any trailing slash from the caller's path
+	if ( path[pathLength-1] == '\\' || path[pathLength-1] == '/' ) {
+		pathLength--;
+	}
+
+	for ( search = fs_searchpaths; search; search = search->next ) {
+
+		if ( search->pack ) {
+			pack_t		*pak   = search->pack;
+			fileInPack_t	*buf   = pak->buildBuffer;
+			int		n;
+
+			for ( n = 0; n < pak->numfiles; n++ ) {
+				const char *name = buf[n].name;
+				const char *after, *slash;
+				char		dirname[MAX_QPATH];
+				int		dirLen;
+
+				// entry must begin with "<path>/"
+				if ( Q_stricmpn( name, path, pathLength ) != 0 ) continue;
+				if ( name[pathLength] != '/' && name[pathLength] != '\\' ) continue;
+
+				// the part after the prefix slash
+				after = name + pathLength + 1;
+
+				// must have another slash — meaning it's inside a subdirectory
+				slash = strchr( after, '/' );
+				if ( !slash ) continue;
+
+				dirLen = (int)( slash - after );
+				if ( dirLen <= 0 || dirLen >= (int)sizeof( dirname ) ) continue;
+
+				Q_strncpyz( dirname, after, dirLen + 1 );
+				nfiles = FS_AddFileToList( dirname, list, nfiles );
+			}
+		}
+		else if ( search->dir && search->policy != DIR_DENY ) {
+			const char	*netpath;
+			char		**sysFiles;
+			int		numSys;
+
+			netpath  = FS_BuildOSPath( search->dir->path, search->dir->gamedir, path );
+			sysFiles = Sys_ListFiles( netpath, "/", NULL, &numSys, 0 );
+			for ( i = 0; i < numSys; i++ ) {
+				// Sys_ListFiles with "/" returns bare names; skip . and ..
+				if ( sysFiles[i][0] == '.' ) continue;
+				nfiles = FS_AddFileToList( sysFiles[i], list, nfiles );
+			}
+			Sys_FreeFileList( sysFiles );
+		}
+	}
+
+	if ( nfiles == 0 ) {
+		return NULL;
+	}
+
+	if ( nfiles > 1 ) {
+		FS_SortFileList( list, nfiles - 1 );
+	}
+
+	*numDirs = nfiles;
+	listCopy = Z_Malloc( ( nfiles + 1 ) * sizeof( listCopy[0] ) );
+	for ( i = 0; i < nfiles; i++ ) {
+		listCopy[i] = list[i];
+	}
+	listCopy[i] = NULL;
+
+	return listCopy;
 }
 
 
@@ -3905,9 +4008,6 @@ FS_Dir_f
 static void FS_Dir_f( void ) {
 	const char *path;
 	const char *extension;
-	char **dirnames;
-	int ndirs;
-	int i;
 
 	if ( Cmd_Argc() < 2 || Cmd_Argc() > 3 ) {
 		Com_Printf( "usage: dir <directory> [extension]\n" );
@@ -3925,9 +4025,11 @@ static void FS_Dir_f( void ) {
 	Com_Printf( "Directory of %s %s\n", path, extension );
 	Com_Printf( "---------------\n" );
 
+	char **dirnames;
+	int ndirs;
 	dirnames = FS_ListFiles( path, extension, &ndirs );
 
-	for ( i = 0; i < ndirs; i++ ) {
+	for ( int i = 0; i < ndirs; i++ ) {
 		Com_Printf( "%s\n", dirnames[i] );
 	}
 	FS_FreeFileList( dirnames );
@@ -3959,7 +4061,6 @@ static void FS_NewDir_f( void ) {
 	char	**dirnames;
 	char	dirname[ MAX_STRING_CHARS ];
 	int		ndirs;
-	int		i;
 
 	if ( Cmd_Argc() < 2 ) {
 		Com_Printf( "usage: fdir <filter>\n" );
@@ -3977,7 +4078,7 @@ static void FS_NewDir_f( void ) {
 		FS_SortFileList( dirnames, ndirs - 1 );
 	}
 
-	for ( i = 0; i < ndirs; i++ ) {
+	for ( int i = 0; i < ndirs; i++ ) {
 		Q_strncpyz( dirname, dirnames[i], sizeof( dirname ) );
 		FS_ConvertPath( dirname );
 		Com_Printf( "%s\n", dirname );
@@ -3995,7 +4096,6 @@ FS_Path_f
 */
 static void FS_Path_f( void ) {
 	const searchpath_t *s;
-	int i;
 
 	Com_Printf( "Current search path:\n" );
 	for ( s = fs_searchpaths; s; s = s->next ) {
@@ -4020,7 +4120,7 @@ static void FS_Path_f( void ) {
 	}
 
 	Com_Printf( "\n" );
-	for ( i = 1 ; i < MAX_FILE_HANDLES ; i++ ) {
+	for ( int i = 1 ; i < MAX_FILE_HANDLES ; i++ ) {
 		if ( fsh[i].handleFiles.file.o ) {
 			Com_Printf( "handle %i: %s\n", i, fsh[i].name );
 		}
@@ -4446,15 +4546,14 @@ we are not interested in a download string format, we want something human-reada
 */
 qboolean FS_ComparePaks( char *neededpaks, int len, qboolean dlstring ) {
 	const searchpath_t	*sp;
-	qboolean havepak;
-	int i;
 
 	if (!fs_numServerReferencedPaks)
 		return qfalse; // Server didn't send any pack information along
 
 	qstring_t qs = QS_Wrap( neededpaks, len );
+	qboolean havepak;
 
-	for ( i = 0 ; i < fs_numServerReferencedPaks ; i++ )
+	for ( int i = 0 ; i < fs_numServerReferencedPaks ; i++ )
 	{
 		// Ok, see if we have this pak file
 		havepak = qfalse;
@@ -4715,10 +4814,8 @@ FS_ListOpenFiles
 ================
 */
 static void FS_ListOpenFiles_f( void ) {
-	int i;
-	fileHandleData_t *fh;
-	fh = fsh;
-	for ( i = 0; i < MAX_FILE_HANDLES; i++, fh++ ) {
+	fileHandleData_t *fh = fsh;
+	for ( int i = 0; i < MAX_FILE_HANDLES; i++, fh++ ) {
 		if ( !fh->handleFiles.file.v )
 			continue;
 		Com_Printf( "%2i %2s %s\n", i, FS_OwnerName(fh->owner), fh->name );
@@ -5862,14 +5959,13 @@ void FS_FilenameCompletion( const char *dir, const char *ext, qboolean stripExt,
 	char	filename[ MAX_STRING_CHARS ];
 	char	**filenames;
 	int		nfiles;
-	int		i;
 
 	filenames = FS_ListFilteredFiles( dir, ext, NULL, &nfiles, flags );
 
 	if ( nfiles >= 2 )
 		FS_SortFileList( filenames, nfiles-1 );
 
-	for( i = 0; i < nfiles; i++ ) {
+	for( int i = 0; i < nfiles; i++ ) {
 
 		Q_strncpyz( filename, filenames[ i ], sizeof( filename ) );
 		FS_ConvertPath( filename );
@@ -5889,9 +5985,7 @@ void FS_FilenameCompletion( const char *dir, const char *ext, qboolean stripExt,
 */
 
 int FS_VM_OpenFile( const char *qpath, fileHandle_t *f, fsMode_t mode, handleOwner_t owner ) {
-	int r;
-
-	r = FS_FOpenFileByMode( qpath, f, mode );
+	int r = FS_FOpenFileByMode( qpath, f, mode );
 
 	if ( f && *f != FS_INVALID_HANDLE )
 		fsh[ *f ].owner = owner;
@@ -5933,8 +6027,6 @@ void FS_VM_WriteFile( void *buffer, int len, fileHandle_t f, handleOwner_t owner
 
 
 int FS_VM_SeekFile( fileHandle_t f, long offset, fsOrigin_t origin, handleOwner_t owner ) {
-	int r;
-
 	if ( f <= 0 || f >= MAX_FILE_HANDLES )
 		return -1;
 
@@ -5948,7 +6040,7 @@ int FS_VM_SeekFile( fileHandle_t f, long offset, fsOrigin_t origin, handleOwner_
 		)
 		return -1;
 
-	r = FS_Seek( f, offset, origin );
+	int r = FS_Seek( f, offset, origin );
 	return r;
 }
 
@@ -6102,6 +6194,10 @@ void *FS_LoadLibrary( const char *name )
 			libHandle = Sys_LoadLibrary( fn );
 			sp = sp->next;
 		}
+	}
+
+	if ( libHandle ) {
+		Com_Printf( "Sys_LoadLibrary(%s): loaded\n", name );
 	}
 
 	return libHandle;

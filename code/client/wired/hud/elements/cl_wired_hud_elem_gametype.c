@@ -35,9 +35,8 @@ void CG_ModernHUDElementGameTypeRoutine(void* context)
 		{
 			const char* player1Name = NULL;
 			const char* player2Name = NULL;
-			int i;
 
-			for (i = 0; i < cgs.maxclients; ++i)
+			for (int i = 0; i < cgs.maxclients; ++i)
 			{
 				if (cgs.clientinfo[i].name[0] && cgs.clientinfo[i].team == 0)
 				{

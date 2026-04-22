@@ -137,6 +137,7 @@ void MSDF_SetOutline( float outlineWidth, const float *outlineColor,
  *   map change). Called from CL_InitRef or equivalent.
  */
 void MSDF_ReregisterShaders( void );
+int  MSDF_GetFontCount( void );
 
 #endif /* FEAT_WIRED_UI */
 #endif /* CL_WIRED_MSDF_H */

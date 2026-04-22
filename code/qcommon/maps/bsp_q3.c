@@ -37,6 +37,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon.h"
 #include "bsp.h"
 
+#if FEAT_RECAST_NAVMESH
+#include "../surfaceflags.h"
+#include "../nav/nav_local.h"
+#include "../nav/nav_coord.h"
+#endif
+
 // Lightmap page dimensions (matches id's stock Q3 lightmap layout).
 #define BSP_LIGHTMAP_PAGE_SIZE	( 128 * 128 * 3 )
 // Light grid entries are 8 bytes each (ambient + directed colors + dir).
@@ -463,9 +469,338 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 	return qtrue;
 }
 
+/* =========================================================================
+   BSP_Q3_ExtractNavGeometry — Q3-format nav geometry extraction callback.
+
+   Ported from nav_bsp.cpp into pure C so all Q3-format knowledge stays in
+   this file (bsp_q3.c) and the nav layer remains format-agnostic.
+
+   Called by Nav_Geom_Extract when bsp->format->extractNavGeometry != NULL.
+   Two-pass: Pass 1 counts verts/tris, Pass 2 allocates (Hunk_AllocateTempMemory)
+   and fills.  Caller must call Nav_Geom_Free(geomOut) when done.
+   ========================================================================= */
+
+#if FEAT_RECAST_NAVMESH
+
+#define NAV_BSP_MAX_BEZIER_LEVEL 5
+#define NAV_BSP_BEZIER_VERTS  ( (NAV_BSP_MAX_BEZIER_LEVEL+1) * (NAV_BSP_MAX_BEZIER_LEVEL+1) )
+#define NAV_BSP_BEZIER_TRIS   ( NAV_BSP_MAX_BEZIER_LEVEL * NAV_BSP_MAX_BEZIER_LEVEL * 2 )
+#define NAV_BSP_BEZIER_IDXS   ( NAV_BSP_MAX_BEZIER_LEVEL * (NAV_BSP_MAX_BEZIER_LEVEL+1) * 2 )
+
+typedef struct {
+    float        verts[NAV_BSP_BEZIER_VERTS][3];
+    unsigned int indexes[NAV_BSP_BEZIER_IDXS];
+    int          numVerts;
+    int          numIndexes;
+    float        ctrl[9][3];
+} NavBezier_t;
+
+static void NavBezier_Tessellate( NavBezier_t *b, int L )
+{
+    int L1 = L + 1;
+    int i, j, row, col, k;
+    b->numVerts   = L1 * L1;
+    b->numIndexes = L * L1 * 2;
+
+    for ( i = 0; i <= L; i++ ) {
+        double a = (double)i / L;
+        double bv = 1.0 - a;
+        for ( k = 0; k < 3; k++ ) {
+            b->verts[i][k] = (float)(
+                b->ctrl[0][k] * (bv*bv) +
+                b->ctrl[3][k] * (2.0*bv*a) +
+                b->ctrl[6][k] * (a*a) );
+        }
+    }
+
+    for ( i = 1; i <= L; i++ ) {
+        double a = (double)i / L;
+        double bv = 1.0 - a;
+        float temp[3][3];
+        for ( j = 0; j < 3; j++ ) {
+            int base = j * 3;
+            for ( k = 0; k < 3; k++ ) {
+                temp[j][k] = (float)(
+                    b->ctrl[base  ][k] * (bv*bv) +
+                    b->ctrl[base+1][k] * (2.0*bv*a) +
+                    b->ctrl[base+2][k] * (a*a) );
+            }
+        }
+        for ( j = 0; j <= L; j++ ) {
+            double aj = (double)j / L;
+            double bj = 1.0 - aj;
+            for ( k = 0; k < 3; k++ ) {
+                b->verts[i * L1 + j][k] = (float)(
+                    temp[0][k] * (bj*bj) +
+                    temp[1][k] * (2.0*bj*aj) +
+                    temp[2][k] * (aj*aj) );
+            }
+        }
+    }
+
+    for ( row = 0; row < L; row++ ) {
+        for ( col = 0; col <= L; col++ ) {
+            b->indexes[ (row * L1 + col) * 2 + 0 ] = (unsigned int)((row + 1) * L1 + col);
+            b->indexes[ (row * L1 + col) * 2 + 1 ] = (unsigned int)( row      * L1 + col);
+        }
+    }
+}
+
+typedef struct {
+    float         *verts;
+    int           *tris;
+    unsigned char *areas;
+    int            numVerts;
+    int            numTris;
+} NavGeomWriter_t;
+
+static void NavGeomWriter_WriteVert( NavGeomWriter_t *w, const float r[3] )
+{
+    w->verts[ w->numVerts * 3 + 0 ] = r[0];
+    w->verts[ w->numVerts * 3 + 1 ] = r[1];
+    w->verts[ w->numVerts * 3 + 2 ] = r[2];
+    w->numVerts++;
+}
+
+/* Reverse winding: Q3 is CW from above; Recast expects CCW. */
+static void NavGeomWriter_WriteTri( NavGeomWriter_t *w, int a, int b, int c,
+                                    unsigned char area )
+{
+    w->tris[ w->numTris * 3 + 0 ] = c;
+    w->tris[ w->numTris * 3 + 1 ] = b;
+    w->tris[ w->numTris * 3 + 2 ] = a;
+    w->areas[ w->numTris ] = area;
+    w->numTris++;
+}
+
+static void BSP_Q3_CountPlanarOrSoup( const dsurface_t *surf, int *nv, int *nt )
+{
+    *nv += surf->numVerts;
+    *nt += surf->numIndexes / 3;
+}
+
+static void BSP_Q3_CountPatch( const dsurface_t *surf, int *nv, int *nt )
+{
+    int npx = (surf->patchWidth  - 1) / 2;
+    int npy = (surf->patchHeight - 1) / 2;
+    int n   = npx * npy;
+    *nv += n * NAV_BSP_BEZIER_VERTS;
+    *nt += n * NAV_BSP_BEZIER_TRIS;
+}
+
+static void BSP_Q3_FillPlanarOrSoup( NavGeomWriter_t *w,
+                                     const dsurface_t *surf,
+                                     const drawVert_t *drawVerts,
+                                     const int        *drawIndexes,
+                                     unsigned char     area )
+{
+    int base = w->numVerts;
+    int v, i;
+    float r[3];
+
+    for ( v = 0; v < surf->numVerts; v++ ) {
+        const float *xyz = drawVerts[ surf->firstVert + v ].xyz;
+        Nav_QuakeToRecast( xyz, r );
+        NavGeomWriter_WriteVert( w, r );
+    }
+
+    for ( i = 0; i + 2 < surf->numIndexes; i += 3 ) {
+        int a = drawIndexes[ surf->firstIndex + i + 0 ];
+        int b = drawIndexes[ surf->firstIndex + i + 1 ];
+        int c = drawIndexes[ surf->firstIndex + i + 2 ];
+        NavGeomWriter_WriteTri( w, base + a, base + b, base + c, area );
+    }
+}
+
+static void BSP_Q3_FillPatch( NavGeomWriter_t  *w,
+                               const dsurface_t *surf,
+                               const drawVert_t *drawVerts,
+                               unsigned char     area )
+{
+    int pw  = surf->patchWidth;
+    int ph  = surf->patchHeight;
+    int npx = (pw - 1) / 2;
+    int npy = (ph - 1) / 2;
+    int pi, pj, ci, cj, v, row, d;
+    int L  = NAV_BSP_MAX_BEZIER_LEVEL;
+    int L1 = L + 1;
+    float r[3];
+
+    for ( pj = 0; pj < npy; pj++ ) {
+        for ( pi = 0; pi < npx; pi++ ) {
+            NavBezier_t bez;
+            int base;
+
+            for ( cj = 0; cj < 3; cj++ ) {
+                for ( ci = 0; ci < 3; ci++ ) {
+                    int cx   = pi * 2 + ci;
+                    int cy   = pj * 2 + cj;
+                    int vidx = surf->firstVert + cy * pw + cx;
+                    const float *xyz = drawVerts[vidx].xyz;
+                    bez.ctrl[cj * 3 + ci][0] = xyz[0];
+                    bez.ctrl[cj * 3 + ci][1] = xyz[1];
+                    bez.ctrl[cj * 3 + ci][2] = xyz[2];
+                }
+            }
+
+            NavBezier_Tessellate( &bez, L );
+
+            base = w->numVerts;
+            for ( v = 0; v < bez.numVerts; v++ ) {
+                Nav_QuakeToRecast( bez.verts[v], r );
+                NavGeomWriter_WriteVert( w, r );
+            }
+
+            for ( row = 0; row < L; row++ ) {
+                const unsigned int *strip = &bez.indexes[ row * L1 * 2 ];
+                int stripLen = L1 * 2;
+                for ( d = 0; d + 2 < stripLen; d++ ) {
+                    if ( d & 1 ) {
+                        NavGeomWriter_WriteTri( w, base + (int)strip[d],
+                                               base + (int)strip[d+2],
+                                               base + (int)strip[d+1], area );
+                    } else {
+                        NavGeomWriter_WriteTri( w, base + (int)strip[d],
+                                               base + (int)strip[d+1],
+                                               base + (int)strip[d+2], area );
+                    }
+                }
+            }
+        }
+    }
+}
+
+static qboolean BSP_Q3_SurfaceIsWalkable( const dsurface_t *surf,
+                                           const dshader_t  *shader )
+{
+    if ( shader->surfaceFlags & ( SURF_NODRAW | SURF_SKY | SURF_NONSOLID ) )
+        return qfalse;
+    if ( surf->surfaceType == MST_FLARE || surf->surfaceType == MST_BAD )
+        return qfalse;
+    /* Accept solid, playerclip, and liquid surfaces.
+     * Liquid brushes (lava/slime/water) lack CONTENTS_SOLID but are walkable
+     * platforms with a cost penalty; excluding them leaves gaps in the navmesh
+     * where liquid floors exist. Playerclip brushes are invisible but walkable —
+     * excluding them leaves nav holes where architects used clip geometry. */
+    if ( !( shader->contentFlags & ( CONTENTS_SOLID | CONTENTS_PLAYERCLIP |
+                                      CONTENTS_LAVA  | CONTENTS_SLIME | CONTENTS_WATER ) ) )
+        return qfalse;
+    return qtrue;
+}
+
+static qboolean BSP_Q3_ExtractNavGeometry( const bspFile_t  *bsp,
+                                            struct navGeom_s *outGeom )
+{
+    navGeom_t *geom = (navGeom_t *)outGeom;
+    int numVerts = 0;
+    int numTris  = 0;
+    int i;
+    NavGeomWriter_t wr;
+
+    /* --- Pass 1: count --- */
+    for ( i = 0; i < bsp->numSurfaces; i++ ) {
+        const dsurface_t *surf   = &bsp->surfaces[i];
+        const dshader_t  *shader = &bsp->shaders[ surf->shaderNum ];
+
+        if ( !BSP_Q3_SurfaceIsWalkable( surf, shader ) )
+            continue;
+
+        switch ( surf->surfaceType ) {
+        case MST_PLANAR:
+        case MST_TRIANGLE_SOUP:
+            BSP_Q3_CountPlanarOrSoup( surf, &numVerts, &numTris );
+            break;
+        case MST_PATCH:
+            BSP_Q3_CountPatch( surf, &numVerts, &numTris );
+            break;
+        default:
+            break;
+        }
+    }
+
+    memset( geom, 0, sizeof(*geom) );
+
+    if ( numVerts == 0 || numTris == 0 ) {
+        Com_Printf( S_COLOR_YELLOW "[NAV] no walkable tris extracted from %s\n", bsp->name );
+        return qfalse;
+    }
+
+    /* Warn if tri count changed >20% vs the last extraction of this map
+     * (session-only memory — detects filter regressions without a full rebuild). */
+    {
+        static char s_lastMap[256];
+        static int  s_lastTris;
+        if ( *s_lastMap && Q_stricmp( s_lastMap, bsp->name ) == 0 && s_lastTris > 0 ) {
+            int delta = numTris - s_lastTris;
+            if ( delta < 0 ) delta = -delta;
+            if ( delta * 100 / s_lastTris > 20 ) {
+                Com_Printf( S_COLOR_YELLOW "[NAV] tri count changed >20%% on %s: was %d, now %d\n",
+                            bsp->name, s_lastTris, numTris );
+            }
+        }
+        Q_strncpyz( s_lastMap, bsp->name, sizeof(s_lastMap) );
+        s_lastTris = numTris;
+    }
+
+    /* --- Allocate in LIFO order: verts (1st), tris (2nd), areas (3rd/top) --- */
+    geom->verts = (float *)        Hunk_AllocateTempMemory( numVerts * 3 * (int)sizeof(float) );
+    geom->tris  = (int *)          Hunk_AllocateTempMemory( numTris  * 3 * (int)sizeof(int) );
+    geom->areas = (unsigned char *)Hunk_AllocateTempMemory( numTris      * (int)sizeof(unsigned char) );
+
+    /* --- Pass 2: fill --- */
+    wr.verts    = geom->verts;
+    wr.tris     = geom->tris;
+    wr.areas    = geom->areas;
+    wr.numVerts = 0;
+    wr.numTris  = 0;
+
+    for ( i = 0; i < bsp->numSurfaces; i++ ) {
+        const dsurface_t *surf   = &bsp->surfaces[i];
+        const dshader_t  *shader = &bsp->shaders[ surf->shaderNum ];
+
+        if ( !BSP_Q3_SurfaceIsWalkable( surf, shader ) )
+            continue;
+
+        unsigned char area;
+        if ( shader->contentFlags & CONTENTS_WATER )
+            area = (unsigned char)NAVAREA_WATER;
+        else if ( shader->contentFlags & ( CONTENTS_LAVA | CONTENTS_SLIME ) )
+            area = (unsigned char)NAVAREA_LAVA;   /* Phase 1 §8: lava and slime share one area ID */
+        else
+            area = (unsigned char)NAVAREA_GROUND;
+
+        switch ( surf->surfaceType ) {
+        case MST_PLANAR:
+        case MST_TRIANGLE_SOUP:
+            BSP_Q3_FillPlanarOrSoup( &wr, surf,
+                                     bsp->drawVerts, bsp->drawIndexes, area );
+            break;
+        case MST_PATCH:
+            BSP_Q3_FillPatch( &wr, surf, bsp->drawVerts, area );
+            break;
+        default:
+            break;
+        }
+    }
+
+    geom->numVerts = wr.numVerts;
+    geom->numTris  = wr.numTris;
+
+    Com_Printf( "[NAV] %s: %d verts, %d tris extracted\n",
+                bsp->name, geom->numVerts, geom->numTris );
+    return qtrue;
+}
+
+#endif /* FEAT_RECAST_NAVMESH */
+
 const bspFormat_t bspFormatQ3 = {
 	"Quake 3",
 	BSP_IDENT,
 	BSP_VERSION,
-	BSP_Q3_Load
+	BSP_Q3_Load,
+#if FEAT_RECAST_NAVMESH
+	BSP_Q3_ExtractNavGeometry
+#else
+	NULL
+#endif
 };

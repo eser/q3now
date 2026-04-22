@@ -879,11 +879,10 @@ BotCreateGroup
 */
 void BotCreateGroup(bot_state_t *bs, int *teammates, int groupsize) {
 	char name[MAX_NETNAME], leadername[MAX_NETNAME];
-	int i;
 
 	// the others in the group will follow the teammates[0]
 	ClientName(teammates[0], leadername, sizeof(leadername));
-	for (i = 1; i < groupsize; i++)
+	for (int i = 1; i < groupsize; i++)
 	{
 		ClientName(teammates[i], name, sizeof(name));
 		if (teammates[0] == bs->client) {
@@ -1921,9 +1920,7 @@ FindHumanTeamLeader
 ==================
 */
 int FindHumanTeamLeader(bot_state_t *bs) {
-	int i;
-
-	for (i = 0; i < MAX_CLIENTS; i++) {
+	for (int i = 0; i < MAX_CLIENTS; i++) {
 		if ( g_entities[i].inuse ) {
 			// if this player is not a bot
 			if ( !(g_entities[i].r.svFlags & SVF_BOT) ) {

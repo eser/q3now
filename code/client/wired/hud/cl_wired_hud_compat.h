@@ -187,16 +187,13 @@ extern vmCvar_t wired_MaxlocationWidth;
 extern vmCvar_t wired_drawTimer;
 extern vmCvar_t wired_drawAmmoWarning;
 #define cg_MaxlocationWidth  wired_MaxlocationWidth
-#define cg_drawTimer         wired_drawTimer
 #define cg_drawAmmoWarning   wired_drawAmmoWarning
 extern vmCvar_t wired_drawRewards;
 #define cg_drawRewards       wired_drawRewards
-extern vmCvar_t wired_drawCrosshair;
 extern vmCvar_t wired_drawCrosshairNames;
-extern vmCvar_t wired_crosshairHealth;
-#define cg_drawCrosshair       wired_drawCrosshair
+extern vmCvar_t wired_crosshairAlpha;
 #define cg_drawCrosshairNames  wired_drawCrosshairNames
-#define cg_crosshairHealth     wired_crosshairHealth
+#define cg_crosshairAlpha      wired_crosshairAlpha
 
 // ── item data stub ───────────────────────────────────────────────────
 

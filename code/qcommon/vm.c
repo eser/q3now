@@ -408,8 +408,6 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 		return NULL;
 	}
 
-	Com_DPrintf( "VM_LoadDLL '%s' ok\n", filename );
-
 	dllEntry_t dllEntry = /* ( dllEntry_t ) */ Sys_LoadFunction( libHandle, "dllEntry" );
 	*entryPoint = /* ( dllSyscall_t ) */ Sys_LoadFunction( libHandle, "vmMain" );
 	if ( !*entryPoint || !dllEntry ) {
@@ -417,9 +415,8 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 		return NULL;
 	}
 
-	Com_DPrintf( "VM_LoadDll(%s) found **vmMain** at %p\n", name, *entryPoint );
+	Com_Printf( "VM_LoadDll(%s): loaded, vmMain @ %p\n", name, *entryPoint );
 	dllEntry( systemcalls );
-	Com_DPrintf( "VM_LoadDll(%s) succeeded!\n", name );
 
 	return libHandle;
 }

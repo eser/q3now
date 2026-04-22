@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build \
         ca-certificates \
         curl \
+        git \
         libcurl4-openssl-dev \
         libssl-dev \
         libx11-dev \

@@ -78,8 +78,7 @@ void CG_ModernHUDElementAwardsRoutine( void *context ) {
 	modernHudElementAwards_t *element = (modernHudElementAwards_t *)context;
 	modernhudGlobalContext_t *gctx = CG_ModernHUDGetContext();
 	int now = cg.time;
-	int i, activeCount;
-	float totalWidth, startX;
+	int i;
 
 	// ── 1. Consume new awards from queue ──────────────────────────────
 
@@ -157,7 +156,7 @@ void CG_ModernHUDElementAwardsRoutine( void *context ) {
 
 	// ── 3. Count active and compute positions ─────────────────────────
 
-	activeCount = 0;
+	int activeCount = 0;
 	for ( i = 0; i < MAX_VISIBLE_AWARDS; i++ ) {
 		if ( element->visible[i].phase != AWARD_PHASE_INACTIVE ) {
 			activeCount++;
@@ -166,8 +165,8 @@ void CG_ModernHUDElementAwardsRoutine( void *context ) {
 
 	if ( activeCount == 0 ) return;
 
-	totalWidth = activeCount * element->iconW + ( activeCount - 1 ) * AWARD_GAP;
-	startX = element->anchorX - totalWidth * 0.5f;
+	float totalWidth = activeCount * element->iconW + ( activeCount - 1 ) * AWARD_GAP;
+	float startX = element->anchorX - totalWidth * 0.5f;
 
 	// ── 4. Render ─────────────────────────────────────────────────────
 

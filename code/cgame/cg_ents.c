@@ -33,9 +33,8 @@ Modifies the entities position and axis by the given
 tag location
 ======================
 */
-void CG_PositionEntityOnTag( refEntity_t *entity, const refEntity_t *parent, 
+void CG_PositionEntityOnTag( refEntity_t *entity, const refEntity_t *parent,
 							qhandle_t parentModel, char *tagName ) {
-	int				i;
 	orientation_t	lerped;
 	
 	// lerp the tag
@@ -44,7 +43,7 @@ void CG_PositionEntityOnTag( refEntity_t *entity, const refEntity_t *parent,
 
 	// FIXME: allow origin offsets along tag?
 	VectorCopy( parent->origin, entity->origin );
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		VectorMA( entity->origin, lerped.origin[i], parent->axis[i], entity->origin );
 	}
 
@@ -62,9 +61,8 @@ Modifies the entities position and axis by the given
 tag location
 ======================
 */
-void CG_PositionRotatedEntityOnTag( refEntity_t *entity, const refEntity_t *parent, 
+void CG_PositionRotatedEntityOnTag( refEntity_t *entity, const refEntity_t *parent,
 							qhandle_t parentModel, char *tagName ) {
-	int				i;
 	orientation_t	lerped;
 	vec3_t			tempAxis[3];
 
@@ -75,7 +73,7 @@ void CG_PositionRotatedEntityOnTag( refEntity_t *entity, const refEntity_t *pare
 
 	// FIXME: allow origin offsets along tag?
 	VectorCopy( parent->origin, entity->origin );
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		VectorMA( entity->origin, lerped.origin[i], parent->axis[i], entity->origin );
 	}
 
@@ -191,6 +189,10 @@ static void CG_General( centity_t *cent ) {
 
 	// convert angles to axis
 	AnglesToAxis( cent->lerpAngles, ent.axis );
+
+#if FEAT_SCREENSHOT_TOOLS
+	if ( cg.stopTime ) ent.shaderTime.f = (float)( cg.time - cg.stopTime ) / 1000.0f;
+#endif
 
 	// add to refresh list
 	trap_R_AddRefEntityToScene (&ent);
@@ -523,6 +525,11 @@ static void CG_Missile( centity_t *cent ) {
 
 	// spin as it moves
 	if ( s1->pos.trType != TR_STATIONARY ) {
+#if FEAT_SCREENSHOT_TOOLS
+		if ( cg.stopTime ) {
+			RotateAroundDirection( ent.axis, cg.stopTime / 4 );
+		} else
+#endif
 		RotateAroundDirection( ent.axis, cg.time / 4 );
 	} else {
 		RotateAroundDirection( ent.axis, s1->time );
@@ -1077,6 +1084,10 @@ void CG_AddPacketEntities( void ) {
 	centity_t			*cent;
 	playerState_t		*ps;
 
+#if FEAT_SCREENSHOT_TOOLS
+	cg.time -= cg.serverOffset;
+#endif
+
 	// set cg.frameInterpolation
 	if ( cg.nextSnap ) {
 		int		delta;
@@ -1117,4 +1128,8 @@ void CG_AddPacketEntities( void ) {
 		cent = &cg_entities[ cg.snap->entities[ num ].number ];
 		CG_AddCEntity( cent );
 	}
+
+#if FEAT_SCREENSHOT_TOOLS
+	cg.time += cg.serverOffset;
+#endif
 }

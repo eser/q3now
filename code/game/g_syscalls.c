@@ -23,6 +23,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "g_local.h"
 #include "bg_public.h"
 #include "inv.h"
+#include "../qcommon/q_feats.h"
+#if FEAT_RECAST_NAVMESH
+#include "../qcommon/nav/nav_types.h"
+#endif
 #ifndef MAX_STRINGFIELD
 #define MAX_STRINGFIELD 80
 #endif
@@ -1050,3 +1054,59 @@ void trap_WiredNet_EmitBotEvent( int bot_id, const char *event_type, int param1,
 	syscall( G_WIREDNET_EMIT_BOT_EVENT, bot_id, event_type, param1, param2, pos );
 }
 #endif
+
+// ── Recast/Detour nav traps ───────────────────────────────────────────
+// Phase 2: wrappers exist; engine-side stubs return -1 until Phase 3+.
+// These are guarded by FEAT_RECAST_NAVMESH so the AAS build compiles clean.
+#if FEAT_RECAST_NAVMESH
+int trap_Nav_FindPath( vec3_t origin, vec3_t goal, int agentType, navPath_t *pathOut ) {
+	return syscall( G_NAV_FIND_PATH, origin, goal, agentType, pathOut );
+}
+
+qboolean trap_Nav_Raycast( vec3_t start, vec3_t end, vec3_t hitPosOut ) {
+	return (qboolean)syscall( G_NAV_RAYCAST, start, end, hitPosOut );
+}
+
+navPolyRef_t trap_Nav_FindNearestPoly( vec3_t origin, vec3_t searchExtents ) {
+	return (navPolyRef_t)syscall( G_NAV_FIND_NEAREST_POLY, origin, searchExtents );
+}
+
+int trap_Nav_GetPolyAreaFlags( navPolyRef_t polyRef ) {
+	return syscall( G_NAV_GET_POLY_AREA_FLAGS, polyRef );
+}
+
+void trap_Nav_TriggerOffMeshLink( navPolyRef_t linkRef ) {
+	syscall( G_NAV_TRIGGER_OFF_MESH_LINK, linkRef );
+}
+
+qboolean trap_Nav_GetRandomPoint( int areaFilter, vec3_t posOut ) {
+	return (qboolean)syscall( G_NAV_GET_RANDOM_POINT, areaFilter, posOut );
+}
+
+int trap_Nav_AddCrowdAgent( int entityNum, vec3_t origin, int agentType ) {
+	return syscall( G_NAV_ADD_CROWD_AGENT, entityNum, origin, agentType );
+}
+
+void trap_Nav_UpdateCrowdAgent( int agentId, vec3_t desiredTarget ) {
+	syscall( G_NAV_UPDATE_CROWD_AGENT, agentId, desiredTarget );
+}
+
+void trap_Nav_RemoveCrowdAgent( int agentId ) {
+	syscall( G_NAV_REMOVE_CROWD_AGENT, agentId );
+}
+
+void trap_Nav_UpdateCrowd( float deltaTime ) {
+	syscall( G_NAV_UPDATE_CROWD, PASSFLOAT( deltaTime ) );
+}
+qboolean trap_Nav_IsReady( void ) {
+	return (qboolean)syscall( G_NAV_IS_READY );
+}
+void trap_Nav_SetPolyFlagsForDoor( const char *targetname, int setFlags, int clearFlags ) {
+	syscall( G_NAV_SET_POLY_FLAGS_FOR_DOOR, targetname, setFlags, clearFlags );
+}
+#endif /* FEAT_RECAST_NAVMESH */
+
+qboolean trap_GetValue( char *value, int valueSize, const char *key ) {
+	return (qboolean)syscall( G_TRAP_GETVALUE, value, valueSize, key );
+}
+

@@ -262,4 +262,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 #endif
 
+// Thread-local storage qualifier. MSVC must be first: it defines
+// __STDC_VERSION__ inconsistently. __STDC_NO_THREADS__ covers freestanding
+// C11 compilers that opt out of threads.h. Error on unknown compilers rather
+// than silently producing non-thread-local globals.
+#if defined(_MSC_VER)
+# define QDECL_TLS __declspec(thread)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
+# define QDECL_TLS _Thread_local
+#elif defined(__GNUC__) || defined(__clang__)
+# define QDECL_TLS __thread
+#else
+# error "QDECL_TLS: no thread-local storage keyword available on this compiler"
+#endif
+
 #endif // __Q_PLATFORM_H

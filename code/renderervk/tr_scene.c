@@ -455,11 +455,10 @@ void RE_RenderScene( const refdef_t *fd ) {
 	tr.refdef.areamaskModified = qfalse;
 	if ( ! (tr.refdef.rdflags & RDF_NOWORLDMODEL) ) {
 		int		areaDiff;
-		int		i;
 
 		// compare the area bits
 		areaDiff = 0;
-		for ( i = 0; i < MAX_MAP_AREA_BYTES/sizeof(int); i++ ) {
+		for ( int i = 0; i < MAX_MAP_AREA_BYTES/sizeof(int); i++ ) {
 			areaDiff |= ((int *)tr.refdef.areamask)[i] ^ ((int *)fd->areamask)[i];
 			((int *)tr.refdef.areamask)[i] = ((int *)fd->areamask)[i];
 		}
@@ -557,9 +556,8 @@ void RE_RenderScene( const refdef_t *fd ) {
 		{
 			// duplicate all views, including portals
 			drawSurfsCommand_t *cmd, *src = NULL;
-			int i;
 
-			for ( i = 0; i < tr.numDrawSurfCmds; i++ )
+			for ( int i = 0; i < tr.numDrawSurfCmds; i++ )
 			{
 				cmd = R_GetCommandBuffer( sizeof( *cmd ) );
 				if ( cmd )

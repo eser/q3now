@@ -35,7 +35,6 @@ If the ammo has gone low enough to generate the warning, play a sound
 ==============
 */
 void CG_CheckAmmo( void ) {
-	int		i;
 	int		total;
 	int		previous;
 	int		weapons;
@@ -43,7 +42,7 @@ void CG_CheckAmmo( void ) {
 	// see about how many seconds of ammo we have remaining
 	weapons = cg.snap->ps.stats[ STAT_WEAPONS ];
 	total = 0;
-	for ( i = WP_MACHINEGUN ; i < WP_NUM_WEAPONS ; i++ ) {
+	for ( int i = WP_MACHINEGUN ; i < WP_NUM_WEAPONS ; i++ ) {
 		if ( ! ( weapons & ( 1 << i ) ) ) {
 			continue;
 		}
@@ -207,7 +206,6 @@ CG_CheckPlayerstateEvents
 ==============
 */
 void CG_CheckPlayerstateEvents( playerState_t *ps, playerState_t *ops ) {
-	int			i;
 	int			event;
 	centity_t	*cent;
 
@@ -220,7 +218,7 @@ void CG_CheckPlayerstateEvents( playerState_t *ps, playerState_t *ops ) {
 
 	cent = &cg.predictedPlayerEntity; // cg_entities[ ps->clientNum ];
 	// go through the predictable events buffer
-	for ( i = ps->eventSequence - MAX_PS_EVENTS ; i < ps->eventSequence ; i++ ) {
+	for ( int i = ps->eventSequence - MAX_PS_EVENTS ; i < ps->eventSequence ; i++ ) {
 		// if we have a new predictable event
 		if ( i >= ops->eventSequence
 			// or the server told us to play another event instead of a predicted event we already issued
@@ -245,12 +243,10 @@ CG_CheckChangedPredictableEvents
 ==================
 */
 void CG_CheckChangedPredictableEvents( playerState_t *ps ) {
-	int i;
-	int event;
 	centity_t	*cent;
 
 	cent = &cg.predictedPlayerEntity;
-	for ( i = ps->eventSequence - MAX_PS_EVENTS ; i < ps->eventSequence ; i++ ) {
+	for ( int i = ps->eventSequence - MAX_PS_EVENTS ; i < ps->eventSequence ; i++ ) {
 		//
 		if (i >= cg.eventSequence) {
 			continue;
@@ -260,7 +256,7 @@ void CG_CheckChangedPredictableEvents( playerState_t *ps ) {
 			// if the new playerstate event is different from a previously predicted one
 			if ( ps->events[i & (MAX_PS_EVENTS-1)] != cg.predictableEvents[i & (MAX_PREDICTED_EVENTS-1) ] ) {
 
-				event = ps->events[ i & (MAX_PS_EVENTS-1) ];
+				int event = ps->events[ i & (MAX_PS_EVENTS-1) ];
 				cent->currentState.event = event;
 				cent->currentState.eventParm = ps->eventParms[ i & (MAX_PS_EVENTS-1) ];
 				CG_EntityEvent( cent, cent->lerpOrigin );

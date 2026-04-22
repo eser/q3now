@@ -1,7 +1,7 @@
--- Visor — cybernetic duelist. Enhanced optics: railgun specialist.
--- Clinical precision, reads enemy movement, rewards patience.
+-- Visor bot personality data — cybernetic duelist, railgun specialist.
+-- Shallow-merged onto _base/bot/main.lua by q3now.load_bot().
+-- Top-level keys here replace the corresponding base keys wholesale.
 return {
-
   traits = {
     attack_skill     = {0.40, 0.90},
     view_factor      = {0.55, 0.95},
@@ -50,13 +50,13 @@ return {
   },
 
   attacks = {
-    { "rg1", aim_height = 36 },  -- rail: the duelist's signature — upper body
-    { "lg1", aim_height = 28 },  -- lightning: dominant close range
-    { "lg2", aim_height = 28 },  -- chain arc: punish groups
-    { "rl1", aim_height = 0  },  -- rocket: medium support, aim at feet
-    { "sg1", aim_height = 28 },  -- shotgun: close desperation
-    { "pr1", aim_height = 28 },  -- plasma: suppression
-    { "gl1", aim_height = 0  },  -- grenades: area denial, aim at feet
+    { "rg1", aim_height = 36 },
+    { "lg1", aim_height = 28 },
+    { "lg2", aim_height = 28 },
+    { "rl1", aim_height = 0  },
+    { "sg1", aim_height = 28 },
+    { "pr1", aim_height = 28 },
+    { "gl1", aim_height = 0  },
     { "mg1", aim_height = 28 },
   },
 
@@ -88,7 +88,6 @@ return {
   },
 
   chats = {
-    file          = "characters/visor/bot/chats",
     insult        = 0.35,
     misc          = 0.30,
     startendlevel = 0.40,

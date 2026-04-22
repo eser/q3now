@@ -375,26 +375,6 @@ int trap_Key_GetKey( const char *binding ) {
 	return syscall( CG_KEY_GETKEY, binding );
 }
 
-int trap_PC_AddGlobalDefine( char *define ) {
-	return syscall( CG_PC_ADD_GLOBAL_DEFINE, define );
-}
-
-int trap_PC_LoadSource( const char *filename ) {
-	return syscall( CG_PC_LOAD_SOURCE, filename );
-}
-
-int trap_PC_FreeSource( int handle ) {
-	return syscall( CG_PC_FREE_SOURCE, handle );
-}
-
-int trap_PC_ReadToken( int handle, pc_token_t *pc_token ) {
-	return syscall( CG_PC_READ_TOKEN, handle, pc_token );
-}
-
-int trap_PC_SourceFileAndLine( int handle, char *filename, int *line ) {
-	return syscall( CG_PC_SOURCE_FILE_AND_LINE, handle, filename, line );
-}
-
 void	trap_S_StopBackgroundTrack( void ) {
 	syscall( CG_S_STOPBACKGROUNDTRACK );
 }
@@ -496,3 +476,7 @@ void trap_WiredStore_Clear( void ) {
 	syscall( CG_WUI_STORE_CLEAR );
 }
 #endif
+
+qboolean trap_GetValue( char *value, int valueSize, const char *key ) {
+	return syscall( CG_TRAP_GETVALUE, value, valueSize, key );
+}

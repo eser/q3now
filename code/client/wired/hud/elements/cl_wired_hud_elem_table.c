@@ -28,38 +28,32 @@ Team filtering: if tableTeamFilter >= 0, only rows where
 */
 void WiredHud_DrawTable( wiredItemDef_t *item, float ox, float oy, float ow, float oh,
                           int fontId, float fontSize ) {
-	wuiStoreEntry_t *countEntry;
-	int totalRows, visibleRow, i, c;
-	float rowH, headerH, y, cx, colW;
 	char keyBuf[256];
 	vec4_t headerColor;
 	vec4_t rowBg;
 	vec4_t cellColor;
-	wuiStoreEntry_t *cellEntry;
-	wuiStoreEntry_t *colorEntry;
-	wuiTableColumn_t *col;
 
 	if ( !item->tableCountBind[0] || !item->tableSource[0] || item->numTableColumns <= 0 ) {
 		return;
 	}
 
-	countEntry = WiredStore_Get( item->tableCountBind );
+	wuiStoreEntry_t *countEntry = WiredStore_Get( item->tableCountBind );
 	if ( !countEntry ) return;
-	totalRows = (int)countEntry->value;
+	int totalRows = (int)countEntry->value;
 	if ( totalRows <= 0 ) return;
 
 	/* sizing */
-	headerH = fontSize * 1.8f;
-	rowH = fontSize * 1.4f;
+	float headerH = fontSize * 1.8f;
+	float rowH = fontSize * 1.4f;
 
 	/* header color -- slightly dimmed white */
 	Vector4Set( headerColor, 0.7f, 0.7f, 0.8f, 1.0f );
 
 	/* -- draw column headers ------------------------------------------- */
-	cx = ox;
-	for ( c = 0; c < item->numTableColumns; c++ ) {
-		col = &item->tableColumns[c];
-		colW = col->width * ow;
+	float cx = ox;
+	for ( int c = 0; c < item->numTableColumns; c++ ) {
+		wuiTableColumn_t *col = &item->tableColumns[c];
+		float colW = col->width * ow;
 		if ( col->header[0] ) {
 			float tx;
 			if ( col->align == 2 ) {
@@ -82,9 +76,9 @@ void WiredHud_DrawTable( wiredItemDef_t *item, float ox, float oy, float ow, flo
 	}
 
 	/* -- draw data rows ------------------------------------------------ */
-	y = oy + headerH;
-	visibleRow = 0;
-	for ( i = 0; i < totalRows && y + rowH <= oy + oh; i++ ) {
+	float y = oy + headerH;
+	int visibleRow = 0;
+	for ( int i = 0; i < totalRows && y + rowH <= oy + oh; i++ ) {
 		/* team filter */
 		if ( item->tableTeamFilter >= 0 ) {
 			wuiStoreEntry_t *teamEntry;
@@ -117,14 +111,14 @@ void WiredHud_DrawTable( wiredItemDef_t *item, float ox, float oy, float ow, flo
 
 		/* draw cells */
 		cx = ox;
-		for ( c = 0; c < item->numTableColumns; c++ ) {
-			col = &item->tableColumns[c];
-			colW = col->width * ow;
+		for ( int c = 0; c < item->numTableColumns; c++ ) {
+			wuiTableColumn_t *col = &item->tableColumns[c];
+			float colW = col->width * ow;
 
 			/* build cell text key */
 			Com_sprintf( keyBuf, sizeof( keyBuf ), "%s.%d.%s",
 			             item->tableSource, i, col->field );
-			cellEntry = WiredStore_Get( keyBuf );
+			wuiStoreEntry_t *cellEntry = WiredStore_Get( keyBuf );
 
 			if ( cellEntry && cellEntry->text[0] ) {
 				float tx;
@@ -134,7 +128,7 @@ void WiredHud_DrawTable( wiredItemDef_t *item, float ox, float oy, float ow, flo
 				if ( col->colorfield[0] ) {
 					Com_sprintf( keyBuf, sizeof( keyBuf ), "%s.%d.%s",
 					             item->tableSource, i, col->colorfield );
-					colorEntry = WiredStore_Get( keyBuf );
+					wuiStoreEntry_t *colorEntry = WiredStore_Get( keyBuf );
 					if ( colorEntry ) {
 						Vector4Copy( colorEntry->color, cellColor );
 					}

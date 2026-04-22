@@ -57,25 +57,18 @@ static int stepsizeTable[89] = {
 
    
 void S_AdpcmEncode( short indata[], char outdata[], int len, struct adpcm_state *state ) {
-    short *inp;			/* Input buffer pointer */
-    signed char *outp;		/* output buffer pointer */
+    signed char *outp = (signed char *)outdata;	/* output buffer pointer */
+    short *inp = indata;			/* Input buffer pointer */
     int val;			/* Current input sample value */
     int sign;			/* Current adpcm sign bit */
     int delta;			/* Current adpcm output value */
     int diff;			/* Difference between val and sample */
-    int step;			/* Stepsize */
-    int valpred;		/* Predicted output value */
+    int valpred = state->sample;	/* Predicted output value */
+    int index = state->index;		/* Current step change index */
+    int step = stepsizeTable[index];	/* Stepsize */
     int vpdiff;			/* Current change to valpred */
-    int index;			/* Current step change index */
     int outputbuffer;		/* place to keep previous 4-bit value */
     int bufferstep;		/* toggle between outputbuffer/output */
-
-    outp = (signed char *)outdata;
-    inp = indata;
-
-    valpred = state->sample;
-    index = state->index;
-    step = stepsizeTable[index];
     
 	outputbuffer = 0;	// quiet a compiler warning
     bufferstep = 1;
@@ -156,26 +149,16 @@ void S_AdpcmEncode( short indata[], char outdata[], int len, struct adpcm_state 
 
 
 /* static */ void S_AdpcmDecode( const char indata[], short *outdata, int len, struct adpcm_state *state ) {
-    signed char *inp;		/* Input buffer pointer */
-    int outp;			/* output buffer pointer */
+    signed char *inp = (signed char *)indata;	/* Input buffer pointer */
+    int outp = 0;		/* output buffer pointer */
     int sign;			/* Current adpcm sign bit */
     int delta;			/* Current adpcm output value */
-    int step;			/* Stepsize */
-    int valpred;		/* Predicted value */
+    int valpred = state->sample;	/* Predicted value */
+    int index = state->index;		/* Current step change index */
+    int step = stepsizeTable[index];	/* Stepsize */
     int vpdiff;			/* Current change to valpred */
-    int index;			/* Current step change index */
-    int inputbuffer;		/* place to keep next 4-bit value */
-    int bufferstep;		/* toggle between inputbuffer/input */
-
-    outp = 0;
-    inp = (signed char *)indata;
-
-    valpred = state->sample;
-    index = state->index;
-    step = stepsizeTable[index];
-
-    bufferstep = 0;
-    inputbuffer = 0;	// quiet a compiler warning
+    int inputbuffer = 0;	/* place to keep next 4-bit value */ // quiet a compiler warning
+    int bufferstep = 0;		/* toggle between inputbuffer/input */
     for ( ; len > 0 ; len-- ) {
 		
 		/* Step 1 - get the delta value */
@@ -238,29 +221,23 @@ Returns the amount of memory (in bytes) needed to store the samples in out inter
 ====================
 */
 int S_AdpcmMemoryNeeded( const wavinfo_t *info ) {
-	float	scale;
-	int		scaledSampleCount;
-	int		sampleMemory;
-	int		blockCount;
-	int		headerMemory;
-
 	// determine scale to convert from input sampling rate to desired sampling rate
-	scale = (float)info->rate / dma.speed;
+	float	scale = (float)info->rate / dma.speed;
 
 	// calc number of samples at playback sampling rate
-	scaledSampleCount = info->samples / scale;
+	int		scaledSampleCount = info->samples / scale;
 
 	// calc memory need to store those samples using ADPCM at 4 bits per sample
-	sampleMemory = scaledSampleCount / 2;
+	int		sampleMemory = scaledSampleCount / 2;
 
 	// calc number of sample blocks needed of PAINTBUFFER_SIZE
-	blockCount = scaledSampleCount / PAINTBUFFER_SIZE;
+	int		blockCount = scaledSampleCount / PAINTBUFFER_SIZE;
 	if( scaledSampleCount % PAINTBUFFER_SIZE ) {
 		blockCount++;
 	}
 
 	// calc memory needed to store the block headers
-	headerMemory = blockCount * sizeof(adpcm_state_t);
+	int		headerMemory = blockCount * sizeof(adpcm_state_t);
 
 	return sampleMemory + headerMemory;
 }
@@ -292,25 +269,19 @@ S_AdpcmEncodeSound
 */
 void S_AdpcmEncodeSound( sfx_t *sfx, short *samples ) {
 	adpcm_state_t	state;
-	int				inOffset;
-	int				count;
-	int				n;
-	sndBuffer		*newchunk, *chunk;
-	byte			*out;
-
-	inOffset = 0;
-	count = sfx->soundLength;
+	int				inOffset = 0;
+	int				count = sfx->soundLength;
 	state.index = 0;
 	state.sample = samples[0];
 
-	chunk = NULL;
+	sndBuffer		*chunk = NULL;
 	while( count ) {
-		n = count;
+		int				n = count;
 		if( n > SND_CHUNK_SIZE_BYTE*2 ) {
 			n = SND_CHUNK_SIZE_BYTE*2;
 		}
 
-		newchunk = SND_malloc();
+		sndBuffer		*newchunk = SND_malloc();
 		if (sfx->soundData == NULL) {
 			sfx->soundData = newchunk;
 		} else if (chunk != NULL) {
@@ -322,7 +293,7 @@ void S_AdpcmEncodeSound( sfx_t *sfx, short *samples ) {
 		chunk->adpcm.index  = state.index;
 		chunk->adpcm.sample = state.sample;
 
-		out = (byte *)chunk->sndChunk;
+		byte			*out = (byte *)chunk->sndChunk;
 
 		// encode the samples
 		S_AdpcmEncode( samples + inOffset, (char *) out, n, &state );

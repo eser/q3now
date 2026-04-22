@@ -11,14 +11,14 @@
 //
 
 // ── mature (stable, shipped) ────────────────────────────────────────────
-#define FEAT_ATMOSPHERIC                  0   // 3B  rain & snow particles
+#define FEAT_ATMOSPHERIC                  1   // 3B  rain & snow particles
 #define FEAT_CRON_JOBS                    1   // 11  timed server-side tasks
 #define FEAT_DAMAGE_PLUMS                 1   // 2A  floating damage numbers
 #define FEAT_FAST_WEAPON_SWITCH           1   // 5A  fast weapon switch (0=normal, 1=skip drop, 2=instant)
 #define FEAT_FS_PRECEDENCE                1   // archive dedup: basename desc, dir > ext precedence
 #define FEAT_IPV6                         1   // IPv6 support
 #define FEAT_JSON_STATS                   0   // 7B  post-match JSON export
-#define FEAT_LENS_FLARES                  0   // 9A  map + missile lens flares (JUHOX)
+#define FEAT_LENS_FLARES                  1   // 9A  map + missile lens flares (JUHOX)
 #define FEAT_MATCH_SUMMARY                1   // 8B  intermission stats overlay
 #define FEAT_SPAWN_PROTECTION             1   // 2B  attacker gets no points for spawnkills
 #define FEAT_SPECTATOR_OUTLINES           1   // 8A  player outlines for spectators
@@ -37,14 +37,8 @@
 #define FEAT_SHOTGUN_PATTERN              1   // fixed pellet ring pattern (replaces random spread)
 #define FEAT_SHOTGUN_PUMP                 1   // Doom-style pump animation after firing
 #define FEAT_TELEPORTING_MISSILES         0   // 2F  rockets/plasma through teleporters
-
-// ── bug fixes (CPMA-sourced id bug fixes) ────────────────────────────────
-#define FEAT_ITEM_BOB_FIX                 0   // fix: item bobbing jitter after ~2 days of server uptime
-#define FEAT_GRENADE_REST_FIX             0   // fix: grenades snap to axis-aligned angles when resting
-#define FEAT_RAIL_BROADCAST               0   // fix: rail trails not visible to players near shooter
-#define FEAT_CORPSE_MOVER_FIX             0   // fix: corpses block movers (doors, lifts, plats)
-#define FEAT_TELEFRAG_FIX                 0   // fix: dead players trigger false telefrag on spawn points
-#define FEAT_BOUNCE_SOUND_LIMIT           0   // fix: unlimited grenade bounce sounds on movers
+#define FEAT_EARTHQUAKE_SYSTEM            1   // server-emitted view shake (EV_EARTHQUAKE + target_earthquake)
+#define FEAT_SPEED_SCALING                1   // velocity-based leg-anim + bobbing speed scale
 
 // ── competitive (testing) ───────────────────────────────────────────────
 #define FEAT_AUTO_DEMO                    0   // 10K auto-record demos in tournament
@@ -56,12 +50,12 @@
 #define FEAT_RTF                          0   // 11  return the flag mode
 #define FEAT_TEAM_AUTOBALANCE             0   // 10A dynamic team balancing
 #define FEAT_TOURNAMENT_PAUSE             0   // 10C mid-game pause/timeout
+#define FEAT_GAME_MEETING                 0   // match-kickoff ready-up lobby (PM_MEETING)
 
 // ── visual / UI (testing) ───────────────────────────────────────────────
 #define FEAT_ENV_LIGHTS                   0   // colored dlights from lava/slime/water surfaces (KEX-style)
 #define FEAT_IMPACT_SPARKS                0   // 11A spark particles on player hit
 #define FEAT_MAP_ROTATION                 0   // 6D  server-side map rotation list
-#define FEAT_STATS_WINDOW                 0   // floating stats overlay + window system
 #define FEAT_PING_LOCATION                0   // 4G  team coordination pings
 #define FEAT_TEAM_LEADERSHIP              0   // 11  particle trail library
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
@@ -70,12 +64,21 @@
 #define FEAT_MOVEMENT_KEYS                0   // show followed player's movement keys (spectator HUD)
 #define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + ModernHUD)
 #define FEAT_LEGACY_UI                    0   // legacy TA menu/HUD code paths (compile-time hard cut)
+#define FEAT_MUSIC_PLAYLIST               0   // playlist.cfg background music engine
+#define FEAT_SCREENSHOT_TOOLS             1   // spectator bullet-time freeze + timescale select
 
 // ── engine internals (testing) ────────────────────────────────────────
+// These flags support CMake override via -DFEAT_X=0; use #ifndef so the
+// command-line definition takes precedence over the default below.
+#ifndef FEAT_RECAST_NAVMESH
+#define FEAT_RECAST_NAVMESH               1   // Recast/Detour navmesh (replaces AAS botlib nav)
+#endif
 #define FEAT_BSP_ABSTRACTION              1   // Pluggable BSP format loaders
 #define FEAT_LEGACY_FORMATS_AUDIO         1   // WAV, OGG Vorbis, ADPCM audio codecs (retire by setting to 0; Opus remains)
 #define FEAT_LEGACY_FORMATS_IMAGE         1   // BMP, PCX, TGA image loaders (retire by setting to 0; PNG+JPG remain)
+#ifndef FEAT_WASM
 #define FEAT_WASM                         1   // WASM VM backend via WAMR
+#endif
 #define FEAT_WIREDNET_OBSERVER            1   // HTTP observer: /status.json, JSON event ring, static web UI
 #define FEAT_WIREDNET_CONTROL             1   // MCP/JSON-RPC control channel over QUIC + HTTP POST /mcp
 #define FEAT_MEMSTATS                     1   // per-subsystem allocation accounting + meminfo commands
@@ -107,14 +110,12 @@
 // backward compat: MISSIONPACK enables everything
 #define FEAT_TA_UI                        1   // Team Arena UI framework, HUD, menus
 #define FEAT_TA_VOICECHAT                 1   // vsay/vtell voice commands (bots use when enabled)
-#define FEAT_TA_TEAM_OVERLAYS             1   // team status overlay HUD (health/armor/weapon of teammates)
 #define FEAT_HARVESTER                    1   // Harvester game mode (skull/cube collection)
 #define FEAT_OVERLOAD                     1   // Overload game mode (obelisk control)
 #define FEAT_PW_PORTAL                    1   // Invulnerability shield (sphere, railgun bounce)
 #else
 #define FEAT_TA_UI                        0
 #define FEAT_TA_VOICECHAT                 0
-#define FEAT_TA_TEAM_OVERLAYS             0
 #define FEAT_HARVESTER                    0
 #define FEAT_OVERLOAD                     0
 #define FEAT_PW_PORTAL                    0

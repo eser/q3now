@@ -270,8 +270,7 @@ returns NULL on success or last failed symbol name otherwise
 */
 static const char *R_ResolveSymbols( sym_t *syms, int count )
 {
-	int i;
-	for ( i = 0; i < count; i++ )
+	for ( int i = 0; i < count; i++ )
 	{
 		*syms[ i ].symbol = ri.GL_GetProcAddress( syms[ i ].name );
 		if ( *syms[ i ].symbol == NULL )
@@ -285,8 +284,7 @@ static const char *R_ResolveSymbols( sym_t *syms, int count )
 
 static void R_ClearSymbols( sym_t *syms, int count )
 {
-	int i;
-	for ( i = 0; i < count; i++ )
+	for ( int i = 0; i < count; i++ )
 	{
 		*syms[ i ].symbol = NULL;
 	}
@@ -753,11 +751,10 @@ static byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, 
 {
 #ifdef USE_VULKAN
 	byte *buffer, *bufstart;
-	int linelen;
 	int	bufAlign;
 	int packAlign = 1;
 
-	linelen = width * 3;
+	int linelen = width * 3;
 
 	bufAlign = MAX( packAlign, 16 ); // for SIMD
 
@@ -889,13 +886,12 @@ void RB_TakeScreenshotJPEG( int x, int y, int width, int height, const char *fil
 
 static void FillBMPHeader( byte *buffer, int width, int height, int memcount, int header_size )
 {
-	int filesize;
 	memset( buffer, 0, header_size );
 
 	// bitmap file header
 	buffer[0] = 'B';
 	buffer[1] = 'M';
-	filesize = memcount + header_size;
+	int filesize = memcount + header_size;
 	buffer[2] = (filesize >> 0) & 255;
 	buffer[3] = (filesize >> 8) & 255;
 	buffer[4] = (filesize >> 16) & 255;
@@ -1017,12 +1013,10 @@ R_ScreenshotFilename
 */
 static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
 	qtime_t t;
-	int count;
-	int ms;
 
-	count = 0;
+	int count = 0;
 	ri.Com_RealTime( &t );
-	ms = ri.Milliseconds() % 1000;
+	int ms = ri.Milliseconds() % 1000;
 	if ( ms < 0 ) ms = 0;
 
 	/* CNQ3 backport: YYYY_MM_DD-HH_MM_SS-TTT filename format */
@@ -1284,12 +1278,10 @@ static void GL_SetDefaultState( void )
 
 	glState.glStateBits = GLS_DEPTHTEST_DISABLE | GLS_DEPTHMASK_TRUE;
 #else
-	int i;
-
 	glState.currenttmu = 0;
 	glState.currentArray = 0;
 
-	for ( i = 0; i < MAX_TEXTURE_UNITS; i++ )
+	for ( int i = 0; i < MAX_TEXTURE_UNITS; i++ )
 	{
 		glState.currenttextures[ i ] = 0;
 		glState.glClientStateBits[ i ] = 0;
@@ -1388,9 +1380,6 @@ static void GfxInfo( void )
 	{
 		ri.Printf( PRINT_ALL, "%s", vk.driverNote );
 	}
-
-	ri.Printf( PRINT_DEVELOPER, "VK_EXTENSIONS: " );
-	R_PrintLongString( glConfig.extensions_string );
 
 	ri.Printf( PRINT_ALL, "\nVK_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
 	ri.Printf( PRINT_ALL, "VK_MAX_TEXTURE_UNITS: %d\n", glConfig.numTextureUnits );
@@ -2043,7 +2032,6 @@ void R_Init( void ) {
 #ifndef USE_VULKAN
 	int	err;
 #endif
-	int i;
 	byte *ptr;
 
 	ri.Printf( PRINT_ALL, "----- R_Init -----\n" );
@@ -2065,7 +2053,7 @@ void R_Init( void ) {
 	//
 	// init function tables
 	//
-	for ( i = 0; i < FUNCTABLE_SIZE; i++ ) {
+	for ( int i = 0; i < FUNCTABLE_SIZE; i++ ) {
 		tr.sinTable[i] = sin( DEG2RAD( i * 360.0f / FUNCTABLE_SIZE ) + 0.0001f );
 		tr.squareTable[i] = (i < FUNCTABLE_SIZE / 2) ? 1.0f : -1.0f;
 		if ( i == 0 ) {
@@ -2297,6 +2285,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.RegisterSkin = RE_RegisterSkin;
 	re.RegisterShader = RE_RegisterShader;
 	re.RegisterShaderNoMip = RE_RegisterShaderNoMip;
+	re.RegisterShaderLightMap = RE_RegisterShaderLightMap;
 	re.RegisterMSDFShader = RE_RegisterMSDFShader;
 	re.LoadWorld = RE_LoadWorldMap;
 	re.SetWorldVisData = RE_SetWorldVisData;

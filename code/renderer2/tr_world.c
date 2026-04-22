@@ -794,11 +794,9 @@ void R_AddWorldSurfaces (void) {
 	// now add all the potentially visible surfaces
 	// also mask invisible dlights for next frame
 	{
-		int i;
-
 		tr.refdef.dlightMask = 0;
 
-		for (i = 0; i < tr.world->numWorldSurfaces; i++)
+		for (int i = 0; i < tr.world->numWorldSurfaces; i++)
 		{
 			if (tr.world->surfacesViewCount[i] != tr.viewCount)
 				continue;

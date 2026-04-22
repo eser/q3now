@@ -62,7 +62,6 @@ static qboolean GLimp_HaveExtension( const char *ext )
 
 void GLimp_InitExtraExtensions( void )
 {
-	int len;
 	char *extension;
 	const char* result[3] = { "...ignoring %s\n", "...using %s\n", "...%s not found\n" };
 	qboolean q_gl_version_at_least_3_0;
@@ -98,7 +97,7 @@ void GLimp_InitExtraExtensions( void )
 	// get our config strings
 	Q_strncpyz( glConfig.vendor_string, (char *)qglGetString (GL_VENDOR), sizeof( glConfig.vendor_string ) );
 	Q_strncpyz( glConfig.renderer_string, (char *)qglGetString (GL_RENDERER), sizeof( glConfig.renderer_string ) );
-	len = strlen( glConfig.renderer_string );
+	int len = strlen( glConfig.renderer_string );
 	if ( len && glConfig.renderer_string[ len - 1 ] == '\n' )
 		glConfig.renderer_string[ len - 1 ] = '\0';
 	Q_strncpyz( glConfig.version_string, (char *)qglGetString( GL_VERSION ), sizeof( glConfig.version_string ) );

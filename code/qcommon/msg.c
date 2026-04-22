@@ -128,8 +128,7 @@ void MSG_WriteBits( msg_t *msg, int value, int bits ) {
 	} else {
 		value &= (0xffffffff>>(32-bits));
 		if ( bits & 7 ) {
-			int nbits;
-			nbits = bits&7;
+			int nbits = bits&7;
 			for ( int i = 0; i < nbits ; i++ ) {
 				HuffmanPutBit( msg->data, msg->bit, (value & 1) );
 				msg->bit++;

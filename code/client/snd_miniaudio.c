@@ -144,12 +144,6 @@ static void S_MiniaudioCallback( ma_device *pDevice, void *pOutput,
 	 * would read from dma.buffer here, transform per source, and write to
 	 * pOutput. Not implemented in this spec.
 	 */
-	ma_uint32 bytesNeeded;
-	ma_uint32 pos;
-	ma_uint32 bytesToEnd;
-	ma_uint32 chunk1;
-	ma_uint32 chunk2;
-
 	(void)pInput;
 	(void)pDevice;
 
@@ -163,15 +157,16 @@ static void S_MiniaudioCallback( ma_device *pDevice, void *pOutput,
 		return;
 	}
 
-	bytesNeeded = frameCount * dma.channels * s_bytesPerSample;
+	ma_uint32 bytesNeeded = frameCount * dma.channels * s_bytesPerSample;
 
 	/* Read current position atomically. The mixer thread never writes to
 	 * dmapos, only reads it, so a single load is sufficient. */
-	pos = ma_atomic_uint32_get( &s_dmapos ) * s_bytesPerSample;
+	ma_uint32 pos = ma_atomic_uint32_get( &s_dmapos ) * s_bytesPerSample;
 	if ( pos >= s_dmasize_bytes )
 		pos = 0;
 
-	bytesToEnd = s_dmasize_bytes - pos;
+	ma_uint32 bytesToEnd = s_dmasize_bytes - pos;
+	ma_uint32 chunk1, chunk2;
 	if ( bytesNeeded <= bytesToEnd )
 	{
 		chunk1 = bytesNeeded;
@@ -213,8 +208,7 @@ static void S_MiniaudioCallback( ma_device *pDevice, void *pOutput,
 			ma_uint32 phase = ma_atomic_uint32_get( &s_testPhase );
 			const float twopi_over_sr = 6.2831853071795864f / (float)s_maDevice.sampleRate;
 			const float freq = 1000.0f; /* 1 kHz */
-			ma_uint32 i;
-			for ( i = 0; i < framesToWrite; i++ )
+			for ( ma_uint32 i = 0; i < framesToWrite; i++ )
 			{
 				float t = (float)( phase + i );
 				int16_t sample = (int16_t)( 0.25f * 32767.0f * sinf( t * freq * twopi_over_sr ) );
@@ -237,18 +231,15 @@ static void S_MiniaudioCallback( ma_device *pDevice, void *pOutput,
 		int16_t *out = (int16_t *)pOutput;
 		ma_uint32 totalSamples = frameCount * (ma_uint32)dma.channels;
 		double sumSquares = 0.0;
-		ma_uint32 i;
-		float rms;
-		ma_uint32 ringPos;
-		for ( i = 0; i < totalSamples; i++ )
+		for ( ma_uint32 i = 0; i < totalSamples; i++ )
 		{
 			float s = (float)out[i] * ( 1.0f / 32768.0f );
 			sumSquares += (double)( s * s );
 		}
-		rms = ( totalSamples > 0 )
+		float rms = ( totalSamples > 0 )
 		    ? (float)sqrt( sumSquares / (double)totalSamples )
 		    : 0.0f;
-		ringPos = ma_atomic_uint32_get( &s_levelsRingPos );
+		ma_uint32 ringPos = ma_atomic_uint32_get( &s_levelsRingPos );
 		s_levelsRing[ ringPos % S_LEVELS_RING_SIZE ] = rms;
 		ma_atomic_uint32_set( &s_levelsRingPos, ringPos + 1 );
 	}
@@ -271,8 +262,6 @@ audio callback observes on its next wake-up — no locking, no race.
 */
 static void S_Test_f( void )
 {
-	ma_uint32 frames;
-
 	if ( !s_maInitialized )
 	{
 		Com_Printf( "snd_test: audio device not initialized\n" );
@@ -280,7 +269,7 @@ static void S_Test_f( void )
 	}
 
 	/* 2 seconds at the device sample rate. */
-	frames = 2 * (ma_uint32)s_maDevice.sampleRate;
+	ma_uint32 frames = 2 * (ma_uint32)s_maDevice.sampleRate;
 	ma_atomic_uint32_set( &s_testPhase, 0 );
 	ma_atomic_uint32_set( &s_testFramesRemaining, frames );
 
@@ -307,21 +296,18 @@ Returns the number of levels actually written to `outLevels` (≤ outCount).
 */
 int S_GetRecentLevels( float *outLevels, int outCount )
 {
-	ma_uint32 pos;
-	int i;
-
 	if ( outLevels == NULL || outCount <= 0 )
 		return 0;
 	if ( outCount > S_LEVELS_RING_SIZE )
 		outCount = S_LEVELS_RING_SIZE;
 
-	pos = ma_atomic_uint32_get( &s_levelsRingPos );
+	ma_uint32 pos = ma_atomic_uint32_get( &s_levelsRingPos );
 
 	/* Walk backwards from the most-recent write: index (pos-1) is newest,
 	 * (pos-2) is one period older, etc. Store them in outLevels so that
 	 * outLevels[outCount-1] is the newest sample (caller can draw left-
 	 * to-right with oldest first). */
-	for ( i = 0; i < outCount; i++ )
+	for ( int i = 0; i < outCount; i++ )
 	{
 		ma_uint32 idx = ( pos - 1 - (ma_uint32)i ) % S_LEVELS_RING_SIZE;
 		outLevels[ outCount - 1 - i ] = s_levelsRing[ idx ];
@@ -365,8 +351,6 @@ int S_GetAudioDeviceList( const char **outNames, int outCapacity )
 	ma_context        context;
 	ma_device_info   *pPlaybackInfos = NULL;
 	ma_uint32         playbackCount  = 0;
-	ma_uint32         i;
-	int               written;
 
 	if ( outNames == NULL || outCapacity <= 0 )
 		return 0;
@@ -388,7 +372,7 @@ int S_GetAudioDeviceList( const char **outNames, int outCapacity )
 	/* Copy device names into our static buffer so the pointers stay valid
 	 * after we uninit the context. */
 	s_devListCount = 0;
-	for ( i = 0; i < playbackCount && s_devListCount < S_DEVLIST_MAX_DEVICES; i++ )
+	for ( ma_uint32 i = 0; i < playbackCount && s_devListCount < S_DEVLIST_MAX_DEVICES; i++ )
 	{
 		Q_strncpyz( s_devListNames[s_devListCount], pPlaybackInfos[i].name,
 		            sizeof( s_devListNames[0] ) );
@@ -397,8 +381,8 @@ int S_GetAudioDeviceList( const char **outNames, int outCapacity )
 
 	ma_context_uninit( &context );
 
-	written = ( s_devListCount < outCapacity ) ? s_devListCount : outCapacity;
-	for ( i = 0; i < (ma_uint32)written; i++ )
+	int written = ( s_devListCount < outCapacity ) ? s_devListCount : outCapacity;
+	for ( ma_uint32 i = 0; i < (ma_uint32)written; i++ )
 	{
 		outNames[i] = s_devListNames[i];
 	}
@@ -419,13 +403,6 @@ the engine mixer expects, and start the device. Returns qtrue on success.
 */
 qboolean SNDDMA_Init( void )
 {
-	ma_device_config config;
-	ma_result result;
-	ma_uint32 sampleRate;
-	ma_uint32 channels;
-	ma_uint32 mixerSamples;
-	ma_uint32 periodSizeInFrames;
-
 	if ( s_maInitialized )
 		return qtrue;
 
@@ -433,14 +410,18 @@ qboolean SNDDMA_Init( void )
 	 * Sample rate from the s_khz cvar (8/11/22/44/48). The engine sets this
 	 * via Cvar_Get long before SNDDMA_Init is called from S_Base_Init.
 	 */
-	sampleRate = (ma_uint32)SNDDMA_KHzToHz( s_khz ? s_khz->integer : 48 );
+	ma_uint32 sampleRate = (ma_uint32)SNDDMA_KHzToHz( s_khz ? s_khz->integer : 48 );
 	if ( sampleRate == 0 )
 		sampleRate = 48000;
 
 	/* Stereo s16 -- the engine mixer always paints stereo s16, regardless
 	 * of source sample count, so we hardwire it here. Future HRTF work
 	 * would change this. */
-	channels = 2;
+	ma_uint32       channels = 2;
+	ma_uint32       mixerSamples;
+	ma_uint32       periodSizeInFrames;
+	ma_device_config config;
+	ma_result       result;
 
 	/*
 	 * periodSizeInFrames is derived from the s_latency cvar (clamped to

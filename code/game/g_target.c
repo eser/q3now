@@ -477,3 +477,36 @@ void SP_target_location( gentity_t *self ){
 
 	G_SetOrigin( self, self->s.origin );
 }
+
+#if FEAT_EARTHQUAKE_SYSTEM
+/*QUAKED target_earthquake (1 0 0) (-8 -8 -8) (8 8 8)
+Triggers a local or global view shake.
+-------- KEYS --------
+duration:  total shake time in seconds (default 10)
+fadein:    fade-in time in seconds (default 1)
+fadeout:   fade-out time in seconds (default 1)
+amplitude: shake intensity 0-100 (default 100; 100 = maximum)
+radius:    attenuation radius in units; use -1 for global (default -1)
+*/
+static void Use_target_earthquake( gentity_t *ent, gentity_t *other, gentity_t *activator ) {
+	gentity_t *event = G_TempEntity( ent->s.origin, EV_EARTHQUAKE );
+	if ( event ) {
+		VectorCopy( ent->s.angles,  event->s.angles );
+		VectorCopy( ent->s.angles2, event->s.angles2 );
+	}
+}
+
+void SP_target_earthquake( gentity_t *ent ) {
+	G_SpawnFloat( "duration",  "10",   &ent->s.angles[0] );
+	G_SpawnFloat( "fadein",    "1",    &ent->s.angles[1] );
+	G_SpawnFloat( "fadeout",   "1",    &ent->s.angles[2] );
+	G_SpawnFloat( "amplitude", "100",  &ent->s.angles2[0] );
+	G_SpawnFloat( "radius",    "-1",   &ent->s.angles2[1] );
+
+	if ( ent->s.angles[0] < ent->s.angles[1] + ent->s.angles[2] ) {
+		ent->s.angles[0] = ent->s.angles[1] + ent->s.angles[2];
+	}
+
+	ent->use = Use_target_earthquake;
+}
+#endif

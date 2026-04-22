@@ -79,14 +79,13 @@ R_CullModel
 static int R_CullModel( md3Header_t *header, const trRefEntity_t *ent, vec3_t bounds[] ) {
 	//vec3_t bounds[2];
 	md3Frame_t	*oldFrame, *newFrame;
-	int			i;
 
 	// compute frame pointers
 	newFrame = ( md3Frame_t * ) ( ( byte * ) header + header->ofsFrames ) + ent->e.frame;
 	oldFrame = ( md3Frame_t * ) ( ( byte * ) header + header->ofsFrames ) + ent->e.oldframe;
 
 	// calculate a bounding box in the current coordinate system
-	for (i = 0 ; i < 3 ; i++) {
+	for (int i = 0 ; i < 3 ; i++) {
 		bounds[0][i] = oldFrame->bounds[0][i] < newFrame->bounds[0][i] ? oldFrame->bounds[0][i] : newFrame->bounds[0][i];
 		bounds[1][i] = oldFrame->bounds[1][i] > newFrame->bounds[1][i] ? oldFrame->bounds[1][i] : newFrame->bounds[1][i];
 	}
@@ -113,9 +112,8 @@ static int R_CullModel( md3Header_t *header, const trRefEntity_t *ent, vec3_t bo
 		}
 		else
 		{
-			int sphereCull, sphereCullB;
-
-			sphereCull  = R_CullLocalPointAndRadius( newFrame->localOrigin, newFrame->radius );
+			int sphereCull = R_CullLocalPointAndRadius( newFrame->localOrigin, newFrame->radius );
+			int sphereCullB;
 			if ( newFrame == oldFrame ) {
 				sphereCullB = sphereCull;
 			} else {
@@ -184,9 +182,8 @@ int R_ComputeLOD( trRefEntity_t *ent ) {
 
 		if(tr.currentModel->type == MOD_MDR)
 		{
-			int frameSize;
 			mdr = (mdrHeader_t *) tr.currentModel->modelData;
-			frameSize = (size_t) (&((mdrFrame_t *)0)->bones[mdr->numBones]);
+			int frameSize = (size_t) (&((mdrFrame_t *)0)->bones[mdr->numBones]);
 			
 			mdrframe = (mdrFrame_t *) ((byte *) mdr + mdr->ofsFrames + frameSize * ent->e.frame);
 			
@@ -281,7 +278,6 @@ R_AddMD3Surfaces
 */
 void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	vec3_t			bounds[2];
-	int				i;
 	md3Header_t		*header = NULL;
 	md3Surface_t	*surface = NULL;
 	md3Shader_t		*md3Shader = NULL;
@@ -366,10 +362,29 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	// draw all surfaces
 	//
 	surface = (md3Surface_t *)( (byte *)header + header->ofsSurfaces );
-	for ( i = 0 ; i < header->numSurfaces ; i++ ) {
-
+	for ( int i = 0 ; i < header->numSurfaces ; i++ ) {
 		if ( ent->e.customShader ) {
 			shader = R_GetShaderByHandle( ent->e.customShader );
+		} else if ( ent->e.characterSkin ) {
+			const cmSkin_t *csk = ri.GetCharacterSkin( ent->e.characterSkin );
+			if ( csk ) {
+				if ( csk->singlePath ) {
+					shader = R_GetShaderByHandle( csk->fallbackShader );
+				} else {
+					int csj;
+					shader = tr.defaultShader;
+					for ( csj = 0; csj < csk->overrideCount; csj++ ) {
+						if ( !strcmp( csk->overrides[csj].surfaceName, surface->name ) ) {
+							shader = R_GetShaderByHandle( csk->overrides[csj].shader );
+							break;
+						}
+					}
+					if ( shader == tr.defaultShader && csk->defaultShader )
+						shader = R_GetShaderByHandle( csk->defaultShader );
+				}
+			} else {
+				shader = tr.defaultShader;
+			}
 		} else if ( ent->e.customSkin > 0 && ent->e.customSkin < tr.numSkins ) {
 			const skin_t *skin;
 			int		j;

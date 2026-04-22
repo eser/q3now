@@ -83,9 +83,7 @@ void CG_ModernHUDElementTeamRoutine(void* context)
 	clientInfo_t* ci;
 	int cnt = 0;
 	int index;
-	int ourTeam;
-
-	ourTeam = cg.snap->ps.persistant[PERS_TEAM];
+	int ourTeam = cg.snap->ps.persistant[PERS_TEAM];
 
 	for (index = 0; index < numSortedTeamPlayers; ++index)
 	{

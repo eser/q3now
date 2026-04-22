@@ -57,11 +57,8 @@ void* CG_ModernHUDElementPwIconCreate(const modernhudConfig_t* config, int index
 void CG_ModernHUDElementPwRoutine(void* context)
 {
 	modernHudElementPowerupContext* element = (modernHudElementPowerupContext*)context;
-	int maxPW;
-	int idx;
-
-	maxPW = wiredHud->activePowerupCount;
-	idx = element->pwIndex - 1;   /* pwIndex is 1-based */
+	int maxPW = wiredHud->activePowerupCount;
+	int idx = element->pwIndex - 1;   /* pwIndex is 1-based */
 
 	if (idx < 0 || idx >= maxPW)
 	{

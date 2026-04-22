@@ -111,7 +111,6 @@ menuDef {
 	}
 
 	WYESNO(0.060, 0.440, 0.400, 0.055, "In-game Video:", 13, "r_inGameVideo")
-	WYESNO(0.060, 0.505, 0.400, 0.055, "Show FPS:", 13, "cg_drawFPS")
 
 	// Right box
 	itemDef {

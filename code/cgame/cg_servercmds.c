@@ -47,8 +47,7 @@ static const orderTask_t validOrders[] = {
 static const int numValidOrders = ARRAY_LEN(validOrders);
 
 static int CG_ValidOrder(const char *p) {
-	int i;
-	for (i = 0; i < numValidOrders; i++) {
+	for (int i = 0; i < numValidOrders; i++) {
 		if (Q_stricmp(p, validOrders[i].order) == 0) {
 			return validOrders[i].taskNum;
 		}
@@ -163,7 +162,6 @@ CG_ParseTeamInfo
 =================
 */
 static void CG_ParseTeamInfo( void ) {
-	int		i;
 	int		client;
 
 	numSortedTeamPlayers = atoi( CG_Argv( 1 ) );
@@ -174,7 +172,7 @@ static void CG_ParseTeamInfo( void ) {
 		return;
 	}
 
-	for ( i = 0 ; i < numSortedTeamPlayers ; i++ ) {
+	for ( int i = 0 ; i < numSortedTeamPlayers ; i++ ) {
 		client = atoi( CG_Argv( i * 6 + 2 ) );
 		if( client < 0 || client >= MAX_CLIENTS )
 		{
@@ -217,7 +215,7 @@ void CG_ParseServerinfo( void ) {
 	mapname = Info_ValueForKey( info, "mapname" );
 	Com_sprintf( cgs.mapname, sizeof( cgs.mapname ), "maps/%s.bsp", mapname );
 #if FEAT_ATMOSPHERIC
-	Q_strncpyz( cgs.weather, Info_ValueForKey( info, "g_weather" ), sizeof(cgs.weather) );
+	Q_strncpyz( cgs.weather, Info_ValueForKey( info, "g_envWeather" ), sizeof(cgs.weather) );
 	CG_AtmosphericInit();
 #endif
 }
@@ -286,13 +284,12 @@ void CG_ShaderStateChanged(void) {
 	char timeOffset[16];
 	const char *o;
 	char *n,*t;
-	int length;
 
 	o = CG_ConfigString( CS_SHADERSTATE );
 	while (o && *o) {
 		n = strstr(o, "=");
 		if (n && *n) {
-			length = n-o+1;
+			int length = n-o+1;
 			if (length > sizeof(originalShader)) {
 				length = sizeof(originalShader);
 			}
@@ -435,9 +432,6 @@ CG_AddToTeamChat
 =======================
 */
 static void CG_AddToTeamChat( const char *str ) {
-	int len;
-	char *p, *ls;
-	int lastcolor;
 	int chatHeight;
 
 	if (cg_teamChatHeight.integer < TEAMCHAT_HEIGHT) {
@@ -452,14 +446,14 @@ static void CG_AddToTeamChat( const char *str ) {
 		return;
 	}
 
-	len = 0;
+	int len = 0;
 
-	p = cgs.teamChatMsgs[cgs.teamChatPos % chatHeight];
+	char *p = cgs.teamChatMsgs[cgs.teamChatPos % chatHeight];
 	*p = 0;
 
-	lastcolor = '7';
+	int lastcolor = '7';
 
-	ls = NULL;
+	char *ls = NULL;
 	while (*str) {
 		if (len > TEAMCHAT_WIDTH - 1) {
 			if (ls) {
@@ -539,6 +533,9 @@ static void CG_MapRestart( void ) {
 	memset( cg.scores, 0, sizeof( cg.scores ) );
 	memset( cgs.attackStats, 0, sizeof( cgs.attackStats ) );
 
+#if FEAT_MUSIC_PLAYLIST
+	CG_ParsePlayList();
+#endif
 	CG_StartMusic();
 
 	trap_S_ClearLoopingSounds(qtrue);
@@ -592,7 +589,7 @@ typedef struct voiceChatList_s
 
 typedef struct headModelVoiceChat_s
 {
-	char headmodel[64];
+	char charKey[64];
 	int voiceChatNum;
 } headModelVoiceChat_t;
 
@@ -707,9 +704,7 @@ CG_LoadVoiceChats
 =================
 */
 void CG_LoadVoiceChats( void ) {
-	int size;
-
-	size = trap_MemoryRemaining();
+	int size = trap_MemoryRemaining();
 	CG_ParseVoiceChats( "scripts/female1.voice", &voiceChatLists[0], MAX_VOICECHATS );
 	CG_ParseVoiceChats( "scripts/female2.voice", &voiceChatLists[1], MAX_VOICECHATS );
 	CG_ParseVoiceChats( "scripts/female3.voice", &voiceChatLists[2], MAX_VOICECHATS );
@@ -718,12 +713,6 @@ void CG_LoadVoiceChats( void ) {
 	CG_ParseVoiceChats( "scripts/male3.voice", &voiceChatLists[5], MAX_VOICECHATS );
 	CG_ParseVoiceChats( "scripts/male4.voice", &voiceChatLists[6], MAX_VOICECHATS );
 	CG_ParseVoiceChats( "scripts/male5.voice", &voiceChatLists[7], MAX_VOICECHATS );
-	{
-		char devBuf[8];
-		trap_Cvar_VariableStringBuffer( "developer", devBuf, sizeof(devBuf) );
-		if ( atoi(devBuf) )
-			CG_Printf("voice chat memory size = %d\n", size - trap_MemoryRemaining());
-	}
 }
 
 /*
@@ -810,28 +799,28 @@ voiceChatList_t *CG_VoiceChatListForClient( int clientNum ) {
 
 	for ( k = 0; k < 2; k++ ) {
 		if ( k == 0 ) {
-			Com_sprintf( headModelName, sizeof(headModelName), "%s/%s", ci->modelName, ci->skinName );
+			Com_sprintf( headModelName, sizeof(headModelName), "%s/%s", ci->characterName, ci->skinName );
 		}
 		else {
-			Com_sprintf( headModelName, sizeof(headModelName), "%s", ci->modelName );
+			Com_sprintf( headModelName, sizeof(headModelName), "%s", ci->characterName );
 		}
 		// find the voice file for the head model the client uses
 		for ( i = 0; i < MAX_HEADMODELS; i++ ) {
-			if (!Q_stricmp(headModelVoiceChat[i].headmodel, headModelName)) {
+			if (!Q_stricmp(headModelVoiceChat[i].charKey, headModelName)) {
 				break;
 			}
 		}
 		if (i < MAX_HEADMODELS) {
 			return &voiceChatLists[headModelVoiceChat[i].voiceChatNum];
 		}
-		// find a <headmodelname>.vc file
+		// find a <charactername>.vc file
 		for ( i = 0; i < MAX_HEADMODELS; i++ ) {
-			if (!strlen(headModelVoiceChat[i].headmodel)) {
+			if (!strlen(headModelVoiceChat[i].charKey)) {
 				Com_sprintf(filename, sizeof(filename), "scripts/%s.vc", headModelName);
 				voiceChatNum = CG_HeadModelVoiceChats(filename);
 				if (voiceChatNum == -1)
 					break;
-				Com_sprintf(headModelVoiceChat[i].headmodel, sizeof ( headModelVoiceChat[i].headmodel ),
+				Com_sprintf(headModelVoiceChat[i].charKey, sizeof ( headModelVoiceChat[i].charKey ),
 							"%s", headModelName);
 				headModelVoiceChat[i].voiceChatNum = voiceChatNum;
 				return &voiceChatLists[headModelVoiceChat[i].voiceChatNum];
@@ -846,8 +835,8 @@ voiceChatList_t *CG_VoiceChatListForClient( int clientNum ) {
 				if (voiceChatLists[i].gender == gender) {
 					// store this head model with voice chat for future reference
 					for ( j = 0; j < MAX_HEADMODELS; j++ ) {
-						if (!strlen(headModelVoiceChat[j].headmodel)) {
-							Com_sprintf(headModelVoiceChat[j].headmodel, sizeof ( headModelVoiceChat[j].headmodel ),
+						if (!strlen(headModelVoiceChat[j].charKey)) {
+							Com_sprintf(headModelVoiceChat[j].charKey, sizeof ( headModelVoiceChat[j].charKey ),
 									"%s", headModelName);
 							headModelVoiceChat[j].voiceChatNum = i;
 							break;
@@ -864,8 +853,8 @@ voiceChatList_t *CG_VoiceChatListForClient( int clientNum ) {
 	}
 	// store this head model with voice chat for future reference
 	for ( j = 0; j < MAX_HEADMODELS; j++ ) {
-		if (!strlen(headModelVoiceChat[j].headmodel)) {
-			Com_sprintf(headModelVoiceChat[j].headmodel, sizeof ( headModelVoiceChat[j].headmodel ),
+		if (!strlen(headModelVoiceChat[j].charKey)) {
+			Com_sprintf(headModelVoiceChat[j].charKey, sizeof ( headModelVoiceChat[j].charKey ),
 					"%s", headModelName);
 			headModelVoiceChat[j].voiceChatNum = 0;
 			break;
@@ -1088,18 +1077,6 @@ static void CG_ServerCommand( void ) {
 		} else if ( !Q_stricmpn( cmd, "vote passed", 11 ) || !Q_stricmpn( cmd, "team vote passed", 16 ) ) {
 			trap_S_StartLocalSound( cgs.media.votePassed, CHAN_ANNOUNCER );
 		}
-#if FEAT_STATS_WINDOW
-		{
-			const char *printText = CG_Argv(1);
-			if ( Q_stristr( printText, "Vote passed" ) ) {
-				CG_voteNotification( "Vote passed!" );
-			} else if ( Q_stristr( printText, "Vote failed" ) ) {
-				CG_voteNotification( "Vote failed" );
-			} else if ( Q_stristr( printText, "Vote:" ) ) {
-				CG_voteNotification( printText );
-			}
-		}
-#endif
 		return;
 	}
 
@@ -1136,47 +1113,6 @@ static void CG_ServerCommand( void ) {
 		CG_RemoveChatEscapeChar( text );
 		CG_AddToTeamChat( text );
 		CG_Printf( "%s\n", text );
-#if FEAT_STATS_WINDOW
-		{
-			char cleanBuf[MAX_SAY_TEXT];
-			const char *myName;
-			const char *colon;
-			char senderName[MAX_NAME_LENGTH];
-			int nameLen;
-
-			Q_strncpyz( cleanBuf, text, sizeof( cleanBuf ) );
-			Q_CleanStr( cleanBuf );
-
-			/* tchat format after cleaning: "PlayerName: message text" */
-			colon = strstr( cleanBuf, ": " );
-			if ( colon ) {
-				nameLen = (int)( colon - cleanBuf );
-				if ( nameLen >= (int)sizeof( senderName ) ) {
-					nameLen = (int)sizeof( senderName ) - 1;
-				}
-				Q_strncpyz( senderName, cleanBuf, nameLen + 1 );
-
-				/* build a clean copy of our own name for comparison */
-				{
-					char myCleanName[MAX_NAME_LENGTH];
-					myName = cgs.clientinfo[cg.clientNum].name;
-					Q_strncpyz( myCleanName, myName, sizeof( myCleanName ) );
-					Q_CleanStr( myCleanName );
-
-					if ( !Q_stricmp( senderName, myCleanName ) ) {
-						const char *msg = colon + 2; /* skip ": " */
-						if ( Q_stristr( msg, "follow me" ) ||
-							Q_stristr( msg, "get the flag" ) ||
-							Q_stristr( msg, "camp here" ) ||
-							Q_stristr( msg, "patrol" ) ||
-							Q_stristr( msg, "report" ) ) {
-							CG_botOrderConfirmation( NULL, msg );
-						}
-					}
-				}
-			}
-		}
-#endif
 		return;
 	}
 

@@ -152,9 +152,6 @@ static void WiredUI_CountPersistedStateEntry( wuiStoreEntry_t *entry, void *user
 
 static void WiredUI_WritePersistedStateEntry( wuiStoreEntry_t *entry, void *userData ) {
 	wiredUiStateWriteCtx_t *ctx = (wiredUiStateWriteCtx_t *)userData;
-	wiredUiStateFileEntryHeader_t eh;
-	int keyLen;
-	int valueLen;
 
 	if ( !entry || !ctx ) {
 		return;
@@ -164,8 +161,9 @@ static void WiredUI_WritePersistedStateEntry( wuiStoreEntry_t *entry, void *user
 		return;
 	}
 
-	keyLen = (int)strlen( entry->key );
-	valueLen = (int)strlen( entry->text );
+	int keyLen = (int)strlen( entry->key );
+	int valueLen = (int)strlen( entry->text );
+	wiredUiStateFileEntryHeader_t eh;
 	if ( keyLen <= 0 || keyLen > 65535 || valueLen < 0 || valueLen > 65535 ) {
 		return;
 	}
@@ -181,26 +179,24 @@ static void WiredUI_WritePersistedStateEntry( wuiStoreEntry_t *entry, void *user
 }
 
 void WiredUI_SaveState( void ) {
-	fileHandle_t f;
-	wiredUiStateFileHeader_t header;
 	wiredUiStateCountCtx_t countCtx;
-	wiredUiStateWriteCtx_t writeCtx;
-
 	countCtx.count = 0;
 	WiredStore_ForEach( NULL, WiredUI_CountPersistedStateEntry, &countCtx );
 
-	f = FS_FOpenFileWrite( WIRED_UI_STATE_FILE );
+	fileHandle_t f = FS_FOpenFileWrite( WIRED_UI_STATE_FILE );
 	if ( f == FS_INVALID_HANDLE ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI: failed to save UI state (%s)\n", WIRED_UI_STATE_FILE );
 		return;
 	}
 
+	wiredUiStateFileHeader_t header;
 	header.magic = WIRED_UI_STATE_MAGIC;
 	header.version = WIRED_UI_STATE_VERSION;
 	header.count = countCtx.count;
 
 	FS_Write( &header, sizeof( header ), f );
 
+	wiredUiStateWriteCtx_t writeCtx;
 	writeCtx.f = f;
 	writeCtx.wrote = 0;
 	WiredStore_ForEach( NULL, WiredUI_WritePersistedStateEntry, &writeCtx );
@@ -211,17 +207,8 @@ void WiredUI_SaveState( void ) {
 }
 
 void WiredUI_LoadState( void ) {
-	fileHandle_t f;
-	int len;
-	byte *data;
-	const byte *p;
-	const byte *end;
-	wiredUiStateFileHeader_t header;
-	int loadedCount = 0;
-	int i;
-
-	f = FS_INVALID_HANDLE;
-	len = FS_FOpenFileRead( WIRED_UI_STATE_FILE, &f, qtrue );
+	fileHandle_t f = FS_INVALID_HANDLE;
+	int len = FS_FOpenFileRead( WIRED_UI_STATE_FILE, &f, qtrue );
 	if ( f == FS_INVALID_HANDLE || len <= 0 ) {
 		if ( f != FS_INVALID_HANDLE ) {
 			FS_FCloseFile( f );
@@ -229,7 +216,7 @@ void WiredUI_LoadState( void ) {
 		return;
 	}
 
-	data = (byte *)Z_Malloc( len );
+	byte *data = (byte *)Z_Malloc( len );
 	if ( !data ) {
 		FS_FCloseFile( f );
 		return;
@@ -242,6 +229,7 @@ void WiredUI_LoadState( void ) {
 	}
 	FS_FCloseFile( f );
 
+	wiredUiStateFileHeader_t header;
 	if ( len < (int)sizeof( header ) ) {
 		Z_Free( data );
 		return;
@@ -256,15 +244,14 @@ void WiredUI_LoadState( void ) {
 		return;
 	}
 
-	p = data + sizeof( header );
-	end = data + len;
+	const byte *p = data + sizeof( header );
+	const byte *end = data + len;
+	int loadedCount = 0;
 
-	for ( i = 0; i < header.count; i++ ) {
+	for ( int i = 0; i < header.count; i++ ) {
 		wiredUiStateFileEntryHeader_t eh;
 		char key[128];
 		char value[256];
-		int valueCopyLen;
-		wuiStoreEntry_t *entry;
 
 		if ( end - p < (int)sizeof( eh ) ) {
 			break;
@@ -289,7 +276,7 @@ void WiredUI_LoadState( void ) {
 		key[eh.keyLen] = '\0';
 		p += eh.keyLen;
 
-		valueCopyLen = eh.valueLen;
+		int valueCopyLen = eh.valueLen;
 		if ( valueCopyLen >= (int)sizeof( value ) ) {
 			valueCopyLen = sizeof( value ) - 1;
 		}
@@ -303,7 +290,7 @@ void WiredUI_LoadState( void ) {
 			continue;
 		}
 
-		entry = WiredStore_Set( key );
+		wuiStoreEntry_t *entry = WiredStore_Set( key );
 		if ( !entry ) {
 			continue;
 		}
@@ -320,13 +307,11 @@ void WiredUI_LoadState( void ) {
 }
 
 static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
-	lua_State *L;
-
 	if ( !functionName || !functionName[0] ) {
 		return qfalse;
 	}
 
-	L = WiredScript_GetState();
+	lua_State *L = WiredScript_GetState();
 	if ( !L ) {
 		return qfalse;
 	}
@@ -357,8 +342,7 @@ static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
 }
 
 static const char *WiredUI_StateDefaultValue( const char *key ) {
-	const wiredUiStateDefault_t *it;
-	for ( it = wui_uiStateDefaults; it->key; it++ ) {
+	for ( const wiredUiStateDefault_t *it = wui_uiStateDefaults; it->key; it++ ) {
 		if ( !Q_stricmp( key, it->key ) ) {
 			return it->defaultValue ? it->defaultValue : "";
 		}
@@ -367,9 +351,6 @@ static const char *WiredUI_StateDefaultValue( const char *key ) {
 }
 
 void WiredUI_StateGetString( const char *key, char *out, int outSize ) {
-	const wiredUiStateDefault_t *it;
-	wuiStoreEntry_t *entry;
-
 	if ( !out || outSize <= 0 ) {
 		return;
 	}
@@ -380,7 +361,7 @@ void WiredUI_StateGetString( const char *key, char *out, int outSize ) {
 	}
 
 	if ( WiredUI_IsStoreStateKey( key ) ) {
-		entry = WiredStore_Get( key );
+		wuiStoreEntry_t *entry = WiredStore_Get( key );
 		if ( entry ) {
 			Q_strncpyz( out, entry->text, outSize );
 			if ( !out[0] ) {
@@ -389,7 +370,7 @@ void WiredUI_StateGetString( const char *key, char *out, int outSize ) {
 			return;
 		}
 
-		for ( it = wui_uiStateDefaults; it->key; it++ ) {
+		for ( const wiredUiStateDefault_t *it = wui_uiStateDefaults; it->key; it++ ) {
 			if ( !Q_stricmp( key, it->key ) ) {
 				Q_strncpyz( out, it->defaultValue ? it->defaultValue : "", outSize );
 				return;
@@ -442,11 +423,6 @@ void WiredUI_StateSetFloat( const char *key, float value ) {
 }
 
 static qboolean WiredUI_StateListContainsValue( const char *list, const char *value ) {
-	char token[256];
-	const char *p;
-	char intBuf[16];
-	int intVal;
-
 	if ( !list || !list[0] ) {
 		return qfalse;
 	}
@@ -455,10 +431,12 @@ static qboolean WiredUI_StateListContainsValue( const char *list, const char *va
 		value = "";
 	}
 
-	intVal = atoi( value );
+	int intVal = atoi( value );
+	char intBuf[16];
 	Com_sprintf( intBuf, sizeof( intBuf ), "%d", intVal );
 
-	p = list;
+	char token[256];
+	const char *p = list;
 	while ( *p ) {
 		int i = 0;
 		while ( *p == ' ' ) p++;
@@ -537,10 +515,6 @@ static void WiredUI_DrawWindowBorder( float x, float y, float w, float h,
 }
 
 static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float w, float h ) {
-	refdef_t refdef;
-	refEntity_t ent;
-	vec3_t angles;
-
 	if ( !item->assetModel[0] ) {
 		return;
 	}
@@ -556,6 +530,8 @@ static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float
 		item->modelShaderHandle = re.RegisterShaderNoMip( item->assetShader );
 	}
 
+	refdef_t refdef;
+	refEntity_t ent;
 	memset( &refdef, 0, sizeof( refdef ) );
 	memset( &ent, 0, sizeof( ent ) );
 
@@ -584,6 +560,7 @@ static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float
 	}
 
 	VectorSet( ent.origin, 0.0f, 0.0f, 0.0f );
+	vec3_t angles;
 	angles[PITCH] = 0.0f;
 	angles[YAW] = item->modelAngle + item->modelRotation * ( (float)cls.realtime / 1000.0f );
 	angles[ROLL] = 0.0f;
@@ -901,9 +878,8 @@ void WiredUI_ResetAssetGlobalsDefaults( void ) {
 void WiredUI_RegisterFeeder( int feederID, wiredFeederCount_t count,
                               wiredFeederItemText_t itemText,
                               wiredFeederSelection_t selection ) {
-	int i;
 	// update existing
-	for ( i = 0; i < wui_numFeeders; i++ ) {
+	for ( int i = 0; i < wui_numFeeders; i++ ) {
 		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID ) {
 			wui_feeders[i].count = count;
 			wui_feeders[i].itemText = itemText;
@@ -921,8 +897,7 @@ void WiredUI_RegisterFeeder( int feederID, wiredFeederCount_t count,
 }
 
 int WiredUI_FeederCount( int feederID ) {
-	int i;
-	for ( i = 0; i < wui_numFeeders; i++ ) {
+	for ( int i = 0; i < wui_numFeeders; i++ ) {
 		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID && wui_feeders[i].count ) {
 			return wui_feeders[i].count( feederID );
 		}
@@ -931,8 +906,7 @@ int WiredUI_FeederCount( int feederID ) {
 }
 
 const char *WiredUI_FeederItemText( int feederID, int index, int column ) {
-	int i;
-	for ( i = 0; i < wui_numFeeders; i++ ) {
+	for ( int i = 0; i < wui_numFeeders; i++ ) {
 		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID && wui_feeders[i].itemText ) {
 			return wui_feeders[i].itemText( feederID, index, column );
 		}
@@ -941,8 +915,7 @@ const char *WiredUI_FeederItemText( int feederID, int index, int column ) {
 }
 
 void WiredUI_FeederSelection( int feederID, int index ) {
-	int i;
-	for ( i = 0; i < wui_numFeeders; i++ ) {
+	for ( int i = 0; i < wui_numFeeders; i++ ) {
 		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID && wui_feeders[i].selection ) {
 			wui_feeders[i].selection( feederID, index );
 			return;
@@ -1032,7 +1005,6 @@ static void WiredUI_CloseMultiDropdown( void ) {
 }
 
 static void WiredUI_GetMultiOptions( wiredItemDef_t *item, wiredMultiOptions_t *out ) {
-	int i;
 	memset( out, 0, sizeof( *out ) );
 	if ( !item ) return;
 
@@ -1045,7 +1017,7 @@ static void WiredUI_GetMultiOptions( wiredItemDef_t *item, wiredMultiOptions_t *
 			if ( ( res.state == WUI_POPULATE_SUCCESS || res.state == WUI_POPULATE_PARTIAL ) &&
 			     res.count > 0 && res.names && res.values ) {
 				out->count = res.count > WIRED_MAX_MULTI_CHOICES ? WIRED_MAX_MULTI_CHOICES : res.count;
-				for ( i = 0; i < out->count; i++ ) {
+				for ( int i = 0; i < out->count; i++ ) {
 					out->labels[i] = res.names[i] ? res.names[i] : "";
 					out->values[i] = res.values[i] ? res.values[i] : "";
 				}
@@ -1057,7 +1029,7 @@ static void WiredUI_GetMultiOptions( wiredItemDef_t *item, wiredMultiOptions_t *
 	if ( !item->multiData ) return;
 	out->count = item->multiData->count > WIRED_MAX_MULTI_CHOICES ? WIRED_MAX_MULTI_CHOICES : item->multiData->count;
 	out->numericValues = !item->multiData->isStringList;
-	for ( i = 0; i < out->count; i++ ) {
+	for ( int i = 0; i < out->count; i++ ) {
 		out->labels[i] = item->multiData->labels[i];
 		if ( item->multiData->isStringList ) {
 			out->values[i] = item->multiData->strValues[i];
@@ -1069,9 +1041,8 @@ static void WiredUI_GetMultiOptions( wiredItemDef_t *item, wiredMultiOptions_t *
 }
 
 static int WiredUI_FindMultiOptionIndex( wiredItemDef_t *item, const wiredMultiOptions_t *opts, const char *currentValue ) {
-	int i;
 	if ( !opts || opts->count <= 0 || !currentValue ) return -1;
-	for ( i = 0; i < opts->count; i++ ) {
+	for ( int i = 0; i < opts->count; i++ ) {
 		if ( opts->numericValues ) {
 			if ( fabs( atof( currentValue ) - atof( opts->values[i] ) ) < 0.0001 ) {
 				return i;
@@ -1129,14 +1100,6 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 	wiredMultiOptions_t opts;
 	float ddX, ddY, ddW, ddH, rowH;
 	int visibleRows;
-	int i;
-	char currentValue[256];
-	int selectedIndex;
-	vec4_t panelColor = { 0.06f, 0.06f, 0.1f, 0.96f };
-	vec4_t borderColor = { 0.45f, 0.45f, 0.52f, 0.95f };
-	vec4_t hoverColor = { 0.85f, 0.55f, 0.1f, 0.20f };
-	vec4_t selectedColor = { 0.85f, 0.55f, 0.1f, 0.32f };
-
 	if ( !wui_multiDropdownOpen || !menu || !wui_multiDropdownItem ) return;
 
 	WiredUI_GetMultiOptions( wui_multiDropdownItem, &opts );
@@ -1151,8 +1114,13 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 		return;
 	}
 
+	char currentValue[256];
 	WiredUI_StateGetString( wui_multiDropdownItem->cvar, currentValue, sizeof( currentValue ) );
-	selectedIndex = WiredUI_FindMultiOptionIndex( wui_multiDropdownItem, &opts, currentValue );
+	int selectedIndex = WiredUI_FindMultiOptionIndex( wui_multiDropdownItem, &opts, currentValue );
+	vec4_t panelColor = { 0.06f, 0.06f, 0.1f, 0.96f };
+	vec4_t borderColor = { 0.45f, 0.45f, 0.52f, 0.95f };
+	vec4_t hoverColor = { 0.85f, 0.55f, 0.1f, 0.20f };
+	vec4_t selectedColor = { 0.85f, 0.55f, 0.1f, 0.32f };
 
 	{
 		int maxScroll = opts.count - visibleRows;
@@ -1167,7 +1135,7 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 	WUI_FillRect( ddX, ddY, 1.0f, ddH, borderColor );
 	WUI_FillRect( ddX + ddW - 1.0f, ddY, 1.0f, ddH, borderColor );
 
-	for ( i = 0; i < visibleRows; i++ ) {
+	for ( int i = 0; i < visibleRows; i++ ) {
 		int idx = wui_multiDropdownScroll + i;
 		float rowY = ddY + rowH * i;
 		if ( idx >= opts.count ) break;
@@ -1208,15 +1176,13 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 // ── symbol registration ───────────────────────────────────────────────
 
 void WiredUI_RegisterSymbol( const char *name, wiredSymbolCallback_t callback, void *userData ) {
-	int i;
-
 	if ( !name || !name[0] || !callback ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterSymbol: invalid args\n" );
 		return;
 	}
 
 	// check for existing symbol (update in place)
-	for ( i = 0; i < wui_numSymbols; i++ ) {
+	for ( int i = 0; i < wui_numSymbols; i++ ) {
 		if ( wui_symbols[i].active && !Q_stricmp( wui_symbols[i].name, name ) ) {
 			wui_symbols[i].callback = callback;
 			wui_symbols[i].userData = userData;
@@ -1237,8 +1203,7 @@ void WiredUI_RegisterSymbol( const char *name, wiredSymbolCallback_t callback, v
 }
 
 void WiredUI_UnregisterSymbol( const char *name ) {
-	int i;
-	for ( i = 0; i < wui_numSymbols; i++ ) {
+	for ( int i = 0; i < wui_numSymbols; i++ ) {
 		if ( wui_symbols[i].active && !Q_stricmp( wui_symbols[i].name, name ) ) {
 			wui_symbols[i].active = qfalse;
 			return;
@@ -1247,8 +1212,7 @@ void WiredUI_UnregisterSymbol( const char *name ) {
 }
 
 const char *WiredUI_ResolveSymbol( const char *name ) {
-	int i;
-	for ( i = 0; i < wui_numSymbols; i++ ) {
+	for ( int i = 0; i < wui_numSymbols; i++ ) {
 		if ( wui_symbols[i].active && !Q_stricmp( wui_symbols[i].name, name ) ) {
 			return wui_symbols[i].callback( wui_symbols[i].userData );
 		}
@@ -1262,15 +1226,13 @@ void WiredUI_RegisterElement( const char *name,
                                wiredElementCreate_t create,
                                wiredElementRoutine_t routine,
                                wiredElementDestroy_t destroy ) {
-	int i;
-
 	if ( !name || !name[0] ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterElement: invalid name\n" );
 		return;
 	}
 
 	// check for existing element (update in place)
-	for ( i = 0; i < wui_numElements; i++ ) {
+	for ( int i = 0; i < wui_numElements; i++ ) {
 		if ( wui_elements[i].active && !Q_stricmp( wui_elements[i].name, name ) ) {
 			wui_elements[i].create = create;
 			wui_elements[i].routine = routine;
@@ -1295,15 +1257,13 @@ void WiredUI_RegisterElement( const char *name,
 // ── populate callback registration ────────────────────────────────────
 
 void WiredUI_RegisterPopulateCallback( const char *name, wuiPopulateCallback_t fn ) {
-	int i;
-
 	if ( !name || !name[0] || !fn ) {
 		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterPopulateCallback: invalid args\n" );
 		return;
 	}
 
 	// update existing entry in place
-	for ( i = 0; i < wui_numPopulateCallbacks; i++ ) {
+	for ( int i = 0; i < wui_numPopulateCallbacks; i++ ) {
 		if ( wui_populateCallbacks[i].active &&
 		     !Q_stricmp( wui_populateCallbacks[i].name, name ) ) {
 			wui_populateCallbacks[i].fn = fn;
@@ -1325,12 +1285,10 @@ void WiredUI_RegisterPopulateCallback( const char *name, wuiPopulateCallback_t f
 }
 
 wuiPopulateCallback_t WiredUI_GetPopulateCallback( const char *name ) {
-	int i;
-
 	if ( !name || !name[0] )
 		return NULL;
 
-	for ( i = 0; i < wui_numPopulateCallbacks; i++ ) {
+	for ( int i = 0; i < wui_numPopulateCallbacks; i++ ) {
 		if ( wui_populateCallbacks[i].active &&
 		     !Q_stricmp( wui_populateCallbacks[i].name, name ) ) {
 			return wui_populateCallbacks[i].fn;
@@ -1460,14 +1418,12 @@ static void WiredUI_CheckHotReload( int realtime ) {
 
 // ── Layer 5: visual layout debug overlay ──────────────────────────────
 static void WiredUI_DrawDebugOverlay( wiredMenuDef_t *menu ) {
-	int i;
-	vec4_t containerColor = { 0, 1, 0, 0.5f };    // green
-	vec4_t childColor     = { 0, 0.5f, 1, 0.5f };  // blue
-	vec4_t itemColor      = { 1, 0, 0, 0.3f };      // red (unused label kept for clarity)
-
 	if ( !wired_debug_layout || !wired_debug_layout->integer ) return;
 	if ( !menu ) return;
 
+	vec4_t containerColor = { 0, 1, 0, 0.5f };    // green
+	vec4_t childColor     = { 0, 0.5f, 1, 0.5f };  // blue
+	vec4_t itemColor      = { 1, 0, 0, 0.3f };      // red (unused label kept for clarity)
 	(void)itemColor; // suppress unused warning
 
 	// Draw menu rect outline (green if flex container)
@@ -1482,7 +1438,7 @@ static void WiredUI_DrawDebugOverlay( wiredMenuDef_t *menu ) {
 		WUI_FillRect( mx + mw - 1, my, 1, mh, containerColor );
 	}
 
-	for ( i = 0; i < menu->itemCount; i++ ) {
+	for ( int i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
 		vec4_t *color;
 		float x, y, w, h;
@@ -1773,8 +1729,7 @@ void WiredUI_Shutdown( void ) {
 	// save menu stack to cvar so vid_restart can restore it
 	{
 		QS_LOCAL( stackBuf, 512 );
-		int i;
-		for ( i = 0; i < wui_menuStackDepth; i++ ) {
+		for ( int i = 0; i < wui_menuStackDepth; i++ ) {
 			if ( i > 0 ) QS_AppendChar( &stackBuf, ';' );
 			QS_Append( &stackBuf, wui_menuStack[i] );
 		}
@@ -1809,7 +1764,6 @@ void WiredUI_Shutdown( void ) {
 
 void WiredUI_Refresh( int realtime ) {
 	wiredMenuDef_t *menu;
-	int i;
 
 	if ( !wui_initialized ) {
 		return;
@@ -1933,7 +1887,7 @@ void WiredUI_Refresh( int realtime ) {
 	}
 
 	// ── transition + fade interpolation ─────────────────────────────
-	for ( i = 0; i < menu->itemCount; i++ ) {
+	for ( int i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
 
 		// rect transition
@@ -1970,7 +1924,7 @@ void WiredUI_Refresh( int realtime ) {
 	}
 
 	// render items — coordinates are relative to menu origin for non-fullscreen
-	for ( i = 0; i < menu->itemCount; i++ ) {
+	for ( int i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
 
 		if ( !WiredUI_ItemShouldRender( item ) ) {
@@ -2282,7 +2236,6 @@ void WiredUI_Refresh( int realtime ) {
 							valueText = "<missing populate callback>";
 						} else {
 							wuiPopulateResult_t res;
-							int j;
 							qboolean found = qfalse;
 							memset( &res, 0, sizeof( res ) );
 							pop( &res );
@@ -2298,7 +2251,7 @@ void WiredUI_Refresh( int realtime ) {
 									break;
 								case WUI_POPULATE_SUCCESS:
 								case WUI_POPULATE_PARTIAL:
-									for ( j = 0; j < res.count; j++ ) {
+									for ( int j = 0; j < res.count; j++ ) {
 										if ( res.values && res.values[j] &&
 										     !Q_stricmp( cvarBuf, res.values[j] ) ) {
 											valueText = res.names[j];
@@ -2329,9 +2282,8 @@ void WiredUI_Refresh( int realtime ) {
 						}
 					}
 					else if ( item->multiData ) {
-						int j;
 						qboolean found = qfalse;
-						for ( j = 0; j < item->multiData->count; j++ ) {
+						for ( int j = 0; j < item->multiData->count; j++ ) {
 							if ( item->multiData->isStringList ) {
 								if ( !Q_stricmp( cvarBuf, item->multiData->strValues[j] ) ) {
 									valueText = item->multiData->labels[j];
@@ -2385,8 +2337,7 @@ void WiredUI_Refresh( int realtime ) {
 						} else {
 							// find primary + alternate keys bound to this command
 							const char *key1 = NULL, *key2 = NULL;
-							int k;
-							for ( k = 0; k < MAX_KEYS; k++ ) {
+							for ( int k = 0; k < MAX_KEYS; k++ ) {
 								const char *b = Key_GetBinding( k );
 								if ( b && !Q_stricmp( b, item->cvar ) ) {
 									if ( !key1 ) key1 = Key_KeynumToString( k );
@@ -2803,9 +2754,8 @@ static void WiredScript_FadeOut( wiredMenuDef_t *menu, wiredItemDef_t *item, int
 }
 
 static void WiredScript_SetFocus( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	int i;
 	if ( numArgs < 1 ) return;
-	for ( i = 0; i < menu->itemCount; i++ ) {
+	for ( int i = 0; i < menu->itemCount; i++ ) {
 		if ( !Q_stricmp( menu->items[i]->name, args[0] ) ) {
 			wui_focusItem = i;
 			break;
@@ -3030,7 +2980,6 @@ static void WiredScript_ToggleMapPool( wiredMenuDef_t *menu, wiredItemDef_t *ite
 	char token[MAX_QPATH];
 	const char *p;
 	qboolean found = qfalse;
-	int len;
 
 	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
 	if ( !mapName[0] ) {
@@ -3043,7 +2992,7 @@ static void WiredScript_ToggleMapPool( wiredMenuDef_t *menu, wiredItemDef_t *ite
 
 	// rebuild rotation without the selected map (or add it if not found)
 	newRotation[0] = '\0';
-	len = 0;
+	int len = 0;
 	p = rotation;
 	while ( *p ) {
 		int i = 0;
@@ -3085,10 +3034,6 @@ static void WiredScript_ToggleFavoriteMap( wiredMenuDef_t *menu, wiredItemDef_t 
 	char favs[2048];
 	char newFavs[2048];
 	char token[MAX_QPATH];
-	const char *p;
-	qboolean found = qfalse;
-	int len;
-
 	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
 	if ( !mapName[0] ) return;
 
@@ -3096,8 +3041,9 @@ static void WiredScript_ToggleFavoriteMap( wiredMenuDef_t *menu, wiredItemDef_t 
 
 	// rebuild without the map, or add it
 	newFavs[0] = '\0';
-	len = 0;
-	p = favs;
+	qboolean found = qfalse;
+	int len = 0;
+	const char *p = favs;
 	while ( *p ) {
 		int i = 0;
 		while ( *p == ' ' ) p++;
@@ -3236,8 +3182,7 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 		                        ( uiSource == 6 ) ? cls.favoriteServers : cls.globalServers;
 		int count = ( uiSource == 0 ) ? cls.numlocalservers :
 		            ( uiSource == 6 ) ? cls.numfavoriteservers : cls.numglobalservers;
-		int j;
-		for ( j = 0; j < count; j++ ) {
+		for ( int j = 0; j < count; j++ ) {
 			if ( !Q_stricmp( NET_AdrToStringwPort( &servers[j].adr ), addr ) ) {
 				if ( servers[j].g_needpass ) {
 					Cvar_VariableStringBuffer( "password", password, sizeof( password ) );
@@ -3335,15 +3280,12 @@ static void WiredScript_RefreshFilter( wiredMenuDef_t *menu, wiredItemDef_t *ite
 static void WiredScript_ConditionalScript( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	const char *trueAction = NULL;
 	const char *falseAction = NULL;
-	int cvarVal;
-	int i;
-
 	if ( numArgs < 4 ) return;  // cvarname mode ( "action" ) ...
 
-	cvarVal = Cvar_VariableIntegerValue( args[0] );
+	int cvarVal = Cvar_VariableIntegerValue( args[0] );
 
 	// find the two ( "action" ) blocks in the args
-	for ( i = 2; i < numArgs; i++ ) {
+	for ( int i = 2; i < numArgs; i++ ) {
 		if ( !Q_stricmp( args[i], "(" ) && i + 1 < numArgs ) {
 			if ( !trueAction ) {
 				trueAction = args[i + 1];
@@ -3524,10 +3466,9 @@ static const wiredUiScriptEntry_t wiredUiScripts[] = {
 };
 
 static void WiredScript_UiScript( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	int i;
 	if ( numArgs < 1 ) return;
 
-	for ( i = 0; wiredUiScripts[i].name; i++ ) {
+	for ( int i = 0; wiredUiScripts[i].name; i++ ) {
 		if ( !Q_stricmp( args[0], wiredUiScripts[i].name ) ) {
 			if ( wiredUiScripts[i].handler ) {
 				// pass remaining args (skip the uiScript command name)
@@ -3659,7 +3600,7 @@ static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const
 	char        token[MAX_STRING_CHARS];
 	const char *args[WIRED_MAX_SCRIPT_ARGS];
 	static char argBuf[WIRED_MAX_SCRIPT_ARGS][256];
-	int         numArgs, i;
+	int         numArgs;
 	const char *p;
 	qboolean    handled;
 
@@ -3673,7 +3614,7 @@ static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const
 		if ( !*p ) break;
 
 		// read command name
-		i = 0;
+		int i = 0;
 		while ( *p && *p != ' ' && *p != '\t' && *p != ';' && i < (int)sizeof(token) - 1 ) {
 			token[i++] = *p++;
 		}
@@ -3701,7 +3642,7 @@ static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const
 
 		// dispatch to command table
 		handled = qfalse;
-		for ( i = 0; wiredScriptCommands[i].name; i++ ) {
+		for ( int i = 0; wiredScriptCommands[i].name; i++ ) {
 			if ( !Q_stricmp( token, wiredScriptCommands[i].name ) ) {
 				wiredScriptCommands[i].handler( menu, item, numArgs, args );
 				handled = qtrue;
@@ -3717,7 +3658,7 @@ static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const
 			Com_sprintf( cmdBuf, sizeof(cmdBuf), "%s", token );
 			{
 				qstring_t cmd_qs = QS_WrapExisting( cmdBuf, sizeof(cmdBuf) );
-				for ( i = 0; i < numArgs; i++ ) {
+				for ( int i = 0; i < numArgs; i++ ) {
 					QS_Appendf( &cmd_qs, " \"%s\"", args[i] );
 				}
 				QS_AppendChar( &cmd_qs, '\n' );
@@ -3823,9 +3764,8 @@ void WiredUI_PopMenu( void ) {
 }
 
 void WiredUI_CloseAllMenus( void ) {
-	int i;
 	// stop all active cinematics on the stack
-	for ( i = 0; i < wui_menuStackDepth; i++ ) {
+	for ( int i = 0; i < wui_menuStackDepth; i++ ) {
 		wiredMenuDef_t *m = WiredUI_FindMenu( wui_menuStack[i] );
 		if ( m && m->cinematicHandle >= 0 ) {
 			CIN_StopCinematic( m->cinematicHandle );
@@ -3898,9 +3838,8 @@ void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retr
 }
 
 static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char *name ) {
-	int i;
 	if ( !menu || !name ) return NULL;
-	for ( i = 0; i < menu->itemCount; i++ ) {
+	for ( int i = 0; i < menu->itemCount; i++ ) {
 		if ( !Q_stricmp( menu->items[i]->name, name ) ) {
 			return menu->items[i];
 		}
@@ -3911,9 +3850,8 @@ static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char 
 // apply a callback to all items matching name OR group
 static void WiredUI_ForEachItemByNameOrGroup( wiredMenuDef_t *menu, const char *name,
 	void (*callback)( wiredItemDef_t *item, void *data ), void *data ) {
-	int i;
 	if ( !menu || !name ) return;
-	for ( i = 0; i < menu->itemCount; i++ ) {
+	for ( int i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *it = menu->items[i];
 		if ( !Q_stricmp( it->name, name ) || !Q_stricmp( it->group, name ) ) {
 			callback( it, data );
@@ -3955,14 +3893,13 @@ static qboolean WiredUI_PointInRect( float px, float py, wiredRect_t *r ) {
 }
 
 static int WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) {
-	int i;
 	// Layout is already resolved by the render loop (WUI_LayoutMenu called each frame)
 	float menuH = menu->resolvedRect.h;
 	float oy = menu->resolvedRect.y;
 	float sy = menu->scrollOffset;
 
 	// iterate back-to-front so topmost item wins
-	for ( i = menu->itemCount - 1; i >= 0; i-- ) {
+	for ( int i = menu->itemCount - 1; i >= 0; i-- ) {
 		wiredItemDef_t *item = menu->items[i];
 		wiredRect_t absRect;
 		if ( !WiredUI_ItemCanFocus( item ) ) continue;
@@ -3988,7 +3925,6 @@ static int WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) 
 void WiredUI_KeyEvent( int key, qboolean down ) {
 	wiredMenuDef_t *menu;
 	wiredItemDef_t *focusedItem = NULL;
-	int i;
 
 	if ( !wui_initialized ) return;
 
@@ -4225,8 +4161,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		} else if ( key == K_BACKSPACE || key == K_DEL ) {
 			// clear all bindings for this command
 			if ( wui_bindItem && wui_bindItem->cvar[0] ) {
-				int k;
-				for ( k = 0; k < MAX_KEYS; k++ ) {
+				for ( int k = 0; k < MAX_KEYS; k++ ) {
 					const char *b = Key_GetBinding( k );
 					if ( b && !Q_stricmp( b, wui_bindItem->cvar ) ) {
 						Key_SetBinding( k, "" );
@@ -4270,7 +4205,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 	if ( !down ) return;
 
 	// ET:Legacy execKey: check ALL items for key-specific bindings
-	for ( i = 0; i < menu->itemCount; i++ ) {
+	for ( int i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
 		if ( item->execKeyCode && item->execKeyCode == key && item->execKeyAction[0] ) {
 			WiredUI_RunScript( menu, item, item->execKeyAction );
@@ -4553,7 +4488,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_KP_UPARROW:
 			{
 				int start = ( wui_focusItem > 0 ) ? wui_focusItem - 1 : menu->itemCount - 1;
-				for ( i = 0; i < menu->itemCount; i++ ) {
+				for ( int i = 0; i < menu->itemCount; i++ ) {
 					int idx = ( start - i + menu->itemCount ) % menu->itemCount;
 					if ( WiredUI_ItemCanFocus( menu->items[idx] ) ) {
 						wui_focusItem = idx;
@@ -4570,7 +4505,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_KP_DOWNARROW:
 			{
 				int start = wui_focusItem + 1;
-				for ( i = 0; i < menu->itemCount; i++ ) {
+				for ( int i = 0; i < menu->itemCount; i++ ) {
 					int idx = ( start + i ) % menu->itemCount;
 					if ( WiredUI_ItemCanFocus( menu->items[idx] ) ) {
 						wui_focusItem = idx;
@@ -4835,7 +4770,6 @@ void WiredUI_DrawConnectScreen( qboolean overlay ) {
 // Called from WiredHud_Routine() for in-game overlays that need .menu layout.
 
 void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
-	int i;
 	float menuAlpha = 1.0f;
 
 	if ( !menu ) return;
@@ -4860,7 +4794,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 	}
 
 	// render items
-	for ( i = 0; i < menu->itemCount; i++ ) {
+	for ( int i = 0; i < menu->itemCount; i++ ) {
 		wiredItemDef_t *item = menu->items[i];
 
 		if ( !WiredUI_ItemShouldRender( item ) ) continue;
@@ -5113,8 +5047,7 @@ void WiredUI_ReloadMenus( void ) {
 
 	// stop all cinematics before reload
 	{
-		int i;
-		for ( i = 0; i < wui_menuStackDepth; i++ ) {
+		for ( int i = 0; i < wui_menuStackDepth; i++ ) {
 			wiredMenuDef_t *m = WiredUI_FindMenu( wui_menuStack[i] );
 			if ( m && m->cinematicHandle >= 0 ) {
 				CIN_StopCinematic( m->cinematicHandle );

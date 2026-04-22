@@ -76,9 +76,8 @@ static int R_MDRCullModel( mdrHeader_t *header, const trRefEntity_t *ent ) {
 		}
 		else
 		{
-			int sphereCull, sphereCullB;
-
-			sphereCull  = R_CullLocalPointAndRadius( newFrame->localOrigin, newFrame->radius );
+			int sphereCull = R_CullLocalPointAndRadius( newFrame->localOrigin, newFrame->radius );
+			int sphereCullB;
 			if ( newFrame == oldFrame ) {
 				sphereCullB = sphereCull;
 			} else {
@@ -137,13 +136,11 @@ static int R_MDRComputeFogNum( mdrHeader_t *header, const trRefEntity_t *ent ) {
 	const fog_t			*fog;
 	mdrFrame_t		*mdrFrame;
 	vec3_t			localOrigin;
-	int frameSize;
-
 	if ( tr.refdef.rdflags & RDF_NOWORLDMODEL ) {
 		return 0;
 	}
-	
-	frameSize = (size_t)( &((mdrFrame_t *)0)->bones[ header->numBones ] );
+
+	int frameSize = (size_t)( &((mdrFrame_t *)0)->bones[ header->numBones ] );
 
 	// FIXME: non-normalized axis issues
 	mdrFrame = ( mdrFrame_t * ) ( ( byte * ) header + header->ofsFrames + frameSize * ent->e.frame);
@@ -483,9 +480,7 @@ void RB_MDRSurfaceAnim( mdrSurface_t *surface )
 
 void MC_UnCompress(float mat[3][4],const unsigned char * comp)
 {
-	int val;
-
-	val=(int)((unsigned short *)(comp))[0];
+	int val=(int)((unsigned short *)(comp))[0];
 	val-=1<<(MC_BITS_X-1);
 	mat[0][3]=((float)(val))*MC_SCALE_X;
 

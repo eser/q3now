@@ -328,9 +328,8 @@ static VkFlags get_composite_alpha( VkCompositeAlphaFlagsKHR flags )
 		VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
 		VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR
 	};
-	int i;
 
-	for ( i = 1; i < ARRAY_LEN( compositeFlags ); i++ ) {
+	for ( int i = 1; i < ARRAY_LEN( compositeFlags ); i++ ) {
 		if ( flags & compositeFlags[i] ) {
 			return compositeFlags[i];
 		}
@@ -1160,7 +1159,6 @@ static void allocate_and_bind_image_memory(VkImage image) {
 	VkMemoryRequirements memory_requirements;
 	VkDeviceSize alignment;
 	ImageChunk *chunk;
-	int i;
 
 	qvkGetImageMemoryRequirements(vk.device, image, &memory_requirements);
 
@@ -1173,7 +1171,7 @@ static void allocate_and_bind_image_memory(VkImage image) {
 
 	// Try to find an existing chunk of sufficient capacity.
 	alignment = memory_requirements.alignment;
-	for ( i = 0; i < vk_world.num_image_chunks; i++ ) {
+	for ( int i = 0; i < vk_world.num_image_chunks; i++ ) {
 		// ensure that memory region has proper alignment
 		VkDeviceSize offset = PAD( vk_world.image_chunks[i].used, alignment );
 
@@ -1456,8 +1454,6 @@ static void create_instance( void )
 		if ( Q_stricmp( ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME ) == 0 ) {
 			flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 		}
-
-		ri.Printf(PRINT_DEVELOPER, "instance extension: %s\n", ext);
 	}
 
 	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -1523,7 +1519,6 @@ static void create_instance( void )
 static VkFormat get_depth_format( VkPhysicalDevice physical_device ) {
 	VkFormatProperties props;
 	VkFormat formats[2];
-	int i;
 
 	if ( glConfig.stencilBits > 0 ) {
 		formats[0] = glConfig.depthBits == 16 ? VK_FORMAT_D16_UNORM_S8_UINT : VK_FORMAT_D24_UNORM_S8_UINT;
@@ -1533,7 +1528,7 @@ static VkFormat get_depth_format( VkPhysicalDevice physical_device ) {
 		formats[1] = VK_FORMAT_D32_SFLOAT;
 	}
 
-	for ( i = 0; i < ARRAY_LEN( formats ); i++ ) {
+	for ( int i = 0; i < ARRAY_LEN( formats ); i++ ) {
 		qvkGetPhysicalDeviceFormatProperties( physical_device, formats[i], &props );
 		if ( ( props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT ) != 0 ) {
 			return formats[i];
@@ -1594,11 +1589,10 @@ static const present_format_t present_formats[] = {
 
 static void get_present_format( int present_bits, VkFormat *bgr, VkFormat *rgb ) {
 	const present_format_t *pf, *sel;
-	int i;
 
 	sel = NULL;
 	pf = present_formats;
-	for ( i = 0; i < ARRAY_LEN( present_formats ); i++, pf++ ) {
+	for ( int i = 0; i < ARRAY_LEN( present_formats ); i++, pf++ ) {
 		if ( pf->bits <= present_bits  ) {
 			sel = pf;
 		}
@@ -2458,10 +2452,9 @@ static VkSampler vk_find_sampler( const Vk_Sampler_Def *def ) {
 	VkFilter min_filter;
 	VkSamplerMipmapMode mipmap_mode;
 	float maxLod;
-	int i;
 
 	// Look for sampler among existing samplers.
-	for ( i = 0; i < vk.samplers.count; i++ ) {
+	for ( int i = 0; i < vk.samplers.count; i++ ) {
 		const Vk_Sampler_Def *cur_def = &vk.samplers.def[i];
 		if ( memcmp( cur_def, def, sizeof( *def ) ) == 0 ) {
 			return vk.samplers.handle[i];
@@ -2558,9 +2551,7 @@ static VkSampler vk_find_sampler( const Vk_Sampler_Def *def ) {
 
 void vk_destroy_samplers( void )
 {
-	int i;
-
-	for ( i = 0; i < vk.samplers.count; i++ ) {
+	for ( int i = 0; i < vk.samplers.count; i++ ) {
 		qvkDestroySampler( vk.device, vk.samplers.handle[i], NULL );
 		memset( &vk.samplers.def[i], 0x0, sizeof( vk.samplers.def[i] ) );
 		vk.samplers.handle[i] = VK_NULL_HANDLE;
@@ -2830,9 +2821,7 @@ void vk_init_descriptors( void )
 
 static void vk_release_geometry_buffers( void )
 {
-	int i;
-
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		qvkDestroyBuffer( vk.device, vk.tess[i].vertex_buffer, NULL );
 		vk.tess[i].vertex_buffer = VK_NULL_HANDLE;
 	}
@@ -3271,8 +3260,6 @@ vk_shutdown_rail_compute
 ===============
 */
 void vk_shutdown_rail_compute( void ) {
-	int i;
-
 	if ( vk.rail.compute_pipeline != VK_NULL_HANDLE ) {
 		qvkDestroyPipeline( vk.device, vk.rail.compute_pipeline, NULL );
 		vk.rail.compute_pipeline = VK_NULL_HANDLE;
@@ -3290,7 +3277,7 @@ void vk_shutdown_rail_compute( void ) {
 		vk.rail.params_memory = VK_NULL_HANDLE;
 		vk.rail.params_ptr = NULL;
 	}
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.rail.vertex_buffer[i] != VK_NULL_HANDLE ) {
 			qvkDestroyBuffer( vk.device, vk.rail.vertex_buffer[i], NULL );
 			if ( vk.rail.vertex_memory[i] != VK_NULL_HANDLE ) {
@@ -3361,7 +3348,6 @@ vk_dispatch_rail_compute — dispatch compute shader for active rail trails
 ===============
 */
 static void vk_dispatch_rail_compute( void ) {
-	int i;
 	int frameIdx;
 	VkCommandBuffer cmd;
 
@@ -3371,7 +3357,7 @@ static void vk_dispatch_rail_compute( void ) {
 	frameIdx = vk.cmd_index;
 	cmd = vk.cmd->command_buffer;
 
-	for ( i = 0; i < vk.numRailDispatches; i++ ) {
+	for ( int i = 0; i < vk.numRailDispatches; i++ ) {
 		int numSegs = vk.railDispatch[i].numSegments;
 
 		if ( numSegs < 2 )
@@ -3432,7 +3418,6 @@ void vk_init_iqm_gpu_skinning( void )
 	VkDescriptorSetAllocateInfo allocDesc;
 	VkDescriptorBufferInfo bufDesc;
 	VkWriteDescriptorSet writeDesc;
-	int i;
 
 	vk.iqmGpu.available = qfalse;
 
@@ -3475,7 +3460,7 @@ void vk_init_iqm_gpu_skinning( void )
 	bufInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 	bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.iqmGpu.bone_buffer[i] ) );
 
 		qvkGetBufferMemoryRequirements( vk.device, vk.iqmGpu.bone_buffer[i], &memReqs );
@@ -3692,14 +3677,12 @@ vk_shutdown_iqm_gpu_skinning
 */
 void vk_shutdown_iqm_gpu_skinning( void )
 {
-	int i;
-
 	if ( vk.iqmGpu.pipeline != VK_NULL_HANDLE ) {
 		qvkDestroyPipeline( vk.device, vk.iqmGpu.pipeline, NULL );
 		vk.iqmGpu.pipeline = VK_NULL_HANDLE;
 	}
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.iqmGpu.bone_buffer[i] != VK_NULL_HANDLE ) {
 			qvkDestroyBuffer( vk.device, vk.iqmGpu.bone_buffer[i], NULL );
 			if ( vk.iqmGpu.bone_memory[i] != VK_NULL_HANDLE ) {
@@ -10460,11 +10443,10 @@ static void *vk_fence_worker( void *arg )
 
 static void vk_fence_thread_start( void )
 {
-	int i;
 	pthread_attr_t attr;
 	vk_ft_head = vk_ft_tail = 0;
 	vk_ft_running = qtrue;
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
+	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 		vk_slot_ready[ i ] = qfalse; // set to qtrue by fence thread after each vkResetFences
 	pthread_attr_init( &attr );
 #ifdef __APPLE__
@@ -10547,7 +10529,6 @@ static uint32_t    vk_gpu_ts_accum_frames;
 static void vk_gpu_ts_init( void )
 {
 	VkQueryPoolCreateInfo info;
-	int i;
 
 	vk_gpu_ts_active = qfalse;
 	vk_gpu_ts_pool = VK_NULL_HANDLE;
@@ -10562,7 +10543,7 @@ static void vk_gpu_ts_init( void )
 		return;
 	}
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		vk_gpu_ts_inflight[ i ].base = i * VK_GPU_TS_MAX;
 	}
 
@@ -10875,8 +10856,6 @@ _retry:
 
 static void vk_resize_geometry_buffer( void )
 {
-	int i;
-
 	vk_end_render_pass();
 
 	VK_CHECK( qvkEndCommandBuffer( vk.cmd->command_buffer ) );
@@ -10890,7 +10869,7 @@ static void vk_resize_geometry_buffer( void )
 	vk_create_geometry_buffers( vk.geometry_buffer_size_new );
 	vk.geometry_buffer_size_new = 0;
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
+	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 		vk_update_uniform_descriptor( vk.tess[ i ].uniform_descriptor, vk.tess[ i ].vertex_buffer );
 
 	ri.Printf( PRINT_DEVELOPER, "...geometry buffer resized to %iK\n", (int)( vk.geometry_buffer_size / 1024 ) );

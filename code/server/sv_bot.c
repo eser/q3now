@@ -621,11 +621,10 @@ EntityInPVS
 int EntityInPVS( int client, int entityNum ) {
 	client_t			*cl;
 	clientSnapshot_t	*frame;
-	int					i;
 
 	cl = &svs.clients[client];
 	frame = &cl->frames[cl->wn_outgoing_sequence & PACKET_MASK];
-	for ( i = 0; i < frame->num_entities; i++ )	{
+	for ( int i = 0; i < frame->num_entities; i++ )	{
 		if ( svs.snapshotEntities[(frame->first_entity + i) % svs.numSnapshotEntities].number == entityNum ) {
 			return qtrue;
 		}

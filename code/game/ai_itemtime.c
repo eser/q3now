@@ -123,7 +123,6 @@ or have respawned (entity visible again). Update pickup timestamps.
 */
 void BotItemTimeUpdate( struct bot_state_s *bs )
 {
-	int i;
 	gentity_t *ent;
 	bot_itemtime_t *ti;
 
@@ -132,7 +131,7 @@ void BotItemTimeUpdate( struct bot_state_s *bs )
 		return;
 	}
 
-	for ( i = 0; i < bs->num_timed_items; i++ ) {
+	for ( int i = 0; i < bs->num_timed_items; i++ ) {
 		ti = &bs->timed_items[i];
 		ent = &g_entities[ti->ent.entnum];
 

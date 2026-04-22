@@ -201,13 +201,12 @@ FBO_AttachImage
 void FBO_AttachImage(FBO_t *fbo, image_t *image, GLenum attachment, GLuint cubemapside)
 {
 	GLenum target = GL_TEXTURE_2D;
-	int index;
 
 	if (image->flags & IMGFLAG_CUBEMAP)
 		target = GL_TEXTURE_CUBE_MAP_POSITIVE_X_ARB + cubemapside;
 
 	qglNamedFramebufferTexture2DEXT(fbo->frameBuffer, attachment, target, image->texnum, 0);
-	index = attachment - GL_COLOR_ATTACHMENT0;
+	int index = attachment - GL_COLOR_ATTACHMENT0;
 	if (index >= 0 && index <= 15)
 		fbo->colorImage[index] = image;
 }

@@ -15,7 +15,6 @@ typedef struct {
 
 void *CG_ModernHUDElementCrosshairCreate( const modernhudConfig_t *config ) {
 	modernHudElementCrosshair_t *element;
-	int i;
 
 	ModernHUD_ELEMENT_INIT( element, config );
 
@@ -26,23 +25,21 @@ void *CG_ModernHUDElementCrosshairCreate( const modernhudConfig_t *config ) {
 
 void CG_ModernHUDElementCrosshairRoutine( void *context ) {
 	modernHudElementCrosshair_t *element = (modernHudElementCrosshair_t *)context;
-	int idx;
-	qhandle_t shader;
-	float w, h, x, y;
 
 	// cgame already decided visibility — shaderIndex < 0 means hidden
-	idx = wiredHud->crosshair.shaderIndex;
+	int idx = wiredHud->crosshair.shaderIndex;
 	if ( idx < 0 ) return;
 
-	shader = element->shader;
+	qhandle_t shader = element->shader;
 	if ( !shader ) return;
 
-	w = h = wiredHud->crosshair.size;
+	float w = wiredHud->crosshair.size;
+	float h = w;
 	if ( w <= 0 ) return;
 
 	// center on screen with offset
-	x = wiredHud->crosshair.x;
-	y = wiredHud->crosshair.y;
+	float x = wiredHud->crosshair.x;
+	float y = wiredHud->crosshair.y;
 
 	// draw centered with cgame-computed color (coords are already real pixels)
 	re.SetColor( wiredHud->crosshair.color );

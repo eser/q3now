@@ -110,10 +110,8 @@ static void IN_MLookUp( void ) {
 
 
 static void IN_KeyDown( kbutton_t *b ) {
-	const char *c;
-	int	k;
-
-	c = Cmd_Argv(1);
+	const char *c = Cmd_Argv(1);
+	int k;
 	if ( c[0] ) {
 		k = atoi(c);
 	} else {
@@ -147,26 +145,21 @@ static void IN_KeyDown( kbutton_t *b ) {
 
 
 static void IN_KeyUp( kbutton_t *b ) {
-	unsigned uptime;
-	const char *c;
-	int		k;
-
-	c = Cmd_Argv(1);
+	const char *c = Cmd_Argv(1);
 	if ( c[0] ) {
-		k = atoi(c);
+		int k = atoi(c);
+		if ( b->down[0] == k ) {
+			b->down[0] = 0;
+		} else if ( b->down[1] == k ) {
+			b->down[1] = 0;
+		} else {
+			return;		// key up without corresponding down (menu pass through)
+		}
 	} else {
 		// typed manually at the console, assume for unsticking, so clear all
 		b->down[0] = b->down[1] = 0;
 		b->active = qfalse;
 		return;
-	}
-
-	if ( b->down[0] == k ) {
-		b->down[0] = 0;
-	} else if ( b->down[1] == k ) {
-		b->down[1] = 0;
-	} else {
-		return;		// key up without corresponding down (menu pass through)
 	}
 	if ( b->down[0] || b->down[1] ) {
 		return;		// some other key is still holding it down
@@ -176,7 +169,7 @@ static void IN_KeyUp( kbutton_t *b ) {
 
 	// save timestamp for partial frame summing
 	c = Cmd_Argv(2);
-	uptime = atoi(c);
+	unsigned uptime = atoi(c);
 	if ( uptime ) {
 		b->msec += uptime - b->downtime;
 	} else {
@@ -195,10 +188,7 @@ Returns the fraction of the frame that the key was down
 ===============
 */
 static float CL_KeyState( kbutton_t *key ) {
-	float		val;
-	int			msec;
-
-	msec = key->msec;
+	int			msec = key->msec;
 	key->msec = 0;
 
 	if ( key->active ) {
@@ -217,7 +207,7 @@ static float CL_KeyState( kbutton_t *key ) {
 	}
 #endif
 
-	val = (float)msec / frame_msec;
+	float val = (float)msec / frame_msec;
 	if ( val < 0 ) {
 		val = 0;
 	}
@@ -327,7 +317,6 @@ Sets the usercmd_t based on key states
 */
 static void CL_KeyMove( usercmd_t *cmd ) {
 	int		movespeed;
-	int		forward, side, up;
 
 	//
 	// adjust for speed key / running
@@ -342,9 +331,9 @@ static void CL_KeyMove( usercmd_t *cmd ) {
 		movespeed = 64;
 	}
 
-	forward = 0;
-	side = 0;
-	up = 0;
+	int forward = 0;
+	int side    = 0;
+	int up      = 0;
 	if ( in_strafe.active ) {
 		side += movespeed * CL_KeyState (&in_right);
 		side -= movespeed * CL_KeyState (&in_left);
@@ -539,14 +528,12 @@ CL_CmdButtons
 ==============
 */
 static void CL_CmdButtons( usercmd_t *cmd ) {
-	int		i;
-
 	//
 	// figure button bits
 	// send a button bit even if the key was pressed and released in
 	// less than a frame
 	//
-	for ( i = 0 ; i < ARRAY_LEN( in_buttons ); i++ ) {
+	for ( int i = 0 ; i < ARRAY_LEN( in_buttons ); i++ ) {
 		if ( in_buttons[i].active || in_buttons[i].wasPressed ) {
 			cmd->buttons |= 1 << i;
 		}
@@ -571,8 +558,6 @@ CL_FinishMove
 ==============
 */
 static void CL_FinishMove( usercmd_t *cmd ) {
-	int		i;
-
 	// copy the state that the cgame is currently sending
 	cmd->weapon = cl.cgameUserCmdValue;
 
@@ -580,7 +565,7 @@ static void CL_FinishMove( usercmd_t *cmd ) {
 	// can be determined without allowing cheating
 	cmd->serverTime = cl.serverTime;
 
-	for (i=0 ; i<3 ; i++) {
+	for (int i=0 ; i<3 ; i++) {
 		cmd->angles[i] = ANGLE2SHORT(cl.viewangles[i]);
 	}
 }
@@ -644,8 +629,6 @@ Create a new usercmd_t structure for this frame
 =================
 */
 static void CL_CreateNewCommands( void ) {
-	int			cmdNum;
-
 	// no need to create usercmds until we have a gamestate
 	if ( cls.state < CA_PRIMED ) {
 		return;
@@ -669,7 +652,7 @@ static void CL_CreateNewCommands( void ) {
 
 	// generate a command for this frame
 	cl.cmdNumber++;
-	cmdNum = cl.cmdNumber & CMD_MASK;
+	int cmdNum = cl.cmdNumber & CMD_MASK;
 	cl.cmds[cmdNum] = CL_CreateCmd();
 }
 
@@ -686,9 +669,6 @@ getting more delta compression will reduce total bandwidth.
 =================
 */
 static qboolean CL_ReadyToSendPacket( void ) {
-	int		oldPacketNum;
-	int		delta;
-
 	// don't send anything if playing back a demo
 	if ( clc.demoplaying || cls.state == CA_CINEMATIC ) {
 		return qfalse;
@@ -718,8 +698,8 @@ static qboolean CL_ReadyToSendPacket( void ) {
 		return qtrue;
 	}
 
-	oldPacketNum = (clc.netchan.outgoingSequence - 1) & PACKET_MASK;
-	delta = cls.realtime - cl.outPackets[ oldPacketNum ].p_realtime;
+	int oldPacketNum = (clc.netchan.outgoingSequence - 1) & PACKET_MASK;
+	int delta        = cls.realtime - cl.outPackets[ oldPacketNum ].p_realtime;
 	if ( delta < 1000 / cl_maxpackets->integer ) {
 		// the accumulated commands will go out in the next packet
 		return qfalse;
@@ -753,12 +733,8 @@ During normal gameplay, a client packet will contain something like:
 void CL_WritePacket( int repeat ) {
 	msg_t		buf;
 	byte		data[ MAX_MSGLEN_BUF ];
-	int			i, j, n;
 	usercmd_t	*cmd, *oldcmd;
 	usercmd_t	nullcmd;
-	int			packetNum;
-	int			oldPacketNum;
-	int			count, key;
 
 	// don't send anything if playing back a demo
 	if ( clc.demoplaying || cls.state == CA_CINEMATIC ) {
@@ -784,13 +760,12 @@ void CL_WritePacket( int repeat ) {
 	MSG_WriteLong( &buf, clc.serverCommandSequence );
 
 	// write any unacknowledged clientCommands
-	n = clc.reliableSequence - clc.reliableAcknowledge;
+	int n = clc.reliableSequence - clc.reliableAcknowledge;
 	if ( clc.quic_conn != CONN_INVALID && transport ) {
 		/* QUIC path: send each unacked command on the reliable game-command channel.
 		 * Stream guarantees delivery — acknowledge all immediately so
 		 * the netchan loop below sends nothing. */
-		int ridx;
-		for ( ridx = clc.reliableAcknowledge + 1; ridx <= clc.reliableSequence; ridx++ ) {
+		for ( int ridx = clc.reliableAcknowledge + 1; ridx <= clc.reliableSequence; ridx++ ) {
 			const char *cmd = clc.reliableCommands[ridx & (MAX_RELIABLE_COMMANDS - 1)];
 			transport->send_reliable( clc.quic_conn, CHAN_COMMANDS,
 				(byte *)cmd, (int)strlen( cmd ) + 1 );
@@ -798,7 +773,7 @@ void CL_WritePacket( int repeat ) {
 		clc.reliableAcknowledge = clc.reliableSequence;
 		n = 0; /* skip netchan embedding */
 	}
-	for ( i = 0; i < n; i++ ) {
+	for ( int i = 0; i < n; i++ ) {
 		const int index = clc.reliableAcknowledge + 1 + i;
 		MSG_WriteByte( &buf, clc_clientCommand );
 		MSG_WriteLong( &buf, index );
@@ -816,9 +791,7 @@ void CL_WritePacket( int repeat ) {
 		 * key=0 — TLS provides confidentiality; no netchan XOR needed. */
 		byte  udg_data[2048];
 		msg_t udg;
-		int   qi, qj, qcount;
-
-		qcount = 3;
+		int qcount = 3;
 		if ( cl.cmdNumber < 3 )
 			qcount = cl.cmdNumber > 0 ? cl.cmdNumber : 1;
 
@@ -836,8 +809,8 @@ void CL_WritePacket( int repeat ) {
 		MSG_WriteByte( &udg, qcount );
 
 		oldcmd = &nullcmd;
-		for ( qi = 0; qi < qcount; qi++ ) {
-			qj  = (cl.cmdNumber - qcount + qi + 1) & CMD_MASK;
+		for ( int qi = 0; qi < qcount; qi++ ) {
+			int qj = (cl.cmdNumber - qcount + qi + 1) & CMD_MASK;
 			cmd = &cl.cmds[qj];
 			MSG_WriteDeltaUsercmdKey( &udg, 0, oldcmd, cmd );
 			oldcmd = cmd;
@@ -848,7 +821,7 @@ void CL_WritePacket( int repeat ) {
 		}
 
 		/* keep outPackets ring valid for snapshot interpolation + next-frame count */
-		packetNum = clc.netchan.outgoingSequence & PACKET_MASK;
+		int packetNum = clc.netchan.outgoingSequence & PACKET_MASK;
 		cl.outPackets[packetNum].p_realtime   = cls.realtime;
 		cl.outPackets[packetNum].p_serverTime = oldcmd->serverTime;
 		cl.outPackets[packetNum].p_cmdNumber  = cl.cmdNumber;
@@ -861,8 +834,8 @@ void CL_WritePacket( int repeat ) {
 	// few packet, so even if a couple packets are dropped in a row,
 	// all the cmds will make it to the server
 
-	oldPacketNum = (clc.netchan.outgoingSequence - 1 - cl_packetdup->integer) & PACKET_MASK;
-	count = cl.cmdNumber - cl.outPackets[ oldPacketNum ].p_cmdNumber;
+	int oldPacketNum = (clc.netchan.outgoingSequence - 1 - cl_packetdup->integer) & PACKET_MASK;
+	int count        = cl.cmdNumber - cl.outPackets[ oldPacketNum ].p_cmdNumber;
 	if ( count > MAX_PACKET_USERCMDS ) {
 		count = MAX_PACKET_USERCMDS;
 		Com_Printf("MAX_PACKET_USERCMDS\n");
@@ -883,15 +856,15 @@ void CL_WritePacket( int repeat ) {
 		MSG_WriteByte( &buf, count );
 
 		// use the checksum feed in the key
-		key = clc.checksumFeed;
+		int key = clc.checksumFeed;
 		// also use the message acknowledge
 		key ^= clc.serverMessageSequence;
 		// also use the last acknowledged server command in the key
 		key ^= MSG_HashKey(clc.serverCommands[ clc.serverCommandSequence & (MAX_RELIABLE_COMMANDS-1) ], 32);
 
 		// write all the commands, including the predicted command
-		for ( i = 0 ; i < count ; i++ ) {
-			j = (cl.cmdNumber - count + i + 1) & CMD_MASK;
+		for ( int i = 0 ; i < count ; i++ ) {
+			int j = (cl.cmdNumber - count + i + 1) & CMD_MASK;
 			cmd = &cl.cmds[j];
 			MSG_WriteDeltaUsercmdKey (&buf, key, oldcmd, cmd);
 			oldcmd = cmd;
@@ -901,7 +874,7 @@ void CL_WritePacket( int repeat ) {
 	//
 	// deliver the message
 	//
-	packetNum = clc.netchan.outgoingSequence & PACKET_MASK;
+	int packetNum = clc.netchan.outgoingSequence & PACKET_MASK;
 	cl.outPackets[ packetNum ].p_realtime = cls.realtime;
 	cl.outPackets[ packetNum ].p_serverTime = oldcmd->serverTime;
 	cl.outPackets[ packetNum ].p_cmdNumber = cl.cmdNumber;

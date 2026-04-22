@@ -59,14 +59,13 @@ qboolean R_IsGlobalFog( int fogNum ) {
 
 
 int R_BoundsFogNum( const vec3_t mins, const vec3_t maxs ) {
-	int i;
 	const fog_t *fog;
 
 	if ( !tr.world || tr.world->numfogs <= 1 ) {
 		return ( tr.globalFogType != FT_NONE ) ? tr.globalFog : 0;
 	}
 
-	for ( i = 1; i < tr.world->numfogs; i++ ) {
+	for ( int i = 1; i < tr.world->numfogs; i++ ) {
 		fog = &tr.world->fogs[i];
 		if ( maxs[0] >= fog->bounds[0][0]
 			&& maxs[1] >= fog->bounds[0][1]
@@ -85,13 +84,12 @@ int R_BoundsFogNum( const vec3_t mins, const vec3_t maxs ) {
 void RE_GetViewFog( const vec3_t origin, refFogType_t *type, vec3_t color,
 	float *depthForOpaque, float *density, qboolean *useColorArray )
 {
-	int i;
 	const fog_t *fog;
 	const fogParms_t *parms = NULL;
 	qboolean insideVolume = qfalse;
 
 	if ( tr.world ) {
-		for ( i = 1; i < tr.world->numfogs; i++ ) {
+		for ( int i = 1; i < tr.world->numfogs; i++ ) {
 			fog = &tr.world->fogs[i];
 			if ( origin[0] >= fog->bounds[0][0] && origin[0] <= fog->bounds[1][0]
 				&& origin[1] >= fog->bounds[0][1] && origin[1] <= fog->bounds[1][1]
@@ -264,9 +262,7 @@ void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b,
 
 
 void RB_AddCoronaFlares( void ) {
-	int i;
 	corona_t *cor;
-	int fogNum;
 
 	if ( !r_flares || !r_flares->integer ) {
 		return;
@@ -276,7 +272,7 @@ void RB_AddCoronaFlares( void ) {
 	}
 
 	cor = backEndData->coronas + r_firstSceneCorona;
-	for ( i = 0; i < r_numcoronas; i++, cor++ ) {
+	for ( int i = 0; i < r_numcoronas; i++, cor++ ) {
 		vec3_t scaledColor;
 
 		if ( !cor->visible ) {
@@ -285,12 +281,11 @@ void RB_AddCoronaFlares( void ) {
 
 		VectorScale( cor->color, cor->scale, scaledColor );
 
-		fogNum = 0;
+		int fogNum = 0;
 		if ( tr.world && tr.world->numfogs > 1 ) {
-			int j, k;
-			for ( j = 1; j < tr.world->numfogs; j++ ) {
+			for ( int j = 1; j < tr.world->numfogs; j++ ) {
 				const fog_t *fv = &tr.world->fogs[j];
-				for ( k = 0; k < 3; k++ ) {
+				for ( int k = 0; k < 3; k++ ) {
 					if ( cor->origin[k] < fv->bounds[0][k] ||
 					     cor->origin[k] > fv->bounds[1][k] ) {
 						break;

@@ -14,7 +14,6 @@ typedef struct
 void* CG_ModernHUDElementLocationCreate(const modernhudConfig_t* config)
 {
 	modernHudElementLocation_t* element;
-	modernhudGlobalContext_t* gctx;
 
 	ModernHUD_ELEMENT_INIT(element, config);
 
@@ -23,8 +22,6 @@ void* CG_ModernHUDElementLocationCreate(const modernhudConfig_t* config)
 		element->config.time.isSet = qtrue;
 		element->config.time.value = 2000;
 	}
-
-	gctx = CG_ModernHUDGetContext();
 
 	CG_ModernHUDTextMakeContext(&element->config, &element->lastLocation);
 	CG_ModernHUDFillAndFrameForText(&element->config, &element->lastLocation);
@@ -35,12 +32,8 @@ void* CG_ModernHUDElementLocationCreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementLocationRoutine(void* context)
 {
 	modernHudElementLocation_t* element = (modernHudElementLocation_t*)context;
-	clientInfo_t* ci;
-	const char* newLocation;
-
-	ci = &cgs.clientinfo[cg.snap->ps.clientNum];
-
-	newLocation = CG_ConfigString(CS_LOCATIONS + ci->location);
+	clientInfo_t* ci = &cgs.clientinfo[cg.snap->ps.clientNum];
+	const char* newLocation = CG_ConfigString(CS_LOCATIONS + ci->location);
 	if (!newLocation || *newLocation == 0)
 	{
 		return;

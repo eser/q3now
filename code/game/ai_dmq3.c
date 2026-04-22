@@ -56,6 +56,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/bots/g_bot_scripts.h"
 //
 #include "chars.h"				//characteristics
+#include "../qcommon/q_feats.h"
+#if FEAT_RECAST_NAVMESH
+#include "g_bot_nav.h"
+#endif
 #include "inv.h"				//indexes into the inventory
 #include "syn.h"				//synonyms
 #include "match.h"				//string matching types and vars
@@ -245,7 +249,7 @@ qboolean EntityIsInvisible(aas_entityinfo_t *entinfo) {
 	if (EntityCarriesFlag(entinfo)) {
 		return qfalse;
 	}
-	if (entinfo->powerups & (1 << PW_INVIS)) {
+	if ( (entinfo->powerups & (1 << PW_INVIS)) || (entinfo->flags & EF_CLOAK) ) {
 		return qtrue;
 	}
 	return qfalse;
@@ -1451,7 +1455,7 @@ char *ClientSkin(int client, char *skin, int size) {
 		return "[client out of range]";
 	}
 	trap_GetConfigstring(CS_PLAYERS+client, buf, sizeof(buf));
-	Q_strncpyz(skin, Info_ValueForKey(buf, "model"), size);
+	Q_strncpyz(skin, Info_ValueForKey(buf, "char"), size);
 	return skin;
 }
 
@@ -1461,10 +1465,9 @@ ClientFromName
 ==================
 */
 int ClientFromName(char *name) {
-	int i;
 	char buf[MAX_INFO_STRING];
 
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		trap_GetConfigstring(CS_PLAYERS+i, buf, sizeof(buf));
 		Q_CleanStr( buf );
 		if (!Q_stricmp(Info_ValueForKey(buf, "n"), name)) return i;
@@ -1478,10 +1481,9 @@ ClientOnSameTeamFromName
 ==================
 */
 int ClientOnSameTeamFromName(bot_state_t *bs, char *name) {
-	int i;
 	char buf[MAX_INFO_STRING];
 
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		if (!BotSameTeam(bs, i))
 			continue;
 		trap_GetConfigstring(CS_PLAYERS+i, buf, sizeof(buf));
@@ -1515,13 +1517,12 @@ EasyClientName
 ==================
 */
 char *EasyClientName(int client, char *buf, int size) {
-	int i;
 	char *str1, *str2, *ptr, c;
 	char name[128] = {0};
 
 	ClientName(client, name, sizeof(name));
-	
-	for (i = 0; name[i]; i++) name[i] &= 127;
+
+	for (int i = 0; name[i]; i++) name[i] &= 127;
 	//remove all spaces
 	for (ptr = strstr(name, " "); ptr; ptr = strstr(name, " ")) {
 		memmove(ptr, ptr+1, strlen(ptr+1)+1);
@@ -1651,7 +1652,9 @@ void BotSetupForMovement(bot_state_t *bs) {
 	//
 	VectorCopy(bs->viewangles, initmove.viewangles);
 	//
+#if !FEAT_RECAST_NAVMESH
 	trap_BotInitMoveState(bs->ms, &initmove);
+#endif
 }
 
 /*
@@ -2098,7 +2101,11 @@ BotIntermission
 qboolean BotIntermission(bot_state_t *bs) {
 	//NOTE: we shouldn't be looking at the game code...
 	if (level.intermissiontime) return qtrue;
-	return (bs->cur_ps.pm_type == PM_FREEZE || bs->cur_ps.pm_type == PM_INTERMISSION);
+	if (bs->cur_ps.pm_type == PM_FREEZE || bs->cur_ps.pm_type == PM_INTERMISSION) return qtrue;
+#if FEAT_GAME_MEETING
+	if (bs->cur_ps.pm_type == PM_MEETING) return qtrue;
+#endif
+	return qfalse;
 }
 
 /*
@@ -2175,10 +2182,8 @@ BotInitWaypoints
 ==================
 */
 void BotInitWaypoints(void) {
-	int i;
-
 	botai_freewaypoints = NULL;
-	for (i = 0; i < MAX_WAYPOINTS; i++) {
+	for (int i = 0; i < MAX_WAYPOINTS; i++) {
 		botai_waypoints[i].next = botai_freewaypoints;
 		botai_freewaypoints = &botai_waypoints[i];
 	}
@@ -2665,7 +2670,7 @@ bot_moveresult_t BotAttackMove(bot_state_t *bs, int tfl) {
 		//initialize the movement state
 		BotSetupForMovement(bs);
 		//move towards the goal
-		trap_BotMoveToGoal(&moveresult, bs->ms, &goal, tfl);
+		BotNav_MoveToGoal(bs, &goal, &moveresult);
 		BotMovementThink(bs, &moveresult);
 		return moveresult;
 	}
@@ -2831,10 +2836,9 @@ InFieldOfVision
 */
 qboolean InFieldOfVision(vec3_t viewangles, float fov, vec3_t angles)
 {
-	int i;
 	float diff, angle;
 
-	for (i = 0; i < 2; i++) {
+	for (int i = 0; i < 2; i++) {
 		angle = AngleMod(viewangles[i]);
 		angles[i] = AngleMod(angles[i]);
 		diff = angles[i] - angle;
@@ -3077,7 +3081,7 @@ int BotFindEnemy(bot_state_t *bs, int curenemy) {
 		//if it's the current enemy
 		if (i == curenemy) continue;
 		//if the enemy has targeting disabled
-		if (g_entities[i].flags & FL_NOTARGET) {
+		if (g_entities[i].flags & FL_NOTARGET || g_entities[i].flags & FL_CLOAK) {
 			continue;
 		}
 		//
@@ -3224,11 +3228,10 @@ BotTeamFlagCarrierVisible
 ==================
 */
 int BotTeamFlagCarrierVisible(bot_state_t *bs) {
-	int i;
 	float vis;
 	aas_entityinfo_t entinfo;
 
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		if (i == bs->client)
 			continue;
 		//
@@ -3258,10 +3261,9 @@ BotTeamFlagCarrier
 ==================
 */
 int BotTeamFlagCarrier(bot_state_t *bs) {
-	int i;
 	aas_entityinfo_t entinfo;
 
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		if (i == bs->client)
 			continue;
 		//
@@ -3287,11 +3289,10 @@ BotEnemyFlagCarrierVisible
 ==================
 */
 int BotEnemyFlagCarrierVisible(bot_state_t *bs) {
-	int i;
 	float vis;
 	aas_entityinfo_t entinfo;
 
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		if (i == bs->client)
 			continue;
 		//
@@ -3321,7 +3322,6 @@ BotVisibleTeamMatesAndEnemies
 ==================
 */
 void BotVisibleTeamMatesAndEnemies(bot_state_t *bs, int *teammates, int *enemies, float range) {
-	int i;
 	float vis;
 	aas_entityinfo_t entinfo;
 	vec3_t dir;
@@ -3330,7 +3330,7 @@ void BotVisibleTeamMatesAndEnemies(bot_state_t *bs, int *teammates, int *enemies
 		*teammates = 0;
 	if (enemies)
 		*enemies = 0;
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		if (i == bs->client)
 			continue;
 		//
@@ -3368,11 +3368,10 @@ BotTeamCubeCarrierVisible
 ==================
 */
 int BotTeamCubeCarrierVisible(bot_state_t *bs) {
-	int i;
 	float vis;
 	aas_entityinfo_t entinfo;
 
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		if (i == bs->client) continue;
 		//
 		BotEntityInfo(i, &entinfo);
@@ -3397,11 +3396,10 @@ BotEnemyCubeCarrierVisible
 ==================
 */
 int BotEnemyCubeCarrierVisible(bot_state_t *bs) {
-	int i;
 	float vis;
 	aas_entityinfo_t entinfo;
 
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		if (i == bs->client)
 			continue;
 		//
@@ -3702,6 +3700,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 				VectorSet(goal.mins, -8, -8, -8);
 				VectorSet(goal.maxs, 8, 8, 8);
 				//
+#if !FEAT_RECAST_NAVMESH
 				if (trap_BotPredictVisiblePosition(bs->lastenemyorigin, bs->lastenemyareanum, &goal, TFL_DEFAULT, target)) {
 					VectorSubtract(target, bs->eye, dir);
 					if (VectorLengthSquared(dir) > Square(80)) {
@@ -3709,6 +3708,7 @@ void BotAimAtEnemy(bot_state_t *bs) {
 						bestorigin[2] -= 20;
 					}
 				}
+#endif
 				aim_accuracy = 1;
 			}
 		}
@@ -4155,10 +4155,9 @@ this is ugly
 */
 int BotModelMinsMaxs(int modelindex, int eType, int contents, vec3_t mins, vec3_t maxs) {
 	gentity_t *ent;
-	int i;
 
 	ent = &g_entities[0];
-	for (i = 0; i < level.num_entities; i++, ent++) {
+	for (int i = 0; i < level.num_entities; i++, ent++) {
 		if ( !ent->inuse ) {
 			continue;
 		}
@@ -4481,11 +4480,9 @@ BotEnableActivateGoalAreas
 ==================
 */
 void BotEnableActivateGoalAreas(bot_activategoal_t *activategoal, int enable) {
-	int i;
-
 	if (activategoal->areasdisabled == !enable)
 		return;
-	for (i = 0; i < activategoal->numareas; i++)
+	for (int i = 0; i < activategoal->numareas; i++)
 		trap_AAS_EnableRoutingArea( activategoal->areas[i], enable );
 	activategoal->areasdisabled = !enable;
 }
@@ -4497,7 +4494,6 @@ BotIsGoingToActivateEntity
 */
 int BotIsGoingToActivateEntity(bot_state_t *bs, int entitynum) {
 	bot_activategoal_t *a;
-	int i;
 
 	for (a = bs->activatestack; a; a = a->next) {
 		if (a->time < FloatTime())
@@ -4505,7 +4501,7 @@ int BotIsGoingToActivateEntity(bot_state_t *bs, int entitynum) {
 		if (a->goal.entitynum == entitynum)
 			return qtrue;
 	}
-	for (i = 0; i < MAX_ACTIVATESTACK; i++) {
+	for (int i = 0; i < MAX_ACTIVATESTACK; i++) {
 		if (bs->activategoalheap[i].inuse)
 			continue;
 		//
@@ -5141,7 +5137,9 @@ void BotCheckForGrenades(bot_state_t *bs, entityState_t *state) {
 	if (state->eType != ET_MISSILE || state->weapon != WP_GRENADE_LAUNCHER)
 		return;
 	// try to avoid the grenade
+#if !FEAT_RECAST_NAVMESH
 	trap_BotAddAvoidSpot(bs->ms, state->pos.trBase, 160, AVOID_ALWAYS);
+#endif
 }
 
 /*
@@ -5342,8 +5340,8 @@ void BotCheckEvents(bot_state_t *bs, entityState_t *state) {
 				}
 				//check out the sound
 				trap_GetConfigstring(CS_SOUNDS + state->eventParm, buf, sizeof(buf));
-				//if falling into a death pit
-				if (!strcmp(buf, "*falling1.opus")) {
+				//if falling into a death pit (convention path: no longer uses *-prefixed strings)
+				if (strstr(buf, "/sounds/falling.opus")) {
 					//if the bot has a personal teleporter
 					if (bs->inventory[INVENTORY_TELEPORTER] > 0) {
 						//use the holdable item
@@ -5410,7 +5408,9 @@ void BotCheckSnapshot(bot_state_t *bs) {
 	entityState_t state;
 
 	//remove all avoid spots
+#if !FEAT_RECAST_NAVMESH
 	{ vec3_t clearOrigin = { 0, 0, 0 }; trap_BotAddAvoidSpot(bs->ms, clearOrigin, 0, AVOID_CLEAR); }
+#endif
 	//reset kamikaze body
 	bs->kamikazebody = 0;
 	//
@@ -6004,11 +6004,10 @@ BotSetEntityNumForGoal
 */
 void BotSetEntityNumForGoal(bot_goal_t *goal, char *classname) {
 	gentity_t *ent;
-	int i;
 	vec3_t dir;
 
 	ent = &g_entities[0];
-	for (i = 0; i < level.num_entities; i++, ent++) {
+	for (int i = 0; i < level.num_entities; i++, ent++) {
 		if ( !ent->inuse ) {
 			continue;
 		}
@@ -6030,11 +6029,10 @@ BotSetEntityNumForGoalWithActivator
 */
 void BotSetEntityNumForGoalWithActivator(bot_goal_t *goal, char *classname) {
 	gentity_t *ent;
-	int i;
 	vec3_t dir;
 
 	ent = &g_entities[0];
-	for (i = 0; i < level.num_entities; i++, ent++) {
+	for (int i = 0; i < level.num_entities; i++, ent++) {
 		if ( !ent->inuse || !ent->activator ) {
 			continue;
 		}

@@ -1749,9 +1749,7 @@ static void PM_BeginWeaponChange( int weapon ) {
 }
 
 static void PM_OutOfAmmoChange( void ) {
-	int i;
-
-	for ( i = WP_NUM_WEAPONS - 1; i > WP_NONE; i-- ) {
+	for ( int i = WP_NUM_WEAPONS - 1; i > WP_NONE; i-- ) {
 		if ( !bg_weaponlist[i].switchOnOutOfAmmo ) {
 			continue;
 		}
@@ -2433,6 +2431,11 @@ void PM_UpdateViewAngles( playerState_t *ps, const usercmd_t *cmd ) {
 	if ( ps->pm_type == PM_INTERMISSION ) {
 		return;		// no view changes at all
 	}
+#if FEAT_GAME_MEETING
+	if ( ps->pm_type == PM_MEETING ) {
+		return;		// no view changes during pre-match lobby
+	}
+#endif
 
 	if ( ps->pm_type != PM_SPECTATOR && ps->stats[STAT_HEALTH] <= 0 ) {
 		return;		// no view changes at all
@@ -2499,7 +2502,11 @@ void PmoveSingle (pmove_t *pmove) {
 	// which mode drives beam/barrel effects without a separate latch field.
 	{
 		qboolean canFire = !(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION
-			&& pm->ps->pm_type != PM_NOCLIP && pm->ps->ammo[ pm->ps->weapon ];
+			&& pm->ps->pm_type != PM_NOCLIP
+#if FEAT_GAME_MEETING
+			&& pm->ps->pm_type != PM_MEETING
+#endif
+			&& pm->ps->ammo[ pm->ps->weapon ];
 		if ( canFire && ( pm->cmd.buttons & BUTTON_ATTACK_PRI ) ) {
 			pm->ps->eFlags |= EF_FIRING_PRI;
 		} else {
@@ -2513,7 +2520,11 @@ void PmoveSingle (pmove_t *pmove) {
 	}
 
     // set the firing flag for continuous beam weapons
-    if (!(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION && (pm->cmd.buttons & BUTTON_AFFIRMATIVE)) {
+    if (!(pm->ps->pm_flags & PMF_RESPAWNED) && pm->ps->pm_type != PM_INTERMISSION
+#if FEAT_GAME_MEETING
+        && pm->ps->pm_type != PM_MEETING
+#endif
+        && (pm->cmd.buttons & BUTTON_AFFIRMATIVE)) {
         pm->ps->eFlags |= EF_GRAPPLE;
     }
     else {
@@ -2601,6 +2612,11 @@ void PmoveSingle (pmove_t *pmove) {
 	if ( pm->ps->pm_type == PM_INTERMISSION ) {
 		return;		// no movement at all
 	}
+#if FEAT_GAME_MEETING
+	if ( pm->ps->pm_type == PM_MEETING ) {
+		return;		// no movement during pre-match lobby
+	}
+#endif
 
 	// set watertype, and waterlevel
 	PM_SetWaterLevel();

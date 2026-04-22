@@ -816,13 +816,12 @@ G_ItemDisabled
 int G_ItemDisabled( gitem_t *item ) {
 
 	char name[128];
-    int i;
 
     if (item->giType == IT_POWERUP && (g_gametype.integer == GT_DUEL || g_gametype.integer == GT_KINGOFTHEHILL)) {
         return 1;
     }
 
-    for (i = 0; i < MAX_ITEM_CLASSNAMES; i++) {
+    for (int i = 0; i < MAX_ITEM_CLASSNAMES; i++) {
         if (item->classnames[i]) {
             Com_sprintf(name, sizeof(name), "disable_%s", item->classnames[i]);
             if (trap_Cvar_VariableIntegerValue(name)) {

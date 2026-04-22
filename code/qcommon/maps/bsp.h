@@ -36,6 +36,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 typedef struct bspFormat_s bspFormat_t;
 typedef struct bspFile_s bspFile_t;
 
+// Forward declaration for the nav geometry type.
+// Full definition is in code/qcommon/nav/nav_local.h.
+// Used by bspFormat_t.extractNavGeometry; bsp.h itself need not know the layout.
+struct navGeom_s;
+
 typedef enum {
 	BSP_ASSET_PROFILE_MODERN = 0,
 	BSP_ASSET_PROFILE_LEGACY
@@ -47,6 +52,10 @@ typedef struct bspFile_s {
 	int			ident;
 	int			version;
 	int			references;
+
+	// Format that loaded this file.  Set by BSP_Load after successful load.
+	// NULL only if the file was loaded before this field was added.
+	const bspFormat_t *format;
 
 	int			checksum;
 	int			rawLength;
@@ -135,6 +144,10 @@ typedef struct bspFormat_s {
 	int			version;		// BSP version (e.g. BSP_VERSION)
 	qboolean	(*loadFunction)( const bspFormat_t *format, const char *name,
 					const void *data, int length, bspFile_t **bspFile );
+	// NULL if this format does not support nav geometry extraction.
+	// When NULL, Nav_LoadMap logs a warning and nav.ready stays qfalse.
+	qboolean	(*extractNavGeometry)( const bspFile_t *bsp,
+	                                   struct navGeom_s *outGeom );
 } bspFormat_t;
 
 // Public API

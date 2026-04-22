@@ -1061,10 +1061,10 @@ void Sys_ShowIP( void ) {
 		Sys_SockaddrToString( addrbuf, sizeof(addrbuf), &localIP[i].addr );
 
 		if(localIP[i].type == NA_IP)
-			Com_Printf( "IP: %s\n", addrbuf);
+			Com_DPrintf( "IP: %s\n", addrbuf);
 #if FEAT_IPV6
 		else if(localIP[i].type == NA_IP6)
-			Com_Printf( "IP6: %s\n", addrbuf);
+			Com_DPrintf( "IP6: %s\n", addrbuf);
 #endif
 	}
 }
@@ -1270,11 +1270,9 @@ Join an ipv6 multicast group
 */
 void NET_JoinMulticast6( void )
 {
-	int err;
-	
 	if(ip6_socket == INVALID_SOCKET || multicast6_socket != INVALID_SOCKET || (net_enabled->integer & NET_DISABLEMCAST))
 		return;
-	
+
 	if(IN6_IS_ADDR_MULTICAST(&boundto.sin6_addr) || IN6_IS_ADDR_UNSPECIFIED(&boundto.sin6_addr))
 	{
 		// The way the socket was bound does not prohibit receiving multi-cast packets. So we don't need to open a new one.
@@ -1282,6 +1280,7 @@ void NET_JoinMulticast6( void )
 	}
 	else
 	{
+		int err;
 		if((multicast6_socket = NET_IP6Socket(net_mcast6addr->string, ntohs(boundto.sin6_port), NULL, &err)) == INVALID_SOCKET)
 		{
 			// If the OS does not support binding to multicast addresses, like WinXP, at least try with the normal file descriptor.
@@ -1494,8 +1493,6 @@ NET_AddLocalAddress
 */
 static void NET_AddLocalAddress( const char *ifname, const struct sockaddr *addr, const struct sockaddr *netmask )
 {
-	int addrlen;
-
 	// only add addresses that have all required info.
 	if (!addr || !netmask || !ifname)
 		return;
@@ -1504,6 +1501,7 @@ static void NET_AddLocalAddress( const char *ifname, const struct sockaddr *addr
 
 	if(numIP < MAX_IPS)
 	{
+		int addrlen;
 		if(family == AF_INET)
 		{
 			addrlen = sizeof(struct sockaddr_in);

@@ -30,12 +30,9 @@ void* CG_ModernHUDElementChatCreate(const modernhudConfig_t* config, int line)
 void CG_ModernHUDElementChatRoutine(void* context)
 {
 	modernHudElementChat_t* element = (modernHudElementChat_t*)context;
-	modernhudChatEntry_t* entry;
-	int index;
 
-	index = ((element->gctx->chat.index - 1) - (element->index - 1)) % ModernHUD_MAX_CHAT_LINES;
-
-	entry = &element->gctx->chat.line[index];
+	int index = ((element->gctx->chat.index - 1) - (element->index - 1)) % ModernHUD_MAX_CHAT_LINES;
+	modernhudChatEntry_t* entry = &element->gctx->chat.line[index];
 
 	if (entry->message[0] == 0)
 	{

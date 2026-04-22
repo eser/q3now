@@ -179,9 +179,7 @@ void CG_ClearParticles (void)
 
 	// Ridah, init the shaderAnims
 	for (i=0; shaderAnimNames[i]; i++) {
-		int j;
-
-		for (j=0; j<shaderAnimCounts[i]; j++) {
+		for (int j=0; j<shaderAnimCounts[i]; j++) {
 			shaderAnims[i][j] = trap_R_RegisterShader( va("%s%i", shaderAnimNames[i], j+1) );
 		}
 	}
@@ -868,10 +866,13 @@ void CG_AddParticles (void)
 	VectorCopy( cg.refdef.viewaxis[2], vup );
 
 	vectoangles( cg.refdef.viewaxis[0], rotate_ang );
+#if FEAT_SCREENSHOT_TOOLS
+	oldtime += cg.timeOffset;
+#endif
 	roll += ((cg.time - oldtime) * 0.1) ;
 	rotate_ang[ROLL] += (roll*0.9);
 	AngleVectors ( rotate_ang, rforward, rright, rup);
-	
+
 	oldtime = cg.time;
 
 	active = NULL;
@@ -881,6 +882,14 @@ void CG_AddParticles (void)
 	{
 
 		next = p->next;
+
+#if FEAT_SCREENSHOT_TOOLS
+		if ( cg.stopTime ) {
+			p->time      += (float)cg.timeOffset;
+			p->endtime   += (float)cg.timeOffset;
+			p->startfade += (float)cg.timeOffset;
+		}
+#endif
 
 		time = (cg.time - p->time)*0.001;
 
@@ -1393,9 +1402,7 @@ int CG_NewParticleArea (int num)
 void	CG_SnowLink (centity_t *cent, qboolean particleOn)
 {
 	cparticle_t		*p, *next;
-	int id;
-
-	id = cent->currentState.frame;
+	int id = cent->currentState.frame;
 
 	for (p=active_particles ; p ; p=next)
 	{
@@ -1780,8 +1787,7 @@ void CG_ParticleBloodCloud (centity_t *cent, vec3_t origin, vec3_t dir)
 	vec3_t	angles, forward;
 	vec3_t	point;
 	cparticle_t	*p;
-	int		i;
-	
+
 	dist = 0;
 
 	length = VectorLength (dir);
@@ -1798,9 +1804,9 @@ void CG_ParticleBloodCloud (centity_t *cent, vec3_t origin, vec3_t dir)
 
 	VectorCopy (origin, point);
 
-	for (i=0; i<dist; i++)
+	for (int i=0; i<dist; i++)
 	{
-		VectorMA (point, crittersize, forward, point);	
+		VectorMA (point, crittersize, forward, point);
 		
 		if (!free_particles)
 			return;
@@ -1905,8 +1911,7 @@ void CG_ParticleDust (centity_t *cent, vec3_t origin, vec3_t dir)
 	vec3_t	angles, forward;
 	vec3_t	point;
 	cparticle_t	*p;
-	int		i;
-	
+
 	dist = 0;
 
 	VectorNegate (dir, dir);
@@ -1924,7 +1929,7 @@ void CG_ParticleDust (centity_t *cent, vec3_t origin, vec3_t dir)
 
 	VectorCopy (origin, point);
 
-	for (i=0; i<dist; i++)
+	for (int i=0; i<dist; i++)
 	{
 		VectorMA (point, crittersize, forward, point);	
 				

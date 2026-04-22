@@ -308,6 +308,14 @@ void	G_TouchTriggers( gentity_t *ent ) {
 SpectatorThink
 =================
 */
+#if FEAT_SCREENSHOT_TOOLS
+static const float timeScaleFromMode[16] = {
+	1.00f, 0.75f, 0.50f, 0.33f, 0.25f,
+	0.20f, 0.15f, 0.10f, 0.08f, 0.05f,
+	1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f
+};
+#endif
+
 void SpectatorThink( gentity_t *ent, usercmd_t *ucmd ) {
 	pmove_t	pm;
 	gclient_t	*client;
@@ -326,6 +334,9 @@ void SpectatorThink( gentity_t *ent, usercmd_t *ucmd ) {
 		}
 
 		client->ps.speed = DEFAULT_MOVESPEED_SPECTATOR;
+#if FEAT_SCREENSHOT_TOOLS
+		if ( ent->s.number == 0 ) client->ps.speed = (int)( client->ps.speed / timeScaleFromMode[level.timeFreezeMode] );
+#endif
 
 		// set up for pmove
 		memset (&pm, 0, sizeof(pm));
@@ -347,10 +358,25 @@ void SpectatorThink( gentity_t *ent, usercmd_t *ucmd ) {
 	client->oldbuttons = client->buttons;
 	client->buttons = ucmd->buttons;
 
+#if !FEAT_SCREENSHOT_TOOLS
 	// attack button cycles through spectators
 	if ( ( client->buttons & BUTTON_ATTACK_PRI ) && ! ( client->oldbuttons & BUTTON_ATTACK_PRI ) ) {
 		Cmd_FollowCycle_f( ent, 1 );
 	}
+#else
+	if ( ( client->buttons & BUTTON_ATTACK_PRI ) && ! ( client->oldbuttons & BUTTON_ATTACK_PRI ) ) {
+		Cmd_Stop_f( ent );
+	}
+	if ( ( client->buttons & BUTTON_USE_HOLDABLE ) && ! ( client->oldbuttons & BUTTON_USE_HOLDABLE ) ) {
+		trap_SendServerCommand( client->ps.clientNum, "screenshot\n" );
+	}
+	if ( ent->s.number == 0 && level.time > client->respawnTime + 2000 ) {
+		level.timeFreezeMode = ucmd->weapon;
+		if ( level.timeFreezeMode < 0 ) level.timeFreezeMode = 0;
+		if ( level.timeFreezeMode > 9 ) level.timeFreezeMode = 9;
+		trap_Cvar_Set( "timescale", va( "%f", timeScaleFromMode[level.timeFreezeMode] ) );
+	}
+#endif
 }
 
 
@@ -594,11 +620,10 @@ StuckInOtherClient
 ==============
 */
 static int StuckInOtherClient(gentity_t *ent) {
-	int i;
 	gentity_t	*ent2;
 
 	ent2 = &g_entities[0];
-	for ( i = 0; i < MAX_CLIENTS; i++, ent2++ ) {
+	for ( int i = 0; i < MAX_CLIENTS; i++, ent2++ ) {
 		if ( ent2 == ent ) {
 			continue;
 		}
@@ -735,6 +760,12 @@ void ClientThink_real( gentity_t *ent ) {
 		ClientIntermissionThink( client );
 		return;
 	}
+#if FEAT_GAME_MEETING
+	if ( level.meeting && client->sess.sessionTeam != TEAM_SPECTATOR ) {
+		ClientIntermissionThink( client );
+		return;
+	}
+#endif
 
 	// spectators don't do much
 	if ( client->sess.sessionTeam == TEAM_SPECTATOR ) {
@@ -762,8 +793,13 @@ void ClientThink_real( gentity_t *ent ) {
 	} else {
 		client->ps.pm_type = PM_NORMAL;
 	}
+#if FEAT_GAME_MEETING
+	if ( level.meeting && client->sess.sessionTeam != TEAM_SPECTATOR ) {
+		client->ps.pm_type = PM_MEETING;
+	}
+#endif
 
-	client->ps.gravity = g_gravity.value;
+	client->ps.gravity = g_envGravity.value;
 
 	// set speed
 	if (g_excessive.integer) {
@@ -1196,6 +1232,12 @@ void ClientEndFrame( gentity_t *ent ) {
 
 	// apply all the damage taken this frame
 	P_DamageFeedback (ent);
+
+	if ( ent->flags & FL_CLOAK ) {
+		ent->client->ps.eFlags |= EF_CLOAK;
+	} else {
+		ent->client->ps.eFlags &= ~EF_CLOAK;
+	}
 
 	// add the EF_CONNECTION flag if we haven't gotten commands recently
 	if ( level.time - ent->client->lastCmdTime > 1000 ) {

@@ -4,13 +4,11 @@
 static cvar_t *sv_wiredRconPassword;
 
 static qboolean SV_RconIsHexDigest( const char *s ) {
-	int i;
-
 	if ( !s || strlen( s ) != COM_SHA256_HEX_LEN ) {
 		return qfalse;
 	}
 
-	for ( i = 0; i < COM_SHA256_HEX_LEN; i++ ) {
+	for ( int i = 0; i < COM_SHA256_HEX_LEN; i++ ) {
 		char c = s[i];
 		qboolean hex =
 			( c >= '0' && c <= '9' ) ||
@@ -25,9 +23,7 @@ static qboolean SV_RconIsHexDigest( const char *s ) {
 }
 
 static rconSession_t *SV_FindRconSession( const netadr_t *from ) {
-	int i;
-
-	for ( i = 0; i < MAX_RCON_SESSIONS; i++ ) {
+	for ( int i = 0; i < MAX_RCON_SESSIONS; i++ ) {
 		rconSession_t *s = &svs.rconSessions[i];
 		if ( s->challenge[0] == '\0' ) {
 			continue;
@@ -42,9 +38,8 @@ static rconSession_t *SV_FindRconSession( const netadr_t *from ) {
 
 static rconSession_t *SV_CreateRconSession( const netadr_t *from ) {
 	rconSession_t *slot = NULL;
-	int i;
 
-	for ( i = 0; i < MAX_RCON_SESSIONS; i++ ) {
+	for ( int i = 0; i < MAX_RCON_SESSIONS; i++ ) {
 		rconSession_t *s = &svs.rconSessions[i];
 
 		if ( s->challenge[0] == '\0' ) {
@@ -71,9 +66,7 @@ static rconSession_t *SV_CreateRconSession( const netadr_t *from ) {
 }
 
 void SV_RconCleanupSessions( void ) {
-	int i;
-
-	for ( i = 0; i < MAX_RCON_SESSIONS; i++ ) {
+	for ( int i = 0; i < MAX_RCON_SESSIONS; i++ ) {
 		rconSession_t *s = &svs.rconSessions[i];
 		if ( s->challenge[0] == '\0' ) {
 			continue;

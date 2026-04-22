@@ -137,17 +137,8 @@ typedef struct {
 #define TEAM_OVERLAY_MAXNAME_WIDTH	12
 #define TEAM_OVERLAY_MAXLOCATION_WIDTH	16
 
-typedef enum {
-	FOOTSTEP_NORMAL,
-	FOOTSTEP_BOOT,
-	FOOTSTEP_FLESH,
-	FOOTSTEP_MECH,
-	FOOTSTEP_ENERGY,
-	FOOTSTEP_METAL,
-	FOOTSTEP_SPLASH,
 
-	FOOTSTEP_TOTAL
-} footstep_t;
+// footstep_t is defined in cg_public.h (shared with engine-side cl_characters.c)
 
 typedef enum {
 	IMPACTSOUND_DEFAULT,
@@ -183,6 +174,9 @@ typedef struct {
 	int			animationNumber;	// may include ANIM_TOGGLEBIT
 	animation_t	*animation;
 	int			animationTime;		// time when the first frame of the animation will be exact
+#if FEAT_SPEED_SCALING
+	int			clock;				// virtual clock advances at frametime * speedScale
+#endif
 } lerpFrame_t;
 
 
@@ -208,7 +202,18 @@ typedef struct {
 
 //=================================================
 
-
+#if FEAT_EARTHQUAKE_SYSTEM
+typedef struct {
+	vec3_t	origin;
+	float	radius;		// negative = global (no distance attenuation)
+	float	amplitude;
+	int		startTime;
+	int		endTime;
+	int		fadeInTime;
+	int		fadeOutTime;
+} earthquake_t;
+#define MAX_EARTHQUAKES 64
+#endif
 
 // centity_t have a direct corespondence with gentity_t in the game, but
 // only the entityState_t is directly communicated to the cgame
@@ -411,7 +416,7 @@ typedef struct {
 	// when clientinfo is changed, the loading of models/skins/sounds
 	// can be deferred until you are dead, to prevent hitches in
 	// gameplay
-	char			modelName[MAX_QPATH];
+	char			characterName[MAX_QPATH];
 	char			skinName[MAX_QPATH];
 	char			redTeam[MAX_TEAMNAME];
 	char			blueTeam[MAX_TEAMNAME];
@@ -434,16 +439,30 @@ typedef struct {
 	qhandle_t		headModel;
 	qhandle_t		headSkin;
 
+	qhandle_t		skinHandle;    // character skin registry handle (0 = use legacy customSkin)
+
 	qhandle_t		modelIcon;
 
 	animation_t		animations[MAX_TOTALANIMATIONS];
 
 	sfxHandle_t		sounds[MAX_CUSTOM_SOUNDS];
 
+	// Per-entity effects and footstep sounds (populated by cg_characters.c).
+	// Replaces global cgs.media.footsteps / cgs.media.gibSound / landSound / watr*.
+	struct {
+		sfxHandle_t gibSound;
+		sfxHandle_t landSound;
+		sfxHandle_t watrInSound;
+		sfxHandle_t watrOutSound;
+		sfxHandle_t watrUnSound;
+	} effects;
+	sfxHandle_t		footstepSounds[FOOTSTEP_TOTAL][4];
+
 #if FEAT_IQM
 	qboolean		iqmModel;		// true if using body.iqm single-mesh
 	qhandle_t		bodyModel;		// body.iqm model handle
 	qhandle_t		bodySkin;		// body.iqm skin handle
+	qhandle_t		bodyShader;     // set when skin is single-path form (IQM path)
 #endif // FEAT_IQM
 } clientInfo_t;
 
@@ -754,6 +773,21 @@ typedef struct {
 	int			sgPumpTime;		// timestamp when pump animation started
 #endif
 
+#if FEAT_EARTHQUAKE_SYSTEM
+	earthquake_t	earthquakes[MAX_EARTHQUAKES];
+	float			additionalTremble;
+#endif
+
+#if FEAT_SCREENSHOT_TOOLS
+	int			stopTime;		// server time when freeze was triggered, 0 if running
+	int			timeOffset;		// serverTime - cg.time at freeze moment
+	int			serverOffset;	// serverTime - snap->serverTime at freeze moment
+#endif
+
+#if FEAT_GAME_MEETING
+	qboolean	meeting;		// pre-match lobby active
+#endif
+
 } cg_t;
 
 
@@ -762,10 +796,6 @@ typedef struct {
 // Other media that can be tied to clients, weapons, or items are
 // stored in the clientInfo_t, itemInfo_t, weaponInfo_t, and powerupInfo_t
 typedef struct {
-	qhandle_t	charsetShader;
-	qhandle_t	charsetProp;
-	qhandle_t	charsetPropGlow;
-	qhandle_t	charsetPropB;
 	qhandle_t	whiteShader;
 
 #if FEAT_HARVESTER
@@ -960,7 +990,6 @@ typedef struct {
 	sfxHandle_t	selectSound;
 	sfxHandle_t	useNothingSound;
 	sfxHandle_t	wearOffSound;
-	sfxHandle_t	footsteps[FOOTSTEP_TOTAL][4];
 	sfxHandle_t	sfx_lghit1;
 	sfxHandle_t	sfx_lghit2;
 	sfxHandle_t	sfx_lghit3;
@@ -993,18 +1022,20 @@ typedef struct {
 #endif
 	sfxHandle_t	winnerSound;
 	sfxHandle_t	loserSound;
-	sfxHandle_t	gibSound;
 	sfxHandle_t	gibBounce1Sound;
 	sfxHandle_t	gibBounce2Sound;
 	sfxHandle_t	gibBounce3Sound;
+	sfxHandle_t	talkSound;
 	sfxHandle_t	teleInSound;
 	sfxHandle_t	teleOutSound;
 	sfxHandle_t	noAmmoSound;
 	sfxHandle_t	respawnSound;
-	sfxHandle_t talkSound;
-	sfxHandle_t landSound;
 	sfxHandle_t fallSound;
+	sfxHandle_t gurpSound[2];
 	sfxHandle_t jumpPadSound;
+#if FEAT_EARTHQUAKE_SYSTEM
+	sfxHandle_t earthquakeSound;
+#endif
 
 	sfxHandle_t oneMinuteSound;
 	sfxHandle_t fiveMinuteSound;
@@ -1037,10 +1068,6 @@ typedef struct {
 	sfxHandle_t voteNow;
 	sfxHandle_t votePassed;
 	sfxHandle_t voteFailed;
-
-	sfxHandle_t watrInSound;
-	sfxHandle_t watrOutSound;
-	sfxHandle_t watrUnSound;
 
 	sfxHandle_t flightSound;
 	sfxHandle_t medkitSound;
@@ -1238,28 +1265,23 @@ extern	vmCvar_t		cg_bobroll;
 extern	vmCvar_t		cg_swingSpeed;
 extern	vmCvar_t		cg_shadows;
 extern	vmCvar_t		cg_gibs;
-extern	vmCvar_t		cg_drawTimer;
-extern	vmCvar_t		cg_drawFPS;
 extern	vmCvar_t		cg_drawSnapshot;
 extern	vmCvar_t		cg_draw3dIcons;
 extern	vmCvar_t		cg_drawIcons;
 extern	vmCvar_t		cg_drawAmmoWarning;
-extern	vmCvar_t		cg_drawCrosshair;
 extern	vmCvar_t		cg_drawCrosshairNames;
 extern	vmCvar_t		cg_drawRewards;
-extern	vmCvar_t		cg_drawTeamOverlay;
 extern	vmCvar_t		cg_teamOverlayUserinfo;
-extern	vmCvar_t		cg_crosshairX;
-extern	vmCvar_t		cg_crosshairY;
 extern	vmCvar_t		cg_crosshairSize;
+extern	vmCvar_t		cg_crosshairAlpha;
 extern	vmCvar_t		cg_crosshairHealth;
 extern	vmCvar_t		cg_crosshairColor;
-extern	vmCvar_t		cg_crosshairAlpha;
 extern	vmCvar_t		cg_draw2D;
 extern	vmCvar_t		cg_animSpeed;
 extern	vmCvar_t		cg_debugAnim;
 extern	vmCvar_t		cg_debugPosition;
 extern	vmCvar_t		cg_debugEvents;
+extern	vmCvar_t		cg_debugCharacterSkin;
 extern	vmCvar_t		cg_errorDecay;
 extern	vmCvar_t		cg_nopredict;
 extern	vmCvar_t		cg_noPlayerAnims;
@@ -1295,7 +1317,7 @@ extern	vmCvar_t		cg_synchronousClients;
 extern	vmCvar_t		cg_teamChatTime;
 extern	vmCvar_t		cg_teamChatHeight;
 extern	vmCvar_t		cg_stats;
-extern	vmCvar_t 		cg_forceSameModel;
+extern	vmCvar_t 		cg_forceSameCharacter;
 extern	vmCvar_t 		cg_buildScript;
 extern	vmCvar_t		cg_paused;
 extern	vmCvar_t		cg_blood;
@@ -1323,7 +1345,50 @@ extern	vmCvar_t		cg_envLights;
 void	CG_AddEnvironmentLights( void );
 #endif
 
+#if FEAT_MUSIC_PLAYLIST
+extern	vmCvar_t		cg_music;
+void	CG_InitPlayList( void );
+void	CG_ParsePlayList( void );
+void	CG_StopPlayList( void );
+void	CG_ContinuePlayList( void );
+void	CG_ResetPlayList( void );
+void	CG_RunPlayListFrame( void );
+#endif
+
 #if FEAT_LENS_FLARES
+typedef enum {
+	LFM_reflexion,
+	LFM_glare,
+	LFM_star
+} lensFlareMode_t;
+
+#define MAX_LENSFLARES_PER_EFFECT       16
+#define MAX_MISSILE_LENSFLARE_EFFECTS   16
+
+typedef struct {
+	qhandle_t        shader;
+	lensFlareMode_t  mode;
+	float            pos;
+	float            size;
+	float            rgba[4];
+	float            rotationOffset;
+	float            rotationYawFactor;
+	float            rotationPitchFactor;
+	float            rotationRollFactor;
+	float            fadeAngleFactor;
+	float            entityAngleFactor;
+	float            intensityThreshold;
+} lensFlare_t;
+
+typedef struct {
+	char             name[64];
+	float            range;
+	float            rangeSqr;
+	float            fadeAngle;
+	int              numLensFlares;
+	lensFlare_t      lensFlares[MAX_LENSFLARES_PER_EFFECT];
+} lensFlareEffect_t;
+
 extern	vmCvar_t		cg_lensFlare;
 extern	vmCvar_t		cg_missileFlare;
 extern	vmCvar_t		cg_powerupFlares;
@@ -1348,8 +1413,8 @@ extern	vmCvar_t		cg_noProjectileTrail;
 extern	vmCvar_t		cg_currentSelectedPlayer;
 extern	vmCvar_t		cg_currentSelectedPlayerName;
 #endif
-extern	vmCvar_t		cg_enableDust;
-extern	vmCvar_t		cg_enableBreath;
+extern	vmCvar_t		cg_envGroundDusty;
+extern	vmCvar_t		cg_envTemperature;
 #if FEAT_OVERLOAD
 extern	vmCvar_t		cg_obeliskRespawnDelay;
 #endif
@@ -1378,60 +1443,16 @@ void		CG_ChatFilterUnignore_f( void );
 qboolean	CG_ChatFilterIsMuted( int clientNum );
 #endif
 
-#if FEAT_STATS_WINDOW
-// --- floating window system (cg_window.c) ---
-#define MAX_WINDOW_LINES    32
-#define MAX_WINDOW_LINE_LEN 128
-#define MAX_WINDOWS         6
-
-#define WID_STATS       1
-#define WID_VOTE        2
-#define WID_BOTORDER    3
-
-typedef enum {
-	WSTATE_OFF,
-	WSTATE_FADEIN,
-	WSTATE_ON,
-	WSTATE_FADEOUT
-} windowState_t;
-
-typedef struct cg_window_s {
-	int             id;
-	windowState_t   state;
-	int             x, y, w, h;
-	int             lineCount;
-	char            lineText[MAX_WINDOW_LINES][MAX_WINDOW_LINE_LEN];
-	vec4_t          lineColor[MAX_WINDOW_LINES];
-	int             stateStartTime;
-	float           alpha;
-	int             autoCloseTime;  /* 0=manual, >0=auto-close after ms */
-} cg_window_t;
-
-typedef struct {
-	cg_window_t     windows[MAX_WINDOWS];
-} cg_windowHandler_t;
-
-extern cg_windowHandler_t cg_windowHandler;
-extern vmCvar_t cg_statsWindow;
-
-void            CG_windowInit( void );
-cg_window_t    *CG_windowAlloc( int id );
-void            CG_windowFree( int id );
-void            CG_windowDraw( void );
-void            CG_statsWindow( void );
-void            CG_StatsDown_f( void );
-void            CG_StatsUp_f( void );
-void            CG_voteNotification( const char *msg );
-void            CG_botOrderConfirmation( const char *bot, const char *order );
-#endif
-
 // cg_wired_bridge.c — Wired UI: push game state to client for HUD rendering
 #if FEAT_WIRED_UI
 void	CG_WiredHudPushState( void );
 #endif
 
-// cg_colorparse.c
-void CG_ParseColor( const char *str, float *col, float alpha );
+//
+// cg_characters.c
+//
+qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName );
+qboolean trap_GetValue( char *value, int valueSize, const char *key );
 
 // cg_alloc.c — cgame-local memory allocator
 void	*CG_Alloc( int size );
@@ -1456,9 +1477,6 @@ void CG_StartMusic( void );
 
 void CG_UpdateCvars( void );
 
-qboolean CG_IsPlayerInvisible( centity_t *cent );
-int CG_CrosshairPlayer( void );
-int CG_LastAttacker( void );
 void CG_KeyEvent(int key, qboolean down);
 void CG_MouseEvent(int x, int y);
 void CG_EventHandling(int type);
@@ -1507,6 +1525,15 @@ void CG_ShowResponseHead( void );
 qboolean CG_YourTeamHasFlag( void );
 qboolean CG_OtherTeamHasFlag( void );
 
+//
+// cg_utils.c
+//
+qboolean CG_IsFollowing( void );
+qboolean CG_IsSpectator( void );
+qboolean CG_IsPlayerInvisible( centity_t *cent );
+int CG_CrosshairPlayer( void );
+int CG_LastAttacker( void );
+void CG_ModernDrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled );
 
 
 //
@@ -1516,7 +1543,6 @@ void CG_Player( centity_t *cent );
 void CG_ResetPlayerEntity( centity_t *cent );
 void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState_t *state, qboolean isPlayerPart, int team );
 void CG_NewClientInfo( int clientNum );
-sfxHandle_t	CG_CustomSound( int clientNum, const char *soundName );
 
 //
 // cg_predict.c
@@ -1538,6 +1564,11 @@ const char	*CG_ClientName( const clientInfo_t *ci );
 const char	*CG_ClientNameByNum( int clientNum );
 void CG_EntityEvent( centity_t *cent, vec3_t position );
 void CG_PainEvent( centity_t *cent, int health );
+
+#if FEAT_EARTHQUAKE_SYSTEM
+void CG_AddEarthquake( const vec3_t origin, float radius, float duration, float fadeIn, float fadeOut, float amplitude );
+void CG_AdjustEarthquakes( const vec3_t delta );
+#endif
 
 
 //

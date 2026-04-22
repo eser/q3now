@@ -11,7 +11,7 @@ cl_wired_background.c -- Shared 3-layer background: base fill, radial glows, gri
 static qhandle_t wui_radialGlow = 0;
 
 void WUI_BackgroundInit( void ) {
-	wui_radialGlow = re.RegisterShaderNoMip( "gfx/ui/radial_glow" );
+	wui_radialGlow = re.RegisterShaderNoMip( "gfx/ui/glow_radial" );
 }
 
 void WUI_DrawBackground( float x, float y, float w, float h ) {

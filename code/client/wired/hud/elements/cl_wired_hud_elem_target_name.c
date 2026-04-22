@@ -24,8 +24,6 @@ void CG_ModernHUDElementTargetNameRoutine(void* context)
 {
 	modernHudElementTargetName_t* element = (modernHudElementTargetName_t*)context;
 	char    s[1024];
-	clientInfo_t* ci;
-	int clientNum;
 
 	if ( wiredHud->crosshair.shaderIndex < 0 ) return;  // crosshair hidden
 	if ( wiredHud->renderingThirdPerson ) return;
@@ -37,10 +35,10 @@ void CG_ModernHUDElementTargetNameRoutine(void* context)
 		return;
 	}
 
-	clientNum = wiredHud->crosshairClientNum;
+	int clientNum = wiredHud->crosshairClientNum;
 	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) return;
 
-	ci = &wired_cgs.clientinfo[clientNum];
+	clientInfo_t* ci = &wired_cgs.clientinfo[clientNum];
 	if ( !ci->infoValid ) return;
 
 	// team-only mode: hide enemy names in team games (pre-computed by cgame)

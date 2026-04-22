@@ -28,6 +28,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../botlib/botlib.h"
 
+#if FEAT_RECAST_NAVMESH
+#include "../qcommon/nav/nav_public.h"
+#endif
+
 botlib_export_t	*botlib_export;
 
 // these functions must be used instead of pointer arithmetic, because
@@ -340,6 +344,32 @@ static qboolean SV_GetValue( char* value, int valueSize, const char* key )
 		return qtrue;
 	}
 
+	if ( strncmp( key, "char:", 5 ) == 0 ) {
+		const char *after = key + 5;
+		const char *colon = strchr( after, ':' );
+		if ( colon && Q_stricmp( colon + 1, "display_name" ) == 0 ) {
+			char charName[MAX_QPATH];
+			int nameLen = (int)( colon - after );
+			if ( nameLen >= MAX_QPATH ) nameLen = MAX_QPATH - 1;
+			memcpy( charName, after, nameLen );
+			charName[nameLen] = '\0';
+			if ( SV_Lua_GetCharacterDisplayName( charName, value, valueSize ) ) {
+				return qtrue;
+			}
+		}
+		return qfalse;
+	}
+
+	if ( !Q_stricmp( key, "char_count" ) ) {
+		Com_sprintf( value, valueSize, "%d", SV_Lua_GetCharacterCount() );
+		return qtrue;
+	}
+
+	if ( strncmp( key, "char_at:", 8 ) == 0 ) {
+		int idx = atoi( key + 8 );
+		return SV_Lua_GetCharacterAt( idx, value, valueSize );
+	}
+
 	return qfalse;
 }
 
@@ -570,6 +600,7 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		}
 		return 0;
 
+#if !FEAT_RECAST_NAVMESH
 	case BOTLIB_AAS_BBOX_AREAS:
 		return botlib_export->aas.AAS_BBoxAreas( VMA(1), VMA(2), VMA(3), args[4] );
 	case BOTLIB_AAS_AREA_INFO:
@@ -624,6 +655,34 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case BOTLIB_AAS_PREDICT_CLIENT_MOVEMENT:
 		return botlib_export->aas.AAS_PredictClientMovement( VMA(1), args[2], VMA(3), args[4], args[5],
 			VMA(6), VMA(7), args[8], args[9], VMF(10), args[11], args[12], args[13] );
+#else  /* FEAT_RECAST_NAVMESH — AAS navigation disabled, Recast is active */
+	/* These cases exist so game code calling trap_AAS_* does not crash.
+	 * Phase 4 will route these call sites to trap_Nav_* equivalents and
+	 * remove the AAS wrappers from g_syscalls.c entirely. */
+	case BOTLIB_AAS_BBOX_AREAS:
+	case BOTLIB_AAS_AREA_INFO:
+	case BOTLIB_AAS_ALTERNATIVE_ROUTE_GOAL:
+	case BOTLIB_AAS_ENTITY_INFO:
+	case BOTLIB_AAS_INITIALIZED:
+	case BOTLIB_AAS_PRESENCE_TYPE_BOUNDING_BOX:
+	case BOTLIB_AAS_TIME:
+	case BOTLIB_AAS_POINT_AREA_NUM:
+	case BOTLIB_AAS_POINT_REACHABILITY_AREA_INDEX:
+	case BOTLIB_AAS_TRACE_AREAS:
+	case BOTLIB_AAS_POINT_CONTENTS:
+	case BOTLIB_AAS_NEXT_BSP_ENTITY:
+	case BOTLIB_AAS_VALUE_FOR_BSP_EPAIR_KEY:
+	case BOTLIB_AAS_VECTOR_FOR_BSP_EPAIR_KEY:
+	case BOTLIB_AAS_FLOAT_FOR_BSP_EPAIR_KEY:
+	case BOTLIB_AAS_INT_FOR_BSP_EPAIR_KEY:
+	case BOTLIB_AAS_AREA_REACHABILITY:
+	case BOTLIB_AAS_AREA_TRAVEL_TIME_TO_GOAL_AREA:
+	case BOTLIB_AAS_ENABLE_ROUTING_AREA:
+	case BOTLIB_AAS_PREDICT_ROUTE:
+	case BOTLIB_AAS_SWIMMING:
+	case BOTLIB_AAS_PREDICT_CLIENT_MOVEMENT:
+		return 0;
+#endif /* FEAT_RECAST_NAVMESH */
 
 	case BOTLIB_EA_SAY:
 		botlib_export->ea.EA_Say( args[1], VMA(2) );
@@ -1059,6 +1118,25 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 				return transport->get_bandwidth( conn );
 		}
 		return 0;
+
+#if FEAT_RECAST_NAVMESH
+	case G_NAV_FIND_PATH:
+	case G_NAV_RAYCAST:
+	case G_NAV_FIND_NEAREST_POLY:
+	case G_NAV_GET_POLY_AREA_FLAGS:
+	case G_NAV_TRIGGER_OFF_MESH_LINK:
+	case G_NAV_GET_RANDOM_POINT:
+	case G_NAV_ADD_CROWD_AGENT:
+	case G_NAV_UPDATE_CROWD_AGENT:
+	case G_NAV_REMOVE_CROWD_AGENT:
+	case G_NAV_UPDATE_CROWD:
+	case G_NAV_IS_READY:
+	case G_NAV_SET_POLY_FLAGS_FOR_DOOR:
+		{
+			byte *vmBase = (gvm && !gvm->entryPoint) ? (byte *)gvm->dataBase : NULL;
+			return Nav_HandleTrap( args[0], args, vmBase );
+		}
+#endif /* FEAT_RECAST_NAVMESH */
 
 	default:
 		Com_Error( ERR_DROP, "Bad game system trap: %ld", (long int) args[0] );

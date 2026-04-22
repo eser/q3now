@@ -22,10 +22,10 @@ void* CG_ModernHUDElementNGPCreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementNGPRoutine(void* context)
 {
 	modernHudElementNGP_t* element = (modernHudElementNGP_t*)context;
-	int ping;
 
 	if (cg.demoPlayback) return;
 
+	int ping;
 	if (qtrue)
 	{
 		ping = 0;

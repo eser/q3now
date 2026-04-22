@@ -284,9 +284,8 @@ gattack_t	bg_attacklist[] =
 };
 
 int BG_AttackByShortname( const char *shortname ) {
-	int i;
 	int count = (int)( sizeof( bg_attacklist ) / sizeof( bg_attacklist[0] ) );
-	for ( i = 0; i < count; i++ ) {
+	for ( int i = 0; i < count; i++ ) {
 		if ( bg_attacklist[i].shortname[0] && Q_stricmp( bg_attacklist[i].shortname, shortname ) == 0 ) {
 			return i;
 		}

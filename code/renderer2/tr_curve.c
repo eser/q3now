@@ -455,8 +455,6 @@ void R_SubdividePatchToGrid( srfBspSurface_t *grid, int width, int height,
 	float		errorTable[2][MAX_GRID_SIZE];
 	int			numIndexes;
 	static glIndex_t indexes[(MAX_GRID_SIZE-1)*(MAX_GRID_SIZE-1)*2*3];
-	int consecutiveComplete;
-
 	for ( i = 0 ; i < width ; i++ ) {
 		for ( j = 0 ; j < height ; j++ ) {
 			ctrl[j][i] = points[j*width+i];
@@ -469,7 +467,7 @@ void R_SubdividePatchToGrid( srfBspSurface_t *grid, int width, int height,
 			errorTable[dir][j] = 0;
 		}
 
-		consecutiveComplete = 0;
+		int consecutiveComplete = 0;
 
 		// horizontal subdivisions
 		for ( j = 0 ; ; j = (j + 2) % (width - 1) ) {

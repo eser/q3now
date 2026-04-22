@@ -723,12 +723,10 @@ team_t CG_ModernHUDGetOurActiveTeam(void)
 
 void CG_ModernHUDFillWithColor(const modernhudCoord_t* coord, const float* color)
 {
-	float x, y, w, h;
-
-	x = coord->named.x;
-	y = coord->named.y;
-	w = coord->named.w;
-	h = coord->named.h;
+	float x = coord->named.x;
+	float y = coord->named.y;
+	float w = coord->named.w;
+	float h = coord->named.h;
 	trap_R_SetColor(color);
 	Wired_DrawPic(x, y, w, h, 0, 0, 0, 0, cgs.media.whiteShader);
 	trap_R_SetColor(NULL);
@@ -736,17 +734,16 @@ void CG_ModernHUDFillWithColor(const modernhudCoord_t* coord, const float* color
 
 qboolean CG_ModernHUDFill(const modernhudConfig_t* cfg)
 {
-	float x, y, w, h;
-	vec4_t bgColor;
 	if (!cfg->fill.isSet || !cfg->rect.isSet)
 	{
 		return qfalse;
 	}
 
-	x = cfg->rect.value[0];
-	y = cfg->rect.value[1];
-	w = cfg->rect.value[2];
-	h = cfg->rect.value[3];
+	float x = cfg->rect.value[0];
+	float y = cfg->rect.value[1];
+	float w = cfg->rect.value[2];
+	float h = cfg->rect.value[3];
+	vec4_t bgColor;
 
 	if (cfg->bgcolor.isSet)
 	{

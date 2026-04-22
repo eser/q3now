@@ -37,9 +37,7 @@ static	image_t*		hashTable[FILE_HASH_SIZE];
 ** R_GammaCorrect
 */
 void R_GammaCorrect( byte *buffer, int bufSize ) {
-	int i;
-
-	for ( i = 0; i < bufSize; i++ ) {
+	for ( int i = 0; i < bufSize; i++ ) {
 		buffer[i] = s_gammatable[buffer[i]];
 	}
 }
@@ -128,11 +126,9 @@ R_SumOfUsedImages
 ===============
 */
 int R_SumOfUsedImages( void ) {
-	int	total;
-	int i;
+	int	total = 0;
 
-	total = 0;
-	for ( i = 0; i < tr.numImages; i++ ) {
+	for ( int i = 0; i < tr.numImages; i++ ) {
 		if ( tr.images[i]->frameUsed == tr.frameCount ) {
 			total += tr.images[i]->uploadWidth * tr.images[i]->uploadHeight;
 		}
@@ -147,20 +143,17 @@ R_ImageList_f
 ===============
 */
 void R_ImageList_f( void ) {
-	int i;
 	int estTotalSize = 0;
 
 	ri.Printf(PRINT_ALL, "\n      -w-- -h-- -type-- -size- --name-------\n");
 
-	for ( i = 0 ; i < tr.numImages ; i++ )
+	for ( int i = 0 ; i < tr.numImages ; i++ )
 	{
 		image_t *image = tr.images[i];
 		const char *format = "????   ";
 		const char *sizeSuffix;
-		int estSize;
-		int displaySize;
 
-		estSize = image->uploadHeight * image->uploadWidth;
+		int estSize = image->uploadHeight * image->uploadWidth;
 
 		switch(image->internalFormat)
 		{
@@ -285,7 +278,7 @@ void R_ImageList_f( void ) {
 			estSize += estSize / 2;
 
 		sizeSuffix = "b ";
-		displaySize = estSize;
+		int displaySize = estSize;
 
 		if (displaySize > 1024)
 		{
@@ -1457,10 +1450,9 @@ static const byte	mipBlendColors[16][4] = {
 
 static void RawImage_SwizzleRA( byte *data, int width, int height )
 {
-	int i;
 	byte *ptr = data, swap;
 
-	for (i=0; i<width*height; i++, ptr+=4)
+	for (int i=0; i<width*height; i++, ptr+=4)
 	{
 		// swap red and alpha
 		swap = ptr[0];
@@ -1624,12 +1616,10 @@ static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inou
 
 static qboolean RawImage_HasAlpha(const byte *scan, int numPixels)
 {
-	int i;
-
 	if (!scan)
 		return qtrue;
 
-	for ( i = 0; i < numPixels; i++ )
+	for ( int i = 0; i < numPixels; i++ )
 	{
 		if ( scan[i*4 + 3] != 255 ) 
 		{
@@ -1855,11 +1845,10 @@ static void RawImage_UploadToRgtc2Texture(GLuint texture, int miplevel, int x, i
 		for (ix = 0; ix < width; ix += 4)
 		{
 			byte workingData[16];
-			int component;
 
 			int ow = MIN(4, width - ix);
 
-			for (component = 0; component < 2; component++)
+			for (int component = 0; component < 2; component++)
 			{
 				int ox, oy;
 
@@ -2174,9 +2163,7 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 		lastMip = !mipmap || (mipWidth == 1 && mipHeight == 1);
 		if (cubemap)
 		{
-			int i;
-
-			for (i = 0; i < 6; i++)
+			for (int i = 0; i < 6; i++)
 				qglTextureImage2DEXT(image->texnum, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, miplevel, internalFormat, mipWidth, mipHeight, 0, dataFormat, GL_UNSIGNED_BYTE, NULL);
 		}
 		else
@@ -2283,7 +2270,6 @@ static const int numImageLoaders = ARRAY_LEN( imageLoaders );
 
 static qboolean R_ShouldPreferLegacyImages( void ) {
 	char profile[16];
-	int version;
 
 	ri.Cvar_VariableStringBuffer( "com_mapAssetProfile", profile, sizeof( profile ) );
 	if ( !Q_stricmp( profile, "legacy" ) ) {
@@ -2293,7 +2279,7 @@ static qboolean R_ShouldPreferLegacyImages( void ) {
 		return qfalse;
 	}
 
-	version = ri.Cvar_VariableIntegerValue( "com_mapBspVersion" );
+	int version = ri.Cvar_VariableIntegerValue( "com_mapBspVersion" );
 	return ( version > 0 && ( version <= 46 || version == 68 ) ) ? qtrue : qfalse;
 }
 
@@ -2524,9 +2510,7 @@ image_t	*R_FindImageFile( const char *name, imgType_t type, imgFlags_t flags )
 
 					for (x = 1; x < width - 1; x++)
 					{
-						int result;
-
-						result = *(picbyte - (width + 1) * 4) + *(picbyte - width * 4) + *(picbyte - (width - 1) * 4) +
+						int result = *(picbyte - (width + 1) * 4) + *(picbyte - width * 4) + *(picbyte - (width - 1) * 4) +
 						         *(picbyte -          1  * 4) + *(picbyte            ) + *(picbyte +          1  * 4) +
 						         *(picbyte + (width - 1) * 4) + *(picbyte + width * 4) + *(picbyte + (width + 1) * 4);
 
@@ -2973,9 +2957,7 @@ R_DeleteTextures
 ===============
 */
 void R_DeleteTextures( void ) {
-	int		i;
-
-	for ( i=0; i<tr.numImages ; i++ ) {
+	for ( int i=0; i<tr.numImages ; i++ ) {
 		qglDeleteTextures( 1, &tr.images[i]->texnum );
 	}
 	memset( tr.images, 0, sizeof( tr.images ) );

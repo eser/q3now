@@ -198,8 +198,7 @@ static int wired_hudElementCount = 0;
 // ── public API ───────────────────────────────────────────────────────
 
 const wiredHudElementDef_t *WiredHud_FindElementDef( const char *name ) {
-	int i;
-	for ( i = 0; wiredHudElementDefs[i].name; i++ ) {
+	for ( int i = 0; wiredHudElementDefs[i].name; i++ ) {
 		if ( !Q_stricmp( wiredHudElementDefs[i].name, name ) ) {
 			return &wiredHudElementDefs[i];
 		}
@@ -213,7 +212,6 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 	void *ctx;
 	char familyName[64];
 	int familyIndex;
-	int i;
 
 	if ( wired_hudElementCount >= WIRED_HUD_MAX_ACTIVE_ELEMENTS ) {
 		Com_Printf( S_COLOR_YELLOW "WiredHud: too many active elements\n" );
@@ -225,7 +223,7 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 		ctx = def->create( config );
 	} else if ( WhudParseFamilyIndex( name, familyName, sizeof( familyName ), &familyIndex ) ) {
 		const wiredHudFamilyDef_t *fam = NULL;
-		for ( i = 0; wiredHudFamilyDefs[i].family; i++ ) {
+		for ( int i = 0; wiredHudFamilyDefs[i].family; i++ ) {
 			if ( !Q_stricmp( wiredHudFamilyDefs[i].family, familyName ) ) {
 				fam = &wiredHudFamilyDefs[i];
 				break;
@@ -265,8 +263,7 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 }
 
 void WiredHud_DestroyAllElements( void ) {
-	int i;
-	for ( i = 0; i < wired_hudElementCount; i++ ) {
+	for ( int i = 0; i < wired_hudElementCount; i++ ) {
 		if ( wired_hudElements[i].active && wired_hudElements[i].context ) {
 			if ( wired_hudElements[i].destroy )
 				wired_hudElements[i].destroy( wired_hudElements[i].context );
@@ -280,10 +277,7 @@ void WiredHud_DestroyAllElements( void ) {
 }
 
 void WiredHud_RenderElements( void ) {
-	int i;
 	qboolean is_dead, is_intermission, is_team_game, is_spectator, is_scores;
-	int vflags;
-	qboolean skip;
 
 	is_dead        = wiredHud->predictedPlayerState.pm_type == PM_DEAD;
 	is_intermission = wiredHud->predictedPlayerState.pm_type == PM_INTERMISSION;
@@ -291,13 +285,13 @@ void WiredHud_RenderElements( void ) {
 	is_spectator   = wired_IsSpectator();
 	is_scores      = wiredHud->showScores;
 
-	for ( i = 0; i < wired_hudElementCount; i++ ) {
+	for ( int i = 0; i < wired_hudElementCount; i++ ) {
 		wiredHudActiveElement_t *elem = &wired_hudElements[i];
 		if ( !elem->active || !elem->routine || !elem->context ) continue;
 
-		vflags = elem->visibility;
+		int vflags = elem->visibility;
 
-		skip = (!(vflags & SE_IM) && is_intermission) ||
+		qboolean skip = (!(vflags & SE_IM) && is_intermission) ||
 		       ((vflags & SE_SIDES_ONLY) && !is_team_game) ||
 		       (!(vflags & SE_DEAD) && is_dead) ||
 		       (!(vflags & SE_SPECT) && is_spectator) ||

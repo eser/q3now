@@ -230,19 +230,16 @@ static char      wui_headModelName[MAX_QPATH];
 static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t itemColor ) {
 	refdef_t    refdef;
 	refEntity_t ent;
-	char        model[MAX_QPATH];
+	char        charNameBuf[MAX_QPATH];
 	char        headPath[MAX_QPATH];
 	vec3_t      angles;
-	char       *slash;
 
-	// read model cvar (format: "model/skin")
-	Cvar_VariableStringBuffer( "model", model, sizeof( model ) );
-	slash = strchr( model, '/' );
-	if ( slash ) *slash = '\0';
-	if ( !model[0] ) Q_strncpyz( model, "sarge", sizeof( model ) );
+	// read char cvar
+	Cvar_VariableStringBuffer( "char", charNameBuf, sizeof( charNameBuf ) );
+	if ( !charNameBuf[0] ) Q_strncpyz( charNameBuf, "visor", sizeof( charNameBuf ) );
 
 	// cache head model handle
-	Com_sprintf( headPath, sizeof( headPath ), "models/players/%s/head.md3", model );
+	Com_sprintf( headPath, sizeof( headPath ), "characters/%s/models/head.md3", charNameBuf );
 	if ( Q_stricmp( headPath, wui_headModelName ) ) {
 		Q_strncpyz( wui_headModelName, headPath, sizeof( wui_headModelName ) );
 		wui_headModel = re.RegisterModel( headPath );

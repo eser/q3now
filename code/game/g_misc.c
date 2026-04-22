@@ -79,7 +79,6 @@ TELEPORTERS
 void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles ) {
 	gentity_t	*tent;
 	qboolean noAngles;
-	int i;
 
 	// release hook
 	if (player->client && player->client->hook) {
@@ -87,7 +86,7 @@ void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles ) {
 	}
 
 	// release connected hooks
-	for (i = 0 ; i < level.maxclients ; i++) {
+	for (int i = 0 ; i < level.maxclients ; i++) {
 		if (level.clients[i].pers.connected == CON_DISCONNECTED) {
 			continue;
 		}

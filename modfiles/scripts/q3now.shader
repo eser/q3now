@@ -6,28 +6,13 @@
 //   result = src_color * src_alpha + dst_color
 // The alpha channel provides the radial shape, additive ensures the
 // glow only brightens the background, never darkens it.
-gfx/loading/glow_radial
+gfx/ui/glow_radial
 {
 	sort additive
 	nopicmip
 	nomipmaps
 	{
-		map gfx/loading/glow_radial.tga
-		blendfunc GL_SRC_ALPHA GL_ONE
-		rgbGen vertex
-		alphaGen vertex
-	}
-}
-
-// ── UI radial glow ────────────────────────────────────────────────────
-// Circular gradient from white center to transparent edges.
-// Alpha-modulated additive blend: brightens the background, never darkens.
-gfx/ui/radial_glow
-{
-	nopicmip
-	nomipmaps
-	{
-		map gfx/ui/radial_glow.png
+		map gfx/ui/glow_radial.png
 		blendfunc GL_SRC_ALPHA GL_ONE
 		rgbGen vertex
 		alphaGen vertex
@@ -153,6 +138,64 @@ lfPowerupGlow
 		alphagen vertex
 		rgbgen vertex
 		tcmod turb 0 0.05 0 0.3
+	}
+}
+
+// Bright Arena Lens Flares
+bfgLFStar
+{
+	sort nearest
+	{
+		map sprites/bfglfstar.tga
+		blendfunc gl_src_alpha gl_one
+		alphagen vertex
+	}
+}
+
+bfgLFGlare
+{
+	sort nearest
+	{
+		map sprites/bfglfglare.tga
+		blendfunc gl_src_alpha gl_one
+		alphagen vertex
+		rgbgen vertex
+	}
+}
+
+bfgLFDisc
+{
+	sort nearest
+	{
+		map sprites/bfglfdisc.tga
+		blendfunc gl_src_alpha gl_one
+		alphagen vertex
+		rgbgen vertex
+	}
+}
+
+bfgLFRing
+{
+	sort nearest
+	{
+		map sprites/bfglfring.tga
+		blendfunc gl_src_alpha gl_one
+		alphagen vertex
+		rgbgen vertex
+	}
+}
+
+bfgLFLine
+{
+	nomipmaps
+	nopicmip
+	sort nearest
+	{
+		clampmap sprites/bfglfline.tga
+		blendfunc gl_src_alpha gl_one
+		alphagen vertex
+		rgbgen vertex
+		tcmod transform 1 0 0 64 0 -31.5
 	}
 }
 
@@ -314,5 +357,27 @@ lightningArc
 		rgbGen wave sawtooth 0.3 0.7 0 7
 		tcMod scroll -3.0 0
 		tcMod scale 1.0 1
+	}
+}
+
+// ── Glass Cloaking ──────────────────────────────────────────────────
+powerups/glassCloaking
+{
+	sort portal
+	{
+		map $whiteimage
+		blendfunc gl_zero gl_one
+		depthwrite
+	}
+}
+
+powerups/glassCloakingSpecular
+{
+	{
+		map textures/effects/invismap.tga
+		blendfunc gl_src_alpha gl_one
+		alphagen entity
+		tcmod turb 0 0.15 0 0.25
+		tcgen environment
 	}
 }

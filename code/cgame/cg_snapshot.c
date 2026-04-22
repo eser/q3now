@@ -81,7 +81,6 @@ All other times will use CG_TransitionSnapshot instead.
 ==================
 */
 void CG_SetInitialSnapshot( snapshot_t *snap ) {
-	int				i;
 	centity_t		*cent;
 	entityState_t	*state;
 
@@ -98,7 +97,7 @@ void CG_SetInitialSnapshot( snapshot_t *snap ) {
 	// what the server has indicated the current weapon is
 	CG_Respawn();
 
-	for ( i = 0 ; i < cg.snap->numEntities ; i++ ) {
+	for ( int i = 0 ; i < cg.snap->numEntities ; i++ ) {
 		state = &cg.snap->entities[ i ];
 		cent = &cg_entities[ state->number ];
 

@@ -47,13 +47,12 @@ static int	c_gridVerts;
 
 static void HSVtoRGB( float h, float s, float v, float rgb[3] )
 {
-	int i;
 	float f;
 	float p, q, t;
 
 	h *= 5;
 
-	i = floor( h );
+	int i = floor( h );
 	f = h - i;
 
 	p = v * ( 1 - s );
@@ -943,7 +942,6 @@ ParseFlare
 */
 static void ParseFlare( const dsurface_t *ds, msurface_t *surf ) {
 	srfFlare_t		*flare;
-	int				i;
 
 	// get shader
 	surf->shader = ShaderForShaderNum( LittleLong( ds->shaderNum ), LIGHTMAP_BY_VERTEX );
@@ -953,7 +951,7 @@ static void ParseFlare( const dsurface_t *ds, msurface_t *surf ) {
 
 	surf->data = (surfaceType_t *)flare;
 
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		flare->origin[i] = LittleFloat( ds->lightmapOrigin[i] );
 		flare->color[i] = LittleFloat( ds->lightmapVecs[0][i] );
 		flare->normal[i] = R_ClampDenorm( LittleFloat( ds->lightmapVecs[2][i] ) );
@@ -1128,10 +1126,9 @@ If this is not the case this function will still do its job but won't fix the hi
 =================
 */
 static void R_FixSharedVertexLodError( void ) {
-	int i;
 	srfGridMesh_t *grid1;
 
-	for ( i = 0; i < s_worldData.numsurfaces; i++ ) {
+	for ( int i = 0; i < s_worldData.numsurfaces; i++ ) {
 		//
 		grid1 = (srfGridMesh_t *) s_worldData.surfaces[i].data;
 		// if this surface is not a grid
@@ -1626,7 +1623,6 @@ static void R_StitchAllPatches( void ) {
 		}
 	}
 	while (stitched);
-	ri.Printf( PRINT_DEVELOPER, "stitched %d LoD cracks\n", numstitches );
 }
 
 
@@ -1783,13 +1779,10 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 	R_MovePatchSurfacesToHunk();
 #endif
 
-	ri.Printf( PRINT_DEVELOPER, "...loaded %d faces, %i meshes, %i trisurfs, %i flares\n",
-		numFaces, numMeshes, numTriSurfs, numFlares );
 }
 
 
 /*
-=================
 R_LoadSubmodels
 =================
 */

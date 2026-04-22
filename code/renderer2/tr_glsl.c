@@ -645,10 +645,8 @@ static int GLSL_InitGPUShader(shaderProgram_t * program, const char *name,
 	char vpCode[32000];
 	char fpCode[32000];
 	char *postHeader;
-	int size;
-	int result;
 
-	size = sizeof(vpCode);
+	int size = sizeof(vpCode);
 	if (addHeader)
 	{
 		GLSL_GetShaderHeader(GL_VERTEX_SHADER, extra, vpCode, size);
@@ -685,7 +683,7 @@ static int GLSL_InitGPUShader(shaderProgram_t * program, const char *name,
 		}
 	}
 
-	result = GLSL_InitGPUShader2(program, name, attribs, vpCode, fragmentShader ? fpCode : NULL);
+	int result = GLSL_InitGPUShader2(program, name, attribs, vpCode, fragmentShader ? fpCode : NULL);
 
 	return result;
 }

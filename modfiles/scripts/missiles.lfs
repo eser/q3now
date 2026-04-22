@@ -1,0 +1,12 @@
+missile_rocket_launcher
+// this is a directed light (spotlight)
+{
+	range -220
+	fadeAngle 45
+	{
+		shader bfglfstar
+		mode star
+		rotation 0 0 0 0
+		size 0.5
+	}
+}

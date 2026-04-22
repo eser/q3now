@@ -38,7 +38,7 @@ Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // Set to 1 to enable per-function diagnostic prints during loading.
 // Remove or set to 0 once debugging is complete.
-#define LOADING_DIAG 1
+#define LOADING_DIAG 0
 
 #define LOADING_WIREFRAME_MAX_DRAW_EDGES    4096
 #define LOADING_WIREFRAME_MAX_DRAW_MARKERS   128
@@ -145,12 +145,11 @@ Fade-aware string draw. Multiplies text color alpha by fade factor.
 static void Loading_DrawStringFaded( int x, int y, float charSize,
 									 const char *text, const float *rgba ) {
 	vec4_t color;
-	int flags;
 	color[0] = rgba[0];
 	color[1] = rgba[1];
 	color[2] = rgba[2];
 	color[3] = ( cl_loadFadeAlpha >= 1.0f ) ? rgba[3] : rgba[3] * cl_loadFadeAlpha;
-	flags = TEXT_FORCECOLOR;
+	int flags = TEXT_FORCECOLOR;
 	if ( !cl_loadFading && cl_loadFadeAlpha >= 1.0f ) {
 		flags |= TEXT_DROPSHADOW;
 	}
@@ -200,7 +199,7 @@ static float Loading_LerpValue( float current, float target ) {
 Loading_DrawRadialGlow
 
 Draws a radial glow using a pre-baked falloff texture
-(gfx/loading/glow_radial — white center, transparent edge).
+(gfx/ui/glow_radial — white center, transparent edge).
 Color-modulated via re.SetColor, drawn with SCR_DrawPic.
 Single draw call per glow.
 ================
@@ -250,7 +249,6 @@ All coordinates are viewport-relative (real screen pixels).
 static void Loading_DrawBackground( void ) {
 	float vpW = (float)cls.glconfig.vidWidth;
 	float vpH = (float)cls.glconfig.vidHeight;
-	float y;
 	vec4_t gridLine;
 	// Exact spec colors — no amplification
 	static const float rightGlowRGB[3] = {
@@ -260,7 +258,7 @@ static void Loading_DrawBackground( void ) {
 	// Re-register every frame — Hunk_ClearLevel between maps invalidates
 	// cached handles, and RegisterShaderNoMip is a fast hash lookup
 	// when the shader is already loaded.
-	s_glowShader = re.RegisterShaderNoMip( "gfx/loading/glow_radial" );
+	s_glowShader = re.RegisterShaderNoMip( "gfx/ui/glow_radial" );
 
 	// --- 1. Full-screen dark background ---
 	Loading_FillRect( 0, 0, vpW, vpH, cl_loadingTheme.bgColor );
@@ -289,7 +287,7 @@ static void Loading_DrawBackground( void ) {
 
 	{
 		float spacing = vpH * 0.04f;
-		for ( y = 0; y < vpH; y += spacing ) {
+		for ( float y = 0; y < vpH; y += spacing ) {
 			Loading_FillRect( 0, y, vpW, 1, gridLine );
 		}
 	}
@@ -316,9 +314,6 @@ static void Loading_DrawTopBar( void ) {
 	vec4_t white = { 1.0f, 1.0f, 1.0f, 0.8f };
 	vec4_t muted = { 1.0f, 1.0f, 1.0f, 0.5f };
 	char info[256];
-	const char *gtName;
-	int scorelimit, timelimit, gt;
-	float px;
 	const char *serverInfo = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
 
 	// Dark semi-transparent bar
@@ -329,9 +324,10 @@ static void Loading_DrawTopBar( void ) {
 					   cl_loadingTheme.accentColor );
 
 	// Separator dot and gametype + limits
-	gt = atoi( Info_ValueForKey( serverInfo, "g_gametype" ) );
-	scorelimit = atoi( Info_ValueForKey( serverInfo, "g_scorelimit" ) );
-	timelimit = atoi( Info_ValueForKey( serverInfo, "g_timelimit" ) );
+	int gt = atoi( Info_ValueForKey( serverInfo, "g_gametype" ) );
+	int scorelimit = atoi( Info_ValueForKey( serverInfo, "g_scorelimit" ) );
+	int timelimit = atoi( Info_ValueForKey( serverInfo, "g_timelimit" ) );
+	const char *gtName;
 
 	if ( gt >= 0 && gt < GT_MAX_GAME_TYPE ) {
 		gtName = bg_gametypelist[gt].name;
@@ -352,7 +348,7 @@ static void Loading_DrawTopBar( void ) {
 	}
 
 	// Draw info string after "q3now" label
-	px = pad + 5 * fontSize + vpW * 0.006f;  // after "q3now" (5 chars) + small gap
+	float px = pad + 5 * fontSize + vpW * 0.006f;  // after "q3now" (5 chars) + small gap
 	Loading_DrawStringFaded( (int)px, (int)pad, fontSize, info, muted );
 
 	// // Bot difficulty dots (right side) — if g_autoBots is set
@@ -456,7 +452,6 @@ static void Loading_DrawWireframe( void ) {
 	const float fitY = panelY + ( panelH - fitSize ) * 0.5f;
 	float scaleX, scaleY, scale, offX, offY;
 	float rangeX, rangeY;
-	int i;
 	// Use Sys_Milliseconds() instead of cls.realtime for animations.
 	// During server loading, cls.realtime is frozen (only updated in
 	// CL_Frame which doesn't run during loading yield points).
@@ -515,7 +510,7 @@ static void Loading_DrawWireframe( void ) {
 				LOADING_WIREFRAME_MAX_DRAW_EDGES;
 		}
 
-		for ( i = 0; i < cl_bspPreview.numEdges; i += edgeStep ) {
+		for ( int i = 0; i < cl_bspPreview.numEdges; i += edgeStep ) {
 			const bspPreviewEdge_t *e = &cl_bspPreview.edges[i];
 			float ex1 = offX + ( e->x1 - cl_bspPreview.minX ) * scale;
 			float ey1 = offY + ( e->y1 - cl_bspPreview.minY ) * scale;
@@ -560,7 +555,7 @@ static void Loading_DrawWireframe( void ) {
 		markerStep = ( cl_bspPreview.numMarkers + LOADING_WIREFRAME_MAX_DRAW_MARKERS - 1 ) /
 			LOADING_WIREFRAME_MAX_DRAW_MARKERS;
 	}
-	for ( i = 0; i < cl_bspPreview.numMarkers; i += markerStep ) {
+	for ( int i = 0; i < cl_bspPreview.numMarkers; i += markerStep ) {
 		const bspPreviewMarker_t *m = &cl_bspPreview.markers[i];
 		float rawX = offX + ( m->x - cl_bspPreview.minX ) * scale;
 		float rawY = offY + ( m->y - cl_bspPreview.minY ) * scale;
@@ -570,9 +565,8 @@ static void Loading_DrawWireframe( void ) {
 		switch ( m->type ) {
 		case 0: { // spawn — yellow circle (12-segment approximation)
 			vec4_t spawnColor = { 1.0f, 0.85f, 0.2f, 0.9f };
-			int seg;
 			Loading_SetColor( spawnColor );
-			for ( seg = 0; seg < 12; seg++ ) {
+			for ( int seg = 0; seg < 12; seg++ ) {
 				float a0 = ( M_PI * 2.0f / 12 ) * seg;
 				float a1 = ( M_PI * 2.0f / 12 ) * ( seg + 1 );
 				Loading_DrawLine( mx + cos(a0) * markerR1, my + sin(a0) * markerR1,
@@ -584,9 +578,8 @@ static void Loading_DrawWireframe( void ) {
 		}
 		case 1: { // item — red circle (12-segment)
 			vec4_t itemColor = { 1.0f, 0.3f, 0.2f, 0.8f };
-			int seg;
 			Loading_SetColor( itemColor );
-			for ( seg = 0; seg < 12; seg++ ) {
+			for ( int seg = 0; seg < 12; seg++ ) {
 				float a0 = ( M_PI * 2.0f / 12 ) * seg;
 				float a1 = ( M_PI * 2.0f / 12 ) * ( seg + 1 );
 				Loading_DrawLine( mx + cos(a0) * markerR2, my + sin(a0) * markerR2,
@@ -619,11 +612,10 @@ static void Loading_DrawWireframe( void ) {
 		float legendGap = vpW * 0.025f;   // gap between icon and text
 		float ly = panelY + panelH + vpH * 0.033f;
 		float lx = vpW * 0.019f;
-		int seg;
 
 		// Spawn: yellow circle
 		Loading_SetColor( spawnYellow );
-		for ( seg = 0; seg < 12; seg++ ) {
+		for ( int seg = 0; seg < 12; seg++ ) {
 			float a0 = ( M_PI * 2.0f / 12 ) * seg;
 			float a1 = ( M_PI * 2.0f / 12 ) * ( seg + 1 );
 			Loading_DrawLine( lx + cos(a0) * legendR1, ly + sin(a0) * legendR1,
@@ -638,10 +630,9 @@ static void Loading_DrawWireframe( void ) {
 		lx += vpW * 0.125f;
 		Loading_SetColor( itemRed );
 		{
-			float r;
 			float ringStep = legendR2 / 3.0f;
-			for ( r = legendR2; r >= ringStep; r -= ringStep ) {
-				for ( seg = 0; seg < 12; seg++ ) {
+			for ( float r = legendR2; r >= ringStep; r -= ringStep ) {
+				for ( int seg = 0; seg < 12; seg++ ) {
 					float a0 = ( M_PI * 2.0f / 12 ) * seg;
 					float a1 = ( M_PI * 2.0f / 12 ) * ( seg + 1 );
 					Loading_DrawLine( lx + cos(a0) * r, ly + sin(a0) * r,
@@ -668,7 +659,7 @@ static void Loading_DrawWireframe( void ) {
 
 	// Console diagnostic: print once per map load
 	if ( !s_wireframeDiagPrinted ) {
-		Com_Printf( "WIREFRAME: %d surfaces, %d segments, %d markers\n",
+		Com_DPrintf( "WIREFRAME: %d surfaces, %d segments, %d markers\n",
 			cl_bspPreview.numSurfaces, cl_bspPreview.numEdges,
 			cl_bspPreview.numMarkers );
 		s_wireframeDiagPrinted = qtrue;
@@ -711,20 +702,16 @@ static void Loading_DrawMapInfo( void ) {
 	vec4_t quoteBorder = { 0.10f, 0.23f, 0.32f, 1.00f };  // #1a3a52
 	vec4_t cellBorder = { 0.12f, 0.23f, 0.29f, 1.00f };  // #1e3a4a
 	vec4_t labelMuted = { 0.29f, 0.42f, 0.53f, 1.00f };  // #4a6a88
-	const char *name;
-	int gt;
-	const char *gtName;
-	const char *archName;
-
 	// --- Archetype tag (small label, cyan) ---
 	// Format: "GAMETYPE | ARCHETYPE"
-	gt = atoi( Info_ValueForKey( info, "g_gametype" ) );
+	int gt = atoi( Info_ValueForKey( info, "g_gametype" ) );
+	const char *gtName;
 	if ( gt >= 0 && gt < GT_MAX_GAME_TYPE ) {
 		gtName = bg_gametypelist[gt].name;
 	} else {
 		gtName = "DEATHMATCH";
 	}
-	archName = cl_mapInfo.archetype[0] ? cl_mapInfo.archetype : "TECH";
+	const char *archName = cl_mapInfo.archetype[0] ? cl_mapInfo.archetype : "TECH";
 	{
 		char tagLine[128];
 		char gtUpper[64];
@@ -744,11 +731,7 @@ static void Loading_DrawMapInfo( void ) {
 		char mapUp[128];
 		char shortUp[64];
 		const char *mapCvar = Info_ValueForKey( info, "mapname" );
-		const char *shortName;
-		int nameLen;
-		float charSize;
-
-		shortName = ( mapCvar && mapCvar[0] ) ? mapCvar : cl_mapInfo.mapName;
+		const char *shortName = ( mapCvar && mapCvar[0] ) ? mapCvar : cl_mapInfo.mapName;
 
 		if ( shortName[0] && cl_mapInfo.longName[0] ) {
 			Q_strncpyz( shortUp, shortName, sizeof(shortUp) );
@@ -762,9 +745,10 @@ static void Loading_DrawMapInfo( void ) {
 		} else {
 			Q_strncpyz( mapUp, "LOADING", sizeof(mapUp) );
 		}
-		nameLen = (int)strlen( mapUp );
+		int nameLen = (int)strlen( mapUp );
 
 		// Progressive scaling to fit panel width
+		float charSize;
 		if ( nameLen > 18 ) {
 			charSize = LOADING_FONT_TITLE * 0.625f;  // was 10/16
 		} else if ( nameLen > 12 ) {
@@ -828,7 +812,6 @@ static void Loading_DrawMapInfo( void ) {
 		float cellW = rw / 3.0f;
 		float cellH = vpH * 0.1f;  // was 48/480
 		char stat[32];
-		int col;
 
 		// Per-column accent colors (border at 15% alpha, bg at 6% alpha)
 		vec4_t colBorder[3] = {
@@ -870,7 +853,7 @@ static void Loading_DrawMapInfo( void ) {
 		values[2] = statBufs[2];
 
 		// Draw each cell
-		for ( col = 0; col < 3; col++ ) {
+		for ( int col = 0; col < 3; col++ ) {
 			float cx = rx + col * cellW;
 			int valLen = (int)strlen( values[col] );
 			int lblLen = (int)strlen( labels[col] );
@@ -913,9 +896,6 @@ static void Loading_DrawStreamingRow( float x, float y, float width,
 	vec4_t barBg      = { 1.00f, 1.00f, 1.00f, 0.05f };   // rgba(1,1,1,0.05)
 	vec4_t barFg      = { 0.00f, 0.706f, 0.847f, 0.90f };  // #00b4d8 @ 90%
 	char pctStr[8];
-	int pctLen;
-	float barY;
-	float fgWidth;
 
 	// Reset any leaked color state from prior draw calls
 	Loading_SetColor( NULL );
@@ -925,14 +905,14 @@ static void Loading_DrawStreamingRow( float x, float y, float width,
 
 	// Percentage on right in cyan
 	Com_sprintf( pctStr, sizeof(pctStr), "%d%%", (int)( pct * 100.0f ) );
-	pctLen = (int)strlen( pctStr );
+	int pctLen = (int)strlen( pctStr );
 	Loading_DrawStringFaded( (int)( x + width - pctLen * LOADING_FONT_LABEL ), (int)y, LOADING_FONT_LABEL,
 					   pctStr, pctColor );
 
 	// 2px progress bar below label baseline
-	barY = y + vpH * 0.029f;  // was 14/480
+	float barY = y + vpH * 0.029f;  // was 14/480
 	Loading_FillRect( x, barY, width, 2, barBg );
-	fgWidth = pct * width;
+	float fgWidth = pct * width;
 	if ( fgWidth > 0.5f ) {
 		Loading_FillRect( x, barY, fgWidth, 2, barFg );
 	}
@@ -1003,8 +983,6 @@ static void Loading_DrawOverallBar( void ) {
 	vec4_t phaseColor = { 0.16f, 0.29f, 0.41f, 1.00f };  // #2a4a68
 	vec4_t barBg      = { 1.00f, 1.00f, 1.00f, 0.04f };   // rgba(1,1,1,0.04)
 	vec4_t barFg      = { 0.00f, 0.71f, 0.85f, 1.00f };   // #00b4d8
-	float barY;
-	float fgWidth;
 
 	// Phase label
 	if ( cl_loadProgress.phase && cl_loadProgress.phase[0] ) {
@@ -1016,9 +994,9 @@ static void Loading_DrawOverallBar( void ) {
 	s_dispOverall = Loading_LerpValue( s_dispOverall, cl_loadProgress.overall );
 
 	// 3px overall progress bar below the phase label
-	barY = by + vpH * 0.029f;
+	float barY = by + vpH * 0.029f;
 	Loading_FillRect( rx, barY, rw, 3, barBg );
-	fgWidth = s_dispOverall * rw;
+	float fgWidth = s_dispOverall * rw;
 	if ( fgWidth > 0.5f ) {
 		Loading_FillRect( rx, barY, fgWidth, 3, barFg );
 	}
@@ -1049,14 +1027,13 @@ static void Loading_DrawVulkanBadge( void ) {
 #endif
 	vec4_t dotCyan = { 0.00f, 0.71f, 0.85f, 1.00f };  // #00b4d8
 	vec4_t textColor = { 0.23f, 0.35f, 0.47f, 1.00f };  // #3a5a78
-	const char *verStr;
-	char buf[64];
 
 	// Small cyan dot (circle simulated as filled rect)
 	Loading_FillRect( rx, by + 1, dotSize, dotSize, dotCyan );
 
 	// Build version string: "Vulkan X.Y.Z | GPU-driven particles"
-	verStr = cls.glconfig.version_string;
+	const char *verStr = cls.glconfig.version_string;
+	char buf[64];
 	if ( verStr && verStr[0] ) {
 		Com_sprintf( buf, sizeof(buf), "%s | GPU-driven particles", verStr );
 	} else {
@@ -1081,8 +1058,6 @@ static void Loading_DrawServerInfoStrip( void ) {
 	const float rx = vpW * 0.542f;     // right panel x (matches other right-panel helpers)
 	const float rw = vpW * 0.436f;     // right panel usable width
 	float y = vpH * 0.63f;
-	const char *info, *sysInfo, *motd, *hostname, *pureFl;
-	char cleanHost[256];
 	vec4_t hostColor = { 0.91f, 0.96f, 0.99f, 0.70f };   // near-white @ 70%
 	vec4_t pureColor = { 0.00f, 0.71f, 0.85f, 0.80f };   // cyan accent
 	vec4_t motdColor = { 0.29f, 0.42f, 0.53f, 0.80f };   // muted blue
@@ -1091,19 +1066,20 @@ static void Loading_DrawServerInfoStrip( void ) {
 		return;
 	}
 
-	info    = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
-	sysInfo = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SYSTEMINFO];
-	motd    = cl.gameState.stringData + cl.gameState.stringOffsets[CS_MOTD];
+	const char *info    = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
+	const char *sysInfo = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SYSTEMINFO];
+	const char *motd    = cl.gameState.stringData + cl.gameState.stringOffsets[CS_MOTD];
 
-	hostname = Info_ValueForKey( info, "sv_hostname" );
+	const char *hostname = Info_ValueForKey( info, "sv_hostname" );
 	if ( hostname && hostname[0] ) {
+		char cleanHost[256];
 		Q_strncpyz( cleanHost, hostname, sizeof( cleanHost ) );
 		Q_CleanStr( cleanHost );
 		Loading_DrawStringFaded( (int)rx, (int)y, LOADING_FONT_LABEL, cleanHost, hostColor );
 		y += LOADING_FONT_LABEL * 1.6f;
 	}
 
-	pureFl = Info_ValueForKey( sysInfo, "sv_pure" );
+	const char *pureFl = Info_ValueForKey( sysInfo, "sv_pure" );
 	if ( pureFl && pureFl[0] == '1' ) {
 		Loading_DrawStringFaded( (int)rx, (int)y, LOADING_FONT_SMALL, "PURE SERVER", pureColor );
 		y += LOADING_FONT_SMALL * 1.6f;

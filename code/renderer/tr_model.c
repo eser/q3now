@@ -86,7 +86,7 @@ static qhandle_t R_RegisterMD3(const char *name, model_t *mod)
 	if ( mod->numLods )
 		return mod->index;
 
-	ri.Printf( PRINT_DEVELOPER, S_COLOR_YELLOW "%s: couldn't load %s\n", __func__, name );
+	ri.AssetLog_Event( "model", filename, fext, NULL, ASSET_LOG_WARN );
 
 	mod->type = MOD_BAD;
 	return 0;
@@ -128,7 +128,7 @@ static qhandle_t R_RegisterMDR(const char *name, model_t *mod)
 	
 	if ( !loaded )
 	{
-		ri.Printf( PRINT_WARNING, "%s: couldn't load %s\n", __func__, name );
+		ri.Printf( PRINT_DEVELOPER, "%s: couldn't load %s\n", __func__, name );
 		mod->type = MOD_BAD;
 		return 0;
 	}
@@ -165,7 +165,7 @@ static qhandle_t R_RegisterIQM(const char *name, model_t *mod)
 
 	if ( !loaded )
 	{
-		ri.Printf( PRINT_WARNING, "%s: couldn't load %s\n", __func__, name );
+		ri.Printf( PRINT_DEVELOPER, "%s: couldn't load %s\n", __func__, name );
 		mod->type = MOD_BAD;
 		return 0;
 	}
@@ -347,8 +347,9 @@ qhandle_t RE_RegisterModel( const char *name ) {
 		{
 			if( orgNameFailed )
 			{
-				ri.Printf( PRINT_DEVELOPER, "WARNING: %s not present, using %s instead\n",
-						name, altName );
+				char fbBuf[32];
+				Com_sprintf( fbBuf, sizeof(fbBuf), "%s>%s", modelLoaders[orgLoader].ext, modelLoaders[i].ext );
+				ri.AssetLog_Event( "model", localName, fbBuf, NULL, ASSET_LOG_INFO );
 			}
 
 			break;

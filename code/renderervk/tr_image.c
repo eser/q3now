@@ -47,14 +47,13 @@ return a hash value for the filename
 ** R_GammaCorrect
 */
 void R_GammaCorrect( byte *buffer, int bufSize ) {
-	int i;
 #ifdef USE_VULKAN
 	if ( vk.capture.image != VK_NULL_HANDLE )
 		return;
 	if ( !gls.deviceSupportsGamma )
 		return;
 #endif
-	for ( i = 0; i < bufSize; i++ ) {
+	for ( int i = 0; i < bufSize; i++ ) {
 		buffer[i] = s_gammatable[buffer[i]];
 	}
 }
@@ -558,12 +557,10 @@ static void R_BlendOverTexture( byte *data, int pixelCount, int mipLevel ) {
 
 static qboolean RawImage_HasAlpha( const byte *scan, const int numPixels )
 {
-	int i;
-
 	if ( !scan )
 		return qtrue;
 
-	for ( i = 0; i < numPixels; i++ )
+	for ( int i = 0; i < numPixels; i++ )
 	{
 		if ( scan[i*4 + 3] != 255 )
 		{
@@ -1289,6 +1286,34 @@ Finds or loads the given image.
 Returns NULL if it fails, not a default image.
 ==============
 */
+/* Dedup cache for mixed-flags warnings — warn once per (image, flagPair) per session. */
+#define MIXED_FLAGS_CACHE_SIZE 64
+static struct {
+	unsigned int nameHash;
+	imgFlags_t   storedFlags;
+	imgFlags_t   requestedFlags;
+	qboolean     used;
+} s_mixedFlagsCache[ MIXED_FLAGS_CACHE_SIZE ];
+
+static qboolean MixedFlagsWarnOnce( const char *name, imgFlags_t storedFlags, imgFlags_t requestedFlags ) {
+	unsigned int h = 0;
+	const char *p = name;
+	while ( *p ) h = h * 31 + (unsigned char)*p++;
+	unsigned int slot = ( h ^ (unsigned int)storedFlags ^ (unsigned int)requestedFlags ) % MIXED_FLAGS_CACHE_SIZE;
+	/* linear probe */
+	for ( int i = 0; i < MIXED_FLAGS_CACHE_SIZE; i++ ) {
+		int idx = ( slot + i ) % MIXED_FLAGS_CACHE_SIZE;
+		struct { unsigned int nameHash; imgFlags_t storedFlags, requestedFlags; qboolean used; } *e = &s_mixedFlagsCache[idx];
+		if ( !e->used ) {
+			e->nameHash = h; e->storedFlags = storedFlags; e->requestedFlags = requestedFlags; e->used = qtrue;
+			return qtrue;
+		}
+		if ( e->nameHash == h && e->storedFlags == storedFlags && e->requestedFlags == requestedFlags )
+			return qfalse;
+	}
+	return qtrue; /* cache full — allow through */
+}
+
 image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 {
 	image_t	*image;
@@ -1312,7 +1337,8 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			// the white image can be used with any set of parms, but other mismatches are errors
 			if ( strcmp( name, "*white" ) ) {
 				if ( image->flags != flags ) {
-					ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
+					if ( MixedFlagsWarnOnce( name, image->flags, flags ) )
+						ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
 				}
 			}
 			return image;
@@ -1326,7 +1352,8 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			if ( !Q_stricmp( strippedName, image->imgName ) ) {
 				//if ( strcmp( strippedName, "*white" ) ) {
 					if ( image->flags != flags ) {
-						ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
+						if ( MixedFlagsWarnOnce( strippedName, image->flags, flags ) )
+							ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
 					}
 				//}
 				return image;
@@ -1343,9 +1370,8 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	}
 
 	if ( tr.mapLoading && r_mapGreyScale->value > 0 ) {
-		byte *img;
-		int i;
-		for ( i = 0, img = pic; i < width * height; i++, img += 4 ) {
+		byte *img = pic;
+		for ( int i = 0; i < width * height; i++, img += 4 ) {
 			if ( r_mapGreyScale->integer ) {
 				byte luma = LUMA( img[0], img[1], img[2] );
 				img[0] = luma;
@@ -1406,13 +1432,12 @@ R_InitFogTable
 =================
 */
 void R_InitFogTable( void ) {
-	int		i;
 	float	d;
 	float	exp;
 
 	exp = 0.5;
 
-	for ( i = 0 ; i < FOG_TABLE_SIZE ; i++ ) {
+	for ( int i = 0 ; i < FOG_TABLE_SIZE ; i++ ) {
 		d = powf( (float)i/(FOG_TABLE_SIZE-1), exp );
 
 		tr.fogTable[i] = d;
@@ -1802,9 +1827,7 @@ void R_InitImages( void ) {
 
 #ifdef USE_VULKAN
 	// initialize linear gamma table before setting color mappings for the first time
-	int i;
-
-	for ( i = 0; i < 256; i++ )
+	for ( int i = 0; i < 256; i++ )
 		s_gammatable_linear[i] = (unsigned char)i;
 #endif
 

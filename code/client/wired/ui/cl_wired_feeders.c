@@ -49,8 +49,8 @@ static void WiredFeeder_GetServerList( serverInfo_t **servers, int *count ) {
 }
 
 static serverInfo_t *WiredFeeder_GetServerPtr( int index ) {
-	serverInfo_t *servers;
-	int count;
+	serverInfo_t *servers = NULL;
+	int count = 0;
 
 	WiredFeeder_GetServerList( &servers, &count );
 
@@ -80,11 +80,11 @@ static qboolean WiredFeeder_ServerPassesFilter( serverInfo_t *s ) {
 
 void WiredFeeder_RebuildServerDisplayList( void ) {
 	serverInfo_t *servers;
-	int count, i;
+	int count;
 	WiredFeeder_GetServerList( &servers, &count );
 
 	wui_serverDisplayCount = 0;
-	for ( i = 0; i < count && wui_serverDisplayCount < MAX_DISPLAY_SERVERS; i++ ) {
+	for ( int i = 0; i < count && wui_serverDisplayCount < MAX_DISPLAY_SERVERS; i++ ) {
 		if ( WiredFeeder_ServerPassesFilter( &servers[i] ) ) {
 			wui_serverDisplayList[wui_serverDisplayCount++] = i;
 		}
@@ -102,8 +102,8 @@ void WiredFeeder_RebuildServerDisplayList( void ) {
 }
 
 static int WiredFeeder_ServerCount( int feederID ) {
-	serverInfo_t *servers;
-	int count;
+	serverInfo_t *servers = NULL;
+	int count = 0;
 	WiredFeeder_GetServerList( &servers, &count );
 
 	// rebuild display list when server count changes (new pings arrived)
@@ -116,13 +116,11 @@ static int WiredFeeder_ServerCount( int feederID ) {
 
 static const char *WiredFeeder_ServerItemText( int feederID, int index, int column ) {
 	static char buf[256];
-	int realIndex;
-	serverInfo_t *s;
 
 	// map display index → real server index via sorted display list
 	if ( index < 0 || index >= wui_serverDisplayCount ) return "";
-	realIndex = wui_serverDisplayList[index];
-	s = WiredFeeder_GetServerPtr( realIndex );
+	int realIndex = wui_serverDisplayList[index];
+	serverInfo_t *s = WiredFeeder_GetServerPtr( realIndex );
 
 	if ( !s ) return "";
 
@@ -160,17 +158,16 @@ static int wui_serverSortKey = SORT_PING;
 static int wui_serverSortDir = 0;  // 0=ascending, 1=descending
 
 static int WiredFeeder_ServerSortCompare( const void *a, const void *b ) {
-	serverInfo_t *servers;
-	int count;
+	serverInfo_t *servers = NULL;
+	int count = 0;
 	int ia = *(const int *)a;
 	int ib = *(const int *)b;
-	serverInfo_t *sa, *sb;
-	int result;
 
 	WiredFeeder_GetServerList( &servers, &count );
 	if ( ia < 0 || ia >= count || ib < 0 || ib >= count ) return 0;
-	sa = &servers[ia];
-	sb = &servers[ib];
+	serverInfo_t *sa = &servers[ia];
+	serverInfo_t *sb = &servers[ib];
+	int result;
 
 	switch ( wui_serverSortKey ) {
 		case SORT_HOST:    result = Q_stricmp( sa->hostName, sb->hostName ); break;
@@ -185,8 +182,8 @@ static int WiredFeeder_ServerSortCompare( const void *a, const void *b ) {
 }
 
 void WiredFeeder_SortServers( int column ) {
-	serverInfo_t *servers;
-	int count, i;
+	serverInfo_t *servers = NULL;
+	int count = 0;
 
 	// toggle direction if clicking same column
 	if ( column == wui_serverSortKey ) {
@@ -200,7 +197,7 @@ void WiredFeeder_SortServers( int column ) {
 
 	// build display list
 	wui_serverDisplayCount = 0;
-	for ( i = 0; i < count && i < MAX_DISPLAY_SERVERS; i++ ) {
+	for ( int i = 0; i < count && i < MAX_DISPLAY_SERVERS; i++ ) {
 		wui_serverDisplayList[wui_serverDisplayCount++] = i;
 	}
 
@@ -216,8 +213,7 @@ void WiredFeeder_SortServers( int column ) {
 	// set per-column indicator cvars (arrow for active column, empty for others)
 	{
 		const char *arrow = wui_serverSortDir ? "v" : "^";
-		int col;
-		for ( col = 0; col < 5; col++ ) {
+		for ( int col = 0; col < 5; col++ ) {
 			WiredFeeder_StateSetString( va( "ui_sortInd%d", col ),
 				( col == wui_serverSortKey ) ? arrow : "" );
 		}
@@ -248,18 +244,15 @@ static int   wui_demoCount = 0;
 
 void WiredFeeder_LoadDemos( void ) {
 	char listBuf[8192];
-	int numFiles, i;
-	char *namePtr;
-	const char *ext;
 
 	wui_demoCount = 0;
 
 	// try current protocol demo extension
-	ext = va( ".dm_%d", PROTOCOL_VERSION );
-	numFiles = FS_GetFileList( "demos", ext, listBuf, sizeof( listBuf ) );
+	const char *ext = va( ".dm_%d", PROTOCOL_VERSION );
+	int numFiles = FS_GetFileList( "demos", ext, listBuf, sizeof( listBuf ) );
 
-	namePtr = listBuf;
-	for ( i = 0; i < numFiles && wui_demoCount < MAX_WIRED_DEMOS; i++ ) {
+	char *namePtr = listBuf;
+	for ( int i = 0; i < numFiles && wui_demoCount < MAX_WIRED_DEMOS; i++ ) {
 		Q_strncpyz( wui_demoList[wui_demoCount], namePtr, sizeof( wui_demoList[0] ) );
 		// strip extension for display
 		char *dot = strrchr( wui_demoList[wui_demoCount], '.' );
@@ -297,8 +290,6 @@ static int   wui_modCount = 0;
 
 void WiredFeeder_LoadMods( void ) {
 	char listBuf[4096];
-	int numDirs, i;
-	char *dirPtr;
 
 	wui_modCount = 0;
 
@@ -307,10 +298,10 @@ void WiredFeeder_LoadMods( void ) {
 	Q_strncpyz( wui_modDesc[0], "q3now (base game)", sizeof( wui_modDesc[0] ) );
 	wui_modCount = 1;
 
-	numDirs = FS_GetFileList( "$modlist", "", listBuf, sizeof( listBuf ) );
+	int numDirs = FS_GetFileList( "$modlist", "", listBuf, sizeof( listBuf ) );
 
-	dirPtr = listBuf;
-	for ( i = 0; i < numDirs && wui_modCount < MAX_WIRED_MODS; i++ ) {
+	char *dirPtr = listBuf;
+	for ( int i = 0; i < numDirs && wui_modCount < MAX_WIRED_MODS; i++ ) {
 		if ( dirPtr[0] && Q_stricmp( dirPtr, "baseq3" ) ) {
 			Q_strncpyz( wui_modList[wui_modCount], dirPtr, sizeof( wui_modList[0] ) );
 			// try to read description.txt
@@ -393,11 +384,10 @@ static int             wui_filteredMapCount = 0;
 static int WiredFeeder_GametypeBits( const char *string ) {
 	int         bits = 0;
 	const char  *p = string;
-	const char  *token;
 	ComParser   parser = { 0 };
 
 	while ( 1 ) {
-		token = COM_ParseExt( &parser, &p, qfalse );
+		const char *token = COM_ParseExt( &parser, &p, qfalse );
 		if ( !token[0] ) break;
 		bits |= BG_GametypeBits( token );
 	}
@@ -407,8 +397,7 @@ static int WiredFeeder_GametypeBits( const char *string ) {
 
 // find a map entry by load name (case-insensitive)
 static wiredMapInfo_t *WiredFeeder_FindMap( const char *mapname ) {
-	int i;
-	for ( i = 0; i < wui_mapCount; i++ ) {
+	for ( int i = 0; i < wui_mapCount; i++ ) {
 		if ( Q_stricmp( wui_maps[i].mapLoadName, mapname ) == 0 ) {
 			return &wui_maps[i];
 		}
@@ -419,20 +408,17 @@ static wiredMapInfo_t *WiredFeeder_FindMap( const char *mapname ) {
 // parse { key value } arena blocks from a buffer — same format as UI_ParseInfos
 // but stores directly into wui_maps entries instead of Info strings
 static void WiredFeeder_ParseArenaBuffer( const char *buf ) {
-	const char  *token;
 	const char  *p = buf;
-	char        key[MAX_TOKEN_CHARS];
-	char        arenaMap[MAX_QPATH];
-	char        arenaLongname[64];
-	char        arenaType[64];
-	wiredMapInfo_t *entry;
 	ComParser   parser = { 0 };
 
 	while ( 1 ) {
-		token = COM_Parse( &parser, &p );
+		const char *token = COM_Parse( &parser, &p );
 		if ( !token[0] ) break;
 		if ( strcmp( token, "{" ) != 0 ) break;
 
+		char arenaMap[MAX_QPATH];
+		char arenaLongname[64];
+		char arenaType[64];
 		arenaMap[0] = '\0';
 		arenaLongname[0] = '\0';
 		arenaType[0] = '\0';
@@ -442,6 +428,7 @@ static void WiredFeeder_ParseArenaBuffer( const char *buf ) {
 			token = COM_ParseExt( &parser, &p, qtrue );
 			if ( !token[0] || !strcmp( token, "}" ) ) break;
 
+			char key[MAX_TOKEN_CHARS];
 			Q_strncpyz( key, token, sizeof( key ) );
 			token = COM_ParseExt( &parser, &p, qfalse );
 
@@ -457,7 +444,7 @@ static void WiredFeeder_ParseArenaBuffer( const char *buf ) {
 		if ( !arenaMap[0] ) continue;
 
 		// cross-reference: find the BSP entry and enrich it
-		entry = WiredFeeder_FindMap( arenaMap );
+		wiredMapInfo_t *entry = WiredFeeder_FindMap( arenaMap );
 		if ( !entry ) continue;
 
 		if ( arenaLongname[0] ) {
@@ -472,10 +459,9 @@ static void WiredFeeder_ParseArenaBuffer( const char *buf ) {
 // load a single .arena file and cross-reference with map entries
 static void WiredFeeder_LoadArenaFile( const char *filename ) {
 	fileHandle_t f;
-	int len;
 	char buf[MAX_ARENA_TEXT];
 
-	len = FS_FOpenFileRead( filename, &f, qfalse );
+	int len = FS_FOpenFileRead( filename, &f, qfalse );
 	if ( !f || len <= 0 ) {
 		if ( f != FS_INVALID_HANDLE ) FS_FCloseFile( f );
 		return;
@@ -500,22 +486,15 @@ static int WiredFeeder_MapSortCompare( const void *a, const void *b ) {
 
 void WiredFeeder_LoadMaps( void ) {
 	char listBuf[16384];
-	int numFiles, i;
-	char *namePtr;
-	int numArenaFiles;
-	char arenaListBuf[4096];
-	char *arenaPtr;
-	int arenaLen;
-	char filename[128];
 	int arenaCount = 0;
 
 	wui_mapCount = 0;
 
 	// ── Step 1: scan all .bsp files ──────────────────────────────────
-	numFiles = FS_GetFileList( "maps", ".bsp", listBuf, sizeof( listBuf ) );
+	int numFiles = FS_GetFileList( "maps", ".bsp", listBuf, sizeof( listBuf ) );
 
-	namePtr = listBuf;
-	for ( i = 0; i < numFiles && wui_mapCount < MAX_WIRED_MAPS; i++ ) {
+	char *namePtr = listBuf;
+	for ( int i = 0; i < numFiles && wui_mapCount < MAX_WIRED_MAPS; i++ ) {
 		char *dot;
 		Q_strncpyz( wui_maps[wui_mapCount].mapLoadName, namePtr, sizeof( wui_maps[0].mapLoadName ) );
 
@@ -540,10 +519,12 @@ void WiredFeeder_LoadMaps( void ) {
 	WiredFeeder_LoadArenaFile( "scripts/arenas.txt" );
 
 	// then scan individual .arena files
-	numArenaFiles = FS_GetFileList( "scripts", ".arena", arenaListBuf, sizeof( arenaListBuf ) );
-	arenaPtr = arenaListBuf;
-	for ( i = 0; i < numArenaFiles; i++ ) {
-		arenaLen = strlen( arenaPtr );
+	char arenaListBuf[4096];
+	int numArenaFiles = FS_GetFileList( "scripts", ".arena", arenaListBuf, sizeof( arenaListBuf ) );
+	char *arenaPtr = arenaListBuf;
+	for ( int i = 0; i < numArenaFiles; i++ ) {
+		int arenaLen = strlen( arenaPtr );
+		char filename[128];
 		Com_sprintf( filename, sizeof( filename ), "scripts/%s", arenaPtr );
 		WiredFeeder_LoadArenaFile( filename );
 		arenaCount++;
@@ -555,7 +536,7 @@ void WiredFeeder_LoadMaps( void ) {
 
 	// ── Step 4: initialize filtered list ─────────────────────────────
 	wui_filteredMapCount = wui_mapCount;
-	for ( i = 0; i < wui_mapCount; i++ ) {
+	for ( int i = 0; i < wui_mapCount; i++ ) {
 		wui_filteredMaps[i] = i;
 	}
 
@@ -582,12 +563,11 @@ void WiredFeeder_LoadMaps( void ) {
 }
 
 static void WiredFeeder_FilterMaps( void ) {
-	int i;
 	int gameType = WiredFeeder_StateGetInt( "ui_netGameType", 0 );
 	int typeBit = ( 1 << gameType );
 
 	wui_filteredMapCount = 0;
-	for ( i = 0; i < wui_mapCount; i++ ) {
+	for ( int i = 0; i < wui_mapCount; i++ ) {
 		if ( wui_maps[i].typeBits & typeBit ) {
 			wui_filteredMaps[wui_filteredMapCount++] = i;
 		}
@@ -608,9 +588,8 @@ static int WiredFeeder_MapCount( int feederID ) {
 
 static const char *WiredFeeder_MapItemText( int feederID, int index, int column ) {
 	static char buf[128];
-	int mapIdx;
 	if ( index < 0 || index >= wui_filteredMapCount ) return "";
-	mapIdx = wui_filteredMaps[index];
+	int mapIdx = wui_filteredMaps[index];
 	switch ( column ) {
 		case 0: {
 			// pool queue number
@@ -684,7 +663,7 @@ static int wui_mapSortDir = 0;
 static int WiredFeeder_MapSortByColumn( const void *a, const void *b ) {
 	int ia = *(const int *)a;
 	int ib = *(const int *)b;
-	int result;
+	int result = 0;
 
 	switch ( wui_mapSortKey ) {
 		case 0: {
@@ -744,7 +723,7 @@ void WiredFeeder_SortMaps( int column ) {
 // FEEDER_SCOREBOARD = all players, FEEDER_REDTEAM/BLUETEAM = team-filtered
 
 static int WiredFeeder_ScoreCount( int feederID ) {
-	int i, count = 0;
+	int count = 0;
 	int teamFilter = -1;
 
 	if ( feederID == 0x05 /* red team feeder */ )  teamFilter = 1 /* red */;
@@ -752,7 +731,7 @@ static int WiredFeeder_ScoreCount( int feederID ) {
 
 	if ( !wiredHud || !wiredHud->valid ) return 0;
 
-	for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+	for ( int i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
 		if ( teamFilter >= 0 && wiredHud->scores[i].team != teamFilter )
 			continue;
 		count++;
@@ -762,9 +741,8 @@ static int WiredFeeder_ScoreCount( int feederID ) {
 
 static const char *WiredFeeder_ScoreItemText( int feederID, int index, int column ) {
 	static char buf[128];
-	int i, count = 0;
+	int count = 0;
 	int teamFilter = -1;
-	wiredHudScore_t *sc;
 
 	if ( feederID == 0x05 /* red team feeder */ )  teamFilter = 1 /* red */;
 	if ( feederID == 0x06 /* blue team feeder */ ) teamFilter = 2 /* blue */;
@@ -772,6 +750,7 @@ static const char *WiredFeeder_ScoreItemText( int feederID, int index, int colum
 	if ( !wiredHud || !wiredHud->valid ) return "";
 
 	// find the Nth matching entry
+	int i;
 	for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
 		if ( teamFilter >= 0 && wiredHud->scores[i].team != teamFilter )
 			continue;
@@ -779,7 +758,7 @@ static const char *WiredFeeder_ScoreItemText( int feederID, int index, int colum
 		count++;
 	}
 	if ( i >= wiredHud->numScores || i >= WIRED_HUD_MAX_SCORES ) return "";
-	sc = &wiredHud->scores[i];
+	wiredHudScore_t *sc = &wiredHud->scores[i];
 
 	switch ( column ) {
 		case 0: // name
@@ -810,76 +789,51 @@ static void WiredFeeder_ScoreSelection( int feederID, int index ) {
 	wui_selectedScore = index;
 }
 
-// ── player model heads feeder (FEEDER_HEADS) ─────────────────────────
+// ── character feeder (FEEDER_HEADS) ──────────────────────────────────
 
-#define MAX_PLAYER_MODELS 128
-
-static char wui_modelList[MAX_PLAYER_MODELS][64];
-static int  wui_modelCount = 0;
-static int  wui_modelSelected = -1;
+static int  wui_charSelected = -1;
 
 void WiredFeeder_LoadModels( void ) {
-	char **dirList;
-	int   numDirs, i;
-	char  testPath[MAX_QPATH];
+	int count = CL_Characters_Count();
 
-	wui_modelCount = 0;
-	dirList = FS_ListFiles( "models/players", "/", &numDirs );
-
-	if ( dirList ) {
-		for ( i = 0; i < numDirs && wui_modelCount < MAX_PLAYER_MODELS; i++ ) {
-			if ( dirList[i][0] == '.' ) continue;
-			// only list models that have head.md3
-			Com_sprintf( testPath, sizeof( testPath ),
-				"models/players/%s/head.md3", dirList[i] );
-			if ( FS_ReadFile( testPath, NULL ) > 0 ) {
-				Q_strncpyz( wui_modelList[wui_modelCount],
-					dirList[i], sizeof( wui_modelList[0] ) );
-				wui_modelCount++;
-			}
-		}
-		FS_FreeFileList( dirList );
-	}
-
-	// match current model cvar to selection
-	{
-		char modelBuf[64];
-		char *slash;
-		Cvar_VariableStringBuffer( "model", modelBuf, sizeof( modelBuf ) );
-		slash = strchr( modelBuf, '/' );
-		if ( slash ) *slash = '\0';
-		wui_modelSelected = -1;
-		for ( i = 0; i < wui_modelCount; i++ ) {
-			if ( !Q_stricmp( wui_modelList[i], modelBuf ) ) {
-				wui_modelSelected = i;
-				break;
-			}
+	// match current char cvar to selection
+	char charBuf[64];
+	Cvar_VariableStringBuffer( "char", charBuf, sizeof( charBuf ) );
+	wui_charSelected = -1;
+	for ( int i = 0; i < count; i++ ) {
+		const clCharacterEntry_t *e = CL_Characters_At( i );
+		if ( e && !Q_stricmp( e->dirname, charBuf ) ) {
+			wui_charSelected = i;
+			break;
 		}
 	}
 
-	Com_DPrintf( "WiredUI: found %d player models\n", wui_modelCount );
+	Com_DPrintf( "WiredUI: found %d characters\n", count );
 }
 
 static int WiredFeeder_HeadsCount( int feederID ) {
-	return wui_modelCount;
+	return CL_Characters_Count();
 }
 
 static const char *WiredFeeder_HeadsItemText( int feederID, int index, int column ) {
-	if ( index < 0 || index >= wui_modelCount ) return "";
-	return wui_modelList[index];
+	const clCharacterEntry_t *e = CL_Characters_At( index );
+	if ( !e ) return "";
+	return e->manifest.displayName[0] ? e->manifest.displayName : e->dirname;
 }
 
 static void WiredFeeder_HeadsSelection( int feederID, int index ) {
-	if ( index < 0 || index >= wui_modelCount ) return;
-	wui_modelSelected = index;
-	Cvar_Set( "model", va( "%s/default", wui_modelList[index] ) );
+	const clCharacterEntry_t *e = CL_Characters_At( index );
+	if ( !e ) return;
+	wui_charSelected = index;
+	Cvar_Set( "char", e->dirname );
+	Cvar_Set( "skin", "default" );
 }
 
-int WiredFeeder_GetModelCount( void ) { return wui_modelCount; }
-int WiredFeeder_GetModelSelected( void ) { return wui_modelSelected; }
+int WiredFeeder_GetModelCount( void ) { return CL_Characters_Count(); }
+int WiredFeeder_GetModelSelected( void ) { return wui_charSelected; }
 const char *WiredFeeder_GetModelName( int index ) {
-	if ( index < 0 || index >= wui_modelCount ) return NULL;
-	return wui_modelList[index];
+	const clCharacterEntry_t *e = CL_Characters_At( index );
+	return e ? e->dirname : NULL;
 }
 void WiredFeeder_SetModelSelected( int index ) {
 	WiredFeeder_HeadsSelection( FEEDER_HEADS, index );

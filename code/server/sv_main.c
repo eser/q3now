@@ -259,7 +259,6 @@ but not on every player enter or exit.
 static void SV_MasterHeartbeat( const char *message )
 {
 	static netadr_t	adr[MAX_MASTER_SERVERS][2]; // [2] for v4 and v6 address for the same address string.
-	int			i;
 	int			res;
 	int			netenabled;
 
@@ -276,7 +275,7 @@ static void SV_MasterHeartbeat( const char *message )
 	svs.nextHeartbeatTime = svs.time + HEARTBEAT_MSEC;
 
 	// send to group masters
-	for (i = 0; i < MAX_MASTER_SERVERS; i++)
+	for (int i = 0; i < MAX_MASTER_SERVERS; i++)
 	{
 		if(!sv_master[i]->string[0])
 			continue;

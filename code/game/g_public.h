@@ -433,7 +433,49 @@ typedef enum {
 	// the QVM trap interface.
 	G_WIREDNET_GET_PING,               // ( int clientNum ) -> int ms; -1 if unknown
 	G_WIREDNET_GET_LOSS,               // ( int clientNum ) -> int loss*1000 (‰); 0 if unknown
-	G_WIREDNET_GET_BANDWIDTH           // ( int clientNum ) -> int kbps; 0 if unknown
+	G_WIREDNET_GET_BANDWIDTH,          // ( int clientNum ) -> int kbps; 0 if unknown
+
+	// ── Recast/Detour nav traps ────────────────────────────────────────
+	// Available only when FEAT_RECAST_NAVMESH=1.
+	// Returns -1 (int) or 0 (void/bool) until Phase 3 navmesh is ready.
+	// See code/qcommon/nav/nav_types.h for parameter type definitions.
+	G_NAV_FIND_PATH = 900,
+	// ( vec3_t origin, vec3_t goal, int agentType, navPath_t *pathOut ) -> int pathPointCount
+
+	G_NAV_RAYCAST,
+	// ( vec3_t start, vec3_t end, vec3_t hitPosOut ) -> qboolean (qtrue = hit geometry)
+
+	G_NAV_FIND_NEAREST_POLY,
+	// ( vec3_t origin, vec3_t searchExtents ) -> navPolyRef_t; 0 = not found
+
+	G_NAV_GET_POLY_AREA_FLAGS,
+	// ( navPolyRef_t polyRef ) -> int (navAreaFlags_t bitmask); -1 = invalid ref
+
+	G_NAV_TRIGGER_OFF_MESH_LINK,
+	// ( navPolyRef_t linkRef ) -> void; marks the off-mesh connection as used
+
+	G_NAV_GET_RANDOM_POINT,
+	// ( navAreaFlags_t areaFilter, vec3_t posOut ) -> qboolean; qtrue = point found
+
+	G_NAV_ADD_CROWD_AGENT,
+	// ( int entityNum, vec3_t origin, int agentType ) -> int agentId; -1 = full/error
+
+	G_NAV_UPDATE_CROWD_AGENT,
+	// ( int agentId, vec3_t desiredTarget ) -> void
+
+	G_NAV_REMOVE_CROWD_AGENT,
+	// ( int agentId ) -> void
+
+	G_NAV_UPDATE_CROWD,
+	// ( float deltaTime ) -> void; advances DetourCrowd simulation (Phase 6)
+
+	G_NAV_IS_READY,
+	// ( void ) -> qboolean; qtrue once navmesh is loaded and queries are safe
+
+	G_NAV_SET_POLY_FLAGS_FOR_DOOR
+	// ( const char *targetname, int setFlags, int clearFlags ) -> void
+	// D-19: set/clear poly flags for all polys belonging to named door entity.
+	// Called at door state transition-start (open/close) from g_mover.c.
 
 } gameImport_t;
 

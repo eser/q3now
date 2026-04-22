@@ -50,21 +50,17 @@ void Text_Init( void )
 
 static const fontFace_t *Text_ResolveFace( int fontId )
 {
-	wiredAssetGlobals_t *ag;
-	const char *serif, *serifItalic, *sans, *sansMedium, *mono;
-	const fontFace_t *face;
-
 	if ( fontId >= 0 && fontId < TEXT_FACE_CACHE_SIZE && wui_faceCache[fontId] ) {
 		return wui_faceCache[fontId];
 	}
 
-	ag = WiredUI_GetAssetGlobals();
-	serif = ag->defaultSerifFontName[0] ? ag->defaultSerifFontName : "sansman";
-	serifItalic = ag->defaultSerifFontItalicName[0] ? ag->defaultSerifFontItalicName : "sansman-italic";
-	sans = ag->defaultSansFontName[0] ? ag->defaultSansFontName : "oxanium";
-	sansMedium = ag->defaultSansFontMediumName[0] ? ag->defaultSansFontMediumName : "oxanium-medium";
-	mono = ag->defaultMonoFontName[0] ? ag->defaultMonoFontName : "sharetechmono";
-	face = NULL;
+	wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
+	const char *serif = ag->defaultSerifFontName[0] ? ag->defaultSerifFontName : "sansman";
+	const char *serifItalic = ag->defaultSerifFontItalicName[0] ? ag->defaultSerifFontItalicName : "sansman-italic";
+	const char *sans = ag->defaultSansFontName[0] ? ag->defaultSansFontName : "oxanium";
+	const char *sansMedium = ag->defaultSansFontMediumName[0] ? ag->defaultSansFontMediumName : "oxanium-medium";
+	const char *mono = ag->defaultMonoFontName[0] ? ag->defaultMonoFontName : "sharetechmono";
+	const fontFace_t *face = NULL;
 
 	switch ( fontId ) {
 	case FONT_DISPLAY:
@@ -108,17 +104,15 @@ static const fontFace_t *Text_ResolveFace( int fontId )
 void Text_Draw( const char *text, float x, float y, int fontId,
                 float size, const vec4_t color, int alignment, int flags )
 {
-	const fontFace_t *face;
-	float drawX, drawY;
 	float ls = text_letterSpacing;
 
 	if ( !text || !text[0] ) return;
 
-	face = Text_ResolveFace( fontId );
+	const fontFace_t *face = Text_ResolveFace( fontId );
 	if ( !face || !face->atlas ) return;
 
-	drawX = x;
-	drawY = y;
+	float drawX = x;
+	float drawY = y;
 
 	/* alignment */
 	if ( alignment == TEXT_ALIGN_CENTER ) {
@@ -152,17 +146,15 @@ void Text_DrawClipped( const char *text, float x, float y, float maxWidth,
                        int fontId, float size,
                        const vec4_t color, int alignment, int flags )
 {
-	const fontFace_t *face;
-	float             ls, fullWidth, drawX;
-	qboolean          shadow, forceColor;
-
 	if ( !text || !text[0] ) return;
 
-	face = Text_ResolveFace( fontId );
+	const fontFace_t *face = Text_ResolveFace( fontId );
 	if ( !face || !face->atlas ) return;
 
-	ls        = text_letterSpacing;
-	fullWidth = MSDF_MeasureString( face->atlas, size, text, -1, ls );
+	float ls = text_letterSpacing;
+	float fullWidth = MSDF_MeasureString( face->atlas, size, text, -1, ls );
+	float drawX;
+	qboolean shadow, forceColor;
 
 	if ( maxWidth <= 0.0f || fullWidth <= maxWidth ) {
 		/* fits — anchor against full width, draw in one pass */

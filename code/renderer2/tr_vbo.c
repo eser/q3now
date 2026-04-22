@@ -65,10 +65,8 @@ void R_VaoUnpackNormal(vec3_t v, int16_t *pack)
 
 void Vao_SetVertexPointers(vao_t *vao)
 {
-	int attribIndex;
-
 	// set vertex pointers
-	for (attribIndex = 0; attribIndex < ATTR_INDEX_COUNT; attribIndex++)
+	for (int attribIndex = 0; attribIndex < ATTR_INDEX_COUNT; attribIndex++)
 	{
 		uint32_t attribBit = 1 << attribIndex;
 		vaoAttrib_t *vAtb = &vao->attribs[attribIndex];
@@ -177,7 +175,6 @@ R_CreateVao2
 vao_t *R_CreateVao2(const char *name, int numVertexes, srfVert_t *verts, int numIndexes, glIndex_t *indexes)
 {
 	vao_t          *vao;
-	int             i;
 
 	byte           *data;
 	int             dataSize;
@@ -268,7 +265,7 @@ vao_t *R_CreateVao2(const char *name, int numVertexes, srfVert_t *verts, int num
 	data = ri.Hunk_AllocateTempMemory(dataSize);
 	dataOfs = 0;
 
-	for (i = 0; i < numVertexes; i++)
+	for (int i = 0; i < numVertexes; i++)
 	{
 		// xyz
 		memcpy(data + dataOfs, &verts[i].xyz, sizeof(verts[i].xyz));
@@ -595,9 +592,6 @@ void RB_UpdateTessVao(unsigned int attribBits)
 	// update the default VAO
 	if(tess.numVertexes > 0 && tess.numVertexes <= SHADER_MAX_VERTEXES && tess.numIndexes > 0 && tess.numIndexes <= SHADER_MAX_INDEXES)
 	{
-		int attribIndex;
-		int attribUpload;
-
 		R_BindVao(tess.vao);
 
 		// orphan old vertex buffer so we don't stall on it
@@ -607,9 +601,9 @@ void RB_UpdateTessVao(unsigned int attribBits)
 		if(!(attribBits & ATTR_BITS))
 			attribBits = ATTR_BITS;
 
-		attribUpload = attribBits;
+		int attribUpload = attribBits;
 
-		for (attribIndex = 0; attribIndex < ATTR_INDEX_COUNT; attribIndex++)
+		for (int attribIndex = 0; attribIndex < ATTR_INDEX_COUNT; attribIndex++)
 		{
 			uint32_t attribBit = 1 << attribIndex;
 			vaoAttrib_t *vAtb = &tess.vao->attribs[attribIndex];

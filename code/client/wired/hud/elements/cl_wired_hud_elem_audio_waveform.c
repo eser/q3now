@@ -33,12 +33,6 @@ void *CG_ModernHUDElementAudioWaveformCreate( const modernhudConfig_t *config )
 void CG_ModernHUDElementAudioWaveformRoutine( void *context )
 {
 	modernHudElementAudioWaveform_t *element = (modernHudElementAudioWaveform_t *)context;
-	float  x, y, w, h;
-	float  barWidth;
-	float  baseY;
-	int    count;
-	int    i;
-	vec4_t baseColor;
 	vec4_t greenColor = { 0.35f, 0.90f, 0.45f, 0.95f };
 	vec4_t amberColor = { 0.95f, 0.75f, 0.25f, 0.95f };
 	vec4_t redColor   = { 0.95f, 0.35f, 0.30f, 0.95f };
@@ -47,10 +41,10 @@ void CG_ModernHUDElementAudioWaveformRoutine( void *context )
 	CG_ModernHUDFill( &element->config );
 	CG_ModernHUDDrawBorder( &element->config );
 
-	x = element->config.rect.value[0];
-	y = element->config.rect.value[1];
-	w = element->config.rect.value[2];
-	h = element->config.rect.value[3];
+	float x = element->config.rect.value[0];
+	float y = element->config.rect.value[1];
+	float w = element->config.rect.value[2];
+	float h = element->config.rect.value[3];
 
 	if ( w <= 0.0f || h <= 0.0f )
 		return;
@@ -58,20 +52,21 @@ void CG_ModernHUDElementAudioWaveformRoutine( void *context )
 	/* Refresh the level snapshot from the audio thread. This is a
 	 * lock-free read that may race with the writer — acceptable for
 	 * a visualization (see S_GetRecentLevels comment). */
-	count = S_GetRecentLevels( element->levels, WAVEFORM_BAR_COUNT );
+	int count = S_GetRecentLevels( element->levels, WAVEFORM_BAR_COUNT );
 	if ( count <= 0 )
 		return;
 
 	/* Compute bar width from the element rect. We draw `count` bars
 	 * with a 1-pixel gap between each so the bars remain visually
 	 * distinct on sub-millisecond periods. */
-	barWidth = ( w - WAVEFORM_BAR_GAP_PX * (float)( count - 1 ) ) / (float)count;
+	float barWidth = ( w - WAVEFORM_BAR_GAP_PX * (float)( count - 1 ) ) / (float)count;
 	if ( barWidth < 1.0f )
 		barWidth = 1.0f;
 
 	/* Baseline: draw a single-pixel flat line so the widget is
 	 * visible even when audio is silent. Uses the border colour if
 	 * the author set one, otherwise a muted white. */
+	vec4_t baseColor;
 	if ( element->config.color.isSet )
 	{
 		Vector4Copy( element->config.color.value.rgba, baseColor );
@@ -96,8 +91,8 @@ void CG_ModernHUDElementAudioWaveformRoutine( void *context )
 	/* Draw each bar from left (oldest) to right (newest). The RMS
 	 * range is small (~0-0.3), so we apply a modest gain so the
 	 * visual response matches the audible dynamic range. */
-	baseY = y + h;
-	for ( i = 0; i < count; i++ )
+	float baseY = y + h;
+	for ( int i = 0; i < count; i++ )
 	{
 		float level = element->levels[i] * WAVEFORM_GAIN;
 		float barH;

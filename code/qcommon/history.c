@@ -140,9 +140,8 @@ static void Con_LoadHistory( void )
 		Field_Clear( &historyEditLines[i] );
 	}
 
-	int consoleSaveBufferSize;
 	fileHandle_t f;
-	consoleSaveBufferSize = FS_Home_FOpenFileRead( CONSOLE_HISTORY_FILE, &f );
+	int consoleSaveBufferSize = FS_Home_FOpenFileRead( CONSOLE_HISTORY_FILE, &f );
 	if ( f == FS_INVALID_HANDLE )
 	{
 		Com_Printf( "Couldn't read %s.\n", CONSOLE_HISTORY_FILE );

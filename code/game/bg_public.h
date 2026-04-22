@@ -178,6 +178,18 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 #error overflow: (CS_MAX) > MAX_CONFIGSTRINGS
 #endif
 
+#if FEAT_SCREENSHOT_TOOLS
+#define CS_STOPTIME				(MAX_CONFIGSTRINGS-1)	// spectator bullet-time freeze timestamp
+#endif
+
+#if FEAT_GAME_MEETING
+#define CS_MEETING				(CS_MAX+0)				// "1" while pre-match lobby is active
+#define CS_CLIENTS_READY		(CS_MAX+1)				// packed bitmask of ready players
+#if (CS_CLIENTS_READY) >= MAX_CONFIGSTRINGS
+#error overflow: CS_CLIENTS_READY >= MAX_CONFIGSTRINGS
+#endif
+#endif
+
 typedef enum {
 	GT_DEATHMATCH,		// deathmatch
 	GT_DUEL,			// one on one tournament
@@ -231,7 +243,10 @@ typedef enum {
 	PM_SPECTATOR,	// still run into walls
 	PM_DEAD,		// no acceleration or turning, but free falling
 	PM_FREEZE,		// stuck in place with no control
-	PM_INTERMISSION
+	PM_INTERMISSION,
+#if FEAT_GAME_MEETING
+	PM_MEETING,		// frozen in pre-match lobby until all players ready
+#endif
 } pmtype_t;
 
 typedef enum {
@@ -401,34 +416,36 @@ typedef enum {
 
 // entityState_t->eFlags
 #define	EF_DEAD				0x00000001		// don't draw a foe marker over players with EF_DEAD
-#define EF_DROPPED_ITEM 	0x00000002
+#define	EF_NODRAW			0x00000002		// may have an event, but no model (unspawned items)
 #define	EF_TELEPORT_BIT		0x00000004		// toggled every time the origin abruptly changes
-#define	EF_AWARD_EXCELLENT	0x00000008		// draw an excellent sprite
-#define EF_PLAYER_EVENT		0x00000010
-#define	EF_BOUNCE			0x00000010		// for missiles
-#define	EF_BOUNCE_HALF		0x00000020		// for missiles
-#define	EF_AWARD_GAUNTLET	0x00000040		// draw a gauntlet sprite
-#define	EF_NODRAW			0x00000080		// may have an event, but no model (unspawned items)
-#define	EF_FIRING_PRI		0x00000100		// for lightning gun
-#define	EF_FIRING_SEC		0x00000200
-#define	EF_MOVER_STOP		0x00000400		// will push otherwise
-#define EF_AWARD_CAP		0x00000800		// draw the capture sprite
-#define	EF_TALK				0x00001000		// draw a talk balloon
-#define	EF_CONNECTION		0x00002000		// draw a connection trouble sprite
-#define	EF_VOTED			0x00004000		// already cast a vote
-#define	EF_AWARD_IMPRESSIVE	0x00008000		// draw an impressive sprite
-#define	EF_AWARD_DEFEND		0x00010000		// draw a defend sprite
-#define	EF_AWARD_ASSIST		0x00020000		// draw a assist sprite
-#define EF_AWARD_DENIED		0x00040000		// denied
-#define EF_TEAMVOTED		0x00080000		// already cast a team vote
-#define	EF_GRAPPLE			0x00100000
-#define EF_SPAWN_PROTECT	0x00200000		// spawn protection white shell (2B)
-#define EF_FROZEN			0x00400000		// frozen in freezetag — ice shell (7A)
-#define EF_GRENADE_BOUNCE	0x00800000		// Q1/Q2-style grenade bounce (0.5x normal restitution)
-#define EF_KAMIKAZE			0x01000000		// alt-fire button held and weapon has alt-fire
+#define EF_PLAYER_EVENT		0x00000008
+#define	EF_MOVER_STOP		0x00000010		// will push otherwise
+#define EF_CLOAK			0x00000020
 
+#define EF_DROPPED_ITEM 	0x00000040
+#define	EF_BACKPACK			0x00000080		// PM: Backpack indicator bit
+#define	EF_BOUNCE			0x00000100		// for missiles
+#define	EF_BOUNCE_HALF		0x00000200		// for missiles
+#define EF_GRENADE_BOUNCE	0x00000400		// Q1/Q2-style grenade bounce (0.5x normal restitution)
 
-#define	EF_BACKPACK			0x00000001		// PM: Backpack indicator bit
+#define	EF_FIRING_PRI		0x00000040		// for lightning gun
+#define	EF_FIRING_SEC		0x00000080
+#define	EF_TALK				0x00000100		// draw a talk balloon
+#define	EF_CONNECTION		0x00000200		// draw a connection trouble sprite
+#define	EF_VOTED			0x00000400		// already cast a vote
+#define EF_TEAMVOTED		0x00000800		// already cast a team vote
+#define	EF_GRAPPLE			0x00001000
+#define EF_SPAWN_PROTECT	0x00002000		// spawn protection white shell (2B)
+#define EF_FROZEN			0x00004000		// frozen in freezetag — ice shell (7A)
+#define EF_KAMIKAZE			0x00008000		// alt-fire button held and weapon has alt-fire
+
+#define	EF_AWARD_EXCELLENT	0x00010000		// draw an excellent sprite
+#define	EF_AWARD_GAUNTLET	0x00020000		// draw a gauntlet sprite
+#define	EF_AWARD_IMPRESSIVE	0x00040000		// draw an impressive sprite
+#define EF_AWARD_CAP		0x00080000		// draw the capture sprite
+#define	EF_AWARD_DEFEND		0x00100000		// draw a defend sprite
+#define	EF_AWARD_ASSIST		0x00200000		// draw a assist sprite
+#define EF_AWARD_DENIED		0x00400000		// denied
 
 // NOTE: may not have more than 16
 typedef enum {
@@ -630,6 +647,10 @@ typedef enum {
 	EV_TAUNT_GETFLAG,
 	EV_TAUNT_GUARDBASE,
 	EV_TAUNT_PATROL,
+
+#if FEAT_EARTHQUAKE_SYSTEM
+	EV_EARTHQUAKE,
+#endif
 
 	EV_NUM_ENTITY_EVENTS	// must be last — used by BUILD_ASSERT in bg_misc.c
 } entity_event_t;

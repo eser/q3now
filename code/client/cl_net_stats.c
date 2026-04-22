@@ -86,15 +86,13 @@ void SCR_DrawPing( void ) {
 	             flux, flux2, aflux, aflux2, std, std2,
 	             alloc_ok, alloc_ok2;
 	static unsigned long long int sum, sum2, asum, asum2, stsum, stsum2;
-	int timeNew, currPing, interval, interval2, fontsize, posx, posy, posxx, posyy, i;
-
-	timeNew  = Sys_Milliseconds();
-	currPing = cl.snap.ping;
-	interval  = cl_drawPingFirstInterval->integer;
-	interval2 = cl_drawPingSecondInterval->integer;
-	fontsize  = cl_drawPingFontSize->integer;
-	posx      = cl_drawPingPosX->integer;
-	posy      = cl_drawPingPosY->integer;
+	int timeNew  = Sys_Milliseconds();
+	int currPing = cl.snap.ping;
+	int interval  = cl_drawPingFirstInterval->integer;
+	int interval2 = cl_drawPingSecondInterval->integer;
+	int fontsize  = cl_drawPingFontSize->integer;
+	int posx      = cl_drawPingPosX->integer;
+	int posy      = cl_drawPingPosY->integer;
 
 	if ( interval  <= 0 ) interval  = 1;
 	if ( interval2 <= 0 ) interval2 = 1;
@@ -112,10 +110,10 @@ void SCR_DrawPing( void ) {
 		if ( alloc_ok )
 			pings[ count++ ] = currPing;
 	} else if ( count ) {
-		for ( i = 0; i < count; i++ ) sum += pings[ i ];
+		for ( int i = 0; i < count; i++ ) sum += pings[ i ];
 		avgPing = (int)( sum / count );
 		flux = 0;
-		for ( i = 0; i < count; i++ ) {
+		for ( int i = 0; i < count; i++ ) {
 			stsum += (unsigned long long int)pow( (double)( pings[i] - avgPing ), 2 );
 			if ( pings[i] > avgPing ) {
 				acount++;
@@ -141,10 +139,10 @@ void SCR_DrawPing( void ) {
 		if ( alloc_ok2 )
 			pings2[ count2++ ] = currPing;
 	} else if ( count2 ) {
-		for ( i = 0; i < count2; i++ ) sum2 += pings2[ i ];
+		for ( int i = 0; i < count2; i++ ) sum2 += pings2[ i ];
 		avgPing2 = (int)( sum2 / count2 );
 		flux2 = 0;
-		for ( i = 0; i < count2; i++ ) {
+		for ( int i = 0; i < count2; i++ ) {
 			stsum2 += (unsigned long long int)pow( (double)( pings2[i] - avgPing2 ), 2 );
 			if ( pings2[i] > avgPing2 ) {
 				acount2++;
@@ -167,8 +165,8 @@ void SCR_DrawPing( void ) {
 	Com_sprintf( string5, sizeof( string5 ), "Avg Spike %3ims %3ims", aflux,    aflux2   );
 	Com_sprintf( string6, sizeof( string6 ), "Std Dev   %3ims %3ims", std,      std2     );
 
-	posxx = ( posx >= 0 && posx < 21 ) ? posx * 30 : 0;
-	posyy = ( posy >= 0 && posy < 24 ) ? posy * 20 : 0;
+	int posxx = ( posx >= 0 && posx < 21 ) ? posx * 30 : 0;
+	int posyy = ( posy >= 0 && posy < 24 ) ? posy * 20 : 0;
 
 	SCR_DrawStringExt( posxx, posyy,                  fontsize, string1, g_color_table[7], qtrue, qtrue );
 	SCR_DrawStringExt( posxx, posyy + (fontsize+2)*1, fontsize, string2, g_color_table[4], qtrue, qtrue );
@@ -206,10 +204,8 @@ void SCR_DrawSnaps( void ) {
 	static float coef, coef2, delayedF, delayedF2, extrapF, extrapF2;
 	static unsigned long long int sumSps, sumSps2, snsum, snsum2, stsum, stsum2, sumFps, sumFps2;
 	static s_snaps_t *snapses, *snapses2;
-	int cmsg, ctime, interval, interval2, fontsize, posx, posy, posxx, posyy, i;
-
-	cmsg  = cl.snap.messageNum;
-	ctime = Sys_Milliseconds();
+	int cmsg  = cl.snap.messageNum;
+	int ctime = Sys_Milliseconds();
 
 	if ( !omsg ) { omsg = cmsg; otime = ctime; otimeFps = ctime; }
 
@@ -219,11 +215,11 @@ void SCR_DrawSnaps( void ) {
 	if ( ctime - otime && cmsg - omsg )
 		{ sps = 1000 * ( cmsg - omsg ) / ( ctime - otime ); omsg = cmsg; otime = ctime; }
 
-	interval  = cl_drawSnapsFirstInterval->integer;
-	interval2 = cl_drawSnapsSecondInterval->integer;
-	fontsize  = cl_drawSnapsFontSize->integer;
-	posx      = cl_drawSnapsPosX->integer;
-	posy      = cl_drawSnapsPosY->integer;
+	int interval  = cl_drawSnapsFirstInterval->integer;
+	int interval2 = cl_drawSnapsSecondInterval->integer;
+	int fontsize  = cl_drawSnapsFontSize->integer;
+	int posx      = cl_drawSnapsPosX->integer;
+	int posy      = cl_drawSnapsPosY->integer;
 
 	if ( interval  <= 0 ) interval  = 1;
 	if ( interval2 <= 0 ) interval2 = 1;
@@ -245,12 +241,12 @@ void SCR_DrawSnaps( void ) {
 			count++;
 		}
 	} else if ( count ) {
-		for ( i = 0; i < count; i++ ) { sumSps += snapses[i].sps; sumFps += snapses[i].fps; }
+		for ( int i = 0; i < count; i++ ) { sumSps += snapses[i].sps; sumFps += snapses[i].fps; }
 		avgSps = (int)( sumSps / count );
 		avgFps = (int)( sumFps / count );
 		coef = avgFps ? ( (float)avgSps / (float)avgFps / (float)interval ) : 0;
 		sdrop = delayed = extrap = 0;
-		for ( i = 0; i < count; i++ ) {
+		for ( int i = 0; i < count; i++ ) {
 			stsum += (unsigned long long int)pow( (double)( snapses[i].sps - avgSps ), 2 );
 			if ( snapses[i].sps < avgSps ) {
 				dcount++;
@@ -285,12 +281,12 @@ void SCR_DrawSnaps( void ) {
 			count2++;
 		}
 	} else if ( count2 ) {
-		for ( i = 0; i < count2; i++ ) { sumSps2 += snapses2[i].sps; sumFps2 += snapses2[i].fps; }
+		for ( int i = 0; i < count2; i++ ) { sumSps2 += snapses2[i].sps; sumFps2 += snapses2[i].fps; }
 		avgSps2 = (int)( sumSps2 / count2 );
 		avgFps2 = (int)( sumFps2 / count2 );
 		coef2   = avgFps2 ? ( (float)avgSps2 / (float)avgFps2 / (float)interval2 ) : 0;
 		sdrop2 = delayed2 = extrap2 = 0;
-		for ( i = 0; i < count2; i++ ) {
+		for ( int i = 0; i < count2; i++ ) {
 			stsum2 += (unsigned long long int)pow( (double)( snapses2[i].sps - avgSps2 ), 2 );
 			if ( snapses2[i].sps < avgSps2 ) {
 				dcount2++;
@@ -319,8 +315,8 @@ void SCR_DrawSnaps( void ) {
 	Com_sprintf( string7, sizeof( string7 ), "Delayed  %.1fSPS %.1fSPS",delayedF,  delayedF2 );
 	Com_sprintf( string8, sizeof( string8 ), "Extrap.  %.1fSPS %.1fSPS",extrapF,   extrapF2  );
 
-	posxx = ( posx >= 0 && posx < 21 ) ? posx * 30 : 0;
-	posyy = ( posy >= 0 && posy < 24 ) ? posy * 20 : 0;
+	int posxx = ( posx >= 0 && posx < 21 ) ? posx * 30 : 0;
+	int posyy = ( posy >= 0 && posy < 24 ) ? posy * 20 : 0;
 
 	SCR_DrawStringExt( posxx, posyy,                  fontsize, string1, g_color_table[7], qtrue, qtrue );
 	SCR_DrawStringExt( posxx, posyy + (fontsize+2)*1, fontsize, string2, g_color_table[3], qtrue, qtrue );
@@ -347,15 +343,13 @@ void SCR_DrawPackets( void ) {
 	             avgPps, avgPps2, mdrop, mdrop2, adrop, adrop2, dcount, dcount2,
 	             std, std2, alloc_ok, alloc_ok2;
 	static unsigned long long int sum, sum2, stsum, stsum2, dsum, dsum2;
-	int posx, posy, posxx, posyy, fontsize, interval, interval2, newtime, i;
+	int interval  = cl_drawPacketsFirstInterval->integer;
+	int interval2 = cl_drawPacketsSecondInterval->integer;
+	int fontsize  = cl_drawPacketsFontSize->integer;
+	int posx      = cl_drawPacketsPosX->integer;
+	int posy      = cl_drawPacketsPosY->integer;
 
-	interval  = cl_drawPacketsFirstInterval->integer;
-	interval2 = cl_drawPacketsSecondInterval->integer;
-	fontsize  = cl_drawPacketsFontSize->integer;
-	posx      = cl_drawPacketsPosX->integer;
-	posy      = cl_drawPacketsPosY->integer;
-
-	newtime = Sys_Milliseconds();
+	int newtime = Sys_Milliseconds();
 
 	if ( !timeRec ) timeRec = timeRec2 = lastRecorded = newtime;
 	if ( interval  <= 0 ) interval  = 1;
@@ -376,10 +370,10 @@ void SCR_DrawPackets( void ) {
 		if ( alloc_ok )
 			packs[ count++ ] = pps;
 	} else if ( count ) {
-		for ( i = 0; i < count; i++ ) sum += packs[ i ];
+		for ( int i = 0; i < count; i++ ) sum += packs[ i ];
 		avgPps = (int)( sum / count );
 		mdrop  = 0;
-		for ( i = 0; i < count; i++ ) {
+		for ( int i = 0; i < count; i++ ) {
 			stsum += (unsigned long long int)pow( (double)( packs[i] - avgPps ), 2 );
 			if ( packs[i] < avgPps ) {
 				dcount++;
@@ -405,10 +399,10 @@ void SCR_DrawPackets( void ) {
 		if ( alloc_ok2 )
 			packs2[ count2++ ] = pps;
 	} else if ( count2 ) {
-		for ( i = 0; i < count2; i++ ) sum2 += packs2[ i ];
+		for ( int i = 0; i < count2; i++ ) sum2 += packs2[ i ];
 		avgPps2 = (int)( sum2 / count2 );
 		mdrop2  = 0;
-		for ( i = 0; i < count2; i++ ) {
+		for ( int i = 0; i < count2; i++ ) {
 			stsum2 += (unsigned long long int)pow( (double)( packs2[i] - avgPps2 ), 2 );
 			if ( packs2[i] < avgPps2 ) {
 				dcount2++;
@@ -431,8 +425,8 @@ void SCR_DrawPackets( void ) {
 	Com_sprintf( string5, sizeof( string5 ), "Avg Drop %3iPPS %3iPPS",  adrop,     adrop2    );
 	Com_sprintf( string6, sizeof( string6 ), "Std Dev  %3iPPS %3iPPS",  std,       std2      );
 
-	posxx = ( posx >= 0 && posx < 21 ) ? posx * 30 : 0;
-	posyy = ( posy >= 0 && posy < 24 ) ? posy * 20 : 0;
+	int posxx = ( posx >= 0 && posx < 21 ) ? posx * 30 : 0;
+	int posyy = ( posy >= 0 && posy < 24 ) ? posy * 20 : 0;
 
 	SCR_DrawStringExt( posxx, posyy,                  fontsize, string1, g_color_table[7], qtrue, qtrue );
 	SCR_DrawStringExt( posxx, posyy + (fontsize+2)*1, fontsize, string2, g_color_table[2], qtrue, qtrue );

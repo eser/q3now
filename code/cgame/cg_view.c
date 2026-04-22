@@ -434,8 +434,7 @@ static void CG_OffsetFirstPersonView( void ) {
 	// velocity spikes; the EMA damps them while preserving real acceleration.
 	{
 		static vec3_t s_smoothedVel;
-		int i;
-		for ( i = 0; i < 3; i++ )
+		for ( int i = 0; i < 3; i++ )
 			s_smoothedVel[i] = 0.3f * cg.predictedPlayerState.velocity[i] + 0.7f * s_smoothedVel[i];
 		VectorCopy( s_smoothedVel, predictedVelocity );
 	}
@@ -712,6 +711,95 @@ static void CG_DamageBlendBlob( void ) {
 }
 
 
+#if FEAT_EARTHQUAKE_SYSTEM
+void CG_AddEarthquake(
+	const vec3_t origin, float radius,
+	float duration, float fadeIn, float fadeOut,
+	float amplitude
+) {
+	int i;
+
+	if ( duration <= 0 ) {
+		float a = amplitude / 100;
+
+		if ( radius > 0 ) {
+			float distance = Distance( cg.refdef.vieworg, origin );
+			if ( distance >= radius ) return;
+			a *= 1 - ( distance / radius );
+		}
+
+		cg.additionalTremble += a;
+		return;
+	}
+
+	for ( i = 0; i < MAX_EARTHQUAKES; i++ ) {
+		earthquake_t *quake = &cg.earthquakes[i];
+		if ( quake->startTime ) continue;
+
+		quake->startTime   = cg.time;
+		quake->endTime     = (int)floor( cg.time + 1000 * duration + 0.5f );
+		quake->fadeInTime  = (int)floor( 1000 * fadeIn + 0.5f );
+		quake->fadeOutTime = (int)floor( 1000 * fadeOut + 0.5f );
+		quake->amplitude   = amplitude;
+		VectorCopy( origin, quake->origin );
+		quake->radius = radius;
+		break;
+	}
+}
+
+void CG_AdjustEarthquakes( const vec3_t delta ) {
+	int i;
+
+	for ( i = 0; i < MAX_EARTHQUAKES; i++ ) {
+		earthquake_t *quake = &cg.earthquakes[i];
+		if ( !quake->startTime ) continue;
+		if ( quake->radius <= 0 ) continue;
+		VectorAdd( quake->origin, delta, quake->origin );
+	}
+}
+
+static void AddEarthquakeTremble( earthquake_t *quake ) {
+	float a;
+	const float offsetAmplitude = 0.2f;
+	const float angleAmplitude  = 0.2f;
+
+	if ( quake ) {
+		if ( cg.time >= quake->endTime ) {
+			memset( quake, 0, sizeof( *quake ) );
+			return;
+		}
+
+		if ( quake->radius > 0 ) {
+			float distance = Distance( cg.refdef.vieworg, quake->origin );
+			if ( distance >= quake->radius ) return;
+			a = 1 - ( distance / quake->radius );
+		} else {
+			a = 1;
+		}
+
+		{
+			int time = cg.time - quake->startTime;
+			a *= quake->amplitude / 100;
+			if ( time < quake->fadeInTime ) {
+				a *= (float)time / (float)quake->fadeInTime;
+			} else if ( cg.time > quake->endTime - quake->fadeOutTime ) {
+				a *= (float)( quake->endTime - cg.time ) / (float)quake->fadeOutTime;
+			}
+		}
+	} else {
+		a = cg.additionalTremble;
+	}
+
+	cg.refdef.vieworg[0]       += offsetAmplitude * a * crandom();
+	cg.refdef.vieworg[1]       += offsetAmplitude * a * crandom();
+	cg.refdef.vieworg[2]       += offsetAmplitude * a * crandom();
+	cg.refdefViewAngles[YAW]   += angleAmplitude  * a * crandom();
+	cg.refdefViewAngles[PITCH] += angleAmplitude  * a * crandom();
+	cg.refdefViewAngles[ROLL]  += angleAmplitude  * a * crandom();
+}
+#endif
+
+
 /*
 ===============
 CG_CalcViewValues
@@ -804,6 +892,17 @@ static int CG_CalcViewValues( void ) {
 	// position eye relative to origin
 	AnglesToAxis( cg.refdefViewAngles, cg.refdef.viewaxis );
 
+#if FEAT_EARTHQUAKE_SYSTEM
+	{
+		for ( int i = 0; i < MAX_EARTHQUAKES; i++ ) {
+			earthquake_t *quake = &cg.earthquakes[i];
+			if ( !quake->startTime ) continue;
+			AddEarthquakeTremble( quake );
+		}
+		AddEarthquakeTremble( NULL );
+	}
+#endif
+
 	if ( cg.hyperspace ) {
 		cg.refdef.rdflags |= RDF_NOWORLDMODEL | RDF_HYPERSPACE;
 	}
@@ -819,11 +918,10 @@ CG_PowerupTimerSounds
 =====================
 */
 static void CG_PowerupTimerSounds( void ) {
-	int		i;
 	int		t;
 
 	// powerup timers going away
-	for ( i = PW_NONE + 1 ; i < PW_NUM_POWERUPS ; i++ ) {
+	for ( int i = PW_NONE + 1 ; i < PW_NUM_POWERUPS ; i++ ) {
 		t = cg.snap->ps.powerups[i];
 		if ( t <= cg.time ) {
 			continue;
@@ -880,8 +978,34 @@ Generates and draws a game scene and status information at the given time.
 void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback ) {
 	int		inwater;
 
+#if FEAT_SCREENSHOT_TOOLS
+	cg.stopTime = atoi( CG_ConfigString( CS_STOPTIME ) );
+	if ( cg.stopTime ) {
+		cg.timeOffset = serverTime - cg.time;
+	} else {
+		cg.timeOffset = 0;
+	}
+#endif
+
+#if FEAT_GAME_MEETING
+	{
+		qboolean wasMeeting = cg.meeting;
+		cg.meeting = atoi( CG_ConfigString( CS_MEETING ) ) ? qtrue : qfalse;
+		if ( wasMeeting && !cg.meeting ) {
+			trap_S_StartLocalSound( cgs.media.countFightSound, CHAN_ANNOUNCER );
+			CG_CenterPrint( "FIGHT!", 120, BIGCHAR_WIDTH * 2 );
+		}
+	}
+#endif
+
 	cg.time = serverTime;
 	cg.demoPlayback = demoPlayback;
+#if FEAT_EARTHQUAKE_SYSTEM
+	cg.additionalTremble = 0;
+#endif
+#if FEAT_MUSIC_PLAYLIST
+	CG_RunPlayListFrame();
+#endif
 
 	// update cvars
 	CG_UpdateCvars();
@@ -899,6 +1023,14 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	if ( !cg.snap || ( cg.snap->snapFlags & SNAPFLAG_NOT_ACTIVE ) ) {
 		return;
 	}
+
+#if FEAT_SCREENSHOT_TOOLS
+	if ( cg.stopTime ) {
+		cg.serverOffset = serverTime - cg.snap->serverTime;
+	} else {
+		cg.serverOffset = 0;
+	}
+#endif
 
 	// let the client system know what our weapon and zoom settings are
 	trap_SetUserCmdValue( cg.weaponSelect, cg.zoomSensitivity );

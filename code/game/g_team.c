@@ -251,10 +251,9 @@ Team_ForceGesture
 ================
 */
 void Team_ForceGesture(int team) {
-	int i;
 	gentity_t *ent;
 
-	for (i = 0; i < MAX_CLIENTS; i++) {
+	for (int i = 0; i < MAX_CLIENTS; i++) {
 		ent = &g_entities[i];
 		if (!ent->inuse)
 			continue;
@@ -1055,9 +1054,6 @@ void TeamplayInfoMessage( gentity_t *ent ) {
 	int			h, a, ac;
 	int			clients[TEAM_MAXOVERLAY];
 	int			team;
-
-	if ( ! ent->client->pers.teamInfo )
-		return;
 
 	// send team info to spectator for team of followed client
 	if (ent->client->sess.sessionTeam == TEAM_SPECTATOR) {

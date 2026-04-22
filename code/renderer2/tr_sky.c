@@ -596,9 +596,7 @@ static void FillCloudySkySide( const int mins[2], const int maxs[2], qboolean ad
 
 static void FillCloudBox( const shader_t *shader, int stage )
 {
-	int i;
-
-	for ( i =0; i < 6; i++ )
+	for ( int i =0; i < 6; i++ )
 	{
 		int sky_mins_subd[2], sky_maxs_subd[2];
 		int s, t;

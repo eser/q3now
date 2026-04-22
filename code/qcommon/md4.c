@@ -55,9 +55,8 @@ static struct mdfour *m;
 /* this applies md4 to 64 byte chunks */
 static void mdfour64(uint32_t *M)
 {
-	int j;
 	uint32_t X[16];
-	for (j=0;j<16;j++)
+	for (int j=0;j<16;j++)
 		X[j] = M[j];
 
 	uint32_t A = m->A, B = m->B, C = m->C, D = m->D;
@@ -92,7 +91,7 @@ static void mdfour64(uint32_t *M)
 
 	A += AA; B += BB; C += CC; D += DD;
 
-	for (j=0;j<16;j++)
+	for (int j=0;j<16;j++)
 		X[j] = 0;
 
 	m->A = A; m->B = B; m->C = C; m->D = D;

@@ -292,7 +292,6 @@ overlap and double darken.
 void RB_ShadowFinish( void ) {
 #ifdef USE_VULKAN
 	float tmp[16];
-	int i;
 #endif
 	static const vec3_t verts[4] = {
 		{ -100, 100, -10 },
@@ -317,7 +316,7 @@ void RB_ShadowFinish( void ) {
 #ifdef USE_VULKAN
 	GL_Bind( tr.whiteImage );
 
-	for ( i = 0; i < 4; i++ )
+	for ( int i = 0; i < 4; i++ )
 	{
 		VectorCopy( verts[i], tess.xyz[i] );
 		Vector4Set( tess.svars.colors[0][i].rgba, 153, 153, 153, 255 );

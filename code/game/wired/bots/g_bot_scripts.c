@@ -665,9 +665,19 @@ static int WiredBots_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_goa
 	bestScore = 0.0f;
 	directLtgTime = 0;
 
+#if FEAT_RECAST_NAVMESH
+	/* AAS is disabled when Recast navmesh is active.  Use distance / 300 ups
+	   as a travel-time proxy so goal scoring still penalises far items. */
+	if ( ltg ) {
+		vec3_t delta;
+		VectorSubtract( ltg->origin, bs->origin, delta );
+		directLtgTime = (int)( VectorLength( delta ) * 1000.0f / 300.0f ) + 1;
+	}
+#else
 	if ( ltg && ltg->areanum > 0 ) {
 		directLtgTime = trap_AAS_AreaTravelTimeToGoalArea( bs->areanum, bs->origin, ltg->areanum, tfl );
 	}
+#endif
 
 	for ( itemNum = 1; itemNum < bg_numItems; itemNum++ ) {
 		const gitem_t *item;
@@ -689,17 +699,29 @@ static int WiredBots_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_goa
 				continue;
 			}
 
+#if FEAT_RECAST_NAVMESH
+			/* AAS unavailable — estimate travel time from Euclidean distance.
+			   Assumes ~300 ups average bot speed.  Always > 0, so no item is
+			   skipped as "unreachable" purely due to missing AAS data. */
+			{
+				vec3_t delta;
+				VectorSubtract( goal.origin, bs->origin, delta );
+				travelTime = (int)( VectorLength( delta ) * 1000.0f / 300.0f ) + 1;
+			}
+#else
 			travelTime = trap_AAS_AreaTravelTimeToGoalArea( bs->areanum, bs->origin, goal.areanum, tfl );
 			if ( travelTime <= 0 ) {
 				dbgSkipNoPath++;
 				continue;
 			}
+#endif
 
 			if ( maxTravelTime > 0.0f && travelTime > maxTravelTime ) {
 				dbgSkipTooFar++;
 				continue;
 			}
 
+#if !FEAT_RECAST_NAVMESH
 			if ( ltg && ltg->areanum > 0 && directLtgTime > 0 ) {
 				int viaLtgTime;
 
@@ -709,6 +731,7 @@ static int WiredBots_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_goa
 					continue;
 				}
 			}
+#endif
 
 			score = (float)WiredBots_EvalItemGoal( bs, item, &goal );
 			score *= 1.0f / ( 1.0f + travelTime / 220.0f );

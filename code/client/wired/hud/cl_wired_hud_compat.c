@@ -15,7 +15,6 @@ cl_wired_hud_compat.c — Compatibility layer: syncs wired_cg/wired_cgs from wir
 #undef cgs
 #undef cg_weapons
 #undef cg_MaxlocationWidth
-#undef cg_drawTimer
 #undef cg_drawAmmoWarning
 #undef cg_items
 
@@ -24,9 +23,8 @@ wiredCgsCompat_t    wired_cgs;
 wiredWeaponCompat_t wired_cg_weapons[32]; /* generic weapon buffer */
 wiredItemCompat_t   wired_cg_items[256];
 #undef cg_drawRewards
-#undef cg_drawCrosshair
 #undef cg_drawCrosshairNames
-#undef cg_crosshairHealth
+#undef cg_crosshairAlpha
 #undef numSortedTeamPlayers
 #undef sortedTeamPlayers
 
@@ -34,9 +32,8 @@ vmCvar_t wired_MaxlocationWidth;
 vmCvar_t wired_drawTimer;
 vmCvar_t wired_drawAmmoWarning;
 vmCvar_t wired_drawRewards;
-vmCvar_t wired_drawCrosshair;
 vmCvar_t wired_drawCrosshairNames;
-vmCvar_t wired_crosshairHealth;
+vmCvar_t wired_crosshairAlpha;
 int wired_numSortedTeamPlayers;
 int wired_sortedTeamPlayers[WIRED_HUD_MAX_TEAMOVERLAY];
 

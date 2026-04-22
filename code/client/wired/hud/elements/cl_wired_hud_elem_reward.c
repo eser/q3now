@@ -62,14 +62,13 @@ void CG_ModernHUDElementRewardRoutine(void* context)
 {
 	modernHudElementStatusbarRewards* element = (modernHudElementStatusbarRewards*)context;
 
-	int i;
-	float* color_origin;
-	float* color;
-
 	if (!cg_drawRewards.integer)
 	{
 		return;
 	}
+
+	float* color_origin;
+	float* color;
 
 	if (element->type == ModernHUD_REWARD_ICON)
 	{
@@ -86,7 +85,7 @@ void CG_ModernHUDElementRewardRoutine(void* context)
 	{
 		if (cg.rewardStack > 0)
 		{
-			for (i = 0; i < cg.rewardStack; i++)
+			for (int i = 0; i < cg.rewardStack; i++)
 			{
 				cg.rewardSound[i] = cg.rewardSound[i + 1];
 				cg.rewardShader[i] = cg.rewardShader[i + 1];
