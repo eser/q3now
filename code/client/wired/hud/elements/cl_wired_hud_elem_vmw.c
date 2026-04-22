@@ -22,7 +22,6 @@ void* CG_ModernHUDElementVMWCreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementVMWRoutine(void* context)
 {
 	modernHudElementVMW_t* element = (modernHudElementVMW_t*)context;
-	int time;
 
 	if (cgs.voteTime == 0) return;
 
@@ -32,7 +31,7 @@ void CG_ModernHUDElementVMWRoutine(void* context)
 		trap_S_StartLocalSound(cgs.media.talkSound, CHAN_LOCAL_SOUND);
 	}
 
-	time = (30000 - (cg.time - cgs.voteTime)) / 1000;
+	int time = (30000 - (cg.time - cgs.voteTime)) / 1000;
 
 	if (time < 0)
 	{

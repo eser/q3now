@@ -24,8 +24,6 @@ void* CG_ModernHUDElementNetStatsCreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementNetStatsRoutine(void* context)
 {
 	modernHudElementNetStats_t* element = (modernHudElementNetStats_t*)context;
-	int ping;
-	int delag;
 
 	if (!cg.snap) {
 		return;
@@ -33,12 +31,12 @@ void CG_ModernHUDElementNetStatsRoutine(void* context)
 
 	// truePing: the server sends the real (averaged) ping via
 	// playerState.
-	ping = cg.snap->ping;
+	int ping = cg.snap->ping;
 
 	// effective delag window: difference between level time and
 	// the command time the server would rewind to.  Approximated
 	// on the client as the reported ping.
-	delag = ping;
+	int delag = ping;
 
 	if (element->config.style.isSet && element->config.style.value == 1) {
 		// compact: just the number

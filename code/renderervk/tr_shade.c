@@ -813,7 +813,6 @@ R_ComputeTexCoords
 */
 void R_ComputeTexCoords( const int b, const textureBundle_t *bundle ) {
 	int	i;
-	int tm;
 	vec2_t *src, *dst;
 
 	if ( !tess.numVertexes )
@@ -857,7 +856,7 @@ void R_ComputeTexCoords( const int b, const textureBundle_t *bundle ) {
 	//
 	// alter texture coordinates
 	//
-	for ( tm = 0; tm < bundle->numTexMods ; tm++ ) {
+	for ( int tm = 0; tm < bundle->numTexMods ; tm++ ) {
 		switch ( bundle->texMods[tm].type )
 		{
 		case TMOD_NONE:
@@ -1002,9 +1001,8 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 					// RF_FORCE_ENT_ALPHA: override vertex color alpha
 					if ( i == 0 && backEnd.currentEntity &&
 						 ( backEnd.currentEntity->e.renderfx & RF_FORCE_ENT_ALPHA ) ) {
-						int j;
 						byte a = backEnd.currentEntity->e.shader.rgba[3];
-						for ( j = 0; j < tess.numVertexes; j++ ) {
+						for ( int j = 0; j < tess.numVertexes; j++ ) {
 							tess.svars.colors[0][j].rgba[3] = a;
 						}
 					}
@@ -1232,7 +1230,6 @@ void VK_LightingPass( void )
 	uint32_t pipeline;
 	const shaderStage_t *pStage;
 	cullType_t cull;
-	int abs_light;
 
 	if ( tess.shader->lightingStage < 0 )
 		return;
@@ -1264,7 +1261,7 @@ void VK_LightingPass( void )
 		}
 	}
 
-	abs_light = /* (pStage->stateBits & GLS_ATEST_BITS) && */ (cull == CT_TWO_SIDED) ? 1 : 0;
+	int abs_light = /* (pStage->stateBits & GLS_ATEST_BITS) && */ (cull == CT_TWO_SIDED) ? 1 : 0;
 
 	if ( fog_stage )
 		vk_update_descriptor( VK_DESC_FOG_DLIGHT, tr.fogImage->descriptor );

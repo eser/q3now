@@ -83,8 +83,7 @@ menuDef {
 	itemDef { name "prefsBasic" rect 0.035 0.205 0.380 0.040 type 0 style 1 text "Crosshair & Rail" font "sansman" 14 textoffset 0.010 0.010 forecolor WCOLOR_ACCENT backcolor 0.12 0.12 0.12 1 visible 0 decoration }
 	itemDef { name "prefsBasic" rect 0.435 0.205 0.380 0.040 type 0 style 1 text "Gameplay Basics" font "sansman" 14 textoffset 0.010 0.010 forecolor WCOLOR_ACCENT backcolor 0.12 0.12 0.12 1 visible 0 decoration }
 
-	itemDef { name "prefsBasic" type 12 text "Crosshair Style:" rect 0.045 0.270 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_drawCrosshair" cvarFloatList { "None" 0 "Cross" 1 "Dot" 2 "Circle" 3 "Bracket" 4 "X" 5 "Diamond" 6 } visible 0 }
-	itemDef { name "prefsBasic" type 12 text "Crosshair Color:" rect 0.045 0.335 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_crosshairColor" cvarFloatList { "White" 1 "Red" 2 "Green" 3 "Blue" 4 "Yellow" 5 "Cyan" 6 "Purple" 7 "Orange" 8 } visible 0 }
+	itemDef { name "prefsBasic" type 12 text "Crosshair:" rect 0.045 0.270 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_crosshairAlpha" cvarFloatList { "None" 0 "10%" 10 "20%" 20 "30%" 30 "40%" 40 "50%" 50 "70%" 70 "80%" 80 "90%" 90 "100%" 100 } visible 0 }
 	itemDef { name "prefsBasic" type 12 text "Rail Color:" rect 0.045 0.400 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "color1" cvarFloatList { "White" 1 "Red" 2 "Green" 3 "Blue" 4 "Yellow" 5 "Cyan" 6 "Purple" 7 "Orange" 8 } visible 0 }
 	itemDef { name "prefsBasic" type 12 text "Rail Style:" rect 0.045 0.465 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_railStyle" cvarFloatList { "Beam" 1 "Spiral" 2 } visible 0 }
 
@@ -100,14 +99,12 @@ menuDef {
 	itemDef { name "prefsAdvanced" rect 0.035 0.205 0.380 0.040 type 0 style 1 text "Advanced Gameplay" font "sansman" 14 textoffset 0.010 0.010 forecolor WCOLOR_ACCENT backcolor 0.12 0.12 0.12 1 visible 0 decoration }
 	itemDef { name "prefsAdvanced" rect 0.435 0.205 0.380 0.040 type 0 style 1 text "HUD / Team / Audio" font "sansman" 14 textoffset 0.010 0.010 forecolor WCOLOR_ACCENT backcolor 0.12 0.12 0.12 1 visible 0 decoration }
 
-	itemDef { name "prefsAdvanced" type 12 text "Team Overlay:" rect 0.045 0.270 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_drawTeamOverlay" cvarFloatList { "Off" 0 "Upper Right" 1 "Lower Right" 2 "Lower Left" 3 } visible 0 }
-	itemDef { name "prefsAdvanced" type 11 text "Show Timer:" rect 0.045 0.335 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_drawTimer" visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Dynamic Lights:" rect 0.045 0.400 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "r_dynamiclight" visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Force Player Models:" rect 0.045 0.465 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_forceSameModel" visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Low Quality Sky:" rect 0.045 0.530 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "r_fastsky" visible 0 }
 
 	itemDef { name "prefsAdvanced" type 12 text "Ejecting Brass:" rect 0.445 0.270 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_brassTime" cvarFloatList { "High" 2500 "Medium" 1250 "Off" 0 } visible 0 }
-	itemDef { name "prefsAdvanced" type 11 text "Voices Off:" rect 0.445 0.335 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_NoVoiceChats" visible 0 }
+	itemDef { name "prefsAdvanced" type 11 text "Voices Off:" rect 0.445 0.335 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_noVoiceChats" visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Taunts Off:" rect 0.445 0.400 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_noTaunt" visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Voice Text Off:" rect 0.445 0.465 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_noVoiceText" visible 0 }
 	itemDef { name "prefsAdvanced" type 11 text "Team Chats Only:" rect 0.445 0.530 0.360 0.055 font "oxanium" 13 forecolor WCOLOR_TEXT cvar "cg_teamChatsOnly" visible 0 }

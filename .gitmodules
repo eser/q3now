@@ -19,3 +19,6 @@
 [submodule "src/libs/libjpeg-turbo"]
 	path = src/libs/libjpeg-turbo
 	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
+[submodule "src/libs/recastnavigation"]
+	path = src/libs/recastnavigation
+	url = https://github.com/recastnavigation/recastnavigation.git

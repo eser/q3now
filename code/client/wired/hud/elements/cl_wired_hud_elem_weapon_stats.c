@@ -69,25 +69,22 @@ void *CG_ModernHUDElementIconCreatePG( const modernhudConfig_t *config )        
 
 void CG_ModernHUDElementWeaponStatsRoutine( void *context ) {
 	modernHudElementWeaponStats_t *element = (modernHudElementWeaponStats_t *)context;
-	int wp;
-	int hits, shots, acc;
-	int maxSlots;
 
 	if ( !element ) return;
 
 	/* resolve weapon ID (-1 = current weapon) */
-	wp = element->weaponId;
+	int wp = element->weaponId;
 	if ( wp < 0 ) {
 		wp = wiredHud->weapon;
 	}
 
 	/* bounds check against bridge array size */
-	maxSlots = (int)(sizeof(wiredHud->attackStats) / sizeof(wiredHud->attackStats[0]));
+	int maxSlots = (int)(sizeof(wiredHud->attackStats) / sizeof(wiredHud->attackStats[0]));
 	if ( wp < 0 || wp >= maxSlots ) return;
 
-	hits  = wiredHud->attackStats[wp].hits;
-	shots = wiredHud->attackStats[wp].shots;
-	acc   = ( shots > 0 ) ? (int)( 100.0f * hits / shots ) : 0;
+	int hits  = wiredHud->attackStats[wp].hits;
+	int shots = wiredHud->attackStats[wp].shots;
+	int acc   = ( shots > 0 ) ? (int)( 100.0f * hits / shots ) : 0;
 
 	if ( element->isIcon ) {
 		/* draw weapon icon */

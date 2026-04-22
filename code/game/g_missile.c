@@ -72,13 +72,13 @@ void G_BounceMissile( gentity_t *ent, trace_t *trace ) {
 		if ( trace->plane.normal[2] > 0.7f &&
 			 ent->s.pos.trDelta[2] > -60 && ent->s.pos.trDelta[2] < 60 ) {
 			G_SetOrigin( ent, trace->endpos );
-#if FEAT_GRENADE_REST_FIX
+
 			// freeze at current visual angle instead of snapping to axis
 			BG_EvaluateTrajectory( &ent->s.apos, level.time, ent->s.angles );
 			VectorCopy( ent->s.angles, ent->s.apos.trBase );
 			VectorClear( ent->s.apos.trDelta );
 			ent->s.apos.trType = TR_STATIONARY;
-#endif
+
 			ent->s.time = level.time / 4;
 			return;
 		}
@@ -90,13 +90,13 @@ void G_BounceMissile( gentity_t *ent, trace_t *trace ) {
 			// check for stop
 			if ( trace->plane.normal[2] > 0.2 && VectorLength( ent->s.pos.trDelta ) < 40 ) {
 				G_SetOrigin( ent, trace->endpos );
-#if FEAT_GRENADE_REST_FIX
+
 				// freeze at current visual angle instead of snapping to axis
 				BG_EvaluateTrajectory( &ent->s.apos, level.time, ent->s.angles );
 				VectorCopy( ent->s.angles, ent->s.apos.trBase );
 				VectorClear( ent->s.apos.trDelta );
 				ent->s.apos.trType = TR_STATIONARY;
-#endif
+
 				ent->s.time = level.time / 4;
 				return;
 			}
@@ -209,14 +209,12 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 	if ( !other->takedamage &&
 		( ent->s.eFlags & ( EF_BOUNCE | EF_BOUNCE_HALF | EF_GRENADE_BOUNCE ) ) ) {
 		G_BounceMissile( ent, trace );
-#if FEAT_BOUNCE_SOUND_LIMIT
+
 		if ( level.time - ent->pain_debounce_time > 100 ) {  // max 10 bounces/sec
 			G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
 			ent->pain_debounce_time = level.time;
 		}
-#else
-		G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
-#endif
+
 		return;
 	}
 
@@ -641,7 +639,7 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 	bolt->s.eType = ET_MISSILE;
 	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	bolt->s.weapon = WP_GRENADE_LAUNCHER;
-#if FEAT_GRENADE_REST_FIX
+
 	// give grenades angular velocity so they tumble and rest at natural angles
 	bolt->s.apos.trType = TR_LINEAR;
 	bolt->s.apos.trTime = level.time;
@@ -650,7 +648,7 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 	VectorCopy( bolt->s.angles, bolt->s.apos.trBase );
 	bolt->s.apos.trDelta[0] = 300 + (rand() % 300);
 	bolt->s.apos.trDelta[1] = 300 + (rand() % 300);
-#endif
+
 	bolt->s.eFlags = (bounce) ? EF_GRENADE_BOUNCE : 0;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;

@@ -748,6 +748,12 @@ char	**FS_ListFiles( const char *directory, const char *extension, int *numfiles
 // if extension is "/", only subdirectories will be returned
 // the returned files will not include any directories or /
 
+char	**FS_ListDirectories( const char *path, int *numDirs );
+// Returns immediate subdirectory names under path, merged across all backends.
+// Works correctly with archive formats (pk3/sw3z) that store no directory
+// entries — subdirectories are inferred from stored file paths.
+// Caller frees via FS_FreeFileList.
+
 void	FS_FreeFileList( char **list );
 
 qboolean FS_FileExists( const char *file );
@@ -981,8 +987,7 @@ extern	int	CPU_Flags;
 char		*CopyString( const char *in );
 void		Info_Print( const char *s );
 
-void		Com_BeginRedirect (char *buffer, int buffersize, void (*flush)(const char *));
-void		Com_EndRedirect( void );
+#include "log.h"
 void 		QDECL Com_Printf( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
 void 		QDECL Com_DPrintf( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
 void 		Com_Quit_f( void );
@@ -1413,6 +1418,10 @@ qboolean Sys_SetAffinityMask( const uint64_t mask );
 // any game related timing information should come from event timestamps
 int		Sys_Milliseconds( void );
 int64_t	Sys_Microseconds( void );
+// Contract-infallible on all supported targets: POSIX guarantees
+// CLOCK_MONOTONIC; MSDN guarantees QueryPerformanceCounter on XP+.
+// Returns nanoseconds since an arbitrary epoch (monotonic, no leap seconds).
+int64_t	Sys_NanoTime( void );
 
 void	Sys_SnapVector( float *vector );
 
@@ -1495,5 +1504,8 @@ void BSP_Shutdown( void );
 
 // Headless Lua scripting runtime
 #include "wired/scripting/wired_scripting.h"
+
+// Grouped asset-failure logging
+#include "asset_load_log.h"
 
 #endif // _QCOMMON_H_

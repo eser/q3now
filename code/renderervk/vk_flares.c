@@ -91,8 +91,6 @@ R_ClearFlares
 ==================
 */
 void R_ClearFlares( void ) {
-	int		i;
-
 	if ( !vk.fragmentStores )
 		return;
 
@@ -100,7 +98,7 @@ void R_ClearFlares( void ) {
 	r_activeFlares = NULL;
 	r_inactiveFlares = NULL;
 
-	for ( i = 0 ; i < MAX_FLARES ; i++ ) {
+	for ( int i = 0 ; i < MAX_FLARES ; i++ ) {
 		r_flareStructs[i].next = r_inactiveFlares;
 		r_inactiveFlares = &r_flareStructs[i];
 	}
@@ -130,7 +128,6 @@ This is called at surface tesselation time
 ==================
 */
 void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t normal ) {
-	int				i;
 	flare_t			*f;
 	vec3_t			local;
 	float			d = 1;
@@ -153,7 +150,7 @@ void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t 
 	R_TransformModelToClip( point, backEnd.or.modelMatrix, backEnd.viewParms.projectionMatrix, eye, clip );
 
 	// check to see if the point is completely off screen
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		if ( clip[i] >= clip[3] || clip[i] <= -clip[3] ) {
 			return;
 		}
@@ -296,7 +293,6 @@ static void RB_TestFlare( flare_t *f ) {
 	float			fade;
 	float			*m;
 	uint32_t		offset;
-	int				i;
 
 	backEnd.pc.c_flareTests++;
 
@@ -345,7 +341,7 @@ static void RB_TestFlare( flare_t *f ) {
 	tess.vboIndex = 0;
 #endif
 	// invalidate descriptors
-	for ( i = 0; i < VK_DESC_COUNT; i++ ) {
+	for ( int i = 0; i < VK_DESC_COUNT; i++ ) {
 		vk_reset_descriptor( i );
 	}
 	// render test dot

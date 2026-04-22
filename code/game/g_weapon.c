@@ -448,7 +448,6 @@ KamikazeDamage
 ===============
 */
 static void KamikazeDamage( gentity_t *self ) {
-	int i;
 	float t;
 	gentity_t *ent;
 	vec3_t newangles;
@@ -478,7 +477,7 @@ static void KamikazeDamage( gentity_t *self ) {
 	newangles[0] = crandom() * 2;
 	newangles[1] = crandom() * 2;
 	newangles[2] = 0;
-	for (i = 0; i < MAX_CLIENTS; i++)
+	for (int i = 0; i < MAX_CLIENTS; i++)
 	{
 		ent = &g_entities[i];
 		if (!ent->inuse)

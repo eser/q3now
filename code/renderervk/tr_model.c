@@ -86,8 +86,6 @@ static qhandle_t R_RegisterMD3(const char *name, model_t *mod)
 	if ( mod->numLods )
 		return mod->index;
 
-	ri.Printf( PRINT_DEVELOPER, S_COLOR_YELLOW "%s: couldn't load %s\n", __func__, name );
-
 	mod->type = MOD_BAD;
 	return 0;
 }
@@ -106,9 +104,7 @@ static qhandle_t R_RegisterMDR(const char *name, model_t *mod)
 	} buf;
 	uint32_t ident;
 	qboolean loaded = qfalse;
-	int filesize;
-
-	filesize = ri.FS_ReadFile( name, &buf.v );
+	int filesize = ri.FS_ReadFile( name, &buf.v );
 	if ( !buf.v ) {
 		mod->type = MOD_BAD;
 		return 0;
@@ -150,9 +146,7 @@ static qhandle_t R_RegisterIQM(const char *name, model_t *mod)
 		void *v;
 	} buf;
 	qboolean loaded = qfalse;
-	int filesize;
-
-	filesize = ri.FS_ReadFile(name, (void **) &buf.v);
+	int filesize = ri.FS_ReadFile(name, (void **) &buf.v);
 	if(!buf.u)
 	{
 		mod->type = MOD_BAD;
@@ -347,12 +341,6 @@ qhandle_t RE_RegisterModel( const char *name ) {
 
 		if( hModel )
 		{
-			if( orgNameFailed )
-			{
-				ri.Printf( PRINT_DEVELOPER, "WARNING: %s not present, using %s instead\n",
-						name, altName );
-			}
-
 			break;
 		}
 	}
@@ -977,12 +965,11 @@ R_Modellist_f
 ================
 */
 void R_Modellist_f( void ) {
-	int		i;
 	model_t	*mod;
 	int		total;
 
 	total = 0;
-	for ( i = 1 ; i < tr.numModels; i++ ) {
+	for ( int i = 1 ; i < tr.numModels; i++ ) {
 		mod = tr.models[i];
 		ri.Printf( PRINT_ALL, "%8i : (%i) %s\n",mod->dataSize, mod->numLods, mod->name );
 		total += mod->dataSize;
@@ -1075,7 +1062,6 @@ int R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFram
 					 float frac, const char *tagName ) {
 	md3Tag_t	*start, *end;
 	md3Tag_t	start_space, end_space;
-	int		i;
 	float		frontLerp, backLerp;
 	model_t		*model;
 
@@ -1114,7 +1100,7 @@ int R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFram
 	frontLerp = frac;
 	backLerp = 1.0f - frac;
 
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		tag->origin[i] = start->origin[i] * backLerp +  end->origin[i] * frontLerp;
 		tag->axis[0][i] = start->axis[0][i] * backLerp +  end->axis[0][i] * frontLerp;
 		tag->axis[1][i] = start->axis[1][i] * backLerp +  end->axis[1][i] * frontLerp;

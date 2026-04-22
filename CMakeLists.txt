@@ -204,7 +204,68 @@ TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${WIREDNET_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE OpenSSL::Crypto)
 
 
-# ── libogg (Ogg container format) ─────────────────────────────────
+# ── Recast/Detour navmesh (replaces AAS when USE_RECAST_NAVMESH=ON) ──
+OPTION(USE_RECAST_NAVMESH "Use Recast/Detour/DetourCrowd navmesh (replaces AAS)" ON)
+IF(NOT USE_RECAST_NAVMESH)
+	ADD_COMPILE_DEFINITIONS(FEAT_RECAST_NAVMESH=0)
+ELSE()
+	# Recast / Detour / DetourCrowd sources from the vendored submodule.
+	# DetourCrowd is compiled but dormant until Phase 6.
+	FILE(GLOB RECAST_SRC    src/libs/recastnavigation/Recast/Source/*.cpp)
+	FILE(GLOB DETOUR_SRC    src/libs/recastnavigation/Detour/Source/*.cpp)
+	FILE(GLOB DETOURCROWD_SRC src/libs/recastnavigation/DetourCrowd/Source/*.cpp)
+
+	ADD_LIBRARY(recast_nav STATIC
+		${RECAST_SRC}
+		${DETOUR_SRC}
+		${DETOURCROWD_SRC}
+	)
+	# Expose only the Include dirs that the nav integration layer needs.
+	TARGET_INCLUDE_DIRECTORIES(recast_nav PUBLIC
+		src/libs/recastnavigation/Recast/Include
+		src/libs/recastnavigation/Detour/Include
+		src/libs/recastnavigation/DetourCrowd/Include
+	)
+	# Recast/Detour do not use C++ exceptions or RTTI.
+	TARGET_COMPILE_OPTIONS(recast_nav PRIVATE
+		$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-exceptions -fno-rtti>
+	)
+
+	SET(RECAST_INCLUDE_DIRS
+		src/libs/recastnavigation/Recast/Include
+		src/libs/recastnavigation/Detour/Include
+		src/libs/recastnavigation/DetourCrowd/Include
+	)
+
+	# Nav integration layer: code/qcommon/nav/*.cpp + *.c
+	FILE(GLOB NAV_CPP_SRCS code/qcommon/nav/*.cpp)
+	FILE(GLOB NAV_C_SRCS   code/qcommon/nav/*.c)
+
+	# Nav CPP files inherit from rcContext which is compiled without RTTI.
+	# Apply -fno-rtti to avoid typeinfo mismatch at link time.
+	SET_SOURCE_FILES_PROPERTIES(${NAV_CPP_SRCS} PROPERTIES
+		COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-exceptions;-fno-rtti>")
+
+	TARGET_SOURCES(qcommon     PRIVATE ${NAV_CPP_SRCS} ${NAV_C_SRCS})
+	TARGET_SOURCES(qcommon_ded PRIVATE ${NAV_CPP_SRCS} ${NAV_C_SRCS})
+
+	TARGET_INCLUDE_DIRECTORIES(qcommon     PRIVATE ${RECAST_INCLUDE_DIRS})
+	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${RECAST_INCLUDE_DIRS})
+
+	TARGET_LINK_LIBRARIES(qcommon     PRIVATE recast_nav)
+	TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE recast_nav)
+
+	# Unit test — Phase 2 hard gate 1: coordinate round-trip identity.
+	# Run with: ctest -R nav_coord_round_trip
+	ENABLE_TESTING()
+	ADD_EXECUTABLE(nav_coord_test
+		tests/nav_coord_test.c
+		code/qcommon/nav/nav_coord.c
+	)
+	ADD_TEST(NAME nav_coord_round_trip COMMAND nav_coord_test)
+ENDIF()
+
+
 set(OGG_SRCS src/libs/ogg/src/bitwise.c src/libs/ogg/src/framing.c)
 add_library(ogg STATIC ${OGG_SRCS})
 target_include_directories(ogg PUBLIC src/libs/ogg/include)
@@ -236,6 +297,34 @@ IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64|x86|i.86")
     file(GLOB OPUS_SILK_X86_SRCS src/libs/opus/silk/x86/*.c)
     file(GLOB OPUS_SILK_FLOAT_X86_SRCS src/libs/opus/silk/float/x86/*.c)
     list(APPEND OPUS_ARCH_SRCS ${OPUS_CELT_X86_SRCS} ${OPUS_SILK_X86_SRCS} ${OPUS_SILK_FLOAT_X86_SRCS})
+    # Each SSE/AVX file requires the matching ISA flag; without it GCC/Clang reject the intrinsics
+    foreach(_f
+        src/libs/opus/celt/x86/pitch_sse2.c
+        src/libs/opus/celt/x86/vq_sse2.c
+    )
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/${_f} PROPERTIES COMPILE_FLAGS "-msse2")
+    endforeach()
+    foreach(_f
+        src/libs/opus/celt/x86/celt_lpc_sse4_1.c
+        src/libs/opus/celt/x86/pitch_sse4_1.c
+        src/libs/opus/silk/x86/NSQ_del_dec_sse4_1.c
+        src/libs/opus/silk/x86/NSQ_sse4_1.c
+        src/libs/opus/silk/x86/VAD_sse4_1.c
+        src/libs/opus/silk/x86/VQ_WMat_EC_sse4_1.c
+    )
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/${_f} PROPERTIES COMPILE_FLAGS "-msse4.1")
+    endforeach()
+    foreach(_f
+        src/libs/opus/celt/x86/pitch_avx.c
+    )
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/${_f} PROPERTIES COMPILE_FLAGS "-mavx")
+    endforeach()
+    foreach(_f
+        src/libs/opus/silk/x86/NSQ_del_dec_avx2.c
+        src/libs/opus/silk/float/x86/inner_product_FLP_avx2.c
+    )
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/${_f} PROPERTIES COMPILE_FLAGS "-mavx2")
+    endforeach()
 ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|arm")
     file(GLOB OPUS_CELT_ARM_SRCS src/libs/opus/celt/arm/*.c)
     file(GLOB OPUS_SILK_ARM_SRCS src/libs/opus/silk/arm/*.c)

@@ -191,7 +191,6 @@ extern float EvalWaveFormClamped( const waveForm_t *wf );
 
 static void ComputeTexMods( shaderStage_t *pStage, int bundleNum, float *outMatrix, float *outOffTurb)
 {
-	int tm;
 	float matrix[6], currentmatrix[6];
 	textureBundle_t *bundle = &pStage->bundle[bundleNum];
 
@@ -206,7 +205,7 @@ static void ComputeTexMods( shaderStage_t *pStage, int bundleNum, float *outMatr
 
 	outOffTurb[0] = 0.0f; outOffTurb[1] = 0.0f; outOffTurb[2] = 0.0f; outOffTurb[3] = 0.0f;
 
-	for ( tm = 0; tm < bundle->numTexMods ; tm++ ) {
+	for ( int tm = 0; tm < bundle->numTexMods ; tm++ ) {
 		switch ( bundle->texMods[tm].type )
 		{
 			
@@ -986,8 +985,6 @@ static unsigned int RB_CalcShaderVertexAttribs( const shaderCommands_t *input )
 
 static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 {
-	int stage;
-	
 	vec4_t fogDistanceVector, fogDepthVector = {0, 0, 0, 0};
 	float eyeT = 0;
 
@@ -1000,7 +997,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 
 	ComputeFogValues(fogDistanceVector, fogDepthVector, &eyeT);
 
-	for ( stage = 0; stage < MAX_SHADER_STAGES; stage++ )
+	for ( int stage = 0; stage < MAX_SHADER_STAGES; stage++ )
 	{
 		shaderStage_t *pStage = input->xstages[stage];
 		shaderProgram_t *sp;
@@ -1276,7 +1273,6 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		}
 		else if ( pStage->glslShaderGroup == tr.lightallShader )
 		{
-			int i;
 			vec4_t enableTextures;
 
 			if (r_sunlightMode->integer && (backEnd.viewParms.flags & VPF_USESUNLIGHT) && (pStage->glslShaderIndex & LIGHTDEF_LIGHTTYPE_MASK))
@@ -1304,7 +1300,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			VectorSet4(enableTextures, 0, 0, 0, 0);
 			if ((r_lightmap->integer == 1 || r_lightmap->integer == 2) && pStage->bundle[TB_LIGHTMAP].image[0])
 			{
-				for (i = 0; i < NUM_TEXTURE_BUNDLES; i++)
+				for (int i = 0; i < NUM_TEXTURE_BUNDLES; i++)
 				{
 					if (i == TB_COLORMAP)
 						R_BindAnimatedImageToTMU( &pStage->bundle[TB_LIGHTMAP], i);
@@ -1314,7 +1310,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			}
 			else if (r_lightmap->integer == 3 && pStage->bundle[TB_DELUXEMAP].image[0])
 			{
-				for (i = 0; i < NUM_TEXTURE_BUNDLES; i++)
+				for (int i = 0; i < NUM_TEXTURE_BUNDLES; i++)
 				{
 					if (i == TB_COLORMAP)
 						R_BindAnimatedImageToTMU( &pStage->bundle[TB_DELUXEMAP], i);

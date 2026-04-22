@@ -69,7 +69,6 @@ Console command: /unignore <clientnum|name|all>
 void CG_ChatFilterUnignore_f( void ) {
 	char arg[MAX_TOKEN_CHARS];
 	int clientNum;
-	int i;
 
 	if ( trap_Argc() < 2 ) {
 		CG_Printf( "Usage: unignore <clientnum|name|all>\n" );
@@ -96,7 +95,7 @@ void CG_ChatFilterUnignore_f( void ) {
 	}
 
 	// try as player name
-	for ( i = 0; i < MAX_CLIENTS; i++ ) {
+	for ( int i = 0; i < MAX_CLIENTS; i++ ) {
 		if ( cgs.clientinfo[i].infoValid && Q_stristr( cgs.clientinfo[i].name, arg ) ) {
 			mutedClients[i] = qfalse;
 			CG_Printf( "Unignoring %s\n", CG_ClientName( &cgs.clientinfo[i] ) );

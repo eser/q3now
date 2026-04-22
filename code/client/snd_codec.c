@@ -30,7 +30,6 @@ static void S_CodecRegister( snd_codec_t *codec );
 
 static qboolean S_CodecPreferLegacy( void ) {
 	char profile[16];
-	int version;
 
 	Cvar_VariableStringBuffer( "com_mapAssetProfile", profile, sizeof( profile ) );
 	if ( !Q_stricmp( profile, "legacy" ) ) {
@@ -40,7 +39,7 @@ static qboolean S_CodecPreferLegacy( void ) {
 		return qfalse;
 	}
 
-	version = Cvar_VariableIntegerValue( "com_mapBspVersion" );
+	int version = Cvar_VariableIntegerValue( "com_mapBspVersion" );
 	return ( version > 0 && ( version <= 46 || version == 68 ) ) ? qtrue : qfalse;
 }
 
@@ -57,10 +56,19 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 	snd_codec_t *codec;
 	snd_codec_t *orgCodec = NULL;
 	qboolean	orgNameFailed = qfalse;
-	char		localName[ MAX_QPATH ];
+	char		localName[ MAX_VFS_PATH ];
 	const char	*ext;
-	char		altName[ MAX_QPATH ];
+	char		altName[ MAX_VFS_PATH ];
 	void		*rtn = NULL;
+	char		normName[ MAX_VFS_PATH ];
+
+	// normalize backslash separators (BSP/map music paths often use backslashes)
+	{
+		char *p;
+		Q_strncpyz( normName, filename, sizeof( normName ) );
+		for ( p = normName; *p; p++ ) { if ( *p == '\\' ) *p = '/'; }
+		filename = normName;
+	}
 
 	Q_strncpyz( localName, filename, sizeof( localName ) );
 
@@ -91,7 +99,7 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 				// try again without the extension
 				orgNameFailed = qtrue;
 				orgCodec = codec;
-				COM_StripExtension( filename, localName, MAX_QPATH );
+				COM_StripExtension( filename, localName, sizeof( localName ) );
 			}
 			else
 			{
@@ -145,15 +153,40 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 		{
 			if ( orgNameFailed )
 			{
-				Com_DPrintf( S_COLOR_YELLOW "WARNING: %s not present, using %s instead\n",
-					filename, altName );
+				if ( Q_stricmpn( localName, "characters/", 11 ) != 0 &&
+				     Q_stricmpn( localName, "music/", 6 ) != 0 )
+				{
+					char fbBuf[32];
+					Com_sprintf( fbBuf, sizeof( fbBuf ), "%s>%s",
+					             orgCodec ? orgCodec->ext : "?", codec->ext );
+					AssetLog_Event( "sound", localName, fbBuf, NULL, ASSET_LOG_INFO );
+				}
 			}
 
 			return rtn;
 		}
 	}
 
-	Com_DPrintf( S_COLOR_YELLOW "WARNING: Failed to %s sound %s!\n", info ? "load" : "open", filename );
+	if ( Q_stricmpn( localName, "characters/", 11 ) != 0 &&
+	     Q_stricmpn( localName, "music/", 6 ) != 0 )
+	{
+		char extBuf[64];
+		const snd_codec_t *c;
+		qboolean first = qtrue;
+		extBuf[0] = '\0';
+		if ( orgCodec ) {
+			Q_strncpyz( extBuf, orgCodec->ext, sizeof( extBuf ) );
+			first = qfalse;
+		}
+		for ( c = codecs; c; c = c->next ) {
+			if ( c == orgCodec ) continue;
+			if ( !first )
+				strncat( extBuf, ",", sizeof( extBuf ) - strlen( extBuf ) - 1 );
+			strncat( extBuf, c->ext, sizeof( extBuf ) - strlen( extBuf ) - 1 );
+			first = qfalse;
+		}
+		AssetLog_Event( "sound", localName, *extBuf ? extBuf : "wav,opus", NULL, ASSET_LOG_WARN );
+	}
 
 	return NULL;
 }
@@ -257,20 +290,16 @@ S_CodecUtilOpen
 */
 snd_stream_t *S_CodecUtilOpen( const char *filename, snd_codec_t *codec )
 {
-	snd_stream_t *stream;
-	fileHandle_t hnd;
-	int length;
-
 	// Try to open the file
-	length = FS_FOpenFileRead( filename, &hnd, qtrue );
+	fileHandle_t hnd;
+	int length = FS_FOpenFileRead( filename, &hnd, qtrue );
 	if ( hnd == FS_INVALID_HANDLE )
 	{
-		Com_DPrintf( "Can't read sound file %s\n", filename );
 		return NULL;
 	}
 
 	// Allocate a stream
-	stream = Z_Malloc( sizeof( snd_stream_t ) );
+	snd_stream_t *stream = Z_Malloc( sizeof( snd_stream_t ) );
 	if ( !stream )
 	{
 		FS_FCloseFile( hnd );

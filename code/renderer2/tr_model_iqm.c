@@ -1776,13 +1776,12 @@ void RB_IQMSurfaceAnimVao(const srfVaoIQModel_t * surface)
 		int			frame = data->num_frames ? backEnd.currentEntity->e.frame % data->num_frames : 0;
 		int			oldframe = data->num_frames ? backEnd.currentEntity->e.oldframe % data->num_frames : 0;
 		float		backlerp = backEnd.currentEntity->e.backlerp;
-		int i;
 
 		// compute interpolated joint matrices
 		ComputePoseMats( surface->iqmData, frame, oldframe, backlerp, jointMats );
 
 		// convert row-major order 3x4 matrix to column-major order 4x4 matrix
-		for ( i = 0; i < data->num_poses; i++ ) {
+		for ( int i = 0; i < data->num_poses; i++ ) {
 			glState.boneMatrix[i][0] = jointMats[i*12+0];
 			glState.boneMatrix[i][1] = jointMats[i*12+4];
 			glState.boneMatrix[i][2] = jointMats[i*12+8];

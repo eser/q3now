@@ -26,7 +26,7 @@ void CG_ModernHUDElementTargetStatusRoutine(void* context)
 	char    s[1024];
 	clientInfo_t* ci;
 
-	if (cg_drawCrosshair.integer == 0) return;
+	if (cg_crosshairAlpha.integer == 0) return;
 	if (cg_drawCrosshairNames.integer == 0) return;
 	if (cg.renderingThirdPerson != 0) return;
 	if (cg.crosshairClientTime == 0) return;
@@ -40,7 +40,7 @@ void CG_ModernHUDElementTargetStatusRoutine(void* context)
 
 	{
 		wuiStoreEntry_t *e = WiredStore_Get( "crosshair.isTeammate" );
-		if ( e && (int)e->value != 0 && cg_crosshairHealth.integer != 0 && !(cg.snap->ps.pm_flags & PMF_FOLLOW) )
+		if ( e && (int)e->value != 0 && !(cg.snap->ps.pm_flags & PMF_FOLLOW) )
 		{
 			vec4_t hcolor;
 			char s[1024];

@@ -303,7 +303,7 @@ SCR_DrawVoipMeter
 static void SCR_DrawVoipMeter( void ) {
 	char	buffer[16];
 	char	string[256];
-	int limit, i;
+	int i;
 
 	if (!cl_voipShowMeter->integer)
 		return;  // player doesn't want to show meter at all.
@@ -318,7 +318,7 @@ static void SCR_DrawVoipMeter( void ) {
 	else if (!cl_voip->integer)
 		return;  // client has VoIP support disabled.
 
-	limit = (int) (clc.voipPower * 10.0f);
+	int limit = (int) (clc.voipPower * 10.0f);
 	if (limit > 10)
 		limit = 10;
 
@@ -364,29 +364,26 @@ SCR_DrawDebugGraph
 */
 static void SCR_DrawDebugGraph( void )
 {
-	int		a, x, y, w, i, h;
-	float	v;
-
 	//
 	// draw the graph
 	//
-	w = cls.glconfig.vidWidth;
-	x = 0;
-	y = cls.glconfig.vidHeight;
+	int w = cls.glconfig.vidWidth;
+	int x = 0;
+	int y = cls.glconfig.vidHeight;
 	re.SetColor( g_color_table[ ColorIndex( COLOR_BLACK ) ] );
-	re.DrawStretchPic(x, y - cl_graphheight->integer, 
+	re.DrawStretchPic(x, y - cl_graphheight->integer,
 		w, cl_graphheight->integer, 0, 0, 0, 0, cls.whiteShader );
 	re.SetColor( NULL );
 
-	for (a=0 ; a<w ; a++)
+	for (int a=0 ; a<w ; a++)
 	{
-		i = (ARRAY_LEN(values)+current-1-(a % ARRAY_LEN(values))) % ARRAY_LEN(values);
-		v = values[i];
+		int i = (ARRAY_LEN(values)+current-1-(a % ARRAY_LEN(values))) % ARRAY_LEN(values);
+		float v = values[i];
 		v = v * cl_graphscale->integer + cl_graphshift->integer;
-		
+
 		if (v < 0)
 			v += cl_graphheight->integer * (1+(int)(-v / cl_graphheight->integer));
-		h = (int)v % cl_graphheight->integer;
+		int h = (int)v % cl_graphheight->integer;
 		re.DrawStretchPic( x+w-1-a, y - h, 1, h, 0, 0, 0, 0, cls.whiteShader );
 	}
 }

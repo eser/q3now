@@ -244,9 +244,7 @@ ClearSkyBox
 ==============
 */
 static void ClearSkyBox (void) {
-	int		i;
-
-	for (i=0 ; i<6 ; i++) {
+	for (int i=0 ; i<6 ; i++) {
 		sky_mins[0][i] = sky_mins[1][i] = 9999;
 		sky_maxs[0][i] = sky_maxs[1][i] = -9999;
 	}
@@ -341,10 +339,10 @@ CullPoints
 static qboolean CullPoints( vec4_t v[], const int count )
 {
 	const cplane_t *frust;
-	int i, j;
+	int j;
 	float dist;
 
-	for ( i = 0; i < 5; i++ ) {
+	for ( int i = 0; i < 5; i++ ) {
 		frust = &backEnd.viewParms.frustum[i];
 		for ( j = 0; j < count; j++ ) {
 			dist = DotProduct( v[j], frust->normal ) - frust->dist;
@@ -477,11 +475,10 @@ static void DrawSkySide( image_t *image, const int mins[2], const int maxs[2] )
 
 static void DrawSkyBox( const shader_t *shader )
 {
-	int		i;
 	sky_min = 0;
 	sky_max = 1;
 
-	for ( i = 0; i < 6; i++ )
+	for ( int i = 0; i < 6; i++ )
 	{
 		int sky_mins_subd[2], sky_maxs_subd[2];
 		int s, t;
@@ -540,9 +537,7 @@ static void DrawSkyBox( const shader_t *shader )
 
 static void FillCloudBox( void )
 {
-	int i;
-
-	for ( i =0; i < 6; i++ )
+	for ( int i = 0; i < 6; i++ )
 	{
 		int sky_mins_subd[2], sky_maxs_subd[2];
 		int s, t;
@@ -658,10 +653,9 @@ static void R_BuildCloudData( const shaderCommands_t *input )
 static void BuildSkyTexCoords( void )
 {
 	float s, t;
-	int i, j;
 
-	for ( i = 0; i <= SKY_SUBDIVISIONS; i++ ) {
-		for ( j = 0; j <= SKY_SUBDIVISIONS; j++ ) {
+	for ( int i = 0; i <= SKY_SUBDIVISIONS; i++ ) {
+		for ( int j = 0; j <= SKY_SUBDIVISIONS; j++ ) {
 			s = ( j - HALF_SKY_SUBDIVISIONS ) / ( float ) HALF_SKY_SUBDIVISIONS;
 			t = ( i - HALF_SKY_SUBDIVISIONS ) / ( float ) HALF_SKY_SUBDIVISIONS;
 

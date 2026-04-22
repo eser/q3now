@@ -228,15 +228,6 @@ loading screen preview.  Only MST_PLANAR surfaces are included.
 ================
 */
 void CL_BuildBspPreview( const char *mapname ) {
-	bspFile_t *bsp;
-	dsurface_t *surfaces;
-	drawVert_t *drawVerts;
-	const char *entityString;
-	int numSurfaces, numDrawVerts;
-	int i, j;
-	char bspPath[MAX_QPATH];
-	qboolean boundsInit;
-
 	CL_ClearBspPreview();
 
 	if ( !mapname || !mapname[0] ) {
@@ -244,18 +235,20 @@ void CL_BuildBspPreview( const char *mapname ) {
 	}
 
 	// Build BSP path
+	char bspPath[MAX_QPATH];
 	Com_sprintf( bspPath, sizeof( bspPath ), "maps/%s.bsp", mapname );
 
+	bspFile_t *bsp;
 	if ( !BSP_Load( bspPath, &bsp ) ) {
 		Com_DPrintf( "CL_BuildBspPreview: could not open %s\n", bspPath );
 		return;
 	}
 
-	drawVerts = bsp->drawVerts;
-	numDrawVerts = bsp->numDrawVerts;
-	surfaces = bsp->surfaces;
-	numSurfaces = bsp->numSurfaces;
-	entityString = bsp->entityString;
+	drawVert_t *drawVerts = bsp->drawVerts;
+	int numDrawVerts = bsp->numDrawVerts;
+	dsurface_t *surfaces = bsp->surfaces;
+	int numSurfaces = bsp->numSurfaces;
+	const char *entityString = bsp->entityString;
 
 	if ( numDrawVerts <= 0 || !drawVerts ) {
 		BSP_Free( bsp );
@@ -270,19 +263,19 @@ void CL_BuildBspPreview( const char *mapname ) {
 	}
 
 	// --- Pass 1: Compute total XY bounds across all planar surfaces ---
-	boundsInit = qfalse;
+	qboolean boundsInit = qfalse;
 	cl_bspPreview.numSurfaces = 0;
 	{
 		float totalMinX = 0, totalMinY = 0, totalMaxX = 0, totalMaxY = 0;
 		float totalRangeX, totalRangeY;
 
-		for ( i = 0; i < numSurfaces; i++ ) {
+		for ( int i = 0; i < numSurfaces; i++ ) {
 			int firstVert, numVerts;
 			if ( surfaces[i].surfaceType != MST_PLANAR ) continue;
 			firstVert = surfaces[i].firstVert;
 			numVerts = surfaces[i].numVerts;
 			if ( numVerts < 3 || firstVert < 0 || firstVert + numVerts > numDrawVerts ) continue;
-			for ( j = 0; j < numVerts; j++ ) {
+			for ( int j = 0; j < numVerts; j++ ) {
 				float vx = drawVerts[firstVert + j].xyz[0];
 				float vy = drawVerts[firstVert + j].xyz[1];
 				if ( !boundsInit ) {
@@ -305,7 +298,7 @@ void CL_BuildBspPreview( const char *mapname ) {
 		// --- Pass 2: Build edges, skipping oversized surfaces (skybox/void) ---
 		boundsInit = qfalse;
 
-		for ( i = 0; i < numSurfaces; i++ ) {
+		for ( int i = 0; i < numSurfaces; i++ ) {
 			int firstVert, numVerts;
 			float sMinX, sMinY, sMaxX, sMaxY;
 
@@ -328,7 +321,7 @@ void CL_BuildBspPreview( const char *mapname ) {
 			// Compute this surface's XY extent
 			sMinX = sMaxX = drawVerts[firstVert].xyz[0];
 			sMinY = sMaxY = drawVerts[firstVert].xyz[1];
-			for ( j = 1; j < numVerts; j++ ) {
+			for ( int j = 1; j < numVerts; j++ ) {
 				float vx = drawVerts[firstVert + j].xyz[0];
 				float vy = drawVerts[firstVert + j].xyz[1];
 				if ( vx < sMinX ) sMinX = vx;
@@ -345,7 +338,7 @@ void CL_BuildBspPreview( const char *mapname ) {
 			}
 
 			// Add edges between consecutive vertices (top-down XY, preserve Z)
-			for ( j = 0; j < numVerts; j++ ) {
+			for ( int j = 0; j < numVerts; j++ ) {
 				int v0 = firstVert + j;
 				int v1 = firstVert + ( ( j + 1 ) % numVerts );
 				float x1 = drawVerts[v0].xyz[0];
@@ -399,7 +392,7 @@ void CL_BuildBspPreview( const char *mapname ) {
 	}
 
 	// Expand bounds to include markers
-	for ( i = 0; i < cl_bspPreview.numMarkers; i++ ) {
+	for ( int i = 0; i < cl_bspPreview.numMarkers; i++ ) {
 		float mx = cl_bspPreview.markers[i].x;
 		float my = cl_bspPreview.markers[i].y;
 

@@ -24,16 +24,12 @@ void* CG_ModernHUDElementGridCreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementGridRoutine(void* context)
 {
 	modernHudElementGridContext* element = (modernHudElementGridContext*)context;
-	int index;
 	float x = element->config.rect.value[0];
 	float y = element->config.rect.value[1];
 	float cellWidth = element->config.rect.value[2];
 	float cellHeight = element->config.rect.value[3];
-	vec4_t color1, color2;
-	float col, row;
-	float startCol, startRow;
-	modernhudCoord_t coord;
 	qboolean hasColor2 = element->config.color2.isSet;
+	vec4_t color1, color2;
 
 	Vector4Copy(element->config.color.value.rgba, color1);
 	if (hasColor2)
@@ -41,20 +37,21 @@ void CG_ModernHUDElementGridRoutine(void* context)
 		Vector4Copy(element->config.color2.value.rgba, color2);
 	}
 
-	startCol = x;
+	float startCol = x;
 	while (startCol > 0)
 	{
 		startCol -= cellWidth;
 	}
 
-	startRow = y;
+	float startRow = y;
 	while (startRow > 0)
 	{
 		startRow -= cellHeight;
 	}
 
-	index = 0;
-	for (col = startCol; col <= (float)cls.glconfig.vidWidth; col += cellWidth, index++)
+	modernhudCoord_t coord;
+	int index = 0;
+	for (float col = startCol; col <= (float)cls.glconfig.vidWidth; col += cellWidth, index++)
 	{
 		coord.named.x = col;
 		coord.named.y = 0;
@@ -72,7 +69,7 @@ void CG_ModernHUDElementGridRoutine(void* context)
 	}
 
 	index = 0;
-	for (row = startRow; row <= (float)cls.glconfig.vidHeight; row += cellHeight, index++)
+	for (float row = startRow; row <= (float)cls.glconfig.vidHeight; row += cellHeight, index++)
 	{
 		coord.named.x = 0;
 		coord.named.y = row;

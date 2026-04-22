@@ -45,11 +45,8 @@ static const wuiDefaultState_t wired_defaultStates[] = {
 /* ── internal helpers ──────────────────────────────────────────────── */
 
 static void WiredTheme_SetState( const char *name, float r, float g, float b, float a ) {
-    int i;
-    wuiThemeEntry_t *entry;
-
     /* check for existing entry to update */
-    for ( i = 0; i < wired_theme.numStates; i++ ) {
+    for ( int i = 0; i < wired_theme.numStates; i++ ) {
         if ( !Q_stricmp( wired_theme.states[i].name, name ) ) {
             wired_theme.states[i].color[0] = r;
             wired_theme.states[i].color[1] = g;
@@ -66,7 +63,7 @@ static void WiredTheme_SetState( const char *name, float r, float g, float b, fl
         return;
     }
 
-    entry = &wired_theme.states[wired_theme.numStates++];
+    wuiThemeEntry_t *entry = &wired_theme.states[wired_theme.numStates++];
     Q_strncpyz( entry->name, name, sizeof( entry->name ) );
     entry->color[0] = r;
     entry->color[1] = g;
@@ -75,8 +72,7 @@ static void WiredTheme_SetState( const char *name, float r, float g, float b, fl
 }
 
 static void WiredTheme_LoadDefaults( void ) {
-    int i;
-    for ( i = 0; wired_defaultStates[i].name; i++ ) {
+    for ( int i = 0; wired_defaultStates[i].name; i++ ) {
         WiredTheme_SetState( wired_defaultStates[i].name,
                              wired_defaultStates[i].r,
                              wired_defaultStates[i].g,
@@ -88,13 +84,11 @@ static void WiredTheme_LoadDefaults( void ) {
 /* ── public API ────────────────────────────────────────────────────── */
 
 qboolean WiredTheme_ResolveState( const char *state, vec4_t colorOut ) {
-    int i;
-
     if ( !state || !state[0] ) {
         return qfalse;
     }
 
-    for ( i = 0; i < wired_theme.numStates; i++ ) {
+    for ( int i = 0; i < wired_theme.numStates; i++ ) {
         if ( !Q_stricmp( wired_theme.states[i].name, state ) ) {
             Vector4Copy( wired_theme.states[i].color, colorOut );
             return qtrue;
@@ -107,11 +101,9 @@ qboolean WiredTheme_ResolveState( const char *state, vec4_t colorOut ) {
 /* ── console commands ──────────────────────────────────────────────── */
 
 static void WiredTheme_Cmd_List( void ) {
-    int i;
-
     Com_Printf( "WiredTheme: '%s' (%d states)\n", wired_theme.name, wired_theme.numStates );
     Com_Printf( "------------------------------------\n" );
-    for ( i = 0; i < wired_theme.numStates; i++ ) {
+    for ( int i = 0; i < wired_theme.numStates; i++ ) {
         Com_Printf( "  %-16s  %.2f %.2f %.2f %.2f\n",
                      wired_theme.states[i].name,
                      wired_theme.states[i].color[0],

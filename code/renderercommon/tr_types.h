@@ -63,6 +63,30 @@ typedef struct {
 	float  extra[4];       // rotationStep, elapsed, reserved, reserved
 } railTrailParams_t;       // 656 bytes, matches GLSL std430
 
+// ── Character skin dispatch (shared between engine, cgame, and renderers) ──
+// Handles are resolved at character-load time; renderer looks up via ri.GetCharacterSkin.
+// singlePath=1: fallbackShader applied to every surface.
+// singlePath=0: overrides[] matched by surface name; defaultShader used for unlisted surfaces.
+
+#define CM_SKIN_NAME_LEN          32
+#define CM_SURFACE_NAME_LEN       32
+#define CM_MAX_SURFACE_OVERRIDES   8
+
+typedef struct {
+	char      surfaceName[CM_SURFACE_NAME_LEN]; // lowercase-normalized at registration
+	qhandle_t shader;
+} cmSkinOverride_t;
+
+typedef struct {
+	char              name[CM_SKIN_NAME_LEN];
+	int               paintable;
+	int               singlePath;
+	qhandle_t         fallbackShader;   // singlePath=1: applied to every surface
+	qhandle_t         defaultShader;    // singlePath=0: fallback for unlisted surfaces
+	int               overrideCount;
+	cmSkinOverride_t  overrides[CM_MAX_SURFACE_OVERRIDES];
+} cmSkin_t;
+
 // refdef flags
 #define RDF_NOWORLDMODEL	0x0001		// used for player configuration screen
 #define RDF_HYPERSPACE		0x0004		// teleportation effect
@@ -116,7 +140,8 @@ typedef struct {
 	// texturing
 	int			skinNum;			// inline skin index
 	qhandle_t	customSkin;			// NULL for default skin
-	qhandle_t	customShader;		// use one image for the entire thing
+	qhandle_t	customShader;		// use one image for the entire thing (powerup overlays, etc.)
+	qhandle_t	characterSkin;		// character skin handle; 0 = not a character entity
 
 	// misc
 	color4ub_t	shader;

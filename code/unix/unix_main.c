@@ -38,6 +38,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <sys/mman.h>
 #include <errno.h>
 #include <libgen.h> // dirname
+#include <pthread.h>
 
 #include <dlfcn.h>
 
@@ -335,7 +336,8 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *format, ... )
 	CL_Shutdown( text, qtrue );
 #endif
 
-	fprintf( stderr, "Sys_Error: %s\n", text );
+	Com_Log( SEV_FATAL, "Sys_Error: %s", text );
+	fprintf( stderr, "Sys_Error: %s\n", text ); // belt-and-suspenders: bypasses pipeline
 
 	Sys_Exit( 1 ); // bk010104 - use single exit point.
 }
@@ -759,6 +761,31 @@ void Sys_Sleep( int msec ) {
 }
 
 
+// Sys_Mutex — wraps pthread_mutex_t in the sys_mutex_t opaque buffer.
+_Static_assert( sizeof(pthread_mutex_t) <= SYS_MUTEX_OPAQUE_SIZE,
+	"sys_mutex_t opaque buffer too small for pthread_mutex_t" );
+
+qboolean Sys_MutexInit( sys_mutex_t *m )
+{
+	return pthread_mutex_init( (pthread_mutex_t *)m->opaque, NULL ) == 0 ? qtrue : qfalse;
+}
+
+void Sys_MutexLock( sys_mutex_t *m )
+{
+	pthread_mutex_lock( (pthread_mutex_t *)m->opaque );
+}
+
+void Sys_MutexUnlock( sys_mutex_t *m )
+{
+	pthread_mutex_unlock( (pthread_mutex_t *)m->opaque );
+}
+
+void Sys_MutexDestroy( sys_mutex_t *m )
+{
+	pthread_mutex_destroy( (pthread_mutex_t *)m->opaque );
+}
+
+
 static const struct Q3ToAnsiColorTable_s
 {
 	const char Q3color;
@@ -838,27 +865,6 @@ void Sys_Print( const char *msg )
 {
 	char printmsg[ MAXPRINTMSG ];
 	size_t len;
-
-	if ( Cvar_VariableIntegerValue( "con_timestamp" ) ) {
-		static qboolean atLineStart = qtrue;
-		static char stamped[ MAXPRINTMSG ];
-		qtime_t now;
-		char ts[12];
-		const char *src = msg;
-		char *w = stamped, *end = stamped + sizeof(stamped) - 1;
-		Com_RealTime( &now );
-		Com_sprintf( ts, sizeof(ts), "%02d:%02d:%02d ", now.tm_hour, now.tm_min, now.tm_sec );
-		while ( *src && w < end ) {
-			if ( atLineStart && *src != '\n' ) {
-				const char *t = ts;
-				while ( *t && w < end ) *w++ = *t++;
-				atLineStart = qfalse;
-			}
-			if ( ( *w++ = *src++ ) == '\n' ) atLineStart = qtrue;
-		}
-		*w = '\0';
-		msg = stamped;
-	}
 
 	if ( ttycon_on )
 	{

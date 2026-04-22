@@ -102,9 +102,8 @@ static void CG_ShotgunEjectBrass( centity_t *cent ) {
 	vec3_t			velocity, xvelocity;
 	vec3_t			offset, xoffset;
 	vec3_t			v[3];
-	int				i;
 
-	for ( i = 0; i < 2; i++ ) {
+	for ( int i = 0; i < 2; i++ ) {
 		float	waterScale = 1.0f;
 
 		le = CG_AllocLocalEntity();
@@ -510,8 +509,7 @@ void CG_AddRailTrails( void ) {
 
 				{
 					// turquoise/ocean-blue: R=80 G=200 B=255
-					int v;
-					for ( v = 0; v < 4; v++ ) {
+					for ( int v = 0; v < 4; v++ ) {
 						cg_railTempVerts[tempIdx + v].modulate.rgba[0] = 80;
 						cg_railTempVerts[tempIdx + v].modulate.rgba[1] = 200;
 						cg_railTempVerts[tempIdx + v].modulate.rgba[2] = 255;
@@ -524,8 +522,7 @@ void CG_AddRailTrails( void ) {
 			}
 
 			if ( tempIdx > 0 ) {
-				int k;
-				for ( k = 0; k < tempIdx; k += 4 ) {
+				for ( int k = 0; k < tempIdx; k += 4 ) {
 					trap_R_AddPolyToScene( cgs.media.whiteShader, 4,
 						&cg_railTempVerts[k] );
 				}
@@ -554,8 +551,7 @@ void CG_AddRailTrails( void ) {
 			}
 
 			{
-				int k;
-				for ( k = 0; k < tempIdx; k += 4 ) {
+				for ( int k = 0; k < tempIdx; k += 4 ) {
 					trap_R_AddPolyToScene( cgs.media.railRingsShader, 4,
 						&cg_railTempVerts[k] );
 				}
@@ -585,8 +581,7 @@ void CG_AddRailTrails( void ) {
 			}
 
 			{
-				int k;
-				for ( k = 0; k < tempIdx; k += 4 ) {
+				for ( int k = 0; k < tempIdx; k += 4 ) {
 					trap_R_AddPolyToScene( cgs.media.whiteShader, 4,
 						&cg_railTempVerts[k] );
 				}
@@ -785,6 +780,9 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	if ( cg_noProjectileTrail.integer ) {
 		return;
 	}
+#if FEAT_SCREENSHOT_TOOLS
+	if ( cg.stopTime ) return;
+#endif
 
 	up[0] = 0;
 	up[1] = 0;
@@ -919,6 +917,9 @@ static void CG_PlasmaTrail( centity_t *cent, const weaponInfo_t *wi ) {
 	if ( cg_noProjectileTrail.integer ) {
 		return;
 	}
+#if FEAT_SCREENSHOT_TOOLS
+	if ( cg.stopTime ) return;
+#endif
 
 	es = &cent->currentState;
 
@@ -1389,15 +1390,13 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	// interpolate beam between server angle and client prediction
 	if (cent->currentState.number == cg.predictedPlayerState.clientNum) {
 		vec3_t angle;
-		int i;
-
 		// eser - true lightning
         // might as well fix up true lightning while we're at it
         AngleVectors(cg.predictedPlayerState.viewangles, forward, NULL, NULL);
         VectorCopy(cg.predictedPlayerState.origin, muzzlePoint);
 		// eser - true lightning
 
-		for (i = 0; i < 3; i++) {
+		for (int i = 0; i < 3; i++) {
 			float a = cent->lerpAngles[i] - cg.refdefViewAngles[i];
 			if (a > 180) {
 				a -= 360;
@@ -2157,8 +2156,6 @@ CG_NextWeapon_f
 ===============
 */
 void CG_NextWeapon_f( void ) {
-    int		i;
-
     if (!cg.snap) {
         return;
     }
@@ -2169,7 +2166,7 @@ void CG_NextWeapon_f( void ) {
 
     cg.weaponSelectTime = cg.time;
 
-    for (i = cg.weaponSelect + 1; i < WP_NUM_WEAPONS; i++) {
+    for (int i = cg.weaponSelect + 1; i < WP_NUM_WEAPONS; i++) {
         if (!bg_weaponlist[i].switchOnCycle) {
             continue;
         }
@@ -2186,8 +2183,6 @@ CG_PrevWeapon_f
 ===============
 */
 void CG_PrevWeapon_f( void ) {
-    int		i;
-
     if (!cg.snap) {
         return;
     }
@@ -2197,7 +2192,7 @@ void CG_PrevWeapon_f( void ) {
 
     cg.weaponSelectTime = cg.time;
 
-    for (i = cg.weaponSelect - 1; i > WP_NONE; i--) {
+    for (int i = cg.weaponSelect - 1; i > WP_NONE; i--) {
         if (!bg_weaponlist[i].switchOnCycle) {
             continue;
         }
@@ -2265,11 +2260,9 @@ The current weapon has just run out of ammo
 ===================
 */
 void CG_OutOfAmmoChange( void ) {
-    int		i;
-
     cg.weaponSelectTime = cg.time;
 
-    for (i = WP_NUM_WEAPONS - 1; i > WP_NONE; i--) {
+    for (int i = WP_NUM_WEAPONS - 1; i > WP_NONE; i--) {
         if (!bg_weaponlist[i].switchOnOutOfAmmo) {
             continue;
         }
@@ -2421,6 +2414,9 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		radius = 64;
 		light = 300;
 		isSprite = qtrue;
+#if FEAT_EARTHQUAKE_SYSTEM
+		CG_AddEarthquake( origin, 600, 0.6f, 0, 0.5f, 300 );
+#endif
 		break;
 	case WP_ROCKET_LAUNCHER:
 		mod = cgs.media.dishFlashModel;
@@ -2439,6 +2435,9 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		// VectorScale( dir, 64, sprVel );
 
 		// CG_ParticleExplosion( "explode1", sprOrg, sprVel, 1400, 20, 30 );
+#if FEAT_EARTHQUAKE_SYSTEM
+		CG_AddEarthquake( origin, 480, 0.6f, 0, 0.5f, 300 );
+#endif
 		break;
 	case WP_RAILGUN:
 		mod = cgs.media.ringFlashModel;
@@ -2567,20 +2566,13 @@ CG_ExplosionParticles
 =================
 */
 void CG_ExplosionParticles(int weapon, vec3_t origin) {
-    int number; // number of particles
-    int jump; // amount to nudge the particles trajectory vector up by
-    int speed; // speed of particles
-    int light; // amount of light for each particle
+    int number = 32; // number of particles
+    int jump = 50; // amount to nudge the particles trajectory vector up by
+    int speed = 300; // speed of particles
+    int light = 50; // amount of light for each particle
     vec4_t lColor; // color of light for each particle
     qhandle_t shader; // shader to use for the particles
-    int index;
     vec3_t randVec, tempVec;
-
-    // set defaults
-    number = 32;
-    jump = 50;
-    speed = 300;
-    light = 50;
     lColor[0] = 1.0f;
     lColor[1] = 1.0f;
     lColor[2] = 1.0f;
@@ -2611,7 +2603,7 @@ void CG_ExplosionParticles(int weapon, vec3_t origin) {
         return;
     }
 
-    for (index = 0; index < number; index++) {
+    for (int index = 0; index < number; index++) {
         localEntity_t *le;
         refEntity_t *re;
 

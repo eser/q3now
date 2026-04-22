@@ -45,9 +45,8 @@ static const char *WUI_PlaceString( int rank ) {
 void WiredHud_DrawScorelistWidget( float ox, float oy, float ow, float oh,
 	int feederID, const vec4_t textColor )
 {
-	int i, rank, maxRows;
-	float y, rowH, hdrH, pad;
-	float fontHdr, fontBody, fontSmall;
+	int i;
+	float y;
 	char tmp[128];
 	const vec4_t colorWhite = { 1, 1, 1, 1 };
 	vec4_t hdrColor;
@@ -60,13 +59,13 @@ void WiredHud_DrawScorelistWidget( float ox, float oy, float ow, float oh,
 	if ( feederID == 0x06 /* blue team feeder */ ) teamFilter = 2; /* blue */
 
 	/* ── layout constants — all relative to ow/oh ──────────────── */
-	pad      = ow * 0.01f;               /* horizontal padding */
-	fontHdr  = oh * 0.025f;              /* header label font */
-	fontBody = oh * 0.03f;               /* player row font (reduced) */
-	fontSmall= oh * 0.022f;             /* small font (rank, ping) */
-	hdrH     = oh * 0.04f;              /* header row total height */
-	rowH     = oh * 0.045f;             /* data row height */
-	maxRows  = (int)( ( oh - hdrH ) / rowH );
+	float pad      = ow * 0.01f;               /* horizontal padding */
+	float fontHdr  = oh * 0.025f;              /* header label font */
+	float fontBody = oh * 0.03f;               /* player row font (reduced) */
+	float fontSmall= oh * 0.022f;             /* small font (rank, ping) */
+	float hdrH     = oh * 0.04f;              /* header row total height */
+	float rowH     = oh * 0.045f;             /* data row height */
+	int maxRows  = (int)( ( oh - hdrH ) / rowH );
 	if ( maxRows < 1 ) maxRows = 1;
 
 	float iconSz  = rowH * 0.8f;        /* head icon size */
@@ -180,7 +179,7 @@ void WiredHud_DrawScorelistWidget( float ox, float oy, float ow, float oh,
 	}
 
 	/* ── player rows ───────────────────────────────────────────── */
-	rank = 0;
+	int rank = 0;
 
 	for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES && rank < maxRows; i++ ) {
 		wiredHudScore_t *sc = &wiredHud->scores[i];
@@ -416,7 +415,6 @@ static void DrawDuelPanel( float px, float py, float pw, float ph,
 	float fontSmall = ph * 0.035f;
 	float pad  = pw * 0.03f;
 	float rowH = ph * 0.055f;
-	float y;
 
 	if ( clientNum < 0 || clientNum >= WIRED_HUD_MAX_CLIENTS ) return;
 	if ( !wiredHud->clients[clientNum].infoValid ) return;
@@ -440,7 +438,7 @@ static void DrawDuelPanel( float px, float py, float pw, float ph,
 		WUI_FillRect( px + pw - 1, py, 1, ph, border );
 	}
 
-	y = py + pad;
+	float y = py + pad;
 
 	/* head icon + player name */
 	{
@@ -523,10 +521,9 @@ static void DrawDuelPanel( float px, float py, float pw, float ph,
 
 		/* per-weapon stats */
 		{
-			int w, hasWeapons = 0;
-			float wpY;
+			int hasWeapons = 0;
 			int wpSlots = (int)(sizeof(sc->weaponStats) / sizeof(sc->weaponStats[0]));
-			for ( w = 0; w < wpSlots; w++ ) {
+			for ( int w = 0; w < wpSlots; w++ ) {
 				if ( sc->weaponStats[w].shots > 0 || sc->weaponStats[w].kills > 0 )
 					hasWeapons = 1;
 			}
@@ -550,13 +547,11 @@ static void DrawDuelPanel( float px, float py, float pw, float ph,
 					fontSmall * 0.85f, dimColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW );
 
 				y += fontSmall;
-				wpY = y;
+				float wpY = y;
 
-				for ( w = 0; w < wpSlots; w++ ) {
+				for ( int w = 0; w < wpSlots; w++ ) {
 					wiredWeaponStats_t *ws = &sc->weaponStats[w];
-					int wpAcc;
 					vec4_t wpColor;
-					float wpNameX;
 
 					if ( ws->shots <= 0 && ws->kills <= 0 ) continue;
 
@@ -566,7 +561,7 @@ static void DrawDuelPanel( float px, float py, float pw, float ph,
 					totalWpDeaths += ws->deaths;
 
 					/* weapon icon + name */
-					wpNameX = px + pad;
+					float wpNameX = px + pad;
 					if ( wiredHud->weaponIcons[w] ) {
 						float wpIconSz = fontSmall * 0.9f;
 						re.SetColor( colorWhite );
@@ -588,7 +583,7 @@ static void DrawDuelPanel( float px, float py, float pw, float ph,
 						fontSmall * 0.85f, colorWhite, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW );
 
 					/* accuracy */
-					wpAcc = ( ws->shots > 0 ) ? (int)( 100.0f * ws->hits / ws->shots ) : 0;
+					int wpAcc = ( ws->shots > 0 ) ? (int)( 100.0f * ws->hits / ws->shots ) : 0;
 					if ( wpAcc >= 50 )      Vector4Set( wpColor, 0.4f, 1.0f, 0.4f, 1.0f );
 					else if ( wpAcc >= 30 ) Vector4Set( wpColor, 1.0f, 0.9f, 0.4f, 1.0f );
 					else                    Vector4Copy( colorWhite, wpColor );
@@ -603,7 +598,6 @@ static void DrawDuelPanel( float px, float py, float pw, float ph,
 				{
 					vec4_t lineColor2 = { 0.3f, 0.3f, 0.4f, 0.3f };
 					vec4_t sumColor = { 0.9f, 0.9f, 1.0f, 1.0f };
-					int totAcc;
 
 					WUI_FillRect( px + pad, wpY, pw - pad * 2, 1, lineColor2 );
 					wpY += fontSmall * 0.3f;
@@ -615,7 +609,7 @@ static void DrawDuelPanel( float px, float py, float pw, float ph,
 					Text_Draw( tmp, px + pw * 0.55f, wpY, FONT_UI,
 						fontSmall * 0.85f, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW );
 
-					totAcc = ( totalShots > 0 ) ? (int)( 100.0f * totalHits / totalShots ) : 0;
+					int totAcc = ( totalShots > 0 ) ? (int)( 100.0f * totalHits / totalShots ) : 0;
 					Com_sprintf( tmp, sizeof( tmp ), "%i%%", totAcc );
 					Text_Draw( tmp, px + pw - pad, wpY, FONT_UI,
 						fontSmall * 0.85f, sumColor, TEXT_ALIGN_RIGHT, TEXT_DROPSHADOW );
@@ -629,18 +623,13 @@ void WiredHud_DrawDuelBoard( float ox, float oy, float ow, float oh )
 {
 	static int s_intermissionStartTime = 0;
 
-	float panelW, panelH, gap, panelY;
-	float fontTitle, fontBody;
 	vec4_t redPanel  = { 0.8f, 0.2f, 0.2f, 1.0f };
 	vec4_t bluePanel = { 0.2f, 0.2f, 0.8f, 1.0f };
 	const vec4_t colorWhite = { 1, 1, 1, 1 };
 	vec4_t vsColor = { 0.6f, 0.6f, 0.7f, 0.8f };
 	int p1 = -1, p2 = -1;
 	int p1score = 0, p2score = 0;
-	int i;
 	char tmp[128];
-	float panelAlpha = 1.0f;
-	float centerX;
 
 	if ( !wiredHud || !wiredHud->valid ) return;
 
@@ -652,7 +641,7 @@ void WiredHud_DrawDuelBoard( float ox, float oy, float ow, float oh )
 	}
 
 	/* find the two duelists (first two non-spectator scores) */
-	for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+	for ( int i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
 		if ( wiredHud->scores[i].team == 3 /* spectator */ ) continue;
 		if ( p1 < 0 ) {
 			p1 = wiredHud->scores[i].client;
@@ -666,13 +655,14 @@ void WiredHud_DrawDuelBoard( float ox, float oy, float ow, float oh )
 		}
 	}
 
-	fontTitle = oh * 0.04f;
-	fontBody  = oh * 0.03f;
-	gap       = ow * 0.03f;
-	panelW    = ( ow - gap * 3 ) * 0.5f;
-	panelH    = oh * 0.85f;
-	panelY    = oy + oh * 0.08f;
-	centerX   = ox + ow * 0.5f;
+	float fontTitle = oh * 0.04f;
+	float fontBody  = oh * 0.03f;
+	float gap       = ow * 0.03f;
+	float panelW    = ( ow - gap * 3 ) * 0.5f;
+	float panelH    = oh * 0.85f;
+	float panelY    = oy + oh * 0.08f;
+	float centerX   = ox + ow * 0.5f;
+	float panelAlpha = 1.0f;
 
 	/* ── intermission: animated winner banner + match duration ── */
 	if ( wiredHud->intermission && s_intermissionStartTime ) {
@@ -793,7 +783,7 @@ void WiredHud_DrawDuelBoard( float ox, float oy, float ow, float oh )
 		float specX = ox + gap;
 		int specCount = 0;
 
-		for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+		for ( int i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
 			if ( wiredHud->scores[i].team == 3 /* spectator */ ) specCount++;
 		}
 

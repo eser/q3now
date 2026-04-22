@@ -264,11 +264,6 @@ worldspawn entity data from the BSP when no .meta is available.
 ================
 */
 void CL_LoadMapInfo( const char *mapname ) {
-	fileHandle_t f;
-	int fileLen;
-	char path[MAX_QPATH];
-	char *text;
-
 	CL_ClearMapInfo();
 
 	if ( !mapname || !mapname[0] ) {
@@ -278,11 +273,13 @@ void CL_LoadMapInfo( const char *mapname ) {
 	Q_strncpyz( cl_mapInfo.mapName, mapname, sizeof( cl_mapInfo.mapName ) );
 
 	// --- Try .meta sidecar file ---
+	char path[MAX_QPATH];
 	Com_sprintf( path, sizeof( path ), "maps/%s.meta", mapname );
-	fileLen = FS_FOpenFileRead( path, &f, qtrue );
+	fileHandle_t f;
+	int fileLen = FS_FOpenFileRead( path, &f, qtrue );
 
 	if ( f && fileLen > 0 ) {
-		text = (char *)Z_Malloc( fileLen + 1 );
+		char *text = (char *)Z_Malloc( fileLen + 1 );
 		if ( FS_Read( text, fileLen, f ) == fileLen ) {
 			text[fileLen] = '\0';
 			CL_MapInfo_ParseMeta( text, fileLen );
@@ -314,9 +311,8 @@ void CL_LoadMapInfo( const char *mapname ) {
 
 	// --- Count item markers from bspPreview if itemNodes not set ---
 	if ( cl_mapInfo.itemNodes == 0 && cl_bspPreview.valid ) {
-		int i;
 		int count = 0;
-		for ( i = 0; i < cl_bspPreview.numMarkers; i++ ) {
+		for ( int i = 0; i < cl_bspPreview.numMarkers; i++ ) {
 			if ( cl_bspPreview.markers[i].type == 1 ) { // type 1 = item
 				count++;
 			}

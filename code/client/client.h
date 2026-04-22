@@ -336,7 +336,6 @@ typedef struct {
 
 	// rendering info
 	glconfig_t	glconfig;
-	qhandle_t	charSetShader;
 	qhandle_t	whiteShader;
 	qhandle_t	consoleShader;
 
@@ -609,6 +608,27 @@ void CL_ShutdownCGame( void );
 qboolean CL_GameCommand( void );
 void CL_CGameRendering( stereoFrame_t stereo );
 void CL_SetCGameTime( void );
+
+//
+// cl_characters.c
+//
+typedef struct {
+	qboolean            loaded;
+	char                dirname[MAX_QPATH];
+	characterManifest_t manifest;
+	qhandle_t           iconHandle;
+} clCharacterEntry_t;
+
+void        CL_Characters_Init( void );
+void        CL_Characters_Reload( void );
+void        CL_Characters_Shutdown( void );
+void        CL_Characters_RegisterIcons( void );
+void        CL_Characters_RegisterShaders( void );
+const characterManifest_t *CL_Characters_Get( const char *dirname );
+int         CL_Characters_Count( void );
+const clCharacterEntry_t  *CL_Characters_At( int index );
+qboolean    CL_Characters_GetManifest( const char *charName, char *buf, int bufSize );
+const cmSkin_t *CL_GetCharacterSkin( qhandle_t handle );
 
 //
 // cl_ui.c

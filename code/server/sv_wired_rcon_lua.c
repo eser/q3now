@@ -23,13 +23,11 @@ static rconOutputCapture_t *s_capture;
 static int s_execStartTime;
 
 static void RconOutput_Append( const char *text ) {
-	int i;
-
 	if ( !s_capture || !s_capture->output || !text ) {
 		return;
 	}
 
-	for ( i = 0; text[i] != '\0'; i++ ) {
+	for ( int i = 0; text[i] != '\0'; i++ ) {
 		if ( s_capture->length >= s_capture->outputLen - 1 ) {
 			s_capture->truncated = qtrue;
 			break;
@@ -59,9 +57,8 @@ static void RconLua_PopToString( lua_State *L ) {
 
 static int l_print( lua_State *L ) {
 	int n = lua_gettop( L );
-	int i;
 
-	for ( i = 1; i <= n; i++ ) {
+	for ( int i = 1; i <= n; i++ ) {
 		const char *s = RconLua_ToString( L, i );
 		if ( i > 1 ) {
 			RconOutput_Append( "\t" );
@@ -147,10 +144,9 @@ static int l_server_maprestart( lua_State *L ) {
 }
 
 static int l_server_status( lua_State *L ) {
-	int i;
 	int players = 0;
 
-	for ( i = 0; i < sv.maxclients; i++ ) {
+	for ( int i = 0; i < sv.maxclients; i++ ) {
 		if ( svs.clients[i].state >= CS_CONNECTED ) {
 			players++;
 		}
@@ -233,11 +229,10 @@ static int l_cvar_list( lua_State *L ) {
 }
 
 static int l_players_list( lua_State *L ) {
-	int i;
 	int n = 0;
 
 	lua_newtable( L );
-	for ( i = 0; i < sv.maxclients; i++ ) {
+	for ( int i = 0; i < sv.maxclients; i++ ) {
 		client_t *cl = &svs.clients[i];
 		const playerState_t *ps;
 
@@ -313,11 +308,10 @@ static int l_players_unban( lua_State *L ) {
 
 static int l_players_find( lua_State *L ) {
 	const char *pattern = luaL_checkstring( L, 1 );
-	int i;
 	int n = 0;
 
 	lua_newtable( L );
-	for ( i = 0; i < sv.maxclients; i++ ) {
+	for ( int i = 0; i < sv.maxclients; i++ ) {
 		client_t *cl = &svs.clients[i];
 		if ( cl->state < CS_CONNECTED ) {
 			continue;

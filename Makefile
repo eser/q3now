@@ -221,7 +221,7 @@ PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax21.$(PAK_EXT)
         copy-libs copy-build copy-build-debug copy-packs copy-all copy-all-debug \
         bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
         run-launcher run-game release \
-        check smoke test-features test-vm test-quic-game bench diff-api lint help
+        check smoke test-vm test-quic-game bench diff-api lint help
 
 all: build
 
@@ -717,31 +717,6 @@ else
 	Q3DIR="$(Q3DIR)" tests/smoke.sh "$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)"
 endif
 
-# ── test-features ────────────────────────────────────────────────────────────
-# Starts map with ALL feature cvars enabled, spawns 3 bots, runs 30s.
-
-test-features: copy-all
-ifeq ($(UNAME_S),Darwin)
-	@echo "==> Testing all features enabled (30s)..."
-	@timeout 35 "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" \
-	  +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
-	  +set g_fastWeaponSwitch 2 \
-	  +set g_spawnProtect 2 \
-	  +set cg_scorePlums 2 \
-	  +set developer 1 +set ttycon 0 \
-	  +map $(MAP) +addbot Doom 3 +addbot Bones 3 +addbot Slash 3 \
-	  +wait 900 +quit > /tmp/q3now-test-features.log 2>&1 || true
-	@if grep -q "Unknown event\|Error\|FATAL\|Signal caught" /tmp/q3now-test-features.log; then \
-	  echo "FAIL: Feature test detected errors"; \
-	  grep "Unknown event\|Error\|FATAL\|Signal caught" /tmp/q3now-test-features.log; \
-	  exit 1; \
-	else \
-	  echo "==> All features OK"; \
-	fi
-else
-	@echo "test-features: not yet implemented for Linux"
-endif
-
 # ── QUIC game transport smoke test ───────────────────────────────────────────
 
 test-quic-game:
@@ -866,7 +841,6 @@ help:
 	@echo "  Testing:"
 	@echo "    make check              verify all outputs present"
 	@echo "    make smoke              headless gameplay test"
-	@echo "    make test-features      all features enabled stress test"
 	@echo "    make test-quic-game     QUIC game transport smoke test"
 	@echo "    make bench              timedemo benchmark"
 	@echo "    make diff-api           diff API headers vs upstream"

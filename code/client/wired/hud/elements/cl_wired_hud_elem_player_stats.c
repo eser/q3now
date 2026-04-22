@@ -39,13 +39,13 @@ void *CG_ModernHUDElementCreatePlayerStatsDamageRatio( const modernhudConfig_t *
 
 void CG_ModernHUDElementPlayerStatsRoutine( void *context ) {
 	modernHudElementPlayerStats_t *element = (modernHudElementPlayerStats_t *)context;
-	int i, totalDG = 0, totalKills = 0, totalDeaths = 0;
-	float ratio;
 
 	if ( !element ) return;
 
+	int totalDG = 0, totalKills = 0, totalDeaths = 0;
+
 	// aggregate stats across all weapons
-	for ( i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
+	for ( int i = ATT_NONE + 1; i < ATT_NUM_ATTACKS; i++ ) {
 		totalDG     += wiredHud->attackStats[i].damage;
 		totalKills  += wiredHud->attackStats[i].kills;
 		totalDeaths += wiredHud->attackStats[i].deaths;
@@ -75,6 +75,7 @@ void CG_ModernHUDElementPlayerStatsRoutine( void *context ) {
 		case 4: // damage ratio (DG / DR)
 		{
 			int dr = totalDeaths * 100;
+			float ratio;
 			if ( dr > 0 ) {
 				ratio = (float)totalDG / (float)dr;
 			} else {

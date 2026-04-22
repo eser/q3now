@@ -44,21 +44,19 @@ static fontFamily_t wui_fontFamilies[] = {
 #define FONT_FAMILY_COUNT (sizeof(wui_fontFamilies) / sizeof(wui_fontFamilies[0]))
 
 void WiredFonts_InitMSDF( void ) {
-	int i, j;
-
 	/* ── Family-based loading: iterate families and faces ─────────── */
-	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
+	int fontsLoadedStart = MSDF_GetFontCount();
+	for ( int i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
 		fontFamily_t *fam = &wui_fontFamilies[i];
-		for ( j = 0; j < fam->faceCount; j++ ) {
+		for ( int j = 0; j < fam->faceCount; j++ ) {
 			fontFace_t *face = &fam->faces[j];
 			msdfFont_t *atlas = NULL;
-			int k, m;
 
 			/* Check if this atlas is already loaded by a previous face */
-			for ( k = 0; k < i + 1; k++ ) {
+			for ( int k = 0; k < i + 1; k++ ) {
 				fontFamily_t *prev = &wui_fontFamilies[k];
 				int limit = ( k == i ) ? j : prev->faceCount;
-				for ( m = 0; m < limit; m++ ) {
+				for ( int m = 0; m < limit; m++ ) {
 					if ( !Q_stricmp( prev->faces[m].atlasName, face->atlasName ) &&
 					     prev->faces[m].atlas != NULL ) {
 						atlas = prev->faces[m].atlas;
@@ -75,6 +73,8 @@ void WiredFonts_InitMSDF( void ) {
 			face->atlas = atlas;
 		}
 	}
+	int fontsLoaded = MSDF_GetFontCount() - fontsLoadedStart;
+	Com_Printf( "MSDF: loaded %d font%s\n", fontsLoaded, fontsLoaded == 1 ? "" : "s" );
 }
 
 /*
@@ -93,13 +93,12 @@ const fontFace_t *WiredFont_Resolve(
 	fontWeight_t  weight,
 	fontStyle_t   style
 ) {
-	int i, j;
 	const fontFamily_t *family = NULL;
 	const fontFace_t   *best = NULL;
 	int                 bestDist = 99999;
 
 	/* Find the family */
-	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
+	for ( int i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
 		if ( !Q_stricmp( familyName, wui_fontFamilies[i].familyName ) ) {
 			family = &wui_fontFamilies[i];
 			break;
@@ -111,7 +110,7 @@ const fontFace_t *WiredFont_Resolve(
 	}
 
 	/* Pass 1: exact weight match among faces with matching style */
-	for ( j = 0; j < family->faceCount; j++ ) {
+	for ( int j = 0; j < family->faceCount; j++ ) {
 		const fontFace_t *f = &family->faces[j];
 		if ( f->style != style ) {
 			continue;
@@ -122,7 +121,7 @@ const fontFace_t *WiredFont_Resolve(
 	}
 
 	/* Pass 2: score = wrong-side penalty (1000) + abs(diff); pick lowest */
-	for ( j = 0; j < family->faceCount; j++ ) {
+	for ( int j = 0; j < family->faceCount; j++ ) {
 		const fontFace_t *f = &family->faces[j];
 		int diff, score, pref;
 
@@ -143,18 +142,16 @@ const fontFace_t *WiredFont_Resolve(
 
 const fontFace_t *WiredFont_ResolveByName( const char *name )
 {
-	int i, j;
-
 	if ( !name || !name[0] ) {
 		return NULL;
 	}
 
-	for ( i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
+	for ( int i = 0; i < (int)FONT_FAMILY_COUNT; i++ ) {
 		const fontFamily_t *family = &wui_fontFamilies[i];
 		if ( !Q_stricmp( name, family->familyName ) ) {
 			return WiredFont_Resolve( family->familyName, FONT_WEIGHT_REGULAR, FONT_STYLE_NORMAL );
 		}
-		for ( j = 0; j < family->faceCount; j++ ) {
+		for ( int j = 0; j < family->faceCount; j++ ) {
 			const fontFace_t *face = &family->faces[j];
 			if ( !Q_stricmp( name, face->name ) || !Q_stricmp( name, face->atlasName ) ) {
 				return face;
@@ -224,10 +221,8 @@ int WiredFont_IdFromName( const char *name )
 		{ "sharetechmono-regular",  FONT_MONO           },
 		{ NULL, 0 }
 	};
-	int i;
-
 	if ( !name || !name[0] ) return FONT_DISPLAY;
-	for ( i = 0; map[i].k; i++ ) {
+	for ( int i = 0; map[i].k; i++ ) {
 		if ( !Q_stricmp( name, map[i].k ) ) return map[i].id;
 	}
 	return FONT_UI;

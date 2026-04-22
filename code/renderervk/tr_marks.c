@@ -201,13 +201,12 @@ static void R_AddMarkFragments(int numClipPoints, vec3_t clipPoints[2][MAX_VERTS
 				   int maxFragments, markFragment_t *fragmentBuffer,
 				   int *returnedPoints, int *returnedFragments,
 				   vec3_t mins, vec3_t maxs) {
-	int pingPong, i;
 	markFragment_t	*mf;
 
 	// chop the surface by all the bounding planes of the to be projected polygon
-	pingPong = 0;
+	int pingPong = 0;
 
-	for ( i = 0 ; i < numPlanes ; i++ ) {
+	for ( int i = 0 ; i < numPlanes ; i++ ) {
 
 		R_ChopPolyBehindPlane( numClipPoints, clipPoints[pingPong],
 						   &numClipPoints, clipPoints[!pingPong],

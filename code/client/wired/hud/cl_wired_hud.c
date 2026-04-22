@@ -141,9 +141,8 @@ void WiredHud_ReceiveState( wiredHudState_t *state ) {
 // ── data binding lookup ──────────────────────────────────────────────
 
 const wiredHudBinding_t *WiredHud_FindBinding( const char *name ) {
-	int i;
 	if ( !name || !name[0] || !wiredHud->valid ) return NULL;
-	for ( i = 0; i < wiredHud->numBindings && i < WIRED_HUD_MAX_BINDINGS; i++ ) {
+	for ( int i = 0; i < wiredHud->numBindings && i < WIRED_HUD_MAX_BINDINGS; i++ ) {
 		if ( !Q_stricmp( wiredHud->bindings[i].name, name ) )
 			return &wiredHud->bindings[i];
 	}
@@ -369,19 +368,15 @@ static void WiredHud_ItemToConfig( const wiredItemDef_t *item, modernhudConfig_t
 
 void WiredHud_LoadFromMenus( void ) {
 	int menuCount = WiredUI_GetMenuCount();
-	int i, j;
 	int created = 0;
 	int hudOverlayMenus = 0;
 
 	Com_DPrintf( "WiredHud: scanning %d menus for hudOverlay...\n", menuCount );
 
 	// iterate all loaded menus
-	for ( i = 0; i < menuCount; i++ ) {
+	for ( int i = 0; i < menuCount; i++ ) {
 		wiredMenuDef_t *menu = WiredUI_GetMenuByIndex( i );
 		if ( !menu ) continue;
-
-		Com_DPrintf( "WiredHud: menu[%d] = '%s' hudOverlay=%d items=%d\n",
-			i, menu->name, menu->hudOverlay, menu->itemCount );
 
 		if ( !menu->hudOverlay ) {
 			continue;
@@ -391,7 +386,7 @@ void WiredHud_LoadFromMenus( void ) {
 		Com_DPrintf( "WiredHud: found hudOverlay menu '%s' with %d items\n", menu->name, menu->itemCount );
 
 		// this is a HUD overlay menu — create elements from its items
-		for ( j = 0; j < menu->itemCount; j++ ) {
+		for ( int j = 0; j < menu->itemCount; j++ ) {
 			wiredItemDef_t *item = menu->items[j];
 			if ( !item->hudElement[0] ) continue;
 
@@ -406,7 +401,8 @@ void WiredHud_LoadFromMenus( void ) {
 		}
 	}
 
-	Com_DPrintf( "WiredHud: %d hudOverlay menus, %d elements created\n", hudOverlayMenus, created );
+	Com_DPrintf( "WiredHud: %d hudOverlay menus, %d elements created, %d active\n",
+		hudOverlayMenus, created, WiredHud_GetElementCount() );
 	wiredHud_elementsLoaded = qtrue;
 }
 
@@ -422,7 +418,6 @@ void WiredHud_Routine( int realtime ) {
 		WiredHud_LoadFromMenus();
 		cl_prof.whud_load += (int)(Sys_Microseconds() - _wld_t0);
 		wiredHud_elementsLoaded = qtrue;
-		Com_DPrintf( "WiredHud: %d elements active\n", WiredHud_GetElementCount() );
 	}
 
 	// sync compat structs so element code sees cg.*/cgs.* patterns
@@ -467,8 +462,8 @@ void WiredHud_Routine( int realtime ) {
 
 				// compute placement text (FFA modes only)
 				if ( wiredHud->gametype < 5 ) {
-					int i, myRank = 0, myScore = 0;
-					for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+					int myRank = 0, myScore = 0;
+					for ( int i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
 						if ( wiredHud->scores[i].team == 3 ) continue; /* spectator */
 						myRank++;
 						if ( wiredHud->scores[i].client == wiredHud->clientNum ) {

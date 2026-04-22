@@ -24,7 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // active (after loading) gameplay
 
 #include "cg_local.h"
-#include "cg_modern_private.h"
 
 int drawTeamOverlayModificationCount = -1;
 
@@ -214,13 +213,6 @@ void CG_AddLagometerSnapshotInfo( snapshot_t *snap ) {
 }
 
 
-#define	MAX_LAGOMETER_PING	900
-#define	MAX_LAGOMETER_RANGE	300
-
-
-
-
-
 /*
 ===============================================================================
 
@@ -369,7 +361,7 @@ static void CG_DrawCrosshair3D(void)
 	char rendererinfos[128];
 	refEntity_t ent;
 
-	if ( !cg_drawCrosshair.integer ) {
+	if ( !cg_crosshairAlpha.integer ) {
 		return;
 	}
 
@@ -629,9 +621,7 @@ Draws fullscreen dark overlay + persistent "Move!" text.
 static void CG_DrawCampOverlay( void ) {
 	static float actualDarkness = 0;
 	float desiredDarkness, deltaTime;
-	int camp;
-
-	camp = cg.snap->ps.stats[STAT_CAMPER];
+	int camp = cg.snap->ps.stats[STAT_CAMPER];
 	desiredDarkness = camp / 255.0f * 0.85f;
 	deltaTime = cg.frametime * 0.001f;
 
@@ -648,7 +638,6 @@ static void CG_DrawCampOverlay( void ) {
 	if ( actualDarkness > 0.01f ) {
 		vec4_t color;
 		vec4_t textColor;
-		int textWidth;
 		const char *msg = "Move!";
 
 		// fullscreen dark overlay (physical screen coords for full widescreen coverage)
@@ -664,7 +653,7 @@ static void CG_DrawCampOverlay( void ) {
 		textColor[1] = 0.3f;
 		textColor[2] = 0.3f;
 		textColor[3] = actualDarkness / 0.85f;  // text fades with overlay
-		textWidth = CG_DrawStrlen( msg ) * BIGCHAR_WIDTH;
+		int textWidth = CG_DrawStrlen( msg ) * BIGCHAR_WIDTH;
 		trap_R_DrawTextNorm( msg, (float)(( 640 - textWidth ) / 2) * NORM_HSCALE, 480 * 0.30f * NORM_VSCALE,
 			FONT_UI, (float)BIGCHAR_HEIGHT * NORM_VSCALE, textColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
 	}

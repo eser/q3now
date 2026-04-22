@@ -23,4 +23,8 @@ int SV_Lua_BotOnChat( int clientNum, const char *eventName, const wbChatCtx_t *c
 void SV_BotVerifyCharacter_f( void );
 void SV_BotDebugWeapons_f( void );
 
+qboolean SV_Lua_GetCharacterDisplayName( const char *name, char *out, int outSize );
+int      SV_Lua_GetCharacterCount( void );
+qboolean SV_Lua_GetCharacterAt( int index, char *out, int outSize );
+
 #endif

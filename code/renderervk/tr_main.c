@@ -125,7 +125,6 @@ int R_CullLocalPointAndRadius( const vec3_t pt, float radius )
 */
 int R_CullPointAndRadius( const vec3_t pt, float radius )
 {
-	int		i;
 	float	dist;
 	const cplane_t	*frust;
 	qboolean mightBeClipped = qfalse;
@@ -135,7 +134,7 @@ int R_CullPointAndRadius( const vec3_t pt, float radius )
 	}
 
 	// check against frustum planes
-	for (i = 0 ; i < 4 ; i++) 
+	for (int i = 0 ; i < 4 ; i++)
 	{
 		frust = &tr.viewParms.frustum[i];
 
@@ -270,9 +269,7 @@ R_TransformModelToClipMVP
 ==========================
 */
 static void R_TransformModelToClipMVP( const vec3_t src, const float *mvp, vec4_t clip ) {
-	int i;
-
-	for ( i = 0 ; i < 4 ; i++ ) {
+	for ( int i = 0 ; i < 4 ; i++ ) {
 		clip[i] = 
 			src[0] * mvp[ i + 0 * 4 ] +
 			src[1] * mvp[ i + 1 * 4 ] +
@@ -446,7 +443,6 @@ static void R_RotateForViewer( void )
 static void R_SetFarClip( void )
 {
 	float	farthestCornerDistance;
-	int		i;
 
 	// if not rendering the world (icons, menus, etc)
 	// set a 2k far clip plane
@@ -459,7 +455,7 @@ static void R_SetFarClip( void )
 	// set far clipping planes dynamically
 	//
 	farthestCornerDistance = 0;
-	for ( i = 0; i < 8; i++ )
+	for ( int i = 0; i < 8; i++ )
 	{
 		vec3_t v;
 		vec3_t vecTo;
@@ -495,8 +491,7 @@ static void R_SetupFrustum( viewParms_t *dest, float xmin, float xmax, float yma
 {
 	vec3_t ofsorigin;
 	float oppleg, adjleg, length;
-	int i;
-	
+
 	if(stereoSep == 0 && xmin == -xmax)
 	{
 		// symmetric case can be simplified
@@ -539,7 +534,7 @@ static void R_SetupFrustum( viewParms_t *dest, float xmin, float xmax, float yma
 	VectorScale(dest->or.axis[0], oppleg, dest->frustum[3].normal);
 	VectorMA(dest->frustum[3].normal, -adjleg, dest->or.axis[2], dest->frustum[3].normal);
 	
-	for (i=0 ; i<4 ; i++) {
+	for (int i=0 ; i<4 ; i++) {
 		dest->frustum[i].type = PLANE_NON_AXIAL;
 		dest->frustum[i].dist = DotProduct (ofsorigin, dest->frustum[i].normal);
 		SetPlaneSignbits( &dest->frustum[i] );
@@ -696,7 +691,6 @@ R_MirrorPoint
 =================
 */
 static void R_MirrorPoint( const vec3_t in, const orientation_t *surface, const orientation_t *camera, vec3_t out ) {
-	int		i;
 	vec3_t	local;
 	vec3_t	transformed;
 	float	d;
@@ -704,7 +698,7 @@ static void R_MirrorPoint( const vec3_t in, const orientation_t *surface, const 
 	VectorSubtract( in, surface->origin, local );
 
 	VectorClear( transformed );
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		d = DotProduct( local, surface->axis[i] );
 		VectorMA( transformed, d, camera->axis[i], transformed );
 	}
@@ -714,11 +708,10 @@ static void R_MirrorPoint( const vec3_t in, const orientation_t *surface, const 
 
 
 static void R_MirrorVector( const vec3_t in, const orientation_t *surface, const orientation_t *camera, vec3_t out ) {
-	int		i;
 	float	d;
 
 	VectorClear( out );
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( int i = 0 ; i < 3 ; i++ ) {
 		d = DotProduct(in, surface->axis[i]);
 		VectorMA( out, d, camera->axis[i], out );
 	}
@@ -781,7 +774,6 @@ Returns qtrue if it should be mirrored
 static qboolean R_GetPortalOrientations( const drawSurf_t *drawSurf, int entityNum,
 							 orientation_t *surface, orientation_t *camera,
 							 vec3_t pvsOrigin, portalView_t *portalView ) {
-	int			i;
 	cplane_t	originalPlane, plane;
 	trRefEntity_t	*e;
 	float		d;
@@ -816,7 +808,7 @@ static qboolean R_GetPortalOrientations( const drawSurf_t *drawSurf, int entityN
 	// locate the portal entity closest to this plane.
 	// origin will be the origin of the portal, origin2 will be
 	// the origin of the camera
-	for ( i = 0 ; i < tr.refdef.num_entities ; i++ ) {
+	for ( int i = 0 ; i < tr.refdef.num_entities ; i++ ) {
 		e = &tr.refdef.entities[i];
 		if ( e->e.reType != RT_PORTALSURFACE ) {
 			continue;
@@ -901,7 +893,6 @@ static qboolean R_GetPortalOrientations( const drawSurf_t *drawSurf, int entityN
 
 static qboolean IsMirror( const drawSurf_t *drawSurf, int entityNum )
 {
-	int			i;
 	cplane_t	originalPlane, plane;
 	trRefEntity_t	*e;
 	float		d;
@@ -934,7 +925,7 @@ static qboolean IsMirror( const drawSurf_t *drawSurf, int entityNum )
 	// locate the portal entity closest to this plane.
 	// origin will be the origin of the portal, origin2 will be
 	// the origin of the camera
-	for ( i = 0 ; i < tr.refdef.num_entities ; i++ ) 
+	for ( int i = 0 ; i < tr.refdef.num_entities ; i++ )
 	{
 		e = &tr.refdef.entities[i];
 		if ( e->e.reType != RT_PORTALSURFACE ) {
@@ -968,7 +959,6 @@ static qboolean IsMirror( const drawSurf_t *drawSurf, int entityNum )
 static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror ) {
 	float shortest = 100000000;
 	int entityNum;
-	int numTriangles;
 	shader_t *shader;
 	int		fogNum;
 	int dlighted;
@@ -992,12 +982,11 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror 
 
 	for ( i = 0; i < tess.numVertexes; i++ )
 	{
-		int j;
 		unsigned int pointFlags = 0;
 
 		R_TransformModelToClip( tess.xyz[i], tr.or.modelMatrix, tr.viewParms.projectionMatrix, eye, clip );
 
-		for ( j = 0; j < 3; j++ )
+		for ( int j = 0; j < 3; j++ )
 		{
 			if ( clip[j] >= clip[3] )
 			{
@@ -1023,7 +1012,7 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror 
 	// based on vertex distance isn't 100% correct (we should be checking for
 	// range to the surface), but it's good enough for the types of portals
 	// we have in the game right now.
-	numTriangles = tess.numIndexes / 3;
+	int numTriangles = tess.numIndexes / 3;
 
 	for ( i = 0; i < tess.numIndexes; i += 3 )
 	{
@@ -1181,11 +1170,10 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 #ifdef USE_PMLIGHT
 	// create dedicated set for each view
 	if ( r_numdlights + oldParms.num_dlights <= ARRAY_LEN( backEndData->dlights ) ) {
-		int i;
 		newParms.dlights = oldParms.dlights + oldParms.num_dlights;
 		newParms.num_dlights = oldParms.num_dlights;
 		r_numdlights += oldParms.num_dlights;
-		for ( i = 0; i < oldParms.num_dlights; i++ )
+		for ( int i = 0; i < oldParms.num_dlights; i++ )
 			newParms.dlights[i] = oldParms.dlights[i];
 	}
 #endif

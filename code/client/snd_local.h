@@ -59,7 +59,9 @@ typedef struct sfx_s {
 	int 			soundLength;
 	int				soundChannels;
 	int				duration;				// Phase 6.2: cached length in milliseconds
-	char 			soundName[MAX_QPATH];
+	// Heap-owned path string. Set once via CopyString() in S_FindName,
+	// freed in S_Base_Shutdown. NULL only for unused slots.
+	const char		*soundName;
 	int				lastTimeUsed;
 	struct sfx_s	*next;
 } sfx_t;

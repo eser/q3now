@@ -570,12 +570,10 @@ R_ScreenshotFilename (CNQ3 backport: timestamp-based)
 */
 static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
 	qtime_t t;
-	int count;
-	int ms;
 
-	count = 0;
+	int count = 0;
 	ri.Com_RealTime( &t );
-	ms = ri.Milliseconds() % 1000;
+	int ms = ri.Milliseconds() % 1000;
 	if ( ms < 0 ) ms = 0;
 
 	Com_sprintf( fileName, MAX_OSPATH,
@@ -942,10 +940,9 @@ static void GfxInfo_f( void )
 	if ( qglGetStringi )
 	{
 		GLint numExtensions;
-		int i;
 
 		qglGetIntegerv( GL_NUM_EXTENSIONS, &numExtensions );
-		for ( i = 0; i < numExtensions; i++ )
+		for ( int i = 0; i < numExtensions; i++ )
 		{
 			ri.Printf( PRINT_ALL, "%s ", qglGetStringi( GL_EXTENSIONS, i ) );
 		}
@@ -1417,7 +1414,6 @@ R_Init
 */
 void R_Init( void ) {	
 	int	err;
-	int i;
 	byte *ptr;
 
 	ri.Printf( PRINT_ALL, "----- R_Init -----\n" );
@@ -1438,7 +1434,7 @@ void R_Init( void ) {
 	//
 	// init function tables
 	//
-	for ( i = 0; i < FUNCTABLE_SIZE; i++ )
+	for ( int i = 0; i < FUNCTABLE_SIZE; i++ )
 	{
 		tr.sinTable[i]		= sin( DEG2RAD( i * 360.0f / ( ( float ) ( FUNCTABLE_SIZE - 1 ) ) ) );
 		tr.squareTable[i]	= ( i < FUNCTABLE_SIZE/2 ) ? 1.0f : -1.0f;
@@ -1617,6 +1613,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.RegisterSkin = RE_RegisterSkin;
 	re.RegisterShader = RE_RegisterShader;
 	re.RegisterShaderNoMip = RE_RegisterShaderNoMip;
+	re.RegisterShaderLightMap = RE_RegisterShaderLightMap;
 	re.RegisterMSDFShader = RE_RegisterMSDFShader;
 	re.LoadWorld = RE_LoadWorldMap;
 	re.SetWorldVisData = RE_SetWorldVisData;

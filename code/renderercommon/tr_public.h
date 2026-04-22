@@ -24,10 +24,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_types.h"
 #include "vulkan/vulkan.h"
+#include "../qcommon/asset_load_log.h"
 
 typedef struct bspFile_s bspFile_t;
 
-#define	REF_API_VERSION		9
+#define	REF_API_VERSION		10
+
+// Lightmap index constants for RegisterShaderLightMap and friends.
+// Must match the values in each renderer's tr_common.h.
+#define LIGHTMAP_NONE       -1
+#define LIGHTMAP_WHITEIMAGE -2
+#define LIGHTMAP_BY_VERTEX  -3
+#define LIGHTMAP_2D         -4
 
 #if !defined(REF_FOG_TYPE_DEFINED)
 #define REF_FOG_TYPE_DEFINED
@@ -71,6 +79,7 @@ typedef struct {
 	qhandle_t (*RegisterSkin)( const char *name );
 	qhandle_t (*RegisterShader)( const char *name );
 	qhandle_t (*RegisterShaderNoMip)( const char *name );
+	qhandle_t (*RegisterShaderLightMap)( const char *name, int lightmapIndex );
 	qhandle_t (*RegisterMSDFShader)( const char *name, float distanceRange, int atlasWidth, int atlasHeight );
 	void	(*LoadWorld)( const bspFile_t *bsp );
 
@@ -272,6 +281,12 @@ typedef struct {
 	void	(*VKimp_Shutdown)( qboolean unloadDLL );
 	void*	(*VK_GetInstanceProcAddr)( VkInstance instance, const char *name );
 	qboolean (*VK_CreateSurface)( VkInstance instance, VkSurfaceKHR *pSurface );
+
+	const cmSkin_t *(*GetCharacterSkin)( qhandle_t handle );
+
+	void	(*AssetLog_Event)( const char *subsystem, const char *full_path,
+	                           const char *extensions_tried, const char *shader_context,
+	                           assetLogSeverity_t severity );
 
 } refimport_t;
 

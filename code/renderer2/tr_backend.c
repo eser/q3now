@@ -1587,14 +1587,13 @@ static const void	*RB_SwapBuffers( const void *data ) {
 	// we measure overdraw by reading back the stencil buffer and
 	// counting up the number of increments that have happened
 	if ( r_measureOverdraw->integer ) {
-		int i;
 		long sum = 0;
 		unsigned char *stencilReadback;
 
 		stencilReadback = ri.Hunk_AllocateTempMemory( glConfig.vidWidth * glConfig.vidHeight );
 		qglReadPixels( 0, 0, glConfig.vidWidth, glConfig.vidHeight, GL_STENCIL_INDEX, GL_UNSIGNED_BYTE, stencilReadback );
 
-		for ( i = 0; i < glConfig.vidWidth * glConfig.vidHeight; i++ ) {
+		for ( int i = 0; i < glConfig.vidWidth * glConfig.vidHeight; i++ ) {
 			sum += stencilReadback[i];
 		}
 

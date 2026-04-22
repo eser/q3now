@@ -517,8 +517,7 @@ CL_WriteAVIVideoFrame
 */
 void CL_WriteAVIVideoFrame( const byte *imageBuffer, int size )
 {
-	unsigned int chunkOffset;
-	int		chunkSize = 8 + size;
+	int		chunkSize   = 8 + size;
 	int		paddingSize = PADLEN( size, 2 );
 	byte	padding[ 4 ] = { 0 };
 
@@ -528,7 +527,7 @@ void CL_WriteAVIVideoFrame( const byte *imageBuffer, int size )
 	// Chunk header + contents + padding
 	CL_CheckFileSize( chunkSize + paddingSize );
 
-	chunkOffset = afd.fileSize - afd.moviOffset - 8;
+	unsigned int chunkOffset = afd.fileSize - afd.moviOffset - 8;
 
 	bufIndex = 0;
 	WRITE_STRING( "00dc" );
@@ -571,15 +570,15 @@ static int  bytesInBuffer = 0;
 CL_FlushAudioBuffer
 ===============
 */
-static void CL_FlushCaptureBuffer( void ) 
+static void CL_FlushCaptureBuffer( void )
 {
-	unsigned int chunkOffset = afd.fileSize - afd.moviOffset - 8;
-	int   chunkSize = 8 + bytesInBuffer;
-	int   paddingSize = PADLEN( bytesInBuffer, 2 );
-	byte  padding[ 4 ] = { 0 };
-
 	if ( !bytesInBuffer )
 		return;
+
+	unsigned int chunkOffset = afd.fileSize - afd.moviOffset - 8;
+	int   chunkSize   = 8 + bytesInBuffer;
+	int   paddingSize = PADLEN( bytesInBuffer, 2 );
+	byte  padding[ 4 ] = { 0 };
 
 	bufIndex = 0;
 	WRITE_STRING( "01wb" );
@@ -671,10 +670,6 @@ Closes the AVI file and writes an index chunk
 */
 qboolean CL_CloseAVI( qboolean reopen )
 {
-	int indexRemainder;
-	int indexSize;
-	const char *idxFileName;
-
 	// AVI file isn't open
 	if ( !afd.fileOpen )
 	{
@@ -699,8 +694,8 @@ qboolean CL_CloseAVI( qboolean reopen )
 		return qtrue;
 	}
 
-	idxFileName = va( "%s" INDEX_FILE_EXTENSION, afd.fileName );
-	indexSize = afd.numIndices * 16;
+	const char *idxFileName = va( "%s" INDEX_FILE_EXTENSION, afd.fileName );
+	int indexSize            = afd.numIndices * 16;
 
 	afd.fileOpen = qfalse;
 
@@ -713,7 +708,7 @@ qboolean CL_CloseAVI( qboolean reopen )
 
 	// Write index
 
-	// Open the temp index file
+	// Open the temp index file — indexSize reused for byte count returned by read
 	if ( ( indexSize = FS_Home_FOpenFileRead( idxFileName, &afd.idxF ) ) <= 0 )
 	{
 		if ( afd.idxF != FS_INVALID_HANDLE ) 
@@ -724,7 +719,7 @@ qboolean CL_CloseAVI( qboolean reopen )
 		return qfalse;
 	}
 
-	indexRemainder = indexSize;
+	int indexRemainder = indexSize;
 
 	// Append index to end of avi file
 	while ( indexRemainder > MAX_AVI_BUFFER )

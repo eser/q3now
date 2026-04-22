@@ -244,10 +244,9 @@ static qboolean R_LightCullSurface( const surfaceType_t* surface, const dlight_t
 #ifdef USE_LEGACY_DLIGHTS
 static int R_DlightFace( srfSurfaceFace_t *face, int dlightBits ) {
 	float		d;
-	int			i;
 	const dlight_t	*dl;
 
-	for ( i = 0; i < tr.refdef.num_dlights; i++ ) {
+	for ( int i = 0; i < tr.refdef.num_dlights; i++ ) {
 		if ( ! ( dlightBits & ( 1 << i ) ) ) {
 			continue;
 		}
@@ -269,10 +268,9 @@ static int R_DlightFace( srfSurfaceFace_t *face, int dlightBits ) {
 
 
 static int R_DlightGrid( srfGridMesh_t *grid, int dlightBits ) {
-	int			i;
 	const dlight_t	*dl;
 
-	for ( i = 0 ; i < tr.refdef.num_dlights ; i++ ) {
+	for ( int i = 0 ; i < tr.refdef.num_dlights ; i++ ) {
 		if ( ! ( dlightBits & ( 1 << i ) ) ) {
 			continue;
 		}
@@ -449,7 +447,6 @@ static void R_RecursiveLightNode( const mnode_t* node )
 	msurface_t** mark;
 	msurface_t* surf;
 	float d;
-	int c;
 	do {
 		// if the node wasn't marked as potentially visible, exit
 		if ( node->visframe != tr.visCount )
@@ -497,7 +494,7 @@ static void R_RecursiveLightNode( const mnode_t* node )
 	tr.pc.c_lit_leafs++;
 
 	// add the individual surfaces
-	c = node->nummarksurfaces;
+	int c = node->nummarksurfaces;
 	mark = node->firstmarksurface;
 	while ( c-- ) {
 		// the surface may have already been added if it spans multiple leafs
@@ -665,9 +662,7 @@ static void R_RecursiveWorldNode( mnode_t *node, unsigned int planeBits, unsigne
 		if ( !r_dlightMode->integer )
 #endif
 		if ( dlightBits ) {
-			int	i;
-
-			for ( i = 0 ; i < tr.refdef.num_dlights ; i++ ) {
+			for ( int i = 0 ; i < tr.refdef.num_dlights ; i++ ) {
 				const dlight_t	*dl;
 				float		dist;
 
@@ -894,7 +889,6 @@ R_AddWorldSurfaces
 void R_AddWorldSurfaces( void ) {
 #ifdef USE_PMLIGHT
 	dlight_t* dl;
-	int i;
 #endif
 
 	if ( !r_drawworld->integer ) {
@@ -932,9 +926,9 @@ void R_AddWorldSurfaces( void ) {
 	// instead of having copypasted versions for both world and local cases
 
 	R_TransformDlights( tr.viewParms.num_dlights, tr.viewParms.dlights, &tr.viewParms.world );
-	for ( i = 0; i < tr.viewParms.num_dlights; i++ ) 
+	for ( int i = 0; i < tr.viewParms.num_dlights; i++ )
 	{
-		dl = &tr.viewParms.dlights[i];	
+		dl = &tr.viewParms.dlights[i];
 		dl->head = dl->tail = NULL;
 		if ( R_CullDlight( dl ) == CULL_OUT ) {
 			tr.pc.c_light_cull_out++;

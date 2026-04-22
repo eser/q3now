@@ -14,10 +14,8 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_alloc.c
     ${SOURCE_DIR}/cgame/cg_atmospheric.c
     ${SOURCE_DIR}/cgame/cg_chatfilter.c
-    ${SOURCE_DIR}/cgame/cg_colorparse.c
     ${SOURCE_DIR}/cgame/cg_lensflare.c
     ${SOURCE_DIR}/cgame/cg_utils.c
-    ${SOURCE_DIR}/cgame/cg_window.c
     ${SOURCE_DIR}/game/bg_tracemap.c
     ${SOURCE_DIR}/cgame/cg_consolecmds.c
     ${SOURCE_DIR}/cgame/cg_draw.c
@@ -27,7 +25,9 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_localents.c
     ${SOURCE_DIR}/cgame/cg_marks.c
     ${SOURCE_DIR}/cgame/cg_particles.c
+    ${SOURCE_DIR}/cgame/cg_playlist.c
     ${SOURCE_DIR}/cgame/cg_players.c
+    ${SOURCE_DIR}/cgame/cg_characters.c
     ${SOURCE_DIR}/cgame/cg_playerstate.c
     ${SOURCE_DIR}/cgame/cg_predict.c
     ${SOURCE_DIR}/cgame/cg_servercmds.c
@@ -63,6 +63,7 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_active.c
     ${SOURCE_DIR}/game/g_arenas.c
     ${SOURCE_DIR}/game/g_bot.c
+    ${SOURCE_DIR}/game/g_bot_nav.c
     ${SOURCE_DIR}/game/wired/bots/g_bot_scripts.c
     ${SOURCE_DIR}/game/wired/bots/g_wiredbots.c
     ${SOURCE_DIR}/game/g_character.c
@@ -101,6 +102,7 @@ set(GAME_BINARY_SOURCES ${SOURCE_DIR}/game/g_syscalls.c)
 # Legacy UI module (q3_ui) removed — Wired UI replaces it
 
 set(GAME_MODULE_SHARED_SOURCES
+    ${SOURCE_DIR}/qcommon/q_color.c
     ${SOURCE_DIR}/qcommon/q_math.c
     ${SOURCE_DIR}/qcommon/q_shared.c
     ${SOURCE_DIR}/qcommon/q_string.c

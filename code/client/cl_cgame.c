@@ -107,7 +107,6 @@ CL_GetSnapshot
 */
 static qboolean CL_GetSnapshot( int snapshotNumber, snapshot_t *snapshot ) {
 	clSnapshot_t	*clSnap;
-	int				i, count;
 
 	if ( cl.snap.messageNum - snapshotNumber < 0 ) {
 		Com_Error( ERR_DROP, "CL_GetSnapshot: snapshotNumber (%i) > cl.snapshot.messageNum (%i)", snapshotNumber, cl.snap.messageNum );
@@ -137,13 +136,13 @@ static qboolean CL_GetSnapshot( int snapshotNumber, snapshot_t *snapshot ) {
 	snapshot->serverTime = clSnap->serverTime;
 	memcpy( snapshot->areamask, clSnap->areamask, sizeof( snapshot->areamask ) );
 	snapshot->ps = clSnap->ps;
-	count = clSnap->numEntities;
+	int count = clSnap->numEntities;
 	if ( count > MAX_ENTITIES_IN_SNAPSHOT ) {
 		Com_DPrintf( "CL_GetSnapshot: truncated %i entities to %i\n", count, MAX_ENTITIES_IN_SNAPSHOT );
 		count = MAX_ENTITIES_IN_SNAPSHOT;
 	}
 	snapshot->numEntities = count;
-	for ( i = 0 ; i < count ; i++ ) {
+	for ( int i = 0 ; i < count ; i++ ) {
 		snapshot->entities[i] =
 			cl.parseEntities[ ( clSnap->parseEntitiesNum + i ) & (MAX_PARSE_ENTITIES-1) ];
 	}
@@ -182,12 +181,10 @@ CL_ConfigstringModified
 */
 static void CL_ConfigstringModified( void ) {
 	const char	*old, *s;
-	int			i, index;
 	const char	*dup;
 	gameState_t	oldGs;
-	int			len;
 
-	index = atoi( Cmd_Argv(1) );
+	int index = atoi( Cmd_Argv(1) );
 	if ( (unsigned) index >= MAX_CONFIGSTRINGS ) {
 		Com_Error( ERR_DROP, "%s: bad configstring index %i", __func__, index );
 	}
@@ -207,7 +204,7 @@ static void CL_ConfigstringModified( void ) {
 	// leave the first 0 for uninitialized strings
 	cl.gameState.dataCount = 1;
 
-	for ( i = 0; i < MAX_CONFIGSTRINGS; i++ ) {
+	for ( int i = 0; i < MAX_CONFIGSTRINGS; i++ ) {
 		if ( i == index ) {
 			dup = s;
 		} else {
@@ -217,7 +214,7 @@ static void CL_ConfigstringModified( void ) {
 			continue;		// leave with the default empty string
 		}
 
-		len = strlen( dup );
+		int len = strlen( dup );
 
 		if ( len + 1 + cl.gameState.dataCount > MAX_GAMESTATE_CHARS ) {
 			Com_Error( ERR_DROP, "%s: MAX_GAMESTATE_CHARS exceeded", __func__ );
@@ -269,8 +266,6 @@ static qboolean CL_GetServerCommand( int serverCommandNumber ) {
 	index = serverCommandNumber & ( MAX_RELIABLE_COMMANDS - 1 );
 	s = clc.serverCommands[ index ];
 	clc.lastExecutedServerCommand = serverCommandNumber;
-
-	Com_DPrintf( "serverCommand: %i : %s\n", serverCommandNumber, s );
 
 	if ( clc.serverCommandsIgnore[ index ] ) {
 		Cmd_Clear();
@@ -464,6 +459,10 @@ static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 	if ( !Q_stricmp( key, "trap_Cvar_SetDescription_Q3E" ) ) {
 		Com_sprintf( value, valueSize, "%i", CG_CVAR_SETDESCRIPTION );
 		return qtrue;
+	}
+
+	if ( strncmp( key, "char:", 5 ) == 0 ) {
+		return CL_Characters_GetManifest( key + 5, value, valueSize );
 	}
 
 	return qfalse;
@@ -953,8 +952,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		{
 			const wuiStagedEntry_t *entries = VMA(1);
 			int count = args[2];
-			int i;
-			for ( i = 0; i < count; i++ ) {
+			for ( int i = 0; i < count; i++ ) {
 				wuiStoreEntry_t *e = WiredStore_Set( entries[i].key );
 				if ( !e ) continue;
 				if ( entries[i].fields & WUI_STAGED_TEXT ) {
@@ -1000,11 +998,10 @@ static intptr_t QDECL CL_DllSyscall( intptr_t arg, ... ) {
 #if !id386 || defined __clang__
 	intptr_t	args[10]; // max.count for cgame
 	va_list	ap;
-	int i;
 
 	args[0] = arg;
 	va_start( ap, arg );
-	for (i = 1; i < ARRAY_LEN( args ); i++ )
+	for (int i = 1; i < ARRAY_LEN( args ); i++ )
 		args[ i ] = va_arg( ap, intptr_t );
 	va_end( ap );
 
@@ -1025,12 +1022,10 @@ Should only be called by CL_StartHunkUsers
 void CL_InitCGame( void ) {
 	const char			*info;
 	const char			*mapname;
-	int					t1, t2;
-	vmInterpret_t		interpret;
 
 	Cbuf_NestedReset();
 
-	t1 = Sys_Milliseconds();
+	int t1 = Sys_Milliseconds();
 
 	// Reset loading progress tracking
 	memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
@@ -1053,7 +1048,7 @@ void CL_InitCGame( void ) {
 	re.VertexLighting( qtrue );
 
 	// load native DLL or WASM module per vm_cgame cvar (0=native, 1=WASM interp, 2=WASM AOT)
-	interpret = Cvar_VariableIntegerValue( "vm_cgame" );
+	vmInterpret_t interpret = Cvar_VariableIntegerValue( "vm_cgame" );
 	if ( cl_connectedToPureServer )
 	{
 		// pure server: force WASM (native DLLs bypass pak integrity checks)
@@ -1076,7 +1071,7 @@ void CL_InitCGame( void ) {
 	// will cause the server to send us the first snapshot
 	cls.state = CA_PRIMED;
 
-	t2 = Sys_Milliseconds();
+	int t2 = Sys_Milliseconds();
 
 	Com_Printf( "CL_InitCGame: %5.2f seconds\n", (t2-t1)/1000.0 );
 
@@ -1162,9 +1157,6 @@ or bursted delayed packets.
 #define	RESET_TIME	500
 
 static void CL_AdjustTimeDelta( void ) {
-	int		newDelta;
-	int		deltaDelta;
-
 	cl.newSnapshots = qfalse;
 
 	// the delta never drifts when replaying a demo
@@ -1172,8 +1164,8 @@ static void CL_AdjustTimeDelta( void ) {
 		return;
 	}
 
-	newDelta = cl.snap.serverTime - cls.realtime;
-	deltaDelta = abs( newDelta - cl.serverTimeDelta );
+	int newDelta = cl.snap.serverTime - cls.realtime;
+	int deltaDelta = abs( newDelta - cl.serverTimeDelta );
 
 	if ( deltaDelta > RESET_TIME ) {
 		cl.serverTimeDelta = newDelta;
@@ -1256,10 +1248,8 @@ Calculates Average Ping from snapshots in buffer. Used by AutoNudge.
 static float CL_AvgPing( void ) {
 	int ping[PACKET_BACKUP];
 	int count = 0;
-	int i, j, iTemp;
-	float result;
 
-	for ( i = 0; i < PACKET_BACKUP; i++ ) {
+	for ( int i = 0; i < PACKET_BACKUP; i++ ) {
 		if ( cl.snapshots[i].ping > 0 && cl.snapshots[i].ping < 999 ) {
 			ping[count] = cl.snapshots[i].ping;
 			count++;
@@ -1270,10 +1260,10 @@ static float CL_AvgPing( void ) {
 		return 0;
 
 	// sort ping array
-	for ( i = count - 1; i > 0; --i ) {
-		for ( j = 0; j < i; ++j ) {
+	for ( int i = count - 1; i > 0; --i ) {
+		for ( int j = 0; j < i; ++j ) {
 			if (ping[j] > ping[j + 1]) {
-				iTemp = ping[j];
+				int iTemp = ping[j];
 				ping[j] = ping[j + 1];
 				ping[j + 1] = iTemp;
 			}
@@ -1281,6 +1271,7 @@ static float CL_AvgPing( void ) {
 	}
 
 	// use median average ping
+	float result;
 	if ( (count % 2) == 0 )
 		result = (ping[count / 2] + ping[(count / 2) - 1]) / 2.0f;
 	else

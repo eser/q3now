@@ -487,10 +487,9 @@ int R_CubemapForPoint( vec3_t point )
 
 	if (r_cubeMapping->integer && tr.numCubemaps)
 	{
-		int i;
 		vec_t shortest = (float)WORLD_SIZE * (float)WORLD_SIZE;
 
-		for (i = 0; i < tr.numCubemaps; i++)
+		for (int i = 0; i < tr.numCubemaps; i++)
 		{
 			vec3_t diff;
 			vec_t length;

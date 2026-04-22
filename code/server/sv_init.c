@@ -25,6 +25,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/wired/net/wn_public.h"
 
+#if FEAT_RECAST_NAVMESH
+#include "../qcommon/nav/nav_public.h"
+#endif
+
 
 /*
 ===============
@@ -517,6 +521,9 @@ void SV_SpawnServer_Tick( void ) {
 
 		Sys_SetStatus( "Loading map %s", mapname );
 		CM_LoadMap( va( "maps/%s.bsp", mapname ), qfalse, &checksum );
+#if FEAT_RECAST_NAVMESH
+		Nav_LoadMap( mapname );
+#endif
 
 		Cvar_Set( "mapname", mapname );
 		Cvar_SetIntegerValue( "sv_mapChecksum", checksum );
@@ -853,6 +860,10 @@ void SV_Init( void )
 		transport->accept_callback = SV_OnPlayerConnect;
 		transport->ready_callback  = SV_OnPlayerReady;
 	}
+
+#if FEAT_RECAST_NAVMESH
+	Nav_Init();
+#endif
 }
 
 
@@ -919,6 +930,9 @@ void SV_Shutdown( const char *finalmsg ) {
 	SV_ShutdownGameProgs();
 	SV_Lua_Shutdown();
 	SV_RconLua_Shutdown();
+#if FEAT_RECAST_NAVMESH
+	Nav_Shutdown();
+#endif
 
 	// free current level
 	SV_ClearServer();

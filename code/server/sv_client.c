@@ -450,8 +450,7 @@ static void SV_SetTLD( char *str, const netadr_t *from, qboolean isLAN )
 static int seqs[ MAX_CLIENTS ];
 
 static void SV_SaveSequences( void ) {
-	int i;
-	for ( i = 0; i < sv.maxclients; i++ ) {
+	for ( int i = 0; i < sv.maxclients; i++ ) {
 		seqs[i] = svs.clients[i].reliableSequence;
 	}
 }
@@ -480,12 +479,10 @@ static void SV_InjectLocation( const char *tld, const char *country ) {
 
 
 static const char *SV_FindCountry( const char *tld ) {
-	int i;
-
 	if ( *tld == '\0' )
 		return "Unknown Location";
 
-	for ( i = 0; i < ARRAY_LEN( tld_info ); i++ ) {
+	for ( int i = 0; i < ARRAY_LEN( tld_info ); i++ ) {
 		if ( !strcmp( tld, tld_info[i].tld ) ) {
 			return tld_info[i].country;
 		}
@@ -672,10 +669,9 @@ SV_ClientEnterWorld to transition it to CS_ACTIVE.
 */
 void SV_OnPlayerReady( conn_handle_t conn )
 {
-	int       i;
 	client_t *cl;
 
-	for ( i = 0; i < sv_maxclients->integer; i++ ) {
+	for ( int i = 0; i < sv_maxclients->integer; i++ ) {
 		cl = &svs.clients[i];
 		if ( cl->state == CS_PRIMED && cl->quic_conn == conn ) {
 			Com_DPrintf( "QUIC: SV_OnPlayerReady — slot %d (%s)\n", i, cl->name );
@@ -822,7 +818,6 @@ void SV_DrainQUICReliableCommands( void )
 	int           len;
 	conn_handle_t rconn;
 	int           rchan;
-	int           i;
 	client_t     *cl;
 
 	if ( !transport )
@@ -835,7 +830,7 @@ void SV_DrainQUICReliableCommands( void )
 			buf[ len < (int)sizeof(buf) ? len : (int)sizeof(buf) - 1 ] = '\0';
 
 			cl = NULL;
-			for ( i = 0; i < sv_maxclients->integer; i++ ) {
+			for ( int i = 0; i < sv_maxclients->integer; i++ ) {
 				if ( svs.clients[i].state >= CS_CONNECTED &&
 				     svs.clients[i].quic_conn == rconn ) {
 					cl = &svs.clients[i];
@@ -1243,8 +1238,6 @@ clear/free any download vars
 ==================
 */
 static void SV_CloseDownload( client_t *cl ) {
-	int i;
-
 	// EOF
 	if ( cl->download != FS_INVALID_HANDLE ) {
 		FS_FCloseFile( cl->download );
@@ -1254,7 +1247,7 @@ static void SV_CloseDownload( client_t *cl ) {
 	*cl->downloadName = '\0';
 
 	// Free the temporary buffer space
-	for (i = 0; i < MAX_DOWNLOAD_WINDOW; i++) {
+	for (int i = 0; i < MAX_DOWNLOAD_WINDOW; i++) {
 		if (cl->downloadBlocks[i]) {
 			Z_Free( cl->downloadBlocks[i] );
 			cl->downloadBlocks[i] = NULL;

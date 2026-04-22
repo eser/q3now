@@ -313,11 +313,10 @@ void RE_BeginScene(const refdef_t *fd)
 	tr.refdef.areamaskModified = qfalse;
 	if ( ! (tr.refdef.rdflags & RDF_NOWORLDMODEL) ) {
 		int		areaDiff;
-		int		i;
 
 		// compare the area bits
 		areaDiff = 0;
-		for ( i = 0; i < MAX_MAP_AREA_BYTES/sizeof(int); i++ ) {
+		for ( int i = 0; i < MAX_MAP_AREA_BYTES/sizeof(int); i++ ) {
 			areaDiff |= ((int *)tr.refdef.areamask)[i] ^ ((int *)fd->areamask)[i];
 			((int *)tr.refdef.areamask)[i] = ((int *)fd->areamask)[i];
 		}

@@ -59,16 +59,11 @@ x, y, and width are in pixels
 */
 static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int size, qboolean showCursor,
 		qboolean noColorEscape ) {
-	int		len;
-	int		drawLen;
+	char	str[MAX_STRING_CHARS];
 	int		prestep;
-	int		cursorChar;
-	char	str[MAX_STRING_CHARS], *s;
-	int		i;
-	int		curColor;
 
-	drawLen = edit->widthInChars - 1; // - 1 so there is always a space for the cursor
-	len = strlen( edit->buffer );
+	int drawLen = edit->widthInChars - 1; // - 1 so there is always a space for the cursor
+	int len = strlen( edit->buffer );
 
 	// guarantee that cursor will be visible
 	if ( len <= drawLen ) {
@@ -96,12 +91,12 @@ static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int 
 	str[ drawLen ] = '\0';
 
 	// color tracking
-	curColor = COLOR_WHITE;
+	int curColor = COLOR_WHITE;
 
 	if ( prestep > 0 ) {
 		// we need to track last actual color because we cut some text before
-		s = edit->buffer;
-		for ( i = 0; i < prestep + 1; i++, s++ ) {
+		char *s = edit->buffer;
+		for ( int i = 0; i < prestep + 1; i++, s++ ) {
 			if ( Q_IsColorString( s ) ) {
 				curColor = *(s+1);
 				s++;
@@ -150,13 +145,14 @@ static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int 
 			return;		// off blink
 		}
 
+		int cursorChar;
 		if ( key_overstrikeMode ) {
 			cursorChar = '|';
 		} else {
 			cursorChar = '_';
 		}
 
-		i = drawLen - strlen( str );
+		int i = drawLen - strlen( str );
 
 		if ( size == smallchar_width ) {
 			float vsize = (float)smallchar_height;
@@ -202,18 +198,15 @@ Field_Paste
 ================
 */
 static void Field_Paste( field_t *edit ) {
-	char	*cbd;
-	int		pasteLen, i;
-
-	cbd = Sys_GetClipboardData();
+	char *cbd = Sys_GetClipboardData();
 
 	if ( !cbd ) {
 		return;
 	}
 
 	// send as if typed, so insert / overstrike works properly
-	pasteLen = strlen( cbd );
-	for ( i = 0 ; i < pasteLen ; i++ ) {
+	int pasteLen = strlen( cbd );
+	for ( int i = 0 ; i < pasteLen ; i++ ) {
 		Field_CharEvent( edit, cbd[i] );
 	}
 
@@ -257,15 +250,13 @@ Key events are used for non-printable characters, others are gotten from char ev
 =================
 */
 static void Field_KeyDownEvent( field_t *edit, int key ) {
-	int		len;
-
 	// shift-insert is paste
 	if ( ( ( key == K_INS ) || ( key == K_KP_INS ) ) && keys[K_SHIFT].down ) {
 		Field_Paste( edit );
 		return;
 	}
 
-	len = strlen( edit->buffer );
+	int len = strlen( edit->buffer );
 
 	switch ( key ) {
 		case K_DEL:
@@ -326,8 +317,6 @@ Field_CharEvent
 ==================
 */
 static void Field_CharEvent( field_t *edit, int ch ) {
-	int		len;
-
 	/* CNQ3 backport Phase 6: any character event ends a cycling-completion
 	 * sequence so the next Tab starts a fresh match list. */
 	Field_ResetCompletionCycle( edit );
@@ -342,7 +331,7 @@ static void Field_CharEvent( field_t *edit, int ch ) {
 		return;
 	}
 
-	len = strlen( edit->buffer );
+	int len = strlen( edit->buffer );
 
 	if ( ch == 'h' - 'a' + 1 )	{	// ctrl-h is backspace
 		if ( edit->cursor > 0 ) {
@@ -893,11 +882,9 @@ Key_ClearStates
 */
 void Key_ClearStates( void )
 {
-	int		i;
-
 	anykeydown = 0;
 
-	for ( i = 0 ; i < MAX_KEYS ; i++ )
+	for ( int i = 0 ; i < MAX_KEYS ; i++ )
 	{
 		if ( keys[i].down )
 			CL_KeyEvent( i, qfalse, 0 );

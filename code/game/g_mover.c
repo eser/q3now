@@ -267,12 +267,8 @@ qboolean G_MoverPush( gentity_t *pusher, vec3_t move, vec3_t amove, gentity_t **
 		check = &g_entities[ entityList[ e ] ];
 
 		// only push items and players
-#if FEAT_CORPSE_MOVER_FIX
 		if ( check->s.eType != ET_ITEM && check->s.eType != ET_PLAYER
 			&& check->r.contents != CONTENTS_CORPSE && !check->physicsObject ) {
-#else
-		if ( check->s.eType != ET_ITEM && check->s.eType != ET_PLAYER && !check->physicsObject ) {
-#endif
 			continue;
 		}
 
@@ -427,6 +423,39 @@ SetMoverState
 void SetMoverState( gentity_t *ent, moverState_t moverState, int time ) {
 	vec3_t			delta;
 	float			f;
+
+#if FEAT_RECAST_NAVMESH
+	/* D-19: update navpoly NAVPOLY_BLOCKED at transition-start (and on initial spawn).
+	 * Fires before ent->moverState is updated so bots see the new passability
+	 * as soon as the door starts moving, not only after it finishes.
+	 * Non-door movers return silently from Nav_SetPolyFlagsForDoor if their
+	 * name doesn't match any door entry built by Nav_TagDoorAreas.
+	 * Unnamed doors are keyed as "door_model_N" using their BSP submodel index
+	 * (the numeric part of ent->model, e.g. "*3" → "door_model_3"). */
+	{
+		const char *navName = NULL;
+		char        synthName[64];
+		if ( ent->targetname ) {
+			navName = ent->targetname;
+		} else if ( ent->model && ent->model[0] == '*' ) {
+			Com_sprintf( synthName, sizeof(synthName), "door_model_%d",
+			             atoi( ent->model + 1 ) );
+			navName = synthName;
+		}
+		if ( navName ) {
+			switch ( moverState ) {
+			case MOVER_1TO2:   /* door started opening */
+			case MOVER_POS2:   /* door fully open (belt-and-suspenders + START_OPEN spawn) */
+				trap_Nav_SetPolyFlagsForDoor( navName, 0, NAVPOLY_BLOCKED );
+				break;
+			case MOVER_2TO1:   /* door started closing */
+			case MOVER_POS1:   /* door fully closed (belt-and-suspenders + initial spawn) */
+				trap_Nav_SetPolyFlagsForDoor( navName, NAVPOLY_BLOCKED, 0 );
+				break;
+			}
+		}
+	}
+#endif /* FEAT_RECAST_NAVMESH */
 
 	ent->moverState = moverState;
 
@@ -1533,7 +1562,7 @@ void SP_func_pendulum(gentity_t *ent) {
 		length = 8;
 	}
 
-	freq = 1 / ( M_PI * 2 ) * sqrt( g_gravity.value / ( 3 * length ) );
+	freq = 1 / ( M_PI * 2 ) * sqrt( g_envGravity.value / ( 3 * length ) );
 
 	ent->s.pos.trDuration = ( 1000 / freq );
 

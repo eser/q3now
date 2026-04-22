@@ -98,6 +98,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... ) {
 	CL_Shutdown( text, qtrue );
 #endif
 
+	Com_Log( SEV_FATAL, "Sys_Error: %s", text );
 	Conbuf_AppendText( text );
 	Conbuf_AppendText( "\n" );
 
@@ -170,27 +171,6 @@ void Sys_Print( const char *msg )
 {
 	char clean_msg[ MAXPRINTMSG ];
 
-	if ( Cvar_VariableIntegerValue( "con_timestamp" ) ) {
-		static qboolean atLineStart = qtrue;
-		static char stamped[ MAXPRINTMSG ];
-		qtime_t now;
-		char ts[12];
-		const char *src = msg;
-		char *w = stamped, *end = stamped + sizeof(stamped) - 1;
-		Com_RealTime( &now );
-		Com_sprintf( ts, sizeof(ts), "%02d:%02d:%02d ", now.tm_hour, now.tm_min, now.tm_sec );
-		while ( *src && w < end ) {
-			if ( atLineStart && *src != '\n' ) {
-				const char *t = ts;
-				while ( *t && w < end ) *w++ = *t++;
-				atLineStart = qfalse;
-			}
-			if ( ( *w++ = *src++ ) == '\n' ) atLineStart = qtrue;
-		}
-		*w = '\0';
-		msg = stamped;
-	}
-
 	Q_strncpyz( clean_msg, msg, sizeof( clean_msg ) );
 	Sys_ReplaceNonPrintableChars( clean_msg );
 
@@ -222,6 +202,32 @@ void Sys_Sleep( int msec ) {
 	//	return;
 
 	Sleep( msec );
+}
+
+
+// Sys_Mutex — wraps CRITICAL_SECTION in the sys_mutex_t opaque buffer.
+_Static_assert( sizeof(CRITICAL_SECTION) <= SYS_MUTEX_OPAQUE_SIZE,
+	"sys_mutex_t opaque buffer too small for CRITICAL_SECTION" );
+
+qboolean Sys_MutexInit( sys_mutex_t *m )
+{
+	InitializeCriticalSection( (CRITICAL_SECTION *)m->opaque );
+	return qtrue;
+}
+
+void Sys_MutexLock( sys_mutex_t *m )
+{
+	EnterCriticalSection( (CRITICAL_SECTION *)m->opaque );
+}
+
+void Sys_MutexUnlock( sys_mutex_t *m )
+{
+	LeaveCriticalSection( (CRITICAL_SECTION *)m->opaque );
+}
+
+void Sys_MutexDestroy( sys_mutex_t *m )
+{
+	DeleteCriticalSection( (CRITICAL_SECTION *)m->opaque );
 }
 
 

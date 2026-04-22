@@ -332,7 +332,6 @@ AREAPORTALS
 */
 
 static void CM_FloodArea_r( int areaNum, int floodnum) {
-	int		i;
 	cArea_t *area;
 	int		*con;
 
@@ -347,7 +346,7 @@ static void CM_FloodArea_r( int areaNum, int floodnum) {
 	area->floodnum = floodnum;
 	area->floodvalid = cm.floodvalid;
 	con = cm.areaPortals + areaNum * cm.numAreas;
-	for ( i=0 ; i < cm.numAreas  ; i++ ) {
+	for ( int i=0 ; i < cm.numAreas  ; i++ ) {
 		if ( con[i] > 0 ) {
 			CM_FloodArea_r( i, floodnum );
 		}
@@ -361,7 +360,6 @@ CM_FloodAreaConnections
 ====================
 */
 void	CM_FloodAreaConnections( void ) {
-	int		i;
 	cArea_t	*area;
 	int		floodnum;
 
@@ -369,7 +367,7 @@ void	CM_FloodAreaConnections( void ) {
 	cm.floodvalid++;
 	floodnum = 0;
 
-	for (i = 0 ; i < cm.numAreas ; i++) {
+	for (int i = 0 ; i < cm.numAreas ; i++) {
 		area = &cm.areas[i];
 		if (area->floodvalid == cm.floodvalid) {
 			continue;		// already flooded into

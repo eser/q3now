@@ -23,12 +23,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
+#include "log.h"
 #include "crash.h"
 #include <setjmp.h>
 #ifndef _WIN32
 #include <netinet/in.h>
 #include <sys/stat.h> // umask
 #include <sys/time.h>
+#include <time.h>       // clock_gettime(CLOCK_MONOTONIC) for Sys_NanoTime
 #else
 #include <winsock.h>
 #if defined(_DEBUG)
@@ -50,7 +52,6 @@ static jmp_buf abortframe;	// an ERR_DROP occurred, exit the entire frame
 
 int		CPU_Flags = 0;
 
-static fileHandle_t logfile = FS_INVALID_HANDLE;
 static fileHandle_t com_journalFile = FS_INVALID_HANDLE ; // events are written here
 fileHandle_t com_journalDataFile = FS_INVALID_HANDLE; // config files are written here
 
@@ -73,10 +74,8 @@ cvar_t	*com_timedemo;
 #ifdef USE_AFFINITY_MASK
 cvar_t	*com_affinityMask;
 #endif
-static cvar_t *com_logfile;		// 1 = buffer log, 2 = flush after each print
 static cvar_t *com_showtrace;
 cvar_t	*com_version;
-static cvar_t *com_buildScript;	// for automated data building scripts
 
 #ifndef DEDICATED
 static cvar_t	*com_introPlayed;
@@ -124,31 +123,6 @@ static void Com_WriteConfig_f( void );
 void CIN_CloseAllVideos( void );
 
 //============================================================================
-
-static qstring_t rd_qs;
-static qboolean  rd_flushing = qfalse;
-static void      (*rd_flush)( const char *buffer );
-
-void Com_BeginRedirect( char *buffer, int buffersize, void (*flush)(const char *) )
-{
-	if (!buffer || !buffersize || !flush)
-		return;
-	rd_qs    = QS_Wrap( buffer, buffersize );
-	rd_flush = flush;
-}
-
-
-void Com_EndRedirect( void )
-{
-	if ( rd_flush ) {
-		rd_flushing = qtrue;
-		rd_flush( rd_qs.data );
-		rd_flushing = qfalse;
-	}
-
-	rd_qs    = (qstring_t){ NULL, 0, 0 };
-	rd_flush = NULL;
-}
 
 
 /*
@@ -200,80 +174,10 @@ A raw string should NEVER be passed as fmt, because of "%f" type crashers.
 =============
 */
 void FORMAT_PRINTF(1, 2) QDECL Com_Printf( const char *fmt, ... ) {
-	static qboolean opening_qconsole = qfalse;
-	va_list		argptr;
-	char		msg[MAXPRINTMSG];
-	int			len;
-
-	va_start( argptr, fmt );
-	len = vsnprintf( msg, sizeof( msg ), fmt, argptr );
-	va_end( argptr );
-
-	if ( rd_qs.data && !rd_flushing ) {
-		if ( len > QS_Remaining( &rd_qs ) ) {
-			rd_flushing = qtrue;
-			rd_flush( rd_qs.data );
-			rd_flushing = qfalse;
-			QS_Clear( &rd_qs );
-		}
-		QS_Append( &rd_qs, msg );
-		return;
-	}
-
-#ifndef DEDICATED
-	// echo to client console if we're not a dedicated server
-	if ( !com_dedicated || !com_dedicated->integer ) {
-		CL_ConsolePrint( msg );
-	}
-#endif
-
-	// echo to dedicated console and early console
-	Sys_Print( msg );
-
-	// logfile
-	if ( com_logfile && com_logfile->integer ) {
-		// TTimo: only open the qconsole.log if the filesystem is in an initialized state
-		//   also, avoid recursing in the qconsole.log opening (i.e. if fs_debug is on)
-		if ( logfile == FS_INVALID_HANDLE && FS_Initialized() && !opening_qconsole ) {
-			const char *logName = "qconsole.log";
-			int mode;
-
-			opening_qconsole = qtrue;
-
-			mode = com_logfile->integer - 1;
-
-			if ( mode & 2 )
-				logfile = FS_FOpenFileAppend( logName );
-			else
-				logfile = FS_FOpenFileWrite( logName );
-
-			if ( logfile != FS_INVALID_HANDLE ) {
-				struct tm *newtime;
-				time_t aclock;
-				char timestr[32];
-
-				time( &aclock );
-				newtime = localtime( &aclock );
-				strftime( timestr, sizeof( timestr ), "%a %b %d %X %Y", newtime );
-
-				Com_Printf( "logfile opened on %s\n", timestr );
-
-				if ( mode & 1 ) {
-					// force it to not buffer so we get valid
-					// data even if we are crashing
-					FS_ForceFlush( logfile );
-				}
-			} else {
-				Com_Printf( S_COLOR_YELLOW "Opening %s failed!\n", logName );
-				Cvar_Set( "logfile", "0" );
-			}
-
-			opening_qconsole = qfalse;
-		}
-		if ( logfile != FS_INVALID_HANDLE && FS_Initialized() ) {
-			FS_Write( msg, len, logfile );
-		}
-	}
+	va_list ap;
+	va_start( ap, fmt );
+	Com_Logv( SEV_INFO, fmt, ap );
+	va_end( ap );
 }
 
 
@@ -285,18 +189,12 @@ A Com_Printf that only shows up if the "developer" cvar is set
 ================
 */
 void FORMAT_PRINTF(1, 2) QDECL Com_DPrintf( const char *fmt, ... ) {
-	va_list		argptr;
-	char		msg[MAXPRINTMSG];
-
-	if ( !com_developer || !com_developer->integer ) {
-		return;			// don't confuse non-developers with techie stuff...
-	}
-
-	va_start( argptr,fmt );
-	vsnprintf( msg, sizeof( msg ), fmt, argptr );
-	va_end( argptr );
-
-	Com_Printf( S_COLOR_DEVEL "%s", msg );
+	if ( !com_developer || !com_developer->integer )
+		return;
+	va_list ap;
+	va_start( ap, fmt );
+	Com_Logv( SEV_DEBUG, fmt, ap );
+	va_end( ap );
 }
 
 
@@ -334,12 +232,6 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 
 	Cvar_SetIntegerValue( "com_errorCode", code );
 
-	// when we are running automated scripts, make sure we
-	// know if anything failed
-	if ( com_buildScript && com_buildScript->integer ) {
-		code = ERR_FATAL;
-	}
-
 	// if we are getting a solid stream of ERR_DROP, do an ERR_FATAL
 	int currentTime = Sys_Milliseconds();
 	if ( currentTime - lastErrorTime < 100 ) {
@@ -369,7 +261,7 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 	if ( code == ERR_DISCONNECT || code == ERR_SERVERDISCONNECT ) {
 		VM_Forced_Unload_Start();
 		SV_Shutdown( "Server disconnected" );
-		Com_EndRedirect();
+		Log_PopRedirectSink();
 #ifndef DEDICATED
 		CL_Disconnect( qfalse );
 		CL_FlushMemory();
@@ -392,7 +284,7 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 			com_errorMessage );
 		VM_Forced_Unload_Start();
 		SV_Shutdown( va( "Server crashed: %s",  com_errorMessage ) );
-		Com_EndRedirect();
+		Log_PopRedirectSink();
 #ifndef DEDICATED
 		CL_Disconnect( qfalse );
 		CL_FlushMemory();
@@ -417,7 +309,7 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 		Q_longjmp( abortframe, 1 );
 	} else if ( code == ERR_NEED_CD ) {
 		SV_Shutdown( "Server didn't have CD" );
-		Com_EndRedirect();
+		Log_PopRedirectSink();
 #ifndef DEDICATED
 		if ( com_cl_running && com_cl_running->integer ) {
 			CL_Disconnect( qfalse );
@@ -439,7 +331,7 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 		CL_Shutdown( va( "Server fatal crashed: %s", com_errorMessage ), qtrue );
 #endif
 		SV_Shutdown( va( "Server fatal crashed: %s", com_errorMessage ) );
-		Com_EndRedirect();
+		Log_PopRedirectSink();
 		VM_Forced_Unload_Done();
 	}
 
@@ -547,12 +439,11 @@ returns qtrue if both vid_xpos and vid_ypos was set
 qboolean Com_EarlyParseCmdLine( char *commandLine, char *con_title, int title_size, int *vid_xpos, int *vid_ypos )
 {
 	int		flags = 0;
-	int		i;
 
 	*con_title = '\0';
 	Com_ParseCommandLine( commandLine );
 
-	for ( i = 0 ; i < com_numConsoleLines ; i++ ) {
+	for ( int i = 0 ; i < com_numConsoleLines ; i++ ) {
 		Cmd_TokenizeString( com_consoleLines[i] );
 		if ( !Q_stricmpn( Cmd_Argv(0), "set", 3 ) && !Q_stricmp( Cmd_Argv(1), "cl_title" ) ) {
 			com_consoleLines[i][0] = '\0';
@@ -609,9 +500,7 @@ skip loading of q3config.cfg
 ===================
 */
 qboolean Com_SafeMode( void ) {
-	int		i;
-
-	for ( i = 0 ; i < com_numConsoleLines ; i++ ) {
+	for ( int i = 0 ; i < com_numConsoleLines ; i++ ) {
 		Cmd_TokenizeString( com_consoleLines[i] );
 		if ( !Q_stricmp( Cmd_Argv(0), "safe" )
 			|| !Q_stricmp( Cmd_Argv(0), "cvar_restart" ) ) {
@@ -635,10 +524,9 @@ be after execing the config and default.
 ===============
 */
 void Com_StartupVariable( const char *match ) {
-	int i;
 	const char *name;
 
-	for ( i = 0; i < com_numConsoleLines; i++ ) {
+	for ( int i = 0; i < com_numConsoleLines; i++ ) {
 		Cmd_TokenizeString( com_consoleLines[i] );
 		if ( Q_stricmp( Cmd_Argv( 0 ), "set" ) ) {
 			continue;
@@ -673,12 +561,11 @@ will keep the demoloop from immediately starting
 =================
 */
 static qboolean Com_AddStartupCommands( void ) {
-	int		i;
 	qboolean	added;
 
 	added = qfalse;
 	// quote every token, so args with semicolons can work
-	for (i=0 ; i < com_numConsoleLines ; i++) {
+	for (int i=0 ; i < com_numConsoleLines ; i++) {
 		if ( !com_consoleLines[i] || !com_consoleLines[i][0] ) {
 			continue;
 		}
@@ -972,6 +859,40 @@ int64_t Sys_Microseconds( void )
 	gettimeofday( &curr, NULL );
 
 	return (int64_t)curr.tv_sec * 1000000LL + (int64_t)curr.tv_usec;
+#endif
+}
+
+
+/*
+================
+Sys_NanoTime
+================
+*/
+// Contract-infallible: POSIX guarantees CLOCK_MONOTONIC; Win32 QPC on XP+.
+// Worst case on failure is a single malformed timestamp in one log line.
+int64_t Sys_NanoTime( void )
+{
+#ifdef _WIN32
+	static qboolean     inited = qfalse;
+	static LARGE_INTEGER base;
+	static LARGE_INTEGER freq;
+	LARGE_INTEGER        curr;
+
+	if ( !inited )
+	{
+		QueryPerformanceFrequency( &freq );
+		QueryPerformanceCounter( &base );
+		inited = qtrue;
+		return 0;
+	}
+
+	QueryPerformanceCounter( &curr );
+	// multiply before divide to keep precision; freq is ~10MHz on modern HW
+	return ((curr.QuadPart - base.QuadPart) * 1000000000LL) / freq.QuadPart;
+#else
+	struct timespec ts;
+	clock_gettime( CLOCK_MONOTONIC, &ts );
+	return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
 #endif
 }
 
@@ -1655,14 +1576,11 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 	char dump[32], *ptr;
 	int  i, j;
 #endif
-	if ( logfile == FS_INVALID_HANDLE || !FS_Initialized() )
-		return;
-
 	size_t size = 0, numBlocks = 0;
 	size_t allocSize = 0;
 	char buf[4096];
-	int len = Com_sprintf( buf, sizeof(buf), "\r\n================\r\n%s log\r\n================\r\n", name );
-	FS_Write( buf, len, logfile );
+	Com_sprintf( buf, sizeof(buf), "\r\n================\r\n%s log\r\n================\r\n", name );
+	Com_Log( SEV_DEBUG, "%s", buf );
 	for ( memblock_t *block = zone->blocklist.next ; ; ) {
 		if ( block->tag != TAG_FREE ) {
 #ifdef ZONE_DEBUG
@@ -1677,8 +1595,8 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 				}
 			}
 			dump[j] = '\0';
-			len = Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s) [%s]\r\n", block->d.allocSize, block->d.file, block->d.line, block->d.label, dump);
-			FS_Write( buf, len, logfile );
+			Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s) [%s]\r\n", block->d.allocSize, block->d.file, block->d.line, block->d.label, dump);
+			Com_Log( SEV_DEBUG, "%s", buf );
 			allocSize += block->d.allocSize;
 #endif
 			size += block->size;
@@ -1695,11 +1613,10 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 #else
 	allocSize = numBlocks * sizeof(memblock_t); // + 32 bit alignment
 #endif
-	len = Com_sprintf( buf, sizeof( buf ), "%"PRIz"u %s memory in %"PRIz"u blocks\r\n", size, name, numBlocks );
-	FS_Write( buf, len, logfile );
-	len = Com_sprintf( buf, sizeof( buf ), "%"PRIz"u %s memory overhead\r\n", size - allocSize, name );
-	FS_Write( buf, len, logfile );
-	FS_Flush( logfile );
+	Com_sprintf( buf, sizeof( buf ), "%"PRIz"u %s memory in %"PRIz"u blocks\r\n", size, name, numBlocks );
+	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_sprintf( buf, sizeof( buf ), "%"PRIz"u %s memory overhead\r\n", size - allocSize, name );
+	Com_Log( SEV_DEBUG, "%s", buf );
 }
 
 
@@ -1958,8 +1875,7 @@ void MemStats_Free( memTag_t tag, int size ) {
 }
 
 void MemStats_Reset( void ) {
-	int i;
-	for ( i = 0; i < MEMTAG_COUNT; i++ ) {
+	for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
 		memStats[i].peakBytes = memStats[i].currentBytes;
 	}
 }
@@ -2147,9 +2063,8 @@ static void Com_Meminfo_f( void ) {
 
 #if FEAT_MEMSTATS
 	{
-		int i;
 		Com_Printf( "\nTAG BREAKDOWN (current / peak):\n" );
-		for ( i = 0; i < MEMTAG_COUNT; i++ ) {
+		for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
 			if ( memStats[i].currentBytes == 0 && memStats[i].peakBytes == 0 ) continue;
 			Com_Printf( "  %-12s %7.1f MB / %7.1f MB   %5i allocs\n",
 				MemTag_Names[i],
@@ -2172,7 +2087,6 @@ static void Com_MemInfoReset_f( void ) {
 static void Com_MemInfoJson_f( void ) {
 	hunkStats_t  hs = Hunk_GetStats();
 	zoneStats_t  zs = Zone_GetStats();
-	int i;
 
 	Com_Printf( "{\"hunk\":{\"total\":%i,\"low\":%i,\"high\":%i,\"temp\":%i,\"free\":%i,\"peak\":%i}",
 		hs.totalBytes, hs.permanentLowBytes, hs.permanentHighBytes,
@@ -2181,7 +2095,7 @@ static void Com_MemInfoJson_f( void ) {
 		zs.totalBytes, zs.usedBytes, zs.freeBytes,
 		zs.freeBlockCount, zs.largestFreeBlock, zs.allocCount );
 	Com_Printf( ",\"tags\":{" );
-	for ( i = 0; i < MEMTAG_COUNT; i++ ) {
+	for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
 		Com_Printf( "%s\"%s\":{\"current\":%lli,\"peak\":%lli,\"count\":%i,\"total\":%i}",
 			i > 0 ? "," : "",
 			MemTag_Names[i],
@@ -2252,9 +2166,7 @@ Com_InitSmallZoneMemory
 */
 static void Com_InitSmallZoneMemory( void ) {
 	static byte s_buf[ 512 * 1024 ];
-	int smallZoneSize;
-
-	smallZoneSize = sizeof( s_buf );
+	int smallZoneSize = sizeof( s_buf );
 	memset( s_buf, 0, smallZoneSize );
 	smallzone = (memzone_t *)s_buf;
 	Z_Init( smallzone, smallZoneSize, "small" );
@@ -2302,25 +2214,22 @@ Hunk_Log
 =================
 */
 void Hunk_Log( void ) {
-	if ( logfile == FS_INVALID_HANDLE || !FS_Initialized() )
-		return;
-
 	int size = 0, numBlocks = 0;
 	char buf[4096];
 	Com_sprintf(buf, sizeof(buf), "\r\n================\r\nHunk log\r\n================\r\n");
-	FS_Write(buf, strlen(buf), logfile);
+	Com_Log( SEV_DEBUG, "%s", buf );
 	for (hunkblock_t *block = hunkblocks ; block; block = block->next) {
 #ifdef HUNK_DEBUG
 		Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s)\r\n", block->size, block->file, block->line, block->label);
-		FS_Write(buf, strlen(buf), logfile);
+		Com_Log( SEV_DEBUG, "%s", buf );
 #endif
 		size += block->size;
 		numBlocks++;
 	}
 	Com_sprintf(buf, sizeof(buf), "%d Hunk memory\r\n", size);
-	FS_Write(buf, strlen(buf), logfile);
+	Com_Log( SEV_DEBUG, "%s", buf );
 	Com_sprintf(buf, sizeof(buf), "%d hunk blocks\r\n", numBlocks);
-	FS_Write(buf, strlen(buf), logfile);
+	Com_Log( SEV_DEBUG, "%s", buf );
 }
 
 
@@ -2331,16 +2240,13 @@ Hunk_SmallLog
 */
 #ifdef HUNK_DEBUG
 void Hunk_SmallLog( void ) {
-	if ( logfile == FS_INVALID_HANDLE || !FS_Initialized() )
-		return;
-
 	for (hunkblock_t *block = hunkblocks ; block; block = block->next) {
 		block->printed = qfalse;
 	}
 	int size = 0, numBlocks = 0;
 	char buf[4096];
 	Com_sprintf(buf, sizeof(buf), "\r\n================\r\nHunk Small log\r\n================\r\n");
-	FS_Write(buf, strlen(buf), logfile);
+	Com_Log( SEV_DEBUG, "%s", buf );
 	for (hunkblock_t *block = hunkblocks; block; block = block->next) {
 		if (block->printed) {
 			continue;
@@ -2358,14 +2264,14 @@ void Hunk_SmallLog( void ) {
 			block2->printed = qtrue;
 		}
 		Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s)\r\n", locsize, block->file, block->line, block->label);
-		FS_Write(buf, strlen(buf), logfile);
+		Com_Log( SEV_DEBUG, "%s", buf );
 		size += block->size;
 		numBlocks++;
 	}
 	Com_sprintf(buf, sizeof(buf), "%d Hunk memory\r\n", size);
-	FS_Write(buf, strlen(buf), logfile);
+	Com_Log( SEV_DEBUG, "%s", buf );
 	Com_sprintf(buf, sizeof(buf), "%d hunk blocks\r\n", numBlocks);
-	FS_Write(buf, strlen(buf), logfile);
+	Com_Log( SEV_DEBUG, "%s", buf );
 }
 #endif
 
@@ -2407,10 +2313,9 @@ static void Com_InitHunkMemory( void ) {
 	Cmd_AddCommand( "meminfo_reset", Com_MemInfoReset_f );
 	Cmd_AddCommand( "meminfo_json",  Com_MemInfoJson_f );
 	{
-		int  i;
 		char cvarName[64];
 		mem_budget_enforce = Cvar_Get( "mem_budget_enforce", "1", CVAR_ARCHIVE );
-		for ( i = 0; i < MEMTAG_COUNT; i++ ) {
+		for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
 			Com_sprintf( cvarName, sizeof( cvarName ), "mem_budget_%s", MemTag_Names[i] );
 			memBudgetCvars[i] = Cvar_Get( cvarName, "0", CVAR_ARCHIVE );
 		}
@@ -3867,17 +3772,16 @@ static const struct {
 	{ "SV_WIRDNETEVENTRATE",   "sv_wirednetEventRate" },
 	{ "SV_WIREDNETRECORD",      "sv_wirednetRecord" },
 	{ "RCONPASSWORD",       "sv_wiredRconPassword" },
-	{ "LOGFILE",            "logfile" },
+	{ "LOGFILE",            "log_enabled" },
 	{ NULL, NULL }
 };
 
 static void Com_SetCvarsFromEnvironment( void )
 {
-	int i;
 	const char *val;
 	int count = 0;
 
-	for ( i = 0; wn_env_map[i].env != NULL; i++ ) {
+	for ( int i = 0; wn_env_map[i].env != NULL; i++ ) {
 		char envname[128];
 		Com_sprintf( envname, sizeof(envname), "Q3_%s", wn_env_map[i].env );
 		val = getenv( envname );
@@ -3906,6 +3810,12 @@ void Com_Init( char *commandLine ) {
 	// get the initial time base
 	Sys_Milliseconds();
 	Sys_SetMainThreadPolicy();
+
+	// Fallback stderr sink: plain write(2), no cvars, no filesystem.
+	// Must be the very first act so banner and early errors reach stderr.
+	if ( !Log_RegisterFallbackStderrSink() ) {
+		Sys_Error( "Log pipeline: Sys_MutexInit failed" );
+	}
 
 	Com_Printf( "%s %s %s\n", Q3NOW_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
 
@@ -3972,14 +3882,18 @@ void Com_Init( char *commandLine ) {
 
 	WiredScript_Init();
 
-	com_logfile = Cvar_Get( "logfile", "0", CVAR_TEMP );
-	Cvar_CheckRange( com_logfile, "0", "4", CV_INTEGER );
-	Cvar_SetDescription( com_logfile, "System console logging:\n"
-		" 0 - disabled\n"
-		" 1 - overwrite mode, buffered\n"
-		" 2 - overwrite mode, synced\n"
-		" 3 - append mode, buffered\n"
-		" 4 - append mode, synced\n" );
+	// Register real sinks now that cvars + filesystem are ready.
+	// log_enabled / log_mode / log_severity registered by Log_RegisterFileSink.
+	// Console sink compiled out in dedicated builds.
+#ifndef DEDICATED
+	Log_RegisterConsoleSink();
+#endif
+	Log_RegisterTtySink();
+	Log_RegisterFileSink(); // no-op if log_enabled == 0
+
+	// Fallback stderr sink served its purpose; real sinks take over.
+	// Drains in-flight dispatches before removing.
+	Log_UnregisterFallbackStderrSink();
 
 	Com_InitJournaling();
 
@@ -4086,9 +4000,6 @@ void Com_Init( char *commandLine ) {
 	Cvar_SetDescription( sv_packetdelay, "Simulates packet delay, which can lead to packet loss. Server side." );
 	com_sv_running = Cvar_Get( "sv_running", "0", CVAR_ROM | CVAR_NOTABCOMPLETE );
 	Cvar_SetDescription( com_sv_running, "Communicates to game modules if there is a server currently running." );
-
-	com_buildScript = Cvar_Get( "com_buildScript", "0", 0 );
-	Cvar_SetDescription( com_buildScript, "Loads all game assets, regardless whether they are required or not." );
 
 	Cvar_Get( "com_errorMessage", "", CVAR_ROM | CVAR_NORESTART );
 
@@ -4424,9 +4335,7 @@ Com_TimeVal
 */
 static int Com_TimeVal( int minMsec )
 {
-	int timeVal;
-
-	timeVal = Com_Milliseconds() - com_frameTime;
+	int timeVal = Com_Milliseconds() - com_frameTime;
 
 	if ( timeVal >= minMsec )
 		timeVal = 0;
@@ -4747,6 +4656,8 @@ void Com_Frame( qboolean noDelay ) {
 		c_pointcontents = 0;
 	}
 
+	AssetLog_Tick();
+
 	com_frameNumber++;
 }
 
@@ -4757,14 +4668,18 @@ Com_Shutdown
 =================
 */
 static void Com_Shutdown( void ) {
+	AssetLog_Flush( NULL );
+
 	WiredScript_Shutdown();
 
 	BSP_Shutdown();
 
-	if ( logfile != FS_INVALID_HANDLE ) {
-		FS_FCloseFile( logfile );
-		logfile = FS_INVALID_HANDLE;
-	}
+	// Drain and close built-in sinks cleanly before filesystem shuts down.
+	Log_UnregisterFileSink();
+#ifndef DEDICATED
+	Log_UnregisterConsoleSink();
+#endif
+	Log_UnregisterTtySink();
 
 	if ( com_journalFile != FS_INVALID_HANDLE ) {
 		FS_FCloseFile( com_journalFile );
@@ -5343,14 +5258,12 @@ fills string array with len random bytes, preferably from the OS randomizer
 */
 void Com_RandomBytes( byte *string, int len )
 {
-	int i;
-
 	if ( Sys_RandomBytes( string, len ) )
 		return;
 
 	Com_Printf( S_COLOR_YELLOW "Com_RandomBytes: using weak randomization\n" );
 	srand( time( NULL ) );
-	for( i = 0; i < len; i++ )
+	for( int i = 0; i < len; i++ )
 		string[i] = (unsigned char)( rand() % 256 );
 }
 

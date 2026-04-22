@@ -160,9 +160,7 @@ void RB_BokehBlur(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox, float 
 		else if (blur > 2.0f)
 		{
 			// blur 1/16th texture then replace
-			int i;
-
-			for (i = 0; i < 2; i++)
+			for (int i = 0; i < 2; i++)
 			{
 				vec2_t blurTexScale;
 				float subblur;
@@ -189,14 +187,12 @@ void RB_BokehBlur(FBO_t *src, ivec4_t srcBox, FBO_t *dst, ivec4_t dstBox, float 
 		else if (blur > 1.0f)
 		{
 			// blur quarter texture then replace
-			int i;
-
 			src = tr.quarterFbo[0];
 			dst = tr.quarterFbo[1];
 
 			VectorSet4(color, 0.5f, 0.5f, 0.5f, 1);
 
-			for (i = 0; i < 2; i++)
+			for (int i = 0; i < 2; i++)
 			{
 				vec2_t blurTexScale;
 				float subblur;
@@ -371,8 +367,7 @@ void RB_SunRays(FBO_t *srcFbo, ivec4_t srcBox, FBO_t *dstFbo, ivec4_t dstBox)
 	{
 		const float stretch_add = 2.f/3.f;
 		float stretch = 1.f + stretch_add;
-		int i;
-		for (i=0; i<2; ++i)
+		for (int i=0; i<2; ++i)
 		{
 			RB_RadialBlur(tr.quarterFbo[i&1], tr.quarterFbo[(~i) & 1], 5, stretch, 0.f, 0.f, tr.quarterFbo[0]->width, tr.quarterFbo[0]->height, pos[0], pos[1], 1.125f);
 			stretch += stretch_add;

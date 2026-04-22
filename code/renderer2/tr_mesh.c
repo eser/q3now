@@ -184,9 +184,8 @@ int R_ComputeLOD( trRefEntity_t *ent ) {
 
 		if(tr.currentModel->type == MOD_MDR)
 		{
-			int frameSize;
 			mdr = (mdrHeader_t *) tr.currentModel->modelData;
-			frameSize = (size_t) (&((mdrFrame_t *)0)->bones[mdr->numBones]);
+			int frameSize = (size_t) (&((mdrFrame_t *)0)->bones[mdr->numBones]);
 			
 			mdrframe = (mdrFrame_t *) ((byte *) mdr + mdr->ofsFrames + frameSize * ent->e.frame);
 			
@@ -281,7 +280,6 @@ R_AddMD3Surfaces
 =================
 */
 void R_AddMD3Surfaces( trRefEntity_t *ent ) {
-	int				i;
 	mdvModel_t		*model = NULL;
 	mdvSurface_t	*surface = NULL;
 	shader_t		*shader = NULL;
@@ -351,10 +349,30 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	// draw all surfaces
 	//
 	surface = model->surfaces;
-	for ( i = 0 ; i < model->numSurfaces ; i++ ) {
+	for ( int i = 0 ; i < model->numSurfaces ; i++ ) {
 
 		if ( ent->e.customShader ) {
 			shader = R_GetShaderByHandle( ent->e.customShader );
+		} else if ( ent->e.characterSkin ) {
+			const cmSkin_t *csk = ri.GetCharacterSkin( ent->e.characterSkin );
+			if ( csk ) {
+				if ( csk->singlePath ) {
+					shader = R_GetShaderByHandle( csk->fallbackShader );
+				} else {
+					int csj;
+					shader = tr.defaultShader;
+					for ( csj = 0; csj < csk->overrideCount; csj++ ) {
+						if ( !strcmp( csk->overrides[csj].surfaceName, surface->name ) ) {
+							shader = R_GetShaderByHandle( csk->overrides[csj].shader );
+							break;
+						}
+					}
+					if ( shader == tr.defaultShader && csk->defaultShader )
+						shader = R_GetShaderByHandle( csk->defaultShader );
+				}
+			} else {
+				shader = tr.defaultShader;
+			}
 		} else if ( ent->e.customSkin > 0 && ent->e.customSkin < tr.numSkins ) {
 			const skin_t *skin;
 			int		j;

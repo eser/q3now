@@ -84,6 +84,11 @@ void AddScore( gentity_t *ent, vec3_t origin, int score ) {
 	if ( level.warmupTime ) {
 		return;
 	}
+#if FEAT_GAME_MEETING
+	if ( level.meeting ) {
+		return;
+	}
+#endif
 	// show score plum
 	ScorePlum(ent, origin, score);
 	//
@@ -267,12 +272,11 @@ GibEntity
 */
 void GibEntity( gentity_t *self, int killer ) {
 	gentity_t *ent;
-	int i;
 
 	//if this entity still has kamikaze
 	if (self->s.eFlags & EF_KAMIKAZE) {
 		// check if there is a kamikaze timer around for this owner
-		for (i = 0; i < level.num_entities; i++) {
+		for (int i = 0; i < level.num_entities; i++) {
 			ent = &g_entities[i];
 			if (!ent->inuse)
 				continue;
@@ -956,8 +960,7 @@ Maps a means-of-death constant to the corresponding attack index.
 ============
 */
 int G_AttackFromMOD( int mod ) {
-	int i;
-	for ( i = 1; i < ATT_NUM_ATTACKS; i++ ) {
+	for ( int i = 1; i < ATT_NUM_ATTACKS; i++ ) {
 		if ( bg_attacklist[i].meansOfDeath == mod || bg_attacklist[i].splashMeansOfDeath == mod ) {
 			return i;
 		}

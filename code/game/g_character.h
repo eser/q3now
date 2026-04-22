@@ -7,9 +7,8 @@ typedef struct {
 	qboolean inuse;
 	char name[MAX_QPATH];
 	char display_name[64];
-	char model[MAX_QPATH];   // "visor/default" format for userinfo
+	char skinName[MAX_QPATH];  // active skin name (e.g. "default", "gorre")
 	char profilePath[MAX_QPATH];
-	char botPath[MAX_QPATH];
 } g_characterInfo_t;
 
 void                    G_Characters_Init( void );

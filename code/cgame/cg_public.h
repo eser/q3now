@@ -2,6 +2,7 @@
 #define CG_PUBLIC_H
 
 #include "../game/bg_public.h"
+#include "../renderercommon/tr_types.h"
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
@@ -230,6 +231,83 @@ typedef enum {
 	CG_TRAP_GETVALUE = COM_TRAP_GETVALUE,
 
 } cgameImport_t;
+
+// ── Character manifest ─────────────────────────────────────────────────
+// Fixed-size struct transferred from the engine to cgame via trap_GetValue.
+// Key format: "char:{name}"  (e.g. "char:visor")
+// All paths are absolute VFS paths ready to pass to trap_R_RegisterModel etc.
+
+typedef enum {
+	FOOTSTEP_NORMAL,
+	FOOTSTEP_BOOT,
+	FOOTSTEP_FLESH,
+	FOOTSTEP_MECH,
+	FOOTSTEP_ENERGY,
+	FOOTSTEP_METAL,
+	FOOTSTEP_SPLASH,
+	FOOTSTEP_TOTAL
+} footstep_t;
+
+#define CM_MAX_SKINS             8   // max skins per character
+#define CM_SOUND_SLOTS           13  // canonical sound slot count
+#define CM_MAX_MODEL_PARTS       4   // max parts in model.parts list
+#define CM_PART_NAME_LEN         16  // max part base name length ("head", "upper", etc.)
+// CM_SKIN_NAME_LEN, CM_SURFACE_NAME_LEN, CM_MAX_SURFACE_OVERRIDES defined in tr_types.h
+
+// Sound slot indices — order matches s_soundSlotName[] in cl_characters.c
+#define CSOUND_DEATH1   0
+#define CSOUND_DEATH2   1
+#define CSOUND_DEATH3   2
+#define CSOUND_JUMP     3
+#define CSOUND_PAIN25   4
+#define CSOUND_PAIN50   5
+#define CSOUND_PAIN75   6
+#define CSOUND_PAIN100  7
+#define CSOUND_FALLING  8
+#define CSOUND_GASP     9
+#define CSOUND_DROWN    10
+#define CSOUND_FALL     11
+#define CSOUND_TAUNT    12
+
+// Bridge struct stored in characterManifest_t.skins[]; links name→skin registry handle.
+typedef struct {
+	char      name[CM_SKIN_NAME_LEN];
+	int       paintable;
+	qhandle_t skinHandle;   // character skin registry handle (0 if unresolved)
+} cmManifestSkin_t;
+
+typedef struct {
+	// Identity
+	char  name[64];
+	char  displayName[64];
+	char  charRoot[MAX_QPATH];              // "characters/{name}/"
+	char  archetypeName[64];               // archetype name, e.g. "mechanized"
+
+	// Model parts (path prefix without extension; try .iqm then .md3)
+	char  partNames[CM_MAX_MODEL_PARTS][CM_PART_NAME_LEN];  // "head", "upper", "lower", ...
+	char  partPaths[CM_MAX_MODEL_PARTS][MAX_QPATH];          // "characters/{name}/models/{part}"
+	int   partCount;
+
+	// Skins (each entry is a cmManifestSkin_t referencing the engine skin registry)
+	cmManifestSkin_t skins[CM_MAX_SKINS];
+	int              numSkins;
+
+	// Icon
+	char  iconPath[MAX_QPATH];
+
+	// Sounds (absolute VFS paths; pre-resolved by engine, including fallback to sarge)
+	char  soundPaths[CM_SOUND_SLOTS][MAX_QPATH];
+
+	// Model config
+	int   footsteps;   // footstep_t enum value
+	int   gender;      // gender_t enum value
+	float headOffset[3];
+	int   fixedLegs;
+	int   fixedTorso;
+
+	// Animation table (fully processed: leg offset applied, backward/flag anims synthesized)
+	animation_t animations[MAX_TOTALANIMATIONS];
+} characterManifest_t;
 
 // ── Wired UI: HUD state bridge struct ────────────────────────────────
 // cgame fills this each frame and pushes to client via CG_WIREDUI_PUSH_HUD_STATE.

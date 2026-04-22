@@ -995,9 +995,7 @@ void BG_EvaluateTrajectory( const trajectory_t *tr, int atTime, vec3_t result ) 
 		break;
 	case TR_SINE:
 		deltaTime = ( atTime - tr->trTime ) / (float) tr->trDuration;
-#if FEAT_ITEM_BOB_FIX
 		deltaTime = fmod( deltaTime, 1.0f );  // prevent float precision loss on long uptimes
-#endif
 		phase = sin( deltaTime * M_PI * 2 );
 		VectorMA( tr->trBase, phase, tr->trDelta, result );
 		break;
@@ -1094,9 +1092,7 @@ void BG_EvaluateTrajectoryDelta( const trajectory_t *tr, int atTime, vec3_t resu
 		break;
 	case TR_SINE:
 		deltaTime = ( atTime - tr->trTime ) / (float) tr->trDuration;
-#if FEAT_ITEM_BOB_FIX
 		deltaTime = fmod( deltaTime, 1.0f );  // prevent float precision loss on long uptimes
-#endif
 		phase = cos( deltaTime * M_PI * 2 );	// derivative of sin = cos
 		phase *= 0.5;
 		VectorScale( tr->trDelta, phase, result );
@@ -1264,6 +1260,9 @@ char *eventnames[] = {
 	"EV_TAUNT_GUARDBASE",
 	"EV_TAUNT_PATROL"
 
+#if FEAT_EARTHQUAKE_SYSTEM
+	,"EV_EARTHQUAKE"
+#endif
 };
 
 // A3: compile-time check — event name table must match entity_event_t enum

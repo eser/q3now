@@ -368,11 +368,17 @@ typedef struct {
 #define	BIG_INFO_VALUE		8192
 
 
-#define	MAX_QPATH			64		// max length of a quake game pathname
+#define	MAX_QPATH		64		// max length of a quake game pathname — network-safe,
+								// used in configstrings, userinfo, demo format, and any
+								// string that crosses the client/server boundary
+#define MAX_VFS_PATH	128		// max length of a virtual filesystem (pak-internal)
+								// asset path — relative, forward-slash, local-only,
+								// never sent over network. Use for stack buffers in
+								// asset loaders and for inputs to registry functions.
 #ifdef PATH_MAX
-#define MAX_OSPATH			PATH_MAX
+#define MAX_OSPATH		PATH_MAX
 #else
-#define	MAX_OSPATH			256		// max length of a filesystem pathname
+#define	MAX_OSPATH		256		// max length of a filesystem pathname
 #endif
 
 #define	MAX_NAME_LENGTH			32		// max length of a client name
@@ -524,6 +530,8 @@ extern	vec4_t		colorDkGrey;
 extern	vec4_t		colorOrange;	// q3now
 extern	vec4_t		colorIndigo;	// q3now
 extern	vec4_t		colorSkyBlue;	// q3now
+
+void Q_ParseColor( const char *str, float *col, float alpha );
 
 #define Q_COLOR_ESCAPE	'^'
 #define Q_IsColorString(p) ( *(p) == Q_COLOR_ESCAPE && *((p)+1) && *((p)+1) != Q_COLOR_ESCAPE )
@@ -999,6 +1007,20 @@ int Info_RemoveKey( char *s, const char *key );
 // this is only here so the functions in q_shared.c and bg_*.c can link
 void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t level, const char *fmt, ... );
 void FORMAT_PRINTF(1, 2) QDECL Com_Printf( const char *msg, ... );
+
+// Platform mutex abstraction. Fixed-size opaque struct; platform files define
+// the actual member via _Static_assert-guarded cast into opaque[]. 128 bytes
+// covers pthread_mutex_t on macOS arm64 (64 B, the largest target) and
+// CRITICAL_SECTION on Win64 (40 B). Sys_MutexInit returns qfalse on resource
+// exhaustion; Com_Init callers must Com_Error ERR_FATAL on failure.
+#define SYS_MUTEX_OPAQUE_SIZE 128
+typedef struct sys_mutex_s {
+	unsigned char opaque[SYS_MUTEX_OPAQUE_SIZE];
+} sys_mutex_t;
+qboolean  Sys_MutexInit   ( sys_mutex_t *m );
+void      Sys_MutexLock   ( sys_mutex_t *m );
+void      Sys_MutexUnlock ( sys_mutex_t *m );
+void      Sys_MutexDestroy( sys_mutex_t *m );
 
 
 /*

@@ -51,6 +51,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_vcmd.h"
 #include "wired/bots/g_bot_scripts.h"
 
+#include "../qcommon/q_feats.h"
+#if FEAT_RECAST_NAVMESH
+#include "g_bot_nav.h"
+#endif
+
 //
 #include "chars.h"
 #include "inv.h"
@@ -81,6 +86,11 @@ vmCvar_t bot_interbreedchar;
 vmCvar_t bot_interbreedbots;
 vmCvar_t bot_interbreedcycle;
 vmCvar_t bot_interbreedwrite;
+
+#if FEAT_RECAST_NAVMESH
+vmCvar_t nav_botdebug;
+vmCvar_t nav_waypoint_tolerance;
+#endif
 
 
 void ExitLevel( void );
@@ -256,12 +266,15 @@ void BotTestAAS(vec3_t origin) {
 	trap_Cvar_Update(&bot_testsolid);
 	trap_Cvar_Update(&bot_testclusters);
 	if (bot_testsolid.integer) {
+#if !FEAT_RECAST_NAVMESH
 		if (!trap_AAS_Initialized()) return;
 		areanum = BotPointAreaNum(origin);
 		if (areanum) BotAI_Print(PRT_MESSAGE, "\rempty area");
 		else BotAI_Print(PRT_MESSAGE, "\r^1SOLID area");
+#endif
 	}
 	else if (bot_testclusters.integer) {
+#if !FEAT_RECAST_NAVMESH
 		if (!trap_AAS_Initialized()) return;
 		areanum = BotPointAreaNum(origin);
 		if (!areanum)
@@ -270,6 +283,7 @@ void BotTestAAS(vec3_t origin) {
 			trap_AAS_AreaInfo(areanum, &info);
 			BotAI_Print(PRT_MESSAGE, "\rarea %d, cluster %d       ", areanum, info.cluster);
 		}
+#endif
 	}
 }
 
@@ -546,10 +560,9 @@ BotUpdateInfoConfigStrings
 ==============
 */
 void BotUpdateInfoConfigStrings(void) {
-	int i;
 	char buf[MAX_INFO_STRING];
 
-	for (i = 0; i < level.maxclients; i++) {
+	for (int i = 0; i < level.maxclients; i++) {
 		//
 		if ( !botstates[i] || !botstates[i]->inuse )
 			continue;
@@ -766,7 +779,6 @@ BotChangeViewAngles
 */
 void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 	float diff, factor, maxchange, anglespeed, disired_speed;
-	int i;
 
 	if (bs->ideal_viewangles[PITCH] > 180) bs->ideal_viewangles[PITCH] -= 360;
 	//
@@ -800,7 +812,7 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 	}
 	if (maxchange < 240) maxchange = 240;
 	maxchange *= thinktime;
-	for (i = 0; i < 2; i++) {
+	for (int i = 0; i < 2; i++) {
 		//
 		if (bot_challenge.integer) {
 			//smooth slowdown view model
@@ -1214,14 +1226,10 @@ static int BotDetermineGender( int client ) {
 	const char *modelName;
 
 	trap_GetUserinfo( client, userinfo, sizeof( userinfo ) );
-	Q_strncpyz( model, Info_ValueForKey( userinfo, "model" ), sizeof( model ) );
+	Q_strncpyz( model, Info_ValueForKey( userinfo, "char" ), sizeof( model ) );
 
-	// strip skin suffix (e.g. "sarge/default" -> "sarge")
+	// model is now the character directory slug (no skin suffix)
 	modelName = model;
-	p = strchr( model, '/' );
-	if ( p ) {
-		model[ p - model ] = '\0';
-	}
 
 	Com_sprintf( filename, sizeof( filename ), "models/players/%s/animation.cfg", modelName );
 	len = trap_FS_FOpenFile( filename, &f, FS_READ );
@@ -1281,10 +1289,17 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 		return qfalse;
 	}
 
+#if !FEAT_RECAST_NAVMESH
 	if (!trap_AAS_Initialized()) {
 		BotAI_Print(PRT_FATAL, "AAS not initialized\n");
 		return qfalse;
 	}
+#else
+	if (!trap_Nav_IsReady()) {
+		BotAI_Print(PRT_FATAL, "Nav not ready\n");
+		return qfalse;
+	}
+#endif
 
 	//load the bot character
 	bs->character = trap_BotLoadCharacter(settings->characterfile, settings->skill);
@@ -1357,6 +1372,9 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 		BotReadSessionData(bs);
 	}
 	//bot has been setup successfully
+#if FEAT_RECAST_NAVMESH
+	BotNav_Init( client );
+#endif
 	return qtrue;
 }
 
@@ -1400,6 +1418,9 @@ int BotAIShutdownClient(int client, qboolean restart) {
 	memset(bs, 0, sizeof(bot_state_t));
 	//set the inuse flag to qfalse
 	bs->inuse = qfalse;
+#if FEAT_RECAST_NAVMESH
+	BotNav_Shutdown( client );
+#endif
 	//there's one bot less
 	numbots--;
 	//everything went ok
@@ -1470,7 +1491,9 @@ int BotAILoadMap( int restart ) {
 
 	if (!restart) {
 		trap_Cvar_Register( &mapname, "mapname", "", CVAR_SERVERINFO | CVAR_ROM );
+#if !FEAT_RECAST_NAVMESH
 		trap_BotLibLoadMap( mapname.string );
+#endif
 	}
 
 	for (i = 0; i < MAX_CLIENTS; i++) {
@@ -1512,6 +1535,10 @@ int BotAIStartFrame(int time) {
 	trap_Cvar_Update(&bot_pause);
 	trap_Cvar_Update(&bot_report);
 	trap_Cvar_Update(&bot_autoskill);
+#if FEAT_RECAST_NAVMESH
+	trap_Cvar_Update(&nav_botdebug);
+	trap_Cvar_Update(&nav_waypoint_tolerance);
+#endif
 
 	if (bot_report.integer) {
 //		BotTeamplayReport();
@@ -1567,6 +1594,7 @@ int BotAIStartFrame(int time) {
 	else thinktime = bot_thinktime.integer;
 
 	// update the bot library
+#if !FEAT_RECAST_NAVMESH
 	if ( botlib_residual >= thinktime ) {
 		botlib_residual -= thinktime;
 
@@ -1632,8 +1660,13 @@ int BotAIStartFrame(int time) {
 
 		BotAIRegularUpdate();
 	}
+#endif /* !FEAT_RECAST_NAVMESH */
 
+#if !FEAT_RECAST_NAVMESH
 	floattime = trap_AAS_Time();
+#else
+	floattime = (float)trap_Milliseconds() * 0.001f;
+#endif
 
 	// execute scheduled bot AI
 	for( i = 0; i < MAX_CLIENTS; i++ ) {
@@ -1646,7 +1679,9 @@ int BotAIStartFrame(int time) {
 		if ( botstates[i]->botthink_residual >= thinktime ) {
 			botstates[i]->botthink_residual -= thinktime;
 
+#if !FEAT_RECAST_NAVMESH
 			if (!trap_AAS_Initialized()) return qfalse;
+#endif
 
 			if ( botstates[i]->wiredBotsActive ) {
 				trap_BotLuaBotThink( botstates[i]->client, (float)thinktime / 1000.0f );
@@ -1681,6 +1716,14 @@ BotInitLibrary
 ==============
 */
 int BotInitLibrary(void) {
+#if FEAT_RECAST_NAVMESH
+	char buf[16];
+	/* Minimal setup under Recast: only maxclients is needed so EA_Setup can
+	 * size the botinputs array. AAS and other subsystems are not initialised. */
+	Com_sprintf(buf, sizeof(buf), "%d", level.maxclients);
+	trap_BotLibVarSet("maxclients", buf);
+	return trap_BotLibSetup();
+#else
 	char buf[144];
 
 	//set the maxclients and maxentities library variables before calling BotSetupLibrary
@@ -1703,7 +1746,7 @@ int BotInitLibrary(void) {
 	trap_BotLibVarSet("g_gametype", buf);
 	//bot developer mode and log file
 	trap_BotLibVarSet("bot_developer", bot_developer.string);
-	trap_Cvar_VariableStringBuffer("logfile", buf, sizeof(buf));
+	trap_Cvar_VariableStringBuffer("log_enabled", buf, sizeof(buf));
 	trap_BotLibVarSet("log", buf);
 	//no chatting
 	trap_Cvar_VariableStringBuffer("bot_nochat", buf, sizeof(buf));
@@ -1739,6 +1782,7 @@ int BotInitLibrary(void) {
 	//
 	//setup the bot library
 	return trap_BotLibSetup();
+#endif /* FEAT_RECAST_NAVMESH */
 }
 
 /*
@@ -1761,6 +1805,10 @@ int BotAISetup( int restart ) {
 	trap_Cvar_Register(&bot_interbreedbots, "bot_interbreedbots", "10", 0);
 	trap_Cvar_Register(&bot_interbreedcycle, "bot_interbreedcycle", "20", 0);
 	trap_Cvar_Register(&bot_interbreedwrite, "bot_interbreedwrite", "", 0);
+#if FEAT_RECAST_NAVMESH
+	trap_Cvar_Register(&nav_botdebug, "nav_botdebug", "0", CVAR_CHEAT);
+	trap_Cvar_Register(&nav_waypoint_tolerance, "nav_waypoint_tolerance", "32", CVAR_CHEAT);
+#endif
 
 	//if the game is restarted for a tournament
 	if (restart) {
@@ -1782,12 +1830,10 @@ BotAIShutdown
 */
 int BotAIShutdown( int restart ) {
 
-	int i;
-
 	//if the game is restarted for a tournament
 	if ( restart ) {
 		//shutdown all the bots in the botlib
-		for (i = 0; i < MAX_CLIENTS; i++) {
+		for (int i = 0; i < MAX_CLIENTS; i++) {
 			if (botstates[i] && botstates[i]->inuse) {
 				BotAIShutdownClient(botstates[i]->client, restart);
 			}

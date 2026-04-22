@@ -475,31 +475,25 @@ Also called by playerstate transition
 ================
 */
 void CG_PainEvent( centity_t *cent, int health ) {
-	char	*snd;
+	int slot;
+	clientInfo_t *ci = &cgs.clientinfo[cent->currentState.number < MAX_CLIENTS ? cent->currentState.number : 0];
 
 	// don't do more than two pain sounds a second
 	if ( cg.time - cent->pe.painTime < 500 ) {
 		return;
 	}
 
-	if ( health < 25 ) {
-		snd = "*pain25_1.opus";
-	} else if ( health < 50 ) {
-		snd = "*pain50_1.opus";
-	} else if ( health < 75 ) {
-		snd = "*pain75_1.opus";
-	} else {
-		snd = "*pain100_1.opus";
-	}
+	if ( health < 25 )      slot = CSOUND_PAIN25;
+	else if ( health < 50 ) slot = CSOUND_PAIN50;
+	else if ( health < 75 ) slot = CSOUND_PAIN75;
+	else                    slot = CSOUND_PAIN100;
+
 	// play a gurp sound instead of a normal pain sound
 	if (CG_WaterLevel(cent) == WATERLEVEL_SUBMERGED) {
-		if (rand()&1) {
-			trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, CG_CustomSound(cent->currentState.number, "sound/player/gurp1.opus"));
-		} else {
-			trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, CG_CustomSound(cent->currentState.number, "sound/player/gurp2.opus"));
-		}
+		trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE,
+			cgs.media.gurpSound[rand() & 1]);
 	} else {
-		trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, CG_CustomSound(cent->currentState.number, snd));
+		trap_S_StartSound(NULL, cent->currentState.number, CHAN_VOICE, ci->sounds[slot]);
 	}
 	// save pain time for programitic twitch animation
 	cent->pe.painTime = cg.time;
@@ -554,35 +548,35 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_FOOTSTEP");
 		if (cg_footsteps.integer && hasSound) {
 			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
-				cgs.media.footsteps[ ci->footsteps ][rand()&3] );
+				ci->footstepSounds[ ci->footsteps ][rand()&3] );
 		}
 		break;
 	case EV_FOOTSTEP_METAL:
 		DEBUGNAME("EV_FOOTSTEP_METAL");
 		if (cg_footsteps.integer && hasSound) {
 			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
-				cgs.media.footsteps[ FOOTSTEP_METAL ][rand()&3] );
+				ci->footstepSounds[ FOOTSTEP_METAL ][rand()&3] );
 		}
 		break;
 	case EV_FOOTSPLASH:
 		DEBUGNAME("EV_FOOTSPLASH");
 		if (cg_footsteps.integer && hasSound) {
 			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
-				cgs.media.footsteps[ FOOTSTEP_SPLASH ][rand()&3] );
+				ci->footstepSounds[ FOOTSTEP_SPLASH ][rand()&3] );
 		}
 		break;
 	case EV_FOOTWADE:
 		DEBUGNAME("EV_FOOTWADE");
 		if (cg_footsteps.integer && hasSound) {
 			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
-				cgs.media.footsteps[ FOOTSTEP_SPLASH ][rand()&3] );
+				ci->footstepSounds[ FOOTSTEP_SPLASH ][rand()&3] );
 		}
 		break;
 	case EV_SWIM:
 		DEBUGNAME("EV_SWIM");
 		if (cg_footsteps.integer && hasSound) {
 			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
-				cgs.media.footsteps[ FOOTSTEP_SPLASH ][rand()&3] );
+				ci->footstepSounds[ FOOTSTEP_SPLASH ][rand()&3] );
 		}
 		break;
 
@@ -590,7 +584,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_FALL_SHORT:
 		DEBUGNAME("EV_FALL_SHORT");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.landSound );
+			trap_S_StartSound (NULL, es->number, CHAN_AUTO, ci->effects.landSound );
 		}
 		if ( clientNum == cg.predictedPlayerState.clientNum ) {
 			// smooth landing z changes
@@ -602,7 +596,8 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_FALL_MEDIUM");
 		if (hasSound) {
 			// use normal pain sound
-			trap_S_StartSound( NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*pain100_1.opus" ) );
+			clientInfo_t *ci_fall = &cgs.clientinfo[es->number < MAX_CLIENTS ? es->number : 0];
+			trap_S_StartSound( NULL, es->number, CHAN_VOICE, ci_fall->sounds[CSOUND_PAIN100] );
 		}
 		if ( clientNum == cg.predictedPlayerState.clientNum ) {
 			// smooth landing z changes
@@ -613,7 +608,8 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_FALL_FAR:
 		DEBUGNAME("EV_FALL_FAR");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, CG_CustomSound( es->number, "*fall1.opus" ) );
+			clientInfo_t *ci_fall2 = &cgs.clientinfo[es->number < MAX_CLIENTS ? es->number : 0];
+			trap_S_StartSound (NULL, es->number, CHAN_AUTO, ci_fall2->sounds[CSOUND_FALL] );
 		}
 		cent->pe.painTime = cg.time;	// don't play a pain sound right after this
 		if ( clientNum == cg.predictedPlayerState.clientNum ) {
@@ -677,18 +673,25 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 		// boing sound at origin, jump sound on player
 		trap_S_StartSound ( cent->lerpOrigin, -1, CHAN_VOICE, cgs.media.jumpPadSound );
-		trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*jump1.opus" ) );
+		{
+			clientInfo_t *ci_jp = &cgs.clientinfo[es->number < MAX_CLIENTS ? es->number : 0];
+			trap_S_StartSound (NULL, es->number, CHAN_VOICE, ci_jp->sounds[CSOUND_JUMP] );
+		}
 		break;
 
 	case EV_JUMP:
 		DEBUGNAME("EV_JUMP");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*jump1.opus" ) );
+			clientInfo_t *ci_jump = &cgs.clientinfo[es->number < MAX_CLIENTS ? es->number : 0];
+			trap_S_StartSound (NULL, es->number, CHAN_VOICE, ci_jump->sounds[CSOUND_JUMP] );
 		}
 		break;
 	case EV_TAUNT:
 		DEBUGNAME("EV_TAUNT");
-		trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, "*taunt.opus" ) );
+		{
+			clientInfo_t *ci_taunt = &cgs.clientinfo[es->number < MAX_CLIENTS ? es->number : 0];
+			trap_S_StartSound (NULL, es->number, CHAN_VOICE, ci_taunt->sounds[CSOUND_TAUNT] );
+		}
 		break;
 	case EV_TAUNT_YES:
 		DEBUGNAME("EV_TAUNT_YES");
@@ -717,25 +720,26 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_WATER_TOUCH:
 		DEBUGNAME("EV_WATER_TOUCH");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.watrInSound );
+			trap_S_StartSound (NULL, es->number, CHAN_AUTO, ci->effects.watrInSound );
 		}
 		break;
 	case EV_WATER_LEAVE:
 		DEBUGNAME("EV_WATER_LEAVE");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.watrOutSound );
+			trap_S_StartSound (NULL, es->number, CHAN_AUTO, ci->effects.watrOutSound );
 		}
 		break;
 	case EV_WATER_UNDER:
 		DEBUGNAME("EV_WATER_UNDER");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, cgs.media.watrUnSound );
+			trap_S_StartSound (NULL, es->number, CHAN_AUTO, ci->effects.watrUnSound );
 		}
 		break;
 	case EV_WATER_CLEAR:
 		DEBUGNAME("EV_WATER_CLEAR");
 		if (hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_AUTO, CG_CustomSound( es->number, "*gasp.opus" ) );
+			clientInfo_t *ci_gasp = &cgs.clientinfo[es->number < MAX_CLIENTS ? es->number : 0];
+			trap_S_StartSound (NULL, es->number, CHAN_AUTO, ci_gasp->sounds[CSOUND_GASP] );
 		}
 		break;
 
@@ -1078,7 +1082,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 			trap_S_StartSound (NULL, es->number, CHAN_VOICE, cgs.gameSounds[ es->eventParm ] );
 		} else {
 			s = CG_ConfigString( CS_SOUNDS + es->eventParm );
-			trap_S_StartSound (NULL, es->number, CHAN_VOICE, CG_CustomSound( es->number, s ) );
+			trap_S_StartSound (NULL, es->number, CHAN_VOICE, trap_S_RegisterSound( s, qfalse ) );
 		}
 		break;
 
@@ -1088,7 +1092,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 			trap_S_StartSound (NULL, cg.snap->ps.clientNum, CHAN_AUTO, cgs.gameSounds[ es->eventParm ] );
 		} else {
 			s = CG_ConfigString( CS_SOUNDS + es->eventParm );
-			trap_S_StartSound (NULL, cg.snap->ps.clientNum, CHAN_AUTO, CG_CustomSound( es->number, s ) );
+			trap_S_StartSound (NULL, cg.snap->ps.clientNum, CHAN_AUTO, trap_S_RegisterSound( s, qfalse ) );
 		}
 		break;
 
@@ -1213,13 +1217,15 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_DEATH2:
 	case EV_DEATH3:
 		DEBUGNAME("EV_DEATHx");
-
-		if (CG_WaterLevel(cent) == WATERLEVEL_SUBMERGED) {
-			trap_S_StartSound(NULL, es->number, CHAN_VOICE, CG_CustomSound(es->number, "*drown.opus"));
-		} else {
-			trap_S_StartSound(NULL, es->number, CHAN_VOICE, CG_CustomSound(es->number, va("*death%i.opus", event - EV_DEATH1 + 1)));
+		{
+			clientInfo_t *ci_death = &cgs.clientinfo[es->number < MAX_CLIENTS ? es->number : 0];
+			if (CG_WaterLevel(cent) == WATERLEVEL_SUBMERGED) {
+				trap_S_StartSound(NULL, es->number, CHAN_VOICE, ci_death->sounds[CSOUND_DROWN]);
+			} else {
+				trap_S_StartSound(NULL, es->number, CHAN_VOICE,
+					ci_death->sounds[CSOUND_DEATH1 + (event - EV_DEATH1)]);
+			}
 		}
-
 		break;
 
 
@@ -1270,7 +1276,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		// with the kamikaze sound, downside is that the gib sound will also
 		// not be played when someone is gibbed while just carrying the kamikaze
 		if ( !(es->eFlags & EF_KAMIKAZE) ) {
-			trap_S_StartSound( NULL, es->number, CHAN_BODY, cgs.media.gibSound );
+			trap_S_StartSound( NULL, es->number, CHAN_BODY, ci->effects.gibSound );
 		}
 		CG_GibPlayer( cent->lerpOrigin );
 		break;
@@ -1285,6 +1291,20 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		DEBUGNAME("EV_DEBUG_LINE");
 		CG_Beam( cent );
 		break;
+
+#if FEAT_EARTHQUAKE_SYSTEM
+	case EV_EARTHQUAKE:
+		DEBUGNAME("EV_EARTHQUAKE");
+		CG_AddEarthquake(
+			es->origin,
+			es->angles2[1],
+			es->angles[0],
+			es->angles[1],
+			es->angles[2],
+			es->angles2[0]
+		);
+		break;
+#endif
 
 	default:
 		DEBUGNAME("UNKNOWN");

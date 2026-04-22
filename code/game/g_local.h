@@ -50,7 +50,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // gentity->flags
 #define	FL_GODMODE				0x00000010
-#define	FL_NOTARGET				0x00000020
+#define	FL_CLOAK				0x00000020
+#define	FL_NOTARGET				0x00000040
 #define	FL_TEAMMEMBER			0x00000400	// not the first on the team
 #define FL_NO_KNOCKBACK			0x00000800
 #define FL_NO_BOTS				0x00001000	// spawn point not for bot use
@@ -290,7 +291,6 @@ typedef struct {
 	int			lastVoteTime;		// level.time of last vote call (cooldown)
 	// eser - callvote cooldown
 	int			teamVoteCount;		// to prevent people from constantly calling votes
-	qboolean	teamInfo;			// send team overlay updates?
 #if FEAT_UNLAGGED
 	int			delag;				// per-weapon delag bitmask from cg_delag userinfo
 	int			debugDelag;			// debug mode flag
@@ -533,6 +533,15 @@ typedef struct {
 #if FEAT_UNLAGGED
     int         frameStartTime;     // actual time this server frame started
 #endif
+
+#if FEAT_SCREENSHOT_TOOLS
+	int			stopTime;			// level.time when freeze was triggered, 0 if not frozen
+	int			timeFreezeMode;		// 0-9, selects timescale (weapon slot from spectator)
+#endif
+
+#if FEAT_GAME_MEETING
+	qboolean	meeting;			// qtrue during pre-match lobby (before everyone is ready)
+#endif
 } level_locals_t;
 
 
@@ -555,6 +564,9 @@ void StopFollowing( gentity_t *ent );
 void BroadcastTeamChange( gclient_t *client, int oldTeam );
 void SetTeam( gentity_t *ent, const char *s );
 void Cmd_FollowCycle_f( gentity_t *ent, int dir );
+#if FEAT_SCREENSHOT_TOOLS
+void Cmd_Stop_f( gentity_t *ent );
+#endif
 
 //
 // g_items.c
@@ -854,7 +866,7 @@ extern	vmCvar_t	g_timelimit;
 extern	vmCvar_t	g_overtime;
 extern	vmCvar_t	g_password;
 extern	vmCvar_t	g_needpass;
-extern	vmCvar_t	g_gravity;
+extern	vmCvar_t	g_envGravity;
 extern	vmCvar_t	g_forceRespawn;
 extern	vmCvar_t	g_inactivity;
 extern	vmCvar_t	g_debugMove;
@@ -874,8 +886,8 @@ extern	vmCvar_t	pmove_fixed;
 extern	vmCvar_t	pmove_msec;
 extern	vmCvar_t	pmove_overbounce;
 extern	vmCvar_t	g_rankings;
-extern	vmCvar_t	g_enableDust;
-extern	vmCvar_t	g_enableBreath;
+extern	vmCvar_t	g_envGroundDusty;
+extern	vmCvar_t	g_envTemperature;
 extern	vmCvar_t	g_localTeamPref;
 extern  vmCvar_t	g_instagib;
 extern  vmCvar_t	g_excessive;
@@ -1182,6 +1194,22 @@ void	trap_BotResetWeaponState(int weaponstate);
 
 int		trap_GeneticParentsAndChildSelection(int numranks, float *ranks, int *parent1, int *parent2, int *child);
 
+#if FEAT_RECAST_NAVMESH
+#include "../qcommon/nav/nav_types.h"
+int          trap_Nav_FindPath( vec3_t origin, vec3_t goal, int agentType, navPath_t *pathOut );
+qboolean     trap_Nav_Raycast( vec3_t start, vec3_t end, vec3_t hitPosOut );
+navPolyRef_t trap_Nav_FindNearestPoly( vec3_t origin, vec3_t searchExtents );
+int          trap_Nav_GetPolyAreaFlags( navPolyRef_t polyRef );
+void         trap_Nav_TriggerOffMeshLink( navPolyRef_t linkRef );
+qboolean     trap_Nav_GetRandomPoint( int areaFilter, vec3_t posOut );
+int          trap_Nav_AddCrowdAgent( int entityNum, vec3_t origin, int agentType );
+void         trap_Nav_UpdateCrowdAgent( int agentId, vec3_t desiredTarget );
+void         trap_Nav_RemoveCrowdAgent( int agentId );
+void         trap_Nav_UpdateCrowd( float deltaTime );
+qboolean     trap_Nav_IsReady( void );
+void         trap_Nav_SetPolyFlagsForDoor( const char *targetname, int setFlags, int clearFlags );
+#endif /* FEAT_RECAST_NAVMESH */
+
 #if FEAT_CLAN_ARENA
 extern  vmCvar_t	g_clanArena;
 #endif
@@ -1192,7 +1220,10 @@ extern  vmCvar_t	g_rtf;
 extern  vmCvar_t	g_ptl;
 #endif
 #if FEAT_ATMOSPHERIC
-extern  vmCvar_t	g_weather;
+extern  vmCvar_t	g_envWeather;
+#endif
+#if FEAT_GAME_MEETING
+extern  vmCvar_t	g_meeting;
 #endif
 
 void	trap_SnapVector( float *v );
@@ -1223,3 +1254,5 @@ void trap_WiredNet_EmitDelag( int shooter, int target, int timeDelta, vec3_t sho
 #endif
 void trap_WiredNet_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos );
 #endif
+
+qboolean trap_GetValue( char *value, int valueSize, const char *key );

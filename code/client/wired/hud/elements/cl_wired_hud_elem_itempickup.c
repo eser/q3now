@@ -28,20 +28,15 @@ void* CG_ModernHUDElementItemPickupCreate(const modernhudConfig_t* config)
 void CG_ModernHUDElementItemPickupRoutine(void* context)
 {
 	modernHudElementItemPickup_t* element = (modernHudElementItemPickup_t*)context;
-	qboolean visible;
-
-	visible = CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.itemPickupTime);
+	qboolean visible = CG_ModernHUDGetFadeColor(element->ctx.color_origin, element->ctx.color, &element->config, cg.itemPickupTime);
 
 	if (visible)
 	{
-		int         mins, seconds, tens;
-		int         msec;
-		msec = cg.itemPickupTime - cgs.levelStartTime;
-
-		seconds = msec / 1000;
-		mins = seconds / 60;
+		int msec = cg.itemPickupTime - cgs.levelStartTime;
+		int seconds = msec / 1000;
+		int mins = seconds / 60;
 		seconds -= mins * 60;
-		tens = seconds / 10;
+		int tens = seconds / 10;
 		seconds -= tens * 10;
 		if (bg_itemlist[cg.itemPickup].pickup_name)
 		{

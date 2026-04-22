@@ -141,9 +141,7 @@ static qboolean isStaticTCgen( const shaderStage_t *stage, int bundle )
 
 static qboolean isStaticTCmod( const textureBundle_t *bundle )
 {
-	int i;
-
-	for ( i = 0; i < bundle->numTexMods; i++ ) {
+	for ( int i = 0; i < bundle->numTexMods; i++ ) {
 		switch ( bundle->texMods[i].type ) {
 			case TMOD_NONE:
 			case TMOD_SCALE:
@@ -405,11 +403,10 @@ void VBO_PushData( int itemIndex, shaderCommands_t *input )
 	const shaderStage_t *pStage;
 	vbo_t *vbo = &world_vbo;
 	vbo_item_t *vi = vbo->items + itemIndex;
-	int i;
 
 	VBO_AddGeometry( vbo, vi, input );
 
-	for ( i = 0; i < MAX_VBO_STAGES; i++ )
+	for ( int i = 0; i < MAX_VBO_STAGES; i++ )
 	{
 		pStage = input->xstages[ i ];
 		if ( !pStage )
@@ -568,9 +565,6 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	vbo->items_queue = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( int ), h_low );
 	vbo->items_queue_count = 0;
 
-	ri.Printf( PRINT_DEVELOPER, "...found %i VBO surfaces (%i vertexes, %i indexes)\n",
-		numStaticSurfaces, numStaticVertexes, numStaticIndexes );
-
 	//Com_Printf( S_COLOR_CYAN "VBO size: %i\n", vbo_size );
 	//Com_Printf( S_COLOR_CYAN "IBO size: %i\n", ibo_size );
 
@@ -709,11 +703,9 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 
 void VBO_Cleanup( void )
 {
-	int i;
-
 	memset( &world_vbo, 0, sizeof( world_vbo ) );
 
-	for ( i = 0; i < tr.numShaders; i++ )
+	for ( int i = 0; i < tr.numShaders; i++ )
 	{
 		tr.shaders[ i ]->isStaticShader = qfalse;
 		tr.shaders[ i ]->iboOffset = -1;
@@ -845,14 +837,13 @@ static void VBO_AddItemRangeToIBOBuffer( int offset, int length )
 void VBO_RenderIBOItems( void )
 {
 	const vbo_t *vbo = &world_vbo;
-	int i;
 
 	// from device-local memory
 	if ( vbo->ibo_items_count )
 	{
 		vk_bind_index_buffer( vk.vbo.vertex_buffer, tess.shader->iboOffset );
 
-		for ( i = 0; i < vbo->ibo_items_count; i++ )
+		for ( int i = 0; i < vbo->ibo_items_count; i++ )
 		{
 			vk_draw_indexed( vbo->ibo_items[ i ].length, vbo->ibo_items[ i ].offset );
 		}

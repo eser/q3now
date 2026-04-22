@@ -136,18 +136,29 @@ static int Export_BotLibSetup( void )
 	botlibglobals.maxclients = LibVarInteger( "maxclients", "64", 0, MAX_CLIENTS );
 	botlibglobals.maxentities = LibVarInteger( "maxentities", "1024", 0, MAX_GENTITIES );
 
+#if !FEAT_RECAST_NAVMESH
 	errnum = AAS_Setup();			//be_aas_main.c
 	if (errnum != BLERR_NOERROR) return errnum;
+#endif
+	/* EA state (botinputs array) must always be allocated — all trap_EA_* calls
+	 * dereference it unconditionally under both nav backends. */
 	errnum = EA_Setup();			//be_ea.c
 	if (errnum != BLERR_NOERROR) return errnum;
-	errnum = BotSetupWeaponAI();	//be_ai_weap.c
-	if (errnum != BLERR_NOERROR)return errnum;
-	errnum = BotSetupGoalAI();		//be_ai_goal.c
-	if (errnum != BLERR_NOERROR) return errnum;
+	/* Chat heap (consolemessageheap) must always be allocated — trap_BotEnterChat
+	 * and related calls dereference it unconditionally under both nav backends. */
 	errnum = BotSetupChatAI();		//be_ai_chat.c
 	if (errnum != BLERR_NOERROR) return errnum;
+#if !FEAT_RECAST_NAVMESH
+	/* weaponconfig=NULL is NULL-guarded in BotValidWeaponNumber; safe to skip. */
+	errnum = BotSetupWeaponAI();	//be_ai_weap.c
+	if (errnum != BLERR_NOERROR)return errnum;
+	/* itemconfig=NULL is NULL-guarded at every dereference site; safe to skip. */
+	errnum = BotSetupGoalAI();		//be_ai_goal.c
+	if (errnum != BLERR_NOERROR) return errnum;
+	/* MoveAI libvars only consumed by stubbed AAS move functions under Recast. */
 	errnum = BotSetupMoveAI();		//be_ai_move.c
 	if (errnum != BLERR_NOERROR) return errnum;
+#endif
 
 	botlibsetup = qtrue;
 	botlibglobals.botlibsetup = qtrue;
@@ -168,7 +179,9 @@ static int Export_BotLibShutdown(void)
 	//DumpFileCRCs();
 #endif //DEMO
 	//
+	/* Symmetric with BotSetupChatAI — must always run. */
 	BotShutdownChatAI();		//be_ai_chat.c
+#if !FEAT_RECAST_NAVMESH
 	BotShutdownMoveAI();		//be_ai_move.c
 	BotShutdownGoalAI();		//be_ai_goal.c
 	BotShutdownWeaponAI();		//be_ai_weap.c
@@ -176,6 +189,7 @@ static int Export_BotLibShutdown(void)
 	BotShutdownCharacters();	//be_ai_char.c
 	//shut down AAS
 	AAS_Shutdown();
+#endif
 	//shut down bot elementary actions
 	EA_Shutdown();
 	//free all libvars

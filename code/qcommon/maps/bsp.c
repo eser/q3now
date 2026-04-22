@@ -101,6 +101,7 @@ qboolean BSP_Load( const char *name, bspFile_t **bspFile ) {
 				(*bspFile)->ident = ident;
 				(*bspFile)->version = version;
 				(*bspFile)->references = 1;
+				(*bspFile)->format = bspFormats[i];
 				bspLoadedFiles[freeSlot] = *bspFile;
 			}
 			return result;

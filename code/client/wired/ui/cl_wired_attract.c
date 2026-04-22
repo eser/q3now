@@ -51,13 +51,11 @@ static void Attract_DispatchCurrent( void );
 
 /* ── security: validate playlist source before use in commands ───────── */
 static qboolean Attract_ValidateSource( int kind, const char *src ) {
-	size_t len, i;
-
-	len = strlen( src );
+	size_t len = strlen( src );
 	if ( len == 0 || len >= MAX_QPATH ) return qfalse;
 
 	/* Reject bytes that could escape a Cbuf argument or inject commands */
-	for ( i = 0; i < len; i++ ) {
+	for ( size_t i = 0; i < len; i++ ) {
 		char c = src[i];
 		if ( c == '\n' || c == '\r' || c == ';' || c == '"' || c == '$' )
 			return qfalse;
@@ -65,7 +63,7 @@ static qboolean Attract_ValidateSource( int kind, const char *src ) {
 
 	/* DEMO and CINEMATIC must look like a filesystem path */
 	if ( kind == ATTRACT_ITEM_DEMO || kind == ATTRACT_ITEM_CINEMATIC ) {
-		for ( i = 0; i < len; i++ ) {
+		for ( size_t i = 0; i < len; i++ ) {
 			char c = src[i];
 			if ( !( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) ||
 			        ( c >= '0' && c <= '9' ) ||
@@ -134,14 +132,12 @@ static void Attract_Teardown( void ) {
 
 /* ── dispatch current playlist item → PLAYING ────────────────────────── */
 static void Attract_DispatchCurrent( void ) {
-	wiredAttractItem_t *item;
-
 	if ( wui_attract.playlistCount == 0 ) {
 		wui_attract.state = ATTRACT_STATE_IDLE;
 		return;
 	}
 
-	item = &wui_attract.playlist[wui_attract.currentIndex];
+	wiredAttractItem_t *item = &wui_attract.playlist[wui_attract.currentIndex];
 	wui_attract.itemStartTime = cls.realtime;
 	wui_attract.pushedPanel[0] = '\0';
 	wui_attract.ownsDemo = qfalse;
@@ -248,17 +244,14 @@ static void Attract_Status_f( void ) {
 /* ── Lua bindings ────────────────────────────────────────────────────── */
 
 static int AttractLua_Add( lua_State *L ) {
-	const char *kindStr, *src;
-	int kind, durationMs;
-	wiredAttractItem_t *item;
-
 	if ( lua_gettop( L ) < 2 ) {
 		return luaL_error( L, "attract.add(kind, source [, duration_ms])" );
 	}
 
-	kindStr = luaL_checkstring( L, 1 );
-	src     = luaL_checkstring( L, 2 );
-	durationMs = lua_gettop( L ) >= 3 ? (int)luaL_checkinteger( L, 3 ) : 0;
+	const char *kindStr = luaL_checkstring( L, 1 );
+	const char *src     = luaL_checkstring( L, 2 );
+	int durationMs = lua_gettop( L ) >= 3 ? (int)luaL_checkinteger( L, 3 ) : 0;
+	int kind;
 
 	if ( Q_stricmp( kindStr, "cinematic" ) == 0 )      kind = ATTRACT_ITEM_CINEMATIC;
 	else if ( Q_stricmp( kindStr, "demo" ) == 0 )      kind = ATTRACT_ITEM_DEMO;
@@ -273,7 +266,7 @@ static int AttractLua_Add( lua_State *L ) {
 		return luaL_error( L, "attract.add: playlist full (%d items)", WIRED_ATTRACT_MAX_ITEMS );
 	}
 
-	item = &wui_attract.playlist[wui_attract.playlistCount];
+	wiredAttractItem_t *item = &wui_attract.playlist[wui_attract.playlistCount];
 	item->kind       = kind;
 	item->durationMs = durationMs;
 	Q_strncpyz( item->source, src, sizeof( item->source ) );
@@ -372,8 +365,6 @@ void WiredAttract_Shutdown( void ) {
 
 /* ── per-frame tick ──────────────────────────────────────────────────── */
 void WiredAttract_Frame( int msec ) {
-	int curState, delayMs;
-
 	(void)msec;
 
 	if ( !wui_attract.initialized ) return;
@@ -429,8 +420,8 @@ void WiredAttract_Frame( int msec ) {
 	}
 
 	/* ── state dispatch ──────────────────────────────────────────────── */
-	curState = (int)wui_attract.state;
-	delayMs  = wui_attract.cvDelay ? wui_attract.cvDelay->integer * 1000 : 30000;
+	int curState = (int)wui_attract.state;
+	int delayMs  = wui_attract.cvDelay ? wui_attract.cvDelay->integer * 1000 : 30000;
 
 	switch ( curState ) {
 
@@ -479,7 +470,6 @@ draw_transition:
 		int   halfMs   = wui_attract.transitionMs / 2;
 		int   elapsed  = (int)( cls.realtime - wui_attract.transitionStartTime );
 		float alpha;
-		vec4_t c;
 
 		if ( elapsed < halfMs ) {
 			/* Fade out: 0 → 1 */
@@ -492,6 +482,7 @@ draw_transition:
 		if ( alpha < 0.0f ) alpha = 0.0f;
 		if ( alpha > 1.0f ) alpha = 1.0f;
 
+		vec4_t c;
 		c[0] = 0.0f; c[1] = 0.0f; c[2] = 0.0f; c[3] = alpha;
 		re.SetColor( c );
 		re.DrawStretchPic( 0, 0,

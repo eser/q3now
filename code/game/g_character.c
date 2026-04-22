@@ -7,8 +7,7 @@ static g_characterInfo_t s_characters[MAX_CHARACTERS];
 static int s_numCharacters;
 
 static qboolean G_Character_HasName( const char *name ) {
-	int i;
-	for ( i = 0; i < s_numCharacters; i++ ) {
+	for ( int i = 0; i < s_numCharacters; i++ ) {
 		if ( s_characters[i].inuse && !Q_stricmp( s_characters[i].name, name ) ) {
 			return qtrue;
 		}
@@ -18,7 +17,6 @@ static qboolean G_Character_HasName( const char *name ) {
 
 static qboolean G_Character_Add(const char *name) {
 	char profilePath[MAX_QPATH];
-	char botPath[MAX_QPATH];
 	fileHandle_t f;
 	int len;
 
@@ -37,79 +35,51 @@ static qboolean G_Character_Add(const char *name) {
 	}
 	trap_FS_FCloseFile( f );
 
-	Com_sprintf( botPath, sizeof( botPath ), "characters/%s/bot/main.lua", name );
-	len = trap_FS_FOpenFile( botPath, &f, FS_READ );
-	if ( len <= 0 || !f ) {
-		if ( f ) {
-			trap_FS_FCloseFile( f );
-		}
-		Com_sprintf( botPath, sizeof( botPath ), "characters/_base/bot/main.lua" );
-		len = trap_FS_FOpenFile( botPath, &f, FS_READ );
-		if ( len <= 0 || !f ) {
-			return qfalse;
+	// Fetch display_name via engine Lua runtime.
+	{
+		char key[MAX_QPATH];
+		Com_sprintf( key, sizeof( key ), "char:%s:display_name", name );
+		if ( !trap_GetValue( s_characters[s_numCharacters].display_name,
+		                     sizeof( s_characters[s_numCharacters].display_name ),
+		                     key ) || !s_characters[s_numCharacters].display_name[0] ) {
+			// Fallback: capitalize the directory slug.
+			Q_strncpyz( s_characters[s_numCharacters].display_name, name,
+				sizeof( s_characters[s_numCharacters].display_name ) );
+			if ( s_characters[s_numCharacters].display_name[0] >= 'a' &&
+			     s_characters[s_numCharacters].display_name[0] <= 'z' ) {
+				s_characters[s_numCharacters].display_name[0] -= 32;
+			}
 		}
 	}
-	trap_FS_FCloseFile( f );
 
 	s_characters[s_numCharacters].inuse = qtrue;
 	Q_strncpyz( s_characters[s_numCharacters].name, name, sizeof( s_characters[s_numCharacters].name ) );
-	Q_strncpyz( s_characters[s_numCharacters].display_name, name, sizeof( s_characters[s_numCharacters].display_name ) );
-	// capitalise first letter of display_name
-	if ( s_characters[s_numCharacters].display_name[0] >= 'a' && s_characters[s_numCharacters].display_name[0] <= 'z' ) {
-		s_characters[s_numCharacters].display_name[0] -= 32;
-	}
-	// model in "name/default" format as used by Q3 userinfo
-	Com_sprintf( s_characters[s_numCharacters].model, sizeof( s_characters[s_numCharacters].model ), "%s/default", name );
+	Q_strncpyz( s_characters[s_numCharacters].skinName, "default", sizeof( s_characters[s_numCharacters].skinName ) );
 	Q_strncpyz( s_characters[s_numCharacters].profilePath, profilePath, sizeof( s_characters[s_numCharacters].profilePath ) );
-	Q_strncpyz( s_characters[s_numCharacters].botPath, botPath, sizeof( s_characters[s_numCharacters].botPath ) );
 	s_numCharacters++;
 
 	return qtrue;
 }
 
 void G_Characters_Init( void ) {
-	char dirlist[4096];
-	char *dirptr;
-	int numdirs;
-	int i;
-	int dirlen;
+	char buf[MAX_QPATH];
+	char key[64];
+	int count, i;
 
 	memset( s_characters, 0, sizeof( s_characters ) );
 	s_numCharacters = 0;
 
-	numdirs = trap_FS_GetFileList( "characters", ".lua", dirlist, sizeof( dirlist ) );
-	dirptr = dirlist;
+	buf[0] = '\0';
+	trap_GetValue( buf, sizeof( buf ), "char_count" );
+	count = atoi( buf );
 
-	for ( i = 0; i < numdirs; i++ ) {
-		char name[MAX_QPATH];
-		char *slash;
-		dirlen = strlen( dirptr );
-		if ( dirlen <= 0 ) {
-			dirptr++;
-			continue;
+	for ( i = 0; i < count; i++ ) {
+		Com_sprintf( key, sizeof( key ), "char_at:%d", i );
+		buf[0] = '\0';
+		trap_GetValue( buf, sizeof( buf ), key );
+		if ( buf[0] && buf[0] != '_' ) {
+			G_Character_Add( buf );
 		}
-
-		if ( dirlen <= 9 || Q_stricmp( dirptr + dirlen - 9, "/main.lua" ) ) {
-			dirptr += dirlen + 1;
-			continue;
-		}
-
-		Q_strncpyz( name, dirptr, sizeof( name ) );
-		slash = strchr( name, '/' );
-		if ( !slash ) {
-			dirptr += dirlen + 1;
-			continue;
-		}
-		*slash = '\0';
-
-		if ( !name[0] || !Q_stricmp( name, "_base" ) || G_Character_HasName( name ) ) {
-			dirptr += dirlen + 1;
-			continue;
-		}
-
-		G_Character_Add( name );
-
-		dirptr += dirlen + 1;
 	}
 
 	G_Printf( "%i characters parsed\n", s_numCharacters );
@@ -120,13 +90,11 @@ int G_Characters_Count( void ) {
 }
 
 const g_characterInfo_t *G_Character_GetByName( const char *name ) {
-	int i;
-
 	if ( !name || !name[0] ) {
 		return NULL;
 	}
 
-	for ( i = 0; i < s_numCharacters; i++ ) {
+	for ( int i = 0; i < s_numCharacters; i++ ) {
 		if ( s_characters[i].inuse && !Q_stricmp( s_characters[i].name, name ) ) {
 			return &s_characters[i];
 		}

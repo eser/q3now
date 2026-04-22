@@ -5,13 +5,6 @@ cg_utils.c -- A collection of utility functions
 ===========================================================================
 */
 #include "cg_local.h"
-#include "cg_modern_private.h"
-
-vmCvar_t cg_MaxlocationWidth;
-
-qboolean CG_ModernIsGameTypeFreeze( void ) {
-	return qfalse;
-}
 
 qboolean CG_IsFollowing( void ) {
 	return ( cg.snap->ps.pm_flags & PMF_FOLLOW ) ? qtrue : qfalse;
@@ -19,6 +12,35 @@ qboolean CG_IsFollowing( void ) {
 
 qboolean CG_IsSpectator( void ) {
 	return cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ? qtrue : qfalse;
+}
+
+qboolean CG_IsPlayerInvisible( centity_t *cent ) {
+	if ( (cent->currentState.powerups & ( 1 << PW_INVIS )) || (cent->currentState.eFlags & EF_CLOAK) ) {
+		return qtrue;
+	}
+
+	if ( cgs.gametype == GT_KINGOFTHEHILL && cgs.kothGhosts ) {
+		if ( !(cent->currentState.powerups & ( 1 << PW_KING )) &&
+			cent->muzzleFlashTime + GHOST_FLASH_TIME < cg.time ) {
+			return qtrue;
+		}
+	}
+
+	return qfalse;
+}
+
+int CG_CrosshairPlayer( void ) {
+	if ( cg.time > ( cg.crosshairClientTime + 1000 ) ) {
+		return -1;
+	}
+	return cg.crosshairClientNum;
+}
+
+int CG_LastAttacker( void ) {
+	if ( !cg.attackerTime ) {
+		return -1;
+	}
+	return cg.snap->ps.persistant[PERS_LAST_ATTACKER];
 }
 
 void CG_ModernDrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled ) {

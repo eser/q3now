@@ -3,11 +3,11 @@
 cg_atmospheric.c -- Rain & snow atmospheric effects (3B / FEAT_ATMOSPHERIC)
 
 Simplified port from Spearmint/mint-arena. Uses tracemap for sky/ground
-height detection. Weather is server-controlled via g_weather cvar.
+height detection. Weather is server-controlled via g_envWeather cvar.
 
-g_weather "rain"  — rain particles
-g_weather "snow"  — snow particles
-g_weather ""      — disabled (default)
+g_envWeather "rain"  — rain particles
+g_envWeather "snow"  — snow particles
+g_envWeather ""      — disabled (default)
 
 Players can callvote to change weather mid-game.
 Client can locally disable with cg_atmosphericEffects 0.
@@ -59,7 +59,7 @@ static struct {
 CG_AtmosphericInit
 
 Idempotent — called from CG_ParseServerinfo whenever serverinfo updates.
-Reads cgs.weather (set by server's g_weather cvar).
+Reads cgs.weather (set by server's g_envWeather cvar).
 Generates tracemap on first call, reinitializes particles on weather change.
 ==================
 */

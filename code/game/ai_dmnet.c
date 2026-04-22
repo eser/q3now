@@ -50,6 +50,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "ai_team.h"
 #include "wired/bots/g_bot_scripts.h"
 #include "wired/bots/g_wiredbots.h"
+#include "../qcommon/q_feats.h"
+#if FEAT_RECAST_NAVMESH
+#include "g_bot_nav.h"
+#endif
 //data file headers
 #include "chars.h"			//characteristics
 #include "inv.h"			//indexes into the inventory
@@ -82,12 +86,11 @@ BotDumpNodeSwitches
 ==================
 */
 void BotDumpNodeSwitches(bot_state_t *bs) {
-	int i;
 	char netname[MAX_NETNAME];
 
 	ClientName(bs->client, netname, sizeof(netname));
 	BotAI_Print(PRT_MESSAGE, "%s at %1.1f switched more than %d AI nodes\n", netname, FloatTime(), MAX_NODESWITCHES);
-	for (i = 0; i < numnodeswitches; i++) {
+	for (int i = 0; i < numnodeswitches; i++) {
 		BotAI_Print(PRT_MESSAGE, "%s", nodeswitch[i]);
 	}
 	BotAI_Print(PRT_FATAL, "");
@@ -1546,11 +1549,13 @@ int AINode_Seek_ActivateEntity(bot_state_t *bs) {
 		//initialize the movement state
 		BotSetupForMovement(bs);
 		//move towards the goal
-		trap_BotMoveToGoal(&moveresult, bs->ms, goal, bs->tfl);
-		//if the movement failed
-		if (moveresult.failure) {
-			//reset the avoid reach, otherwise bot is stuck in current area
-			trap_BotResetAvoidReach(bs->ms);
+	BotNav_MoveToGoal(bs, goal, &moveresult);
+	//if the movement failed
+	if (moveresult.failure) {
+		//reset the avoid reach, otherwise bot is stuck in current area
+#if !FEAT_RECAST_NAVMESH
+		trap_BotResetAvoidReach(bs->ms);
+#endif
 			//
 			bs->activatestack->time = 0;
 		}
@@ -1594,7 +1599,7 @@ int AINode_Seek_ActivateEntity(bot_state_t *bs) {
 		}
 	}
 	else if (!(bs->flags & BFL_IDEALVIEWSET)) {
-		if (trap_BotMovementViewTarget(bs->ms, goal, bs->tfl, 300, target)) {
+		if (BotNav_MovementViewTarget(bs->client, goal, target)) {
 			VectorSubtract(target, bs->origin, dir);
 			vectoangles(dir, bs->ideal_viewangles);
 		}
@@ -1704,11 +1709,13 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	//initialize the movement state
 	BotSetupForMovement(bs);
 	//move towards the goal
-	trap_BotMoveToGoal(&moveresult, bs->ms, &goal, bs->tfl);
+	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
 		//reset the avoid reach, otherwise bot is stuck in current area
+#if !FEAT_RECAST_NAVMESH
 		trap_BotResetAvoidReach(bs->ms);
+#endif
 		bs->nbg_time = 0;
 	}
 	//check if the bot is blocked
@@ -1732,7 +1739,7 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 		}
 		else if (!(bs->flags & BFL_IDEALVIEWSET)) {
 			if (!trap_BotGetSecondGoal(bs->gs, &goal)) trap_BotGetTopGoal(bs->gs, &goal);
-			if (trap_BotMovementViewTarget(bs->ms, &goal, bs->tfl, 300, target)) {
+			if (BotNav_MovementViewTarget(bs->client, &goal, target)) {
 				VectorSubtract(target, bs->origin, dir);
 				vectoangles(dir, bs->ideal_viewangles);
 			}
@@ -1962,11 +1969,13 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	//initialize the movement state
 	BotSetupForMovement(bs);
 	//move towards the goal
-	trap_BotMoveToGoal(&moveresult, bs->ms, &goal, bs->tfl);
+	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
 		//reset the avoid reach, otherwise bot is stuck in current area
+#if !FEAT_RECAST_NAVMESH
 		trap_BotResetAvoidReach(bs->ms);
+#endif
 		//BotAI_Print(PRT_MESSAGE, "movement failure %d\n", moveresult.traveltype);
 		bs->ltg_time = 0;
 	}
@@ -1990,7 +1999,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 			}
 		}
 		else if (!(bs->flags & BFL_IDEALVIEWSET)) {
-			if (trap_BotMovementViewTarget(bs->ms, &goal, bs->tfl, 300, target)) {
+			if (BotNav_MovementViewTarget(bs->client, &goal, target)) {
 				VectorSubtract(target, bs->origin, dir);
 				vectoangles(dir, bs->ideal_viewangles);
 			}
@@ -2297,11 +2306,13 @@ int AINode_Battle_Chase(bot_state_t *bs)
 	//initialize the movement state
 	BotSetupForMovement(bs);
 	//move towards the goal
-	trap_BotMoveToGoal(&moveresult, bs->ms, &goal, bs->tfl);
+	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
 		//reset the avoid reach, otherwise bot is stuck in current area
+#if !FEAT_RECAST_NAVMESH
 		trap_BotResetAvoidReach(bs->ms);
+#endif
 		//BotAI_Print(PRT_MESSAGE, "movement failure %d\n", moveresult.traveltype);
 		bs->ltg_time = 0;
 	}
@@ -2309,15 +2320,18 @@ int AINode_Battle_Chase(bot_state_t *bs)
 	BotAIBlocked(bs, &moveresult, qfalse);
 	BotMovementThink(bs, &moveresult);
 	//
+#if !FEAT_RECAST_NAVMESH
 	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEWSET|MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
 		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
 	}
-	else if (!(bs->flags & BFL_IDEALVIEWSET)) {
+	else
+#endif
+	if (!(bs->flags & BFL_IDEALVIEWSET)) {
 		if (bs->chase_time > FloatTime() - 2) {
 			BotAimAtEnemy(bs);
 		}
 		else {
-			if (trap_BotMovementViewTarget(bs->ms, &goal, bs->tfl, 300, target)) {
+			if (BotNav_MovementViewTarget(bs->client, &goal, target)) {
 				VectorSubtract(target, bs->origin, dir);
 				vectoangles(dir, bs->ideal_viewangles);
 			}
@@ -2484,11 +2498,13 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	//initialize the movement state
 	BotSetupForMovement(bs);
 	//move towards the goal
-	trap_BotMoveToGoal(&moveresult, bs->ms, &goal, bs->tfl);
+	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
 		//reset the avoid reach, otherwise bot is stuck in current area
+#if !FEAT_RECAST_NAVMESH
 		trap_BotResetAvoidReach(bs->ms);
+#endif
 		//BotAI_Print(PRT_MESSAGE, "movement failure %d\n", moveresult.traveltype);
 		bs->ltg_time = 0;
 	}
@@ -2498,11 +2514,15 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	//choose the best weapon to fight with
 	BotChooseWeapon(bs);
 	//if the view is fixed for the movement
+#if !FEAT_RECAST_NAVMESH
 	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
 		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
 	}
 	else if (!(moveresult.flags & MOVERESULT_MOVEMENTVIEWSET)
 				&& !(bs->flags & BFL_IDEALVIEWSET) ) {
+#else
+	if (!(bs->flags & BFL_IDEALVIEWSET)) {
+#endif
 		if ( bs->wiredBotsActive ) {
 			attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_AGGRESSION, 0.5f );
 		} else {
@@ -2513,7 +2533,7 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 			BotAimAtEnemy(bs);
 		}
 		else {
-			if (trap_BotMovementViewTarget(bs->ms, &goal, bs->tfl, 300, target)) {
+			if (BotNav_MovementViewTarget(bs->client, &goal, target)) {
 				VectorSubtract(target, bs->origin, dir);
 				vectoangles(dir, bs->ideal_viewangles);
 			}
@@ -2633,11 +2653,13 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	//initialize the movement state
 	BotSetupForMovement(bs);
 	//move towards the goal
-	trap_BotMoveToGoal(&moveresult, bs->ms, &goal, bs->tfl);
+	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
 		//reset the avoid reach, otherwise bot is stuck in current area
+#if !FEAT_RECAST_NAVMESH
 		trap_BotResetAvoidReach(bs->ms);
+#endif
 		//BotAI_Print(PRT_MESSAGE, "movement failure %d\n", moveresult.traveltype);
 		bs->nbg_time = 0;
 	}
@@ -2649,11 +2671,15 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	//choose the best weapon to fight with
 	BotChooseWeapon(bs);
 	//if the view is fixed for the movement
+#if !FEAT_RECAST_NAVMESH
 	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
 		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
 	}
 	else if (!(moveresult.flags & MOVERESULT_MOVEMENTVIEWSET)
 				&& !(bs->flags & BFL_IDEALVIEWSET)) {
+#else
+	if (!(bs->flags & BFL_IDEALVIEWSET)) {
+#endif
 		if ( bs->wiredBotsActive ) {
 			attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_AGGRESSION, 0.5f );
 		} else {
@@ -2665,7 +2691,7 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 			BotAimAtEnemy(bs);
 		}
 		else {
-			if (trap_BotMovementViewTarget(bs->ms, &goal, bs->tfl, 300, target)) {
+			if (BotNav_MovementViewTarget(bs->client, &goal, target)) {
 				VectorSubtract(target, bs->origin, dir);
 				vectoangles(dir, bs->ideal_viewangles);
 			}

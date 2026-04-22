@@ -80,18 +80,16 @@ sndBuffer *SND_malloc( void ) {
 void SND_setup( void ) 
 {
 	sndBuffer *p, *q;
-	cvar_t	*cv;
-	int scs, sz;
 	static int old_scs = -1;
 
-	cv = Cvar_Get( "com_soundMegs", DEF_COMSOUNDMEGS, CVAR_LATCH | CVAR_ARCHIVE );
+	cvar_t *cv = Cvar_Get( "com_soundMegs", DEF_COMSOUNDMEGS, CVAR_LATCH | CVAR_ARCHIVE );
 	Cvar_CheckRange( cv, "1", "512", CV_INTEGER );
 	Cvar_SetDescription( cv, "Amount of memory (RAM) assigned to the sound buffer (in MB)." );
 
-	scs = ( cv->integer * /*1536*/ 12 * dma.speed ) / 22050;
+	int scs = ( cv->integer * /*1536*/ 12 * dma.speed ) / 22050;
 	scs *= 128;
 
-	sz = scs * sizeof( sndBuffer );
+	int sz = scs * sizeof( sndBuffer );
 
 	// realloc buffer if com_soundMegs changed
 	if ( old_scs != scs ) {
@@ -167,36 +165,29 @@ resample / decimate to the current source rate
 ================
 */
 static int ResampleSfx( sfx_t *sfx, int channels, int inrate, int inwidth, int samples, byte *data, qboolean compressed ) {
-	int		outcount;
-	int		srcsample;
-	float	stepscale;
-	int		i, j;
-	int		sample, samplefrac, fracstep;
-	int			part;
-	sndBuffer	*chunk;
-	
-	stepscale = (float)inrate / dma.speed;	// this is usually 0.5, 1, or 2
+	float stepscale = (float)inrate / dma.speed;	// this is usually 0.5, 1, or 2
 
-	outcount = samples / stepscale;
+	int outcount = samples / stepscale;
 
-	srcsample = 0;
-	samplefrac = 0;
-	fracstep = stepscale * 256 * channels;
-	chunk = sfx->soundData;
+	int srcsample = 0;
+	int samplefrac = 0;
+	int fracstep = stepscale * 256 * channels;
+	sndBuffer *chunk = sfx->soundData;
 
-	for (i=0 ; i<outcount ; i++)
+	for (int i=0 ; i<outcount ; i++)
 	{
 		srcsample += samplefrac >> 8;
 		samplefrac &= 255;
 		samplefrac += fracstep;
-		for (j=0 ; j<channels ; j++)
+		for (int j=0 ; j<channels ; j++)
 		{
+			int sample;
 			if( inwidth == 2 ) {
 				sample = ( ((short *)data)[srcsample+j] );
 			} else {
 				sample = (unsigned int)( (unsigned char)(data[srcsample+j]) - 128) << 8;
 			}
-			part = (i*channels+j)&(SND_CHUNK_SIZE-1);
+			int part = (i*channels+j)&(SND_CHUNK_SIZE-1);
 			if (part == 0) {
 				sndBuffer	*newchunk;
 				newchunk = SND_malloc();
@@ -223,27 +214,22 @@ resample / decimate to the current source rate
 ================
 */
 static int ResampleSfxRaw( short *sfx, int channels, int inrate, int inwidth, int samples, byte *data ) {
-	int			outcount;
-	int			srcsample;
-	float		stepscale;
-	int			i, j;
-	int			sample, samplefrac, fracstep;
-	
-	stepscale = (float)inrate / dma.speed;	// this is usually 0.5, 1, or 2
+	float stepscale = (float)inrate / dma.speed;	// this is usually 0.5, 1, or 2
 
-	outcount = samples / stepscale;
+	int outcount = samples / stepscale;
 
-	srcsample = 0;
-	samplefrac = 0;
-	fracstep = stepscale * 256 * channels;
+	int srcsample = 0;
+	int samplefrac = 0;
+	int fracstep = stepscale * 256 * channels;
 
-	for (i=0 ; i<outcount ; i++)
+	for (int i=0 ; i<outcount ; i++)
 	{
 		srcsample += samplefrac >> 8;
 		samplefrac &= 255;
 		samplefrac += fracstep;
-		for (j=0 ; j<channels ; j++)
+		for (int j=0 ; j<channels ; j++)
 		{
+			int sample;
 			if( inwidth == 2 ) {
 				sample = LittleShort ( ((short *)data)[srcsample+j] );
 			} else {
@@ -265,27 +251,22 @@ Used by Opus in-memory encoding which always operates at 48 kHz.
 */
 static int ResampleSfxRawToRate( short *sfx, int channels, int inrate, int inwidth,
                                  int samples, byte *data, int outrate ) {
-	int			outcount;
-	int			srcsample;
-	float		stepscale;
-	int			i, j;
-	int			sample, samplefrac, fracstep;
+	float stepscale = (float)inrate / outrate;
 
-	stepscale = (float)inrate / outrate;
+	int outcount = samples / stepscale;
 
-	outcount = samples / stepscale;
+	int srcsample = 0;
+	int samplefrac = 0;
+	int fracstep = stepscale * 256 * channels;
 
-	srcsample = 0;
-	samplefrac = 0;
-	fracstep = stepscale * 256 * channels;
-
-	for (i=0 ; i<outcount ; i++)
+	for (int i=0 ; i<outcount ; i++)
 	{
 		srcsample += samplefrac >> 8;
 		samplefrac &= 255;
 		samplefrac += fracstep;
-		for (j=0 ; j<channels ; j++)
+		for (int j=0 ; j<channels ; j++)
 		{
+			int sample;
 			if( inwidth == 2 ) {
 				sample = LittleShort ( ((short *)data)[srcsample+j] );
 			} else {

@@ -1169,7 +1169,6 @@ R_CullIQM
 static int R_CullIQM( const iqmData_t *data, const trRefEntity_t *ent ) {
 	vec3_t		bounds[2];
 	vec_t		*oldBounds, *newBounds;
-	int		i;
 
 	if (!data->bounds) {
 		tr.pc.c_box_cull_md3_clip++;
@@ -1181,7 +1180,7 @@ static int R_CullIQM( const iqmData_t *data, const trRefEntity_t *ent ) {
 	newBounds = data->bounds + 6*ent->e.frame;
 
 	// calculate a bounding box in the current coordinate system
-	for (i = 0 ; i < 3 ; i++) {
+	for (int i = 0 ; i < 3 ; i++) {
 		bounds[0][i] = oldBounds[i] < newBounds[i] ? oldBounds[i] : newBounds[i];
 		bounds[1][i] = oldBounds[i+3] > newBounds[i+3] ? oldBounds[i+3] : newBounds[i+3];
 	}
@@ -1425,7 +1424,6 @@ static void ComputePoseMats( iqmData_t *data, int frame, int oldframe,
 static void ComputeJointMats( iqmData_t *data, int frame, int oldframe,
 			      float backlerp, float *mat ) {
 	float	*mat1;
-	int	i;
 
 	if ( data->num_poses == 0 ) {
 		memcpy( mat, data->bindJoints, data->num_joints * 12 * sizeof(float) );
@@ -1434,7 +1432,7 @@ static void ComputeJointMats( iqmData_t *data, int frame, int oldframe,
 
 	ComputePoseMats( data, frame, oldframe, backlerp, mat );
 
-	for( i = 0; i < data->num_joints; i++ ) {
+	for( int i = 0; i < data->num_joints; i++ ) {
 		float outmat[12];
 		mat1 = mat + 12 * i;
 

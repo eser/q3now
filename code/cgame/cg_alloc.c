@@ -34,11 +34,9 @@ void CG_AllocSetPermanent(int permanent) {
 }
 
 void *CG_Alloc( int size ) {
-	int aligned;
-
 	if ( size <= 0 ) return NULL;
 
-	aligned = CG_AlignUp(size);
+	int aligned = CG_AlignUp(size);
 
 	if (cgAllocPermanent) {
 		if (cgPermOffset + aligned > cgTempOffset) {

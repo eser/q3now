@@ -704,11 +704,9 @@ static void DoRailDiscs( int numSegs, const vec3_t start, const vec3_t dir, cons
 
 	for ( i = 0; i < numSegs; i++ )
 	{
-		int j;
-
 		RB_CHECKOVERFLOW( 4, 6 );
 
-		for ( j = 0; j < 4; j++ )
+		for ( int j = 0; j < 4; j++ )
 		{
 			VectorCopy( pos[j], tess.xyz[tess.numVertexes] );
 			tess.texCoords[tess.numVertexes][0] = (j < 2);

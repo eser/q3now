@@ -67,14 +67,12 @@ Cvar_ValidateName
 ============
 */
 static qboolean Cvar_ValidateName( const char *name ) {
-	const char *s;
-	int c;
-
 	if ( !name ) {
 		return qfalse;
 	}
 
-	s = name;
+	const char *s = name;
+	int c;
 	while ( (c = *s++) != '\0' ) {
 		if ( c == '\\' || c == '\"' || c == ';' || c == '%' || c <= ' ' || c >= '~' )
 			return qfalse;
@@ -1408,7 +1406,6 @@ void Cvar_WriteVariables( fileHandle_t f, qboolean writeAll )
 			// write the latched value, even if it hasn't taken effect yet
 			const char *value = var->latchedString ? var->latchedString : var->string;
 			char buffer[MAX_CMD_LINE];
-			int len;
 			if ( strlen( var->name ) + strlen( value ) + 10 > sizeof( buffer ) ) {
 				Com_Printf( S_COLOR_YELLOW "WARNING: %svalue of variable \"%s\" too long to write to file\n",
 					value == var->latchedString ? "latched " : "", var->name );
@@ -1422,7 +1419,7 @@ void Cvar_WriteVariables( fileHandle_t f, qboolean writeAll )
 			if ( writeAll && var->resetString && !strcmp( value, var->resetString ) ) {
 				continue;
 			}
-			len = Com_sprintf( buffer, sizeof( buffer ), "seta %s \"%s\"" Q_NEWLINE, var->name, value );
+			int len = Com_sprintf( buffer, sizeof( buffer ), "seta %s \"%s\"" Q_NEWLINE, var->name, value );
 
 			FS_Write( buffer, len, f );
 		}
@@ -2060,8 +2057,7 @@ void Cvar_ResetGroup( cvarGroup_t group, qboolean resetModifiedFlags ) {
 	if ( group < CVG_MAX ) {
 		cvar_group[ group ] = 0;
 		if ( resetModifiedFlags ) {
-			int i;
-			for ( i = 0; i < cvar_numIndexes; i++ ) {
+			for ( int i = 0; i < cvar_numIndexes; i++ ) {
 				if ( cvar_indexes[ i ].group == group && cvar_indexes[ i ].name ) {
 					cvar_indexes[ i ].modified = qfalse;
 				}

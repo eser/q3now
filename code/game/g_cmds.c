@@ -377,6 +377,33 @@ void Cmd_God_f (gentity_t *ent)
 
 /*
 ==================
+Cmd_Cloak_f
+
+Sets client to cloak
+
+argv(0) cloak
+==================
+*/
+void Cmd_Cloak_f (gentity_t *ent)
+{
+	char	*msg;
+
+	if ( !CheatsOk( ent ) ) {
+		return;
+	}
+
+	ent->flags ^= FL_CLOAK;
+	if (!(ent->flags & FL_CLOAK) )
+		msg = "cloak OFF\n";
+	else
+		msg = "cloak ON\n";
+
+	trap_SendServerCommand( ent-g_entities, va("print \"%s\"", msg));
+}
+
+
+/*
+==================
 Cmd_Notarget_f
 
 Sets client to notarget
@@ -869,6 +896,25 @@ void Cmd_Follow_f( gentity_t *ent ) {
 
 /*
 =================
+Cmd_Stop_f
+=================
+*/
+#if FEAT_SCREENSHOT_TOOLS
+void Cmd_Stop_f( gentity_t *ent ) {
+	if ( ent->s.number != 0 ) return;
+	if ( ent->client->sess.sessionTeam != TEAM_SPECTATOR ) return;
+
+	if ( level.stopTime ) {
+		level.stopTime = 0;
+	} else {
+		level.stopTime = level.time;
+	}
+	trap_SetConfigstring( CS_STOPTIME, va( "%d", level.stopTime ) );
+}
+#endif
+
+/*
+=================
 Cmd_FollowCycle_f
 =================
 */
@@ -1040,9 +1086,7 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 }
 
 static void SanitizeChatText( char *text ) {
-	int i;
-
-	for ( i = 0; text[i]; i++ ) {
+	for ( int i = 0; text[i]; i++ ) {
 		if ( text[i] == '\n' || text[i] == '\r' ) {
 			text[i] = ' ';
 		}
@@ -1259,7 +1303,6 @@ Cmd_VoiceTaunt_f
 */
 static void Cmd_VoiceTaunt_f( gentity_t *ent ) {
 	gentity_t *who;
-	int i;
 
 	if (!ent->client) {
 		return;
@@ -1304,7 +1347,7 @@ static void Cmd_VoiceTaunt_f( gentity_t *ent ) {
 
 	if (g_gametype.integer >= GT_TDM) {
 		// praise a team mate who just got a reward
-		for(i = 0; i < MAX_CLIENTS; i++) {
+		for(int i = 0; i < MAX_CLIENTS; i++) {
 			who = g_entities + i;
 			if (who->client && who != ent && who->client->sess.sessionTeam == ent->client->sess.sessionTeam) {
 				if (who->client->rewardTime > level.time) {
@@ -1545,13 +1588,13 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 #if FEAT_ATMOSPHERIC
 	} else if ( !Q_stricmp( arg1, "weather" ) ) {
 		if ( !arg2[0] || !Q_stricmp( arg2, "clean" ) ) {
-			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_weather \"\"" );
+			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_envWeather \"\"" );
 			Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "Weather: Clean" );
 		} else if ( !Q_stricmp( arg2, "rain" ) ) {
-			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_weather \"rain\"" );
+			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_envWeather \"rain\"" );
 			Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "Weather: Rain" );
 		} else if ( !Q_stricmp( arg2, "snow" ) ) {
-			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_weather \"snow\"" );
+			Com_sprintf( level.voteString, sizeof( level.voteString ), "g_envWeather \"snow\"" );
 			Com_sprintf( level.voteDisplayString, sizeof( level.voteDisplayString ), "Weather: Snow" );
 		} else {
 			trap_SendServerCommand( ent-g_entities, "print \"Valid weather types: rain, snow, clean.\n\"" );
@@ -1908,12 +1951,11 @@ void Cmd_Admin_f( gentity_t *ent ) {
 		}
 		trap_SendServerCommand( clientNum, va( "print \"Player '%s' not found.\n\"", arg ) );
 	} else if ( Q_stricmp( subcmd, "mute" ) == 0 ) {
-		int i;
 		if ( !arg[0] ) {
 			trap_SendServerCommand( clientNum, "print \"Usage: adm mute <player>\n\"" );
 			return;
 		}
-		for ( i = 0; i < level.maxclients; i++ ) {
+		for ( int i = 0; i < level.maxclients; i++ ) {
 			if ( level.clients[i].pers.connected != CON_CONNECTED ) continue;
 			if ( Q_stricmp( level.clients[i].pers.netname, arg ) == 0 ) {
 				// mute via EF_TALK flag (prevents chat)
@@ -2142,6 +2184,8 @@ void ClientCommand( int clientNum ) {
 		Cmd_Give_f (ent);
 	else if (Q_stricmp (cmd, "god") == 0)
 		Cmd_God_f (ent);
+	else if (Q_stricmp (cmd, "cloak") == 0)
+		Cmd_Cloak_f (ent);
 	else if (Q_stricmp (cmd, "notarget") == 0)
 		Cmd_Notarget_f (ent);
 	else if (Q_stricmp (cmd, "noclip") == 0)
@@ -2254,6 +2298,10 @@ void ClientCommand( int clientNum ) {
 #if FEAT_RANKED_QUEUE
 	else if (Q_stricmp (cmd, "queue") == 0)
 		Cmd_Queue_f (ent);
+#endif
+#if FEAT_SCREENSHOT_TOOLS
+	else if (Q_stricmp (cmd, "stop") == 0)
+		Cmd_Stop_f (ent);
 #endif
 	else
 		trap_SendServerCommand( clientNum, va("print \"unknown cmd %s\n\"", cmd ) );

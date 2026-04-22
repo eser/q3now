@@ -370,6 +370,26 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 
 		if ( ent->e.customShader ) {
 			shader = R_GetShaderByHandle( ent->e.customShader );
+		} else if ( ent->e.characterSkin ) {
+			const cmSkin_t *csk = ri.GetCharacterSkin( ent->e.characterSkin );
+			if ( csk ) {
+				if ( csk->singlePath ) {
+					shader = R_GetShaderByHandle( csk->fallbackShader );
+				} else {
+					int csj;
+					shader = tr.defaultShader;
+					for ( csj = 0; csj < csk->overrideCount; csj++ ) {
+						if ( !strcmp( csk->overrides[csj].surfaceName, surface->name ) ) {
+							shader = R_GetShaderByHandle( csk->overrides[csj].shader );
+							break;
+						}
+					}
+					if ( shader == tr.defaultShader && csk->defaultShader )
+						shader = R_GetShaderByHandle( csk->defaultShader );
+				}
+			} else {
+				shader = tr.defaultShader;
+			}
 		} else if ( ent->e.customSkin > 0 && ent->e.customSkin < tr.numSkins ) {
 			const skin_t *skin;
 			int		j;

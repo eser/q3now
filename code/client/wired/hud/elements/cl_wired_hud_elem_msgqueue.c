@@ -27,9 +27,8 @@ void *CG_ModernHUDElementMsgQueueCreate( const modernhudConfig_t *config ) {
 static int MsgQueue_FindBest( modernhudMsgQueue_t *q ) {
 	int best = -1;
 	modernhudMsgPriority_t bestPrio = ModernHUD_MSG_LOW;
-	int i;
 
-	for ( i = 0; i < q->writeIndex; i++ ) {
+	for ( int i = 0; i < q->writeIndex; i++ ) {
 		int idx = i % ModernHUD_MSG_QUEUE_SIZE;
 		modernhudMsgEntry_t *e = &q->entries[idx];
 		if ( e->shown ) continue;
@@ -44,13 +43,10 @@ static int MsgQueue_FindBest( modernhudMsgQueue_t *q ) {
 
 // check if a higher-priority message arrived that should preempt current
 static qboolean MsgQueue_ShouldPreempt( modernhudMsgQueue_t *q ) {
-	int i;
-	modernhudMsgEntry_t *current;
-
 	if ( q->currentIndex < 0 ) return qfalse;
-	current = &q->entries[q->currentIndex % ModernHUD_MSG_QUEUE_SIZE];
+	modernhudMsgEntry_t *current = &q->entries[q->currentIndex % ModernHUD_MSG_QUEUE_SIZE];
 
-	for ( i = q->currentIndex + 1; i < q->writeIndex; i++ ) {
+	for ( int i = q->currentIndex + 1; i < q->writeIndex; i++ ) {
 		int idx = i % ModernHUD_MSG_QUEUE_SIZE;
 		modernhudMsgEntry_t *e = &q->entries[idx];
 		if ( e->shown ) continue;
@@ -116,14 +112,11 @@ void CG_ModernHUDElementMsgQueueRoutine( void *context ) {
 
 	// renders two lines with independent sizes and alpha — bypasses CG_ModernHUDTextPrint intentionally
 	{
-		float x, y;
-		float charW, charH;
+		float x = element->config.rect.isSet ? element->config.rect.value[0] : 320.0f;
+		float y = element->config.rect.isSet ? element->config.rect.value[1] : 95.0f;
+		float charW = element->config.fontsize.isSet ? element->config.fontsize.value[0] : 10.0f;
+		float charH = element->config.fontsize.isSet ? element->config.fontsize.value[1] : 14.0f;
 		vec4_t color;
-
-		x = element->config.rect.isSet ? element->config.rect.value[0] : 320.0f;
-		y = element->config.rect.isSet ? element->config.rect.value[1] : 95.0f;
-		charW = element->config.fontsize.isSet ? element->config.fontsize.value[0] : 10.0f;
-		charH = element->config.fontsize.isSet ? element->config.fontsize.value[1] : 14.0f;
 
 		Vector4Set( color, 1, 1, 1, alpha );
 

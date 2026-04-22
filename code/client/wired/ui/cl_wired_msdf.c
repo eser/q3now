@@ -181,10 +181,8 @@ static void JSON_NextToken( jsonParser_t *jp )
  */
 static void JSON_SkipValue( jsonParser_t *jp )
 {
-	int depth;
-
 	if ( jp->type == JTOK_LBRACE ) {
-		depth = 1;
+		int depth = 1;
 		while ( depth > 0 ) {
 			JSON_NextToken( jp );
 			if ( jp->type == JTOK_LBRACE )    depth++;
@@ -195,7 +193,7 @@ static void JSON_SkipValue( jsonParser_t *jp )
 	}
 
 	if ( jp->type == JTOK_LBRACKET ) {
-		depth = 1;
+		int depth = 1;
 		while ( depth > 0 ) {
 			JSON_NextToken( jp );
 			if ( jp->type == JTOK_LBRACKET )    depth++;
@@ -483,12 +481,8 @@ msdfGlyph_t *MSDF_FindGlyph( msdfFont_t *font, int unicode )
 
 msdfFont_t *MSDF_LoadFont( const char *fontName )
 {
-	msdfFont_t  *font;
 	char         jsonPath[MAX_QPATH];
 	char         shaderPath[MAX_QPATH];
-	void        *buf;
-	int          len;
-	int          i;
 
 	if ( !fontName || !fontName[0] ) {
 		Com_Printf( S_COLOR_RED "MSDF_LoadFont: NULL font name\n" );
@@ -496,7 +490,7 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 	}
 
 	/* check if already loaded */
-	for ( i = 0; i < wui_fontCount; i++ ) {
+	for ( int i = 0; i < wui_fontCount; i++ ) {
 		if ( wui_fonts[i].loaded && Q_stricmp( wui_fonts[i].name, fontName ) == 0 ) {
 			return &wui_fonts[i];
 		}
@@ -507,7 +501,7 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 		Com_Printf( S_COLOR_RED "MSDF_LoadFont: too many fonts (max %d)\n", MAX_MSDF_FONTS );
 		return NULL;
 	}
-	font = &wui_fonts[wui_fontCount];
+	msdfFont_t *font = &wui_fonts[wui_fontCount];
 
 	/* zero out the struct */
 	memset( font, 0, sizeof(*font) );
@@ -515,7 +509,8 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 
 	/* load JSON metrics */
 	Com_sprintf( jsonPath, sizeof(jsonPath), "fonts/%s.json", fontName );
-	len = FS_ReadFile( jsonPath, &buf );
+	void *buf;
+	int   len = FS_ReadFile( jsonPath, &buf );
 	if ( len <= 0 || !buf ) {
 		Com_Printf( S_COLOR_YELLOW "MSDF_LoadFont: could not read '%s'\n", jsonPath );
 		return NULL;
@@ -552,7 +547,7 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 	font->loaded = qtrue;
 	wui_fontCount++;
 
-	Com_Printf( "MSDF_LoadFont: loaded '%s' (%dx%d atlas, %.0f px, %d glyphs)\n",
+	Com_DPrintf( "MSDF_LoadFont: loaded '%s' (%dx%d atlas, %.0f px, %d glyphs)\n",
 	            fontName, font->atlasWidth, font->atlasHeight, font->atlasSize,
 	            font->glyphCount );
 
@@ -567,10 +562,9 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
  */
 void MSDF_ReregisterShaders( void )
 {
-	int i;
 	char shaderPath[MAX_QPATH];
 
-	for ( i = 0; i < wui_fontCount; i++ ) {
+	for ( int i = 0; i < wui_fontCount; i++ ) {
 		msdfFont_t *f = &wui_fonts[i];
 		if ( !f->loaded || f->name[0] == '\0' ) continue;
 
@@ -587,6 +581,8 @@ void MSDF_ReregisterShaders( void )
 		Com_DPrintf( "MSDF_ReregisterShaders: re-registered %d font(s)\n", wui_fontCount );
 	}
 }
+
+int MSDF_GetFontCount( void ) { return wui_fontCount; }
 
 /* ── character drawing ──────────────────────────────────────────────── */
 
@@ -727,10 +723,6 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
                       qboolean forceColor )
 {
 	float       curColor[4];
-	float       pixelSize;
-	float       curX;
-	int         drawn;
-	const char *p;
 
 	if ( !font || !font->loaded || !str || !str[0] ) return;
 
@@ -740,9 +732,10 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 	curColor[2] = color ? color[2] : 1.0f;
 	curColor[3] = color ? color[3] : 1.0f;
 
-	pixelSize = size;
-	curX = x;
-	drawn = 0;
+	float       pixelSize = size;
+	float       curX      = x;
+	int         drawn     = 0;
+	const char *p;
 
 	for ( p = str; *p; ) {
 		int ch;
@@ -764,17 +757,10 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 float MSDF_MeasureString( msdfFont_t *font, float size,
                           const char *str, int maxChars, float letterSpacing )
 {
-	float       pixelSize;
-	float       lineWidth;   /* accumulator for the current line */
-	float       maxWidth;    /* maximum width seen across all lines */
-	int         counted;
-	const char *p;
-	int         i;
-
 	if ( !font || !font->loaded || !str || !str[0] ) return 0.0f;
 
 	/* per-frame cache: avoid re-iterating the same string within one frame */
-	for ( i = 0; i < MSDF_MEAS_CACHE_SIZE; i++ ) {
+	for ( int i = 0; i < MSDF_MEAS_CACHE_SIZE; i++ ) {
 		if ( wui_meas_cache[i].frame == cls.realtime &&
 		     wui_meas_cache[i].str == str &&
 		     wui_meas_cache[i].font == font &&
@@ -785,10 +771,11 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 		}
 	}
 
-	pixelSize = size;
-	lineWidth = 0.0f;
-	maxWidth  = 0.0f;
-	counted   = 0;
+	float       pixelSize = size;
+	float       lineWidth = 0.0f;   /* accumulator for the current line */
+	float       maxWidth  = 0.0f;   /* maximum width seen across all lines */
+	int         counted   = 0;
+	const char *p;
 
 	for ( p = str; *p; ) {
 		int ch;

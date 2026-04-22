@@ -42,11 +42,8 @@ O(1) average lookup. Returns NULL if the key is not found.
 ==================
 */
 wuiStoreEntry_t *WiredStore_Get( const char *key ) {
-	unsigned int bucket;
-	wuiStoreEntry_t *e;
-
-	bucket = WiredStore_Hash( key );
-	e = wired_store.buckets[bucket];
+	unsigned int bucket = WiredStore_Hash( key );
+	wuiStoreEntry_t *e = wired_store.buckets[bucket];
 
 	while ( e ) {
 		if ( Q_stricmp( e->key, key ) == 0 ) {
@@ -67,11 +64,7 @@ from pool and links into the hash chain head.
 ==================
 */
 wuiStoreEntry_t *WiredStore_Set( const char *key ) {
-	wuiStoreEntry_t *e;
-	unsigned int bucket;
-	int i;
-
-	e = WiredStore_Get( key );
+	wuiStoreEntry_t *e = WiredStore_Get( key );
 	if ( e ) {
 		return e;
 	}
@@ -82,7 +75,7 @@ wuiStoreEntry_t *WiredStore_Set( const char *key ) {
 	}
 
 	/* find a free slot in the pool */
-	for ( i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
+	for ( int i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
 		if ( wired_store.pool[i].key[0] == '\0' ) {
 			e = &wired_store.pool[i];
 			break;
@@ -97,7 +90,7 @@ wuiStoreEntry_t *WiredStore_Set( const char *key ) {
 	Q_strncpyz( e->key, key, sizeof( e->key ) );
 
 	/* link into bucket chain head */
-	bucket = WiredStore_Hash( key );
+	unsigned int bucket = WiredStore_Hash( key );
 	e->next = wired_store.buckets[bucket];
 	wired_store.buckets[bucket] = e;
 
@@ -114,12 +107,9 @@ Remove entry from hash chain, clear slot, decrement count.
 ==================
 */
 void WiredStore_Delete( const char *key ) {
-	unsigned int bucket;
-	wuiStoreEntry_t *e, *prev;
-
-	bucket = WiredStore_Hash( key );
-	prev = NULL;
-	e = wired_store.buckets[bucket];
+	unsigned int bucket = WiredStore_Hash( key );
+	wuiStoreEntry_t *prev = NULL;
+	wuiStoreEntry_t *e = wired_store.buckets[bucket];
 
 	while ( e ) {
 		if ( Q_stricmp( e->key, key ) == 0 ) {
@@ -163,11 +153,9 @@ then clear dirty flag.
 ==================
 */
 void WiredStore_BeginFrame( void ) {
-	int i;
-
 	wired_store.generation++;
 
-	for ( i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
+	for ( int i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
 		wuiStoreEntry_t *e = &wired_store.pool[i];
 
 		if ( e->key[0] == '\0' ) {
@@ -194,13 +182,10 @@ prefix="" or NULL matches everything.
 void WiredStore_ForEach( const char *prefix,
                          void (*fn)( wuiStoreEntry_t *entry, void *userData ),
                          void *userData ) {
-	int i;
-	int prefixLen;
-
 	if ( !fn ) return;
-	prefixLen = ( prefix && prefix[0] ) ? (int)strlen( prefix ) : 0;
+	int prefixLen = ( prefix && prefix[0] ) ? (int)strlen( prefix ) : 0;
 
-	for ( i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
+	for ( int i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
 		wuiStoreEntry_t *e = &wired_store.pool[i];
 		if ( e->key[0] == '\0' ) continue;
 		if ( prefixLen > 0 && Q_stricmpn( e->key, prefix, prefixLen ) != 0 ) continue;
@@ -260,10 +245,8 @@ Prints all entries in bucket order.
 ==================
 */
 static void WiredStore_Cmd_Dump( void ) {
-	int i, count;
-
-	count = 0;
-	for ( i = 0; i < WUI_STORE_BUCKETS; i++ ) {
+	int count = 0;
+	for ( int i = 0; i < WUI_STORE_BUCKETS; i++ ) {
 		wuiStoreEntry_t *e = wired_store.buckets[i];
 		while ( e ) {
 			Com_Printf( "[%3d] %-40s text=\"%s\" value=%.2f state=\"%s\"\n",
@@ -285,10 +268,8 @@ Prints all keys sorted alphabetically.
 */
 static void WiredStore_Cmd_List( void ) {
 	const char *keys[WUI_STORE_MAX_ENTRIES];
-	int count, i;
-
-	count = 0;
-	for ( i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
+	int count = 0;
+	for ( int i = 0; i < WUI_STORE_MAX_ENTRIES; i++ ) {
 		if ( wired_store.pool[i].key[0] ) {
 			keys[count++] = wired_store.pool[i].key;
 		}
@@ -296,7 +277,7 @@ static void WiredStore_Cmd_List( void ) {
 
 	qsort( keys, count, sizeof( keys[0] ), WiredStore_KeyCmp );
 
-	for ( i = 0; i < count; i++ ) {
+	for ( int i = 0; i < count; i++ ) {
 		Com_Printf( "  %s\n", keys[i] );
 	}
 
@@ -345,15 +326,12 @@ Prints bucket distribution statistics.
 ==================
 */
 static void WiredStore_Cmd_Stats( void ) {
-	int emptyBuckets, maxChain, nonEmptyBuckets, i;
-	float totalChain;
+	int emptyBuckets = 0;
+	int maxChain = 0;
+	float totalChain = 0.0f;
+	int nonEmptyBuckets = 0;
 
-	emptyBuckets = 0;
-	maxChain = 0;
-	totalChain = 0.0f;
-	nonEmptyBuckets = 0;
-
-	for ( i = 0; i < WUI_STORE_BUCKETS; i++ ) {
+	for ( int i = 0; i < WUI_STORE_BUCKETS; i++ ) {
 		int chainLen;
 		wuiStoreEntry_t *e;
 

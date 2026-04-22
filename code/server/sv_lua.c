@@ -33,6 +33,7 @@ typedef struct {
 	qboolean floatValid[SV_WB_MAX_INDEX];
 	svLuaCachedAttack_t cachedAttacks[SV_WB_MAX_ATTACKS];
 	int cachedAttackCount;
+	char displayName[64];   // cached from display_name field; populated by SV_Lua_LoadCharacter
 } svLuaCharacter_t;
 
 typedef struct {
@@ -490,11 +491,10 @@ static int SV_Lua_Q3NowLoad( lua_State *L ) {
 }
 
 static int SV_Lua_Q3NowPrint( lua_State *L ) {
-	int i;
 	int nargs = lua_gettop( L );
 	QS_LOCAL(message, 1024);
 
-	for ( i = 1; i <= nargs; i++ ) {
+	for ( int i = 1; i <= nargs; i++ ) {
 		const char *argText;
 
 		lua_getglobal( L, "tostring" );
@@ -575,15 +575,27 @@ static float SV_Lua_DefaultCharacteristicNormalized( int index, float skillNorma
 }
 
 static void SV_Lua_InitCharacterStrings( svLuaCharacter_t *character, const char *characterName ) {
-	int i;
-
-	for ( i = 0; i < SV_WB_MAX_INDEX; i++ ) {
+	for ( int i = 0; i < SV_WB_MAX_INDEX; i++ ) {
 		character->stringValues[i][0] = '\0';
 	}
+	character->displayName[0] = '\0';
 
 	Q_strncpyz( character->stringValues[CHARACTERISTIC_NAME], characterName, sizeof( character->stringValues[CHARACTERISTIC_NAME] ) );
 	Q_strncpyz( character->stringValues[CHARACTERISTIC_CHAT_NAME], characterName, sizeof( character->stringValues[CHARACTERISTIC_CHAT_NAME] ) );
 }
+
+// Pure read-only handle lookup — does NOT allocate or mutate character state.
+static int SV_Lua_FindCharacterHandle( const char *characterName ) {
+	int i;
+	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
+		if ( s_characters[i].inuse && !Q_stricmp( s_characters[i].name, characterName ) ) {
+			return i;
+		}
+	}
+	return 0;
+}
+
+static void SV_Characters_Preload( void );  // defined after SV_Lua_LoadCharacter
 
 static void SV_Lua_ReleaseCharacterProfileRef( int characterHandle ) {
 	if ( !s_botLua ) {
@@ -681,7 +693,6 @@ static int SV_Lua_GetOrCreateCharacterHandle( const char *characterName, float s
 }
 
 void SV_Lua_Init( void ) {
-	int i;
 	int status;
 
 	if ( s_botLua ) {
@@ -709,7 +720,7 @@ void SV_Lua_Init( void ) {
 	// inject q3now.characteristics: name -> CHARACTERISTIC_* index
 	// single source of truth — derived from chars.h #defines, zero drift
 	lua_newtable( s_botLua );
-	for ( i = 0; s_characteristicNames[i].name; i++ ) {
+	for ( int i = 0; s_characteristicNames[i].name; i++ ) {
 		lua_pushinteger( s_botLua, s_characteristicNames[i].index );
 		lua_setfield( s_botLua, -2, s_characteristicNames[i].name );
 	}
@@ -717,19 +728,21 @@ void SV_Lua_Init( void ) {
 
 	lua_setglobal( s_botLua, "q3now" );
 
-	// load _base/main.lua — installs q3now.load_character trampoline as side effect
+	// load scripts/char_framework.lua — installs q3now.load_character and q3now.load_bot
 	lua_getglobal( s_botLua, "q3now" );
 	lua_getfield( s_botLua, -1, "load" );
 	lua_remove( s_botLua, -2 );
-	lua_pushstring( s_botLua, "characters/_base/main" );
+	lua_pushstring( s_botLua, "scripts/char_framework" );
 	status = lua_pcall( s_botLua, 1, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( s_botLua, -1 );
-		Com_Printf( S_COLOR_YELLOW "BotLua: failed loading _base/main.lua (%s)\n", err ? err : "unknown" );
+		Com_Printf( S_COLOR_YELLOW "BotLua: failed loading scripts/char_framework.lua (%s)\n", err ? err : "unknown" );
 	}
 	lua_settop( s_botLua, 0 );
 
 	Com_Printf( "BotLua: initialized\n" );
+
+	SV_Characters_Preload();
 }
 
 void SV_Lua_Shutdown( void ) {
@@ -743,8 +756,7 @@ void SV_Lua_Shutdown( void ) {
 // Look up a string key in s_characteristicNames[], returning the CHARACTERISTIC_* index
 // or -1 if not found.
 static int SV_Lua_FindCharacteristicIndex( const char *key ) {
-	int i;
-	for ( i = 0; s_characteristicNames[i].name; i++ ) {
+	for ( int i = 0; s_characteristicNames[i].name; i++ ) {
 		if ( Q_stricmp( s_characteristicNames[i].name, key ) == 0 ) {
 			return s_characteristicNames[i].index;
 		}
@@ -847,12 +859,9 @@ static void SV_Lua_LoadCharacterFloatValues( lua_State *L, int botTableIndex, in
 int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	lua_State *L;
 	int status;
-	int i;
 	int profileTableIndex;
 	int profileRef;
 	int botRef;
-	char botPath[MAX_QPATH];
-	const char *baseBotPath = "characters/_base/bot/main.lua";
 	int handle;
 
 	if ( !s_botLua ) {
@@ -873,8 +882,6 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	if ( !handle ) {
 		return 0;
 	}
-
-	Com_sprintf( botPath, sizeof( botPath ), "characters/%s/bot/main.lua", characterName );
 
 	L = s_botLua;
 	lua_settop( L, 0 );
@@ -914,7 +921,7 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	lua_pushinteger( L, handle );
 	lua_setfield( L, profileTableIndex, "characterHandle" );
 
-	for ( i = 0; i < (int)( sizeof( s_stringFields ) / sizeof( s_stringFields[0] ) ); i++ ) {
+	for ( int i = 0; i < (int)( sizeof( s_stringFields ) / sizeof( s_stringFields[0] ) ); i++ ) {
 		SV_Lua_ProfileSetStringField(
 			L,
 			profileTableIndex,
@@ -931,6 +938,16 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 			sizeof( s_characters[handle].stringValues[CHARACTERISTIC_NAME] )
 		);
 	}
+
+	// Cache display_name for fast lookup by SV_Lua_GetCharacterDisplayName.
+	lua_getfield( L, profileTableIndex, "display_name" );
+	if ( lua_isstring( L, -1 ) )
+		Q_strncpyz( s_characters[handle].displayName, lua_tostring( L, -1 ),
+			sizeof( s_characters[handle].displayName ) );
+	lua_pop( L, 1 );
+	if ( !s_characters[handle].displayName[0] )
+		Q_strncpyz( s_characters[handle].displayName, characterName,
+			sizeof( s_characters[handle].displayName ) );
 
 	// nicknames[1] is the primary botlib-facing name (chat matching, addbot, /char).
 	// All entries in the array are valid aliases; botlib queries CHARACTERISTIC_CHAT_NAME → nicknames[1].
@@ -965,40 +982,35 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	profileRef = luaL_ref( L, LUA_REGISTRYINDEX );
 	s_characters[handle].profileRef = profileRef;
 
-	// Always load bot brain from bot/main.lua; fall back to _base/bot/main.lua.
-	// The old profile.bot embedded table pattern is no longer supported.
+	// Load bot data via q3now.load_bot(name): shallow-merges _base/bot/main.lua
+	// with characters/{name}/bot/main.lua (if present). No __index needed.
 	botRef = LUA_NOREF;
-	status = SV_Lua_LoadBotFromPath( L, botPath, &botRef );
-	if ( status != 0 ) {
-		lua_settop( L, 0 );
-		status = SV_Lua_LoadBotFromPath( L, baseBotPath, &botRef );
-	} else {
-		// Character has its own bot table. Wire up __index → _base so that methods
-		// defined there (decide, on_chat, etc.) are inherited without duplication.
-		// lua_getfield follows __index, so BotPushMethod picks them up automatically.
-		int baseBotRef = LUA_NOREF;
-		lua_settop( L, 0 );
-		if ( SV_Lua_LoadBotFromPath( L, baseBotPath, &baseBotRef ) == 0 && baseBotRef != LUA_NOREF ) {
-			lua_rawgeti( L, LUA_REGISTRYINDEX, botRef );      // [1] char bot table
-			lua_createtable( L, 0, 1 );                        // [2] new metatable
-			lua_rawgeti( L, LUA_REGISTRYINDEX, baseBotRef );   // [3] base bot table
-			lua_setfield( L, -2, "__index" );                  // mt.__index = base; pops [3]
-			lua_setmetatable( L, -2 );                         // setmetatable(char, mt); pops [2]
-			lua_settop( L, 0 );
-			// Registry ref no longer needed — base table stays alive via char's metatable.
-			luaL_unref( L, LUA_REGISTRYINDEX, baseBotRef );
-		} else {
-			lua_settop( L, 0 );
-		}
-	}
-
-	if ( status != 0 ) {
-		const char *err = lua_tostring( L, -1 );
-		Com_Printf( S_COLOR_YELLOW "BotLua: failed loading brain for %s (%s)\n", characterName, err ? err : "unknown" );
+	lua_settop( L, 0 );
+	lua_getglobal( L, "q3now" );
+	lua_getfield( L, -1, "load_bot" );
+	lua_remove( L, -2 );
+	if ( !lua_isfunction( L, -1 ) ) {
+		Com_Printf( S_COLOR_YELLOW "BotLua: q3now.load_bot not available\n" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
 	}
+	lua_pushstring( L, characterName );
+	status = lua_pcall( L, 1, 1, 0 );
+	if ( status != 0 ) {
+		const char *err = lua_tostring( L, -1 );
+		Com_Printf( S_COLOR_YELLOW "BotLua: load_bot('%s') failed (%s)\n", characterName, err ? err : "unknown" );
+		lua_settop( L, 0 );
+		SV_Lua_FreeCharacter( handle );
+		return 0;
+	}
+	if ( !lua_istable( L, -1 ) ) {
+		Com_Printf( S_COLOR_YELLOW "BotLua: load_bot('%s') must return a table\n", characterName );
+		lua_settop( L, 0 );
+		SV_Lua_FreeCharacter( handle );
+		return 0;
+	}
+	botRef = luaL_ref( L, LUA_REGISTRYINDEX );
 
 	s_characters[handle].botRef = botRef;
 
@@ -1018,15 +1030,25 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	{
 		int botTableIndex = lua_gettop( L );
 
-		// chat_file comes from bot table's chats sub-table
-		lua_getfield( L, botTableIndex, "chats" );
-		if ( lua_istable( L, -1 ) ) {
-			int chatsIdx = lua_gettop( L );
-			SV_Lua_ProfileSetStringField( L, chatsIdx, "file",
-				s_characters[handle].stringValues[CHARACTERISTIC_CHAT_FILE],
-				sizeof( s_characters[handle].stringValues[CHARACTERISTIC_CHAT_FILE] ) );
+		// Determine chat file by VFS presence — no chats.file field in manifests.
+		// Use per-character chats if present, otherwise fall back to base default.
+		{
+			char chatPath[MAX_QPATH];
+			fileHandle_t fh;
+			Com_sprintf( chatPath, sizeof( chatPath ),
+				"characters/%s/bot/chats.lua", characterName );
+			if ( FS_FOpenFileRead( chatPath, &fh, qfalse ) > 0 ) {
+				FS_FCloseFile( fh );
+				Com_sprintf( s_characters[handle].stringValues[CHARACTERISTIC_CHAT_FILE],
+					sizeof( s_characters[handle].stringValues[CHARACTERISTIC_CHAT_FILE] ),
+					"characters/%s/bot/chats", characterName );
+			} else {
+				Q_strncpyz(
+					s_characters[handle].stringValues[CHARACTERISTIC_CHAT_FILE],
+					"characters/_archetypes/_base/bot/chats",
+					sizeof( s_characters[handle].stringValues[CHARACTERISTIC_CHAT_FILE] ) );
+			}
 		}
-		lua_pop( L, 1 );
 
 		SV_Lua_LoadCharacterFloatValues( L, botTableIndex, handle );
 		SV_Lua_CacheAttacks( L, botTableIndex, handle );
@@ -1037,8 +1059,6 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 }
 
 void SV_Lua_FreeCharacter( int characterHandle ) {
-	int i;
-
 	if ( characterHandle <= 0 || characterHandle >= SV_WB_MAX_CHARACTERS ) {
 		return;
 	}
@@ -1046,7 +1066,7 @@ void SV_Lua_FreeCharacter( int characterHandle ) {
 	SV_Lua_ReleaseCharacterProfileRef( characterHandle );
 	SV_Lua_ReleaseCharacterBotRef( characterHandle );
 
-	for ( i = 0; i < MAX_CLIENTS; i++ ) {
+	for ( int i = 0; i < MAX_CLIENTS; i++ ) {
 		if ( s_bots[i].bound && s_bots[i].characterHandle == characterHandle ) {
 			s_bots[i].bound = qfalse;
 			s_bots[i].characterHandle = 0;
@@ -1193,7 +1213,6 @@ float SV_Lua_BotProfileField( int clientNum, int field ) {
 // inventory.  No Lua state access at runtime — all resolution happened at load.
 int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponKey, int weaponKeySize ) {
 	int characterHandle;
-	int i;
 	int idx;
 	int weapon;
 
@@ -1225,7 +1244,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 				clientNum, s_characters[characterHandle].cachedAttackCount );
 		}
 
-		for ( i = 0; i < s_characters[characterHandle].cachedAttackCount; i++ ) {
+		for ( int i = 0; i < s_characters[characterHandle].cachedAttackCount; i++ ) {
 			idx    = s_characters[characterHandle].cachedAttacks[i].attackIndex;
 			weapon = bg_attacklist[idx].weapon;
 
@@ -1306,7 +1325,6 @@ float SV_Lua_BotGetAttackAimHeight( int clientNum, int weaponNum ) {
 int SV_Lua_BotEvalItem( int clientNum, const wbItemEvalCtx_t *ctx ) {
 	lua_State *L;
 	int characterHandle;
-	int i;
 	int n;
 	const char *shortname;
 
@@ -1347,7 +1365,7 @@ int SV_Lua_BotEvalItem( int clientNum, const wbItemEvalCtx_t *ctx ) {
 		return 0;
 	}
 
-	for ( i = 1; i <= n; i++ ) {
+	for ( int i = 1; i <= n; i++ ) {
 		lua_rawgeti( L, -1, i );
 		if ( lua_type( L, -1 ) == LUA_TSTRING ) {
 			shortname = lua_tostring( L, -1 );
@@ -1864,6 +1882,66 @@ void SV_BotVerifyCharacter_f( void ) {
 		Com_Printf( "^1Fix %d mismatch(es) in modfiles/characters/%s/main.lua\n\n",
 		            mismatchCount, charName );
 	}
+}
+
+// Eagerly load all characters from characters/ at Lua init time so that
+// SV_Lua_GetCharacterDisplayName (and future field lookups) are pure registry
+// reads — no per-spawn Lua calls.
+static void SV_Characters_Preload( void ) {
+	char **dirs;
+	int numDirs, i, loaded = 0;
+
+	dirs = FS_ListDirectories( "characters", &numDirs );
+	if ( !dirs ) {
+		Com_Printf( "BotLua: no character directories found under characters/, skipping preload\n" );
+		return;
+	}
+
+	for ( i = 0; i < numDirs; i++ ) {
+		if ( dirs[i][0] == '_' ) continue;
+
+		if ( SV_Lua_LoadCharacter( dirs[i], 0.5f ) )
+			loaded++;
+	}
+	FS_FreeFileList( dirs );
+
+	Com_Printf( "BotLua: preloaded %d character(s)\n", loaded );
+}
+
+qboolean SV_Lua_GetCharacterDisplayName( const char *name, char *out, int outSize ) {
+	int handle;
+
+	out[0] = '\0';
+
+	handle = SV_Lua_FindCharacterHandle( name );
+	if ( !handle || !s_characters[handle].displayName[0] )
+		return qfalse;
+
+	Q_strncpyz( out, s_characters[handle].displayName, outSize );
+	return qtrue;
+}
+
+int SV_Lua_GetCharacterCount( void ) {
+	int i, count = 0;
+	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
+		if ( s_characters[i].inuse )
+			count++;
+	}
+	return count;
+}
+
+qboolean SV_Lua_GetCharacterAt( int index, char *out, int outSize ) {
+	int i, seen = 0;
+	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
+		if ( !s_characters[i].inuse ) continue;
+		if ( seen == index ) {
+			Q_strncpyz( out, s_characters[i].name, outSize );
+			return qtrue;
+		}
+		seen++;
+	}
+	out[0] = '\0';
+	return qfalse;
 }
 
 // bot_debug_weapons <botname|off>

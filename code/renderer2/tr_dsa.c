@@ -37,11 +37,9 @@ glDsaState;
 
 void GL_BindNullTextures(void)
 {
-	int i;
-
 	if (glRefConfig.directStateAccess)
 	{
-		for (i = 0; i < NUM_TEXTURE_BUNDLES; i++)
+		for (int i = 0; i < NUM_TEXTURE_BUNDLES; i++)
 		{
 			qglBindMultiTextureEXT(GL_TEXTURE0 + i, GL_TEXTURE_2D, 0);
 			glDsaState.textures[i] = 0;
@@ -49,7 +47,7 @@ void GL_BindNullTextures(void)
 	}
 	else
 	{
-		for (i = 0; i < NUM_TEXTURE_BUNDLES; i++)
+		for (int i = 0; i < NUM_TEXTURE_BUNDLES; i++)
 		{
 			qglActiveTexture(GL_TEXTURE0 + i);
 			qglBindTexture(GL_TEXTURE_2D, 0);

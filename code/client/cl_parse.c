@@ -88,16 +88,13 @@ CL_ParsePacketEntities
 ==================
 */
 static void CL_ParsePacketEntities( msg_t *msg, const clSnapshot_t *oldframe, clSnapshot_t *newframe ) {
-	const entityState_t	*oldstate;
-	int	newnum;
-	int	oldindex, oldnum;
-
 	newframe->parseEntitiesNum = cl.parseEntitiesNum;
 	newframe->numEntities = 0;
 
 	// delta from the entities present in oldframe
-	oldindex = 0;
-	oldstate = NULL;
+	int	oldindex = 0;
+	int	oldnum;
+	const entityState_t	*oldstate = NULL;
 	if ( !oldframe ) {
 		oldnum = MAX_GENTITIES+1;
 	} else {
@@ -112,7 +109,7 @@ static void CL_ParsePacketEntities( msg_t *msg, const clSnapshot_t *oldframe, cl
 
 	while ( 1 ) {
 		// read the entity index number
-		newnum = MSG_ReadEntitynum( msg );
+		int	newnum = MSG_ReadEntitynum( msg );
 
 		if ( newnum < 0 ) {
 			Com_Error( ERR_DROP, "CL_ParsePacketEntities: end of message" );
@@ -202,9 +199,6 @@ for any reason, no changes to the state will be made at all.
 static void CL_ParseSnapshot( msg_t *msg ) {
 	const clSnapshot_t *old;
 	clSnapshot_t	newSnap;
-	int			deltaNum;
-	int			oldMessageNum;
-	int			i, n, packetNum;
 
 	// get the reliable sequence acknowledge number
 	// NOTE: now sent with all server to client messages
@@ -226,7 +220,7 @@ static void CL_ParseSnapshot( msg_t *msg ) {
 
 	newSnap.messageNum = clc.serverMessageSequence;
 
-	deltaNum = MSG_ReadByte( msg );
+	int			deltaNum = MSG_ReadByte( msg );
 	if ( !deltaNum ) {
 		newSnap.deltaNum = -1;
 	} else {
@@ -291,13 +285,13 @@ static void CL_ParseSnapshot( msg_t *msg ) {
 	// received and this one, so if there was a dropped packet
 	// it won't look like something valid to delta from next
 	// time we wrap around in the buffer
-	oldMessageNum = cl.snap.messageNum + 1;
+	int			oldMessageNum = cl.snap.messageNum + 1;
 
 	if ( newSnap.messageNum - oldMessageNum >= PACKET_BACKUP ) {
 		oldMessageNum = newSnap.messageNum - ( PACKET_BACKUP - 1 );
 	}
 
-	for ( i = 0, n = newSnap.messageNum - oldMessageNum; i < n; i++ ) {
+	for ( int i = 0, n = newSnap.messageNum - oldMessageNum; i < n; i++ ) {
 		cl.snapshots[ ( oldMessageNum + i ) & PACKET_MASK ].valid = qfalse;
 	}
 
@@ -305,8 +299,8 @@ static void CL_ParseSnapshot( msg_t *msg ) {
 	cl.snap = newSnap;
 	cl.snap.ping = 999;
 	// calculate ping time
-	for ( i = 0 ; i < PACKET_BACKUP ; i++ ) {
-		packetNum = ( clc.netchan.outgoingSequence - 1 - i ) & PACKET_MASK;
+	for ( int i = 0 ; i < PACKET_BACKUP ; i++ ) {
+		int packetNum = ( clc.netchan.outgoingSequence - 1 - i ) & PACKET_MASK;
 		if ( cl.snap.ps.commandTime - cl.outPackets[packetNum].p_serverTime >= 0 ) {
 			cl.snap.ping = cls.realtime - cl.outPackets[ packetNum ].p_realtime;
 			break;
@@ -474,10 +468,7 @@ CL_ParseServerInfo
 */
 static void CL_ParseServerInfo( void )
 {
-	const char *serverInfo;
-	size_t	len;
-
-	serverInfo = cl.gameState.stringData
+	const char *serverInfo = cl.gameState.stringData
 		+ cl.gameState.stringOffsets[ CS_SERVERINFO ];
 
 	clc.sv_allowDownload = atoi(Info_ValueForKey(serverInfo,
@@ -487,7 +478,7 @@ static void CL_ParseServerInfo( void )
 		sizeof(clc.sv_dlURL));
 
 	/* remove ending slash in URLs */
-	len = strlen( clc.sv_dlURL );
+	size_t	len = strlen( clc.sv_dlURL );
 	if ( len > 0 &&  clc.sv_dlURL[len-1] == '/' )
 		clc.sv_dlURL[len-1] = '\0';
 }
@@ -499,15 +490,7 @@ CL_ParseGamestate
 ==================
 */
 static void CL_ParseGamestate( msg_t *msg ) {
-	int				i;
-	entityState_t	*es;
-	int				newnum;
 	entityState_t	nullstate;
-	int				cmd;
-	const char		*s;
-	char			oldGame[ MAX_QPATH ];
-	char			reconnectArgs[ MAX_CVAR_VALUE_STRING ];
-	qboolean		gamedirModified;
 
 	Con_Close();
 
@@ -522,8 +505,8 @@ static void CL_ParseGamestate( msg_t *msg ) {
 	CL_ClearState();
 
 	// all configstring updates received before new gamestate must be discarded
-	for ( i = 0; i < MAX_RELIABLE_COMMANDS; i++ ) {
-		s = clc.serverCommands[ i ];
+	for ( int i = 0; i < MAX_RELIABLE_COMMANDS; i++ ) {
+		const char *s = clc.serverCommands[ i ];
 		if ( !strncmp( s, "cs ", 3 ) || !strncmp( s, "bcs0 ", 5 ) || !strncmp( s, "bcs1 ", 5 ) || !strncmp( s, "bcs2 ", 5 ) ) {
 			clc.serverCommandsIgnore[ i ] = qtrue;
 		}
@@ -535,22 +518,20 @@ static void CL_ParseGamestate( msg_t *msg ) {
 	// parse all the configstrings and baselines
 	cl.gameState.dataCount = 1;	// leave a 0 at the beginning for uninitialized configstrings
 	while ( 1 ) {
-		cmd = MSG_ReadByte( msg );
+		int cmd = MSG_ReadByte( msg );
 
 		if ( cmd == svc_EOF ) {
 			break;
 		}
 
 		if ( cmd == svc_configstring ) {
-			int		len;
-
-			i = MSG_ReadShort( msg );
+			int		i = MSG_ReadShort( msg );
 			if ( i < 0 || i >= MAX_CONFIGSTRINGS ) {
 				Com_Error( ERR_DROP, "%s: configstring > MAX_CONFIGSTRINGS", __func__ );
 			}
 
-			s = MSG_ReadBigString( msg );
-			len = strlen( s );
+			const char *s = MSG_ReadBigString( msg );
+			int		len = strlen( s );
 
 			if ( len + 1 + cl.gameState.dataCount > MAX_GAMESTATE_CHARS ) {
 				Com_Error( ERR_DROP, "%s: MAX_GAMESTATE_CHARS exceeded: %i", __func__,
@@ -562,7 +543,7 @@ static void CL_ParseGamestate( msg_t *msg ) {
 			memcpy( cl.gameState.stringData + cl.gameState.dataCount, s, len + 1 );
 			cl.gameState.dataCount += len + 1;
 		} else if ( cmd == svc_baseline ) {
-			newnum = MSG_ReadEntitynum( msg );
+			int			newnum = MSG_ReadEntitynum( msg );
 
 			if ( newnum < 0 ) {
 				Com_Error( ERR_DROP, "%s: end of message", __func__ );
@@ -572,7 +553,7 @@ static void CL_ParseGamestate( msg_t *msg ) {
 				Com_Error( ERR_DROP, "%s: baseline number out of range: %i", __func__, newnum );
 			}
 
-			es = &cl.entityBaselines[ newnum ];
+			entityState_t *es = &cl.entityBaselines[ newnum ];
 			MSG_ReadDeltaEntity( msg, &nullstate, es, newnum );
 			cl.baselineUsed[ newnum ] = 1;
 		} else {
@@ -587,6 +568,7 @@ static void CL_ParseGamestate( msg_t *msg ) {
 	clc.checksumFeed = MSG_ReadLong( msg );
 
 	// save old gamedir
+	char			oldGame[ MAX_QPATH ];
 	Cvar_VariableStringBuffer( "fs_game", oldGame, sizeof( oldGame ) );
 
 	// parse useful values out of CS_SERVERINFO
@@ -602,7 +584,7 @@ static void CL_ParseGamestate( msg_t *msg ) {
 		}
 	}
 
-	gamedirModified = ( Cvar_Flags( "fs_game" ) & CVAR_MODIFIED ) ? qtrue : qfalse;
+	qboolean		gamedirModified = ( Cvar_Flags( "fs_game" ) & CVAR_MODIFIED ) ? qtrue : qfalse;
 
 	if ( !cl_oldGameSet && gamedirModified ) {
 		cl_oldGameSet = qtrue;
@@ -614,6 +596,7 @@ static void CL_ParseGamestate( msg_t *msg ) {
 
 	// preserve \cl_reconnectAgrs between online game directory changes
 	// so after mod switch \reconnect will not restore old value from config but use new one
+	char			reconnectArgs[ MAX_CVAR_VALUE_STRING ];
 	if ( gamedirModified ) {
 		Cvar_VariableStringBuffer( "cl_reconnectArgs", reconnectArgs, sizeof( reconnectArgs ) );
 	}
@@ -866,7 +849,6 @@ static int CL_WiredNetReadFloat( const byte *buf, int len, int *offset, float *o
 
 static int CL_WiredNetReadTrajectory( const byte *buf, int len, int *offset, trajectory_t *tr )
 {
-	int i;
 	int trType;
 	if ( !CL_WiredNetReadS32( buf, len, offset, &trType ) ||
 		!CL_WiredNetReadS32( buf, len, offset, &tr->trTime ) ||
@@ -874,12 +856,12 @@ static int CL_WiredNetReadTrajectory( const byte *buf, int len, int *offset, tra
 		return 0;
 	}
 	tr->trType = (trType_t)trType;
-	for ( i = 0; i < 3; i++ ) {
+	for ( int i = 0; i < 3; i++ ) {
 		if ( !CL_WiredNetReadFloat( buf, len, offset, &tr->trBase[i] ) ) {
 			return 0;
 		}
 	}
-	for ( i = 0; i < 3; i++ ) {
+	for ( int i = 0; i < 3; i++ ) {
 		if ( !CL_WiredNetReadFloat( buf, len, offset, &tr->trDelta[i] ) ) {
 			return 0;
 		}
@@ -889,7 +871,6 @@ static int CL_WiredNetReadTrajectory( const byte *buf, int len, int *offset, tra
 
 static int CL_WiredNetReadEntityState( const byte *buf, int len, int *offset, entityState_t *es )
 {
-	int i;
 	if ( !CL_WiredNetReadS32( buf, len, offset, &es->number ) ||
 		!CL_WiredNetReadS32( buf, len, offset, &es->eType ) ||
 		!CL_WiredNetReadS32( buf, len, offset, &es->eFlags ) ||
@@ -899,10 +880,10 @@ static int CL_WiredNetReadEntityState( const byte *buf, int len, int *offset, en
 		!CL_WiredNetReadS32( buf, len, offset, &es->time2 ) ) {
 		return 0;
 	}
-	for ( i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->origin[i] ) ) return 0;
-	for ( i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->origin2[i] ) ) return 0;
-	for ( i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->angles[i] ) ) return 0;
-	for ( i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->angles2[i] ) ) return 0;
+	for ( int i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->origin[i] ) ) return 0;
+	for ( int i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->origin2[i] ) ) return 0;
+	for ( int i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->angles[i] ) ) return 0;
+	for ( int i = 0; i < 3; i++ ) if ( !CL_WiredNetReadFloat( buf, len, offset, &es->angles2[i] ) ) return 0;
 	if ( !CL_WiredNetReadS32( buf, len, offset, &es->otherEntityNum ) ||
 		!CL_WiredNetReadS32( buf, len, offset, &es->otherEntityNum2 ) ||
 		!CL_WiredNetReadS32( buf, len, offset, &es->groundEntityNum ) ||
@@ -927,14 +908,12 @@ static int CL_WiredNetReadEntityState( const byte *buf, int len, int *offset, en
 
 static void CL_WiredNetBootstrapResetState( void )
 {
-	int i;
-	const char *s;
 	Con_Close();
 	clc.connectPacketCount = 0;
 	Com_ClearLastError();
 	CL_ClearState();
-	for ( i = 0; i < MAX_RELIABLE_COMMANDS; i++ ) {
-		s = clc.serverCommands[i];
+	for ( int i = 0; i < MAX_RELIABLE_COMMANDS; i++ ) {
+		const char *s = clc.serverCommands[i];
 		if ( !strncmp( s, "cs ", 3 ) || !strncmp( s, "bcs0 ", 5 ) ||
 			!strncmp( s, "bcs1 ", 5 ) || !strncmp( s, "bcs2 ", 5 ) ) {
 			clc.serverCommandsIgnore[i] = qtrue;
@@ -1194,12 +1173,8 @@ when it transitions a snapshot
 =====================
 */
 static void CL_ParseCommandString( msg_t *msg ) {
-	const char *s;
-	int		seq;
-	int		index;
-
-	seq = MSG_ReadLong( msg );
-	s = MSG_ReadString( msg );
+	int		seq = MSG_ReadLong( msg );
+	const char *s = MSG_ReadString( msg );
 
 	if ( cl_shownet->integer >= 3 )
 		Com_Printf( " %3i(%3i) %s\n", seq, clc.serverCommandSequence, s );
@@ -1210,7 +1185,7 @@ static void CL_ParseCommandString( msg_t *msg ) {
 	}
 	clc.serverCommandSequence = seq;
 
-	index = seq & (MAX_RELIABLE_COMMANDS-1);
+	int		index = seq & (MAX_RELIABLE_COMMANDS-1);
 	Q_strncpyz( clc.serverCommands[ index ], s, sizeof( clc.serverCommands[ index ] ) );
 	clc.serverCommandsIgnore[ index ] = qfalse;
 
@@ -1243,8 +1218,6 @@ CL_ParseServerMessage
 =====================
 */
 void CL_ParseServerMessage( msg_t *msg ) {
-	int cmd;
-
 	if ( cl_shownet->integer == 1 ) {
 		Com_Printf( "%i ",msg->cursize );
 	} else if ( cl_shownet->integer >= 2 ) {
@@ -1293,7 +1266,7 @@ void CL_ParseServerMessage( msg_t *msg ) {
 			break;
 		}
 
-		cmd = MSG_ReadByte( msg );
+		int cmd = MSG_ReadByte( msg );
 
 		/* In Huffman mode, MSG_ReadByte returns -1 when the post-decode
 		 * readcount crosses cursize — even when the symbol decoded
@@ -1513,9 +1486,8 @@ void CL_CheckSnapshotDatagrams( void )
 				all_mask = ( frag_total == 8 ) ? 0xFF : (uint8_t)( ( 1 << frag_total ) - 1 );
 				if ( s_snap_reassembly.frag_received_mask == all_mask ) {
 					int   total_len = 0;
-					int   i;
 					msg_t msg;
-					for ( i = 0; i < (int)frag_total; i++ )
+					for ( int i = 0; i < (int)frag_total; i++ )
 						total_len += s_snap_reassembly.frag_sizes[i];
 					clc.serverMessageSequence = (int)s_snap_reassembly.wn_sequence;
 					WN_DBG( "snapshot recv: wn_seq=%u delta_base=%u (reassembled %d bytes) → serverMessageSequence=%d\n",

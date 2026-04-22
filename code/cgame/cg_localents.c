@@ -39,13 +39,11 @@ This is called at startup and for tournement restarts
 ===================
 */
 void	CG_InitLocalEntities( void ) {
-	int		i;
-
 	memset( cg_localEntities, 0, sizeof( cg_localEntities ) );
 	cg_activeLocalEntities.next = &cg_activeLocalEntities;
 	cg_activeLocalEntities.prev = &cg_activeLocalEntities;
 	cg_freeLocalEntities = cg_localEntities;
-	for ( i = 0 ; i < MAX_LOCAL_ENTITIES - 1 ; i++ ) {
+	for ( int i = 0 ; i < MAX_LOCAL_ENTITIES - 1 ; i++ ) {
 		cg_localEntities[i].next = &cg_localEntities[i+1];
 	}
 }
@@ -124,6 +122,10 @@ void CG_BloodTrail( localEntity_t *le ) {
 	int		step;
 	vec3_t	newOrigin;
 	localEntity_t	*blood;
+
+#if FEAT_SCREENSHOT_TOOLS
+	if ( cg.stopTime ) return;
+#endif
 
 	step = 150;
 	t = step * ( (cg.time - cg.frametime + step ) / step );
@@ -381,6 +383,9 @@ static void CG_AddMoveScaleFade( localEntity_t *le ) {
 	VectorSubtract( re->origin, cg.refdef.vieworg, delta );
 	len = VectorLength( delta );
 	if ( len < le->radius ) {
+#if FEAT_SCREENSHOT_TOOLS
+		if ( cg.stopTime ) return;
+#endif
 		CG_FreeLocalEntity( le );
 		return;
 	}
@@ -417,6 +422,9 @@ static void CG_AddScaleFade( localEntity_t *le ) {
 	VectorSubtract( re->origin, cg.refdef.vieworg, delta );
 	len = VectorLength( delta );
 	if ( len < le->radius ) {
+#if FEAT_SCREENSHOT_TOOLS
+		if ( cg.stopTime ) return;
+#endif
 		CG_FreeLocalEntity( le );
 		return;
 	}
@@ -676,9 +684,7 @@ CG_AddInvulnerabilityJuiced
 ===================
 */
 void CG_AddInvulnerabilityJuiced( localEntity_t *le ) {
-	int t;
-
-	t = cg.time - le->startTime;
+	int t = cg.time - le->startTime;
 	if ( t > 3000 ) {
 		le->refEntity.axis[0][0] = (float) 1.0 + 0.3 * (t - 3000) / 2000;
 		le->refEntity.axis[1][1] = (float) 1.0 + 0.3 * (t - 3000) / 2000;
@@ -761,7 +767,7 @@ void CG_AddScorePlum( localEntity_t *le ) {
 
 	if ( score < 0 ) {
 		po->color[0] = 1.0f; po->color[1] = 0.067f; po->color[2] = 0.067f;
-		Com_sprintf( po->text, sizeof( po->text ), "%d", score );
+		Com_sprintf( po->text, sizeof( po->text ), "%d score", score );
 	} else {
 		if ( score >= 50 ) {
 			po->color[0] = 1.0f; po->color[1] = 0.0f; po->color[2] = 1.0f;
@@ -774,7 +780,8 @@ void CG_AddScorePlum( localEntity_t *le ) {
 		} else {
 			po->color[0] = po->color[1] = po->color[2] = 1.0f;
 		}
-		Com_sprintf( po->text, sizeof( po->text ), "+%d", score );
+
+		Com_sprintf( po->text, sizeof( po->text ), "+%d score", score );
 	}
 }
 
@@ -835,10 +842,9 @@ Called from CG_Draw2D after trap_R_RenderScene.
 ===================
 */
 void CG_DrawPlumOverlays( void ) {
-	int				i;
 	plumOverlay_t	*po;
 
-	for ( i = 0; i < cg_numPlumOverlays; i++ ) {
+	for ( int i = 0; i < cg_numPlumOverlays; i++ ) {
 		po = &cg_plumOverlays[i];
 		trap_R_DrawTextNorm( po->text,
 			po->x * NORM_HSCALE, po->y * NORM_VSCALE,

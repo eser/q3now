@@ -119,7 +119,6 @@ RB_CalcDeformVertexes
 */
 static void RB_CalcDeformVertexes( deformStage_t *ds )
 {
-	int i;
 	vec3_t	offset;
 	float	scale;
 	float	*xyz = ( float * ) tess.xyz;
@@ -130,7 +129,7 @@ static void RB_CalcDeformVertexes( deformStage_t *ds )
 	{
 		scale = EvalWaveForm( &ds->deformationWave );
 
-		for ( i = 0; i < tess.numVertexes; i++, xyz += 4, normal += 4 )
+		for ( int i = 0; i < tess.numVertexes; i++, xyz += 4, normal += 4 )
 		{
 			R_VaoUnpackNormal(offset, normal);
 			
@@ -143,7 +142,7 @@ static void RB_CalcDeformVertexes( deformStage_t *ds )
 	{
 		table = TableForFunc( ds->deformationWave.func );
 
-		for ( i = 0; i < tess.numVertexes; i++, xyz += 4, normal += 4 )
+		for ( int i = 0; i < tess.numVertexes; i++, xyz += 4, normal += 4 )
 		{
 			float off = ( xyz[0] + xyz[1] + xyz[2] ) * ds->deformationSpread;
 
@@ -169,12 +168,11 @@ Wiggle the normals for wavy environment mapping
 =========================
 */
 static void RB_CalcDeformNormals( deformStage_t *ds ) {
-	int i;
 	float	scale;
 	float	*xyz = ( float * ) tess.xyz;
 	int16_t *normal = tess.normal[0];
 
-	for ( i = 0; i < tess.numVertexes; i++, xyz += 4, normal += 4 ) {
+	for ( int i = 0; i < tess.numVertexes; i++, xyz += 4, normal += 4 ) {
 		vec3_t fNormal;
 
 		R_VaoUnpackNormal(fNormal, normal);
@@ -207,7 +205,6 @@ RB_CalcBulgeVertexes
 ========================
 */
 static void RB_CalcBulgeVertexes( deformStage_t *ds ) {
-	int i;
 	const float *st = ( const float * ) tess.texCoords[0];
 	float		*xyz = ( float * ) tess.xyz;
 	int16_t	*normal = tess.normal[0];
@@ -215,7 +212,7 @@ static void RB_CalcBulgeVertexes( deformStage_t *ds ) {
 
 	now = backEnd.refdef.time * ds->bulgeSpeed * 0.001;
 
-	for ( i = 0; i < tess.numVertexes; i++, xyz += 4, st += 2, normal += 4 ) {
+	for ( int i = 0; i < tess.numVertexes; i++, xyz += 4, st += 2, normal += 4 ) {
 		int64_t off;
 		float scale;
 		vec3_t fNormal;

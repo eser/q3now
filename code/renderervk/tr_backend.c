@@ -1224,7 +1224,6 @@ RB_RotatedPic
 static const void *RB_RotatedPic( const void *data ) {
 	const rotatedPicCommand_t *cmd = (const rotatedPicCommand_t *)data;
 	shader_t *shader;
-	int numVerts, numIndexes;
 	float cx, cy, hw, hh;
 	float ang, c, s;
 
@@ -1258,8 +1257,8 @@ static const void *RB_RotatedPic( const void *data ) {
 	tess.surfType = SF_TRIANGLES;
 #endif
 
-	numIndexes = tess.numIndexes;
-	numVerts = tess.numVertexes;
+	int numIndexes = tess.numIndexes;
+	int numVerts = tess.numVertexes;
 
 	tess.numVertexes += 4;
 	tess.numIndexes += 6;
@@ -1370,7 +1369,6 @@ RB_DrawLine
 static const void *RB_DrawLine( const void *data ) {
 	const drawLineCommand_t	*cmd;
 	shader_t *shader;
-	int		numVerts, numIndexes;
 	float	dx, dy, len, px, py, halfWidth;
 
 	cmd = (const drawLineCommand_t *)data;
@@ -1429,8 +1427,8 @@ static const void *RB_DrawLine( const void *data ) {
 	tess.surfType = SF_TRIANGLES;
 #endif
 
-	numIndexes = tess.numIndexes;
-	numVerts = tess.numVertexes;
+	int numIndexes = tess.numIndexes;
+	int numVerts = tess.numVertexes;
 
 	tess.numVertexes += 4;
 	tess.numIndexes += 6;
@@ -1482,7 +1480,6 @@ static const void *RB_DrawLine( const void *data ) {
 static void RB_LightingPass( void )
 {
 	dlight_t	*dl;
-	int	i;
 
 #ifdef USE_VBO
 	//VBO_Flush();
@@ -1491,7 +1488,7 @@ static void RB_LightingPass( void )
 
 	tess.dlightPass = qtrue;
 
-	for ( i = 0; i < backEnd.viewParms.num_dlights; i++ )
+	for ( int i = 0; i < backEnd.viewParms.num_dlights; i++ )
 	{
 		dl = &backEnd.viewParms.dlights[i];
 		if ( dl->head )
@@ -1534,7 +1531,6 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 	vec3_t p;
 	vec3_t q;
 	vec3_t n;
-	int i;
 
 	if ( numPoints < 3 ) {
 		return;
@@ -1544,7 +1540,7 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 	transform_to_eye_space( &points[3], pb );
 	VectorSubtract( pb, pa, p );
 
-	for ( i = 2; i < numPoints; i++ ) {
+	for ( int i = 2; i < numPoints; i++ ) {
 		transform_to_eye_space( &points[3*i], pb );
 		VectorSubtract( pb, pa, q );
 		CrossProduct( q, p, n );
@@ -1559,7 +1555,7 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 
 #ifdef USE_VULKAN
 	// Solid shade.
-	for (i = 0; i < numPoints; i++) {
+	for (int i = 0; i < numPoints; i++) {
 		VectorCopy(&points[3*i], tess.xyz[i]);
 
 		tess.svars.colors[0][i].rgba[0] = (color&1) ? 255 : 0;
@@ -1570,7 +1566,7 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 	tess.numVertexes = numPoints;
 
 	tess.numIndexes = 0;
-	for (i = 1; i < numPoints - 1; i++) {
+	for (int i = 1; i < numPoints - 1; i++) {
 		tess.indexes[tess.numIndexes + 0] = 0;
 		tess.indexes[tess.numIndexes + 1] = i;
 		tess.indexes[tess.numIndexes + 2] = i + 1;
@@ -1585,7 +1581,7 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 	// Outline.
 	memset( tess.svars.colors[0], tr.identityLightByte, numPoints * 2 * sizeof( color4ub_t ) );
 
-	for ( i = 0; i < numPoints; i++ ) {
+	for ( int i = 0; i < numPoints; i++ ) {
 		VectorCopy( &points[3*i], tess.xyz[2*i] );
 		VectorCopy( &points[3*((i + 1) % numPoints)], tess.xyz[2*i + 1] );
 	}
@@ -1669,8 +1665,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 	// GPU rail trail draw (after scene geometry, before flares)
 	if ( vk.computeAvailable && vk.numRailDispatches > 0 ) {
-		int rt;
-		for ( rt = 0; rt < vk.numRailDispatches; rt++ ) {
+		for ( int rt = 0; rt < vk.numRailDispatches; rt++ ) {
 			RB_DrawRailTrailGPU( vk.railDispatch[rt].numSegments );
 		}
 		vk.numRailDispatches = 0; // clear after draw
@@ -1769,8 +1764,6 @@ Also called by RE_EndRegistration
 #ifdef USE_VULKAN
 void RB_ShowImages( void )
 {
-	int i;
-
 	RB_SetGL2D();
 
 	// draw full-screen quad
@@ -1811,7 +1804,7 @@ void RB_ShowImages( void )
 	vk_bind_geometry( TESS_XYZ | TESS_RGBA0 | TESS_ST0 );
 	vk_draw_geometry( DEPTH_RANGE_NORMAL, qfalse );
 
-	for ( i = 0; i < tr.numImages; i++ ) {
+	for ( int i = 0; i < tr.numImages; i++ ) {
 		image_t* image = tr.images[i];
 
 		float w = glConfig.vidWidth / 20;

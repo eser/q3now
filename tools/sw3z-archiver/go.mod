@@ -1,4 +1,4 @@
-module github.com/eser/qq3now/tools/sw3z-archiver
+module github.com/eser/q3now/tools/sw3z-archiver
 
 go 1.26.1
 

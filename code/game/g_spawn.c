@@ -152,6 +152,9 @@ void SP_target_kill (gentity_t *ent);
 void SP_target_position (gentity_t *ent);
 void SP_target_location (gentity_t *ent);
 void SP_target_push (gentity_t *ent);
+#if FEAT_EARTHQUAKE_SYSTEM
+void SP_target_earthquake (gentity_t *ent);
+#endif
 
 void SP_light (gentity_t *self);
 void SP_info_null (gentity_t *self);
@@ -228,6 +231,9 @@ spawn_t	spawns[] = {
 	{"target_position", SP_target_position},
 	{"target_location", SP_target_location},
 	{"target_push", SP_target_push},
+#if FEAT_EARTHQUAKE_SYSTEM
+	{"target_earthquake", SP_target_earthquake},
+#endif
 
 	{"light", SP_light},
 	{"path_corner", SP_path_corner},
@@ -276,9 +282,7 @@ qboolean G_CallSpawn( gentity_t *ent ) {
 
 	// check item spawn functions
 	for ( item=bg_itemlist+1 ; item->classnames[0] ; item++ ) {
-        int i;
-
-        for (i = 0; i < MAX_ITEM_CLASSNAMES; i++) {
+        for (int i = 0; i < MAX_ITEM_CLASSNAMES; i++) {
             if (item->classnames[i] && !strcmp(item->classnames[i], ent->classname)) {
                 G_SpawnItem(ent, item);
                 return qtrue;
@@ -626,13 +630,21 @@ void SP_worldspawn( void ) {
 	trap_SetConfigstring( CS_MOTD, g_motd.string );		// message of the day
 
 	G_SpawnString( "gravity", "800", &s );
-	trap_Cvar_Set( "g_gravity", s );
+	trap_Cvar_Set( "g_envGravity", s );
+
+	G_SpawnString( "weather", "", &s );
+	trap_Cvar_Set( "g_envWeather", s );
+
+	G_SpawnString( "temperature", "20", &s );
+	trap_Cvar_Set( "g_envTemperature", s );
 
 	G_SpawnString( "enableDust", "0", &s );
-	trap_Cvar_Set( "g_enableDust", s );
+	trap_Cvar_Set( "g_envGroundDusty", s );
 
 	G_SpawnString( "enableBreath", "0", &s );
-	trap_Cvar_Set( "g_enableBreath", s );
+	if ( atoi ( s ) ) {
+		trap_Cvar_Set( "g_envTemperature", "0" );
+	}
 
 	g_entities[ENTITYNUM_WORLD].s.number = ENTITYNUM_WORLD;
 	g_entities[ENTITYNUM_WORLD].r.ownerNum = ENTITYNUM_NONE;

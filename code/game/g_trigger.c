@@ -177,7 +177,7 @@ void AimAtTarget( gentity_t *self ) {
 	}
 
 	height = ent->s.origin[2] - origin[2];
-	gravity = g_gravity.value;
+	gravity = g_envGravity.value;
 	time = sqrt( height / ( .5 * gravity ) );
 	if ( !time ) {
 		G_FreeEntity( self );
@@ -299,8 +299,7 @@ void trigger_teleporter_touch (gentity_t *self, gentity_t *other, trace_t *trace
 
 void G_SetTeleporterDestinations(void) {
 	gentity_t *ent;
-	int i;
-	for (i=0 ; i < level.num_entities ; ++i ) {
+	for (int i=0 ; i < level.num_entities ; ++i ) {
 		gentity_t	*target = NULL;
 		qboolean	unique = qtrue;
 		gentity_t	*unique_target = NULL;

@@ -2449,9 +2449,7 @@ static int CollapseMultitexture( unsigned int st0bits, shaderStage_t *st0, shade
 
 static int tcmodWeight2( const shaderStage_t* st )
 {
-	int i;
-
-	for ( i = 0; i < st->bundle[0].numTexMods; i++ ) {
+	for ( int i = 0; i < st->bundle[0].numTexMods; i++ ) {
 		switch ( st->bundle[0].texMods[i].type ) {
 		case TMOD_NONE:
 		case TMOD_SCALE:
@@ -2668,7 +2666,6 @@ static void FixRenderCommandList( int newShader ) {
 				}
 			case RC_DRAW_SURFS:
 				{
-				int i;
 				drawSurf_t	*drawSurf;
 				shader_t	*sh;
 				int			fogNum;
@@ -2677,7 +2674,8 @@ static void FixRenderCommandList( int newShader ) {
 				int			sortedIndex;
 				const drawSurfsCommand_t *ds_cmd =  (const drawSurfsCommand_t *)curCmd;
 
-				for ( i = 0, drawSurf = ds_cmd->drawSurfs; i < ds_cmd->numDrawSurfs; i++, drawSurf++ ) {
+				drawSurf = ds_cmd->drawSurfs;
+				for ( int i = 0; i < ds_cmd->numDrawSurfs; i++, drawSurf++ ) {
 					R_DecomposeSort( drawSurf->sort, &entityNum, &sh, &fogNum, &dlightMap );
 					sortedIndex = (( drawSurf->sort >> QSORT_SHADERNUM_SHIFT ) & SHADERNUM_MASK);
 					if ( sortedIndex >= newShader ) {
@@ -3107,8 +3105,6 @@ InitShader
 ===============
 */
 static void InitShader( const char *name, int lightmapIndex ) {
-	int i;
-
 	// clear the global shader
 	memset( &shader, 0, sizeof( shader ) );
 	memset( &stages, 0, sizeof( stages ) );
@@ -3121,7 +3117,7 @@ static void InitShader( const char *name, int lightmapIndex ) {
 	// otherwise they will fail and cause massive duplication
 	shader.lightmapSearchIndex = shader.lightmapIndex;
 
-	for ( i = 0 ; i < MAX_SHADER_STAGES ; i++ ) {
+	for ( int i = 0 ; i < MAX_SHADER_STAGES ; i++ ) {
 		stages[i].bundle[0].texMods = texMods[i];
 	}
 
@@ -4047,7 +4043,6 @@ shader_t *R_FindShader( const char *name, int lightmapIndex, qboolean mipRawImag
 
 		image = R_FindImageFile( name, flags );
 		if ( !image ) {
-			ri.Printf( PRINT_DEVELOPER, "Couldn't find image file for shader %s\n", name );
 			shader.defaultShader = qtrue;
 			return FinishShader();
 		}
@@ -4327,13 +4322,12 @@ static int loadShaderBuffers( char **shaderFiles, const int numShaderFiles, char
 	const char *p, *token;
 	long summand, sum = 0;
 	int shaderLine;
-	int i;
 	const char *shaderStart;
 	qboolean denyErrors;
 	ComParser parser;
 
 	// load and parse shader files
-	for ( i = 0; i < numShaderFiles; i++ )
+	for ( int i = 0; i < numShaderFiles; i++ )
 	{
 		Com_sprintf( filename, sizeof( filename ), "scripts/%s", shaderFiles[i] );
 		//ri.Printf( PRINT_DEVELOPER, "...loading '%s'\n", filename );

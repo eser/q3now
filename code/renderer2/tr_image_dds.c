@@ -219,7 +219,6 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 		byte *b;
 		void *v;
 	} buffer;
-	int len;
 	ddsHeader_t *ddsHeader = NULL;
 	ddsHeaderDxt10_t *ddsHeaderDxt10 = NULL;
 	byte *data;
@@ -244,7 +243,7 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 	//
 	// load the file
 	//
-	len = ri.FS_ReadFile( ( char * ) filename, &buffer.v);
+	int len = ri.FS_ReadFile( ( char * ) filename, &buffer.v);
 	if (!buffer.b || len < 0) {
 		return;
 	}

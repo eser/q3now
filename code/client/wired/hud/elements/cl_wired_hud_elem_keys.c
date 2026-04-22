@@ -25,13 +25,11 @@ static void* CG_ModernHUDElementKeyCreate(const modernhudConfig_t* cfg, int keyB
 
 void CG_ModernHUDElementKeyRoutine(void* context) {
 	modernHudElementKey_t* el = (modernHudElementKey_t*)context;
-	int keys;
-	qboolean pressed;
 
 	if ( !cg.snap ) return;
 
-	keys = cg.snap->ps.stats[STAT_KEYS];
-	pressed = (keys & el->keyBit) != 0;
+	int keys = cg.snap->ps.stats[STAT_KEYS];
+	qboolean pressed = (keys & el->keyBit) != 0;
 
 	if ( el->invert ) pressed = !pressed;
 	if ( !pressed ) return;

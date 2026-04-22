@@ -380,23 +380,19 @@ S_Play_f
 =================
 */
 static void S_Play_f( void ) {
-	int 		i;
-	int			c;
-	sfxHandle_t	h;
-
 	if( !si.RegisterSound || !si.StartLocalSound ) {
 		return;
 	}
 
-	c = Cmd_Argc();
+	int c = Cmd_Argc();
 
 	if( c < 2 ) {
 		Com_Printf ("Usage: play <sound filename> [sound filename] [sound filename] ...\n");
 		return;
 	}
 
-	for( i = 1; i < c; i++ ) {
-		h = si.RegisterSound( Cmd_Argv(i), qfalse );
+	for( int i = 1; i < c; i++ ) {
+		sfxHandle_t h = si.RegisterSound( Cmd_Argv(i), qfalse );
 
 		if( h ) {
 			si.StartLocalSound( h, CHAN_LOCAL_SOUND );
@@ -454,7 +450,6 @@ S_Init
 */
 void S_Init( void )
 {
-	cvar_t		*cv;
 	qboolean	started = qfalse;
 
 	if ( !s_audioArena ) {
@@ -491,7 +486,7 @@ void S_Init( void )
 		"  2 = mute when window is minimized\n"
 		"  3 = mute in both cases" );
 
-	cv = Cvar_Get( "s_initsound", "1", 0 );
+	cvar_t *cv = Cvar_Get( "s_initsound", "1", 0 );
 	Cvar_SetDescription( cv, "Whether or not to startup the sound system." );
 	if ( !cv->integer ) {
 		Com_Printf( "Sound disabled.\n" );

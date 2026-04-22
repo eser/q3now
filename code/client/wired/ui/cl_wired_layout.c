@@ -31,11 +31,10 @@ wuiPixelRect_t WUI_ResolveRect( const wuiRect_t *rect, const wuiPixelRect_t *par
 }
 
 void WUI_ApplyAspect( wuiPixelRect_t *rect, const wuiAspect_t *aspect ) {
-	float desiredW, desiredH;
 	if ( !aspect->active ) return;
 	// contain: fit within the given rect maintaining aspect ratio
-	desiredW = rect->h * aspect->ratio;
-	desiredH = rect->w / aspect->ratio;
+	float desiredW = rect->h * aspect->ratio;
+	float desiredH = rect->w / aspect->ratio;
 	if ( desiredW <= rect->w ) {
 		// height is the constraint — center horizontally
 		rect->x += ( rect->w - desiredW ) * 0.5f;
@@ -49,22 +48,21 @@ void WUI_ApplyAspect( wuiPixelRect_t *rect, const wuiAspect_t *aspect ) {
 
 void WUI_ApplyMinMax( wuiPixelRect_t *rect, const wuiFlexChild_t *child,
                       float vpWidth, float vpHeight ) {
-	float minW, maxW, minH, maxH;
 	// Only apply if value > 0 (0 = no constraint)
 	if ( child->minWidth.value > 0 ) {
-		minW = WUI_Resolve( child->minWidth, rect->w, vpWidth, vpHeight );
+		float minW = WUI_Resolve( child->minWidth, rect->w, vpWidth, vpHeight );
 		if ( rect->w < minW ) rect->w = minW;
 	}
 	if ( child->maxWidth.value > 0 ) {
-		maxW = WUI_Resolve( child->maxWidth, rect->w, vpWidth, vpHeight );
+		float maxW = WUI_Resolve( child->maxWidth, rect->w, vpWidth, vpHeight );
 		if ( rect->w > maxW ) rect->w = maxW;
 	}
 	if ( child->minHeight.value > 0 ) {
-		minH = WUI_Resolve( child->minHeight, rect->h, vpWidth, vpHeight );
+		float minH = WUI_Resolve( child->minHeight, rect->h, vpWidth, vpHeight );
 		if ( rect->h < minH ) rect->h = minH;
 	}
 	if ( child->maxHeight.value > 0 ) {
-		maxH = WUI_Resolve( child->maxHeight, rect->h, vpWidth, vpHeight );
+		float maxH = WUI_Resolve( child->maxHeight, rect->h, vpWidth, vpHeight );
 		if ( rect->h > maxH ) rect->h = maxH;
 	}
 }
@@ -75,54 +73,43 @@ void WUI_LayoutFlex(
     const wuiFlexChild_t *childProps, const wuiAspect_t *aspects,
     float vpWidth, float vpHeight )
 {
-	float padTop, padRight, padBot, padLeft;
-	float innerX, innerY, innerW, innerH;
-	float totalNatural, totalGaps, available, excess;
-	float totalGrow, totalShrink;
-	float cursor;
-	float mainSize, crossTotal, gapPx;
-	int i;
-	// line wrapping support
-	int lineStart, lineEnd, lineCount;
-	float lineCrossMax;
-	float lineCrossOffset;
-
 	if ( count <= 0 ) return;
 
 	// 1. Resolve padding
-	padTop   = WUI_Resolve( flex->padding[0], container->h, vpWidth, vpHeight );
-	padRight = WUI_Resolve( flex->padding[1], container->w, vpWidth, vpHeight );
-	padBot   = WUI_Resolve( flex->padding[2], container->h, vpWidth, vpHeight );
-	padLeft  = WUI_Resolve( flex->padding[3], container->w, vpWidth, vpHeight );
+	float padTop   = WUI_Resolve( flex->padding[0], container->h, vpWidth, vpHeight );
+	float padRight = WUI_Resolve( flex->padding[1], container->w, vpWidth, vpHeight );
+	float padBot   = WUI_Resolve( flex->padding[2], container->h, vpWidth, vpHeight );
+	float padLeft  = WUI_Resolve( flex->padding[3], container->w, vpWidth, vpHeight );
 
-	innerX = container->x + padLeft;
-	innerY = container->y + padTop;
-	innerW = container->w - padLeft - padRight;
-	innerH = container->h - padTop - padBot;
+	float innerX = container->x + padLeft;
+	float innerY = container->y + padTop;
+	float innerW = container->w - padLeft - padRight;
+	float innerH = container->h - padTop - padBot;
 
 	if ( innerW < 0 ) innerW = 0;
 	if ( innerH < 0 ) innerH = 0;
 
 	// Determine main axis and cross axis sizes
-	mainSize   = ( flex->direction == WUI_LAYOUT_ROW ) ? innerW : innerH;
-	crossTotal = ( flex->direction == WUI_LAYOUT_ROW ) ? innerH : innerW;
-	gapPx = WUI_Resolve( flex->gap, mainSize, vpWidth, vpHeight );
+	float mainSize   = ( flex->direction == WUI_LAYOUT_ROW ) ? innerW : innerH;
+	float crossTotal = ( flex->direction == WUI_LAYOUT_ROW ) ? innerH : innerW;
+	float gapPx = WUI_Resolve( flex->gap, mainSize, vpWidth, vpHeight );
 
 	// Process items in lines (for wrap support)
-	lineCrossOffset = 0;
-	lineStart = 0;
+	float lineCrossOffset = 0;
+	float lineCrossMax = 0;
+	int lineStart = 0;
 
 	while ( lineStart < count ) {
-		float lineMainUsed;
 		float *mainSizes;
 		float totalUsed, mainRemaining;
+		int lineEnd, lineCount;
 
 		// 2. Determine which items fit in this line
-		lineMainUsed = 0;
+		float lineMainUsed = 0;
 		lineCrossMax = 0;
 		lineEnd = lineStart;
 
-		for ( i = lineStart; i < count; i++ ) {
+		for ( int i = lineStart; i < count; i++ ) {
 			float naturalMain;
 			float itemGap;
 			float naturalCross;
@@ -163,14 +150,14 @@ void WUI_LayoutFlex(
 		if ( !flex->wrap ) lineCrossMax = crossTotal;
 
 		// 3. Distribute space (grow/shrink)
-		totalGaps = gapPx * ( lineCount - 1 );
-		available = mainSize - totalGaps;
-		totalNatural = 0;
-		totalGrow = 0;
-		totalShrink = 0;
+		float totalGaps = gapPx * ( lineCount - 1 );
+		float available = mainSize - totalGaps;
+		float totalNatural = 0;
+		float totalGrow = 0;
+		float totalShrink = 0;
 
 		// First pass: compute natural sizes and totals
-		for ( i = lineStart; i < lineEnd; i++ ) {
+		for ( int i = lineStart; i < lineEnd; i++ ) {
 			float natural;
 			if ( childProps[i].basis.value > 0 ) {
 				natural = WUI_Resolve( childProps[i].basis,
@@ -187,11 +174,11 @@ void WUI_LayoutFlex(
 			totalShrink += childProps[i].shrink * natural;
 		}
 
-		excess = available - totalNatural;
+		float excess = available - totalNatural;
 
 		// Second pass: compute final sizes
 		mainSizes = (float *)alloca( lineCount * sizeof( float ) );
-		for ( i = 0; i < lineCount; i++ ) {
+		for ( int i = 0; i < lineCount; i++ ) {
 			int idx = lineStart + i;
 			float natural;
 			if ( childProps[idx].basis.value > 0 ) {
@@ -218,10 +205,11 @@ void WUI_LayoutFlex(
 
 		// 4. Apply justify (position on main axis)
 		totalUsed = totalGaps;
-		for ( i = 0; i < lineCount; i++ ) totalUsed += mainSizes[i];
+		for ( int i = 0; i < lineCount; i++ ) totalUsed += mainSizes[i];
 		mainRemaining = mainSize - totalUsed;
 		if ( mainRemaining < 0 ) mainRemaining = 0;
 
+		float cursor;
 		switch ( flex->justify ) {
 			case WUI_JUSTIFY_CENTER:
 				cursor = mainRemaining * 0.5f;
@@ -242,7 +230,7 @@ void WUI_LayoutFlex(
 		}
 
 		// 5. Position each child
-		for ( i = 0; i < lineCount; i++ ) {
+		for ( int i = 0; i < lineCount; i++ ) {
 			int idx = lineStart + i;
 			float childMain = mainSizes[i];
 			float childCross;
@@ -314,7 +302,6 @@ void WUI_LayoutFlex(
 
 void WUI_LayoutItem( wiredItemDef_t *item, const wuiPixelRect_t *parent,
                      float vpWidth, float vpHeight ) {
-	int i;
 	const wuiRect_t *srcRect;
 
 	// Check for responsive breakpoint override
@@ -344,7 +331,7 @@ void WUI_LayoutItem( wiredItemDef_t *item, const wuiPixelRect_t *parent,
 		wuiFlexChild_t *childProps = (wuiFlexChild_t *)alloca( item->childCount * sizeof( wuiFlexChild_t ) );
 		wuiAspect_t    *childAspects = (wuiAspect_t *)alloca( item->childCount * sizeof( wuiAspect_t ) );
 
-		for ( i = 0; i < item->childCount; i++ ) {
+		for ( int i = 0; i < item->childCount; i++ ) {
 			childRects[i]   = item->children[i]->wuiRect;
 			childProps[i]   = item->children[i]->flexChild;
 			childAspects[i] = item->children[i]->aspect;
@@ -354,7 +341,7 @@ void WUI_LayoutItem( wiredItemDef_t *item, const wuiPixelRect_t *parent,
 			&item->resolvedRect, &item->flexContainer, childProps, childAspects,
 			vpWidth, vpHeight );
 
-		for ( i = 0; i < item->childCount; i++ ) {
+		for ( int i = 0; i < item->childCount; i++ ) {
 			item->children[i]->resolvedRect = childResolved[i];
 			// Recurse into grandchildren
 			if ( item->children[i]->isFlexContainer && item->children[i]->childCount > 0 ) {
@@ -363,7 +350,7 @@ void WUI_LayoutItem( wiredItemDef_t *item, const wuiPixelRect_t *parent,
 		}
 	} else {
 		// Absolute positioning: resolve children relative to this item
-		for ( i = 0; i < item->childCount; i++ ) {
+		for ( int i = 0; i < item->childCount; i++ ) {
 			WUI_LayoutItem( item->children[i], &item->resolvedRect, vpWidth, vpHeight );
 		}
 	}
@@ -371,7 +358,6 @@ void WUI_LayoutItem( wiredItemDef_t *item, const wuiPixelRect_t *parent,
 
 void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 	wuiPixelRect_t viewport;
-	int i;
 
 	if ( !menu ) return;
 
@@ -413,7 +399,7 @@ void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 	// UNIT_AUTO on height: size to content (walk children to find extent)
 	if ( menu->wuiRect.h.unit == UNIT_AUTO ) {
 		float bottom = 0;
-		for ( i = 0; i < menu->itemCount; i++ ) {
+		for ( int i = 0; i < menu->itemCount; i++ ) {
 			if ( !menu->items[i] ) continue;
 			// Temporarily resolve each item to find its bottom edge
 			wuiPixelRect_t childRect = WUI_ResolveRect( &menu->items[i]->wuiRect,
@@ -437,7 +423,7 @@ void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 		int *flexIndices = (int *)alloca( menu->itemCount * sizeof( int ) );
 		int flexCount = 0;
 
-		for ( i = 0; i < menu->itemCount; i++ ) {
+		for ( int i = 0; i < menu->itemCount; i++ ) {
 			wiredItemDef_t *item = menu->items[i];
 			if ( item->position != POSITION_STATIC ) {
 				// Absolute or viewport-positioned — resolve outside flex flow
@@ -457,7 +443,7 @@ void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 			wuiFlexChild_t *flexProps    = (wuiFlexChild_t *)alloca( flexCount * sizeof( wuiFlexChild_t ) );
 			wuiAspect_t    *flexAspects  = (wuiAspect_t *)alloca( flexCount * sizeof( wuiAspect_t ) );
 
-			for ( i = 0; i < flexCount; i++ ) {
+			for ( int i = 0; i < flexCount; i++ ) {
 				int idx = flexIndices[i];
 				flexRects[i]   = menu->items[idx]->wuiRect;
 				flexProps[i]   = menu->items[idx]->flexChild;
@@ -468,7 +454,7 @@ void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 				&menu->resolvedRect, &menu->flexContainer, flexProps, flexAspects,
 				vpWidth, vpHeight );
 
-			for ( i = 0; i < flexCount; i++ ) {
+			for ( int i = 0; i < flexCount; i++ ) {
 				int idx = flexIndices[i];
 				menu->items[idx]->resolvedRect = flexResolved[i];
 				if ( menu->items[idx]->isFlexContainer && menu->items[idx]->childCount > 0 ) {
@@ -478,7 +464,7 @@ void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 		}
 	} else {
 		// Absolute positioning: resolve each item individually
-		for ( i = 0; i < menu->itemCount; i++ ) {
+		for ( int i = 0; i < menu->itemCount; i++ ) {
 			if ( menu->items[i] ) {
 				WUI_LayoutItem( menu->items[i], &menu->resolvedRect, vpWidth, vpHeight );
 			}
@@ -526,8 +512,7 @@ wuiRect_t WUI_TransitionEval( const wuiTransition_t *tr, int currentTime ) {
 // ── Layer 5: Responsive breakpoints ──────────────────────────────────
 
 const wuiRect_t *WUI_FindBreakpointRect( const wuiBreakpoint_t *bps, int count, int vpWidth ) {
-	int i;
-	for ( i = count - 1; i >= 0; i-- ) {
+	for ( int i = count - 1; i >= 0; i-- ) {
 		if ( !bps[i].active ) continue;
 		if ( bps[i].minWidth && vpWidth < bps[i].minWidth ) continue;
 		if ( bps[i].maxWidth && vpWidth > bps[i].maxWidth ) continue;

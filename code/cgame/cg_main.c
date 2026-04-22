@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 /* TA UI display context removed -- Wired UI handles menus/HUD */
 
-int forceSameModelModificationCount = -1;
+int forceSameCharacterModificationCount = -1;
 
 void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum );
 void CG_Shutdown( void );
@@ -91,26 +91,25 @@ vmCvar_t	cg_bobroll;
 vmCvar_t	cg_swingSpeed;
 vmCvar_t	cg_shadows;
 vmCvar_t	cg_gibs;
-vmCvar_t	cg_drawTimer;
-vmCvar_t	cg_drawFPS;
+#if FEAT_MUSIC_PLAYLIST
+vmCvar_t	cg_music;
+#endif
 vmCvar_t	cg_drawSnapshot;
 vmCvar_t	cg_draw3dIcons;
 vmCvar_t	cg_drawIcons;
 vmCvar_t	cg_drawAmmoWarning;
-vmCvar_t	cg_drawCrosshair;
 vmCvar_t	cg_drawCrosshairNames;
 vmCvar_t	cg_drawRewards;
 vmCvar_t	cg_crosshairSize;
-vmCvar_t	cg_crosshairX;
-vmCvar_t	cg_crosshairY;
+vmCvar_t	cg_crosshairAlpha;
 vmCvar_t	cg_crosshairHealth;
 vmCvar_t	cg_crosshairColor;
-vmCvar_t	cg_crosshairAlpha;
 vmCvar_t	cg_draw2D;
 vmCvar_t	cg_animSpeed;
 vmCvar_t	cg_debugAnim;
 vmCvar_t	cg_debugPosition;
 vmCvar_t	cg_debugEvents;
+vmCvar_t	cg_debugCharacterSkin;
 vmCvar_t	cg_errorDecay;
 vmCvar_t	cg_nopredict;
 vmCvar_t	cg_noPlayerAnims;
@@ -159,12 +158,11 @@ vmCvar_t 	cg_teamChatTime;
 vmCvar_t 	cg_teamChatHeight;
 vmCvar_t 	cg_stats;
 vmCvar_t 	cg_buildScript;
-vmCvar_t 	cg_forceSameModel;
+vmCvar_t 	cg_forceSameCharacter;
 vmCvar_t	cg_paused;
 vmCvar_t	cg_blood;
 vmCvar_t	cg_predictItems;
 vmCvar_t	cg_deferPlayers;
-vmCvar_t	cg_drawTeamOverlay;
 vmCvar_t	cg_teamOverlayUserinfo;
 vmCvar_t	cg_drawFriend;
 vmCvar_t	cg_teamChatsOnly;
@@ -207,8 +205,8 @@ vmCvar_t	cg_noProjectileTrail;
 vmCvar_t	cg_currentSelectedPlayer;
 vmCvar_t	cg_currentSelectedPlayerName;
 #endif
-vmCvar_t	cg_enableDust;
-vmCvar_t	cg_enableBreath;
+vmCvar_t	cg_envGroundDusty;
+vmCvar_t	cg_envTemperature;
 #if FEAT_OVERLOAD
 vmCvar_t	cg_obeliskRespawnDelay;
 #endif
@@ -226,9 +224,6 @@ vmCvar_t	cg_followKiller;
 #if FEAT_AUTO_DEMO
 vmCvar_t	cg_autoRecord;
 vmCvar_t	cg_autoJoin;
-#endif
-#if FEAT_STATS_WINDOW
-vmCvar_t	cg_statsWindow;
 #endif
 #if FEAT_IMPACT_SPARKS
 vmCvar_t	cg_impactSparks;
@@ -250,22 +245,20 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_fov, "cg_fov", "90", CVAR_ARCHIVE },
 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	{ &cg_gibs, "cg_gibs", "1", CVAR_ARCHIVE  },
+#if FEAT_MUSIC_PLAYLIST
+	{ &cg_music, "cg_music", "0", CVAR_ARCHIVE },
+#endif
 	{ &cg_draw2D, "cg_draw2D", "1", CVAR_ARCHIVE  },
-	{ &cg_drawTimer, "cg_drawTimer", "0", CVAR_ARCHIVE  },
-	{ &cg_drawFPS, "cg_drawFPS", "0", CVAR_ARCHIVE  },
 	{ &cg_drawSnapshot, "cg_drawSnapshot", "0", CVAR_ARCHIVE  },
 	{ &cg_draw3dIcons, "cg_draw3dIcons", "1", CVAR_ARCHIVE  },
 	{ &cg_drawIcons, "cg_drawIcons", "1", CVAR_ARCHIVE  },
 	{ &cg_drawAmmoWarning, "cg_drawAmmoWarning", "1", CVAR_ARCHIVE  },
-	{ &cg_drawCrosshair, "cg_drawCrosshair", "4", CVAR_ARCHIVE },
 	{ &cg_drawCrosshairNames, "cg_drawCrosshairNames", "1", CVAR_ARCHIVE },
 	{ &cg_drawRewards, "cg_drawRewards", "1", CVAR_ARCHIVE },
 	{ &cg_crosshairSize, "cg_crosshairSize", "48", CVAR_ARCHIVE },
+	{ &cg_crosshairAlpha, "cg_crosshairAlpha", "1.0", CVAR_ARCHIVE },
 	{ &cg_crosshairHealth, "cg_crosshairHealth", "1", CVAR_ARCHIVE },
 	{ &cg_crosshairColor, "cg_crosshairColor", "white", CVAR_ARCHIVE },
-	{ &cg_crosshairAlpha, "cg_crosshairAlpha", "1.0", CVAR_ARCHIVE },
-	{ &cg_crosshairX, "cg_crosshairX", "0", CVAR_ARCHIVE },
-	{ &cg_crosshairY, "cg_crosshairY", "0", CVAR_ARCHIVE },
 	{ &cg_simpleItems, "cg_simpleItems", "0", CVAR_ARCHIVE },
 	{ &cg_addMarks, "cg_marks", "1", CVAR_ARCHIVE },
 	{ &cg_lagometer, "cg_lagometer", "1", CVAR_ARCHIVE },
@@ -283,6 +276,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_debugAnim, "cg_debuganim", "0", CVAR_CHEAT },
 	{ &cg_debugPosition, "cg_debugposition", "0", CVAR_CHEAT },
 	{ &cg_debugEvents, "cg_debugevents", "0", CVAR_CHEAT },
+	{ &cg_debugCharacterSkin, "cg_debugCharacterSkin", "0", CVAR_CHEAT },
 	{ &cg_errorDecay, "cg_errordecay", "100", 0 },
 	{ &cg_nopredict, "cg_nopredict", "0", 0 },
 	{ &cg_noPlayerAnims, "cg_noplayeranims", "0", CVAR_CHEAT },
@@ -320,11 +314,9 @@ static cvarTable_t cvarTable[] = {
 #endif
 	{ &cg_teamChatTime, "cg_teamChatTime", "3000", CVAR_ARCHIVE  },
 	{ &cg_teamChatHeight, "cg_teamChatHeight", "0", CVAR_ARCHIVE  },
-	{ &cg_forceSameModel, "cg_forceSameModel", "0", CVAR_ARCHIVE  },
+	{ &cg_forceSameCharacter, "cg_forceSameCharacter", "0", CVAR_ARCHIVE  },
 	{ &cg_predictItems, "cg_predictItems", "1", CVAR_ARCHIVE },
 	{ &cg_deferPlayers, "cg_deferPlayers", "0", CVAR_ARCHIVE },
-	{ &cg_drawTeamOverlay, "cg_drawTeamOverlay", "0", CVAR_ARCHIVE },
-	{ &cg_teamOverlayUserinfo, "teamoverlay", "0", CVAR_ROM | CVAR_USERINFO },
 	{ &cg_stats, "cg_stats", "0", 0 },
 	{ &cg_drawFriend, "cg_drawFriend", "1", CVAR_ARCHIVE },
 	{ &cg_teamChatsOnly, "cg_teamChatsOnly", "0", CVAR_ARCHIVE },
@@ -332,7 +324,6 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_noVoiceText, "cg_noVoiceText", "0", CVAR_ARCHIVE },
 	// the following variables are created in other parts of the system,
 	// but we also reference them here
-	{ &cg_buildScript, "com_buildScript", "0", 0 },	// force loading of all possible data amd error on failures
 	{ &cg_paused, "cl_paused", "0", CVAR_ROM },
 	{ &cg_blood, "com_blood", "1", CVAR_ARCHIVE },
 	{ &cg_synchronousClients, "g_synchronousClients", "0", CVAR_SYSTEMINFO },
@@ -340,8 +331,8 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_currentSelectedPlayer, "cg_currentSelectedPlayer", "0", CVAR_ARCHIVE},
 	{ &cg_currentSelectedPlayerName, "cg_currentSelectedPlayerName", "", CVAR_ARCHIVE},
 #endif
-	{ &cg_enableDust, "g_enableDust", "0", CVAR_SERVERINFO},
-	{ &cg_enableBreath, "g_enableBreath", "0", CVAR_SERVERINFO},
+	{ &cg_envGroundDusty, "g_envGroundDusty", "0", CVAR_SERVERINFO},
+	{ &cg_envTemperature, "g_envTemperature", "20", CVAR_SERVERINFO},
 #if FEAT_OVERLOAD
 	{ &cg_obeliskRespawnDelay, "g_obeliskRespawnDelay", "10", CVAR_SERVERINFO},
 #endif
@@ -351,9 +342,9 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_timescaleFadeSpeed, "cg_timescaleFadeSpeed", "0", 0},
 	{ &cg_timescale, "timescale", "1", 0},
 #if FEAT_DAMAGE_PLUMS
-	{ &cg_scorePlums, "cg_scorePlums", "2", CVAR_USERINFO | CVAR_ARCHIVE},
+	{ &cg_scorePlums, "cg_scorePlums", "3", CVAR_USERINFO | CVAR_ARCHIVE},
 #else
-	{ &cg_scorePlums, "cg_scorePlums", "0", CVAR_USERINFO | CVAR_ARCHIVE},
+	{ &cg_scorePlums, "cg_scorePlums", "1", CVAR_USERINFO | CVAR_ARCHIVE},
 #endif
 
 	{ &cg_smoothClients, "cg_smoothClients", "0", CVAR_USERINFO | CVAR_ARCHIVE},
@@ -401,9 +392,6 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_autoRecord, "cg_autoRecord", "0", CVAR_ARCHIVE },
 	{ &cg_autoJoin, "cg_autoJoin", "1", CVAR_ARCHIVE },
 #endif
-#if FEAT_STATS_WINDOW
-	{ &cg_statsWindow, "cg_statsWindow", "0", CVAR_ARCHIVE },
-#endif
 #if FEAT_IMPACT_SPARKS
 	{ &cg_impactSparks, "cg_impactSparks", "1", CVAR_ARCHIVE },
 #endif
@@ -430,9 +418,10 @@ void CG_RegisterCvars( void ) {
 	trap_Cvar_VariableStringBuffer( "sv_running", var, sizeof( var ) );
 	cgs.localServer = atoi( var );
 
-	forceSameModelModificationCount = cg_forceSameModel.modificationCount;
+	forceSameCharacterModificationCount = cg_forceSameCharacter.modificationCount;
 
-	trap_Cvar_Register(NULL, "model", DEFAULT_MODEL, CVAR_USERINFO | CVAR_ARCHIVE );
+	trap_Cvar_Register(NULL, "char", DEFAULT_MODEL, CVAR_USERINFO | CVAR_ARCHIVE );
+	trap_Cvar_Register(NULL, "skin", "default", CVAR_USERINFO | CVAR_ARCHIVE );
 }
 
 /*
@@ -441,9 +430,7 @@ CG_ForceSameModelChange
 ===================
 */
 static void CG_ForceSameModelChange( void ) {
-	int		i;
-
-	for (i=0 ; i<MAX_CLIENTS ; i++) {
+	for (int i=0 ; i<MAX_CLIENTS ; i++) {
 		const char		*clientInfo;
 
 		clientInfo = CG_ConfigString( CS_PLAYERS+i );
@@ -469,52 +456,11 @@ void CG_UpdateCvars( void ) {
 
 	// check for modications here
 
-	// If team overlay is on, ask for updates from the server.  If it's off,
-	// let the server know so we don't receive it
-	if ( drawTeamOverlayModificationCount != cg_drawTeamOverlay.modificationCount ) {
-		drawTeamOverlayModificationCount = cg_drawTeamOverlay.modificationCount;
-
-		if ( cg_drawTeamOverlay.integer > 0 ) {
-			trap_Cvar_Set( "teamoverlay", "1" );
-		} else {
-			trap_Cvar_Set( "teamoverlay", "0" );
-		}
-	}
-
 	// if force same model changed
-	if ( forceSameModelModificationCount != cg_forceSameModel.modificationCount ) {
-		forceSameModelModificationCount = cg_forceSameModel.modificationCount;
+	if ( forceSameCharacterModificationCount != cg_forceSameCharacter.modificationCount ) {
+		forceSameCharacterModificationCount = cg_forceSameCharacter.modificationCount;
 		CG_ForceSameModelChange();
 	}
-}
-
-qboolean CG_IsPlayerInvisible( centity_t *cent ) {
-	if ( cent->currentState.powerups & ( 1 << PW_INVIS ) ) {
-		return qtrue;
-	}
-
-	if ( cgs.gametype == GT_KINGOFTHEHILL && cgs.kothGhosts ) {
-		if ( !(cent->currentState.powerups & ( 1 << PW_KING )) &&
-			cent->muzzleFlashTime + GHOST_FLASH_TIME < cg.time ) {
-			return qtrue;
-		}
-	}
-
-	return qfalse;
-}
-
-int CG_CrosshairPlayer( void ) {
-	if ( cg.time > ( cg.crosshairClientTime + 1000 ) ) {
-		return -1;
-	}
-	return cg.crosshairClientNum;
-}
-
-int CG_LastAttacker( void ) {
-	if ( !cg.attackerTime ) {
-		return -1;
-	}
-	return cg.snap->ps.persistant[PERS_LAST_ATTACKER];
 }
 
 void QDECL CG_Printf( const char *msg, ... ) {
@@ -654,6 +600,9 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.countFightSound = trap_S_RegisterSound( "sound/feedback/fight.opus", qtrue );
 	cgs.media.countPrepareSound = trap_S_RegisterSound( "sound/feedback/prepare.opus", qtrue );
 	cgs.media.countPrepareTeamSound = trap_S_RegisterSound( "sound/feedback/prepare_team.opus", qtrue );
+#if FEAT_EARTHQUAKE_SYSTEM
+	cgs.media.earthquakeSound = trap_S_RegisterSound( "sound/world/earthquake.wav", qfalse );
+#endif
 
 	if ( cgs.gametypeIsTeamGame || cg_buildScript.integer ) {
 
@@ -704,10 +653,10 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.selectSound = trap_S_RegisterSound( "sound/weapons/change.opus", qfalse );
 	cgs.media.wearOffSound = trap_S_RegisterSound( "sound/items/wearoff.opus", qfalse );
 	cgs.media.useNothingSound = trap_S_RegisterSound( "sound/items/use_nothing.opus", qfalse );
-	cgs.media.gibSound = trap_S_RegisterSound( "sound/player/gibsplt1.opus", qfalse );
-	cgs.media.gibBounce1Sound = trap_S_RegisterSound( "sound/player/gibimp1.opus", qfalse );
-	cgs.media.gibBounce2Sound = trap_S_RegisterSound( "sound/player/gibimp2.opus", qfalse );
-	cgs.media.gibBounce3Sound = trap_S_RegisterSound( "sound/player/gibimp3.opus", qfalse );
+	cgs.media.gibBounce1Sound = trap_S_RegisterSound( "sound/misc/gibimp1.opus", qfalse );
+	cgs.media.gibBounce2Sound = trap_S_RegisterSound( "sound/misc/gibimp2.opus", qfalse );
+	cgs.media.gibBounce3Sound = trap_S_RegisterSound( "sound/misc/gibimp3.opus", qfalse );
+	cgs.media.talkSound       = trap_S_RegisterSound( "sound/misc/talk.opus", qfalse );
 
 	cgs.media.useInvulnerabilitySound = trap_S_RegisterSound( "sound/items/invul_activate.opus", qfalse );
 	cgs.media.invulnerabilityImpactSound1 = trap_S_RegisterSound( "sound/items/invul_impact_01.opus", qfalse );
@@ -727,8 +676,8 @@ static void CG_RegisterSounds( void ) {
 
 	cgs.media.noAmmoSound = trap_S_RegisterSound( "sound/weapons/noammo.opus", qfalse );
 
-	cgs.media.talkSound = trap_S_RegisterSound( "sound/player/talk.opus", qfalse );
-	cgs.media.landSound = trap_S_RegisterSound( "sound/player/land1.opus", qfalse);
+	cgs.media.gurpSound[0] = trap_S_RegisterSound( "sound/misc/gurp1.opus", qfalse );
+	cgs.media.gurpSound[1] = trap_S_RegisterSound( "sound/misc/gurp2.opus", qfalse );
 
 	cgs.media.hitSoundNoArmor = trap_S_RegisterSound( "sound/feedback/hit.opus", qfalse );
 	cgs.media.hitSoundHeavyArmor = trap_S_RegisterSound( "sound/feedback/hit.opus", qfalse );
@@ -754,34 +703,9 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.votePassed = trap_S_RegisterSound( "sound/feedback/vote_passed.opus", qtrue);
 	cgs.media.voteFailed = trap_S_RegisterSound( "sound/feedback/vote_failed.opus", qtrue);
 
-	cgs.media.watrInSound = trap_S_RegisterSound( "sound/player/watr_in.opus", qfalse);
-	cgs.media.watrOutSound = trap_S_RegisterSound( "sound/player/watr_out.opus", qfalse);
-	cgs.media.watrUnSound = trap_S_RegisterSound( "sound/player/watr_un.opus", qfalse);
-
 	cgs.media.jumpPadSound = trap_S_RegisterSound ("sound/world/jumppad.opus", qfalse );
 
-	for (i=0 ; i<4 ; i++) {
-		Com_sprintf (name, sizeof(name), "sound/player/footsteps/step%i.opus", i+1);
-		cgs.media.footsteps[FOOTSTEP_NORMAL][i] = trap_S_RegisterSound (name, qfalse);
-
-		Com_sprintf (name, sizeof(name), "sound/player/footsteps/boot%i.opus", i+1);
-		cgs.media.footsteps[FOOTSTEP_BOOT][i] = trap_S_RegisterSound (name, qfalse);
-
-		Com_sprintf (name, sizeof(name), "sound/player/footsteps/flesh%i.opus", i+1);
-		cgs.media.footsteps[FOOTSTEP_FLESH][i] = trap_S_RegisterSound (name, qfalse);
-
-		Com_sprintf (name, sizeof(name), "sound/player/footsteps/mech%i.opus", i+1);
-		cgs.media.footsteps[FOOTSTEP_MECH][i] = trap_S_RegisterSound (name, qfalse);
-
-		Com_sprintf (name, sizeof(name), "sound/player/footsteps/energy%i.opus", i+1);
-		cgs.media.footsteps[FOOTSTEP_ENERGY][i] = trap_S_RegisterSound (name, qfalse);
-
-		Com_sprintf (name, sizeof(name), "sound/player/footsteps/splash%i.opus", i+1);
-		cgs.media.footsteps[FOOTSTEP_SPLASH][i] = trap_S_RegisterSound (name, qfalse);
-
-		Com_sprintf (name, sizeof(name), "sound/player/footsteps/clank%i.opus", i+1);
-		cgs.media.footsteps[FOOTSTEP_METAL][i] = trap_S_RegisterSound (name, qfalse);
-	}
+	// Footsteps are now per-entity (ci->footstepSounds), registered in cg_characters.c
 
 	// only register the items that the server says we need
 	Q_strncpyz(items, CG_ConfigString(CS_ITEMS), sizeof(items));
@@ -818,13 +742,13 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.kamikazeImplodeSound = trap_S_RegisterSound( "sound/items/kam_implode.opus", qfalse );
 	cgs.media.kamikazeFarSound = trap_S_RegisterSound( "sound/items/kam_explode_far.opus", qfalse );
 
-	cgs.media.sfx_nghit = trap_S_RegisterSound( "sound/weapons/nailgun/wnalimpd.opus" , qfalse);
-	cgs.media.sfx_nghitflesh = trap_S_RegisterSound( "sound/weapons/nailgun/wnalimpl.opus" , qfalse);
-	cgs.media.sfx_nghitmetal = trap_S_RegisterSound( "sound/weapons/nailgun/wnalimpm.opus", qfalse );
+	// cgs.media.sfx_nghit = trap_S_RegisterSound( "sound/weapons/nailgun/wnalimpd.opus" , qfalse);
+	// cgs.media.sfx_nghitflesh = trap_S_RegisterSound( "sound/weapons/nailgun/wnalimpl.opus" , qfalse);
+	// cgs.media.sfx_nghitmetal = trap_S_RegisterSound( "sound/weapons/nailgun/wnalimpm.opus", qfalse );
 
-	cgs.media.sfx_chghit = trap_S_RegisterSound( "sound/weapons/vulcan/wvulimpd.opus", qfalse );
-	cgs.media.sfx_chghitflesh = trap_S_RegisterSound( "sound/weapons/vulcan/wvulimpl.opus", qfalse );
-	cgs.media.sfx_chghitmetal = trap_S_RegisterSound( "sound/weapons/vulcan/wvulimpm.opus", qfalse );
+	// cgs.media.sfx_chghit = trap_S_RegisterSound( "sound/weapons/vulcan/wvulimpd.opus", qfalse );
+	// cgs.media.sfx_chghitflesh = trap_S_RegisterSound( "sound/weapons/vulcan/wvulimpl.opus", qfalse );
+	// cgs.media.sfx_chghitmetal = trap_S_RegisterSound( "sound/weapons/vulcan/wvulimpm.opus", qfalse );
 	cgs.media.weaponHoverSound = trap_S_RegisterSound( "sound/weapons/weapon_hover.opus", qfalse );
 	cgs.media.winnerSound = trap_S_RegisterSound( "sound/feedback/voc_youwin.opus", qfalse );
 	cgs.media.loserSound = trap_S_RegisterSound( "sound/feedback/voc_youlose.opus", qfalse );
@@ -1125,9 +1049,7 @@ static void CG_RegisterGraphics( void ) {
 	for (i=1; i<MAX_PARTICLES_AREAS; i++)
 	{
 		{
-			int rval;
-
-			rval = CG_NewParticleArea ( CS_PARTICLES + i);
+			int rval = CG_NewParticleArea ( CS_PARTICLES + i);
 			if (!rval)
 				break;
 		}
@@ -1216,6 +1138,21 @@ void CG_StartMusic( void ) {
 	char	parm1[MAX_QPATH], parm2[MAX_QPATH];
 	ComParser parser = { 0 };
 
+#if FEAT_MUSIC_PLAYLIST
+	switch ( cg_music.integer ) {
+	case 0:
+	default:
+		CG_StopPlayList();
+		return;
+	case 1:
+		CG_StopPlayList();
+		break;
+	case 2:
+		CG_ContinuePlayList();
+		return;
+	}
+#endif
+
 	// start the background music
 	s = CG_ConfigString( CS_MUSIC );
 	Q_strncpyz( parm1, COM_Parse( &parser, &s ), sizeof( parm1 ) );
@@ -1250,19 +1187,12 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	cgs.serverCommandSequence = serverCommandSequence;
 
 	// load a few needed things before we do any screen updates
-	cgs.media.charsetShader		= trap_R_RegisterShader( "gfx/2d/bigchars" );
 	cgs.media.whiteShader		= trap_R_RegisterShader( "white" );
-	cgs.media.charsetProp		= trap_R_RegisterShaderNoMip( "menu/art/font1_prop.tga" );
-	cgs.media.charsetPropGlow	= trap_R_RegisterShaderNoMip( "menu/art/font1_prop_glo.tga" );
-	cgs.media.charsetPropB		= trap_R_RegisterShaderNoMip( "menu/art/font2_prop.tga" );
 
 	CG_RegisterCvars();
 
 	CG_InitConsoleCommands();
 
-#if FEAT_STATS_WINDOW
-	CG_windowInit();
-#endif
 
 	cg.weaponSelect = WP_MACHINEGUN;
 
@@ -1359,6 +1289,9 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	// Make sure we have update values (scores)
 	CG_SetConfigValues();
 
+#if FEAT_MUSIC_PLAYLIST
+	CG_ParsePlayList();
+#endif
 	CG_StartMusic();
 
 	trap_UpdateScreen();

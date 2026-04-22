@@ -58,12 +58,11 @@ Called once during sound system initialisation.
 */
 void S_OpusDecoderInit( void )
 {
-	int err;
-
 	if ( s_opusDecoder ) {
 		return; // already initialised
 	}
 
+	int err;
 	s_opusDecoder = opus_decoder_create( OPUS_INMEM_RATE, 1, &err );
 	if ( err != OPUS_OK || !s_opusDecoder ) {
 		Com_Printf( S_COLOR_RED "ERROR: opus_decoder_create failed (%d)\n", err );
@@ -252,9 +251,8 @@ static int S_OpusFindFrame( const sfx_t *sc, int frameIdx, int *frameLen )
 {
 	int byteOfs = 0;
 	unsigned short len16;
-	int i;
 
-	for ( i = 0; i <= frameIdx; i++ ) {
+	for ( int i = 0; i <= frameIdx; i++ ) {
 		int got = S_OpusChunkRead( sc, byteOfs, (byte *)&len16, 2 );
 		if ( got < 2 ) {
 			return -1;

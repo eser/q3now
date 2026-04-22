@@ -46,11 +46,9 @@ void* CG_ModernHUDElementNameNMECreate(const modernhudConfig_t* config)
 
 static void CG_ModernHUDElementNameGetPairFFA(const char** own, const char** nme)
 {
-	int clientNum;
-	const char* info;
 	*own = cgs.clientinfo[cg.snap->ps.clientNum].name;
 
-	clientNum = cg.predictedPlayerState.persistant[PERS_LAST_ATTACKER];
+	int clientNum = cg.predictedPlayerState.persistant[PERS_LAST_ATTACKER];
 	if (clientNum < 0 || clientNum >= MAX_CLIENTS)
 	{
 		return;
@@ -70,18 +68,15 @@ static void CG_ModernHUDElementNameGetPairFFA(const char** own, const char** nme
 		if (i == MAX_CLIENTS) return;
 	}
 
-	info = CG_ConfigString(CS_PLAYERS + clientNum);
+	const char *info = CG_ConfigString(CS_PLAYERS + clientNum);
 	*nme = Info_ValueForKey(info, "n");
 }
 
 static void CG_ModernHUDElementNameGetPairDuel(const char** own, const char** nme)
 {
-	int i;
-	int k;
-
 	if (cg.snap->ps.persistant[PERS_TEAM] == 3 /* spectator */)
 	{
-		for (i = 0, k = 0; i < MAX_CLIENTS; ++i)
+		for (int i = 0, k = 0; i < MAX_CLIENTS; ++i)
 		{
 			if (cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team != 3 /* spectator */)
 			{
@@ -101,7 +96,7 @@ static void CG_ModernHUDElementNameGetPairDuel(const char** own, const char** nm
 	{
 		*own = cgs.clientinfo[cg.snap->ps.clientNum].name;
 
-		for (i = 0; i < MAX_CLIENTS; ++i)
+		for (int i = 0; i < MAX_CLIENTS; ++i)
 		{
 			if (cgs.clientinfo[i].infoValid && cgs.clientinfo[i].team != 3 /* spectator */)
 			{

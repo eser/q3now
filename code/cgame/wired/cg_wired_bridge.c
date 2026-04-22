@@ -121,22 +121,19 @@ void CG_WiredHudPushState( void ) {
 	state.crosshairClientTime = cg.crosshairClientTime;
 
 	// pre-compute crosshair rendering state (client just draws)
-	if ( !cg_drawCrosshair.integer || cg.renderingThirdPerson ||
+	if ( !cg_crosshairAlpha.integer || cg.renderingThirdPerson ||
 	     cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
 		state.crosshair.shaderIndex = -1;
 	} else {
 		vec4_t xhairColor;
 		float w, f;
 
-		if ( cg_crosshairHealth.integer ) {
-			int eff = BG_GetEffectiveHealth(
-				cg.snap->ps.stats[STAT_HEALTH],
-				cg.snap->ps.stats[STAT_ARMORCLASS],
-				cg.snap->ps.stats[STAT_ARMOR] );
-			BG_GetColorForAmount( eff, xhairColor );
-		} else {
-			CG_ParseColor( cg_crosshairColor.string, xhairColor, 1.0f );
-		}
+		int eff = BG_GetEffectiveHealth(
+			cg.snap->ps.stats[STAT_HEALTH],
+			cg.snap->ps.stats[STAT_ARMORCLASS],
+			cg.snap->ps.stats[STAT_ARMOR] );
+		BG_GetColorForAmount( eff, xhairColor );
+
 		xhairColor[3] = Com_Clamp( 0.0f, 1.0f, cg_crosshairAlpha.value );
 		// rocket launcher helix: amber tint during alt-fire cooldown
 		if ( cg.snap->ps.weapon == WP_ROCKET_LAUNCHER
@@ -156,9 +153,8 @@ void CG_WiredHudPushState( void ) {
 			w *= ( 1.0f + f );
 		}
 		state.crosshair.size = w;
-		state.crosshair.x = (float)cg_crosshairX.integer;
-		state.crosshair.y = (float)cg_crosshairY.integer;
-		state.crosshair.shaderIndex = cg_drawCrosshair.integer;
+		state.crosshair.x = 0;
+		state.crosshair.y = 0;
 	}
 
 	// ── player extras ────────────────────────────────────────────────

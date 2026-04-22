@@ -124,6 +124,13 @@ static bot_movestate_t *botmovestates[MAX_CLIENTS+1];
 //========================================================================
 int BotAllocMoveState(void)
 {
+#if FEAT_RECAST_NAVMESH
+	/* Recast nav does not use AAS move states.
+	 * Return 1 (not 0) so BotMoveStateFromHandle doesn't null-deref.
+	 * Callers that receive handle=1 must not dereference botmovestates[1]
+	 * in FEAT_RECAST_NAVMESH builds (all such callers are fenced out). */
+	return 1;
+#else
 	int i;
 
 	for (i = 1; i <= MAX_CLIENTS; i++)
@@ -135,6 +142,7 @@ int BotAllocMoveState(void)
 		} //end if
 	} //end for
 	return 0;
+#endif
 } //end of the function BotAllocMoveState
 //========================================================================
 //
@@ -716,6 +724,9 @@ static int BotAvoidSpots(vec3_t origin, aas_reachability_t *reach, bot_avoidspot
 //===========================================================================
 void BotAddAvoidSpot(int movestate, const vec3_t origin, float radius, int type)
 {
+#if FEAT_RECAST_NAVMESH
+	(void)movestate; (void)origin; (void)radius; (void)type;
+#else
 	bot_movestate_t *ms;
 
 	ms = BotMoveStateFromHandle(movestate);
@@ -732,6 +743,7 @@ void BotAddAvoidSpot(int movestate, const vec3_t origin, float radius, int type)
 	ms->avoidspots[ms->numavoidspots].radius = radius;
 	ms->avoidspots[ms->numavoidspots].type = type;
 	ms->numavoidspots++;
+#endif
 } //end of the function BotAddAvoidSpot
 //===========================================================================
 //
@@ -839,6 +851,14 @@ static int BotAddToTarget(vec3_t start, vec3_t end, float maxdist, float *dist, 
 
 int BotMovementViewTarget(int movestate, bot_goal_t *goal, int travelflags, float lookahead, vec3_t target)
 {
+#if FEAT_RECAST_NAVMESH
+	/* Replaced by BotNav_MovementViewTarget in g_bot_nav.c for Recast builds.
+	 * This AAS path uses AAS_ReachabilityFromNum / BotGetReachabilityToGoal
+	 * which are unavailable under FEAT_RECAST_NAVMESH.
+	 * Call sites are fenced; this stub satisfies the linker only. */
+	(void)movestate; (void)goal; (void)travelflags; (void)lookahead; (void)target;
+	return qfalse;
+#else
 	aas_reachability_t reach;
 	int reachnum, lastareanum;
 	bot_movestate_t *ms;
@@ -884,6 +904,7 @@ int BotMovementViewTarget(int movestate, bot_goal_t *goal, int travelflags, floa
 	} //end while
 	//
 	return qfalse;
+#endif
 } //end of the function BotMovementViewTarget
 //===========================================================================
 //
@@ -907,6 +928,12 @@ static int BotVisible(int ent, vec3_t eye, vec3_t target)
 //===========================================================================
 int BotPredictVisiblePosition(vec3_t origin, int areanum, bot_goal_t *goal, int travelflags, vec3_t target)
 {
+#if FEAT_RECAST_NAVMESH
+	/* Deferred (D-26). AAS-specific — not used in Recast builds.
+	 * Callers are fenced under #if !FEAT_RECAST_NAVMESH. */
+	(void)origin; (void)areanum; (void)goal; (void)travelflags; (void)target;
+	return qfalse;
+#else
 	aas_reachability_t reach;
 	int reachnum, lastgoalareanum, lastareanum, i;
 	int avoidreach[MAX_AVOIDREACH];
@@ -961,6 +988,7 @@ int BotPredictVisiblePosition(vec3_t origin, int areanum, bot_goal_t *goal, int 
 	} //end while
 	//
 	return qfalse;
+#endif
 } //end of the function BotPredictVisiblePosition
 //===========================================================================
 //
@@ -3468,6 +3496,9 @@ void BotMoveToGoal(bot_moveresult_t *result, int movestate, bot_goal_t *goal, in
 //===========================================================================
 void BotResetAvoidReach(int movestate)
 {
+#if FEAT_RECAST_NAVMESH
+	(void)movestate;
+#else
 	bot_movestate_t *ms;
 
 	ms = BotMoveStateFromHandle(movestate);
@@ -3475,6 +3506,7 @@ void BotResetAvoidReach(int movestate)
 	memset(ms->avoidreach, 0, MAX_AVOIDREACH * sizeof(int));
 	memset(ms->avoidreachtimes, 0, MAX_AVOIDREACH * sizeof(float));
 	memset(ms->avoidreachtries, 0, MAX_AVOIDREACH * sizeof(int));
+#endif
 } //end of the function BotResetAvoidReach
 //===========================================================================
 //
@@ -3484,6 +3516,9 @@ void BotResetAvoidReach(int movestate)
 //===========================================================================
 void BotResetLastAvoidReach(int movestate)
 {
+#if FEAT_RECAST_NAVMESH
+	(void)movestate;
+#else
 	int i, latest;
 	float latesttime;
 	bot_movestate_t *ms;
@@ -3505,6 +3540,7 @@ void BotResetLastAvoidReach(int movestate)
 		ms->avoidreachtimes[latest] = 0;
 		if (ms->avoidreachtries[latest] > 0) ms->avoidreachtries[latest]--;
 	} //end if
+#endif
 } //end of the function BotResetLastAvoidReach
 //===========================================================================
 //

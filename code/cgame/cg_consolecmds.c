@@ -386,10 +386,6 @@ static consoleCommand_t	commands[] = {
 	{ "weapongrabbed", CG_WeaponGrabbed_f },
 	{ "tcmd", CG_TargetCommand_f },
 	{ "tell_target", CG_TellTarget_f },
-#if FEAT_STATS_WINDOW
-	{ "+stats", CG_StatsDown_f },
-	{ "-stats", CG_StatsUp_f },
-#endif
 #if FEAT_TA_UI
 	{ "nextTeamMember", CG_NextTeamMember_f },
 	{ "prevTeamMember", CG_PrevTeamMember_f },
@@ -434,11 +430,10 @@ Cmd_Argc() / Cmd_Argv()
 */
 qboolean CG_ConsoleCommand( void ) {
 	const char	*cmd;
-	int		i;
 
 	cmd = CG_Argv(0);
 
-	for ( i = 0 ; i < ARRAY_LEN( commands ) ; i++ ) {
+	for ( int i = 0 ; i < ARRAY_LEN( commands ) ; i++ ) {
 		if ( !Q_stricmp( cmd, commands[i].cmd ) ) {
 			commands[i].function();
 			return qtrue;
@@ -458,9 +453,7 @@ so it can perform tab completion
 =================
 */
 void CG_InitConsoleCommands( void ) {
-	int		i;
-
-	for ( i = 0 ; i < ARRAY_LEN( commands ) ; i++ ) {
+	for ( int i = 0 ; i < ARRAY_LEN( commands ) ; i++ ) {
 		trap_AddCommand( commands[i].cmd );
 	}
 

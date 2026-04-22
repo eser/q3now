@@ -1790,7 +1790,7 @@ int BotSetupGoalAI(void)
 		itemconfig = LoadItemConfig(filename);
 		if (!itemconfig)
 		{
-			botimport.Print(PRT_FATAL, "couldn't load item config\n");
+			botimport.Print(PRT_WARNING, "couldn't load item config, bot goals unavailable\n");
 			return BLERR_CANNOTLOADITEMCONFIG;
 		} //end if
 	}

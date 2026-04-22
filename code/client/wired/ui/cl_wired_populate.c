@@ -25,9 +25,6 @@ static const char *s_audioDeviceNames[WUI_AUDIO_DEVICE_CAPACITY + 1];
 static const char *s_audioDeviceValues[WUI_AUDIO_DEVICE_CAPACITY + 1];
 
 static int CL_WiredAudioDevicesPopulate( wuiPopulateResult_t *out ) {
-	int count;
-	int i;
-
 	if ( !out ) return 0;
 
 	out->state = WUI_POPULATE_LOADING;
@@ -36,7 +33,7 @@ static int CL_WiredAudioDevicesPopulate( wuiPopulateResult_t *out ) {
 	out->values = NULL;
 
 	/* Reserve slot 0 for the system-default option; enumerate into [1..]. */
-	count = S_GetAudioDeviceList( s_audioDeviceNames + 1, WUI_AUDIO_DEVICE_CAPACITY );
+	int count = S_GetAudioDeviceList( s_audioDeviceNames + 1, WUI_AUDIO_DEVICE_CAPACITY );
 
 	if ( count < 0 ) {
 		/* miniaudio context init or device enumeration failed. */
@@ -51,7 +48,7 @@ static int CL_WiredAudioDevicesPopulate( wuiPopulateResult_t *out ) {
 
 	/* For miniaudio the cvar value IS the device name (s_device matching
 	 * is by name, not UUID), so values[] mirrors names[] for real devices. */
-	for ( i = 1; i <= count; i++ ) {
+	for ( int i = 1; i <= count; i++ ) {
 		s_audioDeviceValues[i] = s_audioDeviceNames[i];
 	}
 

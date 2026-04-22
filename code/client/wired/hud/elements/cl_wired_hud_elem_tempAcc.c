@@ -40,17 +40,15 @@ void *CG_ModernHUDElementTempAccIconCreate( const modernhudConfig_t *config ) {
 void CG_ModernHUDElementTempAccRoutine( void *context ) {
 	modernHudElementTempAcc_t *element = (modernHudElementTempAcc_t *)context;
 	modernhudGlobalContext_t *ctx = CG_ModernHUDGetContext();
-	int wp;
-	float acc;
 	int fadeTime = 1500;  // fade after 3 seconds of no updates
 
 	if ( !element ) return;
 
 	// track the current weapon's temp accuracy
-	wp = wiredHud->weapon;
+	int wp = wiredHud->weapon;
 	if ( wp < 0 || wp >= (int)(sizeof(ctx->tempAcc.weapon) / sizeof(ctx->tempAcc.weapon[0])) ) return;
 
-	acc = ctx->tempAcc.weapon[wp].tempAccuracy;
+	float acc = ctx->tempAcc.weapon[wp].tempAccuracy;
 
 	// detect new accuracy data
 	if ( acc != element->lastAcc ) {

@@ -44,7 +44,6 @@ efficient collision detection
 ====================
 */
 void CG_BuildSolidList( void ) {
-	int			i;
 	centity_t	*cent;
 	snapshot_t	*snap;
 	entityState_t	*ent;
@@ -58,7 +57,7 @@ void CG_BuildSolidList( void ) {
 		snap = cg.snap;
 	}
 
-	for ( i = 0 ; i < snap->numEntities ; i++ ) {
+	for ( int i = 0 ; i < snap->numEntities ; i++ ) {
 		cent = &cg_entities[ snap->entities[ i ].number ];
 		ent = &cent->currentState;
 
@@ -160,7 +159,6 @@ CG_PointContents
 ================
 */
 int		CG_PointContents( const vec3_t point, int passEntityNum ) {
-	int			i;
 	entityState_t	*ent;
 	centity_t	*cent;
 	clipHandle_t cmodel;
@@ -168,7 +166,7 @@ int		CG_PointContents( const vec3_t point, int passEntityNum ) {
 
 	contents = trap_CM_PointContents (point, 0);
 
-	for ( i = 0 ; i < cg_numSolidEntities ; i++ ) {
+	for ( int i = 0 ; i < cg_numSolidEntities ; i++ ) {
 		cent = cg_solidEntities[ i ];
 
 		ent = &cent->currentState;
@@ -323,7 +321,6 @@ Predict push triggers and items
 =========================
 */
 static void CG_TouchTriggerPrediction( void ) {
-	int			i;
 	trace_t		trace;
 	entityState_t	*ent;
 	clipHandle_t cmodel;
@@ -341,7 +338,7 @@ static void CG_TouchTriggerPrediction( void ) {
 		return;
 	}
 
-	for ( i = 0 ; i < cg_numTriggerEntities ; i++ ) {
+	for ( int i = 0 ; i < cg_numTriggerEntities ; i++ ) {
 		cent = cg_triggerEntities[ i ];
 		ent = &cent->currentState;
 

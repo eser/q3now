@@ -88,9 +88,7 @@ static void WiredStoreLua_PairsCollect( wuiStoreEntry_t *entry, void *userData )
 }
 
 static int WiredStoreLua_PairsNext( lua_State *L ) {
-	int idx;
-
-	idx = (int)lua_tointeger( L, lua_upvalueindex( 2 ) ) + 1;
+	int idx = (int)lua_tointeger( L, lua_upvalueindex( 2 ) ) + 1;
 	lua_pushinteger( L, idx );
 	lua_replace( L, lua_upvalueindex( 2 ) );
 

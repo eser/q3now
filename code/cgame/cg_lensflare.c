@@ -27,22 +27,215 @@ typedef struct {
 } lensFlareEntity_t;
 
 static struct {
+	// BSP-discovered map lights
 	lensFlareEntity_t	entities[MAX_LENS_FLARE_ENTITIES];
 	int					numEntities;
-	int					checkIndex;	// round-robin index for interleaved visibility
+	int					checkIndex;
 
-	// original BrightArena shaders
-	qhandle_t			glareShader;
+	// .lfs missile flare effects (loaded from scripts/missiles.lfs)
+	lensFlareEffect_t	missileLensFlareEffects[MAX_MISSILE_LENSFLARE_EFFECTS];
+	int					numMissileLensFlareEffects;
+	int					lensFlareEffectBFG;
+	int					lensFlareEffectRocketLauncher;
+
+	// shaders for map + powerup flare rendering
+	qhandle_t			warmFlowShader;
 	qhandle_t			starShader;
-	qhandle_t			discShader;
-	qhandle_t			ringShader;
-	qhandle_t			lineShader;
-	// q3now cinematic shaders
 	qhandle_t			coolGlowShader;
 	qhandle_t			blueStreakShader;
-	qhandle_t			anamorphicShader;
 	qhandle_t			powerupGlowShader;
 } lf;
+
+/*
+==================
+CG_LoadFileToBuffer — flat .lfs file loader, no include stack
+==================
+*/
+static qboolean CG_LoadFileToBuffer( const char *path, char *buf, int bufSize ) {
+	fileHandle_t	f;
+	int				len;
+
+	len = trap_FS_FOpenFile( path, &f, FS_READ );
+	if ( len <= 0 ) {
+		if ( f ) trap_FS_FCloseFile( f );
+		return qfalse;
+	}
+	if ( len >= bufSize ) {
+		CG_Printf( S_COLOR_YELLOW "lens flare file too large: '%s'\n", path );
+		trap_FS_FCloseFile( f );
+		return qfalse;
+	}
+	trap_FS_Read( buf, len, f );
+	buf[len] = '\0';
+	trap_FS_FCloseFile( f );
+	return qtrue;
+}
+
+/*
+==================
+CG_FindMissileLensFlareEffect
+==================
+*/
+static int CG_FindMissileLensFlareEffect( const char *name ) {
+	for ( int i = 0; i < lf.numMissileLensFlareEffects; i++ ) {
+		if ( !Q_stricmp( lf.missileLensFlareEffects[i].name, name ) )
+			return i;
+	}
+	return -1;
+}
+
+/*
+==================
+CG_ParseLensFlare — parse one { ... } sub-flare block
+Ported from BrightArena cg_main.c (JUHOX)
+==================
+*/
+static qboolean CG_ParseLensFlare( const char **p, lensFlare_t *fl, const char *effectName ) {
+	ComParser       parser = { 0 };
+	const char      *token;
+
+	fl->pos                = 1.0f;
+	fl->size               = 1.0f;
+	fl->rgba[0] = fl->rgba[1] = fl->rgba[2] = fl->rgba[3] = 255.0f;
+	fl->fadeAngleFactor    = 1.0f;
+	fl->entityAngleFactor  = 1.0f;
+	fl->rotationRollFactor = 1.0f;
+
+	while ( 1 ) {
+		token = COM_Parse( &parser, p );
+		if ( !token[0] ) {
+			CG_Printf( S_COLOR_YELLOW "unexpected end in lens flare '%s'\n", effectName );
+			return qfalse;
+		}
+		if ( !Q_stricmp( token, "}" ) ) break;
+
+		if ( !Q_stricmp( token, "shader" ) ) {
+			token = COM_Parse( &parser, p );
+			if ( token[0] ) fl->shader = trap_R_RegisterShaderNoMip( token );
+		} else if ( !Q_stricmp( token, "mode" ) ) {
+			token = COM_Parse( &parser, p );
+			if      ( !Q_stricmp( token, "reflexion" ) ) fl->mode = LFM_reflexion;
+			else if ( !Q_stricmp( token, "glare"     ) ) fl->mode = LFM_glare;
+			else if ( !Q_stricmp( token, "star"      ) ) fl->mode = LFM_star;
+			else {
+				CG_Printf( S_COLOR_YELLOW "unknown flare mode '%s' in '%s'\n", token, effectName );
+				return qfalse;
+			}
+		} else if ( !Q_stricmp( token, "pos" ) ) {
+			fl->pos  = atof( COM_Parse( &parser, p ) );
+		} else if ( !Q_stricmp( token, "size" ) ) {
+			fl->size = atof( COM_Parse( &parser, p ) );
+		} else if ( !Q_stricmp( token, "color" ) ) {
+			fl->rgba[0] = 255.0f * Com_Clamp( 0, 1, atof( COM_Parse( &parser, p ) ) );
+			fl->rgba[1] = 255.0f * Com_Clamp( 0, 1, atof( COM_Parse( &parser, p ) ) );
+			fl->rgba[2] = 255.0f * Com_Clamp( 0, 1, atof( COM_Parse( &parser, p ) ) );
+		} else if ( !Q_stricmp( token, "alpha" ) ) {
+			fl->rgba[3] = 255.0f * Com_Clamp( 0, 1, atof( COM_Parse( &parser, p ) ) );
+		} else if ( !Q_stricmp( token, "rotation" ) ) {
+			fl->rotationOffset      = Com_Clamp( -360, 360, atof( COM_Parse( &parser, p ) ) );
+			fl->rotationYawFactor   = atof( COM_Parse( &parser, p ) );
+			fl->rotationPitchFactor = atof( COM_Parse( &parser, p ) );
+			fl->rotationRollFactor  = atof( COM_Parse( &parser, p ) );
+		} else if ( !Q_stricmp( token, "fadeAngleFactor" ) ) {
+			fl->fadeAngleFactor = atof( COM_Parse( &parser, p ) );
+			if ( fl->fadeAngleFactor < 0 ) fl->fadeAngleFactor = 0;
+		} else if ( !Q_stricmp( token, "entityAngleFactor" ) ) {
+			fl->entityAngleFactor = atof( COM_Parse( &parser, p ) );
+			if ( fl->entityAngleFactor < 0 ) fl->entityAngleFactor = 0;
+		} else if ( !Q_stricmp( token, "intensityThreshold" ) ) {
+			fl->intensityThreshold = Com_Clamp( 0, 0.99f, atof( COM_Parse( &parser, p ) ) );
+		} else {
+			CG_Printf( S_COLOR_YELLOW "unknown token '%s' in flare '%s'\n", token, effectName );
+			return qfalse;
+		}
+	}
+	return qtrue;
+}
+
+/*
+==================
+CG_ParseLensFlareEffect — parse one named effect block
+Ported from BrightArena cg_main.c (JUHOX). Simplified: no import/sunparm/file-stack.
+==================
+*/
+static qboolean CG_ParseLensFlareEffect( const char **p, lensFlareEffect_t *eff ) {
+	ComParser       parser = { 0 };
+	const char      *token;
+
+	token = COM_Parse( &parser, p );
+	if ( !token[0] ) return qfalse;
+	Q_strncpyz( eff->name, token, sizeof( eff->name ) );
+
+	token = COM_Parse( &parser, p );
+	if ( Q_stricmp( token, "{" ) ) {
+		CG_Printf( S_COLOR_YELLOW "expected '{' after effect '%s'\n", eff->name );
+		return qfalse;
+	}
+
+	eff->range     = 400.0f;
+	eff->rangeSqr  = 160000.0f;
+	eff->fadeAngle = 20.0f;
+
+	while ( 1 ) {
+		token = COM_Parse( &parser, p );
+		if ( !token[0] ) {
+			CG_Printf( S_COLOR_YELLOW "unexpected end in effect '%s'\n", eff->name );
+			return qfalse;
+		}
+		if ( !Q_stricmp( token, "}" ) ) break;
+
+		if ( !Q_stricmp( token, "{" ) ) {
+			if ( eff->numLensFlares >= MAX_LENSFLARES_PER_EFFECT ) {
+				CG_Printf( S_COLOR_YELLOW "too many sub-flares in '%s' (max %d)\n",
+				           eff->name, MAX_LENSFLARES_PER_EFFECT );
+				return qfalse;
+			}
+			if ( !CG_ParseLensFlare( p, &eff->lensFlares[eff->numLensFlares], eff->name ) )
+				return qfalse;
+			eff->numLensFlares++;
+		} else if ( !Q_stricmp( token, "range" ) ) {
+			eff->range    = atof( COM_Parse( &parser, p ) );
+			eff->rangeSqr = eff->range * eff->range;
+		} else if ( !Q_stricmp( token, "fadeAngle" ) ) {
+			eff->fadeAngle = Com_Clamp( 0, 180, atof( COM_Parse( &parser, p ) ) );
+		} else {
+			CG_Printf( S_COLOR_YELLOW "unknown token '%s' in effect '%s'\n", token, eff->name );
+			return qfalse;
+		}
+	}
+	return qtrue;
+}
+
+/*
+==================
+CG_LoadMissileLensFlares — loads scripts/missiles.lfs
+==================
+*/
+static void CG_LoadMissileLensFlares( void ) {
+	static char	buf[65536];
+	const char	*p;
+
+	lf.numMissileLensFlareEffects    = 0;
+	lf.lensFlareEffectBFG            = -1;
+	lf.lensFlareEffectRocketLauncher = -1;
+
+	if ( !CG_LoadFileToBuffer( "scripts/missiles.lfs", buf, sizeof( buf ) ) )
+		return;
+
+	p = buf;
+	while ( lf.numMissileLensFlareEffects < MAX_MISSILE_LENSFLARE_EFFECTS ) {
+		if ( !CG_ParseLensFlareEffect( &p, &lf.missileLensFlareEffects[lf.numMissileLensFlareEffects] ) )
+			break;
+		lf.numMissileLensFlareEffects++;
+	}
+
+	lf.lensFlareEffectBFG            = CG_FindMissileLensFlareEffect( "missile_bfg" );
+	lf.lensFlareEffectRocketLauncher = CG_FindMissileLensFlareEffect( "missile_rocket_launcher" );
+
+	CG_Printf( "Lens flares: %d missile effects loaded (bfg=%d rl=%d)\n",
+	           lf.numMissileLensFlareEffects,
+	           lf.lensFlareEffectBFG, lf.lensFlareEffectRocketLauncher );
+}
 
 /*
 ==================
@@ -65,16 +258,15 @@ void CG_InitLensFlares( void ) {
 
 	memset( &lf, 0, sizeof( lf ) );
 
-	// register shaders — q3now cinematic variants
-	lf.glareShader       = trap_R_RegisterShader( "lfWarmGlow" );
+	// shaders for map + powerup flare rendering
+	lf.warmFlowShader    = trap_R_RegisterShader( "lfWarmGlow" );
 	lf.starShader        = trap_R_RegisterShader( "lfStar" );
-	lf.discShader        = trap_R_RegisterShader( "lfGhostDisc" );
-	lf.ringShader        = trap_R_RegisterShader( "lfGhostRing" );
-	lf.lineShader        = trap_R_RegisterShader( "lfAnamorphic" );
 	lf.coolGlowShader    = trap_R_RegisterShader( "lfCoolGlow" );
-	lf.blueStreakShader   = trap_R_RegisterShader( "lfBlueStreak" );
-	lf.anamorphicShader   = trap_R_RegisterShader( "lfAnamorphic" );
+	lf.blueStreakShader  = trap_R_RegisterShader( "lfBlueStreak" );
 	lf.powerupGlowShader = trap_R_RegisterShader( "lfPowerupGlow" );
+
+	// load missile flare effects from data file
+	CG_LoadMissileLensFlares();
 
 	// parse the entity string for "light" entities
 	// The entity string is available via trap_GetEntityToken
@@ -264,7 +456,7 @@ static void CG_AddMapFlares( void ) {
 		// Layer 4: small bright core — soft glow, warm white
 		if ( scale > 0.4f ) {
 			ent.radius = 4 + scale * 8;
-			ent.customShader = lf.glareShader;
+			ent.customShader = lf.warmFlowShader;
 			ent.shaderRGBA[0] = 255;
 			ent.shaderRGBA[1] = 250;
 			ent.shaderRGBA[2] = 240;
@@ -278,93 +470,63 @@ static void CG_AddMapFlares( void ) {
 ==================
 CG_AddMissileFlare
 
-Adds a lens flare to a missile entity. Called from cg_ents.c or cg_weapons.c
-for each visible missile.
+Adds lens flare to a missile entity using the loaded .lfs effect data.
+Called from cg_ents.c for each visible missile each frame.
 ==================
 */
 void CG_AddMissileFlare( centity_t *cent ) {
-	refEntity_t	ent;
-	byte		r, g, b;
-	float		pulse;
+	lensFlareEffect_t	*eff;
+	int					effIdx;
+	int					i;
+	refEntity_t			ent;
+	vec3_t				toLight, screenPt, delta, elemOrigin;
+	float				dist, depth, scale;
 
-	if ( !cg_missileFlare.integer ) {
-		return;
-	}
+	if ( !cg_missileFlare.integer ) return;
 
-	// per-weapon color — vivid, saturated for JJ Abrams look
 	switch ( cent->currentState.weapon ) {
-	case WP_ROCKET_LAUNCHER:
-		r = 255; g = 180; b = 60;		// hot orange
-		break;
-	case WP_PLASMA_RIFLE:
-		r = 100; g = 255; b = 120;		// neon green
-		break;
-	case WP_RAILGUN:
-		r = 100; g = 140; b = 255;		// electric blue
-		break;
-	case WP_GRENADE_LAUNCHER:
-		r = 240; g = 220; b = 80;		// bright yellow
-		break;
-	case WP_LIGHTNING_GUN:
-		r = 200; g = 220; b = 255;		// white-blue
-		break;
-	default:
-		r = g = b = 220;				// bright white
-		break;
+	case WP_ROCKET_LAUNCHER:	effIdx = lf.lensFlareEffectRocketLauncher;	break;
+	default:					return;
 	}
+	if ( effIdx < 0 ) return;
 
-	// subtle pulse based on time + entity number (each missile pulses differently)
-	pulse = 0.85f + 0.15f * sin( cg.time * 0.008f + cent->currentState.number * 1.7f );
+	eff = &lf.missileLensFlareEffects[effIdx];
+
+	VectorSubtract( cent->lerpOrigin, cg.refdef.vieworg, toLight );
+	dist = VectorLength( toLight );
+	if ( dist < 1.0f || dist > eff->range ) return;
+
+	depth = DotProduct( toLight, cg.refdef.viewaxis[0] );
+	if ( depth <= 0 ) return;
+
+	scale = 1.0f - dist / eff->range;
+
+	// screen-axis pivot: point on forward axis at missile depth
+	VectorMA( cg.refdef.vieworg, depth, cg.refdef.viewaxis[0], screenPt );
+	// delta drives ghost element positioning (pos != 1.0)
+	VectorSubtract( cent->lerpOrigin, screenPt, delta );
 
 	memset( &ent, 0, sizeof( ent ) );
 	ent.reType = RT_SPRITE;
-	VectorCopy( cent->lerpOrigin, ent.origin );
 
-	// ── Layer 1: large soft glow ──
-	ent.radius = 48 * pulse;
-	ent.customShader = lf.glareShader;
-	ent.shaderRGBA[0] = (byte)( r * 0.5f );
-	ent.shaderRGBA[1] = (byte)( g * 0.5f );
-	ent.shaderRGBA[2] = (byte)( b * 0.5f );
-	ent.shaderRGBA[3] = 40;
-	trap_R_AddRefEntityToScene( &ent );
+	for ( i = 0; i < eff->numLensFlares; i++ ) {
+		lensFlare_t *fl = &eff->lensFlares[i];
+		if ( !fl->shader ) continue;
+		if ( fl->intensityThreshold > scale ) continue;
 
-	// ── Layer 2: medium core ──
-	ent.radius = 20 * pulse;
-	ent.customShader = lf.glareShader;
-	ent.shaderRGBA[0] = r;
-	ent.shaderRGBA[1] = g;
-	ent.shaderRGBA[2] = b;
-	ent.shaderRGBA[3] = 60;
-	trap_R_AddRefEntityToScene( &ent );
+		// pos=1 → missile origin, pos=0 → screen axis pt, pos<0 → mirrored
+		VectorMA( screenPt, fl->pos, delta, elemOrigin );
+		VectorCopy( elemOrigin, ent.origin );
 
-	// ── Layer 3: bright center — glare (soft) not disc (hard circle) ──
-	ent.radius = 8 * pulse;
-	ent.customShader = lf.glareShader;
-	ent.shaderRGBA[0] = 255;
-	ent.shaderRGBA[1] = 255;
-	ent.shaderRGBA[2] = 255;
-	ent.shaderRGBA[3] = 80;
-	trap_R_AddRefEntityToScene( &ent );
+		ent.radius        = fl->size * 24.0f * scale;
+		if ( ent.radius < 2.0f ) ent.radius = 2.0f;
 
-	// ── Layer 4: star spike — low alpha, large, ethereal ──
-	ent.radius = 32 * pulse;
-	ent.customShader = lf.starShader;
-	ent.shaderRGBA[0] = (byte)( r * 0.7f );
-	ent.shaderRGBA[1] = (byte)( g * 0.7f );
-	ent.shaderRGBA[2] = (byte)( b * 0.7f );
-	ent.shaderRGBA[3] = 35;
-	trap_R_AddRefEntityToScene( &ent );
+		ent.customShader  = fl->shader;
+		ent.shaderRGBA[0] = (byte)Com_Clamp( 0, 255, fl->rgba[0] * scale );
+		ent.shaderRGBA[1] = (byte)Com_Clamp( 0, 255, fl->rgba[1] * scale );
+		ent.shaderRGBA[2] = (byte)Com_Clamp( 0, 255, fl->rgba[2] * scale );
+		ent.shaderRGBA[3] = (byte)Com_Clamp( 0, 255, fl->rgba[3] );
 
-	// ── Layer 5: outer ring halo ──
-	if ( cent->currentState.weapon == WP_ROCKET_LAUNCHER ||
-		 cent->currentState.weapon == WP_RAILGUN ) {
-		ent.radius = 56 * pulse;
-		ent.customShader = lf.ringShader;
-		ent.shaderRGBA[0] = (byte)( r * 0.3f );
-		ent.shaderRGBA[1] = (byte)( g * 0.3f );
-		ent.shaderRGBA[2] = (byte)( b * 0.3f );
-		ent.shaderRGBA[3] = 25;
 		trap_R_AddRefEntityToScene( &ent );
 	}
 }
@@ -431,7 +593,7 @@ void CG_AddPowerupFlare( centity_t *cent, int powerupTag ) {
 
 	// Layer 2: bright core
 	ent.radius = 14 * pulse;
-	ent.customShader = lf.glareShader;
+	ent.customShader = lf.warmFlowShader;
 	ent.shaderRGBA[0] = r;
 	ent.shaderRGBA[1] = g;
 	ent.shaderRGBA[2] = b;

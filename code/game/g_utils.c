@@ -36,9 +36,7 @@ int remapCount = 0;
 shaderRemap_t remappedShaders[MAX_SHADER_REMAPS];
 
 void AddRemap(const char *oldShader, const char *newShader, float timeOffset) {
-	int i;
-
-	for (i = 0; i < remapCount; i++) {
+	for (int i = 0; i < remapCount; i++) {
 		if (Q_stricmp(oldShader, remappedShaders[i].oldShader) == 0) {
 			// found it, just update this one
 			strcpy(remappedShaders[i].newShader,newShader);
@@ -56,10 +54,9 @@ void AddRemap(const char *oldShader, const char *newShader, float timeOffset) {
 
 const char *BuildShaderStateConfig(void) {
 	static char	buff[MAX_STRING_CHARS*4];
-	int i;
 
 	qstring_t buff_qs = QS_Wrap(buff, sizeof(buff));
-	for (i = 0; i < remapCount; i++) {
+	for (int i = 0; i < remapCount; i++) {
 		QS_Appendf(&buff_qs, "%s=%s:%5.2f@", remappedShaders[i].oldShader, remappedShaders[i].newShader, remappedShaders[i].timeOffset);
 	}
 	return buff;
