@@ -106,6 +106,10 @@ set(GAME_MODULE_SHARED_SOURCES
     ${SOURCE_DIR}/qcommon/q_math.c
     ${SOURCE_DIR}/qcommon/q_shared.c
     ${SOURCE_DIR}/qcommon/q_string.c
+    # util/ functions extracted from q_shared.c — must ship with every game module
+    ${SOURCE_DIR}/qcommon/util/math.c
+    ${SOURCE_DIR}/qcommon/util/hash.c
+    ${SOURCE_DIR}/qcommon/util/string.c
 )
 
 set(CGAME_SOURCES_BASEGAME ${CGAME_SOURCES} ${GAME_MODULE_SHARED_SOURCES})
@@ -124,14 +128,14 @@ if(BUILD_GAME_LIBRARIES)
 
     add_library(                ${CGAME_MODULE_BINARY_BASEGAME} SHARED ${CGAME_SOURCES_BASEGAME} ${CGAME_BINARY_SOURCES})
     target_compile_definitions( ${CGAME_MODULE_BINARY_BASEGAME} PRIVATE CGAME)
-    target_include_directories( ${CGAME_MODULE_BINARY_BASEGAME} PRIVATE ${SOURCE_DIR}/cgame)
+    target_include_directories( ${CGAME_MODULE_BINARY_BASEGAME} PRIVATE ${SOURCE_DIR}/cgame ${SOURCE_DIR}/qcommon)
     target_link_libraries(      ${CGAME_MODULE_BINARY_BASEGAME} PRIVATE ${COMMON_LIBRARIES})
     set_target_properties(      ${CGAME_MODULE_BINARY_BASEGAME} PROPERTIES OUTPUT_NAME "${CGAME_MODULE_BINARY}${_GAME_ARCH}" PREFIX "")
     set_output_dirs(            ${CGAME_MODULE_BINARY_BASEGAME} SUBDIRECTORY ${BASEGAME})
 
     add_library(                ${GAME_MODULE_BINARY_BASEGAME} SHARED ${GAME_SOURCES_BASEGAME} ${GAME_BINARY_SOURCES})
     target_compile_definitions( ${GAME_MODULE_BINARY_BASEGAME} PRIVATE QAGAME)
-    target_include_directories( ${GAME_MODULE_BINARY_BASEGAME} PRIVATE ${SOURCE_DIR}/game ${SOURCE_DIR}/botlib)
+    target_include_directories( ${GAME_MODULE_BINARY_BASEGAME} PRIVATE ${SOURCE_DIR}/game ${SOURCE_DIR}/botlib ${SOURCE_DIR}/qcommon)
     target_link_libraries(      ${GAME_MODULE_BINARY_BASEGAME} PRIVATE ${COMMON_LIBRARIES})
     set_target_properties(      ${GAME_MODULE_BINARY_BASEGAME} PROPERTIES OUTPUT_NAME "${GAME_MODULE_BINARY}${_GAME_ARCH}" PREFIX "")
     set_output_dirs(            ${GAME_MODULE_BINARY_BASEGAME} SUBDIRECTORY ${BASEGAME})

@@ -1,75 +1,9 @@
 #include "server.h"
+#include "../qcommon/wired/core/scripting/user_vm.h"
 
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
-
-#define RCON_LUA_MAX_MEMORY (1024 * 1024)
-
-typedef struct {
-	size_t used;
-	size_t limit;
-} rconLuaMem_t;
-
-typedef struct {
-	char *output;
-	int outputLen;
-	int length;
-	qboolean truncated;
-} rconOutputCapture_t;
-
-static rconLuaMem_t s_rconLuaMem;
-static rconOutputCapture_t *s_capture;
-static int s_execStartTime;
-
-static void RconOutput_Append( const char *text ) {
-	if ( !s_capture || !s_capture->output || !text ) {
-		return;
-	}
-
-	for ( int i = 0; text[i] != '\0'; i++ ) {
-		if ( s_capture->length >= s_capture->outputLen - 1 ) {
-			s_capture->truncated = qtrue;
-			break;
-		}
-		s_capture->output[ s_capture->length++ ] = text[i];
-	}
-
-	s_capture->output[ s_capture->length ] = '\0';
-}
-
-static const char *RconLua_ToString( lua_State *L, int idx ) {
-	const char *s;
-
-	lua_getglobal( L, "tostring" );
-	lua_pushvalue( L, idx );
-	lua_call( L, 1, 1 );
-	s = lua_tostring( L, -1 );
-	if ( !s ) {
-		s = "";
-	}
-	return s;
-}
-
-static void RconLua_PopToString( lua_State *L ) {
-	lua_pop( L, 1 );
-}
-
-static int l_print( lua_State *L ) {
-	int n = lua_gettop( L );
-
-	for ( int i = 1; i <= n; i++ ) {
-		const char *s = RconLua_ToString( L, i );
-		if ( i > 1 ) {
-			RconOutput_Append( "\t" );
-		}
-		RconOutput_Append( s );
-		RconLua_PopToString( L );
-	}
-
-	RconOutput_Append( "\n" );
-	return 0;
-}
 
 static void Rcon_SanitizeInline( char *dst, int dstSize, const char *src ) {
 	int i;
@@ -383,41 +317,6 @@ static void RconLua_RegisterTable( lua_State *L, const char *name, const luaL_Re
 	lua_setglobal( L, name );
 }
 
-static void *rcon_lua_alloc( void *ud, void *ptr, size_t osize, size_t nsize ) {
-	rconLuaMem_t *mem = (rconLuaMem_t *)ud;
-
-	if ( nsize == 0 ) {
-		if ( ptr ) {
-			if ( mem->used >= osize ) {
-				mem->used -= osize;
-			} else {
-				mem->used = 0;
-			}
-			free( ptr );
-		}
-		return NULL;
-	}
-
-	if ( nsize > osize ) {
-		size_t grow = nsize - osize;
-		if ( mem->used + grow > mem->limit ) {
-			return NULL;
-		}
-		mem->used += grow;
-	} else {
-		mem->used -= ( osize - nsize );
-	}
-
-	return realloc( ptr, nsize );
-}
-
-static void rcon_lua_hook( lua_State *L, lua_Debug *ar ) {
-	(void)L;
-	(void)ar;
-	if ( Sys_Milliseconds() - s_execStartTime > 1000 ) {
-		luaL_error( L, "rcon script timeout (1 second limit)" );
-	}
-}
 
 void SV_RconLua_Init( void ) {
 	static const luaL_Reg cvarLib[] = {
@@ -456,39 +355,13 @@ void SV_RconLua_Init( void ) {
 	};
 	lua_State *L;
 
-	if ( svs.rconLua.initialized ) {
-		SV_RconLua_Shutdown();
-	}
-
-	s_rconLuaMem.used = 0;
-	s_rconLuaMem.limit = RCON_LUA_MAX_MEMORY;
-	L = lua_newstate( rcon_lua_alloc, &s_rconLuaMem );
+	L = UserVM_GetState();
 	if ( !L ) {
-		Com_Printf( S_COLOR_RED "WiredRconLua: failed to initialize\n" );
+		Com_Printf( S_COLOR_RED "WiredRconLua: User VM not initialized\n" );
 		return;
 	}
 
-	luaL_openlibs( L );
-
-	lua_pushnil( L ); lua_setglobal( L, "io" );
-	lua_pushnil( L ); lua_setglobal( L, "os" );
-	lua_pushnil( L ); lua_setglobal( L, "require" );
-	lua_pushnil( L ); lua_setglobal( L, "loadfile" );
-	lua_pushnil( L ); lua_setglobal( L, "dofile" );
-	lua_pushnil( L ); lua_setglobal( L, "load" );
-	lua_pushnil( L ); lua_setglobal( L, "rawget" );
-	lua_pushnil( L ); lua_setglobal( L, "rawset" );
-	lua_pushnil( L ); lua_setglobal( L, "getmetatable" );
-	lua_pushnil( L ); lua_setglobal( L, "setmetatable" );
-	lua_pushnil( L ); lua_setglobal( L, "debug" );
-	lua_pushnil( L ); lua_setglobal( L, "package" );
-	lua_pushnil( L ); lua_setglobal( L, "coroutine" );
-	lua_pushnil( L ); lua_setglobal( L, "collectgarbage" );
-	lua_pushnil( L ); lua_setglobal( L, "_G" );
-
-	lua_pushcfunction( L, l_print );
-	lua_setglobal( L, "print" );
-
+	/* Convenience shortcut: format = string.format */
 	lua_getglobal( L, "string" );
 	lua_getfield( L, -1, "format" );
 	lua_setglobal( L, "format" );
@@ -499,69 +372,18 @@ void SV_RconLua_Init( void ) {
 	RconLua_RegisterTable( L, "players", playersLib );
 	RconLua_RegisterTable( L, "game", gameLib );
 
-	svs.rconLua.L = L;
 	svs.rconLua.initialized = qtrue;
 	memset( &svs.rconLua.currentClient, 0, sizeof( svs.rconLua.currentClient ) );
 }
 
 void SV_RconLua_Shutdown( void ) {
-	if ( svs.rconLua.L ) {
-		lua_close( svs.rconLua.L );
-	}
-	memset( &svs.rconLua, 0, sizeof( svs.rconLua ) );
-	s_capture = NULL;
-	s_rconLuaMem.used = 0;
+	/* User VM owns the lua_State; do not call lua_close here. */
+	svs.rconLua.initialized = qfalse;
 }
 
 qboolean SV_RconLua_Execute( const char *code, char *output, int outputLen ) {
-	lua_State *L = svs.rconLua.L;
-	rconOutputCapture_t capture;
-	char expr[1024];
-	int status;
-
-	if ( !L || !code || !output || outputLen <= 0 ) {
+	if ( !svs.rconLua.initialized || !code || !output || outputLen <= 0 ) {
 		return qfalse;
 	}
-
-	output[0] = '\0';
-	capture.output = output;
-	capture.outputLen = outputLen;
-	capture.length = 0;
-	capture.truncated = qfalse;
-	s_capture = &capture;
-
-	s_execStartTime = Sys_Milliseconds();
-	lua_sethook( L, rcon_lua_hook, LUA_MASKCOUNT, 10000 );
-
-	Com_sprintf( expr, sizeof( expr ), "return %s", code );
-	status = luaL_loadstring( L, expr );
-	if ( status != 0 ) {
-		lua_pop( L, 1 );
-		status = luaL_loadstring( L, code );
-	}
-
-	if ( status == 0 ) {
-		status = lua_pcall( L, 0, LUA_MULTRET, 0 );
-	}
-
-	lua_sethook( L, NULL, 0, 0 );
-
-	if ( status != 0 ) {
-		const char *err = lua_tostring( L, -1 );
-		if ( !err ) {
-			err = "unknown lua error";
-		}
-		Com_sprintf( output, outputLen, "error: %s", err );
-		lua_pop( L, 1 );
-		s_capture = NULL;
-		return qfalse;
-	}
-
-	if ( capture.truncated ) {
-		RconOutput_Append( "... (output truncated)\n" );
-	}
-
-	lua_settop( L, 0 );
-	s_capture = NULL;
-	return qtrue;
+	return UserVM_RconExecute( code, output, outputLen );
 }

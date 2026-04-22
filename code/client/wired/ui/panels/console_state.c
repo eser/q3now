@@ -19,23 +19,12 @@ along with Quake III Arena source code; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
-// console.c
+// console_state.c
 
-#include "client.h"
-#include "../qcommon/arena.h"
-#include <time.h>
-
-#include "wired/ui/cl_wired_text.h"
-#ifndef DEDICATED
-#include "wired/ui/cl_wired_ui.h"
-#endif
-
-#define  DEFAULT_CONSOLE_WIDTH 78
-#define  CON_LINEBUF_SIZE      513  // enough for any realistic terminal width + NUL
-
-#define  NUM_CON_TIMES  17
-
-#define  CON_TEXTSIZE   65536
+#include "../../../client.h"
+#include "../../../../qcommon/arena.h"
+#include "console_private.h"
+#include "../cl_wired_text.h"
 
 int bigchar_width;
 int bigchar_height;
@@ -46,10 +35,10 @@ int smallchar_height;
 
 cvar_t		*con_lineheight;
 
-static float con_textPointSize = 0;                    /* real-pixel size for FONT_MONO (glyph height) */
-static float con_lineAdvance   = SMALLCHAR_HEIGHT;     /* line-to-line advance = con_textPointSize * con_lineheight */
-static float con_textCharWidth = 0;     /* monospace width in real pixels */
-static float con_textNativeCharW = 0;   /* monospace width in real screen pixels */
+float con_textPointSize   = 0;
+float con_lineAdvance     = SMALLCHAR_HEIGHT;
+float con_textCharWidth   = 0;
+float con_textNativeCharW = 0;
 
 /*
 ================
@@ -80,72 +69,6 @@ static void Con_UpdateTextMetrics( void ) {
 	}
 }
 
-/*
-================
-Con_NativeToVirtualX / Con_NativeToVirtualY
-
-Identity pass-through — Text_Draw now expects real screen pixels,
-which is the same coordinate space the console code already uses.
-Kept as helpers so call sites remain readable.
-================
-*/
-static float Con_NativeToVirtualX( float nativeX ) {
-	return nativeX;
-}
-
-static float Con_NativeToVirtualY( float nativeY ) {
-	return nativeY;
-}
-
-typedef struct {
-	qboolean	initialized;
-
-	short	text[CON_TEXTSIZE];
-	int		current;		// line where next message will be printed
-	int		x;				// offset in current line for next print
-	int		display;		// bottom of console displays this line
-
-	int 	linewidth;		// characters across screen
-	int		totallines;		// total lines in console scrollback
-
-	float	xadjust;		// for wide aspect screens
-
-	float	displayFrac;	// aproaches finalFrac at scr_conspeed
-	float	finalFrac;		// 0.0 to 1.0 lines of console to display
-
-	int		vislines;		// in scanlines
-
-	int		times[NUM_CON_TIMES];	// cls.realtime time the line was generated
-								// for transparent notify lines
-	vec4_t	color;
-
-	int		viswidth;
-	int		vispage;
-
-	qboolean newline;
-
-	// search state
-	qboolean	searchActive;
-	char		searchPattern[256];
-	int			searchCursor;		// cursor position in searchPattern
-	int			searchLine;			// line index of current match (-1 = none)
-	int			searchMatchCount;	// total matches found
-
-	// mark (selection) mode state — Ctrl+M copies selected region
-	// Lines are absolute line indices into the scrollback buffer, same
-	// convention as con.current / con.display.  Columns are 0-based into
-	// the fixed-width con.text grid.
-	qboolean	markActive;
-	int			markStartLine;
-	int			markStartCol;
-	int			markEndLine;
-	int			markEndCol;
-
-} console_t;
-
-extern  qboolean    chat_team;
-extern  int         chat_playerNum;
-
 // forward declarations
 void Con_SearchClose( void );
 void Con_MarkOpen( void );
@@ -157,10 +80,8 @@ qboolean Con_MarkCellIsSelected( int row, int col );
 /* Console state lives in a persistent arena so it survives Hunk_ClearLevel().
    All code uses `con.field` — the macro expands to (*s_con).field which is
    an lvalue, so assignments (con.field = ...) compile correctly.           */
-#define CONSOLE_ARENA_SIZE ( sizeof(console_t) + 4096 )   /* struct + padding */
-static arena_t    *s_conArena = NULL;
-static console_t  *s_con      = NULL;
-#define con (*s_con)
+static arena_t   *s_conArena = NULL;
+console_t        *s_con      = NULL;
 
 cvar_t		*con_conspeed;
 cvar_t		*con_autoclear;
@@ -186,12 +107,12 @@ cvar_t		*con_colCVar;
 cvar_t		*con_colCmd;
 cvar_t		*con_colValue;
 
-static vec4_t con_bgColor     = { 0.063f, 0.074f, 0.074f, 0.965f };
-static vec4_t con_borderColor = { 0.278f, 0.470f, 0.698f, 1.0f };
-static vec4_t con_textColor   = { 0.886f, 0.886f, 0.886f, 1.0f };
-static vec4_t con_cvarColor   = { 0.278f, 0.470f, 0.698f, 1.0f };
-static vec4_t con_cmdColor    = { 0.309f, 0.654f, 0.741f, 1.0f };
-static vec4_t con_valueColor  = { 0.898f, 0.737f, 0.223f, 1.0f };
+vec4_t con_bgColor     = { 0.063f, 0.074f, 0.074f, 0.965f };
+vec4_t con_borderColor = { 0.278f, 0.470f, 0.698f, 1.0f };
+vec4_t con_textColor   = { 0.886f, 0.886f, 0.886f, 1.0f };
+vec4_t con_cvarColor   = { 0.278f, 0.470f, 0.698f, 1.0f };
+vec4_t con_cmdColor    = { 0.309f, 0.654f, 0.741f, 1.0f };
+vec4_t con_valueColor  = { 0.898f, 0.737f, 0.223f, 1.0f };
 
 static char con_bgString[16]     = "";
 static char con_borderString[16] = "";
@@ -306,7 +227,7 @@ static void Con_Clear_f( void ) {
 	Con_Bottom();		// go to end
 }
 
-						
+
 /*
 ================
 Con_Dump_f
@@ -378,7 +299,7 @@ static void Con_Dump_f( void )
 	FS_FCloseFile( f );
 }
 
-						
+
 /*
 ================
 Con_ClearNotify
@@ -618,7 +539,7 @@ Refreshes every per-element cvar.  Cheap — short-circuits when the
 cvar string has not changed since last call.
 ================
 */
-static void Con_UpdateColors( void ) {
+void Con_UpdateColors( void ) {
 	static const vec4_t defBG     = { 0.063f, 0.074f, 0.074f, 0.965f };
 	static const vec4_t defBorder = { 0.278f, 0.470f, 0.698f, 1.0f };
 	static const vec4_t defText   = { 0.886f, 0.886f, 0.886f, 1.0f };
@@ -748,7 +669,7 @@ void Con_Shutdown( void )
 Con_Fixup
 ===============
 */
-static void Con_Fixup( void ) 
+static void Con_Fixup( void )
 {
 	int filled;
 
@@ -942,603 +863,6 @@ void CL_ConsolePrint( const char *txt ) {
 	}
 }
 
-
-/*
-==============================================================================
-
-DRAWING
-
-==============================================================================
-*/
-
-
-/*
-================
-Con_DrawInput
-
-Draw the editline after a ] prompt
-================
-*/
-static void Con_DrawInput( void ) {
-	if ( cls.state != CA_DISCONNECTED && !(Key_GetCatcher( ) & KEYCATCH_CONSOLE ) ) {
-		return;
-	}
-
-	int y = con.vislines - ( (int)con_lineAdvance * 3 );
-	float cw = con_textNativeCharW;     /* character width for grid positioning (native px) */
-	float vcw = con_textCharWidth;    /* character width in virtual pixels */
-	float vy = Con_NativeToVirtualY( (float)y );     /* y in virtual pixels */
-
-	if ( con.searchActive ) {
-		// draw search bar: "Find: pattern_ (N matches)"
-		static vec4_t searchColor = { 1.0f, 1.0f, 0.0f, 1.0f }; // yellow
-		static vec4_t noMatchColor = { 1.0f, 0.3f, 0.3f, 1.0f }; // red
-		char	info[512];
-		vec4_t	*color;
-
-		if ( con.searchPattern[0] && con.searchMatchCount == 0 )
-			color = &noMatchColor;
-		else
-			color = &searchColor;
-
-		{
-			float vxa = Con_NativeToVirtualX( con.xadjust );
-
-			// draw "Find:" prefix
-			Text_DrawChar( 'F', vxa + 1 * vcw, vy, FONT_MONO, con_textPointSize, *color );
-			Text_DrawChar( 'i', vxa + 2 * vcw, vy, FONT_MONO, con_textPointSize, *color );
-			Text_DrawChar( 'n', vxa + 3 * vcw, vy, FONT_MONO, con_textPointSize, *color );
-			Text_DrawChar( 'd', vxa + 4 * vcw, vy, FONT_MONO, con_textPointSize, *color );
-			Text_DrawChar( ':', vxa + 5 * vcw, vy, FONT_MONO, con_textPointSize, *color );
-
-			// draw search pattern
-			int x = 7;
-			for ( int i = 0; con.searchPattern[i] && x < con.linewidth - 16; i++, x++ ) {
-				Text_DrawChar( con.searchPattern[i], vxa + x * vcw, vy, FONT_MONO, con_textPointSize, con.color );
-			}
-
-			// draw blinking cursor
-			if ( (int)( cls.realtime >> 8 ) & 1 ) {
-				Text_DrawChar( '_', vxa + x * vcw, vy, FONT_MONO, con_textPointSize, con.color );
-			}
-
-			// draw match count on the right
-			if ( con.searchPattern[0] ) {
-				Com_sprintf( info, sizeof( info ), "(%d matches)", con.searchMatchCount );
-				int len = strlen( info );
-				for ( int i = 0; i < len; i++ ) {
-					Text_DrawChar( info[i], vxa + ( con.linewidth - len + i ) * vcw, vy, FONT_MONO, con_textPointSize, *color );
-				}
-			}
-
-			re.SetColor( NULL );
-			return;
-		}
-	}
-
-	{
-		float vxa = Con_NativeToVirtualX( con.xadjust );
-		Text_DrawChar( ']', vxa + 1 * vcw, vy, FONT_MONO, con_textPointSize, con.color );
-
-		/* Field_Draw still uses bitmap path; position it on the grid */
-		Field_Draw( &g_consoleField, con.xadjust + 2 * cw, y,
-			cls.glconfig.vidWidth - 3 * smallchar_width, qtrue, qtrue );
-
-		/* CNQ3 backport: syntax-highlight the first token on the input
-		   line by drawing a thin colored underline below it.  We also
-		   render a help panel below the input line when the token
-		   resolves to a known cvar or command. */
-		{
-			const char *buf = g_consoleField.buffer;
-			int start = 0;
-			int end = 0;
-			char token[128];
-			qboolean knownCvar = qfalse;
-			qboolean knownCmd = qfalse;
-			const float *highlightColor = NULL;
-			char helpText[MAX_STRING_CHARS];
-
-			/* skip a leading / or \ used for explicit commands */
-			if ( buf[start] == '/' || buf[start] == '\\' )
-				start++;
-
-			/* skip leading whitespace */
-			while ( buf[start] == ' ' || buf[start] == '\t' )
-				start++;
-
-			end = start;
-			while ( buf[end] != '\0' && buf[end] != ' ' && buf[end] != '\t' ) {
-				end++;
-			}
-			int tokLen = end - start;
-
-			if ( tokLen > 0 && tokLen < (int)sizeof( token ) ) {
-				for ( int k = 0; k < tokLen; k++ )
-					token[k] = buf[start + k];
-				token[tokLen] = '\0';
-
-				knownCvar = Help_IsKnownCvar( token );
-				if ( !knownCvar )
-					knownCmd = Help_IsKnownCommand( token );
-
-				if ( knownCvar )
-					highlightColor = con_cvarColor;
-				else if ( knownCmd )
-					highlightColor = con_cmdColor;
-
-				/* "start" is the char offset after the leading / prefix.
-				   Field_Draw places the first character of the buffer at
-				   (con.xadjust + 2 * cw).  Adjust for the prefix and the
-				   scroll offset (widthInChars). */
-				int tokenStartCharOffset = start - g_consoleField.scroll;
-				if ( tokenStartCharOffset >= 0 && highlightColor != NULL ) {
-					float tx = con.xadjust + (2 + tokenStartCharOffset) * cw;
-					float tw = tokLen * cw;
-					float ty = y + (int)con_textPointSize - 2;
-					re.SetColor( highlightColor );
-					re.DrawStretchPic( tx, ty, tw, 2, 0, 0, 1, 1, cls.whiteShader );
-					re.SetColor( NULL );
-				}
-			}
-
-			/* draw the help panel one line below the input */
-			if ( tokLen > 0 && Help_LookupText( token, helpText, sizeof( helpText ) ) ) {
-				float hy = (float)( y + (int)con_lineAdvance + 2 );
-				float hvy = Con_NativeToVirtualY( hy );
-				int hLen = (int)strlen( helpText );
-				if ( hLen > con.linewidth - 2 )
-					hLen = con.linewidth - 2;
-				for ( int hi = 0; hi < hLen; hi++ ) {
-					Text_DrawChar( helpText[hi],
-						vxa + (1 + hi) * vcw, hvy,
-						FONT_MONO, con_textPointSize, con_textColor );
-				}
-			}
-		}
-	}
-}
-
-
-/*
-================
-Con_DrawNotify
-
-Draws the last few lines of output transparently over the game top
-================
-*/
-static void Con_DrawNotify( void )
-{
-	// Suppress notify text during loading screen
-	if ( cls.state == CA_LOADING || cl_loadProgress.startTime > 0 ) {
-		return;
-	}
-
-	float vcw = con_textCharWidth;    /* character width in virtual pixels */
-	int currentColorIndex = ColorIndex( COLOR_WHITE );
-	re.SetColor( g_color_table[ currentColorIndex ] );
-
-	int v = cl_conYOffset->integer;
-	for (int i = con.current-con_notifylines->integer ; i<=con.current ; i++)
-	{
-		int linelength = 0;
-
-		if (i < 0)
-			continue;
-		int time = con.times[i % NUM_CON_TIMES];
-		if (time == 0)
-			continue;
-		time = cls.realtime - time;
-		if ( time >= con_notifytime->value*1000 )
-			continue;
-		short *text = con.text + (i % con.totallines)*con.linewidth;
-
-		if (cl.snap.ps.pm_type != PM_INTERMISSION && Key_GetCatcher( ) & (KEYCATCH_UI | KEYCATCH_CGAME) ) {
-			continue;
-		}
-
-		{
-			float notifyAlpha = 1.0f;
-
-			if ( con_fade->integer ) {
-				float total     = con_notifytime->value * 1000.0f;
-				float fadeStart = total * 0.75f;
-				if ( (float)time >= fadeStart ) {
-					notifyAlpha = 1.0f - ( (float)time - fadeStart ) / ( total - fadeStart );
-					if ( notifyAlpha < 0.0f ) notifyAlpha = 0.0f;
-				}
-			}
-
-			float vxa = Con_NativeToVirtualX( cl_conXOffset->integer + con.xadjust );
-			float vy = Con_NativeToVirtualY( (float)v );
-			for (int x = 0 ; x < con.linewidth ; x++) {
-				vec4_t drawColor;
-				if ( ( text[x] & 0xff ) == ' ' ) {
-					continue;
-				}
-				int colorIndex = ( text[x] >> 8 ) & 63;
-				currentColorIndex = colorIndex;
-				Vector4Copy( g_color_table[ colorIndex ], drawColor );
-				drawColor[3] *= notifyAlpha;
-				Text_DrawChar( text[x] & 0xff, vxa + (x+1)*vcw, vy,
-				               FONT_MONO, con_textPointSize, drawColor );
-				linelength++;
-			}
-		}
-
-		if (linelength > 0) {
-			v += (int)con_lineAdvance;
-		}
-	}
-
-	re.SetColor( NULL );
-
-	if ( Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CGAME) ) {
-		return;
-	}
-
-	// draw the chat line
-	if ( Key_GetCatcher( ) & KEYCATCH_MESSAGE )
-	{
-		// v is already in native screen pixels — use directly
-
-		int skip;
-		if (chat_team)
-		{
-			vec4_t chatColor = { 1.0f, 1.0f, 1.0f, 1.0f };
-			Text_Draw( "say_team:", (float)smallchar_width, (float)v, FONT_DISPLAY,
-			           (float)bigchar_height, chatColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
-			skip = 10;
-		}
-		else
-		{
-			vec4_t chatColor = { 1.0f, 1.0f, 1.0f, 1.0f };
-			Text_Draw( "say:", (float)smallchar_width, (float)v, FONT_DISPLAY,
-			           (float)bigchar_height, chatColor, TEXT_ALIGN_LEFT, TEXT_DROPSHADOW );
-			skip = 5;
-		}
-
-		{
-			/* All coordinates in native screen pixels */
-			int fieldX = skip * bigchar_width;
-			int fieldY = v;
-			int fieldW = cls.glconfig.vidWidth - ( skip + 1 ) * bigchar_width;
-			Field_BigDraw( &chatField, fieldX, fieldY, fieldW, qtrue, qtrue );
-		}
-	}
-}
-
-
-/*
-================
-Con_ComputeFPS
-
-Client-side 4-frame rolling FPS counter for con_fps.
-Uses Sys_Milliseconds directly since the console is not inside a cgame VM.
-================
-*/
-static int Con_ComputeFPS( void ) {
-	enum { CON_FPS_FRAMES = 4 };
-	static int      samples[4];
-	static int      head;
-	static int      previous;
-	static qboolean seeded;
-
-	int now = Sys_Milliseconds();
-	if ( !seeded ) {
-		previous = now;
-		seeded   = qtrue;
-		return 0;
-	}
-	int dt = now - previous;
-	previous = now;
-	samples[ head++ % CON_FPS_FRAMES ] = dt;
-	int total = 0;
-	for ( int i = 0; i < CON_FPS_FRAMES; i++ ) total += samples[i];
-	if ( total <= 0 ) total = 1;
-	return 1000 * CON_FPS_FRAMES / total;
-}
-
-/*
-================
-Con_DrawStatus
-
-Draws clock (con_clock) and/or FPS (con_fps) right-aligned at the
-top-right of the open console background.  Stacks from the right:
-FPS rightmost, clock immediately left of it.
-================
-*/
-static void Con_DrawStatus( void ) {
-	const float       y    = Con_NativeToVirtualY( 2.0f );
-	const float       gap  = con_textNativeCharW * 2.0f;
-	static const vec4_t statusColor = { 0.6f, 0.6f, 0.6f, 0.9f };
-
-	if ( !con_fps->integer && !con_clock->integer )
-		return;
-
-	char              buf[32];
-	float             x = (float)cls.glconfig.vidWidth - con_textNativeCharW;
-
-	if ( con_fps->integer ) {
-		int fps = Con_ComputeFPS();
-		Com_sprintf( buf, sizeof(buf), "%d fps", fps );
-		x -= Text_Measure( buf, FONT_MONO, con_textPointSize );
-		Text_Draw( buf, Con_NativeToVirtualX( x ), y, FONT_MONO,
-		           con_textPointSize, statusColor, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
-		x -= gap;
-	}
-
-	if ( con_clock->integer ) {
-		time_t    ts;
-		struct tm *lt;
-		ts = time( NULL );
-		lt = localtime( &ts );
-		Com_sprintf( buf, sizeof(buf), "%02d:%02d:%02d",
-		             lt->tm_hour, lt->tm_min, lt->tm_sec );
-		x -= Text_Measure( buf, FONT_MONO, con_textPointSize );
-		Text_Draw( buf, Con_NativeToVirtualX( x ), y, FONT_MONO,
-		           con_textPointSize, statusColor, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
-	}
-}
-
-/*
-================
-Con_DrawSolidConsole
-
-Draws the console with the solid background
-================
-*/
-static void Con_DrawSolidConsole( float frac ) {
-
-	static float conColorValue[4] = { 0.0, 0.0, 0.0, 0.0 };
-	// for cvar value change tracking
-	static char  conColorString[ MAX_CVAR_VALUE_STRING ] = { '\0' };
-
-	int lines = cls.glconfig.vidHeight * frac;
-	if ( lines <= 0 )
-		return;
-
-	if ( re.FinishBloom )
-		re.FinishBloom();
-
-	if ( lines > cls.glconfig.vidHeight )
-		lines = cls.glconfig.vidHeight;
-
-	float wf = (float)cls.glconfig.vidWidth;
-
-	// draw the background
-	float yf = frac * (float)cls.glconfig.vidHeight;
-
-	// on wide screens, center the text
-	con.xadjust = 0;
-
-	/* CNQ3 backport: refresh per-element color cvars if changed */
-	Con_UpdateColors();
-
-	if ( yf < 1.0 ) {
-		yf = 0;
-	} else {
-		/* Prefer the per-element con_colBG when present; fall back to
-		   cl_conColor (legacy 4-integer RGBA form) and finally to the
-		   stock console background shader. cl_consoleType 1 forces the
-		   classic Q3 shader regardless of color cvars. */
-		if ( cl_consoleType->integer == 1 ) {
-			re.SetColor( g_color_table[ ColorIndex( COLOR_WHITE ) ] );
-			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.consoleShader );
-		} else if ( con_colBG && con_colBG->string[0] ) {
-			re.SetColor( con_bgColor );
-			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.whiteShader );
-		} else if ( cl_conColor->string[0] ) {
-			// track changes
-			if ( strcmp( cl_conColor->string, conColorString ) )
-			{
-				char buf[ MAX_CVAR_VALUE_STRING ];
-				char *v[4];
-				Q_strncpyz( conColorString, cl_conColor->string, sizeof( conColorString ) );
-				Q_strncpyz( buf, cl_conColor->string, sizeof( buf ) );
-				Com_Split( buf, v, 4, ' ' );
-				for ( int i = 0; i < 4 ; i++ ) {
-					conColorValue[ i ] = Q_atof( v[ i ] ) / 255.0f;
-					if ( conColorValue[ i ] > 1.0f ) {
-						conColorValue[ i ] = 1.0f;
-					} else if ( conColorValue[ i ] < 0.0f ) {
-						conColorValue[ i ] = 0.0f;
-					}
-				}
-			}
-			re.SetColor( conColorValue );
-			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.whiteShader );
-		} else {
-			re.SetColor( g_color_table[ ColorIndex( COLOR_WHITE ) ] );
-			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.consoleShader );
-		}
-	}
-
-	/* border — per-element color with a red fallback */
-	if ( con_colBorder && con_colBorder->string[0] ) {
-		re.SetColor( con_borderColor );
-	} else {
-		re.SetColor( g_color_table[ ColorIndex( COLOR_RED ) ] );
-	}
-	re.DrawStretchPic( 0, yf, wf, 2, 0, 0, 1, 1, cls.whiteShader );
-
-	//y = yf;
-
-	// draw the version number
-	{
-		float verVX = Con_NativeToVirtualX( (float)cls.glconfig.vidWidth
-		              - ( ARRAY_LEN( Q3NOW_ENGINE_VERSION ) ) * con_textNativeCharW );
-		float verVY = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance) );
-		Text_Draw( Q3NOW_ENGINE_VERSION, verVX, verVY, FONT_MONO,
-		           con_textPointSize, colorWhite, TEXT_ALIGN_LEFT, 0 );
-	}
-
-	// draw the text
-	con.vislines = lines;
-	int rows = lines / smallchar_width - 1;	// rows of text to draw
-
-	int y = lines - ((int)con_lineAdvance * 4);
-
-	int row = con.display;
-
-	{
-		float vcw = con_textCharWidth;
-		float vxa = Con_NativeToVirtualX( con.xadjust );
-
-		// draw from the bottom up
-		if ( con.display != con.current )
-		{
-			// draw arrows to show the buffer is backscrolled
-			float vy = Con_NativeToVirtualY( (float)y );
-			for ( int x = 0 ; x < con.linewidth ; x += 4 )
-				Text_DrawChar( '^', vxa + (x+1)*vcw, vy,
-				               FONT_MONO, con_textPointSize, g_color_table[ ColorIndex( COLOR_RED ) ] );
-			y -= (int)con_lineAdvance;
-			row--;
-		}
-
-#ifdef USE_CURL
-		if ( download.progress[ 0 ] )
-		{
-			float dlVY = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance) );
-			int dlLen = strlen( download.progress );
-			for ( int x = 0 ; x < dlLen ; x++ )
-			{
-				Text_DrawChar( download.progress[x], ( x + 1 ) * vcw, dlVY,
-				               FONT_MONO, con_textPointSize, g_color_table[ ColorIndex( COLOR_CYAN ) ] );
-			}
-		}
-#endif
-
-		for ( int i = 0 ; i < rows ; i++, y -= (int)con_lineAdvance, row-- )
-		{
-			if ( row < 0 )
-				break;
-
-			if ( con.current - row >= con.totallines ) {
-				// past scrollback wrap point
-				continue;
-			}
-
-			// highlight search match line with yellow background
-			if ( con.searchActive && con.searchLine >= 0 && row == con.searchLine ) {
-				static vec4_t searchBg = { 0.3f, 0.3f, 0.0f, 0.5f };
-				re.SetColor( searchBg );
-				re.DrawStretchPic( con.xadjust, y, wf, (int)con_lineAdvance, 0, 0, 1, 1, cls.whiteShader );
-			}
-
-			// mark-mode selection highlight: draw contiguous selected spans
-			// on this row as a solid background before the characters
-			if ( con.markActive ) {
-				static vec4_t markBg = { 0.25f, 0.40f, 0.75f, 0.55f };
-				int runStart = -1;
-				for ( int cx = 0; cx <= con.linewidth; cx++ ) {
-					qboolean inside = ( cx < con.linewidth )
-						? Con_MarkCellIsSelected( row, cx )
-						: qfalse;
-					if ( inside && runStart < 0 ) {
-						runStart = cx;
-					} else if ( !inside && runStart >= 0 ) {
-						float px = con.xadjust + (runStart + 1) * vcw;
-						float pw = (cx - runStart) * vcw;
-						re.SetColor( markBg );
-						re.DrawStretchPic( px, y, pw, (int)con_lineAdvance,
-						                   0, 0, 1, 1, cls.whiteShader );
-						runStart = -1;
-					}
-				}
-			}
-
-			short *text = con.text + (row % con.totallines) * con.linewidth;
-			float vy = Con_NativeToVirtualY( (float)y );
-
-			for ( int x = 0 ; x < con.linewidth ; x++ ) {
-				// skip rendering whitespace
-				if ( ( text[x] & 0xff ) == ' ' ) {
-					continue;
-				}
-				int colorIndex = ( text[ x ] >> 8 ) & 63;
-				Text_DrawChar( text[x] & 0xff, vxa + (x + 1) * vcw, vy,
-				               FONT_MONO, con_textPointSize, g_color_table[ colorIndex ] );
-			}
-		}
-	}
-
-	// ── WiredUI recovery banners ─────────────────────────────────────────
-	// Only in fullscreen console (frac==1.0) while disconnected — that is
-	// exactly when the user is staring at the Layer-0 fallback surface.
-	// The yellow banner tells them the menus are offline and how to recover.
-	// The red banner appears for 3 seconds after a failed recovery attempt.
-#ifndef DEDICATED
-	if ( frac >= 1.0f && cls.state < CA_ACTIVE ) {
-		if ( !WiredUI_IsHealthy() ) {
-			static const vec4_t colorOffline = { 1.0f, 0.85f, 0.0f, 1.0f };
-			float bx = Con_NativeToVirtualX( con.xadjust + con_textNativeCharW );
-			float by = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance) );
-			Text_Draw( "[WiredUI offline]  Press Escape or type 'wired_recover' to reload menus.",
-			           bx, by, FONT_MONO, con_textPointSize, colorOffline, TEXT_ALIGN_LEFT, 0 );
-		}
-		{
-			int failTime = WiredUI_GetLastRecoveryFailTime();
-			if ( failTime != 0 && ( cls.realtime - failTime ) < 3000 ) {
-				static const vec4_t colorFail = { 1.0f, 0.25f, 0.2f, 1.0f };
-				float bx = Con_NativeToVirtualX( con.xadjust + con_textNativeCharW );
-				float by = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance * 2) );
-				Text_Draw( "[WiredUI reload failed.  Type 'wired_reload' or 'wired_recover' to retry.]",
-				           bx, by, FONT_MONO, con_textPointSize, colorFail, TEXT_ALIGN_LEFT, 0 );
-			}
-		}
-	}
-#endif
-
-	// draw the input prompt, user text, and cursor if desired
-	Con_DrawInput();
-
-	Con_DrawStatus();
-
-	re.SetColor( NULL );
-}
-
-
-/*
-==================
-Con_DrawConsole
-==================
-*/
-void Con_DrawConsole( void ) {
-
-	// check for console width changes from a vid mode change
-	Con_CheckResize();
-
-	// For all pre-active states (except cinematic), render the console fullscreen
-	// so the log wall is visible during connecting and spawn phases.
-	// Three cases where we skip this auto-expand — WiredUI owns the background:
-	//   KEYCATCH_UI / KEYCATCH_CGAME: an interactive UI/cgame element is rendered.
-	//   CA_LOADING / CA_PRIMED:       the WiredUI loading screen is rendered.
-	//   cl_loadProgress.startTime > 0: the WiredUI loading screen is rendered
-	//                                  even in pre-LOADING states (e.g. CA_CONNECTED
-	//                                  during async spawn phases).
-	// In all these cases the console is still openable via ~ — it draws at the
-	// user's current con.displayFrac and is never blocked, just not auto-expanded.
-	if ( cls.state < CA_ACTIVE && cls.state != CA_CINEMATIC ) {
-		if ( !( Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CGAME) ) ) {
-			if ( cls.state != CA_LOADING && cls.state != CA_PRIMED
-			     && cl_loadProgress.startTime <= 0 ) {
-				Con_DrawSolidConsole( 1.0 );
-				return;
-			}
-		}
-	}
-
-	if ( con.displayFrac ) {
-		Con_DrawSolidConsole( con.displayFrac );
-	} else {
-		// draw notify lines
-		if ( cls.state == CA_ACTIVE ) {
-			Con_DrawNotify();
-		}
-	}
-}
-
 //================================================================
 
 /*
@@ -1548,14 +872,14 @@ Con_RunConsole
 Scroll it up or down
 ==================
 */
-void Con_RunConsole( void ) 
+void Con_RunConsole( void )
 {
 	// decide on the destination height of the console
 	if ( Key_GetCatcher( ) & KEYCATCH_CONSOLE )
 		con.finalFrac = cl_consoleHeight->value;
 	else
 		con.finalFrac = 0.0;	// none visible
-	
+
 	// instant snap when animation is disabled
 	if ( !con_anim->integer ) {
 		con.displayFrac = con.finalFrac;
@@ -1585,7 +909,7 @@ void Con_PageUp( int lines )
 		lines = con.vispage - 2;
 
 	con.display -= lines;
-	
+
 	Con_Fixup();
 }
 
@@ -1701,32 +1025,39 @@ static int Con_SearchFind( int startLine, int direction ) {
 	if ( !con.searchPattern[0] )
 		return -1;
 
-	char	lineBuf[CON_LINEBUF_SIZE];
+	char lineBuf[CON_LINEBUF_SIZE];
 
-	int numLines;
-	if ( con.current >= con.totallines )
+	/* Valid line range: [oldest, con.current].
+	   Use modular arithmetic so backward search wraps correctly even when
+	   the ring buffer is full (oldest > 0). The old code used
+	   "while (line < 0) line += numLines" which never triggered for a full
+	   buffer since oldest is positive, causing backward wrap to silently
+	   fail. */
+	int numLines, oldest;
+	if ( con.current >= con.totallines ) {
 		numLines = con.totallines;
-	else
+		oldest   = con.current - con.totallines + 1;
+	} else {
 		numLines = con.current + 1;
+		oldest   = 0;
+	}
 
-	for ( int i = 1; i <= numLines; i++ ) {
-		int line = startLine + i * direction;
+	/* Clamp startLine into the valid window — it can go stale if new lines
+	   arrived after the last search (con.current advanced). */
+	if ( startLine < oldest )   startLine = oldest;
+	if ( startLine > con.current ) startLine = con.current;
 
-		// wrap around
-		while ( line < 0 )
-			line += numLines;
-		while ( line > con.current )
-			line -= numLines;
-
-		// don't search beyond valid range
-		if ( con.current - line >= con.totallines )
-			continue;
+	/* pos is an offset within [0, numLines-1] where 0=oldest, numLines-1=newest.
+	   Step by direction each iteration; modular wrap stays within valid range.
+	   Loop numLines-1 times — visits every line except startLine itself. */
+	int pos = startLine - oldest;
+	for ( int i = 0; i < numLines - 1; i++ ) {
+		pos = ( pos + direction + numLines ) % numLines;
+		int line = oldest + pos;
 
 		Con_LineToString( line, lineBuf, sizeof( lineBuf ) );
-
-		if ( Q_stristr( lineBuf, con.searchPattern ) ) {
+		if ( Q_stristr( lineBuf, con.searchPattern ) )
 			return line;
-		}
 	}
 
 	return -1;
@@ -1777,6 +1108,25 @@ Con_SearchUpdate
 Re-run search from current match position after pattern changes.
 ================
 */
+static int Con_VisibleRows( void ) {
+	// Actual on-screen content rows: console pixel height / line advance, minus
+	// the 4 reserved slots at the bottom (input, status, Find bar, padding)
+	// and 1 more for the ^^^^ scroll indicator when scrolled.
+	int lineH = (int)con_lineAdvance;
+	if ( lineH < 1 )
+		lineH = smallchar_width > 0 ? smallchar_width : 8;
+	int vis = ( con.vislines > 0 ) ? ( con.vislines / lineH - 5 ) : ( con.vispage / 2 );
+	return vis < 1 ? 1 : vis;
+}
+
+static void Con_ScrollToLine( int line ) {
+	int half = Con_VisibleRows() / 2;
+	con.display = line + 1 + half;
+	if ( con.display > con.current )
+		con.display = con.current;
+	Con_Fixup();
+}
+
 static void Con_SearchUpdate( void ) {
 	if ( !con.searchPattern[0] ) {
 		con.searchLine = -1;
@@ -1799,11 +1149,8 @@ static void Con_SearchUpdate( void ) {
 	// search backward from current display position
 	con.searchLine = Con_SearchFind( con.display, -1 );
 
-	// scroll to match
-	if ( con.searchLine >= 0 ) {
-		con.display = con.searchLine;
-		Con_Fixup();
-	}
+	if ( con.searchLine >= 0 )
+		Con_ScrollToLine( con.searchLine );
 }
 
 
@@ -1856,8 +1203,7 @@ void Con_SearchNext( qboolean forward ) {
 	int found = Con_SearchFind( startLine, dir );
 	if ( found >= 0 ) {
 		con.searchLine = found;
-		con.display = found;
-		Con_Fixup();
+		Con_ScrollToLine( found );
 	}
 }
 
@@ -1879,6 +1225,8 @@ void Con_SearchChar( int ch ) {
 			con.searchCursor--;
 			con.searchPattern[con.searchCursor] = '\0';
 			Con_SearchUpdate();
+		} else {
+			Con_SearchClose();
 		}
 		return;
 	}

@@ -68,6 +68,9 @@ ENDIF()
 AUX_SOURCE_DIRECTORY(code/botlib BOTLIB_SRCS)
 ADD_LIBRARY(botlib OBJECT ${BOTLIB_SRCS})
 TARGET_COMPILE_DEFINITIONS(botlib PRIVATE BOTLIB)
+# code/qcommon needed so wired/* sub-headers (e.g. wired/con/log.h) can
+# resolve q_shared.h and peer headers via the include-dir search path.
+TARGET_INCLUDE_DIRECTORIES(botlib PRIVATE code/qcommon)
 
 AUX_SOURCE_DIRECTORY(code/server SERVER_SRCS)
 list(REMOVE_ITEM SERVER_SRCS code/server/sv_rankings.c)
@@ -87,6 +90,39 @@ TARGET_COMPILE_DEFINITIONS(qcommon_ded PUBLIC DEDICATED)
 # LZ4 include path (for SW3Z archive reader)
 TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE src/libs/lz4)
 TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE src/libs/lz4)
+
+# code/qcommon as explicit include root so wired/* sub-components can resolve
+# sibling headers (qcommon.h, q_shared.h, unzip.h, etc.) without relative paths.
+TARGET_INCLUDE_DIRECTORIES(qcommon     PRIVATE code/qcommon)
+TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE code/qcommon)
+
+# wired/core/vfs — virtual filesystem
+FILE(GLOB WIRED_VFS_SRCS  code/qcommon/wired/core/vfs/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_VFS_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_VFS_SRCS})
+
+# wired/core/cvars — cvar sub-component
+FILE(GLOB WIRED_CVAR_SRCS code/qcommon/wired/core/cvars/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CVAR_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CVAR_SRCS})
+
+# wired/core/shell — log pipeline (console/tty/file sinks)
+FILE(GLOB WIRED_CON_SRCS  code/qcommon/wired/core/shell/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CON_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CON_SRCS})
+
+# wired/core/events — event primitive stubs (V2 bodies TBD)
+FILE(GLOB WIRED_EVENT_SRCS code/qcommon/wired/core/events/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_EVENT_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_EVENT_SRCS})
+
+# util/ — utility sub-components (crypto, md5, md4; string/sort/hash extraction TBD)
+FILE(GLOB UTIL_SRCS code/qcommon/util/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${UTIL_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${UTIL_SRCS})
+TARGET_INCLUDE_DIRECTORIES(qcommon     PRIVATE code/qcommon/util)
+TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE code/qcommon/util)
+TARGET_INCLUDE_DIRECTORIES(botlib      PRIVATE code/qcommon/util)
 
 # ── zlib-ng (faster inflate for pk3 decompression) ────────────────
 # Replaces the embedded zlib in unzip.c via USE_ZLIB_NG guard.
@@ -378,6 +414,7 @@ AUX_SOURCE_DIRECTORY(code/client/wired/ui          CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/store       CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/hud         CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/hud/elements CLIENT_SRCS)
+AUX_SOURCE_DIRECTORY(code/client/wired/ui/panels   CLIENT_SRCS)
 # bg_misc.c, bg_weapons.c and bg_gametypes.c are in QCOMMON_SRCS (shared with dedicated server); not duplicated here
 IF(NOT USE_CURL)
 	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_curl.c)
@@ -494,19 +531,26 @@ IF(USE_RENDERER_DLOPEN)
 		code/qcommon/q_string.c
 		code/qcommon/puff.c
 		code/qcommon/q_math.c
+		# util/ functions extracted from q_shared.c — must ship with every renderer module
+		code/qcommon/util/math.c
+		code/qcommon/util/hash.c
+		code/qcommon/util/string.c
 	)
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE USE_RENDERER_DLOPEN RENDERER_PREFIX="${RENDERER_PREFIX}" RENDERER_DEFAULT=${RENDERER_DEFAULT})
 
 	ADD_LIBRARY(${RENDERER_PREFIX}_opengl${RENDEXT} SHARED ${RENDERER_GL_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
+	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl${RENDEXT} PRIVATE code/qcommon)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl${RENDEXT} PROPERTIES PREFIX "")
 
 	ADD_LIBRARY(${RENDERER_PREFIX}_opengl2${RENDEXT} SHARED ${RENDERER_GL2_SRCS} ${RENDERER_GL2_FALLBACK_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
+	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE code/qcommon)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_opengl2${RENDEXT} PROPERTIES PREFIX "")
 
 	ADD_LIBRARY(${RENDERER_PREFIX}_vulkan${RENDEXT} SHARED ${RENDERER_VK_SRCS} ${RENDERER_COMMON_SRCS} ${AUX_SRCS})
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
+	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE code/qcommon)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PROPERTIES PREFIX "")
 
 	# Linux: renderer shared libs need libm for math functions (powf etc.)
@@ -679,8 +723,8 @@ IF(USE_LUA)
 	set_target_properties(luajit PROPERTIES IMPORTED_LOCATION ${LUAJIT_LIB})
 	add_dependencies(luajit luajit_build)
 
-	# Headless Lua runtime lives in qcommon/wired/scripting/ — used by both client and dedicated server
-	AUX_SOURCE_DIRECTORY(code/qcommon/wired/scripting QCOMMON_SCRIPTING_SRCS)
+	# Headless Lua runtime lives in qcommon/wired/core/scripting/ — used by both client and dedicated server
+	AUX_SOURCE_DIRECTORY(code/qcommon/wired/core/scripting QCOMMON_SCRIPTING_SRCS)
 	TARGET_SOURCES(qcommon PRIVATE ${QCOMMON_SCRIPTING_SRCS})
 	TARGET_SOURCES(qcommon_ded PRIVATE ${QCOMMON_SCRIPTING_SRCS})
 

@@ -52,7 +52,6 @@ int Sys_Milliseconds( void )
 	return sys_curtime;
 }
 
-
 /*
 ================
 Sys_RandomBytes

@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "server.h"
+#include "../qcommon/wired/core/scripting/user_vm.h"
 #include "../qcommon/q_feats.h"
 
 #include "../qcommon/wired/net/wn_public.h"
@@ -848,6 +849,7 @@ void SV_Init( void )
 	SV_TrackCvarChanges();
 
 	memset( svs.rconSessions, 0, sizeof( svs.rconSessions ) );
+	UserVM_Init();
 	SV_RconLua_Init();
 	SV_Lua_Init();
 
@@ -930,6 +932,7 @@ void SV_Shutdown( const char *finalmsg ) {
 	SV_ShutdownGameProgs();
 	SV_Lua_Shutdown();
 	SV_RconLua_Shutdown();
+	UserVM_Shutdown();
 #if FEAT_RECAST_NAVMESH
 	Nav_Shutdown();
 #endif

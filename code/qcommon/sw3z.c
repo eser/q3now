@@ -17,7 +17,7 @@
 #include "q_shared.h"
 #include "qcommon.h"
 #include "q_feats.h"
-#include "files_pack.h"
+#include "wired/core/vfs/files_pack.h"
 
 #include <lz4.h>
 #include <lz4frame.h>

@@ -11,9 +11,9 @@ WiredScript_RegisterBindings(); they are invoked in WiredScript_PostInit().
 ===========================================================================
 */
 
-#include "../../q_shared.h"
-#include "../../qcommon.h"
-#include "../../arena.h"
+#include "q_shared.h"
+#include "qcommon.h"
+#include "arena.h"
 #include "wired_scripting.h"
 
 #include <lua.h>

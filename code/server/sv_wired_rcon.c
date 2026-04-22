@@ -1,5 +1,5 @@
 #include "server.h"
-#include "../qcommon/crypto.h"
+#include "../qcommon/util/crypto.h"
 
 static cvar_t *sv_wiredRconPassword;
 

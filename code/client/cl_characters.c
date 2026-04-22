@@ -17,7 +17,7 @@ No trap syscall is added — this extends the existing CG_TRAP_GETVALUE path.
 */
 
 #include "client.h"
-#include "../qcommon/wired/scripting/wired_scripting.h"
+#include "../qcommon/wired/core/scripting/wired_scripting.h"
 
 #include <lua.h>
 #include <lualib.h>

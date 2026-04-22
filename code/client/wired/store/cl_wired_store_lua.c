@@ -1,6 +1,6 @@
 #include "../../../qcommon/q_shared.h"
 #include "../../../qcommon/qcommon.h"
-#include "../../../qcommon/wired/scripting/wired_scripting.h"
+#include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 #include "cl_wired_store.h"
 #include "../ui/cl_wired_ui.h"
 

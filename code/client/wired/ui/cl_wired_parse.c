@@ -1339,7 +1339,7 @@ qboolean WiredUI_SafeReload( void ) {
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
-#include "../../../qcommon/wired/scripting/wired_scripting.h"
+#include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 
 static int WiredMenuLua_LoadMenu( lua_State *L ) {
 	const char *path = luaL_checkstring( L, 1 );
