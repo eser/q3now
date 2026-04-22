@@ -15,7 +15,7 @@ cl_wired_ui.c — Wired UI: unified menu/HUD system implementation
 #include "../../../qcommon/menudef.h"
 
 #include <lua.h>
-#include "../../../qcommon/wired/scripting/wired_scripting.h"
+#include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 
 #if FEAT_WIRED_UI
 

@@ -1,4 +1,8 @@
+#include "q_shared.h"
 #include "crypto.h"
+
+/* Declared in qcommon.h; forward-declared here to keep util/ free of qcommon.h. */
+qboolean Sys_RandomBytes( byte *string, int len );
 
 #define SHA256_BLOCK_SIZE 64
 
@@ -231,4 +235,16 @@ void Com_RandomHexString( char *out, int hexLen ) {
 	}
 
 	out[hexLen] = '\0';
+}
+
+
+void Com_RandomBytes( byte *string, int len )
+{
+	if ( Sys_RandomBytes( string, len ) )
+		return;
+
+	Com_Printf( S_COLOR_YELLOW "Com_RandomBytes: using weak randomization\n" );
+	srand( time( NULL ) );
+	for( int i = 0; i < len; i++ )
+		string[i] = (unsigned char)( rand() % 256 );
 }

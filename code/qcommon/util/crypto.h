@@ -1,7 +1,7 @@
 #ifndef CRYPTO_H
 #define CRYPTO_H
 
-#include "q_shared.h"
+// q_shared.h must be included by the translation unit before this header.
 
 #define COM_SHA256_DIGEST_LEN 32
 #define COM_SHA256_HEX_LEN ( COM_SHA256_DIGEST_LEN * 2 )

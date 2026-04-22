@@ -1372,7 +1372,8 @@ static void GfxInfo( void )
 	const char *fs;
 	int mode;
 #ifdef USE_VULKAN
-	ri.Printf( PRINT_ALL, "\nVK_VENDOR: %s\n", glConfig.vendor_string );
+	ri.Printf( PRINT_ALL, "\n" );
+	ri.Printf( PRINT_ALL, "VK_VENDOR: %s\n", glConfig.vendor_string );
 	ri.Printf( PRINT_ALL, "VK_RENDERER: %s\n", glConfig.renderer_string );
 	ri.Printf( PRINT_ALL, "VK_VERSION: %s\n", glConfig.version_string );
 
@@ -1381,12 +1382,14 @@ static void GfxInfo( void )
 		ri.Printf( PRINT_ALL, "%s", vk.driverNote );
 	}
 
-	ri.Printf( PRINT_ALL, "\nVK_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
+	ri.Printf( PRINT_ALL, "\n" );
+	ri.Printf( PRINT_ALL, "VK_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
 	ri.Printf( PRINT_ALL, "VK_MAX_TEXTURE_UNITS: %d\n", glConfig.numTextureUnits );
 #else
 	const char *enablestrings[] = { "disabled", "enabled" };
 
-	ri.Printf( PRINT_ALL, "\nGL_VENDOR: %s\n", glConfig.vendor_string );
+	ri.Printf( PRINT_ALL, "\n" );
+	ri.Printf( PRINT_ALL, "GL_VENDOR: %s\n", glConfig.vendor_string );
 	ri.Printf( PRINT_ALL, "GL_RENDERER: %s\n", glConfig.renderer_string );
 	ri.Printf( PRINT_ALL, "GL_VERSION: %s\n", glConfig.version_string );
 	ri.Printf( PRINT_DEVELOPER, "GL_EXTENSIONS: " );
@@ -1396,7 +1399,8 @@ static void GfxInfo( void )
 	ri.Printf( PRINT_ALL, "GL_MAX_TEXTURE_UNITS_ARB: %d\n", glConfig.numTextureUnits );
 #endif
 
-	ri.Printf( PRINT_ALL, "\nPIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
+	ri.Printf( PRINT_ALL, "\n" );
+	ri.Printf( PRINT_ALL, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
 #ifdef USE_VULKAN
 	ri.Printf( PRINT_ALL, " presentation: %s\n", vk_format_string( vk.present_format.format ) );
 	if ( vk.color_format != vk.present_format.format ) {

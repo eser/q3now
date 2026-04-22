@@ -5,7 +5,7 @@ cl_wired_attract.c — Wired Attract scheduler
 #include "../../client.h"
 #include "cl_wired_ui.h"
 #include "cl_wired_attract.h"
-#include "../../../qcommon/wired/scripting/wired_scripting.h"
+#include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 
 #if FEAT_WIRED_UI
 

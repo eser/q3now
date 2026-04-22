@@ -13,6 +13,7 @@ FUTURE (V2): replace Log_Dispatch body with
 #include "q_shared.h"
 #include "qcommon.h"
 #include "log.h"
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,6 +26,9 @@ FUTURE (V2): replace Log_Dispatch body with
 #include <io.h>       // _write
 #define STDERR_FILENO 2
 #define log_write_stderr(buf, len)  _write( STDERR_FILENO, (buf), (unsigned int)(len) )
+#if defined(_DEBUG)
+#include "../../../win32/win_local.h"
+#endif
 #else
 #include <unistd.h>
 #define log_write_stderr(buf, len)  write( STDERR_FILENO, (buf), (size_t)(len) )
@@ -468,4 +472,226 @@ const char *Log_SeverityBracket( log_severity_t sev )
     case SEV_FATAL: return "[FATAL]";
     default:        return "[?????]";
     }
+}
+
+// -------------------------------------------------------------------------
+// Com_Printf / Com_DPrintf — thin wrappers into the log pipeline
+// -------------------------------------------------------------------------
+
+void FORMAT_PRINTF(1, 2) QDECL Com_Printf( const char *fmt, ... ) {
+	va_list ap;
+	va_start( ap, fmt );
+	Com_Logv( SEV_INFO, fmt, ap );
+	va_end( ap );
+}
+
+void FORMAT_PRINTF(1, 2) QDECL Com_DPrintf( const char *fmt, ... ) {
+	if ( !com_developer || !com_developer->integer )
+		return;
+	va_list ap;
+	va_start( ap, fmt );
+	Com_Logv( SEV_DEBUG, fmt, ap );
+	va_end( ap );
+}
+
+// -------------------------------------------------------------------------
+// Com_LastError API
+// -------------------------------------------------------------------------
+
+void FORMAT_PRINTF(1, 2) QDECL Com_SetLastError( const char *fmt, ... ) {
+	va_list argptr;
+
+	va_start( argptr, fmt );
+	vsnprintf( com_errorMessage, sizeof( com_errorMessage ), fmt, argptr );
+	va_end( argptr );
+
+	Cvar_Set( "com_errorMessage", com_errorMessage );
+	Com_Printf( "^1Error: %s\n", com_errorMessage );
+}
+
+const char *Com_GetLastError( void ) {
+	return com_errorMessage;
+}
+
+qboolean Com_HasLastError( void ) {
+	return com_errorMessage[0] != '\0';
+}
+
+void Com_ClearLastError( void ) {
+	com_errorMessage[0] = '\0';
+	Cvar_Set( "com_errorMessage", "" );
+}
+
+// -------------------------------------------------------------------------
+// Com_Error
+// -------------------------------------------------------------------------
+
+void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char *fmt, ... ) {
+	va_list		argptr;
+	static int	lastErrorTime;
+	static int	errorCount;
+	static qboolean	calledSysError = qfalse;
+
+#if defined(_WIN32) && defined(_DEBUG)
+	if ( code != ERR_DISCONNECT && code != ERR_NEED_CD ) {
+		if ( !com_noErrorInterrupt->integer ) {
+			ShowWindow( g_wv.hWnd, SW_MINIMIZE );
+			DebugBreak();
+		}
+	}
+#endif
+
+	if ( com_errorEntered ) {
+		if ( !calledSysError ) {
+			calledSysError = qtrue;
+			Sys_Error( "recursive error after: %s", com_errorMessage );
+		}
+	}
+
+	com_errorEntered = qtrue;
+
+	Cvar_SetIntegerValue( "com_errorCode", code );
+
+	// if we are getting a solid stream of ERR_DROP, do an ERR_FATAL
+	int currentTime = Sys_Milliseconds();
+	if ( currentTime - lastErrorTime < 100 ) {
+		if ( ++errorCount > 3 ) {
+			code = ERR_FATAL;
+		}
+	} else {
+		errorCount = 0;
+	}
+	lastErrorTime = currentTime;
+
+	va_start( argptr, fmt );
+	vsnprintf( com_errorMessage, sizeof( com_errorMessage ), fmt, argptr );
+	va_end( argptr );
+
+	if ( code != ERR_DISCONNECT && code != ERR_NEED_CD ) {
+		// we can't recover from ERR_FATAL so there is no recipients for com_errorMessage
+		// also if ERR_FATAL was called from S_Malloc - CopyString for a long (2+ chars) text
+		// will trigger recursive error without proper client/server shutdown
+		if ( code != ERR_FATAL ) {
+			Cvar_Set( "com_errorMessage", com_errorMessage );
+		}
+	}
+
+	Cbuf_Init();
+
+	if ( code == ERR_DISCONNECT || code == ERR_SERVERDISCONNECT ) {
+		VM_Forced_Unload_Start();
+		SV_Shutdown( "Server disconnected" );
+		Log_PopRedirectSink();
+#ifndef DEDICATED
+		CL_Disconnect( qfalse );
+		CL_FlushMemory();
+#endif
+		VM_Forced_Unload_Done();
+
+		// make sure we can get at our local stuff
+		FS_PureServerSetLoadedPaks( "", "" );
+		com_errorEntered = qfalse;
+
+		Q_longjmp( abortframe, 1 );
+	} else if ( code == ERR_DROP ) {
+#ifndef DEDICATED
+		// Capture whether a demo was playing BEFORE CL_Disconnect clears
+		// the flag so we can honor the "nextdemo" cvar below.
+		const qboolean wasDemoPlaying = ( com_cl_running && com_cl_running->integer &&
+			CL_DemoPlaying() );
+#endif
+		Com_Printf( "********************\nERROR: %s\n********************\n",
+			com_errorMessage );
+		VM_Forced_Unload_Start();
+		SV_Shutdown( va( "Server crashed: %s",  com_errorMessage ) );
+		Log_PopRedirectSink();
+#ifndef DEDICATED
+		CL_Disconnect( qfalse );
+		CL_FlushMemory();
+		// If a demo was playing and the user has queued another one via
+		// the "nextdemo" cvar, start it now instead of leaving the user
+		// stranded at the menu after a drop error mid-demo.
+		if ( wasDemoPlaying ) {
+			char next[ MAX_CVAR_VALUE_STRING ];
+			Cvar_VariableStringBuffer( "nextdemo", next, sizeof( next ) );
+			if ( next[0] != '\0' ) {
+				Cvar_Set( "nextdemo", "" );
+				Cbuf_AddText( next );
+				Cbuf_AddText( "\n" );
+			}
+		}
+#endif
+		VM_Forced_Unload_Done();
+
+		FS_PureServerSetLoadedPaks( "", "" );
+		com_errorEntered = qfalse;
+
+		Q_longjmp( abortframe, 1 );
+	} else if ( code == ERR_NEED_CD ) {
+		SV_Shutdown( "Server didn't have CD" );
+		Log_PopRedirectSink();
+#ifndef DEDICATED
+		if ( com_cl_running && com_cl_running->integer ) {
+			CL_Disconnect( qfalse );
+			VM_Forced_Unload_Start();
+			CL_FlushMemory();
+			VM_Forced_Unload_Done();
+			CL_CDDialog();
+		} else {
+			Com_Printf( "Server didn't have CD\n" );
+		}
+#endif
+		FS_PureServerSetLoadedPaks( "", "" );
+		com_errorEntered = qfalse;
+
+		Q_longjmp( abortframe, 1 );
+	} else {
+		VM_Forced_Unload_Start();
+#ifndef DEDICATED
+		CL_Shutdown( va( "Server fatal crashed: %s", com_errorMessage ), qtrue );
+#endif
+		SV_Shutdown( va( "Server fatal crashed: %s", com_errorMessage ) );
+		Log_PopRedirectSink();
+		VM_Forced_Unload_Done();
+	}
+
+	Com_Shutdown();
+
+	calledSysError = qtrue;
+	Sys_Error( "%s", com_errorMessage );
+}
+
+// -------------------------------------------------------------------------
+// Com_Error_f — test command
+// -------------------------------------------------------------------------
+
+void NORETURN Com_Error_f( void ) {
+	if ( Cmd_Argc() > 1 ) {
+		Com_Error( ERR_DROP, "Testing drop error" );
+	} else {
+		Com_Error( ERR_FATAL, "Testing fatal error" );
+	}
+}
+
+// -------------------------------------------------------------------------
+// Com_RealTime
+// -------------------------------------------------------------------------
+
+int Com_RealTime( qtime_t *qtime ) {
+	time_t t = time( NULL );
+	if ( !qtime )
+		return t;
+	struct tm *tms = localtime( &t );
+	if ( tms ) {
+		qtime->tm_sec  = tms->tm_sec;
+		qtime->tm_min  = tms->tm_min;
+		qtime->tm_hour = tms->tm_hour;
+		qtime->tm_mday = tms->tm_mday;
+		qtime->tm_mon  = tms->tm_mon;
+		qtime->tm_year = tms->tm_year;
+		qtime->tm_wday = tms->tm_wday;
+		qtime->tm_yday = tms->tm_yday;
+		qtime->tm_isdst = tms->tm_isdst;
+	}
+	return t;
 }

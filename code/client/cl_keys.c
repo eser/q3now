@@ -24,7 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/ui/cl_wired_msdf.h"
 #include "wired/ui/cl_wired_fonts.h"
 #include "wired/ui/cl_wired_text.h"
-#include "../qcommon/wired/scripting/wired_scripting.h"
+#include "../qcommon/wired/core/scripting/wired_scripting.h"
 
 /*
 
@@ -57,6 +57,56 @@ Handles horizontal scrolling and cursor blinking
 x, y, and width are in pixels
 ===================
 */
+/* ── Selection helpers ─────────────────────────────────────────────────── */
+
+/* Returns qtrue + normalized [*start, *end) if a non-empty selection exists. */
+static qboolean Field_GetSelRange( const field_t *edit, int *start, int *end ) {
+	if ( !edit->selActive )
+		return qfalse;
+	*start = edit->selAnchor < edit->cursor ? edit->selAnchor : edit->cursor;
+	*end   = edit->selAnchor < edit->cursor ? edit->cursor    : edit->selAnchor;
+	return ( *start < *end ) ? qtrue : qfalse;
+}
+
+/* Delete selected region, place cursor at former selection start. */
+static void Field_DeleteSel( field_t *edit ) {
+	int start, end;
+	if ( !Field_GetSelRange( edit, &start, &end ) ) {
+		edit->selActive = qfalse;
+		return;
+	}
+	int len = strlen( edit->buffer );
+	memmove( edit->buffer + start, edit->buffer + end, len - end + 1 );
+	edit->cursor = start;
+	edit->selActive = qfalse;
+	if ( edit->cursor < edit->scroll )
+		edit->scroll = edit->cursor;
+}
+
+/* Copy selected text to the OS clipboard. */
+static void Field_CopySel( const field_t *edit ) {
+	int start, end;
+	if ( !Field_GetSelRange( edit, &start, &end ) )
+		return;
+	char buf[MAX_EDIT_LINE];
+	int len = end - start;
+	memcpy( buf, edit->buffer + start, len );
+	buf[len] = '\0';
+	Sys_SetClipboardData( buf );
+}
+
+/* Select the entire buffer; cursor moves to end, anchor stays at 0. */
+static void Field_SelectAll( field_t *edit ) {
+	int len = strlen( edit->buffer );
+	if ( len == 0 )
+		return;
+	edit->selAnchor = 0;
+	edit->cursor    = len;
+	edit->selActive = qtrue;
+}
+
+/* ── End selection helpers ─────────────────────────────────────────────── */
+
 static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int size, qboolean showCursor,
 		qboolean noColorEscape ) {
 	char	str[MAX_STRING_CHARS];
@@ -122,6 +172,35 @@ static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int 
 			if ( len > drawLen + prestep ) {
 				Text_DrawChar( '>', vx + ( edit->widthInChars - 1 ) * vsizeW, vy,
 					FONT_MONO, vsize, colorWhite );
+			}
+			// Selection highlight: background rect + dark text overdraw (terminal inversion).
+			{
+				int selStart, selEnd;
+				if ( Field_GetSelRange( edit, &selStart, &selEnd ) ) {
+					int localStart = selStart - prestep;
+					int localEnd   = selEnd   - prestep;
+					if ( localStart < 0 )        localStart = 0;
+					if ( localEnd   > drawLen )   localEnd   = drawLen;
+					if ( localStart < localEnd ) {
+						char prefBuf[MAX_STRING_CHARS];
+						char selBuf[MAX_STRING_CHARS];
+						int  prefLen = localStart;
+						int  selLen  = localEnd - localStart;
+						int  strLen  = (int)strlen( str );
+						if ( prefLen > strLen )           prefLen = strLen;
+						if ( selLen  > strLen - prefLen ) selLen  = strLen - prefLen;
+						Q_strncpyz( prefBuf, str, prefLen + 1 );
+						Q_strncpyz( selBuf,  str + prefLen, selLen + 1 );
+						float selX = Text_Measure( prefBuf, FONT_MONO, vsize );
+						float selW = Text_Measure( selBuf,  FONT_MONO, vsize );
+						static const vec4_t selBg   = { 0.85f, 0.85f, 0.85f, 0.85f };
+						static const vec4_t selText = { 0.05f, 0.05f, 0.10f, 1.00f };
+						re.SetColor( selBg );
+						re.DrawStretchPic( vx + selX, vy, selW, vsize, 0, 0, 0, 0, cls.whiteShader );
+						re.SetColor( NULL );
+						Text_Draw( selBuf, vx + selX, vy, FONT_MONO, vsize, selText, TEXT_ALIGN_LEFT, 0 );
+					}
+				}
 			}
 		} else {
 			float vsize = (float)bigchar_height;
@@ -198,6 +277,9 @@ Field_Paste
 ================
 */
 static void Field_Paste( field_t *edit ) {
+	if ( edit->selActive )
+		Field_DeleteSel( edit );
+
 	char *cbd = Sys_GetClipboardData();
 
 	if ( !cbd ) {
@@ -260,38 +342,96 @@ static void Field_KeyDownEvent( field_t *edit, int key ) {
 
 	switch ( key ) {
 		case K_DEL:
-			if ( edit->cursor < len ) {
+			if ( edit->selActive ) {
+				Field_DeleteSel( edit );
+			} else if ( edit->cursor < len ) {
 				memmove( edit->buffer + edit->cursor,
 					edit->buffer + edit->cursor + 1, len - edit->cursor );
 			}
 			break;
 
 		case K_RIGHTARROW:
+			// Shift extends selection; no Shift clears it.
+			if ( keys[K_SHIFT].down ) {
+				if ( !edit->selActive ) { edit->selActive = qtrue; edit->selAnchor = edit->cursor; }
+			} else {
+				edit->selActive = qfalse;
+			}
 			if ( edit->cursor < len ) {
+#ifdef __APPLE__
+				if ( keys[K_COMMAND].down ) {
+					edit->cursor = len;
+					edit->scroll = len - ( edit->widthInChars - 1 );
+					if ( edit->scroll < 0 ) edit->scroll = 0;
+				} else if ( keys[K_ALT].down ) {
+					Field_SeekWord( edit, 1 );
+					if ( edit->cursor > edit->scroll + edit->widthInChars - 1 )
+						edit->scroll = edit->cursor - ( edit->widthInChars - 1 );
+				} else if ( !keys[K_CTRL].down ) {
+					edit->cursor++;
+				}
+#else
 				if ( keys[ K_CTRL ].down ) {
 					Field_SeekWord( edit, 1 );
+					if ( edit->cursor > edit->scroll + edit->widthInChars - 1 )
+						edit->scroll = edit->cursor - ( edit->widthInChars - 1 );
 				} else {
 					edit->cursor++;
 				}
+#endif
 			}
 			break;
 
 		case K_LEFTARROW:
+			// Shift extends selection; no Shift clears it.
+			if ( keys[K_SHIFT].down ) {
+				if ( !edit->selActive ) { edit->selActive = qtrue; edit->selAnchor = edit->cursor; }
+			} else {
+				edit->selActive = qfalse;
+			}
 			if ( edit->cursor > 0 ) {
+#ifdef __APPLE__
+				if ( keys[K_COMMAND].down ) {
+					edit->cursor = 0;
+					edit->scroll = 0;
+				} else if ( keys[K_ALT].down ) {
+					Field_SeekWord( edit, -1 );
+					if ( edit->cursor < edit->scroll )
+						edit->scroll = edit->cursor;
+				} else if ( !keys[K_CTRL].down ) {
+					edit->cursor--;
+				}
+#else
 				if ( keys[ K_CTRL ].down ) {
 					Field_SeekWord( edit, -1 );
+					if ( edit->cursor < edit->scroll )
+						edit->scroll = edit->cursor;
 				} else {
 					edit->cursor--;
 				}
+#endif
 			}
 			break;
 
 		case K_HOME:
+			if ( keys[K_SHIFT].down ) {
+				if ( !edit->selActive ) { edit->selActive = qtrue; edit->selAnchor = edit->cursor; }
+			} else {
+				edit->selActive = qfalse;
+			}
 			edit->cursor = 0;
+			edit->scroll = 0;
 			break;
 
 		case K_END:
+			if ( keys[K_SHIFT].down ) {
+				if ( !edit->selActive ) { edit->selActive = qtrue; edit->selAnchor = edit->cursor; }
+			} else {
+				edit->selActive = qfalse;
+			}
 			edit->cursor = len;
+			edit->scroll = len - ( edit->widthInChars - 1 );
+			if ( edit->scroll < 0 ) edit->scroll = 0;
 			break;
 
 		case K_INS:
@@ -321,49 +461,63 @@ static void Field_CharEvent( field_t *edit, int ch ) {
 	 * sequence so the next Tab starts a fresh match list. */
 	Field_ResetCompletionCycle( edit );
 
-	if ( ch == 'v' - 'a' + 1 ) {	// ctrl-v is paste
-		Field_Paste( edit );
+#ifndef __APPLE__
+	if ( ch == 'v' - 'a' + 1 ) {	// ctrl-v is paste (non-macOS; macOS uses Cmd+V in Console_Key)
+		Field_Paste( edit );		// Field_Paste handles active selection
 		return;
 	}
 
-	if ( ch == 'c' - 'a' + 1 ) {	// ctrl-c clears the field
-		Field_Clear( edit );
+	if ( ch == 'c' - 'a' + 1 ) {	// ctrl-c is copy (non-macOS; macOS uses Cmd+C in Console_Key)
+		Field_CopySel( edit );
 		return;
 	}
+
+	if ( ch == 'x' - 'a' + 1 ) {	// ctrl-x is cut (non-macOS; macOS uses Cmd+X in Console_Key)
+		Field_CopySel( edit );
+		Field_DeleteSel( edit );
+		return;
+	}
+
+	if ( ch == 'a' - 'a' + 1 ) {	// ctrl-a is select all (non-macOS; macOS uses Cmd+A in Console_Key)
+		Field_SelectAll( edit );
+		return;
+	}
+#endif
 
 	int len = strlen( edit->buffer );
 
-	if ( ch == 'h' - 'a' + 1 )	{	// ctrl-h is backspace
-		if ( edit->cursor > 0 ) {
+	if ( ch == 'h' - 'a' + 1 ) {	// ctrl-h is backspace
+		if ( edit->selActive ) {
+			Field_DeleteSel( edit );
+		} else if ( edit->cursor > 0 ) {
 			memmove( edit->buffer + edit->cursor - 1,
 				edit->buffer + edit->cursor, len + 1 - edit->cursor );
 			edit->cursor--;
 			if ( edit->cursor < edit->scroll )
-			{
 				edit->scroll--;
-			}
 		}
 		return;
 	}
 
-	if ( ch == 'a' - 'a' + 1 ) {	// ctrl-a is home
-		edit->cursor = 0;
-		edit->scroll = 0;
-		return;
-	}
-
-	if ( ch == 'e' - 'a' + 1 ) {	// ctrl-e is end
+	if ( ch == 'e' - 'a' + 1 ) {	// ctrl-e is end (clears selection)
+		edit->selActive = qfalse;
 		edit->cursor = len;
 		edit->scroll = edit->cursor - edit->widthInChars;
 		return;
 	}
 
 	//
-	// ignore any other non printable chars
+	// ignore any other non-printable chars
 	//
 	if ( ch < ' ' ) {
 		return;
 	}
+
+	// Typing replaces an active selection.
+	if ( edit->selActive )
+		Field_DeleteSel( edit );
+
+	len = strlen( edit->buffer );
 
 	if ( key_overstrikeMode ) {
 		// - 2 to leave room for the leading slash and trailing \0
@@ -381,7 +535,6 @@ static void Field_CharEvent( field_t *edit, int ch ) {
 		edit->buffer[edit->cursor] = ch;
 		edit->cursor++;
 	}
-
 
 	if ( edit->cursor >= edit->widthInChars ) {
 		edit->scroll++;
@@ -420,7 +573,17 @@ static void Console_Key( int key ) {
 		}
 	}
 
-	// ctrl-F opens search
+#ifdef __APPLE__
+	// Cmd+F opens/closes search on macOS
+	if ( tolower(key) == 'f' && keys[K_COMMAND].down ) {
+		if ( Con_IsSearchActive() )
+			Con_SearchClose();
+		else
+			Con_SearchOpen();
+		return;
+	}
+#else
+	// Ctrl+F opens/closes search on non-macOS platforms
 	if ( tolower(key) == 'f' && keys[K_CTRL].down ) {
 		if ( Con_IsSearchActive() )
 			Con_SearchClose();
@@ -428,6 +591,7 @@ static void Console_Key( int key ) {
 			Con_SearchOpen();
 		return;
 	}
+#endif
 
 	// when search is active, intercept keys
 	if ( Con_IsSearchActive() ) {
@@ -436,14 +600,24 @@ static void Console_Key( int key ) {
 			return;
 		}
 		if ( key == K_ENTER || key == K_KP_ENTER ) {
-			// Enter = next match (same as F3)
-			Con_SearchNext( qtrue );
+			// Enter = next older match; Shift+Enter = next newer match.
+			Con_SearchNext( keys[K_SHIFT].down ? qtrue : qfalse );
 			return;
 		}
+#ifndef __APPLE__
 		if ( key == K_F3 ) {
-			Con_SearchNext( keys[K_SHIFT].down ? qfalse : qtrue );
+			// F3 = next older match; Shift+F3 = next newer match.
+			Con_SearchNext( keys[K_SHIFT].down ? qtrue : qfalse );
 			return;
 		}
+#endif
+#ifdef __APPLE__
+		// Cmd+G = next older match; Shift+Cmd+G = next newer match.
+		if ( tolower(key) == 'g' && keys[K_COMMAND].down ) {
+			Con_SearchNext( keys[K_SHIFT].down ? qtrue : qfalse );
+			return;
+		}
+#endif
 		if ( key == K_BACKSPACE ) {
 			Con_SearchChar( '\b' );
 			return;
@@ -466,6 +640,78 @@ static void Console_Key( int key ) {
 		Cbuf_AddText( "clear\n" );
 		return;
 	}
+
+#ifdef __APPLE__
+	// Cmd+Backspace: delete to start of line. Option+Backspace: delete previous word.
+	// If a selection is active, Cmd+Backspace / Option+Backspace delete the selection (via the
+	// early-return branches below). Plain backspace with selection is handled by the SE_CHAR 8
+	// path in Field_CharEvent (ctrl-h), so no early-return here for the plain-backspace case.
+	if ( key == K_BACKSPACE ) {
+		if ( keys[K_COMMAND].down ) {
+			if ( g_consoleField.selActive ) {
+				Field_DeleteSel( &g_consoleField );
+				return;
+			}
+			int cursor = g_consoleField.cursor;
+			if ( cursor > 0 ) {
+				int len = strlen( g_consoleField.buffer );
+				memmove( g_consoleField.buffer,
+					g_consoleField.buffer + cursor,
+					len - cursor + 1 );
+				g_consoleField.cursor = 0;
+				g_consoleField.scroll = 0;
+			}
+			return;
+		}
+		if ( keys[K_ALT].down ) {
+			if ( g_consoleField.selActive ) {
+				Field_DeleteSel( &g_consoleField );
+				return;
+			}
+			int cursor = g_consoleField.cursor;
+			if ( cursor > 0 ) {
+				int len = strlen( g_consoleField.buffer );
+				int wordStart = cursor;
+				if ( g_consoleField.buffer[wordStart - 1] != ' ' && g_consoleField.buffer[wordStart - 1] != '\t' ) {
+					while ( wordStart > 0 && g_consoleField.buffer[wordStart - 1] != ' ' && g_consoleField.buffer[wordStart - 1] != '\t' )
+						wordStart--;
+				} else {
+					while ( wordStart > 0 && ( g_consoleField.buffer[wordStart - 1] == ' ' || g_consoleField.buffer[wordStart - 1] == '\t' ) )
+						wordStart--;
+					while ( wordStart > 0 && g_consoleField.buffer[wordStart - 1] != ' ' && g_consoleField.buffer[wordStart - 1] != '\t' )
+						wordStart--;
+				}
+				memmove( g_consoleField.buffer + wordStart,
+					g_consoleField.buffer + cursor,
+					len - cursor + 1 );
+				g_consoleField.cursor = wordStart;
+				if ( g_consoleField.cursor < g_consoleField.scroll )
+					g_consoleField.scroll = g_consoleField.cursor;
+			}
+			return;
+		}
+		// plain backspace: fall through to the SE_CHAR path in Field_CharEvent
+	}
+
+	// Cmd+A/C/V/X: macOS text editing shortcuts for the console input field.
+	if ( keys[K_COMMAND].down ) {
+		switch ( tolower(key) ) {
+			case 'a':	// Cmd+A = select all
+				Field_SelectAll( &g_consoleField );
+				return;
+			case 'c':	// Cmd+C = copy selection
+				Field_CopySel( &g_consoleField );
+				return;
+			case 'v':	// Cmd+V = paste (replaces selection)
+				Field_Paste( &g_consoleField );
+				return;
+			case 'x':	// Cmd+X = cut selection
+				Field_CopySel( &g_consoleField );
+				Field_DeleteSel( &g_consoleField );
+				return;
+		}
+	}
+#endif
 
 	// enter finishes the line
 	if ( key == K_ENTER || key == K_KP_ENTER ) {
@@ -531,6 +777,7 @@ static void Console_Key( int key ) {
 		 ( ( tolower(key) == 'p' ) && keys[K_CTRL].down ) ) {
 		Con_HistoryGetPrev( &g_consoleField );
 		g_consoleField.widthInChars = g_console_field_width;
+		g_consoleField.selActive = qfalse;
 		return;
 	}
 
@@ -538,24 +785,25 @@ static void Console_Key( int key ) {
 		 ( ( tolower(key) == 'n' ) && keys[K_CTRL].down ) ) {
 		Con_HistoryGetNext( &g_consoleField );
 		g_consoleField.widthInChars = g_console_field_width;
+		g_consoleField.selActive = qfalse;
 		return;
 	}
 
 	// console scrolling
 	if ( key == K_PGUP || key == K_MWHEELUP ) {
-		if ( keys[K_CTRL].down ) {	// hold <ctrl> to accelerate scrolling
-			Con_PageUp( 0 );		// by one visible page
-		} else {
+		if ( keys[K_SHIFT].down ) {	// hold <shift> to granular scrolling
 			Con_PageUp( 1 );
+		} else {
+			Con_PageUp( 0 );		// by one visible page
 		}
 		return;
 	}
 
 	if ( key == K_PGDN || key == K_MWHEELDOWN ) {
-		if ( keys[K_CTRL].down ) {	// hold <ctrl> to accelerate scrolling
-			Con_PageDown( 0 );		// by one visible page
-		} else {
+		if ( keys[K_SHIFT].down ) {	// hold <shift> to granular scrolling
 			Con_PageDown( 1 );
+		} else {
+			Con_PageDown( 0 );		// by one visible page
 		}
 		return;
 	}
@@ -842,15 +1090,15 @@ Normal keyboard characters, already shifted / capslocked / etc
 */
 void CL_CharEvent( int key )
 {
-	// delete is not a printable character and is
-	// otherwise handled by Field_KeyDownEvent
-	if ( key == 127 )
-		return;
-
 	// distribute the key down event to the appropriate handler
 	if ( Key_GetCatcher( ) & KEYCATCH_CONSOLE )
 	{
 		if ( Con_IsSearchActive() ) {
+			// Search mode: K_BACKSPACE etc. arrive via Console_Key (SE_KEY path).
+			// SDL also fires SE_CHAR for those keys, so drop control chars here
+			// to avoid double-dispatch.
+			if ( key < 32 || key == 127 )
+				return;
 			Con_SearchChar( key );
 			return;
 		}
@@ -867,6 +1115,8 @@ void CL_CharEvent( int key )
 	else if ( cls.state == CA_DISCONNECTED )
 	{
 		if ( Con_IsSearchActive() ) {
+			if ( key < 32 || key == 127 )
+				return;
 			Con_SearchChar( key );
 			return;
 		}

@@ -1,5 +1,6 @@
 #include "server.h"
 #include "sv_lua.h"
+#include "../qcommon/wired/core/scripting/user_vm.h"
 
 #include "../game/chars.h"
 
@@ -110,7 +111,6 @@ typedef struct {
 	int  lastPrintTime;
 } svLuaErrThrottle_t;
 
-static lua_State *s_botLua = NULL;
 static svLuaCharacter_t s_characters[SV_WB_MAX_CHARACTERS];
 static svLuaBotBinding_t s_bots[MAX_CLIENTS];
 static svLuaErrThrottle_t s_errThrottle[SV_WB_ERR_THROTTLE_SLOTS];
@@ -312,7 +312,7 @@ static void SV_Lua_BotInitCachedProfile( int clientNum ) {
 	int botTableIndex;
 	int subTableIndex;
 
-	if ( !s_botLua ) {
+	if ( !UserVM_GetState() ) {
 		return;
 	}
 
@@ -336,7 +336,7 @@ static void SV_Lua_BotInitCachedProfile( int clientNum ) {
 	profile = s_bots[clientNum].profileValues;
 	SV_Lua_BotSetDefaultProfile( profile );
 
-	L = s_botLua;
+	L = UserVM_GetState();
 	skill = s_characters[characterHandle].skillNormalized;
 
 	lua_settop( L, 0 );
@@ -598,7 +598,7 @@ static int SV_Lua_FindCharacterHandle( const char *characterName ) {
 static void SV_Characters_Preload( void );  // defined after SV_Lua_LoadCharacter
 
 static void SV_Lua_ReleaseCharacterProfileRef( int characterHandle ) {
-	if ( !s_botLua ) {
+	if ( !UserVM_GetState() ) {
 		return;
 	}
 
@@ -607,13 +607,13 @@ static void SV_Lua_ReleaseCharacterProfileRef( int characterHandle ) {
 	}
 
 	if ( s_characters[characterHandle].profileRef != LUA_NOREF ) {
-		luaL_unref( s_botLua, LUA_REGISTRYINDEX, s_characters[characterHandle].profileRef );
+		luaL_unref( UserVM_GetState(), LUA_REGISTRYINDEX, s_characters[characterHandle].profileRef );
 		s_characters[characterHandle].profileRef = LUA_NOREF;
 	}
 }
 
 static void SV_Lua_ReleaseCharacterBotRef( int characterHandle ) {
-	if ( !s_botLua ) {
+	if ( !UserVM_GetState() ) {
 		return;
 	}
 
@@ -622,7 +622,7 @@ static void SV_Lua_ReleaseCharacterBotRef( int characterHandle ) {
 	}
 
 	if ( s_characters[characterHandle].botRef != LUA_NOREF ) {
-		luaL_unref( s_botLua, LUA_REGISTRYINDEX, s_characters[characterHandle].botRef );
+		luaL_unref( UserVM_GetState(), LUA_REGISTRYINDEX, s_characters[characterHandle].botRef );
 		s_characters[characterHandle].botRef = LUA_NOREF;
 	}
 }
@@ -693,52 +693,47 @@ static int SV_Lua_GetOrCreateCharacterHandle( const char *characterName, float s
 }
 
 void SV_Lua_Init( void ) {
+	lua_State *L;
 	int status;
-
-	if ( s_botLua ) {
-		SV_Lua_Shutdown();
-	}
 
 	SV_Lua_ResetState();
 
-	s_botLua = luaL_newstate();
-	if ( !s_botLua ) {
-		Com_Printf( S_COLOR_YELLOW "BotLua: failed to initialize Lua state\n" );
+	L = UserVM_GetState();
+	if ( !L ) {
+		Com_Printf( S_COLOR_YELLOW "BotLua: User VM not initialized\n" );
 		return;
 	}
 
-	luaL_openlibs( s_botLua );
-
-	lua_newtable( s_botLua );
-	lua_pushcfunction( s_botLua, SV_Lua_Q3NowLoad );
-	lua_setfield( s_botLua, -2, "load" );
-	lua_pushcfunction( s_botLua, SV_Lua_Q3NowPrint );
-	lua_setfield( s_botLua, -2, "print" );
-	lua_pushcfunction( s_botLua, SV_Lua_Q3NowTime );
-	lua_setfield( s_botLua, -2, "time" );
+	lua_newtable( L );
+	lua_pushcfunction( L, SV_Lua_Q3NowLoad );
+	lua_setfield( L, -2, "load" );
+	lua_pushcfunction( L, SV_Lua_Q3NowPrint );
+	lua_setfield( L, -2, "print" );
+	lua_pushcfunction( L, SV_Lua_Q3NowTime );
+	lua_setfield( L, -2, "time" );
 
 	// inject q3now.characteristics: name -> CHARACTERISTIC_* index
 	// single source of truth — derived from chars.h #defines, zero drift
-	lua_newtable( s_botLua );
+	lua_newtable( L );
 	for ( int i = 0; s_characteristicNames[i].name; i++ ) {
-		lua_pushinteger( s_botLua, s_characteristicNames[i].index );
-		lua_setfield( s_botLua, -2, s_characteristicNames[i].name );
+		lua_pushinteger( L, s_characteristicNames[i].index );
+		lua_setfield( L, -2, s_characteristicNames[i].name );
 	}
-	lua_setfield( s_botLua, -2, "characteristics" );
+	lua_setfield( L, -2, "characteristics" );
 
-	lua_setglobal( s_botLua, "q3now" );
+	lua_setglobal( L, "q3now" );
 
 	// load scripts/char_framework.lua — installs q3now.load_character and q3now.load_bot
-	lua_getglobal( s_botLua, "q3now" );
-	lua_getfield( s_botLua, -1, "load" );
-	lua_remove( s_botLua, -2 );
-	lua_pushstring( s_botLua, "scripts/char_framework" );
-	status = lua_pcall( s_botLua, 1, 1, 0 );
+	lua_getglobal( L, "q3now" );
+	lua_getfield( L, -1, "load" );
+	lua_remove( L, -2 );
+	lua_pushstring( L, "scripts/char_framework" );
+	status = lua_pcall( L, 1, 1, 0 );
 	if ( status != 0 ) {
-		const char *err = lua_tostring( s_botLua, -1 );
+		const char *err = lua_tostring( L, -1 );
 		Com_Printf( S_COLOR_YELLOW "BotLua: failed loading scripts/char_framework.lua (%s)\n", err ? err : "unknown" );
 	}
-	lua_settop( s_botLua, 0 );
+	lua_settop( L, 0 );
 
 	Com_Printf( "BotLua: initialized\n" );
 
@@ -746,10 +741,7 @@ void SV_Lua_Init( void ) {
 }
 
 void SV_Lua_Shutdown( void ) {
-	if ( s_botLua ) {
-		lua_close( s_botLua );
-		s_botLua = NULL;
-	}
+	/* User VM owns the lua_State; do not call lua_close here. */
 	SV_Lua_ResetState();
 }
 
@@ -864,7 +856,7 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	int botRef;
 	int handle;
 
-	if ( !s_botLua ) {
+	if ( !UserVM_GetState() ) {
 		return 0;
 	}
 
@@ -883,7 +875,7 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 		return 0;
 	}
 
-	L = s_botLua;
+	L = UserVM_GetState();
 	lua_settop( L, 0 );
 
 	// call q3now.load_character(name, skillNormalized) — trampoline installed by _base/main.lua
@@ -1134,7 +1126,7 @@ void SV_Lua_CharacteristicString( int characterHandle, int index, char *buf, int
 }
 
 int SV_Lua_BindBot( int clientNum, int characterHandle ) {
-	if ( !s_botLua ) {
+	if ( !UserVM_GetState() ) {
 		return qfalse;
 	}
 
@@ -1157,7 +1149,7 @@ int SV_Lua_BotThink( int clientNum, float thinktime ) {
 	lua_State *L;
 	int status;
 
-	if ( !s_botLua ) {
+	if ( !UserVM_GetState() ) {
 		return qfalse;
 	}
 
@@ -1169,7 +1161,7 @@ int SV_Lua_BotThink( int clientNum, float thinktime ) {
 		return qfalse;
 	}
 
-	L = s_botLua;
+	L = UserVM_GetState();
 	lua_settop( L, 0 );
 	lua_getglobal( L, "q3now_bot_think" );
 	if ( !lua_isfunction( L, -1 ) ) {
@@ -1328,7 +1320,7 @@ int SV_Lua_BotEvalItem( int clientNum, const wbItemEvalCtx_t *ctx ) {
 	int n;
 	const char *shortname;
 
-	if ( !ctx || !ctx->itemType[0] || !s_botLua ) {
+	if ( !ctx || !ctx->itemType[0] || !UserVM_GetState() ) {
 		return 0;
 	}
 
@@ -1345,7 +1337,7 @@ int SV_Lua_BotEvalItem( int clientNum, const wbItemEvalCtx_t *ctx ) {
 		return 0;
 	}
 
-	L = s_botLua;
+	L = UserVM_GetState();
 	lua_settop( L, 0 );
 	lua_rawgeti( L, LUA_REGISTRYINDEX, s_characters[characterHandle].botRef );
 	if ( !lua_istable( L, -1 ) ) {
@@ -1404,8 +1396,8 @@ int SV_Lua_BotDecide( int clientNum, const wbDecideCtx_t *ctx, char *decision, i
 	// Route: character-specific Lua decide override (rare — only explicitly defined functions).
 	if ( characterHandle > 0 && characterHandle < SV_WB_MAX_CHARACTERS &&
 	     s_characters[characterHandle].inuse && s_characters[characterHandle].hasDecideFn &&
-	     s_botLua ) {
-		L = s_botLua;
+	     UserVM_GetState() ) {
+		L = UserVM_GetState();
 		if ( SV_Lua_BotPushMethod( L, clientNum, "decide" ) ) {
 			lua_createtable( L, 0, 12 );
 			lua_pushnumber( L, ctx->health );
@@ -1501,11 +1493,11 @@ int SV_Lua_BotOnChat( int clientNum, const char *eventName, const wbChatCtx_t *c
 		outChat[0] = '\0';
 	}
 
-	if ( !ctx || !eventName || !eventName[0] || !s_botLua ) {
+	if ( !ctx || !eventName || !eventName[0] || !UserVM_GetState() ) {
 		return qfalse;
 	}
 
-	L = s_botLua;
+	L = UserVM_GetState();
 	if ( !SV_Lua_BotPushMethod( L, clientNum, "on_chat" ) ) {
 		return qfalse;
 	}
@@ -1728,7 +1720,7 @@ static qboolean SV_BotVerifyLoadLuaValues(
     float newVals[SV_WB_MAX_INDEX],
     qboolean newValid[SV_WB_MAX_INDEX]
 ) {
-	lua_State *L = s_botLua;
+	lua_State *L = UserVM_GetState();
 	int status;
 
 	if ( !L ) {

@@ -1162,7 +1162,14 @@ void HandleEvents( void )
 					if ( generic )
 						Com_QueueEvent( in_eventTime, SE_KEY, generic, qtrue, 0, NULL );
 
-					if ( key == K_BACKSPACE )
+					if ( key == K_BACKSPACE
+#ifdef __APPLE__
+						// Cmd+Backspace and Option+Backspace are handled as SE_KEY
+						// by Console_Key; suppress the duplicate SE_CHAR to avoid
+						// an extra single-char delete after the modifier action.
+						&& !keys[K_COMMAND].down && !keys[K_ALT].down
+#endif
+						)
 						Com_QueueEvent( in_eventTime, SE_CHAR, CTRL('h'), 0, 0, NULL );
 					else if ( key == K_ESCAPE )
 						Com_QueueEvent( in_eventTime, SE_CHAR, key, 0, 0, NULL );

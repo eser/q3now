@@ -30,8 +30,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "sv_lua.h"
 #include "../qcommon/net_transport.h"
 
-typedef struct lua_State lua_State;
-
 //=============================================================================
 
 #define	PERS_SCORE				0		// !!! MUST NOT CHANGE, SERVER AND
@@ -261,7 +259,6 @@ typedef struct {
 } rconSession_t;
 
 typedef struct {
-	lua_State *L;
 	qboolean initialized;
 	netadr_t currentClient;
 } rconLua_t;

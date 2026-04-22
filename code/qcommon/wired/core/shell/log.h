@@ -13,7 +13,10 @@ OTel SeverityNumber mapping:
 */
 #pragma once
 
-#include "q_shared.h"
+// q_shared.h must be included by the translation unit before this header.
+// Q3 convention: sub-headers rely on the caller having established the base
+// types (qboolean, cvar_t, int64_t, etc.) rather than re-including from
+// a path that may not resolve in all build contexts.
 
 // -------------------------------------------------------------------------
 // Severity
@@ -101,6 +104,9 @@ typedef struct log_redirect_frame_s {
 // MUST be on the declaration so every translation unit gets -Wformat coverage.
 void FORMAT_PRINTF(2, 3) Com_Log ( log_severity_t sev, const char *fmt, ... );
 void                     Com_Logv( log_severity_t sev, const char *fmt, va_list ap );
+
+// Test command handler registered as "/error" in Com_Init.
+void NORETURN Com_Error_f( void );
 
 // Log_RegisterSink returns NULL + SEV_ERROR log when registry is full.
 log_sink_t *Log_RegisterSink  ( log_sink_t *sink );

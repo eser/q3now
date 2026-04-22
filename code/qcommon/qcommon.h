@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define _QCOMMON_H_
 
 #include <sys/types.h>
+#include <setjmp.h>
 #include "cm_public.h"
 #include "q_feats.h"
 
@@ -933,6 +934,10 @@ typedef struct {
 	int		acOffset;	/* buffer offset at which the current cycle began, 0 = no active cycle */
 	int		acLength;	/* length of the most recently inserted match (for future use) */
 	int		acMatchIndex;	/* current match index used by cycling tab */
+	/* Text selection: selActive=false means no selection.
+	 * When active, selection spans [min(selAnchor,cursor), max(selAnchor,cursor)]. */
+	qboolean selActive;
+	int		selAnchor;
 } field_t;
 
 void Field_Clear( field_t *edit );
@@ -987,7 +992,7 @@ extern	int	CPU_Flags;
 char		*CopyString( const char *in );
 void		Info_Print( const char *s );
 
-#include "log.h"
+#include "wired/core/shell/log.h"
 void 		QDECL Com_Printf( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
 void 		QDECL Com_DPrintf( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
 void 		Com_Quit_f( void );
@@ -1003,6 +1008,7 @@ void		Com_GameRestart( int checksumFeed, qboolean clientRestart );
 
 int			Com_EventLoop( void );
 int			Com_Milliseconds( void );	// will be journaled properly
+void		Com_InitPushEvent( void );
 
 // MD4 functions
 unsigned	Com_BlockChecksum( const void *buffer, int length );
@@ -1079,6 +1085,9 @@ extern	cvar_t	*vm_rtChecks;
 #ifdef USE_AFFINITY_MASK
 extern	cvar_t	*com_affinityMask;
 #endif
+#if defined(_WIN32) && defined(_DEBUG)
+extern	cvar_t	*com_noErrorInterrupt;
+#endif
 
 // com_speeds times
 extern	int		time_game;
@@ -1106,7 +1115,12 @@ extern	qboolean	gw_active;
 #endif
 
 extern	qboolean	com_errorEntered;
+extern	qboolean	com_fullyInitialized;
+extern	jmp_buf		abortframe;
+extern	char		com_errorMessage[ MAXPRINTMSG ];
+void				Com_Shutdown( void );
 
+extern	fileHandle_t	com_journalFile;
 extern	fileHandle_t	com_journalDataFile;
 
 typedef enum {
@@ -1278,7 +1292,9 @@ void CL_CheckReliableStreams( void );
 void CL_CheckSnapshotDatagrams( void );
 #endif
 
+#if !defined(DEDICATED)
 void CL_ConsolePrint( const char *text );
+#endif
 
 void CL_MapLoading( const char *mapname );
 // do a screen update before starting to load a map
@@ -1503,7 +1519,7 @@ void BSP_Init( void );
 void BSP_Shutdown( void );
 
 // Headless Lua scripting runtime
-#include "wired/scripting/wired_scripting.h"
+#include "wired/core/scripting/wired_scripting.h"
 
 // Grouped asset-failure logging
 #include "asset_load_log.h"
