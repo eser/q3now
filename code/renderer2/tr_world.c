@@ -598,7 +598,7 @@ static mnode_t *R_PointInLeaf( const vec3_t p ) {
 	const cplane_t	*plane;
 	
 	if ( !tr.world ) {
-		ri.Error (ERR_DROP, "R_PointInLeaf: bad model");
+		ri.Terminate( TERM_CLIENT_DROP, "R_PointInLeaf: bad model");
 	}
 
 	node = tr.world->nodes;
@@ -677,11 +677,14 @@ static void R_MarkLeaves (void) {
 	// if the cluster is the same and the area visibility matrix
 	// hasn't changed, we don't need to mark everything again
 
+	static int s_showcluster_mod = -1;
+	int showcluster_changed = ( r_showcluster->modificationCount != s_showcluster_mod );
+
 	for(i = 0; i < MAX_VISCOUNTS; i++)
 	{
 		// if the areamask or r_showcluster was modified, invalidate all visclusters
 		// this caused doors to open into undrawn areas
-		if (tr.refdef.areamaskModified || r_showcluster->modified)
+		if (tr.refdef.areamaskModified || showcluster_changed)
 		{
 			tr.visClusters[i] = -2;
 		}
@@ -689,7 +692,7 @@ static void R_MarkLeaves (void) {
 		{
 			if(tr.visClusters[i] != tr.visClusters[tr.visIndex] && r_showcluster->integer)
 			{
-				ri.Printf(PRINT_ALL, "found cluster:%i  area:%i  index:%i\n", cluster, leaf->area, i);
+				ri.Log( SEV_INFO, "found cluster:%i  area:%i  index:%i\n", cluster, leaf->area, i);
 			}
 			tr.visIndex = i;
 			return;
@@ -700,10 +703,10 @@ static void R_MarkLeaves (void) {
 	tr.visCounts[tr.visIndex]++;
 	tr.visClusters[tr.visIndex] = cluster;
 
-	if ( r_showcluster->modified || r_showcluster->integer ) {
-		r_showcluster->modified = qfalse;
+	if ( showcluster_changed || r_showcluster->integer ) {
+		s_showcluster_mod = r_showcluster->modificationCount;
 		if ( r_showcluster->integer ) {
-			ri.Printf( PRINT_ALL, "cluster:%i  area:%i\n", cluster, leaf->area );
+			ri.Log( SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
 		}
 	}
 

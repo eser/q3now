@@ -23,6 +23,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_local.h"
 #include "../qcommon/maps/bsp.h"
+#include "../renderercommon/r_q1_texture.h"
+
+static struct image_s *RGL_Q1_CreateImage( const char *name, byte *rgba,
+                                            int w, int h, unsigned int flags )
+{
+    return R_CreateImage( name, NULL, rgba, w, h, (imgFlags_t)flags );
+}
+
+static struct image_s *RGL_Q1_LoadImage( const char *path, unsigned int q1flags ) {
+    (void)q1flags;  /* GL1 has no imgType; Q1_IMGF_NORMAL is a no-op here */
+    return R_FindImageFile( path, IMGFLAG_MIPMAP );
+}
 
 /*
 
@@ -238,7 +250,7 @@ R_ProcessLightmap
 expand the 24 bit on-disk to 32 bit and return max.intensity
 ===============
 */
-static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensity )
+static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensity, qboolean isQ1Lightmap )
 {
 	int x, y;
 
@@ -275,7 +287,15 @@ static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensi
 			for ( y = 0 ; y < LIGHTMAP_SIZE; y++ ) {
 				for ( x = 0 ; x < LIGHTMAP_SIZE; x++ ) {
 					byte *dst = &image[((y + LIGHTMAP_BORDER) * LIGHTMAP_LEN + x + LIGHTMAP_BORDER) * 4];
-					R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+					if ( isQ1Lightmap ) {
+						// Q1 lightmap bytes are full-range 0-255 with no overbright pre-compression.
+						// Copy verbatim (RGB -> RGBA expand) without the left-shift amplification.
+						dst[0] = buf_p[0];
+						dst[1] = buf_p[1];
+						dst[2] = buf_p[2];
+					} else {
+						R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+					}
 					dst[3] = 255;
 					buf_p += 3;
 				}
@@ -286,7 +306,15 @@ static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensi
 			for ( y = 0 ; y < LIGHTMAP_SIZE; y++ ) {
 				for ( x = 0 ; x < LIGHTMAP_SIZE; x++ ) {
 					byte *dst = &image[(y * LIGHTMAP_SIZE + x) * 4];
-					R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+					if ( isQ1Lightmap ) {
+						// Q1 lightmap bytes are full-range 0-255 with no overbright pre-compression.
+						// Copy verbatim (RGB -> RGBA expand) without the left-shift amplification.
+						dst[0] = buf_p[0];
+						dst[1] = buf_p[1];
+						dst[2] = buf_p[2];
+					} else {
+						R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+					}
 					dst[3] = 255;
 					buf_p += 3;
 				}
@@ -346,7 +374,7 @@ int R_GetLightmapCoords( const int lightmapIndex, float *x, float *y )
 R_LoadMergedLightmaps
 ===============
 */
-static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
+static void R_LoadMergedLightmaps( const lump_t *l, byte *image, qboolean isQ1Lightmap )
 {
 	const byte	*buf;
 	int			offs;
@@ -381,7 +409,7 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
 				if ( offs >= l->filelen )
 					break;
 
-				R_ProcessLightmap( image, buf + offs, maxIntensity );
+				R_ProcessLightmap( image, buf + offs, maxIntensity, isQ1Lightmap );
 
 				R_UploadSubImage( image, x * LIGHTMAP_LEN, y * LIGHTMAP_LEN,
 					LIGHTMAP_LEN, LIGHTMAP_LEN, tr.lightmaps[ i ] );
@@ -389,11 +417,11 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
 				offs += LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3;
 			}
 		}
-		ri.Printf( PRINT_DEVELOPER, "lightmaps[%i]=%i\n", i, tr.lightmaps[i]->texnum );
+		ri.Log( SEV_DEBUG, "lightmaps[%i]=%i\n", i, tr.lightmaps[i]->texnum );
 	}
 
 	//if ( r_lightmap->integer == 2 )	{
-	//	ri.Printf( PRINT_ALL, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
+	//	ri.Log( SEV_INFO, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
 	//}
 }
 
@@ -403,7 +431,7 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
 R_LoadLightmaps
 ===============
 */
-static void R_LoadLightmaps( const lump_t *l ) {
+static void R_LoadLightmaps( const lump_t *l, qboolean isQ1Lightmap ) {
 	const byte	*buf;
 	byte		image[LIGHTMAP_LEN*LIGHTMAP_LEN*4];
 	int			i, numLightmaps;
@@ -432,15 +460,20 @@ static void R_LoadLightmaps( const lump_t *l ) {
 
 	numLightmaps = l->filelen / (LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3);
 
-	if ( r_mergeLightmaps->integer && r_lightmapAtlas->integer && numLightmaps > 1 ) {
+	/* Q1 maps must not use the merged mega-texture path: Q1 surface UVs are
+	 * pre-baked at parse time as (lm_u / LM_PAGE_W), assuming per-page
+	 * 128×128 textures. The merged path adds tile + border offsets that Q1
+	 * UVs do not encode (R_GetLightmapCoords adjusts Q3 surfaces only).
+	 * Force Q1 to the legacy per-page path. */
+	if ( !isQ1Lightmap && r_mergeLightmaps->integer && r_lightmapAtlas->integer && numLightmaps > 1 ) {
 		// check for low texture sizes
 		if ( glConfig.maxTextureSize >= LIGHTMAP_LEN * 2 ) {
 			if ( textureBorderClampAvailable ) {
 				tr.mergeLightmaps = qtrue;
-				R_LoadMergedLightmaps( l, image ); // reuse stack space
+				R_LoadMergedLightmaps( l, image, isQ1Lightmap ); // reuse stack space
 				return;
 			} else {
-				ri.Printf( PRINT_DEVELOPER, "...GL_ARB_texture_border_clamp is not available, merged lighmaps disabled.\n" );
+				ri.Log( SEV_DEBUG, "...GL_ARB_texture_border_clamp is not available, merged lighmaps disabled.\n" );
 			}
 		}
 	}
@@ -456,13 +489,13 @@ static void R_LoadLightmaps( const lump_t *l ) {
 	tr.lightmaps = ri.Hunk_Alloc( tr.numLightmaps * sizeof(image_t *), h_low );
 
 	for ( i = 0 ; i < tr.numLightmaps ; i++ ) {
-		maxIntensity = R_ProcessLightmap( image, buf + i * LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3, maxIntensity );
+		maxIntensity = R_ProcessLightmap( image, buf + i * LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3, maxIntensity, isQ1Lightmap );
 		tr.lightmaps[i] = R_CreateImage( va( "*lightmap%d", i ), NULL, image, LIGHTMAP_SIZE, LIGHTMAP_SIZE,
 			lightmapFlags | IMGFLAG_CLAMPTOEDGE );
 	}
 
 	//if ( r_lightmap->integer == 2 )	{
-	//	ri.Printf( PRINT_ALL, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
+	//	ri.Log( SEV_INFO, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
 	//}
 }
 
@@ -499,7 +532,7 @@ static void R_LoadVisibility( const lump_t *l ) {
 	}
 
 	if ( len < VIS_HEADER ) {
-		Com_Error( ERR_DROP, "%s: lump too short", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: lump too short", __func__ );
 	}
 
 	buf = fileBase + l->fileofs;
@@ -510,13 +543,13 @@ static void R_LoadVisibility( const lump_t *l ) {
 	len -= VIS_HEADER;
 
 	if ( (uint64_t)numClusters * clusterBytes > len ) {
-		Com_Error( ERR_DROP, "%s: lump too short", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: lump too short", __func__ );
 	}
 	if ( numClusters < s_worldData.numClusters ) {
-		Com_Error( ERR_DROP, "%s: bad numClusters", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad numClusters", __func__ );
 	}
 	if ( clusterBytes < (numClusters + 7) >> 3 ) {
-		Com_Error( ERR_DROP, "%s: bad clusterBytes", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad clusterBytes", __func__ );
 	}
 
 	s_worldData.numClusters = numClusters;
@@ -548,7 +581,7 @@ static shader_t *ShaderForShaderNum( const int shaderNum, int lightmapNum ) {
 	const dshader_t *dsh;
 
 	if ( shaderNum < 0 || shaderNum >= s_worldData.numShaders ) {
-		ri.Error( ERR_DROP, "ShaderForShaderNum: bad num %i", shaderNum );
+		ri.Terminate( TERM_CLIENT_DROP, "ShaderForShaderNum: bad num %i", shaderNum );
 	}
 
 	dsh = &s_worldData.shaders[ shaderNum ];
@@ -646,7 +679,7 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, int numPoi
 	surf->shader = ShaderForShaderNum( LittleLong( ds->shaderNum ), lightmapNum );
 
 	if (numPoints > MAX_FACE_POINTS) {
-		ri.Printf( PRINT_WARNING, "WARNING: MAX_FACE_POINTS exceeded: %i\n", numPoints);
+		ri.Log( SEV_WARN, "WARNING: MAX_FACE_POINTS exceeded: %i\n", numPoints);
 		numPoints = MAX_FACE_POINTS;
 		surf->shader = tr.defaultShader;
 	}
@@ -683,7 +716,7 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, int numPoi
 	for ( i = 0 ; i < numIndexes ; i++ ) {
 		unsigned num = LittleLong( srcIndexes[ i ] );
 		if ( num >= numPoints )
-			ri.Error( ERR_DROP, "%s: bad index", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad index", __func__ );
 		indexes[i] = num;
 	}
 
@@ -784,11 +817,11 @@ static void ParseMesh( const dsurface_t *ds, const drawVert_t *verts, int numVer
 	if (width <= 2 || height <= 2 || !(width & 1) || !(height & 1) ||
 		width > MAX_GRID_SIZE || height > MAX_GRID_SIZE ||
 		width * height > ARRAY_LEN(points))
-		ri.Error( ERR_DROP, "%s: bad patch size", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: bad patch size", __func__ );
 
 	numPoints = width * height;
 	if (numPoints > numVerts)
-		ri.Error( ERR_DROP, "%s: verts out of range", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: verts out of range", __func__ );
 
 	for ( i = 0 ; i < numPoints ; i++ ) {
 		for ( j = 0 ; j < 3 ; j++ ) {
@@ -884,7 +917,7 @@ static void ParseTriSurf( const dsurface_t *ds, const drawVert_t *verts, int num
 	for ( i = 0 ; i < numIndexes ; i++ ) {
 		tri->indexes[i] = LittleLong( indexes[i] );
 		if ( tri->indexes[i] < 0 || tri->indexes[i] >= numVerts ) {
-			ri.Error( ERR_DROP, "Bad index in triangle surface" );
+			ri.Terminate( TERM_CLIENT_DROP, "Bad index in triangle surface" );
 		}
 	}
 }
@@ -1155,7 +1188,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1199,7 +1232,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1252,7 +1285,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1296,7 +1329,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1350,7 +1383,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1394,7 +1427,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1449,7 +1482,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1493,7 +1526,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1580,7 +1613,7 @@ static void R_StitchAllPatches( void ) {
 		}
 	}
 	while (stitched);
-	ri.Printf( PRINT_DEVELOPER, "stitched %d LoD cracks\n", numstitches );
+	ri.Log( SEV_DEBUG, "stitched %d LoD cracks\n", numstitches );
 }
 
 
@@ -1647,17 +1680,17 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 
 	in = (void *)(fileBase + surfs->fileofs);
 	if (surfs->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = surfs->filelen / sizeof(*in);
 
 	dv = (void *)(fileBase + verts->fileofs);
 	if (verts->filelen % sizeof(*dv))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	totalVerts = verts->filelen / sizeof(*dv);
 
 	indexes = (void *)(fileBase + indexLump->fileofs);
 	if ( indexLump->filelen % sizeof(*indexes))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	totalIndexes = indexLump->filelen / sizeof(*indexes);
 
 	out = ri.Hunk_Alloc( count * sizeof(*out), h_low );
@@ -1680,17 +1713,17 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 			else
 				numVerts = LittleLong( in->numVerts );
 			if ( (uint64_t)firstVert + numVerts > totalVerts )
-				ri.Error( ERR_DROP, "%s: bad verts", __func__ );
+				ri.Terminate( TERM_CLIENT_DROP, "%s: bad verts", __func__ );
 
 			if ( type != MST_PATCH ) {
 				firstIndex = LittleLong( in->firstIndex );
 				numIndexes = LittleLong( in->numIndexes );
 				if ( (uint64_t)firstIndex + numIndexes > totalIndexes )
-					ri.Error( ERR_DROP, "%s: bad indexes", __func__ );
+					ri.Terminate( TERM_CLIENT_DROP, "%s: bad indexes", __func__ );
 
 				// don't allow partial triangles
 				if ( numIndexes % 3 ) {
-					ri.Printf( PRINT_WARNING, "%s: odd number of indexes: %u\n", __func__, numIndexes );
+					ri.Log( SEV_WARN, "%s: odd number of indexes: %u\n", __func__, numIndexes );
 					numIndexes -= numIndexes % 3;
 				}
 			}
@@ -1700,7 +1733,7 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 		fogIndex = LittleLong( in->fogNum ) + 1U;
 		if ( fogIndex >= s_worldData.numfogs ) {
 			if ( type != MST_FLARE )
-				ri.Printf( PRINT_WARNING, "%s: bad fog index: %u\n", __func__, fogIndex );
+				ri.Log( SEV_WARN, "%s: bad fog index: %u\n", __func__, fogIndex );
 			fogIndex = 0;
 		}
 		out->fogIndex = fogIndex;
@@ -1723,7 +1756,7 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 			numFlares++;
 			break;
 		default:
-			ri.Error( ERR_DROP, "%s: bad surfaceType: %u", __func__, type );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad surfaceType: %u", __func__, type );
 		}
 	}
 
@@ -1737,7 +1770,7 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 	R_MovePatchSurfacesToHunk();
 #endif
 
-	ri.Printf( PRINT_DEVELOPER, "...loaded %d faces, %i meshes, %i trisurfs, %i flares\n",
+	ri.Log( SEV_DEBUG, "...loaded %d faces, %i meshes, %i trisurfs, %i flares\n",
 		numFaces, numMeshes, numTriSurfs, numFlares );
 }
 
@@ -1755,7 +1788,7 @@ static void R_LoadSubmodels( const lump_t *l ) {
 
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 
 	s_worldData.bmodels = out = ri.Hunk_Alloc( count * sizeof(*out), h_low );
@@ -1766,7 +1799,7 @@ static void R_LoadSubmodels( const lump_t *l ) {
 		model = R_AllocModel();
 
 		if ( model == NULL ) {
-			ri.Error( ERR_DROP, "R_LoadSubmodels: R_AllocModel() failed" );
+			ri.Terminate( TERM_CLIENT_DROP, "R_LoadSubmodels: R_AllocModel() failed" );
 		}
 
 		model->type = MOD_BRUSH;
@@ -1781,11 +1814,18 @@ static void R_LoadSubmodels( const lump_t *l ) {
 		firstSurface = LittleLong( in->firstSurface );
 		numSurfaces = LittleLong( in->numSurfaces );
 		if ( (uint64_t)firstSurface + numSurfaces > s_worldData.numsurfaces ) {
-			ri.Error( ERR_DROP, "%s: bad surfaces", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad surfaces", __func__ );
 		}
 
 		out->firstSurface = s_worldData.surfaces + firstSurface;
 		out->numSurfaces = numSurfaces;
+
+		ri.Log( SEV_INFO,
+		        "R_LoadSubmodels GL1: bmodel[%d] firstSurface=%u numSurfaces=%u"
+		        " bounds=(%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)\n",
+		        i, firstSurface, numSurfaces,
+		        out->bounds[0][0], out->bounds[0][1], out->bounds[0][2],
+		        out->bounds[1][0], out->bounds[1][1], out->bounds[1][2] );
 	}
 }
 
@@ -1801,7 +1841,7 @@ R_SetParent
 static void R_SetParent( mnode_t *node, mnode_t *parent )
 {
 	if ( node->parent )
-		ri.Error( ERR_DROP, "%s: cycle encountered", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: cycle encountered", __func__ );
 	node->parent = parent;
 	if ( node->contents != CONTENTS_NODE )
 		return;
@@ -1826,7 +1866,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 	in = (void *)(fileBase + nodeLump->fileofs);
 	if (nodeLump->filelen % sizeof(dnode_t) ||
 		leafLump->filelen % sizeof(dleaf_t) ) {
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	}
 	numNodes = nodeLump->filelen / sizeof(dnode_t);
 	numLeafs = leafLump->filelen / sizeof(dleaf_t);
@@ -1848,7 +1888,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 	
 		p = LittleLong(in->planeNum);
 		if ( p >= s_worldData.numplanes ) {
-			ri.Error( ERR_DROP, "%s: bad planeNum", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad planeNum", __func__ );
 		}
 		out->plane = s_worldData.planes + p;
 
@@ -1860,12 +1900,12 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 			if (p & 0x80000000) {
 				p = ~p;
 				if ( p >= numLeafs ) {
-					ri.Error( ERR_DROP, "%s: bad leaf", __func__ );
+					ri.Terminate( TERM_CLIENT_DROP, "%s: bad leaf", __func__ );
 				}
 				out->children[j] = s_worldData.nodes + numNodes + p;
 			} else {
 				if ( p >= numNodes ) {
-					ri.Error( ERR_DROP, "%s: bad node", __func__ );
+					ri.Terminate( TERM_CLIENT_DROP, "%s: bad node", __func__ );
 				}
 				out->children[j] = s_worldData.nodes + p;
 			}
@@ -1884,11 +1924,11 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 
 		out->cluster = LittleLong(inLeaf->cluster);
 		if ( out->cluster + 1U > INT_MAX - 63U )
-			Com_Error( ERR_DROP, "%s: bad cluster", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad cluster", __func__ );
 
 		out->area = LittleLong(inLeaf->area);
 		if ( out->area + 1U > MAX_MAP_AREAS )
-			Com_Error( ERR_DROP, "%s: bad area", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad area", __func__ );
 
 		if ( out->cluster >= s_worldData.numClusters ) {
 			s_worldData.numClusters = out->cluster + 1;
@@ -1897,7 +1937,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 		firstmarksurface = LittleLong(inLeaf->firstLeafSurface);
 		nummarksurfaces = LittleLong(inLeaf->numLeafSurfaces);
 		if ( (uint64_t)firstmarksurface + nummarksurfaces > s_worldData.nummarksurfaces ) {
-			ri.Error( ERR_DROP, "%s: bad marksurfaces", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad marksurfaces", __func__ );
 		}
 
 		out->firstmarksurface = s_worldData.marksurfaces + firstmarksurface;
@@ -1941,7 +1981,7 @@ static void R_LoadShaders( const lump_t *l ) {
 	
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low );
 
@@ -1973,7 +2013,7 @@ static void R_LoadMarksurfaces( const lump_t *l )
 	
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low);
 
@@ -1984,7 +2024,7 @@ static void R_LoadMarksurfaces( const lump_t *l )
 	{
 		j = LittleLong(in[i]);
 		if ( j >= s_worldData.numsurfaces ) {
-			ri.Error( ERR_DROP, "%s: bad surface", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad surface", __func__ );
 		}
 		out[i] = s_worldData.surfaces + j;
 	}
@@ -2005,7 +2045,7 @@ static	void R_LoadPlanes( const lump_t *l ) {
 
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc( count*2*sizeof(*out), h_low );
 
@@ -2047,7 +2087,7 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 
 	fogs = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*fogs)) {
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	}
 	count = l->filelen / sizeof(*fogs);
 
@@ -2062,31 +2102,31 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 
 	brushes = (void *)(fileBase + brushesLump->fileofs);
 	if (brushesLump->filelen % sizeof(*brushes)) {
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	}
 	brushesCount = brushesLump->filelen / sizeof(*brushes);
 
 	sides = (void *)(fileBase + sidesLump->fileofs);
 	if (sidesLump->filelen % sizeof(*sides)) {
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	}
 	sidesCount = sidesLump->filelen / sizeof(*sides);
 	if (sidesCount < 6) {
-		ri.Error( ERR_DROP, "%s(): sides lump too short in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): sides lump too short in %s", __func__, s_worldData.name );
 	}
 
 	for ( i=0 ; i<count ; i++, fogs++) {
 		out->originalBrushNumber = LittleLong( fogs->brushNum );
 
 		if ( (unsigned)out->originalBrushNumber >= brushesCount ) {
-			ri.Error( ERR_DROP, "fog brushNumber out of range" );
+			ri.Terminate( TERM_CLIENT_DROP, "fog brushNumber out of range" );
 		}
 		brush = brushes + out->originalBrushNumber;
 
 		firstSide = LittleLong( brush->firstSide );
 
 		if ( firstSide > sidesCount - 6 ) {
-			ri.Error( ERR_DROP, "fog brush sideNumber out of range" );
+			ri.Terminate( TERM_CLIENT_DROP, "fog brush sideNumber out of range" );
 		}
 
 		// brushes are always sorted with the axial sides first
@@ -2094,7 +2134,7 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 			sideNum = firstSide + j;
 			planeNum = LittleLong( sides[ sideNum ].planeNum );
 			if ( planeNum >= s_worldData.numplanes ) {
-				ri.Error( ERR_DROP, "fog brush planeNum out of range" );
+				ri.Terminate( TERM_CLIENT_DROP, "fog brush planeNum out of range" );
 			}
 			d = s_worldData.planes[ planeNum ].dist;
 			out->bounds[j & 1][j >> 1] = (j & 1) ? d : -d;
@@ -2133,13 +2173,13 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 			out->hasSurface = qfalse;
 		} else {
 			if ( sideNum >= sidesCount - firstSide ) {
-				ri.Printf( PRINT_WARNING, "bad fog side offset\n" );
+				ri.Log( SEV_WARN, "bad fog side offset\n" );
 				out->hasSurface = qfalse;
 			} else {
 				out->hasSurface = qtrue;
 				planeNum = LittleLong( sides[ firstSide + sideNum ].planeNum );
 				if ( planeNum >= s_worldData.numplanes ) {
-					ri.Error( ERR_DROP, "fog brush planeNum out of range" );
+					ri.Terminate( TERM_CLIENT_DROP, "fog brush planeNum out of range" );
 				}
 				VectorSubtract( vec3_origin, s_worldData.planes[ planeNum ].normal, out->surface );
 				out->surface[3] = -s_worldData.planes[ planeNum ].dist;
@@ -2187,7 +2227,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 
 	if ( (uint64_t)bounds[0] * bounds[1] > INT_MAX ||
 		 (uint64_t)bounds[0] * bounds[1] * bounds[2] > INT_MAX) {
-		ri.Printf( PRINT_WARNING, "WARNING: bad light grid bounds\n" );
+		ri.Log( SEV_WARN, "WARNING: bad light grid bounds\n" );
 		w->lightGridData = NULL;
 		return;
 	}
@@ -2195,7 +2235,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 	numGridPoints = bounds[0] * bounds[1] * bounds[2];
 
 	if ( l->filelen % 8 || l->filelen / 8 != numGridPoints ) {
-		ri.Printf( PRINT_WARNING, "WARNING: light grid mismatch\n" );
+		ri.Log( SEV_WARN, "WARNING: light grid mismatch\n" );
 		w->lightGridData = NULL;
 		return;
 	}
@@ -2267,7 +2307,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		if (!strncmp(keyname, s, strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
-				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in vertexshaderremap '%s'\n", value );
+				ri.Log( SEV_WARN, "WARNING: no semi colon in vertexshaderremap '%s'\n", value );
 				break;
 			}
 			*vs++ = '\0';
@@ -2281,7 +2321,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		if (!strncmp(keyname, s, (int)strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
-				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in shaderremap '%s'\n", value );
+				ri.Log( SEV_WARN, "WARNING: no semi colon in shaderremap '%s'\n", value );
 				break;
 			}
 			*vs++ = '\0';
@@ -2340,16 +2380,16 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	byte		*startMarker;
 
 	if ( tr.worldMapLoaded ) {
-		ri.Error( ERR_DROP, "ERROR: attempted to redundantly load world map" );
+		ri.Terminate( TERM_CLIENT_DROP, "ERROR: attempted to redundantly load world map" );
 	}
 
 	if ( !bsp ) {
-		ri.Error( ERR_DROP, "%s: bsp is NULL", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: bsp is NULL", __func__ );
 	}
 
 	name = bsp->name;
 	if ( !name[0] ) {
-		ri.Error( ERR_DROP, "%s: bsp has empty name", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: bsp has empty name", __func__ );
 	}
 
 	if ( bsp->version ) {
@@ -2372,10 +2412,10 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	buffer.b = bsp->rawData;
 	size = bsp->rawLength;
 	if ( !buffer.b || size <= 0 ) {
-		ri.Error( ERR_DROP, "%s: %s has no raw BSP data", __func__, name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: %s has no raw BSP data", __func__, name );
 	}
 	if ( size < sizeof( dheader_t ) ) {
-		ri.Error( ERR_DROP, "%s: %s has truncated header", __func__, name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: %s has truncated header", __func__, name );
 	}
 
 	tr.mapLoading = qtrue;
@@ -2405,12 +2445,18 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 		uint32_t ofs = header->lumps[i].fileofs;
 		uint32_t len = header->lumps[i].filelen;
 		if ( (uint64_t)ofs + len > size ) {
-			ri.Error( ERR_DROP, "%s: %s has wrong lump[%i] size/offset", __func__, name, i );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: %s has wrong lump[%i] size/offset", __func__, name, i );
 		}
 	}
 
 	// load into heap
-	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS] );
+	// Q1 maps have lightmapStyles=4 (set by bsp_q1.c); Q3 maps leave it at 0.
+	// Q1 lightmap bytes are full-range 0-255 and must not be run through
+	// R_ColorShiftLightingBytes (which assumes Q3 overbright pre-compression).
+	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS], bsp->lightmapStyles != 0 );
+	R_Q1_SetCreateImageFn( RGL_Q1_CreateImage );
+	R_Q1_SetLoadImageFn( RGL_Q1_LoadImage );
+	R_Q1_PrepareTextures( bsp );
 	R_LoadShaders( &header->lumps[LUMP_SHADERS] );
 	R_LoadPlanes( &header->lumps[LUMP_PLANES] );
 	R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES] );

@@ -167,7 +167,7 @@ static void CG_ParseTeamInfo( void ) {
 	numSortedTeamPlayers = atoi( CG_Argv( 1 ) );
 	if( numSortedTeamPlayers < 0 || numSortedTeamPlayers > TEAM_MAXOVERLAY )
 	{
-		CG_Error( "CG_ParseTeamInfo: numSortedTeamPlayers out of range (%d)",
+		Com_Terminate( TERM_CLIENT_DROP, "CG_ParseTeamInfo: numSortedTeamPlayers out of range (%d)",
 				numSortedTeamPlayers );
 		return;
 	}
@@ -176,7 +176,7 @@ static void CG_ParseTeamInfo( void ) {
 		client = atoi( CG_Argv( i * 6 + 2 ) );
 		if( client < 0 || client >= MAX_CLIENTS )
 		{
-		  CG_Error( "CG_ParseTeamInfo: bad client number: %d", client );
+		  Com_Terminate( TERM_CLIENT_DROP, "CG_ParseTeamInfo: bad client number: %d", client );
 		  return;
 		}
 
@@ -271,6 +271,15 @@ void CG_SetConfigValues( void ) {
 	}
 
 	cg.warmup = atoi( CG_ConfigString( CS_WARMUP ) );
+
+	// Apply lightstyle pattern strings to renderer (styles 0-63).
+	{
+		int i;
+		for ( i = 0; i < CS_MAX_LIGHTSTYLES; i++ ) {
+			const char *s = CG_ConfigString( CS_LIGHTSTYLES + i );
+			trap_R_SetLightstylePattern( i, s ? s : "" );
+		}
+	}
 }
 
 /*
@@ -421,6 +430,9 @@ static void CG_ConfigStringModified( void ) {
 			bd->targetName[0] = '\0';
 		}
 		bd->updateTime = cg.time;
+	} else if ( num >= CS_LIGHTSTYLES && num < CS_LIGHTSTYLES + CS_MAX_LIGHTSTYLES ) {
+		int style = num - CS_LIGHTSTYLES; /* 0-63 directly */
+		trap_R_SetLightstylePattern( style, str );
 	}
 }
 
@@ -508,7 +520,7 @@ require a reload of all the media
 */
 static void CG_MapRestart( void ) {
 	if ( cg_showmiss.integer ) {
-		CG_Printf( "CG_MapRestart\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_MapRestart\n" );
 	}
 
 	CG_InitLocalEntities();
@@ -596,124 +608,6 @@ typedef struct headModelVoiceChat_s
 voiceChatList_t voiceChatLists[MAX_VOICEFILES];
 headModelVoiceChat_t headModelVoiceChat[MAX_HEADMODELS];
 
-/*
-=================
-CG_ParseVoiceChats
-=================
-*/
-int CG_ParseVoiceChats( const char *filename, voiceChatList_t *voiceChatList, int maxVoiceChats ) {
-	int	len, i;
-	fileHandle_t f;
-	char buf[MAX_VOICEFILESIZE];
-	const char **p, *ptr;
-	const char *token;
-	voiceChat_t *voiceChats;
-	qboolean compress;
-	sfxHandle_t sound;
-	ComParser parser = { 0 };
-
-	compress = qtrue;
-	if (cg_buildScript.integer) {
-		compress = qfalse;
-	}
-
-	len = trap_FS_FOpenFile( filename, &f, FS_READ );
-	if ( !f ) {
-		trap_Print( va( S_COLOR_RED "voice chat file not found: %s\n", filename ) );
-		return qfalse;
-	}
-	if ( len >= MAX_VOICEFILESIZE ) {
-		trap_Print( va( S_COLOR_RED "voice chat file too large: %s is %i, max allowed is %i\n", filename, len, MAX_VOICEFILESIZE ) );
-		trap_FS_FCloseFile( f );
-		return qfalse;
-	}
-
-	trap_FS_Read( buf, len, f );
-	buf[len] = 0;
-	trap_FS_FCloseFile( f );
-
-	ptr = buf;
-	p = &ptr;
-
-	Com_sprintf(voiceChatList->name, sizeof(voiceChatList->name), "%s", filename);
-	voiceChats = voiceChatList->voiceChats;
-	for ( i = 0; i < maxVoiceChats; i++ ) {
-		voiceChats[i].id[0] = 0;
-	}
-	token = COM_ParseExt(&parser, p, qtrue);
-	if (!token[0]) {
-		return qtrue;
-	}
-	if (!Q_stricmp(token, "female")) {
-		voiceChatList->gender = GENDER_FEMALE;
-	}
-	else if (!Q_stricmp(token, "male")) {
-		voiceChatList->gender = GENDER_MALE;
-	}
-	else if (!Q_stricmp(token, "neuter")) {
-		voiceChatList->gender = GENDER_NEUTER;
-	}
-	else {
-		trap_Print( va( S_COLOR_RED "expected gender not found in voice chat file: %s\n", filename ) );
-		return qfalse;
-	}
-
-	voiceChatList->numVoiceChats = 0;
-	while ( 1 ) {
-		token = COM_ParseExt(&parser, p, qtrue);
-		if (!token[0]) {
-			return qtrue;
-		}
-		Com_sprintf(voiceChats[voiceChatList->numVoiceChats].id, sizeof( voiceChats[voiceChatList->numVoiceChats].id ), "%s", token);
-		token = COM_ParseExt(&parser, p, qtrue);
-		if (Q_stricmp(token, "{")) {
-			trap_Print( va( S_COLOR_RED "expected { found %s in voice chat file: %s\n", token, filename ) );
-			return qfalse;
-		}
-		voiceChats[voiceChatList->numVoiceChats].numSounds = 0;
-		while(1) {
-			token = COM_ParseExt(&parser, p, qtrue);
-			if (!token[0]) {
-				return qtrue;
-			}
-			if (!Q_stricmp(token, "}"))
-				break;
-			sound = trap_S_RegisterSound( token, compress );
-			voiceChats[voiceChatList->numVoiceChats].sounds[voiceChats[voiceChatList->numVoiceChats].numSounds] = sound;
-			token = COM_ParseExt(&parser, p, qtrue);
-			if (!token[0]) {
-				return qtrue;
-			}
-			Com_sprintf(voiceChats[voiceChatList->numVoiceChats].chats[
-							voiceChats[voiceChatList->numVoiceChats].numSounds], MAX_CHATSIZE, "%s", token);
-			if (sound)
-				voiceChats[voiceChatList->numVoiceChats].numSounds++;
-			if (voiceChats[voiceChatList->numVoiceChats].numSounds >= MAX_VOICESOUNDS)
-				break;
-		}
-		voiceChatList->numVoiceChats++;
-		if (voiceChatList->numVoiceChats >= maxVoiceChats)
-			return qtrue;
-	}
-	return qtrue;
-}
-
-/*
-=================
-CG_LoadVoiceChats
-=================
-*/
-void CG_LoadVoiceChats( void ) {
-	int size = trap_MemoryRemaining();
-	CG_ParseVoiceChats( "scripts/female1.voice", &voiceChatLists[0], MAX_VOICECHATS );
-	CG_ParseVoiceChats( "scripts/female2.voice", &voiceChatLists[1], MAX_VOICECHATS );
-	CG_ParseVoiceChats( "scripts/female3.voice", &voiceChatLists[2], MAX_VOICECHATS );
-	CG_ParseVoiceChats( "scripts/male1.voice", &voiceChatLists[3], MAX_VOICECHATS );
-	CG_ParseVoiceChats( "scripts/male2.voice", &voiceChatLists[4], MAX_VOICECHATS );
-	CG_ParseVoiceChats( "scripts/male3.voice", &voiceChatLists[5], MAX_VOICECHATS );
-	CG_ParseVoiceChats( "scripts/male4.voice", &voiceChatLists[6], MAX_VOICECHATS );
-	CG_ParseVoiceChats( "scripts/male5.voice", &voiceChatLists[7], MAX_VOICECHATS );
-}
 
 /*
 =================
@@ -906,7 +800,7 @@ void CG_PlayVoiceChat( bufferedVoiceChat_t *vchat ) {
 	}
 	if (!vchat->voiceOnly && !cg_noVoiceText.integer) {
 		CG_AddToTeamChat( vchat->message );
-		CG_Printf( "%s\n", vchat->message );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s\n", vchat->message );
 	}
 	voiceChatBuffer[cg.voiceChatBufferOut].snd = 0;
 }
@@ -1068,7 +962,7 @@ static void CG_ServerCommand( void ) {
 	}
 
 	if ( !strcmp( cmd, "print" ) ) {
-		CG_Printf( "%s", CG_Argv(1) );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s", CG_Argv(1) );
 		cmd = CG_Argv(1);			// yes, this is obviously a hack, but so is the way we hear about
 									// votes passing or failing
 
@@ -1095,7 +989,7 @@ static void CG_ServerCommand( void ) {
 		trap_S_StartLocalSound( cgs.media.talkSound, CHAN_LOCAL_SOUND );
 		Q_strncpyz( text, CG_Argv(1), MAX_SAY_TEXT );
 		CG_RemoveChatEscapeChar( text );
-		CG_Printf( "%s\n", text );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s\n", text );
 		return;
 	}
 
@@ -1112,7 +1006,7 @@ static void CG_ServerCommand( void ) {
 		Q_strncpyz( text, CG_Argv(1), MAX_SAY_TEXT );
 		CG_RemoveChatEscapeChar( text );
 		CG_AddToTeamChat( text );
-		CG_Printf( "%s\n", text );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s\n", text );
 		return;
 	}
 
@@ -1184,7 +1078,7 @@ static void CG_ServerCommand( void ) {
 		return;
 	}
 
-	CG_Printf( "Unknown client game command: %s\n", cmd );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "Unknown client game command: %s\n", cmd );
 }
 
 

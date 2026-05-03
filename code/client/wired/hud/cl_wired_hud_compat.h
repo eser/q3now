@@ -44,15 +44,13 @@ cl_wired_hud_compat.h — Compatibility shim for ModernHUD element migration
 
 // ── print ─────────────────────────────────────────────────────────────
 
-#define trap_Print(s)               Com_Printf("%s", s)
-#define CG_Printf                   Com_Printf
-#define CG_Error(...)               Com_Error(ERR_DROP, __VA_ARGS__)
+#define trap_Print(s)               COM_INFO( LOG_CAT_UI, "%s", s )
 
 // ── memory ────────────────────────────────────────────────────────────
 // Z_Malloc and Z_Free are available in both cgame and client
 
 #ifndef OSP_MEMORY_CHECK
-#define OSP_MEMORY_CHECK(p) do { if(!(p)) Com_Error(ERR_DROP, "Out of memory"); } while(0)
+#define OSP_MEMORY_CHECK(p) do { if(!(p)) Com_Terminate( TERM_CLIENT_DROP, "Out of memory"); } while(0)
 #endif
 
 // ── cg.* field access via wiredHudState_t ─────────────────────────────
@@ -178,7 +176,7 @@ void WiredFont_DrawFrame( float x, float y, float w, float h, const float *borde
 // Z_Malloc/Z_Free declared in qcommon.h, available in client
 
 #ifndef OSP_MEMORY_CHECK
-#define OSP_MEMORY_CHECK(p) do { if(!(p)) Com_Error(ERR_DROP, "Out of memory"); } while(0)
+#define OSP_MEMORY_CHECK(p) do { if(!(p)) Com_Terminate( TERM_CLIENT_DROP, "Out of memory"); } while(0)
 #endif
 
 // ── cvar stubs from cgame ─────────────────────────────────────────────

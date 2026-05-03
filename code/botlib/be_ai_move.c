@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *****************************************************************************/
 
 #include "../qcommon/q_shared.h"
+#include "../qcommon/q_feats.h"
 #include "l_memory.h"
 #include "l_libvar.h"
 #include "l_utils.h"
@@ -124,13 +125,6 @@ static bot_movestate_t *botmovestates[MAX_CLIENTS+1];
 //========================================================================
 int BotAllocMoveState(void)
 {
-#if FEAT_RECAST_NAVMESH
-	/* Recast nav does not use AAS move states.
-	 * Return 1 (not 0) so BotMoveStateFromHandle doesn't null-deref.
-	 * Callers that receive handle=1 must not dereference botmovestates[1]
-	 * in FEAT_RECAST_NAVMESH builds (all such callers are fenced out). */
-	return 1;
-#else
 	int i;
 
 	for (i = 1; i <= MAX_CLIENTS; i++)
@@ -142,7 +136,6 @@ int BotAllocMoveState(void)
 		} //end if
 	} //end for
 	return 0;
-#endif
 } //end of the function BotAllocMoveState
 //========================================================================
 //
@@ -1138,6 +1131,19 @@ static int BotSwimInDirection(bot_movestate_t *ms, vec3_t dir, float speed, int 
 //===========================================================================
 static int BotWalkInDirection(bot_movestate_t *ms, vec3_t dir, float speed, int type)
 {
+#if FEAT_RECAST_NAVMESH
+	/* Under Recast the navmesh guarantees gap/barrier safety via Detour path planning
+	 * and the OMC transit state in BotNav_MoveToGoal. AAS_OnGround, BotGapDistance,
+	 * AAS_PredictClientMovement, and BotCheckBarrierJump all require aasworld.initialized
+	 * which is false under Recast — skip the entire AAS-dependent body. */
+	vec3_t hordir;
+	hordir[0] = dir[0]; hordir[1] = dir[1]; hordir[2] = 0;
+	VectorNormalize(hordir);
+	if (type & MOVE_JUMP)   EA_Jump(ms->client);
+	if (type & MOVE_CROUCH) EA_Crouch(ms->client);
+	EA_Move(ms->client, hordir, speed);
+	return qtrue;
+#else
 	vec3_t hordir, cmdmove, velocity, tmpdir, origin;
 	int presencetype, maxframes, cmdframes, stopevent;
 	aas_clientmove_t move;
@@ -1246,6 +1252,7 @@ static int BotWalkInDirection(bot_movestate_t *ms, vec3_t dir, float speed, int 
 		//FIXME: do air control to avoid hazards
 		return qtrue;
 	} //end else
+#endif /* FEAT_RECAST_NAVMESH */
 } //end of the function BotWalkInDirection
 //===========================================================================
 //
@@ -1259,6 +1266,11 @@ int BotMoveInDirection(int movestate, vec3_t dir, float speed, int type)
 
 	ms = BotMoveStateFromHandle(movestate);
 	if (!ms) return qfalse;
+#if FEAT_RECAST_NAVMESH
+	/* AAS_Swimming requires aasworld.initialized which is false under Recast.
+	 * Water swim support is deferred (D-22); route everything through walk path. */
+	return BotWalkInDirection(ms, dir, speed, type);
+#else
 	//if swimming
 	if (AAS_Swimming(ms->origin))
 	{
@@ -1268,6 +1280,7 @@ int BotMoveInDirection(int movestate, vec3_t dir, float speed, int type)
 	{
 		return BotWalkInDirection(ms, dir, speed, type);
 	} //end else
+#endif /* FEAT_RECAST_NAVMESH */
 } //end of the function BotMoveInDirection
 #if 0
 //===========================================================================

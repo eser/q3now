@@ -1073,14 +1073,14 @@ void CG_RegisterWeapon( int weaponNum ) {
         return;
     }
 
-	for ( item = bg_itemlist + 1 ; item->classnames[0] ; item++ ) {
+	for ( item = bg_itemlist + 1 ; item->classname ; item++ ) {
 		if ( item->giType == IT_WEAPON && item->giTag == weaponNum ) {
 			weaponInfo->item = item;
 			break;
 		}
 	}
-	if ( !item->classnames[0] ) {
-		CG_Error( "Couldn't find weapon %i", weaponNum );
+	if ( !item->classname ) {
+		Com_Terminate( TERM_CLIENT_DROP, "Couldn't find weapon %i", weaponNum );
 	}
 	CG_RegisterItemVisuals( item - bg_itemlist );
 
@@ -1096,12 +1096,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 	weaponInfo->weaponIcon = trap_R_RegisterShader( item->icon );
 	weaponInfo->ammoIcon = trap_R_RegisterShader( item->icon );
 
-	for ( ammo = bg_itemlist + 1 ; ammo->classnames[0] ; ammo++ ) {
+	for ( ammo = bg_itemlist + 1 ; ammo->classname ; ammo++ ) {
 		if ( ammo->giType == IT_AMMO && ammo->giTag == weaponNum ) {
 			break;
 		}
 	}
-	if ( ammo->classnames[0] && ammo->world_model[0] ) {
+	if ( ammo->classname && ammo->world_model[0] ) {
 		weaponInfo->ammoModel = trap_R_RegisterModel( ammo->world_model[0] );
 	}
 
@@ -1239,7 +1239,7 @@ void CG_RegisterItemVisuals( int itemNum ) {
 	gitem_t			*item;
 
 	if ( itemNum < 0 || itemNum >= bg_numItems ) {
-		CG_Error( "CG_RegisterItemVisuals: itemNum %d out of range [0-%d]", itemNum, bg_numItems-1 );
+		Com_Terminate( TERM_CLIENT_DROP, "CG_RegisterItemVisuals: itemNum %d out of range [0-%d]", itemNum, bg_numItems-1 );
 	}
 
 	itemInfo = &cg_items[ itemNum ];
@@ -2300,7 +2300,7 @@ void CG_FireWeapon( centity_t *cent ) {
 		return;
 	}
 	if ( ent->weapon >= WP_NUM_WEAPONS ) {
-		CG_Error( "CG_FireWeapon: ent->weapon >= WP_NUM_WEAPONS" );
+		Com_Terminate( TERM_CLIENT_DROP, "CG_FireWeapon: ent->weapon >= WP_NUM_WEAPONS" );
 		return;
 	}
 	weap = &cg_weapons[ ent->weapon ];
@@ -2364,7 +2364,7 @@ CG_MissileHitWall
 Caused by an EV_MISSILE_MISS event, or directly by local bullet tracing
 =================
 */
-void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType, int sourceEntityNum ) {
+void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType, int sourceEntityNum ) {
 	qhandle_t		mod;
 	qhandle_t		mark;
 	qhandle_t		shader;
@@ -2391,10 +2391,20 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 	isSprite = qfalse;
 	duration = 600;
 
-	switch ( weapon ) {
+	// hitscan impacts at a liquid surface: show a splash and skip the wall mark.
+	// explosive projectiles (grenade, rocket, etc.) detonate normally underwater.
+	if ( pType == PROJ_NONE ) {
+		int hitContents = CG_PointContents( origin, 0 );
+		if ( hitContents & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) {
+			CG_BubbleTrail( origin, origin, 32 );
+			return;
+		}
+	}
+
+	switch ( pType ) {
 	default:
-	case WP_LIGHTNING_GUN:
-		// no explosion at LG impact, it is added with the beam
+	case PROJ_NONE:
+		// generic fallback / no explosion
 		r = rand() & 3;
 		if ( r < 2 ) {
 			sfx = cgs.media.sfx_lghit2;
@@ -2406,7 +2416,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		mark = cgs.media.holeMarkShader;
 		radius = 12;
 		break;
-	case WP_GRENADE_LAUNCHER:
+	case PROJ_GRENADE:
 		mod = cgs.media.dishFlashModel;
 		shader = cgs.media.grenadeExplosionShader;
 		sfx = cgs.media.sfx_rockexp;
@@ -2418,7 +2428,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		CG_AddEarthquake( origin, 600, 0.6f, 0, 0.5f, 300 );
 #endif
 		break;
-	case WP_ROCKET_LAUNCHER:
+	case PROJ_ROCKET:
 		mod = cgs.media.dishFlashModel;
 		shader = cgs.media.rocketExplosionShader;
 		sfx = cgs.media.sfx_rockexp;
@@ -2439,7 +2449,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		CG_AddEarthquake( origin, 480, 0.6f, 0, 0.5f, 300 );
 #endif
 		break;
-	case WP_RAILGUN:
+	case PROJ_RAILGUN:
 		mod = cgs.media.ringFlashModel;
 		shader = cgs.media.railExplosionShader;
 		//sfx = cgs.media.sfx_railg;
@@ -2447,14 +2457,31 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		mark = cgs.media.energyMarkShader;
 		radius = 24;
 		break;
-	case WP_PLASMA_RIFLE:
+	case PROJ_PLASMA:
 		mod = cgs.media.ringFlashModel;
 		shader = cgs.media.plasmaExplosionShader;
 		sfx = cgs.media.sfx_plasmaexp;
 		mark = cgs.media.energyMarkShader;
 		radius = 8;
 		break;
-	case WP_SHOTGUN:
+	case PROJ_SPIKE:
+	case PROJ_LASER:
+		mod = cgs.media.bulletFlashModel;
+		shader = cgs.media.bulletExplosionShader;
+		mark = cgs.media.bulletMarkShader;
+		sfx = cgs.media.sfx_ric1;
+		radius = 4;
+		break;
+	case PROJ_LAVABALL:
+		mod = cgs.media.dishFlashModel;
+		shader = cgs.media.grenadeExplosionShader;
+		sfx = cgs.media.sfx_rockexp;
+		mark = cgs.media.burnMarkShader;
+		radius = 48;
+		light = 200;
+		isSprite = qtrue;
+		break;
+	case PROJ_SHOTGUN:
 		mod = cgs.media.bulletFlashModel;
 		shader = cgs.media.bulletExplosionShader;
 		mark = cgs.media.bulletMarkShader;
@@ -2462,7 +2489,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 		radius = 4;
 		break;
 
-	case WP_MACHINEGUN:
+	case PROJ_MACHINEGUN:
 		mod = cgs.media.bulletFlashModel;
 		shader = cgs.media.bulletExplosionShader;
 		mark = cgs.media.bulletMarkShader;
@@ -2502,14 +2529,14 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 							   duration, isSprite );
 		le->light = light;
 		VectorCopy( lightColor, le->lightColor );
-		if ( weapon == WP_RAILGUN ) {
+		if ( pType == PROJ_RAILGUN ) {
 			// colorize with client color
 			VectorCopy( cgs.clientinfo[clientNum].color1, le->color );
 			le->refEntity.shaderRGBA[0] = le->color[0] * 0xff;
 			le->refEntity.shaderRGBA[1] = le->color[1] * 0xff;
 			le->refEntity.shaderRGBA[2] = le->color[2] * 0xff;
 			le->refEntity.shaderRGBA[3] = 0xff;
-		} else if ( weapon == WP_PLASMA_RIFLE ) {
+		} else if ( pType == PROJ_PLASMA ) {
 			float scale = 0.5f; // halve the explosion size
 			VectorScale( le->refEntity.axis[0], scale, le->refEntity.axis[0] );
 			VectorScale( le->refEntity.axis[1], scale, le->refEntity.axis[1] );
@@ -2521,14 +2548,14 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 	// impact mark
 	//
 	alphaFade = (mark == cgs.media.energyMarkShader);	// plasma fades alpha, all others fade color
-	if ( weapon == WP_RAILGUN ) {
+	if ( pType == PROJ_RAILGUN ) {
         CG_ImpactMark(mark, origin, dir, random() * 360, colorSkyBlue[0], colorSkyBlue[1], colorSkyBlue[2], 1, alphaFade, radius, qfalse);
 	} else {
 		CG_ImpactMark( mark, origin, dir, random()*360, 1,1,1,1, alphaFade, radius, qfalse );
 	}
 
 // eser - explosions
-    CG_ExplosionParticles(weapon, origin);
+    CG_ExplosionParticles(pType, origin);
 // eser - explosions
 }
 
@@ -2538,7 +2565,7 @@ void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, im
 CG_MissileHitPlayer
 =================
 */
-void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum ) {
+void CG_MissileHitPlayer( int pType, vec3_t origin, vec3_t dir, int entityNum ) {
 	CG_Bleed( origin, entityNum );
 
 #if FEAT_IMPACT_SPARKS
@@ -2549,10 +2576,11 @@ void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum )
 
 	// some weapons will make an explosion with the blood, while
 	// others will just make the blood
-	switch ( weapon ) {
-	case WP_GRENADE_LAUNCHER:
-	case WP_ROCKET_LAUNCHER:
-		CG_MissileHitWall( weapon, 0, origin, dir, IMPACTSOUND_FLESH, ENTITYNUM_WORLD );
+	switch ( pType ) {
+	case PROJ_GRENADE:
+	case PROJ_ROCKET:
+	case PROJ_LAVABALL:
+		CG_MissileHitWall( pType, 0, origin, dir, IMPACTSOUND_FLESH, ENTITYNUM_WORLD );
 		break;
 	default:
 		break;
@@ -2565,7 +2593,7 @@ void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum )
 CG_ExplosionParticles
 =================
 */
-void CG_ExplosionParticles(int weapon, vec3_t origin) {
+void CG_ExplosionParticles(int pType, vec3_t origin) {
     int number = 32; // number of particles
     int jump = 50; // amount to nudge the particles trajectory vector up by
     int speed = 300; // speed of particles
@@ -2578,8 +2606,8 @@ void CG_ExplosionParticles(int weapon, vec3_t origin) {
     lColor[2] = 1.0f;
     lColor[3] = 1.0f; // alpha
 
-    switch (weapon) {
-    case WP_ROCKET_LAUNCHER:
+    switch (pType) {
+    case PROJ_ROCKET:
         number = 128;
         jump = 70;
         light = 100;
@@ -2589,7 +2617,8 @@ void CG_ExplosionParticles(int weapon, vec3_t origin) {
         shader = cgs.media.sparkShader;
         break;
 
-    case WP_GRENADE_LAUNCHER:
+    case PROJ_GRENADE:
+    case PROJ_LAVABALL:
         number = 64;
         jump = 60;
         light = 100;
@@ -2680,6 +2709,13 @@ static void CG_ShotgunPellet( vec3_t start, vec3_t end, int skipNum ) {
 
 		trap_CM_BoxTrace( &trace, start, end, NULL, NULL, 0, CONTENTS_WATER );
 		CG_BubbleTrail( tr.endpos, trace.endpos, 32 );
+	} else {
+		// bullet crosses a water volume without starting or ending in it
+		trace_t waterTr;
+		trap_CM_BoxTrace( &waterTr, start, tr.endpos, NULL, NULL, 0, CONTENTS_WATER );
+		if ( waterTr.fraction < 1.0f ) {
+			CG_BubbleTrail( waterTr.endpos, tr.endpos, 32 );
+		}
 	}
 
 	if (  tr.surfaceFlags & SURF_NOIMPACT ) {
@@ -2687,16 +2723,16 @@ static void CG_ShotgunPellet( vec3_t start, vec3_t end, int skipNum ) {
 	}
 
 	if ( cg_entities[tr.entityNum].currentState.eType == ET_PLAYER ) {
-		CG_MissileHitPlayer( WP_SHOTGUN, tr.endpos, tr.plane.normal, tr.entityNum );
+		CG_MissileHitPlayer( PROJ_SHOTGUN, tr.endpos, tr.plane.normal, tr.entityNum );
 	} else {
 		if ( tr.surfaceFlags & SURF_NOIMPACT ) {
 			// SURF_NOIMPACT will not make a flame puff or a mark
 			return;
 		}
 		if ( tr.surfaceFlags & SURF_METALSTEPS ) {
-			CG_MissileHitWall( WP_SHOTGUN, 0, tr.endpos, tr.plane.normal, IMPACTSOUND_METAL, ENTITYNUM_WORLD );
+			CG_MissileHitWall( PROJ_SHOTGUN, 0, tr.endpos, tr.plane.normal, IMPACTSOUND_METAL, ENTITYNUM_WORLD );
 		} else {
-			CG_MissileHitWall( WP_SHOTGUN, 0, tr.endpos, tr.plane.normal, IMPACTSOUND_DEFAULT, ENTITYNUM_WORLD );
+			CG_MissileHitWall( PROJ_SHOTGUN, 0, tr.endpos, tr.plane.normal, IMPACTSOUND_DEFAULT, ENTITYNUM_WORLD );
 		}
 	}
 }
@@ -3016,6 +3052,13 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 				trap_CM_BoxTrace( &trace, start, end, NULL, NULL, 0, CONTENTS_WATER );
 				CG_BubbleTrail( trace.endpos, end, 32 );
 			}
+			// bubble trail when bullet crosses water without starting or ending in it
+			else {
+				trap_CM_BoxTrace( &trace, start, end, NULL, NULL, 0, CONTENTS_WATER );
+				if ( trace.fraction < 1.0f ) {
+					CG_BubbleTrail( trace.endpos, end, 32 );
+				}
+			}
 
 			// draw a tracer
 			if ( sourceEntityNum == cg.snap->ps.clientNum && cg.predictedPlayerState.burstRoundsRemaining > 0 ) {
@@ -3031,7 +3074,7 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 	if ( flesh ) {
 		CG_Bleed( end, fleshEntityNum );
 	} else {
-		CG_MissileHitWall( WP_MACHINEGUN, 0, end, normal, IMPACTSOUND_DEFAULT, ENTITYNUM_WORLD );
+		CG_MissileHitWall( PROJ_MACHINEGUN, 0, end, normal, IMPACTSOUND_DEFAULT, ENTITYNUM_WORLD );
 	}
 
 }

@@ -97,7 +97,7 @@ static void VM_WasmInitRuntime( void )
 	init_args.mem_alloc_type = Alloc_With_System_Allocator;
 
 	if ( !wasm_runtime_full_init( &init_args ) ) {
-		Com_Printf( S_COLOR_RED "WASM: failed to initialize WAMR runtime\n" );
+		COM_ERROR( LOG_CAT_SYSTEM, "WASM: failed to initialize WAMR runtime\n" );
 		return;
 	}
 
@@ -106,13 +106,13 @@ static void VM_WasmInitRuntime( void )
 	if ( !wasm_runtime_register_natives_raw( "env",
 	         wasm_native_symbols_raw,
 	         sizeof( wasm_native_symbols_raw ) / sizeof( NativeSymbol ) ) ) {
-		Com_Printf( S_COLOR_RED "WASM: failed to register native syscall\n" );
+		COM_ERROR( LOG_CAT_SYSTEM, "WASM: failed to register native syscall\n" );
 		wasm_runtime_destroy();
 		return;
 	}
 
 	wamr_initialized = qtrue;
-	Com_Printf( "WASM: WAMR runtime initialized\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WASM: WAMR runtime initialized\n" );
 }
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -149,11 +149,11 @@ qboolean VM_WasmLoad( vm_t *vm )
 	errorBuf[0] = '\0';
 	wasm_module_t module = wasm_runtime_load( buf, (uint32_t)fileLen, errorBuf, sizeof( errorBuf ) );
 	if ( !module ) {
-		Com_Printf( S_COLOR_YELLOW "WASM: failed to load %s: %s\n", filename, errorBuf );
+		COM_WARN( LOG_CAT_SYSTEM, "WASM: failed to load %s: %s\n", filename, errorBuf );
 		FS_FreeFile( buf );
 		/* If .aot failed (wrong platform?), try .wasm fallback */
 		if ( isAot ) {
-			Com_Printf( "WASM: .aot load failed, trying .wasm interpreter\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WASM: .aot load failed, trying .wasm interpreter\n" );
 			Com_sprintf( filename, sizeof( filename ), "vm/%s.wasm", vm->name );
 			fileLen = FS_ReadFile( filename, (void **)&buf );
 			if ( fileLen > 0 && buf ) {
@@ -179,7 +179,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 			verStr[copyLen] = '\0';
 			ver = atoi( verStr );
 			if ( ver > Q3NOW_WASM_API_VERSION ) {
-				Com_Printf( S_COLOR_YELLOW "WASM: %s requires API v%d, engine has v%d\n",
+				COM_WARN( LOG_CAT_SYSTEM, "WASM: %s requires API v%d, engine has v%d\n",
 				            vm->name, ver, Q3NOW_WASM_API_VERSION );
 				wasm_runtime_unload( module );
 				FS_FreeFile( buf );
@@ -193,7 +193,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 	wasm_module_inst_t moduleInst = wasm_runtime_instantiate( module, WASM_STACK_SIZE, WASM_HEAP_SIZE,
 	                                       errorBuf, sizeof( errorBuf ) );
 	if ( !moduleInst ) {
-		Com_Printf( S_COLOR_YELLOW "WASM: failed to instantiate %s: %s\n", filename, errorBuf );
+		COM_WARN( LOG_CAT_SYSTEM, "WASM: failed to instantiate %s: %s\n", filename, errorBuf );
 		wasm_runtime_unload( module );
 		FS_FreeFile( buf );
 		return qfalse;
@@ -202,7 +202,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 	/* ── Look up vmMain export ───────────────────────────────────── */
 	wasm_function_inst_t funcVmMain = wasm_runtime_lookup_function( moduleInst, "vmMain" );
 	if ( !funcVmMain ) {
-		Com_Printf( S_COLOR_YELLOW "WASM: %s does not export vmMain\n", filename );
+		COM_WARN( LOG_CAT_SYSTEM, "WASM: %s does not export vmMain\n", filename );
 		wasm_runtime_deinstantiate( moduleInst );
 		wasm_runtime_unload( module );
 		FS_FreeFile( buf );
@@ -212,7 +212,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 	/* ── Create execution environment ────────────────────────────── */
 	wasm_exec_env_t execEnv = wasm_runtime_create_exec_env( moduleInst, WASM_STACK_SIZE );
 	if ( !execEnv ) {
-		Com_Printf( S_COLOR_YELLOW "WASM: failed to create exec env for %s\n", filename );
+		COM_WARN( LOG_CAT_SYSTEM, "WASM: failed to create exec env for %s\n", filename );
 		wasm_runtime_deinstantiate( moduleInst );
 		wasm_runtime_unload( module );
 		FS_FreeFile( buf );
@@ -255,7 +255,7 @@ qboolean VM_WasmLoad( vm_t *vm )
 	 * It will be freed in VM_WasmDestroy. We store nothing extra —
 	 * WAMR holds the reference internally. */
 
-	Com_Printf( "%s loaded as WASM %s (%u KB memory, %d ms)\n",
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s loaded as WASM %s (%u KB memory, %d ms)\n",
 	            filename,
 	            isAot ? "AOT" : "interpreter",
 	            memSize / 1024,
@@ -276,7 +276,7 @@ int32_t VM_CallWasm( vm_t *vm, int nargs, int32_t *args )
 
 	/* Guard: module not loaded or destroyed */
 	if ( !execEnv || !func || !inst ) {
-		Com_Printf( S_COLOR_YELLOW "WASM: %s call skipped (module not loaded)\n", vm->name );
+		COM_WARN( LOG_CAT_SYSTEM, "WASM: %s call skipped (module not loaded)\n", vm->name );
 		return 0;
 	}
 
@@ -290,11 +290,11 @@ int32_t VM_CallWasm( vm_t *vm, int nargs, int32_t *args )
 
 	if ( !wasm_runtime_call_wasm( execEnv, func, nargs, argv ) ) {
 		const char *exception = wasm_runtime_get_exception( inst );
-		Com_Printf( S_COLOR_RED "WASM: %s trap: %s\n",
+		COM_ERROR( LOG_CAT_SYSTEM, "WASM: %s trap: %s\n",
 		            vm->name, exception ? exception : "unknown error" );
 		wasm_runtime_clear_exception( inst );
 		vm->wasmExecEnv = NULL;
-		Com_Error( ERR_DROP, "WASM: %s trap", vm->name );
+		Com_Terminate( TERM_CLIENT_DROP, "WASM: %s trap", vm->name );
 		return 0;
 	}
 

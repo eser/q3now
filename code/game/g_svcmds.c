@@ -102,7 +102,7 @@ static qboolean StringToFilter (char *s, ipFilter_t *f)
 				s++;
 				continue;
 			}
-			G_Printf( "Bad filter address: %s\n", s );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Bad filter address: %s\n", s );
 			return qfalse;
 		}
 		
@@ -160,7 +160,7 @@ static void UpdateIPBans (void)
 		}
 		else
 		{
-			Com_Printf("g_banIPs overflowed at MAX_CVAR_VALUE_STRING\n");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "g_banIPs overflowed at MAX_CVAR_VALUE_STRING\n");
 			break;
 		}
 	}
@@ -218,7 +218,7 @@ static void AddIP( char *str )
 	{
 		if (numIPFilters == MAX_IPFILTERS)
 		{
-			G_Printf ("IP filter list is full\n");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "IP filter list is full\n");
 			return;
 		}
 		numIPFilters++;
@@ -265,7 +265,7 @@ void Svcmd_AddIP_f (void)
 	char		str[MAX_TOKEN_CHARS];
 
 	if ( trap_Argc() < 2 ) {
-		G_Printf("Usage: addip <ip-mask>\n");
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: addip <ip-mask>\n");
 		return;
 	}
 
@@ -287,7 +287,7 @@ void Svcmd_RemoveIP_f (void)
 	char		str[MAX_TOKEN_CHARS];
 
 	if ( trap_Argc() < 2 ) {
-		G_Printf("Usage: removeip <ip-mask>\n");
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: removeip <ip-mask>\n");
 		return;
 	}
 
@@ -300,14 +300,14 @@ void Svcmd_RemoveIP_f (void)
 		if (ipFilters[i].mask == f.mask	&&
 			ipFilters[i].compare == f.compare) {
 			ipFilters[i].compare = 0xffffffffu;
-			G_Printf ("Removed.\n");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Removed.\n");
 
 			UpdateIPBans();
 			return;
 		}
 	}
 
-	G_Printf ( "Didn't find %s.\n", str );
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "Didn't find %s.\n", str );
 }
 
 /*
@@ -324,53 +324,53 @@ void	Svcmd_EntityList_f (void) {
 		if ( !check->inuse ) {
 			continue;
 		}
-		G_Printf("%3i:", e);
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "%3i:", e);
 		switch ( check->s.eType ) {
 		case ET_GENERAL:
-			G_Printf("ET_GENERAL          ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_GENERAL          ");
 			break;
 		case ET_PLAYER:
-			G_Printf("ET_PLAYER           ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_PLAYER           ");
 			break;
 		case ET_ITEM:
-			G_Printf("ET_ITEM             ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_ITEM             ");
 			break;
 		case ET_MISSILE:
-			G_Printf("ET_MISSILE          ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_MISSILE          ");
 			break;
 		case ET_MOVER:
-			G_Printf("ET_MOVER            ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_MOVER            ");
 			break;
 		case ET_BEAM:
-			G_Printf("ET_BEAM             ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_BEAM             ");
 			break;
 		case ET_PORTAL:
-			G_Printf("ET_PORTAL           ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_PORTAL           ");
 			break;
 		case ET_SPEAKER:
-			G_Printf("ET_SPEAKER          ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_SPEAKER          ");
 			break;
 		case ET_PUSH_TRIGGER:
-			G_Printf("ET_PUSH_TRIGGER     ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_PUSH_TRIGGER     ");
 			break;
 		case ET_TELEPORT_TRIGGER:
-			G_Printf("ET_TELEPORT_TRIGGER ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_TELEPORT_TRIGGER ");
 			break;
 		case ET_INVISIBLE:
-			G_Printf("ET_INVISIBLE        ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_INVISIBLE        ");
 			break;
 		case ET_GRAPPLE:
-			G_Printf("ET_GRAPPLE          ");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_GRAPPLE          ");
 			break;
 		default:
-			G_Printf("%3i                 ", check->s.eType);
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "%3i                 ", check->s.eType);
 			break;
 		}
 
 		if ( check->classname ) {
-			G_Printf("%s", check->classname);
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "%s", check->classname);
 		}
-		G_Printf("\n");
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "\n");
 	}
 }
 
@@ -383,13 +383,13 @@ gclient_t	*ClientForString( const char *s ) {
 	if ( s[0] >= '0' && s[0] <= '9' ) {
 		idnum = atoi( s );
 		if ( idnum < 0 || idnum >= level.maxclients ) {
-			Com_Printf( "Bad client slot: %i\n", idnum );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Bad client slot: %i\n", idnum );
 			return NULL;
 		}
 
 		cl = &level.clients[idnum];
 		if ( cl->pers.connected == CON_DISCONNECTED ) {
-			G_Printf( "Client %i is not connected\n", idnum );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Client %i is not connected\n", idnum );
 			return NULL;
 		}
 		return cl;
@@ -406,7 +406,7 @@ gclient_t	*ClientForString( const char *s ) {
 		}
 	}
 
-	G_Printf( "User %s is not on the server\n", s );
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "User %s is not on the server\n", s );
 
 	return NULL;
 }
@@ -423,7 +423,7 @@ void	Svcmd_ForceTeam_f( void ) {
 	char		str[MAX_TOKEN_CHARS];
 
 	if ( trap_Argc() < 3 ) {
-		G_Printf("Usage: forceteam <player> <team>\n");
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: forceteam <player> <team>\n");
 		return;
 	}
 
@@ -450,11 +450,11 @@ ConsoleCommand
 static void Svcmd_Q3nowEngine_f( void ) {
     char buf[256];
     trap_Cvar_VariableStringBuffer( "version", buf, sizeof(buf) );
-    G_Printf( "Engine:      %s\n", buf );
+    Com_Log( SEV_INFO, LOG_CAT_GAME, "Engine:      %s\n", buf );
     trap_Cvar_VariableStringBuffer( "cl_renderer", buf, sizeof(buf) );
-    G_Printf( "Renderer:    %s\n", buf );
+    Com_Log( SEV_INFO, LOG_CAT_GAME, "Renderer:    %s\n", buf );
     trap_Cvar_VariableStringBuffer( "com_maxfps", buf, sizeof(buf) );
-    G_Printf( "com_maxfps:  %s\n", buf );
+    Com_Log( SEV_INFO, LOG_CAT_GAME, "com_maxfps:  %s\n", buf );
 }
 
 // Called by the MCP bot_say tool via Cbuf_ExecuteText("bot_say_console ...").
@@ -465,7 +465,7 @@ static void Svcmd_BotSayConsole_f( void ) {
 	wbParseResult_t result;
 
 	if ( trap_Argc() < 2 ) {
-		G_Printf( "Usage: bot_say_console <message>\n" );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: bot_say_console <message>\n" );
 		return;
 	}
 
@@ -482,6 +482,31 @@ static void Svcmd_BotSayConsole_f( void ) {
 		trap_Cvar_Set( "wiredbot_ack",
 		               va( "no active bot named '%s'", result.recipientMention ) );
 	}
+}
+
+static void Svcmd_Lightstyle_f( void ) {
+	char slotStr[8];
+	char pattern[LIGHTSTYLE_PATTERN_MAX + 1];
+	int  style;
+
+	if ( trap_Argc() < 3 ) {
+		Com_Log( SEV_INFO, LOG_CAT_GAME,
+		         "Usage: lightstyle <slot> <pattern>\n"
+		         "  slot: 0-63; pattern: lowercase a-z string (empty string = off)\n" );
+		return;
+	}
+
+	trap_Argv( 1, slotStr, sizeof( slotStr ) );
+	trap_Argv( 2, pattern, sizeof( pattern ) );
+	style = atoi( slotStr );
+
+	if ( !G_SetLightstyle( style, pattern ) ) {
+		Com_Log( SEV_INFO, LOG_CAT_GAME,
+		         "lightstyle: invalid slot %d or pattern '%s'\n", style, pattern );
+		return;
+	}
+
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "lightstyle: style %d set to '%s'\n", style, pattern );
 }
 
 qboolean	ConsoleCommand( void ) {
@@ -534,10 +559,15 @@ qboolean	ConsoleCommand( void ) {
 		return qtrue;
 	}
 
+	if ( Q_stricmp( cmd, "lightstyle" ) == 0 ) {
+		Svcmd_Lightstyle_f();
+		return qtrue;
+	}
+
 	if ( Q_stricmp( cmd, "bot_order" ) == 0 ) {
 		char botname[MAX_NETNAME];
 		if ( trap_Argc() < 3 ) {
-			G_Printf( "Usage: bot_order <botname> <order>\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: bot_order <botname> <order>\n" );
 			return qtrue;
 		}
 		trap_Argv( 1, botname, sizeof( botname ) );

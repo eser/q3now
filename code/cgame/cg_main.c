@@ -67,7 +67,7 @@ Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, i
 		CG_EventHandling(arg0);
 		return 0;
 	default:
-		CG_Error( "vmMain: unknown command %i", command );
+		Com_Terminate( TERM_CLIENT_DROP, "vmMain: unknown command %i", command );
 		break;
 	}
 	return -1;
@@ -463,48 +463,27 @@ void CG_UpdateCvars( void ) {
 	}
 }
 
-void QDECL CG_Printf( const char *msg, ... ) {
+void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *error, ... ) {
 	va_list		argptr;
-	char		text[1024];
+	char		text[MAX_STRING_CHARS];
 
-	va_start (argptr, msg);
-	vsnprintf (text, sizeof(text), msg, argptr);
-	va_end (argptr);
+	va_start( argptr, error );
+	vsnprintf( text, sizeof(text), error, argptr );
+	va_end( argptr );
 
-	trap_Print( text );
+	trap_Terminate( reason, text );
 }
 
-void QDECL CG_Error( const char *msg, ... ) {
+void QDECL Com_Log_Impl( log_severity_t severity, logCategory_t cat, const char *msg, ... ) {
 	va_list		argptr;
-	char		text[1024];
+	char		text[MAX_STRING_CHARS];
 
-	va_start (argptr, msg);
-	vsnprintf (text, sizeof(text), msg, argptr);
-	va_end (argptr);
+	(void)cat;
+	va_start( argptr, msg );
+	vsnprintf( text, sizeof(text), msg, argptr );
+	va_end( argptr );
 
-	trap_Error( text );
-}
-
-void QDECL Com_Error( errorParm_t level, const char *error, ... ) {
-	va_list		argptr;
-	char		text[1024];
-
-	va_start (argptr, error);
-	vsnprintf (text, sizeof(text), error, argptr);
-	va_end (argptr);
-
-	trap_Error( text );
-}
-
-void QDECL Com_Printf( const char *msg, ... ) {
-	va_list		argptr;
-	char		text[1024];
-
-	va_start (argptr, msg);
-	vsnprintf (text, sizeof(text), msg, argptr);
-	va_end (argptr);
-
-	trap_Print( text );
+	trap_Log( severity, text );
 }
 
 /*
@@ -555,8 +534,8 @@ static void CG_RegisterItemSounds( int itemNum ) {
 
 		len = s-start;
 		if (len >= MAX_QPATH || len < 5) {
-			CG_Error( "PrecacheItem: %s has bad precache string", 
-				item->classnames[0]);
+			Com_Terminate( TERM_CLIENT_DROP, "PrecacheItem: %s has bad precache string", 
+				item->classname);
 			return;
 		}
 		memcpy (data, start, len);
@@ -584,9 +563,6 @@ static void CG_RegisterSounds( void ) {
 	char	items[MAX_ITEMS+1];
 	char	name[MAX_QPATH];
 	const char	*soundName;
-
-	// voice commands
-	CG_LoadVoiceChats();
 
 	cgs.media.oneMinuteSound = trap_S_RegisterSound( "sound/feedback/1_minute.opus", qtrue );
 	cgs.media.fiveMinuteSound = trap_S_RegisterSound( "sound/feedback/5_minute.opus", qtrue );
@@ -658,11 +634,11 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.gibBounce3Sound = trap_S_RegisterSound( "sound/misc/gibimp3.opus", qfalse );
 	cgs.media.talkSound       = trap_S_RegisterSound( "sound/misc/talk.opus", qfalse );
 
-	cgs.media.useInvulnerabilitySound = trap_S_RegisterSound( "sound/items/invul_activate.opus", qfalse );
-	cgs.media.invulnerabilityImpactSound1 = trap_S_RegisterSound( "sound/items/invul_impact_01.opus", qfalse );
-	cgs.media.invulnerabilityImpactSound2 = trap_S_RegisterSound( "sound/items/invul_impact_02.opus", qfalse );
-	cgs.media.invulnerabilityImpactSound3 = trap_S_RegisterSound( "sound/items/invul_impact_03.opus", qfalse );
-	cgs.media.invulnerabilityJuicedSound = trap_S_RegisterSound( "sound/items/invul_juiced.opus", qfalse );
+	cgs.media.useDeflectorSound = trap_S_RegisterSound( "sound/items/invul_activate.opus", qfalse );
+	cgs.media.deflectorImpactSound1 = trap_S_RegisterSound( "sound/items/invul_impact_01.opus", qfalse );
+	cgs.media.deflectorImpactSound2 = trap_S_RegisterSound( "sound/items/invul_impact_02.opus", qfalse );
+	cgs.media.deflectorImpactSound3 = trap_S_RegisterSound( "sound/items/invul_impact_03.opus", qfalse );
+	cgs.media.deflectorJuicedSound = trap_S_RegisterSound( "sound/items/invul_juiced.opus", qfalse );
 #if FEAT_OVERLOAD
 	cgs.media.obeliskHitSound1 = trap_S_RegisterSound( "sound/items/obelisk_hit_01.opus", qfalse );
 	cgs.media.obeliskHitSound2 = trap_S_RegisterSound( "sound/items/obelisk_hit_02.opus", qfalse );
@@ -807,7 +783,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.crosshairBulletShader = trap_R_RegisterShader( "gfx/2d/crosshairBullet" );
 	cgs.media.crosshairBurstShader = trap_R_RegisterShader( "gfx/2d/crosshairBurst" );
 	cgs.media.crosshairMissileShader = trap_R_RegisterShader( "gfx/2d/crosshairMissile" );
-	cgs.media.crosshairMiscShader = trap_R_RegisterShader( "gfx/2d/crosshairMisc" );
+	cgs.media.crosshairDefaultShader = trap_R_RegisterShader( "gfx/2d/crosshairDefault" );
 
 	cgs.media.backTileShader = trap_R_RegisterShader( "gfx/2d/backtile" );
 	cgs.media.noammoShader = trap_R_RegisterShader( "icons/noammo" );
@@ -910,7 +886,7 @@ static void CG_RegisterGraphics( void ) {
 	}
 
     cgs.media.healthModel = trap_R_RegisterModel("models/powerups/health/large_cross.md3");
-    cgs.media.healthIcon = trap_R_RegisterShaderNoMip("icons/iconh_red");
+    cgs.media.healthIcon = trap_R_RegisterShaderNoMip("items/health_50/icon");
 
     cgs.media.heavyArmorModel = trap_R_RegisterModel("models/powerups/armor/armor_red.md3");
     cgs.media.heavyArmorIcon = trap_R_RegisterShaderNoMip("icons/iconr_red");
@@ -952,11 +928,11 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.kamikazeShockWave = trap_R_RegisterModel( "models/weaphits/kamwave.md3" );
 	cgs.media.kamikazeHeadModel = trap_R_RegisterModel( "models/powerups/kamikazi.md3" );
 	cgs.media.kamikazeHeadTrail = trap_R_RegisterModel( "models/powerups/trailtest.md3" );
-	cgs.media.invulnerabilityImpactModel = trap_R_RegisterModel( "models/powerups/shield/impact.md3" );
-	cgs.media.invulnerabilityJuicedModel = trap_R_RegisterModel( "models/powerups/shield/juicer.md3" );
+	cgs.media.deflectorImpactModel = trap_R_RegisterModel( "models/powerups/shield/impact.md3" );
+	cgs.media.deflectorJuicedModel = trap_R_RegisterModel( "models/powerups/shield/juicer.md3" );
+	cgs.media.deflectorPowerupModel = trap_R_RegisterModel( "models/powerups/shield/shield.md3" );
 	cgs.media.medkitUsageModel = trap_R_RegisterModel( "models/powerups/regen.md3" );
 	cgs.media.heartShader = trap_R_RegisterShaderNoMip( "ui/assets/statusbar/selectedhealth.tga" );
-	cgs.media.invulnerabilityPowerupModel = trap_R_RegisterModel( "models/powerups/shield/shield.md3" );
 
 	cgs.media.medalImpressive = trap_R_RegisterShaderNoMip( "medal_impressive" );
 	cgs.media.medalExcellent = trap_R_RegisterShaderNoMip( "medal_excellent" );
@@ -1120,7 +1096,7 @@ CG_ConfigString
 */
 const char *CG_ConfigString( int index ) {
 	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
-		CG_Error( "CG_ConfigString: bad index: %i", index );
+		Com_Terminate( TERM_CLIENT_DROP, "CG_ConfigString: bad index: %i", index );
 	}
 	return cgs.gameState.stringData + cgs.gameState.stringOffsets[ index ];
 }
@@ -1240,7 +1216,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	// check version
 	s = CG_ConfigString( CS_GAME_VERSION );
 	if ( strcmp( s, GAME_VERSION ) ) {
-		CG_Error( "Client/Server game mismatch: %s/%s", GAME_VERSION, s );
+		Com_Terminate( TERM_CLIENT_DROP, "Client/Server game mismatch: %s/%s", GAME_VERSION, s );
 	}
 
 	s = CG_ConfigString( CS_LEVEL_START_TIME );

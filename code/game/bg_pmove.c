@@ -643,12 +643,12 @@ static void PM_WaterMove( void ) {
 
 /*
 ===================
-PM_InvulnerabilityMove
+PM_DeflectorMove
 
-Only with the invulnerability powerup
+Only with the deflector powerup
 ===================
 */
-static void PM_InvulnerabilityMove( void ) {
+static void PM_DeflectorMove( void ) {
 	pm->cmd.forwardmove = 0;
 	pm->cmd.rightmove = 0;
 	pm->cmd.upmove = 0;
@@ -788,8 +788,6 @@ static void PM_WallJump(void) {
         PM_ForceLegsAnim(LEGS_JUMPB);
         pm->ps->pm_flags |= PMF_BACKWARDS_JUMP;
     }
-
-    pm->ps->stats[STAT_WALLJUMPS]++;
 }
 
 /*
@@ -1006,8 +1004,8 @@ static void PM_WalkMove(pmove_t *pmove) {
 
 	PM_Accelerate (wishdir, wishspeed, accelerate);
 
-	//Com_Printf("velocity = %1.1f %1.1f %1.1f\n", pm->ps->velocity[0], pm->ps->velocity[1], pm->ps->velocity[2]);
-	//Com_Printf("velocity1 = %1.1f\n", VectorLength(pm->ps->velocity));
+	//Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "velocity = %1.1f %1.1f %1.1f\n", pm->ps->velocity[0], pm->ps->velocity[1], pm->ps->velocity[2]);
+	//Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "velocity1 = %1.1f\n", VectorLength(pm->ps->velocity));
 
 	if ( ( pml.groundTrace.surfaceFlags & SURF_SLICK ) || pm->ps->pm_flags & PMF_TIME_KNOCKBACK ) {
 		pm->ps->velocity[2] -= pm->ps->gravity * pml.frametime;
@@ -1033,7 +1031,7 @@ static void PM_WalkMove(pmove_t *pmove) {
 
 	PM_StepSlideMove( qfalse );
 
-	//Com_Printf("velocity2 = %1.1f\n", VectorLength(pm->ps->velocity));
+	//Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "velocity2 = %1.1f\n", VectorLength(pm->ps->velocity));
 
 }
 
@@ -1259,7 +1257,7 @@ static int PM_CorrectAllSolid( trace_t *trace ) {
 	vec3_t		point;
 
 	if ( pm->debugLevel ) {
-		Com_Printf("%i:allsolid\n", c_pmove);
+		Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:allsolid\n", c_pmove);
 	}
 
 	// jitter around
@@ -1306,7 +1304,7 @@ static void PM_GroundTraceMissed( void ) {
 	if ( pm->ps->groundEntityNum != ENTITYNUM_NONE ) {
 		// we just transitioned into freefall
 		if ( pm->debugLevel ) {
-			Com_Printf("%i:lift\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:lift\n", c_pmove);
 		}
 
 		// if they aren't in a jumping animation and the ground is a ways away, force into it
@@ -1356,6 +1354,43 @@ static void PM_GroundTrace( void ) {
 
 	// if the trace didn't hit anything, we are in free fall
 	if ( trace.fraction == 1.0 ) {
+		// Stair-down assist: when walking off a step edge, the 0.25-unit probe
+		// misses the floor of the next tread (which can be up to STEPSIZE below).
+		// Do a deeper probe and snap down rather than going airborne.
+		if ( pm->ps->groundEntityNum != ENTITYNUM_NONE ) {
+			float hspeed2 = pm->ps->velocity[0] * pm->ps->velocity[0]
+			              + pm->ps->velocity[1] * pm->ps->velocity[1];
+			if ( hspeed2 > 1.0f ) {
+				vec3_t deep;
+				trace_t stair;
+				VectorCopy( pm->ps->origin, deep );
+				deep[2] -= STEPSIZE;
+				pm->trace( &stair, pm->ps->origin, pm->mins, pm->maxs, deep,
+				           pm->ps->clientNum, pm->tracemask );
+				if ( stair.fraction < 1.0f && !stair.allsolid
+				     && stair.plane.normal[2] >= MIN_WALK_NORMAL ) {
+					if ( pm->stepDebugLevel ) {
+						float drop = stair.endpos[2] - pm->ps->origin[2];
+						Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STAIR-DOWN [%i] snap %.2f units: pos=(%.2f %.2f %.2f) -> (%.2f %.2f %.2f) frac=%.3f\n",
+							c_pmove, drop,
+							pm->ps->origin[0], pm->ps->origin[1], pm->ps->origin[2],
+							stair.endpos[0], stair.endpos[1], stair.endpos[2],
+							stair.fraction );
+					}
+					VectorCopy( stair.endpos, pm->ps->origin );
+					pml.groundTrace = stair;
+					pml.groundPlane = qtrue;
+					pml.walking = qtrue;
+					pm->ps->groundEntityNum = stair.entityNum;
+					PM_AddTouchEnt( stair.entityNum );
+					return;
+				}
+				if ( pm->stepDebugLevel ) {
+					Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STAIR-DOWN [%i] no floor in STEPSIZE: frac=%.3f allsolid=%i\n",
+						c_pmove, stair.fraction, stair.allsolid );
+				}
+			}
+		}
 		PM_GroundTraceMissed();
 		pml.groundPlane = qfalse;
 		pml.walking = qfalse;
@@ -1365,7 +1400,7 @@ static void PM_GroundTrace( void ) {
 	// check if getting thrown off the ground
 	if ( pm->ps->velocity[2] > 0 && DotProduct( pm->ps->velocity, trace.plane.normal ) > 10 ) {
 		if ( pm->debugLevel ) {
-			Com_Printf("%i:kickoff\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:kickoff\n", c_pmove);
 		}
 		// go into jump animation
 		if ( pm->cmd.forwardmove >= 0 ) {
@@ -1385,7 +1420,7 @@ static void PM_GroundTrace( void ) {
 	// slopes that are too steep will not be considered onground
 	if ( trace.plane.normal[2] < MIN_WALK_NORMAL ) {
 		if ( pm->debugLevel ) {
-			Com_Printf("%i:steep\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:steep\n", c_pmove);
 		}
 		// FIXME: if they can't slide down the slope, let them
 		// walk (sharp crevices)
@@ -1408,7 +1443,7 @@ static void PM_GroundTrace( void ) {
 	if ( pm->ps->groundEntityNum == ENTITYNUM_NONE ) {
 		// just hit the ground
 		if ( pm->debugLevel ) {
-			Com_Printf("%i:Land\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:Land\n", c_pmove);
 		}
 
 		PM_CrashLand();
@@ -1483,9 +1518,9 @@ static void PM_CheckDuck (void)
 {
 	trace_t	trace;
 
-	if ( pm->ps->powerups[PW_INVULNERABILITY] ) {
-		if ( pm->ps->pm_flags & PMF_INVULEXPAND ) {
-			// invulnerability sphere has a 42 units radius
+	if ( pm->ps->powerups[PW_DEFLECTOR] ) {
+		if ( pm->ps->pm_flags & PMF_DEFLECTOR_EXPAND ) {
+			// deflector sphere has a 42 units radius
 			VectorSet( pm->mins, -INVUL_RADIUS, -INVUL_RADIUS, -INVUL_RADIUS );
 			VectorSet( pm->maxs, INVUL_RADIUS, INVUL_RADIUS, INVUL_RADIUS );
 		}
@@ -1497,7 +1532,7 @@ static void PM_CheckDuck (void)
 		pm->ps->viewheight = CROUCH_VIEWHEIGHT;
 		return;
 	}
-	pm->ps->pm_flags &= ~PMF_INVULEXPAND;
+	pm->ps->pm_flags &= ~PMF_DEFLECTOR_EXPAND;
 
 	pm->mins[0] = -PLAYER_WIDTH;
 	pm->mins[1] = -PLAYER_WIDTH;
@@ -1566,7 +1601,7 @@ static void PM_Footsteps( void ) {
 
 	if ( pm->ps->groundEntityNum == ENTITYNUM_NONE ) {
 
-		if ( pm->ps->powerups[PW_INVULNERABILITY] ) {
+		if ( pm->ps->powerups[PW_DEFLECTOR] ) {
 			PM_ContinueLegsAnim( LEGS_IDLECR );
 		}
 		// airborne leaves position in cycle intact, but doesn't advance
@@ -2147,12 +2182,14 @@ static void PM_Weapon( void ) {
 	// check for item using
 	if ( pm->cmd.buttons & BUTTON_USE_HOLDABLE ) {
 		if ( ! ( pm->ps->pm_flags & PMF_USE_ITEM_HELD ) ) {
-			if ( bg_itemlist[pm->ps->stats[STAT_HOLDABLE_ITEM]].giTag == HI_MEDKIT
-				&& pm->ps->stats[STAT_HEALTH] >= MAX_HEALTH ) {
-				// don't use medkit if at max health
-			} else {
+			int tag = bg_itemlist[pm->ps->stats[STAT_HOLDABLE_ITEM]].giTag;
+			if ( tag != HI_NONE
+				&& ( pm->ps->stats[STAT_HOLDABLE_BITS] & BG_HOLDABLE_BIT( tag ) )
+				&& BG_HoldableIsSelectable( (holdable_t)tag )
+				&& !( tag == HI_MEDKIT && pm->ps->stats[STAT_HEALTH] >= MAX_HEALTH ) ) {
 				pm->ps->pm_flags |= PMF_USE_ITEM_HELD;
-				PM_AddEvent( EV_USE_ITEM0 + bg_itemlist[pm->ps->stats[STAT_HOLDABLE_ITEM]].giTag );
+				PM_AddEvent( EV_USE_ITEM0 + tag );
+				pm->ps->stats[STAT_HOLDABLE_BITS] &= ~BG_HOLDABLE_BIT( tag );
 				pm->ps->stats[STAT_HOLDABLE_ITEM] = 0;
 			}
 			return;
@@ -2642,8 +2679,8 @@ void PmoveSingle (pmove_t *pmove) {
         pm->ps->stats[STAT_JUMPTIME] -= pml.msec;
     }
 
-	if ( pm->ps->powerups[PW_INVULNERABILITY] ) {
-		PM_InvulnerabilityMove();
+	if ( pm->ps->powerups[PW_DEFLECTOR] ) {
+		PM_DeflectorMove();
 	} else if ( pm->ps->powerups[PW_FLIGHT] ) {
 		// flight powerup doesn't allow jump and has different friction
 		PM_FlyMove();

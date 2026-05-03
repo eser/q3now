@@ -99,7 +99,7 @@ int G_FindConfigstringIndex( char *name, int start, int max, qboolean create ) {
 	}
 
 	if ( i == max ) {
-		G_Error( "G_FindConfigstringIndex: overflow" );
+		Com_Terminate( TERM_CLIENT_DROP, "G_FindConfigstringIndex: overflow" );
 	}
 
 	trap_SetConfigstring( start + i, name );
@@ -192,7 +192,7 @@ gentity_t *G_PickTarget (char *targetname)
 
 	if (!targetname)
 	{
-		G_Printf("G_PickTarget called with NULL targetname\n");
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_PickTarget called with NULL targetname\n");
 		return NULL;
 	}
 
@@ -208,7 +208,7 @@ gentity_t *G_PickTarget (char *targetname)
 
 	if (!num_choices)
 	{
-		G_Printf("G_PickTarget: target %s not found\n", targetname);
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_PickTarget: target %s not found\n", targetname);
 		return NULL;
 	}
 
@@ -247,14 +247,14 @@ void G_UseTargets( gentity_t *ent, gentity_t *activator ) {
 	t = NULL;
 	while ( (t = G_Find (t, FOFS(targetname), ent->target)) != NULL ) {
 		if ( t == ent ) {
-			G_Printf ("WARNING: Entity used itself.\n");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "WARNING: Entity used itself.\n");
 		} else {
 			if ( t->use ) {
 				t->use (t, ent, activator);
 			}
 		}
 		if ( !ent->inuse ) {
-			G_Printf("entity was removed while using targets\n");
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "entity was removed while using targets\n");
 			return;
 		}
 	}
@@ -411,9 +411,9 @@ gentity_t *G_Spawn( void ) {
 	}
 	if ( level.num_entities == ENTITYNUM_MAX_NORMAL ) {
 		for (i = 0; i < MAX_GENTITIES; i++) {
-			G_Printf("%4i: %s\n", i, g_entities[i].classname);
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "%4i: %s\n", i, g_entities[i].classname);
 		}
-		G_Error( "G_Spawn: no free entities" );
+		Com_Terminate( TERM_CLIENT_DROP, "G_Spawn: no free entities" );
 	}
 	
 	// open up a new slot
@@ -574,7 +574,7 @@ void G_AddEvent( gentity_t *ent, int event, int eventParm ) {
 	int		bits;
 
 	if ( !event ) {
-		G_Printf( "G_AddEvent: zero event added for entity %i\n", ent->s.number );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_AddEvent: zero event added for entity %i\n", ent->s.number );
 		return;
 	}
 
@@ -605,6 +605,10 @@ void G_Sound( gentity_t *ent, int channel, int soundIndex ) {
 
 	te = G_TempEntity( ent->r.currentOrigin, EV_GENERAL_SOUND );
 	te->s.eventParm = soundIndex;
+	trap_WCE_EmitEvent( WCE_WORLD_SOUND,
+	                    -1, ent->s.number,
+	                    ent->r.currentOrigin,
+	                    0, 0, 0.0f, NULL );
 }
 
 

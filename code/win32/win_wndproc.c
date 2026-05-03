@@ -235,7 +235,7 @@ static int MapKey( int nVirtKey, int key )
 
 	result = s_scantokey[modified];
 
-	//Com_Printf( "key: 0x%08x modified:%i extended:%i result:%i(%02x) vk=%i\n",
+	//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "key: 0x%08x modified:%i extended:%i result:%i(%02x) vk=%i\n",
 	//	key, modified, is_extended, result, result, nVirtKey );
 
 	if ( !is_extended )
@@ -616,13 +616,13 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 		uTimerM = 0;
 		uTimerT = 0;
 
-		in_forceCharset = Cvar_Get( "in_forceCharset", "1", CVAR_ARCHIVE_ND );
+		in_forceCharset = Cvar_Get( "in_forceCharset", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 		Cvar_SetDescription( in_forceCharset, "Try to translate non-ASCII chars in keyboard input or force EN/US keyboard layout." );
 
 		break;
 #if 0
 	case WM_DISPLAYCHANGE:
-		Com_DPrintf( "WM_DISPLAYCHANGE\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "WM_DISPLAYCHANGE\n" );
 		// we need to force a vid_restart if the user has changed
 		// their desktop resolution while the game is running,
 		// but don't do anything if the message is a result of
@@ -938,13 +938,13 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 			Cbuf_AddText( "vid_restart\n" );
 			return 0;
 		}
-		//Com_Printf( "^2k+^7 wParam:%08x lParam:%08x\n", wParam, lParam );
+		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "^2k+^7 wParam:%08x lParam:%08x\n", wParam, lParam );
 		Sys_QueEvent( g_wv.sysMsgTime, SE_KEY, MapKey( wParam, lParam ), qtrue, 0, NULL );
 		break;
 
 	case WM_SYSKEYUP:
 	case WM_KEYUP:
-		//Com_Printf( "^5k-^7 wParam:%08x lParam:%08x\n", wParam, lParam );
+		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "^5k-^7 wParam:%08x lParam:%08x\n", wParam, lParam );
 		Sys_QueEvent( g_wv.sysMsgTime, SE_KEY, MapKey( wParam, lParam ), qfalse, 0, NULL );
 		break;
 
@@ -981,8 +981,8 @@ void HandleEvents( void ) {
 	MSG msg;
 
 	// pump the message loop
-	while ( PeekMessage( &msg, g_wv.hWnd, 0, 0, PM_NOREMOVE ) ) {
-		if ( GetMessage( &msg, g_wv.hWnd, 0, 0 ) <= 0 ) {
+	while ( PeekMessage( &msg, NULL, 0, 0, PM_NOREMOVE ) ) {
+		if ( GetMessage( &msg, NULL, 0, 0 ) <= 0 ) {
 			Cmd_Clear();
 			Com_Quit_f();
 		}

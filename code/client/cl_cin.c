@@ -156,7 +156,7 @@ static int CIN_HandleForVideo( void ) {
 			return i;
 		}
 	}
-	Com_Error( ERR_DROP, "CIN_HandleForVideo: none free" );
+	Com_Terminate( TERM_CLIENT_DROP, "CIN_HandleForVideo: none free" );
 	return -1;
 }
 
@@ -1000,7 +1000,7 @@ static void readQuadInfo( byte *qData )
 			cinTable[currentHandle].drawY = 256;
 		}
 		if ( cinTable[currentHandle].CIN_WIDTH != 256 || cinTable[currentHandle].CIN_HEIGHT != 256 ) {
-			Com_Printf( "HACK: approxmimating cinematic for Rage Pro or Voodoo\n" );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "HACK: approxmimating cinematic for Rage Pro or Voodoo\n" );
 		}
 	}
 }
@@ -1203,7 +1203,7 @@ redump:
 	cinTable[currentHandle].roqF1		 = (signed char)framedata[6];
 
 	if (cinTable[currentHandle].RoQFrameSize>65536||cinTable[currentHandle].roq_id==0x1084) {
-		Com_DPrintf("roq_size>65536||roq_id==0x1084\n");
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "roq_size>65536||roq_id==0x1084\n");
 		cinTable[currentHandle].status = FMV_EOF;
 		if (cinTable[currentHandle].looping) {
 			RoQReset();
@@ -1268,7 +1268,7 @@ static void RoQShutdown( void ) {
 	if ( cinTable[currentHandle].status == FMV_IDLE ) {
 		return;
 	}
-	Com_DPrintf("finished cinematic\n");
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "finished cinematic\n");
 	cinTable[currentHandle].status = FMV_IDLE;
 
 	if ( cinTable[currentHandle].iFile != FS_INVALID_HANDLE ) {
@@ -1303,7 +1303,7 @@ e_status CIN_StopCinematic( int handle ) {
 	if (handle < 0 || handle>= MAX_VIDEO_HANDLES || cinTable[handle].status == FMV_EOF) return FMV_EOF;
 	currentHandle = handle;
 
-	Com_DPrintf("trFMV::stop(), closing %s\n", cinTable[currentHandle].fileName);
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "trFMV::stop(), closing %s\n", cinTable[currentHandle].fileName);
 
 	if (!cinTable[currentHandle].buf) {
 		return FMV_EOF;
@@ -1414,7 +1414,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 		}
 	}
 
-	Com_DPrintf("CIN_PlayCinematic( %s )\n", arg);
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CIN_PlayCinematic( %s )\n", arg);
 
 	memset(&cin, 0, sizeof(cinematics_t) );
 	currentHandle = CIN_HandleForVideo();
@@ -1426,7 +1426,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 	cinTable[currentHandle].ROQSize = FS_FOpenFileRead( cinTable[currentHandle].fileName, &cinTable[currentHandle].iFile, qtrue );
 
 	if (cinTable[currentHandle].ROQSize<=0) {
-		Com_DPrintf("play(%s), ROQSize<=0\n", arg);
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "play(%s), ROQSize<=0\n", arg);
 		cinTable[currentHandle].fileName[0] = '\0';
 		if ( cinTable[currentHandle].iFile != FS_INVALID_HANDLE ) {
 			FS_FCloseFile( cinTable[currentHandle].iFile );
@@ -1466,7 +1466,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 //		FS_Read (cin.file, cinTable[currentHandle].RoQFrameSize+8, cinTable[currentHandle].iFile);
 
 		cinTable[currentHandle].status = FMV_PLAY;
-		Com_DPrintf("trFMV::play(), playing %s\n", arg);
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "trFMV::play(), playing %s\n", arg);
 
 		// Phase 6.3: pre-buffer the first frame BEFORE transitioning to
 		// CA_CINEMATIC. Without this, cls.state flips to CA_CINEMATIC while
@@ -1498,7 +1498,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 
 		return currentHandle;
 	}
-	Com_DPrintf("trFMV::play(), invalid RoQ ID\n");
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "trFMV::play(), invalid RoQ ID\n");
 
 	RoQShutdown();
 	return -1;
@@ -1626,7 +1626,7 @@ void CIN_DrawCinematic( int handle ) {
 void CL_PlayCinematic_f( void ) {
 	int bits = CIN_system;
 
-	Com_DPrintf("CL_PlayCinematic_f\n");
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_PlayCinematic_f\n");
 	if (cls.state == CA_CINEMATIC) {
 		SCR_StopCinematic();
 	}

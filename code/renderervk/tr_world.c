@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
+#include "../renderercommon/r_q1_texture.h"
 
 
 
@@ -379,13 +380,25 @@ static void R_AddWorldSurface( msurface_t *surf, int dlightBits ) {
 		return;
 	}
 
+	shader_t *drawShader = surf->shader;
+	if ( *surf->data == SF_FACE ) {
+		const srfSurfaceFace_t *face = (const srfSurfaceFace_t *)surf->data;
+		if ( face->altShader
+		     && tr.currentEntity != NULL
+		     && tr.currentEntity != &tr.worldEntity
+		     && tr.currentEntity->e.frame != 0 ) {
+			drawShader = face->altShader;
+		}
+		/* Time-driven animation is handled at draw time via GPU array (shader_t.q1AnimArray) */
+	}
+
 #ifdef USE_PMLIGHT
 #ifdef USE_LEGACY_DLIGHTS
-	if ( r_dlightMode->integer ) 
+	if ( r_dlightMode->integer )
 #endif
 	{
 		surf->vcVisible = tr.viewCount;
-		R_AddDrawSurf( surf->data, surf->shader, surf->fogIndex, 0 );
+		R_AddDrawSurf( surf->data, drawShader, surf->fogIndex, 0 );
 		return;
 	}
 #endif // USE_PMLIGHT
@@ -397,7 +410,7 @@ static void R_AddWorldSurface( msurface_t *surf, int dlightBits ) {
 		dlightBits = ( dlightBits != 0 );
 	}
 
-	R_AddDrawSurf( surf->data, surf->shader, surf->fogIndex, dlightBits );
+	R_AddDrawSurf( surf->data, drawShader, surf->fogIndex, dlightBits );
 #endif // USE_LEGACY_DLIGHTS
 }
 
@@ -744,7 +757,7 @@ static mnode_t *R_PointInLeaf( const vec3_t p ) {
 	const cplane_t	*plane;
 	
 	if ( !tr.world ) {
-		ri.Error (ERR_DROP, "R_PointInLeaf: bad model");
+		ri.Terminate( TERM_CLIENT_DROP, "R_PointInLeaf: bad model");
 	}
 
 	node = tr.world->nodes;
@@ -827,16 +840,19 @@ static void R_MarkLeaves (void) {
 	// if the cluster is the same and the area visibility matrix
 	// hasn't changed, we don't need to mark everything again
 
-	// if r_showcluster was just turned on, remark everything 
-	if ( tr.viewCluster == cluster && !tr.refdef.areamaskModified 
-		&& !r_showcluster->modified ) {
+	// if r_showcluster was just turned on, remark everything
+	static int s_showcluster_mod = -1;
+	int showcluster_changed = ( r_showcluster->modificationCount != s_showcluster_mod );
+
+	if ( tr.viewCluster == cluster && !tr.refdef.areamaskModified
+		&& !showcluster_changed ) {
 		return;
 	}
 
-	if ( r_showcluster->modified || r_showcluster->integer ) {
-		r_showcluster->modified = qfalse;
+	if ( showcluster_changed || r_showcluster->integer ) {
+		s_showcluster_mod = r_showcluster->modificationCount;
 		if ( r_showcluster->integer ) {
-			ri.Printf( PRINT_ALL, "cluster:%i  area:%i\n", cluster, leaf->area );
+			ri.Log( SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
 		}
 	}
 
@@ -853,7 +869,7 @@ static void R_MarkLeaves (void) {
 	}
 
 	vis = R_ClusterPVS (tr.viewCluster);
-	
+
 	for (i=0,leaf=tr.world->nodes ; i<tr.world->numnodes ; i++, leaf++) {
 		cluster = leaf->cluster;
 		if ( cluster < 0 || cluster >= tr.world->numClusters ) {

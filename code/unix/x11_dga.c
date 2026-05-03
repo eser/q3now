@@ -37,7 +37,7 @@ qboolean DGA_Init( Display *_dpy )
 		}
 		if ( d_lib == NULL )
 		{
-			Com_Printf( "...error loading libXxf86dga\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...error loading libXxf86dga\n" );
 			goto __fail;
 		}
 	}
@@ -47,7 +47,7 @@ qboolean DGA_Init( Display *_dpy )
 		*d_list[ i ].symbol = Sys_LoadFunction( d_lib, d_list[ i ].name );
 		if ( *d_list[ i ].symbol == NULL )
 		{
-			Com_Printf( "...couldn't find '%s' in libXxf86dga\n", d_list[ i ].name );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...couldn't find '%s' in libXxf86dga\n", d_list[ i ].name );
 			goto __fail;
 		}
 	}
@@ -56,11 +56,11 @@ qboolean DGA_Init( Display *_dpy )
 
 	if ( !_XF86DGAQueryExtension( dpy, &event_base, &error_base ) || !_XF86DGAQueryVersion( dpy, &ver_major, &ver_minor ) )
 	{
-		Com_Printf( "...DGA extension is not available.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...DGA extension is not available.\n" );
 		goto __fail;
 	}
 
-	Com_Printf( "...DGA extension version %i.%i detected.\n", ver_major, ver_minor );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...DGA extension version %i.%i detected.\n", ver_major, ver_minor );
 
 	glw_state.dga_ext = qtrue;
 

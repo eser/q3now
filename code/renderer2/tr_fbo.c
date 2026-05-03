@@ -41,31 +41,31 @@ static qboolean R_CheckFBO(const FBO_t * fbo)
 	switch (code)
 	{
 		case GL_FRAMEBUFFER_UNSUPPORTED:
-			ri.Printf(PRINT_WARNING, "R_CheckFBO: (%s) Unsupported framebuffer format\n", fbo->name);
+			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Unsupported framebuffer format\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
-			ri.Printf(PRINT_WARNING, "R_CheckFBO: (%s) Framebuffer incomplete attachment\n", fbo->name);
+			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete attachment\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
-			ri.Printf(PRINT_WARNING, "R_CheckFBO: (%s) Framebuffer incomplete, missing attachment\n", fbo->name);
+			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing attachment\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER:
-			ri.Printf(PRINT_WARNING, "R_CheckFBO: (%s) Framebuffer incomplete, missing draw buffer\n", fbo->name);
+			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing draw buffer\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER:
-			ri.Printf(PRINT_WARNING, "R_CheckFBO: (%s) Framebuffer incomplete, missing read buffer\n", fbo->name);
+			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing read buffer\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE:
-			ri.Printf(PRINT_WARNING, "R_CheckFBO: (%s) Framebuffer incomplete multisample\n", fbo->name);
+			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete multisample\n", fbo->name);
 			break;
 
 		default:
-			ri.Printf(PRINT_WARNING, "R_CheckFBO: (%s) unknown error 0x%X\n", fbo->name, code);
+			ri.Log( SEV_WARN, "R_CheckFBO: (%s) unknown error 0x%X\n", fbo->name, code);
 			break;
 	}
 
@@ -83,22 +83,22 @@ static FBO_t          *FBO_Create(const char *name, int width, int height)
 
 	if(strlen(name) >= MAX_QPATH)
 	{
-		ri.Error(ERR_DROP, "FBO_Create: \"%s\" is too long", name);
+		ri.Terminate( TERM_CLIENT_DROP, "FBO_Create: \"%s\" is too long", name);
 	}
 
 	if(width <= 0 || width > glRefConfig.maxRenderbufferSize)
 	{
-		ri.Error(ERR_DROP, "FBO_Create: bad width %i", width);
+		ri.Terminate( TERM_CLIENT_DROP, "FBO_Create: bad width %i", width);
 	}
 
 	if(height <= 0 || height > glRefConfig.maxRenderbufferSize)
 	{
-		ri.Error(ERR_DROP, "FBO_Create: bad height %i", height);
+		ri.Terminate( TERM_CLIENT_DROP, "FBO_Create: bad height %i", height);
 	}
 
 	if(tr.numFBOs == MAX_FBOS)
 	{
-		ri.Error(ERR_DROP, "FBO_Create: MAX_FBOS hit");
+		ri.Terminate( TERM_CLIENT_DROP, "FBO_Create: MAX_FBOS hit");
 	}
 
 	fbo = tr.fbos[tr.numFBOs] = ri.Hunk_Alloc(sizeof(*fbo), h_low);
@@ -165,7 +165,7 @@ static void FBO_CreateBuffer(FBO_t *fbo, int format, int index, int multisample)
 			break;
 
 		default:
-			ri.Printf(PRINT_WARNING, "FBO_CreateBuffer: invalid format %d\n", format);
+			ri.Log( SEV_WARN, "FBO_CreateBuffer: invalid format %d\n", format);
 			return;
 	}
 
@@ -221,7 +221,7 @@ void FBO_Bind(FBO_t * fbo)
 {
 	if (!glRefConfig.framebufferObject)
 	{
-		ri.Printf(PRINT_WARNING, "FBO_Bind() called without framebuffers enabled!\n");
+		ri.Log( SEV_WARN, "FBO_Bind() called without framebuffers enabled!\n");
 		return;
 	}
 
@@ -248,7 +248,7 @@ void FBO_Init(void)
 	int             i;
 	int             hdrFormat, multisample = 0;
 
-	ri.Printf(PRINT_ALL, "------- FBO_Init -------\n");
+	ri.Log( SEV_INFO, "------- FBO_Init -------\n");
 
 	if(!glRefConfig.framebufferObject)
 		return;
@@ -425,7 +425,7 @@ void FBO_Shutdown(void)
 	int             i, j;
 	FBO_t          *fbo;
 
-	ri.Printf(PRINT_ALL, "------- FBO_Shutdown -------\n");
+	ri.Log( SEV_INFO, "------- FBO_Shutdown -------\n");
 
 	if(!glRefConfig.framebufferObject)
 		return;
@@ -465,21 +465,21 @@ static void R_FBOList_f(void)
 
 	if(!glRefConfig.framebufferObject)
 	{
-		ri.Printf(PRINT_ALL, "GL_EXT_framebuffer_object is not available.\n");
+		ri.Log( SEV_INFO, "GL_EXT_framebuffer_object is not available.\n");
 		return;
 	}
 
-	ri.Printf(PRINT_ALL, "             size       name\n");
-	ri.Printf(PRINT_ALL, "----------------------------------------------------------\n");
+	ri.Log( SEV_INFO, "             size       name\n");
+	ri.Log( SEV_INFO, "----------------------------------------------------------\n");
 
 	for(i = 0; i < tr.numFBOs; i++)
 	{
 		fbo = tr.fbos[i];
 
-		ri.Printf(PRINT_ALL, "  %4i: %4i %4i %s\n", i, fbo->width, fbo->height, fbo->name);
+		ri.Log( SEV_INFO, "  %4i: %4i %4i %s\n", i, fbo->width, fbo->height, fbo->name);
 	}
 
-	ri.Printf(PRINT_ALL, " %i FBOs\n", tr.numFBOs);
+	ri.Log( SEV_INFO, " %i FBOs\n", tr.numFBOs);
 }
 #endif
 void FBO_BlitFromTexture(struct image_s *src, vec4_t inSrcTexCorners, vec2_t inSrcTexScale, FBO_t *dst, ivec4_t inDstBox, struct shaderProgram_s *shaderProgram, const vec4_t inColor, int blend)
@@ -495,7 +495,7 @@ void FBO_BlitFromTexture(struct image_s *src, vec4_t inSrcTexCorners, vec2_t inS
 
 	if (!src)
 	{
-		ri.Printf(PRINT_WARNING, "Tried to blit from a NULL texture!\n");
+		ri.Log( SEV_WARN, "Tried to blit from a NULL texture!\n");
 		return;
 	}
 
@@ -593,7 +593,7 @@ void FBO_Blit(FBO_t *src, ivec4_t inSrcBox, vec2_t srcTexScale, FBO_t *dst, ivec
 
 	if (!src)
 	{
-		ri.Printf(PRINT_WARNING, "Tried to blit from a NULL FBO!\n");
+		ri.Log( SEV_WARN, "Tried to blit from a NULL FBO!\n");
 		return;
 	}
 

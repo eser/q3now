@@ -10,7 +10,7 @@ Severity bracket is inner-padded to 7 chars: [TRACE] [DEBUG] [INFO ]
 [WARN ] [ERROR] [FATAL]. One space after the closing bracket.
 
 atLineStart: prefix is emitted only when the previous emit ended with '\n'
-(or on first emit). Prevents mid-line injection when Com_Printf is called
+(or on first emit). Prevents mid-line injection when Com_Log is called
 in multiple pieces without a trailing newline.
 
 V1 invariant: Com_Log is called from the main thread only. No interleave
@@ -45,10 +45,11 @@ static log_sink_t s_ttySink = {
     "tty",
     NULL,
     &s_ttySinkCtx,
-    SEV_INFO,
-    NULL,
-    0,
-    NULL
+    SEV_TRACE,
+    NULL,   // severity_cvar — set by Log_RegisterTtySink
+    -1,     // last_cvar_mod
+    0,      // active_dispatches
+    NULL    // next
 };
 
 // -------------------------------------------------------------------------
@@ -58,13 +59,6 @@ static log_sink_t s_ttySink = {
 static void TtySink_Emit( const log_record_t *rec, void *ctx )
 {
     tty_sink_ctx_t *c = (tty_sink_ctx_t *)ctx;
-    log_severity_t  min;
-
-    min = c->severity_cvar
-        ? Log_ParseSeverity( c->severity_cvar->string )
-        : SEV_INFO;
-    if ( rec->severity < min )
-        return;
 
     // Emit prefix only at the start of a new line.
     if ( c->atLineStart ) {
@@ -75,8 +69,7 @@ static void TtySink_Emit( const log_record_t *rec, void *ctx )
 
         // Optional timestamp (fmt=2: "HH:MM:SS.mmm+HH:MM"), gated by con_timestamp.
         if ( c->timestamp_cvar && c->timestamp_cvar->integer ) {
-            hlen = Log_FormatTimestamp( rec->timestamp_ns, header,
-                                        sizeof( header ) - 16, 2 );
+            hlen = Com_FormatTimestamp( header, sizeof( header ) - 16, 2 );
             // Max timestamp len is 18; 16-byte guard leaves room for bracket+NUL.
             assert( hlen < (int)sizeof( header ) - 14 );
             header[hlen++] = ' ';
@@ -112,15 +105,18 @@ log_sink_t *Log_RegisterTtySink( void )
     // Cvar_Get is idempotent. Descriptions are set here so dedicated builds
     // (which skip the console sink) still get help text; in client builds the
     // console sink sets them first and these calls are harmless repeats.
-    s_ttySinkCtx.severity_cvar  = Cvar_Get( "con_severity",  "INFO", CVAR_ARCHIVE );
-    s_ttySinkCtx.timestamp_cvar = Cvar_Get( "con_timestamp", "1",    CVAR_ARCHIVE );
+    {
+        static const cvarDesc_t ds = CVAR_STRING( "log_tty_severity", "", CVAR_ARCHIVE,
+            "Minimum severity shown in TTY: [EMPTY] TRACE DEBUG INFO WARN ERROR FATAL" );
+        s_ttySinkCtx.severity_cvar = Cvar_Register( &ds );
+    }
+    {
+        static const cvarDesc_t dt = CVAR_BOOL( "log_tty_timestamp", "1", CVAR_ARCHIVE,
+            "Timestamp prefix for TTY: 0=off, 1=on. "
+            "TTY shows timestamps as HH:MM:SS.mmm+TZ." );
+        s_ttySinkCtx.timestamp_cvar = Cvar_Register( &dt );
+    }
     s_ttySinkCtx.atLineStart    = qtrue;
-
-    Cvar_SetDescription( s_ttySinkCtx.severity_cvar,
-        "Minimum severity shown in console and TTY: TRACE DEBUG INFO WARN ERROR FATAL" );
-    Cvar_SetDescription( s_ttySinkCtx.timestamp_cvar,
-        "Timestamp prefix for console and TTY: 0=off, 1=on. "
-        "Console shows HH:MM:SS; TTY shows HH:MM:SS.mmm+TZ." );
 
     s_ttySink.emit            = TtySink_Emit;
     s_ttySink.ctx             = &s_ttySinkCtx;

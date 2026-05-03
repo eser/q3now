@@ -77,6 +77,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define CTF_RUSHBASE_TIME			120	//2 minutes ctf rush base time
 #define CTF_RETURNFLAG_TIME			180	//3 minutes to return the flag
 #define CTF_ROAM_TIME				60	//1 minute ctf roam time
+// Battle_Fight: how long (ms) the enemy can stay out of sight before the bot
+// exits combat. Matches Battle_Retreat/Chase which use a 4-second window;
+// this is shorter because brief occlusion (pillars, doorways) is common.
+#define BATTLE_FIGHT_VIS_GRACE_MS	500	//0.5 seconds — hysteresis against single-tick occlusion
 //patrol flags
 #define PATROL_LOOP					1
 #define PATROL_REVERSE				2
@@ -201,6 +205,10 @@ typedef struct bot_state_s
 	qboolean wiredBotsActive;						// true when character comes from BOTLUA path
 	int num_deaths;									//number of time this bot died
 	int num_kills;									//number of kills of this bot
+	int current_streak;								//consecutive kill streak (reset on death)
+	int prev_rank;									//rank at last milestone check
+	float last_kill_time;							//time of last kill (for double-kill window)
+	float last_streak_ack;							//time the last streak chat fired
 	int revenge_enemy;								//the revenge enemy
 	int revenge_kills;								//number of kills the enemy made
 	int lastframe_health;							//health value the last frame
@@ -220,7 +228,7 @@ typedef struct bot_state_s
 	float stand_time;								//time the bot is standing still
 	float lastchat_time;							//time the bot last selected a chat
 	float kamikaze_time;							//time to check for kamikaze usage
-	float invulnerability_time;						//time to check for invulnerability usage
+	float deflector_time;							//time to check for deflector usage
 	float standfindenemy_time;						//time to find enemy while standing
 	float attackstrafe_time;						//time the bot is strafing in one dir
 	float attackcrouch_time;						//time the bot will stop crouching
@@ -363,6 +371,21 @@ typedef struct bot_state_s
 
 	// ── WiredBots directive state ─────────────────────────────────────
 	botDirectiveState_t directives;			// active tactical directive and tactic
+
+	// ── Peripheral awareness (WCE sound ring) ─────────────────────────
+	bot_sound_event_t heardSounds[MAX_BOT_SOUND_EVENTS];
+	int               heardSoundCount;  // valid entries in heardSounds[] this think
+
+	// Last-heard summary (highest-volume event this think or recent past)
+	vec3_t            lastsoundpos;
+	float             lastsoundtime;    // FloatTime() when set
+	int               lastsoundentity;  // sourceClientNum of loudest event
+	wce_event_type_t  lastsoundtype;
+	float             lastsoundvolume;
+
+	// Investigation target — set when bot hears but has no LOS
+	vec3_t            investigatepos;
+	float             investigatetime;  // FloatTime() when set; age out after ~3 s
 } bot_state_t;
 
 extern bot_state_t *botstates[MAX_CLIENTS];
@@ -373,12 +396,13 @@ void BotResetState(bot_state_t *bs);
 int NumBots(void);
 //returns info about the entity
 void BotEntityInfo(int entnum, aas_entityinfo_t *info);
+float AngleDifference(float ang1, float ang2);
 
 extern float floattime;
 #define FloatTime() floattime
 
 // from the game source
-void	QDECL BotAI_Print(int type, char *fmt, ...) Q_PRINTF_FUNC(2, 3);
+void	QDECL BotAI_Print(int type, char *fmt, ...) FORMAT_PRINTF(2, 3);
 void	QDECL QDECL BotAI_BotInitialChat( bot_state_t *bs, char *type, ... );
 void	BotAI_Trace(bsp_trace_t *bsptrace, vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int passent, int contentmask);
 int		BotAI_GetClientState( int clientNum, playerState_t *state );

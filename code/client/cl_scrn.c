@@ -390,17 +390,35 @@ static void SCR_DrawDebugGraph( void )
 
 //=============================================================================
 
+static const cvarDesc_t scrnDescs[] = {
+	/* 0 */ CVAR_BOOL( "timegraph",   "0",  CVAR_CHEAT, NULL ),
+	/* 1 */ CVAR_BOOL( "debuggraph",  "0",  CVAR_CHEAT, NULL ),
+	/* 2 */ CVAR_INT(  "graphheight", "32", CVAR_CHEAT, NULL, 0, 0 ),
+	/* 3 */ CVAR_INT(  "graphscale",  "1",  CVAR_CHEAT, NULL, 0, 0 ),
+	/* 4 */ CVAR_INT(  "graphshift",  "0",  CVAR_CHEAT, NULL, 0, 0 ),
+};
+
+enum {
+	SCR_TIMEGRAPH, SCR_DEBUGGRAPH, SCR_GRAPHHEIGHT, SCR_GRAPHSCALE, SCR_GRAPHSHIFT,
+	SCR_CVAR_COUNT
+};
+
+_Static_assert( ARRAY_LEN( scrnDescs ) == SCR_CVAR_COUNT, "scrnDescs/enum mismatch" );
+static cvar_t *scrnHandles[SCR_CVAR_COUNT];
+
+
 /*
 ==================
 SCR_Init
 ==================
 */
 void SCR_Init( void ) {
-	cl_timegraph = Cvar_Get ("timegraph", "0", CVAR_CHEAT);
-	cl_debuggraph = Cvar_Get ("debuggraph", "0", CVAR_CHEAT);
-	cl_graphheight = Cvar_Get ("graphheight", "32", CVAR_CHEAT);
-	cl_graphscale = Cvar_Get ("graphscale", "1", CVAR_CHEAT);
-	cl_graphshift = Cvar_Get ("graphshift", "0", CVAR_CHEAT);
+	Cvar_RegisterTable( scrnDescs, ARRAY_LEN( scrnDescs ), scrnHandles );
+	cl_timegraph   = scrnHandles[SCR_TIMEGRAPH];
+	cl_debuggraph  = scrnHandles[SCR_DEBUGGRAPH];
+	cl_graphheight = scrnHandles[SCR_GRAPHHEIGHT];
+	cl_graphscale  = scrnHandles[SCR_GRAPHSCALE];
+	cl_graphshift  = scrnHandles[SCR_GRAPHSHIFT];
 
 	SCR_NetStatsInit();
 	scr_initialized = qtrue;
@@ -464,7 +482,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			}
 			CL_DrawLoadingScreen();
 		} else if ( cls.state == CA_ACTIVE ) {
-			if ( cls.realtime - cl_loadProgress.startTime < 0 ) { // ( com_developer->integer ? 1500 : 350 )
+			if ( cls.realtime - cl_loadProgress.startTime < 0 ) {
 				// Still within minimum display time — draw loading screen at full opacity
 				cl_loadFadeAlpha = 1.0f;
 				CL_PROF(cgr, CL_CGameRendering( stereoFrame ));
@@ -520,7 +538,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	else if ( UI_VM_ACTIVE && !uiFullscreen ) {
 		switch( cls.state ) {
 		default:
-			Com_Error( ERR_FATAL, "SCR_DrawScreenField: bad cls.state" );
+			Com_Terminate( TERM_UNRECOVERABLE, "SCR_DrawScreenField: bad cls.state" );
 			break;
 		case CA_CINEMATIC:
 			SCR_DrawCinematic();

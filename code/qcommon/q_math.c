@@ -978,6 +978,13 @@ void PerpendicularVector( vec3_t dst, const vec3_t src )
 	float minelem = 1.0F;
 	int pos = 0;
 
+	/* Degenerate input: zero-length src cannot define a plane.
+	   Substitute world-up so callers do not divide by zero. */
+	if ( VectorLength( src ) < 1e-6f ) {
+		VectorSet( dst, 0, 0, 1 );
+		return;
+	}
+
 	/*
 	** find the smallest magnitude axially aligned vector
 	*/

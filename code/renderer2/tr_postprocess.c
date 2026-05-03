@@ -283,7 +283,7 @@ static qboolean RB_UpdateSunFlareVis(void)
 				break;
 		}
 
-		ri.Printf(PRINT_DEVELOPER, "Waited %d iterations\n", iter);
+		ri.Log( SEV_DEBUG, "Waited %d iterations\n", iter);
 	}
 	
 	qglGetQueryObjectuiv(tr.sunFlareQuery[tr.sunFlareQueryIndex], GL_QUERY_RESULT, &sampleCount);

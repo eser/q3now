@@ -736,6 +736,7 @@ static void CM_TraceThroughLeaf( traceWork_t *tw, const cLeaf_t *leaf ) {
 		}
 
 		CM_TraceThroughBrush( tw, b );
+
 		if ( !tw->trace.fraction ) {
 			return;
 		}
@@ -1183,7 +1184,7 @@ static void CM_TraceThroughTree( traceWork_t *tw, int num, float p1f, float p2f,
 CM_Trace
 ==================
 */
-static void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, const vec3_t mins, const vec3_t maxs,
+void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, const vec3_t mins, const vec3_t maxs,
 						clipHandle_t model, const vec3_t origin, int brushmask, qboolean capsule, const sphere_t *sphere ) {
 	traceWork_t	tw;
 	cmodel_t	*cmod;
@@ -1459,7 +1460,7 @@ CM_BoxTrace
 void CM_BoxTrace( trace_t *results, const vec3_t start, const vec3_t end,
 						const vec3_t mins, const vec3_t maxs,
 						clipHandle_t model, int brushmask, qboolean capsule ) {
-	CM_Trace( results, start, end, mins, maxs, model, vec3_origin, brushmask, capsule, NULL );
+	cm.tracer->Trace( results, start, end, mins, maxs, model, vec3_origin, brushmask, capsule, NULL );
 }
 
 
@@ -1536,7 +1537,7 @@ void CM_TransformedBoxTrace( trace_t *results, const vec3_t start, const vec3_t 
 	}
 
 	// sweep the box through the model
-	CM_Trace( &trace, start_l, end_l, symetricSize[0], symetricSize[1], model, origin, brushmask, capsule, &sphere );
+	cm.tracer->Trace( &trace, start_l, end_l, symetricSize[0], symetricSize[1], model, origin, brushmask, capsule, &sphere );
 
 	// if the bmodel was rotated and there was a collision
 	if ( rotated && trace.fraction != 1.0 ) {
@@ -1565,7 +1566,7 @@ model. Dispatches into CM_TraceThroughTree / CM_TraceThroughLeaf, which
 recognize TT_BISPHERE via CM_TraceThroughBrush.
 ==================
 */
-void CM_BiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
+void CMQ3_BiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
 	float startRadius, float endRadius, clipHandle_t model, int brushmask ) {
 	traceWork_t	tw;
 	float		largestRadius = startRadius > endRadius ? startRadius : endRadius;
@@ -1645,6 +1646,12 @@ rotational symmetry about its sweep axis, so brush-model yaw/pitch/roll
 would only affect the bounds of attached brushes, not the sphere sweep).
 ==================
 */
+void CM_BiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
+	float startRadius, float endRadius, clipHandle_t model, int brushmask ) {
+	cm.tracer->BiSphereTrace( results, start, end, startRadius, endRadius, model, brushmask );
+}
+
+
 void CM_TransformedBiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
 	float startRadius, float endRadius, clipHandle_t model, int brushmask,
 	const vec3_t origin ) {
@@ -1655,7 +1662,7 @@ void CM_TransformedBiSphereTrace( trace_t *results, const vec3_t start, const ve
 	VectorSubtract( start, origin, start_l );
 	VectorSubtract( end, origin, end_l );
 
-	CM_BiSphereTrace( &trace, start_l, end_l, startRadius, endRadius, model, brushmask );
+	cm.tracer->BiSphereTrace( &trace, start_l, end_l, startRadius, endRadius, model, brushmask );
 
 	// re-calculate endpos in the original (unoffset) frame.
 	trace.endpos[0] = start[0] + trace.fraction * ( end[0] - start[0] );
@@ -1664,3 +1671,11 @@ void CM_TransformedBiSphereTrace( trace_t *results, const vec3_t start, const ve
 
 	*results = trace;
 }
+
+
+cmTracer_t cmTracer_q3 = {
+	"q3",
+	CM_Trace,
+	CMQ3_PointContents,
+	CMQ3_BiSphereTrace,
+};

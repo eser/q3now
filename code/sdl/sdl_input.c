@@ -75,28 +75,28 @@ IN_PrintKey
 static void IN_PrintKey( const SDL_KeyboardEvent *event, keyNum_t key, qboolean down )
 {
 	if( down )
-		Com_Printf( "+ " );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "+ " );
 	else
-		Com_Printf( "  " );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  " );
 
-	Com_Printf( "Scancode: 0x%02x(%s) Sym: 0x%02x(%s)",
+	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Scancode: 0x%02x(%s) Sym: 0x%02x(%s)",
 			event->scancode, SDL_GetScancodeName( event->scancode ),
 			event->key, SDL_GetKeyName( event->key ) );
 
-	if( event->mod & SDL_KMOD_LSHIFT ) Com_Printf( " KMOD_LSHIFT" );
-	if( event->mod & SDL_KMOD_RSHIFT ) Com_Printf( " KMOD_RSHIFT" );
-	if( event->mod & SDL_KMOD_LCTRL )  Com_Printf( " KMOD_LCTRL" );
-	if( event->mod & SDL_KMOD_RCTRL )  Com_Printf( " KMOD_RCTRL" );
-	if( event->mod & SDL_KMOD_LALT )   Com_Printf( " KMOD_LALT" );
-	if( event->mod & SDL_KMOD_RALT )   Com_Printf( " KMOD_RALT" );
-	if( event->mod & SDL_KMOD_LGUI )   Com_Printf( " KMOD_LGUI" );
-	if( event->mod & SDL_KMOD_RGUI )   Com_Printf( " KMOD_RGUI" );
-	if( event->mod & SDL_KMOD_NUM )    Com_Printf( " KMOD_NUM" );
-	if( event->mod & SDL_KMOD_CAPS )   Com_Printf( " KMOD_CAPS" );
-	if( event->mod & SDL_KMOD_MODE )   Com_Printf( " KMOD_MODE" );
+	if( event->mod & SDL_KMOD_LSHIFT ) Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_LSHIFT" );
+	if( event->mod & SDL_KMOD_RSHIFT ) Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_RSHIFT" );
+	if( event->mod & SDL_KMOD_LCTRL )  Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_LCTRL" );
+	if( event->mod & SDL_KMOD_RCTRL )  Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_RCTRL" );
+	if( event->mod & SDL_KMOD_LALT )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_LALT" );
+	if( event->mod & SDL_KMOD_RALT )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_RALT" );
+	if( event->mod & SDL_KMOD_LGUI )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_LGUI" );
+	if( event->mod & SDL_KMOD_RGUI )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_RGUI" );
+	if( event->mod & SDL_KMOD_NUM )    Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_NUM" );
+	if( event->mod & SDL_KMOD_CAPS )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_CAPS" );
+	if( event->mod & SDL_KMOD_MODE )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_MODE" );
 	// SDL3: KMOD_RESERVED removed
 
-	Com_Printf( " Q:0x%02x(%s)\n", key, Key_KeynumToString( key ) );
+	Com_Log( SEV_INFO, LOG_CAT_CLIENT, " Q:0x%02x(%s)\n", key, Key_KeynumToString( key ) );
 }
 
 
@@ -132,12 +132,13 @@ static qboolean IN_IsConsoleKey( keyNum_t key, int character )
 	int i;
 
 	// Only parse the variable when it changes
-	if ( cl_consoleKeys->modified )
+	static int s_consolekeys_mod = -1;
+	if ( cl_consoleKeys->modificationCount != s_consolekeys_mod )
 	{
 		const char *text_p, *token;
 		ComParser parser = { 0 };
 
-		cl_consoleKeys->modified = qfalse;
+		s_consolekeys_mod = cl_consoleKeys->modificationCount;
 		text_p = cl_consoleKeys->string;
 		numConsoleKeys = 0;
 
@@ -416,7 +417,7 @@ static void IN_GobbleMouseEvents( void )
 		SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_WHEEL ) ) > 0 ) { }
 
 	if ( val < 0 )
-		Com_Printf( "%s failed: %s\n", __func__, SDL_GetError() );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s failed: %s\n", __func__, SDL_GetError() );
 }
 
 
@@ -448,24 +449,27 @@ static void IN_ActivateMouse( void )
 			(float)(glw_state.window_width / 2), (float)(glw_state.window_height / 2) );
 
 #ifdef DEBUG_EVENTS
-		Com_Printf( "%4i %s\n", Sys_Milliseconds(), __func__ );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%4i %s\n", Sys_Milliseconds(), __func__ );
 #endif
 	}
 
 	// in_nograb makes no sense in fullscreen mode
 	if ( !glw_state.isFullscreen )
 	{
-		if ( in_nograb->modified || !mouseActive )
 		{
-			if ( in_nograb->integer ) {
-				SDL_SetWindowRelativeMouseMode( SDL_window, false );
-				SDL_SetWindowMouseGrab( SDL_window, false );
-			} else {
-				SDL_SetWindowRelativeMouseMode( SDL_window, in_mouse->integer == 1 ? true : false );
-				SDL_SetWindowMouseGrab( SDL_window, true );
-			}
+			static int s_nograb_mod = -1;
+			if ( in_nograb->modificationCount != s_nograb_mod || !mouseActive )
+			{
+				if ( in_nograb->integer ) {
+					SDL_SetWindowRelativeMouseMode( SDL_window, false );
+					SDL_SetWindowMouseGrab( SDL_window, false );
+				} else {
+					SDL_SetWindowRelativeMouseMode( SDL_window, in_mouse->integer == 1 ? true : false );
+					SDL_SetWindowMouseGrab( SDL_window, true );
+				}
 
-			in_nograb->modified = qfalse;
+				s_nograb_mod = in_nograb->modificationCount;
+			}
 		}
 	}
 
@@ -488,7 +492,7 @@ static void IN_DeactivateMouse( void )
 	if ( mouseActive )
 	{
 #ifdef DEBUG_EVENTS
-		Com_Printf( "%4i %s\n", Sys_Milliseconds(), __func__ );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%4i %s\n", Sys_Milliseconds(), __func__ );
 #endif
 		IN_GobbleMouseEvents();
 
@@ -582,31 +586,31 @@ static void IN_InitJoystick( void )
 
 	if (!SDL_WasInit(SDL_INIT_JOYSTICK))
 	{
-		Com_DPrintf("Calling SDL_Init(SDL_INIT_JOYSTICK)...\n");
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Calling SDL_Init(SDL_INIT_JOYSTICK)...\n");
 		// SDL3: SDL_Init returns bool (true = success)
 		if (!SDL_Init(SDL_INIT_JOYSTICK))
 		{
-			Com_DPrintf("SDL_Init(SDL_INIT_JOYSTICK) failed: %s\n", SDL_GetError());
+			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_Init(SDL_INIT_JOYSTICK) failed: %s\n", SDL_GetError());
 			return;
 		}
-		Com_DPrintf("SDL_Init(SDL_INIT_JOYSTICK) passed.\n");
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_Init(SDL_INIT_JOYSTICK) passed.\n");
 	}
 
 	// SDL3: SDL_INIT_GAMECONTROLLER renamed to SDL_INIT_GAMEPAD
 	if (!SDL_WasInit(SDL_INIT_GAMEPAD))
 	{
-		Com_DPrintf("Calling SDL_Init(SDL_INIT_GAMEPAD)...\n");
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Calling SDL_Init(SDL_INIT_GAMEPAD)...\n");
 		if (!SDL_Init(SDL_INIT_GAMEPAD))
 		{
-			Com_DPrintf("SDL_Init(SDL_INIT_GAMEPAD) failed: %s\n", SDL_GetError());
+			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_Init(SDL_INIT_GAMEPAD) failed: %s\n", SDL_GetError());
 			return;
 		}
-		Com_DPrintf("SDL_Init(SDL_INIT_GAMEPAD) passed.\n");
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_Init(SDL_INIT_GAMEPAD) passed.\n");
 	}
 
 	// SDL3: SDL_NumJoysticks() replaced by SDL_GetJoysticks(&count) returning ID array
 	joysticks = SDL_GetJoysticks(&total);
-	Com_DPrintf("%d possible joysticks\n", total);
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "%d possible joysticks\n", total);
 
 	// Print list and build cvar to allow ui to select joystick.
 	for (i = 0; i < total; i++)
@@ -619,19 +623,25 @@ static void IN_InitJoystick( void )
 	Cvar_SetDescription( cv, "List of available joysticks." );
 
 	if( !in_joystick->integer ) {
-		Com_DPrintf( "Joystick is not active.\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Joystick is not active.\n" );
 		SDL_free(joysticks);
 		SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
 		return;
 	}
 
-	in_joystickNo = Cvar_Get( "in_joystickNo", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( in_joystickNo, "Select which joystick to use." );
+	{
+		static const cvarDesc_t d = CVAR_INT( "in_joystickNo", "0", CVAR_ARCHIVE,
+			"Select which joystick to use.", 0, 0 );
+		in_joystickNo = Cvar_Register( &d );
+	}
 	if( in_joystickNo->integer < 0 || in_joystickNo->integer >= total )
 		Cvar_Set( "in_joystickNo", "0" );
 
-	in_joystickUseAnalog = Cvar_Get( "in_joystickUseAnalog", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( in_joystickUseAnalog, "Do not translate joystick axis events to keyboard commands." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "in_joystickUseAnalog", "0", CVAR_ARCHIVE,
+			"Do not translate joystick axis events to keyboard commands." );
+		in_joystickUseAnalog = Cvar_Register( &d );
+	}
 
 	// SDL3: SDL_JoystickOpen(index) → SDL_OpenJoystick(instance_id)
 	{
@@ -640,7 +650,7 @@ static void IN_InitJoystick( void )
 		stick = SDL_OpenJoystick( joystickID );
 
 		if (stick == NULL) {
-			Com_DPrintf( "No joystick opened: %s\n", SDL_GetError() );
+			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "No joystick opened: %s\n", SDL_GetError() );
 			SDL_free(joysticks);
 			return;
 		}
@@ -649,15 +659,15 @@ static void IN_InitJoystick( void )
 		if (SDL_IsGamepad(joystickID))
 			gamepad = SDL_OpenGamepad(joystickID); // SDL3: SDL_GameControllerOpen → SDL_OpenGamepad
 
-		Com_DPrintf( "Joystick %d opened\n", in_joystickNo->integer );
-		Com_DPrintf( "Name:       %s\n", SDL_GetJoystickNameForID(joystickID) );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Joystick %d opened\n", in_joystickNo->integer );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Name:       %s\n", SDL_GetJoystickNameForID(joystickID) );
 		// SDL3: SDL_JoystickNum* renamed to SDL_GetNumJoystick*
-		Com_DPrintf( "Axes:       %d\n", SDL_GetNumJoystickAxes(stick) );
-		Com_DPrintf( "Hats:       %d\n", SDL_GetNumJoystickHats(stick) );
-		Com_DPrintf( "Buttons:    %d\n", SDL_GetNumJoystickButtons(stick) );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Axes:       %d\n", SDL_GetNumJoystickAxes(stick) );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Hats:       %d\n", SDL_GetNumJoystickHats(stick) );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Buttons:    %d\n", SDL_GetNumJoystickButtons(stick) );
 		// SDL3: SDL_JoystickNumBalls removed (balls emulated as axes)
-		Com_DPrintf( "Use Analog: %s\n", in_joystickUseAnalog->integer ? "Yes" : "No" );
-		Com_DPrintf( "Is gamepad: %s\n", gamepad ? "Yes" : "No" );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Use Analog: %s\n", in_joystickUseAnalog->integer ? "Yes" : "No" );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Is gamepad: %s\n", gamepad ? "Yes" : "No" );
 		// SDL3: SDL_JoystickEventState and SDL_GameControllerEventState removed (always enabled)
 	}
 
@@ -1237,7 +1247,7 @@ void HandleEvents( void )
 						}
 						else
 						{
-							Com_DPrintf( "Unrecognised UTF-8 lead byte: 0x%x\n", (unsigned int)*c );
+							Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Unrecognised UTF-8 lead byte: 0x%x\n", (unsigned int)*c );
 							c++;
 						}
 
@@ -1435,6 +1445,34 @@ static void IN_Restart( void )
 }
 
 
+#ifdef USE_JOYSTICK
+static const cvarDesc_t joystickDescs[] = {
+	/* 0  */ CVAR_BOOL(  "in_joystick",         "0",      CVAR_ARCHIVE | CVAR_LATCH, "Whether or not joystick support is on." ),
+	/* 1  */ CVAR_FLOAT( "joy_threshold",        "0.15",   CVAR_ARCHIVE,              "Threshold of joystick moving distance.", 0, 0 ),
+	/* 2  */ CVAR_FLOAT( "j_pitch",              "0.022",  CVAR_ARCHIVE | CVAR_NODEFAULT,            "Joystick pitch rotation speed/direction.", 0, 0 ),
+	/* 3  */ CVAR_FLOAT( "j_yaw",                "-0.022", CVAR_ARCHIVE | CVAR_NODEFAULT,            "Joystick yaw rotation speed/direction.", 0, 0 ),
+	/* 4  */ CVAR_FLOAT( "j_forward",            "-0.25",  CVAR_ARCHIVE | CVAR_NODEFAULT,            "Joystick forward movement speed/direction.", 0, 0 ),
+	/* 5  */ CVAR_FLOAT( "j_side",               "0.25",   CVAR_ARCHIVE | CVAR_NODEFAULT,            "Joystick side movement speed/direction.", 0, 0 ),
+	/* 6  */ CVAR_FLOAT( "j_up",                 "0",      CVAR_ARCHIVE | CVAR_NODEFAULT,            "Joystick up movement speed/direction.", 0, 0 ),
+	/* 7  */ CVAR_INT(   "j_pitch_axis",          "3",      CVAR_ARCHIVE | CVAR_NODEFAULT,            "Selects which joystick axis controls pitch.", 0, MAX_JOYSTICK_AXIS - 1 ),
+	/* 8  */ CVAR_INT(   "j_yaw_axis",            "2",      CVAR_ARCHIVE | CVAR_NODEFAULT,            "Selects which joystick axis controls yaw.", 0, MAX_JOYSTICK_AXIS - 1 ),
+	/* 9  */ CVAR_INT(   "j_forward_axis",        "1",      CVAR_ARCHIVE | CVAR_NODEFAULT,            "Selects which joystick axis controls forward/back.", 0, MAX_JOYSTICK_AXIS - 1 ),
+	/* 10 */ CVAR_INT(   "j_side_axis",           "0",      CVAR_ARCHIVE | CVAR_NODEFAULT,            "Selects which joystick axis controls left/right.", 0, MAX_JOYSTICK_AXIS - 1 ),
+	/* 11 */ CVAR_INT(   "j_up_axis",             "4",      CVAR_ARCHIVE | CVAR_NODEFAULT,            "Selects which joystick axis controls up/down.", 0, MAX_JOYSTICK_AXIS - 1 ),
+};
+
+enum {
+	JOY_JOYSTICK, JOY_THRESHOLD,
+	JOY_J_PITCH, JOY_J_YAW, JOY_J_FORWARD, JOY_J_SIDE, JOY_J_UP,
+	JOY_PITCH_AXIS, JOY_YAW_AXIS, JOY_FORWARD_AXIS, JOY_SIDE_AXIS, JOY_UP_AXIS,
+	JOY_CVAR_COUNT
+};
+
+_Static_assert( ARRAY_LEN( joystickDescs ) == JOY_CVAR_COUNT, "joystickDescs/enum mismatch" );
+static cvar_t *joystickHandles[JOY_CVAR_COUNT];
+#endif
+
+
 /*
 ===============
 IN_Init
@@ -1444,63 +1482,55 @@ void IN_Init( void )
 {
 	if ( !SDL_WasInit( SDL_INIT_VIDEO ) )
 	{
-		Com_Error( ERR_FATAL, "IN_Init called before SDL_Init( SDL_INIT_VIDEO )" );
+		Com_Terminate( TERM_UNRECOVERABLE, "IN_Init called before SDL_Init( SDL_INIT_VIDEO )" );
 		return;
 	}
 
-	Com_DPrintf( "\n------- Input Initialization -------\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "\n------- Input Initialization -------\n" );
 
-	in_keyboardDebug = Cvar_Get( "in_keyboardDebug", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( in_keyboardDebug, "Print keyboard debug info." );
-	in_forceCharset = Cvar_Get( "in_forceCharset", "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( in_forceCharset, "Try to translate non-ASCII chars in keyboard input or force EN/US keyboard layout." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "in_keyboardDebug", "0", CVAR_ARCHIVE,
+			"Print keyboard debug info." );
+		in_keyboardDebug = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_INT( "in_forceCharset", "1", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Try to translate non-ASCII chars in keyboard input or force EN/US keyboard layout.", 0, 0 );
+		in_forceCharset = Cvar_Register( &d );
+	}
 
 	// mouse variables
-	in_mouse = Cvar_Get( "in_mouse", "1", CVAR_ARCHIVE );
-	Cvar_CheckRange( in_mouse, "-1", "1", CV_INTEGER );
-	Cvar_SetDescription( in_mouse,
-		"Mouse data input source:\n" \
-		"  0 - disable mouse input\n" \
-		"  1 - di/raw mouse\n" \
-		" -1 - win32 mouse" );
+	{
+		static const cvarDesc_t d = CVAR_INT( "in_mouse", "1", CVAR_ARCHIVE,
+			"Mouse data input source:\n"
+			"  0 - disable mouse input\n"
+			"  1 - di/raw mouse\n"
+			" -1 - win32 mouse", -1, 1 );
+		in_mouse = Cvar_Register( &d );
+	}
 
 #ifdef USE_JOYSTICK
-	in_joystick = Cvar_Get( "in_joystick", "0", CVAR_ARCHIVE|CVAR_LATCH );
-	Cvar_SetDescription( in_joystick, "Whether or not joystick support is on." );
-	in_joystickThreshold = Cvar_Get( "joy_threshold", "0.15", CVAR_ARCHIVE );
-	Cvar_SetDescription( in_joystickThreshold, "Threshold of joystick moving distance." );
-
-	j_pitch =        Cvar_Get( "j_pitch",        "0.022", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( j_pitch, "Joystick pitch rotation speed/direction." );
-	j_yaw =          Cvar_Get( "j_yaw",          "-0.022", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( j_yaw, "Joystick yaw rotation speed/direction." );
-	j_forward =      Cvar_Get( "j_forward",      "-0.25", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( j_forward, "Joystick forward movement speed/direction." );
-	j_side =         Cvar_Get( "j_side",         "0.25", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( j_side, "Joystick side movement speed/direction." );
-	j_up =           Cvar_Get( "j_up",           "0", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( j_up, "Joystick up movement speed/direction." );
-
-	j_pitch_axis =   Cvar_Get( "j_pitch_axis",   "3", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( j_pitch_axis,   "0", va("%i",MAX_JOYSTICK_AXIS-1), CV_INTEGER );
-	Cvar_SetDescription( j_pitch_axis, "Selects which joystick axis controls pitch." );
-	j_yaw_axis =     Cvar_Get( "j_yaw_axis",     "2", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( j_yaw_axis,     "0", va("%i",MAX_JOYSTICK_AXIS-1), CV_INTEGER );
-	Cvar_SetDescription( j_yaw_axis, "Selects which joystick axis controls yaw." );
-	j_forward_axis = Cvar_Get( "j_forward_axis", "1", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( j_forward_axis, "0", va("%i",MAX_JOYSTICK_AXIS-1), CV_INTEGER );
-	Cvar_SetDescription( j_forward_axis, "Selects which joystick axis controls forward/back." );
-	j_side_axis =    Cvar_Get( "j_side_axis",    "0", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( j_side_axis,    "0", va("%i",MAX_JOYSTICK_AXIS-1), CV_INTEGER );
-	Cvar_SetDescription( j_side_axis, "Selects which joystick axis controls left/right." );
-	j_up_axis =      Cvar_Get( "j_up_axis",      "4", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( j_up_axis,      "0", va("%i",MAX_JOYSTICK_AXIS-1), CV_INTEGER );
-	Cvar_SetDescription( j_up_axis, "Selects which joystick axis controls up/down." );
+	Cvar_RegisterTable( joystickDescs, ARRAY_LEN( joystickDescs ), joystickHandles );
+	in_joystick          = joystickHandles[JOY_JOYSTICK];
+	in_joystickThreshold = joystickHandles[JOY_THRESHOLD];
+	j_pitch              = joystickHandles[JOY_J_PITCH];
+	j_yaw                = joystickHandles[JOY_J_YAW];
+	j_forward            = joystickHandles[JOY_J_FORWARD];
+	j_side               = joystickHandles[JOY_J_SIDE];
+	j_up                 = joystickHandles[JOY_J_UP];
+	j_pitch_axis         = joystickHandles[JOY_PITCH_AXIS];
+	j_yaw_axis           = joystickHandles[JOY_YAW_AXIS];
+	j_forward_axis       = joystickHandles[JOY_FORWARD_AXIS];
+	j_side_axis          = joystickHandles[JOY_SIDE_AXIS];
+	j_up_axis            = joystickHandles[JOY_UP_AXIS];
 #endif
 
 	// ~ and `, as keys and characters
-	cl_consoleKeys = Cvar_Get( "cl_consoleKeys", "~ ` 0x7e 0x60", CVAR_ARCHIVE );
-	Cvar_SetDescription( cl_consoleKeys, "Space delimited list of key names or characters that toggle the console." );
+	{
+		static const cvarDesc_t d = CVAR_STRING( "cl_consoleKeys", "~ ` 0x7e 0x60", CVAR_ARCHIVE,
+			"Space delimited list of key names or characters that toggle the console." );
+		cl_consoleKeys = Cvar_Register( &d );
+	}
 
 	mouseAvailable = ( in_mouse->value != 0 ) ? qtrue : qfalse;
 
@@ -1514,7 +1544,7 @@ void IN_Init( void )
 	Cmd_AddCommand( "minimize", IN_Minimize );
 	Cmd_AddCommand( "in_restart", IN_Restart );
 
-	Com_DPrintf( "------------------------------------\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "------------------------------------\n" );
 }
 
 

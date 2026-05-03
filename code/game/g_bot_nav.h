@@ -150,6 +150,15 @@ extern vmCvar_t nav_botdebug;
  */
 extern vmCvar_t nav_waypoint_tolerance;
 
+/*
+ * BotNav_PredictEnemyPosition — gamecode wrapper for trap_Nav_PredictEnemyPosition.
+ *
+ * Reads enemy origin and velocity from level.clients[entnum].ps, then calls
+ * trap_Nav_PredictEnemyPosition to forward-simulate on the navmesh surface.
+ * Writes predicted position into outOrigin.  entnum must be < MAX_CLIENTS.
+ */
+void BotNav_PredictEnemyPosition( int entnum, vec3_t outOrigin, float predictTime );
+
 #endif /* FEAT_RECAST_NAVMESH */
 
 #endif /* G_BOT_NAV_H */

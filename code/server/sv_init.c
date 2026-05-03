@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "server.h"
+#include "../qcommon/maps/bsp.h"
 #include "../qcommon/wired/core/scripting/user_vm.h"
 #include "../qcommon/q_feats.h"
 
@@ -109,7 +110,7 @@ SV_SetConfigstring
 */
 void SV_SetConfigstring (int index, const char *val) {
 	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
-		Com_Error (ERR_DROP, "SV_SetConfigstring: bad index %i", index);
+		Com_Terminate( TERM_CLIENT_DROP, "SV_SetConfigstring: bad index %i", index);
 	}
 
 	if ( !val ) {
@@ -157,10 +158,10 @@ SV_GetConfigstring
 */
 void SV_GetConfigstring( int index, char *buffer, int bufferSize ) {
 	if ( bufferSize < 1 ) {
-		Com_Error( ERR_DROP, "SV_GetConfigstring: bufferSize == %i", bufferSize );
+		Com_Terminate( TERM_CLIENT_DROP, "SV_GetConfigstring: bufferSize == %i", bufferSize );
 	}
 	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
-		Com_Error (ERR_DROP, "SV_GetConfigstring: bad index %i", index);
+		Com_Terminate( TERM_CLIENT_DROP, "SV_GetConfigstring: bad index %i", index);
 	}
 	if ( !sv.configstrings[index] ) {
 		buffer[0] = '\0';
@@ -179,7 +180,7 @@ SV_SetUserinfo
 */
 void SV_SetUserinfo( int index, const char *val ) {
 	if ( index < 0 || index >= sv.maxclients ) {
-		Com_Error( ERR_DROP, "%s: bad index %i", __func__, index );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad index %i", __func__, index );
 	}
 
 	if ( !val ) {
@@ -200,10 +201,10 @@ SV_GetUserinfo
 */
 void SV_GetUserinfo( int index, char *buffer, int bufferSize ) {
 	if ( bufferSize < 1 ) {
-		Com_Error( ERR_DROP, "%s: bufferSize == %i", __func__, bufferSize );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bufferSize == %i", __func__, bufferSize );
 	}
 	if ( index < 0 || index >= sv.maxclients ) {
-		Com_Error( ERR_DROP, "%s: bad index %i", __func__, index );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad index %i", __func__, index );
 	}
 	Q_strncpyz( buffer, svs.clients[ index ].userinfo, bufferSize );
 }
@@ -246,11 +247,8 @@ static int SV_BoundMaxClients( int minimum ) {
 
 	if ( sv_maxclients->integer < minimum ) {
 		Cvar_SetIntegerValue( "sv_maxclients", minimum );
-		sv_maxclients->modified = qfalse;
 		return minimum;
 	}
-
-	sv_maxclients->modified = qfalse;
 
 	return sv_maxclients->integer;
 }
@@ -294,12 +292,10 @@ the menu system first.
 */
 static void SV_Startup( void ) {
 	if ( svs.initialized ) {
-		Com_Error( ERR_FATAL, "SV_Startup: svs.initialized" );
+		Com_Terminate( TERM_UNRECOVERABLE, "SV_Startup: svs.initialized" );
 	}
 
 	SV_AllocClients( sv_maxclients->integer );
-
-	sv_maxclients->modified = qfalse;
 
 	svs.initialized = qtrue;
 
@@ -315,6 +311,7 @@ static void SV_Startup( void ) {
 	NET_JoinMulticast6();
 #endif
 
+	SV_Lua_EnsureInit();
 	WN_Init();
 }
 
@@ -435,8 +432,8 @@ void SV_SpawnServer_Tick( void ) {
 
 		SV_ShutdownGameProgs();
 
-		Com_Printf( "------ Server Initialization ------\n" );
-		Com_Printf( "Server: %s\n", mapname );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "------ Server Initialization ------\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server: %s\n", mapname );
 
 		Sys_SetStatus( "Initializing server..." );
 
@@ -453,8 +450,14 @@ void SV_SpawnServer_Tick( void ) {
 		if ( !Cvar_VariableIntegerValue( "sv_running" ) ) {
 			SV_Startup();
 		} else {
-			if ( sv_maxclients->modified ) {
-				SV_ChangeMaxClients();
+			{
+				static int s_maxclients_mod = -1;
+				if ( s_maxclients_mod == -1 ) {
+					s_maxclients_mod = sv_maxclients->modificationCount;
+				} else if ( sv_maxclients->modificationCount != s_maxclients_mod ) {
+					s_maxclients_mod = sv_maxclients->modificationCount;
+					SV_ChangeMaxClients();
+				}
 			}
 		}
 
@@ -546,8 +549,7 @@ void SV_SpawnServer_Tick( void ) {
 	{
 		SV_InitGameProgs();
 
-		sv_gametype->modified = qfalse;
-		sv_pure->modified = qfalse;
+		SV_SyncReloadTracker();
 
 		svs.spawn.phase = SPAWN_P4_SETTLE_BASELINE;
 		return;
@@ -638,15 +640,15 @@ void SV_SpawnServer_Tick( void ) {
 			infolen = strlen( Cvar_InfoString_Big( CVAR_SYSTEMINFO, &infoTruncated ) );
 
 			if ( infoTruncated ) {
-				Com_Printf( S_COLOR_YELLOW "WARNING: truncated systeminfo!\n" );
+				COM_WARN( LOG_CAT_SERVER, "truncated systeminfo!\n" );
 			}
 
 			if ( pakslen > freespace || infolen + pakslen >= BIG_INFO_STRING || overflowed ) {
-				Com_DPrintf( S_COLOR_YELLOW "WARNING: skipping sv_paks setup to avoid gamestate overflow\n" );
+				Com_Log( SEV_DEBUG, LOG_CAT_SERVER, S_COLOR_YELLOW "WARNING: skipping sv_paks setup to avoid gamestate overflow\n" );
 			} else {
 				Cvar_Set( "sv_paks", p );
 				if ( *p == '\0' ) {
-					Com_Printf( S_COLOR_YELLOW "WARNING: sv_pure set but no PK3 files loaded\n" );
+					COM_WARN( LOG_CAT_SERVER, "sv_pure set but no PK3 files loaded\n" );
 				}
 			}
 		}
@@ -657,10 +659,15 @@ void SV_SpawnServer_Tick( void ) {
 		SV_SetConfigstring( CS_SERVERINFO, Cvar_InfoString( CVAR_SERVERINFO, NULL ) );
 		cvar_modifiedFlags &= ~CVAR_SERVERINFO;
 
-		if ( sv_cheats->modified ) {
-			sv_cheats->modified = qfalse;
-			if ( !sv_cheats->integer ) {
-				Cvar_CheatsWereDisabled();
+		{
+			static int s_sv_cheats_mod = -1;
+			if ( s_sv_cheats_mod == -1 ) {
+				s_sv_cheats_mod = sv_cheats->modificationCount;
+			} else if ( sv_cheats->modificationCount != s_sv_cheats_mod ) {
+				s_sv_cheats_mod = sv_cheats->modificationCount;
+				if ( !sv_cheats->integer ) {
+					Cvar_CheatsWereDisabled();
+				}
 			}
 		}
 
@@ -670,7 +677,7 @@ void SV_SpawnServer_Tick( void ) {
 
 		Hunk_SetMark();
 
-		Com_Printf( "-----------------------------------\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "-----------------------------------\n" );
 
 		Sys_SetStatus( "Running map %s", svs.spawn.mapname );
 
@@ -704,6 +711,136 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 }
 
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Server cvar descriptor table — owned by this file.
+ * Non-owner cvars (g_*, sv_master[], write-time PAK ROM cvars) remain on
+ * Cvar_Get inside SV_Init.
+ * "min only" legacy CheckRange cases (sv_maxclientsPerIP, sv_clientTLD,
+ * sv_timeout, sv_zombietime, sv_padPackets, sv_killserver) are typed INT
+ * with min=max=0 (integer type check, no range enforcement).
+ * ────────────────────────────────────────────────────────────────────────── */
+static const cvarDesc_t svDescs[] = {
+	/* serverinfo */
+	CVAR_STRING( "mapname",              "nomap",        CVAR_SERVERINFO | CVAR_ROM,
+	             "Display the name of the current map being used on a server." ),
+	CVAR_INT(    "sv_privateClients",    "0",            CVAR_SERVERINFO,
+	             "The number of spots, out of sv_maxclients, reserved for players with the server password (sv_privatePassword).",
+	             0, MAX_CLIENTS - 1 ),
+	CVAR_STRING( "sv_hostname",          "noname",       CVAR_SERVERINFO | CVAR_ARCHIVE,
+	             "Sets the name of the server." ),
+	CVAR_INT(    "sv_maxclients",        "8",            CVAR_SERVERINFO | CVAR_LATCH,
+	             "Maximum number of people allowed to join the server.",
+	             1, MAX_CLIENTS ),
+	CVAR_INT(    "sv_maxclientsPerIP",   "3",            CVAR_ARCHIVE,
+	             "Limits number of simultaneous connections from the same IP address.",
+	             0, 0 ),
+	CVAR_INT(    "sv_clientTLD",         "0",            CVAR_ARCHIVE | CVAR_NODEFAULT,
+	             "Client country detection code.",
+	             0, 0 ),
+	CVAR_INT(    "sv_minRate",           "0",            CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_SERVERINFO,
+	             "Minimum server bandwidth (in bit per second) a client can use.",
+	             0, 0 ),
+	CVAR_INT(    "sv_maxRate",           "0",            CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_SERVERINFO,
+	             "Maximum server bandwidth (in bit per second) a client can use.",
+	             0, 0 ),
+	CVAR_INT(    "sv_dlRate",            "100",          CVAR_ARCHIVE | CVAR_SERVERINFO,
+	             "Bandwidth allotted to PK3 file downloads via UDP, in kbyte/s.",
+	             0, 500 ),
+	CVAR_BOOL(   "sv_floodProtect",      "1",            CVAR_ARCHIVE | CVAR_SERVERINFO,
+	             "Toggle server flood protection to keep players from bringing the server down." ),
+	/* systeminfo */
+	CVAR_INT(    "sv_serverid",          "0",            CVAR_SYSTEMINFO | CVAR_ROM,
+	             NULL, 0, 0 ),
+	CVAR_BOOL(   "sv_pure",              "1",            CVAR_SYSTEMINFO | CVAR_LATCH,
+	             "Requires clients to only get data from pk3 files the server is using." ),
+	CVAR_BOOL(   "sv_cheats",            "0",            CVAR_SYSTEMINFO | CVAR_LATCH,
+	             "Cheats!" ),
+	CVAR_STRING( "sv_referencedPakNames","",             CVAR_SYSTEMINFO | CVAR_ROM,
+	             "Variable holds a list of all the pk3 files the server loaded data from." ),
+	/* server vars */
+	CVAR_STRING( "sv_privatePassword",   "",             CVAR_TEMP,
+	             "Set password for private clients to login with." ),
+	CVAR_INT(    "sv_fps",               "20",           CVAR_TEMP,
+	             "Set the max frames per second the server sends the client.",
+	             10, 250 ),
+	CVAR_BOOL(   "sv_snapshotTransport", "0",            CVAR_ARCHIVE,
+	             "Snapshot delivery mode: 0=datagram fragmentation (unreliable, Q3 semantics), 1=reliable stream for oversize snapshots." ),
+	CVAR_INT(    "sv_timeout",           "200",          CVAR_TEMP,
+	             "Seconds without any message before automatic client disconnect.",
+	             0, 0 ),
+	CVAR_INT(    "sv_zombietime",        "2",            CVAR_TEMP,
+	             "Seconds to sink messages after disconnect.",
+	             0, 0 ),
+	CVAR_BOOL(   "sv_allowDownload",     "1",            CVAR_SERVERINFO,
+	             "Toggle the ability for clients to download files maps etc. from server." ),
+	CVAR_INT(    "sv_reconnectlimit",    "3",            0,
+	             "Number of seconds a disconnected client should wait before next reconnect.",
+	             0, 12 ),
+	CVAR_INT(    "sv_padPackets",        "0",            CVAR_CHEAT,
+	             "Adds padding bytes to network packets for rate debugging.",
+	             0, 0 ),
+	CVAR_INT(    "sv_killserver",        "0",            0,
+	             "Internal flag to manage server state.",
+	             0, 0 ),
+	CVAR_STRING( "sv_mapChecksum",       "",             CVAR_ROM,
+	             "Allows check for client server map to match." ),
+	CVAR_BOOL(   "sv_lanForceRate",      "1",            CVAR_ARCHIVE | CVAR_NODEFAULT,
+	             "Forces LAN clients to the maximum rate instead of accepting client setting." ),
+	CVAR_BOOL(   "sv_levelTimeReset",    "0",            CVAR_ARCHIVE | CVAR_NODEFAULT,
+	             "Whether or not to reset leveltime after new map loads." ),
+	CVAR_INT(    "sv_minRestartDelay",   "2",            CVAR_ARCHIVE | CVAR_NODEFAULT,
+	             "Schedule an automatic server process restart after this many hours of uptime.\n"
+	             "The actual restart waits for all human clients to disconnect before firing.\n"
+	             "Range 2-48 hours, default 2.",
+	             2, 48 ),
+	CVAR_STRING( "sv_filter",            "filter.txt",   CVAR_ARCHIVE,
+	             "Cvar that point on filter file, if it is \"\" then filtering will be disabled." ),
+#ifdef USE_BANS
+	CVAR_STRING( "sv_banFile",           "serverbans.dat", CVAR_ARCHIVE,
+	             "Name of the file that is used for storing the server bans." ),
+#endif
+};
+
+enum {
+	SV_MAPNAME,
+	SV_PRIVATECLIENTS,
+	SV_HOSTNAME,
+	SV_MAXCLIENTS,
+	SV_MAXCLIENTS_PER_IP,
+	SV_CLIENT_TLD,
+	SV_MIN_RATE,
+	SV_MAX_RATE,
+	SV_DL_RATE,
+	SV_FLOOD_PROTECT,
+	SV_SERVERID,
+	SV_PURE,
+	SV_CHEATS,
+	SV_REFERENCED_PAK_NAMES,
+	SV_PRIVATE_PASSWORD,
+	SV_FPS,
+	SV_SNAPSHOT_TRANSPORT,
+	SV_TIMEOUT,
+	SV_ZOMBIETIME,
+	SV_ALLOW_DOWNLOAD,
+	SV_RECONNECT_LIMIT,
+	SV_PAD_PACKETS,
+	SV_KILLSERVER,
+	SV_MAP_CHECKSUM,
+	SV_LAN_FORCE_RATE,
+	SV_LEVEL_TIME_RESET,
+	SV_MIN_RESTART_DELAY,
+	SV_FILTER,
+#ifdef USE_BANS
+	SV_BAN_FILE,
+#endif
+	SV_CVAR_COUNT
+};
+
+_Static_assert( ARRAY_LEN( svDescs ) == SV_CVAR_COUNT, "svDescs/enum mismatch" );
+
+static cvar_t *svHandles[SV_CVAR_COUNT];
+
+
 /*
 ===============
 SV_Init
@@ -714,119 +851,75 @@ Only called at main exe startup, not for each game
 void SV_Init( void )
 {
 	SV_AddOperatorCommands();
+	SV_BotAwareness_Init();
 
 	if ( com_dedicated->integer )
 		SV_AddDedicatedCommands();
 
-	// serverinfo vars
-	Cvar_Get ("g_noFootsteps", "0", CVAR_SERVERINFO);
-	Cvar_Get ("g_scorelimit", "20", CVAR_SERVERINFO);
-	Cvar_Get ("g_timelimit", "0", CVAR_SERVERINFO);
-	sv_gametype = Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_LATCH );
-	Cvar_SetDescription( sv_gametype, "Set the gametype to mod." );
-	Cvar_Get ("sv_keywords", "", CVAR_SERVERINFO);
+	// serverinfo vars — game-owned; server seeds them with serverinfo flags
+	Cvar_Get( "g_noFootsteps", "0",  CVAR_SERVERINFO );
+	Cvar_Get( "g_scorelimit",  "20", CVAR_SERVERINFO );
+	Cvar_Get( "g_timelimit",   "0",  CVAR_SERVERINFO );
+	{
+		static const cvarDesc_t d = CVAR_INT( "g_gametype", "0", CVAR_SERVERINFO | CVAR_LATCH,
+			"Set the gametype to mod.", 0, 0 );
+		sv_gametype = Cvar_Register( &d );
+	}
+	Cvar_Get( "sv_keywords", "", CVAR_SERVERINFO );
 	//Cvar_Get ("protocol", va("%i", PROTOCOL_VERSION), CVAR_SERVERINFO | CVAR_ROM);
-	sv_mapname = Cvar_Get ("mapname", "nomap", CVAR_SERVERINFO | CVAR_ROM);
-	Cvar_SetDescription( sv_mapname, "Display the name of the current map being used on a server." );
-	sv_privateClients = Cvar_Get( "sv_privateClients", "0", CVAR_SERVERINFO );
-	Cvar_CheckRange( sv_privateClients, "0", va( "%i", MAX_CLIENTS-1 ), CV_INTEGER );
-	Cvar_SetDescription( sv_privateClients, "The number of spots, out of sv_maxclients, reserved for players with the server password (sv_privatePassword)." );
-	sv_hostname = Cvar_Get ("sv_hostname", "noname", CVAR_SERVERINFO | CVAR_ARCHIVE );
-	Cvar_SetDescription( sv_hostname, "Sets the name of the server." );
-	sv_maxclients = Cvar_Get ("sv_maxclients", "8", CVAR_SERVERINFO | CVAR_LATCH);
-	Cvar_CheckRange( sv_maxclients, "1", XSTRING(MAX_CLIENTS), CV_INTEGER );
-	Cvar_SetDescription( sv_maxclients, "Maximum number of people allowed to join the server." );
 
-	sv_maxclientsPerIP = Cvar_Get( "sv_maxclientsPerIP", "3", CVAR_ARCHIVE );
-	Cvar_CheckRange( sv_maxclientsPerIP, "1", NULL, CV_INTEGER );
-	Cvar_SetDescription( sv_maxclientsPerIP, "Limits number of simultaneous connections from the same IP address." );
-
-	sv_clientTLD = Cvar_Get( "sv_clientTLD", "0", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( sv_clientTLD, NULL, NULL, CV_INTEGER );
-	Cvar_SetDescription( sv_clientTLD, "Client country detection code." );
-
-	sv_minRate = Cvar_Get( "sv_minRate", "0", CVAR_ARCHIVE_ND | CVAR_SERVERINFO );
-	Cvar_SetDescription( sv_minRate, "Minimum server bandwidth (in bit per second) a client can use." );
-	sv_maxRate = Cvar_Get( "sv_maxRate", "0", CVAR_ARCHIVE_ND | CVAR_SERVERINFO );
-	Cvar_SetDescription( sv_maxRate, "Maximum server bandwidth (in bit per second) a client can use." );
-	sv_dlRate = Cvar_Get( "sv_dlRate", "100", CVAR_ARCHIVE | CVAR_SERVERINFO );
-	Cvar_CheckRange( sv_dlRate, "0", "500", CV_INTEGER );
-	Cvar_SetDescription( sv_dlRate, "Bandwidth allotted to PK3 file downloads via UDP, in kbyte/s." );
-	sv_floodProtect = Cvar_Get( "sv_floodProtect", "1", CVAR_ARCHIVE | CVAR_SERVERINFO );
-	Cvar_SetDescription( sv_floodProtect, "Toggle server flood protection to keep players from bringing the server down." );
-
-	// systeminfo
-	sv_serverid = Cvar_Get( "sv_serverid", "0", CVAR_SYSTEMINFO | CVAR_ROM );
-	sv_pure = Cvar_Get( "sv_pure", "1", CVAR_SYSTEMINFO | CVAR_LATCH );
-	Cvar_SetDescription( sv_pure, "Requires clients to only get data from pk3 files the server is using." );
-	sv_cheats = Cvar_Get( "sv_cheats", "0", CVAR_SYSTEMINFO | CVAR_LATCH );
-	Cvar_SetDescription( sv_cheats, "Cheats!" );
-	Cvar_Get( "sv_paks", "", CVAR_SYSTEMINFO | CVAR_ROM );
-	Cvar_Get( "sv_pakNames", "", CVAR_SYSTEMINFO | CVAR_ROM );
+	// ROM pak-list cvars — written at runtime by the filesystem
+	Cvar_Get( "sv_paks",           "", CVAR_SYSTEMINFO | CVAR_ROM );
+	Cvar_Get( "sv_pakNames",       "", CVAR_SYSTEMINFO | CVAR_ROM );
 	Cvar_Get( "sv_referencedPaks", "", CVAR_SYSTEMINFO | CVAR_ROM );
-	sv_referencedPakNames = Cvar_Get( "sv_referencedPakNames", "", CVAR_SYSTEMINFO | CVAR_ROM );
-	Cvar_SetDescription( sv_referencedPakNames, "Variable holds a list of all the pk3 files the server loaded data from." );
 
-	// server vars
-	sv_privatePassword = Cvar_Get ("sv_privatePassword", "", CVAR_TEMP );
-	Cvar_SetDescription( sv_privatePassword, "Set password for private clients to login with." );
-	sv_fps = Cvar_Get ("sv_fps", "20", CVAR_TEMP );
-	Cvar_CheckRange( sv_fps, "10", "250", CV_INTEGER );
-	Cvar_SetDescription( sv_fps, "Set the max frames per second the server sends the client." );
-	sv_snapshotTransport = Cvar_Get( "sv_snapshotTransport", "0", CVAR_ARCHIVE );
-	Cvar_CheckRange( sv_snapshotTransport, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( sv_snapshotTransport, "Snapshot delivery mode: 0=datagram fragmentation (unreliable, Q3 semantics), 1=reliable stream for oversize snapshots." );
-	sv_timeout = Cvar_Get( "sv_timeout", "200", CVAR_TEMP );
-	Cvar_CheckRange( sv_timeout, "4", NULL, CV_INTEGER );
-	Cvar_SetDescription( sv_timeout, "Seconds without any message before automatic client disconnect." );
-	sv_zombietime = Cvar_Get( "sv_zombietime", "2", CVAR_TEMP );
-	Cvar_CheckRange( sv_zombietime, "1", NULL, CV_INTEGER );
-	Cvar_SetDescription( sv_zombietime, "Seconds to sink messages after disconnect." );
-	Cvar_Get ("nextmap", "", CVAR_TEMP );
-
-	sv_allowDownload = Cvar_Get ("sv_allowDownload", "1", CVAR_SERVERINFO);
-	Cvar_SetDescription( sv_allowDownload, "Toggle the ability for clients to download files maps etc. from server." );
-	Cvar_Get ("sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE);
-
+	// master servers — dynamic names, cannot be in a static descriptor table
 	for ( int index = 0; index < MAX_MASTER_SERVERS; index++ )
-		sv_master[ index ] = Cvar_Get( va( "sv_master%d", index + 1 ), "", CVAR_ARCHIVE_ND );
+		sv_master[ index ] = Cvar_Get( va( "sv_master%d", index + 1 ), "", CVAR_ARCHIVE | CVAR_NODEFAULT );
 
-	sv_reconnectlimit = Cvar_Get( "sv_reconnectlimit", "3", 0 );
-	Cvar_CheckRange( sv_reconnectlimit, "0", "12", CV_INTEGER );
-	Cvar_SetDescription( sv_reconnectlimit, "Number of seconds a disconnected client should wait before next reconnect." );
+	// transient cvars with no stored handle
+	Cvar_Get( "nextmap",  "", CVAR_TEMP );
+	Cvar_Get( "sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE );
 
-	sv_padPackets = Cvar_Get( "sv_padPackets", "0", CVAR_DEVELOPER );
-	Cvar_SetDescription( sv_padPackets, "Adds padding bytes to network packets for rate debugging." );
-	sv_killserver = Cvar_Get( "sv_killserver", "0", 0 );
-	Cvar_SetDescription( sv_killserver, "Internal flag to manage server state." );
-	sv_mapChecksum = Cvar_Get( "sv_mapChecksum", "", CVAR_ROM );
-	Cvar_SetDescription( sv_mapChecksum, "Allows check for client server map to match." );
-	sv_lanForceRate = Cvar_Get( "sv_lanForceRate", "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( sv_lanForceRate, "Forces LAN clients to the maximum rate instead of accepting client setting." );
-
+	// owned cvars — registered via typed descriptor table
+	Cvar_RegisterTable( svDescs, SV_CVAR_COUNT, svHandles );
+	sv_mapname            = svHandles[SV_MAPNAME];
+	sv_privateClients     = svHandles[SV_PRIVATECLIENTS];
+	sv_hostname           = svHandles[SV_HOSTNAME];
+	sv_maxclients         = svHandles[SV_MAXCLIENTS];
+	sv_maxclientsPerIP    = svHandles[SV_MAXCLIENTS_PER_IP];
+	sv_clientTLD          = svHandles[SV_CLIENT_TLD];
+	sv_minRate            = svHandles[SV_MIN_RATE];
+	sv_maxRate            = svHandles[SV_MAX_RATE];
+	sv_dlRate             = svHandles[SV_DL_RATE];
+	sv_floodProtect       = svHandles[SV_FLOOD_PROTECT];
+	sv_serverid           = svHandles[SV_SERVERID];
+	sv_pure               = svHandles[SV_PURE];
+	sv_cheats             = svHandles[SV_CHEATS];
+	sv_referencedPakNames = svHandles[SV_REFERENCED_PAK_NAMES];
+	sv_privatePassword    = svHandles[SV_PRIVATE_PASSWORD];
+	sv_fps                = svHandles[SV_FPS];
+	sv_snapshotTransport  = svHandles[SV_SNAPSHOT_TRANSPORT];
+	sv_timeout            = svHandles[SV_TIMEOUT];
+	sv_zombietime         = svHandles[SV_ZOMBIETIME];
+	sv_allowDownload      = svHandles[SV_ALLOW_DOWNLOAD];
+	sv_reconnectlimit     = svHandles[SV_RECONNECT_LIMIT];
+	sv_padPackets         = svHandles[SV_PAD_PACKETS];
+	sv_killserver         = svHandles[SV_KILLSERVER];
+	sv_mapChecksum        = svHandles[SV_MAP_CHECKSUM];
+	sv_lanForceRate       = svHandles[SV_LAN_FORCE_RATE];
+	sv_levelTimeReset     = svHandles[SV_LEVEL_TIME_RESET];
+	sv_minRestartDelay    = svHandles[SV_MIN_RESTART_DELAY];
+	sv_filter             = svHandles[SV_FILTER];
 #ifdef USE_BANS
-	sv_banFile = Cvar_Get("sv_banFile", "serverbans.dat", CVAR_ARCHIVE);
-	Cvar_SetDescription( sv_banFile, "Name of the file that is used for storing the server bans." );
+	sv_banFile            = svHandles[SV_BAN_FILE];
 #endif
-
-	sv_levelTimeReset = Cvar_Get( "sv_levelTimeReset", "0", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( sv_levelTimeReset, "Whether or not to reset leveltime after new map loads." );
-
-	sv_minRestartDelay = Cvar_Get( "sv_minRestartDelay", "2", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( sv_minRestartDelay, "2", "48", CV_INTEGER );
-	Cvar_SetDescription( sv_minRestartDelay,
-		"Schedule an automatic server process restart after this many hours of uptime.\n"
-		"The actual restart waits for all human clients to disconnect before firing.\n"
-		"Range 2-48 hours, default 2." );
 
 	// Record server start time for the scheduled-restart logic.
 	if ( sv_startRealTime == 0 ) {
 		sv_startRealTime = Sys_Milliseconds();
 	}
 	sv_restartPending = qfalse;
-
-	sv_filter = Cvar_Get( "sv_filter", "filter.txt", CVAR_ARCHIVE );
-	Cvar_SetDescription( sv_filter, "Cvar that point on filter file, if it is "" then filtering will be disabled." );
 
 	// initialize bot cvars so they are listed and can be set before loading the botlib
 	SV_BotInitCvars();
@@ -861,6 +954,7 @@ void SV_Init( void )
 	if ( transport ) {
 		transport->accept_callback = SV_OnPlayerConnect;
 		transport->ready_callback  = SV_OnPlayerReady;
+		transport->drain_usercmds  = SV_DrainUsercmds_Impl;
 	}
 
 #if FEAT_RECAST_NAVMESH
@@ -915,7 +1009,7 @@ void SV_Shutdown( const char *finalmsg ) {
 		return;
 	}
 
-	Com_Printf( "----- Server Shutdown (%s) -----\n", finalmsg );
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "----- Server Shutdown (%s) -----\n", finalmsg );
 
 	WN_Shutdown();
 
@@ -961,7 +1055,7 @@ void SV_Shutdown( const char *finalmsg ) {
 	Cvar_Set( "ui_singlePlayerActive", "0" );
 #endif
 
-	Com_Printf( "---------------------------\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "---------------------------\n" );
 
 #ifndef DEDICATED
 	// disconnect any local clients
@@ -974,6 +1068,8 @@ void SV_Shutdown( const char *finalmsg ) {
 	Cvar_Set( "sv_referencedPakNames", "" );
 	Cvar_Set( "sv_mapChecksum", "" );
 	Cvar_Set( "sv_serverid", "0" );
+
+	BSP_ClearMapCache();
 
 	Sys_SetStatus( "Server is not running" );
 }

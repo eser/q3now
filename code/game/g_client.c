@@ -90,7 +90,11 @@ qboolean SpotWouldTelefrag( gentity_t *spot ) {
 
 	for (i=0 ; i<num ; i++) {
 		hit = &g_entities[touch[i]];
+#if FEAT_SPAWN_PROTECTION
+		if ( hit->client && !hit->client->spawnprotected && hit->client->ps.stats[STAT_HEALTH] > 0 ) {
+#else
 		if ( hit->client && hit->client->ps.stats[STAT_HEALTH] > 0 ) {
+#endif
 			return qtrue;
 		}
 
@@ -239,7 +243,7 @@ gentity_t *SelectRandomFurthestSpawnPoint ( vec3_t avoidPoint, vec3_t origin, ve
 		spot = G_Find(NULL, FOFS(classname), "info_player_deathmatch");
 
 		if (!spot)
-			G_Error( "Couldn't find a spawn point" );
+			Com_Terminate( TERM_CLIENT_DROP, "Couldn't find a spawn point" );
 
 		VectorCopy (spot->s.origin, origin);
 		origin[2] += 9;
@@ -337,7 +341,7 @@ gentity_t *SelectSpawnPoint ( vec3_t avoidPoint, vec3_t origin, vec3_t angles, q
 
 	// find a single player start spot
 	if (!spot) {
-		G_Error( "Couldn't find a spawn point" );
+		Com_Terminate( TERM_CLIENT_DROP, "Couldn't find a spawn point" );
 	}
 
 	VectorCopy (spot->s.origin, origin);

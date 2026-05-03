@@ -82,7 +82,7 @@ void G_Characters_Init( void ) {
 		}
 	}
 
-	G_Printf( "%i characters parsed\n", s_numCharacters );
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "%i characters parsed\n", s_numCharacters );
 }
 
 int G_Characters_Count( void ) {

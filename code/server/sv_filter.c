@@ -617,7 +617,7 @@ static const char *parse_section( ComParser *parser, const char *text, int level
 					return NULL;
 			}
 
-			//Com_Printf( "%i: KEY %s <%i> %s\n", level, lvalue, fop, v0 ); // debug
+			//Com_Log( SEV_INFO, LOG_CAT_SERVER, "%i: KEY %s <%i> %s\n", level, lvalue, fop, v0 ); // debug
 
 			// allocate new filter node
 			ch = new_node( parser, lvalue, v0, fop, (parser->tokentype == TK_QUOTED) ); // quoted = x
@@ -687,7 +687,7 @@ static qboolean parse_file( const char *filename )
 	if ( f == NULL )
 		return qfalse;
 
-	//Com_Printf( "...loading userinfo filters form '%s'\n", filename );
+	//Com_Log( SEV_INFO, LOG_CAT_SERVER, "...loading userinfo filters form '%s'\n", filename );
 
 	fseek( f, 0, SEEK_END );
 	size = ftell( f );
@@ -764,7 +764,7 @@ static void SV_ReloadFilters( const char *filename, filter_node_t *new_node )
 
 		if ( reload )
 		{
-			//Com_Printf( "...reloading filter nodes from %s\n", ospath );
+			//Com_Log( SEV_INFO, LOG_CAT_SERVER, "...reloading filter nodes from %s\n", ospath );
 			if ( parse_file( ospath ) )
 			{
 				Q_strncpyz( loaded_name, ospath, sizeof( loaded_name ) );
@@ -827,7 +827,7 @@ static void SV_ReloadFilters( const char *filename, filter_node_t *new_node )
 
 	if ( parse_file( ospath ) )
 	{
-		Com_Printf( "...%i filter nodes loaded from '%s'\n", nodeCount, filename );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "...%i filter nodes loaded from '%s'\n", nodeCount, filename );
 		// save file metadata
 		Q_strncpyz( loaded_name, ospath, sizeof( loaded_name ) );
 		Sys_GetFileStats( loaded_name, &loaded_fsize, &loaded_mtime, &loaded_ctime );
@@ -979,21 +979,21 @@ void SV_AddFilter_f( void )
 
 	if ( !sv_filter->string[0] )
 	{
-		Com_Printf( "Filter system is not enabled.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Filter system is not enabled.\n" );
 		SV_ReloadFilters( "", NULL );
 		return;
 	}
 
 	if ( Cmd_Argc() < 2 )
 	{
-		Com_Printf( "Usage: %s <id> [key1] [key2] ... [keyN] [date +<duration[h|d|w|m]>|<date> ] [reason <text>]\nDefault key is \"ip\"\nDefault duration unit is minutes, h(ours), d(ays), w(eeks), m(onths) suffixes can also be specified.\n", Cmd_Argv( 0 ) );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: %s <id> [key1] [key2] ... [keyN] [date +<duration[h|d|w|m]>|<date> ] [reason <text>]\nDefault key is \"ip\"\nDefault duration unit is minutes, h(ours), d(ays), w(eeks), m(onths) suffixes can also be specified.\n", Cmd_Argv( 0 ) );
 		return;
 	}
 
 	cl = SV_GetPlayerByHandle();
 	if ( cl == NULL )
 	{
-		Com_Printf( "Unknown client '%s'\n", Cmd_Argv( 1 ) );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Unknown client '%s'\n", Cmd_Argv( 1 ) );
 		return;
 	}
 
@@ -1015,7 +1015,7 @@ void SV_AddFilter_f( void )
 		{
 			if ( i >= Cmd_Argc() - 1 )
 			{
-				Com_Printf( S_COLOR_YELLOW "missing reason value\n" );
+				COM_WARN( LOG_CAT_SERVER, "missing reason value\n" );
 				return;
 			}
 			reason = Cmd_Argv( i + 1 );
@@ -1028,7 +1028,7 @@ void SV_AddFilter_f( void )
 		{
 			if ( i >= Cmd_Argc() - 1 )
 			{
-				Com_Printf( S_COLOR_YELLOW "missing date value\n" );
+				COM_WARN( LOG_CAT_SERVER, "missing date value\n" );
 				return;
 			}
 			i++;
@@ -1038,7 +1038,7 @@ void SV_AddFilter_f( void )
 				v++;
 				if ( *v < '1' || *v > '9' )
 				{
-					Com_Printf( "expecting integer value for duration\n" );
+					Com_Log( SEV_INFO, LOG_CAT_SERVER, "expecting integer value for duration\n" );
 					return;
 				}
 				n = 0;
@@ -1052,7 +1052,7 @@ void SV_AddFilter_f( void )
 					case 'W': case 'w': Q_AddTime( &t, n * 24 * 7 * 60 ); break;
 					case 'M': case 'm': Q_AddDate( &t, n ); break;
 					default:
-						Com_Printf( S_COLOR_YELLOW "unsupported date suffix '%c'\n", *v );
+						COM_WARN( LOG_CAT_SERVER, "unsupported date suffix '%c'\n", *v );
 						return;
 				}
 				Com_sprintf( date, sizeof( date ), " date \"%04i-%02i-%02i %02i:%02i\"", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min );
@@ -1089,7 +1089,7 @@ void SV_AddFilter_f( void )
 
 	QS_Append( &cmd, buf );
 
-	Com_DPrintf( "bancmd: `%s`\n", QS_CStr(&cmd) );
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "bancmd: `%s`\n", QS_CStr(&cmd) );
 
 	node = NULL;
 	{
@@ -1105,7 +1105,7 @@ void SV_AddFilter_f( void )
 
 	if ( node && node->fop == FOP_DROP )
 	{
-		Com_Printf( S_COLOR_YELLOW "Standalone \"drop\" nodes is not allowed!\n" );
+		COM_WARN( LOG_CAT_SERVER, "Standalone \"drop\" nodes is not allowed!\n" );
 		free_nodes( node );
 		return;
 	}
@@ -1132,14 +1132,14 @@ void SV_AddFilterCmd_f( void )
 
 	if ( !sv_filter->string[0] ) 
 	{
-		Com_Printf( "Filter system is not enabled.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Filter system is not enabled.\n" );
 		SV_ReloadFilters( "", NULL );
 		return;
 	}
 
 	if ( Cmd_Argc() < 2 )
 	{
-		Com_Printf( "Usage: %s <filter format string>\n", Cmd_Argv( 0 ) );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: %s <filter format string>\n", Cmd_Argv( 0 ) );
 		return;
 	}
 
@@ -1159,7 +1159,7 @@ void SV_AddFilterCmd_f( void )
 
 	if ( node && node->fop == FOP_DROP )
 	{
-		Com_Printf( S_COLOR_YELLOW "Standalone \"drop\" nodes is not allowed!\n" );
+		COM_WARN( LOG_CAT_SERVER, "Standalone \"drop\" nodes is not allowed!\n" );
 		free_nodes( node );
 		return;
 	}

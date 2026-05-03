@@ -347,7 +347,7 @@ endif
 _do-copy-build:
 	@echo "==> Copying $(_CFG) build into .app..."
 ifeq ($(UNAME_S),Darwin)
-	rsync -a --delete "$(_APP)/" "$(Q3DIR)/"
+	rsync -a --checksum --delete "$(_APP)/" "$(Q3DIR)/"
 	@test -f "$(LAUNCHER_BIN)" && \
 	  cp "$(LAUNCHER_BIN)" "$(Q3DIR)/Contents/MacOS/q3now-launcher" || \
 	  echo "  NOTE: launcher not built (run make create-launcher)"
@@ -616,6 +616,9 @@ endif
 ifneq ($(MAP),)
 _RUN_GAME_ARGS += +map $(MAP)
 endif
+ifneq ($(EXTRA_ARGS),)
+_RUN_GAME_ARGS += $(EXTRA_ARGS)
+endif
 
 # Copy VM modules into .app when VM=1
 _RUN_VM_COPY :=
@@ -650,6 +653,9 @@ _RUN_DED_ARGS += +set developer 1 +set g_cheats 1
 endif
 ifneq ($(MAP),)
 _RUN_DED_ARGS += +map $(MAP)
+endif
+ifneq ($(EXTRA_ARGS),)
+_RUN_DED_ARGS += $(EXTRA_ARGS)
 endif
 
 run-ded: $(_RUN_GAME_DEP)
@@ -834,6 +840,7 @@ help:
 	@echo "    make run-game DEV=1               developer mode (debug build)"
 	@echo "    make run-game DEV=1 MAP=q3dm17    map with debug"
 	@echo "    make run-game VM=1 MAP=q3dm17     VM modules + map"
+	@echo "    make run-game DEV=1 EXTRA_ARGS=\"+set bsp_q1_coverage_debug 1\"  extra cvars"
 	@echo "    make run-ded                      run dedicated server"
 	@echo "    make run-ded DEV=1 MAP=q3dm17     dedicated + debug + map"
 	@echo "    make release            build + assemble + codesign + package"
@@ -849,6 +856,6 @@ help:
 	@echo ""
 	@echo "  Variables:"
 	@echo "    Q3DIR=$(Q3DIR)"
-	@echo "    JOBS=$(JOBS)   MAP=$(MAP)   DEV=$(DEV)   VM=$(VM)   DEMO=$(DEMO)"
+	@echo "    JOBS=$(JOBS)   MAP=$(MAP)   DEV=$(DEV)   VM=$(VM)   DEMO=$(DEMO)   EXTRA_ARGS=$(EXTRA_ARGS)"
 	@echo "    USE_SW3Z=$(USE_SW3Z)   USE_WASM=$(USE_WASM)   CODESIGN_IDENTITY=$(CODESIGN_IDENTITY)"
 	@echo ""

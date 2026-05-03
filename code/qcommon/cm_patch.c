@@ -486,7 +486,7 @@ static int CM_FindPlane2( const float plane[4], int *flipped ) {
 
 	// add a new plane
 	if ( numPlanes == MAX_PATCH_PLANES ) {
-		Com_Error( ERR_DROP, "MAX_PATCH_PLANES" );
+		Com_Terminate( TERM_CLIENT_DROP, "MAX_PATCH_PLANES" );
 	}
 
 	Vector4Copy( plane, planes[numPlanes].plane );
@@ -539,7 +539,7 @@ static int CM_FindPlane( const float *p1, const float *p2, const float *p3 ) {
 
 	// add a new plane
 	if ( numPlanes == MAX_PATCH_PLANES ) {
-		Com_Error( ERR_DROP, "MAX_PATCH_PLANES" );
+		Com_Terminate( TERM_CLIENT_DROP, "MAX_PATCH_PLANES" );
 	}
 
 	Vector4Copy( plane, planes[numPlanes].plane );
@@ -591,7 +591,7 @@ static int	CM_GridPlane( int gridPlanes[MAX_GRID_SIZE][MAX_GRID_SIZE][2], int i,
 	}
 
 	// should never happen
-	Com_Printf( "WARNING: CM_GridPlane unresolvable\n" );
+	Com_Log( SEV_INFO, LOG_CAT_COLLISION, "WARNING: CM_GridPlane unresolvable\n" );
 	return -1;
 }
 
@@ -669,7 +669,7 @@ static int CM_EdgePlaneNum( const cGrid_t *grid, int gridPlanes[MAX_GRID_SIZE][M
 
 	}
 
-	Com_Error( ERR_DROP, "CM_EdgePlaneNum: bad k" );
+	Com_Terminate( TERM_CLIENT_DROP, "CM_EdgePlaneNum: bad k" );
 	return -1;
 }
 
@@ -705,7 +705,7 @@ static void CM_SetBorderInward( facet_t *facet, const cGrid_t *grid, int gridPla
 		numPoints = 3;
 		break;
 	default:
-		Com_Error( ERR_FATAL, "CM_SetBorderInward: bad parameter" );
+		Com_Terminate( TERM_UNRECOVERABLE, "CM_SetBorderInward: bad parameter" );
 		numPoints = 0;
 		break;
 	}
@@ -736,7 +736,7 @@ static void CM_SetBorderInward( facet_t *facet, const cGrid_t *grid, int gridPla
 			facet->borderPlanes[k] = -1;
 		} else {
 			// bisecting side border
-			Com_DPrintf( "WARNING: CM_SetBorderInward: mixed plane sides\n" );
+			Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "WARNING: CM_SetBorderInward: mixed plane sides\n" );
 			facet->borderInward[k] = qfalse;
 			if ( !debugBlock ) {
 				debugBlock = qtrue;
@@ -862,7 +862,7 @@ static void CM_AddFacetBevels( facet_t *facet ) {
 
 			if ( i == facet->numBorders ) {
 				if ( facet->numBorders >= 4 + 6 + 16 ) {
-					Com_Printf( "ERROR: too many bevels\n" );
+					Com_Log( SEV_INFO, LOG_CAT_COLLISION, "ERROR: too many bevels\n" );
 					continue;
 				}
 				facet->borderPlanes[facet->numBorders] = CM_FindPlane2(plane, &flipped);
@@ -929,14 +929,14 @@ static void CM_AddFacetBevels( facet_t *facet ) {
 
 				if ( i == facet->numBorders ) {
 					if ( facet->numBorders >= 4 + 6 + 16 ) {
-						Com_Printf( "ERROR: too many bevels\n" );
+						Com_Log( SEV_INFO, LOG_CAT_COLLISION, "ERROR: too many bevels\n" );
 						continue;
 					}
 					facet->borderPlanes[facet->numBorders] = CM_FindPlane2(plane, &flipped);
 
 					for ( k = 0 ; k < facet->numBorders ; k++ ) {
 						if (facet->borderPlanes[facet->numBorders] ==
-							facet->borderPlanes[k]) Com_Printf("WARNING: bevel plane already used\n");
+							facet->borderPlanes[k]) Com_Log( SEV_INFO, LOG_CAT_COLLISION, "WARNING: bevel plane already used\n");
 					}
 
 					facet->borderNoAdjust[facet->numBorders] = 0;
@@ -951,7 +951,7 @@ static void CM_AddFacetBevels( facet_t *facet ) {
 					} //end if
 					ChopWindingInPlace( &w2, newplane, newplane[3], 0.1f );
 					if (!w2) {
-						Com_DPrintf("WARNING: CM_AddFacetBevels... invalid bevel\n");
+						Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "WARNING: CM_AddFacetBevels... invalid bevel\n");
 						continue;
 					}
 					else {
@@ -970,7 +970,7 @@ static void CM_AddFacetBevels( facet_t *facet ) {
 #ifndef BSPC
 	//add opposite plane
 	if ( facet->numBorders >= 4 + 6 + 16 ) {
-		Com_Printf( "ERROR: too many bevels\n" );
+		Com_Log( SEV_INFO, LOG_CAT_COLLISION, "ERROR: too many bevels\n" );
 		return;
 	}
 	facet->borderPlanes[facet->numBorders] = facet->surfacePlane;
@@ -1065,7 +1065,7 @@ static void CM_PatchCollideFromGrid( const cGrid_t *grid, patchCollide_t *pf ) {
 			}
 
 			if ( numFacets == MAX_FACETS ) {
-				Com_Error( ERR_DROP, "MAX_FACETS" );
+				Com_Terminate( TERM_CLIENT_DROP, "MAX_FACETS" );
 			}
 			facet_t *facet = &facets[numFacets];
 			memset( facet, 0, sizeof( *facet ) );
@@ -1111,7 +1111,7 @@ static void CM_PatchCollideFromGrid( const cGrid_t *grid, patchCollide_t *pf ) {
 				}
 
 				if ( numFacets == MAX_FACETS ) {
-					Com_Error( ERR_DROP, "MAX_FACETS" );
+					Com_Terminate( TERM_CLIENT_DROP, "MAX_FACETS" );
 				}
 				facet = &facets[numFacets];
 				memset( facet, 0, sizeof( *facet ) );
@@ -1164,16 +1164,16 @@ struct patchCollide_s *CM_GeneratePatchCollide( int width, int height, vec3_t *p
 	int				i, j;
 
 	if ( width <= 2 || height <= 2 || !points ) {
-		Com_Error( ERR_DROP, "CM_GeneratePatchFacets: bad parameters: (%i, %i, %p)",
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GeneratePatchFacets: bad parameters: (%i, %i, %p)",
 			width, height, (void *)points );
 	}
 
 	if ( !(width & 1) || !(height & 1) ) {
-		Com_Error( ERR_DROP, "CM_GeneratePatchFacets: even sizes are invalid for quadratic meshes" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GeneratePatchFacets: even sizes are invalid for quadratic meshes" );
 	}
 
 	if ( width > MAX_GRID_SIZE || height > MAX_GRID_SIZE ) {
-		Com_Error( ERR_DROP, "CM_GeneratePatchFacets: source is > MAX_GRID_SIZE" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GeneratePatchFacets: source is > MAX_GRID_SIZE" );
 	}
 
 	// build a grid
@@ -1311,7 +1311,9 @@ static void CM_TracePointThroughPatchCollide( traceWork_t *tw, const struct patc
 			// we hit this facet
 #ifndef BSPC
 			if (!cv) {
-				cv = Cvar_Get( "r_debugSurfaceUpdate", "1", 0 );
+				static const cvarDesc_t d = CVAR_BOOL( "r_debugSurfaceUpdate", "1", 0,
+					"Update debug patch-collision surface on hit." );
+				cv = Cvar_Register( &d );
 			}
 			if (cv->integer) {
 				debugPatchCollide = pc;
@@ -1502,7 +1504,9 @@ void CM_TraceThroughPatchCollide( traceWork_t *tw, const struct patchCollide_s *
 				//}
 #ifndef BSPC
 				if (!cv) {
-					cv = Cvar_Get( "r_debugSurfaceUpdate", "1", 0 );
+					static const cvarDesc_t d = CVAR_BOOL( "r_debugSurfaceUpdate", "1", 0,
+						"Update debug patch-collision surface on hit." );
+					cv = Cvar_Register( &d );
 				}
 				if (cv && cv->integer) {
 					debugPatchCollide = pc;
@@ -1650,7 +1654,9 @@ void CM_DrawDebugSurface( void (*drawPoly)(int color, int numPoints, float *poin
 #ifndef BSPC
 	if ( !cv2 )
 	{
-		cv2 = Cvar_Get( "r_debugSurface", "0", 0 );
+		static const cvarDesc_t d2 = CVAR_BOOL( "r_debugSurface", "0", 0,
+			"Draw debug patch-collision polygons." );
+		cv2 = Cvar_Register( &d2 );
 	}
 
 	if (cv2->integer != 1)
@@ -1666,7 +1672,9 @@ void CM_DrawDebugSurface( void (*drawPoly)(int color, int numPoints, float *poin
 
 #ifndef BSPC
 	if ( !cv ) {
-		cv = Cvar_Get( "cm_debugSize", "2", 0 );
+		static const cvarDesc_t dcm = CVAR_INT( "cm_debugSize", "2", 0,
+			"Size of debug collision border lines.", 0, 0 );
+		cv = Cvar_Register( &dcm );
 	}
 #endif
 	pc = debugPatchCollide;
@@ -1740,14 +1748,14 @@ void CM_DrawDebugSurface( void (*drawPoly)(int color, int numPoints, float *poin
 			if ( w ) {
 				if ( facet == debugFacet ) {
 					drawPoly( 4, w->numpoints, w->p[0] );
-					//Com_Printf("blue facet has %d border planes\n", facet->numBorders);
+					//Com_Log( SEV_INFO, LOG_CAT_COLLISION, "blue facet has %d border planes\n", facet->numBorders);
 				} else {
 					drawPoly( 1, w->numpoints, w->p[0] );
 				}
 				FreeWinding( w );
 			}
 			else
-				Com_Printf("winding chopped away by border planes\n");
+				Com_Log( SEV_INFO, LOG_CAT_COLLISION, "winding chopped away by border planes\n");
 		}
 	}
 
@@ -1846,7 +1854,7 @@ static void CM_SetTriangleSoupBorderInward( facet_t *facet, float *p1, float *p2
 			facet->borderPlanes[k] = -1;
 		} else {
 			// bisecting side border
-			Com_DPrintf( "WARNING: CM_SetTriangleSoupBorderInward: mixed plane sides\n" );
+			Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "WARNING: CM_SetTriangleSoupBorderInward: mixed plane sides\n" );
 			facet->borderInward[k] = qfalse;
 		}
 	}
@@ -1897,7 +1905,7 @@ static void CM_PatchCollideFromTriangleSoup( int numTriangles, vec3_t *vertexes,
 		}
 
 		if ( numFacets == MAX_FACETS ) {
-			Com_Error( ERR_DROP, "MAX_FACETS" );
+			Com_Terminate( TERM_CLIENT_DROP, "MAX_FACETS" );
 		}
 		facet_t *facet = &facets[numFacets];
 		memset( facet, 0, sizeof( *facet ) );
@@ -1952,17 +1960,17 @@ struct patchCollide_s *CM_GenerateTriangleSoupCollide( int numVertexes, vec3_t *
 	int				i, j;
 
 	if ( numVertexes <= 2 || !vertexes || numIndexes <= 2 || !indexes ) {
-		Com_Error( ERR_DROP, "CM_GenerateTriangleSoupCollide: bad parameters: (%i, %p, %i, %p)",
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GenerateTriangleSoupCollide: bad parameters: (%i, %p, %i, %p)",
 			numVertexes, (void *)vertexes, numIndexes, (void *)indexes );
 	}
 
 	if ( numIndexes % 3 != 0 ) {
-		Com_Error( ERR_DROP, "CM_GenerateTriangleSoupCollide: numIndexes %i not a multiple of 3",
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GenerateTriangleSoupCollide: numIndexes %i not a multiple of 3",
 			numIndexes );
 	}
 
 	if ( numIndexes > SHADER_MAX_INDEXES ) {
-		Com_Error( ERR_DROP, "CM_GenerateTriangleSoupCollide: source is > SHADER_MAX_INDEXES" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GenerateTriangleSoupCollide: source is > SHADER_MAX_INDEXES" );
 	}
 
 	numTriangles = numIndexes / 3;
@@ -1970,7 +1978,7 @@ struct patchCollide_s *CM_GenerateTriangleSoupCollide( int numVertexes, vec3_t *
 	// validate indices
 	for ( i = 0 ; i < numIndexes ; i++ ) {
 		if ( indexes[i] < 0 || indexes[i] >= numVertexes ) {
-			Com_Error( ERR_DROP, "CM_GenerateTriangleSoupCollide: index %i out of range [0,%i)",
+			Com_Terminate( TERM_CLIENT_DROP, "CM_GenerateTriangleSoupCollide: index %i out of range [0,%i)",
 				indexes[i], numVertexes );
 		}
 	}
@@ -2006,7 +2014,7 @@ CM_TriangleSoupCollideSelfTest
 Developer-mode sanity check for CM_GenerateTriangleSoupCollide. Builds a
 regular tetrahedron (4 verts, 4 triangles) and verifies the resulting
 patchCollide_t has the expected facet count and a non-degenerate bounding
-box. Intended to be called from CM_LoadMap under com_developer.
+box. Intended to be called from CM_LoadMap in debug builds.
 
 Also exercises CM_RegisterTriangleSoup to confirm the runtime registration
 path (used by IQM models via CM_LoadIQMGeometry) can allocate a handle,
@@ -2039,20 +2047,20 @@ void CM_TriangleSoupCollideSelfTest( void ) {
 
 	pc = CM_GenerateTriangleSoupCollide( 4, verts, 12, tris );
 	if ( !pc ) {
-		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: returned NULL" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_TriangleSoupCollideSelfTest: returned NULL" );
 	}
 	if ( pc->numFacets != 4 ) {
-		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: expected 4 facets, got %i",
+		Com_Terminate( TERM_CLIENT_DROP, "CM_TriangleSoupCollideSelfTest: expected 4 facets, got %i",
 			pc->numFacets );
 	}
 	if ( pc->numPlanes < 4 ) {
-		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: expected >=4 planes, got %i",
+		Com_Terminate( TERM_CLIENT_DROP, "CM_TriangleSoupCollideSelfTest: expected >=4 planes, got %i",
 			pc->numPlanes );
 	}
 	if ( pc->bounds[0][0] >= pc->bounds[1][0]
 		|| pc->bounds[0][1] >= pc->bounds[1][1]
 		|| pc->bounds[0][2] >= pc->bounds[1][2] ) {
-		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: degenerate bounds" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_TriangleSoupCollideSelfTest: degenerate bounds" );
 	}
 
 	// Exercise the full runtime registration + dispatch path. This
@@ -2061,21 +2069,21 @@ void CM_TriangleSoupCollideSelfTest( void ) {
 	// and return meaningful collision data.
 	handle = CM_RegisterTriangleSoup( "<selftest>", (const vec3_t *)verts, 4, tris, 12 );
 	if ( handle == 0 ) {
-		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: CM_RegisterTriangleSoup failed" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_TriangleSoupCollideSelfTest: CM_RegisterTriangleSoup failed" );
 	}
 
 	CM_ModelBounds( handle, soupMins, soupMaxs );
 	if ( soupMins[0] >= soupMaxs[0] || soupMins[1] >= soupMaxs[1] || soupMins[2] >= soupMaxs[2] ) {
-		Com_Error( ERR_DROP, "CM_TriangleSoupCollideSelfTest: degenerate tri-soup bounds" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_TriangleSoupCollideSelfTest: degenerate tri-soup bounds" );
 	}
 
 	// Trace a point straight down through the tetrahedron's apex.
 	CM_BoxTrace( &trace, traceStart, traceEnd, mins, maxs, handle, CONTENTS_SOLID, qfalse );
 	if ( trace.fraction >= 1.0f ) {
-		Com_DPrintf( "CM_TriangleSoupCollideSelfTest: warning — downward trace missed tetrahedron\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_TriangleSoupCollideSelfTest: warning — downward trace missed tetrahedron\n" );
 	}
 
-	Com_DPrintf( "CM_TriangleSoupCollideSelfTest: ok (facets=%i planes=%i bounds=[%.1f %.1f %.1f]-[%.1f %.1f %.1f] handle=%i trace=%.3f)\n",
+	Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_TriangleSoupCollideSelfTest: ok (facets=%i planes=%i bounds=[%.1f %.1f %.1f]-[%.1f %.1f %.1f] handle=%i trace=%.3f)\n",
 		pc->numFacets, pc->numPlanes,
 		pc->bounds[0][0], pc->bounds[0][1], pc->bounds[0][2],
 		pc->bounds[1][0], pc->bounds[1][1], pc->bounds[1][2],

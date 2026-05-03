@@ -226,6 +226,11 @@ static void buildJumpPads( const entDef_t *defs, int numDefs,
         omc->flags  = (unsigned short)(NAVPOLY_WALKABLE | NAVPOLY_OFFMESH);
         omc->bidir  = 0;
         out->count++;
+        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "[NAV] OMC pad %d: trigger=(%.0f,%.0f,%.0f) apex=(%.0f,%.0f,%.0f) landing=(%.0f,%.0f,%.0f)\n",
+                     out->count - 1,
+                     trigCentre[0], trigCentre[1], trigCentre[2],
+                     apex[0], apex[1], apex[2],
+                     landing[0], landing[1], landing[2] );
     }
 }
 
@@ -412,7 +417,7 @@ void Nav_OMC_Build( const struct bspFile_s *bsp, navOmcInput_t *out )
     buildPlatforms(      defs, numDefs, bsp, out );
     int nPlatforms   = out->count - c0;
 
-    Com_Printf( "[NAV] OMC: %d trigger_push, %d trigger_teleport, "
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] OMC: %d trigger_push, %d trigger_teleport, "
                 "%d target_push, %d func_plat  (total %d)\n",
                 nJumpPads, nTeleporters, nTargetPush, nPlatforms, out->count );
 

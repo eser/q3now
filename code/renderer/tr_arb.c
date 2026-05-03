@@ -268,7 +268,7 @@ static void MSDF_GLSL_Init( void )
 	qglGetShaderiv( vs, GL_COMPILE_STATUS, &ok );
 	if ( !ok ) {
 		qglGetShaderInfoLog( vs, sizeof( log ), NULL, log );
-		ri.Printf( PRINT_WARNING, "MSDF GLSL VP: %s\n", log );
+		ri.Log( SEV_WARN, "MSDF GLSL VP: %s\n", log );
 		qglDeleteShader( vs );
 		return;
 	}
@@ -279,7 +279,7 @@ static void MSDF_GLSL_Init( void )
 	qglGetShaderiv( fs, GL_COMPILE_STATUS, &ok );
 	if ( !ok ) {
 		qglGetShaderInfoLog( fs, sizeof( log ), NULL, log );
-		ri.Printf( PRINT_WARNING, "MSDF GLSL FP: %s\n", log );
+		ri.Log( SEV_WARN, "MSDF GLSL FP: %s\n", log );
 		qglDeleteShader( vs );
 		qglDeleteShader( fs );
 		return;
@@ -295,7 +295,7 @@ static void MSDF_GLSL_Init( void )
 	qglGetProgramiv( msdfGlslProg, GL_LINK_STATUS, &ok );
 	if ( !ok ) {
 		qglGetProgramInfoLog( msdfGlslProg, sizeof( log ), NULL, log );
-		ri.Printf( PRINT_WARNING, "MSDF GLSL link: %s\n", log );
+		ri.Log( SEV_WARN, "MSDF GLSL link: %s\n", log );
 		qglDeleteProgram( msdfGlslProg );
 		msdfGlslProg = 0;
 		return;
@@ -308,7 +308,7 @@ static void MSDF_GLSL_Init( void )
 	msdfLoc_glwWidth   = qglGetUniformLocation( msdfGlslProg, "u_GlowWidth" );
 	msdfLoc_glwColor   = qglGetUniformLocation( msdfGlslProg, "u_GlowColor" );
 
-	ri.Printf( PRINT_ALL, "...MSDF GLSL fallback ready\n" );
+	ri.Log( SEV_INFO, "...MSDF GLSL fallback ready\n" );
 }
 
 
@@ -783,9 +783,6 @@ static const char *ARB_BuildDlightFP( char *program, int programIndex )
 	"MUL_SAT result.color, base, light; \n"
 	"END \n" );
 	
-	r_dlightSpecColor->modified = qfalse;
-	r_dlightSpecPower->modified = qfalse;
-
 	return program;
 }
 
@@ -1235,7 +1232,7 @@ qboolean ARB_CompileProgram( programType ptype, const char *text, GLuint program
 		// we may receive error with active FBO but compiled programs will continue to work properly
 		if ( (errCode == GL_INVALID_OPERATION && !fboEnabled) || errorPos != -1 )
 		{
-			ri.Printf( PRINT_ALL, S_COLOR_YELLOW "%s Compile Error(%i,%i): %s\n" S_COLOR_CYAN "%s\n", (ptype == Fragment) ? "FP" : "VP",
+			ri.Log( SEV_INFO, S_COLOR_YELLOW "%s Compile Error(%i,%i): %s\n" S_COLOR_CYAN "%s\n", (ptype == Fragment) ? "FP" : "VP",
 				errCode, errorPos, qglGetString( GL_PROGRAM_ERROR_STRING_ARB ), text );
 			qglBindProgramARB( kind, 0 );
 			ARB_DeletePrograms();
@@ -1608,7 +1605,7 @@ static qboolean FBO_Create( frameBuffer_t *fb, GLsizei width, GLsizei height, qb
 	fboStatus = qglCheckFramebufferStatus( GL_FRAMEBUFFER );
 	if ( fboStatus != GL_FRAMEBUFFER_COMPLETE )
 	{
-		ri.Printf( PRINT_ALL, "Failed to create %s (%s:%s) FBO (status %s, error %s)\n",
+		ri.Log( SEV_INFO, "Failed to create %s (%s:%s) FBO (status %s, error %s)\n",
 			glDefToStr( internalFormat ), glDefToStr( textureFormat ), glDefToStr( textureType ),
 			glDefToStr( fboStatus ), glDefToStr( (int)qglGetError() ) );
 		FBO_Clean( fb );
@@ -1651,10 +1648,10 @@ static qboolean FBO_CreateMS( frameBuffer_t *fb, int width, int height )
 	while ( nSamples > 0 ) {
 		qglRenderbufferStorageMultisample( GL_RENDERBUFFER, nSamples, fboInternalFormat, width, height );
 		if ( (int)qglGetError() == GL_INVALID_VALUE/* != GL_NO_ERROR */ ) {
-			ri.Printf( PRINT_ALL, "...%ix MSAA is not available\n", nSamples );
+			ri.Log( SEV_INFO, "...%ix MSAA is not available\n", nSamples );
 			nSamples -= 2;
 		} else {
-			ri.Printf( PRINT_ALL, "...using %ix MSAA\n", nSamples );
+			ri.Log( SEV_INFO, "...using %ix MSAA\n", nSamples );
 			break;
 		}
 	}
@@ -1687,7 +1684,7 @@ static qboolean FBO_CreateMS( frameBuffer_t *fb, int width, int height )
 	fboStatus = qglCheckFramebufferStatus( GL_FRAMEBUFFER );
 	if ( fboStatus != GL_FRAMEBUFFER_COMPLETE )
 	{
-		ri.Printf( PRINT_WARNING, "Failed to create MS FBO (status %s, error %s)\n", glDefToStr( fboStatus ), glDefToStr( (int)qglGetError() ) );
+		ri.Log( SEV_WARN, "Failed to create MS FBO (status %s, error %s)\n", glDefToStr( fboStatus ), glDefToStr( (int)qglGetError() ) );
 		FBO_Clean( fb );
 		return qfalse;
 	}
@@ -1714,7 +1711,7 @@ static qboolean FBO_CreateBloom( void )
 
 	if ( glConfig.numTextureUnits < r_bloom_passes->integer )
 	{
-		ri.Printf( PRINT_WARNING, "...not enough texture units (%i) for %i-pass bloom\n",
+		ri.Log( SEV_WARN, "...not enough texture units (%i) for %i-pass bloom\n",
 			glConfig.numTextureUnits, r_bloom_passes->integer );
 		return qfalse;
 	}
@@ -1733,7 +1730,7 @@ static qboolean FBO_CreateBloom( void )
 			break;
 	}
 
-	ri.Printf( PRINT_ALL, "...%i bloom passes\n", fboBloomPasses );
+	ri.Log( SEV_INFO, "...%i bloom passes\n", fboBloomPasses );
 
 	return qtrue;
 }
@@ -2059,14 +2056,14 @@ qboolean FBO_Bloom( const float gamma, const float obScale, qboolean finalStage 
 	{
 		if ( (fboBloomInited = FBO_CreateBloom() ) == qfalse )
 		{
-			ri.Printf( PRINT_WARNING, "...error creating framebuffers for bloom\n" );
+			ri.Log( SEV_WARN, "...error creating framebuffers for bloom\n" );
 			ri.Cvar_Set( "r_bloom", "0" );
 			FBO_CleanBloom();
 			return qfalse;
 		}
 		else
 		{
-			ri.Printf( PRINT_ALL, "...bloom framebuffers created\n" );
+			ri.Log( SEV_INFO, "...bloom framebuffers created\n" );
 		}
 	}
 
@@ -2309,7 +2306,7 @@ void QGL_SetRenderScale( qboolean verbose )
 	{
 		if ( verbose && r_renderScale->integer )
 		{
-			ri.Printf( PRINT_ALL, "...ignoring \r_renderScale due to disabled FBO\n" );
+			ri.Log( SEV_INFO, "...ignoring \r_renderScale due to disabled FBO\n" );
 		}
 		return;
 	}
@@ -2391,7 +2388,7 @@ void QGL_InitFBO( void )
 	frameBufferMultiSampling = qfalse;
 
 	if ( r_fbo->integer && ( !qglGenProgramsARB || !qglGenFramebuffers ) )
-		ri.Printf( PRINT_WARNING, "...FBO is not available\n" );
+		ri.Log( SEV_WARN, "...FBO is not available\n" );
 
 	if ( !r_fbo->integer || !qglGenProgramsARB || !qglGenFramebuffers )
 		return;
@@ -2440,7 +2437,7 @@ void QGL_InitFBO( void )
 	{
 		fboEnabled = qtrue;
 		FBO_BindMain();
-		ri.Printf( PRINT_ALL, "...using %s (%s:%s) FBO\n", glDefToStr( fboInternalFormat ),
+		ri.Log( SEV_INFO, "...using %s (%s:%s) FBO\n", glDefToStr( fboInternalFormat ),
 			glDefToStr( fboTextureFormat ), glDefToStr( fboTextureType ) );
 	}
 	else

@@ -77,8 +77,10 @@ functions imported from the main executable
 #define	CGAME_IMPORT_API_VERSION	4
 
 typedef enum {
-	CG_PRINT,
-	CG_ERROR,
+	CG_PRINT,		// DEPRECATED, no new callers
+	CG_ERROR,		// DEPRECATED, no new callers
+	CG_LOG,			// ( int severity, const char *string );
+	CG_TERMINATE,	// ( int level, const char *string );
 	CG_MILLISECONDS,
 	CG_CVAR_REGISTER,
 	CG_CVAR_UPDATE,
@@ -227,6 +229,12 @@ typedef enum {
 	// void trap_WiredStore_Clear( void )
 	CG_WUI_STORE_PUSH_BATCH = 218,
 	// void trap_WiredStore_PushBatch( const wuiStagedEntry_t *entries, int count )
+
+	// ── lightstyle pattern string update ──────────────────────────────
+	CG_R_SETLIGHTSTYLEPATTERN = 220,
+	// void trap_R_SetLightstylePattern( int style, const char *pattern )
+	// style in [0,63]; pattern is a NUL-terminated string up to LIGHTSTYLE_PATTERN_MAX chars.
+	// Stores pattern for renderer animation and derives a float for backward compat.
 
 	CG_TRAP_GETVALUE = COM_TRAP_GETVALUE,
 
@@ -531,6 +539,15 @@ typedef struct {
 		int       timeLeft;    /* seconds remaining */
 		qboolean  isHoldable;  /* qtrue if holdable item, not a timed powerup */
 	} activePowerups[8];
+
+	/* ── holdable inventory list (cgame fills, client iterates) ─────── */
+	int         holdableListCount;
+	struct {
+		holdable_t id;         /* HI_* enum value */
+		qhandle_t  icon;       /* item icon handle (0 = no asset) */
+		qboolean   selected;   /* qtrue if STAT_HOLDABLE_ITEM points to this holdable */
+		char       label[16];  /* fallback text label (used when icon == 0) */
+	} holdableList[HI_NUM_HOLDABLE];
 
 	/* ── pre-computed scoreboard weapon totals per score entry ──────── */
 	struct {

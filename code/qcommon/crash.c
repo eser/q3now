@@ -357,11 +357,12 @@ void Crash_Init( void )
 {
 	memset( &s_crash, 0, sizeof( s_crash ) );
 
-	com_crashReport = Cvar_Get( "com_crashReport", "1", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( com_crashReport, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( com_crashReport,
-		"Write a JSON crash report (and minidump/backtrace) when the engine faults.\n"
-		"0: disabled\n1: enabled (default)" );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_crashReport", "1", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Write a JSON crash report (and minidump/backtrace) when the engine faults.\n"
+			"0: disabled\n1: enabled (default)" );
+		com_crashReport = Cvar_Register( &d );
+	}
 }
 
 /*

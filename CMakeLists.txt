@@ -116,6 +116,16 @@ FILE(GLOB WIRED_EVENT_SRCS code/qcommon/wired/core/events/*.c)
 TARGET_SOURCES(qcommon     PRIVATE ${WIRED_EVENT_SRCS})
 TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_EVENT_SRCS})
 
+# wired/core/time — time subsystem (Sys_NanoTime, Sys_Milliseconds, Com_RealTime, Com_FormatTimestamp)
+FILE(GLOB WIRED_TIME_SRCS  code/qcommon/wired/core/time/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_TIME_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_TIME_SRCS})
+
+# wired/core — orchestration layer (WiredCore_Init / WiredCore_Shutdown)
+FILE(GLOB WIRED_CORE_SRCS code/qcommon/wired/core/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CORE_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CORE_SRCS})
+
 # util/ — utility sub-components (crypto, md5, md4; string/sort/hash extraction TBD)
 FILE(GLOB UTIL_SRCS code/qcommon/util/*.c)
 TARGET_SOURCES(qcommon     PRIVATE ${UTIL_SRCS})

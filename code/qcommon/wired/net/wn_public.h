@@ -32,13 +32,6 @@ Channel architecture:
 #include "../../qcommon.h"
 #include "../../net_transport.h"
 
-/* wn_debug — controls verbose WiredNet tracing.  Declared in wn_main.c;
- * exposed here so server/client files can use WN_DBG without pulling in
- * the full wn_local.h internal header. */
-extern cvar_t *wn_debug;
-#define WN_DBG( ... ) \
-	do { if ( wn_debug && wn_debug->integer ) Com_Printf( __VA_ARGS__ ); } while ( 0 )
-
 /*
  * Permission model — 3 orthogonal dimensions, each a single bit.
  *
@@ -74,14 +67,6 @@ void        WN_Shutdown( void );
 void        WN_RegisterCommands( void );
 
 // ───────────────────────────────────────────────────────────────────
-// Packet handling — called from net_ip.c
-// ───────────────────────────────────────────────────────────────────
-
-// Check if a received UDP packet is a QUIC packet.
-// buf points to the raw recvfrom data, len is the byte count.
-// Returns qtrue if the packet was consumed by the QUIC subsystem.
-qboolean    WN_CheckPacket( netadr_t *from, byte *buf, int len );
-
 // ───────────────────────────────────────────────────────────────────
 // Frame processing — called from SV_Frame() and after recv drain
 // ───────────────────────────────────────────────────────────────────
@@ -217,7 +202,7 @@ void        WN_ClientClearError( void );
 // True if a QUIC client connection is active (handshaking or established).
 qboolean    WN_ClientIsConnecting( void );
 
-// Feed a raw UDP packet to the client picoquic context (called from WN_CheckPacket).
+// Feed a raw UDP packet to the client picoquic context (called from WN_DemuxPacket).
 qboolean    WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len );
 
 // Dequeue one packet from the client QUIC receive queue (called from NET_Event).

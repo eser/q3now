@@ -12,7 +12,7 @@ regardless of severity name length:
          ^^      ^^ (extra spaces on short names)
 
 atLineStart: prefix is emitted only when the previous emit ended with '\n'
-(or on first emit). Prevents mid-line injection when Com_Printf is called
+(or on first emit). Prevents mid-line injection when Com_Log is called
 in multiple pieces without a trailing newline.
 
 Delegates to CL_ConsolePrint for ring-buffer storage and color parsing.
@@ -60,10 +60,11 @@ static log_sink_t s_consoleSink = {
     "console",
     NULL,
     &s_consoleSinkCtx,
-    SEV_INFO,
-    NULL,
-    0,
-    NULL
+    SEV_TRACE,
+    NULL,   // severity_cvar — set by Log_RegisterConsoleSink
+    -1,     // last_cvar_mod
+    0,      // active_dispatches
+    NULL    // next
 };
 
 // -------------------------------------------------------------------------
@@ -73,13 +74,6 @@ static log_sink_t s_consoleSink = {
 static void ConsoleSink_Emit( const log_record_t *rec, void *ctx )
 {
     console_sink_ctx_t *c = (console_sink_ctx_t *)ctx;
-    log_severity_t      min;
-
-    min = c->severity_cvar
-        ? Log_ParseSeverity( c->severity_cvar->string )
-        : SEV_INFO;
-    if ( rec->severity < min )
-        return;
 
     // Emit prefix only at the start of a new line.
     if ( c->atLineStart ) {
@@ -90,8 +84,7 @@ static void ConsoleSink_Emit( const log_record_t *rec, void *ctx )
 
         // Optional timestamp (fmt=1: "HH:MM:SS"), gated by con_timestamp.
         if ( c->timestamp_cvar && c->timestamp_cvar->integer ) {
-            hlen = Log_FormatTimestamp( rec->timestamp_ns, header,
-                                        sizeof( header ) - 12, 1 );
+            hlen = Com_FormatTimestamp( header, sizeof( header ) - 12, 1 );
             // Max timestamp len is 8; 12 bytes of guard leaves room for bracket+NUL.
             assert( hlen < (int)sizeof( header ) - 10 );
             header[hlen++] = ' ';
@@ -130,15 +123,18 @@ static void ConsoleSink_Emit( const log_record_t *rec, void *ctx )
 
 log_sink_t *Log_RegisterConsoleSink( void )
 {
-    s_consoleSinkCtx.severity_cvar  = Cvar_Get( "con_severity",  "INFO", CVAR_ARCHIVE );
-    s_consoleSinkCtx.timestamp_cvar = Cvar_Get( "con_timestamp", "0",    CVAR_ARCHIVE );
+    {
+        static const cvarDesc_t ds = CVAR_STRING( "log_con_severity", "", CVAR_ARCHIVE,
+            "Minimum severity shown in console: [EMPTY] TRACE DEBUG INFO WARN ERROR FATAL" );
+        s_consoleSinkCtx.severity_cvar = Cvar_Register( &ds );
+    }
+    {
+        static const cvarDesc_t dt = CVAR_BOOL( "log_con_timestamp", "1", CVAR_ARCHIVE,
+            "Timestamp prefix for console: 0=off, 1=on. "
+            "Console shows timestamps as HH:MM:SS." );
+        s_consoleSinkCtx.timestamp_cvar = Cvar_Register( &dt );
+    }
     s_consoleSinkCtx.atLineStart    = qtrue;
-
-    Cvar_SetDescription( s_consoleSinkCtx.severity_cvar,
-        "Minimum severity shown in console and TTY: TRACE DEBUG INFO WARN ERROR FATAL" );
-    Cvar_SetDescription( s_consoleSinkCtx.timestamp_cvar,
-        "Timestamp prefix for console and TTY: 0=off, 1=on. "
-        "Console shows HH:MM:SS; TTY shows HH:MM:SS.mmm+TZ." );
 
     s_consoleSink.emit            = ConsoleSink_Emit;
     s_consoleSink.ctx             = &s_consoleSinkCtx;

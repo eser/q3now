@@ -885,7 +885,7 @@ static qboolean R_GetPortalOrientations( const drawSurf_t *drawSurf, int entityN
 	// to see a surface before the server has communicated the matching
 	// portal surface entity, so we don't want to print anything here...
 
-	//ri.Printf( PRINT_ALL, "Portal surface without a portal entity\n" );
+	//ri.Log( SEV_INFO, "Portal surface without a portal entity\n" );
 
 	return qfalse;
 }
@@ -1139,7 +1139,7 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 
 	// don't recursively mirror
 	if ( tr.viewParms.portalView != PV_NONE ) {
-		ri.Printf( PRINT_DEVELOPER, "WARNING: recursive mirror/portal found\n" );
+		ri.Log( SEV_DEBUG, "WARNING: recursive mirror/portal found\n" );
 		return qfalse;
 	}
 
@@ -1461,9 +1461,10 @@ void R_DecomposeLitSort( unsigned sort, int *entityNum, shader_t **shader, int *
 R_AddDrawSurf
 =================
 */
-void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader, 
+void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader,
 				   int fogIndex, int dlightMap ) {
 	int			index;
+
 
 	// instead of checking for overflow, we just mask the index
 	// so it wraps around
@@ -1524,7 +1525,7 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 		// no shader should ever have this sort type
 		if ( shader->sort == SS_BAD ) {
-			ri.Error (ERR_DROP, "Shader '%s'with sort == SS_BAD", shader->name );
+			ri.Terminate( TERM_CLIENT_DROP, "Shader '%s'with sort == SS_BAD", shader->name );
 		}
 
 		// if the mirror was completely clipped away, we may need to check another surface
@@ -1645,13 +1646,13 @@ static void R_AddEntitySurfaces( void ) {
 					R_AddDrawSurf( &entitySurface, tr.defaultShader, 0, 0 );
 					break;
 				default:
-					ri.Error( ERR_DROP, "R_AddEntitySurfaces: Bad modeltype" );
+					ri.Terminate( TERM_CLIENT_DROP, "R_AddEntitySurfaces: Bad modeltype" );
 					break;
 				}
 			}
 			break;
 		default:
-			ri.Error( ERR_DROP, "R_AddEntitySurfaces: Bad reType" );
+			ri.Terminate( TERM_CLIENT_DROP, "R_AddEntitySurfaces: Bad reType" );
 		}
 	}
 

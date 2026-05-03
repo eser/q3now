@@ -3,7 +3,7 @@
 wired_scripting.h -- Headless LuaJIT runtime for q3now
 
 Common Lua scripting layer shared by client and dedicated server.
-Provides: LuaJIT VM, sandbox, cvar metatable bridge, print -> Com_Printf,
+Provides: LuaJIT VM, sandbox, cvar metatable bridge, print -> Com_Log,
 cmd() -> Cbuf_ExecuteText, file execution via engine FS.
 
 Subsystems register additional Lua bindings via WiredScript_RegisterBindings()

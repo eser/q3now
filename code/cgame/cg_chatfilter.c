@@ -26,10 +26,10 @@ void CG_ChatFilterIgnore_f( void ) {
 
 	if ( trap_Argc() < 2 ) {
 		// no argument: list muted players
-		CG_Printf( "Muted players:\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Muted players:\n" );
 		for ( i = 0; i < MAX_CLIENTS; i++ ) {
 			if ( mutedClients[i] && cgs.clientinfo[i].infoValid ) {
-				CG_Printf( "  %i: %s\n", i, cgs.clientinfo[i].name );
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, "  %i: %s\n", i, cgs.clientinfo[i].name );
 			}
 		}
 		return;
@@ -42,7 +42,7 @@ void CG_ChatFilterIgnore_f( void ) {
 	if ( clientNum >= 0 && clientNum < MAX_CLIENTS && cgs.clientinfo[clientNum].infoValid ) {
 		if ( arg[0] >= '0' && arg[0] <= '9' ) {
 			mutedClients[clientNum] = qtrue;
-			CG_Printf( "Ignoring %s\n", CG_ClientName( &cgs.clientinfo[clientNum] ) );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, "Ignoring %s\n", CG_ClientName( &cgs.clientinfo[clientNum] ) );
 			return;
 		}
 	}
@@ -51,12 +51,12 @@ void CG_ChatFilterIgnore_f( void ) {
 	for ( i = 0; i < MAX_CLIENTS; i++ ) {
 		if ( cgs.clientinfo[i].infoValid && Q_stristr( cgs.clientinfo[i].name, arg ) ) {
 			mutedClients[i] = qtrue;
-			CG_Printf( "Ignoring %s\n", CG_ClientName( &cgs.clientinfo[i] ) );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, "Ignoring %s\n", CG_ClientName( &cgs.clientinfo[i] ) );
 			return;
 		}
 	}
 
-	CG_Printf( "Player '%s' not found.\n", arg );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "Player '%s' not found.\n", arg );
 }
 
 /*
@@ -71,7 +71,7 @@ void CG_ChatFilterUnignore_f( void ) {
 	int clientNum;
 
 	if ( trap_Argc() < 2 ) {
-		CG_Printf( "Usage: unignore <clientnum|name|all>\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Usage: unignore <clientnum|name|all>\n" );
 		return;
 	}
 
@@ -80,7 +80,7 @@ void CG_ChatFilterUnignore_f( void ) {
 	// "all" clears the entire list
 	if ( !Q_stricmp( arg, "all" ) ) {
 		memset( mutedClients, 0, sizeof( mutedClients ) );
-		CG_Printf( "All players unmuted.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "All players unmuted.\n" );
 		return;
 	}
 
@@ -89,7 +89,7 @@ void CG_ChatFilterUnignore_f( void ) {
 	if ( clientNum >= 0 && clientNum < MAX_CLIENTS && cgs.clientinfo[clientNum].infoValid ) {
 		if ( arg[0] >= '0' && arg[0] <= '9' ) {
 			mutedClients[clientNum] = qfalse;
-			CG_Printf( "Unignoring %s\n", CG_ClientName( &cgs.clientinfo[clientNum] ) );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, "Unignoring %s\n", CG_ClientName( &cgs.clientinfo[clientNum] ) );
 			return;
 		}
 	}
@@ -98,12 +98,12 @@ void CG_ChatFilterUnignore_f( void ) {
 	for ( int i = 0; i < MAX_CLIENTS; i++ ) {
 		if ( cgs.clientinfo[i].infoValid && Q_stristr( cgs.clientinfo[i].name, arg ) ) {
 			mutedClients[i] = qfalse;
-			CG_Printf( "Unignoring %s\n", CG_ClientName( &cgs.clientinfo[i] ) );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, "Unignoring %s\n", CG_ClientName( &cgs.clientinfo[i] ) );
 			return;
 		}
 	}
 
-	CG_Printf( "Player '%s' not found.\n", arg );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "Player '%s' not found.\n", arg );
 }
 
 /*

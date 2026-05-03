@@ -33,28 +33,63 @@ static int numBspFormats = 0;
 #define MAX_BSP_FILES 2
 static bspFile_t *bspLoadedFiles[MAX_BSP_FILES];
 
+// Persistent cache reference: keeps the current map's bspFile_t alive across
+// all load-and-free callers within one map cycle. Released by BSP_ClearMapCache.
+static bspFile_t *s_mapCacheBsp = NULL;
+
 void BSP_Init( void ) {
 	numBspFormats = 0;
 	memset( bspFormats, 0, sizeof( bspFormats ) );
 
-	// Register built-in formats
+	// Register built-in formats. Q3 first: detect runs in registration order,
+	// so Q3's magic-byte check fires before Q1's version-only check.
 	extern const bspFormat_t bspFormatQ3;
+	extern const bspFormat_t bspFormatQ1;
 	BSP_RegisterFormat( &bspFormatQ3 );
+	BSP_RegisterFormat( &bspFormatQ1 );
 	memset( bspLoadedFiles, 0, sizeof( bspLoadedFiles ) );
 }
 
 void BSP_RegisterFormat( const bspFormat_t *format ) {
 	if ( numBspFormats >= MAX_BSP_FORMATS ) {
-		Com_Error( ERR_FATAL, "BSP_RegisterFormat: too many formats" );
+		Com_Terminate( TERM_UNRECOVERABLE, "BSP_RegisterFormat: too many formats" );
 	}
+	assert( format->detect != NULL );
+	assert( format->loadFunction != NULL );
 	bspFormats[numBspFormats++] = format;
 }
 
-qboolean BSP_Load( const char *name, bspFile_t **bspFile ) {
+byte *Lit_TryLoad( const char *litPath, int expectedRGBBytes ) {
+	void *litBuf = NULL;
+	int   litLen;
+	byte *out;
+
+	litLen = FS_ReadFile( litPath, &litBuf );
+	if ( !litBuf )
+		return NULL;
+
+	if ( litLen < 8
+	  || LittleLong( ((const int *)litBuf)[0] ) != LIT_MAGIC
+	  || LittleLong( ((const int *)litBuf)[1] ) != LIT_VERSION
+	  || litLen - 8 != expectedRGBBytes ) {
+		if ( litLen >= 8 )
+			Com_Log( SEV_WARN, LOG_CAT_LOADING, "Lit_TryLoad: %s rejected (data=%d expected=%d)\n",
+			         litPath, litLen - 8, expectedRGBBytes );
+		FS_FreeFile( litBuf );
+		return NULL;
+	}
+
+	out = Z_Malloc( expectedRGBBytes );
+	memcpy( out, (const byte *)litBuf + 8, expectedRGBBytes );
+	FS_FreeFile( litBuf );
+	Com_Log( SEV_INFO, LOG_CAT_LOADING, "Loaded .lit colored lighting: %s (%d texels)\n",
+	         litPath, expectedRGBBytes / 3 );
+	return out;
+}
+
+qboolean BSP_Load( const char *name, bspFile_t **bspFile, unsigned flags ) {
 	void		*buf;
 	int			length;
-	int			ident;
-	int			version;
 	int			i;
 	int			freeSlot;
 
@@ -77,7 +112,7 @@ qboolean BSP_Load( const char *name, bspFile_t **bspFile ) {
 	}
 
 	if ( freeSlot < 0 ) {
-		Com_Error( ERR_DROP, "%s: no free BSP slots for '%s'", __func__, name );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: no free BSP slots for '%s'", __func__, name );
 	}
 
 	length = FS_ReadFile( name, &buf );
@@ -90,25 +125,26 @@ qboolean BSP_Load( const char *name, bspFile_t **bspFile ) {
 		return qfalse;
 	}
 
-	ident = LittleLong( ((int *)buf)[0] );
-	version = LittleLong( ((int *)buf)[1] );
-
 	for ( i = 0; i < numBspFormats; i++ ) {
-		if ( bspFormats[i]->ident == ident && bspFormats[i]->version == version ) {
-			qboolean result = bspFormats[i]->loadFunction( bspFormats[i], name, buf, length, bspFile );
+		if ( bspFormats[i]->detect( buf, length ) ) {
+			qboolean result = bspFormats[i]->loadFunction( bspFormats[i], name, buf, length, flags, bspFile );
 			FS_FreeFile( buf );
 			if ( result && *bspFile ) {
-				(*bspFile)->ident = ident;
-				(*bspFile)->version = version;
 				(*bspFile)->references = 1;
 				(*bspFile)->format = bspFormats[i];
 				bspLoadedFiles[freeSlot] = *bspFile;
+				// Release the previous map-cycle cache reference before acquiring
+				// the new one. Without this, every different-map fresh load leaks
+				// one reference to the previous BSP, eventually exhausting the slot pool.
+				BSP_ClearMapCache();
+				s_mapCacheBsp = *bspFile;
+				(*bspFile)->references++;
 			}
 			return result;
 		}
 	}
 
-	Com_Printf( "BSP_Load: %s has unrecognized format (ident=%d, version=%d)\n", name, ident, version );
+	Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Load: %s has no matching format\n", name );
 	FS_FreeFile( buf );
 	return qfalse;
 }
@@ -183,18 +219,38 @@ void BSP_Free( bspFile_t *bspFile ) {
 	if ( bspFile->lightGridData ) {
 		Z_Free( bspFile->lightGridData );
 	}
+	if ( bspFile->embeddedTextures ) {
+		Z_Free( bspFile->embeddedTextures );
+	}
+	for ( i = 0; i < 4; i++ ) {
+		if ( bspFile->styledLightmapData[i] ) {
+			Z_Free( bspFile->styledLightmapData[i] );
+		}
+	}
 	if ( bspFile->rawData ) {
 		Z_Free( bspFile->rawData );
 	}
 	if ( bspFile->fogs ) {
 		Z_Free( bspFile->fogs );
 	}
+	if ( bspFile->drawVertLightstyles ) {
+		Z_Free( bspFile->drawVertLightstyles );
+	}
 
 	Z_Free( bspFile );
 }
 
+void BSP_ClearMapCache( void ) {
+	if ( !s_mapCacheBsp )
+		return;
+	BSP_Free( s_mapCacheBsp );
+	s_mapCacheBsp = NULL;
+}
+
 void BSP_Shutdown( void ) {
 	int i;
+
+	BSP_ClearMapCache();
 
 	for ( i = 0; i < MAX_BSP_FILES; i++ ) {
 		if ( !bspLoadedFiles[i] ) {

@@ -130,7 +130,7 @@ static int SV_ReplacePendingServerCommands( client_t *client, const char *cmd ) 
 				Q_strncpyz( client->reliableCommands[ index ], cmd, sizeof( client->reliableCommands[ index ] ) );
 				/*
 				if ( client->netchan.remoteAddress.type != NA_BOT ) {
-					Com_Printf( "WARNING: client %i removed double pending config string %i: %s\n", client-svs.clients, csnum1, cmd );
+					Com_Log( SEV_INFO, LOG_CAT_SERVER, "WARNING: client %i removed double pending config string %i: %s\n", client-svs.clients, csnum1, cmd );
 				}
 				*/
 				return qtrue;
@@ -175,16 +175,16 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 			 * means acks haven't arrived yet; drop the oldest command to make
 			 * room rather than dropping the connection. */
 			client->reliableAcknowledge++;
-			Com_DPrintf( "QUIC: server command queue full for %s — dropping oldest\n", client->name );
+			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: server command queue full for %s — dropping oldest\n", client->name );
 		} else {
-			Com_Printf( "===== pending server commands =====\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "===== pending server commands =====\n" );
 			int n = client->reliableSequence - client->reliableAcknowledge;
 			int i;
 			for ( i = 0; i < n; i++ ) {
 				const int idx = client->reliableAcknowledge + 1 + i;
-				Com_Printf( "cmd %5d: %s\n", i, client->reliableCommands[ idx & ( MAX_RELIABLE_COMMANDS - 1 ) ] );
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "cmd %5d: %s\n", i, client->reliableCommands[ idx & ( MAX_RELIABLE_COMMANDS - 1 ) ] );
 			}
-			Com_Printf( "cmd %5d: %s\n", i, cmd );
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "cmd %5d: %s\n", i, cmd );
 			SV_DropClient( client, "Server command overflow" );
 			return;
 		}
@@ -222,7 +222,7 @@ void QDECL SV_SendServerCommand( client_t *cl, const char *fmt, ... ) {
 
 	// hack to echo broadcast prints to console
 	if ( com_dedicated->integer && !strncmp( message, "print", 5 ) ) {
-		Com_Printf( "broadcast: %s\n", SV_ExpandNewlines( message ) );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "broadcast: %s\n", SV_ExpandNewlines( message ) );
 	}
 
 	// send the data to all relevant clients
@@ -282,14 +282,17 @@ static void SV_MasterHeartbeat( const char *message )
 
 		// see if we haven't already resolved the name or if it's been over 24 hours
 		// resolving usually causes hitches on win95, so only do it when needed
-		if ( sv_master[i]->modified || svs.time - svs.masterResolveTime[i] > 0 )
 		{
-			sv_master[i]->modified = qfalse;
+			static int s_master_mod[MAX_MASTER_SERVERS];
+			qboolean addr_changed = sv_master[i]->modificationCount != s_master_mod[i];
+			if ( addr_changed ) s_master_mod[i] = sv_master[i]->modificationCount;
+			if ( addr_changed || svs.time - svs.masterResolveTime[i] > 0 )
+			{
 			svs.masterResolveTime[i] = svs.time + MASTERDNS_MSEC;
 			
 			if(netenabled & NET_ENABLEV4)
 			{
-				Com_Printf("Resolving %s (IPv4)\n", sv_master[i]->string);
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "Resolving %s (IPv4)\n", sv_master[i]->string);
 				res = NET_StringToAdr(sv_master[i]->string, &adr[i][0], NA_IP);
 
 				if(res == 2)
@@ -299,14 +302,14 @@ static void SV_MasterHeartbeat( const char *message )
 				}
 				
 				if(res)
-					Com_Printf( "%s resolved to %s\n", sv_master[i]->string, NET_AdrToStringwPort( &adr[i][0] ) );
+					Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s resolved to %s\n", sv_master[i]->string, NET_AdrToStringwPort( &adr[i][0] ) );
 				else
-					Com_Printf( "%s has no IPv4 address.\n", sv_master[i]->string );
+					Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s has no IPv4 address.\n", sv_master[i]->string );
 			}
 #if FEAT_IPV6
 			if(netenabled & NET_ENABLEV6)
 			{
-				Com_Printf("Resolving %s (IPv6)\n", sv_master[i]->string);
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "Resolving %s (IPv6)\n", sv_master[i]->string);
 				res = NET_StringToAdr(sv_master[i]->string, &adr[i][1], NA_IP6);
 
 				if(res == 2)
@@ -316,11 +319,12 @@ static void SV_MasterHeartbeat( const char *message )
 				}
 				
 				if(res)
-					Com_Printf( "%s resolved to %s\n", sv_master[i]->string, NET_AdrToStringwPort( &adr[i][1] ) );
+					Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s resolved to %s\n", sv_master[i]->string, NET_AdrToStringwPort( &adr[i][1] ) );
 				else
-					Com_Printf( "%s has no IPv6 address.\n", sv_master[i]->string );
+					Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s has no IPv6 address.\n", sv_master[i]->string );
 			}
 #endif
+			}
 		}
 
 		if( adr[i][0].type == NA_BAD && adr[i][1].type == NA_BAD )
@@ -329,7 +333,7 @@ static void SV_MasterHeartbeat( const char *message )
 		}
 
 
-		Com_Printf ("Sending heartbeat to %s\n", sv_master[i]->string );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Sending heartbeat to %s\n", sv_master[i]->string );
 
 		// this command should be changed if the server info / status format
 		// ever changes incompatibly
@@ -682,17 +686,15 @@ static void SVC_Status( const netadr_t *from ) {
 
 	// Prevent using getstatus as an amplifier
 	if ( SVC_RateLimitAddress( from, 10, 1000 ) ) {
-		if ( com_developer->integer ) {
-			Com_Printf( "SVC_Status: rate limit from %s exceeded, dropping request\n",
-				NET_AdrToString( from ) );
-		}
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVC_Status: rate limit from %s exceeded, dropping request\n",
+			NET_AdrToString( from ) );
 		return;
 	}
 
 	// Allow getstatus to be DoSed relatively easily, but prevent
 	// excess outbound bandwidth usage when being flooded inbound
 	if ( SVC_RateLimit( &outboundRateLimit, 10, 100 ) ) {
-		Com_DPrintf( "SVC_Status: rate limit exceeded, dropping request\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVC_Status: rate limit exceeded, dropping request\n" );
 		return;
 	}
 
@@ -750,17 +752,15 @@ static void SVC_Info( const netadr_t *from ) {
 
 	// Prevent using getinfo as an amplifier
 	if ( SVC_RateLimitAddress( from, 10, 1000 ) ) {
-		if ( com_developer->integer ) {
-			Com_Printf( "SVC_Info: rate limit from %s exceeded, dropping request\n",
-				NET_AdrToString( from ) );
-		}
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVC_Info: rate limit from %s exceeded, dropping request\n",
+			NET_AdrToString( from ) );
 		return;
 	}
 
 	// Allow getinfo to be DoSed relatively easily, but prevent
 	// excess outbound bandwidth usage when being flooded inbound
 	if ( SVC_RateLimit( &outboundRateLimit, 10, 100 ) ) {
-		Com_DPrintf( "SVC_Info: rate limit exceeded, dropping request\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVC_Info: rate limit exceeded, dropping request\n" );
 		return;
 	}
 
@@ -828,9 +828,7 @@ static void SV_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 
 	if ( !memcmp( "connect ", msg->data + 4, 8 ) ) {
 		if ( msg->cursize > MAX_INFO_STRING*2 ) { // if we assume 200% compression ratio on userinfo
-			if ( com_developer->integer ) {
-				Com_Printf( "%s : connect packet is too long - %i\n", NET_AdrToString( from ), msg->cursize );
-			}
+			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "%s : connect packet is too long - %i\n", NET_AdrToString( from ), msg->cursize );
 			return;
 		}
 		Huff_Decompress( msg, 12 );
@@ -841,9 +839,7 @@ static void SV_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 
 	c = Cmd_Argv(0);
 
-	if ( com_developer->integer ) {
-		Com_Printf( "SV packet %s : %s\n", NET_AdrToString( from ), c );
-	}
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SV packet %s : %s\n", NET_AdrToString( from ), c );
 
 	if ( !com_sv_running->integer ) {
 		return;
@@ -871,10 +867,8 @@ static void SV_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		// server disconnect messages when their new server sees our final
 		// sequenced messages to the old client
 	} else {
-		if ( com_developer->integer ) {
-			Com_Printf( "bad connectionless packet from %s:\n%s\n",
-				NET_AdrToString( from ), s );
-		}
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "bad connectionless packet from %s:\n%s\n",
+			NET_AdrToString( from ), s );
 	}
 }
 
@@ -1077,12 +1071,12 @@ void SV_TrackCvarChanges( void )
 {
 	if ( sv_maxRate->integer && sv_maxRate->integer < 1000 ) {
 		Cvar_Set( "sv_maxRate", "1000" );
-		Com_DPrintf( "sv_maxRate adjusted to 1000\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "sv_maxRate adjusted to 1000\n" );
 	}
 
 	if ( sv_minRate->integer && sv_minRate->integer < 1000 ) {
 		Cvar_Set( "sv_minRate", "1000" );
-		Com_DPrintf( "sv_minRate adjusted to 1000\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "sv_minRate adjusted to 1000\n" );
 	}
 
 	Cvar_ResetGroup( CVG_SERVER, qfalse );
@@ -1178,7 +1172,7 @@ void SV_Frame( int msec ) {
 
 	// QUIC game drains: safe only when gvm != NULL (SPAWN_IDLE guarantees that).
 	WN_DrainPendingConnects();
-	SV_DrainQUICUsercmds();
+	SV_DrainUsercmds();
 	SV_DrainQUICReliableCommands();
 	WN_DrainPendingReady();
 
@@ -1194,7 +1188,7 @@ void SV_Frame( int msec ) {
 	if (frameMsec < 1)
 	{
 		Cvar_SetValue( "timescale", sv_fps->value / 1000.0f );
-		Com_DPrintf( "timescale adjusted to %f\n", com_timescale->value );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "timescale adjusted to %f\n", com_timescale->value );
 		frameMsec = 1;
 	}
 
@@ -1238,7 +1232,7 @@ void SV_Frame( int msec ) {
 		int thresholdMs = sv_minRestartDelay->integer * 3600 * 1000;
 		if ( !sv_restartPending && thresholdMs > 0 && uptimeMs >= thresholdMs ) {
 			sv_restartPending = qtrue;
-			Com_Printf( "Scheduled restart pending after %d hour(s) of uptime.\n",
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Scheduled restart pending after %d hour(s) of uptime.\n",
 				sv_minRestartDelay->integer );
 		}
 		if ( sv_restartPending && svs.clients != NULL ) {
@@ -1250,7 +1244,7 @@ void SV_Frame( int msec ) {
 				humans++;
 			}
 			if ( humans == 0 ) {
-				Com_Printf( "Scheduled restart: no human clients connected, quitting for watchdog.\n" );
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "Scheduled restart: no human clients connected, quitting for watchdog.\n" );
 				Cbuf_AddText( "quit\n" );
 				return;
 			}
@@ -1278,6 +1272,8 @@ void SV_Frame( int msec ) {
 	} else {
 		startTime = 0;	// quite a compiler warning
 	}
+
+	WiredCoreEvents_DispatchSimple( WCE_FRAME_START, -1 );
 
 	// update ping based on the all received frames
 	SV_CalcPings();
@@ -1320,6 +1316,8 @@ void SV_Frame( int msec ) {
 #if FEAT_WIREDNET_CONTROL
 	WN_ProcessCommandQueue();
 #endif
+
+	WiredCoreEvents_DispatchSimple( WCE_FRAME_END, -1 );
 
 	// send a heartbeat to the master if needed
 	SV_MasterHeartbeat(HEARTBEAT_FOR_MASTER);

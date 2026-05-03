@@ -28,7 +28,7 @@ menuDef {
 		rect 0.067 0.250 0.867 0.062
 		font "oxanium" 17
 		forecolor WCOLOR_TEXT
-		cvar "g_spSkill"
+		cvar "g_skill"
 		cvarFloatList { "I Can Win" 1 "Bring It On" 2 "Hurt Me Plenty" 3 "Hardcore" 4 "Nightmare" 5 }
 		visible 1
 		mouseEnter { setcolor forecolor WCOLOR_ACCENT_HOVER }

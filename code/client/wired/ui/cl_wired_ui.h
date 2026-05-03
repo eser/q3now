@@ -478,7 +478,7 @@ wiredMenuDef_t *WiredUI_GetActiveMenu( void );
 // retryable: if qfalse or the last connect target was localhost, the Retry
 // button is hidden (ui_errorRetry = "0").
 //
-// Safe to call with cls.uiStarted == qfalse — falls back to Com_Printf.
+// Safe to call with cls.uiStarted == qfalse — falls back to Com_Log.
 
 void     CL_WiredUI_ShowError( const char *title,
                                 const char *message,

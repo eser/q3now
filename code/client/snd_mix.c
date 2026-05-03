@@ -735,7 +735,7 @@ void S_PaintChannels( int endtime ) {
 		}
 	}
 
-	//Com_Printf ("%i to %i\n", s_paintedtime, endtime);
+	//Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i to %i\n", s_paintedtime, endtime);
 	while ( endtime - s_paintedtime > 0 ) {
 		// if paintbuffer is smaller than DMA buffer
 		// we may need to fill it multiple times

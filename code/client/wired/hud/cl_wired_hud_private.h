@@ -631,6 +631,9 @@ void CG_ModernHUDElementTeamRoutine(void* context);
 void* CG_ModernHUDElementWeaponListCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementWeaponListRoutine(void* context);
 
+void* CG_ModernHUDElementHoldableListCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementHoldableListRoutine(void* context);
+
 
 
 void* CG_ModernHUDElementTempAccTextCreate(const modernhudConfig_t* config);

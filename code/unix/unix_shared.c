@@ -38,38 +38,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 //=============================================================================
 
-/*
-================
-Sys_Milliseconds
-================
-*/
-/* base time in seconds, that's our origin
-   timeval:tv_sec is an int: 
-   assuming this wraps every 0x7fffffff - ~68 years since the Epoch (1970) - we're safe till 2038
-   using unsigned long data type to work right with Sys_XTimeToSysTime */
-unsigned long sys_timeBase = 0;
-/* current time in ms, using sys_timeBase as origin
-   NOTE: sys_timeBase*1000 + curtime -> ms since the Epoch
-     0x7fffffff ms - ~24 days
-   although timeval:tv_usec is an int, I'm not sure whether it is actually used as an unsigned int
-     (which would affect the wrap period) */
-int Sys_Milliseconds( void )
-{
-	struct timeval tp;
-	int curtime;
-
-	gettimeofday( &tp, NULL );
-	
-	if ( !sys_timeBase )
-	{
-		sys_timeBase = tp.tv_sec;
-		return tp.tv_usec/1000;
-	}
-
-	curtime = (tp.tv_sec - sys_timeBase) * 1000 + tp.tv_usec / 1000;
-
-	return curtime;
-}
+/* Sys_Milliseconds, sys_timeBase → wired/core/time/time.c */
 
 
 
@@ -447,12 +416,12 @@ void *Sys_LoadLibrary( const char *name )
 
 	if ( FS_AllowedExtension( name, qfalse, &ext ) )
 	{
-		Com_Error( ERR_FATAL, "Sys_LoadLibrary: Unable to load library with '%s' extension", ext );
+		Com_Terminate( TERM_UNRECOVERABLE, "Sys_LoadLibrary: Unable to load library with '%s' extension", ext );
 	}
 
 	handle = dlopen( name, RTLD_NOW );
 	if ( !handle ) {
-		Com_DPrintf( S_COLOR_YELLOW "Sys_LoadLibrary(%s) failed: %s\n", name, dlerror() );
+		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Sys_LoadLibrary(%s) failed: %s\n", name, dlerror() );
 	}
 	return handle;
 }

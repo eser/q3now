@@ -32,6 +32,7 @@ Skill scaling: lower skill blends fuzzy weights + tracked accuracy.
 #include "ai_main.h"
 #include "ai_weapsel.h"
 #include "inv.h"
+#include "wired/bots/g_bot_scripts.h"
 
 // static weapon stats table — mirrors g_weapon.c / g_missile.c values
 typedef struct {
@@ -151,7 +152,7 @@ Sets bs->weaponnum and bs->weapon_reason.
 void BotChooseWeaponDPS( struct bot_state_s *bs )
 {
 	int wp, zone;
-	float enemyDist, bestDps, dps, hitRate, skill;
+	float enemyDist, bestDps, dps, hitRate;
 	vec3_t delta;
 	const weapstat_t *ws;
 
@@ -161,8 +162,6 @@ void BotChooseWeaponDPS( struct bot_state_s *bs )
 	VectorSubtract( g_entities[bs->enemy].r.currentOrigin, bs->origin, delta );
 	enemyDist = VectorLength( delta );
 	zone = BotCombatZone( enemyDist );
-
-	skill = bs->autoskill > 0 ? bs->autoskill : bs->settings.skill;
 
 	bestDps = -1;
 	bs->weapon_reason = 0;
@@ -190,8 +189,8 @@ void BotChooseWeaponDPS( struct bot_state_s *bs )
 			hitRate = (float)bs->accuracy[wp][zone].hits / (float)bs->accuracy[wp][zone].shots;
 		} else {
 			hitRate = ws->baseAccuracy;
-			// lower skill = worse base accuracy
-			hitRate *= (skill / 5.0f);
+			// skill-1 bot uses 0.2x base accuracy, skill-5 bot uses 1.0x
+			hitRate *= WiredBots_ResolveAbility( bs, 0.2f, 1.0f );
 		}
 
 		if ( hitRate < 0.01f ) hitRate = 0.01f;

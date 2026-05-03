@@ -495,10 +495,12 @@ void RB_RenderFlares (void) {
 		return;
 	}
 
-	if(r_flareCoeff->modified)
 	{
-		R_SetFlareCoeff();
-		r_flareCoeff->modified = qfalse;
+		static int s_flarecoeff_mod = -1;
+		if ( r_flareCoeff->modificationCount != s_flarecoeff_mod ) {
+			s_flarecoeff_mod = r_flareCoeff->modificationCount;
+			R_SetFlareCoeff();
+		}
 	}
 
 	// Reset currentEntity to world so that any previously referenced entities

@@ -59,7 +59,7 @@ void Attack_LightningGun_Primary( gentity_t *ent ) {
 		}
 // eser - lightning push
 
-		// if not the first trace (the lightning bounced of an invulnerability sphere)
+		// if not the first trace (the lightning bounced of an deflector sphere)
 		if (i) {
 			// add bounced off lightning bolt temp entity
 			// the first lightning bolt is a cgame only visual
@@ -77,8 +77,8 @@ void Attack_LightningGun_Primary( gentity_t *ent ) {
 		traceEnt = &g_entities[ tr.entityNum ];
 
 		if ( traceEnt->takedamage) {
-			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
-				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
+			if ( traceEnt->client && traceEnt->client->deflectorTime > level.time ) {
+				if (G_DeflectorEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
 					VectorCopy( impactpoint, muzzle );
 					VectorSubtract( end, impactpoint, forward );
@@ -174,6 +174,15 @@ void Attack_LightningGun_ChainArc( gentity_t *ent ) {
 					bg_attacklist[ATT_LIGHTNING_GUN_CHAIN_ARC].maxDamageDistance );
 			}
 
+			if ( traceEnt->client && traceEnt->client->deflectorTime > level.time ) {
+				vec3_t lgChainDir, invulImpact, invulBounce;
+				VectorSubtract( tr.endpos, muzzle, lgChainDir );
+				VectorNormalize( lgChainDir );
+				G_DeflectorEffect( traceEnt, lgChainDir, tr.endpos,
+					invulImpact, invulBounce );
+				break;
+			}
+
 			// Apply primary beam damage with upward bias for juggle
 			{
 				vec3_t lgDir;
@@ -259,8 +268,14 @@ void Attack_LightningGun_ChainArc( gentity_t *ent ) {
 			VectorSubtract( arcTarget->r.currentOrigin, impactPoint, arcDir );
 			VectorNormalize( arcDir );
 
-			G_Damage( arcTarget, ent, ent, arcDir, arcTarget->r.currentOrigin,
-				arcDamage, 0, MOD_LIGHTNING_CHAIN_ARC );
+			if ( arcTarget->client && arcTarget->client->deflectorTime > level.time ) {
+				vec3_t invulImpact, invulBounce;
+				G_DeflectorEffect( arcTarget, arcDir, arcTarget->r.currentOrigin,
+					invulImpact, invulBounce );
+			} else {
+				G_Damage( arcTarget, ent, ent, arcDir, arcTarget->r.currentOrigin,
+					arcDamage, 0, MOD_LIGHTNING_CHAIN_ARC );
+			}
 
 			// Send arc event for client-side rendering
 			tent = G_TempEntity( impactPoint, EV_LIGHTNING_ARC );

@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *****************************************************************************/
 
 #include "../qcommon/q_shared.h"
+#include "../qcommon/q_feats.h"
 #include "l_memory.h"
 #include "l_log.h"
 #include "l_libvar.h"
@@ -148,13 +149,15 @@ static int Export_BotLibSetup( void )
 	 * and related calls dereference it unconditionally under both nav backends. */
 	errnum = BotSetupChatAI();		//be_ai_chat.c
 	if (errnum != BLERR_NOERROR) return errnum;
+	/* Goal AI allocates the goal heap and loads items.c — no AAS dependency.
+	 * Always set up so BotAllocGoalState and trap_BotPushGoal work under
+	 * both nav backends. */
+	errnum = BotSetupGoalAI();		//be_ai_goal.c
+	if (errnum != BLERR_NOERROR) return errnum;
 #if !FEAT_RECAST_NAVMESH
 	/* weaponconfig=NULL is NULL-guarded in BotValidWeaponNumber; safe to skip. */
 	errnum = BotSetupWeaponAI();	//be_ai_weap.c
 	if (errnum != BLERR_NOERROR)return errnum;
-	/* itemconfig=NULL is NULL-guarded at every dereference site; safe to skip. */
-	errnum = BotSetupGoalAI();		//be_ai_goal.c
-	if (errnum != BLERR_NOERROR) return errnum;
 	/* MoveAI libvars only consumed by stubbed AAS move functions under Recast. */
 	errnum = BotSetupMoveAI();		//be_ai_move.c
 	if (errnum != BLERR_NOERROR) return errnum;
@@ -181,9 +184,10 @@ static int Export_BotLibShutdown(void)
 	//
 	/* Symmetric with BotSetupChatAI — must always run. */
 	BotShutdownChatAI();		//be_ai_chat.c
+	/* Symmetric with BotSetupGoalAI (unconditional in setup) — must always run. */
+	BotShutdownGoalAI();		//be_ai_goal.c
 #if !FEAT_RECAST_NAVMESH
 	BotShutdownMoveAI();		//be_ai_move.c
-	BotShutdownGoalAI();		//be_ai_goal.c
 	BotShutdownWeaponAI();		//be_ai_weap.c
 	BotShutdownWeights();		//be_ai_weight.c
 	BotShutdownCharacters();	//be_ai_char.c
@@ -259,17 +263,21 @@ static int Export_BotLibLoadMap(const char *mapname)
 #ifdef DEBUG
 	int starttime = Sys_MilliSeconds();
 #endif
-	int errnum;
-
 	if (!BotLibSetup("BotLoadMap")) return BLERR_LIBRARYNOTSETUP;
 	//
 	botimport.Print(PRT_MESSAGE, "------------ Map Loading ------------\n");
+#if !FEAT_RECAST_NAVMESH
 	//startup AAS for the current map, model and sound index
-	errnum = AAS_LoadMap(mapname);
-	if (errnum != BLERR_NOERROR) return errnum;
-	//initialize the items in the level
+	{
+		int errnum = AAS_LoadMap(mapname);
+		if (errnum != BLERR_NOERROR) return errnum;
+	}
+	BotSetBrushModelTypes();	//be_ai_move.h (uses AAS BSP entity reader)
+#endif
+	//initialize the items in the level; under Recast, BotSetupGoalAI has
+	//already initialized the heap so AAS_Loaded()==false causes only an
+	//early-return after heap init, leaving an empty-but-valid item database.
 	BotInitLevelItems();		//be_ai_goal.h
-	BotSetBrushModelTypes();	//be_ai_move.h
 	//
 	botimport.Print(PRT_MESSAGE, "-------------------------------------\n");
 #ifdef DEBUG

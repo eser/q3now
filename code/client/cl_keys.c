@@ -134,7 +134,7 @@ static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int 
 
 	// extract <drawLen> characters from the field at <prestep>
 	if ( drawLen >= MAX_STRING_CHARS ) {
-		Com_Error( ERR_DROP, "drawLen >= MAX_STRING_CHARS" );
+		Com_Terminate( TERM_CLIENT_DROP, "drawLen >= MAX_STRING_CHARS" );
 	}
 
 	memcpy( str, edit->buffer + prestep, drawLen );
@@ -727,7 +727,7 @@ static void Console_Key( int key ) {
 			g_consoleField.cursor++;
 		}
 
-		Com_Printf( "]%s\n", g_consoleField.buffer );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "]%s\n", g_consoleField.buffer );
 
 		// leading slash is an explicit command
 		if ( g_consoleField.buffer[0] == '\\' || g_consoleField.buffer[0] == '/' ) {

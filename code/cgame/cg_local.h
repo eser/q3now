@@ -284,8 +284,8 @@ typedef enum {
 	LE_PING_LOCATION,		// team ping marker (4G)
 #endif
 	LE_KAMIKAZE,
-	LE_INVULIMPACT,
-	LE_INVULJUICED,
+	LE_DEFLECTOR_IMPACT,
+	LE_DEFLECTOR_JUICED,
 	LE_SHOWREFENTITY
 } leType_t;
 
@@ -408,10 +408,11 @@ typedef struct {
 	int				powerups;		// so can display quad/flag status
 
 	int				medkitUsageTime;
-	int				invulnerabilityStartTime;
-	int				invulnerabilityStopTime;
+	int				deflectorStartTime;
+	int				deflectorStopTime;
 
 	int				breathPuffTime;
+	int				bubblePuffTime;
 
 	// when clientinfo is changed, the loading of models/skins/sounds
 	// can be deferred until you are dead, to prevent hitches in
@@ -600,6 +601,9 @@ typedef struct {
 
 	float		stepChange;				// for stair up smoothing
 	int			stepTime;
+
+	float		stepDownChange;			// for stair descent smoothing (negative)
+	int			stepDownTime;
 
 	float		duckChange;				// for duck viewheight smoothing
 	int			duckTime;
@@ -897,7 +901,7 @@ typedef struct {
 	qhandle_t	crosshairBulletShader;
 	qhandle_t	crosshairBurstShader;
 	qhandle_t	crosshairMissileShader;
-	qhandle_t	crosshairMiscShader;
+	qhandle_t	crosshairDefaultShader;
 
 	qhandle_t	smokePuffShader;
 	qhandle_t	smokePuffRageProShader;
@@ -958,12 +962,12 @@ typedef struct {
 	qhandle_t	kamikazeShockWave;
 	qhandle_t	kamikazeHeadModel;
 	qhandle_t	kamikazeHeadTrail;
-	qhandle_t	invulnerabilityImpactModel;
-	qhandle_t	invulnerabilityJuicedModel;
+	qhandle_t	deflectorImpactModel;
+	qhandle_t	deflectorJuicedModel;
+	qhandle_t	deflectorPowerupModel;
 	qhandle_t	medkitUsageModel;
 	qhandle_t	dustPuffShader;
 	qhandle_t	heartShader;
-	qhandle_t	invulnerabilityPowerupModel;
 
 	// scoreboard headers
 	qhandle_t	scoreboardName;
@@ -1009,11 +1013,11 @@ typedef struct {
 	sfxHandle_t	sfx_chghit;
 	sfxHandle_t	sfx_chghitflesh;
 	sfxHandle_t	sfx_chghitmetal;
-	sfxHandle_t useInvulnerabilitySound;
-	sfxHandle_t invulnerabilityImpactSound1;
-	sfxHandle_t invulnerabilityImpactSound2;
-	sfxHandle_t invulnerabilityImpactSound3;
-	sfxHandle_t invulnerabilityJuicedSound;
+	sfxHandle_t useDeflectorSound;
+	sfxHandle_t deflectorImpactSound1;
+	sfxHandle_t deflectorImpactSound2;
+	sfxHandle_t deflectorImpactSound3;
+	sfxHandle_t deflectorJuicedSound;
 #if FEAT_OVERLOAD
 	sfxHandle_t obeliskHitSound1;
 	sfxHandle_t obeliskHitSound2;
@@ -1462,16 +1466,13 @@ void	CG_AllocSetPermanent( int permanent );
 #define Z_Malloc( size )    CG_Alloc( size )
 #define Z_Free( ptr )       CG_Free( ptr )
 #define OSP_MEMORY_CHECK( ptr ) \
-	if ( !(ptr) ) { CG_Error( "%s:%d: out of memory\n", __FILE__, __LINE__ ); }
+	if ( !(ptr) ) { Com_Terminate( TERM_CLIENT_DROP, "%s:%d: out of memory\n", __FILE__, __LINE__ ); }
 
 //
 // cg_main.c
 //
 const char *CG_ConfigString( int index );
 const char *CG_Argv( int arg );
-
-void QDECL CG_Printf( const char *msg, ... ) Q_PRINTF_FUNC(1, 2);
-void QDECL CG_Error( const char *msg, ... ) Q_NO_RETURN Q_PRINTF_FUNC(1, 2);
 
 void CG_StartMusic( void );
 
@@ -1598,13 +1599,13 @@ void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );
 
 void CG_FireWeapon( centity_t *cent );
-void CG_MissileHitWall( int weapon, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType, int sourceEntityNum );
-void CG_MissileHitPlayer( int weapon, vec3_t origin, vec3_t dir, int entityNum );
+void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType, int sourceEntityNum );
+void CG_MissileHitPlayer( int pType, vec3_t origin, vec3_t dir, int entityNum );
 void CG_ShotgunFire( entityState_t *es );
 void CG_ShotgunFireWide( entityState_t *es );
 void CG_Bullet( vec3_t origin, int sourceEntityNum, vec3_t normal, qboolean flesh, int fleshEntityNum );
 // eser - explosions
-void CG_ExplosionParticles(int weapon, vec3_t origin);
+void CG_ExplosionParticles(int pType, vec3_t origin);
 // eser - explosions
 
 void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end );
@@ -1657,8 +1658,8 @@ void CG_KamikazeEffect( vec3_t org );
 void CG_ObeliskExplode( vec3_t org, int entityNum );
 void CG_ObeliskPain( vec3_t org );
 #endif
-void CG_InvulnerabilityImpact( vec3_t org, vec3_t angles );
-void CG_InvulnerabilityJuiced( vec3_t org );
+void CG_DeflectorImpact( vec3_t org, vec3_t angles );
+void CG_DeflectorJuiced( vec3_t org );
 void CG_LightningBoltBeam( vec3_t start, vec3_t end );
 void CG_LightningArcBeam( vec3_t start, vec3_t end );
 void CG_ScorePlum( int client, vec3_t org, int score );
@@ -1686,6 +1687,11 @@ void CG_Lightning_Discharge(vec3_t origin, int msec);
 // eser - lightning discharge
 
 //
+// cg_q1_particles.c
+//
+void CG_Q1_MaybeEmitTrail( centity_t *cent );
+
+//
 // cg_snapshot.c
 //
 void CG_ProcessSnapshots( void );
@@ -1710,7 +1716,6 @@ void CG_ExecuteNewServerCommands( int latestSequence );
 void CG_ParseServerinfo( void );
 void CG_SetConfigValues( void );
 void CG_ShaderStateChanged(void);
-void CG_LoadVoiceChats( void );
 void CG_VoiceChatLocal( int mode, qboolean voiceOnly, int clientNum, int color, const char *cmd );
 void CG_PlayBufferedVoiceChats( void );
 //
@@ -1732,7 +1737,11 @@ void CG_CheckChangedPredictableEvents( playerState_t *ps );
 void		trap_Print( const char *fmt );
 
 // abort the game
-void		trap_Error(const char *fmt) Q_NO_RETURN;
+void		trap_Error(const char *fmt) NORETURN;
+
+// severity-preserving log and terminate
+void		trap_Log( log_severity_t severity, const char *text );
+void		NORETURN trap_Terminate( terminationReason_t reason, const char *text );
 
 // milliseconds should only be used for performance tuning, never
 // for anything game related.  Get time from the CG_DrawActiveFrame parameter
@@ -1858,6 +1867,7 @@ qboolean	trap_R_inPVS( const vec3_t p1, const vec3_t p2 );
 #if FEAT_IQM
 int		trap_R_GetIQMAnimations( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );
 #endif // FEAT_IQM
+void		trap_R_SetLightstylePattern( int style, const char *pattern );
 
 // The glconfig_t will not change during the life of a cgame.
 // If it needs to change, the entire cgame will be restarted, because

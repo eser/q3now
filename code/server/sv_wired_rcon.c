@@ -81,8 +81,9 @@ void SV_RconAuth( const netadr_t *from ) {
 	rconSession_t *session = SV_FindRconSession( from );
 
 	if ( !sv_wiredRconPassword ) {
-		sv_wiredRconPassword = Cvar_Get( "sv_wiredRconPassword", "", CVAR_TEMP );
-		Cvar_SetDescription( sv_wiredRconPassword, "Wired RCON password for challenge-response authentication." );
+		static const cvarDesc_t desc = CVAR_STRING( "sv_wiredRconPassword", "", CVAR_TEMP,
+			"Wired RCON password for challenge-response authentication." );
+		sv_wiredRconPassword = Cvar_Register( &desc );
 	}
 
 	if ( !sv_wiredRconPassword->string[0] ) {
@@ -116,8 +117,9 @@ void SV_RconVerify( const netadr_t *from, const char *hmacHex ) {
 	char expected[ COM_SHA256_HEX_LEN + 1 ];
 
 	if ( !sv_wiredRconPassword ) {
-		sv_wiredRconPassword = Cvar_Get( "sv_wiredRconPassword", "", CVAR_TEMP );
-		Cvar_SetDescription( sv_wiredRconPassword, "Wired RCON password for challenge-response authentication." );
+		static const cvarDesc_t desc = CVAR_STRING( "sv_wiredRconPassword", "", CVAR_TEMP,
+			"Wired RCON password for challenge-response authentication." );
+		sv_wiredRconPassword = Cvar_Register( &desc );
 	}
 
 	if ( !session || !SV_RconIsHexDigest( hmacHex ) ) {

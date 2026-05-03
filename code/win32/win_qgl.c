@@ -52,11 +52,11 @@ QGL_Swp_PROCS;
 */
 void QGL_Shutdown( qboolean unloadDLL )
 {
-	Com_Printf( "...shutting down QGL\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...shutting down QGL\n" );
 
 	if ( glw_state.OpenGLLib && unloadDLL )
 	{
-		Com_Printf( "...unloading OpenGL DLL\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...unloading OpenGL DLL\n" );
 		Sys_UnloadLibrary( glw_state.OpenGLLib );
 		glw_state.OpenGLLib = NULL;
 	}
@@ -110,7 +110,7 @@ qboolean QGL_Init( const char *dllname )
 #endif
 #endif
 
-	Com_Printf( "...initializing QGL\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...initializing QGL\n" );
 
 	if ( glw_state.OpenGLLib == NULL )
 	{
@@ -127,7 +127,7 @@ qboolean QGL_Init( const char *dllname )
 		glw_state.OpenGLLib = Sys_LoadLibrary( libName );
 		if ( glw_state.OpenGLLib == NULL )
 		{
-			Com_Printf( "...loading '%s' : " S_COLOR_YELLOW "failed\n", libName );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : " S_COLOR_YELLOW "failed\n", libName );
 			return qfalse;
 		}
 
@@ -140,12 +140,12 @@ qboolean QGL_Init( const char *dllname )
 		GetModuleFileName( glw_state.OpenGLLib, libName, sizeof( libName ) );
 		libName[ sizeof( libName ) - 1 ] = '\0';
 #endif
-		Com_Printf( "...loading '%s' : succeeded\n", libName );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : succeeded\n", libName );
 	}
 
 	Sys_LoadFunctionErrors(); // reset error count
 
-#define GLE( ret, name, ... ) q##name = GL_GetProcAddress( XSTRING( name ) ); if ( !q##name ) { Com_Printf( "Error resolving core Win32 functions\n" ); return qfalse; }
+#define GLE( ret, name, ... ) q##name = GL_GetProcAddress( XSTRING( name ) ); if ( !q##name ) { Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Error resolving core Win32 functions\n" ); return qfalse; }
 	QGL_Win32_PROCS;
 #undef GLE
 

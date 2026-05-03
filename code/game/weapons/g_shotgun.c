@@ -53,8 +53,8 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent, int mod ) {
 		if ( traceEnt->takedamage ) {
 			damage = DEFAULT_SHOTGUN_DAMAGE * s_quadFactor;
 
-			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
-				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
+			if ( traceEnt->client && traceEnt->client->deflectorTime > level.time ) {
+				if (G_DeflectorEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( tr_start, impactpoint, bouncedir, tr_end );
 					VectorCopy( impactpoint, tr_start );
 					// the player can hit him/herself with the bounced rail

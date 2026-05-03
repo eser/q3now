@@ -53,6 +53,28 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/q_feats.h"
 #if FEAT_RECAST_NAVMESH
 #include "g_bot_nav.h"
+
+/* ── Recast-mode replacements for AAS-dependent bot traps ─────────────────
+ * BotTouchingGoal calls AAS_PresenceTypeBoundingBox which fatals without
+ * aasworld loaded.  Replicate the AABB test with hardcoded Q3 PRESENCE_NORMAL
+ * player bounds — compile-time constants, no AAS data required.
+ * BotItemGoalInVisButNotVisible calls AAS_EntityInfo; under Recast, item
+ * liveness is tracked via g_entities[], so always return false (not-invisible).
+ * These #defines scope to ai_dmnet.c only. */
+static qboolean BotNavTouchingGoal( const vec3_t origin, const bot_goal_t *goal ) {
+	/* Q3 PRESENCE_NORMAL: mins {-15,-15,-24} maxs {15,15,32} */
+	static const float pMins[3] = { -15.f, -15.f, -24.f };
+	static const float pMaxs[3] = {  15.f,  15.f,  32.f };
+	int i;
+	for ( i = 0; i < 3; i++ ) {
+		float lo = goal->origin[i] + goal->mins[i] - pMaxs[i];
+		float hi = goal->origin[i] + goal->maxs[i] - pMins[i];
+		if ( origin[i] < lo || origin[i] > hi ) return qfalse;
+	}
+	return qtrue;
+}
+#define trap_BotTouchingGoal(o, g)                        BotNavTouchingGoal(o, g)
+#define trap_BotItemGoalInVisButNotVisible(e, eye, va, g) qfalse
 #endif
 //data file headers
 #include "chars.h"			//characteristics
@@ -260,7 +282,12 @@ int BotReachedGoal(bot_state_t *bs, bot_goal_t *goal) {
 			*/
 			return qtrue;
 		}
-		//if in the goal area and below or above the goal and not swimming
+#if !FEAT_RECAST_NAVMESH
+		/* Under AAS, areanum is a meaningful BSP region index — check if bot is
+		   in the same area as the goal (handles floating/below-goal cases).
+		   Under Recast, bs->areanum and goal->areanum are both 0 (AAS not loaded),
+		   so this check would always fire, causing false "reached" for any bot at
+		   the item's XY regardless of floor — skip it entirely under Recast. */
 		if (bs->areanum == goal->areanum) {
 			if (bs->origin[0] > goal->origin[0] + goal->mins[0] && bs->origin[0] < goal->origin[0] + goal->maxs[0]) {
 				if (bs->origin[1] > goal->origin[1] + goal->mins[1] && bs->origin[1] < goal->origin[1] + goal->maxs[1]) {
@@ -270,6 +297,7 @@ int BotReachedGoal(bot_state_t *bs, bot_goal_t *goal) {
 				}
 			}
 		}
+#endif
 	}
 	else if (goal->flags & GFL_AIR) {
 		//if touching the goal
@@ -453,7 +481,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 				//don't crouch if crouched less than 5 seconds ago
 				if (bs->attackcrouch_time < FloatTime() - 5) {
 					if ( bs->wiredBotsActive ) {
-						croucher = WiredBots_ProfileFieldOr( bs, WB_PROFILE_DODGE_ON_FIRE, 0.2f );
+						croucher = WiredBots_ProfileFieldOr( bs, WB_PROFILE_DODGING, 0.2f );
 					} else {
 						croucher = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CROUCHER, 0, 1);
 					}
@@ -485,6 +513,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 				//if just arrived look at the companion
 				if (bs->arrive_time > FloatTime() - 2) {
 					VectorSubtract(entinfo.origin, bs->origin, dir);
+					dir[2] = 0;
 					vectoangles(dir, bs->ideal_viewangles);
 					bs->ideal_viewangles[2] *= 0.5;
 				}
@@ -492,6 +521,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 				else if (random() < bs->thinktime * 0.8) {
 					BotRoamGoal(bs, target);
 					VectorSubtract(target, bs->origin, dir);
+					dir[2] = 0;
 					vectoangles(dir, bs->ideal_viewangles);
 					bs->ideal_viewangles[2] *= 0.5;
 				}
@@ -671,6 +701,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (random() < bs->thinktime * 0.8) {
 				BotRoamGoal(bs, target);
 				VectorSubtract(target, bs->origin, dir);
+				dir[2] = 0;
 				vectoangles(dir, bs->ideal_viewangles);
 				bs->ideal_viewangles[2] *= 0.5;
 			}
@@ -678,7 +709,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			//don't crouch if crouched less than 5 seconds ago
 			if (bs->attackcrouch_time < FloatTime() - 5) {
 				if ( bs->wiredBotsActive ) {
-					croucher = WiredBots_ProfileFieldOr( bs, WB_PROFILE_DODGE_ON_FIRE, 0.2f );
+					croucher = WiredBots_ProfileFieldOr( bs, WB_PROFILE_DODGING, 0.2f );
 				} else {
 					croucher = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CROUCHER, 0, 1);
 				}
@@ -1131,6 +1162,7 @@ int BotLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) {
 				}
 				//look at the team mate
 				VectorSubtract(entinfo.origin, bs->origin, dir);
+				dir[2] = 0;
 				vectoangles(dir, bs->ideal_viewangles);
 				bs->ideal_viewangles[2] *= 0.5;
 				//just wait for the team mate
@@ -1260,7 +1292,7 @@ void AIEnter_Respawn(bot_state_t *bs, char *s) {
 	if ( bs->botdeathtype == MOD_FALLING || bs->botdeathtype == MOD_TRIGGER_HURT ) {
 		char diag_name[MAX_NETNAME];
 		ClientName( bs->client, diag_name, sizeof(diag_name) );
-		Com_Printf( "BOT VOID DEATH: %s was %s, groundEnt=%d, vel=[%.0f,%.0f,%.0f], lastNode=%d\n",
+		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "BOT VOID DEATH: %s was %s, groundEnt=%d, vel=[%.0f,%.0f,%.0f], lastNode=%d\n",
 		            diag_name,
 		            bs->cur_ps.groundEntityNum == ENTITYNUM_NONE ? "AIRBORNE" : "GROUNDED",
 		            bs->cur_ps.groundEntityNum,
@@ -1458,13 +1490,16 @@ int AINode_Seek_ActivateEntity(bot_state_t *bs) {
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (bot_grapple.integer) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	// if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	// map specific code
 	BotMapScripts(bs);
 	// no enemy
+	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
+		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "[EnemyClear] cl=%d was=%d (activate-state reset)\n", bs->client, bs->enemy );
 	bs->enemy = -1;
+	bs->enemyvisible_time = 0;
 	// if the bot has no activate goal
 	if (!bs->activatestack) {
 		BotClearActivateGoalStack(bs);
@@ -1594,6 +1629,7 @@ int AINode_Seek_ActivateEntity(bot_state_t *bs) {
 		if (random() < bs->thinktime * 0.8) {
 			BotRoamGoal(bs, target);
 			VectorSubtract(target, bs->origin, dir);
+			dir[2] = 0;
 			vectoangles(dir, bs->ideal_viewangles);
 			bs->ideal_viewangles[2] *= 0.5;
 		}
@@ -1601,6 +1637,7 @@ int AINode_Seek_ActivateEntity(bot_state_t *bs) {
 	else if (!(bs->flags & BFL_IDEALVIEWSET)) {
 		if (BotNav_MovementViewTarget(bs->client, goal, target)) {
 			VectorSubtract(target, bs->origin, dir);
+			dir[2] = 0;
 			vectoangles(dir, bs->ideal_viewangles);
 		}
 		else {
@@ -1674,7 +1711,7 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (bot_grapple.integer) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -1684,7 +1721,10 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	//map specific code
 	BotMapScripts(bs);
 	//no enemy
+	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
+		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "[EnemyClear] cl=%d was=%d (nbg-state reset)\n", bs->client, bs->enemy );
 	bs->enemy = -1;
+	bs->enemyvisible_time = 0;
 	//if the bot has no goal
 	if (!trap_BotGetTopGoal(bs->gs, &goal)) bs->nbg_time = 0;
 	//if the bot touches the current goal
@@ -1733,6 +1773,7 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 			if (random() < bs->thinktime * 0.8) {
 				BotRoamGoal(bs, target);
 				VectorSubtract(target, bs->origin, dir);
+				dir[2] = 0;
 				vectoangles(dir, bs->ideal_viewangles);
 				bs->ideal_viewangles[2] *= 0.5;
 			}
@@ -1741,6 +1782,7 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 			if (!trap_BotGetSecondGoal(bs->gs, &goal)) trap_BotGetTopGoal(bs->gs, &goal);
 			if (BotNav_MovementViewTarget(bs->client, &goal, target)) {
 				VectorSubtract(target, bs->origin, dir);
+				dir[2] = 0;
 				vectoangles(dir, bs->ideal_viewangles);
 			}
 			//FIXME: look at cluster portals?
@@ -1754,23 +1796,23 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	if ( bs->directives.directiveLocked ) {
 		/* Directive locked: keep pursuing objective, fire defensively */
 		WiredBots_DefensiveCombat( bs );
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
-			G_Printf( "^5[SeekNBG] cl=%d directiveLocked — defensive combat only\n", bs->client );
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^5[SeekNBG] cl=%d directiveLocked — defensive combat only\n", bs->client );
 		}
 	} else if (BotFindEnemy(bs, -1)) {
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
-			G_Printf( "^2[SeekNBG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[SeekNBG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
 		}
 		if (BotWantsToRetreat(bs)) {
-			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
-				G_Printf( "^1[SeekNBG] cl=%d WantsToRetreat=TRUE -> Battle_NBG\n", bs->client );
+			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+				Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^1[SeekNBG] cl=%d WantsToRetreat=TRUE -> Battle_NBG\n", bs->client );
 			}
 			//keep the current long term goal and retreat
 			AIEnter_Battle_NBG(bs, "seek nbg: found enemy");
 		}
 		else {
-			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
-				G_Printf( "^2[SeekNBG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
+			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+				Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[SeekNBG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
 			}
 			trap_BotResetLastAvoidReach(bs->ms);
 			//empty the goal stack
@@ -1778,11 +1820,11 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 			//go fight
 			AIEnter_Battle_Fight(bs, "seek nbg: found enemy");
 		}
-	} else if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+	} else if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static float s_noEnemyNBG[MAX_CLIENTS];
 		if ( FloatTime() - s_noEnemyNBG[bs->client] > 2.0f ) {
 			s_noEnemyNBG[bs->client] = FloatTime();
-			G_Printf( "^3[SeekNBG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^3[SeekNBG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
 				bs->client, bs->inventory[INVENTORY_HEALTH], bs->lasthealth );
 		}
 	}
@@ -1844,7 +1886,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (bot_grapple.integer) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -1854,7 +1896,10 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	//map specific code
 	BotMapScripts(bs);
 	//no enemy
+	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
+		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "[EnemyClear] cl=%d was=%d (ltg-state reset)\n", bs->client, bs->enemy );
 	bs->enemy = -1;
+	bs->enemyvisible_time = 0;
 	//
 	if (bs->killedenemy_time > FloatTime() - 2) {
 		if (random() < bs->thinktime * 1) {
@@ -1865,24 +1910,24 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	if ( bs->directives.directiveLocked ) {
 		/* Directive locked: keep pursuing objective, fire defensively */
 		WiredBots_DefensiveCombat( bs );
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
-			G_Printf( "^5[SeekLTG] cl=%d directiveLocked — defensive combat only\n", bs->client );
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^5[SeekLTG] cl=%d directiveLocked — defensive combat only\n", bs->client );
 		}
 	} else if (BotFindEnemy(bs, -1)) {
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
-			G_Printf( "^2[SeekLTG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[SeekLTG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
 		}
 		if (BotWantsToRetreat(bs)) {
-			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
-				G_Printf( "^1[SeekLTG] cl=%d WantsToRetreat=TRUE -> Battle_Retreat\n", bs->client );
+			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+				Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^1[SeekLTG] cl=%d WantsToRetreat=TRUE -> Battle_Retreat\n", bs->client );
 			}
 			//keep the current long term goal and retreat
 			AIEnter_Battle_Retreat(bs, "seek ltg: found enemy");
 			return qfalse;
 		}
 		else {
-			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
-				G_Printf( "^2[SeekLTG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
+			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+				Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[SeekLTG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
 			}
 			trap_BotResetLastAvoidReach(bs->ms);
 			//empty the goal stack
@@ -1891,11 +1936,11 @@ int AINode_Seek_LTG(bot_state_t *bs)
 			AIEnter_Battle_Fight(bs, "seek ltg: found enemy");
 			return qfalse;
 		}
-	} else if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+	} else if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static float s_noEnemyLTG[MAX_CLIENTS];
 		if ( FloatTime() - s_noEnemyLTG[bs->client] > 2.0f ) {
 			s_noEnemyLTG[bs->client] = FloatTime();
-			G_Printf( "^3[SeekLTG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^3[SeekLTG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
 				bs->client, bs->inventory[INVENTORY_HEALTH], bs->lasthealth );
 		}
 	}
@@ -1994,6 +2039,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 			if (random() < bs->thinktime * 0.8) {
 				BotRoamGoal(bs, target);
 				VectorSubtract(target, bs->origin, dir);
+				dir[2] = 0;
 				vectoangles(dir, bs->ideal_viewangles);
 				bs->ideal_viewangles[2] *= 0.5;
 			}
@@ -2001,6 +2047,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 		else if (!(bs->flags & BFL_IDEALVIEWSET)) {
 			if (BotNav_MovementViewTarget(bs->client, &goal, target)) {
 				VectorSubtract(target, bs->origin, dir);
+				dir[2] = 0;
 				vectoangles(dir, bs->ideal_viewangles);
 			}
 			//FIXME: look at cluster portals?
@@ -2010,6 +2057,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 			else if (random() < bs->thinktime * 0.8) {
 				BotRoamGoal(bs, target);
 				VectorSubtract(target, bs->origin, dir);
+				dir[2] = 0;
 				vectoangles(dir, bs->ideal_viewangles);
 				bs->ideal_viewangles[2] *= 0.5;
 			}
@@ -2129,10 +2177,17 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 	}
 	//update the reachability area and origin if possible
 	areanum = BotPointAreaNum(target);
+#if FEAT_RECAST_NAVMESH
+	/* BotPointAreaNum returns 0 under Recast; always record last-seen position.
+	 * Sentinel 1 satisfies Battle_Chase's non-zero check. */
+	VectorCopy(target, bs->lastenemyorigin);
+	bs->lastenemyareanum = 1;
+#else
 	if (areanum && trap_AAS_AreaReachability(areanum)) {
 		VectorCopy(target, bs->lastenemyorigin);
 		bs->lastenemyareanum = areanum;
 	}
+#endif
 	//update the attack inventory values
 	BotUpdateBattleInventory(bs, bs->enemy);
 	//if the bot's health decreased
@@ -2152,27 +2207,43 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 		}
 	}
 	//if the enemy is not visible
-	if (!BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, 360, bs->enemy)) {
+	{
+		float visNow = BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, 360, bs->enemy);
+		if (visNow > 0) {
+			bs->enemyvisible_time = FloatTime();
+		} else {
 #if FEAT_OVERLOAD
-		if (bs->enemy == redobelisk.entitynum || bs->enemy == blueobelisk.entitynum) {
-			AIEnter_Battle_Chase(bs, "battle fight: obelisk out of sight");
-			return qfalse;
-		}
+			if (bs->enemy == redobelisk.entitynum || bs->enemy == blueobelisk.entitynum) {
+				AIEnter_Battle_Chase(bs, "battle fight: obelisk out of sight");
+				return qfalse;
+			}
 #endif
-		if (BotWantsToChase(bs)) {
-			AIEnter_Battle_Chase(bs, "battle fight: enemy out of sight");
-			return qfalse;
-		}
-		else {
-			AIEnter_Seek_LTG(bs, "battle fight: enemy out of sight");
-			return qfalse;
+			// Hysteresis: stay in Battle_Fight as long as enemy was seen within the grace window.
+			// This prevents single-tick occlusion (doorways, pillars) from dropping combat.
+			if (bs->enemyvisible_time < FloatTime() - BATTLE_FIGHT_VIS_GRACE_MS * 0.001f) {
+				int wantsChase = BotWantsToChase(bs);
+				if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
+					Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "[BattleExit] cl=%d enemy=%d unseen=%.2fs graceMs=%d -> chase=%d\n",
+						bs->client, bs->enemy,
+						FloatTime() - bs->enemyvisible_time,
+						BATTLE_FIGHT_VIS_GRACE_MS,
+						wantsChase );
+				if (wantsChase) {
+					AIEnter_Battle_Chase(bs, "battle fight: enemy out of sight");
+					return qfalse;
+				}
+				else {
+					AIEnter_Seek_LTG(bs, "battle fight: enemy out of sight");
+					return qfalse;
+				}
+			}
 		}
 	}
 	//use holdable items
 	BotBattleUseItems(bs);
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (bot_grapple.integer) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -2266,7 +2337,7 @@ int AINode_Battle_Chase(bot_state_t *bs)
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (bot_grapple.integer) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -2409,7 +2480,7 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (bot_grapple.integer) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//map specific code
@@ -2440,10 +2511,15 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 		}
 		//update the reachability area and origin if possible
 		areanum = BotPointAreaNum(target);
+#if FEAT_RECAST_NAVMESH
+		VectorCopy(target, bs->lastenemyorigin);
+		bs->lastenemyareanum = 1;
+#else
 		if (areanum && trap_AAS_AreaReachability(areanum)) {
 			VectorCopy(target, bs->lastenemyorigin);
 			bs->lastenemyareanum = areanum;
 		}
+#endif
 	}
 	//if the enemy is NOT visible for 4 seconds
 	if (bs->enemyvisible_time < FloatTime() - 4) {
@@ -2524,7 +2600,7 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	if (!(bs->flags & BFL_IDEALVIEWSET)) {
 #endif
 		if ( bs->wiredBotsActive ) {
-			attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_AGGRESSION, 0.5f );
+			attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ATTACK_SKILL, 0.5f );
 		} else {
 			attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
 		}
@@ -2601,7 +2677,7 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (bot_grapple.integer) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -2626,10 +2702,15 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 		}
 		//update the reachability area and origin if possible
 		areanum = BotPointAreaNum(target);
+#if FEAT_RECAST_NAVMESH
+		VectorCopy(target, bs->lastenemyorigin);
+		bs->lastenemyareanum = 1;
+#else
 		if (areanum && trap_AAS_AreaReachability(areanum)) {
 			VectorCopy(target, bs->lastenemyorigin);
 			bs->lastenemyareanum = areanum;
 		}
+#endif
 	}
 	//if the bot has no goal or touches the current goal
 	if (!trap_BotGetTopGoal(bs->gs, &goal)) {
@@ -2681,7 +2762,7 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	if (!(bs->flags & BFL_IDEALVIEWSET)) {
 #endif
 		if ( bs->wiredBotsActive ) {
-			attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_AGGRESSION, 0.5f );
+			attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ATTACK_SKILL, 0.5f );
 		} else {
 			attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
 		}

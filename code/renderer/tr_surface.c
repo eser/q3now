@@ -54,11 +54,11 @@ void RB_CheckOverflow( int verts, int indexes ) {
 	RB_EndSurface();
 
 	if ( verts >= SHADER_MAX_VERTEXES ) {
-		ri.Error( ERR_DROP, "RB_CheckOverflow: verts > MAX (%d > %d)", verts, SHADER_MAX_VERTEXES );
+		ri.Terminate( TERM_CLIENT_DROP, "RB_CheckOverflow: verts > MAX (%d > %d)", verts, SHADER_MAX_VERTEXES );
 	}
 
 	if ( indexes >= SHADER_MAX_INDEXES ) {
-		ri.Error( ERR_DROP, "RB_CheckOverflow: indices > MAX (%d > %d)", indexes, SHADER_MAX_INDEXES );
+		ri.Terminate( TERM_CLIENT_DROP, "RB_CheckOverflow: indices > MAX (%d > %d)", indexes, SHADER_MAX_INDEXES );
 	}
 
 	RB_BeginSurface( tess.shader, tess.fogNum );
@@ -1220,7 +1220,7 @@ static void RB_SurfaceGrid( srfGridMesh_t *cv ) {
 						tess.numVertexes = 0;
 					} else
 #endif
-					ri.Error( ERR_DROP, "Unexpected grid flush during map loading!\n" );
+					ri.Terminate( TERM_CLIENT_DROP, "Unexpected grid flush during map loading!\n" );
 				} else {
 					RB_EndSurface();
 					RB_BeginSurface( tess.shader, tess.fogNum );
@@ -1416,7 +1416,7 @@ static void RB_SurfaceEntity( const surfaceType_t *surfType ) {
 
 
 static void RB_SurfaceBad( const surfaceType_t *surfType ) {
-	ri.Printf( PRINT_ALL, "Bad surface tesselated.\n" );
+	ri.Log( SEV_INFO, "Bad surface tesselated.\n" );
 }
 
 

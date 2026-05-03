@@ -57,7 +57,6 @@ fileHandle_t com_journalDataFile = FS_INVALID_HANDLE; // config files are writte
 
 cvar_t	*com_viewlog;
 cvar_t	*com_speeds;
-cvar_t	*com_developer;
 cvar_t	*com_dedicated;
 cvar_t	*com_timescale;
 static cvar_t *com_fixedtime;
@@ -120,12 +119,10 @@ char com_errorMessage[ MAXPRINTMSG ];
 
 void Com_Shutdown( void );
 void CIN_CloseAllVideos( void );
+static void Com_ViewlogChanged( cvar_t *self );
+static void Com_DedicatedChanged( cvar_t *self );
 
 //============================================================================
-
-
-// Com_SetLastError / Com_GetLastError / Com_HasLastError / Com_ClearLastError
-// Com_Printf / Com_DPrintf / Com_Error — moved to wired/con/log.c
 
 
 /*
@@ -384,7 +381,7 @@ void Info_Print( const char *s ) {
 		if ( value[0] == '\0' )
 			strcpy( value, "MISSING VALUE" );
 
-		Com_Printf( "%-20s %s\n", key, value );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%-20s %s\n", key, value );
 
 	} while ( *s != '\0' );
 }
@@ -392,78 +389,10 @@ void Info_Print( const char *s ) {
 
 
 
-// Com_RealTime — moved to wired/con/log.c
-
-
-/*
-================
-Sys_Microseconds
-================
-*/
-int64_t Sys_Microseconds( void )
-{
-#ifdef _WIN32
-	static qboolean inited = qfalse;
-	static LARGE_INTEGER base;
-	static LARGE_INTEGER freq;
-	LARGE_INTEGER curr;
-
-	if ( !inited )
-	{
-		QueryPerformanceFrequency( &freq );
-		QueryPerformanceCounter( &base );
-		if ( !freq.QuadPart )
-		{
-			return (int64_t)Sys_Milliseconds() * 1000LL; // fallback
-		}
-		inited = qtrue;
-		return 0;
-	}
-
-	QueryPerformanceCounter( &curr );
-
-	return ((curr.QuadPart - base.QuadPart) * 1000000LL) / freq.QuadPart;
-#else
-	struct timeval curr;
-	gettimeofday( &curr, NULL );
-
-	return (int64_t)curr.tv_sec * 1000000LL + (int64_t)curr.tv_usec;
-#endif
-}
-
-
-/*
-================
-Sys_NanoTime
-================
-*/
-// Contract-infallible: POSIX guarantees CLOCK_MONOTONIC; Win32 QPC on XP+.
-// Worst case on failure is a single malformed timestamp in one log line.
-int64_t Sys_NanoTime( void )
-{
-#ifdef _WIN32
-	static qboolean     inited = qfalse;
-	static LARGE_INTEGER base;
-	static LARGE_INTEGER freq;
-	LARGE_INTEGER        curr;
-
-	if ( !inited )
-	{
-		QueryPerformanceFrequency( &freq );
-		QueryPerformanceCounter( &base );
-		inited = qtrue;
-		return 0;
-	}
-
-	QueryPerformanceCounter( &curr );
-	// multiply before divide to keep precision; freq is ~10MHz on modern HW
-	return ((curr.QuadPart - base.QuadPart) * 1000000000LL) / freq.QuadPart;
-#else
-	struct timespec ts;
-	clock_gettime( CLOCK_MONOTONIC, &ts );
-	return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
-#endif
-}
+/* Sys_Microseconds, Sys_NanoTime, Sys_Milliseconds →
+   wired/core/time/time.c */
+/* Com_RealTime, Com_RealTimeMs, Com_FormatTimestamp →
+   wired/core/time/time.c */
 
 
 /*
@@ -565,7 +494,7 @@ static void InsertFree( memzone_t *zone, memblock_t *block )
 
 #ifdef ZONE_DEBUG
 	if ( block->size < sizeof( *fb ) + sizeof( *block ) ) {
-		Com_Error( ERR_FATAL, "InsertFree: bad block size: %i\n", block->size );
+		Com_Terminate( TERM_UNRECOVERABLE, "InsertFree: bad block size: %i\n", block->size );
 	}
 #endif
 
@@ -585,7 +514,7 @@ static void RemoveFree( memblock_t *block )
 
 #ifdef ZONE_DEBUG
 	if ( fb->next == NULL || fb->prev == NULL || fb->next == fb || fb->prev == fb ) {
-		Com_Error( ERR_FATAL, "RemoveFree: bad pointers fb->next: %p, fb->prev: %p\n", fb->next, fb->prev );
+		Com_Terminate( TERM_UNRECOVERABLE, "RemoveFree: bad pointers fb->next: %p, fb->prev: %p\n", fb->next, fb->prev );
 	}
 #endif
 
@@ -640,7 +569,7 @@ static memblock_t *NewBlock( memzone_t *zone, uint32_t size )
 	//sep = (memblock_t *)calloc( alloc_size, 1 );
 	sep = (memblock_t *)malloc( alloc_size );
 	if ( sep == NULL ) {
-		Com_Error( ERR_FATAL, "Z_Malloc: failed on allocation of %u bytes from the %s zone",
+		Com_Terminate( TERM_UNRECOVERABLE, "Z_Malloc: failed on allocation of %u bytes from the %s zone",
 			size, zone->name );
 		return NULL;
 	}
@@ -811,7 +740,7 @@ void Z_Free( void *ptr )
 {
 	if ( ptr == NULL ) {
 #ifdef _DEBUG
-		Com_Error( ERR_DROP, "Z_Free: NULL pointer" );
+		Com_Terminate( TERM_CLIENT_DROP, "Z_Free: NULL pointer" );
 #else
 		return;
 #endif
@@ -821,12 +750,12 @@ void Z_Free( void *ptr )
 
 #ifdef USE_ZONE_ID
 	if ( block->id != ZONE_ID ) {
-		Com_Error( ERR_FATAL, "Z_Free: freed a pointer without ZONEID" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Z_Free: freed a pointer without ZONEID" );
 	}
 #endif
 
 	if ( block->tag == TAG_FREE ) {
-		Com_Error( ERR_FATAL, "Z_Free: freed a freed pointer" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Z_Free: freed a freed pointer" );
 	}
 
 #ifdef USE_STATIC_TAGS
@@ -838,7 +767,7 @@ void Z_Free( void *ptr )
 	// check the memory trash tester
 #ifdef USE_TRASH_TEST
 	if ( *(int *)((byte *)block + block->size - 4) != TRASH_ID ) {
-		Com_Error( ERR_FATAL, "Z_Free: memory block wrote past end" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Z_Free: memory block wrote past end" );
 	}
 #endif
 
@@ -903,7 +832,7 @@ Z_FreeTags
 int Z_FreeTags( memtag_t tag )
 {
 	if ( tag == TAG_STATIC ) {
-		Com_Error( ERR_FATAL, "Z_FreeTags( TAG_STATIC )" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Z_FreeTags( TAG_STATIC )" );
 		return 0;
 	}
 	memzone_t *zone = (tag == TAG_SMALL) ? smallzone : mainzone;
@@ -950,11 +879,11 @@ void *Z_TagMalloc( size_t size, memtag_t tag ) {
 	memblock_t *base;
 
 	if ( tag == TAG_FREE ) {
-		Com_Error( ERR_FATAL, "Z_TagMalloc: tried to use with TAG_FREE" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Z_TagMalloc: tried to use with TAG_FREE" );
 	}
 
 	if ( size > INT_MAX ) {
-		Com_Error( ERR_FATAL, "Z_TagMalloc: %"PRIz"u > INT_MAX", size );
+		Com_Terminate( TERM_UNRECOVERABLE, "Z_TagMalloc: %"PRIz"u > INT_MAX", size );
 	}
 
 	memzone_t *zone = ( tag == TAG_SMALL || tag == TAG_SOUND ) ? smallzone : mainzone;
@@ -993,10 +922,10 @@ void *Z_TagMalloc( size_t size, memtag_t tag ) {
 			// scanned all the way around the list
 #ifdef ZONE_DEBUG
 			//Z_LogHeap();
-			Com_Error( ERR_FATAL, "Z_Malloc: failed on allocation of %"PRIz"u bytes from the %s zone: %s, line: %d (%s)",
+			Com_Terminate( TERM_UNRECOVERABLE, "Z_Malloc: failed on allocation of %"PRIz"u bytes from the %s zone: %s, line: %d (%s)",
 								size, zone->name, file, line, label );
 #else
-			Com_Error( ERR_FATAL, "Z_Malloc: failed on allocation of %"PRIz"u bytes from the %s zone",
+			Com_Terminate( TERM_UNRECOVERABLE, "Z_Malloc: failed on allocation of %"PRIz"u bytes from the %s zone",
 								size, zone->name );
 #endif
 			return NULL;
@@ -1121,13 +1050,13 @@ void Z_CheckHeap( void )
 				block = next; // new zone segment
 			} else
 #endif
-			Com_Error( ERR_FATAL, "Z_CheckHeap: block size does not touch the next block" );
+			Com_Terminate( TERM_UNRECOVERABLE, "Z_CheckHeap: block size does not touch the next block" );
 		}
 		if ( block->next->prev != block ) {
-			Com_Error( ERR_FATAL, "Z_CheckHeap: next block doesn't have proper back link" );
+			Com_Terminate( TERM_UNRECOVERABLE, "Z_CheckHeap: next block doesn't have proper back link" );
 		}
 		if ( block->tag == TAG_FREE && block->next->tag == TAG_FREE ) {
-			Com_Error( ERR_FATAL, "Z_CheckHeap: two consecutive free blocks" );
+			Com_Terminate( TERM_UNRECOVERABLE, "Z_CheckHeap: two consecutive free blocks" );
 		}
 		block = block->next;
 	}
@@ -1149,7 +1078,7 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 	size_t allocSize = 0;
 	char buf[4096];
 	Com_sprintf( buf, sizeof(buf), "\r\n================\r\n%s log\r\n================\r\n", name );
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 	for ( memblock_t *block = zone->blocklist.next ; ; ) {
 		if ( block->tag != TAG_FREE ) {
 #ifdef ZONE_DEBUG
@@ -1165,7 +1094,7 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 			}
 			dump[j] = '\0';
 			Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s) [%s]\r\n", block->d.allocSize, block->d.file, block->d.line, block->d.label, dump);
-			Com_Log( SEV_DEBUG, "%s", buf );
+			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 			allocSize += block->d.allocSize;
 #endif
 			size += block->size;
@@ -1183,9 +1112,9 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 	allocSize = numBlocks * sizeof(memblock_t); // + 32 bit alignment
 #endif
 	Com_sprintf( buf, sizeof( buf ), "%"PRIz"u %s memory in %"PRIz"u blocks\r\n", size, name, numBlocks );
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 	Com_sprintf( buf, sizeof( buf ), "%"PRIz"u %s memory overhead\r\n", size - allocSize, name );
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 }
 
 
@@ -1399,14 +1328,14 @@ static void MemStats_CheckBudget( memTag_t tag ) {
 
 	if ( newState == MEMBUDGET_EXCEEDED ) {
 		if ( mem_budget_enforce->integer >= 2 ) {
-			Com_Error( ERR_DROP, "mem budget exceeded: %s %.1f/%.0f MB",
+			Com_Terminate( TERM_CLIENT_DROP, "mem budget exceeded: %s %.1f/%.0f MB",
 				MemTag_Names[tag],
 				used / (1024.0f * 1024.0f), budgetMB );
 		}
-		Com_Printf( "^1WARNING: mem budget exceeded: %s %.1f/%.0f MB\n",
+		COM_WARN( LOG_CAT_SYSTEM, "mem budget exceeded: %s %.1f/%.0f MB\n",
 			MemTag_Names[tag], used / (1024.0f * 1024.0f), budgetMB );
 	} else {
-		Com_Printf( "^3WARNING: mem budget 80%%: %s %.1f/%.0f MB\n",
+		COM_WARN( LOG_CAT_SYSTEM, "mem budget 80%%: %s %.1f/%.0f MB\n",
 			MemTag_Names[tag], used / (1024.0f * 1024.0f), budgetMB );
 	}
 }
@@ -1475,13 +1404,13 @@ static void Zone_Stats( const memzone_t *z, qboolean printDetails, zone_stats_t 
 	st.freeSmallest = SIZE_MAX;
 
 	//if ( printDetails ) {
-	//	Com_Printf( "---------- %s zone segment #%i ----------\n", name, zone->segnum );
+	//	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "---------- %s zone segment #%i ----------\n", name, zone->segnum );
 	//}
 
 	for ( block = zone->blocklist.next ; ; ) {
 		if ( printDetails ) {
 			int tag = block->tag;
-			Com_Printf( "block:%p  size:%8u  tag: %s\n", (void *)block, block->size,
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "block:%p  size:%8u  tag: %s\n", (void *)block, block->size,
 				(unsigned)tag < TAG_COUNT ? tagName[ tag ] : va( "%i", tag ) );
 		}
 		if ( block->tag != TAG_FREE ) {
@@ -1513,19 +1442,19 @@ static void Zone_Stats( const memzone_t *z, qboolean printDetails, zone_stats_t 
 #endif
 				st.zoneSegments++;
 				if ( printDetails ) {
-					Com_Printf( "---------- %s zone segment #%"PRIz"u ----------\n", zone->name, st.zoneSegments );
+					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "---------- %s zone segment #%"PRIz"u ----------\n", zone->name, st.zoneSegments );
 				}
 				block = next->next;
 				continue;
 			} else
 #endif
-				Com_Printf( "ERROR: block size does not touch the next block\n" );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ERROR: block size does not touch the next block\n" );
 		}
 		if ( block->next->prev != block) {
-			Com_Printf( "ERROR: next block doesn't have proper back link\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ERROR: next block doesn't have proper back link\n" );
 		}
 		if ( block->tag == TAG_FREE && block->next->tag == TAG_FREE ) {
-			Com_Printf( "ERROR: two consecutive free blocks\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ERROR: two consecutive free blocks\n" );
 		}
 		block = block->next;
 	}
@@ -1577,24 +1506,24 @@ static void Com_Meminfo_f( void ) {
 	zone_stats_t st;
 	int		unused;
 
-	Com_Printf( "──────────────────────────────────────────\n" );
-	Com_Printf( "%8i bytes total hunk\n", s_hunkTotal );
-	Com_Printf( "\n" );
-	Com_Printf( "%8i low mark\n", hunk_low.mark );
-	Com_Printf( "%8i low permanent\n", hunk_low.permanent );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "──────────────────────────────────────────\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i bytes total hunk\n", s_hunkTotal );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i low mark\n", hunk_low.mark );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i low permanent\n", hunk_low.permanent );
 	if ( hunk_low.temp != hunk_low.permanent ) {
-		Com_Printf( "%8i low temp\n", hunk_low.temp );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i low temp\n", hunk_low.temp );
 	}
-	Com_Printf( "%8i low tempHighwater\n", hunk_low.tempHighwater );
-	Com_Printf( "\n" );
-	Com_Printf( "%8i high mark\n", hunk_high.mark );
-	Com_Printf( "%8i high permanent\n", hunk_high.permanent );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i low tempHighwater\n", hunk_low.tempHighwater );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i high mark\n", hunk_high.mark );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i high permanent\n", hunk_high.permanent );
 	if ( hunk_high.temp != hunk_high.permanent ) {
-		Com_Printf( "%8i high temp\n", hunk_high.temp );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i high temp\n", hunk_high.temp );
 	}
-	Com_Printf( "%8i high tempHighwater\n", hunk_high.tempHighwater );
-	Com_Printf( "\n" );
-	Com_Printf( "%8i total hunk in use\n", hunk_low.permanent + hunk_high.permanent );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i high tempHighwater\n", hunk_high.tempHighwater );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i total hunk in use\n", hunk_low.permanent + hunk_high.permanent );
 	unused = 0;
 	if ( hunk_low.tempHighwater > hunk_low.permanent ) {
 		unused += hunk_low.tempHighwater - hunk_low.permanent;
@@ -1602,40 +1531,40 @@ static void Com_Meminfo_f( void ) {
 	if ( hunk_high.tempHighwater > hunk_high.permanent ) {
 		unused += hunk_high.tempHighwater - hunk_high.permanent;
 	}
-	Com_Printf( "%8i unused highwater\n", unused );
-	Com_Printf( "\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i unused highwater\n", unused );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
 
 	Zone_Stats( mainzone, !Q_stricmp( Cmd_Argv(1), "main" ) || !Q_stricmp( Cmd_Argv(1), "all" ), &st );
-	Com_Printf( "%8"PRIz"u bytes total main zone\n\n", mainzone->size );
-	Com_Printf( "%8"PRIz"u bytes in %"PRIz"u main zone blocks%s\n", st.zoneBytes, st.zoneBlocks,
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8"PRIz"u bytes total main zone\n\n", mainzone->size );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8"PRIz"u bytes in %"PRIz"u main zone blocks%s\n", st.zoneBytes, st.zoneBlocks,
 		st.zoneSegments > 1 ? va( " and %"PRIz"u segments", st.zoneSegments ) : "" );
-	Com_Printf( "        %8"PRIz"u bytes in botlib\n", st.botlibBytes );
-	Com_Printf( "        %8"PRIz"u bytes in renderer\n", st.rendererBytes );
-	Com_Printf( "        %8"PRIz"u bytes in other\n", st.zoneBytes - ( st.botlibBytes + st.rendererBytes ) );
-	Com_Printf( "        %8"PRIz"u bytes in %"PRIz"u free blocks\n", st.freeBytes, st.freeBlocks );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in botlib\n", st.botlibBytes );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in renderer\n", st.rendererBytes );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in other\n", st.zoneBytes - ( st.botlibBytes + st.rendererBytes ) );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in %"PRIz"u free blocks\n", st.freeBytes, st.freeBlocks );
 	if ( st.freeBlocks > 1 ) {
-		Com_Printf( "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n\n", st.freeLargest, st.freeSmallest );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n\n", st.freeLargest, st.freeSmallest );
 	}
 
 	Zone_Stats( smallzone, !Q_stricmp( Cmd_Argv(1), "small" ) || !Q_stricmp( Cmd_Argv(1), "all" ), &st );
-	Com_Printf( "%8"PRIz"u bytes total small zone\n\n", smallzone->size );
-	Com_Printf( "%8"PRIz"u bytes in %"PRIz"u small zone blocks%s\n", st.zoneBytes, st.zoneBlocks,
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8"PRIz"u bytes total small zone\n\n", smallzone->size );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8"PRIz"u bytes in %"PRIz"u small zone blocks%s\n", st.zoneBytes, st.zoneBlocks,
 		st.zoneSegments > 1 ? va( " and %"PRIz"u segments", st.zoneSegments ) : "" );
-	Com_Printf( "        %8"PRIz"u bytes in %"PRIz"u free blocks\n", st.freeBytes, st.freeBlocks );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in %"PRIz"u free blocks\n", st.freeBytes, st.freeBlocks );
 	if ( st.freeBlocks > 1 ) {
-		Com_Printf( "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n", st.freeLargest, st.freeSmallest );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n", st.freeLargest, st.freeSmallest );
 	}
 
 	/* Persistent arena allocators */
-	Com_Printf( "\n--- Persistent Arenas (survive map changes) ---\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n--- Persistent Arenas (survive map changes) ---\n" );
 	Arena_PrintStats();
 
 #if FEAT_MEMSTATS
 	{
-		Com_Printf( "\nTAG BREAKDOWN (current / peak):\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\nTAG BREAKDOWN (current / peak):\n" );
 		for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
 			if ( memStats[i].currentBytes == 0 && memStats[i].peakBytes == 0 ) continue;
-			Com_Printf( "  %-12s %7.1f MB / %7.1f MB   %5i allocs\n",
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  %-12s %7.1f MB / %7.1f MB   %5i allocs\n",
 				MemTag_Names[i],
 				memStats[i].currentBytes / (1024.0f * 1024.0f),
 				memStats[i].peakBytes    / (1024.0f * 1024.0f),
@@ -1643,35 +1572,35 @@ static void Com_Meminfo_f( void ) {
 		}
 	}
 #endif
-	Com_Printf( "──────────────────────────────────────────\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "──────────────────────────────────────────\n" );
 }
 
 
 #if FEAT_MEMSTATS
 static void Com_MemInfoReset_f( void ) {
 	MemStats_Reset();
-	Com_Printf( "Peak memory counters reset.\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Peak memory counters reset.\n" );
 }
 
 static void Com_MemInfoJson_f( void ) {
 	hunkStats_t  hs = Hunk_GetStats();
 	zoneStats_t  zs = Zone_GetStats();
 
-	Com_Printf( "{\"hunk\":{\"total\":%i,\"low\":%i,\"high\":%i,\"temp\":%i,\"free\":%i,\"peak\":%i}",
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "{\"hunk\":{\"total\":%i,\"low\":%i,\"high\":%i,\"temp\":%i,\"free\":%i,\"peak\":%i}",
 		hs.totalBytes, hs.permanentLowBytes, hs.permanentHighBytes,
 		hs.tempBytes, hs.freeBytes, hs.peakUsedBytes );
-	Com_Printf( ",\"zone\":{\"total\":%i,\"used\":%i,\"free\":%i,\"freeBlocks\":%i,\"largestFree\":%i,\"allocs\":%i}",
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, ",\"zone\":{\"total\":%i,\"used\":%i,\"free\":%i,\"freeBlocks\":%i,\"largestFree\":%i,\"allocs\":%i}",
 		zs.totalBytes, zs.usedBytes, zs.freeBytes,
 		zs.freeBlockCount, zs.largestFreeBlock, zs.allocCount );
-	Com_Printf( ",\"tags\":{" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, ",\"tags\":{" );
 	for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
-		Com_Printf( "%s\"%s\":{\"current\":%lli,\"peak\":%lli,\"count\":%i,\"total\":%i}",
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\"%s\":{\"current\":%lli,\"peak\":%lli,\"count\":%i,\"total\":%i}",
 			i > 0 ? "," : "",
 			MemTag_Names[i],
 			(long long)memStats[i].currentBytes, (long long)memStats[i].peakBytes,
 			memStats[i].currentCount, memStats[i].totalCount );
 	}
-	Com_Printf( "}}\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "}}\n" );
 }
 #endif // FEAT_MEMSTATS
 
@@ -1722,7 +1651,7 @@ unsigned int Com_TouchMemory( void ) {
 
 	end = Sys_Milliseconds();
 
-	Com_DPrintf( "Com_TouchMemory: %i msec\n", end - start );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Com_TouchMemory: %i msec\n", end - start );
 
 	return sum; // just to silent compiler warning
 }
@@ -1758,9 +1687,13 @@ static void Com_InitZoneMemory( void ) {
 	// configure the memory manager.
 
 	// allocate the random block zone
-	cv = Cvar_Get( "com_zoneMegs", XSTRING( DEF_COMZONEMEGS ), CVAR_LATCH | CVAR_ARCHIVE );
-	Cvar_CheckRange( cv, "1", va("%d", INT_MAX / (1024*1024)), CV_INTEGER );
-	Cvar_SetDescription( cv, "Initial amount of memory (RAM) allocated for the main block zone (in MB)." );
+	{
+		static const cvarDesc_t d = CVAR_INT( "com_zoneMegs", XSTRING( DEF_COMZONEMEGS ),
+			CVAR_LATCH | CVAR_ARCHIVE,
+			"Initial amount of memory (RAM) allocated for the main block zone (in MB).",
+			1, INT_MAX / (1024*1024) );
+		cv = Cvar_Register( &d );
+	}
 
 #ifndef USE_MULTI_SEGMENT
 	if ( cv->integer < DEF_COMZONEMEGS )
@@ -1771,7 +1704,7 @@ static void Com_InitZoneMemory( void ) {
 
 	mainzone = malloc( mainZoneSize );
 	if ( !mainzone ) {
-		Com_Error( ERR_FATAL, "Zone data failed to allocate %i megs", mainZoneSize / (1024*1024) );
+		Com_Terminate( TERM_UNRECOVERABLE, "Zone data failed to allocate %i megs", mainZoneSize / (1024*1024) );
 	}
 	Z_Init( mainzone, mainZoneSize, "main");
 }
@@ -1786,19 +1719,19 @@ void Hunk_Log( void ) {
 	int size = 0, numBlocks = 0;
 	char buf[4096];
 	Com_sprintf(buf, sizeof(buf), "\r\n================\r\nHunk log\r\n================\r\n");
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 	for (hunkblock_t *block = hunkblocks ; block; block = block->next) {
 #ifdef HUNK_DEBUG
 		Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s)\r\n", block->size, block->file, block->line, block->label);
-		Com_Log( SEV_DEBUG, "%s", buf );
+		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 #endif
 		size += block->size;
 		numBlocks++;
 	}
 	Com_sprintf(buf, sizeof(buf), "%d Hunk memory\r\n", size);
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 	Com_sprintf(buf, sizeof(buf), "%d hunk blocks\r\n", numBlocks);
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 }
 
 
@@ -1815,7 +1748,7 @@ void Hunk_SmallLog( void ) {
 	int size = 0, numBlocks = 0;
 	char buf[4096];
 	Com_sprintf(buf, sizeof(buf), "\r\n================\r\nHunk Small log\r\n================\r\n");
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 	for (hunkblock_t *block = hunkblocks; block; block = block->next) {
 		if (block->printed) {
 			continue;
@@ -1833,14 +1766,14 @@ void Hunk_SmallLog( void ) {
 			block2->printed = qtrue;
 		}
 		Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s)\r\n", locsize, block->file, block->line, block->label);
-		Com_Log( SEV_DEBUG, "%s", buf );
+		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 		size += block->size;
 		numBlocks++;
 	}
 	Com_sprintf(buf, sizeof(buf), "%d Hunk memory\r\n", size);
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 	Com_sprintf(buf, sizeof(buf), "%d hunk blocks\r\n", numBlocks);
-	Com_Log( SEV_DEBUG, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
 }
 #endif
 
@@ -1858,19 +1791,23 @@ static void Com_InitHunkMemory( void ) {
 	// by the file system without redundant routines in the file system utilizing different
 	// memory systems
 	if ( FS_LoadStack() != 0 ) {
-		Com_Error( ERR_FATAL, "Hunk initialization failed. File system load stack not zero" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Hunk initialization failed. File system load stack not zero" );
 	}
 
 	// allocate the stack based hunk allocator
-	cv = Cvar_Get( "com_hunkMegs", XSTRING( DEF_COMHUNKMEGS ), CVAR_LATCH | CVAR_ARCHIVE );
-	Cvar_CheckRange( cv, XSTRING( MIN_COMHUNKMEGS ), va("%d", (INT_MAX-63) / (1024*1024)), CV_INTEGER );
-	Cvar_SetDescription( cv, "The size of the hunk memory segment." );
+	{
+		static const cvarDesc_t d = CVAR_INT( "com_hunkMegs", XSTRING( DEF_COMHUNKMEGS ),
+			CVAR_LATCH | CVAR_ARCHIVE,
+			"The size of the hunk memory segment.",
+			MIN_COMHUNKMEGS, (INT_MAX-63) / (1024*1024) );
+		cv = Cvar_Register( &d );
+	}
 
 	s_hunkTotal = cv->integer * 1024 * 1024;
 
 	s_hunkData = calloc( s_hunkTotal + 63, 1 );
 	if ( !s_hunkData ) {
-		Com_Error( ERR_FATAL, "Hunk data failed to allocate %i megs", s_hunkTotal / (1024*1024) );
+		Com_Terminate( TERM_UNRECOVERABLE, "Hunk data failed to allocate %i megs", s_hunkTotal / (1024*1024) );
 	}
 
 	// cacheline align
@@ -1883,7 +1820,10 @@ static void Com_InitHunkMemory( void ) {
 	Cmd_AddCommand( "meminfo_json",  Com_MemInfoJson_f );
 	{
 		char cvarName[64];
-		mem_budget_enforce = Cvar_Get( "mem_budget_enforce", "1", CVAR_ARCHIVE );
+		{
+			static const cvarDesc_t d = CVAR_BOOL( "mem_budget_enforce", "1", CVAR_ARCHIVE, NULL );
+			mem_budget_enforce = Cvar_Register( &d );
+		}
 		for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
 			Com_sprintf( cvarName, sizeof( cvarName ), "mem_budget_%s", MemTag_Names[i] );
 			memBudgetCvars[i] = Cvar_Get( cvarName, "0", CVAR_ARCHIVE );
@@ -1996,7 +1936,7 @@ void Hunk_ClearLevel( void ) {
 	memStats[MEMTAG_TEMP].currentCount = 0;
 #endif
 
-	Com_Printf( "Hunk_ClearLevel: reset the hunk ok\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Hunk_ClearLevel: reset the hunk ok\n" );
 	VM_Clear();
 #ifdef HUNK_DEBUG
 	hunkblocks = NULL;
@@ -2039,15 +1979,15 @@ void *Hunk_Alloc( size_t size, ha_pref preference ) {
 
 	if ( s_hunkData == NULL)
 	{
-		Com_Error( ERR_FATAL, "Hunk_Alloc: Hunk memory system not initialized" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Hunk_Alloc: Hunk memory system not initialized" );
 	}
 
 	if ( size > INT_MAX ) {
-		Com_Error( ERR_FATAL, "Hunk_Alloc: %"PRIz"u > INT_MAX", size );
+		Com_Terminate( TERM_UNRECOVERABLE, "Hunk_Alloc: %"PRIz"u > INT_MAX", size );
 	}
 
 	if ( size > INT_MAX ) {
-		Com_Error( ERR_FATAL, "Hunk_Alloc: %"PRIz"u > INT_MAX", size );
+		Com_Terminate( TERM_UNRECOVERABLE, "Hunk_Alloc: %"PRIz"u > INT_MAX", size );
 	}
 
 	// can't do preference if there is any temp allocated
@@ -2073,9 +2013,9 @@ void *Hunk_Alloc( size_t size, ha_pref preference ) {
 		Hunk_Log();
 		Hunk_SmallLog();
 
-		Com_Error(ERR_DROP, "Hunk_Alloc failed on %"PRIz"u: %s, line: %d (%s)", size, file, line, label);
+		Com_Terminate( TERM_CLIENT_DROP, "Hunk_Alloc failed on %"PRIz"u: %s, line: %d (%s)", size, file, line, label);
 #else
-		Com_Error(ERR_DROP, "Hunk_Alloc failed on %"PRIz"u", size);
+		Com_Terminate( TERM_CLIENT_DROP, "Hunk_Alloc failed on %"PRIz"u", size);
 #endif
 	}
 
@@ -2135,7 +2075,7 @@ void *Hunk_AllocateTempMemory( size_t size ) {
 	}
 
 	if ( size > INT_MAX ) {
-		Com_Error( ERR_FATAL, "Hunk_AllocateTempMemory: %"PRIz"u > INT_MAX", size );
+		Com_Terminate( TERM_UNRECOVERABLE, "Hunk_AllocateTempMemory: %"PRIz"u > INT_MAX", size );
 	}
 
 	Hunk_SwapBanks();
@@ -2143,7 +2083,7 @@ void *Hunk_AllocateTempMemory( size_t size ) {
 	size = PAD(size, sizeof(intptr_t)) + sizeof( hunkHeader_t );
 
 	if ( hunk_temp->temp + hunk_permanent->permanent + size > s_hunkTotal ) {
-		Com_Error( ERR_DROP, "Hunk_AllocateTempMemory: failed on %"PRIz"u", size );
+		Com_Terminate( TERM_CLIENT_DROP, "Hunk_AllocateTempMemory: failed on %"PRIz"u", size );
 	}
 
 	if ( hunk_temp == &hunk_low ) {
@@ -2193,7 +2133,7 @@ void Hunk_FreeTempMemory( void *buf ) {
 
 	hdr = ( (hunkHeader_t *)buf ) - 1;
 	if ( hdr->magic != HUNK_MAGIC ) {
-		Com_Error( ERR_FATAL, "Hunk_FreeTempMemory: bad magic" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Hunk_FreeTempMemory: bad magic" );
 	}
 
 #if FEAT_MEMSTATS
@@ -2208,13 +2148,13 @@ void Hunk_FreeTempMemory( void *buf ) {
 		if ( hdr == (void *)(s_hunkData + hunk_temp->temp - hdr->size ) ) {
 			hunk_temp->temp -= hdr->size;
 		} else {
-			Com_Printf( "Hunk_FreeTempMemory: not the final block\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Hunk_FreeTempMemory: not the final block\n" );
 		}
 	} else {
 		if ( hdr == (void *)(s_hunkData + s_hunkTotal - hunk_temp->temp ) ) {
 			hunk_temp->temp -= hdr->size;
 		} else {
-			Com_Printf( "Hunk_FreeTempMemory: not the final block\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Hunk_FreeTempMemory: not the final block\n" );
 		}
 	}
 }
@@ -2259,11 +2199,11 @@ static void Com_InitJournaling( void ) {
 	}
 
 	if ( com_journal->integer == 1 ) {
-		Com_Printf( "Journaling events\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Journaling events\n" );
 		com_journalFile = FS_FOpenFileWrite( "journal.dat" );
 		com_journalDataFile = FS_FOpenFileWrite( "journaldata.dat" );
 	} else if ( com_journal->integer == 2 ) {
-		Com_Printf( "Replaying journaled events\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Replaying journaled events\n" );
 		FS_FOpenFileRead( "journal.dat", &com_journalFile, qtrue );
 		FS_FOpenFileRead( "journaldata.dat", &com_journalDataFile, qtrue );
 	}
@@ -2278,7 +2218,7 @@ static void Com_InitJournaling( void ) {
 			FS_FCloseFile( com_journalDataFile );
 			com_journalDataFile = FS_INVALID_HANDLE;
 		}
-		Com_Printf( "Couldn't open journal files\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't open journal files\n" );
 	}
 }
 
@@ -2287,9 +2227,6 @@ static void Com_InitJournaling( void ) {
 
 
 //============================================================================
-
-// Com_Error_f — moved to wired/con/log.c
-
 
 /*
 =============
@@ -2304,7 +2241,7 @@ static void Com_Freeze_f( void ) {
 	int		start, now;
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Printf( "freeze <seconds>\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "freeze <seconds>\n" );
 		return;
 	}
 	s = atoi( Cmd_Argv(1) ) * 1000;
@@ -2947,23 +2884,23 @@ static const struct {
 	const char *env;      // env var name (after Q3_ prefix)
 	const char *cvar;     // cvar name
 } wn_env_map[] = {
-	{ "SV_HOSTNAME",        "sv_hostname" },
-	{ "SV_MAXCLIENTS",      "sv_maxclients" },
-	{ "SV_PURE",            "sv_pure" },
-	{ "SV_FPS",             "sv_fps" },
-	{ "DEDICATED",          "dedicated" },
-	{ "G_GAMETYPE",         "g_gametype" },
-	{ "G_SCORELIMIT",       "g_scorelimit" },
-	{ "G_TIMELIMIT",        "g_timelimit" },
-	{ "NET_PORT",           "net_port" },
-	{ "COM_HUNKMEGS",       "com_hunkmegs" },
+	{ "SV_HOSTNAME",        	"sv_hostname" },
+	{ "SV_MAXCLIENTS",      	"sv_maxclients" },
+	{ "SV_PURE",            	"sv_pure" },
+	{ "SV_FPS",             	"sv_fps" },
+	{ "DEDICATED",          	"dedicated" },
+	{ "G_GAMETYPE",         	"g_gametype" },
+	{ "G_SCORELIMIT",       	"g_scorelimit" },
+	{ "G_TIMELIMIT",        	"g_timelimit" },
+	{ "NET_PORT",           	"net_port" },
+	{ "COM_HUNKMEGS",       	"com_hunkmegs" },
 	{ "SV_WIREDNETAUTHTOKEN",   "sv_wirednetAuthToken" },
 	{ "SV_WIREDNETMAXCLIENTS",  "sv_wirednetMaxClients" },
 	{ "SV_WIREDNETSTATERATE",   "sv_wirednetStateRate" },
-	{ "SV_WIRDNETEVENTRATE",   "sv_wirednetEventRate" },
+	{ "SV_WIRDNETEVENTRATE",    "sv_wirednetEventRate" },
 	{ "SV_WIREDNETRECORD",      "sv_wirednetRecord" },
-	{ "RCONPASSWORD",       "sv_wiredRconPassword" },
-	{ "LOGFILE",            "log_enabled" },
+	{ "RCONPASSWORD",       	"sv_wiredRconPassword" },
+	{ "LOGFILE",            	"log_file_enabled" },
 	{ NULL, NULL }
 };
 
@@ -2978,13 +2915,13 @@ static void Com_SetCvarsFromEnvironment( void )
 		val = getenv( envname );
 		if ( val && *val ) {
 			Cvar_Set( wn_env_map[i].cvar, val );
-			Com_Printf( "ENV: %s = \"%s\" → %s\n", envname, val, wn_env_map[i].cvar );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ENV: %s = \"%s\" → %s\n", envname, val, wn_env_map[i].cvar );
 			count++;
 		}
 	}
 
 	if ( count > 0 ) {
-		Com_Printf( "12-factor: %d cvars set from environment.\n", count );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "12-factor: %d cvars set from environment.\n", count );
 	}
 }
 
@@ -3008,7 +2945,7 @@ void Com_Init( char *commandLine ) {
 		Sys_Error( "Log pipeline: Sys_MutexInit failed" );
 	}
 
-	Com_Printf( "%s %s %s\n", Q3NOW_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s %s %s\n", Q3NOW_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
 
 	if ( Q_setjmp( abortframe ) ) {
 		Sys_Error ("Error during initialization");
@@ -3020,6 +2957,20 @@ void Com_Init( char *commandLine ) {
 	Com_InitSmallZoneMemory();
 	Cvar_Init();
 
+	// Global log gate: registered immediately after Cvar_Init so the
+	// modificationCount polling in Com_Logv narrows s_min_severity before
+	// the next Com_Log call. Default INFO suppresses TRACE/DEBUG at runtime.
+	{
+#ifdef _DEBUG
+		static const cvarDesc_t d = CVAR_STRING( "log_severity", "DEBUG", 0, NULL );
+#else
+		static const cvarDesc_t d = CVAR_STRING( "log_severity", "INFO", 0, NULL );
+#endif
+		log_severity_cvar = Cvar_Register( &d );
+	}
+	Log_InitCategories();
+	LogBuffer_Init();
+
 	// TTY sink only needs cvars (con_severity / con_timestamp). Register it now
 	// so FS_InitFilesystem, BSP_Init, and WiredScript_Init all emit with a
 	// severity bracket and optional timestamp instead of raw fallback stderr.
@@ -3028,7 +2979,10 @@ void Com_Init( char *commandLine ) {
 	Log_UnregisterFallbackStderrSink();
 
 #if defined(_WIN32) && defined(_DEBUG)
-	com_noErrorInterrupt = Cvar_Get( "com_noErrorInterrupt", "0", 0 );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_noErrorInterrupt", "0", 0, NULL );
+		com_noErrorInterrupt = Cvar_Register( &d );
+	}
 #endif
 
 #ifdef DEFAULT_GAME
@@ -3048,23 +3002,21 @@ void Com_Init( char *commandLine ) {
 	Com_InitZoneMemory();
 	Cmd_Init();
 
-	// get the developer cvar set as early as possible
-	Com_StartupVariable( "developer" );
-	com_developer = Cvar_Get( "developer", "0", CVAR_TEMP );
-	Cvar_CheckRange( com_developer, NULL, NULL, CV_INTEGER );
-
 	Com_StartupVariable( "journal" );
-	com_journal = Cvar_Get( "journal", "0", CVAR_INIT | CVAR_PROTECTED );
-	Cvar_CheckRange( com_journal, "0", "2", CV_INTEGER );
-	Cvar_SetDescription( com_journal, "When enabled, writes events and its data to 'journal.dat' and 'journaldata.dat'.");
+	{
+		static const cvarDesc_t d = CVAR_INT( "journal", "0", CVAR_INIT | CVAR_PROTECTED,
+			"When enabled, writes events and its data to 'journal.dat' and 'journaldata.dat'.", 0, 2 );
+		com_journal = Cvar_Register( &d );
+	}
 
 	Com_StartupVariable( "sv_master1" );
 	Cvar_Get( "sv_master1", MASTER_SERVER_NAME, CVAR_INIT );
 	
-	com_protocol = Cvar_Get( "protocol", XSTRING( PROTOCOL_VERSION ), 0 );
-	Cvar_SetDescription( com_protocol, "Specify network protocol version number.");
-
-	Cvar_CheckRange( com_protocol, "0", NULL, CV_INTEGER );
+	{
+		static const cvarDesc_t d = CVAR_INT( "protocol", XSTRING( PROTOCOL_VERSION ), 0,
+			"Specify network protocol version number.", 0, 0 );
+		com_protocol = Cvar_Register( &d );
+	}
 	com_protocol->flags &= ~CVAR_USER_CREATED;
 	com_protocol->flags |= CVAR_SERVERINFO | CVAR_ROM;
 
@@ -3074,7 +3026,7 @@ void Com_Init( char *commandLine ) {
 	FS_InitFilesystem();
 
 	// File sink needs VFS (fs_homepath set inside FS_InitFilesystem).
-	// no-op if log_enabled == 0.
+	// no-op if log_file_enabled == 0.
 	Log_RegisterFileSink();
 
 	// initialize BSP format registry (FEAT_BSP_ABSTRACTION)
@@ -3082,7 +3034,7 @@ void Com_Init( char *commandLine ) {
 	Cvar_Get( "com_mapAssetProfile", "modern", CVAR_ROM );
 	Cvar_Get( "com_mapBspVersion", "0", CVAR_ROM );
 
-	WiredScript_Init();
+	WiredCore_Init();
 
 	// Console sink registered late: it requires the ring buffer / Con_Init,
 	// which depends on renderer init. TTY and file sinks are already live.
@@ -3105,14 +3057,17 @@ void Com_Init( char *commandLine ) {
 	Com_StartupVariable( NULL );
 
 	// get dedicated here for proper hunk megs initialization
+	{
 #ifdef DEDICATED
-	com_dedicated = Cvar_Get( "dedicated", "1", CVAR_INIT );
-	Cvar_CheckRange( com_dedicated, "1", "2", CV_INTEGER );
+		static const cvarDesc_t d = CVAR_INT( "dedicated", "1", CVAR_INIT,
+			"Enables dedicated server mode.\n 0: Listen server\n 1: Unlisted dedicated server \n 2: Listed dedicated server", 1, 2 );
 #else
-	com_dedicated = Cvar_Get( "dedicated", "0", CVAR_LATCH );
-	Cvar_CheckRange( com_dedicated, "0", "2", CV_INTEGER );
+		static const cvarDesc_t d = CVAR_INT( "dedicated", "0", CVAR_LATCH,
+			"Enables dedicated server mode.\n 0: Listen server\n 1: Unlisted dedicated server \n 2: Listed dedicated server", 0, 2 );
 #endif
-	Cvar_SetDescription( com_dedicated, "Enables dedicated server mode.\n 0: Listen server\n 1: Unlisted dedicated server \n 2: Listed dedicated server" );
+		com_dedicated = Cvar_Register( &d );
+	}
+	com_dedicated->onChange = Com_DedicatedChanged;
 	// allocate the stack based hunk allocator
 	Com_InitHunkMemory();
 
@@ -3124,21 +3079,28 @@ void Com_Init( char *commandLine ) {
 	// init commands and vars
 	//
 #ifndef DEDICATED
-	com_maxfps = Cvar_Get( "com_maxfps", "250", 0 ); // try to force that in some light way
-	Cvar_CheckRange( com_maxfps, "0", "1000", CV_INTEGER );
-	Cvar_SetDescription( com_maxfps, "Sets maximum frames per second." );
-	com_maxfpsUnfocused = Cvar_Get( "com_maxfpsUnfocused", "60", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( com_maxfpsUnfocused, "0", "1000", CV_INTEGER );
-	Cvar_SetDescription( com_maxfpsUnfocused, "Sets maximum frames per second in unfocused game window." );
-	com_maxfpsMinimized = Cvar_Get( "com_maxfpsMinimized", "5", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( com_maxfpsMinimized, "1", "30", CV_INTEGER );
-	Cvar_SetDescription( com_maxfpsMinimized,
-		"Sets maximum frames per second while the game window is minimized.\n"
-		" Lower values reduce CPU/GPU use when the user is not looking at the game.\n"
-		" Takes precedence over com_maxfpsUnfocused when minimized (CNQ3 port)." );
-	com_yieldCPU = Cvar_Get( "com_yieldCPU", "1", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( com_yieldCPU, "0", "16", CV_INTEGER );
-	Cvar_SetDescription( com_yieldCPU, "Attempt to sleep specified amount of time between rendered frames when game is active, this will greatly reduce CPU load. Use 0 only if you're experiencing some lag." );
+	{
+		static const cvarDesc_t d = CVAR_INT( "com_maxfps", "250", 0,
+			"Sets maximum frames per second.", 0, 1000 );
+		com_maxfps = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_INT( "com_maxfpsUnfocused", "60", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Sets maximum frames per second in unfocused game window.", 0, 1000 );
+		com_maxfpsUnfocused = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_INT( "com_maxfpsMinimized", "5", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Sets maximum frames per second while the game window is minimized.\n"
+			" Lower values reduce CPU/GPU use when the user is not looking at the game.\n"
+			" Takes precedence over com_maxfpsUnfocused when minimized (CNQ3 port).", 1, 30 );
+		com_maxfpsMinimized = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_INT( "com_yieldCPU", "1", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Attempt to sleep specified amount of time between rendered frames when game is active, this will greatly reduce CPU load. Use 0 only if you're experiencing some lag.", 0, 16 );
+		com_yieldCPU = Cvar_Register( &d );
+	}
 #endif
 
 	// com_busyWait: choose the frame limiter strategy.
@@ -3146,64 +3108,112 @@ void Com_Init( char *commandLine ) {
 	//   1: pure busy-wait (highest precision, pegs a CPU core)
 	// When enabled, overrides com_yieldCPU because busy-waiting implies we
 	// don't want to yield to the OS.
-	com_busyWait = Cvar_Get( "com_busyWait", "0", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( com_busyWait, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( com_busyWait,
-		"Frame rate limiter strategy:\n"
-		" 0: hybrid sleep + 2 ms busy-wait (low CPU)\n"
-		" 1: pure busy-wait (highest precision, pegs a core)\n"
-		"Setting this to 1 overrides com_yieldCPU." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_busyWait", "0", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Frame rate limiter strategy:\n"
+			" 0: hybrid sleep + 2 ms busy-wait (low CPU)\n"
+			" 1: pure busy-wait (highest precision, pegs a core)\n"
+			"Setting this to 1 overrides com_yieldCPU." );
+		com_busyWait = Cvar_Register( &d );
+	}
 
 	// Crash reporter — must be initialised before Sys_Init so that the
 	// platform-specific handler installer can find com_crashReport.
 	Crash_Init();
 
 #ifdef USE_AFFINITY_MASK
-	com_affinityMask = Cvar_Get( "com_affinityMask", "", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( com_affinityMask, "Bind game process to bitmask-specified CPU core(s), special characters:\n A or a - all default cores\n P or p - performance cores\n E or e - efficiency cores\n 0x<value> - use hexadecimal notation\n + or - can be used to add or exclude particular cores" );
+	{
+		static const cvarDesc_t d = CVAR_STRING( "com_affinityMask", "", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Bind game process to bitmask-specified CPU core(s), special characters:\n A or a - all default cores\n P or p - performance cores\n E or e - efficiency cores\n 0x<value> - use hexadecimal notation\n + or - can be used to add or exclude particular cores" );
+		com_affinityMask = Cvar_Register( &d );
+	}
 	com_affinityMask->modified = qfalse;
 #endif
 
-	// com_blood = Cvar_Get( "com_blood", "1", CVAR_ARCHIVE_ND );
+	// com_blood = Cvar_Get( "com_blood", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 
-	com_timescale = Cvar_Get( "timescale", "1", CVAR_CHEAT | CVAR_SYSTEMINFO );
-	Cvar_CheckRange( com_timescale, "0", NULL, CV_FLOAT );
-	Cvar_SetDescription( com_timescale, "System timing factor:\n < 1: Slows the game down\n = 1: Regular speed\n > 1: Speeds the game up" );
-	com_fixedtime = Cvar_Get( "fixedtime", "0", CVAR_CHEAT );
-	Cvar_SetDescription( com_fixedtime, "Toggle the rendering of every frame the game will wait until each frame is completely rendered before sending the next frame." );
-	com_showtrace = Cvar_Get( "com_showtrace", "0", CVAR_CHEAT );
-	Cvar_SetDescription( com_showtrace, "Debugging tool that prints out trace information." );
-	com_viewlog = Cvar_Get( "viewlog", "0", 0 );
-	Cvar_SetDescription( com_viewlog, "Toggle the display of the startup console window over the game screen." );
-	com_speeds = Cvar_Get( "com_speeds", "0", 0 );
-	Cvar_SetDescription( com_speeds, "Prints speed information per frame to the console. Used for debugging." );
-	com_cameraMode = Cvar_Get( "com_cameraMode", "0", CVAR_CHEAT );
+	{
+		static const cvarDesc_t d = CVAR_FLOAT( "timescale", "1", CVAR_CHEAT | CVAR_SYSTEMINFO,
+			"System timing factor:\n < 1: Slows the game down\n = 1: Regular speed\n > 1: Speeds the game up", 0, 0 );
+		com_timescale = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "fixedtime", "0", CVAR_CHEAT,
+			"Toggle the rendering of every frame the game will wait until each frame is completely rendered before sending the next frame." );
+		com_fixedtime = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_showtrace", "0", CVAR_CHEAT,
+			"Debugging tool that prints out trace information." );
+		com_showtrace = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "viewlog", "0", 0,
+			"Toggle the display of the startup console window over the game screen." );
+		com_viewlog = Cvar_Register( &d );
+	}
+	com_viewlog->onChange = Com_ViewlogChanged;
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_speeds", "0", 0,
+			"Prints speed information per frame to the console. Used for debugging." );
+		com_speeds = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_cameraMode", "0", CVAR_CHEAT, NULL );
+		com_cameraMode = Cvar_Register( &d );
+	}
 
 #ifndef DEDICATED
-	com_timedemo = Cvar_Get( "timedemo", "0", 0 );
-	Cvar_CheckRange( com_timedemo, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( com_timedemo, "When set to '1' times a demo and returns frames per second like a benchmark." );
-	cl_paused = Cvar_Get( "cl_paused", "0", CVAR_ROM );
-	Cvar_SetDescription( cl_paused, "Read-only CVAR to toggle functionality of paused games (the variable holds the status of the paused flag on the client side)." );
-	cl_packetdelay = Cvar_Get( "cl_packetdelay", "0", CVAR_CHEAT );
-	Cvar_SetDescription( cl_packetdelay, "Artificially set the client's latency. Simulates packet delay, which can lead to packet loss." );
-	com_cl_running = Cvar_Get( "cl_running", "0", CVAR_ROM | CVAR_NOTABCOMPLETE );
-	Cvar_SetDescription( com_cl_running, "Can be used to check the status of the client game." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "timedemo", "0", 0,
+			"When set to '1' times a demo and returns frames per second like a benchmark." );
+		com_timedemo = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "cl_paused", "0", CVAR_ROM,
+			"Read-only CVAR to toggle functionality of paused games (the variable holds the status of the paused flag on the client side)." );
+		cl_paused = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_INT( "cl_packetdelay", "0", CVAR_CHEAT,
+			"Artificially set the client's latency. Simulates packet delay, which can lead to packet loss.", 0, 0 );
+		cl_packetdelay = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "cl_running", "0", CVAR_ROM | CVAR_NOTABCOMPLETE,
+			"Can be used to check the status of the client game." );
+		com_cl_running = Cvar_Register( &d );
+	}
 #endif
 
-	sv_paused = Cvar_Get( "sv_paused", "0", CVAR_ROM );
-	sv_packetdelay = Cvar_Get( "sv_packetdelay", "0", CVAR_CHEAT );
-	Cvar_SetDescription( sv_packetdelay, "Simulates packet delay, which can lead to packet loss. Server side." );
-	com_sv_running = Cvar_Get( "sv_running", "0", CVAR_ROM | CVAR_NOTABCOMPLETE );
-	Cvar_SetDescription( com_sv_running, "Communicates to game modules if there is a server currently running." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "sv_paused", "0", CVAR_ROM, NULL );
+		sv_paused = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_INT( "sv_packetdelay", "0", CVAR_CHEAT,
+			"Simulates packet delay, which can lead to packet loss. Server side.", 0, 0 );
+		sv_packetdelay = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "sv_running", "0", CVAR_ROM | CVAR_NOTABCOMPLETE,
+			"Communicates to game modules if there is a server currently running." );
+		com_sv_running = Cvar_Register( &d );
+	}
 
 	Cvar_Get( "com_errorMessage", "", CVAR_ROM | CVAR_NORESTART );
 
 #ifndef DEDICATED
-	com_introPlayed = Cvar_Get( "com_introplayed", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( com_introPlayed, "Skips the introduction cinematic." );
-	com_skipIdLogo  = Cvar_Get( "com_skipIdLogo", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( com_skipIdLogo, "Skip playing Id Software logo cinematic at startup." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_introplayed", "0", CVAR_ARCHIVE,
+			"Skips the introduction cinematic." );
+		com_introPlayed = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_skipIdLogo", "0", CVAR_ARCHIVE,
+			"Skip playing Id Software logo cinematic at startup." );
+		com_skipIdLogo = Cvar_Register( &d );
+	}
 #endif
 
 	if ( com_dedicated->integer ) {
@@ -3215,11 +3225,11 @@ void Com_Init( char *commandLine ) {
 		gw_minimized = qfalse;
 	}
 
-	if ( com_developer->integer ) {
-		Cmd_AddCommand( "error", Com_Error_f );
-		Cmd_AddCommand( "crash", Com_Crash_f );
-		Cmd_AddCommand( "freeze", Com_Freeze_f );
-	}
+#ifdef _DEBUG
+	Cmd_AddCommand( "error", Com_Error_f );
+	Cmd_AddCommand( "crash", Com_Crash_f );
+	Cmd_AddCommand( "freeze", Com_Freeze_f );
+#endif
 
 	Cmd_AddCommand( "quit", Com_Quit_f );
 	Cmd_AddCommand( "changeVectors", MSG_ReportChangeVectors_f );
@@ -3240,15 +3250,17 @@ void Com_Init( char *commandLine ) {
 	// Install platform crash handlers once the system layer is ready.
 	Crash_InstallHandlers();
 
-	// CPU detection
+	// CPU detection — observational: no consumer before this point reads sys_cpustring,
+	// eCoreMask, pCoreMask, or affinityMask (renderer init is deferred until CL_Init).
+	// Order is safe to leave here; only move if a pre-renderer SIMD consumer is added.
 	Cvar_Get( "sys_cpustring", "detect", CVAR_PROTECTED | CVAR_ROM | CVAR_NORESTART );
 	if ( !Q_stricmp( Cvar_VariableString( "sys_cpustring" ), "detect" ) ) {
 		char vendor[128];
-		Com_Printf( "...detecting CPU, found " );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...detecting CPU, found " );
 		Sys_GetProcessorId( vendor );
 		Cvar_Set( "sys_cpustring", vendor );
 	}
-	Com_Printf( "%s\n", Cvar_VariableString( "sys_cpustring" ) );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\n", Cvar_VariableString( "sys_cpustring" ) );
 
 #ifdef USE_AFFINITY_MASK
 	// get initial process affinity - we will respect it when setting custom affinity masks
@@ -3267,9 +3279,13 @@ void Com_Init( char *commandLine ) {
 	/* Netchan_Init removed — Phase D: netchan replaced by QUIC transport */
 
 	VM_Init();
-	SV_Init();
 
-	com_dedicated->modified = qfalse;
+#ifndef DEDICATED
+	// Load character archetypes before SV_Init so BotLua preload finds them at init time.
+	CL_Characters_Init();
+#endif
+
+	SV_Init();
 
 #ifndef DEDICATED
 	if ( !com_dedicated->integer ) {
@@ -3319,23 +3335,23 @@ void Com_Init( char *commandLine ) {
 		const char *envMap = getenv( "Q3_MAP" );
 		const char *envExec = getenv( "Q3_EXEC" );
 		if ( envExec && *envExec ) {
-			Com_Printf( "ENV: Q3_EXEC = \"%s\"\n", envExec );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ENV: Q3_EXEC = \"%s\"\n", envExec );
 			Cbuf_AddText( va( "exec %s\n", envExec ) );
 			Cbuf_Execute();
 		}
 		if ( envMap && *envMap ) {
-			Com_Printf( "ENV: Q3_MAP = \"%s\"\n", envMap );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ENV: Q3_MAP = \"%s\"\n", envMap );
 			Cbuf_AddText( va( "map %s\n", envMap ) );
 		}
 	}
 
 	com_fullyInitialized = qtrue;
 
-	Com_Printf( "--- Common Initialization Complete ---\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "--- Common Initialization Complete ---\n" );
 
 	NET_Init();
 
-	Com_Printf( "Working directory: %s\n", Sys_Pwd() );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Working directory: %s\n", Sys_Pwd() );
 }
 
 
@@ -3372,7 +3388,7 @@ static int Com_ModifyMsec( int msec ) {
 		// period, because it would mess up all the client's views
 		// of time.
 		if (com_sv_running->integer && msec > 500)
-			Com_Printf( "Hitch warning: %i msec frame time\n", msec );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Hitch warning: %i msec frame time\n", msec );
 
 		clampTime = 5000;
 	} else
@@ -3432,6 +3448,36 @@ void Com_FrameInit( void )
 	lastTimeUsec = com_frameTimeUsec = Sys_Microseconds();
 }
 
+static void Com_ViewlogChanged( cvar_t *self ) {
+	if ( !com_dedicated->integer ) {
+		Sys_ShowConsole( self->integer, qfalse );
+	}
+}
+
+static void Com_DedicatedChanged( cvar_t *self ) {
+	Cvar_Get( "dedicated", "0", 0 );
+	if ( !self->integer ) {
+		SV_Shutdown( "dedicated set to 0" );
+		SV_RemoveDedicatedCommands();
+#ifndef DEDICATED
+		CL_Init();
+#endif
+		Sys_ShowConsole( com_viewlog->integer, qfalse );
+#ifndef DEDICATED
+		gw_minimized = qfalse;
+		CL_StartHunkUsers();
+#endif
+	} else {
+#ifndef DEDICATED
+		CL_Shutdown( "", qfalse );
+		CL_ClearMemory();
+#endif
+		Sys_ShowConsole( 1, qtrue );
+		SV_AddDedicatedCommands();
+		gw_minimized = qtrue;
+	}
+}
+
 /*
 =================
 Com_Frame
@@ -3464,21 +3510,6 @@ void Com_Frame( qboolean noDelay ) {
 	// write config file if anything changed
 #ifndef DELAY_WRITECONFIG
 	Com_WriteConfiguration();
-#endif
-
-	// if "viewlog" has been modified, show or hide the log console
-	if ( com_viewlog->modified ) {
-		if ( !com_dedicated->integer ) {
-			Sys_ShowConsole( com_viewlog->integer, qfalse );
-		}
-		com_viewlog->modified = qfalse;
-	}
-
-#ifdef USE_AFFINITY_MASK
-	if ( com_affinityMask->modified ) {
-		Com_SetAffinityMask( com_affinityMask->string );
-		com_affinityMask->modified = qfalse;
-	}
 #endif
 
 	//
@@ -3602,36 +3633,6 @@ void Com_Frame( qboolean noDelay ) {
 
 	SV_Frame( msec );
 
-	// if "dedicated" has been modified, start up
-	// or shut down the client system.
-	// Do this after the server may have started,
-	// but before the client tries to auto-connect
-	if ( com_dedicated->modified ) {
-		// get the latched value
-		Cvar_Get( "dedicated", "0", 0 );
-		com_dedicated->modified = qfalse;
-		if ( !com_dedicated->integer ) {
-			SV_Shutdown( "dedicated set to 0" );
-			SV_RemoveDedicatedCommands();
-#ifndef DEDICATED
-			CL_Init();
-#endif
-			Sys_ShowConsole( com_viewlog->integer, qfalse );
-#ifndef DEDICATED
-			gw_minimized = qfalse;
-			CL_StartHunkUsers();
-#endif
-		} else {
-#ifndef DEDICATED
-			CL_Shutdown( "", qfalse );
-			CL_ClearMemory();
-#endif
-			Sys_ShowConsole( 1, qtrue );
-			SV_AddDedicatedCommands();
-			gw_minimized = qtrue;
-		}
-	}
-
 #ifdef DEDICATED
 	if ( com_speeds->integer ) {
 		timeAfter = Sys_Milliseconds ();
@@ -3691,17 +3692,17 @@ void Com_Frame( qboolean noDelay ) {
 		cl -= time_frontend + time_backend;
 
 		if ( com_speeds->integer < 2 || all >= com_speeds->integer ) {
-			Com_Printf ("frame:%i all:%3i sv:%3i ev:%3i cl:%3i gm:%3i rf:%3i bk:%3i\n",
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "frame:%i all:%3i sv:%3i ev:%3i cl:%3i gm:%3i rf:%3i bk:%3i\n",
 						com_frameNumber, all, sv, ev, cl, time_game, time_frontend, time_backend );
 			if ( com_speeds->integer >= 2 ) {
-				Com_Printf("  cl: store:%d send:%d resend:%d cgtime:%d cgr:%d whud:%d wui:%d cons:%d snd:%d scr:%d end:%d ui:%d misc:%d (us)\n",
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  cl: store:%d send:%d resend:%d cgtime:%d cgr:%d whud:%d wui:%d cons:%d snd:%d scr:%d end:%d ui:%d misc:%d (us)\n",
 					cl_prof.store, cl_prof.send, cl_prof.resend, cl_prof.cgtime,
 					cl_prof.cgr, cl_prof.whud, cl_prof.wui, cl_prof.cons,
 					cl_prof.sound, cl_prof.scrextra, cl_prof.endframe,
 					cl_prof.userinfo, cl_prof.misc);
-				Com_Printf("  ev: wnframe:%d relstr:%d snapdg:%d chkpkt:%d (us)\n",
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  ev: wnframe:%d relstr:%d snapdg:%d chkpkt:%d (us)\n",
 					cl_prof.wnframe, cl_prof.relstr, cl_prof.snapdg, cl_prof.chkpkt);
-				Com_Printf("  whud: load:%d sync:%d render:%d score:%d (us)\n",
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  whud: load:%d sync:%d render:%d score:%d (us)\n",
 					cl_prof.whud_load, cl_prof.whud_sync, cl_prof.whud_render, cl_prof.whud_score);
 			}
 		}
@@ -3715,7 +3716,7 @@ void Com_Frame( qboolean noDelay ) {
 		extern	int c_traces, c_brush_traces, c_patch_traces;
 		extern	int	c_pointcontents;
 
-		Com_Printf ("%4i traces  (%ib %ip) %4i points\n", c_traces,
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%4i traces  (%ib %ip) %4i points\n", c_traces,
 			c_brush_traces, c_patch_traces, c_pointcontents);
 		c_traces = 0;
 		c_brush_traces = 0;
@@ -3737,7 +3738,8 @@ Com_Shutdown
 void Com_Shutdown( void ) {
 	AssetLog_Flush( NULL );
 
-	WiredScript_Shutdown();
+	LogBuffer_Shutdown();
+	WiredCore_Shutdown();
 
 	BSP_Shutdown();
 
@@ -3851,7 +3853,7 @@ PrintMatches
 */
 static void PrintMatches( const char *s ) {
 	if ( !Q_stricmpn( s, shortestMatch, strlen( shortestMatch ) ) ) {
-		Com_Printf( "    %s\n", s );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "    %s\n", s );
 	}
 }
 
@@ -3866,7 +3868,7 @@ static void PrintCvarMatches( const char *s ) {
 
 	if ( !Q_stricmpn( s, shortestMatch, strlen( shortestMatch ) ) ) {
 		Com_TruncateLongString( value, Cvar_VariableString( s ) );
-		Com_Printf( "    %s = \"%s\"\n", s, value );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "    %s = \"%s\"\n", s, value );
 	}
 }
 
@@ -3944,7 +3946,7 @@ static qboolean Field_Complete( void )
 		return qtrue;
 	}
 
-	Com_Printf( "]%s\n", completionField->buffer );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "]%s\n", completionField->buffer );
 
 	return qfalse;
 }
@@ -4271,12 +4273,11 @@ void Field_AutoComplete( field_t *field )
 	/* CNQ3 backport Phase 6: lazily register con_completionStyle so the
 	 * cvar is available the very first time the user hits Tab. */
 	if ( con_completionStyle == NULL ) {
-		con_completionStyle = Cvar_Get( "con_completionStyle", "0", CVAR_ARCHIVE );
-		Cvar_CheckRange( con_completionStyle, "0", "1", CV_INTEGER );
-		Cvar_SetDescription( con_completionStyle,
+		static const cvarDesc_t d = CVAR_INT( "con_completionStyle", "0", CVAR_ARCHIVE,
 			"Console auto-completion behaviour:\n"
 			"  0 = print every match and complete to the common prefix (Q3 default)\n"
-			"  1 = cycle through matches on repeated Tab presses (Enemy Territory style)" );
+			"  1 = cycle through matches on repeated Tab presses (Enemy Territory style)", 0, 1 );
+		con_completionStyle = Cvar_Register( &d );
 	}
 
 	style = con_completionStyle->integer;

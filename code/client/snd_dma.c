@@ -114,27 +114,27 @@ portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 
 
 static void S_Base_SoundInfo( void ) {
-	Com_Printf( "----- Sound Info -----\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "----- Sound Info -----\n" );
 	if ( !s_soundStarted ) {
-		Com_Printf( "sound system not started\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "sound system not started\n" );
 	} else {
-		Com_Printf("%5d channels\n", dma.channels);
-		Com_Printf("%5d samples\n", dma.samples);
-		Com_Printf("%5d samplebits (%s)\n", dma.samplebits, dma.isfloat ? "float" : "int");
-		Com_Printf("%5d submission_chunk\n", dma.submission_chunk);
-		Com_Printf("%5d speed\n", dma.speed);
-		Com_Printf("%p dma buffer\n", dma.buffer);
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d channels\n", dma.channels);
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d samples\n", dma.samples);
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d samplebits (%s)\n", dma.samplebits, dma.isfloat ? "float" : "int");
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d submission_chunk\n", dma.submission_chunk);
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d speed\n", dma.speed);
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%p dma buffer\n", dma.buffer);
 		if ( dma.driver ) {
-			Com_Printf( "Using %s subsystem\n", dma.driver );
+			Com_Log( SEV_INFO, LOG_CAT_SOUND, "Using %s subsystem\n", dma.driver );
 		}
 		if ( s_backgroundStream ) {
-			Com_Printf("Background file: %s\n", s_backgroundLoop );
+			Com_Log( SEV_INFO, LOG_CAT_SOUND, "Background file: %s\n", s_backgroundLoop );
 		} else {
-			Com_Printf("No background file.\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SOUND, "No background file.\n" );
 		}
 
 	}
-	Com_Printf("----------------------\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "----------------------\n" );
 }
 
 
@@ -152,11 +152,11 @@ static void S_Base_SoundList( void ) {
 	for (int i=0 ; i<s_numSfx ; i++, sfx++) {
 		int		size = sfx->soundLength;
 		total += size;
-		Com_Printf("%6i[%s] : %s[%s]\n", size,
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%6i[%s] : %s[%s]\n", size,
 				type[sfx->soundCompressionMethod],
 				sfx->soundName, mem[sfx->inMemory] );
 	}
-	Com_Printf ("Total resident: %i\n", total);
+	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Total resident: %i\n", total);
 	S_DisplayFreeMemory();
 }
 
@@ -231,21 +231,21 @@ Will allocate a new sfx if it isn't found
 */
 static sfx_t *S_FindName( const char *name ) {
 	if ( !name ) {
-		Com_Error( ERR_FATAL, "Sound name is NULL" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Sound name is NULL" );
 	}
 
 	if ( !name[0] ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: Sound name is empty\n" );
+		COM_WARN( LOG_CAT_CLIENT, "WARNING: Sound name is empty\n" );
 		return NULL;
 	}
 
 	if ( strlen( name ) >= MAX_VFS_PATH ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: Sound name is too long: %s\n", name );
+		COM_WARN( LOG_CAT_CLIENT, "WARNING: Sound name is too long: %s\n", name );
 		return NULL;
 	}
 
 	if ( name[0] == '*' ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: Tried to load player sound directly: %s\n", name );
+		COM_WARN( LOG_CAT_CLIENT, "WARNING: Tried to load player sound directly: %s\n", name );
 		return NULL;
 	}
 
@@ -270,7 +270,7 @@ static sfx_t *S_FindName( const char *name ) {
 
 	if (i == s_numSfx) {
 		if (s_numSfx >= MAX_SFX) {
-			Com_Error (ERR_FATAL, "S_FindName: out of sfx_t");
+			Com_Terminate( TERM_UNRECOVERABLE, "S_FindName: out of sfx_t");
 		}
 		s_numSfx++;
 	}
@@ -317,7 +317,7 @@ static sfxHandle_t S_Base_RegisterSound( const char *name, qboolean compressed )
 	}
 
 	if ( strlen( name ) >= MAX_VFS_PATH ) {
-		Com_Printf( "Sound name exceeds MAX_VFS_PATH\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound name exceeds MAX_VFS_PATH\n" );
 		return 0;
 	}
 
@@ -535,11 +535,11 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 	}
 
 	if ( !origin && ( entityNum < 0 || entityNum >= MAX_GENTITIES ) ) {
-		Com_Error( ERR_DROP, "S_StartSound: bad entitynum %i", entityNum );
+		Com_Terminate( TERM_CLIENT_DROP, "S_StartSound: bad entitynum %i", entityNum );
 	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
-		Com_Printf( S_COLOR_YELLOW "S_StartSound: handle %i out of range\n", sfxHandle );
+		COM_WARN( LOG_CAT_CLIENT, "S_StartSound: handle %i out of range\n", sfxHandle );
 		return;
 	}
 
@@ -550,7 +550,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 	}
 
 	if ( s_show->integer == 1 ) {
-		Com_Printf( "%i : %s\n", s_paintedtime, sfx->soundName );
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%i : %s\n", s_paintedtime, sfx->soundName );
 	}
 
 	// borrowed from cnq3
@@ -572,12 +572,12 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 			if ( ch->thesfx != sfx )
 				continue;
 			sfx->lastTimeUsed = startTime;
-			//Com_Printf( S_COLOR_YELLOW "double sound start: %d %s\n", entityNum, sfx->soundName);
+			//Com_Log( SEV_INFO, LOG_CAT_SOUND, S_COLOR_YELLOW "double sound start: %d %s\n", entityNum, sfx->soundName);
 			return;
 		}
 	}
 
-//	Com_Printf("playing %s\n", sfx->soundName);
+//	Com_Log( SEV_INFO, LOG_CAT_SOUND, "playing %s\n", sfx->soundName);
 	// pick a channel to play on
 
 	// try to limit sound duplication
@@ -591,7 +591,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 	for ( int i = 0; i < MAX_CHANNELS; i++, ch++ ) {
 		if ( ch->entnum == entityNum && ch->thesfx == sfx ) {
 			if ( startTime - ch->allocTime < 20 ) {
-				Com_DPrintf(S_COLOR_YELLOW "S_StartSound: Double start (%d ms < 20 ms) for %s\n", startTime - ch->allocTime, sfx->soundName);
+				Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "S_StartSound: Double start (%d ms < 20 ms) for %s\n", startTime - ch->allocTime, sfx->soundName);
 				return;
 			}
 			inplay++;
@@ -600,7 +600,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 
 	// too much duplicated sounds, ignore
 	if ( inplay > allowed ) {
-		Com_DPrintf(S_COLOR_YELLOW "S_StartSound: %s hit the concurrent channels limit (%d)\n", sfx->soundName, allowed);
+		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "S_StartSound: %s hit the concurrent channels limit (%d)\n", sfx->soundName, allowed);
 		return;
 	}
 
@@ -638,14 +638,14 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 					}
 				}
 				if (chosen == -1) {
-					Com_DPrintf(S_COLOR_YELLOW "S_StartSound: No more channels free for %s\n", sfx->soundName);
+					Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "S_StartSound: No more channels free for %s\n", sfx->soundName);
 					return;
 				}
 			}
 		}
 		ch = &s_channels[chosen];
 		ch->allocTime = sfx->lastTimeUsed;
-		Com_DPrintf(S_COLOR_YELLOW "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx->soundName);
+		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx->soundName);
 	}
 
 	if ( origin ) {
@@ -679,7 +679,7 @@ static void S_Base_StartLocalSound( sfxHandle_t sfxHandle, int channelNum ) {
 	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
-		Com_Printf( S_COLOR_YELLOW "S_StartLocalSound: handle %i out of range\n", sfxHandle );
+		COM_WARN( LOG_CAT_CLIENT, "S_StartLocalSound: handle %i out of range\n", sfxHandle );
 		return;
 	}
 
@@ -751,7 +751,7 @@ continuous looping sounds are added each frame
 
 void S_Base_StopLoopingSound(int entityNum) {
 	if ( entityNum < 0 || entityNum >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "S_StopLoopingSound: bad entitynum %i", entityNum );
+		Com_Terminate( TERM_CLIENT_DROP, "S_StopLoopingSound: bad entitynum %i", entityNum );
 	}
 	loopSounds[entityNum].active = qfalse;
 //	loopSounds[entityNum].sfx = 0;
@@ -790,11 +790,11 @@ void S_Base_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t ve
 	}
 
 	if ( entityNum < 0 || entityNum >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "S_AddLoopingSound: bad entitynum %i", entityNum );
+		Com_Terminate( TERM_CLIENT_DROP, "S_AddLoopingSound: bad entitynum %i", entityNum );
 	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
-		Com_Printf( S_COLOR_YELLOW "S_AddLoopingSound: handle %i out of range\n", sfxHandle );
+		COM_WARN( LOG_CAT_CLIENT, "S_AddLoopingSound: handle %i out of range\n", sfxHandle );
 		return;
 	}
 
@@ -805,7 +805,7 @@ void S_Base_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t ve
 	}
 
 	if ( !sfx->soundLength ) {
-		Com_Error( ERR_DROP, "%s has length 0", sfx->soundName );
+		Com_Terminate( TERM_CLIENT_DROP, "%s has length 0", sfx->soundName );
 	}
 
 	VectorCopy( origin, loopSounds[entityNum].origin );
@@ -858,11 +858,11 @@ void S_Base_AddRealLoopingSound( int entityNum, const vec3_t origin, const vec3_
 	}
 
 	if ( entityNum < 0 || entityNum >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "S_AddRealLoopingSound: bad entitynum %i", entityNum );
+		Com_Terminate( TERM_CLIENT_DROP, "S_AddRealLoopingSound: bad entitynum %i", entityNum );
 	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
-		Com_Printf( S_COLOR_YELLOW "S_AddRealLoopingSound: handle %i out of range\n", sfxHandle );
+		COM_WARN( LOG_CAT_CLIENT, "S_AddRealLoopingSound: handle %i out of range\n", sfxHandle );
 		return;
 	}
 
@@ -873,7 +873,7 @@ void S_Base_AddRealLoopingSound( int entityNum, const vec3_t origin, const vec3_
 	}
 
 	if ( !sfx->soundLength ) {
-		Com_Error( ERR_DROP, "%s has length 0", sfx->soundName );
+		Com_Terminate( TERM_CLIENT_DROP, "%s has length 0", sfx->soundName );
 	}
 	VectorCopy( origin, loopSounds[entityNum].origin );
 	VectorCopy( velocity, loopSounds[entityNum].velocity );
@@ -987,13 +987,13 @@ static void S_Base_RawSamples( int samples, int rate, int width, int n_channels,
 	int		intVolume = 256 * volume;
 
 	if ( s_rawend - s_soundtime < 0 ) {
-		Com_DPrintf( "S_RawSamples: resetting minimum: %i < %i\n", s_rawend, s_soundtime );
+		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_RawSamples: resetting minimum: %i < %i\n", s_rawend, s_soundtime );
 		s_rawend = s_soundtime;
 	}
 
 	float	scale = (float)rate / dma.speed;
 
-	//Com_Printf ("%i < %i < %i\n", s_soundtime, s_paintedtime, s_rawend);
+	//Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i < %i < %i\n", s_soundtime, s_paintedtime, s_rawend);
 	if (n_channels == 2 && width == 2)
 	{
 		if (scale == 1.0)
@@ -1065,7 +1065,7 @@ static void S_Base_RawSamples( int samples, int rate, int width, int n_channels,
 	}
 
 	if ( s_rawend - s_soundtime > MAX_RAW_SAMPLES ) {
-		Com_DPrintf( "S_RawSamples: overflowed %i > %i\n", s_rawend, s_soundtime );
+		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_RawSamples: overflowed %i > %i\n", s_rawend, s_soundtime );
 	}
 }
 
@@ -1080,7 +1080,7 @@ let the sound system know where an entity currently is
 */
 void S_Base_UpdateEntityPosition( int entityNum, const vec3_t origin ) {
 	if ( entityNum < 0 || entityNum >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "S_UpdateEntityPosition: bad entitynum %i", entityNum );
+		Com_Terminate( TERM_CLIENT_DROP, "S_UpdateEntityPosition: bad entitynum %i", entityNum );
 	}
 	VectorCopy( origin, loopSounds[entityNum].origin );
 }
@@ -1101,7 +1101,7 @@ void S_Base_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], int 
 	}
 
 	if ( entityNum < 0 || entityNum >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "S_Respatialize: bad entitynum %i", entityNum );
+		Com_Terminate( TERM_CLIENT_DROP, "S_Respatialize: bad entitynum %i", entityNum );
 	}
 
 	listener_number = entityNum;
@@ -1182,7 +1182,7 @@ Called once each time through the main loop
 */
 static void S_Base_Update( int msec ) {
 	if ( !s_soundStarted || s_soundMuted ) {
-//		Com_DPrintf ("not started or muted\n");
+//		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "not started or muted\n");
 		return;
 	}
 
@@ -1194,12 +1194,12 @@ static void S_Base_Update( int msec ) {
 		channel_t	*ch = s_channels;
 		for (int i=0 ; i<MAX_CHANNELS; i++, ch++) {
 			if (ch->thesfx && (ch->leftvol || ch->rightvol) ) {
-				Com_Printf ("%d %d %s\n", ch->leftvol, ch->rightvol, ch->thesfx->soundName);
+				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%d %d %s\n", ch->leftvol, ch->rightvol, ch->thesfx->soundName);
 				total++;
 			}
 		}
 
-		Com_Printf ("----(%i)---- painted: %i\n", total, s_paintedtime);
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "----(%i)---- painted: %i\n", total, s_paintedtime);
 	}
 
 	// mix some sound
@@ -1372,7 +1372,7 @@ static void S_OpenBackgroundStream( const char *filename ) {
 	}
 
 	if( s_backgroundStream->info.channels != 2 || s_backgroundStream->info.rate != 48000 ) {
-		Com_DPrintf(S_COLOR_YELLOW "WARNING: music file %s is not 48kHz stereo\n", filename );
+		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "WARNING: music file %s is not 48kHz stereo\n", filename );
 	}
 }
 
@@ -1389,7 +1389,7 @@ static void S_Base_StartBackgroundTrack( const char *intro, const char *loop ){
 	if ( !loop || !loop[0] ) {
 		loop = intro;
 	}
-	Com_DPrintf( "S_StartBackgroundTrack( %s, %s )\n", intro, loop );
+	Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_StartBackgroundTrack( %s, %s )\n", intro, loop );
 
 	if(!*intro)
 	{
@@ -1500,7 +1500,7 @@ void S_FreeOldestSound( void ) {
 
 	sfx_t	*sfx = &s_knownSfx[used];
 
-	Com_DPrintf("S_FreeOldestSound: freeing sound %s\n", sfx->soundName);
+	Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_FreeOldestSound: freeing sound %s\n", sfx->soundName);
 
 	sndBuffer	*buffer = sfx->soundData;
 	while(buffer != NULL) {
@@ -1553,6 +1553,43 @@ static void S_Base_Shutdown( void ) {
 }
 
 
+static const cvarDesc_t sndDmaDescs[] = {
+	/* 0 */ CVAR_INT(    "s_khz",          "48",  CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,     "Specifies the sound sampling rate, (8, 11, 22, 44, 48) in kHz. Default value is 48.", 0, 48 ),
+	/* 1 */ CVAR_FLOAT(  "s_mixAhead",     "0.2", CVAR_ARCHIVE | CVAR_NODEFAULT,                  "Amount of time to pre-mix sound data to avoid potential skips/stuttering in case of unstable framerate. Higher values add more CPU usage.", 0.001f, 0.5f ),
+	/* 2 */ CVAR_FLOAT(  "s_mixOffset",    "0",   CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_CHEAT, NULL, 0, 0.5f ),
+	/* 3 */ CVAR_BOOL(   "s_linearFalloff","1",   CVAR_ARCHIVE | CVAR_NODEFAULT,
+		"Distance-based sound attenuation model (CNQ3 port).\n"
+		" 0: classic Q3 falloff (full volume within SOUND_FULLVOLUME, then exponential decay)\n"
+		" 1: linear falloff from listener to SOUND_MAX_DIST (default)" ),
+	/* 4 */ CVAR_BOOL(   "s_show",         "0",   CVAR_CHEAT,                       "Debugging output (used sound files)." ),
+	/* 5 */ CVAR_BOOL(   "s_testsound",    "0",   CVAR_CHEAT,                       "Debugging tool that plays a simple sine wave tone to test the sound system." ),
+	/* 6 */ CVAR_STRING( "s_device",       "",    CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,
+		"Audio output device name (miniaudio backend).\n"
+		" Empty string = system default device.\n"
+		" To pick a specific device, set this to its name as reported\n"
+		" by your OS (use the OS sound panel to look up the exact name).\n"
+		" Requires snd_restart to take effect." ),
+	/* 7 */ CVAR_INT(    "s_latency",      "6",   CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,
+		"Audio output latency hint in milliseconds (clamped 2-20).\n"
+		" Lower = less delay but higher CPU and risk of underruns.\n"
+		" Higher = safer but more audible delay.\n"
+		" Requires snd_restart to take effect.", 2, 20 ),
+	/* 8 */ CVAR_INT(    "s_underruns",    "0",   CVAR_TEMP,
+		"Read-only counter: number of audio underruns since startup.\n"
+		" Updated by the miniaudio backend each frame.\n"
+		" Non-zero values indicate the audio thread is starved.", 0, 0 ),
+};
+
+enum {
+	SNDDMA_KHZ, SNDDMA_MIXAHEAD, SNDDMA_MIXOFFSET, SNDDMA_LINEARFALLOFF,
+	SNDDMA_SHOW, SNDDMA_TESTSOUND, SNDDMA_DEVICE, SNDDMA_LATENCY, SNDDMA_UNDERRUNS,
+	SNDDMA_CVAR_COUNT
+};
+
+_Static_assert( ARRAY_LEN( sndDmaDescs ) == SNDDMA_CVAR_COUNT, "sndDmaDescs/enum mismatch" );
+static cvar_t *sndDmaHandles[SNDDMA_CVAR_COUNT];
+
+
 /*
 ================
 S_Init
@@ -1565,9 +1602,16 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 		return qfalse;
 	}
 
-	s_khz = Cvar_Get( "s_khz", "48", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	Cvar_CheckRange( s_khz, "0", "48", CV_INTEGER );
-	Cvar_SetDescription( s_khz, "Specifies the sound sampling rate, (8, 11, 22, 44, 48) in kHz. Default value is 48." );
+	Cvar_RegisterTable( sndDmaDescs, ARRAY_LEN( sndDmaDescs ), sndDmaHandles );
+	s_khz          = sndDmaHandles[SNDDMA_KHZ];
+	s_mixahead     = sndDmaHandles[SNDDMA_MIXAHEAD];
+	s_mixOffset    = sndDmaHandles[SNDDMA_MIXOFFSET];
+	s_linearFalloff = sndDmaHandles[SNDDMA_LINEARFALLOFF];
+	s_show         = sndDmaHandles[SNDDMA_SHOW];
+	s_testsound    = sndDmaHandles[SNDDMA_TESTSOUND];
+	s_device       = sndDmaHandles[SNDDMA_DEVICE];
+	s_latency      = sndDmaHandles[SNDDMA_LATENCY];
+	s_underruns    = sndDmaHandles[SNDDMA_UNDERRUNS];
 
 	switch( s_khz->integer ) {
 		case 48:
@@ -1579,51 +1623,10 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 			break;
 		default:
 			// anything else is illegal
-			Com_Printf( "WARNING: cvar 's_khz' must be one of (8, 11, 22, 44, 48), setting to '%s'\n", s_khz->resetString );
+			Com_Log( SEV_INFO, LOG_CAT_SOUND, "WARNING: cvar 's_khz' must be one of (8, 11, 22, 44, 48), setting to '%s'\n", s_khz->resetString );
 			Cvar_ForceReset( "s_khz" );
 			break;
 	}
-
-	s_mixahead = Cvar_Get( "s_mixAhead", "0.2", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( s_mixahead, "0.001", "0.5", CV_FLOAT );
-	Cvar_SetDescription( s_mixahead, "Amount of time to pre-mix sound data to avoid potential skips/stuttering in case of unstable framerate. Higher values add more CPU usage." );
-
-	s_mixOffset = Cvar_Get( "s_mixOffset", "0", CVAR_ARCHIVE_ND | CVAR_DEVELOPER );
-	Cvar_CheckRange( s_mixOffset, "0", "0.5", CV_FLOAT );
-
-	s_linearFalloff = Cvar_Get( "s_linearFalloff", "1", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( s_linearFalloff, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( s_linearFalloff,
-		"Distance-based sound attenuation model (CNQ3 port).\n"
-		" 0: classic Q3 falloff (full volume within SOUND_FULLVOLUME, then exponential decay)\n"
-		" 1: linear falloff from listener to SOUND_MAX_DIST (default)" );
-
-	s_show = Cvar_Get( "s_show", "0", CVAR_CHEAT );
-	Cvar_SetDescription( s_show, "Debugging output (used sound files)." );
-	s_testsound = Cvar_Get( "s_testsound", "0", CVAR_CHEAT );
-	Cvar_SetDescription( s_testsound, "Debugging tool that plays a simple sine wave tone to test the sound system." );
-	/* miniaudio backend cvars (task-3) */
-	s_device = Cvar_Get( "s_device", "", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	Cvar_SetDescription( s_device,
-		"Audio output device name (miniaudio backend).\n"
-		" Empty string = system default device.\n"
-		" To pick a specific device, set this to its name as reported\n"
-		" by your OS (use the OS sound panel to look up the exact name).\n"
-		" Requires snd_restart to take effect." );
-
-	s_latency = Cvar_Get( "s_latency", "6", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	Cvar_CheckRange( s_latency, "2", "20", CV_INTEGER );
-	Cvar_SetDescription( s_latency,
-		"Audio output latency hint in milliseconds (clamped 2-20).\n"
-		" Lower = less delay but higher CPU and risk of underruns.\n"
-		" Higher = safer but more audible delay.\n"
-		" Requires snd_restart to take effect." );
-
-	s_underruns = Cvar_Get( "s_underruns", "0", CVAR_TEMP );
-	Cvar_SetDescription( s_underruns,
-		"Read-only counter: number of audio underruns since startup.\n"
-		" Updated by the miniaudio backend each frame.\n"
-		" Non-zero values indicate the audio thread is starved." );
 
 	r = SNDDMA_Init();
 

@@ -457,5 +457,114 @@ typedef struct {
 	int			patchHeight;
 } dsurface_t;
 
+//=============================================================================
+// Quake 1 BSP29 on-disk format
+// All structs prefixed q1_ to avoid collisions with Q3 types above.
+//=============================================================================
+
+// Lump indices for BSP29 (HEADER_LUMPS_Q1 = 15)
+typedef enum {
+	LUMP_Q1_ENTITIES      = 0,
+	LUMP_Q1_PLANES        = 1,
+	LUMP_Q1_TEXTURES      = 2,   // miptex lump (embedded textures)
+	LUMP_Q1_VERTEXES      = 3,
+	LUMP_Q1_VISIBILITY    = 4,
+	LUMP_Q1_NODES         = 5,
+	LUMP_Q1_TEXINFO       = 6,
+	LUMP_Q1_FACES         = 7,
+	LUMP_Q1_LIGHTING      = 8,
+	LUMP_Q1_CLIPNODES     = 9,
+	LUMP_Q1_LEAFS         = 10,
+	LUMP_Q1_MARKSURFACES  = 11,
+	LUMP_Q1_EDGES         = 12,
+	LUMP_Q1_SURFEDGES     = 13,
+	LUMP_Q1_MODELS        = 14
+} q1Lump_t;
+
+// BSP29 file header — version is the first and only magic field (no ident)
+typedef struct {
+	int    version;
+	lump_t lumps[15];   // HEADER_LUMPS_Q1; literal to avoid forward-decl dependency
+} q1_dheader_t;
+
+typedef struct {
+	float  normal[3];
+	float  dist;
+	int    type;   // 0..5: PLANE_X, PLANE_Y, PLANE_Z, PLANE_ANYX, PLANE_ANYY, PLANE_ANYZ
+} q1_dplane_t;
+
+typedef struct {
+	int            planenum;
+	short          children[2];       // negative = leaf index via ~n
+	short          mins[3];
+	short          maxs[3];
+	unsigned short firstface;
+	unsigned short numfaces;
+} q1_dnode_t;
+
+// Q1 leaf contents are negative integers (not bitmasks like Q3)
+typedef struct {
+	int            contents;          // CONTENTS_EMPTY=-1, CONTENTS_SOLID=-2, etc.
+	int            visofs;            // -1 if no vis data
+	short          mins[3];
+	short          maxs[3];
+	unsigned short firstmarksurface;
+	unsigned short nummarksurfaces;
+	byte           ambient_level[4];  // NUM_AMBIENTS = 4
+} q1_dleaf_t;
+
+typedef struct {
+	int   planenum;
+	short children[2];   // negative = contents (CONTENTS_*), 0+ = clipnode index
+} q1_dclipnode_t;
+
+typedef struct {
+	float vecs[2][4];    // s/t texture projection: xyz component + offset
+	int   miptex;
+	int   flags;         // TEX_SPECIAL etc.
+} q1_dtexinfo_t;
+
+typedef struct {
+	short v[2];          // two vertex indices into LUMP_Q1_VERTEXES
+} q1_dedge_t;
+
+typedef struct {
+	short planenum;
+	short side;
+	int   firstedge;
+	short numedges;
+	short texinfo;
+	byte  styles[4];     // lightstyle slots (255 = unused)
+	int   lightofs;      // byte offset into LUMP_Q1_LIGHTING (-1 = no lightmap)
+} q1_dface_t;
+
+typedef struct {
+	float mins[3], maxs[3];
+	float origin[3];
+	int   headnode[4];   // BSP hull 0 + clipnode hulls 1..3
+	int   visleafs;
+	int   firstface;
+	int   numfaces;
+} q1_dmodel_t;
+
+// Miptex lump: starts with nummiptex, followed by nummiptex int offsets,
+// then the miptex_t entries themselves. dataofs[] is variable-length —
+// read nummiptex first, then index into the raw lump bytes.
+typedef struct {
+	int nummiptex;
+	int dataofs[4];   // placeholder: actual array size is nummiptex (read dynamically)
+} q1_dmiptexlump_t;
+
+typedef struct {
+	char         name[16];
+	unsigned int width;
+	unsigned int height;
+	unsigned int offsets[4];   // byte offsets to mip0..mip3 from start of this struct
+} q1_miptex_t;
+
+typedef struct {
+	float point[3];
+} q1_dvertex_t;
+
 
 #endif

@@ -9,6 +9,8 @@ A modern fork of id Software's Quake III Arena engine (idTech 3).
 |                  | Quake III Arena (1999)   | q3now (2026)                     |
 |------------------|--------------------------|----------------------------------|
 | Gameplay         | Vanilla Quake 3          | New q3now Competitive Gameplay   |
+| Map Formats      | Q3 Maps                  | Q3 + Q1 Maps                     |
+| Map Navigation   | Static AAS Files Needed  | Runtime Recast Navmesh           |
 | Model Formats    | MD3                      | IQM, MD3                         |
 | Image Formats    | JPEGLIB, Targa, PCX, BMP | PNG, JPEG Turbo, Targa, PCX, BMP |
 | Sound Formats    | Wave                     | Ogg Opus, Wave                   |

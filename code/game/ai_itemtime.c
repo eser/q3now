@@ -25,6 +25,7 @@ Skill scaling: only skill 4+ actively times items.
 //
 #include "ai_main.h"
 #include "ai_itemtime.h"
+#include "wired/bots/g_bot_scripts.h"
 
 // mirror g_items.c respawn values (seconds)
 #define RESPAWN_ARMOR		30
@@ -162,12 +163,11 @@ just signals the caller.
 qboolean BotItemTimingGoal( struct bot_state_s *bs )
 {
 	int i, bestItem;
-	float skill, bestValue, value;
+	float bestValue, value;
 	int timeUntilRespawn;
 	bot_itemtime_t *ti;
 
-	skill = bs->autoskill > 0 ? bs->autoskill : bs->settings.skill;
-	if ( skill < 4.0f ) return qfalse; // only skill 4+ times items
+	if ( WiredBots_EffectiveSkill( bs ) < 4.0f ) return qfalse; // only skill 4+ times items
 
 	bestItem = -1;
 	bestValue = 0;

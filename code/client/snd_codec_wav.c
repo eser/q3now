@@ -72,7 +72,7 @@ static int S_ReadChunkInfo(fileHandle_t f, char *name)
 
 	len = FGetLittleLong(f);
 	if( len < 0 ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: Negative chunk length\n" );
+		COM_WARN( LOG_CAT_CLIENT, "Negative chunk length\n" );
 		return -1;
 	}
 
@@ -145,14 +145,14 @@ static qboolean S_ReadRIFFHeader(fileHandle_t file, snd_info_t *info)
 	// skip the riff wav header
 	if (FS_Read(dump, 12, file) != 12)
 	{
-		Com_Printf( S_COLOR_RED "ERROR: Couldn't read header\n");
+		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Couldn't read header\n" );
 		return qfalse;
 	}
 
 	// Scan for the format chunk
 	if((fmtlen = S_FindRIFFChunk(file, "fmt ")) < 0)
 	{
-		Com_Printf( S_COLOR_RED "ERROR: Couldn't find \"fmt\" chunk\n");
+		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Couldn't find \"fmt\" chunk\n" );
 		return qfalse;
 	}
 
@@ -166,7 +166,7 @@ static qboolean S_ReadRIFFHeader(fileHandle_t file, snd_info_t *info)
 
 	if( bits < 8 )
 	{
-	  Com_Printf( S_COLOR_RED "ERROR: Less than 8 bit sound is not supported\n");
+	  COM_ERROR( LOG_CAT_CLIENT, "ERROR: Less than 8 bit sound is not supported\n" );
 	  return qfalse;
 	}
 
@@ -183,7 +183,7 @@ static qboolean S_ReadRIFFHeader(fileHandle_t file, snd_info_t *info)
 	// Scan for the data chunk
 	if( (info->size = S_FindRIFFChunk(file, "data")) < 0)
 	{
-		Com_Printf( S_COLOR_RED "ERROR: Couldn't find \"data\" chunk\n");
+		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Couldn't find \"data\" chunk\n" );
 		return qfalse;
 	}
 	info->samples = (info->size / info->width) / info->channels;
@@ -223,8 +223,7 @@ void *S_WAV_CodecLoad(const char *filename, snd_info_t *info)
 	if(!S_ReadRIFFHeader(file, info))
 	{
 		FS_FCloseFile(file);
-		Com_Printf( S_COLOR_RED "ERROR: Incorrect/unsupported format in \"%s\"\n",
-				filename);
+		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Incorrect/unsupported format in \"%s\"\n", filename );
 		return NULL;
 	}
 
@@ -233,8 +232,7 @@ void *S_WAV_CodecLoad(const char *filename, snd_info_t *info)
 	if(!buffer)
 	{
 		FS_FCloseFile(file);
-		Com_Printf( S_COLOR_RED "ERROR: Out of memory reading \"%s\"\n",
-				filename);
+		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Out of memory reading \"%s\"\n", filename );
 		return NULL;
 	}
 
@@ -243,7 +241,7 @@ void *S_WAV_CodecLoad(const char *filename, snd_info_t *info)
 	{
 		Hunk_FreeTempMemory(buffer);
 		FS_FCloseFile(file);
-		Com_Printf( S_COLOR_RED "ERROR: Couldn't read \"%s\"\n", filename);
+		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Couldn't read \"%s\"\n", filename );
 		return NULL;
 	}
 

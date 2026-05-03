@@ -2063,7 +2063,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	{
 		CloseBufferedFile(ThePNG);
 
-		ri.Printf( PRINT_WARNING, "%s: invalid image size\n", name );
+		ri.Log( SEV_WARN, "%s: invalid image size\n", name );
 
 		return; 
 	}

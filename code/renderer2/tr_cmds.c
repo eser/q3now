@@ -21,6 +21,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "tr_local.h"
 
+static int s_anaglyph_mod = -1;
+
 /*
 =====================
 R_PerformanceCounters
@@ -35,40 +37,40 @@ static void R_PerformanceCounters( void ) {
 	}
 
 	if (r_speeds->integer == 1) {
-		ri.Printf (PRINT_ALL, "%i/%i/%i shaders/batches/surfs %i leafs %i verts %i/%i tris %.2f mtex %.2f dc\n",
+		ri.Log( SEV_INFO, "%i/%i/%i shaders/batches/surfs %i leafs %i verts %i/%i tris %.2f mtex %.2f dc\n",
 			backEnd.pc.c_shaders, backEnd.pc.c_surfBatches, backEnd.pc.c_surfaces, tr.pc.c_leafs, backEnd.pc.c_vertexes, 
 			backEnd.pc.c_indexes/3, backEnd.pc.c_totalIndexes/3, 
 			R_SumOfUsedImages()/(1000000.0f), backEnd.pc.c_overDraw / (float)(glConfig.vidWidth * glConfig.vidHeight) ); 
 	} else if (r_speeds->integer == 2) {
-		ri.Printf (PRINT_ALL, "(patch) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
+		ri.Log( SEV_INFO, "(patch) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
 			tr.pc.c_sphere_cull_patch_in, tr.pc.c_sphere_cull_patch_clip, tr.pc.c_sphere_cull_patch_out, 
 			tr.pc.c_box_cull_patch_in, tr.pc.c_box_cull_patch_clip, tr.pc.c_box_cull_patch_out );
-		ri.Printf (PRINT_ALL, "(md3) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
+		ri.Log( SEV_INFO, "(md3) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
 			tr.pc.c_sphere_cull_md3_in, tr.pc.c_sphere_cull_md3_clip, tr.pc.c_sphere_cull_md3_out, 
 			tr.pc.c_box_cull_md3_in, tr.pc.c_box_cull_md3_clip, tr.pc.c_box_cull_md3_out );
 	} else if (r_speeds->integer == 3) {
-		ri.Printf (PRINT_ALL, "viewcluster: %i\n", tr.viewCluster );
+		ri.Log( SEV_INFO, "viewcluster: %i\n", tr.viewCluster );
 	} else if (r_speeds->integer == 4) {
 		if ( backEnd.pc.c_dlightVertexes ) {
-			ri.Printf (PRINT_ALL, "dlight srf:%i  culled:%i  verts:%i  tris:%i\n", 
+			ri.Log( SEV_INFO, "dlight srf:%i  culled:%i  verts:%i  tris:%i\n", 
 				tr.pc.c_dlightSurfaces, tr.pc.c_dlightSurfacesCulled,
 				backEnd.pc.c_dlightVertexes, backEnd.pc.c_dlightIndexes / 3 );
 		}
 	} 
 	else if (r_speeds->integer == 5 )
 	{
-		ri.Printf( PRINT_ALL, "zFar: %.0f\n", tr.viewParms.zFar );
+		ri.Log( SEV_INFO, "zFar: %.0f\n", tr.viewParms.zFar );
 	}
 	else if (r_speeds->integer == 6 )
 	{
-		ri.Printf( PRINT_ALL, "flare adds:%i tests:%i renders:%i\n", 
+		ri.Log( SEV_INFO, "flare adds:%i tests:%i renders:%i\n", 
 			backEnd.pc.c_flareAdds, backEnd.pc.c_flareTests, backEnd.pc.c_flareRenders );
 	}
 	else if (r_speeds->integer == 7 )
 	{
-		ri.Printf( PRINT_ALL, "VAO draws: static %i dynamic %i\n",
+		ri.Log( SEV_INFO, "VAO draws: static %i dynamic %i\n",
 			backEnd.pc.c_staticVaoDraws, backEnd.pc.c_dynamicVaoDraws);
-		ri.Printf( PRINT_ALL, "GLSL binds: %i  draws: gen %i light %i fog %i dlight %i\n",
+		ri.Log( SEV_INFO, "GLSL binds: %i  draws: gen %i light %i fog %i dlight %i\n",
 			backEnd.pc.c_glslShaderBinds, backEnd.pc.c_genericDraws, backEnd.pc.c_lightallDraws, backEnd.pc.c_fogDraws, backEnd.pc.c_dlightDraws);
 	}
 
@@ -135,7 +137,7 @@ static void *R_GetCommandBufferReserved( int bytes, int reservedBytes ) {
 	// always leave room for the end of list command
 	if ( cmdList->used + bytes + sizeof( int ) + reservedBytes > MAX_RENDER_COMMANDS ) {
 		if ( bytes > MAX_RENDER_COMMANDS - sizeof( int ) ) {
-			ri.Error( ERR_FATAL, "R_GetCommandBuffer: bad size %i", bytes );
+			ri.Terminate( TERM_UNRECOVERABLE, "R_GetCommandBuffer: bad size %i", bytes );
 		}
 		// if we run out of room, just start dropping commands
 		return NULL;
@@ -370,58 +372,66 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	//
 	// do overdraw measurement
 	//
-	if ( r_measureOverdraw->integer )
 	{
-		if ( glConfig.stencilBits < 4 )
+		static int s_measureOverdraw_mod = -1;
+		int measureOverdraw_changed = ( r_measureOverdraw->modificationCount != s_measureOverdraw_mod );
+
+		if ( r_measureOverdraw->integer )
 		{
-			ri.Printf( PRINT_ALL, "Warning: not enough stencil bits to measure overdraw: %d\n", glConfig.stencilBits );
-			ri.Cvar_Set( "r_measureOverdraw", "0" );
-			r_measureOverdraw->modified = qfalse;
-		}
-		else if ( r_shadows->integer == 2 )
-		{
-			ri.Printf( PRINT_ALL, "Warning: stencil shadows and overdraw measurement are mutually exclusive\n" );
-			ri.Cvar_Set( "r_measureOverdraw", "0" );
-			r_measureOverdraw->modified = qfalse;
+			if ( glConfig.stencilBits < 4 )
+			{
+				ri.Log( SEV_INFO, "Warning: not enough stencil bits to measure overdraw: %d\n", glConfig.stencilBits );
+				ri.Cvar_Set( "r_measureOverdraw", "0" );
+			}
+			else if ( r_shadows->integer == 2 )
+			{
+				ri.Log( SEV_INFO, "Warning: stencil shadows and overdraw measurement are mutually exclusive\n" );
+				ri.Cvar_Set( "r_measureOverdraw", "0" );
+			}
+			else
+			{
+				R_IssuePendingRenderCommands();
+				qglEnable( GL_STENCIL_TEST );
+				qglStencilMask( ~0U );
+				qglClearStencil( 0U );
+				qglStencilFunc( GL_ALWAYS, 0U, ~0U );
+				qglStencilOp( GL_KEEP, GL_INCR, GL_INCR );
+			}
+			s_measureOverdraw_mod = r_measureOverdraw->modificationCount;
 		}
 		else
 		{
-			R_IssuePendingRenderCommands();
-			qglEnable( GL_STENCIL_TEST );
-			qglStencilMask( ~0U );
-			qglClearStencil( 0U );
-			qglStencilFunc( GL_ALWAYS, 0U, ~0U );
-			qglStencilOp( GL_KEEP, GL_INCR, GL_INCR );
+			// this is only reached if it was on and is now off
+			if ( measureOverdraw_changed ) {
+				R_IssuePendingRenderCommands();
+				qglDisable( GL_STENCIL_TEST );
+			}
+			s_measureOverdraw_mod = r_measureOverdraw->modificationCount;
 		}
-		r_measureOverdraw->modified = qfalse;
-	}
-	else
-	{
-		// this is only reached if it was on and is now off
-		if ( r_measureOverdraw->modified ) {
-			R_IssuePendingRenderCommands();
-			qglDisable( GL_STENCIL_TEST );
-		}
-		r_measureOverdraw->modified = qfalse;
 	}
 
 	//
 	// texturemode stuff
 	//
-	if ( r_textureMode->modified ) {
-		R_IssuePendingRenderCommands();
-		GL_TextureMode( r_textureMode->string );
-		r_textureMode->modified = qfalse;
+	{
+		static int s_texmode_mod = -1;
+		if ( r_textureMode->modificationCount != s_texmode_mod ) {
+			s_texmode_mod = r_textureMode->modificationCount;
+			R_IssuePendingRenderCommands();
+			GL_TextureMode( r_textureMode->string );
+		}
 	}
 
 	//
 	// gamma stuff
 	//
-	if ( r_gamma->modified ) {
-		r_gamma->modified = qfalse;
-
-		R_IssuePendingRenderCommands();
-		R_SetColorMappings();
+	{
+		static int s_gamma_mod = -1;
+		if ( r_gamma->modificationCount != s_gamma_mod ) {
+			s_gamma_mod = r_gamma->modificationCount;
+			R_IssuePendingRenderCommands();
+			R_SetColorMappings();
+		}
 	}
 
 	// check for errors
@@ -431,7 +441,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 
 		R_IssuePendingRenderCommands();
 		if ((err = qglGetError()) != GL_NO_ERROR)
-			ri.Error(ERR_FATAL, "RE_BeginFrame() - glGetError() failed (0x%x)!", err);
+			ri.Terminate( TERM_UNRECOVERABLE, "RE_BeginFrame() - glGetError() failed (0x%x)!", err);
 	}
 
 	if (glConfig.stereoEnabled) {
@@ -445,22 +455,23 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 		} else if ( stereoFrame == STEREO_RIGHT ) {
 			cmd->buffer = (int)GL_BACK_RIGHT;
 		} else {
-			ri.Error( ERR_FATAL, "RE_BeginFrame: Stereo is enabled, but stereoFrame was %i", stereoFrame );
+			ri.Terminate( TERM_UNRECOVERABLE, "RE_BeginFrame: Stereo is enabled, but stereoFrame was %i", stereoFrame );
 		}
 	}
 	else
 	{
 		if(r_anaglyphMode->integer)
 		{
-			if(r_anaglyphMode->modified)
+			if(r_anaglyphMode->modificationCount != s_anaglyph_mod)
 			{
+				s_anaglyph_mod = r_anaglyphMode->modificationCount;
 				// clear both, front and backbuffer.
 				qglColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 				backEnd.colorMask[0] = GL_FALSE;
 				backEnd.colorMask[1] = GL_FALSE;
 				backEnd.colorMask[2] = GL_FALSE;
 				backEnd.colorMask[3] = GL_FALSE;
-								
+
 				if (glRefConfig.framebufferObject)
 				{
 					// clear all framebuffers
@@ -483,8 +494,6 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 				qglClear(GL_COLOR_BUFFER_BIT);
 				qglDrawBuffer(GL_BACK);
 				qglClear(GL_COLOR_BUFFER_BIT);
-
-				r_anaglyphMode->modified = qfalse;
 			}
 			
 			if(stereoFrame == STEREO_LEFT)
@@ -508,7 +517,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 					return;
 			}
 			else
-				ri.Error( ERR_FATAL, "RE_BeginFrame: Stereo is enabled, but stereoFrame was %i", stereoFrame );
+				ri.Terminate( TERM_UNRECOVERABLE, "RE_BeginFrame: Stereo is enabled, but stereoFrame was %i", stereoFrame );
 
 			R_SetColorMode(colcmd->rgba, stereoFrame, r_anaglyphMode->integer);
 			colcmd->commandId = RC_COLORMASK;
@@ -516,7 +525,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 		else
 		{
 			if(stereoFrame != STEREO_CENTER)
-				ri.Error( ERR_FATAL, "RE_BeginFrame: Stereo is disabled, but stereoFrame was %i", stereoFrame );
+				ri.Terminate( TERM_UNRECOVERABLE, "RE_BeginFrame: Stereo is disabled, but stereoFrame was %i", stereoFrame );
 
 			if( !(cmd = R_GetCommandBuffer(sizeof(*cmd))) )
 				return;
@@ -526,14 +535,14 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 		{
 			cmd->commandId = RC_DRAW_BUFFER;
 
-			if(r_anaglyphMode->modified)
+			if(r_anaglyphMode->modificationCount != s_anaglyph_mod)
 			{
+				s_anaglyph_mod = r_anaglyphMode->modificationCount;
 				qglColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 				backEnd.colorMask[0] = 0;
 				backEnd.colorMask[1] = 0;
 				backEnd.colorMask[2] = 0;
 				backEnd.colorMask[3] = 0;
-				r_anaglyphMode->modified = qfalse;
 			}
 
 			if (!Q_stricmp(r_drawBuffer->string, "GL_FRONT"))

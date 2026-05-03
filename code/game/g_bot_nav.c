@@ -313,6 +313,17 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
         travelDelta[2] = 0;
         float xydist = VectorLength( travelDelta );
 
+        if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
+            static float transitLogTime[MAX_CLIENTS];
+            if ( now >= transitLogTime[cn] ) {
+                transitLogTime[cn] = now + 0.5f;
+                BotAI_Print( PRT_MESSAGE,
+                    "[BOTNAV] client %d OMC_TRANSIT: zdelta=%.0f xydist=%.0f (exits at Z>=%.0f XY>=%.0f)\n",
+                    cn, zdelta, xydist,
+                    (float)BOT_NAV_OMC_TRANSIT_Z_DELTA, (float)BOT_NAV_OMC_TRANSIT_XY_DIST );
+            }
+        }
+
         qboolean exitOmc = qfalse;
         if ( zdelta >= BOT_NAV_OMC_TRANSIT_Z_DELTA || xydist >= BOT_NAV_OMC_TRANSIT_XY_DIST )
             exitOmc = qtrue;
@@ -347,6 +358,17 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
                     BotAI_Print( PRT_MESSAGE,
                         "[BOTNAV] client %d OMC_TRANSIT entered at (%.0f,%.0f,%.0f)\n",
                         cn, bs->origin[0], bs->origin[1], bs->origin[2] );
+                }
+            } else if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
+                static float approachLogTime[MAX_CLIENTS];
+                if ( now >= approachLogTime[cn] ) {
+                    approachLogTime[cn] = now + 0.5f;
+                    BotAI_Print( PRT_MESSAGE,
+                        "[BOTNAV] client %d OMC approach: dist=%.0f threshold=%.0f wp=(%.0f,%.0f,%.0f)\n",
+                        cn, distToOmc, (float)BOT_NAV_OMC_APPROACH_DIST,
+                        bn->path.positions[curIdx][0],
+                        bn->path.positions[curIdx][1],
+                        bn->path.positions[curIdx][2] );
                 }
             }
         }
@@ -406,7 +428,9 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
     dir[2] = 0;  /* Flatten: bot uses jump/gravity for vertical, not steering. */
     VectorNormalize( dir );
 
-    trap_EA_Move( bs->client, dir, 400 );
+    if ( bn->steeringState != NAV_STEER_OMC_TRANSIT ) {
+        trap_EA_Move( bs->client, dir, 400 );
+    }
 
     /* Crouch command when in low-ceiling passages. */
     if ( bn->steeringState == NAV_STEER_CROUCH ) {
@@ -433,6 +457,9 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
     vectoangles( dir, wpAngles );
     bs->ideal_viewangles[YAW]   = wpAngles[YAW];
     bs->ideal_viewangles[PITCH] = wpAngles[PITCH];
+    if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
+        BotAI_Print( PRT_MESSAGE, "[AimSet/nav-wp] client %d pitch=%.1f yaw=%.1f\n",
+                     bs->client, bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW] );
 
     /* Fill result movedir for callers that read it. */
     VectorCopy( dir, result->movedir );
@@ -465,6 +492,24 @@ qboolean BotNav_MovementViewTarget( int clientNum, const bot_goal_t *goal,
         return qtrue;
     }
     return qfalse;
+}
+
+/*
+=================
+BotNav_PredictEnemyPosition
+=================
+*/
+void BotNav_PredictEnemyPosition( int entnum, vec3_t outOrigin, float predictTime )
+{
+    if ( entnum < 0 || entnum >= MAX_CLIENTS ) return;
+
+    gclient_t *cl = &level.clients[entnum];
+    if ( cl->pers.connected != CON_CONNECTED ) {
+        VectorCopy( g_entities[entnum].r.currentOrigin, outOrigin );
+        return;
+    }
+
+    trap_Nav_PredictEnemyPosition( cl->ps.origin, cl->ps.velocity, predictTime, outOrigin );
 }
 
 #endif /* FEAT_RECAST_NAVMESH */

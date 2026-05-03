@@ -71,10 +71,23 @@ void G_BounceMissile( gentity_t *ent, trace_t *trace ) {
 		// Q1/Q2 stop: freeze on near-flat floors when vertical velocity decays
 		if ( trace->plane.normal[2] > 0.7f &&
 			 ent->s.pos.trDelta[2] > -60 && ent->s.pos.trDelta[2] < 60 ) {
-			G_SetOrigin( ent, trace->endpos );
+			// CG_Missile builds render axis[0] from pos.trDelta via VectorNormalize2.
+			// G_SetOrigin will zero trDelta making axis[0] default to (0,0,1) — upright.
+			// Capture the horizontal travel direction first so the grenade lies on its side.
+			vec3_t hDir;
+			hDir[0] = ent->s.pos.trDelta[0];
+			hDir[1] = ent->s.pos.trDelta[1];
+			hDir[2] = 0.0f;
+			if ( VectorNormalize( hDir ) < 0.1f ) { hDir[0] = 1.0f; }
 
-			// freeze at current visual angle instead of snapping to axis
+			G_SetOrigin( ent, trace->endpos );
+			// restore non-zero horizontal trDelta so CG_Missile's VectorNormalize2 picks
+			// a horizontal axis[0]; TR_STATIONARY means this has no effect on physics
+			VectorScale( hDir, 64.0f, ent->s.pos.trDelta );
+
 			BG_EvaluateTrajectory( &ent->s.apos, level.time, ent->s.angles );
+			ent->s.angles[PITCH] = 0.0f;
+			ent->s.angles[ROLL]  = 0.0f;
 			VectorCopy( ent->s.angles, ent->s.apos.trBase );
 			VectorClear( ent->s.apos.trDelta );
 			ent->s.apos.trType = TR_STATIONARY;
@@ -130,6 +143,13 @@ void G_ExplodeMissile( gentity_t *ent ) {
 
 	ent->s.eType = ET_GENERAL;
 	G_AddEvent( ent, EV_MISSILE_MISS, DirToByte( dir ) );
+	trap_WCE_EmitEvent( WCE_PROJECTILE_IMPACT,
+	                    g_entities[ent->r.ownerNum].s.number,
+	                    ent->s.number,
+	                    ent->r.currentOrigin,
+	                    ent->s.pType,
+	                    -1,
+	                    0.0f, NULL );
 
 	ent->freeAfterEvent = qtrue;
 
@@ -157,7 +177,7 @@ void G_ExplodeMissile( gentity_t *ent ) {
 G_ReflectProjectile
 
 Reflects a projectile's velocity off a surface normal.
-Used when a missile hits an invulnerability shield (10H).
+Used when a missile hits an deflector shield (10H).
 ================
 */
 static void G_ReflectProjectile( gentity_t *ent, trace_t *trace ) {
@@ -219,7 +239,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 	}
 
 #if FEAT_PROJECTILE_BOUNCE
-	// projectile bounce (10H): reflect missile off invulnerability shield
+	// projectile bounce (10H): reflect missile off deflector shield
 	if ( g_projectileBounce.integer && other->takedamage &&
 		 other->client && other->client->ps.powerups[PW_BATTLESUIT] &&
 		 other->client->ps.powerups[PW_BATTLESUIT] > level.time ) {
@@ -230,11 +250,11 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 #endif
 
 	if ( other->takedamage ) {
-		if ( other->client && other->client->invulnerabilityTime > level.time ) {
+		if ( other->client && other->client->deflectorTime > level.time ) {
 			//
 			VectorCopy( ent->s.pos.trDelta, forward );
 			VectorNormalize( forward );
-			if (G_InvulnerabilityEffect( other, forward, ent->s.pos.trBase, impactpoint, bouncedir )) {
+			if (G_DeflectorEffect( other, forward, trace->endpos, impactpoint, bouncedir )) {
 				VectorCopy( bouncedir, trace->plane.normal );
 				eFlags = ent->s.eFlags & EF_BOUNCE_HALF;
 				ent->s.eFlags &= ~EF_BOUNCE_HALF;
@@ -336,6 +356,13 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 	} else {
 		G_AddEvent( ent, EV_MISSILE_MISS, DirToByte( trace->plane.normal ) );
 	}
+	trap_WCE_EmitEvent( WCE_PROJECTILE_IMPACT,
+	                    g_entities[ent->r.ownerNum].s.number,
+	                    ent->s.number,
+	                    trace->endpos,
+	                    ent->s.pType,
+	                    ( other->takedamage && other->client ) ? other->s.number : -1,
+	                    0.0f, NULL );
 
 	ent->freeAfterEvent = qtrue;
 
@@ -409,7 +436,7 @@ void G_TeleportMissile( gentity_t *ent, trace_t *trace, gentity_t *portal ) {
 
 	dest = G_PickTarget( portal->target );
 	if ( !dest ) {
-		G_Printf( "G_TeleportMissile: couldn't find destination\n" );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_TeleportMissile: couldn't find destination\n" );
 		return;
 	}
 
@@ -461,7 +488,7 @@ void G_RunMissile( gentity_t *ent ) {
 	// get current position
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
 
-	// if this missile bounced off an invulnerability sphere
+	// if this missile bounced off an deflector sphere
 	if ( ent->target_ent ) {
 		passent = ent->target_ent->s.number;
 	}
@@ -568,6 +595,7 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 	bolt->s.eType = ET_MISSILE;
 	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	bolt->s.weapon = WP_PLASMA_RIFLE;
+	bolt->s.pType  = PROJ_PLASMA;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
 #if FEAT_UNLAGGED
@@ -639,6 +667,7 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 	bolt->s.eType = ET_MISSILE;
 	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	bolt->s.weapon = WP_GRENADE_LAUNCHER;
+	bolt->s.pType  = PROJ_GRENADE;
 
 	// give grenades angular velocity so they tumble and rest at natural angles
 	bolt->s.apos.trType = TR_LINEAR;
@@ -709,6 +738,7 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
 	bolt->s.eType = ET_MISSILE;
 	bolt->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	bolt->s.weapon = WP_ROCKET_LAUNCHER;
+	bolt->s.pType  = PROJ_ROCKET;
 	bolt->r.ownerNum = self->s.number;
 	bolt->parent = self;
 #if FEAT_UNLAGGED
@@ -761,6 +791,7 @@ gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir) {
 	hook->s.eType = ET_MISSILE;
 	hook->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	hook->s.weapon = WP_NONE;
+	hook->s.pType  = PROJ_NONE;
 	hook->r.ownerNum = self->s.number;
 	hook->methodOfDeath = MOD_GRAPPLE;
 	hook->clipmask = MASK_SHOT;
@@ -778,4 +809,127 @@ gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir) {
 	self->client->hook = hook;
 
 	return hook;
+}
+
+/*
+=================
+fire_q1_spike
+
+Q1 nail/spike projectile.  damage=9 for normal spike, 18 for super-spike.
+speed: 1000 for player nailgun (weapons.qc launch_spike), 500 for traps (misc.qc spikeshooter_use).
+No splash — direct hit only.  Silent expiry after 6 s.
+=================
+*/
+gentity_t *fire_q1_spike( gentity_t *self, vec3_t start, vec3_t dir, int damage, int speed ) {
+	gentity_t *bolt;
+
+	VectorNormalize( dir );
+
+	bolt = G_Spawn();
+	bolt->classname       = "q1_spike";
+	bolt->nextthink       = level.time + 6000;
+	bolt->think           = G_FreeEntity;
+	bolt->s.eType         = ET_MISSILE;
+	bolt->r.svFlags       = SVF_USE_CURRENT_ORIGIN;
+	bolt->s.weapon        = WP_NONE;
+	bolt->s.pType         = PROJ_SPIKE;
+	bolt->r.ownerNum      = self->s.number;
+	bolt->parent          = self;
+	bolt->damage          = damage;
+	bolt->splashDamage    = 0;
+	bolt->splashRadius    = 0;
+	bolt->methodOfDeath   = MOD_NAIL;
+	bolt->clipmask        = MASK_SHOT;
+	bolt->target_ent      = NULL;
+
+	bolt->s.pos.trType = TR_LINEAR;
+	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;
+	VectorCopy( start, bolt->s.pos.trBase );
+	VectorScale( dir, (float)speed, bolt->s.pos.trDelta );
+	SnapVector( bolt->s.pos.trDelta );
+	VectorCopy( start, bolt->r.currentOrigin );
+
+	return bolt;
+}
+
+/*
+=================
+fire_q1_laser
+
+Q1 enforcer laser projectile.  Speed 600, 15 dmg (MOD_NAIL class).
+Q1 ref: rerelease monsters/enforcer.qc:93 LaunchLaser (vel = normalize*600).
+=================
+*/
+gentity_t *fire_q1_laser( gentity_t *self, vec3_t start, vec3_t dir ) {
+	gentity_t *bolt;
+
+	VectorNormalize( dir );
+
+	bolt = G_Spawn();
+	bolt->classname       = "q1_laser";
+	bolt->nextthink       = level.time + 6000;
+	bolt->think           = G_FreeEntity;
+	bolt->s.eType         = ET_MISSILE;
+	bolt->r.svFlags       = SVF_USE_CURRENT_ORIGIN;
+	bolt->s.weapon        = WP_NONE;
+	bolt->s.pType         = PROJ_LASER;
+	bolt->r.ownerNum      = self->s.number;
+	bolt->parent          = self;
+	bolt->damage          = 15;
+	bolt->splashDamage    = 0;
+	bolt->splashRadius    = 0;
+	bolt->methodOfDeath   = MOD_NAIL;
+	bolt->clipmask        = MASK_SHOT;
+	bolt->target_ent      = NULL;
+
+	bolt->s.pos.trType = TR_LINEAR;
+	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;
+	VectorCopy( start, bolt->s.pos.trBase );
+	VectorScale( dir, 600.0f, bolt->s.pos.trDelta );
+	SnapVector( bolt->s.pos.trDelta );
+	VectorCopy( start, bolt->r.currentOrigin );
+
+	return bolt;
+}
+
+/*
+=================
+fire_q1_lavaball
+
+Q1 lavaball projectile (misc_fireball child entity).
+MOVETYPE_TOSS equivalent: TR_GRAVITY.  20 dmg, no splash.
+Q1 ref: rerelease misc.qc:205–229 fire_fly, FTEQW misc.qc:166–195.
+Silent expiry (Q1 vanilla removes lavaball on touch or timeout).
+=================
+*/
+gentity_t *fire_q1_lavaball( gentity_t *self, vec3_t start, vec3_t dir, float speed ) {
+	gentity_t *bolt;
+
+	VectorNormalize( dir );
+
+	bolt = G_Spawn();
+	bolt->classname       = "q1_lavaball";
+	bolt->nextthink       = level.time + 5000;
+	bolt->think           = G_FreeEntity;
+	bolt->s.eType         = ET_MISSILE;
+	bolt->r.svFlags       = SVF_USE_CURRENT_ORIGIN;
+	bolt->s.weapon        = WP_NONE;
+	bolt->s.pType         = PROJ_LAVABALL;
+	bolt->r.ownerNum      = self->s.number;
+	bolt->parent          = self;
+	bolt->damage          = 20;
+	bolt->splashDamage    = 0;
+	bolt->splashRadius    = 0;
+	bolt->methodOfDeath   = MOD_LAVABALL;
+	bolt->clipmask        = MASK_SHOT;
+	bolt->target_ent      = NULL;
+
+	bolt->s.pos.trType = TR_GRAVITY;
+	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;
+	VectorCopy( start, bolt->s.pos.trBase );
+	VectorScale( dir, speed, bolt->s.pos.trDelta );
+	SnapVector( bolt->s.pos.trDelta );
+	VectorCopy( start, bolt->r.currentOrigin );
+
+	return bolt;
 }

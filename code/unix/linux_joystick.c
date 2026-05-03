@@ -76,7 +76,7 @@ void IN_StartupJoystick( void )
   joy_fd = -1;
 
   if( !in_joystick->integer ) {
-    Com_DPrintf( "Joystick is not active.\n" );
+    Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Joystick is not active.\n" );
     return;
   }
 
@@ -94,7 +94,7 @@ void IN_StartupJoystick( void )
       char name[128];
       int n = -1;
 
-      Com_DPrintf( "Joystick %s found\n", filename );
+      Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Joystick %s found\n", filename );
 
       /* Get rid of initialization messages. */
       do {
@@ -114,9 +114,9 @@ void IN_StartupJoystick( void )
 	strncpy( name, "Unknown", sizeof( name ) );
       }
 
-      Com_DPrintf( "Name:    %s\n", name );
-      Com_DPrintf( "Axes:    %d\n", axes );
-      Com_DPrintf( "Buttons: %d\n", buttons );
+      Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Name:    %s\n", name );
+      Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Axes:    %d\n", axes );
+      Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Buttons: %d\n", buttons );
 
       /* Our work here is done. */
       return;
@@ -126,7 +126,7 @@ void IN_StartupJoystick( void )
 
   /* No soup for you. */
   if( joy_fd == -1 ) {
-    Com_DPrintf( "No joystick found.\n" );
+    Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "No joystick found.\n" );
     return;
   }
 
@@ -172,7 +172,7 @@ void IN_JoyMove( void )
 
       axes_state[event.number] = event.value;
     } else {
-      Com_Printf( "Unknown joystick event type\n" );
+      Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Unknown joystick event type\n" );
     }
 
   } while( 1 );

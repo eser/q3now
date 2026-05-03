@@ -93,7 +93,7 @@ void WN_LogConnect( wn_connection_t *conn )
 	const char *role      = WN_HasPermLeader(conn->perm)   ? "LEADER"   : "MEMBER";
 	const char *auth      = WN_HasPermAdmin(conn->perm)    ? "ADMIN"    : "USER";
 
-	Com_DPrintf( "QUIC: client connected from %s [%s+%s+%s] (%d/%d slots)\n",
+	Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC: client connected from %s [%s+%s+%s] (%d/%d slots)\n",
 		NET_AdrToString( &conn->addr ),
 		conn_type, role, auth,
 		wn.num_connections, wn.sv_wirednetMaxClients->integer );
@@ -101,7 +101,7 @@ void WN_LogConnect( wn_connection_t *conn )
 
 void WN_LogDisconnect( wn_connection_t *conn, const char *reason )
 {
-	Com_Printf( "QUIC: client disconnected from %s (reason: %s)\n",
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC: client disconnected from %s (reason: %s)\n",
 		NET_AdrToString( &conn->addr ),
 		reason ? reason : "unknown" );
 }

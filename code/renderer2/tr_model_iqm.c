@@ -208,7 +208,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 	LL( header->version );
 	if( header->version != IQM_VERSION ) {
-		ri.Printf(PRINT_WARNING, "R_LoadIQM: %s is a unsupported IQM version (%d), only version %d is supported.\n",
+		ri.Log( SEV_WARN, "R_LoadIQM: %s is a unsupported IQM version (%d), only version %d is supported.\n",
 				mod_name, header->version, IQM_VERSION);
 		return qfalse;
 	}
@@ -246,7 +246,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 	// check ioq3 joint limit
 	if ( header->num_joints > IQM_MAX_JOINTS ) {
-		ri.Printf(PRINT_WARNING, "R_LoadIQM: %s has more than %d joints (%d).\n",
+		ri.Log( SEV_WARN, "R_LoadIQM: %s has more than %d joints (%d).\n",
 				mod_name, IQM_MAX_JOINTS, header->num_joints);
 		return qfalse;
 	}
@@ -362,13 +362,13 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 		// check for required vertex arrays
 		if( vertexArrayFormat[IQM_POSITION] == -1 || vertexArrayFormat[IQM_NORMAL] == -1 || vertexArrayFormat[IQM_TEXCOORD] == -1 ) {
-			ri.Printf( PRINT_WARNING, "R_LoadIQM: %s is missing IQM_POSITION, IQM_NORMAL, and/or IQM_TEXCOORD array.\n", mod_name );
+			ri.Log( SEV_WARN, "R_LoadIQM: %s is missing IQM_POSITION, IQM_NORMAL, and/or IQM_TEXCOORD array.\n", mod_name );
 			return qfalse;
 		}
 
 		if( header->num_joints ) {
 			if( vertexArrayFormat[IQM_BLENDINDEXES] == -1 || vertexArrayFormat[IQM_BLENDWEIGHTS] == -1 ) {
-				ri.Printf( PRINT_WARNING, "R_LoadIQM: %s is missing IQM_BLENDINDEXES and/or IQM_BLENDWEIGHTS array.\n", mod_name );
+				ri.Log( SEV_WARN, "R_LoadIQM: %s is missing IQM_BLENDINDEXES and/or IQM_BLENDWEIGHTS array.\n", mod_name );
 				return qfalse;
 			}
 		} else {
@@ -379,7 +379,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 		// opengl2 renderer requires tangents
 		if( vertexArrayFormat[IQM_TANGENT] == -1 ) {
-			ri.Printf( PRINT_WARNING, "R_LoadIQM: %s is missing IQM_TANGENT array.\n", mod_name );
+			ri.Log( SEV_WARN, "R_LoadIQM: %s is missing IQM_TANGENT array.\n", mod_name );
 			return qfalse;
 		}
 
@@ -423,13 +423,13 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 			// check IQM limits
 			if ( mesh->num_vertexes >= IQM_MAX_VERTEXES ) {
-				ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has more than %i verts on %s (%i).\n",
+				ri.Log( SEV_WARN, "R_LoadIQM: %s has more than %i verts on %s (%i).\n",
 					  mod_name, IQM_MAX_VERTEXES - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_vertexes );
 				return qfalse;
 			}
 			if ( mesh->num_triangles*3 >= IQM_MAX_INDEXES ) {
-				ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has more than %i triangles on %s (%i).\n",
+				ri.Log( SEV_WARN, "R_LoadIQM: %s has more than %i triangles on %s (%i).\n",
 					  mod_name, ( IQM_MAX_INDEXES / 3 ) - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_triangles );
 				return qfalse;
@@ -479,7 +479,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	}
 
 	if( header->num_poses != header->num_joints && header->num_poses != 0 ) {
-		ri.Printf( PRINT_WARNING, "R_LoadIQM: %s has %d poses and %d joints, must have the same number or 0 poses\n",
+		ri.Log( SEV_WARN, "R_LoadIQM: %s has %d poses and %d joints, must have the same number or 0 poses\n",
 			  mod_name, header->num_poses, header->num_joints );
 		return qfalse;
 	}
@@ -1343,7 +1343,7 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 	     || (ent->e.frame < 0)
 	     || (ent->e.oldframe >= data->num_frames)
 	     || (ent->e.oldframe < 0) ) {
-		ri.Printf( PRINT_DEVELOPER, "R_AddIQMSurfaces: no such frame %d to %d for '%s'\n",
+		ri.Log( SEV_DEBUG, "R_AddIQMSurfaces: no such frame %d to %d for '%s'\n",
 			   ent->e.oldframe, ent->e.frame,
 			   tr.currentModel->name );
 		ent->e.frame = 0;

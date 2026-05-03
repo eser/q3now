@@ -334,7 +334,7 @@ static qboolean SV_LoadIP4DB( const char *filename )
 
 	if ( len % 10 ) // should be a power of IP4:IP4:TLD2
 	{
-		Com_DPrintf( "%s(%s): invalid file size %i\n", __func__, filename, len );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "%s(%s): invalid file size %i\n", __func__, filename, len );
 		if ( fh != FS_INVALID_HANDLE )
 			FS_FCloseFile( fh );
 		return qfalse;
@@ -378,13 +378,13 @@ static qboolean SV_LoadIP4DB( const char *filename )
 	}
 
 	if ( i != num_tlds ) {
-			Com_Printf( S_COLOR_YELLOW "invalid ip4db entry #%i: range=[%08x..%08x], tld=%c%c\n",
+			COM_WARN( LOG_CAT_SERVER, "invalid ip4db entry #%i: range=[%08x..%08x], tld=%c%c\n",
 				i, ipdb_range[i].from, ipdb_range[i].to, ipdb_tld[i].tld[0], ipdb_tld[i].tld[1] );
 			SV_FreeIP4DB();
 			return qtrue; // to not try to load it again
 	}
 
-	Com_Printf( "ip4db: %i entries loaded\n", num_tlds );
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "ip4db: %i entries loaded\n", num_tlds );
 	return qtrue;
 }
 
@@ -510,16 +510,10 @@ void SV_PrintClientStateChange( const client_t *cl, clientState_t newState ) {
 		return;
 	}
 
-#ifndef _DEBUG
-	if ( com_developer->integer == 0 ) {
-		return;
-	}
-#endif // !_DEBUG
-
 	if ( cl->name[0] != '\0' ) {
-		Com_Printf( "Going from %s to %s for %s\n", SV_GetStateName( cl->state ), SV_GetStateName( newState ), cl->name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "Going from %s to %s for %s\n", SV_GetStateName( cl->state ), SV_GetStateName( newState ), cl->name );
 	} else {
-		Com_Printf( "Going from %s to %s for client %d\n", SV_GetStateName( cl->state ), SV_GetStateName( newState ), (int)(cl - svs.clients) );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "Going from %s to %s for client %d\n", SV_GetStateName( cl->state ), SV_GetStateName( newState ), (int)(cl - svs.clients) );
 	}
 	
 }
@@ -556,16 +550,16 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	   The QUIC connection stays alive; WN_DrainPendingConnects calls us
 	   again next frame. */
 	if ( svs.spawn.phase != SPAWN_IDLE ) {
-		Com_Printf( "SV_OnPlayerConnect: spawn in progress (phase %d), deferring conn %llu\n",
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "SV_OnPlayerConnect: spawn in progress (phase %d), deferring conn %llu\n",
 			(int)svs.spawn.phase, (unsigned long long)conn );
 		WN_RequeueConnect( conn, userinfo );
 		return;
 	}
 
-	Com_DPrintf( "SV_OnPlayerConnect: conn=%llu\n", (unsigned long long)conn );
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SV_OnPlayerConnect: conn=%llu\n", (unsigned long long)conn );
 
 	if ( !WN_GetAddrByConnHandle( conn, &from ) ) {
-		Com_Printf( S_COLOR_YELLOW "SV_OnPlayerConnect: unknown conn handle %llu\n",
+		COM_WARN( LOG_CAT_SERVER, "SV_OnPlayerConnect: unknown conn handle %llu\n",
 			(unsigned long long)conn );
 		return;
 	}
@@ -580,7 +574,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 		}
 	}
 	if ( !newcl ) {
-		Com_Printf( "SV_OnPlayerConnect: server full, dropping conn %llu\n",
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "SV_OnPlayerConnect: server full, dropping conn %llu\n",
 			(unsigned long long)conn );
 		if ( transport )
 			transport->drop_client( conn, "server full" );
@@ -615,7 +609,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	intptr_t denied = VM_Call( gvm, 3, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse );
 	if ( denied ) {
 		const char *reason = GVM_ArgPtr( denied );
-		Com_Printf( "QUIC: game rejected connection from %s: %s\n",
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "QUIC: game rejected connection from %s: %s\n",
 			NET_AdrToString( &from ), reason );
 		if ( transport )
 			transport->drop_client( conn, reason );
@@ -644,7 +638,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	 * CA_CONNECTING — a deadlock without this direct call). */
 	SV_SendClientGameState( newcl );
 
-	Com_DPrintf( "SV_OnPlayerConnect: slot %d assigned to conn=%llu (%s)\n",
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SV_OnPlayerConnect: slot %d assigned to conn=%llu (%s)\n",
 		clientNum, (unsigned long long)conn, NET_AdrToString( &from ) );
 
 	/* Heartbeat to master if first or last slot filled */
@@ -674,12 +668,12 @@ void SV_OnPlayerReady( conn_handle_t conn )
 	for ( int i = 0; i < sv_maxclients->integer; i++ ) {
 		cl = &svs.clients[i];
 		if ( cl->state == CS_PRIMED && cl->quic_conn == conn ) {
-			Com_DPrintf( "QUIC: SV_OnPlayerReady — slot %d (%s)\n", i, cl->name );
+			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: SV_OnPlayerReady — slot %d (%s)\n", i, cl->name );
 			SV_ClientEnterWorld( cl );
 			return;
 		}
 	}
-	Com_DPrintf( "QUIC: SV_OnPlayerReady: no CS_PRIMED client for conn %llu\n",
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: SV_OnPlayerReady: no CS_PRIMED client for conn %llu\n",
 		(unsigned long long)conn );
 }
 
@@ -697,7 +691,7 @@ Datagram format (written by CL_WritePacket QUIC path, key=0, bitstream):
 Called once per server frame from sv_main.c before SV_DrainQUICReliableCommands.
 ==================
 */
-void SV_DrainQUICUsercmds( void )
+void SV_DrainUsercmds_Impl( void )
 {
 	byte          dgbuf[2048];
 	int           dglen;
@@ -773,7 +767,7 @@ void SV_DrainQUICUsercmds( void )
 				cl->reliableAcknowledge = serverCmdAck;
 			}
 
-			WN_DBG( "usercmd recv: client=%s snapAck=%u cmdAck=%d → deltaMessage=%d reliableAck=%d\n",
+			Com_Log( SEV_TRACE, LOG_CAT_SERVER, "[WiredNet] usercmd recv: client=%s snapAck=%u cmdAck=%d → deltaMessage=%d reliableAck=%d\n",
 				cl->name, snapshotAck, serverCmdAck, cl->deltaMessage, cl->reliableAcknowledge );
 
 			/* decode cmds with key=0 (TLS handles confidentiality) */
@@ -799,6 +793,11 @@ void SV_DrainQUICUsercmds( void )
 		}
 		dglen = (int)sizeof( dgbuf );
 	}
+}
+
+void SV_DrainUsercmds( void ) {
+	if ( transport && transport->drain_usercmds )
+		transport->drain_usercmds();
 }
 
 /*
@@ -851,14 +850,14 @@ void SV_DrainQUICReliableCommands( void )
 					sizeof( cl->lastClientCommandString ) );
 				SV_ExecuteClientCommand( cl, (char *)buf );
 			} else {
-				Com_DPrintf( "QUIC: CHAN_COMMANDS for unknown conn %llu — dropped\n",
+				Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: CHAN_COMMANDS for unknown conn %llu — dropped\n",
 					(unsigned long long)rconn );
 			}
 		} else if ( rchan == CHAN_MCP ) {
 			/* MCP JSON-RPC payload from client via reliable channel.
 			 * The primary MCP path is the bidi-stream content-sniff in wn_main.c;
 			 * this channel path is for clients that explicitly frame MCP on CHAN_MCP. */
-			Com_DPrintf( "QUIC: CHAN_MCP from conn %llu len=%d\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: CHAN_MCP from conn %llu len=%d\n",
 				(unsigned long long)rconn, len );
 			/* Future: route to WN_ProcessMcpChannelMessage(rconn, buf, len) */
 		}
@@ -1049,7 +1048,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	msg_t		msg;
 	byte		msgBuffer[ MAX_MSGLEN_BUF ];
 
-	Com_DPrintf( "SV_SendClientGameState() for %s\n", client->name );
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SV_SendClientGameState() for %s\n", client->name );
 
 	SV_PrintClientStateChange( client, CS_PRIMED );
 
@@ -1145,7 +1144,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	// so at least try to inform him in console and release connection slot
 	if ( msg.overflowed ) {
 		if ( client->netchan.remoteAddress.type == NA_LOOPBACK ) {
-			Com_Error( ERR_DROP, "gamestate overflow" );
+			Com_Terminate( TERM_CLIENT_DROP, "gamestate overflow" );
 		} else {
 			NET_OutOfBandPrint( NS_SERVER, &client->netchan.remoteAddress, "print\n" S_COLOR_RED "SERVER ERROR: gamestate overflow\n" );
 			SV_DropClient( client, "gamestate overflow" );
@@ -1162,7 +1161,7 @@ static void SV_SendClientGameState( client_t *client ) {
 		 * no UDP MTU limit, so we can pack all configstrings + baselines. */
 		if ( !SV_WiredNetWriteBootstrap( client, bootbuf, WN_BOOTSTRAP_MAX, &bootlen ) ) {
 			Z_Free( bootbuf );
-			Com_Error( ERR_DROP, "WiredNet bootstrap overflow" );
+			Com_Terminate( TERM_CLIENT_DROP, "WiredNet bootstrap overflow" );
 		}
 		transport->send_reliable( client->quic_conn, CHAN_BOOTSTRAP, bootbuf, bootlen );
 		Z_Free( bootbuf );
@@ -1266,7 +1265,7 @@ Abort a download if in progress
 */
 static void SV_StopDownload_f( client_t *cl ) {
 	if (*cl->downloadName)
-		Com_DPrintf( "clientDownload: %d : file \"%s\" aborted\n", (int) (cl - svs.clients), cl->downloadName );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "clientDownload: %d : file \"%s\" aborted\n", (int) (cl - svs.clients), cl->downloadName );
 
 	SV_CloseDownload( cl );
 }
@@ -1283,7 +1282,7 @@ static void SV_DoneDownload_f( client_t *cl ) {
 	if ( cl->state == CS_ACTIVE )
 		return;
 
-	Com_DPrintf( "clientDownload: %s Done\n", cl->name );
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "clientDownload: %s Done\n", cl->name );
 
 	// resend the game state to update any clients that entered during the download
 	SV_SendClientGameState( cl );
@@ -1303,11 +1302,11 @@ static void SV_NextDownload_f( client_t *cl )
 	int block = atoi( Cmd_Argv(1) );
 
 	if (block == cl->downloadClientBlock) {
-		Com_DPrintf( "clientDownload: %d : client acknowledge of block %d\n", (int) (cl - svs.clients), block );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "clientDownload: %d : client acknowledge of block %d\n", (int) (cl - svs.clients), block );
 
 		// Find out if we are done.  A zero-length block indicates EOF
 		if (cl->downloadBlockSize[cl->downloadClientBlock % MAX_DOWNLOAD_WINDOW] == 0) {
-			Com_Printf( "clientDownload: %d : file \"%s\" completed\n", (int) (cl - svs.clients), cl->downloadName );
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "clientDownload: %d : file \"%s\" completed\n", (int) (cl - svs.clients), cl->downloadName );
 			SV_CloseDownload( cl );
 			return;
 		}
@@ -1414,17 +1413,17 @@ static int SV_WriteDownloadToClient( client_t *cl )
 			// cannot auto-download file
 			if(unreferenced)
 			{
-				Com_Printf("clientDownload: %d : \"%s\" is not referenced and cannot be downloaded.\n", (int) (cl - svs.clients), cl->downloadName);
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "clientDownload: %d : \"%s\" is not referenced and cannot be downloaded.\n", (int) (cl - svs.clients), cl->downloadName);
 				Com_sprintf(errorMessage, sizeof(errorMessage), "File \"%s\" is not referenced and cannot be downloaded.", cl->downloadName);
 			}
 			else if (isProprietary) {
-				Com_Printf("clientDownload: %d : \"%s\" cannot download proprietary files\n", (int) (cl - svs.clients), cl->downloadName);
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "clientDownload: %d : \"%s\" cannot download proprietary files\n", (int) (cl - svs.clients), cl->downloadName);
 				Com_sprintf(errorMessage, sizeof(errorMessage), "Cannot autodownload proprietary file \"%s\"", cl->downloadName);
 			}
 			else if ( !(sv_allowDownload->integer & DLF_ENABLE) ||
 				(sv_allowDownload->integer & DLF_NO_UDP) ) {
 
-				Com_Printf("clientDownload: %d : \"%s\" download disabled\n", (int) (cl - svs.clients), cl->downloadName);
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "clientDownload: %d : \"%s\" download disabled\n", (int) (cl - svs.clients), cl->downloadName);
 				if ( sv.pure != 0 ) {
 					Com_sprintf(errorMessage, sizeof(errorMessage), "Could not download \"%s\" because autodownloading is disabled on the server.\n\n"
 										"You will need to get this file elsewhere before you "
@@ -1438,7 +1437,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 			} else {
         // NOTE TTimo this is NOT supposed to happen unless bug in our filesystem scheme?
         //   if the pk3 is referenced, it must have been found somewhere in the filesystem
-				Com_Printf("clientDownload: %d : \"%s\" file not found on server\n", (int) (cl - svs.clients), cl->downloadName);
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "clientDownload: %d : \"%s\" file not found on server\n", (int) (cl - svs.clients), cl->downloadName);
 				Com_sprintf(errorMessage, sizeof(errorMessage), "File \"%s\" not found on server for autodownloading.\n", cl->downloadName);
 			}
 
@@ -1475,7 +1474,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 			return 1;
 		}
 
-		Com_Printf( "clientDownload: %d : beginning \"%s\"\n", (int) (cl - svs.clients), cl->downloadName );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "clientDownload: %d : beginning \"%s\"\n", (int) (cl - svs.clients), cl->downloadName );
 
 		cl->downloadCurrentBlock = cl->downloadClientBlock = cl->downloadXmitBlock = 0;
 		cl->downloadCount = 0;
@@ -1573,7 +1572,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 		transport->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );
 	}
 
-	Com_DPrintf( "clientDownload: %d : writing block %d\n", (int) (cl - svs.clients), cl->downloadXmitBlock );
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "clientDownload: %d : writing block %d\n", (int) (cl - svs.clients), cl->downloadXmitBlock );
 
 	// Move on to the next block
 	// It will get sent with next snap shot.  The rate will keep us in line.
@@ -1684,7 +1683,7 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 		{
 			// we may get incoming cp sequences from a previous serverId, which we need to ignore
 			if ( atoi( pArg ) != sv.serverId /* || !cl->gamestateAcked */ ) {
-				Com_DPrintf( "ignoring outdated cp command from client %s\n", cl->name );
+				Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "ignoring outdated cp command from client %s\n", cl->name );
 				return;
 			}
 		}
@@ -1975,7 +1974,7 @@ void SV_PrintLocations_f( client_t *client ) {
 			if ( client )
 				NET_OutOfBandPrint( NS_SERVER, &client->netchan.remoteAddress, "print\n%s", buf );
 			else
-				Com_Printf( "%s", buf );
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s", buf );
 
 			s = buf; *s = '\0';
 		}
@@ -1988,7 +1987,7 @@ void SV_PrintLocations_f( client_t *client ) {
 		if ( client )
 			NET_OutOfBandPrint( NS_SERVER, &client->netchan.remoteAddress, "print\n%s", buf );
 		else
-			Com_Printf( "%s", buf );
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s", buf );
 	}
 }
 
@@ -2069,7 +2068,7 @@ qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 	}
 
 	// if ( !isBot && ( !cl->gamestateAcked || sv.serverId != cl->serverId ) ) {
-	//		Com_Printf( "%s: ignoring pre map_restart / outdated client command '%s'\n", cl->name, s );
+	//		Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s: ignoring pre map_restart / outdated client command '%s'\n", cl->name, s );
 	//	return qtrue;
 	// }
 
@@ -2079,7 +2078,7 @@ qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 	if ( bFloodProtect && SV_FloodProtect( cl ) ) {
 #endif
 		// ignore any other text messages from this client but let them keep playing
-		Com_DPrintf( "client text ignored for %s: %s\n", cl->name, Cmd_Argv(0) );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "client text ignored for %s: %s\n", cl->name, Cmd_Argv(0) );
 	} else {
 		// pass unknown strings to the game
 		if ( !ucmd->name && sv.state == SS_GAME && cl->state >= CS_PRIMED ) {
@@ -2112,11 +2111,11 @@ static qboolean SV_ClientCommand( client_t *cl, msg_t *msg ) {
 		return qtrue;
 	}
 
-	Com_DPrintf( "clientCommand: %s : %i : %s\n", cl->name, seq, s );
+	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "clientCommand: %s : %i : %s\n", cl->name, seq, s );
 
 	// drop the connection if we have somehow lost commands
 	if ( seq - cl->lastClientCommand > 1 ) {
-		Com_Printf( "Client %s lost %i clientCommands\n", cl->name, seq - cl->lastClientCommand - 1 );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Client %s lost %i clientCommands\n", cl->name, seq - cl->lastClientCommand - 1 );
 		SV_DropClient( cl, "Lost reliable commands" );
 		return qfalse;
 	}
@@ -2179,12 +2178,12 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	int cmdCount = MSG_ReadByte( msg );
 
 	if ( cmdCount < 1 ) {
-		Com_Printf( "cmdCount < 1\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "cmdCount < 1\n" );
 		return;
 	}
 
 	if ( cmdCount > MAX_PACKET_USERCMDS ) {
-		Com_Printf( "cmdCount > MAX_PACKET_USERCMDS\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "cmdCount > MAX_PACKET_USERCMDS\n" );
 		return;
 	}
 
@@ -2213,7 +2212,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 		if ( sv.pure != 0 && !cl->gotCP ) {
 			// we didn't get a cp yet, don't assume anything and just send the gamestate all over again
 			if ( !SVC_RateLimit( &cl->gamestate_rate, 2, 1000 ) ) {
-				Com_DPrintf( "%s: didn't get cp command, resending gamestate\n", cl->name );
+				Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "%s: didn't get cp command, resending gamestate\n", cl->name );
 				SV_SendClientGameState( cl );
 			}
 			return;
@@ -2278,7 +2277,7 @@ static qboolean SV_AcknowledgeGamestate( client_t *cl, int serverId )
 			cl->gamestateAck = GSA_ACKED;
 			// this client has acknowledged the new gamestate so it's
 			// safe to start sending it the real time again
-			Com_DPrintf( "%s acknowledged gamestate\n", cl->name );
+			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "%s acknowledged gamestate\n", cl->name );
 			cl->oldServerTime = 0;
 			return qtrue;
 		}
@@ -2331,7 +2330,7 @@ void SV_ExecuteClientMessage( client_t *cl, msg_t *msg ) {
 #ifdef _DEBUG
 		SV_DropClient( cl, "DEBUG: illegible client message" );
 #else
-		Com_Printf( S_COLOR_YELLOW "WARNING: dropping %i commands from %s\n", cl->reliableSequence - cl->reliableAcknowledge, cl->name );
+		COM_WARN( LOG_CAT_SERVER, "dropping %i commands from %s\n", cl->reliableSequence - cl->reliableAcknowledge, cl->name );
 #endif
 		cl->reliableAcknowledge = cl->reliableSequence;
 		return;
@@ -2387,7 +2386,7 @@ void SV_ExecuteClientMessage( client_t *cl, msg_t *msg ) {
 		// late check for gamestate acknowledge & resend
 		if ( cl->state == CS_PRIMED ) {
 			if ( !SV_AcknowledgeGamestate( cl, serverId ) ) {
-				Com_DPrintf( "%s: dropped gamestate, resending\n", cl->name );
+				Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "%s: dropped gamestate, resending\n", cl->name );
 				if ( !SVC_RateLimit( &cl->gamestate_rate, 1, 1000 ) ) {
 					SV_SendClientGameState( cl );
 				}
@@ -2404,9 +2403,9 @@ void SV_ExecuteClientMessage( client_t *cl, msg_t *msg ) {
 	} else if ( c == clc_moveNoDelta ) {
 		SV_UserMove( cl, msg, qfalse );
 	} else if ( c != clc_EOF ) {
-		Com_Printf( "WARNING: bad command byte %i for client %i\n", c, (int) (cl - svs.clients) );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "WARNING: bad command byte %i for client %i\n", c, (int) (cl - svs.clients) );
 	}
 //	if ( msg->readcount != msg->cursize ) {
-//		Com_Printf( "WARNING: Junk at end of packet for client %i\n", cl - svs.clients );
+//		Com_Log( SEV_INFO, LOG_CAT_SERVER, "WARNING: Junk at end of packet for client %i\n", cl - svs.clients );
 //	}
 }

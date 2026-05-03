@@ -225,7 +225,7 @@ snd_stream_t *S_OPUS_CodecOpenStream( const char *filename )
 	OggOpusFile *of = op_open_callbacks( stream, &S_OPUS_Callbacks, NULL, 0, &error );
 	if ( !of )
 	{
-		Com_DPrintf( "S_OPUS: Failed to open %s (error %d)\n", filename, error );
+		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_OPUS: Failed to open %s (error %d)\n", filename, error );
 
 		S_CodecUtilClose( &stream );
 
@@ -292,7 +292,7 @@ snd_stream_t *S_OPUS_CodecOpenStream( const char *filename )
 			}
 			if ( stream->info.loopStart >= 0 )
 			{
-				Com_DPrintf( "S_OPUS: %s has loop points: start=%d end=%d\n",
+				Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_OPUS: %s has loop points: start=%d end=%d\n",
 					filename, stream->info.loopStart, stream->info.loopEnd );
 			}
 		}

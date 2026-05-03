@@ -28,6 +28,39 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 static qboolean R_LoadMD3(model_t *mod, int lod, void *buffer, int fileSize, const char *name );
 static qboolean R_LoadMDR(model_t *mod, void *buffer, int filesize, const char *name );
 
+#include "../renderercommon/tr_model_mdl.h"
+
+/*
+====================
+R_RegisterMDL
+====================
+*/
+static qhandle_t R_RegisterMDL(const char *name, model_t *mod)
+{
+	union { unsigned *u; void *v; } buf;
+	void     *md3Buf  = NULL;
+	int       md3Size = 0;
+	qboolean  loaded  = qfalse;
+	int       filesize;
+
+	filesize = ri.FS_ReadFile( name, &buf.v );
+	if ( !buf.v ) {
+		mod->type = MOD_BAD;
+		return 0;
+	}
+	if ( MDL_BuildMD3Buffer( buf.v, filesize, name, &md3Buf, &md3Size ) ) {
+		loaded = R_LoadMD3( mod, 0, md3Buf, md3Size, name );
+		ri.Free( md3Buf );
+	}
+	ri.FS_FreeFile( buf.v );
+	if ( !loaded ) {
+		mod->type = MOD_BAD;
+		return 0;
+	}
+	mod->numLods = 1;
+	return mod->index;
+}
+
 /*
 ====================
 R_RegisterMD3
@@ -60,7 +93,7 @@ static qhandle_t R_RegisterMD3(const char *name, model_t *mod)
 			continue;
 
 		if ( fileSize < sizeof( md3Header_t ) ) {
-			ri.Printf( PRINT_WARNING, "%s: truncated header for %s\n", __func__, name );
+			ri.Log( SEV_WARN, "%s: truncated header for %s\n", __func__, name );
 			ri.FS_FreeFile( buf.v );
 			break;
 		}
@@ -69,7 +102,7 @@ static qhandle_t R_RegisterMD3(const char *name, model_t *mod)
 		if ( ident == MD3_IDENT ) {
 			loaded = R_LoadMD3( mod, mod->numLods, buf.v, fileSize, name );
 		} else {
-			ri.Printf( PRINT_WARNING, "%s: unknown fileid for %s\n", __func__, name );
+			ri.Log( SEV_WARN, "%s: unknown fileid for %s\n", __func__, name );
 			loaded = qfalse;
 		}
 		
@@ -128,7 +161,7 @@ static qhandle_t R_RegisterMDR(const char *name, model_t *mod)
 	
 	if ( !loaded )
 	{
-		ri.Printf( PRINT_DEVELOPER, "%s: couldn't load %s\n", __func__, name );
+		ri.Log( SEV_DEBUG, "%s: couldn't load %s\n", __func__, name );
 		mod->type = MOD_BAD;
 		return 0;
 	}
@@ -165,7 +198,7 @@ static qhandle_t R_RegisterIQM(const char *name, model_t *mod)
 
 	if ( !loaded )
 	{
-		ri.Printf( PRINT_DEVELOPER, "%s: couldn't load %s\n", __func__, name );
+		ri.Log( SEV_DEBUG, "%s: couldn't load %s\n", __func__, name );
 		mod->type = MOD_BAD;
 		return 0;
 	}
@@ -188,6 +221,7 @@ static modelExtToLoaderMap_t modelLoaders[ ] =
 #if FEAT_IQM
 	{ "iqm", R_RegisterIQM },
 #endif // FEAT_IQM
+	{ "mdl", R_RegisterMDL },
 	{ "mdr", R_RegisterMDR },
 	{ "md3", R_RegisterMD3 }
 };
@@ -255,12 +289,12 @@ qhandle_t RE_RegisterModel( const char *name ) {
 	char		altName[ MAX_QPATH ];
 
 	if ( !name || !name[0] ) {
-		ri.Printf( PRINT_ALL, "RE_RegisterModel: NULL name\n" );
+		ri.Log( SEV_INFO, "RE_RegisterModel: NULL name\n" );
 		return 0;
 	}
 
 	if ( strlen( name ) >= MAX_QPATH ) {
-		ri.Printf( PRINT_ALL, "Model name exceeds MAX_QPATH\n" );
+		ri.Log( SEV_INFO, "Model name exceeds MAX_QPATH\n" );
 		return 0;
 	}
 
@@ -280,7 +314,7 @@ qhandle_t RE_RegisterModel( const char *name ) {
 	// allocate a new model_t
 
 	if ( ( mod = R_AllocModel() ) == NULL ) {
-		ri.Printf( PRINT_WARNING, "RE_RegisterModel: R_AllocModel() failed for '%s'\n", name);
+		ri.Log( SEV_WARN, "RE_RegisterModel: R_AllocModel() failed for '%s'\n", name);
 		return 0;
 	}
 
@@ -382,14 +416,14 @@ static qboolean R_LoadMD3( model_t *mod, int lod, void *buffer, int fileSize, co
 
 	version = LittleLong( pinmodel->version );
 	if ( version != MD3_VERSION ) {
-		ri.Printf( PRINT_WARNING, "%s: %s has wrong version (%i should be %i)\n", __func__, mod_name, version, MD3_VERSION );
+		ri.Log( SEV_WARN, "%s: %s has wrong version (%i should be %i)\n", __func__, mod_name, version, MD3_VERSION );
 		return qfalse;
 	}
 
 	size = LittleLong( pinmodel->ofsEnd );
 
 	if ( size > fileSize ) {
-		ri.Printf( PRINT_WARNING, "%s: %s has corrupted header\n", __func__, mod_name );
+		ri.Log( SEV_WARN, "%s: %s has corrupted header\n", __func__, mod_name );
 		return qfalse;
 	}
 
@@ -413,25 +447,25 @@ static qboolean R_LoadMD3( model_t *mod, int lod, void *buffer, int fileSize, co
 	LL( hdr->ofsEnd );
 
 	if ( hdr->numFrames < 1 ) {
-		ri.Printf( PRINT_WARNING, "%s: %s has no frames\n", __func__, mod_name );
+		ri.Log( SEV_WARN, "%s: %s has no frames\n", __func__, mod_name );
 		return qfalse;
 	}
 
 	if ( hdr->ofsFrames > size || hdr->ofsTags > size || hdr->ofsSurfaces > size ) {
-		ri.Printf( PRINT_WARNING, "%s: %s has corrupted header\n", __func__, mod_name );
+		ri.Log( SEV_WARN, "%s: %s has corrupted header\n", __func__, mod_name );
 		return qfalse;
 	}
 
 	if ( hdr->numFrames > (size - hdr->ofsFrames) / sizeof( md3Frame_t ) ) {
-		ri.Printf( PRINT_WARNING, "%s: %s has corrupted header\n", __func__, mod_name );
+		ri.Log( SEV_WARN, "%s: %s has corrupted header\n", __func__, mod_name );
 		return qfalse;
 	}
 	if ( hdr->numTags > (size - hdr->ofsTags) / (sizeof( md3Tag_t ) * hdr->numFrames) ) {
-		ri.Printf( PRINT_WARNING, "%s: %s has corrupted header\n", __func__, mod_name );
+		ri.Log( SEV_WARN, "%s: %s has corrupted header\n", __func__, mod_name );
 		return qfalse;
 	}
 	if ( hdr->numSurfaces > (size - hdr->ofsSurfaces) / sizeof( md3Surface_t ) ) {
-		ri.Printf( PRINT_WARNING, "%s: %s has corrupted header\n", __func__, mod_name );
+		ri.Log( SEV_WARN, "%s: %s has corrupted header\n", __func__, mod_name );
 		return qfalse;
 	}
 
@@ -467,7 +501,7 @@ static qboolean R_LoadMD3( model_t *mod, int lod, void *buffer, int fileSize, co
 		bytesToEnd = size - ((byte*)surf - (byte*)hdr);
 
 		if ( bytesToEnd < sizeof(*surf)) {
-			ri.Printf( PRINT_WARNING, "%s: %s has corrupted surface header\n", __func__, mod_name );
+			ri.Log( SEV_WARN, "%s: %s has corrupted surface header\n", __func__, mod_name );
 			return qfalse;
 		}
 
@@ -485,34 +519,34 @@ static qboolean R_LoadMD3( model_t *mod, int lod, void *buffer, int fileSize, co
 
 		if ( surf->ofsTriangles > bytesToEnd || surf->ofsShaders > bytesToEnd || surf->ofsSt > bytesToEnd ||
 			 surf->ofsXyzNormals > bytesToEnd || surf->ofsEnd > bytesToEnd ) {
-			ri.Printf( PRINT_WARNING, "%s: %s has corrupted surface header\n", __func__, mod_name );
+			ri.Log( SEV_WARN, "%s: %s has corrupted surface header\n", __func__, mod_name );
 			return qfalse;
 		}
 		if ( surf->numTriangles > (bytesToEnd - surf->ofsTriangles) / sizeof( md3Triangle_t ) ) {
-			ri.Printf( PRINT_WARNING, "%s: %s has corrupted surface header\n", __func__, mod_name );
+			ri.Log( SEV_WARN, "%s: %s has corrupted surface header\n", __func__, mod_name );
 			return qfalse;
 		}
 		if ( surf->numShaders > (bytesToEnd - surf->ofsShaders) / sizeof( md3Shader_t ) ) {
-			ri.Printf( PRINT_WARNING, "%s: %s has corrupted surface header\n", __func__, mod_name );
+			ri.Log( SEV_WARN, "%s: %s has corrupted surface header\n", __func__, mod_name );
 			return qfalse;
 		}
 		if ( surf->numVerts > (bytesToEnd - surf->ofsSt) / sizeof( md3St_t ) ) {
-			ri.Printf( PRINT_WARNING, "%s: %s has corrupted surface header\n", __func__, mod_name );
+			ri.Log( SEV_WARN, "%s: %s has corrupted surface header\n", __func__, mod_name );
 			return qfalse;
 		}
 		if ( surf->numVerts > (bytesToEnd - surf->ofsXyzNormals) / sizeof( md3XyzNormal_t ) ) {
-			ri.Printf( PRINT_WARNING, "%s: %s has corrupted surface header\n", __func__, mod_name );
+			ri.Log( SEV_WARN, "%s: %s has corrupted surface header\n", __func__, mod_name );
 			return qfalse;
 		}
 
 		if ( surf->numVerts >= SHADER_MAX_VERTEXES ) {
-			ri.Printf(PRINT_WARNING, "%s: %s has more than %i verts on %s (%i).\n", __func__,
+			ri.Log( SEV_WARN, "%s: %s has more than %i verts on %s (%i).\n", __func__,
 				mod_name, SHADER_MAX_VERTEXES - 1, surf->name[0] ? surf->name : "a surface",
 				surf->numVerts );
 			return qfalse;
 		}
 		if ( surf->numTriangles >= SHADER_MAX_INDEXES / 3 ) {
-			ri.Printf(PRINT_WARNING, "%s: %s has more than %i triangles on %s (%i).\n", __func__,
+			ri.Log( SEV_WARN, "%s: %s has more than %i triangles on %s (%i).\n", __func__,
 				mod_name, ( SHADER_MAX_INDEXES / 3 ) - 1, surf->name[0] ? surf->name : "a surface",
 				surf->numTriangles );
 			return qfalse;
@@ -559,7 +593,7 @@ static qboolean R_LoadMD3( model_t *mod, int lod, void *buffer, int fileSize, co
 			if (tri->indexes[0] >= surf->numVerts ||
 				tri->indexes[1] >= surf->numVerts ||
 				tri->indexes[2] >= surf->numVerts) {
-				ri.Printf( PRINT_WARNING, "%s: %s has corrupted indexes\n", __func__, mod_name );
+				ri.Log( SEV_WARN, "%s: %s has corrupted indexes\n", __func__, mod_name );
 				return qfalse;
 			}
 		}
@@ -614,7 +648,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 	pinmodel->version = LittleLong(pinmodel->version);
 	if ( pinmodel->version != MDR_VERSION ) 
 	{
-		ri.Printf(PRINT_WARNING, "%s: %s has wrong version (%i should be %i)\n", __func__, mod_name, pinmodel->version, MDR_VERSION);
+		ri.Log( SEV_WARN, "%s: %s has wrong version (%i should be %i)\n", __func__, mod_name, pinmodel->version, MDR_VERSION);
 		return qfalse;
 	}
 
@@ -622,7 +656,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 	
 	if ( size > filesize )
 	{
-		ri.Printf( PRINT_WARNING, "%s: Header of %s is broken. Wrong filesize declared!\n", __func__, mod_name );
+		ri.Log( SEV_WARN, "%s: Header of %s is broken. Wrong filesize declared!\n", __func__, mod_name );
 		return qfalse;
 	}
 	
@@ -646,7 +680,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 	if(pinmodel->numBones < 0 ||
 		sizeof(*mdr) + pinmodel->numFrames * (sizeof(*frame) + (pinmodel->numBones - 1) * sizeof(*frame->bones)) > size)
 	{
-		ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has broken structure.\n", mod_name);
+		ri.Log( SEV_WARN, "R_LoadMDR: %s has broken structure.\n", mod_name);
 		return qfalse;
 	}
 
@@ -668,7 +702,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 
 	if ( mdr->numFrames < 1 ) 
 	{
-		ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has no frames\n", mod_name);
+		ri.Log( SEV_WARN, "R_LoadMDR: %s has no frames\n", mod_name);
 		return qfalse;
 	}
 
@@ -760,7 +794,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 		// simple bounds check
 		if((byte *) (lod + 1) > (byte *) mdr + size)
 		{
-			ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has broken structure.\n", mod_name);
+			ri.Log( SEV_WARN, "R_LoadMDR: %s has broken structure.\n", mod_name);
 			return qfalse;
 		}
 
@@ -776,7 +810,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 			// simple bounds check
 			if((byte *) (surf + 1) > (byte *) mdr + size)
 			{
-				ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has broken structure.\n", mod_name);
+				ri.Log( SEV_WARN, "R_LoadMDR: %s has broken structure.\n", mod_name);
 				return qfalse;
 			}
 
@@ -795,14 +829,14 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 			// now do the checks that may fail.
 			if ( surf->numVerts >= SHADER_MAX_VERTEXES ) 
 			{
-				ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has more than %i verts on %s (%i).\n",
+				ri.Log( SEV_WARN, "R_LoadMDR: %s has more than %i verts on %s (%i).\n",
 					  mod_name, SHADER_MAX_VERTEXES - 1, surf->name[0] ? surf->name : "a surface",
 					  surf->numVerts );
 				return qfalse;
 			}
 			if ( surf->numTriangles*3 >= SHADER_MAX_INDEXES ) 
 			{
-				ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has more than %i triangles on %s (%i).\n",
+				ri.Log( SEV_WARN, "R_LoadMDR: %s has more than %i triangles on %s (%i).\n",
 					  mod_name, ( SHADER_MAX_INDEXES / 3 ) - 1, surf->name[0] ? surf->name : "a surface",
 					  surf->numTriangles );
 				return qfalse;
@@ -830,7 +864,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 				// simple bounds check
 				if(curv->numWeights < 0 || (byte *) (v + 1) + (curv->numWeights - 1) * sizeof(*weight) > (byte *) mdr + size)
 				{
-					ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has broken structure.\n", mod_name);
+					ri.Log( SEV_WARN, "R_LoadMDR: %s has broken structure.\n", mod_name);
 					return qfalse;
 				}
 
@@ -871,7 +905,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 			// simple bounds check
 			if(surf->numTriangles < 0 || (byte *) (tri + surf->numTriangles) > (byte *) mdr + size)
 			{
-				ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has broken structure.\n", mod_name);
+				ri.Log( SEV_WARN, "R_LoadMDR: %s has broken structure.\n", mod_name);
 				return qfalse;
 			}
 
@@ -909,7 +943,7 @@ static qboolean R_LoadMDR( model_t *mod, void *buffer, int filesize, const char 
 	// simple bounds check
 	if(mdr->numTags < 0 || (byte *) (tag + mdr->numTags) > (byte *) mdr + size)
 	{
-		ri.Printf(PRINT_WARNING, "R_LoadMDR: %s has broken structure.\n", mod_name);
+		ri.Log( SEV_WARN, "R_LoadMDR: %s has broken structure.\n", mod_name);
 		return qfalse;
 	}
 	
@@ -983,14 +1017,14 @@ void R_Modellist_f( void ) {
 	total = 0;
 	for ( i = 1 ; i < tr.numModels; i++ ) {
 		mod = tr.models[i];
-		ri.Printf( PRINT_ALL, "%8i : (%i) %s\n",mod->dataSize, mod->numLods, mod->name );
+		ri.Log( SEV_INFO, "%8i : (%i) %s\n",mod->dataSize, mod->numLods, mod->name );
 		total += mod->dataSize;
 	}
-	ri.Printf( PRINT_ALL, "%8i : Total models\n", total );
+	ri.Log( SEV_INFO, "%8i : Total models\n", total );
 
 #if	0		// not working right with new hunk
 	if ( tr.world ) {
-		ri.Printf( PRINT_ALL, "\n%8i : %s\n", tr.world->dataSize, tr.world->name );
+		ri.Log( SEV_INFO, "\n%8i : %s\n", tr.world->dataSize, tr.world->name );
 	}
 #endif
 }

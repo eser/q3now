@@ -42,32 +42,64 @@ static cvar_t *cl_drawPacketsPosY;
 static cvar_t *cl_drawPacketsFirstInterval;
 static cvar_t *cl_drawPacketsSecondInterval;
 
+static const cvarDesc_t netStatsDescs[] = {
+	/* ping */
+	/* 0  */ CVAR_BOOL( "cl_drawPing",               "0",  CVAR_ARCHIVE, "Draw per-interval ping statistics overlay (0=off, 1=on)." ),
+	/* 1  */ CVAR_INT(  "cl_drawPingFontSize",        "7",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 2  */ CVAR_INT(  "cl_drawPingPosX",            "0",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 3  */ CVAR_INT(  "cl_drawPingPosY",            "14", CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 4  */ CVAR_INT(  "cl_drawPingFirstInterval",   "2",  CVAR_ARCHIVE, "First collection window length in seconds for ping overlay.", 0, 0 ),
+	/* 5  */ CVAR_INT(  "cl_drawPingSecondInterval",  "10", CVAR_ARCHIVE, "Second collection window length in seconds for ping overlay.", 0, 0 ),
+	/* snaps */
+	/* 6  */ CVAR_BOOL( "cl_drawSnaps",               "0",  CVAR_ARCHIVE, "Draw per-interval snapshot-rate statistics overlay (0=off, 1=on)." ),
+	/* 7  */ CVAR_INT(  "cl_drawSnapsFontSize",       "7",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 8  */ CVAR_INT(  "cl_drawSnapsPosX",           "0",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 9  */ CVAR_INT(  "cl_drawSnapsPosY",           "7",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 10 */ CVAR_INT(  "cl_drawSnapsFirstInterval",  "2",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 11 */ CVAR_INT(  "cl_drawSnapsSecondInterval", "10", CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* packets */
+	/* 12 */ CVAR_BOOL( "cl_drawPackets",               "0",  CVAR_ARCHIVE, "Draw per-interval outbound packet-rate statistics overlay (0=off, 1=on)." ),
+	/* 13 */ CVAR_INT(  "cl_drawPacketsFontSize",       "7",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 14 */ CVAR_INT(  "cl_drawPacketsPosX",           "16", CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 15 */ CVAR_INT(  "cl_drawPacketsPosY",           "2",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 16 */ CVAR_INT(  "cl_drawPacketsFirstInterval",  "2",  CVAR_ARCHIVE, NULL, 0, 0 ),
+	/* 17 */ CVAR_INT(  "cl_drawPacketsSecondInterval", "10", CVAR_ARCHIVE, NULL, 0, 0 ),
+};
+
+enum {
+	NS_DRAWPING, NS_DRAWPINGFONTSIZE, NS_DRAWPINGPOSX, NS_DRAWPINGPOSY,
+	NS_DRAWPINGFIRSTINTERVAL, NS_DRAWPINGSECONDINTERVAL,
+	NS_DRAWSNAPS, NS_DRAWSNAPSFONTSIZE, NS_DRAWSNAPSPOSX, NS_DRAWSNAPSPOSY,
+	NS_DRAWSNAPSFIRSTINTERVAL, NS_DRAWSNAPSSECONDINTERVAL,
+	NS_DRAWPACKETS, NS_DRAWPACKETSFONTSIZE, NS_DRAWPACKETSPOSX, NS_DRAWPACKETSPOSY,
+	NS_DRAWPACKETSFIRSTINTERVAL, NS_DRAWPACKETSSECONDINTERVAL,
+	NS_CVAR_COUNT
+};
+
+_Static_assert( ARRAY_LEN( netStatsDescs ) == NS_CVAR_COUNT, "netStatsDescs/enum mismatch" );
+static cvar_t *netStatsHandles[NS_CVAR_COUNT];
+
+
 void SCR_NetStatsInit( void ) {
-	cl_drawPing = Cvar_Get( "cl_drawPing", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( cl_drawPing, "Draw per-interval ping statistics overlay (0=off, 1=on)." );
-	cl_drawPingFontSize = Cvar_Get( "cl_drawPingFontSize", "7", CVAR_ARCHIVE );
-	cl_drawPingPosX = Cvar_Get( "cl_drawPingPosX", "0", CVAR_ARCHIVE );
-	cl_drawPingPosY = Cvar_Get( "cl_drawPingPosY", "14", CVAR_ARCHIVE );
-	cl_drawPingFirstInterval = Cvar_Get( "cl_drawPingFirstInterval", "2", CVAR_ARCHIVE );
-	Cvar_SetDescription( cl_drawPingFirstInterval, "First collection window length in seconds for ping overlay." );
-	cl_drawPingSecondInterval = Cvar_Get( "cl_drawPingSecondInterval", "10", CVAR_ARCHIVE );
-	Cvar_SetDescription( cl_drawPingSecondInterval, "Second collection window length in seconds for ping overlay." );
-
-	cl_drawSnaps = Cvar_Get( "cl_drawSnaps", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( cl_drawSnaps, "Draw per-interval snapshot-rate statistics overlay (0=off, 1=on)." );
-	cl_drawSnapsFontSize = Cvar_Get( "cl_drawSnapsFontSize", "7", CVAR_ARCHIVE );
-	cl_drawSnapsPosX = Cvar_Get( "cl_drawSnapsPosX", "0", CVAR_ARCHIVE );
-	cl_drawSnapsPosY = Cvar_Get( "cl_drawSnapsPosY", "7", CVAR_ARCHIVE );
-	cl_drawSnapsFirstInterval = Cvar_Get( "cl_drawSnapsFirstInterval", "2", CVAR_ARCHIVE );
-	cl_drawSnapsSecondInterval = Cvar_Get( "cl_drawSnapsSecondInterval", "10", CVAR_ARCHIVE );
-
-	cl_drawPackets = Cvar_Get( "cl_drawPackets", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( cl_drawPackets, "Draw per-interval outbound packet-rate statistics overlay (0=off, 1=on)." );
-	cl_drawPacketsFontSize = Cvar_Get( "cl_drawPacketsFontSize", "7", CVAR_ARCHIVE );
-	cl_drawPacketsPosX = Cvar_Get( "cl_drawPacketsPosX", "16", CVAR_ARCHIVE );
-	cl_drawPacketsPosY = Cvar_Get( "cl_drawPacketsPosY", "2", CVAR_ARCHIVE );
-	cl_drawPacketsFirstInterval = Cvar_Get( "cl_drawPacketsFirstInterval", "2", CVAR_ARCHIVE );
-	cl_drawPacketsSecondInterval = Cvar_Get( "cl_drawPacketsSecondInterval", "10", CVAR_ARCHIVE );
+	Cvar_RegisterTable( netStatsDescs, ARRAY_LEN( netStatsDescs ), netStatsHandles );
+	cl_drawPing               = netStatsHandles[NS_DRAWPING];
+	cl_drawPingFontSize       = netStatsHandles[NS_DRAWPINGFONTSIZE];
+	cl_drawPingPosX           = netStatsHandles[NS_DRAWPINGPOSX];
+	cl_drawPingPosY           = netStatsHandles[NS_DRAWPINGPOSY];
+	cl_drawPingFirstInterval  = netStatsHandles[NS_DRAWPINGFIRSTINTERVAL];
+	cl_drawPingSecondInterval = netStatsHandles[NS_DRAWPINGSECONDINTERVAL];
+	cl_drawSnaps               = netStatsHandles[NS_DRAWSNAPS];
+	cl_drawSnapsFontSize       = netStatsHandles[NS_DRAWSNAPSFONTSIZE];
+	cl_drawSnapsPosX           = netStatsHandles[NS_DRAWSNAPSPOSX];
+	cl_drawSnapsPosY           = netStatsHandles[NS_DRAWSNAPSPOSY];
+	cl_drawSnapsFirstInterval  = netStatsHandles[NS_DRAWSNAPSFIRSTINTERVAL];
+	cl_drawSnapsSecondInterval = netStatsHandles[NS_DRAWSNAPSSECONDINTERVAL];
+	cl_drawPackets               = netStatsHandles[NS_DRAWPACKETS];
+	cl_drawPacketsFontSize       = netStatsHandles[NS_DRAWPACKETSFONTSIZE];
+	cl_drawPacketsPosX           = netStatsHandles[NS_DRAWPACKETSPOSX];
+	cl_drawPacketsPosY           = netStatsHandles[NS_DRAWPACKETSPOSY];
+	cl_drawPacketsFirstInterval  = netStatsHandles[NS_DRAWPACKETSFIRSTINTERVAL];
+	cl_drawPacketsSecondInterval = netStatsHandles[NS_DRAWPACKETSSECONDINTERVAL];
 }
 
 /*

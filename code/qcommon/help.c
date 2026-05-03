@@ -75,6 +75,19 @@ static void Help_FormatFlags( const cvar_t *var, char *out, int outSize )
 }
 
 
+static const char *Help_TypeName( cvarType_t type )
+{
+	switch ( type ) {
+	case CVT_STRING: return "string";
+	case CVT_BOOL:   return "bool";
+	case CVT_INT:    return "integer";
+	case CVT_FLOAT:  return "float";
+	case CVT_ENUM:   return "enum";
+	default:         return "unknown";
+	}
+}
+
+
 /*
 ============
 Help_PrintCvar
@@ -86,31 +99,74 @@ static void Help_PrintCvar( const cvar_t *var )
 {
 	char flagStr[256];
 
-	Com_Printf( S_COLOR_YELLOW "cvar " S_COLOR_WHITE "%s\n", var->name );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM,
+		S_COLOR_YELLOW "cvar " S_COLOR_WHITE "%s" S_COLOR_WHITE " (%s)\n",
+		var->name, Help_TypeName( var->type ) );
 
 	if ( var->description && var->description[0] ) {
-		Com_Printf( "  %s\n", var->description );
-	} else {
-		Com_Printf( "  (no description)\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  %s\n", var->description );
 	}
 
-	Com_Printf( "  current: \"%s\"\n", var->string );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  current: \"%s\"\n", var->string );
 	if ( var->resetString && var->resetString[0] ) {
-		Com_Printf( "  default: \"%s\"\n", var->resetString );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  default: \"%s\"\n", var->resetString );
 	}
 	if ( var->latchedString && var->latchedString[0] ) {
-		Com_Printf( "  latched: \"%s\"\n", var->latchedString );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  latched: \"%s\"\n", var->latchedString );
 	}
-	if ( var->mins ) {
-		Com_Printf( "  min:     %s\n", var->mins );
-	}
-	if ( var->maxs ) {
-		Com_Printf( "  max:     %s\n", var->maxs );
+
+	// Type-specific info
+	switch ( var->type ) {
+	case CVT_BOOL:
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  values:  0/1 (also accepts true/false, yes/no, on/off)\n" );
+		break;
+	case CVT_INT:
+		if ( var->typeMin != var->typeMax ) {
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  range:   %d — %d\n",
+				(int)var->typeMin, (int)var->typeMax );
+		} else {
+			if ( var->mins ) Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  min:     %s\n", var->mins );
+			if ( var->maxs ) Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  max:     %s\n", var->maxs );
+		}
+		break;
+	case CVT_FLOAT:
+		if ( var->typeMin != var->typeMax ) {
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  range:   %g — %g\n",
+				var->typeMin, var->typeMax );
+		} else {
+			if ( var->mins ) Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  min:     %s\n", var->mins );
+			if ( var->maxs ) Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  max:     %s\n", var->maxs );
+		}
+		break;
+	case CVT_ENUM:
+		if ( var->enumValues && var->enumCount > 0 ) {
+			char evbuf[512];
+			int ei, en = 0;
+			evbuf[0] = '\0';
+			for ( ei = 0; ei < var->enumCount; ei++ ) {
+				int elen;
+				if ( ei > 0 && en < (int)sizeof(evbuf) - 3 ) {
+					evbuf[en++] = ',';
+					evbuf[en++] = ' ';
+				}
+				elen = (int)strlen( var->enumValues[ei] );
+				if ( en + elen >= (int)sizeof(evbuf) - 1 ) break;
+				memcpy( evbuf + en, var->enumValues[ei], elen );
+				en += elen;
+			}
+			evbuf[en] = '\0';
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  values:  %s\n", evbuf );
+		}
+		break;
+	default:
+		if ( var->mins ) Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  min:     %s\n", var->mins );
+		if ( var->maxs ) Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  max:     %s\n", var->maxs );
+		break;
 	}
 
 	Help_FormatFlags( var, flagStr, sizeof( flagStr ) );
 	if ( flagStr[0] ) {
-		Com_Printf( "  flags:   %s\n", flagStr );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  flags:   %s\n", flagStr );
 	}
 }
 
@@ -122,8 +178,8 @@ Help_PrintCommand
 */
 static void Help_PrintCommand( const char *name )
 {
-	Com_Printf( S_COLOR_YELLOW "command " S_COLOR_WHITE "%s\n", name );
-	Com_Printf( "  (no description available)\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "command " S_COLOR_WHITE "%s\n", name );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  (no description available)\n" );
 }
 
 
@@ -139,7 +195,7 @@ static void Cmd_Help_f( void )
 	const char *arg0 = Cmd_Argv( 0 );
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Printf( "usage: %s <cvar|cmd>\n", arg0 );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: %s <cvar|cmd>\n", arg0 );
 		return;
 	}
 
@@ -155,7 +211,7 @@ static void Cmd_Help_f( void )
 		return;
 	}
 
-	Com_Printf( "No cvar or command named '%s'.\n", name );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "No cvar or command named '%s'.\n", name );
 }
 
 
@@ -181,11 +237,11 @@ static void Help_SearchCvarCallback( cvar_t *var, void *userdata )
 	}
 
 	if ( match ) {
-		Com_Printf( "  " S_COLOR_YELLOW "cvar " S_COLOR_WHITE "%s" S_COLOR_WHITE, var->name );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  " S_COLOR_YELLOW "cvar " S_COLOR_WHITE "%s" S_COLOR_WHITE, var->name );
 		if ( var->description && var->description[0] ) {
-			Com_Printf( " - %s", var->description );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " - %s", var->description );
 		}
-		Com_Printf( "\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
 		ctx->matches++;
 	}
 }
@@ -195,7 +251,7 @@ static void Help_SearchCmdCallback( const char *cmd_name, void *userdata )
 	helpSearchCtx_t *ctx = (helpSearchCtx_t *)userdata;
 
 	if ( Q_stristr( cmd_name, ctx->pattern ) ) {
-		Com_Printf( "  " S_COLOR_YELLOW "command " S_COLOR_WHITE "%s\n", cmd_name );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  " S_COLOR_YELLOW "command " S_COLOR_WHITE "%s\n", cmd_name );
 		ctx->matches++;
 	}
 }
@@ -211,7 +267,7 @@ static void Cmd_SearchHelp_f( void )
 	helpSearchCtx_t ctx;
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Printf( "usage: searchhelp <pattern>\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: searchhelp <pattern>\n" );
 		return;
 	}
 
@@ -221,7 +277,7 @@ static void Cmd_SearchHelp_f( void )
 	Cvar_ForEach( Help_SearchCvarCallback, &ctx );
 	Cmd_ForEachName( Help_SearchCmdCallback, &ctx );
 
-	Com_Printf( "%i match%s for '%s'.\n",
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%i match%s for '%s'.\n",
 		ctx.matches, ctx.matches == 1 ? "" : "es", ctx.pattern );
 }
 
@@ -335,14 +391,13 @@ Called from Com_Init after Cmd_Init.
 */
 void Help_Init( void )
 {
-	con_drawHelp = Cvar_Get( "con_drawHelp", "1", CVAR_ARCHIVE );
-	Cvar_CheckRange( con_drawHelp, "0", "15", CV_INTEGER );
-	Cvar_SetDescription( con_drawHelp,
+	static const cvarDesc_t d = CVAR_INT( "con_drawHelp", "1", CVAR_ARCHIVE,
 		"Console help panel bitmask:\n"
 		"  1 = enable\n"
 		"  2 = show even when no help text\n"
 		"  4 = show module (cvar|cmd)\n"
-		"  8 = show attribute letters (A/L/R/C/U)" );
+		"  8 = show attribute letters (A/L/R/C/U)", 0, 15 );
+	con_drawHelp = Cvar_Register( &d );
 
 	Cmd_AddCommand( "help", Cmd_Help_f );
 	Cmd_AddCommand( "man", Cmd_Help_f );

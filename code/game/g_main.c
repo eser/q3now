@@ -76,6 +76,7 @@ vmCvar_t	g_smoothClients;
 vmCvar_t	pmove_fixed;
 vmCvar_t	pmove_msec;
 vmCvar_t	pmove_overbounce;
+vmCvar_t	pm_step_debug;
 vmCvar_t	g_rankings;
 vmCvar_t	g_listEntity;
 vmCvar_t	g_localTeamPref;
@@ -238,6 +239,7 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO, 0, qfalse},
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO, 0, qfalse},
 	{ &pmove_overbounce, "pmove_overbounce", "1", CVAR_SYSTEMINFO, 0, qfalse},
+	{ &pm_step_debug, "pm_step_debug", "0", 0, 0, qfalse},
 
 	{ &g_rankings, "g_rankings", "0", 0, 0, qfalse},
 	{ &g_localTeamPref, "g_localTeamPref", "", 0, 0, qfalse },
@@ -314,8 +316,8 @@ static cvarTable_t		gameCvarTable[] = {
     { &g_ptl,                     "g_ptl",                     "0", CVAR_SERVERINFO | CVAR_ARCHIVE | CVAR_LATCH, 0, qfalse },
 #endif
 	// eser - camp-detection
-    { &g_campDetectionTime,            "g_campDetectionTime",            "60",  CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
-    { &g_campDetectionRadius,          "g_campDetectionRadius",          "300", CVAR_ARCHIVE, 0, qfalse },
+    { &g_campDetectionTime,            "g_campDetectionTime",            "0",  CVAR_SERVERINFO, 0, qfalse }, // was 60
+    { &g_campDetectionRadius,          "g_campDetectionRadius",          "300", 0, 0, qfalse },
 	// eser - camp-detection
 #if FEAT_DROP_ITEMS
     { &g_dropEnable,              "g_dropEnable",              "0", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
@@ -377,27 +379,6 @@ Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, i
 }
 
 
-void QDECL G_Printf( const char *fmt, ... ) {
-	va_list		argptr;
-	char		text[1024];
-
-	va_start (argptr, fmt);
-	vsnprintf (text, sizeof(text), fmt, argptr);
-	va_end (argptr);
-
-	trap_Print( text );
-}
-
-void QDECL G_Error( const char *fmt, ... ) {
-	va_list		argptr;
-	char		text[1024];
-
-	va_start (argptr, fmt);
-	vsnprintf (text, sizeof(text), fmt, argptr);
-	va_end (argptr);
-
-	trap_Error( text );
-}
 
 /*
 ================
@@ -452,7 +433,7 @@ void G_FindTeams( void ) {
 		}
 	}
 
-	G_Printf ("%i teams with %i entities\n", c, c2);
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "%i teams with %i entities\n", c, c2);
 }
 
 /*
@@ -473,7 +454,7 @@ void G_RegisterCvars( void ) {
 
 	// check some things
 	if ( g_gametype.integer < 0 || g_gametype.integer >= GT_MAX_GAME_TYPE ) {
-		G_Printf( "g_gametype %i is out of range, defaulting to 0\n", g_gametype.integer );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "g_gametype %i is out of range, defaulting to 0\n", g_gametype.integer );
 		trap_Cvar_Set( "g_gametype", "0" );
 		trap_Cvar_Update( &g_gametype );
 	}
@@ -517,9 +498,9 @@ G_InitGame
 void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	int					i;
 
-	G_Printf ("------- Game Initialization -------\n");
-	G_Printf ("gamename: %s\n", Q3NOW_GAMENAME);
-	G_Printf ("gamedate: %s\n", Q3NOW_GAMEDATE);
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "------- Game Initialization -------\n");
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "gamename: %s\n", Q3NOW_GAMENAME);
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "gamedate: %s\n", Q3NOW_GAMEDATE);
 
 	srand( randomSeed );
 
@@ -538,7 +519,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
         if ( g_instagib.integer )    QS_Append( &features, " instagib" );
         if ( g_excessive.integer )   QS_Append( &features, " excessive" );
         if ( g_grapple.integer )     QS_Append( &features, " grapple" );
-        G_Printf( "q3now | active:%s\n", QS_Empty(&features) ? " (none)" : QS_CStr(&features) );
+        Com_Log( SEV_INFO, LOG_CAT_GAME, "q3now | active:%s\n", QS_Empty(&features) ? " (none)" : QS_CStr(&features) );
     }
 
 	// set some level globals
@@ -555,7 +536,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 			trap_FS_FOpenFile( g_logfile.string, &level.logFile, FS_APPEND );
 		}
 		if ( !level.logFile ) {
-			G_Printf( "WARNING: Couldn't open logfile: %s\n", g_logfile.string );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "WARNING: Couldn't open logfile: %s\n", g_logfile.string );
 		} else {
 			char	serverinfo[MAX_INFO_STRING];
 
@@ -565,7 +546,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 			G_LogPrintf("InitGame: %s\n", serverinfo );
 		}
 	} else {
-		G_Printf( "Not logging to disk.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Not logging to disk.\n" );
 	}
 
 	G_InitWorldSession();
@@ -610,7 +591,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 				}
 				if ( !*p ) break;
 			}
-			G_Printf( "Cron: loaded %d jobs from crontab.txt\n", numCronJobs );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Cron: loaded %d jobs from crontab.txt\n", numCronJobs );
 		}
 		if ( f ) {
 			trap_FS_FCloseFile( f );
@@ -658,6 +639,12 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	// general initialization
 	G_FindTeams();
 
+	{
+		extern void Q1_LinkDoors( void );
+		if ( trap_Cvar_VariableIntegerValue( "com_mapBspVersion" ) == 29 )
+			Q1_LinkDoors();
+	}
+
     if (g_gametype.integer == GT_LASTMANSTANDING) {
         level.initialScorelimit = g_scorelimit.integer;
 
@@ -679,7 +666,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 				G_FreeEntity( e );
 			}
 		}
-		G_Printf( "Clan Arena: items removed\n" );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Clan Arena: items removed\n" );
 	}
 #endif
 
@@ -690,7 +677,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 
 	SaveRegisteredItems();
 
-	G_Printf ("-----------------------------------\n");
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "-----------------------------------\n");
 
 	if ( trap_Cvar_VariableIntegerValue( "bot_enable" ) ) {
 		BotAISetup( restart );
@@ -699,6 +686,39 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	}
 
 	trap_SetConfigstring( CS_INTERMISSION, "" );
+
+	// Initialize lightstyle configstrings for all 64 slots (styles 0-63).
+	//   Styles  0-10: vanilla Q1 animated pattern strings (match renderer's hardcoded table).
+	//   Styles 11-31: "m" (constant baseline brightness; no animation).
+	//   Styles 32-63: "a" (canonical Q1 off state; matches FTEQW/rerelease).
+	{
+		static const char * const q1DefaultPatterns[11] = {
+			"m",                                                    /* 0  normal            */
+			"mmnmmommommnonmmonqnmmo",                              /* 1  flicker           */
+			"abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba",  /* 2  slow strong pulse */
+			"mmmmmaaaaammmmmaaaaaabcdefgabcdefg",                   /* 3  candle (subtle)   */
+			"mamamamamama",                                          /* 4  fast strobe       */
+			"jklmnopqrstuvwxyzyxwvutsrqponmlkj",                    /* 5  gentle pulse      */
+			"nmonqnmomnmomomno",                                     /* 6  flicker 2         */
+			"mmmaaaabcdefgmmmmaaaammmaamm",                          /* 7  candle 2          */
+			"mmmaaammmaaammmabcdefaaaammmmabcdefmmmaaaa",             /* 8  candle 3          */
+			"aaaaaaaazzzzzzzz",                                      /* 9  slow strobe       */
+			"mmamammmmammamamaaamammma",                             /* 10 fluorescent       */
+		};
+		int i;
+		level.q1_nextSwitchableStyle = 32;
+		for ( i = 0; i < CS_MAX_LIGHTSTYLES; i++ ) {
+			const char *pattern;
+			if ( i < 11 ) {
+				pattern = q1DefaultPatterns[i];
+			} else if ( i < 32 ) {
+				pattern = "m"; /* constant baseline */
+			} else {
+				pattern = "a"; /* switchable: off by default (canonical Q1 minimum) */
+			}
+			trap_SetConfigstring( CS_LIGHTSTYLES + i, pattern );
+		}
+	}
 
 #if FEAT_GAME_MEETING
 	level.meeting = g_meeting.integer ? qtrue : qfalse;
@@ -719,7 +739,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 		const char *next = G_PeekRotationMap();
 		if ( next ) {
 			trap_Cvar_Set( "nextmap", va( "map %s", next ) );
-			G_Printf( "Map rotation: next map is %s\n", next );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Map rotation: next map is %s\n", next );
 		}
 	}
 #endif
@@ -733,7 +753,7 @@ G_ShutdownGame
 =================
 */
 void G_ShutdownGame( int restart ) {
-	G_Printf ("==== ShutdownGame ====\n");
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "==== ShutdownGame ====\n");
 
 	if ( level.logFile ) {
 		G_LogPrintf("ShutdownGame:\n" );
@@ -754,26 +774,27 @@ void G_ShutdownGame( int restart ) {
 
 //===================================================================
 
-void QDECL Com_Error ( errorParm_t logLevel, const char *error, ... ) {
+void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *error, ... ) {
 	va_list		argptr;
-	char		text[1024];
+	char		text[MAX_STRING_CHARS];
 
-	va_start (argptr, error);
-	vsnprintf (text, sizeof(text), error, argptr);
-	va_end (argptr);
+	va_start( argptr, error );
+	vsnprintf( text, sizeof(text), error, argptr );
+	va_end( argptr );
 
-	trap_Error( text );
+	trap_Terminate( reason, text );
 }
 
-void QDECL Com_Printf( const char *msg, ... ) {
+void QDECL Com_Log_Impl( log_severity_t severity, logCategory_t cat, const char *msg, ... ) {
 	va_list		argptr;
-	char		text[1024];
+	char		text[MAX_STRING_CHARS];
 
-	va_start (argptr, msg);
-	vsnprintf (text, sizeof(text), msg, argptr);
-	va_end (argptr);
+	(void)cat;
+	va_start( argptr, msg );
+	vsnprintf( text, sizeof(text), msg, argptr );
+	va_end( argptr );
 
-	trap_Print( text );
+	trap_Log( severity, text );
 }
 
 /*
@@ -1353,7 +1374,7 @@ void QDECL G_LogPrintf( const char *fmt, ... ) {
 	va_end( argptr );
 
 	if ( g_dedicated.integer ) {
-		G_Printf( "%s", string + 7 );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "%s", string + 7 );
 	}
 
 	if ( !level.logFile ) {
@@ -1610,7 +1631,7 @@ void CheckExitRules( void ) {
     }
 
 	if ( g_scorelimit.integer < 0 ) {
-		G_Printf( "g_scorelimit %i is out of range, defaulting to 0\n", g_scorelimit.integer );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "g_scorelimit %i is out of range, defaulting to 0\n", g_scorelimit.integer );
 		trap_Cvar_Set( "g_scorelimit", "0" );
 		trap_Cvar_Update( &g_scorelimit );
 	}
@@ -1681,7 +1702,7 @@ void CheckExitRules( void ) {
 	}
 
 	if ( g_timelimit.integer < 0 || g_timelimit.integer > INT_MAX / 60000 ) {
-		G_Printf( "g_timelimit %i is out of range, defaulting to 0\n", g_timelimit.integer );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "g_timelimit %i is out of range, defaulting to 0\n", g_timelimit.integer );
 		trap_Cvar_Set( "g_timelimit", "0" );
 		trap_Cvar_Update( &g_timelimit );
 	}
@@ -2358,7 +2379,7 @@ void G_RunThink (gentity_t *ent) {
 	
 	ent->nextthink = 0;
 	if (!ent->think) {
-		G_Error ( "NULL ent->think");
+		Com_Terminate( TERM_CLIENT_DROP, "NULL ent->think");
 	}
 	ent->think (ent);
 }
@@ -2884,7 +2905,7 @@ void G_RunFrame( int levelTime ) {
 
 	if (g_listEntity.integer) {
 		for (i = 0; i < MAX_GENTITIES; i++) {
-			G_Printf("%4i: %s\n", i, g_entities[i].classname);
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "%4i: %s\n", i, g_entities[i].classname);
 		}
 		trap_Cvar_Set("g_listEntity", "0");
 	}

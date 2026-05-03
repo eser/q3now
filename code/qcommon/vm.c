@@ -73,7 +73,7 @@ void VM_CheckBounds( const vm_t *vm, unsigned int address, unsigned int length )
 	{
 		if ( (address | length) > vm->dataMask || (address + length) > vm->dataMask )
 		{
-			Com_Error( ERR_DROP, "program tried to bypass data segment bounds" );
+			Com_Terminate( TERM_CLIENT_DROP, "program tried to bypass data segment bounds" );
 		}
 	}
 }
@@ -90,7 +90,7 @@ void VM_CheckBounds2( const vm_t *vm, unsigned int addr1, unsigned int addr2, un
 	{
 		if ( (addr1 | addr2 | length) > vm->dataMask || (addr1 + length) > vm->dataMask || (addr2+length) > vm->dataMask )
 		{
-			Com_Error( ERR_DROP, "program tried to bypass data segment bounds" );
+			Com_Terminate( TERM_CLIENT_DROP, "program tried to bypass data segment bounds" );
 		}
 	}
 }
@@ -107,7 +107,7 @@ void VM_CheckBounds3( const vm_t *vm, unsigned int address, unsigned int count, 
 	{
 		if ( (uint64_t)address + (uint64_t)count * size > vm->dataMask )
 		{
-			Com_Error( ERR_DROP, "program tried to bypass data segment bounds" );
+			Com_Terminate( TERM_CLIENT_DROP, "program tried to bypass data segment bounds" );
 		}
 	}
 }
@@ -124,12 +124,12 @@ static void Cmd_ReloadWasm_f( void ) {
 	for ( int i = 0; i < VM_COUNT; i++ ) {
 		vm_t *vm = &vmTable[i];
 		if ( vm->name && vm->isWasm ) {
-			Com_Printf( "Reloading %s...\n", vm->name );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Reloading %s...\n", vm->name );
 			VM_Free( vm );
 			vm->name = NULL;  // allow VM_Create to recreate
 		}
 	}
-	Com_Printf( "WASM modules unloaded. They will reload on next map.\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WASM modules unloaded. They will reload on next map.\n" );
 }
 #endif
 
@@ -248,6 +248,7 @@ static int	ParseHex( const char *text ) {
 }
 
 
+#ifdef _DEBUG
 /*
 ===============
 VM_LoadSymbols
@@ -259,18 +260,13 @@ static void VM_LoadSymbols( vm_t *vm ) {
 		void	*v;
 	} mapfile;
 
-	// don't load symbols if not developer
-	if ( !com_developer->integer ) {
-		return;
-	}
-
 	char name[MAX_QPATH];
 	COM_StripExtension(vm->name, name, sizeof(name));
 	char symbols[MAX_QPATH];
 	Com_sprintf( symbols, sizeof( symbols ), "vm/%s.map", name );
 	FS_ReadFile( symbols, &mapfile.v );
 	if ( !mapfile.c ) {
-		Com_Printf( "Couldn't load symbol file: %s\n", symbols );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't load symbol file: %s\n", symbols );
 		return;
 	}
 
@@ -294,14 +290,14 @@ static void VM_LoadSymbols( vm_t *vm ) {
 
 		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
-			Com_Printf( "WARNING: incomplete line at end of file\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: incomplete line at end of file\n" );
 			break;
 		}
 		int value = ParseHex( token );
 
 		token = COM_Parse( &parser, &text_p );
 		if ( !token[0] ) {
-			Com_Printf( "WARNING: incomplete line at end of file\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: incomplete line at end of file\n" );
 			break;
 		}
 		int chars = strlen( token );
@@ -317,9 +313,10 @@ static void VM_LoadSymbols( vm_t *vm ) {
 	}
 
 	vm->numSymbols = count;
-	Com_Printf( "%i symbols parsed from %s\n", count, symbols );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%i symbols parsed from %s\n", count, symbols );
 	FS_FreeFile( mapfile.v );
 }
+#endif
 
 
 /*
@@ -382,7 +379,7 @@ vm_t *VM_Restart( vm_t *vm ) {
 		return vm;
 	}
 
-	Com_Printf( S_COLOR_YELLOW "WASM module cannot restart in place; freeing.\n" );
+	COM_WARN( LOG_CAT_SYSTEM, "WASM module cannot restart in place; freeing.\n" );
 	VM_Free( vm );
 	return NULL;
 }
@@ -404,7 +401,7 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 	void *libHandle = FS_LoadLibrary( filename );
 
 	if ( !libHandle ) {
-		Com_DPrintf( "VM_LoadDLL '%s' failed\n", filename );
+		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "VM_LoadDLL '%s' failed\n", filename );
 		return NULL;
 	}
 
@@ -415,7 +412,7 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 		return NULL;
 	}
 
-	Com_Printf( "VM_LoadDll(%s): loaded, vmMain @ %p\n", name, *entryPoint );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "VM_LoadDll(%s): loaded, vmMain @ %p\n", name, *entryPoint );
 	dllEntry( systemcalls );
 
 	return libHandle;
@@ -432,11 +429,11 @@ Loads a native shared library (VMI_NATIVE) or a WASM module
 */
 vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret ) {
 	if ( !systemCalls ) {
-		Com_Error( ERR_FATAL, "VM_Create: bad parms" );
+		Com_Terminate( TERM_UNRECOVERABLE, "VM_Create: bad parms" );
 	}
 
 	if ( (unsigned)index >= VM_COUNT ) {
-		Com_Error( ERR_DROP, "VM_Create: bad vm index %i", index );
+		Com_Terminate( TERM_CLIENT_DROP, "VM_Create: bad vm index %i", index );
 	}
 
 	int remaining = Hunk_MemoryRemaining();
@@ -446,7 +443,7 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 	// see if we already have the VM
 	if ( vm->name ) {
 		if ( vm->index != index ) {
-			Com_Error( ERR_DROP, "VM_Create: bad allocated vm index %i", vm->index );
+			Com_Terminate( TERM_CLIENT_DROP, "VM_Create: bad allocated vm index %i", vm->index );
 			return NULL;
 		}
 		return vm;
@@ -469,7 +466,7 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 
 	if ( interpret == VMI_NATIVE ) {
 		// try to load as a system dll
-		Com_Printf( "Loading dll file %s.\n", name );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Loading dll file %s.\n", name );
 		vm->dllHandle = VM_LoadDll( name, &vm->entryPoint, dllSyscalls );
 		if ( vm->dllHandle ) {
 			vm->privateFlag = 0; // allow reading private cvars
@@ -481,7 +478,7 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 			return vm;
 		}
 
-		Com_DPrintf( "Failed to load dll, falling back to WASM.\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Failed to load dll, falling back to WASM.\n" );
 		interpret = VMI_COMPILED;
 	}
 
@@ -497,7 +494,7 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 #endif
 
 	// No WASM module found and no native DLL loaded
-	Com_Printf( S_COLOR_YELLOW "No module found for %s (tried native + WASM).\n", name );
+	COM_WARN( LOG_CAT_SYSTEM, "No module found for %s (tried native + WASM).\n", name );
 	VM_Free( vm );
 	return NULL;
 }
@@ -516,10 +513,10 @@ void VM_Free( vm_t *vm ) {
 
 	if ( vm->callLevel ) {
 		if ( !forced_unload ) {
-			Com_Error( ERR_FATAL, "VM_Free(%s) on running vm", vm->name );
+			Com_Terminate( TERM_UNRECOVERABLE, "VM_Free(%s) on running vm", vm->name );
 			return;
 		} else {
-			Com_Printf( "forcefully unloading %s vm\n", vm->name );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "forcefully unloading %s vm\n", vm->name );
 		}
 	}
 
@@ -633,16 +630,16 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 	intptr_t r;
 
 	if ( !vm ) {
-		Com_Error( ERR_FATAL, "VM_Call with NULL vm" );
+		Com_Terminate( TERM_UNRECOVERABLE, "VM_Call with NULL vm" );
 	}
 
 #ifdef DEBUG
 	if ( vm_debugLevel ) {
-	  Com_Printf( "VM_Call( %d )\n", callnum );
+	  Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "VM_Call( %d )\n", callnum );
 	}
 
 	if ( nargs >= MAX_VMMAIN_CALL_ARGS ) {
-		Com_Error( ERR_DROP, "VM_Call: nargs >= MAX_VMMAIN_CALL_ARGS" );
+		Com_Terminate( TERM_CLIENT_DROP, "VM_Call: nargs >= MAX_VMMAIN_CALL_ARGS" );
 	}
 #endif
 
@@ -690,7 +687,7 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 		// add more arguments if you're changed MAX_VMMAIN_CALL_ARGS:
 		r = vm->entryPoint( callnum, args[0], args[1], args[2] );
 	} else {
-		Com_Error( ERR_DROP, "VM_Call: no module loaded for %s", vm->name );
+		Com_Terminate( TERM_CLIENT_DROP, "VM_Call: no module loaded for %s", vm->name );
 		r = 0;
 	}
 	--vm->callLevel;
@@ -707,25 +704,25 @@ VM_VmInfo_f
 ==============
 */
 static void VM_VmInfo_f( void ) {
-	Com_Printf( "Registered virtual machines:\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Registered virtual machines:\n" );
 	for ( int i = 0 ; i < VM_COUNT ; i++ ) {
 		const vm_t *vm = &vmTable[i];
 		if ( !vm->name ) {
 			continue;
 		}
-		Com_Printf( "%s : ", vm->name );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s : ", vm->name );
 #if FEAT_WASM
 		if ( vm->isWasm ) {
-			Com_Printf( "%s\n", vm->isWasmAot ? "WASM AOT" : "WASM interpreter" );
-			Com_Printf( "    data length : %7i\n", vm->dataMask + 1 );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\n", vm->isWasmAot ? "WASM AOT" : "WASM interpreter" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "    data length : %7i\n", vm->dataMask + 1 );
 			continue;
 		}
 #endif
 		if ( vm->dllHandle ) {
-			Com_Printf( "native\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "native\n" );
 			continue;
 		}
 
-		Com_Printf( "unknown\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "unknown\n" );
 	}
 }

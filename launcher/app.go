@@ -23,7 +23,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const idQuake3PackURL = "https://objects.eser.live/quakedata/id-quake3pack.zip"
+const idQuake3PackURL = "https://objects.eser.live/quakedata/id-quakepack.zip"
 
 // App is the main application struct. Methods are bound to the frontend via Wails.
 type App struct {
@@ -173,9 +173,9 @@ func (a *App) AcceptEula() error {
 
 // ── Free Resource Downloads ─────────────────────────────────────────────────
 
-// CheckDownloadStatus returns whether the id-quake3pack has been downloaded and extracted.
+// CheckDownloadStatus returns whether the id-quakepack has been downloaded and extracted.
 func (a *App) CheckDownloadStatus() map[string]interface{} {
-	packDir := filepath.Join(a.paths.DownloadDir(), "id-quake3pack")
+	packDir := filepath.Join(a.paths.DownloadDir(), "id-quakepack")
 	ready := dirExists(packDir)
 	return map[string]interface{}{
 		"ready": ready,
@@ -210,8 +210,8 @@ func (a *App) runDownload() {
 	a.mu.Unlock()
 
 	dlDir := a.paths.DownloadDir()
-	zipPath := filepath.Join(dlDir, "id-quake3pack.zip")
-	unzipDir := filepath.Join(dlDir, "id-quake3pack")
+	zipPath := filepath.Join(dlDir, "id-quakepack.zip")
+	unzipDir := filepath.Join(dlDir, "id-quakepack")
 
 	// Step 1: Check if zip already downloaded.
 	if fileExists(zipPath) {
@@ -245,7 +245,7 @@ func (a *App) runDownload() {
 		return
 	}
 
-	// Step 3: Unzip to downloads/id-quake3pack/.
+	// Step 3: Unzip to downloads/id-quakepack/.
 	runtime.EventsEmit(a.ctx, "download:progress", map[string]interface{}{
 		"current": 1,
 		"total":   2,
@@ -455,7 +455,7 @@ func (a *App) runImport(q3Path string) {
 	// ── Step 1: Validate downloaded pack ─────────────────────────────────
 	emitProgress("scan", 0, 1, "Checking downloaded resources...")
 
-	packDir := filepath.Join(a.paths.DownloadDir(), "id-quake3pack")
+	packDir := filepath.Join(a.paths.DownloadDir(), "id-quakepack")
 
 	if !dirExists(packDir) {
 		runtime.EventsEmit(a.ctx, "import:error",
@@ -465,13 +465,13 @@ func (a *App) runImport(q3Path string) {
 
 	// ── Step 2: Build pax jobs ───────────────────────────────────────────
 
-	// Always: pax01 (id-quake3pack: all paks from the free download)
+	// Always: pax01 (id-quakepack: all paks from the free download)
 	jobs := []paxJob{
 		{
 			name:   "pax01",
 			output: "pax01.sw3z",
 			sources: []pipeline.SourceGroup{
-				{Origin: "id-quake3pack", Dir: packDir},
+				{Origin: "id-quakepack", Dir: packDir},
 			},
 			entries: pipeline.Q3CopyPax01Entries,
 		},
@@ -550,7 +550,7 @@ func (a *App) runImport(q3Path string) {
 
 	// ── Step 4: Write manifest (signals "assets are ready") ──────────────
 
-	inventory := map[string]string{"id-quake3pack": packDir}
+	inventory := map[string]string{"id-quakepack": packDir}
 	if q3Path != "" {
 		inventory["q3_install"] = q3Path
 	}

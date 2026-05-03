@@ -109,10 +109,10 @@ static rserr_t GLW_StartDriverAndSetMode( int mode, const char *modeFS, int colo
 	switch ( err )
 	{
 	case RSERR_INVALID_FULLSCREEN:
-		Com_Printf( "...WARNING: fullscreen unavailable in this mode\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WARNING: fullscreen unavailable in this mode\n" );
 		return err;
 	case RSERR_INVALID_MODE:
-		Com_Printf( "...WARNING: could not set the given mode (%d)\n", mode );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WARNING: could not set the given mode (%d)\n", mode );
 		return err;
 	default:
 		break;
@@ -134,7 +134,7 @@ static int GLW_ChoosePFD( HDC hDC, PIXELFORMATDESCRIPTOR *pPFD )
 	int maxPFD, bestMatch;
 	int i;
 
-	Com_Printf( "...GLW_ChoosePFD( %d, %d, %d )\n", ( int ) pPFD->cColorBits, ( int ) pPFD->cDepthBits, ( int ) pPFD->cStencilBits );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...GLW_ChoosePFD( %d, %d, %d )\n", ( int ) pPFD->cColorBits, ( int ) pPFD->cDepthBits, ( int ) pPFD->cStencilBits );
 
 	// count number of PFDs
 #ifdef _MSC_VER
@@ -142,7 +142,7 @@ static int GLW_ChoosePFD( HDC hDC, PIXELFORMATDESCRIPTOR *pPFD )
 		maxPFD = DescribePixelFormat( hDC, 1, sizeof( PIXELFORMATDESCRIPTOR ), NULL );
 	}
 	__except ( EXCEPTION_EXECUTE_HANDLER ) {
-		Com_Error( ERR_FATAL, "DescribePixelFormat() crashed" );
+		Com_Terminate( TERM_UNRECOVERABLE, "DescribePixelFormat() crashed" );
 		return 0;
 	}
 #else
@@ -151,7 +151,7 @@ static int GLW_ChoosePFD( HDC hDC, PIXELFORMATDESCRIPTOR *pPFD )
 
 	pfds = Z_Malloc( ( maxPFD + 1 ) * sizeof( PIXELFORMATDESCRIPTOR ) );
 
-	Com_Printf( "...%d PFDs found\n", maxPFD );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...%d PFDs found\n", maxPFD );
 
 	// grab information
 	for ( i = 1; i <= maxPFD; i++ )
@@ -175,7 +175,7 @@ __rescan:
 			{
 				if ( r_verbose->integer )
 				{
-					Com_Printf( "...PFD %d rejected, software acceleration\n", i );
+					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...PFD %d rejected, software acceleration\n", i );
 				}
 				continue;
 			}
@@ -186,7 +186,7 @@ __rescan:
 		{
 			if ( r_verbose->integer )
 			{
-				Com_Printf( "...PFD %d rejected, not RGBA\n", i );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...PFD %d rejected, not RGBA\n", i );
 			}
 			continue;
 		}
@@ -196,7 +196,7 @@ __rescan:
 		{
 			if ( r_verbose->integer )
 			{
-				Com_Printf( "...PFD %d rejected, improper flags (%lx instead of %lx)\n", i, pfds[i].dwFlags, pPFD->dwFlags );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...PFD %d rejected, improper flags (%lx instead of %lx)\n", i, pfds[i].dwFlags, pPFD->dwFlags );
 			}
 			continue;
 		}
@@ -308,22 +308,22 @@ __rescan:
 	{
 		if ( !r_allowSoftwareGL->integer )
 		{
-			Com_Printf( "...no hardware acceleration found\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...no hardware acceleration found\n" );
 			Z_Free( pfds );
 			return 0;
 		}
 		else
 		{
-			Com_Printf( "...using software emulation\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using software emulation\n" );
 		}
 	}
 	else if ( pfds[bestMatch].dwFlags & PFD_GENERIC_ACCELERATED )
 	{
-		Com_Printf( "...MCD acceleration found\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...MCD acceleration found\n" );
 	}
 	else
 	{
-		Com_Printf( "...hardware acceleration found\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...hardware acceleration found\n" );
 	}
 
 	*pPFD = pfds[bestMatch];
@@ -374,7 +374,7 @@ static void GLW_CreatePFD( PIXELFORMATDESCRIPTOR *pPFD, int colorbits, int depth
 
 	if ( stereo )
 	{
-		Com_Printf( "...attempting to use stereo\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...attempting to use stereo\n" );
 		src.dwFlags |= PFD_STEREO;
 		glw_state.config->stereoEnabled = qtrue;
 	}
@@ -406,16 +406,16 @@ static int GLW_MakeContext( PIXELFORMATDESCRIPTOR *pPFD )
 		int pixelformat = GLW_ChoosePFD( glw_state.hDC, pPFD );
 		if ( pixelformat == 0 )
 		{
-			Com_Printf( "...GLW_ChoosePFD failed\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...GLW_ChoosePFD failed\n" );
 			return TRY_PFD_FAIL_SOFT;
 		}
-		Com_Printf( "...PIXELFORMAT %d selected\n", pixelformat );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...PIXELFORMAT %d selected\n", pixelformat );
 
 		DescribePixelFormat( glw_state.hDC, pixelformat, sizeof( *pPFD ), pPFD );
 
 		if ( SetPixelFormat( glw_state.hDC, pixelformat, pPFD ) == FALSE )
 		{
-			Com_Printf( "...SetPixelFormat failed\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...SetPixelFormat failed\n" );
 			return TRY_PFD_FAIL_SOFT;
 		}
 
@@ -427,24 +427,24 @@ static int GLW_MakeContext( PIXELFORMATDESCRIPTOR *pPFD )
 	//
 	if ( !glw_state.hGLRC )
 	{
-		Com_Printf( "...creating GL context: " );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...creating GL context: " );
 		if ( ( glw_state.hGLRC = qwglCreateContext( glw_state.hDC ) ) == 0 )
 		{
-			Com_Printf( "failed\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "failed\n" );
 
 			return TRY_PFD_FAIL_HARD;
 		}
-		Com_Printf( "succeeded\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "succeeded\n" );
 
-		Com_Printf( "...making context current: " );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...making context current: " );
 		if ( !qwglMakeCurrent( glw_state.hDC, glw_state.hGLRC ) )
 		{
 			qwglDeleteContext( glw_state.hGLRC );
 			glw_state.hGLRC = NULL;
-			Com_Printf( "failed\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "failed\n" );
 			return TRY_PFD_FAIL_HARD;
 		}
-		Com_Printf( "succeeded\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "succeeded\n" );
 	}
 
 	return TRY_PFD_SUCCESS;
@@ -463,21 +463,21 @@ static qboolean GLW_InitOpenGLDriver( int colorbits )
 	int		depthbits, stencilbits;
 	static PIXELFORMATDESCRIPTOR pfd;	// save between frames since 'tr' gets cleared
 
-	Com_Printf( "Initializing OpenGL driver\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Initializing OpenGL driver\n" );
 
 	//
 	// get a DC for our window if we don't already have one allocated
 	//
 	if ( glw_state.hDC == NULL )
 	{
-		Com_Printf( "...getting DC: " );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...getting DC: " );
 
 		if ( ( glw_state.hDC = GetDC( g_wv.hWnd ) ) == NULL )
 		{
-			Com_Printf( "failed\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "failed\n" );
 			return qfalse;
 		}
-		Com_Printf( "succeeded\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "succeeded\n" );
 	}
 
 	//
@@ -515,7 +515,7 @@ static qboolean GLW_InitOpenGLDriver( int colorbits )
 		{
 			if ( tpfd == TRY_PFD_FAIL_HARD )
 			{
-				Com_Printf( S_COLOR_YELLOW "...failed hard\n" );
+				COM_WARN( LOG_CAT_SYSTEM, "...failed hard\n" );
 				return qfalse;
 			}
 
@@ -528,7 +528,7 @@ static qboolean GLW_InitOpenGLDriver( int colorbits )
 				ReleaseDC( g_wv.hWnd, glw_state.hDC );
 				glw_state.hDC = NULL;
 
-				Com_Printf( "...failed to find an appropriate PIXELFORMAT\n" );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...failed to find an appropriate PIXELFORMAT\n" );
 
 				return qfalse;
 			}
@@ -549,7 +549,7 @@ static qboolean GLW_InitOpenGLDriver( int colorbits )
 					glw_state.hDC = NULL;
 				}
 
-				Com_Printf( "...failed to find an appropriate PIXELFORMAT\n" );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...failed to find an appropriate PIXELFORMAT\n" );
 
 				return qfalse;
 			}
@@ -560,7 +560,7 @@ static qboolean GLW_InitOpenGLDriver( int colorbits )
 		*/
 		if ( !( pfd.dwFlags & PFD_STEREO ) && ( r_stereoEnabled->integer != 0 ) ) 
 		{
-			Com_Printf( "...failed to select stereo pixel format\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...failed to select stereo pixel format\n" );
 			glw_state.config->stereoEnabled = qfalse;
 		}
 	}
@@ -650,11 +650,11 @@ static qboolean GLW_CreateWindow( int width, int height, int colorbits, qboolean
 
 		if ( !RegisterClass( &wc ) )
 		{
-			Com_Error( ERR_FATAL, "%s: could not register window class", __func__ );
+			Com_Terminate( TERM_UNRECOVERABLE, "%s: could not register window class", __func__ );
 			return qfalse;
 		}
 		s_classRegistered = qtrue;
-		// Com_Printf( "...registered window class\n" );
+		// Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...registered window class\n" );
 	}
 
 	r.left = vid_xpos->integer;
@@ -740,7 +740,7 @@ static qboolean GLW_CreateWindow( int width, int height, int colorbits, qboolean
 		if ( !g_wv.hWnd )
 		{
 			glw_state.cdsFullscreen = oldFullscreen;
-			Com_Error( ERR_FATAL, "GLW_CreateWindow() - Couldn't create window" );
+			Com_Terminate( TERM_UNRECOVERABLE, "GLW_CreateWindow() - Couldn't create window" );
 			return qfalse;
 		}
 
@@ -749,11 +749,11 @@ static qboolean GLW_CreateWindow( int width, int height, int colorbits, qboolean
 		glw_state.config->vidWidth =  r.right - r.left;
 		glw_state.config->vidHeight =  r.bottom - r.top;
 
-		Com_Printf( "...created window@%d,%d (%dx%d)\n", x, y, w, h );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...created window@%d,%d (%dx%d)\n", x, y, w, h );
 	}
 	else
 	{
-		Com_Printf( "...window already present, CreateWindowEx skipped\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...window already present, CreateWindowEx skipped\n" );
 	}
 
 	if ( colorbits == 0 )
@@ -791,25 +791,25 @@ static void PrintCDSError( int value )
 	switch ( value )
 	{
 	case DISP_CHANGE_RESTART:
-		Com_Printf( "restart required\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "restart required\n" );
 		break;
 	case DISP_CHANGE_BADPARAM:
-		Com_Printf( "bad param\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "bad param\n" );
 		break;
 	case DISP_CHANGE_BADFLAGS:
-		Com_Printf( "bad flags\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "bad flags\n" );
 		break;
 	case DISP_CHANGE_FAILED:
-		Com_Printf( "DISP_CHANGE_FAILED\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "DISP_CHANGE_FAILED\n" );
 		break;
 	case DISP_CHANGE_BADMODE:
-		Com_Printf( "bad mode\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "bad mode\n" );
 		break;
 	case DISP_CHANGE_NOTUPDATED:
-		Com_Printf( "not updated\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "not updated\n" );
 		break;
 	default:
-		Com_Printf( "unknown error %d\n", value );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "unknown error %d\n", value );
 		break;
 	}
 }
@@ -818,7 +818,7 @@ static void PrintCDSError( int value )
 static void ResetDisplaySettings( qboolean verbose )
 {
 	if ( verbose )
-		Com_Printf( "...restoring display settings\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...restoring display settings\n" );
 
 	if ( glw_state.displayName[0] )
 		ChangeDisplaySettingsEx( glw_state.displayName, NULL, NULL, 0, NULL );
@@ -938,7 +938,7 @@ void UpdateMonitorInfo( const RECT *target )
 			scaleX = (devMode.dmPelsWidth * 100) / w;
 			scaleY = (devMode.dmPelsHeight * 100) / h;
 			if ( scaleX == scaleY ) {
-				Com_Printf( S_COLOR_YELLOW "...detected DPI scale: %i%%\n", scaleX );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "...detected DPI scale: %i%%\n", scaleX );
 				w = devMode.dmPelsWidth;
 				h = devMode.dmPelsHeight;
 			}
@@ -961,7 +961,7 @@ void UpdateMonitorInfo( const RECT *target )
 
 				glw_state.desktopBitsPixel = devMode.dmBitsPerPel;
 
-				Com_Printf( "...current monitor: %ix%i@%i,%i %s\n", 
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...current monitor: %ix%i@%i,%i %s\n", 
 					w, h, x, y, WtoA( mInfo.szDevice ) );
 
 				if ( gammaSet && re.SetColorMappings ) {
@@ -1014,14 +1014,14 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 	//
 	// print out informational messages
 	//
-	Com_Printf( "...setting mode %d:", mode );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...setting mode %d:", mode );
 	if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect,
 		mode, modeFS, glw_state.desktopWidth, glw_state.desktopHeight, cdsFullscreen ) )
 	{
-		Com_Printf( " invalid mode\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " invalid mode\n" );
 		return RSERR_INVALID_MODE;
 	}
-	Com_Printf( " %d %d %s\n", config->vidWidth, config->vidHeight, win_fs[ cdsFullscreen ] );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " %d %d %s\n", config->vidWidth, config->vidHeight, win_fs[ cdsFullscreen ] );
 
 	//
 	// verify desktop bit depth
@@ -1070,7 +1070,7 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 				&& dm.dmPelsHeight <= dm_current.dmPelsWidth)) {
 			//dm.dmDisplayFrequency = dm_desktop.dmDisplayFrequency;
 			//dm.dmFields |= DM_DISPLAYFREQUENCY;
-			//Com_Printf("...using display refresh rate: %iHz\n", 
+			//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using display refresh rate: %iHz\n", 
 			//	dm_desktop.dmDisplayFrequency );
 		}
 		
@@ -1079,11 +1079,11 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 		{
 			dm.dmBitsPerPel = colorbits;
 			dm.dmFields |= DM_BITSPERPEL;
-			Com_Printf( "...using colorsbits of %d\n", colorbits );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using colorsbits of %d\n", colorbits );
 		}
 		else
 		{
-			Com_Printf( "...using desktop display depth of %d\n", glw_state.desktopBitsPixel );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using desktop display depth of %d\n", glw_state.desktopBitsPixel );
 		}
 
 		//
@@ -1091,7 +1091,7 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 		//
 		if ( glw_state.cdsFullscreen )
 		{
-			Com_Printf( "...already fullscreen, avoiding redundant CDS\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...already fullscreen, avoiding redundant CDS\n" );
 
 			if ( !GLW_CreateWindow( config->vidWidth, config->vidHeight, colorbits, qtrue, vulkan ) )
 			{
@@ -1105,13 +1105,13 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 		//
 		else
 		{
-			Com_Printf( "...calling CDS: " );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...calling CDS: " );
 			
 			// try setting the exact mode requested, because some drivers don't report
 			// the low res modes in EnumDisplaySettings, but still work
 			if ( ( cdsRet = ApplyDisplaySettings( &dm ) ) == DISP_CHANGE_SUCCESSFUL )
 			{
-				Com_Printf( "ok\n" );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ok\n" );
 
 				if ( !GLW_CreateWindow( config->vidWidth, config->vidHeight, colorbits, qtrue, vulkan ) )
 				{
@@ -1128,11 +1128,11 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 				DEVMODE		devmode;
 				int			modeNum;
 
-				Com_Printf( "failed, " );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "failed, " );
 				
 				PrintCDSError( cdsRet );
 			
-				Com_Printf( "...trying next higher resolution:" );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...trying next higher resolution:" );
 				
 				// we could do a better matching job here...
 				for ( modeNum = 0 ; ; modeNum++ ) {
@@ -1159,7 +1159,7 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 
 				if ( modeNum != -1 && ( cdsRet = ApplyDisplaySettings( &devmode ) ) == DISP_CHANGE_SUCCESSFUL )
 				{
-					Com_Printf( " ok\n" );
+					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ok\n" );
 					if ( !GLW_CreateWindow( config->vidWidth, config->vidHeight, colorbits, qtrue, vulkan) )
 					{
 						ResetDisplaySettings( qtrue );
@@ -1169,7 +1169,7 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 				}
 				else
 				{
-					Com_Printf( " failed, " );
+					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " failed, " );
 					
 					PrintCDSError( cdsRet );
 					
@@ -1241,7 +1241,7 @@ static qboolean GLW_LoadOpenGL( const char *drivername )
 	else
 	{
 		config->driverType = GLDRV_STANDALONE;
-		Com_Printf( "...assuming '%s' is a standalone driver\n", drivername );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...assuming '%s' is a standalone driver\n", drivername );
 	}
 
 	//
@@ -1277,7 +1277,7 @@ static void GLimp_SwapBuffers( void )
 {
 	if ( !SwapBuffers( glw_state.hDC ) )
 	{
-		Com_Error( ERR_FATAL, "GLimp_EndFrame() - SwapBuffers() failed!\n" );
+		Com_Terminate( TERM_UNRECOVERABLE, "GLimp_EndFrame() - SwapBuffers() failed!\n" );
 	}
 }
 
@@ -1325,7 +1325,7 @@ static qboolean GLW_StartOpenGL( void )
 			}
 		}
 
-		Com_Error( ERR_FATAL, "GLW_StartOpenGL() - could not load OpenGL subsystem\n" );
+		Com_Terminate( TERM_UNRECOVERABLE, "GLW_StartOpenGL() - could not load OpenGL subsystem\n" );
 		return qfalse;
 	}
 
@@ -1345,13 +1345,13 @@ static qboolean GLW_StartOpenGL( void )
 */
 void GLimp_Init( glconfig_t *config )
 {
-	Com_Printf( "Initializing OpenGL subsystem\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Initializing OpenGL subsystem\n" );
 
 	// glimp-specific
 
 	r_maskMinidriver = Cvar_Get( "r_maskMinidriver", "0", CVAR_LATCH );
 	Cvar_SetDescription( r_maskMinidriver, "If set to 1, then a mini driver will be treated as a normal ICD." );
-	r_stereoEnabled = Cvar_Get( "r_stereoEnabled", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_stereoEnabled = Cvar_Get( "r_stereoEnabled", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	Cvar_SetDescription( r_stereoEnabled, "Enable stereo rendering for techniques like shutter glasses." );
 	r_verbose = Cvar_Get( "r_verbose", "0", 0 );
 	Cvar_SetDescription( r_verbose, "Turns on additional startup information when renderer is starting up." );
@@ -1372,10 +1372,10 @@ void GLimp_Init( glconfig_t *config )
 #undef GLE
 
 	if ( qwglSwapIntervalEXT ) {
-		Com_Printf( "...using WGL_EXT_swap_control\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using WGL_EXT_swap_control\n" );
 		r_swapInterval->modified = qtrue; // force a set next frame
 	} else {
-		Com_Printf( "...WGL_EXT_swap_control not found\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WGL_EXT_swap_control not found\n" );
 	}
 
 	// show main window after all initializations
@@ -1407,7 +1407,7 @@ void GLimp_Shutdown( qboolean unloadDLL )
 
 	IN_Shutdown();
 
-	Com_Printf( "Shutting down OpenGL subsystem\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Shutting down OpenGL subsystem\n" );
 
 	// restore gamma.  We do this first because 3Dfx's extension needs a valid OGL subsystem
 	GLW_RestoreGamma();
@@ -1417,14 +1417,14 @@ void GLimp_Shutdown( qboolean unloadDLL )
 	{
 		retVal = qwglMakeCurrent( NULL, NULL ) != 0;
 
-		Com_Printf( "...wglMakeCurrent( NULL, NULL ): %s\n", success[retVal] );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...wglMakeCurrent( NULL, NULL ): %s\n", success[retVal] );
 	}
 
 	// delete HGLRC
 	if ( glw_state.hGLRC )
 	{
 		retVal = qwglDeleteContext( glw_state.hGLRC ) != 0;
-		Com_Printf( "...deleting GL context: %s\n", success[retVal] );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...deleting GL context: %s\n", success[retVal] );
 		glw_state.hGLRC = NULL;
 	}
 
@@ -1432,14 +1432,14 @@ void GLimp_Shutdown( qboolean unloadDLL )
 	if ( glw_state.hDC )
 	{
 		retVal = ReleaseDC( g_wv.hWnd, glw_state.hDC ) != 0;
-		Com_Printf( "...releasing DC: %s\n", success[retVal] );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...releasing DC: %s\n", success[retVal] );
 		glw_state.hDC   = NULL;
 	}
 
 	// destroy window
 	if ( g_wv.hWnd )
 	{
-		Com_Printf( "...destroying window\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...destroying window\n" );
 		//ShowWindow( g_wv.hWnd, SW_HIDE );
 		DestroyWindow( g_wv.hWnd );
 		g_wv.hWnd = NULL;
@@ -1486,7 +1486,7 @@ static qboolean GLW_StartVulkan( void )
 	// load and initialize Vulkan driver
 	//
 	if ( !GLW_LoadVulkan() ) {
-		Com_Error( ERR_FATAL, "GLW_StartVulkan() - could not load Vulkan subsystem\n" );
+		Com_Terminate( TERM_UNRECOVERABLE, "GLW_StartVulkan() - could not load Vulkan subsystem\n" );
 		return qfalse;
 	}
 
@@ -1506,7 +1506,7 @@ static qboolean GLW_StartVulkan( void )
 */
 void VKimp_Init( glconfig_t *config )
 {
-	Com_Printf( "Initializing Vulkan subsystem\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Initializing Vulkan subsystem\n" );
 
 	// feedback to renderer configuration
 	glw_state.config = config;
@@ -1539,7 +1539,7 @@ void VKimp_Shutdown( qboolean unloadDLL )
 {
 	IN_Shutdown();
 
-	Com_Printf( "Shutting down Vulkan subsystem\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Shutting down Vulkan subsystem\n" );
 
 	// restore gamma
 	GLW_RestoreGamma();
@@ -1547,7 +1547,7 @@ void VKimp_Shutdown( qboolean unloadDLL )
 	// destroy window
 	if ( g_wv.hWnd )
 	{
-		Com_Printf( "...destroying window\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...destroying window\n" );
 		//ShowWindow( g_wv.hWnd, SW_HIDE );
 		DestroyWindow( g_wv.hWnd );
 		g_wv.hWnd = NULL;

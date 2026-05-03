@@ -294,12 +294,10 @@ static void Con_DrawStatus( void ) {
 	}
 
 	if ( con_clock->integer ) {
-		time_t    ts;
-		struct tm *lt;
-		ts = time( NULL );
-		lt = localtime( &ts );
+		qtime_t qt;
+		Com_RealTime( &qt );
 		Com_sprintf( buf, sizeof(buf), "%02d:%02d:%02d",
-		             lt->tm_hour, lt->tm_min, lt->tm_sec );
+		             qt.tm_hour, qt.tm_min, qt.tm_sec );
 		x -= Text_Measure( buf, FONT_MONO, con_textPointSize );
 		Text_Draw( buf, Con_NativeToVirtualX( x ), y, FONT_MONO,
 		           con_textPointSize, statusColor, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );

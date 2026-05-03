@@ -145,6 +145,7 @@ typedef struct aas_entityinfo_s
 	int		weapon;			// determines weapon and flash model, etc
 	int		legsAnim;		// mask off ANIM_TOGGLEBIT
 	int		torsoAnim;		// mask off ANIM_TOGGLEBIT
+	vec3_t	velocity;		// current velocity (populated under Recast; zero under AAS)
 } aas_entityinfo_t;
 
 // area info

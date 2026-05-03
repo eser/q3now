@@ -258,6 +258,13 @@ void PM_StepSlideMove( qboolean gravity ) {
 		return;		// we got exactly where we wanted to go first try
 	}
 
+	if ( pm->stepDebugLevel ) {
+		Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] pos=(%.2f %.2f %.2f) vel=(%.2f %.2f %.2f) blocked by SlideMove\n",
+			c_pmove,
+			start_o[0], start_o[1], start_o[2],
+			start_v[0], start_v[1], start_v[2] );
+	}
+
 	VectorCopy(start_o, down);
 	down[2] -= STEPSIZE;
 	pm->trace (&trace, start_o, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask);
@@ -268,6 +275,10 @@ void PM_StepSlideMove( qboolean gravity ) {
 
 	// never step up when you still have up velocity and not holding jump
 	if (inAir && pm->cmd.upmove < 10) {
+		if ( pm->stepDebugLevel ) {
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] SKIP: inAir (velZ=%.2f frac=%.3f)\n",
+				c_pmove, pm->ps->velocity[2], trace.fraction );
+		}
 		return;
 	}
 
@@ -279,9 +290,21 @@ void PM_StepSlideMove( qboolean gravity ) {
 
 	// test the player position if they were a stepheight higher
 	pm->trace (&trace, start_o, pm->mins, pm->maxs, up, pm->ps->clientNum, pm->tracemask);
+	if ( pm->stepDebugLevel ) {
+		Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] UP trace: from=(%.2f %.2f %.2f) to=(%.2f %.2f %.2f) frac=%.3f allsolid=%i endpos=(%.2f %.2f %.2f) plane=(%.2f %.2f %.2f)\n",
+			c_pmove,
+			start_o[0], start_o[1], start_o[2],
+			up[0], up[1], up[2],
+			trace.fraction, trace.allsolid,
+			trace.endpos[0], trace.endpos[1], trace.endpos[2],
+			trace.plane.normal[0], trace.plane.normal[1], trace.plane.normal[2] );
+	}
 	if ( trace.allsolid ) {
 		if ( pm->debugLevel ) {
-			Com_Printf("%i:bend can't step\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:bend can't step\n", c_pmove);
+		}
+		if ( pm->stepDebugLevel ) {
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] BLOCKED: ceiling allsolid\n", c_pmove );
 		}
 		return;		// can't step up
 	}
@@ -297,6 +320,13 @@ void PM_StepSlideMove( qboolean gravity ) {
 	VectorCopy (pm->ps->origin, down);
 	down[2] -= stepSize;
 	pm->trace (&trace, pm->ps->origin, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask);
+	if ( pm->stepDebugLevel ) {
+		Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] DOWN trace: stepSize=%.2f frac=%.3f allsolid=%i endpos=(%.2f %.2f %.2f) plane=(%.2f %.2f %.2f)\n",
+			c_pmove,
+			stepSize, trace.fraction, trace.allsolid,
+			trace.endpos[0], trace.endpos[1], trace.endpos[2],
+			trace.plane.normal[0], trace.plane.normal[1], trace.plane.normal[2] );
+	}
 	if ( !trace.allsolid ) {
 		VectorCopy (trace.endpos, pm->ps->origin);
 	}
@@ -320,7 +350,7 @@ void PM_StepSlideMove( qboolean gravity ) {
 		VectorCopy (down_o, pm->ps->origin);
 		VectorCopy (down_v, pm->ps->velocity);
 		if ( pm->debugLevel ) {
-			Com_Printf("%i:bend\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:bend\n", c_pmove);
 		}
 	} else
 #endif
@@ -341,7 +371,13 @@ void PM_StepSlideMove( qboolean gravity ) {
 			}
 		}
 		if ( pm->debugLevel ) {
-			Com_Printf("%i:stepped\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:stepped\n", c_pmove);
+		}
+		if ( pm->stepDebugLevel ) {
+			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] RESULT: delta=%.2f finalPos=(%.2f %.2f %.2f) %s\n",
+				c_pmove, delta,
+				pm->ps->origin[0], pm->ps->origin[1], pm->ps->origin[2],
+				delta > 2 ? "STEPPED" : "tiny-step" );
 		}
 	}
 }

@@ -186,6 +186,12 @@ void     Nav_Cache_Save( const char *mapName, int bspChecksum, const void *mesh 
 /* 32-bit FNV-1a hash of build parameters used in the cache key. */
 unsigned int Nav_Cache_ParamHash( void );
 
+/* Delete cached navmesh files.
+ * mapFilter = NULL     — delete all .nav files in the navmesh directory.
+ * mapFilter non-NULL   — delete the single file for that map (bare name,
+ *   with or without .nav extension or directory prefix; all normalized). */
+void Nav_ClearCache( const char *mapFilter );
+
 /* --------------------------------------------------------------------------
    Detour query functions (all implemented in nav_impl.cpp, called from nav_traps.c)
    -------------------------------------------------------------------------- */
@@ -202,6 +208,13 @@ qboolean     Nav_GetRandomPoint( int areaFilter, float *qPosOut );
  * Returns silently if targetname is NULL or not found in doorEntries. */
 void         Nav_SetPolyFlagsForDoor( const char *targetname,
                                       int setFlags, int clearFlags );
+
+/* Predict enemy position by forward-simulating velocity on the navmesh surface.
+ * qOrigin/qVelocity/qPosOut in Quake world-space coordinates.
+ * Simulates up to predictTime seconds in ~10ms steps using moveAlongSurface.
+ * Falls through to qOrigin unchanged if navmesh is not ready. */
+void         Nav_PredictEnemyPosition( const float *qOrigin, const float *qVelocity,
+                                       float predictTime, float *qPosOut );
 
 #endif /* FEAT_RECAST_NAVMESH */
 

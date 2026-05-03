@@ -83,7 +83,7 @@ void SV_BotFreeClient( int clientNum ) {
 	client_t	*cl;
 
 	if ( (unsigned) clientNum >= sv.maxclients ) {
-		Com_Error( ERR_DROP, "SV_BotFreeClient: bad clientNum: %i", clientNum );
+		Com_Terminate( TERM_CLIENT_DROP, "SV_BotFreeClient: bad clientNum: %i", clientNum );
 	}
 
 	cl = &svs.clients[clientNum];
@@ -129,7 +129,7 @@ void BotDrawDebugPolygons(void (*drawPoly)(int color, int numPoints, float *poin
 		bot_debugpoly_t *poly = &debugpolygons[i];
 		if (!poly->inuse) continue;
 		drawPoly(poly->color, poly->numPoints, (float *) poly->points);
-		//Com_Printf("poly %i, numpoints = %d\n", i, poly->numPoints);
+		//Com_Log( SEV_INFO, LOG_CAT_SERVER, "poly %i, numpoints = %d\n", i, poly->numPoints);
 	}
 }
 
@@ -149,27 +149,27 @@ static __attribute__ ((format (printf, 2, 3))) void QDECL BotImport_Print(int ty
 
 	switch(type) {
 		case PRT_MESSAGE: {
-			Com_Printf("%s", str);
+			Com_Log( SEV_DEBUG, LOG_CAT_BOTLIB, "%s", str);
 			break;
 		}
 		case PRT_WARNING: {
-			Com_Printf(S_COLOR_WARNING "Warning: %s", str);
+			Com_Log( SEV_WARN, LOG_CAT_BOTLIB, S_COLOR_WARNING "Warning: %s", str);
 			break;
 		}
 		case PRT_ERROR: {
-			Com_Printf(S_COLOR_ERROR "Error: %s", str);
+			Com_Log( SEV_ERROR, LOG_CAT_BOTLIB, S_COLOR_ERROR "Error: %s", str);
 			break;
 		}
 		case PRT_FATAL: {
-			Com_Printf(S_COLOR_ERROR "Fatal: %s", str);
+			Com_Log( SEV_FATAL, LOG_CAT_BOTLIB, S_COLOR_ERROR "Fatal: %s", str);
 			break;
 		}
 		case PRT_EXIT: {
-			Com_Error(ERR_DROP, S_COLOR_ERROR "Exit: %s", str);
+			Com_Terminate( TERM_CLIENT_DROP, S_COLOR_ERROR "Exit: %s", str);
 			break;
 		}
 		default: {
-			Com_Printf("unknown print type\n");
+			Com_Log( SEV_DEBUG, LOG_CAT_BOTLIB, "unknown print type\n");
 			break;
 		}
 	}
@@ -308,7 +308,7 @@ BotImport_HunkAlloc
 */
 static void *BotImport_HunkAlloc( size_t size ) {
 	if( Hunk_CheckMark() ) {
-		Com_Error( ERR_DROP, "%s(): Alloc with marks already set", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s(): Alloc with marks already set", __func__ );
 	}
 	return Hunk_Alloc( size, h_high );
 }
@@ -461,7 +461,7 @@ int SV_BotLibSetup( void ) {
 	}
 
 	if ( !botlib_export ) {
-		Com_Printf( S_COLOR_ERROR "Error: SV_BotLibSetup without SV_BotInitBotLib\n" );
+		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, S_COLOR_ERROR "Error: SV_BotLibSetup without SV_BotInitBotLib\n" );
 		return -1;
 	}
 
@@ -485,44 +485,44 @@ int SV_BotLibShutdown( void ) {
 	return botlib_export->BotLibShutdown();
 }
 
+static const cvarDesc_t botDescs[] = {
+	CVAR_BOOL(   "bot_enable",            "1",   0,          "Enable the bot." ),
+	CVAR_BOOL(   "bot_developer",         "0",   CVAR_CHEAT, "Bot developer mode." ),
+	CVAR_BOOL(   "bot_debug",             "0",   CVAR_CHEAT, "Enable bot debugging." ),
+	CVAR_INT(    "bot_maxdebugpolys",     "2",   0,          "Maximum number of debug polygons.", 0, 65536 ),
+	CVAR_BOOL(   "bot_groundonly",        "1",   0,          "Only show ground faces of areas." ),
+	CVAR_BOOL(   "bot_reachability",      "0",   0,          "Show all reachabilities to other areas." ),
+	CVAR_BOOL(   "bot_visualizejumppads", "0",   CVAR_CHEAT, "Show jumppads." ),
+	CVAR_BOOL(   "bot_forceclustering",   "0",   0,          "Force cluster calculations." ),
+	CVAR_BOOL(   "bot_forcereachability", "0",   0,          "Force reachability calculations." ),
+	CVAR_BOOL(   "bot_forcewrite",        "0",   0,          "Force writing AAS file." ),
+	CVAR_BOOL(   "bot_aasoptimize",       "0",   0,          "Disable AAS file optimisation." ),
+	CVAR_BOOL(   "bot_saveroutingcache",  "0",   0,          "Save routing cache." ),
+	CVAR_INT(    "bot_thinktime",         "100", 0,          "Milliseconds the bots think per frame.", 0, 0 ),
+	CVAR_BOOL(   "bot_reloadcharacters",  "0",   0,          "Reload the bot characters each time." ),
+	CVAR_BOOL(   "bot_testichat",         "0",   0,          "Test ichats." ),
+	CVAR_BOOL(   "bot_testrchat",         "0",   0,          "Test rchats." ),
+	CVAR_BOOL(   "bot_testsolid",         "0",   CVAR_CHEAT, "Test for solid areas." ),
+	CVAR_BOOL(   "bot_testclusters",      "0",   CVAR_CHEAT, "Test the AAS clusters." ),
+	CVAR_BOOL(   "bot_fastchat",          "0",   0,          "Fast chatting bots." ),
+	CVAR_BOOL(   "bot_nochat",            "0",   0,          "Disable bot chats." ),
+	CVAR_BOOL(   "bot_pause",             "0",   CVAR_CHEAT, "Pause the bots thinking." ),
+	CVAR_BOOL(   "bot_report",            "0",   CVAR_CHEAT, "Get a full report in CTF." ),
+	CVAR_INT(    "bot_minplayers",        "0",   0,          "Minimum players in a team or the game.", 0, 0 ),
+	CVAR_STRING( "bot_interbreedchar",    "",    CVAR_CHEAT, "Bot character used for interbreeding." ),
+	CVAR_INT(    "bot_interbreedbots",    "10",  CVAR_CHEAT, "Number of bots used for interbreeding.", 0, 0 ),
+	CVAR_INT(    "bot_interbreedcycle",   "20",  CVAR_CHEAT, "Bot interbreeding cycle.", 0, 0 ),
+	CVAR_STRING( "bot_interbreedwrite",   "",    CVAR_CHEAT, "Write interbreeded bots to this file." ),
+	CVAR_BOOL(   "bot_highlightarea",     "0",   0,          "Highlight a specific AAS area for debugging." ),
+};
+
 /*
 ==================
 SV_BotInitCvars
 ==================
 */
 void SV_BotInitCvars(void) {
-	Cvar_Get("bot_enable", "1", 0);						//enable the bot
-	Cvar_Get("bot_developer", "0", CVAR_CHEAT);			//bot developer mode
-	Cvar_Get("bot_debug", "0", CVAR_CHEAT);				//enable bot debugging
-	cvar_t *cv = Cvar_Get("bot_maxdebugpolys", "2", 0);			//maximum number of debug polys
-	Cvar_Get("bot_groundonly", "1", 0);					//only show ground faces of areas
-	Cvar_Get("bot_reachability", "0", 0);				//show all reachabilities to other areas
-	Cvar_Get("bot_visualizejumppads", "0", CVAR_CHEAT);	//show jumppads
-	Cvar_Get("bot_forceclustering", "0", 0);			//force cluster calculations
-	Cvar_Get("bot_forcereachability", "0", 0);			//force reachability calculations
-	Cvar_Get("bot_forcewrite", "0", 0);					//force writing aas file
-	Cvar_Get("bot_aasoptimize", "0", 0);				//no aas file optimisation
-	Cvar_Get("bot_saveroutingcache", "0", 0);			//save routing cache
-	Cvar_Get("bot_thinktime", "100", 0);				//msec the bots thinks
-	Cvar_Get("bot_reloadcharacters", "0", 0);			//reload the bot characters each time
-	Cvar_Get("bot_testichat", "0", 0);					//test ichats
-	Cvar_Get("bot_testrchat", "0", 0);					//test rchats
-	Cvar_Get("bot_testsolid", "0", CVAR_CHEAT);			//test for solid areas
-	Cvar_Get("bot_testclusters", "0", CVAR_CHEAT);		//test the AAS clusters
-	Cvar_Get("bot_fastchat", "0", 0);					//fast chatting bots
-	Cvar_Get("bot_nochat", "0", 0);						//disable chats
-	Cvar_Get("bot_pause", "0", CVAR_CHEAT);				//pause the bots thinking
-	Cvar_Get("bot_report", "0", CVAR_CHEAT);			//get a full report in ctf
-	Cvar_Get("bot_grapple", "0", 0);					//enable grapple
-	Cvar_Get("bot_rocketjump", "1", 0);					//enable rocket jumping
-	Cvar_Get("bot_challenge", "0", 0);					//challenging bot
-	Cvar_Get("bot_minplayers", "0", 0);					//minimum players in a team or the game
-	Cvar_Get("bot_interbreedchar", "", CVAR_CHEAT);		//bot character used for interbreeding
-	Cvar_Get("bot_interbreedbots", "10", CVAR_CHEAT);	//number of bots used for interbreeding
-	Cvar_Get("bot_interbreedcycle", "20", CVAR_CHEAT);	//bot interbreeding cycle
-	Cvar_Get("bot_interbreedwrite", "", CVAR_CHEAT);	//write interbreeded bots to this file
-
-	Cvar_CheckRange(cv, "0", "65536", CV_INTEGER);
+	Cvar_RegisterTable( botDescs, ARRAY_LEN( botDescs ), NULL );
 }
 
 /*

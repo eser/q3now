@@ -357,7 +357,7 @@ void SV_RconLua_Init( void ) {
 
 	L = UserVM_GetState();
 	if ( !L ) {
-		Com_Printf( S_COLOR_RED "WiredRconLua: User VM not initialized\n" );
+		COM_ERROR( LOG_CAT_SERVER, "WiredRconLua: User VM not initialized\n" );
 		return;
 	}
 

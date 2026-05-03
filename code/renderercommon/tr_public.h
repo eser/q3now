@@ -177,17 +177,22 @@ typedef struct {
 	int		(*GetIQMAnimations)( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );
 #endif // FEAT_IQM
 
+	// Set lightstyle pattern string at runtime (Faz 1+).
+	// style in [0,63]; pattern is a NUL-terminated string up to LIGHTSTYLE_PATTERN_MAX chars.
+	// Stores the pattern and derives a float value for backward-compat with the float path.
+	void	(*SetLightstylePattern)( int style, const char *pattern );
+
 } refexport_t;
 
 //
 // these are the functions imported by the refresh module
 //
 typedef struct {
-	// print message on the local console
-	void	FORMAT_PRINTF(2, 3) (QDECL *Printf)( printParm_t printLevel, const char *fmt, ... );
+	// log a message at a given severity
+	void	FORMAT_PRINTF(2, 3) (QDECL *Log)( log_severity_t severity, const char *fmt, ... );
 
-	// abort the game
-	void	NORETURN_PTR FORMAT_PRINTF(2, 3)(QDECL *Error)( errorParm_t errorLevel, const char *fmt, ... );
+	// terminate the engine (abort / disconnect)
+	void	NORETURN_PTR FORMAT_PRINTF(2, 3)(QDECL *Terminate)( terminationReason_t level, const char *fmt, ... );
 
 	// milliseconds should only be used for profiling, never
 	// for anything game related.  Get time from the refdef
@@ -233,6 +238,12 @@ typedef struct {
 	void	(*Cmd_ExecuteText)( cbufExec_t exec_when, const char *text );
 
 	byte	*(*CM_ClusterPVS)(int cluster);
+	int		(*CM_PointContents)( const vec3_t p, clipHandle_t model );
+	int		(*CM_NumBrushes)( void );
+	void	(*CM_GetBrushData)( int idx, int *contents, int *shaderNum, const char **shaderName,
+								float mins[3], float maxs[3], int *numsides );
+	void	(*CM_GetBrushSideData)( int brushIdx, int sideIdx, int *planeNum, float normal[3],
+									float *dist, int *shaderNum, const char **shaderName );
 
 	// visualization for debugging collision detection
 	void	(*CM_DrawDebugSurface)( void (*drawPoly)(int color, int numPoints, float *points) );
@@ -246,6 +257,10 @@ typedef struct {
 	void	(*FS_FreeFileList)( char **filelist );
 	void	(*FS_WriteFile)( const char *qpath, const void *buffer, int size );
 	qboolean (*FS_FileExists)( const char *file );
+
+	// BSP loading — used by R_RegisterBSP for standalone prop BSPs
+	qboolean (*BSP_Load)( const char *name, bspFile_t **bspFile, unsigned flags );
+	void     (*BSP_Free)( bspFile_t *bspFile );
 
 	// cinematic stuff
 	void	(*CIN_UploadCinematic)( int handle );

@@ -305,7 +305,7 @@ S_RegisterSound
 sfxHandle_t	S_RegisterSound( const char *sample, qboolean compressed )
 {
 	if ( !sample || !*sample ) {
-		Com_Printf( "NULL sound\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "NULL sound\n" );
 		return 0;
 	}
 
@@ -387,7 +387,7 @@ static void S_Play_f( void ) {
 	int c = Cmd_Argc();
 
 	if( c < 2 ) {
-		Com_Printf ("Usage: play <sound filename> [sound filename] [sound filename] ...\n");
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: play <sound filename> [sound filename] [sound filename] ...\n");
 		return;
 	}
 
@@ -420,7 +420,7 @@ static void S_Music_f( void ) {
 	} else if ( c == 3 ) {
 		si.StartBackgroundTrack( Cmd_Argv(1), Cmd_Argv(2) );
 	} else {
-		Com_Printf ("Usage: music <musicfile> [loopfile]\n");
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: music <musicfile> [loopfile]\n");
 		return;
 	}
 
@@ -443,6 +443,32 @@ static void S_StopMusic_f( void )
 
 //=============================================================================
 
+static const cvarDesc_t sndMainDescs[] = {
+	/* 0 */ CVAR_FLOAT( "s_volume",           "0.8",  CVAR_ARCHIVE,    "Sets master volume for all game audio.", 0, 1 ),
+	/* 1 */ CVAR_FLOAT( "s_musicVolume",      "0.25", CVAR_ARCHIVE,    "Sets volume for in-game music only.", 0, 1 ),
+	/* 2 */ CVAR_FLOAT( "s_announcerVolume",  "1.0",  CVAR_ARCHIVE,    "Volume multiplier for announcer sounds (0=silent, 1=normal, 2=double).", 0, 2 ),
+	/* 3 */ CVAR_BOOL(  "s_doppler",          "1",    CVAR_ARCHIVE | CVAR_NODEFAULT, "Enables doppler effect on moving projectiles." ),
+	/* 4 */ CVAR_BOOL(  "s_muteWhenUnfocused","1",    CVAR_ARCHIVE,    "Mutes all audio while game window is unfocused." ),
+	/* 5 */ CVAR_BOOL(  "s_muteWhenMinimized","1",    CVAR_ARCHIVE,    "Mutes all audio while game is minimized." ),
+	/* 6 */ CVAR_INT(   "s_autoMute",         "1",    CVAR_ARCHIVE,
+		"Auto-mute bitmask (overrides s_muteWhenUnfocused/s_muteWhenMinimized):\n"
+		"  0 = never mute\n"
+		"  1 = mute when window is unfocused\n"
+		"  2 = mute when window is minimized\n"
+		"  3 = mute in both cases", 0, 3 ),
+};
+
+enum {
+	SND_VOLUME, SND_MUSICVOLUME, SND_ANNOUNCERVOLUME,
+	SND_DOPPLER, SND_MUTEWHENUNFOCUSED, SND_MUTEWHENMINIMIZED,
+	SND_AUTOMUTE,
+	SND_CVAR_COUNT
+};
+
+_Static_assert( ARRAY_LEN( sndMainDescs ) == SND_CVAR_COUNT, "sndMainDescs/enum mismatch" );
+static cvar_t *sndMainHandles[SND_CVAR_COUNT];
+
+
 /*
 =================
 S_Init
@@ -456,40 +482,25 @@ void S_Init( void )
 		s_audioArena = Arena_Create( "Audio", AUDIO_ARENA_SIZE );
 	}
 
-	Com_Printf( "------ Initializing Sound ------\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "------ Initializing Sound ------\n" );
 
-	s_volume = Cvar_Get( "s_volume", "0.8", CVAR_ARCHIVE );
-	Cvar_CheckRange( s_volume, "0", "1", CV_FLOAT );
-	Cvar_SetDescription( s_volume, "Sets master volume for all game audio." );
-	s_musicVolume = Cvar_Get( "s_musicVolume", "0.25", CVAR_ARCHIVE );
-	Cvar_CheckRange( s_musicVolume, "0", "1", CV_FLOAT );
-	Cvar_SetDescription( s_musicVolume, "Sets volume for in-game music only." );
-	s_announcerVolume = Cvar_Get( "s_announcerVolume", "1.0", CVAR_ARCHIVE );
-	Cvar_CheckRange( s_announcerVolume, "0", "2", CV_FLOAT );
-	Cvar_SetDescription( s_announcerVolume, "Volume multiplier for announcer sounds (0=silent, 1=normal, 2=double)." );
-	s_doppler = Cvar_Get( "s_doppler", "1", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( s_doppler, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( s_doppler, "Enables doppler effect on moving projectiles." );
-	s_muteWhenUnfocused = Cvar_Get( "s_muteWhenUnfocused", "1", CVAR_ARCHIVE );
-	Cvar_CheckRange( s_muteWhenUnfocused, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( s_muteWhenUnfocused, "Mutes all audio while game window is unfocused." );
-	s_muteWhenMinimized = Cvar_Get( "s_muteWhenMinimized", "1", CVAR_ARCHIVE );
-	Cvar_CheckRange( s_muteWhenMinimized, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( s_muteWhenMinimized, "Mutes all audio while game is minimized." );
+	Cvar_RegisterTable( sndMainDescs, ARRAY_LEN( sndMainDescs ), sndMainHandles );
+	s_volume            = sndMainHandles[SND_VOLUME];
+	s_musicVolume       = sndMainHandles[SND_MUSICVOLUME];
+	s_announcerVolume   = sndMainHandles[SND_ANNOUNCERVOLUME];
+	s_doppler           = sndMainHandles[SND_DOPPLER];
+	s_muteWhenUnfocused = sndMainHandles[SND_MUTEWHENUNFOCUSED];
+	s_muteWhenMinimized = sndMainHandles[SND_MUTEWHENMINIMIZED];
+	s_autoMute          = sndMainHandles[SND_AUTOMUTE];
 
-	s_autoMute = Cvar_Get( "s_autoMute", "1", CVAR_ARCHIVE );
-	Cvar_CheckRange( s_autoMute, "0", "3", CV_INTEGER );
-	Cvar_SetDescription( s_autoMute,
-		"Auto-mute bitmask (overrides s_muteWhenUnfocused/s_muteWhenMinimized):\n"
-		"  0 = never mute\n"
-		"  1 = mute when window is unfocused\n"
-		"  2 = mute when window is minimized\n"
-		"  3 = mute in both cases" );
-
-	cvar_t *cv = Cvar_Get( "s_initsound", "1", 0 );
-	Cvar_SetDescription( cv, "Whether or not to startup the sound system." );
+	cvar_t *cv;
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "s_initsound", "1", 0,
+			"Whether or not to startup the sound system." );
+		cv = Cvar_Register( &d );
+	}
 	if ( !cv->integer ) {
-		Com_Printf( "Sound disabled.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound disabled.\n" );
 	} else {
 
 		S_CodecInit();
@@ -507,17 +518,17 @@ void S_Init( void )
 
 		if ( started ) {
 			if( !S_ValidSoundInterface( &si ) ) {
-				Com_Error( ERR_FATAL, "Sound interface invalid" );
+				Com_Terminate( TERM_UNRECOVERABLE, "Sound interface invalid" );
 			}
 
 			S_SoundInfo();
-			Com_Printf( "Sound initialization successful.\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound initialization successful.\n" );
 		} else {
-			Com_Printf( "Sound initialization failed.\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound initialization failed.\n" );
 		}
 	}
 
-	Com_Printf( "--------------------------------\n");
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "--------------------------------\n");
 }
 
 

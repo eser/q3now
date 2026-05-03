@@ -395,6 +395,7 @@ void SV_GetUserinfo( int index, char *buffer, int bufferSize );
 
 void SV_SpawnServer( const char *mapname, qboolean killBots );
 void SV_SpawnServer_Tick( void );
+void SV_SyncReloadTracker( void );
 
 
 
@@ -403,7 +404,8 @@ void SV_SpawnServer_Tick( void );
 //
 void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo );
 void SV_OnPlayerReady( conn_handle_t conn );
-void SV_DrainQUICUsercmds( void );
+void SV_DrainUsercmds_Impl( void );  /* transport vtable target — use SV_DrainUsercmds() everywhere else */
+void SV_DrainUsercmds( void );
 void SV_DrainQUICReliableCommands( void );
 void SV_PrintClientStateChange( const client_t *cl, clientState_t newState );
 
@@ -459,6 +461,13 @@ void		SV_InitGameProgs ( void );
 void		SV_ShutdownGameProgs ( void );
 void		SV_RestartGameProgs( void );
 qboolean	SV_inPVS (const vec3_t p1, const vec3_t p2);
+
+//
+// sv_bot_awareness.c
+//
+void SV_BotAwareness_Init    ( void );
+void SV_BotAwareness_Shutdown( void );
+int  SV_BotAwareness_GetEvents( int clientNum, bot_sound_event_t *out, int maxOut );
 
 //
 // sv_bot.c

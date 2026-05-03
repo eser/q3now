@@ -70,6 +70,7 @@
 // ── engine internals (testing) ────────────────────────────────────────
 // These flags support CMake override via -DFEAT_X=0; use #ifndef so the
 // command-line definition takes precedence over the default below.
+
 #ifndef FEAT_RECAST_NAVMESH
 #define FEAT_RECAST_NAVMESH               1   // Recast/Detour navmesh (replaces AAS botlib nav)
 #endif
@@ -112,7 +113,7 @@
 #define FEAT_TA_VOICECHAT                 1   // vsay/vtell voice commands (bots use when enabled)
 #define FEAT_HARVESTER                    1   // Harvester game mode (skull/cube collection)
 #define FEAT_OVERLOAD                     1   // Overload game mode (obelisk control)
-#define FEAT_PW_PORTAL                    1   // Invulnerability shield (sphere, railgun bounce)
+#define FEAT_PW_PORTAL                    1   // portal powerup
 #else
 #define FEAT_TA_UI                        0
 #define FEAT_TA_VOICECHAT                 0

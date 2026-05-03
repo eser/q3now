@@ -62,7 +62,7 @@ static void CL_JPGErrorExit(j_common_ptr cinfo)
   
 	(*cinfo->err->format_message)( cinfo, buffer );
   
-	Com_Printf( "Error: %s", buffer );
+	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Error: %s", buffer );
   
 	/* Return control to the setjmp point */
 	Q_longjmp( jerr->setjmp_buffer, 1 );
@@ -77,7 +77,7 @@ static void CL_JPGOutputMessage(j_common_ptr cinfo)
   (*cinfo->err->format_message) (cinfo, buffer);
   
   /* Send it to stderr, adding a newline */
-  Com_Printf( "%s\n", buffer );
+  Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s\n", buffer );
 }
 
 
@@ -145,7 +145,7 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
 		FS_FreeFile( fbuffer.v );
 
 		/* Append the filename to the error for easier debugging */
-		Com_Printf( ", loading file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, ", loading file %s\n", filename );
 		return;
 	}
 
@@ -199,7 +199,7 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
     FS_FreeFile( fbuffer.v );
     jpeg_destroy_decompress(&cinfo);
   
-    Com_Error( ERR_DROP, "LoadJPG: %s has an invalid image format: %dx%d*4=%d, components: %d", filename,
+    Com_Terminate( TERM_CLIENT_DROP, "LoadJPG: %s has an invalid image format: %dx%d*4=%d, components: %d", filename,
 		    cinfo.output_width, cinfo.output_height, pixelcount * 4, cinfo.output_components);
   }
 
@@ -327,7 +327,7 @@ static boolean empty_output_buffer( j_compress_ptr cinfo )
   jpeg_destroy_compress(cinfo);
   
   // Make crash fatal or we would probably leak memory.
-  Com_Error( ERR_FATAL, "Output buffer for encoded JPEG image has insufficient size of %d bytes", dest->size );
+  Com_Terminate( TERM_UNRECOVERABLE, "Output buffer for encoded JPEG image has insufficient size of %d bytes", dest->size );
 
   return FALSE;
 }
@@ -408,7 +408,7 @@ size_t CL_SaveJPGToBuffer(byte *buffer, size_t bufSize, int quality,
      */
     jpeg_destroy_compress( &cinfo );
 
-    Com_Printf( "\n" );
+    Com_Log( SEV_INFO, LOG_CAT_CLIENT, "\n" );
     return 0;
   }
 

@@ -192,7 +192,7 @@ static char *XLateKey( XKeyEvent *ev, int *key )
 
   XLookupRet = XLookupString(ev, (char*)buf, sizeof(buf), &keysym, 0);
 #ifdef KBD_DBG
-  Com_Printf( "XLookupString ret: %d buf: %s keysym: %x\n", XLookupRet, buf, (int)keysym) ;
+  Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "XLookupString ret: %d buf: %s keysym: %x\n", XLookupRet, buf, (int)keysym) ;
 #endif
 
   if (!in_shiftedKeys->integer) {
@@ -200,7 +200,7 @@ static char *XLateKey( XKeyEvent *ev, int *key )
     ev->state = 0;
     XLookupRet = XLookupString(ev, (char*)bufnomod, sizeof(bufnomod), &keysym, 0);
 #ifdef KBD_DBG
-    Com_Printf( "XLookupString (minus modifiers) ret: %d buf: %s keysym: %x\n", XLookupRet, buf, (int)keysym );
+    Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "XLookupString (minus modifiers) ret: %d buf: %s keysym: %x\n", XLookupRet, buf, (int)keysym );
 #endif
   } else {
     bufnomod[0] = '\0';
@@ -350,14 +350,12 @@ static char *XLateKey( XKeyEvent *ev, int *key )
   case XK_backslash: *key = '\\'; break;
 
   default:
-    //Com_Printf( "unknown keysym: %08X\n", keysym );
+    //Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "unknown keysym: %08X\n", keysym );
     if (XLookupRet == 0)
     {
-      if (com_developer->value)
-      {
-        Com_Printf( "Warning: XLookupString failed on KeySym %d\n", (int)keysym );
-      }
-      buf[0] = '\0';
+	  Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Warning: XLookupString failed on KeySym %d\n", (int)keysym );
+
+	  buf[0] = '\0';
       return (char*)buf;
     }
     else
@@ -427,7 +425,7 @@ static void install_mouse_grab( void )
 	res = XGrabPointer( dpy, win, False, MOUSE_MASK, GrabModeAsync, GrabModeAsync, win, None, CurrentTime );
 	if ( res != GrabSuccess )
 	{
-		//Com_Printf( S_COLOR_YELLOW "Warning: XGrabPointer() failed\n" );
+		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Warning: XGrabPointer() failed\n" );
 	}
 	else
 	{
@@ -471,7 +469,7 @@ static void install_kb_grab( void )
 	res = XGrabKeyboard( dpy, win, False, GrabModeAsync, GrabModeAsync, CurrentTime );
 	if ( res != GrabSuccess )
 	{
-		//Com_Printf( S_COLOR_YELLOW "Warning: XGrabKeyboard() failed\n" );
+		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Warning: XGrabKeyboard() failed\n" );
 	}
 
 	XSync( dpy, False );
@@ -483,10 +481,7 @@ static void uninstall_mouse_grab( void )
 #ifdef HAVE_XF86DGA
 	if ( in_dgamouse->integer )
 	{
-		if ( com_developer->integer )
-		{
-			Com_Printf( "DGA Mouse - Disabling DGA DirectVideo\n" );
-		}
+		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "DGA Mouse - Disabling DGA DirectVideo\n" );
 		DGA_Mouse( qfalse );
 	}
 #endif /* HAVE_XF86DGA */
@@ -677,12 +672,12 @@ static int Sys_XTimeToSysTime( Time xtime )
 	// we get 7132, the formula handles the wrap safely
 	unsigned long xtime_aux,base_aux;
 	int test;
-//	Com_Printf("sys_timeBase: %p\n", sys_timeBase);
-//	Com_Printf("xtime: %p\n", xtime);
+//	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "sys_timeBase: %p\n", sys_timeBase);
+//	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "xtime: %p\n", xtime);
 	xtime_aux = 500; // 500 ms after wrap
 	base_aux = 0x3df3b63f; // the base a few seconds before wrap
 	test = xtime_aux - (unsigned long)(base_aux*1000);
-	Com_Printf("xtime wrap test: %d\n", test);
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "xtime wrap test: %d\n", test);
 #endif
 
 	// some X servers (like suse 8.1's) report weird event times
@@ -733,7 +728,7 @@ void HandleEvents( void )
 			break;
 
 		case KeyPress:
-			// Com_Printf("^2K+^7 %08X\n", event.xkey.keycode );
+			// Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "^2K+^7 %08X\n", event.xkey.keycode );
 			t = Sys_XTimeToSysTime( event.xkey.time );
 			if ( event.xkey.keycode == 0x31 )
 			{
@@ -789,7 +784,7 @@ void HandleEvents( void )
 
 			t = Sys_XTimeToSysTime( event.xkey.time );
 #if 0
-			Com_Printf("^5K-^7 %08X %s\n",
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "^5K-^7 %08X %s\n",
 				event.xkey.keycode,
 				X11_PendingInput()?"pending":"");
 #endif
@@ -878,7 +873,7 @@ void HandleEvents( void )
 		case CreateNotify:
 			win_x = event.xcreatewindow.x;
 			win_y = event.xcreatewindow.y;
-			Com_DPrintf( "CreateNotify: x=%i, y=%i\n", win_x, win_y );
+			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "CreateNotify: x=%i, y=%i\n", win_x, win_y );
 			break;
 
 		case ConfigureNotify:
@@ -886,7 +881,7 @@ void HandleEvents( void )
 			win_x = event.xconfigure.x;
 			win_y = event.xconfigure.y;
 
-			Com_DPrintf( "ConfigureNotify: gw_minimized=%i, created=%i, exposed=%i, x=%i, y=%i\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "ConfigureNotify: gw_minimized=%i, created=%i, exposed=%i, x=%i, y=%i\n",
 				gw_minimized, window_created, window_exposed, win_x, win_y );
 
 			if ( !glw_state.cdsFullscreen && window_created && !gw_minimized && window_exposed )
@@ -917,10 +912,10 @@ void HandleEvents( void )
 		case FocusOut:
 			if ( event.type == FocusIn ) {
 				gw_active = qtrue;
-				Com_DPrintf( "FocusIn\n" );
+				Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "FocusIn\n" );
 			} else {
 				gw_active = qfalse;
-				Com_DPrintf( "FocusOut\n" );
+				Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "FocusOut\n" );
 			}
 			Key_ClearStates();
 			break;
@@ -1042,7 +1037,7 @@ qboolean BuildGammaRampTable( unsigned char *red, unsigned char *green, unsigned
 		case 2048: shift = 3; break;
 		case 4096: shift = 4; break;
 		default:
-			Com_Printf( "Unsupported gamma ramp size: %d\n", gammaRampSize );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Unsupported gamma ramp size: %d\n", gammaRampSize );
 		return qfalse;
 	};
 	
@@ -1260,7 +1255,7 @@ static rserr_t GLW_StartDriverAndSetMode( int mode, const char *modeFS, qboolean
 	
 	if ( fullscreen && in_nograb->integer )
 	{
-		Com_Printf( "Fullscreen not allowed with in_nograb 1\n");
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Fullscreen not allowed with in_nograb 1\n");
 		Cvar_Set( "r_fullscreen", "0" );
 		r_fullscreen->modified = qfalse;
 		fullscreen = qfalse;
@@ -1271,15 +1266,15 @@ static rserr_t GLW_StartDriverAndSetMode( int mode, const char *modeFS, qboolean
 	switch ( err )
 	{
 	case RSERR_INVALID_FULLSCREEN:
-		Com_Printf( "...WARNING: fullscreen unavailable in this mode\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WARNING: fullscreen unavailable in this mode\n" );
 		return err;
 
 	case RSERR_INVALID_MODE:
-		Com_Printf( "...WARNING: could not set the given mode (%d)\n", mode );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WARNING: could not set the given mode (%d)\n", mode );
 		return err;
 
 	case RSERR_FATAL_ERROR:
-		Com_Printf( "...WARNING: couldn't open the X display\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WARNING: couldn't open the X display\n" );
 		return err;
 
 	default:
@@ -1388,7 +1383,7 @@ static XVisualInfo *GL_SelectVisual( int colorbits, int depthbits, int stencilbi
 		if ( !visinfo )
 			continue;
 
-		Com_Printf( "Using %d/%d/%d Color bits, %d depth, %d stencil display.\n", 
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Using %d/%d/%d Color bits, %d depth, %d stencil display.\n", 
 			attrib[ATTR_RED_IDX], attrib[ATTR_GREEN_IDX], attrib[ATTR_BLUE_IDX],
 			attrib[ATTR_DEPTH_IDX], attrib[ATTR_STENCIL_IDX]);
 
@@ -1518,14 +1513,14 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 		}
 	}
 #endif
-	Com_Printf( "Initializing display\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Initializing display\n" );
 
-	Com_Printf( "...setting mode %d:", mode );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...setting mode %d:", mode );
 
 	if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect,
 		mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
 	{
-		Com_Printf( " invalid mode\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " invalid mode\n" );
 		return RSERR_INVALID_MODE;
 	}
 
@@ -1534,9 +1529,9 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 	actualRate = r_displayRefresh->integer;
 
 	if ( actualRate )
-		Com_Printf( " %d %d @%iHz\n", actualWidth, actualHeight, actualRate );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " %d %d @%iHz\n", actualWidth, actualHeight, actualRate );
 	else
-		Com_Printf( " %d %d\n", actualWidth, actualHeight );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " %d %d\n", actualWidth, actualHeight );
 
 	if ( glw_state.randr_ext ) // try randr first
 	{
@@ -1551,7 +1546,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 		if ( fullscreen )
 			VidMode_SetMode( &actualWidth, &actualHeight, &actualRate );
 		else
-			Com_Printf( "XFree86-VidModeExtension: Ignored on non-fullscreen\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "XFree86-VidModeExtension: Ignored on non-fullscreen\n" );
 	}
 
 	colorbits = r_colorbits->integer;
@@ -1587,7 +1582,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 	if ( !visinfo )
 	{
-		Com_Printf( "Couldn't get a visual\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't get a visual\n" );
 		return RSERR_INVALID_MODE;
 	}
 
@@ -1679,7 +1674,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 		if ( ctx == NULL )
 		{
-			Com_Error( ERR_FATAL, "Error creating GLX context" );
+			Com_Terminate( TERM_UNRECOVERABLE, "Error creating GLX context" );
 		}
 
 		/* GH: Free the visinfo after we're done with it */
@@ -1687,7 +1682,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 		if ( !qglXMakeCurrent( dpy, win, ctx ) )
 		{
-			Com_Error( ERR_FATAL, "Error setting GLX context" );
+			Com_Terminate( TERM_UNRECOVERABLE, "Error setting GLX context" );
 		}
 	}
 	else
@@ -1719,14 +1714,14 @@ void GLimp_InitGamma( glconfig_t *config )
 
 	if ( glw_state.randr_gamma )
 	{
-		Com_Printf( "...using xrandr gamma extension\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using xrandr gamma extension\n" );
 		config->deviceSupportsGamma = qtrue;
 		return;
 	}
 
 	if ( glw_state.vidmode_gamma )
 	{
-		Com_Printf( "...using vidmode gamma extension\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using vidmode gamma extension\n" );
 		config->deviceSupportsGamma = qtrue;
 		return;
 	}
@@ -1745,10 +1740,10 @@ static int qXErrorHandler( Display *dpy, XErrorEvent *ev )
 	static char buf[1024];
 
 	XGetErrorText( dpy, ev->error_code, buf, sizeof( buf ) );
-	Com_Printf( "X Error of failed request: %s\n", buf) ;
-	Com_Printf( "  Major opcode of failed request: %d\n", ev->request_code );
-	Com_Printf( "  Minor opcode of failed request: %d\n", ev->minor_code );
-	Com_Printf( "  Serial number of failed request: %d\n", (int)ev->serial );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "X Error of failed request: %s\n", buf) ;
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  Major opcode of failed request: %d\n", ev->request_code );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  Minor opcode of failed request: %d\n", ev->minor_code );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  Serial number of failed request: %d\n", (int)ev->serial );
 
 #ifdef DEBUG
 	raise( SIGABRT );
@@ -1765,14 +1760,14 @@ static void InitCvars( void )
 	Cvar_SetDescription( in_nograb, "Do not capture mouse in game, may be useful during online streaming." );
 
 	// turn on-off sub-frame timing of X events, referenced in Sys_XTimeToSysTime
-	in_subframe = Cvar_Get( "in_subframe", "1", CVAR_ARCHIVE_ND );
+	in_subframe = Cvar_Get( "in_subframe", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	Cvar_SetDescription( in_subframe, "Toggle X sub-frame event handling." );
 
-	in_dgamouse = Cvar_Get( "in_dgamouse", "1", CVAR_ARCHIVE_ND );
+	in_dgamouse = Cvar_Get( "in_dgamouse", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	Cvar_SetDescription( in_dgamouse, "DGA Mouse support." );
-	in_shiftedKeys = Cvar_Get( "in_shiftedKeys", "0", CVAR_ARCHIVE_ND );
+	in_shiftedKeys = Cvar_Get( "in_shiftedKeys", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 
-	in_forceCharset = Cvar_Get( "in_forceCharset", "1", CVAR_ARCHIVE_ND );
+	in_forceCharset = Cvar_Get( "in_forceCharset", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	Cvar_SetDescription( in_forceCharset, "Try to translate non-ASCII chars in keyboard input or force EN/US keyboard layout." );
 }
 
@@ -1808,7 +1803,7 @@ static qboolean GLW_LoadOpenGL( const char *name )
 
 			if ( r_mode->integer != 3 || ( fullscreen && atoi( r_modeFullscreen->string ) != 3 ) )
 			{
-				Com_Printf( "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
 
 				if ( GLW_StartDriverAndSetMode( 3, "", fullscreen, qfalse /* vulkan */ ) != RSERR_OK )
 				{
@@ -1848,7 +1843,7 @@ static qboolean GLW_StartOpenGL( void )
 			}
 		}
 
-		Com_Error( ERR_FATAL, "GLW_StartOpenGL() - could not load OpenGL subsystem\n" );
+		Com_Terminate( TERM_UNRECOVERABLE, "GLW_StartOpenGL() - could not load OpenGL subsystem\n" );
 		return qfalse;
 	}
 
@@ -1892,12 +1887,12 @@ void GLimp_Init( glconfig_t *config )
 
 	if ( qglXSwapIntervalEXT || qglXSwapIntervalMESA || qglXSwapIntervalSGI )
 	{
-		Com_Printf( "...using GLX_EXT_swap_control\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using GLX_EXT_swap_control\n" );
 		Cvar_SetModified( "r_swapInterval", qtrue ); // force a set next frame
 	}
 	else
 	{
-		Com_Printf( "...GLX_EXT_swap_control not found\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...GLX_EXT_swap_control not found\n" );
 	}
 
 	Key_ClearStates();
@@ -1977,7 +1972,7 @@ static qboolean GLW_StartVulkan( void )
 	//
 	if ( !GLW_LoadVulkan() )
 	{
-		Com_Error( ERR_FATAL, "GLW_StartVulkan() - could not load Vulkan subsystem\n" );
+		Com_Terminate( TERM_UNRECOVERABLE, "GLW_StartVulkan() - could not load Vulkan subsystem\n" );
 		return qfalse;
 	}
 
@@ -2029,7 +2024,7 @@ void IN_Restart_f( void );
 
 void IN_Init( void )
 {
-	Com_DPrintf( "\n------- Input Initialization -------\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "\n------- Input Initialization -------\n" );
 
 	// mouse variables
 	in_mouse = Cvar_Get( "in_mouse", "1", CVAR_ARCHIVE );
@@ -2049,11 +2044,11 @@ void IN_Init( void )
 
 #ifdef USE_JOYSTICK
 	// bk001130 - from cvs.17 (mkv), joystick variables
-	in_joystick = Cvar_Get( "in_joystick", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	in_joystick = Cvar_Get( "in_joystick", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	Cvar_SetDescription( in_joystick, "Whether or not joystick support is on." );
 	// bk001130 - changed this to match win32
 	in_joystickDebug = Cvar_Get( "in_debugjoystick", "0", CVAR_TEMP );
-	joy_threshold = Cvar_Get( "joy_threshold", "0.15", CVAR_ARCHIVE_ND ); // FIXME: in_joythreshold
+	joy_threshold = Cvar_Get( "joy_threshold", "0.15", CVAR_ARCHIVE | CVAR_NODEFAULT ); // FIXME: in_joythreshold
 	Cvar_SetDescription( joy_threshold, "Threshold of joystick moving distance." );
 
 	IN_StartupJoystick(); // bk001130 - from cvs1.17 (mkv)
@@ -2062,7 +2057,7 @@ void IN_Init( void )
 	Cmd_AddCommand( "minimize", IN_Minimize );
 	Cmd_AddCommand( "in_restart", IN_Restart_f );
 
-	Com_DPrintf( "------------------------------------\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "------------------------------------\n" );
 }
 
 

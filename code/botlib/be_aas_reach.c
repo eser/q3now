@@ -3948,7 +3948,7 @@ static void AAS_SetWeaponJumpAreaFlags(void)
 		if (
 			!strcmp(classname, "item_armor_body") ||
 			!strcmp(classname, "item_armor_combat") ||
-			!strcmp(classname, "item_health_mega") ||
+			!strcmp(classname, "item_armor_jacket") ||
 			!strcmp(classname, "holdable_medkit") ||
 			!strcmp(classname, "weapon_grenadelauncher") ||
 			!strcmp(classname, "weapon_rocketlauncher") ||
@@ -3959,6 +3959,7 @@ static void AAS_SetWeaponJumpAreaFlags(void)
 			!strcmp(classname, "item_quad") ||
 			!strcmp(classname, "item_berserk") ||
 			!strcmp(classname, "item_regen") ||
+			!strcmp(classname, "item_deflector") ||
 			!strcmp(classname, "item_invulnerability"))
 		{
 			if (AAS_VectorForBSPEpairKey(ent, "origin", origin))

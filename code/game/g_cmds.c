@@ -336,7 +336,7 @@ void Cmd_Give_f (gentity_t *ent)
 
 		it_ent = G_Spawn();
 		VectorCopy( ent->r.currentOrigin, it_ent->s.origin );
-		it_ent->classname = it->classnames[0];
+		it_ent->classname = it->classname;
 		G_SpawnItem (it_ent, it);
 		FinishSpawningItem(it_ent );
 		memset( &trace, 0, sizeof( trace ) );
@@ -933,7 +933,7 @@ void Cmd_FollowCycle_f( gentity_t *ent, int dir ) {
 	}
 
 	if ( dir != 1 && dir != -1 ) {
-		G_Error( "Cmd_FollowCycle_f: bad dir %i", dir );
+		Com_Terminate( TERM_CLIENT_DROP, "Cmd_FollowCycle_f: bad dir %i", dir );
 	}
 
 	// if dedicated follow client, just switch between the two auto clients
@@ -1075,7 +1075,7 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 
 	// echo the text to the console
 	if ( g_dedicated.integer ) {
-		G_Printf( "%s%s\n", name, text);
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "%s%s\n", name, text);
 	}
 
 	// send it to all the appropriate clients
@@ -1219,7 +1219,7 @@ void G_Voice( gentity_t *ent, gentity_t *target, int mode, const char *id, qbool
 
 	// echo the text to the console
 	if ( g_dedicated.integer ) {
-		G_Printf( "voice: %s %s\n", ent->client->pers.netname, id);
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "voice: %s %s\n", ent->client->pers.netname, id);
 	}
 
 	// send it to all the appropriate clients
@@ -1879,7 +1879,7 @@ void Cmd_SetViewpos_f( gentity_t *ent ) {
 	trap_Argv( 4, buffer, sizeof( buffer ) );
 	angles[YAW] = atof( buffer );
 
-	TeleportPlayer( ent, origin, angles );
+	TeleportPlayer( ent, origin, angles, 400 );
 }
 
 
@@ -2094,6 +2094,16 @@ static void Cmd_BotSay_f( gentity_t *ent ) {
 	trap_SendServerCommand( ent->s.number, va( "print \"[cmd] %s\n\"", msg ) );
 }
 
+static void Cmd_HoldNext_f( gentity_t *ent ) {
+	if ( !ent->client ) return;
+	G_HoldableAdvanceSelected( ent, 1 );
+}
+
+static void Cmd_HoldPrev_f( gentity_t *ent ) {
+	if ( !ent->client ) return;
+	G_HoldableAdvanceSelected( ent, -1 );
+}
+
 /*
 =================
 ClientCommand
@@ -2287,6 +2297,10 @@ void ClientCommand( int clientNum ) {
 		}
 	}
 #endif
+	else if (Q_stricmp (cmd, "holdnext") == 0)
+		Cmd_HoldNext_f (ent);
+	else if (Q_stricmp (cmd, "holdprev") == 0)
+		Cmd_HoldPrev_f (ent);
 // eser - admin mode
 	else if (Q_stricmp (cmd, "adm") == 0)
 		Cmd_Admin_f (ent);

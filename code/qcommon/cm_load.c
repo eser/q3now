@@ -92,7 +92,7 @@ CMod_LoadShaders
 static void CMod_LoadShaders( void ) {
 	int count = cm_bsp->numShaders;
 	if ( count < 1 ) {
-		Com_Error( ERR_DROP, "%s: map with no shaders", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: map with no shaders", __func__ );
 	}
 
 	cm.shaders = Hunk_Alloc( count * sizeof( *cm.shaders ), h_high );
@@ -117,10 +117,10 @@ static void CMod_LoadSubmodels( void ) {
 	in = cm_bsp->subModels;
 	count = cm_bsp->numSubModels;
 	if ( count < 1 )
-		Com_Error( ERR_DROP, "%s: map with no models", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: map with no models", __func__ );
 
 	if ( count > MAX_SUBMODELS )
-		Com_Error( ERR_DROP, "%s: MAX_SUBMODELS exceeded", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: MAX_SUBMODELS exceeded", __func__ );
 
 	cm.cmodels = Hunk_Alloc( count * sizeof( *cm.cmodels ), h_high );
 	cm.numSubModels = count;
@@ -142,7 +142,7 @@ static void CMod_LoadSubmodels( void ) {
 		firstBrush = in->firstBrush;
 		numBrushes = in->numBrushes;
 		if ( (uint64_t)firstBrush + numBrushes > cm.numBrushes ) {
-			Com_Error( ERR_DROP, "%s: bad brushes", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad brushes", __func__ );
 		}
 
 		// make a "leaf" just to hold the model's brushes and surfaces
@@ -156,7 +156,7 @@ static void CMod_LoadSubmodels( void ) {
 		firstSurface = in->firstSurface;
 		numSurfaces = in->numSurfaces;
 		if ( (uint64_t)firstSurface + numSurfaces > cm.numSurfaces ) {
-			Com_Error( ERR_DROP, "%s: bad surfaces", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad surfaces", __func__ );
 		}
 
 		out->leaf.numLeafSurfaces = numSurfaces;
@@ -184,7 +184,7 @@ static void CMod_LoadNodes( void ) {
 	in = cm_bsp->nodes;
 	count = cm_bsp->numNodes;
 	if ( count < 1 )
-		Com_Error( ERR_DROP, "%s: map has no nodes", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: map has no nodes", __func__ );
 
 	cm.nodes = Hunk_Alloc( count * sizeof( *cm.nodes ), h_high );
 	cm.numNodes = count;
@@ -195,7 +195,7 @@ static void CMod_LoadNodes( void ) {
 	{
 		num = in->planeNum;
 		if ( num >= cm.numPlanes )
-			Com_Error( ERR_DROP, "%s: bad planeNum", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad planeNum", __func__ );
 
 		out->plane = cm.planes + num;
 		for ( j = 0; j < 2; j++ )
@@ -203,10 +203,10 @@ static void CMod_LoadNodes( void ) {
 			child = in->children[j];
 			if ( child & 0x80000000 ) {
 				if ( ~child >= cm.numLeafs )
-					Com_Error( ERR_DROP, "%s: bad leaf", __func__ );
+					Com_Terminate( TERM_CLIENT_DROP, "%s: bad leaf", __func__ );
 			} else {
 				if ( child >= count )
-					Com_Error( ERR_DROP, "%s: bad node", __func__ );
+					Com_Terminate( TERM_CLIENT_DROP, "%s: bad node", __func__ );
 			}
 			out->children[j] = child;
 		}
@@ -221,14 +221,23 @@ CM_BoundBrush
 =================
 */
 static void CM_BoundBrush( cbrush_t *b ) {
-	b->bounds[0][0] = -b->sides[0].plane->dist;
-	b->bounds[1][0] = b->sides[1].plane->dist;
-
-	b->bounds[0][1] = -b->sides[2].plane->dist;
-	b->bounds[1][1] = b->sides[3].plane->dist;
-
-	b->bounds[0][2] = -b->sides[4].plane->dist;
-	b->bounds[1][2] = b->sides[5].plane->dist;
+	int i, j;
+	// Initialize to universe bounds — brushes without a constraining plane
+	// in a given axis direction are treated as infinite in that direction.
+	b->bounds[0][0] = b->bounds[0][1] = b->bounds[0][2] = -65536.0f;
+	b->bounds[1][0] = b->bounds[1][1] = b->bounds[1][2] =  65536.0f;
+	for ( i = 0; i < b->numsides; i++ ) {
+		const cplane_t *p = b->sides[i].plane;
+		for ( j = 0; j < 3; j++ ) {
+			if ( p->normal[j] > 0.999f ) {
+				if ( p->dist < b->bounds[1][j] )
+					b->bounds[1][j] = p->dist;
+			} else if ( p->normal[j] < -0.999f ) {
+				if ( -p->dist > b->bounds[0][j] )
+					b->bounds[0][j] = -p->dist;
+			}
+		}
+	}
 }
 
 
@@ -241,7 +250,7 @@ CMod_LoadBrushes
 static void CMod_LoadBrushes( void ) {
 	dbrush_t	*in;
 	cbrush_t	*out;
-	int			i, count;
+	int			i, count, nDropped;
 	unsigned	firstSide, numSides;
 
 	in = cm_bsp->brushes;
@@ -251,25 +260,40 @@ static void CMod_LoadBrushes( void ) {
 	cm.numBrushes = count;
 
 	out = cm.brushes;
+	nDropped = 0;
 
 	for ( i = 0; i < count; i++, out++, in++ ) {
 		firstSide = in->firstSide;
 		numSides = in->numSides;
 		if ( (uint64_t)firstSide + numSides > cm.numBrushSides )
-			Com_Error( ERR_DROP, "%s: bad brushsides", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad brushsides", __func__ );
 
 		out->sides = cm.brushsides + firstSide;
 		out->numsides = numSides;
 
 		out->shaderNum = in->shaderNum;
 		if ( out->shaderNum < 0 || out->shaderNum >= cm.numShaders ) {
-			Com_Error( ERR_DROP, "%s: bad shaderNum: %i", __func__, out->shaderNum );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad shaderNum: %i", __func__, out->shaderNum );
 		}
 		out->contents = cm.shaders[out->shaderNum].contentFlags;
 
 		CM_BoundBrush( out );
+
+		// Degenerate brushes whose half-space intersection is empty have inverted
+		// bounds after CM_BoundBrush.  Stamp sentinel bounds so the AABB pre-check
+		// in CM_TestBoxInBrush unconditionally rejects them.
+		if ( out->bounds[0][0] > out->bounds[1][0] ||
+		     out->bounds[0][1] > out->bounds[1][1] ||
+		     out->bounds[0][2] > out->bounds[1][2] ) {
+			out->bounds[0][0] = out->bounds[0][1] = out->bounds[0][2] =  99999.0f;
+			out->bounds[1][0] = out->bounds[1][1] = out->bounds[1][2] = -99999.0f;
+			nDropped++;
+		}
 	}
 
+	if ( nDropped > 0 )
+		Com_Log( SEV_INFO, LOG_CAT_LOADING,
+		         "CM_LoadBrushes: dropped %d degenerate brushes (inverted bounds)\n", nDropped );
 }
 
 
@@ -284,7 +308,7 @@ static void CMod_LoadLeafs( void )
 	dleaf_t *in = cm_bsp->leafs;
 	int count = cm_bsp->numLeafs;
 	if ( count < 1 )
-		Com_Error( ERR_DROP, "%s: map with no leafs", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: map with no leafs", __func__ );
 
 	cm.leafs = Hunk_Alloc( ( BOX_LEAFS + count ) * sizeof( *cm.leafs ), h_high );
 	cm.numLeafs = count;
@@ -294,16 +318,16 @@ static void CMod_LoadLeafs( void )
 	{
 		out->cluster = in->cluster;
 		if ( out->cluster + 1U > INT_MAX - 63U )
-			Com_Error( ERR_DROP, "%s: bad cluster", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad cluster", __func__ );
 
 		out->area = in->area;
 		if ( out->area + 1U > MAX_MAP_AREAS )
-			Com_Error( ERR_DROP, "%s: bad area", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad area", __func__ );
 
 		firstLeafBrush = in->firstLeafBrush;
 		numLeafBrushes = in->numLeafBrushes;
 		if ( (uint64_t)firstLeafBrush + numLeafBrushes > cm.numLeafBrushes )
-			Com_Error( ERR_DROP, "%s: bad leafbrushes", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad leafbrushes", __func__ );
 
 		out->firstLeafBrush = firstLeafBrush;
 		out->numLeafBrushes = numLeafBrushes;
@@ -311,7 +335,7 @@ static void CMod_LoadLeafs( void )
 		firstLeafSurface = in->firstLeafSurface;
 		numLeafSurfaces = in->numLeafSurfaces;
 		if ( (uint64_t)firstLeafSurface + numLeafSurfaces > cm.numLeafSurfaces )
-			Com_Error( ERR_DROP, "%s: bad leafsurfaces", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad leafsurfaces", __func__ );
 
 		out->firstLeafSurface = firstLeafSurface;
 		out->numLeafSurfaces = numLeafSurfaces;
@@ -337,7 +361,7 @@ static void CMod_LoadPlanes( void )
 	dplane_t *in = cm_bsp->planes;
 	int count = cm_bsp->numPlanes;
 	if ( count < 1 )
-		Com_Error( ERR_DROP, "%s: map with no planes", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: map with no planes", __func__ );
 
 	cm.planes = Hunk_Alloc( ( BOX_PLANES + count ) * sizeof( *cm.planes ), h_high );
 	cm.numPlanes = count;
@@ -379,7 +403,7 @@ static void CMod_LoadLeafBrushes( void )
 	for ( int i = 0; i < count; i++, in++, out++ ) {
 		unsigned j = *in;
 		if ( j >= cm.numBrushes )
-			Com_Error( ERR_DROP, "%s: bad brush", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad brush", __func__ );
 		*out = j;
 	}
 }
@@ -403,7 +427,7 @@ static void CMod_LoadLeafSurfaces( void )
 	for ( int i = 0; i < count; i++, in++, out++ ) {
 		unsigned j = *in;
 		if ( j >= cm.numSurfaces )
-			Com_Error( ERR_DROP, "%s: bad surface", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad surface", __func__ );
 		*out = j;
 	}
 }
@@ -427,12 +451,12 @@ static void CMod_LoadBrushSides( void )
 	for ( int i = 0; i < count; i++, in++, out++ ) {
 		unsigned num = in->planeNum;
 		if ( num >= cm.numPlanes ) {
-			Com_Error( ERR_DROP, "%s: bad planeNum", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad planeNum", __func__ );
 		}
 		out->plane = &cm.planes[num];
 		out->shaderNum = in->shaderNum;
 		if ( out->shaderNum < 0 || out->shaderNum >= cm.numShaders ) {
-			Com_Error( ERR_DROP, "%s: bad shaderNum: %i", __func__, out->shaderNum );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad shaderNum: %i", __func__, out->shaderNum );
 		}
 		out->surfaceFlags = cm.shaders[out->shaderNum].surfaceFlags;
 	}
@@ -473,13 +497,13 @@ static void CMod_LoadVisibility( void ) {
 	clusterBytes = cm_bsp->clusterBytes;
 
 	if ( (uint64_t)numClusters * clusterBytes > len ) {
-		Com_Error( ERR_DROP, "%s: lump too short", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: lump too short", __func__ );
 	}
 	if ( numClusters < cm.numClusters ) {
-		Com_Error( ERR_DROP, "%s: bad numClusters", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad numClusters", __func__ );
 	}
 	if ( clusterBytes < (numClusters + 7) >> 3 ) {
-		Com_Error( ERR_DROP, "%s: bad clusterBytes", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad clusterBytes", __func__ );
 	}
 
 	cm.visibility = Hunk_Alloc( len, h_high );
@@ -522,13 +546,13 @@ static void CMod_LoadPatches( void ) {
 		unsigned width = in->patchWidth;
 		unsigned height = in->patchHeight;
 		if ( (uint64_t)width * height > MAX_PATCH_VERTS ) {
-			Com_Error( ERR_DROP, "%s: MAX_PATCH_VERTS", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: MAX_PATCH_VERTS", __func__ );
 		}
 
 		unsigned firstVert = in->firstVert;
 		unsigned numVerts = width * height;
 		if ( (uint64_t)firstVert + numVerts > totalVerts ) {
-			Com_Error( ERR_DROP, "%s: bad firstVert", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad firstVert", __func__ );
 		}
 
 		drawVert_t *dv_p = dv + firstVert;
@@ -540,7 +564,7 @@ static void CMod_LoadPatches( void ) {
 
 		unsigned shaderNum = in->shaderNum;
 		if ( shaderNum >= cm.numShaders ) {
-			Com_Error( ERR_DROP, "%s: bad shaderNum", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad shaderNum", __func__ );
 		}
 		patch->contents = cm.shaders[shaderNum].contentFlags;
 		patch->surfaceFlags = cm.shaders[shaderNum].surfaceFlags;
@@ -581,7 +605,7 @@ static uint32_t CM_Checksum( const dheader_t *header ) {
 static void CM_ValidateTree_r( byte *visited, int node ) {
 	while ( node >= 0 ) {
 		if ( visited[node] )
-			Com_Error( ERR_DROP, "%s: cycle encountered", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: cycle encountered", __func__ );
 		visited[node] = 1;
 		CM_ValidateTree_r( visited, cm.nodes[node].children[0] );
 		node = cm.nodes[node].children[1];
@@ -662,7 +686,7 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 		return 0;
 	}
 	if ( numIndexes % 3 ) {
-		Com_Printf( "CM_RegisterTriangleSoup: %s numIndexes %i not a multiple of 3\n",
+		Com_Log( SEV_INFO, LOG_CAT_COLLISION, "CM_RegisterTriangleSoup: %s numIndexes %i not a multiple of 3\n",
 			name, numIndexes );
 		return 0;
 	}
@@ -682,7 +706,7 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 		}
 	}
 	if ( slot < 0 ) {
-		Com_Printf( "CM_RegisterTriangleSoup: %s exceeds MAX_TRI_SOUPS (%i)\n",
+		Com_Log( SEV_INFO, LOG_CAT_COLLISION, "CM_RegisterTriangleSoup: %s exceeds MAX_TRI_SOUPS (%i)\n",
 			name, MAX_TRI_SOUPS );
 		return 0;
 	}
@@ -788,12 +812,12 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 	const byte *base = buf.b;
 
 	if ( fileSize < 16 + 27 * 4 ) {
-		Com_DPrintf( "CM_LoadIQMGeometry: %s truncated header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s truncated header\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
 	if ( strncmp( (const char *)base, IQM_MAGIC_STRING, 16 ) ) {
-		Com_DPrintf( "CM_LoadIQMGeometry: %s wrong magic\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s wrong magic\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
@@ -816,7 +840,7 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 	}
 	(void)version;
 	if ( filesize > (uint32_t)fileSize ) {
-		Com_DPrintf( "CM_LoadIQMGeometry: %s filesize mismatch\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s filesize mismatch\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
@@ -850,17 +874,17 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 		}
 	}
 	if ( !posFound ) {
-		Com_DPrintf( "CM_LoadIQMGeometry: %s no position vertex array\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s no position vertex array\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
 	if ( (uint64_t)posOffset + (uint64_t)num_vertexes * 12 > filesize ) {
-		Com_DPrintf( "CM_LoadIQMGeometry: %s position array out of range\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s position array out of range\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
 	if ( (uint64_t)ofs_triangles + (uint64_t)num_triangles * 12 > filesize ) {
-		Com_DPrintf( "CM_LoadIQMGeometry: %s triangle array out of range\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s triangle array out of range\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
@@ -910,19 +934,27 @@ Loads in the map and all submodels
 */
 void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	if ( !name || !name[0] ) {
-		Com_Error( ERR_DROP, "%s: NULL name", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: NULL name", __func__ );
 	}
 
 #ifndef BSPC
-	cm_noAreas = Cvar_Get( "cm_noAreas", "0", CVAR_CHEAT );
-	Cvar_SetDescription( cm_noAreas, "Do not use areaportals, all areas are connected." );
-	cm_noCurves = Cvar_Get( "cm_noCurves", "0", CVAR_CHEAT );
-	Cvar_SetDescription( cm_noCurves, "Do not collide against curves." );
-	cm_playerCurveClip = Cvar_Get( "cm_playerCurveClip", "1", CVAR_ARCHIVE_ND | CVAR_CHEAT );
-	Cvar_SetDescription( cm_playerCurveClip, "Collide player against curves." );
+	{
+		static const cvarDesc_t cmDescs[] = {
+			/* 0 */ CVAR_BOOL( "cm_noAreas",         "0", CVAR_CHEAT,                   "Do not use areaportals, all areas are connected." ),
+			/* 1 */ CVAR_BOOL( "cm_noCurves",        "0", CVAR_CHEAT,                   "Do not collide against curves." ),
+			/* 2 */ CVAR_BOOL( "cm_playerCurveClip", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_CHEAT, "Collide player against curves." ),
+		};
+		enum { CM_NO_AREAS, CM_NO_CURVES, CM_PLAYER_CURVE_CLIP, CM_CVAR_COUNT };
+		_Static_assert( ARRAY_LEN( cmDescs ) == CM_CVAR_COUNT, "cmDescs/enum mismatch" );
+		static cvar_t *cmHandles[CM_CVAR_COUNT];
+		Cvar_RegisterTable( cmDescs, ARRAY_LEN( cmDescs ), cmHandles );
+		cm_noAreas         = cmHandles[CM_NO_AREAS];
+		cm_noCurves        = cmHandles[CM_NO_CURVES];
+		cm_playerCurveClip = cmHandles[CM_PLAYER_CURVE_CLIP];
+	}
 #endif
 
-	Com_DPrintf( "%s( '%s', %i )\n", __func__, name, clientload );
+	Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "%s( '%s', %i )\n", __func__, name, clientload );
 
 	if ( !strcmp( cm.name, name ) && clientload ) {
 		*checksum = cm.checksum;
@@ -943,13 +975,15 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	}
 #endif
 
-	if ( !BSP_Load( name, &cm_bsp ) ) {
-		Com_Error( ERR_DROP, "%s: couldn't load %s", __func__, name );
+	if ( !BSP_Load( name, &cm_bsp, BSP_LOAD_FLAGS_NONE ) ) {
+		Com_Terminate( TERM_CLIENT_DROP, "%s: couldn't load %s", __func__, name );
 	}
 
 	*checksum = cm.checksum = cm_bsp->checksum;
 
 	int bspVersion = cm_bsp->version;
+	cm.tracer = ( bspVersion == BSP_VERSION_Q1 ) ? &cmTracer_q1 : &cmTracer_q3;
+
 	if ( BSP_AssetProfileForVersion( bspVersion ) == BSP_ASSET_PROFILE_LEGACY ) {
 		Cvar_Set( "com_mapAssetProfile", "legacy" );
 	} else {
@@ -986,12 +1020,9 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	CM_FloodAreaConnections();
 
 #ifndef BSPC
-	{
-		extern cvar_t *com_developer;
-		if ( com_developer && com_developer->integer ) {
-			CM_TriangleSoupCollideSelfTest();
-		}
-	}
+#ifdef _DEBUG
+	CM_TriangleSoupCollideSelfTest();
+#endif
 #endif
 
 	// allow this to be cached if it is loaded by the server
@@ -1007,6 +1038,16 @@ CM_ClearMap
 ==================
 */
 void CM_ClearMap( void ) {
+	// Release any stale BSP reference left by a crash-interrupted CM_LoadMap.
+	// Normally CM_LoadMap calls BSP_Free(cm_bsp) before returning; if a longjmp
+	// (Com_Error) fires between BSP_Load and that BSP_Free, cm_bsp retains a
+	// reference that would otherwise keep the BSP slot occupied indefinitely.
+	if ( cm_bsp ) {
+		BSP_Free( cm_bsp );
+		cm_bsp = NULL;
+	}
+
+	CMQ1_FreeData();
 	memset( &cm, 0, sizeof( cm ) );
 	CM_ClearLevelPatches();
 	CM_ClearTriangleSoups();
@@ -1023,7 +1064,7 @@ CM_ClipHandleToModel
 */
 cmodel_t *CM_ClipHandleToModel( clipHandle_t handle ) {
 	if ( handle < 0 ) {
-		Com_Error( ERR_DROP, "CM_ClipHandleToModel: bad handle %i", handle );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_ClipHandleToModel: bad handle %i", handle );
 	}
 	if ( handle < cm.numSubModels ) {
 		return &cm.cmodels[handle];
@@ -1034,15 +1075,15 @@ cmodel_t *CM_ClipHandleToModel( clipHandle_t handle ) {
 	if ( handle >= TRI_SOUP_HANDLE_BASE && handle < TRI_SOUP_HANDLE_END ) {
 		int idx = handle - TRI_SOUP_HANDLE_BASE;
 		if ( !cm.triSoups[idx].inUse ) {
-			Com_Error( ERR_DROP, "CM_ClipHandleToModel: stale triangle-soup handle %i", handle );
+			Com_Terminate( TERM_CLIENT_DROP, "CM_ClipHandleToModel: stale triangle-soup handle %i", handle );
 		}
 		return &cm.triSoups[idx].cmod;
 	}
 	if ( handle < MAX_SUBMODELS ) {
-		Com_Error( ERR_DROP, "CM_ClipHandleToModel: bad handle %i < %i < %i",
+		Com_Terminate( TERM_CLIENT_DROP, "CM_ClipHandleToModel: bad handle %i < %i < %i",
 			cm.numSubModels, handle, MAX_SUBMODELS );
 	}
-	Com_Error( ERR_DROP, "CM_ClipHandleToModel: bad handle %i", handle + MAX_SUBMODELS );
+	Com_Terminate( TERM_CLIENT_DROP, "CM_ClipHandleToModel: bad handle %i", handle + MAX_SUBMODELS );
 
 	return NULL;
 }
@@ -1055,7 +1096,7 @@ CM_InlineModel
 */
 clipHandle_t CM_InlineModel( int index ) {
 	if ( index < 0 || index >= cm.numSubModels ) {
-		Com_Error (ERR_DROP, "CM_InlineModel: bad number");
+		Com_Terminate( TERM_CLIENT_DROP, "CM_InlineModel: bad number");
 	}
 	return index;
 }
@@ -1078,7 +1119,7 @@ char *CM_EntityString( void ) {
 
 int CM_LeafCluster( int leafnum ) {
 	if ( leafnum < 0 || leafnum >= cm.numLeafs ) {
-		Com_Error( ERR_DROP, "CM_LeafCluster: bad number" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_LeafCluster: bad number" );
 	}
 	return cm.leafs[leafnum].cluster;
 }
@@ -1086,9 +1127,51 @@ int CM_LeafCluster( int leafnum ) {
 
 int CM_LeafArea( int leafnum ) {
 	if ( leafnum < 0 || leafnum >= cm.numLeafs ) {
-		Com_Error( ERR_DROP, "CM_LeafArea: bad number" );
+		Com_Terminate( TERM_CLIENT_DROP, "CM_LeafArea: bad number" );
 	}
 	return cm.leafs[leafnum].area;
+}
+
+
+int CM_NumBrushes( void ) {
+	return cm.numBrushes;
+}
+
+
+void CM_GetBrushData( int idx, int *contents, int *shaderNum, const char **shaderName,
+					  float mins[3], float maxs[3], int *numsides ) {
+	const cbrush_t *b;
+	if ( idx < 0 || idx >= cm.numBrushes )
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GetBrushData: bad index %d", idx );
+	b = &cm.brushes[idx];
+	*contents  = b->contents;
+	*shaderNum = b->shaderNum;
+	*shaderName = ( b->shaderNum >= 0 && b->shaderNum < cm.numShaders )
+				  ? cm.shaders[b->shaderNum].shader : "";
+	mins[0] = b->bounds[0][0]; mins[1] = b->bounds[0][1]; mins[2] = b->bounds[0][2];
+	maxs[0] = b->bounds[1][0]; maxs[1] = b->bounds[1][1]; maxs[2] = b->bounds[1][2];
+	*numsides = b->numsides;
+}
+
+
+void CM_GetBrushSideData( int brushIdx, int sideIdx, int *planeNum, float normal[3],
+						   float *dist, int *shaderNum, const char **shaderName ) {
+	const cbrush_t     *b;
+	const cbrushside_t *s;
+	if ( brushIdx < 0 || brushIdx >= cm.numBrushes )
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GetBrushSideData: bad brush index %d", brushIdx );
+	b = &cm.brushes[brushIdx];
+	if ( sideIdx < 0 || sideIdx >= b->numsides )
+		Com_Terminate( TERM_CLIENT_DROP, "CM_GetBrushSideData: bad side index %d", sideIdx );
+	s = &b->sides[sideIdx];
+	*planeNum  = (int)( s->plane - cm.planes );
+	normal[0]  = s->plane->normal[0];
+	normal[1]  = s->plane->normal[1];
+	normal[2]  = s->plane->normal[2];
+	*dist      = s->plane->dist;
+	*shaderNum = s->shaderNum;
+	*shaderName = ( s->shaderNum >= 0 && s->shaderNum < cm.numShaders )
+				  ? cm.shaders[s->shaderNum].shader : "";
 }
 
 //=======================================================================

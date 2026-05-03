@@ -25,6 +25,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_localents.c
     ${SOURCE_DIR}/cgame/cg_marks.c
     ${SOURCE_DIR}/cgame/cg_particles.c
+    ${SOURCE_DIR}/cgame/cg_q1_particles.c
     ${SOURCE_DIR}/cgame/cg_playlist.c
     ${SOURCE_DIR}/cgame/cg_players.c
     ${SOURCE_DIR}/cgame/cg_characters.c
@@ -69,18 +70,22 @@ set(GAME_SOURCES
     ${SOURCE_DIR}/game/g_character.c
     ${SOURCE_DIR}/game/g_client.c
     ${SOURCE_DIR}/game/g_cmds.c
+    ${SOURCE_DIR}/game/g_lightstyle.c
     ${SOURCE_DIR}/game/g_combat.c
     ${SOURCE_DIR}/game/g_items.c
     ${SOURCE_DIR}/game/g_mem.c
-    ${SOURCE_DIR}/game/g_misc.c
+    ${SOURCE_DIR}/game/entities/g_misc_q3.c
+    ${SOURCE_DIR}/game/entities/g_misc_q1.c
+    ${SOURCE_DIR}/game/entities/g_trigger_q1.c
     ${SOURCE_DIR}/game/g_missile.c
-    ${SOURCE_DIR}/game/g_mover.c
+    ${SOURCE_DIR}/game/entities/g_mover_q3.c
+    ${SOURCE_DIR}/game/entities/g_mover_q1.c
     ${SOURCE_DIR}/game/g_session.c
-    ${SOURCE_DIR}/game/g_spawn.c
+    ${SOURCE_DIR}/game/entities/g_spawn.c
     ${SOURCE_DIR}/game/bg_tracemap.c
     ${SOURCE_DIR}/game/g_stats.c
     ${SOURCE_DIR}/game/g_svcmds.c
-    ${SOURCE_DIR}/game/g_target.c
+    ${SOURCE_DIR}/game/entities/g_target_q3.c
     ${SOURCE_DIR}/game/g_team.c
     ${SOURCE_DIR}/game/g_trigger.c
     ${SOURCE_DIR}/game/g_utils.c

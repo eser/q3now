@@ -25,6 +25,19 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define QDECL
 
+// QDECL_TLS — portable thread-local storage. MSVC checked first because it
+// defines __STDC_VERSION__ inconsistently; __STDC_NO_THREADS__ guards
+// freestanding C11 targets that opt out of threads.
+#if defined(_MSC_VER)
+# define QDECL_TLS __declspec(thread)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
+# define QDECL_TLS _Thread_local
+#elif defined(__GNUC__) || defined(__clang__)
+# define QDECL_TLS __thread
+#else
+# error "QDECL_TLS: no thread-local storage on this compiler"
+#endif
+
 #define id386 0
 #define idx64 0
 #define arm32 0

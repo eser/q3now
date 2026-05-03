@@ -559,7 +559,7 @@ void WiredFeeder_LoadMaps( void ) {
 	WiredFeeder_StateSetString( "ui_favMapAction", "Favorite" );
 	WiredFeeder_StateSetString( "ui_favoriteMaps", "" );
 
-	Com_DPrintf( "WiredUI: %d maps loaded, %d arena files parsed\n", wui_mapCount, arenaCount );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: %d maps loaded, %d arena files parsed\n", wui_mapCount, arenaCount );
 }
 
 static void WiredFeeder_FilterMaps( void ) {
@@ -808,7 +808,7 @@ void WiredFeeder_LoadModels( void ) {
 		}
 	}
 
-	Com_DPrintf( "WiredUI: found %d characters\n", count );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: found %d characters\n", count );
 }
 
 static int WiredFeeder_HeadsCount( int feederID ) {
@@ -867,7 +867,7 @@ void WiredUI_RegisterCoreFeeders( void ) {
 	WiredFeeder_LoadMods();
 	WiredFeeder_LoadModels();
 
-	Com_DPrintf( "WiredUI: feeders registered (demos=%d, mods=%d)\n",
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: feeders registered (demos=%d, mods=%d)\n",
 		wui_demoCount, wui_modCount );
 }
 

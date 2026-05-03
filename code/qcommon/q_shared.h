@@ -401,27 +401,13 @@ typedef enum {
 #define	MAX_MAP_AREA_BYTES		32		// bit vector of area visibility
 
 
-// print levels from renderer (FIXME: set up for game / cgame?)
+// parameters to Com_Terminate
 typedef enum {
-	PRINT_ALL,
-	PRINT_DEVELOPER,		// only print when "developer 1"
-	PRINT_WARNING,
-	PRINT_ERROR
-} printParm_t;
-
-
-#ifdef ERR_FATAL
-#undef ERR_FATAL			// this is be defined in malloc.h
-#endif
-
-// parameters to the main Error routine
-typedef enum {
-	ERR_FATAL,					// exit the entire game with a popup window
-	ERR_DROP,					// print to console and disconnect from game
-	ERR_SERVERDISCONNECT,		// don't kill server
-	ERR_DISCONNECT,				// client disconnected from the server
-	ERR_NEED_CD					// pop up the need-cd dialog
-} errorParm_t;
+	TERM_UNRECOVERABLE,     // process must exit (was ERR_FATAL)
+	TERM_CLIENT_DROP,       // error disconnect, return to menu (was ERR_DROP)
+	TERM_CLIENT_LEAVE,      // user-initiated disconnect (was ERR_DISCONNECT)
+	TERM_SERVER_KICK        // server kicked client (was ERR_SERVERDISCONNECT)
+} terminationReason_t;
 
 // base model rendering values
 #define	DEFAULT_MODEL			"visor"
@@ -1004,15 +990,21 @@ qboolean Info_ValidateKeyValue( const char *s );
 const char *Info_NextPair( const char *s, char *key, char *value );
 int Info_RemoveKey( char *s, const char *key );
 
+// log.h needs cvar_t* (pointer only); forward-declare here so the include works
+// before struct cvar_s is fully defined below.  The full typedef at line ~1091
+// is a compatible redeclaration and is silently deduped by the C standard.
+typedef struct cvar_s cvar_t;
+#include "wired/core/shell/log.h"   // defines log_severity_t; declares Com_Log
+
 // this is only here so the functions in q_shared.c and bg_*.c can link
-void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t level, const char *fmt, ... );
-void FORMAT_PRINTF(1, 2) QDECL Com_Printf( const char *msg, ... );
+void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t level, const char *fmt, ... );
+// Com_Log is declared by the log.h include above (correct FORMAT_PRINTF(2,3))
 
 // Platform mutex abstraction. Fixed-size opaque struct; platform files define
 // the actual member via _Static_assert-guarded cast into opaque[]. 128 bytes
 // covers pthread_mutex_t on macOS arm64 (64 B, the largest target) and
 // CRITICAL_SECTION on Win64 (40 B). Sys_MutexInit returns qfalse on resource
-// exhaustion; Com_Init callers must Com_Error ERR_FATAL on failure.
+// exhaustion; Com_Init callers must Com_Terminate TERM_UNRECOVERABLE on failure.
 #define SYS_MUTEX_OPAQUE_SIZE 128
 typedef struct sys_mutex_s {
 	unsigned char opaque[SYS_MUTEX_OPAQUE_SIZE];
@@ -1034,43 +1026,40 @@ default values.
 ==========================================================
 */
 
-#define	CVAR_ARCHIVE		0x0001	// set to cause it to be saved to vars.rc
+#define	CVAR_ARCHIVE			0x00000001	// set to cause it to be saved to vars.rc
 					// used for system variables, not for player
 					// specific configurations
-#define	CVAR_USERINFO		0x0002	// sent to server on connect or change
-#define	CVAR_SERVERINFO		0x0004	// sent in response to front end requests
-#define	CVAR_SYSTEMINFO		0x0008	// these cvars will be duplicated on all clients
-#define	CVAR_INIT			0x0010	// don't allow change from console at all,
+#define	CVAR_USERINFO			0x00000002	// sent to server on connect or change
+#define	CVAR_SERVERINFO			0x00000004	// sent in response to front end requests
+#define	CVAR_SYSTEMINFO			0x00000008	// these cvars will be duplicated on all clients
+#define	CVAR_INIT				0x00000010	// don't allow change from console at all,
 					// but can be set from the command line
-#define	CVAR_LATCH			0x0020	// will only change when C code next does
+#define	CVAR_LATCH				0x00000020	// will only change when C code next does
 					// a Cvar_Get(), so it can't be changed
 					// without proper initialization.  modified
 					// will be set, even though the value hasn't
 					// changed yet
-#define	CVAR_ROM			0x0040	// display only, cannot be set by user at all
-#define	CVAR_USER_CREATED	0x0080	// created by a set command
-#define	CVAR_TEMP			0x0100	// can be set even when cheats are disabled, but is not archived
-#define CVAR_CHEAT			0x0200	// can not be changed if cheats are disabled
-#define CVAR_NORESTART		0x0400	// do not clear when a cvar_restart is issued
+#define	CVAR_ROM				0x00000040	// display only, cannot be set by user at all
+#define	CVAR_USER_CREATED		0x00000080	// created by a set command
+#define	CVAR_TEMP				0x00000100	// can be set even when cheats are disabled, but is not archived
+#define CVAR_CHEAT				0x00000200	// can not be changed if cheats are disabled
+#define CVAR_NORESTART			0x00000400	// do not clear when a cvar_restart is issued
 
-#define CVAR_SERVER_CREATED	0x0800	// cvar was created by a server the client connected to.
-#define CVAR_VM_CREATED		0x1000	// cvar was created exclusively in one of the VMs.
-#define CVAR_PROTECTED		0x2000	// prevent modifying this var from VMs or the server
+#define CVAR_SERVER_CREATED		0x00000800	// cvar was created by a server the client connected to.
+#define CVAR_VM_CREATED			0x00001000	// cvar was created exclusively in one of the VMs.
+#define CVAR_PROTECTED			0x00002000	// prevent modifying this var from VMs or the server
 
-#define CVAR_NODEFAULT		0x4000	// do not write to config if matching with default value
+#define CVAR_NODEFAULT			0x00004000	// do not write to config if matching with default value
 
-#define CVAR_PRIVATE		0x8000	// can't be read from VM
+#define CVAR_PRIVATE			0x00008000	// can't be read from VM
 
-#define CVAR_DEVELOPER		0x10000 // can be set only in developer mode
-#define CVAR_NOTABCOMPLETE	0x20000 // no tab completion in console
+#define CVAR_NOTABCOMPLETE		0x00010000 // no tab completion in console
 
-#define CVAR_CMDLINE_CREATED	0x80000 // cvar was created through the command-line (+set)
-
-#define CVAR_ARCHIVE_ND		(CVAR_ARCHIVE | CVAR_NODEFAULT)
+#define CVAR_CMDLINE_CREATED	0x00020000 // cvar was created through the command-line (+set)
 
 // These flags are only returned by the Cvar_Flags() function
-#define CVAR_MODIFIED		0x40000000	// Cvar was modified
-#define CVAR_NONEXISTENT	0x80000000	// Cvar doesn't exist.
+#define CVAR_MODIFIED			0x40000000	// Cvar was modified
+#define CVAR_NONEXISTENT		0x80000000	// Cvar doesn't exist.
 
 typedef enum {
 	CV_NONE = 0,
@@ -1087,6 +1076,21 @@ typedef enum {
 	CVG_MAX,
 } cvarGroup_t;
 
+// cvarType_t — explicit value type, used by the typed Cvar_Register() API.
+// CVT_STRING = 0 so zero-initialized legacy cvars (from Cvar_Get) are CVT_STRING.
+typedef enum {
+	CVT_STRING = 0, // any string; ->integer = atoi, ->value = atof (best-effort)
+	CVT_BOOL,       // 0/1; also accepts true/false, yes/no, on/off; normalises to "0"/"1"
+	CVT_INT,        // integer; optional [min, max]; rejects non-integer and out-of-range
+	CVT_FLOAT,      // float;   optional [min, max]; rejects non-numeric and out-of-range
+	CVT_ENUM        // one of a fixed string set; ->integer = index in enumValues[]
+} cvarType_t;
+
+// Callback fired AFTER the value is set, validated, and modificationCount incremented.
+// The cvar retains its new value; the callback cannot veto it.
+// May set other cvars (inline dispatch); re-entrancy is guarded.
+typedef void (*cvarCallback_t)( struct cvar_s *self );
+
 // nothing outside the Cvar_*() functions should modify these fields!
 typedef struct cvar_s cvar_t;
 
@@ -1096,7 +1100,6 @@ struct cvar_s {
 	char		*resetString;		// cvar_restart will reset to this value
 	char		*latchedString;		// for CVAR_LATCH vars
 	int			flags;
-	qboolean	modified;			// set each time the cvar is changed
 	int			modificationCount;	// incremented each time the cvar is changed
 	float		value;				// Q_atof( string )
 	int			integer;			// atoi( string )
@@ -1111,9 +1114,69 @@ struct cvar_s {
 	cvar_t		*hashPrev;
 	int			hashIndex;
 	cvarGroup_t	group;				// to track changes
+
+	// --- typed registration fields (set by Cvar_Register; zero for Cvar_Get cvars) ---
+	cvarType_t      type;           // value type; CVT_STRING=0 for all legacy cvars
+	float           typeMin;        // CVT_INT/CVT_FLOAT: inclusive lower bound (0==no check when typeMin==typeMax)
+	float           typeMax;        // CVT_INT/CVT_FLOAT: inclusive upper bound
+	const char    **enumValues;     // CVT_ENUM: NULL-terminated array of valid strings (static)
+	int             enumCount;      // cached count of enumValues entries
+	cvarCallback_t  onChange;       // called after value is set and validated (NULL = none)
 };
 
 #define	MAX_CVAR_VALUE_STRING	256
+
+// ---------------------------------------------------------------------------
+// cvarDesc_t — single-point-of-truth cvar specification for Cvar_Register().
+// All properties (name, default, description, flags, type, range, enum list,
+// callback) declared in one struct; no follow-up Cvar_SetDescription /
+// Cvar_CheckRange calls needed.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    const char      *name;
+    const char      *defaultValue;
+    const char      *description;
+    int              flags;
+    cvarType_t       type;
+    float            min;           // CVT_INT/CVT_FLOAT: lower bound (min==max==0 → no range check)
+    float            max;           // CVT_INT/CVT_FLOAT: upper bound
+    const char     **enumValues;    // CVT_ENUM: NULL-terminated valid-value array (must be static)
+    cvarCallback_t   onChange;      // called after value changes; NULL = none
+} cvarDesc_t;
+
+// Convenience initialiser macros.
+// Usage: static const cvarDesc_t my_cvar = CVAR_INT( "my_cvar", "0", CVAR_ARCHIVE, "desc", 0, 100 );
+#define CVAR_STRING( name_, def_, flags_, desc_ ) \
+    { name_, def_, desc_, flags_, CVT_STRING, 0, 0, NULL, NULL }
+
+#define CVAR_BOOL( name_, def_, flags_, desc_ ) \
+    { name_, def_, desc_, flags_, CVT_BOOL, 0, 0, NULL, NULL }
+
+#define CVAR_INT( name_, def_, flags_, desc_, lo_, hi_ ) \
+    { name_, def_, desc_, flags_, CVT_INT, (float)(lo_), (float)(hi_), NULL, NULL }
+
+#define CVAR_FLOAT( name_, def_, flags_, desc_, lo_, hi_ ) \
+    { name_, def_, desc_, flags_, CVT_FLOAT, (lo_), (hi_), NULL, NULL }
+
+#define CVAR_ENUM( name_, def_, flags_, desc_, vals_ ) \
+    { name_, def_, desc_, flags_, CVT_ENUM, 0, 0, (vals_), NULL }
+
+// _CB variants add a callback parameter.
+#define CVAR_STRING_CB( name_, def_, flags_, desc_, cb_ ) \
+    { name_, def_, desc_, flags_, CVT_STRING, 0, 0, NULL, cb_ }
+
+#define CVAR_BOOL_CB( name_, def_, flags_, desc_, cb_ ) \
+    { name_, def_, desc_, flags_, CVT_BOOL, 0, 0, NULL, cb_ }
+
+#define CVAR_INT_CB( name_, def_, flags_, desc_, lo_, hi_, cb_ ) \
+    { name_, def_, desc_, flags_, CVT_INT, (float)(lo_), (float)(hi_), NULL, cb_ }
+
+#define CVAR_FLOAT_CB( name_, def_, flags_, desc_, lo_, hi_, cb_ ) \
+    { name_, def_, desc_, flags_, CVT_FLOAT, (lo_), (hi_), NULL, cb_ }
+
+#define CVAR_ENUM_CB( name_, def_, flags_, desc_, vals_, cb_ ) \
+    { name_, def_, desc_, flags_, CVT_ENUM, 0, 0, (vals_), cb_ }
 
 typedef int	cvarHandle_t;
 
@@ -1487,6 +1550,7 @@ typedef struct entityState_s {
 	// for players
 	int		powerups;		// bit flags
 	int		weapon;			// determines weapon and flash model, etc
+	int		pType;			// projectileType_t — ET_MISSILE visual discriminator
 	int		legsAnim;		// mask off ANIM_TOGGLEBIT
 	int		torsoAnim;		// mask off ANIM_TOGGLEBIT
 

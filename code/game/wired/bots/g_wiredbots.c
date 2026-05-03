@@ -196,8 +196,8 @@ static const char *BotPickupToClassname( const char *pickup_name ) {
     int i;
     for ( i = 1; i < bg_numItems; i++ ) {
         if ( bg_itemlist[i].pickup_name &&
-             Q_stricmp( bg_itemlist[i].pickup_name, pickup_name ) == 0 )
-            return bg_itemlist[i].classnames[0];
+            Q_stricmp( bg_itemlist[i].pickup_name, pickup_name ) == 0 )
+            return bg_itemlist[i].classname;
     }
     return pickup_name; /* fallback: may already be a classname */
 }
@@ -214,15 +214,13 @@ static const char *BotResolveItemName( const char *input )
     if ( Q_stricmp( input, "flag" ) == 0 )
         return "flag";
 
-    for ( it = bg_itemlist + 1; it->classnames[0]; it++ ) {
+    for ( it = bg_itemlist + 1; it->classname; it++ ) {
         /* Match by pickup_name first (exact, case-insensitive) */
         if ( it->pickup_name && Q_stricmp( it->pickup_name, input ) == 0 )
             return it->pickup_name;
         /* Match by any classname alias */
-        for ( j = 0; j < MAX_ITEM_CLASSNAMES && it->classnames[j]; j++ ) {
-            if ( Q_stricmp( it->classnames[j], input ) == 0 )
-                return it->pickup_name;
-        }
+        if ( Q_stricmp( it->classname, input ) == 0 )
+            return it->pickup_name;
     }
     return NULL;
 }
@@ -262,11 +260,11 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
     botDirective_t *d  = &bs->directives.tactical;
     float           now = FloatTime();
 
-    if ( trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+    if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
         static float s_dirLogTime[MAX_CLIENTS];
         if ( FloatTime() - s_dirLogTime[bs->client] > 2.0f ) {
             s_dirLogTime[bs->client] = FloatTime();
-            Com_Printf( "^3[DirFrame] cl=%d type=%d target_cl=%d expire=%.1f\n",
+            Com_Log( SEV_INFO, LOG_CAT_GAME, "^3[DirFrame] cl=%d type=%d target_cl=%d expire=%.1f\n",
                 bs->client, d->type, d->target_client,
                 d->expire_time > 0.0f ? d->expire_time - now : -1.0f );
         }
@@ -365,7 +363,7 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
             if ( bs->directives.directiveLocked && Q_stricmp( resolved, "flag" ) != 0 ) {
                 qboolean picked_up = qfalse;
                 const gitem_t *it;
-                for ( it = bg_itemlist + 1; it->classnames[0]; it++ ) {
+                for ( it = bg_itemlist + 1; it->classname; it++ ) {
                     if ( it->pickup_name && Q_stricmp( it->pickup_name, resolved ) == 0 ) {
                         if ( it->giType == IT_ARMOR &&
                              bs->cur_ps.stats[STAT_ARMOR] > bs->directives.armorAtStart ) {
@@ -430,6 +428,9 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
                         vectoangles( dir, angles );
                         bs->ideal_viewangles[YAW]   = angles[YAW];
                         bs->ideal_viewangles[PITCH] = 0.0f;
+                        if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
+                            BotAI_Print( PRT_MESSAGE, "[AimSet/wb-seek] client %d pitch=%.1f yaw=%.1f\n",
+                                         bs->client, bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW] );
                         trap_EA_MoveForward( bs->client );
                     }
                 }
@@ -524,13 +525,13 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
             }
 
             /* ── diagnostic ─────────────────────────────────────────────── */
-            if ( trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+            if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
                 static float s_dirMoveLog[MAX_CLIENTS];
                 if ( FloatTime() - s_dirMoveLog[bs->client] > 1.0f ) {
                     vec3_t diff;
                     s_dirMoveLog[bs->client] = FloatTime();
                     VectorSubtract( bs->origin, bs->teamgoal.origin, diff );
-                    G_Printf( "DIRECTIVE MOVE: cl=%d item=%s dist=%.0f goal=[%.0f,%.0f,%.0f] area=%d ltg=%d\n",
+                    Com_Log( SEV_INFO, LOG_CAT_GAME, "DIRECTIVE MOVE: cl=%d item=%s dist=%.0f goal=[%.0f,%.0f,%.0f] area=%d ltg=%d\n",
                         bs->client, d->item_classname, VectorLength( diff ),
                         bs->teamgoal.origin[0], bs->teamgoal.origin[1], bs->teamgoal.origin[2],
                         bs->teamgoal.areanum, bs->ltgtype );
@@ -562,6 +563,9 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
                                 vectoangles( pdir, pangles );
                                 bs->ideal_viewangles[YAW]   = pangles[YAW];
                                 bs->ideal_viewangles[PITCH] = 0.0f;
+                                if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
+                                    BotAI_Print( PRT_MESSAGE, "[AimSet/wb-patrol] client %d pitch=%.1f yaw=%.1f\n",
+                                                 bs->client, bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW] );
                                 trap_EA_Move( bs->client, pdir, 200 );
                             }
                             bs->directives.nextPatrolTime =
@@ -1192,7 +1196,7 @@ void BotDirective_ConsoleOrder( const char *bot_name, const char *order ) {
     char  clean[MAX_NETNAME];
 
     if ( !bot_name || !bot_name[0] || !order || !order[0] ) {
-        Com_Printf( "Usage: bot_order <botname> <order>\n" );
+        Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: bot_order <botname> <order>\n" );
         return;
     }
 
@@ -1204,12 +1208,12 @@ void BotDirective_ConsoleOrder( const char *bot_name, const char *order ) {
         Q_CleanStr( clean );
         if ( Q_stricmpn( clean, bot_name, strlen( bot_name ) ) == 0 ) {
             BotReceiveDirective( botstates[i], -1 /* console */, order );
-            Com_Printf( "Directive sent to %s: %s\n",
+            Com_Log( SEV_INFO, LOG_CAT_GAME, "Directive sent to %s: %s\n",
                         level.clients[i].pers.netname, order );
             return;
         }
     }
-    Com_Printf( "bot_order: no active bot named '%s'\n", bot_name );
+    Com_Log( SEV_INFO, LOG_CAT_GAME, "bot_order: no active bot named '%s'\n", bot_name );
 }
 
 /* =========================================================================

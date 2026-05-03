@@ -73,8 +73,9 @@ void WiredFonts_InitMSDF( void ) {
 			face->atlas = atlas;
 		}
 	}
-	int fontsLoaded = MSDF_GetFontCount() - fontsLoadedStart;
-	Com_Printf( "MSDF: loaded %d font%s\n", fontsLoaded, fontsLoaded == 1 ? "" : "s" );
+	int fontsNew   = MSDF_GetFontCount() - fontsLoadedStart;
+	int fontsTotal = MSDF_GetFontCount();
+	Com_Log( SEV_INFO, LOG_CAT_UI, "MSDF: %d font%s loaded (%d new)\n", fontsTotal, fontsTotal == 1 ? "" : "s", fontsNew );
 }
 
 /*
