@@ -126,6 +126,48 @@ function chats.death(ctx)
       "Did Xian show you how to do that?",
       "Nice shot, sniper.",
     }
+  elseif w == "mg" then
+    return pick {
+      "How many bullets did that take?",
+      "Suppressed by a machinegun. Filing a complaint.",
+      "You just hosed me down. Real elegant.",
+      "That's what a hundred rounds buys you.",
+    }
+  elseif w == "sg" then
+    return pick {
+      "Had to get up close for that, huh?",
+      "Buckshot. Classy.",
+      "Point blank. You fight dirty.",
+      "Scatter me once, shame on me.",
+    }
+  elseif w == "gl" then
+    return pick {
+      "Lucky bounce.",
+      "Right, the grenades. Of course.",
+      "Bounced it right off the wall. I'll give you that one.",
+      "Predictable weapon. Unpredictable timing.",
+    }
+  elseif w == "rl" then
+    return pick {
+      "Classic. Splash damage and zero finesse.",
+      "Rocket. Fine. Good shot.",
+      "You and your rockets.",
+      "Caught it right in the blast radius. Rookie mistake.",
+    }
+  elseif w == "lg" then
+    return pick {
+      "Decent arc on that lightning.",
+      "You held the beam. I respect that.",
+      "Arc-welded by " .. killer(ctx) .. ".",
+      "Kept the beam on me. Not bad.",
+    }
+  elseif w == "pr" then
+    return pick {
+      "Plasma. Efficient.",
+      "You just pellet-spammed me to death.",
+      "Plasma rifle does the job, I suppose.",
+      "Bolts in the face. I've had worse mornings.",
+    }
   elseif w == "bfg" then
     return pick {
       "Meteor Shower from Hell!",
@@ -175,6 +217,48 @@ function chats.kill(ctx)
       "Humiliation is the name of the game, kid.",
       "Feel the power of the gauntlet!",
       "Shocking.",
+    }
+  elseif w == "mg" then
+    return pick {
+      "Spent half a clip on you. Worth it.",
+      "You just got hosed, " .. v .. ".",
+      "Machinegun. Efficient enough.",
+      "Strafed and deleted.",
+    }
+  elseif w == "sg" then
+    return pick {
+      "Up close and personal, " .. v .. ".",
+      "You never saw me coming.",
+      "Buckshot. The original close-range solution.",
+      "Two feet away. Optimal range.",
+    }
+  elseif w == "gl" then
+    return pick {
+      "Corner pocket, " .. v .. ".",
+      "Watch where you're standing next time.",
+      "You walked right into that.",
+      "Grenade says hi.",
+    }
+  elseif w == "rl" then
+    return pick {
+      "Splash damage: works every time.",
+      "Rockets don't miss at this range, " .. v .. ".",
+      "You ran right into the blast.",
+      "Nothing personal. Just physics.",
+    }
+  elseif w == "lg" then
+    return pick {
+      "Held the beam. You didn't move fast enough.",
+      "Lightning: point and hold.",
+      "Conducted right through you, " .. v .. ".",
+      "Arc maintained. Target acquired. Done.",
+    }
+  elseif w == "pr" then
+    return pick {
+      "Plasma on target. Consistent.",
+      "You can't dodge all of them, " .. v .. ".",
+      "Plasma rifle: boring but effective.",
+      "Bolts add up fast.",
     }
   elseif w == "telefrag" then
     return pick {
@@ -269,19 +353,294 @@ function chats.random(_ctx)
   end
 end
 
+-- Team broadcasts (ctx.team = 1 so these go to team channel)
+function chats.team_need_health(_ctx)
+  return pick {
+    "I'm low. Cover me.",
+    "Need health. Watch my back.",
+    "Someone drop me health.",
+  }
+end
+
+function chats.team_need_weapon(_ctx)
+  return pick {
+    "Need ammo.",
+    "Running dry. Anyone?",
+    nil,
+  }
+end
+
+function chats.team_cover_me(_ctx)
+  return pick {
+    "Cover me!",
+    "I'm taking fire. Cover.",
+    "Back me up.",
+  }
+end
+
+function chats.team_follow_me(_ctx)
+  return pick {
+    "Follow me.",
+    "Stay close, I know the path.",
+    "With me.",
+  }
+end
+
+function chats.team_enemy_base_attack(_ctx)
+  return pick {
+    "Moving on enemy base.",
+    "Hitting their base. Support?",
+    "In their base. Clear the path.",
+  }
+end
+
+function chats.team_defending_base(_ctx)
+  return pick {
+    "Holding our base.",
+    "Defense. I've got it covered.",
+    "Guarding home.",
+  }
+end
+
+function chats.team_got_flag_need_support(_ctx)
+  return pick {
+    "I have the flag! Clear a path!",
+    "Flag carrier here. Cover me!",
+    "Got it! Escort me home!",
+    "Flag secured. Need support!",
+  }
+end
+
+-- Powerup events
+function chats.powerup_quad(_ctx)
+  return pick {
+    "Quad. Let the carnage begin.",
+    "Quad damage acquired. Stand clear.",
+    "Quad. This just got unfair.",
+    "Armed and extremely dangerous.",
+  }
+end
+
+function chats.powerup_haste(_ctx)
+  return pick {
+    "Haste. I was already fast.",
+    "Speed boost. Now I'm unreasonable.",
+    "Haste. You won't see me coming.",
+    nil,
+  }
+end
+
+function chats.powerup_invis(_ctx)
+  return pick {
+    "Invisibility. You can't see what you can't see.",
+    "Off the grid.",
+    "Ghost mode.",
+    nil,
+  }
+end
+
+function chats.powerup_regen(_ctx)
+  return pick {
+    "Regeneration. I'll be here all night.",
+    "Regen. Harder to kill than before.",
+    nil,
+  }
+end
+
+function chats.powerup_battlesuit(_ctx)
+  return pick {
+    "Battlesuit. Splash won't help you now.",
+    "Fully armored.",
+    nil,
+  }
+end
+
+function chats.powerup_enemy_quad(_ctx)
+  return pick {
+    "Enemy has quad. Watch yourself.",
+    "Quad on the enemy. Tactical retreat optional.",
+    "They picked up quad. This will hurt.",
+    "Clear a path or get flattened.",
+  }
+end
+
+function chats.powerup_enemy_any(_ctx)
+  return pick {
+    "Powerup picked up. Stay alert.",
+    "They have a powerup. Adjust.",
+    nil,
+  }
+end
+
+-- Kill streaks
+function chats.kill_double(_ctx)
+  return pick {
+    "Double.",
+    "Two in a row.",
+    "Back to back.",
+    nil,
+  }
+end
+
+function chats.kill_streak_5(ctx)
+  local c = ctx.count or 5
+  return pick {
+    tostring(c) .. " straight.",
+    "Five consecutive frags. I'm in the zone.",
+    "Momentum.",
+    "Five. Don't stop now.",
+  }
+end
+
+function chats.kill_streak_10(ctx)
+  local c = ctx.count or 10
+  return pick {
+    tostring(c) .. " frags straight.",
+    "Ten in a row. This is my arena.",
+    "Double digits. No one here can touch me.",
+    "Running. Can't. Stop.",
+  }
+end
+
+function chats.kill_rampage(ctx)
+  local c = ctx.count or 15
+  return pick {
+    tostring(c) .. " and still counting.",
+    "RAMPAGE. Visor owns this server.",
+    "Is anyone going to stop me? No.",
+    "Total domination.",
+  }
+end
+
+-- Score milestones
+function chats.score_first_place(ctx)
+  return pick {
+    "First place. As expected.",
+    "Top of the board. Where else.",
+    "Rank one. I live here.",
+    "Look at the scoreboard, " .. (ctx.sender ~= "" and ctx.sender or "everyone") .. ".",
+  }
+end
+
+function chats.score_falling_back(ctx)
+  local s = ctx.score or 0
+  return pick {
+    "Fine. Enjoy it while it lasts.",
+    "Slipped. Correcting now.",
+    tostring(s) .. " kills and you still got ahead. Impressive.",
+    "That won't last.",
+    nil,
+  }
+end
+
+function chats.score_last_place(_ctx)
+  return pick {
+    "Last. This is temporary.",
+    "Bottom of the board. Noted.",
+    "I've had worse starts.",
+    nil,
+  }
+end
+
+function chats.score_frag_milestone(ctx)
+  local c = ctx.count or ctx.score or 0
+  return pick {
+    tostring(c) .. " frags.",
+    "That's " .. tostring(c) .. ".",
+    tostring(c) .. " and counting.",
+    nil,
+  }
+end
+
+-- CTF events
+function chats.ctf_got_flag(_ctx)
+  return pick {
+    "Flag acquired. Moving out.",
+    "Got it. Clear a path.",
+    "Flag is mine. Heading home.",
+    "Objective secured.",
+  }
+end
+
+function chats.ctf_enemy_got_flag(_ctx)
+  return pick {
+    "They have our flag. Hunt them down.",
+    "Flag's gone. Someone get it back.",
+    "Our flag is out. Move.",
+    "Intercept the carrier.",
+  }
+end
+
+function chats.ctf_returning_flag(_ctx)
+  return pick {
+    "Flag returned. You're welcome.",
+    "Recovered and reset.",
+    "Flag's back. Let's move.",
+    "Kept it from them.",
+  }
+end
+
+function chats.ctf_capture(_ctx)
+  return pick {
+    "Capture. Point for us.",
+    "That's how it's done.",
+    "Flag delivered. Score updated.",
+    "Clean run. Next.",
+  }
+end
+
+function chats.ctf_flag_dropped(_ctx)
+  return pick {
+    "Flag's loose. Someone grab it.",
+    "Dropped. Don't leave it there.",
+    "Flag is down. Pick it up.",
+    nil,
+  }
+end
+
+function chats.ctf_attack(_ctx)
+  return pick {
+    "Moving on their flag.",
+    "Going in.",
+    "Offensive run. Cover me.",
+    nil,
+  }
+end
+
+function chats.ctf_defend(_ctx)
+  return pick {
+    "Holding position.",
+    "Guarding base.",
+    "Defense. I'll hold the line.",
+    nil,
+  }
+end
+
 -- message: reply to incoming chat
 function chats.message(ctx)
   local text = string.lower(ctx.text or "")
-  if text:match("hi") or text:match("hello") or text:match("hey") then
-    return pick { "Hey.", nil }
+  if text:match("hi") or text:match("hello") or text:match("hey") or text:match("sup") then
+    return pick { ".", "Acknowledged.", nil }
   end
-  if text:match("gg") then
-    return pick { "GG.", nil }
+  if text:match("gg") or text:match("good game") then
+    return pick { "GG.", "Processed.", nil }
   end
-  if text:match("good") or text:match("nice") then
-    return pick { "Thanks, kid.", nil }
+  if text:match("nice") or text:match("good shot") or text:match("well played") or text:match("wp") then
+    return pick { "Expected.", "Data confirmed.", "That's how it's done.", nil }
   end
-  return nil
+  if text:match("noob") or text:match("suck") or text:match("bad") or text:match("loser") or text:match("trash") then
+    return pick { "Incorrect.", "Your data is wrong.", nil }
+  end
+  if text:match("rail") or text:match("railgun") or text:match("rg") then
+    return pick { "Precision tool.", "One shot.", "Clean.", nil }
+  end
+  if text:match("%?") then
+    return pick { "Affirmative.", "Negative.", "Irrelevant.", nil }
+  end
+  if ctx.team and ctx.team ~= 0 then
+    return pick { "Copy.", "Roger.", nil }
+  end
+  return pick { "...", nil }
 end
 
 return chats

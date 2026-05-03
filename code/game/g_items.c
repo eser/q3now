@@ -123,7 +123,8 @@ int Pickup_Powerup( gentity_t *ent, gentity_t *other ) {
 
 int Pickup_Holdable( gentity_t *ent, gentity_t *other ) {
 
-	other->client->ps.stats[STAT_HOLDABLE_ITEM] = ent->item - bg_itemlist;
+	other->client->ps.stats[STAT_HOLDABLE_BITS] |= BG_HOLDABLE_BIT( ent->item->giTag );
+	G_HoldableUpdateSelectedAfterChange( other );
 
 	if( ent->item->giTag == HI_KAMIKAZE ) {
 		other->client->ps.eFlags |= EF_KAMIKAZE;
@@ -288,7 +289,7 @@ void RespawnItem( gentity_t *ent ) {
 		int choice;
 
 		if ( !ent->teammaster ) {
-			G_Error( "RespawnItem: bad teammaster");
+			Com_Terminate( TERM_CLIENT_DROP, "RespawnItem: bad teammaster");
 		}
 		master = ent->teammaster;
 
@@ -375,12 +376,19 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 		return;
 	}
 
-	G_LogPrintf( "Item: %i %s\n", other->s.number, ent->item->classnames[0] );
+	G_LogPrintf( "Item: %i %s\n", other->s.number, ent->item->classname );
 
 #if FEAT_WIREDNET_OBSERVER
 	// QUIC event: item pickup with position
-	trap_WiredNet_EmitItemPickup( other->s.number, ent->item->classnames[0], other->r.currentOrigin );
+	trap_WiredNet_EmitItemPickup( other->s.number, ent->item->classname, other->r.currentOrigin );
 #endif
+	trap_WCE_EmitEvent( WCE_PLAYER_ITEM_PICKUP,
+	                    other->s.number, ent->s.number,
+	                    ent->r.currentOrigin,
+	                    ent->item->giType,
+	                    ent->item->giTag,
+	                    0.0f,
+	                    ent->item->classname );
 
 	predict = other->client->pers.predictItemPickup;
 
@@ -416,6 +424,24 @@ void Touch_Item (gentity_t *ent, gentity_t *other, trace_t *trace) {
 
 	if ( !respawn ) {
 		return;
+	}
+
+	// Bot powerup chat events
+	if ( ent->item->giType == IT_POWERUP ) {
+		const char *pwEvent = NULL;
+		switch ( ent->item->giTag ) {
+			case PW_QUAD:       pwEvent = "powerup_quad";        break;
+			case PW_HASTE:      pwEvent = "powerup_haste";       break;
+			case PW_INVIS:      pwEvent = "powerup_invis";       break;
+			case PW_REGEN:      pwEvent = "powerup_regen";       break;
+			case PW_BATTLESUIT: pwEvent = "powerup_battlesuit";  break;
+			default: break;
+		}
+		if ( pwEvent ) {
+			BotCTFChatEvent( other->s.number, pwEvent );
+			BotCTFChatBroadcast( other->s.number, TEAM_FREE,
+				ent->item->giTag == PW_QUAD ? "powerup_enemy_quad" : "powerup_enemy_any" );
+		}
 	}
 
 	// play the normal pickup sound
@@ -515,7 +541,7 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity ) {
 	dropped->s.modelindex = item - bg_itemlist;	// store item number in modelindex
 	dropped->s.modelindex2 = 1; // This is non-zero is it's a dropped item
 
-	dropped->classname = item->classnames[0];
+	dropped->classname = item->classname;
 	dropped->item = item;
 	VectorSet (dropped->r.mins, -ITEM_RADIUS, -ITEM_RADIUS, -ITEM_RADIUS);
 	VectorSet (dropped->r.maxs, ITEM_RADIUS, ITEM_RADIUS, ITEM_RADIUS);
@@ -614,7 +640,7 @@ void FinishSpawningItem( gentity_t *ent ) {
 		VectorSet( dest, ent->s.origin[0], ent->s.origin[1], ent->s.origin[2] - 4096 );
 		trap_Trace( &tr, ent->s.origin, ent->r.mins, ent->r.maxs, dest, ent->s.number, MASK_SOLID );
 		if ( tr.startsolid ) {
-			G_Printf ("FinishSpawningItem: %s startsolid at %s\n", ent->classname, vtos(ent->s.origin));
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "FinishSpawningItem: %s startsolid at %s\n", ent->classname, vtos(ent->s.origin));
 			G_FreeEntity( ent );
 			return;
 		}
@@ -676,11 +702,11 @@ void G_CheckTeamItems( void ) {
 		// check for the two flags
 		item = BG_FindItem( "Red Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
 		}
 		item = BG_FindItem( "Blue Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
 		}
 	}
 	if( g_gametype.integer == GT_1FCTF ) {
@@ -689,15 +715,15 @@ void G_CheckTeamItems( void ) {
 		// check for all three flags
 		item = BG_FindItem( "Red Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
 		}
 		item = BG_FindItem( "Blue Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
 		}
 		item = BG_FindItem( "Neutral Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_CTF_neutralflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_neutralflag in map\n" );
 		}
 	}
 
@@ -709,13 +735,13 @@ void G_CheckTeamItems( void ) {
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_redobelisk" );
 		if( !ent ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_blueobelisk" );
 		if( !ent ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
 		}
 	}
 #endif
@@ -728,19 +754,19 @@ void G_CheckTeamItems( void ) {
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_redobelisk" );
 		if( !ent ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_blueobelisk" );
 		if( !ent ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_neutralobelisk" );
 		if( !ent ) {
-			G_Printf( S_COLOR_YELLOW "WARNING: No team_neutralobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_neutralobelisk in map\n" );
 		}
 	}
 #endif
@@ -774,7 +800,7 @@ The item will be added to the precache list
 */
 void RegisterItem( gitem_t *item ) {
 	if ( !item ) {
-		G_Error( "RegisterItem: NULL" );
+		Com_Terminate( TERM_CLIENT_DROP, "RegisterItem: NULL" );
 	}
 	itemRegistered[ item - bg_itemlist ] = qtrue;
 }
@@ -804,7 +830,7 @@ void SaveRegisteredItems( void ) {
 	}
 	string[ bg_numItems ] = 0;
 
-	G_Printf( "%i items registered\n", count );
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "%i items registered\n", count );
 	trap_SetConfigstring(CS_ITEMS, string);
 }
 
@@ -821,14 +847,12 @@ int G_ItemDisabled( gitem_t *item ) {
         return 1;
     }
 
-    for (int i = 0; i < MAX_ITEM_CLASSNAMES; i++) {
-        if (item->classnames[i]) {
-            Com_sprintf(name, sizeof(name), "disable_%s", item->classnames[i]);
-            if (trap_Cvar_VariableIntegerValue(name)) {
-                return 1;
-            }
-        }
-    }
+	if (item->classname) {
+		Com_sprintf(name, sizeof(name), "disable_%s", item->classname);
+		if (trap_Cvar_VariableIntegerValue(name)) {
+			return 1;
+		}
+	}
 
     return 0;
 }
@@ -852,6 +876,16 @@ void G_SpawnItem (gentity_t *ent, gitem_t *item) {
 		return;
 
 	ent->item = item;
+
+	// Q1 BSP entities have origin at the item base (z=0 of bbox); Q3 expects bbox center.
+	// BSP_Q1_PrefixClassnames injects "q1Origin" "1" into every Q1 entity block.
+	{
+		int q1Origin = 0;
+		G_SpawnInt( "q1Origin", "0", &q1Origin );
+		if ( q1Origin && item->q1OriginZOffset != 0.0f ) {
+			ent->s.origin[2] += item->q1OriginZOffset;
+		}
+	}
 	// some movers spawn on the second frame, so delay item
 	// spawns until the third frame so they can ride trains
 	ent->nextthink = level.time + FRAMETIME * 2;

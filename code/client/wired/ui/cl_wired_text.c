@@ -39,8 +39,11 @@ float Text_GetLetterSpacing( void )
  */
 void Text_Init( void )
 {
-	cl_wiredTextShadow = Cvar_Get( "cl_wiredTextShadow", "0", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_wiredTextShadow, "Enable drop-shadow on Wired UI text. 0: off (default). 1: on." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "cl_wiredTextShadow", "0", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Enable drop-shadow on Wired UI text. 0: off (default). 1: on." );
+		cl_wiredTextShadow = Cvar_Register( &d );
+	}
 	memset( (void *)wui_faceCache, 0, sizeof( wui_faceCache ) );
 	MSDF_ReregisterShaders();
 	WiredFonts_InitMSDF();

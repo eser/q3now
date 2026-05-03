@@ -114,17 +114,17 @@ vao_t *R_CreateVao(const char *name, byte *vertexes, int vertexesSize, byte *ind
 			break;
 
 		default:
-			Com_Error(ERR_FATAL, "bad vaoUsage_t given: %i", usage);
+			Com_Terminate( TERM_UNRECOVERABLE, "bad vaoUsage_t given: %i", usage);
 			return NULL;
 	}
 
 	if(strlen(name) >= MAX_QPATH)
 	{
-		ri.Error(ERR_DROP, "R_CreateVao: \"%s\" is too long", name);
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateVao: \"%s\" is too long", name);
 	}
 
 	if ( tr.numVaos == MAX_VAOS ) {
-		ri.Error( ERR_DROP, "R_CreateVao: MAX_VAOS hit");
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateVao: MAX_VAOS hit");
 	}
 
 	R_IssuePendingRenderCommands();
@@ -187,11 +187,11 @@ vao_t *R_CreateVao2(const char *name, int numVertexes, srfVert_t *verts, int num
 
 	if(strlen(name) >= MAX_QPATH)
 	{
-		ri.Error(ERR_DROP, "R_CreateVao2: \"%s\" is too long", name);
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateVao2: \"%s\" is too long", name);
 	}
 
 	if ( tr.numVaos == MAX_VAOS ) {
-		ri.Error( ERR_DROP, "R_CreateVao2: MAX_VAOS hit");
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateVao2: MAX_VAOS hit");
 	}
 
 	R_IssuePendingRenderCommands();
@@ -336,7 +336,7 @@ void R_BindVao(vao_t * vao)
 	if(!vao)
 	{
 		//R_BindNullVao();
-		ri.Error(ERR_DROP, "R_BindVao: NULL vao");
+		ri.Terminate( TERM_CLIENT_DROP, "R_BindVao: NULL vao");
 		return;
 	}
 
@@ -412,7 +412,7 @@ void R_InitVaos(void)
 	int             vertexesSize, indexesSize;
 	int             offset;
 
-	ri.Printf(PRINT_ALL, "------- R_InitVaos -------\n");
+	ri.Log( SEV_INFO, "------- R_InitVaos -------\n");
 
 	tr.numVaos = 0;
 
@@ -506,7 +506,7 @@ void R_ShutdownVaos(void)
 	int             i;
 	vao_t          *vao;
 
-	ri.Printf(PRINT_ALL, "------- R_ShutdownVaos -------\n");
+	ri.Log( SEV_INFO, "------- R_ShutdownVaos -------\n");
 
 	R_BindNullVao();
 
@@ -543,14 +543,14 @@ void R_VaoList_f(void)
 	int             vertexesSize = 0;
 	int             indexesSize = 0;
 
-	ri.Printf(PRINT_ALL, " size          name\n");
-	ri.Printf(PRINT_ALL, "----------------------------------------------------------\n");
+	ri.Log( SEV_INFO, " size          name\n");
+	ri.Log( SEV_INFO, "----------------------------------------------------------\n");
 
 	for(i = 0; i < tr.numVaos; i++)
 	{
 		vao = tr.vaos[i];
 
-		ri.Printf(PRINT_ALL, "%d.%02d MB %s\n", vao->vertexesSize / (1024 * 1024),
+		ri.Log( SEV_INFO, "%d.%02d MB %s\n", vao->vertexesSize / (1024 * 1024),
 				  (vao->vertexesSize % (1024 * 1024)) * 100 / (1024 * 1024), vao->name);
 
 		vertexesSize += vao->vertexesSize;
@@ -560,16 +560,16 @@ void R_VaoList_f(void)
 	{
 		vao = tr.vaos[i];
 
-		ri.Printf(PRINT_ALL, "%d.%02d MB %s\n", vao->indexesSize / (1024 * 1024),
+		ri.Log( SEV_INFO, "%d.%02d MB %s\n", vao->indexesSize / (1024 * 1024),
 				  (vao->indexesSize % (1024 * 1024)) * 100 / (1024 * 1024), vao->name);
 
 		indexesSize += vao->indexesSize;
 	}
 
-	ri.Printf(PRINT_ALL, " %i total VAOs\n", tr.numVaos);
-	ri.Printf(PRINT_ALL, " %d.%02d MB total vertices memory\n", vertexesSize / (1024 * 1024),
+	ri.Log( SEV_INFO, " %i total VAOs\n", tr.numVaos);
+	ri.Log( SEV_INFO, " %d.%02d MB total vertices memory\n", vertexesSize / (1024 * 1024),
 			  (vertexesSize % (1024 * 1024)) * 100 / (1024 * 1024));
-	ri.Printf(PRINT_ALL, " %d.%02d MB total triangle indices memory\n", indexesSize / (1024 * 1024),
+	ri.Log( SEV_INFO, " %d.%02d MB total triangle indices memory\n", indexesSize / (1024 * 1024),
 			  (indexesSize % (1024 * 1024)) * 100 / (1024 * 1024));
 }
 
@@ -740,8 +740,8 @@ void VaoCache_Commit(void)
 	if (indexSet < vc.surfaceIndexSets + vc.numSurfaces)
 	{
 		tess.firstIndex = indexSet->bufferOffset / sizeof(glIndex_t);
-		//ri.Printf(PRINT_ALL, "firstIndex %d numIndexes %d as %d\n", tess.firstIndex, tess.numIndexes, (int)(batchLength - vc.batchLengths));
-		//ri.Printf(PRINT_ALL, "vc.numSurfaces %d vc.numBatches %d\n", vc.numSurfaces, vc.numBatches);
+		//ri.Log( SEV_INFO, "firstIndex %d numIndexes %d as %d\n", tess.firstIndex, tess.numIndexes, (int)(batchLength - vc.batchLengths));
+		//ri.Log( SEV_INFO, "vc.numSurfaces %d vc.numBatches %d\n", vc.numSurfaces, vc.numBatches);
 	}
 	// If not, rebuffer the batch
 	// FIXME: keep track of the vertexes so we don't have to reupload them every time
@@ -781,7 +781,7 @@ void VaoCache_Commit(void)
 			vcq.indexCommitSize += indexesSize;
 		}
 
-		//ri.Printf(PRINT_ALL, "committing %d to %d, %d to %d as %d\n", vcq.vertexCommitSize, vc.vertexOffset, vcq.indexCommitSize, vc.indexOffset, (int)(batchLength - vc.batchLengths));
+		//ri.Log( SEV_INFO, "committing %d to %d, %d to %d as %d\n", vcq.vertexCommitSize, vc.vertexOffset, vcq.indexCommitSize, vc.indexOffset, (int)(batchLength - vc.batchLengths));
 
 		if (vcq.vertexCommitSize)
 		{
@@ -874,7 +874,7 @@ void VaoCache_CheckAdd(qboolean *endSurface, qboolean *recycleVertexBuffer, qboo
 
 	if (vc.vao->vertexesSize < vc.vertexOffset + vcq.vertexCommitSize + vertexesSize)
 	{
-		//ri.Printf(PRINT_ALL, "out of space in vertex cache: %d < %d + %d + %d\n", vc.vao->vertexesSize, vc.vertexOffset, vcq.vertexCommitSize, vertexesSize);
+		//ri.Log( SEV_INFO, "out of space in vertex cache: %d < %d + %d + %d\n", vc.vao->vertexesSize, vc.vertexOffset, vcq.vertexCommitSize, vertexesSize);
 		*recycleVertexBuffer = qtrue;
 		*recycleIndexBuffer = qtrue;
 		*endSurface = qtrue;
@@ -882,40 +882,40 @@ void VaoCache_CheckAdd(qboolean *endSurface, qboolean *recycleVertexBuffer, qboo
 
 	if (vc.vao->indexesSize < vc.indexOffset + vcq.indexCommitSize + indexesSize)
 	{
-		//ri.Printf(PRINT_ALL, "out of space in index cache\n");
+		//ri.Log( SEV_INFO, "out of space in index cache\n");
 		*recycleIndexBuffer = qtrue;
 		*endSurface = qtrue;
 	}
 
 	if (vc.numSurfaces + vcq.numSurfaces >= VAOCACHE_MAX_SURFACES)
 	{
-		//ri.Printf(PRINT_ALL, "out of surfaces in index cache\n");
+		//ri.Log( SEV_INFO, "out of surfaces in index cache\n");
 		*recycleIndexBuffer = qtrue;
 		*endSurface = qtrue;
 	}
 
 	if (vc.numBatches >= VAOCACHE_MAX_BATCHES)
 	{
-		//ri.Printf(PRINT_ALL, "out of batches in index cache\n");
+		//ri.Log( SEV_INFO, "out of batches in index cache\n");
 		*recycleIndexBuffer = qtrue;
 		*endSurface = qtrue;
 	}
 
 	if (vcq.numSurfaces >= VAOCACHE_QUEUE_MAX_SURFACES)
 	{
-		//ri.Printf(PRINT_ALL, "out of queued surfaces\n");
+		//ri.Log( SEV_INFO, "out of queued surfaces\n");
 		*endSurface = qtrue;
 	}
 
 	if (VAOCACHE_QUEUE_MAX_VERTEXES * sizeof(srfVert_t) < vcq.vertexCommitSize + vertexesSize)
 	{
-		//ri.Printf(PRINT_ALL, "out of queued vertexes\n");
+		//ri.Log( SEV_INFO, "out of queued vertexes\n");
 		*endSurface = qtrue;
 	}
 
 	if (VAOCACHE_QUEUE_MAX_INDEXES * sizeof(glIndex_t) < vcq.indexCommitSize + indexesSize)
 	{
-		//ri.Printf(PRINT_ALL, "out of queued indexes\n");
+		//ri.Log( SEV_INFO, "out of queued indexes\n");
 		*endSurface = qtrue;
 	}
 }

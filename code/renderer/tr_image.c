@@ -92,7 +92,7 @@ void GL_TextureMode( const char *string ) {
 	}
 
 	if ( mode == NULL ) {
-		ri.Printf( PRINT_ALL, "bad texture filter name '%s'\n", string );
+		ri.Log( SEV_INFO, "bad texture filter name '%s'\n", string );
 		return;
 	}
 
@@ -104,7 +104,7 @@ void GL_TextureMode( const char *string ) {
 	if ( glConfig.hardwareType == GLHW_3DFX_2D3D && gl_filter_max == GL_LINEAR &&
 		gl_filter_min == GL_LINEAR_MIPMAP_LINEAR ) {
 		gl_filter_min = GL_LINEAR_MIPMAP_NEAREST;
-		ri.Printf( PRINT_ALL, "Refusing to set trilinear on a voodoo.\n" );
+		ri.Log( SEV_INFO, "Refusing to set trilinear on a voodoo.\n" );
 	}
 
 	// change all the existing mipmap texture objects
@@ -149,7 +149,7 @@ void R_ImageList_f( void ) {
 	int i, estTotalSize = 0;
 	char *name, buf[MAX_QPATH*2 + 5];
 
-	ri.Printf( PRINT_ALL, "\n -n- --w-- --h-- type  -size- --name-------\n" );
+	ri.Log( SEV_INFO, "\n -n- --w-- --h-- type  -size- --name-------\n" );
 
 	for ( i = 0; i < tr.numImages; i++ )
 	{
@@ -223,13 +223,13 @@ void R_ImageList_f( void ) {
 			name = buf;
 		}
 
-		ri.Printf( PRINT_ALL, " %3i %5i %5i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, name );
+		ri.Log( SEV_INFO, " %3i %5i %5i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, name );
 		estTotalSize += estSize;
 	}
 
-	ri.Printf( PRINT_ALL, " -----------------------\n" );
-	ri.Printf( PRINT_ALL, " approx %i kbytes\n", (estTotalSize + 1023) / 1024 );
-	ri.Printf( PRINT_ALL, " %i total images\n\n", tr.numImages );
+	ri.Log( SEV_INFO, " -----------------------\n" );
+	ri.Log( SEV_INFO, " approx %i kbytes\n", (estTotalSize + 1023) / 1024 );
+	ri.Log( SEV_INFO, " %i total images\n\n", tr.numImages );
 }
 
 //=======================================================================
@@ -257,7 +257,7 @@ static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *
 	byte		*pix1, *pix2, *pix3, *pix4;
 
 	if ( outwidth > ARRAY_LEN( p1 ) )
-		ri.Error( ERR_DROP, "ResampleTexture: max width" );
+		ri.Terminate( TERM_CLIENT_DROP, "ResampleTexture: max width" );
 								
 	fracstep = inwidth * 0x10000 / outwidth;
 
@@ -773,7 +773,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 
 	namelen = (int)strlen( name ) + 1;
 	if ( namelen > MAX_QPATH ) {
-		ri.Error( ERR_DROP, "R_CreateImage: \"%s\" is too long", name );
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImage: \"%s\" is too long", name );
 	}
 
 	if ( name2 && Q_stricmp( name, name2 ) != 0 ) {
@@ -785,7 +785,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	}
 
 	if ( tr.numImages == MAX_DRAWIMAGES ) {
-		ri.Error( ERR_DROP, "R_CreateImage: MAX_DRAWIMAGES hit" );
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImage: MAX_DRAWIMAGES hit" );
 	}
 
 	image = ri.Hunk_Alloc( sizeof( *image ) + namelen + namelen2, h_low );
@@ -1004,7 +1004,7 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 #if 0
 			if ( orgNameFailed )
 			{
-				ri.Printf( PRINT_DEVELOPER, S_COLOR_YELLOW "WARNING: %s not present, using %s instead\n",
+				ri.Log( SEV_DEBUG, S_COLOR_YELLOW "WARNING: %s not present, using %s instead\n",
 						name, altName );
 			}
 #endif
@@ -1048,7 +1048,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			// the white image can be used with any set of parms, but other mismatches are errors
 			if ( strcmp( name, "*white" ) ) {
 				if ( image->flags != flags ) {
-					ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
+					ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
 				}
 			}
 			return image;
@@ -1062,7 +1062,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			if ( !Q_stricmp( strippedName, image->imgName ) ) {
 				//if ( strcmp( strippedName, "*white" ) ) {
 					if ( image->flags != flags ) {
-						ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
+						ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
 					}
 				//}
 				return image;
@@ -1703,12 +1703,12 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	int			totalSurfaces;
 
 	if ( !name || !name[0] ) {
-		ri.Printf( PRINT_DEVELOPER, "Empty name passed to RE_RegisterSkin\n" );
+		ri.Log( SEV_DEBUG, "Empty name passed to RE_RegisterSkin\n" );
 		return 0;
 	}
 
 	if ( strlen( name ) >= MAX_QPATH ) {
-		ri.Printf( PRINT_DEVELOPER, "Skin name exceeds MAX_QPATH\n" );
+		ri.Log( SEV_DEBUG, "Skin name exceeds MAX_QPATH\n" );
 		return 0;
 	}
 
@@ -1726,7 +1726,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 
 	// allocate a new skin
 	if ( tr.numSkins == MAX_SKINS ) {
-		ri.Printf( PRINT_WARNING, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
+		ri.Log( SEV_WARN, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
 		return 0;
 	}
 	tr.numSkins++;
@@ -1788,7 +1788,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	ri.FS_FreeFile( text.v );
 
 	if ( totalSurfaces > MAX_SKIN_SURFACES ) {
-		ri.Printf( PRINT_WARNING, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
+		ri.Log( SEV_WARN, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
 					totalSurfaces, MAX_SKIN_SURFACES, name );
 	}
 
@@ -1846,16 +1846,16 @@ void	R_SkinList_f( void ) {
 	int			i, j;
 	skin_t		*skin;
 
-	ri.Printf (PRINT_ALL, "------------------\n");
+	ri.Log( SEV_INFO, "------------------\n");
 
 	for ( i = 0 ; i < tr.numSkins ; i++ ) {
 		skin = tr.skins[i];
 
-		ri.Printf( PRINT_ALL, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
+		ri.Log( SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
 		for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-			ri.Printf( PRINT_ALL, "       %s = %s\n", 
+			ri.Log( SEV_INFO, "       %s = %s\n", 
 				skin->surfaces[j].name, skin->surfaces[j].shader->name );
 		}
 	}
-	ri.Printf (PRINT_ALL, "------------------\n");
+	ri.Log( SEV_INFO, "------------------\n");
 }

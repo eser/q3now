@@ -88,7 +88,7 @@ void SV_SectorList_f( void ) {
 		for ( svEntity_t *ent = sec->entities ; ent ; ent = ent->nextEntityInWorldSector ) {
 			c++;
 		}
-		Com_Printf( "sector %i: %i entities\n", i, c );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "sector %i: %i entities\n", i, c );
 	}
 }
 
@@ -179,7 +179,7 @@ void SV_UnlinkEntity( sharedEntity_t *gEnt ) {
 		}
 	}
 
-	Com_Printf( "WARNING: SV_UnlinkEntity: not found in worldSector\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "WARNING: SV_UnlinkEntity: not found in worldSector\n" );
 }
 
 
@@ -280,7 +280,7 @@ void SV_LinkEntity( sharedEntity_t *gEnt ) {
 			// but nothing should ever need more than that
 			if (ent->areanum != -1 && ent->areanum != area) {
 				if (ent->areanum2 != -1 && ent->areanum2 != area && sv.state == SS_LOADING) {
-					Com_DPrintf ("Object %i touching 3 areas at %f %f %f\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "Object %i touching 3 areas at %f %f %f\n",
 					gEnt->s.number,
 					gEnt->r.absmin[0], gEnt->r.absmin[1], gEnt->r.absmin[2]);
 				}
@@ -376,7 +376,7 @@ static void SV_AreaEntities_r( worldSector_t *node, areaParms_t *ap ) {
 		}
 
 		if ( ap->count == ap->maxcount ) {
-			Com_Printf ("SV_AreaEntities: MAXCOUNT\n");
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "SV_AreaEntities: MAXCOUNT\n");
 			return;
 		}
 

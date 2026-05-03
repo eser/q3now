@@ -15,7 +15,7 @@ void Event_RegisterType( event_type_t type )
 {
     static qboolean warned = qfalse;
     if ( !warned ) {
-        Com_Printf( "Event_RegisterType: TODO V2\n" );
+        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Event_RegisterType: TODO V2\n" );
         warned = qtrue;
     }
     (void)type;
@@ -27,7 +27,7 @@ event_subscription_t *Event_Subscribe( event_type_t type,
 {
     static qboolean warned = qfalse;
     if ( !warned ) {
-        Com_Printf( "Event_Subscribe: TODO V2\n" );
+        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Event_Subscribe: TODO V2\n" );
         warned = qtrue;
     }
     (void)type; (void)handler; (void)ctx;
@@ -38,7 +38,7 @@ void Event_Unsubscribe( event_subscription_t *sub )
 {
     static qboolean warned = qfalse;
     if ( !warned ) {
-        Com_Printf( "Event_Unsubscribe: TODO V2\n" );
+        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Event_Unsubscribe: TODO V2\n" );
         warned = qtrue;
     }
     (void)sub;
@@ -48,11 +48,150 @@ void Event_Emit( event_type_t type, const void *data, int data_size )
 {
     static qboolean warned = qfalse;
     if ( !warned ) {
-        Com_Printf( "Event_Emit: TODO V2\n" );
+        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Event_Emit: TODO V2\n" );
         warned = qtrue;
     }
     (void)type; (void)data; (void)data_size;
 }
+
+// =========================================================================
+// WiredCoreEvents bus
+// =========================================================================
+
+#define WCE_MAX_HANDLERS       16
+#define WCE_MAX_DISPATCH_DEPTH  8
+
+typedef struct {
+    wce_event_handler_fn fn;
+    void                *userdata;
+} wce_handler_slot_t;
+
+static wce_handler_slot_t handlers[WCE_COUNT][WCE_PRIORITY_COUNT][WCE_MAX_HANDLERS];
+static int                handlerCount[WCE_COUNT][WCE_PRIORITY_COUNT];
+static qboolean           wce_initialized = qfalse;
+
+void WiredCoreEvents_Init( void ) {
+    memset( handlers, 0, sizeof(handlers) );
+    memset( handlerCount, 0, sizeof(handlerCount) );
+    wce_initialized = qtrue;
+    Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WiredCoreEvents: initialized\n" );
+}
+
+void WiredCoreEvents_Shutdown( void ) {
+    memset( handlers, 0, sizeof(handlers) );
+    memset( handlerCount, 0, sizeof(handlerCount) );
+    wce_initialized = qfalse;
+}
+
+void WiredCoreEvents_Register( wce_event_type_t type, wce_event_priority_t priority,
+                                wce_event_handler_fn fn, void *userdata ) {
+    int i, count;
+
+    if ( !wce_initialized || !fn ) return;
+    if ( type <= WCE_NONE || type >= WCE_COUNT ) return;
+    if ( priority < 0 || priority >= WCE_PRIORITY_COUNT ) return;
+
+    count = handlerCount[type][priority];
+
+    for ( i = 0; i < count; i++ ) {
+        if ( handlers[type][priority][i].fn == fn &&
+             handlers[type][priority][i].userdata == userdata ) {
+            return; // duplicate — no-op
+        }
+    }
+
+    if ( count >= WCE_MAX_HANDLERS ) {
+        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WiredCoreEvents_Register: table full (type=%d pri=%d)\n", type, priority );
+        return;
+    }
+
+    handlers[type][priority][count].fn       = fn;
+    handlers[type][priority][count].userdata = userdata;
+    handlerCount[type][priority]++;
+}
+
+void WiredCoreEvents_Unregister( wce_event_type_t type, wce_event_priority_t priority,
+                                  wce_event_handler_fn fn, void *userdata ) {
+    int i, count;
+
+    if ( !wce_initialized ) return;
+    if ( type <= WCE_NONE || type >= WCE_COUNT ) return;
+    if ( priority < 0 || priority >= WCE_PRIORITY_COUNT ) return;
+
+    count = handlerCount[type][priority];
+    for ( i = 0; i < count; i++ ) {
+        if ( handlers[type][priority][i].fn == fn &&
+             handlers[type][priority][i].userdata == userdata ) {
+            int j;
+            for ( j = i; j < count - 1; j++ ) {
+                handlers[type][priority][j] = handlers[type][priority][j + 1];
+            }
+            memset( &handlers[type][priority][count - 1], 0, sizeof(wce_handler_slot_t) );
+            handlerCount[type][priority]--;
+            return;
+        }
+    }
+}
+
+void WiredCoreEvents_Dispatch( const wce_event_data_t *data ) {
+    /*
+     * Re-entrancy guard: handlers may dispatch new events during handling
+     * (e.g., Lua onPlayerDeath -> game.say -> WCE_PLAYER_CHAT).
+     * Expected real-world depth is 2-3. WCE_MAX_DISPATCH_DEPTH = 8 gives
+     * headroom while catching infinite recursion before stack overflow.
+     */
+    static int dispatchDepth = 0;
+    int p, i;
+
+    if ( !wce_initialized || !data ) return;
+    if ( data->type <= WCE_NONE || data->type >= WCE_COUNT ) return;
+
+    if ( dispatchDepth >= WCE_MAX_DISPATCH_DEPTH ) {
+        Com_Log( SEV_WARN, LOG_CAT_SYSTEM, "WiredCoreEvents_Dispatch: max depth %d exceeded for event %d, dropping\n",
+            WCE_MAX_DISPATCH_DEPTH, (int)data->type );
+        return;
+    }
+
+    dispatchDepth++;
+
+    for ( p = 0; p < WCE_PRIORITY_COUNT; p++ ) {
+        int count = handlerCount[data->type][p];
+        for ( i = 0; i < count; i++ ) {
+            handlers[data->type][p][i].fn( data, handlers[data->type][p][i].userdata );
+        }
+    }
+
+    dispatchDepth--;
+}
+
+void WiredCoreEvents_DispatchSimple( wce_event_type_t type, int clientNum ) {
+    wce_event_data_t d;
+    memset( &d, 0, sizeof(d) );
+    d.type      = type;
+    d.clientNum = clientNum;
+    WiredCoreEvents_Dispatch( &d );
+}
+
+void WiredCoreEvents_DispatchWithOrigin( wce_event_type_t type, int clientNum, const vec3_t origin ) {
+    wce_event_data_t d;
+    memset( &d, 0, sizeof(d) );
+    d.type      = type;
+    d.clientNum = clientNum;
+    VectorCopy( origin, d.origin );
+    WiredCoreEvents_Dispatch( &d );
+}
+
+void WiredCoreEvents_DispatchWithText( wce_event_type_t type, int clientNum, const char *text ) {
+    wce_event_data_t d;
+    memset( &d, 0, sizeof(d) );
+    d.type      = type;
+    d.clientNum = clientNum;
+    if ( text ) {
+        Q_strncpyz( d.text, text, sizeof(d.text) );
+    }
+    WiredCoreEvents_Dispatch( &d );
+}
+
 
 // =========================================================================
 // Q3 event queue — extracted from common.c Phase 1 Group 2
@@ -106,7 +245,7 @@ void Sys_QueEvent( int evTime, sysEventType_t evType, int value, int value2, int
 	ev = &eventQue[ eventHead & MASK_QUED_EVENTS ];
 
 	if ( eventHead - eventTail >= MAX_QUED_EVENTS ) {
-		Com_Printf( "%s(type=%s,keys=(%i,%i),time=%i): overflow\n", __func__, Sys_EventName( evType ), value, value2, evTime );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s(type=%s,keys=(%i,%i),time=%i): overflow\n", __func__, Sys_EventName( evType ), value, value2, evTime );
 		// we are discarding an event, but don't leak memory
 		if ( ev->evPtr ) {
 			Z_Free( ev->evPtr );
@@ -174,13 +313,13 @@ static sysEvent_t Com_GetRealEvent( void ) {
 			Sys_SendKeyEvents();
 			r = FS_Read( &ev, sizeof(ev), com_journalFile );
 			if ( r != sizeof(ev) ) {
-				Com_Error( ERR_FATAL, "Error reading from journal file" );
+				Com_Terminate( TERM_UNRECOVERABLE, "Error reading from journal file" );
 			}
 			if ( ev.evPtrLength ) {
 				ev.evPtr = Z_Malloc( ev.evPtrLength );
 				r = FS_Read( ev.evPtr, ev.evPtrLength, com_journalFile );
 				if ( r != ev.evPtrLength ) {
-					Com_Error( ERR_FATAL, "Error reading from journal file" );
+					Com_Terminate( TERM_UNRECOVERABLE, "Error reading from journal file" );
 				}
 			}
 		} else {
@@ -190,12 +329,12 @@ static sysEvent_t Com_GetRealEvent( void ) {
 			if ( com_journal->integer == 1 ) {
 				r = FS_Write( &ev, sizeof(ev), com_journalFile );
 				if ( r != sizeof(ev) ) {
-					Com_Error( ERR_FATAL, "Error writing to journal file" );
+					Com_Terminate( TERM_UNRECOVERABLE, "Error writing to journal file" );
 				}
 				if ( ev.evPtrLength ) {
 					r = FS_Write( ev.evPtr, ev.evPtrLength, com_journalFile );
 					if ( r != ev.evPtrLength ) {
-						Com_Error( ERR_FATAL, "Error writing to journal file" );
+						Com_Terminate( TERM_UNRECOVERABLE, "Error writing to journal file" );
 					}
 				}
 			}
@@ -224,7 +363,7 @@ static void Com_PushEvent( const sysEvent_t *event ) {
 		// don't print the warning constantly, or it can give time for more...
 		if ( !printedWarning ) {
 			printedWarning = qtrue;
-			Com_Printf( "WARNING: Com_PushEvent overflow\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: Com_PushEvent overflow\n" );
 		}
 
 		if ( ev->evPtr ) {
@@ -315,7 +454,7 @@ int Com_EventLoop( void ) {
 			Cbuf_AddText( "\n" );
 			break;
 		default:
-				Com_Error( ERR_FATAL, "Com_EventLoop: bad event type %i", ev.evType );
+				Com_Terminate( TERM_UNRECOVERABLE, "Com_EventLoop: bad event type %i", ev.evType );
 			break;
 		}
 

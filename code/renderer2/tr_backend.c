@@ -55,7 +55,7 @@ void GL_BindToTMU( image_t *image, int tmu )
 	}
 	else
 	{
-		ri.Printf(PRINT_WARNING, "GL_BindToTMU: NULL image\n");
+		ri.Log( SEV_WARN, "GL_BindToTMU: NULL image\n");
 	}
 
 	GL_BindMultiTexture(GL_TEXTURE0_ARB + tmu, target, texture);
@@ -179,7 +179,7 @@ void GL_State( unsigned long stateBits )
 				srcFactor = GL_SRC_ALPHA_SATURATE;
 				break;
 			default:
-				ri.Error( ERR_DROP, "GL_State: invalid src blend state bits" );
+				ri.Terminate( TERM_CLIENT_DROP, "GL_State: invalid src blend state bits" );
 				break;
 			}
 
@@ -210,7 +210,7 @@ void GL_State( unsigned long stateBits )
 				dstFactor = GL_ONE_MINUS_DST_ALPHA;
 				break;
 			default:
-				ri.Error( ERR_DROP, "GL_State: invalid dst blend state bits" );
+				ri.Terminate( TERM_CLIENT_DROP, "GL_State: invalid dst blend state bits" );
 				break;
 			}
 
@@ -704,7 +704,7 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, 
 	for ( j = 0 ; ( 1 << j ) < rows ; j++ ) {
 	}
 	if ( ( 1 << i ) != cols || ( 1 << j ) != rows) {
-		ri.Error (ERR_DROP, "Draw_StretchRaw: size not a power of 2: %i by %i", cols, rows);
+		ri.Terminate( TERM_CLIENT_DROP, "Draw_StretchRaw: size not a power of 2: %i by %i", cols, rows);
 	}
 
 	RE_UploadCinematic (w, h, cols, rows, data, client, dirty);
@@ -712,7 +712,7 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, 
 
 	if ( r_speeds->integer ) {
 		end = ri.Milliseconds();
-		ri.Printf( PRINT_ALL, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
+		ri.Log( SEV_INFO, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
 	}
 
 	// FIXME: HUGE hack
@@ -746,7 +746,7 @@ void RE_UploadCinematic (int w, int h, int cols, int rows, byte *data, int clien
 
 	if (!tr.scratchImage[client])
 	{
-		ri.Printf(PRINT_WARNING, "RE_UploadCinematic: scratch images not initialized\n");
+		ri.Log( SEV_WARN, "RE_UploadCinematic: scratch images not initialized\n");
 		return;
 	}
 
@@ -1487,7 +1487,7 @@ void RB_ShowImages( void ) {
 	qglFinish();
 
 	end = ri.Milliseconds();
-	ri.Printf( PRINT_ALL, "%i msec to draw all images\n", end - start );
+	ri.Log( SEV_INFO, "%i msec to draw all images\n", end - start );
 
 }
 
@@ -1925,7 +1925,7 @@ static const void *RB_ExportCubemaps(const void *data)
 	if (!glRefConfig.framebufferObject || !tr.world || tr.numCubemaps == 0)
 	{
 		// do nothing
-		ri.Printf(PRINT_ALL, "Nothing to export!\n");
+		ri.Log( SEV_INFO, "Nothing to export!\n");
 		return (const void *)(cmd + 1);
 	}
 
@@ -1962,7 +1962,7 @@ static const void *RB_ExportCubemaps(const void *data)
 			}
 
 			R_SaveDDS(filename, cubemapPixels, r_cubemapSize->integer, r_cubemapSize->integer, 6);
-			ri.Printf(PRINT_ALL, "Saved cubemap %d as %s\n", i, filename);
+			ri.Log( SEV_INFO, "Saved cubemap %d as %s\n", i, filename);
 		}
 
 		FBO_Bind(oldFbo);

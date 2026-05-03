@@ -12,39 +12,39 @@
 -- items:               ordered list — bot prioritizes picking items in this order
 -- chats:                CHARACTERISTIC_CHAT_FILE resolved by VFS presence of bot/chats.lua
 --                        (CHAT_NAME comes from nicknames[1] in main.lua)
+--
+-- Values aligned to Q3 Quake3AI baseline (visor_c.c / default_c.c) converted
+-- to {low, high} tuples where Q3 skill-1 → low, skill-5 → high.
 
 return {
 
   -- ── Traits ─────────────────────────────────────────────────────────────────
   traits = {
-    attack_skill     = {0.40, 0.80},
-    view_factor      = {0.35, 0.75},
-    view_maxchange   = {120.00, 240.00},
-    reaction_time    = {2.50, 0.20},
-    croucher         = 0.10,
-    jumper           = {0.40, 0.80},
-    weaponjumping    = {0.20, 0.60},
+    attack_skill     = {0.50, 0.80},
+    view_factor      = {0.70, 1.00},
+    view_maxchange   = {120, 240},
+    reaction_time    = {2.50, 0.80},
     grapple_user     = {0.20, 0.50},
-    aggression       = {0.40, 0.65},
-    selfpreservation = {0.60, 0.40},
-    vengefulness     = {0.35, 0.60},
-    camper           = 0.25,
-    easy_fragger     = {0.40, 0.70},
-    alertness        = {0.45, 0.80},
-    firethrottle     = {0.00, 0.60},
+    aggression       = {0.40, 0.80},
+    selfpreservation = {0.60, 0.45},
+    vengefulness     = {0.35, 0.70},
+    camper           = 0.30,
+    easy_fragger     = {0.10, 0.40},
+    alertness        = {0.40, 0.80},
+    firethrottle     = {0.30, 0.90},
     walker           = 0.05,
   },
 
   -- ── Aim ────────────────────────────────────────────────────────────────────
   aim = {
     accuracy                  = {0.30, 0.75},
-    accuracy_machinegun       = {0.20, 0.55},
-    accuracy_shotgun          = {0.25, 0.65},
-    accuracy_grenade_launcher = {0.20, 0.60},
-    accuracy_rocket_launcher  = {0.25, 0.65},
-    accuracy_lightning_gun    = {0.20, 0.60},
-    accuracy_railgun          = {0.25, 0.65},
-    accuracy_plasma_rifle     = {0.20, 0.55},
+    accuracy_machinegun_pri       = {0.20, 0.55},
+    accuracy_shotgun_pri          = {0.25, 0.65},
+    accuracy_grenade_launcher_pri = {0.20, 0.60},
+    accuracy_rocket_launcher_pri  = {0.25, 0.65},
+    accuracy_lightning_gun_pri    = {0.20, 0.60},
+    accuracy_railgun_pri          = {0.25, 0.65},
+    accuracy_plasma_rifle_pri     = {0.20, 0.55},
     skill                     = {0.30, 0.75},
     skill_machinegun          = {0.20, 0.55},
     skill_shotgun             = {0.20, 0.60},
@@ -53,6 +53,13 @@ return {
     skill_lightning_gun       = {0.20, 0.60},
     skill_railgun             = {0.25, 0.65},
     skill_plasma_rifle        = {0.20, 0.55},
+    weapon_bias_mg            = 1.00,
+    weapon_bias_sg            = 1.00,
+    weapon_bias_gl            = 1.00,
+    weapon_bias_rl            = 1.00,
+    weapon_bias_lg            = 1.00,
+    weapon_bias_rg            = 1.00,
+    weapon_bias_pg            = 1.00,
   },
 
   -- ── Movement ───────────────────────────────────────────────────────────────
@@ -60,12 +67,13 @@ return {
   -- number   → enabled when skill >= value
   -- {lo, hi} → numeric lerp
   movement = {
-    strafe_jump   = 0.25,          -- enabled at skill 0.25+
-    rocket_jump   = 0.65,          -- enabled at skill 0.65+
-    bunny_hop     = 0.30,          -- enabled at skill 0.30+
-    dodge_on_fire = {0.15, 0.60},
-    use_jumppads  = true,
-    swim          = true,
+    strafe_jump      = 0.25,          -- enabled at skill 0.25+
+    weapon_jumping   = {0.20, 0.65}, -- 0.20 at low, 0.65 at high (continuous)
+    jumper           = 0.30,          -- enabled at skill 0.30+
+    dodging          = {0.15, 0.60},
+    use_jumppads     = true,
+    swim             = true,
+    navigation_skill = {0.40, 0.80},
   },
 
   -- ── Attack priority ────────────────────────────────────────────────────────
@@ -113,17 +121,57 @@ return {
 
   -- ── Chats ──────────────────────────────────────────────────────────────────
   chats = {
-    insult        = 0.25,
-    misc          = 0.40,
-    startendlevel = 0.45,
-    enterexitgame = 0.45,
-    kill          = 0.45,
-    death         = 0.35,
-    enemysuicide  = 0.35,
-    hittalking    = 0.10,
-    hitnodeath    = 0.35,
-    hitnokill     = 0.35,
-    random        = 0.35,
-    reply         = {0.35, 0.10},
+    -- Core events — keys match WiredBots_Chat event names
+    -- insult/misc: Q3-path sub-rate only; WiredBots tone is handled in Lua
+    insult         = 0.25,
+    misc           = 0.40,
+    kill           = 0.45,
+    death          = 0.35,
+    random         = 0.35,
+    reply          = {0.35, 0.10},  -- {low_skill_rate, high_skill_rate}
+    message        = 0.35,
+    enemy_suicide  = 0.35,
+    hit_talking    = 0.10,
+    hit_nodeath    = 0.35,
+    hit_nokill     = 0.35,
+    level_start    = 0.45,
+    level_end      = 0.45,
+    level_end_eliminated = 0.60,
+    game_enter     = 0.45,
+    game_exit      = 0.45,
+    -- Team broadcasts (teamplay only)
+    team_need_health         = 0.65,
+    team_need_weapon         = 0.50,
+    team_cover_me            = 0.55,
+    team_follow_me           = 0.60,
+    team_enemy_base_attack   = 0.55,
+    team_defending_base      = 0.50,
+    team_got_flag_need_support = 0.75,
+    -- Powerup events
+    powerup_quad          = 0.70,
+    powerup_haste         = 0.50,
+    powerup_invis         = 0.50,
+    powerup_regen         = 0.40,
+    powerup_battlesuit    = 0.40,
+    powerup_enemy_quad    = 0.55,
+    powerup_enemy_any     = 0.30,
+    -- Kill streaks
+    kill_double          = 0.45,
+    kill_streak_5        = 0.75,
+    kill_streak_10       = 0.85,
+    kill_rampage         = 0.90,
+    -- Score milestones
+    score_first_place    = 0.70,
+    score_falling_back   = 0.50,
+    score_last_place     = 0.35,
+    score_frag_milestone = 0.60,
+    -- CTF events
+    ctf_got_flag      = 0.70,
+    ctf_enemy_got_flag = 0.40,
+    ctf_returning_flag = 0.65,
+    ctf_capture       = 0.85,
+    ctf_flag_dropped  = 0.45,
+    ctf_attack        = 0.30,
+    ctf_defend        = 0.30,
   },
 }

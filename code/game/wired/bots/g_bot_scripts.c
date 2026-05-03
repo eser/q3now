@@ -159,6 +159,75 @@ float WiredBots_GetCurrentAttackAimHeight( bot_state_t *bs ) {
 	return trap_BotLuaBotGetAttackAimHeight( bs->client, bs->weaponnum );
 }
 
+// Returns effective bot skill in [BOT_SKILL_MIN..BOT_SKILL_MAX].
+// Uses autoskill when active, otherwise settings.skill.
+// Single source of truth for the inline ternary pattern.
+float WiredBots_EffectiveSkill( bot_state_t *bs ) {
+	return bs->autoskill > 0.0f ? bs->autoskill : bs->settings.skill;
+}
+
+// Returns skill normalized to [0..1]: BOT_SKILL_MIN→0.0, BOT_SKILL_MAX→1.0.
+// Use for new code that needs a clean 0..1 factor.
+// Existing Q3-style sites used skill/5.0f ([0.2..1.0]) — use WiredBots_ResolveAbility for those.
+float WiredBots_SkillFraction( bot_state_t *bs ) {
+	float skill = WiredBots_EffectiveSkill( bs );
+	return ( skill - BOT_SKILL_MIN ) / ( BOT_SKILL_MAX - BOT_SKILL_MIN );
+}
+
+// Returns lerp(min, max) across the bot's skill range.
+// Drop-in replacement for legacy magic-number patterns:
+//   skill/5.0f       → WiredBots_ResolveAbility(bs, 0.2f, 1.0f)
+//   (6-skill)/5.0f   → WiredBots_ResolveAbility(bs, 1.0f, 0.2f)
+float WiredBots_ResolveAbility( bot_state_t *bs, float min, float max ) {
+	float fraction = WiredBots_SkillFraction( bs );
+	return min + fraction * ( max - min );
+}
+
+// Maps (weapon, slot) → wbProfileField_t. WP_NONE(0) and WP_GAUNTLET(1) have no accuracy field.
+// Indexed [weapon][slot] following WP_* enum order; -1 = no per-weapon entry for this weapon.
+static const int s_accuracyField[WP_NUM_WEAPONS][NUM_ATTACK_SLOTS] = {
+	{ -1, -1 },  // WP_NONE (0)
+	{ -1, -1 },  // WP_GAUNTLET (1) — melee, no accuracy noise field
+	{ WB_PROFILE_ACCURACY_MACHINEGUN_S0,       WB_PROFILE_ACCURACY_MACHINEGUN_S1       },
+	{ WB_PROFILE_ACCURACY_SHOTGUN_S0,          WB_PROFILE_ACCURACY_SHOTGUN_S1          },
+	{ WB_PROFILE_ACCURACY_GRENADE_LAUNCHER_S0, WB_PROFILE_ACCURACY_GRENADE_LAUNCHER_S1 },
+	{ WB_PROFILE_ACCURACY_ROCKET_LAUNCHER_S0,  WB_PROFILE_ACCURACY_ROCKET_LAUNCHER_S1  },
+	{ WB_PROFILE_ACCURACY_LIGHTNING_GUN_S0,    WB_PROFILE_ACCURACY_LIGHTNING_GUN_S1    },
+	{ WB_PROFILE_ACCURACY_RAILGUN_S0,          WB_PROFILE_ACCURACY_RAILGUN_S1          },
+	{ WB_PROFILE_ACCURACY_PLASMA_RIFLE_S0,     WB_PROFILE_ACCURACY_PLASMA_RIFLE_S1     },
+};
+
+// Returns per-(weapon, slot) accuracy. Values of -1.0f are sentinels: "not set in Lua".
+// Fallback chain (first non-sentinel value wins):
+//   slot=1, slot1=unset, slot0=0.7  → 0.7
+//   slot=0, slot0=unset, global=0.4 → 0.4
+//   slot=0, slot0=0.8, global=0.4   → 0.8
+//   slot=1, slot1=0.9, slot0=0.7    → 0.9
+//   all unset                        → 0.5 (hardcoded default)
+float WiredBots_AttackAccuracy( bot_state_t *bs, int weapon, int slot ) {
+	float val = -1.0f;
+
+	if ( weapon > WP_NONE && weapon < WP_NUM_WEAPONS
+	     && slot >= 0 && slot < NUM_ATTACK_SLOTS ) {
+		int field = s_accuracyField[weapon][slot];
+		if ( field >= 0 ) {
+			val = WiredBots_ProfileFieldOr( bs, field, -1.0f );
+		}
+		if ( val < 0.0f && slot == 1 ) {
+			// slot 1 not set: fall through to primary
+			int field0 = s_accuracyField[weapon][0];
+			if ( field0 >= 0 ) {
+				val = WiredBots_ProfileFieldOr( bs, field0, -1.0f );
+			}
+		}
+	}
+
+	if ( val < 0.0f ) {
+		val = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, -1.0f );
+	}
+	return val < 0.0f ? 0.5f : val;
+}
+
 static float WiredBots_WeaponBaseScore( int weapon ) {
 	switch ( weapon ) {
 		case WP_GAUNTLET:
@@ -257,7 +326,7 @@ static void WiredBots_FillCombatCtx( bot_state_t *bs, wbCombatCtx_t *ctx ) {
 
 	memset( ctx, 0, sizeof( *ctx ) );
 	ctx->enemyDist = fabsf( (float)bs->inventory[ENEMY_HORIZONTAL_DIST] );
-	ctx->enemyHealth = -1;
+	ctx->enemyHealth = ( bs->enemy >= 0 && bs->enemy < MAX_GENTITIES ) ? g_entities[bs->enemy].health : -1;
 	ctx->selfHealth = bs->inventory[INVENTORY_HEALTH];
 	ctx->selfArmor = bs->inventory[INVENTORY_ARMOR];
 
@@ -265,6 +334,23 @@ static void WiredBots_FillCombatCtx( bot_state_t *bs, wbCombatCtx_t *ctx ) {
 		ctx->weapons[weapon] = WiredBots_HasWeapon( bs, weapon ) ? 1 : 0;
 		ctx->ammo[weapon] = WiredBots_AmmoForWeapon( bs, weapon );
 	}
+}
+
+static void WiredBots_WeaponPersonalityScores( int clientNum, int weapon, float *outBias, float *outSkill ) {
+	wbProfileField_t biasField = WB_PROFILE_MAX;
+	wbProfileField_t skillField = WB_PROFILE_MAX;
+	switch ( weapon ) {
+		case WP_MACHINEGUN:       biasField = WB_PROFILE_BIAS_MG; skillField = WB_PROFILE_SKILL_MG; break;
+		case WP_SHOTGUN:          biasField = WB_PROFILE_BIAS_SG; skillField = WB_PROFILE_SKILL_SG; break;
+		case WP_GRENADE_LAUNCHER: biasField = WB_PROFILE_BIAS_GL; skillField = WB_PROFILE_SKILL_GL; break;
+		case WP_ROCKET_LAUNCHER:  biasField = WB_PROFILE_BIAS_RL; skillField = WB_PROFILE_SKILL_RL; break;
+		case WP_LIGHTNING_GUN:    biasField = WB_PROFILE_BIAS_LG; skillField = WB_PROFILE_SKILL_LG; break;
+		case WP_RAILGUN:          biasField = WB_PROFILE_BIAS_RG; skillField = WB_PROFILE_SKILL_RG; break;
+		case WP_PLASMA_RIFLE:     biasField = WB_PROFILE_BIAS_PG; skillField = WB_PROFILE_SKILL_PG; break;
+		default: break;
+	}
+	*outBias  = ( biasField  < WB_PROFILE_MAX ) ? trap_BotLuaBotProfileField( clientNum, biasField )  : 1.0f;
+	*outSkill = ( skillField < WB_PROFILE_MAX ) ? trap_BotLuaBotProfileField( clientNum, skillField ) : 0.5f;
 }
 
 int WiredBots_ChooseWeapon( bot_state_t *bs, int fallbackWeapon ) {
@@ -305,17 +391,33 @@ int WiredBots_ChooseWeapon( bot_state_t *bs, int fallbackWeapon ) {
 		float rangeScore;
 		float ammoScore;
 		float score;
+		float bias, skillVal;
 		int ammo;
 		if ( !WiredBots_WeaponUsable( bs, weapon ) ) {
 			continue;
 		}
 
 		ammo = WiredBots_AmmoForWeapon( bs, weapon );
+
+		if ( weapon != WP_GAUNTLET && ammo < 2 ) {
+			continue;
+		}
+
 		baseScore = WiredBots_WeaponBaseScore( weapon );
 		rangeScore = WiredBots_WeaponRangeScore( weapon, enemyDistance );
 		ammoScore = WiredBots_AmmoScore( weapon, ammo );
 
 		score = baseScore * 0.35f + rangeScore * 0.40f + ammoScore * 0.25f;
+
+		WiredBots_WeaponPersonalityScores( bs->client, weapon, &bias, &skillVal );
+		score *= bias;
+		score += ( skillVal - 0.5f ) * 0.10f;
+
+		if ( ctx.enemyHealth > 0 && ctx.enemyHealth <= 50 ) {
+			if      ( weapon == WP_RAILGUN )   score += 0.15f;
+			else if ( weapon == WP_LIGHTNING_GUN ) score += 0.10f;
+			else if ( weapon == WP_SHOTGUN )   score += 0.08f;
+		}
 
 		if ( weapon == bs->cur_ps.weapon && bs->cur_ps.weaponstate == WEAPON_READY ) {
 			score += 0.05f;
@@ -349,7 +451,7 @@ debug_print:
 				if ( s_dbgFrames < 100 ) {
 					int ammo = WiredBots_AmmoForWeapon( bs, chosenWeapon );
 					int inBitmask = ( bs->cur_ps.stats[STAT_WEAPONS] >> chosenWeapon ) & 1;
-					G_Printf( "^5[bot_debug_weapons] frame=%d bot=%s key=%s wp=%d ammo=%d bitmask=%d\n",
+					Com_Log( SEV_INFO, LOG_CAT_GAME, "^5[bot_debug_weapons] frame=%d bot=%s key=%s wp=%d ammo=%d bitmask=%d\n",
 					          s_dbgFrames, botName,
 					          chosenKey ? chosenKey : "?",
 					          chosenWeapon, ammo, inBitmask );
@@ -358,7 +460,7 @@ debug_print:
 					trap_Cvar_Set( "bot_debug_weapon", "" );
 					s_dbgPrev[0] = '\0';
 					s_dbgFrames = 0;
-					G_Printf( "^5[bot_debug_weapons] reached 100 frames, stopping.\n" );
+					Com_Log( SEV_INFO, LOG_CAT_GAME, "^5[bot_debug_weapons] reached 100 frames, stopping.\n" );
 				}
 			}
 		} else if ( s_dbgPrev[0] ) {
@@ -467,11 +569,11 @@ static int WiredBots_Decide( bot_state_t *bs, char *decision, int decisionSize )
 	{
 		int result = trap_BotLuaBotDecide( bs->client, &ctx, decision, decisionSize );
 
-		if ( trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+		if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 			static float s_decideLogTime[MAX_CLIENTS];
 			if ( FloatTime() - s_decideLogTime[bs->client] > 2.0f ) {
 				s_decideLogTime[bs->client] = FloatTime();
-				G_Printf( "^5[Decide] client=%d result='%s'(%d) ev=%d ed=%.0f hp=%d uf=%d\n",
+				Com_Log( SEV_INFO, LOG_CAT_GAME, "^5[Decide] client=%d result='%s'(%d) ev=%d ed=%.0f hp=%d uf=%d\n",
 					bs->client, result ? decision : "<none>", result,
 					ctx.enemyVisible, ctx.enemyDist, ctx.health, ctx.underFire );
 			}
@@ -497,12 +599,6 @@ int WiredBots_WantsToRetreat( bot_state_t *bs ) {
 		return !Q_stricmp( decision, "retreat" );
 	}
 
-	// Lua bot with no decide() — do NOT use the legacy danger formula.
-	// The formula yields danger > 1.0 for MG+no-armor, permanently blocking combat.
-	if ( bs->wiredBotsActive ) {
-		return qfalse;
-	}
-
 	selfPreserve = WiredBots_Clamp01( WiredBots_ProfileFieldOr( bs, WB_PROFILE_SELF_PRESERVE, 0.5f ) );
 	danger = 1.0f - WiredBots_Clamp01( WiredBots_Aggression( bs ) / 100.0f );
 
@@ -521,6 +617,7 @@ int WiredBots_WantsToRetreat( bot_state_t *bs ) {
 	}
 
 	danger *= 0.70f + selfPreserve;
+	danger = Com_Clamp( 0.0f, 1.0f, danger );  // cap: low-weapon + no-armor sums can exceed 1.0
 
 	return danger > 0.65f;
 }
@@ -535,12 +632,17 @@ int WiredBots_WantsToChase( bot_state_t *bs ) {
 	}
 
 	if ( WiredBots_Decide( bs, decision, sizeof( decision ) ) ) {
-		if ( !Q_stricmp( decision, "chase" ) ) {
-			return qtrue;
+		int ret = -1; // -1 = unknown decision, fall through to chaseDrive formula
+		// "fight" and "chase" both mean engage — pursue if briefly out of sight
+		if ( !Q_stricmp( decision, "chase" ) || !Q_stricmp( decision, "fight" ) ) {
+			ret = qtrue;
+		} else if ( !Q_stricmp( decision, "retreat" ) || !Q_stricmp( decision, "roam" ) ) {
+			ret = qfalse;
 		}
-		if ( !Q_stricmp( decision, "retreat" ) || !Q_stricmp( decision, "fight" ) || !Q_stricmp( decision, "roam" ) ) {
-			return qfalse;
-		}
+		if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "[WantsChase] cl=%d decision='%s' ret=%d\n",
+				bs->client, decision, ret );
+		if ( ret >= 0 ) return ret;
 	}
 
 	vengefulness = WiredBots_Clamp01( WiredBots_ProfileFieldOr( bs, WB_PROFILE_VENGEFULNESS, 0.5f ) );
@@ -636,6 +738,8 @@ static int WiredBots_EvalItemGoal( bot_state_t *bs, const gitem_t *item, const b
 	ctx.armor = bs->inventory[INVENTORY_ARMOR];
 	ctx.hasEnemy = ( bs->enemy >= 0 ) ? 1 : 0;
 	ctx.enemyDist = fabsf( (float)bs->inventory[ENEMY_HORIZONTAL_DIST] );
+	ctx.giType = item->giType;
+	ctx.giTag  = item->giTag;
 
 	for ( weapon = WP_GAUNTLET; weapon < WP_NUM_WEAPONS; weapon++ ) {
 		ctx.weapons[weapon] = WiredBots_HasWeapon( bs, weapon ) ? 1 : 0;
@@ -649,6 +753,40 @@ static int WiredBots_EvalItemGoal( bot_state_t *bs, const gitem_t *item, const b
 	ctx.powerups[WB_POWERUP_SLOT_REGEN] = bs->inventory[INVENTORY_REGEN] ? 1.0f : 0.0f;
 	ctx.powerups[WB_POWERUP_SLOT_FLIGHT] = bs->inventory[INVENTORY_FLIGHT] ? 1.0f : 0.0f;
 
+	// C.5: distances bot→item and enemy→item for contested-item scoring in Lua
+	{
+		vec3_t diff;
+		VectorSubtract( goal->origin, bs->origin, diff );
+		ctx.itemBotDist = VectorLength( diff );
+		if ( bs->enemy >= 0 && bs->enemy < MAX_GENTITIES ) {
+			VectorSubtract( goal->origin, g_entities[bs->enemy].s.origin, diff );
+			ctx.itemEnemyDist = VectorLength( diff );
+		} else {
+			ctx.itemEnemyDist = -1.0f;
+		}
+	}
+
+	// C.2/C.3: populate respawn time and apply per-item window (no navmesh dependency)
+	if ( goal->entitynum > 0 && goal->entitynum < MAX_GENTITIES ) {
+		const gentity_t *gent = &g_entities[goal->entitynum];
+		if ( !gent->r.linked ) {
+			int windowMs;
+			int respawnMs = gent->nextthink - level.time;
+			if      ( strcmp( ctx.itemType, "health_mega" ) == 0 ) windowMs = 15000;
+			else if ( strcmp( ctx.itemType, "armor_red"   ) == 0 ) windowMs = 10000;
+			else if ( item->giType == IT_POWERUP )                  windowMs = 20000;
+			else                                                     windowMs =  5000;
+			ctx.itemRespawn = ( respawnMs > 0 ) ? (float)respawnMs / 1000.0f : 0.0f;
+			if ( respawnMs > windowMs ) {
+				return 0;
+			}
+			if ( respawnMs > 0 ) {
+				int rawScore = trap_BotLuaBotEvalItem( bs->client, &ctx );
+				return (int)( rawScore * (float)( windowMs - respawnMs ) / (float)windowMs );
+			}
+		}
+	}
+
 	return trap_BotLuaBotEvalItem( bs->client, &ctx );
 }
 
@@ -656,7 +794,10 @@ static int WiredBots_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_goa
 	float bestScore;
 	int itemNum;
 	int directLtgTime;
-	int dbgSkipAvoid = 0, dbgSkipNoPath = 0, dbgSkipTooFar = 0, dbgSkipDetour = 0;
+	int dbgSkipNoPath = 0, dbgSkipTooFar = 0, dbgSkipDetour = 0;
+#if !FEAT_RECAST_NAVMESH
+	int dbgSkipAvoid = 0;
+#endif
 
 	if ( !bs || !bestGoal ) {
 		return qfalse;
@@ -681,7 +822,6 @@ static int WiredBots_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_goa
 
 	for ( itemNum = 1; itemNum < bg_numItems; itemNum++ ) {
 		const gitem_t *item;
-		int itemIndex;
 		bot_goal_t goal;
 
 		item = &bg_itemlist[itemNum];
@@ -689,72 +829,113 @@ static int WiredBots_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_goa
 			continue;
 		}
 
-		itemIndex = -1;
-		while ( ( itemIndex = trap_BotGetLevelItemGoal( itemIndex, (char *)item->pickup_name, &goal ) ) >= 0 ) {
-			int travelTime;
-			float score;
-
-			if ( trap_BotAvoidGoalTime( bs->gs, goal.number ) > 0.0f ) {
-				dbgSkipAvoid++;
-				continue;
-			}
-
 #if FEAT_RECAST_NAVMESH
-			/* AAS unavailable — estimate travel time from Euclidean distance.
-			   Assumes ~300 ups average bot speed.  Always > 0, so no item is
-			   skipped as "unreachable" purely due to missing AAS data. */
-			{
-				vec3_t delta;
-				VectorSubtract( goal.origin, bs->origin, delta );
-				travelTime = (int)( VectorLength( delta ) * 1000.0f / 300.0f ) + 1;
-			}
-#else
-			travelTime = trap_AAS_AreaTravelTimeToGoalArea( bs->areanum, bs->origin, goal.areanum, tfl );
-			if ( travelTime <= 0 ) {
-				dbgSkipNoPath++;
-				continue;
-			}
-#endif
+		/* Botlib item database is empty under Recast (BotInitLevelItems early-
+		 * returns when AAS_Loaded()==false).  Scan g_entities[] directly so
+		 * items are scored and the best goal is pushed to the goal stack. */
+		{
+			int eNum;
+			for ( eNum = 0; eNum < MAX_GENTITIES; eNum++ ) {
+				int travelTime;
+				float score;
+				gentity_t *gent = &g_entities[eNum];
 
-			if ( maxTravelTime > 0.0f && travelTime > maxTravelTime ) {
-				dbgSkipTooFar++;
-				continue;
-			}
+				if ( !gent->inuse ) continue;
+				if ( !gent->item ) continue;
+				if ( Q_stricmp( gent->item->pickup_name, item->pickup_name ) != 0 ) continue;
 
-#if !FEAT_RECAST_NAVMESH
-			if ( ltg && ltg->areanum > 0 && directLtgTime > 0 ) {
-				int viaLtgTime;
+				memset( &goal, 0, sizeof( goal ) );
+				VectorCopy( gent->r.currentOrigin, goal.origin );
+				VectorCopy( gent->r.mins, goal.mins );
+				VectorCopy( gent->r.maxs, goal.maxs );
+				goal.entitynum = eNum;
+				goal.number    = eNum;
+				goal.flags     = GFL_ITEM;
+				goal.iteminfo  = itemNum;
 
-				viaLtgTime = trap_AAS_AreaTravelTimeToGoalArea( goal.areanum, goal.origin, ltg->areanum, tfl );
-				if ( viaLtgTime > 0 && viaLtgTime > directLtgTime + WB_MAX_NBG_DETOUR ) {
-					dbgSkipDetour++;
+				{
+					vec3_t delta;
+					VectorSubtract( goal.origin, bs->origin, delta );
+					travelTime = (int)( VectorLength( delta ) * 1000.0f / 300.0f ) + 1;
+				}
+
+				if ( maxTravelTime > 0.0f && travelTime > maxTravelTime ) {
+					dbgSkipTooFar++;
 					continue;
 				}
-			}
-#endif
 
-			score = (float)WiredBots_EvalItemGoal( bs, item, &goal );
-			score *= 1.0f / ( 1.0f + travelTime / 220.0f );
+				score = (float)WiredBots_EvalItemGoal( bs, item, &goal );
+				score *= 1.0f / ( 1.0f + travelTime / 220.0f );
 
-			if ( score > bestScore ) {
-				bestScore = score;
-				*bestGoal = goal;
+				if ( score > bestScore ) {
+					bestScore = score;
+					*bestGoal = goal;
+				}
 			}
 		}
+#else
+		{
+			int itemIndex = -1;
+			while ( ( itemIndex = trap_BotGetLevelItemGoal( itemIndex, (char *)item->pickup_name, &goal ) ) >= 0 ) {
+				int travelTime;
+				float score;
+
+				if ( trap_BotAvoidGoalTime( bs->gs, goal.number ) > 0.0f ) {
+					dbgSkipAvoid++;
+					continue;
+				}
+
+				travelTime = trap_AAS_AreaTravelTimeToGoalArea( bs->areanum, bs->origin, goal.areanum, tfl );
+				if ( travelTime <= 0 ) {
+					dbgSkipNoPath++;
+					continue;
+				}
+
+				if ( maxTravelTime > 0.0f && travelTime > maxTravelTime ) {
+					dbgSkipTooFar++;
+					continue;
+				}
+
+				if ( ltg && ltg->areanum > 0 && directLtgTime > 0 ) {
+					int viaLtgTime;
+
+					viaLtgTime = trap_AAS_AreaTravelTimeToGoalArea( goal.areanum, goal.origin, ltg->areanum, tfl );
+					if ( viaLtgTime > 0 && viaLtgTime > directLtgTime + WB_MAX_NBG_DETOUR ) {
+						dbgSkipDetour++;
+						continue;
+					}
+				}
+
+				score = (float)WiredBots_EvalItemGoal( bs, item, &goal );
+				score *= 1.0f / ( 1.0f + travelTime / 220.0f );
+
+				if ( score > bestScore ) {
+					bestScore = score;
+					*bestGoal = goal;
+				}
+			}
+		}
+#endif
 	}
 
-	if ( trap_Cvar_VariableIntegerValue( "sv_botDebugDecide" ) ) {
+	if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static float s_nbgLog[MAX_CLIENTS];
 		if ( FloatTime() - s_nbgLog[bs->client] > 2.0f ) {
 			s_nbgLog[bs->client] = FloatTime();
 			if ( bestScore > 0.0f ) {
-				G_Printf( "^2[NBG] cl=%d FOUND goal=%d score=%.1f area=%d\n",
+				Com_Log( SEV_INFO, LOG_CAT_GAME, "^2[NBG] cl=%d FOUND goal=%d score=%.1f area=%d\n",
 					bs->client, bestGoal->number, bestScore, bestGoal->areanum );
 			} else {
-				G_Printf( "^3[NBG] cl=%d NONE area=%d maxTT=%.0f "
-					"skip: avoid=%d nopath=%d toofar=%d detour=%d\n",
+				Com_Log( SEV_INFO, LOG_CAT_GAME, "^3[NBG] cl=%d NONE area=%d maxTT=%.0f skip:"
+#if !FEAT_RECAST_NAVMESH
+					" avoid=%d"
+#endif
+					" nopath=%d toofar=%d detour=%d\n",
 					bs->client, bs->areanum, maxTravelTime,
-					dbgSkipAvoid, dbgSkipNoPath, dbgSkipTooFar, dbgSkipDetour );
+#if !FEAT_RECAST_NAVMESH
+					dbgSkipAvoid,
+#endif
+					dbgSkipNoPath, dbgSkipTooFar, dbgSkipDetour );
 			}
 		}
 	}

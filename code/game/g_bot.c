@@ -74,12 +74,12 @@ int G_ParseInfos( const char *buf, int max, char *infos[] ) {
 			break;
 		}
 		if ( strcmp( token, "{" ) ) {
-			Com_Printf( "Missing { in info file\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Missing { in info file\n" );
 			break;
 		}
 
 		if ( count == max ) {
-			Com_Printf( "Max infos exceeded\n" );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "Max infos exceeded\n" );
 			break;
 		}
 
@@ -87,7 +87,7 @@ int G_ParseInfos( const char *buf, int max, char *infos[] ) {
 		while ( 1 ) {
 			token = COM_ParseExt( &parser, &buf, qtrue );
 			if ( !token[0] ) {
-				Com_Printf( "Unexpected end of info file\n" );
+				Com_Log( SEV_INFO, LOG_CAT_GAME, "Unexpected end of info file\n" );
 				break;
 			}
 			if ( !strcmp( token, "}" ) ) {
@@ -315,7 +315,7 @@ void G_AddRandomBot( int team ) {
 	char	*teamstr;
 	float	skill;
 
-	skill = trap_Cvar_VariableValue( "g_spSkill" );
+	skill = trap_Cvar_VariableValue( "g_skill" );
 	if ( skill < 1.0f ) {
 		skill = 1.0f;
 	} else if ( skill > 5.0f ) {
@@ -594,7 +594,7 @@ static void AddBotToSpawnQueue( int clientNum, int delay ) {
 		}
 	}
 
-	G_Printf( S_COLOR_YELLOW "Unable to delay spawn\n" );
+	Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "Unable to delay spawn\n" );
 	ClientBegin( clientNum );
 }
 
@@ -658,8 +658,8 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	// have the server allocate a client slot
 	clientNum = trap_BotAllocateClient();
 	if ( clientNum == -1 ) {
-		G_Printf( S_COLOR_RED "Unable to add bot. All player slots are in use.\n" );
-		G_Printf( S_COLOR_RED "Start server with more 'open' slots (or check setting of sv_maxclients cvar).\n" );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_RED "Unable to add bot. All player slots are in use.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_RED "Start server with more 'open' slots (or check setting of sv_maxclients cvar).\n" );
 		return;
 	}
 
@@ -705,7 +705,7 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	}
 
 	if ( !characterInfo ) {
-		G_Printf( S_COLOR_RED "Error: Character '%s' not defined\n", name );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_RED "Error: Character '%s' not defined\n", name );
 		trap_BotFreeClient( clientNum );
 		return;
 	}
@@ -838,13 +838,13 @@ static void G_SpawnBots( const char *botList, int baseDelay ) {
 	int			delay;
 	char		bots[MAX_INFO_VALUE];
 
-	skill = trap_Cvar_VariableValue( "g_spSkill" );
+	skill = trap_Cvar_VariableValue( "g_skill" );
 	if( skill < 1 ) {
-		trap_Cvar_Set( "g_spSkill", "1" );
+		trap_Cvar_Set( "g_skill", "1" );
 		skill = 1;
 	}
 	else if ( skill > 5 ) {
-		trap_Cvar_Set( "g_spSkill", "5" );
+		trap_Cvar_Set( "g_skill", "5" );
 		skill = 5;
 	}
 	skill = ( skill - 1.0f ) / 4.0f;

@@ -102,6 +102,33 @@ typedef struct cmodel_s {
 	cLeaf_t		leaf;			// submodels don't reference the main tree
 } cmodel_t;
 
+// Forward declaration so cmTracer_t can reference const sphere_t * before the full def.
+typedef struct sphere_s sphere_t;
+
+#define MAX_Q1_HULLS  4
+
+typedef struct {
+	int                numClipnodes;
+	q1_dclipnode_t    *clipnodes;
+	int                numSubmodelRoots;
+	int               *submodelRoots;   // hull-1 clipnode roots, one per submodel
+	int               *hull0Roots;      // hull-0 BSP node roots, one per submodel
+	int                numLeafs;
+	int               *leafContents;   // Q3 CONTENTS_* per BSP leaf
+} cmQ1Data_t;
+
+typedef struct {
+	const char *name;
+	void (*Trace)( trace_t *results, const vec3_t start, const vec3_t end,
+	               const vec3_t mins, const vec3_t maxs, clipHandle_t model,
+	               const vec3_t origin, int brushmask, qboolean capsule,
+	               const sphere_t *sphere );
+	int  (*PointContents)( const vec3_t p, clipHandle_t model );
+	void (*BiSphereTrace)( trace_t *results, const vec3_t start, const vec3_t end,
+	                       float startRad, float endRad, clipHandle_t model,
+	                       int brushmask );
+} cmTracer_t;
+
 // Registered triangle-soup collision entry. The cmodel_t is used for
 // CM_ModelBounds responses; the patchCollide_t holds the actual facet
 // geometry and is consumed by CM_TraceThroughPatchCollide.
@@ -195,6 +222,9 @@ typedef struct {
 	int			checkcount;					// incremented on each trace
 
 	unsigned int checksum;
+
+	cmQ1Data_t          q1;
+	const cmTracer_t   *tracer;
 } clipMap_t;
 
 
@@ -209,10 +239,32 @@ extern	cvar_t		*cm_noAreas;
 extern	cvar_t		*cm_noCurves;
 extern	cvar_t		*cm_playerCurveClip;
 
+extern cmTracer_t cmTracer_q3;
+extern cmTracer_t cmTracer_q1;
+
+// cm_q1.c — Q1 hull data management called from bsp_q1.c during load
+void CMQ1_StoreClipnodes( const q1_dclipnode_t *cn, int numCn,
+                          const int *hull1Roots, const int *hull0Roots, int numSubmodels );
+void CMQ1_StoreLeafContents( const int *contents, int numLeafs );
+void CMQ1_FreeData( void );
+
+// cm_trace.c — internal Q3 trace (used by cmTracer_q3 vtable entry and Q1 fallback)
+void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end,
+               const vec3_t mins, const vec3_t maxs, clipHandle_t model,
+               const vec3_t origin, int brushmask, qboolean capsule,
+               const sphere_t *sphere );
+
+// cm_test.c — Q3 brush-walk point-contents impl (vtable entry for cmTracer_q3)
+int CMQ3_PointContents( const vec3_t p, clipHandle_t model );
+
+// cm_trace.c — Q3 bisphere impl (vtable entry for cmTracer_q3)
+void CMQ3_BiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
+                         float startRad, float endRad, clipHandle_t model, int brushmask );
+
 // cm_test.c
 
 // Used for oriented capsule collision detection
-typedef struct
+typedef struct sphere_s
 {
 	qboolean	use;
 	float		radius;

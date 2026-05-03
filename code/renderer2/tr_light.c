@@ -305,7 +305,7 @@ static void LogLight( const trRefEntity_t *ent ) {
 		max2 = ent->directedLight[2];
 	}
 
-	ri.Printf( PRINT_ALL, "amb:%i  dir:%i\n", max1, max2 );
+	ri.Log( SEV_INFO, "amb:%i  dir:%i\n", max1, max2 );
 }
 
 /*

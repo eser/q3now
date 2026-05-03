@@ -194,6 +194,8 @@ static void CG_General( centity_t *cent ) {
 	if ( cg.stopTime ) ent.shaderTime.f = (float)( cg.time - cg.stopTime ) / 1000.0f;
 #endif
 
+	CG_Q1_MaybeEmitTrail( cent );
+
 	// add to refresh list
 	trap_R_AddRefEntityToScene (&ent);
 }
@@ -237,7 +239,7 @@ static void CG_Item( centity_t *cent ) {
 
 	es = &cent->currentState;
 	if ( es->modelindex >= bg_numItems ) {
-		CG_Error( "Bad item index %i on entity", es->modelindex );
+		Com_Terminate( TERM_CLIENT_DROP, "Bad item index %i on entity", es->modelindex );
 	}
 
 	// if set to invisible, skip
@@ -303,13 +305,23 @@ static void CG_Item( centity_t *cent ) {
 
 		cent->lerpOrigin[2] += 8;	// an extra height boost
 	}
-	
-	if( item->giType == IT_WEAPON && item->giTag == WP_RAILGUN ) {
-        ent.shaderRGBA[0] = colorSkyBlue[0] * 255;
-        ent.shaderRGBA[1] = colorSkyBlue[1] * 255;
-        ent.shaderRGBA[2] = colorSkyBlue[2] * 255;
-        ent.shaderRGBA[3] = 255;
-	}
+
+	// if( item->giType == IT_WEAPON && item->giTag == WP_RAILGUN ) {
+    //     ent.shaderRGBA[0] = colorSkyBlue[0] * 255;
+    //     ent.shaderRGBA[1] = colorSkyBlue[1] * 255;
+    //     ent.shaderRGBA[2] = colorSkyBlue[2] * 255;
+    //     ent.shaderRGBA[3] = 255;
+	// }
+
+	// if( item->giType == IT_ARMOR ) {
+	// 	switch ( item->giTag ) {
+    //         case ARM_HEAVY:  VectorSet( ent.shaderRGBA, 255,   0,   0 ); break;
+    //         case ARM_COMBAT: VectorSet( ent.shaderRGBA, 255, 255,   0 ); break;
+    //         case ARM_JACKET: VectorSet( ent.shaderRGBA,   0,   0, 255 ); break;
+    //         default:         VectorSet( ent.shaderRGBA, 255, 255, 255 ); break;
+    //     }
+    //     ent.shaderRGBA[3] = 255;
+	// }
 
 	// ent.hModel = cg_items[es->modelindex].models[0];
 
@@ -500,7 +512,7 @@ static void CG_Missile( centity_t *cent ) {
 	VectorCopy( cent->lerpOrigin, ent.origin);
 	VectorCopy( cent->lerpOrigin, ent.oldorigin);
 
-	if ( cent->currentState.weapon == WP_PLASMA_RIFLE ) {
+	if ( cent->currentState.pType == PROJ_PLASMA ) {
 		ent.reType = RT_SPRITE;
 		ent.radius = 16;
 		ent.rotation = 0;
@@ -611,14 +623,36 @@ static void CG_Mover( centity_t *cent ) {
 
 	ent.renderfx = RF_NOSHADOW;
 
-	// flicker between two skins (FIXME?)
-	ent.skinNum = ( cg.time >> 6 ) & 1;
+	// BSP brush movers have a single lightmap style; alternating skinNum
+	// causes visual artifacts. Non-BSP movers may legitimately cycle skins.
+	if ( s1->solid == SOLID_BMODEL ) {
+		ent.skinNum = 0;
+	} else {
+		ent.skinNum = ( cg.time >> 6 ) & 1;
+	}
 
 	// get the model, either as a bmodel or a modelindex
 	if ( s1->solid == SOLID_BMODEL ) {
 		ent.hModel = cgs.inlineDrawModel[s1->modelindex];
 	} else {
 		ent.hModel = cgs.gameModels[s1->modelindex];
+	}
+
+	ent.frame    = s1->frame;
+	ent.oldframe = s1->frame;
+
+	{
+		static int mover_diag_count = 0;
+		if ( mover_diag_count < 40 ) {
+			mover_diag_count++;
+			Com_Log( SEV_TRACE, LOG_CAT_CGAME, "CG_Mover[%d]: num=%d s1->solid=0x%x SOLID_BMODEL=0x%x"
+				" s1->modelindex=%d hModel=%d"
+				" lerpOrigin=(%.0f,%.0f,%.0f)\n",
+				mover_diag_count, s1->number,
+				(unsigned)s1->solid, (unsigned)SOLID_BMODEL,
+				s1->modelindex, ent.hModel,
+				cent->lerpOrigin[0], cent->lerpOrigin[1], cent->lerpOrigin[2] );
+		}
 	}
 
 	// add to refresh list
@@ -793,7 +827,7 @@ static void CG_InterpolateEntityPosition( centity_t *cent ) {
 	// it would be an internal error to find an entity that interpolates without
 	// a snapshot ahead of the current one
 	if ( cg.nextSnap == NULL ) {
-		CG_Error( "CG_InterpoateEntityPosition: cg.nextSnap == NULL" );
+		Com_Terminate( TERM_CLIENT_DROP, "CG_InterpoateEntityPosition: cg.nextSnap == NULL" );
 	}
 
 	f = cg.frameInterpolation;
@@ -1031,7 +1065,7 @@ static void CG_AddCEntity( centity_t *cent ) {
 
 	switch ( cent->currentState.eType ) {
 	default:
-		CG_Error( "Bad entity type: %i", cent->currentState.eType );
+		Com_Terminate( TERM_CLIENT_DROP, "Bad entity type: %i", cent->currentState.eType );
 		break;
 	case ET_INVISIBLE:
 	case ET_PUSH_TRIGGER:
@@ -1124,6 +1158,20 @@ void CG_AddPacketEntities( void ) {
 	CG_CalcEntityLerpPositions( &cg_entities[ cg.snap->ps.clientNum ] );
 
 	// add each entity sent over by the server
+	{
+		static int snap_diag_logged = 0;
+		if ( snap_diag_logged < 3 && cg.snap->numEntities >= 3 ) {
+			snap_diag_logged++;
+			Com_Log( SEV_TRACE, LOG_CAT_CGAME, "CG_AddPacketEntities[snap%d]: numEntities=%d\n",
+				snap_diag_logged, cg.snap->numEntities );
+			for ( num = 0; num < cg.snap->numEntities; num++ ) {
+				entityState_t *es = &cg.snap->entities[ num ];
+				Com_Log( SEV_TRACE, LOG_CAT_CGAME, "  snap_ent[%d]: number=%d eType=%d solid=0x%x modelindex=%d origin=(%.0f,%.0f,%.0f)\n",
+					num, es->number, es->eType, (unsigned)es->solid, es->modelindex,
+					es->pos.trBase[0], es->pos.trBase[1], es->pos.trBase[2] );
+			}
+		}
+	}
 	for ( num = 0 ; num < cg.snap->numEntities ; num++ ) {
 		cent = &cg_entities[ cg.snap->entities[ num ].number ];
 		CG_AddCEntity( cent );

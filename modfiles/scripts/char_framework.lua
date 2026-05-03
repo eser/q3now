@@ -240,6 +240,56 @@ function q3now.load_bot(name)
   local result = deep_copy(base, 1)
   merge_bot(result, arch_bot)
   merge_bot(result, charBot)
+
+  -- Load chats module (per-character if present, else _base).
+  local chats_mod
+  do
+    local ok, loaded = pcall(q3now.load, "characters/" .. name .. "/bot/chats")
+    if ok and type(loaded) == "table" then
+      chats_mod = loaded
+    else
+      local ok2, base_chats = pcall(q3now.load, "characters/_archetypes/_base/bot/chats")
+      if ok2 and type(base_chats) == "table" then chats_mod = base_chats end
+    end
+  end
+
+  -- Map WiredBots event names to the chats{} rate keys in bot/main.lua.
+  -- Keys not in this table fall through and use the event name directly
+  -- (so new events like ctf_got_flag just need a matching key in chats{}).
+  local EVENT_RATE_KEY = {
+    game_enter     = "enterexitgame",
+    game_exit      = "enterexitgame",
+    level_start    = "startendlevel",
+    level_end      = "startendlevel",
+    kill           = "kill",
+    death          = "death",
+    enemy_suicide  = "enemysuicide",
+    hit_talking    = "hittalking",
+    hit_nodeath    = "hitnodeath",
+    hit_nokill     = "hitnokill",
+    random         = "random",
+    message        = "reply",
+  }
+
+  if chats_mod then
+    result.on_chat = function(self, eventName, ctx)
+      local rateKey = EVENT_RATE_KEY[eventName] or eventName
+      local rateVal = self.chats and self.chats[rateKey]
+      local rate
+      if type(rateVal) == "number" then
+        rate = rateVal
+      elseif type(rateVal) == "table" then
+        rate = type(rateVal[1]) == "number" and rateVal[1] or 0
+      else
+        rate = 0
+      end
+      if math.random() > rate then return nil end
+      local fn = chats_mod[eventName]
+      if type(fn) ~= "function" then return nil end
+      return fn(ctx)
+    end
+  end
+
   return result
 end
 

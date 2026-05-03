@@ -97,13 +97,13 @@ void GL_TextureMode( const char *string ) {
 	// hack to prevent trilinear from being set on voodoo,
 	// because their driver freaks...
 	if ( i == 5 && glConfig.hardwareType == GLHW_3DFX_2D3D ) {
-		ri.Printf( PRINT_ALL, "Refusing to set trilinear on a voodoo.\n" );
+		ri.Log( SEV_INFO, "Refusing to set trilinear on a voodoo.\n" );
 		i = 3;
 	}
 
 
 	if ( i == 6 ) {
-		ri.Printf (PRINT_ALL, "bad filter name\n");
+		ri.Log( SEV_INFO, "bad filter name\n");
 		return;
 	}
 
@@ -145,7 +145,7 @@ R_ImageList_f
 void R_ImageList_f( void ) {
 	int estTotalSize = 0;
 
-	ri.Printf(PRINT_ALL, "\n      -w-- -h-- -type-- -size- --name-------\n");
+	ri.Log( SEV_INFO, "\n      -w-- -h-- -type-- -size- --name-------\n");
 
 	for ( int i = 0 ; i < tr.numImages ; i++ )
 	{
@@ -298,13 +298,13 @@ void R_ImageList_f( void ) {
 			sizeSuffix = "Gb";
 		}
 
-		ri.Printf(PRINT_ALL, "%4i: %4ix%4i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, image->imgName);
+		ri.Log( SEV_INFO, "%4i: %4ix%4i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, image->imgName);
 		estTotalSize += estSize;
 	}
 
-	ri.Printf (PRINT_ALL, " ---------\n");
-	ri.Printf (PRINT_ALL, " approx %i bytes\n", estTotalSize);
-	ri.Printf (PRINT_ALL, " %i total images\n\n", tr.numImages );
+	ri.Log( SEV_INFO, " ---------\n");
+	ri.Log( SEV_INFO, " approx %i bytes\n", estTotalSize);
+	ri.Log( SEV_INFO, " %i total images\n\n", tr.numImages );
 }
 
 //=======================================================================
@@ -331,7 +331,7 @@ static void ResampleTexture( byte *in, int inwidth, int inheight, byte *out,
 	byte	*pix1, *pix2, *pix3, *pix4;
 
 	if (outwidth>2048)
-		ri.Error(ERR_DROP, "ResampleTexture: max width");
+		ri.Terminate( TERM_CLIENT_DROP, "ResampleTexture: max width");
 								
 	fracstep = inwidth*0x10000/outwidth;
 
@@ -1546,7 +1546,7 @@ static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inou
 
 		//endTime = ri.Milliseconds();
 
-		//ri.Printf(PRINT_ALL, "upsampled %dx%d to %dx%d in %dms\n", width, height, scaled_width, scaled_height, endTime - startTime);
+		//ri.Log( SEV_INFO, "upsampled %dx%d to %dx%d in %dms\n", width, height, scaled_width, scaled_height, endTime - startTime);
 
 		*data = *resampledBuffer;
 	}
@@ -1908,7 +1908,7 @@ static int CalculateMipSize(int width, int height, GLenum picFormat)
 			return numPixels * 8;
 
 		default:
-			ri.Printf(PRINT_ALL, "Unsupported texture format %08x\n", picFormat);
+			ri.Log( SEV_INFO, "Unsupported texture format %08x\n", picFormat);
 			return 0;
 	}
 
@@ -2100,14 +2100,14 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 
 	namelen = strlen( name );
 	if ( namelen >= MAX_QPATH ) {
-		ri.Error (ERR_DROP, "R_CreateImage: \"%s\" is too long", name);
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImage: \"%s\" is too long", name);
 	}
 	if ( !strncmp( name, "*lightmap", 9 ) ) {
 		isLightmap = qtrue;
 	}
 
 	if ( tr.numImages == MAX_DRAWIMAGES ) {
-		ri.Error( ERR_DROP, "R_CreateImage: MAX_DRAWIMAGES hit");
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImage: MAX_DRAWIMAGES hit");
 	}
 
 	image = tr.images[tr.numImages] = ri.Hunk_Alloc( sizeof( *image ) + namelen + 1, h_low );
@@ -2390,7 +2390,7 @@ static void R_LoadImage( const char *name, byte **pic, int *width, int *height, 
 		{
 			if( orgNameFailed )
 			{
-				ri.Printf( PRINT_DEVELOPER, "WARNING: %s not present, using %s instead\n",
+				ri.Log( SEV_DEBUG, "WARNING: %s not present, using %s instead\n",
 						name, altName );
 			}
 
@@ -2432,7 +2432,7 @@ image_t	*R_FindImageFile( const char *name, imgType_t type, imgFlags_t flags )
 			// the white image can be used with any set of parms, but other mismatches are errors
 			if ( strcmp( name, "*white" ) ) {
 				if ( image->flags != flags ) {
-					ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
+					ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
 				}
 			}
 			return image;
@@ -3102,12 +3102,12 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	int			totalSurfaces;
 
 	if ( !name || !name[0] ) {
-		ri.Printf( PRINT_DEVELOPER, "Empty name passed to RE_RegisterSkin\n" );
+		ri.Log( SEV_DEBUG, "Empty name passed to RE_RegisterSkin\n" );
 		return 0;
 	}
 
 	if ( strlen( name ) >= MAX_QPATH ) {
-		ri.Printf( PRINT_DEVELOPER, "Skin name exceeds MAX_QPATH\n" );
+		ri.Log( SEV_DEBUG, "Skin name exceeds MAX_QPATH\n" );
 		return 0;
 	}
 
@@ -3125,7 +3125,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 
 	// allocate a new skin
 	if ( tr.numSkins == MAX_SKINS ) {
-		ri.Printf( PRINT_WARNING, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
+		ri.Log( SEV_WARN, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
 		return 0;
 	}
 	tr.numSkins++;
@@ -3187,7 +3187,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	ri.FS_FreeFile( text.v );
 
 	if ( totalSurfaces > MAX_SKIN_SURFACES ) {
-		ri.Printf( PRINT_WARNING, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
+		ri.Log( SEV_WARN, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
 					totalSurfaces, MAX_SKIN_SURFACES, name );
 	}
 
@@ -3243,16 +3243,16 @@ void	R_SkinList_f( void ) {
 	int			i, j;
 	skin_t		*skin;
 
-	ri.Printf (PRINT_ALL, "------------------\n");
+	ri.Log( SEV_INFO, "------------------\n");
 
 	for ( i = 0 ; i < tr.numSkins ; i++ ) {
 		skin = tr.skins[i];
 
-		ri.Printf( PRINT_ALL, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
+		ri.Log( SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
 		for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-			ri.Printf( PRINT_ALL, "       %s = %s\n", 
+			ri.Log( SEV_INFO, "       %s = %s\n", 
 				skin->surfaces[j].name, skin->surfaces[j].shader->name );
 		}
 	}
-	ri.Printf (PRINT_ALL, "------------------\n");
+	ri.Log( SEV_INFO, "------------------\n");
 }

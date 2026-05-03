@@ -34,7 +34,7 @@ static wuiStagedEntry_t *WUI_Stage_Find( const char *key ) {
 
 	/* allocate new slot */
 	if ( wui_stageCount >= WUI_STAGE_MAX_ENTRIES ) {
-		Com_Printf( "WARNING: WUI staging buffer full (%d entries), dropping key '%s'\n",
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "WARNING: WUI staging buffer full (%d entries), dropping key '%s'\n",
 					 WUI_STAGE_MAX_ENTRIES, key );
 		return NULL;
 	}

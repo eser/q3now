@@ -129,7 +129,7 @@ static void CG_Obituary( entityState_t *ent ) {
 
 	target = ent->otherEntityNum;
 	if ( target < 0 || target >= MAX_CLIENTS ) {
-		CG_Error( "CG_Obituary: target out of range" );
+		Com_Terminate( TERM_CLIENT_DROP, "CG_Obituary: target out of range" );
 	}
 
 	attacker = ent->otherEntityNum2;
@@ -167,6 +167,12 @@ static void CG_Obituary( entityState_t *ent ) {
 	case MOD_TRIGGER_HURT:
 		message = "was in the wrong place";
 		break;
+	case MOD_LAVABALL:
+		message = "was incinerated by a lavaball";
+		break;
+	case MOD_NAIL:
+		message = "was nailed";
+		break;
 	default:
 		message = NULL;
 		break;
@@ -198,7 +204,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	}
 
 	if (message) {
-		CG_Printf( "%s %s.\n", CG_ClientNameByNum( target ), message);
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s %s.\n", CG_ClientNameByNum( target ), message);
 #if FEAT_WIRED_UI
 		trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
 			va( "%d|%d|%d|%d", attacker, target, mod, 0 ) );
@@ -311,7 +317,7 @@ static void CG_Obituary( entityState_t *ent ) {
 		}
 
 		if (message) {
-			CG_Printf( "%s %s %s%s\n",
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s %s %s%s\n",
 				CG_ClientNameByNum( target ), message, CG_ClientNameByNum( attacker ), message2);
 #if FEAT_WIRED_UI
 			trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
@@ -322,7 +328,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	}
 
 	// we don't know what it was
-	CG_Printf( "%s died.\n", CG_ClientNameByNum( target ) );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s died.\n", CG_ClientNameByNum( target ) );
 #if FEAT_WIRED_UI
 	trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
 		va( "%d|%d|%d|%d", ENTITYNUM_WORLD, target, mod, 0 ) );
@@ -385,8 +391,8 @@ static void CG_UseItem( centity_t *cent ) {
 		break;
 #endif
 
-	case HI_INVULNERABILITY:
-		trap_S_StartSound (NULL, es->number, CHAN_BODY, cgs.media.useInvulnerabilitySound );
+	case HI_DEFLECTOR:
+		trap_S_StartSound (NULL, es->number, CHAN_BODY, cgs.media.useDeflectorSound );
 		break;
 	}
 
@@ -510,7 +516,7 @@ An entity has an event value
 also called by CG_CheckPlayerstateEvents
 ==============
 */
-#define	DEBUGNAME(x) if(cg_debugEvents.integer){CG_Printf(x"\n");}
+#define	DEBUGNAME(x) if(cg_debugEvents.integer){Com_Log( SEV_INFO, LOG_CAT_CGAME, x"\n");}
 void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	entityState_t	*es;
 	int				event;
@@ -524,7 +530,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	event = es->event & ~EV_EVENT_BITS;
 
 	if ( cg_debugEvents.integer ) {
-		CG_Printf( "ent:%3i  event:%3i ", es->number, event );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "ent:%3i  event:%3i ", es->number, event );
 	}
 
 	if ( !event ) {
@@ -657,7 +663,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 	case EV_JUMP_PAD:
 		DEBUGNAME("EV_JUMP_PAD");
-//		CG_Printf( "EV_JUMP_PAD w/effect #%i\n", es->eventParm );
+//		Com_Log( SEV_INFO, LOG_CAT_CGAME, "EV_JUMP_PAD w/effect #%i\n", es->eventParm );
 		{
 			vec3_t			up = {0, 0, 1};
 
@@ -949,13 +955,13 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		CG_ObeliskPain( cent->lerpOrigin );
 		break;
 #endif
-	case EV_INVUL_IMPACT:
-		DEBUGNAME("EV_INVUL_IMPACT");
-		CG_InvulnerabilityImpact( cent->lerpOrigin, cent->currentState.angles );
+	case EV_DEFLECTOR_IMPACT:
+		DEBUGNAME("EV_DEFLECTOR_IMPACT");
+		CG_DeflectorImpact( cent->lerpOrigin, cent->currentState.angles );
 		break;
-	case EV_JUICED:
-		DEBUGNAME("EV_JUICED");
-		CG_InvulnerabilityJuiced( cent->lerpOrigin );
+	case EV_DEFLECTOR_JUICED:
+		DEBUGNAME("EV_DEFLECTOR_JUICED");
+		CG_DeflectorJuiced( cent->lerpOrigin );
 		break;
 	case EV_LIGHTNINGBOLT:
 		DEBUGNAME("EV_LIGHTNINGBOLT");
@@ -1002,19 +1008,19 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_MISSILE_HIT:
 		DEBUGNAME("EV_MISSILE_HIT");
 		ByteToDir( es->eventParm, dir );
-		CG_MissileHitPlayer( es->weapon, position, dir, es->otherEntityNum );
+		CG_MissileHitPlayer( es->pType, position, dir, es->otherEntityNum );
 		break;
 
 	case EV_MISSILE_MISS:
 		DEBUGNAME("EV_MISSILE_MISS");
 		ByteToDir( es->eventParm, dir );
-		CG_MissileHitWall( es->weapon, 0, position, dir, IMPACTSOUND_DEFAULT, es->number );
+		CG_MissileHitWall( es->pType, 0, position, dir, IMPACTSOUND_DEFAULT, es->number );
 		break;
 
 	case EV_MISSILE_MISS_METAL:
 		DEBUGNAME("EV_MISSILE_MISS_METAL");
 		ByteToDir( es->eventParm, dir );
-		CG_MissileHitWall( es->weapon, 0, position, dir, IMPACTSOUND_METAL, es->number );
+		CG_MissileHitWall( es->pType, 0, position, dir, IMPACTSOUND_METAL, es->number );
 		break;
 
 	case EV_RAILTRAIL:
@@ -1044,7 +1050,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		// if the end was on a nomark surface, don't make an explosion
 		if ( es->eventParm != 255 ) {
 			ByteToDir( es->eventParm, dir );
-			CG_MissileHitWall( es->weapon, es->clientNum, position, dir, IMPACTSOUND_DEFAULT, es->number );
+			CG_MissileHitWall( PROJ_RAILGUN, es->clientNum, position, dir, IMPACTSOUND_DEFAULT, es->number );
 		}
 		break;
 
@@ -1308,7 +1314,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 	default:
 		DEBUGNAME("UNKNOWN");
-		CG_Error( "Unknown event: %i", event );
+		Com_Terminate( TERM_CLIENT_DROP, "Unknown event: %i", event );
 		break;
 	}
 

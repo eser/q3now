@@ -161,21 +161,21 @@ static qboolean SVR_LoadMD3( svrModel_t *mod, const byte *buffer, int fileSize, 
 	uint32_t			size;
 
 	if ( fileSize < (int)sizeof( md3Header_t ) ) {
-		Com_DPrintf( "SVR_LoadMD3: %s truncated header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s truncated header\n", name );
 		return qfalse;
 	}
 
 	pin = (const md3Header_t *)buffer;
 	version = LittleLong( pin->version );
 	if ( version != MD3_VERSION ) {
-		Com_DPrintf( "SVR_LoadMD3: %s wrong version (%u should be %i)\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s wrong version (%u should be %i)\n",
 			name, version, MD3_VERSION );
 		return qfalse;
 	}
 
 	size = LittleLong( pin->ofsEnd );
 	if ( size == 0 || size > (uint32_t)fileSize ) {
-		Com_DPrintf( "SVR_LoadMD3: %s corrupted header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s corrupted header\n", name );
 		return qfalse;
 	}
 
@@ -198,25 +198,25 @@ static qboolean SVR_LoadMD3( svrModel_t *mod, const byte *buffer, int fileSize, 
 	LL( hdr->ofsEnd );
 
 	if ( hdr->numFrames < 1 ) {
-		Com_DPrintf( "SVR_LoadMD3: %s has no frames\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s has no frames\n", name );
 		Z_Free( hdr );
 		return qfalse;
 	}
 
 	if ( hdr->ofsFrames > size || hdr->ofsTags > size ) {
-		Com_DPrintf( "SVR_LoadMD3: %s corrupted offsets\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s corrupted offsets\n", name );
 		Z_Free( hdr );
 		return qfalse;
 	}
 
 	if ( hdr->numFrames > (int)((size - hdr->ofsFrames) / sizeof( md3Frame_t )) ) {
-		Com_DPrintf( "SVR_LoadMD3: %s corrupted frame count\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s corrupted frame count\n", name );
 		Z_Free( hdr );
 		return qfalse;
 	}
 	if ( hdr->numTags > 0 && hdr->numFrames > 0 ) {
 		if ( (size_t)hdr->numTags * (size_t)hdr->numFrames > (size - hdr->ofsTags) / sizeof( md3Tag_t ) ) {
-			Com_DPrintf( "SVR_LoadMD3: %s corrupted tag count\n", name );
+			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s corrupted tag count\n", name );
 			Z_Free( hdr );
 			return qfalse;
 		}
@@ -306,13 +306,13 @@ static qboolean SVR_LoadIQM( svrModel_t *mod, const byte *buffer, int fileSize, 
 	uint32_t			ofsBounds;
 
 	if ( fileSize < (int)sizeof( svrIqmHeader_t ) ) {
-		Com_DPrintf( "SVR_LoadIQM: %s truncated header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadIQM: %s truncated header\n", name );
 		return qfalse;
 	}
 
 	memcpy( &header, buffer, sizeof( header ) );
 	if ( strncmp( header.magic, SVR_IQM_MAGIC, sizeof( header.magic ) ) ) {
-		Com_DPrintf( "SVR_LoadIQM: %s wrong magic\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadIQM: %s wrong magic\n", name );
 		return qfalse;
 	}
 
@@ -322,7 +322,7 @@ static qboolean SVR_LoadIQM( svrModel_t *mod, const byte *buffer, int fileSize, 
 	header.ofs_bounds = LittleLong( header.ofs_bounds );
 
 	if ( header.filesize > (uint32_t)fileSize ) {
-		Com_DPrintf( "SVR_LoadIQM: %s filesize mismatch\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadIQM: %s filesize mismatch\n", name );
 		return qfalse;
 	}
 
@@ -443,7 +443,7 @@ static qhandle_t SVR_RegisterModel( const char *name ) {
 		return 0;
 	}
 	if ( strlen( name ) >= MAX_QPATH ) {
-		Com_DPrintf( "SVR_RegisterModel: name too long (%s)\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_RegisterModel: name too long (%s)\n", name );
 		return 0;
 	}
 

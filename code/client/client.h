@@ -298,12 +298,11 @@ typedef struct {
 	connstate_t	state;				// connection status
 	qboolean	gameSwitch;
 
-	qboolean	cddialog;			// bring up the cd needed dialog next frame
-
 	char		servername[MAX_OSPATH];		// name of server from original connect (used by reconnect)
 
 	// when the server clears the hunk, all of these must be restarted
 	qboolean	rendererStarted;
+	qboolean	wiredUIStarted;
 	qboolean	soundStarted;
 	qboolean	soundRegistered;
 	qboolean	uiStarted;
@@ -633,7 +632,6 @@ const cmSkin_t *CL_GetCharacterSkin( qhandle_t handle );
 //
 // cl_ui.c
 //
-void CL_InitUI( void );
 void CL_ShutdownUI( void );
 int Key_GetCatcher( void );
 void Key_SetCatcher( int catcher );

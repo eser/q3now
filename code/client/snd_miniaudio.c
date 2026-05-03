@@ -264,7 +264,7 @@ static void S_Test_f( void )
 {
 	if ( !s_maInitialized )
 	{
-		Com_Printf( "snd_test: audio device not initialized\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "snd_test: audio device not initialized\n" );
 		return;
 	}
 
@@ -273,7 +273,7 @@ static void S_Test_f( void )
 	ma_atomic_uint32_set( &s_testPhase, 0 );
 	ma_atomic_uint32_set( &s_testFramesRemaining, frames );
 
-	Com_Printf( "snd_test: playing 2 second 1 kHz sine sweep\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "snd_test: playing 2 second 1 kHz sine sweep\n" );
 }
 
 
@@ -502,21 +502,21 @@ qboolean SNDDMA_Init( void )
 			if ( haveChosen )
 			{
 				config.playback.pDeviceID = &chosen;
-				Com_Printf( "miniaudio: using requested device \"%s\"\n",
+				Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: using requested device \"%s\"\n",
 				            s_device->string );
 			}
 			else
 			{
-				Com_Printf( "miniaudio: requested device \"%s\" not found, "
+				Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: requested device \"%s\" not found, "
 				            "falling back to default\n", s_device->string );
 			}
 		}
 
-		Com_Printf( "Opening miniaudio device...\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "Opening miniaudio device...\n" );
 		result = ma_device_init( NULL, &config, &s_maDevice );
 		if ( result != MA_SUCCESS )
 		{
-			Com_Printf( "miniaudio: ma_device_init failed (code %d)\n", (int)result );
+			Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: ma_device_init failed (code %d)\n", (int)result );
 			return qfalse;
 		}
 	}
@@ -568,7 +568,7 @@ qboolean SNDDMA_Init( void )
 	dma.buffer = (byte *)calloc( 1, s_dmasize_bytes );
 	if ( dma.buffer == NULL )
 	{
-		Com_Printf( "miniaudio: failed to allocate %u byte mixer buffer\n",
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: failed to allocate %u byte mixer buffer\n",
 		            (unsigned)s_dmasize_bytes );
 		ma_device_uninit( &s_maDevice );
 		return qfalse;
@@ -588,7 +588,7 @@ qboolean SNDDMA_Init( void )
 	result = ma_device_start( &s_maDevice );
 	if ( result != MA_SUCCESS )
 	{
-		Com_Printf( "miniaudio: ma_device_start failed (code %d)\n", (int)result );
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: ma_device_start failed (code %d)\n", (int)result );
 		free( dma.buffer );
 		dma.buffer = NULL;
 		ma_device_uninit( &s_maDevice );
@@ -603,15 +603,15 @@ qboolean SNDDMA_Init( void )
 	 * path is alive. */
 	Cmd_AddCommand( "snd_test", S_Test_f );
 
-	Com_Printf( "miniaudio: backend=%s, %u Hz, %u ch, s16, %u-frame periods x %u\n",
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: backend=%s, %u Hz, %u ch, s16, %u-frame periods x %u\n",
 	            ma_get_backend_name( s_maDevice.pContext->backend ),
 	            (unsigned)sampleRate,
 	            (unsigned)channels,
 	            (unsigned)periodSizeInFrames,
 	            (unsigned)config.periods );
-	Com_Printf( "miniaudio: device name = \"%s\"\n",
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: device name = \"%s\"\n",
 	            s_maDevice.playback.name[0] ? s_maDevice.playback.name : "(default)" );
-	Com_Printf( "miniaudio: mixer ring = %u mono samples (%u bytes), fullsamples=%d\n",
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: mixer ring = %u mono samples (%u bytes), fullsamples=%d\n",
 	            (unsigned)s_dmasize_samples, (unsigned)s_dmasize_bytes, dma.fullsamples );
 
 	return qtrue;
@@ -668,7 +668,7 @@ void SNDDMA_Shutdown( void )
 
 	Cmd_RemoveCommand( "snd_test" );
 
-	Com_Printf( "Closing miniaudio device...\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "Closing miniaudio device...\n" );
 	ma_device_uninit( &s_maDevice );
 
 	if ( dma.buffer )
@@ -686,7 +686,7 @@ void SNDDMA_Shutdown( void )
 	memset( s_levelsRing, 0, sizeof( s_levelsRing ) );
 	s_maInitialized = qfalse;
 
-	Com_Printf( "miniaudio: shut down.\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "miniaudio: shut down.\n" );
 }
 
 

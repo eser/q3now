@@ -91,7 +91,7 @@ uint64_t SW3Z_FNV1a64( const char *path ) {
 pack_t *SW3Z_LoadArchive( const char *filename ) {
 	FILE *f = fopen( filename, "rb" );
 	if ( !f ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: cannot open '%s'\n", filename );
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: cannot open '%s'\n", filename );
 		return NULL;
 	}
 
@@ -101,7 +101,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	fseek( f, 0, SEEK_SET );
 
 	if ( fileSize < SW3Z_HEADER_SIZE ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' too small (%ld bytes)\n",
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' too small (%ld bytes)\n",
 			filename, fileSize );
 		fclose( f );
 		return NULL;
@@ -110,7 +110,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	/* ── read and validate header ── */
 	byte headerBuf[SW3Z_HEADER_SIZE];
 	if ( fread( headerBuf, 1, SW3Z_HEADER_SIZE, f ) != SW3Z_HEADER_SIZE ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: failed to read header from '%s'\n", filename );
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: failed to read header from '%s'\n", filename );
 		fclose( f );
 		return NULL;
 	}
@@ -126,14 +126,14 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	header.dataOffsetHi   = LittleLong( *(unsigned int *)( headerBuf + 20 ) );
 
 	if ( header.magic != SW3Z_MAGIC ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' bad magic 0x%08X\n",
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' bad magic 0x%08X\n",
 			filename, header.magic );
 		fclose( f );
 		return NULL;
 	}
 
 	if ( header.version != SW3Z_VERSION ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' unsupported version %d\n",
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' unsupported version %d\n",
 			filename, header.version );
 		fclose( f );
 		return NULL;
@@ -141,7 +141,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 
 	/* reconstruct 64-bit data offset — treat >2GB as error */
 	if ( header.dataOffsetHi != 0 ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' data offset exceeds 2GB\n", filename );
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' data offset exceeds 2GB\n", filename );
 		fclose( f );
 		return NULL;
 	}
@@ -152,13 +152,13 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	if ( header.entryCount > 0 &&
 		indexSize / SW3Z_ENTRY_SIZE != header.entryCount ) {
 		/* integer overflow */
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' entryCount overflow\n", filename );
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' entryCount overflow\n", filename );
 		fclose( f );
 		return NULL;
 	}
 
 	if ( (long)( SW3Z_HEADER_SIZE + indexSize + header.stringTableSize ) > fileSize ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' index/strings exceed file size\n", filename );
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' index/strings exceed file size\n", filename );
 		fclose( f );
 		return NULL;
 	}
@@ -168,7 +168,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	if ( header.entryCount > 0 ) {
 		entries = (sw3zEntry_t *)Z_Malloc( indexSize );
 		if ( fread( entries, 1, indexSize, f ) != indexSize ) {
-			Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' failed to read index\n", filename );
+			COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' failed to read index\n", filename );
 			Z_Free( entries );
 			fclose( f );
 			return NULL;
@@ -180,7 +180,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	if ( header.stringTableSize > 0 ) {
 		stringTable = (char *)Z_Malloc( header.stringTableSize );
 		if ( fread( stringTable, 1, header.stringTableSize, f ) != header.stringTableSize ) {
-			Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' failed to read string table\n", filename );
+			COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' failed to read string table\n", filename );
 			if ( entries ) Z_Free( entries );
 			Z_Free( stringTable );
 			fclose( f );
@@ -206,7 +206,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 
 		/* security: string table bounds check */
 		if ( e->stringOffset + e->stringLength > header.stringTableSize ) {
-			Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: '%s' entry %d string out of bounds\n",
+			COM_WARN( LOG_CAT_SYSTEM, "SW3Z: '%s' entry %d string out of bounds\n",
 				filename, i );
 			if ( entries ) Z_Free( entries );
 			if ( stringTable ) Z_Free( stringTable );
@@ -330,7 +330,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	pack->checksum      = 0;
 	pack->pure_checksum = 0;
 
-	Com_DPrintf( "SW3Z: loaded '%s' (%d files)\n", filename, numValidFiles );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "SW3Z: loaded '%s' (%d files)\n", filename, numValidFiles );
 
 	return pack;
 }
@@ -371,7 +371,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 
 	/* bounds check */
 	if ( entryIndex < 0 || entryIndex >= (int)pack->entryCount ) {
-		Com_Printf( S_COLOR_RED "ERROR: SW3Z: entry index %d out of range in '%s'\n",
+		COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: entry index %d out of range in '%s'\n",
 			entryIndex, pack->pakFilename );
 		return -1;
 	}
@@ -380,7 +380,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 
 	/* buffer size check */
 	if ( bufSize < (int)e->uncompressedSize ) {
-		Com_Printf( S_COLOR_RED "ERROR: SW3Z: buffer too small (%d < %u) in '%s'\n",
+		COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: buffer too small (%d < %u) in '%s'\n",
 			bufSize, e->uncompressedSize, pack->pakFilename );
 		return -1;
 	}
@@ -391,7 +391,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 
 	/* >2GB data offset check */
 	if ( e->dataOffsetHi != 0 ) {
-		Com_Printf( S_COLOR_RED "ERROR: SW3Z: entry data offset exceeds 2GB in '%s'\n",
+		COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: entry data offset exceeds 2GB in '%s'\n",
 			pack->pakFilename );
 		return -1;
 	}
@@ -399,20 +399,20 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 	/* entry data_offset is absolute from file start (per spec) */
 	unsigned long seekPos = (unsigned long)e->dataOffsetLo;
 	if ( fseek( PACK_FILE_HANDLE(pack), (long)seekPos, SEEK_SET ) != 0 ) {
-		Com_Printf( S_COLOR_RED "ERROR: SW3Z: seek failed in '%s'\n", pack->pakFilename );
+		COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: seek failed in '%s'\n", pack->pakFilename );
 		return -1;
 	}
 
 	if ( e->compression == SW3Z_COMP_NONE ) {
 		/* ── uncompressed ── */
 		if ( e->compressedSize != e->uncompressedSize ) {
-			Com_Printf( S_COLOR_RED "ERROR: SW3Z: uncompressed entry size mismatch in '%s'\n",
+			COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: uncompressed entry size mismatch in '%s'\n",
 				pack->pakFilename );
 			return -1;
 		}
 
 		if ( fread( buf, 1, e->uncompressedSize, PACK_FILE_HANDLE(pack) ) != e->uncompressedSize ) {
-			Com_Printf( S_COLOR_RED "ERROR: SW3Z: fread failed in '%s'\n", pack->pakFilename );
+			COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: fread failed in '%s'\n", pack->pakFilename );
 			return -1;
 		}
 	} else if ( e->compression == SW3Z_COMP_LZ4 ) {
@@ -422,7 +422,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 
 		byte *compBuf = (byte *)Z_Malloc( e->compressedSize );
 		if ( fread( compBuf, 1, e->compressedSize, PACK_FILE_HANDLE(pack) ) != e->compressedSize ) {
-			Com_Printf( S_COLOR_RED "ERROR: SW3Z: fread compressed data failed in '%s'\n",
+			COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: fread compressed data failed in '%s'\n",
 				pack->pakFilename );
 			Z_Free( compBuf );
 			return -1;
@@ -430,7 +430,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 
 		LZ4F_errorCode_t err = LZ4F_createDecompressionContext( &dctx, LZ4F_VERSION );
 		if ( LZ4F_isError( err ) ) {
-			Com_Printf( S_COLOR_RED "ERROR: SW3Z: LZ4F_createDecompressionContext failed: %s\n",
+			COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: LZ4F_createDecompressionContext failed: %s\n",
 				LZ4F_getErrorName( err ) );
 			Z_Free( compBuf );
 			return -1;
@@ -450,7 +450,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 				dstSize = dstRemain;
 				result = LZ4F_decompress( dctx, dstPtr, &dstSize, srcPtr, &srcSize, NULL );
 				if ( LZ4F_isError( result ) ) {
-					Com_Printf( S_COLOR_RED "ERROR: SW3Z: LZ4 decompression failed in '%s': %s\n",
+					COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: LZ4 decompression failed in '%s': %s\n",
 						pack->pakFilename, LZ4F_getErrorName( result ) );
 					LZ4F_freeDecompressionContext( dctx );
 					Z_Free( compBuf );
@@ -469,16 +469,16 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 		Z_Free( compBuf );
 
 		if ( dstSize != e->uncompressedSize ) {
-			Com_Printf( S_COLOR_RED "ERROR: SW3Z: LZ4 decompressed size mismatch (%zu != %u) in '%s'\n",
+			COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: LZ4 decompressed size mismatch (%zu != %u) in '%s'\n",
 				dstSize, e->uncompressedSize, pack->pakFilename );
 			return -1;
 		}
 	} else if ( e->compression == SW3Z_COMP_ZSTD ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: Zstd compression not supported in '%s'\n",
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: Zstd compression not supported in '%s'\n",
 			pack->pakFilename );
 		return -1;
 	} else {
-		Com_Printf( S_COLOR_YELLOW "WARNING: SW3Z: unknown compression 0x%02X in '%s'\n",
+		COM_WARN( LOG_CAT_SYSTEM, "SW3Z: unknown compression 0x%02X in '%s'\n",
 			e->compression, pack->pakFilename );
 		return -1;
 	}
@@ -486,7 +486,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 	/* ── CRC32C verification ── */
 	uint32_t crc = SW3Z_CRC32C( buf, e->uncompressedSize );
 	if ( crc != e->crc32c ) {
-		Com_Printf( S_COLOR_RED "ERROR: SW3Z: CRC32C mismatch (got 0x%08X, expected 0x%08X) in '%s'\n",
+		COM_ERROR( LOG_CAT_SYSTEM, "ERROR: SW3Z: CRC32C mismatch (got 0x%08X, expected 0x%08X) in '%s'\n",
 			crc, e->crc32c, pack->pakFilename );
 		return -1;
 	}

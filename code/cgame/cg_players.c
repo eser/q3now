@@ -148,7 +148,7 @@ static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci )
 			}
 		}
 		if ( !found ) {
-			Com_Printf( "IQM %s: unmapped animation '%s'\n", modelName, iqmAnims[i].name );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, "IQM %s: unmapped animation '%s'\n", modelName, iqmAnims[i].name );
 		}
 	}
 
@@ -159,7 +159,7 @@ static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci )
 	// warn about unmapped Q3 animation enums (developer-level)
 	for ( i = 0; i < MAX_ANIMATIONS; i++ ) {
 		if ( !mapped[i] ) {
-			Com_Printf( "IQM %s: missing Q3 animation enum %d\n", modelName, i );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, "IQM %s: missing Q3 animation enum %d\n", modelName, i );
 		}
 	}
 
@@ -199,7 +199,7 @@ static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci )
 		animations[FLAG_STAND2RUN].reversed = qtrue;
 	}
 
-	Com_Printf( "IQM %s: mapped %d/%d animations from embedded data\n",
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "IQM %s: mapped %d/%d animations from embedded data\n",
 		modelName, mappedCount, numAnims );
 
 	return qtrue;
@@ -235,7 +235,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 		return qfalse;
 	}
 	if ( len >= sizeof( text ) - 1 ) {
-		CG_Printf( "File %s too long\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "File %s too long\n", filename );
 		trap_FS_FCloseFile( f );
 		return qfalse;
 	}
@@ -276,7 +276,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 			} else if ( !Q_stricmp( token, "energy" ) ) {
 				ci->footsteps = FOOTSTEP_ENERGY;
 			} else {
-				CG_Printf( "Bad footsteps parm in %s: %s\n", filename, token );
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Bad footsteps parm in %s: %s\n", filename, token );
 			}
 			continue;
 		} else if ( !Q_stricmp( token, "headoffset" ) ) {
@@ -314,7 +314,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 			text_p = prev;	// unget the token
 			break;
 		}
-		Com_Printf( "unknown token '%s' in %s\n", token, filename );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "unknown token '%s' in %s\n", token, filename );
 	}
 
 	// read information for each frame
@@ -376,7 +376,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	}
 
 	if ( i != MAX_ANIMATIONS ) {
-		CG_Printf( "Error parsing animation file: %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Error parsing animation file: %s\n", filename );
 		return qfalse;
 	}
 
@@ -506,7 +506,7 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *charac
 		if ( !CG_ParseIQMAnimations( characterName, ci ) ) {
 			Com_sprintf( filename, sizeof( filename ), "characters/%s/models/animation.cfg", characterName );
 			if ( !CG_ParseAnimationFile( filename, ci ) ) {
-				Com_Printf( "Failed to load animation file %s\n", filename );
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load animation file %s\n", filename );
 				return qfalse;
 			}
 		}
@@ -536,28 +536,28 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *charac
 	Com_sprintf( filename, sizeof( filename ), "characters/%s/models/lower.md3", characterName );
 	ci->legsModel = trap_R_RegisterModel( filename );
 	if ( !ci->legsModel ) {
-		Com_Printf( "Failed to load model file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load model file %s\n", filename );
 		return qfalse;
 	}
 
 	Com_sprintf( filename, sizeof( filename ), "characters/%s/models/upper.md3", characterName );
 	ci->torsoModel = trap_R_RegisterModel( filename );
 	if ( !ci->torsoModel ) {
-		Com_Printf( "Failed to load model file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load model file %s\n", filename );
 		return qfalse;
 	}
 
 	Com_sprintf( filename, sizeof( filename ), "characters/%s/models/head.md3", characterName );
 	ci->headModel = trap_R_RegisterModel( filename );
 	if ( !ci->headModel ) {
-		Com_Printf( "Failed to load model file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load model file %s\n", filename );
 		return qfalse;
 	}
 
 	// load the animations
 	Com_sprintf( filename, sizeof( filename ), "characters/%s/models/animation.cfg", characterName );
 	if ( !CG_ParseAnimationFile( filename, ci ) ) {
-		Com_Printf( "Failed to load animation file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load animation file %s\n", filename );
 		return qfalse;
 	}
 
@@ -638,7 +638,7 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 
 	if ( !CG_RegisterClientModelname( ci, ci->characterName, ci->skinName ) ) {
 		if ( cg_buildScript.integer ) {
-			CG_Error( "CG_RegisterClientModelname( %s, %s ) failed", ci->characterName, ci->skinName);
+			Com_Terminate( TERM_CLIENT_DROP, "CG_RegisterClientModelname( %s, %s ) failed", ci->characterName, ci->skinName);
 		}
 
 		// fall back to default team name
@@ -648,12 +648,12 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 			if ( !CG_RegisterClientModelname( ci, DEFAULT_MODEL, ci->skinName ) ) {
 				// Team-specific skin absent — retry with bare default (no team prefix).
 				if ( !CG_RegisterClientModelname( ci, DEFAULT_MODEL, "default" ) ) {
-					CG_Error( "DEFAULT_MODEL / skin (%s/%s) failed to register", DEFAULT_MODEL, ci->skinName );
+					Com_Terminate( TERM_CLIENT_DROP, "DEFAULT_MODEL / skin (%s/%s) failed to register", DEFAULT_MODEL, ci->skinName );
 				}
 			}
 		} else {
 			if ( !CG_RegisterClientModelname( ci, DEFAULT_MODEL, "default" ) ) {
-				CG_Error( "DEFAULT_MODEL (%s) failed to register", DEFAULT_MODEL );
+				Com_Terminate( TERM_CLIENT_DROP, "DEFAULT_MODEL (%s) failed to register", DEFAULT_MODEL );
 			}
 		}
 		modelloaded = qfalse;
@@ -823,7 +823,7 @@ static void CG_SetDeferredClientInfo( int clientNum, clientInfo_t *ci ) {
 	}
 
 	// we should never get here...
-	CG_Printf( "CG_SetDeferredClientInfo: no valid clients!\n" );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_SetDeferredClientInfo: no valid clients!\n" );
 
 	CG_LoadClientInfo( clientNum, ci );
 }
@@ -940,7 +940,7 @@ void CG_NewClientInfo( int clientNum ) {
 			CG_SetDeferredClientInfo( clientNum, &newInfo );
 			// if we are low on memory, leave them with this model
 			if ( forceDefer ) {
-				CG_Printf( "Memory is low. Using deferred model.\n" );
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Memory is low. Using deferred model.\n" );
 				newInfo.deferred = qfalse;
 			}
 		} else {
@@ -973,7 +973,7 @@ void CG_LoadDeferredPlayers( void ) {
 		if ( ci->infoValid && ci->deferred ) {
 			// if we are low on memory, leave it deferred
 			if ( trap_MemoryRemaining() < 4000000 ) {
-				CG_Printf( "Memory is low. Using deferred model.\n" );
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Memory is low. Using deferred model.\n" );
 				ci->deferred = qfalse;
 				continue;
 			}
@@ -1006,7 +1006,7 @@ static void CG_SetLerpFrameAnimation( clientInfo_t *ci, lerpFrame_t *lf, int new
 	newAnimation &= ~ANIM_TOGGLEBIT;
 
 	if ( newAnimation < 0 || newAnimation >= MAX_TOTALANIMATIONS ) {
-		CG_Error( "Bad animation number: %i", newAnimation );
+		Com_Terminate( TERM_CLIENT_DROP, "Bad animation number: %i", newAnimation );
 	}
 
 	anim = &ci->animations[ newAnimation ];
@@ -1015,7 +1015,7 @@ static void CG_SetLerpFrameAnimation( clientInfo_t *ci, lerpFrame_t *lf, int new
 	lf->animationTime = lf->frameTime + anim->initialLerp;
 
 	if ( cg_debugAnim.integer ) {
-		CG_Printf( "Anim: %i\n", newAnimation );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Anim: %i\n", newAnimation );
 	}
 }
 
@@ -1096,7 +1096,7 @@ static void CG_RunLerpFrame( clientInfo_t *ci, lerpFrame_t *lf, int newAnimation
 		if ( t > lf->frameTime ) {
 			lf->frameTime = t;
 			if ( cg_debugAnim.integer ) {
-				CG_Printf( "Clamp lf->frameTime\n");
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Clamp lf->frameTime\n");
 			}
 		}
 	}
@@ -1343,7 +1343,7 @@ static void CG_PlayerAngles( centity_t *cent, vec3_t legs[3], vec3_t torso[3], v
 	} else {
 		dir = cent->currentState.angles2[YAW];
 		if ( dir < 0 || dir > 7 ) {
-			CG_Error( "Bad player movement angle" );
+			Com_Terminate( TERM_CLIENT_DROP, "Bad player movement angle" );
 		}
 	}
 	legsAngles[YAW] = headAngles[YAW] + movementOffsets[ dir ];
@@ -1494,6 +1494,82 @@ static void CG_BreathPuffs( centity_t *cent, refEntity_t *head) {
 	VectorMA(origin, -4, head->axis[2], origin);
 	CG_SmokePuff( origin, up, 16, 1, 1, 1, 0.66f, 1500, cg.time, cg.time + 400, LEF_PUFF_DONT_SCALE, cgs.media.shotgunSmokePuffShader );
 	ci->breathPuffTime = cg.time + 2000;
+}
+
+/*
+===============
+CG_BubblePuffs
+
+Underwater bubble emission from player's head. Player-driven cosmetic.
+Visible in third-person and on remote players; suppressed in first-person
+for the local player to avoid HUD clutter.
+===============
+*/
+static void CG_BubblePuffs( centity_t *cent, refEntity_t *head ) {
+	clientInfo_t  *ci;
+	vec3_t         origin;
+	int            contents;
+	float          speed;
+	int            interval;
+	localEntity_t *le;
+	refEntity_t   *re;
+
+	ci = &cgs.clientinfo[ cent->currentState.number ];
+
+	if ( cent->currentState.number == cg.snap->ps.clientNum && !cg.renderingThirdPerson ) {
+		return;
+	}
+	if ( cent->currentState.eFlags & EF_DEAD ) {
+		return;
+	}
+
+	contents = CG_PointContents( head->origin, 0 );
+	if ( !( contents & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) ) {
+		return;
+	}
+
+	if ( ci->bubblePuffTime > cg.time ) {
+		return;
+	}
+
+	/* movement-rate-driven cadence: idle ~1500ms, sprinting ~400ms */
+	speed = VectorLength( cent->currentState.pos.trDelta );
+	interval = (int)( 1500.0f - speed * 3.5f );
+	if ( interval < 400 )  interval = 400;
+	if ( interval > 1500 ) interval = 1500;
+	interval += ( rand() % 200 ) - 100;
+
+	le = CG_AllocLocalEntity();
+	le->leFlags  = LEF_PUFF_DONT_SCALE;
+	le->leType   = LE_MOVE_SCALE_FADE;
+	le->startTime = cg.time;
+	le->endTime   = cg.time + 1000 + ( rand() % 250 );
+	le->lifeRate  = 1.0f / ( le->endTime - le->startTime );
+
+	re = &le->refEntity;
+	re->shaderTime.f  = cg.time / 1000.0f;
+	re->reType        = RT_SPRITE;
+	re->rotation      = 0;
+	re->radius        = 3;
+	re->customShader  = cgs.media.waterBubbleShader;
+	re->shader.rgba[0] = 0xff;
+	re->shader.rgba[1] = 0xff;
+	re->shader.rgba[2] = 0xff;
+	re->shader.rgba[3] = 0xff;
+
+	le->color[3] = 1.0f;
+
+	VectorMA( head->origin, 4, head->axis[0], origin );
+	VectorMA( origin, 4, head->axis[2], origin );
+
+	le->pos.trType    = TR_LINEAR;
+	le->pos.trTime    = cg.time;
+	VectorCopy( origin, le->pos.trBase );
+	le->pos.trDelta[0] = crandom() * 4;
+	le->pos.trDelta[1] = crandom() * 4;
+	le->pos.trDelta[2] = 12 + crandom() * 4;
+
+	ci->bubblePuffTime = cg.time + interval;
 }
 
 /*
@@ -2508,7 +2584,7 @@ void CG_Player( centity_t *cent ) {
 	// multiple corpses on the level using the same clientinfo
 	clientNum = cent->currentState.clientNum;
 	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
-		CG_Error( "Bad clientNum on player entity");
+		Com_Terminate( TERM_CLIENT_DROP, "Bad clientNum on player entity");
 	}
 	ci = &cgs.clientinfo[ clientNum ];
 
@@ -2680,7 +2756,7 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean legs_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !legs_printed) { legs_printed = qtrue;
-		Com_Printf("[ENT-legs] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "[ENT-legs] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			legs.characterSkin, legs.shaderRGBA[0], legs.shaderRGBA[1], legs.shaderRGBA[2], legs.shaderRGBA[3],
 			legs.renderfx, legs.customShader); }
 	}
@@ -2721,7 +2797,7 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean torso_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !torso_printed) { torso_printed = qtrue;
-		Com_Printf("[ENT-torso] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "[ENT-torso] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			torso.characterSkin, torso.shaderRGBA[0], torso.shaderRGBA[1], torso.shaderRGBA[2], torso.shaderRGBA[3],
 			torso.renderfx, torso.customShader); }
 	}
@@ -2823,7 +2899,7 @@ void CG_Player( centity_t *cent ) {
 			dir[1] = cos(angle) * 20;
 			dir[2] = 0;
 			VectorAdd(torso.origin, dir, skull.origin);
-			
+
 			VectorCopy(dir, skull.axis[1]);
 			VectorNormalize(skull.axis[1]);
 			VectorSet(skull.axis[2], 0, 0, 1);
@@ -2836,32 +2912,34 @@ void CG_Player( centity_t *cent ) {
 		}
 	}
 
-	if ( cent->currentState.powerups & ( 1 << PW_INVULNERABILITY ) ) {
-		if ( !ci->invulnerabilityStartTime ) {
-			ci->invulnerabilityStartTime = cg.time;
+	if ( cent->currentState.powerups & ( 1 << PW_DEFLECTOR ) ) {
+		if ( !ci->deflectorStartTime ) {
+			ci->deflectorStartTime = cg.time;
 		}
-		ci->invulnerabilityStopTime = cg.time;
+		ci->deflectorStopTime = cg.time;
 	}
 	else {
-		ci->invulnerabilityStartTime = 0;
+		ci->deflectorStartTime = 0;
 	}
-	if ( (cent->currentState.powerups & ( 1 << PW_INVULNERABILITY ) ) ||
-		cg.time - ci->invulnerabilityStopTime < 250 ) {
+
+	if ( (cent->currentState.powerups & ( 1 << PW_DEFLECTOR ) ) ||
+		cg.time - ci->deflectorStopTime < 250 ) {
 
 		memcpy(&powerup, &torso, sizeof(torso));
-		powerup.hModel = cgs.media.invulnerabilityPowerupModel;
+		powerup.hModel = cgs.media.deflectorPowerupModel;
 		powerup.frame = 0;
 		powerup.oldframe = 0;
 		powerup.customSkin = 0;
+		powerup.characterSkin = 0;
 		// always draw
 		powerup.renderfx &= ~RF_THIRD_PERSON;
 		VectorCopy(cent->lerpOrigin, powerup.origin);
 
-		if ( cg.time - ci->invulnerabilityStartTime < 250 ) {
-			c = (float) (cg.time - ci->invulnerabilityStartTime) / 250;
+		if ( cg.time - ci->deflectorStartTime < 250 ) {
+			c = (float) (cg.time - ci->deflectorStartTime) / 250;
 		}
-		else if (cg.time - ci->invulnerabilityStopTime < 250 ) {
-			c = (float) (250 - (cg.time - ci->invulnerabilityStopTime)) / 250;
+		else if (cg.time - ci->deflectorStopTime < 250 ) {
+			c = (float) (250 - (cg.time - ci->deflectorStopTime)) / 250;
 		}
 		else {
 			c = 1;
@@ -2879,6 +2957,8 @@ void CG_Player( centity_t *cent ) {
 		powerup.frame = 0;
 		powerup.oldframe = 0;
 		powerup.customSkin = 0;
+		powerup.customShader = 0;
+		powerup.characterSkin = 0;
 		// always draw
 		powerup.renderfx &= ~RF_THIRD_PERSON;
 		VectorClear(angles);
@@ -2886,7 +2966,7 @@ void CG_Player( centity_t *cent ) {
 		VectorCopy(cent->lerpOrigin, powerup.origin);
 		powerup.origin[2] += -24 + (float) t * 80 / 500;
 		if ( t > 400 ) {
-			c = (float) (t - 1000) * 0xff / 100;
+			c = (float) (t - 400) * 0xff / 100;
 			powerup.shaderRGBA[0] = 0xff - c;
 			powerup.shaderRGBA[1] = 0xff - c;
 			powerup.shaderRGBA[2] = 0xff - c;
@@ -2930,13 +3010,14 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean head_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !head_printed) { head_printed = qtrue;
-		Com_Printf("[ENT-head] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "[ENT-head] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			head.characterSkin, head.shaderRGBA[0], head.shaderRGBA[1], head.shaderRGBA[2], head.shaderRGBA[3],
 			head.renderfx, head.customShader); }
 	}
 	CG_AddRefEntityWithPowerups( cent, &head, &cent->currentState, qtrue, ci->team );
 
 	CG_BreathPuffs(cent, &head);
+	CG_BubblePuffs(cent, &head);
 
 	CG_DustTrail(cent);
 
@@ -2998,6 +3079,6 @@ void CG_ResetPlayerEntity( centity_t *cent ) {
 	cent->pe.torso.pitching = qfalse;
 
 	if ( cg_debugPosition.integer ) {
-		CG_Printf("%i ResetPlayerEntity yaw=%f\n", cent->currentState.number, cent->pe.torso.yawAngle );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%i ResetPlayerEntity yaw=%f\n", cent->currentState.number, cent->pe.torso.yawAngle );
 	}
 }

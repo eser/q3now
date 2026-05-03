@@ -30,7 +30,15 @@ void Offhand_Grapple_Hook_Think (gentity_t *ent)
 			if ( ent->parent->client->ps.powerups[PW_QUAD] ) {
 				dmg *= QUAD_FACTOR;
 			}
-			G_Damage( ent->enemy, ent, ent->parent, NULL, NULL, dmg, 0, MOD_GRAPPLE );
+			if ( ent->enemy->client && ent->enemy->client->deflectorTime > level.time ) {
+				vec3_t grappleDir, invulImpact, invulBounce;
+				VectorSubtract( ent->enemy->r.currentOrigin, ent->r.currentOrigin, grappleDir );
+				VectorNormalize( grappleDir );
+				G_DeflectorEffect( ent->enemy, grappleDir, ent->r.currentOrigin,
+					invulImpact, invulBounce );
+			} else {
+				G_Damage( ent->enemy, ent, ent->parent, NULL, NULL, dmg, 0, MOD_GRAPPLE );
+			}
 			ent->pain_debounce_time = level.time;
 		}
 	}

@@ -121,6 +121,19 @@ menuDef {
 		color2 0.4 0.2 0.6 0.5
 	}
 
+	// ── Holdable List (right side, mirrors weaponlist) ───────
+	itemDef { hudElement "holdablelist"
+		anchor CENTER_RIGHT
+		rect 0.967 0.180 0.030 0.030
+		font "sansman"
+		fontsize 10 15
+		textalign 0
+		direction T
+		forecolor 1 1 1 0.5
+		backcolor 0.1 0.1 0.1 0.5
+		color2 0.4 0.2 0.6 0.5
+	}
+
 	// ── Health (bottom center-left) ─────────────────────────
 	itemDef { hudElement "predecorate"
 		anchor BOTTOM_CENTER

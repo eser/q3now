@@ -102,8 +102,17 @@ intptr_t Nav_HandleTrap( int trap, const intptr_t *args, byte *vmBase )
             (int)args[3] );
         return 0;
 
+    case G_NAV_PREDICT_ENEMY_POSITION:
+        /* args[1]=origin args[2]=velocity args[3]=predictTime args[4]=outPos */
+        Nav_PredictEnemyPosition(
+            (const float *)Nav_VMA( args[1], vmBase ),
+            (const float *)Nav_VMA( args[2], vmBase ),
+            *(const float *)&args[3],
+            (float *)       Nav_VMA( args[4], vmBase ) );
+        return 0;
+
     default:
-        Com_DPrintf( "NAV: Nav_HandleTrap: unknown trap %d\n", trap );
+        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: Nav_HandleTrap: unknown trap %d\n", trap );
         return 0;
     }
 }

@@ -54,10 +54,11 @@ host-visible index buffer which is finally rendered via single draw call.
 //[vbo]: [index0][vertex0...][index1][vertex1...][index2][vertex2...]
 
 typedef struct vbo_item_s {
-	int			index_offset;  // device-local, relative to current shader
-	int			soft_offset;   // host-visible, absolute
+	int			index_offset;    // device-local, relative to current shader
+	int			soft_offset;     // host-visible, absolute
 	int			num_indexes;
 	int			num_vertexes;
+	uint32_t	lightStylesPacked;  // lightstyle indices for this surface (4 bytes packed); 0xFFFFFFFF if unused
 } vbo_item_t;
 
 typedef struct ibo_item_s {
@@ -345,34 +346,34 @@ static void VBO_AddGeometry( vbo_t *vbo, vbo_item_t *vi, shaderCommands_t *input
 	offs = input->shader->iboOffset + input->shader->curIndexes * sizeof( input->indexes[0] );
 	size = input->numIndexes * sizeof( input->indexes[ 0 ] );
 	if ( offs + size > vbo->vbo_size ) {
-		ri.Error( ERR_DROP, "Index0 overflow" );
+		ri.Terminate( TERM_CLIENT_DROP, "Index0 overflow" );
 	}
 	memcpy( vbo->vbo_buffer + offs, input->indexes, size );
 
 	// fill soft buffer too
 	if ( vbo->ibo_offset + size > vbo->ibo_size ) {
-		ri.Error( ERR_DROP, "Index1 overflow" );
+		ri.Terminate( TERM_CLIENT_DROP, "Index1 overflow" );
 	}
 	memcpy( vbo->ibo_buffer + vbo->ibo_offset, input->indexes, size );
 	vbo->ibo_offset += size;
-	//Com_Printf( "i offs=%i size=%i\n", offs, size );
+	//Com_Log( SEV_INFO, LOG_CAT_RENDERER, "i offs=%i size=%i\n", offs, size );
 
 	// vertexes
 	offs = input->shader->vboOffset + input->shader->curVertexes * sizeof( input->xyz[0] );
 	size = input->numVertexes * sizeof( input->xyz[ 0 ] );
 	if ( offs + size > vbo->vbo_size ) {
-		ri.Error( ERR_DROP, "Vertex overflow" );
+		ri.Terminate( TERM_CLIENT_DROP, "Vertex overflow" );
 	}
-	//Com_Printf( "v offs=%i size=%i\n", offs, size );
+	//Com_Log( SEV_INFO, LOG_CAT_RENDERER, "v offs=%i size=%i\n", offs, size );
 	memcpy( vbo->vbo_buffer + offs, input->xyz, size );
 
 	// normals
 	offs = input->shader->normalOffset + input->shader->curVertexes * sizeof( input->normal[0] );
 	size = input->numVertexes * sizeof( input->normal[ 0 ] );
 	if ( offs + size > vbo->vbo_size ) {
-		ri.Error( ERR_DROP, "Normals overflow" );
+		ri.Terminate( TERM_CLIENT_DROP, "Normals overflow" );
 	}
-	//Com_Printf( "v offs=%i size=%i\n", offs, size );
+	//Com_Log( SEV_INFO, LOG_CAT_RENDERER, "v offs=%i size=%i\n", offs, size );
 	memcpy( vbo->vbo_buffer + offs, input->normal, size );
 
 	vi->num_indexes += input->numIndexes;
@@ -448,7 +449,7 @@ void VBO_PushData( int itemIndex, shaderCommands_t *input )
 	input->shader->curVertexes += input->numVertexes;
 	input->shader->curIndexes += input->numIndexes;
 
-	//Com_Printf( "%s: vert %i (of %i), ind %i (of %i)\n", input->shader->name,
+	//Com_Log( SEV_INFO, LOG_CAT_RENDERER, "%s: vert %i (of %i), ind %i (of %i)\n", input->shader->name,
 	//	input->shader->curVertexes, input->shader->numVertexes,
 	//	input->shader->curIndexes, input->shader->numIndexes );
 }
@@ -460,11 +461,27 @@ void VBO_UnBind( void )
 }
 
 
+static uint32_t surfLightStylesPacked( const msurface_t *sf )
+{
+	// surfaceType is always the first field in all surface data structs
+	if ( *(const surfaceType_t *)sf->data == SF_FACE ) {
+		uint32_t packed;
+		memcpy( &packed, ((const srfSurfaceFace_t *)sf->data)->lightStyles, 4 );
+		return packed;
+	}
+	return 0xFFFFFFFFu;
+}
+
 static int surfSortFunc( const void *a, const void *b )
 {
-	const msurface_t **sa = (const msurface_t **)a;
-	const msurface_t **sb = (const msurface_t **)b;
-	return (*sa)->shader - (*sb)->shader;
+	const msurface_t *sa = *(const msurface_t **)a;
+	const msurface_t *sb = *(const msurface_t **)b;
+	if ( sa->shader != sb->shader )
+		return ( sa->shader > sb->shader ) ? 1 : -1;
+	// secondary: group by lightstyle signature so VBO batches are homogeneous
+	uint32_t pa = surfLightStylesPacked( sa );
+	uint32_t pb = surfLightStylesPacked( sb );
+	return ( pa > pb ) ? 1 : ( pa < pb ) ? -1 : 0;
 }
 
 
@@ -475,6 +492,7 @@ static void initItem( vbo_item_t *item )
 
 	item->index_offset = -1;
 	item->soft_offset = -1;
+	item->lightStylesPacked = 0xFFFFFFFFu;
 }
 
 
@@ -499,8 +517,11 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	if ( !r_vbo->integer )
 		return;
 
+	// Sort key includes lightStylesPacked so surfaces with the same shader but different
+	// lightstyle signatures form separate VBO sub-groups, each drawn with its own UBO.
+
 	if ( glConfig.numTextureUnits < 3 ) {
-		ri.Printf( PRINT_WARNING, "... not enough texture units for VBO\n" );
+		ri.Log( SEV_WARN, "... not enough texture units for VBO\n" );
 		return;
 	}
 
@@ -548,7 +569,7 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 #endif // USE_VBO_GRID
 	}
 	if ( numStaticSurfaces == 0 ) {
-		ri.Printf( PRINT_ALL, "...no static surfaces for VBO\n" );
+		ri.Log( SEV_INFO, "...no static surfaces for VBO\n" );
 		return;
 	}
 
@@ -565,8 +586,8 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	vbo->items_queue = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( int ), h_low );
 	vbo->items_queue_count = 0;
 
-	//Com_Printf( S_COLOR_CYAN "VBO size: %i\n", vbo_size );
-	//Com_Printf( S_COLOR_CYAN "IBO size: %i\n", ibo_size );
+	//Com_Log( SEV_INFO, S_COLOR_CYAN "VBO size: %i\n", vbo_size );
+	//Com_Log( SEV_INFO, S_COLOR_CYAN "IBO size: %i\n", ibo_size );
 
 	// vertex buffer
 	vbo_size += ibo_size;
@@ -606,7 +627,7 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	}
 
 	if ( n != numStaticSurfaces ) {
-		ri.Error( ERR_DROP, "Invalid VBO surface count" );
+		ri.Terminate( TERM_CLIENT_DROP, "Invalid VBO surface count" );
 	}
 
 	// sort surfaces by shader
@@ -635,9 +656,11 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 			grid->vboItemIndex = i + 1;
 #endif
 		} else {
-			ri.Error( ERR_DROP, "Unexpected surface type" );
+			ri.Terminate( TERM_CLIENT_DROP, "Unexpected surface type" );
 		}
 		initItem( vbo->items + i + 1 );
+		// store lightstyle signature; surfSortFunc already grouped these contiguously
+		vbo->items[i + 1].lightStylesPacked = surfLightStylesPacked( sf );
 		RB_BeginSurface( sf->shader, 0 );
 		tess.allowVBO = qfalse; // block execution of VBO path as we need to tesselate geometry
 #ifdef USE_TESS_NEEDS_NORMAL
@@ -654,7 +677,7 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 		if ( grid->surfaceType == SF_GRID ) {
 			vbo_item_t *vi = vbo->items + i + 1;
 			if ( vi->num_vertexes != grid->vboExpectVertices || vi->num_indexes != grid->vboExpectIndices ) {
-				ri.Error( ERR_DROP, "Unexpected grid vertexes/indexes count" );
+				ri.Terminate( TERM_CLIENT_DROP, "Unexpected grid vertexes/indexes count" );
 			}
 		}
 #endif // USE_VBO_GRID
@@ -668,9 +691,9 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	vk_alloc_vbo( vbo->vbo_buffer, vbo->vbo_size );
 
 	//if ( err == GL_OUT_OF_MEMORY )
-	//	ri.Printf( PRINT_WARNING, "%s: out of memory\n", __func__ );
+	//	ri.Log( SEV_WARN, "%s: out of memory\n", __func__ );
 	//else
-	//	ri.Printf( PRINT_ERROR, "%s: error %i\n", __func__, err );
+	//	ri.Log( SEV_ERROR, "%s: error %i\n", __func__, err );
 #if 0
 	// reset vbo markers
 	for ( i = 0, sf = surf; i < surfCount; i++, sf++ ) {
@@ -782,7 +805,7 @@ void VBO_QueueItem( int itemIndex )
 	}
 	else
 	{
-		ri.Error( ERR_DROP, "VBO queue overflow" );
+		ri.Terminate( TERM_CLIENT_DROP, "VBO queue overflow" );
 	}
 }
 
@@ -893,6 +916,55 @@ void VBO_PrepareQueues( void )
 		}
 		i += item_run;
 	}
+}
+
+
+// Process a sub-range of the sorted queue into IBO/soft buffers.
+// Used by the lightstyle sub-group dispatch to give each unique lightStyles
+// signature its own draw call (and thus its own q1StyleIntensities UBO push).
+void VBO_PrepareSubqueue( int start, int count )
+{
+	vbo_t *vbo = &world_vbo;
+	const int *a = vbo->items_queue + start;
+	int i = 0;
+
+	vbo->soft_buffer_indexes = 0;
+	vbo->ibo_items_count = 0;
+
+	while ( i < count ) {
+		// run detection with explicit sub-range boundary
+		int index_run = 0, item_run = 1;
+		int j;
+		for ( j = i; j < count; j++, item_run++ ) {
+			index_run += vbo->items[ a[j] ].num_indexes;
+			if ( j + 1 >= count || a[j] + 1 != a[j + 1] )
+				break;
+		}
+
+		if ( index_run < MIN_IBO_RUN ) {
+			for ( int k = 0; k < item_run; k++ )
+				VBO_AddItemDataToSoftBuffer( a[ i + k ] );
+		} else {
+			vbo_item_t *s = vbo->items + a[ i ];
+			vbo_item_t *e = vbo->items + a[ i + item_run - 1 ];
+			int len = ( e->index_offset - s->index_offset ) + e->num_indexes;
+			VBO_AddItemRangeToIBOBuffer( s->index_offset, len );
+		}
+		i += item_run;
+	}
+}
+
+
+int VBO_GetQueueCount( void )
+{
+	return world_vbo.items_queue_count;
+}
+
+
+uint32_t VBO_GetQueueItemStylesPacked( int pos )
+{
+	const vbo_t *vbo = &world_vbo;
+	return vbo->items[ vbo->items_queue[pos] ].lightStylesPacked;
 }
 
 #endif // USE_VBO

@@ -24,7 +24,7 @@ void* CG_ModernHUDElementDecorCreate(const modernhudConfig_t* config)
 		element->drawCtx.image = trap_R_RegisterShader(config->image.value);
 		if (!element->drawCtx.image)
 		{
-			CG_Printf("^2Decorate image %s is not found\n", config->image.value);
+			Com_Log( SEV_INFO, LOG_CAT_UI, "^2Decorate image %s is not found\n", config->image.value);
 		}
 	}
 

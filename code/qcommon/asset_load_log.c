@@ -116,16 +116,16 @@ static void FlushBuffer( assetLogBuffer_t *buf ) {
 	/* ---- emit ---- */
 	if ( buf->parent_dir[0] ) {
 		if ( buf->severity == ASSET_LOG_INFO )
-			Com_DPrintf( "%s/%s%s%s\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s/%s%s%s\n",
 			             buf->parent_dir, basenames_str, ext_display, suffix );
 		else
-			Com_Printf( S_COLOR_YELLOW "%s/%s%s%s\n",
+			COM_WARN( LOG_CAT_SYSTEM, "%s/%s%s%s\n",
 			            buf->parent_dir, basenames_str, ext_display, suffix );
 	} else {
 		if ( buf->severity == ASSET_LOG_INFO )
-			Com_DPrintf( "%s%s%s\n", basenames_str, ext_display, suffix );
+			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s%s%s\n", basenames_str, ext_display, suffix );
 		else
-			Com_Printf( S_COLOR_YELLOW "%s%s%s\n", basenames_str, ext_display, suffix );
+			COM_WARN( LOG_CAT_SYSTEM, "%s%s%s\n", basenames_str, ext_display, suffix );
 	}
 
 	buf->count  = 0;
@@ -152,9 +152,9 @@ void AssetLog_Event( const char *subsystem,
 	if ( !buf ) {
 		/* table full — emit directly without grouping */
 		if ( severity == ASSET_LOG_INFO )
-			Com_DPrintf( "%s.%s: fallback found\n", full_path, extensions_tried );
+			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s.%s: fallback found\n", full_path, extensions_tried );
 		else
-			Com_Printf( S_COLOR_YELLOW "%s.%s not found\n", full_path, extensions_tried );
+			COM_WARN( LOG_CAT_SYSTEM, "%s.%s not found\n", full_path, extensions_tried );
 		return;
 	}
 
@@ -324,11 +324,11 @@ static void FlushMPBuffer( assetLogMPBuffer_t *buf ) {
 
 	/* Format: {common_prefix}{variants}{common_suffix}{basenames}{ext} {message} */
 	if ( buf->severity == ASSET_LOG_INFO )
-		Com_DPrintf( "%s%s%s%s%s%s\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s%s%s%s%s%s\n",
 		             buf->common_prefix, variants_str, buf->common_suffix,
 		             basenames_str, ext_display, suffix );
 	else
-		Com_Printf( S_COLOR_YELLOW "%s%s%s%s%s%s\n",
+		COM_WARN( LOG_CAT_SYSTEM, "%s%s%s%s%s%s\n",
 		            buf->common_prefix, variants_str, buf->common_suffix,
 		            basenames_str, ext_display, suffix );
 
@@ -367,10 +367,10 @@ void AssetLog_EventMultiPath( const char *subsystem,
 	if ( !buf ) {
 		if ( s_numMPBuffers >= ASSET_LOG_MAX_MP_BUFFERS ) {
 			if ( severity == ASSET_LOG_INFO )
-				Com_DPrintf( "%s.../%s.%s: fallback found\n",
+				Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s.../%s.%s: fallback found\n",
 				             common_prefix, basename, extensions_tried );
 			else
-				Com_Printf( S_COLOR_YELLOW "%s.../%s.%s not found\n",
+				COM_WARN( LOG_CAT_SYSTEM, "%s.../%s.%s not found\n",
 				            common_prefix, basename, extensions_tried );
 			return;
 		}

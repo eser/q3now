@@ -64,8 +64,8 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 		tent->s.otherEntityNum = ent->s.number;
 
 		if ( traceEnt->takedamage) {
-			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
-				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
+			if ( traceEnt->client && traceEnt->client->deflectorTime > level.time ) {
+				if (G_DeflectorEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
 					VectorCopy( impactpoint, muzzle );
 					// the player can hit him/herself with the bounced rail
@@ -147,8 +147,8 @@ void Attack_Machinegun_Burst( gentity_t *ent ) {
 		tent->s.otherEntityNum = ent->s.number;
 
 		if ( traceEnt->takedamage) {
-			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
-				if (G_InvulnerabilityEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
+			if ( traceEnt->client && traceEnt->client->deflectorTime > level.time ) {
+				if (G_DeflectorEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir )) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
 					VectorCopy( impactpoint, muzzle );
 					// the player can hit him/herself with the bounced rail

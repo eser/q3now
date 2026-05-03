@@ -98,7 +98,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... ) {
 	CL_Shutdown( text, qtrue );
 #endif
 
-	Com_Log( SEV_FATAL, "Sys_Error: %s", text );
+	Com_Log( SEV_FATAL, LOG_CAT_SYSTEM, "Sys_Error: %s", text );
 	Conbuf_AppendText( text );
 	Conbuf_AppendText( "\n" );
 
@@ -557,7 +557,7 @@ void *Sys_LoadLibrary( const char *name )
 
 	if ( FS_AllowedExtension( name, qfalse, &ext ) )
 	{
-		Com_Error( ERR_FATAL, "Sys_LoadLibrary: Unable to load library with '%s' extension", ext );
+		Com_Terminate( TERM_UNRECOVERABLE, "Sys_LoadLibrary: Unable to load library with '%s' extension", ext );
 	}
 
 	return (void *)LoadLibrary( AtoW( name ) );
@@ -899,7 +899,7 @@ static LONG WINAPI ExceptionFilter( struct _EXCEPTION_POINTERS *ExceptionInfo )
 		// alongside the JSON for offline triage.
 		WriteMinidump( ExceptionInfo );
 
-		Com_Error( ERR_DROP, "Unhandled exception caught\n%s", msg );
+		Com_Terminate( TERM_CLIENT_DROP, "Unhandled exception caught\n%s", msg );
 	}
 
 	return EXCEPTION_EXECUTE_HANDLER;

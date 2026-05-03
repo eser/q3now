@@ -32,6 +32,50 @@ typedef enum {
 } log_severity_t;
 
 // -------------------------------------------------------------------------
+// Category
+// -------------------------------------------------------------------------
+
+typedef enum {
+    LOG_CAT_GENERAL,
+    LOG_CAT_SYSTEM,
+    LOG_CAT_FILESYSTEM,
+    LOG_CAT_NETWORK,
+    LOG_CAT_SERVER,
+    LOG_CAT_CLIENT,
+    LOG_CAT_RENDERER,
+    LOG_CAT_SOUND,
+    LOG_CAT_BOTLIB,
+    LOG_CAT_NAV,
+    LOG_CAT_GAME,
+    LOG_CAT_CGAME,
+    LOG_CAT_UI,
+    LOG_CAT_SCRIPTING,
+    LOG_CAT_MCP,
+    LOG_CAT_COLLISION,
+    LOG_CAT_PHYSICS,
+    LOG_CAT_LOADING,
+    LOG_CAT_COUNT
+} logCategory_t;
+
+/*
+ * LOG_COMPILE_SEVERITY: messages strictly below this level are compiled out.
+ * In release builds (NDEBUG defined), TRACE calls become ((void)0) — no
+ * argument evaluation, no call, no overhead.  Dev builds keep everything
+ * so that runtime cvar filtering controls visibility.
+ *
+ * Can be overridden per-TU before including this header:
+ *   #define LOG_COMPILE_SEVERITY SEV_INFO
+ *   #include "qcommon.h"
+ */
+#ifndef LOG_COMPILE_SEVERITY
+  #ifdef NDEBUG
+    #define LOG_COMPILE_SEVERITY SEV_DEBUG
+  #else
+    #define LOG_COMPILE_SEVERITY SEV_TRACE
+  #endif
+#endif
+
+// -------------------------------------------------------------------------
 // Record
 // -------------------------------------------------------------------------
 
@@ -39,14 +83,16 @@ typedef enum {
 typedef struct log_sink_s log_sink_t;
 
 typedef struct {
-    int64_t          timestamp_ns;   // from Sys_NanoTime()
     log_severity_t   severity;
+    logCategory_t    category;
     const char      *body;           // NOT null-terminated past body_len
     uint32_t         body_len;       // use this, never strlen(body)
     qboolean         truncated;      // qtrue if message exceeded 64KB-1
     uint32_t         truncated_bytes;// bytes that were dropped
     log_sink_t      *origin_sink;    // NULL for normal callers; set by dispatch
                                      // to skip self-dispatch in a sink's emit
+    int64_t          ts_mono;        // Sys_NanoTime() at emit time
+    char             ts_wall[40];    // Com_FormatTimestamp output (fmt=3)
 } log_record_t;
 
 // -------------------------------------------------------------------------
@@ -67,8 +113,9 @@ struct log_sink_s {
     const char     *name;
     log_sink_fn     emit;
     void           *ctx;             // per-sink context (sink resolves its cvars here)
-    log_severity_t  min_severity;    // cached from severity_cvar at registration
+    log_severity_t  min_severity;    // cached threshold, refreshed by last_cvar_mod check
     cvar_t         *severity_cvar;   // pointer cached once at Log_RegisterSink time
+    int             last_cvar_mod;   // cached cvar->modificationCount, -1 = uninitialized
     int             active_dispatches; // drain counter for Log_UnregisterSink
     log_sink_t     *next;            // intrusive FIFO list (tail-appended)
 };
@@ -102,8 +149,23 @@ typedef struct log_redirect_frame_s {
 
 // FORMAT_PRINTF is declared in q_shared.h:122 — compile-time CWE-134 defence.
 // MUST be on the declaration so every translation unit gets -Wformat coverage.
-void FORMAT_PRINTF(2, 3) Com_Log ( log_severity_t sev, const char *fmt, ... );
-void                     Com_Logv( log_severity_t sev, const char *fmt, va_list ap );
+//
+// Com_Log_Impl is the real function. Com_Log is a macro that compiles out
+// calls below LOG_COMPILE_SEVERITY entirely, preventing argument evaluation.
+// Code that needs a raw function pointer (e.g. rimp.Log = Com_Log_Impl) must
+// reference Com_Log_Impl directly.
+void FORMAT_PRINTF(3, 4) Com_Log_Impl ( log_severity_t sev, logCategory_t cat, const char *fmt, ... );
+void                     Com_Logv     ( log_severity_t sev, logCategory_t cat, const char *fmt, va_list ap );
+
+// Global category name table (LOG_CAT_COUNT entries).
+extern const char *logCategoryNames[LOG_CAT_COUNT];
+
+#define Com_Log( severity, category, ... ) \
+    do { \
+        if ( (severity) >= LOG_COMPILE_SEVERITY ) { \
+            Com_Log_Impl( (severity), (category), __VA_ARGS__ ); \
+        } \
+    } while (0)
 
 // Test command handler registered as "/error" in Com_Init.
 void NORETURN Com_Error_f( void );
@@ -129,20 +191,31 @@ qboolean Log_PopRedirectSink ( void );   // qtrue=popped, qfalse=was empty
 // Shared helpers (implemented in log.c, used by all built-in sinks)
 // -------------------------------------------------------------------------
 
-// Log_ParseSeverity: case-insensitive "TRACE"/"DEBUG"/"INFO"/"WARN"/"ERROR"/"FATAL".
+// Global severity gate cvar. Registered by Com_Init after Cvar_Init.
+// NULL during the pre-Cvar_Init fallback window (early boot drops nothing).
+extern cvar_t *log_severity_cvar;
+
+// Log_InitCategories: register per-category severity cvars (log_cat_<name>)
+// and the log_cat_list / log_cat_all console commands. Call after Cvar_Init
+// and after log_severity_cvar is registered.
+void Log_InitCategories( void );
+
+// Log_ParseSeverity: case-insensitive [EMPTY]/"TRACE"/"DEBUG"/"INFO"/"WARN"/"ERROR"/"FATAL".
 // Returns SEV_INFO on unrecognised input.
 log_severity_t Log_ParseSeverity( const char *name );
 
-// Log_FormatTimestamp: formats local wall-clock time into buf[0..buflen-1].
-//   fmt 0  off (writes nothing, returns 0)
-//   fmt 1  "HH:MM:SS"                       — short, for in-game console
-//   fmt 2  "HH:MM:SS.mmm+HH:MM"             — ms + TZ offset, for TTY
-//   fmt 3  "YYYY-MM-DDTHH:MM:SS.mmm+HH:MM"  — full ISO 8601, for file
-// Returns bytes written (no NUL counted). buf is NUL-terminated on success.
-int Log_FormatTimestamp( int64_t ns, char *buf, int buflen, int fmt );
+/* Com_FormatTimestamp declared in wired/core/time/time.h (via qcommon.h). */
 
 // Log_SeverityBracket: returns static literal e.g. "[INFO]", "[WARN]".
 const char *Log_SeverityBracket( log_severity_t sev );
+
+// Log_SeverityName: bare name without brackets, e.g. "INFO", "WARN".
+// Implemented in log_sink_file.c (shared by file sink and log buffer).
+const char *Log_SeverityName( log_severity_t sev );
+
+// JsonEscapeBody: strips ^N color codes, JSON-escapes special chars.
+// Implemented in log_sink_file.c (shared by file sink and log buffer).
+int JsonEscapeBody( const char *body, int body_len, char *out, int outsize );
 
 // -------------------------------------------------------------------------
 // Built-in sink registration (implemented in log_sink_*.c)
@@ -158,7 +231,7 @@ void        Log_UnregisterConsoleSink( void );
 log_sink_t *Log_RegisterTtySink      ( void );
 void        Log_UnregisterTtySink    ( void );
 
-// File sink — qconsole.log. Returns NULL if com_logfile == 0.
+// File sink — log_file_path cvar.
 log_sink_t *Log_RegisterFileSink     ( void );
 void        Log_UnregisterFileSink   ( void );
 
@@ -166,12 +239,12 @@ void        Log_UnregisterFileSink   ( void );
 // Convenience macros
 // -------------------------------------------------------------------------
 
-#define COM_TRACE(...)  Com_Log(SEV_TRACE,  __VA_ARGS__)
-#define COM_DEBUG(...)  Com_Log(SEV_DEBUG,  __VA_ARGS__)
-#define COM_INFO(...)   Com_Log(SEV_INFO,   __VA_ARGS__)
-#define COM_WARN(...)   Com_Log(SEV_WARN,   __VA_ARGS__)
-#define COM_ERROR(...)  Com_Log(SEV_ERROR,  __VA_ARGS__)
-#define COM_FATAL(...)  Com_Log(SEV_FATAL,  __VA_ARGS__)
+#define COM_TRACE( category, ... )  Com_Log( SEV_TRACE,  (category), __VA_ARGS__ )
+#define COM_DEBUG( category, ... )  Com_Log( SEV_DEBUG,  (category), __VA_ARGS__ )
+#define COM_INFO( category, ... )   Com_Log( SEV_INFO,   (category), __VA_ARGS__ )
+#define COM_WARN( category, ... )   Com_Log( SEV_WARN,   (category), __VA_ARGS__ )
+#define COM_ERROR( category, ... )  Com_Log( SEV_ERROR,  (category), __VA_ARGS__ )
+#define COM_FATAL( category, ... )  Com_Log( SEV_FATAL,  (category), __VA_ARGS__ )
 
 // -------------------------------------------------------------------------
 // Format buffer size (64 KB)

@@ -38,7 +38,7 @@ qboolean Nav_Geom_GetChecksum( const char *mapname, int *out )
     char bspPath[MAX_QPATH];
     Com_sprintf( bspPath, sizeof(bspPath), "maps/%s.bsp", mapname );
 
-    if ( !BSP_Load( bspPath, &bsp ) || !bsp )
+    if ( !BSP_Load( bspPath, &bsp, BSP_LOAD_FLAGS_NONE ) || !bsp )
         return qfalse;
 
     *out = bsp->checksum;
@@ -61,13 +61,13 @@ qboolean Nav_Geom_Extract( const char *mapname,
     char bspPath[MAX_QPATH];
     Com_sprintf( bspPath, sizeof(bspPath), "maps/%s.bsp", mapname );
 
-    if ( !BSP_Load( bspPath, &bsp ) || !bsp ) {
-        Com_Printf( "[NAV] Nav_Geom_Extract: BSP_Load failed for '%s'\n", mapname );
+    if ( !BSP_Load( bspPath, &bsp, BSP_LOAD_FLAGS_NONE ) || !bsp ) {
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_Geom_Extract: BSP_Load failed for '%s'\n", mapname );
         return qfalse;
     }
 
     if ( !bsp->format || !bsp->format->extractNavGeometry ) {
-        Com_Printf( "[NAV] Nav_Geom_Extract: format '%s' does not support nav geometry\n",
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_Geom_Extract: format '%s' does not support nav geometry\n",
                     bsp->format ? bsp->format->name : "<null>" );
         BSP_Free( bsp );
         return qfalse;
@@ -75,7 +75,7 @@ qboolean Nav_Geom_Extract( const char *mapname,
 
     memset( geomOut, 0, sizeof(*geomOut) );
     if ( !bsp->format->extractNavGeometry( bsp, geomOut ) ) {
-        Com_Printf( "[NAV] Nav_Geom_Extract: extractNavGeometry failed for '%s'\n", mapname );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_Geom_Extract: extractNavGeometry failed for '%s'\n", mapname );
         BSP_Free( bsp );
         return qfalse;
     }
@@ -146,7 +146,7 @@ int Nav_Get_DoorBoxes( const char *mapname, navDoorBox_t **outBoxes )
 
     *outBoxes = NULL;
 
-    if ( !BSP_Load( bspPath, &bsp ) || !bsp )
+    if ( !BSP_Load( bspPath, &bsp, BSP_LOAD_FLAGS_NONE ) || !bsp )
         return 0;
 
     if ( !bsp->entityString ) {

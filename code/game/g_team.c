@@ -90,14 +90,14 @@ const char *TeamColorString(int team) {
 }
 
 // NULL for everyone
-static Q_PRINTF_FUNC(2, 3) void QDECL PrintMsg( gentity_t *ent, const char *fmt, ... ) {
+static FORMAT_PRINTF(2, 3) void QDECL PrintMsg( gentity_t *ent, const char *fmt, ... ) {
 	char		msg[1024];
 	va_list		argptr;
 	char		*p;
 	
 	va_start (argptr,fmt);
 	if (vsnprintf (msg, sizeof(msg), fmt, argptr) >= sizeof(msg)) {
-		G_Error ( "PrintMsg overrun" );
+		Com_Terminate( TERM_CLIENT_DROP, "PrintMsg overrun" );
 	}
 	va_end (argptr);
 
@@ -243,6 +243,7 @@ void Team_CheckDroppedItem( gentity_t *dropped ) {
 	else if( dropped->item->giTag == PW_NEUTRALFLAG ) {
 		Team_SetFlagStatus( TEAM_FREE, FLAG_DROPPED );
 	}
+	BotCTFChatBroadcast( -1, TEAM_FREE, "ctf_flag_dropped" );
 }
 
 /*
@@ -555,7 +556,7 @@ void Team_ReturnFlagSound( gentity_t *ent, int team ) {
 	gentity_t	*te;
 
 	if (ent == NULL) {
-		G_Printf ("Warning:  NULL passed to Team_ReturnFlagSound\n");
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Warning:  NULL passed to Team_ReturnFlagSound\n");
 		return;
 	}
 
@@ -573,7 +574,7 @@ void Team_TakeFlagSound( gentity_t *ent, int team ) {
 	gentity_t	*te;
 
 	if (ent == NULL) {
-		G_Printf ("Warning:  NULL passed to Team_TakeFlagSound\n");
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Warning:  NULL passed to Team_TakeFlagSound\n");
 		return;
 	}
 
@@ -611,7 +612,7 @@ void Team_CaptureFlagSound( gentity_t *ent, int team ) {
 	gentity_t	*te;
 
 	if (ent == NULL) {
-		G_Printf ("Warning:  NULL passed to Team_CaptureFlagSound\n");
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "Warning:  NULL passed to Team_CaptureFlagSound\n");
 		return;
 	}
 
@@ -704,6 +705,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 			other->client->pers.teamState.lastreturnedflag = level.time;
 			//ResetFlag will remove this entity!  We must return zero
 			Team_ReturnFlagSound(Team_ResetFlag(team), team);
+			BotCTFChatEvent( other->s.number, "ctf_returning_flag" );
 			return 0;
 		}
 	}
@@ -751,6 +753,7 @@ int Team_TouchOurFlag( gentity_t *ent, gentity_t *other, int team ) {
 	AddScore(other, ent->r.currentOrigin, CTF_CAPTURE_BONUS);
 
 	Team_CaptureFlagSound( ent, team );
+	BotCTFChatEvent( other->s.number, "ctf_capture" );
 
 	// Ok, let's do the player loop, hand out the bonuses
 	for (i = 0; i < g_maxclients.integer; i++) {
@@ -829,6 +832,9 @@ int Team_TouchEnemyFlag( gentity_t *ent, gentity_t *other, int team ) {
 
 	cl->pers.teamState.flagsince = level.time;
 	Team_TakeFlagSound( ent, team );
+
+	BotCTFChatEvent( other->s.number, "ctf_got_flag" );
+	BotCTFChatBroadcast( other->s.number, OtherTeam( other->client->sess.sessionTeam ), "ctf_enemy_got_flag" );
 
 	return -1; // Do not respawn this automatically, but do delete it if it was FL_DROPPED
 }
@@ -1360,7 +1366,7 @@ void ObeliskInit( gentity_t *ent ) {
 		trap_Trace( &tr, ent->s.origin, ent->r.mins, ent->r.maxs, dest, ent->s.number, MASK_SOLID );
 		if ( tr.startsolid ) {
 			ent->s.origin[2] -= 1;
-			G_Printf( "SpawnObelisk: %s startsolid at %s\n", ent->classname, vtos(ent->s.origin) );
+			Com_Log( SEV_INFO, LOG_CAT_GAME, "SpawnObelisk: %s startsolid at %s\n", ent->classname, vtos(ent->s.origin) );
 
 			ent->s.groundEntityNum = ENTITYNUM_NONE;
 			G_SetOrigin( ent, ent->s.origin );

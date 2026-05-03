@@ -127,7 +127,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 	if ( !hShader ) {
 		// This isn't a useful warning, and an hShader of zero isn't a null shader, it's
 		// the default shader.
-		//ri.Printf( PRINT_WARNING, "WARNING: RE_AddPolyToScene: NULL poly shader\n");
+		//ri.Log( SEV_WARN, "WARNING: RE_AddPolyToScene: NULL poly shader\n");
 		//return;
 	}
 
@@ -139,7 +139,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
       since we don't plan on changing the const and making for room for those effects
       simply cut this message to developer only
       */
-			ri.Printf( PRINT_DEVELOPER, "WARNING: RE_AddPolyToScene: r_max_polys or r_max_polyverts reached\n");
+			ri.Log( SEV_DEBUG, "WARNING: RE_AddPolyToScene: r_max_polys or r_max_polyverts reached\n");
 			return;
 		}
 
@@ -211,19 +211,19 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime ) {
 		return;
 	}
 	if ( r_numentities >= MAX_REFENTITIES ) {
-		ri.Printf(PRINT_DEVELOPER, "RE_AddRefEntityToScene: Dropping refEntity, reached MAX_REFENTITIES\n");
+		ri.Log( SEV_DEBUG, "RE_AddRefEntityToScene: Dropping refEntity, reached MAX_REFENTITIES\n");
 		return;
 	}
 	if ( Q_isnan(ent->origin[0]) || Q_isnan(ent->origin[1]) || Q_isnan(ent->origin[2]) ) {
 		static qboolean firstTime = qtrue;
 		if (firstTime) {
 			firstTime = qfalse;
-			ri.Printf( PRINT_WARNING, "RE_AddRefEntityToScene passed a refEntity which has an origin with a NaN component\n");
+			ri.Log( SEV_WARN, "RE_AddRefEntityToScene passed a refEntity which has an origin with a NaN component\n");
 		}
 		return;
 	}
 	if ( (int)ent->reType < 0 || ent->reType >= RT_MAX_REF_ENTITY_TYPE ) {
-		ri.Error( ERR_DROP, "RE_AddRefEntityToScene: bad reType %i", ent->reType );
+		ri.Terminate( TERM_CLIENT_DROP, "RE_AddRefEntityToScene: bad reType %i", ent->reType );
 	}
 
 	backEndData->entities[r_numentities].e = *ent;
@@ -475,7 +475,7 @@ void RE_RenderScene( const refdef_t *fd ) {
 	startTime = ri.Milliseconds();
 
 	if (!tr.world && !( fd->rdflags & RDF_NOWORLDMODEL ) ) {
-		ri.Error (ERR_DROP, "R_RenderScene: NULL worldmodel");
+		ri.Terminate( TERM_CLIENT_DROP, "R_RenderScene: NULL worldmodel");
 	}
 
 	RE_BeginScene(fd);

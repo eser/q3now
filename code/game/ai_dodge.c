@@ -28,6 +28,7 @@ Skill scaling:
 //
 #include "ai_main.h"
 #include "ai_dodge.h"
+#include "wired/bots/g_bot_scripts.h"
 
 #define DODGE_LOOKAHEAD		0.7f	// seconds to predict ahead
 #define DODGE_NUM_DIRS		9		// 8 cardinal + maintain heading
@@ -90,7 +91,7 @@ void BotScanMissiles( struct bot_state_s *bs )
 	vec3_t		toMissile, forward;
 
 	bs->num_missiles = 0;
-	skill = bs->autoskill > 0 ? bs->autoskill : bs->settings.skill;
+	skill = WiredBots_EffectiveSkill( bs );
 
 	// skill 1-2: narrow detection FOV
 	detectFov = ( skill >= 3 ) ? 0.0f : 0.5f; // 0 = 180° fov, 0.5 = ~120° fov
@@ -154,7 +155,7 @@ void BotDodgeMovement( struct bot_state_s *bs )
 		return;
 	}
 
-	skill = bs->autoskill > 0 ? bs->autoskill : bs->settings.skill;
+	skill = WiredBots_EffectiveSkill( bs );
 
 	// build candidate directions in world space
 	AngleVectors( bs->viewangles, forward, right, NULL );

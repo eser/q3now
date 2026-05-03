@@ -15,7 +15,7 @@ CVars: cg_lensFlare, cg_missileFlare
 
 #define MAX_LENS_FLARE_ENTITIES   256
 #define FLARE_DISTANCE            1500.0f
-#define FLARES_PER_FRAME          16
+#define FLARES_PER_FRAME          48  // 16 was too low for Q1 maps (80 lights → 5-frame stale window); 48 covers up to ~128 lights in one pass
 #define FLARE_MIN_LIGHT_RADIUS    20		// skip dim fill lights (ambient, pathway)
 #define FLARE_MIN_HEIGHT_ABOVE    210		// light must be >= 210 units above ground below it
 
@@ -61,7 +61,7 @@ static qboolean CG_LoadFileToBuffer( const char *path, char *buf, int bufSize ) 
 		return qfalse;
 	}
 	if ( len >= bufSize ) {
-		CG_Printf( S_COLOR_YELLOW "lens flare file too large: '%s'\n", path );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_YELLOW "lens flare file too large: '%s'\n", path );
 		trap_FS_FCloseFile( f );
 		return qfalse;
 	}
@@ -104,7 +104,7 @@ static qboolean CG_ParseLensFlare( const char **p, lensFlare_t *fl, const char *
 	while ( 1 ) {
 		token = COM_Parse( &parser, p );
 		if ( !token[0] ) {
-			CG_Printf( S_COLOR_YELLOW "unexpected end in lens flare '%s'\n", effectName );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_YELLOW "unexpected end in lens flare '%s'\n", effectName );
 			return qfalse;
 		}
 		if ( !Q_stricmp( token, "}" ) ) break;
@@ -118,7 +118,7 @@ static qboolean CG_ParseLensFlare( const char **p, lensFlare_t *fl, const char *
 			else if ( !Q_stricmp( token, "glare"     ) ) fl->mode = LFM_glare;
 			else if ( !Q_stricmp( token, "star"      ) ) fl->mode = LFM_star;
 			else {
-				CG_Printf( S_COLOR_YELLOW "unknown flare mode '%s' in '%s'\n", token, effectName );
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_YELLOW "unknown flare mode '%s' in '%s'\n", token, effectName );
 				return qfalse;
 			}
 		} else if ( !Q_stricmp( token, "pos" ) ) {
@@ -145,7 +145,7 @@ static qboolean CG_ParseLensFlare( const char **p, lensFlare_t *fl, const char *
 		} else if ( !Q_stricmp( token, "intensityThreshold" ) ) {
 			fl->intensityThreshold = Com_Clamp( 0, 0.99f, atof( COM_Parse( &parser, p ) ) );
 		} else {
-			CG_Printf( S_COLOR_YELLOW "unknown token '%s' in flare '%s'\n", token, effectName );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_YELLOW "unknown token '%s' in flare '%s'\n", token, effectName );
 			return qfalse;
 		}
 	}
@@ -168,7 +168,7 @@ static qboolean CG_ParseLensFlareEffect( const char **p, lensFlareEffect_t *eff 
 
 	token = COM_Parse( &parser, p );
 	if ( Q_stricmp( token, "{" ) ) {
-		CG_Printf( S_COLOR_YELLOW "expected '{' after effect '%s'\n", eff->name );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_YELLOW "expected '{' after effect '%s'\n", eff->name );
 		return qfalse;
 	}
 
@@ -179,14 +179,14 @@ static qboolean CG_ParseLensFlareEffect( const char **p, lensFlareEffect_t *eff 
 	while ( 1 ) {
 		token = COM_Parse( &parser, p );
 		if ( !token[0] ) {
-			CG_Printf( S_COLOR_YELLOW "unexpected end in effect '%s'\n", eff->name );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_YELLOW "unexpected end in effect '%s'\n", eff->name );
 			return qfalse;
 		}
 		if ( !Q_stricmp( token, "}" ) ) break;
 
 		if ( !Q_stricmp( token, "{" ) ) {
 			if ( eff->numLensFlares >= MAX_LENSFLARES_PER_EFFECT ) {
-				CG_Printf( S_COLOR_YELLOW "too many sub-flares in '%s' (max %d)\n",
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_YELLOW "too many sub-flares in '%s' (max %d)\n",
 				           eff->name, MAX_LENSFLARES_PER_EFFECT );
 				return qfalse;
 			}
@@ -199,7 +199,7 @@ static qboolean CG_ParseLensFlareEffect( const char **p, lensFlareEffect_t *eff 
 		} else if ( !Q_stricmp( token, "fadeAngle" ) ) {
 			eff->fadeAngle = Com_Clamp( 0, 180, atof( COM_Parse( &parser, p ) ) );
 		} else {
-			CG_Printf( S_COLOR_YELLOW "unknown token '%s' in effect '%s'\n", token, eff->name );
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_YELLOW "unknown token '%s' in effect '%s'\n", token, eff->name );
 			return qfalse;
 		}
 	}
@@ -232,7 +232,7 @@ static void CG_LoadMissileLensFlares( void ) {
 	lf.lensFlareEffectBFG            = CG_FindMissileLensFlareEffect( "missile_bfg" );
 	lf.lensFlareEffectRocketLauncher = CG_FindMissileLensFlareEffect( "missile_rocket_launcher" );
 
-	CG_Printf( "Lens flares: %d missile effects loaded (bfg=%d rl=%d)\n",
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "Lens flares: %d missile effects loaded (bfg=%d rl=%d)\n",
 	           lf.numMissileLensFlareEffects,
 	           lf.lensFlareEffectBFG, lf.lensFlareEffectRocketLauncher );
 }
@@ -339,7 +339,7 @@ void CG_InitLensFlares( void ) {
 	}
 
 	if ( lf.numEntities > 0 ) {
-		CG_Printf( "Lens flares: %i light entities found\n", lf.numEntities );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Lens flares: %i light entities found\n", lf.numEntities );
 	}
 }
 

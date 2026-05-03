@@ -243,7 +243,7 @@ void Com_RandomBytes( byte *string, int len )
 	if ( Sys_RandomBytes( string, len ) )
 		return;
 
-	Com_Printf( S_COLOR_YELLOW "Com_RandomBytes: using weak randomization\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Com_RandomBytes: using weak randomization\n" );
 	srand( time( NULL ) );
 	for( int i = 0; i < len; i++ )
 		string[i] = (unsigned char)( rand() % 256 );

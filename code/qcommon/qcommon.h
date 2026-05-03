@@ -27,6 +27,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <setjmp.h>
 #include "cm_public.h"
 #include "q_feats.h"
+#include "wired/core/time/time.h"   /* Sys_NanoTime, Sys_Microseconds, Sys_Milliseconds,
+                                       Com_RealTime, Com_RealTimeMs, Com_FormatTimestamp */
 
 //Ignore __attribute__ on non-gcc/clang platforms
 #if !defined(__GNUC__) && !defined(__clang__)
@@ -573,8 +575,18 @@ cvar_t *Cvar_Get( const char *var_name, const char *value, int flags );
 // that allows variables to be unarchived without needing bitflags
 // if value is "", the value will not override a previously set value.
 
-void	Cvar_Register( vmCvar_t *vmCvar, const char *varName, const char *defaultValue, int flags, int privateFlag );
-// basically a slightly modified Cvar_Get for the interpreted modules
+void	Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName, const char *defaultValue, int flags, int privateFlag );
+// slightly modified Cvar_Get for the interpreted modules (game/cgame VM syscall path)
+
+cvar_t *Cvar_Register( const cvarDesc_t *desc );
+// single-call typed registration: name, default, description, flags, type, range,
+// enum list, and callback all declared in one cvarDesc_t. Returns the cvar_t*.
+// Backward-compatible: if the cvar was already created via Cvar_Get, the existing
+// value is preserved; the typed fields are set on the existing entry.
+
+void Cvar_RegisterTable( const cvarDesc_t *table, int count, cvar_t **handles );
+// batch registration from a descriptor table; handles[i] receives Cvar_Register(&table[i]).
+// handles may be NULL if the caller does not need the individual pointers.
 
 void	Cvar_Update( vmCvar_t *vmCvar, int privateFlag );
 // updates an interpreted modules' version of a cvar
@@ -595,8 +607,6 @@ void	Cvar_SetValue( const char *var_name, float value );
 void	Cvar_SetIntegerValue( const char *var_name, int value );
 void	Cvar_SetValueSafe( const char *var_name, float value );
 // expands value to a string and calls Cvar_Set/Cvar_SetSafe
-
-qboolean Cvar_SetModified( const char *var_name, qboolean modified );
 
 float	Cvar_VariableValue( const char *var_name );
 int		Cvar_VariableIntegerValue( const char *var_name );
@@ -777,6 +787,7 @@ qboolean FS_ResetReadOnlyAttribute( const char *filename );
 qboolean FS_SV_FileExists( const char *file );
 
 fileHandle_t FS_SV_FOpenFileWrite( const char *filename );
+fileHandle_t FS_SV_FOpenFileAppend( const char *filename );
 int		FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp );
 void	FS_SV_Rename( const char *from, const char *to );
 int		FS_FOpenFileRead( const char *qpath, fileHandle_t *file, qboolean uniqueFILE );
@@ -985,7 +996,7 @@ extern	int	CPU_Flags;
 #define CPU_VFPv3  0x04
 
 // TTimo
-// centralized and cleaned, that's the max string you can send to a Com_Printf / Com_DPrintf (above gets truncated)
+// max string you can send to Com_Log (above gets truncated)
 // bump to 8192 as 4096 may be not enough to print some data like gl extensions - CE
 #define	MAXPRINTMSG	8192
 
@@ -993,8 +1004,8 @@ char		*CopyString( const char *in );
 void		Info_Print( const char *s );
 
 #include "wired/core/shell/log.h"
-void 		QDECL Com_Printf( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
-void 		QDECL Com_DPrintf( const char *fmt, ... ) __attribute__ ((format (printf, 1, 2)));
+#include "wired/core/shell/log_buffer.h"
+#include "wired/core/core.h"
 void 		Com_Quit_f( void );
 
 // Com_LastError API — wraps the existing com_errorMessage buffer + cvar.
@@ -1029,7 +1040,7 @@ int			Com_Filter( const char *filter, const char *name );
 qboolean	Com_FilterExt( const char *filter, const char *name );
 qboolean	Com_HasPatterns( const char *str );
 int			Com_FilterPath( const char *filter, const char *name );
-int			Com_RealTime(qtime_t *qtime);
+/* Com_RealTime, Com_RealTimeMs, Com_FormatTimestamp — see wired/core/time/time.h */
 qboolean	Com_SafeMode( void );
 void		Com_RunAndTimeServerPacket( const netadr_t *evFrom, msg_t *buf );
 
@@ -1059,7 +1070,6 @@ static ID_INLINE unsigned int log2pad( unsigned int v, int roundup )
 }
 
 
-extern	cvar_t	*com_developer;
 extern	cvar_t	*com_dedicated;
 extern	cvar_t	*com_speeds;
 extern	cvar_t	*com_timescale;
@@ -1270,6 +1280,7 @@ CLIENT / SERVER SYSTEMS
 // client interface
 //
 void CL_Init( void );
+void CL_Characters_Init( void );  // must run before SV_Init (before BotLua preload)
 void CL_AbortFrame( void );
 qboolean CL_DemoPlaying( void );
 qboolean CL_Disconnect( qboolean showMainMenu );
@@ -1306,9 +1317,6 @@ void	CL_ForwardCommandToServer( const char *string );
 // adds the current command line as a clc_clientCommand to the client message.
 // things like godmode, noclip, etc, are commands directed to the server,
 // so when they are typed in at the console, they will need to be forwarded.
-
-void CL_CDDialog( void );
-// bring up the "need a cd to play" dialog
 
 void CL_ShutdownLevel( void );
 // level-scoped teardown only: cgame VM, level renderer resources, level audio.
@@ -1430,14 +1438,7 @@ uint64_t Sys_GetAffinityMask( void );
 qboolean Sys_SetAffinityMask( const uint64_t mask );
 #endif
 
-// Sys_Milliseconds should only be used for profiling purposes,
-// any game related timing information should come from event timestamps
-int		Sys_Milliseconds( void );
-int64_t	Sys_Microseconds( void );
-// Contract-infallible on all supported targets: POSIX guarantees
-// CLOCK_MONOTONIC; MSDN guarantees QueryPerformanceCounter on XP+.
-// Returns nanoseconds since an arbitrary epoch (monotonic, no leap seconds).
-int64_t	Sys_NanoTime( void );
+/* Sys_Milliseconds, Sys_Microseconds, Sys_NanoTime — see wired/core/time/time.h */
 
 void	Sys_SnapVector( float *vector );
 

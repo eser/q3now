@@ -45,9 +45,7 @@
 #define VK_DESC_FOG_COLLAPSE 4
 #define VK_DESC_DEPTH_FADE   5
 #define VK_DESC_COUNT        6  // base descriptor count (sets 0-5)
-#if FEAT_PARALLAX_MAPPING
-#define VK_DESC_NORMALMAP    6  // parallax normalmap (only bound when active)
-#endif
+#define VK_DESC_NORMALMAP    6  // set=6: parallax normalmap or Q1 anim next-frame sampler
 
 #define VK_DESC_TEXTURE_BASE VK_DESC_TEXTURE0
 #define VK_DESC_FOG_ONLY     VK_DESC_TEXTURE1
@@ -62,39 +60,42 @@ typedef enum {
 	TYPE_DOT,
 	TYPE_MSDF,
 
-	TYPE_SIGNLE_TEXTURE_LIGHTING,
-	TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR,
+	TYPE_SINGLE_TEXTURE_LIGHTING,
+	TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR,
 #if FEAT_PARALLAX_MAPPING
-	TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX,
-	TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX_LINEAR,
+	TYPE_SINGLE_TEXTURE_LIGHTING_PARALLAX,
+	TYPE_SINGLE_TEXTURE_LIGHTING_PARALLAX_LINEAR,
 #endif
 #if FEAT_ADVANCED_WATER
 	TYPE_WATER,
 #endif
 #if FEAT_SHADOW_MAPPING
-	TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW,
-	TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW_LINEAR,
+	TYPE_SINGLE_TEXTURE_LIGHTING_SHADOW,
+	TYPE_SINGLE_TEXTURE_LIGHTING_SHADOW_LINEAR,
 	TYPE_SHADOW_DEPTH,
 #endif
 #if FEAT_PBR
-	TYPE_SIGNLE_TEXTURE_LIGHTING_PBR,
-	TYPE_SIGNLE_TEXTURE_LIGHTING_PBR_LINEAR,
+	TYPE_SINGLE_TEXTURE_LIGHTING_PBR,
+	TYPE_SINGLE_TEXTURE_LIGHTING_PBR_LINEAR,
 #endif
 
-	TYPE_SIGNLE_TEXTURE_DF,
+	TYPE_SINGLE_TEXTURE_DF,
+
+	TYPE_LIGHTSTYLES,		// Q1 4-style lightmap blend, animChain lerp via set=6
+	TYPE_LIGHTSTYLES_ARRAY,	// Q1 4-style lightmap blend, GPU time-driven texture array
 
 	TYPE_GENERIC_BEGIN, // start of non-env/env shader pairs
 	TYPE_SIGNLE_TEXTURE = TYPE_GENERIC_BEGIN,
-	TYPE_SIGNLE_TEXTURE_ENV,
+	TYPE_SINGLE_TEXTURE_ENV,
 
-	TYPE_SIGNLE_TEXTURE_IDENTITY,
-	TYPE_SIGNLE_TEXTURE_IDENTITY_ENV,
+	TYPE_SINGLE_TEXTURE_IDENTITY,
+	TYPE_SINGLE_TEXTURE_IDENTITY_ENV,
 
-	TYPE_SIGNLE_TEXTURE_FIXED_COLOR,
-	TYPE_SIGNLE_TEXTURE_FIXED_COLOR_ENV,
+	TYPE_SINGLE_TEXTURE_FIXED_COLOR,
+	TYPE_SINGLE_TEXTURE_FIXED_COLOR_ENV,
 
-	TYPE_SIGNLE_TEXTURE_ENT_COLOR,
-	TYPE_SIGNLE_TEXTURE_ENT_COLOR_ENV,
+	TYPE_SINGLE_TEXTURE_ENT_COLOR,
+	TYPE_SINGLE_TEXTURE_ENT_COLOR_ENV,
 
 	TYPE_MULTI_TEXTURE_ADD2_IDENTITY,
 	TYPE_MULTI_TEXTURE_ADD2_IDENTITY_ENV,
@@ -237,6 +238,8 @@ typedef struct vkUniform_s {
 	vec4_t fogDepthVector;		// vertex
 	vec4_t fogEyeT;				// vertex
 	vec4_t fogColor;			// fragment
+	// lightstyle per-surface blend weights (x=slot0, y=slot1, z=slot2, w=slot3)
+	vec4_t q1StyleIntensities;
 } vkUniform_t;
 
 #define TESS_XYZ   (1)
@@ -282,7 +285,7 @@ void vk_render_shadow_map( const struct dlight_s *dl );
 // Resources allocation.
 //
 void vk_create_image( image_t *image, int width, int height, int mip_levels );
-void vk_upload_image_data( image_t *image, int x, int y, int width, int height, int miplevels, byte *pixels, int size, qboolean update );
+void vk_upload_image_data( image_t *image, int x, int y, int width, int height, int miplevels, byte *pixels, int size, qboolean update, uint32_t baseArrayLayer );
 void vk_update_descriptor_set( image_t *image, qboolean mipmap );
 void vk_destroy_image_resources( VkImage *image, VkImageView *imageView );
 void vk_update_attachment_descriptors( void );
@@ -349,6 +352,9 @@ void vk_update_post_process_pipelines( void );
 const char *vk_format_string( VkFormat format );
 
 void VBO_PrepareQueues( void );
+void VBO_PrepareSubqueue( int start, int count );
+int  VBO_GetQueueCount( void );
+uint32_t VBO_GetQueueItemStylesPacked( int pos );
 void VBO_RenderIBOItems( void );
 void VBO_ClearQueue( void );
 
@@ -395,7 +401,7 @@ typedef struct vk_tess_s {
 
 	struct {
 		uint32_t		start, end;
-		VkDescriptorSet	current[VK_DESC_COUNT]; // 0:uniform, 1:color0, 2:color1, 3:color2, 4:fog, 5:depth_fade
+		VkDescriptorSet	current[VK_DESC_COUNT + 1]; // 0:uniform, 1:color0, 2:color1, 3:color2, 4:fog, 5:depth_fade, 6:normalmap/Q1-anim-next
 		uint32_t		offset[1]; // 0 (uniform)
 	} descriptor_set;
 
@@ -732,6 +738,11 @@ typedef struct {
 		VkShaderModule smaa_resolve_vs;
 		VkShaderModule smaa_resolve_fs;
 
+		// Q1 4-style lightmap blend
+		VkShaderModule q1_ls_vs;
+		VkShaderModule q1_ls_fs;
+		VkShaderModule q1_ls_array_fs;   // array variant; reuses q1_ls_vs
+
 		// rail trail compute + render
 		VkShaderModule rail_helix_cs;
 		VkShaderModule rail_debris_cs;
@@ -801,6 +812,8 @@ typedef struct {
 	uint32_t dot_pipeline;
 
 	uint32_t msdf_pipeline;
+	uint32_t q1ls_pipeline;		// Q1 4-style lightmap blend, animChain lerp
+	uint32_t q1ls_array_pipeline;	// Q1 4-style lightmap blend, texture array animation
 
 	VkPipeline gamma_pipeline;
 

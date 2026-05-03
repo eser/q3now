@@ -370,7 +370,7 @@ struct gclient_s {
 	int			portalID;
 #endif
 	int			ammoTimes[WP_NUM_WEAPONS];
-	int			invulnerabilityTime;
+	int			deflectorTime;
 
 	char		*areabits;
 
@@ -542,6 +542,12 @@ typedef struct {
 #if FEAT_GAME_MEETING
 	qboolean	meeting;			// qtrue during pre-match lobby (before everyone is ready)
 #endif
+
+	// Q1 map state
+	int			q1_worldtype;		// 0=medieval, 1=metal, 2=base, 3=hub
+	int			q1_total_secrets;	// count of q1_trigger_secret entities in map
+	int			q1_found_secrets;	// secrets found this level
+	int			q1_nextSwitchableStyle;	// auto-assign counter for switchable lightstyle slots (starts at 32)
 } level_locals_t;
 
 
@@ -629,7 +635,7 @@ const char *BuildShaderStateConfig( void );
 qboolean CanDamage (gentity_t *targ, vec3_t origin);
 void G_Damage (gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_t dir, vec3_t point, int damage, int dflags, int mod);
 qboolean G_RadiusDamage (vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, qboolean underWater);
-int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir );
+int G_DeflectorEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir );
 void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath );
 int G_AttackFromMOD( int mod );
 void TossClientItems( gentity_t *self );
@@ -646,7 +652,7 @@ qboolean	PM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float
 #define DAMAGE_RADIUS				0x00000001	// damage was indirect
 #define DAMAGE_NO_ARMOR				0x00000002	// armour does not protect from this damage
 #define DAMAGE_NO_KNOCKBACK			0x00000004	// do not affect velocity, just view angles
-#define DAMAGE_NO_PROTECTION		0x00000008  // armor, shields, invulnerability, and godmode have no effect
+#define DAMAGE_NO_PROTECTION		0x00000008  // armor, shields, deflector, and godmode have no effect
 #define DAMAGE_NO_TEAM_PROTECTION	0x00000010  // bypass team friendly-fire protection (especially for kamikaze)
 
 //
@@ -661,29 +667,32 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t aimdir, int time, qboolean bounce);
 gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir);
 gentity_t *fire_grapple (gentity_t *self, vec3_t start, vec3_t dir);
+gentity_t *fire_q1_spike   (gentity_t *self, vec3_t start, vec3_t dir, int damage, int speed);
+gentity_t *fire_q1_laser   (gentity_t *self, vec3_t start, vec3_t dir);
+gentity_t *fire_q1_lavaball(gentity_t *self, vec3_t start, vec3_t dir, float speed);
 
 
 //
 // g_mover.c
 //
 void G_RunMover( gentity_t *ent );
-void Touch_DoorTrigger( gentity_t *ent, gentity_t *other, trace_t *trace );
+void Q3_Touch_DoorTrigger( gentity_t *ent, gentity_t *other, trace_t *trace );
 
 //
 // g_trigger.c
 //
-void trigger_teleporter_touch (gentity_t *self, gentity_t *other, trace_t *trace );
-void hurt_touch( gentity_t *self, gentity_t *other, trace_t *trace );
+void Q3_trigger_teleporter_touch (gentity_t *self, gentity_t *other, trace_t *trace );
+void Q3_hurt_touch( gentity_t *self, gentity_t *other, trace_t *trace );
 void G_SetTeleporterDestinations(void);
 
 
 //
 // g_misc.c
 //
-void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles );
+void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles, int exitSpeed );
 #if FEAT_PW_PORTAL
-void DropPortalSource( gentity_t *ent );
-void DropPortalDestination( gentity_t *ent );
+void Q3_DropPortalSource( gentity_t *ent );
+void Q3_DropPortalDestination( gentity_t *ent );
 #endif
 
 
@@ -718,6 +727,12 @@ void CalculateRanks( void );
 qboolean SpotWouldTelefrag( gentity_t *spot );
 
 //
+// g_lightstyle.c
+//
+qboolean G_ValidateLightstylePattern( const char *pattern );
+qboolean G_SetLightstyle( int style, const char *pattern );
+
+//
 // g_svcmds.c
 //
 qboolean	ConsoleCommand( void );
@@ -731,6 +746,8 @@ int G_DamageFalloff( int damage, vec3_t start, vec3_t end, float maxDamageDistan
 void SnapVectorTowards( vec3_t v, vec3_t to );
 void FireWeapon( gentity_t *ent, int attackIndex );
 void G_StartKamikaze( gentity_t *ent );
+void G_HoldableUpdateSelectedAfterChange( gentity_t *ent );
+void G_HoldableAdvanceSelected( gentity_t *ent, int dir );
 
 // weapons/
 void Attack_Gauntlet_Primary( gentity_t *ent );
@@ -766,10 +783,8 @@ void SetLeader(int team, int client);
 void CheckTeamLeader( int team );
 void G_RunThink (gentity_t *ent);
 void AddTournamentQueue(gclient_t *client);
-void QDECL G_LogPrintf( const char *fmt, ... ) Q_PRINTF_FUNC(1, 2);
+void QDECL G_LogPrintf( const char *fmt, ... ) FORMAT_PRINTF(1, 2);
 void SendScoreboardMessageToAllClients( void );
-void QDECL G_Printf( const char *fmt, ... ) Q_PRINTF_FUNC(1, 2);
-void QDECL G_Error( const char *fmt, ... ) Q_NO_RETURN Q_PRINTF_FUNC(1, 2);
 
 //
 // g_client.c
@@ -885,6 +900,7 @@ extern	vmCvar_t	g_smoothClients;
 extern	vmCvar_t	pmove_fixed;
 extern	vmCvar_t	pmove_msec;
 extern	vmCvar_t	pmove_overbounce;
+extern	vmCvar_t	pm_step_debug;
 extern	vmCvar_t	g_rankings;
 extern	vmCvar_t	g_envGroundDusty;
 extern	vmCvar_t	g_envTemperature;
@@ -983,7 +999,9 @@ void	Cmd_Drop_f( gentity_t *ent );
 
 
 void	trap_Print( const char *text );
-void	trap_Error( const char *text ) Q_NO_RETURN;
+void	trap_Error( const char *text ) NORETURN;
+void	trap_Log( log_severity_t severity, const char *text );
+void	NORETURN trap_Terminate( terminationReason_t reason, const char *text );
 int		trap_Milliseconds( void );
 int	trap_RealTime( qtime_t *qtime );
 int		trap_Argc( void );
@@ -1208,6 +1226,8 @@ void         trap_Nav_RemoveCrowdAgent( int agentId );
 void         trap_Nav_UpdateCrowd( float deltaTime );
 qboolean     trap_Nav_IsReady( void );
 void         trap_Nav_SetPolyFlagsForDoor( const char *targetname, int setFlags, int clearFlags );
+void         trap_Nav_PredictEnemyPosition( const vec3_t origin, const vec3_t velocity,
+                                            float predictTime, vec3_t outPos );
 #endif /* FEAT_RECAST_NAVMESH */
 
 #if FEAT_CLAN_ARENA
@@ -1254,5 +1274,22 @@ void trap_WiredNet_EmitDelag( int shooter, int target, int timeDelta, vec3_t sho
 #endif
 void trap_WiredNet_EmitBotEvent( int bot_id, const char *event_type, int param1, int param2, vec3_t pos );
 #endif
+
+// WiredCoreEvents — game-VM emit interface
+// wce_event_type_t and WCE_* constants come from this include.
+#include "wired/core/events/event.h"
+
+// Single generic trap — one ABI entry point for all event types.
+void trap_WCE_EmitEvent( wce_event_type_t type,
+                          int clientNum, int entityNum,
+                          const vec3_t origin,
+                          int param1, int param2, float fparam,
+                          const char *text );
+
+// Poll server-side per-bot sound ring; returns count of new events written to out.
+int  trap_WCE_GetSoundEvents( int clientNum, bot_sound_event_t *out, int maxOut );
+
+void BotCTFChatEvent( int clientNum, const char *eventName );
+void BotCTFChatBroadcast( int excludeClient, int teamNum, const char *eventName );
 
 qboolean trap_GetValue( char *value, int valueSize, const char *key );

@@ -128,7 +128,7 @@ int QDECL Com_sprintf( char *dest, int size, const char *fmt, ...)
 {
 	if ( !dest )
 	{
-		Com_Error( ERR_FATAL, "Com_sprintf: NULL dest" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Com_sprintf: NULL dest" );
 #if defined(_DEBUG) && defined(_WIN32)
 		DebugBreak();
 #endif
@@ -143,7 +143,7 @@ int QDECL Com_sprintf( char *dest, int size, const char *fmt, ...)
 	if ( len < 0 )
 	{
 		dest[0] = '\0';
-		Com_Error( ERR_FATAL, "Com_sprintf: encoding error" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Com_sprintf: encoding error" );
 #if defined(_DEBUG) && defined(_WIN32)
 		DebugBreak();
 #endif
@@ -152,7 +152,7 @@ int QDECL Com_sprintf( char *dest, int size, const char *fmt, ...)
 
 	if ( len >= size )
 	{
-		Com_Printf( S_COLOR_YELLOW "Com_sprintf: overflow of %i in %i\n", len, size );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Com_sprintf: overflow of %i in %i\n", len, size );
 #if defined(_DEBUG) && defined(_WIN32)
 		DebugBreak();
 #endif

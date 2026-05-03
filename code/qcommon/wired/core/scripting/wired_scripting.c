@@ -3,7 +3,7 @@
 wired_scripting.c -- Headless LuaJIT runtime for q3now
 
 Core Lua scripting: VM lifecycle, sandbox, cvar metatable bridge,
-print -> Com_Printf, cmd() -> Cbuf_ExecuteText, file execution.
+print -> Com_Log, cmd() -> Cbuf_ExecuteText, file execution.
 
 This is the engine-level runtime shared by client and dedicated server.
 Subsystems register additional Lua bindings via
@@ -130,18 +130,18 @@ static int WiredScript_CvarNewIndex( lua_State *L ) {
 	return 0;
 }
 
-/* ---- print -> Com_Printf --------------------------------------------- */
+/* ---- print -> Com_Log ------------------------------------------------ */
 
 static int WiredScript_Print( lua_State *L ) {
 	int n = lua_gettop( L );
 	int i;
 	for ( i = 1; i <= n; i++ ) {
 		const char *s = WiredScript_ToString( L, i );
-		if ( i > 1 ) Com_Printf( "\t" );
-		Com_Printf( "%s", s ? s : "nil" );
+		if ( i > 1 ) Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "\t" );
+		Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "%s", s ? s : "nil" );
 		lua_pop( L, 1 );
 	}
-	Com_Printf( "\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "\n" );
 	return 0;
 }
 
@@ -153,11 +153,60 @@ static int WiredScript_Cmd( lua_State *L ) {
 	return 0;
 }
 
+/* ---- lightstyle(slot, pattern) -> bool ------------------------------- */
+/* Typed, validated wrapper over the "lightstyle" console command.
+   slot:    integer [0, 63]  (mirrors CS_MAX_LIGHTSTYLES in bg_public.h)
+   pattern: string, lowercase a-z only, or "" to turn a slot off
+             max length 64   (mirrors LIGHTSTYLE_PATTERN_MAX in bg_public.h)
+   Returns true on success, false if slot or pattern is invalid.
+   Dispatches EXEC_NOW so the configstring is written before returning.
+
+   Example:
+     lightstyle(5, "abcdefghijklmnopqrstuvwxyz")  -- smooth pulse
+     lightstyle(6, "z")                           -- full brightness
+     lightstyle(7, "")                            -- off
+*/
+static int WiredScript_Lightstyle( lua_State *L ) {
+	int         slot;
+	const char *pattern;
+	int         i, len;
+
+	slot    = (int)luaL_checkinteger( L, 1 );
+	pattern = luaL_checkstring( L, 2 );
+
+	/* Validate slot */
+	if ( slot < 0 || slot >= 64 ) {
+		lua_pushboolean( L, 0 );
+		return 1;
+	}
+
+	/* Validate pattern before embedding in cbuf string — prevents tokenizer
+	   corruption and mirrors G_ValidateLightstylePattern rules exactly. */
+	len = (int)strlen( pattern );
+	if ( len >= 64 ) {
+		lua_pushboolean( L, 0 );
+		return 1;
+	}
+	for ( i = 0; i < len; i++ ) {
+		if ( pattern[i] < 'a' || pattern[i] > 'z' ) {
+			lua_pushboolean( L, 0 );
+			return 1;
+		}
+	}
+
+	/* Always quote pattern so tokenizer sees argv[2] regardless of length.
+	   G_SetLightstyle re-validates server-side; this is defense-in-depth. */
+	Cbuf_ExecuteText( EXEC_NOW, va( "lightstyle %d \"%s\"\n", slot, pattern ) );
+
+	lua_pushboolean( L, 1 );
+	return 1;
+}
+
 /* ---- Console commands ------------------------------------------------- */
 
 static void WiredScript_Cmd_Exec( void ) {
 	if ( Cmd_Argc() < 2 ) {
-		Com_Printf( "usage: lua_exec <filename.lua>\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "usage: lua_exec <filename.lua>\n" );
 		return;
 	}
 	WiredScript_ExecFile( Cmd_Argv( 1 ) );
@@ -168,7 +217,7 @@ static void WiredScript_Cmd_Eval( void ) {
 	int i;
 
 	if ( Cmd_Argc() < 2 ) {
-		Com_Printf( "usage: lua_eval <expression>\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "usage: lua_eval <expression>\n" );
 		return;
 	}
 
@@ -203,7 +252,7 @@ void WiredScript_Init( void ) {
 
 	L = luaL_newstate();
 	if ( !L ) {
-		Com_Printf( S_COLOR_RED "WiredScript: failed to create Lua state\n" );
+		COM_ERROR( LOG_CAT_SCRIPTING, "WiredCore/Scripting: failed to create Lua state\n" );
 		return;
 	}
 
@@ -222,6 +271,9 @@ void WiredScript_Init( void ) {
 	lua_pushcfunction( L, WiredScript_Cmd );
 	lua_setglobal( L, "cmd" );
 
+	lua_pushcfunction( L, WiredScript_Lightstyle );
+	lua_setglobal( L, "lightstyle" );
+
 	/* Cvar metatable on _G (Lua 5.1 API: LUA_GLOBALSINDEX) */
 	lua_pushvalue( L, LUA_GLOBALSINDEX );
 	lua_newtable( L );
@@ -237,7 +289,7 @@ void WiredScript_Init( void ) {
 	Cmd_AddCommand( "lua_exec", WiredScript_Cmd_Exec );
 	Cmd_AddCommand( "lua_eval", WiredScript_Cmd_Eval );
 
-	Com_Printf( "WiredScript: LuaJIT initialized (sandbox active)\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "WiredCore/Scripting: LuaJIT initialized (sandbox active)\n" );
 
 	/* autoexec.lua runs at VM creation time, before WiredScript_PostInit.
 	   Only baseline globals are available: print, cmd, cvar bridge.
@@ -252,7 +304,7 @@ void WiredScript_Shutdown( void ) {
 		Cmd_RemoveCommand( "lua_eval" );
 		lua_close( s_ws->lua );
 		s_ws->lua = NULL;
-		Com_Printf( "WiredScript: shutdown\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "WiredCore/Scripting: shutdown\n" );
 	}
 }
 
@@ -282,11 +334,11 @@ qboolean WiredScript_TryEval( const char *text ) {
 					int i;
 					for ( i = 1; i <= nresults; i++ ) {
 						const char *s = WiredScript_ToString( s_ws->lua, i );
-						if ( i > 1 ) Com_Printf( "\t" );
-						Com_Printf( "%s", s ? s : "nil" );
+						if ( i > 1 ) Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "\t" );
+						Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "%s", s ? s : "nil" );
 						lua_pop( s_ws->lua, 1 );
 					}
-					Com_Printf( "\n" );
+					Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "\n" );
 				}
 				lua_settop( s_ws->lua, 0 );
 				return qtrue;
@@ -307,7 +359,7 @@ qboolean WiredScript_TryEval( const char *text ) {
 	status = lua_pcall( s_ws->lua, 0, 0, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( s_ws->lua, -1 );
-		Com_Printf( S_COLOR_RED "Lua error: %s\n", err ? err : "unknown" );
+		COM_ERROR( LOG_CAT_SCRIPTING, "Lua error: %s\n", err ? err : "unknown" );
 		lua_pop( s_ws->lua, 1 );
 	}
 	lua_settop( s_ws->lua, 0 );
@@ -327,7 +379,7 @@ void WiredScript_ExecFile( const char *filename ) {
 	{
 		const char *ext = strrchr( filename, '.' );
 		if ( !ext || Q_stricmp( ext, ".lua" ) != 0 ) {
-			Com_Printf( S_COLOR_YELLOW "WiredScript: only .lua files supported\n" );
+			COM_WARN( LOG_CAT_SCRIPTING, "WiredCore/Scripting: only .lua files supported\n" );
 			return;
 		}
 	}
@@ -335,7 +387,7 @@ void WiredScript_ExecFile( const char *filename ) {
 	len = FS_FOpenFileRead( filename, &f, qfalse );
 	if ( len <= 0 || f == 0 ) {
 		if ( Q_stricmp( filename, "autoexec.lua" ) != 0 ) {
-			Com_Printf( S_COLOR_YELLOW "WiredScript: file not found '%s'\n", filename );
+			COM_WARN( LOG_CAT_SCRIPTING, "WiredCore/Scripting: file not found '%s'\n", filename );
 		}
 		return;
 	}
@@ -354,7 +406,7 @@ void WiredScript_ExecFile( const char *filename ) {
 
 	if ( status != 0 ) {
 		const char *err = lua_tostring( s_ws->lua, -1 );
-		Com_Printf( S_COLOR_RED "Lua load error (%s): %s\n", filename, err ? err : "unknown" );
+		COM_ERROR( LOG_CAT_SCRIPTING, "Lua load error (%s): %s\n", filename, err ? err : "unknown" );
 		lua_pop( s_ws->lua, 1 );
 		return;
 	}
@@ -362,23 +414,23 @@ void WiredScript_ExecFile( const char *filename ) {
 	status = lua_pcall( s_ws->lua, 0, 0, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( s_ws->lua, -1 );
-		Com_Printf( S_COLOR_RED "Lua exec error (%s): %s\n", filename, err ? err : "unknown" );
+		COM_ERROR( LOG_CAT_SCRIPTING, "Lua exec error (%s): %s\n", filename, err ? err : "unknown" );
 		lua_pop( s_ws->lua, 1 );
 		return;
 	}
 
-	Com_Printf( "WiredScript: executed '%s'\n", filename );
+	Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "WiredCore/Scripting: executed '%s'\n", filename );
 }
 
 /* ---- Binding registration --------------------------------------------- */
 
 void WiredScript_RegisterBindings( WiredScript_BindingFn fn ) {
 	if ( !s_ws ) {
-		Com_Printf( S_COLOR_RED "WiredScript: RegisterBindings called before Init\n" );
+		COM_ERROR( LOG_CAT_SCRIPTING, "WiredCore/Scripting: RegisterBindings called before Init\n" );
 		return;
 	}
 	if ( s_ws->numRegistrars >= MAX_BINDING_REGISTRARS ) {
-		Com_Printf( S_COLOR_RED "WiredScript: binding registrar table full\n" );
+		COM_ERROR( LOG_CAT_SCRIPTING, "WiredCore/Scripting: binding registrar table full\n" );
 		return;
 	}
 	s_ws->registrars[s_ws->numRegistrars++] = fn;
@@ -395,7 +447,7 @@ void WiredScript_PostInit( void ) {
 		s_ws->registrars[i]( s_ws->lua );
 	}
 	if ( s_ws->numRegistrars ) {
-		Com_Printf( "WiredScript: %d binding registrar(s) applied\n", s_ws->numRegistrars );
+		Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "WiredCore/Scripting: %d binding registrar(s) applied\n", s_ws->numRegistrars );
 	}
 }
 

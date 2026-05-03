@@ -56,11 +56,11 @@ static PFN_vkCreateXlibSurfaceKHR qvkCreateXlibSurfaceKHR;
 */
 void QVK_Shutdown( qboolean unloadDLL )
 {
-	Com_Printf( "...shutting down QVK\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...shutting down QVK\n" );
 
 	if ( glw_state.VulkanLib && unloadDLL )
 	{
-		Com_Printf( "...unloading Vulkan DLL\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...unloading Vulkan DLL\n" );
 		dlclose( glw_state.VulkanLib );
 		glw_state.VulkanLib = NULL;
 
@@ -124,7 +124,7 @@ static void *load_vulkan_library( const char *dllname )
 qboolean QVK_Init( void )
 {
 
-	Com_Printf( "...initializing QVK\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...initializing QVK\n" );
 
 	if ( glw_state.VulkanLib == NULL )
 	{
@@ -135,7 +135,7 @@ qboolean QVK_Init( void )
 		{
 			glw_state.VulkanLib = load_vulkan_library( dllnames[i] );
 
-			Com_Printf( "...loading '%s' : %s\n", dllnames[i], glw_state.VulkanLib ? "success" : "failed" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : %s\n", dllnames[i], glw_state.VulkanLib ? "success" : "failed" );
 			if ( glw_state.VulkanLib )
 			{
 				break;

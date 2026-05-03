@@ -205,7 +205,7 @@ void CG_Lightning_Discharge (vec3_t origin, int msec)
 {
     localEntity_t		*le;
 
-    if (msec <= 0) CG_Error ("CG_Lightning_Discharge: msec = %i", msec);
+    if (msec <= 0) Com_Terminate( TERM_CLIENT_DROP,"CG_Lightning_Discharge: msec = %i", msec);
 
     le = CG_SmokePuff (	origin,			// where
         vec3_origin,			// where to
@@ -351,10 +351,10 @@ void CG_ObeliskPain( vec3_t org ) {
 
 /*
 ==================
-CG_InvulnerabilityImpact
+CG_DeflectorImpact
 ==================
 */
-void CG_InvulnerabilityImpact( vec3_t org, vec3_t angles ) {
+void CG_DeflectorImpact( vec3_t org, vec3_t angles ) {
 	localEntity_t	*le;
 	refEntity_t		*re;
 	int				r;
@@ -362,7 +362,7 @@ void CG_InvulnerabilityImpact( vec3_t org, vec3_t angles ) {
 
 	le = CG_AllocLocalEntity();
 	le->leFlags = 0;
-	le->leType = LE_INVULIMPACT;
+	le->leType = LE_DEFLECTOR_IMPACT;
 	le->startTime = cg.time;
 	le->endTime = cg.time + 1000;
 	le->lifeRate = 1.0 / ( le->endTime - le->startTime );
@@ -374,35 +374,35 @@ void CG_InvulnerabilityImpact( vec3_t org, vec3_t angles ) {
 	re->reType = RT_MODEL;
 	re->shaderTime.f =cg.time / 1000.0f;
 
-	re->hModel = cgs.media.invulnerabilityImpactModel;
+	re->hModel = cgs.media.deflectorImpactModel;
 
 	VectorCopy( org, re->origin );
 	AnglesToAxis( angles, re->axis );
 
 	r = rand() & 3;
 	if ( r < 2 ) {
-		sfx = cgs.media.invulnerabilityImpactSound1;
+		sfx = cgs.media.deflectorImpactSound1;
 	} else if ( r == 2 ) {
-		sfx = cgs.media.invulnerabilityImpactSound2;
+		sfx = cgs.media.deflectorImpactSound2;
 	} else {
-		sfx = cgs.media.invulnerabilityImpactSound3;
+		sfx = cgs.media.deflectorImpactSound3;
 	}
 	trap_S_StartSound (org, ENTITYNUM_NONE, CHAN_BODY, sfx );
 }
 
 /*
 ==================
-CG_InvulnerabilityJuiced
+CG_DeflectorJuiced
 ==================
 */
-void CG_InvulnerabilityJuiced( vec3_t org ) {
+void CG_DeflectorJuiced( vec3_t org ) {
 	localEntity_t	*le;
 	refEntity_t		*re;
 	vec3_t			angles;
 
 	le = CG_AllocLocalEntity();
 	le->leFlags = 0;
-	le->leType = LE_INVULJUICED;
+	le->leType = LE_DEFLECTOR_JUICED;
 	le->startTime = cg.time;
 	le->endTime = cg.time + 10000;
 	le->lifeRate = 1.0 / ( le->endTime - le->startTime );
@@ -414,13 +414,13 @@ void CG_InvulnerabilityJuiced( vec3_t org ) {
 	re->reType = RT_MODEL;
 	re->shaderTime.f =cg.time / 1000.0f;
 
-	re->hModel = cgs.media.invulnerabilityJuicedModel;
+	re->hModel = cgs.media.deflectorJuicedModel;
 
 	VectorCopy( org, re->origin );
 	VectorClear(angles);
 	AnglesToAxis( angles, re->axis );
 
-	trap_S_StartSound (org, ENTITYNUM_NONE, CHAN_BODY, cgs.media.invulnerabilityJuicedSound );
+	trap_S_StartSound (org, ENTITYNUM_NONE, CHAN_BODY, cgs.media.deflectorJuicedSound );
 }
 
 // cg_scorePlums bitmask
@@ -459,7 +459,7 @@ void CG_ScorePlum( int client, vec3_t org, int score ) {
 		le->pos.trBase[2] -= 20;
 	}
 
-	//CG_Printf( "Plum origin %i %i %i -- %i\n", (int)org[0], (int)org[1], (int)org[2], (int)Distance(org, lastPos));
+	//Com_Log( SEV_INFO, LOG_CAT_CGAME, "Plum origin %i %i %i -- %i\n", (int)org[0], (int)org[1], (int)org[2], (int)Distance(org, lastPos));
 	VectorCopy(org, lastPos);
 
 
@@ -592,7 +592,7 @@ localEntity_t *CG_MakeExplosion( vec3_t origin, vec3_t dir,
 	vec3_t			tmpVec, newOrigin;
 
 	if ( msec <= 0 ) {
-		CG_Error( "CG_MakeExplosion: msec = %i", msec );
+		Com_Terminate( TERM_CLIENT_DROP, "CG_MakeExplosion: msec = %i", msec );
 	}
 
 	// skew the time a bit so they aren't all in sync

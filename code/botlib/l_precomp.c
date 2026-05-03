@@ -54,6 +54,7 @@ typedef enum {qfalse, qtrue}	qboolean;
 
 #ifdef BOTLIB
 #include "../qcommon/q_shared.h"
+#include "../qcommon/qcommon.h"
 #include "botlib.h"
 #include "be_interface.h"
 #include "l_memory.h"
@@ -271,7 +272,7 @@ static token_t *PC_CopyToken(token_t *token)
 #ifdef BSPC
 		Error("out of token space");
 #else
-		Com_Error(ERR_FATAL, "out of token space");
+		Com_Terminate( TERM_UNRECOVERABLE, "out of token space");
 #endif
 		return NULL;
 	} //end if
@@ -753,8 +754,8 @@ static int PC_ExpandBuiltinDefine(source_t *source, token_t *deftoken, define_t 
 		} //end case
 		case BUILTIN_DATE:
 		{
-			t = time(NULL);
-			curtime = ctime(( const time_t *)&t);
+			t = (time_t)Com_RealTime(NULL);
+			curtime = ctime(&t);
 			strcpy(token->string, "\"");
 			strncat(token->string, curtime+4, 7);
 			strncat(token->string+7, curtime+20, 4);
@@ -767,8 +768,8 @@ static int PC_ExpandBuiltinDefine(source_t *source, token_t *deftoken, define_t 
 		} //end case
 		case BUILTIN_TIME:
 		{
-			t = time(NULL);
-			curtime = ctime(( const time_t *)&t);
+			t = (time_t)Com_RealTime(NULL);
+			curtime = ctime(&t);
 			strcpy(token->string, "\"");
 			strncat(token->string, curtime+11, 8);
 			strcat(token->string, "\"");

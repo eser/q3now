@@ -144,7 +144,7 @@ static qboolean wn_reliable_stage_header( wn_rel_partial_t *partial,
 		(*data_io)++;
 		(*len_io)--;
 	}
-	WN_DBG( "QUIC %s: stream %llu header staged %d/2 bytes\n",
+	Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC %s: stream %llu header staged %d/2 bytes\n",
 		tag, (unsigned long long)stream_id, partial->header_bytes );
 	if ( partial->header_bytes < 2 ) {
 		return qtrue; /* not yet complete — wait for next chunk */
@@ -153,21 +153,21 @@ static qboolean wn_reliable_stage_header( wn_rel_partial_t *partial,
 		return qtrue; /* already parsed on a previous call */
 	}
 	if ( partial->header_staging[0] != WN_GAME_REL_VERSION ) {
-		Com_DPrintf( "QUIC %s: invalid reliable header on stream %llu "
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC %s: invalid reliable header on stream %llu "
 			"(version=%d expected %d) — dropped\n",
 			tag, (unsigned long long)stream_id,
 			(int)partial->header_staging[0], (int)WN_GAME_REL_VERSION );
 		return qfalse;
 	}
 	if ( !wn_reliable_channel_is_game( partial->header_staging[1] ) ) {
-		Com_DPrintf( "QUIC %s: invalid reliable header on stream %llu "
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC %s: invalid reliable header on stream %llu "
 			"(channel=%d) — dropped\n",
 			tag, (unsigned long long)stream_id,
 			(int)partial->header_staging[1] );
 		return qfalse;
 	}
 	partial->channel = partial->header_staging[1];
-	WN_DBG( "QUIC %s: stream %llu header complete chan=%d\n",
+	Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC %s: stream %llu header complete chan=%d\n",
 		tag, (unsigned long long)stream_id, partial->channel );
 	return qtrue;
 }
@@ -213,7 +213,7 @@ static qboolean wn_reliable_queue_push( wn_rel_msg_t *queue, volatile int *head,
 	int next_head = ( *head + 1 ) % WN_REL_QUEUE_SIZE;
 	wn_rel_msg_t *msg;
 	if ( next_head == *tail ) {
-		Com_DPrintf( "QUIC: reliable recv queue full — message dropped (channel=%d len=%d)\n", channel, len );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC: reliable recv queue full — message dropped (channel=%d len=%d)\n", channel, len );
 		return qfalse;
 	}
 	msg = &queue[*head];
@@ -233,7 +233,7 @@ static qboolean wn_reliable_queue_pop( wn_rel_msg_t *queue, volatile int *head,
 	}
 	msg = &queue[*tail];
 	if ( msg->len > *len_out ) {
-		Com_Printf( S_COLOR_RED "QUIC: wn_reliable_queue_pop: dropping oversize message "
+		COM_ERROR( LOG_CAT_NETWORK, "QUIC: wn_reliable_queue_pop: dropping oversize message "
 			"(chan=%d len=%d > buf=%d) — increase caller buffer\n",
 			msg->channel, msg->len, *len_out );
 		*tail = ( *tail + 1 ) % WN_REL_QUEUE_SIZE;
@@ -262,11 +262,11 @@ static void wn_reliable_server_consume_stream( wn_game_conn_t *gc, uint64_t stre
 	if ( !partial ) {
 		partial = wn_reliable_alloc_partial( gc->rel_partials, stream_id );
 		if ( !partial ) {
-			Com_DPrintf( "QUIC game: no partial slots for reliable stream %llu\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: no partial slots for reliable stream %llu\n",
 				(unsigned long long)stream_id );
 			return;
 		}
-		WN_DBG( "QUIC game: partial slot alloc for stream %llu first_chunk=%d bytes\n",
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC game: partial slot alloc for stream %llu first_chunk=%d bytes\n",
 			(unsigned long long)stream_id, len );
 	}
 	if ( !wn_reliable_stage_header( partial, &payload, &payload_len, stream_id, "game" ) ) {
@@ -277,7 +277,7 @@ static void wn_reliable_server_consume_stream( wn_game_conn_t *gc, uint64_t stre
 		/* Header still staging; nothing to append yet. If the stream already
 		 * closed (fin), warn and free — we can't dispatch without a channel. */
 		if ( fin ) {
-			Com_DPrintf( "QUIC game: stream %llu closed with incomplete header "
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: stream %llu closed with incomplete header "
 				"(%d/2 bytes) — dropped\n",
 				(unsigned long long)stream_id, partial->header_bytes );
 			wn_reliable_free_partial( partial );
@@ -286,7 +286,7 @@ static void wn_reliable_server_consume_stream( wn_game_conn_t *gc, uint64_t stre
 		return;
 	}
 	if ( partial->len + payload_len > MAX_MSGLEN ) {
-		Com_DPrintf( "QUIC game: reliable stream %llu overflow — dropped (%d+%d > %d)\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: reliable stream %llu overflow — dropped (%d+%d > %d)\n",
 			(unsigned long long)stream_id, partial->len, payload_len, MAX_MSGLEN );
 		wn_reliable_free_partial( partial );
 		return;
@@ -294,15 +294,15 @@ static void wn_reliable_server_consume_stream( wn_game_conn_t *gc, uint64_t stre
 	if ( payload_len > 0 ) {
 		memcpy( partial->data + partial->len, payload, (size_t)payload_len );
 		partial->len += payload_len;
-		WN_DBG( "QUIC game: partial slot for stream %llu: %d bytes (fin=%d)\n",
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC game: partial slot for stream %llu: %d bytes (fin=%d)\n",
 			(unsigned long long)stream_id, partial->len, (int)fin );
 	}
 	if ( fin ) {
-		WN_DBG( "QUIC game: partial slot for stream %llu: %d bytes COMPLETE (chan=%d)\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "[WiredNet] QUIC game: partial slot for stream %llu: %d bytes COMPLETE (chan=%d)\n",
 			(unsigned long long)stream_id, partial->len, partial->channel );
 		if ( !wn_reliable_queue_push( gc->rel_queue, &gc->rel_head, &gc->rel_tail,
 			partial->channel, partial->data, partial->len ) ) {
-			Com_DPrintf( "QUIC game: reliable recv queue full for stream %llu\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: reliable recv queue full for stream %llu\n",
 				(unsigned long long)stream_id );
 		}
 		wn_reliable_free_partial( partial );
@@ -324,11 +324,11 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 	if ( !partial ) {
 		partial = wn_reliable_alloc_partial( wtcl.rel_partials, stream_id );
 		if ( !partial ) {
-			Com_DPrintf( "QUIC client: no partial slots for stream %llu\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: no partial slots for stream %llu\n",
 				(unsigned long long)stream_id );
 			return;
 		}
-		WN_DBG( "QUIC client: partial slot alloc for stream %llu first_chunk=%d bytes\n",
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC client: partial slot alloc for stream %llu first_chunk=%d bytes\n",
 			(unsigned long long)stream_id, len );
 	}
 	if ( !wn_reliable_stage_header( partial, &payload, &payload_len, stream_id, "client" ) ) {
@@ -339,7 +339,7 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 		/* Header still staging; nothing to append yet. If the stream already
 		 * closed (fin), warn and free — we can't dispatch without a channel. */
 		if ( fin ) {
-			Com_DPrintf( "QUIC client: stream %llu closed with incomplete header "
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: stream %llu closed with incomplete header "
 				"(%d/2 bytes) — dropped\n",
 				(unsigned long long)stream_id, partial->header_bytes );
 			wn_reliable_free_partial( partial );
@@ -350,14 +350,14 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 	/* CHAN_BOOTSTRAP exceeds MAX_MSGLEN — route to the dedicated large buffer. */
 	if ( partial->channel == CHAN_BOOTSTRAP ) {
 		if ( wtcl.bootstrap_recv_ready ) {
-			Com_DPrintf( "QUIC client: bootstrap already pending; stream %llu dropped\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: bootstrap already pending; stream %llu dropped\n",
 				(unsigned long long)stream_id );
 			wn_reliable_free_partial( partial );
 			picoquic_reset_stream_ctx( wtcl.cnx, stream_id );
 			return;
 		}
 		if ( wtcl.bootstrap_recv_len + payload_len > WN_BOOTSTRAP_MAX ) {
-			Com_DPrintf( "QUIC client: bootstrap stream %llu overflow — dropped\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: bootstrap stream %llu overflow — dropped\n",
 				(unsigned long long)stream_id );
 			wn_reliable_free_partial( partial );
 			picoquic_reset_stream_ctx( wtcl.cnx, stream_id );
@@ -376,7 +376,7 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 		return;
 	}
 	if ( partial->len + payload_len > MAX_MSGLEN ) {
-		Com_DPrintf( "QUIC client: reliable stream %llu overflow — dropped (%d+%d > %d)\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: reliable stream %llu overflow — dropped (%d+%d > %d)\n",
 			(unsigned long long)stream_id, partial->len, payload_len, MAX_MSGLEN );
 		wn_reliable_free_partial( partial );
 		return;
@@ -384,15 +384,15 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 	if ( payload_len > 0 ) {
 		memcpy( partial->data + partial->len, payload, (size_t)payload_len );
 		partial->len += payload_len;
-		WN_DBG( "QUIC client: partial slot for stream %llu: %d bytes (fin=%d)\n",
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC client: partial slot for stream %llu: %d bytes (fin=%d)\n",
 			(unsigned long long)stream_id, partial->len, (int)fin );
 	}
 	if ( fin ) {
-		WN_DBG( "QUIC client: partial slot for stream %llu: %d bytes COMPLETE (chan=%d)\n",
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC client: partial slot for stream %llu: %d bytes COMPLETE (chan=%d)\n",
 			(unsigned long long)stream_id, partial->len, partial->channel );
 		if ( !wn_reliable_queue_push( wtcl.rel_queue, &wtcl.rel_head, &wtcl.rel_tail,
 			partial->channel, partial->data, partial->len ) ) {
-			Com_DPrintf( "QUIC client: reliable recv queue full for stream %llu\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: reliable recv queue full for stream %llu\n",
 				(unsigned long long)stream_id );
 		}
 		wn_reliable_free_partial( partial );
@@ -480,7 +480,7 @@ wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 
 	/* E5: Enforce sv_wirednetMaxClients before allocating a slot. */
 	if ( wn.num_game_conns >= max_clients ) {
-		Com_Printf( S_COLOR_YELLOW "QUIC game: connection limit (%d) reached, refusing\n",
+		COM_WARN( LOG_CAT_NETWORK, "QUIC game: connection limit (%d) reached, refusing\n",
 		            max_clients );
 		return NULL;
 	}
@@ -494,12 +494,12 @@ wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 			gc->hs_state = WN_GAME_HS_NONE;
 			wn.num_game_conns++;
 			conn->game_conn = gc;
-			Com_DPrintf( "QUIC game: allocated conn slot %d for %s\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: allocated conn slot %d for %s\n",
 				i, NET_AdrToStringwPort( &conn->addr ) );
 			return gc;
 		}
 	}
-	Com_Printf( S_COLOR_YELLOW "QUIC game: no free game_conn slots\n" );
+	COM_WARN( LOG_CAT_NETWORK, "QUIC game: no free game_conn slots\n" );
 	return NULL;
 }
 
@@ -509,7 +509,7 @@ void WN_GameFreeConn( wn_game_conn_t *gc )
 		return;
 	if ( gc->conn )
 		gc->conn->game_conn = NULL;
-	Com_DPrintf( "WiredNet game: freed conn slot %td\n", gc - wn.game_conns );
+	Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "WiredNet game: freed conn slot %td\n", gc - wn.game_conns );
 	memset( gc, 0, sizeof( wn_game_conn_t ) );
 	if ( wn.num_game_conns > 0 )
 		wn.num_game_conns--;
@@ -527,18 +527,18 @@ void WN_GameHandleDatagram( wn_connection_t *conn, const byte *data, int len )
 	wn_game_pkt_t  *pkt;
 
 	if ( len <= 0 || len > WN_GAME_PKT_MAX ) {
-		Com_DPrintf( "QUIC game: datagram length %d out of range — dropped\n", len );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: datagram length %d out of range — dropped\n", len );
 		return;
 	}
 	gc = conn ? conn->game_conn : NULL;
 	if ( !gc || !gc->active ) {
-		Com_DPrintf( "QUIC game: datagram from non-game connection — dropped\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: datagram from non-game connection — dropped\n" );
 		return;
 	}
 	next_head = ( gc->recv_head + 1 ) % WN_GAME_QUEUE_SIZE;
 	if ( next_head == gc->recv_tail ) {
 		wn.dropped_packets++;
-		Com_DPrintf( "QUIC game: recv queue full for %s — dropped\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: recv queue full for %s — dropped\n",
 			NET_AdrToStringwPort( &conn->addr ) );
 		return;
 	}
@@ -569,7 +569,7 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 
 	/* Binary TLV path */
 	if ( !TLV_Read( data, len, &tlv_type, &payload, &plen ) ) {
-		Com_DPrintf( "QUIC game: incomplete TLV on handshake stream — ignored\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: incomplete TLV on handshake stream — ignored\n" );
 		return;
 	}
 
@@ -579,7 +579,7 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 			int slot = (int)( gc - wn.game_conns );
 			if ( slot >= 0 && slot < WN_MAX_CLIENTS ) {
 				wn.pending_ready[slot] = qtrue;
-				Com_DPrintf( "QUIC game: TLV READY from slot %d — enqueued\n", slot );
+				Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: TLV READY from slot %d — enqueued\n", slot );
 			}
 		}
 		return;
@@ -587,14 +587,14 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 
 	if ( tlv_type != 0x01 ) {
 		/* Non-CONNECT TLV on session stream — future message types, ignore for now */
-		Com_DPrintf( "QUIC game: TLV type 0x%02X on session stream (not CONNECT) — ignored\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: TLV type 0x%02X on session stream (not CONNECT) — ignored\n",
 			(unsigned)tlv_type );
 		return;
 	}
 
 	/* TLV 0x01 CONNECT: version:u16le, userinfo_len:u16le, userinfo:bytes */
 	if ( plen < 4 ) {
-		Com_DPrintf( "QUIC game: TLV CONNECT payload too short (%u bytes)\n", (unsigned)plen );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: TLV CONNECT payload too short (%u bytes)\n", (unsigned)plen );
 		return;
 	}
 	{
@@ -653,7 +653,7 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 			}
 		}
 		if ( i == WN_MAX_CLIENTS ) {
-			Com_Printf( S_COLOR_YELLOW
+			COM_WARN( LOG_CAT_NETWORK,
 				"QUIC game: pending_connects overflow — TLV CONNECT from %s dropped\n",
 				NET_AdrToStringwPort( &conn->addr ) );
 			return;
@@ -672,7 +672,7 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 
 		gc->hs_state = WN_GAME_HS_ACCEPTED;
 
-		Com_DPrintf( "QUIC game: TLV CONNECT from %s → slot %d, accept pending\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC game: TLV CONNECT from %s → slot %d, accept pending\n",
 			NET_AdrToStringwPort( &conn->addr ), slot );
 	}
 }
@@ -700,7 +700,7 @@ void WN_SendGamePacketToAddr( const netadr_t *to, const void *data, int length )
 #if !defined(DEDICATED)
 		goto try_client;
 #else
-		Com_DPrintf( "WN_SendGamePacketToAddr: QUIC not initialized\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "WN_SendGamePacketToAddr: QUIC not initialized\n" );
 		return;
 #endif
 	}
@@ -716,7 +716,7 @@ void WN_SendGamePacketToAddr( const netadr_t *to, const void *data, int length )
 try_client:
 	WN_ClientSendPacket( to, data, length );
 #else
-	Com_DPrintf( "WN_SendGamePacketToAddr: no game conn for %s\n",
+	Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "WN_SendGamePacketToAddr: no game conn for %s\n",
 		NET_AdrToStringwPort( to ) );
 #endif
 }
@@ -865,7 +865,7 @@ void WN_RequeueConnect( conn_handle_t conn, const char *userinfo )
 		}
 	}
 	/* All slots occupied — cannot hold the connection. */
-	Com_Printf( "*** WN_RequeueConnect: no free slot for conn %llu — dropping ***\n",
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "*** WN_RequeueConnect: no free slot for conn %llu — dropping ***\n",
 		(unsigned long long)conn );
 	if ( transport )
 		transport->drop_client( conn, "Server starting up" );
@@ -926,14 +926,14 @@ static int WN_ClientCallback(
 	(void)callback_ctx;
 	(void)v_ctx;
 
-	WN_DBG( "QUIC client CB: event=%d stream=%llu conn=%s len=%zu\n",
+	Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC client CB: event=%d stream=%llu conn=%s len=%zu\n",
 		(int)event, (unsigned long long)stream_id,
 		cnx ? "yes" : "no", length );
 
 	switch ( event ) {
 
 	case picoquic_callback_ready:
-		Com_DPrintf( "QUIC client: connected to server %s\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: connected to server %s\n",
 			NET_AdrToString( &wtcl.server_addr ) );
 		{
 			/* Send TLV 0x01 CONNECT on session stream 0x00:
@@ -954,7 +954,7 @@ static int WN_ClientCallback(
 			if ( tlv_len > 0 ) {
 				picoquic_add_to_stream( cnx, WIREDNET_SESSION_STREAM_ID,
 					connect_tlv, (size_t)tlv_len, 0 );
-				Com_DPrintf( "QUIC client: sent TLV CONNECT on stream 0x%02X (%d bytes)\n",
+				Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: sent TLV CONNECT on stream 0x%02X (%d bytes)\n",
 					(unsigned)WIREDNET_SESSION_STREAM_ID, tlv_len );
 			}
 		}
@@ -977,7 +977,7 @@ static int WN_ClientCallback(
 
 				if ( tlv_type == 0x02 ) { /* ACCEPT */
 					wtcl.accept_pending = qtrue;
-					Com_DPrintf( "QUIC client: TLV ACCEPT received\n" );
+					Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: TLV ACCEPT received\n" );
 				} else if ( tlv_type == 0x03 ) { /* REFUSE */
 					char reason[MAX_INFO_STRING] = "refused";
 					if ( plen >= 2 ) {
@@ -989,7 +989,7 @@ static int WN_ClientCallback(
 						memcpy( reason, payload + 2, rlen );
 						reason[rlen] = '\0';
 					}
-					Com_Printf( S_COLOR_YELLOW "QUIC connect refused: %s\n", reason );
+					COM_WARN( LOG_CAT_NETWORK, "QUIC connect refused: %s\n", reason );
 					WN_ClientDisconnect();
 					return 0;
 				}
@@ -1007,14 +1007,14 @@ static int WN_ClientCallback(
 
 	case picoquic_callback_datagram:
 		if ( length <= 0 || length > WN_SNAP_DGRAM_MAX ) {
-			Com_DPrintf( "QUIC client: datagram len %zu out of range — dropped\n", length );
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: datagram len %zu out of range — dropped\n", length );
 			break;
 		}
 		{
 			int            next_head = ( wtcl.recv_head + 1 ) % WN_GAME_QUEUE_SIZE;
 			wn_snap_pkt_t *pkt;
 			if ( next_head == wtcl.recv_tail ) {
-				Com_DPrintf( "QUIC client: recv queue full — datagram dropped\n" );
+				Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC client: recv queue full — datagram dropped\n" );
 				break;
 			}
 			pkt            = &wtcl.recv_queue[wtcl.recv_head];
@@ -1032,7 +1032,7 @@ static int WN_ClientCallback(
 		{
 			uint64_t local_err  = cnx ? picoquic_get_local_error( cnx )  : 0;
 			uint64_t remote_err = cnx ? picoquic_get_remote_error( cnx ) : 0;
-			Com_Printf( "QUIC client: connection closed (event=%d local_err=%llu remote_err=%llu)\n",
+			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC client: connection closed (event=%d local_err=%llu remote_err=%llu)\n",
 				(int)event, (unsigned long long)local_err, (unsigned long long)remote_err );
 		}
 		/* Do NOT call WN_ClientDisconnect() here — we are inside a picoquic
@@ -1108,7 +1108,7 @@ static void WN_ClientFlushOutbound( void )
 
 	// Promote any sendto error from this frame to the connect-error slot.
 	if ( NET_HasLastSendError() && !wtcl.connect_failed ) {
-		Com_Printf( "*** WN_ClientFlushOutbound: send error → connect_failed: %s ***\n",
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "*** WN_ClientFlushOutbound: send error → connect_failed: %s ***\n",
 			NET_LastSendError() );
 		Q_strncpyz( wtcl.connect_error, NET_LastSendError(),
 		            sizeof( wtcl.connect_error ) );
@@ -1118,7 +1118,7 @@ static void WN_ClientFlushOutbound( void )
 	// Deferred disconnect: if the close callback fired during the loop above,
 	// now that we are outside picoquic it is safe to call picoquic_free.
 	if ( wtcl.pending_disconnect ) {
-		Com_Printf( "*** WN_ClientFlushOutbound: pending_disconnect → WN_ClientDisconnect ***\n" );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "*** WN_ClientFlushOutbound: pending_disconnect → WN_ClientDisconnect ***\n" );
 		wtcl.pending_disconnect = qfalse;
 		WN_ClientDisconnect();
 	}
@@ -1222,7 +1222,7 @@ static void wn_tofu_save( const char *addr, const char *fp )
 	wn_tofu_file_path( path, sizeof(path) );
 	f = fopen( path, "a" );
 	if ( !f ) {
-		Com_Printf( S_COLOR_YELLOW "QUIC TOFU: could not write %s\n", path );
+		COM_WARN( LOG_CAT_NETWORK, "QUIC TOFU: could not write %s\n", path );
 		return;
 	}
 	fseek( f, 0, SEEK_END );
@@ -1244,7 +1244,7 @@ static int tofu_override_cb(
 	(void)tls; (void)ret; (void)ossl_ret; (void)chain;
 
 	if ( !cert ) {
-		Com_Printf( S_COLOR_RED "QUIC TOFU: server presented no certificate\n" );
+		COM_ERROR( LOG_CAT_NETWORK, "QUIC TOFU: server presented no certificate\n" );
 		return -1;
 	}
 
@@ -1252,16 +1252,15 @@ static int tofu_override_cb(
 	chk = wn_tofu_check( ctx->addr, fp );
 
 	if ( chk == 1 ) {
-		Com_Printf( "^5QUIC TOFU: new server %s — trusting (SPKI SHA256: %.16s...)\n",
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "^5QUIC TOFU: new server %s — trusting (SPKI SHA256: %.16s...)\n",
 			ctx->addr, fp );
 		wn_tofu_save( ctx->addr, fp );
 		return 0;
 	} else if ( chk == 0 ) {
-		Com_DPrintf( "QUIC TOFU: cert OK for %s\n", ctx->addr );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC TOFU: cert OK for %s\n", ctx->addr );
 		return 0;
 	} else {
-		Com_Printf( S_COLOR_RED
-			"QUIC TOFU: certificate changed for %s!\n"
+		COM_ERROR( LOG_CAT_NETWORK, "QUIC TOFU: certificate changed for %s!\n"
 			"  Got SPKI SHA256: %.16s...\n"
 			"  Delete entry in known_servers.txt to reconnect.\n",
 			ctx->addr, fp );
@@ -1282,7 +1281,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	int                   ss_len = 0;
 
 	if ( wtcl.initialized ) {
-		Com_DPrintf( "WN_ClientConnect: already connected\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "WN_ClientConnect: already connected\n" );
 		return;
 	}
 
@@ -1302,7 +1301,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		current_time, NULL, NULL, NULL, 0 );
 
 	if ( !wtcl.quic ) {
-		Com_Printf( S_COLOR_RED "WN_ClientConnect: picoquic_create failed\n" );
+		COM_ERROR( LOG_CAT_NETWORK, "WN_ClientConnect: picoquic_create failed\n" );
 		wtcl.connect_failed = qtrue;
 		Q_strncpyz( wtcl.connect_error, "picoquic_create failed",
 		            sizeof( wtcl.connect_error ) );
@@ -1310,7 +1309,11 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	}
 
 	/* Certificate verification: TOFU by default; bypassed when wn_cert_verify=0. */
-	Cvar_Get( "wn_cert_verify", "1", CVAR_ARCHIVE );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "wn_cert_verify", "1", CVAR_ARCHIVE,
+			"Verify TLS certificate on QUIC connections. Set to 0 to use TOFU (trust on first use)." );
+		Cvar_Register( &d );
+	}
 	if ( Cvar_VariableIntegerValue( "wn_cert_verify" ) == 0 ) {
 		picoquic_set_null_verifier( wtcl.quic );
 	} else {
@@ -1386,7 +1389,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	}
 #endif
 	else {
-		Com_Printf( S_COLOR_RED "WN_ClientConnect: unsupported address type %d\n",
+		COM_ERROR( LOG_CAT_NETWORK, "WN_ClientConnect: unsupported address type %d\n",
 			serverAddr->type );
 		picoquic_free( wtcl.quic );
 		wtcl.quic = NULL;
@@ -1406,7 +1409,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	if ( !wtcl.cnx ) {
 		/* picoquic_create_client_cnx already calls picoquic_start_client_cnx internally.
 		 * NULL here means TLS init failed (ALPN missing, crypto error, etc.). */
-		Com_Printf( S_COLOR_RED "WN_ClientConnect: picoquic_create_client_cnx failed\n" );
+		COM_ERROR( LOG_CAT_NETWORK, "WN_ClientConnect: picoquic_create_client_cnx failed\n" );
 		picoquic_free( wtcl.quic );
 		wtcl.quic = NULL;
 		wtcl.connect_failed = qtrue;
@@ -1416,7 +1419,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	}
 
 	wtcl.initialized = qtrue;
-	Com_Printf( "QUIC client: connecting to %s...\n",
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC client: connecting to %s...\n",
 		NET_AdrToStringwPort( serverAddr ) );
 }
 
@@ -1450,7 +1453,7 @@ void WN_ClientDisconnect( void )
 	if ( !wtcl.initialized )
 		return;
 
-	Com_Printf( "*** WN_ClientDisconnect: called while initialized ***\n" );
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "*** WN_ClientDisconnect: called while initialized ***\n" );
 
 	/* Zero state BEFORE calling into picoquic. picoquic_free triggers
 	 * picoquic_delete_cnx → picoquic_connection_disconnect → callback_close
@@ -1533,7 +1536,7 @@ qboolean WN_ClientGetPacket( netadr_t *from, msg_t *message )
 void WN_ClientSendPacket( const netadr_t *to, const void *data, int length )
 {
 	if ( !wtcl.initialized || !wtcl.cnx ) {
-		Com_DPrintf( "WN_ClientSendPacket: no client connection\n" );
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "WN_ClientSendPacket: no client connection\n" );
 		return;
 	}
 	{
@@ -1545,7 +1548,7 @@ void WN_ClientSendPacket( const netadr_t *to, const void *data, int length )
 		else if ( !NET_IS_IPV6( a->type ) && !NET_IS_IPV6( to->type ) )
 			match = ( memcmp( a->ipv._4, to->ipv._4, 4 ) == 0 );
 		if ( !match ) {
-			Com_DPrintf( "WN_ClientSendPacket: address mismatch\n" );
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "WN_ClientSendPacket: address mismatch\n" );
 			return;
 		}
 	}
@@ -1576,7 +1579,7 @@ static void wn_listen( int port ) { (void)port; /* QUIC already bound in WN_Init
 static void wn_drop_client( conn_handle_t conn, const char *reason )
 {
 	picoquic_cnx_t *cnx = wn_get_cnx( conn );
-	Com_Printf( "*** wn_drop_client: conn=%llu reason=%s ***\n",
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "*** wn_drop_client: conn=%llu reason=%s ***\n",
 		(unsigned long long)conn, reason ? reason : "NULL" );
 	if ( cnx )
 		picoquic_close( cnx, 0 );
@@ -1607,7 +1610,7 @@ static void wn_disconnect( conn_handle_t conn, const char *reason )
 {
 #if !defined(DEDICATED)
 	if ( conn == CONN_CLIENT_HANDLE ) {
-		Com_Printf( "*** wn_disconnect: CONN_CLIENT_HANDLE reason=%s ***\n",
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "*** wn_disconnect: CONN_CLIENT_HANDLE reason=%s ***\n",
 			reason ? reason : "NULL" );
 		WN_ClientDisconnect();
 		return;
@@ -1704,7 +1707,7 @@ static void wn_send_reliable( conn_handle_t conn, int channel,
 	sending_from_client = ( conn == CONN_CLIENT_HANDLE ) ? qtrue : qfalse;
 	stream_id = wn_resolve_reliable_send_stream( cnx, channel, sending_from_client );
 	if ( stream_id == UINT64_MAX ) {
-		Com_Printf( S_COLOR_YELLOW "QUIC: invalid reliable channel %d for conn %llu\n",
+		COM_WARN( LOG_CAT_NETWORK, "QUIC: invalid reliable channel %d for conn %llu\n",
 			channel, (unsigned long long)conn );
 		return;
 	}
@@ -1712,7 +1715,7 @@ static void wn_send_reliable( conn_handle_t conn, int channel,
 		/* CHAN_BOOTSTRAP may exceed MAX_MSGLEN — allow up to WN_BOOTSTRAP_MAX. */
 		int max_payload = ( channel == CHAN_BOOTSTRAP ) ? WN_BOOTSTRAP_MAX : MAX_MSGLEN;
 		if ( !wn_reliable_channel_is_game( channel ) || len > max_payload ) {
-			Com_Printf( S_COLOR_YELLOW "QUIC: invalid reliable payload for channel %d\n",
+			COM_WARN( LOG_CAT_NETWORK, "QUIC: invalid reliable payload for channel %d\n",
 				channel );
 			return;
 		}
@@ -1732,7 +1735,7 @@ static void wn_send_reliable( conn_handle_t conn, int channel,
 	ret = picoquic_add_to_stream( cnx, stream_id, send_data, (size_t)send_len,
 		wn_reliable_channel_allows_fixed_stream( channel ) ? 0 : 1 );
 	if ( framed_heap ) Z_Free( framed );
-	WN_DBG( "QUIC: wn_send_reliable conn=%llu channel=%d len=%d ret=%d\n",
+	Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC: wn_send_reliable conn=%llu channel=%d len=%d ret=%d\n",
 		(unsigned long long)conn, channel, len, ret );
 }
 
@@ -1857,6 +1860,7 @@ transport_t quic_transport = {
 	NULL,              /* accept_callback — set by caller (Phase B) */
 	NULL,              /* ready_callback  — set by caller (Phase B2) */
 	wn_drop_client,
+	NULL,              /* drain_usercmds  — registered by server (sv_init.c) */
 	wn_connect,
 	wn_disconnect,
 	wn_send_unreliable,

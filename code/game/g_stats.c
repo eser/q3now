@@ -92,7 +92,7 @@ void G_WriteStatsJSON( void ) {
 
 	trap_FS_FOpenFile( filename, &f, FS_WRITE );
 	if ( !f ) {
-		G_Printf( "G_WriteStatsJSON: could not open %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_WriteStatsJSON: could not open %s\n", filename );
 		return;
 	}
 
@@ -153,7 +153,7 @@ void G_WriteStatsJSON( void ) {
 
 	trap_FS_FCloseFile( f );
 
-	G_Printf( "Stats exported to %s (%i players)\n", filename, playerCount );
+	Com_Log( SEV_INFO, LOG_CAT_GAME, "Stats exported to %s (%i players)\n", filename, playerCount );
 }
 
 #endif // FEAT_JSON_STATS

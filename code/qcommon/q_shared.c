@@ -252,7 +252,7 @@ void COM_ParseError( const ComParser *parser, const char *format, ... )
 	vsnprintf (string, sizeof(string), format, argptr);
 	va_end( argptr );
 
-	Com_Printf( "ERROR: %s, line %d: %s\n", parser->parsename, COM_GetCurrentParseLine( parser ), string );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ERROR: %s, line %d: %s\n", parser->parsename, COM_GetCurrentParseLine( parser ), string );
 }
 
 
@@ -265,7 +265,7 @@ void COM_ParseWarning( const ComParser *parser, const char *format, ... )
 	vsnprintf (string, sizeof(string), format, argptr);
 	va_end( argptr );
 
-	Com_Printf( "WARNING: %s, line %d: %s\n", parser->parsename, COM_GetCurrentParseLine( parser ), string );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: %s, line %d: %s\n", parser->parsename, COM_GetCurrentParseLine( parser ), string );
 }
 
 
@@ -709,7 +709,7 @@ COM_MatchToken
 static void COM_MatchToken( ComParser *parser, const char **buf_p, const char *match ) {
 	const char *token = COM_Parse( parser, buf_p );
 	if ( strcmp( token, match ) ) {
-		Com_Error( ERR_DROP, "MatchToken: %s != %s", token, match );
+		Com_Terminate( TERM_CLIENT_DROP, "MatchToken: %s != %s", token, match );
 	}
 }
 
@@ -905,17 +905,17 @@ void Q_strncpyz( char *dest, const char *src, int destsize )
 {
 	if ( !dest ) 
 	{
-		Com_Error( ERR_FATAL, "Q_strncpyz: NULL dest" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Q_strncpyz: NULL dest" );
 	}
 
 	if ( !src ) 
 	{
-		Com_Error( ERR_FATAL, "Q_strncpyz: NULL src" );
+		Com_Terminate( TERM_UNRECOVERABLE, "Q_strncpyz: NULL src" );
 	}
 
 	if ( destsize < 1 )
 	{
-		Com_Error(ERR_FATAL,"Q_strncpyz: destsize < 1" );
+		Com_Terminate( TERM_UNRECOVERABLE,"Q_strncpyz: destsize < 1" );
 	}
 #if 1 
 	// do not fill whole remaining buffer with zeros
@@ -945,7 +945,7 @@ char *Q_strncpy( char *dest, const char *src, int destsize )
 
 	if ( src_len > destsize ) {
 #ifdef _DEBUG
-		Com_Printf( S_COLOR_YELLOW "Q_strncpy: overlapped (src >= dst) buffers\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Q_strncpy: overlapped (src >= dst) buffers\n" );
 #endif
 		src_len = destsize;
 	}
@@ -1499,7 +1499,7 @@ const char *Info_ValueForKey( const char *s, const char *key )
 
 			if ( (int)(s - v) >= BIG_INFO_VALUE )
 			{
-				Com_Error( ERR_DROP, "Info_ValueForKey: oversize infostring" );
+				Com_Terminate( TERM_CLIENT_DROP, "Info_ValueForKey: oversize infostring" );
 			}
 			else
 			{
@@ -1769,17 +1769,17 @@ qboolean Info_SetValueForKey_s( char *s, int slen, const char *key, const char *
 	int len1 = (int)strlen( s );
 
 	if ( len1 >= slen ) {
-		Com_Printf( S_COLOR_YELLOW "Info_SetValueForKey(%s): oversize infostring\n", key );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Info_SetValueForKey(%s): oversize infostring\n", key );
 		return qfalse;
 	}
 
 	if ( !key || !Info_ValidateKeyValue( key ) || *key == '\0' ) {
-		Com_Printf( S_COLOR_YELLOW "Invalid key name: '%s'\n", key );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Invalid key name: '%s'\n", key );
 		return qfalse;
 	}
 
 	if ( value && !Info_ValidateKeyValue( value ) ) {
-		Com_Printf( S_COLOR_YELLOW "Invalid value name: '%s'\n", value );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Invalid value name: '%s'\n", value );
 		return qfalse;
 	}
 
@@ -1791,7 +1791,7 @@ qboolean Info_SetValueForKey_s( char *s, int slen, const char *key, const char *
 	int len2 = Com_sprintf( newi, sizeof( newi ), "\\%s\\%s", key, value );
 
 	if ( len1 + len2 >= slen ) {
-		Com_Printf( S_COLOR_YELLOW "Info string length exceeded for key '%s'\n", key );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Info string length exceeded for key '%s'\n", key );
 		return qfalse;
 	}
 
@@ -1801,5 +1801,3 @@ qboolean Info_SetValueForKey_s( char *s, int slen, const char *key, const char *
 
 
 //====================================================================
-
-

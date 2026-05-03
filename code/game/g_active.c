@@ -268,7 +268,7 @@ void	G_TouchTriggers( gentity_t *ent ) {
 			if ( hit->s.eType != ET_TELEPORT_TRIGGER &&
 				// this is ugly but adding a new ET_? type will
 				// most likely cause network incompatibilities
-				hit->touch != Touch_DoorTrigger) {
+				hit->touch != Q3_Touch_DoorTrigger) {
 				continue;
 			}
 		}
@@ -477,6 +477,46 @@ void ClientIntermissionThink( gclient_t *client ) {
 }
 
 
+void G_HoldableUpdateSelectedAfterChange( gentity_t *ent ) {
+	playerState_t *ps = &ent->client->ps;
+	int bits = ps->stats[STAT_HOLDABLE_BITS];
+	int cur  = bg_itemlist[ps->stats[STAT_HOLDABLE_ITEM]].giTag;
+
+	if ( cur != HI_NONE && ( bits & BG_HOLDABLE_BIT( cur ) ) && BG_HoldableIsSelectable( (holdable_t)cur ) )
+		return;
+
+	ps->stats[STAT_HOLDABLE_ITEM] = 0;
+	for ( int hi = 1; hi < HI_NUM_HOLDABLE; hi++ ) {
+		if ( ( bits & BG_HOLDABLE_BIT( hi ) ) && BG_HoldableIsSelectable( (holdable_t)hi ) ) {
+			ps->stats[STAT_HOLDABLE_ITEM] = BG_FindItemForHoldable( (holdable_t)hi ) - bg_itemlist;
+			break;
+		}
+	}
+}
+
+void G_HoldableAdvanceSelected( gentity_t *ent, int dir ) {
+	playerState_t *ps = &ent->client->ps;
+	int bits  = ps->stats[STAT_HOLDABLE_BITS];
+	int cur   = bg_itemlist[ps->stats[STAT_HOLDABLE_ITEM]].giTag;
+	int start = ( cur == HI_NONE ) ? ( dir > 0 ? HI_NONE : HI_NUM_HOLDABLE ) : cur;
+	int hi;
+
+	for ( hi = start + dir; hi > HI_NONE && hi < HI_NUM_HOLDABLE; hi += dir ) {
+		if ( ( bits & BG_HOLDABLE_BIT( hi ) ) && BG_HoldableIsSelectable( (holdable_t)hi ) ) {
+			ps->stats[STAT_HOLDABLE_ITEM] = BG_FindItemForHoldable( (holdable_t)hi ) - bg_itemlist;
+			return;
+		}
+	}
+	start = ( dir > 0 ) ? HI_NONE : HI_NUM_HOLDABLE;
+	for ( hi = start + dir; hi > HI_NONE && hi < HI_NUM_HOLDABLE; hi += dir ) {
+		if ( hi == cur ) break;
+		if ( ( bits & BG_HOLDABLE_BIT( hi ) ) && BG_HoldableIsSelectable( (holdable_t)hi ) ) {
+			ps->stats[STAT_HOLDABLE_ITEM] = BG_FindItemForHoldable( (holdable_t)hi ) - bg_itemlist;
+			return;
+		}
+	}
+}
+
 /*
 ================
 ClientEvents
@@ -514,16 +554,31 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			} else {
 				damage = 2;
 			}
+			trap_WCE_EmitEvent( WCE_PLAYER_FALL,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    event == EV_FALL_FAR ? 2 : 1,
+			                    0, 0.0f, NULL );
 			ent->pain_debounce_time = level.time + 200;	// no normal pain sound
             G_Damage(ent, NULL, NULL, NULL, NULL, damage, DAMAGE_NO_ARMOR, MOD_FALLING);
 			break;
 
 		case EV_FIRE_WEAPON_PRI:
 			FireWeapon( ent, 0 );
+			trap_WCE_EmitEvent( WCE_PLAYER_ATTACK_PRIMARY,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    ent->client->ps.weapon,
+			                    0, 0.0f, NULL );
 			break;
 
 		case EV_FIRE_WEAPON_SEC:
 			FireWeapon( ent, 1 );
+			trap_WCE_EmitEvent( WCE_PLAYER_ATTACK_SECONDARY,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    ent->client->ps.weapon,
+			                    0, 0.0f, NULL );
 			break;
 
 		case EV_USE_ITEM1:		// teleporter
@@ -576,35 +631,108 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 			}
 #endif
 			SelectSpawnPoint( ent->client->ps.origin, origin, angles, qfalse );
-			TeleportPlayer( ent, origin, angles );
+			TeleportPlayer( ent, origin, angles, 400 );
+			G_HoldableUpdateSelectedAfterChange( ent );
 			break;
 
 		case EV_USE_ITEM2:		// medkit
 			ent->health = MAX_HEALTH;
-
+			G_HoldableUpdateSelectedAfterChange( ent );
 			break;
 
 		case EV_USE_ITEM3:		// kamikaze
-			// make sure the invulnerability is off
-			ent->client->invulnerabilityTime = 0;
+			// make sure the deflector is off
+			ent->client->deflectorTime = 0;
+			ent->client->ps.powerups[PW_DEFLECTOR] = 0;
 
 			// start the kamikze
 			G_StartKamikaze( ent );
+			G_HoldableUpdateSelectedAfterChange( ent );
 			break;
 
 #if FEAT_PW_PORTAL
 		case EV_USE_ITEM4:		// portal
 			if( ent->client->portalID ) {
-				DropPortalSource( ent );
+				Q3_DropPortalSource( ent );
 			}
 			else {
-				DropPortalDestination( ent );
+				Q3_DropPortalDestination( ent );
 			}
+			G_HoldableUpdateSelectedAfterChange( ent );
 			break;
 #endif
 
-		case EV_USE_ITEM5:		// invulnerability
-			ent->client->invulnerabilityTime = level.time + 10000;
+		case EV_USE_ITEM5:		// deflector
+			ent->client->deflectorTime = level.time + 10000;
+			ent->client->ps.powerups[PW_DEFLECTOR] = ent->client->deflectorTime;
+			G_HoldableUpdateSelectedAfterChange( ent );
+			break;
+
+		case EV_FOOTSTEP:
+			trap_WCE_EmitEvent( WCE_PLAYER_FOOTSTEP,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
+			break;
+		case EV_FOOTSTEP_METAL:
+			trap_WCE_EmitEvent( WCE_PLAYER_FOOTSTEP,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    1, 0, 0.0f, NULL );
+			break;
+		case EV_FALL_SHORT:
+			trap_WCE_EmitEvent( WCE_PLAYER_FALL,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
+			break;
+		case EV_SWIM:
+			trap_WCE_EmitEvent( WCE_PLAYER_SWIM,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
+			break;
+		case EV_JUMP:
+			trap_WCE_EmitEvent( WCE_PLAYER_JUMP,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
+			break;
+		case EV_WATER_TOUCH:
+			trap_WCE_EmitEvent( WCE_PLAYER_WATER_ENTER,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
+			break;
+		case EV_WATER_LEAVE:
+			trap_WCE_EmitEvent( WCE_PLAYER_WATER_EXIT,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
+			break;
+		case EV_WATER_UNDER:
+			trap_WCE_EmitEvent( WCE_PLAYER_WATER_SUBMERGE,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
+			break;
+		case EV_WATER_CLEAR:
+			trap_WCE_EmitEvent( WCE_PLAYER_WATER_EXIT,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
+			break;
+		case EV_TAUNT:
+		case EV_TAUNT_YES:
+		case EV_TAUNT_NO:
+		case EV_TAUNT_FOLLOWME:
+		case EV_TAUNT_GETFLAG:
+		case EV_TAUNT_GUARDBASE:
+		case EV_TAUNT_PATROL:
+			trap_WCE_EmitEvent( WCE_PLAYER_TAUNT,
+			                    ent->s.number, ent->s.number,
+			                    ent->client->ps.origin,
+			                    0, 0, 0.0f, NULL );
 			break;
 
 		default:
@@ -721,11 +849,11 @@ void ClientThink_real( gentity_t *ent ) {
 	// sanity check the command time to prevent speedup cheating
 	if ( ucmd->serverTime > level.time + 200 ) {
 		ucmd->serverTime = level.time + 200;
-//		G_Printf("serverTime <<<<<\n" );
+//		Com_Log( SEV_INFO, LOG_CAT_GAME, "serverTime <<<<<\n" );
 	}
 	if ( ucmd->serverTime < level.time - 1000 ) {
 		ucmd->serverTime = level.time - 1000;
-//		G_Printf("serverTime >>>>>\n" );
+//		Com_Log( SEV_INFO, LOG_CAT_GAME, "serverTime >>>>>\n" );
 	}
 
 	msec = ucmd->serverTime - client->ps.commandTime;
@@ -836,29 +964,27 @@ void ClientThink_real( gentity_t *ent ) {
 		ent->client->pers.cmd.buttons |= BUTTON_GESTURE;
 	}
 
-	// check for invulnerability expansion before doing the Pmove
-	if (client->ps.powerups[PW_INVULNERABILITY] ) {
-		if ( !(client->ps.pm_flags & PMF_INVULEXPAND) ) {
-			vec3_t mins = { -INVUL_RADIUS, -INVUL_RADIUS, -INVUL_RADIUS };
-			vec3_t maxs = { INVUL_RADIUS, INVUL_RADIUS, INVUL_RADIUS };
-			vec3_t oldmins, oldmaxs;
+	// check for deflector expansion before doing the Pmove
+	if ( client->deflectorTime && !(client->ps.pm_flags & PMF_DEFLECTOR_EXPAND) ) {
+		vec3_t mins = { -INVUL_RADIUS, -INVUL_RADIUS, -INVUL_RADIUS };
+		vec3_t maxs = { INVUL_RADIUS, INVUL_RADIUS, INVUL_RADIUS };
+		vec3_t oldmins, oldmaxs;
 
-			VectorCopy (ent->r.mins, oldmins);
-			VectorCopy (ent->r.maxs, oldmaxs);
-			// expand
-			VectorCopy (mins, ent->r.mins);
-			VectorCopy (maxs, ent->r.maxs);
-			trap_LinkEntity(ent);
-			// check if this would get anyone stuck in this player
-			if ( !StuckInOtherClient(ent) ) {
-				// set flag so the expanded size will be set in PM_CheckDuck
-				client->ps.pm_flags |= PMF_INVULEXPAND;
-			}
-			// set back
-			VectorCopy (oldmins, ent->r.mins);
-			VectorCopy (oldmaxs, ent->r.maxs);
-			trap_LinkEntity(ent);
+		VectorCopy (ent->r.mins, oldmins);
+		VectorCopy (ent->r.maxs, oldmaxs);
+		// expand
+		VectorCopy (mins, ent->r.mins);
+		VectorCopy (maxs, ent->r.maxs);
+		trap_LinkEntity(ent);
+		// check if this would get anyone stuck in this player
+		if ( !StuckInOtherClient(ent) ) {
+			// set flag so the expanded size will be set in PM_CheckDuck
+			client->ps.pm_flags |= PMF_DEFLECTOR_EXPAND;
 		}
+		// set back
+		VectorCopy (oldmins, ent->r.mins);
+		VectorCopy (oldmaxs, ent->r.maxs);
+		trap_LinkEntity(ent);
 	}
 
 	pm.ps = &client->ps;
@@ -875,6 +1001,7 @@ void ClientThink_real( gentity_t *ent ) {
 	pm.trace = trap_Trace;
 	pm.pointcontents = trap_PointContents;
 	pm.debugLevel = g_debugMove.integer;
+	pm.stepDebugLevel = pm_step_debug.integer;
 	pm.noFootsteps = g_noFootsteps.integer;
 
 	pm.pmove_fixed = pmove_fixed.integer | client->pers.pmoveFixed;
@@ -947,7 +1074,7 @@ void ClientThink_real( gentity_t *ent ) {
 	// execute client events
 	ClientEvents( ent, oldEventSequence );
 
-	// link entity now, after any personal teleporters have been used
+	// link entity now, after any teleporters have been used
 	trap_LinkEntity (ent);
 	if ( !ent->client->noclip ) {
 		G_TouchTriggers( ent );
@@ -1206,10 +1333,6 @@ void ClientEndFrame( gentity_t *ent ) {
 		}
 	}
 #endif
-
-	if ( ent->client->invulnerabilityTime > level.time ) {
-		ent->client->ps.powerups[PW_INVULNERABILITY] = level.time;
-	}
 
 	// save network bandwidth
 #if 0

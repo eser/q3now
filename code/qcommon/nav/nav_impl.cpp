@@ -90,9 +90,9 @@ class NavContext : public rcContext {
 protected:
     void doLog( const rcLogCategory cat, const char *msg, const int ) override {
         if ( cat == RC_LOG_ERROR || cat == RC_LOG_WARNING )
-            Com_Printf( "NAV: [RC] %s\n", msg );
+            Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: [RC] %s\n", msg );
         else
-            Com_DPrintf( "NAV: [RC] %s\n", msg );
+            Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: [RC] %s\n", msg );
     }
 };
 
@@ -158,7 +158,7 @@ static void buildOmcArrays( const navOmcInput_t *omc, OmcArrays *out )
 static dtNavMesh *Nav_Build_Internal( const navGeom_t *geom, const navOmcInput_t *omc )
 {
     if ( !geom || geom->numVerts == 0 || geom->numTris == 0 ) {
-        Com_Printf( "NAV: Nav_Build_Internal called with empty geometry\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: Nav_Build_Internal called with empty geometry\n" );
         return NULL;
     }
 
@@ -177,10 +177,10 @@ static dtNavMesh *Nav_Build_Internal( const navGeom_t *geom, const navOmcInput_t
 
     /* 2. Heightfield */
     rcHeightfield *hf = rcAllocHeightfield();
-    if ( !hf ) { Com_Printf( "NAV: rcAllocHeightfield failed\n" ); return NULL; }
+    if ( !hf ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcAllocHeightfield failed\n" ); return NULL; }
 
     if ( !rcCreateHeightfield( &ctx, *hf, gw, gh, bmin, bmax, NAV_CS, NAV_CH ) ) {
-        Com_Printf( "NAV: rcCreateHeightfield failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcCreateHeightfield failed\n" );
         rcFreeHeightField( hf ); return NULL;
     }
 
@@ -194,7 +194,7 @@ static dtNavMesh *Nav_Build_Internal( const navGeom_t *geom, const navOmcInput_t
      * RC_NULL_AREA — never any other value.  The assert below self-documents this. */
     unsigned char *workAreas = (unsigned char *)Z_Malloc( geom->numTris );
     if ( !workAreas ) {
-        Com_Printf( "NAV: Z_Malloc workAreas failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: Z_Malloc workAreas failed\n" );
         rcFreeHeightField( hf ); return NULL;
     }
     memset( workAreas, RC_NULL_AREA, (size_t)geom->numTris );
@@ -211,7 +211,7 @@ static dtNavMesh *Nav_Build_Internal( const navGeom_t *geom, const navOmcInput_t
 
     if ( !rcRasterizeTriangles( &ctx, geom->verts, geom->numVerts,
                                  geom->tris, workAreas, geom->numTris, *hf, walkC ) ) {
-        Com_Printf( "NAV: rcRasterizeTriangles failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcRasterizeTriangles failed\n" );
         Z_Free( workAreas ); rcFreeHeightField( hf ); return NULL;
     }
     Z_Free( workAreas );
@@ -226,11 +226,11 @@ static dtNavMesh *Nav_Build_Internal( const navGeom_t *geom, const navOmcInput_t
     /* 3. Compact heightfield (use crouchH so low-clearance spans are included) */
     rcCompactHeightfield *chf = rcAllocCompactHeightfield();
     if ( !chf ) {
-        Com_Printf( "NAV: rcAllocCompactHeightfield failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcAllocCompactHeightfield failed\n" );
         rcFreeHeightField( hf ); return NULL;
     }
     if ( !rcBuildCompactHeightfield( &ctx, crouchH, walkC, *hf, *chf ) ) {
-        Com_Printf( "NAV: rcBuildCompactHeightfield failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcBuildCompactHeightfield failed\n" );
         rcFreeHeightField( hf ); rcFreeCompactHeightfield( chf ); return NULL;
     }
     rcFreeHeightField( hf ); hf = NULL;
@@ -259,32 +259,32 @@ static dtNavMesh *Nav_Build_Internal( const navGeom_t *geom, const navOmcInput_t
     /* 4. Erosion */
     const int walkR = (int)floorf( NAV_WALKABLE_RADIUS / NAV_CS );
     if ( !rcErodeWalkableArea( &ctx, walkR, *chf ) ) {
-        Com_Printf( "NAV: rcErodeWalkableArea failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcErodeWalkableArea failed\n" );
         rcFreeCompactHeightfield( chf ); return NULL;
     }
 
     /* 5. Regions */
     if ( !rcBuildDistanceField( &ctx, *chf ) ) {
-        Com_Printf( "NAV: rcBuildDistanceField failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcBuildDistanceField failed\n" );
         rcFreeCompactHeightfield( chf ); return NULL;
     }
     if ( !rcBuildRegions( &ctx, *chf, 0, NAV_MIN_REGION_AREA, NAV_MERGE_REGION_AREA ) ) {
-        Com_Printf( "NAV: rcBuildRegions failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcBuildRegions failed\n" );
         rcFreeCompactHeightfield( chf ); return NULL;
     }
 
     /* 6. Contours → poly mesh */
     rcContourSet *cset = rcAllocContourSet();
-    if ( !cset ) { Com_Printf( "NAV: rcAllocContourSet failed\n" ); rcFreeCompactHeightfield( chf ); return NULL; }
+    if ( !cset ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcAllocContourSet failed\n" ); rcFreeCompactHeightfield( chf ); return NULL; }
     if ( !rcBuildContours( &ctx, *chf, NAV_MAX_SIMPLIFICATION_ERR, (int)NAV_MAX_EDGE_LEN, *cset ) ) {
-        Com_Printf( "NAV: rcBuildContours failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcBuildContours failed\n" );
         rcFreeCompactHeightfield( chf ); rcFreeContourSet( cset ); return NULL;
     }
 
     rcPolyMesh *pmesh = rcAllocPolyMesh();
-    if ( !pmesh ) { Com_Printf( "NAV: rcAllocPolyMesh failed\n" ); rcFreeCompactHeightfield( chf ); rcFreeContourSet( cset ); return NULL; }
+    if ( !pmesh ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcAllocPolyMesh failed\n" ); rcFreeCompactHeightfield( chf ); rcFreeContourSet( cset ); return NULL; }
     if ( !rcBuildPolyMesh( &ctx, *cset, NAV_MAX_VERTS_PER_POLY, *pmesh ) ) {
-        Com_Printf( "NAV: rcBuildPolyMesh failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcBuildPolyMesh failed\n" );
         rcFreeCompactHeightfield( chf ); rcFreeContourSet( cset ); rcFreePolyMesh( pmesh ); return NULL;
     }
     rcFreeContourSet( cset ); cset = NULL;
@@ -376,13 +376,13 @@ static dtNavMesh *Nav_Build_Internal( const navGeom_t *geom, const navOmcInput_t
                 omcArrs.count++;
             }
         }
-        Com_DPrintf( "[NAV] drop OMCs detected: %d\n", omcArrs.count - numExtOmcs );
+        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "[NAV] drop OMCs detected: %d\n", omcArrs.count - numExtOmcs );
     }
 
     rcPolyMeshDetail *dmesh = rcAllocPolyMeshDetail();
-    if ( !dmesh ) { Com_Printf( "NAV: rcAllocPolyMeshDetail failed\n" ); rcFreeCompactHeightfield( chf ); rcFreePolyMesh( pmesh ); return NULL; }
+    if ( !dmesh ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcAllocPolyMeshDetail failed\n" ); rcFreeCompactHeightfield( chf ); rcFreePolyMesh( pmesh ); return NULL; }
     if ( !rcBuildPolyMeshDetail( &ctx, *pmesh, *chf, NAV_DETAIL_SAMPLE_DIST, NAV_DETAIL_SAMPLE_MAX_ERR, *dmesh ) ) {
-        Com_Printf( "NAV: rcBuildPolyMeshDetail failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: rcBuildPolyMeshDetail failed\n" );
         rcFreeCompactHeightfield( chf ); rcFreePolyMesh( pmesh ); rcFreePolyMeshDetail( dmesh ); return NULL;
     }
     rcFreeCompactHeightfield( chf ); chf = NULL;
@@ -433,20 +433,20 @@ static dtNavMesh *Nav_Build_Internal( const navGeom_t *geom, const navOmcInput_t
 
     unsigned char *navData = NULL; int navDataSize = 0;
     if ( !dtCreateNavMeshData( &params, &navData, &navDataSize ) ) {
-        Com_Printf( "NAV: dtCreateNavMeshData failed (%d polys)\n", pmesh->npolys );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: dtCreateNavMeshData failed (%d polys)\n", pmesh->npolys );
         rcFreePolyMesh( pmesh ); rcFreePolyMeshDetail( dmesh ); return NULL;
     }
     rcFreePolyMesh( pmesh ); rcFreePolyMeshDetail( dmesh );
 
     dtNavMesh *mesh = dtAllocNavMesh();
-    if ( !mesh ) { dtFree( navData ); Com_Printf( "NAV: dtAllocNavMesh failed\n" ); return NULL; }
+    if ( !mesh ) { dtFree( navData ); Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: dtAllocNavMesh failed\n" ); return NULL; }
     dtStatus status = mesh->init( navData, navDataSize, DT_TILE_FREE_DATA );
     if ( dtStatusFailed(status) ) {
         dtFree( navData ); dtFreeNavMesh( mesh );
-        Com_Printf( "NAV: dtNavMesh::init failed (0x%08x)\n", (unsigned)status );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: dtNavMesh::init failed (0x%08x)\n", (unsigned)status );
         return NULL;
     }
-    Com_DPrintf( "NAV: navmesh built -- %d bytes, %d OMCs (%d drop)\n",
+    Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: navmesh built -- %d bytes, %d OMCs (%d drop)\n",
                  navDataSize, omcArrs.count, omcArrs.count - (omc ? omc->count : 0) );
     return mesh;
 }
@@ -510,13 +510,13 @@ void Nav_Init( void )
 {
     memset( &nav, 0, sizeof(nav) );
     Nav_Debug_RegisterCommands();
-    Com_DPrintf( "[NAV] Nav_Init: Recast/Detour nav layer initialised\n" );
+    Com_Log( SEV_DEBUG, LOG_CAT_NAV, "[NAV] Nav_Init: Recast/Detour nav layer initialised\n" );
 }
 
 void Nav_Shutdown( void )
 {
     Nav_UnloadMap();
-    Com_DPrintf( "[NAV] Nav_Shutdown\n" );
+    Com_Log( SEV_DEBUG, LOG_CAT_NAV, "[NAV] Nav_Shutdown\n" );
 }
 
 void Nav_UnloadMap( void )
@@ -546,7 +546,7 @@ void Nav_LoadMap( const char *mapname )
             nav.fromCache = qtrue;
             int ms = Sys_Milliseconds() - tStart;
             nav.buildMs   = ms;
-            Com_Printf( "[NAV] loaded from cache: %d ms\n", ms );
+            Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] loaded from cache: %d ms\n", ms );
             goto query_init;
         }
     }
@@ -558,26 +558,26 @@ void Nav_LoadMap( const char *mapname )
 
         int t0 = Sys_Milliseconds();
         if ( !Nav_Geom_Extract( mapname, &geom, &omc ) ) {
-            Com_Printf( "[NAV] Nav_LoadMap: geometry extraction failed for '%s'\n", mapname );
+            Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_LoadMap: geometry extraction failed for '%s'\n", mapname );
             return;
         }
 
         if ( geom.numTris == 0 ) {
-            Com_Printf( "[NAV] Nav_LoadMap: no geometry in '%s'\n", mapname );
+            Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_LoadMap: no geometry in '%s'\n", mapname );
             Nav_OMC_Free( &omc );
             Nav_Geom_Free( &geom );
             return;
         }
 
         int t1 = Sys_Milliseconds();
-        Com_Printf( "[NAV] geometry extraction: %d ms (%d verts, %d tris)\n",
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] geometry extraction: %d ms (%d verts, %d tris)\n",
                     t1 - t0, geom.numVerts, geom.numTris );
 
         nav.mesh = Nav_Build_Internal( &geom, &omc );
 
         int t2 = Sys_Milliseconds();
-        Com_Printf( "[NAV] Recast pipeline:     %d ms\n", t2 - t1 );
-        Com_Printf( "[NAV] total build:         %d ms\n", t2 - t0 );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Recast pipeline:     %d ms\n", t2 - t1 );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] total build:         %d ms\n", t2 - t0 );
 
         nav.buildMs   = t2 - t0;
         nav.fromCache = qfalse;
@@ -586,7 +586,7 @@ void Nav_LoadMap( const char *mapname )
         Nav_Geom_Free( &geom );
 
         if ( !nav.mesh ) {
-            Com_Printf( "[NAV] Nav_LoadMap: build failed for '%s'\n", mapname );
+            Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_LoadMap: build failed for '%s'\n", mapname );
             return;
         }
 
@@ -598,12 +598,12 @@ void Nav_LoadMap( const char *mapname )
 query_init:
     nav.query = dtAllocNavMeshQuery();
     if ( !nav.query ) {
-        Com_Printf( "[NAV] dtAllocNavMeshQuery failed\n" );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] dtAllocNavMeshQuery failed\n" );
         Nav_Impl_FreeMesh( nav.mesh ); nav.mesh = NULL; return;
     }
     dtStatus st = nav.query->init( nav.mesh, NAV_MAX_QUERY_NODES );
     if ( dtStatusFailed(st) ) {
-        Com_Printf( "[NAV] dtNavMeshQuery::init failed (0x%08x)\n", (unsigned)st );
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] dtNavMeshQuery::init failed (0x%08x)\n", (unsigned)st );
         dtFreeNavMeshQuery( nav.query ); nav.query = NULL;
         Nav_Impl_FreeMesh( nav.mesh );  nav.mesh  = NULL; return;
     }
@@ -612,7 +612,7 @@ query_init:
     Nav_TagDoorAreas( mapname );
 
     nav.ready = qtrue;
-    Com_Printf( "[NAV] navmesh ready for '%s' (%s)\n",
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] navmesh ready for '%s' (%s)\n",
                 mapname, nav.fromCache ? "from cache" : "built" );
 }
 
@@ -683,7 +683,7 @@ int Nav_FindPath( const float *qOrigin, const float *qGoal,
         for ( int i = 0; i < count; i++ ) {
             if ( straightFlags[i] & 0x04 ) { hasOmc = true; break; }
         }
-        Com_DPrintf( "[BOTNAV] FindPath engine: %d polys -> %d pts%s\n",
+        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "[BOTNAV] FindPath engine: %d polys -> %d pts%s\n",
                      numPolys, count, hasOmc ? " [OMC]" : "" );
     }
 
@@ -767,6 +767,87 @@ qboolean Nav_GetRandomPoint( int areaFilter, float *qPosOut )
 }
 
 /* -------------------------------------------------------------------------
+   Nav_PredictEnemyPosition — Phase 5.5 Detour-based aim prediction
+   Forward-simulate enemy trajectory on the navmesh surface using
+   moveAlongSurface.  Replaces trap_AAS_PredictClientMovement at high skill.
+   Inputs in Quake world-space; output in Quake world-space.
+   ------------------------------------------------------------------------- */
+void Nav_PredictEnemyPosition( const float *qOrigin, const float *qVelocity,
+                                float predictTime, float *qPosOut )
+{
+    /* Return current position on any failure — caller still has velocity lead. */
+    if ( !nav.ready || !nav.query || predictTime <= 0.0f ) {
+        qPosOut[0] = qOrigin[0]; qPosOut[1] = qOrigin[1]; qPosOut[2] = qOrigin[2];
+        return;
+    }
+
+    /* Skip simulation if velocity is negligible (< 10 ups). */
+    float velSqLen = qVelocity[0]*qVelocity[0]
+                   + qVelocity[1]*qVelocity[1]
+                   + qVelocity[2]*qVelocity[2];
+    if ( velSqLen < 100.0f ) {  /* 10² */
+        qPosOut[0] = qOrigin[0]; qPosOut[1] = qOrigin[1]; qPosOut[2] = qOrigin[2];
+        return;
+    }
+
+    /* Convert to Recast coordinate space: (x, y, z) → (x, z, -y). */
+    float rPos[3], rVel[3];
+    Nav_QuakeToRecastV( qOrigin,   rPos );
+    Nav_QuakeToRecastV( qVelocity, rVel );
+
+    const dtQueryFilter *filter = GetFilter();
+    float     nearPt[3];
+    dtPolyRef startRef = 0;
+    nav.query->findNearestPoly( rPos, kDefaultExtents, filter, &startRef, nearPt );
+    if ( !startRef ) {
+        qPosOut[0] = qOrigin[0]; qPosOut[1] = qOrigin[1]; qPosOut[2] = qOrigin[2];
+        return;
+    }
+
+    /* Forward-simulate in 10 ms steps.  Max 80 steps (= 0.8 s, covers rocket range). */
+    const float dt       = 0.01f;
+    const int   maxSteps = (int)( predictTime / dt ) + 1;
+    const int   capSteps = maxSteps < 80 ? maxSteps : 80;
+
+    dtPolyRef visited[16];
+    int       visitedCount = 0;
+    dtPolyRef curRef = startRef;
+    float     curPos[3] = { rPos[0], rPos[1], rPos[2] };
+
+    for ( int step = 0; step < capSteps; step++ ) {
+        float endPos[3] = {
+            curPos[0] + rVel[0] * dt,
+            curPos[1] + rVel[1] * dt,
+            curPos[2] + rVel[2] * dt
+        };
+
+        float     resultPos[3];
+        dtStatus  st = nav.query->moveAlongSurface(
+            curRef, curPos, endPos, filter,
+            resultPos, visited, &visitedCount, 16 );
+
+        if ( dtStatusFailed(st) ) break;
+
+        if ( visitedCount > 0 )
+            curRef = visited[visitedCount - 1];
+
+        /* Stop early if step was clipped more than 8 units (hit a boundary wall). */
+        float dx = resultPos[0] - endPos[0];
+        float dz = resultPos[2] - endPos[2];
+        if ( dx*dx + dz*dz > 64.0f ) {  /* 8² — horizontal clip only */
+            curPos[0] = resultPos[0]; curPos[1] = resultPos[1]; curPos[2] = resultPos[2];
+            break;
+        }
+
+        curPos[0] = resultPos[0];
+        curPos[1] = resultPos[1];
+        curPos[2] = resultPos[2];
+    }
+
+    Nav_RecastToQuakeV( curPos, qPosOut );
+}
+
+/* -------------------------------------------------------------------------
    Nav_SetPolyFlagsForDoor — D-19 runtime door hookup
    Set or clear poly flags for all polys belonging to 'targetname' door.
    Called from gamecode via trap at door state transition-start.
@@ -804,7 +885,7 @@ static void Nav_TagDoorAreas( const char *mapname )
     navDoorBox_t *boxes = NULL;
     int numBoxes = Nav_Get_DoorBoxes( mapname, &boxes );
     if ( numBoxes <= 0 || !boxes ) {
-        Com_DPrintf( "[NAV] no func_door entities on %s\n", mapname );
+        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "[NAV] no func_door entities on %s\n", mapname );
         return;
     }
 
@@ -863,7 +944,7 @@ static void Nav_TagDoorAreas( const char *mapname )
         }
     }
 
-    Com_Printf( "[NAV] tagged %d polys as NAVAREA_DOOR from %d func_door entities on %s\n",
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] tagged %d polys as NAVAREA_DOOR from %d func_door entities on %s\n",
                 polyCount, numBoxes, mapname );
     Z_Free( boxes );
 }
@@ -878,7 +959,7 @@ static void Nav_TagDoorAreas( const char *mapname )
    ------------------------------------------------------------------------- */
 static void Nav_DrawCmd( void )
 {
-    if ( !nav.ready || !nav.mesh ) { Com_Printf( "NAV: navmesh not loaded\n" ); return; }
+    if ( !nav.ready || !nav.mesh ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: navmesh not loaded\n" ); return; }
 
     const char *mapname = nav.mapname[0] ? nav.mapname : "unknown";
 
@@ -888,7 +969,7 @@ static void Nav_DrawCmd( void )
 
     fileHandle_t mtlF = 0;
     FS_FOpenFileByMode( mtlName, &mtlF, FS_WRITE );
-    if ( !mtlF ) { Com_Printf( "[NAV] nav_draw: cannot open %s\n", mtlName ); return; }
+    if ( !mtlF ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] nav_draw: cannot open %s\n", mtlName ); return; }
 
     FS_Printf( mtlF, "# q3now navmesh materials\n" );
     FS_Printf( mtlF, "newmtl nav_ground\n"      "Kd 0.6 0.6 0.6\n\n" );
@@ -901,7 +982,7 @@ static void Nav_DrawCmd( void )
 
     fileHandle_t f = 0;
     FS_FOpenFileByMode( objName, &f, FS_WRITE );
-    if ( !f ) { Com_Printf( "[NAV] nav_draw: cannot open %s\n", objName ); return; }
+    if ( !f ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] nav_draw: cannot open %s\n", objName ); return; }
 
     /* Timestamp (server frames, not wall clock — we don't have strftime) */
     FS_Printf( f, "# q3now navmesh export: %s\n", mapname );
@@ -1013,7 +1094,7 @@ static void Nav_DrawCmd( void )
     }
 
     FS_FCloseFile( f );
-    Com_Printf( "[NAV] wrote %d verts, %d tris to navmesh/%s.obj\n",
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] wrote %d verts, %d tris to navmesh/%s.obj\n",
                 totalVerts, totalTris, mapname );
 }
 
@@ -1024,9 +1105,9 @@ static void Nav_DrawCmd( void )
 static void Nav_SetBlockedCmd( void )
 {
     if ( Cmd_Argc() < 3 ) {
-        Com_Printf( "Usage: nav_setblocked <polyref> <0|1>\n" ); return;
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "Usage: nav_setblocked <polyref> <0|1>\n" ); return;
     }
-    if ( !nav.ready || !nav.mesh ) { Com_Printf( "NAV: navmesh not loaded\n" ); return; }
+    if ( !nav.ready || !nav.mesh ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: navmesh not loaded\n" ); return; }
 
     dtPolyRef ref = (dtPolyRef)atoi( Cmd_Argv(1) );
     int block     = atoi( Cmd_Argv(2) );
@@ -1034,7 +1115,7 @@ static void Nav_SetBlockedCmd( void )
     unsigned short flags = 0;
     dtStatus st = nav.mesh->getPolyFlags( ref, &flags );
     if ( dtStatusFailed(st) ) {
-        Com_Printf( "[NAV] nav_setblocked: invalid polyref %u\n", (unsigned)ref ); return;
+        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] nav_setblocked: invalid polyref %u\n", (unsigned)ref ); return;
     }
 
     if ( block )
@@ -1043,12 +1124,12 @@ static void Nav_SetBlockedCmd( void )
         flags = (unsigned short)(flags & ~(unsigned short)NAVPOLY_BLOCKED);
 
     nav.mesh->setPolyFlags( ref, flags );
-    Com_Printf( "[NAV] poly %u %s\n", (unsigned)ref, block ? "blocked" : "unblocked" );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] poly %u %s\n", (unsigned)ref, block ? "blocked" : "unblocked" );
 }
 
 static void Nav_InfoCmd( void )
 {
-    if ( !nav.ready || !nav.mesh ) { Com_Printf( "NAV: navmesh not loaded\n" ); return; }
+    if ( !nav.ready || !nav.mesh ) { Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: navmesh not loaded\n" ); return; }
     const dtNavMeshParams *params = nav.mesh->getParams();
     int totalPolys = 0, totalVerts = 0;
     int maxTiles = nav.mesh->getMaxTiles();
@@ -1058,17 +1139,22 @@ static void Nav_InfoCmd( void )
         totalPolys += tile->header->polyCount;
         totalVerts += tile->header->vertCount;
     }
-    Com_Printf( "--- NAV INFO ---\n" );
-    Com_Printf( "  Ready       : %s\n",    nav.ready     ? "yes" : "no" );
-    Com_Printf( "  Map         : %s\n",    nav.mapname[0] ? nav.mapname : "(none)" );
-    Com_Printf( "  Tile origin : %.1f %.1f %.1f\n", params->orig[0], params->orig[1], params->orig[2] );
-    Com_Printf( "  Tile size   : %.1f x %.1f\n",    params->tileWidth, params->tileHeight );
-    Com_Printf( "  Max tiles   : %d\n",    params->maxTiles );
-    Com_Printf( "  Polys/verts : %d / %d\n", totalPolys, totalVerts );
-    Com_Printf( "  Cache from  : %s\n",    nav.fromCache ? "disk" : "built" );
-    Com_Printf( "  Build time  : %d ms (%s)\n", nav.buildMs,
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "--- NAV INFO ---\n" );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "  Ready       : %s\n",    nav.ready     ? "yes" : "no" );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "  Map         : %s\n",    nav.mapname[0] ? nav.mapname : "(none)" );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "  Tile origin : %.1f %.1f %.1f\n", params->orig[0], params->orig[1], params->orig[2] );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "  Tile size   : %.1f x %.1f\n",    params->tileWidth, params->tileHeight );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "  Max tiles   : %d\n",    params->maxTiles );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "  Polys/verts : %d / %d\n", totalPolys, totalVerts );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "  Cache from  : %s\n",    nav.fromCache ? "disk" : "built" );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "  Build time  : %d ms (%s)\n", nav.buildMs,
                 nav.fromCache ? "from cache" : "built this session" );
-    Com_Printf( "--- END NAV ---\n" );
+    Com_Log( SEV_INFO, LOG_CAT_NAV, "--- END NAV ---\n" );
+}
+
+static void Nav_ClearCmd( void )
+{
+    Nav_ClearCache( Cmd_Argc() > 1 ? Cmd_Argv(1) : NULL );
 }
 
 void Nav_Debug_RegisterCommands( void )
@@ -1076,6 +1162,7 @@ void Nav_Debug_RegisterCommands( void )
     Cmd_AddCommand( "nav_info",       Nav_InfoCmd );
     Cmd_AddCommand( "nav_draw",       Nav_DrawCmd );
     Cmd_AddCommand( "nav_setblocked", Nav_SetBlockedCmd );
+    Cmd_AddCommand( "nav_clear",      Nav_ClearCmd );
 }
 
 } /* extern "C" */

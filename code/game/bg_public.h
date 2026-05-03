@@ -24,17 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // bg_public.h -- definitions shared by both the server game and client game modules
 
-// ── Quake3e / ioquake3 macro compatibility ───────────────────────────────────
-// ioquake3 game code uses Q_PRINTF_FUNC / Q_NO_RETURN; Quake3e's q_shared.h
-// provides FORMAT_PRINTF / NORETURN instead.  Add aliases here so game
-// modules compile unchanged against either engine header set.
-#ifndef Q_PRINTF_FUNC
-#define Q_PRINTF_FUNC(x, y) FORMAT_PRINTF(x, y)
-#endif
-#ifndef Q_NO_RETURN
-#define Q_NO_RETURN NORETURN
-#endif
-
 // Quake3e engine extension syscall index — defined in engine's qcommon.h but
 // referenced by g_public.h and cg_public.h which game modules include.
 // Game modules don't include qcommon.h, so define it here.
@@ -190,6 +179,19 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 #endif
 #endif
 
+// Lightstyle pattern strings (game → renderer channel).
+// 64 slots: slot i = style i, covering styles 0-63.
+//   Styles  0-10: vanilla Q1 animated pattern strings (e.g. "mmnmmommommnonmmonqnmmo")
+//   Styles 11-31: "m" (constant baseline, full brightness)
+//   Styles 32-63: "" (off) or "m" (on) for trigger-controlled switchable lights
+// Value stored as a pattern string; renderer animates at 10Hz from character sequence.
+#define CS_LIGHTSTYLES		(CS_MAX+2)
+#define CS_MAX_LIGHTSTYLES	64
+#define LIGHTSTYLE_PATTERN_MAX	64
+#if (CS_LIGHTSTYLES + CS_MAX_LIGHTSTYLES - 1) >= MAX_CONFIGSTRINGS
+#error overflow: CS_LIGHTSTYLES range exceeds MAX_CONFIGSTRINGS
+#endif
+
 typedef enum {
 	GT_DEATHMATCH,		// deathmatch
 	GT_DUEL,			// one on one tournament
@@ -257,19 +259,19 @@ typedef enum {
 } weaponstate_t;
 
 // pmove->pm_flags
-#define	PMF_DUCKED			1
-#define	PMF_JUMP_HELD		2
-#define	PMF_BACKWARDS_JUMP	8		// go into backwards land
-#define	PMF_BACKWARDS_RUN	16		// coast down to backwards run
-#define	PMF_TIME_LAND		32		// pm_time is time before rejump
-#define	PMF_TIME_KNOCKBACK	64		// pm_time is an air-accelerate only time
-#define	PMF_TIME_WATERJUMP	256		// pm_time is waterjump
-#define	PMF_RESPAWNED		512		// clear after attack and jump buttons come up
-#define	PMF_USE_ITEM_HELD	1024
-#define PMF_GRAPPLE_PULL	2048	// pull towards grapple location
-#define PMF_FOLLOW			4096	// spectate following another player
-#define PMF_SCOREBOARD		8192	// spectate as a scoreboard
-#define PMF_INVULEXPAND		16384	// invulnerability sphere set to full size
+#define	PMF_DUCKED				1
+#define	PMF_JUMP_HELD			2
+#define	PMF_BACKWARDS_JUMP		8		// go into backwards land
+#define	PMF_BACKWARDS_RUN		16		// coast down to backwards run
+#define	PMF_TIME_LAND			32		// pm_time is time before rejump
+#define	PMF_TIME_KNOCKBACK		64		// pm_time is an air-accelerate only time
+#define	PMF_TIME_WATERJUMP		256		// pm_time is waterjump
+#define	PMF_RESPAWNED			512		// clear after attack and jump buttons come up
+#define	PMF_USE_ITEM_HELD		1024
+#define PMF_GRAPPLE_PULL		2048	// pull towards grapple location
+#define PMF_FOLLOW				4096	// spectate following another player
+#define PMF_SCOREBOARD			8192	// spectate as a scoreboard
+#define PMF_DEFLECTOR_EXPAND	16384	// deflector sphere set to full size
 
 #define	PMF_ALL_TIMES	(PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK)
 
@@ -288,6 +290,7 @@ typedef struct {
 	usercmd_t	cmd;
 	int			tracemask;			// collide against these types of surfaces
 	int			debugLevel;			// if set, diagnostic output will be printed
+	int			stepDebugLevel;		// if set, log every PM_StepSlideMove attempt
 	qboolean	noFootsteps;		// if the game is setup for no footsteps by the server
 	qboolean	gauntletHit;		// true if a gauntlet attack would actually hit something
 
@@ -342,11 +345,12 @@ extern float	pm_clientrespawndelay;
 // player_state->stats[] indexes
 // NOTE: may not have more than 16
 typedef enum {
-	STAT_HEALTH,
-	STAT_HOLDABLE_ITEM,
-	STAT_WEAPONS,					// 16 bit fields
-	STAT_ARMOR,				
+	STAT_HEALTH,					// 16 bit fields
+	STAT_ARMOR,
     STAT_ARMORCLASS,
+	STAT_WEAPONS,
+	STAT_HOLDABLE_ITEM,				// deprecated: single-slot index (kept for bot AI compat)
+	STAT_HOLDABLE_BITS,				// bitmask: bit N set means player owns HI_* type N
 	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
 	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
 
@@ -458,12 +462,11 @@ typedef enum {
 	PW_INVIS,
 	PW_REGEN,
 	PW_FLIGHT,
+	PW_DEFLECTOR,
 
 	PW_REDFLAG,
 	PW_BLUEFLAG,
 	PW_NEUTRALFLAG,
-
-	PW_INVULNERABILITY,
 
     PW_KING,
 
@@ -478,10 +481,15 @@ typedef enum {
 	HI_MEDKIT,
 	HI_KAMIKAZE,
 	HI_PORTAL,
-	HI_INVULNERABILITY,
+	HI_DEFLECTOR,
+
+	HI_KEY_GOLD,
+	HI_KEY_SILVER,
 
 	HI_NUM_HOLDABLE
 } holdable_t;
+
+#define BG_HOLDABLE_BIT(h) (1 << (h))
 
 
 typedef enum {
@@ -632,9 +640,9 @@ typedef enum {
 	EV_KAMIKAZE,			// kamikaze explodes
 	EV_OBELISKEXPLODE,		// obelisk explodes
 	EV_OBELISKPAIN,			// obelisk is in pain
-	EV_INVUL_IMPACT,		// invulnerability sphere impact
-	EV_JUICED,				// invulnerability juiced effect
-	EV_LIGHTNINGBOLT,		// lightning bolt bounced of invulnerability sphere
+	EV_DEFLECTOR_IMPACT,	// deflector sphere impact
+	EV_DEFLECTOR_JUICED,	// deflector juiced effect
+	EV_LIGHTNINGBOLT,		// lightning bolt bounced of deflector sphere
 	EV_LIGHTNING_ARC,		// chain arc beam from primary target to secondary target
 //#endif
 
@@ -809,8 +817,24 @@ typedef enum {
 	MOD_TARGET_LASER,
 	MOD_TRIGGER_HURT,
 	MOD_KAMIKAZE,
-	MOD_GRAPPLE
+	MOD_GRAPPLE,
+	MOD_LAVABALL,   /* Q1 misc_fireball projectile */
+	MOD_NAIL        /* Q1 trap_spikeshooter spike/superspike/laser */
 } meansOfDeath_t;
+
+typedef enum {
+	PROJ_NONE,        /* default / generic explosion fallback */
+	PROJ_ROCKET,      /* rocket launcher missile */
+	PROJ_GRENADE,     /* grenade launcher projectile */
+	PROJ_PLASMA,      /* plasma rifle bolt */
+	PROJ_SPIKE,       /* Q1 nail/spike */
+	PROJ_LASER,       /* Q1 enforcer laser */
+	PROJ_LAVABALL,    /* Q1 fireball/lavaball */
+	PROJ_SHOTGUN,     /* shotgun pellet impact (hitscan direct caller) */
+	PROJ_MACHINEGUN,  /* machinegun bullet impact (hitscan direct caller) */
+	PROJ_RAILGUN,     /* railgun slug impact (hitscan direct caller) */
+	PROJ_NUM_TYPES
+} projectileType_t;
 
 
 //---------------------------------------------------------
@@ -836,12 +860,12 @@ typedef enum {
 } itemType_t;
 
 #define MAX_ITEM_MODELS     4
-#define MAX_ITEM_CLASSNAMES 3
 
 typedef struct gitem_s {
-    char		*classnames[MAX_ITEM_CLASSNAMES];	// spawning name
+    char		*classname;	// spawning name
 	char		*pickup_sound;
 	char		*world_model[MAX_ITEM_MODELS];
+	float		q1OriginZOffset;	// Z added to entity origin when the item came from a Q1 BSP
 
 	char		*icon;
 	char		*pickup_name;	// for printing on pickup
@@ -959,6 +983,7 @@ gitem_t	*BG_FindItem( const char *pickupName );
 gitem_t	*BG_FindItemForWeapon( weapon_t weapon );
 gitem_t	*BG_FindItemForPowerup( powerup_t pw );
 gitem_t	*BG_FindItemForHoldable( holdable_t pw );
+qboolean BG_HoldableIsSelectable( holdable_t h );
 #define	ITEM_INDEX(x) ((x)-bg_itemlist)
 
 qboolean	BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const playerState_t *ps );
@@ -1018,6 +1043,13 @@ qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTim
 
 #define MAX_BOTS			1024
 #define MAX_BOTS_TEXT		8192
+
+// Bot skill level range (Q3 convention: integer [1..5], 1=novice, 5=expert).
+// Centralized so call sites never encode the range directly.
+#define BOT_SKILL_MIN      1.0f
+#define BOT_SKILL_MAX      5.0f
+// Number of attack slots per weapon (0 = primary fire, 1 = secondary/alt fire).
+#define NUM_ATTACK_SLOTS   2
 
 
 // Kamikaze

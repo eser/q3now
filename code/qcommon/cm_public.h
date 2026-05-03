@@ -80,3 +80,15 @@ int			CM_WriteAreaBits( byte *buffer, int area );
 
 // cm_patch.c
 void CM_DrawDebugSurface( void (*drawPoly)(int color, int numPoints, float *points) );
+
+int			CM_NumBrushes( void );
+void		CM_GetBrushData( int idx, int *contents, int *shaderNum, const char **shaderName,
+							float mins[3], float maxs[3], int *numsides );
+void		CM_GetBrushSideData( int brushIdx, int sideIdx, int *planeNum, float normal[3],
+								 float *dist, int *shaderNum, const char **shaderName );
+
+// Q1 clipnode data — called by bsp_q1.c during map load.
+void CMQ1_StoreClipnodes( const q1_dclipnode_t *cn, int numCn,
+                          const int *hull1Roots, const int *hull0Roots, int numSubmodels );
+void CMQ1_StoreLeafContents( const int *contents, int numLeafs );
+

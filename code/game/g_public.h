@@ -106,11 +106,15 @@ typedef struct {
 typedef enum {
 	//============== general Quake services ==================
 
-	G_PRINT,		// ( const char *string );
+	G_PRINT,		// ( const char *string ); — DEPRECATED, no new callers
 	// print message on the local console
 
-	G_ERROR,		// ( const char *string );
+	G_ERROR,		// ( const char *string ); — DEPRECATED, no new callers
 	// abort the game
+
+	// Severity-preserving replacements for G_PRINT / G_ERROR
+	G_LOG,			// ( int severity, const char *string );
+	G_TERMINATE,	// ( int level, const char *string );
 
 	G_MILLISECONDS,	// ( void );
 	// get current time for profiling reasons
@@ -472,10 +476,26 @@ typedef enum {
 	G_NAV_IS_READY,
 	// ( void ) -> qboolean; qtrue once navmesh is loaded and queries are safe
 
-	G_NAV_SET_POLY_FLAGS_FOR_DOOR
+	G_NAV_SET_POLY_FLAGS_FOR_DOOR,
 	// ( const char *targetname, int setFlags, int clearFlags ) -> void
 	// D-19: set/clear poly flags for all polys belonging to named door entity.
 	// Called at door state transition-start (open/close) from g_mover.c.
+
+	G_NAV_PREDICT_ENEMY_POSITION,
+	// ( vec3_t origin, vec3_t velocity, float predictTime, vec3_t outPos ) -> void
+	// Phase 5.5: Detour-based enemy position prediction replacing AAS physics sim.
+	// Simulates enemy trajectory on navmesh surface for high-skill projectile aim.
+
+	// ── WiredCoreEvents generic emit ─────────────────────────────────────
+	// Single ABI entry point. Event type is encoded in the payload (arg 1).
+	// Adding new event types requires no ABI change — only an enum value and
+	// an optional macro in g_local.h. See wce_event_data_t for field docs.
+	G_WCE_EMIT_EVENT = 1000,
+	// ( wce_event_type_t type, int clientNum, int entityNum, vec3_t origin,
+	//   int param1, int param2, float fparam, const char *text )
+
+	G_WCE_GET_SOUND_EVENTS = 1001
+	// ( int clientNum, bot_sound_event_t *out, int maxOut ) → int count
 
 } gameImport_t;
 

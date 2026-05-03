@@ -239,7 +239,7 @@ static void Con_Dump_f( void )
 {
 	if ( Cmd_Argc() != 2 )
 	{
-		Com_Printf( "usage: condump <filename>\n" );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "usage: dumpConsole <filename>\n" );
 		return;
 	}
 
@@ -249,18 +249,18 @@ static void Con_Dump_f( void )
 
 	const char *ext;
 	if ( !FS_AllowedExtension( filename, qfalse, &ext ) ) {
-		Com_Printf( "%s: Invalid filename extension '%s'.\n", __func__, ext );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "%s: Invalid filename extension '%s'.\n", __func__, ext );
 		return;
 	}
 
 	fileHandle_t f = FS_FOpenFileWrite( filename );
 	if ( f == FS_INVALID_HANDLE )
 	{
-		Com_Printf( "ERROR: couldn't open %s.\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "ERROR: couldn't open %s.\n", filename );
 		return;
 	}
 
-	Com_Printf( "Dumped console text to %s.\n", filename );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "Dumped console text to %s.\n", filename );
 
 	int n, l;
 	if ( con.current >= con.totallines ) {
@@ -323,10 +323,18 @@ void Con_CheckResize( void )
 {
 	short	tbuf[CON_TEXTSIZE];
 	static int old_width, old_vispage;
+	static int s_scale_mod = -1, s_lineheight_mod = -1;
+	static float s_con_factor = -1.0f;
 
-	if ( con.viswidth == cls.glconfig.vidWidth && !con_scale->modified && !con_lineheight->modified ) {
+	if ( con.viswidth == cls.glconfig.vidWidth
+	     && con_scale->modificationCount == s_scale_mod
+	     && con_lineheight->modificationCount == s_lineheight_mod
+	     && cls.con_factor == s_con_factor ) {
 		return;
 	}
+	s_scale_mod = con_scale->modificationCount;
+	s_lineheight_mod = con_lineheight->modificationCount;
+	s_con_factor = cls.con_factor;
 
 	float scale = con_scale->value;
 
@@ -413,9 +421,6 @@ void Con_CheckResize( void )
 	}
 
 	con.display = con.current;
-
-	con_scale->modified = qfalse;
-	con_lineheight->modified = qfalse;
 }
 
 
@@ -524,7 +529,7 @@ static void Con_UpdateColor( cvar_t *cv, char *lastString, int lastSize,
 	}
 
 	if ( !Con_ParseHexColor( cv->string, out ) ) {
-		Com_Printf( S_COLOR_YELLOW "WARNING: invalid hex color in %s: '%s'\n",
+		COM_WARN( LOG_CAT_UI, "WARNING: invalid hex color in %s: '%s'\n",
 			cv->name, cv->string );
 		Vector4Copy( fallback, out );
 	}
@@ -562,6 +567,38 @@ void Con_UpdateColors( void ) {
 }
 
 
+static const cvarDesc_t s_conDescs[] = {
+	/*  0 */ CVAR_FLOAT(  "con_notifytime",   "5",        CVAR_ARCHIVE,    "Defines how long messages (from players or the system) are on the screen (in seconds).", 0, 0 ),
+	/*  1 */ CVAR_INT(    "con_notifylines",  "3",        CVAR_ARCHIVE,    "Defines the number of lines to display in the notify area.", 1, NUM_CON_TIMES - 1 ),
+	/*  2 */ CVAR_FLOAT(  "scr_conspeed",     "3",        CVAR_ARCHIVE,    "Console opening/closing scroll speed.", 0, 0 ),
+	/*  3 */ CVAR_BOOL(   "con_autoclear",    "1",        CVAR_ARCHIVE | CVAR_NODEFAULT, "Enable/disable clearing console input text when console is closed." ),
+	/*  4 */ CVAR_FLOAT(  "con_scale",        "1",        CVAR_ARCHIVE | CVAR_NODEFAULT, "Console font size scale.", 0.5f, 8.0f ),
+	/*  5 */ CVAR_FLOAT(  "con_lineheight",   "1",        CVAR_ARCHIVE | CVAR_NODEFAULT, "Notify/console line height multiplier (1.0 = tight, 2.0 = double-spaced).", 0.5f, 4.0f ),
+	/*  6 */ CVAR_BOOL(   "con_anim",         "1",        CVAR_ARCHIVE | CVAR_NODEFAULT, "Animate console open/close. 0 = instant snap." ),
+	/*  7 */ CVAR_FLOAT(  "cl_consoleHeight", "0.5",      CVAR_ARCHIVE,    "Fraction of screen height covered by the console when open (0.1-1.0).", 0.1f, 1.0f ),
+	/*  8 */ CVAR_INT(    "cl_consoleType",   "0",        CVAR_ARCHIVE,    "Console background style: 0=themed (con_colBG), 1=classic Q3 shader.", 0, 1 ),
+	/*  9 */ CVAR_BOOL(   "con_clock",        "1",        CVAR_ARCHIVE | CVAR_NODEFAULT, "Draw wall-clock HH:MM:SS in the top-right corner of the console." ),
+	/* 10 */ CVAR_BOOL(   "con_fade",         "1",        CVAR_ARCHIVE | CVAR_NODEFAULT, "Fade notify lines to transparent before they expire instead of popping." ),
+	/* 11 */ CVAR_BOOL(   "con_fps",          "1",        CVAR_ARCHIVE | CVAR_NODEFAULT, "Draw current FPS in the top-right corner of the console." ),
+	/* 12 */ CVAR_BOOL(   "con_timestamp",    "1",        CVAR_ARCHIVE | CVAR_NODEFAULT, "Prefix each console line with a HH:MM:SS timestamp." ),
+	/* 13 */ CVAR_STRING( "con_colBG",        "101013F6", CVAR_ARCHIVE,    "Console background color (hex RRGGBB or RRGGBBAA)." ),
+	/* 14 */ CVAR_STRING( "con_colBorder",    "4778B2FF", CVAR_ARCHIVE,    "Console border color (hex RRGGBB or RRGGBBAA)." ),
+	/* 15 */ CVAR_STRING( "con_colText",      "E2E2E2",   CVAR_ARCHIVE,    "Console text color (hex RRGGBB)." ),
+	/* 16 */ CVAR_STRING( "con_colCVar",      "4778B2",   CVAR_ARCHIVE,    "Console input color for cvar names (hex RRGGBB)." ),
+	/* 17 */ CVAR_STRING( "con_colCmd",       "4FA7BD",   CVAR_ARCHIVE,    "Console input color for command names (hex RRGGBB)." ),
+	/* 18 */ CVAR_STRING( "con_colValue",     "E5BC39",   CVAR_ARCHIVE,    "Console input color for cvar values (hex RRGGBB)." ),
+};
+enum {
+	CON_NOTIFYTIME, CON_NOTIFYLINES, CON_CONSPEED, CON_AUTOCLEAR,
+	CON_SCALE, CON_LINEHEIGHT, CON_ANIM, CON_HEIGHT, CON_TYPE,
+	CON_CLOCK, CON_FADE, CON_FPS, CON_TIMESTAMP,
+	CON_COLBG, CON_COLBORDER, CON_COLTEXT, CON_COLCVAR, CON_COLCMD, CON_COLVALUE,
+	CON_CVAR_COUNT
+};
+_Static_assert( ARRAY_LEN( s_conDescs ) == CON_CVAR_COUNT, "s_conDescs/enum mismatch" );
+static cvar_t *s_conHandles[CON_CVAR_COUNT];
+
+
 /*
 ================
 Con_Init
@@ -584,52 +621,27 @@ void Con_Init( void )
 		memset( s_con, 0, sizeof( console_t ) );
 	}
 
-	con_notifytime = Cvar_Get( "con_notifytime", "5", CVAR_ARCHIVE );
-	Cvar_SetDescription( con_notifytime, "Defines how long messages (from players or the system) are on the screen (in seconds)." );
-	con_notifylines = Cvar_Get ( "con_notifylines", "3", CVAR_ARCHIVE );
-	Cvar_CheckRange(con_notifylines, "1", va( "%i", NUM_CON_TIMES - 1), CV_INTEGER);
-	Cvar_SetDescription( con_notifylines, "Defines the number of lines to display in the notify area." );
-	con_conspeed = Cvar_Get( "scr_conspeed", "3", CVAR_ARCHIVE );
-	Cvar_SetDescription( con_conspeed, "Console opening/closing scroll speed." );
-	con_autoclear = Cvar_Get("con_autoclear", "1", CVAR_ARCHIVE_ND);
-	Cvar_SetDescription( con_autoclear, "Enable/disable clearing console input text when console is closed." );
-	con_scale = Cvar_Get( "con_scale", "1", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( con_scale, "0.5", "8", CV_FLOAT );
-	Cvar_SetDescription( con_scale, "Console font size scale." );
-	con_lineheight = Cvar_Get( "con_lineheight", "1", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( con_lineheight, "0.5", "4", CV_FLOAT );
-	Cvar_SetDescription( con_lineheight, "Notify/console line height multiplier (1.0 = tight, 2.0 = double-spaced)." );
-
-	con_anim  = Cvar_Get( "con_anim",  "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( con_anim,  "Animate console open/close. 0 = instant snap." );
-	cl_consoleHeight = Cvar_Get( "cl_consoleHeight", "0.5", CVAR_ARCHIVE );
-	Cvar_CheckRange( cl_consoleHeight, "0.1", "1", CV_FLOAT );
-	Cvar_SetDescription( cl_consoleHeight, "Fraction of screen height covered by the console when open (0.1-1.0)." );
-	cl_consoleType = Cvar_Get( "cl_consoleType", "0", CVAR_ARCHIVE );
-	Cvar_CheckRange( cl_consoleType, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( cl_consoleType, "Console background style: 0=themed (con_colBG), 1=classic Q3 shader." );
-	con_clock = Cvar_Get( "con_clock", "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( con_clock, "Draw wall-clock HH:MM:SS in the top-right corner of the console." );
-	con_fade  = Cvar_Get( "con_fade",  "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( con_fade,  "Fade notify lines to transparent before they expire instead of popping." );
-	con_fps   = Cvar_Get( "con_fps",   "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( con_fps,   "Draw current FPS in the top-right corner of the console." );
-	con_timestamp = Cvar_Get( "con_timestamp", "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( con_timestamp, "Prefix each console line with a HH:MM:SS timestamp." );
-
+	Cvar_RegisterTable( s_conDescs, ARRAY_LEN( s_conDescs ), s_conHandles );
+	con_notifytime    = s_conHandles[CON_NOTIFYTIME];
+	con_notifylines   = s_conHandles[CON_NOTIFYLINES];
+	con_conspeed      = s_conHandles[CON_CONSPEED];
+	con_autoclear     = s_conHandles[CON_AUTOCLEAR];
+	con_scale         = s_conHandles[CON_SCALE];
+	con_lineheight    = s_conHandles[CON_LINEHEIGHT];
+	con_anim          = s_conHandles[CON_ANIM];
+	cl_consoleHeight  = s_conHandles[CON_HEIGHT];
+	cl_consoleType    = s_conHandles[CON_TYPE];
+	con_clock         = s_conHandles[CON_CLOCK];
+	con_fade          = s_conHandles[CON_FADE];
+	con_fps           = s_conHandles[CON_FPS];
+	con_timestamp     = s_conHandles[CON_TIMESTAMP];
 	/* CNQ3 backport: per-element console colors */
-	con_colBG     = Cvar_Get( "con_colBG",     "101013F6", CVAR_ARCHIVE );
-	Cvar_SetDescription( con_colBG, "Console background color (hex RRGGBB or RRGGBBAA)." );
-	con_colBorder = Cvar_Get( "con_colBorder", "4778B2FF", CVAR_ARCHIVE );
-	Cvar_SetDescription( con_colBorder, "Console border color (hex RRGGBB or RRGGBBAA)." );
-	con_colText   = Cvar_Get( "con_colText",   "E2E2E2",   CVAR_ARCHIVE );
-	Cvar_SetDescription( con_colText, "Console text color (hex RRGGBB)." );
-	con_colCVar   = Cvar_Get( "con_colCVar",   "4778B2",   CVAR_ARCHIVE );
-	Cvar_SetDescription( con_colCVar, "Console input color for cvar names (hex RRGGBB)." );
-	con_colCmd    = Cvar_Get( "con_colCmd",    "4FA7BD",   CVAR_ARCHIVE );
-	Cvar_SetDescription( con_colCmd, "Console input color for command names (hex RRGGBB)." );
-	con_colValue  = Cvar_Get( "con_colValue",  "E5BC39",   CVAR_ARCHIVE );
-	Cvar_SetDescription( con_colValue, "Console input color for cvar values (hex RRGGBB)." );
+	con_colBG         = s_conHandles[CON_COLBG];
+	con_colBorder     = s_conHandles[CON_COLBORDER];
+	con_colText       = s_conHandles[CON_COLTEXT];
+	con_colCVar       = s_conHandles[CON_COLCVAR];
+	con_colCmd        = s_conHandles[CON_COLCMD];
+	con_colValue      = s_conHandles[CON_COLVALUE];
 
 	Con_UpdateColors();
 
@@ -637,8 +649,8 @@ void Con_Init( void )
 	g_consoleField.widthInChars = g_console_field_width;
 
 	Cmd_AddCommand( "clear", Con_Clear_f );
-	Cmd_AddCommand( "condump", Con_Dump_f );
-	Cmd_SetCommandCompletionFunc( "condump", Cmd_CompleteTxtName );
+	Cmd_AddCommand( "dumpConsole", Con_Dump_f );
+	Cmd_SetCommandCompletionFunc( "dumpConsole", Cmd_CompleteTxtName );
 	Cmd_AddCommand( "toggleconsole", Con_ToggleConsole_f );
 	Cmd_AddCommand( "messagemode", Con_MessageMode_f );
 	Cmd_AddCommand( "messagemode2", Con_MessageMode2_f );
@@ -655,7 +667,7 @@ Con_Shutdown
 void Con_Shutdown( void )
 {
 	Cmd_RemoveCommand( "clear" );
-	Cmd_RemoveCommand( "condump" );
+	Cmd_RemoveCommand( "dumpConsole" );
 	Cmd_RemoveCommand( "toggleconsole" );
 	Cmd_RemoveCommand( "messagemode" );
 	Cmd_RemoveCommand( "messagemode2" );
@@ -762,7 +774,7 @@ void CL_ConsolePrint( const char *txt ) {
 	}
 
 	/* Lazily allocate the arena on first print (may happen before Con_Init
-	   due to early Com_Printf calls at engine startup).  Con_Init completes
+	   due to early Com_Log calls at engine startup).  Con_Init completes
 	   the setup (cvars, cvar-based colors, cmd registration) later. */
 	if ( !s_con ) {
 		if ( !s_conArena ) {
@@ -784,10 +796,8 @@ void CL_ConsolePrint( const char *txt ) {
 		cls.con_factor = 1.0f;
 		con_scale = &null_cvar;
 		con_scale->value = 1.0f;
-		con_scale->modified = qtrue;
 		con_lineheight = &null_cvar;
 		con_lineheight->value = 1.0f;
-		con_lineheight->modified = qtrue;
 		Con_CheckResize();
 		con.initialized = qtrue;
 	}

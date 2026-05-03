@@ -18,4 +18,9 @@ int WiredBots_Chat( bot_state_t *bs, const char *eventName, const wbChatCtx_t *c
 float WiredBots_ProfileFieldOr( bot_state_t *bs, int field, float fallback );
 float WiredBots_GetCurrentAttackAimHeight( bot_state_t *bs );
 
+float WiredBots_EffectiveSkill( bot_state_t *bs );
+float WiredBots_SkillFraction( bot_state_t *bs );
+float WiredBots_ResolveAbility( bot_state_t *bs, float min, float max );
+float WiredBots_AttackAccuracy( bot_state_t *bs, int weapon, int slot );
+
 #endif

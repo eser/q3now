@@ -1126,7 +1126,7 @@ static qboolean R_GetPortalOrientations( const drawSurf_t *drawSurf, int entityN
 	// to see a surface before the server has communicated the matching
 	// portal surface entity, so we don't want to print anything here...
 
-	//ri.Printf( PRINT_ALL, "Portal surface without a portal entity\n" );
+	//ri.Log( SEV_INFO, "Portal surface without a portal entity\n" );
 
 	return qfalse;
 }
@@ -1302,7 +1302,7 @@ static qboolean R_MirrorViewBySurface (const drawSurf_t *drawSurf, int entityNum
 
 	// don't recursively mirror
 	if (tr.viewParms.isPortal) {
-		ri.Printf( PRINT_DEVELOPER, "WARNING: recursive mirror/portal found\n" );
+		ri.Log( SEV_DEBUG, "WARNING: recursive mirror/portal found\n" );
 		return qfalse;
 	}
 
@@ -1496,7 +1496,7 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	int             pshadowed;
 	int				i;
 
-	//ri.Printf(PRINT_ALL, "firstDrawSurf %d numDrawSurfs %d\n", (int)(drawSurfs - tr.refdef.drawSurfs), numDrawSurfs);
+	//ri.Log( SEV_INFO, "firstDrawSurf %d numDrawSurfs %d\n", (int)(drawSurfs - tr.refdef.drawSurfs), numDrawSurfs);
 
 	// it is possible for some views to not have any surfaces
 	if ( numDrawSurfs < 1 ) {
@@ -1526,7 +1526,7 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 		// no shader should ever have this sort type
 		if ( shader->sort == SS_BAD ) {
-			ri.Error (ERR_DROP, "Shader '%s'with sort == SS_BAD", shader->name );
+			ri.Terminate( TERM_CLIENT_DROP, "Shader '%s'with sort == SS_BAD", shader->name );
 		}
 
 		// if the mirror was completely clipped away, we may need to check another surface
@@ -1614,13 +1614,13 @@ static void R_AddEntitySurface (int entityNum)
 				R_AddDrawSurf( &entitySurface, tr.defaultShader, 0, 0, 0, 0 );
 				break;
 			default:
-				ri.Error( ERR_DROP, "R_AddEntitySurfaces: Bad modeltype" );
+				ri.Terminate( TERM_CLIENT_DROP, "R_AddEntitySurfaces: Bad modeltype" );
 				break;
 			}
 		}
 		break;
 	default:
-		ri.Error( ERR_DROP, "R_AddEntitySurfaces: Bad reType" );
+		ri.Terminate( TERM_CLIENT_DROP, "R_AddEntitySurfaces: Bad reType" );
 	}
 }
 
@@ -2469,8 +2469,8 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 			VectorScale(lightviewBounds[1], worldUnitsPerTexel, lightviewBounds[1]);
 		}
 
-		//ri.Printf(PRINT_ALL, "level %d znear %f zfar %f\n", level, lightviewBounds[0][0], lightviewBounds[1][0]);		
-		//ri.Printf(PRINT_ALL, "xmin %f xmax %f ymin %f ymax %f\n", lightviewBounds[0][1], lightviewBounds[1][1], -lightviewBounds[1][2], -lightviewBounds[0][2]);
+		//ri.Log( SEV_INFO, "level %d znear %f zfar %f\n", level, lightviewBounds[0][0], lightviewBounds[1][0]);		
+		//ri.Log( SEV_INFO, "xmin %f xmax %f ymin %f ymax %f\n", lightviewBounds[0][1], lightviewBounds[1][1], -lightviewBounds[1][2], -lightviewBounds[0][2]);
 	}
 
 	{
@@ -2621,7 +2621,7 @@ void R_RenderCubemapSide( int cubemapIndex, int cubemapSide, qboolean subscene )
 		// only print message for first side
 		if (scale < 1.0001f && cubemapSide == 0)
 		{
-			ri.Printf(PRINT_ALL, "cubemap %d %s (%f, %f, %f) is outside the lightgrid or inside a wall!\n", cubemapIndex, tr.cubemaps[cubemapIndex].name, tr.refdef.vieworg[0], tr.refdef.vieworg[1], tr.refdef.vieworg[2]);
+			ri.Log( SEV_INFO, "cubemap %d %s (%f, %f, %f) is outside the lightgrid or inside a wall!\n", cubemapIndex, tr.cubemaps[cubemapIndex].name, tr.refdef.vieworg[0], tr.refdef.vieworg[1], tr.refdef.vieworg[2]);
 		}
 	}
 

@@ -126,16 +126,16 @@ static int uvm_print( lua_State *L ) {
 
         if ( i > 1 ) {
             if ( s_capture ) uvm_capture_append( "\t" );
-            else             Com_Printf( "\t" );
+            else             Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "\t" );
         }
         if ( s_capture ) uvm_capture_append( s );
-        else             Com_Printf( "%s", s );
+        else             Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "%s", s );
 
         lua_pop( L, 1 );
     }
 
     if ( s_capture ) uvm_capture_append( "\n" );
-    else             Com_Printf( "\n" );
+    else             Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "\n" );
 
     return 0;
 }
@@ -149,8 +149,16 @@ void UserVM_Init( void ) {
         UserVM_Shutdown();
     }
 
-    s_memoryMbCvar  = Cvar_Get( "user_vm_memory_mb",          "50",     CVAR_ARCHIVE );
-    s_insnLimitCvar = Cvar_Get( "user_vm_instruction_limit",  "100000", CVAR_ARCHIVE );
+    {
+        static const cvarDesc_t dm = CVAR_INT( "user_vm_memory_mb", "50", CVAR_ARCHIVE,
+            "Memory budget in megabytes for the Lua scripting VM.", 1, 512 );
+        s_memoryMbCvar = Cvar_Register( &dm );
+    }
+    {
+        static const cvarDesc_t di = CVAR_INT( "user_vm_instruction_limit", "100000", CVAR_ARCHIVE,
+            "Maximum Lua instructions executed per call before the VM is interrupted.", 0, 0 );
+        s_insnLimitCvar = Cvar_Register( &di );
+    }
 
     memLimit = (size_t)s_memoryMbCvar->integer * 1024u * 1024u;
     if ( memLimit == 0 ) {
@@ -162,7 +170,7 @@ void UserVM_Init( void ) {
 
     s_L = lua_newstate( uvm_alloc, &s_allocCtx );
     if ( !s_L ) {
-        Com_Error( ERR_FATAL, "UserVM_Init: lua_newstate failed (memory cap %zu MB)",
+        Com_Terminate( TERM_UNRECOVERABLE, "UserVM_Init: lua_newstate failed (memory cap %zu MB)",
                    memLimit / ( 1024u * 1024u ) );
         return;
     }
@@ -186,7 +194,7 @@ void UserVM_Init( void ) {
     s_adminCtx = qfalse;
     s_capture  = NULL;
 
-    Com_Printf( "UserVM: initialized (cap %d MB, insn limit %d)\n",
+    Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "WiredCore/Scripting: UserVM initialized (cap %d MB, insn limit %d)\n",
                 s_memoryMbCvar->integer, s_insnLimitCvar->integer );
 }
 
@@ -226,7 +234,7 @@ void UserVM_RegisterBindings( UserVM_BindingFn fn ) {
         return;
     }
     if ( s_numRegistrars >= MAX_BINDING_REGISTRARS ) {
-        Com_Printf( S_COLOR_YELLOW "UserVM_RegisterBindings: table full (max %d)\n",
+        COM_WARN( LOG_CAT_SCRIPTING, "UserVM_RegisterBindings: table full (max %d)\n",
                     MAX_BINDING_REGISTRARS );
         return;
     }

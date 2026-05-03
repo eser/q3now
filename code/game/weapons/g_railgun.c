@@ -46,8 +46,8 @@ void Attack_Railgun_Primary (gentity_t *ent) {
 		}
 		traceEnt = &g_entities[ trace.entityNum ];
 		if ( traceEnt->takedamage ) {
-			if ( traceEnt->client && traceEnt->client->invulnerabilityTime > level.time ) {
-				if ( G_InvulnerabilityEffect( traceEnt, forward, trace.endpos, impactpoint, bouncedir ) ) {
+			if ( traceEnt->client && traceEnt->client->deflectorTime > level.time ) {
+				if ( G_DeflectorEffect( traceEnt, forward, trace.endpos, impactpoint, bouncedir ) ) {
 					G_BounceProjectile( muzzle, impactpoint, bouncedir, end );
 					// snap the endpos to integers to save net bandwidth, but nudged towards the line
 					SnapVectorTowards( trace.endpos, muzzle );

@@ -59,7 +59,7 @@ const float *GL_Ortho( const float left, const float right, const float bottom, 
 void GL_Bind( image_t *image ) {
 #ifdef USE_VULKAN
 	if ( !image ) {
-		ri.Printf( PRINT_WARNING, "GL_Bind: NULL image\n" );
+		ri.Log( SEV_WARN, "GL_Bind: NULL image\n" );
 		image = tr.defaultImage;
 	}
 
@@ -76,7 +76,7 @@ void GL_Bind( image_t *image ) {
 	GLuint texnum;
 
 	if ( !image ) {
-		ri.Printf( PRINT_WARNING, "GL_Bind: NULL image\n" );
+		ri.Log( SEV_WARN, "GL_Bind: NULL image\n" );
 		texnum = tr.defaultImage->texnum;
 	} else {
 		texnum = image->texnum;
@@ -111,7 +111,7 @@ void GL_SelectTexture( int unit )
 
 	if ( unit >= glConfig.numTextureUnits )
 	{
-		ri.Error( ERR_DROP, "GL_SelectTexture: unit = %i", unit );
+		ri.Terminate( TERM_CLIENT_DROP, "GL_SelectTexture: unit = %i", unit );
 	}
 #ifndef USE_VULKAN
 	qglActiveTextureARB( GL_TEXTURE0_ARB + unit );
@@ -133,7 +133,7 @@ static void GL_SelectClientTexture( int unit )
 
 	if ( unit >= glConfig.numTextureUnits )
 	{
-		ri.Error( ERR_DROP, "GL_SelectClientTexture: unit = %i", unit );
+		ri.Terminate( TERM_CLIENT_DROP, "GL_SelectClientTexture: unit = %i", unit );
 	}
 
 	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
@@ -194,7 +194,7 @@ void GL_TexEnv( GLint env )
 		qglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, env );
 		break;
 	default:
-		ri.Error( ERR_DROP, "GL_TexEnv: invalid env '%d' passed", env );
+		ri.Terminate( TERM_CLIENT_DROP, "GL_TexEnv: invalid env '%d' passed", env );
 		break;
 	}
 #endif
@@ -271,7 +271,7 @@ void GL_State( unsigned stateBits )
 				srcFactor = GL_SRC_ALPHA_SATURATE;
 				break;
 			default:
-				ri.Error( ERR_DROP, "GL_State: invalid src blend state bits" );
+				ri.Terminate( TERM_CLIENT_DROP, "GL_State: invalid src blend state bits" );
 				break;
 			}
 
@@ -302,7 +302,7 @@ void GL_State( unsigned stateBits )
 				dstFactor = GL_ONE_MINUS_DST_ALPHA;
 				break;
 			default:
-				ri.Error( ERR_DROP, "GL_State: invalid dst blend state bits" );
+				ri.Terminate( TERM_CLIENT_DROP, "GL_State: invalid dst blend state bits" );
 				break;
 			}
 
@@ -383,7 +383,7 @@ void GL_State( unsigned stateBits )
 			qglAlphaFunc( GL_GEQUAL, 0.5f );
 			break;
 		default:
-			ri.Error( ERR_DROP, "GL_State: invalid alpha test bits" );
+			ri.Terminate( TERM_CLIENT_DROP, "GL_State: invalid alpha test bits" );
 			break;
 		}
 	}
@@ -1105,14 +1105,14 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, 
 	}
 
 	if ( ( 1 << i ) != cols || ( 1 << j ) != rows ) {
-		ri.Error( ERR_DROP, "%s(): size not a power of 2: %i by %i", __func__, cols, rows );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): size not a power of 2: %i by %i", __func__, cols, rows );
 	}
 
 	RE_UploadCinematic( w, h, cols, rows, data, client, dirty );
 
 	if ( r_speeds->integer ) {
 		end = ri.Milliseconds();
-		ri.Printf( PRINT_ALL, "RE_UploadCinematic( %i, %i ): %i msec\n", cols, rows, end - start );
+		ri.Log( SEV_INFO, "RE_UploadCinematic( %i, %i ): %i msec\n", cols, rows, end - start );
 	}
 
 	tr.cinematicShader->stages[0]->bundle[0].image[0] = tr.scratchImage[client];
@@ -1141,7 +1141,7 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clien
 		image->height = image->uploadHeight = rows;
 #ifdef USE_VULKAN
 		vk_create_image( image, cols, rows, 1 );
-		vk_upload_image_data( image, 0, 0, cols, rows, 1, data, cols * rows * 4, qfalse );
+		vk_upload_image_data( image, 0, 0, cols, rows, 1, data, cols * rows * 4, qfalse, 0 );
 #else
 		qglTexImage2D( GL_TEXTURE_2D, 0, image->internalFormat, cols, rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, data );
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
@@ -1153,7 +1153,7 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clien
 		// otherwise, just subimage upload it so that drivers can tell we are going to be changing
 		// it and don't try and do a texture compression
 #ifdef USE_VULKAN
-		vk_upload_image_data( image, 0, 0, cols, rows, 1, data, cols * rows * 4, qtrue );
+		vk_upload_image_data( image, 0, 0, cols, rows, 1, data, cols * rows * 4, qtrue, 0 );
 #else
 		qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, data );
 #endif
@@ -1698,7 +1698,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 #ifdef USE_VULKAN
 	if ( cmd->refdef.switchRenderPass ) {
 #if FEAT_FBO_DEBUG
-		ri.Printf( PRINT_ALL, "^3[FBO_DEBUG] Switching: screenmap → main render pass\n" );
+		ri.Log( SEV_INFO, "^3[FBO_DEBUG] Switching: screenmap → main render pass\n" );
 #endif
 		vk_end_render_pass();
 		vk_begin_main_render_pass();
@@ -1886,7 +1886,7 @@ void RB_ShowImages( void ) {
 	qglFinish();
 
 	end = ri.Milliseconds();
-	ri.Printf( PRINT_ALL, "%i msec to draw all images\n", end - start );
+	ri.Log( SEV_INFO, "%i msec to draw all images\n", end - start );
 }
 #endif
 
@@ -2018,19 +2018,19 @@ static const void *RB_SwapBuffers( const void *data ) {
 		if ( backEnd.screenshotMask & SCREENSHOT_TGA && backEnd.screenshotTGA[0] ) {
 			RB_TakeScreenshot( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotTGA );
 			if ( !backEnd.screenShotTGAsilent ) {
-				ri.Printf( PRINT_ALL, "Wrote %s\n", backEnd.screenshotTGA );
+				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotTGA );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_JPG && backEnd.screenshotJPG[0] ) {
 			RB_TakeScreenshotJPEG( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotJPG );
 			if ( !backEnd.screenShotJPGsilent ) {
-				ri.Printf( PRINT_ALL, "Wrote %s\n", backEnd.screenshotJPG );
+				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotJPG );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_BMP && ( backEnd.screenshotBMP[0] || ( backEnd.screenshotMask & SCREENSHOT_BMP_CLIPBOARD ) ) ) {
 			RB_TakeScreenshotBMP( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotBMP, backEnd.screenshotMask & SCREENSHOT_BMP_CLIPBOARD );
 			if ( !backEnd.screenShotBMPsilent ) {
-				ri.Printf( PRINT_ALL, "Wrote %s\n", backEnd.screenshotBMP );
+				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotBMP );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_AVI ) {

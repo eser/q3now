@@ -55,6 +55,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "iqm.h"
 #endif // FEAT_IQM
 
+struct q1AnimChain_s; // defined in renderercommon/r_q1_texture.h
+
 
 #ifdef USE_VULKAN
 #include "vk.h"
@@ -353,6 +355,7 @@ typedef struct {
 #define LIGHTMAP_INDEX_NONE			0
 #define LIGHTMAP_INDEX_SHADER		1
 #define LIGHTMAP_INDEX_OFFSET		2
+#define LIGHTMAP_PROP_OFFSET		8192	/* propLightmaps[] base; no world BSP produces this many pages */
 
 typedef struct {
 	image_t			*image[MAX_IMAGE_ANIMATIONS];
@@ -536,6 +539,9 @@ typedef struct shader_s {
 	int			msdfAtlasWidth;		// atlas texture width
 	int			msdfAtlasHeight;	// atlas texture height
 
+	int              q1NumAnimFrames;  /* layers in q1AnimArray; 1 for single-frame or non-Q1 */
+	struct image_s  *q1AnimArray;      /* VK_IMAGE_VIEW_TYPE_2D_ARRAY built in Phase B; NULL if unavailable */
+
 	struct	shader_s	*next;
 } shader_t;
 
@@ -592,6 +598,7 @@ typedef struct image_s {
 	int			uploadWidth;		// after power of two and picmip but not including clamp to MAX_TEXTURE_SIZE
 	int			uploadHeight;
 	imgFlags_t	flags;
+	uint32_t	layerCount;			/* 1 for 2D, N for VK_IMAGE_VIEW_TYPE_2D_ARRAY */
 	int			frameUsed;			// for texture usage in frame statistics
 
 #ifdef USE_VULKAN
@@ -812,6 +819,8 @@ typedef struct {
 	int			numPoints;
 	int			numIndices;
 	int			ofsIndices;
+	shader_t	*altShader;				// Q1 +a frame alt shader (NULL if not a +0 button texture)
+	byte		lightStyles[4];			// lightstyle indices per slot (255 = unused)
 	float		points[1][VERTEXSIZE];	// variable sized
 										// there is a variable length list of indices here also
 } srfSurfaceFace_t;
@@ -1024,6 +1033,8 @@ typedef struct {
 
 	char		*entityString;
 	const char	*entityParsePoint;
+
+	qboolean	lightStyles;		// true if this is a Q1 map with per-slot lightmaps
 } world_t;
 
 //======================================================================
@@ -1283,6 +1294,15 @@ typedef struct {
 
 	int						numLightmaps;
 	image_t					**lightmaps;
+	image_t					**lightmapsStyle[3];	// Q1 style-slot 1/2/3 lightmap images
+	int						numLightmapsStyle;		// count (== numLightmaps for Q1 maps)
+
+	image_t					**propLightmaps;		/* uploaded prop BSP lightmap pages (Z_Malloc, reset per level) */
+	int						numPropLightmaps;		/* count of valid entries in propLightmaps[] */
+	int						maxPropLightmaps;		/* allocated capacity of propLightmaps[] */
+
+	float					lightstyleValues[64];	// per-style animation intensity [0,1]
+	char					lightstylePatterns[64][64]; // per-style pattern string (Faz 1+, max LIGHTSTYLE_PATTERN_MAX)
 
 	qboolean				mergeLightmaps;
 	float					lightmapOffset[2];	// current shader lightmap offset
@@ -1473,6 +1493,7 @@ extern cvar_t	*r_sunX;
 extern cvar_t	*r_sunY;
 #endif
 extern cvar_t	*r_smaa;
+extern cvar_t	*r_lerpLightstyles;		// 0=10Hz stepped, 1=smooth lerp between pattern chars
 #endif
 
 extern cvar_t	*r_dlightBacks;			// dlight non-facing surfaces for continuity
@@ -1675,6 +1696,7 @@ void		R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlph
 
 void	R_ImageList_f( void );
 void	R_SkinList_f( void );
+void	Cmd_BSPDump_f( void );
 
 void	R_InitFogTable( void );
 float	R_FogFactor( float s, float t );
@@ -1765,6 +1787,7 @@ typedef struct shaderCommands_s
 
 #ifdef USE_VULKAN
 	Vk_Depth_Range depthRange;
+	byte		q1SurfaceStyles[4];	// lightstyle slot indices for current face (255=unused)
 #endif
 
 	// info extracted from current shader
@@ -1808,6 +1831,7 @@ WORLD MAP
 void R_AddBrushModelSurfaces( trRefEntity_t *e );
 void R_AddWorldSurfaces( void );
 qboolean R_inPVS( const vec3_t p1, const vec3_t p2 );
+qhandle_t R_RegisterBSP( const char *name, model_t *mod );
 
 
 /*
@@ -1932,6 +1956,7 @@ qboolean R_IsGlobalFog( int fogNum );
 #endif
 
 void RE_RenderScene( const refdef_t *fd );
+void RE_SetLightstylePattern( int style, const char *pattern );
 
 /*
 =============================================================

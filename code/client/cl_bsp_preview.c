@@ -239,8 +239,8 @@ void CL_BuildBspPreview( const char *mapname ) {
 	Com_sprintf( bspPath, sizeof( bspPath ), "maps/%s.bsp", mapname );
 
 	bspFile_t *bsp;
-	if ( !BSP_Load( bspPath, &bsp ) ) {
-		Com_DPrintf( "CL_BuildBspPreview: could not open %s\n", bspPath );
+	if ( !BSP_Load( bspPath, &bsp, BSP_LOAD_FLAG_RENDER_ONLY ) ) {
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_BuildBspPreview: could not open %s\n", bspPath );
 		return;
 	}
 
@@ -252,13 +252,13 @@ void CL_BuildBspPreview( const char *mapname ) {
 
 	if ( numDrawVerts <= 0 || !drawVerts ) {
 		BSP_Free( bsp );
-		Com_DPrintf( "CL_BuildBspPreview: no draw verts in %s\n", bspPath );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_BuildBspPreview: no draw verts in %s\n", bspPath );
 		return;
 	}
 
 	if ( numSurfaces <= 0 || !surfaces ) {
 		BSP_Free( bsp );
-		Com_DPrintf( "CL_BuildBspPreview: no surfaces in %s\n", bspPath );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_BuildBspPreview: no surfaces in %s\n", bspPath );
 		return;
 	}
 
@@ -414,7 +414,7 @@ void CL_BuildBspPreview( const char *mapname ) {
 
 	if ( cl_bspPreview.numEdges > 0 || cl_bspPreview.numMarkers > 0 ) {
 		cl_bspPreview.valid = qtrue;
-		Com_DPrintf( "CL_BuildBspPreview: %s -> %d edges, %d markers\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_BuildBspPreview: %s -> %d edges, %d markers\n",
 			bspPath, cl_bspPreview.numEdges, cl_bspPreview.numMarkers );
 	}
 }

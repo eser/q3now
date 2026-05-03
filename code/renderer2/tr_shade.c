@@ -247,7 +247,7 @@ static void ComputeTexMods( shaderStage_t *pStage, int bundleNum, float *outMatr
 			break;
 
 		default:
-			ri.Error( ERR_DROP, "ERROR: unknown texmod '%d' in shader '%s'", bundle->texMods[tm].type, tess.shader->name );
+			ri.Terminate( TERM_CLIENT_DROP, "ERROR: unknown texmod '%d' in shader '%s'", bundle->texMods[tm].type, tess.shader->name );
 			break;
 		}
 
@@ -1644,10 +1644,10 @@ void RB_EndSurface( void ) {
 	}
 
 	if (input->indexes[SHADER_MAX_INDEXES-1] != 0) {
-		ri.Error (ERR_DROP, "RB_EndSurface() - SHADER_MAX_INDEXES hit");
+		ri.Terminate( TERM_CLIENT_DROP, "RB_EndSurface() - SHADER_MAX_INDEXES hit");
 	}	
 	if (input->xyz[SHADER_MAX_VERTEXES-1][0] != 0) {
-		ri.Error (ERR_DROP, "RB_EndSurface() - SHADER_MAX_VERTEXES hit");
+		ri.Terminate( TERM_CLIENT_DROP, "RB_EndSurface() - SHADER_MAX_VERTEXES hit");
 	}
 
 	if ( tess.shader == tr.shadowShader ) {

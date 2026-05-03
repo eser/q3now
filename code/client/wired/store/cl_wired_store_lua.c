@@ -143,7 +143,7 @@ static const luaL_Reg wiredStoreLib[] = {
 static void WiredStoreLua_Register( lua_State *L ) {
 	luaL_newlib( L, wiredStoreLib );
 	lua_setglobal( L, "store" );
-	Com_Printf( "WiredScript: store module registered\n" );
+	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredCore/Scripting: store module registered\n" );
 }
 
 void WiredStoreLua_Init( void ) {

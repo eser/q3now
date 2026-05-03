@@ -160,7 +160,7 @@ qboolean RandR_SetMode( int *width, int *height, int *rate )
 
 	if ( *width == m->w && *height == m->h )
 	{
-		Com_Printf( "...using desktop display mode\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using desktop display mode\n" );
 		glw_state.randr_active = qtrue;
 		return glw_state.randr_active;
 	}
@@ -213,7 +213,7 @@ qboolean RandR_SetMode( int *width, int *height, int *rate )
 	
 	if ( best_fit != -1 )
 	{
-		//Com_Printf( "...setting new mode 0x%x via xrandr \n", (int)newMode );
+		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...setting new mode 0x%x via xrandr \n", (int)newMode );
 		_XRRSetCrtcConfig( dpy, sr, m->crtcn, CurrentTime, crtc_info->x, crtc_info->y,
 			newMode, crtc_info->rotation, crtc_info->outputs, crtc_info->noutput );
 
@@ -247,7 +247,7 @@ void RandR_RestoreMode( void )
 	if ( m->curMode == m->oldMode )
 		return;
 
-	Com_Printf( "...restoring desktop display mode\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...restoring desktop display mode\n" );
 
 	sr = _XRRGetScreenResources( dpy, DefaultRootWindow( dpy ) );
 
@@ -412,7 +412,7 @@ void RandR_UpdateMonitor( int x, int y, int w, int h )
 
 		glw_state.desktop_ok = qtrue;
 
-		Com_Printf( "...current monitor: %ix%i@%i,%i %s\n",
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...current monitor: %ix%i@%i,%i %s\n",
 			glw_state.desktop_width, glw_state.desktop_height,
 			glw_state.desktop_x, glw_state.desktop_y,
 			desktop_monitor.name );
@@ -523,7 +523,7 @@ qboolean RandR_Init( int x, int y, int w, int h )
 		}
 		if ( r_lib == NULL )
 		{
-			Com_Printf( "...error loading libXrandr\n" );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...error loading libXrandr\n" );
 			goto __fail;
 		}
 	}
@@ -533,18 +533,18 @@ qboolean RandR_Init( int x, int y, int w, int h )
 		*r_list[ i ].symbol = Sys_LoadFunction( r_lib, r_list[ i ].name );
 		if ( *r_list[ i ].symbol == NULL )
 		{
-			Com_Printf( "...couldn't find '%s' in libXrandr\n", r_list[ i ].name );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...couldn't find '%s' in libXrandr\n", r_list[ i ].name );
 			goto __fail;
 		}
 	}
 
 	if ( !_XRRQueryExtension( dpy, &event_base, &error_base ) || !_XRRQueryVersion( dpy, &ver_major, &ver_minor ) )
 	{
-		Com_Printf( "...RandR extension is not available.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...RandR extension is not available.\n" );
 		goto __fail;
 	}
 
-	Com_Printf( "...RandR extension version %i.%i detected.\n", ver_major, ver_minor );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...RandR extension version %i.%i detected.\n", ver_major, ver_minor );
 
 	glw_state.randr_ext = qtrue;
 

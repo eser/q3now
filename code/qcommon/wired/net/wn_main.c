@@ -32,9 +32,9 @@ picoquic context management and the main callback dispatcher.
 // Global QUIC state — singleton
 wn_state_t wn;
 
-// Verbose QUIC debug cvar — default off, gate for per-packet/per-callback logs.
-// Registered in WN_Init below.
-cvar_t *wn_debug = NULL;
+// Forward declaration: demux handler registered at WN_Init
+static qboolean WN_DemuxPacket( const netadr_t *from, const byte *data, int len );
+static transport_demux_t s_quic_demux = { WN_DemuxPacket, "quic" };
 
 /*
 ====================
@@ -56,7 +56,7 @@ static qboolean WN_GenerateSelfSignedCert( const char *cert_path, const char *ke
 	/* Generate EC P-256 key (EVP_EC_gen requires OpenSSL 3.0+, already satisfied) */
 	pkey = EVP_EC_gen( "P-256" );
 	if ( !pkey ) {
-		Com_Printf( S_COLOR_YELLOW "QUIC: EVP_EC_gen failed\n" );
+		COM_WARN( LOG_CAT_NETWORK, "QUIC: EVP_EC_gen failed\n" );
 		goto cleanup;
 	}
 
@@ -75,13 +75,13 @@ static qboolean WN_GenerateSelfSignedCert( const char *cert_path, const char *ke
 	X509_set_issuer_name( cert, name );  /* self-signed */
 
 	if ( !X509_sign( cert, pkey, EVP_sha256() ) ) {
-		Com_Printf( S_COLOR_YELLOW "QUIC: X509_sign failed\n" );
+		COM_WARN( LOG_CAT_NETWORK, "QUIC: X509_sign failed\n" );
 		goto cleanup;
 	}
 
 	f = fopen( key_path, "wb" );
 	if ( !f ) {
-		Com_Printf( S_COLOR_YELLOW "QUIC: cannot write key to %s\n", key_path );
+		COM_WARN( LOG_CAT_NETWORK, "QUIC: cannot write key to %s\n", key_path );
 		goto cleanup;
 	}
 	PEM_write_PrivateKey( f, pkey, NULL, NULL, 0, NULL, NULL );
@@ -90,7 +90,7 @@ static qboolean WN_GenerateSelfSignedCert( const char *cert_path, const char *ke
 
 	f = fopen( cert_path, "wb" );
 	if ( !f ) {
-		Com_Printf( S_COLOR_YELLOW "QUIC: cannot write cert to %s\n", cert_path );
+		COM_WARN( LOG_CAT_NETWORK, "QUIC: cannot write cert to %s\n", cert_path );
 		goto cleanup;
 	}
 	PEM_write_X509( f, cert );
@@ -123,7 +123,7 @@ static size_t WN_AlpnSelectCallback( picoquic_quic_t *quic,
 
 	for ( i = 0; i < count; i++ ) {
 		if ( list[i].len == 5 && memcmp( list[i].base, "q3v69", 5 ) == 0 ) {
-			Com_DPrintf( "QUIC: ALPN matched 'q3v69' at index %zu\n", i );
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC: ALPN matched 'q3v69' at index %zu\n", i );
 			return i;
 		}
 	}
@@ -131,12 +131,12 @@ static size_t WN_AlpnSelectCallback( picoquic_quic_t *quic,
 	// Also accept "h3" for compatibility testing
 	for ( i = 0; i < count; i++ ) {
 		if ( list[i].len == 2 && memcmp( list[i].base, "h3", 2 ) == 0 ) {
-			Com_DPrintf( "QUIC: ALPN matched 'h3' at index %zu\n", i );
+			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC: ALPN matched 'h3' at index %zu\n", i );
 			return i;
 		}
 	}
 
-	Com_Printf( "QUIC: no matching ALPN found (%zu offered)\n", count );
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC: no matching ALPN found (%zu offered)\n", count );
 	return SIZE_MAX;
 }
 
@@ -202,7 +202,7 @@ static int WN_PicoquicCallback(
 		conn = WN_FindConnection( cnx );
 	}
 
-	WN_DBG( "QUIC CB: event=%d stream=%llu conn=%s len=%zu\n",
+	Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC CB: event=%d stream=%llu conn=%s len=%zu\n",
 		(int)event, (unsigned long long)stream_id,
 		conn ? "yes" : "NULL", length );
 
@@ -236,12 +236,12 @@ static int WN_PicoquicCallback(
 	case picoquic_callback_stream_data:
 	case picoquic_callback_stream_fin:
 		if ( !conn || !conn->active ) {
-			Com_Printf( "QUIC: stream data on stream %llu but no connection — dropping\n",
+			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC: stream data on stream %llu but no connection — dropping\n",
 				(unsigned long long)stream_id );
 			break;
 		}
 
-		Com_DPrintf( "QUIC: stream data: stream=%llu len=%zu\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "QUIC: stream data: stream=%llu len=%zu\n",
 			(unsigned long long)stream_id, length );
 
 		// Stream 0x00 = session control channel (binary TLV: CONNECT/ACCEPT/REFUSE/READY)
@@ -281,7 +281,7 @@ static int WN_PicoquicCallback(
 	case picoquic_callback_application_close: {
 		uint64_t err_code = picoquic_get_local_error(cnx);
 		uint64_t remote_err = picoquic_get_remote_error(cnx);
-		Com_Printf( "WiredNet: close event=%d local_err=%llu remote_err=%llu\n",
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WiredNet: close event=%d local_err=%llu remote_err=%llu\n",
 			(int)event, (unsigned long long)err_code, (unsigned long long)remote_err );
 		if ( conn && conn->active ) {
 			char reason[128];
@@ -299,16 +299,16 @@ static int WN_PicoquicCallback(
 	}
 
 	case picoquic_callback_request_alpn_list:
-		Com_Printf( "QUIC: ALPN list requested\n" );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC: ALPN list requested\n" );
 		// picoquic handles ALPN matching via the default_alpn parameter in picoquic_create
 		break;
 
 	case picoquic_callback_set_alpn:
-		Com_Printf( "QUIC: ALPN negotiated\n" );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC: ALPN negotiated\n" );
 		break;
 
 	case picoquic_callback_stateless_reset:
-		Com_Printf( "QUIC: stateless reset received\n" );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC: stateless reset received\n" );
 		if ( conn && conn->active ) {
 			WN_LogDisconnect( conn, "stateless reset" );
 			WN_FreeConnection( conn );
@@ -360,7 +360,9 @@ Called from SV_Init.
 */
 void WN_Init( void )
 {
-	uint64_t current_time;
+	uint64_t    current_time;
+	const char *cert_file = NULL;
+	const char *key_file  = NULL;
 
 	if ( wn.initialized ) {
 		return;
@@ -373,18 +375,30 @@ void WN_Init( void )
 #endif
 
 	// Register cvars
-	wn.sv_wirednetAuthToken  = Cvar_Get( "sv_wirednetAuthToken",  "", CVAR_ARCHIVE );
-	wn.sv_wirednetMaxClients = Cvar_Get( "sv_wirednetMaxClients", "8", CVAR_ARCHIVE );
-	wn.sv_wirednetStateRate  = Cvar_Get( "sv_wirednetStateRate", "10", CVAR_ARCHIVE );
-	wn.sv_wirednetEventRate  = Cvar_Get( "sv_wirednetEventRate", "20", CVAR_ARCHIVE );
-	wn_debug             = Cvar_Get( "wn_debug", "0", CVAR_TEMP );
-	Cvar_SetDescription( wn_debug,
-		"WiredNet verbose trace: 1 = show per-packet/per-callback/per-partial-slot "
-		"logs. Default 0 = quiet for gameplay." );
+	{
+		static const cvarDesc_t descs[] = {
+			CVAR_STRING( "sv_wirednetAuthToken",  "",   CVAR_ARCHIVE, "Authentication token for Wired QUIC transport." ),
+			CVAR_INT(    "sv_wirednetMaxClients", "8",  CVAR_ARCHIVE, "Maximum QUIC/Wired clients.", 0, 0 ),
+			CVAR_INT(    "sv_wirednetStateRate",  "10", CVAR_ARCHIVE, "State update rate (Hz) for QUIC transport.", 0, 0 ),
+			CVAR_INT(    "sv_wirednetEventRate",  "20", CVAR_ARCHIVE, "Event update rate (Hz) for QUIC transport.", 0, 0 ),
+		};
+		cvar_t *h[4];
+		Cvar_RegisterTable( descs, ARRAY_LEN( descs ), h );
+		wn.sv_wirednetAuthToken  = h[0];
+		wn.sv_wirednetMaxClients = h[1];
+		wn.sv_wirednetStateRate  = h[2];
+		wn.sv_wirednetEventRate  = h[3];
+	}
 
 #if FEAT_WIREDNET_OBSERVER
-	wn.sv_observerEventCount = Cvar_Get( "sv_observerEventCount", "100", CVAR_ARCHIVE );
-	wn.sv_httpRateLimit      = Cvar_Get( "sv_httpRateLimit",      "30",  CVAR_ARCHIVE );
+	{
+		static const cvarDesc_t d0 = CVAR_INT( "sv_observerEventCount", "100", CVAR_ARCHIVE,
+			"Maximum events buffered per observer connection.", 0, 0 );
+		static const cvarDesc_t d1 = CVAR_INT( "sv_httpRateLimit", "30", CVAR_ARCHIVE,
+			"HTTP observer rate limit (requests per second).", 0, 0 );
+		wn.sv_observerEventCount = Cvar_Register( &d0 );
+		wn.sv_httpRateLimit      = Cvar_Register( &d1 );
+	}
 
 	// TCP HTTP listener — same port as QUIC/UDP (TCP and UDP share a port namespace,
 	// so both can bind to 27960 independently without conflict).
@@ -404,7 +418,7 @@ void WN_Init( void )
 				if ( bind( fd, (struct sockaddr *)&sa, sizeof(sa) ) < 0 ||
 				     listen( fd, 8 ) < 0 ) {
 					wn_tcp_close( fd );
-					Com_Printf( S_COLOR_YELLOW
+					COM_WARN( LOG_CAT_NETWORK,
 						"WN_Init: TCP HTTP listener failed to bind port %d\n", port );
 				} else {
 #ifdef _WIN32
@@ -416,7 +430,6 @@ void WN_Init( void )
 					fcntl( fd, F_SETFL, fcntl( fd, F_GETFL, 0 ) | O_NONBLOCK );
 #endif
 					wn.tcp4_fd = fd;
-					Com_Printf( "WiredNet: TCP HTTP listener on port %d (IPv4)\n", port );
 				}
 			}
 		}
@@ -428,8 +441,8 @@ void WN_Init( void )
 	// Create picoquic context with TLS certificate
 	// Look for cert/key files in fs_homepath/certs/ or use cvars
 	{
-		const char *cert_file = Cvar_VariableString( "sv_wirednetCertFile" );
-		const char *key_file  = Cvar_VariableString( "sv_wirednetKeyFile" );
+		cert_file = Cvar_VariableString( "sv_wirednetCertFile" );
+		key_file  = Cvar_VariableString( "sv_wirednetKeyFile" );
 
 		// Default paths: resolve against fs_homepath so the server works regardless
 		// of CWD. picoquic calls fopen() directly and is blind to Q3's VFS.
@@ -453,10 +466,14 @@ void WN_Init( void )
 			key_file = key_buf;
 		}
 
-		Cvar_Get( "sv_wirednetCertFile", "", CVAR_ARCHIVE );
-		Cvar_Get( "sv_wirednetKeyFile", "", CVAR_ARCHIVE );
-
-		Com_Printf( "QUIC: using cert=%s key=%s\n", cert_file, key_file );
+		{
+			static const cvarDesc_t dc = CVAR_STRING( "sv_wirednetCertFile", "", CVAR_ARCHIVE,
+				"Path to TLS certificate file for QUIC transport (PEM format)." );
+			static const cvarDesc_t dk = CVAR_STRING( "sv_wirednetKeyFile", "", CVAR_ARCHIVE,
+				"Path to TLS private key file for QUIC transport (PEM format)." );
+			Cvar_Register( &dc );
+			Cvar_Register( &dk );
+		}
 
 		/* Auto-generate a self-signed cert if the files are missing.
 		 * This allows the engine to start without manual cert setup on first run. */
@@ -473,12 +490,12 @@ void WN_Init( void )
 						Sys_Mkdir( dir_buf );
 					}
 				}
-				Com_Printf( "QUIC: cert not found — generating self-signed cert...\n" );
+				Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC: cert not found — generating self-signed cert...\n" );
 				if ( !WN_GenerateSelfSignedCert( cert_file, key_file ) ) {
-					Com_Printf( S_COLOR_YELLOW "QUIC: cert generation failed."
+					COM_WARN( LOG_CAT_NETWORK, "QUIC: cert generation failed."
 						" Set sv_wirednetCertFile / sv_wirednetKeyFile manually.\n" );
 				} else {
-					Com_Printf( "QUIC: self-signed cert generated at %s\n", cert_file );
+					Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC: self-signed cert generated at %s\n", cert_file );
 				}
 			} else {
 				fclose( f );
@@ -505,10 +522,8 @@ void WN_Init( void )
 
 	} // end cert block
 
-	Com_Printf( "QUIC: picoquic_create returned %p\n", (void*)wn.quic );
-
 	if ( !wn.quic ) {
-		Com_Printf( S_COLOR_RED "WN_Init: picoquic_create failed. QUIC disabled.\n" );
+		COM_ERROR( LOG_CAT_NETWORK, "WN_Init: picoquic_create failed. QUIC disabled.\n" );
 		return;
 	}
 
@@ -540,13 +555,19 @@ void WN_Init( void )
 	picoquic_set_cookie_mode( wn.quic, 1 );
 
 	wn.initialized = qtrue;
+	Net_RegisterDemux( &s_quic_demux );
 
 #if FEAT_WIREDNET_OBSERVER
 	WN_RecordInit();
 #endif
 
-	Com_Printf( "QUIC transport initialized. ALPN: %s, max clients: %d\n",
-		WN_ALPN, wn.sv_wirednetMaxClients->integer );
+	{
+		int port = Cvar_VariableIntegerValue( "net_port" );
+		if ( port <= 0 ) port = PORT_SERVER;
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WiredNet: listening on port %d (IPv4), ALPN: %s, max clients: %d, cert=%s key=%s\n",
+			port, WN_ALPN, wn.sv_wirednetMaxClients->integer,
+			cert_file ? cert_file : "?", key_file ? key_file : "?" );
+	}
 
 	/* Publish the transport vtable so engine code can route through it */
 	transport = &quic_transport;
@@ -588,9 +609,10 @@ void WN_Shutdown( void )
 
 	picoquic_free( wn.quic );
 	wn.quic = NULL;
+	Net_UnregisterDemux( &s_quic_demux );
 	wn.initialized = qfalse;
 
-	Com_Printf( "QUIC transport shut down.\n" );
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC transport shut down.\n" );
 }
 
 
@@ -687,7 +709,7 @@ void WN_FlushOutbound( void )
 			continue; // unknown address family, skip
 		}
 
-		WN_DBG( "QUIC: sending %d bytes to %s\n", (int)send_len, NET_AdrToString(&to) );
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC: sending %d bytes to %s\n", (int)send_len, NET_AdrToString(&to) );
 		NET_SendPacket( NS_SERVER, (int)send_len, send_buf, &to );
 	}
 }
@@ -695,10 +717,11 @@ void WN_FlushOutbound( void )
 
 /*
 ====================
-WN_CheckPacket
+WN_DemuxPacket
 
-Demux helper — check if a received UDP packet is QUIC.
-Called from NET_GetPacket for each recvfrom result (IPv4, IPv6, multicast).
+transport_demux_t handler — check if a received UDP packet is QUIC.
+Registered via Net_RegisterDemux in WN_Init; called from Net_DispatchDemux
+for each recvfrom result (IPv4, IPv6, multicast).
 
 Returns qtrue if the packet was consumed by QUIC.
 
@@ -709,7 +732,7 @@ Demux logic:
   4. Otherwise           → Netchan
 ====================
 */
-qboolean WN_CheckPacket( netadr_t *from, byte *buf, int len )
+static qboolean WN_DemuxPacket( const netadr_t *from, const byte *data, int len )
 {
 	uint64_t current_time;
 	uint8_t  first;
@@ -720,23 +743,23 @@ qboolean WN_CheckPacket( netadr_t *from, byte *buf, int len )
 	if ( len <= 0 )
 		return qfalse;
 
-	first = buf[0];
+	first = data[0];
 
 	// QUIC Long Header: bit 7 set (Initial, Handshake, 0-RTT, Retry)
 	// QUIC Short Header: bits 7:6 = 01 (1-RTT established connection)
 	if ( (first & 0x80) || (first & 0xC0) == 0x40 ) {
-		WN_DBG( "QUIC: demux hit, first=0x%02X len=%d from=%s\n",
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC: demux hit, first=0x%02X len=%d from=%s\n",
 			first, len, NET_AdrToString( from ) );
 		current_time = Sys_Microseconds();
 
 		// Copy packet data to QUIC-owned buffer — net_message->data is shared
 		// and may be reused by subsequent recvfrom calls in the same drain loop.
 		if ( len > WN_PACKET_BUF_SIZE ) {
-			Com_Printf( S_COLOR_YELLOW "QUIC: oversized packet (%d bytes), dropped\n", len );
+			COM_WARN( LOG_CAT_NETWORK, "QUIC: oversized packet (%d bytes), dropped\n", len );
 			wn.dropped_packets++;
 			return qtrue;  // consumed (dropped)
 		}
-		memcpy( wn.recv_buf, buf, len );
+		memcpy( wn.recv_buf, data, len );
 
 		// Convert netadr_t to sockaddr for picoquic
 		{
@@ -765,18 +788,18 @@ qboolean WN_CheckPacket( netadr_t *from, byte *buf, int len )
 				0,                          // ECN
 				current_time
 			);
-			WN_DBG( "QUIC: picoquic_incoming_packet returned %d\n", pq_ret );
+			Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC: picoquic_incoming_packet returned %d\n", pq_ret );
 		}
 
 		// Dual-flush: send ACKs immediately after receiving QUIC packets.
 		// Without this, ACKs are delayed until the next SV_Frame (50ms at 20Hz),
 		// exceeding QUIC's 25ms max_ack_delay and causing unnecessary retransmits.
-		WN_DBG( "WiredNet: dual-flush after incoming packet\n" );
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] WiredNet: dual-flush after incoming packet\n" );
 		WN_FlushOutbound();
 
 		// Also feed the client QUIC context (when running as non-dedicated client)
 #if !defined(DEDICATED)
-		WN_ClientCheckPacket( from, buf, len );
+		WN_ClientCheckPacket( from, (byte *)data, len ); /* safe: WN_ClientCheckPacket memcpy-copies immediately, never writes through */
 #endif
 
 		cl_prof.chkpkt += (int)(Sys_Microseconds() - current_time);
@@ -801,7 +824,7 @@ static void WN_Status_f( void )
 	uint64_t now = Sys_Microseconds();
 
 	if ( !wn.initialized ) {
-		Com_Printf( "QUIC transport not initialized.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC transport not initialized.\n" );
 		return;
 	}
 
@@ -810,7 +833,7 @@ static void WN_Status_f( void )
 			count++;
 	}
 
-	Com_Printf( "QUIC connections: %d/%d\n", count, wn.sv_wirednetMaxClients->integer );
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC connections: %d/%d\n", count, wn.sv_wirednetMaxClients->integer );
 
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		wn_connection_t *c = &wn.connections[i];
@@ -833,7 +856,7 @@ static void WN_Status_f( void )
 		}
 		loss_pct = quality.sent > 0 ? (float)quality.lost * 100.0f / (float)quality.sent : 0.0f;
 
-		Com_Printf( "  #%d  %s  %s+%s+%s  RTT:%llums  Loss:%.1f%%  Up:%lum%lus\n",
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "  #%d  %s  %s+%s+%s  RTT:%llums  Loss:%.1f%%  Up:%lum%lus\n",
 			i,
 			NET_AdrToString( &c->addr ),
 			conn_type, role, auth,
@@ -843,8 +866,8 @@ static void WN_Status_f( void )
 			(unsigned long)(uptime_sec % 60) );
 	}
 
-	Com_Printf( "Events emitted: %llu\n", (unsigned long long)wn.event_seq );
-	Com_Printf( "Dropped packets (misroute): %d\n", wn.dropped_packets );
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Events emitted: %llu\n", (unsigned long long)wn.event_seq );
+	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Dropped packets (misroute): %d\n", wn.dropped_packets );
 }
 
 

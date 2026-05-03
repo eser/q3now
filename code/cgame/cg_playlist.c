@@ -93,12 +93,12 @@ static qboolean OpenWaveFile( const char *name ) {
 
 	fileSize = trap_FS_FOpenFile( name, &file, FS_READ );
 	if ( !file ) {
-		CG_Printf( "^3Couldn't open '%s'\n", name );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "^3Couldn't open '%s'\n", name );
 		return qfalse;
 	}
 	if ( fileSize < 44 ) {
 		BadFile:
-		CG_Printf( "^3Unknown file format: '%s'\n", name );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "^3Unknown file format: '%s'\n", name );
 		return qfalse;
 	}
 	bufPos = 0;
@@ -119,11 +119,11 @@ static void SkipToEndOfFile( void ) {
 
 static qboolean ReadChunkHeader( chunkHeader_t *header ) {
 	if ( !ReadDWORD( &header->id ) ) {
-		CG_Printf( "^3Unexpected end of file\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "^3Unexpected end of file\n" );
 		return qfalse;
 	}
 	if ( !ReadDWORD( &header->size ) ) {
-		CG_Printf( "^3Unexpected end of file\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "^3Unexpected end of file\n" );
 		return qfalse;
 	}
 	return qtrue;
@@ -214,7 +214,7 @@ void CG_ParsePlayList( void ) {
 	}
 
 	numEntries = i;
-	CG_Printf( "%d entries in playlist\n", numEntries );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "%d entries in playlist\n", numEntries );
 }
 
 void CG_StopPlayList( void ) {

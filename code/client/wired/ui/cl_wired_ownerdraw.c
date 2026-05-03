@@ -342,7 +342,7 @@ void WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
 		unsigned long long bit = 1ULL << ( ownerDraw % 64 );
 		if ( !( wui_odWarnedBits[word] & bit ) ) {
 			wui_odWarnedBits[word] |= bit;
-			Com_DPrintf( "WiredUI: unimplemented ownerdraw %d\n", ownerDraw );
+			Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: unimplemented ownerdraw %d\n", ownerDraw );
 		}
 	}
 }

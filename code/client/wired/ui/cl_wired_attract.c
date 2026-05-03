@@ -145,7 +145,7 @@ static void Attract_DispatchCurrent( void ) {
 	switch ( item->kind ) {
 	case ATTRACT_ITEM_PANEL:
 		if ( WiredUI_FindMenu( item->source ) == NULL ) {
-			Com_Printf( "attract: panel '%s' not found, skipping\n", item->source );
+			Com_Log( SEV_INFO, LOG_CAT_UI, "attract: panel '%s' not found, skipping\n", item->source );
 			Attract_Advance();
 			return;
 		}
@@ -164,7 +164,7 @@ static void Attract_DispatchCurrent( void ) {
 		   Store the file path in a WiredUI state key for the menu to read. */
 		WiredUI_StateSetString( "attract.cinematic.file", item->source );
 		if ( WiredUI_FindMenu( "attract_cinematic" ) == NULL ) {
-			Com_Printf( "attract: attract_cinematic menu not found, skipping\n" );
+			Com_Log( SEV_INFO, LOG_CAT_UI, "attract: attract_cinematic menu not found, skipping\n" );
 			Attract_Advance();
 			return;
 		}
@@ -173,7 +173,7 @@ static void Attract_DispatchCurrent( void ) {
 		break;
 
 	default:
-		Com_Printf( "attract: unknown item kind %d, skipping\n", item->kind );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "attract: unknown item kind %d, skipping\n", item->kind );
 		Attract_Advance();
 		return;
 	}
@@ -219,26 +219,26 @@ static void Attract_Status_f( void ) {
 	int state = (int)wui_attract.state;
 	const char *stateName = ( state >= 0 && state <= 5 ) ? stateNames[state] : "?";
 
-	Com_Printf( "attract_status:\n" );
-	Com_Printf( "  state         : %s\n", stateName );
-	Com_Printf( "  playlist      : %d items (loop=%d shuffle=%d)\n",
+	Com_Log( SEV_INFO, LOG_CAT_UI, "attract_status:\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  state         : %s\n", stateName );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  playlist      : %d items (loop=%d shuffle=%d)\n",
 	            wui_attract.playlistCount, wui_attract.loop, wui_attract.shuffle );
-	Com_Printf( "  currentIndex  : %d\n", wui_attract.currentIndex );
-	Com_Printf( "  itemElapsed   : %d ms\n",
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  currentIndex  : %d\n", wui_attract.currentIndex );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  itemElapsed   : %d ms\n",
 	            wui_attract.state == ATTRACT_STATE_PLAYING
 	            ? (int)( cls.realtime - wui_attract.itemStartTime ) : 0 );
-	Com_Printf( "  attract_delay : %d s\n",
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  attract_delay : %d s\n",
 	            wui_attract.cvDelay ? wui_attract.cvDelay->integer : 0 );
-	Com_Printf( "  attract_volume: %.2f\n",
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  attract_volume: %.2f\n",
 	            wui_attract.cvVolume ? wui_attract.cvVolume->value : 0.0f );
-	Com_Printf( "  ownsDemo      : %d (demoplaying=%d)\n",
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  ownsDemo      : %d (demoplaying=%d)\n",
 	            wui_attract.ownsDemo, clc.demoplaying );
-	Com_Printf( "  wiredHealthy  : %d\n", WiredUI_IsHealthy() );
-	Com_Printf( "  recoveryFail  : %d ms ago\n",
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  wiredHealthy  : %d\n", WiredUI_IsHealthy() );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  recoveryFail  : %d ms ago\n",
 	            WiredUI_GetLastRecoveryFailTime() != 0
 	            ? (int)( cls.realtime - WiredUI_GetLastRecoveryFailTime() ) : -1 );
-	Com_Printf( "  prevHadError  : %d\n", wui_attract.prevHadError );
-	Com_Printf( "  idle-detect   : keyboard only (mouse gated on KEYCATCH_UI)\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  prevHadError  : %d\n", wui_attract.prevHadError );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "  idle-detect   : keyboard only (mouse gated on KEYCATCH_UI)\n" );
 }
 
 /* ── Lua bindings ────────────────────────────────────────────────────── */
@@ -345,7 +345,7 @@ void WiredAttract_Init( void ) {
 	WiredScript_ExecFile( "scripts/attract.lua" );
 
 	wui_attract.initialized = qtrue;
-	Com_Printf( "WiredAttract: initialized (%d items in playlist)\n",
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredAttract: initialized (%d items in playlist)\n",
 	            wui_attract.playlistCount );
 }
 
@@ -537,7 +537,7 @@ void WiredAttract_OnMenuReload( void ) {
 void WiredAttract_Start( void ) {
 	if ( !wui_attract.initialized ) return;
 	if ( wui_attract.playlistCount == 0 ) {
-		Com_Printf( "attract: playlist is empty\n" );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "attract: playlist is empty\n" );
 		return;
 	}
 	wui_attract.currentIndex  = 0;

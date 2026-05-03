@@ -47,7 +47,7 @@ void GL_Bind( image_t *image ) {
 	GLuint texnum;
 
 	if ( !image ) {
-		ri.Printf( PRINT_WARNING, "GL_Bind: NULL image\n" );
+		ri.Log( SEV_WARN, "GL_Bind: NULL image\n" );
 		texnum = tr.defaultImage->texnum;
 	} else {
 		texnum = image->texnum;
@@ -95,7 +95,7 @@ void GL_SelectTexture( int unit )
 
 	if ( unit >= glConfig.numTextureUnits )
 	{
-		ri.Error( ERR_DROP, "GL_SelectTexture: unit = %i", unit );
+		ri.Terminate( TERM_CLIENT_DROP, "GL_SelectTexture: unit = %i", unit );
 	}
 
 	qglActiveTextureARB( GL_TEXTURE0_ARB + unit );
@@ -116,7 +116,7 @@ static void GL_SelectClientTexture( int unit )
 
 	if ( unit >= glConfig.numTextureUnits )
 	{
-		ri.Error( ERR_DROP, "GL_SelectClientTexture: unit = %i", unit );
+		ri.Terminate( TERM_CLIENT_DROP, "GL_SelectClientTexture: unit = %i", unit );
 	}
 
 	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
@@ -188,7 +188,7 @@ void GL_TexEnv( GLint env )
 		qglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, env );
 		break;
 	default:
-		ri.Error( ERR_DROP, "GL_TexEnv: invalid env '%d' passed", env );
+		ri.Terminate( TERM_CLIENT_DROP, "GL_TexEnv: invalid env '%d' passed", env );
 		break;
 	}
 }
@@ -263,7 +263,7 @@ void GL_State( unsigned stateBits )
 				srcFactor = GL_SRC_ALPHA_SATURATE;
 				break;
 			default:
-				ri.Error( ERR_DROP, "GL_State: invalid src blend state bits" );
+				ri.Terminate( TERM_CLIENT_DROP, "GL_State: invalid src blend state bits" );
 				break;
 			}
 
@@ -294,7 +294,7 @@ void GL_State( unsigned stateBits )
 				dstFactor = GL_ONE_MINUS_DST_ALPHA;
 				break;
 			default:
-				ri.Error( ERR_DROP, "GL_State: invalid dst blend state bits" );
+				ri.Terminate( TERM_CLIENT_DROP, "GL_State: invalid dst blend state bits" );
 				break;
 			}
 
@@ -375,7 +375,7 @@ void GL_State( unsigned stateBits )
 			qglAlphaFunc( GL_GEQUAL, 0.5f );
 			break;
 		default:
-			ri.Error( ERR_DROP, "GL_State: invalid alpha test bits" );
+			ri.Terminate( TERM_CLIENT_DROP, "GL_State: invalid alpha test bits" );
 			break;
 		}
 	}
@@ -1016,14 +1016,14 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, 
 	for ( j = 0 ; ( 1 << j ) < rows ; j++ ) {
 	}
 	if ( ( 1 << i ) != cols || ( 1 << j ) != rows) {
-		ri.Error (ERR_DROP, "Draw_StretchRaw: size not a power of 2: %i by %i", cols, rows);
+		ri.Terminate( TERM_CLIENT_DROP, "Draw_StretchRaw: size not a power of 2: %i by %i", cols, rows);
 	}
 
 	RE_UploadCinematic( w, h, cols, rows, data, client, dirty );
 
 	if ( r_speeds->integer ) {
 		end = ri.Milliseconds();
-		ri.Printf( PRINT_ALL, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
+		ri.Log( SEV_INFO, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
 	}
 
 	tr.cinematicShader->stages[0]->bundle[0].image[0] = tr.scratchImage[client];
@@ -1633,7 +1633,7 @@ void RB_ShowImages( void ) {
 	qglFinish();
 
 	end = ri.Milliseconds();
-	ri.Printf( PRINT_ALL, "%i msec to draw all images\n", end - start );
+	ri.Log( SEV_INFO, "%i msec to draw all images\n", end - start );
 }
 
 
@@ -1791,19 +1791,19 @@ static const void *RB_SwapBuffers( const void *data ) {
 		if ( backEnd.screenshotMask & SCREENSHOT_TGA && backEnd.screenshotTGA[0] ) {
 			RB_TakeScreenshot( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotTGA );
 			if ( !backEnd.screenShotTGAsilent ) {
-				ri.Printf( PRINT_ALL, "Wrote %s\n", backEnd.screenshotTGA );
+				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotTGA );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_JPG && backEnd.screenshotJPG[0] ) {
 			RB_TakeScreenshotJPEG( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotJPG );
 			if ( !backEnd.screenShotJPGsilent ) {
-				ri.Printf( PRINT_ALL, "Wrote %s\n", backEnd.screenshotJPG );
+				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotJPG );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_BMP && ( backEnd.screenshotBMP[0] || ( backEnd.screenshotMask & SCREENSHOT_BMP_CLIPBOARD ) ) ) {
 			RB_TakeScreenshotBMP( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotBMP, backEnd.screenshotMask & SCREENSHOT_BMP_CLIPBOARD );
 			if ( !backEnd.screenShotBMPsilent ) {
-				ri.Printf( PRINT_ALL, "Wrote %s\n", backEnd.screenshotBMP );
+				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotBMP );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_AVI ) {
@@ -1847,8 +1847,6 @@ static const void *RB_SwapBuffers( const void *data ) {
 	backEnd.doneBloom = qfalse;
 	backEnd.doneSurfaces = qfalse;
 	backEnd.drawConsole = qfalse;
-
-	r_anaglyphMode->modified = qfalse;
 
 	return (const void *)(cmd + 1);
 }

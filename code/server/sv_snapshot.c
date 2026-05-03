@@ -120,7 +120,7 @@ static void SV_WriteSnapshotToClient( const client_t *client, msg_t *msg ) {
 	// this is the snapshot we are creating
 	const clientSnapshot_t *frame = &client->frames[ client->wn_outgoing_sequence & PACKET_MASK ];
 
-	WN_DBG( "snapshot send: client=%s wn_outgoing=%u deltaMsg=%d msgAck=%d\n",
+	Com_Log( SEV_TRACE, LOG_CAT_SERVER, "[WiredNet] snapshot send: client=%s wn_outgoing=%u deltaMsg=%d msgAck=%d\n",
 		client->name, client->wn_outgoing_sequence,
 		client->deltaMessage, client->messageAcknowledge );
 
@@ -133,13 +133,11 @@ static void SV_WriteSnapshotToClient( const client_t *client, msg_t *msg ) {
 		lastframe = 0;
 	} else if ( client->wn_outgoing_sequence - client->deltaMessage >= (PACKET_BACKUP - 3) ) {
 		// client hasn't gotten a good message through in a long time
-		if ( com_developer->integer ) {
-			if ( client->deltaMessage != client->wn_outgoing_sequence - ( PACKET_BACKUP + 1 ) ) {
-				Com_Printf( "%s: Delta request from out of date packet.\n", client->name );
-				WN_DBG( "delta REJECT: oldMsgNum=%d wn_outgoing=%u delta=%d\n",
-					client->deltaMessage + 1, client->wn_outgoing_sequence,
-					client->deltaMessage );
-			}
+		if ( client->deltaMessage != client->wn_outgoing_sequence - ( PACKET_BACKUP + 1 ) ) {
+			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "[WiredNet] delta request from out of date packet REJECT: name=%s, oldMsgNum=%d wn_outgoing=%u delta=%d\n",
+				client->name,
+				client->deltaMessage + 1, client->wn_outgoing_sequence,
+				client->deltaMessage );
 		}
 		oldframe = NULL;
 		lastframe = 0;
@@ -149,7 +147,7 @@ static void SV_WriteSnapshotToClient( const client_t *client, msg_t *msg ) {
 		lastframe = client->wn_outgoing_sequence - client->deltaMessage;
 		// we may refer on outdated frame
 		if ( oldframe->frameNum - svs.lastValidFrame < 0 ) {
-			Com_DPrintf( "%s: Delta request from out of date frame.\n", client->name );
+			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "%s: Delta request from out of date frame.\n", client->name );
 			oldframe = NULL;
 			lastframe = 0;
 		}
@@ -278,7 +276,7 @@ static void SV_SortEntityNumbers( entityNum_t *num, const int size ) {
 	// consistency check for delta encoding
 	for ( int i = 1 ; i < size; i++ ) {
 		if ( num[i-1] >= num[i] ) {
-			Com_Error( ERR_DROP, "%s: invalid entity number %i", __func__, num[ i ] );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: invalid entity number %i", __func__, num[ i ] );
 		}
 	}
 #endif
@@ -347,7 +345,7 @@ static void SV_AddEntitiesVisibleFromPoint( const vec3_t origin, clientSnapshot_
 		// entities can be flagged to be sent to a given mask of clients
 		if ( ent->r.svFlags & SVF_CLIENTMASK ) {
 			if (frame->ps.clientNum >= 32)
-				Com_Error( ERR_DROP, "SVF_CLIENTMASK: clientNum >= 32" );
+				Com_Terminate( TERM_CLIENT_DROP, "SVF_CLIENTMASK: clientNum >= 32" );
 			if (~ent->r.singleClient & (1 << frame->ps.clientNum))
 				continue;
 		}
@@ -493,7 +491,7 @@ static void SV_BuildCommonSnapshot( void )
 			}
 	
 			if ( ent->s.number != num ) {
-				Com_DPrintf( "FIXING ENT->S.NUMBER %i => %i\n", ent->s.number, num );
+				Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "FIXING ENT->S.NUMBER %i => %i\n", ent->s.number, num );
 				ent->s.number = num;
 			}
 
@@ -530,7 +528,7 @@ static void SV_BuildCommonSnapshot( void )
 
 	// should never happen but anyway
 	if ( svs.freeStorageEntities < count ) {
-		Com_Error( ERR_DROP, "Not enough snapshot storage: %i < %i", svs.freeStorageEntities, count );
+		Com_Terminate( TERM_CLIENT_DROP, "Not enough snapshot storage: %i < %i", svs.freeStorageEntities, count );
 	}
 
 	// allocate storage
@@ -592,7 +590,7 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 
 	int clientNum = frame->ps.clientNum;
 	if ( clientNum < 0 || clientNum >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "SV_SvEntityForGentity: bad gEnt" );
+		Com_Terminate( TERM_CLIENT_DROP, "SV_SvEntityForGentity: bad gEnt" );
 	}
 
 	// we set client->gentity only after sending gamestate
@@ -709,7 +707,7 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 					/* Reliable stream — QUIC handles fragmentation and retransmit. */
 					byte rbuf[8 + MAX_MSGLEN];
 					if ( frag_total > 8 ) {
-						Com_DPrintf( "QUIC: snapshot %d bytes needs %d frags (>8) for client %d — using reliable stream\n",
+						Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: snapshot %d bytes needs %d frags (>8) for client %d — using reliable stream\n",
 							snap_len, frag_total, (int)(client - svs.clients) );
 					}
 					rbuf[0] = (byte)( srv_tick          & 0xFF );
@@ -724,7 +722,7 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 					transport->send_reliable( conn, CHAN_SNAPSHOT_RELIABLE, rbuf, 8 + snap_len );
 				} else {
 					/* App-level datagram fragmentation (default, mode 0). */
-					Com_DPrintf( "QUIC: snapshot %d bytes → %d frags for client %d\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: snapshot %d bytes → %d frags for client %d\n",
 						snap_len, frag_total, (int)(client - svs.clients) );
 					for ( int i = 0; i < frag_total; i++ ) {
 						int      offset      = i * WN_FRAG_PAYLOAD;
@@ -801,7 +799,7 @@ void SV_SendClientSnapshot( client_t *client ) {
 
 	// check for overflow
 	if ( msg.overflowed ) {
-		Com_Printf( "WARNING: msg overflowed for %s\n", client->name );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "WARNING: msg overflowed for %s\n", client->name );
 		MSG_Clear( &msg );
 	}
 

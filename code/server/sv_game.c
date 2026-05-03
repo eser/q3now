@@ -44,7 +44,7 @@ int	SV_NumForGentity( sharedEntity_t *ent ) {
 
 sharedEntity_t *SV_GentityNum( int num ) {
 	if ( num < 0 || num >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "%s: bad num %d", __func__, num );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad num %d", __func__, num );
 	}
 	sharedEntity_t *ent = (sharedEntity_t *)((byte *)sv.gentities + sv.gentitySize*(num));
 	return ent;
@@ -59,7 +59,7 @@ playerState_t *SV_GameClientNum( int num ) {
 
 svEntity_t	*SV_SvEntityForGentity( sharedEntity_t *gEnt ) {
 	if ( !gEnt || gEnt->s.number < 0 || gEnt->s.number >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "SV_SvEntityForGentity: bad gEnt" );
+		Com_Terminate( TERM_CLIENT_DROP, "SV_SvEntityForGentity: bad gEnt" );
 	}
 	return &sv.svEntities[ gEnt->s.number ];
 }
@@ -114,11 +114,11 @@ sets mins and maxs for inline bmodels
 */
 static void SV_SetBrushModel( sharedEntity_t *ent, const char *name ) {
 	if ( !name ) {
-		Com_Error( ERR_DROP, "SV_SetBrushModel: NULL" );
+		Com_Terminate( TERM_CLIENT_DROP, "SV_SetBrushModel: NULL" );
 	}
 
 	if ( name[0] != '*' ) {
-		Com_Error( ERR_DROP, "SV_SetBrushModel: %s isn't a brush model", name );
+		Com_Terminate( TERM_CLIENT_DROP, "SV_SetBrushModel: %s isn't a brush model", name );
 	}
 
 	ent->s.modelindex = atoi( name + 1 );
@@ -231,7 +231,7 @@ SV_GetServerinfo
 static void SV_GetServerinfo( char *buffer, int bufferSize ) {
 
 	if ( bufferSize < 1 ) {
-		Com_Error( ERR_DROP, "SV_GetServerinfo: bufferSize == %i", bufferSize );
+		Com_Terminate( TERM_CLIENT_DROP, "SV_GetServerinfo: bufferSize == %i", bufferSize );
 	}
 	if ( sv.state != SS_GAME || !sv.configstrings[ CS_SERVERINFO ] ) {
 		Q_strncpyz( buffer, Cvar_InfoString( CVAR_SERVERINFO, NULL ), bufferSize );
@@ -252,19 +252,19 @@ static void SV_LocateGameData( sharedEntity_t *gEnts, unsigned numGEntities, uns
 
 	if ( !gvm->entryPoint ) {
 		if ( numGEntities > MAX_GENTITIES ) {
-			Com_Error( ERR_DROP, "%s: bad entity count %u", __func__, numGEntities );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad entity count %u", __func__, numGEntities );
 		}
 
 		if ( sizeofGEntity_t < sizeof(sharedEntity_t) || sizeofGEntity_t > gvm->exactDataLength / MAX_GENTITIES ) {
-			Com_Error( ERR_DROP, "%s: bad entity size %u", __func__, sizeofGEntity_t );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad entity size %u", __func__, sizeofGEntity_t );
 		} else if ( (byte*)gEnts - gvm->dataBase > gvm->exactDataLength - sizeofGEntity_t * MAX_GENTITIES ) {
-			Com_Error( ERR_DROP, "%s: entities located out of data segment", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: entities located out of data segment", __func__ );
 		}
 
 		if ( sizeofGameClient < sizeof(playerState_t) || sizeofGameClient > gvm->exactDataLength / MAX_CLIENTS ) {
-			Com_Error( ERR_DROP, "%s: bad game client size %u", __func__, sizeofGameClient );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad game client size %u", __func__, sizeofGameClient );
 		} else if ( (byte*)clients - gvm->dataBase > gvm->exactDataLength - sizeofGameClient * MAX_CLIENTS ) {
-			Com_Error( ERR_DROP, "%s: clients located out of data segment", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: clients located out of data segment", __func__ );
 		}
 	}
 
@@ -286,7 +286,7 @@ static void SV_GetUsercmd( int clientNum, usercmd_t *cmd ) {
 	if ( (unsigned) clientNum < sv.maxclients ) {
 		*cmd = svs.clients[ clientNum ].lastUsercmd;
 	} else {
-		Com_Error( ERR_DROP, "%s(): bad clientNum: %i", __func__, clientNum );
+		Com_Terminate( TERM_CLIENT_DROP, "%s(): bad clientNum: %i", __func__, clientNum );
 	}
 }
 
@@ -388,21 +388,27 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	// retrying spawn point selection can loop forever if all spawn points have FL_NO_BOTS
 	// set, causing the server to hang at 100% CPU
 	if ( gvm->syscallCount >= 1024 * 1024 ) {
-		Com_Error( ERR_DROP, "game VM syscall overflow - Loss of control in VM" );
+		Com_Terminate( TERM_CLIENT_DROP, "game VM syscall overflow - Loss of control in VM" );
 	}
 	++gvm->syscallCount;
 
 	switch( args[0] ) {
 	case G_PRINT:
-		Com_Printf( "%s", (const char*)VMA(1) );
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "%s", (const char*)VMA(1) );
 		return 0;
 	case G_ERROR:
-		Com_Error( ERR_DROP, "%s", (const char*)VMA(1) );
+		Com_Terminate( TERM_CLIENT_DROP, "%s", (const char*)VMA(1) );
+		return 0;
+	case G_LOG:
+		Com_Log( (log_severity_t)args[1], LOG_CAT_GAME, "%s", (const char*)VMA(2) );
+		return 0;
+	case G_TERMINATE:
+		Com_Terminate( (terminationReason_t)args[1], "%s", (const char*)VMA(2) );
 		return 0;
 	case G_MILLISECONDS:
 		return Sys_Milliseconds();
 	case G_CVAR_REGISTER:
-		Cvar_Register( VMA(1), VMA(2), VMA(3), args[4], gvm->privateFlag ); 
+		Cvar_VM_Register( VMA(1), VMA(2), VMA(3), args[4], gvm->privateFlag );
 		return 0;
 	case G_CVAR_UPDATE:
 		Cvar_Update( VMA(1), gvm->privateFlag );
@@ -1092,6 +1098,27 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return 0;
 #endif
 
+	// ── WiredCoreEvents generic emit ─────────────────────────────────
+	case G_WCE_EMIT_EVENT: {
+		wce_event_data_t ev;
+		const char *text;
+		memset( &ev, 0, sizeof(ev) );
+		ev.type      = (wce_event_type_t)args[1];
+		ev.clientNum = (int)args[2];
+		ev.entityNum = (int)args[3];
+		VectorCopy( (const float *)VMA(4), ev.origin );
+		ev.param1    = (int)args[5];
+		ev.param2    = (int)args[6];
+		ev.fparam    = VMF(7);
+		text = VMA(8);
+		if ( text ) Q_strncpyz( ev.text, text, sizeof(ev.text) );
+		WiredCoreEvents_Dispatch( &ev );
+		return 0;
+	}
+
+	case G_WCE_GET_SOUND_EVENTS:
+		return SV_BotAwareness_GetEvents( (int)args[1], VMA(2), (int)args[3] );
+
 	case G_WIREDNET_GET_PING:
 		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
 			conn_handle_t conn = WN_GetConnHandleByAddr(
@@ -1132,6 +1159,7 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case G_NAV_UPDATE_CROWD:
 	case G_NAV_IS_READY:
 	case G_NAV_SET_POLY_FLAGS_FOR_DOOR:
+	case G_NAV_PREDICT_ENEMY_POSITION:
 		{
 			byte *vmBase = (gvm && !gvm->entryPoint) ? (byte *)gvm->dataBase : NULL;
 			return Nav_HandleTrap( args[0], args, vmBase );
@@ -1139,7 +1167,7 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 #endif /* FEAT_RECAST_NAVMESH */
 
 	default:
-		Com_Error( ERR_DROP, "Bad game system trap: %ld", (long int) args[0] );
+		Com_Terminate( TERM_CLIENT_DROP, "Bad game system trap: %ld", (long int) args[0] );
 	}
 	return 0;
 }
@@ -1227,7 +1255,7 @@ void SV_RestartGameProgs( void ) {
 	// do a restart instead of a free
 	gvm = VM_Restart( gvm );
 	if ( !gvm ) {
-		Com_Error( ERR_DROP, "VM_Restart on game failed" );
+		Com_Terminate( TERM_CLIENT_DROP, "VM_Restart on game failed" );
 	}
 
 	SV_InitGameVM( qtrue );
@@ -1259,7 +1287,7 @@ void SV_InitGameProgs( void ) {
 	// load the dll or bytecode
 	gvm = VM_Create( VM_GAME, SV_GameSystemCalls, SV_DllSyscall, Cvar_VariableIntegerValue( "vm_game" ) );
 	if ( !gvm ) {
-		Com_Error( ERR_DROP, "VM_Create on game failed" );
+		Com_Terminate( TERM_CLIENT_DROP, "VM_Create on game failed" );
 	}
 
 	SV_InitGameVM( qfalse );

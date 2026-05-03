@@ -55,7 +55,7 @@ menuDef {
 		rect 0.703 0.017 0.272 0.042
 		font "oxanium" 14
 		forecolor 1 1 1 1
-		cvar "g_spSkill"
+		cvar "g_skill"
 		cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 }
 		visible 1
 		mouseEnter { setcolor forecolor 1 0.75 0.2 1 }

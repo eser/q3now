@@ -40,7 +40,7 @@ void *CG_Alloc( int size ) {
 
 	if (cgAllocPermanent) {
 		if (cgPermOffset + aligned > cgTempOffset) {
-			CG_Printf(S_COLOR_RED "CG_Alloc: pool exhausted (perm %d + %d > temp %d)\n",
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_RED "CG_Alloc: pool exhausted (perm %d + %d > temp %d)\n",
 				cgPermOffset, aligned, cgTempOffset);
 			return NULL;
 		}
@@ -52,7 +52,7 @@ void *CG_Alloc( int size ) {
 		}
 	} else {
 		if (cgTempOffset - aligned < cgPermOffset) {
-			CG_Printf(S_COLOR_RED "CG_Alloc: pool exhausted (temp %d - %d < perm %d)\n",
+			Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_RED "CG_Alloc: pool exhausted (temp %d - %d < perm %d)\n",
 				cgTempOffset, aligned, cgPermOffset);
 			return NULL;
 		}

@@ -127,7 +127,7 @@ static void IN_KeyDown( kbutton_t *b ) {
 	} else if ( !b->down[1] ) {
 		b->down[1] = k;
 	} else {
-		Com_Printf ("Three keys down for a button!\n");
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Three keys down for a button!\n");
 		return;
 	}
 
@@ -203,7 +203,7 @@ static float CL_KeyState( kbutton_t *key ) {
 
 #if 0
 	if (msec) {
-		Com_Printf ("%i ", msec);
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i ", msec);
 	}
 #endif
 
@@ -381,7 +381,7 @@ Joystick values stay set until changed
 */
 void CL_JoystickEvent( int axis, int value, int time ) {
 	if ( axis < 0 || axis >= MAX_JOYSTICK_AXIS ) {
-		Com_Error( ERR_DROP, "CL_JoystickEvent: bad axis %i", axis );
+		Com_Terminate( TERM_CLIENT_DROP, "CL_JoystickEvent: bad axis %i", axis );
 	} else {
 		cl.joystickAxis[axis] = value;
 	}
@@ -468,7 +468,7 @@ static void CL_MouseMove( usercmd_t *cmd )
 			my *= accelSensitivity;
 
 			if ( cl_showMouseRate->integer )
-				Com_Printf( "rate: %f, accelSensitivity: %f\n", rate, accelSensitivity );
+				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "rate: %f, accelSensitivity: %f\n", rate, accelSensitivity );
 		}
 		else
 		{
@@ -496,7 +496,7 @@ static void CL_MouseMove( usercmd_t *cmd )
 			my = cl_sensitivity->value * (my + ((my < 0) ? -power[1] : power[1]) * offset);
 
 			if(cl_showMouseRate->integer)
-				Com_Printf("ratex: %f, ratey: %f, powx: %f, powy: %f\n", rate[0], rate[1], power[0], power[1]);
+				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "ratex: %f, ratey: %f, powx: %f, powy: %f\n", rate[0], rate[1], power[0], power[1]);
 		}
 	}
 	else
@@ -804,7 +804,7 @@ void CL_WritePacket( int repeat ) {
 		/* serverCmd_ack:u32 — last server command processed by client;
 		 * server advances reliableAcknowledge to stop re-embedding processed commands */
 		MSG_WriteLong( &udg, clc.serverCommandSequence );
-		WN_DBG( "usercmd send: snapshot_ack=%d serverCmd_ack=%d\n",
+		Com_Log( SEV_TRACE, LOG_CAT_CLIENT, "[WiredNet] usercmd send: snapshot_ack=%d serverCmd_ack=%d\n",
 			clc.serverMessageSequence, clc.serverCommandSequence );
 		MSG_WriteByte( &udg, qcount );
 
@@ -838,11 +838,11 @@ void CL_WritePacket( int repeat ) {
 	int count        = cl.cmdNumber - cl.outPackets[ oldPacketNum ].p_cmdNumber;
 	if ( count > MAX_PACKET_USERCMDS ) {
 		count = MAX_PACKET_USERCMDS;
-		Com_Printf("MAX_PACKET_USERCMDS\n");
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "MAX_PACKET_USERCMDS\n");
 	}
 	if ( count >= 1 ) {
 		if ( cl_showSend->integer ) {
-			Com_Printf( "(%i)", count );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "(%i)", count );
 		}
 
 		// begin a client move command
@@ -882,7 +882,7 @@ void CL_WritePacket( int repeat ) {
 	cl_sent++;
 
 	if ( cl_showSend->integer ) {
-		Com_Printf( "%i ", buf.cursize );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i ", buf.cursize );
 	}
 
 	MSG_WriteByte( &buf, clc_EOF );
@@ -891,7 +891,7 @@ void CL_WritePacket( int repeat ) {
 		if ( cls.state >= CA_CONNECTED && cls.state != CA_CINEMATIC ) {
 			cls.state = CA_CONNECTING; // to avoid recursive error
 		}
-		Com_Error( ERR_DROP, "%s: message overflowed", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: message overflowed", __func__ );
 	}
 
 	/* Phase D: netchan transmit removed — QUIC datagram path returned early above */
@@ -922,13 +922,49 @@ void CL_SendCmd( void ) {
 	// don't send a packet if the last packet was sent too recently
 	if ( !CL_ReadyToSendPacket() ) {
 		if ( cl_showSend->integer ) {
-			Com_Printf( ". " );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, ". " );
 		}
 		return;
 	}
 
 	CL_WritePacket( 0 );
 }
+
+
+static const cvarDesc_t inputDescs[] = {
+	/* 0  */ CVAR_BOOL(  "cl_nodelta",          "0",     CVAR_CHEAT,  	  "Flag server to disable delta compression on server snapshots." ),
+	/* 1  */ CVAR_INT(   "cl_debugMove",        "0",     0,               "Prints a graph of view angle deltas.\n 0: Disabled\n 1: Yaw\n 2: Pitch", 0, 2 ),
+	/* 2  */ CVAR_BOOL(  "cl_showSend",         "0",     CVAR_TEMP,       "Prints client to server packet information." ),
+	/* 3  */ CVAR_FLOAT( "cl_yawspeed",         "140",   CVAR_ARCHIVE | CVAR_NODEFAULT, "Side-to-side turning speed using keys (+left and +right).", 0, 0 ),
+	/* 4  */ CVAR_FLOAT( "cl_pitchspeed",       "140",   CVAR_ARCHIVE | CVAR_NODEFAULT, "Up and down pitching speed using keys (+lookup and +lookdown).", 0, 0 ),
+	/* 5  */ CVAR_FLOAT( "cl_anglespeedkey",    "1.5",   0,               "Set the speed that the direction keys (not mouse) change the view angle.", 0, 0 ),
+	/* 6  */ CVAR_INT(   "cl_maxpackets",       "125",   CVAR_ARCHIVE,    "Set how many client packets are sent to the server per second, can't exceed \\com_maxFPS.", 15, 125 ),
+	/* 7  */ CVAR_INT(   "cl_packetdup",        "1",     CVAR_ARCHIVE | CVAR_NODEFAULT, "Limits the number of previous client commands added in packet, helps in packet loss mitigation, increases client command packets size a bit.", 0, 5 ),
+	/* 8  */ CVAR_BOOL(  "cl_run",              "1",     CVAR_ARCHIVE | CVAR_NODEFAULT, "Persistent player running movement." ),
+	/* 9  */ CVAR_FLOAT( "sensitivity",         "5",     CVAR_ARCHIVE,    "Sets base mouse sensitivity (mouse speed).", 0, 0 ),
+	/* 10 */ CVAR_FLOAT( "cl_mouseAccel",       "0",     CVAR_ARCHIVE | CVAR_NODEFAULT, "Toggle the use of mouse acceleration the mouse speeds up or becomes more sensitive as it continues in one direction.", 0, 0 ),
+	/* 11 */ CVAR_BOOL(  "cl_freelook",         "1",     CVAR_ARCHIVE | CVAR_NODEFAULT, "Allow pitching or up/down look with mouse." ),
+	/* 12 */ CVAR_BOOL(  "cl_mouseAccelStyle",  "0",     CVAR_ARCHIVE | CVAR_NODEFAULT, "Choose between two different mouse acceleration styles." ),
+	/* 13 */ CVAR_FLOAT( "cl_mouseAccelOffset", "5",     CVAR_ARCHIVE | CVAR_NODEFAULT, "Sets how much base mouse delta will be doubled by acceleration. Requires 'cl_mouseAccelStyle 1'.", 0.001f, 50000 ),
+	/* 14 */ CVAR_BOOL(  "cl_showMouseRate",    "0",     0,               "Prints mouse acceleration info when 'cl_mouseAccel' has a value set (rate of mouse samples per frame)." ),
+	/* 15 */ CVAR_FLOAT( "m_pitch",             "0.022", CVAR_ARCHIVE | CVAR_NODEFAULT, "Set the up and down movement distance of the player in relation to how much the mouse moves.", 0, 0 ),
+	/* 16 */ CVAR_FLOAT( "m_yaw",               "0.022", CVAR_ARCHIVE | CVAR_NODEFAULT, "Set the speed at which the player's screen moves left and right while using the mouse.", 0, 0 ),
+	/* 17 */ CVAR_FLOAT( "m_forward",           "0.25",  CVAR_ARCHIVE | CVAR_NODEFAULT, "Set the back and forth movement distance of the player in relation to how much the mouse moves.", 0, 0 ),
+	/* 18 */ CVAR_FLOAT( "m_side",              "0.25",  CVAR_ARCHIVE | CVAR_NODEFAULT, "Set the strafe movement distance of the player in relation to how much the mouse moves.", 0, 0 ),
+};
+
+enum {
+	INP_NODELTA, INP_DEBUGMOVE, INP_SHOWSEND,
+	INP_YAWSPEED, INP_PITCHSPEED, INP_ANGLESPEEDKEY,
+	INP_MAXPACKETS, INP_PACKETDUP,
+	INP_RUN, INP_SENSITIVITY, INP_MOUSEACCEL, INP_FREELOOK,
+	INP_MOUSEACCELSTYLE, INP_MOUSEACCELOFFSET, INP_SHOWMOUSERATE,
+	INP_MPITCH, INP_MYAW, INP_MFORWARD, INP_MSIDE,
+	INP_CVAR_COUNT
+};
+
+_Static_assert( ARRAY_LEN( inputDescs ) == INP_CVAR_COUNT, "inputDescs/enum mismatch" );
+static cvar_t *inputHandles[INP_CVAR_COUNT];
 
 
 /*
@@ -1002,66 +1038,38 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("+button15", IN_Button15Down);
 	Cmd_AddCommand ("-button15", IN_Button15Up);
 
-	cl_nodelta = Cvar_Get( "cl_nodelta", "0", CVAR_DEVELOPER );
-	Cvar_SetDescription( cl_nodelta, "Flag server to disable delta compression on server snapshots." );
-	cl_debugMove = Cvar_Get( "cl_debugMove", "0", 0 );
-	Cvar_CheckRange( cl_debugMove, "0", "2", CV_INTEGER );
-	Cvar_SetDescription( cl_debugMove, "Prints a graph of view angle deltas.\n 0: Disabled\n 1: Yaw\n 2: Pitch" );
+	Cvar_RegisterTable( inputDescs, ARRAY_LEN( inputDescs ), inputHandles );
+	cl_nodelta         = inputHandles[INP_NODELTA];
+	cl_debugMove       = inputHandles[INP_DEBUGMOVE];
+	cl_showSend        = inputHandles[INP_SHOWSEND];
+	cl_yawspeed        = inputHandles[INP_YAWSPEED];
+	cl_pitchspeed      = inputHandles[INP_PITCHSPEED];
+	cl_anglespeedkey   = inputHandles[INP_ANGLESPEEDKEY];
+	cl_maxpackets      = inputHandles[INP_MAXPACKETS];
+	cl_packetdup       = inputHandles[INP_PACKETDUP];
+	cl_run             = inputHandles[INP_RUN];
+	cl_sensitivity     = inputHandles[INP_SENSITIVITY];
+	cl_mouseAccel      = inputHandles[INP_MOUSEACCEL];
+	cl_freelook        = inputHandles[INP_FREELOOK];
+	cl_mouseAccelStyle  = inputHandles[INP_MOUSEACCELSTYLE];
+	cl_mouseAccelOffset = inputHandles[INP_MOUSEACCELOFFSET];
+	cl_showMouseRate   = inputHandles[INP_SHOWMOUSERATE];
+	m_pitch            = inputHandles[INP_MPITCH];
+	m_yaw              = inputHandles[INP_MYAW];
+	m_forward          = inputHandles[INP_MFORWARD];
+	m_side             = inputHandles[INP_MSIDE];
 
-	cl_showSend = Cvar_Get( "cl_showSend", "0", CVAR_TEMP );
-	Cvar_SetDescription( cl_showSend, "Prints client to server packet information." );
-
-	cl_yawspeed = Cvar_Get( "cl_yawspeed", "140", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_yawspeed, "Side-to-side turning speed using keys (+left and +right)." );
-	cl_pitchspeed = Cvar_Get( "cl_pitchspeed", "140", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_pitchspeed, "Up and down pitching speed using keys (+lookup and +lookdown)." );
-	cl_anglespeedkey = Cvar_Get( "cl_anglespeedkey", "1.5", 0 );
-	Cvar_SetDescription( cl_anglespeedkey, "Set the speed that the direction keys (not mouse) change the view angle." );
-
-	cl_maxpackets = Cvar_Get ("cl_maxpackets", "125", CVAR_ARCHIVE );
-	Cvar_CheckRange( cl_maxpackets, "15", "125", CV_INTEGER );
-	Cvar_SetDescription( cl_maxpackets, "Set how many client packets are sent to the server per second, can't exceed \\com_maxFPS." );
-	cl_packetdup = Cvar_Get( "cl_packetdup", "1", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( cl_packetdup, "0", "5", CV_INTEGER );
-	Cvar_SetDescription( cl_packetdup, "Limits the number of previous client commands added in packet, helps in packet loss mitigation, increases client command packets size a bit." );
-
-	cl_run = Cvar_Get( "cl_run", "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_run, "Persistent player running movement." );
-	cl_sensitivity = Cvar_Get( "sensitivity", "5", CVAR_ARCHIVE );
-	Cvar_SetDescription( cl_sensitivity, "Sets base mouse sensitivity (mouse speed)." );
-	cl_mouseAccel = Cvar_Get( "cl_mouseAccel", "0", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_mouseAccel, "Toggle the use of mouse acceleration the mouse speeds up or becomes more sensitive as it continues in one direction." );
-	cl_freelook = Cvar_Get( "cl_freelook", "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_freelook, "Allow pitching or up/down look with mouse." );
-
-	// 0: legacy mouse acceleration
-	// 1: new implementation
-	cl_mouseAccelStyle = Cvar_Get( "cl_mouseAccelStyle", "0", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_mouseAccelStyle, "Choose between two different mouse acceleration styles." );
-	// offset for the power function (for style 1, ignored otherwise)
-	// this should be set to the max rate value
-	cl_mouseAccelOffset = Cvar_Get( "cl_mouseAccelOffset", "5", CVAR_ARCHIVE_ND );
-	Cvar_CheckRange( cl_mouseAccelOffset, "0.001", "50000", CV_FLOAT );
-	Cvar_SetDescription( cl_mouseAccelOffset, "Sets how much base mouse delta will be doubled by acceleration. Requires 'cl_mouseAccelStyle 1'." );
-
-	cl_showMouseRate = Cvar_Get( "cl_showMouseRate", "0", 0 );
-	Cvar_SetDescription( cl_showMouseRate, "Prints mouse acceleration info when 'cl_mouseAccel' has a value set (rate of mouse samples per frame)." );
-
-	m_pitch = Cvar_Get( "m_pitch", "0.022", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( m_pitch, "Set the up and down movement distance of the player in relation to how much the mouse moves." );
-	m_yaw = Cvar_Get( "m_yaw", "0.022", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( m_yaw, "Set the speed at which the player's screen moves left and right while using the mouse." );
-	m_forward = Cvar_Get( "m_forward", "0.25", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( m_forward, "Set the back and forth movement distance of the player in relation to how much the mouse moves." );
-	m_side = Cvar_Get( "m_side", "0.25", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( m_side, "Set the strafe movement distance of the player in relation to how much the mouse moves." );
+	{
 #ifdef MACOS_X
-	// Input is jittery on OS X w/o this
-	m_filter = Cvar_Get( "m_filter", "1", CVAR_ARCHIVE_ND );
+		// Input is jittery on OS X w/o this
+		static const cvarDesc_t d = CVAR_BOOL( "m_filter", "1", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Toggle use of mouse 'smoothing'." );
 #else
-	m_filter = Cvar_Get( "m_filter", "0", CVAR_ARCHIVE_ND );
+		static const cvarDesc_t d = CVAR_BOOL( "m_filter", "0", CVAR_ARCHIVE | CVAR_NODEFAULT,
+			"Toggle use of mouse 'smoothing'." );
 #endif
-	Cvar_SetDescription( m_filter, "Toggle use of mouse 'smoothing'." );
+		m_filter = Cvar_Register( &d );
+	}
 }
 
 

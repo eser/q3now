@@ -21,12 +21,12 @@ gfx/ui/glow_radial
 
 // ── crosshair shaders (fix: rgbGen exactVertex enables SetColor tinting) ──
 // Q3 vanilla uses rgbGen identity which ignores SetColor → crosshair always white.
-// QL fixed this with rgbGen exactVertex. We override all 10 crosshairs here.
+// q3now fixed this with rgbGen exactVertex. We override all 10 crosshairs here.
 gfx/2d/crosshairMelee   { nopicmip { map gfx/2d/crosshairMelee.tga    blendfunc blend  rgbGen exactVertex } }
 gfx/2d/crosshairBullet  { nopicmip { map gfx/2d/crosshairBullet.tga   blendfunc blend  rgbGen exactVertex } }
 gfx/2d/crosshairBurst   { nopicmip { map gfx/2d/crosshairBurst.tga    blendfunc blend  rgbGen exactVertex } }
 gfx/2d/crosshairMissile { nopicmip { map gfx/2d/crosshairMissile.tga  blendfunc blend  rgbGen exactVertex } }
-gfx/2d/crosshairMisc    { nopicmip { map gfx/2d/crosshairMisc.tga     blendfunc blend  rgbGen exactVertex } }
+gfx/2d/crosshairDefault    { nopicmip { map gfx/2d/crosshairDefault.png     blendfunc blend  rgbGen exactVertex } }
 
 // ── q3now lens flare shaders ────────────────────────────────────────
 // Alternatives inspired by JJ Abrams / cinematic lens flare references.
@@ -320,8 +320,8 @@ wiredui/clouds
 }
 
 models/powerups/health/red
-{	
-	
+{
+
 	{
 		map textures/effects/envmapred.tga
         tcGen environment
@@ -379,5 +379,176 @@ powerups/glassCloakingSpecular
 		alphagen entity
 		tcmod turb 0 0.15 0 0.25
 		tcgen environment
+	}
+}
+
+// ── Q1 teleporter pad liquid surface ────────────────────────────────
+// Substitutes textures/sfx/portal_sfx.tga (Q3 pak) — uses local
+// gfx/misc/teleportEffect2.jpg so the shader works without pak lookup.
+textures/liquids/teleporter_q1
+{
+	qer_editorimage gfx/misc/teleportEffect2.jpg
+	q3map_globaltexture
+	surfaceparm trans
+	surfaceparm nonsolid
+	surfaceparm noimpact
+	surfaceparm nolightmap
+	q3map_surfacelight 400
+	cull disable
+
+	deformVertexes wave 64 sin 0.5 0.5 0 0.5
+
+	{
+		map gfx/misc/teleportEffect2.jpg
+		blendFunc GL_ONE GL_ONE
+		tcMod scale 1 1
+		tcMod scroll 0.05 0.05
+		rgbGen identity
+	}
+	{
+		map gfx/misc/teleportEffect2.jpg
+		blendFunc GL_ONE GL_ONE
+		tcMod turb 0 0.2 0 0.1
+		tcMod scroll -0.03 0.02
+		rgbGen wave sin 0.5 0.5 0 0.3
+	}
+}
+
+// ── Q1 water surface ─────────────────────────────────────────────────
+textures/liquids/clear_calm1
+{
+	qer_editorimage textures/liquids/pool3d_3e.jpg
+	surfaceparm nolightmap
+	surfaceparm water
+	cull disable
+	{
+		map textures/liquids/pool3d_3e.jpg
+		tcMod turb 0 0.15 0 0.08
+		tcMod scroll 0.03 0.02
+		rgbGen identity
+	}
+}
+
+// ── Q1 slime surface ─────────────────────────────────────────────────
+textures/liquids/slime2
+{
+	qer_editorimage textures/liquids/slime7e.jpg
+	surfaceparm nolightmap
+	surfaceparm slime
+	cull disable
+	{
+		map textures/liquids/slime7e.jpg
+		tcMod turb 0 0.1 0 0.05
+		tcMod scroll 0.015 0.01
+		rgbGen identity
+	}
+}
+
+// ── Q1 lava surface ──────────────────────────────────────────────────
+// No dedicated lava texture in tree; pool3d_5e with warm tint stands in.
+textures/liquids/lavacrust
+{
+	qer_editorimage textures/liquids/pool3d_5e.jpg
+	surfaceparm nolightmap
+	surfaceparm lava
+	q3map_surfacelight 800
+	cull disable
+	{
+		map textures/liquids/pool3d_5e.jpg
+		tcMod turb 0 0.2 0 0.05
+		tcMod scroll 0.01 0.008
+		rgbGen wave sin 0.9 0.1 0 0.4
+	}
+}
+
+// ── Armors ───────────────────────────────────────────────────────────
+models/powerups/armor/newgreen
+{
+    {
+		map textures/sfx/specular.tga
+		tcGen environment
+		rgbGen identity
+	}
+	{
+		map models/powerups/armor/newgreen.tga
+		blendFunc blend
+		rgbGen entity
+	}
+}
+
+models/powerups/armor/energy_gre1
+{
+    cull none
+    nopicmip
+    nomipmaps
+
+	{
+		map models/powerups/armor/energy_gre1.tga
+		blendFunc add
+		rgbGen entity
+		tcMod scroll 7.4 1.3
+	}
+}
+
+models/powerups/armor/newbase
+{
+    {
+		map textures/sfx/specular.tga
+		tcGen environment
+		rgbGen identity
+	}
+	{
+		map models/powerups/armor/newbase.tga
+		blendFunc blend
+		rgbGen entity
+	}
+}
+
+models/powerups/armor/energy_base1
+{
+    cull none
+    nopicmip
+    nomipmaps
+
+	{
+		map models/powerups/armor/energy_base1.tga
+		blendFunc add
+		rgbGen entity
+		tcMod scroll 7.4 1.3
+	}
+}
+
+models/powerups/health/green
+{
+	{
+		map textures/effects/envmapgreen.tga
+		tcGen environment
+	}
+}
+
+models/powerups/armor/energy_grn1
+{
+	deformVertexes wave 100 sin 2 0 0 0
+	{
+		map textures/effects/envmapgreen.tga
+		blendFunc GL_ONE GL_ONE
+		tcGen environment
+		tcmod rotate 30
+		tcMod scroll 1 1
+		rgbGen wave triangle -.3 1.3 0 .3
+	}
+}
+
+models/weapons2/grenadel/grenadel
+{
+	{
+		map models/weapons2/grenadel/grenadel.tga
+		rgbGen lightingDiffuse
+	}
+	{
+		map models/weapons2/grenadel/grenadel.tga
+		blendfunc gl_dst_color gl_dst_alpha
+		rgbGen lightingDiffuse
+		alphaGen lightingSpecular
 	}
 }

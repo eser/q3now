@@ -56,7 +56,7 @@ CG_FreeLocalEntity
 */
 void CG_FreeLocalEntity( localEntity_t *le ) {
 	if ( !le->prev ) {
-		CG_Error( "CG_FreeLocalEntity: not active" );
+		Com_Terminate( TERM_CLIENT_DROP, "CG_FreeLocalEntity: not active" );
 	}
 
 	// remove from the doubly linked active list
@@ -671,19 +671,19 @@ void CG_AddKamikaze( localEntity_t *le ) {
 
 /*
 ===================
-CG_AddInvulnerabilityImpact
+CG_AddDeflectorImpact
 ===================
 */
-void CG_AddInvulnerabilityImpact( localEntity_t *le ) {
+void CG_AddDeflectorImpact( localEntity_t *le ) {
 	trap_R_AddRefEntityToScene( &le->refEntity );
 }
 
 /*
 ===================
-CG_AddInvulnerabilityJuiced
+CG_AddDeflectorJuiced
 ===================
 */
-void CG_AddInvulnerabilityJuiced( localEntity_t *le ) {
+void CG_AddDeflectorJuiced( localEntity_t *le ) {
 	int t = cg.time - le->startTime;
 	if ( t > 3000 ) {
 		le->refEntity.axis[0][0] = (float) 1.0 + 0.3 * (t - 3000) / 2000;
@@ -880,7 +880,7 @@ void CG_AddLocalEntities( void ) {
 		}
 		switch ( le->leType ) {
 		default:
-			CG_Error( "Bad leType: %i", le->leType );
+			Com_Terminate( TERM_CLIENT_DROP, "Bad leType: %i", le->leType );
 			break;
 
 		case LE_MARK:
@@ -947,11 +947,11 @@ void CG_AddLocalEntities( void ) {
 		case LE_KAMIKAZE:
 			CG_AddKamikaze( le );
 			break;
-		case LE_INVULIMPACT:
-			CG_AddInvulnerabilityImpact( le );
+		case LE_DEFLECTOR_IMPACT:
+			CG_AddDeflectorImpact( le );
 			break;
-		case LE_INVULJUICED:
-			CG_AddInvulnerabilityJuiced( le );
+		case LE_DEFLECTOR_JUICED:
+			CG_AddDeflectorJuiced( le );
 			break;
 		case LE_SHOWREFENTITY:
 			CG_AddRefEntity( le );

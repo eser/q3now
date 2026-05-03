@@ -48,7 +48,7 @@ so you will probably have to cycle a couple frames to see it.
 
 "nextframe", "prevframe", "nextskin", and "prevskin" commands will change the
 frame or skin of the testmodel.  These are bound to F5, F6, F7, and F8 in
-q3default.cfg.
+default.cfg.
 
 If a gun is being tested, the "gun_x", "gun_y", and "gun_z" variables will let
 you adjust the positioning.
@@ -86,7 +86,7 @@ void CG_TestModel_f (void) {
 		cg.testModelEntity.oldframe = 0;
 	}
 	if (! cg.testModelEntity.hModel ) {
-		CG_Printf( "Can't register model\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Can't register model\n" );
 		return;
 	}
 
@@ -120,7 +120,7 @@ void CG_TestGun_f (void) {
 
 void CG_TestModelNextFrame_f (void) {
 	cg.testModelEntity.frame++;
-	CG_Printf( "frame %i\n", cg.testModelEntity.frame );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "frame %i\n", cg.testModelEntity.frame );
 }
 
 void CG_TestModelPrevFrame_f (void) {
@@ -128,12 +128,12 @@ void CG_TestModelPrevFrame_f (void) {
 	if ( cg.testModelEntity.frame < 0 ) {
 		cg.testModelEntity.frame = 0;
 	}
-	CG_Printf( "frame %i\n", cg.testModelEntity.frame );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "frame %i\n", cg.testModelEntity.frame );
 }
 
 void CG_TestModelNextSkin_f (void) {
 	cg.testModelEntity.skinNum++;
-	CG_Printf( "skin %i\n", cg.testModelEntity.skinNum );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "skin %i\n", cg.testModelEntity.skinNum );
 }
 
 void CG_TestModelPrevSkin_f (void) {
@@ -141,7 +141,7 @@ void CG_TestModelPrevSkin_f (void) {
 	if ( cg.testModelEntity.skinNum < 0 ) {
 		cg.testModelEntity.skinNum = 0;
 	}
-	CG_Printf( "skin %i\n", cg.testModelEntity.skinNum );
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "skin %i\n", cg.testModelEntity.skinNum );
 }
 
 static void CG_AddTestModel (void) {
@@ -150,7 +150,7 @@ static void CG_AddTestModel (void) {
 	// re-register the model, because the level may have changed
 	cg.testModelEntity.hModel = trap_R_RegisterModel( cg.testModelName );
 	if (! cg.testModelEntity.hModel ) {
-		CG_Printf ("Can't register model\n");
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Can't register model\n");
 		return;
 	}
 
@@ -336,13 +336,23 @@ static void CG_OffsetThirdPersonView( void ) {
 
 // this causes a compiler bug on mac MrC compiler
 static void CG_StepOffset( void ) {
-	int		timeDelta;
-	
-	// smooth out stair climbing
+	int timeDelta;
+
+	// Ascent: EV_STEP_* raised cg.stepChange (positive). Subtract a decaying
+	// offset so the camera appears to stay level as origin snapped up.
 	timeDelta = cg.time - cg.stepTime;
 	if ( timeDelta < STEP_TIME ) {
-		cg.refdef.vieworg[2] -= cg.stepChange 
-			* (STEP_TIME - timeDelta) / STEP_TIME;
+		cg.refdef.vieworg[2] -= cg.stepChange
+			* (float)( STEP_TIME - timeDelta ) / (float)STEP_TIME;
+	}
+
+	// Descent: PM_GroundTrace snapped origin down silently; cg_predict.c set
+	// cg.stepDownChange (negative). Subtracting a negative value pushes the
+	// camera UP, compensating the drop and decaying back to 0 over STEP_TIME.
+	timeDelta = cg.time - cg.stepDownTime;
+	if ( timeDelta < STEP_TIME && cg.stepDownChange < 0.0f ) {
+		cg.refdef.vieworg[2] -= cg.stepDownChange
+			* (float)( STEP_TIME - timeDelta ) / (float)STEP_TIME;
 	}
 }
 
@@ -1173,7 +1183,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	CG_DrawActive( stereoView );
 
 	if ( cg_stats.integer ) {
-		CG_Printf( "cg.clientFrame:%i\n", cg.clientFrame );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "cg.clientFrame:%i\n", cg.clientFrame );
 	}
 
 

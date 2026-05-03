@@ -64,6 +64,13 @@ qboolean CheckGauntletAttack( gentity_t *ent ) {
 	}
 
 	damage = 80 * s_quadFactor;
+
+	if ( traceEnt->client && traceEnt->client->deflectorTime > level.time ) {
+		vec3_t impactpoint, bouncedir;
+		G_DeflectorEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir );
+		return qtrue;
+	}
+
 	G_Damage( traceEnt, ent, ent, forward, tr.endpos,
 		damage, 0, MOD_GAUNTLET );
 
@@ -133,6 +140,13 @@ void Attack_Gauntlet_Lunge( gentity_t *ent ) {
 	}
 
 	damage = 100 * s_quadFactor;
+
+	if ( traceEnt->client && traceEnt->client->deflectorTime > level.time ) {
+		vec3_t impactpoint, bouncedir;
+		G_DeflectorEffect( traceEnt, forward, tr.endpos, impactpoint, bouncedir );
+		return;
+	}
+
 	G_Damage( traceEnt, ent, ent, forward, tr.endpos, damage, 0, MOD_GAUNTLET_LUNGE );
 
 	if ( ent->client ) {

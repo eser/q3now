@@ -185,7 +185,7 @@ void WiredUI_SaveState( void ) {
 
 	fileHandle_t f = FS_FOpenFileWrite( WIRED_UI_STATE_FILE );
 	if ( f == FS_INVALID_HANDLE ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: failed to save UI state (%s)\n", WIRED_UI_STATE_FILE );
+		COM_WARN( LOG_CAT_UI, "WiredUI: failed to save UI state (%s)\n", WIRED_UI_STATE_FILE );
 		return;
 	}
 
@@ -203,7 +203,7 @@ void WiredUI_SaveState( void ) {
 
 	FS_FCloseFile( f );
 
-	Com_DPrintf( "WiredUI: saved %d UI state entries\n", writeCtx.wrote );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: saved %d UI state entries\n", writeCtx.wrote );
 }
 
 void WiredUI_LoadState( void ) {
@@ -303,7 +303,7 @@ void WiredUI_LoadState( void ) {
 
 	Z_Free( data );
 
-	Com_DPrintf( "WiredUI: loaded %d UI state entries\n", loadedCount );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: loaded %d UI state entries\n", loadedCount );
 }
 
 static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
@@ -330,7 +330,7 @@ static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
 
 	if ( lua_pcall( L, 0, 0, 0 ) != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		Com_Printf( S_COLOR_YELLOW "WiredUI: Lua store.%s failed: %s\n",
+		COM_WARN( LOG_CAT_UI, "WiredUI: Lua store.%s failed: %s\n",
 			functionName, err ? err : "unknown" );
 		lua_pop( L, 1 );
 		lua_pop( L, 1 );
@@ -1177,7 +1177,7 @@ static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
 
 void WiredUI_RegisterSymbol( const char *name, wiredSymbolCallback_t callback, void *userData ) {
 	if ( !name || !name[0] || !callback ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterSymbol: invalid args\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI_RegisterSymbol: invalid args\n" );
 		return;
 	}
 
@@ -1191,7 +1191,7 @@ void WiredUI_RegisterSymbol( const char *name, wiredSymbolCallback_t callback, v
 	}
 
 	if ( wui_numSymbols >= WIRED_MAX_SYMBOLS ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterSymbol: too many symbols (max %d)\n", WIRED_MAX_SYMBOLS );
+		COM_WARN( LOG_CAT_UI, "WiredUI_RegisterSymbol: too many symbols (max %d)\n", WIRED_MAX_SYMBOLS );
 		return;
 	}
 
@@ -1227,7 +1227,7 @@ void WiredUI_RegisterElement( const char *name,
                                wiredElementRoutine_t routine,
                                wiredElementDestroy_t destroy ) {
 	if ( !name || !name[0] ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterElement: invalid name\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI_RegisterElement: invalid name\n" );
 		return;
 	}
 
@@ -1242,7 +1242,7 @@ void WiredUI_RegisterElement( const char *name,
 	}
 
 	if ( wui_numElements >= WIRED_MAX_ELEMENTS ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterElement: too many elements (max %d)\n", WIRED_MAX_ELEMENTS );
+		COM_WARN( LOG_CAT_UI, "WiredUI_RegisterElement: too many elements (max %d)\n", WIRED_MAX_ELEMENTS );
 		return;
 	}
 
@@ -1258,7 +1258,7 @@ void WiredUI_RegisterElement( const char *name,
 
 void WiredUI_RegisterPopulateCallback( const char *name, wuiPopulateCallback_t fn ) {
 	if ( !name || !name[0] || !fn ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterPopulateCallback: invalid args\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI_RegisterPopulateCallback: invalid args\n" );
 		return;
 	}
 
@@ -1272,7 +1272,7 @@ void WiredUI_RegisterPopulateCallback( const char *name, wuiPopulateCallback_t f
 	}
 
 	if ( wui_numPopulateCallbacks >= WIRED_MAX_POPULATE_CALLBACKS ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI_RegisterPopulateCallback: too many callbacks (max %d)\n",
+		COM_WARN( LOG_CAT_UI, "WiredUI_RegisterPopulateCallback: too many callbacks (max %d)\n",
 		            WIRED_MAX_POPULATE_CALLBACKS );
 		return;
 	}
@@ -1301,11 +1301,11 @@ wuiPopulateCallback_t WiredUI_GetPopulateCallback( const char *name ) {
 // These will be filled in Phase 3 when ModernHUD elements are wrapped.
 
 void WiredUI_RegisterCoreSymbols( void ) {
-	Com_Printf( "WiredUI: core symbols registered (stub — Phase 3)\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: core symbols registered (stub — Phase 3)\n" );
 }
 
 void WiredUI_RegisterCoreElements( void ) {
-	Com_Printf( "WiredUI: core elements registered (stub — Phase 3)\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: core elements registered (stub — Phase 3)\n" );
 }
 
 // ── public API ────────────────────────────────────────────────────────
@@ -1387,7 +1387,7 @@ static void WiredUI_TestAll_f( void ) {
 		// Toggle off
 		testall_active = qfalse;
 		WiredUI_CloseAllMenus();
-		Com_Printf( "ui_testall: stopped\n" );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "ui_testall: stopped\n" );
 		return;
 	}
 
@@ -1401,7 +1401,7 @@ static void WiredUI_TestAll_f( void ) {
 	testall_active = qtrue;
 	testall_menuIndex = 0;
 	testall_nextTime = 0;
-	Com_Printf( "ui_testall: cycling %d menus every %d ms (run again to stop)\n",
+	Com_Log( SEV_INFO, LOG_CAT_UI, "ui_testall: cycling %d menus every %d ms (run again to stop)\n",
 		WiredUI_GetMenuCount(), testall_delay );
 }
 
@@ -1412,7 +1412,7 @@ static void WiredUI_CheckHotReload( int realtime ) {
 	wui_lastReloadCheck = realtime;
 
 	// Re-load all menus from manifest using the existing safe-reload path
-	Com_Printf( "Wired UI: hot-reload check\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "Wired UI: hot-reload check\n" );
 	WiredUI_ReloadMenus();
 }
 
@@ -1508,12 +1508,12 @@ qboolean WiredUI_EnsureLoaded( void ) {
 
 	if ( !cls.rendererStarted ) {
 		// Renderer is down — bring it (and WiredUI) back up.
-		// CL_StartHunkUsers → CL_InitRenderer → WiredUI_Init sets wui_healthy.
+		// CL_StartHunkUsers → CL_InitRenderer, then WiredUI peer block → WiredUI_Init sets wui_healthy.
 		// WiredUI_Init clears inRecovery as its first action (longjmp guard).
 		CL_StartHunkUsers();
 	} else if ( !cls.uiStarted ) {
 		// Renderer is up but WiredUI was shut down independently.
-		CL_InitUI();
+		cls.uiStarted = qtrue;
 	} else if ( WiredUI_GetMenuCount() == 0 ) {
 		// UI started but menu pool is empty — reload via menus.lua.
 		WiredUI_LoadMenusFromLua();
@@ -1532,7 +1532,7 @@ qboolean WiredUI_EnsureLoaded( void ) {
 // the console above WiredUI. If the user had ~ open, it stays open.
 void WiredUI_Activate( void ) {
 	if ( !WiredUI_EnsureLoaded() ) {
-		Com_Printf( "WiredUI: failed to reload — use 'wired_reload' or restart\n" );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: failed to reload — use 'wired_reload' or restart\n" );
 		wui_recoveryFailTime = cls.realtime;
 		return;
 	}
@@ -1594,7 +1594,7 @@ void WiredUI_Init( qboolean inGameUI ) {
 		// already qfalse. No action needed — the comment is kept for clarity.
 	}
 
-	Com_Printf( "------- WiredUI_Init -------\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "------- WiredUI_Init -------\n" );
 
 	memset( wui_symbols, 0, sizeof( wui_symbols ) );
 	memset( wui_elements, 0, sizeof( wui_elements ) );
@@ -1694,7 +1694,7 @@ void WiredUI_Init( qboolean inGameUI ) {
 			Cvar_Set( "wui_activeMenuSaved", "0" );
 
 			if ( wui_menuStackDepth > 0 ) {
-				Com_Printf( "WiredUI: restored menu stack (depth %d)\n", wui_menuStackDepth );
+				Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: restored menu stack (depth %d)\n", wui_menuStackDepth );
 			}
 		}
 	}
@@ -1708,9 +1708,11 @@ void WiredUI_Init( qboolean inGameUI ) {
 	wired_hotreload = Cvar_Get( "wired_hotreload", "0", CVAR_TEMP );
 	wired_debug_layout = Cvar_Get( "wired_debug_layout", "0", CVAR_TEMP );
 
+	re.VertexLighting( qfalse ); // UI elements don't use vertex-light collapse
+
 	wui_healthy = qtrue;
 	wui_recoveryFailTime = 0; // clear any stale failure banner
-	Com_Printf( "WiredUI: initialized (%d menus loaded)\n", WiredUI_GetMenuCount() );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: initialized (%d menus loaded)\n", WiredUI_GetMenuCount() );
 }
 
 void WiredUI_Shutdown( void ) {
@@ -1759,7 +1761,7 @@ void WiredUI_Shutdown( void ) {
 	wui_activeMenu = UIMENU_NONE;
 	wui_initialized = qfalse;
 
-	Com_Printf( "WiredUI: shutdown\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: shutdown\n" );
 }
 
 void WiredUI_Refresh( int realtime ) {
@@ -1787,7 +1789,7 @@ void WiredUI_Refresh( int realtime ) {
 		if ( realtime - wui_screenshotTime >= wired_screenshotDelay->integer * 1000 ) {
 			Cbuf_ExecuteText( EXEC_APPEND, "screenshotJPEG\n" );
 			wui_screenshotTaken = qtrue;
-			Com_Printf( "WiredUI: delayed screenshot taken\n" );
+			Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: delayed screenshot taken\n" );
 		}
 	}
 
@@ -1807,14 +1809,14 @@ void WiredUI_Refresh( int realtime ) {
 					Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
 
 					WiredUI_PushMenu( m->name );
-					Com_Printf( "ui_testall: [%d/%d] %s\n",
+					Com_Log( SEV_INFO, LOG_CAT_UI, "ui_testall: [%d/%d] %s\n",
 						testall_menuIndex + 1, menuCount, m->name );
 				}
 				testall_menuIndex++;
 			} else {
 				// all menus shown — stop
 				testall_active = qfalse;
-				Com_Printf( "ui_testall: done (%d menus tested)\n", testall_menuIndex );
+				Com_Log( SEV_INFO, LOG_CAT_UI, "ui_testall: done (%d menus tested)\n", testall_menuIndex );
 			}
 
 			testall_nextTime = realtime + testall_delay;
@@ -1992,7 +1994,7 @@ void WiredUI_Refresh( int realtime ) {
 				if ( iconEntry && iconEntry->icon ) {
 					storeIcon = iconEntry->icon;
 				} else if ( !item->bindWarned ) {
-					Com_DPrintf( "WiredUI: bindicon key '%s' not found (item '%s')\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: bindicon key '%s' not found (item '%s')\n",
 								 item->storeBindIcon, item->name );
 					item->bindWarned = qtrue;
 				}
@@ -2004,7 +2006,7 @@ void WiredUI_Refresh( int realtime ) {
 				if ( valEntry ) {
 					storeValue = valEntry->value;
 				} else if ( !item->bindWarned ) {
-					Com_DPrintf( "WiredUI: bindvalue key '%s' not found (item '%s')\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: bindvalue key '%s' not found (item '%s')\n",
 								 item->storeBindValue, item->name );
 					item->bindWarned = qtrue;
 				}
@@ -2411,7 +2413,7 @@ void WiredUI_Refresh( int realtime ) {
 				if ( bindEntry && bindEntry->text[0] ) {
 					sourceText = bindEntry->text;
 				} else if ( !item->bindWarned ) {
-					Com_DPrintf( "WiredUI: bind key '%s' not found (item '%s')\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: bind key '%s' not found (item '%s')\n",
 								 item->storeBind, item->name );
 					item->bindWarned = qtrue;
 				}
@@ -2431,7 +2433,7 @@ void WiredUI_Refresh( int realtime ) {
 						Vector4Copy( colorEntry->color, drawColor );
 					}
 				} else if ( !item->bindWarned ) {
-					Com_DPrintf( "WiredUI: bindcolor key '%s' not found (item '%s')\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: bindcolor key '%s' not found (item '%s')\n",
 								 item->storeBindColor, item->name );
 					item->bindWarned = qtrue;
 				}
@@ -2639,7 +2641,7 @@ static void WiredScript_Close( wiredMenuDef_t *menu, wiredItemDef_t *item, int n
 static void WiredScript_SetCvar( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	if ( numArgs >= 2 ) {
 		if ( WiredUI_IsStoreStateKey( args[0] ) ) {
-			Com_Printf( S_COLOR_YELLOW "WiredUI: setcvar '%s' targets store-backed UI state; use setstate\n", args[0] );
+			COM_WARN( LOG_CAT_UI, "WiredUI: setcvar '%s' targets store-backed UI state; use setstate\n", args[0] );
 		}
 		Cvar_Set( args[0], args[1] );
 	}
@@ -2783,7 +2785,7 @@ static const wiredGameTypePersistField_t wui_gameTypePersistCvars[] = {
 	{ "sv_maxclients", qfalse },
 	{ "sv_pure", qfalse },
 	{ "sv_allowDownload", qfalse },
-	{ "g_spSkill", qfalse },
+	{ "g_skill", qfalse },
 	{ "g_autoBots", qfalse },
 	{ "g_minPlayers", qfalse },
 	{ "g_friendlyfire", qtrue },
@@ -2983,11 +2985,11 @@ static void WiredScript_ToggleMapPool( wiredMenuDef_t *menu, wiredItemDef_t *ite
 
 	WiredUI_StateGetString( "ui_selectedMap", mapName, sizeof( mapName ) );
 	if ( !mapName[0] ) {
-		Com_Printf( "WiredUI: ToggleMapPool — no map selected\n" );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: ToggleMapPool — no map selected\n" );
 		return;
 	}
 
-	Com_Printf( "WiredUI: ToggleMapPool '%s'\n", mapName );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: ToggleMapPool '%s'\n", mapName );
 	WiredUI_GetMapRotation( rotation, sizeof( rotation ) );
 
 	// rebuild rotation without the selected map (or add it if not found)
@@ -3110,7 +3112,7 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 		}
 	}
 	if ( !mapName[0] ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: no map selected\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI: no map selected\n" );
 		return;
 	}
 
@@ -3170,7 +3172,7 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 
 	WiredUI_StateGetString( "ui_selectedServerAddr", addr, sizeof( addr ) );
 	if ( !addr[0] ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: no server selected\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI: no server selected\n" );
 		return;
 	}
 
@@ -3205,7 +3207,7 @@ static void WiredScript_RunDemo( wiredMenuDef_t *menu, wiredItemDef_t *item, int
 
 	WiredUI_StateGetString( "ui_selectedDemo", demoName, sizeof( demoName ) );
 	if ( !demoName[0] ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: no demo selected\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI: no demo selected\n" );
 		return;
 	}
 
@@ -3236,7 +3238,7 @@ static void WiredScript_RunMod( wiredMenuDef_t *menu, wiredItemDef_t *item, int 
 
 	WiredUI_StateGetString( "ui_selectedMod", modName, sizeof( modName ) );
 	if ( !modName[0] ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: no mod selected\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI: no mod selected\n" );
 		return;
 	}
 
@@ -3390,7 +3392,7 @@ static void WiredScript_Transition( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 static void WiredScript_MapSortCmd( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	extern void WiredFeeder_SortMaps( int column );
 	int col = ( numArgs >= 1 ) ? atoi( args[0] ) : 0;
-	Com_Printf( "WiredUI: MapSort column %d\n", col );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: MapSort column %d\n", col );
 	WiredFeeder_SortMaps( col );
 }
 
@@ -3494,14 +3496,14 @@ static void WiredScript_UiScript( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 		WiredFeeder_SortServers( atoi( args[1] ) );
 	} else if ( !Q_stricmp( args[0], "MapSort" ) && numArgs >= 2 ) {
 		extern void WiredFeeder_SortMaps( int column );
-		Com_Printf( "WiredUI: MapSort column %s\n", args[1] );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: MapSort column %s\n", args[1] );
 		WiredFeeder_SortMaps( atoi( args[1] ) );
 	} else if ( !Q_stricmp( args[0], "addFavorite" ) ) {
 		Cbuf_ExecuteText( EXEC_APPEND, "addFavorite\n" );
 	} else if ( !Q_stricmp( args[0], "deleteFavorite" ) ) {
 		Cbuf_ExecuteText( EXEC_APPEND, "deleteFavorite\n" );
 	} else {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: unknown uiScript '%s'\n", args[0] );
+		COM_WARN( LOG_CAT_UI, "WiredUI: unknown uiScript '%s'\n", args[0] );
 	}
 }
 
@@ -3533,7 +3535,7 @@ static void WiredScript_Clipboard( wiredMenuDef_t *menu, wiredItemDef_t *item,
 
 	if ( src[0] ) {
 		Sys_SetClipboardData( src );
-		Com_Printf( "Copied %d bytes to clipboard.\n", (int)strlen(src) );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "Copied %d bytes to clipboard.\n", (int)strlen(src) );
 	}
 }
 
@@ -3675,12 +3677,12 @@ void WiredUI_PushMenu( const char *name ) {
 
 	// check if menu exists
 	if ( !WiredUI_FindMenu( name ) ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: cannot open menu '%s' — not found (loaded %d menus)\n", name, WiredUI_GetMenuCount() );
+		COM_WARN( LOG_CAT_UI, "WiredUI: cannot open menu '%s' — not found (loaded %d menus)\n", name, WiredUI_GetMenuCount() );
 		return;
 	}
 
 	if ( wui_menuStackDepth >= WIRED_MENU_STACK_DEPTH ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: menu stack overflow (max %d)\n", WIRED_MENU_STACK_DEPTH );
+		COM_WARN( LOG_CAT_UI, "WiredUI: menu stack overflow (max %d)\n", WIRED_MENU_STACK_DEPTH );
 		return;
 	}
 
@@ -3705,14 +3707,14 @@ void WiredUI_PushMenu( const char *name ) {
 				pushed->cinematicHandle = CIN_PlayCinematic( pushed->cinematic,
 					0, 0, (float)cls.glconfig.vidWidth, (float)cls.glconfig.vidHeight, CIN_loop | CIN_silent );
 				if ( pushed->cinematicHandle >= 0 ) {
-					Com_DPrintf( "WiredUI: started cinematic '%s' (handle %d)\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: started cinematic '%s' (handle %d)\n",
 						pushed->cinematic, pushed->cinematicHandle );
 				}
 			}
 		}
 	}
 
-	Com_DPrintf( "WiredUI: push menu '%s' (depth %d)\n", name, wui_menuStackDepth );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: push menu '%s' (depth %d)\n", name, wui_menuStackDepth );
 
 	// run onOpen script if present
 	{
@@ -3760,7 +3762,7 @@ void WiredUI_PopMenu( void ) {
 		// for UIMENU_MAIN, the root stays visible (can't close the main menu)
 	}
 
-	Com_DPrintf( "WiredUI: pop menu (depth %d)\n", wui_menuStackDepth );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: pop menu (depth %d)\n", wui_menuStackDepth );
 }
 
 void WiredUI_CloseAllMenus( void ) {
@@ -3808,7 +3810,7 @@ void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retr
 
 	if ( !cls.uiStarted ) {
 		// UI not initialised — best we can do is log
-		Com_Printf( S_COLOR_RED "Connect error (UI not ready): %s\n",
+		COM_ERROR( LOG_CAT_UI, "Connect error (UI not ready): %s\n",
 		            message ? message : "unknown error" );
 		return;
 	}
@@ -4656,7 +4658,7 @@ void WiredUI_SetActiveMenu( int menu ) {
 		// re-register all assets — Hunk_ClearLevel on map load invalidates handles
 		WiredUI_RegisterAssets();
 
-		Com_DPrintf( "WiredUI: SetActiveMenu %d\n", menu );
+		Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: SetActiveMenu %d\n", menu );
 	} else {
 		Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 		Cvar_Set( "cl_paused", "0" );
@@ -4828,7 +4830,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 				if ( iconEntry && iconEntry->icon ) {
 					storeIcon = iconEntry->icon;
 				} else if ( !item->bindWarned ) {
-					Com_DPrintf( "WiredUI: bindicon key '%s' not found (item '%s')\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: bindicon key '%s' not found (item '%s')\n",
 								 item->storeBindIcon, item->name );
 					item->bindWarned = qtrue;
 				}
@@ -4840,7 +4842,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 				if ( valEntry ) {
 					storeValue = valEntry->value;
 				} else if ( !item->bindWarned ) {
-					Com_DPrintf( "WiredUI: bindvalue key '%s' not found (item '%s')\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: bindvalue key '%s' not found (item '%s')\n",
 								 item->storeBindValue, item->name );
 					item->bindWarned = qtrue;
 				}
@@ -4950,7 +4952,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 				if ( bindEntry && bindEntry->text[0] ) {
 					drawText = bindEntry->text;
 				} else if ( !drawText && !item->bindWarned ) {
-					Com_DPrintf( "WiredUI: bind key '%s' not found (item '%s')\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: bind key '%s' not found (item '%s')\n",
 								 item->storeBind, item->name );
 					item->bindWarned = qtrue;
 				}
@@ -4970,7 +4972,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 						Vector4Copy( colorEntry->color, overlayDrawColor );
 					}
 				} else if ( !item->bindWarned ) {
-					Com_DPrintf( "WiredUI: bindcolor key '%s' not found (item '%s')\n",
+					Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: bindcolor key '%s' not found (item '%s')\n",
 								 item->storeBindColor, item->name );
 					item->bindWarned = qtrue;
 				}
@@ -5022,7 +5024,7 @@ void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
 }
 
 void WiredUI_ReloadHud( void ) {
-	Com_Printf( "WiredUI: reloading HUD...\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: reloading HUD...\n" );
 
 	// destroy all active elements (frees Z_Malloc'd contexts)
 	WiredHud_DestroyAllElements();
@@ -5039,11 +5041,11 @@ void WiredUI_ReloadHud( void ) {
 	// recreate HUD elements from hudOverlay menus
 	WiredHud_LoadFromMenus();
 
-	Com_Printf( "WiredUI: HUD reloaded, %d elements active\n", WiredHud_GetElementCount() );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: HUD reloaded, %d elements active\n", WiredHud_GetElementCount() );
 }
 
 void WiredUI_ReloadMenus( void ) {
-	Com_Printf( "WiredUI: reloading menus...\n" );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: reloading menus...\n" );
 
 	// stop all cinematics before reload
 	{
@@ -5071,7 +5073,7 @@ void WiredUI_ReloadMenus( void ) {
 
 	// two-phase safe reload: parse new → swap, or keep old on failure
 	if ( WiredUI_SafeReload() ) {
-		Com_Printf( "Menus reloaded successfully.\n" );
+		Com_Log( SEV_INFO, LOG_CAT_UI, "Menus reloaded successfully.\n" );
 	}
 	// on failure, SafeReload already restored old menus + printed error
 
@@ -5091,13 +5093,6 @@ void WiredUI_ReloadMenus( void ) {
 }
 
 // ── Engine-facing API (replaces cl_ui.c) ──────────────────────────────
-
-void CL_InitUI( void ) {
-	// disallow vl.collapse for UI elements
-	re.VertexLighting( qfalse );
-
-	cls.uiStarted = qtrue;
-}
 
 void CL_ShutdownUI( void ) {
 	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );

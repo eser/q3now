@@ -92,6 +92,15 @@ typedef struct {
 	 */
 	void          (*ready_callback)( conn_handle_t conn );
 	void          (*drop_client)( conn_handle_t conn, const char *reason );
+	/*
+	 * drain_usercmds: called once per server frame to drain all pending
+	 * usercmd datagrams from game clients into SV_ClientThink.
+	 * For QUIC: reads gc->recv_queue (separate from the client snapshot
+	 * queue in wtcl.recv_queue, which is why recv_unreliable cannot be used).
+	 * NULL in the static initializer; registered by the server layer after
+	 * transport->init() (see sv_init.c).
+	 */
+	void          (*drain_usercmds)( void );
 
 	/* ── Client ─────────────────────────────────────────────────── */
 	conn_handle_t (*connect)( const char *address, int port, const char *userinfo );
@@ -119,5 +128,37 @@ typedef struct {
  * NULL until the transport is initialized.
  */
 extern transport_t *transport;
+
+/* ── Pre-connection packet demux ───────────────────────────────────────────
+ *
+ * Demuxes route raw incoming UDP packets to the appropriate transport
+ * before any conn_handle_t exists.  The transport_t vtable operates on
+ * known connections; transport_demux_t operates on raw bytes from recvfrom.
+ *
+ * Each transport that needs to inspect raw incoming packets registers a
+ * transport_demux_t at engine init via Net_RegisterDemux.  NET_GetPacket
+ * calls Net_DispatchDemux on every received packet; the first demux that
+ * returns qtrue claims the packet — remaining demuxes are not consulted.
+ *
+ * Implementer is responsible for all internal state-machine advances and
+ * outbound flushing.  The demux abstraction never sees those operations.
+ */
+typedef struct transport_demux_s {
+	/* Returns qtrue if this demux consumed the packet.
+	 * Returns qfalse if the packet does not belong to this transport.
+	 * On qtrue, the caller MUST NOT use the packet further.
+	 * data is read-only; the implementation must copy if it needs persistence.
+	 */
+	qboolean (*try_handle_packet)( const netadr_t *from, const byte *data, int len );
+
+	/* Human-readable name for diagnostics (e.g., "quic"). */
+	const char *name;
+} transport_demux_t;
+
+#define TRANSPORT_DEMUX_MAX 8
+
+void     Net_RegisterDemux  ( transport_demux_t *demux );
+void     Net_UnregisterDemux( transport_demux_t *demux );
+qboolean Net_DispatchDemux  ( const netadr_t *from, const byte *data, int len );
 
 #endif /* NET_TRANSPORT_H */

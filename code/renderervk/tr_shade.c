@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_shade.c
 
 #include "tr_local.h"
+#include "../renderercommon/r_q1_texture.h"
 #include "../qcommon/q_feats.h"
 
 /*
@@ -923,13 +924,62 @@ void R_ComputeTexCoords( const int b, const textureBundle_t *bundle ) {
 			break;
 
 		default:
-			ri.Error( ERR_DROP, "ERROR: unknown texmod '%d' in shader '%s'", bundle->texMods[tm].type, tess.shader->name );
+			ri.Terminate( TERM_CLIENT_DROP, "ERROR: unknown texmod '%d' in shader '%s'", bundle->texMods[tm].type, tess.shader->name );
 			break;
 		}
 	}
 
 	tess.svars.texcoordPtr[ b ] = src;
 }
+
+
+#ifdef USE_VULKAN
+static void R_ComputeLightstyles( void ) {
+	// Unified 64-style loop: pattern strings in tr.lightstylePatterns[] are the
+	// sole source of truth (populated from configstrings by RE_SetLightstylePattern).
+	// 'a'=0.0 (dark), 'm'=1.0 (baseline), 'z'=2.083 (overbright). 10Hz stepped.
+	int   style;
+	int   t = backEnd.refdef.time;
+
+	for ( style = 0; style < 64; style++ ) {
+		const char *pattern = tr.lightstylePatterns[style];
+		int   len = (int)strlen( pattern );
+		float intensity;
+
+		if ( len == 0 ) {
+			intensity = 0.0f;
+		} else if ( len == 1 ) {
+			intensity = ( pattern[0] - 'a' ) / 12.0f;
+		} else {
+			int   frame = ( t / 100 ) % len;
+			float curr  = ( pattern[frame] - 'a' ) / 12.0f;
+			if ( r_lerpLightstyles->integer ) {
+				int   nextFrame = ( frame + 1 ) % len;
+				float next      = ( pattern[nextFrame] - 'a' ) / 12.0f;
+				float frac      = (float)( t % 100 ) / 100.0f;
+				intensity = curr + ( next - curr ) * frac;
+			} else {
+				intensity = curr;
+			}
+		}
+
+		tr.lightstyleValues[style] = intensity;
+	}
+}
+
+
+/*
+RE_SetLightstylePattern
+Store a pattern string for a lightstyle slot.
+style in [0,63]; pattern is a NUL-terminated string up to LIGHTSTYLE_PATTERN_MAX chars.
+tr.lightstyleValues[] is now a per-frame output of R_ComputeLightstyles only.
+*/
+void RE_SetLightstylePattern( int style, const char *pattern ) {
+	if ( style < 0 || style >= 64 ) return;
+	Q_strncpyz( tr.lightstylePatterns[style], pattern ? pattern : "",
+	            sizeof( tr.lightstylePatterns[style] ) );
+}
+#endif
 
 
 /*
@@ -977,8 +1027,9 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 	for ( stage = 0; stage < MAX_SHADER_STAGES; stage++ )
 	{
 		pStage = tess.xstages[ stage ];
-		if ( !pStage )
+		if ( !pStage ) {
 			break;
+		}
 
 #ifdef USE_VBO
 		tess.vboStage = stage;
@@ -1076,6 +1127,105 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			                         tr.msdfGlowColor,
 			                         tr.msdfShadowOffset,
 			                         tr.msdfShadowColor );
+		}
+
+		{
+			static int q1ls_log_count = 0;
+			if ( q1ls_log_count < 20 ) {
+				q1ls_log_count++;
+				ri.Log( SEV_DEBUG, "[Q1LS] gate check sh='%s' b1lm=%d q1ls_pipeline=%d lightStyles=%s\n",
+				        tess.shader->name, pStage->bundle[1].lightmap,
+				        (int)vk.q1ls_pipeline, ( tr.world && tr.world->lightStyles ) ? "yes" : "no" );
+			}
+		}
+		if ( tr.world && tr.world->lightStyles && vk.q1ls_pipeline != 0
+		     && pStage->bundle[1].lightmap != LIGHTMAP_INDEX_NONE ) {
+			int lmIdx = pStage->bundle[1].lightmap - LIGHTMAP_INDEX_OFFSET;
+			const byte *s = tess.q1SurfaceStyles;
+			R_ComputeLightstyles();
+			uniform.q1StyleIntensities[0] = s[0] < 64 ? tr.lightstyleValues[s[0]] : 0.0f;
+			uniform.q1StyleIntensities[1] = s[1] < 64 ? tr.lightstyleValues[s[1]] : 0.0f;
+			uniform.q1StyleIntensities[2] = s[2] < 64 ? tr.lightstyleValues[s[2]] : 0.0f;
+			uniform.q1StyleIntensities[3] = s[3] < 64 ? tr.lightstyleValues[s[3]] : 0.0f;
+
+			if ( tess.shader->q1AnimArray && vk.q1ls_array_pipeline != 0 ) {
+				/* GPU texture array path — shader computes frame from tr.refdef.time */
+				image_t *lmImg;
+				{
+					static int q1arr_log_count = 0;
+					if ( q1arr_log_count < 10 ) {
+						q1arr_log_count++;
+						ri.Log( SEV_DEBUG, "[Q1ARR] array path sh='%s' numFrames=%d animArray=%p\n",
+						        tess.shader->name, tess.shader->q1NumAnimFrames,
+						        (void *)tess.shader->q1AnimArray );
+					}
+				}
+				uniform.light.pos[0] = (float)tr.refdef.time;
+				uniform.light.pos[1] = (float)tess.shader->q1NumAnimFrames;
+				vk_update_descriptor( VK_DESC_TEXTURE0, tess.shader->q1AnimArray->descriptor );
+				VK_PushUniform( &uniform );
+				// bind primary lightmap (style 0) to set=2
+				if ( lmIdx >= LIGHTMAP_PROP_OFFSET ) {
+					int pi = lmIdx - LIGHTMAP_PROP_OFFSET;
+					lmImg = ( tr.propLightmaps && pi < tr.numPropLightmaps )
+					        ? tr.propLightmaps[pi] : tr.whiteImage;
+				} else if ( tr.lightmaps && lmIdx >= 0 && lmIdx < tr.numLightmaps ) {
+					lmImg = tr.lightmaps[lmIdx];
+				} else {
+					lmImg = tr.whiteImage;
+				}
+				vk_update_descriptor( VK_DESC_TEXTURE1, lmImg->descriptor );
+				// bind style slot 1/2/3 lightmaps to sets 3/4/5
+				if ( tr.lightmapsStyle[0] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
+					vk_update_descriptor( VK_DESC_TEXTURE2, tr.lightmapsStyle[0][lmIdx]->descriptor );
+				else
+					vk_update_descriptor( VK_DESC_TEXTURE2, tr.whiteImage->descriptor );
+				if ( tr.lightmapsStyle[1] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
+					vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.lightmapsStyle[1][lmIdx]->descriptor );
+				else
+					vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.whiteImage->descriptor );
+				if ( tr.lightmapsStyle[2] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
+					vk_update_descriptor( VK_DESC_DEPTH_FADE, tr.lightmapsStyle[2][lmIdx]->descriptor );
+				else
+					vk_update_descriptor( VK_DESC_DEPTH_FADE, tr.whiteImage->descriptor );
+				// set=6 unused by array shader; bind white as dummy so the slot is valid
+				vk_update_descriptor( VK_DESC_NORMALMAP, tr.whiteImage->descriptor );
+				pipeline = vk.q1ls_array_pipeline;
+			} else {
+				/* Non-animated single-frame Q1 surface */
+				image_t *lmImg;
+				uniform.light.pos[0] = 0.0f;
+				VK_PushUniform( &uniform );
+				// bind primary (style 0) lightmap to lm0 — VK_DESC_TEXTURE1 = set=2 in q1_ls.frag.
+				// Prop surfaces use tr.propLightmaps[] (lmIdx >= LIGHTMAP_PROP_OFFSET);
+				// world surfaces use tr.lightmaps[] (lmIdx in [0, numLightmaps)).
+				if ( lmIdx >= LIGHTMAP_PROP_OFFSET ) {
+					int pi = lmIdx - LIGHTMAP_PROP_OFFSET;
+					lmImg = ( tr.propLightmaps && pi < tr.numPropLightmaps )
+					        ? tr.propLightmaps[pi] : tr.whiteImage;
+				} else if ( tr.lightmaps && lmIdx >= 0 && lmIdx < tr.numLightmaps ) {
+					lmImg = tr.lightmaps[lmIdx];
+				} else {
+					lmImg = tr.whiteImage;
+				}
+				vk_update_descriptor( VK_DESC_TEXTURE1, lmImg->descriptor );
+				// bind style slot 1/2/3 LMs to descriptor sets 3/4/5 (fog_collapse/depth_fade slots)
+				if ( tr.lightmapsStyle[0] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
+					vk_update_descriptor( VK_DESC_TEXTURE2, tr.lightmapsStyle[0][lmIdx]->descriptor );
+				else
+					vk_update_descriptor( VK_DESC_TEXTURE2, tr.whiteImage->descriptor );
+				if ( tr.lightmapsStyle[1] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
+					vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.lightmapsStyle[1][lmIdx]->descriptor );
+				else
+					vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.whiteImage->descriptor );
+				if ( tr.lightmapsStyle[2] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
+					vk_update_descriptor( VK_DESC_DEPTH_FADE, tr.lightmapsStyle[2][lmIdx]->descriptor );
+				else
+					vk_update_descriptor( VK_DESC_DEPTH_FADE, tr.whiteImage->descriptor );
+				/* set=6 blend is 0.0 so diffuseMapNext is never sampled; bind white to satisfy validation */
+				vk_update_descriptor( VK_DESC_NORMALMAP, tr.whiteImage->descriptor );
+				pipeline = vk.q1ls_pipeline;
+			}
 		}
 
 		vk_bind_pipeline( pipeline );
@@ -1276,10 +1426,10 @@ void VK_LightingPass( void )
 	if ( pStage->bundle[3].image[0] ) {
 		Vk_Pipeline_Def def;
 		vk_get_pipeline_def( pipeline, &def );
-		if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING )
-			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_PBR;
-		else if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR )
-			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_PBR_LINEAR;
+		if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING )
+			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PBR;
+		else if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR )
+			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PBR_LINEAR;
 		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		// bind pbrMap to set 4 (fog_collapse slot, unused during dlight pass)
 		vk_update_descriptor( VK_DESC_FOG_COLLAPSE, pStage->bundle[3].image[0]->descriptor );
@@ -1291,10 +1441,10 @@ void VK_LightingPass( void )
 	if ( vk.shadowMap.active ) {
 		Vk_Pipeline_Def def;
 		vk_get_pipeline_def( pipeline, &def );
-		if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING )
-			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW;
-		else if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR )
-			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_SHADOW_LINEAR;
+		if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING )
+			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_SHADOW;
+		else if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR )
+			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_SHADOW_LINEAR;
 		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		// bind shadow map to set 3 (blend texture slot)
 		vk_update_descriptor( VK_DESC_TEXTURE2, vk.shadowMap.descriptor );
@@ -1318,10 +1468,10 @@ void VK_LightingPass( void )
 	if ( r_parallaxMapping->integer && pStage->bundle[2].image[0] ) {
 		Vk_Pipeline_Def def;
 		vk_get_pipeline_def( pipeline, &def );
-		if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING )
-			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX;
-		else if ( def.shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR )
-			def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING_PARALLAX_LINEAR;
+		if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING )
+			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PARALLAX;
+		else if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR )
+			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PARALLAX_LINEAR;
 		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		// bind normalmap to descriptor set 6
 		vk_update_descriptor( VK_DESC_NORMALMAP, pStage->bundle[2].image[0]->descriptor );
@@ -1353,9 +1503,10 @@ void RB_StageIteratorGeneric( void )
 #endif
 	qboolean fogCollapse = qfalse;
 
+
 #ifdef USE_VBO
 	if ( tess.vboIndex != 0 ) {
-		VBO_PrepareQueues();
+		VBO_PrepareQueues(); // must run before PMLIGHT check (VK_LightingPass needs sorted IBO)
 		tess.vboStage = 0;
 	} else
 #endif
@@ -1370,6 +1521,28 @@ void RB_StageIteratorGeneric( void )
 
 #ifdef USE_FOG_COLLAPSE
 	fogCollapse = tess.fogNum && tess.shader->fogPass && tess.shader->fogCollapse;
+#endif
+
+#ifdef USE_VBO
+	// lightstyle: dispatch one sub-group per unique lightStyles signature so each
+	// gets its own VK_PushUniform with the correct q1StyleIntensities.
+	// VBO_PrepareQueues already sorted the queue; iterate in sorted order.
+	if ( tess.vboIndex != 0 && tr.world && tr.world->lightStyles ) {
+		int pos = 0;
+		const int total = VBO_GetQueueCount();
+		while ( pos < total ) {
+			uint32_t curPacked = VBO_GetQueueItemStylesPacked( pos );
+			int n = 1;
+			while ( pos + n < total && VBO_GetQueueItemStylesPacked( pos + n ) == curPacked )
+				n++;
+			memcpy( tess.q1SurfaceStyles, &curPacked, 4 );
+			VBO_PrepareSubqueue( pos, n );
+			tess.vboStage = 0;
+			RB_IterateStagesGeneric( &tess, fogCollapse );
+			pos += n;
+		}
+		return;
+	}
 #endif
 
 	// call shader function
@@ -1533,11 +1706,11 @@ void RB_EndSurface( void ) {
 	}
 
 	if ( input->numIndexes > SHADER_MAX_INDEXES ) {
-		ri.Error( ERR_DROP, "RB_EndSurface() - SHADER_MAX_INDEXES hit" );
+		ri.Terminate( TERM_CLIENT_DROP, "RB_EndSurface() - SHADER_MAX_INDEXES hit" );
 	}
 
 	if ( input->numVertexes > SHADER_MAX_VERTEXES ) {
-		ri.Error( ERR_DROP, "RB_EndSurface() - SHADER_MAX_VERTEXES hit" );
+		ri.Terminate( TERM_CLIENT_DROP, "RB_EndSurface() - SHADER_MAX_VERTEXES hit" );
 	}
 
 	if ( tess.shader == tr.shadowShader ) {

@@ -142,7 +142,7 @@ void GLimp_InitGamma( glconfig_t *config )
 			 ( HIBYTE( s_oldHardwareGamma[2][255] ) <= HIBYTE( s_oldHardwareGamma[2][0] ) ) )
 		{
 			config->deviceSupportsGamma = qfalse;
-			Com_Printf( S_COLOR_YELLOW "WARNING: device has broken gamma support\n" );
+			COM_WARN( LOG_CAT_SYSTEM, "WARNING: device has broken gamma support\n" );
 		}
 
 		//
@@ -153,7 +153,7 @@ void GLimp_InitGamma( glconfig_t *config )
 		{
 			int g;
 
-			Com_Printf( S_COLOR_YELLOW "WARNING: suspicious gamma tables, using linear ramp for restoration\n" );
+			COM_WARN( LOG_CAT_SYSTEM, "WARNING: suspicious gamma tables, using linear ramp for restoration\n" );
 
 			for ( g = 0; g < 256; g++ )
 			{
@@ -190,7 +190,7 @@ void mapGammaMax( void ) {
 			}
 		}
 		table[0][i] = table[1][i] = table[2][i] = i<<9;
-		Com_Printf( "index %i max: %i\n", i, j-1 );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "index %i max: %i\n", i, j-1 );
 	}
 }
 */
@@ -219,7 +219,7 @@ void GLimp_SetGamma( unsigned char red[256], unsigned char green[256], unsigned 
 	}
 
 	// Win2K and newer put this odd restriction on gamma ramps...
-	Com_DPrintf( "performing gamma clamp.\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "performing gamma clamp.\n" );
 	for ( j = 0 ; j < 3 ; j++ ) {
 		for ( i = 0 ; i < 128 ; i++ ) {
 			if ( table[j][i] > ( (128+i) << 8 ) ) {
@@ -251,7 +251,7 @@ void GLimp_SetGamma( unsigned char red[256], unsigned char green[256], unsigned 
 	}
 
 	if ( !ret ) {
-		Com_Printf( S_COLOR_YELLOW "SetDeviceGammaRamp failed.\n" );
+		COM_WARN( LOG_CAT_SYSTEM, "SetDeviceGammaRamp failed.\n" );
 	} else {
 		glw_state.gammaSet = qtrue;
 	}

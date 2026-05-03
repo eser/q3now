@@ -553,6 +553,8 @@ const char *BG_ModShortName( meansOfDeath_t mod )
 	case MOD_TARGET_LASER:          return "laser";
 	case MOD_TRIGGER_HURT:          return "hurt";
 	case MOD_KAMIKAZE:              return "kamikaze";
+	case MOD_LAVABALL:              return "lavaball";
+	case MOD_NAIL:                  return "nail";
 	default:                        return "world";
 	}
 }

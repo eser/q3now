@@ -49,7 +49,7 @@ Debugging command to print the current position
 =============
 */
 static void CG_Viewpos_f (void) {
-	CG_Printf ("(%i %i %i) : %i\n", (int)cg.refdef.vieworg[0],
+	Com_Log( SEV_INFO, LOG_CAT_CGAME, "(%i %i %i) : %i\n", (int)cg.refdef.vieworg[0],
 		(int)cg.refdef.vieworg[1], (int)cg.refdef.vieworg[2], 
 		(int)cg.refdefViewAngles[YAW]);
 }
@@ -328,12 +328,6 @@ static void CG_ThirdPersonUp_f( void ) {
 #endif
 
 static void CG_StartOrbit_f( void ) {
-	char var[MAX_TOKEN_CHARS];
-
-	trap_Cvar_VariableStringBuffer( "developer", var, sizeof( var ) );
-	if ( !atoi(var) ) {
-		return;
-	}
 	if (cg_cameraOrbit.value != 0) {
 		trap_Cvar_Set ("cg_cameraOrbit", "0");
 		trap_Cvar_Set("cg_thirdPerson", "0");
@@ -353,7 +347,7 @@ static void CG_Camera_f( void ) {
 		cg.cameraMode = qtrue;
 		trap_startCamera(cg.time);
 	} else {
-		CG_Printf ("Unable to load camera %s\n",name);
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Unable to load camera %s\n",name);
 	}
 }
 */

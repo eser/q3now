@@ -52,11 +52,11 @@ static PFN_vkCreateWin32SurfaceKHR qvkCreateWin32SurfaceKHR;
 */
 void QVK_Shutdown( qboolean unloadDLL )
 {
-	Com_Printf( "...shutting down QVK\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...shutting down QVK\n" );
 
 	if ( glw_state.VulkanLib && unloadDLL )
 	{
-		Com_Printf( "...unloading Vulkan DLL\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...unloading Vulkan DLL\n" );
 		Sys_UnloadLibrary( glw_state.VulkanLib );
 		glw_state.VulkanLib = NULL;
 
@@ -125,7 +125,7 @@ static HINSTANCE load_vulkan_library( const char *dllname )
 */
 qboolean QVK_Init( void )
 {
-	Com_Printf( "...initializing QVK\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...initializing QVK\n" );
 
 	if ( glw_state.VulkanLib == NULL )
 	{
@@ -145,7 +145,7 @@ qboolean QVK_Init( void )
 		{
 			glw_state.VulkanLib = load_vulkan_library( dllnames[i] );
 
-			//Com_Printf( "...loading '%s' : %s\n", dllnames[i], glw_state.VulkanLib ? "success" : "failed" );
+			//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : %s\n", dllnames[i], glw_state.VulkanLib ? "success" : "failed" );
 			if ( glw_state.VulkanLib )
 			{
 				char libName[1024];
@@ -159,10 +159,10 @@ qboolean QVK_Init( void )
 				GetModuleFileName( glw_state.VulkanLib, libName, sizeof( libName ) );
 				libName[ sizeof( libName ) - 1 ] = '\0';
 #endif
-				Com_Printf( "...loading '%s' : %s\n", libName, "success" );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : %s\n", libName, "success" );
 				break;
 			} else {
-				Com_Printf( "...loading '%s' : %s\n", dllnames[i], "failed" );
+				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : %s\n", dllnames[i], "failed" );
 			}
 		}
 

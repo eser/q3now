@@ -28,10 +28,6 @@ typedef enum {
 	UIMENU_NONE,
 	UIMENU_MAIN,
 	UIMENU_INGAME,
-	UIMENU_NEED_CD,
-	UIMENU_BAD_CD_KEY,
-	UIMENU_TEAM,
-	UIMENU_POSTGAME
 } uiMenuCommand_t;
 
 // Server browser sort keys (was in ui_public.h)

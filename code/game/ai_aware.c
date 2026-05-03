@@ -25,6 +25,7 @@ react_time delay before bot can act on awareness.
 #include "../botlib/be_ai_weap.h"
 //
 #include "ai_main.h"
+#include "wired/bots/g_bot_scripts.h"
 #include "ai_aware.h"
 
 #define AWARE_BASE_RADIUS		1500.0f	// base detection radius (units)
@@ -42,7 +43,7 @@ void BotAwareUpdate( struct bot_state_s *bs )
 {
 	int i;
 	float now = floattime;
-	float skill, awareRadius;
+	float awareRadius;
 
 	// expire old entries
 	for ( i = 0; i < bs->num_aware; i++ ) {
@@ -57,8 +58,13 @@ void BotAwareUpdate( struct bot_state_s *bs )
 		}
 	}
 
-	skill = bs->autoskill > 0 ? bs->autoskill : bs->settings.skill;
-	awareRadius = AWARE_BASE_RADIUS * (skill / 5.0f); // skill 1 = 300u, skill 5 = 1500u
+	if ( bs->wiredBotsActive ) {
+		// skill-1 fallback = 0.2x radius, skill-5 = 1.0x; autoskill-aware fallback
+		awareRadius = AWARE_BASE_RADIUS * WiredBots_ProfileFieldOr( bs, WB_PROFILE_ALERTNESS, WiredBots_ResolveAbility( bs, 0.2f, 1.0f ) );
+	} else {
+		// skill-1 bot uses 0.2x base radius, skill-5 bot uses 1.0x
+		awareRadius = AWARE_BASE_RADIUS * WiredBots_ResolveAbility( bs, 0.2f, 1.0f );
+	}
 
 	// --- trigger 1: missile owners ---
 	// if we detected missiles (from BotScanMissiles), become aware of their owners
@@ -95,7 +101,7 @@ Add or refresh an entity in the awareness list.
 void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius )
 {
 	gentity_t *ent;
-	float dist, skill, react;
+	float dist, react;
 	vec3_t delta;
 
 	if ( entnum < 0 || entnum >= MAX_CLIENTS ) return;
@@ -127,8 +133,8 @@ void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius )
 		bs->num_aware = MAX_AWARE_ENTITIES - 1;
 	}
 
-	skill = bs->autoskill > 0 ? bs->autoskill : bs->settings.skill;
-	react = AWARE_REACT_BASE * (6.0f - skill) / 5.0f; // skill 1 = 0.8s, skill 5 = 0.16s
+	// skill-1 bot waits 1.0x react time, skill-5 waits 0.2x; higher skill = faster reaction
+	react = AWARE_REACT_BASE * WiredBots_ResolveAbility( bs, 1.0f, 0.2f );
 
 	bs->aware[bs->num_aware].ent.entnum = entnum;
 	bs->aware[bs->num_aware].ent.eType = ET_PLAYER;

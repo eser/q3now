@@ -97,7 +97,8 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "teamcount_own", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountOWNCreate, CG_ModernHUDElementTeamCountRoutine, NULL },
 	{ "votemessageworld", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementVMWCreate, CG_ModernHUDElementVMWRoutine, NULL },
 	{ "warmupinfo", 0, CG_ModernHUDElementWarmupInfoCreate, CG_ModernHUDElementWarmupInfoRoutine, NULL },
-	{ "weaponlist", 0, CG_ModernHUDElementWeaponListCreate, CG_ModernHUDElementWeaponListRoutine, NULL },
+	{ "weaponlist",    0, CG_ModernHUDElementWeaponListCreate,    CG_ModernHUDElementWeaponListRoutine,    NULL },
+	{ "holdablelist",  0, CG_ModernHUDElementHoldableListCreate,  CG_ModernHUDElementHoldableListRoutine,  NULL },
 	{ "rewardicons", 0, CG_ModernHUDElementRewardIconCreate, CG_ModernHUDElementRewardRoutine, NULL },
 	{ "rewardnumbers", 0, CG_ModernHUDElementRewardCountCreate, CG_ModernHUDElementRewardRoutine, NULL },
 	{ "awards", 0, CG_ModernHUDElementAwardsCreate, CG_ModernHUDElementAwardsRoutine, NULL },
@@ -168,7 +169,7 @@ static qboolean WhudParseFamilyIndex( const char *name, char *familyBuf, int fam
 	while ( *p >= '0' && *p <= '9' ) { index = index * 10 + ( *p - '0' ); p++; }
 
 	if ( index < 1 || index > 16 ) {
-		Com_DPrintf( "WiredHud: family index out of range in '%s'\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: family index out of range in '%s'\n", name );
 		return qfalse;
 	}
 
@@ -214,7 +215,7 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 	int familyIndex;
 
 	if ( wired_hudElementCount >= WIRED_HUD_MAX_ACTIVE_ELEMENTS ) {
-		Com_Printf( S_COLOR_YELLOW "WiredHud: too many active elements\n" );
+		COM_WARN( LOG_CAT_UI, "WiredHud: too many active elements\n" );
 		return qfalse;
 	}
 
@@ -230,7 +231,7 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 			}
 		}
 		if ( !fam ) {
-			Com_DPrintf( "WiredHud: unknown element '%s'\n", name );
+			Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: unknown element '%s'\n", name );
 			return qfalse;
 		}
 		ctx = fam->createIndexed( config, familyIndex );
@@ -245,7 +246,7 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 		elem->active     = qtrue;
 		return qtrue;
 	} else {
-		Com_DPrintf( "WiredHud: unknown element '%s'\n", name );
+		Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: unknown element '%s'\n", name );
 		return qfalse;
 	}
 	if ( !ctx ) return qfalse;

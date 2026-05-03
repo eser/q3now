@@ -18,7 +18,7 @@ void *CG_ModernHUDElementCrosshairCreate( const modernhudConfig_t *config ) {
 
 	ModernHUD_ELEMENT_INIT( element, config );
 
-	element->shader = re.RegisterShader( "gfx/2d/crosshairMisc" );
+	element->shader = re.RegisterShader( "gfx/2d/crosshairDefault" );
 
 	return element;
 }

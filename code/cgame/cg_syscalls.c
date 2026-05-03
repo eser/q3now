@@ -51,8 +51,17 @@ void trap_Error(const char *fmt)
 	exit(1);
 }
 
+void trap_Log( log_severity_t severity, const char *text ) {
+	syscall( CG_LOG, (int)severity, text );
+}
+
+void trap_Terminate( terminationReason_t reason, const char *text ) {
+	syscall( CG_TERMINATE, (int)reason, text );
+	exit(1);
+}
+
 int		trap_Milliseconds( void ) {
-	return syscall( CG_MILLISECONDS ); 
+	return syscall( CG_MILLISECONDS );
 }
 
 void	trap_Cvar_Register( vmCvar_t *vmCvar, const char *varName, const char *defaultValue, int flags ) {
@@ -476,6 +485,10 @@ void trap_WiredStore_Clear( void ) {
 	syscall( CG_WUI_STORE_CLEAR );
 }
 #endif
+
+void trap_R_SetLightstylePattern( int style, const char *pattern ) {
+	syscall( CG_R_SETLIGHTSTYLEPATTERN, style, pattern );
+}
 
 qboolean trap_GetValue( char *value, int valueSize, const char *key ) {
 	return syscall( CG_TRAP_GETVALUE, value, valueSize, key );

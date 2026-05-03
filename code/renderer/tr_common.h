@@ -41,6 +41,7 @@ typedef enum
 	IMGFLAG_NOSCALE        = 0x0080,
 	IMGFLAG_RGB            = 0x0100,
 	IMGFLAG_COLORSHIFT     = 0x0200,
+	IMGFLAG_ARRAY          = 0x0400,  /* 2D_ARRAY image; layerCount gives depth */
 } imgFlags_t;
 
 typedef enum {

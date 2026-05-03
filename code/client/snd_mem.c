@@ -82,9 +82,9 @@ void SND_setup( void )
 	sndBuffer *p, *q;
 	static int old_scs = -1;
 
-	cvar_t *cv = Cvar_Get( "com_soundMegs", DEF_COMSOUNDMEGS, CVAR_LATCH | CVAR_ARCHIVE );
-	Cvar_CheckRange( cv, "1", "512", CV_INTEGER );
-	Cvar_SetDescription( cv, "Amount of memory (RAM) assigned to the sound buffer (in MB)." );
+	static const cvarDesc_t soundMegsDesc = CVAR_INT( "com_soundMegs", DEF_COMSOUNDMEGS,
+		CVAR_LATCH | CVAR_ARCHIVE, "Amount of memory (RAM) assigned to the sound buffer (in MB).", 1, 512 );
+	cvar_t *cv = Cvar_Register( &soundMegsDesc );
 
 	int scs = ( cv->integer * /*1536*/ 12 * dma.speed ) / 22050;
 	scs *= 128;
@@ -106,7 +106,7 @@ void SND_setup( void )
 
 	// -EC-
 	if ( buffer == NULL ) {
-		Com_Error( ERR_FATAL, "Error allocating %i bytes for sound buffer", sz );
+		Com_Terminate( TERM_UNRECOVERABLE, "Error allocating %i bytes for sound buffer", sz );
 	} else {
 		memset( buffer, 0, sz );
 	}
@@ -121,7 +121,7 @@ void SND_setup( void )
 
 	// clear scratch buffer -EC-
 	if ( sfxScratchBuffer == NULL ) {
-		Com_Error( ERR_FATAL, "Error allocating %i bytes for sfxScratchBuffer",	sz );
+		Com_Terminate( TERM_UNRECOVERABLE, "Error allocating %i bytes for sfxScratchBuffer",	sz );
 	} else {
 		memset( sfxScratchBuffer, 0, sz );
 	}
@@ -139,7 +139,7 @@ void SND_setup( void )
 	*(sndBuffer **)q = NULL;
 	freelist = p + scs - 1;
 
-	Com_Printf( "Sound memory manager started\n" );
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound memory manager started\n" );
 }
 
 
@@ -301,11 +301,11 @@ qboolean S_LoadSound( sfx_t *sfx )
 		return qfalse;
 
 	if ( info.width == 1 ) {
-		Com_DPrintf(S_COLOR_YELLOW "WARNING: %s is a 8 bit audio file\n", sfx->soundName);
+		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "WARNING: %s is a 8 bit audio file\n", sfx->soundName);
 	}
 
 	if ( info.rate != 48000 && info.rate != 44100 && info.rate != 22050 ) {
-		Com_DPrintf(S_COLOR_YELLOW "WARNING: %s has unusual sample rate %dHz\n", sfx->soundName, info.rate);
+		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "WARNING: %s has unusual sample rate %dHz\n", sfx->soundName, info.rate);
 	}
 
 	samples = Hunk_AllocateTempMemory(info.samples * sizeof(short) * 2);
@@ -368,5 +368,5 @@ qboolean S_LoadSound( sfx_t *sfx )
 }
 
 void S_DisplayFreeMemory(void) {
-	Com_Printf("%d bytes free sound buffer memory, %d total used\n", inUse, totalInUse);
+	Com_Log( SEV_INFO, LOG_CAT_SOUND, "%d bytes free sound buffer memory, %d total used\n", inUse, totalInUse);
 }

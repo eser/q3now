@@ -14,21 +14,6 @@ Shared between wn_*.c files. Not included by engine code — use wn_public.h.
 #include "picoquic.h"
 #include "picoquic_utils.h"
 
-/*
- * wn_debug — verbose QUIC transport tracing cvar (default 0).
- *
- * Gated via the WN_DBG macro below. Per-packet/per-callback/per-partial-slot
- * logs are hidden by default so gameplay doesn't stall on terminal I/O;
- * `wn_debug 1` reinstates the full trace for protocol debugging.
- *
- * Lifecycle, handshake, TOFU, and error logs stay on Com_DPrintf / Com_Printf
- * directly — see wn_main.c / wn_transport.c for the ungated call sites.
- */
-extern cvar_t *wn_debug;
-
-#define WN_DBG( ... ) \
-	do { if ( wn_debug && wn_debug->integer ) Com_Printf( __VA_ARGS__ ); } while ( 0 )
-
 // ───────────────────────────────────────────────────────────────────
 // QUIC context — singleton, created in WN_Init, destroyed in WN_Shutdown
 // ───────────────────────────────────────────────────────────────────

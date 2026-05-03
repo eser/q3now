@@ -64,3 +64,6 @@ int BotValidChatPosition(bot_state_t *bs);
 void BotChatTest(bot_state_t *bs);
 // current map title
 char *BotMapTitle(void);
+// CTF event chat helpers — called from g_team.c
+void BotCTFChatEvent( int clientNum, const char *eventName );
+void BotCTFChatBroadcast( int excludeClient, int teamNum, const char *eventName );

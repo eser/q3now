@@ -6,6 +6,7 @@
 
 void SV_Lua_Init( void );
 void SV_Lua_Shutdown( void );
+void SV_Lua_EnsureInit( void );
 
 int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized );
 void SV_Lua_FreeCharacter( int characterHandle );

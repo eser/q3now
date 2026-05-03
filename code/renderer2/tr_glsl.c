@@ -231,29 +231,29 @@ static void GLSL_PrintLog(GLuint programOrShader, glslPrintLog_t type, qboolean 
 	static char     msgPart[1024];
 	int             maxLength = 0;
 	int             i;
-	int             printLevel = developerOnly ? PRINT_DEVELOPER : PRINT_ALL;
+	log_severity_t  printLevel = developerOnly ? SEV_DEBUG : SEV_INFO;
 
 	switch (type)
 	{
 		case GLSL_PRINTLOG_PROGRAM_INFO:
-			ri.Printf(printLevel, "Program info log:\n");
+			ri.Log(printLevel, "Program info log:\n");
 			qglGetProgramiv(programOrShader, GL_INFO_LOG_LENGTH, &maxLength);
 			break;
 
 		case GLSL_PRINTLOG_SHADER_INFO:
-			ri.Printf(printLevel, "Shader info log:\n");
+			ri.Log(printLevel, "Shader info log:\n");
 			qglGetShaderiv(programOrShader, GL_INFO_LOG_LENGTH, &maxLength);
 			break;
 
 		case GLSL_PRINTLOG_SHADER_SOURCE:
-			ri.Printf(printLevel, "Shader source:\n");
+			ri.Log(printLevel, "Shader source:\n");
 			qglGetShaderiv(programOrShader, GL_SHADER_SOURCE_LENGTH, &maxLength);
 			break;
 	}
 
 	if (maxLength <= 0)
 	{
-		ri.Printf(printLevel, "None.\n");
+		ri.Log(printLevel, "None.\n");
 		return;
 	}
 
@@ -281,7 +281,7 @@ static void GLSL_PrintLog(GLuint programOrShader, glslPrintLog_t type, qboolean 
 	{
 		msgPart[maxLength + 1] = '\0';
 
-		ri.Printf(printLevel, "%s\n", msgPart);
+		ri.Log(printLevel, "%s\n", msgPart);
 	}
 	else
 	{
@@ -289,10 +289,10 @@ static void GLSL_PrintLog(GLuint programOrShader, glslPrintLog_t type, qboolean 
 		{
 			Q_strncpyz(msgPart, msg + i, sizeof(msgPart));
 
-			ri.Printf(printLevel, "%s", msgPart);
+			ri.Log(printLevel, "%s", msgPart);
 		}
 
-		ri.Printf(printLevel, "\n");
+		ri.Log(printLevel, "\n");
 
 		ri.Free(msg);
 	}
@@ -444,7 +444,7 @@ static int GLSL_CompileGPUShader(GLuint program, GLuint *prevShader, const GLcha
 	{
 		GLSL_PrintLog(shader, GLSL_PRINTLOG_SHADER_SOURCE, qfalse);
 		GLSL_PrintLog(shader, GLSL_PRINTLOG_SHADER_INFO, qfalse);
-		ri.Error(ERR_DROP, "Couldn't compile shader");
+		ri.Terminate( TERM_CLIENT_DROP, "Couldn't compile shader");
 		return 0;
 	}
 
@@ -491,19 +491,19 @@ static int GLSL_LoadGPUShaderText(const char *name, const char *fallback,
 	{
 		if (fallback)
 		{
-			ri.Printf(PRINT_DEVELOPER, "...loading built-in '%s'\n", filename);
+			ri.Log( SEV_DEBUG, "...loading built-in '%s'\n", filename);
 			shaderText = fallback;
 			size = strlen(shaderText);
 		}
 		else
 		{
-			ri.Printf(PRINT_DEVELOPER, "couldn't load '%s'\n", filename);
+			ri.Log( SEV_DEBUG, "couldn't load '%s'\n", filename);
 			return 0;
 		}
 	}
 	else
 	{
-		ri.Printf(PRINT_DEVELOPER, "...loading '%s'\n", filename);
+		ri.Log( SEV_DEBUG, "...loading '%s'\n", filename);
 		shaderText = buffer;
 	}
 
@@ -535,7 +535,7 @@ static void GLSL_LinkProgram(GLuint program)
 	if(!linked)
 	{
 		GLSL_PrintLog(program, GLSL_PRINTLOG_PROGRAM_INFO, qfalse);
-		ri.Error(ERR_DROP, "shaders failed to link");
+		ri.Terminate( TERM_CLIENT_DROP, "shaders failed to link");
 	}
 }
 
@@ -553,17 +553,17 @@ static void GLSL_ShowProgramUniforms(GLuint program)
 	{
 		qglGetActiveUniform(program, i, sizeof(uniformName), NULL, &size, &type, uniformName);
 
-		ri.Printf(PRINT_DEVELOPER, "active uniform: '%s'\n", uniformName);
+		ri.Log( SEV_DEBUG, "active uniform: '%s'\n", uniformName);
 	}
 }
 
 static int GLSL_InitGPUShader2(shaderProgram_t * program, const char *name, int attribs, const char *vpCode, const char *fpCode)
 {
-	ri.Printf(PRINT_DEVELOPER, "------- GPU shader -------\n");
+	ri.Log( SEV_DEBUG, "------- GPU shader -------\n");
 
 	if(strlen(name) >= MAX_QPATH)
 	{
-		ri.Error(ERR_DROP, "GLSL_InitGPUShader2: \"%s\" is too long", name);
+		ri.Terminate( TERM_CLIENT_DROP, "GLSL_InitGPUShader2: \"%s\" is too long", name);
 	}
 
 	Q_strncpyz(program->name, name, sizeof(program->name));
@@ -573,7 +573,7 @@ static int GLSL_InitGPUShader2(shaderProgram_t * program, const char *name, int 
 
 	if (!(GLSL_CompileGPUShader(program->program, &program->vertexShader, vpCode, strlen(vpCode), GL_VERTEX_SHADER)))
 	{
-		ri.Printf(PRINT_ALL, "GLSL_InitGPUShader2: Unable to load \"%s\" as GL_VERTEX_SHADER\n", name);
+		ri.Log( SEV_INFO, "GLSL_InitGPUShader2: Unable to load \"%s\" as GL_VERTEX_SHADER\n", name);
 		qglDeleteProgram(program->program);
 		return 0;
 	}
@@ -582,7 +582,7 @@ static int GLSL_InitGPUShader2(shaderProgram_t * program, const char *name, int 
 	{
 		if(!(GLSL_CompileGPUShader(program->program, &program->fragmentShader, fpCode, strlen(fpCode), GL_FRAGMENT_SHADER)))
 		{
-			ri.Printf(PRINT_ALL, "GLSL_InitGPUShader2: Unable to load \"%s\" as GL_FRAGMENT_SHADER\n", name);
+			ri.Log( SEV_INFO, "GLSL_InitGPUShader2: Unable to load \"%s\" as GL_FRAGMENT_SHADER\n", name);
 			qglDeleteProgram(program->program);
 			return 0;
 		}
@@ -754,7 +754,7 @@ void GLSL_SetUniformInt(shaderProgram_t *program, int uniformNum, GLint value)
 
 	if (uniformsInfo[uniformNum].type != GLSL_INT)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformInt: wrong type for uniform %i in program %s\n", uniformNum, program->name);
+		ri.Log( SEV_WARN, "GLSL_SetUniformInt: wrong type for uniform %i in program %s\n", uniformNum, program->name);
 		return;
 	}
 
@@ -778,7 +778,7 @@ void GLSL_SetUniformFloat(shaderProgram_t *program, int uniformNum, GLfloat valu
 
 	if (uniformsInfo[uniformNum].type != GLSL_FLOAT)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformFloat: wrong type for uniform %i in program %s\n", uniformNum, program->name);
+		ri.Log( SEV_WARN, "GLSL_SetUniformFloat: wrong type for uniform %i in program %s\n", uniformNum, program->name);
 		return;
 	}
 
@@ -802,7 +802,7 @@ void GLSL_SetUniformVec2(shaderProgram_t *program, int uniformNum, const vec2_t 
 
 	if (uniformsInfo[uniformNum].type != GLSL_VEC2)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformVec2: wrong type for uniform %i in program %s\n", uniformNum, program->name);
+		ri.Log( SEV_WARN, "GLSL_SetUniformVec2: wrong type for uniform %i in program %s\n", uniformNum, program->name);
 		return;
 	}
 
@@ -827,7 +827,7 @@ void GLSL_SetUniformVec3(shaderProgram_t *program, int uniformNum, const vec3_t 
 
 	if (uniformsInfo[uniformNum].type != GLSL_VEC3)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformVec3: wrong type for uniform %i in program %s\n", uniformNum, program->name);
+		ri.Log( SEV_WARN, "GLSL_SetUniformVec3: wrong type for uniform %i in program %s\n", uniformNum, program->name);
 		return;
 	}
 
@@ -851,7 +851,7 @@ void GLSL_SetUniformVec4(shaderProgram_t *program, int uniformNum, const vec4_t 
 
 	if (uniformsInfo[uniformNum].type != GLSL_VEC4)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformVec4: wrong type for uniform %i in program %s\n", uniformNum, program->name);
+		ri.Log( SEV_WARN, "GLSL_SetUniformVec4: wrong type for uniform %i in program %s\n", uniformNum, program->name);
 		return;
 	}
 
@@ -875,7 +875,7 @@ void GLSL_SetUniformFloat5(shaderProgram_t *program, int uniformNum, const vec5_
 
 	if (uniformsInfo[uniformNum].type != GLSL_FLOAT5)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformFloat5: wrong type for uniform %i in program %s\n", uniformNum, program->name);
+		ri.Log( SEV_WARN, "GLSL_SetUniformFloat5: wrong type for uniform %i in program %s\n", uniformNum, program->name);
 		return;
 	}
 
@@ -899,7 +899,7 @@ void GLSL_SetUniformMat4(shaderProgram_t *program, int uniformNum, const mat4_t 
 
 	if (uniformsInfo[uniformNum].type != GLSL_MAT16)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformMat4: wrong type for uniform %i in program %s\n", uniformNum, program->name);
+		ri.Log( SEV_WARN, "GLSL_SetUniformMat4: wrong type for uniform %i in program %s\n", uniformNum, program->name);
 		return;
 	}
 
@@ -924,13 +924,13 @@ void GLSL_SetUniformMat4BoneMatrix(shaderProgram_t *program, int uniformNum, /*c
 
 	if (uniformsInfo[uniformNum].type != GLSL_MAT16_BONEMATRIX)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformMat4BoneMatrix: wrong type for uniform %i in program %s\n", uniformNum, program->name);
+		ri.Log( SEV_WARN, "GLSL_SetUniformMat4BoneMatrix: wrong type for uniform %i in program %s\n", uniformNum, program->name);
 		return;
 	}
 
 	if (numMatricies > glRefConfig.glslMaxAnimatedBones)
 	{
-		ri.Printf( PRINT_WARNING, "GLSL_SetUniformMat4BoneMatrix: too many matricies (%d/%d) for uniform %i in program %s\n",
+		ri.Log( SEV_WARN, "GLSL_SetUniformMat4BoneMatrix: too many matricies (%d/%d) for uniform %i in program %s\n",
 				numMatricies, glRefConfig.glslMaxAnimatedBones, uniformNum, program->name);
 		return;
 	}
@@ -980,7 +980,7 @@ void GLSL_InitGPUShaders(void)
 	int attribs;
 	int numGenShaders = 0, numLightShaders = 0, numEtcShaders = 0;
 
-	ri.Printf(PRINT_ALL, "------- GLSL_InitGPUShaders -------\n");
+	ri.Log( SEV_INFO, "------- GLSL_InitGPUShaders -------\n");
 
 	R_IssuePendingRenderCommands();
 
@@ -1025,7 +1025,7 @@ void GLSL_InitGPUShaders(void)
 
 		if (!GLSL_InitGPUShader(&tr.genericShader[i], "generic", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_generic_vp, fallbackShader_generic_fp))
 		{
-			ri.Error(ERR_FATAL, "Could not load generic shader!");
+			ri.Terminate( TERM_UNRECOVERABLE, "Could not load generic shader!");
 		}
 
 		GLSL_InitUniforms(&tr.genericShader[i]);
@@ -1043,7 +1043,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.textureColorShader, "texturecolor", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_texturecolor_vp, fallbackShader_texturecolor_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load texturecolor shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load texturecolor shader!");
 	}
 	
 	GLSL_InitUniforms(&tr.textureColorShader);
@@ -1059,7 +1059,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.msdfShader, "msdf", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_msdf_vp, fallbackShader_msdf_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load msdf shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load msdf shader!");
 	}
 
 	GLSL_InitUniforms(&tr.msdfShader);
@@ -1097,7 +1097,7 @@ void GLSL_InitGPUShaders(void)
 
 		if (!GLSL_InitGPUShader(&tr.fogShader[i], "fogpass", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_fogpass_vp, fallbackShader_fogpass_fp))
 		{
-			ri.Error(ERR_FATAL, "Could not load fogpass shader!");
+			ri.Terminate( TERM_UNRECOVERABLE, "Could not load fogpass shader!");
 		}
 
 		GLSL_InitUniforms(&tr.fogShader[i]);
@@ -1119,7 +1119,7 @@ void GLSL_InitGPUShaders(void)
 
 		if (!GLSL_InitGPUShader(&tr.dlightShader[i], "dlight", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_dlight_vp, fallbackShader_dlight_fp))
 		{
-			ri.Error(ERR_FATAL, "Could not load dlight shader!");
+			ri.Terminate( TERM_UNRECOVERABLE, "Could not load dlight shader!");
 		}
 
 		GLSL_InitUniforms(&tr.dlightShader[i]);
@@ -1272,7 +1272,7 @@ void GLSL_InitGPUShaders(void)
 
 		if (!GLSL_InitGPUShader(&tr.lightallShader[i], "lightall", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_lightall_vp, fallbackShader_lightall_fp))
 		{
-			ri.Error(ERR_FATAL, "Could not load lightall shader!");
+			ri.Terminate( TERM_UNRECOVERABLE, "Could not load lightall shader!");
 		}
 
 		GLSL_InitUniforms(&tr.lightallShader[i]);
@@ -1316,7 +1316,7 @@ void GLSL_InitGPUShaders(void)
 
 		if (!GLSL_InitGPUShader(&tr.shadowmapShader[i], "shadowfill", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_shadowfill_vp, fallbackShader_shadowfill_fp))
 		{
-			ri.Error(ERR_FATAL, "Could not load shadowfill shader!");
+			ri.Terminate( TERM_UNRECOVERABLE, "Could not load shadowfill shader!");
 		}
 
 		GLSL_InitUniforms(&tr.shadowmapShader[i]);
@@ -1332,7 +1332,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.pshadowShader, "pshadow", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_pshadow_vp, fallbackShader_pshadow_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load pshadow shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load pshadow shader!");
 	}
 	
 	GLSL_InitUniforms(&tr.pshadowShader);
@@ -1349,7 +1349,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.down4xShader, "down4x", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_down4x_vp, fallbackShader_down4x_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load down4x shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load down4x shader!");
 	}
 	
 	GLSL_InitUniforms(&tr.down4xShader);
@@ -1366,7 +1366,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.bokehShader, "bokeh", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_bokeh_vp, fallbackShader_bokeh_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load bokeh shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load bokeh shader!");
 	}
 
 	GLSL_InitUniforms(&tr.bokehShader);
@@ -1383,7 +1383,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.tonemapShader, "tonemap", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_tonemap_vp, fallbackShader_tonemap_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load tonemap shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load tonemap shader!");
 	}
 
 	GLSL_InitUniforms(&tr.tonemapShader);
@@ -1406,7 +1406,7 @@ void GLSL_InitGPUShaders(void)
 
 		if (!GLSL_InitGPUShader(&tr.calclevels4xShader[i], "calclevels4x", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_calclevels4x_vp, fallbackShader_calclevels4x_fp))
 		{
-			ri.Error(ERR_FATAL, "Could not load calclevels4x shader!");
+			ri.Terminate( TERM_UNRECOVERABLE, "Could not load calclevels4x shader!");
 		}
 
 		GLSL_InitUniforms(&tr.calclevels4xShader[i]);
@@ -1437,7 +1437,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.shadowmaskShader, "shadowmask", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_shadowmask_vp, fallbackShader_shadowmask_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load shadowmask shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load shadowmask shader!");
 	}
 	
 	GLSL_InitUniforms(&tr.shadowmaskShader);
@@ -1458,7 +1458,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.ssaoShader, "ssao", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_ssao_vp, fallbackShader_ssao_fp))
 	{
-		ri.Error(ERR_FATAL, "Could not load ssao shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load ssao shader!");
 	}
 
 	GLSL_InitUniforms(&tr.ssaoShader);
@@ -1486,7 +1486,7 @@ void GLSL_InitGPUShaders(void)
 
 		if (!GLSL_InitGPUShader(&tr.depthBlurShader[i], "depthBlur", attribs, qtrue, QS_CStr(&extradefines), qtrue,fallbackShader_depthblur_vp, fallbackShader_depthblur_fp))
 		{
-			ri.Error(ERR_FATAL, "Could not load depthBlur shader!");
+			ri.Terminate( TERM_UNRECOVERABLE, "Could not load depthBlur shader!");
 		}
 		
 		GLSL_InitUniforms(&tr.depthBlurShader[i]);
@@ -1505,7 +1505,7 @@ void GLSL_InitGPUShaders(void)
 
 	if (!GLSL_InitGPUShader(&tr.testcubeShader, "testcube", attribs, qtrue, QS_CStr(&extradefines), qtrue,NULL, NULL))
 	{
-		ri.Error(ERR_FATAL, "Could not load testcube shader!");
+		ri.Terminate( TERM_UNRECOVERABLE, "Could not load testcube shader!");
 	}
 
 	GLSL_InitUniforms(&tr.testcubeShader);
@@ -1520,7 +1520,7 @@ void GLSL_InitGPUShaders(void)
 
 	endTime = ri.Milliseconds();
 
-	ri.Printf(PRINT_ALL, "loaded %i GLSL shaders (%i gen %i light %i etc) in %5.2f seconds\n", 
+	ri.Log( SEV_INFO, "loaded %i GLSL shaders (%i gen %i light %i etc) in %5.2f seconds\n", 
 		numGenShaders + numLightShaders + numEtcShaders, numGenShaders, numLightShaders, 
 		numEtcShaders, (endTime - startTime) / 1000.0);
 }
@@ -1529,7 +1529,7 @@ void GLSL_ShutdownGPUShaders(void)
 {
 	int i;
 
-	ri.Printf(PRINT_ALL, "------- GLSL_ShutdownGPUShaders -------\n");
+	ri.Log( SEV_INFO, "------- GLSL_ShutdownGPUShaders -------\n");
 
 	for (i = 0; i < ATTR_INDEX_COUNT; i++)
 		qglDisableVertexAttribArray(i);

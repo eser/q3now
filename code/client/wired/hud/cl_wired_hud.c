@@ -152,11 +152,12 @@ const wiredHudBinding_t *WiredHud_FindBinding( const char *name ) {
 // ── init / shutdown ──────────────────────────────────────────────────
 
 void WiredHud_Init( void ) {
-	cl_drawHud = Cvar_Get( "cl_drawHud", "1", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_drawHud, "Draw the Wired HUD. 0: off. 1: on (default)." );
+	static const cvarDesc_t d = CVAR_BOOL( "cl_drawHud", "1", CVAR_ARCHIVE | CVAR_NODEFAULT,
+		"Draw the Wired HUD. 0: off. 1: on (default)." );
+	cl_drawHud = Cvar_Register( &d );
 	memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
 	wiredHud_elementsLoaded = qfalse;
-	Com_DPrintf( "WiredHud: initialized (Phase 3)\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: initialized (Phase 3)\n" );
 }
 
 void WiredHud_Shutdown( void ) {
@@ -371,7 +372,7 @@ void WiredHud_LoadFromMenus( void ) {
 	int created = 0;
 	int hudOverlayMenus = 0;
 
-	Com_DPrintf( "WiredHud: scanning %d menus for hudOverlay...\n", menuCount );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: scanning %d menus for hudOverlay...\n", menuCount );
 
 	// iterate all loaded menus
 	for ( int i = 0; i < menuCount; i++ ) {
@@ -383,7 +384,7 @@ void WiredHud_LoadFromMenus( void ) {
 		}
 
 		hudOverlayMenus++;
-		Com_DPrintf( "WiredHud: found hudOverlay menu '%s' with %d items\n", menu->name, menu->itemCount );
+		Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: found hudOverlay menu '%s' with %d items\n", menu->name, menu->itemCount );
 
 		// this is a HUD overlay menu — create elements from its items
 		for ( int j = 0; j < menu->itemCount; j++ ) {
@@ -396,12 +397,12 @@ void WiredHud_LoadFromMenus( void ) {
 			if ( WiredHud_CreateElement( item->hudElement, &cfg ) ) {
 				created++;
 			} else {
-				Com_Printf( S_COLOR_YELLOW "WiredHud: failed to create '%s'\n", item->hudElement );
+				COM_WARN( LOG_CAT_UI, "WiredHud: failed to create '%s'\n", item->hudElement );
 			}
 		}
 	}
 
-	Com_DPrintf( "WiredHud: %d hudOverlay menus, %d elements created, %d active\n",
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: %d hudOverlay menus, %d elements created, %d active\n",
 		hudOverlayMenus, created, WiredHud_GetElementCount() );
 	wiredHud_elementsLoaded = qtrue;
 }

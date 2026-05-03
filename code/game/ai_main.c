@@ -111,27 +111,27 @@ void QDECL BotAI_Print(int type, char *fmt, ...) {
 
 	switch(type) {
 		case PRT_MESSAGE: {
-			G_Printf("%s", str);
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "%s", str);
 			break;
 		}
 		case PRT_WARNING: {
-			G_Printf( S_COLOR_YELLOW "Warning: %s", str );
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, S_COLOR_YELLOW "Warning: %s", str );
 			break;
 		}
 		case PRT_ERROR: {
-			G_Printf( S_COLOR_RED "Error: %s", str );
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, S_COLOR_RED "Error: %s", str );
 			break;
 		}
 		case PRT_FATAL: {
-			G_Printf( S_COLOR_RED "Fatal: %s", str );
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, S_COLOR_RED "Fatal: %s", str );
 			break;
 		}
 		case PRT_EXIT: {
-			G_Error( S_COLOR_RED "Exit: %s", str );
+			Com_Terminate( TERM_CLIENT_DROP, S_COLOR_RED "Exit: %s", str );
 			break;
 		}
 		default: {
-			G_Printf( "unknown print type\n" );
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "unknown print type\n" );
 			break;
 		}
 	}
@@ -701,7 +701,52 @@ BotEntityInfo
 ==============
 */
 void BotEntityInfo(int entnum, aas_entityinfo_t *info) {
+#if FEAT_RECAST_NAVMESH
+	/* Under Recast, AAS entity tracking is not initialized (aasworld.loaded==false),
+	   so trap_AAS_EntityInfo returns zeroed data with valid=false, making BotFindEnemy
+	   skip every client.  Read live state directly from g_entities[] and level.clients[]. */
+	gentity_t *gent;
+	memset(info, 0, sizeof(aas_entityinfo_t));
+	if (entnum < 0 || entnum >= MAX_GENTITIES) return;
+	gent = &g_entities[entnum];
+	if (!gent->inuse) return;
+
+	info->valid      = qtrue;
+	info->number     = entnum;
+	info->type       = gent->s.eType;
+	info->flags      = gent->s.eFlags;
+	info->weapon     = gent->s.weapon;
+	info->modelindex = gent->s.modelindex;
+	VectorCopy(gent->r.currentOrigin, info->origin);
+	VectorCopy(gent->r.currentOrigin, info->lastvisorigin);
+	VectorCopy(gent->r.currentOrigin, info->old_origin);
+	VectorCopy(gent->r.mins,          info->mins);
+	VectorCopy(gent->r.maxs,          info->maxs);
+	VectorCopy(gent->r.currentAngles, info->angles);
+	VectorCopy(gent->s.pos.trDelta,   info->velocity);
+
+	if (entnum < MAX_CLIENTS) {
+		gclient_t *cl = &level.clients[entnum];
+		if (cl->pers.connected == CON_CONNECTED) {
+			int pw;
+			/* Prefer playerState origin — more accurate than r.currentOrigin for clients. */
+			VectorCopy(cl->ps.origin,     info->origin);
+			VectorCopy(cl->ps.origin,     info->lastvisorigin);
+			VectorCopy(cl->ps.origin,     info->old_origin);
+			VectorCopy(cl->ps.velocity,   info->velocity);
+			/* Use view angles for the InFieldOfVision check ("is bot in enemy's FOV"). */
+			VectorCopy(cl->ps.viewangles, info->angles);
+			/* Build powerup bitmask for EntityIs* helpers (powerups[] stores expiry times). */
+			for (pw = 0; pw < PW_NUM_POWERUPS; pw++) {
+				if (cl->ps.powerups[pw] > level.time) {
+					info->powerups |= (1 << pw);
+				}
+			}
+		}
+	}
+#else
 	trap_AAS_EntityInfo(entnum, info);
+#endif
 }
 
 /*
@@ -778,7 +823,7 @@ BotChangeViewAngles
 ==============
 */
 void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
-	float diff, factor, maxchange, anglespeed, disired_speed;
+	float diff;
 
 	if (bs->ideal_viewangles[PITCH] > 180) bs->ideal_viewangles[PITCH] -= 360;
 	//
@@ -792,55 +837,57 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 		bs->ideal_viewangles[YAW] += scanOfs * 45.0f;
 		bs->ideal_viewangles[YAW] = AngleMod( bs->ideal_viewangles[YAW] );
 	}
-	if ( bs->wiredBotsActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "sv_botDebugAim" ) ) {
+	if ( bs->wiredBotsActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
 		static int s_viewLogTick[MAX_CLIENTS];
 		if ( ++s_viewLogTick[bs->client] % 6 == 0 ) {
-			G_Printf( "^3[ViewAngle] c=%d view=(%.1f %.1f) ideal=(%.1f %.1f) spd=(%.1f %.1f)\n",
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^3[ViewAngle] c=%d view=(%.1f %.1f) ideal=(%.1f %.1f) spd=(%.1f %.1f)\n",
 				bs->client,
 				bs->viewangles[PITCH], bs->viewangles[YAW],
 				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW],
 				bs->viewanglespeed[PITCH], bs->viewanglespeed[YAW] );
 		}
 	}
+
+	if ( bs->wiredBotsActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+		static int s_viewChangeTick[MAX_CLIENTS];
+		if ( ++s_viewChangeTick[bs->client] % 6 == 0 ) {
+			float dbg_skill = Com_Clamp( 0.0f, 1.0f, WiredBots_ProfileFieldOr( bs, WB_PROFILE_TRACKING, 0.5f ) );
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^3[ViewChange] cl=%d actual=(%.1f %.1f) ideal=(%.1f %.1f) skill=%.3f\n",
+				bs->client,
+				bs->viewangles[PITCH], bs->viewangles[YAW],
+				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW],
+				dbg_skill );
+		}
+	}
+
+	/* Unified aim model: skill-parameterized critically-damped approach.
+	 * aim_skill drives both convergence rate (accel) and max angular velocity (maxvel).
+	 * No oscillation: viewanglespeed converges asymptotically to desired_speed. */
+	float aim_skill, maxvel;
 	if (bs->enemy >= 0) {
-		factor = Com_Clamp( 0.01f, 1.0f, WiredBots_ProfileFieldOr( bs, WB_PROFILE_TRACKING, 0.5f ) );
-		maxchange = 240.0f + 1560.0f * WiredBots_ProfileFieldOr( bs, WB_PROFILE_ACCURACY, 0.5f );
+		aim_skill = Com_Clamp( 0.0f, 1.0f, WiredBots_ProfileFieldOr( bs, WB_PROFILE_TRACKING, 0.5f ) );
+		maxvel = 180.0f + aim_skill * 1620.0f;  // 180..1800 deg/s
+	} else {
+		aim_skill = 0.05f;
+		maxvel = 261.0f;  // low-skill roam speed
 	}
-	else {
-		factor = 0.05f;
-		maxchange = 360;
+	if ( bs->wiredBotsActive ) {
+		float capDegPerSec = WiredBots_ProfileFieldOr( bs, WB_PROFILE_VIEW_MAXCHANGE, 1800.0f );  // view_maxchange deg/s; Q3 ceiling default
+		if ( maxvel > capDegPerSec ) maxvel = capDegPerSec;
 	}
-	if (maxchange < 240) maxchange = 240;
-	maxchange *= thinktime;
+	float accel = 2.0f + aim_skill * 18.0f;  // 2..20 — reaction time feel
+
 	for (int i = 0; i < 2; i++) {
-		//
-		if (bot_challenge.integer) {
-			//smooth slowdown view model
-			diff = fabs(AngleDifference(bs->viewangles[i], bs->ideal_viewangles[i]));
-			anglespeed = diff * factor;
-			if (anglespeed > maxchange) anglespeed = maxchange;
-			bs->viewangles[i] = BotChangeViewAngle(bs->viewangles[i],
-											bs->ideal_viewangles[i], anglespeed);
-		}
-		else {
-			//over reaction view model
-			bs->viewangles[i] = AngleMod(bs->viewangles[i]);
-			bs->ideal_viewangles[i] = AngleMod(bs->ideal_viewangles[i]);
-			diff = AngleDifference(bs->viewangles[i], bs->ideal_viewangles[i]);
-			disired_speed = diff * factor;
-			bs->viewanglespeed[i] += (bs->viewanglespeed[i] - disired_speed);
-			if (bs->viewanglespeed[i] > 180) bs->viewanglespeed[i] = maxchange;
-			if (bs->viewanglespeed[i] < -180) bs->viewanglespeed[i] = -maxchange;
-			anglespeed = bs->viewanglespeed[i];
-			if (anglespeed > maxchange) anglespeed = maxchange;
-			if (anglespeed < -maxchange) anglespeed = -maxchange;
-			bs->viewangles[i] += anglespeed;
-			bs->viewangles[i] = AngleMod(bs->viewangles[i]);
-			//demping
-			bs->viewanglespeed[i] *= 0.45 * (1 - factor);
-		}
-		//BotAI_Print(PRT_MESSAGE, "ideal_angles %f %f\n", bs->ideal_viewangles[0], bs->ideal_viewangles[1], bs->ideal_viewangles[2]);`
-		//bs->viewangles[i] = bs->ideal_viewangles[i];
+		bs->viewangles[i]       = AngleMod(bs->viewangles[i]);
+		bs->ideal_viewangles[i] = AngleMod(bs->ideal_viewangles[i]);
+		diff = AngleDifference(bs->ideal_viewangles[i], bs->viewangles[i]);
+		float desired_speed = diff * aim_skill / thinktime;
+		float delta = desired_speed - bs->viewanglespeed[i];
+		bs->viewanglespeed[i] += delta * accel * thinktime;
+		if (bs->viewanglespeed[i] >  maxvel) bs->viewanglespeed[i] =  maxvel;
+		if (bs->viewanglespeed[i] < -maxvel) bs->viewanglespeed[i] = -maxvel;
+		bs->viewangles[i] += bs->viewanglespeed[i] * thinktime;
+		bs->viewangles[i] = AngleMod(bs->viewangles[i]);
 	}
 	//bs->viewangles[PITCH] = 0;
 	if (bs->viewangles[PITCH] > 180) bs->viewangles[PITCH] -= 360;
@@ -982,7 +1029,12 @@ BotAIRegularUpdate
 */
 void BotAIRegularUpdate(void) {
 	if (regularupdate_time < FloatTime()) {
+#if !FEAT_RECAST_NAVMESH
+		/* Under Recast, item positions are read directly from g_entities[].
+		 * BotUpdateEntityItems() calls AAS_EntityInfo() which fatals without
+		 * an AAS file loaded. */
 		trap_BotUpdateEntityItems();
+#endif
 		regularupdate_time = FloatTime() + 0.3;
 	}
 }
@@ -1096,6 +1148,31 @@ int BotAI(int client, float thinktime) {
 	bs->areanum = BotPointAreaNum(bs->origin);
 	//translate active WiredBots directive into ltgtype / teamgoal before AI runs
 	BotDirective_FrameUpdate(bs);
+
+	// Fetch processed sound events from server-side bot awareness ring
+	bs->heardSoundCount = trap_WCE_GetSoundEvents(
+	    bs->client, bs->heardSounds, MAX_BOT_SOUND_EVENTS );
+	if ( bs->heardSoundCount > 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
+		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "BotAwareness: cl=%d fetched %d sound events\n",
+		    bs->client, bs->heardSoundCount );
+	}
+
+	// Update lastsound* from the highest-volume entry this tick
+	if ( bs->heardSoundCount > 0 ) {
+		int    s;
+		float  bestVol = -1.0f;
+		for ( s = 0; s < bs->heardSoundCount; s++ ) {
+			if ( bs->heardSounds[s].volume > bestVol ) {
+				bestVol = bs->heardSounds[s].volume;
+				VectorCopy( bs->heardSounds[s].origin, bs->lastsoundpos );
+				bs->lastsoundtime   = FloatTime();
+				bs->lastsoundentity = bs->heardSounds[s].sourceClientNum;
+				bs->lastsoundtype   = bs->heardSounds[s].type;
+				bs->lastsoundvolume = bs->heardSounds[s].volume;
+			}
+		}
+	}
+
 	//the real AI
 	BotDeathmatchAI(bs, thinktime);
 	//set the weapon selection every AI frame
@@ -1351,6 +1428,10 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 	bs->client = client;
 	bs->entitynum = client;
 	bs->setupcount = 4;
+	bs->prev_rank = -1;
+	bs->current_streak = 0;
+	bs->last_kill_time = 0.0f;
+	bs->last_streak_ack = 0.0f;
 	BotDirective_Init(&bs->directives);
 	bs->entergame_time = FloatTime();
 	bs->ms = trap_BotAllocMoveState();
@@ -1524,8 +1605,6 @@ int BotAIStartFrame(int time) {
 
 	G_CheckBotSpawn();
 
-	trap_Cvar_Update(&bot_rocketjump);
-	trap_Cvar_Update(&bot_grapple);
 	trap_Cvar_Update(&bot_fastchat);
 	trap_Cvar_Update(&bot_nochat);
 	trap_Cvar_Update(&bot_testrchat);
@@ -1534,7 +1613,6 @@ int BotAIStartFrame(int time) {
 	trap_Cvar_Update(&bot_saveroutingcache);
 	trap_Cvar_Update(&bot_pause);
 	trap_Cvar_Update(&bot_report);
-	trap_Cvar_Update(&bot_autoskill);
 #if FEAT_RECAST_NAVMESH
 	trap_Cvar_Update(&nav_botdebug);
 	trap_Cvar_Update(&nav_waypoint_tolerance);
@@ -1746,7 +1824,7 @@ int BotInitLibrary(void) {
 	trap_BotLibVarSet("g_gametype", buf);
 	//bot developer mode and log file
 	trap_BotLibVarSet("bot_developer", bot_developer.string);
-	trap_Cvar_VariableStringBuffer("log_enabled", buf, sizeof(buf));
+	trap_Cvar_VariableStringBuffer("log_file_enabled", buf, sizeof(buf));
 	trap_BotLibVarSet("log", buf);
 	//no chatting
 	trap_Cvar_VariableStringBuffer("bot_nochat", buf, sizeof(buf));

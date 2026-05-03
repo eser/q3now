@@ -228,25 +228,25 @@ int		max_polyverts;
 
 // for modular renderer
 #ifdef USE_RENDERER_DLOPEN
-void QDECL Com_Error( errorParm_t code, const char *fmt, ... )
+void QDECL Com_Log_Impl( log_severity_t severity, logCategory_t cat, const char *fmt, ... )
 {
-	char buf[ 4096 ];
+	char buf[ MAXPRINTMSG ];
 	va_list	argptr;
+	(void)cat;
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
-	ri.Error( code, "%s", buf );
+	ri.Log( severity, "%s", buf );
 }
 
-void QDECL Com_Printf( const char *fmt, ... )
+void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *fmt, ... )
 {
 	char buf[ MAXPRINTMSG ];
 	va_list	argptr;
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
-
-	ri.Printf( PRINT_ALL, "%s", buf );
+	ri.Terminate( reason, "%s", buf );
 }
 #endif
 
@@ -280,7 +280,7 @@ static void InitOpenGL( void )
 		
 		if ( !ri.GLimp_Init )
 		{
-			ri.Error( ERR_FATAL, "OpenGL interface is not initialized" );
+			ri.Terminate( TERM_UNRECOVERABLE, "OpenGL interface is not initialized" );
 		}
 
 		ri.GLimp_Init( &glConfig );
@@ -320,7 +320,7 @@ static void InitOpenGL( void )
 
 	// check for GLSL function textureCubeLod()
 	if ( r_cubeMapping->integer && !QGL_VERSION_ATLEAST( 3, 0 ) ) {
-		ri.Printf( PRINT_WARNING, "WARNING: Disabled r_cubeMapping because it requires OpenGL 3.0\n" );
+		ri.Log( SEV_WARN, "WARNING: Disabled r_cubeMapping because it requires OpenGL 3.0\n" );
 		ri.Cvar_Set( "r_cubeMapping", "0" );
 	}
 
@@ -369,7 +369,7 @@ void GL_CheckErrs( char *file, int line ) {
 			break;
 	}
 
-	ri.Error( ERR_FATAL, "GL_CheckErrors: %s in %s at line %d", s , file, line);
+	ri.Terminate( TERM_UNRECOVERABLE, "GL_CheckErrors: %s in %s at line %d", s , file, line);
 }
 
 
@@ -653,7 +653,7 @@ static void R_LevelShot( void ) {
 	ri.Hunk_FreeTempMemory(buffer);
 	ri.Hunk_FreeTempMemory(allsource);
 
-	ri.Printf( PRINT_ALL, "Wrote %s\n", checkname );
+	ri.Log( SEV_INFO, "Wrote %s\n", checkname );
 }
 
 /* 
@@ -693,7 +693,7 @@ static void R_ScreenShot_f (void) {
 	R_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, checkname, qfalse );
 
 	if ( !silent ) {
-		ri.Printf (PRINT_ALL, "Wrote %s\n", checkname);
+		ri.Log( SEV_INFO, "Wrote %s\n", checkname);
 	}
 }
 
@@ -722,7 +722,7 @@ static void R_ScreenShotJPEG_f (void) {
 	R_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, checkname, qtrue );
 
 	if ( !silent ) {
-		ri.Printf (PRINT_ALL, "Wrote %s\n", checkname);
+		ri.Log( SEV_INFO, "Wrote %s\n", checkname);
 	}
 }
 
@@ -909,7 +909,7 @@ static void R_PrintLongString(const char *string) {
 	while(size > 0)
 	{
 		Q_strncpyz(buffer, p, sizeof (buffer) );
-		ri.Printf( PRINT_DEVELOPER, "%s", buffer );
+		ri.Log( SEV_DEBUG, "%s", buffer );
 		p += 1023;
 		size -= 1023;
 	}
@@ -933,11 +933,11 @@ static void GfxInfo_f( void )
 		"fullscreen"
 	};
 
-	ri.Printf( PRINT_ALL, "\n" );
-	ri.Printf( PRINT_ALL, "GL_VENDOR: %s\n", glConfig.vendor_string );
-	ri.Printf( PRINT_ALL, "GL_RENDERER: %s\n", glConfig.renderer_string );
-	ri.Printf( PRINT_ALL, "GL_VERSION: %s\n", glConfig.version_string );
-	ri.Printf( PRINT_ALL, "GL_EXTENSIONS: " );
+	ri.Log( SEV_INFO, "\n" );
+	ri.Log( SEV_INFO, "GL_VENDOR: %s\n", glConfig.vendor_string );
+	ri.Log( SEV_INFO, "GL_RENDERER: %s\n", glConfig.renderer_string );
+	ri.Log( SEV_INFO, "GL_VERSION: %s\n", glConfig.version_string );
+	ri.Log( SEV_INFO, "GL_EXTENSIONS: " );
 	if ( qglGetStringi )
 	{
 		GLint numExtensions;
@@ -945,44 +945,44 @@ static void GfxInfo_f( void )
 		qglGetIntegerv( GL_NUM_EXTENSIONS, &numExtensions );
 		for ( int i = 0; i < numExtensions; i++ )
 		{
-			ri.Printf( PRINT_ALL, "%s ", qglGetStringi( GL_EXTENSIONS, i ) );
+			ri.Log( SEV_INFO, "%s ", qglGetStringi( GL_EXTENSIONS, i ) );
 		}
 	}
 	else
 	{
 		R_PrintLongString( glConfig.extensions_string );
 	}
-	ri.Printf( PRINT_ALL, "\n" );
-	ri.Printf( PRINT_ALL, "GL_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
-	ri.Printf( PRINT_ALL, "GL_MAX_TEXTURE_IMAGE_UNITS: %d\n", glConfig.numTextureUnits );
-	ri.Printf( PRINT_ALL, "\n" );
-	ri.Printf( PRINT_ALL, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
-	ri.Printf( PRINT_ALL, "MODE: %d, %d x %d %s hz:", ri.Cvar_VariableIntegerValue( "r_mode" ), glConfig.vidWidth, glConfig.vidHeight, fsstrings[ glConfig.isFullscreen != 0 ] );
+	ri.Log( SEV_INFO, "\n" );
+	ri.Log( SEV_INFO, "GL_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
+	ri.Log( SEV_INFO, "GL_MAX_TEXTURE_IMAGE_UNITS: %d\n", glConfig.numTextureUnits );
+	ri.Log( SEV_INFO, "\n" );
+	ri.Log( SEV_INFO, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
+	ri.Log( SEV_INFO, "MODE: %d, %d x %d %s hz:", ri.Cvar_VariableIntegerValue( "r_mode" ), glConfig.vidWidth, glConfig.vidHeight, fsstrings[ glConfig.isFullscreen != 0 ] );
 	if ( glConfig.displayFrequency )
 	{
-		ri.Printf( PRINT_ALL, "%d\n", glConfig.displayFrequency );
+		ri.Log( SEV_INFO, "%d\n", glConfig.displayFrequency );
 	}
 	else
 	{
-		ri.Printf( PRINT_ALL, "N/A\n" );
+		ri.Log( SEV_INFO, "N/A\n" );
 	}
 	if ( glConfig.deviceSupportsGamma )
 	{
-		ri.Printf( PRINT_DEVELOPER, "GAMMA: hardware w/ %d overbright bits\n", tr.overbrightBits );
+		ri.Log( SEV_DEBUG, "GAMMA: hardware w/ %d overbright bits\n", tr.overbrightBits );
 	}
 	else
 	{
-		ri.Printf( PRINT_DEVELOPER, "GAMMA: software w/ %d overbright bits\n", tr.overbrightBits );
+		ri.Log( SEV_DEBUG, "GAMMA: software w/ %d overbright bits\n", tr.overbrightBits );
 	}
 
-	ri.Printf( PRINT_ALL, "texturemode: %s\n", r_textureMode->string );
-	ri.Printf( PRINT_ALL, "picmip: %d\n", r_picmip->integer );
-	ri.Printf( PRINT_ALL, "texture bits: %d\n", r_texturebits->integer );
-	ri.Printf( PRINT_ALL, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
-	ri.Printf( PRINT_ALL, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
+	ri.Log( SEV_INFO, "texturemode: %s\n", r_textureMode->string );
+	ri.Log( SEV_INFO, "picmip: %d\n", r_picmip->integer );
+	ri.Log( SEV_INFO, "texture bits: %d\n", r_texturebits->integer );
+	ri.Log( SEV_INFO, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
+	ri.Log( SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
 	
 	if ( r_finish->integer ) {
-		ri.Printf( PRINT_ALL, "Forcing glFinish\n" );
+		ri.Log( SEV_INFO, "Forcing glFinish\n" );
 	}
 }
 
@@ -998,7 +998,7 @@ static void GfxMemInfo_f( void )
 	{
 		case MI_NONE:
 		{
-			ri.Printf(PRINT_ALL, "No extension found for GPU memory info.\n");
+			ri.Log( SEV_INFO, "No extension found for GPU memory info.\n");
 		}
 		break;
 		case MI_NVX:
@@ -1006,19 +1006,19 @@ static void GfxMemInfo_f( void )
 			int value;
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, &value);
-			ri.Printf(PRINT_ALL, "GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX: %ikb\n", value);
+			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX: %ikb\n", value);
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &value);
-			ri.Printf(PRINT_ALL, "GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX: %ikb\n", value);
+			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX: %ikb\n", value);
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &value);
-			ri.Printf(PRINT_ALL, "GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX: %ikb\n", value);
+			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX: %ikb\n", value);
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_EVICTION_COUNT_NVX, &value);
-			ri.Printf(PRINT_ALL, "GPU_MEMORY_INFO_EVICTION_COUNT_NVX: %i\n", value);
+			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_EVICTION_COUNT_NVX: %i\n", value);
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_EVICTED_MEMORY_NVX, &value);
-			ri.Printf(PRINT_ALL, "GPU_MEMORY_INFO_EVICTED_MEMORY_NVX: %ikb\n", value);
+			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_EVICTED_MEMORY_NVX: %ikb\n", value);
 		}
 		break;
 		case MI_ATI:
@@ -1027,13 +1027,13 @@ static void GfxMemInfo_f( void )
 			int value[4];
 
 			qglGetIntegerv(GL_VBO_FREE_MEMORY_ATI, &value[0]);
-			ri.Printf(PRINT_ALL, "VBO_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
+			ri.Log( SEV_INFO, "VBO_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
 
 			qglGetIntegerv(GL_TEXTURE_FREE_MEMORY_ATI, &value[0]);
-			ri.Printf(PRINT_ALL, "TEXTURE_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
+			ri.Log( SEV_INFO, "TEXTURE_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
 
 			qglGetIntegerv(GL_RENDERBUFFER_FREE_MEMORY_ATI, &value[0]);
-			ri.Printf(PRINT_ALL, "RENDERBUFFER_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
+			ri.Log( SEV_INFO, "RENDERBUFFER_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
 		}
 		break;
 	}
@@ -1050,15 +1050,15 @@ static void R_Register( void )
 	//
 	// latched and archived variables
 	//
-	r_allowExtensions = ri.Cvar_Get( "r_allowExtensions", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	r_allowExtensions = ri.Cvar_Get( "r_allowExtensions", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_allowExtensions, "Use all of the OpenGL extensions your card is capable of." );
-	r_ext_compressed_textures = ri.Cvar_Get( "r_ext_compressed_textures", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	r_ext_compressed_textures = ri.Cvar_Get( "r_ext_compressed_textures", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ext_compressed_textures, "Enables texture compression." );
-	r_ext_multitexture = ri.Cvar_Get( "r_ext_multitexture", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	r_ext_multitexture = ri.Cvar_Get( "r_ext_multitexture", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ext_multitexture, "Enables hardware multi-texturing (0: off, 1: on)." );
-	r_ext_compiled_vertex_array = ri.Cvar_Get( "r_ext_compiled_vertex_array", "1", CVAR_ARCHIVE | CVAR_LATCH);
+	r_ext_compiled_vertex_array = ri.Cvar_Get( "r_ext_compiled_vertex_array", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ext_compiled_vertex_array, "Enables hardware-compiled vertex array rendering method." );
-	r_ext_texture_env_add = ri.Cvar_Get( "r_ext_texture_env_add", "1", CVAR_ARCHIVE | CVAR_LATCH);
+	r_ext_texture_env_add = ri.Cvar_Get( "r_ext_texture_env_add", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH | CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ext_texture_env_add, "Enables additive blending in multitexturing. Requires \\r_ext_multitexture 1." );
 
 	r_ext_framebuffer_object = ri.Cvar_Get( "r_ext_framebuffer_object", "1", CVAR_ARCHIVE | CVAR_LATCH);
@@ -1091,7 +1091,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_ext_multisample, "For anti-aliasing geometry edges." );
 	r_overBrightBits = ri.Cvar_Get ("r_overBrightBits", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_overBrightBits, "Sets the intensity of overall brightness of texture pixels." );
-	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_brightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_brightness,
 		"Float-based overall brightness multiplier (replaces r_overBrightBits).\n"
@@ -1174,7 +1174,7 @@ static void R_Register( void )
 		" Works together with r_mergeLightmaps." );
 
 	// CNQ3 port: swap throttle during map loads.
-	r_loadingFpsCap = ri.Cvar_Get( "r_loadingFpsCap", "10", CVAR_ARCHIVE_ND );
+	r_loadingFpsCap = ri.Cvar_Get( "r_loadingFpsCap", "10", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_loadingFpsCap, "0", "60", CV_INTEGER );
 	ri.Cvar_SetDescription( r_loadingFpsCap,
 		"Maximum render backend frames per second while loading a map.\n"
@@ -1212,7 +1212,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_fullbright, "Debugging tool to render the entire level without lighting." );
 	r_mapOverBrightBits = ri.Cvar_Get ("r_mapOverBrightBits", "2", CVAR_LATCH );
 	ri.Cvar_SetDescription( r_mapOverBrightBits, "Sets the number of overbright bits baked into all lightmaps and map data." );
-	r_mapBrightness = ri.Cvar_Get( "r_mapBrightness", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_mapBrightness = ri.Cvar_Get( "r_mapBrightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_mapBrightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_mapBrightness,
 		"Float-based map (lightmap) brightness multiplier (replaces r_mapOverBrightBits).\n"
@@ -1306,12 +1306,12 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_flareCoeff, "Coefficient for the light flare intensity falloff function. Requires \\r_flares 1." );
 
 #if FEAT_FOG_SYSTEM
-	r_useGlFog = ri.Cvar_Get( "r_useGlFog", "1", CVAR_ARCHIVE_ND );
+	r_useGlFog = ri.Cvar_Get( "r_useGlFog", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_useGlFog, "Use GL_FOG fixed-function fog pipeline in addition to per-vertex volume fog." );
-	r_defaultFogParmsType = ri.Cvar_Get( "r_defaultFogParmsType", "0", CVAR_ARCHIVE_ND );
+	r_defaultFogParmsType = ri.Cvar_Get( "r_defaultFogParmsType", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_defaultFogParmsType, "Default fogType_t for maps without explicit fog: 0=linear, 1=exp, 2=exp2." );
 	ri.Cvar_CheckRange( r_defaultFogParmsType, "0", "2", CV_INTEGER );
-	r_globalLinearFogDrawSky = ri.Cvar_Get( "r_globalLinearFogDrawSky", "0", CVAR_ARCHIVE_ND );
+	r_globalLinearFogDrawSky = ri.Cvar_Get( "r_globalLinearFogDrawSky", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_globalLinearFogDrawSky, "Draw sky surfaces through linear global fog (Spearmint compat)." );
 #endif
 
@@ -1418,7 +1418,7 @@ void R_Init( void ) {
 	int	err;
 	byte *ptr;
 
-	ri.Printf( PRINT_ALL, "----- R_Init -----\n" );
+	ri.Log( SEV_INFO, "----- R_Init -----\n" );
 
 	// clear all our internal state
 	memset( &tr, 0, sizeof( tr ) );
@@ -1426,10 +1426,10 @@ void R_Init( void ) {
 	memset( &tess, 0, sizeof( tess ) );
 
 	if(sizeof(glconfig_t) != 11332)
-		ri.Error( ERR_FATAL, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11332", (unsigned int) sizeof(glconfig_t));
+		ri.Terminate( TERM_UNRECOVERABLE, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11332", (unsigned int) sizeof(glconfig_t));
 
 	if ( (intptr_t)tess.xyz & 15 ) {
-		ri.Printf( PRINT_WARNING, "tess.xyz not 16 byte aligned\n" );
+		ri.Log( SEV_WARN, "tess.xyz not 16 byte aligned\n" );
 	}
 	//memset( tess.constantColor255, 255, sizeof( tess.constantColor255 ) );
 
@@ -1504,11 +1504,11 @@ void R_Init( void ) {
 
 	err = qglGetError();
 	if ( err != GL_NO_ERROR )
-		ri.Printf (PRINT_ALL, "glGetError() = 0x%x\n", err);
+		ri.Log( SEV_INFO, "glGetError() = 0x%x\n", err);
 
 	// print info
 	GfxInfo_f();
-	ri.Printf( PRINT_ALL, "----- finished R_Init -----\n" );
+	ri.Log( SEV_INFO, "----- finished R_Init -----\n" );
 }
 
 
@@ -1519,7 +1519,7 @@ RE_Shutdown
 */
 static void RE_Shutdown( refShutdownCode_t code ) {
 
-	ri.Printf( PRINT_ALL, "RE_Shutdown( %i )\n", code );
+	ri.Log( SEV_INFO, "RE_Shutdown( %i )\n", code );
 
 	ri.Cmd_RemoveCommand( "imagelist" );
 	ri.Cmd_RemoveCommand( "shaderlist" );
@@ -1601,7 +1601,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	memset( &re, 0, sizeof( re ) );
 
 	if ( apiVersion != REF_API_VERSION ) {
-		ri.Printf(PRINT_ALL, "Mismatched REF_API_VERSION: expected %i, got %i\n", 
+		ri.Log( SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n", 
 			REF_API_VERSION, apiVersion );
 		return NULL;
 	}

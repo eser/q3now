@@ -3,9 +3,9 @@
 log_sink_file.c — JSONL file sink (V1)
 
 Writes to qconsole.jsonl, one JSON object per line:
-  {"ts":"2026-04-22T15:28:40.123","sev":"INFO","msg":"body text"}
-  {"ts":"...","sev":"WARN","msg":"...","truncated":true,"truncated_bytes":N}
-  {"ts":"...","sev":"ERROR","msg":"...","escape_truncated":true}
+  {"ts":"2026-04-22T15:28:40.123","sev":"INFO","cat":"NETWORK","msg":"body text"}
+  {"ts":"...","sev":"WARN","cat":"SERVER","msg":"...","truncated":true,"truncated_bytes":N}
+  {"ts":"...","sev":"ERROR","cat":"SYSTEM","msg":"...","escape_truncated":true}
 
 Timestamp is always present as a structured UTC field.
 
@@ -13,14 +13,14 @@ msg field: color codes (^N) stripped; all JSON special chars escaped
 (", \, \n, \r, \t, control chars as \uXXXX).
 
 Cvar surface (all log_* prefix):
-  log_enabled   0|1, ARCHIVE         — enable/disable file logging
-  log_mode      string enum, ARCHIVE — overwrite_buffered (default)
+  log_file_enabled   0|1, ARCHIVE         — enable/disable file logging
+  log_file_mode      string enum, ARCHIVE — overwrite_buffered (default)
                                        overwrite_synced
                                        append_buffered
                                        append_synced
-  log_severity  string, ARCHIVE      — minimum severity (default INFO)
-  log_path      ROM                  — display-only; fs_homepath/qconsole.jsonl
-  log_file_failures ROM              — write-failure counter
+  log_file_severity  string, ARCHIVE      — minimum severity (default INFO)
+  log_file_path      ROM                  — display-only; fs_homepath/qconsole.jsonl
+  log_file_failures  ROM                  — write-failure counter
 
 do_append and do_sync are cached at registration time; changing log_mode
 at runtime has no effect until engine restart.
@@ -49,28 +49,18 @@ static log_sink_t s_fileSink = {
     "file",
     NULL,
     &s_fileSinkCtx,
-    SEV_INFO,
-    NULL,
-    0,
-    NULL
+    SEV_TRACE,
+    NULL,   // severity_cvar — set by Log_RegisterFileSink
+    -1,     // last_cvar_mod
+    0,      // active_dispatches
+    NULL    // next
 };
 
 // -------------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------------
 
-static const char *SevName( log_severity_t sev )
-{
-    switch ( sev ) {
-    case SEV_TRACE: return "TRACE";
-    case SEV_DEBUG: return "DEBUG";
-    case SEV_INFO:  return "INFO";
-    case SEV_WARN:  return "WARN";
-    case SEV_ERROR: return "ERROR";
-    case SEV_FATAL: return "FATAL";
-    default:        return "UNKNOWN";
-    }
-}
+/* Log_SeverityName — implemented above (non-static, declared in log.h) */
 
 // Parses log_mode string into do_append / do_sync. Returns qfalse on unknown.
 static qboolean ParseLogMode( const char *mode,
@@ -98,8 +88,21 @@ static const char s_hexdig[] = "0123456789abcdef";
 // Writes into out[0..outsize-1] and NUL-terminates. Returns bytes written.
 // Returns a negative value if output was truncated; absolute value is bytes
 // written (not counting NUL).
-static int JsonEscapeBody( const char *body, int body_len,
-                            char *out, int outsize )
+const char *Log_SeverityName( log_severity_t sev )
+{
+    switch ( sev ) {
+    case SEV_TRACE: return "TRACE";
+    case SEV_DEBUG: return "DEBUG";
+    case SEV_INFO:  return "INFO";
+    case SEV_WARN:  return "WARN";
+    case SEV_ERROR: return "ERROR";
+    case SEV_FATAL: return "FATAL";
+    default:        return "UNKNOWN";
+    }
+}
+
+int JsonEscapeBody( const char *body, int body_len,
+                    char *out, int outsize )
 {
     const char   *src    = body;
     const char   *end    = body + body_len;
@@ -166,17 +169,14 @@ static void FileSink_Emit( const log_record_t *rec, void *ctx )
     if ( c->fh == FS_INVALID_HANDLE )
         return;
 
-    if ( c->severity_cvar &&
-         rec->severity < Log_ParseSeverity( c->severity_cvar->string ) )
-        return;
-
     // Build JSON header. ts fmt=3: "YYYY-MM-DDTHH:MM:SS.mmm+HH:MM" = 29 chars max.
     {
         char ts[36];
-        Log_FormatTimestamp( rec->timestamp_ns, ts, sizeof( ts ), 3 );
+        Com_FormatTimestamp( ts, sizeof( ts ), 3 );
         header_len = Com_sprintf( header, sizeof( header ),
-            "{\"ts\":\"%s\",\"sev\":\"%s\",\"msg\":\"",
-            ts, SevName( rec->severity ) );
+            "{\"ts\":\"%s\",\"sev\":\"%s\",\"cat\":\"%s\",\"msg\":\"",
+            ts, Log_SeverityName( rec->severity ),
+            logCategoryNames[ rec->category ] );
     }
 
     // JSON-escape body (strips color codes).
@@ -239,35 +239,42 @@ log_sink_t *Log_RegisterFileSink( void )
     char        logPath[MAX_OSPATH];
     const char *logName = "qconsole.jsonl";
 
-    s_fileSinkCtx.severity_cvar = Cvar_Get( "log_severity", "INFO", CVAR_ARCHIVE );
-    Cvar_SetDescription( s_fileSinkCtx.severity_cvar,
-        "Minimum severity written to qconsole.jsonl: TRACE DEBUG INFO WARN ERROR FATAL" );
-
-    enabled_cvar = Cvar_Get( "log_enabled", "0", CVAR_ARCHIVE );
-    Cvar_SetDescription( enabled_cvar,
-        "Enable writing to qconsole.jsonl. 0=disabled, 1=enabled." );
-
-    mode_cvar = Cvar_Get( "log_mode", "overwrite_buffered", CVAR_ARCHIVE );
-    Cvar_SetDescription( mode_cvar,
-        "Log file write mode: overwrite_buffered (default) | overwrite_synced | "
-        "append_buffered | append_synced. Changes take effect on engine restart." );
-
-    s_failuresCvar = Cvar_Get( "log_file_failures", "0", CVAR_ROM );
+    {
+        static const cvarDesc_t ds = CVAR_STRING( "log_file_severity", "", CVAR_ARCHIVE,
+            "Minimum severity written to qconsole.jsonl: [EMPTY] TRACE DEBUG INFO WARN ERROR FATAL" );
+        s_fileSinkCtx.severity_cvar = Cvar_Register( &ds );
+    }
+    {
+        static const cvarDesc_t de = CVAR_BOOL( "log_file_enabled", "1", CVAR_ARCHIVE,
+            "Enable writing to qconsole.jsonl. 0=disabled, 1=enabled." );
+        enabled_cvar = Cvar_Register( &de );
+    }
+    {
+        static const cvarDesc_t dm = CVAR_STRING( "log_file_mode", "overwrite_buffered", CVAR_ARCHIVE,
+            "Log file write mode: overwrite_buffered (default) | overwrite_synced | "
+            "append_buffered | append_synced. Changes take effect on engine restart." );
+        mode_cvar = Cvar_Register( &dm );
+    }
+    {
+        static const cvarDesc_t df = CVAR_INT( "log_file_failures", "0", CVAR_ROM,
+            "Number of write failures encountered by the file log sink.", 0, 0 );
+        s_failuresCvar = Cvar_Register( &df );
+    }
 
     if ( !enabled_cvar->integer )
         return NULL;
 
     if ( !ParseLogMode( mode_cvar->string, &do_append, &do_sync ) ) {
-        Com_Printf( "log_sink_file: unknown log_mode '%s', using overwrite_buffered\n",
+        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "log_sink_file: unknown log_mode '%s', using overwrite_buffered\n",
                     mode_cvar->string );
         do_append = qfalse;
         do_sync   = qfalse;
     }
 
     if ( do_append )
-        s_fileSinkCtx.fh = FS_FOpenFileAppend( logName );
+        s_fileSinkCtx.fh = FS_SV_FOpenFileAppend( logName );
     else
-        s_fileSinkCtx.fh = FS_FOpenFileWrite( logName );
+        s_fileSinkCtx.fh = FS_SV_FOpenFileWrite( logName );
 
     if ( s_fileSinkCtx.fh == FS_INVALID_HANDLE )
         return NULL;
@@ -278,7 +285,7 @@ log_sink_t *Log_RegisterFileSink( void )
     fs_homepath = Cvar_Get( "fs_homepath", "", 0 );
     Com_sprintf( logPath, sizeof( logPath ), "%s/%s",
                  fs_homepath->string, logName );
-    Cvar_Get( "log_path", logPath, CVAR_ROM );
+    Cvar_Get( "log_file_path", logPath, CVAR_ROM );
 
     s_fileSink.emit          = FileSink_Emit;
     s_fileSink.ctx           = &s_fileSinkCtx;

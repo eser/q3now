@@ -603,4 +603,13 @@ void BotMovementThink( bot_state_t *bs, bot_moveresult_t *moveresult )
 	/* Priority 5: generic air steering (no special movement active) */
 	if ( airborne )
 		BotAirSteer( bs );
+
+	if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+		static int s_moveExitTick[MAX_CLIENTS];
+		if ( ++s_moveExitTick[bs->client] % 30 == 0 ) {
+			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[MoveExit] cl=%d ideal=(%.1f %.1f) wrote_ideal=0\n",
+				bs->client,
+				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW] );
+		}
+	}
 }

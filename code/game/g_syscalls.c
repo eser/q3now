@@ -89,6 +89,15 @@ void trap_Error( const char *text )
 	exit(1);
 }
 
+void trap_Log( log_severity_t severity, const char *text ) {
+	syscall( G_LOG, (int)severity, text );
+}
+
+void trap_Terminate( terminationReason_t reason, const char *text ) {
+	syscall( G_TERMINATE, (int)reason, text );
+	exit(1);
+}
+
 int		trap_Milliseconds( void ) {
 	return syscall( G_MILLISECONDS ); 
 }
@@ -638,7 +647,7 @@ int trap_BotLoadCharacter(char *charfile, float skill) {
 			}
 		}
 	}
-	Com_Printf( S_COLOR_RED "Unsupported legacy bot character file: %s\n", charfile ? charfile : "<null>" );
+	Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_RED "Unsupported legacy bot character file: %s\n", charfile ? charfile : "<null>" );
 	return 0;
 }
 
@@ -1055,6 +1064,20 @@ void trap_WiredNet_EmitBotEvent( int bot_id, const char *event_type, int param1,
 }
 #endif
 
+// ── WiredCoreEvents generic emit ─────────────────────────────────────
+void trap_WCE_EmitEvent( wce_event_type_t type,
+                          int clientNum, int entityNum,
+                          const vec3_t origin,
+                          int param1, int param2, float fparam,
+                          const char *text ) {
+    syscall( G_WCE_EMIT_EVENT, type, clientNum, entityNum,
+             origin, param1, param2, PASSFLOAT(fparam), text );
+}
+
+int trap_WCE_GetSoundEvents( int clientNum, bot_sound_event_t *out, int maxOut ) {
+    return syscall( G_WCE_GET_SOUND_EVENTS, clientNum, out, maxOut );
+}
+
 // ── Recast/Detour nav traps ───────────────────────────────────────────
 // Phase 2: wrappers exist; engine-side stubs return -1 until Phase 3+.
 // These are guarded by FEAT_RECAST_NAVMESH so the AAS build compiles clean.
@@ -1104,9 +1127,12 @@ qboolean trap_Nav_IsReady( void ) {
 void trap_Nav_SetPolyFlagsForDoor( const char *targetname, int setFlags, int clearFlags ) {
 	syscall( G_NAV_SET_POLY_FLAGS_FOR_DOOR, targetname, setFlags, clearFlags );
 }
+void trap_Nav_PredictEnemyPosition( const vec3_t origin, const vec3_t velocity,
+                                    float predictTime, vec3_t outPos ) {
+	syscall( G_NAV_PREDICT_ENEMY_POSITION, origin, velocity, PASSFLOAT( predictTime ), outPos );
+}
 #endif /* FEAT_RECAST_NAVMESH */
 
 qboolean trap_GetValue( char *value, int valueSize, const char *key ) {
 	return (qboolean)syscall( G_TRAP_GETVALUE, value, valueSize, key );
 }
-

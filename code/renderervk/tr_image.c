@@ -91,7 +91,7 @@ void GL_TextureMode( const char *string ) {
 	}
 
 	if ( mode == NULL ) {
-		ri.Printf( PRINT_ALL, "bad texture filter name '%s'\n", string );
+		ri.Log( SEV_INFO, "bad texture filter name '%s'\n", string );
 		return;
 	}
 
@@ -120,7 +120,7 @@ void GL_TextureMode( const char *string ) {
 	if ( glConfig.hardwareType == GLHW_3DFX_2D3D && gl_filter_max == GL_LINEAR &&
 		gl_filter_min == GL_LINEAR_MIPMAP_LINEAR ) {
 		gl_filter_min = GL_LINEAR_MIPMAP_NEAREST;
-		ri.Printf( PRINT_ALL, "Refusing to set trilinear on a voodoo.\n" );
+		ri.Log( SEV_INFO, "Refusing to set trilinear on a voodoo.\n" );
 	}
 
 	// change all the existing mipmap texture objects
@@ -166,7 +166,7 @@ void R_ImageList_f( void ) {
 	int i, estTotalSize = 0;
 	char *name, buf[MAX_QPATH*2 + 5];
 
-	ri.Printf( PRINT_ALL, "\n -n- --w-- --h-- type  -size- --name-------\n" );
+	ri.Log( SEV_INFO, "\n -n- --w-- --h-- type  -size- --name-------\n" );
 
 	for ( i = 0; i < tr.numImages; i++ )
 	{
@@ -263,13 +263,13 @@ void R_ImageList_f( void ) {
 			name = buf;
 		}
 
-		ri.Printf( PRINT_ALL, " %3i %5i %5i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, name );
+		ri.Log( SEV_INFO, " %3i %5i %5i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, name );
 		estTotalSize += estSize;
 	}
 
-	ri.Printf( PRINT_ALL, " -----------------------\n" );
-	ri.Printf( PRINT_ALL, " approx %i kbytes\n", (estTotalSize + 1023) / 1024 );
-	ri.Printf( PRINT_ALL, " %i total images\n\n", tr.numImages );
+	ri.Log( SEV_INFO, " -----------------------\n" );
+	ri.Log( SEV_INFO, " approx %i kbytes\n", (estTotalSize + 1023) / 1024 );
+	ri.Log( SEV_INFO, " %i total images\n\n", tr.numImages );
 }
 
 //=======================================================================
@@ -297,7 +297,7 @@ static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *
 	byte		*pix1, *pix2, *pix3, *pix4;
 
 	if ( outwidth > ARRAY_LEN( p1 ) )
-		ri.Error( ERR_DROP, "ResampleTexture: max width" );
+		ri.Terminate( TERM_CLIENT_DROP, "ResampleTexture: max width" );
 								
 	fracstep = inwidth * 0x10000 / outwidth;
 
@@ -766,13 +766,94 @@ static void upload_vk_image( image_t *image, byte *pic ) {
 		image->internalFormat = has_alpha ? VK_FORMAT_B4G4R4A4_UNORM_PACK16 : VK_FORMAT_A1R5G5B5_UNORM_PACK16;
 	}
 
-	image->uploadWidth = w;
+	image->uploadWidth  = w;
 	image->uploadHeight = h;
+	image->layerCount   = 1;
 
 	vk_create_image( image, w, h, upload_data.mip_levels );
-	vk_upload_image_data( image, 0, 0, w, h, upload_data.mip_levels, upload_data.buffer, upload_data.buffer_size, qfalse );
+	vk_upload_image_data( image, 0, 0, w, h, upload_data.mip_levels, upload_data.buffer, upload_data.buffer_size, qfalse, 0 );
 
 	ri.Hunk_FreeTempMemory( upload_data.buffer );
+}
+
+/*
+ * R_CreateImageArray — upload N RGBA frames as a single VK_IMAGE_VIEW_TYPE_2D_ARRAY.
+ * All frames must have matching width × height. Returns NULL if inputs are invalid.
+ * If numFrames == 1, delegates to R_CreateImage (no array overhead).
+ */
+image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int width, int height, imgFlags_t flags ) {
+	image_t    *image;
+	long        hash;
+	int         namelen;
+	int         k;
+
+	if ( numFrames < 1 || !frames || width <= 0 || height <= 0 )
+		return NULL;
+	for ( k = 0; k < numFrames; k++ ) {
+		if ( !frames[k] ) return NULL;
+	}
+
+	if ( numFrames == 1 )
+		return R_CreateImage( name, NULL, frames[0], width, height, flags );
+
+	if ( tr.numImages == MAX_DRAWIMAGES ) {
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImageArray: MAX_DRAWIMAGES hit" );
+	}
+
+	namelen = (int)strlen( name ) + 1;
+	image   = ri.Hunk_Alloc( sizeof( *image ) + namelen, h_low );
+	image->imgName  = (char *)( image + 1 );
+	image->imgName2 = image->imgName;
+	strcpy( image->imgName, name );
+
+	hash             = generateHashValue( name );
+	image->next      = hashTable[hash];
+	hashTable[hash]  = image;
+	tr.images[tr.numImages++] = image;
+
+	image->flags      = flags | IMGFLAG_ARRAY;
+	image->width      = width;
+	image->height     = height;
+	image->layerCount = (uint32_t)numFrames;
+
+	image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	image->handle        = VK_NULL_HANDLE;
+	image->view          = VK_NULL_HANDLE;
+	image->descriptor    = VK_NULL_HANDLE;
+
+	/* Determine format from first frame */
+	{
+		Image_Upload_Data ud0;
+		generate_image_upload_data( image, frames[0], &ud0 );
+
+		if ( r_texturebits->integer > 16 || r_texturebits->integer == 0 || !( flags & IMGFLAG_MIPMAP ) ) {
+			image->internalFormat = VK_FORMAT_R8G8B8A8_UNORM;
+		} else {
+			image->internalFormat = RawImage_HasAlpha( ud0.buffer, ud0.base_level_width * ud0.base_level_height )
+			                        ? VK_FORMAT_B4G4R4A4_UNORM_PACK16 : VK_FORMAT_A1R5G5B5_UNORM_PACK16;
+		}
+
+		image->uploadWidth  = ud0.base_level_width;
+		image->uploadHeight = ud0.base_level_height;
+
+		vk_create_image( image, ud0.base_level_width, ud0.base_level_height, ud0.mip_levels );
+
+		/* Layer 0: initial transition (UNDEFINED → TRANSFER_DST → SHADER_READ) */
+		vk_upload_image_data( image, 0, 0, ud0.base_level_width, ud0.base_level_height,
+		                      ud0.mip_levels, ud0.buffer, ud0.buffer_size, qfalse, 0 );
+		ri.Hunk_FreeTempMemory( ud0.buffer );
+
+		/* Layers 1..N-1: update transition (SHADER_READ → TRANSFER_DST → SHADER_READ) */
+		for ( k = 1; k < numFrames; k++ ) {
+			Image_Upload_Data ud;
+			generate_image_upload_data( image, frames[k], &ud );
+			vk_upload_image_data( image, 0, 0, ud.base_level_width, ud.base_level_height,
+			                      ud.mip_levels, ud.buffer, ud.buffer_size, qtrue, (uint32_t)k );
+			ri.Hunk_FreeTempMemory( ud.buffer );
+		}
+	}
+
+	return image;
 }
 
 #else // !USE_VULKAN
@@ -1019,7 +1100,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 
 	namelen = (int)strlen( name ) + 1;
 	if ( namelen > MAX_QPATH ) {
-		ri.Error( ERR_DROP, "R_CreateImage: \"%s\" is too long", name );
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImage: \"%s\" is too long", name );
 	}
 
 	if ( name2 && Q_stricmp( name, name2 ) != 0 ) {
@@ -1031,7 +1112,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	}
 
 	if ( tr.numImages == MAX_DRAWIMAGES ) {
-		ri.Error( ERR_DROP, "R_CreateImage: MAX_DRAWIMAGES hit" );
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImage: MAX_DRAWIMAGES hit" );
 	}
 
 	image = ri.Hunk_Alloc( sizeof( *image ) + namelen + namelen2, h_low );
@@ -1050,9 +1131,10 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 
 	tr.images[ tr.numImages++ ] = image;
 
-	image->flags = flags;
-	image->width = width;
-	image->height = height;
+	image->flags      = flags;
+	image->width      = width;
+	image->height     = height;
+	image->layerCount = 1;
 
 	if ( namelen > 6 && Q_stristr( image->imgName, "maps/" ) == image->imgName && Q_stristr( image->imgName + 6, "/lm_" ) != NULL ) {
 		// external lightmap atlases stored in maps/<mapname>/lm_XXXX textures
@@ -1265,7 +1347,7 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 #if 0
 			if ( orgNameFailed )
 			{
-				ri.Printf( PRINT_DEVELOPER, S_COLOR_YELLOW "WARNING: %s not present, using %s instead\n",
+				ri.Log( SEV_DEBUG, S_COLOR_YELLOW "WARNING: %s not present, using %s instead\n",
 						name, altName );
 			}
 #endif
@@ -1338,7 +1420,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			if ( strcmp( name, "*white" ) ) {
 				if ( image->flags != flags ) {
 					if ( MixedFlagsWarnOnce( name, image->flags, flags ) )
-						ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
+						ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
 				}
 			}
 			return image;
@@ -1353,7 +1435,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 				//if ( strcmp( strippedName, "*white" ) ) {
 					if ( image->flags != flags ) {
 						if ( MixedFlagsWarnOnce( strippedName, image->flags, flags ) )
-							ri.Printf( PRINT_DEVELOPER, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
+							ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
 					}
 				//}
 				return image;
@@ -2027,12 +2109,12 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	int			totalSurfaces;
 
 	if ( !name || !name[0] ) {
-		ri.Printf( PRINT_DEVELOPER, "Empty name passed to RE_RegisterSkin\n" );
+		ri.Log( SEV_DEBUG, "Empty name passed to RE_RegisterSkin\n" );
 		return 0;
 	}
 
 	if ( strlen( name ) >= MAX_QPATH ) {
-		ri.Printf( PRINT_DEVELOPER, "Skin name exceeds MAX_QPATH\n" );
+		ri.Log( SEV_DEBUG, "Skin name exceeds MAX_QPATH\n" );
 		return 0;
 	}
 
@@ -2050,7 +2132,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 
 	// allocate a new skin
 	if ( tr.numSkins == MAX_SKINS ) {
-		ri.Printf( PRINT_WARNING, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
+		ri.Log( SEV_WARN, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
 		return 0;
 	}
 	tr.numSkins++;
@@ -2110,7 +2192,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	ri.FS_FreeFile( text.v );
 
 	if ( totalSurfaces > MAX_SKIN_SURFACES ) {
-		ri.Printf( PRINT_WARNING, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
+		ri.Log( SEV_WARN, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
 					totalSurfaces, MAX_SKIN_SURFACES, name );
 	}
 
@@ -2168,16 +2250,16 @@ void	R_SkinList_f( void ) {
 	int			i, j;
 	skin_t		*skin;
 
-	ri.Printf (PRINT_ALL, "------------------\n");
+	ri.Log( SEV_INFO, "------------------\n");
 
 	for ( i = 0 ; i < tr.numSkins ; i++ ) {
 		skin = tr.skins[i];
 
-		ri.Printf( PRINT_ALL, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
+		ri.Log( SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
 		for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-			ri.Printf( PRINT_ALL, "       %s = %s\n", 
+			ri.Log( SEV_INFO, "       %s = %s\n", 
 				skin->surfaces[j].name, skin->surfaces[j].shader->name );
 		}
 	}
-	ri.Printf (PRINT_ALL, "------------------\n");
+	ri.Log( SEV_INFO, "------------------\n");
 }

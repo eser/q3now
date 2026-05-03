@@ -23,9 +23,30 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_local.h"
 #include "../qcommon/maps/bsp.h"
+#include "../renderercommon/r_q1_texture.h"
 #ifdef USE_VULKAN
 #include "vk.h"
 #endif
+
+/* Callback registered with the shared Q1 texture module so it can call
+   the renderervk-specific R_CreateImage (name, name2, pic, w, h, flags). */
+static struct image_s *RVK_Q1_CreateImage( const char *name, byte *rgba,
+                                            int w, int h, unsigned int flags )
+{
+    return R_CreateImage( name, NULL, rgba, w, h, (imgFlags_t)flags );
+}
+
+static struct image_s *RVK_Q1_LoadImage( const char *path, unsigned int q1flags ) {
+    (void)q1flags;  /* renderervk has no imgType; Q1_IMGF_NORMAL is a no-op here */
+    return R_FindImageFile( path, IMGFLAG_MIPMAP );
+}
+
+static struct image_s *RVK_Q1_CreateImageArray( const char *name,
+                                                 byte **frames, int numFrames,
+                                                 int w, int h, unsigned int q1flags )
+{
+    return R_CreateImageArray( name, frames, numFrames, w, h, (imgFlags_t)q1flags );
+}
 
 /*
 
@@ -39,6 +60,8 @@ void RE_LoadWorldMap( const bspFile_t *bsp );
 
 static	world_t		s_worldData;
 static	byte		*fileBase;
+// Q1 per-vertex style indices passed to ParseFace during R_LoadSurfaces
+static const byte	*lightstyleData = NULL;
 
 static int	c_gridVerts;
 
@@ -241,7 +264,7 @@ R_ProcessLightmap
 expand the 24 bit on-disk to 32 bit and return max.intensity
 ===============
 */
-static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensity )
+static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensity, qboolean isQ1Lightmap )
 {
 	int x, y;
 
@@ -278,7 +301,15 @@ static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensi
 			for ( y = 0 ; y < LIGHTMAP_SIZE; y++ ) {
 				for ( x = 0 ; x < LIGHTMAP_SIZE; x++ ) {
 					byte *dst = &image[((y + LIGHTMAP_BORDER) * LIGHTMAP_LEN + x + LIGHTMAP_BORDER) * 4];
-					R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+					if ( isQ1Lightmap ) {
+						// Q1 lightmap bytes are full-range 0-255 with no overbright pre-compression.
+						// Copy verbatim (RGB -> RGBA expand) without the left-shift amplification.
+						dst[0] = buf_p[0];
+						dst[1] = buf_p[1];
+						dst[2] = buf_p[2];
+					} else {
+						R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+					}
 					dst[3] = 255;
 					buf_p += 3;
 				}
@@ -289,7 +320,15 @@ static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensi
 			for ( y = 0 ; y < LIGHTMAP_SIZE; y++ ) {
 				for ( x = 0 ; x < LIGHTMAP_SIZE; x++ ) {
 					byte *dst = &image[(y * LIGHTMAP_SIZE + x) * 4];
-					R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+					if ( isQ1Lightmap ) {
+						// Q1 lightmap bytes are full-range 0-255 with no overbright pre-compression.
+						// Copy verbatim (RGB -> RGBA expand) without the left-shift amplification.
+						dst[0] = buf_p[0];
+						dst[1] = buf_p[1];
+						dst[2] = buf_p[2];
+					} else {
+						R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+					}
 					dst[3] = 255;
 					buf_p += 3;
 				}
@@ -349,7 +388,7 @@ int R_GetLightmapCoords( const int lightmapIndex, float *x, float *y )
 R_LoadMergedLightmaps
 ===============
 */
-static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
+static void R_LoadMergedLightmaps( const lump_t *l, byte *image, qboolean isQ1Lightmap )
 {
 	const byte	*buf;
 	int			offs;
@@ -381,10 +420,10 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
 				if ( offs >= l->filelen )
 					break;
 
-				R_ProcessLightmap( image, buf + offs, maxIntensity );
+				R_ProcessLightmap( image, buf + offs, maxIntensity, isQ1Lightmap );
 				
 #ifdef USE_VULKAN
-				vk_upload_image_data( tr.lightmaps[ i ], x * LIGHTMAP_LEN, y * LIGHTMAP_LEN, LIGHTMAP_LEN, LIGHTMAP_LEN, 1, image, LIGHTMAP_LEN * LIGHTMAP_LEN * 4, qtrue );
+				vk_upload_image_data( tr.lightmaps[ i ], x * LIGHTMAP_LEN, y * LIGHTMAP_LEN, LIGHTMAP_LEN, LIGHTMAP_LEN, 1, image, LIGHTMAP_LEN * LIGHTMAP_LEN * 4, qtrue, 0 );
 #else
 				R_UploadSubImage( image, x * LIGHTMAP_LEN, y * LIGHTMAP_LEN, LIGHTMAP_LEN, LIGHTMAP_LEN, tr.lightmaps[ i ] );
 #endif
@@ -395,12 +434,12 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
 #ifdef USE_VULKAN
 		//
 #else
-		ri.Printf( PRINT_DEVELOPER, "lightmaps[%i]=%i\n", i, tr.lightmaps[i]->texnum );
+		ri.Log( SEV_DEBUG, "lightmaps[%i]=%i\n", i, tr.lightmaps[i]->texnum );
 #endif
 	}
 
 	//if ( r_lightmap->integer == 2 )	{
-	//	ri.Printf( PRINT_ALL, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
+	//	ri.Log( SEV_INFO, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
 	//}
 }
 
@@ -410,7 +449,7 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
 R_LoadLightmaps
 ===============
 */
-static void R_LoadLightmaps( const lump_t *l ) {
+static void R_LoadLightmaps( const lump_t *l, qboolean isQ1Lightmap ) {
 	const byte	*buf;
 	byte		image[LIGHTMAP_LEN*LIGHTMAP_LEN*4];
 	int			i, numLightmaps;
@@ -418,6 +457,9 @@ static void R_LoadLightmaps( const lump_t *l ) {
 
 	tr.numLightmaps = 0;
 	tr.mergeLightmaps = qfalse;
+	// Prop lightmap image_t* pointers are stale after hunk clear on level change.
+	// Reset the count here so R_UploadPropLightmaps starts fresh for the new map.
+	tr.numPropLightmaps = 0;
 	tr.lightmapScale[0] = 1.0f;
 	tr.lightmapScale[1] = 1.0f;
 	tr.lightmapOffset[0] = 0.0f;
@@ -439,11 +481,16 @@ static void R_LoadLightmaps( const lump_t *l ) {
 
 	numLightmaps = l->filelen / (LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3);
 
-	if ( r_mergeLightmaps->integer && r_lightmapAtlas->integer && numLightmaps > 1 ) {
+	/* Q1 maps must not use the merged mega-texture path: Q1 surface UVs are
+	 * pre-baked at parse time as (lm_u / LM_PAGE_W), assuming per-page
+	 * 128×128 textures. The merged path adds tile + border offsets that Q1
+	 * UVs do not encode (R_GetLightmapCoords adjusts Q3 surfaces only).
+	 * Force Q1 to the legacy per-page path. */
+	if ( !isQ1Lightmap && r_mergeLightmaps->integer && r_lightmapAtlas->integer && numLightmaps > 1 ) {
 		// check for low texture sizes
 		if ( glConfig.maxTextureSize >= LIGHTMAP_LEN * 2 ) {
 			tr.mergeLightmaps = qtrue;
-			R_LoadMergedLightmaps( l, image ); // reuse stack space
+			R_LoadMergedLightmaps( l, image, isQ1Lightmap ); // reuse stack space
 			return;
 		}
 	}
@@ -456,14 +503,114 @@ static void R_LoadLightmaps( const lump_t *l ) {
 	tr.lightmaps = ri.Hunk_Alloc( tr.numLightmaps * sizeof(image_t *), h_low );
 
 	for ( i = 0 ; i < tr.numLightmaps ; i++ ) {
-		maxIntensity = R_ProcessLightmap( image, buf + i * LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3, maxIntensity );
+		maxIntensity = R_ProcessLightmap( image, buf + i * LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3, maxIntensity, isQ1Lightmap );
 		tr.lightmaps[i] = R_CreateImage( va( "*lightmap%d", i ), NULL, image, LIGHTMAP_SIZE, LIGHTMAP_SIZE,
 			lightmapFlags | IMGFLAG_CLAMPTOEDGE );
 	}
 
 	//if ( r_lightmap->integer == 2 )	{
-	//	ri.Printf( PRINT_ALL, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
+	//	ri.Log( SEV_INFO, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
 	//}
+}
+
+
+/*
+=================
+R_LoadQ1StyledLightmaps
+
+Upload Q1 per-slot lightmaps for style slots 1/2/3 from bspFile_t.
+Called after R_LoadLightmaps so tr.lightmaps[] (slot 0) is already populated.
+Only runs if bsp->styledLightmapData[1] is set (Q1 maps with multi-style lighting).
+=================
+*/
+static void R_LoadQ1StyledLightmaps( const bspFile_t *bsp ) {
+	byte	image[LIGHTMAP_LEN*LIGHTMAP_LEN*4];
+	float	maxIntensity = 0;
+	int		k, i, n;
+
+	if ( !bsp || !bsp->styledLightmapData[1] ) {
+		return;
+	}
+
+	if ( tr.mergeLightmaps ) {
+		ri.Log( SEV_DEBUG, "R_LoadQ1StyledLightmaps: skipped (merged lightmaps not supported for Q1 style blend)\n" );
+		return;
+	}
+
+	n = bsp->numLightmapPages;
+	tr.numLightmapsStyle = n;
+
+	for ( k = 1; k <= 3; k++ ) {
+		if ( !bsp->styledLightmapData[k] || !bsp->numStyledLightmapPages[k] ) {
+			tr.lightmapsStyle[k-1] = NULL;
+			continue;
+		}
+
+		tr.lightmapsStyle[k-1] = ri.Hunk_Alloc( n * sizeof(image_t *), h_low );
+
+		for ( i = 0; i < n; i++ ) {
+			const byte *src = bsp->styledLightmapData[k] + (size_t)i * bsp->lightmapPageSize;
+			maxIntensity = R_ProcessLightmap( image, src, maxIntensity, qtrue );
+			tr.lightmapsStyle[k-1][i] = R_CreateImage( va( "*q1lm%d_%d", k, i ), NULL, image,
+				LIGHTMAP_SIZE, LIGHTMAP_SIZE, lightmapFlags | IMGFLAG_CLAMPTOEDGE );
+		}
+	}
+
+	ri.Log( SEV_DEBUG, "R_LoadQ1StyledLightmaps: uploaded %d pages × 3 style slots\n", n );
+}
+
+
+/*
+=================
+R_UploadPropLightmaps
+
+Upload lightmap pages from a prop BSP (e.g. maps/b_explob.bsp) into
+tr.propLightmaps[], a ri.Malloc growable array separate from the world
+lightmaps in tr.lightmaps[].
+
+Returns the base index into tr.propLightmaps[] for this prop's pages
+(add LIGHTMAP_PROP_OFFSET to form the per-surface lightmapNum).
+Returns -1 if the prop has no lightmap data; caller falls back to LIGHTMAP_WHITEIMAGE.
+=================
+*/
+static int R_UploadPropLightmaps( const bspFile_t *bsp ) {
+	byte  image[LIGHTMAP_LEN * LIGHTMAP_LEN * 4];
+	int   firstIdx, i, newMax;
+	image_t **newArr;
+
+	if ( !bsp->lightmapData || bsp->numLightmapPages <= 0 )
+		return -1;
+
+	firstIdx = tr.numPropLightmaps;
+
+	if ( firstIdx + bsp->numLightmapPages > tr.maxPropLightmaps ) {
+		newMax = tr.maxPropLightmaps * 2;
+		if ( newMax < firstIdx + bsp->numLightmapPages )
+			newMax = firstIdx + bsp->numLightmapPages;
+		if ( newMax < 64 )
+			newMax = 64;
+		newArr = ri.Malloc( newMax * sizeof( image_t * ) );
+		if ( tr.propLightmaps ) {
+			if ( tr.numPropLightmaps > 0 )
+				memcpy( newArr, tr.propLightmaps, tr.numPropLightmaps * sizeof( image_t * ) );
+			ri.Free( tr.propLightmaps );
+		}
+		tr.propLightmaps    = newArr;
+		tr.maxPropLightmaps = newMax;
+	}
+
+	for ( i = 0; i < bsp->numLightmapPages; i++ ) {
+		const byte *src = bsp->lightmapData + (size_t)i * bsp->lightmapPageSize;
+		R_ProcessLightmap( image, src, 0.0f, qtrue );
+		tr.propLightmaps[ firstIdx + i ] = R_CreateImage(
+			va( "*propLightmap%d", firstIdx + i ), NULL, image,
+			LIGHTMAP_SIZE, LIGHTMAP_SIZE, lightmapFlags | IMGFLAG_CLAMPTOEDGE );
+	}
+	tr.numPropLightmaps += bsp->numLightmapPages;
+
+	ri.Log( SEV_DEBUG, "R_UploadPropLightmaps: uploaded %d pages (base %d)\n",
+		bsp->numLightmapPages, firstIdx );
+	return firstIdx;
 }
 
 
@@ -499,7 +646,7 @@ static void R_LoadVisibility( const lump_t *l ) {
 	}
 
 	if ( len < VIS_HEADER ) {
-		Com_Error( ERR_DROP, "%s: lump too short", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: lump too short", __func__ );
 	}
 
 	buf = fileBase + l->fileofs;
@@ -510,13 +657,13 @@ static void R_LoadVisibility( const lump_t *l ) {
 	len -= VIS_HEADER;
 
 	if ( (uint64_t)numClusters * clusterBytes > len ) {
-		Com_Error( ERR_DROP, "%s: lump too short", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: lump too short", __func__ );
 	}
 	if ( numClusters < s_worldData.numClusters ) {
-		Com_Error( ERR_DROP, "%s: bad numClusters", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad numClusters", __func__ );
 	}
 	if ( clusterBytes < (numClusters + 7) >> 3 ) {
-		Com_Error( ERR_DROP, "%s: bad clusterBytes", __func__ );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad clusterBytes", __func__ );
 	}
 
 	s_worldData.numClusters = numClusters;
@@ -548,7 +695,7 @@ static shader_t *ShaderForShaderNum( const int shaderNum, int lightmapNum ) {
 	const dshader_t *dsh;
 
 	if ( shaderNum < 0 || shaderNum >= s_worldData.numShaders ) {
-		ri.Error( ERR_DROP, "ShaderForShaderNum: bad num %i", shaderNum );
+		ri.Terminate( TERM_CLIENT_DROP, "ShaderForShaderNum: bad num %i", shaderNum );
 	}
 
 	dsh = &s_worldData.shaders[ shaderNum ];
@@ -562,6 +709,7 @@ static shader_t *ShaderForShaderNum( const int shaderNum, int lightmapNum ) {
 	}
 
 	shader = R_FindShader( dsh->shader, lightmapNum, qtrue );
+
 
 	// if the shader had errors, just use default shader
 	if ( shader->defaultShader ) {
@@ -653,89 +801,132 @@ void qsort_idx( int32_t *a, const int n ) {
 
 
 /*
-===============
-ParseFace
-===============
+======================
+R_Q1_BuildAnimChain
+======================
+Builds a q1AnimChain_t for a +0..+9 animated surface shader.
+Only called when the surface's base name starts with '+0'.
+Returns NULL when fewer than 2 frames exist (no cycle needed).
+All frame shaders receive back-pointers to the same chain.
 */
-static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, int numPoints, msurface_t *surf, int *srcIndexes, int numIndexes ) {
-	int			i, j;
-	srfSurfaceFace_t	*cv;
-	int			*indexes;
-	int			lightmapNum;
-	float		lightmapX, lightmapY;
-	int			sfaceSize, ofsIndexes;
-	//static const int idx_pattern[] = {2, 3, 4, 3, 5, 4};
-	//static const int idx_pattern2[] = {5, 4, 3, 2, 3, 4};
+static q1AnimChain_t *R_Q1_BuildAnimChain( shader_t *baseShader, int lightmapNum ) {
+	const char *name = baseShader->name;
+	if ( name[0] != '+' || name[1] != '0' )
+		return NULL;
 
-	lightmapNum = LittleLong( ds->lightmapNum );
-	if ( lightmapNum >= 0 && tr.mergeLightmaps ) {
-		lightmapNum = R_GetLightmapCoords( lightmapNum, &lightmapX, &lightmapY );
-	} else {
-		lightmapX = lightmapY = 0.0f;
+	char            frameName[MAX_QPATH];
+	shader_t       *frameShaders[Q1_MAX_ANIM_FRAMES];
+	int             numFrames = 0;
+
+	Q_strncpyz( frameName, name, sizeof( frameName ) );
+	ri.Log( SEV_DEBUG, "[Q1ANIM] BuildAnimChain entry: base='%s' lm=%d\n", name, lightmapNum );
+	for ( int i = 0; i < Q1_MAX_ANIM_FRAMES; i++ ) {
+		frameName[1] = '0' + i;
+		const q1TexInfo_t *qf = R_Q1_GetTexForName( frameName );
+		if ( !qf || !qf->diffuse ) {
+			ri.Log( SEV_DEBUG, "[Q1ANIM]   frame[%d] '%s': tex=%s\n", i, frameName, qf ? "found/no-diffuse" : "not-in-cache" );
+			break;
+		}
+		shader_t *sh = qf->cachedShader ? qf->cachedShader : R_FindShader( frameName, lightmapNum, qtrue );
+		if ( !sh || sh->defaultShader ) {
+			ri.Log( SEV_DEBUG, "[Q1ANIM]   frame[%d] '%s': shader=%s\n", i, frameName, sh ? "defaultShader" : "null" );
+			break;
+		}
+		ri.Log( SEV_DEBUG, "[Q1ANIM]   frame[%d] '%s': OK sh='%s' cached=%d\n", i, frameName, sh->name, qf->cachedShader != NULL );
+		frameShaders[numFrames++] = sh;
 	}
 
-	tr.lightmapOffset[0] = lightmapX;
-	tr.lightmapOffset[1] = lightmapY;
+	if ( numFrames <= 1 ) {
+		ri.Log( SEV_DEBUG, "[Q1ANIM] BuildAnimChain '%s': numFrames=%d -> returning NULL\n", name, numFrames );
+		return NULL;
+	}
 
-	// get shader value
-	surf->shader = ShaderForShaderNum( LittleLong( ds->shaderNum ), lightmapNum );
+	q1AnimChain_t *chain = ri.Hunk_Alloc( sizeof( *chain ), h_low );
+	chain->numFrames = numFrames;
+	for ( int i = 0; i < numFrames; i++ ) {
+		chain->shaders[i] = frameShaders[i];
+	}
+	return chain;
+}
 
-	if (numPoints > MAX_FACE_POINTS) {
-		ri.Printf( PRINT_WARNING, "WARNING: MAX_FACE_POINTS exceeded: %i\n", numPoints);
+
+/*
+================
+ParseFaceCommon
+
+Shared body for ParseFace (world) and ParsePropFace (props).
+Caller pre-resolves shader and lightmap coords; this function owns
+vertex/index copy, plane derivation, and hunk allocation.
+Returns the allocated srfSurfaceFace_t so the caller can set
+altShader; also writes surf->data and surf->shader.
+fogIndex is NOT set here — that is always the caller's responsibility.
+================
+*/
+static srfSurfaceFace_t *ParseFaceCommon( const dsurface_t *ds, const drawVert_t *verts,
+                                           int numPoints, msurface_t *surf,
+                                           int *srcIndexes, int numIndexes,
+                                           shader_t *shader,
+                                           int lightmapNum, float lightmapX, float lightmapY,
+                                           const byte *lightStyles ) {
+	int              i, j;
+	srfSurfaceFace_t *cv;
+	int              *indexes;
+	int              sfaceSize, ofsIndexes;
+
+	if ( numPoints > MAX_FACE_POINTS ) {
+		ri.Log( SEV_WARN, "WARNING: MAX_FACE_POINTS exceeded: %i\n", numPoints );
 		numPoints = MAX_FACE_POINTS;
-		surf->shader = tr.defaultShader;
+		shader = tr.defaultShader;
 	}
+	surf->shader = shader;
 
-	// create the srfSurfaceFace_t
-	sfaceSize = sizeof( *cv ) - sizeof( cv->points ) + sizeof( cv->points[0] ) * numPoints;
+	sfaceSize  = sizeof( *cv ) - sizeof( cv->points ) + sizeof( cv->points[0] ) * numPoints;
 	ofsIndexes = sfaceSize;
 	sfaceSize += sizeof( int ) * numIndexes;
 
 	cv = ri.Hunk_Alloc( sfaceSize, h_low );
 	cv->surfaceType = SF_FACE;
-	cv->numPoints = numPoints;
-	cv->numIndices = numIndexes;
-	cv->ofsIndices = ofsIndexes;
+	cv->numPoints   = numPoints;
+	cv->numIndices  = numIndexes;
+	cv->ofsIndices  = ofsIndexes;
+	if ( lightStyles ) {
+		cv->lightStyles[0] = lightStyles[0];
+		cv->lightStyles[1] = lightStyles[1];
+		cv->lightStyles[2] = lightStyles[2];
+		cv->lightStyles[3] = lightStyles[3];
+	} else {
+		cv->lightStyles[0] = cv->lightStyles[1] = cv->lightStyles[2] = cv->lightStyles[3] = 255;
+	}
+	cv->altShader = NULL;
 
-	for ( i = 0 ; i < numPoints ; i++ ) {
-		for ( j = 0 ; j < 3 ; j++ ) {
+	for ( i = 0; i < numPoints; i++ ) {
+		for ( j = 0; j < 3; j++ )
 			cv->points[i][j] = LittleFloat( verts[i].xyz[j] );
-		}
-		for ( j = 0 ; j < 2 ; j++ ) {
+		for ( j = 0; j < 2; j++ ) {
 			cv->points[i][3+j] = LittleFloat( verts[i].st[j] );
 			cv->points[i][5+j] = LittleFloat( verts[i].lightmap[j] );
 		}
 		R_ColorShiftLightingBytes( verts[i].color.rgba, (byte *)&cv->points[i][7], qtrue );
 		if ( lightmapNum >= 0 && tr.mergeLightmaps ) {
-			// adjust lightmap coords
 			cv->points[i][5] = cv->points[i][5] * tr.lightmapScale[0] + lightmapX;
 			cv->points[i][6] = cv->points[i][6] * tr.lightmapScale[1] + lightmapY;
 		}
 	}
 
-	indexes = (int*)((byte *) cv + cv->ofsIndices);
-
-	for ( i = 0 ; i < numIndexes ; i++ ) {
-		unsigned num = LittleLong( srcIndexes[ i ] );
-		if ( num >= numPoints )
-			ri.Error( ERR_DROP, "%s: bad index", __func__ );
+	indexes = (int *)((byte *)cv + cv->ofsIndices);
+	for ( i = 0; i < numIndexes; i++ ) {
+		unsigned num = LittleLong( srcIndexes[i] );
+		if ( num >= (unsigned)numPoints )
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad index", __func__ );
 		indexes[i] = num;
 	}
 
-	// reorder certain indexes to avoid bug on intel gen 9.5 hardware/vulkan driver
-	// can be observed on lun3dm5 map
-	//if ( numIndexes >=6 && memcmp( indexes, idx_pattern, sizeof( idx_pattern ) ) == 0 ) {
-	//	memcpy( indexes, idx_pattern2, sizeof( idx_pattern2 ) );
-	//}
-
-	if ( numIndexes >= 6 ) {
+	// reorder indexes to avoid bug on intel gen 9.5 hardware/vulkan driver (e.g. lun3dm5)
+	if ( numIndexes >= 6 )
 		qsort_idx( indexes, (numIndexes / 3) - 1 );
-	}
 
-	// take the plane information from the lightmap vector
-	for ( i = 0 ; i < 3 ; i++ ) {
+	for ( i = 0; i < 3; i++ )
 		cv->plane.normal[i] = LittleFloat( ds->lightmapVecs[2][i] );
-	}
 
 #ifdef USE_PMLIGHT
 	if ( surf->shader->numUnfoggedPasses && surf->shader->lightingStage >= 0 ) {
@@ -774,15 +965,54 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, int numPoi
 		}
 	}
 
-	for ( i = 0; i < 3; i++ ) {
+	for ( i = 0; i < 3; i++ )
 		cv->plane.normal[i] = R_ClampDenorm( cv->plane.normal[i] );
-	}
 
 	cv->plane.dist = DotProduct( cv->points[0], cv->plane.normal );
 	SetPlaneSignbits( &cv->plane );
 	cv->plane.type = PlaneTypeForNormal( cv->plane.normal );
 
 	surf->data = (surfaceType_t *)cv;
+	return cv;
+}
+
+
+/*
+===============
+ParseFace
+===============
+*/
+static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, int numPoints, msurface_t *surf, int *srcIndexes, int numIndexes, const byte *lightStyles ) {
+	int              lightmapNum;
+	float            lightmapX, lightmapY;
+	shader_t        *shader;
+	srfSurfaceFace_t *cv;
+
+	lightmapNum = LittleLong( ds->lightmapNum );
+	if ( lightmapNum >= 0 && tr.mergeLightmaps ) {
+		lightmapNum = R_GetLightmapCoords( lightmapNum, &lightmapX, &lightmapY );
+	} else {
+		lightmapX = lightmapY = 0.0f;
+	}
+	tr.lightmapOffset[0] = lightmapX;
+	tr.lightmapOffset[1] = lightmapY;
+
+	shader = ShaderForShaderNum( LittleLong( ds->shaderNum ), lightmapNum );
+	ri.Log( SEV_DEBUG, "[Q1FACE] ParseFace: raw='%s' resolved='%s' default=%d lm=%d\n",
+	        shader->name, shader->name, shader->defaultShader, lightmapNum );
+
+	cv = ParseFaceCommon( ds, verts, numPoints, surf, srcIndexes, numIndexes,
+	                      shader, lightmapNum, lightmapX, lightmapY, lightStyles );
+
+	// +a variant means entity-toggled (button); +0..+9 numeric cycle only for non-toggled textures
+	if ( surf->shader->name[0] == '+' && surf->shader->name[1] == '0' ) {
+		ri.Log( SEV_DEBUG, "[Q1FACE] +0 branch hit: surf='%s'\n", surf->shader->name );
+		char altName[MAX_QPATH];
+		Q_strncpyz( altName, surf->shader->name, sizeof(altName) );
+		altName[1] = 'a';
+		shader_t *alt = R_FindShader( altName, lightmapNum, qtrue );
+		cv->altShader = ( alt && !alt->defaultShader ) ? alt : NULL;
+	}
 }
 
 
@@ -829,11 +1059,11 @@ static void ParseMesh( const dsurface_t *ds, const drawVert_t *verts, int numVer
 	if (width <= 2 || height <= 2 || !(width & 1) || !(height & 1) ||
 		width > MAX_GRID_SIZE || height > MAX_GRID_SIZE ||
 		width * height > ARRAY_LEN(points))
-		ri.Error( ERR_DROP, "%s: bad patch size", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: bad patch size", __func__ );
 
 	numPoints = width * height;
 	if (numPoints > numVerts)
-		ri.Error( ERR_DROP, "%s: verts out of range", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: verts out of range", __func__ );
 
 	for ( i = 0 ; i < numPoints ; i++ ) {
 		for ( j = 0 ; j < 3 ; j++ ) {
@@ -929,7 +1159,7 @@ static void ParseTriSurf( const dsurface_t *ds, const drawVert_t *verts, int num
 	for ( i = 0 ; i < numIndexes ; i++ ) {
 		tri->indexes[i] = LittleLong( indexes[i] );
 		if ( tri->indexes[i] < 0 || tri->indexes[i] >= numVerts ) {
-			ri.Error( ERR_DROP, "Bad index in triangle surface" );
+			ri.Terminate( TERM_CLIENT_DROP, "Bad index in triangle surface" );
 		}
 	}
 }
@@ -1198,7 +1428,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1242,7 +1472,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1295,7 +1525,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1339,7 +1569,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1393,7 +1623,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1437,7 +1667,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1492,7 +1722,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1536,7 +1766,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1689,17 +1919,17 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 
 	in = (void *)(fileBase + surfs->fileofs);
 	if (surfs->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = surfs->filelen / sizeof(*in);
 
 	dv = (void *)(fileBase + verts->fileofs);
 	if (verts->filelen % sizeof(*dv))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	totalVerts = verts->filelen / sizeof(*dv);
 
 	indexes = (void *)(fileBase + indexLump->fileofs);
 	if ( indexLump->filelen % sizeof(*indexes))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	totalIndexes = indexLump->filelen / sizeof(*indexes);
 
 	out = ri.Hunk_Alloc( count * sizeof(*out), h_low );
@@ -1722,17 +1952,17 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 			else
 				numVerts = LittleLong( in->numVerts );
 			if ( (uint64_t)firstVert + numVerts > totalVerts )
-				ri.Error( ERR_DROP, "%s: bad verts", __func__ );
+				ri.Terminate( TERM_CLIENT_DROP, "%s: bad verts", __func__ );
 
 			if ( type != MST_PATCH ) {
 				firstIndex = LittleLong( in->firstIndex );
 				numIndexes = LittleLong( in->numIndexes );
 				if ( (uint64_t)firstIndex + numIndexes > totalIndexes )
-					ri.Error( ERR_DROP, "%s: bad indexes", __func__ );
+					ri.Terminate( TERM_CLIENT_DROP, "%s: bad indexes", __func__ );
 
 				// don't allow partial triangles
 				if ( numIndexes % 3 ) {
-					ri.Printf( PRINT_WARNING, "%s: odd number of indexes: %u\n", __func__, numIndexes );
+					ri.Log( SEV_WARN, "%s: odd number of indexes: %u\n", __func__, numIndexes );
 					numIndexes -= numIndexes % 3;
 				}
 			}
@@ -1742,7 +1972,7 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 		fogIndex = LittleLong( in->fogNum ) + 1U;
 		if ( fogIndex >= s_worldData.numfogs ) {
 			if ( type != MST_FLARE )
-				ri.Printf( PRINT_WARNING, "%s: bad fog index: %u\n", __func__, fogIndex );
+				ri.Log( SEV_WARN, "%s: bad fog index: %u\n", __func__, fogIndex );
 			fogIndex = 0;
 		}
 		out->fogIndex = fogIndex;
@@ -1757,7 +1987,8 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 			numTriSurfs++;
 			break;
 		case MST_PLANAR:
-			ParseFace( in, dv + firstVert, numVerts, out, indexes + firstIndex, numIndexes );
+			ParseFace( in, dv + firstVert, numVerts, out, indexes + firstIndex, numIndexes,
+				lightstyleData ? lightstyleData + firstVert * 4 : NULL );
 			numFaces++;
 			break;
 		case MST_FLARE:
@@ -1765,7 +1996,7 @@ static void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 			numFlares++;
 			break;
 		default:
-			ri.Error( ERR_DROP, "%s: bad surfaceType: %u", __func__, type );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad surfaceType: %u", __func__, type );
 		}
 	}
 
@@ -1794,7 +2025,7 @@ static void R_LoadSubmodels( const lump_t *l ) {
 
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 
 	s_worldData.bmodels = out = ri.Hunk_Alloc( count * sizeof(*out), h_low );
@@ -1805,7 +2036,7 @@ static void R_LoadSubmodels( const lump_t *l ) {
 		model = R_AllocModel();
 
 		if ( model == NULL ) {
-			ri.Error( ERR_DROP, "R_LoadSubmodels: R_AllocModel() failed" );
+			ri.Terminate( TERM_CLIENT_DROP, "R_LoadSubmodels: R_AllocModel() failed" );
 		}
 
 		model->type = MOD_BRUSH;
@@ -1820,11 +2051,18 @@ static void R_LoadSubmodels( const lump_t *l ) {
 		firstSurface = LittleLong( in->firstSurface );
 		numSurfaces = LittleLong( in->numSurfaces );
 		if ( (uint64_t)firstSurface + numSurfaces > s_worldData.numsurfaces ) {
-			ri.Error( ERR_DROP, "%s: bad surfaces", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad surfaces", __func__ );
 		}
 
 		out->firstSurface = s_worldData.surfaces + firstSurface;
 		out->numSurfaces = numSurfaces;
+
+		ri.Log( SEV_TRACE,
+		        "R_LoadSubmodels VK: bmodel[%d] firstSurface=%u numSurfaces=%u"
+		        " bounds=(%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)\n",
+		        i, firstSurface, numSurfaces,
+		        out->bounds[0][0], out->bounds[0][1], out->bounds[0][2],
+		        out->bounds[1][0], out->bounds[1][1], out->bounds[1][2] );
 	}
 }
 
@@ -1840,7 +2078,7 @@ R_SetParent
 static void R_SetParent( mnode_t *node, mnode_t *parent )
 {
 	if ( node->parent )
-		ri.Error( ERR_DROP, "%s: cycle encountered", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: cycle encountered", __func__ );
 	node->parent = parent;
 	if ( node->contents != CONTENTS_NODE )
 		return;
@@ -1865,7 +2103,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 	in = (void *)(fileBase + nodeLump->fileofs);
 	if (nodeLump->filelen % sizeof(dnode_t) ||
 		leafLump->filelen % sizeof(dleaf_t) ) {
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	}
 	numNodes = nodeLump->filelen / sizeof(dnode_t);
 	numLeafs = leafLump->filelen / sizeof(dleaf_t);
@@ -1887,7 +2125,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 	
 		p = LittleLong(in->planeNum);
 		if ( p >= s_worldData.numplanes ) {
-			ri.Error( ERR_DROP, "%s: bad planeNum", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad planeNum", __func__ );
 		}
 		out->plane = s_worldData.planes + p;
 
@@ -1899,12 +2137,12 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 			if (p & 0x80000000) {
 				p = ~p;
 				if ( p >= numLeafs ) {
-					ri.Error( ERR_DROP, "%s: bad leaf", __func__ );
+					ri.Terminate( TERM_CLIENT_DROP, "%s: bad leaf", __func__ );
 				}
 				out->children[j] = s_worldData.nodes + numNodes + p;
 			} else {
 				if ( p >= numNodes ) {
-					ri.Error( ERR_DROP, "%s: bad node", __func__ );
+					ri.Terminate( TERM_CLIENT_DROP, "%s: bad node", __func__ );
 				}
 				out->children[j] = s_worldData.nodes + p;
 			}
@@ -1923,11 +2161,11 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 
 		out->cluster = LittleLong(inLeaf->cluster);
 		if ( out->cluster + 1U > INT_MAX - 63U )
-			Com_Error( ERR_DROP, "%s: bad cluster", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad cluster", __func__ );
 
 		out->area = LittleLong(inLeaf->area);
 		if ( out->area + 1U > MAX_MAP_AREAS )
-			Com_Error( ERR_DROP, "%s: bad area", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: bad area", __func__ );
 
 		if ( out->cluster >= s_worldData.numClusters ) {
 			s_worldData.numClusters = out->cluster + 1;
@@ -1936,12 +2174,12 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 		firstmarksurface = LittleLong(inLeaf->firstLeafSurface);
 		nummarksurfaces = LittleLong(inLeaf->numLeafSurfaces);
 		if ( (uint64_t)firstmarksurface + nummarksurfaces > s_worldData.nummarksurfaces ) {
-			ri.Error( ERR_DROP, "%s: bad marksurfaces", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad marksurfaces", __func__ );
 		}
 
 		out->firstmarksurface = s_worldData.marksurfaces + firstmarksurface;
 		out->nummarksurfaces = nummarksurfaces;
-	}	
+	}
 
 	// chain descendants
 	R_SetParent (s_worldData.nodes, NULL);
@@ -1980,7 +2218,7 @@ static void R_LoadShaders( const lump_t *l ) {
 	
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low );
 
@@ -2012,7 +2250,7 @@ static void R_LoadMarksurfaces( const lump_t *l )
 	
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low);
 
@@ -2023,7 +2261,7 @@ static void R_LoadMarksurfaces( const lump_t *l )
 	{
 		j = LittleLong(in[i]);
 		if ( j >= s_worldData.numsurfaces ) {
-			ri.Error( ERR_DROP, "%s: bad surface", __func__ );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: bad surface", __func__ );
 		}
 		out[i] = s_worldData.surfaces + j;
 	}
@@ -2044,7 +2282,7 @@ static	void R_LoadPlanes( const lump_t *l ) {
 
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc( count*2*sizeof(*out), h_low );
 
@@ -2100,7 +2338,7 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 
 	fogs = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*fogs)) {
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	}
 	count = l->filelen / sizeof(*fogs);
 
@@ -2115,31 +2353,31 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 
 	brushes = (void *)(fileBase + brushesLump->fileofs);
 	if (brushesLump->filelen % sizeof(*brushes)) {
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	}
 	brushesCount = brushesLump->filelen / sizeof(*brushes);
 
 	sides = (void *)(fileBase + sidesLump->fileofs);
 	if (sidesLump->filelen % sizeof(*sides)) {
-		ri.Error( ERR_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	}
 	sidesCount = sidesLump->filelen / sizeof(*sides);
 	if (sidesCount < 6) {
-		ri.Error( ERR_DROP, "%s(): sides lump too short in %s", __func__, s_worldData.name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s(): sides lump too short in %s", __func__, s_worldData.name );
 	}
 
 	for ( i=0 ; i<count ; i++, fogs++) {
 		out->originalBrushNumber = LittleLong( fogs->brushNum );
 
 		if ( (unsigned)out->originalBrushNumber >= brushesCount ) {
-			ri.Error( ERR_DROP, "fog brushNumber out of range" );
+			ri.Terminate( TERM_CLIENT_DROP, "fog brushNumber out of range" );
 		}
 		brush = brushes + out->originalBrushNumber;
 
 		firstSide = LittleLong( brush->firstSide );
 
 		if ( firstSide > sidesCount - 6 ) {
-			ri.Error( ERR_DROP, "fog brush sideNumber out of range" );
+			ri.Terminate( TERM_CLIENT_DROP, "fog brush sideNumber out of range" );
 		}
 
 		// brushes are always sorted with the axial sides first
@@ -2147,7 +2385,7 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 			sideNum = firstSide + j;
 			planeNum = LittleLong( sides[ sideNum ].planeNum );
 			if ( planeNum >= s_worldData.numplanes ) {
-				ri.Error( ERR_DROP, "fog brush planeNum out of range" );
+				ri.Terminate( TERM_CLIENT_DROP, "fog brush planeNum out of range" );
 			}
 			d = s_worldData.planes[ planeNum ].dist;
 			out->bounds[j & 1][j >> 1] = (j & 1) ? d : -d;
@@ -2186,13 +2424,13 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 			out->hasSurface = qfalse;
 		} else {
 			if ( sideNum >= sidesCount - firstSide ) {
-				ri.Printf( PRINT_WARNING, "bad fog side offset\n" );
+				ri.Log( SEV_WARN, "bad fog side offset\n" );
 				out->hasSurface = qfalse;
 			} else {
 				out->hasSurface = qtrue;
 				planeNum = LittleLong( sides[ firstSide + sideNum ].planeNum );
 				if ( planeNum >= s_worldData.numplanes ) {
-					ri.Error( ERR_DROP, "fog brush planeNum out of range" );
+					ri.Terminate( TERM_CLIENT_DROP, "fog brush planeNum out of range" );
 				}
 				VectorSubtract( vec3_origin, s_worldData.planes[ planeNum ].normal, out->surface );
 				out->surface[3] = -s_worldData.planes[ planeNum ].dist;
@@ -2240,7 +2478,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 
 	if ( (uint64_t)bounds[0] * bounds[1] > INT_MAX ||
 		 (uint64_t)bounds[0] * bounds[1] * bounds[2] > INT_MAX) {
-		ri.Printf( PRINT_WARNING, "WARNING: bad light grid bounds\n" );
+		ri.Log( SEV_WARN, "WARNING: bad light grid bounds\n" );
 		w->lightGridData = NULL;
 		return;
 	}
@@ -2248,7 +2486,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 	numGridPoints = bounds[0] * bounds[1] * bounds[2];
 
 	if ( l->filelen % 8 || l->filelen / 8 != numGridPoints ) {
-		ri.Printf( PRINT_WARNING, "WARNING: light grid mismatch\n" );
+		ri.Log( SEV_WARN, "WARNING: light grid mismatch\n" );
 		w->lightGridData = NULL;
 		return;
 	}
@@ -2320,7 +2558,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		if (!strncmp(keyname, s, strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
-				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in vertexshaderremap '%s'\n", value );
+				ri.Log( SEV_WARN, "WARNING: no semi colon in vertexshaderremap '%s'\n", value );
 				break;
 			}
 			*vs++ = '\0';
@@ -2334,7 +2572,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		if (!strncmp(keyname, s, (int)strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
-				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in shaderremap '%s'\n", value );
+				ri.Log( SEV_WARN, "WARNING: no semi colon in shaderremap '%s'\n", value );
 				break;
 			}
 			*vs++ = '\0';
@@ -2393,16 +2631,16 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	byte		*startMarker;
 
 	if ( tr.worldMapLoaded ) {
-		ri.Error( ERR_DROP, "ERROR: attempted to redundantly load world map" );
+		ri.Terminate( TERM_CLIENT_DROP, "ERROR: attempted to redundantly load world map" );
 	}
 
 	if ( !bsp ) {
-		ri.Error( ERR_DROP, "%s: bsp is NULL", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: bsp is NULL", __func__ );
 	}
 
 	name = bsp->name;
 	if ( !name[0] ) {
-		ri.Error( ERR_DROP, "%s: bsp has empty name", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: bsp has empty name", __func__ );
 	}
 
 	if ( bsp->version ) {
@@ -2425,10 +2663,10 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	buffer.b = bsp->rawData;
 	size = bsp->rawLength;
 	if ( !buffer.b || size <= 0 ) {
-		ri.Error( ERR_DROP, "%s: %s has no raw BSP data", __func__, name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: %s has no raw BSP data", __func__, name );
 	}
 	if ( size < sizeof( dheader_t ) ) {
-		ri.Error( ERR_DROP, "%s: %s has truncated header", __func__, name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: %s has truncated header", __func__, name );
 	}
 
 	tr.mapLoading = qtrue;
@@ -2458,17 +2696,27 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 		uint32_t ofs = header->lumps[i].fileofs;
 		uint32_t len = header->lumps[i].filelen;
 		if ( (uint64_t)ofs + len > size ) {
-			ri.Error( ERR_DROP, "%s: %s has wrong lump[%i] size/offset", __func__, name, i );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: %s has wrong lump[%i] size/offset", __func__, name, i );
 		}
 	}
 
 	// load into heap
-	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS] );
+	// Q1 maps have lightmapStyles=4 (set by bsp_q1.c); Q3 maps leave it at 0.
+	// Q1 lightmap bytes are full-range 0-255 and must not be run through
+	// R_ColorShiftLightingBytes (which assumes Q3 overbright pre-compression).
+	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS], bsp->lightmapStyles != 0 );
+	R_LoadQ1StyledLightmaps( bsp );
+	R_Q1_SetCreateImageFn( RVK_Q1_CreateImage );
+	R_Q1_SetLoadImageFn( RVK_Q1_LoadImage );
+	R_Q1_SetCreateImageArrayFn( RVK_Q1_CreateImageArray );
+	R_Q1_PrepareTextures( bsp );
 	R_PreLoadFogs( &header->lumps[LUMP_FOGS] );
 	R_LoadShaders( &header->lumps[LUMP_SHADERS] );
 	R_LoadPlanes( &header->lumps[LUMP_PLANES] );
 	R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES] );
+	lightstyleData = bsp->drawVertLightstyles;
 	R_LoadSurfaces( &header->lumps[LUMP_SURFACES], &header->lumps[LUMP_DRAWVERTS], &header->lumps[LUMP_DRAWINDEXES] );
+	lightstyleData = NULL;
 	R_LoadMarksurfaces( &header->lumps[LUMP_LEAFSURFACES] );
 	R_LoadNodesAndLeafs( &header->lumps[LUMP_NODES], &header->lumps[LUMP_LEAFS] );
 	R_LoadSubmodels( &header->lumps[LUMP_MODELS] );
@@ -2484,7 +2732,448 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 
 	s_worldData.dataSize = (byte *)ri.Hunk_Alloc(0, h_low) - startMarker;
 
+	s_worldData.lightStyles = ( bsp->styledLightmapData[1] != NULL ) ? qtrue : qfalse;
+
 	// only set tr.world now that we know the entire level has loaded properly
 	tr.world = &s_worldData;
 
+}
+
+// ---------------------------------------------------------------------------
+// Q1 BSP diagnostic dump command
+// ---------------------------------------------------------------------------
+
+// AABB touch with 1-unit tolerance — same metric as Q1_RawLeafAABBTouch in bsp_q1.c
+static qboolean Q1_MnodesAdjacent( const mnode_t *a, const mnode_t *b ) {
+	int d;
+	for ( d = 0; d < 3; d++ )
+		if ( a->maxs[d] + 1.0f < b->mins[d] || b->maxs[d] + 1.0f < a->mins[d] )
+			return qfalse;
+	return qtrue;
+}
+
+// Returns: 0=empty 1=water 2=slime 3=lava 4=solid
+static int Q1_InferLeafType( const mnode_t *leaf ) {
+	vec3_t center;
+	int    contents;
+	if ( leaf->cluster < 0 )
+		return 4;
+	// Q1 face-ownership: a water surface normal points into the air leaf above
+	// it, so marksurface shader flags misclassify air leaves as liquid.
+	// Query the collision model instead — BSP_Q1_SynthesizeLiquidBrushes
+	// built correct volumetric AABB brushes from Q1 leaf raw contents.
+	center[0] = ( leaf->mins[0] + leaf->maxs[0] ) * 0.5f;
+	center[1] = ( leaf->mins[1] + leaf->maxs[1] ) * 0.5f;
+	center[2] = ( leaf->mins[2] + leaf->maxs[2] ) * 0.5f;
+	contents = ri.CM_PointContents( center, 0 );
+	if ( contents & CONTENTS_LAVA  ) return 3;
+	if ( contents & CONTENTS_SLIME ) return 2;
+	if ( contents & CONTENTS_WATER ) return 1;
+	return 0;
+}
+
+static const char *Q1_LeafTypeName( int t ) {
+	switch ( t ) {
+		case 0: return "empty";
+		case 1: return "water";
+		case 2: return "slime";
+		case 3: return "lava";
+		case 4: return "solid";
+	}
+	return "?";
+}
+
+static int Q1_PVSPopcount( const byte *row, int clusterBytes ) {
+	int b, n = 0;
+	for ( b = 0; b < clusterBytes; b++ ) {
+		byte v = row[b];
+		v = v - ((v >> 1) & 0x55u);
+		v = (v & 0x33u) + ((v >> 2) & 0x33u);
+		n += (int)((v + (v >> 4)) & 0x0Fu);
+	}
+	return n;
+}
+
+#define BSPDUMP_CAP (20 * 1024 * 1024)
+
+static void bsp_dump_append( char *buf, size_t *off, const char *fmt, ... )
+	__attribute__ ((format (printf, 3, 4)));
+static void bsp_dump_append( char *buf, size_t *off, const char *fmt, ... ) {
+	va_list ap;
+	int n;
+	if ( *off >= BSPDUMP_CAP - 1 ) return;
+	va_start( ap, fmt );
+	n = vsnprintf( buf + *off, BSPDUMP_CAP - *off, fmt, ap );
+	va_end( ap );
+	if ( n > 0 ) *off += (size_t)n;
+}
+
+static void Q1_WriteBSPDump( void ) {
+	world_t    *w           = tr.world;
+	int         numDecision = w->numDecisionNodes;
+	int         numLeafs    = w->numnodes - numDecision;
+	int         numClusters = w->numClusters;
+	int         clusterBytes = w->clusterBytes;
+	const byte *vis          = w->vis;
+	char        path[MAX_OSPATH];
+	char       *buf;
+	size_t      off = 0;
+	int         i, j;
+	int         cnt[5] = {0,0,0,0,0}; /* empty water slime lava solid */
+
+	buf = (char *)ri.Malloc( BSPDUMP_CAP );
+
+	/* ---- SUMMARY ---- */
+	bsp_dump_append( buf, &off, "=== SUMMARY ===\n" );
+	bsp_dump_append( buf, &off, "map              %s\n", w->baseName );
+	bsp_dump_append( buf, &off, "numDecisionNodes %d\n", numDecision );
+	bsp_dump_append( buf, &off, "numLeafs         %d\n", numLeafs );
+	bsp_dump_append( buf, &off, "numClusters      %d\n", numClusters );
+	bsp_dump_append( buf, &off, "clusterBytes     %d\n", clusterBytes );
+
+	for ( i = 0; i < numLeafs; i++ )
+		cnt[ Q1_InferLeafType( &w->nodes[numDecision + i] ) ]++;
+
+	bsp_dump_append( buf, &off,
+		"leafTypes        solid=%d empty=%d water=%d slime=%d lava=%d\n\n",
+		cnt[4], cnt[0], cnt[1], cnt[2], cnt[3] );
+
+	/* ---- CONTENTS_HISTOGRAM ---- */
+	bsp_dump_append( buf, &off, "=== CONTENTS_HISTOGRAM ===\n" );
+	bsp_dump_append( buf, &off, "%-10s  count\n", "type" );
+	bsp_dump_append( buf, &off, "%-10s  %d\n", "solid", cnt[4] );
+	bsp_dump_append( buf, &off, "%-10s  %d\n", "empty", cnt[0] );
+	bsp_dump_append( buf, &off, "%-10s  %d\n", "water", cnt[1] );
+	bsp_dump_append( buf, &off, "%-10s  %d\n", "slime", cnt[2] );
+	bsp_dump_append( buf, &off, "%-10s  %d\n\n", "lava", cnt[3] );
+
+	/* ---- LEAVES ---- */
+	bsp_dump_append( buf, &off, "=== LEAVES ===\n" );
+	bsp_dump_append( buf, &off, "%-6s  %-8s  %-6s  %-6s  %-10s  %-10s  %-10s  %-10s  %-10s  %s\n",
+		"idx", "cluster", "type", "surfs",
+		"bmin.x", "bmin.y", "bmin.z", "bmax.x", "bmax.y", "bmax.z" );
+	for ( i = 0; i < numLeafs; i++ ) {
+		const mnode_t *leaf = &w->nodes[numDecision + i];
+		bsp_dump_append( buf, &off,
+			"%-6d  %-8d  %-6s  %-6d  %-10.0f  %-10.0f  %-10.0f  %-10.0f  %-10.0f  %.0f\n",
+			i, leaf->cluster, Q1_LeafTypeName( Q1_InferLeafType( leaf ) ),
+			leaf->nummarksurfaces,
+			(double)leaf->mins[0], (double)leaf->mins[1], (double)leaf->mins[2],
+			(double)leaf->maxs[0], (double)leaf->maxs[1], (double)leaf->maxs[2] );
+	}
+	bsp_dump_append( buf, &off, "\n" );
+
+	/* ---- PVS_STATS ---- */
+	if ( vis && numClusters > 0 && clusterBytes > 0 ) {
+		bsp_dump_append( buf, &off, "=== PVS_STATS ===\n" );
+		bsp_dump_append( buf, &off, "%-10s  %-12s  %s\n",
+			"cluster", "visible_bits", "pct_of_total" );
+		for ( i = 0; i < numClusters; i++ ) {
+			int pop = Q1_PVSPopcount( vis + (size_t)i * clusterBytes, clusterBytes );
+			bsp_dump_append( buf, &off, "%-10d  %-12d  %.1f%%\n",
+				i, pop, numClusters > 0 ? (100.0f * pop / numClusters) : 0.0f );
+		}
+		bsp_dump_append( buf, &off, "\n" );
+	}
+
+	/* ---- LIQUID_LEAVES ---- */
+	bsp_dump_append( buf, &off, "=== LIQUID_LEAVES ===\n" );
+	bsp_dump_append( buf, &off, "%-6s  %-8s  %-6s  %-6s  %s\n",
+		"idx", "cluster", "type", "surfs", "adj_non_liquid_clusters" );
+	for ( i = 0; i < numLeafs; i++ ) {
+		const mnode_t *li = &w->nodes[numDecision + i];
+		int ti = Q1_InferLeafType( li );
+		if ( ti < 1 || ti > 3 ) continue;
+		bsp_dump_append( buf, &off, "%-6d  %-8d  %-6s  %-6d  [",
+			i, li->cluster, Q1_LeafTypeName( ti ), li->nummarksurfaces );
+		for ( j = 0; j < numLeafs; j++ ) {
+			const mnode_t *lj = &w->nodes[numDecision + j];
+			int tj = Q1_InferLeafType( lj );
+			if ( tj >= 1 && tj <= 3 ) continue;
+			if ( lj->cluster < 0 ) continue;
+			if ( Q1_MnodesAdjacent( li, lj ) )
+				bsp_dump_append( buf, &off, "%d ", lj->cluster );
+		}
+		bsp_dump_append( buf, &off, "]\n" );
+	}
+	bsp_dump_append( buf, &off, "\n" );
+
+	/* ---- NON_LIQUID_NEIGHBOURS_OF_LIQUID ---- */
+	bsp_dump_append( buf, &off, "=== NON_LIQUID_NEIGHBOURS_OF_LIQUID ===\n" );
+	bsp_dump_append( buf, &off, "%-16s  %s\n",
+		"liquid_cluster", "non_liquid_adjacent_clusters" );
+	for ( i = 0; i < numLeafs; i++ ) {
+		const mnode_t *li = &w->nodes[numDecision + i];
+		int ti = Q1_InferLeafType( li );
+		if ( ti < 1 || ti > 3 ) continue;
+		bsp_dump_append( buf, &off, "%-16d  [", li->cluster );
+		for ( j = 0; j < numLeafs; j++ ) {
+			const mnode_t *lj = &w->nodes[numDecision + j];
+			int tj = Q1_InferLeafType( lj );
+			if ( tj >= 1 && tj <= 3 ) continue;
+			if ( lj->cluster < 0 ) continue;
+			if ( Q1_MnodesAdjacent( li, lj ) )
+				bsp_dump_append( buf, &off, "%d ", lj->cluster );
+		}
+		bsp_dump_append( buf, &off, "]\n" );
+	}
+	bsp_dump_append( buf, &off, "\n" );
+
+	/* ---- ABOVE_LIQUID_VIEW_DOWN ---- */
+	if ( vis && numClusters > 0 && clusterBytes > 0 ) {
+		bsp_dump_append( buf, &off, "=== ABOVE_LIQUID_VIEW_DOWN ===\n" );
+		bsp_dump_append( buf, &off, "%-10s  %s\n",
+			"cluster", "liquid_clusters_in_pvs" );
+		for ( i = 0; i < numLeafs; i++ ) {
+			const mnode_t *li = &w->nodes[numDecision + i];
+			int ti = Q1_InferLeafType( li );
+			if ( ti != 0 ) continue; /* only empty (non-liquid, non-solid) leaves */
+			if ( li->cluster < 0 || li->cluster >= numClusters ) continue;
+			{
+				const byte *row  = vis + (size_t)li->cluster * clusterBytes;
+				int         any  = 0;
+				for ( j = 0; j < numLeafs; j++ ) {
+					const mnode_t *lj = &w->nodes[numDecision + j];
+					int tj = Q1_InferLeafType( lj );
+					if ( tj < 1 || tj > 3 ) continue;
+					if ( lj->cluster < 0 || lj->cluster >= numClusters ) continue;
+					if ( row[lj->cluster >> 3] & (1 << (lj->cluster & 7)) ) {
+						if ( !any ) {
+							bsp_dump_append( buf, &off, "%-10d  [", li->cluster );
+							any = 1;
+						}
+						bsp_dump_append( buf, &off, "%d ", lj->cluster );
+					}
+				}
+				if ( any )
+					bsp_dump_append( buf, &off, "]\n" );
+			}
+		}
+		bsp_dump_append( buf, &off, "\n" );
+	}
+
+	/* ---- SURFACES_PER_LIQUID ---- */
+	bsp_dump_append( buf, &off, "=== SURFACES_PER_LIQUID ===\n" );
+	bsp_dump_append( buf, &off, "%-6s  %-8s  %-6s  %s\n",
+		"idx", "cluster", "type", "shaders" );
+	for ( i = 0; i < numLeafs; i++ ) {
+		const mnode_t *li = &w->nodes[numDecision + i];
+		int ti = Q1_InferLeafType( li );
+		if ( ti < 1 || ti > 3 ) continue;
+		bsp_dump_append( buf, &off, "%-6d  %-8d  %-6s  ",
+			i, li->cluster, Q1_LeafTypeName( ti ) );
+		for ( j = 0; j < li->nummarksurfaces; j++ )
+			bsp_dump_append( buf, &off, "%s ",
+				li->firstmarksurface[j]->shader->name );
+		bsp_dump_append( buf, &off, "\n" );
+	}
+	bsp_dump_append( buf, &off, "\n" );
+
+	/* ---- ADJACENCY_SAMPLE ---- */
+	{
+		int pairs = 0;
+		bsp_dump_append( buf, &off, "=== ADJACENCY_SAMPLE (first 30 non-solid pairs) ===\n" );
+		bsp_dump_append( buf, &off, "%-6s  %-6s  %-10s  %-10s  %-6s  %s\n",
+			"leaf_a", "leaf_b", "cluster_a", "cluster_b", "type_a", "type_b" );
+		for ( i = 0; i < numLeafs && pairs < 30; i++ ) {
+			const mnode_t *la = &w->nodes[numDecision + i];
+			if ( la->cluster < 0 ) continue;
+			for ( j = i + 1; j < numLeafs && pairs < 30; j++ ) {
+				const mnode_t *lb = &w->nodes[numDecision + j];
+				if ( lb->cluster < 0 ) continue;
+				if ( !Q1_MnodesAdjacent( la, lb ) ) continue;
+				bsp_dump_append( buf, &off,
+					"%-6d  %-6d  %-10d  %-10d  %-6s  %s\n",
+					i, j, la->cluster, lb->cluster,
+					Q1_LeafTypeName( Q1_InferLeafType( la ) ),
+					Q1_LeafTypeName( Q1_InferLeafType( lb ) ) );
+				pairs++;
+			}
+		}
+	}
+
+	/* ---- BRUSHES ---- */
+	{
+		int numBrushes = ri.CM_NumBrushes();
+		int bi, si;
+		bsp_dump_append( buf, &off, "\n=== BRUSHES (%d total) ===\n", numBrushes );
+		bsp_dump_append( buf, &off, "%-6s  %-28s  %-12s  %-5s  %-20s  %s\n",
+			"idx", "shader", "contents", "sides", "bounds_min", "bounds_max" );
+		for ( bi = 0; bi < numBrushes; bi++ ) {
+			int         contents, shaderNum, numsides;
+			const char *shaderName;
+			float       bmins[3], bmaxs[3];
+			char        smin[32], smax[32];
+			ri.CM_GetBrushData( bi, &contents, &shaderNum, &shaderName,
+								bmins, bmaxs, &numsides );
+			if ( fabsf(bmins[0]) >= 65535.5f || fabsf(bmins[1]) >= 65535.5f ||
+				 fabsf(bmins[2]) >= 65535.5f || fabsf(bmaxs[0]) >= 65535.5f ||
+				 fabsf(bmaxs[1]) >= 65535.5f || fabsf(bmaxs[2]) >= 65535.5f ) {
+				Com_sprintf( smin, sizeof(smin), "UNBOUND" );
+				Com_sprintf( smax, sizeof(smax), "UNBOUND" );
+			} else {
+				Com_sprintf( smin, sizeof(smin), "%.0f,%.0f,%.0f",
+							 bmins[0], bmins[1], bmins[2] );
+				Com_sprintf( smax, sizeof(smax), "%.0f,%.0f,%.0f",
+							 bmaxs[0], bmaxs[1], bmaxs[2] );
+			}
+			bsp_dump_append( buf, &off,
+				"%-6d  %-28s  0x%08x    %-5d  %-20s  %s\n",
+				bi, shaderName, (unsigned)contents, numsides, smin, smax );
+			for ( si = 0; si < numsides; si++ ) {
+				int         pn, sShaderNum;
+				float       snormal[3], sdist;
+				const char *sShaderName;
+				ri.CM_GetBrushSideData( bi, si, &pn, snormal, &sdist,
+										&sShaderNum, &sShaderName );
+				bsp_dump_append( buf, &off,
+					"  side[%d]  pn=%-6d  n=(%.3f,%.3f,%.3f)  dist=%.3f  shader=%s\n",
+					si, pn, snormal[0], snormal[1], snormal[2], sdist, sShaderName );
+			}
+		}
+	}
+
+	/* ---- write file ---- */
+	Com_sprintf( path, sizeof(path), "maps/%s.bspdump", w->baseName );
+	ri.FS_WriteFile( path, buf, (int)off );
+	ri.Log( SEV_INFO, "BSP dump written to %s (%d bytes)\n", path, (int)off );
+
+	ri.Free( buf );
+}
+
+void Cmd_BSPDump_f( void ) {
+	if ( !tr.world ) {
+		ri.Log( SEV_INFO, "bspdump: no map loaded\n" );
+		return;
+	}
+	Q1_WriteBSPDump();
+}
+
+
+/*
+===========
+ParsePropFace
+
+Face parser for standalone Q1 BSP props (e.g. maps/b_explob.bsp).
+Resolves the shader full-bright (LIGHTMAP_WHITEIMAGE) so the Q1 LS
+pipeline never fires, then delegates geometry to ParseFaceCommon.
+No lightmap atlas, no anim chains, no lightstyle slots in Faz 1.
+===========
+*/
+static void ParsePropFace( const dsurface_t *ds, const drawVert_t *verts, int numPoints,
+                           msurface_t *surf, int *srcIndexes, int numIndexes,
+                           const char *shaderName, int lightmapNum ) {
+	srfSurfaceFace_t *cv;
+	shader_t *shader = R_FindShader( shaderName, lightmapNum, qtrue );
+	if ( shader->defaultShader )
+		shader = tr.defaultShader;
+
+	cv = ParseFaceCommon( ds, verts, numPoints, surf, srcIndexes, numIndexes,
+	                      shader, lightmapNum, 0.0f, 0.0f, NULL );
+
+	// Style slot 0 = Q1 "always-on" style; lightstyleValues[0] = 1.0 at runtime.
+	// With a real prop lightmap the Q1 LS pipeline multiplies by 1.0 — correct baked light.
+	// Full-bright fallback (LIGHTMAP_WHITEIMAGE) keeps all slots at 255 so the pipeline
+	// is skipped entirely (bundle[1].lightmap stays LIGHTMAP_INDEX_NONE).
+	if ( lightmapNum != LIGHTMAP_WHITEIMAGE )
+		cv->lightStyles[0] = 0;
+
+	surf->fogIndex = 0;
+}
+
+
+/*
+===========
+R_RegisterBSP
+
+Model loader for standalone Q1 BSP prop files (e.g. maps/b_explob.bsp).
+Registered in modelLoaders[] as "bsp" so RE_RegisterModel dispatches here.
+
+Faz 1: full-bright only; no lightmap baking.  All faces become LIGHTMAP_WHITEIMAGE
+shaders so the Q1 LS pipeline is bypassed and surfaces render at full brightness.
+===========
+*/
+qhandle_t R_RegisterBSP( const char *name, model_t *mod ) {
+	bspFile_t  *bsp      = NULL;
+	bmodel_t   *bmodel;
+	msurface_t *surfs;
+	int         i, numFaces;
+	int         allocSize;
+
+	if ( !ri.BSP_Load( name, &bsp, BSP_LOAD_FLAG_RENDER_ONLY ) || !bsp ) {
+		ri.Log( SEV_WARN, "R_RegisterBSP: failed to load '%s'\n", name );
+		return 0;
+	}
+
+	if ( bsp->numSubModels < 1 ) {
+		ri.Log( SEV_WARN, "R_RegisterBSP: '%s' has no submodels\n", name );
+		ri.BSP_Free( bsp );
+		return 0;
+	}
+
+	const dmodel_t *dm = &bsp->subModels[0];
+
+	// Populate the Q1 texture cache with this prop's embedded miptex data so that
+	// R_Q1_BuildSyntheticShader can look up the textures when ParsePropFace calls
+	// R_FindShader.  The world's PrepareTextures was called earlier by RE_LoadWorldMap;
+	// since all world shaders are already in the hash table, resetting the cache here
+	// only affects shaders not yet looked up (i.e. new prop shaders).
+	R_Q1_PrepareTextures( bsp );
+
+	// Upload this prop's lightmap pages into tr.propLightmaps[].
+	// propLmBase is the starting index in tr.propLightmaps[] for these pages;
+	// -1 means the prop has no lightmap data (surfaces fall back to full-bright).
+	int propLmBase = R_UploadPropLightmaps( bsp );
+
+	numFaces = 0;
+	for ( i = 0; i < LittleLong( dm->numSurfaces ); i++ ) {
+		const dsurface_t *ds = &bsp->surfaces[ LittleLong( dm->firstSurface ) + i ];
+		if ( LittleLong( ds->surfaceType ) == MST_PLANAR )
+			numFaces++;
+	}
+
+	allocSize = (int)(sizeof(bmodel_t) + sizeof(msurface_t) * numFaces);
+	bmodel    = ri.Hunk_Alloc( allocSize, h_low );
+	surfs     = (msurface_t *)(bmodel + 1);
+
+	bmodel->firstSurface = surfs;
+	bmodel->numSurfaces  = 0;
+	bmodel->bounds[0][0] = LittleFloat( dm->mins[0] );
+	bmodel->bounds[0][1] = LittleFloat( dm->mins[1] );
+	bmodel->bounds[0][2] = LittleFloat( dm->mins[2] );
+	bmodel->bounds[1][0] = LittleFloat( dm->maxs[0] );
+	bmodel->bounds[1][1] = LittleFloat( dm->maxs[1] );
+	bmodel->bounds[1][2] = LittleFloat( dm->maxs[2] );
+
+	for ( i = 0; i < LittleLong( dm->numSurfaces ); i++ ) {
+		const dsurface_t *ds = &bsp->surfaces[ LittleLong( dm->firstSurface ) + i ];
+		if ( LittleLong( ds->surfaceType ) != MST_PLANAR )
+			continue;
+
+		const char       *shaderName = bsp->shaders[ LittleLong( ds->shaderNum ) ].shader;
+		const drawVert_t *verts      = bsp->drawVerts + LittleLong( ds->firstVert );
+		int              *srcIndexes = bsp->drawIndexes + LittleLong( ds->firstIndex );
+		int               dsLmNum   = LittleLong( ds->lightmapNum );
+
+		// Per-surface lightmap index: LIGHTMAP_PROP_OFFSET + base + page_within_this_prop.
+		// ds->lightmapNum holds the page index baked by bsp_q1.c; -1 = no lightmap.
+		int propLmIndex = ( propLmBase >= 0 && dsLmNum >= 0 )
+			? LIGHTMAP_PROP_OFFSET + propLmBase + dsLmNum
+			: LIGHTMAP_WHITEIMAGE;
+
+		ParsePropFace( ds, verts, LittleLong( ds->numVerts ),
+		               &surfs[ bmodel->numSurfaces ],
+		               srcIndexes, LittleLong( ds->numIndexes ),
+		               shaderName, propLmIndex );
+		bmodel->numSurfaces++;
+	}
+
+	mod->type     = MOD_BRUSH;
+	mod->bmodel   = bmodel;
+	mod->dataSize = allocSize;
+
+	ri.BSP_Free( bsp );
+
+	ri.Log( SEV_INFO, "R_RegisterBSP: '%s' loaded (%d faces)\n", name, bmodel->numSurfaces );
+	return mod->index;
 }

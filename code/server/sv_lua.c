@@ -22,19 +22,30 @@ typedef struct {
 	float aimHeight;   // units above entity origin to aim (0=feet, 28=center mass, 56=top)
 } svLuaCachedAttack_t;
 
+// Permanent per-character record, populated once at engine start by SV_Characters_Preload.
+// Lives in s_templates[] which is never cleared by SV_Lua_FreeCharacter.
 typedef struct {
 	qboolean inuse;
-	char name[MAX_QPATH];
-	float skillNormalized;
-	int profileRef;
-	int botRef;
-	qboolean hasDecideFn;   // qtrue if character's own bot table defines a 'decide' function
-	char stringValues[SV_WB_MAX_INDEX][MAX_QPATH];
-	float floatValues[SV_WB_MAX_INDEX];
+	char     name[MAX_QPATH];
+	char     displayName[64];
+} svLuaCharacterTemplate_t;
+
+// Per-bot-session state, allocated by SV_Lua_LoadCharacter and freed by SV_Lua_FreeCharacter.
+// May have multiple live instances for the same character (different skill levels).
+typedef struct {
+	qboolean inuse;
+	int      templateIdx;   // index into s_templates[]
+	char     name[MAX_QPATH];
+	float    skillNormalized;
+	int      profileRef;
+	int      botRef;
+	qboolean hasDecideFn;
+	char     stringValues[SV_WB_MAX_INDEX][MAX_QPATH];
+	float    floatValues[SV_WB_MAX_INDEX];
 	qboolean floatValid[SV_WB_MAX_INDEX];
 	svLuaCachedAttack_t cachedAttacks[SV_WB_MAX_ATTACKS];
-	int cachedAttackCount;
-	char displayName[64];   // cached from display_name field; populated by SV_Lua_LoadCharacter
+	int      cachedAttackCount;
+	char     displayName[64];
 } svLuaCharacter_t;
 
 typedef struct {
@@ -69,19 +80,16 @@ static const struct { const char *name; int index; } s_characteristicNames[] = {
 	{ "skill_plasma_rifle",      CHARACTERISTIC_AIM_SKILL_PLASMAGUN },
 	{ "insult",                   CHARACTERISTIC_CHAT_INSULT },
 	{ "misc",                     CHARACTERISTIC_CHAT_MISC },
-	{ "startendlevel",            CHARACTERISTIC_CHAT_STARTENDLEVEL },
-	{ "enterexitgame",            CHARACTERISTIC_CHAT_ENTEREXITGAME },
+	{ "level_start",              CHARACTERISTIC_CHAT_STARTENDLEVEL },
+	{ "game_enter",               CHARACTERISTIC_CHAT_ENTEREXITGAME },
 	{ "kill",                     CHARACTERISTIC_CHAT_KILL },
 	{ "death",                    CHARACTERISTIC_CHAT_DEATH },
-	{ "enemysuicide",             CHARACTERISTIC_CHAT_ENEMYSUICIDE },
-	{ "hittalking",               CHARACTERISTIC_CHAT_HITTALKING },
-	{ "hitnodeath",               CHARACTERISTIC_CHAT_HITNODEATH },
-	{ "hitnokill",                CHARACTERISTIC_CHAT_HITNOKILL },
+	{ "enemy_suicide",            CHARACTERISTIC_CHAT_ENEMYSUICIDE },
+	{ "hit_talking",              CHARACTERISTIC_CHAT_HITTALKING },
+	{ "hit_nodeath",              CHARACTERISTIC_CHAT_HITNODEATH },
+	{ "hit_nokill",               CHARACTERISTIC_CHAT_HITNOKILL },
 	{ "random",                   CHARACTERISTIC_CHAT_RANDOM },
 	{ "reply",                    CHARACTERISTIC_CHAT_REPLY },
-	{ "croucher",                     CHARACTERISTIC_CROUCHER },
-	{ "jumper",                       CHARACTERISTIC_JUMPER },
-	{ "weaponjumping",                CHARACTERISTIC_WEAPONJUMPING },
 	{ "grapple_user",                 CHARACTERISTIC_GRAPPLE_USER },
 	{ "aggression",                   CHARACTERISTIC_AGGRESSION },
 	{ "selfpreservation",             CHARACTERISTIC_SELFPRESERVATION },
@@ -111,6 +119,8 @@ typedef struct {
 	int  lastPrintTime;
 } svLuaErrThrottle_t;
 
+static svLuaCharacterTemplate_t s_templates[SV_WB_MAX_CHARACTERS];
+static int s_numTemplates;
 static svLuaCharacter_t s_characters[SV_WB_MAX_CHARACTERS];
 static svLuaBotBinding_t s_bots[MAX_CLIENTS];
 static svLuaErrThrottle_t s_errThrottle[SV_WB_ERR_THROTTLE_SLOTS];
@@ -173,12 +183,44 @@ static void SV_Lua_BotSetDefaultProfile( float *profileValues ) {
 	profileValues[WB_PROFILE_ACCURACY] = 0.5f;
 	profileValues[WB_PROFILE_LEAD_SKILL] = 0.5f;
 	profileValues[WB_PROFILE_STRAFE_JUMP] = 0.0f;
-	profileValues[WB_PROFILE_ROCKET_JUMP] = 0.0f;
-	profileValues[WB_PROFILE_BUNNY_HOP] = 0.0f;
-	profileValues[WB_PROFILE_DODGE_ON_FIRE] = 0.5f;
+	profileValues[WB_PROFILE_WEAPON_JUMPING] = 0.5f;
+	profileValues[WB_PROFILE_JUMPER] = 0.0f;
+	profileValues[WB_PROFILE_DODGING] = 0.5f;
 	profileValues[WB_PROFILE_USE_JUMPPADS] = 1.0f;
 	profileValues[WB_PROFILE_SWIM] = 1.0f;
 	profileValues[WB_PROFILE_FIRETHROTTLE] = 0.5f;
+	profileValues[WB_PROFILE_GRAPPLE] = 0.0f;
+	profileValues[WB_PROFILE_NAVIGATION] = 0.5f;
+	profileValues[WB_PROFILE_BIAS_MG] = 1.0f;
+	profileValues[WB_PROFILE_BIAS_SG] = 1.0f;
+	profileValues[WB_PROFILE_BIAS_GL] = 1.0f;
+	profileValues[WB_PROFILE_BIAS_RL] = 1.0f;
+	profileValues[WB_PROFILE_BIAS_LG] = 1.0f;
+	profileValues[WB_PROFILE_BIAS_RG] = 1.0f;
+	profileValues[WB_PROFILE_BIAS_PG] = 1.0f;
+	profileValues[WB_PROFILE_SKILL_MG] = 0.5f;
+	profileValues[WB_PROFILE_SKILL_SG] = 0.5f;
+	profileValues[WB_PROFILE_SKILL_GL] = 0.5f;
+	profileValues[WB_PROFILE_SKILL_RL] = 0.5f;
+	profileValues[WB_PROFILE_SKILL_LG] = 0.5f;
+	profileValues[WB_PROFILE_SKILL_RG] = 0.5f;
+	profileValues[WB_PROFILE_SKILL_PG] = 0.5f;
+	// C.1: per-weapon accuracy sentinels (-1.0f = inherit from fallback chain)
+	profileValues[WB_PROFILE_ACCURACY_MACHINEGUN_S0]       = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_MACHINEGUN_S1]       = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_SHOTGUN_S0]          = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_SHOTGUN_S1]          = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_GRENADE_LAUNCHER_S0] = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_GRENADE_LAUNCHER_S1] = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_ROCKET_LAUNCHER_S0]  = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_ROCKET_LAUNCHER_S1]  = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_LIGHTNING_GUN_S0]    = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_LIGHTNING_GUN_S1]    = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_RAILGUN_S0]          = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_RAILGUN_S1]          = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_PLASMA_RIFLE_S0]     = -1.0f;
+	profileValues[WB_PROFILE_ACCURACY_PLASMA_RIFLE_S1]     = -1.0f;
+	profileValues[WB_PROFILE_CHAT_INSULT]                  = 0.0f;
 }
 
 static float SV_Lua_BotClamp01( float value ) {
@@ -383,6 +425,22 @@ static void SV_Lua_BotInitCachedProfile( int clientNum ) {
 		lua_getfield( L, subTableIndex, "firethrottle" );
 		profile[WB_PROFILE_FIRETHROTTLE] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, profile[WB_PROFILE_FIRETHROTTLE] ) );
 		lua_pop( L, 1 );
+
+		lua_getfield( L, subTableIndex, "grapple_user" );
+		profile[WB_PROFILE_GRAPPLE] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, profile[WB_PROFILE_GRAPPLE] ) );
+		lua_pop( L, 1 );
+
+		lua_getfield( L, subTableIndex, "alertness" );
+		profile[WB_PROFILE_ALERTNESS] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, 0.5f ) );
+		lua_pop( L, 1 );
+
+		lua_getfield( L, subTableIndex, "attack_skill" );
+		profile[WB_PROFILE_ATTACK_SKILL] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, 0.5f ) );
+		lua_pop( L, 1 );
+
+		lua_getfield( L, subTableIndex, "view_maxchange" );
+		profile[WB_PROFILE_VIEW_MAXCHANGE] = SV_Lua_ResolveFloat( L, -1, skill, 1800.0f ); // deg/s cap; not clamped to [0,1]
+		lua_pop( L, 1 );
 	}
 	lua_pop( L, 1 );
 
@@ -399,12 +457,71 @@ static void SV_Lua_BotInitCachedProfile( int clientNum ) {
 		lua_getfield( L, subTableIndex, "accuracy" );
 		profile[WB_PROFILE_ACCURACY] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, profile[WB_PROFILE_ACCURACY] ) );
 		lua_pop( L, 1 );
+
+		// B.1: weapon bias multipliers (aim.weapon_bias_<key>; default 1.0 = neutral)
+		#define READ_BIAS(key, field) \
+			lua_getfield( L, subTableIndex, key ); \
+			if ( lua_isnumber( L, -1 ) ) profile[field] = (float)lua_tonumber( L, -1 ); \
+			lua_pop( L, 1 );
+		READ_BIAS( "weapon_bias_mg", WB_PROFILE_BIAS_MG )
+		READ_BIAS( "weapon_bias_sg", WB_PROFILE_BIAS_SG )
+		READ_BIAS( "weapon_bias_gl", WB_PROFILE_BIAS_GL )
+		READ_BIAS( "weapon_bias_rl", WB_PROFILE_BIAS_RL )
+		READ_BIAS( "weapon_bias_lg", WB_PROFILE_BIAS_LG )
+		READ_BIAS( "weapon_bias_rg", WB_PROFILE_BIAS_RG )
+		READ_BIAS( "weapon_bias_pg", WB_PROFILE_BIAS_PG )
+		#undef READ_BIAS
+
+		// B.2: per-weapon aim skill (aim.skill_<weapon>; default = WB_PROFILE_ACCURACY)
+		profile[WB_PROFILE_SKILL_MG] = profile[WB_PROFILE_ACCURACY];
+		profile[WB_PROFILE_SKILL_SG] = profile[WB_PROFILE_ACCURACY];
+		profile[WB_PROFILE_SKILL_GL] = profile[WB_PROFILE_ACCURACY];
+		profile[WB_PROFILE_SKILL_RL] = profile[WB_PROFILE_ACCURACY];
+		profile[WB_PROFILE_SKILL_LG] = profile[WB_PROFILE_ACCURACY];
+		profile[WB_PROFILE_SKILL_RG] = profile[WB_PROFILE_ACCURACY];
+		profile[WB_PROFILE_SKILL_PG] = profile[WB_PROFILE_ACCURACY];
+		#define READ_SKILL(key, field) \
+			lua_getfield( L, subTableIndex, key ); \
+			profile[field] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, profile[field] ) ); \
+			lua_pop( L, 1 );
+		READ_SKILL( "skill_machinegun",       WB_PROFILE_SKILL_MG )
+		READ_SKILL( "skill_shotgun",          WB_PROFILE_SKILL_SG )
+		READ_SKILL( "skill_grenade_launcher", WB_PROFILE_SKILL_GL )
+		READ_SKILL( "skill_rocket_launcher",  WB_PROFILE_SKILL_RL )
+		READ_SKILL( "skill_lightning_gun",    WB_PROFILE_SKILL_LG )
+		READ_SKILL( "skill_railgun",          WB_PROFILE_SKILL_RG )
+		READ_SKILL( "skill_plasma_rifle",     WB_PROFILE_SKILL_PG )
+		#undef READ_SKILL
+
+		// C.1: per-weapon accuracy (aim.accuracy_<weapon>_pri and aim.accuracy_<weapon>_sec).
+		// Overrides sentinel only when the Lua key is present; absent keys keep -1.0f fallback.
+		// _sec = secondary fire accuracy; inherits _pri slot if absent.
+		#define READ_ACCURACY(key, field) \
+			lua_getfield( L, subTableIndex, key ); \
+			if ( !lua_isnil( L, -1 ) ) \
+				profile[field] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, 0.5f ) ); \
+			lua_pop( L, 1 );
+		READ_ACCURACY( "accuracy_machinegun_pri",          WB_PROFILE_ACCURACY_MACHINEGUN_S0       )
+		READ_ACCURACY( "accuracy_machinegun_sec",          WB_PROFILE_ACCURACY_MACHINEGUN_S1       )
+		READ_ACCURACY( "accuracy_shotgun_pri",             WB_PROFILE_ACCURACY_SHOTGUN_S0          )
+		READ_ACCURACY( "accuracy_shotgun_sec",             WB_PROFILE_ACCURACY_SHOTGUN_S1          )
+		READ_ACCURACY( "accuracy_grenade_launcher_pri",    WB_PROFILE_ACCURACY_GRENADE_LAUNCHER_S0 )
+		READ_ACCURACY( "accuracy_grenade_launcher_sec",    WB_PROFILE_ACCURACY_GRENADE_LAUNCHER_S1 )
+		READ_ACCURACY( "accuracy_rocket_launcher_pri",     WB_PROFILE_ACCURACY_ROCKET_LAUNCHER_S0  )
+		READ_ACCURACY( "accuracy_rocket_launcher_sec",     WB_PROFILE_ACCURACY_ROCKET_LAUNCHER_S1  )
+		READ_ACCURACY( "accuracy_lightning_gun_pri",       WB_PROFILE_ACCURACY_LIGHTNING_GUN_S0    )
+		READ_ACCURACY( "accuracy_lightning_gun_sec",       WB_PROFILE_ACCURACY_LIGHTNING_GUN_S1    )
+		READ_ACCURACY( "accuracy_railgun_pri",             WB_PROFILE_ACCURACY_RAILGUN_S0          )
+		READ_ACCURACY( "accuracy_railgun_sec",             WB_PROFILE_ACCURACY_RAILGUN_S1          )
+		READ_ACCURACY( "accuracy_plasma_rifle_pri",        WB_PROFILE_ACCURACY_PLASMA_RIFLE_S0     )
+		READ_ACCURACY( "accuracy_plasma_rifle_sec",        WB_PROFILE_ACCURACY_PLASMA_RIFLE_S1     )
+		#undef READ_ACCURACY
 	}
 	lua_pop( L, 1 );
 
 	// --- movement → WB_PROFILE_* ---
 	// Threshold convention: number means "enable at skill >= N"; true/false = always on/off.
-	// dodge_on_fire is a numeric lerp, not a threshold.
+	// weapon_jumping and dodging are numeric lerps, not thresholds.
 	lua_getfield( L, botTableIndex, "movement" );
 	if ( lua_istable( L, -1 ) ) {
 		subTableIndex = lua_gettop( L );
@@ -413,16 +530,16 @@ static void SV_Lua_BotInitCachedProfile( int clientNum ) {
 		profile[WB_PROFILE_STRAFE_JUMP] = SV_Lua_ResolveThreshold( L, -1, skill, profile[WB_PROFILE_STRAFE_JUMP] > 0.5f ) ? 1.0f : 0.0f;
 		lua_pop( L, 1 );
 
-		lua_getfield( L, subTableIndex, "rocket_jump" );
-		profile[WB_PROFILE_ROCKET_JUMP] = SV_Lua_ResolveThreshold( L, -1, skill, profile[WB_PROFILE_ROCKET_JUMP] > 0.5f ) ? 1.0f : 0.0f;
+		lua_getfield( L, subTableIndex, "weapon_jumping" );
+		profile[WB_PROFILE_WEAPON_JUMPING] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, profile[WB_PROFILE_WEAPON_JUMPING] ) );
 		lua_pop( L, 1 );
 
-		lua_getfield( L, subTableIndex, "bunny_hop" );
-		profile[WB_PROFILE_BUNNY_HOP] = SV_Lua_ResolveThreshold( L, -1, skill, profile[WB_PROFILE_BUNNY_HOP] > 0.5f ) ? 1.0f : 0.0f;
+		lua_getfield( L, subTableIndex, "jumper" );
+		profile[WB_PROFILE_JUMPER] = SV_Lua_ResolveThreshold( L, -1, skill, profile[WB_PROFILE_JUMPER] > 0.5f ) ? 1.0f : 0.0f;
 		lua_pop( L, 1 );
 
-		lua_getfield( L, subTableIndex, "dodge_on_fire" );
-		profile[WB_PROFILE_DODGE_ON_FIRE] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, profile[WB_PROFILE_DODGE_ON_FIRE] ) );
+		lua_getfield( L, subTableIndex, "dodging" );
+		profile[WB_PROFILE_DODGING] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, profile[WB_PROFILE_DODGING] ) );
 		lua_pop( L, 1 );
 
 		lua_getfield( L, subTableIndex, "use_jumppads" );
@@ -431,6 +548,21 @@ static void SV_Lua_BotInitCachedProfile( int clientNum ) {
 
 		lua_getfield( L, subTableIndex, "swim" );
 		profile[WB_PROFILE_SWIM] = SV_Lua_ResolveThreshold( L, -1, skill, profile[WB_PROFILE_SWIM] > 0.5f ) ? 1.0f : 0.0f;
+		lua_pop( L, 1 );
+
+		lua_getfield( L, subTableIndex, "navigation_skill" );
+		profile[WB_PROFILE_NAVIGATION] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, profile[WB_PROFILE_NAVIGATION] ) );
+		lua_pop( L, 1 );
+	}
+	lua_pop( L, 1 );
+
+	// --- chats → WB_PROFILE_CHAT_* ---
+	lua_getfield( L, botTableIndex, "chats" );
+	if ( lua_istable( L, -1 ) ) {
+		subTableIndex = lua_gettop( L );
+
+		lua_getfield( L, subTableIndex, "insult" );
+		profile[WB_PROFILE_CHAT_INSULT] = SV_Lua_BotClamp01( SV_Lua_ResolveFloat( L, -1, skill, 0.0f ) );
 		lua_pop( L, 1 );
 	}
 	lua_pop( L, 1 );
@@ -517,7 +649,7 @@ static int SV_Lua_Q3NowPrint( lua_State *L ) {
 		}
 	}
 
-	Com_Printf( "BotLua: %s\n", QS_CStr(&message) );
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "BotLua: %s\n", QS_CStr(&message) );
 	return 0;
 }
 
@@ -584,18 +716,26 @@ static void SV_Lua_InitCharacterStrings( svLuaCharacter_t *character, const char
 	Q_strncpyz( character->stringValues[CHARACTERISTIC_CHAT_NAME], characterName, sizeof( character->stringValues[CHARACTERISTIC_CHAT_NAME] ) );
 }
 
-// Pure read-only handle lookup — does NOT allocate or mutate character state.
-static int SV_Lua_FindCharacterHandle( const char *characterName ) {
+// Find an existing template by name, or create a new one.
+// Returns a 0-based template index, or -1 if the template table is full.
+static int SV_Lua_GetOrCreateTemplate( const char *characterName ) {
 	int i;
-	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
-		if ( s_characters[i].inuse && !Q_stricmp( s_characters[i].name, characterName ) ) {
+	for ( i = 0; i < s_numTemplates; i++ ) {
+		if ( s_templates[i].inuse && !Q_stricmp( s_templates[i].name, characterName ) )
 			return i;
-		}
 	}
-	return 0;
+	if ( s_numTemplates >= SV_WB_MAX_CHARACTERS ) {
+		COM_WARN( LOG_CAT_SERVER, "BotLua: template table full, cannot register '%s'\n", characterName );
+		return -1;
+	}
+	i = s_numTemplates++;
+	s_templates[i].inuse = qtrue;
+	Q_strncpyz( s_templates[i].name, characterName, sizeof( s_templates[i].name ) );
+	s_templates[i].displayName[0] = '\0';
+	return i;
 }
 
-static void SV_Characters_Preload( void );  // defined after SV_Lua_LoadCharacter
+static int SV_Characters_Preload( void );  // defined after SV_Lua_LoadCharacter
 
 static void SV_Lua_ReleaseCharacterProfileRef( int characterHandle ) {
 	if ( !UserVM_GetState() ) {
@@ -630,8 +770,12 @@ static void SV_Lua_ReleaseCharacterBotRef( int characterHandle ) {
 static void SV_Lua_ResetState( void ) {
 	int i;
 
+	memset( s_templates, 0, sizeof( s_templates ) );
+	s_numTemplates = 0;
+
 	for ( i = 0; i < SV_WB_MAX_CHARACTERS; i++ ) {
 		s_characters[i].inuse = qfalse;
+		s_characters[i].templateIdx = -1;
 		s_characters[i].name[0] = '\0';
 		s_characters[i].skillNormalized = 0.0f;
 		s_characters[i].profileRef = LUA_NOREF;
@@ -656,26 +800,24 @@ static void SV_Lua_ResetState( void ) {
 }
 
 static int SV_Lua_GetOrCreateCharacterHandle( const char *characterName, float skillNormalized ) {
-	int i;
+	int i, templateIdx;
 
 	if ( !characterName || !characterName[0] ) {
 		return 0;
 	}
 
-	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
-		if ( s_characters[i].inuse && !Q_stricmp( s_characters[i].name, characterName ) ) {
-			s_characters[i].skillNormalized = skillNormalized;
-			memset( s_characters[i].floatValues, 0, sizeof( s_characters[i].floatValues ) );
-			memset( s_characters[i].floatValid, 0, sizeof( s_characters[i].floatValid ) );
-			s_characters[i].cachedAttackCount = 0;
-			SV_Lua_InitCharacterStrings( &s_characters[i], characterName );
-			return i;
-		}
+	// Ensure a template entry exists for this character name.
+	templateIdx = SV_Lua_GetOrCreateTemplate( characterName );
+	if ( templateIdx < 0 ) {
+		return 0;
 	}
 
+	// Always allocate a fresh instance slot — never reuse by name.
+	// Multiple bots of the same character each need independent floatValues/skill state.
 	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
 		if ( !s_characters[i].inuse ) {
 			s_characters[i].inuse = qtrue;
+			s_characters[i].templateIdx = templateIdx;
 			Q_strncpyz( s_characters[i].name, characterName, sizeof( s_characters[i].name ) );
 			s_characters[i].skillNormalized = skillNormalized;
 			s_characters[i].profileRef = LUA_NOREF;
@@ -688,7 +830,7 @@ static int SV_Lua_GetOrCreateCharacterHandle( const char *characterName, float s
 		}
 	}
 
-	Com_Printf( S_COLOR_YELLOW "BotLua: character table full, cannot register '%s'\n", characterName );
+	COM_WARN( LOG_CAT_SERVER, "BotLua: character table full, cannot register '%s'\n", characterName );
 	return 0;
 }
 
@@ -700,7 +842,7 @@ void SV_Lua_Init( void ) {
 
 	L = UserVM_GetState();
 	if ( !L ) {
-		Com_Printf( S_COLOR_YELLOW "BotLua: User VM not initialized\n" );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: User VM not initialized\n" );
 		return;
 	}
 
@@ -731,18 +873,28 @@ void SV_Lua_Init( void ) {
 	status = lua_pcall( L, 1, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		Com_Printf( S_COLOR_YELLOW "BotLua: failed loading scripts/char_framework.lua (%s)\n", err ? err : "unknown" );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: failed loading scripts/char_framework.lua (%s)\n", err ? err : "unknown" );
 	}
 	lua_settop( L, 0 );
 
-	Com_Printf( "BotLua: initialized\n" );
-
-	SV_Characters_Preload();
+	{
+		int loaded = SV_Characters_Preload();
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "WiredCore/Scripting: BotLua initialized (preloaded %d character(s))\n", loaded );
+	}
 }
 
 void SV_Lua_Shutdown( void ) {
 	/* User VM owns the lua_State; do not call lua_close here. */
 	SV_Lua_ResetState();
+}
+
+void SV_Lua_EnsureInit( void ) {
+	if ( UserVM_GetState() != NULL ) {
+		return;
+	}
+	UserVM_Init();
+	SV_RconLua_Init();
+	SV_Lua_Init();
 }
 
 // Look up a string key in s_characteristicNames[], returning the CHARACTERISTIC_* index
@@ -883,7 +1035,7 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	lua_getfield( L, -1, "load_character" );
 	lua_remove( L, -2 );
 	if ( !lua_isfunction( L, -1 ) ) {
-		Com_Printf( S_COLOR_YELLOW "BotLua: q3now.load_character not available\n" );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: q3now.load_character not available\n" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
@@ -893,14 +1045,14 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	status = lua_pcall( L, 2, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		Com_Printf( S_COLOR_YELLOW "BotLua: failed loading character '%s' (%s)\n", characterName, err ? err : "unknown" );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: failed loading character '%s' (%s)\n", characterName, err ? err : "unknown" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
 	}
 
 	if ( !lua_istable( L, -1 ) ) {
-		Com_Printf( S_COLOR_YELLOW "BotLua: load_character('%s') must return a table\n", characterName );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: load_character('%s') must return a table\n", characterName );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
@@ -940,6 +1092,15 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	if ( !s_characters[handle].displayName[0] )
 		Q_strncpyz( s_characters[handle].displayName, characterName,
 			sizeof( s_characters[handle].displayName ) );
+
+	// Persist displayName into the template so it survives after this instance is freed.
+	if ( s_characters[handle].templateIdx >= 0 &&
+	     s_characters[handle].templateIdx < s_numTemplates &&
+	     !s_templates[s_characters[handle].templateIdx].displayName[0] ) {
+		Q_strncpyz( s_templates[s_characters[handle].templateIdx].displayName,
+		            s_characters[handle].displayName,
+		            sizeof( s_templates[s_characters[handle].templateIdx].displayName ) );
+	}
 
 	// nicknames[1] is the primary botlib-facing name (chat matching, addbot, /char).
 	// All entries in the array are valid aliases; botlib queries CHARACTERISTIC_CHAT_NAME → nicknames[1].
@@ -982,7 +1143,7 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	lua_getfield( L, -1, "load_bot" );
 	lua_remove( L, -2 );
 	if ( !lua_isfunction( L, -1 ) ) {
-		Com_Printf( S_COLOR_YELLOW "BotLua: q3now.load_bot not available\n" );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: q3now.load_bot not available\n" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
@@ -991,13 +1152,13 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	status = lua_pcall( L, 1, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		Com_Printf( S_COLOR_YELLOW "BotLua: load_bot('%s') failed (%s)\n", characterName, err ? err : "unknown" );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: load_bot('%s') failed (%s)\n", characterName, err ? err : "unknown" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
 	}
 	if ( !lua_istable( L, -1 ) ) {
-		Com_Printf( S_COLOR_YELLOW "BotLua: load_bot('%s') must return a table\n", characterName );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: load_bot('%s') must return a table\n", characterName );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
@@ -1174,7 +1335,7 @@ int SV_Lua_BotThink( int clientNum, float thinktime ) {
 	status = lua_pcall( L, 2, 0, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		Com_Printf( S_COLOR_YELLOW "BotLua: think error for client %d (%s)\n", clientNum, err ? err : "unknown" );
+		COM_WARN( LOG_CAT_SERVER, "BotLua: think error for client %d (%s)\n", clientNum, err ? err : "unknown" );
 		lua_settop( L, 0 );
 		return qfalse;
 	}
@@ -1232,7 +1393,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 	{
 		int debugWeapon = Cvar_VariableIntegerValue( "sv_botDebugWeapon" );
 		if ( debugWeapon ) {
-			Com_Printf( "^3[BotPickWeapon] client=%d cachedAttackCount=%d\n",
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "^3[BotPickWeapon] client=%d cachedAttackCount=%d\n",
 				clientNum, s_characters[characterHandle].cachedAttackCount );
 		}
 
@@ -1241,7 +1402,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 			weapon = bg_attacklist[idx].weapon;
 
 			if ( debugWeapon ) {
-				Com_Printf( "  [%d] shortname='%s' weapon=%d aim_height=%.0f has_weapon=%d has_ammo=%d\n",
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "  [%d] shortname='%s' weapon=%d aim_height=%.0f has_weapon=%d has_ammo=%d\n",
 					i,
 					bg_attacklist[idx].shortname,
 					weapon,
@@ -1253,7 +1414,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 			if ( weapon == WP_GAUNTLET ) {
 				// gauntlet: always usable, no inventory check
 				if ( debugWeapon ) {
-					Com_Printf( "  ^2=> selected '%s' (gauntlet fallback)\n", bg_attacklist[idx].shortname );
+					Com_Log( SEV_INFO, LOG_CAT_SERVER, "  ^2=> selected '%s' (gauntlet fallback)\n", bg_attacklist[idx].shortname );
 				}
 				if ( weaponKey && weaponKeySize > 0 ) {
 					Q_strncpyz( weaponKey, bg_attacklist[idx].shortname, weaponKeySize );
@@ -1263,7 +1424,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 
 			if ( ctx->weapons[weapon] && ctx->ammo[weapon] > 0 ) {
 				if ( debugWeapon ) {
-					Com_Printf( "  ^2=> selected '%s' weapon=%d\n", bg_attacklist[idx].shortname, weapon );
+					Com_Log( SEV_INFO, LOG_CAT_SERVER, "  ^2=> selected '%s' weapon=%d\n", bg_attacklist[idx].shortname, weapon );
 				}
 				if ( weaponKey && weaponKeySize > 0 ) {
 					Q_strncpyz( weaponKey, bg_attacklist[idx].shortname, weaponKeySize );
@@ -1274,7 +1435,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 	}
 
 	if ( Cvar_VariableIntegerValue( "sv_botDebugWeapon" ) ) {
-		Com_Printf( "  ^1=> no attack selected (fallback to default 'mg')\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  ^1=> no attack selected (fallback to default 'mg')\n" );
 	}
 
 	return qfalse;
@@ -1310,6 +1471,67 @@ float SV_Lua_BotGetAttackAimHeight( int clientNum, int weaponNum ) {
 	return 28.0f;
 }
 
+/* Scale a position-based item score by how much the bot actually needs the item.
+ * Returns 0 when the bot cannot benefit at all (full health, weapon owned, etc.).
+ * Uses ps directly — no AAS dependency. */
+static int SV_Lua_ApplyNeedMultiplier( int clientNum, const wbItemEvalCtx_t *ctx, int score ) {
+	playerState_t *ps;
+	float mult = 1.0f;
+
+	ps = SV_GameClientNum( clientNum );
+	if ( !ps ) {
+		return score;
+	}
+
+	switch ( ctx->giType ) {
+	case IT_HEALTH: {
+		int cur = ps->stats[STAT_HEALTH];
+		int cap = (strcmp( ctx->itemType, "health_mega" ) == 0) ? 200 : 100;
+		mult = (cur >= cap) ? 0.0f : (float)(cap - cur) / (float)cap;
+		break;
+	}
+	case IT_ARMOR: {
+		int cur = ps->stats[STAT_ARMOR];
+		mult = (cur >= 200) ? 0.0f : (float)(200 - cur) / 200.0f;
+		break;
+	}
+	case IT_WEAPON:
+		if ( ctx->giTag > WP_NONE && ctx->giTag < WP_NUM_WEAPONS ) {
+			int owned = ( ps->stats[STAT_WEAPONS] >> ctx->giTag ) & 1;
+			mult = owned ? 0.2f : 1.0f;
+		}
+		break;
+	case IT_AMMO:
+		if ( ctx->giTag > WP_NONE && ctx->giTag < WP_NUM_WEAPONS ) {
+			int owned = ( ps->stats[STAT_WEAPONS] >> ctx->giTag ) & 1;
+			if ( !owned ) {
+				mult = 0.0f;
+			} else {
+				int cur = ps->ammo[ctx->giTag];
+				int cap = bg_weaponlist[ctx->giTag].maxAmmunition;
+				mult = (cap > 0 && cur >= cap) ? 0.0f :
+				       (cap > 0) ? (float)(cap - cur) / (float)cap : 1.0f;
+			}
+		}
+		break;
+	case IT_POWERUP:
+		if ( ctx->giTag > 0 && ctx->giTag < PW_NUM_POWERUPS ) {
+			mult = (ps->powerups[ctx->giTag] > sv.time) ? 0.3f : 1.0f;
+		}
+		break;
+	default:
+		break;
+	}
+
+	// C.5: contested-item penalty — if enemy is 20%+ closer, halve the score
+	if ( ctx->itemEnemyDist >= 0.0f && ctx->itemBotDist > 0.0f &&
+	     ctx->itemEnemyDist < ctx->itemBotDist * 0.8f ) {
+		mult *= 0.5f;
+	}
+
+	return (int)( (float)score * mult );
+}
+
 // Walk the bot's items[] priority list and score ctx->itemType by its position.
 // Position 1 → score 100, position n → score ~(100/n).  Items not in the list
 // return 0 (bot has no interest).  The caller applies a travel-time discount on
@@ -1337,6 +1559,13 @@ int SV_Lua_BotEvalItem( int clientNum, const wbItemEvalCtx_t *ctx ) {
 		return 0;
 	}
 
+#if FEAT_RECAST_NAVMESH
+	if ( Cvar_VariableIntegerValue( "sv_botDebugItem" ) ) {
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "[EVALITEM-IN] cl=%d item=%s giType=%d giTag=%d\n",
+			clientNum, ctx->itemType, ctx->giType, ctx->giTag );
+	}
+#endif
+
 	L = UserVM_GetState();
 	lua_settop( L, 0 );
 	lua_rawgeti( L, LUA_REGISTRYINDEX, s_characters[characterHandle].botRef );
@@ -1363,15 +1592,16 @@ int SV_Lua_BotEvalItem( int clientNum, const wbItemEvalCtx_t *ctx ) {
 			shortname = lua_tostring( L, -1 );
 			if ( Q_stricmp( shortname, ctx->itemType ) == 0 ) {
 				int score = 100 - ( (i - 1) * 100 / n );
+				if ( score <= 0 ) score = 1;
 				lua_settop( L, 0 );
-				return score > 0 ? score : 1;
+				return SV_Lua_ApplyNeedMultiplier( clientNum, ctx, score );
 			}
 		}
 		lua_pop( L, 1 );
 	}
 
 	lua_settop( L, 0 );
-	return 0;
+	return SV_Lua_ApplyNeedMultiplier( clientNum, ctx, 20 );
 }
 
 int SV_Lua_BotDecide( int clientNum, const wbDecideCtx_t *ctx, char *decision, int decisionSize ) {
@@ -1431,7 +1661,7 @@ int SV_Lua_BotDecide( int clientNum, const wbDecideCtx_t *ctx, char *decision, i
 			if ( status != 0 ) {
 				if ( SV_Lua_ShouldPrintError( clientNum, WB_METHOD_DECIDE ) ) {
 					const char *err = lua_tostring( L, -1 );
-					Com_Printf( S_COLOR_YELLOW "BotLua: decide failed for client %d (%s)\n", clientNum, err ? err : "unknown" );
+					COM_WARN( LOG_CAT_SERVER, "BotLua: decide failed for client %d (%s)\n", clientNum, err ? err : "unknown" );
 				}
 				lua_settop( L, 0 );
 				// Fall through to C logic on Lua error.
@@ -1534,7 +1764,7 @@ int SV_Lua_BotOnChat( int clientNum, const char *eventName, const wbChatCtx_t *c
 	if ( status != 0 ) {
 		if ( SV_Lua_ShouldPrintError( clientNum, WB_METHOD_ON_CHAT ) ) {
 			const char *err = lua_tostring( L, -1 );
-			Com_Printf( S_COLOR_YELLOW "BotLua: on_chat failed for client %d (%s)\n", clientNum, err ? err : "unknown" );
+			COM_WARN( LOG_CAT_SERVER, "BotLua: on_chat failed for client %d (%s)\n", clientNum, err ? err : "unknown" );
 		}
 		lua_settop( L, 0 );
 		return qfalse;
@@ -1740,7 +1970,7 @@ static qboolean SV_BotVerifyLoadLuaValues(
 	status = lua_pcall( L, 2, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		Com_Printf( S_COLOR_YELLOW "bot_verify_character: Lua error for '%s': %s\n",
+		COM_WARN( LOG_CAT_SERVER, "bot_verify_character: Lua error for '%s': %s\n",
 		            charName, err ? err : "unknown" );
 		lua_settop( L, 0 );
 		return qfalse;
@@ -1784,7 +2014,7 @@ void SV_BotVerifyCharacter_f( void ) {
 	int matchCount = 0, mismatchCount = 0, skipCount = 0;
 
 	if ( Cmd_Argc() < 3 ) {
-		Com_Printf( "Usage: bot_verify_character <name> <skill>\n"
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: bot_verify_character <name> <skill>\n"
 		            "  name  - character name (e.g., sarge, daemia, grunt)\n"
 		            "  skill - integer skill level 1-5\n" );
 		return;
@@ -1794,30 +2024,30 @@ void SV_BotVerifyCharacter_f( void ) {
 	skill = atoi( Cmd_Argv( 2 ) );
 
 	if ( skill < 1 || skill > 5 ) {
-		Com_Printf( "bot_verify_character: skill must be 1-5\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_verify_character: skill must be 1-5\n" );
 		return;
 	}
 
 	skillNorm = (float)( skill - 1 ) * 0.25f;
 
 	if ( !SV_BotVerifyParseOldFile( charName, skill, oldVals, oldValid ) ) {
-		Com_Printf( "bot_verify_character: no legacy botfile for '%s' "
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_verify_character: no legacy botfile for '%s' "
 		            "(botfiles/bots/%s_c.c not found)\n",
 		            charName, charName );
-		Com_Printf( "  Expected for new characters (keel, anarki, crash).\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  Expected for new characters (keel, anarki, crash).\n" );
 		return;
 	}
 
 	if ( !SV_BotVerifyLoadLuaValues( charName, skillNorm, newVals, newValid ) ) {
-		Com_Printf( "bot_verify_character: failed to load Lua character '%s'\n", charName );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_verify_character: failed to load Lua character '%s'\n", charName );
 		return;
 	}
 
-	Com_Printf( "\n^3bot_verify_character: %s  skill=%d (norm=%.2f)\n\n",
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "\n^3bot_verify_character: %s  skill=%d (norm=%.2f)\n\n",
 	            charName, skill, skillNorm );
-	Com_Printf( "%-34s  %-8s  %-8s  %s\n",
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8s  %-8s  %s\n",
 	            "characteristic", "old", "new", "status" );
-	Com_Printf( "%-34s  %-8s  %-8s  ------\n",
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8s  %-8s  ------\n",
 	            "----------------------------------", "--------", "--------" );
 
 	for ( i = 0; s_characteristicNames[i].name; i++ ) {
@@ -1835,7 +2065,7 @@ void SV_BotVerifyCharacter_f( void ) {
 		if ( diff < 0.0f ) diff = -diff;
 
 		if ( SV_BotVerifyIsLegacyScale( idx ) ) {
-			Com_Printf( "%-34s  %-8.4f  %-8.4f  ^6SCALE_DIFF (legacy range)\n",
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  %-8.4f  ^6SCALE_DIFF (legacy range)\n",
 			            cname, oldVal, newVal );
 			skipCount++;
 		} else if ( oldValid[idx] && !newValid[idx] ) {
@@ -1843,50 +2073,49 @@ void SV_BotVerifyCharacter_f( void ) {
 			float defDiff = oldVal - def;
 			if ( defDiff < 0.0f ) defDiff = -defDiff;
 			if ( defDiff > 0.01f ) {
-				Com_Printf( "%-34s  %-8.4f  ^1(undef)^7   ^1MISSING (def=%.4f, diff=%.4f)\n",
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  ^1(undef)^7   ^1MISSING (def=%.4f, diff=%.4f)\n",
 				            cname, oldVal, def, defDiff );
 				mismatchCount++;
 			} else {
-				Com_Printf( "%-34s  %-8.4f  %-8s  ^3MISSING (def~=old)\n",
+				Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  %-8s  ^3MISSING (def~=old)\n",
 				            cname, oldVal, "(undef)" );
 				matchCount++;
 			}
 		} else if ( !oldValid[idx] && newValid[idx] ) {
-			Com_Printf( "%-34s  %-8s  %-8.4f  ^2NEW_ONLY\n",
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8s  %-8.4f  ^2NEW_ONLY\n",
 			            cname, "(none)", newVal );
 			matchCount++;
 		} else if ( diff > 0.01f ) {
-			Com_Printf( "%-34s  %-8.4f  %-8.4f  ^1MISMATCH (diff=%.4f)\n",
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  %-8.4f  ^1MISMATCH (diff=%.4f)\n",
 			            cname, oldVal, newVal, diff );
 			mismatchCount++;
 		} else {
-			Com_Printf( "%-34s  %-8.4f  %-8.4f  ^2OK\n",
+			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  %-8.4f  ^2OK\n",
 			            cname, oldVal, newVal );
 			matchCount++;
 		}
 	}
 
-	Com_Printf( "\n^3Summary: %s skill=%d -- %d match, %d mismatch, %d scale-skipped\n",
+	Com_Log( SEV_INFO, LOG_CAT_SERVER, "\n^3Summary: %s skill=%d -- %d match, %d mismatch, %d scale-skipped\n",
 	            charName, skill, matchCount, mismatchCount, skipCount );
 	if ( mismatchCount == 0 ) {
-		Com_Printf( "^2All comparable values match.\n\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "^2All comparable values match.\n\n" );
 	} else {
-		Com_Printf( "^1Fix %d mismatch(es) in modfiles/characters/%s/main.lua\n\n",
-		            mismatchCount, charName );
+		COM_WARN( LOG_CAT_SERVER, "Fix %d mismatch(es) in modfiles/characters/%s/main.lua\n\n",
+		          mismatchCount, charName );
 	}
 }
 
 // Eagerly load all characters from characters/ at Lua init time so that
 // SV_Lua_GetCharacterDisplayName (and future field lookups) are pure registry
 // reads — no per-spawn Lua calls.
-static void SV_Characters_Preload( void ) {
+static int SV_Characters_Preload( void ) {
 	char **dirs;
 	int numDirs, i, loaded = 0;
 
 	dirs = FS_ListDirectories( "characters", &numDirs );
 	if ( !dirs ) {
-		Com_Printf( "BotLua: no character directories found under characters/, skipping preload\n" );
-		return;
+		return 0;
 	}
 
 	for ( i = 0; i < numDirs; i++ ) {
@@ -1897,50 +2126,42 @@ static void SV_Characters_Preload( void ) {
 	}
 	FS_FreeFileList( dirs );
 
-	Com_Printf( "BotLua: preloaded %d character(s)\n", loaded );
+	return loaded;
 }
 
 qboolean SV_Lua_GetCharacterDisplayName( const char *name, char *out, int outSize ) {
-	int handle;
+	int i;
 
 	out[0] = '\0';
-
-	handle = SV_Lua_FindCharacterHandle( name );
-	if ( !handle || !s_characters[handle].displayName[0] )
-		return qfalse;
-
-	Q_strncpyz( out, s_characters[handle].displayName, outSize );
-	return qtrue;
+	for ( i = 0; i < s_numTemplates; i++ ) {
+		if ( s_templates[i].inuse && !Q_stricmp( s_templates[i].name, name ) ) {
+			Q_strncpyz( out,
+			            s_templates[i].displayName[0] ? s_templates[i].displayName : name,
+			            outSize );
+			return qtrue;
+		}
+	}
+	return qfalse;
 }
 
 int SV_Lua_GetCharacterCount( void ) {
-	int i, count = 0;
-	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
-		if ( s_characters[i].inuse )
-			count++;
-	}
-	return count;
+	return s_numTemplates;
 }
 
 qboolean SV_Lua_GetCharacterAt( int index, char *out, int outSize ) {
-	int i, seen = 0;
-	for ( i = 1; i < SV_WB_MAX_CHARACTERS; i++ ) {
-		if ( !s_characters[i].inuse ) continue;
-		if ( seen == index ) {
-			Q_strncpyz( out, s_characters[i].name, outSize );
-			return qtrue;
-		}
-		seen++;
+	if ( index < 0 || index >= s_numTemplates ) {
+		out[0] = '\0';
+		return qfalse;
 	}
-	out[0] = '\0';
-	return qfalse;
+	Q_strncpyz( out, s_templates[index].name, outSize );
+	return qtrue;
 }
 
 // bot_debug_weapons <botname|off>
 // Sets the cvar that game code reads to enable per-frame weapon debug output.
 void SV_BotDebugWeapons_f( void ) {
 	if ( Cmd_Argc() < 2 ) {
-		Com_Printf( "Usage: bot_debug_weapons <botname|off>\n"
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: bot_debug_weapons <botname|off>\n"
 		            "  botname - track weapon selection for this bot (100 frames)\n"
 		            "  off     - disable weapon debug output\n" );
 		return;
@@ -1948,9 +2169,9 @@ void SV_BotDebugWeapons_f( void ) {
 
 	if ( !Q_stricmp( Cmd_Argv( 1 ), "off" ) ) {
 		Cvar_Set( "bot_debug_weapon", "" );
-		Com_Printf( "bot_debug_weapons: disabled\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_debug_weapons: disabled\n" );
 	} else {
 		Cvar_Set( "bot_debug_weapon", Cmd_Argv( 1 ) );
-		Com_Printf( "bot_debug_weapons: tracking '%s' for up to 100 frames\n", Cmd_Argv( 1 ) );
+		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_debug_weapons: tracking '%s' for up to 100 frames\n", Cmd_Argv( 1 ) );
 	}
 }

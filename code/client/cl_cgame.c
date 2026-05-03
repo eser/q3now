@@ -64,7 +64,7 @@ static qboolean CL_GetUserCmd( int cmdNumber, usercmd_t *ucmd ) {
 
 	// can't return anything that we haven't created yet
 	if ( cl.cmdNumber - cmdNumber < 0 ) {
-		Com_Error( ERR_DROP, "CL_GetUserCmd: cmdNumber (%i) > cl.cmdNumber (%i)", cmdNumber, cl.cmdNumber );
+		Com_Terminate( TERM_CLIENT_DROP, "CL_GetUserCmd: cmdNumber (%i) > cl.cmdNumber (%i)", cmdNumber, cl.cmdNumber );
 	}
 
 	// the usercmd has been overwritten in the wrapping
@@ -109,7 +109,7 @@ static qboolean CL_GetSnapshot( int snapshotNumber, snapshot_t *snapshot ) {
 	clSnapshot_t	*clSnap;
 
 	if ( cl.snap.messageNum - snapshotNumber < 0 ) {
-		Com_Error( ERR_DROP, "CL_GetSnapshot: snapshotNumber (%i) > cl.snapshot.messageNum (%i)", snapshotNumber, cl.snap.messageNum );
+		Com_Terminate( TERM_CLIENT_DROP, "CL_GetSnapshot: snapshotNumber (%i) > cl.snapshot.messageNum (%i)", snapshotNumber, cl.snap.messageNum );
 	}
 
 	// if the frame has fallen out of the circular buffer, we can't return it
@@ -138,7 +138,7 @@ static qboolean CL_GetSnapshot( int snapshotNumber, snapshot_t *snapshot ) {
 	snapshot->ps = clSnap->ps;
 	int count = clSnap->numEntities;
 	if ( count > MAX_ENTITIES_IN_SNAPSHOT ) {
-		Com_DPrintf( "CL_GetSnapshot: truncated %i entities to %i\n", count, MAX_ENTITIES_IN_SNAPSHOT );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_GetSnapshot: truncated %i entities to %i\n", count, MAX_ENTITIES_IN_SNAPSHOT );
 		count = MAX_ENTITIES_IN_SNAPSHOT;
 	}
 	snapshot->numEntities = count;
@@ -186,7 +186,7 @@ static void CL_ConfigstringModified( void ) {
 
 	int index = atoi( Cmd_Argv(1) );
 	if ( (unsigned) index >= MAX_CONFIGSTRINGS ) {
-		Com_Error( ERR_DROP, "%s: bad configstring index %i", __func__, index );
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad configstring index %i", __func__, index );
 	}
 	// get everything after "cs <num>"
 	s = Cmd_ArgsFrom(2);
@@ -217,7 +217,7 @@ static void CL_ConfigstringModified( void ) {
 		int len = strlen( dup );
 
 		if ( len + 1 + cl.gameState.dataCount > MAX_GAMESTATE_CHARS ) {
-			Com_Error( ERR_DROP, "%s: MAX_GAMESTATE_CHARS exceeded", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: MAX_GAMESTATE_CHARS exceeded", __func__ );
 		}
 
 		// append it to the gameState string buffer
@@ -254,12 +254,12 @@ static qboolean CL_GetServerCommand( int serverCommandNumber ) {
 			Cmd_Clear();
 			return qfalse;
 		}
-		Com_Error( ERR_DROP, "CL_GetServerCommand: a reliable command was cycled out" );
+		Com_Terminate( TERM_CLIENT_DROP, "CL_GetServerCommand: a reliable command was cycled out" );
 		return qfalse;
 	}
 
 	if ( clc.serverCommandSequence - serverCommandNumber < 0 ) {
-		Com_Error( ERR_DROP, "CL_GetServerCommand: requested a command not received" );
+		Com_Terminate( TERM_CLIENT_DROP, "CL_GetServerCommand: requested a command not received" );
 		return qfalse;
 	}
 
@@ -281,9 +281,9 @@ rescan:
 		// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=552
 		// allow server to indicate why they were disconnected
 		if ( argc >= 2 )
-			Com_Error( ERR_SERVERDISCONNECT, "Server disconnected - %s", Cmd_Argv( 1 ) );
+			Com_Terminate( TERM_SERVER_KICK, "Server disconnected - %s", Cmd_Argv( 1 ) );
 		else
-			Com_Error( ERR_SERVERDISCONNECT, "Server disconnected" );
+			Com_Terminate( TERM_SERVER_KICK, "Server disconnected" );
 	}
 
 	if ( !strcmp( cmd, "bcs0" ) ) {
@@ -294,7 +294,7 @@ rescan:
 	if ( !strcmp( cmd, "bcs1" ) ) {
 		s = Cmd_Argv(2);
 		if( strlen(bigConfigString) + strlen(s) >= BIG_INFO_STRING ) {
-			Com_Error( ERR_DROP, "bcs exceeded BIG_INFO_STRING" );
+			Com_Terminate( TERM_CLIENT_DROP, "bcs exceeded BIG_INFO_STRING" );
 		}
 		strcat( bigConfigString, s );
 		return qfalse;
@@ -303,7 +303,7 @@ rescan:
 	if ( !strcmp( cmd, "bcs2" ) ) {
 		s = Cmd_Argv(2);
 		if( strlen(bigConfigString) + strlen(s) + 1 >= BIG_INFO_STRING ) {
-			Com_Error( ERR_DROP, "bcs exceeded BIG_INFO_STRING" );
+			Com_Terminate( TERM_CLIENT_DROP, "bcs exceeded BIG_INFO_STRING" );
 		}
 		strcat( bigConfigString, s );
 		strcat( bigConfigString, "\"" );
@@ -373,8 +373,8 @@ static void CL_CM_LoadMap( const char *mapname ) {
 		cls.cgameBsp = NULL;
 	}
 
-	if ( !BSP_Load( mapname, &bsp ) ) {
-		Com_Error( ERR_DROP, "%s: couldn't load %s", __func__, mapname );
+	if ( !BSP_Load( mapname, &bsp, BSP_LOAD_FLAGS_NONE ) ) {
+		Com_Terminate( TERM_CLIENT_DROP, "%s: couldn't load %s", __func__, mapname );
 	}
 	cls.cgameBsp = bsp;
 }
@@ -479,6 +479,9 @@ static void CL_ForceFixedDlights( void ) {
 }
 
 
+// Frametime tracking for loading yields — advances console animation during CA_LOADING.
+static int cl_loadYieldLastTime;
+
 /*
 ====================
 CL_LoadingYield
@@ -497,8 +500,29 @@ void CL_LoadingYield( const char *phaseName ) {
 		cl_loadProgress.shaders * 0.40f +
 		cl_loadProgress.audio   * 0.15f +
 		cl_loadProgress.download * 0.20f;
+
+	// Advance realFrametime so console slide animation ticks during loading.
+	// CL_Frame is not running here, so this is the only update path.
+	// Does NOT touch cls.realtime or cls.frametime — those are CL_Frame's accumulators.
+	{
+		int now = Sys_Milliseconds();
+		cls.realFrametime = now - cl_loadYieldLastTime;
+		cl_loadYieldLastTime = now;
+	}
+
 	SCR_UpdateScreen();
+
+	// Drain OS events and dispatch them. CL_MapLoading sets only KEYCATCH_CONSOLE
+	// before entering CA_LOADING, so dispatch goes exclusively through Console_Key /
+	// CL_CharEvent. KEYCATCH_CGAME and KEYCATCH_UI are both 0 — no VM reentry paths
+	// are reachable. ESC with console closed hits cls.state != CA_DISCONNECTED and
+	// calls CL_Disconnect, cancelling the load as expected.
+#ifdef _DEBUG
+	assert( !( Key_GetCatcher() & KEYCATCH_CGAME ) );
+	assert( !( Key_GetCatcher() & KEYCATCH_UI ) );
+#endif
 	Sys_SendKeyEvents();
+	Com_EventLoop();
 }
 
 
@@ -527,15 +551,21 @@ The cgame module is making a system call
 static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	switch( args[0] ) {
 	case CG_PRINT:
-		Com_Printf( "%s", (const char*)VMA(1) );
+		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s", (const char*)VMA(1) );
 		return 0;
 	case CG_ERROR:
-		Com_Error( ERR_DROP, "%s", (const char*)VMA(1) );
+		Com_Terminate( TERM_CLIENT_DROP, "%s", (const char*)VMA(1) );
+		return 0;
+	case CG_LOG:
+		Com_Log( (log_severity_t)args[1], LOG_CAT_CGAME, "%s", (const char*)VMA(2) );
+		return 0;
+	case CG_TERMINATE:
+		Com_Terminate( (terminationReason_t)args[1], "%s", (const char*)VMA(2) );
 		return 0;
 	case CG_MILLISECONDS:
 		return Sys_Milliseconds();
 	case CG_CVAR_REGISTER:
-		Cvar_Register( VMA(1), VMA(2), VMA(3), args[4], cgvm->privateFlag );
+		Cvar_VM_Register( VMA(1), VMA(2), VMA(3), args[4], cgvm->privateFlag );
 		return 0;
 	case CG_CVAR_UPDATE:
 		Cvar_Update( VMA(1), cgvm->privateFlag );
@@ -674,7 +704,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return 0;
 	case CG_R_LOADWORLDMAP:
 		if ( !cls.cgameBsp ) {
-			Com_Error( ERR_DROP, "%s: world BSP was not loaded", __func__ );
+			Com_Terminate( TERM_CLIENT_DROP, "%s: world BSP was not loaded", __func__ );
 		}
 		re.LoadWorld( cls.cgameBsp );
 		CL_LoadingYield( "loading BSP" );
@@ -746,7 +776,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return 0;
 	case CG_R_DRAWSTRETCHPIC:
 		/* removed — all callers migrated to CG_R_DRAWSTRETCHPICNORM */
-		Com_Printf( S_COLOR_YELLOW "WARNING: CG_R_DRAWSTRETCHPIC is removed, use CG_R_DRAWSTRETCHPICNORM\n" );
+		COM_WARN( LOG_CAT_CLIENT, "WARNING: CG_R_DRAWSTRETCHPIC is removed, use CG_R_DRAWSTRETCHPICNORM\n" );
 		return 0;
 	case CG_R_DRAWSTRETCHPICNORM: {
 		float x = VMF(1) * cls.glconfig.vidWidth;
@@ -982,8 +1012,13 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return 0;
 #endif
 
+	case CG_R_SETLIGHTSTYLEPATTERN:
+		if ( re.SetLightstylePattern )
+			re.SetLightstylePattern( args[1], VMA(2) );
+		return 0;
+
 	default:
-		Com_Error( ERR_DROP, "Bad cgame system trap: %ld", (long int) args[0] );
+		Com_Terminate( TERM_CLIENT_DROP, "Bad cgame system trap: %ld", (long int) args[0] );
 	}
 	return 0;
 }
@@ -1058,9 +1093,10 @@ void CL_InitCGame( void ) {
 
 	cgvm = VM_Create( VM_CGAME, CL_CgameSystemCalls, CL_DllSyscall, interpret );
 	if ( !cgvm ) {
-		Com_Error( ERR_DROP, "VM_Create on cgame failed" );
+		Com_Terminate( TERM_CLIENT_DROP, "VM_Create on cgame failed" );
 	}
 	cls.state = CA_LOADING;
+	cl_loadYieldLastTime = Sys_Milliseconds();
 
 	// init for this gamestate
 	// use the lastExecutedServerCommand instead of the serverCommandSequence
@@ -1073,7 +1109,7 @@ void CL_InitCGame( void ) {
 
 	int t2 = Sys_Milliseconds();
 
-	Com_Printf( "CL_InitCGame: %5.2f seconds\n", (t2-t1)/1000.0 );
+	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_InitCGame: %5.2f seconds\n", (t2-t1)/1000.0 );
 
 	// have the renderer touch all its images, so they are present
 	// on the card even if the driver does deferred loading
@@ -1172,12 +1208,12 @@ static void CL_AdjustTimeDelta( void ) {
 		cl.oldServerTime = cl.snap.serverTime;	// FIXME: is this a problem for cgame?
 		cl.serverTime = cl.snap.serverTime;
 		if ( cl_showTimeDelta->integer ) {
-			Com_Printf( "<RESET> " );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "<RESET> " );
 		}
 	} else if ( deltaDelta > 100 ) {
 		// fast adjust, cut the difference in half
 		if ( cl_showTimeDelta->integer ) {
-			Com_Printf( "<FAST> " );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "<FAST> " );
 		}
 		cl.serverTimeDelta = ( cl.serverTimeDelta + newDelta ) >> 1;
 	} else {
@@ -1198,7 +1234,7 @@ static void CL_AdjustTimeDelta( void ) {
 	}
 
 	if ( cl_showTimeDelta->integer ) {
-		Com_Printf( "%i ", cl.serverTimeDelta );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i ", cl.serverTimeDelta );
 	}
 }
 
@@ -1331,7 +1367,7 @@ void CL_SetCGameTime( void ) {
 
 	// if we have gotten to this point, cl.snap is guaranteed to be valid
 	if ( !cl.snap.valid ) {
-		Com_Error( ERR_DROP, "CL_SetCGameTime: !cl.snap.valid" );
+		Com_Terminate( TERM_CLIENT_DROP, "CL_SetCGameTime: !cl.snap.valid" );
 	}
 
 	// allow pause in single player
@@ -1341,7 +1377,7 @@ void CL_SetCGameTime( void ) {
 	}
 
 	if ( cl.snap.serverTime - cl.oldFrameServerTime < 0 ) {
-		Com_Error( ERR_DROP, "cl.snap.serverTime < cl.oldFrameServerTime" );
+		Com_Terminate( TERM_CLIENT_DROP, "cl.snap.serverTime < cl.oldFrameServerTime" );
 	}
 	cl.oldFrameServerTime = cl.snap.serverTime;
 

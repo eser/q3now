@@ -532,8 +532,31 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 
 	bmodel = pModel->bmodel;
 
+	{
+		static int bmodel_diag_count = 0;
+		if ( bmodel_diag_count < 40 ) {
+			bmodel_diag_count++;
+			ri.Log( SEV_TRACE,
+				"R_AddBrushModelSurfaces[%d]: hModel=%d numSurfaces=%d"
+				" bounds=(%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)"
+				" ent.origin=(%.0f,%.0f,%.0f)\n",
+				bmodel_diag_count, ent->e.hModel, bmodel->numSurfaces,
+				bmodel->bounds[0][0], bmodel->bounds[0][1], bmodel->bounds[0][2],
+				bmodel->bounds[1][0], bmodel->bounds[1][1], bmodel->bounds[1][2],
+				ent->e.origin[0], ent->e.origin[1], ent->e.origin[2] );
+		}
+	}
+
 	clip = R_CullLocalBox( bmodel->bounds );
 	if ( clip == CULL_OUT ) {
+		static int bmodel_cull_count = 0;
+		if ( bmodel_cull_count < 40 ) {
+			bmodel_cull_count++;
+			ri.Log( SEV_TRACE,
+				"R_AddBrushModelSurfaces: CULL_OUT hModel=%d ent.origin=(%.0f,%.0f,%.0f)\n",
+				ent->e.hModel,
+				ent->e.origin[0], ent->e.origin[1], ent->e.origin[2] );
+		}
 		return;
 	}
 
@@ -749,7 +772,7 @@ static mnode_t *R_PointInLeaf( const vec3_t p ) {
 	const cplane_t	*plane;
 	
 	if ( !tr.world ) {
-		ri.Error (ERR_DROP, "R_PointInLeaf: bad model");
+		ri.Terminate( TERM_CLIENT_DROP, "R_PointInLeaf: bad model");
 	}
 
 	node = tr.world->nodes;
@@ -832,16 +855,19 @@ static void R_MarkLeaves (void) {
 	// if the cluster is the same and the area visibility matrix
 	// hasn't changed, we don't need to mark everything again
 
-	// if r_showcluster was just turned on, remark everything 
-	if ( tr.viewCluster == cluster && !tr.refdef.areamaskModified 
-		&& !r_showcluster->modified ) {
+	// if r_showcluster was just turned on, remark everything
+	static int s_showcluster_mod = -1;
+	int showcluster_changed = ( r_showcluster->modificationCount != s_showcluster_mod );
+
+	if ( tr.viewCluster == cluster && !tr.refdef.areamaskModified
+		&& !showcluster_changed ) {
 		return;
 	}
 
-	if ( r_showcluster->modified || r_showcluster->integer ) {
-		r_showcluster->modified = qfalse;
+	if ( showcluster_changed || r_showcluster->integer ) {
+		s_showcluster_mod = r_showcluster->modificationCount;
 		if ( r_showcluster->integer ) {
-			ri.Printf( PRINT_ALL, "cluster:%i  area:%i\n", cluster, leaf->area );
+			ri.Log( SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
 		}
 	}
 

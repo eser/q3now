@@ -67,7 +67,8 @@ void CG_WiredHudPushState( void ) {
 		usercmd_t cmd;
 		cmdNum = trap_GetCurrentCmdNumber() - CMD_BACKUP + 1;
 		trap_GetUserCmd( cmdNum, &cmd );
-		state.connectionInterrupted = ( cmd.serverTime > cg.snap->ps.commandTime
+		state.connectionInterrupted = ( !cg_paused.integer
+		                                && cmd.serverTime > cg.snap->ps.commandTime
 		                                && cmd.serverTime <= cg.time );
 	}
 
@@ -360,17 +361,41 @@ void CG_WiredHudPushState( void ) {
 			state.activePowerups[pwCount].isHoldable = qfalse;
 			pwCount++;
 		}
-		/* holdable item */
-		{
-			int hi = cg.snap->ps.stats[STAT_HOLDABLE_ITEM];
-			if ( hi && pwCount < 8 ) {
-				state.activePowerups[pwCount].icon = cg_items[hi].icon;
-				state.activePowerups[pwCount].timeLeft = 0;
-				state.activePowerups[pwCount].isHoldable = qtrue;
-				pwCount++;
-			}
-		}
 		state.activePowerupCount = pwCount;
+	}
+
+	/* holdable inventory list */
+	{
+		int bits = cg.snap->ps.stats[STAT_HOLDABLE_BITS];
+		int count = 0;
+		for ( int hi = 1; hi < HI_NUM_HOLDABLE; hi++ ) {
+			if ( !( bits & BG_HOLDABLE_BIT( hi ) ) ) continue;
+			state.holdableList[count].id       = (holdable_t)hi;
+			state.holdableList[count].selected = ( bg_itemlist[cg.snap->ps.stats[STAT_HOLDABLE_ITEM]].giTag == hi );
+
+			/* safe lookup: cg_items[] is indexed by bg_itemlist position, not holdable_t */
+			gitem_t *item = NULL;
+			for ( int j = 0; j < bg_numItems; j++ ) {
+				if ( bg_itemlist[j].giType == IT_HOLDABLE && bg_itemlist[j].giTag == hi ) {
+					item = &bg_itemlist[j];
+					break;
+				}
+			}
+
+			if ( item && cg_items[item - bg_itemlist].icon ) {
+				state.holdableList[count].icon     = cg_items[item - bg_itemlist].icon;
+				state.holdableList[count].label[0] = '\0';
+			} else {
+				state.holdableList[count].icon = 0;
+				switch ( hi ) {
+				case HI_KEY_GOLD:   Q_strncpyz( state.holdableList[count].label, "GOLD KEY",   16 ); break;
+				case HI_KEY_SILVER: Q_strncpyz( state.holdableList[count].label, "SILVER KEY", 16 ); break;
+				default:            Q_strncpyz( state.holdableList[count].label, item ? item->pickup_name : "ITEM", 16 ); break;
+				}
+			}
+			count++;
+		}
+		state.holdableListCount = count;
 	}
 
 	// ── data bindings (named stat bundles for generic HUD elements) ──

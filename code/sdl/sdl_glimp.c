@@ -218,12 +218,12 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 #ifdef USE_VULKAN_API
 	if ( vulkan ) {
 		flags |= SDL_WINDOW_VULKAN;
-		Com_Printf( "Initializing Vulkan display\n");
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Initializing Vulkan display\n");
 	} else
 #endif
 	{
 		flags |= SDL_WINDOW_OPENGL;
-		Com_Printf( "Initializing OpenGL display\n");
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Initializing OpenGL display\n");
 	}
 
 	// If a window exists, note its display
@@ -232,7 +232,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		displayID = SDL_GetDisplayForWindow( SDL_window );
 		if ( displayID == 0 )
 		{
-			Com_DPrintf( "SDL_GetDisplayForWindow() failed: %s\n", SDL_GetError() );
+			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_GetDisplayForWindow() failed: %s\n", SDL_GetError() );
 		}
 	}
 	else
@@ -244,7 +244,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		// according to previously stored \vid_xpos and \vid_ypos coordinates
 		displayID = FindNearestDisplay( &x, &y, 640, 480 );
 
-		//Com_Printf("Selected display: %u\n", displayID );
+		//Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Selected display: %u\n", displayID );
 	}
 
 	if ( displayID != 0 )
@@ -290,15 +290,15 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	config->isFullscreen = fullscreen;
 	glw_state.isFullscreen = fullscreen;
 
-	Com_Printf( "...setting mode %d:", mode );
+	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "...setting mode %d:", mode );
 
 	if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect, mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
 	{
-		Com_Printf( " invalid mode\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, " invalid mode\n" );
 		return RSERR_INVALID_MODE;
 	}
 
-	Com_Printf( " %d %d\n", config->vidWidth, config->vidHeight );
+	Com_Log( SEV_INFO, LOG_CAT_CLIENT, " %d %d\n", config->vidWidth, config->vidHeight );
 
 	// Destroy existing state if it exists
 	if ( SDL_glContext != NULL )
@@ -310,7 +310,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	if ( SDL_window != NULL )
 	{
 		SDL_GetWindowPosition( SDL_window, &x, &y );
-		Com_DPrintf( "Existing window at %dx%d before being destroyed\n", x, y );
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Existing window at %dx%d before being destroyed\n", x, y );
 		SDL_DestroyWindow( SDL_window );
 		SDL_window = NULL;
 	}
@@ -452,7 +452,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		// Create window first, then set position.
 		if ( ( SDL_window = SDL_CreateWindow( cl_title, config->vidWidth, config->vidHeight, flags ) ) == NULL )
 		{
-			Com_DPrintf( "SDL_CreateWindow failed: %s\n", SDL_GetError() );
+			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_CreateWindow failed: %s\n", SDL_GetError() );
 			continue;
 		}
 
@@ -501,7 +501,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 				{
 					case 16: fsMode.format = SDL_PIXELFORMAT_RGB565;  break;
 					case 24: fsMode.format = SDL_PIXELFORMAT_XRGB8888; break;
-					default: Com_DPrintf( "testColorBits is %d, can't fullscreen\n", testColorBits );
+					default: Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "testColorBits is %d, can't fullscreen\n", testColorBits );
 						SDL_DestroyWindow( SDL_window );
 						SDL_window = NULL;
 						continue;
@@ -514,7 +514,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 				if ( !SDL_SetWindowFullscreenMode( SDL_window, &fsMode ) )
 				{
-					Com_DPrintf( "SDL_SetWindowFullscreenMode failed: %s\n", SDL_GetError() );
+					Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_SetWindowFullscreenMode failed: %s\n", SDL_GetError() );
 					SDL_DestroyWindow( SDL_window );
 					SDL_window = NULL;
 					continue;
@@ -547,7 +547,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			{
 				if ( ( SDL_glContext = SDL_GL_CreateContext( SDL_window ) ) == NULL )
 				{
-					Com_DPrintf( "SDL_GL_CreateContext failed: %s\n", SDL_GetError( ) );
+					Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_GL_CreateContext failed: %s\n", SDL_GetError( ) );
 					SDL_DestroyWindow( SDL_window );
 					SDL_window = NULL;
 					continue;
@@ -557,7 +557,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			// SDL3: SDL_GL_SetSwapInterval returns bool (true = success)
 			if ( !SDL_GL_SetSwapInterval( r_swapInterval->integer ) )
 			{
-				Com_DPrintf( "SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError( ) );
+				Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError( ) );
 			}
 
 			SDL_GL_GetAttribute( SDL_GL_RED_SIZE, &realColorBits[0] );
@@ -570,7 +570,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		} // if ( !vulkan )
 
 
-		Com_Printf( "Using %d color bits, %d depth, %d stencil display.\n",	config->colorBits, config->depthBits, config->stencilBits );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Using %d color bits, %d depth, %d stencil display.\n",	config->colorBits, config->depthBits, config->stencilBits );
 
 		break;
 	}
@@ -595,7 +595,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	}
 	else
 	{
-		Com_Printf( "Couldn't get a visual\n" );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Couldn't get a visual\n" );
 		return RSERR_INVALID_MODE;
 	}
 
@@ -627,9 +627,8 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 
 	if ( fullscreen && in_nograb->integer )
 	{
-		Com_Printf( "Fullscreen not allowed with \\in_nograb 1\n");
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Fullscreen not allowed with \\in_nograb 1\n");
 		Cvar_Set( "r_fullscreen", "0" );
-		r_fullscreen->modified = qfalse;
 		fullscreen = qfalse;
 	}
 
@@ -651,7 +650,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 			static char moltenVKPath[ MAX_OSPATH ];
 			Com_sprintf( moltenVKPath, sizeof( moltenVKPath ), "%s/libMoltenVK.dylib", Sys_DefaultAppPath() );
 			SDL_SetHint( SDL_HINT_VULKAN_LIBRARY, moltenVKPath );
-			Com_Printf( "SDL Vulkan: requesting MoltenVK from %s\n", moltenVKPath );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL Vulkan: requesting MoltenVK from %s\n", moltenVKPath );
 			// MoltenVK default: synchronous queue submits (vkQueueSubmit blocks until GPU
 			// finishes, serializing CPU+GPU and halving throughput). Force async so the
 			// CPU and GPU overlap frames. Respect any explicit user override.
@@ -667,7 +666,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 		// SDL3: SDL_Init returns bool (true = success)
 		if ( !SDL_Init( SDL_INIT_VIDEO ) )
 		{
-			Com_Printf( "SDL_Init( SDL_INIT_VIDEO ) FAILED (%s)\n", SDL_GetError() );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL_Init( SDL_INIT_VIDEO ) FAILED (%s)\n", SDL_GetError() );
 			return RSERR_FATAL_ERROR;
 		}
 
@@ -678,16 +677,16 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 			int sdlmic = SDL_VERSIONNUM_MICRO( sdlver );
 			if ( sdlver < SDL_VERSIONNUM( MINSDL_MAJOR, MINSDL_MINOR, MINSDL_MICRO ) )
 			{
-				Com_Error( ERR_FATAL, "SDL3 runtime version %d.%d.%d is older than required %d.%d.%d",
+				Com_Terminate( TERM_UNRECOVERABLE, "SDL3 runtime version %d.%d.%d is older than required %d.%d.%d",
 					sdlmaj, sdlmin, sdlmic,
 					MINSDL_MAJOR, MINSDL_MINOR, MINSDL_MICRO );
 			}
 			driverName = SDL_GetCurrentVideoDriver();
-			Com_Printf( "SDL version: %d.%d.%d (compiled against %d.%d.%d)\n",
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL version: %d.%d.%d (compiled against %d.%d.%d)\n",
 				sdlmaj, sdlmin, sdlmic,
 				SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION );
 		}
-		Com_Printf( "SDL using driver \"%s\"\n", driverName );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL using driver \"%s\"\n", driverName );
 	}
 
 	err = GLW_SetMode( mode, modeFS, fullscreen, vulkan );
@@ -695,10 +694,10 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 	switch ( err )
 	{
 		case RSERR_INVALID_FULLSCREEN:
-			Com_Printf( "...WARNING: fullscreen unavailable in this mode\n" );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "...WARNING: fullscreen unavailable in this mode\n" );
 			return err;
 		case RSERR_INVALID_MODE:
-			Com_Printf( "...WARNING: could not set the given mode (%d)\n", mode );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "...WARNING: could not set the given mode (%d)\n", mode );
 			return err;
 		default:
 			break;
@@ -724,18 +723,24 @@ void GLimp_Init( glconfig_t *config )
 	InitSig();
 #endif
 
-	Com_DPrintf( "GLimp_Init()\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "GLimp_Init()\n" );
 
 	glw_state.config = config; // feedback renderer configuration
 
-	in_nograb = Cvar_Get( "in_nograb", "0", 0 );
-	Cvar_SetDescription( in_nograb, "Do not capture mouse in game, may be useful during online streaming." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "in_nograb", "0", 0,
+			"Do not capture mouse in game, may be useful during online streaming." );
+		in_nograb = Cvar_Register( &d );
+	}
 
 	r_allowSoftwareGL = Cvar_Get( "r_allowSoftwareGL", "0", CVAR_LATCH );
 
 	r_swapInterval = Cvar_Get( "r_swapInterval", "0", CVAR_ARCHIVE | CVAR_LATCH );
-	r_stereoEnabled = Cvar_Get( "r_stereoEnabled", "0", CVAR_ARCHIVE | CVAR_LATCH );
-	Cvar_SetDescription( r_stereoEnabled, "Enable stereo rendering for techniques like shutter glasses." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "r_stereoEnabled", "0", CVAR_ARCHIVE | CVAR_LATCH,
+			"Enable stereo rendering for techniques like shutter glasses." );
+		r_stereoEnabled = Cvar_Register( &d );
+	}
 
 	// Create the window and set up the context
 	err = GLimp_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string, r_fullscreen->integer, qfalse );
@@ -743,17 +748,17 @@ void GLimp_Init( glconfig_t *config )
 	{
 		if ( err == RSERR_FATAL_ERROR )
 		{
-			Com_Error( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem" );
+			Com_Terminate( TERM_UNRECOVERABLE, "GLimp_Init() - could not load OpenGL subsystem" );
 			return;
 		}
 
 		if ( r_mode->integer != 3 || ( r_fullscreen->integer && atoi( r_modeFullscreen->string ) != 3 ) )
 		{
-			Com_Printf( "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
+			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
 			if ( GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer, qfalse ) != RSERR_OK )
 			{
 				// Nothing worked, give up
-				Com_Error( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem" );
+				Com_Terminate( TERM_UNRECOVERABLE, "GLimp_Init() - could not load OpenGL subsystem" );
 				return;
 			}
 		}
@@ -819,14 +824,20 @@ void VKimp_Init( glconfig_t *config )
 	InitSig();
 #endif
 
-	Com_DPrintf( "VKimp_Init()\n" );
+	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "VKimp_Init()\n" );
 
-	in_nograb = Cvar_Get( "in_nograb", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( in_nograb, "Do not capture mouse in game, may be useful during online streaming." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "in_nograb", "0", CVAR_ARCHIVE,
+			"Do not capture mouse in game, may be useful during online streaming." );
+		in_nograb = Cvar_Register( &d );
+	}
 
 	r_swapInterval = Cvar_Get( "r_swapInterval", "0", CVAR_ARCHIVE | CVAR_LATCH );
-	r_stereoEnabled = Cvar_Get( "r_stereoEnabled", "0", CVAR_ARCHIVE | CVAR_LATCH );
-	Cvar_SetDescription( r_stereoEnabled, "Enable stereo rendering for techniques like shutter glasses." );
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "r_stereoEnabled", "0", CVAR_ARCHIVE | CVAR_LATCH,
+			"Enable stereo rendering for techniques like shutter glasses." );
+		r_stereoEnabled = Cvar_Register( &d );
+	}
 
 	// feedback to renderer configuration
 	glw_state.config = config;
@@ -837,17 +848,17 @@ void VKimp_Init( glconfig_t *config )
 	{
 		if ( err == RSERR_FATAL_ERROR )
 		{
-			Com_Error( ERR_FATAL, "VKimp_Init() - could not load Vulkan subsystem" );
+			Com_Terminate( TERM_UNRECOVERABLE, "VKimp_Init() - could not load Vulkan subsystem" );
 			return;
 		}
 
-		Com_Printf( "Setting r_mode %d failed, falling back on r_mode %d\n", r_mode->integer, 3 );
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Setting r_mode %d failed, falling back on r_mode %d\n", r_mode->integer, 3 );
 
 		err = GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer, qtrue /* Vulkan */ );
 		if( err != RSERR_OK )
 		{
 			// Nothing worked, give up
-			Com_Error( ERR_FATAL, "VKimp_Init() - could not load Vulkan subsystem" );
+			Com_Terminate( TERM_UNRECOVERABLE, "VKimp_Init() - could not load Vulkan subsystem" );
 			return;
 		}
 	}
@@ -858,7 +869,7 @@ void VKimp_Init( glconfig_t *config )
 	if ( qvkGetInstanceProcAddr == NULL )
 	{
 		SDL_QuitSubSystem( SDL_INIT_VIDEO );
-		Com_Error( ERR_FATAL, "VKimp_Init: qvkGetInstanceProcAddr is NULL" );
+		Com_Terminate( TERM_UNRECOVERABLE, "VKimp_Init: qvkGetInstanceProcAddr is NULL" );
 	}
 
 	// These values force the UI to disable driver selection

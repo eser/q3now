@@ -223,7 +223,7 @@ CM_PointContents
 
 ==================
 */
-int CM_PointContents( const vec3_t p, clipHandle_t model ) {
+int CMQ3_PointContents( const vec3_t p, clipHandle_t model ) {
 	int			leafnum;
 	int			i, k;
 	int			brushnum;
@@ -272,6 +272,10 @@ int CM_PointContents( const vec3_t p, clipHandle_t model ) {
 	return contents;
 }
 
+int CM_PointContents( const vec3_t p, clipHandle_t model ) {
+	return cm.tracer->PointContents( p, model );
+}
+
 /*
 ==================
 CM_TransformedPointContents
@@ -300,7 +304,7 @@ int	CM_TransformedPointContents( const vec3_t p, clipHandle_t model, const vec3_
 		p_l[2] = DotProduct (temp, up);
 	}
 
-	return CM_PointContents( p_l, model );
+	return cm.tracer->PointContents( p_l, model );
 }
 
 
@@ -340,7 +344,7 @@ static void CM_FloodArea_r( int areaNum, int floodnum) {
 	if ( area->floodvalid == cm.floodvalid ) {
 		if (area->floodnum == floodnum)
 			return;
-		Com_Error (ERR_DROP, "FloodArea_r: reflooded");
+		Com_Terminate( TERM_CLIENT_DROP, "FloodArea_r: reflooded");
 	}
 
 	area->floodnum = floodnum;
@@ -390,7 +394,7 @@ void	CM_AdjustAreaPortalState( int area1, int area2, qboolean open ) {
 	}
 
 	if ( area1 >= cm.numAreas || area2 >= cm.numAreas ) {
-		Com_Error (ERR_DROP, "CM_ChangeAreaPortalState: bad area number");
+		Com_Terminate( TERM_CLIENT_DROP, "CM_ChangeAreaPortalState: bad area number");
 	}
 
 	if ( open ) {
@@ -400,7 +404,7 @@ void	CM_AdjustAreaPortalState( int area1, int area2, qboolean open ) {
 		cm.areaPortals[ area1 * cm.numAreas + area2 ]--;
 		cm.areaPortals[ area2 * cm.numAreas + area1 ]--;
 		if ( cm.areaPortals[ area2 * cm.numAreas + area1 ] < 0 ) {
-			Com_Error (ERR_DROP, "CM_AdjustAreaPortalState: negative reference count");
+			Com_Terminate( TERM_CLIENT_DROP, "CM_AdjustAreaPortalState: negative reference count");
 		}
 	}
 
@@ -425,7 +429,7 @@ qboolean	CM_AreasConnected( int area1, int area2 ) {
 	}
 
 	if (area1 >= cm.numAreas || area2 >= cm.numAreas) {
-		Com_Error (ERR_DROP, "area >= cm.numAreas");
+		Com_Terminate( TERM_CLIENT_DROP, "area >= cm.numAreas");
 	}
 
 	if (cm.areas[area1].floodnum == cm.areas[area2].floodnum) {

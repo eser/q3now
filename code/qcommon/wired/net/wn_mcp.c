@@ -728,7 +728,7 @@ static void WN_McpHandleBotSetSkill_Buf( char *out, int out_size,
 	if ( skill > 5.0f ) skill = 5.0f;
 
 	// Set skill via console command — deferred to next frame
-	Cbuf_ExecuteText( EXEC_APPEND, va("g_spSkill %d\n", (int)(skill + 0.5f)) );
+	Cbuf_ExecuteText( EXEC_APPEND, va("g_skill %d\n", (int)(skill + 0.5f)) );
 
 	Com_sprintf( out, out_size,
 		"{\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Skill set to %.1f\"}],\"isError\":false},\"id\":%d}",
@@ -749,7 +749,6 @@ Used to validate "get <item>" bot commands before fire-and-forget dispatch.
 static const char *WN_ResolveItemPickupName( const char *input )
 {
 	gitem_t *it;
-	int      j;
 
 	if ( !input || !input[0] )
 		return NULL;
@@ -757,13 +756,11 @@ static const char *WN_ResolveItemPickupName( const char *input )
 	if ( !Q_stricmp( input, "flag" ) )
 		return "flag";
 
-	for ( it = bg_itemlist + 1; it->classnames[0]; it++ ) {
+	for ( it = bg_itemlist + 1; it->classname; it++ ) {
 		if ( it->pickup_name && !Q_stricmp( it->pickup_name, input ) )
 			return it->pickup_name;
-		for ( j = 0; j < MAX_ITEM_CLASSNAMES && it->classnames[j]; j++ ) {
-			if ( !Q_stricmp( it->classnames[j], input ) )
-				return it->pickup_name;
-		}
+		if ( !Q_stricmp( it->classname, input ) )
+			return it->pickup_name;
 	}
 	return NULL;
 }
@@ -921,7 +918,7 @@ static void WN_McpHandleGameItems_Buf( char *out, int out_size, int req_id )
 		if ( ent->s.modelindex <= 0 || ent->s.modelindex >= bg_numItems ) continue;
 
 		item  = &bg_itemlist[ent->s.modelindex];
-		cname = ( item->classnames[0] && item->classnames[0][0] ) ? item->classnames[0] : "unknown";
+		cname = ( item->classname && item->classname[0] ) ? item->classname : "unknown";
 		pname = ( item->pickup_name   && item->pickup_name[0]   ) ? item->pickup_name   : cname;
 		ox    = ent->r.currentOrigin[0];
 		oy    = ent->r.currentOrigin[1];
@@ -1096,9 +1093,9 @@ static void WN_McpHandleStartCoaching_Buf( char *out, int out_size, int req_id )
 	p += n; rem -= n;
 	for ( i = 1; i < bg_numItems; i++ ) {
 		if ( bg_itemlist[i].pickup_name  && bg_itemlist[i].pickup_name[0] &&
-		     bg_itemlist[i].classnames[0] && bg_itemlist[i].classnames[0][0] ) {
+		     bg_itemlist[i].classname && bg_itemlist[i].classname[0] ) {
 			n = Com_sprintf( p, rem, "  %s (%s)\n",
-				bg_itemlist[i].pickup_name, bg_itemlist[i].classnames[0] );
+				bg_itemlist[i].pickup_name, bg_itemlist[i].classname );
 			p += n; rem -= n;
 			if ( rem < 64 ) goto text_done;
 		}
@@ -1271,7 +1268,7 @@ static void WN_McpHandleStartCoaching_Buf( char *out, int out_size, int req_id )
 			if ( ent->s.modelindex <= 0 || ent->s.modelindex >= bg_numItems ) continue;
 
 			item  = &bg_itemlist[ent->s.modelindex];
-			cname = ( item->classnames[0] && item->classnames[0][0] ) ? item->classnames[0] : "unknown";
+			cname = ( item->classname && item->classname[0] ) ? item->classname : "unknown";
 			pname = ( item->pickup_name   && item->pickup_name[0]   ) ? item->pickup_name   : cname;
 			ox    = ent->r.currentOrigin[0];
 			oy    = ent->r.currentOrigin[1];
@@ -1286,7 +1283,7 @@ static void WN_McpHandleStartCoaching_Buf( char *out, int out_size, int req_id )
 				Com_sprintf( rl_buf,   sizeof(rl_buf),   "(%.0f,%.0f,%.0f)", ox, oy, oz );
 				rl_pos = rl_buf;
 			}
-			if ( !mega_pos && Q_stricmp( cname, "item_health_mega"      ) == 0 ) {
+			if ( !mega_pos && Q_stricmp( cname, "holdable_medkit"      ) == 0 ) {
 				Com_sprintf( mega_buf, sizeof(mega_buf), "(%.0f,%.0f,%.0f)", ox, oy, oz );
 				mega_pos = mega_buf;
 			}
@@ -1675,7 +1672,7 @@ static void WN_McpHandleStartCasting_Buf( char *out, int out_size,
 			if ( ent->s.modelindex <= 0 || ent->s.modelindex >= bg_numItems ) continue;
 
 			item  = &bg_itemlist[ent->s.modelindex];
-			cname = ( item->classnames[0] && item->classnames[0][0] ) ? item->classnames[0] : "unknown";
+			cname = ( item->classname && item->classname[0] ) ? item->classname : "unknown";
 			pname = ( item->pickup_name   && item->pickup_name[0]   ) ? item->pickup_name   : cname;
 			ox    = ent->r.currentOrigin[0];
 			oy    = ent->r.currentOrigin[1];
@@ -1689,7 +1686,7 @@ static void WN_McpHandleStartCasting_Buf( char *out, int out_size,
 				Com_sprintf( rl_buf,   sizeof(rl_buf),   "(%.0f,%.0f,%.0f)", ox, oy, oz );
 				rl_pos = rl_buf;
 			}
-			if ( !mega_pos && Q_stricmp( cname, "item_health_mega"      ) == 0 ) {
+			if ( !mega_pos && Q_stricmp( cname, "holdable_medkit"      ) == 0 ) {
 				Com_sprintf( mega_buf, sizeof(mega_buf), "(%.0f,%.0f,%.0f)", ox, oy, oz );
 				mega_pos = mega_buf;
 			}

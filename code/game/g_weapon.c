@@ -289,7 +289,7 @@ void FireWeapon( gentity_t *ent, int attackIndex ) {
 		Weapon_PlasmaRifle_Primary( ent );
 		break;
 	default:
-// FIXME		G_Error( "Bad ent->s.weapon" );
+// FIXME		Com_Terminate( TERM_CLIENT_DROP, "Bad ent->s.weapon" );
 		break;
 	}
 

@@ -24,8 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "g_local.h"
 
-void BotAutoCalibrate_RecordKill( int attacker, int victim );
-
 /*
 ============
 ScorePlum
@@ -158,9 +156,14 @@ void TossClientItems( gentity_t *self ) {
             drop->health =
                 ((self->client->ps.ammo[WP_GRENADE_LAUNCHER] & 0x00FF) << 8) +
                 (self->client->ps.ammo[WP_ROCKET_LAUNCHER] & 0x00FF);
-            drop->splashDamage =
-                ((self->client->ps.ammo[WP_LIGHTNING_GUN] & 0x00FF) << 8) +
-                (self->client->ps.ammo[WP_RAILGUN] & 0x00FF);
+            {
+                int lgAmmo = self->client->ps.ammo[WP_LIGHTNING_GUN];
+                /* Q1 rerelease backpack ammo floor: lightning gun minimum 15 cells */
+                if ( lgAmmo > 0 && lgAmmo < 15 ) lgAmmo = 15;
+                drop->splashDamage =
+                    ((lgAmmo & 0x00FF) << 8) +
+                    (self->client->ps.ammo[WP_RAILGUN] & 0x00FF);
+            }
             drop->splashRadius =
                 ((self->client->ps.ammo[WP_PLASMA_RIFLE] & 0x00FF) << 8);
         }
@@ -345,7 +348,9 @@ char	*modNames[] = {
 	"MOD_TARGET_LASER",
 	"MOD_TRIGGER_HURT",
 	"MOD_KAMIKAZE",
-	"MOD_GRAPPLE"
+	"MOD_GRAPPLE",
+	"MOD_LAVABALL",
+	"MOD_NAIL"
 };
 
 /*
@@ -537,8 +542,6 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		killer, self->s.number, meansOfDeath, killerName,
 		self->client->pers.netname, obit );
 
-	BotAutoCalibrate_RecordKill( killer, self->s.number );
-
 #if FEAT_UNLAGGED
 	G_UnTimeShiftClient( self );
 #endif
@@ -552,6 +555,13 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		trap_WiredNet_EmitKill( killer, self->s.number, meansOfDeath, att_pos, self->client->ps.origin );
 	}
 #endif
+	trap_WCE_EmitEvent( WCE_PLAYER_DEATH,
+	                    self->s.number, self->s.number,
+	                    self->client->ps.origin,
+	                    meansOfDeath,
+	                    killer,
+	                    0.0f,
+	                    obit );
 
 	// broadcast the death event to everyone
 	ent = G_TempEntity( self->r.currentOrigin, EV_OBITUARY );
@@ -894,10 +904,10 @@ int RaySphereIntersections( vec3_t origin, float radius, vec3_t point, vec3_t di
 
 /*
 ================
-G_InvulnerabilityEffect
+G_DeflectorEffect
 ================
 */
-int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir ) {
+int G_DeflectorEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir ) {
 	gentity_t	*impact;
 	vec3_t		intersections[2], vec;
 	int			n;
@@ -909,7 +919,7 @@ int G_InvulnerabilityEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t i
 	VectorInverse(vec);
 	n = RaySphereIntersections( targ->client->ps.origin, INVUL_RADIUS, point, vec, intersections);
 	if (n > 0) {
-		impact = G_TempEntity( targ->client->ps.origin, EV_INVUL_IMPACT );
+		impact = G_TempEntity( targ->client->ps.origin, EV_DEFLECTOR_IMPACT );
 		VectorSubtract(intersections[0], targ->client->ps.origin, vec);
 		vectoangles(vec, impact->s.angles);
 		impact->s.angles[0] += 90;
@@ -991,9 +1001,9 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	attIdx = G_AttackFromMOD( mod );
 
 	if ( targ->client ) {
-		if ( targ->client->invulnerabilityTime > level.time) {
+		if ( targ->client->deflectorTime > level.time) {
 			if ( dir && point ) {
-				G_InvulnerabilityEffect( targ, dir, point, impactpoint, bouncedir );
+				G_DeflectorEffect( targ, dir, point, impactpoint, bouncedir );
 			}
 			return;
 		}
@@ -1181,7 +1191,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	if ( g_debugDamage.integer ) {
-		G_Printf( "%i: client:%i health:%i damage:%i armor:%i\n", level.time, targ->s.number,
+		Com_Log( SEV_INFO, LOG_CAT_GAME, "%i: client:%i health:%i damage:%i armor:%i\n", level.time, targ->s.number,
 			targ->health, take, asave );
 	}
 
@@ -1264,6 +1274,14 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		trap_WiredNet_EmitDamage( attacker->s.number, targ->s.number, take, mod, att_pos, targ->r.currentOrigin );
 	}
 #endif
+	if ( take > 0 && targ->client ) {
+		trap_WCE_EmitEvent( WCE_PLAYER_TAKE_DAMAGE,
+		                    targ->s.number, targ->s.number,
+		                    targ->r.currentOrigin,
+		                    take,
+		                    attacker ? attacker->s.number : -1,
+		                    0.0f, NULL );
+	}
 
 	if ( targ->health <= 0 ) {
 		if ( targ->client )

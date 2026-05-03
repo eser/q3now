@@ -23,9 +23,30 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_local.h"
 #include "../qcommon/maps/bsp.h"
+#include "../renderercommon/r_q1_texture.h"
 
 #define JSON_IMPLEMENTATION
 #include "../qcommon/json.h"
+
+/* renderer2 R_CreateImage has a different signature from renderer/renderervk
+   (takes imgType_t + internalFormat), and IMGFLAG_CLAMPTOEDGE = 0x0040 vs the
+   Q1_IMGF_CLAMP sentinel 0x0004 used by the shared module. */
+static struct image_s *RGL2_Q1_CreateImage( const char *name, byte *rgba,
+                                             int w, int h, unsigned int q1flags )
+{
+    imgFlags_t flags = IMGFLAG_NONE;
+    if ( q1flags & 0x01u ) flags |= IMGFLAG_MIPMAP;
+    if ( q1flags & 0x02u ) flags |= IMGFLAG_PICMIP;
+    if ( q1flags & 0x04u ) flags |= IMGFLAG_CLAMPTOEDGE;
+    return R_CreateImage( name, rgba, w, h, IMGTYPE_COLORALPHA, flags, 0 );
+}
+
+static struct image_s *RGL2_Q1_LoadImage( const char *path, unsigned int q1flags ) {
+    /* renderer2 distinguishes normal maps at load time for swizzle/mip generation. */
+    imgType_t  type  = ( q1flags & 0x08u ) ? IMGTYPE_NORMAL : IMGTYPE_COLORALPHA;
+    imgFlags_t flags = IMGFLAG_MIPMAP;
+    return R_FindImageFile( path, type, flags );
+}
 #undef JSON_IMPLEMENTATION
 
 /*
@@ -332,7 +353,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 			if (textureInternalFormat == GL_RGBA16)
 			{
 				Com_sprintf( filename, sizeof( filename ), "maps/%s/lm_%04d.hdr", s_worldData.baseName, i * (tr.worldDeluxeMapping ? 2 : 1) );
-				//ri.Printf(PRINT_ALL, "looking for %s\n", filename);
+				//ri.Log( SEV_INFO, "looking for %s\n", filename);
 
 				size = ri.FS_ReadFile(filename, (void **)&hdrLightmap);
 			}
@@ -340,7 +361,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 			if (hdrLightmap)
 			{
 				byte *p = hdrLightmap, *end = hdrLightmap + size;
-				//ri.Printf(PRINT_ALL, "found!\n");
+				//ri.Log( SEV_INFO, "found!\n");
 				
 				/* FIXME: don't just skip over this header and actually parse it */
 				while (p < end && !(*p == '\n' && *(p+1) == '\n'))
@@ -354,16 +375,16 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 				p++;
 
 				if (p >= end)
-					ri.Error(ERR_DROP, "Bad header for %s!", filename);
+					ri.Terminate( TERM_CLIENT_DROP, "Bad header for %s!", filename);
 
 				buf_p = p;
 
 #if 0 // HDRFILE_RGBE
 				if ((int)(end - hdrLightmap) != tr.lightmapSize * tr.lightmapSize * 4)
-					ri.Error(ERR_DROP, "Bad size for %s (%i)!", filename, size);
+					ri.Terminate( TERM_CLIENT_DROP, "Bad size for %s (%i)!", filename, size);
 #else // HDRFILE_FLOAT
 				if ((int)(end - hdrLightmap) != tr.lightmapSize * tr.lightmapSize * 12)
-					ri.Error(ERR_DROP, "Bad size for %s (%i)!", filename, size);
+					ri.Terminate( TERM_CLIENT_DROP, "Bad size for %s (%i)!", filename, size);
 #endif
 			}
 			else
@@ -497,7 +518,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 	}
 
 	if ( r_lightmap->integer == 2 )	{
-		ri.Printf( PRINT_ALL, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
+		ri.Log( SEV_INFO, "Brightest lightmap value: %d\n", ( int ) ( maxIntensity * 255 ) );
 	}
 
 	ri.Free(image);
@@ -611,7 +632,7 @@ static shader_t *ShaderForShaderNum( int shaderNum, int lightmapNum ) {
 
 	int _shaderNum = LittleLong( shaderNum );
 	if ( _shaderNum < 0 || _shaderNum >= s_worldData.numShaders ) {
-		ri.Error( ERR_DROP, "ShaderForShaderNum: bad num %i", _shaderNum );
+		ri.Terminate( TERM_CLIENT_DROP, "ShaderForShaderNum: bad num %i", _shaderNum );
 	}
 	dsh = &s_worldData.shaders[ _shaderNum ];
 
@@ -718,7 +739,7 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, float *hdr
 
 	numVerts = LittleLong(ds->numVerts);
 	if (numVerts > MAX_FACE_POINTS) {
-		ri.Printf( PRINT_WARNING, "WARNING: MAX_FACE_POINTS exceeded: %i\n", numVerts);
+		ri.Log( SEV_WARN, "WARNING: MAX_FACE_POINTS exceeded: %i\n", numVerts);
 		numVerts = MAX_FACE_POINTS;
 		surf->shader = tr.defaultShader;
 	}
@@ -753,7 +774,7 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, float *hdr
 
 			if(tri[j] >= numVerts)
 			{
-				ri.Error(ERR_DROP, "Bad index in face surface");
+				ri.Terminate( TERM_CLIENT_DROP, "Bad index in face surface");
 			}
 		}
 
@@ -766,7 +787,7 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, float *hdr
 
 	if (badTriangles)
 	{
-		ri.Printf(PRINT_WARNING, "Face has bad triangles, originally shader %s %d tris %d verts, now %d tris\n", surf->shader->name, numIndexes / 3, numVerts, numIndexes / 3 - badTriangles);
+		ri.Log( SEV_WARN, "Face has bad triangles, originally shader %s %d tris %d verts, now %d tris\n", surf->shader->name, numIndexes / 3, numVerts, numIndexes / 3 - badTriangles);
 		cv->numIndexes -= badTriangles * 3;
 	}
 
@@ -853,7 +874,7 @@ static void ParseMesh ( const dsurface_t *ds, const drawVert_t *verts, float *hd
 	height = LittleLong( ds->patchHeight );
 
 	if(width < 0 || width > MAX_PATCH_SIZE || height < 0 || height > MAX_PATCH_SIZE)
-		ri.Error(ERR_DROP, "ParseMesh: bad size");
+		ri.Terminate( TERM_CLIENT_DROP, "ParseMesh: bad size");
 
 	verts += LittleLong( ds->firstVert );
 	numPoints = width * height;
@@ -935,7 +956,7 @@ static void ParseTriSurf( const dsurface_t *ds, const drawVert_t *verts, float *
 
 			if(tri[j] >= numVerts)
 			{
-				ri.Error(ERR_DROP, "Bad index in face surface");
+				ri.Terminate( TERM_CLIENT_DROP, "Bad index in face surface");
 			}
 		}
 
@@ -948,7 +969,7 @@ static void ParseTriSurf( const dsurface_t *ds, const drawVert_t *verts, float *
 
 	if (badTriangles)
 	{
-		ri.Printf(PRINT_WARNING, "Trisurf has bad triangles, originally shader %s %d tris %d verts, now %d tris\n", surf->shader->name, numIndexes / 3, numVerts, numIndexes / 3 - badTriangles);
+		ri.Log( SEV_WARN, "Trisurf has bad triangles, originally shader %s %d tris %d verts, now %d tris\n", surf->shader->name, numIndexes / 3, numVerts, numIndexes / 3 - badTriangles);
 		cv->numIndexes -= badTriangles * 3;
 	}
 
@@ -1237,7 +1258,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1281,7 +1302,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1334,7 +1355,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1378,7 +1399,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1432,7 +1453,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1476,7 +1497,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1531,7 +1552,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert column into grid2 right after column l
 					if (m) row = grid2->height-1;
 					else row = 0;
@@ -1575,7 +1596,7 @@ static int R_StitchPatches( int grid1num, int grid2num ) {
 							fabs(v1[2] - v2[2]) < .01)
 						continue;
 					//
-					//ri.Printf( PRINT_ALL, "found highest LoD crack between two patches\n" );
+					//ri.Log( SEV_INFO, "found highest LoD crack between two patches\n" );
 					// insert row into grid2 right after row l
 					if (m) column = grid2->width-1;
 					else column = 0;
@@ -1660,7 +1681,7 @@ static void R_StitchAllPatches( void ) {
 		}
 	}
 	while (stitched);
-	ri.Printf( PRINT_DEVELOPER, "stitched %d LoD cracks\n", numstitches );
+	ri.Log( SEV_DEBUG, "stitched %d LoD cracks\n", numstitches );
 }
 
 /*
@@ -1724,16 +1745,16 @@ static	void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 	numFlares = 0;
 
 	if (surfs->filelen % sizeof(*in))
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	count = surfs->filelen / sizeof(*in);
 
 	dv = (void *)(fileBase + verts->fileofs);
 	if (verts->filelen % sizeof(*dv))
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 
 	indexes = (void *)(fileBase + indexLump->fileofs);
 	if ( indexLump->filelen % sizeof(*indexes))
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 
 	out = ri.Hunk_Alloc ( count * sizeof(*out), h_low );	
 
@@ -1749,15 +1770,15 @@ static	void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 		char filename[MAX_QPATH];
 
 		Com_sprintf( filename, sizeof( filename ), "maps/%s/vertlight.raw", s_worldData.baseName);
-		//ri.Printf(PRINT_ALL, "looking for %s\n", filename);
+		//ri.Log( SEV_INFO, "looking for %s\n", filename);
 
 		int size = ri.FS_ReadFile(filename, (void **)&hdrVertColors);
 
 		if (hdrVertColors)
 		{
-			//ri.Printf(PRINT_ALL, "Found!\n");
+			//ri.Log( SEV_INFO, "Found!\n");
 			if (size != sizeof(float) * 3 * (verts->filelen / sizeof(*dv)))
-				ri.Error(ERR_DROP, "Bad size for %s (%i, expected %i)!", filename, size, (int)((sizeof(float)) * 3 * (verts->filelen / sizeof(*dv))));
+				ri.Terminate( TERM_CLIENT_DROP, "Bad size for %s (%i, expected %i)!", filename, size, (int)((sizeof(float)) * 3 * (verts->filelen / sizeof(*dv))));
 		}
 	}
 
@@ -1807,7 +1828,7 @@ static	void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 			numFlares++;
 			break;
 		default:
-			ri.Error( ERR_DROP, "Bad surfaceType" );
+			ri.Terminate( TERM_CLIENT_DROP, "Bad surfaceType" );
 		}
 	}
 
@@ -1826,7 +1847,7 @@ static	void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 	R_MovePatchSurfacesToHunk();
 #endif
 
-	ri.Printf( PRINT_DEVELOPER, "...loaded %d faces, %i meshes, %i trisurfs, %i flares\n",
+	ri.Log( SEV_DEBUG, "...loaded %d faces, %i meshes, %i trisurfs, %i flares\n",
 		numFaces, numMeshes, numTriSurfs, numFlares );
 }
 
@@ -1844,7 +1865,7 @@ static	void R_LoadSubmodels( const lump_t *l ) {
 
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	count = l->filelen / sizeof(*in);
 
 	s_worldData.numBModels = count;
@@ -1857,7 +1878,7 @@ static	void R_LoadSubmodels( const lump_t *l ) {
 
 		assert( model != NULL );			// this should never happen
 		if ( model == NULL ) {
-			ri.Error(ERR_DROP, "R_LoadSubmodels: R_AllocModel() failed");
+			ri.Terminate( TERM_CLIENT_DROP, "R_LoadSubmodels: R_AllocModel() failed");
 		}
 
 		model->type = MOD_BRUSH;
@@ -1913,7 +1934,7 @@ static	void R_LoadNodesAndLeafs (const lump_t *nodeLump, const lump_t *leafLump)
 	in = (void *)(fileBase + nodeLump->fileofs);
 	if (nodeLump->filelen % sizeof(dnode_t) ||
 		leafLump->filelen % sizeof(dleaf_t) ) {
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	}
 	numNodes = nodeLump->filelen / sizeof(dnode_t);
 	numLeafs = leafLump->filelen / sizeof(dleaf_t);
@@ -1986,7 +2007,7 @@ static	void R_LoadShaders( const lump_t *l ) {
 	
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low );
 
@@ -2015,7 +2036,7 @@ static	void R_LoadMarksurfaces (const lump_t *l)
 	
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low);	
 
@@ -2044,7 +2065,7 @@ static	void R_LoadPlanes( const lump_t *l ) {
 	
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	count = l->filelen / sizeof(*in);
 	out = ri.Hunk_Alloc ( count*2*sizeof(*out), h_low);	
 	
@@ -2087,7 +2108,7 @@ static	void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 
 	fogs = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*fogs)) {
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	}
 	count = l->filelen / sizeof(*fogs);
 
@@ -2102,13 +2123,13 @@ static	void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 
 	brushes = (void *)(fileBase + brushesLump->fileofs);
 	if (brushesLump->filelen % sizeof(*brushes)) {
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	}
 	brushesCount = brushesLump->filelen / sizeof(*brushes);
 
 	sides = (void *)(fileBase + sidesLump->fileofs);
 	if (sidesLump->filelen % sizeof(*sides)) {
-		ri.Error (ERR_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
+		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	}
 	sidesCount = sidesLump->filelen / sizeof(*sides);
 
@@ -2116,14 +2137,14 @@ static	void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 		out->originalBrushNumber = LittleLong( fogs->brushNum );
 
 		if ( (unsigned)out->originalBrushNumber >= brushesCount ) {
-			ri.Error( ERR_DROP, "fog brushNumber out of range" );
+			ri.Terminate( TERM_CLIENT_DROP, "fog brushNumber out of range" );
 		}
 		brush = brushes + out->originalBrushNumber;
 
 		firstSide = LittleLong( brush->firstSide );
 
 			if ( (unsigned)firstSide > sidesCount - 6 ) {
-			ri.Error( ERR_DROP, "fog brush sideNumber out of range" );
+			ri.Terminate( TERM_CLIENT_DROP, "fog brush sideNumber out of range" );
 		}
 
 		// brushes are always sorted with the axial sides first
@@ -2211,7 +2232,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 
 	if ( (uint64_t)w->lightGridBounds[0] * w->lightGridBounds[1] > INT_MAX ||
 		 (uint64_t)w->lightGridBounds[0] * w->lightGridBounds[1] * w->lightGridBounds[2] > INT_MAX ) {
-		ri.Printf( PRINT_WARNING, "WARNING: bad light grid bounds\n" );
+		ri.Log( SEV_WARN, "WARNING: bad light grid bounds\n" );
 		w->lightGridData = NULL;
 		return;
 	}
@@ -2219,7 +2240,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 	numGridPoints = w->lightGridBounds[0] * w->lightGridBounds[1] * w->lightGridBounds[2];
 
 	if ( l->filelen % 8 || l->filelen / 8 != numGridPoints ) {
-		ri.Printf( PRINT_WARNING, "WARNING: light grid mismatch\n" );
+		ri.Log( SEV_WARN, "WARNING: light grid mismatch\n" );
 		w->lightGridData = NULL;
 		return;
 	}
@@ -2240,16 +2261,16 @@ static void R_LoadLightGrid( const lump_t *l ) {
 		float *hdrLightGrid;
 
 		Com_sprintf( filename, sizeof( filename ), "maps/%s/lightgrid.raw", s_worldData.baseName);
-		//ri.Printf(PRINT_ALL, "looking for %s\n", filename);
+		//ri.Log( SEV_INFO, "looking for %s\n", filename);
 
 		int size = ri.FS_ReadFile(filename, (void **)&hdrLightGrid);
 
 		if (hdrLightGrid)
 		{
-			//ri.Printf(PRINT_ALL, "found!\n");
+			//ri.Log( SEV_INFO, "found!\n");
 
 			if (size != sizeof(float) * 6 * numGridPoints)
-				ri.Error(ERR_DROP, "Bad size for %s (%i, expected %i)!", filename, size, (int)(sizeof(float)) * 6 * numGridPoints);
+				ri.Terminate( TERM_CLIENT_DROP, "Bad size for %s (%i, expected %i)!", filename, size, (int)(sizeof(float)) * 6 * numGridPoints);
 
 			w->lightGrid16 = ri.Hunk_Alloc(sizeof(w->lightGrid16) * 6 * numGridPoints, h_low);
 
@@ -2347,7 +2368,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		if (!strncmp(keyname, s, strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
-				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in vertexshaderremap '%s'\n", value );
+				ri.Log( SEV_WARN, "WARNING: no semi colon in vertexshaderremap '%s'\n", value );
 				break;
 			}
 			*vs++ = 0;
@@ -2361,7 +2382,7 @@ static void R_LoadEntities( const lump_t *l ) {
 		if (!strncmp(keyname, s, strlen(s)) ) {
 			char *vs = strchr(value, ';');
 			if (!vs) {
-				ri.Printf( PRINT_WARNING, "WARNING: no semi colon in shaderremap '%s'\n", value );
+				ri.Log( SEV_WARN, "WARNING: no semi colon in shaderremap '%s'\n", value );
 				break;
 			}
 			*vs++ = 0;
@@ -2420,7 +2441,7 @@ static qboolean R_ParseSpawnVars( char *spawnVarChars, int maxSpawnVarChars, int
 		return qfalse;
 	}
 	if ( com_token[0] != '{' ) {
-		ri.Printf( PRINT_ALL, "R_ParseSpawnVars: found %s when expecting {\n",com_token );
+		ri.Log( SEV_INFO, "R_ParseSpawnVars: found %s when expecting {\n",com_token );
 		return qfalse;
 	}
 
@@ -2430,7 +2451,7 @@ static qboolean R_ParseSpawnVars( char *spawnVarChars, int maxSpawnVarChars, int
 
 		// parse key
 		if ( !R_GetEntityToken( keyname, sizeof( keyname ) ) ) {
-			ri.Printf( PRINT_ALL, "R_ParseSpawnVars: EOF without closing brace\n" );
+			ri.Log( SEV_INFO, "R_ParseSpawnVars: EOF without closing brace\n" );
 			return qfalse;
 		}
 
@@ -2440,17 +2461,17 @@ static qboolean R_ParseSpawnVars( char *spawnVarChars, int maxSpawnVarChars, int
 		
 		// parse value	
 		if ( !R_GetEntityToken( com_token, sizeof( com_token ) ) ) {
-			ri.Printf( PRINT_ALL, "R_ParseSpawnVars: EOF without closing brace\n" );
+			ri.Log( SEV_INFO, "R_ParseSpawnVars: EOF without closing brace\n" );
 			return qfalse;
 		}
 
 		if ( com_token[0] == '}' ) {
-			ri.Printf( PRINT_ALL, "R_ParseSpawnVars: closing brace without data\n" );
+			ri.Log( SEV_INFO, "R_ParseSpawnVars: closing brace without data\n" );
 			return qfalse;
 		}
 
 		if ( *numSpawnVars == MAX_SPAWN_VARS ) {
-			ri.Printf( PRINT_ALL, "R_ParseSpawnVars: MAX_SPAWN_VARS\n" );
+			ri.Log( SEV_INFO, "R_ParseSpawnVars: MAX_SPAWN_VARS\n" );
 			return qfalse;
 		}
 
@@ -2459,7 +2480,7 @@ static qboolean R_ParseSpawnVars( char *spawnVarChars, int maxSpawnVarChars, int
 
 		if (numSpawnVarChars + keyLength + tokenLength > maxSpawnVarChars)
 		{
-			ri.Printf( PRINT_ALL, "R_ParseSpawnVars: MAX_SPAWN_VAR_CHARS\n" );
+			ri.Log( SEV_INFO, "R_ParseSpawnVars: MAX_SPAWN_VAR_CHARS\n" );
 			return qfalse;
 		}
 
@@ -2499,7 +2520,7 @@ static void R_LoadEnvironmentJson(const char *baseName)
 
 	if (JSON_ValueGetType(buffer.c, bufferEnd) != JSONTYPE_OBJECT)
 	{
-		ri.Printf(PRINT_ALL, "Bad %s: does not start with a object\n", filename);
+		ri.Log( SEV_INFO, "Bad %s: does not start with a object\n", filename);
 		ri.FS_FreeFile(buffer.v);
 		return;
 	}
@@ -2507,14 +2528,14 @@ static void R_LoadEnvironmentJson(const char *baseName)
 	cubemapArrayJson = JSON_ObjectGetNamedValue(buffer.c, bufferEnd, "Cubemaps");
 	if (!cubemapArrayJson)
 	{
-		ri.Printf(PRINT_ALL, "Bad %s: no Cubemaps\n", filename);
+		ri.Log( SEV_INFO, "Bad %s: no Cubemaps\n", filename);
 		ri.FS_FreeFile(buffer.v);
 		return;
 	}
 
 	if (JSON_ValueGetType(cubemapArrayJson, bufferEnd) != JSONTYPE_ARRAY)
 	{
-		ri.Printf(PRINT_ALL, "Bad %s: Cubemaps not an array\n", filename);
+		ri.Log( SEV_INFO, "Bad %s: Cubemaps not an array\n", filename);
 		ri.FS_FreeFile(buffer.v);
 		return;
 	}
@@ -2637,12 +2658,12 @@ static void R_AssignCubemapsToWorldSurfaces(void)
 		}
 		else
 		{
-			//ri.Printf(PRINT_ALL, "surface %d has no cubemap\n", i);
+			//ri.Log( SEV_INFO, "surface %d has no cubemap\n", i);
 			continue;
 		}
 
 		surf->cubemapIndex = R_CubemapForPoint(surfOrigin);
-		//ri.Printf(PRINT_ALL, "surface %d has cubemap %d\n", i, surf->cubemapIndex);
+		//ri.Log( SEV_INFO, "surface %d has cubemap %d\n", i, surf->cubemapIndex);
 	}
 }
 
@@ -2738,16 +2759,16 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	byte		*startMarker;
 
 	if ( tr.worldMapLoaded ) {
-		ri.Error( ERR_DROP, "ERROR: attempted to redundantly load world map" );
+		ri.Terminate( TERM_CLIENT_DROP, "ERROR: attempted to redundantly load world map" );
 	}
 
 	if ( !bsp ) {
-		ri.Error( ERR_DROP, "%s: bsp is NULL", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: bsp is NULL", __func__ );
 	}
 
 	name = bsp->name;
 	if ( !name[0] ) {
-		ri.Error( ERR_DROP, "%s: bsp has empty name", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: bsp has empty name", __func__ );
 	}
 
 	if ( bsp->version ) {
@@ -2785,7 +2806,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	buffer.b = bsp->rawData;
 	size = bsp->rawLength;
 	if ( !buffer.b || size <= 0 ) {
-		ri.Error( ERR_DROP, "%s: %s has no raw BSP data", __func__, name );
+		ri.Terminate( TERM_CLIENT_DROP, "%s: %s has no raw BSP data", __func__, name );
 	}
 
 	tr.mapLoading = qtrue;		// CNQ3: signal backend to throttle swaps during load
@@ -2815,7 +2836,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 		uint32_t ofs = header->lumps[i].fileofs;
 		uint32_t len = header->lumps[i].filelen;
 		if ( (uint64_t)ofs + len > size ) {
-			ri.Error( ERR_DROP, "%s: %s has wrong lump[%i] size/offset", __func__, name, i );
+			ri.Terminate( TERM_CLIENT_DROP, "%s: %s has wrong lump[%i] size/offset", __func__, name, i );
 		}
 	}
 
@@ -2823,6 +2844,9 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	R_LoadEntities( &header->lumps[LUMP_ENTITIES] );
 	R_LoadShaders( &header->lumps[LUMP_SHADERS] );
 	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS], &header->lumps[LUMP_SURFACES] );
+	R_Q1_SetCreateImageFn( RGL2_Q1_CreateImage );
+	R_Q1_SetLoadImageFn( RGL2_Q1_LoadImage );
+	R_Q1_PrepareTextures( bsp );
 	R_LoadPlanes (&header->lumps[LUMP_PLANES]);
 	R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES] );
 	R_LoadSurfaces( &header->lumps[LUMP_SURFACES], &header->lumps[LUMP_DRAWVERTS], &header->lumps[LUMP_DRAWINDEXES] );
@@ -2946,7 +2970,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 			{
 				if (DotProduct(ci->plane.normal, tr.sunDirection) <= 0.0f)
 				{
-					//ri.Printf(PRINT_ALL, "surface %d is not oriented towards sunlight\n", i);
+					//ri.Log( SEV_INFO, "surface %d is not oriented towards sunlight\n", i);
 					continue;
 				}
 			}
@@ -2977,7 +3001,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 				ibounds[1][2] = CLAMP(ibounds[1][2], 0, w->lightGridSize[2]);
 
 				/*
-				ri.Printf(PRINT_ALL, "surf %d bounds (%f %f %f)-(%f %f %f) ibounds (%d %d %d)-(%d %d %d)\n", i,
+				ri.Log( SEV_INFO, "surf %d bounds (%f %f %f)-(%f %f %f) ibounds (%d %d %d)-(%d %d %d)\n", i,
 					ci->bounds[0][0], ci->bounds[0][1], ci->bounds[0][2],
 					ci->bounds[1][0], ci->bounds[1][1], ci->bounds[1][2],
 					ibounds[0][0], ibounds[0][1], ibounds[0][2],
@@ -3008,7 +3032,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 				// FIXME: magic number for determining whether object is mostly in sunlight
 				if (goodSamples > numSamples * 0.75f)
 				{
-					//ri.Printf(PRINT_ALL, "surface %d is in sunlight\n", i);
+					//ri.Log( SEV_INFO, "surface %d is in sunlight\n", i);
 					//surf->primaryLight = 1;
 				}
 			}

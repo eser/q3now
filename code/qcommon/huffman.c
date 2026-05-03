@@ -271,7 +271,7 @@ static int Huff_Receive(node_t *node, int *ch, byte *fin) {
 	}
 	if (!node) {
 		return 0;
-//		Com_Error(ERR_DROP, "Illegal tree!");
+//		Com_Terminate( TERM_CLIENT_DROP, "Illegal tree!");
 	}
 	return (*ch = node->symbol);
 }

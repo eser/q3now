@@ -42,6 +42,7 @@ typedef enum
 	IMGFLAG_NOSCALE        = 0x0080,
 	IMGFLAG_RGB            = 0x0100,
 	IMGFLAG_COLORSHIFT     = 0x0200,
+	IMGFLAG_ARRAY          = 0x0400,  /* 2D_ARRAY image; layerCount gives depth */
 } imgFlags_t;
 
 typedef enum {
@@ -96,6 +97,7 @@ void  R_NoiseInit( void );
 
 image_t *R_FindImageFile( const char *name, imgFlags_t flags );
 image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int width, int height, imgFlags_t flags );
+image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int width, int height, imgFlags_t flags );
 void R_UploadSubImage( byte *data, int x, int y, int width, int height, image_t *image );
 
 qhandle_t RE_RegisterShaderLightMap( const char *name, int lightmapIndex );

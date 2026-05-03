@@ -382,7 +382,7 @@ static void CG_DrawCrosshair3D(void)
 		w *= ( 1 + f );
 	}
 
-	hShader = cgs.media.crosshairMiscShader;
+	hShader = cgs.media.crosshairDefaultShader;
 
 	// Use a different method rendering the crosshair so players don't see two of them when
 	// focusing their eyes at distant objects with high stereo separation

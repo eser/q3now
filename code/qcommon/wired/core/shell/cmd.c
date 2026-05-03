@@ -73,13 +73,13 @@ Usage: waitms <milliseconds>
 */
 static void Cmd_WaitMs_f( void ) {
 	if ( Cmd_Argc() != 2 ) {
-		Com_Printf( "usage: waitms <milliseconds>\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: waitms <milliseconds>\n" );
 		return;
 	}
 
 	int duration = atoi( Cmd_Argv( 1 ) );
 	if ( duration <= 0 ) {
-		Com_Printf( "waitms: invalid duration\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "waitms: invalid duration\n" );
 		return;
 	}
 
@@ -121,7 +121,7 @@ void Cbuf_AddText( const char *text ) {
 
 	if (cmd_text.cursize + l >= cmd_text.maxsize)
 	{
-		Com_Printf ("Cbuf_AddText: overflow\n");
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cbuf_AddText: overflow\n");
 		return;
 	}
 
@@ -162,7 +162,7 @@ void Cbuf_NestedAdd( const char *text ) {
 			if ( cmd_text.cursize < cmd_text.maxsize ) {
 				cmd_text.data[cmd_text.cursize++] = ';';
 			} else {
-				Com_Printf( S_COLOR_YELLOW "%s(%i) overflowed\n", __func__, pos );
+				COM_WARN( LOG_CAT_SYSTEM, "%s(%i) overflowed\n", __func__, pos );
 				nestedCmdOffset = cmd_text.cursize;
 				return;
 			}
@@ -183,7 +183,7 @@ void Cbuf_NestedAdd( const char *text ) {
 	}
 
 	if ( len + cmd_text.cursize > cmd_text.maxsize ) {
-		Com_Printf( S_COLOR_YELLOW "%s(%i) overflowed\n", __func__, pos );
+		COM_WARN( LOG_CAT_SYSTEM, "%s(%i) overflowed\n", __func__, pos );
 		nestedCmdOffset = cmd_text.cursize;
 		return;
 	}
@@ -220,7 +220,7 @@ void Cbuf_InsertText( const char *text ) {
 	int len = strlen( text ) + 1;
 
 	if ( len + cmd_text.cursize > cmd_text.maxsize ) {
-		Com_Printf( "Cbuf_InsertText overflowed\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cbuf_InsertText overflowed\n" );
 		return;
 	}
 
@@ -252,11 +252,11 @@ void Cbuf_ExecuteText( cbufExec_t exec_when, const char *text )
 		cmd_wait = 0; // discard any pending waiting
 		cmd_waitms_until = 0;
 		if ( text && text[0] != '\0' ) {
-			Com_DPrintf(S_COLOR_YELLOW "EXEC_NOW %s\n", text);
+			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "EXEC_NOW %s\n", text);
 			Cmd_ExecuteString( text );
 		} else {
 			Cbuf_Execute();
-			Com_DPrintf( S_COLOR_YELLOW "EXEC_NOW %s\n", cmd_text.data );
+			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "EXEC_NOW %s\n", cmd_text.data );
 		}
 		break;
 	case EXEC_INSERT:
@@ -266,7 +266,7 @@ void Cbuf_ExecuteText( cbufExec_t exec_when, const char *text )
 		Cbuf_AddText( text );
 		break;
 	default:
-		Com_Error (ERR_FATAL, "Cbuf_ExecuteText: bad exec_when");
+		Com_Terminate( TERM_UNRECOVERABLE, "Cbuf_ExecuteText: bad exec_when");
 	}
 }
 
@@ -429,7 +429,7 @@ static void Cmd_Exec_f( void ) {
 	qboolean quiet = !Q_stricmp(Cmd_Argv(0), "execq");
 
 	if (Cmd_Argc () != 2) {
-		Com_Printf ("exec%s <filename> : execute a script file%s\n",
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "exec%s <filename> : execute a script file%s\n",
 			quiet ? "q" : "", quiet ? " without notification" : "");
 		return;
 	}
@@ -445,11 +445,11 @@ static void Cmd_Exec_f( void ) {
 	FS_ReadFile( filename, &f.v );
 	FS_RestorePure();
 	if ( f.v == NULL ) {
-		Com_Printf( "couldn't exec %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "couldn't exec %s\n", filename );
 		return;
 	}
 	if (!quiet)
-		Com_Printf ("execing %s\n", filename);
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WiredCore/Scripting: executing %s\n", filename);
 
 	Cbuf_InsertText( f.c );
 
@@ -472,7 +472,7 @@ Inserts the current value of a variable as command text
 */
 static void Cmd_Vstr_f( void ) {
 	if ( Cmd_Argc () != 2 ) {
-		Com_Printf( "vstr <variablename> : execute a variable command\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "vstr <variablename> : execute a variable command\n" );
 		return;
 	}
 
@@ -499,7 +499,7 @@ static qboolean vstrKeyPressed[ MAX_VSTR_KEYS ];
 
 static void Cmd_VstrDown_f( void ) {
 	if ( Cmd_Argc() < 3 ) {
-		Com_Printf( "+vstr <press cvar> <release cvar> : press/release variable commands\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "+vstr <press cvar> <release cvar> : press/release variable commands\n" );
 		return;
 	}
 
@@ -523,7 +523,7 @@ static void Cmd_VstrDown_f( void ) {
 
 static void Cmd_VstrUp_f( void ) {
 	if ( Cmd_Argc() < 3 ) {
-		Com_Printf( "-vstr <press cvar> <release cvar> : press/release variable commands\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "-vstr <press cvar> <release cvar> : press/release variable commands\n" );
 		return;
 	}
 
@@ -555,7 +555,7 @@ Just prints the rest of the line to the console
 */
 static void Cmd_Echo_f( void )
 {
-	Com_Printf( "%s\n", Cmd_ArgsFrom( 1 ) );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\n", Cmd_ArgsFrom( 1 ) );
 }
 
 
@@ -747,7 +747,7 @@ will point into this temporary buffer.
 static void Cmd_TokenizeString2( const char *text_in, qboolean ignoreQuotes ) {
 #ifdef TKN_DBG
 	// FIXME TTimo blunt hook to try to find the tokenization of userinfo
-	Com_DPrintf("Cmd_TokenizeString: %s\n", text_in);
+	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Cmd_TokenizeString: %s\n", text_in);
 #endif
 
 	// clear previous args
@@ -895,7 +895,7 @@ static void Cmd_AddCommandInternal( const char *cmd_name, xcommand_t function, q
 	{
 		// allow completion-only commands to be silently doubled
 		if ( function != NULL )
-			Com_Printf( "Cmd_AddCommand: %s already defined\n", cmd_name );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cmd_AddCommand: %s already defined\n", cmd_name );
 		return;
 	}
 
@@ -994,7 +994,7 @@ void Cmd_RemoveCommandSafe( const char *cmd_name )
 		return;
 	if( cmd->function )
 	{
-		Com_Error( ERR_DROP, "Restricted source tried to remove "
+		Com_Terminate( TERM_CLIENT_DROP, "Restricted source tried to remove "
 			"system command \"%s\"", cmd_name );
 		return;
 	}
@@ -1176,10 +1176,10 @@ static void Cmd_List_f( void )
 	for ( const cmd_function_t *cmd = cmd_functions ; cmd ; cmd=cmd->next ) {
 		if ( match && !Com_Filter( match, cmd->name ) )
 			continue;
-		Com_Printf( "%s\n", cmd->name );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\n", cmd->name );
 		i++;
 	}
-	Com_Printf( "%i commands\n", i );
+	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%i commands\n", i );
 }
 
 

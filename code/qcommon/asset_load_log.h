@@ -17,8 +17,8 @@ Output examples:
 #define ASSET_LOAD_LOG_H
 
 typedef enum {
-	ASSET_LOG_INFO,		// Com_DPrintf  — fallback found, informational only
-	ASSET_LOG_WARN		// Com_Printf yellow — all fallbacks exhausted
+	ASSET_LOG_INFO,		// Com_Log info  — fallback found, informational only
+	ASSET_LOG_WARN		// Com_Log yellow — all fallbacks exhausted
 } assetLogSeverity_t;
 
 /*

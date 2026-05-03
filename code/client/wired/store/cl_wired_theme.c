@@ -58,7 +58,7 @@ static void WiredTheme_SetState( const char *name, float r, float g, float b, fl
 
     /* add new entry */
     if ( wired_theme.numStates >= WUI_THEME_MAX_STATES ) {
-        Com_Printf( S_COLOR_YELLOW "WiredTheme: max states reached (%d), cannot add '%s'\n",
+        COM_WARN( LOG_CAT_CLIENT, "WiredTheme: max states reached (%d), cannot add '%s'\n",
                      WUI_THEME_MAX_STATES, name );
         return;
     }
@@ -101,10 +101,10 @@ qboolean WiredTheme_ResolveState( const char *state, vec4_t colorOut ) {
 /* ── console commands ──────────────────────────────────────────────── */
 
 static void WiredTheme_Cmd_List( void ) {
-    Com_Printf( "WiredTheme: '%s' (%d states)\n", wired_theme.name, wired_theme.numStates );
-    Com_Printf( "------------------------------------\n" );
+    Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredTheme: '%s' (%d states)\n", wired_theme.name, wired_theme.numStates );
+    Com_Log( SEV_INFO, LOG_CAT_CLIENT, "------------------------------------\n" );
     for ( int i = 0; i < wired_theme.numStates; i++ ) {
-        Com_Printf( "  %-16s  %.2f %.2f %.2f %.2f\n",
+        Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  %-16s  %.2f %.2f %.2f %.2f\n",
                      wired_theme.states[i].name,
                      wired_theme.states[i].color[0],
                      wired_theme.states[i].color[1],
@@ -118,8 +118,8 @@ static void WiredTheme_Cmd_Set( void ) {
     float r, g, b, a;
 
     if ( Cmd_Argc() < 6 ) {
-        Com_Printf( "Usage: wui_theme_set <state> <r> <g> <b> <a>\n" );
-        Com_Printf( "  Example: wui_theme_set critical 1.0 0.0 0.0 1.0\n" );
+        Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: wui_theme_set <state> <r> <g> <b> <a>\n" );
+        Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  Example: wui_theme_set critical 1.0 0.0 0.0 1.0\n" );
         return;
     }
 
@@ -130,7 +130,7 @@ static void WiredTheme_Cmd_Set( void ) {
     a = atof( Cmd_Argv( 5 ) );
 
     WiredTheme_SetState( state, r, g, b, a );
-    Com_Printf( "WiredTheme: set '%s' to %.2f %.2f %.2f %.2f\n", state, r, g, b, a );
+    Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredTheme: set '%s' to %.2f %.2f %.2f %.2f\n", state, r, g, b, a );
 }
 
 /* ── init / shutdown ───────────────────────────────────────────────── */
@@ -144,7 +144,7 @@ void WiredTheme_Init( void ) {
     Cmd_AddCommand( "wui_theme_list", WiredTheme_Cmd_List );
     Cmd_AddCommand( "wui_theme_set", WiredTheme_Cmd_Set );
 
-    Com_Printf( "WiredTheme: initialized '%s' (%d states)\n",
+    Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredTheme: initialized '%s' (%d states)\n",
                  wired_theme.name, wired_theme.numStates );
 }
 

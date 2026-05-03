@@ -37,7 +37,7 @@ static int c_winding_points;
 static void pw(winding_t *w)
 {
 	for ( int i = 0 ; i < w->numpoints ; i++ )
-		Com_Printf( "%f, %f, %f\n", w->p[i][0], w->p[i][1], w->p[i][2] );
+		Com_Log( SEV_INFO, LOG_CAT_COLLISION, "%f, %f, %f\n", w->p[i][0], w->p[i][1], w->p[i][2] );
 }
 #endif
 
@@ -68,7 +68,7 @@ static winding_t *AllocWinding( int points )
 void FreeWinding (winding_t *w)
 {
 	if (*(unsigned *)w == 0xdeaddead)
-		Com_Error (ERR_FATAL, "FreeWinding: freed a freed winding");
+		Com_Terminate( TERM_UNRECOVERABLE, "FreeWinding: freed a freed winding");
 	*(unsigned *)w = 0xdeaddead;
 
 	c_active_windings--;
@@ -211,7 +211,7 @@ winding_t *BaseWindingForPlane (vec3_t normal, vec_t dist)
 	}
 
 	if ( x < 0 )
-		Com_Error( ERR_DROP, "BaseWindingForPlane: no axis found" );
+		Com_Terminate( TERM_CLIENT_DROP, "BaseWindingForPlane: no axis found" );
 
 	vec3_t vup;
 	VectorCopy (vec3_origin, vup);
@@ -394,9 +394,9 @@ static void ClipWindingEpsilon( winding_t *in, vec3_t normal, vec_t dist, vec_t 
 	}
 	
 	if (f->numpoints > maxpts || b->numpoints > maxpts)
-		Com_Error (ERR_DROP, "ClipWinding: points exceeded estimate");
+		Com_Terminate( TERM_CLIENT_DROP, "ClipWinding: points exceeded estimate");
 	if (f->numpoints > MAX_POINTS_ON_WINDING || b->numpoints > MAX_POINTS_ON_WINDING)
-		Com_Error (ERR_DROP, "ClipWinding: MAX_POINTS_ON_WINDING");
+		Com_Terminate( TERM_CLIENT_DROP, "ClipWinding: MAX_POINTS_ON_WINDING");
 }
 
 
@@ -491,9 +491,9 @@ void ChopWindingInPlace( winding_t **inout, const vec3_t normal, vec_t dist, vec
 	}
 	
 	if (f->numpoints > maxpts)
-		Com_Error (ERR_DROP, "ClipWinding: points exceeded estimate");
+		Com_Terminate( TERM_CLIENT_DROP, "ClipWinding: points exceeded estimate");
 	if (f->numpoints > MAX_POINTS_ON_WINDING)
-		Com_Error (ERR_DROP, "ClipWinding: MAX_POINTS_ON_WINDING");
+		Com_Terminate( TERM_CLIENT_DROP, "ClipWinding: MAX_POINTS_ON_WINDING");
 
 	FreeWinding (in);
 	*inout = f;
@@ -529,11 +529,11 @@ CheckWinding
 void CheckWinding (winding_t *w)
 {
 	if (w->numpoints < 3)
-		Com_Error (ERR_DROP, "CheckWinding: %i points",w->numpoints);
+		Com_Terminate( TERM_CLIENT_DROP, "CheckWinding: %i points",w->numpoints);
 
 	vec_t area = WindingArea(w);
 	if (area < 1)
-		Com_Error (ERR_DROP, "CheckWinding: %f area", area);
+		Com_Terminate( TERM_CLIENT_DROP, "CheckWinding: %f area", area);
 
 	vec3_t facenormal;
 	vec_t facedist;
@@ -545,14 +545,14 @@ void CheckWinding (winding_t *w)
 
 		for (int j=0 ; j<3 ; j++)
 			if (p1[j] > MAX_MAP_BOUNDS || p1[j] < -MAX_MAP_BOUNDS)
-				Com_Error (ERR_DROP, "CheckFace: BUGUS_RANGE: %f",p1[j]);
+				Com_Terminate( TERM_CLIENT_DROP, "CheckFace: BUGUS_RANGE: %f",p1[j]);
 
 		int j = i+1 == w->numpoints ? 0 : i+1;
 
 	// check the point is on the face plane
 		vec_t d = DotProduct (p1, facenormal) - facedist;
 		if (d < -ON_EPSILON || d > ON_EPSILON)
-			Com_Error (ERR_DROP, "CheckWinding: point off plane");
+			Com_Terminate( TERM_CLIENT_DROP, "CheckWinding: point off plane");
 
 	// check the edge is not degenerate
 		vec_t *p2 = w->p[j];
@@ -560,7 +560,7 @@ void CheckWinding (winding_t *w)
 		VectorSubtract (p2, p1, dir);
 
 		if (VectorLength (dir) < ON_EPSILON)
-			Com_Error (ERR_DROP, "CheckWinding: degenerate edge");
+			Com_Terminate( TERM_CLIENT_DROP, "CheckWinding: degenerate edge");
 
 		vec3_t edgenormal;
 		CrossProduct (facenormal, dir, edgenormal);
@@ -575,7 +575,7 @@ void CheckWinding (winding_t *w)
 				continue;
 			d = DotProduct (w->p[j], edgenormal);
 			if (d > edgedist)
-				Com_Error (ERR_DROP, "CheckWinding: non-convex");
+				Com_Terminate( TERM_CLIENT_DROP, "CheckWinding: non-convex");
 		}
 	}
 }

@@ -160,7 +160,7 @@ static void ClipSkyPolygon (int nump, vec3_t vecs, int stage)
 	int		i, j;
 
 	if (nump > MAX_CLIP_VERTS-2)
-		ri.Error (ERR_DROP, "ClipSkyPolygon: MAX_CLIP_VERTS");
+		ri.Terminate( TERM_CLIENT_DROP, "ClipSkyPolygon: MAX_CLIP_VERTS");
 	if (stage == 6)
 	{	// fully clipped, so draw it
 		AddSkyPolygon (nump, vecs);
@@ -405,12 +405,12 @@ static void FillSkySide( const int mins[2], const int maxs[2], float skyTexCoord
 
 #if ( (SKY_SUBDIVISIONS+1) * (SKY_SUBDIVISIONS+1) * 6 > SHADER_MAX_VERTEXES )
 	if ( tess.numVertexes + tHeight * sWidth > SHADER_MAX_VERTEXES )
-		ri.Error( ERR_DROP, "SHADER_MAX_VERTEXES hit in %s()", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "SHADER_MAX_VERTEXES hit in %s()", __func__ );
 #endif
 
 #if ( SKY_SUBDIVISIONS * SKY_SUBDIVISIONS * 6 * 6 > SHADER_MAX_INDEXES )
 	if ( tess.numIndexes + (tHeight - 1) * (sWidth - 1) * 6 > SHADER_MAX_INDEXES )
-		ri.Error( ERR_DROP, "SHADER_MAX_INDEXES hit in %s()", __func__ );
+		ri.Terminate( TERM_CLIENT_DROP, "SHADER_MAX_INDEXES hit in %s()", __func__ );
 #endif
 
 	for ( t = mins[1]+HALF_SKY_SUBDIVISIONS; t <= maxs[1]+HALF_SKY_SUBDIVISIONS; t++ )

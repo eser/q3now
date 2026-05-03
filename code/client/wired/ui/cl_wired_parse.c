@@ -24,7 +24,7 @@ static int  wui_menuPoolUsed = 0;
 
 static void *WiredUI_Alloc( int size ) {
 	if ( wui_menuPoolUsed + size > WIRED_MENU_POOL_SIZE ) {
-		Com_Printf( S_COLOR_RED "WiredUI_Alloc: pool exhausted (%d + %d > %d)\n",
+		COM_ERROR( LOG_CAT_UI, "WiredUI_Alloc: pool exhausted (%d + %d > %d)\n",
 			wui_menuPoolUsed, size, WIRED_MENU_POOL_SIZE );
 		return NULL;
 	}
@@ -550,7 +550,7 @@ static void WiredPC_ParseAnchorInto( int handle, wiredAnchor_t *anchor ) {
 	if ( WiredPC_String( handle, &str ) ) {
 		int a = WiredPC_LookupEnum( s_anchorMap, str, WUI_ENUM_UNKNOWN );
 		if ( a == WUI_ENUM_UNKNOWN ) {
-			Com_Printf( S_COLOR_YELLOW "WARNING: unknown anchor '%s'\n", str );
+			COM_WARN( LOG_CAT_UI, "WARNING: unknown anchor '%s'\n", str );
 			*anchor = ANCHOR_NONE;
 		} else {
 			*anchor = (wiredAnchor_t)a;
@@ -693,7 +693,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 
 	// expect opening brace
 	if ( !WiredPC_Expect( handle, "{" ) ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: expected '{' for itemDef\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI: expected '{' for itemDef\n" );
 		return qfalse;
 	}
 
@@ -1054,7 +1054,7 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 		}
 		else {
 			/* unknown keyword -- smart skip to avoid poisoning subsequent parsing */
-			Com_DPrintf( "WiredUI: unknown item keyword '%s'\n", token.string );
+			Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: unknown item keyword '%s'\n", token.string );
 			if ( WiredPC_ReadToken( handle, &token ) ) {
 				if ( !Q_stricmp( token.string, "{" ) ) {
 					WiredPC_SkipBracedBlock( handle );
@@ -1089,7 +1089,7 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 
 	// expect opening brace
 	if ( !WiredPC_Expect( handle, "{" ) ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: expected '{' for menuDef\n" );
+		COM_WARN( LOG_CAT_UI, "WiredUI: expected '{' for menuDef\n" );
 		return qfalse;
 	}
 
@@ -1147,12 +1147,12 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		}
 		else if ( !Q_stricmp( token.string, "itemDef" ) ) {
 			if ( !WiredUI_ParseItem( handle, menu ) ) {
-				Com_Printf( S_COLOR_YELLOW "WiredUI: failed to parse itemDef in menu '%s'\n", menu->name );
+				COM_WARN( LOG_CAT_UI, "WiredUI: failed to parse itemDef in menu '%s'\n", menu->name );
 			}
 		}
 		else {
 			// unknown keyword — smart skip to avoid poisoning subsequent parsing
-			Com_DPrintf( "WiredUI: unknown menu keyword '%s'\n", token.string );
+			Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: unknown menu keyword '%s'\n", token.string );
 			if ( WiredPC_ReadToken( handle, &token ) ) {
 				if ( !Q_stricmp( token.string, "{" ) ) {
 					WiredPC_SkipBracedBlock( handle );
@@ -1177,7 +1177,7 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 
 	if ( wui_menuCount < WIRED_MAX_MENUS ) {
 		wui_menus[wui_menuCount++] = menu;
-		Com_DPrintf( "WiredUI: loaded menu '%s' (%d items)\n", menu->name, menu->itemCount );
+		Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: loaded menu '%s' (%d items)\n", menu->name, menu->itemCount );
 	}
 
 	return qtrue;
@@ -1190,11 +1190,11 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 
 	int handle = WiredPC_LoadSource( filename );
 	if ( !handle ) {
-		Com_Printf( S_COLOR_YELLOW "WiredUI: could not load '%s'\n", filename );
+		COM_WARN( LOG_CAT_UI, "WiredUI: could not load '%s'\n", filename );
 		return qfalse;
 	}
 
-	Com_DPrintf( "WiredUI: loading native format '%s'\n", filename );
+	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: loading native format '%s'\n", filename );
 
 	while ( 1 ) {
 		if ( !WiredPC_ReadToken( handle, &token ) ) {
@@ -1207,7 +1207,7 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 		else if ( !Q_stricmp( token.string, "assetGlobalDef" ) ) {
 			wiredAssetGlobals_t *ag = WiredUI_GetAssetGlobals();
 			if ( !WiredPC_Expect( handle, "{" ) ) {
-				Com_Printf( S_COLOR_YELLOW "WiredUI: expected '{' for assetGlobalDef\n" );
+				COM_WARN( LOG_CAT_UI, "WiredUI: expected '{' for assetGlobalDef\n" );
 				continue;
 			}
 			while ( 1 ) {
@@ -1242,13 +1242,13 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 				else if ( !Q_stricmp( token.string, "focusColor" ) )       WiredPC_Color( handle, &ag->focusColor );
 				else if ( !Q_stricmp( token.string, "gradientBarColor" ) ) WiredPC_Color( handle, &ag->gradientBarColor );
 			}
-			Com_DPrintf( "WiredUI: parsed assetGlobalDef (cursor=%s)\n", ag->cursor );
+			Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: parsed assetGlobalDef (cursor=%s)\n", ag->cursor );
 		}
 		else if ( !Q_stricmp( token.string, "{" ) || !Q_stricmp( token.string, "}" ) ) {
 			// top-level braces — Q3:TA/QL files wrap content in { }. Just ignore.
 		}
 		else {
-			Com_DPrintf( "WiredUI: unexpected token '%s' in '%s'\n", token.string, filename );
+			Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: unexpected token '%s' in '%s'\n", token.string, filename );
 		}
 	}
 
@@ -1319,7 +1319,7 @@ qboolean WiredUI_SafeReload( void ) {
 
 	if ( !ok ) {
 		// parse failed — restore old menus
-		Com_Printf( S_COLOR_YELLOW "Menu reload failed — keeping old menus.\n" );
+		COM_WARN( LOG_CAT_UI, "Menu reload failed — keeping old menus.\n" );
 		memcpy( wui_menuPool, wired_backup->pool, wired_backup->poolUsed );
 		wui_menuPoolUsed = wired_backup->poolUsed;
 		memcpy( wui_menus, wired_backup->menus, sizeof( wui_menus[0] ) * wired_backup->menuCount );
@@ -1371,7 +1371,7 @@ void WiredUI_LoadMenusFromLua( void ) {
 	int totalItems = 0;
 	for ( int i = 0; i < wui_menuCount; i++ )
 		totalItems += wui_menus[i] ? wui_menus[i]->itemCount : 0;
-	Com_Printf( "WiredUI: loaded %d menus (%d items total)\n", wui_menuCount, totalItems );
+	Com_Log( SEV_INFO, LOG_CAT_UI, "WiredUI: loaded %d menus (%d items total)\n", wui_menuCount, totalItems );
 }
 
 #endif // FEAT_WIRED_UI

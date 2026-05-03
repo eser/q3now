@@ -225,7 +225,7 @@ static void Loading_DrawRadialGlow( float cx, float cy, float radius,
 
 	{
 		if ( s_glowDiagCount < 4 ) {
-			Com_DPrintf( "GLOW virtual: x=%.0f y=%.0f w=%.0f h=%.0f (cx=%.0f cy=%.0f r=%.0f) rgba=(%.3f %.3f %.3f %.2f)\n",
+			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "GLOW virtual: x=%.0f y=%.0f w=%.0f h=%.0f (cx=%.0f cy=%.0f r=%.0f) rgba=(%.3f %.3f %.3f %.2f)\n",
 						x, y, w, h, cx, cy, radius, color[0], color[1], color[2], color[3] );
 			s_glowDiagCount++;
 		}
@@ -355,7 +355,7 @@ static void Loading_DrawTopBar( void ) {
 	// {
 	// 	int autoBots = Cvar_VariableIntegerValue( "g_autoBots" );
 	// 	if ( autoBots > 0 ) {
-	// 		int skill = Cvar_VariableIntegerValue( "g_spSkill" );
+	// 		int skill = Cvar_VariableIntegerValue( "g_skill" );
 	// 		int i;
 	// 		float dotSize = vpH * 0.0083f;   // ~4/480
 	// 		float dotGap  = vpW * 0.0109f;   // ~7/640
@@ -399,7 +399,7 @@ static void Loading_DrawDivider( void ) {
 
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 ) {
-		Com_DPrintf( "DIAG Divider: x=%.0f yTop=%.0f yMid=%.0f yBot=%.0f\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG Divider: x=%.0f yTop=%.0f yMid=%.0f yBot=%.0f\n",
 			x, yTop, yMid1, yBottom );
 	}
 #endif
@@ -469,7 +469,7 @@ static void Loading_DrawWireframe( void ) {
 
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
-		Com_DPrintf( "DIAG Wireframe: valid=%d edges=%d markers=%d surfaces=%d "
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG Wireframe: valid=%d edges=%d markers=%d surfaces=%d "
 			"bounds=(%.0f,%.0f)-(%.0f,%.0f)\n",
 			cl_bspPreview.valid, cl_bspPreview.numEdges, cl_bspPreview.numMarkers,
 			cl_bspPreview.numSurfaces,
@@ -659,7 +659,7 @@ static void Loading_DrawWireframe( void ) {
 
 	// Console diagnostic: print once per map load
 	if ( !s_wireframeDiagPrinted ) {
-		Com_DPrintf( "WIREFRAME: %d surfaces, %d segments, %d markers\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "WIREFRAME: %d surfaces, %d segments, %d markers\n",
 			cl_bspPreview.numSurfaces, cl_bspPreview.numEdges,
 			cl_bspPreview.numMarkers );
 		s_wireframeDiagPrinted = qtrue;
@@ -686,7 +686,7 @@ static void Loading_DrawMapInfo( void ) {
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 ) {
 		const char *mapCvar = Info_ValueForKey( info, "mapname" );
-		Com_DPrintf( "DIAG MapInfo: mapname=\"%s\" longName=\"%s\" author=\"%s\" "
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG MapInfo: mapname=\"%s\" longName=\"%s\" author=\"%s\" "
 			"quote=\"%s\" sky=\"%s\" players=%d-%d weapon=\"%s\" items=%d hasMeta=%d\n",
 			mapCvar ? mapCvar : "(null)",
 			cl_mapInfo.longName, cl_mapInfo.author, cl_mapInfo.quote,
@@ -937,7 +937,7 @@ static void Loading_DrawStreamingRows( void ) {
 
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
-		Com_DPrintf( "DIAG Streaming: geo=%.3f shd=%.3f aud=%.3f dl=%.3f overall=%.3f phase=\"%s\"\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG Streaming: geo=%.3f shd=%.3f aud=%.3f dl=%.3f overall=%.3f phase=\"%s\"\n",
 			cl_loadProgress.geometry, cl_loadProgress.shaders,
 			cl_loadProgress.audio, cl_loadProgress.download,
 			cl_loadProgress.overall,
@@ -975,7 +975,7 @@ static void Loading_DrawOverallBar( void ) {
 	const float by = vpH * 0.7708f;    // was 370/480
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
-		Com_DPrintf( "DIAG OverallBar: overall=%.3f phase=\"%s\" rx=%.0f by=%.0f\n",
+		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG OverallBar: overall=%.3f phase=\"%s\" rx=%.0f by=%.0f\n",
 			cl_loadProgress.overall,
 			cl_loadProgress.phase ? cl_loadProgress.phase : "(null)",
 			rx, by );
@@ -1021,7 +1021,7 @@ static void Loading_DrawVulkanBadge( void ) {
 	float dotSize = vpH * 0.0125f;     // was 6/480
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
-		Com_Printf( "DIAG VulkanBadge: version=\"%s\" rx=%.0f by=%.0f\n",
+		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "DIAG VulkanBadge: version=\"%s\" rx=%.0f by=%.0f\n",
 			cls.glconfig.version_string[0] ? cls.glconfig.version_string : "(empty)",
 			rx, by );
 #endif

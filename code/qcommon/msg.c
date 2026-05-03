@@ -78,7 +78,7 @@ void MSG_BeginReadingOOB( msg_t *msg ) {
 void MSG_Copy(msg_t *buf, byte *data, int length, const msg_t *src)
 {
 	if (length<src->cursize) {
-		Com_Error( ERR_DROP, "MSG_Copy: can't copy into a smaller msg_t buffer");
+		Com_Terminate( TERM_CLIENT_DROP, "MSG_Copy: can't copy into a smaller msg_t buffer");
 	}
 	memcpy(buf, src, sizeof(msg_t));
 	buf->data = data;
@@ -96,7 +96,7 @@ bit functions
 // negative bit values include signs
 void MSG_WriteBits( msg_t *msg, int value, int bits ) {
 	if ( bits == 0 || bits < -31 || bits > 32 ) {
-		Com_Error( ERR_DROP, "MSG_WriteBits: bad bits %i", bits );
+		Com_Terminate( TERM_CLIENT_DROP, "MSG_WriteBits: bad bits %i", bits );
 	}
 
 	if ( msg->overflowed != qfalse )
@@ -123,7 +123,7 @@ void MSG_WriteBits( msg_t *msg, int value, int bits ) {
 			msg->cursize += 4;
 			msg->bit += 32;
 		} else {
-			Com_Error(ERR_DROP, "can't write %d bits", bits);
+			Com_Terminate( TERM_CLIENT_DROP, "can't write %d bits", bits);
 		}
 	} else {
 		value &= (0xffffffff>>(32-bits));
@@ -191,7 +191,7 @@ static int MSG_ReadBits( msg_t *msg, int bits ) {
 			msg->bit += 32;
 		}
 		else
-			Com_Error( ERR_DROP, "can't read %d bits", bits );
+			Com_Terminate( TERM_CLIENT_DROP, "can't read %d bits", bits );
 	} else {
 		const int nbits = bits & 7;
 		int bitIndex = msg->bit; // dereference optimization
@@ -236,7 +236,7 @@ static int MSG_ReadBits( msg_t *msg, int bits ) {
 void MSG_WriteChar( msg_t *sb, int c ) {
 #ifdef PARANOID
 	if (c < -128 || c > 127)
-		Com_Error (ERR_FATAL, "MSG_WriteChar: range error");
+		Com_Terminate( TERM_UNRECOVERABLE, "MSG_WriteChar: range error");
 #endif
 
 	MSG_WriteBits( sb, c, 8 );
@@ -245,7 +245,7 @@ void MSG_WriteChar( msg_t *sb, int c ) {
 void MSG_WriteByte( msg_t *sb, int c ) {
 #ifdef PARANOID
 	if (c < 0 || c > 255)
-		Com_Error (ERR_FATAL, "MSG_WriteByte: range error");
+		Com_Terminate( TERM_UNRECOVERABLE, "MSG_WriteByte: range error");
 #endif
 
 	MSG_WriteBits( sb, c, 8 );
@@ -260,7 +260,7 @@ void MSG_WriteData( msg_t *buf, const void *data, int length ) {
 void MSG_WriteShort( msg_t *sb, int c ) {
 #ifdef PARANOID
 	if (c < ((short)0x8000) || c > (short)0x7fff)
-		Com_Error (ERR_FATAL, "MSG_WriteShort: range error");
+		Com_Terminate( TERM_UNRECOVERABLE, "MSG_WriteShort: range error");
 #endif
 
 	MSG_WriteBits( sb, c, 16 );
@@ -279,7 +279,7 @@ void MSG_WriteFloat( msg_t *sb, float f ) {
 void MSG_WriteString( msg_t *sb, const char *s ) {
 	int l = s ? strlen( s ) : 0;
 	if ( l >= MAX_STRING_CHARS ) {
-		Com_Printf( "MSG_WriteString: MAX_STRING_CHARS\n" );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "MSG_WriteString: MAX_STRING_CHARS\n" );
 		l = 0;
 	}
 
@@ -299,7 +299,7 @@ void MSG_WriteString( msg_t *sb, const char *s ) {
 void MSG_WriteBigString( msg_t *sb, const char *s ) {
 	int l = s ? strlen( s ) : 0;
 	if ( l >= BIG_INFO_STRING ) {
-		Com_Printf( "MSG_WriteBigString: BIG_INFO_STRING\n" );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "MSG_WriteBigString: BIG_INFO_STRING\n" );
 		l = 0;
 	}
 
@@ -499,7 +499,7 @@ int MSG_HashKey(const char *string, int maxlen) {
 
 #ifndef DEDICATED
 extern cvar_t *cl_shownet;
-#define	LOG(x) if( cl_shownet && cl_shownet->integer == 4 ) { Com_Printf("%s ", x ); };
+#define	LOG(x) if( cl_shownet && cl_shownet->integer == 4 ) { Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s ", x ); };
 #else
 #define	LOG(x)
 #endif
@@ -644,7 +644,7 @@ Prints out a table from the current statistics for copying to code
 void MSG_ReportChangeVectors_f( void ) {
 	for(int i=0;i<256;i++) {
 		if (pcount[i]) {
-			Com_Printf("%d used %d\n", i, pcount[i]);
+			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%d used %d\n", i, pcount[i]);
 		}
 	}
 }
@@ -680,6 +680,7 @@ static const netField_t entityStateFields[] =
 { NETF(eFlags), 25 },
 { NETF(otherEntityNum), GENTITYNUM_BITS },
 { NETF(weapon), 8 },
+{ NETF(pType), 8 },
 { NETF(clientNum), 8 },
 { NETF(angles[1]), 0 },
 { NETF(pos.trDuration), 32 },
@@ -750,7 +751,7 @@ void MSG_WriteDeltaEntity( msg_t *msg, const entityState_t *from, const entitySt
 	}
 
 	if ( to->number < 0 || to->number >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "MSG_WriteDeltaEntity: Bad entity number: %i", to->number );
+		Com_Terminate( TERM_CLIENT_DROP, "MSG_WriteDeltaEntity: Bad entity number: %i", to->number );
 	}
 
 	int lc = 0;
@@ -840,7 +841,7 @@ Can go from either a baseline or a previous packet_entity
 */
 void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *to, int number ) {
 	if ( number < 0 || number >= MAX_GENTITIES ) {
-		Com_Error( ERR_DROP, "Bad delta entity number: %i", number );
+		Com_Terminate( TERM_CLIENT_DROP, "Bad delta entity number: %i", number );
 	}
 
 	int startBit;
@@ -856,7 +857,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 		to->number = MAX_GENTITIES - 1;
 #ifndef DEDICATED
 		if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -1 ) ) {
-			Com_Printf( "%3i: #%-3i remove\n", msg->readcount, number );
+			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%3i: #%-3i remove\n", msg->readcount, number );
 		}
 #endif
 		return;
@@ -877,7 +878,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 		// of erroring so a single bad frame does not tear down the whole
 		// demo playback (and cannot snowball into an ERR_FATAL via the
 		// "solid stream of ERR_DROP" escalation).
-		Com_Printf( S_COLOR_YELLOW "WARNING: invalid entityState field count %d (max %d), clamping\n",
+		COM_WARN( LOG_CAT_SYSTEM, "invalid entityState field count %d (max %d), clamping\n",
 			lc, numFields );
 		if ( lc < 0 ) {
 			lc = 0;
@@ -894,7 +895,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 	// just print the delta records
 	if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -1 ) ) {
 		print = 1;
-		Com_Printf( "%3i: #%-3i ", msg->readcount, to->number );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%3i: #%-3i ", msg->readcount, to->number );
 	} else {
 		print = 0;
 	}
@@ -923,13 +924,13 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 						trunc -= FLOAT_INT_BIAS;
 						*(float *)toF = trunc;
 						if ( print ) {
-							Com_Printf( "%s:%i ", field->name, trunc );
+							Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%i ", field->name, trunc );
 						}
 					} else {
 						// full floating point value
 						*toF = MSG_ReadBits( msg, 32 );
 						if ( print ) {
-							Com_Printf( "%s:%f ", field->name, *(float *)toF );
+							Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%f ", field->name, *(float *)toF );
 						}
 					}
 				}
@@ -940,7 +941,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 					// integer
 					*toF = MSG_ReadBits( msg, field->bits );
 					if ( print ) {
-						Com_Printf( "%s:%i ", field->name, *toF );
+						Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%i ", field->name, *toF );
 					}
 				}
 			}
@@ -962,7 +963,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 		} else {
 			endBit = ( msg->readcount - 1 ) * 8 + msg->bit - GENTITYNUM_BITS;
 		}
-		Com_Printf( " (%i bits)\n", endBit - startBit  );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, " (%i bits)\n", endBit - startBit  );
 	}
 }
 
@@ -1202,7 +1203,7 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 	// just print the delta records
 	if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -2 ) ) {
 		print = 1;
-		Com_Printf( "%3i: playerstate ", msg->readcount );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%3i: playerstate ", msg->readcount );
 	} else {
 		print = 0;
 	}
@@ -1218,7 +1219,7 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 		// of erroring so a single bad frame does not tear down the whole
 		// demo playback (and cannot snowball into an ERR_FATAL via the
 		// "solid stream of ERR_DROP" escalation).
-		Com_Printf( S_COLOR_YELLOW "WARNING: invalid playerState field count %d (max %d), clamping\n",
+		COM_WARN( LOG_CAT_SYSTEM, "invalid playerState field count %d (max %d), clamping\n",
 			lc, numFields );
 		if ( lc < 0 ) {
 			lc = 0;
@@ -1245,20 +1246,20 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 					trunc -= FLOAT_INT_BIAS;
 					*(float *)toF = trunc;
 					if ( print ) {
-						Com_Printf( "%s:%i ", field->name, trunc );
+						Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%i ", field->name, trunc );
 					}
 				} else {
 					// full floating point value
 					*toF = MSG_ReadBits( msg, 32 );
 					if ( print ) {
-						Com_Printf( "%s:%f ", field->name, *(float *)toF );
+						Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%f ", field->name, *(float *)toF );
 					}
 				}
 			} else {
 				// integer
 				*toF = MSG_ReadBits( msg, field->bits );
 				if ( print ) {
-					Com_Printf( "%s:%i ", field->name, *toF );
+					Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%i ", field->name, *toF );
 				}
 			}
 		}
@@ -1326,7 +1327,7 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 		} else {
 			endBit = ( msg->readcount - 1 ) * 8 + msg->bit - GENTITYNUM_BITS;
 		}
-		Com_Printf( " (%i bits)\n", endBit - startBit  );
+		Com_Log( SEV_INFO, LOG_CAT_NETWORK, " (%i bits)\n", endBit - startBit  );
 	}
 }
 

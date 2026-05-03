@@ -264,7 +264,7 @@ void CG_CheckChangedPredictableEvents( playerState_t *ps ) {
 				cg.predictableEvents[ i & (MAX_PREDICTED_EVENTS-1) ] = event;
 
 				if ( cg_showmiss.integer ) {
-					CG_Printf("WARNING: changed predicted event\n");
+					Com_Log( SEV_INFO, LOG_CAT_CGAME, "WARNING: changed predicted event\n");
 				}
 			}
 		}
@@ -542,4 +542,5 @@ void CG_TransitionPlayerState( playerState_t *ps, playerState_t *ops ) {
 		cg.duckChange = ps->viewheight - ops->viewheight;
 		cg.duckTime = cg.time;
 	}
+
 }

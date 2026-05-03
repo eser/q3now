@@ -31,26 +31,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <conio.h>
 #include <intrin.h>
 
-/*
-================
-Sys_Milliseconds
-================
-*/
-int Sys_Milliseconds( void )
-{
-	static qboolean	initialized = qfalse;
-	static DWORD sys_timeBase;
-	int	sys_curtime;
-
-	if ( !initialized ) {
-		sys_timeBase = timeGetTime();
-		initialized = qtrue;
-	}
-
-	sys_curtime = timeGetTime() - sys_timeBase;
-
-	return sys_curtime;
-}
+/* Sys_Milliseconds → wired/core/time/time.c */
 
 /*
 ================
@@ -109,7 +90,7 @@ const char *Sys_DefaultHomePath( void )
 	userProfile = getenv( "USERPROFILE" );
 	if ( userProfile == NULL || *userProfile == '\0' )
 	{
-		Com_Printf( "Unable to detect USERPROFILE\n" );
+		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Unable to detect USERPROFILE\n" );
 		return NULL;
 	}
 
@@ -120,7 +101,7 @@ const char *Sys_DefaultHomePath( void )
 	{
 		if ( GetLastError() != ERROR_ALREADY_EXISTS )
 		{
-			Com_Printf( "Unable to create directory \"%s\"\n", path );
+			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Unable to create directory \"%s\"\n", path );
 			return NULL;
 		}
 	}
