@@ -123,6 +123,10 @@ void	UpdateMonitorInfo( const RECT *target );
 LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM  lParam );
 void HandleConsoleEvents( void );
 
+// win_console_attach.c — reattach stdio to parent console (client only;
+// dedicated is console subsystem and doesn't need this).
+void Sys_AttachParentConsole( void );
+
 void Conbuf_AppendText( const char *msg );
 void Conbuf_BeginPrint( void );
 void Conbuf_EndPrint( void );

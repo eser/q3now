@@ -104,8 +104,6 @@ set(GAME_SOURCES
 
 set(GAME_BINARY_SOURCES ${SOURCE_DIR}/game/g_syscalls.c)
 
-# Legacy UI module (q3_ui) removed — Wired UI replaces it
-
 set(GAME_MODULE_SHARED_SOURCES
     ${SOURCE_DIR}/qcommon/q_color.c
     ${SOURCE_DIR}/qcommon/q_math.c

@@ -21,8 +21,10 @@ func launchBinary(binPath string, args []string) (*exec.Cmd, error) {
 
 	cmd := exec.Command(binPath, args...)
 	cmd.Dir = filepath.Dir(binPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	if err := configureSpawnIO(cmd, binPath); err != nil {
+		return nil, fmt.Errorf("configure spawn io: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start %s: %w", filepath.Base(binPath), err)

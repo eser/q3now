@@ -1071,7 +1071,7 @@ static void WN_ClientFlushOutbound( void )
 	// loop is from this frame's sends — no timestamp, no race window.
 	NET_ClearLastSendError();
 
-	current_time = Sys_Microseconds();
+	current_time = picoquic_current_time();
 
 	while ( 1 ) {
 		send_len = 0;
@@ -1080,6 +1080,8 @@ static void WN_ClientFlushOutbound( void )
 			send_buf, sizeof(send_buf), &send_len,
 			&addr_to, &addr_from, &if_index,
 			&log_cid, &last_cnx, &send_msg_size );
+
+		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "WN_ClientFlushOutbound: prepare ret=%d send_len=%zu\n", ret, send_len );
 
 		if ( ret != 0 || send_len == 0 )
 			break;
@@ -1293,7 +1295,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	wtcl.qport       = qport;
 	wtcl.server_addr = *serverAddr;
 
-	current_time = Sys_Microseconds();
+	current_time = picoquic_current_time();
 
 	wtcl.quic = picoquic_create(
 		1, NULL, NULL, NULL,
@@ -1510,7 +1512,7 @@ qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len )
 	ss_to.sin_addr.s_addr = INADDR_ANY;
 	ss_to.sin_port        = from->port;
 
-	current_time = Sys_Microseconds();
+	current_time = picoquic_current_time();
 	memcpy( wtcl.recv_buf, buf, len );
 
 	picoquic_incoming_packet(

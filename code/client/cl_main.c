@@ -72,7 +72,6 @@ cvar_t	*cl_lanForcePackets;
 cvar_t	*cl_guidServerUniq;
 
 cvar_t	*cl_dlURL;
-cvar_t	*cl_dlDirectory;
 
 cvar_t	*cl_reconnectArgs;
 
@@ -270,7 +269,9 @@ void CL_StopRecord_f( void ) {
 		Com_sprintf( finalName, sizeof( finalName ), "%s.%s%d", clc.recordName, DEMOEXT, protocol );
 
 		if ( clc.explicitRecordName ) {
-			FS_Remove( finalName );
+			/* Demo file is written via FS_FOpenFileWrite (homepath/fs_gamedir/...);
+			 * FS_HomeRemove rebuilds the same path. */
+			FS_HomeRemove( finalName );
 		} else {
 			// add sequence suffix to avoid overwrite
 			int sequence = 0;
@@ -2281,7 +2282,7 @@ static void CL_CheckForResend( void ) {
 			if ( transport ) {
 				clc.quic_conn = transport->connect(
 					NET_AdrToString( &clc.serverAddress ),
-					(int)ntohs( clc.serverAddress.port ),
+					(int)BigShort( clc.serverAddress.port ),
 					info );
 			}
 		} else {
@@ -3364,30 +3365,16 @@ static void CL_InitRef( void ) {
 #endif
 
 	Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
-#ifdef __APPLE__
-	// Try app bundle path first (Contents/MacOS/ on macOS) — self-contained bundle layout
-	ospath = FS_BuildOSPath( Sys_DefaultAppPath(), dllName, NULL );
+	// FS_GetInstallBinaryPath returns Contents/MacOS on macOS, fs_installpath
+	// elsewhere — covers both the .app bundle and the flat-dir layouts.
+	ospath = FS_BuildOSPath( FS_GetInstallBinaryPath(), dllName, NULL );
 	rendererLib = Sys_LoadLibrary( ospath );
-	if ( !rendererLib )
-#endif
-	{
-		// Fall back to basepath — classic / Linux / Windows layout
-		ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
-		rendererLib = Sys_LoadLibrary( ospath );
-	}
 	if ( !rendererLib )
 	{
 		Cvar_ForceReset( "cl_renderer" );
 		Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
-#ifdef __APPLE__
-		ospath = FS_BuildOSPath( Sys_DefaultAppPath(), dllName, NULL );
+		ospath = FS_BuildOSPath( FS_GetInstallBinaryPath(), dllName, NULL );
 		rendererLib = Sys_LoadLibrary( ospath );
-		if ( !rendererLib )
-#endif
-		{
-			ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
-			rendererLib = Sys_LoadLibrary( ospath );
-		}
 		if ( !rendererLib )
 		{
 			Com_Terminate( TERM_UNRECOVERABLE, "Failed to load renderer %s", dllName );
@@ -3825,7 +3812,7 @@ static void CL_InitGLimp_Cvars( void )
 	{
 #ifdef __APPLE__
 		// SDL3 fullscreen mode detection is broken on macOS/MoltenVK —
-		// default to windowed so first launch succeeds without q3config.cfg.
+		// default to windowed so first launch succeeds without config.cfg.
 		static const cvarDesc_t d = CVAR_BOOL( "r_fullscreen", "0", CVAR_ARCHIVE | CVAR_LATCH,
 			"Fullscreen mode. Set to 0 for windowed mode." );
 #else
@@ -3858,7 +3845,7 @@ static const cvarDesc_t clInitDescs[] = {
 	/* 0  */ CVAR_BOOL(   "cl_noprint",               "0",   0,                             "Disable printing of information in the console." ),
 	/* 1  */ CVAR_BOOL(   "cl_motd",                  "1",   0,                             "Toggle the display of the 'Message of the day'. When Quake 3 Arena starts a map up, it sends the GL_RENDERER string to the Message Of The Day server at id. This responds back with a message of the day to the client." ),
 	/* 2  */ CVAR_INT(    "cl_timeout",               "200", 0,                             "Duration of receiving nothing from server for client to decide it must be disconnected (in seconds).", 0, 0 ),
-	/* 3  */ CVAR_FLOAT(  "cl_autoNudge",             "0",   CVAR_TEMP,                     "Automatic time nudge that uses your average ping as the time nudge, values:\n  0 - use fixed \\cl_timeNudge\n (0..1] - factor of median average ping to use as timenudge\n", 0, 1 ),
+	/* 3  */ CVAR_FLOAT(  "cl_autoNudge",             "1",   CVAR_TEMP,                     "Automatic time nudge that uses your average ping as the time nudge, values:\n  0 - use fixed \\cl_timeNudge\n (0..1] - factor of median average ping to use as timenudge\n", 0, 1 ),
 	/* 4  */ CVAR_INT(    "cl_timeNudge",             "0",   CVAR_TEMP,                     "Allows more or less latency to be added in the interest of better smoothness or better responsiveness.", -30, 30 ),
 	/* 5  */ CVAR_INT(    "cl_shownet",               "0",   CVAR_TEMP,                     "Toggle the display of current network status.", 0, 0 ),
 	/* 6  */ CVAR_BOOL(   "cl_showTimeDelta",         "0",   CVAR_TEMP,                     "Prints the time delta of each packet to the console (the time delta between server updates)." ),
@@ -3887,7 +3874,6 @@ static const cvarDesc_t clInitDescs[] = {
 	/* 21 */ CVAR_BOOL(   "cl_lanForcePackets",       "1",   CVAR_ARCHIVE | CVAR_NODEFAULT,               "Bypass \\cl_maxpackets for LAN games, send packets every frame." ),
 	/* 22 */ CVAR_BOOL(   "cl_guidServerUniq",        "1",   CVAR_ARCHIVE | CVAR_NODEFAULT,               "Makes cl_guid unique for each server." ),
 	/* 23 */ CVAR_STRING( "cl_dlURL",                 "http://ws.q3df.org/maps/download/%1", CVAR_ARCHIVE | CVAR_NODEFAULT, "Cvar must point to download location." ),
-	/* 24 */ CVAR_BOOL(   "cl_dlDirectory",           "0",   CVAR_ARCHIVE | CVAR_NODEFAULT,               NULL ),
 	/* 25 */ CVAR_STRING( "cl_reconnectArgs",         "",    CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_NOTABCOMPLETE, NULL ),
 	/* 26 */ CVAR_STRING( "cl_wiredRconPassword",     "",    CVAR_TEMP,                     "Wired RCON password used for challenge-response authentication." ),
 };
@@ -3901,7 +3887,7 @@ enum {
 	CLI_CONXOFFSET, CLI_CONYOFFSET, CLI_CONCOLOR,
 	CLI_MATCHALERTS, CLI_SERVERSTATUSRESENDTIME,
 	CLI_MOTDSTRING, CLI_LANFORCEPACKETS, CLI_GUIDSERVERUNIQ,
-	CLI_DLURL, CLI_DLDIRECTORY, CLI_RECONNECTARGS, CLI_WIREDRCONPASSWORD,
+	CLI_DLURL, CLI_RECONNECTARGS, CLI_WIREDRCONPASSWORD,
 	CLI_CVAR_COUNT
 };
 
@@ -3964,15 +3950,8 @@ void CL_Init( void ) {
 	cl_lanForcePackets        = clInitHandles[CLI_LANFORCEPACKETS];
 	cl_guidServerUniq         = clInitHandles[CLI_GUIDSERVERUNIQ];
 	cl_dlURL                  = clInitHandles[CLI_DLURL];
-	cl_dlDirectory            = clInitHandles[CLI_DLDIRECTORY];
 	cl_reconnectArgs          = clInitHandles[CLI_RECONNECTARGS];
 	cl_wiredRconPassword      = clInitHandles[CLI_WIREDRCONPASSWORD];
-
-	// dynamic description depends on FS_GetBaseGameDir() return value
-	Cvar_SetDescription( cl_dlDirectory, va(
-		"Save downloads initiated by \\dlmap and \\download commands in:\n"
-		" 0 - current game directory\n"
-		" 1 - basegame (%s) directory\n", FS_GetBaseGameDir() ) );
 
 #ifdef USE_CURL
 	{

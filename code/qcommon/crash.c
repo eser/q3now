@@ -302,7 +302,7 @@ static void Crash_WriteKeyCvars( void )
 	JSON_BeginNamedObject( "cvars" );
 	Crash_WriteCvar( "com_dedicated" );
 	Crash_WriteCvar( "fs_game" );
-	Crash_WriteCvar( "fs_basepath" );
+	Crash_WriteCvar( "fs_installpath" );
 	Crash_WriteCvar( "mapname" );
 	Crash_WriteCvar( "r_mode" );
 	Crash_WriteCvar( "r_customwidth" );
@@ -388,21 +388,23 @@ void Crash_WriteReport( const char *reason, const char *address, const char *mod
 		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec );
 
-	const char *basepath = Cvar_VariableString( "fs_basepath" );
-	char fullpath[ MAX_OSPATH * 2 ];
-	if ( basepath == NULL || basepath[ 0 ] == '\0' ) {
-		Q_strncpyz( fullpath, filename, sizeof( fullpath ) );
-	} else {
-		Com_sprintf( fullpath, sizeof( fullpath ), "%s%c%s", basepath, PATH_SEP, filename );
+	/* Crash reports go to fs_homepath — a writable user-data location
+	 * on every platform. fs_installpath was wrong for macOS (.app interior
+	 * is read-only for system installs) and the cwd fallback wrote to
+	 * an unpredictable location. If homepath is unavailable / unwritable
+	 * the engine has bigger problems; we drop the report rather than
+	 * scattering files. */
+	const char *homepath = Cvar_VariableString( "fs_homepath" );
+	if ( homepath == NULL || homepath[ 0 ] == '\0' ) {
+		return;
 	}
+
+	char fullpath[ MAX_OSPATH * 2 ];
+	Com_sprintf( fullpath, sizeof( fullpath ), "%s%c%s", homepath, PATH_SEP, filename );
 
 	FILE *file = fopen( fullpath, "wb" );
 	if ( file == NULL ) {
-		// Fallback: current working directory.
-		file = fopen( filename, "wb" );
-		if ( file == NULL ) {
-			return;
-		}
+		return;
 	}
 
 	JSON_Begin( file );

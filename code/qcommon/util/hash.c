@@ -2,7 +2,8 @@
 
 // Maps '.' to '\0' (hash terminates at file extension) and
 // '\\' to '/' (path separator normalization). Distinct from locase[].
-// Note: _Static_assert on array subscripts is a GCC extension; Clang rejects it.
+// Invariants verified at boot by Hash_SelfTest (called from Com_Init):
+// '.' and 'A' must map to '\0' and 'a' respectively; '\\' must map to '/'.
 static const byte hash_locase[ 256 ] =
 {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
@@ -39,12 +40,13 @@ static const byte hash_locase[ 256 ] =
 	0xf8,0xf9,0xfa,0xfb,0xfc,0xfd,0xfe,0xff
 };
 
-#if !defined(__clang__)
-_Static_assert( hash_locase['.']  == '\0', "hash_locase: '.' must map to '\\0' (terminates hash at extension)" );
-_Static_assert( hash_locase['\\'] == '/',  "hash_locase: '\\\\' must map to '/' (path separator normalization)" );
-_Static_assert( hash_locase['A']  == 'a',  "hash_locase: uppercase must map to lowercase" );
-_Static_assert( hash_locase['a']  == 'a',  "hash_locase: lowercase must map to itself" );
-#endif
+void Hash_SelfTest( void )
+{
+	if ( hash_locase['.']  != '\0' ) Com_Terminate( TERM_UNRECOVERABLE, "hash_locase['.'] must map to '\\0'" );
+	if ( hash_locase['\\'] != '/'  ) Com_Terminate( TERM_UNRECOVERABLE, "hash_locase['\\\\'] must map to '/'" );
+	if ( hash_locase['A']  != 'a'  ) Com_Terminate( TERM_UNRECOVERABLE, "hash_locase['A'] must map to 'a'" );
+	if ( hash_locase['a']  != 'a'  ) Com_Terminate( TERM_UNRECOVERABLE, "hash_locase['a'] must map to 'a'" );
+}
 
 unsigned long Com_GenerateHashValue( const char *fname, const unsigned int size )
 {

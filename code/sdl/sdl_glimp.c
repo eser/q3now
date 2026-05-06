@@ -648,7 +648,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 		if ( vulkan )
 		{
 			static char moltenVKPath[ MAX_OSPATH ];
-			Com_sprintf( moltenVKPath, sizeof( moltenVKPath ), "%s/libMoltenVK.dylib", Sys_DefaultAppPath() );
+			Com_sprintf( moltenVKPath, sizeof( moltenVKPath ), "%s/libMoltenVK.dylib", FS_GetInstallBinaryPath() );
 			SDL_SetHint( SDL_HINT_VULKAN_LIBRARY, moltenVKPath );
 			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL Vulkan: requesting MoltenVK from %s\n", moltenVKPath );
 			// MoltenVK default: synchronous queue submits (vkQueueSubmit blocks until GPU

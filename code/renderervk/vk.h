@@ -407,6 +407,14 @@ typedef struct vk_tess_s {
 
 	Vk_Depth_Range		depth_range;
 	VkPipeline			last_pipeline;
+	/* Layout the most-recently-bound pipeline was created with. Used by
+	 * vk_bind_descriptor_sets so the BindDescriptorSets call passes a layout
+	 * compatible with the bound pipeline (matters for the MSDF pipeline,
+	 * which uses vk.pipeline_layout_msdf — different push-constant ranges
+	 * from the main vk.pipeline_layout).
+	 * VK_NULL_HANDLE = no pipeline bound; bind path falls back to
+	 * vk.pipeline_layout (the historical hardcoded default). */
+	VkPipelineLayout	last_pipeline_layout;
 
 	uint32_t num_indexes; // value from most recent vk_bind_index() call
 

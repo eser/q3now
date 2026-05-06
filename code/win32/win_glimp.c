@@ -1282,24 +1282,19 @@ static void GLimp_SwapBuffers( void )
 }
 
 
+static void GLW_SwapIntervalChanged( cvar_t *self )
+{
+	if ( qwglSwapIntervalEXT ) {
+		qwglSwapIntervalEXT( self->integer );
+	}
+}
+
+
 /*
 ** GLimp_EndFrame
 */
 void GLimp_EndFrame( void )
 {
-	//
-	// swapinterval stuff
-	//
-	if ( r_swapInterval->modified ) {
-		r_swapInterval->modified = qfalse;
-
-		//if ( !glConfig.stereoEnabled ) {	// why?
-			if ( qwglSwapIntervalEXT ) {
-				qwglSwapIntervalEXT( r_swapInterval->integer );
-			}
-		//}
-	}
-
 	// don't flip if drawing to front buffer
 	if ( Q_stricmp( cl_drawBuffer->string, "GL_FRONT" ) != 0 ) {
 		GLimp_SwapBuffers();
@@ -1317,10 +1312,9 @@ static qboolean GLW_StartOpenGL( void )
 		if ( Q_stricmp( r_glDriver->string, OPENGL_DRIVER_NAME ) != 0 ) 
 		{
 			// try default driver
-			if ( GLW_LoadOpenGL( OPENGL_DRIVER_NAME ) ) 
+			if ( GLW_LoadOpenGL( OPENGL_DRIVER_NAME ) )
 			{
 				Cvar_Set( "r_glDriver", OPENGL_DRIVER_NAME );
-				r_glDriver->modified = qfalse;
 				return qtrue;
 			}
 		}
@@ -1373,7 +1367,8 @@ void GLimp_Init( glconfig_t *config )
 
 	if ( qwglSwapIntervalEXT ) {
 		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using WGL_EXT_swap_control\n" );
-		r_swapInterval->modified = qtrue; // force a set next frame
+		r_swapInterval->onChange = GLW_SwapIntervalChanged;
+		GLW_SwapIntervalChanged( r_swapInterval );
 	} else {
 		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WGL_EXT_swap_control not found\n" );
 	}

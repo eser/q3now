@@ -52,7 +52,7 @@ echo " Assets:      $ASSETS_DIR"
 echo "════════════════════════════════════════════════════════════"
 
 exec "$BINARY" \
-    +set fs_basepath "$ASSETS_DIR" \
+    +set fs_installpath "$ASSETS_DIR" \
     +set fs_homepath "$PROJECT_DIR" \
     +set dedicated 1 \
     +set com_hunkmegs "${Q3_COM_HUNKMEGS}" \

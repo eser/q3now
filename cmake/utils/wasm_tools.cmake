@@ -9,14 +9,33 @@ function(add_wasm MODULE_NAME)
     message(STATUS "WASM: Skipping ${MODULE_NAME} (wasi-sdk not available)")
 endfunction()
 
-# Find wasi-sdk
+# Find wasi-sdk. Auto-detect at platform-canonical paths so each cmake
+# configure (Release AND Debug) finds the toolchain without requiring
+# the caller to forward WASI_SDK_PATH every time. Env var still wins
+# if set.
 if(NOT DEFINED WASI_SDK_PATH)
-    if(EXISTS "/opt/wasi-sdk")
-        set(WASI_SDK_PATH "/opt/wasi-sdk")
+    if(DEFINED ENV{WASI_SDK_PATH})
+        set(WASI_SDK_PATH "$ENV{WASI_SDK_PATH}")
     else()
-        message(STATUS "WASM: wasi-sdk not found — WASM module compilation disabled")
-        message(STATUS "  Set WASI_SDK_PATH or install to /opt/wasi-sdk")
-        return()
+        set(_wasi_candidates "/opt/wasi-sdk")
+        if(WIN32)
+            # MSYS2 mounts its /opt under C:/msys64/opt. cmake on Windows
+            # doesn't see "/opt/wasi-sdk" as the same path, so list the
+            # native form explicitly.
+            list(APPEND _wasi_candidates "C:/msys64/opt/wasi-sdk")
+        endif()
+        foreach(_candidate IN LISTS _wasi_candidates)
+            if(EXISTS "${_candidate}")
+                set(WASI_SDK_PATH "${_candidate}")
+                break()
+            endif()
+        endforeach()
+        if(NOT DEFINED WASI_SDK_PATH)
+            message(STATUS "WASM: wasi-sdk not found — WASM module compilation disabled")
+            message(STATUS "  Tried: ${_wasi_candidates}")
+            message(STATUS "  Set WASI_SDK_PATH (env var or -D) to override")
+            return()
+        endif()
     endif()
 endif()
 

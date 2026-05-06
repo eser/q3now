@@ -1080,11 +1080,6 @@ void IN_Startup( void ) {
 	IN_StartupMIDI();
 #endif
 	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "------------------------------------\n" );
-
-	in_mouse->modified = qfalse;
-#ifdef USE_JOYSTICK
-	in_joystick->modified = qfalse;
-#endif
 }
 
 

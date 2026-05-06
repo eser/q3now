@@ -95,7 +95,7 @@ COPY --from=builder /tmp/q3now-ded /opt/q3now/q3now-ded
 COPY --from=builder /src/build/Release/baseq3/ /opt/q3now/baseq3/
 
 # Install default server config
-COPY modfiles/q3config_server.cfg /opt/q3now/baseq3/q3config_server.cfg
+COPY modfiles/config_server.cfg /opt/q3now/baseq3/config_server.cfg
 
 # Install entrypoint
 COPY docker/entrypoint.sh /opt/q3now/entrypoint.sh

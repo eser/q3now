@@ -765,6 +765,7 @@ qboolean COM_CompareExtension(const char *in, const char *ext);
 void	COM_DefaultExtension( char *path, int maxSize, const char *extension );
 
 unsigned long Com_GenerateHashValue( const char *fname, const unsigned int size );
+void Hash_SelfTest( void );
 
 typedef enum {
 	TK_GENEGIC = 0, // for single-char tokens

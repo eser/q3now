@@ -6,7 +6,7 @@ set -e
 # Unset variables are simply omitted — engine defaults apply.
 
 ARGS="+set dedicated 2"
-ARGS="$ARGS +set fs_basepath /opt/q3now"
+ARGS="$ARGS +set fs_installpath /opt/q3now"
 ARGS="$ARGS +set fs_homepath /home/q3now"
 ARGS="$ARGS +set sv_allowDownload 1"
 

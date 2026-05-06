@@ -1,0 +1,13 @@
+diff --git a/picoquic/picoquic_utils.h b/picoquic/picoquic_utils.h
+index 3e729160..937a12db 100644
+--- a/picoquic/picoquic_utils.h
++++ b/picoquic/picoquic_utils.h
+@@ -146,7 +146,7 @@ int picoquic_get_input_path(char * target_file_path, size_t file_path_max, const
+ #define DBG_PRINTF(fmt, ...)                                                                 \
+     debug_printf("%s:%u [%s]: " fmt "\n",                                                    \
+         &__FILE__[MAX(DBG_PRINTF_FILENAME_MAX, sizeof(__FILE__)) - DBG_PRINTF_FILENAME_MAX], \
+-        __LINE__, __func__ , __VA_ARGS__)
++        __LINE__, __func__ , ##__VA_ARGS__)
+ 
+ #define DBG_FATAL_PRINTF(fmt, ...)                    \
+     do {                                              \

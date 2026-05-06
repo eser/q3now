@@ -1,0 +1,33 @@
+diff --git a/picoquic/picosocks.c b/picoquic/picosocks.c
+index 51c6d7a7..4cea7c33 100644
+--- a/picoquic/picosocks.c
++++ b/picoquic/picosocks.c
+@@ -1367,12 +1367,28 @@ void picoquic_set_key_log_file_from_env(picoquic_quic_t* quic)
+         char* keylog_filename = NULL;
+ 
+ #ifdef _WINDOWS
++#if defined(__MINGW32__) || defined(__MINGW64__)
++        /* MinGW lacks _dupenv_s. getenv returns a static pointer; wrap in
++         * strdup so the call-site contract (caller-frees malloc'd buffer)
++         * matches the _dupenv_s path. */
++        {
++            const char* env_value = getenv("SSLKEYLOGFILE");
++            if (env_value == NULL) {
++                return;
++            }
++            keylog_filename = strdup(env_value);
++            if (keylog_filename == NULL) {
++                return;
++            }
++        }
++#else
+         size_t len;
+ 
+         if (_dupenv_s(&keylog_filename, &len, "SSLKEYLOGFILE") != 0 ||
+             keylog_filename == NULL) {
+             return;
+         }
++#endif
+ #else
+         keylog_filename = getenv("SSLKEYLOGFILE");
+         if (keylog_filename == NULL) {

@@ -279,7 +279,7 @@ qboolean Com_EarlyParseCmdLine( char *commandLine, char *con_title, int title_si
 Com_SafeMode
 
 Check for "safe" on the command line, which will
-skip loading of q3config.cfg
+skip loading of config.cfg
 ===================
 */
 qboolean Com_SafeMode( void ) {
@@ -476,7 +476,7 @@ static memzone_t *smallzone;
 
 
 #ifdef USE_MULTI_SEGMENT
-static int GetBucketIndex( const memzone_t *zone, uint32_t size ) 
+static int GetBucketIndex( const memzone_t *zone, uint32_t size )
 {
 	const int index = size / BUCKET_SIZE;
 	return index > (BUCKET_COUNT - 1) ? BUCKET_COUNT - 1 : index;
@@ -1681,7 +1681,7 @@ static void Com_InitZoneMemory( void ) {
 	cvar_t	*cv;
 
 	// Please note: com_zoneMegs can only be set on the command line, and
-	// not in q3config.cfg or Com_StartupVariable, as they haven't been
+	// not in config.cfg or Com_StartupVariable, as they haven't been
 	// executed by this point. It's a chicken and egg problem. We need the
 	// memory manager configured to handle those places where you would
 	// configure the memory manager.
@@ -2283,7 +2283,7 @@ static void Com_ExecuteCfg( void )
 
 	if (!Com_SafeMode())
 	{
-		// skip the q3config.cfg and autoexec.cfg if "safe" is on the command line
+		// skip the config.cfg and autoexec.cfg if "safe" is on the command line
 		Cbuf_ExecuteText(EXEC_NOW, "exec " Q3CONFIG_CFG "\n");
 		Cbuf_Execute();
 		Cbuf_ExecuteText(EXEC_NOW, "exec autoexec.cfg\n");
@@ -2851,6 +2851,11 @@ static void Com_SetAffinityMask( const char *str )
 		Sys_SetAffinityMask( mask );
 	}
 }
+
+static void Com_AffinityMaskChanged( cvar_t *self )
+{
+	Com_SetAffinityMask( self->string );
+}
 #endif // USE_AFFINITY_MASK
 
 
@@ -2947,6 +2952,8 @@ void Com_Init( char *commandLine ) {
 
 	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s %s %s\n", Q3NOW_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
 
+	Hash_SelfTest();
+
 	if ( Q_setjmp( abortframe ) ) {
 		Sys_Error ("Error during initialization");
 	}
@@ -3011,7 +3018,7 @@ void Com_Init( char *commandLine ) {
 
 	Com_StartupVariable( "sv_master1" );
 	Cvar_Get( "sv_master1", MASTER_SERVER_NAME, CVAR_INIT );
-	
+
 	{
 		static const cvarDesc_t d = CVAR_INT( "protocol", XSTRING( PROTOCOL_VERSION ), 0,
 			"Specify network protocol version number.", 0, 0 );
@@ -3127,7 +3134,7 @@ void Com_Init( char *commandLine ) {
 			"Bind game process to bitmask-specified CPU core(s), special characters:\n A or a - all default cores\n P or p - performance cores\n E or e - efficiency cores\n 0x<value> - use hexadecimal notation\n + or - can be used to add or exclude particular cores" );
 		com_affinityMask = Cvar_Register( &d );
 	}
-	com_affinityMask->modified = qfalse;
+	com_affinityMask->onChange = Com_AffinityMaskChanged;
 #endif
 
 	// com_blood = Cvar_Get( "com_blood", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
@@ -3270,7 +3277,6 @@ void Com_Init( char *commandLine ) {
 #endif
 	if ( com_affinityMask->string[0] != '\0' ) {
 		Com_SetAffinityMask( com_affinityMask->string );
-		com_affinityMask->modified = qfalse;
 	}
 #endif
 

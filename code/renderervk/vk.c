@@ -27,8 +27,8 @@ static int vkMaxSamples = VK_SAMPLE_COUNT_1_BIT;
 static VkInstance vk_instance = VK_NULL_HANDLE;
 static VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 
-#ifndef NDEBUG
-VkDebugReportCallbackEXT vk_debug_callback = VK_NULL_HANDLE;
+#ifdef USE_VK_VALIDATION
+static VkDebugUtilsMessengerEXT vk_debug_messenger = VK_NULL_HANDLE;
 #endif
 
 static int vk_diag_fence_ms, vk_diag_submit_ms, vk_diag_present_ms, vk_diag_acquire_ms, vk_diag_frames;
@@ -71,8 +71,8 @@ static PFN_vkGetPhysicalDeviceSurfaceFormatsKHR			qvkGetPhysicalDeviceSurfaceFor
 static PFN_vkGetPhysicalDeviceSurfacePresentModesKHR	qvkGetPhysicalDeviceSurfacePresentModesKHR;
 static PFN_vkGetPhysicalDeviceSurfaceSupportKHR			qvkGetPhysicalDeviceSurfaceSupportKHR;
 #ifdef USE_VK_VALIDATION
-static PFN_vkCreateDebugReportCallbackEXT				qvkCreateDebugReportCallbackEXT;
-static PFN_vkDestroyDebugReportCallbackEXT				qvkDestroyDebugReportCallbackEXT;
+static PFN_vkCreateDebugUtilsMessengerEXT				qvkCreateDebugUtilsMessengerEXT;
+static PFN_vkDestroyDebugUtilsMessengerEXT				qvkDestroyDebugUtilsMessengerEXT;
 #endif
 static PFN_vkAllocateCommandBuffers						qvkAllocateCommandBuffers;
 static PFN_vkAllocateDescriptorSets						qvkAllocateDescriptorSets;
@@ -1363,14 +1363,35 @@ static void vk_alloc_staging_buffer( VkDeviceSize size )
 
 
 #ifdef USE_VK_VALIDATION
-static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT object_type, uint64_t object, size_t location,
-	int32_t message_code, const char* layer_prefix, const char* message, void* user_data) {
-#ifdef _WIN32
-	MessageBoxA( 0, message, layer_prefix, MB_ICONWARNING );
-	OutputDebugString(message);
-	OutputDebugString("\n");
-	DebugBreak();
-#endif
+/* Routes validation-layer messages to the engine log (cat=renderer) instead
+ * of spawning a modal MessageBox per error.  ri.Log → Com_Logv internally,
+ * so output lands in qconsole.jsonl with the renderer category. */
+static VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_callback(
+	VkDebugUtilsMessageSeverityFlagBitsEXT       severity_bits,
+	VkDebugUtilsMessageTypeFlagsEXT              type_flags,
+	const VkDebugUtilsMessengerCallbackDataEXT  *data,
+	void                                        *user_data )
+{
+	log_severity_t sev;
+	const char *msg;
+
+	(void)type_flags;
+	(void)user_data;
+
+	if ( !data || !data->pMessage )
+		return VK_FALSE;
+	msg = data->pMessage;
+
+	if ( severity_bits & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT )
+		sev = SEV_ERROR;
+	else if ( severity_bits & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT )
+		sev = SEV_WARN;
+	else if ( severity_bits & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT )
+		sev = SEV_INFO;
+	else
+		sev = SEV_DEBUG;
+
+	ri.Log( sev, "Vulkan: %s\n", msg );
 	return VK_FALSE;
 }
 #endif
@@ -1390,11 +1411,6 @@ static qboolean used_instance_extension( const char *ext )
 
 	if ( Q_stricmp( ext, VK_KHR_SWAPCHAIN_EXTENSION_NAME ) == 0 )
 		return qtrue;
-
-#ifdef USE_VK_VALIDATION
-	if ( Q_stricmp( ext, VK_EXT_DEBUG_REPORT_EXTENSION_NAME ) == 0 )
-		return qtrue;
-#endif
 
 	if ( Q_stricmp( ext, VK_EXT_DEBUG_UTILS_EXTENSION_NAME ) == 0 )
 		return qtrue;
@@ -2016,11 +2032,11 @@ static void vk_destroy_instance( void ) {
 	}
 
 #ifdef USE_VK_VALIDATION
-	if ( vk_debug_callback ) {
-		if ( qvkDestroyDebugReportCallbackEXT != NULL ) {
-			qvkDestroyDebugReportCallbackEXT( vk_instance, vk_debug_callback, NULL );
+	if ( vk_debug_messenger != VK_NULL_HANDLE ) {
+		if ( qvkDestroyDebugUtilsMessengerEXT != NULL ) {
+			qvkDestroyDebugUtilsMessengerEXT( vk_instance, vk_debug_messenger, NULL );
 		}
-		vk_debug_callback = VK_NULL_HANDLE;
+		vk_debug_messenger = VK_NULL_HANDLE;
 	}
 #endif
 
@@ -2072,21 +2088,26 @@ static void init_vulkan_library( void )
 		INIT_INSTANCE_FUNCTION( vkGetPhysicalDeviceSurfaceSupportKHR )
 
 #ifdef USE_VK_VALIDATION
-		INIT_INSTANCE_FUNCTION_EXT( vkCreateDebugReportCallbackEXT )
-		INIT_INSTANCE_FUNCTION_EXT( vkDestroyDebugReportCallbackEXT )
+		INIT_INSTANCE_FUNCTION_EXT( vkCreateDebugUtilsMessengerEXT )
+		INIT_INSTANCE_FUNCTION_EXT( vkDestroyDebugUtilsMessengerEXT )
 
-		// Create debug callback.
-		if ( qvkCreateDebugReportCallbackEXT && qvkDestroyDebugReportCallbackEXT ) {
-			VkDebugReportCallbackCreateInfoEXT desc;
-			desc.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
-			desc.pNext = NULL;
-			desc.flags = VK_DEBUG_REPORT_WARNING_BIT_EXT |
-				VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
-				VK_DEBUG_REPORT_ERROR_BIT_EXT;
-			desc.pfnCallback = &debug_callback;
-			desc.pUserData = NULL;
+		/* Wire validation-layer output into the engine log.  Skipped silently
+		 * when the loader didn't expose VK_EXT_debug_utils — same behavior as
+		 * before for drivers that lack the extension. */
+		if ( qvkCreateDebugUtilsMessengerEXT && qvkDestroyDebugUtilsMessengerEXT ) {
+			VkDebugUtilsMessengerCreateInfoEXT desc;
+			desc.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+			desc.pNext           = NULL;
+			desc.flags           = 0;
+			desc.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+			                     | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+			desc.messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+			                     | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+			                     | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+			desc.pfnUserCallback = debug_utils_callback;
+			desc.pUserData       = NULL;
 
-			VK_CHECK( qvkCreateDebugReportCallbackEXT( vk_instance, &desc, NULL, &vk_debug_callback ) );
+			VK_CHECK( qvkCreateDebugUtilsMessengerEXT( vk_instance, &desc, NULL, &vk_debug_messenger ) );
 		}
 #endif
 
@@ -2274,8 +2295,8 @@ static void deinit_instance_functions( void )
 	qvkGetPhysicalDeviceSurfacePresentModesKHR = NULL;
 	qvkGetPhysicalDeviceSurfaceSupportKHR = NULL;
 #ifdef USE_VK_VALIDATION
-	qvkCreateDebugReportCallbackEXT = NULL;
-	qvkDestroyDebugReportCallbackEXT = NULL;
+	qvkCreateDebugUtilsMessengerEXT = NULL;
+	qvkDestroyDebugUtilsMessengerEXT = NULL;
 #endif
 }
 
@@ -3231,6 +3252,7 @@ void vk_init_rail_compute( void ) {
 		colorBlend.attachmentCount = 1;
 		colorBlend.pAttachments = &blendAttach;
 
+		memset( &gpInfo, 0, sizeof( gpInfo ) );
 		gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		gpInfo.stageCount = 2;
 		gpInfo.pStages = stages;
@@ -3339,6 +3361,16 @@ void RB_DrawRailTrailGPU( int numSegments ) {
 	}
 
 	qvkCmdDraw( cmd, ( numSegments - 1 ) * 6, 1, 0, 0 );
+
+	// invalidate pipeline and descriptor state so the next standard draw
+	// rebinds correctly (we bound vk.pipeline_layout_compute — incompatible
+	// with the main vk.pipeline_layout that subsequent draws expect).
+	// Mirrors vk_draw_iqm's cleanup at the end of that function.
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT; // force viewport/scissor update
+	memset( vk.cmd->descriptor_set.current, 0, sizeof( vk.cmd->descriptor_set.current ) );
+	vk.cmd->descriptor_set.start = ~0U;
+	vk.cmd->descriptor_set.end = 0;
 }
 
 
@@ -3645,6 +3677,7 @@ void vk_init_iqm_gpu_skinning( void )
 		colorBlend.attachmentCount = 1;
 		colorBlend.pAttachments = &blendAttach;
 
+		memset( &gpInfo, 0, sizeof( gpInfo ) );
 		gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		gpInfo.stageCount = 2;
 		gpInfo.pStages = stages;
@@ -6567,14 +6600,6 @@ void vk_initialize( void )
 
 	vk_create_shader_modules();
 
-	// rail trail GPU resources — must be after shader modules are loaded
-	vk_init_rail_compute();
-
-#if FEAT_IQM
-	// IQM GPU skinning — must be after shader modules and descriptor pool
-	vk_init_iqm_gpu_skinning();
-#endif
-
 	{
 		VkPipelineCacheCreateInfo ci;
 		memset( &ci, 0, sizeof( ci ) );
@@ -6592,8 +6617,22 @@ void vk_initialize( void )
 	// color/depth attachments
 	vk_create_attachments();
 
-	// renderpasses
+	// renderpasses — must run before vk_init_rail_compute() and
+	// vk_init_iqm_gpu_skinning() because both create graphics pipelines that
+	// read vk.render_pass.main; with the previous ordering that field was
+	// still VK_NULL_HANDLE, tripping VUID-VkGraphicsPipelineCreateInfo-
+	// dynamicRendering-06576 on every Debug startup.
 	vk_create_render_passes();
+
+	// rail trail GPU resources — must be after shader modules are loaded AND
+	// after render passes (graphics pipeline reads vk.render_pass.main).
+	vk_init_rail_compute();
+
+#if FEAT_IQM
+	// IQM GPU skinning — must be after shader modules, descriptor pool, AND
+	// render passes (graphics pipeline reads vk.render_pass.main).
+	vk_init_iqm_gpu_skinning();
+#endif
 
 	// framebuffers for each swapchain image
 	vk_create_framebuffers();
@@ -7067,6 +7106,59 @@ void vk_shutdown( refShutdownCode_t code )
 		qvkDestroyShaderModule( vk.device, vk.modules.smaa_resolve_vs, NULL );
 	if ( vk.modules.smaa_resolve_fs != VK_NULL_HANDLE )
 		qvkDestroyShaderModule( vk.device, vk.modules.smaa_resolve_fs, NULL );
+
+#define DESTROY_SM(m) \
+	do { if ( (m) != VK_NULL_HANDLE ) { \
+		qvkDestroyShaderModule( vk.device, (m), NULL ); \
+		(m) = VK_NULL_HANDLE; } } while ( 0 )
+
+#if FEAT_PARALLAX_MAPPING
+	for ( i = 0; i < 2; i++ ) {
+		DESTROY_SM( vk.modules.vert.light_parallax[i] );
+		for ( j = 0; j < 2; j++ )
+			DESTROY_SM( vk.modules.frag.light_parallax[i][j] );
+	}
+#endif
+
+	/* Rail trail compute + graphics modules — only created when vk.computeAvailable;
+	 * the NULL check inside DESTROY_SM covers the disabled path. */
+	DESTROY_SM( vk.modules.rail_helix_cs );
+	DESTROY_SM( vk.modules.rail_debris_cs );
+	DESTROY_SM( vk.modules.rail_sparks_cs );
+	DESTROY_SM( vk.modules.rail_helix_vs );
+	DESTROY_SM( vk.modules.rail_helix_fs );
+
+#if FEAT_ADVANCED_WATER
+	DESTROY_SM( vk.modules.water_fs );
+#endif
+
+#if FEAT_SHADOW_MAPPING
+	DESTROY_SM( vk.modules.shadow_depth_vs );
+	DESTROY_SM( vk.modules.shadow_depth_fs );
+	for ( i = 0; i < 2; i++ ) {
+		DESTROY_SM( vk.modules.light_shadow[i] );
+		for ( j = 0; j < 2; j++ )
+			DESTROY_SM( vk.modules.light_shadow_frag[i][j] );
+	}
+#endif
+
+#if FEAT_PBR
+	for ( i = 0; i < 2; i++ )
+		for ( j = 0; j < 2; j++ )
+			DESTROY_SM( vk.modules.light_pbr_frag[i][j] );
+#endif
+
+#if FEAT_IQM
+	/* vk_shutdown_iqm_gpu_skinning above only destroys the pipeline/buffers/layout. */
+	DESTROY_SM( vk.modules.iqm_skinning_vs );
+	DESTROY_SM( vk.modules.iqm_skinning_fs );
+#endif
+
+	/* gamma_variant_fs is a sparse array indexed by feature-flag bitmask. */
+	for ( i = 0; i < GAMMA_VAR_COUNT; i++ )
+		DESTROY_SM( vk.gamma_variant_fs[i] );
+
+#undef DESTROY_SM
 
 __cleanup:
 	if ( vk.device != VK_NULL_HANDLE ) {
@@ -9869,7 +9961,17 @@ void vk_bind_descriptor_sets( void )
 		}
 	}
 
-	qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, start, count, vk.cmd->descriptor_set.current + start, offset_count, offsets );
+	/* Bind via the layout the currently-bound pipeline was created with
+	 * (set by vk_bind_pipeline). Falls back to vk.pipeline_layout when no
+	 * pipeline is bound — matches the historical hardcoded behavior for
+	 * that pre-bind window and after callers that reset last_pipeline =
+	 * VK_NULL_HANDLE (rail trail / IQM / bloom etc.) to force a rebind. */
+	{
+		VkPipelineLayout layout = vk.cmd->last_pipeline != VK_NULL_HANDLE
+		                          ? vk.cmd->last_pipeline_layout
+		                          : vk.pipeline_layout;
+		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, start, count, vk.cmd->descriptor_set.current + start, offset_count, offsets );
+	}
 
 	vk.cmd->descriptor_set.end = 0;
 	vk.cmd->descriptor_set.start = ~0U;
@@ -9882,6 +9984,17 @@ void vk_bind_pipeline( uint32_t pipeline ) {
 	vkpipe = vk_gen_pipeline( pipeline );
 
 	if ( vkpipe != vk.cmd->last_pipeline ) {
+		/* Track which layout this pipeline was created with so
+		 * vk_bind_descriptor_sets binds via a compatible layout. Mirrors the
+		 * layout selection inside vk_create_pipeline (TYPE_DOT/TYPE_MSDF/default). */
+		const int shader_type = vk.pipelines[ pipeline ].def.shader_type;
+		if ( shader_type == TYPE_DOT )
+			vk.cmd->last_pipeline_layout = vk.pipeline_layout_storage;
+		else if ( shader_type == TYPE_MSDF )
+			vk.cmd->last_pipeline_layout = vk.pipeline_layout_msdf;
+		else
+			vk.cmd->last_pipeline_layout = vk.pipeline_layout;
+
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipe );
 		vk.cmd->last_pipeline = vkpipe;
 		vk_diag_pipebinds++;
@@ -9992,6 +10105,37 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 		render_pass_begin_info.clearValueCount = 0;
 		render_pass_begin_info.pClearValues = NULL;
 	}
+
+	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
+
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+}
+
+
+/* Single-attachment variant for post-process passes (bloom_extract, blur,
+ * capture, gamma).  Each of these passes was created with
+ * VK_ATTACHMENT_LOAD_OP_CLEAR on its sole color attachment, so the begin
+ * info must supply exactly one VkClearValue or VUID-clearValueCount-00902
+ * fires.  vk_begin_render_pass()'s clearValueCount=2-or-3 shape is for
+ * color+depth(+msaa) and doesn't fit here. */
+static void vk_begin_render_pass_clear1( VkRenderPass renderPass, VkFramebuffer frameBuffer, uint32_t width, uint32_t height )
+{
+	VkRenderPassBeginInfo render_pass_begin_info;
+	VkClearValue clear_value;
+
+	memset( &clear_value, 0, sizeof( clear_value ) );
+
+	render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	render_pass_begin_info.pNext = NULL;
+	render_pass_begin_info.renderPass = renderPass;
+	render_pass_begin_info.framebuffer = frameBuffer;
+	render_pass_begin_info.renderArea.offset.x = 0;
+	render_pass_begin_info.renderArea.offset.y = 0;
+	render_pass_begin_info.renderArea.extent.width = width;
+	render_pass_begin_info.renderArea.extent.height = height;
+	render_pass_begin_info.clearValueCount = 1;
+	render_pass_begin_info.pClearValues = &clear_value;
 
 	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
 
@@ -10360,7 +10504,7 @@ void vk_begin_bloom_extract_render_pass( void )
 	//vk.renderScaleY = (float)vk.renderHeight / (float)glConfig.vidHeight;
 	vk.renderScaleX = vk.renderScaleY = 1.0f;
 
-	vk_begin_render_pass( vk.render_pass.bloom_extract, frameBuffer, qfalse, vk.renderWidth, vk.renderHeight );
+	vk_begin_render_pass_clear1( vk.render_pass.bloom_extract, frameBuffer, vk.renderWidth, vk.renderHeight );
 }
 
 
@@ -10377,7 +10521,7 @@ void vk_begin_blur_render_pass( uint32_t index )
 	//vk.renderScaleY = (float)vk.renderHeight / (float)glConfig.vidHeight;
 	vk.renderScaleX = vk.renderScaleY = 1.0f;
 
-	vk_begin_render_pass( vk.render_pass.blur[ index ], frameBuffer, qfalse, vk.renderWidth, vk.renderHeight );
+	vk_begin_render_pass_clear1( vk.render_pass.blur[ index ], frameBuffer, vk.renderWidth, vk.renderHeight );
 }
 
 
@@ -10975,7 +11119,7 @@ void vk_end_frame( void )
 			}
 
 			// render to capture FBO
-			vk_begin_render_pass( vk.render_pass.capture, vk.framebuffers.capture, qfalse, gls.captureWidth, gls.captureHeight );
+			vk_begin_render_pass_clear1( vk.render_pass.capture, vk.framebuffers.capture, gls.captureWidth, gls.captureHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.capture_pipeline );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
 
@@ -11024,7 +11168,7 @@ void vk_end_frame( void )
 			}
 #endif
 
-			vk_begin_render_pass( vk.render_pass.gamma, vk.framebuffers.gamma[ vk.cmd->swapchain_image_index ], qfalse, vk.renderWidth, vk.renderHeight );
+			vk_begin_render_pass_clear1( vk.render_pass.gamma, vk.framebuffers.gamma[ vk.cmd->swapchain_image_index ], vk.renderWidth, vk.renderHeight );
 			{
 				// Build gamma variant index from active post-process cvars
 				int varIdx = 0;

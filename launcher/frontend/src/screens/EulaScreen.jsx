@@ -73,6 +73,8 @@ const styles = {
 export default function EulaScreen({ onAccept, onDecline }) {
   const [eulaText, setEulaText] = useState("");
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
+  const [acceptError, setAcceptError] = useState("");
+  const [accepting, setAccepting] = useState(false);
   const boxRef = useRef(null);
 
   useEffect(() => {
@@ -90,8 +92,20 @@ export default function EulaScreen({ onAccept, onDecline }) {
   };
 
   const handleAccept = async () => {
-    await AcceptEula();
-    onAccept();
+    setAcceptError("");
+    setAccepting(true);
+    try {
+      await AcceptEula();
+      onAccept();
+    } catch (err) {
+      // Wails returns Go errors as rejected promises. Without this catch,
+      // the rejection was silently swallowed and the screen appeared to do
+      // nothing on click — the original symptom of the EULA-accept bug.
+      const msg = (err && err.message) ? err.message : String(err);
+      setAcceptError(`Could not save your acceptance: ${msg}`);
+    } finally {
+      setAccepting(false);
+    }
   };
 
   return (
@@ -123,6 +137,21 @@ export default function EulaScreen({ onAccept, onDecline }) {
         )}
       </div>
 
+      {acceptError && (
+        <div
+          style={{
+            padding: "12px 40px",
+            background: "rgba(220, 38, 38, 0.15)",
+            borderTop: "1px solid rgba(220, 38, 38, 0.4)",
+            color: "rgb(248, 113, 113)",
+            fontSize: "13px",
+            lineHeight: 1.5,
+          }}
+        >
+          {acceptError}
+        </div>
+      )}
+
       <div style={styles.actions}>
         <Button
           variant="secondary"
@@ -131,8 +160,11 @@ export default function EulaScreen({ onAccept, onDecline }) {
         >
           Decline
         </Button>
-        <Button disabled={!scrolledToBottom} onClick={handleAccept}>
-          Accept
+        <Button
+          disabled={!scrolledToBottom || accepting}
+          onClick={handleAccept}
+        >
+          {accepting ? "Saving..." : "Accept"}
         </Button>
       </div>
     </div>

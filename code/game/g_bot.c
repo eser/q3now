@@ -166,7 +166,7 @@ static void G_LoadArenas( void ) {
 		G_LoadArenasFromFile(filename);
 	}
 	trap_Print( va( "%i arenas parsed\n", g_numArenas ) );
-	
+
 	for( n = 0; n < g_numArenas; n++ ) {
 		Info_SetValueForKey( g_arenaInfos[n], "num", va( "%i", n ) );
 	}
@@ -924,7 +924,7 @@ void G_InitBots( qboolean restart ) {
 	}
 
 	trap_Cvar_Register( &g_minPlayers, "g_minPlayers", "2", CVAR_SERVERINFO | CVAR_ARCHIVE );
-	trap_Cvar_Register( &g_autoBots, "g_autoBots", "1", CVAR_SERVERINFO | CVAR_ARCHIVE );
+	trap_Cvar_Register( &g_autoBots, "g_autoBots", "0", CVAR_SERVERINFO | CVAR_ARCHIVE );
 
 	if( g_singlePlayer.integer ) {
 		trap_GetServerinfo( serverinfo, sizeof(serverinfo) );

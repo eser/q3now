@@ -97,9 +97,13 @@ protected:
 };
 
 /* Forward declarations for static helpers used by Nav_Build_Internal before
- * they are defined later in this file. */
-static const dtQueryFilter *GetFilter( void );
-static void Nav_TagDoorAreas( const char *mapname );
+ * they are defined later in this file. Wrapped in extern "C" because the
+ * definitions live inside the extern "C" Nav_Impl_* block at line ~458; GCC 16
+ * rejects mismatched-linkage forward decls in the same TU. */
+extern "C" {
+    static const dtQueryFilter *GetFilter( void );
+    static void Nav_TagDoorAreas( const char *mapname );
+}
 
 /* -------------------------------------------------------------------------
    Off-mesh connection layout arrays (used in dtNavMeshCreateParams)
