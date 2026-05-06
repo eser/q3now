@@ -92,7 +92,8 @@ jobs:
           libasound-dev libxss-dev libxcursor-dev libxi-dev libxinerama-dev \
           libxfixes-dev libxkbcommon-dev libwayland-dev libdecor-0-dev \
           libpipewire-0.3-dev libpulse-dev libegl-dev libdrm-dev libgbm-dev \
-          libwebkit2gtk-4.1-dev libgtk-3-dev
+          libwebkit2gtk-4.1-dev libgtk-3-dev \
+          libopus-dev libopusfile-dev
         # SDL3 is not in Ubuntu 24.04 repos — build from source
         git clone --depth 1 https://github.com/libsdl-org/SDL.git /tmp/SDL3
         cmake -S /tmp/SDL3 -B /tmp/SDL3/build -G Ninja \
@@ -155,7 +156,7 @@ jobs:
         node-version: '25.8.0'
 
     - name: Install system dependencies
-      run: brew install cmake ninja sdl3 molten-vk create-dmg
+      run: brew install cmake ninja sdl3 molten-vk create-dmg opus opusfile
 
     - name: Install wasi-sdk
       run: |
@@ -219,7 +220,11 @@ jobs:
       with:
         msystem: MINGW64
         update: false
-        install: mingw-w64-x86_64-openssl
+        install: >-
+          mingw-w64-x86_64-openssl
+          mingw-w64-x86_64-opus
+          mingw-w64-x86_64-opusfile
+          mingw-w64-x86_64-pkg-config
         path-type: inherit
 
     - name: Install wasi-sdk
