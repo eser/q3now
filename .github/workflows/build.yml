@@ -111,7 +111,7 @@ jobs:
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build and package
-      run: make release Q3DIR=${{ runner.temp }}/q3now WAILS_TAGS="-tags webkit2_41"
+      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now WAILS_TAGS="-tags webkit2_41"
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
@@ -168,7 +168,7 @@ jobs:
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build and package
-      run: make release Q3DIR=${{ runner.temp }}/q3now.app
+      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now.app
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
@@ -243,7 +243,13 @@ jobs:
       shell: bash
       env:
         OPENSSL_ROOT_DIR: "${{ runner.temp }}/msys64/mingw64"
-      run: make release Q3DIR=dist/q3now USE_SDL=0 WASI_SDK_PATH="$USERPROFILE/wasi-sdk"
+      # USERPROFILE arrives as Windows-form (C:\Users\...); CMake's parser
+      # interprets backslashes in -D values as escape sequences (\U, \r),
+      # which corrupts the path. Convert \ → / via bash parameter expansion
+      # so cmake sees a clean forward-slash path it doesn't try to escape.
+      run: |
+        WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
+        make release CHANNEL=public Q3DIR=dist/q3now USE_SDL=0 WASI_SDK_PATH="$WASI_HOME"
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
