@@ -243,11 +243,23 @@ jobs:
       shell: bash
       env:
         OPENSSL_ROOT_DIR: "${{ runner.temp }}/msys64/mingw64"
-      # USERPROFILE arrives as Windows-form (C:\Users\...); CMake's parser
-      # interprets backslashes in -D values as escape sequences (\U, \r),
-      # which corrupts the path. Convert \ → / via bash parameter expansion
-      # so cmake sees a clean forward-slash path it doesn't try to escape.
+      # PATH adjustments and quirks:
+      #
+      # (1) Strawberry Perl is preinstalled on windows-2025 runners and ships
+      #     a broken pkg-config.bat that bails out with "Can't find … on
+      #     PATH, '.' not in PATH." regardless of what's actually being
+      #     queried. Wails' `Generating bindings` step invokes CGo on
+      #     gopkg.in/hraban/opus.v2 which calls pkg-config; Strawberry's
+      #     wrapper is found first and fails. Prepend MSYS2's mingw64/bin
+      #     so the real pkg-config.exe (which can find opus.pc / opusfile.pc
+      #     installed via mingw-w64-x86_64-{opus,opusfile,pkg-config}) wins.
+      #
+      # (2) USERPROFILE arrives as Windows-form (C:\Users\...); CMake's
+      #     parser interprets backslashes in -D values as escape sequences
+      #     (\U, \r) and corrupts the path. Convert \ → / via bash parameter
+      #     expansion so cmake sees a clean forward-slash path.
       run: |
+        export PATH="${{ runner.temp }}/msys64/mingw64/bin:$PATH"
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
         make release CHANNEL=public Q3DIR=dist/q3now USE_SDL=0 WASI_SDK_PATH="$WASI_HOME"
 
