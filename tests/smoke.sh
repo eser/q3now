@@ -36,7 +36,7 @@ trap "rm -f $LOGFILE" EXIT
 
 echo "==> Starting smoke test: $DED +map q3dm1"
 timeout 30 "$DED" \
-  +set fs_basepath "$Q3DIR" \
+  +set fs_installpath "$Q3DIR" \
   +set dedicated 2 \
   +set bot_enable 1 \
   +set g_gametype 0 \

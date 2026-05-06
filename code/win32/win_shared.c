@@ -151,3 +151,11 @@ qboolean Sys_SetAffinityMask( const uint64_t mask )
 	return qfalse;
 }
 #endif // USE_AFFINITY_MASK
+
+/* Apple has a real implementation in code/macosx/macosx_main.c (mach
+ * THREAD_TIME_CONSTRAINT_POLICY). Windows has no direct equivalent for the
+ * "real-time-ish, low-jitter main thread" semantics that policy provides;
+ * SetThreadPriority(THREAD_PRIORITY_TIME_CRITICAL) is too aggressive and
+ * disrupts the rest of the system. Leaving as a no-op here matches the
+ * Linux/BSD default. */
+void Sys_SetMainThreadPolicy( void ) { }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 )
@@ -43,15 +44,25 @@ func Read(path string) *Settings {
 }
 
 // Write persists settings to the given path using atomic write.
+//
+// Per launcher convention (see docs/launcher.md "Writer self-bootstrap"):
+// writers must os.MkdirAll their parent before writing. There is no
+// centralized HomeDir bootstrap; each writer is independently responsible.
 func Write(path string, s *Settings) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
 
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		slog.Error("failed to create settings directory", "dir", dir, "error", err)
+		return err
+	}
+
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		slog.Error("failed to write settings", "error", err)
+		slog.Error("failed to write settings", "path", tmp, "error", err)
 		return err
 	}
 	return os.Rename(tmp, path)

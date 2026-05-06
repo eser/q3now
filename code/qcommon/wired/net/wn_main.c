@@ -436,7 +436,10 @@ void WN_Init( void )
 	}
 #endif
 
-	current_time = Sys_Microseconds();
+	/* picoquic uses picoquic_current_time() (wall-clock UTC µs) internally
+	 * for wake_time scheduling; passing Sys_Microseconds (QPC-monotonic-
+	 * since-first-call) here mixes time bases and jams the scheduler. */
+	current_time = picoquic_current_time();
 
 	// Create picoquic context with TLS certificate
 	// Look for cert/key files in fs_homepath/certs/ or use cvars
@@ -667,7 +670,7 @@ void WN_FlushOutbound( void )
 	if ( !wn.initialized )
 		return;
 
-	current_time = Sys_Microseconds();
+	current_time = picoquic_current_time();
 
 	while ( 1 ) {
 		send_len = 0;
@@ -750,7 +753,7 @@ static qboolean WN_DemuxPacket( const netadr_t *from, const byte *data, int len 
 	if ( (first & 0x80) || (first & 0xC0) == 0x40 ) {
 		Com_Log( SEV_TRACE, LOG_CAT_NETWORK, "[WiredNet] QUIC: demux hit, first=0x%02X len=%d from=%s\n",
 			first, len, NET_AdrToString( from ) );
-		current_time = Sys_Microseconds();
+		current_time = picoquic_current_time();
 
 		// Copy packet data to QUIC-owned buffer — net_message->data is shared
 		// and may be reused by subsequent recvfrom calls in the same drain loop.

@@ -2598,10 +2598,6 @@ static void Com_WriteConfigToFileForced( const char *filename ) {
 
 
 void Com_WriteConfiguration( void ) {
-#ifndef DEDICATED
-	const char *basegame;
-	const char *gamedir;
-#endif
 	if ( !com_fullyInitialized ) {
 		return;
 	}
@@ -2612,11 +2608,6 @@ void Com_WriteConfiguration( void ) {
 	cvar_modifiedFlags &= ~CVAR_ARCHIVE;
 
 	Com_WriteConfigToFile( Q3CONFIG_CFG );
-
-#ifndef DEDICATED
-	gamedir = FS_GetCurrentGameDir();
-	basegame = FS_GetBaseGameDir();
-#endif
 }
 
 

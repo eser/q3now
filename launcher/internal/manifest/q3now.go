@@ -2,7 +2,9 @@ package manifest
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -61,15 +63,27 @@ func WriteWithInventory(path string, inventory map[string]string) error {
 	return write(path, &m)
 }
 
+// write persists the manifest to the given path using atomic write.
+//
+// Per launcher convention (see docs/launcher.md "Writer self-bootstrap"):
+// writers must os.MkdirAll their parent before writing. There is no
+// centralized HomeDir bootstrap; each writer is independently responsible.
 func write(path string, m *Manifest) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
 
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		slog.Error("failed to create manifest directory", "dir", dir, "error", err)
+		return err
+	}
+
 	// Atomic write: write to temp, then rename.
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		slog.Error("failed to write manifest", "path", tmp, "error", err)
 		return err
 	}
 	return os.Rename(tmp, path)

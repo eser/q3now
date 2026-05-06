@@ -6,6 +6,14 @@ SET(CMAKE_C_STANDARD 11)
 SET(CMAKE_C_STANDARD_REQUIRED ON)
 SET(CMAKE_C_EXTENSIONS OFF)
 
+# Strict -std=c11 hides glibc POSIX/BSD extensions (addrinfo, EAI_NONAME,
+# IFF_UP, NI_NUMERICHOST, nanosleep, ...) that net_ip.c, unix_main.c, and
+# other platform code rely on. _GNU_SOURCE re-exposes them without raising
+# the C standard floor. Future work: incrementally reduce the surface that
+# requires _GNU_SOURCE and eventually drop this define. See docs/health.md
+# "Linux dev workflow silently broken for 14 days" for motivation.
+ADD_COMPILE_DEFINITIONS(_GNU_SOURCE)
+
 SET(CNAME "q3now")
 SET(DNAME "q3now-ded")
 
@@ -38,6 +46,16 @@ list(APPEND QCOMMON_SRCS src/libs/lz4/lz4.c src/libs/lz4/lz4frame.c src/libs/lz4
 # and vm.c skips WASM code paths (q_feats.h hardcodes FEAT_WASM=1).
 IF(NOT USE_WASM)
 	ADD_COMPILE_DEFINITIONS(FEAT_WASM=0)
+ENDIF()
+
+# MinGW: picoquic + picotls use bare `#ifdef _WINDOWS` (MSVC-only auto-define)
+# to gate winsock includes. Inject _WINDOWS so they take the Windows code
+# path; vendored sources stay untouched. Definition is innocuous for q3now's
+# own code (q3now uses _WIN32 throughout). Applied globally before any target
+# is created so every TU that transitively includes picoquic.h sees it.
+# See docs/health.md "picoquic _WINDOWS guards do not match MinGW".
+IF(WIN32 AND NOT MSVC)
+	ADD_COMPILE_DEFINITIONS(_WINDOWS)
 ENDIF()
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
 	IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
@@ -161,8 +179,15 @@ IF(USE_WASM)
 	SET(WAMR_BUILD_FAST_INTERP 1)
 	SET(WAMR_BUILD_AOT 1)
 	SET(WAMR_BUILD_JIT 0)
-	# Fast JIT: WAMR's own x86_64 JIT (no LLVM). Skip on other arches — not supported.
-	IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+	# Fast JIT: WAMR's own x86_64 JIT (no LLVM). Skip on:
+	#   - Non-x86_64 (Fast JIT codegen only targets x86_64)
+	#   - Windows (WAMR's runtime_lib.cmake:61-64 force-disables Fast JIT on
+	#     Windows; AND its line 51-54 mutex (FAST_JIT=1 forces FAST_INTERP=0)
+	#     fires BEFORE the Windows disable, so requesting FAST_JIT=1 on Windows
+	#     leaves us with neither Fast JIT nor Fast Interpreter — only the
+	#     classic interpreter (slowest mode). On Windows, request FAST_INTERP=1
+	#     by setting FAST_JIT=0 here so the mutex never fires.)
+	IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64" AND NOT WIN32)
 		SET(WAMR_BUILD_FAST_JIT 1)
 	ELSE()
 		SET(WAMR_BUILD_FAST_JIT 0)
@@ -177,6 +202,10 @@ IF(USE_WASM)
 	SET(WAMR_BUILD_LOAD_CUSTOM_SECTION 1)
 	ADD_SUBDIRECTORY(src/libs/wamr)
 	IF(WIN32)
+    	target_compile_definitions(vmlib PRIVATE
+            _WIN32_WINNT=0x0A00
+            WINVER=0x0A00
+        )
 		# WAMR upstream hardcodes -lm -ldl (line 154) without platform guard.
 		# Windows has no libdl — strip it from vmlib's transitive link interface.
 		get_target_property(_vmlib_libs vmlib INTERFACE_LINK_LIBRARIES)
@@ -222,12 +251,33 @@ SET(PICOTLS_SRCS
 	src/libs/picotls/lib/hpke.c
 )
 
+# Windows: picoquic+picotls call gettimeofday(), which wincompat.h remaps to
+# wintimeofday(). The implementation lives in picotls' Visual-Studio project
+# subdirectory (picotlsvs/picotls/wintimeofday.c) and is not in the default
+# library source list. MSVC builds compile it via the .vcxproj; we add it
+# explicitly here so MinGW + any future MSVC-via-CMake build link cleanly.
+IF(WIN32)
+	list(APPEND PICOTLS_SRCS src/libs/picotls/picotlsvs/picotls/wintimeofday.c)
+ENDIF()
+
 FILE(GLOB MPACK_SRCS    src/libs/mpack/src/mpack/*.c)
 
 # wired/net module — WiredNet transport layer
 FILE(GLOB WN_SRCS code/qcommon/wired/net/*.c)
 
 SET(WIREDNET_ALL_SRCS ${PICOQUIC_SRCS} ${PICOTLS_SRCS} ${MPACK_SRCS} ${WN_SRCS})
+
+# MinGW: MinGW's <inttypes.h> defines imaxabs via __CRT_INLINE which under
+# strict -std=c11 expands to extern inline (strong symbol per TU) instead of
+# the GNU/C89 semantics of "inline-only, no strong definition emitted". Many
+# picoquic+picotls TUs include <inttypes.h> transitively, so the linker sees
+# multiple definitions of imaxabs. -fgnu-inline restores the GNU inline
+# semantics for these TUs only without raising the C standard floor.
+# See docs/health.md "picoquic _WINDOWS guards do not match MinGW".
+IF(WIN32 AND NOT MSVC)
+	set_source_files_properties(${PICOQUIC_SRCS} ${PICOTLS_SRCS}
+		PROPERTIES COMPILE_OPTIONS "-fgnu89-inline")
+ENDIF()
 
 # Include paths
 SET(WIREDNET_INCLUDE_DIRS
@@ -369,7 +419,7 @@ IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64|x86|i.86")
         src/libs/opus/silk/x86/NSQ_del_dec_avx2.c
         src/libs/opus/silk/float/x86/inner_product_FLP_avx2.c
     )
-        set_source_files_properties(${CMAKE_SOURCE_DIR}/${_f} PROPERTIES COMPILE_FLAGS "-mavx2")
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/${_f} PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
     endforeach()
 ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|arm")
     file(GLOB OPUS_CELT_ARM_SRCS src/libs/opus/celt/arm/*.c)
@@ -573,6 +623,17 @@ IF(USE_RENDERER_DLOPEN)
 		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
 		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
 	ENDIF()
+
+	# MinGW: renderer shared libs are created before the global
+	# add_compile_options(-Wno-error=incompatible-pointer-types ...) at the WIN32
+	# platform-detection block (~line 642), so they don't inherit the relaxation.
+	# Apply the same flags explicitly here. Mirrors the legacy char**/const char**
+	# patterns the qcommon-side relaxation accommodates.
+	IF(WIN32 AND NOT MSVC)
+		TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_opengl${RENDEXT}  PRIVATE -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
+		TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
+		TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT}  PRIVATE -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
+	ENDIF()
 ELSE()
 	IF(USE_VULKAN)
 		ADD_LIBRARY(${RENDERER_PREFIX}_vulkan OBJECT ${RENDERER_VK_SRCS} ${RENDERER_COMMON_SRCS})
@@ -616,7 +677,13 @@ IF(UNIX)
 		list(APPEND Q3_SRCS code/macosx/macosx_main.c)
 	ENDIF()
 ELSEIF(WIN32)
-	SET(EXE_TYPE WIN32)
+	# Per-target subsystem: client is GUI (game has a window), dedicated is
+	# console (Linux-style stdio so smoke harnesses, NSSM-services, Docker
+	# logs, terminal redirection etc. all see stdout/stderr). See
+	# docs/health.md "q3now-ded Windows GUI-subsystem blocks smoke output capture"
+	# and docs/launcher.md (analogous launcher CLI dual-mode pattern).
+	SET(EXE_TYPE_CLIENT WIN32) # GUI subsystem (-mwindows / /SUBSYSTEM:WINDOWS)
+	SET(EXE_TYPE_DED    "")    # Console subsystem (default, no flag)
 	IF(MSVC)
 		SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /MANIFEST:NO")
 		ADD_COMPILE_DEFINITIONS(_CRT_SECURE_NO_WARNINGS) # v3.12+
@@ -628,6 +695,11 @@ ELSEIF(WIN32)
 		ADD_COMPILE_OPTIONS(-Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
 	ENDIF()
 
+	# Q3_SRCS holds files that go into BOTH executables. After phase 3 of
+	# the Windows-console modernization (2026-05-05), win_syscon.c is a
+	# single stdio shim shared by client and dedicated — no per-target
+	# split needed for it. Client adds win_console_attach.c on top
+	# (AttachConsole shim for the GUI-subsystem binary).
 	SET(Q3_SRCS
 		code/win32/win_main.c
 		code/win32/win_shared.c
@@ -681,8 +753,27 @@ ENDIF()
 
 # client executable
 
-ADD_EXECUTABLE(${CNAME}${BINEXT} ${EXE_TYPE} ${Q3_SRCS})
+# EXE_TYPE differs per platform: Linux/macOS use a single EXE_TYPE
+# (set above to MACOSX_BUNDLE on macOS, empty on Linux). Windows uses
+# split EXE_TYPE_CLIENT / EXE_TYPE_DED — bridge the two conventions.
+IF(WIN32)
+	SET(_CLIENT_EXE_TYPE ${EXE_TYPE_CLIENT})
+	SET(_DED_EXE_TYPE    ${EXE_TYPE_DED})
+ELSE()
+	SET(_CLIENT_EXE_TYPE ${EXE_TYPE})
+	SET(_DED_EXE_TYPE    ${EXE_TYPE})
+ENDIF()
+
+ADD_EXECUTABLE(${CNAME}${BINEXT} ${_CLIENT_EXE_TYPE} ${Q3_SRCS})
 TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} qcommon botlib client windowSystem opusfile)
+IF(WIN32)
+	# Client adds the AttachConsole shim (phase 2 of Windows-console
+	# modernization, 2026-05-05) — reattaches stdio to parent console when
+	# this GUI-subsystem binary is launched from a terminal. Dedicated
+	# doesn't need it (console subsystem auto-attaches at process start).
+	# The shared win_syscon.c is in Q3_SRCS, linked into both targets.
+	TARGET_SOURCES(${CNAME}${BINEXT} PRIVATE code/win32/win_console_attach.c)
+ENDIF()
 #TARGET_LINK_OPTIONS(${CNAME} PRIVATE -fno-pie) # v3.13+
 
 IF(NOT USE_RENDERER_DLOPEN)
@@ -695,8 +786,11 @@ ENDIF()
 
 # dedicated server executable
 
-ADD_EXECUTABLE(${DNAME}${BINEXT} ${EXE_TYPE} ${Q3_SRCS})
+ADD_EXECUTABLE(${DNAME}${BINEXT} ${_DED_EXE_TYPE} ${Q3_SRCS})
 TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} qcommon_ded botlib)
+# Dedicated uses the same win_syscon.c (in Q3_SRCS) as client; the
+# Sys_ConsoleInput stdin reader path is gated #ifdef DEDICATED so only
+# the dedicated build compiles it.
 
 # WAMR library linking
 IF(USE_WASM)

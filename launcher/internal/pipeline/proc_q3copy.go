@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -50,8 +51,14 @@ func (p *Q3CopyProcessor) Process(entry AssetEntry, readFile func() ([]byte, err
 	pe := p.Entries[outputKey]
 
 	// Strict pack validation: the asset must come from the declared pak.
-	if pe.Pack != "" && !strings.HasSuffix(entry.SourcePak, pe.Pack) {
-		slog.Debug("q3copy: pack mismatch", "path", lower, "want", pe.Pack, "got", entry.SourcePak)
+	// entry.SourcePak comes from filepath.WalkDir using the OS-native separator
+	// (backslash on Windows). pe.Pack is hardcoded with forward slashes
+	// (e.g. "demota/pak0.pk3"). Normalize at compare time only — entry.SourcePak
+	// is consumed elsewhere as an OS-native path for actual file opens
+	// (process.go:cache.get, repackage_sw3z.go), so we don't normalize at the
+	// scan site. Compare-time normalization is local and defensive.
+	if pe.Pack != "" && !strings.HasSuffix(filepath.ToSlash(entry.SourcePak), pe.Pack) {
+		slog.Debug("q3copy: pack mismatch", "path", lower, "want", pe.Pack, "got", filepath.ToSlash(entry.SourcePak))
 		return EntryDecision{Action: Skip}, nil
 	}
 	slog.Debug("q3copy: matched", "path", lower, "output", outputKey, "pack", entry.SourcePak)
@@ -113,7 +120,11 @@ func (p *Q3CopyProcessor) Finalize() ([]OutputEntry, error) {
 	var missingList []string
 	for key, pe := range p.Entries {
 		if !p.matched[key] {
-			missingList = append(missingList, key+" (want "+pe.Pack+")")
+			// Include PackIndex (the source filename inside the archive) so
+			// the user can see what was being looked up — q3copy converts
+			// wav→opus, tga→png etc., so the destination key alone doesn't
+			// reveal the original asset path.
+			missingList = append(missingList, key+" (want "+pe.Pack+":"+pe.PackIndex+")")
 		}
 	}
 	if len(missingList) > 0 {

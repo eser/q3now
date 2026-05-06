@@ -178,7 +178,7 @@ static void SV_Map_f( void ) {
 	// force latched values to get set
 	Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_USERINFO | CVAR_LATCH );
 
-	// save the map name here cause on a map restart we reload the q3config.cfg
+	// save the map name here cause on a map restart we reload the config.cfg
 	// and thus nuke the arguments of the map command
 	char mapname[MAX_QPATH];
 	Q_strncpyz(mapname, map, sizeof(mapname));
@@ -624,12 +624,12 @@ static void SV_RehashBans_f(void)
 				break;
 
 			*newlinepos = '\0';
-			
+
 			if(NET_StringToAdr(curpos + 2, &serverBans[index].ip, NA_UNSPEC))
 			{
 				serverBans[index].isexception = (curpos[0] != '0');
 				serverBans[index].subnet = atoi(maskpos);
-				
+
 				if(serverBans[index].ip.type == NA_IP &&
 				   (serverBans[index].subnet < 1 || serverBans[index].subnet > 32))
 				{
@@ -641,12 +641,12 @@ static void SV_RehashBans_f(void)
 					serverBans[index].subnet = 128;
 				}
 			}
-			
+
 			curpos = newlinepos + 1;
 		}
-			
+
 		serverBansCount = index;
-		
+
 		Z_Free(textbuf);
 	}
 }
@@ -675,7 +675,7 @@ static void SV_WriteBans(void)
 		for(int index = 0; index < serverBansCount; index++)
 		{
 			curban = &serverBans[index];
-			
+
 			Com_sprintf(writebuf, sizeof(writebuf), "%d %s %d\n",
 				    curban->isexception, NET_AdrToString(&curban->ip), curban->subnet);
 			FS_Write(writebuf, strlen(writebuf), writeto);
@@ -719,7 +719,7 @@ Parse a CIDR notation type string and return a netadr_t and suffix by reference
 static qboolean SV_ParseCIDRNotation(netadr_t *dest, int *mask, const char *adrstr)
 {
 	char *suffix;
-	
+
 	suffix = strchr(adrstr, '/');
 	if(suffix)
 	{
@@ -733,7 +733,7 @@ static qboolean SV_ParseCIDRNotation(netadr_t *dest, int *mask, const char *adrs
 	if(suffix)
 	{
 		*mask = atoi(suffix);
-		
+
 		if(dest->type == NA_IP)
 		{
 			if(*mask < 1 || *mask > 32)
@@ -749,7 +749,7 @@ static qboolean SV_ParseCIDRNotation(netadr_t *dest, int *mask, const char *adrs
 		*mask = 32;
 	else
 		*mask = 128;
-	
+
 	return qfalse;
 }
 
@@ -789,11 +789,11 @@ static void SV_AddBanToList(qboolean isexception)
 	}
 
 	const char *banstring = Cmd_Argv(1);
-	
+
 	if(strchr(banstring, '.') || strchr(banstring, ':'))
 	{
 		// This is an ip address, not a client num.
-		
+
 		if(SV_ParseCIDRNotation(&ip, &mask, banstring))
 		{
 			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: Invalid address %s\n", banstring);
@@ -803,9 +803,9 @@ static void SV_AddBanToList(qboolean isexception)
 	else
 	{
 		client_t *cl;
-		
+
 		// client num.
-		
+
 		cl = SV_GetPlayerByNum();
 
 		if(!cl)
@@ -813,13 +813,13 @@ static void SV_AddBanToList(qboolean isexception)
 			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: Playernum %s does not exist.\n", Cmd_Argv(1));
 			return;
 		}
-		
+
 		ip = cl->netchan.remoteAddress;
-		
+
 		if(argc == 3)
 		{
 			mask = atoi(Cmd_Argv(2));
-			
+
 			if(ip.type == NA_IP)
 			{
 				if(mask < 1 || mask > 32)
@@ -877,7 +877,7 @@ static void SV_AddBanToList(qboolean isexception)
 	while(index < serverBansCount)
 	{
 		curban = &serverBans[index];
-		
+
 		if(curban->subnet > mask && (!curban->isexception || isexception) && NET_CompareBaseAdrMask(&curban->ip, &ip, mask))
 			SV_DelBanEntryFromList(index);
 		else
@@ -887,9 +887,9 @@ static void SV_AddBanToList(qboolean isexception)
 	serverBans[serverBansCount].ip = ip;
 	serverBans[serverBansCount].subnet = mask;
 	serverBans[serverBansCount].isexception = isexception;
-	
+
 	serverBansCount++;
-	
+
 	SV_WriteBans();
 
 	Com_Log( SEV_INFO, LOG_CAT_SERVER, "Added %s: %s/%d\n", isexception ? "ban exception" : "ban",
@@ -968,7 +968,7 @@ static void SV_DelBanFromList(qboolean isexception)
 			if(serverBans[index].isexception == isexception)
 			{
 				count++;
-			
+
 				if(count == todel)
 				{
 					Com_Log( SEV_INFO, LOG_CAT_SERVER, "Deleting %s %s/%d\n",
@@ -982,7 +982,7 @@ static void SV_DelBanFromList(qboolean isexception)
 			}
 		}
 	}
-	
+
 	SV_WriteBans();
 }
 
@@ -1048,10 +1048,10 @@ static void SV_FlushBans_f(void)
 	}
 
 	serverBansCount = 0;
-	
+
 	// empty the ban file.
 	SV_WriteBans();
-	
+
 	Com_Log( SEV_INFO, LOG_CAT_SERVER, "All bans and exceptions have been deleted.\n");
 }
 
@@ -1192,7 +1192,7 @@ static void SV_Status_f( void ) {
 			Com_Log( SEV_INFO, LOG_CAT_SERVER, " ZMB " );
 		else
 			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%4i ", cl->ping < 999 ? cl->ping : 999 );
-	
+
 		// variable-length name field
 		s = np[ i ];
 		Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s", s );
@@ -2038,7 +2038,7 @@ void SV_AddOperatorCommands( void ) {
 	Cmd_AddCommand ("map", SV_Map_f);
 	Cmd_SetCommandCompletionFunc( "map", SV_CompleteMapName );
 	Cmd_AddCommand ("killserver", SV_KillServer_f);
-#ifdef USE_BANS	
+#ifdef USE_BANS
 	Cmd_AddCommand("rehashbans", SV_RehashBans_f);
 	Cmd_AddCommand("listbans", SV_ListBans_f);
 	Cmd_AddCommand("banaddr", SV_BanAddr_f);

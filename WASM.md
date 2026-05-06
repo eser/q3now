@@ -2,8 +2,9 @@
 
 q3now supports WebAssembly (WASM) as a game module execution backend via
 [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (WebAssembly
-Micro Runtime). Game modules (qagame, cgame, ui) can run as `.wasm` files
-alongside or instead of traditional QVM bytecode.
+Micro Runtime). Game modules (qagame, cgame) can run as `.wasm` files
+alongside or instead of traditional QVM bytecode. (Legacy q3_ui has been
+removed in favour of Wired UI; only qagame and cgame are WASM-built today.)
 
 ## Architecture
 
@@ -31,17 +32,47 @@ If `.wasm` is not found, it silently falls back to `.qvm`.
 
 ### Prerequisites
 
-- **wasi-sdk** (v32+) for compiling game modules to WASM:
-  ```bash
-  # macOS arm64
-  cd /tmp
-  curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-32/wasi-sdk-32.0-arm64-macos.tar.gz
-  sudo tar xf wasi-sdk-32.0-arm64-macos.tar.gz -C /opt/
-  sudo ln -sf /opt/wasi-sdk-32.0-arm64-macos /opt/wasi-sdk
-  ```
-  For other platforms, download from https://github.com/WebAssembly/wasi-sdk/releases
+- **wasi-sdk** for compiling game modules to WASM. **Pinned version: 33.0**
+  (released 2026-04-30, clang 22.1.0, target `wasm32-unknown-wasip1`). When
+  bumping, update this section and `docs/health.md` "WASM module compilation"
+  entry together.
 
-- **wamrc** (optional) for AOT compilation. Build from https://github.com/bytecodealliance/wasm-micro-runtime
+  **macOS (arm64):**
+  ```bash
+  cd /tmp
+  curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-arm64-macos.tar.gz
+  sudo tar xf wasi-sdk-33.0-arm64-macos.tar.gz -C /opt/
+  sudo ln -sf /opt/wasi-sdk-33.0-arm64-macos /opt/wasi-sdk
+  ```
+
+  **Linux (x86_64), e.g., Ubuntu/Debian:**
+  ```bash
+  cd /tmp
+  curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz
+  sudo tar xf wasi-sdk-33.0-x86_64-linux.tar.gz -C /opt/
+  sudo ln -sf /opt/wasi-sdk-33.0-x86_64-linux /opt/wasi-sdk
+  ```
+  CMake auto-detects `/opt/wasi-sdk` on Linux/macOS; no env var needed.
+
+  **Windows (MSYS2 MINGW64):** `pacman` does not package wasi-sdk (only
+  `wasi-libc`, which is just headers). Manual install required:
+  ```bash
+  cd /c/msys64/opt
+  curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-windows.tar.gz
+  tar xzf wasi-sdk-33.0-x86_64-windows.tar.gz
+  ln -sf wasi-sdk-33.0-x86_64-windows wasi-sdk   # symlink for consistency
+  export WASI_SDK_PATH=C:/msys64/opt/wasi-sdk    # required: Windows-native
+                                                 # cmake.exe doesn't resolve
+                                                 # POSIX `/opt/wasi-sdk`
+  ```
+  The `Makefile` forwards `WASI_SDK_PATH` to cmake automatically when set.
+
+  Other distros: download the matching tarball from
+  https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-33
+
+- **wamrc** (optional) for AOT compilation. Build from
+  https://github.com/bytecodealliance/wasm-micro-runtime — not bundled. When
+  not on PATH, q3now builds interpreter-mode `.wasm` only (no `.aot`).
 
 ### Build commands
 
@@ -65,7 +96,8 @@ make test-wasm
 When `USE_WASM=ON`, cmake:
 1. Builds WAMR as a static library (`vmlib`)
 2. Links it into the engine and dedicated server
-3. Compiles all three game modules to `.wasm` via wasi-sdk
+3. Compiles `qagame` and `cgame` to `.wasm` via wasi-sdk (output:
+   `<build>/<config>/baseq3/vm/{qagame,cgame}.wasm`)
 
 ### Feature flags
 

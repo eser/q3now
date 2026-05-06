@@ -38,11 +38,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 /* C99 defines __func__ */
-#if __STDC_VERSION__ < 199901L 
-#if __GNUC__ >= 2 || _MSC_VER >= 1300 
-#define __func__ __FUNCTION__ 
-#else 
-#define __func__ "(unknown)" 
+#if __STDC_VERSION__ < 199901L
+#if __GNUC__ >= 2 || _MSC_VER >= 1300
+#define __func__ __FUNCTION__
+#else
+#define __func__ "(unknown)"
 #endif
 #endif
 
@@ -321,7 +321,7 @@ enum svc_ops_e {
 //
 enum clc_ops_e {
 	clc_bad,
-	clc_nop, 		
+	clc_nop,
 	clc_move,				// [[usercmd_t]
 	clc_moveNoDelta,		// [[usercmd_t]
 	clc_clientCommand,		// [string] message
@@ -720,11 +720,11 @@ typedef enum {
 #define	MAX_FOUND_FILES		0x5000
 
 #ifdef DEDICATED
-#define Q3CONFIG_CFG "q3config_server.cfg"
-#define CONSOLE_HISTORY_FILE "q3history_server"
+#define Q3CONFIG_CFG "config_dedicated.cfg"
+#define CONSOLE_HISTORY_FILE "history_dedicated"
 #else
-#define Q3CONFIG_CFG "q3config.cfg"
-#define CONSOLE_HISTORY_FILE "q3history"
+#define Q3CONFIG_CFG "config.cfg"
+#define CONSOLE_HISTORY_FILE "history"
 #endif
 
 typedef	time_t fileTime_t;
@@ -867,9 +867,9 @@ qboolean FS_ExcludeReference( void );
 const char *FS_ReferencedPakNames( void );
 const char *FS_ReferencedPakChecksums( void );
 const char *FS_ReferencedPakPureChecksums( int maxlen );
-// Returns a space separated string containing the checksums of all loaded 
-// AND referenced pk3 files. Servers with sv_pure set will get this string 
-// back from clients for pure validation 
+// Returns a space separated string containing the checksums of all loaded
+// AND referenced pk3 files. Servers with sv_pure set will get this string
+// back from clients for pure validation
 
 void FS_ClearPakReferences( int flags );
 // clears referenced booleans on loaded pk3s
@@ -902,9 +902,29 @@ void FS_VM_CloseFile( fileHandle_t f, handleOwner_t owner );
 void FS_VM_CloseFiles( handleOwner_t owner );
 
 const char *FS_GetCurrentGameDir( void );
-const char *FS_GetBaseGameDir( void );
 
 const char *FS_GetHomePath( void );
+
+/* Install-tree accessors. The platform branch lives inside each body so
+ * call sites stay platform-agnostic. Return values are static buffers per
+ * accessor — caller must NOT cache the pointer across calls; copy if needed.
+ *
+ *   FS_GetInstallPath()          fs_installpath verbatim. The install root.
+ *                                  macOS: <something>/q3now-preview.app
+ *                                  Linux/Windows: directory containing the
+ *                                  engine binary.
+ *
+ *   FS_GetInstallBinaryPath()    Where engine + plug-in dylibs/DLLs live.
+ *                                  macOS: <basepath>/Contents/MacOS
+ *                                  Linux/Windows: <basepath>
+ *
+ *   FS_GetInstallResourcePath()  Where data files (paks) live.
+ *                                  macOS: <basepath>/Contents/Resources
+ *                                  Linux/Windows: <basepath>
+ */
+const char *FS_GetInstallPath( void );
+const char *FS_GetInstallBinaryPath( void );
+const char *FS_GetInstallResourcePath( void );
 
 qboolean FS_StripExt( char *filename, const char *ext );
 qboolean FS_AllowedExtension( const char *fileName, qboolean allowPk3s, const char **ext );
@@ -913,7 +933,7 @@ void *FS_LoadLibrary( const char *name );
 
 typedef qboolean ( *fnamecallback_f )( const char *filename, int length );
 
-void FS_SetFilenameCallback( fnamecallback_f func ); 
+void FS_SetFilenameCallback( fnamecallback_f func );
 
 char *FS_CopyString( const char *in );
 
@@ -1468,10 +1488,6 @@ const char *Sys_DefaultHomePath( void );
 
 int Sys_GetCapsLockMode( void );
 int Sys_GetNumLockMode( void );
-
-#ifdef __APPLE__
-char    *Sys_DefaultAppPath( void );
-#endif
 
 char **Sys_ListFiles( const char *directory, const char *extension, const char *filter, int *numfiles, int subdirs );
 void Sys_FreeFileList( char **list );

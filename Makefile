@@ -4,39 +4,38 @@
 # All cmake details live in cmake/ — this file is a thin workflow layer.
 #
 # GENERATION TARGETS
-#   make create-launcher    build Go/Wails launcher binary
+#   make create-launcher     build Go/Wails launcher binary
 #   make create-packs        package modfiles/ + VM modules → mod pack
-#   make build-fonts          build MSDF font atlases from TTF sources
+#   make build-fonts         build MSDF font atlases from TTF sources
 #
 # COPY TARGETS (assemble .app at Q3DIR)
-#   make copy-libs          copy renderer + dependency dylibs into .app
-#   make copy-build         copy Release engine + game dylibs into .app
-#   make copy-build-debug   copy Debug engine + game dylibs into .app
+#   make copy-libs           copy renderer + dependency dylibs into .app
+#   make copy-build          copy Release engine + game dylibs into .app
+#   make copy-build DEV=1    same with Debug build
 #   make copy-packs          copy mod pack into .app data directory
 #
 # BUNDLING TARGETS
-#   make bundle-codesign    codesign the .app bundle (macOS)
-#   make bundle-dmg         create versioned DMG (macOS)
-#   make bundle-tar         create versioned tar.gz (Linux)
+#   make bundle-codesign     codesign the .app bundle (macOS)
+#   make bundle-dmg          create versioned DMG (macOS)
+#   make bundle-tar          create versioned tar.gz (Linux)
 #
 # FLOW TARGETS
-#   make run-launcher       build + assemble + codesign + open launcher
+#   make run-launcher        		  build + assemble + codesign + open launcher
 #   make run-game                     run engine (main menu)
-#   make run-game DEV=1               developer mode (debug build)
+#   make run-game DEV=1               debug build
 #   make run-game DEV=1 MAP=q3dm17    map with debug
 #   make run-game VM=1 MAP=q3dm17     VM modules + map
 #   make run-ded                      run dedicated server (no client)
-#   make run-ded DEV=1                dedicated + debug build + developer mode
+#   make run-ded DEV=1                dedicated + debug build
 #   make run-ded DEV=1 MAP=q3dm17     dedicated + debug + load map
-#   make release            build + assemble + codesign + package
+#   make release             		  build + assemble + codesign + package
 #
 # VARIABLES (override on command line or env)
 #   Q3DIR              install destination      (default: /Applications/q3now on macOS)
 #   JOBS               parallel job count       (default: CPU count)
 #   MAP                map to load              (default: none = main menu)
-#   DEV                developer mode           (default: 0; 1 = debug build + developer 1)
+#   DEV                debug build              (default: 0; 1 = debug build)
 #   VM                 VM game modules           (default: 0; 1=VM + sv_pure 1)
-#   USE_SW3Z           archive format           (0=legacy pk3, 1=sw3z; default: 0)
 #   USE_WASM           VM backend via WAMR       (0=off, 1=on; default: 1)
 #   CHANNEL            release channel           (default: preview; "public" omits suffix)
 #   CODESIGN_IDENTITY  signing identity         (default: - = ad-hoc)
@@ -60,10 +59,21 @@ MAP        ?=
 DEV        ?= 0
 VM         ?= 0
 
-# Dual build directories — avoid cmake reconfigure thrash between Release/Debug
-BUILD_DIR_RELEASE := build/release
-BUILD_DIR_DEBUG   := build/debug
-BUILD_DIR         := $(BUILD_DIR_RELEASE)
+# Dual build directories — avoid cmake reconfigure thrash between Release/Debug.
+# BUILD_DIR / BUILD_CFG are DEV-driven aliases. Targets that should
+# follow DEV=1 use these; packaging / bundling targets stay on the explicit
+# *_RELEASE roots so distributions are never accidentally Debug.
+ifeq ($(DEV),1)
+  BUILD_DIR    := build/debug
+  BUILD_CFG    := Debug
+
+  ifeq ($(MAKECMDGOALS),release)
+  	$(error 'make release' requires DEV=0 (Release build))
+  endif
+else
+  BUILD_DIR    := build/release
+  BUILD_CFG    := Release
+endif
 
 # CPU count and architecture detection
 UNAME_S := $(shell uname -s)
@@ -102,30 +112,30 @@ endif
 # GAME_ARCH mirrors ARCH_STRING from q_platform.h (vm.c appends it to dylib filenames)
 GAME_ARCH := $(patsubst _%,%,$(RENDEXT))
 ifeq ($(UNAME_S),Darwin)
-  JOBS        ?= $(shell sysctl -n hw.ncpu)
-  BUILT_APP_RELEASE := $(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)$(BINEXT).app
-  BUILT_APP_DEBUG   := $(BUILD_DIR_DEBUG)/$(CMAKE_APP_NAME)$(BINEXT).app
-  GAME_BIN    := $(BUILT_APP_RELEASE)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)
-  BUILT_DED_RELEASE := $(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(CMAKE_APP_NAME)-ded$(BINEXT)
-  BUILT_DED_DEBUG   := $(BUILD_DIR_DEBUG)/$(CMAKE_APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(CMAKE_APP_NAME)-ded$(BINEXT)
+  JOBS      ?= $(shell sysctl -n hw.ncpu)
+  BUILT_APP := $(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT).app
+  GAME_BIN  := $(BUILT_APP)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)
+  BUILT_DED := $(BUILD_DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(CMAKE_APP_NAME)-ded$(BINEXT)
   Q3DIR       ?= /Applications/$(APP_NAME).app
 else
   JOBS        ?= $(shell nproc 2>/dev/null || echo 4)
-  GAME_BIN    := $(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)
-  Q3DIR       ?= $(HOME)/$(APP_NAME)
+  GAME_BIN    := $(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)
+  ifdef IS_WINDOWS
+  	Q3DIR     ?= $(LOCALAPPDATA)/Programs/$(APP_NAME)
+  else
+  	Q3DIR     ?= $(HOME)/.local/share/$(APP_NAME)
+  endif
 endif
 
-# cmake puts game modules at <build-dir>/Release/baseq3/ (or Debug/baseq3/)
-MODULE_DIR_RELEASE := $(BUILD_DIR_RELEASE)/Release/baseq3
-MODULE_DIR_DEBUG   := $(BUILD_DIR_DEBUG)/Debug/baseq3
-MODULE_DIR         := $(MODULE_DIR_RELEASE)
+# cmake puts game modules at <build-dir>/<build-cfg>/baseq3/
+MODULE_DIR := $(BUILD_DIR)/$(BUILD_CFG)/baseq3
 
 ifeq ($(UNAME_S),Darwin)
-  # macOS bundle conventions: code in Contents/MacOS/, data in Contents/Resources/
-  Q3BASEDIR  := $(Q3DIR)/Contents/MacOS/baseq3
+  # macOS bundle conventions: code in Contents/MacOS/, data in Contents/Resources/.
+  Q3BINDIR   := $(Q3DIR)/Contents/MacOS
   Q3DATADIR  := $(Q3DIR)/Contents/Resources/baseq3
 else
-  Q3BASEDIR  := $(Q3DIR)/baseq3
+  Q3BINDIR   := $(Q3DIR)
   Q3DATADIR  := $(Q3DIR)/baseq3
 endif
 
@@ -160,10 +170,8 @@ endif
 
 CMAKE_EXTRA_FLAGS ?=
 CMAKE_CHANNEL_FLAG := -DCHANNEL_SUFFIX="$(CHANNEL_SUFFIX)"
-CMAKE_CONFIGURE_RELEASE := cmake -S . -B $(BUILD_DIR_RELEASE) $(GENERATOR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
-CMAKE_CONFIGURE_DEBUG   := cmake -S . -B $(BUILD_DIR_DEBUG) $(GENERATOR) -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
-CMAKE_BUILD_RELEASE     := cmake --build $(BUILD_DIR_RELEASE) --parallel $(JOBS)
-CMAKE_BUILD_DEBUG       := cmake --build $(BUILD_DIR_DEBUG) --parallel $(JOBS)
+CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_BUILD        := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # Code signing identity (default: ad-hoc).
 CODESIGN_IDENTITY ?= -
@@ -171,27 +179,39 @@ CODESIGN_IDENTITY ?= -
 # DMG packaging (macOS only)
 VERSION     := $(shell date +%Y%m%d)-$(shell git describe --always --dirty)
 DMG_NAME    := $(APP_NAME)-$(VERSION)-$(UNAME_M)
-DMG_STAGING := $(BUILD_DIR_RELEASE)/dmg-staging
-DMG_OUT     := $(BUILD_DIR_RELEASE)/$(DMG_NAME).dmg
+DMG_STAGING := $(BUILD_DIR)/dmg-staging
+DMG_OUT     := $(BUILD_DIR)/$(DMG_NAME).dmg
 
 # tar.gz packaging (Linux)
 TAR_NAME    := $(APP_NAME)-$(VERSION)-linux-$(UNAME_M)
-TAR_STAGING := $(BUILD_DIR_RELEASE)/tar-staging
-TAR_OUT     := $(BUILD_DIR_RELEASE)/$(TAR_NAME).tar.gz
+TAR_STAGING := $(BUILD_DIR)/tar-staging
+TAR_OUT     := $(BUILD_DIR)/$(TAR_NAME).tar.gz
 
 # zip packaging (Windows)
 ZIP_NAME    := $(APP_NAME)-$(VERSION)-windows-x86_64
-ZIP_STAGING := $(BUILD_DIR_RELEASE)/zip-staging
-ZIP_OUT     := $(BUILD_DIR_RELEASE)/$(ZIP_NAME).zip
+ZIP_STAGING := $(BUILD_DIR)/zip-staging
+ZIP_OUT     := $(BUILD_DIR)/$(ZIP_NAME).zip
 
 # Launcher (Go/Wails)
 LAUNCHER_DIR := launcher
 ifeq ($(UNAME_S),Darwin)
-  LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS/q3now-launcher
+  LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS/q3now-launcher
+  # Self-contained launcher build dir layout (post create-launcher).
+  # paths.GameBinaryPath() = filepath.Dir(os.Executable())/<engine name>;
+  # the launcher binary lives in Contents/MacOS/ so the engine binary
+  # colocates there. Game modules + paks go under Contents/Resources/baseq3
+  # because post-engine-Phase-1 the basegame scan reaches only the resource
+  # path on macOS (mirrors the Q3DATADIR collapse for the install layout).
+  LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS
+  LAUNCHER_DSTDATA := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/Resources/baseq3
 else ifdef IS_WINDOWS
-  LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now-launcher.exe
+  LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/q3now-launcher.exe
+  LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin
+  LAUNCHER_DSTDATA := $(LAUNCHER_DIR)/build/bin/baseq3
 else
-  LAUNCHER_BIN := $(LAUNCHER_DIR)/build/bin/q3now-launcher
+  LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/q3now-launcher
+  LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin
+  LAUNCHER_DSTDATA := $(LAUNCHER_DIR)/build/bin/baseq3
 endif
 WAILS_TAGS   ?=
 
@@ -199,29 +219,22 @@ WAILS_TAGS   ?=
 SW3Z_DIR := tools/sw3z-archiver
 SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
 
-# Archive format toggle: 1 = sw3z, 0 = legacy pk3
-USE_SW3Z ?= 1
-
 # VM backend toggle (moved to top, before ifeq)
 # USE_WASM is defined near other cmake flags above
 
 # Pak output (always from Release build — VM modules are always Release)
-PAK_STAGING := $(BUILD_DIR_RELEASE)/pak-staging
-ifeq ($(USE_SW3Z),1)
-  PAK_EXT := sw3z
-else
-  PAK_EXT := pk3
-endif
-PAK_OUT := $(BUILD_DIR_RELEASE)/baseq3/pax21.$(PAK_EXT)
+PAK_STAGING := $(BUILD_DIR)/pak-staging
+PAK_OUT := $(BUILD_DIR)/baseq3/pax21.sw3z
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
-.PHONY: all configure build build-debug clean rebuild \
+.PHONY: all configure build clean clean-launcher clean-all rebuild \
         create-launcher create-packs build-fonts \
-        copy-libs copy-build copy-build-debug copy-packs copy-all copy-all-debug \
+        _wails-build \
+        copy-libs copy-build copy-packs copy-all \
         bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
         run-launcher run-game release \
-        check smoke test-vm test-quic-game bench diff-api lint help
+        check smoke test-vm test-quic-game test-fs-dedup bench diff-api lint help
 
 all: build
 
@@ -229,22 +242,23 @@ all: build
 # FOUNDATION — configure, build, clean
 # ══════════════════════════════════════════════════════════════════════════════
 
-$(BUILD_DIR_RELEASE)/CMakeCache.txt: CMakeLists.txt
-	$(CMAKE_CONFIGURE_RELEASE)
+$(BUILD_DIR)/CMakeCache.txt: CMakeLists.txt
+	$(CMAKE_CONFIGURE)
 
-$(BUILD_DIR_DEBUG)/CMakeCache.txt: CMakeLists.txt
-	$(CMAKE_CONFIGURE_DEBUG)
+configure: $(BUILD_DIR)/CMakeCache.txt
 
-configure: $(BUILD_DIR_RELEASE)/CMakeCache.txt
-
-build: $(BUILD_DIR_RELEASE)/CMakeCache.txt
-	$(CMAKE_BUILD_RELEASE)
-
-build-debug: $(BUILD_DIR_DEBUG)/CMakeCache.txt
-	$(CMAKE_BUILD_DEBUG)
+build: $(BUILD_DIR)/CMakeCache.txt
+	$(CMAKE_BUILD)
 
 clean:
-	rm -rf $(BUILD_DIR_RELEASE) $(BUILD_DIR_DEBUG)
+	rm -rf $(BUILD_DIR)
+
+# clean-launcher: nuke wails build output. Preserves frontend/node_modules
+# and Go module cache (rebuilding those takes minutes).
+clean-launcher:
+	rm -rf $(LAUNCHER_DIR)/build
+
+clean-all: clean clean-launcher
 
 rebuild: clean build
 
@@ -253,41 +267,58 @@ rebuild: clean build
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── create-launcher ──────────────────────────────────────────────────────────
-# Builds the Go/Wails launcher binary. Requires: go, node, wails CLI.
+# Builds the Go/Wails launcher AND populates its build directory with the
+# engine, ded server, renderer/dependency libs, game modules, and mod pack.
+#
+# After this target the launcher build dir is a self-contained mini-install:
+# running launcher/build/bin/q3now-launcher{,.exe,.app/Contents/MacOS/...}
+# works without copy-build / Q3DIR. The structural assumption in
+# launcher/internal/config/paths.go (engine binary lives next to launcher
+# binary) holds on every platform.
+#
+# Requires: go, node, wails CLI for the launcher; cmake for the engine.
 
-create-launcher:
-	@echo "==> Building launcher..."
+create-launcher: build create-packs _wails-build
+	$(call install_engine,$(LAUNCHER_DSTBIN),$(LAUNCHER_DSTDATA))
+	$(call install_libs,$(LAUNCHER_DSTBIN))
+	$(call install_pack,$(LAUNCHER_DSTDATA))
+	@echo "==> Launcher ready (self-contained): $(LAUNCHER_BIN)"
+
+# _wails-build: internal step. Runs wails build and asserts the output exists
+# before downstream _install-* helpers populate the build dir. Split from
+# create-launcher's recipe so the helpers can run as ordered prerequisites.
+_wails-build:
+	@echo "==> Building launcher (wails)..."
 	cd $(LAUNCHER_DIR) && PATH="$$HOME/go/bin:$$PATH" wails build \
 	  $(WAILS_TAGS) -ldflags "-X main.version=$(VERSION) -X github.com/eser/q3now/launcher/internal/config.channelSuffix=$(CHANNEL_SUFFIX)"
-	@echo "==> Launcher ready: $(LAUNCHER_BIN)"
+	@test -f "$(LAUNCHER_BIN)" || { \
+	  echo "ERROR: wails build did not produce $(LAUNCHER_BIN)"; \
+	  exit 1; }
 
 # ── create-packs ──────────────────────────────────────────────────────────────
-# Packages modfiles/ + VM modules into the mod pack (pax21.sw3z or legacy .pk3).
+# Packages modfiles/ + VM modules into the mod pack (pax21.sw3z).
 # "pax21" sorts after pak0–pak8, ensuring highest override priority.
 # VM modules here override the stock 1999 bytecode in the base pack.
 
 $(SW3Z_BIN):
 	cd $(SW3Z_DIR) && go build -o $(CURDIR)/$(SW3Z_BIN) ./cmd/sw3z
 
-ifeq ($(USE_SW3Z),1)
 create-packs: build $(SW3Z_BIN)
-else
-create-packs: build
-endif
 	@echo "==> Staging pak contents..."
 	rm -rf $(PAK_STAGING)
-	mkdir -p $(PAK_STAGING) $(BUILD_DIR_RELEASE)/baseq3
+	mkdir -p $(PAK_STAGING) $(BUILD_DIR)/baseq3
 	cp -R modfiles/. $(PAK_STAGING)/
 	@echo "==> Copying VM modules into pak..."
-	cp -R $(MODULE_DIR_RELEASE)/vm $(PAK_STAGING)/
+	# WASM VM modules (cgame.wasm / qagame.wasm) are config-independent
+	# bytecode and the cmake config only builds them under the Release
+	# tree — so DEV=1 still pulls them from build/release. Engine
+	# binaries and native game DLLs DO follow DEV via $(MODULE_DIR);
+	# this one line is the deliberate exception.
+	cp -R $(MODULE_DIR)/vm $(PAK_STAGING)/
 	@echo "==> Stamping version..."
 	echo "$(APP_NAME) $$(git describe --always --dirty) ($$(date +%Y-%m-%d))" > $(PAK_STAGING)/description.txt
 	@echo "==> Creating $(PAK_OUT)..."
-ifeq ($(USE_SW3Z),1)
 	$(SW3Z_BIN) a -x "**/.DS_Store" -x ".DS_Store" "$(PAK_OUT)" $(PAK_STAGING)
-else
-	cd $(PAK_STAGING) && zip -r9 "$(CURDIR)/$(PAK_OUT)" . -x "**/.DS_Store" -x ".DS_Store"
-endif
 	@echo "==> $(PAK_OUT) ready"
 
 # ── build-fonts ───────────────────────────────────────────────────────────────
@@ -300,7 +331,7 @@ FONT_SRC           = assets/fonts
 FONT_OUT           = modfiles/fonts
 
 $(MSDF_ATLAS_GEN):
-	cd $(MSDF_ATLAS_GEN_DIR) && cmake -B build -DCMAKE_BUILD_TYPE=Release -DMSDF_ATLAS_BUILD_STANDALONE=ON -DMSDF_ATLAS_USE_VCPKG=OFF -DMSDF_ATLAS_USE_SKIA=OFF && cmake --build build --config Release
+	cd $(MSDF_ATLAS_GEN_DIR) && cmake -B build -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DMSDF_ATLAS_BUILD_STANDALONE=ON -DMSDF_ATLAS_USE_VCPKG=OFF -DMSDF_ATLAS_USE_SKIA=OFF && cmake --build build --config $(BUILD_CFG)
 
 FONT_WEIGHT_TRANSFORM = python3 tools/font-weight-transform.py
 FONT_BUILD_TMP        = $(FONT_SRC)/.build
@@ -342,79 +373,99 @@ else
   _GAME_MODULE_EXT = $(GAME_ARCH).so
 endif
 
-# _do-copy-build: internal target pattern for copy-build / copy-build-debug
-# Uses target-specific variables set by the caller
-_do-copy-build:
-	@echo "==> Copying $(_CFG) build into .app..."
+# ── Install helpers (parameterized via $(call ...) macros) ───────────────────
+# These four helpers are invoked from create-launcher / copy-build / copy-libs
+# / copy-packs.  Same engine artifacts can land in Q3DIR (production install)
+# or launcher/build/bin/ (self-contained launcher dev dir) without
+# duplicating the copy logic.
+#
+# Why macros, not phony targets: phony targets dedup per Make invocation, so
+# `make run-launcher` (which depends on both create-launcher and copy-build)
+# would build _install-engine ONCE, with whichever caller's target-specific
+# vars were resolved first — silently skipping the other caller's install.
+# Macros expand inline at the call site with explicit args, no dedup.
+#
+# Across all four callers, _BDIR/_CFG/_APP/_DED were invariant globals
+# (BUILD_DIR/BUILD_CFG/BUILT_APP/BUILT_DED); only _DSTBIN/_DSTDATA varied.
+# The macros take only the varying values as arguments and reference the
+# rest of the globals directly.
+
+# install_engine($(1)=dstbin, $(2)=dstdata) — copies engine + ded binaries
+# and game modules into the destination.  On macOS the engine lives inside
+# cmake's per-target .app bundle; elsewhere it's a flat file under BUILD_DIR.
 ifeq ($(UNAME_S),Darwin)
-	rsync -a --checksum --delete "$(_APP)/" "$(Q3DIR)/"
+define install_engine
+	@echo "==> Installing engine + game modules into $(1) ..."
+	@mkdir -p "$(1)" "$(2)"
+	cp "$(BUILT_APP)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" "$(1)/"
+	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(1)/$(CMAKE_APP_NAME)-ded" || true
+	cp "$(BUILD_DIR)/$(BUILD_CFG)/baseq3/cgame$(_GAME_MODULE_EXT)"  "$(2)/"
+	cp "$(BUILD_DIR)/$(BUILD_CFG)/baseq3/qagame$(_GAME_MODULE_EXT)" "$(2)/"
+endef
+else
+define install_engine
+	@echo "==> Installing engine + game modules into $(1) ..."
+	@mkdir -p "$(1)" "$(2)"
+	cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" "$(1)/"
+	@test -f "$(BUILD_DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" && \
+	  cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" "$(1)/" || true
+	cp "$(BUILD_DIR)/$(BUILD_CFG)/baseq3/cgame$(_GAME_MODULE_EXT)"  "$(2)/"
+	cp "$(BUILD_DIR)/$(BUILD_CFG)/baseq3/qagame$(_GAME_MODULE_EXT)" "$(2)/"
+endef
+endif
+
+# install_app_skeleton — installs the launcher binary into Q3DIR.  macOS
+# rsyncs the engine .app skeleton (Contents/Info.plist, Resources/, etc.)
+# and overlays the launcher binary, rewriting CFBundleExecutable so
+# double-click runs the launcher.  Windows copies the launcher .exe into
+# Q3DIR.  Linux is a no-op — Q3DIR-installed launcher isn't part of the
+# Linux flow; users run launcher/build/bin/q3now-launcher directly.
+ifeq ($(UNAME_S),Darwin)
+define install_app_skeleton
+	@echo "==> Installing .app skeleton to $(Q3DIR) ..."
+	rsync -a --checksum --delete "$(BUILT_APP)/" "$(Q3DIR)/"
 	@test -f "$(LAUNCHER_BIN)" && \
 	  cp "$(LAUNCHER_BIN)" "$(Q3DIR)/Contents/MacOS/q3now-launcher" || \
 	  echo "  NOTE: launcher not built (run make create-launcher)"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable q3now-launcher" \
 	  "$(Q3DIR)/Contents/Info.plist"
-	@test -f "$(_DED)" && cp "$(_DED)" \
-	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)-ded" || true
-else
-	mkdir -p "$(Q3DIR)"
-	cp "$(_BDIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" "$(Q3DIR)/"
-	@test -f "$(_BDIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" && \
-	  cp "$(_BDIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)" "$(Q3DIR)/" || true
-ifdef IS_WINDOWS
+endef
+else ifdef IS_WINDOWS
+define install_app_skeleton
+	@mkdir -p "$(Q3DIR)"
 	@test -f "$(LAUNCHER_BIN)" && \
 	  cp "$(LAUNCHER_BIN)" "$(Q3DIR)/q3now-launcher.exe" || \
 	  echo "  NOTE: launcher not built (run make create-launcher)"
+endef
+else
+define install_app_skeleton
+	@true
+endef
 endif
-endif
-	mkdir -p "$(Q3BASEDIR)"
-	cp "$(_BDIR)/$(_CFG)/baseq3/cgame$(_GAME_MODULE_EXT)"  "$(Q3BASEDIR)/"
-	cp "$(_BDIR)/$(_CFG)/baseq3/qagame$(_GAME_MODULE_EXT)" "$(Q3BASEDIR)/"
 
-# ── copy-build ───────────────────────────────────────────────────────────────
-# Build Release engine, copy engine binary + game dylibs into .app at Q3DIR.
-# Also copies launcher binary if previously built (see create-launcher).
-
-copy-build: _BDIR := $(BUILD_DIR_RELEASE)
-copy-build: _CFG  := Release
-copy-build: _APP  := $(BUILT_APP_RELEASE)
-copy-build: _DED  := $(BUILT_DED_RELEASE)
-copy-build: build _do-copy-build
-
-# ── copy-build-debug ─────────────────────────────────────────────────────────
-# Build Debug engine, copy engine binary + game dylibs into .app at Q3DIR.
-# Also copies launcher binary if previously built (see create-launcher).
-
-copy-build-debug: _BDIR := $(BUILD_DIR_DEBUG)
-copy-build-debug: _CFG  := Debug
-copy-build-debug: _APP  := $(BUILT_APP_DEBUG)
-copy-build-debug: _DED  := $(BUILT_DED_DEBUG)
-copy-build-debug: build-debug _do-copy-build
-
-# ── copy-libs ────────────────────────────────────────────────────────────────
-# Copies renderer dylibs and third-party dependencies into .app.
-# Does NOT copy engine binaries or game modules — copy-build handles those.
-
-copy-libs: build
+# install_libs($(1)=dstbin) — copies renderer plug-ins (and macOS third-party
+# deps) into $(1).  On macOS, otool -L discovers each binary's exact linked
+# library path and rewrites it to @executable_path/ — handles Homebrew
+# symlink vs real path mismatches (e.g. /opt/homebrew/opt/sdl3/lib/... vs
+# /opt/homebrew/lib/...).
 ifeq ($(UNAME_S),Darwin)
-	@echo "==> Copying renderer + dependency dylibs..."
-	cp "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/"
-	@test -f "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" && \
-	  cp "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" "$(Q3DIR)/Contents/MacOS/" || true
-	@# Bundle third-party dylibs (SDL3, MoltenVK) into .app and rewrite load paths.
-	@# Uses otool -L to find the EXACT path each binary references, then rewrites
-	@# it to @executable_path/. This handles Homebrew symlink vs real path mismatches
-	@# (e.g. /opt/homebrew/opt/sdl3/lib/... vs /opt/homebrew/lib/...).
+define install_libs
+	@mkdir -p "$(1)"
+	@echo "==> Installing renderer + dependency dylibs into $(1) ..."
+	cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dylib" "$(1)/"
+	@test -f "$(BUILD_DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" && \
+	  cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" "$(1)/" || true
 	@for LIBNAME in libSDL3 libMoltenVK; do \
 	  DYLIB=$$(find /opt/homebrew/lib /opt/homebrew/opt/*/lib /usr/local/lib \
 	    2>/dev/null -name "$$LIBNAME*.dylib" -not -type l -maxdepth 1 | head -1); \
 	  if [ -n "$$DYLIB" ]; then \
 	    BASENAME=$$(basename "$$DYLIB"); \
-	    echo "  $$LIBNAME: $$DYLIB → Contents/MacOS/$$BASENAME"; \
-	    rm -f "$(Q3DIR)/Contents/MacOS/$$BASENAME"; \
-	    cp "$$DYLIB" "$(Q3DIR)/Contents/MacOS/"; \
-	    for BIN in "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" \
-	              "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dylib" \
-	              "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib"; do \
+	    echo "  $$LIBNAME: $$DYLIB → $$BASENAME"; \
+	    rm -f "$(1)/$$BASENAME"; \
+	    cp "$$DYLIB" "$(1)/"; \
+	    for BIN in "$(1)/$(CMAKE_APP_NAME)$(BINEXT)" \
+	              "$(1)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dylib" \
+	              "$(1)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib"; do \
 	      [ -f "$$BIN" ] || continue; \
 	      LINKED=$$(otool -L "$$BIN" 2>/dev/null | grep --color=never "$$LIBNAME" | awk '{print $$1}'); \
 	      if [ -n "$$LINKED" ] && [ "$$LINKED" != "@executable_path/$$BASENAME" ]; then \
@@ -426,39 +477,60 @@ ifeq ($(UNAME_S),Darwin)
 	    echo "  WARNING: $$LIBNAME not found — run: brew install $$(echo $$LIBNAME | sed 's/lib//' | tr '[:upper:]' '[:lower:]')"; \
 	  fi; \
 	done
+endef
 else ifdef IS_WINDOWS
-	@echo "==> Copying renderer DLLs..."
-	@for dll in "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dll" \
-	            "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dll"; do \
-	  [ -f "$$dll" ] && cp "$$dll" "$(Q3DIR)/" || true; \
+define install_libs
+	@mkdir -p "$(1)"
+	@echo "==> Installing renderer DLLs into $(1) ..."
+	@for dll in "$(BUILD_DIR)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dll" \
+	            "$(BUILD_DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dll"; do \
+	  [ -f "$$dll" ] && cp "$$dll" "$(1)/" || true; \
 	done
+endef
 else
-	@echo "==> Copying renderer shared objects..."
-	@for so in "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).so" \
-	           "$(BUILD_DIR_RELEASE)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).so"; do \
-	  [ -f "$$so" ] && cp "$$so" "$(Q3DIR)/" || true; \
+define install_libs
+	@mkdir -p "$(1)"
+	@echo "==> Installing renderer shared objects into $(1) ..."
+	@for so in "$(BUILD_DIR)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).so" \
+	           "$(BUILD_DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).so"; do \
+	  [ -f "$$so" ] && cp "$$so" "$(1)/" || true; \
 	done
+endef
 endif
+
+# install_pack($(1)=dstdata) — copies the mod pack into $(1).
+define install_pack
+	@echo "==> Installing mod pack into $(1) ..."
+	@mkdir -p "$(1)"
+	cp "$(PAK_OUT)" "$(1)/"
+endef
+
+# ── copy-build ───────────────────────────────────────────────────────────────
+# Build Release engine, install engine + game modules into Q3DIR. On macOS
+# also rsyncs the .app skeleton; on Windows also copies the launcher .exe.
+# (The launcher binary is sourced from $(LAUNCHER_BIN), produced earlier by
+# make create-launcher.)
+
+copy-build: build
+	$(call install_app_skeleton)
+	$(call install_engine,$(Q3BINDIR),$(Q3DATADIR))
+
+# ── copy-libs ────────────────────────────────────────────────────────────────
+# Copies renderer plug-ins (and macOS third-party deps) into Q3DIR.
+# Does NOT copy engine binaries or game modules — copy-build handles those.
+
+copy-libs: build
+	$(call install_libs,$(Q3BINDIR))
 
 # ── copy-packs ────────────────────────────────────────────────────────────────
 # Copies the mod pack into Q3DATADIR. Removes stale format.
 
 copy-packs: create-packs
-	mkdir -p "$(Q3DATADIR)"
-ifeq ($(USE_SW3Z),1)
-	@echo "==> Copying mod pack to $(Q3DATADIR)/"
-	@rm -f "$(Q3DATADIR)/zz-$(APP_NAME).pk3"
-	cp "$(PAK_OUT)" "$(Q3DATADIR)/"
-else
-	@echo "==> Copying mod pack to $(Q3DATADIR)/"
-	@rm -f "$(Q3DATADIR)/zz-$(APP_NAME).sw3z"
-	cp "$(PAK_OUT)" "$(Q3DATADIR)/"
-endif
+	$(call install_pack,$(Q3DATADIR))
 
 # ── Composite helpers ────────────────────────────────────────────────────────
 
 copy-all:       copy-build copy-libs copy-packs
-copy-all-debug: copy-build-debug copy-libs copy-packs
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BUNDLING TARGETS — codesign, package for distribution
@@ -472,7 +544,7 @@ bundle-codesign:
 ifeq ($(UNAME_S),Darwin)
 	@echo "==> Code signing..."
 	@for dylib in "$(Q3DIR)/Contents/MacOS/"*.dylib \
-	              "$(Q3BASEDIR)/"*$(GAME_ARCH).dylib; do \
+	              "$(Q3DATADIR)/"*$(GAME_ARCH).dylib; do \
 	  [ -f "$$dylib" ] && codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" "$$dylib" 2>/dev/null; \
 	done
 	codesign --force --options runtime --entitlements misc/macos/q3now.entitlements \
@@ -521,7 +593,7 @@ ifeq ($(UNAME_S),Linux)
 	@test -f "$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)" && \
 	  cp "$(Q3DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)" "$(TAR_STAGING)/" || true
 	cp "$(LAUNCHER_BIN)" "$(TAR_STAGING)/q3now-launcher" 2>/dev/null || true
-	cp -R "$(Q3BASEDIR)/." "$(TAR_STAGING)/baseq3/"
+	cp -R "$(Q3DATADIR)/." "$(TAR_STAGING)/baseq3/"
 	cp README.md "$(TAR_STAGING)/"
 	tar czf "$(TAR_OUT)" -C $(TAR_STAGING) .
 	rm -rf $(TAR_STAGING)
@@ -546,7 +618,7 @@ ifdef IS_WINDOWS
 	            "$(Q3DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dll"; do \
 	  [ -f "$$dll" ] && cp "$$dll" "$(ZIP_STAGING)/" || true; \
 	done
-	cp -R "$(Q3BASEDIR)/." "$(ZIP_STAGING)/baseq3/"
+	cp -R "$(Q3DATADIR)/." "$(ZIP_STAGING)/baseq3/"
 	cp README.md "$(ZIP_STAGING)/"
 	cd $(ZIP_STAGING) && powershell -Command "Compress-Archive -Path '*' -DestinationPath '$(CURDIR)/$(ZIP_OUT)' -Force"
 	rm -rf $(ZIP_STAGING)
@@ -583,23 +655,21 @@ endif
 # Build engine + paks, assemble .app, run engine directly.
 #
 # Variables:
-#   DEV=1    debug build, developer mode                       (default: 0)
+#   DEV=1    debug build                                       (default: 0)
 #   VM=1     use VM game modules instead of native dylibs      (default: 0)
 #   MAP=X    load map X; uses +map when DEV=1, +map otherwise
 #
 # Examples:
 #   make run-game                    main menu (native dylibs)
 #   make run-game MAP=q3dm17         load q3dm17
-#   make run-game DEV=1              debug build, developer mode
+#   make run-game DEV=1              debug build
 #   make run-game DEV=1 MAP=q3dm17   debug build, map q3dm17
 #   make run-game VM=1 MAP=q3dm17    VM modules, load q3dm17
 
-# Build the right target based on DEV flag
-ifeq ($(DEV),1)
-_RUN_GAME_DEP := copy-all-debug
-else
+# DEV controls Release vs Debug throughout BUILD_DIR / BUILD_CFG
+# / BUILT_APP / BUILT_DED / MODULE_DIR / PAK_OUT — copy-all picks up the right
+# config automatically. No separate copy-all-debug.
 _RUN_GAME_DEP := copy-all
-endif
 
 # VM mode: 0=native dylibs (default), 1=WASM AOT modules with sv_pure
 ifeq ($(VM),1)
@@ -611,7 +681,7 @@ endif
 # Compose command-line arguments
 _RUN_GAME_ARGS := $(_RUN_VM_ARGS)
 ifeq ($(DEV),1)
-_RUN_GAME_ARGS += +set developer 1 +set g_cheats 1
+_RUN_GAME_ARGS += +set g_cheats 1
 endif
 ifneq ($(MAP),)
 _RUN_GAME_ARGS += +map $(MAP)
@@ -629,12 +699,12 @@ endif
 _copy-vm:
 ifeq ($(UNAME_S),Darwin)
 	@mkdir -p "$(Q3DIR)/Contents/Resources/baseq3/vm"
-	@for f in $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.wasm $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.aot; do \
+	@for f in $(BUILD_DIR)/$(BUILD_CFG)/baseq3/vm/*.wasm $(BUILD_DIR)/$(BUILD_CFG)/baseq3/vm/*.aot; do \
 		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/Contents/Resources/baseq3/vm/" || true; \
 	done
 else
 	@mkdir -p "$(Q3DIR)/baseq3/vm"
-	@for f in $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.wasm $(BUILD_DIR_DEBUG)/Debug/baseq3/vm/*.aot; do \
+	@for f in $(BUILD_DIR)/$(BUILD_CFG)/baseq3/vm/*.wasm $(BUILD_DIR)/$(BUILD_CFG)/baseq3/vm/*.aot; do \
 		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/baseq3/vm/" || true; \
 	done
 endif
@@ -649,7 +719,7 @@ endif
 # Compose dedicated-server args (dedicated 2 = no client, VM + map as run-game)
 _RUN_DED_ARGS := +set dedicated 2 $(_RUN_VM_ARGS)
 ifeq ($(DEV),1)
-_RUN_DED_ARGS += +set developer 1 +set g_cheats 1
+_RUN_DED_ARGS += +set g_cheats 1
 endif
 ifneq ($(MAP),)
 _RUN_DED_ARGS += +map $(MAP)
@@ -702,11 +772,11 @@ endif
 
 check: create-packs
 	@echo "==> Verifying build..."
-	@ls $(MODULE_DIR_RELEASE)/vm/cgame.wasm  > /dev/null 2>&1 && echo "  cgame VM:    OK" || echo "  cgame VM:    MISSING (wasi-sdk not found?)"
-	@ls $(MODULE_DIR_RELEASE)/vm/qagame.wasm > /dev/null 2>&1 && echo "  qagame VM:   OK" || echo "  qagame VM:   MISSING (wasi-sdk not found?)"
-	@ls $(MODULE_DIR_RELEASE)/cgame$(GAME_ARCH).*    > /dev/null 2>&1 && echo "  cgame native: OK" || echo "  cgame native: MISSING"
-	@ls $(MODULE_DIR_RELEASE)/qagame$(GAME_ARCH).*  > /dev/null 2>&1 && echo "  qagame native: OK" || echo "  qagame native: MISSING"
-	@test -f $(PAK_OUT) && echo "  mod pack:     OK ($(PAK_EXT))"
+	@ls $(MODULE_DIR)/vm/cgame.wasm  > /dev/null 2>&1 && echo "  cgame VM:    OK" || echo "  cgame VM:    MISSING (wasi-sdk not found?)"
+	@ls $(MODULE_DIR)/vm/qagame.wasm > /dev/null 2>&1 && echo "  qagame VM:   OK" || echo "  qagame VM:   MISSING (wasi-sdk not found?)"
+	@ls $(MODULE_DIR)/cgame$(GAME_ARCH).*    > /dev/null 2>&1 && echo "  cgame native: OK" || echo "  cgame native: MISSING"
+	@ls $(MODULE_DIR)/qagame$(GAME_ARCH).*  > /dev/null 2>&1 && echo "  qagame native: OK" || echo "  qagame native: MISSING"
+	@test -f $(PAK_OUT) && echo "  mod pack:     OK"
 ifeq ($(UNAME_S),Darwin)
 	@codesign --verify "$(Q3DIR)" 2>/dev/null && echo "  codesign:    OK" || echo "  codesign:    MISSING (run make bundle-codesign)"
 	@codesign -d --entitlements - "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" 2>/dev/null | grep -q "allow-jit" && echo "  JIT entitlement: OK" || echo "  JIT entitlement: MISSING"
@@ -733,15 +803,24 @@ test-quic-game:
 test-vm:
 	@bash tests/smoke-wasm.sh
 
+# ── FS dedup smoke test ─────────────────────────────────────────────────────
+# Regression test for FS_DeduplicateArchives SW3Z double-free.
+# Builds two same-basename SW3Z archives in fixture basepath/ + homepath/,
+# launches q3now-ded with explicit fs_installpath / fs_homepath, asserts clean
+# exit and that the dedup code path actually fired.
+
+test-fs-dedup: build $(SW3Z_BIN)
+	@bash tests/smoke-fs-dedup.sh "$(BUILD_DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT)$(EXEEXT)"
+
 # ── bench ────────────────────────────────────────────────────────────────────
-# Timedemo benchmark. Requires a demo at Q3BASEDIR/demos/<DEMO>.dm_68.
+# Timedemo benchmark. Requires a demo at Q3DATADIR/demos/<DEMO>.dm_68.
 
 DEMO ?= four
 
 bench: copy-all
-	@if [ ! -f "$(Q3BASEDIR)/demos/$(DEMO).dm_68" ]; then \
-	  echo "ERROR: $(Q3BASEDIR)/demos/$(DEMO).dm_68 not found"; \
-	  echo "Copy a demo file (.dm_68) to $(Q3BASEDIR)/demos/ and set DEMO=<name>"; \
+	@if [ ! -f "$(Q3DATADIR)/demos/$(DEMO).dm_68" ]; then \
+	  echo "ERROR: $(Q3DATADIR)/demos/$(DEMO).dm_68 not found"; \
+	  echo "Copy a demo file (.dm_68) to $(Q3DATADIR)/demos/ and set DEMO=<name>"; \
 	  exit 1; \
 	fi
 ifeq ($(UNAME_S),Darwin)
@@ -780,17 +859,17 @@ else
   LINT_EXTRA_ARGS :=
 endif
 
-lint: $(BUILD_DIR_RELEASE)/CMakeCache.txt
-	@if [ ! -f "$(BUILD_DIR_RELEASE)/compile_commands.json" ]; then \
+lint: $(BUILD_DIR)/CMakeCache.txt
+	@if [ ! -f "$(BUILD_DIR)/compile_commands.json" ]; then \
 	  echo "ERROR: compile_commands.json not found — run 'make configure' first"; \
 	  exit 1; \
 	fi
 	@if [ -n "$(LINT_SRCS)" ]; then \
 	  echo "==> clang-tidy ($(LINT_SRCS))"; \
-	  $(CLANG_TIDY) -p $(BUILD_DIR_RELEASE) $(LINT_EXTRA_ARGS) $(LINT_SRCS); \
+	  $(CLANG_TIDY) -p $(BUILD_DIR) $(LINT_EXTRA_ARGS) $(LINT_SRCS); \
 	elif [ -x "$(RUN_CLANG_TIDY)" ]; then \
 	  echo "==> run-clang-tidy -j$(LINT_JOBS) (all project sources)"; \
-	  $(RUN_CLANG_TIDY) -p $(BUILD_DIR_RELEASE) -j $(LINT_JOBS) \
+	  $(RUN_CLANG_TIDY) -p $(BUILD_DIR) -j $(LINT_JOBS) \
 	    -clang-tidy-binary $(CLANG_TIDY) \
 	    -extra-arg='-isysroot$(shell xcrun --show-sdk-path 2>/dev/null)' \
 	    -header-filter='^code/.*' \
@@ -799,7 +878,7 @@ lint: $(BUILD_DIR_RELEASE)/CMakeCache.txt
 	  echo "==> clang-tidy (sequential — install run-clang-tidy for parallel)"; \
 	  find code -name '*.c' -not -path '*/asm/*' | sort | while read -r f; do \
 	    echo "  $$f"; \
-	    $(CLANG_TIDY) -p $(BUILD_DIR_RELEASE) $(LINT_EXTRA_ARGS) "$$f" || true; \
+	    $(CLANG_TIDY) -p $(BUILD_DIR) $(LINT_EXTRA_ARGS) "$$f" || true; \
 	  done; \
 	fi
 
@@ -811,22 +890,23 @@ help:
 	@echo ""
 	@echo "  q3now build targets"
 	@echo "  ───────────────────────────────────────────────────────────"
-	@echo "  make              configure + build Release"
-	@echo "  make build-debug  configure + build Debug"
-	@echo "  make clean        remove build-release/ + build-debug/"
-	@echo "  make rebuild      clean + build"
+	@echo "  make                 configure + build Release"
+	@echo "  make clean           remove build-release/ + build-debug/"
+	@echo "  make clean-launcher  remove launcher/build/ (wails output)"
+	@echo "  make clean-all       clean + clean-launcher"
+	@echo "  make rebuild         clean + build"
 	@echo ""
 	@echo "  Generation:"
-	@echo "    make create-launcher    build Go/Wails launcher binary"
-	@echo "    make create-packs        package modfiles/ + VM modules → .$(PAK_EXT)"
+	@echo "    make create-launcher   build launcher AND populate launcher/build/bin/"
+	@echo "                            (engine, ded, renderers, deps, modules, pack)"
+	@echo "                            — self-contained; runs without copy-build"
+	@echo "    make create-packs      package modfiles/ + VM modules → .sw3z"
 	@echo ""
-	@echo "  Copy (assemble .app):"
-	@echo "    make copy-build         Release engine + dylibs → .app"
-	@echo "    make copy-build-debug   Debug engine + dylibs → .app"
+	@echo "  Copy (assemble .app — pass DEV=1 to use Debug build):"
+	@echo "    make copy-build         engine + dylibs → .app"
 	@echo "    make copy-libs          renderer + deps → .app"
-	@echo "    make copy-packs          mod pack (.$(PAK_EXT)) → .app"
-	@echo "    make copy-all           all of the above (Release)"
-	@echo "    make copy-all-debug     all of the above (Debug)"
+	@echo "    make copy-packs          mod pack (.sw3z) → .app"
+	@echo "    make copy-all           all of the above"
 	@echo ""
 	@echo "  Bundling:"
 	@echo "    make bundle-codesign    codesign .app (macOS)"
@@ -837,7 +917,7 @@ help:
 	@echo "  Flows:"
 	@echo "    make run-launcher       build + assemble + codesign + open launcher"
 	@echo "    make run-game                     run engine (main menu)"
-	@echo "    make run-game DEV=1               developer mode (debug build)"
+	@echo "    make run-game DEV=1               debug build"
 	@echo "    make run-game DEV=1 MAP=q3dm17    map with debug"
 	@echo "    make run-game VM=1 MAP=q3dm17     VM modules + map"
 	@echo "    make run-game DEV=1 EXTRA_ARGS=\"+set bsp_q1_coverage_debug 1\"  extra cvars"
@@ -849,6 +929,7 @@ help:
 	@echo "    make check              verify all outputs present"
 	@echo "    make smoke              headless gameplay test"
 	@echo "    make test-quic-game     QUIC game transport smoke test"
+	@echo "    make test-fs-dedup      FS dedup SW3Z double-free regression test"
 	@echo "    make bench              timedemo benchmark"
 	@echo "    make diff-api           diff API headers vs upstream"
 	@echo "    make lint               static analysis via clang-tidy"
@@ -857,5 +938,5 @@ help:
 	@echo "  Variables:"
 	@echo "    Q3DIR=$(Q3DIR)"
 	@echo "    JOBS=$(JOBS)   MAP=$(MAP)   DEV=$(DEV)   VM=$(VM)   DEMO=$(DEMO)   EXTRA_ARGS=$(EXTRA_ARGS)"
-	@echo "    USE_SW3Z=$(USE_SW3Z)   USE_WASM=$(USE_WASM)   CODESIGN_IDENTITY=$(CODESIGN_IDENTITY)"
+	@echo "    USE_WASM=$(USE_WASM)   CODESIGN_IDENTITY=$(CODESIGN_IDENTITY)"
 	@echo ""

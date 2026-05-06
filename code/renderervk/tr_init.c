@@ -1899,11 +1899,11 @@ static void R_Register( void )
 		" -2 - first integrated GPU" );
 	s_r_device_mod = r_device->modificationCount;
 
-	r_fbo = ri.Cvar_Get( "r_fbo", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and greyscale effects." );
 	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription(r_hdr, "Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n -1: 4-bit, for testing purposes, heavy color banding, might not work on all systems\n  0: 8 bit, default, moderate color banding with multi-stage shaders\n  1: 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD / Intel GPUs\n" );
-	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
 	r_bloom_passes = ri.Cvar_Get( "r_bloom_passes", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
@@ -2186,23 +2186,25 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 		tr.maxPropLightmaps = 0;
 	}
 
-	// For REF_KEEP_CONTEXT (map transition during async spawn), preserve GPU
-	// textures and FreeType state so the frame loop can draw the console and
-	// fonts between spawn phases.  R_InitImages will clean up old resources
-	// via R_DeleteTextures + vk_release_resources + ri.FreeAll when the
-	// renderer re-initialises on the next map.
+	// Destroy textures unconditionally — including for REF_KEEP_CONTEXT.
 	//
-	// Vulkan ordering rule: VkImages must be destroyed BEFORE their backing
-	// VkDeviceMemory (image_chunks) is freed.  Guard vk_release_resources()
-	// together with R_DeleteTextures() so the ordering is always correct.
-	//if ( tr.registered ) {
-		//R_IssuePendingRenderCommands();
-	if ( code != REF_KEEP_CONTEXT ) {
-		R_DeleteTextures();
+	// The original gate `if ( code != REF_KEEP_CONTEXT )` was intended to
+	// preserve GPU textures across map-load transitions so the frame loop
+	// could draw the loading screen between spawn phases.  In practice
+	// q3now's Hunk_ClearLevel (qcommon/common.c) zeroes both hunk_high AND
+	// hunk_low, freeing the image_t structs that tr.images[] points to.
+	// Skipping the destroy on REF_KEEP_CONTEXT therefore left VkImages
+	// alive on the GPU with no remaining bookkeeping to find or destroy
+	// them — they leaked until vkDestroyDevice
+	// (VUID-vkDestroyDevice-device-05137).
+	//
+	// Vulkan ordering: VkImages must be destroyed BEFORE their backing
+	// VkDeviceMemory (image_chunks) is freed; pair R_DeleteTextures with
+	// vk_release_resources so the order is always correct.
+	R_DeleteTextures();
 #ifdef USE_VULKAN
-		vk_release_resources();
+	vk_release_resources();
 #endif
-	}
 	//}
 
 	if ( code != REF_KEEP_CONTEXT ) {

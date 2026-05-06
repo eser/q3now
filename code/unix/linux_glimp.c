@@ -1257,7 +1257,6 @@ static rserr_t GLW_StartDriverAndSetMode( int mode, const char *modeFS, qboolean
 	{
 		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Fullscreen not allowed with in_nograb 1\n");
 		Cvar_Set( "r_fullscreen", "0" );
-		r_fullscreen->modified = qfalse;
 		fullscreen = qfalse;
 	}
 
@@ -1838,7 +1837,6 @@ static qboolean GLW_StartOpenGL( void )
 			if ( GLW_LoadOpenGL( OPENGL_DRIVER_NAME ) )
 			{
 				Cvar_Set( "r_glDriver", OPENGL_DRIVER_NAME );
-				r_glDriver->modified = qfalse;
 				return qtrue;
 			}
 		}
@@ -1857,6 +1855,7 @@ static qboolean GLW_StartOpenGL( void )
 ** This routine is responsible for initializing the OS specific portions
 ** of OpenGL.
 */
+static void GLW_SwapIntervalChanged( cvar_t *self ); // defined after GLimp_EndFrame
 void GLimp_Init( glconfig_t *config )
 {
 	InitSig();
@@ -1888,7 +1887,8 @@ void GLimp_Init( glconfig_t *config )
 	if ( qglXSwapIntervalEXT || qglXSwapIntervalMESA || qglXSwapIntervalSGI )
 	{
 		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using GLX_EXT_swap_control\n" );
-		Cvar_SetModified( "r_swapInterval", qtrue ); // force a set next frame
+		r_swapInterval->onChange = GLW_SwapIntervalChanged;
+		GLW_SwapIntervalChanged( r_swapInterval );
 	}
 	else
 	{
@@ -1901,30 +1901,27 @@ void GLimp_Init( glconfig_t *config )
 }
 
 
+static void GLW_SwapIntervalChanged( cvar_t *self )
+{
+	if ( qglXSwapIntervalEXT ) {
+		qglXSwapIntervalEXT( dpy, win, self->integer );
+	} else if ( qglXSwapIntervalMESA ) {
+		qglXSwapIntervalMESA( self->integer );
+	} else if ( qglXSwapIntervalSGI ) {
+		qglXSwapIntervalSGI( self->integer );
+	}
+}
+
+
 /*
 ** GLimp_EndFrame
-** 
+**
 ** Responsible for doing a swapbuffers and possibly for other stuff
 ** as yet to be determined.  Probably better not to make this a GLimp
 ** function and instead do a call to GLimp_SwapBuffers.
 */
 void GLimp_EndFrame( void )
 {
-	//
-	// swapinterval stuff
-	//
-	if ( r_swapInterval->modified ) {
-		r_swapInterval->modified = qfalse;
-
-		if ( qglXSwapIntervalEXT ) {
-			qglXSwapIntervalEXT( dpy, win, r_swapInterval->integer );
-		} else if ( qglXSwapIntervalMESA ) {
-			qglXSwapIntervalMESA( r_swapInterval->integer );
-		} else if ( qglXSwapIntervalSGI ) {
-			qglXSwapIntervalSGI( r_swapInterval->integer );
-		}
-	}
-
 	// don't flip if drawing to front buffer
 	if ( Q_stricmp( cl_drawBuffer->string, "GL_FRONT" ) != 0 )
 	{

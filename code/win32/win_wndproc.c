@@ -783,8 +783,6 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 		if ( !glw_state.cdsFullscreen )	{
 			Cvar_SetIntegerValue( "vid_xpos", g_wv.winRect.left );
 			Cvar_SetIntegerValue( "vid_ypos", g_wv.winRect.top );
-			vid_xpos->modified = qfalse;
-			vid_ypos->modified = qfalse;
 		}
 		break;
 

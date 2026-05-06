@@ -985,49 +985,30 @@ static void Sys_SetDefaultBasePath( const char *path )
 
 /*
 =================
-Sys_StripAppBundle
-Discovers if passed dir is suffixed with the directory structure of a Mac OS X
-.app bundle. If it is, the .app directory structure is stripped off the end and
-the result is returned. If not, dir is returned untouched.
+Sys_AppBundleRoot
+Returns the .app bundle path when passed a path inside it (i.e., when the
+input ends in /Contents/MacOS). Otherwise returns the input unchanged.
+
+Strips two levels: <root>/Foo.app/Contents/MacOS → <root>/Foo.app.
 =================
 */
-// Used to determine where to store user-specific files
-static char *Sys_StripAppBundle( char *dir )
+static char *Sys_AppBundleRoot( char *dir )
 {
 	static char cwd[MAX_OSPATH];
 
 	Q_strncpyz( cwd, dir, sizeof( cwd ) );
 	if ( strcmp( basename( cwd ), "MacOS" ) != 0 )
-	{ 
 		return dir;
-	}
 
 	Q_strncpyz( cwd, dirname( cwd ), sizeof( cwd ) );
 	if ( strcmp( basename( cwd ), "Contents" ) != 0 )
-	{
 		return dir;
-	}
 
-	Q_strncpyz( cwd, dirname( cwd ), sizeof( cwd ) ); 
-	if ( strstr( basename( cwd ), ".app") == NULL )
-	{
+	Q_strncpyz( cwd, dirname( cwd ), sizeof( cwd ) );
+	if ( strstr( basename( cwd ), ".app" ) == NULL )
 		return dir;
-	}
-
-	Q_strncpyz(cwd, dirname( cwd ), sizeof( cwd ) );
 
 	return cwd;
-}
-
-
-/*
-=================
-Sys_DefaultAppPath
-=================
-*/
-char *Sys_DefaultAppPath( void )
-{
-	return binaryPath;
 }
 #endif // __APPLE__
 
@@ -1292,8 +1273,12 @@ int main( int argc, const char* argv[] )
 #endif
 
 #ifdef __APPLE__
+	/* Sys_SetBinaryPath gives <root>/Foo.app/Contents/MacOS;
+	 * Sys_AppBundleRoot lifts that to <root>/Foo.app — fs_installpath wants
+	 * the .app itself so FS_GetInstallBinaryPath/ResourcePath can append
+	 * Contents/MacOS and Contents/Resources from a single anchor. */
 	Sys_SetBinaryPath( argv[ 0 ] );
-	Sys_SetDefaultBasePath( Sys_StripAppBundle( binaryPath ) );
+	Sys_SetDefaultBasePath( Sys_AppBundleRoot( binaryPath ) );
 #endif
 
 	// merge the command line, this is kinda silly
@@ -1375,3 +1360,10 @@ int main( int argc, const char* argv[] )
 	// never gets here
 	return 0;
 }
+
+#ifndef __APPLE__
+/* Apple has a real implementation in code/macosx/macosx_main.c that pins the
+ * main thread to a time-constraint scheduling class. Linux/BSD have no
+ * equivalent kernel API; latency tuning is left to the OS scheduler. */
+void Sys_SetMainThreadPolicy( void ) { }
+#endif

@@ -88,7 +88,6 @@ Show the early console as an error dialog
 void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... ) {
 	va_list	argptr;
 	char	text[4096];
-	MSG		msg;
 
 	va_start( argptr, error );
 	vsnprintf( text, sizeof( text ), error, argptr );
@@ -102,25 +101,15 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... ) {
 	Conbuf_AppendText( text );
 	Conbuf_AppendText( "\n" );
 
+	/* Sys_SetErrorText handles platform-appropriate user surfacing:
+	 *   - Dedicated: stderr only (no GUI dialog blocking unattended servers).
+	 *   - Client: stderr + MessageBox (blocks until user clicks OK; double-
+	 *     click users without a terminal still see the error).
+	 * After it returns we exit cleanly. */
 	Sys_SetErrorText( text );
-	Sys_ShowConsole( 1, qtrue );
 
 	timeEndPeriod( 1 );
-
-	// wait for the user to quit
-	while ( 1 ) {
-		if ( GetMessage( &msg, NULL, 0, 0 ) <= 0 ) {
-			Cmd_Clear();
-			Com_Quit_f();
-		}
-		TranslateMessage( &msg );
-		DispatchMessage( &msg );
-	}
-
 	SetUnhandledExceptionFilter( NULL );
-
-	Sys_DestroyConsole();
-
 	exit( 1 );
 }
 
@@ -935,12 +924,44 @@ void Sys_InstallCrashHandler( void )
 }
 
 
+#ifdef DEDICATED
+/*
+==================
+main (console-subsystem entry for q3now-ded)
+
+The dedicated server builds as a Windows console-subsystem binary
+(see CMakeLists.txt EXE_TYPE_DED). The console-subsystem entry point
+is main(), not WinMain(). Bridge to WinMain so the body below stays
+single-source — most of WinMain is platform-init that's identical
+across subsystems (Com_Init, frame loop, etc.).
+
+Skip the program name in GetCommandLineA so lpCmdLine matches the
+GUI-subsystem WinMain contract (everything AFTER the program name).
+==================
+*/
+int main( int argc, char **argv )
+{
+	(void)argc; (void)argv;
+	LPSTR cmdline = GetCommandLineA();
+	/* Skip program name (first token; may be quoted with embedded spaces). */
+	if ( cmdline[0] == '"' ) {
+		cmdline++;
+		while ( *cmdline != '\0' && *cmdline != '"' ) cmdline++;
+		if ( *cmdline == '"' ) cmdline++;
+	} else {
+		while ( *cmdline != '\0' && *cmdline != ' ' && *cmdline != '\t' ) cmdline++;
+	}
+	while ( *cmdline == ' ' || *cmdline == '\t' ) cmdline++;
+	return WinMain( GetModuleHandleA( NULL ), NULL, cmdline, SW_SHOWNORMAL );
+}
+#endif
+
 /*
 ==================
 WinMain
 ==================
 */
-int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow ) 
+int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow )
 {
 	static char	sys_cmdline[ MAX_STRING_CHARS ];
 	char con_title[ MAX_CVAR_VALUE_STRING ];
@@ -948,6 +969,15 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	qboolean useXYpos;
 	HANDLE hProcess;
 	DWORD dwPriority;
+
+#ifndef DEDICATED
+	/* Phase 2 of Windows-console modernization (2026-05-05): reattach to
+	 * the parent console when this GUI-subsystem binary is launched from
+	 * a terminal so stdout/stderr/stdin are usable. No-op when there's
+	 * no parent console (double-click case). Dedicated is console
+	 * subsystem (phase 1) and doesn't need this. */
+	Sys_AttachParentConsole();
+#endif
 
 	// should never get a previous instance in Win32
 	if ( hPrevInstance ) {
@@ -968,7 +998,10 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	useXYpos = Com_EarlyParseCmdLine( sys_cmdline, con_title, sizeof( con_title ), &xpos, &ypos );
 
-	// done before Com/Sys_Init since we need this for error output
+	/* Configure stdio buffering and set the parent terminal title.
+	 * Post-phase-3 Sys_CreateConsole no longer creates a Win32 console
+	 * window; the function name is preserved for the qcommon API but
+	 * the implementation is just stdio setup + SetConsoleTitleA. */
 	Sys_CreateConsole( con_title, xpos, ypos, useXYpos );
 
 	// no abort/retry/fail errors
@@ -978,11 +1011,10 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	Com_Init( sys_cmdline );
 
-	// hide the early console since we've reached the point where we
-	// have a working graphics subsystems
-	if ( !com_dedicated->integer && !com_viewlog->integer ) {
-		Sys_ShowConsole( 0, qfalse );
-	}
+	/* Sys_ShowConsole is now a no-op post-phase-3 (no GUI console window
+	 * exists). The deprecated `viewlog` cvar still calls it via
+	 * Com_ViewlogChanged but the call has no effect. Engine output flows
+	 * to stdio (terminal/redirect) and the in-game console (client). */
 
 	// main game loop
 	while ( 1 ) {
