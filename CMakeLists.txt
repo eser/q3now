@@ -6,6 +6,17 @@ SET(CMAKE_C_STANDARD 11)
 SET(CMAKE_C_STANDARD_REQUIRED ON)
 SET(CMAKE_C_EXTENSIONS OFF)
 
+# Apple clang on macOS defaults to C++03 if no standard is set explicitly,
+# which causes nav_impl.cpp's `auto` and `override` usage to error out as
+# "C++11 extensions" rather than warn.  Pin to C++17: covers our current
+# usage (auto, override, range-for, lambdas) plus headroom for future
+# constexpr / structured-binding / std::optional adoption without another
+# bump.  Apple clang has shipped C++17 since Xcode 9 (2017); no risk.
+# Extensions left ON (CMake default) because vendored picoquic/picotls
+# C++ touchpoints rely on them.
+SET(CMAKE_CXX_STANDARD 17)
+SET(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Strict -std=c11 hides glibc POSIX/BSD extensions (addrinfo, EAI_NONAME,
 # IFF_UP, NI_NUMERICHOST, nanosleep, ...) that net_ip.c, unix_main.c, and
 # other platform code rely on. _GNU_SOURCE re-exposes them without raising
@@ -226,6 +237,45 @@ ENDIF()
 # ── WiredNet ──────────────────────────────────────────────────────
 # picoquic + picotls + mpack sources
 # These are added as git submodules under src/libs/
+
+# MinGW: picoquic + picotls have a handful of MSVC-only assumptions that
+# break under MinGW's CRT (struct timezone redefinition, va_args macros,
+# ws2tcpip include order, _dupenv_s missing). Local patches in
+# patches/picoquic-mingw/ fix each. Apply them idempotently at configure
+# time so fresh submodule checkouts (CI) get the same fixes that local
+# working trees have. git apply --check --reverse returns 0 if the patch
+# is already applied, so re-running configure on a patched tree is safe.
+IF(WIN32)
+	FIND_PROGRAM(_GIT_EXE git REQUIRED)
+	FILE(GLOB _PICOQUIC_PATCHES "${CMAKE_SOURCE_DIR}/patches/picoquic-mingw/*.patch")
+	LIST(SORT _PICOQUIC_PATCHES)
+	FOREACH(_patch ${_PICOQUIC_PATCHES})
+		GET_FILENAME_COMPONENT(_patch_name "${_patch}" NAME)
+		EXECUTE_PROCESS(
+			COMMAND "${_GIT_EXE}" apply --check --reverse "${_patch}"
+			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/libs/picoquic"
+			RESULT_VARIABLE _rc_already
+			OUTPUT_QUIET ERROR_QUIET)
+		IF(_rc_already EQUAL 0)
+			MESSAGE(STATUS "picoquic patch already applied: ${_patch_name}")
+		ELSE()
+			EXECUTE_PROCESS(
+				COMMAND "${_GIT_EXE}" apply "${_patch}"
+				WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/libs/picoquic"
+				RESULT_VARIABLE _rc_apply
+				OUTPUT_VARIABLE _out_apply
+				ERROR_VARIABLE _err_apply)
+			IF(NOT _rc_apply EQUAL 0)
+				MESSAGE(FATAL_ERROR
+					"Failed to apply ${_patch_name}: ${_err_apply}\n"
+					"Run `git -C src/libs/picoquic reset --hard` to revert "
+					"local changes, then re-configure.")
+			ENDIF()
+			MESSAGE(STATUS "applied picoquic patch: ${_patch_name}")
+		ENDIF()
+	ENDFOREACH()
+ENDIF()
+
 FILE(GLOB PICOQUIC_SRCS src/libs/picoquic/picoquic/*.c)
 
 # Exclude optional picoquic TLS backend adapters — we only use OpenSSL

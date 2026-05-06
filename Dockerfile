@@ -71,8 +71,8 @@ RUN ARCH=$(uname -m) && \
       *)       BINEXT="" ;; \
     esac && \
     cmake --build build --target "q3now-ded${BINEXT}" \
-      cgame_baseq3 qagame_baseq3 ui_baseq3 \
-      qagame_wasm cgame_wasm ui_wasm \
+      cgame_baseq3 qagame_baseq3 \
+      qagame_wasm cgame_wasm \
       --parallel $(nproc) && \
     cp "build/q3now-ded${BINEXT}" /tmp/q3now-ded
 
