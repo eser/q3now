@@ -59,7 +59,7 @@
 	itemDef { \
 		name "bg_full" \
 		position viewport \
-		ownerdraw 261 \
+		ownerdraw "background_full" \
 		rect 0 0 100vw 100vh \
 		decoration \
 		visible 1 \
@@ -76,7 +76,7 @@
 #define WBACKGROUND_GRID \
 	itemDef { \
 		rect 0 0 1 1 \
-		ownerdraw UI_BACKGROUND_GRID \
+		ownerdraw "background_grid" \
 		visible 1 \
 		decoration \
 	}

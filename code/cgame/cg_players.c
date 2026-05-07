@@ -605,12 +605,12 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 	// Try the new character manifest system first.
 	if ( CG_LoadCharacter( ci, ci->characterName ) ) {
 		ci->deferred = qfalse;
-		// Reset any existing player entities using this client slot.
-		for ( i = 0 ; i < MAX_GENTITIES ; i++ ) {
-			if ( cg_entities[i].currentState.clientNum == clientNum
-				&& cg_entities[i].currentState.eType == ET_PLAYER ) {
-				CG_ResetPlayerEntity( &cg_entities[i] );
-			}
+		// The player entity for client N lives at cg_entities[N] — direct access
+		// instead of scanning all MAX_GENTITIES.
+		if ( clientNum >= 0 && clientNum < MAX_CLIENTS
+			&& cg_entities[clientNum].currentState.clientNum == clientNum
+			&& cg_entities[clientNum].currentState.eType == ET_PLAYER ) {
+			CG_ResetPlayerEntity( &cg_entities[clientNum] );
 		}
 		return;
 	}
@@ -665,13 +665,13 @@ static void CG_LoadClientInfo( int clientNum, clientInfo_t *ci ) {
 
 	ci->deferred = qfalse;
 
-	// reset any existing players and bodies, because they might be in bad
-	// frames for this new model
-	for ( i = 0 ; i < MAX_GENTITIES ; i++ ) {
-		if ( cg_entities[i].currentState.clientNum == clientNum
-			&& cg_entities[i].currentState.eType == ET_PLAYER ) {
-			CG_ResetPlayerEntity( &cg_entities[i] );
-		}
+	// Reset the player entity if it's currently live for this client slot —
+	// the new model frames may not match the previous one. Player entities are
+	// always at cg_entities[clientNum]; no need to walk MAX_GENTITIES.
+	if ( clientNum >= 0 && clientNum < MAX_CLIENTS
+		&& cg_entities[clientNum].currentState.clientNum == clientNum
+		&& cg_entities[clientNum].currentState.eType == ET_PLAYER ) {
+		CG_ResetPlayerEntity( &cg_entities[clientNum] );
 	}
 }
 
@@ -703,20 +703,63 @@ static void CG_CopyClientInfoModel( clientInfo_t *from, clientInfo_t *to ) {
 
 /*
 ======================
+CG_FNV1aLower
+
+Case-insensitive FNV-1a over a NUL-terminated string. Used to build the
+clientInfo_t.infoHash signature so the scan loops below can reject mismatches
+without string compares.
+======================
+*/
+static unsigned int CG_FNV1aLower( unsigned int h, const char *s ) {
+	while ( *s ) {
+		unsigned char c = (unsigned char)*s++;
+		if ( c >= 'A' && c <= 'Z' ) c += 'a' - 'A';
+		h ^= c;
+		h *= 16777619u;
+	}
+	h ^= '\0';
+	h *= 16777619u;
+	return h;
+}
+
+/*
+======================
+CG_HashClientInfo
+
+Build the fast-reject signature: characterName | skinName | team. Loops in
+CG_ScanForExistingClientInfo and CG_SetDeferredClientInfo compare this first
+and only fall through to Q_stricmp on a hash hit.
+======================
+*/
+static unsigned int CG_HashClientInfo( const clientInfo_t *ci ) {
+	unsigned int h = 2166136261u; // FNV-1a offset basis
+	h = CG_FNV1aLower( h, ci->characterName );
+	h = CG_FNV1aLower( h, ci->skinName );
+	h ^= (unsigned int)ci->team;
+	h *= 16777619u;
+	return h;
+}
+
+/*
+======================
 CG_ScanForExistingClientInfo
 ======================
 */
 static qboolean CG_ScanForExistingClientInfo( clientInfo_t *ci ) {
 	clientInfo_t	*match;
+	const unsigned int wantHash = CG_HashClientInfo( ci );
 
 	for ( int i = 0 ; i < cgs.maxclients ; i++ ) {
 		match = &cgs.clientinfo[ i ];
-		if ( !match->infoValid ) {
+		if ( !match->infoValid || match->deferred ) {
 			continue;
 		}
-		if ( match->deferred ) {
+		// Fast-reject on the cached signature before any string compare.
+		if ( match->infoHash != wantHash ) {
 			continue;
 		}
+		// Hash hit — full verification (also covers blueTeam/redTeam which
+		// aren't in the signature) and the team check.
 		if ( !Q_stricmp( ci->characterName, match->characterName )
 			&& !Q_stricmp( ci->skinName, match->skinName )
 			&& !Q_stricmp( ci->blueTeam, match->blueTeam )
@@ -747,12 +790,19 @@ client's info to use until we have some spare time.
 static void CG_SetDeferredClientInfo( int clientNum, clientInfo_t *ci ) {
 	int		i;
 	clientInfo_t	*match;
+	const unsigned int wantHash = CG_HashClientInfo( ci );
 
 	// if someone else is already the same models and skins we
 	// can just load the client info
 	for ( i = 0 ; i < cgs.maxclients ; i++ ) {
 		match = &cgs.clientinfo[ i ];
 		if ( !match->infoValid || match->deferred ) {
+			continue;
+		}
+		// Fast-reject via hash signature (characterName + skinName + team) —
+		// matches the field set this loop checks. blueTeam/redTeam aren't part
+		// of the signature, but this loop doesn't check them either.
+		if ( match->infoHash != wantHash ) {
 			continue;
 		}
 		if ( Q_stricmp( ci->skinName, match->skinName ) ||
@@ -928,6 +978,7 @@ void CG_NewClientInfo( int clientNum ) {
 
 	// replace whatever was there with the new one
 	newInfo.infoValid = qtrue;
+	newInfo.infoHash = CG_HashClientInfo( &newInfo );
 	*ci = newInfo;
 }
 

@@ -421,6 +421,11 @@ typedef struct {
 	char			blueTeam[MAX_TEAMNAME];
 	qboolean		deferred;
 
+	// FNV-1a hash of (characterName + skinName + team) — used as a fast-reject
+	// signature for CG_ScanForExistingClientInfo / CG_SetDeferredClientInfo.
+	// Recomputed in CG_NewClientInfo whenever the underlying fields change.
+	unsigned int	infoHash;
+
 	qboolean		newAnims;		// true if using the new mission pack animations
 	qboolean		fixedlegs;		// true if legs yaw is always the same as torso yaw
 	qboolean		fixedtorso;		// true if torso never changes yaw

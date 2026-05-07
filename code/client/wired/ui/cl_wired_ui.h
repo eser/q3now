@@ -460,6 +460,8 @@ void     WiredUI_RegisterFeeder( int feederID, const char *name,
 void     WiredUI_RegisterFeederIcon( int feederID, wiredFeederItemIcon_t icon );
 // Look up a feeder ID from its registered name. Returns 0 if not found.
 int      WiredUI_FeederIDByName( const char *name );
+// Look up an ownerdraw ID from its registered script name. Returns 0 if not found.
+int      WiredUI_OwnerDrawIDByName( const char *name );
 int      WiredUI_FeederCount( int feederID );
 const char *WiredUI_FeederItemText( int feederID, int index, int column );
 qhandle_t WiredUI_FeederItemIcon( int feederID, int index );

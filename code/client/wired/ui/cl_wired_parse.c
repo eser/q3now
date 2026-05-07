@@ -618,7 +618,7 @@ static const wuiPropDef_t s_itemProps[] = {
 	WP_I( "textalign",        wiredItemDef_t, textalign        ),
 	WP_I( "textstyle",        wiredItemDef_t, textstyle        ),
 	WP_I( "border",           wiredItemDef_t, border           ),
-	WP_I( "ownerdraw",        wiredItemDef_t, ownerdraw        ),
+	/* "ownerdraw" is parsed manually below — accepts numeric ID or quoted name */
 	WP_I( "ownerdrawFlag",    wiredItemDef_t, ownerdrawFlag    ),
 	WP_I( "maxChars",         wiredItemDef_t, maxChars         ),
 	WP_I( "maxPaintChars",    wiredItemDef_t, maxPaintChars    ),
@@ -790,6 +790,23 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 						COM_WARN( LOG_CAT_UI, "WiredUI: unknown feeder name '%s'\n", fstr );
 					}
 					item->feeder = (float)id;
+				}
+			}
+		}
+		else if ( !Q_stricmp( token.string, "ownerdraw" ) ) {
+			/* Same shape as `feeder`: numeric ID or quoted name resolved against
+			   the ownerdraw dispatch table. Unknown names log a warning and leave
+			   ownerdraw == 0 (renderer treats 0 as "no ownerdraw" and skips). */
+			const char *odstr = NULL;
+			if ( WiredPC_String( handle, &odstr ) && odstr ) {
+				if ( odstr[0] >= '0' && odstr[0] <= '9' ) {
+					item->ownerdraw = atoi( odstr );
+				} else {
+					int id = WiredUI_OwnerDrawIDByName( odstr );
+					if ( id == 0 ) {
+						COM_WARN( LOG_CAT_UI, "WiredUI: unknown ownerdraw name '%s'\n", odstr );
+					}
+					item->ownerdraw = id;
 				}
 			}
 		}

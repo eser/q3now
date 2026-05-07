@@ -72,9 +72,24 @@ typedef struct {
 #define CM_SURFACE_NAME_LEN       32
 #define CM_MAX_SURFACE_OVERRIDES   8
 
+// Case-insensitive FNV-1a hash for surface names. Used as a fast-reject
+// signature so per-frame skin override / skin surface lookups in tr_mesh.c
+// can skip the strcmp on hash mismatch.
+static ID_INLINE unsigned int Q_HashSurfaceName( const char *s ) {
+	unsigned int h = 2166136261u; // FNV-1a offset basis
+	while ( *s ) {
+		unsigned char c = (unsigned char)*s++;
+		if ( c >= 'A' && c <= 'Z' ) c += 'a' - 'A';
+		h ^= c;
+		h *= 16777619u;
+	}
+	return h;
+}
+
 typedef struct {
-	char      surfaceName[CM_SURFACE_NAME_LEN]; // lowercase-normalized at registration
-	qhandle_t shader;
+	char         surfaceName[CM_SURFACE_NAME_LEN]; // lowercase-normalized at registration
+	unsigned int surfaceNameHash;                  // Q_HashSurfaceName( surfaceName )
+	qhandle_t    shader;
 } cmSkinOverride_t;
 
 typedef struct {

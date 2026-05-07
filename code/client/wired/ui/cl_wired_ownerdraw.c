@@ -380,37 +380,50 @@ typedef void (*ownerDrawFunc_t)( float x, float y, float w, float h, vec4_t item
 typedef struct {
 	int              id;
 	ownerDrawFunc_t  draw;
-	const char      *name;  // for debug logging
+	const char      *name;  // script-side identifier; .wmenu writes `ownerdraw "name"`
 } ownerDrawEntry_t;
 
 static const ownerDrawEntry_t ownerDrawTable[] = {
-	// P1: most-used in TA HUD menus
-	{ CG_PLAYER_HEALTH,       WiredOD_PlayerHealth,     "CG_PLAYER_HEALTH" },
-	{ CG_PLAYER_ARMOR_VALUE,  WiredOD_PlayerArmor,      "CG_PLAYER_ARMOR_VALUE" },
-	{ CG_PLAYER_AMMO_VALUE,   WiredOD_PlayerAmmoValue,  "CG_PLAYER_AMMO_VALUE" },
-	{ CG_PLAYER_ARMOR_ICON,   WiredOD_PlayerArmorIcon,  "CG_PLAYER_ARMOR_ICON" },
-	{ CG_PLAYER_AMMO_ICON,    WiredOD_PlayerAmmoIcon,   "CG_PLAYER_AMMO_ICON" },
-	{ CG_PLAYER_ARMOR_ICON2D, WiredOD_PlayerArmorIcon,  "CG_PLAYER_ARMOR_ICON2D" },
-	{ CG_PLAYER_AMMO_ICON2D,  WiredOD_PlayerAmmoIcon,   "CG_PLAYER_AMMO_ICON2D" },
-	{ CG_PLAYER_SCORE,        WiredOD_PlayerScore,      "CG_PLAYER_SCORE" },
+	// P1: most-used in TA HUD widgets
+	{ CG_PLAYER_HEALTH,       WiredOD_PlayerHealth,     "player_health" },
+	{ CG_PLAYER_ARMOR_VALUE,  WiredOD_PlayerArmor,      "player_armor" },
+	{ CG_PLAYER_AMMO_VALUE,   WiredOD_PlayerAmmoValue,  "player_ammo" },
+	{ CG_PLAYER_ARMOR_ICON,   WiredOD_PlayerArmorIcon,  "player_armor_icon" },
+	{ CG_PLAYER_AMMO_ICON,    WiredOD_PlayerAmmoIcon,   "player_ammo_icon" },
+	{ CG_PLAYER_ARMOR_ICON2D, WiredOD_PlayerArmorIcon,  "player_armor_icon_2d" },
+	{ CG_PLAYER_AMMO_ICON2D,  WiredOD_PlayerAmmoIcon,   "player_ammo_icon_2d" },
+	{ CG_PLAYER_SCORE,        WiredOD_PlayerScore,      "player_score" },
 
 	// P2: team/CTF/match info
-	{ CG_BLUE_SCORE,          WiredOD_BlueScore,        "CG_BLUE_SCORE" },
-	{ CG_RED_SCORE,           WiredOD_RedScore,         "CG_RED_SCORE" },
-	{ CG_KILLER,              WiredOD_Killer,           "CG_KILLER" },
-	{ CG_GAME_TYPE,           WiredOD_GameType,         "CG_GAME_TYPE" },
+	{ CG_BLUE_SCORE,          WiredOD_BlueScore,        "blue_score" },
+	{ CG_RED_SCORE,           WiredOD_RedScore,         "red_score" },
+	{ CG_KILLER,              WiredOD_Killer,           "killer" },
+	{ CG_GAME_TYPE,           WiredOD_GameType,         "game_type" },
 
 	// Wired UI extensions
-	{ UI_BACKGROUND_GRID,     WiredOD_BackgroundGrid,   "UI_BACKGROUND_GRID" },
-	{ UI_BACKGROUND_FULL,     WiredOD_BackgroundFull,    "UI_BACKGROUND_FULL" },
+	{ UI_BACKGROUND_GRID,     WiredOD_BackgroundGrid,   "background_grid" },
+	{ UI_BACKGROUND_FULL,     WiredOD_BackgroundFull,   "background_full" },
 
-	// UI ownerdraw items (server browser, etc.)
-	{ UI_NETMAPPREVIEW,       WiredOD_NetMapPreview,    "UI_NETMAPPREVIEW" },
-	{ UI_PLAYERMODEL,         WiredOD_PlayerModel,      "UI_PLAYERMODEL" },
-	{ UI_EFFECTS,             WiredOD_Effects,          "UI_EFFECTS" },
+	// UI ownerdraw items (server browser, player setup, etc.)
+	{ UI_NETMAPPREVIEW,       WiredOD_NetMapPreview,    "net_map_preview" },
+	{ UI_PLAYERMODEL,         WiredOD_PlayerModel,      "player_model" },
+	{ UI_EFFECTS,             WiredOD_Effects,          "effects" },
 
 	{ 0, NULL, NULL }  // sentinel
 };
+
+// Look up an ownerdraw numeric ID by its registered script name.
+// Case-insensitive. Returns 0 (treated as "no ownerdraw") if not found.
+int WiredUI_OwnerDrawIDByName( const char *name ) {
+	int i;
+	if ( !name || !name[0] ) return 0;
+	for ( i = 0; ownerDrawTable[i].draw != NULL; i++ ) {
+		if ( ownerDrawTable[i].name && !Q_stricmp( ownerDrawTable[i].name, name ) ) {
+			return ownerDrawTable[i].id;
+		}
+	}
+	return 0;
+}
 
 // track which ownerdraw IDs we've already warned about (log once per ID)
 static unsigned long long wui_odWarnedBits[2] = {0, 0};  // 128 bits = IDs 0-127

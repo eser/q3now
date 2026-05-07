@@ -69,6 +69,24 @@ typedef struct {
 	int wrote;
 } wiredUiStateWriteCtx_t;
 
+// Open-addressing hash of wui_uiStateDefaults below. Built once by
+// WiredUI_BuildStateDefaultsHash so per-frame WiredUI_IsStoreStateKey /
+// StateDefaultValue lookups become O(1) instead of O(N) per call.
+#define WUI_STATE_DEFAULTS_BUCKETS 128
+static const wiredUiStateDefault_t *wui_stateDefaultsHash[WUI_STATE_DEFAULTS_BUCKETS];
+static qboolean wui_stateDefaultsHashBuilt = qfalse;
+
+static unsigned int WiredUI_StateKeyHash( const char *s ) {
+	unsigned int h = 2166136261u; // FNV-1a
+	while ( *s ) {
+		unsigned char c = (unsigned char)*s++;
+		if ( c >= 'A' && c <= 'Z' ) c += 'a' - 'A';
+		h ^= c;
+		h *= 16777619u;
+	}
+	return h;
+}
+
 static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_netSource", "0" },
 	{ "ui_browserGameType", "0" },
@@ -104,20 +122,43 @@ static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ NULL, NULL }
 };
 
-qboolean WiredUI_IsStoreStateKey( const char *key ) {
+// Build the open-addressing hash from wui_uiStateDefaults. Idempotent — safe
+// to call repeatedly; only the first call does work.
+static void WiredUI_BuildStateDefaultsHash( void ) {
 	const wiredUiStateDefault_t *it;
+	if ( wui_stateDefaultsHashBuilt ) return;
 
-	if ( !key || !key[0] ) {
-		return qfalse;
-	}
-
+	memset( wui_stateDefaultsHash, 0, sizeof( wui_stateDefaultsHash ) );
 	for ( it = wui_uiStateDefaults; it->key; it++ ) {
-		if ( !Q_stricmp( key, it->key ) ) {
-			return qtrue;
+		unsigned int slot = WiredUI_StateKeyHash( it->key ) & ( WUI_STATE_DEFAULTS_BUCKETS - 1 );
+		while ( wui_stateDefaultsHash[slot] ) {
+			slot = ( slot + 1 ) & ( WUI_STATE_DEFAULTS_BUCKETS - 1 );
 		}
+		wui_stateDefaultsHash[slot] = it;
 	}
+	wui_stateDefaultsHashBuilt = qtrue;
+}
 
-	return qfalse;
+// O(1) lookup. Returns NULL if `key` isn't in the table. Lazily builds the
+// hash on first call so callers don't need an explicit init step.
+static const wiredUiStateDefault_t *WiredUI_StateLookup( const char *key ) {
+	unsigned int slot, start;
+	if ( !key || !key[0] ) return NULL;
+	if ( !wui_stateDefaultsHashBuilt ) WiredUI_BuildStateDefaultsHash();
+
+	slot = WiredUI_StateKeyHash( key ) & ( WUI_STATE_DEFAULTS_BUCKETS - 1 );
+	start = slot;
+	do {
+		const wiredUiStateDefault_t *e = wui_stateDefaultsHash[slot];
+		if ( !e ) return NULL;
+		if ( !Q_stricmp( e->key, key ) ) return e;
+		slot = ( slot + 1 ) & ( WUI_STATE_DEFAULTS_BUCKETS - 1 );
+	} while ( slot != start );
+	return NULL;
+}
+
+qboolean WiredUI_IsStoreStateKey( const char *key ) {
+	return WiredUI_StateLookup( key ) != NULL;
 }
 
 static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
@@ -342,15 +383,14 @@ static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
 }
 
 static const char *WiredUI_StateDefaultValue( const char *key ) {
-	for ( const wiredUiStateDefault_t *it = wui_uiStateDefaults; it->key; it++ ) {
-		if ( !Q_stricmp( key, it->key ) ) {
-			return it->defaultValue ? it->defaultValue : "";
-		}
-	}
+	const wiredUiStateDefault_t *e = WiredUI_StateLookup( key );
+	if ( e && e->defaultValue ) return e->defaultValue;
 	return "";
 }
 
 void WiredUI_StateGetString( const char *key, char *out, int outSize ) {
+	const wiredUiStateDefault_t *def;
+
 	if ( !out || outSize <= 0 ) {
 		return;
 	}
@@ -360,28 +400,25 @@ void WiredUI_StateGetString( const char *key, char *out, int outSize ) {
 		return;
 	}
 
-	if ( WiredUI_IsStoreStateKey( key ) ) {
+	// Single hash lookup: serves both the IsStoreStateKey check and the
+	// default-value fallback below. Replaces three linear walks of
+	// wui_uiStateDefaults from the previous implementation.
+	def = WiredUI_StateLookup( key );
+
+	if ( def ) {
 		wuiStoreEntry_t *entry = WiredStore_Get( key );
 		if ( entry ) {
 			Q_strncpyz( out, entry->text, outSize );
-			if ( !out[0] ) {
-				Q_strncpyz( out, WiredUI_StateDefaultValue( key ), outSize );
+			if ( !out[0] && def->defaultValue ) {
+				Q_strncpyz( out, def->defaultValue, outSize );
 			}
 			return;
 		}
-
-		for ( const wiredUiStateDefault_t *it = wui_uiStateDefaults; it->key; it++ ) {
-			if ( !Q_stricmp( key, it->key ) ) {
-				Q_strncpyz( out, it->defaultValue ? it->defaultValue : "", outSize );
-				return;
-			}
-		}
+		Q_strncpyz( out, def->defaultValue ? def->defaultValue : "", outSize );
+		return;
 	}
 
 	Cvar_VariableStringBuffer( key, out, outSize );
-	if ( !out[0] && WiredUI_IsStoreStateKey( key ) ) {
-		Q_strncpyz( out, WiredUI_StateDefaultValue( key ), outSize );
-	}
 }
 
 int WiredUI_StateGetInt( const char *key ) {
@@ -822,6 +859,24 @@ typedef struct {
 
 static wiredPopulateEntry_t wui_populateCallbacks[WIRED_MAX_POPULATE_CALLBACKS];
 static int                   wui_numPopulateCallbacks = 0;
+
+// Open-addressing index for the populate-callback registry. Each bucket holds
+// (1 + index into wui_populateCallbacks) so 0 = empty. Per-frame
+// WiredUI_GetPopulateCallback lookups become O(1) instead of O(N) per item.
+#define WUI_POPULATE_CB_BUCKETS 64
+static unsigned char wui_populateCallbacksHash[WUI_POPULATE_CB_BUCKETS];
+
+static void WiredUI_PopulateHashInsert( int idx ) {
+	unsigned int slot = WiredUI_StateKeyHash( wui_populateCallbacks[idx].name )
+		& ( WUI_POPULATE_CB_BUCKETS - 1 );
+	while ( wui_populateCallbacksHash[slot] ) {
+		// already-present entry with the same name overwrites in place; the
+		// register path handles that before getting here, so we only land here
+		// for genuine collisions.
+		slot = ( slot + 1 ) & ( WUI_POPULATE_CB_BUCKETS - 1 );
+	}
+	wui_populateCallbacksHash[slot] = (unsigned char)( idx + 1 );
+}
 
 // ── feeder registry ───────────────────────────────────────────────────
 
@@ -1326,19 +1381,28 @@ void WiredUI_RegisterPopulateCallback( const char *name, wuiPopulateCallback_t f
 	            sizeof( wui_populateCallbacks[0].name ) );
 	wui_populateCallbacks[wui_numPopulateCallbacks].fn = fn;
 	wui_populateCallbacks[wui_numPopulateCallbacks].active = qtrue;
+	WiredUI_PopulateHashInsert( wui_numPopulateCallbacks );
 	wui_numPopulateCallbacks++;
 }
 
 wuiPopulateCallback_t WiredUI_GetPopulateCallback( const char *name ) {
+	unsigned int slot, start;
 	if ( !name || !name[0] )
 		return NULL;
 
-	for ( int i = 0; i < wui_numPopulateCallbacks; i++ ) {
-		if ( wui_populateCallbacks[i].active &&
-		     !Q_stricmp( wui_populateCallbacks[i].name, name ) ) {
-			return wui_populateCallbacks[i].fn;
+	slot = WiredUI_StateKeyHash( name ) & ( WUI_POPULATE_CB_BUCKETS - 1 );
+	start = slot;
+	do {
+		unsigned char v = wui_populateCallbacksHash[slot];
+		if ( !v ) return NULL;  // empty bucket → not registered
+		{
+			const wiredPopulateEntry_t *e = &wui_populateCallbacks[ v - 1 ];
+			if ( e->active && !Q_stricmp( e->name, name ) ) {
+				return e->fn;
+			}
 		}
-	}
+		slot = ( slot + 1 ) & ( WUI_POPULATE_CB_BUCKETS - 1 );
+	} while ( slot != start );
 	return NULL;
 }
 
@@ -1644,6 +1708,7 @@ void WiredUI_Init( qboolean inGameUI ) {
 	memset( wui_symbols, 0, sizeof( wui_symbols ) );
 	memset( wui_elements, 0, sizeof( wui_elements ) );
 	memset( wui_populateCallbacks, 0, sizeof( wui_populateCallbacks ) );
+	memset( wui_populateCallbacksHash, 0, sizeof( wui_populateCallbacksHash ) );
 	wui_numSymbols = 0;
 	wui_numElements = 0;
 	wui_numPopulateCallbacks = 0;

@@ -363,6 +363,10 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	//
 	surface = (md3Surface_t *)( (byte *)header + header->ofsSurfaces );
 	for ( int i = 0 ; i < header->numSurfaces ; i++ ) {
+		// Hash the surface name once per surface; the inner skin/override loops
+		// fast-reject on hash mismatch so strcmp only runs on a hit.
+		const unsigned int surfHash = Q_HashSurfaceName( surface->name );
+
 		if ( ent->e.customShader ) {
 			shader = R_GetShaderByHandle( ent->e.customShader );
 		} else if ( ent->e.characterSkin ) {
@@ -374,6 +378,8 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 					int csj;
 					shader = tr.defaultShader;
 					for ( csj = 0; csj < csk->overrideCount; csj++ ) {
+						if ( csk->overrides[csj].surfaceNameHash != surfHash )
+							continue;
 						if ( !strcmp( csk->overrides[csj].surfaceName, surface->name ) ) {
 							shader = R_GetShaderByHandle( csk->overrides[csj].shader );
 							break;
@@ -394,7 +400,9 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 			// match the surface name to something in the skin file
 			shader = tr.defaultShader;
 			for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-				// the names have both been lowercased
+				// the names have both been lowercased; nameHash is the fast-reject
+				if ( skin->surfaces[j].nameHash != surfHash )
+					continue;
 				if ( !strcmp( skin->surfaces[j].name, surface->name ) ) {
 					shader = skin->surfaces[j].shader;
 					break;
