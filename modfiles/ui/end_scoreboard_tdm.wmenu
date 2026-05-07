@@ -57,7 +57,7 @@ menuDef {
 		name "red_scorelist"
 		type 20
 		rect 0 0.07 0.445 0.708
-		feeder 5
+		feeder "players_red_team"
 		forecolor 1.0 0.85 0.85 0.9
 		visible 1
 		decoration
@@ -81,7 +81,7 @@ menuDef {
 		name "blue_scorelist"
 		type 20
 		rect 0.461 0.07 0.445 0.708
-		feeder 6
+		feeder "players_blue_team"
 		forecolor 0.85 0.85 1.0 0.9
 		visible 1
 		decoration

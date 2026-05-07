@@ -9,7 +9,8 @@ return {
 
   model = {
     parts      = { "head", "upper", "lower" }, -- relative base names under models/
-    icon       = "icon_64.tga",                -- relative to characters/{name}/
+    -- Icon is auto-derived from skin keys: tries characters/{name}/icon_{skinname}.{png,tga,jpg}
+    -- in skin-list order and uses the first one that resolves (see CL_Characters_RegisterIcons).
     headoffset = { 0, 0, 0 },
     skins      = {},                           -- each character provides their own skins
   },

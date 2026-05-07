@@ -1048,10 +1048,8 @@ int SV_FrameMsec( void )
 {
 	if ( sv_fps )
 	{
-		int frameMsec;
-		
-		frameMsec = 1000.0f / sv_fps->value;
-		
+		const int frameMsec = 1000 / sv_fps->integer;
+
 		if ( frameMsec < sv.timeResidual )
 			return 0;
 		else

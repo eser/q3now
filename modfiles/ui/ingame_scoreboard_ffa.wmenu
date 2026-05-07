@@ -16,7 +16,7 @@ menuDef {
 		name "scorelist"
 		type 20
 		rect 0 0 1.0 1.0
-		feeder 11
+		feeder "scoreboard"
 		forecolor 1.0 1.0 1.0 1.0
 		visible 1
 		decoration

@@ -29,7 +29,7 @@ menuDef {
 		forecolor WCOLOR_TEXT
 		backcolor 0.06 0.06 0.1 0.8
 		style 1
-		feeder 10
+		feeder "demos"
 		elementheight 16
 		columns 1 0 400 64
 		visible 1

@@ -322,6 +322,7 @@ typedef struct wiredItemDef_s {
 	int             listScrollOffset;       // first visible row (vertical) or first visible column (horizontal)
 	int             listSelectedRow;        // selected row index (-1 = none)
 	int             listScrollFadeTime;     // cls.realtime when last scrolled (for scrollbar fade)
+	int             elementtype;            // LISTBOX_TEXT or LISTBOX_IMAGE — picks how each row is drawn
 	qboolean        horizontalScroll;       // axis-flip: items flow left-to-right instead of top-to-bottom
 
 	// transition animation state (Phase 2.5)
@@ -442,15 +443,26 @@ void     WiredUI_LoadState( void );
 typedef int         (*wiredFeederCount_t)( int feederID );
 typedef const char *(*wiredFeederItemText_t)( int feederID, int index, int column );
 typedef void        (*wiredFeederSelection_t)( int feederID, int index );
+typedef qhandle_t   (*wiredFeederItemIcon_t)( int feederID, int index );
 
 #define WIRED_MAX_FEEDERS  32
 
-void     WiredUI_RegisterFeeder( int feederID,
+// Register a feeder. The symbolic `name` (e.g. "characters", "skins") is what
+// .wmenu files quote in `feeder "name"`; pass NULL/"" if the feeder is only
+// addressable by numeric ID.
+void     WiredUI_RegisterFeeder( int feederID, const char *name,
                                   wiredFeederCount_t count,
                                   wiredFeederItemText_t itemText,
                                   wiredFeederSelection_t selection );
+// Optional: attach an icon callback to a feeder so listboxes with
+// elementtype LISTBOX_IMAGE can render thumbnails per row. Call AFTER
+// WiredUI_RegisterFeeder so the feeder slot already exists.
+void     WiredUI_RegisterFeederIcon( int feederID, wiredFeederItemIcon_t icon );
+// Look up a feeder ID from its registered name. Returns 0 if not found.
+int      WiredUI_FeederIDByName( const char *name );
 int      WiredUI_FeederCount( int feederID );
 const char *WiredUI_FeederItemText( int feederID, int index, int column );
+qhandle_t WiredUI_FeederItemIcon( int feederID, int index );
 void     WiredUI_FeederSelection( int feederID, int index );
 
 // ── feeder data loading (cl_wired_feeders.c) ──────────────────────────

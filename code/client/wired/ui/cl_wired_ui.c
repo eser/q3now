@@ -546,7 +546,15 @@ static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float
 	refdef.fov_y = item->modelFovY > 0.0f ? item->modelFovY :
 		( refdef.fov_x * (float)refdef.height / (float)refdef.width );
 	refdef.time = cls.realtime;
-	AxisClear( refdef.viewaxis );
+
+	// Camera looks down -X toward the model at origin. Q3's viewaxis[0] is
+	// the forward direction; AxisClear (identity) points forward at +X,
+	// which faces AWAY from a model placed at origin while vieworg is at +X.
+	{
+		vec3_t viewangles;
+		VectorSet( viewangles, 0, 180, 0 );
+		AnglesToAxis( viewangles, refdef.viewaxis );
+	}
 
 	VectorSet( refdef.vieworg,
 		item->modelOrigin[0] != 0.0f ? item->modelOrigin[0] : 80.0f,
@@ -819,9 +827,11 @@ static int                   wui_numPopulateCallbacks = 0;
 
 typedef struct {
 	int                       feederID;
+	char                      name[32];     // optional symbolic name; .wmenu can write `feeder "name"`
 	wiredFeederCount_t        count;
 	wiredFeederItemText_t     itemText;
 	wiredFeederSelection_t    selection;
+	wiredFeederItemIcon_t     itemIcon;     // optional, NULL if feeder has no icons
 	qboolean                  active;
 } wiredFeeder_t;
 
@@ -875,7 +885,8 @@ void WiredUI_ResetAssetGlobalsDefaults( void ) {
 // Theme selection is handled inside scripts/menus.lua via the global metatable
 // cvar bridge (ui_theme readable as a Lua global). No manifest path function needed.
 
-void WiredUI_RegisterFeeder( int feederID, wiredFeederCount_t count,
+void WiredUI_RegisterFeeder( int feederID, const char *name,
+                              wiredFeederCount_t count,
                               wiredFeederItemText_t itemText,
                               wiredFeederSelection_t selection ) {
 	// update existing
@@ -884,16 +895,50 @@ void WiredUI_RegisterFeeder( int feederID, wiredFeederCount_t count,
 			wui_feeders[i].count = count;
 			wui_feeders[i].itemText = itemText;
 			wui_feeders[i].selection = selection;
+			if ( name && name[0] )
+				Q_strncpyz( wui_feeders[i].name, name, sizeof( wui_feeders[i].name ) );
 			return;
 		}
 	}
 	if ( wui_numFeeders >= WIRED_MAX_FEEDERS ) return;
 	wui_feeders[wui_numFeeders].feederID = feederID;
+	wui_feeders[wui_numFeeders].name[0] = '\0';
+	if ( name && name[0] )
+		Q_strncpyz( wui_feeders[wui_numFeeders].name, name, sizeof( wui_feeders[wui_numFeeders].name ) );
 	wui_feeders[wui_numFeeders].count = count;
 	wui_feeders[wui_numFeeders].itemText = itemText;
 	wui_feeders[wui_numFeeders].selection = selection;
+	wui_feeders[wui_numFeeders].itemIcon = NULL;
 	wui_feeders[wui_numFeeders].active = qtrue;
 	wui_numFeeders++;
+}
+
+void WiredUI_RegisterFeederIcon( int feederID, wiredFeederItemIcon_t icon ) {
+	for ( int i = 0; i < wui_numFeeders; i++ ) {
+		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID ) {
+			wui_feeders[i].itemIcon = icon;
+			return;
+		}
+	}
+}
+
+int WiredUI_FeederIDByName( const char *name ) {
+	if ( !name || !name[0] ) return 0;
+	for ( int i = 0; i < wui_numFeeders; i++ ) {
+		if ( wui_feeders[i].active && !Q_stricmp( wui_feeders[i].name, name ) ) {
+			return wui_feeders[i].feederID;
+		}
+	}
+	return 0;
+}
+
+qhandle_t WiredUI_FeederItemIcon( int feederID, int index ) {
+	for ( int i = 0; i < wui_numFeeders; i++ ) {
+		if ( wui_feeders[i].active && wui_feeders[i].feederID == feederID && wui_feeders[i].itemIcon ) {
+			return wui_feeders[i].itemIcon( feederID, index );
+		}
+	}
+	return 0;
 }
 
 int WiredUI_FeederCount( int feederID ) {
@@ -1613,13 +1658,14 @@ void WiredUI_Init( qboolean inGameUI ) {
 	wired_hud = Cvar_Get( "hud", "default", CVAR_ARCHIVE );
 	Q_strncpyz( wui_hud_lastLoaded, wired_hud->string, sizeof( wui_hud_lastLoaded ) );
 
+	// register feeder data sources first — the menu parser resolves
+	// `feeder "name"` against this registry while loading .wmenu files.
+	WiredUI_RegisterCoreFeeders();
+
 	// load menu files from scripts/menus.lua
 	WiredUI_ClearMenus();
 	WiredUI_LoadMenusFromLua();
 	WiredUI_LoadHudFromCvar();
-
-	// register feeder data sources
-	WiredUI_RegisterCoreFeeders();
 
 	if ( !WiredUI_CallLuaStoreFunction( "loadstate" ) ) {
 		WiredUI_LoadState();
@@ -2041,27 +2087,55 @@ void WiredUI_Refresh( int realtime ) {
 
 			if ( item->horizontalScroll ) {
 				/* horizontal axis: items flow left→right */
-				float colW        = item->elementheight > 0 ? item->elementheight : 64.0f;
+				float colW        = item->elementwidth > 0 ? item->elementwidth : 64.0f;
 				int   visibleCols = (int)( itemW / colW );
 				float scrollBarH  = 4.0f;
 				float contentH    = itemH;
 				int   col;
+				int   hoverCol    = -1;
+				vec4_t hoverColor = { 1, 1, 1, 0.10f };
 
 				if ( totalItems > visibleCols ) {
 					contentH -= scrollBarH + 2.0f;
 				}
 
+				/* hover detection: which cell is the cursor over? Used as a click affordance. */
+				if ( wui_cursorX >= itemX && wui_cursorX < itemX + itemW &&
+				     wui_cursorY >= itemY && wui_cursorY < itemY + contentH ) {
+					hoverCol = (int)( ( wui_cursorX - itemX ) / colW );
+					if ( hoverCol < 0 || hoverCol >= visibleCols ) hoverCol = -1;
+					else if ( item->listScrollOffset + hoverCol >= totalItems ) hoverCol = -1;
+				}
+
 				Text_SetLetterSpacing( letterSpacing );
 				for ( col = 0; col < visibleCols && ( item->listScrollOffset + col ) < totalItems; col++ ) {
-					int   dataIdx = item->listScrollOffset + col;
-					float colX    = itemX + col * colW;
-					const char *text = WiredUI_FeederItemText( feederID, dataIdx, 0 );
+					int       dataIdx = item->listScrollOffset + col;
+					float     colX    = itemX + col * colW;
+					qhandle_t icon    = ( item->elementtype == LISTBOX_IMAGE )
+					                    ? WiredUI_FeederItemIcon( feederID, dataIdx ) : 0;
+					const char *text  = ( item->elementtype != LISTBOX_IMAGE || !icon )
+					                    ? WiredUI_FeederItemText( feederID, dataIdx, 0 ) : NULL;
 
 					if ( dataIdx == item->listSelectedRow ) {
 						WUI_FillRect( colX, itemY, colW, contentH, selColor );
+					} else if ( col == hoverCol ) {
+						WUI_FillRect( colX, itemY, colW, contentH, hoverColor );
 					}
 
-					if ( text && text[0] ) {
+					if ( icon ) {
+						/* fit the icon into the cell with a small inset; preserve aspect by using min(colW, contentH) */
+						float pad   = 2.0f;
+						float side  = colW < contentH ? colW : contentH;
+						side -= pad * 2.0f;
+						if ( side < 1 ) side = 1;
+						{
+							float iconX = colX + ( colW - side ) * 0.5f;
+							float iconY = itemY + ( contentH - side ) * 0.5f;
+							re.SetColor( item->forecolor );
+							WUI_DrawPic( iconX, iconY, side, side, icon );
+							re.SetColor( NULL );
+						}
+					} else if ( text && text[0] ) {
 						float centerX = colX + colW * 0.5f;
 						Text_Draw( text, centerX, itemY + ( contentH - charSize ) * 0.5f,
 						           FONT_UI, charSize, item->forecolor, TEXT_ALIGN_CENTER, 0 );
@@ -2645,6 +2719,31 @@ static void WiredScript_SetCvar( wiredMenuDef_t *menu, wiredItemDef_t *item, int
 		}
 		Cvar_Set( args[0], args[1] );
 	}
+}
+
+// cyclecvar <cvar> <min> <max> [step]
+//   Steps an integer cvar by `step` (default 1) within [min, max], wrapping
+//   around. Used by ownerdraw items (e.g. Effect color) where each click
+//   should advance the value to the next enum.
+static void WiredScript_CycleCvar( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	int min, max, step, val, range;
+
+	if ( numArgs < 3 ) return;
+	min  = atoi( args[1] );
+	max  = atoi( args[2] );
+	step = ( numArgs >= 4 ) ? atoi( args[3] ) : 1;
+	if ( step == 0 ) step = 1;
+	if ( max < min ) { int t = min; min = max; max = t; }
+
+	val   = (int)Cvar_VariableValue( args[0] );
+	range = max - min + 1;
+	if ( range <= 0 ) return;
+
+	val = val + step;
+	// wrap into [min, max]
+	val = ( ( val - min ) % range + range ) % range + min;
+
+	Cvar_Set( args[0], va( "%d", val ) );
 }
 
 static void WiredScript_SetState( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -3413,27 +3512,27 @@ static void WiredScript_SetBackground( wiredMenuDef_t *menu, wiredItemDef_t *ite
 	}
 }
 
-// ── player model cycling ──────────────────────────────────────────────
+// ── character cycling ─────────────────────────────────────────────────
 
-extern int         WiredFeeder_GetModelCount( void );
-extern int         WiredFeeder_GetModelSelected( void );
-extern const char *WiredFeeder_GetModelName( int index );
-extern void        WiredFeeder_SetModelSelected( int index );
+extern int         WiredFeeder_GetCharacterCount( void );
+extern int         WiredFeeder_GetCharacterSelected( void );
+extern const char *WiredFeeder_GetCharacterName( int index );
+extern void        WiredFeeder_SetCharacterSelected( int index );
 
-static void WiredScript_PrevPlayerModel( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	int count = WiredFeeder_GetModelCount();
+static void WiredScript_PrevCharacter( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	int count = WiredFeeder_GetCharacterCount();
 	if ( count < 1 ) return;
-	int sel = WiredFeeder_GetModelSelected();
+	int sel = WiredFeeder_GetCharacterSelected();
 	sel = ( sel <= 0 ) ? count - 1 : sel - 1;
-	WiredFeeder_SetModelSelected( sel );
+	WiredFeeder_SetCharacterSelected( sel );
 }
 
-static void WiredScript_NextPlayerModel( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	int count = WiredFeeder_GetModelCount();
+static void WiredScript_NextCharacter( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	int count = WiredFeeder_GetCharacterCount();
 	if ( count < 1 ) return;
-	int sel = WiredFeeder_GetModelSelected();
+	int sel = WiredFeeder_GetCharacterSelected();
 	sel = ( sel >= count - 1 ) ? 0 : sel + 1;
-	WiredFeeder_SetModelSelected( sel );
+	WiredFeeder_SetCharacterSelected( sel );
 }
 
 // ── uiScript ─────────────────────────────────────────────────────────
@@ -3462,8 +3561,8 @@ static const wiredUiScriptEntry_t wiredUiScripts[] = {
 	{ "StopRefresh",      NULL },  // noop — server queries are fire-and-forget
 	{ "closeJoin",        NULL },
 	{ "closeingame",      NULL },
-	{ "prevPlayerModel",  WiredScript_PrevPlayerModel },
-	{ "nextPlayerModel",  WiredScript_NextPlayerModel },
+	{ "prevCharacter",    WiredScript_PrevCharacter },
+	{ "nextCharacter",    WiredScript_NextCharacter },
 	{ NULL, NULL }
 };
 
@@ -3546,6 +3645,7 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "open",             WiredScript_Open },
 	{ "close",            WiredScript_Close },
 	{ "setcvar",          WiredScript_SetCvar },
+	{ "cyclecvar",        WiredScript_CycleCvar },
 	{ "setstate",         WiredScript_SetState },
 	{ "savestate",        WiredScript_SaveState },
 	{ "loadstate",        WiredScript_LoadState },
@@ -4264,14 +4364,22 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				break;
 			}
 
-			// LISTBOX items: click to select row
+			// LISTBOX items: click to select row (or column, in horizontal mode)
 			if ( focusedItem->type == ITEM_TYPE_LISTBOX && focusedItem->feeder != 0 ) {
-				float rowH = focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f;
-				float menuOY = menu->fullscreen ? 0 : menu->rect.y;
-				float scrollOff = menu->scrollOffset;
-				float listAbsY = menuOY + focusedItem->rect.y - scrollOff;
-				int clickedRow = (int)( ( wui_cursorY - listAbsY ) / rowH ) + focusedItem->listScrollOffset;
-				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
+				int   clickedRow;
+				int   total = WiredUI_FeederCount( (int)focusedItem->feeder );
+
+				if ( focusedItem->horizontalScroll ) {
+					float colW     = focusedItem->elementwidth > 0 ? focusedItem->elementwidth : 64.0f;
+					float menuOX   = menu->fullscreen ? 0 : menu->rect.x;
+					float listAbsX = menuOX + focusedItem->rect.x;
+					clickedRow = (int)( ( wui_cursorX - listAbsX ) / colW ) + focusedItem->listScrollOffset;
+				} else {
+					float rowH     = focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f;
+					float menuOY   = menu->fullscreen ? 0 : menu->rect.y;
+					float listAbsY = menuOY + focusedItem->rect.y - menu->scrollOffset;
+					clickedRow = (int)( ( wui_cursorY - listAbsY ) / rowH ) + focusedItem->listScrollOffset;
+				}
 
 				if ( clickedRow >= 0 && clickedRow < total ) {
 					focusedItem->listSelectedRow = clickedRow;
@@ -4407,7 +4515,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
 				int visible, step;
 				if ( focusedItem->horizontalScroll ) {
-					float colW = focusedItem->elementheight > 0 ? focusedItem->elementheight : 64.0f;
+					float colW = focusedItem->elementwidth > 0 ? focusedItem->elementwidth : 64.0f;
 					visible = (int)( focusedItem->rect.w / colW );
 				} else {
 					float rowH = focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f;
@@ -4437,17 +4545,37 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_KP_RIGHTARROW:
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX
 			     && focusedItem->horizontalScroll && focusedItem->feeder != 0 ) {
-				/* horizontal listbox: left/right scrolls items */
+				/* horizontal listbox: left/right moves the selection.
+				   Auto-scrolls to keep the selection in view. */
 				int total   = WiredUI_FeederCount( (int)focusedItem->feeder );
-				float colW  = focusedItem->elementheight > 0 ? focusedItem->elementheight : 64.0f;
+				float colW  = focusedItem->elementwidth > 0 ? focusedItem->elementwidth : 64.0f;
 				int visible = (int)( focusedItem->rect.w / colW );
 				int dir     = ( key == K_LEFTARROW || key == K_KP_LEFTARROW ) ? -1 : 1;
-				focusedItem->listScrollOffset += dir;
+				int sel     = focusedItem->listSelectedRow;
+
+				if ( total <= 0 ) break;
+				if ( visible < 1 ) visible = 1;
+
+				if ( sel < 0 ) sel = ( dir > 0 ) ? 0 : total - 1;
+				else           sel += dir;
+				if ( sel < 0 )       sel = 0;
+				if ( sel >= total )  sel = total - 1;
+
+				if ( sel != focusedItem->listSelectedRow ) {
+					focusedItem->listSelectedRow = sel;
+					WiredUI_FeederSelection( (int)focusedItem->feeder, sel );
+					if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
+				}
+
+				/* keep the selection visible: scroll if it left the window */
+				if ( sel < focusedItem->listScrollOffset ) {
+					focusedItem->listScrollOffset = sel;
+					focusedItem->listScrollFadeTime = cls.realtime;
+				} else if ( sel >= focusedItem->listScrollOffset + visible ) {
+					focusedItem->listScrollOffset = sel - visible + 1;
+					focusedItem->listScrollFadeTime = cls.realtime;
+				}
 				if ( focusedItem->listScrollOffset < 0 ) focusedItem->listScrollOffset = 0;
-				if ( focusedItem->listScrollOffset > total - visible )
-					focusedItem->listScrollOffset = total - visible;
-				if ( focusedItem->listScrollOffset < 0 ) focusedItem->listScrollOffset = 0;
-				focusedItem->listScrollFadeTime = cls.realtime;
 			}
 			else if ( focusedItem && focusedItem->cvar[0] ) {
 				/* left/right adjusts sliders and cycles multi items */
