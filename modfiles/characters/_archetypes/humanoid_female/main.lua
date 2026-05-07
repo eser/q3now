@@ -3,7 +3,7 @@
 -- No current characters use this; sounds share humanoid_male assets for MVP.
 return {
   sounds = {
-    footsteps = "normal",
+    gender = "female",
   },
 
   stats = {

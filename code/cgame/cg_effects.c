@@ -867,6 +867,63 @@ void CG_BigExplode( vec3_t playerOrigin ) {
 	CG_LaunchExplode( origin, velocity, cgs.media.smoke2 );
 }
 
+/*
+============
+CG_LightningSparks
+Blue spark shower for lightning gun wall impacts. Called every frame
+the LG beam is hitting a surface, so each call emits a small handful;
+they accumulate into a continuous shower while firing. Skips water.
+Direction is the surface-outward vector (sparks fly away from wall).
+============
+*/
+void CG_LightningSparks( vec3_t origin, vec3_t dir ) {
+	int				i, count, j;
+	localEntity_t	*le;
+	refEntity_t		*re;
+
+	if ( trap_CM_PointContents( origin, 0 ) & CONTENTS_WATER ) {
+		return;
+	}
+
+	count = 3;
+	for ( i = 0; i < count; i++ ) {
+		le = CG_AllocLocalEntity();
+		le->leFlags = LEF_PUFF_DONT_SCALE;
+		le->leType = LE_MOVE_SCALE_FADE;
+		le->startTime = cg.time;
+		le->endTime = cg.time + 200 + ( rand() & 0xff );
+		le->lifeRate = 1.0f / ( le->endTime - le->startTime );
+
+		re = &le->refEntity;
+		re->reType = RT_SPRITE;
+		re->rotation = 0;
+		re->radius = 1.5f + random() * 1.5f;
+		re->customShader = cgs.media.lightningSparkShader;
+		// blue tint via rgbGen vertex
+		re->shaderRGBA[0] = 0x55;
+		re->shaderRGBA[1] = 0x99;
+		re->shaderRGBA[2] = 0xff;
+		re->shaderRGBA[3] = 0xff;
+
+		le->color[0] = 0x55 / 255.0f;
+		le->color[1] = 0x99 / 255.0f;
+		le->color[2] = 1.0f;
+		le->color[3] = 1.0f;
+
+		le->pos.trType = TR_GRAVITY;
+		le->pos.trTime = cg.time;
+		VectorCopy( origin, le->pos.trBase );
+
+		// fan around the surface normal, then push along it
+		for ( j = 0; j < 3; j++ ) {
+			le->pos.trDelta[j] = dir[j] + crandom() * 0.7f;
+		}
+		VectorNormalize( le->pos.trDelta );
+		VectorScale( le->pos.trDelta, 100.0f + random() * 200.0f, le->pos.trDelta );
+		le->pos.trDelta[2] += random() * 100.0f;
+	}
+}
+
 #if FEAT_IMPACT_SPARKS
 /*
 ============

@@ -13,11 +13,13 @@ return {
     -- String-form skin: one texture applied to every surface via customShader.
     -- Table-form skin with paintable=true: per-surface .skin file via customSkin.
     skins = {
-      default           = "./visor_default.jpg",
-      default_paintable = { paintable = true,
-                            u_torso = "./visor_paintable.tga",
-                            l_legs  = "./visor_paintable.tga",
-                            h_head  = "./visor_paintable.tga" },
+      default       = { paintable = true,
+                        u_torso = "./skin_default.tga",
+                        l_legs  = "./skin_default.tga",
+                        h_head  = "./skin_default.tga" },
+      original      = "./skin_original.jpg",
+      deadlight     = "./skin_deadlight.jpg",
+      shade         = "./skin_shade.jpg",
     },
   },
 }

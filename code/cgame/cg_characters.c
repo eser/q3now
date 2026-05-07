@@ -33,9 +33,9 @@ static qboolean MissWarnOnce( const char *a, const char *b ) {
 
 // Sound slot names — order matches CSOUND_* defines in cg_public.h
 static const char *s_soundSlotName[CM_SOUND_SLOTS] = {
-	"death1", "death2", "death3", "jump",
+	"death1", "death2", "death3", "jump1",
 	"pain25", "pain50", "pain75", "pain100",
-	"falling", "gasp", "drown", "fall", "taunt",
+	"falling1", "gasp1", "drown1", "fall1", "taunt1",
 };
 
 // ── CG_LoadCharacter ──────────────────────────────────────────────────────
@@ -208,9 +208,6 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 		}
 	}
 
-	// ── Footsteps ───────────────────────────────────────────────────────────
-	ci->footsteps = (footstep_t)mf.footsteps;
-
 	// ── Sounds ──────────────────────────────────────────────────────────────
 	// Fallback chain: character → archetype → _base (hard fail + warning if all miss)
 	const char *archetype = mf.archetypeName;   // guaranteed non-empty: validator enforces this
@@ -240,11 +237,11 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 	// ── Effects sounds ────────────────────────────────────────────────────
 	// Convention: characters/{name}/sounds/{slot}.opus, archetype fallback.
 	static const struct { const char *slot; size_t offset; } s_effectSlots[] = {
-		{ "gib",      offsetof( clientInfo_t, effects.gibSound )    },
-		{ "land",     offsetof( clientInfo_t, effects.landSound )   },
-		{ "water_in", offsetof( clientInfo_t, effects.watrInSound ) },
-		{ "water_out",offsetof( clientInfo_t, effects.watrOutSound) },
-		{ "water_un", offsetof( clientInfo_t, effects.watrUnSound ) },
+		{ "gib_split1", offsetof( clientInfo_t, effects.gibSound )    },
+		{ "land1",      offsetof( clientInfo_t, effects.landSound )   },
+		{ "water_in1",  offsetof( clientInfo_t, effects.watrInSound ) },
+		{ "water_out1", offsetof( clientInfo_t, effects.watrOutSound) },
+		{ "water_un1",  offsetof( clientInfo_t, effects.watrUnSound ) },
 	};
 	for ( i = 0; i < (int)(sizeof(s_effectSlots)/sizeof(s_effectSlots[0])); i++ ) {
 		sfxHandle_t *dest = (sfxHandle_t *)( (char *)ci + s_effectSlots[i].offset );
@@ -268,31 +265,31 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 	}
 
 	// ── Footstep sounds ───────────────────────────────────────────────────
-	// Convention: characters/_archetypes/{archetype}/footsteps/{type}/step{1,2,3,4}.opus
-	// Character override: characters/{name}/footsteps/{type}/step{1,2,3,4}.opus
+	// Convention: characters/_archetypes/{archetype}/footsteps/{type}{1,2,3,4}.opus
+	// Character override: characters/{name}/footsteps/{type}{1,2,3,4}.opus
 	static const char *s_footstepTypes[] = {
-		"normal", "boot", "flesh", "mech", "energy", "metal", "splash"
+		"normal", "metal", "splash"
 	};
 	for ( int ft = 0; ft < FOOTSTEP_TOTAL; ft++ ) {
 		for ( int v = 0; v < 4; v++ ) {
 			// Character-level override first
 			sfxHandle_t h = trap_S_RegisterSound(
-				va( "characters/%s/footsteps/%s/step%d.opus", charName, s_footstepTypes[ft], v + 1 ),
+				va( "characters/%s/sounds/footsteps/%s%d.opus", charName, s_footstepTypes[ft], v + 1 ),
 				qfalse );
 			if ( !h ) {
 				h = trap_S_RegisterSound(
-					va( "characters/_archetypes/%s/footsteps/%s/step%d.opus",
+					va( "characters/_archetypes/%s/sounds/footsteps/%s%d.opus",
 						archetype, s_footstepTypes[ft], v + 1 ), qfalse );
 			}
 			// Fix C: _base tier
 			if ( !h ) {
 				h = trap_S_RegisterSound(
-					va( "characters/_archetypes/_base/footsteps/%s/step%d.opus",
+					va( "characters/_archetypes/_base/sounds/footsteps/%s%d.opus",
 						s_footstepTypes[ft], v + 1 ), qfalse );
 			}
 			// Warn once per (charName, footstepType) if all three tiers failed
 			if ( !h && v == 0 && MissWarnOnce( charName, s_footstepTypes[ft] ) ) {
-				Com_Log( SEV_INFO, LOG_CAT_CGAME, "^3characters/{%s,_archetypes/%s,_archetypes/_base}/footsteps/%s/step{1,2,3,4}.opus not found, using default\n",
+				Com_Log( SEV_INFO, LOG_CAT_CGAME, "^3characters/{%s,_archetypes/%s,_archetypes/_base}/sounds/footsteps/%s{1,2,3,4}.opus not found, using default\n",
 					charName, archetype, s_footstepTypes[ft] );
 			}
 			ci->footstepSounds[ft][v] = h;

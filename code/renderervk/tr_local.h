@@ -2259,6 +2259,6 @@ void vk_shutdown_compute( void );
 void RE_AddRailTrailParams( const railTrailParams_t *params );
 
 // tr_surface.c — GPU rail trail draw
-void RB_DrawRailTrailGPU( int numSegments );
+void RB_DrawRailTrailGPU( int slot, int numSegments );
 
 #endif //TR_LOCAL_H

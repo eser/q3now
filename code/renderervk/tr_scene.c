@@ -356,22 +356,35 @@ Copies the params struct to the mapped input SSBO and queues a compute dispatch.
 =====================
 */
 void RE_AddRailTrailParams( const railTrailParams_t *params ) {
-	if ( !vk.computeAvailable || !vk.rail.params_ptr || !r_railGPU->integer )
+	int frame, slot;
+	byte *dst;
+
+	if ( !vk.computeAvailable || !r_railGPU->integer )
 		return;
 
 	if ( vk.numRailDispatches >= MAX_GPU_RAIL_TRAILS )
 		return;
 
-	// copy params to the mapped SSBO — HOST_COHERENT makes this immediately visible to GPU
-	memcpy( vk.rail.params_ptr, params, sizeof( railTrailParams_t ) );
+	frame = vk.cmd_index;
+	slot  = vk.numRailDispatches;
+
+	if ( vk.rail.params_ptr[frame] == NULL )
+		return;
+
+	// Write into this frame's slot. The GPU reads via the descriptor's dynamic
+	// offset bound at dispatch time, so each in-flight frame and each trail
+	// within a frame has its own non-overlapping memory. Stride is padded to
+	// minStorageBufferOffsetAlignment so the dynamic offsets stay legal.
+	dst = vk.rail.params_ptr[frame] + (size_t)slot * vk.rail.params_slot_stride;
+	memcpy( dst, params, sizeof( railTrailParams_t ) );
 
 	// queue the dispatch
-	vk.railDispatch[ vk.numRailDispatches ].numSegments = (int)params->params[3];
-	vk.railDispatch[ vk.numRailDispatches ].beamLen = params->start[3];
-	vk.railDispatch[ vk.numRailDispatches ].frac = params->beamAxis[3];
-	vk.railDispatch[ vk.numRailDispatches ].curRadius = params->params[0];
-	vk.railDispatch[ vk.numRailDispatches ].curSpacing = params->params[1];
-	vk.railDispatch[ vk.numRailDispatches ].curWidth = params->params[2];
+	vk.railDispatch[ slot ].numSegments = (int)params->params[3];
+	vk.railDispatch[ slot ].beamLen     = params->start[3];
+	vk.railDispatch[ slot ].frac        = params->beamAxis[3];
+	vk.railDispatch[ slot ].curRadius   = params->params[0];
+	vk.railDispatch[ slot ].curSpacing  = params->params[1];
+	vk.railDispatch[ slot ].curWidth    = params->params[2];
 	vk.numRailDispatches++;
 }
 

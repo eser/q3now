@@ -3,7 +3,7 @@
 -- Sounds convention: characters/_archetypes/mechanized_male/sounds/{slot}.opus
 return {
   sounds = {
-    footsteps = "mech",
+    gender = "male",
   },
 
   stats = {

@@ -360,6 +360,55 @@ lightningArc
 	}
 }
 
+lightningBolt
+{
+	cull none
+	{
+		map gfx/misc/lightningbolt.jpg
+		blendfunc add
+		tcMod scale 1.5 1
+		tcMod scroll -1.8 0
+	}
+	{
+		map gfx/misc/lightningbolt.jpg
+		blendfunc add
+		tcMod scale -1.5 -1
+		tcMod scroll -4 0
+	}
+}
+
+
+lightningBoltNPM
+{
+	nopicmip
+	cull none
+	{
+		map gfx/misc/lightningbolt.jpg
+		blendfunc add
+		tcMod scale 1.5 1
+		tcMod scroll -1.8 0
+	}
+	{
+		map gfx/misc/lightningbolt.jpg
+		blendfunc add
+		tcMod scale -1.5 -1
+		tcMod scroll -4 0
+	}
+}
+
+// Additive grayscale particle, rgbGen vertex
+// so per-entity shaderRGBA controls the tint.
+gfx/misc/particle
+{
+	nopicmip
+	cull none
+	{
+		map gfx/misc/particle.png
+		blendfunc gl_one gl_one
+		rgbGen vertex
+	}
+}
+
 // ── Glass Cloaking ──────────────────────────────────────────────────
 powerups/glassCloaking
 {
