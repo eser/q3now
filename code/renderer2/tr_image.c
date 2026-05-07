@@ -3177,6 +3177,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 		if ( skin->numSurfaces < MAX_SKIN_SURFACES ) {
 			surf = &parseSurfaces[skin->numSurfaces];
 			Q_strncpyz( surf->name, surfName, sizeof( surf->name ) );
+			surf->nameHash = Q_HashSurfaceName( surf->name );
 			surf->shader = R_FindShader( token, LIGHTMAP_NONE, qtrue );
 			skin->numSurfaces++;
 		}

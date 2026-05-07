@@ -72,7 +72,7 @@ menuDef {
 		rect 0.045 0.280 0.360 0.060
 		style 0
 		text "Effect:"
-		ownerdraw UI_EFFECTS
+		ownerdraw "effects"
 		font "oxanium" 13
 		forecolor WCOLOR_TEXT
 		action { cyclecvar "color1" 0 7 1 }
@@ -135,7 +135,7 @@ menuDef {
 
 	itemDef {
 		name "modelselection"
-		ownerdraw UI_PLAYERMODEL
+		ownerdraw "player_model"
 		rect 0.460 0.200 0.330 0.300
 		style 1
 		decoration

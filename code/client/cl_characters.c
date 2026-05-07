@@ -354,6 +354,8 @@ static qhandle_t CL_RegisterCharacterSkin( const clParsedSkin_t *parsed ) {
 			Q_strncpyz( entry->skin.overrides[i].surfaceName,
 				parsed->overrides[i].surface, CM_SURFACE_NAME_LEN );
 			Q_strlwr( entry->skin.overrides[i].surfaceName );
+			entry->skin.overrides[i].surfaceNameHash =
+				Q_HashSurfaceName( entry->skin.overrides[i].surfaceName );
 			Q_strncpyz( entry->overridePaths[i].path,
 				parsed->overrides[i].path, MAX_QPATH );
 			if ( re.RegisterShaderLightMap && parsed->overrides[i].path[0] )

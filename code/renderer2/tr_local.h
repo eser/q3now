@@ -810,8 +810,9 @@ typedef struct {
 
 // skins allow models to be retextured without modifying the model file
 typedef struct {
-	char		name[MAX_QPATH];
-	shader_t	*shader;
+	char         name[MAX_QPATH];
+	unsigned int nameHash;       // Q_HashSurfaceName( name ) — fast-reject in tr_mesh.c
+	shader_t    *shader;
 } skinSurface_t;
 
 typedef struct skin_s {
