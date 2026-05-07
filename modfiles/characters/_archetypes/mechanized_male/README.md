@@ -2,7 +2,7 @@
 
 Archetype defaults for mechanized/cybernetic male characters. Currently used by: Visor, Keel.
 
-Overrides `_base` for slots where a mechanical/robotic voice is appropriate. Footsteps default to the `mech` surface bank.
+Overrides `_base` for slots where a mechanical/robotic voice is appropriate.
 
 ## Source
 

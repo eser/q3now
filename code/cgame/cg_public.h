@@ -27,7 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 
-#define	CMD_BACKUP			64	
+#define	CMD_BACKUP			64
 #define	CMD_MASK			(CMD_BACKUP - 1)
 // allow a lot of command backups for very fast systems
 // multiple commands may be combined into a single packet, so this
@@ -247,10 +247,6 @@ typedef enum {
 
 typedef enum {
 	FOOTSTEP_NORMAL,
-	FOOTSTEP_BOOT,
-	FOOTSTEP_FLESH,
-	FOOTSTEP_MECH,
-	FOOTSTEP_ENERGY,
 	FOOTSTEP_METAL,
 	FOOTSTEP_SPLASH,
 	FOOTSTEP_TOTAL
@@ -307,7 +303,6 @@ typedef struct {
 	char  soundPaths[CM_SOUND_SLOTS][MAX_QPATH];
 
 	// Model config
-	int   footsteps;   // footstep_t enum value
 	int   gender;      // gender_t enum value
 	float headOffset[3];
 	int   fixedLegs;
@@ -659,7 +654,7 @@ typedef enum {
 	CG_LAST_ATTACKER,
 //	int (*CG_LastAttacker)( void );
 
-	CG_KEY_EVENT, 
+	CG_KEY_EVENT,
 //	void	(*CG_KeyEvent)( int key, qboolean down );
 
 	CG_MOUSE_EVENT,

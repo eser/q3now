@@ -2972,8 +2972,9 @@ qboolean vk_init_compute( void ) {
 	}
 
 	memset( bindings, 0, sizeof( bindings ) );
+	// binding 0: per-trail params, dynamic offset selects the slot at bind time
 	bindings[0].binding = 0;
-	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
 	bindings[0].descriptorCount = 1;
 	bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
@@ -3054,10 +3055,6 @@ static VkPipeline vk_create_compute_pipeline( VkShaderModule compModule, VkPipel
 vk_init_rail_compute — allocate SSBOs + create pipelines for GPU rail trail
 ===============
 */
-#define RAIL_GPU_VERTEX_SIZE    48
-#define RAIL_GPU_MAX_VERTS      (2048 * 4)
-#define RAIL_GPU_PARAMS_SIZE    656
-
 void vk_init_rail_compute( void ) {
 	VkBufferCreateInfo bufInfo;
 	VkMemoryRequirements memReq;
@@ -3067,6 +3064,7 @@ void vk_init_rail_compute( void ) {
 	VkDescriptorBufferInfo bufInfos[2];
 	uint32_t memType;
 	uint32_t outputSize;
+	uint32_t paramsBufferSize;
 	int i;
 
 	if ( !vk.computeAvailable )
@@ -3075,29 +3073,42 @@ void vk_init_rail_compute( void ) {
 	if ( !vk.modules.rail_helix_cs )
 		return;
 
+	// Slot stride must satisfy minStorageBufferOffsetAlignment; the actual
+	// payload (656 bytes) is unchanged, only the slot-to-slot stride grows.
+	vk.rail.params_slot_stride = (uint32_t)PAD( RAIL_GPU_PARAMS_SIZE, vk.storage_alignment );
+	paramsBufferSize = MAX_GPU_RAIL_TRAILS * vk.rail.params_slot_stride;
+
 	outputSize = RAIL_GPU_MAX_VERTS * RAIL_GPU_VERTEX_SIZE;
 
+	// per-frame params buffers (HOST_COHERENT, slotted by MAX_GPU_RAIL_TRAILS)
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size = paramsBufferSize;
+		bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.rail.params_buffer[i] ) );
+		qvkGetBufferMemoryRequirements( vk.device, vk.rail.params_buffer[i], &memReq );
+		memType = find_memory_type( memReq.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memReq.size;
+		allocInfo.memoryTypeIndex = memType;
+
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.rail.params_memory[i] ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.rail.params_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.rail.params_ptr[i] ) );
+		qvkBindBufferMemory( vk.device, vk.rail.params_buffer[i], vk.rail.params_memory[i], 0 );
+	}
+
+	// per-frame vertex output buffers (DEVICE_LOCAL in release; host-visible in debug)
 	memset( &bufInfo, 0, sizeof( bufInfo ) );
 	bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufInfo.size = RAIL_GPU_PARAMS_SIZE;
+	bufInfo.size = outputSize;
 	bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-	VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.rail.params_buffer ) );
-	qvkGetBufferMemoryRequirements( vk.device, vk.rail.params_buffer, &memReq );
-	memType = find_memory_type( memReq.memoryTypeBits,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-
-	memset( &allocInfo, 0, sizeof( allocInfo ) );
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memReq.size;
-	allocInfo.memoryTypeIndex = memType;
-
-	VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.rail.params_memory ) );
-	VK_CHECK( qvkMapMemory( vk.device, vk.rail.params_memory, 0, VK_WHOLE_SIZE, 0, (void**)&vk.rail.params_ptr ) );
-	qvkBindBufferMemory( vk.device, vk.rail.params_buffer, vk.rail.params_memory, 0 );
-
-	bufInfo.size = outputSize;
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		VkMemoryPropertyFlags memFlags;
@@ -3112,6 +3123,8 @@ void vk_init_rail_compute( void ) {
 #endif
 		memType = find_memory_type( memReq.memoryTypeBits, memFlags );
 
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 		allocInfo.allocationSize = memReq.size;
 		allocInfo.memoryTypeIndex = memType;
 
@@ -3129,20 +3142,22 @@ void vk_init_rail_compute( void ) {
 		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.rail.descriptor[i] ) );
 
 		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = vk.rail.params_buffer;
+		// Dynamic params binding: 'range' is one slot's worth; the dynamic
+		// offset at bind time selects which slot the shader sees.
+		bufInfos[0].buffer = vk.rail.params_buffer[i];
 		bufInfos[0].offset = 0;
-		bufInfos[0].range = RAIL_GPU_PARAMS_SIZE;
+		bufInfos[0].range  = RAIL_GPU_PARAMS_SIZE;
 
 		bufInfos[1].buffer = vk.rail.vertex_buffer[i];
 		bufInfos[1].offset = 0;
-		bufInfos[1].range = outputSize;
+		bufInfos[1].range  = outputSize;
 
 		memset( writes, 0, sizeof( writes ) );
 		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[0].dstSet = vk.rail.descriptor[i];
 		writes[0].dstBinding = 0;
 		writes[0].descriptorCount = 1;
-		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
 		writes[0].pBufferInfo = &bufInfos[0];
 
 		writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -3290,16 +3305,16 @@ void vk_shutdown_rail_compute( void ) {
 		qvkDestroyPipeline( vk.device, vk.rail.graphics_pipeline, NULL );
 		vk.rail.graphics_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.rail.params_buffer != VK_NULL_HANDLE ) {
-		qvkDestroyBuffer( vk.device, vk.rail.params_buffer, NULL );
-		if ( vk.rail.params_memory != VK_NULL_HANDLE ) {
-			qvkFreeMemory( vk.device, vk.rail.params_memory, NULL );
-		}
-		vk.rail.params_buffer = VK_NULL_HANDLE;
-		vk.rail.params_memory = VK_NULL_HANDLE;
-		vk.rail.params_ptr = NULL;
-	}
 	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.rail.params_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.rail.params_buffer[i], NULL );
+			if ( vk.rail.params_memory[i] != VK_NULL_HANDLE ) {
+				qvkFreeMemory( vk.device, vk.rail.params_memory[i], NULL );
+			}
+			vk.rail.params_buffer[i] = VK_NULL_HANDLE;
+			vk.rail.params_memory[i] = VK_NULL_HANDLE;
+			vk.rail.params_ptr   [i] = NULL;
+		}
 		if ( vk.rail.vertex_buffer[i] != VK_NULL_HANDLE ) {
 			qvkDestroyBuffer( vk.device, vk.rail.vertex_buffer[i], NULL );
 			if ( vk.rail.vertex_memory[i] != VK_NULL_HANDLE ) {
@@ -3317,9 +3332,11 @@ void vk_shutdown_rail_compute( void ) {
 RB_DrawRailTrailGPU — render compute-generated rail trail vertices
 ===============
 */
-void RB_DrawRailTrailGPU( int numSegments ) {
+void RB_DrawRailTrailGPU( int slot, int numSegments ) {
 	VkCommandBuffer cmd;
 	int frameIdx;
+	uint32_t paramsOffset;
+	int vertexBaseIndex;
 
 	if ( !vk.computeAvailable || vk.rail.graphics_pipeline == VK_NULL_HANDLE )
 		return;
@@ -3329,11 +3346,14 @@ void RB_DrawRailTrailGPU( int numSegments ) {
 
 	cmd = vk.cmd->command_buffer;
 	frameIdx = vk.cmd_index;
+	paramsOffset    = (uint32_t)slot * vk.rail.params_slot_stride;
+	vertexBaseIndex = slot * RAIL_GPU_VERTS_PER_TRAIL;
 
 	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.rail.graphics_pipeline );
 
 	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.pipeline_layout_compute, 0, 1, &vk.rail.descriptor[frameIdx], 0, NULL );
+		vk.pipeline_layout_compute, 0, 1, &vk.rail.descriptor[frameIdx],
+		1, &paramsOffset );
 
 	{
 		float mvp[16];
@@ -3341,6 +3361,10 @@ void RB_DrawRailTrailGPU( int numSegments ) {
 			backEnd.viewParms.projectionMatrix, mvp );
 		qvkCmdPushConstants( cmd, vk.pipeline_layout_compute,
 			VK_SHADER_STAGE_VERTEX_BIT, 0, 64, mvp );
+		// Vertex shader reads its slot's vertex base from offset 64 of the
+		// shared push range so it can index into vertex_buffer[slot * VERTS_PER_TRAIL ..].
+		qvkCmdPushConstants( cmd, vk.pipeline_layout_compute,
+			VK_SHADER_STAGE_VERTEX_BIT, 64, sizeof( int ), &vertexBaseIndex );
 	}
 
 	{
@@ -3382,6 +3406,7 @@ vk_dispatch_rail_compute — dispatch compute shader for active rail trails
 static void vk_dispatch_rail_compute( void ) {
 	int frameIdx;
 	VkCommandBuffer cmd;
+	qboolean dispatched;
 
 	if ( vk.numRailDispatches == 0 )
 		return;
@@ -3389,35 +3414,54 @@ static void vk_dispatch_rail_compute( void ) {
 	frameIdx = vk.cmd_index;
 	cmd = vk.cmd->command_buffer;
 
+	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.rail.compute_pipeline );
+
+	dispatched = qfalse;
 	for ( int i = 0; i < vk.numRailDispatches; i++ ) {
 		int numSegs = vk.railDispatch[i].numSegments;
+		uint32_t paramsOffset;
+		int      vertexBaseIndex;
 
 		if ( numSegs < 2 )
 			continue;
 
-		qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.rail.compute_pipeline );
+		// Each trail reads its own params slot (dynamic offset) and writes
+		// its own region of the output vertex buffer. Slots are disjoint, so
+		// the dispatches don't fight over memory and need no compute→compute
+		// barrier between them.
+		paramsOffset    = (uint32_t)i * vk.rail.params_slot_stride;
+		vertexBaseIndex = i * RAIL_GPU_VERTS_PER_TRAIL;
+
 		qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-			vk.pipeline_layout_compute, 0, 1, &vk.rail.descriptor[frameIdx], 0, NULL );
+			vk.pipeline_layout_compute, 0, 1, &vk.rail.descriptor[frameIdx],
+			1, &paramsOffset );
+
+		// Compute reads vertexBaseIndex from offset 64 of the shared push range
+		// (offset 0..63 holds the vertex shader's mat4 mvp).
+		qvkCmdPushConstants( cmd, vk.pipeline_layout_compute,
+			VK_SHADER_STAGE_COMPUTE_BIT, 64, sizeof( int ), &vertexBaseIndex );
 
 		qvkCmdDispatch( cmd, ( numSegs + 63 ) / 64, 1, 1 );
+		dispatched = qtrue;
+	}
 
-		{
-			VkBufferMemoryBarrier barrier;
-			memset( &barrier, 0, sizeof( barrier ) );
-			barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-			barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			barrier.buffer = vk.rail.vertex_buffer[frameIdx];
-			barrier.offset = 0;
-			barrier.size = VK_WHOLE_SIZE;
+	if ( dispatched ) {
+		// One barrier covers every dispatch above: compute writes → vertex reads.
+		VkBufferMemoryBarrier barrier;
+		memset( &barrier, 0, sizeof( barrier ) );
+		barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.buffer = vk.rail.vertex_buffer[frameIdx];
+		barrier.offset = 0;
+		barrier.size = VK_WHOLE_SIZE;
 
-			qvkCmdPipelineBarrier( cmd,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-				0, 0, NULL, 1, &barrier, 0, NULL );
-		}
+		qvkCmdPipelineBarrier( cmd,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+			0, 0, NULL, 1, &barrier, 0, NULL );
 	}
 
 	// dispatch queue cleared after draw in tr_backend.c
@@ -6401,7 +6445,7 @@ void vk_initialize( void )
 		//pool_size[2].descriptorCount = NUM_COMMAND_BUFFERS;
 
 		pool_size[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
-		pool_size[2].descriptorCount = 1;
+		pool_size[2].descriptorCount = 1 + NUM_COMMAND_BUFFERS; // generic storage + per-frame rail params
 
 		pool_size[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		pool_size[3].descriptorCount = 8;

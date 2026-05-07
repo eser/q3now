@@ -1,9 +1,8 @@
 -- characters/_archetypes/humanoid_male/main.lua
--- Archetype defaults for masculine humanoid characters (Sarge, Major).
--- Sounds and footsteps convention: characters/_archetypes/humanoid_male/sounds/{slot}.opus
+-- Archetype defaults for masculine humanoid characters (Sarge).
 return {
   sounds = {
-    footsteps = "normal",
+    gender = "male",
   },
 
   stats = {

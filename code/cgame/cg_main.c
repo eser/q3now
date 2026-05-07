@@ -534,7 +534,7 @@ static void CG_RegisterItemSounds( int itemNum ) {
 
 		len = s-start;
 		if (len >= MAX_QPATH || len < 5) {
-			Com_Terminate( TERM_CLIENT_DROP, "PrecacheItem: %s has bad precache string", 
+			Com_Terminate( TERM_CLIENT_DROP, "PrecacheItem: %s has bad precache string",
 				item->classname);
 			return;
 		}
@@ -629,10 +629,10 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.selectSound = trap_S_RegisterSound( "sound/weapons/change.opus", qfalse );
 	cgs.media.wearOffSound = trap_S_RegisterSound( "sound/items/wearoff.opus", qfalse );
 	cgs.media.useNothingSound = trap_S_RegisterSound( "sound/items/use_nothing.opus", qfalse );
-	cgs.media.gibBounce1Sound = trap_S_RegisterSound( "sound/misc/gibimp1.opus", qfalse );
-	cgs.media.gibBounce2Sound = trap_S_RegisterSound( "sound/misc/gibimp2.opus", qfalse );
-	cgs.media.gibBounce3Sound = trap_S_RegisterSound( "sound/misc/gibimp3.opus", qfalse );
-	cgs.media.talkSound       = trap_S_RegisterSound( "sound/misc/talk.opus", qfalse );
+	cgs.media.gibBounce1Sound = trap_S_RegisterSound( "characters/_archetypes/_base/sounds/gib_bounce1.opus", qfalse );
+	cgs.media.gibBounce2Sound = trap_S_RegisterSound( "characters/_archetypes/_base/sounds/gib_bounce2.opus", qfalse );
+	cgs.media.gibBounce3Sound = trap_S_RegisterSound( "characters/_archetypes/_base/sounds/gib_bounce3.opus", qfalse );
+	cgs.media.talkSound       = trap_S_RegisterSound( "characters/_archetypes/_base/sounds/talk1.opus", qfalse );
 
 	cgs.media.useDeflectorSound = trap_S_RegisterSound( "sound/items/invul_activate.opus", qfalse );
 	cgs.media.deflectorImpactSound1 = trap_S_RegisterSound( "sound/items/invul_impact_01.opus", qfalse );
@@ -652,8 +652,8 @@ static void CG_RegisterSounds( void ) {
 
 	cgs.media.noAmmoSound = trap_S_RegisterSound( "sound/weapons/noammo.opus", qfalse );
 
-	cgs.media.gurpSound[0] = trap_S_RegisterSound( "sound/misc/gurp1.opus", qfalse );
-	cgs.media.gurpSound[1] = trap_S_RegisterSound( "sound/misc/gurp2.opus", qfalse );
+	cgs.media.gurpSound[0] = trap_S_RegisterSound( "characters/_archetypes/_base/sounds/gurp1.opus", qfalse );
+	cgs.media.gurpSound[1] = trap_S_RegisterSound( "characters/_archetypes/_base/sounds/gurp2.opus", qfalse );
 
 	cgs.media.hitSoundNoArmor = trap_S_RegisterSound( "sound/feedback/hit.opus", qfalse );
 	cgs.media.hitSoundHeavyArmor = trap_S_RegisterSound( "sound/feedback/hit.opus", qfalse );
@@ -768,6 +768,7 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.shotgunSmokePuffShader = trap_R_RegisterShader( "shotgunSmokePuff" );
 	// cgs.media.nailPuffShader = trap_R_RegisterShader( "nailtrail" );
     cgs.media.sparkShader = trap_R_RegisterShader("hasteSmokePuff");
+    cgs.media.lightningSparkShader = trap_R_RegisterShader("gfx/misc/particle");
 
 	cgs.media.plasmaBallShader = trap_R_RegisterShader( "sprites/plasma1" );
 	cgs.media.bloodTrailShader = trap_R_RegisterShader( "bloodTrail" );
@@ -1016,7 +1017,7 @@ static void CG_RegisterGraphics( void ) {
     cgs.media.backpackModel = trap_R_RegisterModel("models/powerups/armor/shard.md3");
     cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/iconr_shard");
 
-    cgs.media.lightningShader = trap_R_RegisterShader("lightningBoltNew");
+    cgs.media.lightningShader = trap_R_RegisterShader("lightningBolt");
 	cgs.media.lightningArcShader = trap_R_RegisterShader( "lightningArc" );
 	cgs.media.sfx_lightningArcLoop = trap_S_RegisterSound( "sound/weapons/lightning/lg_arc_loop.opus", qfalse );
 
@@ -1035,7 +1036,7 @@ static void CG_RegisterGraphics( void ) {
 
 
 
-/*																																			
+/*
 =======================
 CG_BuildSpectatorString
 

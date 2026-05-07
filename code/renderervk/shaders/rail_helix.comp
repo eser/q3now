@@ -26,17 +26,29 @@ layout(std430, set = 0, binding = 1) writeonly buffer OutputVerts {
 	GPUVertex verts[];
 };
 
+// Shared push-constant range with rail_helix.vert. The vertex shader uses
+// the mat4 mvp at offset 0..63; compute reads the slot's vertex base from
+// offset 64 so it knows where in OutputVerts to start writing.
 layout(push_constant) uniform PushConstants {
-	int rotationStep;      // RAIL_HELIX_ROTATION
+	layout(offset = 64) int vertexBaseIndex;
 	int _pad0;
 	int _pad1;
 	int _pad2;
 };
 
+#define MAX_SEGS_PER_TRAIL  2048   // mirrors RAIL_GPU_VERTS_PER_TRAIL / 4 in vk.h
+
 void main() {
 	uint segIdx = gl_GlobalInvocationID.x;
-	int numSegs = int(trail.params.w);
 
+	// Defence in depth: numSegs comes from CPU-side params and is normally
+	// already clamped; clamp again here so any torn or out-of-spec value
+	// can't push base[] past this slot's reserved region.
+	int numSegs = int(trail.params.w);
+	numSegs = clamp(numSegs, 0, MAX_SEGS_PER_TRAIL);
+
+	if (numSegs < 2)
+		return;
 	if (segIdx >= uint(numSegs - 1))
 		return;
 
@@ -53,6 +65,8 @@ void main() {
 	if (d0 < 0.0) d0 = 0.0;
 	if (d1 < 0.0) return; // past muzzle
 
+	// rotation step lives in the shared params struct (cgame writes RAIL_HELIX_ROTATION here)
+	int rotationStep = int(trail.extra.x);
 	int ring0 = int(segIdx * uint(rotationStep)) % 36;
 	int ring1 = int((segIdx + 1) * uint(rotationStep)) % 36;
 
@@ -78,8 +92,8 @@ void main() {
 	// turquoise/ocean-blue: R=80/255 G=200/255 B=255/255
 	vec4 segColor = vec4(0.314, 0.784, 1.0, a);
 
-	// 4 quad vertices
-	uint base = segIdx * 4;
+	// 4 quad vertices, written into this trail's reserved slot
+	uint base = uint(vertexBaseIndex) + segIdx * 4;
 	verts[base + 0].pos = vec4(sp0 - curWidth * rn0, 1.0);
 	verts[base + 1].pos = vec4(sp0 + curWidth * rn0, 1.0);
 	verts[base + 2].pos = vec4(sp1 - curWidth * rn1, 1.0);

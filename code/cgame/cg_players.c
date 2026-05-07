@@ -25,9 +25,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // Canonical sound slot names — order matches CSOUND_* defines in cg_public.h
 static const char *cg_soundSlotNames[CM_SOUND_SLOTS] = {
-	"death1", "death2", "death3", "jump",
+	"death1", "death2", "death3", "jump1",
 	"pain25", "pain50", "pain75", "pain100",
-	"falling", "gasp", "drown", "fall", "taunt",
+	"falling1", "gasp1", "drown1", "fall1", "taunt1",
 };
 
 
@@ -116,7 +116,6 @@ static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci )
 	mappedCount = 0;
 
 	// set sensible defaults for all animations
-	ci->footsteps = FOOTSTEP_NORMAL;
 	VectorClear( ci->headOffset );
 	ci->gender = GENDER_NEUTER;
 	ci->fixedlegs = qfalse;
@@ -247,7 +246,6 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	text_p = text;
 	skip = 0;	// quite the compiler warning
 
-	ci->footsteps = FOOTSTEP_NORMAL;
 	VectorClear( ci->headOffset );
 	ci->gender = GENDER_NEUTER;
 	ci->fixedlegs = qfalse;
@@ -260,26 +258,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 		if ( !token[0] ) {
 			break;
 		}
-		if ( !Q_stricmp( token, "footsteps" ) ) {
-			token = COM_Parse( &parser, &text_p );
-			if ( !token[0] ) {
-				break;
-			}
-			if ( !Q_stricmp( token, "default" ) || !Q_stricmp( token, "normal" ) ) {
-				ci->footsteps = FOOTSTEP_NORMAL;
-			} else if ( !Q_stricmp( token, "boot" ) ) {
-				ci->footsteps = FOOTSTEP_BOOT;
-			} else if ( !Q_stricmp( token, "flesh" ) ) {
-				ci->footsteps = FOOTSTEP_FLESH;
-			} else if ( !Q_stricmp( token, "mech" ) ) {
-				ci->footsteps = FOOTSTEP_MECH;
-			} else if ( !Q_stricmp( token, "energy" ) ) {
-				ci->footsteps = FOOTSTEP_ENERGY;
-			} else {
-				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Bad footsteps parm in %s: %s\n", filename, token );
-			}
-			continue;
-		} else if ( !Q_stricmp( token, "headoffset" ) ) {
+		if ( !Q_stricmp( token, "headoffset" ) ) {
 			for ( i = 0 ; i < 3 ; i++ ) {
 				token = COM_Parse( &parser, &text_p );
 				if ( !token[0] ) {
@@ -703,7 +682,6 @@ CG_CopyClientInfoModel
 */
 static void CG_CopyClientInfoModel( clientInfo_t *from, clientInfo_t *to ) {
 	VectorCopy( from->headOffset, to->headOffset );
-	to->footsteps = from->footsteps;
 	to->gender = from->gender;
 
 	to->legsModel = from->legsModel;
@@ -741,7 +719,7 @@ static qboolean CG_ScanForExistingClientInfo( clientInfo_t *ci ) {
 		}
 		if ( !Q_stricmp( ci->characterName, match->characterName )
 			&& !Q_stricmp( ci->skinName, match->skinName )
-			&& !Q_stricmp( ci->blueTeam, match->blueTeam ) 
+			&& !Q_stricmp( ci->blueTeam, match->blueTeam )
 			&& !Q_stricmp( ci->redTeam, match->redTeam )
 			&& (!cgs.gametypeIsTeamGame || ci->team == match->team) ) {
 			// this clientinfo is identical, so use its handles
@@ -1066,7 +1044,9 @@ static void CG_RunLerpFrame( clientInfo_t *ci, lerpFrame_t *lf, int newAnimation
 			lf->frameTime = lf->oldFrameTime + anim->frameLerp;
 		}
 		f = ( lf->frameTime - lf->animationTime ) / anim->frameLerp;
+#if !FEAT_SPEED_SCALING
 		f *= speedScale;		// adjust for haste, etc
+#endif
 
 		numFrames = anim->numFrames;
 		if (anim->flipflop) {
@@ -1155,16 +1135,18 @@ static void CG_PlayerAnimation( centity_t *cent, int *legsOld, int *legs, float 
 #if FEAT_SPEED_SCALING
 	{
 		int legsAnim = cent->currentState.legsAnim & ~ANIM_TOGGLEBIT;
-		float vel = VectorLength( cent->currentState.pos.trDelta );
-		speedScale = vel / 320.0f;
-		if ( speedScale < 0.2f ) speedScale = 0.2f;
-		if ( speedScale > 2.0f ) speedScale = 2.0f;
-		if ( legsAnim == LEGS_WALK || legsAnim == LEGS_WALKCR ) {
-			speedScale *= 2.0f;
-		} else if ( legsAnim == LEGS_JUMP || legsAnim == LEGS_LAND ||
-					legsAnim == LEGS_JUMPB || legsAnim == LEGS_LANDB ||
-					legsAnim == LEGS_IDLE || legsAnim == LEGS_IDLECR ) {
-			speedScale = 1.0f;
+
+		speedScale = 1.0f;
+		if ( legsAnim == LEGS_RUN || legsAnim == LEGS_BACK ||
+			 legsAnim == LEGS_WALK || legsAnim == LEGS_WALKCR ||
+			 legsAnim == LEGS_BACKWALK || legsAnim == LEGS_BACKCR ) {
+			float vel = VectorLength( cent->currentState.pos.trDelta );
+			speedScale = vel / 320.0f;
+			if ( speedScale < 0.2f ) speedScale = 0.2f;
+			if ( speedScale > 2.0f ) speedScale = 2.0f;
+			if ( legsAnim == LEGS_WALK || legsAnim == LEGS_WALKCR ) {
+				speedScale *= 2.0f;
+			}
 		}
 	}
 #else
@@ -1233,7 +1215,7 @@ static void CG_SwingAngles( float destination, float swingTolerance, float clamp
 	if ( !*swinging ) {
 		return;
 	}
-	
+
 	// modify the speed depending on the delta
 	// so it doesn't seem so linear
 	swing = AngleSubtract( destination, *angle );
@@ -1327,8 +1309,8 @@ static void CG_PlayerAngles( centity_t *cent, vec3_t legs[3], vec3_t torso[3], v
 	// --------- yaw -------------
 
 	// allow yaw to drift a bit
-	if ( ( cent->currentState.legsAnim & ~ANIM_TOGGLEBIT ) != LEGS_IDLE 
-		|| ((cent->currentState.torsoAnim & ~ANIM_TOGGLEBIT) != TORSO_STAND 
+	if ( ( cent->currentState.legsAnim & ~ANIM_TOGGLEBIT ) != LEGS_IDLE
+		|| ((cent->currentState.torsoAnim & ~ANIM_TOGGLEBIT) != TORSO_STAND
 		&& (cent->currentState.torsoAnim & ~ANIM_TOGGLEBIT) != TORSO_STAND2)) {
 		// if not standing still, always point all in the same direction
 		cent->pe.torso.yawing = qtrue;	// always center
@@ -1448,10 +1430,10 @@ static void CG_HasteTrail( centity_t *cent ) {
 	VectorCopy( cent->lerpOrigin, origin );
 	origin[2] -= 16;
 
-	smoke = CG_SmokePuff( origin, vec3_origin, 
-				  8, 
+	smoke = CG_SmokePuff( origin, vec3_origin,
+				  8,
 				  1, 1, 1, 1,
-				  500, 
+				  500,
 				  cg.time,
 				  0,
 				  0,
@@ -1969,7 +1951,7 @@ static qboolean CG_FriendVisible(centity_t *cent) {
 	trace_t trace;
 
 	VectorCopy( cg.refdef.vieworg, start );
-	CG_Trace(&trace, start, vec3_origin, vec3_origin, cent->lerpOrigin, 
+	CG_Trace(&trace, start, vec3_origin, vec3_origin, cent->lerpOrigin,
 			cg.snap->ps.clientNum,
 			CONTENTS_SOLID );
 
@@ -1979,7 +1961,7 @@ static qboolean CG_FriendVisible(centity_t *cent) {
 	return qfalse;
 
 	//VectorCopy( cg.refdef.vieworg, start );
-	//CG_Trace(&trace, start, vec3_origin, vec3_origin, cent->lerpOrigin, 
+	//CG_Trace(&trace, start, vec3_origin, vec3_origin, cent->lerpOrigin,
 	//		cg.snap->ps.clientNum,
 	//		CONTENTS_SOLID |CONTENTS_BODY );
 
@@ -2268,7 +2250,7 @@ static void CG_PlayerSprites( centity_t *cent ) {
         }
     }
 
-	if ( !(cent->currentState.eFlags & EF_DEAD) && 
+	if ( !(cent->currentState.eFlags & EF_DEAD) &&
 		cg.snap->ps.persistant[PERS_TEAM] == cgs.clientinfo[ cent->currentState.clientNum ].team &&
 		cgs.gametypeIsTeamGame) {
 		if (cg_drawFriend.integer) {
@@ -2325,11 +2307,11 @@ static qboolean CG_PlayerShadow( centity_t *cent, float *shadowPlane ) {
 	alpha = 1.0 - trace.fraction;
 
 	// hack / FPE - bogus planes?
-	//assert( DotProduct( trace.plane.normal, trace.plane.normal ) != 0.0f ) 
+	//assert( DotProduct( trace.plane.normal, trace.plane.normal ) != 0.0f )
 
 	// add the mark as a temporary, so it goes directly to the renderer
 	// without taking a spot in the cg_marks array
-	CG_ImpactMark( cgs.media.shadowMarkShader, trace.endpos, trace.plane.normal, 
+	CG_ImpactMark( cgs.media.shadowMarkShader, trace.endpos, trace.plane.normal,
 		cent->pe.legs.yawAngle, alpha,alpha,alpha,1, qfalse, 24, qtrue );
 
 	return qtrue;
@@ -2531,7 +2513,7 @@ int CG_LightVerts( vec3_t normal, int numVerts, polyVert_t *verts )
 			verts[i].modulate.rgba[2] = ambientLight[2];
 			verts[i].modulate.rgba[3] = 255;
 			continue;
-		} 
+		}
 		j = ( ambientLight[0] + incoming * directedLight[0] );
 		if ( j > 255 ) {
 			j = 255;
@@ -2653,7 +2635,7 @@ void CG_Player( centity_t *cent ) {
 
 	// get the rotation information
 	CG_PlayerAngles( cent, legs.axis, torso.axis, head.axis );
-	
+
 	// get the animation state (after rotation, to allow feet shuffle)
 	CG_PlayerAnimation( cent, &legs.oldframe, &legs.frame, &legs.backlerp,
 		 &torso.oldframe, &torso.frame, &torso.backlerp );
@@ -2821,7 +2803,7 @@ void CG_Player( centity_t *cent ) {
 			angle = ((cg.time / 4) & 255) * (M_PI * 2) / 255;
 			dir[2] = 15 + sin(angle) * 8;
 			VectorAdd(torso.origin, dir, skull.origin);
-			
+
 			dir[2] = 0;
 			VectorCopy(dir, skull.axis[1]);
 			VectorNormalize(skull.axis[1]);
@@ -3055,7 +3037,7 @@ A player just came into view or teleported, so reset all animation info
 */
 void CG_ResetPlayerEntity( centity_t *cent ) {
 	cent->errorTime = -99999;		// guarantee no error decay added
-	cent->extrapolated = qfalse;	
+	cent->extrapolated = qfalse;
 
 	CG_ClearLerpFrame( &cgs.clientinfo[ cent->currentState.clientNum ], &cent->pe.legs, cent->currentState.legsAnim );
 	CG_ClearLerpFrame( &cgs.clientinfo[ cent->currentState.clientNum ], &cent->pe.torso, cent->currentState.torsoAnim );

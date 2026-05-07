@@ -105,9 +105,9 @@ func findArchiveFiles(dir string) ([]string, error) {
 			return nil
 		}
 		name := strings.ToLower(d.Name())
-		if strings.HasPrefix(name, "pak") && strings.HasSuffix(name, ".pk3") {
+		if strings.HasSuffix(name, ".pk3") { // strings.HasPrefix(name, "pak") &&
 			pk3s = append(pk3s, path)
-		} else if strings.HasPrefix(name, "pak") && strings.HasSuffix(name, ".pak") {
+		} else if strings.HasSuffix(name, ".pak") { // strings.HasPrefix(name, "pak") &&
 			paks = append(paks, path)
 		}
 		return nil

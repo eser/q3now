@@ -349,7 +349,7 @@ static void CG_UseItem( centity_t *cent ) {
 	entityState_t *es;
 
 	es = &cent->currentState;
-	
+
 	itemNum = (es->event & ~EV_EVENT_BITS) - EV_USE_ITEM0;
 	if ( itemNum < 0 || itemNum > HI_NUM_HOLDABLE ) {
 		itemNum = 0;
@@ -553,35 +553,35 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_FOOTSTEP:
 		DEBUGNAME("EV_FOOTSTEP");
 		if (cg_footsteps.integer && hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
-				ci->footstepSounds[ ci->footsteps ][rand()&3] );
+			trap_S_StartSound (NULL, es->number, CHAN_BODY,
+				ci->footstepSounds[ FOOTSTEP_NORMAL ][rand()&3] );
 		}
 		break;
 	case EV_FOOTSTEP_METAL:
 		DEBUGNAME("EV_FOOTSTEP_METAL");
 		if (cg_footsteps.integer && hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
+			trap_S_StartSound (NULL, es->number, CHAN_BODY,
 				ci->footstepSounds[ FOOTSTEP_METAL ][rand()&3] );
 		}
 		break;
 	case EV_FOOTSPLASH:
 		DEBUGNAME("EV_FOOTSPLASH");
 		if (cg_footsteps.integer && hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
+			trap_S_StartSound (NULL, es->number, CHAN_BODY,
 				ci->footstepSounds[ FOOTSTEP_SPLASH ][rand()&3] );
 		}
 		break;
 	case EV_FOOTWADE:
 		DEBUGNAME("EV_FOOTWADE");
 		if (cg_footsteps.integer && hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
+			trap_S_StartSound (NULL, es->number, CHAN_BODY,
 				ci->footstepSounds[ FOOTSTEP_SPLASH ][rand()&3] );
 		}
 		break;
 	case EV_SWIM:
 		DEBUGNAME("EV_SWIM");
 		if (cg_footsteps.integer && hasSound) {
-			trap_S_StartSound (NULL, es->number, CHAN_BODY, 
+			trap_S_StartSound (NULL, es->number, CHAN_BODY,
 				ci->footstepSounds[ FOOTSTEP_SPLASH ][rand()&3] );
 		}
 		break;
@@ -668,12 +668,12 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 			vec3_t			up = {0, 0, 1};
 
 
-			CG_SmokePuff( cent->lerpOrigin, up, 
-						  32, 
+			CG_SmokePuff( cent->lerpOrigin, up,
+						  32,
 						  1, 1, 1, 0.33f,
-						  1000, 
+						  1000,
 						  cg.time, 0,
-						  LEF_PUFF_DONT_SCALE, 
+						  LEF_PUFF_DONT_SCALE,
 						  cgs.media.smokePuffShader );
 		}
 
@@ -1026,7 +1026,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	case EV_RAILTRAIL:
 		DEBUGNAME("EV_RAILTRAIL");
 		cent->currentState.weapon = WP_RAILGUN;
-		
+
         if (((cg_drawGun.integer == 2) || (cg_drawGun.integer == 3)) && es->clientNum == cg.snap->ps.clientNum && !cg.renderingThirdPerson) {
             int pos;
             vec3_t railtrail_origin;
@@ -1141,7 +1141,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 					}
 					else {
 						if (cg.snap->ps.persistant[PERS_TEAM] == TEAM_BLUE) {
-							if (cgs.gametype == GT_1FCTF) 
+							if (cgs.gametype == GT_1FCTF)
 								CG_AddBufferedSound( cgs.media.yourTeamTookTheFlagSound );
 							else
 								CG_AddBufferedSound( cgs.media.enemyTookYourFlagSound );

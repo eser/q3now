@@ -29,16 +29,16 @@ static const char *s_soundSlotName[CM_SOUND_SLOTS] = {
 	"death1",   // 0: *death1.opus
 	"death2",   // 1: *death2.opus
 	"death3",   // 2: *death3.opus
-	"jump",     // 3: *jump1.opus
+	"jump1",    // 3: *jump1.opus
 	"pain25",   // 4: *pain25_1.opus
 	"pain50",   // 5: *pain50_1.opus
 	"pain75",   // 6: *pain75_1.opus
 	"pain100",  // 7: *pain100_1.opus
-	"falling",  // 8: *falling1.opus
-	"gasp",     // 9: *gasp.opus
-	"drown",    // 10: *drown.opus
-	"fall",     // 11: *fall1.opus
-	"taunt",    // 12: *taunt.opus
+	"falling1", // 8: *falling1.opus
+	"gasp1",    // 9: *gasp1.opus
+	"drown1",   // 10: *drown1.opus
+	"fall1",    // 11: *fall1.opus
+	"taunt1",   // 12: *taunt1.opus
 };
 
 // ── Character skin registry ───────────────────────────────────────────────
@@ -122,9 +122,9 @@ static const char *s_knownModelKeys[] = {
 };
 static const char *s_knownSoundsKeys[] = {
 	"footsteps",
-	"death1", "death2", "death3", "jump",
+	"death1", "death2", "death3", "jump1",
 	"pain25", "pain50", "pain75", "pain100",
-	"falling", "gasp", "drown", "fall", "taunt", NULL
+	"falling1", "gasp1", "drown1", "fall1", "taunt1", NULL
 };
 static const char *s_knownStatsKeys[] = {
 	"health", "speed", NULL
@@ -892,16 +892,12 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	lua_getfield( L, merged_idx, "sounds" );
 	int sounds_idx = lua_gettop( L );
 	if ( lua_istable( L, sounds_idx ) ) {
-		lua_getfield( L, sounds_idx, "footsteps" );
-		if ( lua_isstring( L, -1 ) ) {
-			const char *ft = lua_tostring( L, -1 );
-			if      ( !Q_stricmp( ft, "boot"   ) ) mf.footsteps = FOOTSTEP_BOOT;
-			else if ( !Q_stricmp( ft, "flesh"  ) ) mf.footsteps = FOOTSTEP_FLESH;
-			else if ( !Q_stricmp( ft, "mech"   ) ) mf.footsteps = FOOTSTEP_MECH;
-			else if ( !Q_stricmp( ft, "energy" ) ) mf.footsteps = FOOTSTEP_ENERGY;
-			else                                    mf.footsteps = FOOTSTEP_NORMAL;
-		}
-		lua_pop( L, 1 );
+		// lua_getfield( L, sounds_idx, "footsteps" );
+		// if ( lua_isstring( L, -1 ) ) {
+		// 	const char *ft = lua_tostring( L, -1 );
+		// 	mf.footsteps = FOOTSTEP_NORMAL;
+		// }
+		// lua_pop( L, 1 );
 
 		for ( int i = 0; i < CM_SOUND_SLOTS; i++ ) {
 			lua_getfield( L, sounds_idx, s_soundSlotName[i] );

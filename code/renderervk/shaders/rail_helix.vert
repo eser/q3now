@@ -16,7 +16,11 @@ layout(std430, set = 0, binding = 1) readonly buffer OutputVerts {
 };
 
 layout(push_constant) uniform PushConstants {
-	mat4 mvp;
+	mat4 mvp;                            // offset 0..63
+	layout(offset = 64) int vertexBaseIndex;  // shared with compute: this trail's slot base
+	int _pad0;
+	int _pad1;
+	int _pad2;
 };
 
 layout(location = 0) out vec2 fragUV;
@@ -32,7 +36,7 @@ const int quadIndices[6] = int[6](0, 1, 2, 2, 1, 3);
 void main() {
 	uint quadIdx = uint(gl_VertexIndex) / 6;
 	uint localIdx = quadIndices[gl_VertexIndex % 6];
-	uint idx = quadIdx * 4 + localIdx;
+	uint idx = uint(vertexBaseIndex) + quadIdx * 4 + localIdx;
 
 	gl_Position = mvp * verts[idx].pos;
 	fragUV = verts[idx].uv;

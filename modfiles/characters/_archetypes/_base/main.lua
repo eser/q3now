@@ -15,7 +15,7 @@ return {
   },
 
   sounds = {
-    footsteps = "normal",    -- enum: normal | boot | flesh | mech | energy
+    gender = "male",
   },
 
   stats = {

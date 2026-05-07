@@ -1666,7 +1666,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 	// GPU rail trail draw (after scene geometry, before flares)
 	if ( vk.computeAvailable && vk.numRailDispatches > 0 ) {
 		for ( int rt = 0; rt < vk.numRailDispatches; rt++ ) {
-			RB_DrawRailTrailGPU( vk.railDispatch[rt].numSegments );
+			RB_DrawRailTrailGPU( rt, vk.railDispatch[rt].numSegments );
 		}
 		vk.numRailDispatches = 0; // clear after draw
 	}

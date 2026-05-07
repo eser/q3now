@@ -1464,7 +1464,7 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	beam.reType = RT_LIGHTNING;
 	beam.customShader = cgs.media.lightningShader;
 	// eser - wide lightning beam
-	beam.radius = 16;
+	beam.radius = 8;
 	// eser - wide lightning beam
 
 	trap_R_AddRefEntityToScene( &beam );
@@ -1487,7 +1487,18 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 		angles[1] = rand() % 360;
 		angles[2] = rand() % 360;
 		AnglesToAxis( angles, beam.axis );
+		VectorScale( beam.axis[0], 0.5f, beam.axis[0] );
+		VectorScale( beam.axis[1], 0.5f, beam.axis[1] );
+		VectorScale( beam.axis[2], 0.5f, beam.axis[2] );
+		beam.nonNormalizedAxes = qtrue;
 		trap_R_AddRefEntityToScene( &beam );
+
+		// dir points muzzle→wall; negate so sparks fly outward from the surface
+		{
+			vec3_t sparkDir;
+			VectorNegate( dir, sparkDir );
+			CG_LightningSparks( trace.endpos, sparkDir );
+		}
 	}
 }
 /*

@@ -486,7 +486,11 @@ typedef struct {
 	qboolean computeAvailable;					// false if compute init failed
 
 	// per-frame trail dispatch queue (filled by cgame, consumed by renderer)
-	#define MAX_GPU_RAIL_TRAILS 8
+	#define MAX_GPU_RAIL_TRAILS         8
+	#define RAIL_GPU_VERTEX_SIZE        48
+	#define RAIL_GPU_VERTS_PER_TRAIL    (2048 * 4)                                  // matches cgame MAX_RAIL_SEGMENTS * 4
+	#define RAIL_GPU_MAX_VERTS          (MAX_GPU_RAIL_TRAILS * RAIL_GPU_VERTS_PER_TRAIL)
+	#define RAIL_GPU_PARAMS_SIZE        656                                         // sizeof( railTrailParams_t ), std430
 	struct {
 		int   numSegments;
 		float beamLen;
@@ -497,13 +501,19 @@ typedef struct {
 	} railDispatch[MAX_GPU_RAIL_TRAILS];
 	int numRailDispatches;
 
+	// Per-frame, per-slot params buffer prevents the CPU from overwriting
+	// data the GPU is still reading: with NUM_COMMAND_BUFFERS frames in
+	// flight, each gets its own params memory keyed by vk.cmd_index. Within
+	// a frame, MAX_GPU_RAIL_TRAILS disjoint slots let multiple trails coexist
+	// without clobbering each other (bound via dynamic SSBO offset).
 	struct {
 		VkPipeline		compute_pipeline;		// helix geometry generation
 		VkPipeline		graphics_pipeline;		// helix rendering (empty vertex input)
-		VkBuffer		params_buffer;			// input SSBO (trail params, host-mapped)
-		VkDeviceMemory	params_memory;
-		byte			*params_ptr;			// mapped memory for CPU writes
-		VkBuffer		vertex_buffer[NUM_COMMAND_BUFFERS];	// per-frame output SSBOs
+		uint32_t		params_slot_stride;		// PAD(RAIL_GPU_PARAMS_SIZE, vk.storage_alignment)
+		VkBuffer		params_buffer[NUM_COMMAND_BUFFERS];	// per-frame input SSBOs (slotted)
+		VkDeviceMemory	params_memory[NUM_COMMAND_BUFFERS];
+		byte			*params_ptr   [NUM_COMMAND_BUFFERS];	// mapped memory for CPU writes
+		VkBuffer		vertex_buffer[NUM_COMMAND_BUFFERS];	// per-frame output SSBOs (slotted)
 		VkDeviceMemory	vertex_memory[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet	descriptor[NUM_COMMAND_BUFFERS];	// per-frame descriptor sets
 	} rail;
