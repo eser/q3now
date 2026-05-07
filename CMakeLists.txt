@@ -240,11 +240,16 @@ ENDIF()
 
 # MinGW: picoquic + picotls have a handful of MSVC-only assumptions that
 # break under MinGW's CRT (struct timezone redefinition, va_args macros,
-# ws2tcpip include order, _dupenv_s missing). Local patches in
-# patches/picoquic-mingw/ fix each. Apply them idempotently at configure
+# ws2tcpip include order, _dupenv_s missing).  Local patches in
+# patches/picoquic-mingw/ fix each.  Apply them idempotently at configure
 # time so fresh submodule checkouts (CI) get the same fixes that local
-# working trees have. git apply --check --reverse returns 0 if the patch
-# is already applied, so re-running configure on a patched tree is safe.
+# working trees have.
+#
+# Idempotency: try `git apply --check --reverse` first — exits 0 only when
+# the patch is already cleanly applied, so we skip.  Otherwise apply with
+# --ignore-whitespace so CRLF/LF drift on Windows working trees (Git's
+# autocrlf converts checked-out files) doesn't fail the patch context
+# match.  Both check and apply pass --ignore-whitespace for symmetry.
 IF(WIN32)
 	FIND_PROGRAM(_GIT_EXE git REQUIRED)
 	FILE(GLOB _PICOQUIC_PATCHES "${CMAKE_SOURCE_DIR}/patches/picoquic-mingw/*.patch")
@@ -252,7 +257,7 @@ IF(WIN32)
 	FOREACH(_patch ${_PICOQUIC_PATCHES})
 		GET_FILENAME_COMPONENT(_patch_name "${_patch}" NAME)
 		EXECUTE_PROCESS(
-			COMMAND "${_GIT_EXE}" apply --check --reverse "${_patch}"
+			COMMAND "${_GIT_EXE}" apply --check --reverse --ignore-whitespace "${_patch}"
 			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/libs/picoquic"
 			RESULT_VARIABLE _rc_already
 			OUTPUT_QUIET ERROR_QUIET)
@@ -260,16 +265,20 @@ IF(WIN32)
 			MESSAGE(STATUS "picoquic patch already applied: ${_patch_name}")
 		ELSE()
 			EXECUTE_PROCESS(
-				COMMAND "${_GIT_EXE}" apply "${_patch}"
+				COMMAND "${_GIT_EXE}" apply --ignore-whitespace "${_patch}"
 				WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/libs/picoquic"
 				RESULT_VARIABLE _rc_apply
 				OUTPUT_VARIABLE _out_apply
 				ERROR_VARIABLE _err_apply)
 			IF(NOT _rc_apply EQUAL 0)
 				MESSAGE(FATAL_ERROR
-					"Failed to apply ${_patch_name}: ${_err_apply}\n"
-					"Run `git -C src/libs/picoquic reset --hard` to revert "
-					"local changes, then re-configure.")
+					"Failed to apply ${_patch_name}:\n${_err_apply}\n"
+					"This usually means the picoquic submodule has unrelated "
+					"local modifications that conflict with the patch hunks.\n"
+					"To recover:\n"
+					"  git -C src/libs/picoquic reset --hard\n"
+					"  rm -rf build/release  # or build/debug\n"
+					"  re-run cmake / make")
 			ENDIF()
 			MESSAGE(STATUS "applied picoquic patch: ${_patch_name}")
 		ENDIF()
