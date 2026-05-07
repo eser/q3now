@@ -789,11 +789,32 @@ static void WiredFeeder_ScoreSelection( int feederID, int index ) {
 	wui_selectedScore = index;
 }
 
-// ── character feeder (FEEDER_HEADS) ──────────────────────────────────
+// ── character feeder (FEEDER_CHARACTERS) ──────────────────────────────
 
 static int  wui_charSelected = -1;
+static int  wui_skinSelected = -1;
 
-void WiredFeeder_LoadModels( void ) {
+// Pick a skin index for the given character, preserving the current "skin" cvar
+// if it still matches one of the character's skins; otherwise fall back to the
+// first available skin. Returns -1 only if the character has no skins at all.
+static int WiredFeeder_PickSkinForChar( const clCharacterEntry_t *e ) {
+	char skinBuf[CM_SKIN_NAME_LEN];
+	int i;
+
+	if ( !e || e->manifest.numSkins <= 0 ) return -1;
+
+	Cvar_VariableStringBuffer( "skin", skinBuf, sizeof( skinBuf ) );
+	if ( skinBuf[0] ) {
+		for ( i = 0; i < e->manifest.numSkins; i++ ) {
+			if ( !Q_stricmp( e->manifest.skins[i].name, skinBuf ) ) {
+				return i;
+			}
+		}
+	}
+	return 0;
+}
+
+void WiredFeeder_LoadCharacters( void ) {
 	int count = CL_Characters_Count();
 
 	// match current char cvar to selection
@@ -808,64 +829,106 @@ void WiredFeeder_LoadModels( void ) {
 		}
 	}
 
+	// align the skin selection with whatever the current skin cvar is
+	wui_skinSelected = WiredFeeder_PickSkinForChar( CL_Characters_At( wui_charSelected ) );
+
 	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: found %d characters\n", count );
 }
 
-static int WiredFeeder_HeadsCount( int feederID ) {
+static int WiredFeeder_CharactersCount( int feederID ) {
 	return CL_Characters_Count();
 }
 
-static const char *WiredFeeder_HeadsItemText( int feederID, int index, int column ) {
+static const char *WiredFeeder_CharactersItemText( int feederID, int index, int column ) {
 	const clCharacterEntry_t *e = CL_Characters_At( index );
 	if ( !e ) return "";
 	return e->manifest.displayName[0] ? e->manifest.displayName : e->dirname;
 }
 
-static void WiredFeeder_HeadsSelection( int feederID, int index ) {
+static qhandle_t WiredFeeder_CharactersItemIcon( int feederID, int index ) {
 	const clCharacterEntry_t *e = CL_Characters_At( index );
+	return e ? e->iconHandle : 0;
+}
+
+static void WiredFeeder_CharactersSelection( int feederID, int index ) {
+	const clCharacterEntry_t *e = CL_Characters_At( index );
+	int skinIdx;
 	if ( !e ) return;
 	wui_charSelected = index;
 	Cvar_Set( "char", e->dirname );
-	Cvar_Set( "skin", "default" );
+
+	skinIdx = WiredFeeder_PickSkinForChar( e );
+	if ( skinIdx >= 0 ) {
+		wui_skinSelected = skinIdx;
+		Cvar_Set( "skin", e->manifest.skins[skinIdx].name );
+	} else {
+		wui_skinSelected = -1;
+		Cvar_Set( "skin", "default" );
+	}
 }
 
-int WiredFeeder_GetModelCount( void ) { return CL_Characters_Count(); }
-int WiredFeeder_GetModelSelected( void ) { return wui_charSelected; }
-const char *WiredFeeder_GetModelName( int index ) {
+// ── skin feeder (FEEDER_SKINS) ───────────────────────────────────────
+// Lists the skins of the currently selected character. Reflects wui_charSelected,
+// which is updated by the characters feeder; if no character is selected the list is empty.
+
+static int WiredFeeder_SkinsCount( int feederID ) {
+	const clCharacterEntry_t *e = CL_Characters_At( wui_charSelected );
+	return e ? e->manifest.numSkins : 0;
+}
+
+static const char *WiredFeeder_SkinsItemText( int feederID, int index, int column ) {
+	const clCharacterEntry_t *e = CL_Characters_At( wui_charSelected );
+	if ( !e || index < 0 || index >= e->manifest.numSkins ) return "";
+	return e->manifest.skins[index].name;
+}
+
+static void WiredFeeder_SkinsSelection( int feederID, int index ) {
+	const clCharacterEntry_t *e = CL_Characters_At( wui_charSelected );
+	if ( !e || index < 0 || index >= e->manifest.numSkins ) return;
+	wui_skinSelected = index;
+	Cvar_Set( "skin", e->manifest.skins[index].name );
+}
+
+int WiredFeeder_GetCharacterCount( void ) { return CL_Characters_Count(); }
+int WiredFeeder_GetCharacterSelected( void ) { return wui_charSelected; }
+const char *WiredFeeder_GetCharacterName( int index ) {
 	const clCharacterEntry_t *e = CL_Characters_At( index );
 	return e ? e->dirname : NULL;
 }
-void WiredFeeder_SetModelSelected( int index ) {
-	WiredFeeder_HeadsSelection( FEEDER_HEADS, index );
+void WiredFeeder_SetCharacterSelected( int index ) {
+	WiredFeeder_CharactersSelection( FEEDER_CHARACTERS, index );
 }
 
 // ── feeder registration ───────────────────────────────────────────────
 
 void WiredUI_RegisterCoreFeeders( void ) {
-	WiredUI_RegisterFeeder( FEEDER_SERVERS, WiredFeeder_ServerCount,
+	WiredUI_RegisterFeeder( FEEDER_SERVERS, "servers", WiredFeeder_ServerCount,
 		WiredFeeder_ServerItemText, WiredFeeder_ServerSelection );
-	WiredUI_RegisterFeeder( FEEDER_MAPS, WiredFeeder_MapCount,
+	WiredUI_RegisterFeeder( FEEDER_MAPS, "maps", WiredFeeder_MapCount,
 		WiredFeeder_MapItemText, WiredFeeder_MapSelection );
-	WiredUI_RegisterFeeder( FEEDER_ALLMAPS, WiredFeeder_MapCount,
+	WiredUI_RegisterFeeder( FEEDER_ALLMAPS, "allmaps", WiredFeeder_MapCount,
 		WiredFeeder_MapItemText, WiredFeeder_MapSelection );
-	WiredUI_RegisterFeeder( FEEDER_DEMOS, WiredFeeder_DemoCount,
+	WiredUI_RegisterFeeder( FEEDER_DEMOS, "demos", WiredFeeder_DemoCount,
 		WiredFeeder_DemoItemText, WiredFeeder_DemoSelection );
-	WiredUI_RegisterFeeder( FEEDER_MODS, WiredFeeder_ModCount,
+	WiredUI_RegisterFeeder( FEEDER_MODS, "mods", WiredFeeder_ModCount,
 		WiredFeeder_ModItemText, WiredFeeder_ModSelection );
-	WiredUI_RegisterFeeder( FEEDER_SCOREBOARD, WiredFeeder_ScoreCount,
+	WiredUI_RegisterFeeder( FEEDER_SCOREBOARD, "scoreboard", WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
-	WiredUI_RegisterFeeder( 0x05 /* red team feeder */, WiredFeeder_ScoreCount,
+	WiredUI_RegisterFeeder( FEEDER_REDTEAM_LIST, "players_red_team", WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
-	WiredUI_RegisterFeeder( 0x06 /* blue team feeder */, WiredFeeder_ScoreCount,
+	WiredUI_RegisterFeeder( FEEDER_BLUETEAM_LIST, "players_blue_team", WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
-	WiredUI_RegisterFeeder( FEEDER_HEADS, WiredFeeder_HeadsCount,
-		WiredFeeder_HeadsItemText, WiredFeeder_HeadsSelection );
+	WiredUI_RegisterFeeder( FEEDER_CHARACTERS, "characters", WiredFeeder_CharactersCount,
+		WiredFeeder_CharactersItemText, WiredFeeder_CharactersSelection );
+	WiredUI_RegisterFeederIcon( FEEDER_CHARACTERS, WiredFeeder_CharactersItemIcon );
+	WiredUI_RegisterFeeder( FEEDER_SKINS, "skins", WiredFeeder_SkinsCount,
+		WiredFeeder_SkinsItemText, WiredFeeder_SkinsSelection );
 
 	// load initial data
 	WiredFeeder_LoadMaps();
 	WiredFeeder_LoadDemos();
 	WiredFeeder_LoadMods();
-	WiredFeeder_LoadModels();
+	WiredFeeder_LoadCharacters();
 
 	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: feeders registered (demos=%d, mods=%d)\n",
 		wui_demoCount, wui_modCount );

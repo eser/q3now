@@ -633,7 +633,7 @@ static const wuiPropDef_t s_itemProps[] = {
 	WP_F( "textscale",        wiredItemDef_t, textscale        ),
 	WP_F( "bordersize",       wiredItemDef_t, bordersize       ),
 	WP_F( "special",          wiredItemDef_t, special          ),
-	WP_F( "feeder",           wiredItemDef_t, feeder           ),
+	/* "feeder" is parsed manually below — accepts either a numeric ID or a quoted name */
 	WP_F( "elementwidth",     wiredItemDef_t, elementwidth     ),
 	WP_F( "elementheight",    wiredItemDef_t, elementheight    ),
 	WP_F( "letterspacing",    wiredItemDef_t, letterSpacing    ),
@@ -774,8 +774,24 @@ static qboolean WiredUI_ParseItemProperties( int handle, wiredItemDef_t *item ) 
 			}
 		}
 		else if ( !Q_stricmp( token.string, "elementtype" ) ) {
-			int et = 0;
-			WiredPC_Int( handle, &et ); // LISTBOX_TEXT or LISTBOX_IMAGE — store if needed
+			WiredPC_Int( handle, &item->elementtype );
+		}
+		else if ( !Q_stricmp( token.string, "feeder" ) ) {
+			/* Accept either `feeder 16` (numeric ID) or `feeder "characters"` (symbolic name).
+			   Strings are resolved against the registry; unknown names log a warning and
+			   leave feeder == 0 (which the renderer treats as "no feeder set"). */
+			const char *fstr = NULL;
+			if ( WiredPC_String( handle, &fstr ) && fstr ) {
+				if ( fstr[0] >= '0' && fstr[0] <= '9' ) {
+					item->feeder = (float)atoi( fstr );
+				} else {
+					int id = WiredUI_FeederIDByName( fstr );
+					if ( id == 0 ) {
+						COM_WARN( LOG_CAT_UI, "WiredUI: unknown feeder name '%s'\n", fstr );
+					}
+					item->feeder = (float)id;
+				}
+			}
 		}
 		else if ( !Q_stricmp( token.string, "anchor" ) ) {
 			WiredPC_ParseAnchorInto( handle, &item->anchor );

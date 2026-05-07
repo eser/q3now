@@ -132,7 +132,7 @@ menuDef {
 		forecolor 1 1 1 1
 		backcolor 0.04 0.04 0.06 0.8
 		style 1
-		feeder 4
+		feeder "allmaps"
 		elementheight 14
 		columns 4 0 24 0 24 140 0 164 150 0 338 20 0
 		visible 1

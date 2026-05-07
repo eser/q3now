@@ -1003,6 +1003,26 @@ void CL_Characters_Shutdown( void ) {
 	Cmd_RemoveCommand( "reload_characters" );
 }
 
+// Try to register a character icon shader. Looks under characters/{name}/icon_{skinname}.<ext>
+// for each skin in the manifest, in skin-list order, taking the first that resolves.
+// Returns 0 if none found.
+static qhandle_t CL_Characters_TryIconCandidates( const clCharacterEntry_t *entry ) {
+	static const char * const exts[] = { "png", "tga", "jpg" };
+	const characterManifest_t *mf = &entry->manifest;
+	char tryPath[MAX_QPATH];
+	int s, e;
+
+	for ( s = 0; s < mf->numSkins; s++ ) {
+		for ( e = 0; e < (int)( sizeof( exts ) / sizeof( exts[0] ) ); e++ ) {
+			Com_sprintf( tryPath, sizeof( tryPath ), "%sicon_%s.%s",
+				mf->charRoot, mf->skins[s].name, exts[e] );
+			qhandle_t h = re.RegisterShaderNoMip( tryPath );
+			if ( h ) return h;
+		}
+	}
+	return 0;
+}
+
 // Called after renderer is initialized so icon shaders and skin shaders can be registered.
 void CL_Characters_RegisterIcons( void ) {
 	int i;
@@ -1010,9 +1030,15 @@ void CL_Characters_RegisterIcons( void ) {
 	for ( i = 0; i < s_clCharacterCount; i++ ) {
 		if ( !s_clCharacters[i].loaded ) continue;
 		if ( s_clCharacters[i].iconHandle ) continue;
-		if ( s_clCharacters[i].manifest.iconPath[0] )
-			s_clCharacters[i].iconHandle =
-				re.RegisterShaderNoMip( s_clCharacters[i].manifest.iconPath );
+
+		s_clCharacters[i].iconHandle = CL_Characters_TryIconCandidates( &s_clCharacters[i] );
+		if ( !s_clCharacters[i].iconHandle ) {
+			COM_WARN( LOG_CAT_CLIENT,
+				"CL_Characters: '%s' has no icon — looked for %sicon_<skin>.{png,tga,jpg} in %d skin slot(s)\n",
+				s_clCharacters[i].dirname,
+				s_clCharacters[i].manifest.charRoot,
+				s_clCharacters[i].manifest.numSkins );
+		}
 	}
 }
 

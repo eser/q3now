@@ -1088,7 +1088,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	MSG_WriteLong( &msg, client->reliableSequence );
 
 	// write the configstrings
-	qboolean csUpdated = qfalse;
+	int csUpdated = 0;
 	for ( start = 0 ; start < MAX_CONFIGSTRINGS ; start++ ) {
 		if ( *sv.configstrings[ start ] != '\0' ) {
 			MSG_WriteByte( &msg, svc_configstring );
@@ -1104,17 +1104,29 @@ static void SV_SendClientGameState( client_t *client ) {
 			}
 		}
 		if ( client->csUpdated[start] ) {
-			csUpdated = qtrue;
+			csUpdated++;
 		}
-		client->csUpdated[start] = qfalse;
 	}
 
 	if ( client->gamestateAck == GSA_INIT ) {
 		// inital submission, accept any messageAcknowledge with matching serverId
 		client->gamestateAck = GSA_SENT_ONCE;
 	} else {
-		if ( client->gamestateAck == GSA_SENT_ONCE && !csUpdated ) {
+		const int cmdCap = client->reliableSequence - client->reliableAcknowledge;
+		if ( csUpdated > 0 && cmdCap + csUpdated >= MAX_RELIABLE_COMMANDS - 1 ) {
+			// too much cs updates, could lead to command overflow
+			for ( start = 0; start < MAX_CONFIGSTRINGS; start++ ) {
+				if ( client->csUpdated[start] ) {
+					client->csUpdated[start] = qfalse;
+				}
+			}
+		} else {
+			// can handle cs updates later without potential overflow
+			csUpdated = 0;
+		}
+		if ( ( client->gamestateAck == GSA_SENT_ONCE || client->gamestateAck == GSA_ACKED ) && csUpdated == 0 ) {
 			// if no configstrings being updated since last submission then assume that we're (re)sending identical gamestate
+			client->gamestateAck = GSA_SENT_ONCE;
 		} else {
 			// expect exact messageAcknowledge
 			client->gamestateAck = GSA_SENT_MANY;
@@ -1146,7 +1158,7 @@ static void SV_SendClientGameState( client_t *client ) {
 		if ( client->netchan.remoteAddress.type == NA_LOOPBACK ) {
 			Com_Terminate( TERM_CLIENT_DROP, "gamestate overflow" );
 		} else {
-			NET_OutOfBandPrint( NS_SERVER, &client->netchan.remoteAddress, "print\n" S_COLOR_RED "SERVER ERROR: gamestate overflow\n" );
+			NET_OutOfBandPrint( NS_SERVER, &client->netchan.remoteAddress, "print\n" S_COLOR_ERROR "SERVER ERROR: gamestate overflow\n" );
 			SV_DropClient( client, "gamestate overflow" );
 		}
 		return;
@@ -1286,6 +1298,9 @@ static void SV_DoneDownload_f( client_t *cl ) {
 
 	// resend the game state to update any clients that entered during the download
 	SV_SendClientGameState( cl );
+
+	// apply rate to avoid retransmission after late gamestate acknowledge check
+	SVC_RateLimit( &cl->gamestate_rate, 1, 1000 );
 }
 
 
@@ -1876,7 +1891,10 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 		ip = NET_AdrToString( &cl->netchan.remoteAddress );
 
 	if ( !Info_SetValueForKey( cl->userinfo, "ip", ip ) )
+	{
 		SV_DropClient( cl, "userinfo string length exceeded" );
+		return;
+	}
 
 	Info_SetValueForKey( cl->userinfo, "tld", cl->tld );
 

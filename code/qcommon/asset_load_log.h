@@ -9,7 +9,7 @@ the ring reaches 64 records, or the subsystem is shut down.
 Output examples:
   ^3sound/voices/female2/{or_01,or_02,or_03}.{wav,opus} not found, default beep will be used
   sound/voices/female2/{or_01,or_02,or_03}.wav not present, .opus found instead
-  ^3characters/visor/models/{visor_paintable}.{tga,jpg,png} not found (referenced by shader 'characters/visor/models/visor_paintable'), no texture
+  ^3characters/visor/models/{visor_default}.{tga,jpg,png} not found (referenced by shader 'characters/visor/models/visor_default'), no texture
 ===========================================================================
 */
 

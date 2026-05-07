@@ -223,28 +223,88 @@ static void WiredOD_NetMapPreview( float x, float y, float w, float h, vec4_t it
 }
 
 // ── player model preview ──────────────────────────────────────────────
+// Cached per-frame state: (char, skin) → (head model handle, skin handle).
+// Re-resolved only when either cvar changes; otherwise we just reuse the cached handles.
 
-static qhandle_t wui_headModel = 0;
-static char      wui_headModelName[MAX_QPATH];
+static char      wui_previewChar[MAX_QPATH];
+static char      wui_previewSkin[CM_SKIN_NAME_LEN];
+static qhandle_t wui_previewModel = 0;
+static qhandle_t wui_previewSkinHandle = 0;
+
+// Resolve a model handle for the given path prefix (no extension).
+// Tries .iqm first, then .md3, mirroring CG_LoadCharacter.
+static qhandle_t WUI_RegisterCharacterMesh( const char *prefix ) {
+	char tryPath[MAX_QPATH];
+	qhandle_t handle;
+
+	Com_sprintf( tryPath, sizeof( tryPath ), "%s.iqm", prefix );
+	handle = re.RegisterModel( tryPath );
+	if ( handle ) return handle;
+
+	Com_sprintf( tryPath, sizeof( tryPath ), "%s.md3", prefix );
+	handle = re.RegisterModel( tryPath );
+	if ( !handle ) {
+		Com_Log( SEV_WARN, LOG_CAT_UI,
+			"WiredOD_PlayerModel: no model at '%s.iqm' or '%s.md3'\n",
+			prefix, prefix );
+	}
+	return handle;
+}
 
 static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t itemColor ) {
 	refdef_t    refdef;
 	refEntity_t ent;
 	char        charNameBuf[MAX_QPATH];
-	char        headPath[MAX_QPATH];
+	char        skinNameBuf[CM_SKIN_NAME_LEN];
 	vec3_t      angles;
 
-	// read char cvar
+	// read char and skin cvars
 	Cvar_VariableStringBuffer( "char", charNameBuf, sizeof( charNameBuf ) );
 	if ( !charNameBuf[0] ) Q_strncpyz( charNameBuf, "visor", sizeof( charNameBuf ) );
+	Cvar_VariableStringBuffer( "skin", skinNameBuf, sizeof( skinNameBuf ) );
+	if ( !skinNameBuf[0] ) Q_strncpyz( skinNameBuf, "default", sizeof( skinNameBuf ) );
 
-	// cache head model handle
-	Com_sprintf( headPath, sizeof( headPath ), "characters/%s/models/head.md3", charNameBuf );
-	if ( Q_stricmp( headPath, wui_headModelName ) ) {
-		Q_strncpyz( wui_headModelName, headPath, sizeof( wui_headModelName ) );
-		wui_headModel = re.RegisterModel( headPath );
+	// re-resolve the cached model + skin handles when either cvar changed
+	if ( Q_stricmp( charNameBuf, wui_previewChar ) || Q_stricmp( skinNameBuf, wui_previewSkin ) ) {
+		const characterManifest_t *mf = CL_Characters_Get( charNameBuf );
+		int i;
+		const char *resolvedPrefix = "(no manifest)";
+		int resolvedNumSkins = 0;
+
+		Q_strncpyz( wui_previewChar, charNameBuf, sizeof( wui_previewChar ) );
+		Q_strncpyz( wui_previewSkin, skinNameBuf, sizeof( wui_previewSkin ) );
+		wui_previewModel = 0;
+		wui_previewSkinHandle = 0;
+
+		if ( mf ) {
+			// pick the "head" part if present; else fall back to the first available part
+			int chosenPart = -1;
+			for ( i = 0; i < mf->partCount; i++ ) {
+				if ( !Q_stricmp( mf->partNames[i], "head" ) ) { chosenPart = i; break; }
+			}
+			if ( chosenPart < 0 && mf->partCount > 0 ) chosenPart = 0;
+			if ( chosenPart >= 0 ) {
+				wui_previewModel = WUI_RegisterCharacterMesh( mf->partPaths[chosenPart] );
+				resolvedPrefix = mf->partPaths[chosenPart];
+			}
+
+			resolvedNumSkins = mf->numSkins;
+			for ( i = 0; i < mf->numSkins; i++ ) {
+				if ( !Q_stricmp( mf->skins[i].name, skinNameBuf ) ) {
+					wui_previewSkinHandle = mf->skins[i].skinHandle;
+					break;
+				}
+			}
+		}
+
+		Com_Log( SEV_INFO, LOG_CAT_UI,
+			"WiredOD_PlayerModel: char='%s' skin='%s' parts=%d skins=%d prefix='%s' modelHandle=%d skinHandle=%d\n",
+			charNameBuf, skinNameBuf,
+			mf ? mf->partCount : -1, resolvedNumSkins,
+			resolvedPrefix, (int)wui_previewModel, (int)wui_previewSkinHandle );
 	}
-	if ( !wui_headModel ) return;
+
+	if ( !wui_previewModel ) return;
 
 	// coordinates are already real screen pixels
 	memset( &refdef, 0, sizeof( refdef ) );
@@ -257,15 +317,23 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 	refdef.fov_x   = 25.0f;
 	refdef.fov_y   = 25.0f * (float)refdef.height / (float)refdef.width;
 	refdef.time    = cls.realtime;
-	AxisClear( refdef.viewaxis );
 
-	// camera looks down -X toward the model at origin
+	// Camera at +X 80, looking down -X toward the model at origin.
+	// Q3's viewaxis[0] is the FORWARD direction (see R_RotateForViewer's
+	// "looking down X" comment), so AxisClear (= identity) would point the
+	// camera AWAY from the model. YAW 180 swings forward to -X.
+	{
+		vec3_t viewangles;
+		VectorSet( viewangles, 0, 180, 0 );
+		AnglesToAxis( viewangles, refdef.viewaxis );
+	}
 	VectorSet( refdef.vieworg, 80, 0, 0 );
 
 	// model entity — spinning head at origin
 	memset( &ent, 0, sizeof( ent ) );
 	ent.reType  = RT_MODEL;
-	ent.hModel  = wui_headModel;
+	ent.hModel  = wui_previewModel;
+	ent.characterSkin = wui_previewSkinHandle;
 	ent.origin[2] = -5.0f;
 
 	angles[PITCH] = 0;
@@ -279,6 +347,30 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 	re.ClearScene();
 	re.AddRefEntityToScene( &ent, qfalse );
 	re.RenderScene( &refdef );
+}
+
+// ── player setup ownerdraws ───────────────────────────────────────────
+
+// Display the player's effect (railgun/armor tint) — cvar "color1", 1-7.
+static const char *wui_effectNames[] = {
+	"None", "Red", "Yellow", "Green", "Cyan", "Blue", "Magenta", "White"
+};
+
+static void WiredOD_Effects( float x, float y, float w, float h, vec4_t itemColor ) {
+	char  buf[32];
+	int   effect;
+	vec4_t color;
+	const int numEffects = (int)( sizeof( wui_effectNames ) / sizeof( wui_effectNames[0] ) );
+
+	effect = (int)Cvar_VariableValue( "color1" );
+	if ( effect < 0 || effect >= numEffects ) effect = 0;
+	Q_strncpyz( buf, wui_effectNames[effect], sizeof( buf ) );
+
+	if ( itemColor ) Vector4Copy( itemColor, color );
+	else             Vector4Set( color, 1, 1, 1, 1 );
+
+	Text_Draw( buf, x + w - 8.0f, y + h * 0.5f + 5.0f,
+		FONT_UI, 14.0f, color, TEXT_ALIGN_RIGHT, 0 );
 }
 
 // ── dispatch table ────────────────────────────────────────────────────
@@ -315,6 +407,7 @@ static const ownerDrawEntry_t ownerDrawTable[] = {
 	// UI ownerdraw items (server browser, etc.)
 	{ UI_NETMAPPREVIEW,       WiredOD_NetMapPreview,    "UI_NETMAPPREVIEW" },
 	{ UI_PLAYERMODEL,         WiredOD_PlayerModel,      "UI_PLAYERMODEL" },
+	{ UI_EFFECTS,             WiredOD_Effects,          "UI_EFFECTS" },
 
 	{ 0, NULL, NULL }  // sentinel
 };

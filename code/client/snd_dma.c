@@ -144,15 +144,17 @@ S_Base_SoundList
 =================
 */
 static void S_Base_SoundList( void ) {
-	const char *type[4] = { "16bit", "adpcm", "daub4", "mulaw" };
-	const char *mem[2] = { "paged out", "resident " };
+	static const char *type[4] = { "16bit", "adpcm", "daub4", "mulaw" };
+	static const char *mem[2] = { "paged out", "resident" };
 
 	int		total = 0;
 	const sfx_t *sfx = s_knownSfx;
 	for (int i=0 ; i<s_numSfx ; i++, sfx++) {
-		int		size = sfx->soundLength;
-		total += size;
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%6i[%s] : %s[%s]\n", size,
+		const int size = sfx->soundLength * sizeof(short);
+		if ( sfx->inMemory ) {
+			total += size;
+		}
+		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%7i[%s] : %s [%s]\n", size,
 				type[sfx->soundCompressionMethod],
 				sfx->soundName, mem[sfx->inMemory] );
 	}

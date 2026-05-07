@@ -71,7 +71,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define LISTBOX_IMAGE 0x01
 
 // list feeders
-#define FEEDER_HEADS						0x00			// model heads
+// NOTE: feeder ID 0 is reserved as "no feeder set" by the listbox renderer/input
+// (it skips items with feeder == 0). All real feeders must use non-zero IDs.
 #define FEEDER_MAPS							0x01			// text maps based on game type
 #define FEEDER_SERVERS						0x02			// servers
 #define FEEDER_CLANS						0x03			// clan names
@@ -87,6 +88,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define FEEDER_SERVERSTATUS					0x0d			// server status
 #define FEEDER_FINDPLAYER					0x0e			// find player
 #define FEEDER_CINEMATICS					0x0f			// cinematics
+#define FEEDER_CHARACTERS					0x10			// playable characters
+#define FEEDER_SKINS						0x11			// skins for the currently selected character
 
 // display flags
 #define CG_SHOW_BLUE_TEAM_HAS_REDFLAG     0x00000001
@@ -214,7 +217,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 
 #define UI_OWNERDRAW_BASE 200
-#define UI_HANDICAP 200
 #define UI_EFFECTS 201
 #define UI_PLAYERMODEL 202
 #define UI_CLANNAME 203

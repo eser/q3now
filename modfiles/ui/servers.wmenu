@@ -158,7 +158,7 @@ menuDef {
 		forecolor 1 1 1 1
 		backcolor 0.04 0.04 0.06 0.8
 		style 1
-		feeder 2
+		feeder "servers"
 		elementheight 16
 		columns 5 0 230 30 230 100 20 340 50 10 394 50 10 450 50 10
 		visible 1

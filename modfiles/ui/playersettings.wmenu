@@ -68,24 +68,14 @@ menuDef {
 	WEDITFIELD(0.045, 0.205, 0.360, 0.060, "Name:", 13, "ui_Name", 32)
 
 	itemDef {
-		name "handicapfield"
-		rect 0.045 0.280 0.360 0.060
-		style 0
-		text "Handicap:"
-		ownerdraw UI_HANDICAP
-		font "oxanium" 13
-		forecolor WCOLOR_TEXT
-		visible 1
-	}
-
-	itemDef {
 		name "effectfield"
-		rect 0.045 0.355 0.360 0.060
+		rect 0.045 0.280 0.360 0.060
 		style 0
 		text "Effect:"
 		ownerdraw UI_EFFECTS
 		font "oxanium" 13
 		forecolor WCOLOR_TEXT
+		action { cyclecvar "color1" 0 7 1 }
 		visible 1
 	}
 
@@ -120,9 +110,9 @@ menuDef {
 		decoration
 	}
 
-	// Right box: player preview + heads list
+	// Right box: player preview + heads list + skin list
 	itemDef {
-		rect 0.430 0.130 0.390 0.610
+		rect 0.430 0.130 0.390 0.660
 		style 1
 		border 1
 		bordercolor 0.6 0.6 0.6 0.5
@@ -154,7 +144,7 @@ menuDef {
 
 	itemDef {
 		type 0
-		text "Available heads/models"
+		text "Available characters"
 		rect 0.460 0.525 0.330 0.030
 		font "oxanium" 10
 		forecolor WCOLOR_TEXT_DIM
@@ -164,14 +154,43 @@ menuDef {
 	}
 
 	itemDef {
-		name "headlist"
+		name "characterlist"
 		rect 0.450 0.560 0.350 0.140
 		type 6
 		style 1
-		elementwidth 26
-		elementheight 26
+		elementwidth 64
+		elementheight 64
 		elementtype 1
-		feeder 0
+		feeder "characters"
+		horizontalscroll
+		border 1
+		bordersize 1
+		backcolor 0 0 0 0.24
+		bordercolor 0.5 0.5 0.5 1
+		forecolor 1 1 1 1
+		visible 1
+	}
+
+	itemDef {
+		type 0
+		text "Skin"
+		rect 0.460 0.708 0.330 0.025
+		font "oxanium" 10
+		forecolor WCOLOR_TEXT_DIM
+		textalign 1
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "skinlist"
+		rect 0.450 0.735 0.350 0.045
+		type 6
+		style 1
+		elementwidth 70
+		elementheight 18
+		elementtype 0
+		feeder "skins"
 		horizontalscroll
 		border 1
 		bordersize 1
