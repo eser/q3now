@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // tr_map.c
@@ -1013,7 +1008,7 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, int numPoi
 	tr.lightmapOffset[1] = lightmapY;
 
 	shader = ShaderForShaderNum( LittleLong( ds->shaderNum ), lightmapNum );
-	ri.Log( SEV_DEBUG, "[Q1FACE] ParseFace: raw='%s' resolved='%s' default=%d lm=%d\n",
+	ri.Log( SEV_TRACE, "[Q1FACE] ParseFace: raw='%s' resolved='%s' default=%d lm=%d\n",
 	        shader->name, shader->name, shader->defaultShader, lightmapNum );
 
 	cv = ParseFaceCommon( ds, verts, numPoints, surf, srcIndexes, numIndexes,
@@ -1021,7 +1016,7 @@ static void ParseFace( const dsurface_t *ds, const drawVert_t *verts, int numPoi
 
 	// +a variant means entity-toggled (button); +0..+9 numeric cycle only for non-toggled textures
 	if ( surf->shader->name[0] == '+' && surf->shader->name[1] == '0' ) {
-		ri.Log( SEV_DEBUG, "[Q1FACE] +0 branch hit: surf='%s'\n", surf->shader->name );
+		ri.Log( SEV_TRACE, "[Q1FACE] +0 branch hit: surf='%s'\n", surf->shader->name );
 		char altName[MAX_QPATH];
 		Q_strncpyz( altName, surf->shader->name, sizeof(altName) );
 		altName[1] = 'a';

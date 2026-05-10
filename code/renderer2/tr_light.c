@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // tr_light.c
@@ -26,7 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	DLIGHT_AT_RADIUS		16
 // at the edge of a dlight's influence, this amount of light will be added
 
-#define	DLIGHT_MINIMUM_RADIUS	16		
+#define	DLIGHT_MINIMUM_RADIUS	16
 // never calculate a range less than this to prevent huge light numbers
 
 
@@ -325,7 +320,7 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	vec3_t			lightDir;
 	vec3_t			lightOrigin;
 
-	// lighting calculations 
+	// lighting calculations
 	if ( ent->lightingCalculated ) {
 		return;
 	}
@@ -344,13 +339,13 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	}
 
 	// if NOWORLDMODEL, only use dynamic lights (menu system, etc)
-	if ( !(refdef->rdflags & RDF_NOWORLDMODEL ) 
+	if ( !(refdef->rdflags & RDF_NOWORLDMODEL )
 		&& tr.world->lightGridData ) {
 		R_SetupEntityLightingGrid( ent, tr.world );
 	} else {
-		ent->ambientLight[0] = ent->ambientLight[1] = 
+		ent->ambientLight[0] = ent->ambientLight[1] =
 			ent->ambientLight[2] = tr.identityLight * 150;
-		ent->directedLight[0] = ent->directedLight[1] = 
+		ent->directedLight[0] = ent->directedLight[1] =
 			ent->directedLight[2] = tr.identityLight * 150;
 		VectorCopy( tr.sunDirection, ent->lightDir );
 	}
@@ -428,7 +423,7 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	((byte *)&ent->ambientLightInt)[1] = myftol(ent->ambientLight[1]);
 	((byte *)&ent->ambientLightInt)[2] = myftol(ent->ambientLight[2]);
 	((byte *)&ent->ambientLightInt)[3] = 0xff;
-	
+
 	// transform the direction to local space
 	VectorNormalize( lightDir );
 	ent->modelLightDir[0] = DotProduct( lightDir, ent->e.axis[0] );
@@ -446,7 +441,7 @@ R_LightForPoint
 int R_LightForPoint( vec3_t point, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir )
 {
 	trRefEntity_t ent;
-	
+
 	if ( tr.world->lightGridData == NULL )
 	  return qfalse;
 
@@ -464,7 +459,7 @@ int R_LightForPoint( vec3_t point, vec3_t ambientLight, vec3_t directedLight, ve
 int R_LightDirForPoint( vec3_t point, vec3_t lightDir, vec3_t normal, world_t *world )
 {
 	trRefEntity_t ent;
-	
+
 	if ( world->lightGridData == NULL )
 	  return qfalse;
 

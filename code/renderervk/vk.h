@@ -351,6 +351,12 @@ void vk_update_post_process_pipelines( void );
 
 const char *vk_format_string( VkFormat format );
 
+// Phase 9C: print the HDR pipeline state snapshot captured during
+// setup_surface_formats(). Called from GfxInfo (tr_init.c) so the
+// existing `gfxinfo` console command shows current HDR plumbing
+// without per-frame logging.
+void vk_hdr_state_print( void );
+
 void VBO_PrepareQueues( void );
 void VBO_PrepareSubqueue( int start, int count );
 int  VBO_GetQueueCount( void );
@@ -721,9 +727,13 @@ typedef struct {
 	#define RIBBON_HEADERS_PER_FRAME      256u // hard cap on submissions per frame
 	#define RIBBON_POINT_BYTES             48u // sizeof(GPU RibbonPoint), std430
 	                                           // (3 * vec4: posW, rgba, normal+pad)
-	#define RIBBON_HEADER_BYTES            32u // sizeof(GPU RibbonHeader), std430
+	#define RIBBON_HEADER_BYTES            24u // sizeof(GPU RibbonHeader), std430
 	                                           // 4 uints (pointOffset, pointCount, shaderHandle, flags) +
-	                                           // vec2 uvScroll + float spawnTime + float _pad = 32 B
+	                                           // vec2 uvScroll = 24 B. Struct alignment is 8 B (vec2);
+	                                           // 24 is a multiple of 8 so no trailing pad. Phase 5U
+	                                           // dropped the dormant spawnTime + _pad pair (no shader
+	                                           // ever read it; ribbon is transient-only and uvScroll
+	                                           // references the absolute frame clock).
 	struct {
 		// pipeline + layouts + shader-bound state
 		VkDescriptorSetLayout	set_layout;          // 2 SSBOs: points, headers
@@ -1179,6 +1189,11 @@ typedef struct {
 		VkShaderModule blur_fs;
 		VkShaderModule blend_fs;
 
+		// Phase 9D (6B3a): post-main HDR boost pass — applies obScale
+		// to vk.color_image before bloom-extract reads it. Scaffolded
+		// here; dispatch wiring lands in 6B3b.
+		VkShaderModule boost_fs;
+
 		VkShaderModule gamma_fs;
 		VkShaderModule gamma_vs;
 
@@ -1314,6 +1329,11 @@ typedef struct {
 	VkPipeline bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs
 	VkPipeline bloom_blend_pipeline;
+
+	// Phase 9D (6B3a): boost pipeline — post-main HDR multiply.
+	// Created via vk_create_post_process_pipeline case 4; not bound
+	// to any dispatch this phase (6B3b wires the draw + render pass).
+	VkPipeline boost_pipeline;
 	VkPipeline smaa_edge_pipeline;
 	VkPipeline smaa_blend_pipeline;
 	VkPipeline smaa_resolve_pipeline;

@@ -1,33 +1,34 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
 #include "server.h"
 #include "../qcommon/maps/bsp.h"
+#include "../qcommon/maps/meta.h"
 #include "../qcommon/wired/core/scripting/user_vm.h"
 #include "../qcommon/q_feats.h"
 
 #include "../qcommon/wired/net/wn_public.h"
 /* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
+
+// Active per-server map metadata. Points into maps_list[] (owned by
+// Maps_Arena), so survives Hunk_ClearLevel and remains valid for the
+// whole match. NULL between matches.
+static const map_meta_t *sv_currentMeta = NULL;
 
 #if FEAT_RECAST_NAVMESH
 #include "../qcommon/nav/nav_public.h"
@@ -524,6 +525,21 @@ void SV_SpawnServer_Tick( void ) {
 		srand( Com_Milliseconds() );
 		Com_RandomBytes( (byte*)&sv.checksumFeed, sizeof( sv.checksumFeed ) );
 		FS_Restart( sv.checksumFeed );
+
+		// Phase 5 (q3now meta): resolve per-map metadata BEFORE CM_LoadMap.
+		// CM_LoadMap triggers RE_RegisterShader on the client, and the
+		// renderer's R_FindShader fallback consults the active remap; the
+		// remap pointer must be live before any shader resolution starts.
+		// FS_Restart above may have just rescanned the map roster, so the
+		// fast path is to look the map up in maps_list[]. If the map is
+		// missing (e.g., custom map dropped in after the last scan),
+		// Maps_AddOrRefresh is the targeted re-parse for a single name.
+		sv_currentMeta = Maps_FindByName( mapname );
+		if ( !sv_currentMeta ) {
+			Maps_AddOrRefresh( mapname );
+			sv_currentMeta = Maps_FindByName( mapname );
+		}
+		R_SetActiveRemapSet( sv_currentMeta ? &sv_currentMeta->remap : NULL );
 
 		Sys_SetStatus( "Loading map %s", mapname );
 		CM_LoadMap( va( "maps/%s.bsp", mapname ), qfalse, &checksum );
@@ -1039,6 +1055,11 @@ void SV_Shutdown( const char *finalmsg ) {
 #if FEAT_RECAST_NAVMESH
 	Nav_Shutdown();
 #endif
+
+	// Clear the active remap set; the tables themselves live in
+	// Maps_Arena and get reclaimed on the next FS_Restart / shutdown.
+	R_SetActiveRemapSet( NULL );
+	sv_currentMeta = NULL;
 
 	// free current level
 	SV_ClearServer();

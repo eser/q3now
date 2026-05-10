@@ -2,21 +2,15 @@
 ===========================================================================
 Copyright (C) 2005-2006 Tim Angus
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -142,8 +136,8 @@ static ID_INLINE void START_CHUNK( const char *s )
 	if( afd.chunkStackTop >= MAX_RIFF_CHUNKS )
 	{
 		Com_Terminate( TERM_CLIENT_DROP, "ERROR: Top of chunkstack breached" );
-	} 
-	else 
+	}
+	else
 	{
 		afd.chunkStack[ afd.chunkStackTop ] = bufIndex;
 		afd.chunkStackTop++;
@@ -165,7 +159,7 @@ static ID_INLINE void END_CHUNK( void )
 	if( afd.chunkStackTop <= 0 )
 	{
 		Com_Terminate( TERM_CLIENT_DROP, "ERROR: Bottom of chunkstack breached" );
-	} 
+	}
 	else
 	{
 		afd.chunkStackTop--;
@@ -334,7 +328,7 @@ static void CL_WriteAVIHeader( void )
 
 static qboolean CL_ValidatePipeFormat( const char *s )
 {
-	while ( *s != '\0' ) 
+	while ( *s != '\0' )
 	{
 		if ( *s == '.' && *(s+1) == '.' && ( *(s+2) == '/' || *(s+2) == '\\' ) )
 			return qfalse;
@@ -640,7 +634,7 @@ void CL_WriteAVIAudioFrame( const byte *pcmBuffer, int size )
 		CL_FlushCaptureBuffer();
 	}
 
-	if ( pcmBuffer ) 
+	if ( pcmBuffer )
 	{
 		memcpy( &pcmCaptureBuffer[ bytesInBuffer ], pcmBuffer, size );
 		bytesInBuffer += size;
@@ -714,7 +708,7 @@ qboolean CL_CloseAVI( qboolean reopen )
 	// Open the temp index file — indexSize reused for byte count returned by read
 	if ( ( indexSize = FS_Home_FOpenFileRead( idxFileName, &afd.idxF ) ) <= 0 )
 	{
-		if ( afd.idxF != FS_INVALID_HANDLE ) 
+		if ( afd.idxF != FS_INVALID_HANDLE )
 		{
 			FS_FCloseFile( afd.idxF );
 		}

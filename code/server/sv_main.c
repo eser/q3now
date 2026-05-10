@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -200,7 +195,7 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 =================
 SV_SendServerCommand
 
-Sends a reliable command string to be interpreted by 
+Sends a reliable command string to be interpreted by
 the client game module: "cp", "print", "chat", etc
 A NULL client will broadcast to all clients
 =================
@@ -296,7 +291,7 @@ static void SV_MasterHeartbeat( const char *message )
 			if ( addr_changed || svs.time - svs.masterResolveTime[i] > 0 )
 			{
 			svs.masterResolveTime[i] = svs.time + MASTERDNS_MSEC;
-			
+
 			if(netenabled & NET_ENABLEV4)
 			{
 				Com_Log( SEV_INFO, LOG_CH(ch_server), "Resolving %s (IPv4)\n", sv_master[i]->string);
@@ -307,7 +302,7 @@ static void SV_MasterHeartbeat( const char *message )
 					// if no port was specified, use the default master port
 					adr[i][0].port = BigShort(PORT_MASTER);
 				}
-				
+
 				if(res)
 					Com_Log( SEV_INFO, LOG_CH(ch_server), "%s resolved to %s\n", sv_master[i]->string, NET_AdrToStringwPort( &adr[i][0] ) );
 				else
@@ -324,7 +319,7 @@ static void SV_MasterHeartbeat( const char *message )
 					// if no port was specified, use the default master port
 					adr[i][1].port = BigShort(PORT_MASTER);
 				}
-				
+
 				if(res)
 					Com_Log( SEV_INFO, LOG_CH(ch_server), "%s resolved to %s\n", sv_master[i]->string, NET_AdrToStringwPort( &adr[i][1] ) );
 				else
@@ -504,7 +499,7 @@ static leakyBucket_t *SVC_BucketForAddress( const netadr_t *address, int burst, 
 			} else {
 				bucketHashes[ bucket->hash ] = bucket->next;
 			}
-			
+
 			if ( bucket->next != NULL ) {
 				bucket->next->prev = bucket->prev;
 			}
@@ -726,10 +721,10 @@ static void SVC_Status( const netadr_t *from ) {
 			playerState_t *ps = SV_GameClientNum( i );
 			int playerLength = Com_sprintf( player, sizeof( player ), "%i %i \"%s\"\n",
 				ps->persistant[ PERS_SCORE ], cl->ping, cl->name );
-			
+
 			if ( statusLength + playerLength >= MAX_PACKETLEN-4 )
 				break; // can't hold any more
-			
+
 			s = Q_stradd( s, player );
 			statusLength += playerLength;
 		}
@@ -950,7 +945,7 @@ static void SV_CalcPings( void ) {
 ==================
 SV_CheckTimeouts
 
-If a packet has not been received from a client for timeout->integer 
+If a packet has not been received from a client for timeout->integer
 seconds, drop the connection.  Server time is used instead of
 realtime to avoid dropping the local client while debugging.
 
@@ -1117,9 +1112,9 @@ static void SV_Restart( const char *reason ) {
 
 	sv.time = 0; // force level time reset
 	sv.restartTime = 0;
-	
+
 	Cvar_VariableStringBuffer( "mapname", mapName, sizeof( mapName ) );
-	
+
 	if ( sv_shutdown ) {
 		SV_Shutdown( reason );
 	}

@@ -1,12 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 2017-2020 Gian 'myT' Schellenbaum (CNQ3 original)
-Copyright (C) 2026 Wired engine contributors (C port and adaptation)
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of the Wired engine (derived from Quake III Arena source
-code and Challenge Quake 3). It is free software released under the terms
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
 of the GNU General Public License version 2 or (at your option) any later
-version. See the file COPYING.txt for details.
+version.
+
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // JSON-format crash report writer.

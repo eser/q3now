@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired Engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // tr_init.c -- functions that are not called every frame
@@ -1417,6 +1412,14 @@ static void GfxInfo( void )
 		ri.Log( SEV_INFO, " capture: %s\n", vk_format_string( vk.capture_format ) );
 	}
 	ri.Log( SEV_INFO, " depth: %s\n", vk_format_string( vk.depth_format ) );
+
+	// Phase 9C: HDR pipeline state snapshot (captured during
+	// setup_surface_formats + vk_create_attachments). Extends the
+	// PIXELFORMAT block above with the full HDR plumbing —
+	// requested vs. effective r_hdr, SFLOAT capability, bloom
+	// format / pass count.
+	ri.Log( SEV_INFO, "\n" );
+	vk_hdr_state_print();
 #endif
 	if ( glConfig.isFullscreen )
 	{
@@ -1958,7 +1961,12 @@ static void R_Register( void )
 	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and post-process saturation/tonemap effects." );
 	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription(r_hdr, "Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n -1: 4-bit, for testing purposes, heavy color banding, might not work on all systems\n  0: 8 bit, default, moderate color banding with multi-stage shaders\n  1: 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD / Intel GPUs\n" );
+	ri.Cvar_SetDescription( r_hdr,
+		"Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n"
+		" -1: 4-bit B4G4R4A4, for testing purposes, heavy color banding, might not work on all systems\n"
+		"  0: 8-bit BGRA, default, moderate color banding with multi-stage shaders\n"
+		"  1: 16-bit UNORM, enhanced blending precision, no color banding, [0,1] range, might decrease performance on AMD / Intel GPUs\n"
+		"  2: 16-bit SFLOAT, true HDR pipeline, supports values >1.0 and <0, foundation for tonemap auto-exposure and PBR shading (planned)\n" );
 	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");

@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 //
@@ -100,7 +95,7 @@ CG_SmokePuff
 Adds a smoke puff or blood trail localEntity.
 =====================
 */
-localEntity_t *CG_SmokePuff( const vec3_t p, const vec3_t vel, 
+localEntity_t *CG_SmokePuff( const vec3_t p, const vec3_t vel,
 				   float radius,
 				   float r, float g, float b, float a,
 				   float duration,
@@ -133,7 +128,7 @@ localEntity_t *CG_SmokePuff( const vec3_t p, const vec3_t vel,
 		le->lifeRate = 1.0 / ( le->endTime - le->startTime );
 	}
 	le->color[0] = r;
-	le->color[1] = g; 
+	le->color[1] = g;
 	le->color[2] = b;
 	le->color[3] = a;
 
@@ -276,6 +271,311 @@ void CG_LightningArcBeam( vec3_t start, vec3_t end ) {
 	bd.uvScroll[1]    = 0.0f;
 	trap_R_AddBeamToScene( &bd );
 }
+
+
+// ── Phase 5T: generic player-trail infrastructure ─────────────────
+//
+// Multiple trail types per player can be active concurrently; each
+// (client, type) pair has its own expiry timestamp. Per-frame
+// transient re-submit: cgame recomputes the anchor and player origin
+// every frame and submits a fresh beamDesc with the freshly-faded
+// alpha. The engine sees only generic primitive shader / particle
+// handles; effect-specific naming (PTRAIL_PUSH, "pushTrail") lives
+// only here and in shader.script.
+//
+// State: cg_playerTrails[client][type] holds an expiry timestamp in
+// cg.time. > cg.time → active this frame. Per-type fade window
+// (def->fadeWindowMs) controls the linear ramp-down; outside the
+// window alpha is alphaCeiling × 1.0.
+//
+// Anchor: behind the player along the negative velocity vector, at
+// PTRAIL_ANCHOR_DISTANCE. Below PTRAIL_SPEED_THRESHOLD the trail is
+// suppressed regardless of expiry (still moving but barely).
+
+// Trail anchor: distance behind the player along the negative
+// velocity vector. Trail beam runs anchor → player. Shared across
+// all trail types — geometry, not visual.
+#define PTRAIL_ANCHOR_DISTANCE         48.0f
+
+// Vertical offset applied to both endpoints so the beam centers on
+// the player body silhouette rather than sitting at feet-level.
+// Q3 player bbox is ~56u tall; +24 lands near the chest.
+#define PTRAIL_VERTICAL_OFFSET         24.0f
+
+// Movement threshold. Below this speed (u/s) no trail renders even
+// if expiry is in the future.
+#define PTRAIL_SPEED_THRESHOLD         50.0f
+
+// Per-type extension durations used by
+// CG_UpdatePlayerTrailExtensions per-frame. Picked > frame budget
+// at any sane FPS so a transiently-skipped frame doesn't pop.
+#define PTRAIL_HASTE_EXTEND_MS         200
+// Future: PTRAIL_FLAG_EXTEND_MS, PTRAIL_SKULLS_EXTEND_MS
+
+// PTRAIL_PUSH def-table values.
+#define PTRAIL_PUSH_ALPHA_CEILING      0.25f
+#define PTRAIL_PUSH_START_WIDTH       28.0f   // wide enough to cover body silhouette
+#define PTRAIL_PUSH_END_WIDTH         28.0f   // uniform — vertical coverage matters more than taper
+#define PTRAIL_PUSH_AXIAL_COPIES       2
+#define PTRAIL_PUSH_FADE_WINDOW_MS     200
+#define PTRAIL_PUSH_PARTICLE_RATE_MIN  30.0f
+#define PTRAIL_PUSH_PARTICLE_RATE_MAX  120.0f
+
+static const vec3_t PTRAIL_PUSH_DEFAULT_COLOR = { 0.9f, 0.95f, 1.0f };
+
+// Per-(client, type) expiry timestamps. BSS-zero-init: all trails
+// start inactive. Public — third-party hooks may write directly.
+int cg_playerTrails[MAX_CLIENTS][PTRAIL_COUNT];
+
+// Per-type visual / behavioural parameters. Populated once by
+// CG_RegisterPlayerTrailDefs after cgs.media.* handles are bound.
+static playerTrailDef_t cg_playerTrailDefs[PTRAIL_COUNT];
+
+void CG_RegisterPlayerTrailDefs( void )
+{
+	playerTrailDef_t *def;
+
+	memset( cg_playerTrailDefs, 0, sizeof( cg_playerTrailDefs ) );
+
+	// PTRAIL_PUSH: jumppad + haste/speed.
+	def = &cg_playerTrailDefs[PTRAIL_PUSH];
+	def->shaderPtrPtr        = &cgs.media.pushTrailShader;
+	def->particleClassPtrPtr = &cgs.media.pushStreamClass;
+	VectorCopy( PTRAIL_PUSH_DEFAULT_COLOR, def->defaultColor );
+	def->colorResolveFn      = NULL;   // use defaultColor
+	def->alphaCeiling        = PTRAIL_PUSH_ALPHA_CEILING;
+	def->startWidth          = PTRAIL_PUSH_START_WIDTH;
+	def->endWidth            = PTRAIL_PUSH_END_WIDTH;
+	def->axialCopies         = PTRAIL_PUSH_AXIAL_COPIES;
+	def->fadeWindowMs        = PTRAIL_PUSH_FADE_WINDOW_MS;
+	def->particleRateMin     = PTRAIL_PUSH_PARTICLE_RATE_MIN;
+	def->particleRateMax     = PTRAIL_PUSH_PARTICLE_RATE_MAX;
+
+	// Future PTRAIL_FLAG / PTRAIL_SKULLS def entries land here.
+}
+
+void CG_TriggerPlayerTrail( int clientNum,
+                            playerTrailType_t type,
+                            int durationMs )
+{
+	int newExpiry;
+
+	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) return;
+	if ( type < 0 || type >= PTRAIL_COUNT ) return;
+	if ( durationMs <= 0 ) return;
+
+	newExpiry = cg.time + durationMs;
+	if ( newExpiry > cg_playerTrails[clientNum][type] ) {
+		cg_playerTrails[clientNum][type] = newExpiry;
+	}
+}
+
+// Per-frame condition checks: scan all clients, bump the matching
+// trail-type expiry while the condition is active. PTRAIL_PUSH is
+// extended while the player is haste-buffed; future PTRAIL_FLAG /
+// PTRAIL_SKULLS extensions slot in here.
+static void CG_UpdatePlayerTrailExtensions( void )
+{
+	int i;
+
+	for ( i = 0; i < MAX_CLIENTS; i++ ) {
+		const playerState_t *ps;
+		const centity_t     *cent;
+		qboolean             hasHaste;
+
+		// Resolve player-state source: predicted for local,
+		// snapped entity state for remote.
+		if ( i == cg.predictedPlayerState.clientNum ) {
+			ps   = &cg.predictedPlayerState;
+			cent = NULL;
+		} else {
+			cent = &cg_entities[i];
+			if ( !cent->currentValid ) continue;
+			ps = NULL;
+		}
+
+		hasHaste = qfalse;
+
+		if ( ps != NULL ) {
+			// Local: ps->powerups[PW_HASTE] holds expiry timestamp;
+			// > cg.time means active.
+			if ( ps->powerups[PW_HASTE] > cg.time ) hasHaste = qtrue;
+		} else if ( cent != NULL ) {
+			// Remote: bitmask in cent->currentState.powerups.
+			// Pattern matches existing usage in cg_players.c and
+			// cg_znudge.c.
+			if ( cent->currentState.powerups & ( 1 << PW_HASTE ) ) {
+				hasHaste = qtrue;
+			}
+		}
+
+		if ( hasHaste ) {
+			CG_TriggerPlayerTrail( i, PTRAIL_PUSH, PTRAIL_HASTE_EXTEND_MS );
+		}
+
+		// Future: PTRAIL_FLAG / PTRAIL_SKULLS extension checks land
+		// here. Each trail type's "active condition" check + a
+		// CG_TriggerPlayerTrail call.
+	}
+}
+
+// Emit particles flowing anchor → player along the beam axis.
+// Frame-rate-independent count via cg.frametime; per-frame rate
+// scales linearly between def->particleRateMin and
+// def->particleRateMax based on speed (clamped at
+// PTRAIL_JUMPPAD_SPEED_NORM).
+static void CG_EmitPlayerTrailParticles(
+	const vec3_t start, const vec3_t end,
+	const vec3_t color, float alphaScale, float speed,
+	const playerTrailDef_t *def, qhandle_t particleClass )
+{
+	float         particlesPerSecond;
+	emitterDesc_t emitter;
+	vec3_t        axis;
+	float         length;
+	float         frameTime;
+	int           count;
+	float         t;
+
+	VectorSubtract( end, start, axis );
+	length = VectorLength( axis );
+	if ( length < 1.0f ) return;
+
+	t = speed / PTRAIL_JUMPPAD_SPEED_NORM;
+	if ( t > 1.0f ) t = 1.0f;
+	if ( t < 0.0f ) t = 0.0f;
+	particlesPerSecond = def->particleRateMin +
+		t * ( def->particleRateMax - def->particleRateMin );
+
+	frameTime = (float)cg.frametime / 1000.0f;
+	count     = (int)( particlesPerSecond * frameTime + 0.5f );
+	if ( count <= 0 ) return;
+
+	memset( &emitter, 0, sizeof( emitter ) );
+	emitter.cls   = particleClass;
+	emitter.count = count;
+	VectorCopy( start, emitter.origin );
+	VectorCopy( end,   emitter.end );  // EMIT_PATH samples uniformly start..end
+	VectorScale( axis, 1.0f / length, emitter.axis );
+	emitter.colorTint[0] = color[0];
+	emitter.colorTint[1] = color[1];
+	emitter.colorTint[2] = color[2];
+	emitter.colorTint[3] = alphaScale;
+	trap_R_EmitParticles( &emitter );
+}
+
+// Generic per-(client, type) render. Reads the type's def for
+// visual params; computes anchor + alpha + color; submits the beam
+// + particle emit.
+static void CG_RenderOnePlayerTrail( int clientNum,
+                                     playerTrailType_t type )
+{
+	const playerTrailDef_t *def;
+	vec3_t                  playerOrigin;
+	vec3_t                  playerVelocity;
+	float                   speed;
+	vec3_t                  velNorm;
+	vec3_t                  anchor;
+	int                     remaining;
+	float                   fadeAlpha;
+	vec3_t                  color;
+	qhandle_t               shader;
+	qhandle_t               particleClass;
+	beamDesc_t              bd;
+
+	def = &cg_playerTrailDefs[type];
+
+	// Late-bound handle resolution: defs hold pointer-to-handle so
+	// registration order between the def table and the underlying
+	// cgs.media.* slot doesn't matter.
+	shader        = def->shaderPtrPtr        ? *def->shaderPtrPtr        : 0;
+	particleClass = def->particleClassPtrPtr ? *def->particleClassPtrPtr : 0;
+	if ( shader == 0 ) return;   // unregistered type — silent skip
+
+	// Position + velocity: predicted for local, lerp / trDelta for
+	// remote.
+	if ( clientNum == cg.predictedPlayerState.clientNum ) {
+		VectorCopy( cg.predictedPlayerState.origin,   playerOrigin );
+		VectorCopy( cg.predictedPlayerState.velocity, playerVelocity );
+	} else {
+		const centity_t *cent = &cg_entities[clientNum];
+		if ( !cent->currentValid ) return;
+		VectorCopy( cent->lerpOrigin,                 playerOrigin );
+		VectorCopy( cent->currentState.pos.trDelta,   playerVelocity );
+	}
+
+	speed = VectorLength( playerVelocity );
+	if ( speed < PTRAIL_SPEED_THRESHOLD ) return;
+
+	VectorScale( playerVelocity, 1.0f / speed, velNorm );
+	VectorMA( playerOrigin, -PTRAIL_ANCHOR_DISTANCE, velNorm, anchor );
+
+	// Lift both endpoints to body-center height so the beam covers
+	// the player silhouette instead of skimming the feet plane.
+	anchor[2]       += PTRAIL_VERTICAL_OFFSET;
+	playerOrigin[2] += PTRAIL_VERTICAL_OFFSET;
+
+	remaining = cg_playerTrails[clientNum][type] - cg.time;
+	if ( remaining <= 0 ) return;
+	if ( def->fadeWindowMs > 0 && remaining < def->fadeWindowMs ) {
+		fadeAlpha = (float)remaining / (float)def->fadeWindowMs;
+	} else {
+		fadeAlpha = 1.0f;
+	}
+	fadeAlpha *= def->alphaCeiling;
+	if ( fadeAlpha <= 0.0f ) return;
+
+	if ( def->colorResolveFn ) {
+		def->colorResolveFn( clientNum, color );
+	} else {
+		VectorCopy( def->defaultColor, color );
+	}
+
+	memset( &bd, 0, sizeof( bd ) );
+	VectorCopy( anchor,       bd.start );
+	VectorCopy( playerOrigin, bd.end );
+	bd.startWidth     = def->startWidth;
+	bd.endWidth       = def->endWidth;
+	bd.startColor[0]  = color[0];
+	bd.startColor[1]  = color[1];
+	bd.startColor[2]  = color[2];
+	bd.startColor[3]  = 0.0f;       // anchor end fully faded — rearward ghost-out
+	bd.endColor[0]    = color[0];
+	bd.endColor[1]    = color[1];
+	bd.endColor[2]    = color[2];
+	bd.endColor[3]    = fadeAlpha;  // player end carries the full time-faded alpha
+	bd.shader         = shader;
+	bd.duration       = 0.0f;             // transient — re-submitted each frame
+	bd.axialCopies    = def->axialCopies;
+	bd.startEntityNum = -1;
+	bd.endEntityNum   = -1;
+	bd.uvScroll[0]    = 0.0f;             // shader.script tcMod scroll handles animation
+	bd.uvScroll[1]    = 0.0f;
+	trap_R_AddBeamToScene( &bd );
+
+	if ( particleClass != 0 ) {
+		CG_EmitPlayerTrailParticles( anchor, playerOrigin,
+		                             color, fadeAlpha, speed,
+		                             def, particleClass );
+	}
+}
+
+void CG_AddPlayerTrails( void )
+{
+	int clientNum;
+	int type;
+
+	CG_UpdatePlayerTrailExtensions();
+
+	for ( clientNum = 0; clientNum < MAX_CLIENTS; clientNum++ ) {
+		for ( type = 0; type < PTRAIL_COUNT; type++ ) {
+			if ( cg_playerTrails[clientNum][type] <= cg.time ) continue;
+			CG_RenderOnePlayerTrail( clientNum,
+			                         (playerTrailType_t)type );
+		}
+	}
+}
+
 
 /*
 ==================
@@ -454,10 +754,10 @@ void CG_ScorePlum( int client, vec3_t org, int score ) {
 	le->endTime = cg.time + 4000;
 	le->lifeRate = 1.0 / ( le->endTime - le->startTime );
 
-	
+
 	le->color[0] = le->color[1] = le->color[2] = le->color[3] = 1.0;
 	le->radius = score;
-	
+
 	VectorCopy( org, le->pos.trBase );
 	if (org[2] >= lastPos[2] - 20 && org[2] <= lastPos[2] + 20) {
 		le->pos.trBase[2] -= 20;
@@ -587,7 +887,7 @@ void CG_PingLocation( centity_t *cent ) {
 CG_MakeExplosion
 ====================
 */
-localEntity_t *CG_MakeExplosion( vec3_t origin, vec3_t dir, 
+localEntity_t *CG_MakeExplosion( vec3_t origin, vec3_t dir,
 								qhandle_t hModel, qhandle_t shader,
 								int msec, qboolean isSprite ) {
 	float			ang;
@@ -662,7 +962,7 @@ void CG_Bleed( vec3_t origin, int entityNum ) {
 
 	ex->startTime = cg.time;
 	ex->endTime = ex->startTime + 500;
-	
+
 	VectorCopy ( origin, ex->refEntity.origin);
 	ex->refEntity.reType = RT_SPRITE;
 	ex->refEntity.rotation = rand() % 360;

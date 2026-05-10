@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -27,7 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 All bones should be an identity orientation to display the mesh exactly
 as it is specified.
 
-For all other frames, the bones represent the transformation from the 
+For all other frames, the bones represent the transformation from the
 orientation of the bone in the base frame to the orientation in this
 frame.
 
@@ -46,7 +41,7 @@ static int R_MDRCullModel( mdrHeader_t *header, const trRefEntity_t *ent ) {
 	int			i, frameSize;
 
 	frameSize = (size_t)( &((mdrFrame_t *)0)->bones[ header->numBones ] );
-	
+
 	// compute frame pointers
 	newFrame = ( mdrFrame_t * ) ( ( byte * ) header + header->ofsFrames + frameSize * ent->e.frame);
 	oldFrame = ( mdrFrame_t * ) ( ( byte * ) header + header->ofsFrames + frameSize * ent->e.oldframe);
@@ -60,7 +55,7 @@ static int R_MDRCullModel( mdrHeader_t *header, const trRefEntity_t *ent ) {
 			{
 				// Ummm... yeah yeah I know we don't really have an md3 here.. but we pretend
 				// we do. After all, the purpose of mdrs are not that different, are they?
-				
+
 				case CULL_OUT:
 					tr.pc.c_sphere_cull_md3_out++;
 					return CULL_OUT;
@@ -99,7 +94,7 @@ static int R_MDRCullModel( mdrHeader_t *header, const trRefEntity_t *ent ) {
 			}
 		}
 	}
-	
+
 	// calculate a bounding box in the current coordinate system
 	for (i = 0 ; i < 3 ; i++) {
 		bounds[0][i] = oldFrame->bounds[0][i] < newFrame->bounds[0][i] ? oldFrame->bounds[0][i] : newFrame->bounds[0][i];
@@ -229,7 +224,7 @@ void R_MDRAddAnimSurfaces( trRefEntity_t *ent ) {
 	{
 		lod = (mdrLOD_t *) ((byte *) lod + lod->ofsEnd);
 	}
-	
+
 	// set up lighting
 	if ( !personalModel || r_shadows->integer > 1 )
 	{
@@ -243,14 +238,14 @@ void R_MDRAddAnimSurfaces( trRefEntity_t *ent ) {
 
 	for ( i = 0 ; i < lod->numSurfaces ; i++ )
 	{
-		
+
 		if(ent->e.customShader)
 			shader = R_GetShaderByHandle(ent->e.customShader);
 		else if(ent->e.customSkin > 0 && ent->e.customSkin < tr.numSkins)
 		{
 			skin = R_GetSkinByHandle(ent->e.customSkin);
 			shader = tr.defaultShader;
-			
+
 			for(j = 0; j < skin->numSurfaces; j++)
 			{
 				if (!strcmp(skin->surfaces[j].name, surface->name))
@@ -325,12 +320,12 @@ void RB_MDRSurfaceAnim( mdrSurface_t *surface )
 
 	// don't lerp if lerping off, or this is the only frame, or the last frame...
 	//
-	if (backEnd.currentEntity->e.oldframe == backEnd.currentEntity->e.frame) 
+	if (backEnd.currentEntity->e.oldframe == backEnd.currentEntity->e.frame)
 	{
 		backlerp	= 0;	// if backlerp is 0, lerping is off and frontlerp is never used
 		frontlerp	= 1;
-	} 
-	else  
+	}
+	else
 	{
 		backlerp	= backEnd.currentEntity->e.backlerp;
 		frontlerp	= 1.0f - backlerp;
@@ -351,9 +346,9 @@ void RB_MDRSurfaceAnim( mdrSurface_t *surface )
 	indexes		= surface->numTriangles * 3;
 	baseIndex	= tess.numIndexes;
 	baseVertex	= tess.numVertexes;
-	
+
 	// Set up all triangles.
-	for (j = 0 ; j < indexes ; j++) 
+	for (j = 0 ; j < indexes ; j++)
 	{
 		tess.indexes[baseIndex + j] = baseVertex + triangles[j];
 	}
@@ -362,16 +357,16 @@ void RB_MDRSurfaceAnim( mdrSurface_t *surface )
 	//
 	// lerp all the needed bones
 	//
-	if ( !backlerp ) 
+	if ( !backlerp )
 	{
 		// no lerping needed
 		bonePtr = frame->bones;
-	} 
-	else 
+	}
+	else
 	{
 		bonePtr = bones;
-		
-		for ( i = 0 ; i < header->numBones*12 ; i++ ) 
+
+		for ( i = 0 ; i < header->numBones*12 ; i++ )
 		{
 			((float *)bonePtr)[i] = frontlerp * ((float *)frame->bones)[i] + backlerp * ((float *)oldFrame->bones)[i];
 		}
@@ -382,7 +377,7 @@ void RB_MDRSurfaceAnim( mdrSurface_t *surface )
 	//
 	numVerts = surface->numVerts;
 	v = (mdrVertex_t *) ((byte *)surface + surface->ofsVerts);
-	for ( j = 0; j < numVerts; j++ ) 
+	for ( j = 0; j < numVerts; j++ )
 	{
 		vec3_t	tempVert, tempNormal;
 		mdrWeight_t	*w;
@@ -390,14 +385,14 @@ void RB_MDRSurfaceAnim( mdrSurface_t *surface )
 		VectorClear( tempVert );
 		VectorClear( tempNormal );
 		w = v->weights;
-		for ( k = 0 ; k < v->numWeights ; k++, w++ ) 
+		for ( k = 0 ; k < v->numWeights ; k++, w++ )
 		{
 			bone = bonePtr + w->boneIndex;
-			
+
 			tempVert[0] += w->boneWeight * ( DotProduct( bone->matrix[0], w->offset ) + bone->matrix[0][3] );
 			tempVert[1] += w->boneWeight * ( DotProduct( bone->matrix[1], w->offset ) + bone->matrix[1][3] );
 			tempVert[2] += w->boneWeight * ( DotProduct( bone->matrix[2], w->offset ) + bone->matrix[2][3] );
-			
+
 #ifdef USE_TESS_NEEDS_NORMAL
 			if ( tess.needsNormal )
 #endif

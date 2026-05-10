@@ -3,22 +3,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 //
@@ -890,6 +885,17 @@ typedef struct {
 	qhandle_t	lightningShaderPrim;
 	qhandle_t	lightningArcShaderPrim;
 
+	// Phase 5T: PTRAIL_PUSH visual assets — beam shader +
+	// sparkle-stream particle class. Registered via
+	// CG_RegisterGraphics + CG_RegisterPushParticleClasses; the
+	// generic CG_RegisterPlayerTrailDefs binds these into the
+	// PTRAIL_PUSH def table entry, and CG_AddPlayerTrails consumes
+	// them per-frame via the transient re-submit pattern. Jumppads
+	// are the current EV trigger; haste/speed extends the trail
+	// per-frame from CG_UpdatePlayerTrailExtensions.
+	qhandle_t	pushTrailShader;
+	qhandle_t	pushStreamClass;
+
 	// Particle class handle for Lightning Gun primary impact sparks.
 	// Registered via CG_RegisterLightningParticleClasses() once
 	// cgs.media.lightningSparkShader is bound; consumed by
@@ -1629,6 +1635,74 @@ void CG_AddRailTrails( void );
 void CG_ClearRailTrails( void );
 void CG_RegisterRailParticleClasses( void );      // cg_wired_particles.c
 void CG_RegisterLightningParticleClasses( void ); // cg_wired_particles.c
+
+// Phase 5T: generic player-trail infrastructure.
+// Multiple trail types per player can be active concurrently
+// (e.g., a haste-carrying flag runner shows both PUSH and FLAG
+// trails). Each (client, type) pair has its own expiry timestamp;
+// trails stack visually with independent fade.
+//
+// State is publicly accessible (cg_playerTrails[][]) so
+// third-party hooks (game-mode logic, mod code) can extend trails
+// directly. CG_TriggerPlayerTrail is the preferred API but not
+// mandatory.
+//
+// Engine sees only generic primitive shader / particle handles;
+// effect-specific naming (PTRAIL_PUSH, "pushTrail", etc.) lives
+// only here in cgame and in shader.script.
+typedef enum {
+	PTRAIL_PUSH = 0,   // jumppad + haste/speed
+	PTRAIL_COUNT       // sentinel — never use as an index
+} playerTrailType_t;
+
+// Color-resolution callback. NULL → def->defaultColor is used.
+// Non-NULL → called per-render to compute color (e.g., flag
+// carrier color from team membership).
+typedef void (*CG_TrailColorFn)( int clientNum, vec3_t outColor );
+
+typedef struct {
+	qhandle_t           *shaderPtrPtr;          // address of cgs.media.* slot
+	qhandle_t           *particleClassPtrPtr;   // address of cgs.media.* slot, may be NULL
+	vec3_t               defaultColor;
+	CG_TrailColorFn      colorResolveFn;        // NULL → defaultColor
+	float                alphaCeiling;
+	float                startWidth;
+	float                endWidth;
+	int                  axialCopies;
+	int                  fadeWindowMs;
+	float                particleRateMin;
+	float                particleRateMax;
+} playerTrailDef_t;
+
+// Jumppad velocity → duration scaling (PTRAIL_PUSH-specific,
+// shared between the EV_JUMP_PAD trigger in cg_event.c and the
+// particle-rate scaling in cg_effects.c).
+#define PTRAIL_JUMPPAD_DURATION_MIN_MS 200
+#define PTRAIL_JUMPPAD_DURATION_MAX_MS 800
+#define PTRAIL_JUMPPAD_SPEED_NORM      1500.0f
+
+// Per-(client, type) expiry timestamp (cg.time-based).
+// cg_playerTrails[client][type] > cg.time means the trail is
+// active and renders this frame.
+extern int cg_playerTrails[MAX_CLIENTS][PTRAIL_COUNT];
+
+// Per-frame entry point. Called from cg_view.c after the other
+// persistent-effect render calls.
+void CG_AddPlayerTrails( void );
+
+// Startup: populate the def table after cgs.media.* shader and
+// particle handles are registered.
+void CG_RegisterPlayerTrailDefs( void );
+
+// Preferred API for triggering / extending a trail. Sets
+// cg_playerTrails[clientNum][type] to max(current, cg.time +
+// durationMs). Multiple sources merge naturally — highest
+// expiry wins.
+void CG_TriggerPlayerTrail( int clientNum,
+                            playerTrailType_t type,
+                            int durationMs );
+
+void CG_RegisterPushParticleClasses( void );   // cg_wired_particles.c
 void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi );
 void CG_AddViewWeapon (playerState_t *ps);
 void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent, int team );

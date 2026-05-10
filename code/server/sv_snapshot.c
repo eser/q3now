@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -439,7 +434,7 @@ static void SV_AddEntitiesVisibleFromPoint( const vec3_t origin, clientSnapshot_
 SV_InitSnapshotStorage
 ===============
 */
-void SV_InitSnapshotStorage( void ) 
+void SV_InitSnapshotStorage( void )
 {
 	// initialize snapshot storage
 	memset( svs.snapFrames, 0, sizeof( svs.snapFrames ) );
@@ -461,10 +456,10 @@ SV_IssueNewSnapshot
 This should be called before any new client snaphot built
 ===============
 */
-void SV_IssueNewSnapshot( void ) 
+void SV_IssueNewSnapshot( void )
 {
 	svs.currFrame = NULL;
-	
+
 	// value that clients can use even for their empty frames
 	// as it will not increment on new snapshot built
 	svs.currentSnapshotFrame = svs.snapshotFrame;
@@ -492,7 +487,7 @@ static void SV_BuildCommonSnapshot( void )
 			if ( !ent->r.linked ) {
 				continue;
 			}
-	
+
 			if ( ent->s.number != num ) {
 				Com_Log( SEV_DEBUG, LOG_CH(ch_server), "FIXING ENT->S.NUMBER %i => %i\n", ent->s.number, num );
 				ent->s.number = num;
@@ -511,7 +506,7 @@ static void SV_BuildCommonSnapshot( void )
 	sv.snapshotCounter = -1;
 
 	snapshotFrame_t *sf = &svs.snapFrames[ svs.snapshotFrame % NUM_SNAPSHOT_FRAMES ];
-	
+
 	// track last valid frame
 	if ( svs.snapshotFrame - svs.lastValidFrame > (NUM_SNAPSHOT_FRAMES-1) ) {
 		svs.lastValidFrame = svs.snapshotFrame - (NUM_SNAPSHOT_FRAMES-1);
@@ -538,7 +533,7 @@ static void SV_BuildCommonSnapshot( void )
 	sf->count = count;
 	svs.freeStorageEntities -= count;
 
-	sf->start = svs.currentStoragePosition; 
+	sf->start = svs.currentStoragePosition;
 	svs.currentStoragePosition = ( svs.currentStoragePosition + count ) % svs.numSnapshotEntities;
 
 	sf->frameNum = svs.snapshotFrame;
@@ -581,7 +576,7 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 	// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=62
 	frame->num_entities = 0;
 	frame->frameNum = svs.currentSnapshotFrame;
-	
+
 	if ( client->state == CS_ZOMBIE )
 		return;
 
@@ -636,7 +631,7 @@ static void SV_BuildClientSnapshot( client_t *client ) {
 	// to work correctly.  This also catches the error condition
 	// of an entity being included twice.
 	if ( entityNumbers.unordered ) {
-		SV_SortEntityNumbers( &entityNumbers.snapshotEntities[0], 
+		SV_SortEntityNumbers( &entityNumbers.snapshotEntities[0],
 			entityNumbers.numSnapshotEntities );
 	}
 

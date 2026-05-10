@@ -633,6 +633,14 @@ target_include_directories(client PRIVATE
 
 # renderers
 AUX_SOURCE_DIRECTORY(code/renderercommon RENDERER_COMMON_SRCS)
+# r_image_probe.c is an offline-tool-only TU (consumed by extract-meta).
+# It calls FS_FOpenFileRead/FS_FCloseFile directly, which the renderer
+# DLLs can't satisfy (they go through refimport_t::FS_ReadFile). The
+# engine never calls R_ImageResolves, so the file is harmless to omit
+# from every renderer DLL link. Two forms because AUX_SOURCE_DIRECTORY
+# may emit either depending on CMake version.
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS code/renderercommon/r_image_probe.c)
+LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/renderercommon/r_image_probe.c)
 AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)
@@ -1083,3 +1091,5 @@ IF(CLANG_FORMAT_EXE)
 		VERBATIM
 	)
 ENDIF()
+
+ADD_SUBDIRECTORY(tools/extract-meta)

@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // tr_shade_calc.c
@@ -27,7 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // NOLINTNEXTLINE(bugprone-macro-parentheses) — `table` is always a static float[] array, never a complex expression
 #define	WAVEVALUE( table, base, amplitude, phase, freq )  ((base) + table[ (int64_t)( ( ( (phase) + tess.shaderTime * (freq) ) * FUNCTABLE_SIZE ) ) & FUNCTABLE_MASK ] * (amplitude))
 
-static float *TableForFunc( genFunc_t func ) 
+static float *TableForFunc( genFunc_t func )
 {
 	switch ( func )
 	{
@@ -133,7 +128,7 @@ static void RB_CalcDeformVertexes( deformStage_t *ds )
 		for ( int i = 0; i < tess.numVertexes; i++, xyz += 4, normal += 4 )
 		{
 			R_VaoUnpackNormal(offset, normal);
-			
+
 			xyz[0] += offset[0] * scale;
 			xyz[1] += offset[1] * scale;
 			xyz[2] += offset[2] * scale;
@@ -147,7 +142,7 @@ static void RB_CalcDeformVertexes( deformStage_t *ds )
 		{
 			float off = ( xyz[0] + xyz[1] + xyz[2] ) * ds->deformationSpread;
 
-			scale = WAVEVALUE( table, ds->deformationWave.base, 
+			scale = WAVEVALUE( table, ds->deformationWave.base,
 				ds->deformationWave.amplitude,
 				ds->deformationWave.phase + off,
 				ds->deformationWave.frequency );
@@ -223,7 +218,7 @@ static void RB_CalcBulgeVertexes( deformStage_t *ds ) {
 		off = (float)( FUNCTABLE_SIZE / (M_PI*2) ) * ( st[0] * ds->bulgeWidth + now );
 
 		scale = tr.sinTable[ off & FUNCTABLE_MASK ] * ds->bulgeHeight;
-			
+
 		xyz[0] += fNormal[0] * scale;
 		xyz[1] += fNormal[1] * scale;
 		xyz[2] += fNormal[2] * scale;
@@ -247,7 +242,7 @@ static void RB_CalcMoveVertexes( deformStage_t *ds ) {
 
 	table = TableForFunc( ds->deformationWave.func );
 
-	scale = WAVEVALUE( table, ds->deformationWave.base, 
+	scale = WAVEVALUE( table, ds->deformationWave.base,
 		ds->deformationWave.amplitude,
 		ds->deformationWave.phase,
 		ds->deformationWave.frequency );
@@ -486,7 +481,7 @@ static void Autosprite2Deform( void ) {
 			v2 = xyz + 4 * edgeVerts[j][1];
 
 			VectorSubtract( v1, v2, temp );
-			
+
 			l = DotProduct( temp, temp );
 			if ( l < lengths[0] ) {
 				nums[1] = nums[0];
@@ -514,7 +509,7 @@ static void Autosprite2Deform( void ) {
 		// cross this with the view direction to get minor axis
 		CrossProduct( major, forward, minor );
 		VectorNormalize( minor );
-		
+
 		// re-project the points
 		for ( j = 0 ; j < 2 ; j++ ) {
 			float	l;
@@ -523,7 +518,7 @@ static void Autosprite2Deform( void ) {
 			v2 = xyz + 4 * edgeVerts[nums[j]][1];
 
 			l = 0.5 * sqrt( lengths[j] );
-			
+
 			// we need to see which direction this edge
 			// is used to determine direction of projection
 			for ( k = 0 ; k < 5 ; k++ ) {
@@ -622,7 +617,7 @@ float RB_CalcWaveColorSingle( const waveForm_t *wf )
 	if ( wf->func != GF_NOISE && wf->func != GF_RANDOM ) {
 		glow *= tr.identityLight;
 	}
-	
+
 	if ( glow < 0 ) {
 		glow = 0;
 	}
@@ -706,11 +701,11 @@ void RB_CalcFogTexCoords( float *st ) {
 
 	// rotate the gradient vector for this orientation
 	if ( fog->hasSurface ) {
-		fogDepthVector[0] = fog->surface[0] * backEnd.or.axis[0][0] + 
+		fogDepthVector[0] = fog->surface[0] * backEnd.or.axis[0][0] +
 			fog->surface[1] * backEnd.or.axis[0][1] + fog->surface[2] * backEnd.or.axis[0][2];
-		fogDepthVector[1] = fog->surface[0] * backEnd.or.axis[1][0] + 
+		fogDepthVector[1] = fog->surface[0] * backEnd.or.axis[1][0] +
 			fog->surface[1] * backEnd.or.axis[1][1] + fog->surface[2] * backEnd.or.axis[1][2];
-		fogDepthVector[2] = fog->surface[0] * backEnd.or.axis[2][0] + 
+		fogDepthVector[2] = fog->surface[0] * backEnd.or.axis[2][0] +
 			fog->surface[1] * backEnd.or.axis[2][1] + fog->surface[2] * backEnd.or.axis[2][2];
 		fogDepthVector[3] = -fog->surface[3] + DotProduct( backEnd.or.origin, fog->surface );
 
@@ -736,7 +731,7 @@ void RB_CalcFogTexCoords( float *st ) {
 		s = DotProduct( v, fogDistanceVector ) + fogDistanceVector[3];
 		t = DotProduct( v, fogDepthVector ) + fogDepthVector[3];
 
-		// partially clipped fogs use the T axis		
+		// partially clipped fogs use the T axis
 		if ( eyeOutside ) {
 			if ( t < 1.0 ) {
 				t = 1.0/32;	// point is outside, so no fogging

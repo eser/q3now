@@ -13,8 +13,11 @@ layout(constant_id = 0) const float gamma = 1.0;
 layout(constant_id = 1) const float obScale = 2.0;
 // saturation = 1.0 is identity; below desaturates toward
 // luma, above super-saturates. Wired from r_saturation->value.
-// 8-bit framebuffer clamps any pixel exceeding [0, 1] after
-// the mix; super-saturation may visibly clip.
+// Under r_hdr 0 / 1 the framebuffer clamps any pixel exceeding
+// [0, 1] after the mix; super-saturation may visibly clip.
+// Under r_hdr 2 (SFLOAT) values >1.0 pass through; the visible
+// clip happens at tonemap time (ACES clamp inside applyTonemap)
+// or at swapchain present (display SDR mapping).
 layout(constant_id = 2) const float saturation = 1.0;
 //
 layout(constant_id = 7) const int ditherMode = 0; // 0 - disabled, 1 - ordered

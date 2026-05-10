@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 #include "tr_local.h"
@@ -70,11 +65,11 @@ void GL_Cull( int cullType ) {
 		return;
 	}
 
-	if ( cullType == CT_TWO_SIDED ) 
+	if ( cullType == CT_TWO_SIDED )
 	{
 		qglDisable( GL_CULL_FACE );
-	} 
-	else 
+	}
+	else
 	{
 		qboolean cullFront = (cullType == CT_FRONT_SIDED);
 
@@ -270,14 +265,14 @@ void GL_State( unsigned long stateBits )
 void GL_SetProjectionMatrix(mat4_t matrix)
 {
 	Mat4Copy(matrix, glState.projection);
-	Mat4Multiply(glState.projection, glState.modelview, glState.modelviewProjection);	
+	Mat4Multiply(glState.projection, glState.modelview, glState.modelviewProjection);
 }
 
 
 void GL_SetModelviewMatrix(mat4_t matrix)
 {
 	Mat4Copy(matrix, glState.modelview);
-	Mat4Multiply(glState.projection, glState.modelview, glState.modelviewProjection);	
+	Mat4Multiply(glState.projection, glState.modelview, glState.modelviewProjection);
 }
 
 
@@ -312,9 +307,9 @@ static void SetViewportAndScissor( void ) {
 	GL_SetProjectionMatrix( backEnd.viewParms.projectionMatrix );
 
 	// set the window clipping
-	qglViewport( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY, 
+	qglViewport( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
 		backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight );
-	qglScissor( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY, 
+	qglScissor( backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
 		backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight );
 }
 
@@ -523,7 +518,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 				{
 					// hack the depth range to prevent view model from poking into walls
 					depthRange = qtrue;
-					
+
 					if(backEnd.currentEntity->e.renderfx & RF_CROSSHAIR)
 						isCrosshair = qtrue;
 				}
@@ -733,7 +728,7 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, 
 	VectorSet2(texCoords[3], 0.5f / cols,          (rows - 0.5f) / rows);
 
 	GLSL_BindProgram(&tr.textureColorShader);
-	
+
 	GLSL_SetUniformMat4(&tr.textureColorShader, UNIFORM_MODELVIEWPROJECTIONMATRIX, glState.modelviewProjection);
 	GLSL_SetUniformVec4(&tr.textureColorShader, UNIFORM_COLOR, colorWhite);
 
@@ -1362,7 +1357,7 @@ static const void	*RB_DrawSurfs( const void *data ) {
 		{
 			FBO_t *oldFbo = glState.currentFBO;
 			FBO_Bind(tr.sunRaysFbo);
-			
+
 			qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
 			qglClear( GL_COLOR_BUFFER_BIT );
 
@@ -1383,7 +1378,7 @@ static const void	*RB_DrawSurfs( const void *data ) {
 		}
 
 		// darken down any stencil shadows
-		RB_ShadowFinish();		
+		RB_ShadowFinish();
 
 		// add light flares on lights that aren't obscured
 		RB_RenderFlares();
@@ -1514,7 +1509,7 @@ static const void *RB_ColorMask(const void *data)
 	}
 
 	qglColorMask(cmd->rgba[0], cmd->rgba[1], cmd->rgba[2], cmd->rgba[3]);
-	
+
 	return (const void *)(cmd + 1);
 }
 
@@ -1527,7 +1522,7 @@ RB_ClearDepth
 static const void *RB_ClearDepth(const void *data)
 {
 	const clearDepthCommand_t *cmd = data;
-	
+
 	// finish any 2D drawing if needed
 	if(tess.numIndexes)
 		RB_EndSurface();
@@ -1557,7 +1552,7 @@ static const void *RB_ClearDepth(const void *data)
 		qglClear(GL_DEPTH_BUFFER_BIT);
 	}
 
-	
+
 	return (const void *)(cmd + 1);
 }
 

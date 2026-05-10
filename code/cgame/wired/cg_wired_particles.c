@@ -335,3 +335,69 @@ void CG_RegisterLightningParticleClasses( void ) {
 	cgs.media.lgSparksClass =
 		(qhandle_t)CG_RegisterParticleClass( "lg_sparks", &cls );
 }
+
+
+/*
+==========================
+CG_RegisterPushParticleClasses
+
+Phase 5T: register the sparkle-stream particle class consumed by
+the PTRAIL_PUSH def-table entry. Called once from
+CG_RegisterGraphics (cg_main.c) after the particle shader is
+bound and before CG_RegisterPlayerTrailDefs wires the handle into
+the def table.
+
+The stream flows along the beam axis (anchor → player). Per-emission
+color tint and alphaScale are supplied by CG_EmitPlayerTrailParticles
+from the resolved per-trail color × the (capped) fade alpha; the
+class itself stores a neutral-white palette that the tint
+multiplies.
+
+Class parameters mirror the Phase 5Q jumppad_stream verbatim — only
+the registration function and class-name string change. Behaviour
+tweaks (velocity-scaled emit count, alpha ceiling) live in the
+def table and at the render-side call sites, not in the class.
+==========================
+*/
+void CG_RegisterPushParticleClasses( void ) {
+	particleClass_t cls;
+
+	// ── push_stream ────────────────────────────────────────────────
+	// Soft sparkles flowing along the beam axis. Emitted along the
+	// trigger→player path; velocity along the same axis carries them
+	// toward the player. No gravity (axial flow only); short lifetime
+	// so the stream stays tightly clustered around the beam.
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.lightningSparkShader; // same soft sparkle texture
+	                                                          // the LG impact shower uses;
+	                                                          // tint at emit time covers
+	                                                          // the color difference.
+	cls.renderFlags        = PRIM_FLAG_ADDITIVE;
+	cls.emitMode           = EMIT_PATH;
+	cls.scatterShape       = SCATTER_CUBE;
+	cls.scatterMagnitude   = 6.0f;       // perpendicular jitter around beam axis
+	cls.velocityShape      = VEL_AXIAL_PLUS_CUBE;
+	cls.axialSpeed         = 384.0f;     // flow speed trigger→player
+	cls.cubeJitter         = 32.0f;      // small lateral drift
+	cls.coneHalfAngle      = 0.0f;
+	cls.lifetimeMean       = 0.4f;       // 400 ms
+	cls.lifetimeJitter     = 0.1f;
+	// Neutral white palette; per-emission colorTint applies the
+	// hook-color multiplier.
+	cls.paletteCount       = 1;
+	cls.colorPalette[0][0] = 1.0f;
+	cls.colorPalette[0][1] = 1.0f;
+	cls.colorPalette[0][2] = 1.0f;
+	cls.colorPalette[0][3] = 1.0f;
+	cls.colorEndMult[0]    = 1.0f;
+	cls.colorEndMult[1]    = 1.0f;
+	cls.colorEndMult[2]    = 1.0f;
+	cls.colorEndMult[3]    = 0.0f;       // fade alpha to 0 over lifetime
+	cls.sizeStart          = 3.0f;
+	cls.sizeEnd            = 0.0f;
+	cls.gravityScale       = 0.0f;       // axial flow only, no fall
+	cls.drag               = 0.0f;
+
+	cgs.media.pushStreamClass =
+		(qhandle_t)CG_RegisterParticleClass( "push_stream", &cls );
+}

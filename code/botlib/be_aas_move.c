@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -376,9 +371,9 @@ static void AAS_Accelerate(vec3_t velocity, float frametime, vec3_t wishdir, flo
 	if (accelspeed > addspeed) {
 		accelspeed = addspeed;
 	}
-	
+
 	for (i=0 ; i<3 ; i++) {
-		velocity[i] += accelspeed*wishdir[i];	
+		velocity[i] += accelspeed*wishdir[i];
 	}
 } //end of the function AAS_Accelerate
 //===========================================================================
@@ -517,7 +512,7 @@ static int AAS_ClientMovementPrediction( aas_clientmove_t *move,
 	vec3_t up = {0, 0, 1};
 	aas_plane_t *plane, *plane2;
 	aas_trace_t trace, steptrace;
-	
+
 	if (frametime <= 0) frametime = 0.1f;
 	//
 	phys_friction = aassettings.phys_friction;
@@ -808,13 +803,13 @@ static int AAS_ClientMovementPrediction( aas_clientmove_t *move,
 				if (!step)
 				{
 					//velocity left to test for this frame is the projection
-					//of the current test velocity into the hit plane 
+					//of the current test velocity into the hit plane
 					VectorMA(left_test_vel, -DotProduct(left_test_vel, plane->normal),
 										plane->normal, left_test_vel);
 					//store the old velocity for landing check
 					VectorCopy(frame_test_vel, old_frame_test_vel);
 					//test velocity for the next frame is the projection
-					//of the velocity of the current frame into the hit plane 
+					//of the velocity of the current frame into the hit plane
 					VectorMA(frame_test_vel, -DotProduct(frame_test_vel, plane->normal),
 										plane->normal, frame_test_vel);
 					//check for a landing on an almost horizontal floor

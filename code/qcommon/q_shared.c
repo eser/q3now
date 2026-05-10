@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 //
@@ -94,15 +89,15 @@ qboolean COM_CompareExtension(const char *in, const char *ext)
 {
 	int inlen = strlen(in);
 	int extlen = strlen(ext);
-	
+
 	if(extlen <= inlen)
 	{
 		in += inlen - extlen;
-		
+
 		if(!Q_stricmp(in, ext))
 			return qtrue;
 	}
-	
+
 	return qfalse;
 }
 
@@ -315,9 +310,9 @@ int COM_Compress( char *data_p ) {
 			}
 		// skip /* */ comments
 		} else if ( c == '/' && in[1] == '*' ) {
-			while ( *in && ( *in != '*' || in[1] != '/' ) ) 
+			while ( *in && ( *in != '*' || in[1] != '/' ) )
 				in++;
-			if ( *in ) 
+			if ( *in )
 				in += 2;
 			// record when we hit a newline
 		} else if ( c == '\n' || c == '\r' ) {
@@ -480,7 +475,7 @@ const char *COM_ParseExt( ComParser *parser, const char **data_p, qboolean allow
 	*data_p = data;
 	return parser->token;
 }
-	
+
 
 /*
 ==============
@@ -898,18 +893,18 @@ qboolean Q_isintegral( float f )
 /*
 =============
 Q_strncpyz
- 
+
 Safe strncpy that ensures a trailing zero
 =============
 */
-void Q_strncpyz( char *dest, const char *src, int destsize ) 
+void Q_strncpyz( char *dest, const char *src, int destsize )
 {
-	if ( !dest ) 
+	if ( !dest )
 	{
 		Com_Terminate( TERM_UNRECOVERABLE, "Q_strncpyz: NULL dest" );
 	}
 
-	if ( !src ) 
+	if ( !src )
 	{
 		Com_Terminate( TERM_UNRECOVERABLE, "Q_strncpyz: NULL src" );
 	}
@@ -918,7 +913,7 @@ void Q_strncpyz( char *dest, const char *src, int destsize )
 	{
 		Com_Terminate( TERM_UNRECOVERABLE,"Q_strncpyz: destsize < 1" );
 	}
-#if 1 
+#if 1
 	// do not fill whole remaining buffer with zeros
 	// this is obvious behavior change but actually it may affect only buggy QVMs
 	// which passes overlapping or short buffers to cvar reading routines
@@ -995,7 +990,7 @@ int Q_stricmpn( const char *s1, const char *s2, int n ) {
 				}
 			}
 	} while (c1);
-	
+
 	return 0;		// strings are equal
 }
 
@@ -1016,7 +1011,7 @@ int Q_stricmp( const char *s1, const char *s2 )
 		c1 = *s1++;
 		c2 = *s2++;
 
-		if ( c1 != c2 ) 
+		if ( c1 != c2 )
 		{
 
 			if ( c1 <= 'Z' && c1 >= 'A' )
@@ -1025,7 +1020,7 @@ int Q_stricmp( const char *s1, const char *s2 )
 			if ( c2 <= 'Z' && c2 >= 'A' )
 				c2 += ('a' - 'A');
 
-			if ( c1 != c2 ) 
+			if ( c1 != c2 )
 				return c1 < c2 ? -1 : 1;
 		}
 	}
@@ -1207,7 +1202,7 @@ char *Q_CleanStr( char *string ) {
 	while ( (c = (byte)*s) != 0 ) {
 		if ( Q_IsColorString( s ) ) {
 			s++;
-		}		
+		}
 		else if ( c >= 0x20 && c <= 0x7E ) {
 			*d++ = c;
 		}
@@ -1228,7 +1223,7 @@ int Q_CountChar(const char *string, char tocount)
 		if(*string == tocount)
 			count++;
 	}
-	
+
 	return count;
 }
 

@@ -1,25 +1,21 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 #include "tr_local.h"
+#include "../qcommon/maps/meta.h"
 
 // tr_shader.c -- this file deals with the parsing and definition of shaders
 
@@ -46,7 +42,7 @@ return a hash value for the filename
 ================
 */
 #ifdef __GNUCC__
-  #warning TODO: check if long is ok here 
+  #warning TODO: check if long is ok here
 #endif
 
 #define generateHashValue Com_GenerateHashValue
@@ -165,7 +161,7 @@ NameToAFunc
 ===============
 */
 static unsigned NameToAFunc( const char *funcname )
-{	
+{
 	if ( !Q_stricmp( funcname, "GT0" ) )
 	{
 		return GLS_ATEST_GT_0;
@@ -1338,7 +1334,7 @@ static void ParseDeform( ComParser *parser, const char **text ) {
 
 	if ( !Q_stricmpn( token, "text", 4 ) ) {
 		int		n;
-		
+
 		n = token[4] - '0';
 		if ( n < 0 || n > 7 ) {
 			n = 0;
@@ -1710,7 +1706,7 @@ static qboolean ParseCondition( ComParser *parser, const char **text, resultType
 			ri.Log( SEV_WARN, "WARNING: unexpected operator '%s' for comparison in shader %s\n", token, shader.name );
 			return qfalse;
 		}
-		
+
 		str = qfalse;
 
 		if ( lval_type == TK_QUOTED ) {
@@ -1762,7 +1758,7 @@ static qboolean ParseCondition( ComParser *parser, const char **text, resultType
 			r |= r0;
 		else
 			r &= r0;
-			
+
 		if ( parser->tokentype == TK_OR ) {
 			rm = maskOR;
 			continue;
@@ -1783,7 +1779,7 @@ static qboolean ParseCondition( ComParser *parser, const char **text, resultType
 
 	if ( res )
 		*res = r ? res_true : res_false;
-	
+
 	return qtrue;
 }
 
@@ -2222,7 +2218,7 @@ static void ComputeVertexAttribs(void)
 	{
 		shaderStage_t *pStage = &stages[stage];
 
-		if ( !pStage->active ) 
+		if ( !pStage->active )
 		{
 			break;
 		}
@@ -2307,8 +2303,8 @@ static void ComputeVertexAttribs(void)
 }
 
 
-static void CollapseStagesToLightall(shaderStage_t *diffuse, 
-	shaderStage_t *normal, shaderStage_t *specular, shaderStage_t *lightmap, 
+static void CollapseStagesToLightall(shaderStage_t *diffuse,
+	shaderStage_t *normal, shaderStage_t *specular, shaderStage_t *lightmap,
 	qboolean useLightVector, qboolean useLightVertex, qboolean parallax, qboolean tcgen)
 {
 	int defs = 0;
@@ -2487,7 +2483,7 @@ static int CollapseStagesToGLSL(void)
 			if (pStage->bundle[0].tcGen == TCGEN_LIGHTMAP)
 			{
 				int blendBits = pStage->stateBits & ( GLS_DSTBLEND_BITS | GLS_SRCBLEND_BITS );
-				
+
 				if (blendBits != (GLS_DSTBLEND_SRC_COLOR | GLS_SRCBLEND_ZERO)
 					&& blendBits != (GLS_DSTBLEND_ZERO | GLS_SRCBLEND_DST_COLOR))
 				{
@@ -2659,7 +2655,7 @@ static int CollapseStagesToGLSL(void)
 		if (pStage->type == ST_SPECULARMAP)
 		{
 			pStage->active = qfalse;
-		}			
+		}
 	}
 
 	// remove inactive stages
@@ -2895,7 +2891,7 @@ static shader_t *GeneratePermanentShader( void ) {
 
 	tr.shaders[ tr.numShaders ] = newShader;
 	newShader->index = tr.numShaders;
-	
+
 	tr.sortedShaders[ tr.numShaders ] = newShader;
 	newShader->sortedIndex = tr.numShaders;
 
@@ -3148,17 +3144,17 @@ static shader_t *FinishShader( void ) {
 				if(!stages[index].active)
 					break;
 			}
-			
+
 			if(index < MAX_SHADER_STAGES)
 				memmove(pStage, pStage + 1, sizeof(*pStage) * (index - stage));
 			else
 			{
 				if(stage + 1 < MAX_SHADER_STAGES)
 					memmove(pStage, pStage + 1, sizeof(*pStage) * (index - stage - 1));
-				
+
 				memset(&stages[index - 1], 0, sizeof(*stages));
 			}
-			
+
 			continue;
 		}
 
@@ -3224,7 +3220,7 @@ static shader_t *FinishShader( void ) {
 				}
 			}
 		}
-		
+
 		stage++;
 	}
 
@@ -3473,6 +3469,18 @@ shader_t *R_FindShader( const char *name, int lightmapIndex, qboolean mipRawImag
 
 		image = R_FindImageFile( name, IMGTYPE_COLORALPHA, flags );
 		if ( !image ) {
+			// q3now meta-remap fallback (see code/renderer/tr_shader.c
+			// for the full rationale). Recursion-guarded — a remap
+			// target that is itself missing falls through to default.
+			const char *remapped = R_TryRemapShader( name );
+			if ( remapped && Q_stricmp( remapped, name ) != 0 ) {
+				R_PushNullRemap();
+				shader_t *result = R_FindShader( remapped, lightmapIndex, mipRawImage );
+				R_PopRemap();
+				if ( result && !result->defaultShader && result != tr.defaultShader ) {
+					return result;
+				}
+			}
 			ri.Log( SEV_DEBUG, "Couldn't find image file for shader %s\n", name );
 			shader.defaultShader = qtrue;
 			return FinishShader();
@@ -3633,7 +3641,7 @@ qhandle_t RE_RegisterShaderFromImage(const char *name, int lightmapIndex, image_
 }
 
 
-/* 
+/*
 ====================
 RE_RegisterShaderLightMap
 
@@ -3667,7 +3675,7 @@ qhandle_t RE_RegisterShaderLightMap( const char *name, int lightmapIndex ) {
 }
 
 
-/* 
+/*
 ====================
 RE_RegisterShader
 

@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 #include "cm_local.h"
@@ -37,7 +32,7 @@ static int CM_PointLeafnum_r( const vec3_t p, int num ) {
 	{
 		node = cm.nodes + num;
 		plane = node->plane;
-		
+
 		if (plane->type < 3)
 			d = p[plane->type] - plane->dist;
 		else
@@ -147,7 +142,7 @@ void CM_BoxLeafnums_r( leafList_t *ll, int nodenum ) {
 			ll->storeLeafs( ll, nodenum );
 			return;
 		}
-	
+
 		node = &cm.nodes[nodenum];
 		plane = node->plane;
 		s = BoxOnPlaneSide( ll->bounds[0], ll->bounds[1], plane );
@@ -207,7 +202,7 @@ int CM_BoxBrushes( const vec3_t mins, const vec3_t maxs, cbrush_t **list, int li
 	ll.storeLeafs = CM_StoreBrushes;
 	ll.lastLeaf = 0;
 	ll.overflowed = qfalse;
-	
+
 	CM_BoxLeafnums_r( &ll, 0 );
 
 	return ll.count;
@@ -293,7 +288,7 @@ int	CM_TransformedPointContents( const vec3_t p, clipHandle_t model, const vec3_
 	VectorSubtract (p, origin, p_l);
 
 	// rotate start and end into the models frame of reference
-	if ( model != BOX_MODEL_HANDLE && 
+	if ( model != BOX_MODEL_HANDLE &&
 	(angles[0] || angles[1] || angles[2]) )
 	{
 		AngleVectors (angles, forward, right, up);

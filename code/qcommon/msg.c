@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 #include "q_shared.h"
@@ -92,7 +87,7 @@ void MSG_Copy(msg_t *buf, byte *data, int length, const msg_t *src)
 =============================================================================
 
 bit functions
-  
+
 =============================================================================
 */
 
@@ -199,7 +194,7 @@ static int MSG_ReadBits( msg_t *msg, int bits ) {
 		const int nbits = bits & 7;
 		int bitIndex = msg->bit; // dereference optimization
 		if ( nbits )
-		{		
+		{
 			for ( int i = 0; i < nbits; i++ ) {
 				value |= HuffmanGetBit( buffer, bitIndex ) << i;
 				bitIndex++;
@@ -341,8 +336,8 @@ int MSG_ReadChar (msg_t *msg ) {
 	int c = (signed char)MSG_ReadBits( msg, 8 );
 	if ( msg->readcount > msg->cursize ) {
 		c = -1;
-	}	
-	
+	}
+
 	return c;
 }
 
@@ -350,7 +345,7 @@ int MSG_ReadByte( msg_t *msg ) {
 	int c = (unsigned char)MSG_ReadBits( msg, 8 );
 	if ( msg->readcount > msg->cursize ) {
 		c = -1;
-	}	
+	}
 	return c;
 }
 
@@ -358,7 +353,7 @@ int MSG_ReadShort( msg_t *msg ) {
 	int c = (short)MSG_ReadBits( msg, 16 );
 	if ( msg->readcount > msg->cursize ) {
 		c = -1;
-	}	
+	}
 
 	return c;
 }
@@ -367,27 +362,27 @@ int MSG_ReadLong( msg_t *msg ) {
 	int c = MSG_ReadBits( msg, 32 );
 	if ( msg->readcount > msg->cursize ) {
 		c = -1;
-	}	
-	
+	}
+
 	return c;
 }
 
 float MSG_ReadFloat( msg_t *msg ) {
 	floatint_t dat;
-	
+
 	dat.i = MSG_ReadBits( msg, 32 );
 	if ( msg->readcount > msg->cursize ) {
 		dat.f = -1;
-	}	
-	
-	return dat.f;	
+	}
+
+	return dat.f;
 }
 
 
 const char *MSG_ReadString( msg_t *msg ) {
 	static char	string[MAX_STRING_CHARS];
 	int	l, c;
-	
+
 	l = 0;
 	do {
 		c = MSG_ReadByte( msg ); // use ReadByte so -1 is out of bounds
@@ -413,7 +408,7 @@ const char *MSG_ReadString( msg_t *msg ) {
 const char *MSG_ReadBigString( msg_t *msg ) {
 	static char	string[ BIG_INFO_STRING ];
 	int	l, c;
-	
+
 	l = 0;
 	do {
 		c = MSG_ReadByte( msg ); // use ReadByte so -1 is out of bounds
@@ -508,7 +503,7 @@ extern cvar_t *cl_shownet;
 =============================================================================
 
 delta functions with keys
-  
+
 =============================================================================
 */
 
@@ -630,7 +625,7 @@ void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, usercm
 =============================================================================
 
 entityState_t communication
-  
+
 =============================================================================
 */
 
@@ -804,7 +799,7 @@ void MSG_WriteDeltaEntity( msg_t *msg, const entityState_t *from, const entitySt
 				MSG_WriteBits( msg, 0, 1 );
 			} else {
 				MSG_WriteBits( msg, 1, 1 );
-				if ( trunc == fullFloat && trunc + FLOAT_INT_BIAS >= 0 && 
+				if ( trunc == fullFloat && trunc + FLOAT_INT_BIAS >= 0 &&
 					trunc + FLOAT_INT_BIAS < ( 1 << FLOAT_INT_BITS ) ) {
 					// send as small integer
 					MSG_WriteBits( msg, 0, 1 );
@@ -853,7 +848,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 
 	// check for a remove
 	if ( MSG_ReadBits( msg, 1 ) == 1 ) {
-		memset( to, 0, sizeof( *to ) );	
+		memset( to, 0, sizeof( *to ) );
 		to->number = MAX_GENTITIES - 1;
 #ifndef DEDICATED
 		if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -1 ) ) {
@@ -915,7 +910,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 			if ( field->bits == 0 ) {
 				// float
 				if ( MSG_ReadBits( msg, 1 ) == 0 ) {
-						*(float *)toF = 0.0f; 
+						*(float *)toF = 0.0f;
 				} else {
 					if ( MSG_ReadBits( msg, 1 ) == 0 ) {
 						// integral float
@@ -979,7 +974,7 @@ plyer_state_t communication
 // using the stringizing operator to save typing...
 #define	PSF(x) #x,(size_t)&((playerState_t*)0)->x
 
-static const netField_t playerStateFields[] = 
+static const netField_t playerStateFields[] =
 {
 { PSF(commandTime), 32 },
 { PSF(origin[0]), 0 },
@@ -1015,7 +1010,7 @@ static const netField_t playerStateFields[] =
 { PSF(damagePitch), 8 },
 { PSF(damageCount), 8 },
 { PSF(generic1), 8 },
-{ PSF(pm_type), 8 },					
+{ PSF(pm_type), 8 },
 { PSF(delta_angles[0]), 16 },
 { PSF(delta_angles[2]), 16 },
 { PSF(torsoTimer), 12 },
@@ -1080,7 +1075,7 @@ void MSG_WriteDeltaPlayerstate( msg_t *msg, const playerState_t *from, const pla
 			float fullFloat = *(const float *)toF;
 			int trunc = (int)fullFloat;
 
-			if ( trunc == fullFloat && trunc + FLOAT_INT_BIAS >= 0 && 
+			if ( trunc == fullFloat && trunc + FLOAT_INT_BIAS >= 0 &&
 				trunc + FLOAT_INT_BIAS < ( 1 << FLOAT_INT_BITS ) ) {
 				// send as small integer
 				MSG_WriteBits( msg, 0, 1 );

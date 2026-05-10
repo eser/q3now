@@ -2,21 +2,15 @@
 ===========================================================================
 Copyright (C) 2010 James Canete (use.less01@gmail.com)
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // tr_extramath.c - extra math needed by the renderer not in qmath.c
@@ -44,10 +38,10 @@ void Mat4Identity( mat4_t out )
 
 void Mat4Copy( const mat4_t in, mat4_t out )
 {
-	out[ 0] = in[ 0]; out[ 4] = in[ 4]; out[ 8] = in[ 8]; out[12] = in[12]; 
-	out[ 1] = in[ 1]; out[ 5] = in[ 5]; out[ 9] = in[ 9]; out[13] = in[13]; 
-	out[ 2] = in[ 2]; out[ 6] = in[ 6]; out[10] = in[10]; out[14] = in[14]; 
-	out[ 3] = in[ 3]; out[ 7] = in[ 7]; out[11] = in[11]; out[15] = in[15]; 
+	out[ 0] = in[ 0]; out[ 4] = in[ 4]; out[ 8] = in[ 8]; out[12] = in[12];
+	out[ 1] = in[ 1]; out[ 5] = in[ 5]; out[ 9] = in[ 9]; out[13] = in[13];
+	out[ 2] = in[ 2]; out[ 6] = in[ 6]; out[10] = in[10]; out[14] = in[14];
+	out[ 3] = in[ 3]; out[ 7] = in[ 7]; out[11] = in[11]; out[15] = in[15];
 }
 
 void Mat4Multiply( const mat4_t in1, const mat4_t in2, mat4_t out )
@@ -140,7 +134,7 @@ void Mat4SimpleInverse( const mat4_t in, mat4_t out)
 {
 	vec3_t v;
 	float invSqrLen;
- 
+
 	VectorCopy(in + 0, v);
 	invSqrLen = 1.0f / DotProduct(v, v); VectorScale(v, invSqrLen, v);
 	out[ 0] = v[0]; out[ 4] = v[1]; out[ 8] = v[2]; out[12] = -DotProduct(v, &in[12]);
@@ -167,7 +161,7 @@ qboolean SpheresIntersect(vec3_t origin1, float radius1, vec3_t origin2, float r
 {
 	float radiusSum = radius1 + radius2;
 	vec3_t diff;
-	
+
 	VectorSubtract(origin1, origin2, diff);
 
 	if (DotProduct(diff, diff) <= radiusSum * radiusSum)

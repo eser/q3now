@@ -245,6 +245,7 @@ const char *vk_format_string( VkFormat format )
 		CASE_STR( VK_FORMAT_B4G4R4A4_UNORM_PACK16 );
 		CASE_STR( VK_FORMAT_R4G4B4A4_UNORM_PACK16 );
 		CASE_STR( VK_FORMAT_R16G16B16A16_UNORM );
+		CASE_STR( VK_FORMAT_R16G16B16A16_SFLOAT );
 		CASE_STR( VK_FORMAT_A2B10G10R10_UNORM_PACK32 );
 		CASE_STR( VK_FORMAT_A2R10G10B10_UNORM_PACK32 );
 		CASE_STR( VK_FORMAT_B10G11R11_UFLOAT_PACK32 );
@@ -310,6 +311,71 @@ static const char *vk_result_string( VkResult code ) {
 	}
 }
 #undef CASE_STR
+
+
+// Phase 9C: HDR pipeline state snapshot, captured during
+// setup_surface_formats() and printed on demand by the `gfxinfo`
+// console command (see vk_hdr_state_print() below). This replaces
+// the per-vid_restart FEAT_FBO_DEBUG bloom diagnostic added in 9B —
+// state-keeping + on-demand report instead of build-flag log spam.
+typedef struct {
+	qboolean valid;
+	VkFormat base_format;
+	VkFormat color_format;
+	VkFormat bloom_format;
+	VkFormat capture_format;
+	VkFormat present_format;
+	VkFormat depth_format;
+	int      r_fbo_value;
+	int      r_hdr_value;        // post-downgrade
+	int      r_hdr_requested;    // pre-downgrade
+	qboolean sfloat_supported;
+	int      bloom_enabled;
+	int      bloom_passes_active;
+	int      bloom_mip_max;
+} hdrPipelineState_t;
+
+static hdrPipelineState_t vk_hdr_state;
+
+void vk_hdr_state_print( void )
+{
+	if ( !vk_hdr_state.valid ) {
+		ri.Log( SEV_INFO, "HDR pipeline: not yet initialized\n" );
+		return;
+	}
+
+	ri.Log( SEV_INFO, "HDR pipeline:\n" );
+	ri.Log( SEV_INFO, "  r_fbo            : %d\n", vk_hdr_state.r_fbo_value );
+	if ( vk_hdr_state.r_hdr_value != vk_hdr_state.r_hdr_requested ) {
+		ri.Log( SEV_INFO, "  r_hdr            : %d (requested %d)\n",
+			vk_hdr_state.r_hdr_value, vk_hdr_state.r_hdr_requested );
+	} else {
+		ri.Log( SEV_INFO, "  r_hdr            : %d\n", vk_hdr_state.r_hdr_value );
+	}
+	if ( vk_hdr_state.r_hdr_requested == 2 ) {
+		ri.Log( SEV_INFO, "  SFLOAT supported : %s\n",
+			vk_hdr_state.sfloat_supported ? "yes" : "no" );
+	} else {
+		// SFLOAT capability is only queried when r_hdr 2 is requested;
+		// for r_hdr 0 / 1 the GPU's actual SFLOAT support is unknown.
+		ri.Log( SEV_INFO, "  SFLOAT supported : not queried\n" );
+	}
+	ri.Log( SEV_INFO, "  base format      : %s\n", vk_format_string( vk_hdr_state.base_format ) );
+	ri.Log( SEV_INFO, "  color (main FBO) : %s\n", vk_format_string( vk_hdr_state.color_format ) );
+	ri.Log( SEV_INFO, "  bloom            : %s\n", vk_format_string( vk_hdr_state.bloom_format ) );
+	ri.Log( SEV_INFO, "  capture          : %s\n", vk_format_string( vk_hdr_state.capture_format ) );
+	ri.Log( SEV_INFO, "  present          : %s\n", vk_format_string( vk_hdr_state.present_format ) );
+	ri.Log( SEV_INFO, "  depth            : %s\n", vk_format_string( vk_hdr_state.depth_format ) );
+	ri.Log( SEV_INFO, "  bloom passes     : %d / %d max\n",
+		vk_hdr_state.bloom_passes_active, vk_hdr_state.bloom_mip_max );
+	ri.Log( SEV_INFO, "  bloom enabled    : %d\n", vk_hdr_state.bloom_enabled );
+
+	if ( vk_hdr_state.r_hdr_requested != vk_hdr_state.r_hdr_value ) {
+		ri.Log( SEV_INFO, "  r_hdr DOWNGRADED %d -> %d (GPU lacks SFLOAT)\n",
+			vk_hdr_state.r_hdr_requested, vk_hdr_state.r_hdr_value );
+	}
+}
+
 
 #define VK_CHECK( function_call ) { \
 	VkResult res = function_call; \
@@ -1582,7 +1648,8 @@ static VkFormat get_hdr_format( VkFormat base_format )
 
 	switch ( r_hdr->integer ) {
 		case -1: return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
-		case 1: return VK_FORMAT_R16G16B16A16_UNORM;
+		case 1:  return VK_FORMAT_R16G16B16A16_UNORM;
+		case 2:  return VK_FORMAT_R16G16B16A16_SFLOAT;
 		default: return base_format;
 	}
 }
@@ -1697,11 +1764,56 @@ static void setup_surface_formats( VkPhysicalDevice physical_device )
 {
 	vk.depth_format = get_depth_format( physical_device );
 
+	// Phase 9C: seed the HDR state snapshot with what the user asked
+	// for. The r_hdr==2 path below overwrites r_hdr_requested with
+	// the same value plus a real sfloat_supported probe; for r_hdr
+	// 0/1 these defaults remain (sfloat_supported "unknown until
+	// SFLOAT path runs" — surfaced as "not queried" in the report).
+	vk_hdr_state.r_hdr_requested = r_hdr->integer;
+	vk_hdr_state.sfloat_supported = qfalse;
+
+	// Phase 9A: validate SFLOAT support before get_hdr_format()
+	// reads r_hdr. If the chosen GPU lacks the required usage flags
+	// for VK_FORMAT_R16G16B16A16_SFLOAT, downgrade r_hdr 2 → 1
+	// silently. UNORM blends correctly; SFLOAT just adds the
+	// out-of-[0,1] range that future phases will exploit.
+	if ( r_hdr->integer == 2 ) {
+		VkFormatProperties props;
+		const VkFormatFeatureFlags required =
+			VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+			VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
+			VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+			VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+
+		vk_hdr_state.r_hdr_requested = r_hdr->integer;
+
+		qvkGetPhysicalDeviceFormatProperties( physical_device,
+			VK_FORMAT_R16G16B16A16_SFLOAT, &props );
+
+		vk_hdr_state.sfloat_supported =
+			( ( props.optimalTilingFeatures & required ) == required )
+				? qtrue : qfalse;
+
+		if ( ( props.optimalTilingFeatures & required ) != required ) {
+			ri.Log( SEV_WARN,
+				"r_hdr 2 (SFLOAT) not supported by GPU "
+				"(optimalTilingFeatures = 0x%08x, required = 0x%08x); "
+				"falling back to r_hdr 1 (UNORM)\n",
+				props.optimalTilingFeatures, required );
+			ri.Cvar_Set( "r_hdr", "1" );
+		}
+	}
+
 	vk.color_format = get_hdr_format( vk.base_format.format );
 
 	vk.capture_format = VK_FORMAT_R8G8B8A8_UNORM;
 
-	vk.bloom_format = vk.base_format.format;
+	// Phase 9B: bloom intermediates inherit the HDR-aware color
+	// attachment format so the bloom mip chain can carry the same
+	// dynamic range as the main pass. Under r_hdr 2 (SFLOAT) this
+	// removes the 8-bit clamp that previously broke HDR highlight
+	// bloom at extract time.
+	vk.bloom_format = vk.color_format;
 
 	vk.blitEnabled = vk_blit_enabled( physical_device, vk.color_format, vk.capture_format );
 
@@ -1717,6 +1829,31 @@ static void setup_surface_formats( VkPhysicalDevice physical_device )
 	ri.Log( SEV_INFO, "^3[FBO_DEBUG]   bloom_format=%d  capture_format=%d  depth_format=%d\n", vk.bloom_format, vk.capture_format, vk.depth_format );
 	ri.Log( SEV_INFO, "^3[FBO_DEBUG]   blitEnabled=%d\n", vk.blitEnabled );
 #endif
+
+	// Phase 9C: finalise the HDR state snapshot now that every format
+	// decision is settled (including any r_hdr 2 → 1 downgrade from
+	// the SFLOAT probe above). Bloom-side fields are filled later at
+	// vk_create_attachments time. valid=qtrue last so a partially-
+	// populated snapshot never leaks through to vk_hdr_state_print.
+	vk_hdr_state.r_fbo_value     = r_fbo->integer;
+	vk_hdr_state.r_hdr_value     = r_hdr->integer;
+	vk_hdr_state.base_format     = vk.base_format.format;
+	vk_hdr_state.color_format    = vk.color_format;
+	vk_hdr_state.bloom_format    = vk.bloom_format;
+	vk_hdr_state.capture_format  = vk.capture_format;
+	vk_hdr_state.present_format  = vk.present_format.format;
+	vk_hdr_state.depth_format    = vk.depth_format;
+	vk_hdr_state.valid           = qtrue;
+
+	// Phase 9A: r_hdr requested but FBO disabled — every HDR format
+	// option above is gated by the r_fbo == 0 short-circuit in
+	// get_hdr_format(), so the user's r_hdr setting has no effect.
+	// One-shot diagnostic for confused users.
+	if ( r_hdr->integer != 0 && r_fbo->integer == 0 ) {
+		ri.Log( SEV_WARN,
+			"r_hdr %d has no effect: r_fbo is 0\n",
+			r_hdr->integer );
+	}
 }
 
 
@@ -3319,9 +3456,9 @@ void vk_init_ribbon( void )
 	_Static_assert( sizeof( ribbonPoint_t ) == RIBBON_POINT_BYTES,
 		"ribbonPoint_t (host) and GPU RibbonPoint must agree on layout: "
 		"vec3 pos + float width + vec4 rgba + vec3 normal + float pad = 48 B" );
-	_Static_assert( RIBBON_HEADER_BYTES == 32,
-		"RIBBON_HEADER_BYTES must be 32 bytes for std430 RibbonHeader "
-		"(4 uint header + vec2 uvScroll + float spawnTime + float pad = 32 B)" );
+	_Static_assert( RIBBON_HEADER_BYTES == 24,
+		"RIBBON_HEADER_BYTES must be 24 bytes for std430 RibbonHeader "
+		"(4 uint header + vec2 uvScroll = 24 B; struct alignment 8 B)" );
 #endif
 
 	memset( &vk.ribbon, 0, sizeof( vk.ribbon ) );
@@ -6983,6 +7120,10 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.blur_fs, "gaussian blur fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.blend_fs, "final bloom blend fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
+	// Phase 9D (6B3a): boost pass — post-main HDR multiplier.
+	vk.modules.boost_fs = SHADER_MODULE( boost_frag_spv );
+	SET_OBJECT_NAME( vk.modules.boost_fs, "boost (post-main obScale) fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
 #if FEAT_ADVANCED_WATER
 	vk.modules.water_fs = SHADER_MODULE( water_frag_spv );
 #endif
@@ -7595,6 +7736,10 @@ void vk_update_post_process_pipelines( void )
 	if ( vk.fboActive ) {
 		// update gamma shader
 		vk_create_post_process_pipeline( 0, 0, 0 );
+		// Phase 9D (6B3a): create the boost pipeline. Scaffolding
+		// only — not dispatched this phase, so the engine behaves
+		// identically to pre-6B3a. 6B3b adds the actual draw call.
+		vk_create_post_process_pipeline( 4, 0, 0 );
 		if ( vk.capture.image ) {
 			// update capture pipeline
 			vk_create_post_process_pipeline( 3, gls.captureWidth, gls.captureHeight );
@@ -7953,6 +8098,13 @@ static void vk_create_attachments( void )
 
 			create_color_attachment( width, height, VK_SAMPLE_COUNT_1_BIT, vk.bloom_format,
 				usage, &vk.bloom_image[0], &vk.bloom_image_view[0], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
+
+			// Phase 9C: capture bloom-side state for the `gfxinfo`
+			// HDR pipeline report. Replaces the FBO_DEBUG per-restart
+			// log from 9B with on-demand reporting.
+			vk_hdr_state.bloom_enabled       = r_bloom->integer;
+			vk_hdr_state.bloom_passes_active = r_bloom_passes->integer;
+			vk_hdr_state.bloom_mip_max       = VK_NUM_BLOOM_PASSES;
 
 			for ( i = 1; i < ARRAY_LEN( vk.bloom_image ); i += 2 ) {
 				width /= 2;
@@ -9137,16 +9289,27 @@ void vk_initialize( void )
 		uint32_t i, maxSets;
 
 		pool_size[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		// MAX_DRAWIMAGES per-image samplers + 9 specific ones (color,
-		// screenmap, bloom variants, depth fade, smaa) + 384 for the
-		// three primitive sampler arrays: particle binding 3, ribbon
-		// binding 2, beam binding 1 — each 64 slots × NUM_COMMAND_BUFFERS
-		// (= 2) descriptor sets = 128 entries, three primitives = 384.
-		// Without this explicit budget the primitive arrays would
-		// silently eat into MAX_DRAWIMAGES headroom and pool exhaustion
-		// could fire on heavy maps that load close to MAX_DRAWIMAGES
-		// images.
-		pool_size[0].descriptorCount = MAX_DRAWIMAGES + 1 + 1 + 1 + VK_NUM_BLOOM_PASSES * 2 + 1 + 5
+		// MAX_DRAWIMAGES per-image samplers + 9 post-process / FBO-side
+		// descriptors + 384 for the three primitive sampler arrays
+		// (particle binding 3, ribbon binding 2, beam binding 1 — each
+		// 64 slots × NUM_COMMAND_BUFFERS (= 2) descriptor sets = 128
+		// entries, three primitives = 384). Without the explicit primitive
+		// budget those arrays would silently eat into MAX_DRAWIMAGES
+		// headroom and pool exhaustion could fire on heavy maps that load
+		// close to MAX_DRAWIMAGES images.
+		//
+		// The 9 post-process descriptors map to vkAllocateDescriptorSets
+		// calls in the post-process descriptor block (~line 2771): each
+		// `+ 1` term below corresponds to one sampler descriptor for one
+		// VkImageView, allocated unconditionally or under the matching
+		// FEAT_* / boolean guard at the alloc site.
+		pool_size[0].descriptorCount = MAX_DRAWIMAGES
+		                             + 1 /* vk.color_descriptor — main scene HDR sampler */
+		                             + 1 /* vk.screenMap.color_descriptor — screenmap (env capture) */
+		                             + 1 /* vk.depthFade.descriptor — depth-fade post pass */
+		                             + VK_NUM_BLOOM_PASSES * 2 /* vk.bloom_image_descriptor[i] — ping-pong per pass */
+		                             + 1 /* vk.shadowMap.descriptor — FEAT_SHADOW_MAPPING */
+		                             + 5 /* vk.smaa.{edges,blend,input,area,search}_descriptor */
 		                             + 384;
 
 		pool_size[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
@@ -9671,6 +9834,15 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 		vk.gamma_pipeline = VK_NULL_HANDLE;
 	}
 
+	// Phase 9D (6B3a): boost pipeline cleanup. NULL-guarded for the
+	// same reason as gamma/capture above — the pipeline may have
+	// failed creation, or vk_initialize may not have reached the
+	// post-process stage before shutdown.
+	if ( vk.boost_pipeline ) {
+		qvkDestroyPipeline( vk.device, vk.boost_pipeline, NULL );
+		vk.boost_pipeline = VK_NULL_HANDLE;
+	}
+
 	if ( vk.capture_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.capture_pipeline, NULL );
 		vk.capture_pipeline = VK_NULL_HANDLE;
@@ -9711,6 +9883,13 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 void vk_shutdown( refShutdownCode_t code )
 {
 	int i, j, k, l;
+
+	// Phase 9C: invalidate the HDR pipeline state snapshot so a
+	// post-shutdown `gfxinfo` prints "not yet initialized" rather
+	// than stale formats from the previous device. Runs before the
+	// early-return below so it fires even when shutdown is called
+	// on a partially-initialized instance.
+	memset( &vk_hdr_state, 0, sizeof( vk_hdr_state ) );
 
 	if ( qvkQueuePresentKHR == NULL ) { // not fully initialized
 		goto __cleanup;
@@ -9901,6 +10080,9 @@ void vk_shutdown( refShutdownCode_t code )
 	qvkDestroyShaderModule(vk.device, vk.modules.bloom_fs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.blur_fs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.blend_fs, NULL);
+
+	// Phase 9D (6B3a): boost shader module cleanup.
+	qvkDestroyShaderModule(vk.device, vk.modules.boost_fs, NULL);
 
 	qvkDestroyShaderModule(vk.device, vk.modules.gamma_vs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.gamma_fs, NULL);
@@ -10544,6 +10726,24 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			pipeline_name = "capture buffer pipeline";
 			blend = qfalse;
 			break;
+		case 4: // Phase 9D (6B3a): boost — post-main HDR multiply.
+			// 6B3a scaffolding: the boost pipeline is created but not
+			// dispatched yet. renderpass is set to vk.render_pass.gamma
+			// as a placeholder per spec §7 — 6B3b chooses the final
+			// render-pass binding (likely vk.render_pass.post_bloom or
+			// a new dedicated pass) once dispatch ordering is decided.
+			// The pipeline only needs format-compatibility with its
+			// bound render pass at creation time; the gamma pass writes
+			// a single color attachment with vk.present_format which is
+			// loose-compatible with the shader's vec4 output.
+			pipeline = &vk.boost_pipeline;
+			fsmodule = vk.modules.boost_fs;
+			renderpass = vk.render_pass.gamma;
+			layout = vk.pipeline_layout_post_process;
+			samples = VK_SAMPLE_COUNT_1_BIT;
+			pipeline_name = "boost buffer pipeline";
+			blend = qfalse;
+			break;
 		default: // gamma correction
 			pipeline = &vk.gamma_pipeline;
 			fsmodule = vk.modules.gamma_fs;
@@ -10701,19 +10901,21 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	//
 	// Viewport.
 	//
-	if ( program_index == 0 || program_index == 5 ) {
-		// Gamma pipeline (case 0) and gamma feature variants
-		// (case 5 — SSAO/tonemap/colorgrade/FXAA/godrays combos)
-		// both target the gamma render pass at full window
-		// dimensions. Both call sites pass (0, 0) for width/height
-		// as a sentinel meaning "use the window extent". Without
-		// this branch covering case 5, the variant pipeline would
+	if ( program_index == 0 || program_index == 4 || program_index == 5 ) {
+		// Gamma pipeline (case 0), boost (case 4 — 6B3a scaffolding,
+		// pipeline bound to the gamma render pass as placeholder),
+		// and gamma feature variants (case 5 — SSAO/tonemap/colorgrade/
+		// FXAA/godrays combos) all target the gamma render pass at
+		// full window dimensions. All three call sites pass (0, 0) for
+		// width/height as a sentinel meaning "use the window extent".
+		// Without each branch covering its case, the pipeline would
 		// fall into the else and produce a 0×0 viewport, which
 		// vkCreateGraphicsPipelines rejects with the "pViewports[0]
 		// .width (0.000000) is not greater than zero" validation
-		// error. The blitX0/blitY0 offsets are the windowed-mode
-		// blit insets; case 5 inherits the same insets because it
-		// renders into the same gamma render pass.
+		// error (VUID-VkViewport-width-01770). The blitX0/blitY0
+		// offsets are the windowed-mode blit insets; case 4 and case 5
+		// inherit the same insets because they render into the same
+		// gamma render pass.
 		viewport.x = 0.0 + vk.blitX0;
 		viewport.y = 0.0 + vk.blitY0;
 		viewport.width = gls.windowWidth - vk.blitX0 * 2;
