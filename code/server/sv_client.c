@@ -26,7 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 /* WiredNet bootstrap is a reliable QUIC stream — no UDP MTU limit.
  * Size must hold all configstrings + entity baselines for the largest maps.
- * 256 KB covers q3dm7-scale maps (typical usage < 64 KB). */
+ * 256 KB covers arena7-scale maps (typical usage < 64 KB). */
 #define WN_BOOTSTRAP_MAX (256 * 1024)
 
 static void SV_CloseDownload( client_t *cl );
@@ -518,7 +518,7 @@ void SV_PrintClientStateChange( const client_t *cl, clientState_t newState ) {
 	} else {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "Going from %s to %s for client %d\n", SV_GetStateName( cl->state ), SV_GetStateName( newState ), (int)(cl - svs.clients) );
 	}
-	
+
 }
 
 

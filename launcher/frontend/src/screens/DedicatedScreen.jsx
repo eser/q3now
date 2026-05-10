@@ -15,9 +15,9 @@ import NumberInput from "../components/NumberInput";
 
 const PRESETS = [
   {
-    label: "FFA q3dm17",
-    hostname: "q3now FFA",
-    map: "q3dm17",
+    label: "DM arena7",
+    hostname: "q3now server",
+    map: "arena7",
     gameType: "dm",
     maxClients: 8,
     addBots: true,
@@ -49,37 +49,7 @@ const GAME_TYPES = [
   { value: "ctf", label: "CTF" },
 ];
 
-const MAPS = [
-  "q3dm1",
-  "q3dm2",
-  "q3dm3",
-  "q3dm4",
-  "q3dm5",
-  "q3dm6",
-  "q3dm7",
-  "q3dm8",
-  "q3dm9",
-  "q3dm10",
-  "q3dm11",
-  "q3dm12",
-  "q3dm13",
-  "q3dm14",
-  "q3dm15",
-  "q3dm16",
-  "q3dm17",
-  "q3dm18",
-  "q3dm19",
-  "q3tourney1",
-  "q3tourney2",
-  "q3tourney3",
-  "q3tourney4",
-  "q3tourney5",
-  "q3tourney6",
-  "q3ctf1",
-  "q3ctf2",
-  "q3ctf3",
-  "q3ctf4",
-];
+const MAPS = ["arena1", "arena7", "arena17"];
 
 const styles = {
   container: {
@@ -225,7 +195,7 @@ const styles = {
 export default function DedicatedScreen({ assetsReady, onBack }) {
   const [config, setConfig] = useState({
     hostname: "q3now server",
-    map: "q3dm17",
+    map: "arena7",
     gameType: "dm",
     maxClients: 16,
     password: "",
@@ -340,8 +310,7 @@ export default function DedicatedScreen({ assetsReady, onBack }) {
             <input
               style={styles.input}
               value={config.hostname}
-              onChange={(e) =>
-                updateConfig("hostname", e.target.value)}
+              onChange={(e) => updateConfig("hostname", e.target.value)}
             />
           </div>
           <div style={styles.row}>
@@ -350,10 +319,13 @@ export default function DedicatedScreen({ assetsReady, onBack }) {
               <select
                 style={styles.select}
                 value={config.map}
-                onChange={(e) =>
-                  updateConfig("map", e.target.value)}
+                onChange={(e) => updateConfig("map", e.target.value)}
               >
-                {MAPS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {MAPS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -366,7 +338,9 @@ export default function DedicatedScreen({ assetsReady, onBack }) {
                 onChange={(e) => updateConfig("gameType", e.target.value)}
               >
                 {GAME_TYPES.map((gt) => (
-                  <option key={gt.value} value={gt.value}>{gt.label}</option>
+                  <option key={gt.value} value={gt.value}>
+                    {gt.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -414,7 +388,9 @@ export default function DedicatedScreen({ assetsReady, onBack }) {
             Command
           </div>
           <div style={styles.commandBox}>
-            <div style={styles.commandText} title={command}>{command}</div>
+            <div style={styles.commandText} title={command}>
+              {command}
+            </div>
             <CopyButton text={command} />
           </div>
         </div>
@@ -458,7 +434,9 @@ export default function DedicatedScreen({ assetsReady, onBack }) {
               Server log will appear here...
             </span>
           )}
-          {logs.map((line, i) => <div key={i}>{line}</div>)}
+          {logs.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
         </div>
       </div>
 

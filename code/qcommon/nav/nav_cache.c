@@ -94,7 +94,7 @@ unsigned int Nav_Cache_ParamHash( void )
 
 /* -------------------------------------------------------------------------
    Cache path derivation
-   "maps/q3dm1.bsp"  →  "navmesh/q3dm1.nav"
+   "maps/arena1.bsp"  →  "navmesh/arena1.nav"
    ------------------------------------------------------------------------- */
 
 static void buildCachePath( const char *mapName, char *out, int outLen )
@@ -260,7 +260,7 @@ void Nav_Cache_Save( const char *mapName, int bspChecksum, const void *mesh )
    mapFilter = NULL  → delete all.
    mapFilter non-NULL → delete the single file for that map; input is
      normalized: directory prefix and .nav extension are stripped so the
-     caller can pass "q3dm17", "q3dm17.nav", or "navmesh/q3dm17.nav".
+     caller can pass "arena7", "arena7.nav", or "navmesh/arena7.nav".
    FS_HomeRemove returns void — no error code is available.  Existence is
    verified via FS_FOpenFileByMode before deletion for the single-file path.
    ------------------------------------------------------------------------- */
@@ -272,12 +272,12 @@ void Nav_ClearCache( const char *mapFilter ) {
     if ( mapFilter && mapFilter[0] ) {
         Q_strncpyz( filterName, mapFilter, sizeof(filterName) );
 
-        /* Strip any directory prefix (navmesh/q3dm17 → q3dm17) */
+        /* Strip any directory prefix (navmesh/arena7 → arena7) */
         char *slash = strrchr( filterName, '/' );
         if ( !slash ) slash = strrchr( filterName, '\\' );
         if ( slash ) memmove( filterName, slash + 1, strlen( slash + 1 ) + 1 );
 
-        /* Strip .nav extension if present (q3dm17.nav → q3dm17) */
+        /* Strip .nav extension if present (arena7.nav → arena7) */
         int flen = (int)strlen( filterName );
         if ( flen > 4 && Q_stricmp( filterName + flen - 4, ".nav" ) == 0 )
             filterName[flen - 4] = '\0';

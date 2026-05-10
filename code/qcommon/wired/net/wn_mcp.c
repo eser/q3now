@@ -204,14 +204,14 @@ static void WN_McpHandleToolsList_Buf( char *out, int out_size, int req_id )
 		"\"level\":{\"type\":\"integer\",\"description\":\"Skill level x10 (10=1.0, 50=5.0).\"}},\"required\":[\"id\",\"level\"]}},"
 		"{\"name\":\"bot.command\","
 		"\"description\":\"Send a WiredBots directive with console authority (senderClient=-1, bypasses team/leader checks). "
-		"Examples: '@sarge kill Laroux', '@all rush', '@visor get Heavy Armor'. "
+		"Examples: '@visor kill Laroux', '@all rush', '@visor get Heavy Armor'. "
 		"Use item pickup names from game.items (the 'name' field). Accepts both pickup name and entity name.\","
 		"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
 		"\"message\":{\"type\":\"string\",\"description\":\"Directive text. For item pickups: '@<bot> get <name>' where <name> is from game.items.\"}},\"required\":[\"message\"]}},"
 		"{\"name\":\"bot.add\","
 		"\"description\":\"Spawn a new bot. Returns the assigned client slot ID.\","
 		"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
-		"\"name\":{\"type\":\"string\",\"description\":\"Bot character name (e.g. 'sarge', 'keel', 'grunt').\"},"
+		"\"name\":{\"type\":\"string\",\"description\":\"Bot character name (e.g. 'visor', 'daemia', 'grunt').\"},"
 		"\"skill\":{\"type\":\"integer\",\"description\":\"Skill level 1-5 (default 3).\"},"
 		"\"team\":{\"type\":\"string\",\"enum\":[\"red\",\"blue\",\"free\"],\"description\":\"Team to join (default: auto-assign).\"}},\"required\":[\"name\"]}}"
 		"]},\"id\":%d}",
@@ -778,7 +778,7 @@ Sanitizes the message, validates "get <item>" pickup names when the
 message starts with "get " (bare form), then dispatches via bot_say_console
 → WiredBots_ProcessChat(-1, ...) with console authority.
 
-@mention form (@sarge get Heavy Armor) is passed through without item
+@mention form (@visor get Heavy Armor) is passed through without item
 validation — the parser in WiredBots_ProcessChat handles it.
 
 Returns qtrue and writes the dispatched safe message into safe[safe_size]
@@ -1066,7 +1066,7 @@ static void WN_McpHandleStartCoaching_Buf( char *out, int out_size, int req_id )
 		"  Call coaching.tick in a loop. Nothing else.\n\n"
 		"COMMAND TYPES IN coaching.tick:\n"
 		"  bot_command — sends directive to bots. MUST use @mention format.\n"
-		"    Example: {\"type\":\"bot_command\",\"message\":\"@sarge get Heavy Armor\"}\n"
+		"    Example: {\"type\":\"bot_command\",\"message\":\"@visor get Heavy Armor\"}\n"
 		"  say — broadcasts coach message to arena chat. Players see it.\n"
 		"    Example: {\"type\":\"say\",\"message\":\"Sarge grab RA now!\"}\n\n"
 		"  NEVER use type 'say' for bot directives. Bots cannot hear say.\n"
@@ -1119,9 +1119,9 @@ static void WN_McpHandleStartCoaching_Buf( char *out, int out_size, int req_id )
 		"  - Does a player favor a specific weapon? Avoid that weapon's ideal range.\n"
 		"  - Is a player dominating one of your bots? Switch that bot's assignment.\n"
 		"  Always announce discoveries via game.say so the arena knows:\n"
-		"    '[COACH] Eser keeps grabbing RA every 30s. @sarge deny item_armor_body'\n"
+		"    '[COACH] Eser keeps grabbing RA every 30s. @visor deny item_armor_body'\n"
 		"    '[COACH] Visor dies at railgun hall. @keel camp there.'\n"
-		"    '[COACH] Eser owns LG range. @sarge keep distance, use railgun.'\n\n"
+		"    '[COACH] Eser owns LG range. @visor keep distance, use railgun.'\n\n"
 		"ADAPTIVE STRATEGY:\n"
 		"  Monitor score via game.status and shift strategy vocally:\n"
 		"  LOSING (5+ behind):\n"

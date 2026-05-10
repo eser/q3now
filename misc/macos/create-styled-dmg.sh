@@ -53,7 +53,7 @@ tell application "Finder"
         set icon size of viewOptions to 128
         set text size of viewOptions to 14
         set background picture of viewOptions to file ".background:bg.png"
-        set position of item "Wired.app" of container window to {90, 200}
+        set position of item "q3now.app" of container window to {90, 200}
         set position of item "Applications" of container window to {390, 200}
         set position of item ".background" of container window to {10, 900}
         set position of item ".DS_Store" of container window to {50, 900}

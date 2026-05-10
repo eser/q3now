@@ -312,7 +312,7 @@ typedef struct {
 	// Icon
 	char  iconPath[MAX_QPATH];
 
-	// Sounds (absolute VFS paths; pre-resolved by engine, including fallback to sarge)
+	// Sounds (absolute VFS paths; pre-resolved by engine, including fallback to visor)
 	char  soundPaths[CM_SOUND_SLOTS][MAX_QPATH];
 
 	// Model config

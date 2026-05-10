@@ -155,7 +155,7 @@ These verify the backend stays clean under load and across restarts.
 ### 3.1 Multi-channel chaos
 
 - Setup: On q3dm6 (or any map with bot support), add at least 3 bots:
-  console `addbot sarge 4`, `addbot grunt 4`, `addbot major 4`.
+  console `addbot visor 4`, `addbot daemia 4`, `addbot grunt 4`.
 - Action: Engage in a free-for-all fight for at least one minute.
   Pick up items, fire continuously, take damage, hear the bots
   fighting each other.

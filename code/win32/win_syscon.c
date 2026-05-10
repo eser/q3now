@@ -113,7 +113,7 @@ void Conbuf_AppendText( const char *msg )
 ==============
 Sys_SetStatus
 
-Was: GUI console status bar pane ("Loading map q3dm7"). Now: a
+Was: GUI console status bar pane ("Loading map arena7"). Now: a
 stderr-prefixed informational line. Server callers (sv_init.c) use
 this for transient progress messages during long operations.
 ==============

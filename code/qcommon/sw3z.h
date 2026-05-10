@@ -112,6 +112,17 @@ struct pack_s;
 /* ── reader API ──────────────────────────────────────────────────────── */
 
 /*
+ * One-shot module init. Builds the static CRC32C lookup table eagerly
+ * so SW3Z_CRC32C is a pure function over the table at all call sites.
+ * Must be called once before any other SW3Z_* function. Idempotent;
+ * called from FS_InitFilesystem.
+ *
+ * (Replaces the prior lazy first-call init inside SW3Z_CRC32C, which
+ * was a thread-safety footgun if async loading is ever added.)
+ */
+void		SW3Z_Init( void );
+
+/*
  * Open an SW3Z archive.  Reads header, index, and string table.
  * Builds fileInPack_t hash table for FS compatibility.
  * Returns NULL on failure (logs a warning).

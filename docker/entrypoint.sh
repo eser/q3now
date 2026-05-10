@@ -58,6 +58,6 @@ fi
 # Escape hatch: pass arbitrary engine arguments
 [ -n "$WIRED_EXTRA_ARGS" ]   && ARGS="$ARGS $WIRED_EXTRA_ARGS"
 
-# CMD args (e.g., +map q3dm17) are appended via "$@"
+# CMD args (e.g., +map arena7) are appended via "$@"
 # exec replaces shell so the engine is PID 1 (receives SIGTERM on docker stop)
 exec /opt/wired/wired-ded $ARGS "$@"

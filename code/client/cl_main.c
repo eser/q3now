@@ -1837,11 +1837,11 @@ static void CL_Snd_Restart_f( void )
 
 /*
 ==================
-CL_PK3List_f
+CL_PakList_f
 ==================
 */
-void CL_OpenedPK3List_f( void ) {
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "Opened PK3 Names: %s\n", FS_LoadedPakNames());
+void CL_OpenedPakList_f( void ) {
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Opened Pak Names: %s\n", FS_LoadedPakNames());
 }
 
 
@@ -1850,8 +1850,8 @@ void CL_OpenedPK3List_f( void ) {
 CL_PureList_f
 ==================
 */
-static void CL_ReferencedPK3List_f( void ) {
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "Referenced PK3 Names: %s\n", FS_ReferencedPakNames() );
+static void CL_ReferencedPakList_f( void ) {
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Referenced Pak Names: %s\n", FS_ReferencedPakNames() );
 }
 
 
@@ -4038,8 +4038,8 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("ping", CL_Ping_f );
 	Cmd_AddCommand ("serverstatus", CL_ServerStatus_f );
 	Cmd_AddCommand ("showip", CL_ShowIP_f );
-	Cmd_AddCommand ("fs_openedList", CL_OpenedPK3List_f );
-	Cmd_AddCommand ("fs_referencedList", CL_ReferencedPK3List_f );
+	Cmd_AddCommand ("fs_openedList", CL_OpenedPakList_f );
+	Cmd_AddCommand ("fs_referencedList", CL_ReferencedPakList_f );
 	Cmd_AddCommand ("char", CL_SetChar_f );
 	Cmd_AddCommand ("skin", CL_SetSkin_f );
 	Cmd_AddCommand ("video", CL_Video_f );

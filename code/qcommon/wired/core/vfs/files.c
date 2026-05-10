@@ -296,9 +296,15 @@ typedef struct {
 	int			pakIndex;
 	pack_t		*pak;
 #if FEAT_SW3Z
-	byte		*sw3zData;		// decompressed file buffer (NULL if not SW3Z)
+	byte		*sw3zData;		// decompressed file buffer (NULL if not SW3Z, or if entry decompression deferred)
 	int			sw3zSize;		// total decompressed size
 	int			sw3zPos;		// current read position
+	/* Phase 4-#4 deferred decompression hint.
+	 * When >= 0 *and* sw3zData == NULL, the handle is "open but not yet
+	 * decompressed". FS_ReadFile uses this to skip the intermediate
+	 * sw3zData buffer entirely — the very next FS_Read decompresses
+	 * straight into the caller's hunk buffer. Cleared on consumption. */
+	int			sw3zEntryIdx;
 #endif
 } fileHandleData_t;
 
@@ -322,6 +328,15 @@ static int		fs_serverReferencedPaks[MAX_REF_PAKS];		// checksums
 static char		*fs_serverReferencedPakNames[MAX_REF_PAKS];	// pk3 names
 
 int	fs_lastPakIndex;
+
+#if FEAT_SW3Z
+/* Phase 4-#4 hint flag.
+ * Set by FS_ReadFile around its FS_FOpenFileRead call to ask
+ * FS_OpenFileInSW3Z to defer decompression. Single-threaded I/O makes
+ * the static safe; FS_ReadFile is responsible for clearing it on every
+ * exit path. */
+static qboolean		fs_sw3z_deferOpen = qfalse;
+#endif
 
 #ifdef FS_MISSING
 static FILE*		missingFiles = NULL;
@@ -802,6 +817,7 @@ static void FS_InitHandle( fileHandleData_t *fd ) {
 	fd->sw3zData = NULL;
 	fd->sw3zSize = 0;
 	fd->sw3zPos = 0;
+	fd->sw3zEntryIdx = -1;
 #endif
 }
 
@@ -1111,6 +1127,121 @@ static void FS_AddToHandleList( pack_t *pak )
 	hhead = pak;
 	hpaksCount++;
 }
+
+#if FEAT_SW3Z
+
+/* ── SW3Z file-handle LRU ─────────────────────────────────────────────
+ *
+ * Bounds the count of simultaneously-open FILE* handles for SW3Z packs.
+ * Distinct from the PK3 unzFile LRU above because:
+ *  - The bounded resource differs (FILE* vs unzFile).
+ *  - SW3Z handles have no "in-use" state — FS_OpenFileInSW3Z runs
+ *    SW3Z_ReadEntry synchronously and the FILE* is idle on return.
+ *    There is no analogue of pak->handleUsed, so every SW3Z pack with
+ *    an open FILE* lives in this LRU at all times.
+ *
+ * Lifecycle:
+ *  - Cold load (SW3Z_LoadArchive completes) → caller adds.
+ *  - Cache disk-load (FS_LoadPakFromFile fopens) → caller adds.
+ *  - Read access (FS_OpenFileInSW3Z) → if FILE* NULL, lazy fopen and
+ *    add; otherwise touch to head.
+ *  - Pack free (FS_FreePak SW3Z branch) → remove before fclose.
+ *  - LRU eviction (cap exceeded) → fclose tail's FILE*, remove. Pack
+ *    stays in pakHashTable; lazy reopen on next access.
+ */
+
+static int		hpaksCount_sw3z;
+static pack_t	*hhead_sw3z;
+
+static void FS_RemoveFromHandleList_SW3Z( pack_t *pak )
+{
+	if ( pak->next_h_sw3z != pak ) {
+		// cut pak from list
+		pak->next_h_sw3z->prev_h_sw3z = pak->prev_h_sw3z;
+		pak->prev_h_sw3z->next_h_sw3z = pak->next_h_sw3z;
+		if ( hhead_sw3z == pak ) {
+			hhead_sw3z = pak->next_h_sw3z;
+		}
+	} else {
+#ifdef _DEBUG
+		if ( hhead_sw3z != pak )
+			Com_Terminate( TERM_CLIENT_DROP, "%s(): invalid head pointer", __func__ );
+#endif
+		hhead_sw3z = NULL;
+	}
+
+	pak->next_h_sw3z = NULL;
+	pak->prev_h_sw3z = NULL;
+
+	hpaksCount_sw3z--;
+
+#ifdef _DEBUG
+	if ( hpaksCount_sw3z < 0 ) {
+		Com_Terminate( TERM_CLIENT_DROP, "%s(): negative paks count", __func__ );
+	}
+
+	if ( hpaksCount_sw3z == 0 && hhead_sw3z != NULL ) {
+		Com_Terminate( TERM_CLIENT_DROP, "%s(): non-null head with zero paks count", __func__ );
+	}
+#endif
+}
+
+
+static void FS_AddToHandleList_SW3Z( pack_t *pak )
+{
+#ifdef _DEBUG
+	if ( !PACK_FILE_HANDLE(pak) ) {
+		Com_Terminate( TERM_CLIENT_DROP, "%s(): invalid pak FILE handle", __func__ );
+	}
+	if ( pak->next_h_sw3z || pak->prev_h_sw3z ) {
+		Com_Terminate( TERM_CLIENT_DROP, "%s(): invalid pak pointers", __func__ );
+	}
+#endif
+	while ( hpaksCount_sw3z >= MAX_CACHED_SW3Z_HANDLES ) {
+		// NOLINTNEXTLINE(clang-analyzer-core.NullDereference) — invariant: hpaksCount_sw3z > 0 implies hhead_sw3z != NULL
+		pack_t *pk = hhead_sw3z->prev_h_sw3z; // tail item
+#ifdef _DEBUG
+		if ( PACK_FILE_HANDLE(pk) == NULL ) {
+			Com_Terminate( TERM_CLIENT_DROP, "%s(): invalid pak FILE handle", __func__ );
+		}
+#endif
+		fclose( PACK_FILE_HANDLE(pk) );
+		PACK_FILE_HANDLE(pk) = NULL;
+		FS_RemoveFromHandleList_SW3Z( pk );
+	}
+
+	if ( hhead_sw3z == NULL ) {
+		pak->next_h_sw3z = pak;
+		pak->prev_h_sw3z = pak;
+	} else {
+		hhead_sw3z->prev_h_sw3z->next_h_sw3z = pak;
+		pak->prev_h_sw3z = hhead_sw3z->prev_h_sw3z;
+		hhead_sw3z->prev_h_sw3z = pak;
+		pak->next_h_sw3z = hhead_sw3z;
+	}
+
+	hhead_sw3z = pak;
+	hpaksCount_sw3z++;
+}
+
+
+/* Move pak to LRU head ("touch" on access). If the pak is not in the
+ * LRU yet, this is a no-op — the caller is responsible for ensuring
+ * an open FILE* and adding via FS_AddToHandleList_SW3Z. */
+static void FS_TouchHandleList_SW3Z( pack_t *pak )
+{
+	if ( pak->next_h_sw3z == NULL ) {
+		return;	// not in LRU
+	}
+	if ( hhead_sw3z == pak ) {
+		return;	// already at head
+	}
+	FS_RemoveFromHandleList_SW3Z( pak );
+	FS_AddToHandleList_SW3Z( pak );
+}
+
+#endif // FEAT_SW3Z
+
 #endif
 
 
@@ -1458,6 +1589,29 @@ static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pak
 		// 	pakFile->name, entryIdx, size, compName );
 	}
 
+#ifdef USE_HANDLE_CACHE
+	/* SW3Z handle LRU integration. Two cases:
+	 *  (a) FILE* is open (pack has been touched recently or never
+	 *      evicted): touch to MRU position so the LRU keeps it.
+	 *  (b) FILE* was evicted (LRU pressure from other sw3z packs):
+	 *      lazy reopen and re-register. The pack's pakHashTable entry
+	 *      and parsed metadata (entries[], buildBuffer, etc.) survive
+	 *      eviction — only the FILE* needed to re-fopen. */
+	if ( PACK_FILE_HANDLE(pak) == NULL ) {
+		PACK_FILE_HANDLE(pak) = fopen( pak->pakFilename, "rb" );
+		if ( PACK_FILE_HANDLE(pak) == NULL ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_filesystem),
+				"FS_OpenFileInSW3Z: lazy reopen failed for '%s'\n",
+				pak->pakFilename );
+			*file = FS_INVALID_HANDLE;
+			return -1;
+		}
+		FS_AddToHandleList_SW3Z( pak );
+	} else {
+		FS_TouchHandleList_SW3Z( pak );
+	}
+#endif
+
 	if ( size == 0 ) {
 		/* empty file / directory entry */
 		*file = FS_HandleForFile();
@@ -1472,17 +1626,30 @@ static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pak
 		return 0;
 	}
 
-	/* decompress entire file into memory */
 	*file = FS_HandleForFile();
 	f = &fsh[ *file ];
 	FS_InitHandle( f );
 
-	f->sw3zData = (byte *)Z_Malloc( size );
-	if ( SW3Z_ReadEntry( pak, entryIdx, f->sw3zData, size ) != size ) {
-		Z_Free( f->sw3zData );
-		f->sw3zData = NULL;
-		*file = FS_INVALID_HANDLE;
-		return -1;
+	if ( fs_sw3z_deferOpen ) {
+		/* Phase 4-#4 deferred path: skip the Z_Malloc'd intermediate
+		 * sw3zData buffer entirely. FS_ReadFile will Hunk-allocate the
+		 * caller's return buffer next, and the very next FS_Read on
+		 * this handle will decompress straight into it. */
+		f->sw3zData     = NULL;
+		f->sw3zEntryIdx = entryIdx;
+		f->pak          = pak;
+	} else {
+		/* Default path: decompress the entire entry up-front into a
+		 * Z_Malloc'd buffer. FS_Read then memcpy's slices on demand;
+		 * FS_Seek can rewind freely. Required for VM-callable reads
+		 * and for callers that issue partial / repeated reads. */
+		f->sw3zData = (byte *)Z_Malloc( size );
+		if ( SW3Z_ReadEntry( pak, entryIdx, f->sw3zData, size ) != size ) {
+			Z_Free( f->sw3zData );
+			f->sw3zData = NULL;
+			*file = FS_INVALID_HANDLE;
+			return -1;
+		}
 	}
 
 	f->sw3zSize = size;
@@ -1862,6 +2029,28 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 		fsh[f].sw3zPos += len;
 		return len;
 	}
+	if ( fsh[f].sw3zEntryIdx >= 0 ) {
+		/* Phase 4-#4 deferred decompression. FS_ReadFile is the only
+		 * caller that triggers this state and it always reads the full
+		 * entry in one shot. Require len >= sw3zSize so we can decompress
+		 * straight into the caller's buffer; partial reads on a deferred
+		 * handle would leave state inconsistent (no place to store the
+		 * remainder), so reject them. */
+		if ( len < fsh[f].sw3zSize ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_filesystem),
+				"FS_Read: partial read on deferred SW3Z handle (len=%d size=%d) — rejecting\n",
+				len, fsh[f].sw3zSize );
+			return 0;
+		}
+		int decompressed = SW3Z_ReadEntry( fsh[f].pak, fsh[f].sw3zEntryIdx, buffer, fsh[f].sw3zSize );
+		fsh[f].sw3zEntryIdx = -1;	/* consume the deferred state */
+		if ( decompressed != fsh[f].sw3zSize ) {
+			fsh[f].sw3zPos = fsh[f].sw3zSize;	/* mark EOF so subsequent reads return 0 */
+			return -1;
+		}
+		fsh[f].sw3zPos = fsh[f].sw3zSize;
+		return decompressed;
+	}
 #endif
 
 	if ( !fsh[f].zipFile ) {
@@ -1965,7 +2154,7 @@ void QDECL FS_Printf( fileHandle_t h, const char *fmt, ... ) {
 	FS_Write(msg, strlen(msg), h);
 }
 
-#define PK3_SEEK_BUFFER_SIZE 65536
+#define PAK_SEEK_BUFFER_SIZE 65536
 
 /*
 =================
@@ -2003,7 +2192,7 @@ int FS_Seek( fileHandle_t f, long offset, fsOrigin_t origin ) {
 		int		currentPosition = unztell( fsh[f].handleFiles.file.z );
 		long	targetOffset;
 		long	remainder;
-		byte	buffer[PK3_SEEK_BUFFER_SIZE];
+		byte	buffer[PAK_SEEK_BUFFER_SIZE];
 
 		switch ( origin ) {
 		case FS_SEEK_SET:
@@ -2031,7 +2220,7 @@ int FS_Seek( fileHandle_t f, long offset, fsOrigin_t origin ) {
 		}
 
 		while ( remainder > 0 ) {
-			int r = unzReadCurrentFile( fsh[f].handleFiles.file.z, buffer, MIN( remainder, PK3_SEEK_BUFFER_SIZE ) );
+			int r = unzReadCurrentFile( fsh[f].handleFiles.file.z, buffer, MIN( remainder, PAK_SEEK_BUFFER_SIZE ) );
 			if ( r < 0 ) {
 				return r;
 			}
@@ -2205,7 +2394,20 @@ int FS_ReadFile( const char *qpath, void **buffer ) {
 	}
 
 	// look for it in the filesystem or pack files
+	//
+	// Phase 4-#4: ask the SW3Z opener to defer decompression. We're
+	// going to Hunk-allocate the caller's return buffer immediately
+	// after this call returns the entry size, then trigger decompression
+	// directly into that buffer via FS_Read — eliminating the Z_Malloc'd
+	// sw3zData intermediate that the default open path would use. The
+	// flag is a no-op for PK3 / on-disk reads.
+#if FEAT_SW3Z
+	fs_sw3z_deferOpen = qtrue;
+#endif
 	len = FS_FOpenFileRead( qpath, &h, qfalse );
+#if FEAT_SW3Z
+	fs_sw3z_deferOpen = qfalse;
+#endif
 	if ( h == FS_INVALID_HANDLE ) {
 		if ( buffer ) {
 			*buffer = NULL;
@@ -2365,17 +2567,17 @@ static void FS_ConvertFilename( char *name )
 }
 
 
-#ifdef USE_PK3_CACHE
+#ifdef USE_PAK_CACHE
 
-#define PK3_HASH_SIZE 512
+#define PAK_HASH_SIZE 512
 
 static void FS_FreePak( pack_t *pak );
 
-static pack_t *pakHashTable[ PK3_HASH_SIZE ];
+static pack_t *pakHashTable[ PAK_HASH_SIZE ];
 
-#ifdef USE_PK3_CACHE_FILE
+#ifdef USE_PAK_CACHE_FILE
 
-#define CACHE_FILE_NAME "pk3cache.dat"
+#define CACHE_FILE_NAME "pakcache.dat"
 
 #define CACHE_SYNC_CONDITION ( fs_paksReaded + fs_paksSkipped + fs_paksReleased >= 8 )
 
@@ -2398,9 +2600,15 @@ static qboolean fs_cacheSynced = qtrue;
 // non-matching header will cause whole file being ignored
 static const byte cache_header[ 4 ] = {
 #if FEAT_SW3Z
-	1, //version — bumped for packType field in pk3cacheHeader_t
+	3, //version 3 — Phase 4 adds maxCompressedSize to the SW3Z tail
+	   //              so disk-cache-loaded packs know the scratch
+	   //              buffer cap without re-walking entries.
+	   //          v2 was Phase 2: full SW3Z record persistence with
+	   //              length-prefixed format tail (entries[]).
+	   //          v1 was Phase 1: packType field present but only PK3
+	   //              records on disk; SW3Z packs lived in-memory only.
 #else
-	0, //version
+	0, //version 0 — pre-FEAT_SW3Z, no packType field
 #endif
 #if !Q_BIG_ENDIAN
 	0x0,
@@ -2411,7 +2619,7 @@ static const byte cache_header[ 4 ] = {
 	( ( sizeof( fileOffset_t ) - 1 ) << 4 ) | ( sizeof( fileTime_t ) - 1 )
 };
 
-typedef struct pk3cacheHeader_s {
+typedef struct pakcacheHeader_s {
 	int pakNameLen;		// full path
 	int namesLen;
 	int numFiles;
@@ -2423,20 +2631,20 @@ typedef struct pk3cacheHeader_s {
 #if FEAT_SW3Z
 	int packType;		// 0 = PACK_PK3, 1 = PACK_SW3Z
 #endif
-} pk3cacheHeader_t;
+} pakcacheHeader_t;
 
-typedef struct pk3cacheFileItem_s {
+typedef struct pakcacheFileItem_s {
 	unsigned long name; // offset in namebuffer
 	unsigned long size;
 	unsigned long pos;	// info position in pk3 file
-} pk3cacheFileItem_t;
+} pakcacheFileItem_t;
 
 #pragma pack( pop )
 
-#endif // USE_PK3_CACHE_FILE
+#endif // USE_PAK_CACHE_FILE
 
 
-static int FS_HashPK3( const char *name )
+static int FS_HashPak( const char *name )
 {
 	unsigned int c, hash = 0;
 	while ( (c = (byte)*name++) != '\0' )
@@ -2444,7 +2652,7 @@ static int FS_HashPK3( const char *name )
 		hash = hash * 101 + c;
 	}
 	hash = hash ^ (hash >> 16);
-	return hash & (PK3_HASH_SIZE-1);
+	return hash & (PAK_HASH_SIZE-1);
 }
 
 
@@ -2453,7 +2661,7 @@ static pack_t *FS_FindInCache( const char *zipfile )
 	pack_t *pack;
 	unsigned int hash;
 
-	hash = FS_HashPK3( zipfile );
+	hash = FS_HashPak( zipfile );
 	pack = pakHashTable[ hash ];
 	while ( pack )
 	{
@@ -2470,7 +2678,7 @@ static pack_t *FS_FindInCache( const char *zipfile )
 
 static void FS_AddToCache( pack_t *pack )
 {
-	pack->namehash = FS_HashPK3( pack->pakFilename );
+	pack->namehash = FS_HashPak( pack->pakFilename );
 	pack->next = pakHashTable[ pack->namehash ];
 	pack->prev = NULL;
 	if ( pakHashTable[ pack->namehash ] )
@@ -2496,18 +2704,18 @@ static void FS_RemoveFromCache( pack_t *pack )
 }
 
 
-static pack_t *FS_LoadCachedPK3( const char *zipfile )
+static pack_t *FS_LoadCachedPak( const char *pakfile )
 {
 	fileOffset_t size;
 	fileTime_t mtime;
 	fileTime_t ctime;
 	pack_t *pak;
 
-	pak = FS_FindInCache( zipfile );
+	pak = FS_FindInCache( pakfile );
 	if ( pak == NULL )
 		return NULL;
 
-	if ( !Sys_GetFileStats( zipfile, &size, &mtime, &ctime ) )
+	if ( !Sys_GetFileStats( pakfile, &size, &mtime, &ctime ) )
 	{
 		FS_RemoveFromCache( pak );
 		FS_FreePak( pak );
@@ -2526,7 +2734,7 @@ static pack_t *FS_LoadCachedPK3( const char *zipfile )
 }
 
 
-static void FS_InsertPK3ToCache( pack_t *pak )
+static void FS_InsertPakToCache( pack_t *pak )
 {
 	if ( Sys_GetFileStats( pak->pakFilename, &pak->size, &pak->mtime, &pak->ctime ) )
 	{
@@ -2538,7 +2746,12 @@ static void FS_InsertPK3ToCache( pack_t *pak )
 
 static void FS_ResetCacheReferences( void )
 {
-	for ( int i = 0; i < ARRAY_LEN( pakHashTable ); i++ )
+	// pakHashTable is `pack_t *[PAK_HASH_SIZE]`; iterate by the known size
+	// directly rather than via ARRAY_LEN's `sizeof(arr)/sizeof(arr[0])`,
+	// which clang-tidy's bugprone-sizeof-expression flags because
+	// sizeof(pack_t *) is "sizeof(A*); pointer to aggregate". The math is
+	// correct but the lint is noisy — using the constant is clearer anyway.
+	for ( int i = 0; i < PAK_HASH_SIZE; i++ )
 	{
 		pack_t *pak = pakHashTable[ i ];
 		while ( pak )
@@ -2553,7 +2766,8 @@ static void FS_ResetCacheReferences( void )
 
 static void FS_FreeUnusedCache( void )
 {
-	for ( int i = 0; i < ARRAY_LEN( pakHashTable ); i++ )
+	// See FS_ResetCacheReferences for why this uses PAK_HASH_SIZE directly.
+	for ( int i = 0; i < PAK_HASH_SIZE; i++ )
 	{
 		pack_t *pak = pakHashTable[ i ];
 		while ( pak )
@@ -2563,7 +2777,7 @@ static void FS_FreeUnusedCache( void )
 			{
 				FS_RemoveFromCache( pak );
 				FS_FreePak( pak );
-#ifdef USE_PK3_CACHE_FILE
+#ifdef USE_PAK_CACHE_FILE
 				fs_paksReleased++;
 #endif
 			}
@@ -2572,7 +2786,7 @@ static void FS_FreeUnusedCache( void )
 	}
 }
 
-#ifdef USE_PK3_CACHE_FILE
+#ifdef USE_PAK_CACHE_FILE
 
 static void FS_WriteCacheHeader( FILE *f )
 {
@@ -2596,11 +2810,22 @@ static qboolean FS_ValidateCacheHeader( FILE *f )
 
 static qboolean FS_SavePackToFile( const pack_t *pak, FILE *f )
 {
+	/* Skip unknown formats — they'll re-parse from the source archive
+	 * on next session via their native loader. New formats opt in by
+	 * adding a positive type check below and (if needed) appending a
+	 * length-prefixed format-specific tail after the common record. */
+	if ( pak->type != PACK_PK3
+#if FEAT_SW3Z
+	     && pak->type != PACK_SW3Z
+#endif
+	   )
+		return qtrue;
+
 	const char *namePtr = (char*)(pak->buildBuffer + pak->numfiles);
 	const char *pakName = pak->pakFilename;
 	int pakNameLen = PAD( (int)strlen( pakName ) + 1, sizeof( int ) );
-	pk3cacheHeader_t pk;
-	pk3cacheFileItem_t it;
+	pakcacheHeader_t pk;
+	pakcacheFileItem_t it;
 	int namesLen = pakName - namePtr;
 
 	// file content length
@@ -2673,6 +2898,34 @@ static qboolean FS_SavePackToFile( const pack_t *pak, FILE *f )
 	}
 #endif
 
+#if FEAT_SW3Z
+	if ( pak->type == PACK_SW3Z )
+	{
+		/* Format-specific tail, length-prefixed so the stat-mismatch
+		 * skip path and any future-format reader can advance past it
+		 * without knowing the layout. The runtime fields persisted are
+		 * the minimum needed for SW3Z_ReadEntry: the global data offset,
+		 * the per-pack compScratch cap (Phase 4-#2), and the per-entry
+		 * compression metadata. The SW3Z stringTable is intentionally
+		 * NOT persisted — at runtime, file names live in the inline
+		 * namebuffer (already part of the common record); stringTable
+		 * is only consulted during the cold-load name copy which the
+		 * cache hit skips. */
+		const uint32_t entryCount        = (uint32_t)pak->entryCount;
+		const uint32_t dataOffLo         = (uint32_t)pak->dataOffset;
+		const uint32_t maxCompressedSize = (uint32_t)pak->maxCompressedSize;
+		const uint32_t entriesLen        = entryCount * (uint32_t)sizeof( sw3zEntry_t );
+		const uint32_t tailLen           = (uint32_t)( 3 * sizeof( uint32_t ) ) + entriesLen;
+
+		fwrite( &tailLen,           sizeof( tailLen           ), 1, f );
+		fwrite( &dataOffLo,         sizeof( dataOffLo         ), 1, f );
+		fwrite( &entryCount,        sizeof( entryCount        ), 1, f );
+		fwrite( &maxCompressedSize, sizeof( maxCompressedSize ), 1, f );
+		if ( entryCount > 0 && pak->entries )
+			fwrite( pak->entries, entriesLen, 1, f );
+	}
+#endif
+
 	return qtrue;
 }
 
@@ -2685,14 +2938,17 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 	char pakName[ PAD( MAX_OSPATH*3+1, sizeof( int ) ) ];
 	char pakBase[ PAD( MAX_OSPATH, sizeof( int ) ) ], *basename;
 	char *filename_inzip;
-	pk3cacheHeader_t pk;
-	pk3cacheFileItem_t it;
+	pakcacheHeader_t pk;
+	pakcacheFileItem_t it;
 	pack_t *pack;
 	char *namePtr;
 	int size, i;
 	int pakBaseLen;
 	int hashSize;
 	long hash;
+#if FEAT_SW3Z
+	qboolean is_sw3z;
+#endif
 
 	if ( fread( &pk, sizeof( pk ), 1, f ) != 1 )
 		return qfalse; // probably EOF
@@ -2723,6 +2979,20 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 		return qfalse;
 	}
 
+#if FEAT_SW3Z
+	/* Format gate: PK3 and SW3Z are reconstructable from disk. Any
+	 * unknown packType means this cache file was written by a future
+	 * engine version with format support we lack — bail on the entire
+	 * file (we can't know the tail size to skip). The cache will be
+	 * rebuilt with our format vocabulary. */
+	if ( (packType_t)pk.packType != PACK_PK3
+	     && (packType_t)pk.packType != PACK_SW3Z )
+	{
+		return qfalse;
+	}
+	is_sw3z = ( (packType_t)pk.packType == PACK_SW3Z );
+#endif
+
 	// load filename
 	if ( fread( pakName, pk.pakNameLen, 1, f ) != 1 )
 	{
@@ -2744,6 +3014,20 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 		{
 			return qfalse;
 		}
+
+#if FEAT_SW3Z
+		/* SW3Z records have a length-prefixed format tail after the
+		 * common body — read its length and skip past it so the next
+		 * record starts at the correct offset. */
+		if ( (packType_t)pk.packType == PACK_SW3Z )
+		{
+			uint32_t tailLen;
+			if ( fread( &tailLen, sizeof( tailLen ), 1, f ) != 1 )
+				return qfalse;
+			if ( fseek( f, (long)tailLen, SEEK_CUR ) != 0 )
+				return qfalse;
+		}
+#endif
 
 		fs_paksSkipped++;
 		return qtrue; // just outdated info, we can continue
@@ -2770,11 +3054,27 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 
 	hashSize = FS_PakHashSize( pk.numFiles );
 
+	/* PK3 packs embed headerLongs inline — the whole pack is a single
+	 * Z_TagMalloc'd block freed in one Z_Free. SW3Z packs match
+	 * SW3Z_LoadArchive's layout: headerLongs is separately Z_Malloc'd
+	 * because SW3Z_CloseArchive unconditionally Z_Frees it. Mixing
+	 * inline+separate would double-free or free-of-inline. */
 	size = sizeof( *pack ) + pk.namesLen + pk.numFiles * sizeof( pack->buildBuffer[0] );
-	size += hashSize * sizeof( pack->hashTable[0] );
+	// pack->hashTable is `fileInPack_t **` — each slot stores a pointer.
+	// Using `sizeof(fileInPack_t *)` rather than `sizeof(pack->hashTable[0])`
+	// keeps clang-tidy's bugprone-sizeof-expression quiet (the latter flags
+	// as "sizeof(A*); pointer to aggregate") and documents intent: we're
+	// reserving room for `hashSize` pointers, not for fileInPack_t structs.
+	size += hashSize * sizeof( fileInPack_t * );
 	size += pk.pakNameLen;
 	size += pakBaseLen;
 	size += pk.numHeaderLongs * sizeof( pack->headerLongs[0] );
+#if FEAT_SW3Z
+	/* SW3Z packs use a separately-allocated headerLongs (matching
+	 * SW3Z_LoadArchive); back out the inline reservation. */
+	if ( is_sw3z )
+		size -= pk.numHeaderLongs * sizeof( pack->headerLongs[0] );
+#endif
 
 	pack = Z_TagMalloc( size, TAG_PACK );
 	memset( pack, 0, size );
@@ -2803,6 +3103,14 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 	pack->pakFilename = (char*)( namePtr + pk.namesLen );
 	pack->pakBasename = (char*)( pack->pakFilename + pk.pakNameLen );
 	pack->headerLongs = (int*)( pack->pakBasename + pakBaseLen );
+#if FEAT_SW3Z
+	/* For SW3Z, leave pack->headerLongs NULL; it will be separately
+	 * Z_Malloc'd below, before the headerLongs fread. If __error fires
+	 * before that allocation, FS_FreePak → SW3Z_CloseArchive checks
+	 * for NULL and skips the free. */
+	if ( is_sw3z )
+		pack->headerLongs = NULL;
+#endif
 
 	strcpy( pack->pakFilename, pakName );
 	strcpy( pack->pakBasename, pakBase );
@@ -2852,6 +3160,17 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 		}
 	}
 
+#if FEAT_SW3Z
+	/* Allocate SW3Z's separately-tracked headerLongs now that the
+	 * items read loop has succeeded — keeping the failure window
+	 * narrow so the __error path doesn't have to distinguish "before
+	 * Z_Malloc" from "after". SW3Z_CloseArchive frees this on cleanup. */
+	if ( is_sw3z )
+	{
+		pack->headerLongs = (int *)Z_Malloc( pack->numHeaderLongs * sizeof( int ) );
+	}
+#endif
+
 	if ( fread( pack->headerLongs + 1, ( pack->numHeaderLongs - 1 ) * sizeof( pack->headerLongs[0] ), 1, f ) != 1 )
 	{
 		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "error reading headerLongs\n" );
@@ -2878,9 +3197,78 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 		goto __error;
 	}
 
+#if FEAT_SW3Z
+	if ( is_sw3z )
+	{
+		/* Format-specific tail (cache v3): dataOffset + entryCount +
+		 * maxCompressedSize + entries[]. stringTable is intentionally
+		 * not persisted — runtime file-name lookups go through the
+		 * inline namebuffer above; the SW3Z stringTable is only
+		 * consulted during the cold-load name copy, which the cache
+		 * hit skips. */
+		uint32_t tailLen, dataOffLo, entryCount, maxCompressedSize;
+		uint32_t entriesLen, expectedTailLen;
+
+		if ( fread( &tailLen,           sizeof( tailLen           ), 1, f ) != 1 )
+			goto __error;
+		if ( fread( &dataOffLo,         sizeof( dataOffLo         ), 1, f ) != 1 )
+			goto __error;
+		if ( fread( &entryCount,        sizeof( entryCount        ), 1, f ) != 1 )
+			goto __error;
+		if ( fread( &maxCompressedSize, sizeof( maxCompressedSize ), 1, f ) != 1 )
+			goto __error;
+
+		entriesLen       = entryCount * (uint32_t)sizeof( sw3zEntry_t );
+		expectedTailLen  = (uint32_t)( 3 * sizeof( uint32_t ) ) + entriesLen;
+		if ( tailLen != expectedTailLen )
+		{
+			Com_Log( SEV_WARN, LOG_CH(ch_filesystem),
+				"FS_LoadPakFromFile: SW3Z tail length mismatch for '%s' (got %u, expected %u)\n",
+				pakName, tailLen, expectedTailLen );
+			goto __error;
+		}
+
+		pack->dataOffset        = (unsigned long)dataOffLo;
+		pack->entryCount        = entryCount;
+		pack->maxCompressedSize = maxCompressedSize;
+		pack->compScratch       = NULL;
+		pack->compScratchSize   = 0;
+		pack->stringTable       = NULL;
+		pack->stringTableSize   = 0;
+
+		if ( entryCount > 0 )
+		{
+			pack->entries = (sw3zEntry_t *)Z_Malloc( entriesLen );
+			if ( fread( pack->entries, entriesLen, 1, f ) != 1 )
+				goto __error;
+		}
+		else
+		{
+			pack->entries = NULL;
+		}
+
+		/* SW3Z runtime needs an open FILE* for entry data reads. The
+		 * fresh-load path opens this in SW3Z_LoadArchive; the cache
+		 * hit must open it here. On failure, FS_FreePak →
+		 * SW3Z_CloseArchive handles the partially-built pack. */
+		PACK_FILE_HANDLE(pack) = fopen( pakName, "rb" );
+		if ( !PACK_FILE_HANDLE(pack) )
+		{
+			Com_Log( SEV_WARN, LOG_CH(ch_filesystem),
+				"FS_LoadPakFromFile: SW3Z fopen failed for '%s'\n", pakName );
+			goto __error;
+		}
+
+#ifdef USE_HANDLE_CACHE
+		/* Register the freshly-opened FILE* in the SW3Z handle LRU. */
+		FS_AddToHandleList_SW3Z( pack );
+#endif
+	}
+#endif
+
 	fs_paksCached++;
 
-	FS_InsertPK3ToCache( pack );
+	FS_InsertPakToCache( pack );
 
 	return qtrue;
 
@@ -2989,9 +3377,9 @@ static void FS_LoadCache( void )
 
 }
 
-#endif // USE_PK3_CACHE_FILE
+#endif // USE_PAK_CACHE_FILE
 
-#endif // USE_PK3_CACHE
+#endif // USE_PAK_CACHE
 
 
 /*
@@ -3021,8 +3409,8 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 	int				fileNameLen;
 	int				baseNameLen;
 
-#ifdef USE_PK3_CACHE
-	pack = FS_LoadCachedPK3( zipfile );
+#ifdef USE_PAK_CACHE
+	pack = FS_LoadCachedPak( zipfile );
 	if ( pack )
 	{
 		// update pure checksum
@@ -3087,10 +3475,12 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 	hashSize = FS_PakHashSize( filecount );
 
 	namelen = PAD( namelen, sizeof( int ) );
-	size = sizeof( *pack ) + hashSize * sizeof( pack->hashTable[0] ) + filecount * sizeof( pack->buildBuffer[0] ) + namelen;
+	// hashTable slots are pointers — see size calc in FS_LoadZipFile / similar
+	// site for the rationale on `sizeof(fileInPack_t *)` vs the indexed form.
+	size = sizeof( *pack ) + hashSize * sizeof( fileInPack_t * ) + filecount * sizeof( pack->buildBuffer[0] ) + namelen;
 	size += PAD( fileNameLen, sizeof( int ) );
 	size += PAD( baseNameLen, sizeof( int ) );
-#ifdef USE_PK3_CACHE
+#ifdef USE_PAK_CACHE
 	size += ( filecount + 1 ) * sizeof( fs_headerLongs[0] );
 #endif
 	pack = Z_TagMalloc( size, TAG_PACK );
@@ -3108,7 +3498,7 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 	pack->pakFilename = (char*)( namePtr + namelen );
 	pack->pakBasename = (char*)( pack->pakFilename + PAD( fileNameLen, sizeof( int ) ) );
 
-#ifdef USE_PK3_CACHE
+#ifdef USE_PAK_CACHE
 	fs_headerLongs = (int*)( pack->pakBasename + PAD( baseNameLen, sizeof( int ) ) );
 #else
 	fs_headerLongs = Z_Malloc( ( filecount + 1 ) * sizeof( fs_headerLongs[0] ) );
@@ -3167,7 +3557,7 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 	pack->pure_checksum = Com_BlockChecksum( fs_headerLongs, sizeof( fs_headerLongs[0] ) * fs_numHeaderLongs );
 	pack->pure_checksum = LittleLong( pack->pure_checksum );
 
-#ifdef USE_PK3_CACHE
+#ifdef USE_PAK_CACHE
 	pack->headerLongs = fs_headerLongs;
 	pack->numHeaderLongs = fs_numHeaderLongs;
 	pack->checksumFeed = fs_checksumFeed;
@@ -3185,9 +3575,9 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 	}
 #endif
 
-#ifdef USE_PK3_CACHE
-	FS_InsertPK3ToCache( pack );
-#ifdef USE_PK3_CACHE_FILE
+#ifdef USE_PAK_CACHE
+	FS_InsertPakToCache( pack );
+#ifdef USE_PAK_CACHE_FILE
 	fs_paksReaded++;
 #endif
 #endif
@@ -3200,21 +3590,62 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 =================
 FS_FreePak
 
-Frees a pak structure and releases all associated resources
+Frees a pak structure and releases all associated resources.
+Dispatches by pack->type:
+  PACK_PK3  — unzClose the zip handle, disconnect from the handle LRU,
+              then Z_Free the single Z_TagMalloc'd block.
+  PACK_SW3Z — delegate to SW3Z_CloseArchive which owns its separately-
+              allocated entries[]/stringTable/headerLongs + FILE handle.
+
+The type check on each branch is intentional — it documents which
+operations are format-specific and avoids running PK3-only logic
+(unzClose) against a future pack format that might be added.
 =================
 */
 static void FS_FreePak( pack_t *pak )
 {
-	if ( PACK_ZIP_HANDLE(pak) )
+#if FEAT_SW3Z
+	if ( pak->type == PACK_SW3Z )
 	{
 #ifdef USE_HANDLE_CACHE
-		if ( pak->next_h )
-			FS_RemoveFromHandleList( pak );
+		/* Unlink from the SW3Z handle LRU before SW3Z_CloseArchive
+		 * fcloses + Z_Frees — otherwise the LRU would hold a
+		 * dangling pointer after the pack vanishes. The membership
+		 * check guards against packs that were never registered
+		 * (e.g., partially-built packs that errored before
+		 * FS_AddToHandleList_SW3Z) and packs whose FILE* was
+		 * evicted by an earlier LRU pressure event. */
+		if ( pak->next_h_sw3z )
+			FS_RemoveFromHandleList_SW3Z( pak );
 #endif
-		unzClose( PACK_ZIP_HANDLE(pak) );
-		PACK_ZIP_HANDLE(pak) = NULL;
+		SW3Z_CloseArchive( pak );
+		return;
+	}
+#endif
+
+	if ( pak->type == PACK_PK3 )
+	{
+		if ( PACK_ZIP_HANDLE(pak) )
+		{
+#ifdef USE_HANDLE_CACHE
+			if ( pak->next_h )
+				FS_RemoveFromHandleList( pak );
+#endif
+			unzClose( PACK_ZIP_HANDLE(pak) );
+			PACK_ZIP_HANDLE(pak) = NULL;
+		}
+
+		Z_Free( pak );
+		return;
 	}
 
+	/* Unknown pack type — should not happen in well-formed flows.
+	 * Log and free the raw allocation; format-specific resources
+	 * (handles, side-allocations) will leak by definition since
+	 * we don't know how to release them. */
+	Com_Log( SEV_WARN, LOG_CH(ch_filesystem),
+		"FS_FreePak: unknown pack type %d for '%s'\n",
+		(int)pak->type, pak->pakFilename ? pak->pakFilename : "(null)" );
 	Z_Free( pak );
 }
 
@@ -3234,7 +3665,7 @@ qboolean FS_CompareZipChecksum(const char *zipfile)
 		return qfalse;
 
 	int checksum = thepak->checksum;
-#ifndef USE_PK3_CACHE
+#ifndef USE_PAK_CACHE
 	FS_FreePak(thepak);
 #endif
 
@@ -3261,7 +3692,7 @@ int FS_GetZipChecksum( const char *zipfile )
 		return 0xFFFFFFFF;
 
 	int checksum = pak->checksum;
-#ifndef USE_PK3_CACHE
+#ifndef USE_PAK_CACHE
 	FS_FreePak( pak );
 #endif
 
@@ -3423,7 +3854,7 @@ static char **FS_ListFilteredFiles( const char *path, const char *extension, con
 	//
 	for ( search = fs_searchpaths; search; search = search->next ) {
 		// is the element a pak file?
-		if ( search->pack && ( flags & FS_MATCH_PK3s ) ) {
+		if ( search->pack && ( flags & FS_MATCH_PAKS ) ) {
 
 			//ZOID:  If we are pure, don't search for files on paks that
 			// aren't on the pure list
@@ -4412,20 +4843,58 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 				continue;
 
 			pakfile = FS_BuildOSPath( path, dir, sw3zfiles[pakfilesi] );
-			pak = SW3Z_LoadArchive( pakfile );
-			if ( !pak )
-				continue;
 
-			/* Complete the cache fields that SW3Z_LoadArchive left for us
-			 * (it can't access the static fs_checksumFeed). */
-			pak->checksumFeed = fs_checksumFeed;
-			pak->headerLongs[0] = LittleLong( fs_checksumFeed );
-			pak->checksum = Com_BlockChecksum( pak->headerLongs + 1,
-				sizeof( pak->headerLongs[0] ) * ( pak->numHeaderLongs - 1 ) );
-			pak->checksum = LittleLong( pak->checksum );
-			pak->pure_checksum = Com_BlockChecksum( pak->headerLongs,
-				sizeof( pak->headerLongs[0] ) * pak->numHeaderLongs );
-			pak->pure_checksum = LittleLong( pak->pure_checksum );
+#ifdef USE_PAK_CACHE
+			/* Cache lookup: a previous load with matching size/mtime/ctime
+			 * is reused directly. Mirrors the FS_LoadZipFile flow at the
+			 * top of that function (PK3 path). On a feed change the
+			 * pure_checksum is recomputed in place; everything else
+			 * (entries[], stringTable, hashTable, FILE handle) survives. */
+			pak = FS_LoadCachedPak( pakfile );
+			if ( pak )
+			{
+				if ( pak->checksumFeed != fs_checksumFeed )
+				{
+					pak->headerLongs[0] = LittleLong( fs_checksumFeed );
+					pak->pure_checksum = Com_BlockChecksum( pak->headerLongs,
+						sizeof( pak->headerLongs[0] ) * pak->numHeaderLongs );
+					pak->pure_checksum = LittleLong( pak->pure_checksum );
+					pak->checksumFeed = fs_checksumFeed;
+				}
+				pak->touched = qtrue;
+			}
+			else
+#endif
+			{
+				pak = SW3Z_LoadArchive( pakfile );
+				if ( !pak )
+					continue;
+
+				/* Complete the cache fields that SW3Z_LoadArchive left for
+				 * us (it can't access the static fs_checksumFeed). */
+				pak->checksumFeed = fs_checksumFeed;
+				pak->headerLongs[0] = LittleLong( fs_checksumFeed );
+				pak->checksum = Com_BlockChecksum( pak->headerLongs + 1,
+					sizeof( pak->headerLongs[0] ) * ( pak->numHeaderLongs - 1 ) );
+				pak->checksum = LittleLong( pak->checksum );
+				pak->pure_checksum = Com_BlockChecksum( pak->headerLongs,
+					sizeof( pak->headerLongs[0] ) * pak->numHeaderLongs );
+				pak->pure_checksum = LittleLong( pak->pure_checksum );
+
+#ifdef USE_HANDLE_CACHE
+				/* SW3Z_LoadArchive opened the FILE* — register it in
+				 * the SW3Z handle LRU. May trigger eviction of an
+				 * older idle SW3Z FILE* if the cap is reached. */
+				FS_AddToHandleList_SW3Z( pak );
+#endif
+
+#ifdef USE_PAK_CACHE
+				FS_InsertPakToCache( pak );
+#ifdef USE_PAK_CACHE_FILE
+				fs_paksReaded++;
+#endif
+#endif
+			}
 
 			pak->pakGamename = gamedir;
 			pak->index = fs_packCount;
@@ -4656,7 +5125,7 @@ void FS_Shutdown( qboolean closemfp )
 	}
 #endif
 
-#ifdef USE_PK3_CACHE
+#ifdef USE_PAK_CACHE
 	FS_ResetCacheReferences();
 #endif
 
@@ -4667,21 +5136,20 @@ void FS_Shutdown( qboolean closemfp )
 
 		if ( p->pack )
 		{
-#if FEAT_SW3Z
-			if ( p->pack->type == PACK_SW3Z ) {
-				SW3Z_CloseArchive( p->pack );
-			} else
-#endif
-			{
-#ifdef USE_PK3_CACHE
+#ifdef USE_PAK_CACHE
+			/* Both PK3 and SW3Z packs persist in pakHashTable across
+			 * FS_Restart; the FS_FreeUnusedCache() call below frees
+			 * any pack not re-touched by the next directory scan.
+			 * PK3 additionally needs to be unlinked from the file-
+			 * handle LRU list (SW3Z packs hold their FILE* directly
+			 * and are not handle-list members). */
 #ifdef USE_HANDLE_CACHE
-				if ( p->pack->next_h )
-					FS_RemoveFromHandleList( p->pack );
+			if ( p->pack->type == PACK_PK3 && p->pack->next_h )
+				FS_RemoveFromHandleList( p->pack );
 #endif
 #else
-				FS_FreePak( p->pack );
+			FS_FreePak( p->pack );
 #endif
-			}
 			p->pack = NULL;
 		}
 
@@ -4921,30 +5389,20 @@ static void FS_DeduplicateArchives( void )
 				/* remove from search path — lower priority duplicate */
 				*pp = s->next;
 
-				/* Close file handles and free pack resources. Ownership
-				 * differs by pack type: SW3Z_CloseArchive owns the entire
-				 * pack_t allocation; FS_FreePak handles unzClose + Z_Free
-				 * for PK3. Order matters — read numfiles before close. */
+				/* Close file handles and free pack resources. Both PK3 and
+				 * SW3Z packs are registered in pakHashTable (Phase 1+) — the
+				 * cache pointer must be removed before FS_FreePak runs so
+				 * a subsequent FS_FreeUnusedCache (next FS_Restart) doesn't
+				 * double-free this entry. FS_FreePak dispatches by
+				 * pack->type internally (SW3Z → SW3Z_CloseArchive). Order
+				 * matters — read numfiles before close. */
 				if ( s->pack ) {
 					fs_packFiles -= s->pack->numfiles;
 					fs_packCount--;
-#if FEAT_SW3Z
-					if ( s->pack->type == PACK_SW3Z ) {
-						/* SW3Z packs never enter the PK3 cache
-						 * (FS_InsertPK3ToCache is PK3-only). */
-						SW3Z_CloseArchive( s->pack );
-					} else
+#ifdef USE_PAK_CACHE
+					FS_RemoveFromCache( s->pack );
 #endif
-					{
-#ifdef USE_PK3_CACHE
-						/* PK3 packs were registered in pakHashTable by
-						 * FS_LoadZipFile. Remove the cache pointer before
-						 * freeing so a subsequent FS_FreeUnusedCache (next
-						 * FS_Restart) doesn't double-free this entry. */
-						FS_RemoveFromCache( s->pack );
-#endif
-						FS_FreePak( s->pack );
-					}
+					FS_FreePak( s->pack );
 					s->pack = NULL;
 				}
 				Z_Free( s );
@@ -5111,8 +5569,8 @@ static void FS_Startup( void ) {
 
 	start = Sys_Milliseconds();
 
-#ifdef USE_PK3_CACHE
-#ifdef USE_PK3_CACHE_FILE
+#ifdef USE_PAK_CACHE
+#ifdef USE_PAK_CACHE_FILE
 	FS_LoadCache();
 #endif
 #endif
@@ -5203,9 +5661,9 @@ static void FS_Startup( void ) {
 	}
 #endif
 
-#ifdef USE_PK3_CACHE
+#ifdef USE_PAK_CACHE
 	FS_FreeUnusedCache();
-#ifdef USE_PK3_CACHE_FILE
+#ifdef USE_PAK_CACHE_FILE
 	FS_SaveCache();
 #endif
 #endif
@@ -5746,6 +6204,13 @@ void FS_InitFilesystem( void ) {
 
 #ifdef _WIN32
  	_setmaxstdio( 2048 );
+#endif
+
+#if FEAT_SW3Z
+	/* Eagerly initialize SW3Z's CRC32C lookup table so the runtime
+	 * verify path is a pure lookup (no init check, no thread-safety
+	 * concern if async loading is added later). Idempotent. */
+	SW3Z_Init();
 #endif
 
 	// try to start up normally
