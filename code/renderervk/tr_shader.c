@@ -2331,7 +2331,7 @@ Perform it before multitexture collapse for simplification and to preserve all i
 Key complex shaders to validate/check:
 [q3dm0]
 * textures/base_wall/comp3 -> stage #3
-[q3dm17]
+[arena17]
 * textures/sfx/diamond2cjumppad -> stage #0
 * textures/sfx/launchpad_diamond -> stage #1
 * textures/base_floor/diamond2c_ow -> stage #1

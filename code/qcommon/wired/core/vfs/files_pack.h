@@ -19,11 +19,21 @@
 
 /* ── compile-time feature toggles (must match files.c) ──────────────── */
 
-#define USE_PK3_CACHE
-#define USE_PK3_CACHE_FILE
+#define USE_PAK_CACHE
+#define USE_PAK_CACHE_FILE
 
 #define USE_HANDLE_CACHE
 #define MAX_CACHED_HANDLES 384
+
+#if FEAT_SW3Z
+/* SW3Z file-handle LRU. Independent from MAX_CACHED_HANDLES because
+ * the resource being bounded is different (raw FILE* vs unzFile) and
+ * SW3Z handle lifetime semantics differ (no in-use ref counting —
+ * reads complete synchronously inside SW3Z_ReadEntry). 32 is generous
+ * for typical sw3z file counts (1-3) while still capping pathological
+ * mod stacks. */
+#define MAX_CACHED_SW3Z_HANDLES 32
+#endif
 
 /* ── pack type discriminator ────────────────────────────────────────── */
 
@@ -67,15 +77,29 @@ typedef struct pack_s {
 	char			*stringTable;
 	unsigned int	stringTableSize;
 	unsigned long	dataOffset;
+
+	/* Per-pack reusable compressed-data scratch buffer (Phase 4-#2).
+	 * SW3Z_LoadArchive computes maxCompressedSize once; the scratch is
+	 * lazily allocated on first read and grown geometrically (in
+	 * practice, allocated once at maxCompressedSize and reused for the
+	 * pack's lifetime). Eliminates the per-read Z_Malloc/Z_Free pair
+	 * that was the dominant allocator-pressure source on map load. */
+	unsigned int	maxCompressedSize;
+	byte			*compScratch;
+	unsigned int	compScratchSize;
 #endif
 
 #ifdef USE_HANDLE_CACHE
-	struct pack_s	*next_h;					// double-linked list of unreferenced paks with open file handles
+	struct pack_s	*next_h;					// PK3 unzFile LRU: doubly-linked list of unreferenced paks with open handles
 	struct pack_s	*prev_h;
+#if FEAT_SW3Z
+	struct pack_s	*next_h_sw3z;				// SW3Z FILE* LRU: every pack with an open FILE* (no in-use ref counting)
+	struct pack_s	*prev_h_sw3z;
+#endif
 #endif
 
 	// caching subsystem
-#ifdef USE_PK3_CACHE
+#ifdef USE_PAK_CACHE
 	unsigned int	namehash;
 	fileOffset_t	size;
 	fileTime_t		mtime;

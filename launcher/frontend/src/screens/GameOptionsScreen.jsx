@@ -10,37 +10,7 @@ import CopyButton from "../components/CopyButton";
 import ErrorOverlay from "../components/ErrorOverlay";
 import Logo from "../components/Logo";
 
-const MAPS = [
-  "q3dm1",
-  "q3dm2",
-  "q3dm3",
-  "q3dm4",
-  "q3dm5",
-  "q3dm6",
-  "q3dm7",
-  "q3dm8",
-  "q3dm9",
-  "q3dm10",
-  "q3dm11",
-  "q3dm12",
-  "q3dm13",
-  "q3dm14",
-  "q3dm15",
-  "q3dm16",
-  "q3dm17",
-  "q3dm18",
-  "q3dm19",
-  "q3tourney1",
-  "q3tourney2",
-  "q3tourney3",
-  "q3tourney4",
-  "q3tourney5",
-  "q3tourney6",
-  "q3ctf1",
-  "q3ctf2",
-  "q3ctf3",
-  "q3ctf4",
-];
+const MAPS = ["arena1", "arena7", "arena17"];
 
 const styles = {
   container: {
@@ -274,7 +244,11 @@ export default function GameOptionsScreen({ assetsReady, onBack }) {
                 }}
               >
                 <option value="">— none (open game menu) —</option>
-                {MAPS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {MAPS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -303,8 +277,7 @@ export default function GameOptionsScreen({ assetsReady, onBack }) {
                   type="radio"
                   value="vulkan"
                   checked={renderer === "vulkan"}
-                  onChange={() =>
-                    setRenderer("vulkan")}
+                  onChange={() => setRenderer("vulkan")}
                 />{" "}
                 Vulkan
               </label>
@@ -313,8 +286,7 @@ export default function GameOptionsScreen({ assetsReady, onBack }) {
                   type="radio"
                   value="opengl"
                   checked={renderer === "opengl"}
-                  onChange={() =>
-                    setRenderer("opengl")}
+                  onChange={() => setRenderer("opengl")}
                 />{" "}
                 OpenGL
               </label>
@@ -369,7 +341,9 @@ export default function GameOptionsScreen({ assetsReady, onBack }) {
             Command
           </div>
           <div style={styles.commandBox}>
-            <div style={styles.commandText} title={command}>{command}</div>
+            <div style={styles.commandText} title={command}>
+              {command}
+            </div>
             <CopyButton text={command} />
           </div>
         </div>
@@ -385,7 +359,9 @@ export default function GameOptionsScreen({ assetsReady, onBack }) {
         >
           Back
         </Button>
-        <Button disabled={!assetsReady} onClick={handleLaunch}>Launch</Button>
+        <Button disabled={!assetsReady} onClick={handleLaunch}>
+          Launch
+        </Button>
       </div>
     </div>
   );

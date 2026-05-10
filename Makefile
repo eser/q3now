@@ -23,11 +23,11 @@
 #   make run-launcher        		  build + assemble + codesign + open launcher
 #   make run-game                     run engine (main menu)
 #   make run-game DEV=1               debug build
-#   make run-game DEV=1 MAP=q3dm17    map with debug
-#   make run-game VM=1 MAP=q3dm17     VM modules + map
+#   make run-game DEV=1 MAP=arena7    map with debug
+#   make run-game VM=1 MAP=arena7     VM modules + map
 #   make run-ded                      run dedicated server (no client)
 #   make run-ded DEV=1                dedicated + debug build
-#   make run-ded DEV=1 MAP=q3dm17     dedicated + debug + load map
+#   make run-ded DEV=1 MAP=arena7     dedicated + debug + load map
 #   make release             		  build + assemble + codesign + package
 #
 # VARIABLES (override on command line or env)
@@ -209,15 +209,20 @@ ZIP_OUT     := $(BUILD_DIR)/$(ZIP_NAME).zip
 # Launcher (Go/Wails)
 LAUNCHER_DIR := launcher
 ifeq ($(UNAME_S),Darwin)
-  LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/Wired.app/Contents/MacOS/q3now-launcher
+  LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS/q3now-launcher
   # Self-contained launcher build dir layout (post create-launcher).
   # paths.GameBinaryPath() = filepath.Dir(os.Executable())/<engine name>;
   # the launcher binary lives in Contents/MacOS/ so the engine binary
   # colocates there. Game modules + paks go under Contents/Resources/baseq3
   # because post-engine-Phase-1 the basegame scan reaches only the resource
   # path on macOS (mirrors the Q3DATADIR collapse for the install layout).
-  LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin/Wired.app/Contents/MacOS
-  LAUNCHER_DSTDATA := $(LAUNCHER_DIR)/build/bin/Wired.app/Contents/Resources/baseq3
+  # Bundle name is the GAME (q3now) per Wired-vs-game branding boundary —
+  # the engine binaries (wired.x64, wired_<api>_<arch>.dylib) live INSIDE the
+  # game's .app wrapper. Wails emits this bundle name from launcher/wails.json
+  # ("name": "q3now"); align consumer paths here so Linux / Windows / macOS
+  # all key off the same launcher artifact.
+  LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS
+  LAUNCHER_DSTDATA := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/Resources/baseq3
 else ifdef IS_WINDOWS
   LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/q3now-launcher.exe
   LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin
@@ -675,10 +680,10 @@ endif
 #
 # Examples:
 #   make run-game                    main menu (native dylibs)
-#   make run-game MAP=q3dm17         load q3dm17
+#   make run-game MAP=arena7         load arena7 (temple of retribution)
 #   make run-game DEV=1              debug build
-#   make run-game DEV=1 MAP=q3dm17   debug build, map q3dm17
-#   make run-game VM=1 MAP=q3dm17    VM modules, load q3dm17
+#   make run-game DEV=1 MAP=arena7   debug build, map arena7
+#   make run-game VM=1 MAP=arena7    VM modules, load arena7
 
 # DEV controls Release vs Debug throughout BUILD_DIR / BUILD_CFG
 # / BUILT_APP / BUILT_DED / MODULE_DIR / PAK_OUT — copy-all picks up the right
@@ -932,11 +937,11 @@ help:
 	@echo "    make run-launcher       build + assemble + codesign + open launcher"
 	@echo "    make run-game                     run engine (main menu)"
 	@echo "    make run-game DEV=1               debug build"
-	@echo "    make run-game DEV=1 MAP=q3dm17    map with debug"
-	@echo "    make run-game VM=1 MAP=q3dm17     VM modules + map"
+	@echo "    make run-game DEV=1 MAP=arena7    map with debug"
+	@echo "    make run-game VM=1 MAP=arena7     VM modules + map"
 	@echo "    make run-game DEV=1 EXTRA_ARGS=\"+set bsp_q1_coverage_debug 1\"  extra cvars"
 	@echo "    make run-ded                      run dedicated server"
-	@echo "    make run-ded DEV=1 MAP=q3dm17     dedicated + debug + map"
+	@echo "    make run-ded DEV=1 MAP=arena7     dedicated + debug + map"
 	@echo "    make release            build + assemble + codesign + package"
 	@echo ""
 	@echo "  Testing:"

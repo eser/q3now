@@ -244,7 +244,7 @@ jobs:
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build and package
-      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/Wired.app
+      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now.app
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'

@@ -72,7 +72,7 @@ if [ "$1" == "notarize" ]; then
 	RELEASE_LOCATION="build/release-darwin-universal2"
 
 	# release build name
-	RELEASE_BUILD="Wired.app"
+	RELEASE_BUILD="q3now.app"
 
 	# Pre-notarized zip file (not what is shipped)
 	PRE_NOTARIZED_ZIP="wired_prenotarized.zip"

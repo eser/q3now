@@ -42,7 +42,7 @@ trap "rm -f $LOGFILE" EXIT
 
 EXTRA_ARGS=""
 if [ -f "$Q3DIR/baseq3/pak0.pk3" ]; then
-  EXTRA_ARGS="+set fs_installpath $Q3DIR +map q3dm1 +addbot sarge 1 +wait 200"
+  EXTRA_ARGS="+set fs_installpath $Q3DIR +map arena7 +addbot visor 1 +wait 200"
 else
   # Asset-free: just enough to reach network init
   EXTRA_ARGS="+set fs_installpath $Q3DIR"

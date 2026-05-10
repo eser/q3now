@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # smoke.sh — headless smoke test for q3now dedicated server
 #
-# Launches wired-ded, loads q3dm1 with a bot for 300 ticks, and exits.
+# Launches wired-ded, loads arena1 with a bot for 300 ticks, and exits.
 # Parses console output for hard VM errors.
 #
 # Usage:
@@ -34,15 +34,15 @@ fi
 LOGFILE=$(mktemp /tmp/q3now-smoke-XXXXXX.log)
 trap "rm -f $LOGFILE" EXIT
 
-echo "==> Starting smoke test: $DED +map q3dm1"
+echo "==> Starting smoke test: $DED +map arena1"
 timeout 30 "$DED" \
   +set fs_installpath "$Q3DIR" \
   +set dedicated 2 \
   +set bot_enable 1 \
   +set g_gametype 0 \
   +set sv_maxclients 4 \
-  +map q3dm1 \
-  +addbot sarge 1 \
+  +map arena1 \
+  +addbot visor 1 \
   +wait 300 \
   +quit \
   2>&1 | tee "$LOGFILE" || true

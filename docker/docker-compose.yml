@@ -28,7 +28,7 @@ services:
       WIRED_SCORELIMIT: "25"
       WIRED_TIMELIMIT: "15"
       # WIRED_GAMETYPE: "0"          # 0=FFA, 1=Duel, 3=TDM, 4=CTF
-      # WIRED_MAPROTATION: "q3dm17 q3dm6 q3tourney2"
+      # WIRED_MAPROTATION: "arena7 arena1 arena17"
       # WIRED_QUIC: "1"              # Enable QUIC transport (needs certs)
       # WIRED_DOWNLOAD_URL: "http://yoursite.com/q3now"
       # WIRED_EXEC: "server.cfg"     # Execute a custom config on startup
@@ -41,7 +41,7 @@ services:
       # - ./certs:/home/wired/certs:ro
 
     # Override the default map
-    command: ["+map", "q3dm17"]
+    command: ["+map", "arena7"]
 
     restart: unless-stopped
 

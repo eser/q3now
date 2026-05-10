@@ -33,7 +33,19 @@ LOG_DECLARE_CHANNEL( ch_system, "system" );
 static uint32_t sw3z_crc32c_table[256];
 static qboolean sw3z_crc32c_init = qfalse;
 
-static void SW3Z_InitCRC32C( void ) {
+/*
+ * SW3Z_Init: one-shot module initialization. Builds the CRC32C table
+ * eagerly so SW3Z_CRC32C is a pure lookup at every call site. Idempotent.
+ *
+ * Called once from FS_InitFilesystem. Must run before any SW3Z function
+ * that hashes data — which is every SW3Z_ReadEntry that hits the verify
+ * path. Centralizing here removes the pre-existing lazy-init race that
+ * would surface the moment async loading is introduced.
+ */
+void SW3Z_Init( void ) {
+	if ( sw3z_crc32c_init )
+		return;
+
 	for ( int i = 0; i < 256; i++ ) {
 		uint32_t crc = (uint32_t)i;
 		for ( int j = 0; j < 8; j++ ) {
@@ -47,12 +59,44 @@ static void SW3Z_InitCRC32C( void ) {
 	sw3z_crc32c_init = qtrue;
 }
 
+
+/*
+ * SW3Z_EnsureLZ4Context: lazy-init + reset of one global LZ4F_dctx.
+ *
+ * The dctx is created on first use and reused across every SW3Z LZ4
+ * decompression. LZ4F_resetDecompressionContext (lz4frame.h:528,
+ * "always successful") puts the context back to its initial state
+ * cheaply — far cheaper than the create/free pair that this replaces.
+ *
+ * Single-threaded I/O makes the global safe. If async loading is ever
+ * introduced, this needs to become per-thread or per-handle (along
+ * with much else in the FS layer).
+ *
+ * The dctx itself is intentionally not freed at engine shutdown — it's
+ * a one-time allocation, the OS reclaims it, and adding a teardown
+ * hook would be more code than the leak avoids.
+ */
+static LZ4F_dctx *g_lz4Dctx = NULL;
+
+static qboolean SW3Z_EnsureLZ4Context( const char *forFilename ) {
+	if ( g_lz4Dctx ) {
+		LZ4F_resetDecompressionContext( g_lz4Dctx );
+		return qtrue;
+	}
+	LZ4F_errorCode_t err = LZ4F_createDecompressionContext( &g_lz4Dctx, LZ4F_VERSION );
+	if ( LZ4F_isError( err ) ) {
+		COM_ERROR( LOG_CH(ch_system),
+			"ERROR: SW3Z: LZ4F_createDecompressionContext failed for '%s': %s\n",
+			forFilename, LZ4F_getErrorName( err ) );
+		g_lz4Dctx = NULL;
+		return qfalse;
+	}
+	return qtrue;
+}
+
 uint32_t SW3Z_CRC32C( const void *data, size_t len ) {
 	const byte *p = (const byte *)data;
 	uint32_t crc = 0xFFFFFFFFU;
-
-	if ( !sw3z_crc32c_init )
-		SW3Z_InitCRC32C();
 
 	for ( size_t i = 0; i < len; i++ )
 		crc = sw3z_crc32c_table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
@@ -193,6 +237,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	/* ── validate all entries and compute total name buffer size ── */
 	int numValidFiles = 0;
 	int nameLen = 0;
+	unsigned int maxCompressedSize = 0;	/* Phase 4-#2: cap for the per-pack compBuf scratch */
 	for ( int i = 0; i < (int)header.entryCount; i++ ) {
 		sw3zEntry_t *e = &entries[i];
 
@@ -216,12 +261,30 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 			return NULL;
 		}
 
+		/* security: data range bounds check (Phase 4-#6).
+		 * Reject any entry whose data extent walks past the file end —
+		 * a malformed sw3z used to fseek+fread off the end at read time.
+		 * Using uint64 arithmetic to avoid 32-bit overflow on the sum. */
+		if ( e->dataOffsetHi != 0
+		     || (uint64_t)e->dataOffsetLo + (uint64_t)e->compressedSize > (uint64_t)fileSize ) {
+			COM_WARN( LOG_CH(ch_system),
+				"SW3Z: '%s' entry %d data offset/size out of bounds (offset=%u size=%u fileSize=%ld)\n",
+				filename, i, e->dataOffsetLo, e->compressedSize, fileSize );
+			if ( entries ) Z_Free( entries );
+			if ( stringTable ) Z_Free( stringTable );
+			fclose( f );
+			return NULL;
+		}
+
 		/* skip directory entries (uncompressedSize == 0 and compressedSize == 0) */
 		if ( e->uncompressedSize == 0 && e->compressedSize == 0 )
 			continue;
 
 		numValidFiles++;
 		nameLen += e->stringLength + 1; /* +1 for NUL terminator */
+
+		if ( e->compressedSize > maxCompressedSize )
+			maxCompressedSize = e->compressedSize;
 	}
 
 	/* ── compute hash table size (power of 2, same logic as FS_LoadZipFile) ── */
@@ -279,6 +342,13 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	pack->numfiles       = numValidFiles;
 	pack->referenced     = 0;
 	pack->exclude        = qfalse;
+
+	/* Phase 4-#2: scratch buffer sized to the biggest entry. compScratch
+	 * stays NULL until the first SW3Z_ReadEntry hits an LZ4 entry; from
+	 * that point on it lives until SW3Z_CloseArchive. */
+	pack->maxCompressedSize = maxCompressedSize;
+	pack->compScratch       = NULL;
+	pack->compScratchSize   = 0;
 
 	/* ── build fileInPack_t hash table ── */
 	{
@@ -349,13 +419,15 @@ void SW3Z_CloseArchive( pack_t *pack ) {
 		PACK_FILE_HANDLE(pack) = NULL;
 	}
 
-	/* entries, stringTable, and headerLongs were separately allocated */
+	/* entries, stringTable, headerLongs, and compScratch were separately allocated */
 	if ( pack->entries )
 		Z_Free( pack->entries );
 	if ( pack->stringTable )
 		Z_Free( pack->stringTable );
 	if ( pack->headerLongs )
 		Z_Free( pack->headerLongs );
+	if ( pack->compScratch )
+		Z_Free( pack->compScratch );
 
 	/* pack itself (+ hashTable + buildBuffer + names) is one allocation */
 	Z_Free( pack );
@@ -418,23 +490,42 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 			return -1;
 		}
 	} else if ( e->compression == SW3Z_COMP_LZ4 ) {
-		/* ── LZ4 Frame Format ── */
-		LZ4F_dctx *dctx = NULL;
+		/* ── LZ4 Frame Format ──
+		 *
+		 * Pooled global LZ4F_dctx (single-threaded I/O makes this safe).
+		 * The compressed-data scratch buffer is also pooled per-pack
+		 * (Phase 4 change #2). This branch carries no Z_Malloc/Z_Free
+		 * pair on the hot path — it's the single biggest source of
+		 * allocator churn on map load before Phase 4. */
 		size_t dstSize;
 
-		byte *compBuf = (byte *)Z_Malloc( e->compressedSize );
-		if ( fread( compBuf, 1, e->compressedSize, PACK_FILE_HANDLE(pack) ) != e->compressedSize ) {
-			COM_ERROR( LOG_CH(ch_system), "ERROR: SW3Z: fread compressed data failed in '%s'\n",
-				pack->pakFilename );
-			Z_Free( compBuf );
+		if ( !SW3Z_EnsureLZ4Context( pack->pakFilename ) ) {
 			return -1;
 		}
 
-		LZ4F_errorCode_t err = LZ4F_createDecompressionContext( &dctx, LZ4F_VERSION );
-		if ( LZ4F_isError( err ) ) {
-			COM_ERROR( LOG_CH(ch_system), "ERROR: SW3Z: LZ4F_createDecompressionContext failed: %s\n",
-				LZ4F_getErrorName( err ) );
-			Z_Free( compBuf );
+		/* Per-pack reusable scratch (Phase 4-#2). On the first LZ4 read
+		 * we allocate up to maxCompressedSize so subsequent reads never
+		 * grow. The cache disk-load path persists maxCompressedSize so
+		 * a cache hit knows the cap without re-walking entries. If
+		 * maxCompressedSize is 0 (e.g., legacy on-disk cache pre-v3
+		 * without the field — defensive only; v2→v3 invalidation
+		 * should prevent this), fall back to e->compressedSize. */
+		if ( pack->compScratchSize < e->compressedSize ) {
+			unsigned int newSize = pack->maxCompressedSize > e->compressedSize
+				? pack->maxCompressedSize
+				: e->compressedSize;
+			if ( pack->compScratch ) {
+				Z_Free( pack->compScratch );
+			}
+			pack->compScratch = (byte *)Z_TagMalloc( (int)newSize, TAG_PACK );
+			pack->compScratchSize = newSize;
+		}
+		byte *compBuf = pack->compScratch;
+
+		if ( fread( compBuf, 1, e->compressedSize, PACK_FILE_HANDLE(pack) ) != e->compressedSize ) {
+			COM_ERROR( LOG_CH(ch_system), "ERROR: SW3Z: fread compressed data failed in '%s'\n",
+				pack->pakFilename );
+			/* Don't free compBuf — it's owned by the pack now. */
 			return -1;
 		}
 
@@ -450,12 +541,11 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 			while ( result != 0 && dstRemain > 0 ) {
 				size_t srcSize = srcRemain;
 				dstSize = dstRemain;
-				result = LZ4F_decompress( dctx, dstPtr, &dstSize, srcPtr, &srcSize, NULL );
+				result = LZ4F_decompress( g_lz4Dctx, dstPtr, &dstSize, srcPtr, &srcSize, NULL );
 				if ( LZ4F_isError( result ) ) {
 					COM_ERROR( LOG_CH(ch_system), "ERROR: SW3Z: LZ4 decompression failed in '%s': %s\n",
 						pack->pakFilename, LZ4F_getErrorName( result ) );
-					LZ4F_freeDecompressionContext( dctx );
-					Z_Free( compBuf );
+					/* compBuf is pack-owned (compScratch); freed at SW3Z_CloseArchive. */
 					return -1;
 				}
 				srcPtr    += srcSize;
@@ -466,9 +556,6 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 
 			dstSize = e->uncompressedSize - dstRemain;
 		}
-
-		LZ4F_freeDecompressionContext( dctx );
-		Z_Free( compBuf );
 
 		if ( dstSize != e->uncompressedSize ) {
 			COM_ERROR( LOG_CH(ch_system), "ERROR: SW3Z: LZ4 decompressed size mismatch (%zu != %u) in '%s'\n",
@@ -485,12 +572,35 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 		return -1;
 	}
 
-	/* ── CRC32C verification ── */
-	uint32_t crc = SW3Z_CRC32C( buf, e->uncompressedSize );
-	if ( crc != e->crc32c ) {
-		COM_ERROR( LOG_CH(ch_system), "ERROR: SW3Z: CRC32C mismatch (got 0x%08X, expected 0x%08X) in '%s'\n",
-			crc, e->crc32c, pack->pakFilename );
-		return -1;
+	/* ── CRC32C verification ──
+	 *
+	 * Phase 4-#3 trade-off:
+	 *   - SW3Z_COMP_LZ4: LZ4F's content checksum (XXH32) was already
+	 *     verified inside LZ4F_decompress on the path above. Re-running
+	 *     CRC32C here would catch only one extra threat — an attacker
+	 *     who rewrites both the LZ4 data blob *and* its inner XXH32 but
+	 *     leaves the SW3Z index intact. That threat is out of scope for
+	 *     offline/single-player play; it becomes interesting only when
+	 *     the server enforces strict pure mode (sv_pure >= 2). Skip the
+	 *     redundant pass in the common case.
+	 *   - SW3Z_COMP_NONE: uncompressed entries have no LZ4 wrapper and
+	 *     thus no XXH32. The CRC32C here is the only integrity check —
+	 *     always run it.
+	 *
+	 * sv_pure semantics:
+	 *   0/1: trust LZ4F's content checksum for compressed entries.
+	 *   >=2: extra-strict — re-verify CRC32C even on LZ4 entries. */
+	qboolean must_verify = ( e->compression == SW3Z_COMP_NONE );
+	if ( !must_verify ) {
+		must_verify = ( Cvar_VariableIntegerValue( "sv_pure" ) >= 2 );
+	}
+	if ( must_verify ) {
+		uint32_t crc = SW3Z_CRC32C( buf, e->uncompressedSize );
+		if ( crc != e->crc32c ) {
+			COM_ERROR( LOG_CH(ch_system), "ERROR: SW3Z: CRC32C mismatch (got 0x%08X, expected 0x%08X) in '%s'\n",
+				crc, e->crc32c, pack->pakFilename );
+			return -1;
+		}
 	}
 
 	return (int)e->uncompressedSize;

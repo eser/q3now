@@ -2018,7 +2018,7 @@ void SV_BotVerifyCharacter_f( void ) {
 
 	if ( Cmd_Argc() < 3 ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: bot_verify_character <name> <skill>\n"
-		            "  name  - character name (e.g., sarge, daemia, grunt)\n"
+		            "  name  - character name (e.g., visor, daemia, grunt)\n"
 		            "  skill - integer skill level 1-5\n" );
 		return;
 	}

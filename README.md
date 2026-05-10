@@ -179,7 +179,7 @@ git submodule update --init --recursive
 | `make create-packs`        | Package modfiles/ + VM modules into mod pack                   |
 | `make run-launcher`        | Build + assemble + codesign + open launcher                    |
 | `make run-game`            | Build + assemble + run engine (main menu)                      |
-| `make run-game MAP=q3dm17` | Build + run + load map                                         |
+| `make run-game MAP=arena7` | Build + run + load map                                         |
 | `make run-game DEV=1`      | Debug build, native dylibs, developer mode                     |
 | `make run-game VM=1`       | VM game modules (sv_pure 1)                                    |
 | `make check`               | Verify VM modules, dylibs, mod pack, codesign, JIT entitlement |
@@ -213,7 +213,7 @@ docker run -d -p 27960:27960/udp \
   -v /path/to/your/baseq3:/home/wired/baseq3 \
   -e WIRED_HOSTNAME="My Server" \
   -e WIRED_MAXCLIENTS=16 \
-  eserozvataf/q3now +map q3dm17
+  eserozvataf/q3now +map arena7
 ```
 
 Mount your game assets (`pak0.pk3`, custom maps, `server.cfg`) into the

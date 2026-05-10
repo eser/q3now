@@ -2876,7 +2876,7 @@ Docker, systemd, k8s, or any 12-factor deployment:
   export WIRED_SV_HOSTNAME="My Server"
   export WIRED_SV_MAXCLIENTS=16
   export WIRED_G_GAMETYPE=4
-  export WIRED_MAP=q3dm17
+  export WIRED_MAP=arena7
   export WIRED_SV_WIREDNETAUTHTOKEN="observer:member:user:abc123"
   ./wired-ded
 

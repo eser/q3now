@@ -709,7 +709,7 @@ typedef enum {
 #define FS_MATCH_UNPURE    (1<<2)
 #define FS_MATCH_STICK     (1<<3)
 #define FS_MATCH_SUBDIRS   (1<<4)
-#define FS_MATCH_PK3s      (FS_MATCH_PURE | FS_MATCH_UNPURE)
+#define FS_MATCH_PAKS      (FS_MATCH_PURE | FS_MATCH_UNPURE)
 #define FS_MATCH_ANY       (FS_MATCH_EXTERN | FS_MATCH_PURE | FS_MATCH_UNPURE)
 
 #define FS_MAX_SUBDIRS		8 /* should be enough for practical use with FS_MATCH_SUBDIRS */
@@ -910,7 +910,7 @@ const char *FS_GetHomePath( void );
  * accessor — caller must NOT cache the pointer across calls; copy if needed.
  *
  *   FS_GetInstallPath()          fs_installpath verbatim. The install root.
- *                                  macOS: <something>/Wired.app
+ *                                  macOS: <something>/q3now.app
  *                                  Linux/Windows: directory containing the
  *                                  engine binary.
  *

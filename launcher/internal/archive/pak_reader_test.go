@@ -65,8 +65,8 @@ func createTestPak(t *testing.T, dir, name string, files map[string][]byte) stri
 func TestPAK_ValidArchive(t *testing.T) {
 	dir := t.TempDir()
 	path := createTestPak(t, dir, "test.pak", map[string][]byte{
-		"maps/dm1.bsp":     []byte("bsp data here"),
-		"textures/wall.tga": []byte("tga pixels"),
+		"maps/arena1.bsp":     []byte("bsp data here"),
+		"textures/wall.tga":   []byte("tga pixels"),
 	})
 
 	r, err := openPAK(path)

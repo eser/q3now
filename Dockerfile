@@ -6,7 +6,7 @@
 #   docker build -t q3now-server .
 #   docker run -p 27960:27960/udp \
 #     -v ./baseq3:/home/wired/baseq3 \
-#     eserozvataf/q3now +map q3dm17
+#     eserozvataf/q3now +map arena7
 #
 # One UDP port serves all clients — QUIC (WebTransport) and legacy Q3 protocol
 # share port 27960/udp via in-engine packet demultiplexing.
@@ -114,4 +114,4 @@ USER wired
 WORKDIR /opt/wired
 
 ENTRYPOINT ["/opt/wired/entrypoint.sh"]
-CMD ["+map", "q3dm17"]
+CMD ["+map", "arena7"]

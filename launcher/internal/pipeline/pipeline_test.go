@@ -92,7 +92,7 @@ func TestPipeline_EndToEnd_MockProcessor(t *testing.T) {
 	pk3Path := filepath.Join(srcDir, "pak0.pk3")
 	f, _ := os.Create(pk3Path)
 	zw := zip.NewWriter(f)
-	w, _ := zw.Create("maps/q3dm1.bsp")
+	w, _ := zw.Create("maps/arena7.bsp")
 	w.Write([]byte("bsp data"))
 	w2, _ := zw.Create("video/intro.roq")
 	w2.Write([]byte("roq data"))
@@ -129,12 +129,12 @@ func TestPipeline_EndToEnd_MockProcessor(t *testing.T) {
 		t.Fatalf("process: %v", err)
 	}
 
-	// Should have 1 entry (maps/q3dm1.bsp included, video/intro.roq skipped).
+	// Should have 1 entry (maps/arena7.bsp included, video/intro.roq skipped).
 	if len(output) != 1 {
 		t.Fatalf("expected 1 output, got %d", len(output))
 	}
-	if output[0].OutputPath != "maps/q3dm1.bsp" {
-		t.Errorf("expected maps/q3dm1.bsp, got %s", output[0].OutputPath)
+	if output[0].OutputPath != "maps/arena7.bsp" {
+		t.Errorf("expected maps/arena7.bsp, got %s", output[0].OutputPath)
 	}
 
 	// Write to SW3Z.

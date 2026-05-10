@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # smoke-wasm.sh — WASM VM backend smoke test
 #
-# Runs the dedicated server with WASM modules (vm_game=3) on q3dm7
-# (Temple of Retribution). q3dm7 is in the Q3 demo PAK (`demoq3/pak0.pk3`,
+# Runs the dedicated server with WASM modules (vm_game=3) on arena7
+# (Temple of Retribution). arena7 is in the Q3 demo PAK (`demoq3/pak0.pk3`,
 # verified via launcher/internal/pipeline/proc_q3copy_entries_pax01.go:102),
 # so this smoke runs against redistributable demo assets — no full Q3
 # install required.
@@ -25,9 +25,9 @@
 #   at the build instructions. There is no manual fallback — a single
 #   known-good path beats two paths where one is broken.
 #
-# Map choice: q3dm7. Reasoning: shipped in demoq3/pak0.pk3, exercises
+# Map choice: arena7. Reasoning: shipped in demoq3/pak0.pk3, exercises
 # bot AI navigation, jump pads, item placement variety better than
-# q3dm1/q3dm17. Override via the second positional arg if needed.
+# arena1/arena7. Override via the second positional arg if needed.
 #
 # Usage:
 #   bash tests/smoke-wasm.sh [path-to-ded] [map] [path-to-basepath]
@@ -55,7 +55,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # ── Locate dedicated server binary ──────────────────────────────────────────
 DED_OVERRIDE="${1:-}"
-MAP="${2:-q3dm7}"
+MAP="${2:-arena7}"
 BASEPATH_OVERRIDE="${3:-${BASEPATH:-}}"
 
 if [ -n "$DED_OVERRIDE" ]; then
@@ -205,7 +205,7 @@ timeout 30 "$DED" \
     +set vm_game 3 \
     +set dedicated 2 \
     +map "$MAP" \
-    +addbot sarge 1 \
+    +addbot visor 1 \
     +wait 300 \
     +quit \
     2>&1 | tee /tmp/smoke-wasm-1.log || true
