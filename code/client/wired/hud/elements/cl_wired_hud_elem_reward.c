@@ -10,6 +10,7 @@ typedef enum
 	ModernHUD_REWARD_COUNT,
 } modernHudRewardType_t;
 
+// NOLINTNEXTLINE(bugprone-tagged-union-member-count) — `type` is a reward kind, not a discriminator for the ctx union; ctx variant is implicit per element registration site
 typedef struct
 {
 	modernhudConfig_t config;

@@ -148,7 +148,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 		poly->hShader = hShader;
 		poly->numVerts = numVerts;
 		poly->verts = &backEndData->polyVerts[r_numpolyverts];
-		
+
 		memcpy( poly->verts, &verts[numVerts*j], numVerts * sizeof( *verts ) );
 
 		if ( glConfig.hardwareType == GLHW_RAGEPRO ) {
@@ -176,7 +176,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 				AddPointToBounds( poly->verts[i].xyz, bounds[0], bounds[1] );
 			}
 			for ( fogIndex = 1 ; fogIndex < tr.world->numfogs ; fogIndex++ ) {
-				fog = &tr.world->fogs[fogIndex]; 
+				fog = &tr.world->fogs[fogIndex];
 				if ( bounds[1][0] >= fog->bounds[0][0]
 					&& bounds[1][1] >= fog->bounds[0][1]
 					&& bounds[1][2] >= fog->bounds[0][2]
@@ -289,6 +289,46 @@ void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, flo
 }
 
 
+/*
+=====================
+Primitive submission stubs (wired/render).
+
+Placeholders until the primitive pipeline lands. Empty bodies
+keep rendering output unchanged from today; cgame may call
+them safely.
+=====================
+*/
+void RE_AddRibbonToScene( const ribbonDesc_t *desc ) {
+	// TODO: implement primitive ribbon pipeline.
+	(void)desc;
+}
+
+void RE_AddBeamToScene( const beamDesc_t *desc ) {
+	// TODO: implement primitive beam pipeline.
+	(void)desc;
+}
+
+void RE_AddSpriteToScene( const spriteDesc_t *desc ) {
+	// TODO: implement primitive sprite pipeline.
+	(void)desc;
+}
+
+void RE_EmitParticles( const emitterDesc_t *desc ) {
+	// TODO: implement particle system.
+	(void)desc;
+}
+
+void RE_AddDecalToScene( const decalDesc_t *desc ) {
+	// TODO: implement decal projection.
+	(void)desc;
+}
+
+void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls ) {
+	// renderer2 does not yet implement the particle subsystem.
+	(void)handle; (void)cls;
+}
+
+
 void RE_BeginScene(const refdef_t *fd)
 {
 	memcpy( tr.refdef.text, fd->text, sizeof( tr.refdef.text ) );
@@ -338,7 +378,7 @@ void RE_BeginScene(const refdef_t *fd)
 	}
 	else
 	{
-		float scale = (1 << r_mapOverBrightBits->integer) / 255.0f;
+		float scale = (1 << tr.mapOverbrightBits) / 255.0f;
 
 		if (r_forceSun->integer)
 			VectorScale(tr.sunLight, scale * r_forceSunLightScale->value, tr.refdef.sunCol);
@@ -396,7 +436,7 @@ void RE_BeginScene(const refdef_t *fd)
 			VectorCopy(extra->sunCol,    tr.refdef.sunCol);
 			VectorCopy(extra->sunAmbCol, tr.refdef.sunAmbCol);
 		}
-	} 
+	}
 	else
 	{
 		tr.refdef.blurFactor = 0.0f;
@@ -551,7 +591,7 @@ void RE_RenderScene( const refdef_t *fd ) {
 
 	parms.fovX = tr.refdef.fov_x;
 	parms.fovY = tr.refdef.fov_y;
-	
+
 	parms.stereoFrame = tr.refdef.stereoFrame;
 
 	VectorCopy( fd->vieworg, parms.or.origin );

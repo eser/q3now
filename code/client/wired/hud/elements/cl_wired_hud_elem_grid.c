@@ -51,6 +51,7 @@ void CG_ModernHUDElementGridRoutine(void* context)
 
 	modernhudCoord_t coord;
 	int index = 0;
+	// NOLINTNEXTLINE(bugprone-float-loop-counter,clang-analyzer-security.FloatLoopCounter) — viewport-pixel grid step; drift acceptable for visual output
 	for (float col = startCol; col <= (float)cls.glconfig.vidWidth; col += cellWidth, index++)
 	{
 		coord.named.x = col;
@@ -69,6 +70,7 @@ void CG_ModernHUDElementGridRoutine(void* context)
 	}
 
 	index = 0;
+	// NOLINTNEXTLINE(bugprone-float-loop-counter,clang-analyzer-security.FloatLoopCounter) — viewport-pixel grid step; drift acceptable for visual output
 	for (float row = startRow; row <= (float)cls.glconfig.vidHeight; row += cellHeight, index++)
 	{
 		coord.named.x = 0;

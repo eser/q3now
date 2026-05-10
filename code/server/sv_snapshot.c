@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "server.h"
 #include "../qcommon/wired/net/wn_public.h"  /* WN_DATAGRAM_MTU, WN_FRAG_PAYLOAD, sv_snapshotTransport */
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 
 /*
@@ -94,6 +96,7 @@ static void SV_EmitPacketEntities( const clientSnapshot_t *from, const clientSna
 
 		if ( newnum < oldnum ) {
 			// this is a new entity, send it from the baseline
+			// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — newnum < MAX_GENTITIES is guaranteed by snapshot-construction invariant; analyzer's path through the entity-iteration loop doesn't see the upstream bounds check
 			MSG_WriteDeltaEntity (msg, &sv.svEntities[newnum].baseline, newent, qtrue );
 			newindex++;
 			continue;
@@ -120,7 +123,7 @@ static void SV_WriteSnapshotToClient( const client_t *client, msg_t *msg ) {
 	// this is the snapshot we are creating
 	const clientSnapshot_t *frame = &client->frames[ client->wn_outgoing_sequence & PACKET_MASK ];
 
-	Com_Log( SEV_TRACE, LOG_CAT_SERVER, "[WiredNet] snapshot send: client=%s wn_outgoing=%u deltaMsg=%d msgAck=%d\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_server), "[WiredNet] snapshot send: client=%s wn_outgoing=%u deltaMsg=%d msgAck=%d\n",
 		client->name, client->wn_outgoing_sequence,
 		client->deltaMessage, client->messageAcknowledge );
 
@@ -134,7 +137,7 @@ static void SV_WriteSnapshotToClient( const client_t *client, msg_t *msg ) {
 	} else if ( client->wn_outgoing_sequence - client->deltaMessage >= (PACKET_BACKUP - 3) ) {
 		// client hasn't gotten a good message through in a long time
 		if ( client->deltaMessage != client->wn_outgoing_sequence - ( PACKET_BACKUP + 1 ) ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "[WiredNet] delta request from out of date packet REJECT: name=%s, oldMsgNum=%d wn_outgoing=%u delta=%d\n",
+			Com_Log( SEV_DEBUG, LOG_CH(ch_server), "[WiredNet] delta request from out of date packet REJECT: name=%s, oldMsgNum=%d wn_outgoing=%u delta=%d\n",
 				client->name,
 				client->deltaMessage + 1, client->wn_outgoing_sequence,
 				client->deltaMessage );
@@ -147,7 +150,7 @@ static void SV_WriteSnapshotToClient( const client_t *client, msg_t *msg ) {
 		lastframe = client->wn_outgoing_sequence - client->deltaMessage;
 		// we may refer on outdated frame
 		if ( oldframe->frameNum - svs.lastValidFrame < 0 ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "%s: Delta request from out of date frame.\n", client->name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_server), "%s: Delta request from out of date frame.\n", client->name );
 			oldframe = NULL;
 			lastframe = 0;
 		}
@@ -491,7 +494,7 @@ static void SV_BuildCommonSnapshot( void )
 			}
 	
 			if ( ent->s.number != num ) {
-				Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "FIXING ENT->S.NUMBER %i => %i\n", ent->s.number, num );
+				Com_Log( SEV_DEBUG, LOG_CH(ch_server), "FIXING ENT->S.NUMBER %i => %i\n", ent->s.number, num );
 				ent->s.number = num;
 			}
 
@@ -707,7 +710,7 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 					/* Reliable stream — QUIC handles fragmentation and retransmit. */
 					byte rbuf[8 + MAX_MSGLEN];
 					if ( frag_total > 8 ) {
-						Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: snapshot %d bytes needs %d frags (>8) for client %d — using reliable stream\n",
+						Com_Log( SEV_DEBUG, LOG_CH(ch_server), "QUIC: snapshot %d bytes needs %d frags (>8) for client %d — using reliable stream\n",
 							snap_len, frag_total, (int)(client - svs.clients) );
 					}
 					rbuf[0] = (byte)( srv_tick          & 0xFF );
@@ -722,7 +725,7 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 					transport->send_reliable( conn, CHAN_SNAPSHOT_RELIABLE, rbuf, 8 + snap_len );
 				} else {
 					/* App-level datagram fragmentation (default, mode 0). */
-					Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "QUIC: snapshot %d bytes → %d frags for client %d\n",
+					Com_Log( SEV_DEBUG, LOG_CH(ch_server), "QUIC: snapshot %d bytes → %d frags for client %d\n",
 						snap_len, frag_total, (int)(client - svs.clients) );
 					for ( int i = 0; i < frag_total; i++ ) {
 						int      offset      = i * WN_FRAG_PAYLOAD;
@@ -799,7 +802,7 @@ void SV_SendClientSnapshot( client_t *client ) {
 
 	// check for overflow
 	if ( msg.overflowed ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "WARNING: msg overflowed for %s\n", client->name );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "WARNING: msg overflowed for %s\n", client->name );
 		MSG_Clear( &msg );
 	}
 

@@ -55,23 +55,30 @@ extern	pmove_t		*pm;
 extern	pml_t		pml;
 
 // movement parameters
-extern	float	pm_stopspeed;
+extern	float	pm_stopSpeed;
 extern	float	pm_duckScale;
 extern	float	pm_swimScale;
 
 extern	float	pm_accelerate;
-extern	float	pm_airaccelerate;
-extern	float	pm_wateraccelerate;
-extern	float	pm_flyaccelerate;
+extern	float	pm_airAccelerate;
+extern	float	pm_waterAccelerate;
+extern	float	pm_flyAccelerate;
 
 extern	float	pm_friction;
-extern	float	pm_waterfriction;
-extern	float	pm_flightfriction;
+extern	float	pm_waterFriction;
+extern	float	pm_flightFriction;
+
+extern	float	pm_rampboost;
+extern	float	pm_rampboostMin;
+extern	float	pm_rampboostMax;
+extern	float	pm_stairBunnyHopMin;
+extern  int     pm_overbounceThreshold;
 
 extern	int		c_pmove;
 
 void PM_ClipVelocity( vec3_t in, vec3_t normal, vec3_t out, float overbounce );
 void PM_OneSidedClipVelocity( vec3_t in, vec3_t normal, vec3_t out, float overbounce );
+void PM_SlopeBoostClip( vec3_t in, vec3_t normal, vec3_t out, float boost, qboolean allowOverbounce );
 void PM_AddTouchEnt( int entityNum );
 void PM_AddEvent( int newEvent );
 

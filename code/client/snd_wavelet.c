@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define C0 0.4829629131445341
 #define C1 0.8365163037378079
 #define C2 0.2241438680420134
-#define C3 -0.1294095225512604
+#define C3 (-0.1294095225512604)
 
 void daub4(float b[], unsigned long n, int isign)
 {

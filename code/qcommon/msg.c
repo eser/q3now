@@ -21,6 +21,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "q_shared.h"
 #include "qcommon.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_network, "network" );
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 static int pcount[256];
 
@@ -217,6 +220,7 @@ static int MSG_ReadBits( msg_t *msg, int bits ) {
 	}
 
 	if ( sgn && bits < 32 ) {
+		// NOLINTNEXTLINE(clang-analyzer-core.BitwiseShift) — analyzer explores INT_MIN/INT_MAX paths; real call sites pass 8/16/32 or other small positives, so bits is in [1, 31] here
 		if ( value & ( 1 << ( bits - 1 ) ) ) {
 			value |= -1 ^ ( ( 1 << bits ) - 1 );
 		}
@@ -279,7 +283,7 @@ void MSG_WriteFloat( msg_t *sb, float f ) {
 void MSG_WriteString( msg_t *sb, const char *s ) {
 	int l = s ? strlen( s ) : 0;
 	if ( l >= MAX_STRING_CHARS ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "MSG_WriteString: MAX_STRING_CHARS\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "MSG_WriteString: MAX_STRING_CHARS\n" );
 		l = 0;
 	}
 
@@ -299,7 +303,7 @@ void MSG_WriteString( msg_t *sb, const char *s ) {
 void MSG_WriteBigString( msg_t *sb, const char *s ) {
 	int l = s ? strlen( s ) : 0;
 	if ( l >= BIG_INFO_STRING ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "MSG_WriteBigString: BIG_INFO_STRING\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "MSG_WriteBigString: BIG_INFO_STRING\n" );
 		l = 0;
 	}
 
@@ -333,6 +337,7 @@ void MSG_WriteAngle16( msg_t *sb, float f ) {
 
 // returns -1 if no more characters are available
 int MSG_ReadChar (msg_t *msg ) {
+	// NOLINTNEXTLINE(bugprone-signed-char-misuse) — MSG_ReadChar intentionally returns signed [-128,127]
 	int c = (signed char)MSG_ReadBits( msg, 8 );
 	if ( msg->readcount > msg->cursize ) {
 		c = -1;
@@ -392,16 +397,15 @@ const char *MSG_ReadString( msg_t *msg ) {
 		// translate all fmt spec to avoid crash bugs
 		if ( c == '%' ) {
 			c = '.';
-		} else
-		// don't allow higher ascii values
-		if ( c > 127 ) {
+		} else if ( c > 127 ) {
+			// don't allow higher ascii values
 			c = '.';
 		}
 		string[ l++ ] = c;
 	} while ( qtrue );
-	
+
 	string[ l ] = '\0';
-	
+
 	return string;
 }
 
@@ -419,16 +423,15 @@ const char *MSG_ReadBigString( msg_t *msg ) {
 		// translate all fmt spec to avoid crash bugs
 		if ( c == '%' ) {
 			c = '.';
-		} else
-		// don't allow higher ascii values
-		if ( c > 127 ) {
+		} else if ( c > 127 ) {
+			// don't allow higher ascii values
 			c = '.';
 		}
 		string[ l++ ] = c;
 	} while ( qtrue );
-	
+
 	string[ l ] = '\0';
-	
+
 	return string;
 }
 
@@ -446,16 +449,15 @@ const char *MSG_ReadStringLine( msg_t *msg ) {
 		// translate all fmt spec to avoid crash bugs
 		if ( c == '%' ) {
 			c = '.';
-		} else
-		// don't allow higher ascii values
-		if ( c > 127 ) {
+		} else if ( c > 127 ) {
+			// don't allow higher ascii values
 			c = '.';
 		}
 		string[ l++ ] = c;
 	} while ( qtrue );
-	
+
 	string[ l ] = '\0';
-	
+
 	return string;
 }
 
@@ -476,10 +478,8 @@ int MSG_ReadEntitynum( msg_t *msg ) {
 	const int num = MSG_ReadBits( msg, GENTITYNUM_BITS );
 	if ( msg->readcount > msg->cursize ) {
 		return -1;
-	} else {
-		return num;
 	}
-	
+	return num;
 }
 
 
@@ -499,7 +499,7 @@ int MSG_HashKey(const char *string, int maxlen) {
 
 #ifndef DEDICATED
 extern cvar_t *cl_shownet;
-#define	LOG(x) if( cl_shownet && cl_shownet->integer == 4 ) { Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s ", x ); };
+#define	LOG(x) if( cl_shownet && cl_shownet->integer == 4 ) { Com_Log( SEV_INFO, LOG_CH(ch_network), "%s ", x ); };
 #else
 #define	LOG(x)
 #endif
@@ -644,7 +644,7 @@ Prints out a table from the current statistics for copying to code
 void MSG_ReportChangeVectors_f( void ) {
 	for(int i=0;i<256;i++) {
 		if (pcount[i]) {
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%d used %d\n", i, pcount[i]);
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "%d used %d\n", i, pcount[i]);
 		}
 	}
 }
@@ -857,7 +857,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 		to->number = MAX_GENTITIES - 1;
 #ifndef DEDICATED
 		if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -1 ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%3i: #%-3i remove\n", msg->readcount, number );
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "%3i: #%-3i remove\n", msg->readcount, number );
 		}
 #endif
 		return;
@@ -878,7 +878,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 		// of erroring so a single bad frame does not tear down the whole
 		// demo playback (and cannot snowball into an ERR_FATAL via the
 		// "solid stream of ERR_DROP" escalation).
-		COM_WARN( LOG_CAT_SYSTEM, "invalid entityState field count %d (max %d), clamping\n",
+		COM_WARN( LOG_CH(ch_system), "invalid entityState field count %d (max %d), clamping\n",
 			lc, numFields );
 		if ( lc < 0 ) {
 			lc = 0;
@@ -895,7 +895,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 	// just print the delta records
 	if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -1 ) ) {
 		print = 1;
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%3i: #%-3i ", msg->readcount, to->number );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%3i: #%-3i ", msg->readcount, to->number );
 	} else {
 		print = 0;
 	}
@@ -924,13 +924,13 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 						trunc -= FLOAT_INT_BIAS;
 						*(float *)toF = trunc;
 						if ( print ) {
-							Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%i ", field->name, trunc );
+							Com_Log( SEV_INFO, LOG_CH(ch_network), "%s:%i ", field->name, trunc );
 						}
 					} else {
 						// full floating point value
 						*toF = MSG_ReadBits( msg, 32 );
 						if ( print ) {
-							Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%f ", field->name, *(float *)toF );
+							Com_Log( SEV_INFO, LOG_CH(ch_network), "%s:%f ", field->name, *(float *)toF );
 						}
 					}
 				}
@@ -941,7 +941,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 					// integer
 					*toF = MSG_ReadBits( msg, field->bits );
 					if ( print ) {
-						Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%i ", field->name, *toF );
+						Com_Log( SEV_INFO, LOG_CH(ch_network), "%s:%i ", field->name, *toF );
 					}
 				}
 			}
@@ -963,7 +963,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 		} else {
 			endBit = ( msg->readcount - 1 ) * 8 + msg->bit - GENTITYNUM_BITS;
 		}
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, " (%i bits)\n", endBit - startBit  );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), " (%i bits)\n", endBit - startBit  );
 	}
 }
 
@@ -1203,7 +1203,7 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 	// just print the delta records
 	if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -2 ) ) {
 		print = 1;
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%3i: playerstate ", msg->readcount );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%3i: playerstate ", msg->readcount );
 	} else {
 		print = 0;
 	}
@@ -1219,7 +1219,7 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 		// of erroring so a single bad frame does not tear down the whole
 		// demo playback (and cannot snowball into an ERR_FATAL via the
 		// "solid stream of ERR_DROP" escalation).
-		COM_WARN( LOG_CAT_SYSTEM, "invalid playerState field count %d (max %d), clamping\n",
+		COM_WARN( LOG_CH(ch_system), "invalid playerState field count %d (max %d), clamping\n",
 			lc, numFields );
 		if ( lc < 0 ) {
 			lc = 0;
@@ -1246,20 +1246,20 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 					trunc -= FLOAT_INT_BIAS;
 					*(float *)toF = trunc;
 					if ( print ) {
-						Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%i ", field->name, trunc );
+						Com_Log( SEV_INFO, LOG_CH(ch_network), "%s:%i ", field->name, trunc );
 					}
 				} else {
 					// full floating point value
 					*toF = MSG_ReadBits( msg, 32 );
 					if ( print ) {
-						Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%f ", field->name, *(float *)toF );
+						Com_Log( SEV_INFO, LOG_CH(ch_network), "%s:%f ", field->name, *(float *)toF );
 					}
 				}
 			} else {
 				// integer
 				*toF = MSG_ReadBits( msg, field->bits );
 				if ( print ) {
-					Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s:%i ", field->name, *toF );
+					Com_Log( SEV_INFO, LOG_CH(ch_network), "%s:%i ", field->name, *toF );
 				}
 			}
 		}
@@ -1327,7 +1327,7 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 		} else {
 			endBit = ( msg->readcount - 1 ) * 8 + msg->bit - GENTITYNUM_BITS;
 		}
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, " (%i bits)\n", endBit - startBit  );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), " (%i bits)\n", endBit - startBit  );
 	}
 }
 

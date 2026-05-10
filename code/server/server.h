@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/qcommon.h"
 #include "../qcommon/vm_local.h"
 #include "../game/g_public.h"
-#include "../game/bg_public.h"
+#include "../qcommon/wired/protocol.h"
 #include "sv_wired_rcon_lua.h"
 #include "sv_lua.h"
 #include "../qcommon/net_transport.h"

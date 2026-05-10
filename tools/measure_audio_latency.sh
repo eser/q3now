@@ -67,7 +67,7 @@ case "$PLATFORM" in
         echo "  1. Install BlackHole 2ch (or Loopback.app)."
         echo "  2. System Settings -> Sound -> Output: select BlackHole 2ch."
         echo "  3. Open Audacity -> set input device to BlackHole 2ch."
-        echo "  4. Hit record in Audacity, then trigger 'snd_test' in q3now."
+        echo "  4. Hit record in Audacity, then trigger 'snd_test' in wired."
         echo "  5. Stop recording, measure offset to first non-silent sample."
         echo ""
         echo "For the most accurate number, prefer Method A (hardware loopback)"

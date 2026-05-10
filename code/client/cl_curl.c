@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #ifdef USE_CURL
 #include "client.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 cvar_t *cl_cURLLib;
 
 #define ALLOWED_PROTOCOLS ( CURLPROTO_HTTP | CURLPROTO_HTTPS | CURLPROTO_FTP | CURLPROTO_FTPS )
@@ -72,13 +74,13 @@ static void *GPA(const char *str)
 	rv = Sys_LoadFunction(cURLLib, str);
 	if(!rv)
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Can't load symbol %s\n", str);
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Can't load symbol %s\n", str);
 		clc.cURLEnabled = qfalse;
 		return NULL;
 	}
 	else
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Loaded symbol %s (0x%p)\n", str, rv);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Loaded symbol %s (0x%p)\n", str, rv);
 		return rv;
 	}
 }
@@ -96,7 +98,7 @@ qboolean CL_cURL_Init( void )
 		return qtrue;
 
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Loading \"%s\"...", cl_cURLLib->string);
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Loading \"%s\"...", cl_cURLLib->string);
 	if( (cURLLib = Sys_LoadLibrary(cl_cURLLib->string)) == 0 )
 	{
 #ifdef _WIN32
@@ -146,10 +148,10 @@ qboolean CL_cURL_Init( void )
 	if(!clc.cURLEnabled)
 	{
 		CL_cURL_Shutdown();
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "FAIL One or more symbols not found\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "FAIL One or more symbols not found\n");
 		return qfalse;
 	}
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "OK\n");
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "OK\n");
 
 	return qtrue;
 #else
@@ -202,13 +204,13 @@ void CL_cURL_Cleanup(void)
 			result = qcurl_multi_remove_handle(clc.downloadCURLM,
 				clc.downloadCURL);
 			if(result != CURLM_OK) {
-				Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "qcurl_multi_remove_handle failed: %s\n", qcurl_multi_strerror(result));
+				Com_Log( SEV_DEBUG, LOG_CH(ch_client), "qcurl_multi_remove_handle failed: %s\n", qcurl_multi_strerror(result));
 			}
 			qcurl_easy_cleanup(clc.downloadCURL);
 		}
 		result = qcurl_multi_cleanup(clc.downloadCURLM);
 		if(result != CURLM_OK) {
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_cURL_Cleanup: qcurl_multi_cleanup failed: %s\n", qcurl_multi_strerror(result));
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_cURL_Cleanup: qcurl_multi_cleanup failed: %s\n", qcurl_multi_strerror(result));
 		}
 		clc.downloadCURLM = NULL;
 		clc.downloadCURL = NULL;
@@ -275,7 +277,7 @@ CURLcode qcurl_easy_setopt_warn(CURL *curl, CURLoption option, ...)
 	}
 
 	if(result != CURLE_OK) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "qcurl_easy_setopt failed: %s\n", qcurl_easy_strerror(result));
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "qcurl_easy_setopt failed: %s\n", qcurl_easy_strerror(result));
 	}
 	va_end(argp);
 
@@ -294,8 +296,8 @@ void CL_cURL_BeginDownload( const char *localName, const char *remoteURL )
 	CURLMcode result;
 
 	clc.cURLUsed = qtrue;
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "URL: %s\n", remoteURL);
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "***** CL_cURL_BeginDownload *****\n"
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "URL: %s\n", remoteURL);
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "***** CL_cURL_BeginDownload *****\n"
 		"Localname: %s\n"
 		"RemoteURL: %s\n"
 		"****************************\n", localName, remoteURL);
@@ -330,7 +332,7 @@ void CL_cURL_BeginDownload( const char *localName, const char *remoteURL )
 	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_TRANSFERTEXT, 0);
 	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_REFERER, va("ioQ3://%s",
 		NET_AdrToString(&clc.serverAddress)));
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_USERAGENT, Q3NOW_ENGINE_VERSION);
+	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_USERAGENT, WIRED_ENGINE_VERSION);
 	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_WRITEFUNCTION,
 		CL_cURL_CallbackWrite);
 	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_WRITEDATA, &clc.download);
@@ -543,7 +545,7 @@ Com_DL_Init
 qboolean Com_DL_Init( download_t *dl )
 {
 #ifdef USE_CURL_DLOPEN
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Loading \"%s\"...", cl_cURLLib->string );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Loading \"%s\"...", cl_cURLLib->string );
 	if( ( dl->func.lib = Sys_LoadLibrary( cl_cURLLib->string ) ) == NULL )
 	{
 #ifdef _WIN32
@@ -592,11 +594,11 @@ qboolean Com_DL_Init( download_t *dl )
 	if ( Sys_LoadFunctionErrors() )
 	{
 		Com_DL_Done( dl );
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "FAIL: One or more symbols not found\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "FAIL: One or more symbols not found\n" );
 		return qfalse;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "OK\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "OK\n" );
 
 	return qtrue;
 #else
@@ -745,7 +747,7 @@ static int Com_DL_CallbackProgress( void *data, double dltotal, double dlnow, do
 	{
 		if ( Key_IsDown( K_ESCAPE ) )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s: aborted\n", dl->Name );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "%s: aborted\n", dl->Name );
 			return -1;
 		}
 		Cvar_SetIntegerValue( "cl_downloadSize", dl->Size );
@@ -791,7 +793,7 @@ static size_t Com_DL_CallbackWrite( void *ptr, size_t size, size_t nmemb, void *
 	{
 		if ( !CL_ValidPakSignature( ptr, size*nmemb ) )
 		{
-			COM_WARN( LOG_CAT_CLIENT, "Com_DL_CallbackWrite(): invalid pak signature for %s.\n",
+			COM_WARN( LOG_CH(ch_client), "Com_DL_CallbackWrite(): invalid pak signature for %s.\n",
 				dl->Name );
 			return (size_t)-1;
 		}
@@ -842,7 +844,7 @@ static size_t Com_DL_HeaderCallback( void *ptr, size_t size, size_t nmemb, void 
 
 	if ( size*nmemb >= sizeof( header ) )
 	{
-		COM_ERROR( LOG_CAT_CLIENT, "Com_DL_HeaderCallback: header is too large." );
+		COM_ERROR( LOG_CH(ch_client), "Com_DL_HeaderCallback: header is too large." );
 		return (size_t)-1;
 	}
 
@@ -851,7 +853,7 @@ static size_t Com_DL_HeaderCallback( void *ptr, size_t size, size_t nmemb, void 
 	memcpy( header, ptr, size*nmemb+1 );
 	header[ size*nmemb ] = '\0';
 
-	//Com_Log( SEV_INFO, LOG_CAT_CLIENT, "h: %s\n--------------------------\n", header );
+	//Com_Log( SEV_INFO, LOG_CH(ch_client), "h: %s\n--------------------------\n", header );
 
 	s = (char*)stristr( header, "content-disposition:" );
 	if ( s )
@@ -884,7 +886,7 @@ static size_t Com_DL_HeaderCallback( void *ptr, size_t size, size_t nmemb, void 
 			// validate
 			if ( len < 5 || !stristr( name + len - 4, ".pk3" ) || !Com_DL_ValidFileName( name ) )
 			{
-				COM_ERROR( LOG_CAT_CLIENT, "Com_DL_HeaderCallback: bad file name '%s'\n", name );
+				COM_ERROR( LOG_CH(ch_client), "Com_DL_HeaderCallback: bad file name '%s'\n", name );
 				return (size_t)-1;
 			}
 
@@ -913,7 +915,7 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 
 	if ( Com_DL_InProgress( dl ) )
 	{
-		COM_WARN( LOG_CAT_CLIENT, " already downloading %s\n", dl->Name );
+		COM_WARN( LOG_CH(ch_client), " already downloading %s\n", dl->Name );
 		return qfalse;
 	}
 
@@ -921,14 +923,14 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 
 	if ( !Com_DL_Init( dl ) )
 	{
-		COM_WARN( LOG_CAT_CLIENT, "Error initializing cURL library\n" );
+		COM_WARN( LOG_CH(ch_client), "Error initializing cURL library\n" );
 		return qfalse;
 	}
 
 	dl->cURL = dl->func.easy_init();
 	if ( !dl->cURL )
 	{
-		COM_ERROR( LOG_CAT_CLIENT, "Com_DL_Begin: easy_init() failed\n" );
+		COM_ERROR( LOG_CH(ch_client), "Com_DL_Begin: easy_init() failed\n" );
 		Com_DL_Cleanup( dl );
 		return qfalse;
 	}
@@ -937,7 +939,7 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 		char *escapedName = dl->func.easy_escape( dl->cURL, localName, 0 );
 		if ( !escapedName )
 		{
-			COM_ERROR( LOG_CAT_CLIENT, "Com_DL_Begin: easy_escape() failed\n" );
+			COM_ERROR( LOG_CH(ch_client), "Com_DL_Begin: easy_escape() failed\n" );
 			Com_DL_Cleanup( dl );
 			return qfalse;
 		}
@@ -961,7 +963,7 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 		dl->func.free( escapedName );
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "URL: %s\n", dl->URL );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "URL: %s\n", dl->URL );
 
 	Q_strncpyz( dl->gameDir, FS_GetCurrentGameDir(), sizeof( dl->gameDir ) );
 
@@ -976,7 +978,7 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 	FS_StripExt( dl->Name, ".pk3" );
 	if ( !dl->Name[0] )
 	{
-		COM_WARN( LOG_CAT_CLIENT, " empty filename after extension strip.\n" );
+		COM_WARN( LOG_CH(ch_client), " empty filename after extension strip.\n" );
 		return qfalse;
 	}
 
@@ -990,7 +992,7 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 	dl->func.easy_setopt( dl->cURL, CURLOPT_TRANSFERTEXT, 0 );
 	//dl->func.easy_setopt( dl->cURL, CURLOPT_REFERER, "q3a://127.0.0.1" );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_REFERER, dl->URL );
-	dl->func.easy_setopt( dl->cURL, CURLOPT_USERAGENT, Q3NOW_ENGINE_VERSION );
+	dl->func.easy_setopt( dl->cURL, CURLOPT_USERAGENT, WIRED_ENGINE_VERSION );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_WRITEFUNCTION, Com_DL_CallbackWrite );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_WRITEDATA, dl );
 	if ( dl->headerCheck )
@@ -1024,14 +1026,14 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 	if ( !dl->cURLM )
 	{
 		Com_DL_Cleanup( dl );
-		COM_ERROR( LOG_CAT_CLIENT, "Com_DL_Begin: multi_init() failed\n" );
+		COM_ERROR( LOG_CH(ch_client), "Com_DL_Begin: multi_init() failed\n" );
 		return qfalse;
 	}
 
 	if ( dl->func.multi_add_handle( dl->cURLM, dl->cURL ) != CURLM_OK )
 	{
 		Com_DL_Cleanup( dl );
-		COM_ERROR( LOG_CAT_CLIENT, "Com_DL_Begin: multi_add_handle() failed\n" );
+		COM_ERROR( LOG_CH(ch_client), "Com_DL_Begin: multi_add_handle() failed\n" );
 		return qfalse;
 	}
 
@@ -1112,7 +1114,7 @@ qboolean Com_DL_Perform( download_t *dl )
 
 		Com_DL_Cleanup( dl );
 		FS_Reload(); //clc.downloadRestart = qtrue;
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, S_COLOR_GREEN "%s downloaded\n", name );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), S_COLOR_GREEN "%s downloaded\n", name );
 		if ( autoDownload )
 		{
 			if ( cls.state == CA_CONNECTED && !clc.demoplaying )
@@ -1132,7 +1134,7 @@ qboolean Com_DL_Perform( download_t *dl )
 	{
 		qboolean autoDownload = dl->mapAutoDownload;
 		dl->func.easy_getinfo( msg->easy_handle, CURLINFO_RESPONSE_CODE, &code );
-		COM_ERROR( LOG_CAT_CLIENT, "Download Error: %s Code: %ld\n",
+		COM_ERROR( LOG_CH(ch_client), "Download Error: %s Code: %ld\n",
 			dl->func.easy_strerror( msg->data.result ), code );
 		strcpy( name, dl->TempName );
 		Com_DL_Cleanup( dl );

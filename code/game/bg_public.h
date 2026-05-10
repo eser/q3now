@@ -37,15 +37,27 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define	GAME_VERSION		"q3now-1"
 
+// Per-game identity advertised to the master server. Game/cgame populate the
+// engine cvars sv_gamename / sv_heartbeat / cl_gamename from these at init;
+// engine code reads only the cvars and never includes this header.
+#define	GAMENAME_FOR_MASTER		"q3now"
+#define	HEARTBEAT_FOR_MASTER	"QuakeArena-1"
+
 // feature flags — single source of truth for all modules
 #include "../qcommon/q_feats.h"
+
+// Engine ↔ game protocol-shared definitions live in wired/protocol.h. That
+// file owns persEnum_t, statIndex_t, weapon_t, team_t, entityType_t (and
+// pending: gitem_t, gametype_t, CS_BOTDIRECTIVES…). bg_public.h pulls them
+// in here so game-side code keeps working unchanged.
+#include "../qcommon/wired/protocol.h"
 
 #define	DEFAULT_GRAVITY				800
 #define	DEFAULT_MOVESPEED_PLAYER	320
 #define	DEFAULT_MOVESPEED_SPECTATOR	480
 #define	JUMP_VELOCITY				270
-#define WALLJUMP_BOOST      		240
-#define MAX_WALLJUMPS       		3
+#define WALLJUMP_BOOST      		130
+#define MAX_WALLJUMPS       		1
 
 #define	QUAD_FACTOR					4
 #define MAX_HEALTH					100
@@ -128,99 +140,9 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 // from the server to all connected clients.
 //
 
-// CS_SERVERINFO and CS_SYSTEMINFO are defined in q_shared.h
-#define	CS_MUSIC				2
-#define	CS_MESSAGE				3		// from the map worldspawn's message field
-#define	CS_MOTD					4		// g_motd string for server message of the day
-#define	CS_WARMUP				5		// server time when the match will be restarted
-#define	CS_SCORES1				6
-#define	CS_SCORES2				7
-#define CS_VOTE_TIME			8
-#define CS_VOTE_STRING			9
-#define	CS_VOTE_YES				10
-#define	CS_VOTE_NO				11
+// CS_* configstring slot indices live in wired/protocol.h.
 
-#define CS_TEAMVOTE_TIME		12
-#define CS_TEAMVOTE_STRING		14
-#define	CS_TEAMVOTE_YES			16
-#define	CS_TEAMVOTE_NO			18
-
-#define	CS_GAME_VERSION			20
-#define	CS_LEVEL_START_TIME		21		// so the timer only shows the current level
-#define	CS_INTERMISSION			22		// when 1, scorelimit/timelimit has been hit and intermission will start in a second or two
-#define CS_FLAGSTATUS			23		// string indicating flag status in CTF
-#define CS_SHADERSTATE			24
-#define CS_BOTINFO				25
-
-#define	CS_ITEMS				27		// string of 0's and 1's that tell which items are present
-
-#define	CS_MODELS				32
-#define	CS_SOUNDS				(CS_MODELS+MAX_MODELS)
-#define	CS_PLAYERS				(CS_SOUNDS+MAX_SOUNDS)
-#define CS_BOTDIRECTIVES		(CS_PLAYERS+MAX_CLIENTS)	// one slot per client; server→client directive display
-#define CS_LOCATIONS			(CS_BOTDIRECTIVES+MAX_CLIENTS)
-#define CS_PARTICLES			(CS_LOCATIONS+MAX_LOCATIONS)
-
-#define CS_MAX					(CS_PARTICLES+MAX_LOCATIONS)
-
-#if (CS_MAX) > MAX_CONFIGSTRINGS
-#error overflow: (CS_MAX) > MAX_CONFIGSTRINGS
-#endif
-
-#if FEAT_SCREENSHOT_TOOLS
-#define CS_STOPTIME				(MAX_CONFIGSTRINGS-1)	// spectator bullet-time freeze timestamp
-#endif
-
-#if FEAT_GAME_MEETING
-#define CS_MEETING				(CS_MAX+0)				// "1" while pre-match lobby is active
-#define CS_CLIENTS_READY		(CS_MAX+1)				// packed bitmask of ready players
-#if (CS_CLIENTS_READY) >= MAX_CONFIGSTRINGS
-#error overflow: CS_CLIENTS_READY >= MAX_CONFIGSTRINGS
-#endif
-#endif
-
-// Lightstyle pattern strings (game → renderer channel).
-// 64 slots: slot i = style i, covering styles 0-63.
-//   Styles  0-10: vanilla Q1 animated pattern strings (e.g. "mmnmmommommnonmmonqnmmo")
-//   Styles 11-31: "m" (constant baseline, full brightness)
-//   Styles 32-63: "" (off) or "m" (on) for trigger-controlled switchable lights
-// Value stored as a pattern string; renderer animates at 10Hz from character sequence.
-#define CS_LIGHTSTYLES		(CS_MAX+2)
-#define CS_MAX_LIGHTSTYLES	64
-#define LIGHTSTYLE_PATTERN_MAX	64
-#if (CS_LIGHTSTYLES + CS_MAX_LIGHTSTYLES - 1) >= MAX_CONFIGSTRINGS
-#error overflow: CS_LIGHTSTYLES range exceeds MAX_CONFIGSTRINGS
-#endif
-
-typedef enum {
-	GT_DEATHMATCH,		// deathmatch
-	GT_DUEL,			// one on one tournament
-
-    GT_KINGOFTHEHILL,
-    GT_LASTMANSTANDING,
-
-    //-- team games go after this --
-
-	GT_TDM,			// team deathmatch
-	GT_CTF,				// capture the flag
-	GT_1FCTF,
-	GT_OBELISK,
-	GT_HARVESTER,
-#if FEAT_FREEZETAG
-	GT_FREEZETAG,
-#endif
-	GT_MAX_GAME_TYPE
-} gametype_t;
-
-// Gametype metadata — indexed by gametype_t
-typedef struct ggametype_s {
-	char		*name;
-	char		*shortname;
-	char		**parseTokens;		// NULL-terminated token list for arena/BSP matching
-	char		*hudToken;			// ModernHUD visibility token (e.g. "gt_ffa"), "" if none
-} ggametype_t;
-
-extern	ggametype_t	bg_gametypelist[];
+// gametype_t, GF_CAMPAIGN, ggametype_t, bg_gametypelist[] live in wired/protocol.h.
 
 int			BG_GametypeBits( const char *token );		// single token → bitmask of matching gametypes
 int			BG_GametypeForToken( const char *token );	// single token → gametype_t, or -1 if not found
@@ -239,20 +161,10 @@ movement on the server game.
 ===================================================================================
 */
 
-typedef enum {
-	PM_NORMAL,		// can accelerate and turn
-	PM_NOCLIP,		// noclip movement
-	PM_SPECTATOR,	// still run into walls
-	PM_DEAD,		// no acceleration or turning, but free falling
-	PM_FREEZE,		// stuck in place with no control
-	PM_INTERMISSION,
-#if FEAT_GAME_MEETING
-	PM_MEETING,		// frozen in pre-match lobby until all players ready
-#endif
-} pmtype_t;
+// pmtype_t lives in wired/protocol.h.
 
 typedef enum {
-	WEAPON_READY, 
+	WEAPON_READY,
 	WEAPON_RAISING,
 	WEAPON_DROPPING,
 	WEAPON_FIRING
@@ -282,7 +194,10 @@ typedef enum {
 #define WATERLEVEL_SUBMERGED	3 	// fully underwater (max possible waterlevel)
 
 #define	MAXTOUCH	32
-typedef struct {
+// Tag name pmove_s lets wired/protocol.h forward-declare the type for the
+// gattack_t alt-fire callback signatures without pulling pmove_t's full
+// definition into the engine-side header.
+typedef struct pmove_s {
 	// state (in / out)
 	playerState_t	*ps;
 
@@ -342,30 +257,7 @@ extern float	pm_clientrespawndelay;
 //===================================================================================
 
 
-// player_state->stats[] indexes
-// NOTE: may not have more than 16
-typedef enum {
-	STAT_HEALTH,					// 16 bit fields
-	STAT_ARMOR,
-    STAT_ARMORCLASS,
-	STAT_WEAPONS,
-	STAT_HOLDABLE_ITEM,				// deprecated: single-slot index (kept for bot AI compat)
-	STAT_HOLDABLE_BITS,				// bitmask: bit N set means player owns HI_* type N
-	STAT_DEAD_YAW,					// look this direction when dead (FIXME: get rid of?)
-	STAT_CLIENTS_READY,				// bit mask of clients wishing to exit the intermission (FIXME: configstring?)
-
-    STAT_JUMPTIME,
-    STAT_RAILTIME,                  // PM: Added for allowchange
-
-    STAT_WALLJUMPS,
-#if FEAT_FREEZETAG
-    STAT_FROZENSTATE,               // 0=normal, 1=frozen, 2=thawing (7A)
-#endif
-    STAT_CAMPER,                    // 0-255: camping punishment darkness level (11C)
-#if FEAT_MOVEMENT_KEYS
-    STAT_KEYS                       // bitmask of movement keys (spectator follow only)
-#endif
-} statIndex_t;
+// statIndex_t (player_state->stats[] indexes) lives in wired/protocol.h.
 
 #if FEAT_FREEZETAG
 #define FROZENSTATE_NORMAL   0
@@ -387,35 +279,7 @@ typedef enum {
 #endif
 
 
-// player_state->persistant[] indexes
-// these fields are the only part of player_state that isn't
-// cleared on respawn
-// NOTE: may not have more than 16
-typedef enum {
-	PERS_SCORE,						// !!! MUST NOT CHANGE, SERVER AND GAME BOTH REFERENCE !!!
-	PERS_HITS,						// total points damage inflicted so damage beeps can sound on change
-	PERS_RANK,						// player rank or team rank
-	PERS_TEAM,						// player team
-	PERS_SPAWN_COUNT,				// incremented every respawn
-	PERS_PLAYEREVENTS,				// 16 bits that can be flipped for events
-	PERS_LAST_ATTACKER,				// clientnum of last damage inflicter
-	PERS_KILLED,					// count of the number of times you died
-	// player awards tracking
-	PERS_IMPRESSIVE_COUNT,			// two railgun hits in a row
-	PERS_EXCELLENT_COUNT,			// two successive kills in a short amount of time
-	PERS_DEFEND_COUNT,				// defend awards
-	PERS_ASSIST_COUNT,				// assist awards
-	PERS_GAUNTLET_FRAG_COUNT,		// kills with the guantlet
-	PERS_CAPTURES,					// captures
-	PERS_KILLING_SPREE_COUNT,		// 5-kill streaks
-	PERS_RAMPAGE_COUNT,				// 10-kill streaks
-	PERS_MASSACRE_COUNT,			// 15-kill streaks
-	PERS_UNSTOPPABLE_COUNT,			// 20-kill streaks
-	// observer/web stats (synced each frame by ClientEndFrame)
-	PERS_TOTAL_SHOTS,				// total shots fired across all weapons
-	PERS_TOTAL_HITS,				// total hits across all weapons
-	PERS_TOTAL_DAMAGE,				// total damage dealt
-} persEnum_t;
+// persEnum_t (player_state->persistant[] indexes) lives in wired/protocol.h.
 
 
 // entityState_t->eFlags
@@ -451,61 +315,12 @@ typedef enum {
 #define	EF_AWARD_ASSIST		0x00200000		// draw a assist sprite
 #define EF_AWARD_DENIED		0x00400000		// denied
 
-// NOTE: may not have more than 16
-typedef enum {
-	PW_NONE,
-
-	PW_QUAD,
-	PW_BERSERK,
-	PW_BATTLESUIT,
-	PW_HASTE,
-	PW_INVIS,
-	PW_REGEN,
-	PW_FLIGHT,
-	PW_DEFLECTOR,
-
-	PW_REDFLAG,
-	PW_BLUEFLAG,
-	PW_NEUTRALFLAG,
-
-    PW_KING,
-
-	PW_NUM_POWERUPS
-
-} powerup_t;
-
-typedef enum {
-	HI_NONE,
-
-	HI_TELEPORTER,
-	HI_MEDKIT,
-	HI_KAMIKAZE,
-	HI_PORTAL,
-	HI_DEFLECTOR,
-
-	HI_KEY_GOLD,
-	HI_KEY_SILVER,
-
-	HI_NUM_HOLDABLE
-} holdable_t;
+// powerup_t and holdable_t live in wired/protocol.h.
 
 #define BG_HOLDABLE_BIT(h) (1 << (h))
 
 
-typedef enum {
-	WP_NONE,
-
-	WP_GAUNTLET,
-	WP_MACHINEGUN,
-	WP_SHOTGUN,
-	WP_GRENADE_LAUNCHER,
-	WP_ROCKET_LAUNCHER,
-	WP_LIGHTNING_GUN,
-	WP_RAILGUN,
-	WP_PLASMA_RIFLE,
-
-	WP_NUM_WEAPONS
-} weapon_t;
+// weapon_t lives in wired/protocol.h.
 
 typedef enum {
     ARM_NONE,
@@ -753,18 +568,7 @@ typedef struct animation_s {
 #define	ANIM_TOGGLEBIT		128
 
 
-typedef enum {
-	TEAM_FREE,
-	TEAM_RED,
-	TEAM_BLUE,
-	TEAM_SPECTATOR,
-	TEAM_4,
-	TEAM_5,
-	TEAM_6,
-	TEAM_7,
-
-	TEAM_NUM_TEAMS
-} team_t;
+// team_t lives in wired/protocol.h.
 
 // Time between location updates
 #define TEAM_LOCATION_UPDATE_TIME		1000
@@ -775,7 +579,7 @@ typedef enum {
 //team task
 typedef enum {
 	TEAMTASK_NONE,
-	TEAMTASK_OFFENSE, 
+	TEAMTASK_OFFENSE,
 	TEAMTASK_DEFENSE,
 	TEAMTASK_PATROL,
 	TEAMTASK_FOLLOW,
@@ -784,144 +588,15 @@ typedef enum {
 	TEAMTASK_CAMP
 } teamtask_t;
 
-// means of death
-typedef enum {
-	MOD_UNKNOWN,
-	MOD_SHOTGUN,
-	MOD_GAUNTLET,
-	MOD_MACHINEGUN,
-	MOD_GRENADE,
-	MOD_GRENADE_SPLASH,
-	MOD_ROCKET,
-	MOD_ROCKET_SPLASH,
-	MOD_PLASMA,
-	MOD_RAILGUN,
-	MOD_LIGHTNING,
-// eser - lightning discharge
-    MOD_LIGHTNING_DISCHARGE,
-// eser - lightning discharge
-	// alt-fire means of death
-	MOD_GAUNTLET_LUNGE,
-	MOD_MACHINEGUN_BURST,
-	MOD_SHOTGUN_DOUBLE_BLAST,
-	MOD_ROCKET_MORTAR,
-	MOD_ROCKET_MORTAR_SPLASH,
-	MOD_LIGHTNING_CHAIN_ARC,
-	MOD_WATER,
-	MOD_SLIME,
-	MOD_LAVA,
-	MOD_CRUSH,
-	MOD_TELEFRAG,
-	MOD_FALLING,
-	MOD_SUICIDE,
-	MOD_TARGET_LASER,
-	MOD_TRIGGER_HURT,
-	MOD_KAMIKAZE,
-	MOD_GRAPPLE,
-	MOD_LAVABALL,   /* Q1 misc_fireball projectile */
-	MOD_NAIL        /* Q1 trap_spikeshooter spike/superspike/laser */
-} meansOfDeath_t;
-
-typedef enum {
-	PROJ_NONE,        /* default / generic explosion fallback */
-	PROJ_ROCKET,      /* rocket launcher missile */
-	PROJ_GRENADE,     /* grenade launcher projectile */
-	PROJ_PLASMA,      /* plasma rifle bolt */
-	PROJ_SPIKE,       /* Q1 nail/spike */
-	PROJ_LASER,       /* Q1 enforcer laser */
-	PROJ_LAVABALL,    /* Q1 fireball/lavaball */
-	PROJ_SHOTGUN,     /* shotgun pellet impact (hitscan direct caller) */
-	PROJ_MACHINEGUN,  /* machinegun bullet impact (hitscan direct caller) */
-	PROJ_RAILGUN,     /* railgun slug impact (hitscan direct caller) */
-	PROJ_NUM_TYPES
-} projectileType_t;
-
-
-//---------------------------------------------------------
-
-const char *BG_ModShortName( meansOfDeath_t mod );
+// meansOfDeath_t, projectileType_t, BG_ModShortName live in wired/protocol.h.
 
 float BG_GetArmorProtection( int armorClass );
 int BG_GetEffectiveHealth( int health, int armorClass, int armor );
 void BG_GetColorForAmount( int amount, vec4_t hcolor );
 
-// gitem_t->type
-typedef enum {
-	IT_BAD,
-	IT_WEAPON,				// EFX: rotate + upscale + minlight
-	IT_AMMO,				// EFX: rotate
-	IT_ARMOR,				// EFX: rotate + minlight
-	IT_HEALTH,				// EFX: static external sphere + rotating internal
-	IT_POWERUP,				// instant on, timer based
-							// EFX: rotate + external ring that rotates
-	IT_HOLDABLE,			// single use, holdable item
-							// EFX: rotate + bob
-	IT_TEAM
-} itemType_t;
+// itemType_t, gitem_t, bg_itemlist[], bg_numItems live in wired/protocol.h.
 
-#define MAX_ITEM_MODELS     4
-
-typedef struct gitem_s {
-    char		*classname;	// spawning name
-	char		*pickup_sound;
-	char		*world_model[MAX_ITEM_MODELS];
-	float		q1OriginZOffset;	// Z added to entity origin when the item came from a Q1 BSP
-
-	char		*icon;
-	char		*pickup_name;	// for printing on pickup
-
-	int			quantity;		// for ammo how much, or duration of powerup
-	itemType_t  giType;			// IT_* flags
-
-	int			giTag;
-
-	char		*precaches;		// string of all models and images this item will use
-	char		*sounds;		// string of all sounds this item will use
-} gitem_t;
-
-// included in both the game dll and the client
-extern	gitem_t	bg_itemlist[];
-extern	int		bg_numItems;
-
-// Attack types — each weapon references one or two of these
-typedef enum {
-	ATT_NONE,
-
-	ATT_GAUNTLET_PRIMARY,
-	ATT_GAUNTLET_LUNGE,
-	ATT_MACHINEGUN_PRIMARY,
-	ATT_MACHINEGUN_BURST,
-	ATT_SHOTGUN_PRIMARY,
-	ATT_SHOTGUN_DOUBLE_BLAST,
-	ATT_GRENADE_LAUNCHER_PRIMARY,
-	ATT_ROCKET_LAUNCHER_PRIMARY,
-	ATT_ROCKET_LAUNCHER_MORTAR,
-	ATT_LIGHTNING_GUN_PRIMARY,
-	ATT_LIGHTNING_GUN_CHAIN_ARC,
-	ATT_RAILGUN_PRIMARY,
-	ATT_PLASMA_RIFLE_PRIMARY,
-
-	ATT_NUM_ATTACKS
-} attackType_t;
-
-typedef struct gattack_s {
-	char        *name;
-	char         shortname[16];  // Lua bot shortname (e.g. "lg1", "rl2")
-	int			weapon;
-	float       maxDamageDistance;
-	qboolean    armorPiercing;
-	float       knockbackScale;
-	float       selfKnockbackScale;
-	float       recoilKick;
-	int         reloadTime;
-	int         meansOfDeath;        // MOD_ value for direct hit kills
-	int         splashMeansOfDeath;  // MOD_ value for splash kills (0 if no splash)
-
-	// Alt-fire callbacks (NULL = use default fire behavior)
-	qboolean    (*onAltFireStart)(pmove_t *pm);    // called on initial alt-fire press; return qtrue if handled
-	qboolean    (*onAltFireThink)(pmove_t *pm);    // called each frame during alt-fire; return qtrue if handled
-	void        (*onAltFireRelease)(pmove_t *pm);  // called when alt-fire released or cancelled
-} gattack_t;
+// attackType_t and gattack_t live in wired/protocol.h.
 
 // MG burst alt-fire callbacks (implemented in bg_pmove.c)
 qboolean PM_MG_Burst_Start( pmove_t *pm );
@@ -950,34 +625,7 @@ qboolean PM_LG_ChainArc_Start( pmove_t *pm );
 qboolean PM_LG_ChainArc_Think( pmove_t *pm );
 void     PM_LG_ChainArc_Release( pmove_t *pm );
 
-extern	gattack_t	bg_attacklist[];
-int BG_AttackByShortname( const char *shortname );  // returns ATT_NONE if not found
-
-// Weapons
-typedef struct gweapon_s {
-    char        *name;
-    char        *shortname;
-
-    vec_t       *color;
-    qboolean    switchOnCycle;
-    qboolean    switchOnOutOfAmmo;
-
-    qboolean    tossOnDeath;
-
-    int         ammoBox;
-    int         minAmmunition;
-    int         maxAmmunition;
-
-    qboolean    spawnWeapon;
-    int         spawnAmmunition;
-
-    int         attack;         // attackType_t index into bg_attacklist[]
-    int         attackAlt;      // ATT_NONE if no alt-fire
-
-    float       weight;
-} gweapon_t;
-
-extern	gweapon_t	bg_weaponlist[];
+// bg_attacklist[], BG_AttackByShortname, gweapon_t, bg_weaponlist[] live in wired/protocol.h.
 
 gitem_t	*BG_FindItem( const char *pickupName );
 gitem_t	*BG_FindItemForWeapon( weapon_t weapon );
@@ -989,38 +637,10 @@ qboolean BG_HoldableIsSelectable( holdable_t h );
 qboolean	BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const playerState_t *ps );
 
 
-// content masks
-#define	MASK_ALL				(-1)
-#define	MASK_SOLID				(CONTENTS_SOLID)
-#define	MASK_PLAYERSOLID		(CONTENTS_SOLID|CONTENTS_PLAYERCLIP|CONTENTS_BODY)
-#define	MASK_DEADSOLID			(CONTENTS_SOLID|CONTENTS_PLAYERCLIP)
-#define	MASK_WATER				(CONTENTS_WATER|CONTENTS_LAVA|CONTENTS_SLIME)
-#define	MASK_OPAQUE				(CONTENTS_SOLID|CONTENTS_SLIME|CONTENTS_LAVA)
-#define	MASK_SHOT				(CONTENTS_SOLID|CONTENTS_BODY|CONTENTS_CORPSE)
+// MASK_* content masks live in wired/protocol.h.
 
 
-//
-// entityState_t->eType
-//
-typedef enum {
-	ET_GENERAL,
-	ET_PLAYER,
-	ET_ITEM,
-	ET_MISSILE,
-	ET_MOVER,
-	ET_BEAM,
-	ET_PORTAL,
-	ET_SPEAKER,
-	ET_PUSH_TRIGGER,
-	ET_TELEPORT_TRIGGER,
-	ET_INVISIBLE,
-	ET_GRAPPLE,				// grapple hooked on wall
-	ET_TEAM,
-
-	ET_EVENTS				// any of the EV_* events can be added freestanding
-							// by setting eType to ET_EVENTS + eventNum
-							// this avoids having to set eFlags and eventNum
-} entityType_t;
+// entityType_t (entityState_t->eType) lives in wired/protocol.h.
 
 
 

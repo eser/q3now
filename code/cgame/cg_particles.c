@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cg_particles.c  
 
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 //#define WOLF_PARTICLES
 
@@ -173,6 +175,7 @@ void CG_ClearParticles (void)
 		particles[i].next = &particles[i+1];
 		particles[i].type = 0;
 	}
+	// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — cl_numparticles is initialized to MAX_PARTICLES at file scope and is never reassigned; the analyzer can't see the constant init
 	particles[cl_numparticles-1].next = NULL;
 
 	oldtime = cg.time;
@@ -830,7 +833,7 @@ void CG_AddParticleToScene (cparticle_t *p, vec3_t org, float alpha)
 	
 	if (!p->pshader) {
 // (SA) temp commented out for DM
-//		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_AddParticleToScene type %d p->pshader == ZERO\n", p->type);
+//		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_AddParticleToScene type %d p->pshader == ZERO\n", p->type);
 		return;
 	}
 
@@ -994,7 +997,7 @@ void CG_ParticleSnowFlurry (qhandle_t pshader, centity_t *cent)
 	qboolean turb = qtrue;
 
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_ParticleSnowFlurry pshader == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_ParticleSnowFlurry pshader == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -1057,7 +1060,7 @@ void CG_ParticleSnow (qhandle_t pshader, vec3_t origin, vec3_t origin2, int turb
 	cparticle_t	*p;
 
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_ParticleSnow pshader == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_ParticleSnow pshader == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -1115,7 +1118,7 @@ void CG_ParticleBubble (qhandle_t pshader, vec3_t origin, vec3_t origin2, int tu
 	float		randsize;
 
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_ParticleSnow pshader == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_ParticleSnow pshader == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -1178,7 +1181,7 @@ void CG_ParticleSmoke (qhandle_t pshader, centity_t *cent)
 	cparticle_t	*p;
 
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_ParticleSmoke == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_ParticleSmoke == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -1427,7 +1430,7 @@ void CG_ParticleImpactSmokePuff (qhandle_t pshader, vec3_t origin)
 	cparticle_t	*p;
 
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_ParticleImpactSmokePuff pshader == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_ParticleImpactSmokePuff pshader == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -1467,7 +1470,7 @@ void CG_Particle_Bleed (qhandle_t pshader, vec3_t start, vec3_t dir, int fleshEn
 	cparticle_t	*p;
 
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_Particle_Bleed pshader == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_Particle_Bleed pshader == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -1528,7 +1531,7 @@ void CG_Particle_OilParticle (qhandle_t pshader, centity_t *cent)
 	ratio =(float)1 - ((float)time / (float)time2);
 
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_Particle_OilParticle == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_Particle_OilParticle == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -1581,7 +1584,7 @@ void CG_Particle_OilSlick (qhandle_t pshader, centity_t *cent)
 	cparticle_t	*p;
 	
   	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_Particle_OilSlick == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_Particle_OilSlick == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -1650,7 +1653,7 @@ void CG_OilSlickRemove (centity_t *cent)
 	id = 1.0f;
 
 	if (!id)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_OilSlickRevove NULL id\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_OilSlickRevove NULL id\n");
 
 	for (p=active_particles ; p ; p=next)
 	{
@@ -1724,7 +1727,7 @@ void CG_BloodPool (localEntity_t *le, qhandle_t pshader, trace_t *tr)
 	float		rndSize;
 	
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_BloodPool pshader == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_BloodPool pshader == ZERO!\n");
 
 	if (!free_particles)
 		return;
@@ -2003,7 +2006,7 @@ void CG_ParticleMisc (qhandle_t pshader, vec3_t origin, int size, int duration, 
 	cparticle_t	*p;
 
 	if (!pshader)
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_ParticleImpactSmokePuff pshader == ZERO!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_ParticleImpactSmokePuff pshader == ZERO!\n");
 
 	if (!free_particles)
 		return;

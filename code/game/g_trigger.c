@@ -21,6 +21,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 void Q3_InitTrigger( gentity_t *self ) {
@@ -97,7 +99,7 @@ void SP_q3_trigger_multiple( gentity_t *ent ) {
 
 	if ( ent->random >= ent->wait && ent->wait >= 0 ) {
 		ent->random = ent->wait - FRAMETIME;
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "trigger_multiple has random >= wait\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "trigger_multiple has random >= wait\n" );
 	}
 
 	ent->touch = Q3_Touch_Multi;
@@ -290,7 +292,7 @@ void Q3_trigger_teleporter_touch (gentity_t *self, gentity_t *other, trace_t *tr
 
 	dest = 	G_PickTarget( self->target );
 	if (!dest) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Couldn't find teleporter destination\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Couldn't find teleporter destination\n");
 		return;
 	}
 
@@ -324,9 +326,8 @@ void G_SetTeleporterDestinations(void) {
 			if (unique_target) {
 				unique = qfalse;
 				break;
-			} else {
-				unique_target = target;
 			}
+			unique_target = target;
 		}
 
 		if (unique_target && unique) {
@@ -503,7 +504,7 @@ void SP_q3_func_timer( gentity_t *self ) {
 
 	if ( self->random >= self->wait ) {
 		self->random = self->wait - FRAMETIME;
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "func_timer at %s has random >= wait\n", vtos( self->s.origin ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "func_timer at %s has random >= wait\n", vtos( self->s.origin ) );
 	}
 
 	if ( self->spawnflags & 1 ) {

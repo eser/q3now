@@ -24,6 +24,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cm_local.h"
 #include "cm_patch.h"
 #include "maps/bsp.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_collision, "collision" );
+LOG_DECLARE_CHANNEL( ch_loading, "loading" );
 
 #ifdef BSPC
 
@@ -292,7 +295,7 @@ static void CMod_LoadBrushes( void ) {
 	}
 
 	if ( nDropped > 0 )
-		Com_Log( SEV_INFO, LOG_CAT_LOADING,
+		Com_Log( SEV_INFO, LOG_CH(ch_loading),
 		         "CM_LoadBrushes: dropped %d degenerate brushes (inverted bounds)\n", nDropped );
 }
 
@@ -686,7 +689,7 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 		return 0;
 	}
 	if ( numIndexes % 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_COLLISION, "CM_RegisterTriangleSoup: %s numIndexes %i not a multiple of 3\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_collision), "CM_RegisterTriangleSoup: %s numIndexes %i not a multiple of 3\n",
 			name, numIndexes );
 		return 0;
 	}
@@ -706,7 +709,7 @@ clipHandle_t CM_RegisterTriangleSoup( const char *name, const vec3_t *vertexes,
 		}
 	}
 	if ( slot < 0 ) {
-		Com_Log( SEV_INFO, LOG_CAT_COLLISION, "CM_RegisterTriangleSoup: %s exceeds MAX_TRI_SOUPS (%i)\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_collision), "CM_RegisterTriangleSoup: %s exceeds MAX_TRI_SOUPS (%i)\n",
 			name, MAX_TRI_SOUPS );
 		return 0;
 	}
@@ -812,12 +815,15 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 	const byte *base = buf.b;
 
 	if ( fileSize < 16 + 27 * 4 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s truncated header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "CM_LoadIQMGeometry: %s truncated header\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
-	if ( strncmp( (const char *)base, IQM_MAGIC_STRING, 16 ) ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s wrong magic\n", name );
+	// strncmp with the 16-byte magic comparison is bounded by the fileSize check above;
+	// IQM_MAGIC_STRING is exactly 16 bytes (no NUL needed in the source).
+	// NOLINTNEXTLINE(bugprone-suspicious-string-compare,bugprone-not-null-terminated-result)
+	if ( strncmp( (const char *)base, IQM_MAGIC_STRING, 16 ) != 0 ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "CM_LoadIQMGeometry: %s wrong magic\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
@@ -840,7 +846,7 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 	}
 	(void)version;
 	if ( filesize > (uint32_t)fileSize ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s filesize mismatch\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "CM_LoadIQMGeometry: %s filesize mismatch\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
@@ -874,17 +880,17 @@ clipHandle_t CM_LoadIQMGeometry( const char *name ) {
 		}
 	}
 	if ( !posFound ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s no position vertex array\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "CM_LoadIQMGeometry: %s no position vertex array\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
 	if ( (uint64_t)posOffset + (uint64_t)num_vertexes * 12 > filesize ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s position array out of range\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "CM_LoadIQMGeometry: %s position array out of range\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
 	if ( (uint64_t)ofs_triangles + (uint64_t)num_triangles * 12 > filesize ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_LoadIQMGeometry: %s triangle array out of range\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "CM_LoadIQMGeometry: %s triangle array out of range\n", name );
 		FS_FreeFile( buf.v );
 		return 0;
 	}
@@ -954,7 +960,7 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	}
 #endif
 
-	Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "%s( '%s', %i )\n", __func__, name, clientload );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "%s( '%s', %i )\n", __func__, name, clientload );
 
 	if ( !strcmp( cm.name, name ) && clientload ) {
 		*checksum = cm.checksum;

@@ -1175,39 +1175,40 @@ void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
 		VectorCopy( model->bmodel->bounds[1], maxs );
 		
 		return;
-	} else if (model->type == MOD_MESH) {
-		md3Header_t	*header;
+	}
+	if ( model->type == MOD_MESH ) {
+		md3Header_t *header;
 		md3Frame_t	*frame;
 
 		header = model->md3[0];
-		frame = (md3Frame_t *) ((byte *)header + header->ofsFrames);
+		frame  = (md3Frame_t *)( (byte *)header + header->ofsFrames );
 
 		VectorCopy( frame->bounds[0], mins );
 		VectorCopy( frame->bounds[1], maxs );
-		
+
 		return;
-	} else if (model->type == MOD_MDR) {
-		mdrHeader_t	*header;
+	}
+	if ( model->type == MOD_MDR ) {
+		mdrHeader_t *header;
 		mdrFrame_t	*frame;
 
 		header = (mdrHeader_t *)model->modelData;
-		frame = (mdrFrame_t *) ((byte *)header + header->ofsFrames);
+		frame  = (mdrFrame_t *)( (byte *)header + header->ofsFrames );
 
 		VectorCopy( frame->bounds[0], mins );
 		VectorCopy( frame->bounds[1], maxs );
-		
+
 		return;
 	}
 #if FEAT_IQM
-	else if(model->type == MOD_IQM) {
+	if ( model->type == MOD_IQM ) {
 		iqmData_t *iqmData;
 
 		iqmData = model->modelData;
 
-		if(iqmData->bounds)
-		{
-			VectorCopy(iqmData->bounds, mins);
-			VectorCopy(iqmData->bounds + 3, maxs);
+		if ( iqmData->bounds ) {
+			VectorCopy( iqmData->bounds, mins );
+			VectorCopy( iqmData->bounds + 3, maxs );
 			return;
 		}
 	}

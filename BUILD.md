@@ -14,14 +14,14 @@ This pulls in `src/libs/luajit`, `src/libs/mpack`, `src/libs/picoquic`, and `src
 
 ### windows/cmake
 
-q3now uses CMake as its build system. **MSYS2 MINGW64 is the canonical Windows toolchain** — it's vendor-neutral, community-owned, and is the profile actively built and verified. The MSVC + Visual Studio cmake generator path is not currently verified; a community contributor wishing to maintain an MSVC build profile is welcome to submit one, but it is not presented here as a supported path until verified.
+Wired uses CMake as its build system. **MSYS2 MINGW64 is the canonical Windows toolchain** — it's vendor-neutral, community-owned, and is the profile actively built and verified. The MSVC + Visual Studio cmake generator path is not currently verified; a community contributor wishing to maintain an MSVC build profile is welcome to submit one, but it is not presented here as a supported path until verified.
 
 **Using `make` from MSYS2 MINGW64:**
 ```
 make
 ```
 
-This wraps `cmake` + `ninja` and produces `q3now.x64.exe` and `q3now-ded.x64.exe` in `build/release/` along with renderer DLLs and game modules. Copy resulting binaries from the created `build` directory.
+This wraps `cmake` + `ninja` and produces `wired.x64.exe` and `wired-ded.x64.exe` in `build/release/` along with renderer DLLs and game modules. Copy resulting binaries from the created `build` directory.
 
 **USE_SDL profile note:** `USE_SDL=ON` is the default and recommended profile on Windows. `USE_SDL=OFF` uses the native Win32 windowing/input subsystem (`code/win32/win_glimp.c`, `win_input.c`, `win_wndproc.c`); audio is handled by miniaudio across all platforms regardless of this flag. Supported but less tested.
 
@@ -34,7 +34,7 @@ Install the build dependencies:
 `MSYS2 MSYS`
 
 * pacman -Syu
-* pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-nasm mingw-w64-x86_64-sdl3 mingw-w64-x86_64-go mingw-w64-x86_64-nodejs mingw-w64-x86_64-opus mingw-w64-x86_64-opusfile make git
+* pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-nasm mingw-w64-x86_64-sdl3 mingw-w64-x86_64-go mingw-w64-x86_64-nodejs mingw-w64-x86_64-opus mingw-w64-x86_64-opusfile mingw-w64-x86_64-clang-tools-extra make git
 
 Use `MSYS2 MINGW32` or `MSYS2 MINGW64` depending on your target system, then copy resulting binaries from created `build` directory or use command:
 

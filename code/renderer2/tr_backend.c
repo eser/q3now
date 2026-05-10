@@ -392,10 +392,9 @@ static void RB_BeginDrawingView (void) {
 		RB_Hyperspace();
 		return;
 	}
-	else
-	{
-		backEnd.isHyperspace = qfalse;
-	}
+
+	backEnd.isHyperspace = qfalse;
+
 
 	// we will only draw a sun if there was sky rendered in this view
 	backEnd.skyRenderedThisView = qfalse;

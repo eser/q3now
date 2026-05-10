@@ -332,7 +332,7 @@ async def test_http_metrics(client: Q3QuicClient) -> bool:
         return False
 
     response = data.decode(errors="replace")
-    if "200 OK" in response and "q3_quic_connections_active" in response:
+    if "200 OK" in response and "wired_quic_connections_active" in response:
         ok("HTTP /metrics → 200 OK (Prometheus format)")
         return True
     elif "200 OK" in response:

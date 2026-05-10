@@ -35,6 +35,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 //=============================================================================
 
@@ -326,7 +328,7 @@ qboolean Sys_ResetReadOnlyAttribute( const char *ospath )
 Sys_Pwd
 =================
 */
-const char *Sys_Pwd( void ) 
+const char *Sys_Pwd( void )
 {
 	static char pwd[ MAX_OSPATH ];
 
@@ -364,15 +366,31 @@ const char *Sys_DefaultHomePath( void )
 
 	if ( *homePath )
 		return homePath;
-            
-	if ( (p = getenv("HOME")) != NULL ) 
+
+	if ( (p = getenv("HOME")) != NULL )
 	{
-		Q_strncpyz( homePath, p, sizeof( homePath ) );
-		{ qstring_t _hp_qs = QS_WrapExisting( homePath, sizeof( homePath ) ); QS_Append( &_hp_qs, "/q3now" CHANNEL_SUFFIX ); }
-		if ( mkdir( homePath, 0750 ) ) 
+		// Engine root <home>{SEP}wired{SEP} — shared across every game built
+		// on the wired engine. PATH_SEP comes from q_platform.h (portable);
+		// using it keeps the source consistent with the win32 sibling even
+		// though this file only compiles on Unix-likes.
 		{
-			if ( errno != EEXIST ) 
-				Sys_Error( "Unable to create directory \"%s\", error is %s(%d)\n", 
+			char engineRoot[MAX_OSPATH];
+			Com_sprintf( engineRoot, sizeof( engineRoot ),
+				"%s%c%s", p, PATH_SEP, "wired" );
+			if ( mkdir( engineRoot, 0750 ) && errno != EEXIST )
+				Sys_Error( "Unable to create directory \"%s\", error is %s(%d)\n",
+					engineRoot, strerror( errno ), errno );
+		}
+
+		// Per-product subfolder <home>{SEP}wired{SEP}<PRODUCT_NAME><CHANNEL_SUFFIX>{SEP}
+		Com_sprintf( homePath, sizeof( homePath ),
+			"%s%c%s%c%s%s", p, PATH_SEP, "wired", PATH_SEP,
+			PRODUCT_NAME, CHANNEL_SUFFIX );
+
+		if ( mkdir( homePath, 0750 ) )
+		{
+			if ( errno != EEXIST )
+				Sys_Error( "Unable to create directory \"%s\", error is %s(%d)\n",
 					homePath, strerror( errno ), errno );
 		}
 		return homePath;
@@ -421,7 +439,7 @@ void *Sys_LoadLibrary( const char *name )
 
 	handle = dlopen( name, RTLD_NOW );
 	if ( !handle ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Sys_LoadLibrary(%s) failed: %s\n", name, dlerror() );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "Sys_LoadLibrary(%s) failed: %s\n", name, dlerror() );
 	}
 	return handle;
 }
@@ -451,7 +469,7 @@ void *Sys_LoadFunction( void *handle, const char *name )
 	void *symbol;
 	size_t nlen;
 
-	if ( handle == NULL || name == NULL || *name == '\0' ) 
+	if ( handle == NULL || name == NULL || *name == '\0' )
 	{
 		dll_err_count++;
 		return NULL;

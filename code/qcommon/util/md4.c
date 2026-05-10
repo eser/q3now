@@ -48,9 +48,11 @@ static struct mdfour *m;
 #define H(X,Y,Z) ((X)^(Y)^(Z))
 #define lshift(x,s) (((x)<<(s)) | ((x)>>(32-(s))))
 
+// NOLINTBEGIN(bugprone-macro-parentheses) — vendored MD4 reference impl; macro args are always uint32_t locals (a, b, c, d) at every call site
 #define ROUND1(a,b,c,d,k,s) a = lshift(a + F(b,c,d) + X[k], s)
 #define ROUND2(a,b,c,d,k,s) a = lshift(a + G(b,c,d) + X[k] + 0x5A827999,s)
 #define ROUND3(a,b,c,d,k,s) a = lshift(a + H(b,c,d) + X[k] + 0x6ED9EBA1,s)
+// NOLINTEND(bugprone-macro-parentheses)
 
 /* this applies md4 to 64 byte chunks */
 static void mdfour64(uint32_t *M)

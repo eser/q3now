@@ -31,6 +31,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "snd_local.h"
 #include "snd_codec.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
 #define DEF_COMSOUNDMEGS "32"
 
@@ -137,10 +139,11 @@ void SND_setup( void )
 	while (--q > p)
 		*(sndBuffer **)q = q-1;
 
+	// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — q == p here (loop ended at q > p); writes at the head of the freelist buffer
 	*(sndBuffer **)q = NULL;
 	freelist = p + scs - 1;
 
-	Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound memory manager started\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_sound), "Sound memory manager started\n" );
 }
 
 
@@ -302,11 +305,11 @@ qboolean S_LoadSound( sfx_t *sfx )
 		return qfalse;
 
 	if ( info.width == 1 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "WARNING: %s is a 8 bit audio file\n", sfx->soundName);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "WARNING: %s is a 8 bit audio file\n", sfx->soundName);
 	}
 
 	if ( info.rate != 48000 && info.rate != 44100 && info.rate != 22050 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "WARNING: %s has unusual sample rate %dHz\n", sfx->soundName, info.rate);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "WARNING: %s has unusual sample rate %dHz\n", sfx->soundName, info.rate);
 	}
 
 	samples = Hunk_AllocateTempMemory(info.samples * sizeof(short) * 2);
@@ -369,5 +372,5 @@ qboolean S_LoadSound( sfx_t *sfx )
 }
 
 void S_DisplayFreeMemory(void) {
-	Com_Log( SEV_INFO, LOG_CAT_SOUND, "%d bytes free sound buffer memory, %d total used\n", inUse, totalInUse);
+	Com_Log( SEV_INFO, LOG_CH(ch_sound), "%d bytes free sound buffer memory, %d total used\n", inUse, totalInUse);
 }

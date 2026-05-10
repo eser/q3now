@@ -26,16 +26,22 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // q_shared.h -- included first by ALL program modules.
 // A user mod should never modify this file
 
-#define Q3NOW_ENGINE_VERSION  "q3now 0.80"
-#ifndef Q3NOW_ENGINE_RELEASE_VERSION
-  #define Q3NOW_ENGINE_RELEASE_VERSION Q3NOW_ENGINE_VERSION
+#define WIRED_ENGINE_VERSION  "Wired 0.80"
+#ifndef WIRED_ENGINE_RELEASE_VERSION
+  #define WIRED_ENGINE_RELEASE_VERSION WIRED_ENGINE_VERSION
+#endif
+// Product name (defaults to q3now). The build system overrides via
+// -DPRODUCT_NAME=<name>; this fallback covers non-CMake builds and lets the
+// engine resolve per-product paths (~/wired/<PRODUCT_NAME><CHANNEL_SUFFIX>/).
+#ifndef PRODUCT_NAME
+#define PRODUCT_NAME "q3now"
 #endif
 #ifdef CHANNEL_SUFFIX
-#define CLIENT_WINDOW_TITLE   "q3now" CHANNEL_SUFFIX
-#define CONSOLE_WINDOW_TITLE  "q3now" CHANNEL_SUFFIX " Console"
+#define CLIENT_WINDOW_TITLE   "Wired" CHANNEL_SUFFIX
+#define CONSOLE_WINDOW_TITLE  "Wired" CHANNEL_SUFFIX " Console"
 #else
-#define CLIENT_WINDOW_TITLE   "q3now"
-#define CONSOLE_WINDOW_TITLE  "q3now Console"
+#define CLIENT_WINDOW_TITLE   "Wired"
+#define CONSOLE_WINDOW_TITLE  "Wired Console"
 #endif
 // 1.32 released 7-10-2002
 
@@ -47,8 +53,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MAX_TEAMNAME            32
 #define MAX_MASTER_SERVERS      5	// number of supported master servers
 
-#define GAMENAME_FOR_MASTER		"q3now"
-#define HEARTBEAT_FOR_MASTER	"QuakeArena-1"
+// Per-game identity (gamename + heartbeat tag) lives in code/game/bg_public.h
+// and is populated into engine cvars (sv_gamename / sv_heartbeat / cl_gamename)
+// by the game/cgame module at init. Engine code reads only the cvars.
 
 #define DEMOEXT	"dm_"			// standard demo extension
 
@@ -154,6 +161,19 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_platform.h"
 
+// Foundational types (vec*_t, qboolean, byte, qhandle_t, MAX_QPATH/MAX_OSPATH,
+// MAX_STRING_CHARS, ARRAY_LEN, …) live in wired/core.h. Pulled in here so the
+// rest of q_shared.h, plus everyone who already includes q_shared.h, sees the
+// same primitives without churning their includes.
+#include "wired/core.h"
+
+// Wire-protocol contract (entityState_t / playerState_t / usercmd_t / trace_t /
+// configstring + entitynum limits / weapon_t / team_t / gametype_t / itemList /
+// projectile + means-of-death enums, …) lives in wired/protocol.h. Engine code
+// pulls it in from there directly; q_shared.h re-exports it so any TU that has
+// only ever seen q_shared.h still gets the same names without an include churn.
+#include "wired/protocol.h"
+
 /*
 ============================================================================
 
@@ -220,8 +240,7 @@ static ID_INLINE uint64_t Q_bswap64( uint64_t x )
 #endif
 }
 
-/* float/int bit-cast union — needed by the endian swap helpers below */
-typedef union floatint_u { int32_t i; uint32_t u; float f; unsigned char b[4]; } floatint_t;
+// floatint_u / floatint_t lives in wired/core.h.
 
 /*
  * Host <-> Little/Big endian conversion.
@@ -299,87 +318,12 @@ int Q_longjmp_c(void *, int);
 #define Q_longjmp longjmp
 #endif
 
-typedef unsigned char byte;
-
-typedef enum { qfalse = 0, qtrue } qboolean;
-
-typedef union {
-	byte rgba[4];
-	uint32_t u32;
-} color4ub_t;
-
-
-typedef int		qhandle_t;
-typedef int		sfxHandle_t;
-typedef int		fileHandle_t;
-typedef int		clipHandle_t;
-
-#define PAD(base, alignment)	(((base)+(alignment)-1) & ~((alignment)-1))
-#define PADLEN(base, alignment)	(PAD((base), (alignment)) - (base))
-
-#define PADP(base, alignment)	((void *) PAD((intptr_t) (base), (alignment)))
-
-#ifdef __GNUC__
-#define QALIGN(x) __attribute__((aligned(x)))
-#else
-#define QALIGN(x)
-#endif
-
-#ifndef NULL
-#define NULL ((void *)0)
-#endif
-
-#define	MAX_QINT			0x7fffffff
-#define	MIN_QINT			(-MAX_QINT-1)
-
-#define	MAX_UINT			((unsigned)(~0))
-
-#define ARRAY_LEN(x)		(sizeof(x) / sizeof(*(x)))
-#define STRARRAY_LEN(x)		(ARRAY_LEN(x) - 1)
-
-// angle indexes
-#define	PITCH				0		// up / down
-#define	YAW					1		// left / right
-#define	ROLL				2		// fall over
-
-// the game guarantees that no string from the network will ever
-// exceed MAX_STRING_CHARS
-#define	MAX_STRING_CHARS	1024	// max length of a string passed to Cmd_TokenizeString
-#define	MAX_STRING_TOKENS	1024	// max tokens resulting from Cmd_TokenizeString
-#define	MAX_TOKEN_CHARS		1024	// max length of an individual token
-
-#define	MAX_INFO_STRING		1024
-#define	MAX_INFO_KEY		1024
-#define	MAX_INFO_VALUE		1024
-
-#define MAX_INFO_TOKENS ((MAX_INFO_STRING/3)+2)
-
-typedef struct {
-	char        buffer[MAX_INFO_STRING];
-	const char  *keys[MAX_INFO_TOKENS];
-	const char  *values[MAX_INFO_TOKENS];
-	int         count;
-} InfoTokens;
-
-#define MAX_USERINFO_LENGTH (MAX_INFO_STRING-13) // incl. length of 'connect ""' or 'userinfo ""' and reserving one byte to avoid q3msgboom
-													
-#define	BIG_INFO_STRING		8192  // used for system info key only
-#define	BIG_INFO_KEY		  8192
-#define	BIG_INFO_VALUE		8192
-
-
-#define	MAX_QPATH		64		// max length of a quake game pathname — network-safe,
-								// used in configstrings, userinfo, demo format, and any
-								// string that crosses the client/server boundary
-#define MAX_VFS_PATH	128		// max length of a virtual filesystem (pak-internal)
-								// asset path — relative, forward-slash, local-only,
-								// never sent over network. Use for stack buffers in
-								// asset loaders and for inputs to registry functions.
-#ifdef PATH_MAX
-#define MAX_OSPATH		PATH_MAX
-#else
-#define	MAX_OSPATH		256		// max length of a filesystem pathname
-#endif
+// byte, qboolean, color4ub_t, qhandle_t/sfxHandle_t/fileHandle_t/clipHandle_t,
+// PAD/PADLEN/PADP/QALIGN, NULL fallback, MAX_QINT/MIN_QINT/MAX_UINT,
+// ARRAY_LEN/STRARRAY_LEN, PITCH/YAW/ROLL, MAX_STRING_CHARS/MAX_STRING_TOKENS/
+// MAX_TOKEN_CHARS, MAX_INFO_STRING/MAX_INFO_KEY/MAX_INFO_VALUE/MAX_INFO_TOKENS,
+// InfoTokens, MAX_USERINFO_LENGTH, BIG_INFO_STRING/BIG_INFO_KEY/BIG_INFO_VALUE,
+// MAX_QPATH/MAX_VFS_PATH/MAX_OSPATH all live in wired/core.h.
 
 #define	MAX_NAME_LENGTH			32		// max length of a client name
 #define	MAX_HOSTNAME_LENGTH		80
@@ -458,25 +402,8 @@ MATHLIB
 */
 
 
-typedef float vec_t;
-typedef vec_t vec2_t[2];
-typedef vec_t vec3_t[3];
-typedef vec_t vec4_t[4];
-typedef vec_t vec5_t[5];
-
-typedef vec_t quat_t[4];
-
-typedef	int	fixed4_t;
-typedef	int	fixed8_t;
-typedef	int	fixed16_t;
-
-#ifndef M_PI
-#define M_PI		3.14159265358979323846f	// matches value in gcc v2 math.h
-#endif
-
-#ifndef M_LN2
-#define M_LN2      0.693147180559945309417f
-#endif
+// vec_t, vec2_t..vec5_t, quat_t, fixed4_t/fixed8_t/fixed16_t, M_PI, M_LN2 all
+// live in wired/core.h.
 
 #ifdef __linux__
 #ifdef __GLIBC__
@@ -513,9 +440,9 @@ extern	vec4_t		colorWhite;
 extern	vec4_t		colorLtGrey;
 extern	vec4_t		colorMdGrey;
 extern	vec4_t		colorDkGrey;
-extern	vec4_t		colorOrange;	// q3now
-extern	vec4_t		colorIndigo;	// q3now
-extern	vec4_t		colorSkyBlue;	// q3now
+extern	vec4_t		colorOrange;	// wired
+extern	vec4_t		colorIndigo;	// wired
+extern	vec4_t		colorSkyBlue;	// wired
 
 void Q_ParseColor( const char *str, float *col, float alpha );
 
@@ -636,7 +563,7 @@ void AddPointToBounds( const vec3_t v, vec3_t mins, vec3_t maxs );
 static ID_INLINE int VectorCompare( const vec3_t v1, const vec3_t v2 ) {
 	if (v1[0] != v2[0] || v1[1] != v2[1] || v1[2] != v2[2]) {
 		return 0;
-	}			
+	}
 	return 1;
 }
 
@@ -682,9 +609,11 @@ static ID_INLINE void VectorInverse( vec3_t v ){
 }
 
 static ID_INLINE void CrossProduct( const vec3_t v1, const vec3_t v2, vec3_t cross ) {
+	// NOLINTBEGIN(clang-analyzer-core.UndefinedBinaryOperatorResult) — v1, v2 are caller-supplied vec3_t; analyzer's deep cross-function path lacks the entity-init contract
 	cross[0] = v1[1]*v2[2] - v1[2]*v2[1];
 	cross[1] = v1[2]*v2[0] - v1[0]*v2[2];
 	cross[2] = v1[0]*v2[1] - v1[1]*v2[0];
+	// NOLINTEND(clang-analyzer-core.UndefinedBinaryOperatorResult)
 }
 
 
@@ -756,7 +685,8 @@ float Q_atof( const char *str );
 
 //=============================================
 
-float Com_Clamp( float min, float max, float value );
+float   Com_Clamp( float min, float max, float value );
+int     Com_Clampi( int min, int max, int value );
 
 char	*COM_SkipPath( char *pathname );
 const char	*COM_GetExtension( const char *name );
@@ -995,7 +925,7 @@ int Info_RemoveKey( char *s, const char *key );
 // before struct cvar_s is fully defined below.  The full typedef at line ~1091
 // is a compatible redeclaration and is silently deduped by the C standard.
 typedef struct cvar_s cvar_t;
-#include "wired/core/shell/log.h"   // defines log_severity_t; declares Com_Log
+#include "wired/core/logging/log.h" // defines log_severity_t; declares Com_Log
 
 // this is only here so the functions in q_shared.c and bg_*.c can link
 void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t level, const char *fmt, ... );
@@ -1217,361 +1147,20 @@ PlaneTypeForNormal
 
 #define PlaneTypeForNormal(x) (x[0] == 1.0 ? PLANE_X : (x[1] == 1.0 ? PLANE_Y : (x[2] == 1.0 ? PLANE_Z : PLANE_NON_AXIAL) ) )
 
-// plane_t structure
-// !!! if this is changed, it must be changed in asm code too !!!
-typedef struct cplane_s {
-	vec3_t	normal;
-	float	dist;
-	byte	type;			// for fast side tests: 0,1,2 = axial, 3 = nonaxial
-	byte	signbits;		// signx + (signy<<1) + (signz<<2), used as lookup during collision
-	byte	pad[2];
-} cplane_t;
-
-
-// a trace is returned when a box is swept through the world
-typedef struct {
-	qboolean	allsolid;	// if true, plane is not valid
-	qboolean	startsolid;	// if true, the initial point was in a solid area
-	float		fraction;	// time completed, 1.0 = didn't hit anything
-	vec3_t		endpos;		// final position
-	cplane_t	plane;		// surface normal at impact, transformed to world space
-	int			surfaceFlags;	// surface hit
-	int			contents;	// contents on other side of surface hit
-	int			entityNum;	// entity the contacted surface is a part of
-} trace_t;
-
-// trace type for collision detection
-typedef enum {
-	TT_NONE,
-	TT_AABB,
-	TT_CAPSULE,
-	TT_BISPHERE
-} traceType_t;
-
-// trace->entityNum can also be 0 to (MAX_GENTITIES-1)
-// or ENTITYNUM_NONE, ENTITYNUM_WORLD
-
-
-// markfragments are returned by R_MarkFragments()
-typedef struct {
-	int		firstPoint;
-	int		numPoints;
-} markFragment_t;
-
-
-
-typedef struct {
-	vec3_t		origin;
-	vec3_t		axis[3];
-} orientation_t;
-
-//=====================================================================
-
-
-// in order from highest priority to lowest
-// if none of the catchers are active, bound key strings will be executed
-#define KEYCATCH_CONSOLE    0x0001
-#define KEYCATCH_UI         0x0002
-#define KEYCATCH_MESSAGE    0x0004
-#define KEYCATCH_CGAME      0x0008
-
-
-// sound channels
-// channel 0 never willingly overrides
-// other channels will always override a playing sound on that channel
-typedef enum {
-	CHAN_AUTO,
-	CHAN_LOCAL,		// menu sounds, etc
-	CHAN_WEAPON,
-	CHAN_VOICE,
-	CHAN_ITEM,
-	CHAN_BODY,
-	CHAN_LOCAL_SOUND,	// chat messages, etc
-	CHAN_ANNOUNCER		// announcer voices, etc
-} soundChannel_t;
-
-
-/*
-========================================================================
-
-  ELEMENTS COMMUNICATED ACROSS THE NET
-
-========================================================================
-*/
-
-#define	ANGLE2SHORT(x)	((int)((x)*65536/360) & 65535)
-#define	SHORT2ANGLE(x)	((x)*(360.0/65536))
-
-#define	SNAPFLAG_RATE_DELAYED	1
-#define	SNAPFLAG_NOT_ACTIVE		2	// snapshot used during connection and for zombies
-#define SNAPFLAG_SERVERCOUNT	4	// toggled every map_restart so transitions can be detected
-
-//
-// per-level limits
-//
-#define	MAX_CLIENTS			64		// absolute limit
-#define MAX_LOCATIONS		64
-
-#define	GENTITYNUM_BITS		10		// don't need to send any more
-#define	MAX_GENTITIES		(1<<GENTITYNUM_BITS)
-
-// entitynums are communicated with GENTITY_BITS, so any reserved
-// values that are going to be communcated over the net need to
-// also be in this range
-#define	ENTITYNUM_NONE		(MAX_GENTITIES-1)
-#define	ENTITYNUM_WORLD		(MAX_GENTITIES-2)
-#define	ENTITYNUM_MAX_NORMAL	(MAX_GENTITIES-2)
-
-
-#define	MAX_MODELS			256		// these are sent over the net as 8 bits
-#define	MAX_SOUNDS			256		// so they cannot be blindly increased
-
-
-#define	MAX_CONFIGSTRINGS	1024
-
-// these are the only configstrings that the system reserves, all the
-// other ones are strictly for servergame to clientgame communication
-#define	CS_SERVERINFO		0		// an info string with all the serverinfo cvars
-#define	CS_SYSTEMINFO		1		// an info string for server system to client system configuration (timescale, etc)
-
-#define	RESERVED_CONFIGSTRINGS	2	// game can't modify below this, only the system can
-
-#define	MAX_GAMESTATE_CHARS	16000
-typedef struct {
-	int			stringOffsets[MAX_CONFIGSTRINGS];
-	char		stringData[MAX_GAMESTATE_CHARS];
-	int			dataCount;
-} gameState_t;
-
-//=========================================================
-
-// bit field limits
-#define	MAX_STATS				16
-#define	MAX_PERSISTANT			24		// increased from 20 for observer/web stat slots
-#define	MAX_POWERUPS			16
-#define	MAX_WEAPONS				16
-#define	MAX_ATTACKS				32
-
-#define	MAX_PS_EVENTS			2
-
-#define PS_PMOVEFRAMECOUNTBITS	6
-
-// playerState_t is the information needed by both the client and server
-// to predict player motion and actions
-// nothing outside of pmove should modify these, or some degree of prediction error
-// will occur
-
-// you can't add anything to this without modifying the code in msg.c
-
-// playerState_t is a full superset of entityState_t as it is used by players,
-// so if a playerState_t is transmitted, the entityState_t can be fully derived
-// from it.
-typedef struct playerState_s {
-	int			commandTime;	// cmd->serverTime of last executed command
-	int			pm_type;
-	int			bobCycle;		// for view bobbing and footstep generation
-	int			pm_flags;		// ducked, jump_held, etc
-	int			pm_time;
-
-	vec3_t		origin;
-	vec3_t		velocity;
-	int			weaponTime;
-	int			gravity;
-	int			speed;
-	int			delta_angles[3];	// add to command angles to get view direction
-									// changed by spawns, rotating objects, and teleporters
-
-	int			groundEntityNum;// ENTITYNUM_NONE = in air
-
-	int			legsTimer;		// don't change low priority animations until this runs out
-	int			legsAnim;		// mask off ANIM_TOGGLEBIT
-
-	int			torsoTimer;		// don't change low priority animations until this runs out
-	int			torsoAnim;		// mask off ANIM_TOGGLEBIT
-
-	int			movementDir;	// a number 0 to 7 that represents the relative angle
-								// of movement to the view angle (axial and diagonals)
-								// when at rest, the value will remain unchanged
-								// used to twist the legs during strafing
-
-	vec3_t		grapplePoint;	// location of grapple to pull towards if PMF_GRAPPLE_PULL
-
-	int			eFlags;			// copied to entityState_t->eFlags
-
-	int			eventSequence;	// pmove generated events
-	int			events[MAX_PS_EVENTS];
-	int			eventParms[MAX_PS_EVENTS];
-
-	int			externalEvent;	// events set on player from another source
-	int			externalEventParm;
-	int			externalEventTime;
-
-	int			clientNum;		// ranges from 0 to MAX_CLIENTS-1
-	int			weapon;			// copied to entityState_t->weapon
-	int			weaponstate;
-	int			burstRoundsRemaining;	// rounds left in current burst fire
-	int			chargeStartTime;		// time when alt-fire charge began (0 = not charging)
-	int			cooldownEndTime;		// time when weapon cooldown ends (0 = no cooldown)
-	int			doubleBlastState;		// state for shotgun double-blast (0 = idle, 1 = first blast fired, waiting for second)
-
-	vec3_t		viewangles;		// for fixed views
-	int			viewheight;
-
-	// damage feedback
-	int			damageEvent;	// when it changes, latch the other parms
-	int			damageYaw;
-	int			damagePitch;
-	int			damageCount;
-
-	int			stats[MAX_STATS];
-	int			persistant[MAX_PERSISTANT];	// stats that aren't cleared on death
-	int			powerups[MAX_POWERUPS];	// level.time that the powerup runs out
-	int			ammo[MAX_WEAPONS];
-
-	int			generic1;
-	int			loopSound;
-	int			jumppad_ent;	// jumppad entity hit this frame
-
-	// not communicated over the net at all
-	int			ping;			// server to game info for scoreboard
-	int			pmove_framecount;	// FIXME: don't transmit over the network
-	int			jumppad_frame;
-	int			entityEventSequence;
-} playerState_t;
-
-
-//====================================================================
-
-
-//
-// usercmd_t->button bits, many of which are generated by the client system,
-// so they aren't game/cgame only definitions
-//
-#define	BUTTON_ATTACK_PRI	1
-#define	BUTTON_ATTACK_SEC	2			// secondary fire (bit 1, slot next to +attack)
-#define	BUTTON_TALK			4096		// displays talk balloon and disables actions
-#define	BUTTON_USE_HOLDABLE	4
-#define	BUTTON_GESTURE		8
-#define	BUTTON_WALKING		16			// walking can't just be inferred from MOVE_RUN
-										// because a key pressed late in the frame will
-										// only generate a small move value for that frame
-										// walking will use different animations and
-										// won't generate footsteps
-#define BUTTON_AFFIRMATIVE	32
-#define	BUTTON_NEGATIVE		64
-
-#define BUTTON_GETFLAG		128
-#define BUTTON_GUARDBASE	256
-#define BUTTON_PATROL		512
-#define BUTTON_FOLLOWME		1024
-
-#define	BUTTON_ANY			2048			// any key whatsoever
-
-#define	MOVE_RUN			120			// if forwardmove or rightmove are >= MOVE_RUN,
-										// then BUTTON_WALKING should be set
-
-// usercmd_t is sent to the server each client frame
-typedef struct usercmd_s {
-	int				serverTime;
-	int				angles[3];
-	int 			buttons;
-	byte			weapon;           // weapon 
-	signed char	forwardmove, rightmove, upmove;
-} usercmd_t;
-
-//===================================================================
-
-// if entityState->solid == SOLID_BMODEL, modelindex is an inline model number
-#define	SOLID_BMODEL	0xffffff
-
-typedef enum {
-	TR_STATIONARY,
-	TR_INTERPOLATE,				// non-parametric, but interpolate between snapshots
-	TR_LINEAR,
-	TR_LINEAR_STOP,
-	TR_SINE,					// value = base + sin( time / duration ) * delta
-	TR_GRAVITY,
-	// q3now: additional trajectory types used by bg_misc.c
-	TR_GRAVITY_DOUBLE,			// double strength gravity
-	TR_ACCELERATE,				// accelerating linear
-	TR_SMALL_GRAVITY,			// half strength gravity
-	TR_ORBITAL					// gravity + centripetal
-} trType_t;
-
-typedef struct {
-	trType_t	trType;
-	int		trTime;
-	int		trDuration;			// if non 0, trTime + trDuration = stop time
-	vec3_t	trBase;
-	vec3_t	trDelta;			// velocity, etc
-} trajectory_t;
-
-// entityState_t is the information conveyed from the server
-// in an update message about entities that the client will
-// need to render in some way
-// Different eTypes may use the information in different ways
-// The messages are delta compressed, so it doesn't really matter if
-// the structure size is fairly large
-
-typedef struct entityState_s {
-	int		number;			// entity index
-	int		eType;			// entityType_t
-	int		eFlags;
-
-	trajectory_t	pos;	// for calculating position
-	trajectory_t	apos;	// for calculating angles
-
-	int		time;
-	int		time2;
-
-	vec3_t	origin;
-	vec3_t	origin2;
-
-	vec3_t	angles;
-	vec3_t	angles2;
-
-	int		otherEntityNum;	// shotgun sources, etc
-	int		otherEntityNum2;
-
-	int		groundEntityNum;	// ENTITYNUM_NONE = in air
-
-	int		constantLight;	// r + (g<<8) + (b<<16) + (intensity<<24)
-	int		loopSound;		// constantly loop this sound
-
-	int		modelindex;
-	int		modelindex2;
-	int		clientNum;		// 0 to (MAX_CLIENTS - 1), for players and corpses
-	int		frame;
-
-	int		solid;			// for client side prediction, trap_linkentity sets this properly
-
-	int		event;			// impulse events -- muzzle flashes, footsteps, etc
-	int		eventParm;
-
-	// for players
-	int		powerups;		// bit flags
-	int		weapon;			// determines weapon and flash model, etc
-	int		pType;			// projectileType_t — ET_MISSILE visual discriminator
-	int		legsAnim;		// mask off ANIM_TOGGLEBIT
-	int		torsoAnim;		// mask off ANIM_TOGGLEBIT
-
-	int		generic1;
-} entityState_t;
-
-typedef enum {
-	CA_UNINITIALIZED,
-	CA_DISCONNECTED, 	// not talking to a server
-	CA_AUTHORIZING,		// not used any more, was checking cd key 
-	CA_CONNECTING,		// sending request packets to the server
-	CA_CHALLENGING,		// sending challenge packets to the server
-	CA_CONNECTED,		// netchan_t established, getting gamestate
-	CA_LOADING,			// only during cgame initialization, never during main loop
-	CA_PRIMED,			// got gamestate, waiting for first frame
-	CA_ACTIVE,			// game views should be displayed
-	CA_CINEMATIC		// playing a cinematic or a static pic, not connected to a server
-} connstate_t;
-
-// font support 
+// cplane_t / trace_t / traceType_t / markFragment_t / orientation_t live in wired/protocol.h.
+// KEYCATCH_* / soundChannel_t live in wired/protocol.h.
+// ANGLE2SHORT/SHORT2ANGLE, SNAPFLAG_*, MAX_CLIENTS, MAX_LOCATIONS, GENTITYNUM_BITS,
+// MAX_GENTITIES, ENTITYNUM_*, MAX_MODELS, MAX_SOUNDS, MAX_CONFIGSTRINGS, CS_SERVERINFO,
+// CS_SYSTEMINFO, RESERVED_CONFIGSTRINGS, MAX_GAMESTATE_CHARS, gameState_t — all in wired/protocol.h.
+// MAX_STATS / MAX_PERSISTANT / MAX_POWERUPS / MAX_WEAPONS / MAX_ATTACKS / MAX_PS_EVENTS /
+// PS_PMOVEFRAMECOUNTBITS — all in wired/protocol.h.
+// playerState_t — wired/protocol.h.
+// BUTTON_* / MOVE_RUN / usercmd_t — wired/protocol.h.
+// SOLID_BMODEL / trType_t / trajectory_t — wired/protocol.h.
+// entityState_t — wired/protocol.h.
+// connstate_t — wired/protocol.h.
+
+// font support
 
 #define GLYPH_START 0
 #define GLYPH_END 255

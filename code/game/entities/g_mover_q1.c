@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // Q1 mover entities (func_door, func_plat)
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #define DOOR_START_OPEN   1   /* Q1 spawnflag: spawn at open position */
 #define DOOR_DONT_LINK    4   /* Q1 spawnflag: do not link adjacent doors into team */
@@ -364,7 +366,7 @@ Q1_DoorSecret_Reached
 */
 static void Q1_DoorSecret_Reached( gentity_t *ent ) {
 	/* DIAG Bug 3 — remove after fix */
-	Com_Log( SEV_TRACE, LOG_CAT_GAME,
+	Com_Log( SEV_TRACE, LOG_CH(ch_game),
 	         "q1_func_door_secret reached: id=%i count=%i moverState=%i origin=(%.1f %.1f %.1f) "
 	         "absmin=(%.1f %.1f %.1f) absmax=(%.1f %.1f %.1f) time=%i\n",
 	         ent->s.number, ent->count, ent->moverState,
@@ -612,7 +614,7 @@ void SP_q1_func_door_secret( gentity_t *ent ) {
 	VectorMA( ent->pos2, t_length, forward, ent->pos2 );
 	/* pos2 is now pos_open (end of phase 2) */
 
-	Com_Log( SEV_TRACE, LOG_CAT_GAME,
+	Com_Log( SEV_TRACE, LOG_CH(ch_game),
 	         "SP_q1_func_door_secret: model='%s' spawnflags=%d sounds=%d"
 	         " angle=%.0f t_width=%.0f t_length=%.0f"
 	         " pos1=(%.0f,%.0f,%.0f) pos2=(%.0f,%.0f,%.0f)\n",
@@ -657,7 +659,7 @@ void SP_q1_func_door_secret( gentity_t *ent ) {
 	if ( !( ent->spawnflags & SECRET_OPEN_ONCE ) )
 		ent->touch = Q1_SecretDoor_Touch;
 
-	Com_Log( SEV_TRACE, LOG_CAT_GAME,
+	Com_Log( SEV_TRACE, LOG_CH(ch_game),
 	         "SP_q1_func_door_secret [post-Q3_InitMover]: model='%s'"
 	         " s.origin=(%.0f,%.0f,%.0f)"
 	         " r.currentOrigin=(%.0f,%.0f,%.0f)"
@@ -674,7 +676,7 @@ void SP_q1_func_door_secret( gentity_t *ent ) {
 	         ent->s.pos.trDelta[0], ent->s.pos.trDelta[1], ent->s.pos.trDelta[2],
 	         (unsigned)ent->s.solid, (int)ent->r.linked );
 	/* DIAG Bug 3 — remove after fix */
-	Com_Log( SEV_TRACE, LOG_CAT_GAME,
+	Com_Log( SEV_TRACE, LOG_CH(ch_game),
 	         "q1_func_door_secret spawn: id=%i origin=(%.1f %.1f %.1f) angle=%.1f "
 	         "pos1=(%.1f %.1f %.1f) pos2=(%.1f %.1f %.1f) origin2=(%.1f %.1f %.1f) "
 	         "absmin=(%.1f %.1f %.1f) absmax=(%.1f %.1f %.1f) "
@@ -707,7 +709,7 @@ static void Reached_Q1Plat( gentity_t *ent ) {
 	Q3_Reached_BinaryMover( ent );
 	if ( arrivedAtTop ) {
 		/* DIAG Bug 3 — remove after fix */
-		Com_Log( SEV_TRACE, LOG_CAT_GAME,
+		Com_Log( SEV_TRACE, LOG_CH(ch_game),
 		         "q1_func_plat reached top: id=%i origin=(%.1f %.1f %.1f) time=%i\n",
 		         ent->s.number,
 		         ent->r.currentOrigin[0], ent->r.currentOrigin[1], ent->r.currentOrigin[2],
@@ -816,7 +818,7 @@ void SP_q1_func_plat( gentity_t *ent ) {
 		Q3_SpawnPlatTrigger( ent );
 	}
 	/* DIAG Bug 3 — remove after fix */
-	Com_Log( SEV_TRACE, LOG_CAT_GAME,
+	Com_Log( SEV_TRACE, LOG_CH(ch_game),
 	         "q1_func_plat spawn: id=%i origin=(%.1f %.1f %.1f) "
 	         "pos1=(%.1f %.1f %.1f) pos2=(%.1f %.1f %.1f) "
 	         "absmin=(%.1f %.1f %.1f) absmax=(%.1f %.1f %.1f)\n",
@@ -889,7 +891,7 @@ void Q1_LinkDoors( void ) {
 		} while ( found );
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "Q1_LinkDoors: %d doors, %d teams formed\n", doorCount, teamCount );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "Q1_LinkDoors: %d doors, %d teams formed\n", doorCount, teamCount );
 }
 
 /*

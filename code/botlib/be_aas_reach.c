@@ -309,7 +309,7 @@ int AAS_BestReachableFromJumpPadArea(vec3_t origin, vec3_t mins, vec3_t maxs)
 	for (ent = AAS_NextBSPEntity(0); ent; ent = AAS_NextBSPEntity(ent))
 	{
 		if (!AAS_ValueForBSPEpairKey(ent, "classname", classname, MAX_EPAIRKEY)) continue;
-		if (strcmp(classname, "trigger_push")) continue;
+		if (strcmp(classname, "trigger_push") != 0) continue;
 		//
 		if (!AAS_GetJumpPadInfo(ent, areastart, absmins, absmaxs, velocity)) continue;
 		//get the areas the jump pad brush is in
@@ -658,7 +658,7 @@ static float AAS_MaxJumpDistance(float phys_jumpvel)
 int AAS_AreaCrouch(int areanum)
 {
 	if (!(aasworld.areasettings[areanum].presencetype & PRESENCE_NORMAL)) return qtrue;
-	else return qfalse;
+	return qfalse;
 } //end of the function AAS_AreaCrouch
 //===========================================================================
 // returns qtrue if it is possible to swim in the area
@@ -670,7 +670,7 @@ int AAS_AreaCrouch(int areanum)
 int AAS_AreaSwim(int areanum)
 {
 	if (aasworld.areasettings[areanum].areaflags & AREA_LIQUID) return qtrue;
-	else return qfalse;
+	return qfalse;
 } //end of the function AAS_AreaSwim
 //===========================================================================
 // returns qtrue if the area contains a liquid
@@ -682,7 +682,7 @@ int AAS_AreaSwim(int areanum)
 int AAS_AreaLiquid(int areanum)
 {
 	if (aasworld.areasettings[areanum].areaflags & AREA_LIQUID) return qtrue;
-	else return qfalse;
+	return qfalse;
 } //end of the function AAS_AreaLiquid
 //===========================================================================
 //
@@ -1620,6 +1620,7 @@ static float VectorDistance( const vec3_t v1, const vec3_t v2)
 {
 	vec3_t dir;
 
+	// NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — v1, v2 are caller-supplied vec3_t; analyzer's deep cross-function path lacks the entity-init contract
 	VectorSubtract(v2, v1, dir);
 	return VectorLength(dir);
 } //end of the function VectorDistance
@@ -1647,6 +1648,7 @@ static int VectorBetweenVectors( const vec3_t v, const vec3_t v1, const vec3_t v
 //===========================================================================
 static void VectorMiddle( const vec3_t v1, const vec3_t v2, vec3_t middle)
 {
+	// NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — v1, v2 are caller-supplied vec3_t; analyzer's deep cross-function path lacks the entity-init contract
 	VectorAdd(v1, v2, middle);
 	VectorScale(middle, 0.5, middle);
 } //end of the function VectorMiddle
@@ -3301,7 +3303,7 @@ static void AAS_Reachability_FuncBobbing(void)
 	for (ent = AAS_NextBSPEntity(0); ent; ent = AAS_NextBSPEntity(ent))
 	{
 		if (!AAS_ValueForBSPEpairKey(ent, "classname", classname, MAX_EPAIRKEY)) continue;
-		if (strcmp(classname, "func_bobbing")) continue;
+		if (strcmp(classname, "func_bobbing") != 0) continue;
 		AAS_FloatForBSPEpairKey(ent, "height", &height);
 		if (!height) height = 32;
 		//
@@ -3524,7 +3526,7 @@ static void AAS_Reachability_JumpPad(void)
 	for (ent = AAS_NextBSPEntity(0); ent; ent = AAS_NextBSPEntity(ent))
 	{
 		if (!AAS_ValueForBSPEpairKey(ent, "classname", classname, MAX_EPAIRKEY)) continue;
-		if (strcmp(classname, "trigger_push")) continue;
+		if (strcmp(classname, "trigger_push") != 0) continue;
 		//
 		if (!AAS_GetJumpPadInfo(ent, areastart, absmins, absmaxs, velocity)) continue;
 		/*

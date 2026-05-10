@@ -7,6 +7,8 @@ cl_wired_hud.c — Wired UI HUD: client-side element rendering
 #include "cl_wired_ui.h"
 #include "cl_wired_text.h"
 #include "cl_wired_hud_private.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 // from cl_wired_hud_compat.c
 extern void WiredHud_SyncCompat( void );
@@ -157,7 +159,7 @@ void WiredHud_Init( void ) {
 	cl_drawHud = Cvar_Register( &d );
 	memset( &wired_hudStateStorage, 0, sizeof( wired_hudStateStorage ) );
 	wiredHud_elementsLoaded = qfalse;
-	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: initialized (Phase 3)\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredHud: initialized (Phase 3)\n" );
 }
 
 void WiredHud_Shutdown( void ) {
@@ -372,7 +374,7 @@ void WiredHud_LoadFromMenus( void ) {
 	int created = 0;
 	int hudOverlayMenus = 0;
 
-	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: scanning %d menus for hudOverlay...\n", menuCount );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredHud: scanning %d menus for hudOverlay...\n", menuCount );
 
 	// iterate all loaded menus
 	for ( int i = 0; i < menuCount; i++ ) {
@@ -384,7 +386,7 @@ void WiredHud_LoadFromMenus( void ) {
 		}
 
 		hudOverlayMenus++;
-		Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: found hudOverlay menu '%s' with %d items\n", menu->name, menu->itemCount );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredHud: found hudOverlay menu '%s' with %d items\n", menu->name, menu->itemCount );
 
 		// this is a HUD overlay menu — create elements from its items
 		for ( int j = 0; j < menu->itemCount; j++ ) {
@@ -397,12 +399,12 @@ void WiredHud_LoadFromMenus( void ) {
 			if ( WiredHud_CreateElement( item->hudElement, &cfg ) ) {
 				created++;
 			} else {
-				COM_WARN( LOG_CAT_UI, "WiredHud: failed to create '%s'\n", item->hudElement );
+				COM_WARN( LOG_CH(ch_ui), "WiredHud: failed to create '%s'\n", item->hudElement );
 			}
 		}
 	}
 
-	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: %d hudOverlay menus, %d elements created, %d active\n",
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredHud: %d hudOverlay menus, %d elements created, %d active\n",
 		hudOverlayMenus, created, WiredHud_GetElementCount() );
 	wiredHud_elementsLoaded = qtrue;
 }

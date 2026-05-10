@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "g_local.h"
 #include "g_character.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 int				g_numArenas;
@@ -73,13 +75,13 @@ int G_ParseInfos( const char *buf, int max, char *infos[] ) {
 		if ( !token[0] ) {
 			break;
 		}
-		if ( strcmp( token, "{" ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Missing { in info file\n" );
+		if ( strcmp( token, "{" ) != 0 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Missing { in info file\n" );
 			break;
 		}
 
 		if ( count == max ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Max infos exceeded\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Max infos exceeded\n" );
 			break;
 		}
 
@@ -87,7 +89,7 @@ int G_ParseInfos( const char *buf, int max, char *infos[] ) {
 		while ( 1 ) {
 			token = COM_ParseExt( &parser, &buf, qtrue );
 			if ( !token[0] ) {
-				Com_Log( SEV_INFO, LOG_CAT_GAME, "Unexpected end of info file\n" );
+				Com_Log( SEV_INFO, LOG_CH(ch_game), "Unexpected end of info file\n" );
 				break;
 			}
 			if ( !strcmp( token, "}" ) ) {
@@ -594,7 +596,7 @@ static void AddBotToSpawnQueue( int clientNum, int delay ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "Unable to delay spawn\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "Unable to delay spawn\n" );
 	ClientBegin( clientNum );
 }
 
@@ -658,8 +660,8 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	// have the server allocate a client slot
 	clientNum = trap_BotAllocateClient();
 	if ( clientNum == -1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_RED "Unable to add bot. All player slots are in use.\n" );
-		Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_RED "Start server with more 'open' slots (or check setting of sv_maxclients cvar).\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_RED "Unable to add bot. All player slots are in use.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_RED "Start server with more 'open' slots (or check setting of sv_maxclients cvar).\n" );
 		return;
 	}
 
@@ -705,7 +707,7 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	}
 
 	if ( !characterInfo ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_RED "Error: Character '%s' not defined\n", name );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_RED "Error: Character '%s' not defined\n", name );
 		trap_BotFreeClient( clientNum );
 		return;
 	}
@@ -926,7 +928,7 @@ void G_InitBots( qboolean restart ) {
 	trap_Cvar_Register( &g_minPlayers, "g_minPlayers", "2", CVAR_SERVERINFO | CVAR_ARCHIVE );
 	trap_Cvar_Register( &g_autoBots, "g_autoBots", "0", CVAR_SERVERINFO | CVAR_ARCHIVE );
 
-	if( g_singlePlayer.integer ) {
+	if( g_gameflags.integer & GF_CAMPAIGN ) {
 		trap_GetServerinfo( serverinfo, sizeof(serverinfo) );
 		Q_strncpyz( map, Info_ValueForKey( serverinfo, "mapname" ), sizeof(map) );
 		arenainfo = G_GetArenaInfoByMap( map );

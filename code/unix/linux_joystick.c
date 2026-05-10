@@ -41,6 +41,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../client/client.h"
 #include "linux_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 /* We translate axes movement into keypresses. */
 int joy_keys[16] = {
@@ -76,7 +78,7 @@ void IN_StartupJoystick( void )
   joy_fd = -1;
 
   if( !in_joystick->integer ) {
-    Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Joystick is not active.\n" );
+    Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Joystick is not active.\n" );
     return;
   }
 
@@ -94,7 +96,7 @@ void IN_StartupJoystick( void )
       char name[128];
       int n = -1;
 
-      Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Joystick %s found\n", filename );
+      Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Joystick %s found\n", filename );
 
       /* Get rid of initialization messages. */
       do {
@@ -114,9 +116,9 @@ void IN_StartupJoystick( void )
 	strncpy( name, "Unknown", sizeof( name ) );
       }
 
-      Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Name:    %s\n", name );
-      Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Axes:    %d\n", axes );
-      Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Buttons: %d\n", buttons );
+      Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Name:    %s\n", name );
+      Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Axes:    %d\n", axes );
+      Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Buttons: %d\n", buttons );
 
       /* Our work here is done. */
       return;
@@ -126,7 +128,7 @@ void IN_StartupJoystick( void )
 
   /* No soup for you. */
   if( joy_fd == -1 ) {
-    Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "No joystick found.\n" );
+    Com_Log( SEV_DEBUG, LOG_CH(ch_system), "No joystick found.\n" );
     return;
   }
 
@@ -172,7 +174,7 @@ void IN_JoyMove( void )
 
       axes_state[event.number] = event.value;
     } else {
-      Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Unknown joystick event type\n" );
+      Com_Log( SEV_INFO, LOG_CH(ch_system), "Unknown joystick event type\n" );
     }
 
   } while( 1 );

@@ -259,7 +259,7 @@ static fuzzyseperator_t *ReadFuzzySeperators_r(source_t *source)
 			FreeFuzzySeperators_r(firstfs);
 			return NULL;
 		} //end if
-	} while(strcmp(token.string, "}"));
+	} while(strcmp(token.string, "}") != 0);
 	//
 	if (!founddefault)
 	{
@@ -586,27 +586,28 @@ static float FuzzyWeight_r(int *inventory, fuzzyseperator_t *fs)
 	if (inventory[fs->index] < fs->value)
 	{
 		if (fs->child) return FuzzyWeight_r(inventory, fs->child);
-		else return fs->weight;
+		return fs->weight;
 	} //end if
-	else if (fs->next)
-	{
-		if (inventory[fs->index] < fs->next->value)
-		{
+	if ( fs->next ) {
+		if ( inventory[fs->index] < fs->next->value ) {
 			//first weight
-			if (fs->child) w1 = FuzzyWeight_r(inventory, fs->child);
-			else w1 = fs->weight;
-			//second weight
-			if (fs->next->child) w2 = FuzzyWeight_r(inventory, fs->next->child);
-			else w2 = fs->next->weight;
-			//the scale factor
-			if(fs->next->value == MAX_INVENTORYVALUE) // is fs->next the default case?
-        		return w2;      // can't interpolate, return default weight
+			if ( fs->child )
+				w1 = FuzzyWeight_r( inventory, fs->child );
 			else
-				scale = (float) (inventory[fs->index] - fs->value) / (fs->next->value - fs->value);
+				w1 = fs->weight;
+			//second weight
+			if ( fs->next->child )
+				w2 = FuzzyWeight_r( inventory, fs->next->child );
+			else
+				w2 = fs->next->weight;
+			//the scale factor
+			if ( fs->next->value == MAX_INVENTORYVALUE ) // is fs->next the default case?
+				return w2;								 // can't interpolate, return default weight
+			scale = (float)( inventory[fs->index] - fs->value ) / ( fs->next->value - fs->value );
 			//scale between the two weights
-			return (1 - scale) * w1 + scale * w2;
+			return ( 1 - scale ) * w1 + scale * w2;
 		} //end if
-		return FuzzyWeight_r(inventory, fs->next);
+		return FuzzyWeight_r( inventory, fs->next );
 	} //end else if
 	return fs->weight;
 } //end of the function FuzzyWeight_r
@@ -623,27 +624,28 @@ static float FuzzyWeightUndecided_r(int *inventory, fuzzyseperator_t *fs)
 	if (inventory[fs->index] < fs->value)
 	{
 		if (fs->child) return FuzzyWeightUndecided_r(inventory, fs->child);
-		else return fs->minweight + random() * (fs->maxweight - fs->minweight);
+		return fs->minweight + random() * ( fs->maxweight - fs->minweight );
 	} //end if
-	else if (fs->next)
-	{
-		if (inventory[fs->index] < fs->next->value)
-		{
+	if ( fs->next ) {
+		if ( inventory[fs->index] < fs->next->value ) {
 			//first weight
-			if (fs->child) w1 = FuzzyWeightUndecided_r(inventory, fs->child);
-			else w1 = fs->minweight + random() * (fs->maxweight - fs->minweight);
-			//second weight
-			if (fs->next->child) w2 = FuzzyWeight_r(inventory, fs->next->child);
-			else w2 = fs->next->minweight + random() * (fs->next->maxweight - fs->next->minweight);
-			//the scale factor
-			if(fs->next->value == MAX_INVENTORYVALUE) // is fs->next the default case?
-        		return w2;      // can't interpolate, return default weight
+			if ( fs->child )
+				w1 = FuzzyWeightUndecided_r( inventory, fs->child );
 			else
-				scale = (float) (inventory[fs->index] - fs->value) / (fs->next->value - fs->value);
+				w1 = fs->minweight + random() * ( fs->maxweight - fs->minweight );
+			//second weight
+			if ( fs->next->child )
+				w2 = FuzzyWeight_r( inventory, fs->next->child );
+			else
+				w2 = fs->next->minweight + random() * ( fs->next->maxweight - fs->next->minweight );
+			//the scale factor
+			if ( fs->next->value == MAX_INVENTORYVALUE ) // is fs->next the default case?
+				return w2;								 // can't interpolate, return default weight
+			scale = (float)( inventory[fs->index] - fs->value ) / ( fs->next->value - fs->value );
 			//scale between the two weights
-			return (1 - scale) * w1 + scale * w2;
+			return ( 1 - scale ) * w1 + scale * w2;
 		} //end if
-		return FuzzyWeightUndecided_r(inventory, fs->next);
+		return FuzzyWeightUndecided_r( inventory, fs->next );
 	} //end else if
 	return fs->weight;
 } //end of the function FuzzyWeightUndecided_r

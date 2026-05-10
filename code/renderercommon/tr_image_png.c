@@ -368,6 +368,7 @@ static qboolean BufferedFileRewind(struct BufferedFile *BF, unsigned Offset)
 	 *  How many bytes do we have already read?
 	 */
 
+	// NOLINTNEXTLINE(clang-analyzer-core.NullPointerArithm) — BF->Ptr and BF->Buffer are both inside the same allocation; pointer subtraction is well-defined
 	BytesRead = BF->Ptr - BF->Buffer;
 
 	/*
@@ -481,18 +482,14 @@ static qboolean FindChunk(struct BufferedFile *BF, uint32_t ChunkType)
 
 			break;
 		}
-		else
-		{
-			/*
+
+		/*
 			 *  Skip the rest of the chunk.
 			 */
 
-			if(Length)
-			{
-				if(!BufferedFileSkip(BF, Length + PNG_ChunkCRC_Size))
-				{
-					return(qfalse);
-				}  
+		if ( Length ) {
+			if ( !BufferedFileSkip( BF, Length + PNG_ChunkCRC_Size ) ) {
+				return ( qfalse );
 			}
 		}
 	}
@@ -1982,7 +1979,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  Is it a PNG?
 	 */
 
-	if(memcmp(Signature, PNG_Signature, PNG_Signature_Size))
+	if(memcmp(Signature, PNG_Signature, PNG_Signature_Size) != 0)
 	{
 		CloseBufferedFile(ThePNG);
 

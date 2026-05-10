@@ -7,9 +7,9 @@ Sources:
   Sys_NanoTime          ← code/qcommon/common.c
   Sys_Milliseconds      ← code/unix/unix_shared.c (POSIX) +
                           code/win32/win_shared.c (Win32), merged via #ifdef
-  Com_RealTime          ← code/qcommon/wired/core/shell/log.c
-  Com_RealTimeMs        ← code/qcommon/wired/core/shell/log.c (added Cephe B-0b)
-  Com_FormatTimestamp   ← code/qcommon/wired/core/shell/log.c (was Log_FormatTimestamp)
+  Com_RealTime          ← code/qcommon/wired/core/logging/log.c
+  Com_RealTimeMs        ← code/qcommon/wired/core/logging/log.c (added Cephe B-0b)
+  Com_FormatTimestamp   ← code/qcommon/wired/core/logging/log.c (was Log_FormatTimestamp)
 
 sys_timeBase is a non-static global so that Sys_XTimeToSysTime in
 code/unix/linux_glimp.c can reference it via `extern unsigned long sys_timeBase`
@@ -29,6 +29,7 @@ requiring a touch on linux_glimp.c.
 #  include <time.h>       /* time(), _localtime64_s, struct tm */
 #endif
 
+// NOLINTNEXTLINE(readability-duplicate-include) — distinct from the system <time.h> above
 #include "time.h"   /* own public header; pulls in q_shared.h → qtime_t, int64_t */
 
 // -------------------------------------------------------------------------
@@ -138,7 +139,7 @@ int Sys_Milliseconds( void )
 // -------------------------------------------------------------------------
 // Com_RealTime
 // -------------------------------------------------------------------------
-// Moved from code/qcommon/wired/core/shell/log.c.
+// Moved from code/qcommon/wired/core/logging/log.c.
 int Com_RealTime( qtime_t *qtime ) {
 	time_t t = time( NULL );
 	if ( !qtime )
@@ -205,7 +206,7 @@ int64_t Com_RealTimeMs( qtime_t *qtime ) {
 // -------------------------------------------------------------------------
 // Com_FormatTimestamp
 // -------------------------------------------------------------------------
-// Moved from code/qcommon/wired/core/shell/log.c (was Log_FormatTimestamp,
+// Moved from code/qcommon/wired/core/logging/log.c (was Log_FormatTimestamp,
 // renamed to Com_FormatTimestamp in Cephe B-0b).
 // All fields derived from a single clock read so seconds and ms never mismatch.
 // Timezone offset derived from the process's system TZ (TZ env / /etc/localtime).

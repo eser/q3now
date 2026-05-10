@@ -2,6 +2,8 @@
 
 #include "q_shared.h"
 #include "qcommon.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 static      qboolean historyLoaded = qfalse;
 
@@ -144,7 +146,7 @@ static void Con_LoadHistory( void )
 	int consoleSaveBufferSize = FS_Home_FOpenFileRead( CONSOLE_HISTORY_FILE, &f );
 	if ( f == FS_INVALID_HANDLE )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't read %s.\n", CONSOLE_HISTORY_FILE );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Couldn't read %s.\n", CONSOLE_HISTORY_FILE );
 		return;
 	}
 
@@ -177,7 +179,7 @@ static void Con_LoadHistory( void )
 			text_p++;
 			if ( numChars > ( consoleSaveBufferSize - ( text_p - consoleSaveBuffer ) ) || numChars >= sizeof( edit->buffer ) )
 			{
-				Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "WARNING: probable corrupt history\n" );
+				Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "WARNING: probable corrupt history\n" );
 				break;
 			}
 
@@ -206,7 +208,7 @@ static void Con_LoadHistory( void )
 		historyLine = nextHistoryLine = numLines;
 	}
 	else
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't read %s.\n", CONSOLE_HISTORY_FILE );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Couldn't read %s.\n", CONSOLE_HISTORY_FILE );
 
 	FS_FCloseFile( f );
 }
@@ -251,12 +253,12 @@ static void Con_SaveHistory( void )
 	fileHandle_t f = FS_FOpenFileWrite( CONSOLE_HISTORY_FILE );
 	if( f == FS_INVALID_HANDLE )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't write %s.\n", CONSOLE_HISTORY_FILE );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Couldn't write %s.\n", CONSOLE_HISTORY_FILE );
 		return;
 	}
 
 	if( FS_Write( consoleSaveBuffer, consoleSaveBufferSize, f ) < consoleSaveBufferSize )
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't write %s.\n", CONSOLE_HISTORY_FILE );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Couldn't write %s.\n", CONSOLE_HISTORY_FILE );
 
 	FS_FCloseFile( f );
 }

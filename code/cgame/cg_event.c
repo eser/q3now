@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 // for the voice chats
 #include "../qcommon/menudef.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 //==========================================================================
 
 /*
@@ -204,7 +206,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	}
 
 	if (message) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s %s.\n", CG_ClientNameByNum( target ), message);
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s %s.\n", CG_ClientNameByNum( target ), message);
 #if FEAT_WIRED_UI
 		trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
 			va( "%d|%d|%d|%d", attacker, target, mod, 0 ) );
@@ -317,7 +319,7 @@ static void CG_Obituary( entityState_t *ent ) {
 		}
 
 		if (message) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s %s %s%s\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s %s %s%s\n",
 				CG_ClientNameByNum( target ), message, CG_ClientNameByNum( attacker ), message2);
 #if FEAT_WIRED_UI
 			trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
@@ -328,7 +330,7 @@ static void CG_Obituary( entityState_t *ent ) {
 	}
 
 	// we don't know what it was
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s died.\n", CG_ClientNameByNum( target ) );
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s died.\n", CG_ClientNameByNum( target ) );
 #if FEAT_WIRED_UI
 	trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
 		va( "%d|%d|%d|%d", ENTITYNUM_WORLD, target, mod, 0 ) );
@@ -516,7 +518,7 @@ An entity has an event value
 also called by CG_CheckPlayerstateEvents
 ==============
 */
-#define	DEBUGNAME(x) if(cg_debugEvents.integer){Com_Log( SEV_INFO, LOG_CAT_CGAME, x"\n");}
+#define	DEBUGNAME(x) if(cg_debugEvents.integer){Com_Log( SEV_INFO, LOG_CH(ch_cgame), x"\n");}
 void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	entityState_t	*es;
 	int				event;
@@ -530,7 +532,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 	event = es->event & ~EV_EVENT_BITS;
 
 	if ( cg_debugEvents.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "ent:%3i  event:%3i ", es->number, event );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "ent:%3i  event:%3i ", es->number, event );
 	}
 
 	if ( !event ) {
@@ -663,7 +665,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 
 	case EV_JUMP_PAD:
 		DEBUGNAME("EV_JUMP_PAD");
-//		Com_Log( SEV_INFO, LOG_CAT_CGAME, "EV_JUMP_PAD w/effect #%i\n", es->eventParm );
+//		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "EV_JUMP_PAD w/effect #%i\n", es->eventParm );
 		{
 			vec3_t			up = {0, 0, 1};
 

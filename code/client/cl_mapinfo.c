@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "../qcommon/qfiles.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 clMapInfo_t cl_mapInfo;
 
@@ -283,7 +285,7 @@ void CL_LoadMapInfo( const char *mapname ) {
 		if ( FS_Read( text, fileLen, f ) == fileLen ) {
 			text[fileLen] = '\0';
 			CL_MapInfo_ParseMeta( text, fileLen );
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_LoadMapInfo: loaded %s\n", path );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_LoadMapInfo: loaded %s\n", path );
 		}
 		Z_Free( text );
 		FS_FCloseFile( f );
@@ -305,7 +307,7 @@ void CL_LoadMapInfo( const char *mapname ) {
 			}
 			BSP_Free( bsp );
 		} else {
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_LoadMapInfo: no BSP found at %s\n", bspPath );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_LoadMapInfo: no BSP found at %s\n", bspPath );
 		}
 	}
 
@@ -320,7 +322,7 @@ void CL_LoadMapInfo( const char *mapname ) {
 		cl_mapInfo.itemNodes = count;
 	}
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_LoadMapInfo: %s -> longName=\"%s\", author=\"%s\", sky=\"%s\", items=%d, meta=%s\n",
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_LoadMapInfo: %s -> longName=\"%s\", author=\"%s\", sky=\"%s\", items=%d, meta=%s\n",
 		cl_mapInfo.mapName,
 		cl_mapInfo.longName,
 		cl_mapInfo.author,

@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // It also handles local physics interaction, like fragments bouncing off walls
 
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 static	pmove_t		cg_pmove;
 
@@ -141,7 +143,7 @@ static void CG_ClipMoveToEntities ( const vec3_t start, const vec3_t mins, const
 CG_Trace
 ================
 */
-void	CG_Trace( trace_t *result, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, 
+void	CG_Trace( trace_t *result, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end,
 					 int skipNumber, int mask ) {
 	trace_t	t;
 
@@ -242,10 +244,10 @@ static void CG_InterpolatePlayerState( qboolean grabAngles ) {
 	for ( i = 0 ; i < 3 ; i++ ) {
 		out->origin[i] = prev->ps.origin[i] + f * (next->ps.origin[i] - prev->ps.origin[i] );
 		if ( !grabAngles ) {
-			out->viewangles[i] = LerpAngle( 
+			out->viewangles[i] = LerpAngle(
 				prev->ps.viewangles[i], next->ps.viewangles[i], f );
 		}
-		out->velocity[i] = prev->ps.velocity[i] + 
+		out->velocity[i] = prev->ps.velocity[i] +
 			f * (next->ps.velocity[i] - prev->ps.velocity[i] );
 	}
 
@@ -277,7 +279,7 @@ static void CG_TouchItem( centity_t *cent ) {
 
 	item = &bg_itemlist[ cent->currentState.modelindex ];
 
-	// Special case for flags.  
+	// Special case for flags.
 	// We don't predict touching our own flag
 	if( cgs.gametype == GT_1FCTF ) {
 		if( item->giType == IT_TEAM && item->giTag != PW_NEUTRALFLAG ) {
@@ -356,7 +358,7 @@ static void CG_TouchTriggerPrediction( void ) {
 			continue;
 		}
 
-		trap_CM_BoxTrace( &trace, cg.predictedPlayerState.origin, cg.predictedPlayerState.origin, 
+		trap_CM_BoxTrace( &trace, cg.predictedPlayerState.origin, cg.predictedPlayerState.origin,
 			cg_pmove.mins, cg_pmove.maxs, cmodel, -1 );
 
 		if ( !trace.startsolid ) {
@@ -369,7 +371,7 @@ static void CG_TouchTriggerPrediction( void ) {
             if (cg.predictedPlayerEntity.pe.grappleFiring) {
                 continue;
             }
-            
+
             BG_TouchJumpPad(&cg.predictedPlayerState, ent);
 		}
 	}
@@ -464,10 +466,10 @@ void CG_PredictPlayerState( void ) {
 	// the last good position we had
 	cmdNum = current - CMD_BACKUP + 1;
 	trap_GetUserCmd( cmdNum, &oldestCmd );
-	if ( oldestCmd.serverTime > cg.snap->ps.commandTime 
+	if ( oldestCmd.serverTime > cg.snap->ps.commandTime
 		&& oldestCmd.serverTime < cg.time ) {	// special check for map_restart
 		if ( cg_showmiss.integer ) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, "exceeded PACKET_BACKUP on commands\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "exceeded PACKET_BACKUP on commands\n");
 		}
 		return;
 	}
@@ -477,7 +479,7 @@ void CG_PredictPlayerState( void ) {
 
 	// get the most recent information we have, even if
 	// the server time is beyond our current cg.time,
-	// because predicted player positions are going to 
+	// because predicted player positions are going to
 	// be ahead of everything else anyway
 #if FEAT_FPS_IMPROVEMENTS
 	if ( cg.nextSnap && !cg.nextFrameTeleport && !cg.thisFrameTeleport
@@ -506,9 +508,6 @@ void CG_PredictPlayerState( void ) {
 	// build pmove_flags bitmask from feature cvars (mirrors g_active.c)
 	cg_pmove.pmove_flags = 0;
 
-	if ( pmove_overbounce.integer ) {
-		cg_pmove.pmove_flags |= PMF_OVERBOUNCE;
-	}
 
 #if FEAT_FAST_WEAPON_SWITCH
 	// fast weapon switch (5A): map cvar value to 2-bit pmove_flags
@@ -549,24 +548,24 @@ void CG_PredictPlayerState( void ) {
 				// a teleport will not cause an error decay
 				VectorClear( cg.predictedError );
 				if ( cg_showmiss.integer ) {
-					Com_Log( SEV_INFO, LOG_CAT_CGAME, "PredictionTeleport\n" );
+					Com_Log( SEV_INFO, LOG_CH(ch_cgame), "PredictionTeleport\n" );
 				}
 				cg.thisFrameTeleport = qfalse;
 			} else {
 				vec3_t adjusted, new_angles;
-				CG_AdjustPositionForMover( cg.predictedPlayerState.origin, 
+				CG_AdjustPositionForMover( cg.predictedPlayerState.origin,
 				cg.predictedPlayerState.groundEntityNum, cg.physicsTime, cg.oldTime, adjusted, cg.predictedPlayerState.viewangles, new_angles);
 
 				if ( cg_showmiss.integer ) {
 					if (!VectorCompare( oldPlayerState.origin, adjusted )) {
-						Com_Log( SEV_INFO, LOG_CAT_CGAME, "prediction error\n");
+						Com_Log( SEV_INFO, LOG_CH(ch_cgame), "prediction error\n");
 					}
 				}
 				VectorSubtract( oldPlayerState.origin, adjusted, delta );
 				len = VectorLength( delta );
 				if ( len > 0.1 ) {
 					if ( cg_showmiss.integer ) {
-						Com_Log( SEV_INFO, LOG_CAT_CGAME, "Prediction miss: %f\n", len);
+						Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Prediction miss: %f\n", len);
 					}
 					if ( cg_errorDecay.integer ) {
 						int		t;
@@ -578,7 +577,7 @@ void CG_PredictPlayerState( void ) {
 							f = 0;
 						}
 						if ( f > 0 && cg_showmiss.integer ) {
-							Com_Log( SEV_INFO, LOG_CAT_CGAME, "Double prediction decay: %f\n", f);
+							Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Double prediction decay: %f\n", f);
 						}
 						VectorScale( cg.predictedError, f, cg.predictedError );
 					} else {
@@ -610,24 +609,24 @@ void CG_PredictPlayerState( void ) {
 	}
 
 	if ( cg_showmiss.integer > 1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "[%i : %i] ", cg_pmove.cmd.serverTime, cg.time );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "[%i : %i] ", cg_pmove.cmd.serverTime, cg.time );
 	}
 
 	if ( !moved ) {
 		if ( cg_showmiss.integer ) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, "not moved\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "not moved\n" );
 		}
 		return;
 	}
 
 	// adjust for the movement of the groundentity
-	CG_AdjustPositionForMover( cg.predictedPlayerState.origin, 
-		cg.predictedPlayerState.groundEntityNum, 
+	CG_AdjustPositionForMover( cg.predictedPlayerState.origin,
+		cg.predictedPlayerState.groundEntityNum,
 		cg.physicsTime, cg.time, cg.predictedPlayerState.origin, cg.predictedPlayerState.viewangles, cg.predictedPlayerState.viewangles);
 
 	if ( cg_showmiss.integer ) {
 		if (cg.predictedPlayerState.eventSequence > oldPlayerState.eventSequence + MAX_PS_EVENTS) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, "WARNING: dropped event\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "WARNING: dropped event\n");
 		}
 	}
 
@@ -636,7 +635,7 @@ void CG_PredictPlayerState( void ) {
 
 	if ( cg_showmiss.integer ) {
 		if (cg.eventSequence > cg.predictedPlayerState.eventSequence) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, "WARNING: double event\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "WARNING: double event\n");
 			cg.eventSequence = cg.predictedPlayerState.eventSequence;
 		}
 	}

@@ -131,13 +131,13 @@ struct gentity_s {
 	char		*model;
 	char		*model2;
 	int			freetime;			// level.time when the object was freed
-	
+
 	int			eventTime;			// events will be cleared EVENT_VALID_MSEC after set
 	qboolean	freeAfterEvent;
 	qboolean	unlinkAfterEvent;
 
 	qboolean	physicsObject;		// if true, it can be pushed by movers and fall off edges
-									// all game items are physicsObjects, 
+									// all game items are physicsObjects,
 	float		physicsBounce;		// 1.0 = continuous bounce, 0.0 = no bounce
 	int			clipmask;			// brushes with this content value will be collided against
 									// when moving.  items and corpses do not collide against
@@ -870,6 +870,7 @@ extern	gentity_t		g_entities[MAX_GENTITIES];
 extern	qboolean	g_gametypeIsTeamGame;
 
 extern	vmCvar_t	g_gametype;
+extern	vmCvar_t	g_gameflags;
 extern	vmCvar_t	g_dedicated;
 extern	vmCvar_t	g_cheats;
 extern	vmCvar_t	g_maxclients;			// allow this many total, including spectators
@@ -899,7 +900,6 @@ extern	vmCvar_t	g_obeliskRespawnDelay;
 extern	vmCvar_t	g_smoothClients;
 extern	vmCvar_t	pmove_fixed;
 extern	vmCvar_t	pmove_msec;
-extern	vmCvar_t	pmove_overbounce;
 extern	vmCvar_t	pm_step_debug;
 extern	vmCvar_t	g_rankings;
 extern	vmCvar_t	g_envGroundDusty;
@@ -913,7 +913,6 @@ extern  vmCvar_t	g_grapple;
 extern	vmCvar_t	g_noFootsteps;
 extern	vmCvar_t	g_kothGhosts;
 
-extern	vmCvar_t	g_singlePlayer;
 #if FEAT_UNLAGGED
 extern  vmCvar_t	g_unlagged;
 #endif

@@ -2,6 +2,8 @@
 
 #include "server.h"
 #include "sv_bot_awareness.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 // ── Internal state ────────────────────────────────────────────────────────────
 
@@ -149,7 +151,7 @@ static void SV_BotAwareness_OnEvent( const wce_event_data_t *ev, void *userdata 
 
             // state-change log: at most one line per bot per 2 seconds
             if ( bot_debug->integer >= 1 && sv.time - st->lastLogSvTime > 2000 ) {
-                Com_Log( SEV_INFO, LOG_CAT_SERVER, "BotAwareness: client=%d heard ev=%d src=%d dist=%.0f vol=%.2f\n",
+                Com_Log( SEV_INFO, LOG_CH(ch_server), "BotAwareness: client=%d heard ev=%d src=%d dist=%.0f vol=%.2f\n",
                     i, (int)ev->type, ev->clientNum, dist, volume );
                 st->lastLogSvTime = sv.time;
             }

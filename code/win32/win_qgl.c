@@ -38,6 +38,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../renderercommon/tr_types.h"
 #include "glw_win.h"
 #include "win_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #define GLE( ret, name, ... ) ret ( APIENTRY * q##name )( __VA_ARGS__ );
 QGL_Win32_PROCS;
@@ -52,11 +54,11 @@ QGL_Swp_PROCS;
 */
 void QGL_Shutdown( qboolean unloadDLL )
 {
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...shutting down QGL\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "...shutting down QGL\n" );
 
 	if ( glw_state.OpenGLLib && unloadDLL )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...unloading OpenGL DLL\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...unloading OpenGL DLL\n" );
 		Sys_UnloadLibrary( glw_state.OpenGLLib );
 		glw_state.OpenGLLib = NULL;
 	}
@@ -110,7 +112,7 @@ qboolean QGL_Init( const char *dllname )
 #endif
 #endif
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...initializing QGL\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "...initializing QGL\n" );
 
 	if ( glw_state.OpenGLLib == NULL )
 	{
@@ -127,7 +129,7 @@ qboolean QGL_Init( const char *dllname )
 		glw_state.OpenGLLib = Sys_LoadLibrary( libName );
 		if ( glw_state.OpenGLLib == NULL )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : " S_COLOR_YELLOW "failed\n", libName );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "...loading '%s' : " S_COLOR_YELLOW "failed\n", libName );
 			return qfalse;
 		}
 
@@ -140,12 +142,12 @@ qboolean QGL_Init( const char *dllname )
 		GetModuleFileName( glw_state.OpenGLLib, libName, sizeof( libName ) );
 		libName[ sizeof( libName ) - 1 ] = '\0';
 #endif
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : succeeded\n", libName );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...loading '%s' : succeeded\n", libName );
 	}
 
 	Sys_LoadFunctionErrors(); // reset error count
 
-#define GLE( ret, name, ... ) q##name = GL_GetProcAddress( XSTRING( name ) ); if ( !q##name ) { Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Error resolving core Win32 functions\n" ); return qfalse; }
+#define GLE( ret, name, ... ) q##name = GL_GetProcAddress( XSTRING( name ) ); if ( !q##name ) { Com_Log( SEV_INFO, LOG_CH(ch_system), "Error resolving core Win32 functions\n" ); return qfalse; }
 	QGL_Win32_PROCS;
 #undef GLE
 

@@ -19,6 +19,8 @@ sv_game.c should pass:
 
 #include "../q_shared.h"
 #include "../q_feats.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_nav, "nav" );
 
 #if FEAT_RECAST_NAVMESH
 
@@ -112,7 +114,7 @@ intptr_t Nav_HandleTrap( int trap, const intptr_t *args, byte *vmBase )
         return 0;
 
     default:
-        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: Nav_HandleTrap: unknown trap %d\n", trap );
+        Com_Log( SEV_DEBUG, LOG_CH(ch_nav), "NAV: Nav_HandleTrap: unknown trap %d\n", trap );
         return 0;
     }
 }

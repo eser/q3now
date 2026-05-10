@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_types.h"
 #include "vulkan/vulkan.h"
 #include "../qcommon/asset_load_log.h"
+#include "../qcommon/wired/render/primitives.h"
+#include "../qcommon/wired/render/particle_class.h"
 
 typedef struct bspFile_s bspFile_t;
 
@@ -81,6 +83,14 @@ typedef struct {
 	qhandle_t (*RegisterShaderNoMip)( const char *name );
 	qhandle_t (*RegisterShaderLightMap)( const char *name, int lightmapIndex );
 	qhandle_t (*RegisterMSDFShader)( const char *name, float distanceRange, int atlasWidth, int atlasHeight );
+	// Like RegisterShader, but additionally writes the resolved shader's
+	// stages[0]→bundle[0]→image[0] into the wired primitive shader image
+	// registry (vk_primitive_shader_images[]) so that ribbon / beam /
+	// other primitive pipelines can sample the texture by handle. Returns
+	// the same qhandle_t RegisterShader would; use this for shader
+	// handles that will be passed to trap_R_AddRibbonToScene or
+	// trap_R_AddBeamToScene.
+	qhandle_t (*RegisterPrimitiveShader)( const char *name );
 	void	(*LoadWorld)( const bspFile_t *bsp );
 
 	// the vis data is a large enough block of data that we go to the trouble
@@ -100,7 +110,16 @@ typedef struct {
 	void	(*AddLightToScene)( const vec3_t org, float intensity, float r, float g, float b );
 	void	(*AddAdditiveLightToScene)( const vec3_t org, float intensity, float r, float g, float b );
 	void	(*AddLinearLightToScene)( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
-	void	(*AddRailTrailParams)( const railTrailParams_t *params );
+
+	// ── primitive submission (wired/render) — generic, effect-agnostic ──
+	void	(*AddRibbonToScene)  ( const ribbonDesc_t  *desc );
+	void	(*AddBeamToScene)    ( const beamDesc_t    *desc );
+	void	(*AddSpriteToScene)  ( const spriteDesc_t  *desc );
+	void	(*EmitParticles)     ( const emitterDesc_t *desc );
+	void	(*AddDecalToScene)   ( const decalDesc_t   *desc );
+	void	(*RegisterParticleClass)( particleClassHandle_t handle,
+	                                  const particleClass_t *cls );
+
 	void	(*RenderScene)( const refdef_t *fd );
 
 	void	(*SetColor)( const float *rgba );	// NULL = 1,1,1,1
@@ -177,7 +196,7 @@ typedef struct {
 	int		(*GetIQMAnimations)( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );
 #endif // FEAT_IQM
 
-	// Set lightstyle pattern string at runtime (Faz 1+).
+	// Set lightstyle pattern string at runtime (Phase 1+).
 	// style in [0,63]; pattern is a NUL-terminated string up to LIGHTSTYLE_PATTERN_MAX chars.
 	// Stores the pattern and derives a float value for backward-compat with the float path.
 	void	(*SetLightstylePattern)( int style, const char *pattern );

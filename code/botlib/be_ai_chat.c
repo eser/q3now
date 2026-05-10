@@ -1472,8 +1472,7 @@ static int StringsMatch(bot_matchpiece_t *pieces, bot_match_t *match)
 						lastvariable = -1;
 						break;
 					} //end if
-					else if (index == 0)
-					{
+					if ( index == 0 ) {
 						break;
 					} //end else
 					newstrptr = NULL;
@@ -1927,7 +1926,7 @@ static bot_replychat_t *BotLoadReplyChat( const char *filename )
 	//
 	while(PC_ReadToken(source, &token))
 	{
-		if (strcmp(token.string, "["))
+		if (strcmp(token.string, "[") != 0)
 		{
 			SourceError(source, "expected [, found %s", token.string);
 			BotFreeReplyChat(replychatlist);
@@ -2160,7 +2159,7 @@ static bot_chat_t *BotLoadInitialChat(const char *chatfile, const char *chatname
 							return NULL;
 						} //end if
 						if (!strcmp(token.string, "}")) break;
-						if (strcmp(token.string, "type"))
+						if (strcmp(token.string, "type") != 0)
 						{
 							SourceError(source, "expected type found %s", token.string);
 							FreeSource(source);

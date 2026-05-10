@@ -21,6 +21,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 /*
@@ -211,7 +213,7 @@ void G_InitWorldSession( void ) {
 	// client sessions
 	if ( g_gametype.integer != gt ) {
 		level.newSession = qtrue;
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Gametype changed, clearing session data.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Gametype changed, clearing session data.\n" );
 	}
 }
 

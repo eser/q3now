@@ -5,7 +5,7 @@
 # Usage:
 #   docker build -t q3now-server .
 #   docker run -p 27960:27960/udp \
-#     -v ./baseq3:/home/q3now/baseq3 \
+#     -v ./baseq3:/home/wired/baseq3 \
 #     eserozvataf/q3now +map q3dm17
 #
 # One UDP port serves all clients — QUIC (WebTransport) and legacy Q3 protocol
@@ -70,11 +70,11 @@ RUN ARCH=$(uname -m) && \
       armv7l)  BINEXT=".arm" ;; \
       *)       BINEXT="" ;; \
     esac && \
-    cmake --build build --target "q3now-ded${BINEXT}" \
+    cmake --build build --target "wired-ded${BINEXT}" \
       cgame_baseq3 qagame_baseq3 \
       qagame_wasm cgame_wasm \
       --parallel $(nproc) && \
-    cp "build/q3now-ded${BINEXT}" /tmp/q3now-ded
+    cp "build/wired-ded${BINEXT}" /tmp/wired-ded
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -85,33 +85,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         openssl \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd -g 1000 q3now \
-    && useradd -u 1000 -g q3now -m -d /home/q3now -s /bin/sh q3now
+    && groupadd -g 1000 wired \
+    && useradd -u 1000 -g wired -m -d /home/wired -s /bin/sh wired
 
 # Install dedicated server binary (arch-independent path)
-COPY --from=builder /tmp/q3now-ded /opt/q3now/q3now-ded
+COPY --from=builder /tmp/wired-ded /opt/wired/wired-ded
 
 # Install game modules (native .so + WASM .wasm)
-COPY --from=builder /src/build/Release/baseq3/ /opt/q3now/baseq3/
+COPY --from=builder /src/build/Release/baseq3/ /opt/wired/baseq3/
 
 # Install default server config
-COPY modfiles/config_server.cfg /opt/q3now/baseq3/config_server.cfg
+COPY modfiles/config_server.cfg /opt/wired/baseq3/config_server.cfg
 
 # Install entrypoint
-COPY docker/entrypoint.sh /opt/q3now/entrypoint.sh
-RUN chmod +x /opt/q3now/entrypoint.sh /opt/q3now/q3now-ded
+COPY docker/entrypoint.sh /opt/wired/entrypoint.sh
+RUN chmod +x /opt/wired/entrypoint.sh /opt/wired/wired-ded
 
 # Create writable homepath directory for volume mounts
-# Operators mount game assets (pak files, configs) at /home/q3now/baseq3
-RUN mkdir -p /home/q3now/baseq3 /home/q3now/certs \
-    && chown -R q3now:q3now /home/q3now
+# Operators mount game assets (pak files, configs) at /home/wired/baseq3
+RUN mkdir -p /home/wired/baseq3 /home/wired/certs \
+    && chown -R wired:wired /home/wired
 
 # Single UDP port for all traffic — QUIC and the legacy Q3 protocol share
 # the same socket; the engine demultiplexes on the first bytes of each packet.
 EXPOSE 27960/udp
 
-USER q3now
-WORKDIR /opt/q3now
+USER wired
+WORKDIR /opt/wired
 
-ENTRYPOINT ["/opt/q3now/entrypoint.sh"]
+ENTRYPOINT ["/opt/wired/entrypoint.sh"]
 CMD ["+map", "q3dm17"]

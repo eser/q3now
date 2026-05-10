@@ -2,7 +2,11 @@
 #define G_BOT_SCRIPTS_SHARED_H
 
 #include "../../../qcommon/q_shared.h"
-#include "../../bg_public.h"
+// This header is consumed by both game-module bot AI code AND by the
+// engine-side server bot-scripting bridge (sv_lua.h). To keep the engine
+// free of any game-side header dependency, source the protocol-shared
+// types (WP_NUM_WEAPONS, gitem_t, etc.) from wired/protocol.h directly.
+#include "../../../qcommon/wired/protocol.h"
 
 #define WB_WEAPONKEY_STR 16
 #define WB_ITEMTYPE_STR 32

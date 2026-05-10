@@ -1,6 +1,6 @@
 /*
 ===========================================================================
-wired_scripting.h -- Headless LuaJIT runtime for q3now
+wired_scripting.h -- Headless LuaJIT runtime for the wired engine
 
 Common Lua scripting layer shared by client and dedicated server.
 Provides: LuaJIT VM, sandbox, cvar metatable bridge, print -> Com_Log,

@@ -62,11 +62,6 @@ cvar_t	*r_defaultFogParmsType;
 cvar_t	*r_globalLinearFogDrawSky;
 #endif
 
-cvar_t	*r_railWidth;
-cvar_t	*r_railCoreWidth;
-cvar_t	*r_railSegmentLength;
-cvar_t	*r_railGPU;
-
 cvar_t	*r_detailTextures;
 
 cvar_t	*r_znear;
@@ -77,7 +72,7 @@ cvar_t	*r_skipBackEnd;
 
 //cvar_t	*r_anaglyphMode;
 
-cvar_t	*r_greyscale;
+cvar_t	*r_saturation;
 cvar_t	*r_dither;
 cvar_t	*r_presentBits;
 #if FEAT_DEPTH_CLAMP
@@ -130,6 +125,7 @@ cvar_t	*r_ssao;
 #endif
 #if FEAT_TONEMAP
 cvar_t	*r_tonemap;
+cvar_t	*r_tonemapExposure;
 #endif
 #if FEAT_COLOR_GRADING
 cvar_t	*r_colorGrading;
@@ -209,11 +205,10 @@ cvar_t	*r_portalOnly;
 cvar_t	*r_subdivisions;
 cvar_t	*r_lodCurveError;
 
-cvar_t	*r_overBrightBits;
-cvar_t	*r_mapOverBrightBits;
 cvar_t	*r_brightness;
 cvar_t	*r_mapBrightness;
-cvar_t	*r_mapGreyScale;
+cvar_t	*r_mapSaturation;
+cvar_t	*r_lightmapSaturation;
 
 cvar_t	*r_debugSurface;
 cvar_t	*r_simpleMipMaps;
@@ -305,15 +300,24 @@ static void R_ClearSymTables( void )
 
 // for modular renderer
 #ifdef USE_RENDERER_DLOPEN
-void QDECL Com_Log_Impl( log_severity_t severity, logCategory_t cat, const char *fmt, ... )
+void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *fmt, ... )
 {
 	char buf[ MAXPRINTMSG ];
 	va_list	argptr;
-	(void)cat;
+	(void)channel;  // renderer DLL routes everything through ri.Log → "renderer"
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
 	ri.Log( severity, "%s", buf );
+}
+
+// Stub for q_shared.c's LOG_CH expansion. The renderer DLL has no access
+// to the engine's channel registry; everything is routed through ri.Log to
+// the top-level "renderer" channel anyway, so the returned id is unused.
+int Log_GetChannel( const char *name )
+{
+	(void)name;
+	return 0;
 }
 
 void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *fmt, ... )
@@ -1562,20 +1566,43 @@ static void R_Register( void )
 	//
 	r_fullbright = ri.Cvar_Get( "r_fullbright", "0", CVAR_LATCH );
 	ri.Cvar_SetDescription( r_fullbright, "Debugging tool to render the entire level without lighting." );
-	r_overBrightBits = ri.Cvar_Get( "r_overBrightBits", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_overBrightBits, "Sets the intensity of overall brightness of texture pixels." );
-	r_mapOverBrightBits = ri.Cvar_Get( "r_mapOverBrightBits", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_mapOverBrightBits, "Sets the number of overbright bits baked into all lightmaps and map data." );
-	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+
+	// r_brightness is a runtime-live post-process scene multiplier.
+	// CVG_RENDERER group membership wires it into tr_cmds.c's
+	// per-frame check that calls vk_update_post_process_pipelines()
+	// when any group cvar's modificationCount changes — same
+	// mechanism r_saturation, r_gamma, r_dither, and the bloom cvars
+	// already use. The gamma pipeline gets destroyed + recreated
+	// with a fresh frag_spec_data.overbright = 1 << overbrightBits
+	// on the next frame after the cvar changes; no vid_restart
+	// required.
+	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_brightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_brightness,
-		"Float-based overall brightness multiplier (replaces r_overBrightBits).\n"
-		"Range 0.25-32, default 2.0." );
+		"Post-process scene-wide brightness multiplier.\n"
+		"Range 0.25-32, default 2.0.\n"
+		"Multiplies the rendered frame in the gamma pipeline\n"
+		"via obScale = 2**round(log2(value)), clamped to [1, 4].\n"
+		"Independent of r_mapBrightness; they compose\n"
+		"multiplicatively. Live: takes effect on next frame." );
+	ri.Cvar_SetGroup( r_brightness, CVG_RENDERER );
+
+	// r_mapBrightness stays CVAR_LATCH: lightmap pixel data is
+	// pre-multiplied at BSP load via R_ColorShiftLightingBytes
+	// (tr_bsp.c), shift = mapOverbrightBits. Live changes would
+	// leave loaded lightmaps stale; same constraint as
+	// r_mapSaturation. Vid_restart re-walks the BSP and applies
+	// the new value.
 	r_mapBrightness = ri.Cvar_Get( "r_mapBrightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_mapBrightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_mapBrightness,
-		"Float-based map (lightmap) brightness multiplier (replaces r_mapOverBrightBits).\n"
-		"Range 0.25-32, default 2.0." );
+		"Lightmap brightness multiplier baked into pixel data\n"
+		"at BSP load. Range 0.25-32, default 2.0.\n"
+		"Lightmap shift = 2**round(log2(value)), clamped to [1, 4].\n"
+		"Vid_restart required after change. Independent of\n"
+		"r_brightness — they compose multiplicatively in\n"
+		"final visible output." );
+
 	r_intensity = ri.Cvar_Get( "r_intensity", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_intensity, "1", "255", CV_FLOAT );
 	ri.Cvar_SetDescription( r_intensity, "Global texture lighting scale." );
@@ -1637,9 +1664,35 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_vbo, "Use Vertex Buffer Objects to cache static map geometry, may improve FPS on modern GPUs, increases hunk memory usage by 15-30MB (map-dependent)." );
 #endif
 
-	r_mapGreyScale = ri.Cvar_Get( "r_mapGreyScale", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_mapGreyScale, "-1", "1", CV_FLOAT );
-	ri.Cvar_SetDescription(r_mapGreyScale, "Desaturate world map textures only, works independently from \\r_greyscale, negative values only desaturate lightmaps.");
+	// r_mapSaturation is baked into world texture pixel data and
+	// fog vertex colors at BSP load (R_FindImageFile, R_LoadFogs).
+	// Lightmaps are NOT affected — see r_lightmapSaturation.
+	// Vid_restart required.
+	r_mapSaturation = ri.Cvar_Get( "r_mapSaturation", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_mapSaturation, "0", "2", CV_FLOAT );
+	ri.Cvar_SetDescription( r_mapSaturation,
+		"World texture and fog saturation multiplier baked\n"
+		"into pixel data at BSP load. Range 0.0-2.0,\n"
+		"default 1.0.\n"
+		"  0.0 = grayscale\n"
+		"  1.0 = full color (identity)\n"
+		"  2.0 = super-saturated (clamps on 8-bit)\n"
+		"Vid_restart required. Independent of\n"
+		"r_lightmapSaturation and r_saturation." );
+
+	// r_lightmapSaturation is baked into lightmap pixel data at BSP
+	// load (R_ColorShiftLightingBytes). World textures and fog are
+	// NOT affected — see r_mapSaturation. Vid_restart required.
+	r_lightmapSaturation = ri.Cvar_Get( "r_lightmapSaturation", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_lightmapSaturation, "0", "2", CV_FLOAT );
+	ri.Cvar_SetDescription( r_lightmapSaturation,
+		"Lightmap saturation multiplier baked into pixel\n"
+		"data at BSP load. Range 0.0-2.0, default 1.0.\n"
+		"  0.0 = grayscale\n"
+		"  1.0 = full color (identity)\n"
+		"  2.0 = super-saturated (clamps on 8-bit)\n"
+		"Vid_restart required. Independent of\n"
+		"r_mapSaturation and r_saturation." );
 
 	r_subdivisions = ri.Cvar_Get( "r_subdivisions", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription(r_subdivisions, "Distance to subdivide bezier curved surfaces. Higher values mean less subdivision and less geometric complexity.");
@@ -1709,15 +1762,6 @@ static void R_Register( void )
 	r_facePlaneCull = ri.Cvar_Get ("r_facePlaneCull", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_facePlaneCull, "Enables culling of planar surfaces with back side test." );
 
-	r_railWidth = ri.Cvar_Get( "r_railWidth", "16", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_railWidth, "Radius of railgun trails." );
-	r_railCoreWidth = ri.Cvar_Get( "r_railCoreWidth", "6", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_railCoreWidth, "Size of railgun trail rings when enabled in game code (normally \\cg_oldRail 0)." );
-	r_railSegmentLength = ri.Cvar_Get( "r_railSegmentLength", "32", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	r_railGPU = ri.Cvar_Get( "r_railGPU", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_railGPU, "Use GPU compute shader for rail trail rendering (1=GPU, 0=CPU fallback)." );
-	ri.Cvar_SetDescription( r_railSegmentLength, "Length of segments in railgun trails." );
-
 	r_ambientScale = ri.Cvar_Get( "r_ambientScale", "0.6", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ambientScale, "Light grid ambient light scaling on entity models." );
 	r_directedScale = ri.Cvar_Get( "r_directedScale", "1", CVAR_CHEAT );
@@ -1726,10 +1770,22 @@ static void R_Register( void )
 	//r_anaglyphMode = ri.Cvar_Get( "r_anaglyphMode", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	//ri.Cvar_SetDescription( r_anaglyphMode, "Enable rendering of anaglyph images. Valid options for 3D glasses types:\n 0: Disabled\n 1: Red-cyan\n 2: Red-blue\n 3: Red-green\n 4: Green-magenta" );
 
-	r_greyscale = ri.Cvar_Get( "r_greyscale", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_CheckRange( r_greyscale, "-1", "1", CV_FLOAT );
-	ri.Cvar_SetDescription( r_greyscale, "Desaturate rendered frame, requires \\r_fbo 1." );
-	ri.Cvar_SetGroup( r_greyscale, CVG_RENDERER );
+	// r_saturation drives the post-process saturation multiplier
+	// in gamma.frag (spec constant id 2). Range [0, 2]; 1.0 is
+	// identity. Below 1.0 desaturates toward grey; above 1.0
+	// super-saturates (8-bit framebuffer clamps pixels exceeding
+	// [0,1]). Live: takes effect on next frame via CVG_RENDERER
+	// group rebake.
+	r_saturation = ri.Cvar_Get( "r_saturation", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_saturation, "0", "2", CV_FLOAT );
+	ri.Cvar_SetDescription( r_saturation,
+		"Post-process saturation multiplier.\n"
+		"Range 0.0-2.0, default 1.0.\n"
+		"  0.0 = grayscale\n"
+		"  1.0 = full color (identity)\n"
+		"  2.0 = super-saturated (may clamp on 8-bit)\n"
+		"Requires r_fbo 1. Live: takes effect on next frame." );
+	ri.Cvar_SetGroup( r_saturation, CVG_RENDERER );
 
 	r_dither = ri.Cvar_Get( "r_dither", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_dither, "0", "1", CV_INTEGER );
@@ -1900,7 +1956,7 @@ static void R_Register( void )
 	s_r_device_mod = r_device->modificationCount;
 
 	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and greyscale effects." );
+	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and post-process saturation/tonemap effects." );
 	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription(r_hdr, "Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n -1: 4-bit, for testing purposes, heavy color banding, might not work on all systems\n  0: 8 bit, default, moderate color banding with multi-stage shaders\n  1: 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD / Intel GPUs\n" );
 	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
@@ -1963,10 +2019,40 @@ static void R_Register( void )
 #endif
 
 #if FEAT_TONEMAP
-	r_tonemap = ri.Cvar_Get( "r_tonemap", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_tonemap, "0", "2", CV_INTEGER );
-	ri.Cvar_SetDescription( r_tonemap, "HDR tone mapping.\n"
-		" 0 - disabled, 1 - Reinhard, 2 - ACES filmic. Requires \\r_fbo 1." );
+	// r_tonemap is in CVG_RENDERER (runtime-live): the operator
+	// selection is wired through tonemap_mode (gamma.frag spec
+	// constant id 17). Group membership triggers gamma pipeline
+	// rebake on modificationCount changes; same mechanism as
+	// r_brightness, r_saturation, etc.
+	r_tonemap = ri.Cvar_Get( "r_tonemap", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_tonemap, "0", "3", CV_INTEGER );
+	ri.Cvar_SetDescription( r_tonemap,
+		"HDR tone mapping operator.\n"
+		"  0 - disabled\n"
+		"  1 - Reinhard (default film curve)\n"
+		"  2 - ACES filmic\n"
+		"  3 - Uncharted 2\n"
+		"Requires r_fbo 1. Live: takes effect on next frame." );
+	ri.Cvar_SetGroup( r_tonemap, CVG_RENDERER );
+
+	// r_tonemapExposure is the pre-tonemap multiplier (gamma.frag
+	// spec constant id 18). Values <1 darken atmospherically
+	// before the operator's shoulder kicks in; values >1 brighten.
+	// Only takes effect when r_tonemap > 0 — when r_tonemap is 0,
+	// the GAMMA_VAR_TONEMAP varIdx bit is unset and the gamma-with-
+	// tonemap pipeline isn't selected, so the exposure write
+	// doesn't reach a running shader.
+	r_tonemapExposure = ri.Cvar_Get( "r_tonemapExposure", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_tonemapExposure, "0.1", "8.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_tonemapExposure,
+		"Pre-tonemap exposure multiplier.\n"
+		"Range 0.1-8.0, default 1.0.\n"
+		"Multiplies HDR colour before the tonemap operator;\n"
+		"values below 1.0 darken atmospherically (Doom-3-style\n"
+		"shoulder compression), values above 1.0 brighten.\n"
+		"Requires r_tonemap > 0 and r_fbo 1. Live: takes\n"
+		"effect on next frame." );
+	ri.Cvar_SetGroup( r_tonemapExposure, CVG_RENDERER );
 #endif
 
 #if FEAT_COLOR_GRADING
@@ -2123,6 +2209,24 @@ void R_Init( void ) {
 
 	R_InitImages();
 
+#ifdef USE_VULKAN
+	// Phase 5: eagerly populate the particle pipeline's per-class
+	// sampler array (binding 3) with tr.whiteImage now that
+	// R_InitImages has created it. vk_init_particle runs from
+	// InitOpenGL above — earlier than R_InitImages — so it cannot
+	// touch this binding itself. Re-runs on every R_Init, so
+	// vid_restart correctly repopulates against the freshly-recreated
+	// tr.whiteImage.
+	vk_init_particle_textures();
+
+	// Same eager-init pattern for the shared primitive-shader image
+	// registry consumed by the ribbon pipeline (binding 2). All 64
+	// slots default to tr.whiteImage; per-shader registrations via
+	// RE_RegisterPrimitiveShader (called later from cgame init)
+	// overwrite the slots they need.
+	vk_init_primitive_shader_images();
+#endif
+
 	VarInfo();
 
 #ifdef USE_VULKAN
@@ -2191,7 +2295,7 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	// The original gate `if ( code != REF_KEEP_CONTEXT )` was intended to
 	// preserve GPU textures across map-load transitions so the frame loop
 	// could draw the loading screen between spawn phases.  In practice
-	// q3now's Hunk_ClearLevel (qcommon/common.c) zeroes both hunk_high AND
+	// Wired's Hunk_ClearLevel (qcommon/common.c) zeroes both hunk_high AND
 	// hunk_low, freeing the image_t structs that tr.images[] points to.
 	// Skipping the destroy on REF_KEEP_CONTEXT therefore left VkImages
 	// alive on the GPU with no remaining bookkeeping to find or destroy
@@ -2311,6 +2415,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.RegisterShaderNoMip = RE_RegisterShaderNoMip;
 	re.RegisterShaderLightMap = RE_RegisterShaderLightMap;
 	re.RegisterMSDFShader = RE_RegisterMSDFShader;
+	re.RegisterPrimitiveShader = RE_RegisterPrimitiveShader;
 	re.LoadWorld = RE_LoadWorldMap;
 	re.SetWorldVisData = RE_SetWorldVisData;
 	re.EndRegistration = RE_EndRegistration;
@@ -2329,7 +2434,12 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.AddLightToScene = RE_AddLightToScene;
 	re.AddAdditiveLightToScene = RE_AddAdditiveLightToScene;
 	re.AddLinearLightToScene = RE_AddLinearLightToScene;
-	re.AddRailTrailParams = RE_AddRailTrailParams;
+	re.AddRibbonToScene = RE_AddRibbonToScene;
+	re.AddBeamToScene = RE_AddBeamToScene;
+	re.AddSpriteToScene = RE_AddSpriteToScene;
+	re.EmitParticles = RE_EmitParticles;
+	re.AddDecalToScene = RE_AddDecalToScene;
+	re.RegisterParticleClass = RE_RegisterParticleClass;
 #if FEAT_CORONA
 	re.AddCoronaToScene = RE_AddCoronaToScene;
 #endif

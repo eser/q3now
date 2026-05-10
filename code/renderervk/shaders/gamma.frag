@@ -11,7 +11,11 @@ layout(location = 0) out vec4 out_color;
 
 layout(constant_id = 0) const float gamma = 1.0;
 layout(constant_id = 1) const float obScale = 2.0;
-layout(constant_id = 2) const float greyscale = 0.0;
+// saturation = 1.0 is identity; below desaturates toward
+// luma, above super-saturates. Wired from r_saturation->value.
+// 8-bit framebuffer clamps any pixel exceeding [0, 1] after
+// the mix; super-saturation may visibly clip.
+layout(constant_id = 2) const float saturation = 1.0;
 //
 layout(constant_id = 7) const int ditherMode = 0; // 0 - disabled, 1 - ordered
 layout(constant_id = 8) const int depth_r = 255;
@@ -23,7 +27,12 @@ layout(constant_id = 15) const float zNear = 4.0;
 layout(constant_id = 16) const float zFar = 4096.0;
 #endif
 #ifdef USE_TONEMAP
-layout(constant_id = 17) const int tonemap_mode = 0;    // 0=Reinhard, 1=ACES, 2=Uncharted2
+// tonemap_mode is wired from r_tonemap->integer host-side. Mode 0
+// disables the tonemap pipeline variant entirely (varIdx bit unset
+// in vk.c), so this shader path only runs for modes 1..3.
+//   1 = Reinhard, 2 = ACES filmic, 3 = Uncharted 2.
+layout(constant_id = 17) const int tonemap_mode = 1;
+// tonemap_exposure is wired from r_tonemapExposure->value host-side.
 layout(constant_id = 18) const float tonemap_exposure = 1.0;
 #endif
 #ifdef USE_COLOR_GRADING
@@ -153,12 +162,12 @@ vec3 tonemapUncharted2( vec3 color ) {
 
 vec3 applyTonemap( vec3 color ) {
 	color *= tonemap_exposure;
-	if ( tonemap_mode == 1 )
+	if ( tonemap_mode == 2 )
 		return tonemapACES( color );
-	else if ( tonemap_mode == 2 )
+	else if ( tonemap_mode == 3 )
 		return tonemapUncharted2( color );
 	else
-		return tonemapReinhard( color );
+		return tonemapReinhard( color );  // mode == 1
 }
 #endif
 
@@ -283,14 +292,15 @@ void main() {
 	base = applyColorGrading( base );
 #endif
 
-	if ( greyscale == 1 )
-	{
-		base = vec3(dot(base, sRGB));
-	}
-	else if ( greyscale != 0 )
+	if ( saturation != 1.0 )
 	{
 		vec3 luma = vec3(dot(base, sRGB));
-		base = mix(base, luma, greyscale);
+		// mix(luma, base, saturation):
+		//   saturation = 0 → luma   (grayscale)
+		//   saturation = 1 → base   (identity, branch skipped above)
+		//   saturation > 1 → luma + saturation * (base - luma)
+		//                  → super-saturated; clamps on 8-bit fb.
+		base = mix(luma, base, saturation);
 	}
 
 	if ( gamma != 1.0 )

@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_trigger_q1.c -- Q1 trigger entity spawn functions
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 void Q3_InitTrigger( gentity_t *self );
 
@@ -221,7 +223,7 @@ static void q1_trigger_secret_touch( gentity_t *self, gentity_t *other, trace_t 
 
 	G_UseTargets( self, other );
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "Secret [%d/%d]\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "Secret [%d/%d]\n",
 	         level.q1_found_secrets, level.q1_total_secrets );
 
 	self->touch    = NULL;
@@ -599,7 +601,7 @@ static void q1_trigger_teleport_touch( gentity_t *self, gentity_t *other, trace_
 		dest = G_Find( NULL, FOFS(targetname), self->target );
 	}
 	if ( !dest ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME,
+		Com_Log( SEV_INFO, LOG_CH(ch_game),
 		         "q1_trigger_teleport: no destination for target '%s'\n",
 		         self->target ? self->target : "<null>" );
 		return;

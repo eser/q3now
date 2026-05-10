@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../client/client.h"
 #include "win_local.h"
 #include "glw_win.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 
 typedef struct {
@@ -364,7 +366,7 @@ static void IN_ActivateRawMouse( void )
 	cnt = GRRID( &Rid, &num, sizeof( Rid ) );
 	if ( cnt < 0 || !g_wv.hWnd ) 
 	{
-		COM_WARN( LOG_CAT_SYSTEM, "Error getting registered raw input devices\n" );
+		COM_WARN( LOG_CH(ch_system), "Error getting registered raw input devices\n" );
 		return; // error getting registered raw input devices
 	}
 
@@ -383,7 +385,7 @@ static void IN_ActivateRawMouse( void )
 
 		if( !RRID( &Rid, 1, sizeof( Rid ) ) )
 		{
-			COM_WARN( LOG_CAT_SYSTEM, "Error registering raw input device\n" );
+			COM_WARN( LOG_CH(ch_system), "Error registering raw input device\n" );
 			return;
 		}
 	}
@@ -411,7 +413,7 @@ static void IN_DeactivateRawMouse( void )
 		Rid.hwndTarget = NULL;
 		if ( !RRID( &Rid, 1, sizeof( Rid ) ) )
 		{
-			COM_WARN( LOG_CAT_SYSTEM, "Error removing raw input device\n" );
+			COM_WARN( LOG_CH(ch_system), "Error removing raw input device\n" );
 			return;
 		}
 	}
@@ -503,13 +505,13 @@ static qboolean IN_InitDIMouse( void ) {
 		DINPUT_BUFFERSIZE,              // dwData
 	};
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Initializing DirectInput...\n");
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Initializing DirectInput...\n");
 
 	if (!hInstDI) {
 		hInstDI = LoadLibrary( TEXT( "dinput.dll" ) );
 		
 		if (hInstDI == NULL) {
-			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Couldn't load dinput.dll\n");
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Couldn't load dinput.dll\n");
 			return qfalse;
 		}
 	}
@@ -519,7 +521,7 @@ static qboolean IN_InitDIMouse( void ) {
 			GetProcAddress(hInstDI,"DirectInputCreateA");
 
 		if (!pDirectInputCreate) {
-			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Couldn't get DI proc addr\n");
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Couldn't get DI proc addr\n");
 			return qfalse;
 		}
 	}
@@ -528,7 +530,7 @@ static qboolean IN_InitDIMouse( void ) {
 	hr = iDirectInputCreate( g_wv.hInstance, DIRECTINPUT_VERSION, &g_pdi, NULL);
 
 	if (FAILED(hr)) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "iDirectInputCreate failed\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "iDirectInputCreate failed\n");
 		return qfalse;
 	}
 
@@ -536,7 +538,7 @@ static qboolean IN_InitDIMouse( void ) {
 	hr = IDirectInput_CreateDevice(g_pdi, &GUID_SysMouse, &g_pMouse, NULL);
 
 	if (FAILED(hr)) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Couldn't open DI mouse device\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Couldn't open DI mouse device\n");
 		return qfalse;
 	}
 
@@ -544,7 +546,7 @@ static qboolean IN_InitDIMouse( void ) {
 	hr = IDirectInputDevice_SetDataFormat(g_pMouse, &df);
 
 	if (FAILED(hr)) 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Couldn't set DI mouse format\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Couldn't set DI mouse format\n");
 		return qfalse;
 	}
 
@@ -554,7 +556,7 @@ static qboolean IN_InitDIMouse( void ) {
 
 	// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=50
 	if (FAILED(hr)) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Couldn't set DI coop level\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Couldn't set DI coop level\n");
 		return qfalse;
 	}
 
@@ -567,7 +569,7 @@ static qboolean IN_InitDIMouse( void ) {
 	}
 
 	if (FAILED(hr)) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Couldn't set DI buffersize\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Couldn't set DI buffersize\n");
 		return qfalse;
 	}
 
@@ -575,7 +577,7 @@ static qboolean IN_InitDIMouse( void ) {
 	IN_DIMouse( &x, &y );
 	IN_DIMouse( &x, &y );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "DirectInput initialized.\n");
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "DirectInput initialized.\n");
 	return qtrue;
 }
 
@@ -614,7 +616,7 @@ static void IN_ActivateDIMouse( void ) {
 	hr = IDirectInputDevice_Acquire( g_pMouse );
 	if (FAILED(hr)) {
 		if ( !IN_InitDIMouse() ) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Falling back to Win32 mouse support...\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Falling back to Win32 mouse support...\n");
 			Cvar_Set( "in_mouse", "-1" );
 		}
 	}
@@ -804,12 +806,12 @@ static void IN_StartupMouse( void )
 	s_wmv.mouseInitialized = qfalse;
 
 	if ( in_mouse->integer == 0 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Mouse control not active.\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Mouse control not active.\n" );
 		return;
 	}
 
 	if ( in_mouse->integer == -1 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Skipping check for Raw/DirectInput\n" ); 
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Skipping check for Raw/DirectInput\n" ); 
 	} else {
 
 		if ( !g_wv.hWnd ) {
@@ -818,7 +820,7 @@ static void IN_StartupMouse( void )
 
 		if ( IN_InitRawMouse() ) {
 			s_wmv.mouseInitialized = qtrue;
-			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Raw mouse input initialized.\n" );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Raw mouse input initialized.\n" );
 			return;
 		}
 
@@ -826,7 +828,7 @@ static void IN_StartupMouse( void )
 			s_wmv.mouseInitialized = qtrue;
 			return;
 		}
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Falling back to Win32 mouse support...\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Falling back to Win32 mouse support...\n" );
 	}
 
 	s_wmv.mouseInitialized = qtrue;
@@ -1008,7 +1010,7 @@ static void IN_GetHotkey( cvar_t *var, int *pHotKey ) {
 				&& code != VK_SHIFT && code != VK_LSHIFT && code != VK_RSHIFT
 				&& code != (VK_LWIN|HK_MOD_LWIN) && code != (VK_RWIN|HK_MOD_RWIN)
 				&& *pHotKey & 0xFF )) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s:"S_COLOR_YELLOW" invalid token %s\n", var->name, buf );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "%s:"S_COLOR_YELLOW" invalid token %s\n", var->name, buf );
 			*pHotKey = 0;
 			break;
 		}
@@ -1043,11 +1045,11 @@ static void IN_GetHotkey( cvar_t *var, int *pHotKey ) {
 			|| *pHotKey == (HK_MOD_WIN|HK_MOD_RWIN)
 			|| *pHotKey == (VK_RETURN|HK_MOD_ALT)
 			|| *pHotKey == (HK_MOD_CONTROL|VK_PAUSE)) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s:"S_COLOR_YELLOW" invalid hotkey %s\n", var->name, var->string );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s:"S_COLOR_YELLOW" invalid hotkey %s\n", var->name, var->string );
 		*pHotKey = 0;
 	}
 
-	//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "GetHotkey: %06X\n",*HotKey);
+	//Com_Log( SEV_INFO, LOG_CH(ch_system), "GetHotkey: %06X\n",*HotKey);
 	Win_RemoveHotkey();
 	Win_AddHotkey();
 }
@@ -1071,7 +1073,7 @@ IN_Startup
 ===========
 */
 void IN_Startup( void ) {
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "\n------- Input Initialization -------\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "\n------- Input Initialization -------\n" );
 	IN_StartupMouse();
 #ifdef USE_JOYSTICK
 	IN_StartupJoystick ();
@@ -1079,7 +1081,7 @@ void IN_Startup( void ) {
 #ifdef USE_MIDI
 	IN_StartupMIDI();
 #endif
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "------------------------------------\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "------------------------------------\n" );
 }
 
 
@@ -1254,14 +1256,14 @@ void IN_StartupJoystick (void) {
 	joy.avail = qfalse; 
 
 	if (! in_joystick->integer ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Joystick is not active.\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Joystick is not active.\n");
 		return;
 	}
 
 	// verify joystick driver is present
 	if ((numdevs = joyGetNumDevs ()) == 0)
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "joystick not found -- driver not present\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "joystick not found -- driver not present\n");
 		return;
 	}
 
@@ -1280,7 +1282,7 @@ void IN_StartupJoystick (void) {
 	// abort startup if we didn't find a valid joystick
 	if (mmr != JOYERR_NOERROR)
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "joystick not found -- no valid joysticks (%x)\n", mmr);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "joystick not found -- no valid joysticks (%x)\n", mmr);
 		return;
 	}
 
@@ -1289,22 +1291,22 @@ void IN_StartupJoystick (void) {
 	memset (&joy.jc, 0, sizeof(joy.jc));
 	if ((mmr = joyGetDevCaps (joy.id, &joy.jc, sizeof(joy.jc))) != JOYERR_NOERROR)
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "joystick not found -- invalid joystick capabilities (%x)\n", mmr); 
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "joystick not found -- invalid joystick capabilities (%x)\n", mmr); 
 		return;
 	}
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Joystick found.\n" );
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Pname: %s\n", joy.jc.szPname );
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "OemVxD: %s\n", joy.jc.szOEMVxD );
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "RegKey: %s\n", joy.jc.szRegKey );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Joystick found.\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Pname: %s\n", joy.jc.szPname );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "OemVxD: %s\n", joy.jc.szOEMVxD );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "RegKey: %s\n", joy.jc.szRegKey );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Numbuttons: %i / %i\n", joy.jc.wNumButtons, joy.jc.wMaxButtons );
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Axis: %i / %i\n", joy.jc.wNumAxes, joy.jc.wMaxAxes );
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Caps: 0x%x\n", joy.jc.wCaps );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Numbuttons: %i / %i\n", joy.jc.wNumButtons, joy.jc.wMaxButtons );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Axis: %i / %i\n", joy.jc.wNumAxes, joy.jc.wMaxAxes );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Caps: 0x%x\n", joy.jc.wCaps );
 	if ( joy.jc.wCaps & JOYCAPS_HASPOV ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "HASPOV\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "HASPOV\n" );
 	} else {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "no POV\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "no POV\n" );
 	}
 
 	// old button and POV states default to no buttons pressed
@@ -1382,13 +1384,13 @@ void IN_JoyMove( void ) {
 		// read error occurred
 		// turning off the joystick seems too harsh for 1 read error,
 		// but what should be done?
-		// Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "IN_ReadJoystick: no response\n");
+		// Com_Log( SEV_INFO, LOG_CH(ch_system), "IN_ReadJoystick: no response\n");
 		// joy.avail = false;
 		return;
 	}
 
 	if ( in_debugJoystick->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8x %5i %5.2f %5.2f %5.2f %5.2f %6i %6i\n", 
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%8x %5i %5.2f %5.2f %5.2f %5.2f %6i %6i\n", 
 			JoyToI( joy.ji.dwButtons ),
 			JoyToI( joy.ji.dwPOV ),
 			JoyToF( joy.ji.dwXpos ), JoyToF( joy.ji.dwYpos ),
@@ -1539,22 +1541,22 @@ static void MidiInfo_f( void )
 
 	const char *enableStrings[] = { "disabled", "enabled" };
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\nMIDI control:       %s\n", enableStrings[in_midi->integer != 0] );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "port:               %d\n", in_midiport->integer );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "channel:            %d\n", in_midichannel->integer );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "current device:     %d\n", in_mididevice->integer );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "number of devices:  %d\n", s_midiInfo.numDevices );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\nMIDI control:       %s\n", enableStrings[in_midi->integer != 0] );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "port:               %d\n", in_midiport->integer );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "channel:            %d\n", in_midichannel->integer );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "current device:     %d\n", in_mididevice->integer );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "number of devices:  %d\n", s_midiInfo.numDevices );
 	for ( i = 0; i < s_midiInfo.numDevices; i++ )
 	{
 		if ( i == Cvar_VariableIntegerValue( "in_mididevice" ) )
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "***" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "***" );
 		else
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "..." );
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM,    "device %2d:       %s\n", i, s_midiInfo.caps[i].szPname );
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...manufacturer ID: 0x%hx\n", s_midiInfo.caps[i].wMid );
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...product ID:      0x%hx\n", s_midiInfo.caps[i].wPid );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "..." );
+		Com_Log( SEV_INFO, LOG_CH(ch_system),    "device %2d:       %s\n", i, s_midiInfo.caps[i].szPname );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...manufacturer ID: 0x%hx\n", s_midiInfo.caps[i].wMid );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...product ID:      0x%hx\n", s_midiInfo.caps[i].wPid );
 
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "\n" );
 	}
 }
 
@@ -1584,7 +1586,7 @@ static void IN_StartupMIDI( void )
 					 ( unsigned long ) NULL,
 					 CALLBACK_FUNCTION ) != MMSYSERR_NOERROR )
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "WARNING: could not open MIDI device %d: '%s'\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "WARNING: could not open MIDI device %d: '%s'\n",
 								in_mididevice->integer , s_midiInfo.caps[( int ) in_mididevice->value].szPname );
 		return;
 	}

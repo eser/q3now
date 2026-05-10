@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 
@@ -957,7 +959,7 @@ void SP_q3_func_door (gentity_t *ent) {
 
 	Q3_InitMover( ent );
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME,
+	Com_Log( SEV_INFO, LOG_CH(ch_game),
 	         "SP_q3_func_door [post-Q3_InitMover]: model='%s'"
 	         " s.origin=(%.0f,%.0f,%.0f)"
 	         " r.currentOrigin=(%.0f,%.0f,%.0f)"
@@ -1335,7 +1337,7 @@ void Q3_Think_SetupTrainTargets( gentity_t *ent ) {
 
 	ent->nextTrain = G_Find( NULL, FOFS(targetname), ent->target );
 	if ( !ent->nextTrain ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "func_train at %s with an unfound target\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "func_train at %s with an unfound target\n",
 			vtos(ent->r.absmin) );
 		return;
 	}
@@ -1347,7 +1349,7 @@ void Q3_Think_SetupTrainTargets( gentity_t *ent ) {
 		}
 
 		if ( !path->target ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Train corner at %s without a target\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Train corner at %s without a target\n",
 				vtos(path->s.origin) );
 			return;
 		}
@@ -1359,11 +1361,11 @@ void Q3_Think_SetupTrainTargets( gentity_t *ent ) {
 		do {
 			next = G_Find( next, FOFS(targetname), path->target );
 			if ( !next ) {
-				Com_Log( SEV_INFO, LOG_CAT_GAME, "Train corner at %s without a target path_corner\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_game), "Train corner at %s without a target path_corner\n",
 					vtos(path->s.origin) );
 				return;
 			}
-		} while ( strcmp( next->classname, "path_corner" ) );
+		} while ( strcmp( next->classname, "path_corner" ) != 0 );
 
 		path->nextTrain = next;
 	}
@@ -1382,7 +1384,7 @@ Target: next path corner and other targets to fire
 */
 void SP_q3_path_corner( gentity_t *self ) {
 	if ( !self->targetname ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "path_corner with no targetname at %s\n", vtos(self->s.origin));
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "path_corner with no targetname at %s\n", vtos(self->s.origin));
 		G_FreeEntity( self );
 		return;
 	}
@@ -1419,7 +1421,7 @@ void SP_q3_func_train (gentity_t *self) {
 	}
 
 	if ( !self->target ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "func_train without a target at %s\n", vtos(self->r.absmin));
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "func_train without a target at %s\n", vtos(self->r.absmin));
 		G_FreeEntity( self );
 		return;
 	}

@@ -18,6 +18,8 @@
 #include "inv.h"
 
 #include <math.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #define WB_MAX_NBG_DETOUR 120
 
@@ -451,7 +453,7 @@ debug_print:
 				if ( s_dbgFrames < 100 ) {
 					int ammo = WiredBots_AmmoForWeapon( bs, chosenWeapon );
 					int inBitmask = ( bs->cur_ps.stats[STAT_WEAPONS] >> chosenWeapon ) & 1;
-					Com_Log( SEV_INFO, LOG_CAT_GAME, "^5[bot_debug_weapons] frame=%d bot=%s key=%s wp=%d ammo=%d bitmask=%d\n",
+					Com_Log( SEV_INFO, LOG_CH(ch_game), "^5[bot_debug_weapons] frame=%d bot=%s key=%s wp=%d ammo=%d bitmask=%d\n",
 					          s_dbgFrames, botName,
 					          chosenKey ? chosenKey : "?",
 					          chosenWeapon, ammo, inBitmask );
@@ -460,7 +462,7 @@ debug_print:
 					trap_Cvar_Set( "bot_debug_weapon", "" );
 					s_dbgPrev[0] = '\0';
 					s_dbgFrames = 0;
-					Com_Log( SEV_INFO, LOG_CAT_GAME, "^5[bot_debug_weapons] reached 100 frames, stopping.\n" );
+					Com_Log( SEV_INFO, LOG_CH(ch_game), "^5[bot_debug_weapons] reached 100 frames, stopping.\n" );
 				}
 			}
 		} else if ( s_dbgPrev[0] ) {
@@ -573,7 +575,7 @@ static int WiredBots_Decide( bot_state_t *bs, char *decision, int decisionSize )
 			static float s_decideLogTime[MAX_CLIENTS];
 			if ( FloatTime() - s_decideLogTime[bs->client] > 2.0f ) {
 				s_decideLogTime[bs->client] = FloatTime();
-				Com_Log( SEV_INFO, LOG_CAT_GAME, "^5[Decide] client=%d result='%s'(%d) ev=%d ed=%.0f hp=%d uf=%d\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_game), "^5[Decide] client=%d result='%s'(%d) ev=%d ed=%.0f hp=%d uf=%d\n",
 					bs->client, result ? decision : "<none>", result,
 					ctx.enemyVisible, ctx.enemyDist, ctx.health, ctx.underFire );
 			}
@@ -640,7 +642,7 @@ int WiredBots_WantsToChase( bot_state_t *bs ) {
 			ret = qfalse;
 		}
 		if ( trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "[WantsChase] cl=%d decision='%s' ret=%d\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "[WantsChase] cl=%d decision='%s' ret=%d\n",
 				bs->client, decision, ret );
 		if ( ret >= 0 ) return ret;
 	}
@@ -923,10 +925,11 @@ static int WiredBots_SelectBestItemGoal( bot_state_t *bs, int tfl, const bot_goa
 		if ( FloatTime() - s_nbgLog[bs->client] > 2.0f ) {
 			s_nbgLog[bs->client] = FloatTime();
 			if ( bestScore > 0.0f ) {
-				Com_Log( SEV_INFO, LOG_CAT_GAME, "^2[NBG] cl=%d FOUND goal=%d score=%.1f area=%d\n",
+				// NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage) — bestGoal is written via *bestGoal=goal at lines 915-917 when bestScore > 0; analyzer can't see the through-pointer init via the parameter
+				Com_Log( SEV_INFO, LOG_CH(ch_game), "^2[NBG] cl=%d FOUND goal=%d score=%.1f area=%d\n",
 					bs->client, bestGoal->number, bestScore, bestGoal->areanum );
 			} else {
-				Com_Log( SEV_INFO, LOG_CAT_GAME, "^3[NBG] cl=%d NONE area=%d maxTT=%.0f skip:"
+				Com_Log( SEV_INFO, LOG_CH(ch_game), "^3[NBG] cl=%d NONE area=%d maxTT=%.0f skip:"
 #if !FEAT_RECAST_NAVMESH
 					" avoid=%d"
 #endif

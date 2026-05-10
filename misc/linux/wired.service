@@ -1,0 +1,12 @@
+[Unit]
+Description=This service spawns an wired Internet server
+# A map will need to be loaded for players to be able to join.
+# For additional settings see https://wired.com/
+
+[Service]
+User=q3now
+ExecStart=/usr/local/games/q3now/wired.ded +set dedicated 2
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target

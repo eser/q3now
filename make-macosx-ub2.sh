@@ -2,7 +2,7 @@
 
 cd `dirname $0`
 if [ ! -f Makefile ]; then
-	echo "This script must be run from the q3now build directory"
+	echo "This script must be run from the wired build directory"
 	exit 1
 fi
 
@@ -72,19 +72,19 @@ if [ "$1" == "notarize" ]; then
 	RELEASE_LOCATION="build/release-darwin-universal2"
 
 	# release build name
-	RELEASE_BUILD="q3now.app"
+	RELEASE_BUILD="Wired.app"
 
 	# Pre-notarized zip file (not what is shipped)
-	PRE_NOTARIZED_ZIP="q3now_prenotarized.zip"
+	PRE_NOTARIZED_ZIP="wired_prenotarized.zip"
 
 	# Post-notarized zip file (shipped)
-	POST_NOTARIZED_ZIP="q3now_notarized.zip"
+	POST_NOTARIZED_ZIP="wired_notarized.zip"
 
-	BUNDLE_ID="com.q3now.q3now"
+	BUNDLE_ID="com.eser.wired"
 
 	# allows for unsigned executable memory in hardened runtime
 	# see: https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_security_cs_allow-unsigned-executable-memory
-	ENTITLEMENTS_FILE="misc/xcode/q3now/q3now.entitlements"
+	ENTITLEMENTS_FILE="misc/macos/wired.entitlements"
 
 	# sign the resulting app bundle
 	echo "signing..."

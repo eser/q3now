@@ -1,4 +1,4 @@
-/*
+﻿/*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
 
@@ -518,9 +518,14 @@ static void RB_SurfaceBeam( void )
 	tess.numIndexes = 0;
 	tess.firstIndex = 0;
 
+	// VectorCopy is a comma-expression macro; passing tess.numVertexes++ as
+	// the destination index would post-increment 3 times. Separate the
+	// copy and the advance.
 	for ( i = 0; i <= NUM_BEAM_SEGS; i++ ) {
-		VectorCopy(start_points[ i % NUM_BEAM_SEGS ], tess.xyz[tess.numVertexes++]);
-		VectorCopy(end_points  [ i % NUM_BEAM_SEGS ], tess.xyz[tess.numVertexes++]);
+		VectorCopy(start_points[ i % NUM_BEAM_SEGS ], tess.xyz[tess.numVertexes]);
+		tess.numVertexes++;
+		VectorCopy(end_points  [ i % NUM_BEAM_SEGS ], tess.xyz[tess.numVertexes]);
+		tess.numVertexes++;
 	}
 
 	for ( i = 0; i < NUM_BEAM_SEGS; i++ ) {
@@ -551,293 +556,6 @@ static void RB_SurfaceBeam( void )
 	tess.firstIndex = 0;
 }
 
-//================================================================================
-
-static void DoRailCore( const vec3_t start, const vec3_t end, const vec3_t up, float len, float spanWidth )
-{
-	float		spanWidth2;
-	int			vbase;
-	float		t = len / 256.0f;
-
-	RB_CheckVao(tess.vao);
-
-	RB_CHECKOVERFLOW( 4, 6 );
-
-	vbase = tess.numVertexes;
-
-	spanWidth2 = -spanWidth;
-
-	// FIXME: use quad stamp?
-	VectorMA( start, spanWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[tess.numVertexes][0] = 0;
-	tess.texCoords[tess.numVertexes][1] = 0;
-	tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 0.25f * 257.0f;
-	tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 0.25f * 257.0f;
-	tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 0.25f * 257.0f;
-	tess.numVertexes++;
-
-	VectorMA( start, spanWidth2, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[tess.numVertexes][0] = 0;
-	tess.texCoords[tess.numVertexes][1] = 1;
-	tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 257;
-	tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 257;
-	tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 257;
-	tess.numVertexes++;
-
-	VectorMA( end, spanWidth, up, tess.xyz[tess.numVertexes] );
-
-	tess.texCoords[tess.numVertexes][0] = t;
-	tess.texCoords[tess.numVertexes][1] = 0;
-	tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 257;
-	tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 257;
-	tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 257;
-	tess.numVertexes++;
-
-	VectorMA( end, spanWidth2, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[tess.numVertexes][0] = t;
-	tess.texCoords[tess.numVertexes][1] = 1;
-	tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 257;
-	tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 257;
-	tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 257;
-	tess.numVertexes++;
-
-	tess.indexes[tess.numIndexes++] = vbase;
-	tess.indexes[tess.numIndexes++] = vbase + 1;
-	tess.indexes[tess.numIndexes++] = vbase + 2;
-
-	tess.indexes[tess.numIndexes++] = vbase + 2;
-	tess.indexes[tess.numIndexes++] = vbase + 1;
-	tess.indexes[tess.numIndexes++] = vbase + 3;
-}
-
-/*
-** DoRailCoreTapered — same as DoRailCore but width and alpha fade from start to end
-*/
-static void DoRailCoreTapered( const vec3_t start, const vec3_t end, const vec3_t up,
-	float len, float startWidth, float endWidth )
-{
-	int			vbase;
-	float		t = len / 256.0f;
-
-	RB_CheckVao(tess.vao);
-
-	RB_CHECKOVERFLOW( 4, 6 );
-
-	vbase = tess.numVertexes;
-
-	// start vertices — full width, full alpha
-	VectorMA( start, startWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[tess.numVertexes][0] = 0;
-	tess.texCoords[tess.numVertexes][1] = 0;
-	tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 0.25f * 257.0f;
-	tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 0.25f * 257.0f;
-	tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 0.25f * 257.0f;
-	tess.numVertexes++;
-
-	VectorMA( start, -startWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[tess.numVertexes][0] = 0;
-	tess.texCoords[tess.numVertexes][1] = 1;
-	tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 257;
-	tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 257;
-	tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 257;
-	tess.numVertexes++;
-
-	// end vertices — tapered width, faded alpha
-	VectorMA( end, endWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[tess.numVertexes][0] = t;
-	tess.texCoords[tess.numVertexes][1] = 0;
-	tess.color[tess.numVertexes][0] = 0;
-	tess.color[tess.numVertexes][1] = 0;
-	tess.color[tess.numVertexes][2] = 0;
-	tess.numVertexes++;
-
-	VectorMA( end, -endWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[tess.numVertexes][0] = t;
-	tess.texCoords[tess.numVertexes][1] = 1;
-	tess.color[tess.numVertexes][0] = 0;
-	tess.color[tess.numVertexes][1] = 0;
-	tess.color[tess.numVertexes][2] = 0;
-	tess.numVertexes++;
-
-	tess.indexes[tess.numIndexes++] = vbase;
-	tess.indexes[tess.numIndexes++] = vbase + 1;
-	tess.indexes[tess.numIndexes++] = vbase + 2;
-
-	tess.indexes[tess.numIndexes++] = vbase + 2;
-	tess.indexes[tess.numIndexes++] = vbase + 1;
-	tess.indexes[tess.numIndexes++] = vbase + 3;
-}
-
-static void DoRailDiscs( int numSegs, const vec3_t start, const vec3_t dir, const vec3_t right, const vec3_t up )
-{
-	int i;
-	vec3_t	pos[4];
-	vec3_t	v;
-	int		spanWidth = r_railWidth->integer;
-	float c, s;
-	float		scale;
-
-	if ( numSegs > 1 )
-		numSegs--;
-	if ( !numSegs )
-		return;
-
-	scale = 0.25;
-
-	for ( i = 0; i < 4; i++ )
-	{
-		c = cos( DEG2RAD( 45 + i * 90 ) );
-		s = sin( DEG2RAD( 45 + i * 90 ) );
-		v[0] = ( right[0] * c + up[0] * s ) * scale * spanWidth;
-		v[1] = ( right[1] * c + up[1] * s ) * scale * spanWidth;
-		v[2] = ( right[2] * c + up[2] * s ) * scale * spanWidth;
-		VectorAdd( start, v, pos[i] );
-
-		if ( numSegs > 1 )
-		{
-			// offset by 1 segment if we're doing a long distance shot
-			VectorAdd( pos[i], dir, pos[i] );
-		}
-	}
-
-	RB_CheckVao(tess.vao);
-
-	for ( i = 0; i < numSegs; i++ )
-	{
-		RB_CHECKOVERFLOW( 4, 6 );
-
-		for ( int j = 0; j < 4; j++ )
-		{
-			VectorCopy( pos[j], tess.xyz[tess.numVertexes] );
-			tess.texCoords[tess.numVertexes][0] = (j < 2);
-			tess.texCoords[tess.numVertexes][1] = (j && j != 3);
-			tess.color[tess.numVertexes][0] = backEnd.currentEntity->e.shader.rgba[0] * 257;
-			tess.color[tess.numVertexes][1] = backEnd.currentEntity->e.shader.rgba[1] * 257;
-			tess.color[tess.numVertexes][2] = backEnd.currentEntity->e.shader.rgba[2] * 257;
-			tess.numVertexes++;
-
-			VectorAdd( pos[j], dir, pos[j] );
-		}
-
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 0;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 1;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 3;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 3;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 1;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 2;
-	}
-}
-
-/*
-** RB_SurfaceRailRinges
-*/
-static void RB_SurfaceRailRings( void ) {
-	const refEntity_t *e;
-	int			numSegs;
-	int			len;
-	vec3_t		vec;
-	vec3_t		right, up;
-	vec3_t		start, end;
-
-	e = &backEnd.currentEntity->e;
-
-	VectorCopy( e->oldorigin, start );
-	VectorCopy( e->origin, end );
-
-	// compute variables
-	VectorSubtract( end, start, vec );
-	len = VectorNormalize( vec );
-	MakeNormalVectors( vec, right, up );
-	numSegs = ( len ) / r_railSegmentLength->value;
-	if ( numSegs <= 0 ) {
-		numSegs = 1;
-	}
-
-	VectorScale( vec, r_railSegmentLength->value, vec );
-
-	DoRailDiscs( numSegs, start, vec, right, up );
-}
-
-/*
-** RB_SurfaceRailCore
-*/
-static void RB_SurfaceRailCore( void ) {
-	const refEntity_t *e;
-	int			len;
-	vec3_t		right;
-	vec3_t		vec;
-	vec3_t		start, end;
-	vec3_t		v1, v2;
-
-	e = &backEnd.currentEntity->e;
-
-	VectorCopy( e->oldorigin, start );
-	VectorCopy( e->origin, end );
-
-	VectorSubtract( end, start, vec );
-	len = VectorNormalize( vec );
-
-	// compute side vector
-	VectorSubtract( start, backEnd.viewParms.or.origin, v1 );
-	VectorNormalize( v1 );
-	VectorSubtract( end, backEnd.viewParms.or.origin, v2 );
-	VectorNormalize( v2 );
-	CrossProduct( v1, v2, right );
-	VectorNormalize( right );
-
-	DoRailCore( start, end, right, len, r_railCoreWidth->integer );
-}
-
-/*
-** RB_SurfaceLightningBolt
-*/
-static void RB_SurfaceLightningBolt( void ) {
-	const refEntity_t *e;
-	int			len;
-	vec3_t		right;
-	vec3_t		vec;
-	vec3_t		start, end;
-	vec3_t		v1, v2;
-	int			i;
-	float		taperLen = 64.0f;
-
-	e = &backEnd.currentEntity->e;
-
-	VectorCopy( e->oldorigin, end );
-	VectorCopy( e->origin, start );
-
-	// compute variables
-	VectorSubtract( end, start, vec );
-	len = VectorNormalize( vec );
-
-	// compute side vector
-	VectorSubtract( start, backEnd.viewParms.or.origin, v1 );
-	VectorNormalize( v1 );
-	VectorSubtract( end, backEnd.viewParms.or.origin, v2 );
-	VectorNormalize( v2 );
-	CrossProduct( v1, v2, right );
-	VectorNormalize( right );
-
-	if ( len > taperLen * 2 ) {
-		vec3_t taperStart;
-		VectorMA( end, -taperLen, vec, taperStart );
-
-		for ( i = 0; i < 4; i++ ) {
-			vec3_t temp;
-			DoRailCore( start, taperStart, right, len - taperLen, 8 );
-			DoRailCoreTapered( taperStart, end, right, taperLen, 8, 0 );
-			RotatePointAroundVector( temp, vec, right, 45 );
-			VectorCopy( temp, right );
-		}
-	} else {
-		for ( i = 0; i < 4; i++ ) {
-			vec3_t temp;
-			DoRailCore( start, end, right, len, 8 );
-			RotatePointAroundVector( temp, vec, right, 45 );
-			VectorCopy( temp, right );
-		}
-	}
-}
 
 
 static void LerpMeshVertexes(const mdvSurface_t *surf, float backlerp)
@@ -1249,15 +967,6 @@ static void RB_SurfaceEntity( const surfaceType_t *surfType ) {
 	case RT_BEAM:
 		RB_SurfaceBeam();
 		break;
-	case RT_RAIL_CORE:
-		RB_SurfaceRailCore();
-		break;
-	case RT_RAIL_RINGS:
-		RB_SurfaceRailRings();
-		break;
-	case RT_LIGHTNING:
-		RB_SurfaceLightningBolt();
-		break;
 	default:
 		RB_SurfaceAxis();
 		break;
@@ -1325,6 +1034,7 @@ static void RB_SurfaceVaoMdvMesh(const srfVaoMdvMesh_t * surface)
 
 		attribIndex = ATTR_INDEX_POSITION;
 		vAtb = &surface->vao->attribs[attribIndex];
+		// NOLINTNEXTLINE(clang-analyzer-core.NullPointerArithm) — BUFFER_OFFSET((char*)NULL + offset) is the canonical GL VBO-offset idiom
 		qglVertexAttribPointer(attribIndex, vAtb->count, vAtb->type, vAtb->normalized, vAtb->stride, BUFFER_OFFSET(vAtb->offset + frameOffset));
 
 		attribIndex = ATTR_INDEX_NORMAL;

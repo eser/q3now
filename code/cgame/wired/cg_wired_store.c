@@ -10,6 +10,8 @@ to the same key within one frame merge into one staged entry.
 */
 
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 #if FEAT_WIRED_UI
 
@@ -34,7 +36,7 @@ static wuiStagedEntry_t *WUI_Stage_Find( const char *key ) {
 
 	/* allocate new slot */
 	if ( wui_stageCount >= WUI_STAGE_MAX_ENTRIES ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "WARNING: WUI staging buffer full (%d entries), dropping key '%s'\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "WARNING: WUI staging buffer full (%d entries), dropping key '%s'\n",
 					 WUI_STAGE_MAX_ENTRIES, key );
 		return NULL;
 	}

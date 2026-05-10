@@ -9,6 +9,8 @@ cl_wired_ownerdraw.c — TA ownerdraw dispatch table + rendering callbacks
 #include "cl_wired_draw.h"
 #include "cl_wired_background.h"
 #include "../../../qcommon/menudef.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
 
@@ -75,10 +77,8 @@ qboolean WiredUI_OwnerDrawVisible( int flags ) {
 		if ( testFlags < UI_SHOW_LEADER ) {
 			// CG range (values below 0x00000001 of UI range)
 			return ( wiredHud->cgShowFlags & testFlags ) != 0;
-		} else {
-			// UI range
-			return ( wiredHud->uiShowFlags & testFlags ) != 0;
-		}
+		} // UI range
+		return ( wiredHud->uiShowFlags & testFlags ) != 0;
 	}
 
 	return qtrue;
@@ -244,7 +244,7 @@ static qhandle_t WUI_RegisterCharacterMesh( const char *prefix ) {
 	Com_sprintf( tryPath, sizeof( tryPath ), "%s.md3", prefix );
 	handle = re.RegisterModel( tryPath );
 	if ( !handle ) {
-		Com_Log( SEV_WARN, LOG_CAT_UI,
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
 			"WiredOD_PlayerModel: no model at '%s.iqm' or '%s.md3'\n",
 			prefix, prefix );
 	}
@@ -297,7 +297,7 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 			}
 		}
 
-		Com_Log( SEV_INFO, LOG_CAT_UI,
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
 			"WiredOD_PlayerModel: char='%s' skin='%s' parts=%d skins=%d prefix='%s' modelHandle=%d skinHandle=%d\n",
 			charNameBuf, skinNameBuf,
 			mf ? mf->partCount : -1, resolvedNumSkins,
@@ -351,7 +351,7 @@ static void WiredOD_PlayerModel( float x, float y, float w, float h, vec4_t item
 
 // ── player setup ownerdraws ───────────────────────────────────────────
 
-// Display the player's effect (railgun/armor tint) — cvar "color1", 1-7.
+// Display the player's effect (per-weapon player-effect tint) — cvar "color1", 1-7.
 static const char *wui_effectNames[] = {
 	"None", "Red", "Yellow", "Green", "Cyan", "Blue", "Magenta", "White"
 };
@@ -448,7 +448,7 @@ void WiredUI_OwnerDraw( int ownerDraw, float x, float y, float w, float h,
 		unsigned long long bit = 1ULL << ( ownerDraw % 64 );
 		if ( !( wui_odWarnedBits[word] & bit ) ) {
 			wui_odWarnedBits[word] |= bit;
-			Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: unimplemented ownerdraw %d\n", ownerDraw );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: unimplemented ownerdraw %d\n", ownerDraw );
 		}
 	}
 }

@@ -2,7 +2,7 @@
 
 [![build](../../workflows/build/badge.svg)](../../actions?query=workflow%3Abuild)
 
-A modern fork of id Software's Quake III Arena engine (idTech 3).
+This repository ships **Wired**, a modern fork of id Software's Quake III Arena engine (idTech 3), and **q3now**, the game that runs on it. Engine code lives under `code/{qcommon,client,server,renderer*,sdl,unix,win32}` and is built into the `wired` and `wired-ded` binaries; game code lives under `code/{game,cgame}` and ships its assets under `baseq3/`. The engine identifies as "Wired" in window titles, banners, and master-server traffic-tag plumbing; per-game identity (gamename, heartbeat) lives in `code/game/bg_public.h` and is published into engine cvars at game-init time.
 
 ## q3now vs Quake III Arena
 
@@ -210,9 +210,9 @@ Run a q3now dedicated server with Docker:
 
 ```bash
 docker run -d -p 27960:27960/udp \
-  -v /path/to/your/baseq3:/home/q3now/baseq3 \
-  -e Q3_HOSTNAME="My Server" \
-  -e Q3_MAXCLIENTS=16 \
+  -v /path/to/your/baseq3:/home/wired/baseq3 \
+  -e WIRED_HOSTNAME="My Server" \
+  -e WIRED_MAXCLIENTS=16 \
   eserozvataf/q3now +map q3dm17
 ```
 
@@ -221,21 +221,21 @@ Mount your game assets (`pak0.pk3`, custom maps, `server.cfg`) into the
 all available environment variables.
 
 QUIC transport is enabled by default. A self-signed TLS certificate is
-auto-generated in `/home/q3now/certs/` on first start. For production,
-mount a real cert via `Q3_WIREDNET_CERT` / `Q3_WIREDNET_KEY`.
+auto-generated in `/home/wired/certs/` on first start. For production,
+mount a real cert via `WIRED_WIREDNET_CERT` / `WIRED_WIREDNET_KEY`.
 
 | Environment Variable | Engine Cvar            | Description                   |
 |----------------------|------------------------|-------------------------------|
-| `Q3_HOSTNAME`        | `sv_hostname`          | Server name                   |
-| `Q3_MAXCLIENTS`      | `sv_maxclients`        | Max players                   |
-| `Q3_RCONPASSWORD`    | `sv_wiredRconPassword` | Wired RCON password           |
-| `Q3_GAMETYPE`        | `g_gametype`           | 0=DM, 1=Duel, 3=TDM, 4=CTF    |
-| `Q3_SCORELIMIT`      | `g_scorelimit`         | Score limit                   |
-| `Q3_TIMELIMIT`       | `g_timelimit`          | Time limit (minutes)          |
-| `Q3_WIREDNET_CERT`   | `sv_wirednetCertFile`  | Path to TLS certificate (PEM) |
-| `Q3_WIREDNET_KEY`    | `sv_wirednetKeyFile`   | Path to TLS private key (PEM) |
-| `Q3_EXEC`            | `+exec`                | Execute a config file         |
-| `Q3_EXTRA_ARGS`      | _(verbatim)_           | Arbitrary engine arguments    |
+| `WIRED_HOSTNAME`        | `sv_hostname`          | Server name                   |
+| `WIRED_MAXCLIENTS`      | `sv_maxclients`        | Max players                   |
+| `WIRED_RCONPASSWORD`    | `sv_wiredRconPassword` | Wired RCON password           |
+| `WIRED_GAMETYPE`        | `g_gametype`           | 0=DM, 1=Duel, 3=TDM, 4=CTF    |
+| `WIRED_SCORELIMIT`      | `g_scorelimit`         | Score limit                   |
+| `WIRED_TIMELIMIT`       | `g_timelimit`          | Time limit (minutes)          |
+| `WIRED_WIREDNET_CERT`   | `sv_wirednetCertFile`  | Path to TLS certificate (PEM) |
+| `WIRED_WIREDNET_KEY`    | `sv_wirednetKeyFile`   | Path to TLS private key (PEM) |
+| `WIRED_EXEC`            | `+exec`                | Execute a config file         |
+| `WIRED_EXTRA_ARGS`      | _(verbatim)_           | Arbitrary engine arguments    |
 
 ## [Build Instructions](BUILD.md)
 

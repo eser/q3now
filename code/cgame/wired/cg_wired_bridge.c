@@ -756,7 +756,7 @@ void CG_WiredHudPushState( void ) {
 			int len = 0;
 			int ci;
 			dirList[0] = '\0';
-			if ( cg_drawBotDirectives.integer )
+			if ( cg_drawBotDirectives.integer ) {
 			for ( ci = 0; ci < MAX_CLIENTS; ci++ ) {
 				const char *dirText;
 				char line[128];
@@ -783,6 +783,7 @@ void CG_WiredHudPushState( void ) {
 					if ( len >= (int)sizeof(dirList) - 1 ) break;
 				}
 			}
+			} // if ( cg_drawBotDirectives.integer )
 			WUI_Stage_SetString( "game.bots.directives", dirList );
 		}
 

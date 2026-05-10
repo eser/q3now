@@ -28,17 +28,20 @@ BotStrafeJumpCheck() call in ai_dmnet.c.
 #include "ai_main.h"
 #include "ai_movement.h"
 #include "ai_dmq3.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
 
 /*
  * Modern physics parameters — defined as plain globals in bg_pmove.c.
  * No extern header exists for these; declare them here.
  */
-extern float pm_airaccelerate;
-extern float pm_airstopaccelerate;
+extern float pm_airAccelerate;
+extern float pm_airStopAccelerate;
 extern float pm_aircontrol;
-extern float pm_strafeaccelerate;
-extern float pm_wishspeed;
-extern float pm_jump_z;
+extern float pm_strafeAccelerate;
+extern float pm_wishSpeed;
+extern float pm_jumpTimer;
+extern float pm_jumpDoubleJumpZ;
 extern int   pm_walljumps;
 
 
@@ -114,11 +117,11 @@ bot_trajectory_t BotPredictTrajectory( const vec3_t startOrigin,
 
 			if ( pureStrafe ) {
 				/* movementDir 2 or 6: cap to pm_wishspeed, use strafeaccel */
-				if ( wishspeed > pm_wishspeed ) wishspeed = pm_wishspeed;
-				accel = pm_strafeaccelerate;
+				if ( wishspeed > pm_wishSpeed ) wishspeed = pm_wishSpeed;
+				accel = pm_strafeAccelerate;
 			} else {
 				accel = ( DotProduct( velocity, wdir ) < 0.0f )
-				        ? pm_airstopaccelerate : pm_airaccelerate;
+				        ? pm_airStopAccelerate : pm_airAccelerate;
 			}
 
 			/* PM_Accelerate (Q2 style) */
@@ -246,7 +249,7 @@ qboolean BotShouldDoubleJump( bot_state_t *bs )
 	vec3_t     diff;
 	float      heightNeeded, horizDist;
 
-	if ( pm_jump_z <= 0.0f ) return qfalse;
+	if ( pm_jumpDoubleJumpZ <= 0.0f ) return qfalse;
 	if ( bs->cur_ps.groundEntityNum == ENTITYNUM_NONE ) return qfalse;
 
 	if ( !trap_BotGetTopGoal( bs->gs, &goal ) ) return qfalse;
@@ -273,7 +276,7 @@ Coordinates the two-jump sequence for targets 100-200 units above.
 Phase 1 (on ground, no prior jump): issue first jump.
 Phase 2 (airborne): wait for landing.
 Phase 3 (on ground, STAT_JUMPTIME > 0): issue second jump — bg_pmove
-         detects the open window and adds +pm_jump_z to velocity.
+         detects the open window and adds +pm_jumpDoubleJumpZ to velocity.
 
 If STAT_JUMPTIME expires before the second jump is issued, the sequence
 aborts cleanly; the bot reverts to normal navigation next frame.
@@ -312,7 +315,7 @@ void BotDoubleJumpThink( bot_state_t *bs )
 		trap_EA_Jump( bs->client );
 #if FEAT_WIREDNET_OBSERVER
 		trap_WiredNet_EmitBotEvent( bs->entitynum, "doublejump_second",
-		                            1, (int)pm_jump_z, bs->origin );
+		                            1, (int)pm_jumpDoubleJumpZ, bs->origin );
 #endif
 	}
 	/* Window expired or second jump issued — always reset */
@@ -607,7 +610,7 @@ void BotMovementThink( bot_state_t *bs, bot_moveresult_t *moveresult )
 	if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static int s_moveExitTick[MAX_CLIENTS];
 		if ( ++s_moveExitTick[bs->client] % 30 == 0 ) {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[MoveExit] cl=%d ideal=(%.1f %.1f) wrote_ideal=0\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^2[MoveExit] cl=%d ideal=(%.1f %.1f) wrote_ideal=0\n",
 				bs->client,
 				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW] );
 		}

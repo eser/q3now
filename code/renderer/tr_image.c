@@ -82,7 +82,7 @@ void GL_TextureMode( const char *string ) {
 	const textureMode_t *mode;
 	image_t	*img;
 	int		i;
-	
+
 	mode = NULL;
 	for ( i = 0 ; i < ARRAY_LEN( modes ) ; i++ ) {
 		if ( !Q_stricmp( modes[i].name, string ) ) {
@@ -243,11 +243,11 @@ Used to resample images in a more general than quartering fashion.
 This will only be filtered properly if the resampled size
 is greater than half the original size.
 
-If a larger shrinking is needed, use the mipmap function 
+If a larger shrinking is needed, use the mipmap function
 before or after.
 ================
 */
-static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *out,  
+static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *out,
 							int outwidth, int outheight ) {
 	int		i, j;
 	unsigned	*inrow, *inrow2;
@@ -258,7 +258,8 @@ static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *
 
 	if ( outwidth > ARRAY_LEN( p1 ) )
 		ri.Terminate( TERM_CLIENT_DROP, "ResampleTexture: max width" );
-								
+
+	// NOLINTNEXTLINE(clang-analyzer-core.DivideZero) — caller never passes outwidth == 0; image-resampling caller invariant
 	fracstep = inwidth * 0x10000 / outwidth;
 
 	frac = fracstep>>2;
@@ -390,7 +391,7 @@ static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, i
 		for ( j = 0 ; j < outWidth ; j++ ) {
 			outpix = (byte *) ( temp + i * outWidth + j );
 			for ( k = 0 ; k < 4 ; k++ ) {
-				total = 
+				total =
 					1 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
 					2 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
 					2 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
@@ -795,7 +796,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 		image->imgName2 = image->imgName + namelen;
 		strcpy( image->imgName2, name2 );
 	} else {
-		image->imgName2 = image->imgName; 
+		image->imgName2 = image->imgName;
 	}
 
 	hash = generateHashValue( name );
@@ -1046,7 +1047,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	for ( image = hashTable[ hash ]; image; image = image->next ) {
 		if ( !Q_stricmp( name, image->imgName ) ) {
 			// the white image can be used with any set of parms, but other mismatches are errors
-			if ( strcmp( name, "*white" ) ) {
+			if ( strcmp( name, "*white" ) != 0 ) {
 				if ( image->flags != flags ) {
 					ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
 				}
@@ -1126,8 +1127,8 @@ static void R_CreateDlightImage( void ) {
 			} else if ( b < 75 ) {
 				b = 0;
 			}
-			data[y][x][0] = 
-			data[y][x][1] = 
+			data[y][x][0] =
+			data[y][x][1] =
 			data[y][x][2] = b;
 			data[y][x][3] = 255;
 		}
@@ -1211,8 +1212,8 @@ static void R_CreateFogImage( void ) {
 		for (y=0 ; y<FOG_T ; y++) {
 			d = R_FogFactor( ( x + 0.5f ) / FOG_S, ( y + 0.5f ) / FOG_T );
 
-			data[(y*FOG_S+x)*4+0] = 
-			data[(y*FOG_S+x)*4+1] = 
+			data[(y*FOG_S+x)*4+0] =
+			data[(y*FOG_S+x)*4+1] =
 			data[(y*FOG_S+x)*4+2] = 255;
 			data[(y*FOG_S+x)*4+3] = 255*d;
 		}
@@ -1369,8 +1370,8 @@ static void R_CreateBuiltinImages( void ) {
 	// for default lightmaps, etc
 	for (x=0 ; x<DEFAULT_SIZE ; x++) {
 		for (y=0 ; y<DEFAULT_SIZE ; y++) {
-			data[y][x][0] = 
-			data[y][x][1] = 
+			data[y][x][0] =
+			data[y][x][1] =
 			data[y][x][2] = tr.identityLightByte;
 			data[y][x][3] = 255;
 		}
@@ -1400,7 +1401,7 @@ void R_SetColorMappings( void ) {
 	int		inf;
 	int		shift;
 	qboolean applyGamma;
-	float	brightness;
+	float   brightness, mapBrightness;
 
 	if ( !tr.inited ) {
 		// it may be called from window handling functions where gamma flags is now yet known/set
@@ -1408,63 +1409,39 @@ void R_SetColorMappings( void ) {
 	}
 
 	// Float-based brightness (CNQ3-style rework).
-	// When r_brightness != 0 we use its log2 as the effective overbright-bits
-	// shift, replacing the integer r_overBrightBits input. r_overBrightBits
-	// is still honored as a fallback to preserve existing configs and
-	// command-line overrides.
-	if ( r_brightness != NULL && r_brightness->value > 0.0f ) {
-		brightness = r_brightness->value;
-		if ( brightness < 0.25f ) brightness = 0.25f;
-		if ( brightness > 32.0f ) brightness = 32.0f;
-		tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
-		if ( r_overBrightBits->integer < 0 ) {
-			// negative overBrightBits forces gamma even in windowed mode
-			tr.overbrightBits = -tr.overbrightBits;
-		}
-	} else {
-		// setup the overbright lighting
-		// negative value will force gamma in windowed mode
-		tr.overbrightBits = r_overBrightBits->integer;
-	}
-	tr.overbrightBits = abs( tr.overbrightBits );
+    // log2(brightness) → integer overbright-bits shift.
+    brightness = Com_Clamp( 0.25f, 32.0f, r_brightness->value );
+    tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
 
-	// never overbright in windowed mode
+    mapBrightness = Com_Clamp( 0.25f, 32.0f, r_mapBrightness->value );
+    tr.mapOverbrightBits = (int)( logf( mapBrightness ) / logf( 2.0f ) + 0.5f );
+
+    tr.overbrightBits    = Com_Clampi( 0, 2, tr.overbrightBits );
+    tr.mapOverbrightBits = Com_Clampi( 0, 2, tr.mapOverbrightBits );
+
+    // Don't allow more global overbright bits than the map provides.
+    if ( tr.overbrightBits > tr.mapOverbrightBits ) {
+        tr.overbrightBits = tr.mapOverbrightBits;
+    }
+
 #ifdef USE_FBO
-	if ( !glConfig.isFullscreen && r_overBrightBits->integer >= 0 && !fboEnabled ) {
+	if ( !glConfig.deviceSupportsGamma && !fboEnabled ) {
 #else
-	if ( !glConfig.isFullscreen && r_overBrightBits->integer >= 0 ) {
+	if ( !glConfig.deviceSupportsGamma ) {
 #endif
-		tr.overbrightBits = 0;
+		tr.overbrightBits = 0; // need hardware gamma for overbright
 		applyGamma = qfalse;
 	} else {
-#ifdef USE_FBO
-		if ( !glConfig.deviceSupportsGamma && !fboEnabled ) {
-#else
-		if ( !glConfig.deviceSupportsGamma ) {
-#endif
-			tr.overbrightBits = 0; // need hardware gamma for overbright
-			applyGamma = qfalse;
-		} else {
-			applyGamma = qtrue;
-		}
+		applyGamma = qtrue;
 	}
 
-	// allow 2 overbright bits in 24 bit, but only 1 in 16 bit
-	if ( glConfig.colorBits > 16 ) {
-		if ( tr.overbrightBits > 2 ) {
-			tr.overbrightBits = 2;
-		}
-	} else {
-		if ( tr.overbrightBits > 1 ) {
-			tr.overbrightBits = 1;
-		}
-	}
-	if ( tr.overbrightBits < 0 ) {
-		tr.overbrightBits = 0;
-	}
+	// 16-bit color buffer can't carry 2 overbright bits cleanly
+    if ( glConfig.colorBits <= 16 && tr.overbrightBits > 1 ) {
+        tr.overbrightBits = 1;
+    }
 
-	tr.identityLight = 1.0f / ( 1 << tr.overbrightBits );
-	tr.identityLightByte = 255 * tr.identityLight;
+    tr.identityLight = 1.0f / ( 1 << tr.overbrightBits );
+    tr.identityLightByte = 255 * tr.identityLight;
 
 	g = r_gamma->value;
 
@@ -1600,14 +1577,14 @@ static char *CommaParse( const char **data_p ) {
 
 	while ( 1 ) {
 		// skip whitespace
-		while ( (c = *data) <= ' ' ) {
+		 while ( (c = (byte)*data) <= ' ' ) {
 			if ( c == '\0' ) {
 				break;
 			}
 			data++;
 		}
 
-		c = *data;
+		c = (byte)*data;
 
 		// skip double slash comments
 		if ( c == '/' && data[1] == '/' )
@@ -1618,14 +1595,14 @@ static char *CommaParse( const char **data_p ) {
 			}
 		}
 		// skip /* */ comments
-		else if ( c == '/' && data[1] == '*' ) 
+		else if ( c == '/' && data[1] == '*' )
 		{
 			data += 2;
-			while ( *data && ( *data != '*' || data[1] != '/' ) ) 
+			while ( *data && ( *data != '*' || data[1] != '/' ) )
 			{
 				data++;
 			}
-			if ( *data ) 
+			if ( *data )
 			{
 				data += 2;
 			}
@@ -1646,7 +1623,7 @@ static char *CommaParse( const char **data_p ) {
 		data++;
 		while (1)
 		{
-			c = *data;
+			c = (byte)*data;
 			if ( c == '\"' || c == '\0' )
 			{
 				if ( c == '\"' )
@@ -1673,7 +1650,7 @@ static char *CommaParse( const char **data_p ) {
 			len++;
 		}
 		data++;
-		c = *data;
+		c = (byte)*data;
 	} while ( c > ' ' && c != ',' );
 
 	com_token[ len ] = '\0';
@@ -1738,7 +1715,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	//R_IssuePendingRenderCommands();
 
 	// If not a .skin file, load as a single shader
-	if ( strcmp( name + strlen( name ) - 5, ".skin" ) ) {
+	if ( strcmp( name + strlen( name ) - 5, ".skin" ) != 0 ) {
 		skin->numSurfaces = 1;
 		skin->surfaces = ri.Hunk_Alloc( sizeof( skinSurface_t ), h_low );
 		skin->surfaces[0].shader = R_FindShader( name, LIGHTMAP_NONE, qtrue );
@@ -1854,7 +1831,7 @@ void	R_SkinList_f( void ) {
 
 		ri.Log( SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
 		for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-			ri.Log( SEV_INFO, "       %s = %s\n", 
+			ri.Log( SEV_INFO, "       %s = %s\n",
 				skin->surfaces[j].name, skin->surfaces[j].shader->name );
 		}
 	}

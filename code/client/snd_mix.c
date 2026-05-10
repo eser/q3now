@@ -29,6 +29,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "snd_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 static portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
 static int snd_vol;
@@ -495,6 +497,7 @@ static void S_PaintChannelFrom16_scalar( channel_t *ch, const sfx_t *sc, int cou
 					fdata[1] += samples[j&(SND_CHUNK_SIZE-1)];
 				}
 			}
+			// NOLINTNEXTLINE(bugprone-integer-division) — sample-block divisor; integer math intentional for ADPCM frame sizing
 			float fdiv = 256 * (boff-aoff) / sc->soundChannels;
 			samp[i].left += (fdata[0] * fleftvol)/fdiv;
 			samp[i].right += (fdata[1] * frightvol)/fdiv;
@@ -645,6 +648,7 @@ static void S_PaintChannelFromMuLaw( channel_t *ch, sfx_t *sc, int count, int sa
 	if (!ch->doppler) {
 		byte *samples = (byte *)chunk->sndChunk + sampleOffset;
 		for ( int i=0 ; i<count ; i++ ) {
+			// NOLINTNEXTLINE(clang-analyzer-core.NullDereference) — mixer invariant: chunk is non-NULL when we enter the doppler path; loop body advances by chunk
 			int data  = mulawToShort[*samples];
 			samp[i].left += (data * leftvol)>>8;
 			samp[i].right += (data * rightvol)>>8;
@@ -735,7 +739,7 @@ void S_PaintChannels( int endtime ) {
 		}
 	}
 
-	//Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i to %i\n", s_paintedtime, endtime);
+	//Com_Log( SEV_INFO, LOG_CH(ch_client), "%i to %i\n", s_paintedtime, endtime);
 	while ( endtime - s_paintedtime > 0 ) {
 		// if paintbuffer is smaller than DMA buffer
 		// we may need to fill it multiple times
@@ -835,6 +839,7 @@ void S_PaintChannels( int endtime ) {
 					} else {
 						S_PaintChannelFrom16		(ch, sc, count, sampleOffset, ltime - s_paintedtime);
 					}
+					// NOLINTNEXTLINE(readability-misleading-indentation) — preceding `} else\n#endif\nif (...)` pattern fools the heuristic
 					ltime += count;
 				}
 			} while ( ltime - end < 0 );

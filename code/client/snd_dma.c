@@ -32,6 +32,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "snd_local.h"
 #include "snd_codec.h"
 #include "client.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
+LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
 static void S_Update_( int msec );
 static void S_UpdateBackgroundTrack( void );
@@ -114,27 +117,27 @@ portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 
 
 static void S_Base_SoundInfo( void ) {
-	Com_Log( SEV_INFO, LOG_CAT_SOUND, "----- Sound Info -----\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_sound), "----- Sound Info -----\n" );
 	if ( !s_soundStarted ) {
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "sound system not started\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "sound system not started\n" );
 	} else {
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d channels\n", dma.channels);
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d samples\n", dma.samples);
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d samplebits (%s)\n", dma.samplebits, dma.isfloat ? "float" : "int");
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d submission_chunk\n", dma.submission_chunk);
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%5d speed\n", dma.speed);
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%p dma buffer\n", dma.buffer);
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%5d channels\n", dma.channels);
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%5d samples\n", dma.samples);
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%5d samplebits (%s)\n", dma.samplebits, dma.isfloat ? "float" : "int");
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%5d submission_chunk\n", dma.submission_chunk);
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%5d speed\n", dma.speed);
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%p dma buffer\n", dma.buffer);
 		if ( dma.driver ) {
-			Com_Log( SEV_INFO, LOG_CAT_SOUND, "Using %s subsystem\n", dma.driver );
+			Com_Log( SEV_INFO, LOG_CH(ch_sound), "Using %s subsystem\n", dma.driver );
 		}
 		if ( s_backgroundStream ) {
-			Com_Log( SEV_INFO, LOG_CAT_SOUND, "Background file: %s\n", s_backgroundLoop );
+			Com_Log( SEV_INFO, LOG_CH(ch_sound), "Background file: %s\n", s_backgroundLoop );
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SOUND, "No background file.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_sound), "No background file.\n" );
 		}
 
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SOUND, "----------------------\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_sound), "----------------------\n" );
 }
 
 
@@ -154,11 +157,11 @@ static void S_Base_SoundList( void ) {
 		if ( sfx->inMemory ) {
 			total += size;
 		}
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%7i[%s] : %s [%s]\n", size,
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%7i[%s] : %s [%s]\n", size,
 				type[sfx->soundCompressionMethod],
 				sfx->soundName, mem[sfx->inMemory] );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Total resident: %i\n", total);
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Total resident: %i\n", total);
 	S_DisplayFreeMemory();
 }
 
@@ -237,17 +240,17 @@ static sfx_t *S_FindName( const char *name ) {
 	}
 
 	if ( !name[0] ) {
-		COM_WARN( LOG_CAT_CLIENT, "WARNING: Sound name is empty\n" );
+		COM_WARN( LOG_CH(ch_client), "WARNING: Sound name is empty\n" );
 		return NULL;
 	}
 
 	if ( strlen( name ) >= MAX_VFS_PATH ) {
-		COM_WARN( LOG_CAT_CLIENT, "WARNING: Sound name is too long: %s\n", name );
+		COM_WARN( LOG_CH(ch_client), "WARNING: Sound name is too long: %s\n", name );
 		return NULL;
 	}
 
 	if ( name[0] == '*' ) {
-		COM_WARN( LOG_CAT_CLIENT, "WARNING: Tried to load player sound directly: %s\n", name );
+		COM_WARN( LOG_CH(ch_client), "WARNING: Tried to load player sound directly: %s\n", name );
 		return NULL;
 	}
 
@@ -319,7 +322,7 @@ static sfxHandle_t S_Base_RegisterSound( const char *name, qboolean compressed )
 	}
 
 	if ( strlen( name ) >= MAX_VFS_PATH ) {
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound name exceeds MAX_VFS_PATH\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "Sound name exceeds MAX_VFS_PATH\n" );
 		return 0;
 	}
 
@@ -541,7 +544,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
-		COM_WARN( LOG_CAT_CLIENT, "S_StartSound: handle %i out of range\n", sfxHandle );
+		COM_WARN( LOG_CH(ch_client), "S_StartSound: handle %i out of range\n", sfxHandle );
 		return;
 	}
 
@@ -552,7 +555,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 	}
 
 	if ( s_show->integer == 1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "%i : %s\n", s_paintedtime, sfx->soundName );
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%i : %s\n", s_paintedtime, sfx->soundName );
 	}
 
 	// borrowed from cnq3
@@ -574,12 +577,12 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 			if ( ch->thesfx != sfx )
 				continue;
 			sfx->lastTimeUsed = startTime;
-			//Com_Log( SEV_INFO, LOG_CAT_SOUND, S_COLOR_YELLOW "double sound start: %d %s\n", entityNum, sfx->soundName);
+			//Com_Log( SEV_INFO, LOG_CH(ch_sound), S_COLOR_YELLOW "double sound start: %d %s\n", entityNum, sfx->soundName);
 			return;
 		}
 	}
 
-//	Com_Log( SEV_INFO, LOG_CAT_SOUND, "playing %s\n", sfx->soundName);
+//	Com_Log( SEV_INFO, LOG_CH(ch_sound), "playing %s\n", sfx->soundName);
 	// pick a channel to play on
 
 	// try to limit sound duplication
@@ -593,7 +596,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 	for ( int i = 0; i < MAX_CHANNELS; i++, ch++ ) {
 		if ( ch->entnum == entityNum && ch->thesfx == sfx ) {
 			if ( startTime - ch->allocTime < 20 ) {
-				Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "S_StartSound: Double start (%d ms < 20 ms) for %s\n", startTime - ch->allocTime, sfx->soundName);
+				Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "S_StartSound: Double start (%d ms < 20 ms) for %s\n", startTime - ch->allocTime, sfx->soundName);
 				return;
 			}
 			inplay++;
@@ -602,7 +605,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 
 	// too much duplicated sounds, ignore
 	if ( inplay > allowed ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "S_StartSound: %s hit the concurrent channels limit (%d)\n", sfx->soundName, allowed);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "S_StartSound: %s hit the concurrent channels limit (%d)\n", sfx->soundName, allowed);
 		return;
 	}
 
@@ -640,14 +643,14 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 					}
 				}
 				if (chosen == -1) {
-					Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "S_StartSound: No more channels free for %s\n", sfx->soundName);
+					Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "S_StartSound: No more channels free for %s\n", sfx->soundName);
 					return;
 				}
 			}
 		}
 		ch = &s_channels[chosen];
 		ch->allocTime = sfx->lastTimeUsed;
-		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx->soundName);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx->soundName);
 	}
 
 	if ( origin ) {
@@ -681,7 +684,7 @@ static void S_Base_StartLocalSound( sfxHandle_t sfxHandle, int channelNum ) {
 	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
-		COM_WARN( LOG_CAT_CLIENT, "S_StartLocalSound: handle %i out of range\n", sfxHandle );
+		COM_WARN( LOG_CH(ch_client), "S_StartLocalSound: handle %i out of range\n", sfxHandle );
 		return;
 	}
 
@@ -796,7 +799,7 @@ void S_Base_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t ve
 	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
-		COM_WARN( LOG_CAT_CLIENT, "S_AddLoopingSound: handle %i out of range\n", sfxHandle );
+		COM_WARN( LOG_CH(ch_client), "S_AddLoopingSound: handle %i out of range\n", sfxHandle );
 		return;
 	}
 
@@ -864,7 +867,7 @@ void S_Base_AddRealLoopingSound( int entityNum, const vec3_t origin, const vec3_
 	}
 
 	if ( sfxHandle < 0 || sfxHandle >= s_numSfx ) {
-		COM_WARN( LOG_CAT_CLIENT, "S_AddRealLoopingSound: handle %i out of range\n", sfxHandle );
+		COM_WARN( LOG_CH(ch_client), "S_AddRealLoopingSound: handle %i out of range\n", sfxHandle );
 		return;
 	}
 
@@ -989,13 +992,13 @@ static void S_Base_RawSamples( int samples, int rate, int width, int n_channels,
 	int		intVolume = 256 * volume;
 
 	if ( s_rawend - s_soundtime < 0 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_RawSamples: resetting minimum: %i < %i\n", s_rawend, s_soundtime );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_RawSamples: resetting minimum: %i < %i\n", s_rawend, s_soundtime );
 		s_rawend = s_soundtime;
 	}
 
 	float	scale = (float)rate / dma.speed;
 
-	//Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i < %i < %i\n", s_soundtime, s_paintedtime, s_rawend);
+	//Com_Log( SEV_INFO, LOG_CH(ch_client), "%i < %i < %i\n", s_soundtime, s_paintedtime, s_rawend);
 	if (n_channels == 2 && width == 2)
 	{
 		if (scale == 1.0)
@@ -1067,7 +1070,7 @@ static void S_Base_RawSamples( int samples, int rate, int width, int n_channels,
 	}
 
 	if ( s_rawend - s_soundtime > MAX_RAW_SAMPLES ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_RawSamples: overflowed %i > %i\n", s_rawend, s_soundtime );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_RawSamples: overflowed %i > %i\n", s_rawend, s_soundtime );
 	}
 }
 
@@ -1184,7 +1187,7 @@ Called once each time through the main loop
 */
 static void S_Base_Update( int msec ) {
 	if ( !s_soundStarted || s_soundMuted ) {
-//		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "not started or muted\n");
+//		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "not started or muted\n");
 		return;
 	}
 
@@ -1196,12 +1199,12 @@ static void S_Base_Update( int msec ) {
 		channel_t	*ch = s_channels;
 		for (int i=0 ; i<MAX_CHANNELS; i++, ch++) {
 			if (ch->thesfx && (ch->leftvol || ch->rightvol) ) {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%d %d %s\n", ch->leftvol, ch->rightvol, ch->thesfx->soundName);
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "%d %d %s\n", ch->leftvol, ch->rightvol, ch->thesfx->soundName);
 				total++;
 			}
 		}
 
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "----(%i)---- painted: %i\n", total, s_paintedtime);
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "----(%i)---- painted: %i\n", total, s_paintedtime);
 	}
 
 	// mix some sound
@@ -1374,7 +1377,7 @@ static void S_OpenBackgroundStream( const char *filename ) {
 	}
 
 	if( s_backgroundStream->info.channels != 2 || s_backgroundStream->info.rate != 48000 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "WARNING: music file %s is not 48kHz stereo\n", filename );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "WARNING: music file %s is not 48kHz stereo\n", filename );
 	}
 }
 
@@ -1391,7 +1394,7 @@ static void S_Base_StartBackgroundTrack( const char *intro, const char *loop ){
 	if ( !loop || !loop[0] ) {
 		loop = intro;
 	}
-	Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_StartBackgroundTrack( %s, %s )\n", intro, loop );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_StartBackgroundTrack( %s, %s )\n", intro, loop );
 
 	if(!*intro)
 	{
@@ -1502,7 +1505,7 @@ void S_FreeOldestSound( void ) {
 
 	sfx_t	*sfx = &s_knownSfx[used];
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "S_FreeOldestSound: freeing sound %s\n", sfx->soundName);
+	Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_FreeOldestSound: freeing sound %s\n", sfx->soundName);
 
 	sndBuffer	*buffer = sfx->soundData;
 	while(buffer != NULL) {
@@ -1625,7 +1628,7 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 			break;
 		default:
 			// anything else is illegal
-			Com_Log( SEV_INFO, LOG_CAT_SOUND, "WARNING: cvar 's_khz' must be one of (8, 11, 22, 44, 48), setting to '%s'\n", s_khz->resetString );
+			Com_Log( SEV_INFO, LOG_CH(ch_sound), "WARNING: cvar 's_khz' must be one of (8, 11, 22, 44, 48), setting to '%s'\n", s_khz->resetString );
 			Cvar_ForceReset( "s_khz" );
 			break;
 	}

@@ -1,6 +1,6 @@
 /*
 ===========================================================================
-user_vm.h — Untrusted Lua User VM (q3now wired/scripting layer)
+user_vm.h — Untrusted Lua User VM (wired engine scripting layer)
 
 Sandbox for rcon scripts, bot AI, and future mod code.  One shared
 lua_State with a configurable allocator cap and a per-call coroutine

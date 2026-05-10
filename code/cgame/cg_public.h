@@ -188,12 +188,25 @@ typedef enum {
 	CG_R_ADDREFENTITYTOSCENE2,
 	CG_R_FORCEFIXEDDLIGHTS,
 	CG_R_ADDLINEARLIGHTTOSCENE,
-	CG_R_ADDRAILTRAILPARAMS,
 	CG_IS_RECORDING_DEMO,
 	CG_CVAR_SETDESCRIPTION,
 	// ── IQM animation query ─────────────────────────────────────────
 	CG_R_GETIQMANIMS,
 	// int trap_R_GetIQMAnimations( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims )
+	// ── Primitive submission (wired/render) ─────────────────────────
+	CG_R_ADDRIBBONTOSCENE,
+	CG_R_ADDBEAMTOSCENE,
+	CG_R_ADDSPRITETOSCENE,
+	CG_R_EMITPARTICLES,
+	CG_R_ADDDECALTOSCENE,
+	CG_R_REGISTERPARTICLECLASS,
+	// void trap_R_RegisterParticleClass( particleClassHandle_t handle,
+	//                                     const particleClass_t *cls )
+	CG_R_REGISTERPRIMITIVESHADER,
+	// qhandle_t trap_R_RegisterPrimitiveShader( const char *name )
+	// — like CG_R_REGISTERSHADER but additionally writes the resolved
+	// shader's image into vk_primitive_shader_images[] so the ribbon
+	// (and future beam) pipeline can sample the texture by handle.
 	// ── Wired UI: HUD state bridge (Phase 3) ────────────────────────
 	CG_WIREDUI_PUSH_HUD_STATE = 200,
 	// void trap_WiredUI_PushHudState( wiredHudState_t *state )

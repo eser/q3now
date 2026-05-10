@@ -834,12 +834,11 @@ static int BotAddToTarget(vec3_t start, vec3_t end, float maxdist, float *dist, 
 		*dist += curdist;
 		return qfalse;
 	} //end if
-	else
-	{
-		VectorMA(start, maxdist - *dist, dir, target);
-		*dist = maxdist;
-		return qtrue;
-	} //end else
+
+	VectorMA( start, maxdist - *dist, dir, target );
+	*dist = maxdist;
+	return qtrue;
+	//end else
 } //end of the function BotAddToTarget
 
 int BotMovementViewTarget(int movestate, bot_goal_t *goal, int travelflags, float lookahead, vec3_t target)
@@ -1724,10 +1723,9 @@ static int BotAirControl(vec3_t origin, vec3_t velocity, vec3_t goal, vec3_t dir
 			*speed = 400 - (400 - 13 * dist);
 			return qtrue;
 		} //end if
-		else
-		{
-			VectorAdd(org, vel, org);
-		} //end else
+
+		VectorAdd( org, vel, org );
+		//end else
 	} //end for
 	VectorSet(dir, 0, 0, 0);
 	*speed = 400;
@@ -3421,22 +3419,20 @@ void BotMoveToGoal(bot_moveresult_t *result, int movestate, bot_goal_t *goal, in
 					//botimport.Print(PRT_MESSAGE, "found jumppad reachability\n");
 					break;
 				} //end if
-				else
-				{
-					for (lastreachnum = AAS_NextAreaReachability(areas[i], 0); lastreachnum;
-						lastreachnum = AAS_NextAreaReachability(areas[i], lastreachnum))
-					{
-						//get the reachability from the number
-						AAS_ReachabilityFromNum(lastreachnum, &reach);
-						if ((reach.traveltype & TRAVELTYPE_MASK) == TRAVEL_JUMPPAD)
-						{
-							ms->lastreachnum = lastreachnum;
-							ms->lastareanum = areas[i];
-							//botimport.Print(PRT_MESSAGE, "found jumppad reachability hard!!\n");
-						} //end if
-					} //end for
-					if (lastreachnum) break;
-				} //end else
+
+				for ( lastreachnum = AAS_NextAreaReachability( areas[i], 0 ); lastreachnum;
+					  lastreachnum = AAS_NextAreaReachability( areas[i], lastreachnum ) ) {
+					//get the reachability from the number
+					AAS_ReachabilityFromNum( lastreachnum, &reach );
+					if ( ( reach.traveltype & TRAVELTYPE_MASK ) == TRAVEL_JUMPPAD ) {
+						ms->lastreachnum = lastreachnum;
+						ms->lastareanum	 = areas[i];
+						//botimport.Print(PRT_MESSAGE, "found jumppad reachability hard!!\n");
+					} //end if
+				} //end for
+				if ( lastreachnum )
+					break;
+				//end else
 			} //end if
 		} //end for
 		if (botDeveloper)

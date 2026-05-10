@@ -490,10 +490,8 @@ qboolean CG_ModernHUDGetFadeColor(const vec4_t from_color, vec4_t out, const mod
 			Vector4MA(from_color, k, tmpfade, out);
 			return qtrue;
 		}
-		else
-		{
-			return qfalse;
-		}
+
+		return qfalse;
 	}
 
 	return qfalse;

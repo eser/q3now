@@ -341,6 +341,17 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	tr.frameCount++;
 	tr.frameSceneNum = 0;
 
+	// Reset primitive ring write cursors before cgame submissions for
+	// this frame begin. Stereo-guarded: only fire on the first eye (or
+	// non-stereo, where stereoFrame is STEREO_CENTER). Otherwise the
+	// second eye's RE_BeginFrame would zero counters that the first
+	// eye's cgame populated.
+	if ( stereoFrame == STEREO_LEFT || stereoFrame == STEREO_CENTER ) {
+		vk.ribbon.numPointsThisFrame  = 0;
+		vk.ribbon.numHeadersThisFrame = 0;
+		vk.sprite.numThisFrame        = 0;
+	}
+
 	if ( ( cmd = R_GetCommandBuffer( sizeof( *cmd ) ) ) == NULL )
 		return;
 

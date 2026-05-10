@@ -49,10 +49,6 @@ cvar_t	*r_defaultFogParmsType;
 cvar_t	*r_globalLinearFogDrawSky;
 #endif
 
-cvar_t	*r_railWidth;
-cvar_t	*r_railCoreWidth;
-cvar_t	*r_railSegmentLength;
-
 cvar_t	*r_detailTextures;
 
 cvar_t	*r_znear;
@@ -171,8 +167,6 @@ cvar_t	*r_portalOnly;
 cvar_t	*r_subdivisions;
 cvar_t	*r_lodCurveError;
 
-cvar_t	*r_overBrightBits;
-cvar_t	*r_mapOverBrightBits;
 cvar_t	*r_brightness;
 cvar_t	*r_mapBrightness;
 cvar_t	*r_mapGreyScale;
@@ -274,15 +268,24 @@ static void R_ClearSymTables( void )
 
 // for modular renderer
 #ifdef USE_RENDERER_DLOPEN
-void QDECL Com_Log_Impl( log_severity_t severity, logCategory_t cat, const char *fmt, ... )
+void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *fmt, ... )
 {
 	char buf[ MAXPRINTMSG ];
 	va_list	argptr;
-	(void)cat;
+	(void)channel;  // renderer DLL routes everything through ri.Log → "renderer"
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
 	ri.Log( severity, "%s", buf );
+}
+
+// Stub for q_shared.c's LOG_CH expansion. The renderer DLL has no access
+// to the engine's channel registry; everything is routed through ri.Log to
+// the top-level "renderer" channel anyway, so the returned id is unused.
+int Log_GetChannel( const char *name )
+{
+	(void)name;
+	return 0;
 }
 
 void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *fmt, ... )
@@ -1525,19 +1528,15 @@ static void R_Register( void )
 	//
 	r_fullbright = ri.Cvar_Get( "r_fullbright", "0", CVAR_LATCH );
 	ri.Cvar_SetDescription( r_fullbright, "Debugging tool to render the entire level without lighting." );
-	r_overBrightBits = ri.Cvar_Get( "r_overBrightBits", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_overBrightBits, "Sets the intensity of overall brightness of texture pixels." );
-	r_mapOverBrightBits = ri.Cvar_Get( "r_mapOverBrightBits", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_mapOverBrightBits, "Sets the number of overbright bits baked into all lightmaps and map data." );
 	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_brightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_brightness,
-		"Float-based overall brightness multiplier (replaces r_overBrightBits).\n"
-		"Range 0.25-32, default 2.0 (matches r_overBrightBits 1)." );
+		"Float-based overall brightness multiplier.\n"
+		"Range 0.25-32, default 2.0." );
 	r_mapBrightness = ri.Cvar_Get( "r_mapBrightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_mapBrightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_mapBrightness,
-		"Float-based map (lightmap) brightness multiplier (replaces r_mapOverBrightBits).\n"
+		"Float-based map (lightmap) brightness multiplier.\n"
 		"Range 0.25-32, default 2.0." );
 	r_intensity = ri.Cvar_Get( "r_intensity", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_intensity, "1", "255", CV_FLOAT );
@@ -1722,13 +1721,6 @@ static void R_Register( void )
 	ri.Cvar_SetGroup( r_gamma, CVG_RENDERER );
 	r_facePlaneCull = ri.Cvar_Get ("r_facePlaneCull", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_facePlaneCull, "Enables culling of planar surfaces with back side test." );
-
-	r_railWidth = ri.Cvar_Get( "r_railWidth", "16", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_railWidth, "Radius of railgun trails." );
-	r_railCoreWidth = ri.Cvar_Get( "r_railCoreWidth", "6", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_railCoreWidth, "Size of railgun trail rings when enabled in game code (normally \\cg_oldRail 0)." );
-	r_railSegmentLength = ri.Cvar_Get( "r_railSegmentLength", "32", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_railSegmentLength, "Length of segments in railgun trails." );
 
 	r_ambientScale = ri.Cvar_Get( "r_ambientScale", "0.6", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ambientScale, "Light grid ambient light scaling on entity models." );
@@ -2111,7 +2103,12 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.AddLightToScene = RE_AddLightToScene;
 	re.AddAdditiveLightToScene = RE_AddAdditiveLightToScene;
 	re.AddLinearLightToScene = RE_AddLinearLightToScene;
-	re.AddRailTrailParams = NULL; // no GPU compute in OpenGL renderer
+	re.AddRibbonToScene = RE_AddRibbonToScene;
+	re.AddBeamToScene = RE_AddBeamToScene;
+	re.AddSpriteToScene = RE_AddSpriteToScene;
+	re.EmitParticles = RE_EmitParticles;
+	re.AddDecalToScene = RE_AddDecalToScene;
+	re.RegisterParticleClass = RE_RegisterParticleClass;
 
 	re.RenderScene = RE_RenderScene;
 

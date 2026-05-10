@@ -345,14 +345,13 @@ int BotGetPatrolWaypoints(bot_state_t *bs, bot_match_t *match) {
 			patrolflags = PATROL_LOOP;
 			break;
 		}
-		else if (keyareamatch.subtype & ST_REVERSE) {
+		if ( keyareamatch.subtype & ST_REVERSE ) {
 			patrolflags = PATROL_REVERSE;
 			break;
 		}
-		else if (keyareamatch.subtype & ST_MORE) {
-			trap_BotMatchVariable(&keyareamatch, MORE, keyarea, MAX_MESSAGE_SIZE);
-		}
-		else {
+		if ( keyareamatch.subtype & ST_MORE ) {
+			trap_BotMatchVariable( &keyareamatch, MORE, keyarea, MAX_MESSAGE_SIZE );
+		} else {
 			break;
 		}
 	}
@@ -399,19 +398,22 @@ int BotAddressedToBot(bot_state_t *bs, bot_match_t *match) {
 			if (addresseematch.type == MSG_EVERYONE) {
 				return qtrue;
 			}
-			else if (addresseematch.type == MSG_MULTIPLENAMES) {
-				trap_BotMatchVariable(&addresseematch, TEAMMATE, name, sizeof(name));
-				if (strlen(name)) {
-					if (stristr(botname, name)) return qtrue;
-					if (stristr(bs->directives.subteam, name)) return qtrue;
+			if ( addresseematch.type == MSG_MULTIPLENAMES ) {
+				trap_BotMatchVariable( &addresseematch, TEAMMATE, name, sizeof( name ) );
+				if ( strlen( name ) ) {
+					if ( stristr( botname, name ) )
+						return qtrue;
+					if ( stristr( bs->directives.subteam, name ) )
+						return qtrue;
 				}
-				trap_BotMatchVariable(&addresseematch, MORE, addressedto, MAX_MESSAGE_SIZE);
-			}
-			else {
-				trap_BotMatchVariable(&addresseematch, TEAMMATE, name, MAX_MESSAGE_SIZE);
-				if (strlen(name)) {
-					if (stristr(botname, name)) return qtrue;
-					if (stristr(bs->directives.subteam, name)) return qtrue;
+				trap_BotMatchVariable( &addresseematch, MORE, addressedto, MAX_MESSAGE_SIZE );
+			} else {
+				trap_BotMatchVariable( &addresseematch, TEAMMATE, name, MAX_MESSAGE_SIZE );
+				if ( strlen( name ) ) {
+					if ( stristr( botname, name ) )
+						return qtrue;
+					if ( stristr( bs->directives.subteam, name ) )
+						return qtrue;
 				}
 				break;
 			}
@@ -420,16 +422,14 @@ int BotAddressedToBot(bot_state_t *bs, bot_match_t *match) {
 		//trap_EA_Say(bs->client, buf);
 		return qfalse;
 	}
-	else {
-		bot_match_t tellmatch;
+	bot_match_t tellmatch;
 
-		tellmatch.type = 0;
-		//if this message wasn't directed solely to this bot
-		if (!trap_BotFindMatch(match->string, &tellmatch, MTCONTEXT_REPLYCHAT) ||
-				tellmatch.type != MSG_CHATTELL) {
-			//make sure not everyone reacts to this message
-			if (random() > (float ) 1.0 / (NumPlayersOnSameTeam(bs)-1)) return qfalse;
-		}
+	tellmatch.type = 0;
+	//if this message wasn't directed solely to this bot
+	if (!trap_BotFindMatch(match->string, &tellmatch, MTCONTEXT_REPLYCHAT) ||
+			tellmatch.type != MSG_CHATTELL) {
+		//make sure not everyone reacts to this message
+		if (random() > (float ) 1.0 / (NumPlayersOnSameTeam(bs)-1)) return qfalse;
 	}
 	return qtrue;
 }

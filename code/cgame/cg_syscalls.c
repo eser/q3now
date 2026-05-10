@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "cg_local.h"
+#include "../qcommon/wired/render/traps.h"
 
 #ifdef WASM_MODULE
 extern intptr_t QDECL syscall( intptr_t arg, ... );
@@ -258,6 +259,10 @@ qhandle_t trap_R_RegisterShaderNoMip( const char *name ) {
 	return syscall( CG_R_REGISTERSHADERNOMIP, name );
 }
 
+qhandle_t trap_R_RegisterPrimitiveShader( const char *name ) {
+	return syscall( CG_R_REGISTERPRIMITIVESHADER, name );
+}
+
 void trap_R_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 	syscall(CG_R_REGISTERFONT, fontName, pointSize, font );
 }
@@ -290,8 +295,30 @@ void	trap_R_AddAdditiveLightToScene( const vec3_t org, float intensity, float r,
 	syscall( CG_R_ADDADDITIVELIGHTTOSCENE, org, PASSFLOAT(intensity), PASSFLOAT(r), PASSFLOAT(g), PASSFLOAT(b) );
 }
 
-void	trap_R_AddRailTrailParams( const railTrailParams_t *params ) {
-	syscall( CG_R_ADDRAILTRAILPARAMS, params );
+void	trap_R_AddRibbonToScene( const ribbonPoint_t *points, int numPoints,
+								 qhandle_t shader, int flags ) {
+	syscall( CG_R_ADDRIBBONTOSCENE, points, numPoints, shader, flags );
+}
+
+void	trap_R_AddBeamToScene( const beamDesc_t *desc ) {
+	syscall( CG_R_ADDBEAMTOSCENE, desc );
+}
+
+void	trap_R_AddSpriteToScene( const spriteDesc_t *desc ) {
+	syscall( CG_R_ADDSPRITETOSCENE, desc );
+}
+
+void	trap_R_EmitParticles( const emitterDesc_t *desc ) {
+	syscall( CG_R_EMITPARTICLES, desc );
+}
+
+void	trap_R_AddDecalToScene( const decalDesc_t *desc ) {
+	syscall( CG_R_ADDDECALTOSCENE, desc );
+}
+
+void	trap_R_RegisterParticleClass( particleClassHandle_t handle,
+									  const particleClass_t *cls ) {
+	syscall( CG_R_REGISTERPARTICLECLASS, handle, cls );
 }
 
 void	trap_R_RenderScene( const refdef_t *fd ) {

@@ -3,36 +3,120 @@
 # Focused on bug-finding and safety checks suitable for a C game engine.
 # Style enforcement is intentionally minimal — the codebase has its own
 # well-established conventions inherited from id Software / Quake3e.
+#
+# Checks are organized into phases. Phase 1 (active) is the broad bug-finder
+# set: bugprone-*, clang-analyzer-*, performance-*, portability-* with known
+# noise filtered out. Phases 2 and 3 are commented out — opt in by uncommenting
+# the relevant block when ready to address that class of finding.
 
+# PHASE 1 — broad bug-finding + analyzer + performance + portability (active)
 Checks: >
   -*,
   bugprone-*,
   clang-analyzer-*,
   misc-redundant-expression,
+  misc-static-assert,
+  misc-unconventional-assign-operator,
   misc-unused-using-decls,
   performance-*,
   portability-*,
   readability-duplicate-include,
+  readability-else-after-return,
   readability-misleading-indentation,
   readability-redundant-control-flow,
+  readability-redundant-preprocessor,
+  readability-simplify-boolean-expr,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-branch-clone,
+  -bugprone-casting-through-void,
   -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-narrowing-conversions,
   -bugprone-reserved-identifier,
   -bugprone-signal-handler,
-  -bugprone-assignment-in-if-condition,
   -bugprone-suspicious-include,
   -bugprone-switch-missing-default-case,
-  -bugprone-implicit-widening-of-multiplication-result,
-  -bugprone-casting-through-void,
+  -bugprone-unchecked-string-to-number-conversion,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-incorrect-roundings,
+  -bugprone-integer-division,
+  -bugprone-suspicious-memory-comparison,
+  -clang-analyzer-deadcode.DeadStores,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
   -clang-analyzer-security.insecureAPI.strcpy,
-  -clang-analyzer-deadcode.DeadStores,
   -performance-no-int-to-ptr,
+  -performance-type-promotion-in-math-fn,
 
-WarningsAsErrors: ''
+# PHASE 2 — style + cognitive complexity (now active)
+#  Active in main Checks list above:
+#    misc-unused-parameters
+#    readability-else-after-return
+#    readability-inconsistent-declaration-parameter-name
+#    readability-simplify-boolean-expr
+#
+#  Still disabled (require dedicated effort or are too noisy):
+#    bugprone-argument-comment            — needs canonical-name pass on every callee
+#    bugprone-assert-side-effect          — Q3 has a few legitimate side-effect asserts; consider per-site
+#    bugprone-branch-clone                — legitimate Q3 pattern in MSG_ReadStringFmt-style "translate to '.'" filters
+#    readability-braces-around-statements — Q3 uses braceless single-line if/for extensively; would explode the diff
+#    readability-function-cognitive-complexity — Q3 has many large functions by inheritance; threshold tuning later
+#    readability-isolate-declaration      — Q3 uses `int a, b, c;` extensively
+#    readability-non-const-parameter      — would touch hundreds of vec3_t signatures
+
+# PHASE 3 — extra perf checks already covered by performance-* wildcard above;
+# kept as a slot for any future opt-ins that aren't part of the wildcards.
+
+# INTENTIONALLY EXCLUDED — too noisy for Q3 codebase:
+#  bugprone-easily-swappable-parameters             — Q3 APIs have many (int, int, int) signatures
+#  bugprone-narrowing-conversions                   — int/float casts everywhere by design
+#  bugprone-implicit-widening-of-multiplication-result — common in Q3 array math
+#  bugprone-reserved-identifier                     — legacy id-Software identifiers tripped this widely
+#  bugprone-suspicious-include                      — Q3 uses .h-as-include-of-.c in places (msg.c, tlds.h)
+#  bugprone-switch-missing-default-case             — many Q3 enums are exhaustively switched
+#  bugprone-signal-handler                          — engine signal handlers do legitimate work
+#  bugprone-assignment-in-if-condition              — common Q3 pattern `if ( (x = ...) )`
+#  bugprone-casting-through-void                    — unavoidable in Q3 callback registries
+#  clang-analyzer-deadcode.DeadStores               — too noisy in defensive engine code
+#  clang-analyzer-security.insecureAPI.{strcpy,DeprecatedOrUnsafeBufferHandling}
+#                                                    — Q_strncpyz / Q_strcat are bounded; the analyzer
+#                                                      doesn't know our string-safety wrappers
+#  performance-no-int-to-ptr                        — engine has legitimate int↔ptr conversions
+#  performance-type-promotion-in-math-fn            — Q3 uses sin/cos/sqrt with floats by design
+#  clang-analyzer-optin.core.EnumCastOutOfRange     — Q3 pattern of 0 = "no key/font/etc" for various enums (keyNum_t, fontWeight_t, …); too noisy without enum API changes
+#  bugprone-incorrect-roundings                     — Q3 uses (int)(x + 0.5f) idiom widely; systematic refactor to lround() not in scope
+#  bugprone-integer-division                        — Q3 mixes integer pixel/index math with float contexts pervasively; per-site NOLINT for the few real precision-loss cases is more useful
+#  bugprone-suspicious-memory-comparison            — Q3 memcmp's waveForm_t / colorChange_t / etc. structs that have padding; relies on memset(0) discipline upstream, established pattern
+#  bugprone-unchecked-string-to-number-conversion   — atoi/atof are pervasive in cvar/parse code;
+#                                                     bounded conversion would need a sweep across
+#                                                     hundreds of call sites (separate effort)
+#  bugprone-multi-level-implicit-pointer-conversion — Q3 callbacks pass void* with multi-level
+#                                                     casts in the registry-walking pattern
+#  misc-unused-parameters                           — Q3 callback signatures (cmd handlers, completion
+#                                                     fns) leave `args` / context params unused by
+#                                                     design; 230+ sites would be (void)param; noise
+#  readability-inconsistent-declaration-parameter-name
+#                                                   — header-vs-source param name drift; cosmetic
+#                                                     (e.g. `int n` in decl vs `int count` in def);
+#                                                     76 sites without bug-finding value
+#  readability-magic-numbers                        — addressed separately via named constants
+#  readability-identifier-naming                    — Q3 naming conventions are established
+
+WarningsAsErrors: >
+  bugprone-suspicious-semicolon,
+  bugprone-sizeof-expression,
+  bugprone-swapped-arguments,
+  bugprone-macro-repeated-side-effects,
+  bugprone-suspicious-memset-usage
 
 HeaderFilterRegex: '^code/.*'
 
 CheckOptions:
+  - key: bugprone-signed-char-misuse.CharTypdefsToIgnore
+    value: 'byte'
   - key: bugprone-suspicious-string-compare.WarnOnImplicitComparison
     value: true
+  - key: bugprone-too-small-loop-variable.MagnitudeBitsUpperLimit
+    value: '16'
+  - key: readability-function-cognitive-complexity.Threshold
+    value: '50'

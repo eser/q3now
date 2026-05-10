@@ -11,7 +11,7 @@ Key map published below — observers decode fields by WTK_* integer.
 */
 #include "wn_local.h"
 #include "../../../server/server.h"  // for svs, sv, client_t, SV_GameClientNum
-#include "../../../game/bg_public.h" // for PERS_SCORE, PERS_TEAM, PERS_KILLED
+#include "../protocol.h"             // for PERS_SCORE, PERS_TEAM, PERS_KILLED
 
 #if FEAT_WIREDNET_OBSERVER
 

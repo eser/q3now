@@ -128,6 +128,7 @@ static	int	neighbors[8][2] = {
 
 	wrapWidth = qfalse;
 	for ( i = 0 ; i < height ; i++ ) {
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — ctrl is sized [height][width]; [i][width-1] is in bounds
 		VectorSubtract( ctrl[i][0].xyz, ctrl[i][width-1].xyz, delta );
 		len = VectorLengthSquared( delta );
 		if ( len > 1.0 ) {
@@ -140,6 +141,7 @@ static	int	neighbors[8][2] = {
 
 	wrapHeight = qfalse;
 	for ( i = 0 ; i < width ; i++ ) {
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — ctrl is sized [height][width]; [height-1][i] is in bounds
 		VectorSubtract( ctrl[0][i].xyz, ctrl[height-1][i].xyz, delta );
 		len = VectorLengthSquared( delta );
 		if ( len > 1.0 ) {
@@ -184,11 +186,10 @@ static	int	neighbors[8][2] = {
 					VectorSubtract( ctrl[y][x].xyz, base, temp );
 					if ( VectorNormalize( temp ) < 0.001f ) {
 						continue;				// degenerate edge, get more dist
-					} else {
-						good[k] = qtrue;
-						VectorCopy( temp, around[k] );
-						break;					// good edge
 					}
+					good[k] = qtrue;
+					VectorCopy( temp, around[k] );
+					break; // good edge
 				}
 			}
 

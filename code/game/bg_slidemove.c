@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "bg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_physics, "physics" );
 
 /*
 
@@ -70,7 +72,7 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 		if ( pml.groundPlane ) {
 			// slide along the ground plane
 			PM_ClipVelocity (pm->ps->velocity, pml.groundTrace.plane.normal,
-				pm->ps->velocity, OVERCLIP );
+				pm->ps->velocity, (pm->pmove_flags & PMF_OVERBOUNCE) ? OVERCLIP : 1.0f );
 		}
 	}
 
@@ -155,12 +157,13 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 				pml.impactSpeed = -into;
 			}
 
-			// slide along the plane
-			PM_ClipVelocity (pm->ps->velocity, planes[i], clipVelocity, OVERCLIP );
+			// slide along the plane (slope-aware: preserves/amplifies speed
+			// on slopes so bunny hops into ramps don't bleed forward velocity)
+			PM_SlopeBoostClip ( pm->ps->velocity, planes[i], clipVelocity, pm_rampboost, (pm->pmove_flags & PMF_OVERBOUNCE) );
 
 			if ( gravity ) {
-				// slide along the plane
-				PM_ClipVelocity (endVelocity, planes[i], endClipVelocity, OVERCLIP );
+                // slide along the plane
+                PM_SlopeBoostClip ( endVelocity, planes[i], endClipVelocity, pm_rampboost, (pm->pmove_flags & PMF_OVERBOUNCE) );
 			}
 
 			// see if there is a second plane that the new move enters
@@ -259,7 +262,7 @@ void PM_StepSlideMove( qboolean gravity ) {
 	}
 
 	if ( pm->stepDebugLevel ) {
-		Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] pos=(%.2f %.2f %.2f) vel=(%.2f %.2f %.2f) blocked by SlideMove\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_physics), "STEP [%i] pos=(%.2f %.2f %.2f) vel=(%.2f %.2f %.2f) blocked by SlideMove\n",
 			c_pmove,
 			start_o[0], start_o[1], start_o[2],
 			start_v[0], start_v[1], start_v[2] );
@@ -273,13 +276,24 @@ void PM_StepSlideMove( qboolean gravity ) {
 	inAir = ( pm->ps->velocity[2] > 0 && (trace.fraction == 1.0 ||
 										DotProduct(trace.plane.normal, up) < 0.7));
 
-	// never step up when you still have up velocity and not holding jump
-	if (inAir && pm->cmd.upmove < 10) {
-		if ( pm->stepDebugLevel ) {
-			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] SKIP: inAir (velZ=%.2f frac=%.3f)\n",
-				c_pmove, pm->ps->velocity[2], trace.fraction );
+	// Allow step-up while bunny-hopping (high pre-clip horizontal velocity)
+	// even mid-air with jump released, so stair faces don't kill forward
+	// momentum on each hop. start_v is the velocity before PM_SlideMove
+	// clipped it above; current pm->ps->velocity has already been beaten
+	// down to ~0 by the wall clip and would fail the threshold.
+	{
+		qboolean isBunnyHop = (start_v[0]*start_v[0] + start_v[1]*start_v[1])
+		                      > (pm_stairBunnyHopMin * pm_stairBunnyHopMin);
+
+		// never step up when you still have up velocity and not holding jump,
+		// unless we're bunny-hopping forward
+		if (inAir && pm->cmd.upmove < 10 && !isBunnyHop) {
+			if ( pm->stepDebugLevel ) {
+				Com_Log( SEV_INFO, LOG_CH(ch_physics), "STEP [%i] SKIP: inAir (velZ=%.2f frac=%.3f)\n",
+					c_pmove, pm->ps->velocity[2], trace.fraction );
+			}
+			return;
 		}
-		return;
 	}
 
 	//VectorCopy (pm->ps->origin, down_o);
@@ -291,7 +305,7 @@ void PM_StepSlideMove( qboolean gravity ) {
 	// test the player position if they were a stepheight higher
 	pm->trace (&trace, start_o, pm->mins, pm->maxs, up, pm->ps->clientNum, pm->tracemask);
 	if ( pm->stepDebugLevel ) {
-		Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] UP trace: from=(%.2f %.2f %.2f) to=(%.2f %.2f %.2f) frac=%.3f allsolid=%i endpos=(%.2f %.2f %.2f) plane=(%.2f %.2f %.2f)\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_physics), "STEP [%i] UP trace: from=(%.2f %.2f %.2f) to=(%.2f %.2f %.2f) frac=%.3f allsolid=%i endpos=(%.2f %.2f %.2f) plane=(%.2f %.2f %.2f)\n",
 			c_pmove,
 			start_o[0], start_o[1], start_o[2],
 			up[0], up[1], up[2],
@@ -301,10 +315,10 @@ void PM_StepSlideMove( qboolean gravity ) {
 	}
 	if ( trace.allsolid ) {
 		if ( pm->debugLevel ) {
-			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:bend can't step\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CH(ch_physics), "%i:bend can't step\n", c_pmove);
 		}
 		if ( pm->stepDebugLevel ) {
-			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] BLOCKED: ceiling allsolid\n", c_pmove );
+			Com_Log( SEV_INFO, LOG_CH(ch_physics), "STEP [%i] BLOCKED: ceiling allsolid\n", c_pmove );
 		}
 		return;		// can't step up
 	}
@@ -321,7 +335,7 @@ void PM_StepSlideMove( qboolean gravity ) {
 	down[2] -= stepSize;
 	pm->trace (&trace, pm->ps->origin, pm->mins, pm->maxs, down, pm->ps->clientNum, pm->tracemask);
 	if ( pm->stepDebugLevel ) {
-		Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] DOWN trace: stepSize=%.2f frac=%.3f allsolid=%i endpos=(%.2f %.2f %.2f) plane=(%.2f %.2f %.2f)\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_physics), "STEP [%i] DOWN trace: stepSize=%.2f frac=%.3f allsolid=%i endpos=(%.2f %.2f %.2f) plane=(%.2f %.2f %.2f)\n",
 			c_pmove,
 			stepSize, trace.fraction, trace.allsolid,
 			trace.endpos[0], trace.endpos[1], trace.endpos[2],
@@ -336,7 +350,7 @@ void PM_StepSlideMove( qboolean gravity ) {
 			 !(pm->cmd.upmove < 10) &&
 			 !(pm->ps->pm_flags & PMF_JUMP_HELD) &&
 			 (pm->ps->stats[STAT_JUMPTIME] > 0) ) {
-			PM_ClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
+			PM_SlopeBoostClip( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, pm_rampboost, (pm->pmove_flags & PMF_OVERBOUNCE) );
 		} else {
 			PM_OneSidedClipVelocity( pm->ps->velocity, trace.plane.normal, pm->ps->velocity, OVERCLIP );
 		}
@@ -350,7 +364,7 @@ void PM_StepSlideMove( qboolean gravity ) {
 		VectorCopy (down_o, pm->ps->origin);
 		VectorCopy (down_v, pm->ps->velocity);
 		if ( pm->debugLevel ) {
-			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:bend\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CH(ch_physics), "%i:bend\n", c_pmove);
 		}
 	} else
 #endif
@@ -371,10 +385,10 @@ void PM_StepSlideMove( qboolean gravity ) {
 			}
 		}
 		if ( pm->debugLevel ) {
-			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "%i:stepped\n", c_pmove);
+			Com_Log( SEV_INFO, LOG_CH(ch_physics), "%i:stepped\n", c_pmove);
 		}
 		if ( pm->stepDebugLevel ) {
-			Com_Log( SEV_INFO, LOG_CAT_PHYSICS, "STEP [%i] RESULT: delta=%.2f finalPos=(%.2f %.2f %.2f) %s\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_physics), "STEP [%i] RESULT: delta=%.2f finalPos=(%.2f %.2f %.2f) %s\n",
 				c_pmove, delta,
 				pm->ps->origin[0], pm->ps->origin[1], pm->ps->origin[2],
 				delta > 2 ? "STEPPED" : "tiny-step" );

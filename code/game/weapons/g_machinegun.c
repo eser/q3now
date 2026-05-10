@@ -76,15 +76,15 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 					passent = traceEnt->s.number;
 				}
 				continue;
-			} else {
-				int	bDamage = damage;
-
-				// eser - damage falloff
-				bDamage = G_DamageFalloff( bDamage, muzzle, tr.endpos, bg_attacklist[ATT_MACHINEGUN_PRIMARY].maxDamageDistance );
-				// eser - damage falloff
-
-				G_Damage( traceEnt, ent, ent, forward, tr.endpos, bDamage, 0, MOD_MACHINEGUN);
 			}
+			int bDamage = damage;
+
+			// eser - damage falloff
+			bDamage =
+				G_DamageFalloff( bDamage, muzzle, tr.endpos, bg_attacklist[ATT_MACHINEGUN_PRIMARY].maxDamageDistance );
+			// eser - damage falloff
+
+			G_Damage( traceEnt, ent, ent, forward, tr.endpos, bDamage, 0, MOD_MACHINEGUN );
 		}
 		break;
 	}
@@ -159,15 +159,15 @@ void Attack_Machinegun_Burst( gentity_t *ent ) {
 					passent = traceEnt->s.number;
 				}
 				continue;
-			} else {
-				int	bDamage = damage;
-
-				// eser - damage falloff
-				bDamage = G_DamageFalloff( bDamage, muzzle, tr.endpos, bg_attacklist[ATT_MACHINEGUN_BURST].maxDamageDistance );
-				// eser - damage falloff
-
-				G_Damage( traceEnt, ent, ent, forward, tr.endpos, bDamage, 0, MOD_MACHINEGUN_BURST);
 			}
+			int bDamage = damage;
+
+			// eser - damage falloff
+			bDamage =
+				G_DamageFalloff( bDamage, muzzle, tr.endpos, bg_attacklist[ATT_MACHINEGUN_BURST].maxDamageDistance );
+			// eser - damage falloff
+
+			G_Damage( traceEnt, ent, ent, forward, tr.endpos, bDamage, 0, MOD_MACHINEGUN_BURST );
 		}
 		break;
 	}

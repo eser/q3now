@@ -12,8 +12,8 @@ var assetsDownloadCmd = &cobra.Command{
 	Use:   "download",
 	Short: "Download the redistributable id-quakepack bundle",
 	Long: `Download the redistributable Quake III demo + Q3TA demo bundle from the
-canonical mirror. Output is cached at ~/q3now${channelSuffix}/downloaded/
-and unzipped to ~/q3now${channelSuffix}/downloaded/id-quakepack/.
+canonical mirror. Output is cached at ~/wired${channelSuffix}/downloaded/
+and unzipped to ~/wired${channelSuffix}/downloaded/id-quakepack/.
 
 Re-running this command after a successful download is a no-op: the
 cached zip is reused. Delete the cached zip to force re-download.

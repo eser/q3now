@@ -9,6 +9,8 @@ Guarded by FEAT_JSON_STATS — compiled out when disabled.
 ===========================================================================
 */
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #if FEAT_JSON_STATS
 
@@ -92,7 +94,7 @@ void G_WriteStatsJSON( void ) {
 
 	trap_FS_FOpenFile( filename, &f, FS_WRITE );
 	if ( !f ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_WriteStatsJSON: could not open %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "G_WriteStatsJSON: could not open %s\n", filename );
 		return;
 	}
 
@@ -153,7 +155,7 @@ void G_WriteStatsJSON( void ) {
 
 	trap_FS_FCloseFile( f );
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "Stats exported to %s (%i players)\n", filename, playerCount );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "Stats exported to %s (%i players)\n", filename, playerCount );
 }
 
 #endif // FEAT_JSON_STATS

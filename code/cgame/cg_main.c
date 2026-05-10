@@ -83,6 +83,7 @@ botDirectiveDisplay_t	cg_botDirectives[MAX_CLIENTS];
 
 
 vmCvar_t	cg_centertime;
+vmCvar_t	cg_cpuEffects;
 vmCvar_t	cg_runpitch;
 vmCvar_t	cg_runroll;
 vmCvar_t	cg_bobup;
@@ -173,7 +174,6 @@ vmCvar_t 	cg_smoothClients;
 vmCvar_t	pmove_fixed;
 //vmCvar_t	cg_pmove_fixed;
 vmCvar_t	pmove_msec;
-vmCvar_t	pmove_overbounce;
 #if FEAT_FAST_WEAPON_SWITCH
 vmCvar_t	cg_fastWeaponSwitch;
 #endif
@@ -210,7 +210,6 @@ vmCvar_t	cg_envTemperature;
 #if FEAT_OVERLOAD
 vmCvar_t	cg_obeliskRespawnDelay;
 #endif
-vmCvar_t	cg_singlePlayer;
 vmCvar_t    cg_switchToEmpty;
 vmCvar_t	cg_stretch;
 vmCvar_t	cg_fovAspectAdjust;
@@ -266,6 +265,10 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_gunY, "cg_gunY", "0", CVAR_CHEAT },
 	{ &cg_gunZ, "cg_gunZ", "0", CVAR_CHEAT },
 	{ &cg_centertime, "cg_centertime", "3", CVAR_CHEAT },
+	// A/B compare: 1 = legacy CPU poly path (trap_R_AddPolyToScene)
+	// for rail debris+sparks; 0 = GPU particle path (trap_R_EmitParticles).
+	// Helix is unaffected (always CPU poly — different geometry).
+	{ &cg_cpuEffects, "cg_cpuEffects", "0", 0 },
 	{ &cg_runpitch, "cg_runpitch", "0.002", CVAR_ARCHIVE},
 	{ &cg_runroll, "cg_runroll", "0.005", CVAR_ARCHIVE },
 	{ &cg_bobup , "cg_bobup", "0.005", CVAR_CHEAT },
@@ -352,7 +355,6 @@ static cvarTable_t cvarTable[] = {
 
 	{ &pmove_fixed, "pmove_fixed", "0", CVAR_SYSTEMINFO},
 	{ &pmove_msec, "pmove_msec", "8", CVAR_SYSTEMINFO},
-	{ &pmove_overbounce, "pmove_overbounce", "1", CVAR_SYSTEMINFO},
 #if FEAT_FAST_WEAPON_SWITCH
 	{ &cg_fastWeaponSwitch, "g_fastWeaponSwitch", "1", CVAR_SERVERINFO},
 #endif
@@ -373,8 +375,6 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_noTaunt, "cg_noTaunt", "0", CVAR_ARCHIVE},
 	{ &cg_noProjectileTrail, "cg_noProjectileTrail", "0", CVAR_ARCHIVE},
 //	{ &cg_pmove_fixed, "cg_pmove_fixed", "0", CVAR_USERINFO | CVAR_ARCHIVE }
-
-    { &cg_singlePlayer, "g_singlePlayer", "0", CVAR_USERINFO },
 
     { &cg_switchToEmpty, "cg_switchToEmpty", "0", CVAR_ARCHIVE },
 
@@ -474,16 +474,23 @@ void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *error
 	trap_Terminate( reason, text );
 }
 
-void QDECL Com_Log_Impl( log_severity_t severity, logCategory_t cat, const char *msg, ... ) {
+void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *msg, ... ) {
 	va_list		argptr;
 	char		text[MAX_STRING_CHARS];
 
-	(void)cat;
+	(void)channel;  // VM-side routes everything through trap_Log → "cgame"
 	va_start( argptr, msg );
 	vsnprintf( text, sizeof(text), msg, argptr );
 	va_end( argptr );
 
 	trap_Log( severity, text );
+}
+
+// Stub for the LOG_CH expansion in shared headers compiled into the native
+// cgame DLL. The VM bridge ignores the channel id, so 0 is always fine.
+int Log_GetChannel( const char *name ) {
+	(void)name;
+	return 0;
 }
 
 /*
@@ -1017,8 +1024,8 @@ static void CG_RegisterGraphics( void ) {
     cgs.media.backpackModel = trap_R_RegisterModel("models/powerups/armor/shard.md3");
     cgs.media.backpackIcon = trap_R_RegisterShaderNoMip("icons/iconr_shard");
 
-    cgs.media.lightningShader = trap_R_RegisterShader("lightningBolt");
-	cgs.media.lightningArcShader = trap_R_RegisterShader( "lightningArc" );
+	cgs.media.lightningShaderPrim    = trap_R_RegisterPrimitiveShader( "lightningBolt" );
+	cgs.media.lightningArcShaderPrim = trap_R_RegisterPrimitiveShader( "lightningArc" );
 	cgs.media.sfx_lightningArcLoop = trap_S_RegisterSound( "sound/weapons/lightning/lg_arc_loop.opus", qfalse );
 
 	CG_ClearParticles ();
@@ -1150,6 +1157,10 @@ Will perform callbacks to make the loading info screen update.
 void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	const char	*s;
 
+	// Publish per-game identity to engine cvars. The wired engine reads
+	// cl_gamename for master-server queries and never includes bg_public.h.
+	trap_Cvar_Set( "cl_gamename", GAMENAME_FOR_MASTER );
+
 	// clear everything
 	memset( &cgs, 0, sizeof( cgs ) );
 	memset( &cg, 0, sizeof( cg ) );
@@ -1216,7 +1227,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	// check version
 	s = CG_ConfigString( CS_GAME_VERSION );
-	if ( strcmp( s, GAME_VERSION ) ) {
+	if ( strcmp( s, GAME_VERSION ) != 0 ) {
 		Com_Terminate( TERM_CLIENT_DROP, "Client/Server game mismatch: %s/%s", GAME_VERSION, s );
 	}
 
@@ -1250,9 +1261,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	cg.loading = qfalse;	// future players will be deferred
 
 	CG_InitLocalEntities();
-#if FEAT_RAIL_TRAIL == 0
 	CG_ClearRailTrails();
-#endif
 
 	CG_InitMarkPolys();
 

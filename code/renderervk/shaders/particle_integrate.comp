@@ -1,0 +1,152 @@
+#version 450
+
+/*
+particle_integrate.comp — wired-render particle compute shader
+
+Reads from the "read" particle pool, integrates physics + age, writes
+to the "write" pool. Each thread handles one particle slot indexed by
+gl_GlobalInvocationID.x. Workgroup size = 64; dispatch ceil(poolSize/64).
+
+A slot is dead when classHandle == 0 OR age >= 1.0. Dead slots are
+written back as zero-filled (classHandle = 0) so they're available for
+emit-time reuse.
+
+World gravity is hardcoded to 800 units/sec² along world -Z (the q3
+convention; cgame's cg_gravity defaults to 800).
+
+Layout matches the host-side packed mirrors in vk.c:
+    Particle         = 64 bytes per std430
+    ParticleClassGPU = 400 bytes per std430
+    ParticleFrame    = 128 bytes per std140
+*/
+
+#define PALETTE_MAX 16
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle {
+	vec3  pos;
+	float age;
+	vec3  vel;
+	float lifetimeInv;
+	uint  classHandle;
+	uint  paletteIndex;     // phase 6; written by RE_EmitParticles, passed through unchanged by integrate
+	float sizeJitterPick;   // per-particle sizeStart offset; passed through unchanged by integrate
+	uint  pad1;
+	uint  pad2;
+	uint  pad3;
+	uint  pad4;
+	uint  pad5;
+};
+
+struct ParticleClassGPU {
+	uint  shader;
+	uint  renderFlags;
+	uint  emitMode;
+	uint  scatterShape;
+	float scatterMagnitude;
+	uint  velocityShape;
+	float axialSpeed;
+	float cubeJitter;
+	float coneHalfAngle;
+	float lifetimeMean;
+	float lifetimeJitter;
+	int   paletteCount;
+	vec4  colorPalette[PALETTE_MAX];
+	vec4  colorEndMult;
+	float sizeStart;
+	float sizeEnd;
+	float gravityScale;
+	float drag;
+	uint  shaderBlendIsAdditive;  // phase 5; 0 = alpha, 1 = additive (compute does not use this; field present for std430 layout match)
+	uint  pad1;
+	uint  pad2;
+	uint  pad3;
+	// Expressivity extension fields — compute does not consume any of
+	// these. They are present here purely so the std430 layout matches
+	// host particleClassGPU_t and the renderer-side particle.vert
+	// mirror; classes[] SSBO indexing would drift otherwise.
+	vec4  velocityBias;
+	vec4  velocityBiasJitter;
+	float speedJitter;
+	float sizeJitter;
+	uint  pad4;
+	uint  pad5;
+};
+
+layout(set = 0, binding = 0) uniform ParticleFrame {
+	mat4  mvp;
+	vec4  viewLeft;
+	vec4  viewUp;
+	vec4  eyeWorld;
+	float dt;
+	uint  poolSize;
+	uint  numClasses;
+	uint  pingPongRead;
+	// Compute does not consume identityLight; the field is present
+	// here only so the std140 layout matches host particleFrame_t and
+	// the particle.vert / particle.frag mirrors. UBO indexing would
+	// drift otherwise.
+	float identityLight;
+	float pad0;
+	float pad1;
+	float pad2;
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer ReadPool {
+	Particle readParticles[];
+};
+
+layout(std430, set = 0, binding = 2) writeonly buffer WritePool {
+	Particle writeParticles[];
+};
+
+layout(std430, set = 0, binding = 3) readonly buffer Classes {
+	ParticleClassGPU classes[];
+};
+
+const float WORLD_GRAVITY = 800.0;
+
+Particle deadParticle() {
+	Particle p;
+	p.pos            = vec3(0.0);
+	p.age            = 0.0;
+	p.vel            = vec3(0.0);
+	p.lifetimeInv    = 0.0;
+	p.classHandle    = 0u;
+	p.paletteIndex   = 0u;
+	p.sizeJitterPick = 0.0;
+	p.pad1           = 0u;
+	p.pad2           = 0u;
+	p.pad3           = 0u;
+	p.pad4           = 0u;
+	p.pad5           = 0u;
+	return p;
+}
+
+void main() {
+	uint idx = gl_GlobalInvocationID.x;
+	if (idx >= poolSize) return;
+
+	Particle p = readParticles[idx];
+
+	if (p.classHandle == 0u || p.age >= 1.0 || p.classHandle > numClasses) {
+		writeParticles[idx] = deadParticle();
+		return;
+	}
+
+	ParticleClassGPU c = classes[p.classHandle - 1u];
+
+	// Integrate. Q3 world is z-up; gravity acts along -Z.
+	p.vel.z += -WORLD_GRAVITY * c.gravityScale * dt;
+	p.vel   *= exp(-c.drag * dt);
+	p.pos   += p.vel * dt;
+	p.age   += dt * p.lifetimeInv;
+
+	if (p.age >= 1.0) {
+		writeParticles[idx] = deadParticle();
+		return;
+	}
+
+	writeParticles[idx] = p;
+}

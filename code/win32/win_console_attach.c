@@ -1,10 +1,10 @@
 /*
 ===========================================================================
-win_console_attach.c — reattach stdio to parent console for client (q3now.x64.exe)
+win_console_attach.c — reattach stdio to parent console for client (wired.x64.exe)
 
-q3now.x64.exe is a Windows GUI-subsystem binary because it has a game
+wired.x64.exe is a Windows GUI-subsystem binary because it has a game
 window. Without intervention, the OS NULLs std handles when launched
-from a terminal — `q3now.x64.exe +echo "..." +set developer 1` from a
+from a terminal — `wired.x64.exe +echo "..." +set developer 1` from a
 console produces no visible output even though the engine is writing
 to stdout/stderr.
 
@@ -38,7 +38,7 @@ void Sys_AttachParentConsole( void )
 {
 	/* Three launch shapes to handle:
 	 *
-	 *  1. Inherited stdio (cmd redirect `q3now.exe > out.txt`, bash/mintty
+	 *  1. Inherited stdio (cmd redirect `wired.exe > out.txt`, bash/mintty
 	 *     pipe, PowerShell capture, NSSM service): the parent passed valid
 	 *     std handles to us via STARTUPINFO. C runtime's stdout/stderr/stdin
 	 *     are already bound to those handles. **Don't touch them** —

@@ -20,6 +20,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_renderer, "renderer" );
 
 /*
 
@@ -639,7 +641,7 @@ static void VBO_AddGeometry( vbo_t *vbo, vbo_item_t *vi, shaderCommands_t *input
 		ri.Terminate( TERM_CLIENT_DROP, "Index0 overflow" );
 	}
 	memcpy( vbo->ibo_buffer + offs, input->indexes, size );
-	//Com_Log( SEV_INFO, LOG_CAT_RENDERER, "i offs=%i size=%i\n", offs, size );
+	//Com_Log( SEV_INFO, LOG_CH(ch_renderer), "i offs=%i size=%i\n", offs, size );
 
 	// vertexes
 	offs = input->shader->vboOffset + input->shader->curVertexes * sizeof( input->xyz[0] );
@@ -647,7 +649,7 @@ static void VBO_AddGeometry( vbo_t *vbo, vbo_item_t *vi, shaderCommands_t *input
 	if ( offs + size > vbo->vbo_size ) {
 		ri.Terminate( TERM_CLIENT_DROP, "Vertex overflow" );
 	}
-	//Com_Log( SEV_INFO, LOG_CAT_RENDERER, "v offs=%i size=%i\n", offs, size );
+	//Com_Log( SEV_INFO, LOG_CH(ch_renderer), "v offs=%i size=%i\n", offs, size );
 	memcpy( vbo->vbo_buffer + offs, input->xyz, size );
 
 	// normals
@@ -656,7 +658,7 @@ static void VBO_AddGeometry( vbo_t *vbo, vbo_item_t *vi, shaderCommands_t *input
 	if ( offs + size > vbo->vbo_size ) {
 		ri.Terminate( TERM_CLIENT_DROP, "Normals overflow" );
 	}
-	//Com_Log( SEV_INFO, LOG_CAT_RENDERER, "v offs=%i size=%i\n", offs, size );
+	//Com_Log( SEV_INFO, LOG_CH(ch_renderer), "v offs=%i size=%i\n", offs, size );
 	memcpy( vbo->vbo_buffer + offs, input->normal, size );
 
 	vi->num_indexes += input->numIndexes;
@@ -713,7 +715,7 @@ void VBO_PushData( int itemIndex, shaderCommands_t *input )
 	input->shader->curVertexes += input->numVertexes;
 	input->shader->curIndexes += input->numIndexes;
 
-	//Com_Log( SEV_INFO, LOG_CAT_RENDERER, "%s: vert %i (of %i), ind %i (of %i)\n", input->shader->name, 
+	//Com_Log( SEV_INFO, LOG_CH(ch_renderer), "%s: vert %i (of %i), ind %i (of %i)\n", input->shader->name, 
 	//	input->shader->curVertexes, input->shader->numVertexes,
 	//	input->shader->curIndexes, input->shader->numIndexes );
 }

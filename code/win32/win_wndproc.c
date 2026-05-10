@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../client/client.h"
 #include "win_local.h"
 #include "glw_win.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #ifndef WM_MOUSEWHEEL
 #define WM_MOUSEWHEEL (WM_MOUSELAST+1)  // message that will be supported by the OS 
@@ -235,7 +237,7 @@ static int MapKey( int nVirtKey, int key )
 
 	result = s_scantokey[modified];
 
-	//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "key: 0x%08x modified:%i extended:%i result:%i(%02x) vk=%i\n",
+	//Com_Log( SEV_INFO, LOG_CH(ch_system), "key: 0x%08x modified:%i extended:%i result:%i(%02x) vk=%i\n",
 	//	key, modified, is_extended, result, result, nVirtKey );
 
 	if ( !is_extended )
@@ -622,7 +624,7 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 		break;
 #if 0
 	case WM_DISPLAYCHANGE:
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "WM_DISPLAYCHANGE\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "WM_DISPLAYCHANGE\n" );
 		// we need to force a vid_restart if the user has changed
 		// their desktop resolution while the game is running,
 		// but don't do anything if the message is a result of
@@ -936,13 +938,13 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 			Cbuf_AddText( "vid_restart\n" );
 			return 0;
 		}
-		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "^2k+^7 wParam:%08x lParam:%08x\n", wParam, lParam );
+		//Com_Log( SEV_INFO, LOG_CH(ch_system), "^2k+^7 wParam:%08x lParam:%08x\n", wParam, lParam );
 		Sys_QueEvent( g_wv.sysMsgTime, SE_KEY, MapKey( wParam, lParam ), qtrue, 0, NULL );
 		break;
 
 	case WM_SYSKEYUP:
 	case WM_KEYUP:
-		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "^5k-^7 wParam:%08x lParam:%08x\n", wParam, lParam );
+		//Com_Log( SEV_INFO, LOG_CH(ch_system), "^5k-^7 wParam:%08x lParam:%08x\n", wParam, lParam );
 		Sys_QueEvent( g_wv.sysMsgTime, SE_KEY, MapKey( wParam, lParam ), qfalse, 0, NULL );
 		break;
 

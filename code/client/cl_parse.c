@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "../qcommon/wired/net/wn_public.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 static const char *svc_strings[] = {
 	"svc_bad",
@@ -40,7 +42,7 @@ static const char *svc_strings[] = {
 
 static void SHOWNET( msg_t *msg, const char *s ) {
 	if ( cl_shownet->integer >= 2) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%3i:%s\n", msg->readcount-1, s);
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%3i:%s\n", msg->readcount-1, s);
 	}
 }
 
@@ -69,6 +71,7 @@ static void CL_DeltaEntity( msg_t *msg, clSnapshot_t *frame, int newnum, const e
 	state = &cl.parseEntities[cl.parseEntitiesNum & (MAX_PARSE_ENTITIES-1)];
 
 	if ( unchanged ) {
+		// NOLINTNEXTLINE(clang-analyzer-core.NullDereference) — caller contract: unchanged=qtrue implies old is non-NULL (no prior frame ⇒ no "unchanged")
 		*state = *old;
 	} else {
 		MSG_ReadDeltaEntity( msg, old, state, newnum );
@@ -122,12 +125,13 @@ static void CL_ParsePacketEntities( msg_t *msg, const clSnapshot_t *oldframe, cl
 		while ( oldnum < newnum ) {
 			// one or more entities from the old packet are unchanged
 			if ( cl_shownet->integer == 3 ) {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%3i:  unchanged: %i\n", msg->readcount, oldnum);
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "%3i:  unchanged: %i\n", msg->readcount, oldnum);
 			}
 			CL_DeltaEntity( msg, newframe, oldnum, oldstate, qtrue );
 
 			oldindex++;
 
+			// NOLINTNEXTLINE(clang-analyzer-core.NullDereference) — packet-entity parser invariant: when oldnum != MAX_GENTITIES+1 (sentinel), oldframe is non-NULL
 			if ( oldindex >= oldframe->numEntities ) {
 				oldnum = MAX_GENTITIES+1;
 			} else {
@@ -139,12 +143,13 @@ static void CL_ParsePacketEntities( msg_t *msg, const clSnapshot_t *oldframe, cl
 		if (oldnum == newnum) {
 			// delta from previous state
 			if ( cl_shownet->integer == 3 ) {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%3i:  delta: %i\n", msg->readcount, newnum);
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "%3i:  delta: %i\n", msg->readcount, newnum);
 			}
 			CL_DeltaEntity( msg, newframe, newnum, oldstate, qfalse );
 
 			oldindex++;
 
+			// NOLINTNEXTLINE(clang-analyzer-core.NullDereference) — packet-entity parser invariant: when oldnum != MAX_GENTITIES+1 (sentinel), oldframe is non-NULL
 			if ( oldindex >= oldframe->numEntities ) {
 				oldnum = MAX_GENTITIES+1;
 			} else {
@@ -158,7 +163,7 @@ static void CL_ParsePacketEntities( msg_t *msg, const clSnapshot_t *oldframe, cl
 		if ( oldnum > newnum ) {
 			// delta from baseline
 			if ( cl_shownet->integer == 3 ) {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%3i:  baseline: %i\n", msg->readcount, newnum);
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "%3i:  baseline: %i\n", msg->readcount, newnum);
 			}
 			CL_DeltaEntity( msg, newframe, newnum, &cl.entityBaselines[newnum], qfalse );
 			continue;
@@ -170,7 +175,7 @@ static void CL_ParsePacketEntities( msg_t *msg, const clSnapshot_t *oldframe, cl
 	while ( oldnum != MAX_GENTITIES+1 ) {
 		// one or more entities from the old packet are unchanged
 		if ( cl_shownet->integer == 3 ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%3i:  unchanged: %i\n", msg->readcount, oldnum);
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "%3i:  unchanged: %i\n", msg->readcount, oldnum);
 		}
 		CL_DeltaEntity( msg, newframe, oldnum, oldstate, qtrue );
 
@@ -236,13 +241,13 @@ static void CL_ParseSnapshot( msg_t *msg ) {
 		old = &cl.snapshots[newSnap.deltaNum & PACKET_MASK];
 		if ( !old->valid ) {
 			// should never happen
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Delta from invalid frame (not supposed to happen!).\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Delta from invalid frame (not supposed to happen!).\n");
 		} else if ( old->messageNum != newSnap.deltaNum ) {
 			// The frame that the server did the delta from
 			// is too old, so we can't reconstruct it properly.
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Delta frame too old.\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Delta frame too old.\n");
 		} else if ( cl.parseEntitiesNum - old->parseEntitiesNum > MAX_PARSE_ENTITIES - MAX_SNAPSHOT_ENTITIES ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Delta parseEntitiesNum too old.\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Delta parseEntitiesNum too old.\n");
 		} else {
 			newSnap.valid = qtrue;	// valid delta parse
 		}
@@ -306,7 +311,7 @@ static void CL_ParseSnapshot( msg_t *msg ) {
 	cl.snapshots[cl.snap.messageNum & PACKET_MASK] = cl.snap;
 
 	if (cl_shownet->integer == 3) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "   snapshot:%i  delta:%i  ping:%i\n", cl.snap.messageNum,
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "   snapshot:%i  delta:%i  ping:%i\n", cl.snap.messageNum,
 		cl.snap.deltaNum, cl.snap.ping );
 	}
 
@@ -355,7 +360,7 @@ void CL_SystemInfoChanged( qboolean onlyGame ) {
 	s = Info_ValueForKey( systemInfo, "fs_game" );
 
 	if ( FS_InvalidGameDir( s ) ) {
-		COM_WARN( LOG_CAT_CLIENT, "Server sent invalid fs_game value %s\n", s );
+		COM_WARN( LOG_CH(ch_client), "Server sent invalid fs_game value %s\n", s );
 	} else {
 		Cvar_Set( "fs_game", s );
 	}
@@ -428,7 +433,7 @@ void CL_SystemInfoChanged( qboolean onlyGame ) {
 				if ( Q_stricmp( key, "g_synchronousClients" ) && Q_stricmp( key, "pmove_fixed" ) && Q_stricmp( key, "pmove_msec" ) )
 #endif
 				{
-					COM_WARN( LOG_CAT_CLIENT, "server is not allowed to set %s=%s\n", key, value );
+					COM_WARN( LOG_CH(ch_client), "server is not allowed to set %s=%s\n", key, value );
 					continue;
 				}
 			}
@@ -651,7 +656,7 @@ static void CL_HandleDownloadBlock( uint16_t block, int size, const byte *data,
 	qboolean hasSize, int downloadSize, const char *errorMessage ) {
 
 	if (!*clc.downloadTempName) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Server sending download, but no download was requested\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Server sending download, but no download was requested\n");
 		CL_AddReliableCommand( "stopdl", qfalse );
 		return;
 	}
@@ -682,7 +687,7 @@ static void CL_HandleDownloadBlock( uint16_t block, int size, const byte *data,
 
 	if((clc.downloadBlock & 0xFFFF) != block)
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_ParseDownload: Expected block %d, got %d\n", (clc.downloadBlock & 0xFFFF), block);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_ParseDownload: Expected block %d, got %d\n", (clc.downloadBlock & 0xFFFF), block);
 		return;
 	}
 
@@ -691,7 +696,7 @@ static void CL_HandleDownloadBlock( uint16_t block, int size, const byte *data,
 	{
 		if ( !CL_ValidPakSignature( data, size ) )
 		{
-			COM_WARN( LOG_CAT_CLIENT, "Invalid pak signature for %s\n", clc.downloadName );
+			COM_WARN( LOG_CH(ch_client), "Invalid pak signature for %s\n", clc.downloadName );
 			CL_AddReliableCommand( "stopdl", qfalse );
 			CL_NextDownload();
 			return;
@@ -701,7 +706,7 @@ static void CL_HandleDownloadBlock( uint16_t block, int size, const byte *data,
 
 		if ( clc.download == FS_INVALID_HANDLE )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Could not create %s\n", clc.downloadTempName );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Could not create %s\n", clc.downloadTempName );
 			CL_AddReliableCommand( "stopdl", qfalse );
 			CL_NextDownload();
 			return;
@@ -997,7 +1002,7 @@ static void CL_ParseTypedBootstrap( const byte *buf, int len )
 	int checksumFeed = 0;
 
 	if ( len < 1 || buf[0] != WN_BOOTSTRAP_MSG_STATE ) {
-		COM_WARN( LOG_CAT_CLIENT, "WiredNet bootstrap: invalid message\n" );
+		COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: invalid message\n" );
 		return;
 	}
 	CL_WiredNetBootstrapResetState();
@@ -1008,12 +1013,12 @@ static void CL_ParseTypedBootstrap( const byte *buf, int len )
 		int sectionType = buf[offset++];
 		uint16_t count;
 		if ( !CL_WiredNetReadU32( buf, len, &offset, &sectionLen ) ) {
-			COM_WARN( LOG_CAT_CLIENT, "WiredNet bootstrap: short section header\n" );
+			COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: short section header\n" );
 			return;
 		}
 		sectionEnd = offset + (int)sectionLen;
 		if ( sectionEnd > len ) {
-			COM_WARN( LOG_CAT_CLIENT, "WiredNet bootstrap: truncated section\n" );
+			COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: truncated section\n" );
 			return;
 		}
 		switch ( sectionType ) {
@@ -1070,16 +1075,16 @@ static void CL_ParseTypedBootstrap( const byte *buf, int len )
 			sawClientInfo = qtrue;
 			break;
 		default:
-			COM_WARN( LOG_CAT_CLIENT, "WiredNet bootstrap: unknown section %d\n", sectionType );
+			COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: unknown section %d\n", sectionType );
 			return;
 		}
 		if ( offset != sectionEnd ) {
-			COM_WARN( LOG_CAT_CLIENT, "WiredNet bootstrap: section length mismatch\n" );
+			COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: section length mismatch\n" );
 			return;
 		}
 	}
 	if ( !sawAck || !sawCmds || !sawConfig || !sawBaselines || !sawClientInfo ) {
-		COM_WARN( LOG_CAT_CLIENT, "WiredNet bootstrap: missing required section\n" );
+		COM_WARN( LOG_CH(ch_client), "WiredNet bootstrap: missing required section\n" );
 		return;
 	}
 	CL_WiredNetBootstrapFinalize( clientNum, checksumFeed );
@@ -1093,14 +1098,14 @@ static void CL_ParseTypedDownload( const byte *buf, int len )
 	const byte *payload;
 
 	if ( len < 1 ) {
-		COM_WARN( LOG_CAT_CLIENT, "WiredNet download: short message\n" );
+		COM_WARN( LOG_CH(ch_client), "WiredNet download: short message\n" );
 		return;
 	}
 
 	switch ( buf[0] ) {
 	case WN_DOWNLOAD_MSG_ERROR:
 		if ( len < 3 ) {
-			COM_WARN( LOG_CAT_CLIENT, "WiredNet download: short error\n" );
+			COM_WARN( LOG_CH(ch_client), "WiredNet download: short error\n" );
 			return;
 		}
 		{
@@ -1118,7 +1123,7 @@ static void CL_ParseTypedDownload( const byte *buf, int len )
 
 	case WN_DOWNLOAD_MSG_BLOCK:
 		if ( len < 5 ) {
-			COM_WARN( LOG_CAT_CLIENT, "WiredNet download: short block header\n" );
+			COM_WARN( LOG_CH(ch_client), "WiredNet download: short block header\n" );
 			return;
 		}
 		block = (uint16_t)( buf[1] | ( (uint16_t)buf[2] << 8 ) );
@@ -1126,7 +1131,7 @@ static void CL_ParseTypedDownload( const byte *buf, int len )
 		payload = buf + 5;
 		if ( block == 0 && clc.downloadBlock == 0 ) {
 			if ( len < 9 ) {
-				COM_WARN( LOG_CAT_CLIENT, "WiredNet download: short initial block\n" );
+				COM_WARN( LOG_CH(ch_client), "WiredNet download: short initial block\n" );
 				return;
 			}
 			downloadSize = (int)( buf[5]
@@ -1135,20 +1140,20 @@ static void CL_ParseTypedDownload( const byte *buf, int len )
 				| ( (uint32_t)buf[8] << 24 ) );
 			payload = buf + 9;
 			if ( size > len - 9 ) {
-				COM_WARN( LOG_CAT_CLIENT, "WiredNet download: block payload truncated\n" );
+				COM_WARN( LOG_CH(ch_client), "WiredNet download: block payload truncated\n" );
 				return;
 			}
 			CL_HandleDownloadBlock( block, size, payload, qtrue, downloadSize, NULL );
 			return;
 		}
 		if ( size > len - 5 ) {
-			COM_WARN( LOG_CAT_CLIENT, "WiredNet download: block payload truncated\n" );
+			COM_WARN( LOG_CH(ch_client), "WiredNet download: block payload truncated\n" );
 			return;
 		}
 		CL_HandleDownloadBlock( block, size, payload, qfalse, 0, NULL );
 		return;
 	default:
-		COM_WARN( LOG_CAT_CLIENT, "WiredNet download: unknown msg type %d\n", buf[0] );
+		COM_WARN( LOG_CH(ch_client), "WiredNet download: unknown msg type %d\n", buf[0] );
 		return;
 	}
 }
@@ -1167,7 +1172,7 @@ static void CL_ParseCommandString( msg_t *msg ) {
 	const char *s = MSG_ReadString( msg );
 
 	if ( cl_shownet->integer >= 3 )
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, " %3i(%3i) %s\n", seq, clc.serverCommandSequence, s );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), " %3i(%3i) %s\n", seq, clc.serverCommandSequence, s );
 
 	// see if we have already executed stored it off
 	if ( clc.serverCommandSequence - seq >= 0 ) {
@@ -1190,7 +1195,7 @@ static void CL_ParseCommandString( msg_t *msg ) {
 		if ( !Q_stricmp( Cmd_Argv(0), "disconnect" ) ) {
 			text = ( Cmd_Argc() > 1 ) ? va( "Server disconnected: %s", Cmd_Argv( 1 ) ) : "Server disconnected.";
 			Com_SetLastError( "%s", text );
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s\n", text );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "%s\n", text );
 			if ( !CL_Disconnect( qtrue ) ) { // restart client if not done already
 				CL_FlushMemory();
 			}
@@ -1209,9 +1214,9 @@ CL_ParseServerMessage
 */
 void CL_ParseServerMessage( msg_t *msg ) {
 	if ( cl_shownet->integer == 1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i ",msg->cursize );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%i ",msg->cursize );
 	} else if ( cl_shownet->integer >= 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "------------------\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "------------------\n" );
 	}
 
 	clc.eventMask = 0;
@@ -1236,7 +1241,7 @@ void CL_ParseServerMessage( msg_t *msg ) {
 
 			if ( clc.reliableSequence - clc.reliableAcknowledge > MAX_RELIABLE_COMMANDS ) {
 				if ( !clc.demoplaying ) {
-					COM_WARN( LOG_CAT_CLIENT, "dropping %i commands from server\n", clc.reliableSequence - clc.reliableAcknowledge );
+					COM_WARN( LOG_CH(ch_client), "dropping %i commands from server\n", clc.reliableSequence - clc.reliableAcknowledge );
 				}
 				clc.reliableAcknowledge = clc.reliableSequence;
 			} else if ( clc.reliableSequence - clc.reliableAcknowledge < 0 ) {
@@ -1270,7 +1275,7 @@ void CL_ParseServerMessage( msg_t *msg ) {
 
 		if ( cl_shownet->integer >= 2 ) {
 			if ( (unsigned) cmd >= ARRAY_LEN( svc_strings ) ) {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%3i:BAD CMD %i\n", msg->readcount-1, cmd );
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "%3i:BAD CMD %i\n", msg->readcount-1, cmd );
 			} else {
 				SHOWNET( msg, svc_strings[cmd] );
 			}
@@ -1366,7 +1371,7 @@ void CL_CheckReliableStreams( void )
 			/* MCP JSON-RPC push from server via reliable channel.
 			 * Primary MCP path is client-initiated bidi streams in wn_main.c;
 			 * this handles server-initiated MCP messages if the server uses CHAN_MCP. */
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "QUIC: CHAN_MCP from server len=%d\n", len );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "QUIC: CHAN_MCP from server len=%d\n", len );
 			/* Future: route to client-side MCP handler */
 		} else if ( rchan == CHAN_SNAPSHOT_RELIABLE ) {
 			/* Reliable snapshot: [wn_sequence:u32le][delta_base:u32le][snapshot_data...]
@@ -1433,7 +1438,7 @@ void CL_CheckSnapshotDatagrams( void )
 				if ( dglen > 8 ) {
 					msg_t msg;
 					clc.serverMessageSequence = (int)srv_tick;
-					Com_Log( SEV_TRACE, LOG_CAT_CLIENT, "[WiredNet] snapshot recv: wn_seq=%u delta_base=%u → serverMessageSequence=%d\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_client), "[WiredNet] snapshot recv: wn_seq=%u delta_base=%u → serverMessageSequence=%d\n",
 						srv_tick, raw_base & 0x7FFFFFFFu, clc.serverMessageSequence );
 					MSG_Init( &msg, dgbuf + 8, dglen - 8 );
 					msg.cursize   = dglen - 8;
@@ -1480,7 +1485,7 @@ void CL_CheckSnapshotDatagrams( void )
 					for ( int i = 0; i < (int)frag_total; i++ )
 						total_len += s_snap_reassembly.frag_sizes[i];
 					clc.serverMessageSequence = (int)s_snap_reassembly.wn_sequence;
-					Com_Log( SEV_TRACE, LOG_CAT_CLIENT, "[WiredNet] snapshot recv: wn_seq=%u delta_base=%u (reassembled %d bytes) → serverMessageSequence=%d\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_client), "[WiredNet] snapshot recv: wn_seq=%u delta_base=%u (reassembled %d bytes) → serverMessageSequence=%d\n",
 						s_snap_reassembly.wn_sequence, s_snap_reassembly.delta_base,
 						total_len, clc.serverMessageSequence );
 					MSG_Init( &msg, s_snap_reassembly.data, total_len );

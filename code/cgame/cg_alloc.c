@@ -10,6 +10,8 @@ CG_AllocReset() only resets the temp region. Safe to call on HUD reload.
 ===========================================================================
 */
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 #define CG_ALLOC_POOL_SIZE  ( 1024 * 1024 )   // 1MB pool
 #define CG_ALLOC_ALIGNMENT  8
@@ -40,7 +42,7 @@ void *CG_Alloc( int size ) {
 
 	if (cgAllocPermanent) {
 		if (cgPermOffset + aligned > cgTempOffset) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_RED "CG_Alloc: pool exhausted (perm %d + %d > temp %d)\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), S_COLOR_RED "CG_Alloc: pool exhausted (perm %d + %d > temp %d)\n",
 				cgPermOffset, aligned, cgTempOffset);
 			return NULL;
 		}
@@ -52,7 +54,7 @@ void *CG_Alloc( int size ) {
 		}
 	} else {
 		if (cgTempOffset - aligned < cgPermOffset) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, S_COLOR_RED "CG_Alloc: pool exhausted (temp %d - %d < perm %d)\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), S_COLOR_RED "CG_Alloc: pool exhausted (temp %d - %d < perm %d)\n",
 				cgTempOffset, aligned, cgPermOffset);
 			return NULL;
 		}

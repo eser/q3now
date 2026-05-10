@@ -43,6 +43,7 @@ R_DrawElements
 
 void R_DrawElements( int numIndexes, glIndex_t firstIndex)
 {
+	// NOLINTNEXTLINE(clang-analyzer-core.NullPointerArithm) — BUFFER_OFFSET((char*)NULL + offset) is the canonical GL VBO-offset idiom
 	qglDrawElements(GL_TRIANGLES, numIndexes, GL_INDEX_TYPE, BUFFER_OFFSET(firstIndex * sizeof(glIndex_t)));
 }
 

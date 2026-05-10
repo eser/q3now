@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 /*
@@ -849,11 +851,11 @@ void ClientThink_real( gentity_t *ent ) {
 	// sanity check the command time to prevent speedup cheating
 	if ( ucmd->serverTime > level.time + 200 ) {
 		ucmd->serverTime = level.time + 200;
-//		Com_Log( SEV_INFO, LOG_CAT_GAME, "serverTime <<<<<\n" );
+//		Com_Log( SEV_INFO, LOG_CH(ch_game), "serverTime <<<<<\n" );
 	}
 	if ( ucmd->serverTime < level.time - 1000 ) {
 		ucmd->serverTime = level.time - 1000;
-//		Com_Log( SEV_INFO, LOG_CAT_GAME, "serverTime >>>>>\n" );
+//		Com_Log( SEV_INFO, LOG_CH(ch_game), "serverTime >>>>>\n" );
 	}
 
 	msec = ucmd->serverTime - client->ps.commandTime;
@@ -1009,9 +1011,6 @@ void ClientThink_real( gentity_t *ent ) {
 	// build pmove_flags bitmask from feature cvars
 	pm.pmove_flags = 0;
 
-	if ( pmove_overbounce.integer ) {
-		pm.pmove_flags |= PMF_OVERBOUNCE;
-	}
 
 #if FEAT_FAST_WEAPON_SWITCH
 	// fast weapon switch (5A): map cvar value to 2-bit pmove_flags
@@ -1021,7 +1020,7 @@ void ClientThink_real( gentity_t *ent ) {
 
 	VectorCopy( client->ps.origin, client->oldOrigin );
 
-	if (level.intermissionQueued != 0 && g_singlePlayer.integer) {
+	if (level.intermissionQueued != 0 && (g_gameflags.integer & GF_CAMPAIGN)) {
 		if ( level.time - level.intermissionQueued >= 1000  ) {
 			pm.cmd.buttons = 0;
 			pm.cmd.forwardmove = 0;
@@ -1114,15 +1113,14 @@ void ClientThink_real( gentity_t *ent ) {
 			return;
 		}
 #endif
-        if (g_gametype.integer == GT_LASTMANSTANDING && client->ps.persistant[PERS_SCORE] < 1) {
-            SetTeam(ent, "s");
-            return;
-        }
+		if (g_gametype.integer == GT_LASTMANSTANDING && client->ps.persistant[PERS_SCORE] < 1) {
+			SetTeam(ent, "s");
+			return;
+		}
 		// wait for the attack button to be pressed
-		else if ( level.time > client->respawnTime ) {
+		if ( level.time > client->respawnTime ) {
 			// forcerespawn is to prevent users from waiting out powerups
-			if ( g_forceRespawn.integer > 0 &&
-				( level.time - client->respawnTime ) > g_forceRespawn.integer * 1000 ) {
+			if ( g_forceRespawn.integer > 0 && ( level.time - client->respawnTime ) > g_forceRespawn.integer * 1000 ) {
 				ClientRespawn( ent );
 				return;
 			}

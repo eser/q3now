@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # smoke.sh — headless smoke test for q3now dedicated server
 #
-# Launches q3now-ded, loads q3dm1 with a bot for 300 ticks, and exits.
+# Launches wired-ded, loads q3dm1 with a bot for 300 ticks, and exits.
 # Parses console output for hard VM errors.
 #
 # Usage:
-#   tests/smoke.sh [path-to-q3now-ded]
+#   tests/smoke.sh [path-to-wired-ded]
 #
 # Environment:
 #   Q3DIR   path to game installation with baseq3/pak*.pk3 (default: /Applications/q3now)
@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-DED="${1:-q3now-ded}"
+DED="${1:-wired-ded}"
 Q3DIR="${Q3DIR:-/Applications/q3now}"
 
 # Graceful skip: CI runners don't have proprietary Q3A assets

@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_combat.c
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 /*
 ============
@@ -270,6 +272,47 @@ void LookAtKiller( gentity_t *self, gentity_t *inflictor, gentity_t *attacker ) 
 
 /*
 ==================
+IsGibMOD
+==================
+*/
+qboolean IsGibMOD( int meansOfDeath ) {
+    switch (meansOfDeath) {
+        case MOD_UNKNOWN:
+        case MOD_GRENADE:
+        case MOD_ROCKET:
+        case MOD_RAILGUN:
+        case MOD_CRUSH:
+        case MOD_TELEFRAG:
+        case MOD_FALLING:
+        case MOD_SUICIDE:
+        case MOD_KAMIKAZE:
+            return qtrue;
+        default:
+            return qfalse;
+    }
+}
+
+/*
+==================
+IsInstantGibMOD
+==================
+*/
+qboolean IsInstantGibMOD( int meansOfDeath ) {
+    switch (meansOfDeath) {
+        case MOD_RAILGUN:
+        case MOD_CRUSH:
+        case MOD_TELEFRAG:
+        case MOD_FALLING:
+        case MOD_SUICIDE:
+        case MOD_KAMIKAZE:
+            return qtrue;
+        default:
+            return qfalse;
+    }
+}
+
+/*
+==================
 GibEntity
 ==================
 */
@@ -285,7 +328,7 @@ void GibEntity( gentity_t *self, int killer ) {
 				continue;
 			if (ent->activator != self)
 				continue;
-			if (strcmp(ent->classname, "kamikaze timer"))
+			if ( strcmp( ent->classname, "kamikaze timer" ) != 0 )
 				continue;
 			G_FreeEntity(ent);
 			break;
@@ -306,7 +349,7 @@ void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int d
 	if ( self->health > GIB_HEALTH ) {
 		return;
 	}
-	if ( !g_blood.integer ) {
+	if ( !g_blood.integer || !IsGibMOD( meansOfDeath ) ) {
 		self->health = GIB_HEALTH+1;
 		return;
 	}
@@ -768,7 +811,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	// never gib in a nodrop
 	contents = trap_PointContents( self->r.currentOrigin, -1 );
 
-	if ( (self->health <= GIB_HEALTH && !(contents & CONTENTS_NODROP) && g_blood.integer) || meansOfDeath == MOD_SUICIDE) {
+	if ( (self->health <= GIB_HEALTH && !(contents & CONTENTS_NODROP) && g_blood.integer && IsGibMOD( meansOfDeath )) || IsInstantGibMOD( meansOfDeath ) ) {
 		// gib death
 		GibEntity( self, killer );
 	} else {
@@ -894,9 +937,9 @@ int RaySphereIntersections( vec3_t origin, float radius, vec3_t point, vec3_t di
 		VectorMA(point, t, dir, intersections[1]);
 		return 2;
 	}
-	else if (d == 0) {
-		t = (- b ) / 2;
-		VectorMA(point, t, dir, intersections[0]);
+	if ( d == 0 ) {
+		t = ( -b ) / 2;
+		VectorMA( point, t, dir, intersections[0] );
 		return 1;
 	}
 	return 0;
@@ -934,9 +977,7 @@ int G_DeflectorEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactp
 		}
 		return qtrue;
 	}
-	else {
-		return qfalse;
-	}
+	return qfalse;
 }
 
 /*
@@ -1191,7 +1232,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	if ( g_debugDamage.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "%i: client:%i health:%i damage:%i armor:%i\n", level.time, targ->s.number,
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "%i: client:%i health:%i damage:%i armor:%i\n", level.time, targ->s.number,
 			targ->health, take, asave );
 	}
 
@@ -1293,10 +1334,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 		targ->enemy = attacker;
 		targ->die (targ, inflictor, attacker, take, mod);
 		return;
-	} else if ( targ->pain ) {
-		targ->pain (targ, attacker, take);
 	}
-
+	if ( targ->pain ) {
+		targ->pain( targ, attacker, take );
+	}
 }
 
 

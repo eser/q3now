@@ -1,21 +1,21 @@
 /*
 ===========================================================================
-Copyright (C) 2024-2026 q3now contributors
+Copyright (C) 2024-2026 Wired engine contributors
 
-This file is part of q3now source code.
+This file is part of the Wired engine source code.
 
-q3now source code is free software; you can redistribute it
+The Wired engine source code is free software; you can redistribute it
 and/or modify it under the terms of the GNU General Public License as
 published by the Free Software Foundation; either version 2 of the License,
 or (at your option) any later version.
 
-q3now source code is distributed in the hope that it will be useful,
+The Wired engine source code is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with q3now source code; if not, write to the Free Software
+along with the Wired engine source code; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
@@ -37,6 +37,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "snd_local.h"
 #include <opus.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
+LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
 // ── static decoder (shared, reset on sfx switch) ──────────────────────────
 
@@ -65,7 +68,7 @@ void S_OpusDecoderInit( void )
 	int err;
 	s_opusDecoder = opus_decoder_create( OPUS_INMEM_RATE, 1, &err );
 	if ( err != OPUS_OK || !s_opusDecoder ) {
-		COM_ERROR( LOG_CAT_CLIENT, "ERROR: opus_decoder_create failed (%d)\n", err );
+		COM_ERROR( LOG_CH(ch_client), "ERROR: opus_decoder_create failed (%d)\n", err );
 		s_opusDecoder = NULL;
 		return;
 	}
@@ -74,7 +77,7 @@ void S_OpusDecoderInit( void )
 	s_opusDecoderFrameIdx = -1;
 	s_opusDecodeBufValid = 0;
 
-	Com_Log( SEV_INFO, LOG_CAT_SOUND, "Opus in-memory decoder initialised\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_sound), "Opus in-memory decoder initialised\n" );
 }
 
 
@@ -192,7 +195,7 @@ void S_OpusEncodeSound( sfx_t *sfx, short *samples )
 
 	enc = opus_encoder_create( OPUS_INMEM_RATE, 1, OPUS_APPLICATION_AUDIO, &err );
 	if ( err != OPUS_OK || !enc ) {
-		COM_ERROR( LOG_CAT_CLIENT, "ERROR: S_OpusEncodeSound: opus_encoder_create failed (%d)\n", err );
+		COM_ERROR( LOG_CH(ch_client), "ERROR: S_OpusEncodeSound: opus_encoder_create failed (%d)\n", err );
 		return;
 	}
 
@@ -217,7 +220,7 @@ void S_OpusEncodeSound( sfx_t *sfx, short *samples )
 		encBytes = opus_encode( enc, frameBuf, OPUS_INMEM_FRAME_SAMPLES,
 		                        encBuf, sizeof( encBuf ) );
 		if ( encBytes < 0 ) {
-			COM_ERROR( LOG_CAT_CLIENT, "ERROR: opus_encode failed (%d) at offset %d\n",
+			COM_ERROR( LOG_CH(ch_client), "ERROR: opus_encode failed (%d) at offset %d\n",
 			           encBytes, offset );
 			break;
 		}
@@ -235,7 +238,7 @@ void S_OpusEncodeSound( sfx_t *sfx, short *samples )
 
 	opus_encoder_destroy( enc );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SOUND, "Opus encoded %s: %d samples -> sndBuffer chain\n",
+	Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "Opus encoded %s: %d samples -> sndBuffer chain\n",
 	             sfx->soundName, totalSamples );
 }
 
@@ -316,7 +319,7 @@ static int S_OpusDecodeFrame( const sfx_t *sc, int frameIdx )
 	decoded = opus_decode( s_opusDecoder, encBuf, frameLen,
 	                       s_opusDecodeBuf, OPUS_INMEM_FRAME_SAMPLES, 0 );
 	if ( decoded < 0 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SOUND, S_COLOR_YELLOW "WARNING: opus_decode error %d (frame %d)\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "WARNING: opus_decode error %d (frame %d)\n",
 		             decoded, frameIdx );
 		s_opusDecodeBufValid = 0;
 		return 0;

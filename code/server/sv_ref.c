@@ -1,8 +1,8 @@
 /*
 ===========================================================================
-Copyright (C) 2026 q3now contributors.
+Copyright (C) 2026 Wired engine contributors.
 
-This file is part of q3now and is distributed under the terms of the
+This file is part of the Wired engine and is distributed under the terms of the
 GNU General Public License version 2 or (at your option) any later version.
 
 sv_ref.c — Dedicated server headless renderer (FEAT_HEADLESS_RENDERER)
@@ -24,7 +24,7 @@ needs — LoadWorld, RegisterModel, ModelBounds, LerpTag — do real work:
                   renderer-side R_LerpTag math) so GVM code that walks
                   model attachments returns valid orientations.
 
-q3now's dedicated build omits the client library and all renderer DLLs.
+Wired's dedicated build omits the client library and all renderer DLLs.
 This file is compiled into the dedicated binary so server code that
 calls refexport_t entry points gets a deterministic, correct response
 instead of a crash or a silent dead-end.
@@ -38,6 +38,8 @@ Activation:
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 #if FEAT_HEADLESS_RENDERER
 
@@ -161,21 +163,21 @@ static qboolean SVR_LoadMD3( svrModel_t *mod, const byte *buffer, int fileSize, 
 	uint32_t			size;
 
 	if ( fileSize < (int)sizeof( md3Header_t ) ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s truncated header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadMD3: %s truncated header\n", name );
 		return qfalse;
 	}
 
 	pin = (const md3Header_t *)buffer;
 	version = LittleLong( pin->version );
 	if ( version != MD3_VERSION ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s wrong version (%u should be %i)\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadMD3: %s wrong version (%u should be %i)\n",
 			name, version, MD3_VERSION );
 		return qfalse;
 	}
 
 	size = LittleLong( pin->ofsEnd );
 	if ( size == 0 || size > (uint32_t)fileSize ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s corrupted header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadMD3: %s corrupted header\n", name );
 		return qfalse;
 	}
 
@@ -198,25 +200,25 @@ static qboolean SVR_LoadMD3( svrModel_t *mod, const byte *buffer, int fileSize, 
 	LL( hdr->ofsEnd );
 
 	if ( hdr->numFrames < 1 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s has no frames\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadMD3: %s has no frames\n", name );
 		Z_Free( hdr );
 		return qfalse;
 	}
 
 	if ( hdr->ofsFrames > size || hdr->ofsTags > size ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s corrupted offsets\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadMD3: %s corrupted offsets\n", name );
 		Z_Free( hdr );
 		return qfalse;
 	}
 
 	if ( hdr->numFrames > (int)((size - hdr->ofsFrames) / sizeof( md3Frame_t )) ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s corrupted frame count\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadMD3: %s corrupted frame count\n", name );
 		Z_Free( hdr );
 		return qfalse;
 	}
 	if ( hdr->numTags > 0 && hdr->numFrames > 0 ) {
 		if ( (size_t)hdr->numTags * (size_t)hdr->numFrames > (size - hdr->ofsTags) / sizeof( md3Tag_t ) ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadMD3: %s corrupted tag count\n", name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadMD3: %s corrupted tag count\n", name );
 			Z_Free( hdr );
 			return qfalse;
 		}
@@ -306,13 +308,13 @@ static qboolean SVR_LoadIQM( svrModel_t *mod, const byte *buffer, int fileSize, 
 	uint32_t			ofsBounds;
 
 	if ( fileSize < (int)sizeof( svrIqmHeader_t ) ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadIQM: %s truncated header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadIQM: %s truncated header\n", name );
 		return qfalse;
 	}
 
 	memcpy( &header, buffer, sizeof( header ) );
 	if ( strncmp( header.magic, SVR_IQM_MAGIC, sizeof( header.magic ) ) ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadIQM: %s wrong magic\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadIQM: %s wrong magic\n", name );
 		return qfalse;
 	}
 
@@ -322,7 +324,7 @@ static qboolean SVR_LoadIQM( svrModel_t *mod, const byte *buffer, int fileSize, 
 	header.ofs_bounds = LittleLong( header.ofs_bounds );
 
 	if ( header.filesize > (uint32_t)fileSize ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_LoadIQM: %s filesize mismatch\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_LoadIQM: %s filesize mismatch\n", name );
 		return qfalse;
 	}
 
@@ -443,7 +445,7 @@ static qhandle_t SVR_RegisterModel( const char *name ) {
 		return 0;
 	}
 	if ( strlen( name ) >= MAX_QPATH ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "SVR_RegisterModel: name too long (%s)\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVR_RegisterModel: name too long (%s)\n", name );
 		return 0;
 	}
 
@@ -507,6 +509,7 @@ static qhandle_t SVR_RegisterMSDFShader( const char *name, float distanceRange, 
 	(void)name; (void)distanceRange; (void)atlasWidth; (void)atlasHeight;
 	return 0;
 }
+static qhandle_t SVR_RegisterPrimitiveShader( const char *name ) { (void)name; return 0; }
 
 /*
 ====================
@@ -563,7 +566,11 @@ static void SVR_AddAdditiveLightToScene( const vec3_t org, float intensity, floa
 static void SVR_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b ) {
 	(void)start; (void)end; (void)intensity; (void)r; (void)g; (void)b;
 }
-static void SVR_AddRailTrailParams( const railTrailParams_t *params ) { (void)params; }
+static void SVR_AddRibbonToScene( const ribbonDesc_t *desc ) { (void)desc; }
+static void SVR_AddBeamToScene( const beamDesc_t *desc ) { (void)desc; }
+static void SVR_AddSpriteToScene( const spriteDesc_t *desc ) { (void)desc; }
+static void SVR_EmitParticles( const emitterDesc_t *desc ) { (void)desc; }
+static void SVR_AddDecalToScene( const decalDesc_t *desc ) { (void)desc; }
 static void SVR_RenderScene( const refdef_t *fd ) { (void)fd; }
 
 static void SVR_SetColor( const float *rgba ) { (void)rgba; }
@@ -781,6 +788,7 @@ void GetRefAPI_Headless( refexport_t *re ) {
 	re->RegisterShader = SVR_RegisterShader;
 	re->RegisterShaderNoMip = SVR_RegisterShaderNoMip;
 	re->RegisterMSDFShader = SVR_RegisterMSDFShader;
+	re->RegisterPrimitiveShader = SVR_RegisterPrimitiveShader;
 	re->LoadWorld = SVR_LoadWorld;
 	re->SetWorldVisData = SVR_SetWorldVisData;
 	re->EndRegistration = SVR_EndRegistration;
@@ -792,7 +800,11 @@ void GetRefAPI_Headless( refexport_t *re ) {
 	re->AddLightToScene = SVR_AddLightToScene;
 	re->AddAdditiveLightToScene = SVR_AddAdditiveLightToScene;
 	re->AddLinearLightToScene = SVR_AddLinearLightToScene;
-	re->AddRailTrailParams = SVR_AddRailTrailParams;
+	re->AddRibbonToScene = SVR_AddRibbonToScene;
+	re->AddBeamToScene = SVR_AddBeamToScene;
+	re->AddSpriteToScene = SVR_AddSpriteToScene;
+	re->EmitParticles = SVR_EmitParticles;
+	re->AddDecalToScene = SVR_AddDecalToScene;
 	re->RenderScene = SVR_RenderScene;
 
 	re->SetColor = SVR_SetColor;

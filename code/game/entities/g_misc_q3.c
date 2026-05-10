@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_misc.c
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 /*QUAKED func_group (0 0 0) ?
@@ -134,7 +136,7 @@ void SP_misc_lightstyle( gentity_t *self ) {
 
 	G_SpawnString( "pattern", "m", &pattern );
 	if ( !G_ValidateLightstylePattern( pattern ) || pattern[0] == '\0' ) {
-		Com_Log( SEV_WARN, LOG_CAT_GAME,
+		Com_Log( SEV_WARN, LOG_CH(ch_game),
 		         "misc_lightstyle at (%.0f %.0f %.0f): invalid pattern '%s', using 'm'\n",
 		         self->s.origin[0], self->s.origin[1], self->s.origin[2], pattern );
 		pattern = "m";
@@ -161,8 +163,12 @@ void TeleportPlayer( gentity_t *player, vec3_t origin, vec3_t angles, int exitSp
 	gentity_t	*tent;
 	qboolean noAngles;
 
+	if (!player->client) {
+		return;	// non-client entities can't be teleported here
+	}
+
 	// release hook
-	if (player->client && player->client->hook) {
+	if (player->client->hook) {
 		Offhand_Grapple_Free(player->client->hook);
 	}
 
@@ -267,7 +273,7 @@ void Q3_locateCamera( gentity_t *ent ) {
 
 	owner = G_PickTarget( ent->target );
 	if ( !owner ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Couldn't find target for misc_partal_surface\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Couldn't find target for misc_partal_surface\n" );
 		G_FreeEntity( ent );
 		return;
 	}

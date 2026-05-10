@@ -112,9 +112,8 @@ static ID_INLINE int AAS_ClusterAreaNum(int cluster, int areanum)
 
 	areacluster = aasworld.areasettings[areanum].cluster;
 	if (areacluster > 0) return aasworld.areasettings[areanum].clusterareanum;
-	else
-	{
-/*#ifdef ROUTING_DEBUG
+
+	/*#ifdef ROUTING_DEBUG
 		if (aasworld.portals[-areacluster].frontcluster != cluster &&
 				aasworld.portals[-areacluster].backcluster != cluster)
 		{
@@ -122,9 +121,9 @@ static ID_INLINE int AAS_ClusterAreaNum(int cluster, int areanum)
 											, -areacluster, cluster);
 		} //end if
 #endif //ROUTING_DEBUG*/
-		side = aasworld.portals[-areacluster].frontcluster != cluster;
-		return aasworld.portals[-areacluster].clusterareanum[side];
-	} //end else
+	side = aasworld.portals[-areacluster].frontcluster != cluster;
+	return aasworld.portals[-areacluster].clusterareanum[side];
+	//end else
 } //end of the function AAS_ClusterAreaNum
 //===========================================================================
 //
@@ -1331,6 +1330,7 @@ static void AAS_UpdateAreaRoutingCache(aas_routingcache_t *areacache)
 	updateliststart = curupdate;
 	updatelistend = curupdate;
 	//while there are updates in the current list
+	// NOLINTNEXTLINE(clang-analyzer-core.StackAddressEscape) — startareatraveltimes is consumed by the routing scan in this function; the aasworld.areaupdate[].areatraveltimes pointer is reset before this function returns
 	while (updateliststart)
 	{
 		curupdate = updateliststart;

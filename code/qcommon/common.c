@@ -23,7 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
-#include "wired/core/shell/log.h"
+#include "wired/core/logging/log.h"
 #include "crash.h"
 #include <setjmp.h>
 #ifndef _WIN32
@@ -39,6 +39,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 #include "../client/keys.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 const int demo_protocols[] = { PROTOCOL_VERSION, 0 };
 
@@ -381,7 +383,7 @@ void Info_Print( const char *s ) {
 		if ( value[0] == '\0' )
 			strcpy( value, "MISSING VALUE" );
 
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%-20s %s\n", key, value );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%-20s %s\n", key, value );
 
 	} while ( *s != '\0' );
 }
@@ -1078,7 +1080,7 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 	size_t allocSize = 0;
 	char buf[4096];
 	Com_sprintf( buf, sizeof(buf), "\r\n================\r\n%s log\r\n================\r\n", name );
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 	for ( memblock_t *block = zone->blocklist.next ; ; ) {
 		if ( block->tag != TAG_FREE ) {
 #ifdef ZONE_DEBUG
@@ -1094,7 +1096,7 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 			}
 			dump[j] = '\0';
 			Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s) [%s]\r\n", block->d.allocSize, block->d.file, block->d.line, block->d.label, dump);
-			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 			allocSize += block->d.allocSize;
 #endif
 			size += block->size;
@@ -1112,9 +1114,9 @@ static void Z_LogZoneHeap( memzone_t *zone, const char *name )
 	allocSize = numBlocks * sizeof(memblock_t); // + 32 bit alignment
 #endif
 	Com_sprintf( buf, sizeof( buf ), "%"PRIz"u %s memory in %"PRIz"u blocks\r\n", size, name, numBlocks );
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 	Com_sprintf( buf, sizeof( buf ), "%"PRIz"u %s memory overhead\r\n", size - allocSize, name );
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 }
 
 
@@ -1175,8 +1177,8 @@ char *CopyString( const char *in )
 	if ( in[0] == '\0' ) {
 		return ((char *)&emptystring) + sizeof(memblock_t);
 	}
-	else if ( in[0] >= '0' && in[0] <= '9' && in[1] == '\0' ) {
-		return ((char *)&numberstring[in[0]-'0']) + sizeof(memblock_t);
+	if ( in[0] >= '0' && in[0] <= '9' && in[1] == '\0' ) {
+		return ( (char *)&numberstring[in[0] - '0'] ) + sizeof( memblock_t );
 	}
 #endif
 	out = S_Malloc( strlen( in ) + 1 );
@@ -1332,10 +1334,10 @@ static void MemStats_CheckBudget( memTag_t tag ) {
 				MemTag_Names[tag],
 				used / (1024.0f * 1024.0f), budgetMB );
 		}
-		COM_WARN( LOG_CAT_SYSTEM, "mem budget exceeded: %s %.1f/%.0f MB\n",
+		COM_WARN( LOG_CH(ch_system), "mem budget exceeded: %s %.1f/%.0f MB\n",
 			MemTag_Names[tag], used / (1024.0f * 1024.0f), budgetMB );
 	} else {
-		COM_WARN( LOG_CAT_SYSTEM, "mem budget 80%%: %s %.1f/%.0f MB\n",
+		COM_WARN( LOG_CH(ch_system), "mem budget 80%%: %s %.1f/%.0f MB\n",
 			MemTag_Names[tag], used / (1024.0f * 1024.0f), budgetMB );
 	}
 }
@@ -1404,13 +1406,13 @@ static void Zone_Stats( const memzone_t *z, qboolean printDetails, zone_stats_t 
 	st.freeSmallest = SIZE_MAX;
 
 	//if ( printDetails ) {
-	//	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "---------- %s zone segment #%i ----------\n", name, zone->segnum );
+	//	Com_Log( SEV_INFO, LOG_CH(ch_system), "---------- %s zone segment #%i ----------\n", name, zone->segnum );
 	//}
 
 	for ( block = zone->blocklist.next ; ; ) {
 		if ( printDetails ) {
 			int tag = block->tag;
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "block:%p  size:%8u  tag: %s\n", (void *)block, block->size,
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "block:%p  size:%8u  tag: %s\n", (void *)block, block->size,
 				(unsigned)tag < TAG_COUNT ? tagName[ tag ] : va( "%i", tag ) );
 		}
 		if ( block->tag != TAG_FREE ) {
@@ -1442,19 +1444,18 @@ static void Zone_Stats( const memzone_t *z, qboolean printDetails, zone_stats_t 
 #endif
 				st.zoneSegments++;
 				if ( printDetails ) {
-					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "---------- %s zone segment #%"PRIz"u ----------\n", zone->name, st.zoneSegments );
+					Com_Log( SEV_INFO, LOG_CH(ch_system), "---------- %s zone segment #%"PRIz"u ----------\n", zone->name, st.zoneSegments );
 				}
 				block = next->next;
 				continue;
-			} else
-#endif
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ERROR: block size does not touch the next block\n" );
+			}
+#endif Com_Log( SEV_INFO, LOG_CH( ch_system ), "ERROR: block size does not touch the next block\n" );
 		}
 		if ( block->next->prev != block) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ERROR: next block doesn't have proper back link\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "ERROR: next block doesn't have proper back link\n" );
 		}
 		if ( block->tag == TAG_FREE && block->next->tag == TAG_FREE ) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ERROR: two consecutive free blocks\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "ERROR: two consecutive free blocks\n" );
 		}
 		block = block->next;
 	}
@@ -1506,24 +1507,24 @@ static void Com_Meminfo_f( void ) {
 	zone_stats_t st;
 	int		unused;
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "──────────────────────────────────────────\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i bytes total hunk\n", s_hunkTotal );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i low mark\n", hunk_low.mark );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i low permanent\n", hunk_low.permanent );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "──────────────────────────────────────────\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i bytes total hunk\n", s_hunkTotal );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i low mark\n", hunk_low.mark );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i low permanent\n", hunk_low.permanent );
 	if ( hunk_low.temp != hunk_low.permanent ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i low temp\n", hunk_low.temp );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i low temp\n", hunk_low.temp );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i low tempHighwater\n", hunk_low.tempHighwater );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i high mark\n", hunk_high.mark );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i high permanent\n", hunk_high.permanent );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i low tempHighwater\n", hunk_low.tempHighwater );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i high mark\n", hunk_high.mark );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i high permanent\n", hunk_high.permanent );
 	if ( hunk_high.temp != hunk_high.permanent ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i high temp\n", hunk_high.temp );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i high temp\n", hunk_high.temp );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i high tempHighwater\n", hunk_high.tempHighwater );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i total hunk in use\n", hunk_low.permanent + hunk_high.permanent );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i high tempHighwater\n", hunk_high.tempHighwater );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i total hunk in use\n", hunk_low.permanent + hunk_high.permanent );
 	unused = 0;
 	if ( hunk_low.tempHighwater > hunk_low.permanent ) {
 		unused += hunk_low.tempHighwater - hunk_low.permanent;
@@ -1531,40 +1532,40 @@ static void Com_Meminfo_f( void ) {
 	if ( hunk_high.tempHighwater > hunk_high.permanent ) {
 		unused += hunk_high.tempHighwater - hunk_high.permanent;
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8i unused highwater\n", unused );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8i unused highwater\n", unused );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\n" );
 
 	Zone_Stats( mainzone, !Q_stricmp( Cmd_Argv(1), "main" ) || !Q_stricmp( Cmd_Argv(1), "all" ), &st );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8"PRIz"u bytes total main zone\n\n", mainzone->size );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8"PRIz"u bytes in %"PRIz"u main zone blocks%s\n", st.zoneBytes, st.zoneBlocks,
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8"PRIz"u bytes total main zone\n\n", mainzone->size );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8"PRIz"u bytes in %"PRIz"u main zone blocks%s\n", st.zoneBytes, st.zoneBlocks,
 		st.zoneSegments > 1 ? va( " and %"PRIz"u segments", st.zoneSegments ) : "" );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in botlib\n", st.botlibBytes );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in renderer\n", st.rendererBytes );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in other\n", st.zoneBytes - ( st.botlibBytes + st.rendererBytes ) );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in %"PRIz"u free blocks\n", st.freeBytes, st.freeBlocks );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "        %8"PRIz"u bytes in botlib\n", st.botlibBytes );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "        %8"PRIz"u bytes in renderer\n", st.rendererBytes );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "        %8"PRIz"u bytes in other\n", st.zoneBytes - ( st.botlibBytes + st.rendererBytes ) );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "        %8"PRIz"u bytes in %"PRIz"u free blocks\n", st.freeBytes, st.freeBlocks );
 	if ( st.freeBlocks > 1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n\n", st.freeLargest, st.freeSmallest );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n\n", st.freeLargest, st.freeSmallest );
 	}
 
 	Zone_Stats( smallzone, !Q_stricmp( Cmd_Argv(1), "small" ) || !Q_stricmp( Cmd_Argv(1), "all" ), &st );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8"PRIz"u bytes total small zone\n\n", smallzone->size );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%8"PRIz"u bytes in %"PRIz"u small zone blocks%s\n", st.zoneBytes, st.zoneBlocks,
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8"PRIz"u bytes total small zone\n\n", smallzone->size );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%8"PRIz"u bytes in %"PRIz"u small zone blocks%s\n", st.zoneBytes, st.zoneBlocks,
 		st.zoneSegments > 1 ? va( " and %"PRIz"u segments", st.zoneSegments ) : "" );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        %8"PRIz"u bytes in %"PRIz"u free blocks\n", st.freeBytes, st.freeBlocks );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "        %8"PRIz"u bytes in %"PRIz"u free blocks\n", st.freeBytes, st.freeBlocks );
 	if ( st.freeBlocks > 1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n", st.freeLargest, st.freeSmallest );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "        (largest: %"PRIz"u bytes, smallest: %"PRIz"u bytes)\n", st.freeLargest, st.freeSmallest );
 	}
 
 	/* Persistent arena allocators */
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n--- Persistent Arenas (survive map changes) ---\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\n--- Persistent Arenas (survive map changes) ---\n" );
 	Arena_PrintStats();
 
 #if FEAT_MEMSTATS
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\nTAG BREAKDOWN (current / peak):\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "\nTAG BREAKDOWN (current / peak):\n" );
 		for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
 			if ( memStats[i].currentBytes == 0 && memStats[i].peakBytes == 0 ) continue;
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  %-12s %7.1f MB / %7.1f MB   %5i allocs\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "  %-12s %7.1f MB / %7.1f MB   %5i allocs\n",
 				MemTag_Names[i],
 				memStats[i].currentBytes / (1024.0f * 1024.0f),
 				memStats[i].peakBytes    / (1024.0f * 1024.0f),
@@ -1572,35 +1573,35 @@ static void Com_Meminfo_f( void ) {
 		}
 	}
 #endif
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "──────────────────────────────────────────\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "──────────────────────────────────────────\n" );
 }
 
 
 #if FEAT_MEMSTATS
 static void Com_MemInfoReset_f( void ) {
 	MemStats_Reset();
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Peak memory counters reset.\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "Peak memory counters reset.\n" );
 }
 
 static void Com_MemInfoJson_f( void ) {
 	hunkStats_t  hs = Hunk_GetStats();
 	zoneStats_t  zs = Zone_GetStats();
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "{\"hunk\":{\"total\":%i,\"low\":%i,\"high\":%i,\"temp\":%i,\"free\":%i,\"peak\":%i}",
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "{\"hunk\":{\"total\":%i,\"low\":%i,\"high\":%i,\"temp\":%i,\"free\":%i,\"peak\":%i}",
 		hs.totalBytes, hs.permanentLowBytes, hs.permanentHighBytes,
 		hs.tempBytes, hs.freeBytes, hs.peakUsedBytes );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, ",\"zone\":{\"total\":%i,\"used\":%i,\"free\":%i,\"freeBlocks\":%i,\"largestFree\":%i,\"allocs\":%i}",
+	Com_Log( SEV_INFO, LOG_CH(ch_system), ",\"zone\":{\"total\":%i,\"used\":%i,\"free\":%i,\"freeBlocks\":%i,\"largestFree\":%i,\"allocs\":%i}",
 		zs.totalBytes, zs.usedBytes, zs.freeBytes,
 		zs.freeBlockCount, zs.largestFreeBlock, zs.allocCount );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, ",\"tags\":{" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), ",\"tags\":{" );
 	for ( int i = 0; i < MEMTAG_COUNT; i++ ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\"%s\":{\"current\":%lli,\"peak\":%lli,\"count\":%i,\"total\":%i}",
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s\"%s\":{\"current\":%lli,\"peak\":%lli,\"count\":%i,\"total\":%i}",
 			i > 0 ? "," : "",
 			MemTag_Names[i],
 			(long long)memStats[i].currentBytes, (long long)memStats[i].peakBytes,
 			memStats[i].currentCount, memStats[i].totalCount );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "}}\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "}}\n" );
 }
 #endif // FEAT_MEMSTATS
 
@@ -1651,7 +1652,7 @@ unsigned int Com_TouchMemory( void ) {
 
 	end = Sys_Milliseconds();
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Com_TouchMemory: %i msec\n", end - start );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Com_TouchMemory: %i msec\n", end - start );
 
 	return sum; // just to silent compiler warning
 }
@@ -1719,19 +1720,19 @@ void Hunk_Log( void ) {
 	int size = 0, numBlocks = 0;
 	char buf[4096];
 	Com_sprintf(buf, sizeof(buf), "\r\n================\r\nHunk log\r\n================\r\n");
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 	for (hunkblock_t *block = hunkblocks ; block; block = block->next) {
 #ifdef HUNK_DEBUG
 		Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s)\r\n", block->size, block->file, block->line, block->label);
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 #endif
 		size += block->size;
 		numBlocks++;
 	}
 	Com_sprintf(buf, sizeof(buf), "%d Hunk memory\r\n", size);
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 	Com_sprintf(buf, sizeof(buf), "%d hunk blocks\r\n", numBlocks);
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 }
 
 
@@ -1748,7 +1749,7 @@ void Hunk_SmallLog( void ) {
 	int size = 0, numBlocks = 0;
 	char buf[4096];
 	Com_sprintf(buf, sizeof(buf), "\r\n================\r\nHunk Small log\r\n================\r\n");
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 	for (hunkblock_t *block = hunkblocks; block; block = block->next) {
 		if (block->printed) {
 			continue;
@@ -1766,14 +1767,14 @@ void Hunk_SmallLog( void ) {
 			block2->printed = qtrue;
 		}
 		Com_sprintf(buf, sizeof(buf), "size = %8d: %s, line: %d (%s)\r\n", locsize, block->file, block->line, block->label);
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 		size += block->size;
 		numBlocks++;
 	}
 	Com_sprintf(buf, sizeof(buf), "%d Hunk memory\r\n", size);
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 	Com_sprintf(buf, sizeof(buf), "%d hunk blocks\r\n", numBlocks);
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "%s", buf );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "%s", buf );
 }
 #endif
 
@@ -1796,6 +1797,7 @@ static void Com_InitHunkMemory( void ) {
 
 	// allocate the stack based hunk allocator
 	{
+		// NOLINTNEXTLINE(bugprone-integer-division) — both operands are exact integer multiples; max-megabyte count is naturally integer
 		static const cvarDesc_t d = CVAR_INT( "com_hunkMegs", XSTRING( DEF_COMHUNKMEGS ),
 			CVAR_LATCH | CVAR_ARCHIVE,
 			"The size of the hunk memory segment.",
@@ -1936,7 +1938,7 @@ void Hunk_ClearLevel( void ) {
 	memStats[MEMTAG_TEMP].currentCount = 0;
 #endif
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Hunk_ClearLevel: reset the hunk ok\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Hunk_ClearLevel: reset the hunk ok\n" );
 	VM_Clear();
 #ifdef HUNK_DEBUG
 	hunkblocks = NULL;
@@ -2148,13 +2150,13 @@ void Hunk_FreeTempMemory( void *buf ) {
 		if ( hdr == (void *)(s_hunkData + hunk_temp->temp - hdr->size ) ) {
 			hunk_temp->temp -= hdr->size;
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Hunk_FreeTempMemory: not the final block\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Hunk_FreeTempMemory: not the final block\n" );
 		}
 	} else {
 		if ( hdr == (void *)(s_hunkData + s_hunkTotal - hunk_temp->temp ) ) {
 			hunk_temp->temp -= hdr->size;
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Hunk_FreeTempMemory: not the final block\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Hunk_FreeTempMemory: not the final block\n" );
 		}
 	}
 }
@@ -2199,11 +2201,11 @@ static void Com_InitJournaling( void ) {
 	}
 
 	if ( com_journal->integer == 1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Journaling events\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Journaling events\n" );
 		com_journalFile = FS_FOpenFileWrite( "journal.dat" );
 		com_journalDataFile = FS_FOpenFileWrite( "journaldata.dat" );
 	} else if ( com_journal->integer == 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Replaying journaled events\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Replaying journaled events\n" );
 		FS_FOpenFileRead( "journal.dat", &com_journalFile, qtrue );
 		FS_FOpenFileRead( "journaldata.dat", &com_journalDataFile, qtrue );
 	}
@@ -2218,7 +2220,7 @@ static void Com_InitJournaling( void ) {
 			FS_FCloseFile( com_journalDataFile );
 			com_journalDataFile = FS_INVALID_HANDLE;
 		}
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't open journal files\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Couldn't open journal files\n" );
 	}
 }
 
@@ -2241,7 +2243,7 @@ static void Com_Freeze_f( void ) {
 	int		start, now;
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "freeze <seconds>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "freeze <seconds>\n" );
 		return;
 	}
 	s = atoi( Cmd_Argv(1) ) * 1000;
@@ -2265,6 +2267,7 @@ A way to force a bus error for development reasons
 =================
 */
 static void Com_Crash_f( void ) {
+	// NOLINTNEXTLINE(clang-analyzer-core.NullDereference) — intentional crash to test signal handlers
 	* ( volatile int * ) 0 = 0x12345678;
 }
 
@@ -2284,7 +2287,7 @@ static void Com_ExecuteCfg( void )
 	if (!Com_SafeMode())
 	{
 		// skip the config.cfg and autoexec.cfg if "safe" is on the command line
-		Cbuf_ExecuteText(EXEC_NOW, "exec " Q3CONFIG_CFG "\n");
+		Cbuf_ExecuteText(EXEC_NOW, "exec " WIRED_CONFIG_CFG "\n");
 		Cbuf_Execute();
 		Cbuf_ExecuteText(EXEC_NOW, "exec autoexec.cfg\n");
 		Cbuf_Execute();
@@ -2785,27 +2788,27 @@ static const char *parseAffinityMask( const char *str, uint64_t *outv, int level
 			++str;
 			continue;
 		}
-		else if ( *str == 'P' || *str == 'p' ) {
+		if ( *str == 'P' || *str == 'p' ) {
 			mask = pCoreMask;
 			++str;
 			continue;
 		}
-		else if ( *str == 'E' || *str == 'e' ) {
+		if ( *str == 'E' || *str == 'e' ) {
 			mask = eCoreMask;
 			++str;
 			continue;
 		}
-		else if ( *str == '0' && (str[1] == 'x' || str[1] == 'X') && (v = hex_code( str[2] )) >= 0 ) {
+		if ( *str == '0' && ( str[1] == 'x' || str[1] == 'X' ) && ( v = hex_code( str[2] ) ) >= 0 ) {
 			int hex;
 			str += 3; // 0xH
-			while ( (hex = hex_code( *str )) >= 0 ) {
+			while ( ( hex = hex_code( *str ) ) >= 0 ) {
 				v = v * 16 + hex;
 				str++;
 			}
 			mask = v;
 			continue;
 		}
-		else if ( *str >= '0' && *str <= '9' ) {
+		if ( *str >= '0' && *str <= '9' ) {
 			mask = *str++ - '0';
 			while ( *str >= '0' && *str <= '9' ) {
 				mask = mask * 10 + *str - '0';
@@ -2863,30 +2866,29 @@ static void Com_AffinityMaskChanged( cvar_t *self )
 =================
 Com_SetCvarsFromEnvironment
 
-12-factor app support: read Q3_* environment variables and set them as cvars.
-Mapping: Q3_SV_HOSTNAME → sv_hostname, Q3_G_GAMETYPE → g_gametype, etc.
+12-factor app support: read WIRED_* environment variables and set them as cvars.
+Mapping: WIRED_SV_HOSTNAME → sv_hostname, WIRED_G_GAMETYPE → g_gametype, etc.
 
-The Q3_ prefix is stripped, and the remainder is lowercased to form the cvar name.
-This allows server operators to configure q3now via environment variables in
+The WIRED_ prefix is stripped, and the remainder is lowercased to form the cvar name.
+This allows server operators to configure the wired engine via environment variables in
 Docker, systemd, k8s, or any 12-factor deployment:
 
-  export Q3_SV_HOSTNAME="My Server"
-  export Q3_SV_MAXCLIENTS=16
-  export Q3_G_GAMETYPE=4
-  export Q3_MAP=q3dm17
-  export Q3_SV_WIREDNET=1  # deprecated (ignored)
-  export Q3_SV_WIREDNETAUTHTOKEN="observer:member:user:abc123"
-  ./q3now-ded
+  export WIRED_SV_HOSTNAME="My Server"
+  export WIRED_SV_MAXCLIENTS=16
+  export WIRED_G_GAMETYPE=4
+  export WIRED_MAP=q3dm17
+  export WIRED_SV_WIREDNETAUTHTOKEN="observer:member:user:abc123"
+  ./wired-ded
 
 Special vars:
-  Q3_MAP  → executed as "map <value>" after full init (not a cvar)
-  Q3_EXEC → executed as "exec <value>" after full init
+  WIRED_MAP  → executed as "map <value>" after full init (not a cvar)
+  WIRED_EXEC → executed as "exec <value>" after full init
 =================
 */
 
 // environment variables we know about — mapped to cvars
 static const struct {
-	const char *env;      // env var name (after Q3_ prefix)
+	const char *env;      // env var name (after WIRED_ prefix)
 	const char *cvar;     // cvar name
 } wn_env_map[] = {
 	{ "SV_HOSTNAME",        	"sv_hostname" },
@@ -2916,17 +2918,17 @@ static void Com_SetCvarsFromEnvironment( void )
 
 	for ( int i = 0; wn_env_map[i].env != NULL; i++ ) {
 		char envname[128];
-		Com_sprintf( envname, sizeof(envname), "Q3_%s", wn_env_map[i].env );
+		Com_sprintf( envname, sizeof(envname), "WIRED_%s", wn_env_map[i].env );
 		val = getenv( envname );
 		if ( val && *val ) {
 			Cvar_Set( wn_env_map[i].cvar, val );
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ENV: %s = \"%s\" → %s\n", envname, val, wn_env_map[i].cvar );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "ENV: %s = \"%s\" → %s\n", envname, val, wn_env_map[i].cvar );
 			count++;
 		}
 	}
 
 	if ( count > 0 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "12-factor: %d cvars set from environment.\n", count );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "12-factor: %d cvars set from environment.\n", count );
 	}
 }
 
@@ -2950,11 +2952,11 @@ void Com_Init( char *commandLine ) {
 		Sys_Error( "Log pipeline: Sys_MutexInit failed" );
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s %s %s\n", Q3NOW_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%s %s %s\n", WIRED_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
 
 	Hash_SelfTest();
 
-	if ( Q_setjmp( abortframe ) ) {
+	if ( Q_setjmp( (void **)abortframe ) ) {
 		Sys_Error ("Error during initialization");
 	}
 
@@ -2964,9 +2966,10 @@ void Com_Init( char *commandLine ) {
 	Com_InitSmallZoneMemory();
 	Cvar_Init();
 
-	// Global log gate: registered immediately after Cvar_Init so the
-	// modificationCount polling in Com_Logv narrows s_min_severity before
-	// the next Com_Log call. Default INFO suppresses TRACE/DEBUG at runtime.
+	// Global log gate: registered immediately after Cvar_Init so its
+	// onChange callback (wired in Log_InitChannels) can re-resolve every
+	// channel's effectiveSev when the floor moves. Default INFO suppresses
+	// TRACE/DEBUG at runtime.
 	{
 #ifdef _DEBUG
 		static const cvarDesc_t d = CVAR_STRING( "log_severity", "DEBUG", 0, NULL );
@@ -2975,7 +2978,7 @@ void Com_Init( char *commandLine ) {
 #endif
 		log_severity_cvar = Cvar_Register( &d );
 	}
-	Log_InitCategories();
+	Log_InitChannels();
 	LogBuffer_Init();
 
 	// TTY sink only needs cvars (con_severity / con_timestamp). Register it now
@@ -3054,10 +3057,10 @@ void Com_Init( char *commandLine ) {
 
 	Com_ExecuteCfg();
 
-	// 12-factor: override config with Q3_* environment variables.
+	// 12-factor: override config with WIRED_* environment variables.
 	// Precedence: defaults < config files < env vars < command-line args.
-	// Env var format: Q3_CVAR_NAME=value (underscores map to underscores in cvar names).
-	// Example: Q3_SV_HOSTNAME="My Server" → +set sv_hostname "My Server"
+	// Env var format: WIRED_CVAR_NAME=value (underscores map to underscores in cvar names).
+	// Example: WIRED_SV_HOSTNAME="My Server" → +set sv_hostname "My Server"
 	Com_SetCvarsFromEnvironment();
 
 	// override anything from the config files with command line args
@@ -3245,7 +3248,7 @@ void Com_Init( char *commandLine ) {
 
 	Help_Init();
 
-	s = va( "%s %s %s", Q3NOW_ENGINE_VERSION, PLATFORM_STRING, __DATE__ );
+	s = va( "%s %s %s", WIRED_ENGINE_VERSION, PLATFORM_STRING, __DATE__ );
 	com_version = Cvar_Get( "version", s, CVAR_PROTECTED | CVAR_ROM | CVAR_SERVERINFO );
 	Cvar_SetDescription( com_version, "Read-only CVAR to see the version of the game." );
 
@@ -3263,11 +3266,11 @@ void Com_Init( char *commandLine ) {
 	Cvar_Get( "sys_cpustring", "detect", CVAR_PROTECTED | CVAR_ROM | CVAR_NORESTART );
 	if ( !Q_stricmp( Cvar_VariableString( "sys_cpustring" ), "detect" ) ) {
 		char vendor[128];
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...detecting CPU, found " );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...detecting CPU, found " );
 		Sys_GetProcessorId( vendor );
 		Cvar_Set( "sys_cpustring", vendor );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\n", Cvar_VariableString( "sys_cpustring" ) );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%s\n", Cvar_VariableString( "sys_cpustring" ) );
 
 #ifdef USE_AFFINITY_MASK
 	// get initial process affinity - we will respect it when setting custom affinity masks
@@ -3335,29 +3338,29 @@ void Com_Init( char *commandLine ) {
 	Cvar_Set( "ui_singlePlayerActive", "0" );
 #endif
 
-	// 12-factor: Q3_MAP and Q3_EXEC env vars execute commands after full init.
-	// These run AFTER Com_AddStartupCommands, so command-line +map overrides Q3_MAP.
+	// 12-factor: WIRED_MAP and WIRED_EXEC env vars execute commands after full init.
+	// These run AFTER Com_AddStartupCommands, so command-line +map overrides WIRED_MAP.
 	{
-		const char *envMap = getenv( "Q3_MAP" );
-		const char *envExec = getenv( "Q3_EXEC" );
+		const char *envMap = getenv( "WIRED_MAP" );
+		const char *envExec = getenv( "WIRED_EXEC" );
 		if ( envExec && *envExec ) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ENV: Q3_EXEC = \"%s\"\n", envExec );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "ENV: WIRED_EXEC = \"%s\"\n", envExec );
 			Cbuf_AddText( va( "exec %s\n", envExec ) );
 			Cbuf_Execute();
 		}
 		if ( envMap && *envMap ) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ENV: Q3_MAP = \"%s\"\n", envMap );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "ENV: WIRED_MAP = \"%s\"\n", envMap );
 			Cbuf_AddText( va( "map %s\n", envMap ) );
 		}
 	}
 
 	com_fullyInitialized = qtrue;
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "--- Common Initialization Complete ---\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "--- Common Initialization Complete ---\n" );
 
 	NET_Init();
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Working directory: %s\n", Sys_Pwd() );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "Working directory: %s\n", Sys_Pwd() );
 }
 
 
@@ -3394,11 +3397,10 @@ static int Com_ModifyMsec( int msec ) {
 		// period, because it would mess up all the client's views
 		// of time.
 		if (com_sv_running->integer && msec > 500)
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Hitch warning: %i msec frame time\n", msec );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Hitch warning: %i msec frame time\n", msec );
 
 		clampTime = 5000;
-	} else
-	if ( !com_sv_running->integer ) {
+	} else if ( !com_sv_running->integer ) {
 		// clients of remote servers do not want to clamp time, because
 		// it would skew their view of the server's time temporarily
 		clampTime = 5000;
@@ -3495,7 +3497,7 @@ void Com_Frame( qboolean noDelay ) {
 	static int biasUsec = 0;
 #endif
 
-	if ( Q_setjmp( abortframe ) ) {
+	if ( Q_setjmp( (void **)abortframe ) ) {
 #ifndef DEDICATED
 		CL_AbortFrame();	// reset SCR_UpdateScreen guard on ERR_DROP recovery
 #endif
@@ -3546,11 +3548,9 @@ void Com_Frame( qboolean noDelay ) {
 			//   4. No cap               -> minUsec = 1000 (1ms)
 			if ( gw_minimized && com_maxfpsMinimized->integer > 0 )
 				targetUsec = 1000000 / com_maxfpsMinimized->integer;
-			else
-			if ( !gw_active && com_maxfpsUnfocused->integer > 0 )
+			else if ( !gw_active && com_maxfpsUnfocused->integer > 0 )
 				targetUsec = 1000000 / com_maxfpsUnfocused->integer;
-			else
-			if ( com_maxfps->integer > 0 )
+			else if ( com_maxfps->integer > 0 )
 				targetUsec = 1000000 / com_maxfps->integer;
 			else
 				targetUsec = 1000;
@@ -3578,8 +3578,8 @@ void Com_Frame( qboolean noDelay ) {
 	int timeValUsec;
 	int timeValSV;
 	int sleepUsec;
-	if ( noDelay == qfalse )
-	do {
+	if ( noDelay == qfalse ) {
+		do {
 		if ( com_sv_running->integer ) {
 			timeValSV = SV_SendQueuedPackets();
 			timeValUsec = Com_TimeValUsec( minUsec );
@@ -3613,7 +3613,8 @@ void Com_Frame( qboolean noDelay ) {
 #endif
 			NET_Sleep( sleepUsec - 500 );
 		}
-	} while( Com_TimeValUsec( minUsec ) );
+		} while( Com_TimeValUsec( minUsec ) );
+	}
 
 	lastTime = com_frameTime;
 	lastTimeUsec = com_frameTimeUsec;
@@ -3698,17 +3699,17 @@ void Com_Frame( qboolean noDelay ) {
 		cl -= time_frontend + time_backend;
 
 		if ( com_speeds->integer < 2 || all >= com_speeds->integer ) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "frame:%i all:%3i sv:%3i ev:%3i cl:%3i gm:%3i rf:%3i bk:%3i\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "frame:%i all:%3i sv:%3i ev:%3i cl:%3i gm:%3i rf:%3i bk:%3i\n",
 						com_frameNumber, all, sv, ev, cl, time_game, time_frontend, time_backend );
 			if ( com_speeds->integer >= 2 ) {
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  cl: store:%d send:%d resend:%d cgtime:%d cgr:%d whud:%d wui:%d cons:%d snd:%d scr:%d end:%d ui:%d misc:%d (us)\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "  cl: store:%d send:%d resend:%d cgtime:%d cgr:%d whud:%d wui:%d cons:%d snd:%d scr:%d end:%d ui:%d misc:%d (us)\n",
 					cl_prof.store, cl_prof.send, cl_prof.resend, cl_prof.cgtime,
 					cl_prof.cgr, cl_prof.whud, cl_prof.wui, cl_prof.cons,
 					cl_prof.sound, cl_prof.scrextra, cl_prof.endframe,
 					cl_prof.userinfo, cl_prof.misc);
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  ev: wnframe:%d relstr:%d snapdg:%d chkpkt:%d (us)\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "  ev: wnframe:%d relstr:%d snapdg:%d chkpkt:%d (us)\n",
 					cl_prof.wnframe, cl_prof.relstr, cl_prof.snapdg, cl_prof.chkpkt);
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  whud: load:%d sync:%d render:%d score:%d (us)\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "  whud: load:%d sync:%d render:%d score:%d (us)\n",
 					cl_prof.whud_load, cl_prof.whud_sync, cl_prof.whud_render, cl_prof.whud_score);
 			}
 		}
@@ -3722,7 +3723,7 @@ void Com_Frame( qboolean noDelay ) {
 		extern	int c_traces, c_brush_traces, c_patch_traces;
 		extern	int	c_pointcontents;
 
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%4i traces  (%ib %ip) %4i points\n", c_traces,
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%4i traces  (%ib %ip) %4i points\n", c_traces,
 			c_brush_traces, c_patch_traces, c_pointcontents);
 		c_traces = 0;
 		c_brush_traces = 0;
@@ -3859,7 +3860,7 @@ PrintMatches
 */
 static void PrintMatches( const char *s ) {
 	if ( !Q_stricmpn( s, shortestMatch, strlen( shortestMatch ) ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "    %s\n", s );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "    %s\n", s );
 	}
 }
 
@@ -3874,7 +3875,7 @@ static void PrintCvarMatches( const char *s ) {
 
 	if ( !Q_stricmpn( s, shortestMatch, strlen( shortestMatch ) ) ) {
 		Com_TruncateLongString( value, Cvar_VariableString( s ) );
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "    %s = \"%s\"\n", s, value );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "    %s = \"%s\"\n", s, value );
 	}
 }
 
@@ -3952,7 +3953,7 @@ static qboolean Field_Complete( void )
 		return qtrue;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "]%s\n", completionField->buffer );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "]%s\n", completionField->buffer );
 
 	return qfalse;
 }

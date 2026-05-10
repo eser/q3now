@@ -12,7 +12,7 @@ var assetsImportCmd = &cobra.Command{
 	Use:   "import",
 	Short: "Import downloaded assets (and optionally a full Q3 install) into baseq3/",
 	Long: `Process the downloaded id-quakepack bundle through the q3copy pipeline,
-producing pax01.sw3z in ~/q3now${channelSuffix}/baseq3/.
+producing pax01.sw3z in ~/wired${channelSuffix}/baseq3/.
 
 When --q3path points at a full Quake III Arena install root (a directory
 containing baseq3/pak0.pk3), the pipeline also produces pax02.sw3z from

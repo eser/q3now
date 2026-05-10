@@ -392,7 +392,7 @@ static void AAS_ParseBSPEntities(void)
 
 	while(PS_ReadToken(script, &token))
 	{
-		if (strcmp(token.string, "{"))
+		if (strcmp(token.string, "{") != 0)
 		{
 			ScriptError(script, "invalid %s", token.string);
 			AAS_FreeBSPEntities();
@@ -433,7 +433,7 @@ static void AAS_ParseBSPEntities(void)
 			epair->value = (char *) GetHunkMemory(strlen(token.string) + 1);
 			strcpy(epair->value, token.string);
 		} //end while
-		if (strcmp(token.string, "}"))
+		if (strcmp(token.string, "}") != 0)
 		{
 			ScriptError(script, "missing }");
 			AAS_FreeBSPEntities();

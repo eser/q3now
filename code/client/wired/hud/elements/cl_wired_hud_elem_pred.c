@@ -1,6 +1,8 @@
 #include "../../../client.h"
 #include "../cl_wired_hud_compat.h"
 #include "../cl_wired_hud_private.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
 
@@ -24,7 +26,7 @@ void* CG_ModernHUDElementDecorCreate(const modernhudConfig_t* config)
 		element->drawCtx.image = trap_R_RegisterShader(config->image.value);
 		if (!element->drawCtx.image)
 		{
-			Com_Log( SEV_INFO, LOG_CAT_UI, "^2Decorate image %s is not found\n", config->image.value);
+			Com_Log( SEV_INFO, LOG_CH(ch_ui), "^2Decorate image %s is not found\n", config->image.value);
 		}
 	}
 

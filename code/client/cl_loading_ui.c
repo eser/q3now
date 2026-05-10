@@ -1,35 +1,37 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024-2026 q3now contributors
+Copyright (C) 2024-2026 Wired engine contributors
 
-This file is part of q3now source code.
+This file is part of the Wired engine source code.
 
-q3now source code is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by the
-Free Software Foundation; either version 2 of the License, or (at your
+The Wired engine source code is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or (at your
 option) any later version.
 
-q3now source code is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+The Wired engine source code is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
 for more details.
 
 You should have received a copy of the GNU General Public License along
-with q3now source code; if not, write to the Free Software Foundation,
+with the Wired engine source code; if not, write to the Free Software Foundation,
 Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 // cl_loading_ui.c -- main loading screen renderer
 //
 // Layout (viewport-relative):
-//   Top bar (5.8%):       q3now · gametype · scorelimit · timelimit
+//   Top bar (5.8%):       <game brand> · gametype · scorelimit · timelimit
 //   Left panel (52%):     BSP wireframe preview with entity markers
 //   Right panel (48%):    Map info, streaming rows, overall bar, Vulkan badge
 
 #include "client.h"
 #include "wired/ui/cl_wired_text.h"
 #include "wired/ui/cl_wired_background.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 // Viewport-relative font sizes
 #define LOADING_FONT_TITLE   (cls.glconfig.vidHeight * 0.028f)
@@ -225,7 +227,7 @@ static void Loading_DrawRadialGlow( float cx, float cy, float radius,
 
 	{
 		if ( s_glowDiagCount < 4 ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "GLOW virtual: x=%.0f y=%.0f w=%.0f h=%.0f (cx=%.0f cy=%.0f r=%.0f) rgba=(%.3f %.3f %.3f %.2f)\n",
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "GLOW virtual: x=%.0f y=%.0f w=%.0f h=%.0f (cx=%.0f cy=%.0f r=%.0f) rgba=(%.3f %.3f %.3f %.2f)\n",
 						x, y, w, h, cx, cy, radius, color[0], color[1], color[2], color[3] );
 			s_glowDiagCount++;
 		}
@@ -287,6 +289,7 @@ static void Loading_DrawBackground( void ) {
 
 	{
 		float spacing = vpH * 0.04f;
+		// NOLINTNEXTLINE(bugprone-float-loop-counter,clang-analyzer-security.FloatLoopCounter) — viewport-relative grid step; small float increment, drift acceptable for visual gridlines
 		for ( float y = 0; y < vpH; y += spacing ) {
 			Loading_FillRect( 0, y, vpW, 1, gridLine );
 		}
@@ -299,7 +302,7 @@ Loading_DrawTopBar
 
 Semi-transparent dark bar at top with game info.
 y=0, h=28.
-Left: "q3now" in accent color.
+Left: game brand (cl_gamename, "Wired" fallback) in accent color.
 Middle: gametype · scorelimit · timelimit.
 Right: bot difficulty dots if g_autoBots is active.
 ================
@@ -319,9 +322,15 @@ static void Loading_DrawTopBar( void ) {
 	// Dark semi-transparent bar
 	Loading_FillRect( 0, 0, vpW, barH, barColor );
 
-	// "q3now" in accent color, left side
-	Loading_DrawStringFaded( (int)pad, (int)pad, fontSize, "q3now",
-					   cl_loadingTheme.accentColor );
+	// Game name in accent color, left side. Sourced from cl_gamename, populated
+	// by cgame at init from bg_public.h's GAMENAME_FOR_MASTER. Falls back to
+	// "Wired" if cgame hasn't initialized yet (engine self-identifies).
+	{
+		const char *brand = Cvar_VariableString( "cl_gamename" );
+		if ( !*brand ) brand = "Wired";
+		Loading_DrawStringFaded( (int)pad, (int)pad, fontSize, brand,
+						   cl_loadingTheme.accentColor );
+	}
 
 	// Separator dot and gametype + limits
 	int gt = atoi( Info_ValueForKey( serverInfo, "g_gametype" ) );
@@ -347,8 +356,9 @@ static void Loading_DrawTopBar( void ) {
 		Com_sprintf( info, sizeof( info ), "| %s", gtName );
 	}
 
-	// Draw info string after "q3now" label
-	float px = pad + 5 * fontSize + vpW * 0.006f;  // after "q3now" (5 chars) + small gap
+	// Draw info string after the brand label (assume ~5 chars; longer game
+	// names will overlap with the info string until the layout is generalized).
+	float px = pad + 5 * fontSize + vpW * 0.006f;  // after brand label + small gap
 	Loading_DrawStringFaded( (int)px, (int)pad, fontSize, info, muted );
 
 	// // Bot difficulty dots (right side) — if g_autoBots is set
@@ -399,7 +409,7 @@ static void Loading_DrawDivider( void ) {
 
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG Divider: x=%.0f yTop=%.0f yMid=%.0f yBot=%.0f\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "DIAG Divider: x=%.0f yTop=%.0f yMid=%.0f yBot=%.0f\n",
 			x, yTop, yMid1, yBottom );
 	}
 #endif
@@ -469,7 +479,7 @@ static void Loading_DrawWireframe( void ) {
 
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG Wireframe: valid=%d edges=%d markers=%d surfaces=%d "
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "DIAG Wireframe: valid=%d edges=%d markers=%d surfaces=%d "
 			"bounds=(%.0f,%.0f)-(%.0f,%.0f)\n",
 			cl_bspPreview.valid, cl_bspPreview.numEdges, cl_bspPreview.numMarkers,
 			cl_bspPreview.numSurfaces,
@@ -631,6 +641,7 @@ static void Loading_DrawWireframe( void ) {
 		Loading_SetColor( itemRed );
 		{
 			float ringStep = legendR2 / 3.0f;
+			// NOLINTNEXTLINE(bugprone-float-loop-counter,clang-analyzer-security.FloatLoopCounter) — concentric-ring loop; 3 iterations exactly, float drift not material
 			for ( float r = legendR2; r >= ringStep; r -= ringStep ) {
 				for ( int seg = 0; seg < 12; seg++ ) {
 					float a0 = ( M_PI * 2.0f / 12 ) * seg;
@@ -659,7 +670,7 @@ static void Loading_DrawWireframe( void ) {
 
 	// Console diagnostic: print once per map load
 	if ( !s_wireframeDiagPrinted ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "WIREFRAME: %d surfaces, %d segments, %d markers\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "WIREFRAME: %d surfaces, %d segments, %d markers\n",
 			cl_bspPreview.numSurfaces, cl_bspPreview.numEdges,
 			cl_bspPreview.numMarkers );
 		s_wireframeDiagPrinted = qtrue;
@@ -686,7 +697,7 @@ static void Loading_DrawMapInfo( void ) {
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 ) {
 		const char *mapCvar = Info_ValueForKey( info, "mapname" );
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG MapInfo: mapname=\"%s\" longName=\"%s\" author=\"%s\" "
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "DIAG MapInfo: mapname=\"%s\" longName=\"%s\" author=\"%s\" "
 			"quote=\"%s\" sky=\"%s\" players=%d-%d weapon=\"%s\" items=%d hasMeta=%d\n",
 			mapCvar ? mapCvar : "(null)",
 			cl_mapInfo.longName, cl_mapInfo.author, cl_mapInfo.quote,
@@ -937,7 +948,7 @@ static void Loading_DrawStreamingRows( void ) {
 
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG Streaming: geo=%.3f shd=%.3f aud=%.3f dl=%.3f overall=%.3f phase=\"%s\"\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "DIAG Streaming: geo=%.3f shd=%.3f aud=%.3f dl=%.3f overall=%.3f phase=\"%s\"\n",
 			cl_loadProgress.geometry, cl_loadProgress.shaders,
 			cl_loadProgress.audio, cl_loadProgress.download,
 			cl_loadProgress.overall,
@@ -975,7 +986,7 @@ static void Loading_DrawOverallBar( void ) {
 	const float by = vpH * 0.7708f;    // was 370/480
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "DIAG OverallBar: overall=%.3f phase=\"%s\" rx=%.0f by=%.0f\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "DIAG OverallBar: overall=%.3f phase=\"%s\" rx=%.0f by=%.0f\n",
 			cl_loadProgress.overall,
 			cl_loadProgress.phase ? cl_loadProgress.phase : "(null)",
 			rx, by );
@@ -1021,7 +1032,7 @@ static void Loading_DrawVulkanBadge( void ) {
 	float dotSize = vpH * 0.0125f;     // was 6/480
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "DIAG VulkanBadge: version=\"%s\" rx=%.0f by=%.0f\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "DIAG VulkanBadge: version=\"%s\" rx=%.0f by=%.0f\n",
 			cls.glconfig.version_string[0] ? cls.glconfig.version_string : "(empty)",
 			rx, by );
 #endif
@@ -1101,6 +1112,7 @@ static void Loading_DrawServerInfoStrip( void ) {
 			Q_strncpyz( line1, motd, splitAt + 1 );
 			Q_strncpyz( line2, motd + splitAt + 1, sizeof( line2 ) );
 			if ( (int)strlen( line2 ) > maxChars ) {
+				// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — guarded by `> maxChars`; maxChars is a sane positive constant earlier in this function
 				line2[maxChars - 3] = '.';
 				line2[maxChars - 2] = '.';
 				line2[maxChars - 1] = '.';

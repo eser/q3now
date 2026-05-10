@@ -39,6 +39,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "unix_glw.h"
 
 #include <dlfcn.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #define GLE( ret, name, ... ) ret ( APIENTRY * q##name )( __VA_ARGS__ );
 QGL_LinX11_PROCS;
@@ -52,11 +54,11 @@ QGL_Swp_PROCS;
 */
 void QGL_Shutdown( qboolean unloadDLL )
 {
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...shutting down QGL\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "...shutting down QGL\n" );
 
 	if ( glw_state.OpenGLLib && unloadDLL )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...unloading OpenGL DLL\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...unloading OpenGL DLL\n" );
 		// 25/09/05 Tim Angus <tim@ngus.net>
 		// Certain combinations of hardware and software, specifically
 		// Linux/SMP/Nvidia/agpgart (OK, OK. MY combination of hardware and
@@ -120,11 +122,11 @@ void *GL_GetProcAddress( const char *symbol )
 */
 qboolean QGL_Init( const char *dllname )
 {
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...initializing QGL\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "...initializing QGL\n" );
 
 	if ( glw_state.OpenGLLib == NULL )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : ", dllname );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...loading '%s' : ", dllname );
 
 		glw_state.OpenGLLib = dlopen( dllname, RTLD_NOW | RTLD_GLOBAL );
 
@@ -133,7 +135,7 @@ qboolean QGL_Init( const char *dllname )
 #if 0
 			char fn[1024];
 
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n...loading '%s' : ", dllname );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "\n...loading '%s' : ", dllname );
 			// if we are not setuid, try current directory
 			if ( dllname != NULL )
 			{
@@ -147,26 +149,26 @@ qboolean QGL_Init( const char *dllname )
 
 				if ( glw_state.OpenGLLib == NULL )
 				{
-					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "failed\n" );
-					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "QGL_Init: Can't load %s from /etc/ld.so.conf or current dir: %s\n", dllname, do_dlerror() );
+					Com_Log( SEV_INFO, LOG_CH(ch_system), "failed\n" );
+					Com_Log( SEV_INFO, LOG_CH(ch_system), "QGL_Init: Can't load %s from /etc/ld.so.conf or current dir: %s\n", dllname, do_dlerror() );
 					return qfalse;
 				}
 			}
 			else
 #endif
 			{
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "failed\n" );
-				//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "QGL_Init: Can't load %s from /etc/ld.so.conf: %s\n", dllname, do_dlerror() );
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "failed\n" );
+				//Com_Log( SEV_INFO, LOG_CH(ch_system), "QGL_Init: Can't load %s from /etc/ld.so.conf: %s\n", dllname, do_dlerror() );
 				return qfalse;
 			}
 		}
 
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "succeeded\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "succeeded\n" );
 	}
 
 	glErrorCount = 0;
 
-#define GLE( ret, name, ... ) q##name = GL_GetProcAddress( XSTRING( name ) ); if ( !q##name ) { Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Error resolving core X11 functions\n" ); return qfalse; }
+#define GLE( ret, name, ... ) q##name = GL_GetProcAddress( XSTRING( name ) ); if ( !q##name ) { Com_Log( SEV_INFO, LOG_CH(ch_system), "Error resolving core X11 functions\n" ); return qfalse; }
 	QGL_LinX11_PROCS;
 #undef GLE
 

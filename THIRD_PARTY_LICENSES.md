@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-q3now bundles or links to a number of third-party components. This document
+q3now and Wired bundles or links to a number of third-party components. This document
 catalogues each one along with its upstream URL, license, and the canonical
 copyright / permission notice that the upstream license requires us to
 reproduce.
@@ -43,11 +43,11 @@ For machine-readable enumeration of every transitive dependency, see:
 
 ## 1. Project license & derivation
 
-q3now is licensed under the **GNU General Public License, version 2 or
+q3now and Wired is licensed under the **GNU General Public License, version 2 or
 later (GPL-2.0-or-later)**. The full license text is in `COPYING.txt` at
 the repository root.
 
-q3now is derived from **ioquake3** (`https://github.com/ioquake/ioq3`),
+q3now and Wired is derived from **ioquake3** (`https://github.com/ioquake/ioq3`),
 which is itself a continuation of id Software's open-source release of
 the **Quake III Arena** engine. Per the original release:
 
@@ -84,8 +84,8 @@ at `launcher/eula.go`. Acceptance is recorded with a timestamp in the
 launcher's per-user `settings.json`.
 
 After download, `assets import` extracts the bundle to
-`~/q3now${channel}/downloaded/id-quakepack/` and converts the contained
-PAKs into q3now's `.sw3z` format under `~/q3now${channel}/baseq3/`.
+`~/wired${channel}/downloaded/id-quakepack/` and converts the contained
+PAKs into q3now's `.sw3z` format under `~/wired${channel}/baseq3/`.
 
 The bundle aggregates content from several distinct copyright holders. Each
 is enumerated below with its origin, license/permission status, and what
@@ -497,12 +497,12 @@ MIT License
 Copyright (c) 2017 Private Octopus
 ```
 
-q3now applies a small set of MinGW-portability patches to picoquic at
+Wired applies a small set of MinGW-portability patches to picoquic at
 configure time (`patches/picoquic-mingw/*.patch`); these modifications
 follow the MIT permission grant and are themselves licensed under the same
 MIT terms. The patched source remains attributable to Private Octopus.
 
-q3now's CMake build excludes the following picoquic source-file groups
+Wired's CMake build excludes the following picoquic source-file groups
 from compilation (and therefore from the distributed binary): `*minicrypto*`,
 `*mbedtls*`, `*fusion*`, `*qlog*` (see `CMakeLists.txt:241-250`).
 Attribution for excluded code is not required.
@@ -515,11 +515,11 @@ Attribution for excluded code is not required.
 - **Pinned:** commit `b84869f4`
 
 The picotls TLS protocol implementation core is MIT-licensed. picotls
-bundles cryptographic backends in `src/libs/picotls/deps/`; q3now's CMake
+bundles cryptographic backends in `src/libs/picotls/deps/`; Wired's CMake
 build links against the OpenSSL backend and **excludes** the alternative
 backends (`minicrypto`, `cifra`, `micro-ecc`-based code) from compilation.
 Attribution for those excluded backends is therefore not required by
-q3now's distribution, but is recorded here for completeness:
+Wired's distribution, but is recorded here for completeness:
 
 #### 3.9.1 micro-ecc (sub-dep of picotls/minicrypto)
 
@@ -547,7 +547,7 @@ Per Apache-2.0 §4(d), the upstream `LICENSE` file is preserved at
 (NuttX-derived bits, AsmJit, Zydis, libuv, UVWASI, libpng-2.0, SSP,
 er-coap, …); the canonical attribution catalogue for those is upstream
 WAMR's own third-party-license documentation under
-`src/libs/wamr/build-scripts/` and `src/libs/wamr/core/`. q3now does not
+`src/libs/wamr/build-scripts/` and `src/libs/wamr/core/`. Wired does not
 duplicate that catalogue here; consult those upstream files when
 distributing.
 
@@ -580,10 +580,10 @@ misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-recastnavigation's `RecastDemo/` subtree (which q3now does not build into
+recastnavigation's `RecastDemo/` subtree (which Wired does not build into
 its release artifacts) bundles development-only deps such as Dear ImGui
-and SDL — q3now's release binaries don't link to those, so attribution is
-not required for q3now's distribution.
+and SDL — Wired's release binaries don't link to those, so attribution is
+not required for Wired's distribution.
 
 ### 3.12 curl (system library — not vendored)
 
@@ -591,7 +591,7 @@ The `src/libs/curl/` directory contains **only** CMake configuration
 helper scripts (`conf751.sh`, `conf840.sh`, `windows/`) used during build.
 **The actual libcurl is provided by the host system** (`libcurl4-openssl-dev`
 on Linux, system curl on macOS, `mingw-w64-x86_64-curl` on Windows-MSYS2).
-q3now does not redistribute libcurl source or binaries; attribution
+Wired does not redistribute libcurl source or binaries; attribution
 obligations fall on the host distribution.
 
 For reference, libcurl is released under the **curl license** (a permissive
@@ -615,7 +615,7 @@ Per the upstream header:
 > See license statements at the end of this file.
 
 The full upstream license text (both options) is preserved verbatim at the
-end of `code/client/miniaudio.h`. q3now elects no specific option and
+end of `code/client/miniaudio.h`. Wired elects no specific option and
 reproduces both as shipped.
 
 ### 4.2 Vulkan-Headers (Khronos)
@@ -639,8 +639,8 @@ Per Apache-2.0 §4, this notice is preserved.
 ## 5. Build & development tooling
 
 The components in this section run **at build time** but are not linked
-into q3now's distributed binary. They are listed for completeness; users
-of q3now release artifacts do not redistribute them.
+into Wired's distributed binary. They are listed for completeness; users
+of Wired release artifacts do not redistribute them.
 
 ### 5.1 msdf-atlas-gen
 
@@ -651,7 +651,7 @@ of q3now release artifacts do not redistribute them.
 - **Copyright:** `Copyright (c) 2020 - 2026 Viktor Chlumsky`
 
 msdf-atlas-gen bundles **msdfgen** (MIT, also Viktor Chlumsky) and
-**artery-font-format** (MIT). q3now invokes msdf-atlas-gen at build time
+**artery-font-format** (MIT). Wired invokes msdf-atlas-gen at build time
 to bake font atlases from upstream font files; the resulting `.png` and
 `.json` outputs ship in q3now's mod pack but the tool itself does not.
 
@@ -666,7 +666,7 @@ to bake font atlases from upstream font files; the resulting `.png` and
 The compiled WASM modules **are** distributed inside `pax21.sw3z`, but they
 contain only q3now-original source code compiled by wasi-sdk's clang —
 they don't embed wasi-sdk code itself. Attribution for wasi-sdk is not
-required in q3now's distribution.
+required in Wired's distribution.
 
 ---
 
@@ -936,10 +936,10 @@ For q3now's distribution, that obligation is satisfied by:
   during build (and in any redistributed source archive).
 
 Apache-2.0's other obligations (notice of modifications when distributing
-modified source) apply to the upstream sources; q3now does not modify
+modified source) apply to the upstream sources; Wired does not modify
 WAMR, Vulkan-Headers, or Cobra source from upstream releases.
 
 ---
 
-*This document was generated for q3now and is itself licensed under the
+*This document was generated for q3now and Wired and is itself licensed under the
 project's GPL-2.0-or-later. Last updated: 2026-05-07.*

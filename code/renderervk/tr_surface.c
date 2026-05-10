@@ -1,4 +1,4 @@
-/*
+﻿/*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
 
@@ -382,6 +382,7 @@ static void RB_SurfaceTriangles( const srfTriangles_t *srf ) {
 			texCoords1 += 2;
 		}
 
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — `color` iterates within tess.vertexColors[]; bounded by srf->numVerts upstream
 		*color = dv->color.u32;
 	}
 #ifdef USE_LEGACY_DLIGHTS
@@ -472,296 +473,6 @@ static void RB_SurfaceBeam( void )
 	qglEnable( GL_TEXTURE_2D );
 #endif
 }
-
-//================================================================================
-
-static void DoRailCore( const vec3_t start, const vec3_t end, const vec3_t up, float len, float spanWidth )
-{
-	float		spanWidth2;
-	int			vbase;
-	float		t = len / 256.0f;
-
-	RB_CHECKOVERFLOW( 4, 6 );
-
-	vbase = tess.numVertexes;
-
-	spanWidth2 = -spanWidth;
-
-	// FIXME: use quad stamp?
-	VectorMA( start, spanWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[0][tess.numVertexes][0] = 0;
-	tess.texCoords[0][tess.numVertexes][1] = 0;
-	tess.vertexColors[tess.numVertexes].rgba[0] = backEnd.currentEntity->e.shader.rgba[0] * 0.25;
-	tess.vertexColors[tess.numVertexes].rgba[1] = backEnd.currentEntity->e.shader.rgba[1] * 0.25;
-	tess.vertexColors[tess.numVertexes].rgba[2] = backEnd.currentEntity->e.shader.rgba[2] * 0.25;
-	tess.numVertexes++;
-
-	VectorMA( start, spanWidth2, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[0][tess.numVertexes][0] = 0;
-	tess.texCoords[0][tess.numVertexes][1] = 1;
-	tess.vertexColors[tess.numVertexes].rgba[0] = backEnd.currentEntity->e.shader.rgba[0];
-	tess.vertexColors[tess.numVertexes].rgba[1] = backEnd.currentEntity->e.shader.rgba[1];
-	tess.vertexColors[tess.numVertexes].rgba[2] = backEnd.currentEntity->e.shader.rgba[2];
-	tess.numVertexes++;
-
-	VectorMA( end, spanWidth, up, tess.xyz[tess.numVertexes] );
-
-	tess.texCoords[0][tess.numVertexes][0] = t;
-	tess.texCoords[0][tess.numVertexes][1] = 0;
-	tess.vertexColors[tess.numVertexes].rgba[0] = backEnd.currentEntity->e.shader.rgba[0];
-	tess.vertexColors[tess.numVertexes].rgba[1] = backEnd.currentEntity->e.shader.rgba[1];
-	tess.vertexColors[tess.numVertexes].rgba[2] = backEnd.currentEntity->e.shader.rgba[2];
-	tess.numVertexes++;
-
-	VectorMA( end, spanWidth2, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[0][tess.numVertexes][0] = t;
-	tess.texCoords[0][tess.numVertexes][1] = 1;
-	tess.vertexColors[tess.numVertexes].rgba[0] = backEnd.currentEntity->e.shader.rgba[0];
-	tess.vertexColors[tess.numVertexes].rgba[1] = backEnd.currentEntity->e.shader.rgba[1];
-	tess.vertexColors[tess.numVertexes].rgba[2] = backEnd.currentEntity->e.shader.rgba[2];
-	tess.numVertexes++;
-
-	tess.indexes[tess.numIndexes++] = vbase;
-	tess.indexes[tess.numIndexes++] = vbase + 1;
-	tess.indexes[tess.numIndexes++] = vbase + 2;
-
-	tess.indexes[tess.numIndexes++] = vbase + 2;
-	tess.indexes[tess.numIndexes++] = vbase + 1;
-	tess.indexes[tess.numIndexes++] = vbase + 3;
-}
-
-
-/*
-** DoRailCoreTapered — same as DoRailCore but width and alpha fade from start to end
-*/
-static void DoRailCoreTapered( const vec3_t start, const vec3_t end, const vec3_t up,
-	float len, float startWidth, float endWidth )
-{
-	int			vbase;
-	float		t = len / 256.0f;
-
-	RB_CHECKOVERFLOW( 4, 6 );
-
-	vbase = tess.numVertexes;
-
-	// start vertices — full width, full alpha
-	VectorMA( start, startWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[0][tess.numVertexes][0] = 0;
-	tess.texCoords[0][tess.numVertexes][1] = 0;
-	tess.vertexColors[tess.numVertexes].rgba[0] = backEnd.currentEntity->e.shader.rgba[0] * 0.25;
-	tess.vertexColors[tess.numVertexes].rgba[1] = backEnd.currentEntity->e.shader.rgba[1] * 0.25;
-	tess.vertexColors[tess.numVertexes].rgba[2] = backEnd.currentEntity->e.shader.rgba[2] * 0.25;
-	tess.numVertexes++;
-
-	VectorMA( start, -startWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[0][tess.numVertexes][0] = 0;
-	tess.texCoords[0][tess.numVertexes][1] = 1;
-	tess.vertexColors[tess.numVertexes].rgba[0] = backEnd.currentEntity->e.shader.rgba[0];
-	tess.vertexColors[tess.numVertexes].rgba[1] = backEnd.currentEntity->e.shader.rgba[1];
-	tess.vertexColors[tess.numVertexes].rgba[2] = backEnd.currentEntity->e.shader.rgba[2];
-	tess.numVertexes++;
-
-	// end vertices — tapered width, faded alpha
-	VectorMA( end, endWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[0][tess.numVertexes][0] = t;
-	tess.texCoords[0][tess.numVertexes][1] = 0;
-	tess.vertexColors[tess.numVertexes].rgba[0] = 0;
-	tess.vertexColors[tess.numVertexes].rgba[1] = 0;
-	tess.vertexColors[tess.numVertexes].rgba[2] = 0;
-	tess.numVertexes++;
-
-	VectorMA( end, -endWidth, up, tess.xyz[tess.numVertexes] );
-	tess.texCoords[0][tess.numVertexes][0] = t;
-	tess.texCoords[0][tess.numVertexes][1] = 1;
-	tess.vertexColors[tess.numVertexes].rgba[0] = 0;
-	tess.vertexColors[tess.numVertexes].rgba[1] = 0;
-	tess.vertexColors[tess.numVertexes].rgba[2] = 0;
-	tess.numVertexes++;
-
-	tess.indexes[tess.numIndexes++] = vbase;
-	tess.indexes[tess.numIndexes++] = vbase + 1;
-	tess.indexes[tess.numIndexes++] = vbase + 2;
-
-	tess.indexes[tess.numIndexes++] = vbase + 2;
-	tess.indexes[tess.numIndexes++] = vbase + 1;
-	tess.indexes[tess.numIndexes++] = vbase + 3;
-}
-
-
-static void DoRailDiscs( int numSegs, const vec3_t start, const vec3_t dir, const vec3_t right, const vec3_t up )
-{
-	int i;
-	vec3_t	pos[4];
-	vec3_t	v;
-	int		spanWidth = r_railWidth->integer;
-	float c, s;
-	float		scale;
-
-	if ( numSegs > 1 )
-		numSegs--;
-	if ( !numSegs )
-		return;
-
-	scale = 0.25;
-
-	for ( i = 0; i < 4; i++ )
-	{
-		c = cos( DEG2RAD( 45 + i * 90 ) );
-		s = sin( DEG2RAD( 45 + i * 90 ) );
-		v[0] = ( right[0] * c + up[0] * s ) * scale * spanWidth;
-		v[1] = ( right[1] * c + up[1] * s ) * scale * spanWidth;
-		v[2] = ( right[2] * c + up[2] * s ) * scale * spanWidth;
-		VectorAdd( start, v, pos[i] );
-
-		if ( numSegs > 1 )
-		{
-			// offset by 1 segment if we're doing a long distance shot
-			VectorAdd( pos[i], dir, pos[i] );
-		}
-	}
-
-	for ( i = 0; i < numSegs; i++ )
-	{
-		RB_CHECKOVERFLOW( 4, 6 );
-
-		for ( int j = 0; j < 4; j++ )
-		{
-			VectorCopy( pos[j], tess.xyz[tess.numVertexes] );
-			tess.texCoords[0][tess.numVertexes][0] = ( j < 2 );
-			tess.texCoords[0][tess.numVertexes][1] = ( j && j != 3 );
-			tess.vertexColors[tess.numVertexes].rgba[0] = backEnd.currentEntity->e.shader.rgba[0];
-			tess.vertexColors[tess.numVertexes].rgba[1] = backEnd.currentEntity->e.shader.rgba[1];
-			tess.vertexColors[tess.numVertexes].rgba[2] = backEnd.currentEntity->e.shader.rgba[2];
-			tess.numVertexes++;
-
-			VectorAdd( pos[j], dir, pos[j] );
-		}
-
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 0;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 1;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 3;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 3;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 1;
-		tess.indexes[tess.numIndexes++] = tess.numVertexes - 4 + 2;
-	}
-}
-
-
-/*
-** RB_SurfaceRailRinges
-*/
-static void RB_SurfaceRailRings( void ) {
-	const refEntity_t *e;
-	int			numSegs;
-	int			len;
-	vec3_t		vec;
-	vec3_t		right, up;
-	vec3_t		start, end;
-
-	e = &backEnd.currentEntity->e;
-
-	VectorCopy( e->oldorigin, start );
-	VectorCopy( e->origin, end );
-
-	// compute variables
-	VectorSubtract( end, start, vec );
-	len = VectorNormalize( vec );
-	MakeNormalVectors( vec, right, up );
-	numSegs = ( len ) / r_railSegmentLength->value;
-	if ( numSegs <= 0 ) {
-		numSegs = 1;
-	}
-
-	VectorScale( vec, r_railSegmentLength->value, vec );
-
-	DoRailDiscs( numSegs, start, vec, right, up );
-}
-
-
-/*
-** RB_SurfaceRailCore
-*/
-static void RB_SurfaceRailCore( void ) {
-	const refEntity_t *e;
-	int			len;
-	vec3_t		right;
-	vec3_t		vec;
-	vec3_t		start, end;
-	vec3_t		v1, v2;
-
-	e = &backEnd.currentEntity->e;
-
-	VectorCopy( e->oldorigin, start );
-	VectorCopy( e->origin, end );
-
-	VectorSubtract( end, start, vec );
-	len = VectorNormalize( vec );
-
-	// compute side vector
-	VectorSubtract( start, backEnd.viewParms.or.origin, v1 );
-	VectorNormalize( v1 );
-	VectorSubtract( end, backEnd.viewParms.or.origin, v2 );
-	VectorNormalize( v2 );
-	CrossProduct( v1, v2, right );
-	VectorNormalize( right );
-
-	DoRailCore( start, end, right, len, r_railCoreWidth->integer );
-}
-
-
-/*
-** RB_SurfaceLightningBolt
-*/
-static void RB_SurfaceLightningBolt( void ) {
-	const refEntity_t *e;
-	int			len;
-	vec3_t		right;
-	vec3_t		vec;
-	vec3_t		start, end;
-	vec3_t		v1, v2;
-	int			i;
-	float		taperLen = 64.0f;
-
-	e = &backEnd.currentEntity->e;
-
-	VectorCopy( e->oldorigin, end );
-	VectorCopy( e->origin, start );
-
-	// compute variables
-	VectorSubtract( end, start, vec );
-	len = VectorNormalize( vec );
-
-	// compute side vector
-	VectorSubtract( start, backEnd.viewParms.or.origin, v1 );
-	VectorNormalize( v1 );
-	VectorSubtract( end, backEnd.viewParms.or.origin, v2 );
-	VectorNormalize( v2 );
-	CrossProduct( v1, v2, right );
-	VectorNormalize( right );
-
-	if ( len > taperLen * 2 ) {
-		// main body (full width) + tapered tail for dissipation
-		vec3_t taperStart;
-		VectorMA( end, -taperLen, vec, taperStart );
-
-		for ( i = 0; i < 4; i++ ) {
-			vec3_t temp;
-			DoRailCore( start, taperStart, right, len - taperLen, 8 );
-			DoRailCoreTapered( taperStart, end, right, taperLen, 8, 0 );
-			RotatePointAroundVector( temp, vec, right, 45 );
-			VectorCopy( temp, right );
-		}
-	} else {
-		// beam too short to taper — draw normally
-		for ( i = 0; i < 4; i++ ) {
-			vec3_t temp;
-			DoRailCore( start, end, right, len, 8 );
-			RotatePointAroundVector( temp, vec, right, 45 );
-			VectorCopy( temp, right );
-		}
-	}
-}
-
 
 /*
 ** VectorArrayNormalize
@@ -1322,6 +1033,7 @@ static void RB_SurfaceGrid( srfGridMesh_t *cv ) {
 					normal[2] = dv->normal[2];
 					normal += 4;
 				}
+				// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — `color` iterates within tess.vertexColors[]; bounded by srf->numVerts upstream
 				*color = dv->color.u32;
 #ifdef USE_LEGACY_DLIGHTS
 				*vDlightBits++ = dlightBits;
@@ -1474,15 +1186,6 @@ static void RB_SurfaceEntity( const surfaceType_t *surfType ) {
 	case RT_BEAM:
 		RB_SurfaceBeam();
 		break;
-	case RT_RAIL_CORE:
-		RB_SurfaceRailCore();
-		break;
-	case RT_RAIL_RINGS:
-		RB_SurfaceRailRings();
-		break;
-	case RT_LIGHTNING:
-		RB_SurfaceLightningBolt();
-		break;
 	default:
 		RB_SurfaceAxis();
 		break;
@@ -1528,6 +1231,3 @@ void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES])( void *) = {
 	(void(*)(void*))RB_SurfaceFlare,		// SF_FLARE,
 	(void(*)(void*))RB_SurfaceEntity		// SF_ENTITY
 };
-
-
-// RB_DrawRailTrailGPU lives in vk.c (needs access to static qvk* function pointers)

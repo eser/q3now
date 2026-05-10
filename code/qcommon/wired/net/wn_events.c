@@ -96,6 +96,7 @@ void WN_EventRingPush( const byte *data, int len )
 			if ( gc->active && gc->conn && gc->conn->cnx &&
 			     gc->hs_state == WN_GAME_HS_ACCEPTED ) {
 				if ( transport ) {
+					// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — `i+1` is a small client index; widening to conn_handle_t is intentional
 					transport->send_reliable( (conn_handle_t)( i + 1 ), CHAN_EVENTS,
 						(const byte *)data, len );
 				}

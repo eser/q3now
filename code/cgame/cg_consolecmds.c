@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // executed by a key binding
 
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
 
@@ -49,7 +51,7 @@ Debugging command to print the current position
 =============
 */
 static void CG_Viewpos_f (void) {
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "(%i %i %i) : %i\n", (int)cg.refdef.vieworg[0],
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "(%i %i %i) : %i\n", (int)cg.refdef.vieworg[0],
 		(int)cg.refdef.vieworg[1], (int)cg.refdef.vieworg[2], 
 		(int)cg.refdefViewAngles[YAW]);
 }
@@ -347,7 +349,7 @@ static void CG_Camera_f( void ) {
 		cg.cameraMode = qtrue;
 		trap_startCamera(cg.time);
 	} else {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Unable to load camera %s\n",name);
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Unable to load camera %s\n",name);
 	}
 }
 */

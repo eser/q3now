@@ -57,11 +57,10 @@ static float LibVarStringValue( const char *string )
 			{
 				return 0;
 			} //end if
-			else
-			{
-				dotfound = 10;
-				string++;
-			} //end if
+
+			dotfound = 10;
+			string++;
+			//end if
 		} //end if
 		if (dotfound)
 		{
@@ -159,10 +158,9 @@ const char *LibVarGetString( const char *var_name )
 	{
 		return v->string;
 	} //end if
-	else
-	{
-		return "";
-	} //end else
+
+	return "";
+	//end else
 } //end of the function LibVarGetString
 //===========================================================================
 //
@@ -179,10 +177,9 @@ float LibVarGetValue( const char *var_name )
 	{
 		return v->value;
 	} //end if
-	else
-	{
-		return 0;
-	} //end else
+
+	return 0;
+	//end else
 } //end of the function LibVarGetValue
 //===========================================================================
 //

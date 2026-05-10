@@ -30,6 +30,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  *****************************************************************************/
 
+// NOLINTBEGIN(clang-analyzer-security.ArrayBound,clang-analyzer-core.CallAndMessage,clang-analyzer-core.UndefinedBinaryOperatorResult)
+// Vendored Q3 bot AI (CTF/Obelisk/Harvester orders). Pattern repeats throughout
+// the file: a stack-local `int teammates[MAX_CLIENTS]` is filled by
+// BotSortTeamMatesByBaseTravelTime which returns the count, then indexed at
+// teammates[0..count-1]. The analyzer can't see through the helper's contract,
+// so it flags every read as out-of-bounds / uninitialized.
 #include "g_local.h"
 #include "../botlib/botlib.h"
 #include "../botlib/be_aas.h"
@@ -2099,3 +2105,4 @@ void BotTeamAI(bot_state_t *bs) {
 #endif
 	}
 }
+// NOLINTEND(clang-analyzer-security.ArrayBound,clang-analyzer-core.CallAndMessage,clang-analyzer-core.UndefinedBinaryOperatorResult)

@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 static cvar_t	*cvar_vars = NULL;
 static cvar_t	*cvar_cheats;
@@ -77,7 +79,7 @@ static qboolean Cvar_ValidateName( const char *name ) {
 
 	const char *s = name;
 	int c;
-	while ( (c = *s++) != '\0' ) {
+	while ( (c = (byte)*s++) != '\0' ) {
 		if ( c == '\\' || c == '\"' || c == ';' || c == '%' || c <= ' ' || c >= '~' )
 			return qfalse;
 	}
@@ -206,10 +208,8 @@ unsigned Cvar_Flags( const char *var_name )
 
 	if ( ( var = Cvar_FindVar( var_name ) ) == NULL )
 		return CVAR_NONEXISTENT;
-	else
-	{
-		return var->flags;
-	}
+
+	return var->flags;
 }
 
 
@@ -266,13 +266,13 @@ static const char *Cvar_Validate( cvar_t *var, const char *value, qboolean warn 
 	if ( var->validator == CV_INTEGER || var->validator == CV_FLOAT ) {
 		if ( !Q_isanumber( value ) ) {
 			if ( warn )
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: cvar '%s' must be numeric", var->name );
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "WARNING: cvar '%s' must be numeric", var->name );
 			limit = var->resetString;
 		} else {
 			if ( var->validator == CV_INTEGER ) {
 				if ( !Cvar_IsIntegral( value ) ) {
 					if ( warn )
-						Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: cvar '%s' must be integral", var->name );
+						Com_Log( SEV_INFO, LOG_CH(ch_system), "WARNING: cvar '%s' must be integral", var->name );
 					sprintf( intbuf, "%i", atoi( value ) );
 					value = intbuf; // new value
 				}
@@ -294,11 +294,11 @@ static const char *Cvar_Validate( cvar_t *var, const char *value, qboolean warn 
 			if ( warn ) {
 				if ( limit && ( limit == var->mins || limit == var->maxs ) ) {
 					if ( value == intbuf ) { // cast to integer
-						Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " and" );
+						Com_Log( SEV_INFO, LOG_CH(ch_system), " and" );
 					} else {
-						Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: cvar '%s'", var->name );
+						Com_Log( SEV_INFO, LOG_CH(ch_system), "WARNING: cvar '%s'", var->name );
 					}
-					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " is out of range (%s '%s')", (limit == var->mins) ? "min" : "max", limit );
+					Com_Log( SEV_INFO, LOG_CH(ch_system), " is out of range (%s '%s')", (limit == var->mins) ? "min" : "max", limit );
 				}
 			}
 		} // Q_isanumber
@@ -308,12 +308,12 @@ static const char *Cvar_Validate( cvar_t *var, const char *value, qboolean warn 
 		// check for directory traversal patterns
 		if ( FS_InvalidGameDir( value ) ) {
 			if ( warn ) {
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: cvar '%s' contains invalid patterns", var->name );
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "WARNING: cvar '%s' contains invalid patterns", var->name );
 			}
 			// try to use current value if it is valid
 			if ( !FS_InvalidGameDir( var->string ) ) {
 				if ( warn ) {
-					Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n" );
+					Com_Log( SEV_INFO, LOG_CH(ch_system), "\n" );
 				}
 				return var->string;
 			}
@@ -325,11 +325,10 @@ static const char *Cvar_Validate( cvar_t *var, const char *value, qboolean warn 
 		if ( !limit )
 			limit = value;
 		if ( warn )
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, ", setting to '%s'\n", limit );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), ", setting to '%s'\n", limit );
 		return limit;
-	} else {
-		return value;
 	}
+	return value;
 }
 
 
@@ -351,13 +350,13 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 	}
 
 	if ( !Cvar_ValidateName( var_name ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "invalid cvar name string: %s\n", var_name );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "invalid cvar name string: %s\n", var_name );
 		var_name = "BADNAME";
 	}
 
 #if 0 // FIXME: values with backslash happen
 	if ( !Cvar_ValidateString( var_value ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "invalid cvar value string: %s\n", var_value );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "invalid cvar value string: %s\n", var_value );
 		var_value = "BADVALUE";
 	}
 #endif
@@ -437,8 +436,8 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 				// we don't have a reset string yet
 				Z_Free( var->resetString );
 				var->resetString = CopyString( var_value );
-			} else if ( var_value[0] && strcmp( var->resetString, var_value ) ) {
-				Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Warning: cvar \"%s\" given initial values: \"%s\" and \"%s\"\n",
+			} else if ( var_value[0] && strcmp( var->resetString, var_value ) != 0 ) {
+				Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Warning: cvar \"%s\" given initial values: \"%s\" and \"%s\"\n",
 					var_name, var->resetString, var_value );
 			}
 
@@ -602,21 +601,21 @@ Prints the value, default, and latched string of the given variable
 */
 static void Cvar_Print( const cvar_t *v ) {
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\"%s\" is:\"%s" S_COLOR_WHITE "\"",
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\"%s\" is:\"%s" S_COLOR_WHITE "\"",
 		v->name, v->string );
 
 	if ( !( v->flags & CVAR_ROM ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " default:\"%s" S_COLOR_WHITE "\"",
+		Com_Log( SEV_INFO, LOG_CH(ch_system), " default:\"%s" S_COLOR_WHITE "\"",
 			v->resetString );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n");
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\n");
 
 	if ( v->latchedString ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "latched: \"%s\"\n", v->latchedString );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "latched: \"%s\"\n", v->latchedString );
 	}
 
 	if ( v->description ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\n", v->description );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s\n", v->description );
 	}
 }
 
@@ -705,7 +704,7 @@ static qboolean Cvar_ValidateTyped( cvar_t *var, const char *value,
 
     case CVT_BOOL: {
         if ( !Cvar_ParseBool( value, outInteger ) ) {
-            Com_Log( SEV_WARN, LOG_CAT_SYSTEM,
+            Com_Log( SEV_WARN, LOG_CH(ch_system),
                 "%s: invalid boolean '%s' (valid: 0, 1, true, false, yes, no, on, off)\n",
                 var->name, value );
             return qfalse;
@@ -717,13 +716,13 @@ static qboolean Cvar_ValidateTyped( cvar_t *var, const char *value,
 
     case CVT_INT: {
         if ( !Cvar_ParseInt( value, outInteger ) ) {
-            Com_Log( SEV_WARN, LOG_CAT_SYSTEM,
+            Com_Log( SEV_WARN, LOG_CH(ch_system),
                 "%s: '%s' is not a valid integer\n", var->name, value );
             return qfalse;
         }
         if ( var->typeMin != var->typeMax ) { // min==max==0 means no range check
             if ( *outInteger < (int)var->typeMin || *outInteger > (int)var->typeMax ) {
-                Com_Log( SEV_WARN, LOG_CAT_SYSTEM,
+                Com_Log( SEV_WARN, LOG_CH(ch_system),
                     "%s: value %d out of range [%d, %d]\n",
                     var->name, *outInteger, (int)var->typeMin, (int)var->typeMax );
                 return qfalse;
@@ -735,13 +734,13 @@ static qboolean Cvar_ValidateTyped( cvar_t *var, const char *value,
 
     case CVT_FLOAT: {
         if ( !Cvar_ParseFloat( value, outFloat ) ) {
-            Com_Log( SEV_WARN, LOG_CAT_SYSTEM,
+            Com_Log( SEV_WARN, LOG_CH(ch_system),
                 "%s: '%s' is not a valid number\n", var->name, value );
             return qfalse;
         }
         if ( var->typeMin != var->typeMax ) {
             if ( *outFloat < var->typeMin || *outFloat > var->typeMax ) {
-                Com_Log( SEV_WARN, LOG_CAT_SYSTEM,
+                Com_Log( SEV_WARN, LOG_CH(ch_system),
                     "%s: value %g out of range [%g, %g]\n",
                     var->name, *outFloat, var->typeMin, var->typeMax );
                 return qfalse;
@@ -761,7 +760,7 @@ static qboolean Cvar_ValidateTyped( cvar_t *var, const char *value,
                 return qtrue;
             }
         }
-        Com_Log( SEV_WARN, LOG_CAT_SYSTEM,
+        Com_Log( SEV_WARN, LOG_CH(ch_system),
             "%s: '%s' is not a valid option (valid: %s)\n",
             var->name, value, Cvar_EnumValuesString( var ) );
         return qfalse;
@@ -783,17 +782,17 @@ cvar_t *Cvar_Set2( const char *var_name, const char *value, qboolean force ) {
 	float       newFloat   = 0.0f;
 	const char *normalized = NULL;
 
-//	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Cvar_Set2: %s %s\n", var_name, value );
+//	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Cvar_Set2: %s %s\n", var_name, value );
 
 	if ( !Cvar_ValidateName( var_name ) )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "invalid cvar name string: %s\n", var_name );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "invalid cvar name string: %s\n", var_name );
 		var_name = "BADNAME";
 	}
 
 #if 0	// FIXME
 	if ( value && !Cvar_ValidateString( value ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "invalid cvar value string: %s\n", value );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "invalid cvar value string: %s\n", value );
 		var_value = "BADVALUE";
 	}
 #endif
@@ -806,27 +805,26 @@ cvar_t *Cvar_Set2( const char *var_name, const char *value, qboolean force ) {
 		// create it
 		if ( !force )
 			return Cvar_Get( var_name, value, CVAR_USER_CREATED );
-		else
-			return Cvar_Get( var_name, value, 0 );
+		return Cvar_Get( var_name, value, 0 );
 	}
 
 	if ( var->flags & (CVAR_ROM | CVAR_INIT | CVAR_CHEAT) && !force )
 	{
 		if ( var->flags & CVAR_ROM )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s is read only.\n", var_name );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "%s is read only.\n", var_name );
 			return var;
 		}
 
 		if ( var->flags & CVAR_INIT )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s is write protected.\n", var_name );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "%s is write protected.\n", var_name );
 			return var;
 		}
 
 		if ( (var->flags & CVAR_CHEAT) && cvar_cheats && !cvar_cheats->integer )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s is cheat protected.\n", var_name );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "%s is cheat protected.\n", var_name );
 			return var;
 		}
 
@@ -885,7 +883,7 @@ cvar_t *Cvar_Set2( const char *var_name, const char *value, qboolean force ) {
 					return var;
 			}
 
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s will be changed upon restarting.\n", var_name );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "%s will be changed upon restarting.\n", var_name );
 			var->latchedString = CopyString( value );
 			var->modificationCount++;
 			cvar_group[ var->group ] = 1;
@@ -927,7 +925,7 @@ cvar_t *Cvar_Set2( const char *var_name, const char *value, qboolean force ) {
 			var->onChange( var );
 			cvar_callbackDepth--;
 		} else {
-			Com_Log( SEV_WARN, LOG_CAT_SYSTEM, "Cvar callback depth %d exceeded for '%s'\n",
+			Com_Log( SEV_WARN, LOG_CH(ch_system), "Cvar callback depth %d exceeded for '%s'\n",
 				CVAR_MAX_CALLBACK_DEPTH, var->name );
 		}
 	}
@@ -951,7 +949,7 @@ void Cvar_CheatsWereDisabled(void) {
 		if (strcmp(var->string, var->resetString) == 0)
             continue;
 
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s reset to default.\n", var->name);
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s reset to default.\n", var->name);
         Cvar_Set2(var->name, var->resetString, qtrue); // force reset
     }
 }
@@ -982,10 +980,10 @@ void Cvar_SetSafe( const char *var_name, const char *value )
 		if ( flags & ( CVAR_PROTECTED | CVAR_PRIVATE ) )
 		{
 			if( value )
-				COM_WARN( LOG_CAT_SYSTEM, "Restricted source tried to set "
+				COM_WARN( LOG_CH(ch_system), "Restricted source tried to set "
 					"\"%s\" to \"%s\"\n", var_name, value );
 			else
-				COM_WARN( LOG_CAT_SYSTEM, "Restricted source tried to "
+				COM_WARN( LOG_CH(ch_system), "Restricted source tried to "
 					"modify \"%s\"\n", var_name );
 			return;
 		}
@@ -1165,7 +1163,7 @@ static void Cvar_Print_f( void )
 
 	if(Cmd_Argc() != 2)
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: print <variable>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "usage: print <variable>\n");
 		return;
 	}
 
@@ -1176,7 +1174,7 @@ static void Cvar_Print_f( void )
 	if(cv)
 		Cvar_Print(cv);
 	else
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cvar %s does not exist.\n", name);
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Cvar %s does not exist.\n", name);
 }
 
 
@@ -1194,7 +1192,7 @@ static void Cvar_Toggle_f( void ) {
 
 	c = Cmd_Argc();
 	if ( c < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: toggle <variable> [value1, value2, ...]\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "usage: toggle <variable> [value1, value2, ...]\n" );
 		return;
 	}
 
@@ -1205,7 +1203,7 @@ static void Cvar_Toggle_f( void ) {
 	}
 
 	if ( c == 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "toggle: nothing to toggle to\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "toggle: nothing to toggle to\n" );
 		return;
 	}
 
@@ -1242,7 +1240,7 @@ static void Cvar_Set_f( void ) {
 	cmd = Cmd_Argv(0);
 
 	if ( c < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: %s <variable> <value>\n", cmd);
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "usage: %s <variable> <value>\n", cmd);
 		return;
 	}
 	if ( c == 2 ) {
@@ -1284,7 +1282,7 @@ Cvar_Reset_f
 */
 static void Cvar_Reset_f( void ) {
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: reset <variable>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "usage: reset <variable>\n");
 		return;
 	}
 	Cvar_Reset( Cmd_Argv( 1 ) );
@@ -1315,13 +1313,11 @@ static const char *GetValue( int index, int *ival, float *fval )
 		Q_strncpyz( buf, cmd, sizeof( buf ) );
 		return buf;
 	}
-	else // found cvar, extract values
-	{
-		*ival = var->integer;
-		*fval = var->value;
-		Q_strncpyz( buf, var->string, sizeof( buf ) );
-		return buf;
-	}
+	// found cvar, extract values
+	*ival = var->integer;
+	*fval = var->value;
+	Q_strncpyz( buf, var->string, sizeof( buf ) );
+	return buf;
 }
 
 
@@ -1468,7 +1464,7 @@ static void Cvar_Rand( int *ival, float *fval )
 static void Cvar_Func_f( void ) {
 
 	if ( Cmd_Argc() < 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: \n" \
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "usage: \n" \
 			"  \\varfunc <add|sub|mul|div|mod|sin|cos> <cvar> <value> [lo.cap] [hi.cap]\n" \
 			"  \\varfunc rand <cvar> [base] [modulus]\n" );
 		return;
@@ -1481,7 +1477,7 @@ static void Cvar_Func_f( void ) {
 
 	funcType_t ftype = GetFuncType(); // index 1: function type
 	if ( ftype == FT_BAD ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s: unknown function %s\n", Cmd_Argv( 0 ), Cmd_Argv( 1 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s: unknown function %s\n", Cmd_Argv( 0 ), Cmd_Argv( 1 ) );
 		return;
 	}
 
@@ -1489,11 +1485,11 @@ static void Cvar_Func_f( void ) {
 	cvar_t *cvar = Cvar_FindVar( cvar_name );
 	if ( !cvar ) {
 		if ( !AllowEmptyCvar( ftype ) )	{
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cvar '%s' does not exist.\n", cvar_name );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Cvar '%s' does not exist.\n", cvar_name );
 			return; // FIXME: allow cvar creation for some functions?
 		}
 	} else if ( cvar->flags & ( CVAR_INIT | CVAR_ROM | CVAR_PROTECTED ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cvar '%s' is write-protected.\n", cvar_name );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Cvar '%s' is write-protected.\n", cvar_name );
 		return;
 	}
 
@@ -1560,7 +1556,7 @@ void Cvar_WriteVariables( fileHandle_t f, qboolean writeAll )
 			const char *value = var->latchedString ? var->latchedString : var->string;
 			char buffer[MAX_CMD_LINE];
 			if ( strlen( var->name ) + strlen( value ) + 10 > sizeof( buffer ) ) {
-				COM_WARN( LOG_CAT_SYSTEM, "WARNING: %svalue of variable \"%s\" too long to write to file\n",
+				COM_WARN( LOG_CH(ch_system), "WARNING: %svalue of variable \"%s\" too long to write to file\n",
 					value == var->latchedString ? "latched " : "", var->name );
 				continue;
 			}
@@ -1723,7 +1719,7 @@ static void Cvar_List_f( void ) {
 			Q_strncpyz( descBuf, desc, sizeof( descBuf ) );
 		}
 
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM,
+		Com_Log( SEV_INFO, LOG_CH(ch_system),
 			"%s  %-24s %-11s %-21s %s\n",
 			flags, var->name, valBuf, typeInfo, descBuf );
 
@@ -1732,11 +1728,11 @@ static void Cvar_List_f( void ) {
 		i++;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n  Total: %d cvars  (%d string, %d bool, %d int, %d float, %d enum)\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\n  Total: %d cvars  (%d string, %d bool, %d int, %d float, %d enum)\n",
 		i,
 		typeCounts[CVT_STRING], typeCounts[CVT_BOOL],
 		typeCounts[CVT_INT], typeCounts[CVT_FLOAT], typeCounts[CVT_ENUM] );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  %d cvar indexes\n", cvar_numIndexes );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "  %d cvar indexes\n", cvar_numIndexes );
 }
 
 
@@ -1773,55 +1769,55 @@ static void Cvar_ListModified_f( void ) {
 			continue;
 
 		if (var->flags & CVAR_SERVERINFO) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "S");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "S");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 		if (var->flags & CVAR_SYSTEMINFO) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "s");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "s");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 		if (var->flags & CVAR_USERINFO) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "U");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "U");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 		if (var->flags & CVAR_ROM) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "R");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "R");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 		if (var->flags & CVAR_INIT) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "I");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "I");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 		if (var->flags & CVAR_ARCHIVE) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "A");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "A");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 		if (var->flags & CVAR_LATCH) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "L");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "L");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 		if (var->flags & CVAR_CHEAT) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "C");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "C");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 		if (var->flags & CVAR_USER_CREATED) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "?");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "?");
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " ");
+			Com_Log( SEV_INFO, LOG_CH(ch_system), " ");
 		}
 
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " %s \"%s\", default \"%s\"\n", var->name, value, var->resetString);
+		Com_Log( SEV_INFO, LOG_CH(ch_system), " %s \"%s\", default \"%s\"\n", var->name, value, var->resetString);
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\n%i total modified cvars\n", totalModified);
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "\n%i total modified cvars\n", totalModified);
 }
 
 
@@ -1887,7 +1883,7 @@ static void Cvar_Unset_f( void )
 
 	if ( Cmd_Argc() != 2 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Usage: %s <varname>\n", Cmd_Argv( 0 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Usage: %s <varname>\n", Cmd_Argv( 0 ) );
 		return;
 	}
 
@@ -1899,7 +1895,7 @@ static void Cvar_Unset_f( void )
 	if ( cv->flags & CVAR_USER_CREATED )
 		Cvar_Unset( cv );
 	else
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Error: %s: Variable %s is not user created.\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Error: %s: Variable %s is not user created.\n",
 			Cmd_Argv( 0 ), cv->name );
 }
 
@@ -1947,7 +1943,7 @@ static void Cvar_Trim( qboolean verbose )
 		{
 			// throw out any variables the user created
 			if ( verbose )
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "unset cvar" S_COLOR_YELLOW " %s\n", curvar->name );
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "unset cvar" S_COLOR_YELLOW " %s\n", curvar->name );
 
 			curvar = Cvar_Unset( curvar );
 			continue;
@@ -2012,13 +2008,13 @@ static void Cvar_Trim_f( void )
 	}
 
 #ifdef DEDICATED
-	COM_WARN( LOG_CAT_SYSTEM, " You're not running a server, so not all subsystems/VMs are loaded.\n" );
+	COM_WARN( LOG_CH(ch_system), " You're not running a server, so not all subsystems/VMs are loaded.\n" );
 #else
-	COM_WARN( LOG_CAT_SYSTEM, " You're not running a listen server, so not all subsystems/VMs are loaded.\n" );
+	COM_WARN( LOG_CH(ch_system), " You're not running a listen server, so not all subsystems/VMs are loaded.\n" );
 #endif
-	COM_WARN( LOG_CAT_SYSTEM, " This means you'd remove cvars that are probably best kept around.\n" );
-	COM_WARN( LOG_CAT_SYSTEM, " If you don't care, you can force the call by running '\\%s -f'.\n", Cmd_Argv(0) );
-	COM_WARN( LOG_CAT_SYSTEM, " You've been warned.\n" );
+	COM_WARN( LOG_CH(ch_system), " This means you'd remove cvars that are probably best kept around.\n" );
+	COM_WARN( LOG_CH(ch_system), " If you don't care, you can force the call by running '\\%s -f'.\n", Cmd_Argv(0) );
+	COM_WARN( LOG_CH(ch_system), " You've been warned.\n" );
 }
 
 
@@ -2134,7 +2130,7 @@ Cvar_CheckRange
 void Cvar_CheckRange( cvar_t *var, const char *mins, const char *maxs, cvarValidator_t type )
 {
 	if ( type >= CV_MAX ) {
-		COM_WARN( LOG_CAT_SYSTEM, "Invalid validation type %i for %s\n", type, var->name );
+		COM_WARN( LOG_CH(ch_system), "Invalid validation type %i for %s\n", type, var->name );
 		return;
 	}
 
@@ -2230,9 +2226,8 @@ Cvar_CheckGroup
 int Cvar_CheckGroup( cvarGroup_t group ) {
 	if ( group < CVG_MAX ) {
 		return cvar_group[ group ];
-	} else {
-		return 0;
 	}
+	return 0;
 }
 
 
@@ -2266,14 +2261,14 @@ void Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName, const char *defaul
 	// flags. Unfortunately some historical game code (including single player
 	// baseq3) sets both flags. We unset CVAR_ROM for such cvars.
 	if ((flags & (CVAR_ARCHIVE | CVAR_ROM)) == (CVAR_ARCHIVE | CVAR_ROM)) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "WARNING: Unsetting CVAR_ROM from cvar '%s', "
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "WARNING: Unsetting CVAR_ROM from cvar '%s', "
 			"since it is also CVAR_ARCHIVE\n", varName );
 		flags &= ~CVAR_ROM;
 	}
 
 	// Don't allow VM to specify a different creator or other internal flags.
 	if ( flags & INVALID_FLAGS ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "WARNING: VM tried to set invalid flags 0x%02x on cvar '%s'\n", ( flags & INVALID_FLAGS ), varName );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "WARNING: VM tried to set invalid flags 0x%02x on cvar '%s'\n", ( flags & INVALID_FLAGS ), varName );
 		flags &= ~INVALID_FLAGS;
 	}
 
@@ -2281,7 +2276,7 @@ void Cvar_VM_Register( vmCvar_t *vmCvar, const char *varName, const char *defaul
 
 	// Don't modify cvar if it's protected.
 	if ( cv && ( cv->flags & ( CVAR_PROTECTED | CVAR_PRIVATE ) ) ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "WARNING: VM tried to register protected cvar '%s' with value '%s'%s\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "WARNING: VM tried to register protected cvar '%s' with value '%s'%s\n",
 			varName, defaultValue, ( flags & ~cv->flags ) != 0 ? " and new flags" : "" );
 		if ( cv->flags & CVAR_PRIVATE ) {
 			if ( privateFlag ) {
@@ -2321,7 +2316,7 @@ cvar_t *Cvar_Register( const cvarDesc_t *desc )
 	int     i;
 
 	if ( !desc || !desc->name || !desc->defaultValue ) {
-		Com_Log( SEV_ERROR, LOG_CAT_SYSTEM, "Cvar_Register: NULL descriptor or required field\n" );
+		Com_Log( SEV_ERROR, LOG_CH(ch_system), "Cvar_Register: NULL descriptor or required field\n" );
 		return NULL;
 	}
 
@@ -2432,7 +2427,7 @@ void Cvar_Update( vmCvar_t *vmCvar, int privateFlag ) {
 
 	len = strlen( cv->string );
 	if ( len + 1 > MAX_CVAR_VALUE_STRING ) {
-		COM_WARN( LOG_CAT_SYSTEM, "Cvar_Update: src %s length %d exceeds MAX_CVAR_VALUE_STRING - truncate\n",
+		COM_WARN( LOG_CH(ch_system), "Cvar_Update: src %s length %d exceeds MAX_CVAR_VALUE_STRING - truncate\n",
 			cv->string, (int)len );
 	}
 
@@ -2494,13 +2489,13 @@ void Cvar_CompleteCvarName( const char *args, int argNum )
 			break;
 		case CVT_INT:
 			if ( var->typeMin != var->typeMax ) {
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  %s  [range: %d - %d, current: %s]\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "  %s  [range: %d - %d, current: %s]\n",
 					var->name, (int)var->typeMin, (int)var->typeMax, var->string );
 			}
 			break;
 		case CVT_FLOAT:
 			if ( var->typeMin != var->typeMax ) {
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  %s  [range: %g - %g, current: %s]\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "  %s  [range: %g - %g, current: %s]\n",
 					var->name, var->typeMin, var->typeMax, var->string );
 			}
 			break;
@@ -2563,7 +2558,7 @@ static void Com_WriteConfigToFile( const char *filename ) {
 	f = FS_FOpenFileWrite( filename );
 	if ( f == FS_INVALID_HANDLE ) {
 		if ( !FS_ResetReadOnlyAttribute( filename ) || ( f = FS_FOpenFileWrite( filename ) ) == FS_INVALID_HANDLE ) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't write %s.\n", filename );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Couldn't write %s.\n", filename );
 			return;
 		}
 	}
@@ -2583,7 +2578,7 @@ static void Com_WriteConfigToFileForced( const char *filename ) {
 	f = FS_FOpenFileWrite( filename );
 	if ( f == FS_INVALID_HANDLE ) {
 		if ( !FS_ResetReadOnlyAttribute( filename ) || ( f = FS_FOpenFileWrite( filename ) ) == FS_INVALID_HANDLE ) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't write %s.\n", filename );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Couldn't write %s.\n", filename );
 			return;
 		}
 	}
@@ -2607,7 +2602,7 @@ void Com_WriteConfiguration( void ) {
 	}
 	cvar_modifiedFlags &= ~CVAR_ARCHIVE;
 
-	Com_WriteConfigToFile( Q3CONFIG_CFG );
+	Com_WriteConfigToFile( WIRED_CONFIG_CFG );
 }
 
 
@@ -2619,7 +2614,7 @@ static void Com_WriteConfig_f( void ) {
 	int argc = Cmd_Argc();
 
 	if ( argc != 2 && argc != 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Usage: writeconfig [-f] <filename>\n"
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Usage: writeconfig [-f] <filename>\n"
 		            "  -f   also write non-archived (non-default) cvars\n" );
 		return;
 	}
@@ -2629,7 +2624,7 @@ static void Com_WriteConfig_f( void ) {
 			writeAll = qtrue;
 			nameArg = Cmd_Argv( 2 );
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Usage: writeconfig [-f] <filename>\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Usage: writeconfig [-f] <filename>\n" );
 			return;
 		}
 	} else {
@@ -2640,11 +2635,11 @@ static void Com_WriteConfig_f( void ) {
 	COM_DefaultExtension( filename, sizeof( filename ), ".cfg" );
 
 	if ( !FS_AllowedExtension( filename, qfalse, &ext ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s: Invalid filename extension: '%s'.\n", __func__, ext );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s: Invalid filename extension: '%s'.\n", __func__, ext );
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Writing %s%s.\n", filename, writeAll ? " (full dump)" : "" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "Writing %s%s.\n", filename, writeAll ? " (full dump)" : "" );
 	if ( writeAll ) {
 		Com_WriteConfigToFileForced( filename );
 	} else {

@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/ui/cl_wired_fonts.h"
 #include "wired/ui/cl_wired_text.h"
 #include "../qcommon/wired/core/scripting/wired_scripting.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 /*
 
@@ -148,7 +150,7 @@ static void Field_VariableSizeDraw( field_t *edit, int x, int y, int width, int 
 		char *s = edit->buffer;
 		for ( int i = 0; i < prestep + 1; i++, s++ ) {
 			if ( Q_IsColorString( s ) ) {
-				curColor = *(s+1);
+				curColor = (byte)*(s+1);
 				s++;
 			}
 		}
@@ -478,6 +480,7 @@ static void Field_CharEvent( field_t *edit, int ch ) {
 		return;
 	}
 
+	// NOLINTNEXTLINE(misc-redundant-expression) — kept as `'a' - 'a' + 1` to match the ctrl-key formula style of nearby checks (ctrl-letter = letter - 'a' + 1)
 	if ( ch == 'a' - 'a' + 1 ) {	// ctrl-a is select all (non-macOS; macOS uses Cmd+A in Console_Key)
 		Field_SelectAll( edit );
 		return;
@@ -727,7 +730,7 @@ static void Console_Key( int key ) {
 			g_consoleField.cursor++;
 		}
 
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "]%s\n", g_consoleField.buffer );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "]%s\n", g_consoleField.buffer );
 
 		// leading slash is an explicit command
 		if ( g_consoleField.buffer[0] == '\\' || g_consoleField.buffer[0] == '/' ) {
@@ -738,10 +741,9 @@ static void Console_Key( int key ) {
 			if ( !g_consoleField.buffer[0] ) {
 				return;	// empty lines just scroll the console without adding to history
 			}
-			else if ( WiredScript_TryEval( g_consoleField.buffer ) ) {
+			if ( WiredScript_TryEval( g_consoleField.buffer ) ) {
 				/* Lua handled it -- skip chat dispatch */
-			}
-			else {
+			} else {
 				Cbuf_AddText( "cmd say " );
 				Cbuf_AddText( g_consoleField.buffer );
 				Cbuf_AddText( "\n" );

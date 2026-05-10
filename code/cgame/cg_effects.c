@@ -24,6 +24,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // of event processing
 
 #include "cg_local.h"
+#include "../qcommon/wired/render/primitives.h"
+#include "../qcommon/wired/render/traps.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
 /*
@@ -227,23 +231,23 @@ CG_LightningBoltBeam
 ===============
 */
 void CG_LightningBoltBeam( vec3_t start, vec3_t end ) {
-	localEntity_t	*le;
-	refEntity_t		*beam;
-
-	le = CG_AllocLocalEntity();
-	le->leFlags = 0;
-	le->leType = LE_SHOWREFENTITY;
-	le->startTime = cg.time;
-	le->endTime = cg.time + 50;
-
-	beam = &le->refEntity;
-
-	VectorCopy( start, beam->origin );
-	// this is the end point
-	VectorCopy( end, beam->oldorigin );
-
-	beam->reType = RT_LIGHTNING;
-	beam->customShader = cgs.media.lightningShader;
+	beamDesc_t bd;
+	memset( &bd, 0, sizeof( bd ) );
+	VectorCopy( start, bd.start );
+	VectorCopy( end, bd.end );
+	bd.startWidth     = 8.0f;
+	bd.endWidth       = 8.0f;
+	bd.startColor[0] = bd.startColor[1] = bd.startColor[2] = bd.startColor[3] = 1.0f;
+	bd.endColor[0]   = bd.endColor[1]   = bd.endColor[2]   = bd.endColor[3]   = 1.0f;
+	bd.shader         = cgs.media.lightningShaderPrim;
+	bd.duration       = 0.050f;        // 50 ms persistent
+	bd.fadeOut        = 0.020f;
+	bd.axialCopies    = 4;
+	bd.startEntityNum = -1;
+	bd.endEntityNum   = -1;
+	bd.uvScroll[0]    = 0.0f;          // shader handles scroll
+	bd.uvScroll[1]    = 0.0f;
+	trap_R_AddBeamToScene( &bd );
 }
 
 /*
@@ -254,23 +258,23 @@ Uses a dedicated shader for visual distinction from the primary beam.
 =================
 */
 void CG_LightningArcBeam( vec3_t start, vec3_t end ) {
-	localEntity_t	*le;
-	refEntity_t		*beam;
-
-	le = CG_AllocLocalEntity();
-	le->leType = LE_SHOWREFENTITY;
-	le->startTime = cg.time;
-	le->endTime = cg.time + 50;
-
-	beam = &le->refEntity;
-	VectorCopy( start, beam->origin );
-	VectorCopy( end, beam->oldorigin );
-
-	beam->reType = RT_LIGHTNING;
-	beam->customShader = cgs.media.lightningArcShader;
-
-	// Make arc beam thinner than primary by scaling down
-	beam->radius = 4;   // thinner than primary beam
+	beamDesc_t bd;
+	memset( &bd, 0, sizeof( bd ) );
+	VectorCopy( start, bd.start );
+	VectorCopy( end, bd.end );
+	bd.startWidth     = 4.0f;          // honors cgame intent (engine ignored beam->radius before)
+	bd.endWidth       = 4.0f;
+	bd.startColor[0] = bd.startColor[1] = bd.startColor[2] = bd.startColor[3] = 1.0f;
+	bd.endColor[0]   = bd.endColor[1]   = bd.endColor[2]   = bd.endColor[3]   = 1.0f;
+	bd.shader         = cgs.media.lightningArcShaderPrim;
+	bd.duration       = 0.050f;
+	bd.fadeOut        = 0.020f;
+	bd.axialCopies    = 2;             // thinner crackle (legacy was 4 forced by engine)
+	bd.startEntityNum = -1;
+	bd.endEntityNum   = -1;
+	bd.uvScroll[0]    = 0.0f;          // shader handles scroll
+	bd.uvScroll[1]    = 0.0f;
+	trap_R_AddBeamToScene( &bd );
 }
 
 /*
@@ -459,7 +463,7 @@ void CG_ScorePlum( int client, vec3_t org, int score ) {
 		le->pos.trBase[2] -= 20;
 	}
 
-	//Com_Log( SEV_INFO, LOG_CAT_CGAME, "Plum origin %i %i %i -- %i\n", (int)org[0], (int)org[1], (int)org[2], (int)Distance(org, lastPos));
+	//Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Plum origin %i %i %i -- %i\n", (int)org[0], (int)org[1], (int)org[2], (int)Distance(org, lastPos));
 	VectorCopy(org, lastPos);
 
 
@@ -882,6 +886,26 @@ void CG_LightningSparks( vec3_t origin, vec3_t dir ) {
 	refEntity_t		*re;
 
 	if ( trap_CM_PointContents( origin, 0 ) & CONTENTS_WATER ) {
+		return;
+	}
+
+	// GPU path. Default. Mirrors the CPU body via the lg_sparks
+	// particle class registered in CG_RegisterLightningParticleClasses.
+	// emitter.count = 3 matches the CPU loop count below; per-frame
+	// caller (CG_LightningBolt's impact branch) drives the steady-
+	// state shower by calling once per frame held against a wall.
+	if ( !cg_cpuEffects.integer ) {
+		emitterDesc_t emitter;
+		memset( &emitter, 0, sizeof( emitter ) );
+		emitter.cls   = cgs.media.lgSparksClass;
+		emitter.count = 3;
+		VectorCopy( origin, emitter.origin );
+		VectorCopy( dir,    emitter.axis );
+		emitter.colorTint[0] = 1.0f;
+		emitter.colorTint[1] = 1.0f;
+		emitter.colorTint[2] = 1.0f;
+		emitter.colorTint[3] = 1.0f;
+		trap_R_EmitParticles( &emitter );
 		return;
 	}
 

@@ -486,7 +486,7 @@ void CopyToBodyQue( gentity_t *ent ) {
 				continue;
 			if (e->activator != ent)
 				continue;
-			if (strcmp(e->classname, "kamikaze timer"))
+			if ( strcmp( e->classname, "kamikaze timer" ) != 0 )
 				continue;
 			e->activator = body;
 			break;
@@ -789,8 +789,8 @@ void ClientUserinfoChanged( int clientNum ) {
 	}
 
 	if ( client->pers.connected == CON_CONNECTED ) {
-		if ( strcmp( oldname, client->pers.netname ) ) {
-            trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " renamed to " S_COLOR_GREEN "%s" S_COLOR_WHITE "\n\"", oldname,
+		if ( strcmp( oldname, client->pers.netname ) != 0 ) {
+			trap_SendServerCommand(-1, va("print \"" S_COLOR_GREEN "%s" S_COLOR_WHITE " renamed to " S_COLOR_GREEN "%s" S_COLOR_WHITE "\n\"", oldname,
 				client->pers.netname) );
 		}
 	}
@@ -1409,12 +1409,12 @@ void ClientDisconnect( int clientNum ) {
 		&& !level.warmupTime && level.sortedClients[1] == clientNum ) {
 		level.clients[ level.sortedClients[0] ].sess.wins++;
 		ClientUserinfoChanged( level.sortedClients[0] );
-    }
-    else if (g_gametype.integer == GT_KINGOFTHEHILL && !level.intermissiontime) {
-        if (ent->client->ps.powerups[PW_KING]) {
-            AssignAKing(NULL);
-        }
-    }
+	}
+	else if (g_gametype.integer == GT_KINGOFTHEHILL && !level.intermissiontime) {
+		if (ent->client->ps.powerups[PW_KING]) {
+			AssignAKing(NULL);
+		}
+	}
 
 	if( g_gametype.integer == GT_DUEL &&
 		ent->client->sess.sessionTeam == TEAM_FREE &&

@@ -877,11 +877,24 @@ typedef struct {
 
 	qhandle_t	railRingsShader;
 	qhandle_t	railCoreShader;
-	qhandle_t	railHelixShader;
-	qhandle_t	railDebrisShader;
 
-	qhandle_t	lightningShader;
-	qhandle_t	lightningArcShader;
+	// Particle class handles for rail debris and impact sparks.
+	// Registered via CG_RegisterRailParticleClasses() once the rail
+	// shaders above are bound (handles cgs.media.railRingsShader and
+	// cgs.media.whiteShader feed into the class definitions). Stored
+	// as qhandle_t (= int) to match the surrounding rail-handle
+	// convention; particleClassHandle_t is the same underlying type.
+	qhandle_t	railDebrisClass;
+	qhandle_t	railSparksClass;
+
+	qhandle_t	lightningShaderPrim;
+	qhandle_t	lightningArcShaderPrim;
+
+	// Particle class handle for Lightning Gun primary impact sparks.
+	// Registered via CG_RegisterLightningParticleClasses() once
+	// cgs.media.lightningSparkShader is bound; consumed by
+	// CG_LightningSparks's GPU branch (cg_cpuEffects == 0).
+	qhandle_t	lgSparksClass;
 
 	qhandle_t	friendShader;
 	qhandle_t	friendFlagShaderNeutral;
@@ -1176,6 +1189,7 @@ typedef struct {
 
 	// parsed from serverinfo
 	gametype_t		gametype;
+	int             gameflags;
 	qboolean		gametypeIsTeamGame;
 	int				noFootsteps;
 	int             kothGhosts;
@@ -1264,6 +1278,7 @@ extern	botDirectiveDisplay_t	cg_botDirectives[MAX_CLIENTS];
 extern	markPoly_t		cg_markPolys[MAX_MARK_POLYS];
 
 extern	vmCvar_t		cg_centertime;
+extern	vmCvar_t		cg_cpuEffects;
 extern	vmCvar_t		cg_runpitch;
 extern	vmCvar_t		cg_runroll;
 extern	vmCvar_t		cg_bobup;
@@ -1338,7 +1353,6 @@ extern  vmCvar_t		cg_scorePlums;
 extern	vmCvar_t		cg_smoothClients;
 extern	vmCvar_t		pmove_fixed;
 extern	vmCvar_t		pmove_msec;
-extern	vmCvar_t		pmove_overbounce;
 #if FEAT_FAST_WEAPON_SWITCH
 extern	vmCvar_t		cg_fastWeaponSwitch;
 #endif
@@ -1425,7 +1439,6 @@ extern	vmCvar_t		cg_envTemperature;
 #if FEAT_OVERLOAD
 extern	vmCvar_t		cg_obeliskRespawnDelay;
 #endif
-extern	vmCvar_t		cg_singlePlayer;
 extern  vmCvar_t        cg_switchToEmpty;
 extern	vmCvar_t		cg_stretch;
 extern	vmCvar_t		cg_fovAspectAdjust;
@@ -1612,10 +1625,10 @@ void CG_ExplosionParticles(int pType, vec3_t origin);
 // eser - explosions
 
 void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end );
-#if FEAT_RAIL_TRAIL == 0
 void CG_AddRailTrails( void );
 void CG_ClearRailTrails( void );
-#endif
+void CG_RegisterRailParticleClasses( void );      // cg_wired_particles.c
+void CG_RegisterLightningParticleClasses( void ); // cg_wired_particles.c
 void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi );
 void CG_AddViewWeapon (playerState_t *ps);
 void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent, int team );
@@ -1844,6 +1857,7 @@ qhandle_t	trap_R_RegisterModel( const char *name );			// returns rgb axis if not
 qhandle_t	trap_R_RegisterSkin( const char *name );			// returns all white if not found
 qhandle_t	trap_R_RegisterShader( const char *name );			// returns all white if not found
 qhandle_t	trap_R_RegisterShaderNoMip( const char *name );			// returns all white if not found
+qhandle_t	trap_R_RegisterPrimitiveShader( const char *name );		// returns all white if not found; primitive consumers (ribbon/beam) sample the shader's image by handle
 
 // a scene is built up by calls to R_ClearScene and the various R_Add functions.
 // Nothing is drawn until R_RenderScene is called.
@@ -1856,7 +1870,6 @@ void		trap_R_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t 
 void		trap_R_AddPolysToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts, int numPolys );
 void		trap_R_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void		trap_R_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
-void		trap_R_AddRailTrailParams( const railTrailParams_t *params );
 int			trap_R_LightForPoint( vec3_t point, vec3_t ambientLight, vec3_t directedLight, vec3_t lightDir );
 void		trap_R_RenderScene( const refdef_t *fd );
 void		trap_R_SetColor( const float *rgba );	// NULL = 1,1,1,1

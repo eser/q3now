@@ -39,7 +39,7 @@ void CG_ModernHUDElementChatRoutine(void* context)
 		return;
 	}
 
-	// forceChat not supported in q3now
+	// forceChat not supported
 
 	if (entry->time == 0)
 	{

@@ -21,6 +21,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 //==========================================================
 
@@ -325,7 +327,7 @@ void Q3_target_laser_start (gentity_t *self)
 	if (self->target) {
 		ent = G_Find (NULL, FOFS(targetname), self->target);
 		if (!ent) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "%s at %s: %s is a bad target\n", self->classname, vtos(self->s.origin), self->target);
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "%s at %s: %s is a bad target\n", self->classname, vtos(self->s.origin), self->target);
 		}
 		self->enemy = ent;
 	} else {
@@ -362,7 +364,7 @@ void Q3_target_teleporter_use( gentity_t *self, gentity_t *other, gentity_t *act
 		return;
 	dest = 	G_PickTarget( self->target );
 	if (!dest) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Couldn't find teleporter destination\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Couldn't find teleporter destination\n");
 		return;
 	}
 
@@ -374,7 +376,7 @@ The activator will be teleported away.
 */
 void SP_q3_target_teleporter( gentity_t *self ) {
 	if (!self->targetname)
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "untargeted %s at %s\n", self->classname, vtos(self->s.origin));
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "untargeted %s at %s\n", self->classname, vtos(self->s.origin));
 
 	self->use = Q3_target_teleporter_use;
 }

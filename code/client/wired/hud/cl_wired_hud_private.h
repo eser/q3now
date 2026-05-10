@@ -2,9 +2,9 @@
 #define CL_WIRED_HUD_PRIVATE_H
 
 // Client-side version: no cg_local.h dependency
-// Types from q_shared.h and bg_public.h are sufficient
+// Types from q_shared.h and the wired protocol bridge are sufficient
 #include "../../../qcommon/q_shared.h"
-#include "../../../game/bg_public.h"
+#include "../../../qcommon/wired/protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +23,7 @@ extern "C" {
    Client does not know how many weapons exist; it uses this as a buffer. */
 #define WIRED_WEAPON_BUFFER_SIZE 32
 
-// q3now compatibility macros
+// legacy Q3 compatibility macros
 #ifndef Vector4Clear
 #define Vector4Clear(a)  ((a)[0]=(a)[1]=(a)[2]=(a)[3]=0)
 #endif

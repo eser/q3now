@@ -1,11 +1,11 @@
 /*
 ===========================================================================
 Copyright (C) 2017-2020 Gian 'myT' Schellenbaum (CNQ3 original)
-Copyright (C) 2026 q3now project (C port and adaptation)
+Copyright (C) 2026 Wired engine contributors (C port and adaptation)
 
-This file is part of q3now (derived from Quake III Arena source code and
-Challenge Quake 3). It is free software released under the terms of the
-GNU General Public License version 2 or (at your option) any later
+This file is part of the Wired engine (derived from Quake III Arena source
+code and Challenge Quake 3). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
 version. See the file COPYING.txt for details.
 ===========================================================================
 */

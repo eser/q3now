@@ -149,7 +149,7 @@ Q3NOW_SERVER_ARCHS=""
 
 BASEDIR="baseq3"
 
-DEDICATED_NAME="q3now.ded"
+DEDICATED_NAME="wired.ded"
 
 ICNSDIR="code/unix"
 ICNS="quake3_flat.icns"
@@ -251,7 +251,7 @@ PLIST="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
     <key>CFBundleIconFile</key>
     <string>quake3_flat</string>
     <key>CFBundleIdentifier</key>
-    <string>com.q3now.${PRODUCT_NAME}</string>
+    <string>com.wired.${PRODUCT_NAME}</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

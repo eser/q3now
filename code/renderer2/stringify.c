@@ -20,8 +20,10 @@ int main(int argc, char **argv)
         return 2;
 
     ofp = fopen(outFile, "w");
-    if(!ofp)
+    if(!ofp) {
+        fclose(ifp);
         return 3;
+    }
 
     // Strip extension
     char *base = basename(inFile);

@@ -84,6 +84,8 @@ static qboolean BotNavTouchingGoal( const vec3_t origin, const bot_goal_t *goal 
 
 // for the voice chats
 #include "../qcommon/menudef.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
 
 //goal flag, see ../botlib/be_ai_goal.h for the other GFL_*
 #define GFL_AIR			128
@@ -195,18 +197,16 @@ int BotGoForAir(bot_state_t *bs, int tfl, bot_goal_t *ltg, float range) {
 			trap_BotPushGoal(bs->gs, &goal);
 			return qtrue;
 		}
-		else {
-			//get a nearby goal outside the water
-			while(trap_BotChooseNBGItem(bs->gs, bs->origin, bs->inventory, tfl, ltg, range)) {
-				trap_BotGetTopGoal(bs->gs, &goal);
-				//if the goal is not in water
-				if (!(trap_AAS_PointContents(goal.origin) & (CONTENTS_WATER|CONTENTS_SLIME|CONTENTS_LAVA))) {
-					return qtrue;
-				}
-				trap_BotPopGoal(bs->gs);
+		//get a nearby goal outside the water
+		while ( trap_BotChooseNBGItem( bs->gs, bs->origin, bs->inventory, tfl, ltg, range ) ) {
+			trap_BotGetTopGoal( bs->gs, &goal );
+			//if the goal is not in water
+			if ( !( trap_AAS_PointContents( goal.origin ) & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) ) {
+				return qtrue;
 			}
-			trap_BotResetAvoidGoals(bs->gs);
+			trap_BotPopGoal( bs->gs );
 		}
+		trap_BotResetAvoidGoals( bs->gs );
 	}
 	return qfalse;
 }
@@ -1152,22 +1152,21 @@ int BotLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) {
 			memcpy(goal, &bs->lead_teamgoal, sizeof(bot_goal_t));
 			return qtrue;
 		}
-		else {
-			//if quite distant from the team mate
-			if (squaredist > Square(500)) {
-				if (bs->leadmessage_time < FloatTime() - 20) {
-					BotAI_BotInitialChat(bs, "followme", EasyClientName(bs->lead_teammate, teammate, sizeof(teammate)), NULL);
-					trap_BotEnterChat(bs->cs, bs->teammate, CHAT_TELL);
-					bs->leadmessage_time = FloatTime();
-				}
-				//look at the team mate
-				VectorSubtract(entinfo.origin, bs->origin, dir);
-				dir[2] = 0;
-				vectoangles(dir, bs->ideal_viewangles);
-				bs->ideal_viewangles[2] *= 0.5;
-				//just wait for the team mate
-				return qfalse;
+		//if quite distant from the team mate
+		if ( squaredist > Square( 500 ) ) {
+			if ( bs->leadmessage_time < FloatTime() - 20 ) {
+				BotAI_BotInitialChat( bs, "followme", EasyClientName( bs->lead_teammate, teammate, sizeof( teammate ) ),
+									  NULL );
+				trap_BotEnterChat( bs->cs, bs->teammate, CHAT_TELL );
+				bs->leadmessage_time = FloatTime();
 			}
+			//look at the team mate
+			VectorSubtract( entinfo.origin, bs->origin, dir );
+			dir[2] = 0;
+			vectoangles( dir, bs->ideal_viewangles );
+			bs->ideal_viewangles[2] *= 0.5;
+			//just wait for the team mate
+			return qfalse;
 		}
 	}
 	return BotGetLongTermGoal(bs, tfl, retreat, goal);
@@ -1292,7 +1291,7 @@ void AIEnter_Respawn(bot_state_t *bs, char *s) {
 	if ( bs->botdeathtype == MOD_FALLING || bs->botdeathtype == MOD_TRIGGER_HURT ) {
 		char diag_name[MAX_NETNAME];
 		ClientName( bs->client, diag_name, sizeof(diag_name) );
-		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "BOT VOID DEATH: %s was %s, groundEnt=%d, vel=[%.0f,%.0f,%.0f], lastNode=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_botlib), "BOT VOID DEATH: %s was %s, groundEnt=%d, vel=[%.0f,%.0f,%.0f], lastNode=%d\n",
 		            diag_name,
 		            bs->cur_ps.groundEntityNum == ENTITYNUM_NONE ? "AIRBORNE" : "GROUNDED",
 		            bs->cur_ps.groundEntityNum,
@@ -1379,21 +1378,19 @@ int BotSelectActivateWeapon(bot_state_t *bs) {
 	//
 	if (bs->inventory[INVENTORY_MACHINEGUN] > 0 && bs->inventory[INVENTORY_BULLETS] > 0)
 		return WEAPONINDEX_MACHINEGUN;
-	else if (bs->inventory[INVENTORY_SHOTGUN] > 0 && bs->inventory[INVENTORY_SHELLS] > 0)
+	if ( bs->inventory[INVENTORY_SHOTGUN] > 0 && bs->inventory[INVENTORY_SHELLS] > 0 )
 		return WEAPONINDEX_SHOTGUN;
-	else if (bs->inventory[INVENTORY_PLASMA_RIFLE] > 0 && bs->inventory[INVENTORY_CELLS] > 0)
+	if ( bs->inventory[INVENTORY_PLASMA_RIFLE] > 0 && bs->inventory[INVENTORY_CELLS] > 0 )
 		return WEAPONINDEX_PLASMAGUN;
-	else if (bs->inventory[INVENTORY_LIGHTNING_GUN] > 0 && bs->inventory[INVENTORY_LIGHTNING] > 0)
+	if ( bs->inventory[INVENTORY_LIGHTNING_GUN] > 0 && bs->inventory[INVENTORY_LIGHTNING] > 0 )
 		return WEAPONINDEX_LIGHTNING;
-	else if (bs->inventory[INVENTORY_GRENADE_LAUNCHER] > 0 && bs->inventory[INVENTORY_GRENADES] > 0)
+	if ( bs->inventory[INVENTORY_GRENADE_LAUNCHER] > 0 && bs->inventory[INVENTORY_GRENADES] > 0 )
 		return WEAPONINDEX_GRENADE_LAUNCHER;
-	else if (bs->inventory[INVENTORY_RAILGUN] > 0 && bs->inventory[INVENTORY_SLUGS] > 0)
+	if ( bs->inventory[INVENTORY_RAILGUN] > 0 && bs->inventory[INVENTORY_SLUGS] > 0 )
 		return WEAPONINDEX_RAILGUN;
-	else if (bs->inventory[INVENTORY_ROCKET_LAUNCHER] > 0 && bs->inventory[INVENTORY_ROCKETS] > 0)
+	if ( bs->inventory[INVENTORY_ROCKET_LAUNCHER] > 0 && bs->inventory[INVENTORY_ROCKETS] > 0 )
 		return WEAPONINDEX_ROCKET_LAUNCHER;
-	else {
-		return -1;
-	}
+	return -1;
 }
 
 /*
@@ -1497,7 +1494,7 @@ int AINode_Seek_ActivateEntity(bot_state_t *bs) {
 	BotMapScripts(bs);
 	// no enemy
 	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
-		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "[EnemyClear] cl=%d was=%d (activate-state reset)\n", bs->client, bs->enemy );
+		Com_Log( SEV_INFO, LOG_CH(ch_botlib), "[EnemyClear] cl=%d was=%d (activate-state reset)\n", bs->client, bs->enemy );
 	bs->enemy = -1;
 	bs->enemyvisible_time = 0;
 	// if the bot has no activate goal
@@ -1722,7 +1719,7 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	BotMapScripts(bs);
 	//no enemy
 	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
-		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "[EnemyClear] cl=%d was=%d (nbg-state reset)\n", bs->client, bs->enemy );
+		Com_Log( SEV_INFO, LOG_CH(ch_botlib), "[EnemyClear] cl=%d was=%d (nbg-state reset)\n", bs->client, bs->enemy );
 	bs->enemy = -1;
 	bs->enemyvisible_time = 0;
 	//if the bot has no goal
@@ -1797,22 +1794,22 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 		/* Directive locked: keep pursuing objective, fire defensively */
 		WiredBots_DefensiveCombat( bs );
 		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^5[SeekNBG] cl=%d directiveLocked — defensive combat only\n", bs->client );
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^5[SeekNBG] cl=%d directiveLocked — defensive combat only\n", bs->client );
 		}
 	} else if (BotFindEnemy(bs, -1)) {
 		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[SeekNBG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^2[SeekNBG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
 		}
 		if (BotWantsToRetreat(bs)) {
 			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-				Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^1[SeekNBG] cl=%d WantsToRetreat=TRUE -> Battle_NBG\n", bs->client );
+				Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^1[SeekNBG] cl=%d WantsToRetreat=TRUE -> Battle_NBG\n", bs->client );
 			}
 			//keep the current long term goal and retreat
 			AIEnter_Battle_NBG(bs, "seek nbg: found enemy");
 		}
 		else {
 			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-				Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[SeekNBG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
+				Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^2[SeekNBG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
 			}
 			trap_BotResetLastAvoidReach(bs->ms);
 			//empty the goal stack
@@ -1824,7 +1821,7 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 		static float s_noEnemyNBG[MAX_CLIENTS];
 		if ( FloatTime() - s_noEnemyNBG[bs->client] > 2.0f ) {
 			s_noEnemyNBG[bs->client] = FloatTime();
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^3[SeekNBG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^3[SeekNBG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
 				bs->client, bs->inventory[INVENTORY_HEALTH], bs->lasthealth );
 		}
 	}
@@ -1897,7 +1894,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	BotMapScripts(bs);
 	//no enemy
 	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
-		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "[EnemyClear] cl=%d was=%d (ltg-state reset)\n", bs->client, bs->enemy );
+		Com_Log( SEV_INFO, LOG_CH(ch_botlib), "[EnemyClear] cl=%d was=%d (ltg-state reset)\n", bs->client, bs->enemy );
 	bs->enemy = -1;
 	bs->enemyvisible_time = 0;
 	//
@@ -1911,36 +1908,36 @@ int AINode_Seek_LTG(bot_state_t *bs)
 		/* Directive locked: keep pursuing objective, fire defensively */
 		WiredBots_DefensiveCombat( bs );
 		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^5[SeekLTG] cl=%d directiveLocked — defensive combat only\n", bs->client );
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^5[SeekLTG] cl=%d directiveLocked — defensive combat only\n", bs->client );
 		}
 	} else if (BotFindEnemy(bs, -1)) {
 		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[SeekLTG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^2[SeekLTG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
 		}
 		if (BotWantsToRetreat(bs)) {
 			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-				Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^1[SeekLTG] cl=%d WantsToRetreat=TRUE -> Battle_Retreat\n", bs->client );
+				Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^1[SeekLTG] cl=%d WantsToRetreat=TRUE -> Battle_Retreat\n", bs->client );
 			}
 			//keep the current long term goal and retreat
 			AIEnter_Battle_Retreat(bs, "seek ltg: found enemy");
 			return qfalse;
 		}
-		else {
-			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-				Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^2[SeekLTG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
-			}
-			trap_BotResetLastAvoidReach(bs->ms);
-			//empty the goal stack
-			trap_BotEmptyGoalStack(bs->gs);
-			//go fight
-			AIEnter_Battle_Fight(bs, "seek ltg: found enemy");
-			return qfalse;
+		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CH( ch_botlib ), "^2[SeekLTG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n",
+					 bs->client );
 		}
+		trap_BotResetLastAvoidReach( bs->ms );
+		//empty the goal stack
+		trap_BotEmptyGoalStack( bs->gs );
+		//go fight
+		AIEnter_Battle_Fight( bs, "seek ltg: found enemy" );
+		return qfalse;
+
 	} else if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static float s_noEnemyLTG[MAX_CLIENTS];
 		if ( FloatTime() - s_noEnemyLTG[bs->client] > 2.0f ) {
 			s_noEnemyLTG[bs->client] = FloatTime();
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^3[SeekLTG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^3[SeekLTG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
 				bs->client, bs->inventory[INVENTORY_HEALTH], bs->lasthealth );
 		}
 	}
@@ -2223,7 +2220,7 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 			if (bs->enemyvisible_time < FloatTime() - BATTLE_FIGHT_VIS_GRACE_MS * 0.001f) {
 				int wantsChase = BotWantsToChase(bs);
 				if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
-					Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "[BattleExit] cl=%d enemy=%d unseen=%.2fs graceMs=%d -> chase=%d\n",
+					Com_Log( SEV_INFO, LOG_CH(ch_botlib), "[BattleExit] cl=%d enemy=%d unseen=%.2fs graceMs=%d -> chase=%d\n",
 						bs->client, bs->enemy,
 						FloatTime() - bs->enemyvisible_time,
 						BATTLE_FIGHT_VIS_GRACE_MS,
@@ -2232,10 +2229,8 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 					AIEnter_Battle_Chase(bs, "battle fight: enemy out of sight");
 					return qfalse;
 				}
-				else {
-					AIEnter_Seek_LTG(bs, "battle fight: enemy out of sight");
-					return qfalse;
-				}
+				AIEnter_Seek_LTG( bs, "battle fight: enemy out of sight" );
+				return qfalse;
 			}
 		}
 	}
@@ -2527,10 +2522,10 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 		return qfalse;
 	}
 	//else if the enemy is NOT visible
-	else if (bs->enemyvisible_time < FloatTime()) {
+	if ( bs->enemyvisible_time < FloatTime() ) {
 		//if there is another enemy
-		if (BotFindEnemy(bs, -1)) {
-			AIEnter_Battle_Fight(bs, "battle retreat: another enemy");
+		if ( BotFindEnemy( bs, -1 ) ) {
+			AIEnter_Battle_Fight( bs, "battle retreat: another enemy" );
 			return qfalse;
 		}
 	}

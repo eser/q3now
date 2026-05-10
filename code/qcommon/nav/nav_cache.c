@@ -23,6 +23,8 @@ Cache file format (matches nav_cache.cpp — binary-compatible):
 
 #include "../q_shared.h"
 #include "../q_feats.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_nav, "nav" );
 
 #if FEAT_RECAST_NAVMESH
 
@@ -83,6 +85,7 @@ unsigned int Nav_Cache_ParamHash( void )
     const unsigned char *p = (const unsigned char *)&cfg;
     int i;
     for ( i = 0; i < (int)sizeof(cfg); i++ ) {
+        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign) — cfg is fully populated by the caller before invoking this hash; analyzer's path through the cache loader doesn't see the upstream init
         h ^= p[i];
         h *= 16777619u;
     }
@@ -127,24 +130,24 @@ void *Nav_Cache_Load( const char *mapName, int bspChecksum )
         FS_FCloseFile( fh ); return NULL;
     }
     if ( hdr.magic != NAV_CACHE_MAGIC ) {
-        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: cache %s: bad magic\n", path );
+        Com_Log( SEV_DEBUG, LOG_CH(ch_nav), "NAV: cache %s: bad magic\n", path );
         FS_FCloseFile( fh ); return NULL;
     }
     if ( hdr.version != NAV_CACHE_VERSION ) {
-        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: cache %s: version mismatch (%u vs %u)\n",
+        Com_Log( SEV_DEBUG, LOG_CH(ch_nav), "NAV: cache %s: version mismatch (%u vs %u)\n",
                      path, hdr.version, (unsigned)NAV_CACHE_VERSION );
         FS_FCloseFile( fh ); return NULL;
     }
     if ( hdr.bspChecksum != bspChecksum ) {
-        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: cache %s: BSP checksum mismatch\n", path );
+        Com_Log( SEV_DEBUG, LOG_CH(ch_nav), "NAV: cache %s: BSP checksum mismatch\n", path );
         FS_FCloseFile( fh ); return NULL;
     }
     if ( hdr.paramHash != Nav_Cache_ParamHash() ) {
-        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: cache %s: param hash mismatch (rebuild)\n", path );
+        Com_Log( SEV_DEBUG, LOG_CH(ch_nav), "NAV: cache %s: param hash mismatch (rebuild)\n", path );
         FS_FCloseFile( fh ); return NULL;
     }
     if ( hdr.numTiles <= 0 ) {
-        Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: cache %s: numTiles=%d\n", path, hdr.numTiles );
+        Com_Log( SEV_DEBUG, LOG_CH(ch_nav), "NAV: cache %s: numTiles=%d\n", path, hdr.numTiles );
         FS_FCloseFile( fh ); return NULL;
     }
 
@@ -157,11 +160,11 @@ void *Nav_Cache_Load( const char *mapName, int bspChecksum )
     for ( tile = 0; tile < hdr.numTiles; tile++ ) {
         navTileRecord_t rec;
         if ( FS_Read( &rec, (int)sizeof(rec), fh ) != (int)sizeof(rec) ) {
-            Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: cache %s: truncated tile record\n", path );
+            Com_Log( SEV_INFO, LOG_CH(ch_nav), "NAV: cache %s: truncated tile record\n", path );
             Nav_Impl_FreeMesh( mesh ); FS_FCloseFile( fh ); return NULL;
         }
         if ( rec.dataSize <= 0 ) {
-            Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: cache %s: invalid dataSize %d\n", path, rec.dataSize );
+            Com_Log( SEV_INFO, LOG_CH(ch_nav), "NAV: cache %s: invalid dataSize %d\n", path, rec.dataSize );
             Nav_Impl_FreeMesh( mesh ); FS_FCloseFile( fh ); return NULL;
         }
 
@@ -172,14 +175,14 @@ void *Nav_Cache_Load( const char *mapName, int bspChecksum )
             Nav_Impl_FreeMesh( mesh ); FS_FCloseFile( fh ); return NULL;
         }
         if ( FS_Read( data, rec.dataSize, fh ) != rec.dataSize ) {
-            Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: cache %s: truncated tile data\n", path );
+            Com_Log( SEV_INFO, LOG_CH(ch_nav), "NAV: cache %s: truncated tile data\n", path );
             Nav_Impl_FreeMesh( mesh ); FS_FCloseFile( fh ); return NULL;
         }
 
         if ( tile == 0 ) {
             /* First tile: use single-tile mesh init path. */
             if ( !Nav_Impl_InitMeshFromData( mesh, data, rec.dataSize, 1 ) ) {
-                Com_Log( SEV_INFO, LOG_CAT_NAV, "NAV: cache %s: mesh init failed\n", path );
+                Com_Log( SEV_INFO, LOG_CH(ch_nav), "NAV: cache %s: mesh init failed\n", path );
                 Nav_Impl_FreeMesh( mesh ); FS_FCloseFile( fh ); return NULL;
             }
         }
@@ -188,7 +191,7 @@ void *Nav_Cache_Load( const char *mapName, int bspChecksum )
     }
 
     FS_FCloseFile( fh );
-    Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: loaded navmesh from cache %s (%d tile(s))\n", path, hdr.numTiles );
+    Com_Log( SEV_DEBUG, LOG_CH(ch_nav), "NAV: loaded navmesh from cache %s (%d tile(s))\n", path, hdr.numTiles );
     return mesh;
 }
 
@@ -220,7 +223,7 @@ void Nav_Cache_Save( const char *mapName, int bspChecksum, const void *mesh )
 
     fileHandle_t fh = 0;
     if ( FS_FOpenFileByMode( path, &fh, FS_WRITE ) < 0 || !fh ) {
-        COM_WARN( LOG_CAT_NAV, "[NAV] cache write failed for %s\n", mapName );
+        COM_WARN( LOG_CH(ch_nav), "[NAV] cache write failed for %s\n", mapName );
         return;
     }
 
@@ -248,7 +251,7 @@ void Nav_Cache_Save( const char *mapName, int bspChecksum, const void *mesh )
     }
 
     FS_FCloseFile( fh );
-    Com_Log( SEV_DEBUG, LOG_CAT_NAV, "NAV: saved navmesh to cache %s (%d tile(s))\n", path, numTiles );
+    Com_Log( SEV_DEBUG, LOG_CH(ch_nav), "NAV: saved navmesh to cache %s (%d tile(s))\n", path, numTiles );
 }
 
 /* -------------------------------------------------------------------------
@@ -290,13 +293,13 @@ void Nav_ClearCache( const char *mapFilter ) {
         int probeLen = FS_FOpenFileByMode( path, &fh, FS_READ );
         if ( probeLen <= 0 || !fh ) {
             if ( fh ) FS_FCloseFile( fh );
-            Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] no cache for map '%s'\n", filterName );
+            Com_Log( SEV_INFO, LOG_CH(ch_nav), "[NAV] no cache for map '%s'\n", filterName );
             return;
         }
         FS_FCloseFile( fh );
 
         FS_HomeRemove( path );
-        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] deleted %s\n", path );
+        Com_Log( SEV_INFO, LOG_CH(ch_nav), "[NAV] deleted %s\n", path );
         return;
     }
 
@@ -305,7 +308,7 @@ void Nav_ClearCache( const char *mapFilter ) {
     char **files = FS_ListFiles( "navmesh", ".nav", &numFiles );
     if ( !files || numFiles == 0 ) {
         if ( files ) FS_FreeFileList( files );
-        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] no cache files found\n" );
+        Com_Log( SEV_INFO, LOG_CH(ch_nav), "[NAV] no cache files found\n" );
         return;
     }
 
@@ -314,11 +317,11 @@ void Nav_ClearCache( const char *mapFilter ) {
         char path[256];
         Com_sprintf( path, sizeof(path), "navmesh/%s", files[i] );
         FS_HomeRemove( path );
-        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] deleted %s\n", path );
+        Com_Log( SEV_INFO, LOG_CH(ch_nav), "[NAV] deleted %s\n", path );
         deleted++;
     }
     FS_FreeFileList( files );
-    Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] cleared %d nav cache file(s)\n", deleted );
+    Com_Log( SEV_INFO, LOG_CH(ch_nav), "[NAV] cleared %d nav cache file(s)\n", deleted );
 }
 
 #endif /* FEAT_RECAST_NAVMESH */

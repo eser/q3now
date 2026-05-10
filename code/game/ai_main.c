@@ -60,6 +60,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "chars.h"
 #include "inv.h"
 #include "syn.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
 
 
 //bot states
@@ -111,19 +113,19 @@ void QDECL BotAI_Print(int type, char *fmt, ...) {
 
 	switch(type) {
 		case PRT_MESSAGE: {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "%s", str);
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "%s", str);
 			break;
 		}
 		case PRT_WARNING: {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, S_COLOR_YELLOW "Warning: %s", str );
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), S_COLOR_YELLOW "Warning: %s", str );
 			break;
 		}
 		case PRT_ERROR: {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, S_COLOR_RED "Error: %s", str );
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), S_COLOR_RED "Error: %s", str );
 			break;
 		}
 		case PRT_FATAL: {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, S_COLOR_RED "Fatal: %s", str );
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), S_COLOR_RED "Fatal: %s", str );
 			break;
 		}
 		case PRT_EXIT: {
@@ -131,7 +133,7 @@ void QDECL BotAI_Print(int type, char *fmt, ...) {
 			break;
 		}
 		default: {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "unknown print type\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "unknown print type\n" );
 			break;
 		}
 	}
@@ -840,7 +842,7 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 	if ( bs->wiredBotsActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
 		static int s_viewLogTick[MAX_CLIENTS];
 		if ( ++s_viewLogTick[bs->client] % 6 == 0 ) {
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^3[ViewAngle] c=%d view=(%.1f %.1f) ideal=(%.1f %.1f) spd=(%.1f %.1f)\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^3[ViewAngle] c=%d view=(%.1f %.1f) ideal=(%.1f %.1f) spd=(%.1f %.1f)\n",
 				bs->client,
 				bs->viewangles[PITCH], bs->viewangles[YAW],
 				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW],
@@ -852,7 +854,7 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 		static int s_viewChangeTick[MAX_CLIENTS];
 		if ( ++s_viewChangeTick[bs->client] % 6 == 0 ) {
 			float dbg_skill = Com_Clamp( 0.0f, 1.0f, WiredBots_ProfileFieldOr( bs, WB_PROFILE_TRACKING, 0.5f ) );
-			Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "^3[ViewChange] cl=%d actual=(%.1f %.1f) ideal=(%.1f %.1f) skill=%.3f\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^3[ViewChange] cl=%d actual=(%.1f %.1f) ideal=(%.1f %.1f) skill=%.3f\n",
 				bs->client,
 				bs->viewangles[PITCH], bs->viewangles[YAW],
 				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW],
@@ -1011,7 +1013,10 @@ void BotUpdateInput(bot_state_t *bs, int time, int elapsed_time) {
 	trap_EA_GetInput(bs->client, (float) time / 1000, &bi);
 	//respawn hack
 	if (bi.actionflags & ACTION_RESPAWN) {
-		if (bs->lastucmd.buttons & (BUTTON_ATTACK_PRI | BUTTON_ATTACK_SEC | ACTION_USE))
+		// `lastucmd.buttons` holds BUTTON_* flags; ACTION_USE (0x2) was a typo here for
+		// BUTTON_USE_HOLDABLE (0x4) — it aliased BUTTON_ATTACK_SEC (also 0x2) and silently
+		// swallowed the use button as an attack press.
+		if (bs->lastucmd.buttons & (BUTTON_ATTACK_PRI | BUTTON_ATTACK_SEC | BUTTON_USE_HOLDABLE))
 			bi.actionflags &= ~(ACTION_RESPAWN|ACTION_ATTACK_PRI|ACTION_ATTACK_SEC|ACTION_USE);
 	}
 	//convert the bot input to a usercmd
@@ -1153,7 +1158,7 @@ int BotAI(int client, float thinktime) {
 	bs->heardSoundCount = trap_WCE_GetSoundEvents(
 	    bs->client, bs->heardSounds, MAX_BOT_SOUND_EVENTS );
 	if ( bs->heardSoundCount > 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, "BotAwareness: cl=%d fetched %d sound events\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_botlib), "BotAwareness: cl=%d fetched %d sound events\n",
 		    bs->client, bs->heardSoundCount );
 	}
 
@@ -1339,7 +1344,8 @@ static int BotDetermineGender( int client ) {
 
 	if ( *p == 'f' || *p == 'F' ) {
 		return CHAT_GENDERFEMALE;
-	} else if ( *p == 'm' || *p == 'M' ) {
+	}
+	if ( *p == 'm' || *p == 'M' ) {
 		return CHAT_GENDERMALE;
 	}
 

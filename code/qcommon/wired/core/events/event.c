@@ -10,12 +10,14 @@ once-only debug log entry and returns a no-op value.
 #include "q_shared.h"
 #include "qcommon.h"
 #include "event.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 void Event_RegisterType( event_type_t type )
 {
     static qboolean warned = qfalse;
     if ( !warned ) {
-        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Event_RegisterType: TODO V2\n" );
+        Com_Log( SEV_INFO, LOG_CH(ch_system), "Event_RegisterType: TODO V2\n" );
         warned = qtrue;
     }
     (void)type;
@@ -27,7 +29,7 @@ event_subscription_t *Event_Subscribe( event_type_t type,
 {
     static qboolean warned = qfalse;
     if ( !warned ) {
-        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Event_Subscribe: TODO V2\n" );
+        Com_Log( SEV_INFO, LOG_CH(ch_system), "Event_Subscribe: TODO V2\n" );
         warned = qtrue;
     }
     (void)type; (void)handler; (void)ctx;
@@ -38,7 +40,7 @@ void Event_Unsubscribe( event_subscription_t *sub )
 {
     static qboolean warned = qfalse;
     if ( !warned ) {
-        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Event_Unsubscribe: TODO V2\n" );
+        Com_Log( SEV_INFO, LOG_CH(ch_system), "Event_Unsubscribe: TODO V2\n" );
         warned = qtrue;
     }
     (void)sub;
@@ -48,7 +50,7 @@ void Event_Emit( event_type_t type, const void *data, int data_size )
 {
     static qboolean warned = qfalse;
     if ( !warned ) {
-        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Event_Emit: TODO V2\n" );
+        Com_Log( SEV_INFO, LOG_CH(ch_system), "Event_Emit: TODO V2\n" );
         warned = qtrue;
     }
     (void)type; (void)data; (void)data_size;
@@ -74,7 +76,7 @@ void WiredCoreEvents_Init( void ) {
     memset( handlers, 0, sizeof(handlers) );
     memset( handlerCount, 0, sizeof(handlerCount) );
     wce_initialized = qtrue;
-    Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WiredCoreEvents: initialized\n" );
+    Com_Log( SEV_INFO, LOG_CH(ch_system), "WiredCoreEvents: initialized\n" );
 }
 
 void WiredCoreEvents_Shutdown( void ) {
@@ -101,7 +103,7 @@ void WiredCoreEvents_Register( wce_event_type_t type, wce_event_priority_t prior
     }
 
     if ( count >= WCE_MAX_HANDLERS ) {
-        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WiredCoreEvents_Register: table full (type=%d pri=%d)\n", type, priority );
+        Com_Log( SEV_INFO, LOG_CH(ch_system), "WiredCoreEvents_Register: table full (type=%d pri=%d)\n", type, priority );
         return;
     }
 
@@ -147,7 +149,7 @@ void WiredCoreEvents_Dispatch( const wce_event_data_t *data ) {
     if ( data->type <= WCE_NONE || data->type >= WCE_COUNT ) return;
 
     if ( dispatchDepth >= WCE_MAX_DISPATCH_DEPTH ) {
-        Com_Log( SEV_WARN, LOG_CAT_SYSTEM, "WiredCoreEvents_Dispatch: max depth %d exceeded for event %d, dropping\n",
+        Com_Log( SEV_WARN, LOG_CH(ch_system), "WiredCoreEvents_Dispatch: max depth %d exceeded for event %d, dropping\n",
             WCE_MAX_DISPATCH_DEPTH, (int)data->type );
         return;
     }
@@ -222,9 +224,8 @@ static const char *Sys_EventName( sysEventType_t evType ) {
 
 	if ( (unsigned)evType >= ARRAY_LEN( evNames ) ) {
 		return "SE_UNKNOWN";
-	} else {
-		return evNames[ evType ];
 	}
+	return evNames[evType];
 }
 
 void Sys_QueEvent( int evTime, sysEventType_t evType, int value, int value2, int ptrLength, void *ptr ) {
@@ -245,7 +246,7 @@ void Sys_QueEvent( int evTime, sysEventType_t evType, int value, int value2, int
 	ev = &eventQue[ eventHead & MASK_QUED_EVENTS ];
 
 	if ( eventHead - eventTail >= MAX_QUED_EVENTS ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s(type=%s,keys=(%i,%i),time=%i): overflow\n", __func__, Sys_EventName( evType ), value, value2, evTime );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s(type=%s,keys=(%i,%i),time=%i): overflow\n", __func__, Sys_EventName( evType ), value, value2, evTime );
 		// we are discarding an event, but don't leak memory
 		if ( ev->evPtr ) {
 			Z_Free( ev->evPtr );
@@ -363,7 +364,7 @@ static void Com_PushEvent( const sysEvent_t *event ) {
 		// don't print the warning constantly, or it can give time for more...
 		if ( !printedWarning ) {
 			printedWarning = qtrue;
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: Com_PushEvent overflow\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "WARNING: Com_PushEvent overflow\n" );
 		}
 
 		if ( ev->evPtr ) {

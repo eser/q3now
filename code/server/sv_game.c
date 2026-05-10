@@ -27,6 +27,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/wired/net/wn_public.h"
 
 #include "../botlib/botlib.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #if FEAT_RECAST_NAVMESH
 #include "../qcommon/nav/nav_public.h"
@@ -312,8 +314,7 @@ static void *VM_ArgPtr( intptr_t intValue ) {
 
 	if ( gvm->entryPoint )
 		return (void *)(intValue);
-	else
-		return (void *)(gvm->dataBase + (intValue & gvm->dataMask));
+	return (void *)( gvm->dataBase + ( intValue & gvm->dataMask ) );
 }
 
 
@@ -394,13 +395,13 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 
 	switch( args[0] ) {
 	case G_PRINT:
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "%s", (const char*)VMA(1) );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "%s", (const char*)VMA(1) );
 		return 0;
 	case G_ERROR:
 		Com_Terminate( TERM_CLIENT_DROP, "%s", (const char*)VMA(1) );
 		return 0;
 	case G_LOG:
-		Com_Log( (log_severity_t)args[1], LOG_CAT_GAME, "%s", (const char*)VMA(2) );
+		Com_Log( (log_severity_t)args[1], LOG_CH(ch_game), "%s", (const char*)VMA(2) );
 		return 0;
 	case G_TERMINATE:
 		Com_Terminate( (terminationReason_t)args[1], "%s", (const char*)VMA(2) );
@@ -542,9 +543,8 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 			}
 			if ( !sv.entityParsePoint && s[0] == '\0' ) {
 				return qfalse;
-			} else {
-				return qtrue;
 			}
+			return qtrue;
 		}
 
 	case G_DEBUG_POLYGON_CREATE:

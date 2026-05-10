@@ -23,6 +23,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "server.h"
 #include "../botlib/botlib.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 typedef struct bot_debugpoly_s
 {
@@ -129,7 +132,7 @@ void BotDrawDebugPolygons(void (*drawPoly)(int color, int numPoints, float *poin
 		bot_debugpoly_t *poly = &debugpolygons[i];
 		if (!poly->inuse) continue;
 		drawPoly(poly->color, poly->numPoints, (float *) poly->points);
-		//Com_Log( SEV_INFO, LOG_CAT_SERVER, "poly %i, numpoints = %d\n", i, poly->numPoints);
+		//Com_Log( SEV_INFO, LOG_CH(ch_server), "poly %i, numpoints = %d\n", i, poly->numPoints);
 	}
 }
 
@@ -149,19 +152,19 @@ static __attribute__ ((format (printf, 2, 3))) void QDECL BotImport_Print(int ty
 
 	switch(type) {
 		case PRT_MESSAGE: {
-			Com_Log( SEV_DEBUG, LOG_CAT_BOTLIB, "%s", str);
+			Com_Log( SEV_DEBUG, LOG_CH(ch_botlib), "%s", str);
 			break;
 		}
 		case PRT_WARNING: {
-			Com_Log( SEV_WARN, LOG_CAT_BOTLIB, S_COLOR_WARNING "Warning: %s", str);
+			Com_Log( SEV_WARN, LOG_CH(ch_botlib), S_COLOR_WARNING "Warning: %s", str);
 			break;
 		}
 		case PRT_ERROR: {
-			Com_Log( SEV_ERROR, LOG_CAT_BOTLIB, S_COLOR_ERROR "Error: %s", str);
+			Com_Log( SEV_ERROR, LOG_CH(ch_botlib), S_COLOR_ERROR "Error: %s", str);
 			break;
 		}
 		case PRT_FATAL: {
-			Com_Log( SEV_FATAL, LOG_CAT_BOTLIB, S_COLOR_ERROR "Fatal: %s", str);
+			Com_Log( SEV_FATAL, LOG_CH(ch_botlib), S_COLOR_ERROR "Fatal: %s", str);
 			break;
 		}
 		case PRT_EXIT: {
@@ -169,7 +172,7 @@ static __attribute__ ((format (printf, 2, 3))) void QDECL BotImport_Print(int ty
 			break;
 		}
 		default: {
-			Com_Log( SEV_DEBUG, LOG_CAT_BOTLIB, "unknown print type\n");
+			Com_Log( SEV_DEBUG, LOG_CH(ch_botlib), "unknown print type\n");
 			break;
 		}
 	}
@@ -461,7 +464,7 @@ int SV_BotLibSetup( void ) {
 	}
 
 	if ( !botlib_export ) {
-		Com_Log( SEV_INFO, LOG_CAT_BOTLIB, S_COLOR_ERROR "Error: SV_BotLibSetup without SV_BotInitBotLib\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_botlib), S_COLOR_ERROR "Error: SV_BotLibSetup without SV_BotInitBotLib\n" );
 		return -1;
 	}
 
@@ -606,9 +609,8 @@ int SV_BotGetConsoleMessage( int client, char *buf, int size )
 
 		Q_strncpyz( buf, cl->reliableCommands[index], size );
 		return qtrue;
-	} else {
-		return qfalse;
 	}
+	return qfalse;
 }
 
 
@@ -647,7 +649,6 @@ int SV_BotGetSnapshotEntity( int client, int sequence ) {
 			return -1;
 		}
 		return frame->ents[sequence]->number;
-	} else {
-		return -1;
 	}
+	return -1;
 }

@@ -25,6 +25,8 @@ legacy AINode_Seek_LTG navigation code keeps driving movement unchanged.
 #include "ai_dmnet.h"
 #include "ai_dmq3.h"
 #include "g_wiredbots.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 /* ── botstates array (defined in ai_main.c) ─────────────────────────── */
 extern bot_state_t *botstates[MAX_CLIENTS];
@@ -264,7 +266,7 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
         static float s_dirLogTime[MAX_CLIENTS];
         if ( FloatTime() - s_dirLogTime[bs->client] > 2.0f ) {
             s_dirLogTime[bs->client] = FloatTime();
-            Com_Log( SEV_INFO, LOG_CAT_GAME, "^3[DirFrame] cl=%d type=%d target_cl=%d expire=%.1f\n",
+            Com_Log( SEV_INFO, LOG_CH(ch_game), "^3[DirFrame] cl=%d type=%d target_cl=%d expire=%.1f\n",
                 bs->client, d->type, d->target_client,
                 d->expire_time > 0.0f ? d->expire_time - now : -1.0f );
         }
@@ -531,7 +533,7 @@ void BotDirective_FrameUpdate( bot_state_t *bs ) {
                     vec3_t diff;
                     s_dirMoveLog[bs->client] = FloatTime();
                     VectorSubtract( bs->origin, bs->teamgoal.origin, diff );
-                    Com_Log( SEV_INFO, LOG_CAT_GAME, "DIRECTIVE MOVE: cl=%d item=%s dist=%.0f goal=[%.0f,%.0f,%.0f] area=%d ltg=%d\n",
+                    Com_Log( SEV_INFO, LOG_CH(ch_game), "DIRECTIVE MOVE: cl=%d item=%s dist=%.0f goal=[%.0f,%.0f,%.0f] area=%d ltg=%d\n",
                         bs->client, d->item_classname, VectorLength( diff ),
                         bs->teamgoal.origin[0], bs->teamgoal.origin[1], bs->teamgoal.origin[2],
                         bs->teamgoal.areanum, bs->ltgtype );
@@ -1196,7 +1198,7 @@ void BotDirective_ConsoleOrder( const char *bot_name, const char *order ) {
     char  clean[MAX_NETNAME];
 
     if ( !bot_name || !bot_name[0] || !order || !order[0] ) {
-        Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: bot_order <botname> <order>\n" );
+        Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: bot_order <botname> <order>\n" );
         return;
     }
 
@@ -1208,12 +1210,12 @@ void BotDirective_ConsoleOrder( const char *bot_name, const char *order ) {
         Q_CleanStr( clean );
         if ( Q_stricmpn( clean, bot_name, strlen( bot_name ) ) == 0 ) {
             BotReceiveDirective( botstates[i], -1 /* console */, order );
-            Com_Log( SEV_INFO, LOG_CAT_GAME, "Directive sent to %s: %s\n",
+            Com_Log( SEV_INFO, LOG_CH(ch_game), "Directive sent to %s: %s\n",
                         level.clients[i].pers.netname, order );
             return;
         }
     }
-    Com_Log( SEV_INFO, LOG_CAT_GAME, "bot_order: no active bot named '%s'\n", bot_name );
+    Com_Log( SEV_INFO, LOG_CH(ch_game), "bot_order: no active bot named '%s'\n", bot_name );
 }
 
 /* =========================================================================

@@ -137,6 +137,7 @@ static void DrawTris( const shaderCommands_t *input ) {
 #endif
 	qglColor4f( 1, 1, 1, 1 );
 
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE );
 	qglDepthRange( 0, 0 );
 
@@ -1042,7 +1043,9 @@ void RB_StageIteratorGeneric( void )
 
 	//
 	// now do fog
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 	//
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if pattern; statement at function scope
 	if ( tess.fogNum && tess.shader->fogPass )
 	{
 		RB_FogPass();

@@ -165,7 +165,7 @@ void S_AdpcmEncode( short indata[], char outdata[], int len, struct adpcm_state 
 		if ( bufferstep ) {
 			delta = inputbuffer & 0xf;
 		} else {
-			inputbuffer = *inp++;
+			inputbuffer = (byte)*inp++;
 			delta = (inputbuffer >> 4) & 0xf;
 		}
 		bufferstep = !bufferstep;

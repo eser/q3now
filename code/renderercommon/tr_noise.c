@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define NOISE_MASK ( NOISE_SIZE - 1 )
 
 #define VAL( a ) s_noise_perm[ ( a ) & ( NOISE_MASK )]
+// NOLINTNEXTLINE(bugprone-macro-parentheses) — recursive VAL nesting; macro args are always int locals (x, y, z, t)
 #define INDEX( x, y, z, t ) VAL( x + VAL( y + VAL( z + VAL( t ) ) ) )
 
 static float s_noise_table[NOISE_SIZE];

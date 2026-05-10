@@ -43,6 +43,7 @@ typedef struct {
 
 static const archetypePalette_t palettes[4] = {
 	// ARCHETYPE_TECH  -- bg 080c10, primary 0a1a2e, secondary 6e1a1a, accent cyan #00e5ff
+	// NOLINTBEGIN(misc-redundant-expression) — `0.0f/255.0f` and `255.0f/255.0f` are kept for column alignment with adjacent components in each row
 	{
 		{ 8.0f/255.0f, 12.0f/255.0f, 16.0f/255.0f, 1.0f },
 		{ 10.0f/255.0f, 26.0f/255.0f, 46.0f/255.0f, 1.0f },
@@ -70,6 +71,7 @@ static const archetypePalette_t palettes[4] = {
 		{ 10.0f/255.0f, 26.0f/255.0f, 26.0f/255.0f, 1.0f },
 		{ 96.0f/255.0f, 125.0f/255.0f, 139.0f/255.0f, 1.0f }
 	}
+	// NOLINTEND(misc-redundant-expression)
 };
 
 /*

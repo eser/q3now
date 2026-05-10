@@ -350,44 +350,597 @@ void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float inten
 
 /*
 =====================
-RE_AddRailTrailParams — receive rail trail params from cgame for GPU compute
+Primitive submission (wired/render).
 
-Copies the params struct to the mapped input SSBO and queues a compute dispatch.
+Renderer-side handlers for trap_R_Add*ToScene / trap_R_EmitParticles.
+The ribbon path is wired to the renderervk ribbon pipeline; the
+others remain stubs until their respective pipelines land.
 =====================
 */
-void RE_AddRailTrailParams( const railTrailParams_t *params ) {
-	int frame, slot;
-	byte *dst;
+void RE_AddRibbonToScene( const ribbonDesc_t *desc ) {
+	uint32_t frame, dstPointBase, dstHeaderIdx;
+	byte *dstPoints, *dstHeader;
+	uint32_t *udst;
+	float    *fdst;
 
-	if ( !vk.computeAvailable || !r_railGPU->integer )
+	// Validation. Drop silently on any failure — the renderer never
+	// owns the right to log per-frame from this path. Cgame guarantees
+	// the descriptor is valid by the time it reaches this trap; the
+	// guards here are belt-and-braces against engine-side bugs.
+	if ( !vk.ribbon.available )
+		return;
+	if ( desc == NULL || desc->points == NULL )
+		return;
+	if ( desc->numPoints < 2 || desc->numPoints > RIBBON_MAX_POINTS )
 		return;
 
-	if ( vk.numRailDispatches >= MAX_GPU_RAIL_TRAILS )
+	// Bounds-check the per-frame ring buffers.
+	if ( vk.ribbon.numHeadersThisFrame >= RIBBON_HEADERS_PER_FRAME )
+		return;
+	if ( vk.ribbon.numPointsThisFrame + (uint32_t)desc->numPoints
+	     > RIBBON_POINTS_PER_FRAME )
+		return;
+
+	frame        = vk.cmd_index;
+	dstPointBase = vk.ribbon.numPointsThisFrame;
+	dstHeaderIdx = vk.ribbon.numHeadersThisFrame;
+
+	// Append points. The host ribbonPoint_t struct (vec3 pos + float
+	// width + vec4 rgba = 32 B) is layout-compatible with the GPU
+	// RibbonPoint (vec4 posW + vec4 rgba, std430), so a memcpy is
+	// safe — pos[0..2] lands in posW.xyz and `width` in posW.w
+	// without reinterpret-cast tricks.
+	dstPoints = vk.ribbon.points_ptr[frame] + dstPointBase * RIBBON_POINT_BYTES;
+	memcpy( dstPoints, desc->points, (size_t)desc->numPoints * RIBBON_POINT_BYTES );
+
+	// Append header.
+	// Layout (32 B std430, must match ribbon.vert RibbonHeader):
+	//   offset  0..15  4 × uint  (pointOffset, pointCount, shaderHandle, flags)
+	//   offset 16..23  vec2      uvScroll
+	//   offset 24..27  float     spawnTime  (= tr.refdef.floatTime at submit)
+	//   offset 28..31  float     _pad
+	dstHeader = vk.ribbon.headers_ptr[frame] + dstHeaderIdx * RIBBON_HEADER_BYTES;
+	udst = (uint32_t *)dstHeader;
+	fdst = (float    *)dstHeader;
+	udst[0] = dstPointBase;
+	udst[1] = (uint32_t)desc->numPoints;
+	// Phase 5K: cgame submits a qhandle; the GPU header carries a
+	// primitive registry slot. Translate via the indirection table.
+	udst[2] = vk_qhandle_to_prim_slot( desc->shader );
+	udst[3] = (uint32_t)desc->flags;
+	fdst[4] = desc->uvScroll[0];
+	fdst[5] = desc->uvScroll[1];
+	// spawnTime uses tr.refdef.floatTime (front-end current-frame
+	// time, set in RE_BeginScene). Same rationale as RE_AddBeamToScene
+	// — backEnd.refdef.floatTime here would be one frame stale; using
+	// the front-end value keeps spawnTime aligned with what the
+	// vertex shader sees as frameParams.y at draw time.
+	fdst[6] = (float)tr.refdef.floatTime;
+	fdst[7] = 0.0f; // pad
+
+	vk.ribbon.numPointsThisFrame  += (uint32_t)desc->numPoints;
+	vk.ribbon.numHeadersThisFrame += 1;
+}
+
+/*
+=====================
+RE_AddBeamToScene
+
+Append one beam descriptor to the engine-managed pool. The pool
+holds both transient (one-frame, duration == 0) and persistent
+(lifetime + fade, duration > 0) beams in a single BEAM_POOL_MAX-slot
+array; RB_DrawBeams walks the pool each frame, resolves
+entity-attached endpoints into world space, computes fade alpha for
+persistent slots, writes a compacted run of GPU headers to the
+per-frame SSBO, and issues a single vkCmdDraw.
+
+Pool exhaustion drops the submission silently — at the current
+BEAM_POOL_MAX (128, post-Phase 5P), this is rare in practice. The
+heaviest current consumer is LG primary at 2 slots per firing player
+(main body + tapered tail); 16-player matches with all firing land
+~70 slots used, comfortably within budget. A noisy log on overflow
+would be more disruptive than helpful.
+
+Validates handle / range; on any failure, the pool stays unchanged.
+=====================
+*/
+void RE_AddBeamToScene( const beamDesc_t *desc ) {
+	int slot;
+	int copies;
+
+	if ( !tr.registered ) return;
+	if ( desc == NULL ) return;
+	if ( !vk.beam.available ) return;
+
+	// Linear scan for a free slot. 64 entries; sub-microsecond cost.
+	for ( slot = 0; slot < (int)BEAM_POOL_MAX; slot++ ) {
+		if ( !vk.beam.active[slot] ) break;
+	}
+	if ( slot == (int)BEAM_POOL_MAX ) {
+		// Pool full — drop silently.
+		return;
+	}
+
+	// Clamp axialCopies to [1, BEAM_AXIAL_MAX]. Out-of-range values
+	// from older or buggy callers degrade gracefully.
+	copies = desc->axialCopies;
+	if ( copies < 1 )                    copies = 1;
+	if ( copies > (int)BEAM_AXIAL_MAX )  copies = (int)BEAM_AXIAL_MAX;
+
+	// Copy the descriptor into the pool slot. Persistent metadata
+	// is captured even for transient beams (duration == 0); the
+	// lifetime check in RB_DrawBeams handles both uniformly via
+	// the duration == 0 branch. spawnTime uses the current frame's
+	// floatTime so persistent beams' fadeIn ramp is anchored at
+	// submission time.
+	vk.beam.desc[slot]              = *desc;
+	vk.beam.desc[slot].axialCopies  = copies;
+	// PRIM_FLAG_TRANSIENT is engine-managed, derived from duration.
+	// Mask any caller-set value (cgame should not set this bit) then
+	// re-set it ourselves based on duration. Other flag bits pass
+	// through unchanged. Without this, transient beams' uvScroll is
+	// non-functional because age == 0 every per-frame submit; the
+	// vertex shader needs the bit to know to use absolute frame time
+	// as the scroll reference instead.
+	vk.beam.desc[slot].flags &= ~PRIM_FLAG_TRANSIENT;
+	if ( desc->duration <= 0.0f ) {
+		vk.beam.desc[slot].flags |= PRIM_FLAG_TRANSIENT;
+	}
+	// spawnTime uses tr.refdef.floatTime (front-end current-frame
+	// time, set in RE_BeginScene) rather than backEnd.refdef.floatTime
+	// — the back-end's refdef holds the PREVIOUS frame's value at
+	// the moment RE_AddBeamToScene runs (re_AddBeamToScene is invoked
+	// during cgame frame processing, before commands are flushed to
+	// the back-end). Using the front-end value keeps spawnTime
+	// aligned with what RB_DrawBeams will see as the current draw-
+	// frame's tr.refdef.floatTime, so age = 0 on the first render
+	// and fadeIn ramps cleanly from there.
+	//
+	// For transient beams the value is still captured (kept uniform
+	// with the persistent path to avoid branchy host code), but the
+	// vertex shader ignores it because PRIM_FLAG_TRANSIENT routes
+	// uvScroll to absolute frameParams.y.
+	vk.beam.spawnTime[slot]         = (float)tr.refdef.floatTime;
+	vk.beam.duration[slot]          = desc->duration;
+	vk.beam.fadeIn[slot]            = desc->fadeIn;
+	vk.beam.fadeOut[slot]           = desc->fadeOut;
+	vk.beam.active[slot]            = qtrue;
+}
+
+/*
+=====================
+RE_AddSpriteToScene
+
+Append one GPU SpriteHeader (std430, 48 bytes) to the per-frame
+SSBO indexed by vk.cmd_index. Drops silently on validation failure
+or capacity exhaustion — the renderer never owns the right to log
+per-frame from this path.
+
+GPU layout (must match sprite.vert):
+    bytes  0..15  vec4  originW       (.xyz=position, .w=radius)
+    bytes 16..31  vec4  rgba
+    bytes 32..35  uint  shaderHandle  (reserved)
+    bytes 36..39  uint  flags         (PRIM_FLAG_*)
+    bytes 40..47  uint[2] padding to std430 vec4 alignment
+=====================
+*/
+void RE_AddSpriteToScene( const spriteDesc_t *desc ) {
+	uint32_t  frame, idx;
+	byte     *dst;
+	float    *fdst;
+	uint32_t *udst;
+
+	if ( !vk.sprite.available )
+		return;
+	if ( desc == NULL || desc->radius <= 0.0f )
+		return;
+
+	if ( vk.sprite.numThisFrame >= SPRITES_PER_FRAME )
 		return;
 
 	frame = vk.cmd_index;
-	slot  = vk.numRailDispatches;
+	idx   = vk.sprite.numThisFrame;
+	dst   = vk.sprite.headers_ptr[frame] + idx * SPRITE_HEADER_BYTES;
+	fdst  = (float    *)dst;
+	udst  = (uint32_t *)dst;
 
-	if ( vk.rail.params_ptr[frame] == NULL )
-		return;
+	// originW.xyz = origin, originW.w = radius
+	fdst[0] = desc->origin[0];
+	fdst[1] = desc->origin[1];
+	fdst[2] = desc->origin[2];
+	fdst[3] = desc->radius;
 
-	// Write into this frame's slot. The GPU reads via the descriptor's dynamic
-	// offset bound at dispatch time, so each in-flight frame and each trail
-	// within a frame has its own non-overlapping memory. Stride is padded to
-	// minStorageBufferOffsetAlignment so the dynamic offsets stay legal.
-	dst = vk.rail.params_ptr[frame] + (size_t)slot * vk.rail.params_slot_stride;
-	memcpy( dst, params, sizeof( railTrailParams_t ) );
+	// rgba (already float [0..1] per primitives.h convention)
+	fdst[4] = desc->rgba[0];
+	fdst[5] = desc->rgba[1];
+	fdst[6] = desc->rgba[2];
+	fdst[7] = desc->rgba[3];
 
-	// queue the dispatch
-	vk.railDispatch[ slot ].numSegments = (int)params->params[3];
-	vk.railDispatch[ slot ].beamLen     = params->start[3];
-	vk.railDispatch[ slot ].frac        = params->beamAxis[3];
-	vk.railDispatch[ slot ].curRadius   = params->params[0];
-	vk.railDispatch[ slot ].curSpacing  = params->params[1];
-	vk.railDispatch[ slot ].curWidth    = params->params[2];
-	vk.numRailDispatches++;
+	// Phase 5K: cgame qhandle → primitive registry slot translation.
+	udst[8]  = vk_qhandle_to_prim_slot( desc->shader );
+	udst[9]  = (uint32_t)desc->flags;
+	udst[10] = 0; // pad0
+	udst[11] = 0; // pad1
+
+	vk.sprite.numThisFrame += 1;
 }
 
+// ── particle emit helpers ────────────────────────────────────────
+//
+// File-local scatter / velocity helpers. Each scatter helper writes
+// a per-axis offset into out_offset; caller adds that to a base
+// position. Each velocity helper writes a velocity into out_vel.
+// random() / crandom() come from q_shared.h ([0, 1) and [-1, +1]
+// respectively); PerpendicularVector and CrossProduct are q_math.
+
+static void Particle_ScatterNone( vec3_t out_offset ) {
+	VectorClear( out_offset );
+}
+
+static void Particle_ScatterCube( float mag, vec3_t out_offset ) {
+	out_offset[0] = crandom() * mag;
+	out_offset[1] = crandom() * mag;
+	out_offset[2] = crandom() * mag;
+}
+
+static void Particle_ScatterSphere( float mag, vec3_t out_offset ) {
+	vec3_t v;
+	// Rejection sampling for uniform point in unit sphere. Average
+	// ~1.91 iterations per call; tighter than Marsaglia for vec3.
+	do {
+		v[0] = crandom();
+		v[1] = crandom();
+		v[2] = crandom();
+	} while ( DotProduct( v, v ) > 1.0f );
+	VectorScale( v, mag, out_offset );
+}
+
+static void Particle_ScatterPerpDisc( float mag, const vec3_t axis, vec3_t out_offset ) {
+	vec3_t right, up;
+	float u, v;
+
+	PerpendicularVector( right, axis );
+	CrossProduct( axis, right, up );
+	VectorNormalize( right );
+	VectorNormalize( up );
+
+	// Rejection in unit disc, then scale.
+	do {
+		u = crandom();
+		v = crandom();
+	} while ( u * u + v * v > 1.0f );
+
+	VectorScale( right, u * mag, out_offset );
+	VectorMA( out_offset, v * mag, up, out_offset );
+}
+
+static void Particle_VelocityAxial( const vec3_t axis, float axialSpeed, vec3_t out_vel ) {
+	VectorScale( axis, axialSpeed, out_vel );
+}
+
+static void Particle_VelocityAxialPlusCube( const vec3_t axis, float axialSpeed,
+                                            float cubeJitter, vec3_t out_vel ) {
+	VectorScale( axis, axialSpeed, out_vel );
+	out_vel[0] += crandom() * cubeJitter;
+	out_vel[1] += crandom() * cubeJitter;
+	out_vel[2] += crandom() * cubeJitter;
+}
+
+static void Particle_VelocityCone( const vec3_t axis, float axialSpeed,
+                                   float coneHalfAngle, vec3_t out_vel ) {
+	float cosHalf = cosf( coneHalfAngle );
+	float z       = cosHalf + ( 1.0f - cosHalf ) * random();
+	float phi     = random() * 2.0f * (float)M_PI;
+	float r       = sqrtf( 1.0f - z * z );
+	vec3_t right, up;
+
+	PerpendicularVector( right, axis );
+	CrossProduct( axis, right, up );
+	VectorNormalize( right );
+	VectorNormalize( up );
+
+	// Uniform on spherical cap of half-angle coneHalfAngle around
+	// axis; magnitude = axialSpeed.
+	VectorScale( axis,                  z * axialSpeed,           out_vel );
+	VectorMA  ( out_vel, r * cosf( phi ) * axialSpeed, right, out_vel );
+	VectorMA  ( out_vel, r * sinf( phi ) * axialSpeed, up,    out_vel );
+}
+
+static void Particle_VelocityPureCube( float cubeJitter, vec3_t out_vel ) {
+	out_vel[0] = crandom() * cubeJitter;
+	out_vel[1] = crandom() * cubeJitter;
+	out_vel[2] = crandom() * cubeJitter;
+}
+
+void RE_EmitParticles( const emitterDesc_t *desc ) {
+	const particleClassGPU_t *gpuClasses;
+	const particleClassGPU_t *cls;
+	particleGPU_t *pool;
+	int            i;
+	uint32_t       pingRead;
+
+	if ( !vk.particle.available ) return;
+	if ( desc == NULL ) return;
+	if ( desc->cls < 1
+	  || (uint32_t)desc->cls > vk.particle.numClasses ) return;
+	if ( desc->count <= 0 ) return;
+
+	gpuClasses = (const particleClassGPU_t *)vk.particle.classes_ptr;
+	cls        = &gpuClasses[ desc->cls - 1 ];
+
+	// Emit happens during cgame sim, BEFORE vk_begin_frame's
+	// compute dispatch + flip. At emit time, pingPongRead points to
+	// the buffer last frame's compute wrote; this frame's compute
+	// will read it (integrating these new particles by one frame
+	// before the first render), then write to 1-pingPongRead.
+	pingRead = vk.particle.pingPongRead;
+	pool     = (particleGPU_t *)vk.particle.pool_ptr[ pingRead ];
+
+	for ( i = 0; i < desc->count; i++ ) {
+		particleGPU_t p;
+		vec3_t        basePos, scatterOff, vel;
+		float         lifetime, lifetimeInv;
+		uint32_t      slot;
+
+		memset( &p, 0, sizeof( p ) );
+
+		// Position: emit mode picks the base point along the
+		// origin→end path (or just origin), scatter shape adds
+		// an offset from there.
+		if ( cls->emitMode == EMIT_POINT ) {
+			VectorCopy( desc->origin, basePos );
+		} else {  // EMIT_PATH
+			float t = random();
+			basePos[0] = desc->origin[0] + t * ( desc->end[0] - desc->origin[0] );
+			basePos[1] = desc->origin[1] + t * ( desc->end[1] - desc->origin[1] );
+			basePos[2] = desc->origin[2] + t * ( desc->end[2] - desc->origin[2] );
+		}
+
+		switch ( cls->scatterShape ) {
+			case SCATTER_NONE:
+				Particle_ScatterNone( scatterOff );
+				break;
+			case SCATTER_CUBE:
+				Particle_ScatterCube( cls->scatterMagnitude, scatterOff );
+				break;
+			case SCATTER_SPHERE:
+				Particle_ScatterSphere( cls->scatterMagnitude, scatterOff );
+				break;
+			case SCATTER_PERP_DISC:
+				Particle_ScatterPerpDisc( cls->scatterMagnitude,
+				                          desc->axis, scatterOff );
+				break;
+			default:
+				VectorClear( scatterOff );
+				break;
+		}
+
+		VectorAdd( basePos, scatterOff, p.pos );
+
+		// Per-particle effective axial speed. speedJitter defaults to
+		// zero, in which case effectiveAxialSpeed == axialSpeed and
+		// pre-extension behavior is byte-identical. Picked once per
+		// particle so the shape helpers themselves remain stateless.
+		// VEL_PURE_CUBE has no axial component, so the pick is wasted
+		// for that shape — cheap enough to compute unconditionally
+		// and avoid a switch on shape just to skip the rand call.
+		{
+			float effectiveAxialSpeed = cls->axialSpeed
+			                          + crandom() * cls->speedJitter;
+
+			switch ( cls->velocityShape ) {
+				case VEL_AXIAL:
+					Particle_VelocityAxial( desc->axis, effectiveAxialSpeed, vel );
+					break;
+				case VEL_AXIAL_PLUS_CUBE:
+					Particle_VelocityAxialPlusCube( desc->axis, effectiveAxialSpeed,
+					                                cls->cubeJitter, vel );
+					break;
+				case VEL_CONE:
+					Particle_VelocityCone( desc->axis, effectiveAxialSpeed,
+					                       cls->coneHalfAngle, vel );
+					break;
+				case VEL_PURE_CUBE:
+					Particle_VelocityPureCube( cls->cubeJitter, vel );
+					break;
+				default:
+					VectorClear( vel );
+					break;
+			}
+		}
+
+		// Post-shape velocity bias + per-axis symmetric jitter. Both
+		// default to zero (memset-zeroed in the GPU mirror when the
+		// class doesn't populate them), so existing classes are
+		// untouched. Asymmetric ranges express via midpoint+halfwidth:
+		// CPU's "vel.z += [0, 100]" → bias=(0,0,50), jitter=(0,0,50).
+		vel[0] += cls->velocityBias[0]
+		        + crandom() * cls->velocityBiasJitter[0];
+		vel[1] += cls->velocityBias[1]
+		        + crandom() * cls->velocityBiasJitter[1];
+		vel[2] += cls->velocityBias[2]
+		        + crandom() * cls->velocityBiasJitter[2];
+
+		VectorCopy( vel, p.vel );
+
+		// Per-particle sizeStart offset, picked once at emit. Vertex
+		// shader reads p.sizeJitterPick each frame and adds it to
+		// c.sizeStart inside the size lerp. Classes with sizeJitter
+		// == 0 store 0 here, so the lerp degenerates to the existing
+		// mix(c.sizeStart, c.sizeEnd, p.age).
+		p.sizeJitterPick = crandom() * cls->sizeJitter;
+
+		// Lifetime: mean ± jitter, signed. Clamp at 1ms to avoid
+		// divide-by-zero in lifetimeInv (the compute shader also
+		// guards against age >= 1.0 each frame, so a pathologically
+		// short lifetime just means the particle dies in 1-2 frames).
+		lifetime = cls->lifetimeMean + crandom() * cls->lifetimeJitter;
+		if ( lifetime < 0.001f ) lifetime = 0.001f;
+		lifetimeInv = 1.0f / lifetime;
+
+		p.age         = 0.0f;
+		p.lifetimeInv = lifetimeInv;
+		p.classHandle = (uint32_t)desc->cls;
+
+		// Phase 6: per-particle palette index. Random pick in
+		// [0, paletteCount). Class's paletteCount is clamped to
+		// >= 1 by RE_RegisterParticleClass; the > 1 branch
+		// documents intent and avoids a no-op modulo on
+		// single-palette classes.
+		if ( cls->paletteCount > 1 ) {
+			p.paletteIndex = (uint32_t)( rand() % (int)cls->paletteCount );
+		} else {
+			p.paletteIndex = 0;
+		}
+		// p.pad1..pad2 stay zero from the memset.
+
+		// Round-robin slot allocation. Wrap-around overwrites the
+		// oldest particle (which is either dead or near-end-of-life
+		// given pool size 16384 and typical emit rates).
+		slot                  = vk.particle.nextSlot;
+		vk.particle.nextSlot  = ( slot + 1 ) % PARTICLES_PER_POOL;
+
+		memcpy( &pool[ slot ], &p, sizeof( particleGPU_t ) );
+	}
+}
+
+void RE_AddDecalToScene( const decalDesc_t *desc ) {
+	// TODO: implement decal projection.
+	(void)desc;
+}
+
+void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls ) {
+	particleClassGPU_t *gpuClasses;
+	particleClassGPU_t *dst;
+	int i;
+
+	if ( !vk.particle.available ) return;
+	if ( cls == NULL ) return;
+	if ( handle < 1 || handle > MAX_PARTICLE_CLASSES ) return;
+
+	// Host-coherent SSBO; direct write, no staging.
+	gpuClasses = (particleClassGPU_t *)vk.particle.classes_ptr;
+	dst        = &gpuClasses[ handle - 1 ];
+
+	memset( dst, 0, sizeof( *dst ) );
+
+	dst->shader            = (uint32_t)cls->shader;
+	dst->renderFlags       = (uint32_t)cls->renderFlags;
+	dst->emitMode          = (uint32_t)cls->emitMode;
+	dst->scatterShape      = (uint32_t)cls->scatterShape;
+	dst->scatterMagnitude  = cls->scatterMagnitude;
+	dst->velocityShape     = (uint32_t)cls->velocityShape;
+	dst->axialSpeed        = cls->axialSpeed;
+	dst->cubeJitter        = cls->cubeJitter;
+	dst->coneHalfAngle     = cls->coneHalfAngle;
+	dst->lifetimeMean      = cls->lifetimeMean;
+	dst->lifetimeJitter    = cls->lifetimeJitter;
+	// Phase 6: clamp paletteCount to [1, PARTICLE_CLASS_MAX_PALETTE].
+	// 0 → would crash RE_EmitParticles's modulo at emit time.
+	// >16 → would let particle.vert read colorPalette[idx] out of
+	// bounds (the GLSL array is fixed at PARTICLE_CLASS_MAX_PALETTE).
+	// Silent clamp; class definitions with bad paletteCount get
+	// repaired rather than rejected.
+	{
+		int pc = cls->paletteCount;
+		if ( pc < 1 ) pc = 1;
+		if ( pc > PARTICLE_CLASS_MAX_PALETTE ) pc = PARTICLE_CLASS_MAX_PALETTE;
+		dst->paletteCount = pc;
+	}
+
+	for ( i = 0; i < PARTICLE_CLASS_MAX_PALETTE; i++ ) {
+		dst->colorPalette[i][0] = cls->colorPalette[i][0];
+		dst->colorPalette[i][1] = cls->colorPalette[i][1];
+		dst->colorPalette[i][2] = cls->colorPalette[i][2];
+		dst->colorPalette[i][3] = cls->colorPalette[i][3];
+	}
+
+	dst->colorEndMult[0] = cls->colorEndMult[0];
+	dst->colorEndMult[1] = cls->colorEndMult[1];
+	dst->colorEndMult[2] = cls->colorEndMult[2];
+	dst->colorEndMult[3] = cls->colorEndMult[3];
+
+	dst->sizeStart    = cls->sizeStart;
+	dst->sizeEnd      = cls->sizeEnd;
+	dst->gravityScale = cls->gravityScale;
+	dst->drag         = cls->drag;
+	// shaderBlendIsAdditive set below; pad1..pad3 stay zero from the memset.
+
+	// Expressivity-extension fields. .w lanes of the two vec4s are
+	// unused — only .xyz carry data. Memset above already zeroed them
+	// (which is the zero-effect default for any class that does not
+	// opt in), so this block only matters when the class did populate
+	// these fields.
+	dst->velocityBias[0]       = cls->velocityBias[0];
+	dst->velocityBias[1]       = cls->velocityBias[1];
+	dst->velocityBias[2]       = cls->velocityBias[2];
+	dst->velocityBias[3]       = 0.0f;
+	dst->velocityBiasJitter[0] = cls->velocityBiasJitter[0];
+	dst->velocityBiasJitter[1] = cls->velocityBiasJitter[1];
+	dst->velocityBiasJitter[2] = cls->velocityBiasJitter[2];
+	dst->velocityBiasJitter[3] = 0.0f;
+	dst->speedJitter           = cls->speedJitter;
+	dst->sizeJitter            = cls->sizeJitter;
+	// pad4, pad5 stay zero from the memset.
+
+	// ── Phase 5: resolve class shader → image, write to sampler array.
+	//
+	// Three-tier fallback mirrors the IQM precedent at
+	// tr_model_iqm.c:1495-1504. The resolved image_t is cached in
+	// vk.particle.classImages[] so vk_init_descriptors's re-alloc
+	// path can re-walk the registry after a pool reset.
+	//
+	// Blend mode is derived from the class shader's stages[0] state
+	// bits (additive vs alpha). The vertex shader filters per blend
+	// variant by reading shaderBlendIsAdditive — so the per-particle
+	// PRIM_FLAG_ADDITIVE bit on cls->renderFlags is no longer
+	// load-bearing for blend selection. See primitives.h.
+	{
+		shader_t *resolvedShader = R_GetShaderByHandle( cls->shader );
+		image_t  *resolvedImage;
+		uint32_t  isAdditive = 0;
+
+		if ( resolvedShader && resolvedShader->stages[0]
+		  && resolvedShader->stages[0]->bundle[0].image[0] ) {
+			resolvedImage = resolvedShader->stages[0]->bundle[0].image[0];
+		} else if ( tr.defaultShader && tr.defaultShader->stages[0]
+		         && tr.defaultShader->stages[0]->bundle[0].image[0] ) {
+			resolvedImage = tr.defaultShader->stages[0]->bundle[0].image[0];
+		} else {
+			resolvedImage = tr.whiteImage;
+		}
+
+		// Derive blend mode from the resolved shader's stage 0 state
+		// bits. Two patterns are recognised as additive:
+		//   GL_SRC_ALPHA / GL_ONE  (alpha-modulated additive — q3 sprite convention)
+		//   GL_ONE       / GL_ONE  (pure additive — "blendfunc add")
+		// Any other combination falls back to alpha-blend for now;
+		// dst-color / modulate / etc. are out of phase-5 scope.
+		if ( resolvedShader && resolvedShader->stages[0] ) {
+			uint32_t blendBits = resolvedShader->stages[0]->stateBits & GLS_BLEND_BITS;
+			if ( blendBits == ( GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE )
+			  || blendBits == ( GLS_SRCBLEND_ONE       | GLS_DSTBLEND_ONE ) ) {
+				isAdditive = 1;
+			}
+		}
+		dst->shaderBlendIsAdditive = isAdditive;
+
+		// Cache image pointer for re-alloc-after-pool-reset.
+		vk.particle.classImages[ handle - 1 ] = resolvedImage;
+
+		// Update slot (handle - 1) of the sampler array on every
+		// per-frame render descriptor set. Helper lives in vk.c
+		// because the qvk* function pointers are static there.
+		vk_particle_set_class_image( handle, resolvedImage );
+	}
+
+	// Registration is monotonic in the static-init use case (handle
+	// equals numClasses + 1), but tolerate re-registration as
+	// overwrite without bumping the counter.
+	if ( (uint32_t)handle > vk.particle.numClasses ) {
+		vk.particle.numClasses = (uint32_t)handle;
+	}
+}
 
 
 /*

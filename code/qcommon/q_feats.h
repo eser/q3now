@@ -1,7 +1,7 @@
 #ifndef _Q_FEATS_H
 #define _Q_FEATS_H
 //
-// q_feats.h -- q3now feature flags
+// q_feats.h -- Wired engine feature flags
 //
 // All modules (game, cgame, ui) include this file.
 // Set to 1 to enable, 0 to compile out with zero runtime cost.
@@ -60,7 +60,6 @@
 #define FEAT_TEAM_LEADERSHIP              0   // 11  particle trail library
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
-#define FEAT_RAIL_TRAIL                   0   // 0 = default, 1 = old, 2 = wicked
 #define FEAT_MOVEMENT_KEYS                0   // show followed player's movement keys (spectator HUD)
 #define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + ModernHUD)
 #define FEAT_LEGACY_UI                    0   // legacy TA menu/HUD code paths (compile-time hard cut)
@@ -95,7 +94,7 @@
 #define FEAT_DEPTH_FADE                   0   // soft particle edges (explosions, smoke, blood)
 #define FEAT_PARALLAX_MAPPING             0   // steep parallax mapping with normalmap (height in alpha)
 #define FEAT_SSAO                         0   // screen-space ambient occlusion (embedded in gamma pass)
-#define FEAT_TONEMAP                      0   // HDR tone mapping (Reinhard/ACES/Uncharted2)
+#define FEAT_TONEMAP                      1   // HDR tone mapping (Reinhard/ACES/Uncharted2)
 #define FEAT_COLOR_GRADING                0   // color tint, saturation, contrast
 #define FEAT_FXAA                         0   // fast approximate anti-aliasing (embedded in gamma pass)
 #define FEAT_GODRAYS                      0   // screen-space crepuscular rays (depth-based sky detection)

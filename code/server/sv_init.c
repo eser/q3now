@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/q_feats.h"
 
 #include "../qcommon/wired/net/wn_public.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 #if FEAT_RECAST_NAVMESH
 #include "../qcommon/nav/nav_public.h"
@@ -432,8 +434,8 @@ void SV_SpawnServer_Tick( void ) {
 
 		SV_ShutdownGameProgs();
 
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "------ Server Initialization ------\n" );
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server: %s\n", mapname );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "------ Server Initialization ------\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server: %s\n", mapname );
 
 		Sys_SetStatus( "Initializing server..." );
 
@@ -640,15 +642,15 @@ void SV_SpawnServer_Tick( void ) {
 			infolen = strlen( Cvar_InfoString_Big( CVAR_SYSTEMINFO, &infoTruncated ) );
 
 			if ( infoTruncated ) {
-				COM_WARN( LOG_CAT_SERVER, "truncated systeminfo!\n" );
+				COM_WARN( LOG_CH(ch_server), "truncated systeminfo!\n" );
 			}
 
 			if ( pakslen > freespace || infolen + pakslen >= BIG_INFO_STRING || overflowed ) {
-				Com_Log( SEV_DEBUG, LOG_CAT_SERVER, S_COLOR_YELLOW "WARNING: skipping sv_paks setup to avoid gamestate overflow\n" );
+				Com_Log( SEV_DEBUG, LOG_CH(ch_server), S_COLOR_YELLOW "WARNING: skipping sv_paks setup to avoid gamestate overflow\n" );
 			} else {
 				Cvar_Set( "sv_paks", p );
 				if ( *p == '\0' ) {
-					COM_WARN( LOG_CAT_SERVER, "sv_pure set but no PK3 files loaded\n" );
+					COM_WARN( LOG_CH(ch_server), "sv_pure set but no PK3 files loaded\n" );
 				}
 			}
 		}
@@ -677,7 +679,7 @@ void SV_SpawnServer_Tick( void ) {
 
 		Hunk_SetMark();
 
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "-----------------------------------\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "-----------------------------------\n" );
 
 		Sys_SetStatus( "Running map %s", svs.spawn.mapname );
 
@@ -877,6 +879,13 @@ void SV_Init( void )
 	for ( int index = 0; index < MAX_MASTER_SERVERS; index++ )
 		sv_master[ index ] = Cvar_Get( va( "sv_master%d", index + 1 ), "", CVAR_ARCHIVE | CVAR_NODEFAULT );
 
+	// per-game identity — populated by the game module from bg_public.h's
+	// GAMENAME_FOR_MASTER / HEARTBEAT_FOR_MASTER during G_InitGame. Engine reads
+	// the cvars and never includes the game-side header. Heartbeat is skipped
+	// while either cvar is empty (i.e., before game init completes).
+	Cvar_Get( "sv_gamename",  "", CVAR_SERVERINFO | CVAR_ROM );
+	Cvar_Get( "sv_heartbeat", "", CVAR_ROM );
+
 	// transient cvars with no stored handle
 	Cvar_Get( "nextmap",  "", CVAR_TEMP );
 	Cvar_Get( "sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE );
@@ -1009,7 +1018,7 @@ void SV_Shutdown( const char *finalmsg ) {
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "----- Server Shutdown (%s) -----\n", finalmsg );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "----- Server Shutdown (%s) -----\n", finalmsg );
 
 	WN_Shutdown();
 
@@ -1055,7 +1064,7 @@ void SV_Shutdown( const char *finalmsg ) {
 	Cvar_Set( "ui_singlePlayerActive", "0" );
 #endif
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "---------------------------\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "---------------------------\n" );
 
 #ifndef DEDICATED
 	// disconnect any local clients

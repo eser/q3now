@@ -11,30 +11,30 @@
 # on a fixed binary. See git log for the FS_DeduplicateArchives commit.
 #
 # Usage:
-#   tests/smoke-fs-dedup.sh [path-to-q3now-ded]
+#   tests/smoke-fs-dedup.sh [path-to-wired-ded]
 #
 # Exit codes:
 #   0  PASS — engine boots cleanly, dedup log line emitted
 #   1  FAIL — engine crashed, missing dedup line, or other failure
-#  77  SKIP — q3now-ded binary or sw3z archiver not built
+#  77  SKIP — wired-ded binary or sw3z archiver not built
 
 set -euo pipefail
 
-DED="${1:-q3now-ded}"
+DED="${1:-wired-ded}"
 SW3Z_TOOL="${SW3Z_TOOL:-tools/sw3z-archiver/cmd/sw3z/sw3z}"
 
 # ── locate binaries ─────────────────────────────────────────────────────────
 if [ ! -x "$DED" ] && ! command -v "$DED" >/dev/null 2>&1; then
   # Try common build locations
   for candidate in \
-    "build/release/q3now-ded.x64.exe" \
-    "build/release/q3now-ded.x86_64" \
-    "build/release/q3now-ded"; do
+    "build/release/wired-ded.x64.exe" \
+    "build/release/wired-ded.x86_64" \
+    "build/release/wired-ded"; do
     if [ -x "$candidate" ]; then DED="$candidate"; break; fi
   done
 fi
 if [ ! -x "$DED" ] && ! command -v "$DED" >/dev/null 2>&1; then
-  echo "SKIP: q3now-ded binary not found (tried: $1, build/release/q3now-ded*)"
+  echo "SKIP: wired-ded binary not found (tried: $1, build/release/wired-ded*)"
   exit 77
 fi
 

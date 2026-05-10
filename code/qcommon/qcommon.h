@@ -284,7 +284,7 @@ extern const int demo_protocols[];
 #define MASTER_SERVER_NAME	"master.quake3arena.com"
 #endif
 // Phase 6.4: AUTHORIZE_SERVER_NAME / PORT_AUTHORIZE removed.
-// q3now never contacts authorize.quake3arena.com — see CL_RequestAuthorization
+// Wired never contacts authorize.quake3arena.com — see CL_RequestAuthorization
 // removal in cl_main.c and SV_AuthorizeIpPacket removal in sv_client.c.
 
 #define	PORT_MASTER			27950
@@ -720,10 +720,10 @@ typedef enum {
 #define	MAX_FOUND_FILES		0x5000
 
 #ifdef DEDICATED
-#define Q3CONFIG_CFG "config_dedicated.cfg"
+#define WIRED_CONFIG_CFG "config_dedicated.cfg"
 #define CONSOLE_HISTORY_FILE "history_dedicated"
 #else
-#define Q3CONFIG_CFG "config.cfg"
+#define WIRED_CONFIG_CFG "config.cfg"
 #define CONSOLE_HISTORY_FILE "history"
 #endif
 
@@ -910,7 +910,7 @@ const char *FS_GetHomePath( void );
  * accessor — caller must NOT cache the pointer across calls; copy if needed.
  *
  *   FS_GetInstallPath()          fs_installpath verbatim. The install root.
- *                                  macOS: <something>/q3now-preview.app
+ *                                  macOS: <something>/Wired.app
  *                                  Linux/Windows: directory containing the
  *                                  engine binary.
  *
@@ -1023,8 +1023,8 @@ extern	int	CPU_Flags;
 char		*CopyString( const char *in );
 void		Info_Print( const char *s );
 
-#include "wired/core/shell/log.h"
-#include "wired/core/shell/log_buffer.h"
+#include "wired/core/logging/log.h"
+#include "wired/core/logging/log_buffer.h"
 #include "wired/core/core.h"
 void 		Com_Quit_f( void );
 

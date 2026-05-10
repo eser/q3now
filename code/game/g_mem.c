@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 #define POOLSIZE	(256 * 1024)
@@ -37,7 +39,7 @@ void *G_Alloc( int size ) {
 	char	*p;
 
 	if ( g_debugAlloc.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_Alloc of %i bytes (%i left)\n", size, POOLSIZE - allocPoint - ( ( size + 31 ) & ~31 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "G_Alloc of %i bytes (%i left)\n", size, POOLSIZE - allocPoint - ( ( size + 31 ) & ~31 ) );
 	}
 
 	if ( allocPoint + size > POOLSIZE ) {
@@ -57,5 +59,5 @@ void G_InitMemory( void ) {
 }
 
 void Svcmd_GameMem_f( void ) {
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "Game memory status: %i out of %i bytes allocated\n", allocPoint, POOLSIZE );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "Game memory status: %i out of %i bytes allocated\n", allocPoint, POOLSIZE );
 }

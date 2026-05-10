@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cg_ents.c -- present snapshot entities, happens every single frame
 
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
 /*
@@ -645,7 +647,7 @@ static void CG_Mover( centity_t *cent ) {
 		static int mover_diag_count = 0;
 		if ( mover_diag_count < 40 ) {
 			mover_diag_count++;
-			Com_Log( SEV_TRACE, LOG_CAT_CGAME, "CG_Mover[%d]: num=%d s1->solid=0x%x SOLID_BMODEL=0x%x"
+			Com_Log( SEV_TRACE, LOG_CH(ch_cgame), "CG_Mover[%d]: num=%d s1->solid=0x%x SOLID_BMODEL=0x%x"
 				" s1->modelindex=%d hModel=%d"
 				" lerpOrigin=(%.0f,%.0f,%.0f)\n",
 				mover_diag_count, s1->number,
@@ -1162,11 +1164,11 @@ void CG_AddPacketEntities( void ) {
 		static int snap_diag_logged = 0;
 		if ( snap_diag_logged < 3 && cg.snap->numEntities >= 3 ) {
 			snap_diag_logged++;
-			Com_Log( SEV_TRACE, LOG_CAT_CGAME, "CG_AddPacketEntities[snap%d]: numEntities=%d\n",
+			Com_Log( SEV_TRACE, LOG_CH(ch_cgame), "CG_AddPacketEntities[snap%d]: numEntities=%d\n",
 				snap_diag_logged, cg.snap->numEntities );
 			for ( num = 0; num < cg.snap->numEntities; num++ ) {
 				entityState_t *es = &cg.snap->entities[ num ];
-				Com_Log( SEV_TRACE, LOG_CAT_CGAME, "  snap_ent[%d]: number=%d eType=%d solid=0x%x modelindex=%d origin=(%.0f,%.0f,%.0f)\n",
+				Com_Log( SEV_TRACE, LOG_CH(ch_cgame), "  snap_ent[%d]: number=%d eType=%d solid=0x%x modelindex=%d origin=(%.0f,%.0f,%.0f)\n",
 					num, es->number, es->eType, (unsigned)es->solid, es->modelindex,
 					es->pos.trBase[0], es->pos.trBase[1], es->pos.trBase[2] );
 			}

@@ -24,6 +24,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #ifdef USE_VULKAN_API
 #	include <SDL3/SDL_vulkan.h>
 #endif
+#ifdef _WIN32
+// HGLOBAL / OpenClipboard / GlobalAlloc / SetClipboardData are used directly
+// in Sys_SetClipboardBitmap below; pull them in explicitly so clang-tidy and
+// any future toolchain that doesn't include them transitively still resolves.
+#	define WIN32_LEAN_AND_MEAN
+#	include <windows.h>
+#	undef WIN32_LEAN_AND_MEAN
+#endif
 
 #define MINSDL_MAJOR 3
 #define MINSDL_MINOR 2
@@ -33,6 +41,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../renderercommon/tr_public.h"
 #include "sdl_glw.h"
 #include "sdl_icon.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 typedef enum {
 	RSERR_OK,
@@ -66,6 +76,7 @@ void GLimp_Shutdown( qboolean unloadDLL )
 
 	if ( glw_state.isFullscreen ) {
 		if ( drv && strcmp( drv, "x11" ) == 0 ) {
+			// NOLINTNEXTLINE(bugprone-integer-division) — pixel-aligned screen-center coordinates; integer math intentional
 			SDL_WarpMouseGlobal( (float)(glw_state.desktop_width / 2), (float)(glw_state.desktop_height / 2) );
 		} else {
 			SDL_ShowCursor();
@@ -218,12 +229,12 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 #ifdef USE_VULKAN_API
 	if ( vulkan ) {
 		flags |= SDL_WINDOW_VULKAN;
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Initializing Vulkan display\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Initializing Vulkan display\n");
 	} else
 #endif
 	{
 		flags |= SDL_WINDOW_OPENGL;
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Initializing OpenGL display\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Initializing OpenGL display\n");
 	}
 
 	// If a window exists, note its display
@@ -232,7 +243,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		displayID = SDL_GetDisplayForWindow( SDL_window );
 		if ( displayID == 0 )
 		{
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_GetDisplayForWindow() failed: %s\n", SDL_GetError() );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_GetDisplayForWindow() failed: %s\n", SDL_GetError() );
 		}
 	}
 	else
@@ -244,7 +255,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		// according to previously stored \vid_xpos and \vid_ypos coordinates
 		displayID = FindNearestDisplay( &x, &y, 640, 480 );
 
-		//Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Selected display: %u\n", displayID );
+		//Com_Log( SEV_INFO, LOG_CH(ch_client), "Selected display: %u\n", displayID );
 	}
 
 	if ( displayID != 0 )
@@ -290,15 +301,15 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	config->isFullscreen = fullscreen;
 	glw_state.isFullscreen = fullscreen;
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "...setting mode %d:", mode );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "...setting mode %d:", mode );
 
 	if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect, mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, " invalid mode\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), " invalid mode\n" );
 		return RSERR_INVALID_MODE;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, " %d %d\n", config->vidWidth, config->vidHeight );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), " %d %d\n", config->vidWidth, config->vidHeight );
 
 	// Destroy existing state if it exists
 	if ( SDL_glContext != NULL )
@@ -310,7 +321,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	if ( SDL_window != NULL )
 	{
 		SDL_GetWindowPosition( SDL_window, &x, &y );
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Existing window at %dx%d before being destroyed\n", x, y );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Existing window at %dx%d before being destroyed\n", x, y );
 		SDL_DestroyWindow( SDL_window );
 		SDL_window = NULL;
 	}
@@ -452,7 +463,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		// Create window first, then set position.
 		if ( ( SDL_window = SDL_CreateWindow( cl_title, config->vidWidth, config->vidHeight, flags ) ) == NULL )
 		{
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_CreateWindow failed: %s\n", SDL_GetError() );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_CreateWindow failed: %s\n", SDL_GetError() );
 			continue;
 		}
 
@@ -501,7 +512,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 				{
 					case 16: fsMode.format = SDL_PIXELFORMAT_RGB565;  break;
 					case 24: fsMode.format = SDL_PIXELFORMAT_XRGB8888; break;
-					default: Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "testColorBits is %d, can't fullscreen\n", testColorBits );
+					default: Com_Log( SEV_DEBUG, LOG_CH(ch_client), "testColorBits is %d, can't fullscreen\n", testColorBits );
 						SDL_DestroyWindow( SDL_window );
 						SDL_window = NULL;
 						continue;
@@ -514,7 +525,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 				if ( !SDL_SetWindowFullscreenMode( SDL_window, &fsMode ) )
 				{
-					Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_SetWindowFullscreenMode failed: %s\n", SDL_GetError() );
+					Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_SetWindowFullscreenMode failed: %s\n", SDL_GetError() );
 					SDL_DestroyWindow( SDL_window );
 					SDL_window = NULL;
 					continue;
@@ -547,7 +558,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			{
 				if ( ( SDL_glContext = SDL_GL_CreateContext( SDL_window ) ) == NULL )
 				{
-					Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_GL_CreateContext failed: %s\n", SDL_GetError( ) );
+					Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_GL_CreateContext failed: %s\n", SDL_GetError( ) );
 					SDL_DestroyWindow( SDL_window );
 					SDL_window = NULL;
 					continue;
@@ -557,7 +568,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			// SDL3: SDL_GL_SetSwapInterval returns bool (true = success)
 			if ( !SDL_GL_SetSwapInterval( r_swapInterval->integer ) )
 			{
-				Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError( ) );
+				Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError( ) );
 			}
 
 			SDL_GL_GetAttribute( SDL_GL_RED_SIZE, &realColorBits[0] );
@@ -570,7 +581,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		} // if ( !vulkan )
 
 
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Using %d color bits, %d depth, %d stencil display.\n",	config->colorBits, config->depthBits, config->stencilBits );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Using %d color bits, %d depth, %d stencil display.\n",	config->colorBits, config->depthBits, config->stencilBits );
 
 		break;
 	}
@@ -595,7 +606,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	}
 	else
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Couldn't get a visual\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Couldn't get a visual\n" );
 		return RSERR_INVALID_MODE;
 	}
 
@@ -610,6 +621,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	glw_state.window_height = config->vidHeight;
 
 	// SDL3: SDL_WarpMouseInWindow takes float coords
+	// NOLINTNEXTLINE(bugprone-integer-division) — pixel-aligned window-center coordinates; integer math intentional
 	SDL_WarpMouseInWindow( SDL_window, (float)(glw_state.window_width / 2), (float)(glw_state.window_height / 2) );
 
 	return RSERR_OK;
@@ -627,7 +639,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 
 	if ( fullscreen && in_nograb->integer )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Fullscreen not allowed with \\in_nograb 1\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Fullscreen not allowed with \\in_nograb 1\n");
 		Cvar_Set( "r_fullscreen", "0" );
 		fullscreen = qfalse;
 	}
@@ -650,7 +662,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 			static char moltenVKPath[ MAX_OSPATH ];
 			Com_sprintf( moltenVKPath, sizeof( moltenVKPath ), "%s/libMoltenVK.dylib", FS_GetInstallBinaryPath() );
 			SDL_SetHint( SDL_HINT_VULKAN_LIBRARY, moltenVKPath );
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL Vulkan: requesting MoltenVK from %s\n", moltenVKPath );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "SDL Vulkan: requesting MoltenVK from %s\n", moltenVKPath );
 			// MoltenVK default: synchronous queue submits (vkQueueSubmit blocks until GPU
 			// finishes, serializing CPU+GPU and halving throughput). Force async so the
 			// CPU and GPU overlap frames. Respect any explicit user override.
@@ -666,7 +678,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 		// SDL3: SDL_Init returns bool (true = success)
 		if ( !SDL_Init( SDL_INIT_VIDEO ) )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL_Init( SDL_INIT_VIDEO ) FAILED (%s)\n", SDL_GetError() );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "SDL_Init( SDL_INIT_VIDEO ) FAILED (%s)\n", SDL_GetError() );
 			return RSERR_FATAL_ERROR;
 		}
 
@@ -682,11 +694,11 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 					MINSDL_MAJOR, MINSDL_MINOR, MINSDL_MICRO );
 			}
 			driverName = SDL_GetCurrentVideoDriver();
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL version: %d.%d.%d (compiled against %d.%d.%d)\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "SDL version: %d.%d.%d (compiled against %d.%d.%d)\n",
 				sdlmaj, sdlmin, sdlmic,
 				SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION );
 		}
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "SDL using driver \"%s\"\n", driverName );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "SDL using driver \"%s\"\n", driverName );
 	}
 
 	err = GLW_SetMode( mode, modeFS, fullscreen, vulkan );
@@ -694,10 +706,10 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 	switch ( err )
 	{
 		case RSERR_INVALID_FULLSCREEN:
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "...WARNING: fullscreen unavailable in this mode\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "...WARNING: fullscreen unavailable in this mode\n" );
 			return err;
 		case RSERR_INVALID_MODE:
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "...WARNING: could not set the given mode (%d)\n", mode );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "...WARNING: could not set the given mode (%d)\n", mode );
 			return err;
 		default:
 			break;
@@ -723,7 +735,7 @@ void GLimp_Init( glconfig_t *config )
 	InitSig();
 #endif
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "GLimp_Init()\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "GLimp_Init()\n" );
 
 	glw_state.config = config; // feedback renderer configuration
 
@@ -754,7 +766,7 @@ void GLimp_Init( glconfig_t *config )
 
 		if ( r_mode->integer != 3 || ( r_fullscreen->integer && atoi( r_modeFullscreen->string ) != 3 ) )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
 			if ( GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer, qfalse ) != RSERR_OK )
 			{
 				// Nothing worked, give up
@@ -824,7 +836,7 @@ void VKimp_Init( glconfig_t *config )
 	InitSig();
 #endif
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "VKimp_Init()\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "VKimp_Init()\n" );
 
 	{
 		static const cvarDesc_t d = CVAR_BOOL( "in_nograb", "0", CVAR_ARCHIVE,
@@ -852,7 +864,7 @@ void VKimp_Init( glconfig_t *config )
 			return;
 		}
 
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Setting r_mode %d failed, falling back on r_mode %d\n", r_mode->integer, 3 );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting r_mode %d failed, falling back on r_mode %d\n", r_mode->integer, 3 );
 
 		err = GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer, qtrue /* Vulkan */ );
 		if( err != RSERR_OK )
@@ -924,6 +936,7 @@ void VKimp_Shutdown( qboolean unloadDLL )
 
 	if ( glw_state.isFullscreen ) {
 		if ( drv && strcmp( drv, "x11" ) == 0 ) {
+			// NOLINTNEXTLINE(bugprone-integer-division) — pixel-aligned screen-center coordinates; integer math intentional
 			SDL_WarpMouseGlobal( (float)(glw_state.desktop_width / 2), (float)(glw_state.desktop_height / 2) );
 		} else {
 			SDL_ShowCursor();

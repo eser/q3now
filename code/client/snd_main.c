@@ -26,6 +26,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "snd_local.h"
 #include "snd_public.h"
 #include "../qcommon/arena.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
+LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
 /* ---- Audio_Arena (Step 3.4) -----------------------------------------------
    The audio subsystem uses static globals and backend-internal allocations,
@@ -305,15 +308,14 @@ S_RegisterSound
 sfxHandle_t	S_RegisterSound( const char *sample, qboolean compressed )
 {
 	if ( !sample || !*sample ) {
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "NULL sound\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "NULL sound\n" );
 		return 0;
 	}
 
 	if( si.RegisterSound ) {
 		return si.RegisterSound( sample, compressed );
-	} else {
-		return 0;
 	}
+	return 0;
 }
 
 
@@ -387,7 +389,7 @@ static void S_Play_f( void ) {
 	int c = Cmd_Argc();
 
 	if( c < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: play <sound filename> [sound filename] [sound filename] ...\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Usage: play <sound filename> [sound filename] [sound filename] ...\n");
 		return;
 	}
 
@@ -420,7 +422,7 @@ static void S_Music_f( void ) {
 	} else if ( c == 3 ) {
 		si.StartBackgroundTrack( Cmd_Argv(1), Cmd_Argv(2) );
 	} else {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: music <musicfile> [loopfile]\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Usage: music <musicfile> [loopfile]\n");
 		return;
 	}
 
@@ -482,7 +484,7 @@ void S_Init( void )
 		s_audioArena = Arena_Create( "Audio", AUDIO_ARENA_SIZE );
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SOUND, "------ Initializing Sound ------\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_sound), "------ Initializing Sound ------\n" );
 
 	Cvar_RegisterTable( sndMainDescs, ARRAY_LEN( sndMainDescs ), sndMainHandles );
 	s_volume            = sndMainHandles[SND_VOLUME];
@@ -500,7 +502,7 @@ void S_Init( void )
 		cv = Cvar_Register( &d );
 	}
 	if ( !cv->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound disabled.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_sound), "Sound disabled.\n" );
 	} else {
 
 		S_CodecInit();
@@ -522,13 +524,13 @@ void S_Init( void )
 			}
 
 			S_SoundInfo();
-			Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound initialization successful.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_sound), "Sound initialization successful.\n" );
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SOUND, "Sound initialization failed.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_sound), "Sound initialization failed.\n" );
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SOUND, "--------------------------------\n");
+	Com_Log( SEV_INFO, LOG_CH(ch_sound), "--------------------------------\n");
 }
 
 

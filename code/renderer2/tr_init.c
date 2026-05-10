@@ -45,10 +45,6 @@ cvar_t	*r_defaultFogParmsType;
 cvar_t	*r_globalLinearFogDrawSky;
 #endif
 
-cvar_t	*r_railWidth;
-cvar_t	*r_railCoreWidth;
-cvar_t	*r_railSegmentLength;
-
 cvar_t	*r_ignore;
 
 cvar_t	*r_detailTextures;
@@ -198,8 +194,6 @@ cvar_t	*r_portalOnly;
 cvar_t	*r_subdivisions;
 cvar_t	*r_lodCurveError;
 
-cvar_t	*r_overBrightBits;
-cvar_t	*r_mapOverBrightBits;
 cvar_t	*r_brightness;
 cvar_t	*r_mapBrightness;
 
@@ -228,15 +222,24 @@ int		max_polyverts;
 
 // for modular renderer
 #ifdef USE_RENDERER_DLOPEN
-void QDECL Com_Log_Impl( log_severity_t severity, logCategory_t cat, const char *fmt, ... )
+void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *fmt, ... )
 {
 	char buf[ MAXPRINTMSG ];
 	va_list	argptr;
-	(void)cat;
+	(void)channel;  // renderer DLL routes everything through ri.Log → "renderer"
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
 	ri.Log( severity, "%s", buf );
+}
+
+// Stub for q_shared.c's LOG_CH expansion. The renderer DLL has no access
+// to the engine's channel registry; everything is routed through ri.Log to
+// the top-level "renderer" channel anyway, so the returned id is unused.
+int Log_GetChannel( const char *name )
+{
+	(void)name;
+	return 0;
 }
 
 void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *fmt, ... )
@@ -273,11 +276,11 @@ static void InitOpenGL( void )
 	//		- r_ignorehwgamma
 	//		- r_gamma
 	//
-	
+
 	if ( glConfig.vidWidth == 0 )
 	{
 		GLint		temp;
-		
+
 		if ( !ri.GLimp_Init )
 		{
 			ri.Terminate( TERM_UNRECOVERABLE, "OpenGL interface is not initialized" );
@@ -296,7 +299,7 @@ static void InitOpenGL( void )
 		glConfig.maxTextureSize = temp;
 
 		// stubbed or broken drivers may have reported 0...
-		if ( glConfig.maxTextureSize <= 0 ) 
+		if ( glConfig.maxTextureSize <= 0 )
 		{
 			glConfig.maxTextureSize = 0;
 		}
@@ -373,10 +376,10 @@ void GL_CheckErrs( char *file, int line ) {
 }
 
 
-/* 
-============================================================================== 
- 
-						SCREEN SHOTS 
+/*
+==============================================================================
+
+						SCREEN SHOTS
 
 NOTE TTimo
 some thoughts about the screenshots system:
@@ -389,11 +392,11 @@ we use statics to store a count and start writing the first screenshot/screensho
 (with FS_FileExists / FS_FOpenFileWrite calls)
 FIXME: the statics don't get a reinit between fs_game changes
 
-============================================================================== 
-*/ 
+==============================================================================
+*/
 
-/* 
-================== 
+/*
+==================
 RB_ReadPixels
 
 Reads an image but takes care of alignment issues for reading RGB images.
@@ -406,51 +409,51 @@ alignment of packAlign to ensure efficient copying.
 Stores the length of padding after a line of pixels to address padlen
 
 Return value must be freed with ri.Hunk_FreeTempMemory()
-================== 
-*/  
+==================
+*/
 
 static byte *RB_ReadPixels(int x, int y, int width, int height, size_t *offset, int *padlen)
 {
 	byte *buffer, *bufstart;
 	int padwidth, linelen;
 	GLint packAlign;
-	
+
 	qglGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
-	
+
 	linelen = width * 3;
 	padwidth = PAD(linelen, packAlign);
-	
+
 	// Allocate a few more bytes so that we can choose an alignment we like
 	buffer = ri.Hunk_AllocateTempMemory(padwidth * height + *offset + packAlign - 1);
-	
+
 	bufstart = PADP((intptr_t) buffer + *offset, packAlign);
 
 	qglReadPixels(x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, bufstart);
-	
+
 	*offset = bufstart - buffer;
 	*padlen = padwidth - linelen;
-	
+
 	return buffer;
 }
 
-/* 
-================== 
+/*
+==================
 RB_TakeScreenshot
-================== 
-*/  
+==================
+*/
 static void RB_TakeScreenshot(int x, int y, int width, int height, const char *fileName)
 {
 	byte *allbuf, *buffer;
 	byte *srcptr, *destptr;
 	byte *endline, *endmem;
 	byte temp;
-	
+
 	int linelen, padlen;
 	size_t offset = 18, memcount;
-		
+
 	allbuf = RB_ReadPixels(x, y, width, height, &offset, &padlen);
 	buffer = allbuf + offset - 18;
-	
+
 	memset (buffer, 0, 18);
 	buffer[2] = 2;		// uncompressed type
 	buffer[12] = width & 255;
@@ -461,10 +464,10 @@ static void RB_TakeScreenshot(int x, int y, int width, int height, const char *f
 
 	// swap rgb to bgr and remove padding from line endings
 	linelen = width * 3;
-	
+
 	srcptr = destptr = allbuf + offset;
 	endmem = srcptr + (linelen + padlen) * height;
-	
+
 	while(srcptr < endmem)
 	{
 		endline = srcptr + linelen;
@@ -475,10 +478,10 @@ static void RB_TakeScreenshot(int x, int y, int width, int height, const char *f
 			*destptr++ = srcptr[2];
 			*destptr++ = srcptr[1];
 			*destptr++ = temp;
-			
+
 			srcptr += 3;
 		}
-		
+
 		// Skip the pad
 		srcptr += padlen;
 	}
@@ -494,10 +497,10 @@ static void RB_TakeScreenshot(int x, int y, int width, int height, const char *f
 	ri.Hunk_FreeTempMemory(allbuf);
 }
 
-/* 
-================== 
+/*
+==================
 RB_TakeScreenshotJPEG
-================== 
+==================
 */
 
 static void RB_TakeScreenshotJPEG(int x, int y, int width, int height, const char *fileName)
@@ -524,7 +527,7 @@ RB_TakeScreenshotCmd
 */
 const void *RB_TakeScreenshotCmd( const void *data ) {
 	const screenshotCommand_t	*cmd;
-	
+
 	cmd = (const screenshotCommand_t *)data;
 
 	// finish any 2D drawing if needed
@@ -535,8 +538,8 @@ const void *RB_TakeScreenshotCmd( const void *data ) {
 		RB_TakeScreenshotJPEG( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName);
 	else
 		RB_TakeScreenshot( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName);
-	
-	return (const void *)(cmd + 1);	
+
+	return (const void *)(cmd + 1);
 }
 
 /*
@@ -656,8 +659,8 @@ static void R_LevelShot( void ) {
 	ri.Log( SEV_INFO, "Wrote %s\n", checkname );
 }
 
-/* 
-================== 
+/*
+==================
 R_ScreenShot_f
 
 screenshot
@@ -666,8 +669,8 @@ screenshot [levelshot]
 screenshot [filename]
 
 Doesn't print the pacifier message if there is a second arg
-================== 
-*/  
+==================
+*/
 static void R_ScreenShot_f (void) {
 	char	checkname[MAX_OSPATH];
 	qboolean	silent;
@@ -775,7 +778,7 @@ const void *RB_TakeVideoFrameCmd( const void *data )
 		RB_EndSurface();
 
 	cmd = (const videoFrameCommand_t *)data;
-	
+
 	qglGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
 
 	linelen = cmd->width * 3;
@@ -788,7 +791,7 @@ const void *RB_TakeVideoFrameCmd( const void *data )
 	avipadlen = avipadwidth - linelen;
 
 	cBuf = PADP(cmd->captureBuffer, packAlign);
-		
+
 	qglReadPixels(0, 0, cmd->width, cmd->height, GL_RGB,
 		GL_UNSIGNED_BYTE, cBuf);
 
@@ -809,11 +812,11 @@ const void *RB_TakeVideoFrameCmd( const void *data )
 	{
 		byte *lineend, *memend;
 		byte *srcptr, *destptr;
-	
+
 		srcptr = cBuf;
 		destptr = cmd->encodeBuffer;
 		memend = srcptr + memcount;
-		
+
 		// swap R and B and remove line paddings
 		while(srcptr < memend)
 		{
@@ -825,17 +828,17 @@ const void *RB_TakeVideoFrameCmd( const void *data )
 				*destptr++ = srcptr[0];
 				srcptr += 3;
 			}
-			
+
 			memset(destptr, '\0', avipadlen);
 			destptr += avipadlen;
-			
+
 			srcptr += padlen;
 		}
-		
+
 		ri.CL_WriteAVIVideoFrame(cmd->encodeBuffer, avipadwidth * cmd->height);
 	}
 
-	return (const void *)(cmd + 1);	
+	return (const void *)(cmd + 1);
 }
 
 //============================================================================
@@ -920,7 +923,7 @@ static void R_PrintLongString(const char *string) {
 GfxInfo_f
 ================
 */
-static void GfxInfo_f( void ) 
+static void GfxInfo_f( void )
 {
 	const char *enablestrings[] =
 	{
@@ -980,7 +983,7 @@ static void GfxInfo_f( void )
 	ri.Log( SEV_INFO, "texture bits: %d\n", r_texturebits->integer );
 	ri.Log( SEV_INFO, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
 	ri.Log( SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
-	
+
 	if ( r_finish->integer ) {
 		ri.Log( SEV_INFO, "Forcing glFinish\n" );
 	}
@@ -992,7 +995,7 @@ static void GfxInfo_f( void )
 GfxMemInfo_f
 ================
 */
-static void GfxMemInfo_f( void ) 
+static void GfxMemInfo_f( void )
 {
 	switch (glRefConfig.memInfo)
 	{
@@ -1045,7 +1048,7 @@ static void GfxMemInfo_f( void )
 R_Register
 ===============
 */
-static void R_Register( void ) 
+static void R_Register( void )
 {
 	//
 	// latched and archived variables
@@ -1089,12 +1092,10 @@ static void R_Register( void )
 	r_ext_multisample = ri.Cvar_Get( "r_ext_multisample", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_multisample, "0", "8", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ext_multisample, "For anti-aliasing geometry edges." );
-	r_overBrightBits = ri.Cvar_Get ("r_overBrightBits", "1", CVAR_ARCHIVE | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_overBrightBits, "Sets the intensity of overall brightness of texture pixels." );
 	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_brightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_brightness,
-		"Float-based overall brightness multiplier (replaces r_overBrightBits).\n"
+		"Float-based overall brightness multiplier.\n"
 		"Range 0.25-32, default 2.0." );
 	r_ignorehwgamma = ri.Cvar_Get( "r_ignorehwgamma", "0", CVAR_ARCHIVE | CVAR_LATCH);
 	ri.Cvar_SetDescription( r_ignorehwgamma, "Overrides hardware gamma capabilities." );
@@ -1210,12 +1211,10 @@ static void R_Register( void )
 	//
 	r_fullbright = ri.Cvar_Get ("r_fullbright", "0", CVAR_LATCH|CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_fullbright, "Debugging tool to render the entire level without lighting." );
-	r_mapOverBrightBits = ri.Cvar_Get ("r_mapOverBrightBits", "2", CVAR_LATCH );
-	ri.Cvar_SetDescription( r_mapOverBrightBits, "Sets the number of overbright bits baked into all lightmaps and map data." );
 	r_mapBrightness = ri.Cvar_Get( "r_mapBrightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_mapBrightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_mapBrightness,
-		"Float-based map (lightmap) brightness multiplier (replaces r_mapOverBrightBits).\n"
+		"Float-based map (lightmap) brightness multiplier.\n"
 		"Range 0.25-32, default 2.0." );
 	r_intensity = ri.Cvar_Get ("r_intensity", "1", CVAR_LATCH );
 	ri.Cvar_SetDescription( r_intensity, "Global texture lighting scale." );
@@ -1260,12 +1259,6 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_gamma, "Gamma correction factor." );
 	r_facePlaneCull = ri.Cvar_Get ("r_facePlaneCull", "1", CVAR_ARCHIVE );
 	ri.Cvar_SetDescription( r_facePlaneCull, "Enables culling of planar surfaces with back side test." );
-	r_railWidth = ri.Cvar_Get( "r_railWidth", "16", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_railWidth, "Radius of railgun trails." );
-	r_railCoreWidth = ri.Cvar_Get( "r_railCoreWidth", "6", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_railCoreWidth, "Size of railgun trail rings when enabled in game code (normally \\cg_oldRail 0)." );
-	r_railSegmentLength = ri.Cvar_Get( "r_railSegmentLength", "32", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_railSegmentLength, "Length of segments in railgun trails." );
 
 	r_ambientScale = ri.Cvar_Get( "r_ambientScale", "0.6", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_ambientScale, "Light grid ambient light scaling on entity models." );
@@ -1414,7 +1407,7 @@ static void RE_SyncRender( void )
 R_Init
 ===============
 */
-void R_Init( void ) {	
+void R_Init( void ) {
 	int	err;
 	byte *ptr;
 
@@ -1601,7 +1594,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	memset( &re, 0, sizeof( re ) );
 
 	if ( apiVersion != REF_API_VERSION ) {
-		ri.Log( SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n", 
+		ri.Log( SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n",
 			REF_API_VERSION, apiVersion );
 		return NULL;
 	}
@@ -1634,7 +1627,12 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.LightForPoint = R_LightForPoint;
 	re.AddLightToScene = RE_AddLightToScene;
 	re.AddAdditiveLightToScene = RE_AddAdditiveLightToScene;
-	re.AddRailTrailParams = NULL; // no GPU compute in OpenGL2 renderer
+	re.AddRibbonToScene = RE_AddRibbonToScene;
+	re.AddBeamToScene = RE_AddBeamToScene;
+	re.AddSpriteToScene = RE_AddSpriteToScene;
+	re.EmitParticles = RE_EmitParticles;
+	re.AddDecalToScene = RE_AddDecalToScene;
+	re.RegisterParticleClass = RE_RegisterParticleClass;
 #if FEAT_CORONA
 	re.AddCoronaToScene = RE_AddCoronaToScene;
 #endif

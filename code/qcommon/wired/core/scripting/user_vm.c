@@ -17,6 +17,8 @@ rcon-privileged bindings.
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_scripting, "scripting" );
 
 #define MAX_BINDING_REGISTRARS  16
 #define DEFAULT_MEMORY_MB       50
@@ -126,16 +128,16 @@ static int uvm_print( lua_State *L ) {
 
         if ( i > 1 ) {
             if ( s_capture ) uvm_capture_append( "\t" );
-            else             Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "\t" );
+            else             Com_Log( SEV_INFO, LOG_CH(ch_scripting), "\t" );
         }
         if ( s_capture ) uvm_capture_append( s );
-        else             Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "%s", s );
+        else             Com_Log( SEV_INFO, LOG_CH(ch_scripting), "%s", s );
 
         lua_pop( L, 1 );
     }
 
     if ( s_capture ) uvm_capture_append( "\n" );
-    else             Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "\n" );
+    else             Com_Log( SEV_INFO, LOG_CH(ch_scripting), "\n" );
 
     return 0;
 }
@@ -194,7 +196,7 @@ void UserVM_Init( void ) {
     s_adminCtx = qfalse;
     s_capture  = NULL;
 
-    Com_Log( SEV_INFO, LOG_CAT_SCRIPTING, "WiredCore/Scripting: UserVM initialized (cap %d MB, insn limit %d)\n",
+    Com_Log( SEV_INFO, LOG_CH(ch_scripting), "WiredCore/Scripting: UserVM initialized (cap %d MB, insn limit %d)\n",
                 s_memoryMbCvar->integer, s_insnLimitCvar->integer );
 }
 
@@ -234,7 +236,7 @@ void UserVM_RegisterBindings( UserVM_BindingFn fn ) {
         return;
     }
     if ( s_numRegistrars >= MAX_BINDING_REGISTRARS ) {
-        COM_WARN( LOG_CAT_SCRIPTING, "UserVM_RegisterBindings: table full (max %d)\n",
+        COM_WARN( LOG_CH(ch_scripting), "UserVM_RegisterBindings: table full (max %d)\n",
                     MAX_BINDING_REGISTRARS );
         return;
     }

@@ -40,7 +40,7 @@ typedef struct {
 
 typedef struct adpcm_state {
 	short	sample;		/* Previous output value */
-	char	index;		/* Index into stepsize table */
+	byte	index;		/* Index into stepsize table (always [0, 88]) */
 } adpcm_state_t;
 
 typedef	struct sndBuffer_s {

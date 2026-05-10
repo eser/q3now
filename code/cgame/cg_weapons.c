@@ -1,4 +1,4 @@
-/*
+﻿/*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
 
@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // cg_weapons.c -- events and effects dealing with weapons
 #include "cg_local.h"
+#include "../qcommon/wired/render/primitives.h"
+#include "../qcommon/wired/render/traps.h"
 
 /*
 ==========================
@@ -194,8 +196,6 @@ static void CG_ShotgunEjectBrass( centity_t *cent ) {
 // 	smoke->leType = LE_SCALE_FADE;
 // }
 
-#if FEAT_RAIL_TRAIL == 0
-
 /*
 ==========================
 CG_RailTrail — Q2-spirit modernized rail trail
@@ -216,6 +216,15 @@ static railTrail_t  cg_railTrails[MAX_RAIL_TRAILS];
 
 // shared temp buffer for per-frame fade submission (avoids stack pressure)
 static polyVert_t   cg_railTempVerts[MAX_RAIL_SEGMENTS * 4];
+
+// Helix GPU-ribbon scratch. Sized at MAX_RAIL_SEGMENTS = 2048 which
+// is also RIBBON_MAX_POINTS — the per-call cap on
+// trap_R_AddRibbonToScene. ~96 KB; file-static rather than a stack
+// local to avoid stack pressure on the rare deep call chain. Reused
+// across all active rail trails — only one trail's worth of points
+// are alive at any instant since trap_R_AddRibbonToScene memcpies
+// out before returning.
+static ribbonPoint_t cg_railHelixPoints[MAX_RAIL_SEGMENTS];
 
 /*
 ==========================
@@ -373,6 +382,47 @@ void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end ) {
 		CG_BuildBillboardQuad( &trail->sparks[i * 4], trail->sparkOrg[i], 0.3f, sparkColor );
 	}
 
+	// ── 4. GPU particle emission (default path) ────────────────────
+	//
+	// When cg_cpuEffects == 0 (default) the per-frame CPU debris
+	// and sparks loops in CG_AddRailTrails are skipped; instead each
+	// trail emits once at spawn into the GPU particle pool. The
+	// compute shader integrates each particle over its lifetime; the
+	// render shader draws billboards. Helix is unaffected — it
+	// remains on the CPU poly path regardless of this cvar.
+	//
+	// CPU spawn-time setup above (debrisOrg/Delta and spark arrays)
+	// is left intact so flipping the cvar at runtime back to 1
+	// resumes the CPU path mid-session without re-firing.
+	if ( !cg_cpuEffects.integer ) {
+		emitterDesc_t emitter;
+
+		// Debris: along trail->start..trail->end, MAX_RAIL_DEBRIS
+		// particles, EMIT_PATH + SCATTER_CUBE per the rail_debris
+		// class definition.
+		memset( &emitter, 0, sizeof( emitter ) );
+		emitter.cls   = cgs.media.railDebrisClass;
+		emitter.count = MAX_RAIL_DEBRIS;
+		VectorCopy( trail->start,    emitter.origin );
+		VectorCopy( trail->end,      emitter.end );
+		VectorCopy( trail->beamAxis, emitter.axis );
+		emitter.colorTint[0] = 1.0f; emitter.colorTint[1] = 1.0f;
+		emitter.colorTint[2] = 1.0f; emitter.colorTint[3] = 1.0f;
+		trap_R_EmitParticles( &emitter );
+
+		// Sparks: at trail->end with impactNormal as cone axis,
+		// MAX_RAIL_SPARKS particles, EMIT_POINT + VEL_AXIAL_PLUS_CUBE
+		// per the rail_sparks class definition.
+		memset( &emitter, 0, sizeof( emitter ) );
+		emitter.cls   = cgs.media.railSparksClass;
+		emitter.count = MAX_RAIL_SPARKS;
+		VectorCopy( trail->end,          emitter.origin );
+		VectorCopy( trail->impactNormal, emitter.axis );
+		emitter.colorTint[0] = 1.0f; emitter.colorTint[1] = 1.0f;
+		emitter.colorTint[2] = 1.0f; emitter.colorTint[3] = 1.0f;
+		trap_R_EmitParticles( &emitter );
+	}
+
 	trail->active = qtrue;
 }
 
@@ -404,43 +454,26 @@ void CG_AddRailTrails( void ) {
 		elapsed = ( cg.time - trail->startTime ) / 1000.0f;
 		alpha = 1.0f - frac;
 
-		// ── GPU helix path: submit trail params to renderer for compute dispatch ──
-		{
-			// ease-out curve for evolving params
-			float easedFrac  = 1.0f - (1.0f - frac) * (1.0f - frac);
-			float curRadius  = 2.0f + easedFrac * 2.0f;
-			float curSpacing = RAIL_HELIX_SPACING * ( 1.0f - easedFrac * 0.667f );
-			float curWidth   = RAIL_RIBBON_WIDTH * ( 1.0f + easedFrac * 1.5f );
-			int   numSegs    = (int)( trail->beamLen / curSpacing );
-			int   k;
-			railTrailParams_t params;
+		// ── Helix ──
+		//
+		// cg_cpuEffects 0 (default): GPU path — one
+		//   trap_R_AddRibbonToScene per active trail with
+		//   PRIM_FLAG_CUSTOM_NORMAL. The renderer's ribbon vertex
+		//   shader uses each point's normal directly as the extrude
+		//   axis, reproducing the path-aligned twist the CPU loop
+		//   builds from cross(beamAxis, perpAxis[ring]).
+		// cg_cpuEffects 1: legacy CPU path — per-segment quads via
+		//   trap_R_AddPolyToScene (one call per segment, ~250 calls
+		//   per trail per frame). Kept for A/B compare and
+		//   regression fallback.
+		if ( cg_cpuEffects.integer ) {
 
-			if ( numSegs > MAX_RAIL_SEGMENTS ) numSegs = MAX_RAIL_SEGMENTS;
-			if ( numSegs < 2 ) numSegs = 2;
-
-			memset( &params, 0, sizeof( params ) );
-
-			// pack TrailParams matching GLSL layout
-			VectorCopy( trail->start, params.start ); params.start[3] = trail->beamLen;
-			VectorCopy( trail->beamAxis, params.beamAxis ); params.beamAxis[3] = frac;
-			for ( k = 0; k < 36; k++ ) {
-				VectorCopy( trail->perpAxis[k], params.perpAxis[k] );
-			}
-			params.params[0] = curRadius;
-			params.params[1] = curSpacing;
-			params.params[2] = curWidth;
-			params.params[3] = (float)numSegs;
-			params.color[0] = 80.0f / 255.0f;   // turquoise R
-			params.color[1] = 200.0f / 255.0f;  // turquoise G
-			params.color[2] = 1.0f;              // turquoise B
-			params.color[3] = alpha;
-			params.extra[0] = (float)RAIL_HELIX_ROTATION;
-			params.extra[1] = elapsed;
-
-			trap_R_AddRailTrailParams( &params );
-		}
-
-		// ── CPU helix (always runs — GPU path not yet producing visible output) ──
+		// === CPU PATH (legacy; cg_cpuEffects == 1) =================
+		// Body verbatim from pre-migration; do not edit inside this
+		// block. The sprite primitive's camera-facing billboards
+		// overlapped heavily along the spiral path, saturating to
+		// white, which is why this path was kept after the sprite
+		// migration was reverted.
 		{
 			// ease-out curve: starts slow, accelerates at end
 			float easedFrac  = 1.0f - (1.0f - frac) * (1.0f - frac);
@@ -529,6 +562,133 @@ void CG_AddRailTrails( void ) {
 			}
 		}
 
+		} else {
+
+		// === GPU PATH (default; cg_cpuEffects == 0) ================
+		// Builds N spiral sample positions and submits ONE ribbon
+		// with PRIM_FLAG_CUSTOM_NORMAL. Each point carries its own
+		// world-space position, half-width, RGBA, and unit extrude
+		// normal — the ribbon vertex shader reads .normal directly
+		// (no cross-product fallback). The N points form N-1 quad
+		// segments per the ribbon shader's segIdx → points[i],
+		// points[i+1] indexing.
+		//
+		// The CPU loop emits a quad per CPU iteration using sp0/sp1
+		// and rn0/rn1; equivalently, it walks N sample positions
+		// and forms N-1 segments. The migration walks the same
+		// sample positions and lets the ribbon shader form the
+		// segments. Per-segment alpha in CPU was set from the
+		// segment's start vertex; in ribbon mode each point carries
+		// its own alpha and the GPU interpolates linearly across
+		// each segment. The alpha gradient between adjacent points
+		// is small (frac is fixed for the frame; segPos changes by
+		// step/(numSegs-1) per point), so the interpolation is
+		// visually indistinguishable from the CPU's stepped values.
+		{
+			// Same evolved parameters as the CPU branch.
+			float  easedFrac  = 1.0f - (1.0f - frac) * (1.0f - frac);
+			float  curRadius  = 2.0f + easedFrac * 2.0f;
+			float  curSpacing = RAIL_HELIX_SPACING * ( 1.0f - easedFrac * 0.667f );
+			float  curWidth   = RAIL_RIBBON_WIDTH * ( 1.0f + easedFrac * 1.5f );
+			int    numSegs    = (int)( trail->beamLen / curSpacing );
+			int    step       = 1;
+			int    numPoints  = 0;
+			vec3_t midpoint;
+
+			if ( numSegs > MAX_RAIL_SEGMENTS ) numSegs = MAX_RAIL_SEGMENTS;
+			if ( numSegs < 2 ) numSegs = 2;
+
+			// Distance LOD — same threshold as CPU.
+			midpoint[0] = trail->start[0] + 0.5f * (trail->end[0] - trail->start[0]);
+			midpoint[1] = trail->start[1] + 0.5f * (trail->end[1] - trail->start[1]);
+			midpoint[2] = trail->start[2] + 0.5f * (trail->end[2] - trail->start[2]);
+			if ( Distance( cg.refdef.vieworg, midpoint ) > 1000.0f ) {
+				step = 2;
+			}
+
+			// Walk sample positions j = 0, step, 2*step, ...,
+			// up to numSegs - 1 INCLUSIVE — one more sample than
+			// the CPU loop's `j < numSegs - 1` to capture the final
+			// d1 endpoint that the CPU iteration would have used as
+			// its sp1. N samples → N-1 ribbon segments → N-1
+			// quads, matching CPU's quad count exactly when both
+			// paths use the same step.
+			for ( j = 0; j <= numSegs - 1; j += step ) {
+				float        d, segPos, unwindFade, a;
+				int          ring;
+				ribbonPoint_t *p;
+
+				d = trail->beamLen - j * curSpacing;
+				if ( d < 0.0f ) {
+					// CPU's `if (d1 < 0) break` analogue. Stops
+					// adding points past the muzzle.
+					break;
+				}
+
+				ring = ( j * RAIL_HELIX_ROTATION ) % 36;
+				if ( ring < 0 ) ring += 36; // defensive; j*RAIL_HELIX_ROTATION is non-negative in practice
+
+				p = &cg_railHelixPoints[ numPoints ];
+
+				// Position: same formula as CPU's sp0.
+				VectorMA( trail->start, d,         trail->beamAxis,        p->pos );
+				VectorMA( p->pos,       curRadius, trail->perpAxis[ring],  p->pos );
+
+				// Normal: same formula as CPU's rn0. Caller-side
+				// normalize is required by the ribbon shader's
+				// PRIM_FLAG_CUSTOM_NORMAL contract.
+				CrossProduct( trail->beamAxis, trail->perpAxis[ring], p->normal );
+				VectorNormalize( p->normal );
+				p->_pad = 0.0f;
+
+				// Half-width: uniform across the trail; written per
+				// point because ribbonPoint_t carries it per-point.
+				p->width = curWidth;
+
+				// Per-point alpha: same unwind-fade formula CPU
+				// uses for the segment-START vertex. CPU emits the
+				// quad with this alpha on all four vertices; in
+				// ribbon mode the GPU interpolates between adjacent
+				// points' alpha, producing a smoother but visually
+				// equivalent fade.
+				segPos = (float)j / ( numSegs - 1 );
+				unwindFade = 1.0f - frac * ( 1.0f + segPos );
+				if ( unwindFade < 0.0f ) unwindFade = 0.0f;
+				a = alpha * unwindFade;
+
+				// Turquoise/ocean-blue: R=80 G=200 B=255. Float
+				// [0..1] per primitives.h convention (HDR-friendly,
+				// no quantization).
+				p->rgba[0] =  80.0f / 255.0f;
+				p->rgba[1] = 200.0f / 255.0f;
+				p->rgba[2] = 1.0f;
+				// (B=255/255 → 1.0f; written explicitly so the maxed channel reads at a glance.)
+				p->rgba[3] = a;
+
+				numPoints++;
+			}
+
+			// Submit. Ribbon trap takes four scalars (not a
+			// ribbonDesc_t pointer) so the descriptor's points
+			// pointer can be VMA-translated cleanly across the
+			// WASM-VM boundary; see traps.h for rationale.
+			if ( numPoints >= 2 ) {
+				trap_R_AddRibbonToScene( cg_railHelixPoints, numPoints,
+					cgs.media.whiteShader, PRIM_FLAG_CUSTOM_NORMAL );
+			}
+		}
+
+		}
+
+		// ── Debris + impact sparks ──
+		//
+		// cg_cpuEffects == 1 → run the legacy CPU per-frame loops
+		// (trap_R_AddPolyToScene). Default 0 → skip; the GPU particle
+		// path emitted at trail spawn time in CG_RailTrail handles
+		// these effects via trap_R_EmitParticles. Helix block above
+		// runs unconditionally.
+		if ( cg_cpuEffects.integer ) {
+
 		// ── Debris (with gravity drift) ──
 
 		if ( trail->numDebris > 0 ) {
@@ -588,6 +748,8 @@ void CG_AddRailTrails( void ) {
 			}
 		}
 
+		} // end cg_cpuEffects gate
+
 		// ── Dynamic light (synced fade) ──
 
 		{
@@ -598,169 +760,6 @@ void CG_AddRailTrails( void ) {
 	}
 }
 
-#elif FEAT_RAIL_TRAIL == 1
-
-/*
-==========================
-CG_RailTrail
-==========================
-*/
-void CG_RailTrail (clientInfo_t *ci, vec3_t start, vec3_t end) {
-	vec3_t axis[36], move, move2, vec, temp;
-	float  len;
-	int    i, j, skip;
-
-	localEntity_t *le;
-	refEntity_t   *re;
-
-#define RADIUS   4
-#define ROTATION 1
-#define SPACING  5
-
-	start[2] -= 4;
-
-	le = CG_AllocLocalEntity();
-	re = &le->refEntity;
-
-	le->leType = LE_FADE_RGB;
-	le->startTime = cg.time;
-	le->endTime = cg.time + RAIL_TRAILTIME;
-	le->lifeRate = 1.0 / (le->endTime - le->startTime);
-
-	re->shaderTime.f =cg.time / 1000.0f;
-	re->reType = RT_RAIL_CORE;
-	re->customShader = cgs.media.railCoreShader;
-
-	VectorCopy(start, re->origin);
-	VectorCopy(end, re->oldorigin);
-
-	re->shaderRGBA[0] = colorIndigo[0] * 255;
-	re->shaderRGBA[1] = colorIndigo[1] * 255;
-	re->shaderRGBA[2] = colorIndigo[2] * 255;
-	re->shaderRGBA[3] = 255;
-
-	le->color[0] = colorIndigo[0] * 0.75;
-	le->color[1] = colorIndigo[1] * 0.75;
-	le->color[2] = colorIndigo[2] * 0.75;
-	le->color[3] = 1.0f;
-
-	AxisClear( re->axis );
-
-	VectorCopy (start, move);
-	VectorSubtract (end, start, vec);
-	len = VectorNormalize (vec);
-	PerpendicularVector(temp, vec);
-	for (i = 0 ; i < 36; i++)
-	{
-		RotatePointAroundVector(axis[i], vec, temp, i * 10);//banshee 2.4 was 10
-	}
-
-	VectorMA(move, 20, vec, move);
-	VectorScale (vec, SPACING, vec);
-
-	skip = -1;
-
-	j = 18;
-	for (i = 0; i < len; i += SPACING)
-	{
-		if (i != skip)
-		{
-			skip = i + SPACING;
-			le = CG_AllocLocalEntity();
-			re = &le->refEntity;
-			le->leFlags = LEF_PUFF_DONT_SCALE;
-			le->leType = LE_MOVE_SCALE_FADE;
-			le->startTime = cg.time;
-			le->endTime = cg.time + (i>>1) + 500;
-			le->lifeRate = 1.0 / (le->endTime - le->startTime);
-
-			re->shaderTime.f =cg.time / 1000.0f;
-			re->reType = RT_SPRITE;
-			re->radius = 1.1f;
-			re->customShader = cgs.media.railRingsShader;
-
-			re->shaderRGBA[0] = colorSkyBlue[0] * 255;
-			re->shaderRGBA[1] = colorSkyBlue[1] * 255;
-			re->shaderRGBA[2] = colorSkyBlue[2] * 255;
-			re->shaderRGBA[3] = 255;
-
-			le->color[0] = colorSkyBlue[0] * 0.75;
-			le->color[1] = colorSkyBlue[1] * 0.75;
-			le->color[2] = colorSkyBlue[2] * 0.75;
-			le->color[3] = 1.0f;
-
-			le->pos.trType = TR_LINEAR;
-			le->pos.trTime = cg.time;
-
-			VectorCopy( move, move2);
-			VectorMA(move2, RADIUS , axis[j], move2);
-			VectorCopy(move2, le->pos.trBase);
-
-			le->pos.trDelta[0] = axis[j][0]*6;
-			le->pos.trDelta[1] = axis[j][1]*6;
-			le->pos.trDelta[2] = axis[j][2]*6;
-		}
-
-		VectorAdd (move, vec, move);
-
-        j = j + ROTATION < 36 ? j + ROTATION : (j + ROTATION) % 36;
-	}
-}
-
-#else
-
-/*
-==========================
-CG_RailTrail — Alternate rail trail (Nemesis "Wicked" style)
-Double core beam with longer fade time. Selected via cg_railTrail 1.
-==========================
-*/
-void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end ) {
-	localEntity_t *le;
-	refEntity_t   *re;
-
-	// first core: longer-lasting LE_FADE_RGB
-	le = CG_AllocLocalEntity();
-	re = &le->refEntity;
-	le->leType = LE_FADE_RGB;
-	le->startTime = cg.time;
-	le->endTime = cg.time + RAIL_CORE_TRAILTIME;
-	le->lifeRate = 1.0 / ( le->endTime - le->startTime );
-	re->shaderTime.f = cg.time / 1000.0f;
-	re->reType = RT_RAIL_CORE;
-	re->customShader = cgs.media.railCoreShader;
-	VectorCopy( start, re->origin );
-	VectorCopy( end, re->oldorigin );
-	re->origin[2] -= 8;
-	re->oldorigin[2] -= 8;
-	le->color[0] = ci->color1[0] * 0.75;
-	le->color[1] = ci->color1[1] * 0.75;
-	le->color[2] = ci->color1[2] * 0.75;
-	le->color[3] = 1.0f;
-	AxisClear( re->axis );
-
-	// second core: offset slightly, fades independently
-	le = CG_AllocLocalEntity();
-	re = &le->refEntity;
-	le->leType = LE_FADE_RGB;
-	le->startTime = cg.time;
-	le->endTime = cg.time + RAIL_CORE_TRAILTIME;
-	le->lifeRate = 1.0 / ( le->endTime - le->startTime );
-	re->shaderTime.f = cg.time / 1000.0f;
-	re->reType = RT_RAIL_CORE;
-	re->customShader = cgs.media.railCoreShader;
-	VectorCopy( start, re->origin );
-	VectorCopy( end, re->oldorigin );
-	re->origin[2] -= 4;
-	re->oldorigin[2] -= 4;
-	le->color[0] = ci->color2[0] * 0.75;
-	le->color[1] = ci->color2[1] * 0.75;
-	le->color[2] = ci->color2[2] * 0.75;
-	le->color[3] = 1.0f;
-	AxisClear( re->axis );
-}
-
-#endif
 
 /*
 ==========================
@@ -999,35 +998,41 @@ CG_GrappleTrail
 */
 void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	vec3_t	origin;
+	vec3_t	beamStart;
 	entityState_t	*es;
-	vec3_t			forward, up;
-	refEntity_t		beam;
+	vec3_t	up;
 
 	es = &ent->currentState;
 
 	BG_EvaluateTrajectory( &es->pos, cg.time, origin );
 	ent->trailTime = cg.time;
 
-	memset( &beam, 0, sizeof( beam ) );
-	//FIXME adjust for muzzle position
-	VectorCopy ( cg_entities[ ent->currentState.otherEntityNum ].lerpOrigin, beam.origin );
-	beam.origin[2] += 26;
-	AngleVectors( cg_entities[ ent->currentState.otherEntityNum ].lerpAngles, forward, NULL, up );
-	VectorMA( beam.origin, -6, up, beam.origin );
-	VectorCopy( origin, beam.oldorigin );
+	// FIXME adjust for muzzle position
+	VectorCopy( cg_entities[ ent->currentState.otherEntityNum ].lerpOrigin, beamStart );
+	beamStart[2] += 26;
+	AngleVectors( cg_entities[ ent->currentState.otherEntityNum ].lerpAngles, NULL, NULL, up );
+	VectorMA( beamStart, -6, up, beamStart );
 
-	if (Distance( beam.origin, beam.oldorigin ) < 64 )
+	if ( Distance( beamStart, origin ) < 64 ) {
 		return; // Don't draw if close
+	}
 
-	beam.reType = RT_LIGHTNING;
-	beam.customShader = cgs.media.lightningShader;
-
-	AxisClear( beam.axis );
-	beam.shaderRGBA[0] = 0xff;
-	beam.shaderRGBA[1] = 0xff;
-	beam.shaderRGBA[2] = 0xff;
-	beam.shaderRGBA[3] = 0xff;
-	trap_R_AddRefEntityToScene( &beam );
+	beamDesc_t bd;
+	memset( &bd, 0, sizeof( bd ) );
+	VectorCopy( beamStart, bd.start );
+	VectorCopy( origin, bd.end );
+	bd.startWidth     = 8.0f;
+	bd.endWidth       = 8.0f;
+	bd.startColor[0] = bd.startColor[1] = bd.startColor[2] = bd.startColor[3] = 1.0f;
+	bd.endColor[0]   = bd.endColor[1]   = bd.endColor[2]   = bd.endColor[3]   = 1.0f;
+	bd.shader         = cgs.media.lightningShaderPrim;
+	bd.duration       = 0.0f;
+	bd.axialCopies    = 1;             // rope-like, NOT cross (legacy was 4 forced by engine)
+	bd.startEntityNum = -1;
+	bd.endEntityNum   = -1;
+	bd.uvScroll[0]    = 0.0f;          // shader handles scroll
+	bd.uvScroll[1]    = 0.0f;
+	trap_R_AddBeamToScene( &bd );
 }
 
 /*
@@ -1184,12 +1189,16 @@ void CG_RegisterWeapon( int weaponNum ) {
 		weaponInfo->firingSecSound = trap_S_RegisterSound( "sound/weapons/lightning/lg_hum.opus", qfalse );
 		weaponInfo->flashSound[0] = trap_S_RegisterSound( "sound/weapons/lightning/lg_fire.opus", qfalse );
 
-		// cgs.media.lightningShader = trap_R_RegisterShader( "lightningBoltNew");
 		cgs.media.lightningExplosionModel = trap_R_RegisterModel( "models/weaphits/crackle.md3" );
 		cgs.media.sfx_lghit1 = trap_S_RegisterSound( "sound/weapons/lightning/lg_hit.opus", qfalse );
 		cgs.media.sfx_lghit2 = trap_S_RegisterSound( "sound/weapons/lightning/lg_hit2.opus", qfalse );
 		cgs.media.sfx_lghit3 = trap_S_RegisterSound( "sound/weapons/lightning/lg_hit3.opus", qfalse );
 
+		// Particle class for the impact-spark shower. Must run after
+		// cgs.media.lightningSparkShader is bound — that handle is
+		// registered in CG_RegisterGraphics (cg_main.c) which precedes
+		// CG_RegisterWeapon, so it is already valid here.
+		CG_RegisterLightningParticleClasses();
 		break;
 
 	case WP_RAILGUN:
@@ -1201,8 +1210,12 @@ void CG_RegisterWeapon( int weaponNum ) {
 		cgs.media.railExplosionShader = trap_R_RegisterShader( "railExplosion" );
 		cgs.media.railRingsShader = trap_R_RegisterShader( "railDisc" );
 		cgs.media.railCoreShader = trap_R_RegisterShader( "railCore" );
-		cgs.media.railHelixShader = trap_R_RegisterShader( "q3now/railHelix" );
-		cgs.media.railDebrisShader = trap_R_RegisterShader( "q3now/railDebris" );
+
+		// Particle classes for GPU debris + sparks paths. Must run
+		// after the rail shaders above are bound — the class defs
+		// reference cgs.media.railRingsShader and cgs.media.whiteShader.
+		// whiteShader was already bound earlier in CG_Init.
+		CG_RegisterRailParticleClasses();
 		break;
 
 	case WP_PLASMA_RIFLE:
@@ -1376,7 +1389,6 @@ angle)
 */
 static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	trace_t  trace;
-	refEntity_t  beam;
 	vec3_t   forward;
 	vec3_t   muzzlePoint, endPoint;
 	int      anim;
@@ -1384,8 +1396,6 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	if (cent->currentState.weapon != WP_LIGHTNING_GUN) {
 		return;
 	}
-
-	memset( &beam, 0, sizeof( beam ) );
 
 	// interpolate beam between server angle and client prediction
 	if (cent->currentState.number == cg.predictedPlayerState.clientNum) {
@@ -1454,44 +1464,117 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 	}
 // eser - lightning beams
 
-	// this is the endpoint
-	VectorCopy( trace.endpos, beam.oldorigin );
+	// === Beam submission =====================================
+	// Phase 5I: legacy DoRailCore + DoRailCoreTapered two-segment
+	// shape. Main body uniform width 8 from flash.origin to
+	// (trace.endpos - 64u along axis); tail tapers from width 8 to
+	// width 0 over the last 64u near the wall. Both segments use
+	// the same shader (multi-stage scroll handled engine-side via
+	// the per-stage SSBO), 4-axial cross, full white.
+	//
+	// Short-beam path (length <= 64): the entire beam is the tail;
+	// no main-body submission. Avoids degenerate negative-length
+	// main body when firing point-blank.
+	{
+		const float kTaperLength = 64.0f;
+		vec3_t      axis;
+		float       totalLength;
+		vec3_t      axisN;
+		vec3_t      splitPoint;
+		beamDesc_t  bd;
 
-	// use the provided origin, even though it may be slightly
-	// different than the muzzle origin
-	VectorCopy( origin, beam.origin );
+		VectorSubtract( trace.endpos, origin, axis );
+		totalLength = VectorLength( axis );
 
-	beam.reType = RT_LIGHTNING;
-	beam.customShader = cgs.media.lightningShader;
-	// eser - wide lightning beam
-	beam.radius = 8;
-	// eser - wide lightning beam
+		if ( totalLength <= kTaperLength ) {
+			// Short beam: entire length is tail. Single tapered submission.
+			memset( &bd, 0, sizeof( bd ) );
+			VectorCopy( origin, bd.start );
+			VectorCopy( trace.endpos, bd.end );
+			bd.startWidth     = 8.0f;
+			bd.endWidth       = 0.0f;          // taper to point at wall
+			bd.startColor[0] = bd.startColor[1] = bd.startColor[2] = 1.0f;
+			bd.startColor[3] = 1.0f;
+			bd.endColor[0]   = bd.endColor[1]   = bd.endColor[2]   = 1.0f;
+			bd.endColor[3]   = 1.0f;
+			bd.shader         = cgs.media.lightningShaderPrim;
+			bd.duration       = 0.0f;
+			bd.axialCopies    = 4;
+			bd.startEntityNum = -1;
+			bd.endEntityNum   = -1;
+			bd.uvScroll[0]    = 0.0f;
+			bd.uvScroll[1]    = 0.0f;
+			trap_R_AddBeamToScene( &bd );
+		} else {
+			// Long beam: uniform main body + tapered tail.
+			VectorCopy( axis, axisN );
+			VectorNormalize( axisN );
+			VectorMA( trace.endpos, -kTaperLength, axisN, splitPoint );
 
-	trap_R_AddRefEntityToScene( &beam );
+			// Main body — uniform width.
+			memset( &bd, 0, sizeof( bd ) );
+			VectorCopy( origin, bd.start );
+			VectorCopy( splitPoint, bd.end );
+			bd.startWidth     = 8.0f;
+			bd.endWidth       = 8.0f;
+			bd.startColor[0] = bd.startColor[1] = bd.startColor[2] = 1.0f;
+			bd.startColor[3] = 1.0f;
+			bd.endColor[0]   = bd.endColor[1]   = bd.endColor[2]   = 1.0f;
+			bd.endColor[3]   = 1.0f;
+			bd.shader         = cgs.media.lightningShaderPrim;
+			bd.duration       = 0.0f;
+			bd.axialCopies    = 4;
+			bd.startEntityNum = -1;
+			bd.endEntityNum   = -1;
+			bd.uvScroll[0]    = 0.0f;
+			bd.uvScroll[1]    = 0.0f;
+			trap_R_AddBeamToScene( &bd );
 
-	// add the impact flare if it hit something
+			// Tail — width tapers 8 → 0 over the last 64 units.
+			memset( &bd, 0, sizeof( bd ) );
+			VectorCopy( splitPoint, bd.start );
+			VectorCopy( trace.endpos, bd.end );
+			bd.startWidth     = 8.0f;
+			bd.endWidth       = 0.0f;
+			bd.startColor[0] = bd.startColor[1] = bd.startColor[2] = 1.0f;
+			bd.startColor[3] = 1.0f;
+			bd.endColor[0]   = bd.endColor[1]   = bd.endColor[2]   = 1.0f;
+			bd.endColor[3]   = 1.0f;
+			bd.shader         = cgs.media.lightningShaderPrim;
+			bd.duration       = 0.0f;
+			bd.axialCopies    = 4;
+			bd.startEntityNum = -1;
+			bd.endEntityNum   = -1;
+			bd.uvScroll[0]    = 0.0f;
+			bd.uvScroll[1]    = 0.0f;
+			trap_R_AddBeamToScene( &bd );
+		}
+	}
+
+	// === Impact flare + sparks (independent of beam pipeline) ===
 	if ( trace.fraction < 1.0 ) {
-		vec3_t	angles;
-		vec3_t	dir;
+		refEntity_t flare;
+		vec3_t      angles;
+		vec3_t      dir;
 
-		VectorSubtract( beam.oldorigin, beam.origin, dir );
+		VectorSubtract( trace.endpos, origin, dir );
 		VectorNormalize( dir );
 
-		memset( &beam, 0, sizeof( beam ) );
-		beam.hModel = cgs.media.lightningExplosionModel;
+		memset( &flare, 0, sizeof( flare ) );
+		flare.hModel = cgs.media.lightningExplosionModel;
 
-		VectorMA( trace.endpos, -16, dir, beam.origin );
+		VectorMA( trace.endpos, -16, dir, flare.origin );
 
 		// make a random orientation
 		angles[0] = rand() % 360;
 		angles[1] = rand() % 360;
 		angles[2] = rand() % 360;
-		AnglesToAxis( angles, beam.axis );
-		VectorScale( beam.axis[0], 0.5f, beam.axis[0] );
-		VectorScale( beam.axis[1], 0.5f, beam.axis[1] );
-		VectorScale( beam.axis[2], 0.5f, beam.axis[2] );
-		beam.nonNormalizedAxes = qtrue;
-		trap_R_AddRefEntityToScene( &beam );
+		AnglesToAxis( angles, flare.axis );
+		VectorScale( flare.axis[0], 0.5f, flare.axis[0] );
+		VectorScale( flare.axis[1], 0.5f, flare.axis[1] );
+		VectorScale( flare.axis[2], 0.5f, flare.axis[2] );
+		flare.nonNormalizedAxes = qtrue;
+		trap_R_AddRefEntityToScene( &flare );
 
 		// dir points muzzle→wall; negate so sparks fly outward from the surface
 		{
@@ -1501,75 +1584,6 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 		}
 	}
 }
-/*
-
-static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
-	trace_t		trace;
-	refEntity_t		beam;
-	vec3_t			forward;
-	vec3_t			muzzlePoint, endPoint;
-
-	if ( cent->currentState.weapon != WP_LIGHTNING_GUN ) {
-		return;
-	}
-
-	memset( &beam, 0, sizeof( beam ) );
-
-	// find muzzle point for this frame
-	VectorCopy( cent->lerpOrigin, muzzlePoint );
-	AngleVectors( cent->lerpAngles, forward, NULL, NULL );
-
-	// FIXME: crouch
-	muzzlePoint[2] += DEFAULT_VIEWHEIGHT;
-
-	VectorMA( muzzlePoint, 14, forward, muzzlePoint );
-
-	// project forward by the lightning range
-	VectorMA( muzzlePoint, LIGHTNING_RANGE, forward, endPoint );
-
-// eser - lightning beams
-	// see if it hit a wall — match server-side beam width (±4)
-	{
-		static vec3_t lgMins = { -4, -4, -4 };
-		static vec3_t lgMaxs = {  4,  4,  4 };
-		CG_Trace( &trace, muzzlePoint, lgMins, lgMaxs, endPoint,
-			cent->currentState.number, MASK_SHOT );
-	}
-// eser - lightning beams
-
-	// this is the endpoint
-	VectorCopy( trace.endpos, beam.oldorigin );
-
-	// use the provided origin, even though it may be slightly
-	// different than the muzzle origin
-	VectorCopy( origin, beam.origin );
-
-	beam.reType = RT_LIGHTNING;
-	beam.customShader = cgs.media.lightningShader;
-	trap_R_AddRefEntityToScene( &beam );
-
-	// add the impact flare if it hit something
-	if ( trace.fraction < 1.0 ) {
-		vec3_t	angles;
-		vec3_t	dir;
-
-		VectorSubtract( beam.oldorigin, beam.origin, dir );
-		VectorNormalize( dir );
-
-		memset( &beam, 0, sizeof( beam ) );
-		beam.hModel = cgs.media.lightningExplosionModel;
-
-		VectorMA( trace.endpos, -16, dir, beam.origin );
-
-		// make a random orientation
-		angles[0] = rand() % 360;
-		angles[1] = rand() % 360;
-		angles[2] = rand() % 360;
-		AnglesToAxis( angles, beam.axis );
-		trap_R_AddRefEntityToScene( &beam );
-	}
-}
-*/
 
 /*
 ===============
@@ -1977,7 +1991,10 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		vec3_t		origin;
 
 		if ( cg.predictedPlayerState.eFlags & EF_FIRING_PRI || cg.predictedPlayerState.eFlags & EF_FIRING_SEC ) {
-			// special hack for lightning gun...
+			// special hack for lightning gun: beam emerges from
+			// below the eye-line when the gun model is hidden.
+			// Near-camera-clip distortion is handled engine-side
+			// in beam.vert's start vertex guard.
 			VectorCopy( cg.refdef.vieworg, origin );
 			VectorMA( origin, -8, cg.refdef.viewaxis[2], origin );
 			CG_LightningBolt( &cg_entities[ps->clientNum], origin );
@@ -2042,10 +2059,10 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 		#define SG_SETTLE_MS		160		// phase 5: ease to ready
 		#define SG_PUMP_TOTAL_MS	(SG_RECOIL_MS + SG_DWELL_MS + SG_PUMPBACK_MS + SG_PUMPFWD_MS + SG_SETTLE_MS)
 
-		#define SG_RECOIL_PITCH		-6.0f	// recoil pitch (subtle)
-		#define SG_PUMP_PITCH		-10.0f	// pump pitch (more pronounced)
-		#define SG_PUMP_DROP		-2.5f	// drop during pump
-		#define SG_PUMP_PULLBACK	-3.5f	// pull toward camera during pump
+		#define SG_RECOIL_PITCH		(-6.0f)		// recoil pitch (subtle)
+		#define SG_PUMP_PITCH		(-10.0f)	// pump pitch (more pronounced)
+		#define SG_PUMP_DROP		(-2.5f)		// drop during pump
+		#define SG_PUMP_PULLBACK	(-3.5f)		// pull toward camera during pump
 
 		if ( delta < SG_PUMP_TOTAL_MS ) {
 			float kickPitch = 0.0f;

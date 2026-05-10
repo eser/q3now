@@ -21,6 +21,8 @@ is printed to the server console. Events continue to stream over QUIC.
 ===========================================================================
 */
 #include "wn_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_network, "network" );
 
 #if FEAT_WIREDNET_OBSERVER
 
@@ -83,12 +85,13 @@ static void WN_RecordStart( void )
 
 	FS_FOpenFileByMode( filename, &wn_record_file, FS_WRITE );
 	if ( !wn_record_file ) {
-		COM_ERROR( LOG_CAT_NETWORK, "QUIC Recording: failed to open %s\n", filename );
+		COM_ERROR( LOG_CH(ch_network), "QUIC Recording: failed to open %s\n", filename );
 		return;
 	}
 
 	// Write header
 	start_time = (uint64_t)Sys_Microseconds();
+	// NOLINTNEXTLINE(bugprone-not-null-terminated-result) — fixed-width binary header magic; no NUL terminator
 	memcpy( header, WN_RECORD_MAGIC, 4 );
 	header[4] = (WN_RECORD_VERSION >> 24) & 0xFF;
 	header[5] = (WN_RECORD_VERSION >> 16) & 0xFF;
@@ -105,7 +108,7 @@ static void WN_RecordStart( void )
 
 	written = FS_Write( header, sizeof(header), wn_record_file );
 	if ( written != sizeof(header) ) {
-		COM_ERROR( LOG_CAT_NETWORK, "QUIC Recording: failed to write header\n" );
+		COM_ERROR( LOG_CH(ch_network), "QUIC Recording: failed to write header\n" );
 		FS_FCloseFile( wn_record_file );
 		wn_record_file = 0;
 		return;
@@ -115,7 +118,7 @@ static void WN_RecordStart( void )
 	wn_record_start_time = start_time;
 	wn_record_event_count = 0;
 
-	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC Recording started: %s\n", filename );
+	Com_Log( SEV_INFO, LOG_CH(ch_network), "QUIC Recording started: %s\n", filename );
 }
 
 
@@ -135,7 +138,7 @@ static void WN_RecordStop( void )
 	wn_record_file = 0;
 	wn_recording = qfalse;
 
-	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "QUIC Recording stopped. %d events recorded.\n", wn_record_event_count );
+	Com_Log( SEV_INFO, LOG_CH(ch_network), "QUIC Recording stopped. %d events recorded.\n", wn_record_event_count );
 }
 
 
@@ -175,14 +178,14 @@ void WN_RecordEvent( const byte *data, int len )
 
 	written = FS_Write( len_header, 4, wn_record_file );
 	if ( written != 4 ) {
-		COM_WARN( LOG_CAT_NETWORK, "QUIC Recording: write error (disk full?). Stopping.\n" );
+		COM_WARN( LOG_CH(ch_network), "QUIC Recording: write error (disk full?). Stopping.\n" );
 		WN_RecordStop();
 		return;
 	}
 
 	written = FS_Write( data, len, wn_record_file );
 	if ( written != len ) {
-		COM_WARN( LOG_CAT_NETWORK, "QUIC Recording: write error (disk full?). Stopping.\n" );
+		COM_WARN( LOG_CH(ch_network), "QUIC Recording: write error (disk full?). Stopping.\n" );
 		WN_RecordStop();
 		return;
 	}

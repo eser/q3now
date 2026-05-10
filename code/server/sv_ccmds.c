@@ -22,7 +22,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "server.h"
 #include "../qcommon/cm_local.h"
-#include "../game/bg_public.h"
+#include "../qcommon/wired/protocol.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 static int s_sv_reload_mod = -1;
 
@@ -58,7 +60,7 @@ client_t *SV_GetPlayerByHandle( void ) {
 	}
 
 	if ( Cmd_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "No player specified.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "No player specified.\n" );
 		return NULL;
 	}
 
@@ -100,7 +102,7 @@ client_t *SV_GetPlayerByHandle( void ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "Player %s is not on the server\n", s );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "Player %s is not on the server\n", s );
 
 	return NULL;
 }
@@ -120,7 +122,7 @@ static client_t *SV_GetPlayerByNum( void ) {
 	}
 
 	if ( Cmd_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "No player specified.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "No player specified.\n" );
 		return NULL;
 	}
 
@@ -128,19 +130,19 @@ static client_t *SV_GetPlayerByNum( void ) {
 
 	for (int i = 0; s[i]; i++) {
 		if (s[i] < '0' || s[i] > '9') {
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Bad slot number: %s\n", s);
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "Bad slot number: %s\n", s);
 			return NULL;
 		}
 	}
 	int idnum = atoi( s );
 	if ( idnum < 0 || idnum >= sv.maxclients ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Bad client slot: %i\n", idnum );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Bad client slot: %i\n", idnum );
 		return NULL;
 	}
 
 	client_t *cl = &svs.clients[idnum];
 	if ( cl->state < CS_CONNECTED ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Client %i is not active\n", idnum );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Client %i is not active\n", idnum );
 		return NULL;
 	}
 	return cl;
@@ -171,7 +173,7 @@ static void SV_Map_f( void ) {
 	int len = FS_FOpenFileRead( expanded, NULL, qfalse );
 	FS_RestorePure();
 	if ( len == -1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Can't find map %s\n", expanded );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Can't find map %s\n", expanded );
 		return;
 	}
 
@@ -205,7 +207,7 @@ static void SV_MapRestart_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
@@ -233,7 +235,7 @@ static void SV_MapRestart_f( void ) {
 		} else if ( cur != s_sv_reload_mod ) {
 			char mapname[MAX_QPATH];
 			s_sv_reload_mod = cur;
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "variable change -- restarting.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "variable change -- restarting.\n" );
 			Q_strncpyz( mapname, Cvar_VariableString( "mapname" ), sizeof( mapname ) );
 			SV_SpawnServer( mapname, qfalse );
 			return;
@@ -299,7 +301,7 @@ static void SV_MapRestart_f( void ) {
 			// this generally shouldn't happen, because the client
 			// was connected before the level change
 			SV_DropClient( client, denied );
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "SV_MapRestart_f(%d): dropped client %i - denied!\n", delay, i );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "SV_MapRestart_f(%d): dropped client %i - denied!\n", delay, i );
 			continue;
 		}
 
@@ -336,12 +338,12 @@ Kick a user off of the server  FIXME: move to game
 static void SV_Kick_f( void ) {
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: kick <player name>\nkick all = kick everyone\nkick allbots = kick all bots\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: kick <player name>\nkick all = kick everyone\nkick allbots = kick all bots\n");
 		return;
 	}
 
@@ -376,7 +378,7 @@ static void SV_Kick_f( void ) {
 		return;
 	}
 	if ( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Cannot kick host player\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Cannot kick host player\n" );
 		return;
 	}
 
@@ -394,7 +396,7 @@ Kick all bots off of the server
 static void SV_KickBots_f( void ) {
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n");
 		return;
 	}
 
@@ -422,7 +424,7 @@ Kick all users off of the server
 static void SV_KickAll_f( void ) {
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
@@ -453,12 +455,12 @@ static void SV_KickNum_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: %s <client number>\n", Cmd_Argv(0));
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: %s <client number>\n", Cmd_Argv(0));
 		return;
 	}
 
@@ -467,7 +469,7 @@ static void SV_KickNum_f( void ) {
 		return;
 	}
 	if ( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Cannot kick host player\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Cannot kick host player\n");
 		return;
 	}
 
@@ -492,12 +494,12 @@ static void SV_Ban_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: banUser <player name>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: banUser <player name>\n");
 		return;
 	}
 
@@ -508,14 +510,14 @@ static void SV_Ban_f( void ) {
 	}
 
 	if( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Cannot kick host player\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Cannot kick host player\n");
 		return;
 	}
 
 	// Phase 6.4: id authorize server is gone — these legacy banUser/banClient
 	// commands are dead. Use SV_AddBanToList()/SV_RehashBans_f() (also gated
 	// behind USE_BANS) for local file-based banning instead.
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "banUser is deprecated; use SV_RehashBans/SV_BanAddr instead\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "banUser is deprecated; use SV_RehashBans/SV_BanAddr instead\n" );
 }
 
 /*
@@ -531,12 +533,12 @@ static void SV_BanNum_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: banClient <client number>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: banClient <client number>\n");
 		return;
 	}
 
@@ -545,12 +547,12 @@ static void SV_BanNum_f( void ) {
 		return;
 	}
 	if( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Cannot kick host player\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Cannot kick host player\n");
 		return;
 	}
 
 	// Phase 6.4: id authorize server is gone — see SV_Ban_f for details.
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "banClient is deprecated; use SV_RehashBans/SV_BanAddr instead\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "banClient is deprecated; use SV_RehashBans/SV_BanAddr instead\n" );
 }
 
 #endif // USE_BANS
@@ -770,7 +772,7 @@ static void SV_AddBanToList(qboolean isexception)
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
@@ -778,13 +780,13 @@ static void SV_AddBanToList(qboolean isexception)
 
 	if(argc < 2 || argc > 3)
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: %s (ip[/subnet] | clientnum [subnet])\n", Cmd_Argv(0));
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: %s (ip[/subnet] | clientnum [subnet])\n", Cmd_Argv(0));
 		return;
 	}
 
 	if(serverBansCount >= ARRAY_LEN(serverBans))
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: Maximum number of bans/exceptions exceeded.\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Error: Maximum number of bans/exceptions exceeded.\n");
 		return;
 	}
 
@@ -796,7 +798,7 @@ static void SV_AddBanToList(qboolean isexception)
 
 		if(SV_ParseCIDRNotation(&ip, &mask, banstring))
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: Invalid address %s\n", banstring);
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "Error: Invalid address %s\n", banstring);
 			return;
 		}
 	}
@@ -810,7 +812,7 @@ static void SV_AddBanToList(qboolean isexception)
 
 		if(!cl)
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: Playernum %s does not exist.\n", Cmd_Argv(1));
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "Error: Playernum %s does not exist.\n", Cmd_Argv(1));
 			return;
 		}
 
@@ -837,7 +839,7 @@ static void SV_AddBanToList(qboolean isexception)
 
 	if(ip.type != NA_IP && ip.type != NA_IP6)
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: Can ban players connected via the internet only.\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Error: Can ban players connected via the internet only.\n");
 		return;
 	}
 
@@ -852,7 +854,7 @@ static void SV_AddBanToList(qboolean isexception)
 			{
 				Q_strncpyz(addy2, NET_AdrToString(&ip), sizeof(addy2));
 
-				Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: %s %s/%d supersedes %s %s/%d\n", curban->isexception ? "Exception" : "Ban",
+				Com_Log( SEV_INFO, LOG_CH(ch_server), "Error: %s %s/%d supersedes %s %s/%d\n", curban->isexception ? "Exception" : "Ban",
 					   NET_AdrToString(&curban->ip), curban->subnet,
 					   isexception ? "exception" : "ban", addy2, mask);
 				return;
@@ -864,7 +866,7 @@ static void SV_AddBanToList(qboolean isexception)
 			{
 				Q_strncpyz(addy2, NET_AdrToString(&curban->ip), sizeof(addy2));
 
-				Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: %s %s/%d supersedes already existing %s %s/%d\n", isexception ? "Exception" : "Ban",
+				Com_Log( SEV_INFO, LOG_CH(ch_server), "Error: %s %s/%d supersedes already existing %s %s/%d\n", isexception ? "Exception" : "Ban",
 					   NET_AdrToString(&ip), mask,
 					   curban->isexception ? "exception" : "ban", addy2, curban->subnet);
 				return;
@@ -892,7 +894,7 @@ static void SV_AddBanToList(qboolean isexception)
 
 	SV_WriteBans();
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "Added %s: %s/%d\n", isexception ? "ban exception" : "ban",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "Added %s: %s/%d\n", isexception ? "ban exception" : "ban",
 		   NET_AdrToString(&ip), mask);
 }
 
@@ -911,13 +913,13 @@ static void SV_DelBanFromList(qboolean isexception)
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
 	if(Cmd_Argc() != 2)
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: %s (ip[/subnet] | num)\n", Cmd_Argv(0));
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: %s (ip[/subnet] | num)\n", Cmd_Argv(0));
 		return;
 	}
 
@@ -929,7 +931,7 @@ static void SV_DelBanFromList(qboolean isexception)
 
 		if(SV_ParseCIDRNotation(&ip, &mask, banstring))
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: Invalid address %s\n", banstring);
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "Error: Invalid address %s\n", banstring);
 			return;
 		}
 
@@ -943,7 +945,7 @@ static void SV_DelBanFromList(qboolean isexception)
 			   curban->subnet >= mask 			&&
 			   NET_CompareBaseAdrMask(&curban->ip, &ip, mask))
 			{
-				Com_Log( SEV_INFO, LOG_CAT_SERVER, "Deleting %s %s/%d\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_server), "Deleting %s %s/%d\n",
 					   isexception ? "exception" : "ban",
 					   NET_AdrToString(&curban->ip), curban->subnet);
 
@@ -959,7 +961,7 @@ static void SV_DelBanFromList(qboolean isexception)
 
 		if(todel < 1 || todel > serverBansCount)
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Error: Invalid ban number given\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "Error: Invalid ban number given\n");
 			return;
 		}
 
@@ -971,7 +973,7 @@ static void SV_DelBanFromList(qboolean isexception)
 
 				if(count == todel)
 				{
-					Com_Log( SEV_INFO, LOG_CAT_SERVER, "Deleting %s %s/%d\n",
+					Com_Log( SEV_INFO, LOG_CH(ch_server), "Deleting %s %s/%d\n",
 					   isexception ? "exception" : "ban",
 					   NET_AdrToString(&serverBans[index].ip), serverBans[index].subnet);
 
@@ -1001,7 +1003,7 @@ static void SV_ListBans_f(void)
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
@@ -1013,7 +1015,7 @@ static void SV_ListBans_f(void)
 		{
 			count++;
 
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Ban #%d: %s/%d\n", count,
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "Ban #%d: %s/%d\n", count,
 				    NET_AdrToString(&ban->ip), ban->subnet);
 		}
 	}
@@ -1025,7 +1027,7 @@ static void SV_ListBans_f(void)
 		{
 			count++;
 
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "Except #%d: %s/%d\n", count,
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "Except #%d: %s/%d\n", count,
 				    NET_AdrToString(&ban->ip), ban->subnet);
 		}
 	}
@@ -1043,7 +1045,7 @@ static void SV_FlushBans_f(void)
 {
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
@@ -1052,7 +1054,7 @@ static void SV_FlushBans_f(void)
 	// empty the ban file.
 	SV_WriteBans();
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "All bans and exceptions have been deleted.\n");
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "All bans and exceptions have been deleted.\n");
 }
 
 static void SV_BanAddr_f(void)
@@ -1113,7 +1115,7 @@ static void SV_Status_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
@@ -1139,39 +1141,39 @@ static void SV_Status_f( void ) {
 		strcpy( nc, cl->name );
 		np[ i ] = nc; nc += l;			// name pointer in name buffer
 		nl[ i ] = SV_Strlen( cl->name );// name length without color sequences
-		if ( nl[ i ] > max_namelength )
-			max_namelength = nl[ i ];
+		if ( (byte)nl[ i ] > max_namelength )
+			max_namelength = (byte)nl[ i ];
 
 		s = NET_AdrToString( &cl->netchan.remoteAddress );
 		l = strlen( s ) + 1;
 		strcpy( ac, s );
 		ap[ i ] = ac; ac += l;			// address pointer in address buffer
 		al[ i ] = l - 1;				// address length
-		if ( al[ i ] > max_addrlength )
-			max_addrlength = al[ i ];
+		if ( (byte)al[ i ] > max_addrlength )
+			max_addrlength = (byte)al[ i ];
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "map: %s\n", sv_mapname->string );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "map: %s\n", sv_mapname->string );
 
 #if 0
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "cl score ping name                        address                     rate\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "-- ----- ---- --------------------------- --------------------------- -----\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "cl score ping name                        address                     rate\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "-- ----- ---- --------------------------- --------------------------- -----\n" );
 #else // variable-length fields
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "cl score ping name" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "cl score ping name" );
 	for ( i = 0; i < max_namelength - 4; i++ )
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, " " );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, " address" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), " " );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), " address" );
 	for ( i = 0; i < max_addrlength - 7; i++ )
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, " " );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, " rate\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), " " );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), " rate\n" );
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "-- ----- ---- " );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "-- ----- ---- " );
 	for ( i = 0; i < max_namelength; i++ )
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "-" );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, " " );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "-" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), " " );
 	for ( i = 0; i < max_addrlength; i++ )
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "-" );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, " -----\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "-" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), " -----\n" );
 #endif
 
 	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ )
@@ -1179,39 +1181,39 @@ static void SV_Status_f( void ) {
 		if ( cl->state == CS_FREE )
 			continue;
 
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "%2i ", i ); // id
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "%2i ", i ); // id
 		const playerState_t *ps = SV_GameClientNum( i );
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "%5i ", ps->persistant[PERS_SCORE] );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "%5i ", ps->persistant[PERS_SCORE] );
 
 		// ping/status
 		if ( cl->state == CS_PRIMED )
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, " PRM " );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), " PRM " );
 		else if ( cl->state == CS_CONNECTED )
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, " CON " );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), " CON " );
 		else if ( cl->state == CS_ZOMBIE )
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, " ZMB " );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), " ZMB " );
 		else
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%4i ", cl->ping < 999 ? cl->ping : 999 );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "%4i ", cl->ping < 999 ? cl->ping : 999 );
 
 		// variable-length name field
 		s = np[ i ];
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s", s );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "%s", s );
 		l = max_namelength - nl[ i ];
 		for ( j = 0; j < l; j++ )
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, " " );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), " " );
 
 		// variable-length address field
 		s = ap[ i ];
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, S_COLOR_WHITE " %s", s );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), S_COLOR_WHITE " %s", s );
 		l = max_addrlength - al[ i ];
 		for ( j = 0; j < l; j++ )
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, " " );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), " " );
 
 		// rate
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, " %5i\n", cl->rate );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), " %5i\n", cl->rate );
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "\n" );
 }
 
 
@@ -1225,7 +1227,7 @@ static void SV_ConSay_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
@@ -1262,12 +1264,12 @@ static void SV_ConTell_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
 	if ( Cmd_Argc() < 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: tell <client number> <text>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: tell <client number> <text>\n" );
 		return;
 	}
 
@@ -1291,7 +1293,7 @@ static void SV_ConTell_f( void ) {
 	strcpy( text, S_COLOR_MAGENTA "console: " );
 	strcat( text, p );
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "%s\n", text );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "%s\n", text );
 	SV_SendServerCommand( cl, "chat \"%s\"", text );
 }
 
@@ -1320,11 +1322,11 @@ static void SV_Serverinfo_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server info settings:\n");
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "Server info settings:\n");
 	info = sv.configstrings[ CS_SERVERINFO ];
 	if ( info ) {
 		Info_Print( info );
@@ -1343,10 +1345,10 @@ static void SV_Systeminfo_f( void ) {
 	const char *info;
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "System info settings:\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "System info settings:\n" );
 	info = sv.configstrings[ CS_SYSTEMINFO ];
 	if ( info ) {
 		Info_Print( info );
@@ -1366,12 +1368,12 @@ static void SV_DumpUser_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: dumpuser <userid>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: dumpuser <userid>\n");
 		return;
 	}
 
@@ -1380,8 +1382,8 @@ static void SV_DumpUser_f( void ) {
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "userinfo\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "--------\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "userinfo\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "--------\n" );
 	Info_Print( cl->userinfo );
 }
 
@@ -1405,12 +1407,12 @@ static void SV_Locations_f( void ) {
 
 	// make sure server is running
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
 	if ( !sv_clientTLD->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Disabled on this server.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Disabled on this server.\n" );
 		return;
 	}
 
@@ -1538,7 +1540,7 @@ static void SV_MemInfoClients_f( void ) {
 	int totalSnap = 0, totalDl = 0, totalAll = 0;
 
 	if ( !com_sv_running->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Server is not running.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
 
@@ -1548,9 +1550,9 @@ static void SV_MemInfoClients_f( void ) {
 		if ( cl->state >= CS_CONNECTED ) connected++;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "──────────────────────────────────────────\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "CLIENT MEMORY (%i connected):\n", connected );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  %-3s  %-20s  %8s  %8s  %8s\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "──────────────────────────────────────────\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "CLIENT MEMORY (%i connected):\n", connected );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  %-3s  %-20s  %8s  %8s  %8s\n",
 		"#", "Name", "Snapshot", "Download", "Total" );
 
 	cl = svs.clients;
@@ -1558,7 +1560,7 @@ static void SV_MemInfoClients_f( void ) {
 		if ( cl->state < CS_CONNECTED ) continue;
 		clientMemStats_t ms = SV_GetClientMemStats( i );
 
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  %-3i  %-20s  %6.1f KB  %6.1f KB  %6.1f KB\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "  %-3i  %-20s  %6.1f KB  %6.1f KB  %6.1f KB\n",
 			i, cl->name,
 			ms.snapshotBytes / 1024.0f,
 			ms.downloadBytes / 1024.0f,
@@ -1569,7 +1571,7 @@ static void SV_MemInfoClients_f( void ) {
 		totalAll  += ms.totalBytes;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  %-3s  %-20s  %6.1f KB  %6.1f KB  %6.1f KB\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  %-3s  %-20s  %6.1f KB  %6.1f KB  %6.1f KB\n",
 		"---", "Total",
 		totalSnap / 1024.0f,
 		totalDl   / 1024.0f,
@@ -1579,12 +1581,12 @@ static void SV_MemInfoClients_f( void ) {
 		float avgSnap = totalSnap / (float)connected;
 		float avgDl   = totalDl   / (float)connected;
 		float avgAll  = totalAll  / (float)connected;
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  Projected (128p): snap %.0f KB  dl %.0f KB  total %.0f KB\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "  Projected (128p): snap %.0f KB  dl %.0f KB  total %.0f KB\n",
 			avgSnap * 128.0f / 1024.0f,
 			avgDl   * 128.0f / 1024.0f,
 			avgAll  * 128.0f / 1024.0f );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "──────────────────────────────────────────\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "──────────────────────────────────────────\n" );
 }
 #endif // FEAT_MEMSTATS
 
@@ -1668,18 +1670,18 @@ static void SV_PosCheck_f( void ) {
 
 	/* Check server is running a game */
 	if ( sv.state != SS_GAME ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "poscheck: server is not in SS_GAME state.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "poscheck: server is not in SS_GAME state.\n" );
 		return;
 	}
 
 	/* Check client 0 is connected */
 	if ( !svs.clients ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "poscheck: svs.clients is NULL.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "poscheck: svs.clients is NULL.\n" );
 		return;
 	}
 	cl = &svs.clients[0];
 	if ( cl->state < CS_CONNECTED ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "poscheck: client 0 is not connected (state=%d).\n", cl->state );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "poscheck: client 0 is not connected (state=%d).\n", cl->state );
 		return;
 	}
 
@@ -1688,39 +1690,39 @@ static void SV_PosCheck_f( void ) {
 	VectorCopy( ps->origin, origin );
 
 	/* ── Header ─────────────────────────────────────────────── */
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "══════════════════════════════════════════\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "POSCHECK  map=%-20s  time=%d  range=%d\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "══════════════════════════════════════════\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "POSCHECK  map=%-20s  time=%d  range=%d\n",
 		sv_mapname ? sv_mapname->string : "?", sv.time, range );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  client=0  name=\"%s\"\n", cl->name );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "══════════════════════════════════════════\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  client=0  name=\"%s\"\n", cl->name );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "══════════════════════════════════════════\n" );
 
 	/* ── Section 1: Player state ─────────────────────────────── */
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "─── 1. Player state ───\n" );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  origin       : %.2f %.2f %.2f\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "─── 1. Player state ───\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  origin       : %.2f %.2f %.2f\n",
 		origin[0], origin[1], origin[2] );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  velocity     : %.2f %.2f %.2f  |v|=%.2f\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  velocity     : %.2f %.2f %.2f  |v|=%.2f\n",
 		ps->velocity[0], ps->velocity[1], ps->velocity[2],
 		VectorLength( ps->velocity ) );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  bbox mins    : %.2f %.2f %.2f\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  bbox mins    : %.2f %.2f %.2f\n",
 		gent->r.mins[0], gent->r.mins[1], gent->r.mins[2] );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  bbox maxs    : %.2f %.2f %.2f\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  bbox maxs    : %.2f %.2f %.2f\n",
 		gent->r.maxs[0], gent->r.maxs[1], gent->r.maxs[2] );
 	{
 		int gen = ps->groundEntityNum;
 		if ( gen == ENTITYNUM_NONE )
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "  groundEntity : airborne\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "  groundEntity : airborne\n" );
 		else if ( gen == ENTITYNUM_WORLD )
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "  groundEntity : world\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "  groundEntity : world\n" );
 		else
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "  groundEntity : entity %d\n", gen );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "  groundEntity : entity %d\n", gen );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  pm_type      : %s (%d)\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  pm_type      : %s (%d)\n",
 		PosCheck_PmTypeName( ps->pm_type ), ps->pm_type );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  health       : %d\n", ps->stats[STAT_HEALTH] );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "  armor        : %d\n", ps->stats[STAT_ARMOR] );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  health       : %d\n", ps->stats[STAT_HEALTH] );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "  armor        : %d\n", ps->stats[STAT_ARMOR] );
 
 	/* ── Section 2: Axis traces ──────────────────────────────── */
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "─── 2. Axis traces (range=%d) ───\n", range );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "─── 2. Axis traces (range=%d) ───\n", range );
 	{
 		static const vec3_t dirs[6] = {
 			{ 1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}
@@ -1740,7 +1742,7 @@ static void SV_PosCheck_f( void ) {
 			/* point trace */
 			SV_Trace( &tr, origin, vec3_origin, vec3_origin, end,
 				0, mask, qfalse );
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "  %s point: frac=%.3f endpos=%.1f %.1f %.1f "
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "  %s point: frac=%.3f endpos=%.1f %.1f %.1f "
 				"norm=%.2f %.2f %.2f dist=%.2f ent=%d as=%d ss=%d\n",
 				dnames[i], tr.fraction,
 				tr.endpos[0], tr.endpos[1], tr.endpos[2],
@@ -1751,7 +1753,7 @@ static void SV_PosCheck_f( void ) {
 			/* box trace */
 			SV_Trace( &tr, origin, *pmins, *pmaxs, end,
 				0, mask, qfalse );
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "  %s box  : frac=%.3f endpos=%.1f %.1f %.1f "
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "  %s box  : frac=%.3f endpos=%.1f %.1f %.1f "
 				"norm=%.2f %.2f %.2f dist=%.2f ent=%d as=%d ss=%d\n",
 				dnames[i], tr.fraction,
 				tr.endpos[0], tr.endpos[1], tr.endpos[2],
@@ -1770,7 +1772,7 @@ static void SV_PosCheck_f( void ) {
 			end[2] = origin[2] - deepRange;
 			SV_Trace( &tr, origin, *pmins, *pmaxs, end,
 				0, mask, qfalse );
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "  -Z deep(box,range=%d): frac=%.3f endpos=%.1f %.1f %.1f "
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "  -Z deep(box,range=%d): frac=%.3f endpos=%.1f %.1f %.1f "
 				"norm=%.2f %.2f %.2f ent=%d as=%d ss=%d\n",
 				deepRange, tr.fraction,
 				tr.endpos[0], tr.endpos[1], tr.endpos[2],
@@ -1780,7 +1782,7 @@ static void SV_PosCheck_f( void ) {
 	}
 
 	/* ── Section 3: PointContents at 9 sample points ─────────── */
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "─── 3. PointContents samples ───\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "─── 3. PointContents samples ───\n" );
 	{
 		vec3_t samples[9];
 		const char *labels[9] = {
@@ -1799,12 +1801,12 @@ static void SV_PosCheck_f( void ) {
 		for ( i = 0; i < 9; i++ ) {
 			int c = CM_PointContents( samples[i], 0 );
 			PosCheck_DecodeContents( c, contBuf, sizeof(contBuf) );
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "  %-8s : 0x%08x  %s\n", labels[i], c, contBuf );
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "  %-8s : 0x%08x  %s\n", labels[i], c, contBuf );
 		}
 	}
 
 	/* ── Section 4: Surrounding entities ─────────────────────── */
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "─── 4. Area entities (range=%d) ───\n", range );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "─── 4. Area entities (range=%d) ───\n", range );
 	{
 		int   entList[POSCHECK_MAX_ENTITIES*4];
 		int   numEnts;
@@ -1840,12 +1842,12 @@ static void SV_PosCheck_f( void ) {
 			entries[j+1] = tmp;
 		}
 		if ( entCount > POSCHECK_MAX_ENTITIES ) entCount = POSCHECK_MAX_ENTITIES;
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  found %d entities (showing up to %d):\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "  found %d entities (showing up to %d):\n",
 			numEnts, POSCHECK_MAX_ENTITIES );
 		for ( i = 0; i < entCount; i++ ) {
 			int entNum = entries[i].num;
 			sharedEntity_t *se = SV_GentityNum( entNum );
-			Com_Log( SEV_INFO, LOG_CAT_SERVER,
+			Com_Log( SEV_INFO, LOG_CH(ch_server),
 				"  [%d] ent=%d dist=%.1f origin=%.1f %.1f %.1f "
 				"mins=%.1f %.1f %.1f maxs=%.1f %.1f %.1f contents=0x%x\n",
 				i, entNum, entries[i].dist,
@@ -1857,7 +1859,7 @@ static void SV_PosCheck_f( void ) {
 	}
 
 	/* ── Section 5: Surrounding brushes via CM_BoxLeafnums ───── */
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "─── 5. Surrounding brushes (range=%d) ───\n", range );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "─── 5. Surrounding brushes (range=%d) ───\n", range );
 	{
 		int   leafList[256];
 		int   numLeafs, lastLeaf;
@@ -1918,7 +1920,7 @@ static void SV_PosCheck_f( void ) {
 			bEntries[j+1] = tmp;
 		}
 		if ( bCount > POSCHECK_MAX_BRUSHES ) bCount = POSCHECK_MAX_BRUSHES;
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  found %d unique brushes (showing up to %d):\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "  found %d unique brushes (showing up to %d):\n",
 			brushCount, POSCHECK_MAX_BRUSHES );
 		for ( i = 0; i < bCount; i++ ) {
 			int bi = bEntries[i].idx;
@@ -1929,7 +1931,7 @@ static void SV_PosCheck_f( void ) {
 				shaderName = cm.shaders[b->shaderNum].shader;
 			}
 			PosCheck_DecodeContents( b->contents, contBuf, sizeof(contBuf) );
-			Com_Log( SEV_INFO, LOG_CAT_SERVER,
+			Com_Log( SEV_INFO, LOG_CH(ch_server),
 				"  brush[%d] dist=%.1f contents=0x%x(%s) sides=%d "
 				"bounds=(%.1f %.1f %.1f)-(%.1f %.1f %.1f) shader=%s\n",
 				bi, bEntries[i].dist, b->contents, contBuf, b->numsides,
@@ -1942,7 +1944,7 @@ static void SV_PosCheck_f( void ) {
 				for ( s = 0; s < b->numsides; s++ ) {
 					const cbrushside_t *side = &b->sides[s];
 					if ( side->plane ) {
-						Com_Log( SEV_INFO, LOG_CAT_SERVER,
+						Com_Log( SEV_INFO, LOG_CH(ch_server),
 							"    side[%d] normal=%.3f %.3f %.3f dist=%.3f\n",
 							s,
 							side->plane->normal[0],
@@ -1956,13 +1958,13 @@ static void SV_PosCheck_f( void ) {
 	}
 
 	/* ── Section 6: Cluster / PVS ────────────────────────────── */
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "─── 6. Cluster / PVS ───\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "─── 6. Cluster / PVS ───\n" );
 	{
 		int leafNum = CM_PointLeafnum( origin );
 		int cluster = CM_LeafCluster( leafNum );
 		int area    = CM_LeafArea( leafNum );
 		int totalClusters = CM_NumClusters();
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  leafnum=%d  cluster=%d  area=%d  totalClusters=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "  leafnum=%d  cluster=%d  area=%d  totalClusters=%d\n",
 			leafNum, cluster, area, totalClusters );
 		if ( cluster >= 0 ) {
 			byte *pvs = CM_ClusterPVS( cluster );
@@ -1979,12 +1981,12 @@ static void SV_PosCheck_f( void ) {
 					}
 				}
 			}
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "  PVS: %d/%d clusters visible\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "  PVS: %d/%d clusters visible\n",
 				visCount, totalClusters );
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "══════════════════════════════════════════\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "══════════════════════════════════════════\n" );
 }
 
 

@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../../../../qcommon/arena.h"
 #include "console_private.h"
 #include "../cl_wired_text.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 int bigchar_width;
 int bigchar_height;
@@ -239,7 +241,7 @@ static void Con_Dump_f( void )
 {
 	if ( Cmd_Argc() != 2 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_UI, "usage: dumpConsole <filename>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_ui), "usage: dumpConsole <filename>\n" );
 		return;
 	}
 
@@ -249,18 +251,18 @@ static void Con_Dump_f( void )
 
 	const char *ext;
 	if ( !FS_AllowedExtension( filename, qfalse, &ext ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_UI, "%s: Invalid filename extension '%s'.\n", __func__, ext );
+		Com_Log( SEV_INFO, LOG_CH(ch_ui), "%s: Invalid filename extension '%s'.\n", __func__, ext );
 		return;
 	}
 
 	fileHandle_t f = FS_FOpenFileWrite( filename );
 	if ( f == FS_INVALID_HANDLE )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_UI, "ERROR: couldn't open %s.\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_ui), "ERROR: couldn't open %s.\n", filename );
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_UI, "Dumped console text to %s.\n", filename );
+	Com_Log( SEV_INFO, LOG_CH(ch_ui), "Dumped console text to %s.\n", filename );
 
 	int n, l;
 	if ( con.current >= con.totallines ) {
@@ -529,7 +531,7 @@ static void Con_UpdateColor( cvar_t *cv, char *lastString, int lastSize,
 	}
 
 	if ( !Con_ParseHexColor( cv->string, out ) ) {
-		COM_WARN( LOG_CAT_UI, "WARNING: invalid hex color in %s: '%s'\n",
+		COM_WARN( LOG_CH(ch_ui), "WARNING: invalid hex color in %s: '%s'\n",
 			cv->name, cv->string );
 		Vector4Copy( fallback, out );
 	}
@@ -805,7 +807,7 @@ void CL_ConsolePrint( const char *txt ) {
 	int colorIndex = ColorIndex( COLOR_WHITE );
 
 	int c;
-	while ( (c = *txt) != 0 ) {
+	while ( (c = (byte)*txt) != 0 ) {
 		if ( Q_IsColorString( txt ) && *(txt+1) != '\n' ) {
 			colorIndex = ColorIndexFromChar( *(txt+1) );
 			txt += 2;

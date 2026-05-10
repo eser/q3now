@@ -38,6 +38,7 @@ void CG_ModernHUDElementPlayerNameRoutine(void* context)
 
 	element->ctx.text = textBuffer;
 
+	// NOLINTNEXTLINE(clang-analyzer-core.StackAddressEscape) — element->ctx.text aliases local `textBuffer`; consumed within CG_ModernHUDTextPrint and not retained past this call
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 

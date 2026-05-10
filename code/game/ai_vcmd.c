@@ -175,7 +175,7 @@ void BotVoiceChat_Defend(bot_state_t *bs, int client, int mode) {
 	}
 	else
 #endif
-		if (gametype == GT_CTF || gametype == GT_1FCTF) {
+	if (gametype == GT_CTF || gametype == GT_1FCTF) {
 		//
 		switch(BotTeam(bs)) {
 			case TEAM_RED: memcpy(&bs->teamgoal, &ctf_redflag, sizeof(bot_goal_t)); break;

@@ -5,11 +5,14 @@ cl_wired_fonts.c -- Wired UI font system (migrated from cg_moderntext.c)
 #include "cl_wired_fonts.h"
 #include "cl_wired_msdf.h"
 #include "cl_wired_draw.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
 
 /* ── Font family registration table ───────────────────────────────── */
 
+// NOLINTBEGIN(bugprone-invalid-enum-default-initialization) — fixed-size variants[] array zero-fills the tail; tail entries are never read (count field guards), so the 0-weight enum value never reaches consumers
 static fontFamily_t wui_fontFamilies[] = {
 	// ── Enter Sansman ──────────────────────────────────────────────
 	// Each weight is a separate atlas from a FontForge-transformed TTF.
@@ -40,6 +43,7 @@ static fontFamily_t wui_fontFamilies[] = {
 		}, 1
 	},
 };
+// NOLINTEND(bugprone-invalid-enum-default-initialization)
 
 #define FONT_FAMILY_COUNT (sizeof(wui_fontFamilies) / sizeof(wui_fontFamilies[0]))
 
@@ -75,7 +79,7 @@ void WiredFonts_InitMSDF( void ) {
 	}
 	int fontsNew   = MSDF_GetFontCount() - fontsLoadedStart;
 	int fontsTotal = MSDF_GetFontCount();
-	Com_Log( SEV_INFO, LOG_CAT_UI, "MSDF: %d font%s loaded (%d new)\n", fontsTotal, fontsTotal == 1 ? "" : "s", fontsNew );
+	Com_Log( SEV_INFO, LOG_CH(ch_ui), "MSDF: %d font%s loaded (%d new)\n", fontsTotal, fontsTotal == 1 ? "" : "s", fontsNew );
 }
 
 /*
