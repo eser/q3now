@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cg_view.c -- setup all the parameters (position, angle, etc)
 // for a 3D rendering
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
 /*
@@ -86,7 +88,7 @@ void CG_TestModel_f (void) {
 		cg.testModelEntity.oldframe = 0;
 	}
 	if (! cg.testModelEntity.hModel ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Can't register model\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Can't register model\n" );
 		return;
 	}
 
@@ -120,7 +122,7 @@ void CG_TestGun_f (void) {
 
 void CG_TestModelNextFrame_f (void) {
 	cg.testModelEntity.frame++;
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "frame %i\n", cg.testModelEntity.frame );
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "frame %i\n", cg.testModelEntity.frame );
 }
 
 void CG_TestModelPrevFrame_f (void) {
@@ -128,12 +130,12 @@ void CG_TestModelPrevFrame_f (void) {
 	if ( cg.testModelEntity.frame < 0 ) {
 		cg.testModelEntity.frame = 0;
 	}
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "frame %i\n", cg.testModelEntity.frame );
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "frame %i\n", cg.testModelEntity.frame );
 }
 
 void CG_TestModelNextSkin_f (void) {
 	cg.testModelEntity.skinNum++;
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "skin %i\n", cg.testModelEntity.skinNum );
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "skin %i\n", cg.testModelEntity.skinNum );
 }
 
 void CG_TestModelPrevSkin_f (void) {
@@ -141,7 +143,7 @@ void CG_TestModelPrevSkin_f (void) {
 	if ( cg.testModelEntity.skinNum < 0 ) {
 		cg.testModelEntity.skinNum = 0;
 	}
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "skin %i\n", cg.testModelEntity.skinNum );
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "skin %i\n", cg.testModelEntity.skinNum );
 }
 
 static void CG_AddTestModel (void) {
@@ -150,7 +152,7 @@ static void CG_AddTestModel (void) {
 	// re-register the model, because the level may have changed
 	cg.testModelEntity.hModel = trap_R_RegisterModel( cg.testModelName );
 	if (! cg.testModelEntity.hModel ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Can't register model\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Can't register model\n");
 		return;
 	}
 
@@ -593,6 +595,7 @@ static int CG_CalcFov( void ) {
 		{
 			fov_x = cg_fov.value;
 		}
+		// NOLINTNEXTLINE(readability-misleading-indentation) — preceding else-chain spans #if FEAT_THIRD_PERSON; analyzer can't follow the preprocessor branch
 		if ( fov_x < 1 ) {
 			fov_x = 1;
 		} else if ( fov_x > 160 ) {
@@ -1120,9 +1123,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 		CG_AddMarks();
 		CG_AddParticles ();
 		CG_AddLocalEntities();
-#if FEAT_RAIL_TRAIL == 0
 		CG_AddRailTrails();
-#endif
 #if FEAT_ATMOSPHERIC
 		CG_AddAtmosphericEffects();
 #endif
@@ -1183,7 +1184,7 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	CG_DrawActive( stereoView );
 
 	if ( cg_stats.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "cg.clientFrame:%i\n", cg.clientFrame );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "cg.clientFrame:%i\n", cg.clientFrame );
 	}
 
 

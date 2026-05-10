@@ -1,5 +1,7 @@
 #include "g_character.h"
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #define MAX_CHARACTERS 256
 
@@ -82,7 +84,7 @@ void G_Characters_Init( void ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "%i characters parsed\n", s_numCharacters );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "%i characters parsed\n", s_numCharacters );
 }
 
 int G_Characters_Count( void ) {

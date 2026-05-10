@@ -36,6 +36,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <io.h>
 #include <time.h>
 #include <dbghelp.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 
 #define MEM_THRESHOLD (96*1024*1024)
@@ -97,7 +99,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... ) {
 	CL_Shutdown( text, qtrue );
 #endif
 
-	Com_Log( SEV_FATAL, LOG_CAT_SYSTEM, "Sys_Error: %s", text );
+	Com_Log( SEV_FATAL, LOG_CH(ch_system), "Sys_Error: %s", text );
 	Conbuf_AppendText( text );
 	Conbuf_AppendText( "\n" );
 
@@ -927,7 +929,7 @@ void Sys_InstallCrashHandler( void )
 #ifdef DEDICATED
 /*
 ==================
-main (console-subsystem entry for q3now-ded)
+main (console-subsystem entry for wired-ded)
 
 The dedicated server builds as a Windows console-subsystem binary
 (see CMakeLists.txt EXE_TYPE_DED). The console-subsystem entry point

@@ -16,10 +16,11 @@ void Attack_LightningGun_Primary( gentity_t *ent ) {
 
 	damage = 8 * s_quadFactor;
 
-	if (ent->client) {
-		ent->client->accuracy_shots++;
-		ent->client->attackStats[ATT_LIGHTNING_GUN_PRIMARY].shots++;
+	if (!ent->client) {
+		return;	// non-client entities can't fire weapons
 	}
+	ent->client->accuracy_shots++;
+	ent->client->attackStats[ATT_LIGHTNING_GUN_PRIMARY].shots++;
 
 	passent = ent->s.number;
 	for (i = 0; i < 10; i++) {

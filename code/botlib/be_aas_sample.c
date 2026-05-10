@@ -537,24 +537,19 @@ aas_trace_t AAS_TraceClientBBox(vec3_t start, vec3_t end, int presencetype,
 				if (DotProduct(v1, plane->normal) > 0) trace.planenum ^= 1;
 				return trace;
 			} //end if
-			else
-			{
-				if (passent >= 0)
-				{
-					if (AAS_AreaEntityCollision(-nodenum, tstack_p->start,
-													tstack_p->end, presencetype, passent,
-													&trace))
-					{
-						if (!trace.startsolid)
-						{
-							VectorSubtract(end, start, v1);
-							VectorSubtract(trace.endpos, start, v2);
-							trace.fraction = VectorLength(v2) / VectorLength(v1);
-						} //end if
-						return trace;
+
+			if ( passent >= 0 ) {
+				if ( AAS_AreaEntityCollision( -nodenum, tstack_p->start, tstack_p->end, presencetype, passent,
+											  &trace ) ) {
+					if ( !trace.startsolid ) {
+						VectorSubtract( end, start, v1 );
+						VectorSubtract( trace.endpos, start, v2 );
+						trace.fraction = VectorLength( v2 ) / VectorLength( v1 );
 					} //end if
+					return trace;
 				} //end if
-			} //end else
+			} //end if
+			//end else
 			trace.lastarea = -nodenum;
 			continue;
 		} //end if

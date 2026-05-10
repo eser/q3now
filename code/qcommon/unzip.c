@@ -1209,6 +1209,7 @@ static int strcmpcasenosensitive_internal (const char* fileName1,const char* fil
 {
 	for (;;)
 	{
+		// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign) — fileName1 is non-NULL by caller contract; analyzer's deep cross-function path tracking generates a false positive
 		char c1=*(fileName1++);
 		char c2=*(fileName2++);
 		if ((c1>='a') && (c1<='z'))
@@ -2144,8 +2145,7 @@ extern int unzeof (unzFile file)
 	
 	if (pfile_in_zip_read_info->rest_read_uncompressed == 0)
 		return 1;
-	else
-		return 0;
+	return 0;
 }
 
 

@@ -45,14 +45,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define MASK_SOLID		CONTENTS_PLAYERCLIP
 
-//FIXME: these might change
-enum {
-	ET_GENERAL,
-	ET_PLAYER,
-	ET_ITEM,
-	ET_MISSILE,
-	ET_MOVER
-};
+// ET_* values now come canonically from wired/protocol.h via q_shared.h.
 
 //===========================================================================
 //

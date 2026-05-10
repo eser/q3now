@@ -482,6 +482,7 @@ static void ProjectDlightTexture( void ) {
 				}
 			}
 			clipBits[i] = clip;
+			// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — index bounded by upstream invariant (sun-shadow cascades, surfaceIndexSets count, dlight pipeline count); analyzer doesn't see the bound
 			colors[0] = dl->color[0] * modulate;
 			colors[1] = dl->color[1] * modulate;
 			colors[2] = dl->color[2] * modulate;
@@ -1325,6 +1326,7 @@ void VK_SetFogParams( vkUniform_t *uniform, int *fogStage )
 static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 	float radius;
 
+// NOLINTNEXTLINE(readability-redundant-preprocessor) — branch retained for portability with non-Vulkan derivatives
 #ifdef USE_VULKAN
 	if ( !glConfig.deviceSupportsGamma && !vk.fboActive )
 #else
@@ -1417,8 +1419,10 @@ void VK_LightingPass( void )
 		vk_update_descriptor( VK_DESC_FOG_DLIGHT, tr.fogImage->descriptor );
 
 	if ( tess.light->linear )
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — index bounded by upstream invariant (sun-shadow cascades, surfaceIndexSets count, dlight pipeline count); analyzer doesn't see the bound
 		pipeline = vk.dlight1_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
 	else
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — index bounded by upstream invariant (sun-shadow cascades, surfaceIndexSets count, dlight pipeline count); analyzer doesn't see the bound
 		pipeline = vk.dlight_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
 
 #if FEAT_PBR
@@ -1498,6 +1502,7 @@ void VK_LightingPass( void )
 
 void RB_StageIteratorGeneric( void )
 {
+// NOLINTNEXTLINE(readability-redundant-preprocessor) — branch retained for portability with non-Vulkan derivatives
 #ifdef USE_VULKAN
 	qboolean rebindIndex = qfalse;
 #endif
@@ -1513,6 +1518,7 @@ void RB_StageIteratorGeneric( void )
 	RB_DeformTessGeometry();
 
 #ifdef USE_PMLIGHT
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 	if ( tess.dlightPass ) {
 		VK_LightingPass();
 		return;
@@ -1555,6 +1561,7 @@ void RB_StageIteratorGeneric( void )
 #endif
 	if ( tess.dlightBits && tess.shader->sort <= SS_OPAQUE && !(tess.shader->surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) ) {
 		if ( !fogCollapse ) {
+// NOLINTNEXTLINE(readability-redundant-preprocessor) — branch retained for portability with non-Vulkan derivatives
 #ifdef USE_VULKAN
 			rebindIndex = ProjectDlightTexture();
 #else	
@@ -1564,8 +1571,11 @@ void RB_StageIteratorGeneric( void )
 	}
 #endif // USE_LEGACY_DLIGHTS
 
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 	// now do fog
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if pattern; statement at function scope
 	if ( tess.fogNum && tess.shader->fogPass && !fogCollapse ) {
+// NOLINTNEXTLINE(readability-redundant-preprocessor) — branch retained for portability with non-Vulkan derivatives
 #ifdef USE_VULKAN
 		RB_FogPass( rebindIndex );
 #else

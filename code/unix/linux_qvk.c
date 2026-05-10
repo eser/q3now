@@ -42,6 +42,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define VK_USE_PLATFORM_XLIB_KHR
 //#define VK_USE_PLATFORM_XLIB_XRANDR_EXT
 #include "../renderercommon/vulkan/vulkan.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 static PFN_vkGetInstanceProcAddr qvkGetInstanceProcAddr;
 static PFN_vkCreateXlibSurfaceKHR qvkCreateXlibSurfaceKHR;
@@ -56,11 +58,11 @@ static PFN_vkCreateXlibSurfaceKHR qvkCreateXlibSurfaceKHR;
 */
 void QVK_Shutdown( qboolean unloadDLL )
 {
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...shutting down QVK\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "...shutting down QVK\n" );
 
 	if ( glw_state.VulkanLib && unloadDLL )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...unloading Vulkan DLL\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...unloading Vulkan DLL\n" );
 		dlclose( glw_state.VulkanLib );
 		glw_state.VulkanLib = NULL;
 
@@ -124,7 +126,7 @@ static void *load_vulkan_library( const char *dllname )
 qboolean QVK_Init( void )
 {
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...initializing QVK\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "...initializing QVK\n" );
 
 	if ( glw_state.VulkanLib == NULL )
 	{
@@ -135,7 +137,7 @@ qboolean QVK_Init( void )
 		{
 			glw_state.VulkanLib = load_vulkan_library( dllnames[i] );
 
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...loading '%s' : %s\n", dllnames[i], glw_state.VulkanLib ? "success" : "failed" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "...loading '%s' : %s\n", dllnames[i], glw_state.VulkanLib ? "success" : "failed" );
 			if ( glw_state.VulkanLib )
 			{
 				break;

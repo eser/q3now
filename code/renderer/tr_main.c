@@ -144,8 +144,7 @@ int R_CullPointAndRadius( const vec3_t pt, float radius )
 		{
 			return CULL_OUT;
 		}
-		else if ( dist <= radius ) 
-		{
+		if ( dist <= radius ) {
 			mightBeClipped = qtrue;
 		}
 	}
@@ -179,7 +178,7 @@ int R_CullDlight( const dlight_t* dl )
 			dist2 = DotProduct( dl->transformed2, frust->normal) - frust->dist;
 			if ( dist < -dl->radius && dist2 < -dl->radius )
 				return CULL_OUT;
-			else if ( dist <= dl->radius || dist2 <= dl->radius ) 
+			if ( dist <= dl->radius || dist2 <= dl->radius )
 				mightBeClipped = qtrue;
 		}
 	} 
@@ -190,10 +189,11 @@ int R_CullDlight( const dlight_t* dl )
 		dist = DotProduct( dl->transformed, frust->normal) - frust->dist;
 		if ( dist < -dl->radius )
 			return CULL_OUT;
-		else if ( dist <= dl->radius ) 
+		if ( dist <= dl->radius )
 			mightBeClipped = qtrue;
 	}
 
+	// NOLINTNEXTLINE(readability-misleading-indentation) — preceding else without braces is a Q3 idiom; this statement is at function scope
 	if ( mightBeClipped )
 		return CULL_CLIP;
 
@@ -1574,9 +1574,6 @@ static void R_AddEntitySurfaces( void ) {
 			break;		// don't draw anything
 		case RT_SPRITE:
 		case RT_BEAM:
-		case RT_LIGHTNING:
-		case RT_RAIL_CORE:
-		case RT_RAIL_RINGS:
 			// self blood sprites, talk balloons, etc should not be drawn in the primary
 			// view.  We can't just do this check for all entities, because md3
 			// entities may still want to cast shadows from them
@@ -1586,6 +1583,13 @@ static void R_AddEntitySurfaces( void ) {
 			shader = R_GetShaderByHandle( ent->e.customShader );
 			R_AddDrawSurf( &entitySurface, shader, R_SpriteFogNum( ent ), 0 );
 			break;
+
+		case RT_LIGHTNING:
+			// Legacy refEntity type. cgame migrated to wired beam primitive
+			// (trap_R_AddBeamToScene); RT_LIGHTNING is preserved in the enum
+			// for ABI but produces no draw. Mods still emitting RT_LIGHTNING
+			// should migrate to trap_R_AddBeamToScene.
+			continue;
 
 		case RT_MODEL:
 			// we must set up parts of tr.or for model culling

@@ -12,12 +12,12 @@
 #   one and only bootstrap mechanism. Smoke detects the launcher binary
 #   in the build tree, then invokes it with HOME (Linux/macOS) and
 #   USERPROFILE (Windows) redirected to a temp dir so the launcher's
-#   default `$HOME/q3now-preview/` resolves to a smoke-local path
+#   default `$HOME/wired-preview/` resolves to a smoke-local path
 #   instead of polluting the user's real install.
 #
 #   The launcher's q3copy pipeline converts raw demo PAKs (TGA→PNG,
 #   WAV→Opus, repackage) into q3now's SW3Z format under
-#   `<work>/q3now-preview/baseq3/pax01.sw3z`. The q3now engine accepts
+#   `<work>/wired-preview/baseq3/pax01.sw3z`. The q3now engine accepts
 #   `.sw3z` natively (code/qcommon/sw3z.c), so smoke launches against
 #   that directory as `fs_installpath`.
 #
@@ -46,7 +46,7 @@
 #   Q3NOW_CHANNEL=...          Channel suffix the launcher was built with.
 #                              Default: "-preview" (matches Makefile default).
 #                              Smoke uses this to find the launcher's output
-#                              dir (HOME/q3now${Q3NOW_CHANNEL}/baseq3/).
+#                              dir (HOME/wired${CHANNEL}/baseq3/).
 
 set -euo pipefail
 
@@ -62,10 +62,10 @@ if [ -n "$DED_OVERRIDE" ]; then
     DED="$DED_OVERRIDE"
 else
     for candidate in \
-        "${PROJECT_DIR}/build/release/q3now-ded.x86_64" \
-        "${PROJECT_DIR}/build/release/q3now-ded.x64.exe" \
-        "${PROJECT_DIR}/build/Release/q3now-ded.arm64" \
-        "${PROJECT_DIR}/build/release/q3now-ded.aarch64" \
+        "${PROJECT_DIR}/build/release/wired-ded.x86_64" \
+        "${PROJECT_DIR}/build/release/wired-ded.x64.exe" \
+        "${PROJECT_DIR}/build/Release/wired-ded.arm64" \
+        "${PROJECT_DIR}/build/release/wired-ded.aarch64" \
     ; do
         if [ -x "$candidate" ]; then DED="$candidate"; break; fi
     done
@@ -73,7 +73,7 @@ fi
 
 if [ -z "${DED:-}" ] || [ ! -x "$DED" ]; then
     echo "ERROR: dedicated server not found. Tried:"
-    echo "  build/release/q3now-ded.{x86_64,x64.exe,arm64,aarch64}"
+    echo "  build/release/wired-ded.{x86_64,x64.exe,arm64,aarch64}"
     echo "Override: bash $0 path-to-ded [map] [basepath]"
     exit 1
 fi
@@ -102,7 +102,7 @@ has_baseq3_assets() {
 # ── Resolve basepath: explicit override > already-imported > launcher CLI ──
 WORK_DIR="${Q3NOW_DEMO_PAK_DIR:-${PROJECT_DIR}/baseq3-demo}"
 CHANNEL="${Q3NOW_CHANNEL:--preview}"
-LAUNCHER_OUTPUT="${WORK_DIR}/q3now${CHANNEL}"
+LAUNCHER_OUTPUT="${WORK_DIR}/wired${CHANNEL}"
 
 if [ -n "$BASEPATH_OVERRIDE" ] && has_baseq3_assets "$BASEPATH_OVERRIDE"; then
     Q3DIR="$BASEPATH_OVERRIDE"

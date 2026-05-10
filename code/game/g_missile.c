@@ -21,6 +21,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #define	MISSILE_PRESTEP_TIME	50
 #if FEAT_TELEPORTING_MISSILES
@@ -436,7 +438,7 @@ void G_TeleportMissile( gentity_t *ent, trace_t *trace, gentity_t *portal ) {
 
 	dest = G_PickTarget( portal->target );
 	if ( !dest ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_TeleportMissile: couldn't find destination\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "G_TeleportMissile: couldn't find destination\n" );
 		return;
 	}
 

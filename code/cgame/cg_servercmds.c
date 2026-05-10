@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cg_local.h"
 #include "../qcommon/menudef.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 typedef struct {
 	const char *order;
@@ -207,6 +209,7 @@ void CG_ParseServerinfo( void ) {
 	info = CG_ConfigString( CS_SERVERINFO );
 	cgs.gametype = atoi( Info_ValueForKey( info, "g_gametype" ) );
 	cgs.gametypeIsTeamGame = BG_IsTeamGametype( cgs.gametype );
+	cgs.gameflags = atoi( Info_ValueForKey( info, "g_gameflags" ) );
 	cgs.noFootsteps = atoi( Info_ValueForKey( info, "g_noFootsteps" ) );
 	cgs.kothGhosts = atoi( Info_ValueForKey( info, "g_kothGhosts" ) );
 	cgs.scorelimit = atoi( Info_ValueForKey( info, "g_scorelimit" ) );
@@ -488,7 +491,7 @@ static void CG_AddToTeamChat( const char *str ) {
 
 		if ( Q_IsColorString( str ) ) {
 			*p++ = *str++;
-			lastcolor = *str;
+			lastcolor = (byte)*str;
 			*p++ = *str++;
 			continue;
 		}
@@ -520,7 +523,7 @@ require a reload of all the media
 */
 static void CG_MapRestart( void ) {
 	if ( cg_showmiss.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_MapRestart\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_MapRestart\n" );
 	}
 
 	CG_InitLocalEntities();
@@ -569,7 +572,7 @@ static void CG_MapRestart( void ) {
 	}
 #endif
 
-    if (cg_singlePlayer.integer) {
+    if ( cgs.gameflags & GF_CAMPAIGN ) {
 		trap_Cvar_Set("ui_matchStartTime", va("%i", cg.time));
 	}
 
@@ -800,7 +803,7 @@ void CG_PlayVoiceChat( bufferedVoiceChat_t *vchat ) {
 	}
 	if (!vchat->voiceOnly && !cg_noVoiceText.integer) {
 		CG_AddToTeamChat( vchat->message );
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s\n", vchat->message );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s\n", vchat->message );
 	}
 	voiceChatBuffer[cg.voiceChatBufferOut].snd = 0;
 }
@@ -962,7 +965,7 @@ static void CG_ServerCommand( void ) {
 	}
 
 	if ( !strcmp( cmd, "print" ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s", CG_Argv(1) );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s", CG_Argv(1) );
 		cmd = CG_Argv(1);			// yes, this is obviously a hack, but so is the way we hear about
 									// votes passing or failing
 
@@ -989,7 +992,7 @@ static void CG_ServerCommand( void ) {
 		trap_S_StartLocalSound( cgs.media.talkSound, CHAN_LOCAL_SOUND );
 		Q_strncpyz( text, CG_Argv(1), MAX_SAY_TEXT );
 		CG_RemoveChatEscapeChar( text );
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s\n", text );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s\n", text );
 		return;
 	}
 
@@ -1006,7 +1009,7 @@ static void CG_ServerCommand( void ) {
 		Q_strncpyz( text, CG_Argv(1), MAX_SAY_TEXT );
 		CG_RemoveChatEscapeChar( text );
 		CG_AddToTeamChat( text );
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s\n", text );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s\n", text );
 		return;
 	}
 
@@ -1078,7 +1081,7 @@ static void CG_ServerCommand( void ) {
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "Unknown client game command: %s\n", cmd );
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Unknown client game command: %s\n", cmd );
 }
 
 

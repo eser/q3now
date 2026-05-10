@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // g_utils.c -- misc utility functions for game module
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 typedef struct {
   char oldShader[MAX_QPATH];
@@ -192,7 +194,7 @@ gentity_t *G_PickTarget (char *targetname)
 
 	if (!targetname)
 	{
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_PickTarget called with NULL targetname\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "G_PickTarget called with NULL targetname\n");
 		return NULL;
 	}
 
@@ -208,7 +210,7 @@ gentity_t *G_PickTarget (char *targetname)
 
 	if (!num_choices)
 	{
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_PickTarget: target %s not found\n", targetname);
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "G_PickTarget: target %s not found\n", targetname);
 		return NULL;
 	}
 
@@ -247,14 +249,14 @@ void G_UseTargets( gentity_t *ent, gentity_t *activator ) {
 	t = NULL;
 	while ( (t = G_Find (t, FOFS(targetname), ent->target)) != NULL ) {
 		if ( t == ent ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "WARNING: Entity used itself.\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "WARNING: Entity used itself.\n");
 		} else {
 			if ( t->use ) {
 				t->use (t, ent, activator);
 			}
 		}
 		if ( !ent->inuse ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "entity was removed while using targets\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "entity was removed while using targets\n");
 			return;
 		}
 	}
@@ -411,7 +413,7 @@ gentity_t *G_Spawn( void ) {
 	}
 	if ( level.num_entities == ENTITYNUM_MAX_NORMAL ) {
 		for (i = 0; i < MAX_GENTITIES; i++) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "%4i: %s\n", i, g_entities[i].classname);
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "%4i: %s\n", i, g_entities[i].classname);
 		}
 		Com_Terminate( TERM_CLIENT_DROP, "G_Spawn: no free entities" );
 	}
@@ -574,7 +576,7 @@ void G_AddEvent( gentity_t *ent, int event, int eventParm ) {
 	int		bits;
 
 	if ( !event ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_AddEvent: zero event added for entity %i\n", ent->s.number );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "G_AddEvent: zero event added for entity %i\n", ent->s.number );
 		return;
 	}
 

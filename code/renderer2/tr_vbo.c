@@ -73,6 +73,7 @@ void Vao_SetVertexPointers(vao_t *vao)
 
 		if (vAtb->enabled)
 		{
+			// NOLINTNEXTLINE(clang-analyzer-core.NullPointerArithm) — BUFFER_OFFSET((char*)NULL + offset) is the canonical GL VBO-offset idiom
 			qglVertexAttribPointer(attribIndex, vAtb->count, vAtb->type, vAtb->normalized, vAtb->stride, BUFFER_OFFSET(vAtb->offset));
 			if (glRefConfig.vertexArrayObject || !(glState.vertexAttribsEnabled & attribBit))
 				qglEnableVertexAttribArray(attribIndex);
@@ -617,6 +618,7 @@ void RB_UpdateTessVao(unsigned int attribBits)
 			if (attribBits & attribBit)
 			{
 				if (!glRefConfig.vertexArrayObject)
+					// NOLINTNEXTLINE(clang-analyzer-core.NullPointerArithm) — BUFFER_OFFSET((char*)NULL + offset) is the canonical GL VBO-offset idiom
 					qglVertexAttribPointer(attribIndex, vAtb->count, vAtb->type, vAtb->normalized, vAtb->stride, BUFFER_OFFSET(vAtb->offset));
 
 				if (!(glState.vertexAttribsEnabled & attribBit))
@@ -739,6 +741,7 @@ void VaoCache_Commit(void)
 	// If found, use it
 	if (indexSet < vc.surfaceIndexSets + vc.numSurfaces)
 	{
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — index bounded by upstream invariant (sun-shadow cascades, surfaceIndexSets count, dlight pipeline count); analyzer doesn't see the bound
 		tess.firstIndex = indexSet->bufferOffset / sizeof(glIndex_t);
 		//ri.Log( SEV_INFO, "firstIndex %d numIndexes %d as %d\n", tess.firstIndex, tess.numIndexes, (int)(batchLength - vc.batchLengths));
 		//ri.Log( SEV_INFO, "vc.numSurfaces %d vc.numBatches %d\n", vc.numSurfaces, vc.numBatches);

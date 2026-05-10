@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 #include "g_local.h"
 #include "wired/bots/g_wiredbots.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #if FEAT_TA_VOICECHAT
 #include "../qcommon/menudef.h"			// for the voice chats
@@ -1075,7 +1077,7 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 
 	// echo the text to the console
 	if ( g_dedicated.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "%s%s\n", name, text);
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "%s%s\n", name, text);
 	}
 
 	// send it to all the appropriate clients
@@ -1219,7 +1221,7 @@ void G_Voice( gentity_t *ent, gentity_t *target, int mode, const char *id, qbool
 
 	// echo the text to the console
 	if ( g_dedicated.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "voice: %s %s\n", ent->client->pers.netname, id);
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "voice: %s %s\n", ent->client->pers.netname, id);
 	}
 
 	// send it to all the appropriate clients

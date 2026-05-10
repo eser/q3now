@@ -1,4 +1,4 @@
-# q3now — developer Makefile
+# Wired — developer Makefile
 #
 # Composable build workflow with granular targets.
 # All cmake details live in cmake/ — this file is a thin workflow layer.
@@ -51,10 +51,19 @@ else
   CHANNEL_SUFFIX := -$(CHANNEL)
 endif
 
-# CMAKE_APP_NAME: matches cmake PROJECT() name — used for build output paths
-# APP_NAME: channel-suffixed name — used for install paths and artifact names
-CMAKE_APP_NAME := q3now
-APP_NAME       ?= $(CMAKE_APP_NAME)$(CHANNEL_SUFFIX)
+# Branding split:
+#   PRODUCT_NAME   — game/product name (matches CMakeLists.txt PRODUCT_NAME).
+#                    Used for install paths, package archives, .app display.
+#                    Override via PRODUCT_NAME=othergame for builds targeting
+#                    a different game on the wired engine.
+#   CMAKE_APP_NAME — engine binary name (matches CMakeLists.txt CNAME = wired).
+#                    Used for build-output paths inside build/<cfg>/ and for
+#                    binary filenames inside installed bundles.
+#   APP_NAME       — channel-suffixed product name. Used for install paths,
+#                    DMG/tar/zip filenames, and the .app display name on macOS.
+PRODUCT_NAME   ?= q3now
+CMAKE_APP_NAME := wired
+APP_NAME       ?= $(PRODUCT_NAME)$(CHANNEL_SUFFIX)
 MAP        ?=
 DEV        ?= 0
 VM         ?= 0
@@ -113,13 +122,17 @@ endif
 GAME_ARCH := $(patsubst _%,%,$(RENDEXT))
 ifeq ($(UNAME_S),Darwin)
   JOBS      ?= $(shell sysctl -n hw.ncpu)
-  BUILT_APP := $(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT).app
-  GAME_BIN  := $(BUILT_APP)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)
-  BUILT_DED := $(BUILD_DIR)/$(CMAKE_APP_NAME)-ded$(BINEXT).app/Contents/MacOS/$(CMAKE_APP_NAME)-ded$(BINEXT)
+  # CMake assembles a single product bundle on macOS:
+  #   build/<cfg>/$(APP_NAME)$(BINEXT).app/Contents/MacOS/{wired$(BINEXT), wired-ded$(BINEXT)}
+  # Bundle directory is product+channel branded; engine binaries inside keep
+  # their wired/wired-ded names. See "Combined macOS bundle assembly" in CMakeLists.txt.
+  BUILT_APP  := $(BUILD_DIR)/$(APP_NAME)$(BINEXT).app
+  ENGINE_BIN := $(BUILT_APP)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)
+  BUILT_DED  := $(BUILT_APP)/Contents/MacOS/$(CMAKE_APP_NAME)-ded$(BINEXT)
   Q3DIR       ?= /Applications/$(APP_NAME).app
 else
   JOBS        ?= $(shell nproc 2>/dev/null || echo 4)
-  GAME_BIN    := $(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)
+  ENGINE_BIN  := $(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)
   ifdef IS_WINDOWS
   	Q3DIR     ?= $(LOCALAPPDATA)/Programs/$(APP_NAME)
   else
@@ -170,7 +183,8 @@ endif
 
 CMAKE_EXTRA_FLAGS ?=
 CMAKE_CHANNEL_FLAG := -DCHANNEL_SUFFIX="$(CHANNEL_SUFFIX)"
-CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_PRODUCT_FLAG := -DPRODUCT_NAME="$(PRODUCT_NAME)"
+CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_WASM_FLAG) $(CMAKE_SDL_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
 CMAKE_BUILD        := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # Code signing identity (default: ad-hoc).
@@ -195,15 +209,15 @@ ZIP_OUT     := $(BUILD_DIR)/$(ZIP_NAME).zip
 # Launcher (Go/Wails)
 LAUNCHER_DIR := launcher
 ifeq ($(UNAME_S),Darwin)
-  LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS/q3now-launcher
+  LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/Wired.app/Contents/MacOS/q3now-launcher
   # Self-contained launcher build dir layout (post create-launcher).
   # paths.GameBinaryPath() = filepath.Dir(os.Executable())/<engine name>;
   # the launcher binary lives in Contents/MacOS/ so the engine binary
   # colocates there. Game modules + paks go under Contents/Resources/baseq3
   # because post-engine-Phase-1 the basegame scan reaches only the resource
   # path on macOS (mirrors the Q3DATADIR collapse for the install layout).
-  LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/MacOS
-  LAUNCHER_DSTDATA := $(LAUNCHER_DIR)/build/bin/q3now.app/Contents/Resources/baseq3
+  LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin/Wired.app/Contents/MacOS
+  LAUNCHER_DSTDATA := $(LAUNCHER_DIR)/build/bin/Wired.app/Contents/Resources/baseq3
 else ifdef IS_WINDOWS
   LAUNCHER_BIN     := $(LAUNCHER_DIR)/build/bin/q3now-launcher.exe
   LAUNCHER_DSTBIN  := $(LAUNCHER_DIR)/build/bin
@@ -547,17 +561,17 @@ ifeq ($(UNAME_S),Darwin)
 	              "$(Q3DATADIR)/"*$(GAME_ARCH).dylib; do \
 	  [ -f "$$dylib" ] && codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" "$$dylib" 2>/dev/null; \
 	done
-	codesign --force --options runtime --entitlements misc/macos/q3now.entitlements \
+	codesign --force --options runtime --entitlements misc/macos/wired.entitlements \
 	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
 	codesign --force --options runtime \
 	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/q3now-launcher"
 	@test -f "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)-ded" && \
-	  codesign --force --options runtime --entitlements misc/macos/q3now.entitlements \
+	  codesign --force --options runtime --entitlements misc/macos/wired.entitlements \
 	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)-ded" || true
 	@# Sign the bundle as a whole (--deep re-signs all subcomponents).
 	@# Non-code data (.sw3z) lives in Contents/Resources/, not Contents/MacOS/,
 	@# so codesign handles the bundle cleanly.
-	codesign --force --deep --options runtime --entitlements misc/macos/q3now.entitlements \
+	codesign --force --deep --options runtime --entitlements misc/macos/wired.entitlements \
 	  --sign "$(CODESIGN_IDENTITY)" "$(Q3DIR)"
 else
 	@echo "bundle-codesign: macOS only, skipping"
@@ -681,7 +695,7 @@ endif
 # Compose command-line arguments
 _RUN_GAME_ARGS := $(_RUN_VM_ARGS)
 ifeq ($(DEV),1)
-_RUN_GAME_ARGS += +set g_cheats 1
+_RUN_GAME_ARGS += +set sv_cheats 1
 endif
 ifneq ($(MAP),)
 _RUN_GAME_ARGS += +map $(MAP)
@@ -719,7 +733,7 @@ endif
 # Compose dedicated-server args (dedicated 2 = no client, VM + map as run-game)
 _RUN_DED_ARGS := +set dedicated 2 $(_RUN_VM_ARGS)
 ifeq ($(DEV),1)
-_RUN_DED_ARGS += +set g_cheats 1
+_RUN_DED_ARGS += +set sv_cheats 1
 endif
 ifneq ($(MAP),)
 _RUN_DED_ARGS += +map $(MAP)
@@ -750,7 +764,7 @@ else
 endif
 	@echo ""
 	@echo "  ┌─────────────────────────────────────┐"
-	@echo "  │  q3now release ready                 │"
+	@echo "  │  Wired release ready                 │"
 	@echo "  ├─────────────────────────────────────┤"
 ifeq ($(UNAME_S),Darwin)
 	@echo "  │  DMG: $(DMG_OUT)"
@@ -806,7 +820,7 @@ test-vm:
 # ── FS dedup smoke test ─────────────────────────────────────────────────────
 # Regression test for FS_DeduplicateArchives SW3Z double-free.
 # Builds two same-basename SW3Z archives in fixture basepath/ + homepath/,
-# launches q3now-ded with explicit fs_installpath / fs_homepath, asserts clean
+# launches wired-ded with explicit fs_installpath / fs_homepath, asserts clean
 # exit and that the dedup code path actually fired.
 
 test-fs-dedup: build $(SW3Z_BIN)
@@ -830,12 +844,12 @@ else
 endif
 
 # ── diff-api ─────────────────────────────────────────────────────────────────
-# Diffs q3now's game API headers against upstream Quake3e at the fork point.
+# Diffs Wired's game API headers against upstream Quake3e at the fork point.
 
 UPSTREAM_REF ?= ecd5fa41
 
 diff-api:
-	@echo "==> API header diff (q3now vs upstream $(UPSTREAM_REF))"
+	@echo "==> API header diff (wired vs upstream $(UPSTREAM_REF))"
 	@echo "--- g_public.h ---"
 	@git diff $(UPSTREAM_REF) -- code/game/g_public.h
 	@echo "--- cg_public.h ---"
@@ -888,7 +902,7 @@ lint: $(BUILD_DIR)/CMakeCache.txt
 
 help:
 	@echo ""
-	@echo "  q3now build targets"
+	@echo "  Wired build targets"
 	@echo "  ───────────────────────────────────────────────────────────"
 	@echo "  make                 configure + build Release"
 	@echo "  make clean           remove build-release/ + build-debug/"

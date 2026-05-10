@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 qboolean	G_SpawnString( const char *key, const char *defaultString, char **out ) {
 	int		i;
@@ -403,7 +405,7 @@ qboolean G_CallSpawn( gentity_t *ent ) {
 	gitem_t	*item;
 
 	if ( !ent->classname ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "G_CallSpawn: NULL classname\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "G_CallSpawn: NULL classname\n");
 		return qfalse;
 	}
 
@@ -423,7 +425,7 @@ qboolean G_CallSpawn( gentity_t *ent ) {
 			return qtrue;
 		}
 	}
-	Com_Log( SEV_DEBUG, LOG_CAT_GAME, "%s doesn't have a spawn function\n", ent->classname);
+	Com_Log( SEV_DEBUG, LOG_CH(ch_game), "%s doesn't have a spawn function\n", ent->classname);
 	G_TrackMissingSpawn( ent->classname );
 	return qfalse;
 }
@@ -439,7 +441,7 @@ so message texts can be multi-line
 char *G_NewString( const char *string ) {
 	char	*newb, *new_p;
 	int		i,l;
-	
+
 	l = strlen(string) + 1;
 
 	newb = G_Alloc( l );
@@ -459,7 +461,7 @@ char *G_NewString( const char *string ) {
 			*new_p++ = string[i];
 		}
 	}
-	
+
 	return newb;
 }
 
@@ -590,7 +592,7 @@ static void G_RemapEntity( gentity_t *ent ) {
 
 	for ( r = s_entityRemaps; r->from; r++ ) {
 		if ( !Q_stricmp( ent->classname, r->from ) ) {
-			Com_Log( SEV_TRACE, LOG_CAT_GAME, "Entity remap: %s -> %s\n", r->from, r->to );
+			Com_Log( SEV_TRACE, LOG_CH(ch_game), "Entity remap: %s -> %s\n", r->from, r->to );
 			ent->classname = (char *)r->to;
 			return;
 		}
@@ -619,7 +621,7 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 	}
 
 	// check for "notsingle" flag
-	if ( g_singlePlayer.integer ) {
+	if ( g_gameflags.integer & GF_CAMPAIGN ) {
 		G_SpawnInt( "notsingle", "0", &i );
 		if ( i ) {
 			ADJUST_AREAPORTAL();
@@ -735,7 +737,7 @@ qboolean G_ParseSpawnVars( void ) {
 	}
 
 	// go through all the key / value pairs
-	while ( 1 ) {	
+	while ( 1 ) {
 		// parse key
 		if ( !trap_GetEntityToken( keyname, sizeof( keyname ) ) ) {
 			Com_Terminate( TERM_CLIENT_DROP, "G_ParseSpawnVars: EOF without closing brace" );
@@ -744,8 +746,8 @@ qboolean G_ParseSpawnVars( void ) {
 		if ( keyname[0] == '}' ) {
 			break;
 		}
-		
-		// parse value	
+
+		// parse value
 		if ( !trap_GetEntityToken( com_token, sizeof( com_token ) ) ) {
 			Com_Terminate( TERM_CLIENT_DROP, "G_ParseSpawnVars: EOF without closing brace" );
 		}
@@ -860,9 +862,9 @@ void G_SpawnEntitiesFromString( void ) {
 
 	if ( g_missingSpawnCount > 0 ) {
 		int i;
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Missing spawn functions (%d unique classnames):\n", g_missingSpawnCount );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Missing spawn functions (%d unique classnames):\n", g_missingSpawnCount );
 		for ( i = 0; i < g_missingSpawnCount; i++ ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "  %-40s  count=%d\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "  %-40s  count=%d\n",
 			         g_missingSpawns[i].name, g_missingSpawns[i].count );
 		}
 		g_missingSpawnCount = 0;

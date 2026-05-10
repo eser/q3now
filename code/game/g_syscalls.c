@@ -31,6 +31,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MAX_STRINGFIELD 80
 #endif
 #include "../botlib/be_ai_weap.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #ifdef WASM_MODULE
 extern intptr_t QDECL syscall( intptr_t arg, ... );
@@ -647,7 +649,7 @@ int trap_BotLoadCharacter(char *charfile, float skill) {
 			}
 		}
 	}
-	Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_RED "Unsupported legacy bot character file: %s\n", charfile ? charfile : "<null>" );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_RED "Unsupported legacy bot character file: %s\n", charfile ? charfile : "<null>" );
 	return 0;
 }
 

@@ -1,4 +1,4 @@
-#include "tr_local.h"
+﻿#include "tr_local.h"
 #include "vk.h"
 #ifndef _WIN32
 #include <pthread.h>
@@ -386,7 +386,7 @@ static void end_command_buffer( VkCommandBuffer command_buffer, const char *loca
 		submit_info.waitSemaphoreCount = 1;
 		submit_info.pWaitSemaphores = &waits;
 		submit_info.pWaitDstStageMask = &wait_dst_stage_mask;
-	} else 
+	} else
 #endif
 	{
 		submit_info.waitSemaphoreCount = 0;
@@ -407,7 +407,7 @@ static void end_command_buffer( VkCommandBuffer command_buffer, const char *loca
 }
 
 
-static void record_image_layout_transition( VkCommandBuffer command_buffer, VkImage image, VkImageAspectFlags image_aspect_flags, 
+static void record_image_layout_transition( VkCommandBuffer command_buffer, VkImage image, VkImageAspectFlags image_aspect_flags,
 	VkImageLayout old_layout, VkImageLayout new_layout, uint32_t src_stage_override, uint32_t dst_stage_override ) {
 	VkImageMemoryBarrier barrier;
 	uint32_t src_stage, dst_stage;
@@ -1218,7 +1218,7 @@ static void vk_clean_staging_buffer( void )
 		vk.staging_buffer.handle = VK_NULL_HANDLE;
 	}
 
-	//if ( vk.staging_buffer.ptr != NULL ) 
+	//if ( vk.staging_buffer.ptr != NULL )
 	//	qvkUnmapMemory( vk.device, vk.staging_buffer.memory ) {
 	//	vk.staging_buffer.ptr = NULL;
 	//}
@@ -1249,9 +1249,8 @@ static qboolean vk_wait_staging_buffer( void )
 		vk.staging_buffer.offset = 0; // FIXME: is this correct?
 		vk.aux_fence_wait = qfalse;
 		return qtrue;
-	} else {
-		return qfalse;
 	}
+	return qfalse;
 }
 
 
@@ -1474,7 +1473,7 @@ static void create_instance( void )
 
 	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	appInfo.pNext = NULL;
-	appInfo.pApplicationName = NULL; // Q3NOW_ENGINE_VERSION;
+	appInfo.pApplicationName = NULL; // WIRED_ENGINE_VERSION;
 	appInfo.applicationVersion = 0x0;
 	appInfo.pEngineName = NULL;
 	appInfo.engineVersion = 0x0;
@@ -2123,7 +2122,7 @@ static void init_vulkan_library( void )
 		ri.Terminate( TERM_UNRECOVERABLE, "Vulkan: no physical devices found" );
 		return;
 	}
-	else if ( res < 0 ) {
+	if ( res < 0 ) {
 		ri.Terminate( TERM_UNRECOVERABLE, "vkEnumeratePhysicalDevices returned %s", vk_result_string( res ) );
 		return;
 	}
@@ -2837,6 +2836,320 @@ void vk_init_descriptors( void )
 		}
 	}
 #endif
+
+	// re-allocate ribbon SSBO descriptors after descriptor pool reset.
+	// The buffers (points, headers) and the set/pipeline layouts survive
+	// the reset; only the descriptor sets need recreation + rewrite.
+	if ( vk.ribbon.available ) {
+		VkDescriptorSetAllocateInfo dsAlloc;
+		VkWriteDescriptorSet writes[2];
+		VkDescriptorBufferInfo bufInfos[2];
+		const uint32_t pointsBytes  = RIBBON_POINTS_PER_FRAME  * RIBBON_POINT_BYTES;
+		const uint32_t headersBytes = RIBBON_HEADERS_PER_FRAME * RIBBON_HEADER_BYTES;
+		uint32_t j;
+
+		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			dsAlloc.descriptorPool     = vk.descriptor_pool;
+			dsAlloc.descriptorSetCount = 1;
+			dsAlloc.pSetLayouts        = &vk.ribbon.set_layout;
+			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.ribbon.descriptor[j] ) );
+
+			memset( bufInfos, 0, sizeof( bufInfos ) );
+			bufInfos[0].buffer = vk.ribbon.points_buffer[j];
+			bufInfos[0].offset = 0;
+			bufInfos[0].range  = pointsBytes;
+			bufInfos[1].buffer = vk.ribbon.headers_buffer[j];
+			bufInfos[1].offset = 0;
+			bufInfos[1].range  = headersBytes;
+
+			memset( writes, 0, sizeof( writes ) );
+			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[0].dstSet          = vk.ribbon.descriptor[j];
+			writes[0].dstBinding      = 0;
+			writes[0].descriptorCount = 1;
+			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[0].pBufferInfo     = &bufInfos[0];
+			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[1].dstSet          = vk.ribbon.descriptor[j];
+			writes[1].dstBinding      = 1;
+			writes[1].descriptorCount = 1;
+			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[1].pBufferInfo     = &bufInfos[1];
+
+			qvkUpdateDescriptorSets( vk.device, 2, writes, 0, NULL );
+		}
+	}
+
+	// re-allocate sprite SSBO descriptor after descriptor pool reset.
+	// The buffer (headers) and the set/pipeline layouts survive the
+	// reset; only the descriptor sets need recreation + rewrite.
+	if ( vk.sprite.available ) {
+		VkDescriptorSetAllocateInfo dsAlloc;
+		VkWriteDescriptorSet writes[1];
+		VkDescriptorBufferInfo bufInfos[1];
+		const uint32_t headersBytes = SPRITES_PER_FRAME * SPRITE_HEADER_BYTES;
+		uint32_t j;
+
+		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			dsAlloc.descriptorPool     = vk.descriptor_pool;
+			dsAlloc.descriptorSetCount = 1;
+			dsAlloc.pSetLayouts        = &vk.sprite.set_layout;
+			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.sprite.descriptor[j] ) );
+
+			memset( bufInfos, 0, sizeof( bufInfos ) );
+			bufInfos[0].buffer = vk.sprite.headers_buffer[j];
+			bufInfos[0].offset = 0;
+			bufInfos[0].range  = headersBytes;
+
+			memset( writes, 0, sizeof( writes ) );
+			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[0].dstSet          = vk.sprite.descriptor[j];
+			writes[0].dstBinding      = 0;
+			writes[0].descriptorCount = 1;
+			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[0].pBufferInfo     = &bufInfos[0];
+
+			qvkUpdateDescriptorSets( vk.device, 1, writes, 0, NULL );
+		}
+	}
+
+	// re-allocate beam SSBO descriptor after descriptor pool reset.
+	// The header buffers and set/pipeline layouts survive the reset;
+	// only the descriptor sets need recreation + rewrite of the
+	// header SSBO binding (binding 0). Binding 1 (the sampler array)
+	// is rewritten later by vk_init_primitive_shader_images, which
+	// runs from R_Init AFTER this function. Without this block,
+	// vk.beam.descriptor[j] holds stale handles after vid_restart
+	// and the first call into the sampler-array write site fires
+	// "Invalid VkDescriptorSet Object" validation errors.
+	if ( vk.beam.available ) {
+		VkDescriptorSetAllocateInfo dsAlloc;
+		VkWriteDescriptorSet writes[3];
+		VkDescriptorBufferInfo bufInfos[3];
+		const uint32_t headerBytes = BEAM_POOL_MAX * BEAM_HEADER_BYTES;
+		uint32_t j;
+
+		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+			uint32_t writeCount;
+
+			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			dsAlloc.descriptorPool     = vk.descriptor_pool;
+			dsAlloc.descriptorSetCount = 1;
+			dsAlloc.pSetLayouts        = &vk.beam.set_layout;
+			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.beam.descriptor[j] ) );
+
+			memset( bufInfos, 0, sizeof( bufInfos ) );
+			bufInfos[0].buffer = vk.beam.header_buffer[j];
+			bufInfos[0].offset = 0;
+			bufInfos[0].range  = headerBytes;
+
+			memset( writes, 0, sizeof( writes ) );
+			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[0].dstSet          = vk.beam.descriptor[j];
+			writes[0].dstBinding      = 0;
+			writes[0].descriptorCount = 1;
+			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[0].pBufferInfo     = &bufInfos[0];
+
+			writeCount = 1;
+
+			// Phase 5G: bindings 2 (per-stage data) and 3 (stage counts)
+			// must be re-written here too. The buffers themselves
+			// survive vid_restart (allocated in
+			// vk_init_primitive_shader_stages, which runs after this
+			// from R_Init's R_InitImages → vk_init_primitive_shader_images
+			// path); skip their writes if the buffers don't exist yet
+			// — vk_init_primitive_shader_images will handle the late
+			// case via its own descriptor write or the sampler-array
+			// write site (which fires after R_Init).
+			if ( vk.primitive_stages_buffer != VK_NULL_HANDLE ) {
+				bufInfos[1].buffer = vk.primitive_stages_buffer;
+				bufInfos[1].offset = 0;
+				bufInfos[1].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+					* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
+
+				writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				writes[1].dstSet          = vk.beam.descriptor[j];
+				writes[1].dstBinding      = 2;
+				writes[1].descriptorCount = 1;
+				writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+				writes[1].pBufferInfo     = &bufInfos[1];
+
+				bufInfos[2].buffer = vk.primitive_stage_counts_buffer;
+				bufInfos[2].offset = 0;
+				bufInfos[2].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+					* sizeof( uint32_t );
+
+				writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				writes[2].dstSet          = vk.beam.descriptor[j];
+				writes[2].dstBinding      = 3;
+				writes[2].descriptorCount = 1;
+				writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+				writes[2].pBufferInfo     = &bufInfos[2];
+
+				writeCount = 3;
+			}
+
+			qvkUpdateDescriptorSets( vk.device, writeCount, writes, 0, NULL );
+		}
+
+		// Pool slots' active flags survived the descriptor pool reset
+		// in host memory, but the underlying GPU resources (descriptor
+		// sets) got invalidated. Any in-flight transient or persistent
+		// beam from before vid_restart is now decoupled from valid
+		// state — drop them all so RB_DrawBeams starts fresh.
+		memset( vk.beam.active,    0, sizeof( vk.beam.active ) );
+		memset( vk.beam.spawnTime, 0, sizeof( vk.beam.spawnTime ) );
+		memset( vk.beam.duration,  0, sizeof( vk.beam.duration ) );
+		memset( vk.beam.fadeIn,    0, sizeof( vk.beam.fadeIn ) );
+		memset( vk.beam.fadeOut,   0, sizeof( vk.beam.fadeOut ) );
+		vk.beam.drawCount = 0;
+	}
+
+	// re-allocate particle compute + render descriptor sets after
+	// descriptor pool reset. The buffers (pool ping-pong, classes
+	// shadow, per-frame UBOs) and the set/pipeline layouts survive
+	// the reset; only the descriptor sets need recreation + rewrite.
+	// Without this block, particle bindings hold stale handles after
+	// vk_release_resources / vid_restart and validation fires every
+	// frame (Family 2 / Family 3).
+	if ( vk.particle.available ) {
+		VkDescriptorSetAllocateInfo dsAlloc;
+		VkWriteDescriptorSet writes[4];
+		VkDescriptorBufferInfo bufInfos[4];
+		const uint32_t poolBytes    = PARTICLES_PER_POOL * PARTICLE_BYTES;
+		const uint32_t classesBytes = MAX_PARTICLE_CLASSES * PARTICLE_CLASS_GPU_BYTES;
+		const uint32_t frameBytes   = sizeof( particleFrame_t );
+		uint32_t j;
+
+		// compute descriptor sets — same layout as the freshly-init
+		// pattern in vk_init_particle: UBO at 0, read pool at 1,
+		// write pool at 2, class shadow at 3. Index i reads pool[i],
+		// writes pool[1-i].
+		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+			uint32_t readPool  = j;
+			uint32_t writePool = 1 - j;
+
+			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			dsAlloc.descriptorPool     = vk.descriptor_pool;
+			dsAlloc.descriptorSetCount = 1;
+			dsAlloc.pSetLayouts        = &vk.particle.compute_set_layout;
+			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.particle.compute_descriptor[j] ) );
+
+			memset( bufInfos, 0, sizeof( bufInfos ) );
+			bufInfos[0].buffer = vk.particle.frame_buffer[j];
+			bufInfos[0].offset = 0;
+			bufInfos[0].range  = frameBytes;
+			bufInfos[1].buffer = vk.particle.pool_buffer[readPool];
+			bufInfos[1].offset = 0;
+			bufInfos[1].range  = poolBytes;
+			bufInfos[2].buffer = vk.particle.pool_buffer[writePool];
+			bufInfos[2].offset = 0;
+			bufInfos[2].range  = poolBytes;
+			bufInfos[3].buffer = vk.particle.classes_buffer;
+			bufInfos[3].offset = 0;
+			bufInfos[3].range  = classesBytes;
+
+			memset( writes, 0, sizeof( writes ) );
+			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[0].dstSet          = vk.particle.compute_descriptor[j];
+			writes[0].dstBinding      = 0;
+			writes[0].descriptorCount = 1;
+			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			writes[0].pBufferInfo     = &bufInfos[0];
+			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[1].dstSet          = vk.particle.compute_descriptor[j];
+			writes[1].dstBinding      = 1;
+			writes[1].descriptorCount = 1;
+			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[1].pBufferInfo     = &bufInfos[1];
+			writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[2].dstSet          = vk.particle.compute_descriptor[j];
+			writes[2].dstBinding      = 2;
+			writes[2].descriptorCount = 1;
+			writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[2].pBufferInfo     = &bufInfos[2];
+			writes[3].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[3].dstSet          = vk.particle.compute_descriptor[j];
+			writes[3].dstBinding      = 3;
+			writes[3].descriptorCount = 1;
+			writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[3].pBufferInfo     = &bufInfos[3];
+
+			qvkUpdateDescriptorSets( vk.device, 4, writes, 0, NULL );
+		}
+
+		// render descriptor sets — UBO at 0, read pool at 1, classes
+		// at 2. Index i reads pool[1-i] (the post-compute output when
+		// compute_descriptor[i] just ran).
+		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+			uint32_t renderPool = 1 - j;
+
+			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			dsAlloc.descriptorPool     = vk.descriptor_pool;
+			dsAlloc.descriptorSetCount = 1;
+			dsAlloc.pSetLayouts        = &vk.particle.render_set_layout;
+			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.particle.render_descriptor[j] ) );
+
+			memset( bufInfos, 0, sizeof( bufInfos ) );
+			bufInfos[0].buffer = vk.particle.frame_buffer[j];
+			bufInfos[0].offset = 0;
+			bufInfos[0].range  = frameBytes;
+			bufInfos[1].buffer = vk.particle.pool_buffer[renderPool];
+			bufInfos[1].offset = 0;
+			bufInfos[1].range  = poolBytes;
+			bufInfos[2].buffer = vk.particle.classes_buffer;
+			bufInfos[2].offset = 0;
+			bufInfos[2].range  = classesBytes;
+
+			memset( writes, 0, sizeof( writes ) );
+			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[0].dstSet          = vk.particle.render_descriptor[j];
+			writes[0].dstBinding      = 0;
+			writes[0].descriptorCount = 1;
+			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			writes[0].pBufferInfo     = &bufInfos[0];
+			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[1].dstSet          = vk.particle.render_descriptor[j];
+			writes[1].dstBinding      = 1;
+			writes[1].descriptorCount = 1;
+			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[1].pBufferInfo     = &bufInfos[1];
+			writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[2].dstSet          = vk.particle.render_descriptor[j];
+			writes[2].dstBinding      = 2;
+			writes[2].descriptorCount = 1;
+			writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[2].pBufferInfo     = &bufInfos[2];
+
+			qvkUpdateDescriptorSets( vk.device, 3, writes, 0, NULL );
+
+			// Note on binding 3 (per-class sampler array): population
+			// is deferred — vk_init_descriptors runs from InitOpenGL
+			// BEFORE R_InitImages re-creates tr.whiteImage on a
+			// vid_restart, so we cannot read tr.whiteImage->view
+			// here. R_Init calls vk_init_particle_textures AFTER
+			// R_InitImages to populate this binding eagerly against
+			// the now-fresh tr.whiteImage.
+		}
+		// Pool reset invalidated the previously-populated sampler
+		// array; R_DeleteTextures + R_InitImages also invalidate the
+		// cached image_t pointers in classImages[] (the old image_t
+		// structs were freed; new ones live at different addresses).
+		// Clear both. R_Init's call to vk_init_particle_textures
+		// (after R_InitImages re-creates tr.whiteImage) repopulates
+		// the array; cgame re-registration later writes each class's
+		// own slot in classImages[].
+		memset( vk.particle.classImages, 0, sizeof( vk.particle.classImages ) );
+		vk.particle.numClasses = 0;
+	}
 }
 
 
@@ -2956,224 +3269,186 @@ static void vk_create_storage_buffer( uint32_t size )
 
 /*
 ===============
-vk_init_compute — initialize generic compute shader infrastructure
+Primitive ribbon — self-contained pipeline.
+
+Cgame submits world-space ribbons of N control points each via
+RE_AddRibbonToScene. Each call appends `numPoints` GPU RibbonPoint
+records to the per-frame points SSBO and one GPU RibbonHeader to
+the per-frame headers SSBO. RB_DrawRibbons (called from
+RB_DrawSurfs after world translucents) issues one direct
+vkCmdDraw per submitted ribbon, with `firstInstance = headerIdx`
+so the vertex shader can read its header via gl_InstanceIndex.
+
+Push range layout (vertex stage only, 80 bytes):
+    bytes  0..63  mat4  mvp        — world MVP, Y-flipped for Vulkan
+    bytes 64..79  vec4  eyeWorld   — .xyz = world-space camera origin
+
+Descriptor set 0:
+    binding 0  STORAGE_BUFFER  RibbonPoint  points[]
+    binding 1  STORAGE_BUFFER  RibbonHeader headers[]
+
+Two pipeline variants (alpha and additive) selected per ribbon
+from header.flags.
 ===============
 */
-qboolean vk_init_compute( void ) {
-	VkDescriptorSetLayoutBinding bindings[2];
+
+void vk_init_ribbon( void )
+{
+	VkDescriptorSetLayoutBinding binds[3];
 	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipelineLayoutInfo;
 	VkPushConstantRange pushRange;
-
-	if ( !qvkCreateComputePipelines || !qvkCmdDispatch ) {
-		ri.Log( SEV_WARN, "WARNING: Vulkan compute not available\n" );
-		vk.computeAvailable = qfalse;
-		return qfalse;
-	}
-
-	memset( bindings, 0, sizeof( bindings ) );
-	// binding 0: per-trail params, dynamic offset selects the slot at bind time
-	bindings[0].binding = 0;
-	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
-	bindings[0].descriptorCount = 1;
-	bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-	bindings[1].binding = 1;
-	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	bindings[1].descriptorCount = 1;
-	bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 2;
-	layoutInfo.pBindings = bindings;
-
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.set_layout_compute ) );
-
-	memset( &pushRange, 0, sizeof( pushRange ) );
-	pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
-	pushRange.offset = 0;
-	pushRange.size = 128;
-
-	memset( &pipelineLayoutInfo, 0, sizeof( pipelineLayoutInfo ) );
-	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipelineLayoutInfo.setLayoutCount = 1;
-	pipelineLayoutInfo.pSetLayouts = &vk.set_layout_compute;
-	pipelineLayoutInfo.pushConstantRangeCount = 1;
-	pipelineLayoutInfo.pPushConstantRanges = &pushRange;
-
-	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipelineLayoutInfo, NULL, &vk.pipeline_layout_compute ) );
-
-	vk.computeAvailable = qtrue;
-	ri.Log( SEV_INFO, "Vulkan compute shader infrastructure initialized\n" );
-	return qtrue;
-}
-
-
-/*
-===============
-vk_shutdown_compute
-===============
-*/
-void vk_shutdown_compute( void ) {
-	if ( vk.pipeline_layout_compute != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.pipeline_layout_compute, NULL );
-		vk.pipeline_layout_compute = VK_NULL_HANDLE;
-	}
-	if ( vk.set_layout_compute != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.set_layout_compute, NULL );
-		vk.set_layout_compute = VK_NULL_HANDLE;
-	}
-	vk.computeAvailable = qfalse;
-}
-
-
-/*
-===============
-vk_create_compute_pipeline
-===============
-*/
-static VkPipeline vk_create_compute_pipeline( VkShaderModule compModule, VkPipelineLayout layout ) {
-	VkComputePipelineCreateInfo info;
-	VkPipeline pipeline;
-
-	memset( &info, 0, sizeof( info ) );
-	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	info.stage.module = compModule;
-	info.stage.pName = "main";
-	info.layout = layout;
-
-	VK_CHECK( qvkCreateComputePipelines( vk.device, VK_NULL_HANDLE, 1, &info, NULL, &pipeline ) );
-	return pipeline;
-}
-
-
-/*
-===============
-vk_init_rail_compute — allocate SSBOs + create pipelines for GPU rail trail
-===============
-*/
-void vk_init_rail_compute( void ) {
+	VkPipelineLayoutCreateInfo pipeLayoutInfo;
 	VkBufferCreateInfo bufInfo;
-	VkMemoryRequirements memReq;
+	VkMemoryRequirements memReqs;
 	VkMemoryAllocateInfo allocInfo;
 	VkDescriptorSetAllocateInfo dsAlloc;
 	VkWriteDescriptorSet writes[2];
 	VkDescriptorBufferInfo bufInfos[2];
-	uint32_t memType;
-	uint32_t outputSize;
-	uint32_t paramsBufferSize;
+	uint32_t pointsBytes;
+	uint32_t headersBytes;
 	int i;
 
-	if ( !vk.computeAvailable )
-		return;
-
-	if ( !vk.modules.rail_helix_cs )
-		return;
-
-	// Slot stride must satisfy minStorageBufferOffsetAlignment; the actual
-	// payload (656 bytes) is unchanged, only the slot-to-slot stride grows.
-	vk.rail.params_slot_stride = (uint32_t)PAD( RAIL_GPU_PARAMS_SIZE, vk.storage_alignment );
-	paramsBufferSize = MAX_GPU_RAIL_TRAILS * vk.rail.params_slot_stride;
-
-	outputSize = RAIL_GPU_MAX_VERTS * RAIL_GPU_VERTEX_SIZE;
-
-	// per-frame params buffers (HOST_COHERENT, slotted by MAX_GPU_RAIL_TRAILS)
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size = paramsBufferSize;
-		bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.rail.params_buffer[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.rail.params_buffer[i], &memReq );
-		memType = find_memory_type( memReq.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-
-		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize = memReq.size;
-		allocInfo.memoryTypeIndex = memType;
-
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.rail.params_memory[i] ) );
-		VK_CHECK( qvkMapMemory( vk.device, vk.rail.params_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.rail.params_ptr[i] ) );
-		qvkBindBufferMemory( vk.device, vk.rail.params_buffer[i], vk.rail.params_memory[i], 0 );
-	}
-
-	// per-frame vertex output buffers (DEVICE_LOCAL in release; host-visible in debug)
-	memset( &bufInfo, 0, sizeof( bufInfo ) );
-	bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufInfo.size = outputSize;
-	bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-	bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		VkMemoryPropertyFlags memFlags;
-
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.rail.vertex_buffer[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.rail.vertex_buffer[i], &memReq );
-
-#ifdef _DEBUG
-		memFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-#else
-		memFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	// Phase 5M: anti-drift checks on the ribbon SSBO byte-layout
+	// constants. The point assert is real layout protection — host
+	// `ribbonPoint_t` is the std430-mirror of GPU `RibbonPoint`, so a
+	// drift in either side fires the assert. The header assert is a
+	// documentation tautology (no host typedef to take sizeof of —
+	// SSBO writes go through raw float/uint pointers); kept for parity
+	// with BEAM_HEADER_BYTES's assert and to flag bumps to the constant.
+#if defined( __STDC_VERSION__ ) && __STDC_VERSION__ >= 201112L
+	_Static_assert( sizeof( ribbonPoint_t ) == RIBBON_POINT_BYTES,
+		"ribbonPoint_t (host) and GPU RibbonPoint must agree on layout: "
+		"vec3 pos + float width + vec4 rgba + vec3 normal + float pad = 48 B" );
+	_Static_assert( RIBBON_HEADER_BYTES == 32,
+		"RIBBON_HEADER_BYTES must be 32 bytes for std430 RibbonHeader "
+		"(4 uint header + vec2 uvScroll + float spawnTime + float pad = 32 B)" );
 #endif
-		memType = find_memory_type( memReq.memoryTypeBits, memFlags );
 
+	memset( &vk.ribbon, 0, sizeof( vk.ribbon ) );
+
+	memset( binds, 0, sizeof( binds ) );
+	binds[0].binding         = 0;
+	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[0].descriptorCount = 1;
+	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+	binds[1].binding         = 1;
+	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[1].descriptorCount = 1;
+	binds[1].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+	// binding 2: per-shader-handle texture array. Populated host-side
+	// from vk_primitive_shader_images[] by vk_init_primitive_shader_images
+	// (called from R_Init AFTER tr.whiteImage exists; deferred because
+	// vk_init_ribbon runs from InitOpenGL before R_InitImages). Fragment
+	// stage only — only ribbon.frag samples it.
+	binds[2].binding         = 2;
+	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binds[2].descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
+	binds[2].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 3;
+	layoutInfo.pBindings    = binds;
+	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.ribbon.set_layout ) );
+
+	memset( &pushRange, 0, sizeof( pushRange ) );
+	// VERTEX | FRAGMENT: the trailing vec4 frameParams (.x =
+	// tr.identityLight) is consumed by ribbon.frag, so the range
+	// must be visible to the fragment stage. The shape of the
+	// vertex-only fields (mvp, eyeWorld) is unchanged.
+	pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT
+	                     | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pushRange.offset     = 0;
+	pushRange.size       = 96; // mat4 mvp + vec4 eyeWorld + vec4 frameParams
+
+	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
+	pipeLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipeLayoutInfo.setLayoutCount         = 1;
+	pipeLayoutInfo.pSetLayouts            = &vk.ribbon.set_layout;
+	pipeLayoutInfo.pushConstantRangeCount = 1;
+	pipeLayoutInfo.pPushConstantRanges    = &pushRange;
+	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.ribbon.pipeline_layout ) );
+
+	pointsBytes  = RIBBON_POINTS_PER_FRAME  * RIBBON_POINT_BYTES;
+	headersBytes = RIBBON_HEADERS_PER_FRAME * RIBBON_HEADER_BYTES;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		uint32_t memType;
+
+		// points buffer (host-coherent, mapped)
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = pointsBytes;
+		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.ribbon.points_buffer[i] ) );
+		qvkGetBufferMemoryRequirements( vk.device, vk.ribbon.points_buffer[i], &memReqs );
+		memType = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
 		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize = memReq.size;
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
 		allocInfo.memoryTypeIndex = memType;
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.ribbon.points_memory[i] ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.ribbon.points_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.ribbon.points_ptr[i] ) );
+		qvkBindBufferMemory( vk.device, vk.ribbon.points_buffer[i], vk.ribbon.points_memory[i], 0 );
 
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.rail.vertex_memory[i] ) );
-		qvkBindBufferMemory( vk.device, vk.rail.vertex_buffer[i], vk.rail.vertex_memory[i], 0 );
+		// headers buffer (host-coherent, mapped)
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = headersBytes;
+		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.ribbon.headers_buffer[i] ) );
+		qvkGetBufferMemoryRequirements( vk.device, vk.ribbon.headers_buffer[i], &memReqs );
+		memType = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
+		allocInfo.memoryTypeIndex = memType;
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.ribbon.headers_memory[i] ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.ribbon.headers_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.ribbon.headers_ptr[i] ) );
+		qvkBindBufferMemory( vk.device, vk.ribbon.headers_buffer[i], vk.ribbon.headers_memory[i], 0 );
 	}
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool = vk.descriptor_pool;
+		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dsAlloc.descriptorPool     = vk.descriptor_pool;
 		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts = &vk.set_layout_compute;
-
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.rail.descriptor[i] ) );
+		dsAlloc.pSetLayouts        = &vk.ribbon.set_layout;
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.ribbon.descriptor[i] ) );
 
 		memset( bufInfos, 0, sizeof( bufInfos ) );
-		// Dynamic params binding: 'range' is one slot's worth; the dynamic
-		// offset at bind time selects which slot the shader sees.
-		bufInfos[0].buffer = vk.rail.params_buffer[i];
+		bufInfos[0].buffer = vk.ribbon.points_buffer[i];
 		bufInfos[0].offset = 0;
-		bufInfos[0].range  = RAIL_GPU_PARAMS_SIZE;
-
-		bufInfos[1].buffer = vk.rail.vertex_buffer[i];
+		bufInfos[0].range  = pointsBytes;
+		bufInfos[1].buffer = vk.ribbon.headers_buffer[i];
 		bufInfos[1].offset = 0;
-		bufInfos[1].range  = outputSize;
+		bufInfos[1].range  = headersBytes;
 
 		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet = vk.rail.descriptor[i];
-		writes[0].dstBinding = 0;
+		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[0].dstSet          = vk.ribbon.descriptor[i];
+		writes[0].dstBinding      = 0;
 		writes[0].descriptorCount = 1;
-		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
-		writes[0].pBufferInfo = &bufInfos[0];
-
-		writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[1].dstSet = vk.rail.descriptor[i];
-		writes[1].dstBinding = 1;
+		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[0].pBufferInfo     = &bufInfos[0];
+		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[1].dstSet          = vk.ribbon.descriptor[i];
+		writes[1].dstBinding      = 1;
 		writes[1].descriptorCount = 1;
-		writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[1].pBufferInfo = &bufInfos[1];
+		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[1].pBufferInfo     = &bufInfos[1];
 
 		qvkUpdateDescriptorSets( vk.device, 2, writes, 0, NULL );
 	}
 
-	vk.rail.compute_pipeline = vk_create_compute_pipeline(
-		vk.modules.rail_helix_cs, vk.pipeline_layout_compute );
-
-	// graphics pipeline (empty vertex input, additive blend)
+	// Two graphics pipeline variants (alpha and additive). Everything
+	// matches the existing translucent pattern: depthTest=LESS_OR_EQUAL,
+	// depthWrite=OFF, cull=NONE, blend enabled. Variant differs only in
+	// the destination blend factor.
 	{
 		VkGraphicsPipelineCreateInfo gpInfo;
 		VkPipelineShaderStageCreateInfo stages[2];
@@ -3189,282 +3464,2670 @@ void vk_init_rail_compute( void ) {
 		VkDynamicState dynStates[2];
 		VkViewport viewport;
 		VkRect2D scissor;
+		int variant;
 
-		memset( &gpInfo, 0, sizeof( gpInfo ) );
 		memset( stages, 0, sizeof( stages ) );
-
-		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		stages[0].module = vk.modules.rail_helix_vs;
-		stages[0].pName = "main";
-
-		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		stages[1].module = vk.modules.rail_helix_fs;
-		stages[1].pName = "main";
+		stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[0].module = vk.modules.ribbon_vs;
+		stages[0].pName  = "main";
+		stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stages[1].module = vk.modules.ribbon_fs;
+		stages[1].pName  = "main";
 
 		memset( &vertexInput, 0, sizeof( vertexInput ) );
 		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
 		memset( &inputAssembly, 0, sizeof( inputAssembly ) );
-		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
 		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
 		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
-
 		memset( &dynamicState, 0, sizeof( dynamicState ) );
-		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 		dynamicState.dynamicStateCount = 2;
-		dynamicState.pDynamicStates = dynStates;
+		dynamicState.pDynamicStates    = dynStates;
 
 		memset( &viewport, 0, sizeof( viewport ) );
-		viewport.width = (float)vk.renderWidth;
-		viewport.height = (float)vk.renderHeight;
+		viewport.width    = (float)vk.renderWidth;
+		viewport.height   = (float)vk.renderHeight;
 		viewport.maxDepth = 1.0f;
-
 		memset( &scissor, 0, sizeof( scissor ) );
-		scissor.extent.width = vk.renderWidth;
+		scissor.extent.width  = vk.renderWidth;
 		scissor.extent.height = vk.renderHeight;
 
 		memset( &viewportState, 0, sizeof( viewportState ) );
-		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		viewportState.viewportCount = 1;
-		viewportState.pViewports = &viewport;
-		viewportState.scissorCount = 1;
-		viewportState.pScissors = &scissor;
+		viewportState.pViewports    = &viewport;
+		viewportState.scissorCount  = 1;
+		viewportState.pScissors     = &scissor;
 
 		memset( &rasterizer, 0, sizeof( rasterizer ) );
-		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-		rasterizer.lineWidth = 1.0f;
-		rasterizer.cullMode = VK_CULL_MODE_NONE;
-		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+		rasterizer.lineWidth   = 1.0f;
+		rasterizer.cullMode    = VK_CULL_MODE_NONE;            // two-sided
+		rasterizer.frontFace   = VK_FRONT_FACE_CLOCKWISE;
 
 		memset( &multisampling, 0, sizeof( multisampling ) );
-		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampling.rasterizationSamples = vk.msaaActive ? vkSamples : VK_SAMPLE_COUNT_1_BIT;
 
 		memset( &depthStencil, 0, sizeof( depthStencil ) );
-		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-		depthStencil.depthTestEnable = VK_TRUE;
+		depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable  = VK_TRUE;
 		depthStencil.depthWriteEnable = VK_FALSE;
-		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-		memset( &blendAttach, 0, sizeof( blendAttach ) );
-		blendAttach.blendEnable = VK_TRUE;
-		blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-		blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-		blendAttach.colorBlendOp = VK_BLEND_OP_ADD;
-		blendAttach.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-		blendAttach.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-		blendAttach.alphaBlendOp = VK_BLEND_OP_ADD;
-		blendAttach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+#ifdef USE_REVERSED_DEPTH
+		depthStencil.depthCompareOp   = VK_COMPARE_OP_GREATER_OR_EQUAL;
+#else
+		depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
+#endif
 
 		memset( &colorBlend, 0, sizeof( colorBlend ) );
-		colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 		colorBlend.attachmentCount = 1;
-		colorBlend.pAttachments = &blendAttach;
+		colorBlend.pAttachments    = &blendAttach;
 
 		memset( &gpInfo, 0, sizeof( gpInfo ) );
-		gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		gpInfo.stageCount = 2;
-		gpInfo.pStages = stages;
-		gpInfo.pVertexInputState = &vertexInput;
+		gpInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		gpInfo.stageCount          = 2;
+		gpInfo.pStages             = stages;
+		gpInfo.pVertexInputState   = &vertexInput;
 		gpInfo.pInputAssemblyState = &inputAssembly;
-		gpInfo.pViewportState = &viewportState;
+		gpInfo.pViewportState      = &viewportState;
 		gpInfo.pRasterizationState = &rasterizer;
-		gpInfo.pMultisampleState = &multisampling;
-		gpInfo.pDepthStencilState = &depthStencil;
-		gpInfo.pColorBlendState = &colorBlend;
-		gpInfo.pDynamicState = &dynamicState;
-		gpInfo.layout = vk.pipeline_layout_compute;
-		gpInfo.renderPass = vk.render_pass.main;
-		gpInfo.subpass = 0;
+		gpInfo.pMultisampleState   = &multisampling;
+		gpInfo.pDepthStencilState  = &depthStencil;
+		gpInfo.pColorBlendState    = &colorBlend;
+		gpInfo.pDynamicState       = &dynamicState;
+		gpInfo.layout              = vk.ribbon.pipeline_layout;
+		gpInfo.renderPass          = vk.render_pass.main;
+		gpInfo.subpass             = 0;
 
-		VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &gpInfo, NULL, &vk.rail.graphics_pipeline ) );
+		// 0 = alpha (SRC_ALPHA / ONE_MINUS_SRC_ALPHA),
+		// 1 = additive (SRC_ALPHA / ONE).
+		for ( variant = 0; variant < 2; variant++ ) {
+			memset( &blendAttach, 0, sizeof( blendAttach ) );
+			blendAttach.blendEnable         = VK_TRUE;
+			blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+			blendAttach.dstColorBlendFactor = (variant == 0)
+				? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+				: VK_BLEND_FACTOR_ONE;
+			blendAttach.colorBlendOp        = VK_BLEND_OP_ADD;
+			blendAttach.srcAlphaBlendFactor = blendAttach.srcColorBlendFactor;
+			blendAttach.dstAlphaBlendFactor = blendAttach.dstColorBlendFactor;
+			blendAttach.alphaBlendOp        = VK_BLEND_OP_ADD;
+			blendAttach.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+			                                | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+			VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &gpInfo, NULL,
+				(variant == 0) ? &vk.ribbon.pipeline_alpha : &vk.ribbon.pipeline_additive ) );
+		}
 	}
 
-	ri.Log( SEV_INFO, "Rail trail GPU compute initialized (%d KB output SSBO)\n",
-		outputSize / 1024 );
+	vk.ribbon.available = qtrue;
+	ri.Log( SEV_INFO, "Vulkan ribbon primitive pipeline initialized (%u points / %u headers per frame)\n",
+		(unsigned)RIBBON_POINTS_PER_FRAME, (unsigned)RIBBON_HEADERS_PER_FRAME );
 }
 
 
-/*
-===============
-vk_shutdown_rail_compute
-===============
-*/
-void vk_shutdown_rail_compute( void ) {
-	if ( vk.rail.compute_pipeline != VK_NULL_HANDLE ) {
-		qvkDestroyPipeline( vk.device, vk.rail.compute_pipeline, NULL );
-		vk.rail.compute_pipeline = VK_NULL_HANDLE;
+void vk_shutdown_ribbon( void )
+{
+	int i;
+
+	if ( vk.ribbon.pipeline_alpha != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.ribbon.pipeline_alpha, NULL );
+		vk.ribbon.pipeline_alpha = VK_NULL_HANDLE;
 	}
-	if ( vk.rail.graphics_pipeline != VK_NULL_HANDLE ) {
-		qvkDestroyPipeline( vk.device, vk.rail.graphics_pipeline, NULL );
-		vk.rail.graphics_pipeline = VK_NULL_HANDLE;
+	if ( vk.ribbon.pipeline_additive != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.ribbon.pipeline_additive, NULL );
+		vk.ribbon.pipeline_additive = VK_NULL_HANDLE;
 	}
-	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.rail.params_buffer[i] != VK_NULL_HANDLE ) {
-			qvkDestroyBuffer( vk.device, vk.rail.params_buffer[i], NULL );
-			if ( vk.rail.params_memory[i] != VK_NULL_HANDLE ) {
-				qvkFreeMemory( vk.device, vk.rail.params_memory[i], NULL );
-			}
-			vk.rail.params_buffer[i] = VK_NULL_HANDLE;
-			vk.rail.params_memory[i] = VK_NULL_HANDLE;
-			vk.rail.params_ptr   [i] = NULL;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.ribbon.points_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.ribbon.points_buffer[i], NULL );
+			vk.ribbon.points_buffer[i] = VK_NULL_HANDLE;
 		}
-		if ( vk.rail.vertex_buffer[i] != VK_NULL_HANDLE ) {
-			qvkDestroyBuffer( vk.device, vk.rail.vertex_buffer[i], NULL );
-			if ( vk.rail.vertex_memory[i] != VK_NULL_HANDLE ) {
-				qvkFreeMemory( vk.device, vk.rail.vertex_memory[i], NULL );
-			}
-			vk.rail.vertex_buffer[i] = VK_NULL_HANDLE;
-			vk.rail.vertex_memory[i] = VK_NULL_HANDLE;
+		if ( vk.ribbon.points_memory[i] != VK_NULL_HANDLE ) {
+			qvkFreeMemory( vk.device, vk.ribbon.points_memory[i], NULL );
+			vk.ribbon.points_memory[i] = VK_NULL_HANDLE;
+			vk.ribbon.points_ptr[i] = NULL;
+		}
+		if ( vk.ribbon.headers_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.ribbon.headers_buffer[i], NULL );
+			vk.ribbon.headers_buffer[i] = VK_NULL_HANDLE;
+		}
+		if ( vk.ribbon.headers_memory[i] != VK_NULL_HANDLE ) {
+			qvkFreeMemory( vk.device, vk.ribbon.headers_memory[i], NULL );
+			vk.ribbon.headers_memory[i] = VK_NULL_HANDLE;
+			vk.ribbon.headers_ptr[i] = NULL;
 		}
 	}
+
+	if ( vk.ribbon.pipeline_layout != VK_NULL_HANDLE ) {
+		qvkDestroyPipelineLayout( vk.device, vk.ribbon.pipeline_layout, NULL );
+		vk.ribbon.pipeline_layout = VK_NULL_HANDLE;
+	}
+	if ( vk.ribbon.set_layout != VK_NULL_HANDLE ) {
+		qvkDestroyDescriptorSetLayout( vk.device, vk.ribbon.set_layout, NULL );
+		vk.ribbon.set_layout = VK_NULL_HANDLE;
+	}
+
+	vk.ribbon.available = qfalse;
 }
 
 
-/*
-===============
-RB_DrawRailTrailGPU — render compute-generated rail trail vertices
-===============
-*/
-void RB_DrawRailTrailGPU( int slot, int numSegments ) {
+void RB_DrawRibbons( void )
+{
 	VkCommandBuffer cmd;
 	int frameIdx;
-	uint32_t paramsOffset;
-	int vertexBaseIndex;
+	VkPipeline lastPipeline;
+	float pushBuf[24]; // mat4 mvp + vec4 eyeWorld + vec4 frameParams
+	float mvp[16];
+	const float *p;
+	float proj[16];
+	uint32_t i;
 
-	if ( !vk.computeAvailable || vk.rail.graphics_pipeline == VK_NULL_HANDLE )
+	// Pipelines were created against vk.render_pass.main only — skip if
+	// we're being called inside the screenmap pass.
+	if ( !vk.ribbon.available
+	  || vk.ribbon.numHeadersThisFrame == 0
+	  || vk.renderPassIndex != RENDER_PASS_MAIN )
 		return;
 
-	if ( numSegments < 2 )
-		return;
-
-	cmd = vk.cmd->command_buffer;
+	cmd      = vk.cmd->command_buffer;
 	frameIdx = vk.cmd_index;
-	paramsOffset    = (uint32_t)slot * vk.rail.params_slot_stride;
-	vertexBaseIndex = slot * RAIL_GPU_VERTS_PER_TRAIL;
 
-	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.rail.graphics_pipeline );
+	// World MVP — same construction the standard 3D path uses
+	// (get_mvp_transform): copy the projection, flip column 1
+	// for Vulkan clip-space, then myGlMultMatrix( modelView, proj ).
+	p = backEnd.viewParms.projectionMatrix;
+	memcpy( proj, p, sizeof( proj ) );
+	proj[5] = -p[5];
+	myGlMultMatrix( backEnd.viewParms.world.modelMatrix, proj, mvp );
 
-	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.pipeline_layout_compute, 0, 1, &vk.rail.descriptor[frameIdx],
-		1, &paramsOffset );
+	memcpy( pushBuf,      mvp,                          64 );
+	memcpy( pushBuf + 16, backEnd.viewParms.or.origin,  sizeof( vec3_t ) );
+	pushBuf[19] = 0.0f;
+	// frameParams: .x = tr.identityLight (CGEN_VERTEX-equivalent
+	// halving for ribbon.frag); .y = currentTime (consumed by
+	// ribbon.vert to drive uvScroll age); .zw reserved.
+	pushBuf[20] = tr.identityLight;
+	pushBuf[21] = (float)backEnd.refdef.floatTime;
+	pushBuf[22] = 0.0f;
+	pushBuf[23] = 0.0f;
 
 	{
-		float mvp[16];
-		myGlMultMatrix( backEnd.viewParms.world.modelMatrix,
-			backEnd.viewParms.projectionMatrix, mvp );
-		qvkCmdPushConstants( cmd, vk.pipeline_layout_compute,
-			VK_SHADER_STAGE_VERTEX_BIT, 0, 64, mvp );
-		// Vertex shader reads its slot's vertex base from offset 64 of the
-		// shared push range so it can index into vertex_buffer[slot * VERTS_PER_TRAIL ..].
-		qvkCmdPushConstants( cmd, vk.pipeline_layout_compute,
-			VK_SHADER_STAGE_VERTEX_BIT, 64, sizeof( int ), &vertexBaseIndex );
+		VkViewport viewport;
+		VkRect2D   scissor;
+		memset( &viewport, 0, sizeof( viewport ) );
+		viewport.x        = (float)backEnd.viewParms.viewportX;
+		viewport.y        = (float)backEnd.viewParms.viewportY;
+		viewport.width    = (float)backEnd.viewParms.viewportWidth;
+		viewport.height   = (float)backEnd.viewParms.viewportHeight;
+		viewport.maxDepth = 1.0f;
+		memset( &scissor, 0, sizeof( scissor ) );
+		scissor.offset.x      = backEnd.viewParms.viewportX;
+		scissor.offset.y      = backEnd.viewParms.viewportY;
+		scissor.extent.width  = backEnd.viewParms.viewportWidth;
+		scissor.extent.height = backEnd.viewParms.viewportHeight;
+		qvkCmdSetViewport( cmd, 0, 1, &viewport );
+		qvkCmdSetScissor ( cmd, 0, 1, &scissor );
+	}
+
+	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		vk.ribbon.pipeline_layout, 0, 1, &vk.ribbon.descriptor[frameIdx], 0, NULL );
+
+	qvkCmdPushConstants( cmd, vk.ribbon.pipeline_layout,
+		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		0, sizeof( pushBuf ), pushBuf );
+
+	lastPipeline = VK_NULL_HANDLE;
+	for ( i = 0; i < vk.ribbon.numHeadersThisFrame; i++ ) {
+		const uint32_t *hdr = (const uint32_t *)
+			(vk.ribbon.headers_ptr[frameIdx] + i * RIBBON_HEADER_BYTES);
+		uint32_t pointCount = hdr[1];
+		uint32_t flags      = hdr[3];
+		VkPipeline pipe = (flags & PRIM_FLAG_ADDITIVE)
+			? vk.ribbon.pipeline_additive : vk.ribbon.pipeline_alpha;
+
+		if ( pointCount < 2 )
+			continue;
+
+		if ( pipe != lastPipeline ) {
+			qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe );
+			lastPipeline = pipe;
+		}
+
+		// 6 verts per segment × (pointCount - 1) segments. firstInstance = i
+		// so the vertex shader sees this header at gl_InstanceIndex.
+		qvkCmdDraw( cmd, ( pointCount - 1 ) * 6, 1, 0, i );
+	}
+
+	// Invalidate cached pipeline / descriptor / depth-range so the next
+	// standard draw rebinds correctly. Same cleanup pattern the IQM
+	// draw uses.
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->depth_range   = DEPTH_RANGE_COUNT;
+	memset( vk.cmd->descriptor_set.current, 0, sizeof( vk.cmd->descriptor_set.current ) );
+	vk.cmd->descriptor_set.start = ~0U;
+	vk.cmd->descriptor_set.end   = 0;
+}
+
+
+/*
+===============
+Primitive beam — self-contained pipeline.
+
+Cgame submits two-endpoint camera-facing quads via RE_AddBeamToScene.
+The renderer maintains a small mixed-mode pool (BEAM_POOL_MAX = 128
+slots) holding both transient (one-frame) and persistent (lifetime
++ fade) beams. Each frame, RB_DrawBeams walks the pool, resolves
+entity-attached endpoints into world space, computes fade alpha for
+persistent beams, writes a compacted run of beamHeaderGPU_t entries
+to the per-frame SSBO, and issues a single vkCmdDraw with
+vertexCount = 6 * BEAM_AXIAL_MAX, instanceCount = drawCount.
+
+The vertex shader (beam.vert) expands each instance into
+axialCopies × 6 vertices, emitting clip-space-behind degenerate
+output for axial copies above the beam's `axialCopies` field
+(GPU rasterizer discards). axialCopies > 1 produces a "cross"
+pattern of multiple camera-facing quads rotated around the beam
+axis at equal angular intervals.
+
+Push range layout (96 bytes):
+    bytes  0..63   mat4  mvp           — world MVP, Y-flipped for Vulkan
+    bytes 64..79   vec4  eyeWorld      — .xyz = camera world origin (axis-facing math)
+    bytes 80..95   vec4  frameParams   — reserved (matches ribbon layout)
+
+Descriptor set 0:
+    binding 0  STORAGE_BUFFER          BeamHeader headers[]
+    binding 1  COMBINED_IMAGE_SAMPLER  shaderImages[PRIMITIVE_SHADER_IMAGE_MAX]
+
+Lifetime semantics:
+    desc.duration == 0  → transient. Drawn this frame; slot freed
+                          at the end of RB_DrawBeams. Cgame must
+                          re-submit each frame to keep visible.
+    desc.duration  > 0  → persistent. spawnTime captured at
+                          RE_AddBeamToScene. Engine fades in/out
+                          and frees the slot when age >= duration.
+
+Entity attachment is translate-only: cachedStart =
+tr.refdef.entities[startEntityNum].e.origin + startOffset.
+Rotation is NOT applied (kept simple for the LG-style migration
+sites that pass world coords directly with startEntityNum = -1).
+===============
+*/
+
+void vk_init_beam( void )
+{
+	VkDescriptorSetLayoutBinding binds[4];
+	VkDescriptorSetLayoutCreateInfo layoutInfo;
+	VkPushConstantRange pushRange;
+	VkPipelineLayoutCreateInfo pipeLayoutInfo;
+	VkBufferCreateInfo bufInfo;
+	VkMemoryRequirements memReqs;
+	VkMemoryAllocateInfo allocInfo;
+	VkDescriptorSetAllocateInfo dsAlloc;
+	VkWriteDescriptorSet writes[3];
+	VkDescriptorBufferInfo bufInfos[3];
+	uint32_t headerBytes;
+	int i;
+
+	memset( &vk.beam, 0, sizeof( vk.beam ) );
+
+	// Sanity check on the GPU header layout. The layout is described
+	// in vk.h's BEAM_HEADER_BYTES comment and must match beam.vert's
+	// BeamHeader struct.
+#if defined( __STDC_VERSION__ ) && __STDC_VERSION__ >= 201112L
+	_Static_assert( BEAM_HEADER_BYTES == 96,
+		"BEAM_HEADER_BYTES must be 96 bytes for std430 BeamHeader "
+		"(4 vec4 = 64 B (start, end, startColor, endColor); "
+		"+ vec2 uvScroll + 2 float widths + float spawnTime + 3 uint "
+		"= 32 B trailer; total 96 B, naturally 16-aligned)" );
+	// Phase 5K: VK_PRIM_QHANDLE_MAX (parallel constant in vk.h, lives
+	// outside the tr_local.h include order) must match MAX_SHADERS.
+	_Static_assert( VK_PRIM_QHANDLE_MAX == MAX_SHADERS,
+		"VK_PRIM_QHANDLE_MAX must equal MAX_SHADERS — qhandle→primitive-slot "
+		"indirection table is sized by VK_PRIM_QHANDLE_MAX in vk.h but "
+		"MAX_SHADERS is the actual qhandle bound" );
+#endif
+
+	// ── Descriptor set layout ────────────────────────────────────
+	// Phase 5G: 4 bindings.
+	//   0: header SSBO (per-instance beam pool, vertex stage)
+	//   1: image array (sampler array, fragment stage)
+	//   2: per-stage SSBO (multi-stage shader data, vertex+fragment)
+	//   3: stage counts SSBO (PRIMITIVE_SHADER_IMAGE_MAX uints,
+	//      vertex stage — for cheap per-stage cull)
+	memset( binds, 0, sizeof( binds ) );
+	binds[0].binding         = 0;
+	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[0].descriptorCount = 1;
+	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+	binds[1].binding         = 1;
+	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binds[1].descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
+	binds[1].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+	binds[2].binding         = 2;
+	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[2].descriptorCount = 1;
+	binds[2].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	binds[3].binding         = 3;
+	binds[3].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[3].descriptorCount = 1;
+	binds[3].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+
+	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 4;
+	layoutInfo.pBindings    = binds;
+	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.beam.set_layout ) );
+
+	memset( &pushRange, 0, sizeof( pushRange ) );
+	pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pushRange.offset     = 0;
+	// Phase 5G: 112 B = mat4 mvp (64) + vec4 eyeWorld (16) + vec4
+	// frameParams (16) + vec4 stageParams (16). stageParams.x carries
+	// the per-draw stageIdx (cast from float in the shader).
+	pushRange.size       = 112;
+
+	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
+	pipeLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipeLayoutInfo.setLayoutCount         = 1;
+	pipeLayoutInfo.pSetLayouts            = &vk.beam.set_layout;
+	pipeLayoutInfo.pushConstantRangeCount = 1;
+	pipeLayoutInfo.pPushConstantRanges    = &pushRange;
+	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.beam.pipeline_layout ) );
+
+	// ── Per-frame header SSBOs (host-coherent, mapped) ──────────
+	headerBytes = BEAM_POOL_MAX * BEAM_HEADER_BYTES;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		uint32_t memType;
+
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = headerBytes;
+		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.beam.header_buffer[i] ) );
+
+		qvkGetBufferMemoryRequirements( vk.device, vk.beam.header_buffer[i], &memReqs );
+		memType = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
+		allocInfo.memoryTypeIndex = memType;
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.beam.header_memory[i] ) );
+		VK_CHECK( qvkBindBufferMemory( vk.device, vk.beam.header_buffer[i], vk.beam.header_memory[i], 0 ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.beam.header_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.beam.header_ptr[i] ) );
+	}
+
+	// ── Allocate descriptor sets and write bindings 0, 2, 3 ─────
+	// Binding 1 (sampler array) is left unwritten here; it's
+	// populated by vk_init_primitive_shader_images from R_Init,
+	// AFTER tr.whiteImage exists and vk_init_particle has created
+	// vk.particle.sampler.
+	//
+	// Bindings 2 and 3 (per-stage data, stage counts) come from
+	// vk.primitive_stages_buffer / vk.primitive_stage_counts_buffer
+	// allocated by vk_init_primitive_shader_stages, which is called
+	// from vk_init_primitive_shader_images. The buffers may not
+	// exist yet at vk_init_beam time (vk_init_beam runs before
+	// R_Init); skip the writes here and re-emit at vid_restart re-
+	// alloc once the buffers exist (vk_init_descriptors handles it).
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		uint32_t writeCount;
+
+		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dsAlloc.descriptorPool     = vk.descriptor_pool;
+		dsAlloc.descriptorSetCount = 1;
+		dsAlloc.pSetLayouts        = &vk.beam.set_layout;
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.beam.descriptor[i] ) );
+
+		memset( bufInfos, 0, sizeof( bufInfos ) );
+		bufInfos[0].buffer = vk.beam.header_buffer[i];
+		bufInfos[0].offset = 0;
+		bufInfos[0].range  = headerBytes;
+
+		memset( writes, 0, sizeof( writes ) );
+		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[0].dstSet          = vk.beam.descriptor[i];
+		writes[0].dstBinding      = 0;
+		writes[0].descriptorCount = 1;
+		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[0].pBufferInfo     = &bufInfos[0];
+
+		writeCount = 1;
+
+		if ( vk.primitive_stages_buffer != VK_NULL_HANDLE ) {
+			bufInfos[1].buffer = vk.primitive_stages_buffer;
+			bufInfos[1].offset = 0;
+			bufInfos[1].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+				* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
+
+			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[1].dstSet          = vk.beam.descriptor[i];
+			writes[1].dstBinding      = 2;
+			writes[1].descriptorCount = 1;
+			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[1].pBufferInfo     = &bufInfos[1];
+
+			bufInfos[2].buffer = vk.primitive_stage_counts_buffer;
+			bufInfos[2].offset = 0;
+			bufInfos[2].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+				* sizeof( uint32_t );
+
+			writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[2].dstSet          = vk.beam.descriptor[i];
+			writes[2].dstBinding      = 3;
+			writes[2].descriptorCount = 1;
+			writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			writes[2].pBufferInfo     = &bufInfos[2];
+
+			writeCount = 3;
+		}
+
+		qvkUpdateDescriptorSets( vk.device, writeCount, writes, 0, NULL );
+	}
+
+	// ── Phase 5J: dedicated REPEAT-mode sampler for binding 1 ───
+	// Beam UV scrolling can produce arbitrarily large out-of-range
+	// UVs over a long match (-1.8 UV/sec × hundreds of seconds).
+	// CLAMP_TO_EDGE saturates and kills animation; REPEAT wraps
+	// natively, restoring the legacy CPU pipeline's texture-tiling
+	// behaviour. Beam-only — ribbon/sprite/particle keep
+	// vk.particle.sampler (CLAMP_TO_EDGE).
+	{
+		VkSamplerCreateInfo samplerInfo;
+		memset( &samplerInfo, 0, sizeof( samplerInfo ) );
+		samplerInfo.sType         = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+		samplerInfo.magFilter     = VK_FILTER_LINEAR;
+		samplerInfo.minFilter     = VK_FILTER_LINEAR;
+		samplerInfo.mipmapMode    = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		samplerInfo.addressModeU  = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.addressModeV  = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.addressModeW  = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		samplerInfo.anisotropyEnable = VK_FALSE;
+		samplerInfo.maxAnisotropy = 1.0f;
+		samplerInfo.borderColor   = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+		samplerInfo.minLod        = 0.0f;
+		samplerInfo.maxLod        = VK_LOD_CLAMP_NONE;
+		VK_CHECK( qvkCreateSampler( vk.device, &samplerInfo, NULL,
+			&vk.beam.sampler_repeat ) );
+		SET_OBJECT_NAME( vk.beam.sampler_repeat,
+			"sampler - beam REPEAT",
+			VK_DEBUG_REPORT_OBJECT_TYPE_SAMPLER_EXT );
+	}
+
+	// ── Graphics pipeline ───────────────────────────────────────
+	{
+		VkPipelineShaderStageCreateInfo stages[2];
+		VkPipelineVertexInputStateCreateInfo vertexInput;
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+		VkPipelineRasterizationStateCreateInfo rasterizer;
+		VkPipelineMultisampleStateCreateInfo multisampling;
+		VkPipelineDepthStencilStateCreateInfo depthStencil;
+		VkPipelineColorBlendStateCreateInfo colorBlend;
+		VkPipelineColorBlendAttachmentState blendAttach;
+		VkPipelineViewportStateCreateInfo viewportState;
+		VkGraphicsPipelineCreateInfo gpInfo;
+		VkPipelineDynamicStateCreateInfo dynamicState;
+		VkDynamicState dynStates[2];
+		VkViewport viewport;
+		VkRect2D scissor;
+
+		memset( stages, 0, sizeof( stages ) );
+		stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[0].module = vk.modules.beam_vs;
+		stages[0].pName  = "main";
+		stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stages[1].module = vk.modules.beam_fs;
+		stages[1].pName  = "main";
+
+		memset( &vertexInput, 0, sizeof( vertexInput ) );
+		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		// No vertex attributes; vertex shader pulls from the SSBO
+		// via gl_VertexIndex / gl_InstanceIndex (same pattern as
+		// ribbon and particle).
+
+		memset( &inputAssembly, 0, sizeof( inputAssembly ) );
+		inputAssembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
+		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
+		memset( &dynamicState, 0, sizeof( dynamicState ) );
+		dynamicState.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = 2;
+		dynamicState.pDynamicStates    = dynStates;
+
+		memset( &viewport, 0, sizeof( viewport ) );
+		viewport.width    = (float)vk.renderWidth;
+		viewport.height   = (float)vk.renderHeight;
+		viewport.maxDepth = 1.0f;
+		memset( &scissor, 0, sizeof( scissor ) );
+		scissor.extent.width  = vk.renderWidth;
+		scissor.extent.height = vk.renderHeight;
+
+		memset( &viewportState, 0, sizeof( viewportState ) );
+		viewportState.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.pViewports    = &viewport;
+		viewportState.scissorCount  = 1;
+		viewportState.pScissors     = &scissor;
+
+		memset( &rasterizer, 0, sizeof( rasterizer ) );
+		rasterizer.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterizer.lineWidth   = 1.0f;
+		rasterizer.cullMode    = VK_CULL_MODE_NONE;            // two-sided
+		rasterizer.frontFace   = VK_FRONT_FACE_CLOCKWISE;
+
+		memset( &multisampling, 0, sizeof( multisampling ) );
+		multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.rasterizationSamples = vk.msaaActive ? vkSamples : VK_SAMPLE_COUNT_1_BIT;
+
+		memset( &depthStencil, 0, sizeof( depthStencil ) );
+		depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable  = VK_TRUE;
+		depthStencil.depthWriteEnable = VK_FALSE;
+#ifdef USE_REVERSED_DEPTH
+		depthStencil.depthCompareOp   = VK_COMPARE_OP_GREATER_OR_EQUAL;
+#else
+		depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
+#endif
+
+		memset( &blendAttach, 0, sizeof( blendAttach ) );
+		blendAttach.blendEnable         = VK_TRUE;
+		// Phase 5G: ONE/ONE (pure additive) — matches `blendfunc add`
+		// in q3 shader.script which every beam-consuming shader
+		// (lightningBolt, lightningArc) uses. Source contribution is
+		// `texel * fragColor.rgb`; src.alpha is ignored under ONE/ONE
+		// (different from the prior SRC_ALPHA/ONE pipeline which
+		// modulated the contribution by vertex alpha).
+		blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttach.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttach.colorBlendOp        = VK_BLEND_OP_ADD;
+		blendAttach.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttach.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttach.alphaBlendOp        = VK_BLEND_OP_ADD;
+		blendAttach.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+		                                | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+		memset( &colorBlend, 0, sizeof( colorBlend ) );
+		colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlend.attachmentCount = 1;
+		colorBlend.pAttachments    = &blendAttach;
+
+		memset( &gpInfo, 0, sizeof( gpInfo ) );
+		gpInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		gpInfo.stageCount          = 2;
+		gpInfo.pStages             = stages;
+		gpInfo.pVertexInputState   = &vertexInput;
+		gpInfo.pInputAssemblyState = &inputAssembly;
+		gpInfo.pViewportState      = &viewportState;
+		gpInfo.pRasterizationState = &rasterizer;
+		gpInfo.pMultisampleState   = &multisampling;
+		gpInfo.pDepthStencilState  = &depthStencil;
+		gpInfo.pColorBlendState    = &colorBlend;
+		gpInfo.pDynamicState       = &dynamicState;
+		gpInfo.layout              = vk.beam.pipeline_layout;
+		gpInfo.renderPass          = vk.render_pass.main;
+		gpInfo.subpass             = 0;
+
+		VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &gpInfo, NULL, &vk.beam.pipeline ) );
+	}
+
+	vk.beam.available = qtrue;
+	ri.Log( SEV_INFO, "Vulkan beam primitive pipeline initialized (%u pool slots, %u axial copies max)\n",
+		(unsigned)BEAM_POOL_MAX, (unsigned)BEAM_AXIAL_MAX );
+}
+
+
+void vk_shutdown_beam( void )
+{
+	int i;
+
+	if ( vk.beam.pipeline != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.beam.pipeline, NULL );
+		vk.beam.pipeline = VK_NULL_HANDLE;
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.beam.header_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.beam.header_buffer[i], NULL );
+			vk.beam.header_buffer[i] = VK_NULL_HANDLE;
+		}
+		if ( vk.beam.header_memory[i] != VK_NULL_HANDLE ) {
+			qvkFreeMemory( vk.device, vk.beam.header_memory[i], NULL );
+			vk.beam.header_memory[i] = VK_NULL_HANDLE;
+			vk.beam.header_ptr[i] = NULL;
+		}
+	}
+
+	if ( vk.beam.pipeline_layout != VK_NULL_HANDLE ) {
+		qvkDestroyPipelineLayout( vk.device, vk.beam.pipeline_layout, NULL );
+		vk.beam.pipeline_layout = VK_NULL_HANDLE;
+	}
+	if ( vk.beam.set_layout != VK_NULL_HANDLE ) {
+		qvkDestroyDescriptorSetLayout( vk.device, vk.beam.set_layout, NULL );
+		vk.beam.set_layout = VK_NULL_HANDLE;
+	}
+	if ( vk.beam.sampler_repeat != VK_NULL_HANDLE ) {
+		qvkDestroySampler( vk.device, vk.beam.sampler_repeat, NULL );
+		vk.beam.sampler_repeat = VK_NULL_HANDLE;
+	}
+
+	vk.beam.available = qfalse;
+}
+
+
+void RB_DrawBeams( void )
+{
+	VkCommandBuffer cmd;
+	int             frameIdx;
+	// Phase 5G: 28 floats = 112 B push range = mat4 mvp + vec4 eyeWorld
+	// + vec4 frameParams + vec4 stageParams (.x = stageIdx).
+	float           pushBuf[28];
+	float           mvp[16];
+	const float    *p;
+	float           proj[16];
+	float           currentTime;
+	uint32_t        i;
+	uint32_t        stageIdx;
+	byte           *headerBase;
+
+	if ( !vk.beam.available
+	  || vk.renderPassIndex != RENDER_PASS_MAIN ) {
+		// Even if we skip the draw this frame, transient slots from
+		// prior frames should still expire so they don't leak. Walk
+		// the pool and free any transient slots; persistent slots
+		// keep their state for the next viable frame.
+		for ( i = 0; i < BEAM_POOL_MAX; i++ ) {
+			if ( vk.beam.active[i] && vk.beam.duration[i] == 0.0f ) {
+				vk.beam.active[i] = qfalse;
+			}
+		}
+		vk.beam.drawCount = 0;
+		return;
+	}
+
+	cmd      = vk.cmd->command_buffer;
+	frameIdx = vk.cmd_index;
+	currentTime = (float)backEnd.refdef.floatTime;
+
+	headerBase = vk.beam.header_ptr[frameIdx];
+	vk.beam.drawCount = 0;
+
+	// ── Pool walk: resolve, fade, write SSBO, and free expired slots
+	for ( i = 0; i < BEAM_POOL_MAX; i++ ) {
+		const beamDesc_t *desc;
+		float    age;
+		float    fadeAlpha;
+		vec3_t   resolvedStart;
+		vec3_t   resolvedEnd;
+		uint32_t copies;
+		float   *fdst;
+		uint32_t *udst;
+		byte    *slot;
+
+		if ( !vk.beam.active[i] ) continue;
+
+		desc = &vk.beam.desc[i];
+
+		// Lifetime check.
+		if ( vk.beam.duration[i] > 0.0f ) {
+			age = currentTime - vk.beam.spawnTime[i];
+			if ( age >= vk.beam.duration[i] ) {
+				// Expired persistent beam — free the slot, skip drawing.
+				vk.beam.active[i] = qfalse;
+				continue;
+			}
+
+			// Compute fade alpha. fadeIn / fadeOut clamp to non-negative.
+			fadeAlpha = 1.0f;
+			if ( vk.beam.fadeIn[i] > 0.0f && age < vk.beam.fadeIn[i] ) {
+				fadeAlpha = age / vk.beam.fadeIn[i];
+			}
+			if ( vk.beam.fadeOut[i] > 0.0f && age > vk.beam.duration[i] - vk.beam.fadeOut[i] ) {
+				float fadeOutAge = age - ( vk.beam.duration[i] - vk.beam.fadeOut[i] );
+				float k = 1.0f - fadeOutAge / vk.beam.fadeOut[i];
+				if ( k < 0.0f ) k = 0.0f;
+				if ( k < fadeAlpha ) fadeAlpha = k;
+			}
+		} else {
+			// Transient: full opacity, single-frame.
+			fadeAlpha = 1.0f;
+		}
+
+		// ── Resolve world-space start/end (entity attachment is
+		// translate-only; entity rotation is intentionally not
+		// applied — see header doc-comment).
+		if ( desc->startEntityNum >= 0 && desc->startEntityNum < tr.refdef.num_entities ) {
+			const trRefEntity_t *ent = &tr.refdef.entities[desc->startEntityNum];
+			VectorAdd( ent->e.origin, desc->startOffset, resolvedStart );
+		} else {
+			VectorCopy( desc->start, resolvedStart );
+		}
+		if ( desc->endEntityNum >= 0 && desc->endEntityNum < tr.refdef.num_entities ) {
+			const trRefEntity_t *ent = &tr.refdef.entities[desc->endEntityNum];
+			VectorAdd( ent->e.origin, desc->endOffset, resolvedEnd );
+		} else {
+			VectorCopy( desc->end, resolvedEnd );
+		}
+
+		// Clamp axialCopies (defensive — RE_AddBeamToScene already
+		// clamps, but a corrupt slot or future caller wouldn't have).
+		copies = (uint32_t)desc->axialCopies;
+		if ( copies < 1 )              copies = 1;
+		if ( copies > BEAM_AXIAL_MAX ) copies = BEAM_AXIAL_MAX;
+
+		// ── Write the GPU header at SSBO slot vk.beam.drawCount.
+		// std430 layout (96 B):
+		//   bytes  0..15  vec4  start         (.xyz, .w pad)
+		//   bytes 16..31  vec4  end           (.xyz, .w pad)
+		//   bytes 32..47  vec4  startColor    (alpha pre-multiplied with fade)
+		//   bytes 48..63  vec4  endColor      (alpha pre-multiplied with fade)
+		//   bytes 64..71  vec2  uvScroll      (8-byte aligned at offset 64)
+		//   bytes 72..75  float startWidth
+		//   bytes 76..79  float endWidth
+		//   bytes 80..83  float spawnTime
+		//   bytes 84..87  uint  shaderHandle
+		//   bytes 88..91  uint  axialCopies
+		//   bytes 92..95  uint  flags
+		slot = headerBase + vk.beam.drawCount * BEAM_HEADER_BYTES;
+		fdst = (float    *)slot;
+		udst = (uint32_t *)slot;
+
+		fdst[0] = resolvedStart[0];
+		fdst[1] = resolvedStart[1];
+		fdst[2] = resolvedStart[2];
+		fdst[3] = 0.0f; // pad
+
+		fdst[4] = resolvedEnd[0];
+		fdst[5] = resolvedEnd[1];
+		fdst[6] = resolvedEnd[2];
+		fdst[7] = 0.0f; // pad
+
+		// Premultiply fade into BOTH endpoints' alpha channels so the
+		// linear-interpolated per-fragment alpha fades uniformly. RGB
+		// stays as-is; the fragment shader does texel * fragColor and
+		// the alpha modulation propagates correctly through the
+		// additive blend.
+		fdst[8]  = desc->startColor[0];
+		fdst[9]  = desc->startColor[1];
+		fdst[10] = desc->startColor[2];
+		fdst[11] = desc->startColor[3] * fadeAlpha;
+
+		fdst[12] = desc->endColor[0];
+		fdst[13] = desc->endColor[1];
+		fdst[14] = desc->endColor[2];
+		fdst[15] = desc->endColor[3] * fadeAlpha;
+
+		// Animation trailer (offsets 64..95). vk.beam.spawnTime[i]
+		// was captured at RE_AddBeamToScene time; transient beams
+		// (PRIM_FLAG_TRANSIENT in flags) ignore it shader-side and
+		// use frameParams.y directly, persistent beams use
+		// (frameParams.y - spawnTime).
+		fdst[16] = desc->uvScroll[0];
+		fdst[17] = desc->uvScroll[1];
+		fdst[18] = desc->startWidth;
+		fdst[19] = desc->endWidth;
+		fdst[20] = vk.beam.spawnTime[i];
+		// Phase 5K: translate cgame qhandle → primitive registry slot.
+		// Out-of-range / unregistered qhandles map to slot 0 (whiteImage)
+		// rather than producing OOB SSBO reads on the GPU.
+		udst[21] = vk_qhandle_to_prim_slot( desc->shader );
+		udst[22] = copies;
+		udst[23] = (uint32_t)desc->flags;
+
+		vk.beam.drawCount++;
+
+		// Transient slots free immediately after the SSBO write so
+		// the next frame requires re-submission.
+		if ( vk.beam.duration[i] == 0.0f ) {
+			vk.beam.active[i] = qfalse;
+		}
+	}
+
+	if ( vk.beam.drawCount == 0 ) return;
+
+	// ── World MVP push (same construction as ribbon/sprite).
+	p = backEnd.viewParms.projectionMatrix;
+	memcpy( proj, p, sizeof( proj ) );
+	proj[5] = -p[5];
+	myGlMultMatrix( backEnd.viewParms.world.modelMatrix, proj, mvp );
+
+	memcpy( pushBuf,      mvp,                          64 );
+	memcpy( pushBuf + 16, backEnd.viewParms.or.origin,  sizeof( vec3_t ) );
+	pushBuf[19] = 0.0f;
+	// frameParams: .x = identityLight (unused by beam — fragment doesn't
+	// halve; set to identity for ribbon-shaped layout), .y = currentTime
+	// (consumed by beam.vert to drive uvScroll age), .zw reserved.
+	pushBuf[20] = 1.0f;
+	pushBuf[21] = (float)backEnd.refdef.floatTime;
+	pushBuf[22] = 0.0f;
+	pushBuf[23] = 0.0f;
+	// stageParams (.x = stageIdx) — set per dispatch in the loop below.
+	pushBuf[24] = 0.0f;
+	pushBuf[25] = 0.0f;
+	pushBuf[26] = 0.0f;
+	pushBuf[27] = 0.0f;
+
+	// Phase 5G: refresh the stage-counts SSBO from the host-side
+	// mirror. Cheap (256 B) and decouples shader-registration timing
+	// from the descriptor write — the beam pipeline always reads the
+	// current count array regardless of when shaders were registered.
+	if ( vk.primitive_stage_counts_mapped != NULL ) {
+		uint32_t *countDst = (uint32_t *)vk.primitive_stage_counts_mapped;
+		for ( i = 0; i < PRIMITIVE_SHADER_IMAGE_MAX; i++ ) {
+			countDst[i] = (uint32_t)vk.primitive_shader_stage_counts[i];
+		}
 	}
 
 	{
 		VkViewport viewport;
-		VkRect2D scissor;
-
+		VkRect2D   scissor;
 		memset( &viewport, 0, sizeof( viewport ) );
-		viewport.width = (float)glConfig.vidWidth;
-		viewport.height = (float)glConfig.vidHeight;
+		viewport.x        = (float)backEnd.viewParms.viewportX;
+		viewport.y        = (float)backEnd.viewParms.viewportY;
+		viewport.width    = (float)backEnd.viewParms.viewportWidth;
+		viewport.height   = (float)backEnd.viewParms.viewportHeight;
 		viewport.maxDepth = 1.0f;
-
 		memset( &scissor, 0, sizeof( scissor ) );
-		scissor.extent.width = glConfig.vidWidth;
-		scissor.extent.height = glConfig.vidHeight;
-
+		scissor.offset.x      = backEnd.viewParms.viewportX;
+		scissor.offset.y      = backEnd.viewParms.viewportY;
+		scissor.extent.width  = backEnd.viewParms.viewportWidth;
+		scissor.extent.height = backEnd.viewParms.viewportHeight;
 		qvkCmdSetViewport( cmd, 0, 1, &viewport );
-		qvkCmdSetScissor( cmd, 0, 1, &scissor );
+		qvkCmdSetScissor ( cmd, 0, 1, &scissor );
 	}
 
-	qvkCmdDraw( cmd, ( numSegments - 1 ) * 6, 1, 0, 0 );
+	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.beam.pipeline );
+	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		vk.beam.pipeline_layout, 0, 1, &vk.beam.descriptor[frameIdx], 0, NULL );
 
-	// invalidate pipeline and descriptor state so the next standard draw
-	// rebinds correctly (we bound vk.pipeline_layout_compute — incompatible
-	// with the main vk.pipeline_layout that subsequent draws expect).
-	// Mirrors vk_draw_iqm's cleanup at the end of that function.
+	// Phase 5G: outer loop over stage index. Each iteration is one
+	// instanced draw covering all beams in the pool; the vertex
+	// shader culls beams whose registered stageCount <= stageIdx
+	// (their fragments never rasterize). For homogeneous-shader
+	// frames (e.g. only LG primary, stageCount=2) we issue 2 real
+	// dispatches and 2 culled-empty dispatches; the empty ones
+	// cost only a vertex-shader degenerate write per vertex.
+	//
+	// All stages share the single ONE/ONE additive pipeline (the
+	// only blend used by every primitive shader in the current
+	// asset base — `blendfunc add`). When mixed-blend primitive
+	// shaders appear, extend with a per-stage pipeline cache.
+	for ( stageIdx = 0; stageIdx < PRIMITIVE_STAGE_MAX; stageIdx++ ) {
+		pushBuf[24] = (float)stageIdx;
+		qvkCmdPushConstants( cmd, vk.beam.pipeline_layout,
+			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+			0, sizeof( pushBuf ), pushBuf );
+
+		// 6 verts × BEAM_AXIAL_MAX slots per instance × drawCount
+		// instances. Vertex shader gates axialCopies > limit AND
+		// stageIdx >= stageCount to degenerate output.
+		qvkCmdDraw( cmd, 6 * BEAM_AXIAL_MAX, vk.beam.drawCount, 0, 0 );
+	}
+
+	// Invalidate cached binding state (same cleanup ribbon does).
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
-	vk.cmd->depth_range = DEPTH_RANGE_COUNT; // force viewport/scissor update
+	vk.cmd->depth_range   = DEPTH_RANGE_COUNT;
 	memset( vk.cmd->descriptor_set.current, 0, sizeof( vk.cmd->descriptor_set.current ) );
 	vk.cmd->descriptor_set.start = ~0U;
-	vk.cmd->descriptor_set.end = 0;
+	vk.cmd->descriptor_set.end   = 0;
 }
 
 
 /*
 ===============
-vk_dispatch_rail_compute — dispatch compute shader for active rail trails
+Primitive sprite — self-contained pipeline.
+
+Cgame submits world-space billboard sprites via RE_AddSpriteToScene.
+Each call appends one GPU SpriteHeader to the per-frame headers
+SSBO. RB_DrawSprites (called from RB_DrawSurfs after RB_DrawRibbons)
+sorts the headers into two blend groups (alpha and additive) and
+issues at most one direct vkCmdDraw per group, with vertexCount=6
+and instanceCount=N, so the vertex shader can read its header via
+gl_InstanceIndex.
+
+Push range layout (vertex stage only, 96 bytes):
+    bytes  0..63   mat4  mvp        — world MVP, Y-flipped for Vulkan
+    bytes 64..79   vec4  viewLeft   — .xyz = camera-left in world
+    bytes 80..95   vec4  viewUp     — .xyz = camera-up   in world
+
+Descriptor set 0:
+    binding 0  STORAGE_BUFFER  SpriteHeader sprites[]
+
+Two pipeline variants (alpha and additive) selected per submission
+from header.flags.
 ===============
 */
-static void vk_dispatch_rail_compute( void ) {
-	int frameIdx;
-	VkCommandBuffer cmd;
-	qboolean dispatched;
 
-	if ( vk.numRailDispatches == 0 )
+void vk_init_sprite( void )
+{
+	VkDescriptorSetLayoutBinding binds[1];
+	VkDescriptorSetLayoutCreateInfo layoutInfo;
+	VkPushConstantRange pushRange;
+	VkPipelineLayoutCreateInfo pipeLayoutInfo;
+	VkBufferCreateInfo bufInfo;
+	VkMemoryRequirements memReqs;
+	VkMemoryAllocateInfo allocInfo;
+	VkDescriptorSetAllocateInfo dsAlloc;
+	VkWriteDescriptorSet writes[1];
+	VkDescriptorBufferInfo bufInfos[1];
+	uint32_t headersBytes;
+	int i;
+
+	memset( &vk.sprite, 0, sizeof( vk.sprite ) );
+
+	memset( binds, 0, sizeof( binds ) );
+	binds[0].binding         = 0;
+	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[0].descriptorCount = 1;
+	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+
+	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 1;
+	layoutInfo.pBindings    = binds;
+	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.sprite.set_layout ) );
+
+	memset( &pushRange, 0, sizeof( pushRange ) );
+	// VERTEX | FRAGMENT: the trailing vec4 frameParams (.x =
+	// tr.identityLight) is consumed by sprite.frag.
+	pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT
+	                     | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pushRange.offset     = 0;
+	pushRange.size       = 112; // mat4 mvp + vec4 viewLeft + vec4 viewUp + vec4 frameParams
+
+	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
+	pipeLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipeLayoutInfo.setLayoutCount         = 1;
+	pipeLayoutInfo.pSetLayouts            = &vk.sprite.set_layout;
+	pipeLayoutInfo.pushConstantRangeCount = 1;
+	pipeLayoutInfo.pPushConstantRanges    = &pushRange;
+	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.sprite.pipeline_layout ) );
+
+	headersBytes = SPRITES_PER_FRAME * SPRITE_HEADER_BYTES;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		uint32_t memType;
+
+		// headers buffer (host-coherent, mapped)
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = headersBytes;
+		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.sprite.headers_buffer[i] ) );
+		qvkGetBufferMemoryRequirements( vk.device, vk.sprite.headers_buffer[i], &memReqs );
+		memType = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
+		allocInfo.memoryTypeIndex = memType;
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.sprite.headers_memory[i] ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.sprite.headers_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.sprite.headers_ptr[i] ) );
+		qvkBindBufferMemory( vk.device, vk.sprite.headers_buffer[i], vk.sprite.headers_memory[i], 0 );
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dsAlloc.descriptorPool     = vk.descriptor_pool;
+		dsAlloc.descriptorSetCount = 1;
+		dsAlloc.pSetLayouts        = &vk.sprite.set_layout;
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.sprite.descriptor[i] ) );
+
+		memset( bufInfos, 0, sizeof( bufInfos ) );
+		bufInfos[0].buffer = vk.sprite.headers_buffer[i];
+		bufInfos[0].offset = 0;
+		bufInfos[0].range  = headersBytes;
+
+		memset( writes, 0, sizeof( writes ) );
+		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[0].dstSet          = vk.sprite.descriptor[i];
+		writes[0].dstBinding      = 0;
+		writes[0].descriptorCount = 1;
+		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[0].pBufferInfo     = &bufInfos[0];
+
+		qvkUpdateDescriptorSets( vk.device, 1, writes, 0, NULL );
+	}
+
+	// Two graphics pipeline variants (alpha and additive). Same state
+	// as the ribbon pipeline (depthTest enabled, depthWrite off, cull
+	// none, blend enabled). Only the destination blend factor differs.
+	{
+		VkGraphicsPipelineCreateInfo gpInfo;
+		VkPipelineShaderStageCreateInfo stages[2];
+		VkPipelineVertexInputStateCreateInfo vertexInput;
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+		VkPipelineViewportStateCreateInfo viewportState;
+		VkPipelineRasterizationStateCreateInfo rasterizer;
+		VkPipelineMultisampleStateCreateInfo multisampling;
+		VkPipelineDepthStencilStateCreateInfo depthStencil;
+		VkPipelineColorBlendAttachmentState blendAttach;
+		VkPipelineColorBlendStateCreateInfo colorBlend;
+		VkPipelineDynamicStateCreateInfo dynamicState;
+		VkDynamicState dynStates[2];
+		VkViewport viewport;
+		VkRect2D scissor;
+		int variant;
+
+		memset( stages, 0, sizeof( stages ) );
+		stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[0].module = vk.modules.sprite_vs;
+		stages[0].pName  = "main";
+		stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stages[1].module = vk.modules.sprite_fs;
+		stages[1].pName  = "main";
+
+		memset( &vertexInput, 0, sizeof( vertexInput ) );
+		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+		memset( &inputAssembly, 0, sizeof( inputAssembly ) );
+		inputAssembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
+		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
+		memset( &dynamicState, 0, sizeof( dynamicState ) );
+		dynamicState.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = 2;
+		dynamicState.pDynamicStates    = dynStates;
+
+		memset( &viewport, 0, sizeof( viewport ) );
+		viewport.width    = (float)vk.renderWidth;
+		viewport.height   = (float)vk.renderHeight;
+		viewport.maxDepth = 1.0f;
+		memset( &scissor, 0, sizeof( scissor ) );
+		scissor.extent.width  = vk.renderWidth;
+		scissor.extent.height = vk.renderHeight;
+
+		memset( &viewportState, 0, sizeof( viewportState ) );
+		viewportState.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.pViewports    = &viewport;
+		viewportState.scissorCount  = 1;
+		viewportState.pScissors     = &scissor;
+
+		memset( &rasterizer, 0, sizeof( rasterizer ) );
+		rasterizer.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterizer.lineWidth   = 1.0f;
+		rasterizer.cullMode    = VK_CULL_MODE_NONE;            // two-sided
+		rasterizer.frontFace   = VK_FRONT_FACE_CLOCKWISE;
+
+		memset( &multisampling, 0, sizeof( multisampling ) );
+		multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.rasterizationSamples = vk.msaaActive ? vkSamples : VK_SAMPLE_COUNT_1_BIT;
+
+		memset( &depthStencil, 0, sizeof( depthStencil ) );
+		depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable  = VK_TRUE;
+		depthStencil.depthWriteEnable = VK_FALSE;
+#ifdef USE_REVERSED_DEPTH
+		depthStencil.depthCompareOp   = VK_COMPARE_OP_GREATER_OR_EQUAL;
+#else
+		depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
+#endif
+
+		memset( &colorBlend, 0, sizeof( colorBlend ) );
+		colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlend.attachmentCount = 1;
+		colorBlend.pAttachments    = &blendAttach;
+
+		memset( &gpInfo, 0, sizeof( gpInfo ) );
+		gpInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		gpInfo.stageCount          = 2;
+		gpInfo.pStages             = stages;
+		gpInfo.pVertexInputState   = &vertexInput;
+		gpInfo.pInputAssemblyState = &inputAssembly;
+		gpInfo.pViewportState      = &viewportState;
+		gpInfo.pRasterizationState = &rasterizer;
+		gpInfo.pMultisampleState   = &multisampling;
+		gpInfo.pDepthStencilState  = &depthStencil;
+		gpInfo.pColorBlendState    = &colorBlend;
+		gpInfo.pDynamicState       = &dynamicState;
+		gpInfo.layout              = vk.sprite.pipeline_layout;
+		gpInfo.renderPass          = vk.render_pass.main;
+		gpInfo.subpass             = 0;
+
+		// 0 = alpha (SRC_ALPHA / ONE_MINUS_SRC_ALPHA),
+		// 1 = additive (SRC_ALPHA / ONE).
+		for ( variant = 0; variant < 2; variant++ ) {
+			memset( &blendAttach, 0, sizeof( blendAttach ) );
+			blendAttach.blendEnable         = VK_TRUE;
+			blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+			blendAttach.dstColorBlendFactor = (variant == 0)
+				? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+				: VK_BLEND_FACTOR_ONE;
+			blendAttach.colorBlendOp        = VK_BLEND_OP_ADD;
+			blendAttach.srcAlphaBlendFactor = blendAttach.srcColorBlendFactor;
+			blendAttach.dstAlphaBlendFactor = blendAttach.dstColorBlendFactor;
+			blendAttach.alphaBlendOp        = VK_BLEND_OP_ADD;
+			blendAttach.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+			                                | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+			VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &gpInfo, NULL,
+				(variant == 0) ? &vk.sprite.pipeline_alpha : &vk.sprite.pipeline_additive ) );
+		}
+	}
+
+	vk.sprite.available = qtrue;
+	ri.Log( SEV_INFO, "Vulkan sprite primitive pipeline initialized (%u headers per frame)\n",
+		(unsigned)SPRITES_PER_FRAME );
+}
+
+
+void vk_shutdown_sprite( void )
+{
+	int i;
+
+	if ( vk.sprite.pipeline_alpha != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.sprite.pipeline_alpha, NULL );
+		vk.sprite.pipeline_alpha = VK_NULL_HANDLE;
+	}
+	if ( vk.sprite.pipeline_additive != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.sprite.pipeline_additive, NULL );
+		vk.sprite.pipeline_additive = VK_NULL_HANDLE;
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.sprite.headers_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.sprite.headers_buffer[i], NULL );
+			vk.sprite.headers_buffer[i] = VK_NULL_HANDLE;
+		}
+		if ( vk.sprite.headers_memory[i] != VK_NULL_HANDLE ) {
+			qvkFreeMemory( vk.device, vk.sprite.headers_memory[i], NULL );
+			vk.sprite.headers_memory[i] = VK_NULL_HANDLE;
+			vk.sprite.headers_ptr[i] = NULL;
+		}
+	}
+
+	if ( vk.sprite.pipeline_layout != VK_NULL_HANDLE ) {
+		qvkDestroyPipelineLayout( vk.device, vk.sprite.pipeline_layout, NULL );
+		vk.sprite.pipeline_layout = VK_NULL_HANDLE;
+	}
+	if ( vk.sprite.set_layout != VK_NULL_HANDLE ) {
+		qvkDestroyDescriptorSetLayout( vk.device, vk.sprite.set_layout, NULL );
+		vk.sprite.set_layout = VK_NULL_HANDLE;
+	}
+
+	vk.sprite.available = qfalse;
+}
+
+
+void RB_DrawSprites( void )
+{
+	VkCommandBuffer cmd;
+	int frameIdx;
+	float pushBuf[28]; // mat4 mvp + vec4 viewLeft + vec4 viewUp + vec4 frameParams
+	float mvp[16];
+	const float *p;
+	float proj[16];
+	uint32_t firstAdditive, additiveCount, alphaCount;
+
+	// Pipelines were created against vk.render_pass.main only — skip if
+	// we're being called inside the screenmap pass.
+	if ( !vk.sprite.available
+	  || vk.sprite.numThisFrame == 0
+	  || vk.renderPassIndex != RENDER_PASS_MAIN )
 		return;
 
+	cmd      = vk.cmd->command_buffer;
 	frameIdx = vk.cmd_index;
-	cmd = vk.cmd->command_buffer;
 
-	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.rail.compute_pipeline );
+	// World MVP — same construction the standard 3D path uses
+	// (get_mvp_transform): copy the projection, flip column 1
+	// for Vulkan clip-space, then myGlMultMatrix( modelView, proj ).
+	p = backEnd.viewParms.projectionMatrix;
+	memcpy( proj, p, sizeof( proj ) );
+	proj[5] = -p[5];
+	myGlMultMatrix( backEnd.viewParms.world.modelMatrix, proj, mvp );
 
-	dispatched = qfalse;
-	for ( int i = 0; i < vk.numRailDispatches; i++ ) {
-		int numSegs = vk.railDispatch[i].numSegments;
-		uint32_t paramsOffset;
-		int      vertexBaseIndex;
+	memcpy( pushBuf,      mvp,                          64 );
+	memcpy( pushBuf + 16, backEnd.viewParms.or.axis[1], sizeof( vec3_t ) );
+	pushBuf[19] = 0.0f;
+	memcpy( pushBuf + 20, backEnd.viewParms.or.axis[2], sizeof( vec3_t ) );
+	pushBuf[23] = 0.0f;
+	// frameParams: .x = tr.identityLight; .y = currentTime (sprite
+	// shader doesn't currently consume frameParams.y, but the field
+	// is populated for symmetry with ribbon/beam — a future textured
+	// sprite consumer with UV scroll could opt in without further
+	// host-side changes); .zw reserved.
+	pushBuf[24] = tr.identityLight;
+	pushBuf[25] = (float)backEnd.refdef.floatTime;
+	pushBuf[26] = 0.0f;
+	pushBuf[27] = 0.0f;
 
-		if ( numSegs < 2 )
-			continue;
-
-		// Each trail reads its own params slot (dynamic offset) and writes
-		// its own region of the output vertex buffer. Slots are disjoint, so
-		// the dispatches don't fight over memory and need no compute→compute
-		// barrier between them.
-		paramsOffset    = (uint32_t)i * vk.rail.params_slot_stride;
-		vertexBaseIndex = i * RAIL_GPU_VERTS_PER_TRAIL;
-
-		qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-			vk.pipeline_layout_compute, 0, 1, &vk.rail.descriptor[frameIdx],
-			1, &paramsOffset );
-
-		// Compute reads vertexBaseIndex from offset 64 of the shared push range
-		// (offset 0..63 holds the vertex shader's mat4 mvp).
-		qvkCmdPushConstants( cmd, vk.pipeline_layout_compute,
-			VK_SHADER_STAGE_COMPUTE_BIT, 64, sizeof( int ), &vertexBaseIndex );
-
-		qvkCmdDispatch( cmd, ( numSegs + 63 ) / 64, 1, 1 );
-		dispatched = qtrue;
+	{
+		VkViewport viewport;
+		VkRect2D   scissor;
+		memset( &viewport, 0, sizeof( viewport ) );
+		viewport.x        = (float)backEnd.viewParms.viewportX;
+		viewport.y        = (float)backEnd.viewParms.viewportY;
+		viewport.width    = (float)backEnd.viewParms.viewportWidth;
+		viewport.height   = (float)backEnd.viewParms.viewportHeight;
+		viewport.maxDepth = 1.0f;
+		memset( &scissor, 0, sizeof( scissor ) );
+		scissor.offset.x      = backEnd.viewParms.viewportX;
+		scissor.offset.y      = backEnd.viewParms.viewportY;
+		scissor.extent.width  = backEnd.viewParms.viewportWidth;
+		scissor.extent.height = backEnd.viewParms.viewportHeight;
+		qvkCmdSetViewport( cmd, 0, 1, &viewport );
+		qvkCmdSetScissor ( cmd, 0, 1, &scissor );
 	}
 
-	if ( dispatched ) {
-		// One barrier covers every dispatch above: compute writes → vertex reads.
-		VkBufferMemoryBarrier barrier;
-		memset( &barrier, 0, sizeof( barrier ) );
-		barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.buffer = vk.rail.vertex_buffer[frameIdx];
-		barrier.offset = 0;
-		barrier.size = VK_WHOLE_SIZE;
+	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		vk.sprite.pipeline_layout, 0, 1, &vk.sprite.descriptor[frameIdx], 0, NULL );
 
-		qvkCmdPipelineBarrier( cmd,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-			0, 0, NULL, 1, &barrier, 0, NULL );
+	qvkCmdPushConstants( cmd, vk.sprite.pipeline_layout,
+		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		0, sizeof( pushBuf ), pushBuf );
+
+	// Sort headers into two contiguous groups by blend mode, in place
+	// in the SSBO — alpha first, additive second. Adjacent additive
+	// entries get bubbled to the tail with a single linear pass; this
+	// keeps the GPU draw to at most two vkCmdDraws per frame
+	// (one per blend variant) without giving up the gl_InstanceIndex
+	// indexing pattern.
+	//
+	// Two-pointer partition: scan from start, anything additive gets
+	// swapped with the next-from-end alpha. O(N) headers, all in the
+	// host-coherent ring slot we own this frame.
+	{
+		byte *base = vk.sprite.headers_ptr[frameIdx];
+		uint32_t lo = 0;
+		uint32_t hi = vk.sprite.numThisFrame;
+		// hdrFlagsOf: read flags field at offset 36 in a header
+		while ( lo < hi ) {
+			uint32_t loFlags = *(const uint32_t *)( base + lo * SPRITE_HEADER_BYTES + 36 );
+			if ( ( loFlags & PRIM_FLAG_ADDITIVE ) == 0 ) {
+				lo++;
+				continue;
+			}
+			// lo is additive — find the previous alpha at hi-1 and swap
+			hi--;
+			if ( lo >= hi )
+				break;
+			{
+				uint32_t hiFlags = *(const uint32_t *)( base + hi * SPRITE_HEADER_BYTES + 36 );
+				if ( ( hiFlags & PRIM_FLAG_ADDITIVE ) != 0 )
+					continue; // already additive at the tail; keep shrinking hi
+			}
+			{
+				byte tmp[SPRITE_HEADER_BYTES];
+				byte *aSlot = base + lo * SPRITE_HEADER_BYTES;
+				byte *bSlot = base + hi * SPRITE_HEADER_BYTES;
+				memcpy( tmp,   aSlot, SPRITE_HEADER_BYTES );
+				memcpy( aSlot, bSlot, SPRITE_HEADER_BYTES );
+				memcpy( bSlot, tmp,   SPRITE_HEADER_BYTES );
+			}
+			lo++;
+		}
+		// After the partition: [0..lo) is alpha, [lo..numThisFrame) is additive.
+		alphaCount    = lo;
+		firstAdditive = lo;
+		additiveCount = vk.sprite.numThisFrame - lo;
 	}
 
-	// dispatch queue cleared after draw in tr_backend.c
+	if ( alphaCount > 0 ) {
+		qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.sprite.pipeline_alpha );
+		qvkCmdDraw( cmd, 6, alphaCount, 0, 0 );
+	}
+	if ( additiveCount > 0 ) {
+		qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.sprite.pipeline_additive );
+		qvkCmdDraw( cmd, 6, additiveCount, 0, firstAdditive );
+	}
+
+	// Invalidate cached pipeline / descriptor / depth-range so the next
+	// standard draw rebinds correctly. Same cleanup pattern the IQM
+	// and ribbon draws use.
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->depth_range   = DEPTH_RANGE_COUNT;
+	memset( vk.cmd->descriptor_set.current, 0, sizeof( vk.cmd->descriptor_set.current ) );
+	vk.cmd->descriptor_set.start = ~0U;
+	vk.cmd->descriptor_set.end   = 0;
+}
+
+
+/*
+===============
+Primitive particle — compute-driven GPU pool + billboard render.
+
+Pool: PARTICLES_PER_POOL particles in 2 ping-pong SSBOs. Each frame's
+compute pass reads from one pool, integrates physics + age, writes to
+the other. Render pass reads from the just-written pool.
+
+Per-frame uniform layout (std140, 128 B):
+    bytes  0..63   mat4  mvp
+    bytes 64..79   vec4  viewLeft   (.xyz from backEnd.viewParms.or.axis[1])
+    bytes 80..95   vec4  viewUp     (.xyz from backEnd.viewParms.or.axis[2])
+    bytes 96..111  vec4  eyeWorld   (.xyz from backEnd.viewParms.or.origin)
+    bytes 112..127 float dt + uint poolSize + uint numClasses + uint pingPongRead
+
+Compute descriptor set (set 0, 4 bindings):
+    binding 0  UNIFORM_BUFFER  ParticleFrame
+    binding 1  STORAGE_BUFFER  Particle pool (read)
+    binding 2  STORAGE_BUFFER  Particle pool (write)
+    binding 3  STORAGE_BUFFER  ParticleClassGPU classes[]
+
+Render descriptor set (set 0, 3 bindings):
+    binding 0  UNIFORM_BUFFER  ParticleFrame      (same UBO)
+    binding 1  STORAGE_BUFFER  Particle pool (read — post-compute)
+    binding 2  STORAGE_BUFFER  ParticleClassGPU classes[]
+
+Two graphics pipeline variants (alpha and additive). The vertex shader
+reads class.renderFlags and emits a degenerate triangle for particles
+that don't match the bound pipeline's blend variant. The variant flag
+is supplied via specialization constant 0 (PIPELINE_BLEND_MASK).
+===============
+*/
+
+void vk_init_particle( void )
+{
+	VkDescriptorSetLayoutBinding binds[4];
+	VkDescriptorSetLayoutCreateInfo layoutInfo;
+	VkPipelineLayoutCreateInfo pipeLayoutInfo;
+	VkBufferCreateInfo bufInfo;
+	VkMemoryRequirements memReqs;
+	VkMemoryAllocateInfo allocInfo;
+	VkDescriptorSetAllocateInfo dsAlloc;
+	VkWriteDescriptorSet writes[4];
+	VkDescriptorBufferInfo bufInfos[4];
+	const uint32_t poolBytes    = PARTICLES_PER_POOL * PARTICLE_BYTES;
+	const uint32_t classesBytes = MAX_PARTICLE_CLASSES * PARTICLE_CLASS_GPU_BYTES;
+	const uint32_t frameBytes   = sizeof( particleFrame_t );
+	int i;
+
+	// Layout sanity. If a future edit drifts the C struct out of sync
+	// with std430, these fire at compile time, not as silent SSBO
+	// misreads.
+#if defined( __STDC_VERSION__ ) && __STDC_VERSION__ >= 201112L
+	_Static_assert( sizeof( particleClassGPU_t ) == PARTICLE_CLASS_GPU_BYTES,
+		"particleClassGPU_t must be 400 bytes to match GLSL std430 stride" );
+	_Static_assert( sizeof( particleGPU_t ) == PARTICLE_BYTES,
+		"particleGPU_t must be 64 bytes to match GLSL std430 stride" );
+	_Static_assert( sizeof( particleFrame_t ) == 144,
+		"particleFrame_t must be 144 bytes to match GLSL std140 layout" );
+#else
+	if ( sizeof( particleClassGPU_t ) != PARTICLE_CLASS_GPU_BYTES ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"particleClassGPU_t size mismatch: C=%u, std430=%u",
+			(unsigned)sizeof( particleClassGPU_t ),
+			(unsigned)PARTICLE_CLASS_GPU_BYTES );
+	}
+	if ( sizeof( particleGPU_t ) != PARTICLE_BYTES ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"particleGPU_t size mismatch: C=%u, std430=%u",
+			(unsigned)sizeof( particleGPU_t ),
+			(unsigned)PARTICLE_BYTES );
+	}
+	if ( sizeof( particleFrame_t ) != 144 ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"particleFrame_t size mismatch: C=%u, expected=144",
+			(unsigned)sizeof( particleFrame_t ) );
+	}
+#endif
+
+	memset( &vk.particle, 0, sizeof( vk.particle ) );
+
+	// ── Compute descriptor set layout (4 bindings) ───────────────
+	memset( binds, 0, sizeof( binds ) );
+	binds[0].binding         = 0;
+	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	binds[0].descriptorCount = 1;
+	binds[0].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
+	binds[1].binding         = 1;
+	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[1].descriptorCount = 1;
+	binds[1].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
+	binds[2].binding         = 2;
+	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[2].descriptorCount = 1;
+	binds[2].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
+	binds[3].binding         = 3;
+	binds[3].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[3].descriptorCount = 1;
+	binds[3].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 4;
+	layoutInfo.pBindings    = binds;
+	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.particle.compute_set_layout ) );
+
+	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
+	pipeLayoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipeLayoutInfo.setLayoutCount = 1;
+	pipeLayoutInfo.pSetLayouts    = &vk.particle.compute_set_layout;
+	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.particle.compute_pipeline_layout ) );
+
+	// ── Render descriptor set layout (4 bindings) ────────────────
+	// binding 0  UBO         — ParticleFrame
+	// binding 1  STORAGE     — Particle pool (post-compute output)
+	// binding 2  STORAGE     — ParticleClassGPU classes shadow
+	// binding 3  IMAGE_SAMPLER × MAX_PARTICLE_CLASSES — per-class
+	//            texture array, indexed in fragment shader by
+	//            classHandle - 1. Phase 5.
+	memset( binds, 0, sizeof( binds ) );
+	binds[0].binding         = 0;
+	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	binds[0].descriptorCount = 1;
+	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+	binds[1].binding         = 1;
+	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[1].descriptorCount = 1;
+	binds[1].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+	binds[2].binding         = 2;
+	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	binds[2].descriptorCount = 1;
+	binds[2].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+	binds[3].binding         = 3;
+	binds[3].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binds[3].descriptorCount = MAX_PARTICLE_CLASSES;
+	binds[3].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+	binds[3].pImmutableSamplers = NULL;
+
+	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 4;
+	layoutInfo.pBindings    = binds;
+	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.particle.render_set_layout ) );
+
+	// Shared sampler for the per-class texture array. Linear filter,
+	// clamp-to-edge, no anisotropy — appropriate for billboard
+	// particles regardless of class. vk_find_sampler deduplicates
+	// against existing samplers so this may return an already-built
+	// instance.
+	{
+		Vk_Sampler_Def sd;
+		memset( &sd, 0, sizeof( sd ) );
+		sd.address_mode  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		sd.gl_mag_filter = GL_LINEAR;
+		sd.gl_min_filter = GL_LINEAR;
+		sd.noAnisotropy  = qtrue;
+		vk.particle.sampler = vk_find_sampler( &sd );
+	}
+
+	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
+	pipeLayoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipeLayoutInfo.setLayoutCount = 1;
+	pipeLayoutInfo.pSetLayouts    = &vk.particle.render_set_layout;
+	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.particle.render_pipeline_layout ) );
+
+	// ── Particle pool buffers (ping-pong, host-coherent) ─────────
+	// Phase 5P: the ping-pong index math at the readPool/writePool
+	// sites assumes NUM_COMMAND_BUFFERS == 2 (cmd buffer i ⇔ pool
+	// (1-i)). Bumping NUM_COMMAND_BUFFERS for triple buffering would
+	// silently underflow `1 - i` for i >= 2 and OOB-index pool_buffer.
+	// Catch it at compile time; the HAL refactor will abstract this
+	// via frame-in-flight, after which the assert can come out.
+#if defined( __STDC_VERSION__ ) && __STDC_VERSION__ >= 201112L
+	_Static_assert( NUM_COMMAND_BUFFERS == 2,
+		"Particle ping-pong assumes double-buffering. Bumping "
+		"NUM_COMMAND_BUFFERS requires reworking the readPool/writePool "
+		"logic and pool_buffer[N] array sizing." );
+#endif
+	for ( i = 0; i < 2; i++ ) {
+		uint32_t memType;
+
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = poolBytes;
+		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.particle.pool_buffer[i] ) );
+		qvkGetBufferMemoryRequirements( vk.device, vk.particle.pool_buffer[i], &memReqs );
+		memType = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
+		allocInfo.memoryTypeIndex = memType;
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.particle.pool_memory[i] ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.particle.pool_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.particle.pool_ptr[i] ) );
+		qvkBindBufferMemory( vk.device, vk.particle.pool_buffer[i], vk.particle.pool_memory[i], 0 );
+
+		// Initialize all slots to dead (classHandle = 0).
+		memset( vk.particle.pool_ptr[i], 0, poolBytes );
+	}
+
+	// ── Class shadow SSBO (host-coherent, mapped) ────────────────
+	{
+		uint32_t memType;
+
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = classesBytes;
+		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.particle.classes_buffer ) );
+		qvkGetBufferMemoryRequirements( vk.device, vk.particle.classes_buffer, &memReqs );
+		memType = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
+		allocInfo.memoryTypeIndex = memType;
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.particle.classes_memory ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.particle.classes_memory, 0, VK_WHOLE_SIZE, 0, (void**)&vk.particle.classes_ptr ) );
+		qvkBindBufferMemory( vk.device, vk.particle.classes_buffer, vk.particle.classes_memory, 0 );
+
+		memset( vk.particle.classes_ptr, 0, classesBytes );
+	}
+
+	// ── Per-frame uniform buffer (host-coherent, one per cmd_index) ─
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		uint32_t memType;
+
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = frameBytes;
+		bufInfo.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.particle.frame_buffer[i] ) );
+		qvkGetBufferMemoryRequirements( vk.device, vk.particle.frame_buffer[i], &memReqs );
+		memType = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
+		allocInfo.memoryTypeIndex = memType;
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.particle.frame_memory[i] ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.particle.frame_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.particle.frame_ptr[i] ) );
+		qvkBindBufferMemory( vk.device, vk.particle.frame_buffer[i], vk.particle.frame_memory[i], 0 );
+
+		memset( vk.particle.frame_ptr[i], 0, frameBytes );
+	}
+
+	// ── Allocate compute descriptor sets (NUM_COMMAND_BUFFERS slots) ─
+	// compute_descriptor[i] reads pool[i], writes pool[1-i].
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		uint32_t readPool  = (uint32_t)i;            // 0 or 1
+		uint32_t writePool = (uint32_t)(1 - i);      // 1 or 0
+
+		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dsAlloc.descriptorPool     = vk.descriptor_pool;
+		dsAlloc.descriptorSetCount = 1;
+		dsAlloc.pSetLayouts        = &vk.particle.compute_set_layout;
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.particle.compute_descriptor[i] ) );
+
+		memset( bufInfos, 0, sizeof( bufInfos ) );
+		bufInfos[0].buffer = vk.particle.frame_buffer[i];
+		bufInfos[0].offset = 0;
+		bufInfos[0].range  = frameBytes;
+		bufInfos[1].buffer = vk.particle.pool_buffer[readPool];
+		bufInfos[1].offset = 0;
+		bufInfos[1].range  = poolBytes;
+		bufInfos[2].buffer = vk.particle.pool_buffer[writePool];
+		bufInfos[2].offset = 0;
+		bufInfos[2].range  = poolBytes;
+		bufInfos[3].buffer = vk.particle.classes_buffer;
+		bufInfos[3].offset = 0;
+		bufInfos[3].range  = classesBytes;
+
+		memset( writes, 0, sizeof( writes ) );
+		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[0].dstSet          = vk.particle.compute_descriptor[i];
+		writes[0].dstBinding      = 0;
+		writes[0].descriptorCount = 1;
+		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		writes[0].pBufferInfo     = &bufInfos[0];
+		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[1].dstSet          = vk.particle.compute_descriptor[i];
+		writes[1].dstBinding      = 1;
+		writes[1].descriptorCount = 1;
+		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[1].pBufferInfo     = &bufInfos[1];
+		writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[2].dstSet          = vk.particle.compute_descriptor[i];
+		writes[2].dstBinding      = 2;
+		writes[2].descriptorCount = 1;
+		writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[2].pBufferInfo     = &bufInfos[2];
+		writes[3].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[3].dstSet          = vk.particle.compute_descriptor[i];
+		writes[3].dstBinding      = 3;
+		writes[3].descriptorCount = 1;
+		writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[3].pBufferInfo     = &bufInfos[3];
+
+		qvkUpdateDescriptorSets( vk.device, 4, writes, 0, NULL );
+	}
+
+	// ── Allocate render descriptor sets (NUM_COMMAND_BUFFERS slots) ─
+	// render_descriptor[i] reads pool[1-i] (the post-compute output
+	// when compute_descriptor[i] just ran).
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		uint32_t renderPool = (uint32_t)(1 - i);     // 1 or 0
+
+		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dsAlloc.descriptorPool     = vk.descriptor_pool;
+		dsAlloc.descriptorSetCount = 1;
+		dsAlloc.pSetLayouts        = &vk.particle.render_set_layout;
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.particle.render_descriptor[i] ) );
+
+		memset( bufInfos, 0, sizeof( bufInfos ) );
+		bufInfos[0].buffer = vk.particle.frame_buffer[i];
+		bufInfos[0].offset = 0;
+		bufInfos[0].range  = frameBytes;
+		bufInfos[1].buffer = vk.particle.pool_buffer[renderPool];
+		bufInfos[1].offset = 0;
+		bufInfos[1].range  = poolBytes;
+		bufInfos[2].buffer = vk.particle.classes_buffer;
+		bufInfos[2].offset = 0;
+		bufInfos[2].range  = classesBytes;
+
+		memset( writes, 0, sizeof( writes ) );
+		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[0].dstSet          = vk.particle.render_descriptor[i];
+		writes[0].dstBinding      = 0;
+		writes[0].descriptorCount = 1;
+		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		writes[0].pBufferInfo     = &bufInfos[0];
+		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[1].dstSet          = vk.particle.render_descriptor[i];
+		writes[1].dstBinding      = 1;
+		writes[1].descriptorCount = 1;
+		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[1].pBufferInfo     = &bufInfos[1];
+		writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[2].dstSet          = vk.particle.render_descriptor[i];
+		writes[2].dstBinding      = 2;
+		writes[2].descriptorCount = 1;
+		writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[2].pBufferInfo     = &bufInfos[2];
+
+		qvkUpdateDescriptorSets( vk.device, 3, writes, 0, NULL );
+
+		// Note on binding 3 (per-class sampler array): population is
+		// deferred. vk_init_particle runs from InitOpenGL →
+		// vk_initialize, BEFORE R_InitImages creates tr.whiteImage.
+		// R_Init calls vk_init_particle_textures AFTER R_InitImages
+		// to populate this binding eagerly against a valid
+		// tr.whiteImage.
+	}
+
+	// ── Compute pipeline ──────────────────────────────────────────
+	{
+		VkComputePipelineCreateInfo cpInfo;
+		memset( &cpInfo, 0, sizeof( cpInfo ) );
+		cpInfo.sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+		cpInfo.layout = vk.particle.compute_pipeline_layout;
+		cpInfo.stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		cpInfo.stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
+		cpInfo.stage.module = vk.modules.particle_integrate_cs;
+		cpInfo.stage.pName  = "main";
+		VK_CHECK( qvkCreateComputePipelines( vk.device, VK_NULL_HANDLE, 1, &cpInfo, NULL, &vk.particle.compute_pipeline ) );
+	}
+
+	// ── Render pipelines (alpha + additive variants) ──────────────
+	{
+		VkGraphicsPipelineCreateInfo gpInfo;
+		VkPipelineShaderStageCreateInfo stages[2];
+		VkPipelineVertexInputStateCreateInfo vertexInput;
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+		VkPipelineViewportStateCreateInfo viewportState;
+		VkPipelineRasterizationStateCreateInfo rasterizer;
+		VkPipelineMultisampleStateCreateInfo multisampling;
+		VkPipelineDepthStencilStateCreateInfo depthStencil;
+		VkPipelineColorBlendAttachmentState blendAttach;
+		VkPipelineColorBlendStateCreateInfo colorBlend;
+		VkPipelineDynamicStateCreateInfo dynamicState;
+		VkDynamicState dynStates[2];
+		VkViewport viewport;
+		VkRect2D scissor;
+		VkSpecializationMapEntry specMap;
+		VkSpecializationInfo specInfo;
+		uint32_t blendMaskValue;
+		int variant;
+
+		// Specialization: vertex stage gets PIPELINE_BLEND_MASK = 0
+		// (alpha) or 1 (additive). Filled per-variant inside the loop.
+		memset( &specMap, 0, sizeof( specMap ) );
+		specMap.constantID = 0;
+		specMap.offset     = 0;
+		specMap.size       = sizeof( uint32_t );
+		memset( &specInfo, 0, sizeof( specInfo ) );
+		specInfo.mapEntryCount = 1;
+		specInfo.pMapEntries   = &specMap;
+		specInfo.dataSize      = sizeof( uint32_t );
+		specInfo.pData         = &blendMaskValue;
+
+		memset( stages, 0, sizeof( stages ) );
+		stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[0].module = vk.modules.particle_vs;
+		stages[0].pName  = "main";
+		stages[0].pSpecializationInfo = &specInfo;
+		stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stages[1].module = vk.modules.particle_fs;
+		stages[1].pName  = "main";
+
+		memset( &vertexInput, 0, sizeof( vertexInput ) );
+		vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+		memset( &inputAssembly, 0, sizeof( inputAssembly ) );
+		inputAssembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		dynStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
+		dynStates[1] = VK_DYNAMIC_STATE_SCISSOR;
+		memset( &dynamicState, 0, sizeof( dynamicState ) );
+		dynamicState.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = 2;
+		dynamicState.pDynamicStates    = dynStates;
+
+		memset( &viewport, 0, sizeof( viewport ) );
+		viewport.width    = (float)vk.renderWidth;
+		viewport.height   = (float)vk.renderHeight;
+		viewport.maxDepth = 1.0f;
+		memset( &scissor, 0, sizeof( scissor ) );
+		scissor.extent.width  = vk.renderWidth;
+		scissor.extent.height = vk.renderHeight;
+
+		memset( &viewportState, 0, sizeof( viewportState ) );
+		viewportState.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.pViewports    = &viewport;
+		viewportState.scissorCount  = 1;
+		viewportState.pScissors     = &scissor;
+
+		memset( &rasterizer, 0, sizeof( rasterizer ) );
+		rasterizer.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterizer.lineWidth   = 1.0f;
+		rasterizer.cullMode    = VK_CULL_MODE_NONE;
+		rasterizer.frontFace   = VK_FRONT_FACE_CLOCKWISE;
+
+		memset( &multisampling, 0, sizeof( multisampling ) );
+		multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.rasterizationSamples = vk.msaaActive ? vkSamples : VK_SAMPLE_COUNT_1_BIT;
+
+		memset( &depthStencil, 0, sizeof( depthStencil ) );
+		depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable  = VK_TRUE;
+		depthStencil.depthWriteEnable = VK_FALSE;
+#ifdef USE_REVERSED_DEPTH
+		depthStencil.depthCompareOp   = VK_COMPARE_OP_GREATER_OR_EQUAL;
+#else
+		depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
+#endif
+
+		memset( &colorBlend, 0, sizeof( colorBlend ) );
+		colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlend.attachmentCount = 1;
+		colorBlend.pAttachments    = &blendAttach;
+
+		memset( &gpInfo, 0, sizeof( gpInfo ) );
+		gpInfo.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		gpInfo.stageCount          = 2;
+		gpInfo.pStages             = stages;
+		gpInfo.pVertexInputState   = &vertexInput;
+		gpInfo.pInputAssemblyState = &inputAssembly;
+		gpInfo.pViewportState      = &viewportState;
+		gpInfo.pRasterizationState = &rasterizer;
+		gpInfo.pMultisampleState   = &multisampling;
+		gpInfo.pDepthStencilState  = &depthStencil;
+		gpInfo.pColorBlendState    = &colorBlend;
+		gpInfo.pDynamicState       = &dynamicState;
+		gpInfo.layout              = vk.particle.render_pipeline_layout;
+		gpInfo.renderPass          = vk.render_pass.main;
+		gpInfo.subpass             = 0;
+
+		// 0 = alpha (SRC_ALPHA / ONE_MINUS_SRC_ALPHA),
+		// 1 = additive (SRC_ALPHA / ONE).
+		for ( variant = 0; variant < 2; variant++ ) {
+			blendMaskValue = (uint32_t)variant;
+
+			memset( &blendAttach, 0, sizeof( blendAttach ) );
+			blendAttach.blendEnable         = VK_TRUE;
+			blendAttach.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+			blendAttach.dstColorBlendFactor = (variant == 0)
+				? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+				: VK_BLEND_FACTOR_ONE;
+			blendAttach.colorBlendOp        = VK_BLEND_OP_ADD;
+			blendAttach.srcAlphaBlendFactor = blendAttach.srcColorBlendFactor;
+			blendAttach.dstAlphaBlendFactor = blendAttach.dstColorBlendFactor;
+			blendAttach.alphaBlendOp        = VK_BLEND_OP_ADD;
+			blendAttach.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+			                                | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+			VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &gpInfo, NULL,
+				(variant == 0) ? &vk.particle.render_pipeline_alpha : &vk.particle.render_pipeline_additive ) );
+		}
+	}
+
+	vk.particle.pingPongRead  = 0;
+	vk.particle.prevSceneTime = 0.0f;
+	vk.particle.numClasses    = 0;
+	vk.particle.nextSlot      = 0;
+	vk.particle.available     = qtrue;
+
+	ri.Log( SEV_INFO, "Vulkan particle subsystem initialized (pool=%u particles, classes=%u, %u KB pool memory)\n",
+		(unsigned)PARTICLES_PER_POOL,
+		(unsigned)MAX_PARTICLE_CLASSES,
+		(unsigned)( ( poolBytes * 2 + classesBytes ) / 1024 ) );
+}
+
+
+// Phase 5 eager texture init: populate the per-class sampler array
+// (binding 3) on every per-frame render descriptor set. Walks
+// classImages[] (mostly NULL at engine init) and falls back to
+// tr.whiteImage for unregistered slots. Called once from R_Init
+// AFTER R_InitImages has created tr.whiteImage; cannot run earlier
+// because vk_init_particle and vk_init_descriptors both execute
+// from InitOpenGL, before R_InitImages.
+//
+// On vid_restart, vk_init_descriptors's particle re-alloc clears
+// classImages[] and numClasses; R_InitImages re-creates
+// tr.whiteImage at a fresh address; this function then re-runs
+// from the same R_Init call site to repopulate against the fresh
+// pointers. RE_RegisterParticleClass overwrites per-class slots
+// with their resolved shader images later, when cgame loads.
+//
+// The fatal-on-NULL guard converts a wrong-phase call into a clear
+// startup failure rather than a silent unbound-texture issue.
+void vk_init_particle_textures( void )
+{
+	VkDescriptorImageInfo imgInfos[MAX_PARTICLE_CLASSES];
+	VkWriteDescriptorSet  imgWrite;
+	uint32_t j, k;
+
+	if ( !vk.particle.available ) return;
+	if ( tr.whiteImage == NULL ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"vk_init_particle_textures: tr.whiteImage is NULL — "
+			"called before R_InitImages?" );
+		return;
+	}
+
+	for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+		for ( k = 0; k < MAX_PARTICLE_CLASSES; k++ ) {
+			image_t *img = vk.particle.classImages[k]
+			             ? vk.particle.classImages[k]
+			             : tr.whiteImage;
+			memset( &imgInfos[k], 0, sizeof( imgInfos[k] ) );
+			imgInfos[k].imageView   = img->view;
+			imgInfos[k].sampler     = vk.particle.sampler;
+			imgInfos[k].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		}
+		memset( &imgWrite, 0, sizeof( imgWrite ) );
+		imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		imgWrite.dstSet          = vk.particle.render_descriptor[j];
+		imgWrite.dstBinding      = 3;
+		imgWrite.dstArrayElement = 0;
+		imgWrite.descriptorCount = MAX_PARTICLE_CLASSES;
+		imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		imgWrite.pImageInfo      = imgInfos;
+		qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	}
+}
+
+
+void vk_particle_set_class_image( int handle, image_t *image )
+{
+	VkDescriptorImageInfo imgInfo;
+	VkWriteDescriptorSet  imgWrite;
+	uint32_t              j;
+
+	// Phase 5: encapsulate the per-class sampler-array slot update
+	// so RE_RegisterParticleClass (in tr_scene.c) doesn't need
+	// access to the static qvk* function pointers in this TU.
+	// Writes the same (image->view, vk.particle.sampler) pair into
+	// slot (handle - 1) of binding 3 on every per-frame render
+	// descriptor set. The other 63 slots were populated with
+	// tr.whiteImage by vk_init_particle_textures (called from
+	// R_Init after R_InitImages); this function only touches the
+	// registered class's slot.
+	if ( !vk.particle.available ) return;
+	if ( handle < 1 || handle > MAX_PARTICLE_CLASSES ) return;
+	if ( image == NULL ) return;
+
+	memset( &imgInfo, 0, sizeof( imgInfo ) );
+	imgInfo.imageView   = image->view;
+	imgInfo.sampler     = vk.particle.sampler;
+	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+		memset( &imgWrite, 0, sizeof( imgWrite ) );
+		imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		imgWrite.dstSet          = vk.particle.render_descriptor[j];
+		imgWrite.dstBinding      = 3;
+		imgWrite.dstArrayElement = (uint32_t)( handle - 1 );
+		imgWrite.descriptorCount = 1;
+		imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		imgWrite.pImageInfo      = &imgInfo;
+		qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	}
+}
+
+
+// ── shared primitive shader image registry ──────────────────────────
+// One global registry, indexed by qhandle_t. Today consumed only by
+// ribbon (descriptor binding 2). Future beam pipeline will add itself
+// to vk_register_primitive_shader_image's update broadcast in turn 5B.
+// See vk.h for the registry contract.
+image_t *vk_primitive_shader_images[PRIMITIVE_SHADER_IMAGE_MAX];
+
+
+/*
+================
+vk_init_primitive_shader_images
+
+Eager init of the primitive shader image registry + ribbon's binding-2
+sampler array. Called from R_Init AFTER R_InitImages creates
+tr.whiteImage; cannot run earlier because the descriptor write needs
+a valid image_t. Pattern mirrors vk_init_particle_textures: walk all
+NUM_COMMAND_BUFFERS descriptor sets and populate every slot with
+either the registered image or tr.whiteImage as fallback.
+
+Re-runs on every R_Init, so vid_restart correctly repopulates against
+the freshly-recreated tr.whiteImage and any previously-registered
+image pointers (those become dangling after R_DeleteTextures and must
+be reset; this function clears the registry to tr.whiteImage as the
+fresh-start state, and any consumer that wants a textured shader
+re-registers via RE_RegisterPrimitiveShader).
+================
+*/
+static void vk_init_primitive_shader_stages( void );
+
+void vk_init_primitive_shader_images( void )
+{
+	int i;
+
+	if ( tr.whiteImage == NULL ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"vk_init_primitive_shader_images: tr.whiteImage is NULL — "
+			"called before R_InitImages?" );
+		return;
+	}
+
+	// Reset the registry to a known fresh-start state. Any
+	// previously-cached pointers from before vid_restart are now
+	// dangling. Per-shader registrations re-run from cgame init
+	// after R_Init returns and overwrite the slots they care about.
+	for ( i = 0; i < PRIMITIVE_SHADER_IMAGE_MAX; i++ ) {
+		vk_primitive_shader_images[i] = tr.whiteImage;
+	}
+
+	// Phase 5F: allocate (first call) and re-zero (every call) the
+	// per-stage SSBO. cgame re-registers shaders post-vid_restart
+	// via RE_RegisterPrimitiveShader, which re-populates entries.
+	vk_init_primitive_shader_stages();
+
+	// Sampler reuse: vk.particle.sampler is a shared linear/clamp/
+	// no-anisotropy sampler created in vk_init_particle. Used by
+	// ribbon binding 2 (helix has uvScroll=0 so CLAMP_TO_EDGE is
+	// fine). Beam binding 1 uses vk.beam.sampler_repeat instead —
+	// see Phase 5J: scrolling lightning shaders need REPEAT to
+	// wrap large UVs without saturating to the texture edge.
+	{
+		VkDescriptorImageInfo imgInfosClamp[PRIMITIVE_SHADER_IMAGE_MAX];
+		VkDescriptorImageInfo imgInfosRepeat[PRIMITIVE_SHADER_IMAGE_MAX];
+		VkWriteDescriptorSet  imgWrite;
+		uint32_t              j, k;
+
+		// Build two parallel imageInfo arrays — same images, two
+		// samplers. Cheap (each is 16 entries × NUM_COMMAND_BUFFERS
+		// frames; rebuilt once per init/vid_restart, not per frame).
+		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+			for ( k = 0; k < PRIMITIVE_SHADER_IMAGE_MAX; k++ ) {
+				image_t *img = vk_primitive_shader_images[k];
+				memset( &imgInfosClamp[k], 0, sizeof( imgInfosClamp[k] ) );
+				imgInfosClamp[k].imageView   = img->view;
+				imgInfosClamp[k].sampler     = vk.particle.sampler;
+				imgInfosClamp[k].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+				memset( &imgInfosRepeat[k], 0, sizeof( imgInfosRepeat[k] ) );
+				imgInfosRepeat[k].imageView   = img->view;
+				imgInfosRepeat[k].sampler     = vk.beam.sampler_repeat;
+				imgInfosRepeat[k].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			}
+
+			if ( vk.ribbon.available ) {
+				memset( &imgWrite, 0, sizeof( imgWrite ) );
+				imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				imgWrite.dstSet          = vk.ribbon.descriptor[j];
+				imgWrite.dstBinding      = 2;
+				imgWrite.dstArrayElement = 0;
+				imgWrite.descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
+				imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				imgWrite.pImageInfo      = imgInfosClamp;
+				qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+			}
+
+			if ( vk.beam.available ) {
+				memset( &imgWrite, 0, sizeof( imgWrite ) );
+				imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				imgWrite.dstSet          = vk.beam.descriptor[j];
+				imgWrite.dstBinding      = 1;
+				imgWrite.dstArrayElement = 0;
+				imgWrite.descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
+				imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				imgWrite.pImageInfo      = imgInfosRepeat;
+				qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+			}
+
+			// Phase 5G: bind the multi-stage SSBOs to the beam set's
+			// bindings 2 and 3. vk_init_primitive_shader_stages
+			// (called above) just allocated these buffers, so this
+			// is the earliest time the writes are valid. On vid_restart
+			// the descriptor pool reset has invalidated the previous
+			// writes; re-emitting here keeps the set healthy.
+			if ( vk.beam.available
+			  && vk.primitive_stages_buffer != VK_NULL_HANDLE ) {
+				VkDescriptorBufferInfo bufInfos[2];
+				VkWriteDescriptorSet   bufWrites[2];
+
+				memset( bufInfos, 0, sizeof( bufInfos ) );
+				bufInfos[0].buffer = vk.primitive_stages_buffer;
+				bufInfos[0].offset = 0;
+				bufInfos[0].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+					* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
+
+				bufInfos[1].buffer = vk.primitive_stage_counts_buffer;
+				bufInfos[1].offset = 0;
+				bufInfos[1].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+					* sizeof( uint32_t );
+
+				memset( bufWrites, 0, sizeof( bufWrites ) );
+				bufWrites[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				bufWrites[0].dstSet          = vk.beam.descriptor[j];
+				bufWrites[0].dstBinding      = 2;
+				bufWrites[0].descriptorCount = 1;
+				bufWrites[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+				bufWrites[0].pBufferInfo     = &bufInfos[0];
+
+				bufWrites[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				bufWrites[1].dstSet          = vk.beam.descriptor[j];
+				bufWrites[1].dstBinding      = 3;
+				bufWrites[1].descriptorCount = 1;
+				bufWrites[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+				bufWrites[1].pBufferInfo     = &bufInfos[1];
+
+				qvkUpdateDescriptorSets( vk.device, 2, bufWrites, 0, NULL );
+			}
+		}
+	}
+}
+
+
+/*
+================
+vk_register_primitive_shader_image
+
+Idempotently register an image_t at registry slot `handle` and push
+the change to every primitive descriptor set that consumes the
+registry. Today: ribbon only. Beam (turn 5B) will append a second
+update call here.
+
+Out-of-range handles (>= PRIMITIVE_SHADER_IMAGE_MAX) are silently
+ignored — the shader-side slot clamp at the fragment shader
+(`slot = handle < 64u ? handle : 0u`) renders such submissions
+through slot 0 (tr.whiteImage), so they appear untextured rather
+than crashing.
+================
+*/
+void vk_register_primitive_shader_image( int slot, image_t *image )
+{
+	VkDescriptorImageInfo imgInfoClamp;
+	VkDescriptorImageInfo imgInfoRepeat;
+	VkWriteDescriptorSet  imgWrite;
+	uint32_t              j;
+
+	// Phase 5K: parameter is now a primitive registry SLOT, not a qhandle.
+	// Slot 0 reserved for tr.whiteImage; usable slots [1, PRIMITIVE_SHADER_IMAGE_MAX).
+	if ( slot <= 0 || slot >= PRIMITIVE_SHADER_IMAGE_MAX ) return;
+	if ( image == NULL ) return;
+	if ( vk_primitive_shader_images[slot] == image ) return; // idempotent
+
+	vk_primitive_shader_images[slot] = image;
+
+	// Phase 5J: ribbon binding 2 uses vk.particle.sampler (CLAMP_TO_EDGE);
+	// beam binding 1 uses vk.beam.sampler_repeat (REPEAT). Same image,
+	// different sampler.
+	memset( &imgInfoClamp, 0, sizeof( imgInfoClamp ) );
+	imgInfoClamp.imageView   = image->view;
+	imgInfoClamp.sampler     = vk.particle.sampler;
+	imgInfoClamp.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	memset( &imgInfoRepeat, 0, sizeof( imgInfoRepeat ) );
+	imgInfoRepeat.imageView   = image->view;
+	imgInfoRepeat.sampler     = vk.beam.sampler_repeat;
+	imgInfoRepeat.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
+		if ( vk.ribbon.available ) {
+			memset( &imgWrite, 0, sizeof( imgWrite ) );
+			imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			imgWrite.dstSet          = vk.ribbon.descriptor[j];
+			imgWrite.dstBinding      = 2;
+			imgWrite.dstArrayElement = (uint32_t)slot;
+			imgWrite.descriptorCount = 1;
+			imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			imgWrite.pImageInfo      = &imgInfoClamp;
+			qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+		}
+		if ( vk.beam.available ) {
+			memset( &imgWrite, 0, sizeof( imgWrite ) );
+			imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			imgWrite.dstSet          = vk.beam.descriptor[j];
+			imgWrite.dstBinding      = 1;
+			imgWrite.dstArrayElement = (uint32_t)slot;
+			imgWrite.descriptorCount = 1;
+			imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			imgWrite.pImageInfo      = &imgInfoRepeat;
+			qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+		}
+	}
+}
+
+
+/*
+================
+vk_alloc_primitive_shader_image_slot
+
+Phase 5F support: allocate (or reuse) a registry slot for a stage>0
+image whose qhandle slot is already taken by stage 0's image of the
+same shader. Linear scan returns an existing slot when the image is
+already registered; otherwise writes into the first slot still
+holding tr.whiteImage and broadcasts the descriptor write via
+vk_register_primitive_shader_image.
+
+Slots 0 (reserved for tr.whiteImage) and the qhandle-occupied slots
+1..N are skipped during the free-slot search. Returns -1 if no free
+slot remains.
+
+The collision case (a future shader's qhandle landing on a slot
+allocated here for a stage>0 image) is documented but unhandled in
+this turn — most multi-stage shaders reuse the same image across
+stages (the LG case), so the linear-scan reuse path covers them
+without needing a new slot.
+================
+*/
+int vk_alloc_primitive_shader_image_slot( image_t *image )
+{
+	int i;
+
+	if ( image == NULL ) return -1;
+
+	// Reuse path: if `image` is already registered anywhere, return
+	// its slot. Includes slot 0 (tr.whiteImage) — but caller filters
+	// that case before getting here for non-trivial images.
+	for ( i = 1; i < PRIMITIVE_SHADER_IMAGE_MAX; i++ ) {
+		if ( vk_primitive_shader_images[i] == image ) {
+			return i;
+		}
+	}
+
+	// Allocate path: scan from the end backward to minimize collision
+	// with future qhandle assignments (which start low). First slot
+	// still holding tr.whiteImage wins.
+	for ( i = PRIMITIVE_SHADER_IMAGE_MAX - 1; i >= 1; i-- ) {
+		if ( vk_primitive_shader_images[i] == tr.whiteImage ) {
+			vk_register_primitive_shader_image( i, image );
+			return i;
+		}
+	}
+
+	return -1; // exhausted
+}
+
+
+/*
+================
+vk_qhandle_to_prim_slot
+
+Phase 5K: translate a cgame qhandle into the engine-internal primitive
+registry slot used by GPU SSBOs. Reads the indirection table populated
+by RE_RegisterPrimitiveShader. Used at SSBO write sites to pack a
+small (≤63) slot index into the GPU header where the previous design
+had relied on (qhandle == slot), an assumption that broke as soon as
+the qhandle counter exceeded PRIMITIVE_SHADER_IMAGE_MAX.
+
+Out-of-range or unregistered qhandles return slot 0 (whiteImage),
+rendering as untextured rather than producing OOB SSBO reads on the
+GPU.
+================
+*/
+unsigned int vk_qhandle_to_prim_slot( qhandle_t h )
+{
+	uint8_t slot;
+
+	if ( h <= 0 || h >= VK_PRIM_QHANDLE_MAX ) return 0;
+
+	slot = vk.qhandle_to_prim_slot[h];
+	if ( slot == PRIMITIVE_SLOT_INVALID ) return 0;
+
+	return (unsigned int)slot;
+}
+
+
+/*
+================
+vk_init_primitive_shader_stages
+
+Phase 5F: lazy allocation of the per-stage SSBO that backs multi-
+stage primitive shaders. Buffer is allocated on first call and
+persists across vid_restart (it lives outside the descriptor pool,
+so the pool reset doesn't invalidate it). Contents are zeroed on
+every call so vid_restart sees a clean slate before cgame
+re-registers shaders via RE_RegisterPrimitiveShader.
+
+The buffer holds PRIMITIVE_SHADER_IMAGE_MAX × PRIMITIVE_STAGE_MAX
+entries of VK_PRIMITIVE_STAGE_BYTES each = 64 × 4 × 32 = 8 KB.
+Indexed [shaderHandle * PRIMITIVE_STAGE_MAX + stageNumber].
+
+Bound to the beam pipeline by Phase 5G (this turn allocates only).
+================
+*/
+static void vk_init_primitive_shader_stages( void )
+{
+	const VkDeviceSize stagesSize = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+		* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
+	const VkDeviceSize countsSize = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+		* sizeof( uint32_t );
+
+	if ( vk.primitive_stages_buffer == VK_NULL_HANDLE ) {
+		VkBufferCreateInfo bufInfo;
+		VkMemoryRequirements memReqs;
+		VkMemoryAllocateInfo allocInfo;
+
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = stagesSize;
+		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL,
+			&vk.primitive_stages_buffer ) );
+
+		qvkGetBufferMemoryRequirements( vk.device,
+			vk.primitive_stages_buffer, &memReqs );
+
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
+		allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+			VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL,
+			&vk.primitive_stages_memory ) );
+		VK_CHECK( qvkBindBufferMemory( vk.device, vk.primitive_stages_buffer,
+			vk.primitive_stages_memory, 0 ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.primitive_stages_memory,
+			0, stagesSize, 0, &vk.primitive_stages_mapped ) );
+	}
+
+	// Phase 5G: stage-counts companion buffer. 256 B; uploaded each
+	// frame in RB_DrawBeams from the host-side count array. Decoupled
+	// from the stages buffer so the vertex shader can cheaply cull
+	// per-stage draws without reading every stage entry.
+	if ( vk.primitive_stage_counts_buffer == VK_NULL_HANDLE ) {
+		VkBufferCreateInfo bufInfo;
+		VkMemoryRequirements memReqs;
+		VkMemoryAllocateInfo allocInfo;
+
+		memset( &bufInfo, 0, sizeof( bufInfo ) );
+		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufInfo.size        = countsSize;
+		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL,
+			&vk.primitive_stage_counts_buffer ) );
+
+		qvkGetBufferMemoryRequirements( vk.device,
+			vk.primitive_stage_counts_buffer, &memReqs );
+
+		memset( &allocInfo, 0, sizeof( allocInfo ) );
+		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize  = memReqs.size;
+		allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+			VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL,
+			&vk.primitive_stage_counts_memory ) );
+		VK_CHECK( qvkBindBufferMemory( vk.device, vk.primitive_stage_counts_buffer,
+			vk.primitive_stage_counts_memory, 0 ) );
+		VK_CHECK( qvkMapMemory( vk.device, vk.primitive_stage_counts_memory,
+			0, countsSize, 0, &vk.primitive_stage_counts_mapped ) );
+	}
+
+	// Zero-init: every call (vid_restart included). Trailing stages
+	// (stageNumber >= stageCount[handle]) stay zero; consumers gate
+	// per-stage draws on the count array.
+	if ( vk.primitive_stages_mapped != NULL ) {
+		memset( vk.primitive_stages_mapped, 0, (size_t)stagesSize );
+	}
+	if ( vk.primitive_stage_counts_mapped != NULL ) {
+		memset( vk.primitive_stage_counts_mapped, 0, (size_t)countsSize );
+	}
+	memset( vk.primitive_shader_stage_counts, 0,
+		sizeof( vk.primitive_shader_stage_counts ) );
+
+	// Phase 5K: reset qhandle→primitive-slot lookup. 0xFF byte fill
+	// means every entry is PRIMITIVE_SLOT_INVALID. Re-runs cleanly
+	// on vid_restart; cgame re-registers primitive shaders post-restart
+	// and repopulates entries through the slot allocator.
+	memset( vk.qhandle_to_prim_slot, PRIMITIVE_SLOT_INVALID,
+		sizeof( vk.qhandle_to_prim_slot ) );
+}
+
+
+/*
+================
+vk_shutdown_primitive_stages
+
+Phase 5F: destroy the per-stage SSBO. Called from vk_shutdown only
+(NOT from vk_release_resources / vid_restart — buffer survives
+those because it's outside the descriptor pool).
+================
+*/
+void vk_shutdown_primitive_stages( void )
+{
+	if ( vk.primitive_stages_buffer != VK_NULL_HANDLE ) {
+		if ( vk.primitive_stages_mapped != NULL ) {
+			qvkUnmapMemory( vk.device, vk.primitive_stages_memory );
+			vk.primitive_stages_mapped = NULL;
+		}
+		qvkDestroyBuffer( vk.device, vk.primitive_stages_buffer, NULL );
+		vk.primitive_stages_buffer = VK_NULL_HANDLE;
+	}
+	if ( vk.primitive_stages_memory != VK_NULL_HANDLE ) {
+		qvkFreeMemory( vk.device, vk.primitive_stages_memory, NULL );
+		vk.primitive_stages_memory = VK_NULL_HANDLE;
+	}
+	if ( vk.primitive_stage_counts_buffer != VK_NULL_HANDLE ) {
+		if ( vk.primitive_stage_counts_mapped != NULL ) {
+			qvkUnmapMemory( vk.device, vk.primitive_stage_counts_memory );
+			vk.primitive_stage_counts_mapped = NULL;
+		}
+		qvkDestroyBuffer( vk.device, vk.primitive_stage_counts_buffer, NULL );
+		vk.primitive_stage_counts_buffer = VK_NULL_HANDLE;
+	}
+	if ( vk.primitive_stage_counts_memory != VK_NULL_HANDLE ) {
+		qvkFreeMemory( vk.device, vk.primitive_stage_counts_memory, NULL );
+		vk.primitive_stage_counts_memory = VK_NULL_HANDLE;
+	}
+	memset( vk.primitive_shader_stage_counts, 0,
+		sizeof( vk.primitive_shader_stage_counts ) );
+}
+
+
+void vk_shutdown_particle( void )
+{
+	int i;
+
+	if ( vk.particle.render_pipeline_alpha != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.particle.render_pipeline_alpha, NULL );
+		vk.particle.render_pipeline_alpha = VK_NULL_HANDLE;
+	}
+	if ( vk.particle.render_pipeline_additive != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.particle.render_pipeline_additive, NULL );
+		vk.particle.render_pipeline_additive = VK_NULL_HANDLE;
+	}
+	if ( vk.particle.compute_pipeline != VK_NULL_HANDLE ) {
+		qvkDestroyPipeline( vk.device, vk.particle.compute_pipeline, NULL );
+		vk.particle.compute_pipeline = VK_NULL_HANDLE;
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.particle.frame_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.particle.frame_buffer[i], NULL );
+			vk.particle.frame_buffer[i] = VK_NULL_HANDLE;
+		}
+		if ( vk.particle.frame_memory[i] != VK_NULL_HANDLE ) {
+			qvkFreeMemory( vk.device, vk.particle.frame_memory[i], NULL );
+			vk.particle.frame_memory[i] = VK_NULL_HANDLE;
+			vk.particle.frame_ptr[i] = NULL;
+		}
+	}
+
+	if ( vk.particle.classes_buffer != VK_NULL_HANDLE ) {
+		qvkDestroyBuffer( vk.device, vk.particle.classes_buffer, NULL );
+		vk.particle.classes_buffer = VK_NULL_HANDLE;
+	}
+	if ( vk.particle.classes_memory != VK_NULL_HANDLE ) {
+		qvkFreeMemory( vk.device, vk.particle.classes_memory, NULL );
+		vk.particle.classes_memory = VK_NULL_HANDLE;
+		vk.particle.classes_ptr = NULL;
+	}
+
+	for ( i = 0; i < 2; i++ ) {
+		if ( vk.particle.pool_buffer[i] != VK_NULL_HANDLE ) {
+			qvkDestroyBuffer( vk.device, vk.particle.pool_buffer[i], NULL );
+			vk.particle.pool_buffer[i] = VK_NULL_HANDLE;
+		}
+		if ( vk.particle.pool_memory[i] != VK_NULL_HANDLE ) {
+			qvkFreeMemory( vk.device, vk.particle.pool_memory[i], NULL );
+			vk.particle.pool_memory[i] = VK_NULL_HANDLE;
+			vk.particle.pool_ptr[i] = NULL;
+		}
+	}
+
+	if ( vk.particle.render_pipeline_layout != VK_NULL_HANDLE ) {
+		qvkDestroyPipelineLayout( vk.device, vk.particle.render_pipeline_layout, NULL );
+		vk.particle.render_pipeline_layout = VK_NULL_HANDLE;
+	}
+	if ( vk.particle.compute_pipeline_layout != VK_NULL_HANDLE ) {
+		qvkDestroyPipelineLayout( vk.device, vk.particle.compute_pipeline_layout, NULL );
+		vk.particle.compute_pipeline_layout = VK_NULL_HANDLE;
+	}
+	if ( vk.particle.render_set_layout != VK_NULL_HANDLE ) {
+		qvkDestroyDescriptorSetLayout( vk.device, vk.particle.render_set_layout, NULL );
+		vk.particle.render_set_layout = VK_NULL_HANDLE;
+	}
+	if ( vk.particle.compute_set_layout != VK_NULL_HANDLE ) {
+		qvkDestroyDescriptorSetLayout( vk.device, vk.particle.compute_set_layout, NULL );
+		vk.particle.compute_set_layout = VK_NULL_HANDLE;
+	}
+
+	vk.particle.available = qfalse;
+}
+
+
+void RB_RunParticleCompute( void )
+{
+	VkCommandBuffer cmd;
+	int frameIdx;
+	float currentSceneTime, dt;
+	particleFrame_t *frameDst;
+	VkBufferMemoryBarrier barrier;
+	uint32_t pingRead;
+
+	if ( !vk.particle.available )
+		return;
+
+	// IMPORTANT: this function is called from vk_begin_frame, BEFORE
+	// the main render pass opens. vkCmdDispatch is spec-forbidden
+	// inside a render pass instance (VUID-vkCmdDispatch-renderpass);
+	// keeping the call out here is the entire point of phase 2's
+	// Hypothesis-A fix. Do NOT call this from inside RB_DrawSurfs.
+	cmd      = vk.cmd->command_buffer;
+	frameIdx = vk.cmd_index;
+
+	// backEnd.refdef.floatTime here holds the PREVIOUS frame's value
+	// — refdef isn't updated for the current frame until
+	// RB_BeginDrawingView runs (later, inside the main render pass).
+	// The dt computed here is therefore the delta from frame N-2 to
+	// frame N-1, applied to particles being integrated for frame N's
+	// render. One frame of integration latency. Acceptable for
+	// particles; not a bug; do not "fix" by reading time elsewhere.
+	//
+	// dt clamp: covers map-change resets (negative delta, clamp to 0)
+	// and long pauses / breakpoints (huge delta, clamp to 100ms so
+	// particles skip a frame instead of teleporting).
+	currentSceneTime = (float)backEnd.refdef.floatTime;
+	dt = currentSceneTime - vk.particle.prevSceneTime;
+	if ( dt < 0.0f ) dt = 0.0f;
+	if ( dt > 0.1f ) dt = 0.1f;
+	vk.particle.prevSceneTime = currentSceneTime;
+
+	// Update the COMPUTE region of the per-frame UBO (bytes 112..127)
+	// and the SHARED region (bytes 128..143). The render region
+	// (bytes 0..111: mvp, viewLeft, viewUp, eyeWorld) is filled later
+	// by RB_DrawParticles when backEnd.viewParms is valid. Field-by-
+	// field assignment leaves the render region untouched.
+	//
+	// identityLight tracks tr.identityLight = 1/2^overbrightBits.
+	// r_brightness is in CVG_RENDERER, so a runtime change runs
+	// R_SetColorMappings via tr_cmds.c and rebakes the gamma
+	// pipeline; the next frame's UBO write picks up the new value
+	// here without further coordination.
+	frameDst = (particleFrame_t *)vk.particle.frame_ptr[frameIdx];
+	frameDst->dt            = dt;
+	frameDst->poolSize      = PARTICLES_PER_POOL;
+	frameDst->numClasses    = vk.particle.numClasses;
+	frameDst->pingPongRead  = vk.particle.pingPongRead;
+	frameDst->identityLight = tr.identityLight;
+
+	pingRead = vk.particle.pingPongRead;
+
+	// Bind compute pipeline + descriptor set, dispatch.
+	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.particle.compute_pipeline );
+	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+		vk.particle.compute_pipeline_layout, 0, 1,
+		&vk.particle.compute_descriptor[pingRead], 0, NULL );
+
+	// Dispatch ceil(PARTICLES_PER_POOL / 64). Workgroup size = 64.
+	qvkCmdDispatch( cmd, ( PARTICLES_PER_POOL + 63 ) / 64, 1, 1 );
+
+	// Barrier: compute writes to pool[1-pingRead] must be visible to
+	// the next vertex shader read in RB_DrawParticles. Now outside any
+	// render pass, so no self-dependency machinery is needed.
+	memset( &barrier, 0, sizeof( barrier ) );
+	barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	barrier.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
+	barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.buffer              = vk.particle.pool_buffer[1 - pingRead];
+	barrier.offset              = 0;
+	barrier.size                = VK_WHOLE_SIZE;
+
+	qvkCmdPipelineBarrier( cmd,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+		0,
+		0, NULL,
+		1, &barrier,
+		0, NULL );
+
+	// Flip ping-pong for next frame.
+	vk.particle.pingPongRead = 1 - vk.particle.pingPongRead;
+}
+
+
+void RB_DrawParticles( void )
+{
+	VkCommandBuffer cmd;
+	int frameIdx;
+	uint32_t renderIdx;
+	particleFrame_t *frameDst;
+	const float *p;
+	float proj[16];
+	float mvp[16];
+
+	if ( !vk.particle.available
+	  || vk.renderPassIndex != RENDER_PASS_MAIN )
+		return;
+
+	cmd      = vk.cmd->command_buffer;
+	frameIdx = vk.cmd_index;
+
+	// Update the RENDER region of the per-frame UBO (bytes 0..111).
+	// The compute region (bytes 112..127) was filled earlier in
+	// RB_RunParticleCompute (called from vk_begin_frame). Field-by-
+	// field assignment leaves the compute region untouched.
+	//
+	// MVP construction — same pattern as ribbon / sprite (proj y-flip
+	// for Vulkan clip space, world.modelMatrix already has the q3
+	// z-up → gl y-up flip baked in).
+	p = backEnd.viewParms.projectionMatrix;
+	memcpy( proj, p, sizeof( proj ) );
+	proj[5] = -p[5];
+	myGlMultMatrix( backEnd.viewParms.world.modelMatrix, proj, mvp );
+
+	frameDst = (particleFrame_t *)vk.particle.frame_ptr[frameIdx];
+	memcpy( frameDst->mvp,      mvp,                          64 );
+	memcpy( frameDst->viewLeft, backEnd.viewParms.or.axis[1], sizeof( vec3_t ) );
+	frameDst->viewLeft[3] = 0.0f;
+	memcpy( frameDst->viewUp,   backEnd.viewParms.or.axis[2], sizeof( vec3_t ) );
+	frameDst->viewUp[3] = 0.0f;
+	memcpy( frameDst->eyeWorld, backEnd.viewParms.or.origin,  sizeof( vec3_t ) );
+	frameDst->eyeWorld[3] = 0.0f;
+
+	// renderIdx selects the descriptor set whose particle pool binding
+	// is the post-compute output. compute_descriptor[i] writes pool[1-i],
+	// so render_descriptor[i] reads pool[1-i] — index i matches.
+	// RB_RunParticleCompute flipped pingPongRead at its tail, so the
+	// PRE-flip value (= the index used by compute this frame) is
+	// (vk.particle.pingPongRead ^ 1).
+	renderIdx = vk.particle.pingPongRead ^ 1u;
+
+	{
+		VkViewport viewport;
+		VkRect2D   scissor;
+		memset( &viewport, 0, sizeof( viewport ) );
+		viewport.x        = (float)backEnd.viewParms.viewportX;
+		viewport.y        = (float)backEnd.viewParms.viewportY;
+		viewport.width    = (float)backEnd.viewParms.viewportWidth;
+		viewport.height   = (float)backEnd.viewParms.viewportHeight;
+		viewport.maxDepth = 1.0f;
+		memset( &scissor, 0, sizeof( scissor ) );
+		scissor.offset.x      = backEnd.viewParms.viewportX;
+		scissor.offset.y      = backEnd.viewParms.viewportY;
+		scissor.extent.width  = backEnd.viewParms.viewportWidth;
+		scissor.extent.height = backEnd.viewParms.viewportHeight;
+		qvkCmdSetViewport( cmd, 0, 1, &viewport );
+		qvkCmdSetScissor ( cmd, 0, 1, &scissor );
+	}
+
+	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		vk.particle.render_pipeline_layout, 0, 1,
+		&vk.particle.render_descriptor[renderIdx], 0, NULL );
+
+	// Two passes: alpha-blend particles, then additive. Each draw
+	// dispatches the full pool (16K instances of 6 vertices); the
+	// vertex shader emits degenerate triangles for slots whose
+	// blend variant doesn't match the bound pipeline (and for dead
+	// slots). 16K of small fully-culled quads is cheap on the GPU.
+	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.particle.render_pipeline_alpha );
+	qvkCmdDraw( cmd, 6, PARTICLES_PER_POOL, 0, 0 );
+
+	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.particle.render_pipeline_additive );
+	qvkCmdDraw( cmd, 6, PARTICLES_PER_POOL, 0, 0 );
+
+	// Invalidate cached pipeline / descriptor / depth-range so the
+	// next standard draw rebinds correctly. Same cleanup pattern the
+	// IQM, ribbon, and sprite draws use.
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->depth_range   = DEPTH_RANGE_COUNT;
+	memset( vk.cmd->descriptor_set.current, 0, sizeof( vk.cmd->descriptor_set.current ) );
+	vk.cmd->descriptor_set.start = ~0U;
+	vk.cmd->descriptor_set.end   = 0;
 }
 
 
@@ -3806,6 +6469,7 @@ qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
 		return qfalse;
 
 	// check that the staging buffer can hold the data
+	// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — small int sum widened to VkDeviceSize for the comparison; both inputs are bounded, no precision loss
 	if ( (VkDeviceSize)(vertSize + idxSize) > vk.staging_buffer.size ) {
 		ri.Log( SEV_WARN, "vk_create_iqm_vbo: data too large for staging buffer (%d > %d)\n",
 			vertSize + idxSize, (int)vk.staging_buffer.size );
@@ -4311,15 +6975,6 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.dot_vs, "dot vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.dot_fs, "dot fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
-	// rail trail compute + render shader modules
-	if ( vk.computeAvailable ) {
-		vk.modules.rail_helix_cs  = SHADER_MODULE( rail_helix_comp_spv );
-		vk.modules.rail_debris_cs = SHADER_MODULE( rail_debris_comp_spv );
-		vk.modules.rail_sparks_cs = SHADER_MODULE( rail_sparks_comp_spv );
-		vk.modules.rail_helix_vs  = SHADER_MODULE( rail_helix_vert_spv );
-		vk.modules.rail_helix_fs  = SHADER_MODULE( rail_helix_frag_spv );
-	}
-
 	vk.modules.bloom_fs = SHADER_MODULE( bloom_frag_spv );
 	vk.modules.blur_fs = SHADER_MODULE( blur_frag_spv );
 	vk.modules.blend_fs = SHADER_MODULE( blend_frag_spv );
@@ -4409,6 +7064,28 @@ static void vk_create_shader_modules( void )
 	vk.modules.msdf_fs = SHADER_MODULE( msdf_frag_spv );
 	SET_OBJECT_NAME( vk.modules.msdf_vs, "MSDF text vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.msdf_fs, "MSDF text fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
+	vk.modules.ribbon_vs = SHADER_MODULE( ribbon_vert_spv );
+	vk.modules.ribbon_fs = SHADER_MODULE( ribbon_frag_spv );
+	SET_OBJECT_NAME( vk.modules.ribbon_vs, "ribbon vertex module",   VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+	SET_OBJECT_NAME( vk.modules.ribbon_fs, "ribbon fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
+	vk.modules.sprite_vs = SHADER_MODULE( sprite_vert_spv );
+	vk.modules.sprite_fs = SHADER_MODULE( sprite_frag_spv );
+	SET_OBJECT_NAME( vk.modules.sprite_vs, "sprite vertex module",   VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+	SET_OBJECT_NAME( vk.modules.sprite_fs, "sprite fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
+	vk.modules.beam_vs = SHADER_MODULE( beam_vert_spv );
+	vk.modules.beam_fs = SHADER_MODULE( beam_frag_spv );
+	SET_OBJECT_NAME( vk.modules.beam_vs, "beam vertex module",   VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+	SET_OBJECT_NAME( vk.modules.beam_fs, "beam fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
+	vk.modules.particle_integrate_cs = SHADER_MODULE( particle_integrate_comp_spv );
+	vk.modules.particle_vs           = SHADER_MODULE( particle_vert_spv );
+	vk.modules.particle_fs           = SHADER_MODULE( particle_frag_spv );
+	SET_OBJECT_NAME( vk.modules.particle_integrate_cs, "particle integrate compute module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+	SET_OBJECT_NAME( vk.modules.particle_vs,           "particle vertex module",            VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+	SET_OBJECT_NAME( vk.modules.particle_fs,           "particle fragment module",          VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
 	vk.modules.q1_ls_vs       = SHADER_MODULE( q1_ls_vert_spv );
 	vk.modules.q1_ls_fs       = SHADER_MODULE( q1_ls_frag_spv );
@@ -4942,6 +7619,29 @@ void vk_update_post_process_pipelines( void )
 		if ( vk.smaa.active ) {
 			vk_create_smaa_pipelines();
 		}
+		// Tear down any previously-active gamma variant pipelines.
+		// Variant slots in vk.gamma_variants[] are indexed by varIdx
+		// bitmask; toggling a feature cvar (r_tonemap, r_ssao, etc.)
+		// changes the active index, so the previous slot's pipeline
+		// must be explicitly freed. The per-create destroy guard inside
+		// vk_create_post_process_pipeline only checks the CURRENT slot,
+		// so it would leak any other slot's pipeline. Walking the whole
+		// array here keeps "exactly one variant pipeline live at a
+		// time" — the same invariant the variant-bind path at draw
+		// time assumes (vk.c around line 12710). Cost: one
+		// vk_wait_idle if any variant is alive (rare, only fires when
+		// CVG_RENDERER cvars change), otherwise a no-op loop.
+		{
+			int i;
+			for ( i = 0; i < ARRAY_LEN( vk.gamma_variants ); i++ ) {
+				if ( vk.gamma_variants[i] != VK_NULL_HANDLE ) {
+					vk_wait_idle();
+					qvkDestroyPipeline( vk.device, vk.gamma_variants[i], NULL );
+					vk.gamma_variants[i] = VK_NULL_HANDLE;
+				}
+			}
+		}
+
 		// Create gamma variant pipeline if any post-process features are active
 		{
 			int varIdx = 0;
@@ -4968,6 +7668,7 @@ void vk_update_post_process_pipelines( void )
 }
 
 
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — fields ordered by semantics, not packing
 typedef struct vk_attach_desc_s  {
 	VkImage descriptor;
 	VkImageView *image_view;
@@ -6436,7 +9137,17 @@ void vk_initialize( void )
 		uint32_t i, maxSets;
 
 		pool_size[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		pool_size[0].descriptorCount = MAX_DRAWIMAGES + 1 + 1 + 1 + VK_NUM_BLOOM_PASSES * 2 + 1 + 5; // color, screenmap, bloom, depth fade, smaa descriptors
+		// MAX_DRAWIMAGES per-image samplers + 9 specific ones (color,
+		// screenmap, bloom variants, depth fade, smaa) + 384 for the
+		// three primitive sampler arrays: particle binding 3, ribbon
+		// binding 2, beam binding 1 — each 64 slots × NUM_COMMAND_BUFFERS
+		// (= 2) descriptor sets = 128 entries, three primitives = 384.
+		// Without this explicit budget the primitive arrays would
+		// silently eat into MAX_DRAWIMAGES headroom and pool exhaustion
+		// could fire on heavy maps that load close to MAX_DRAWIMAGES
+		// images.
+		pool_size[0].descriptorCount = MAX_DRAWIMAGES + 1 + 1 + 1 + VK_NUM_BLOOM_PASSES * 2 + 1 + 5
+		                             + 384;
 
 		pool_size[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 		pool_size[1].descriptorCount = NUM_COMMAND_BUFFERS;
@@ -6445,14 +9156,33 @@ void vk_initialize( void )
 		//pool_size[2].descriptorCount = NUM_COMMAND_BUFFERS;
 
 		pool_size[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
-		pool_size[2].descriptorCount = 1 + NUM_COMMAND_BUFFERS; // generic storage + per-frame rail params
+		pool_size[2].descriptorCount = 1 + NUM_COMMAND_BUFFERS; // generic storage + reserved per-frame slots
 
 		pool_size[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		pool_size[3].descriptorCount = 8;
+		// First-launch consumption (ribbon, sprite, particle, beam
+		// each double-allocate — once in vk_init_*, once in
+		// vk_init_descriptors's re-alloc block; a vid_restart skips
+		// the first allocation since vk.active stays true and
+		// vk_initialize doesn't re-run):
+		//   ribbon:   2 SSBOs × 2 cmd × 2 alloc =  8
+		//   sprite:   1 SSBO  × 2 cmd × 2 alloc =  4
+		//   particle: ~10 SSBOs across compute+render × 2 alloc ≈ 20
+		//   beam:     3 SSBOs (header + stages + counts) × 2 cmd × 2 alloc = 12
+		//   total: ≈ 44.
+		// vid_restart-only path: ≈ 22 (single allocation).
+		// 64-slot pool gives ~31% headroom (44/64) post-Phase 5G; the
+		// underlying double-alloc waste is tracked in docs/health.md
+		// and deferred to the HAL refactor that will rebuild
+		// descriptor management entirely.
+		pool_size[3].descriptorCount = 64;
 
 		// IQM GPU skinning: per-frame bone matrix UBOs (non-dynamic uniform buffers)
+		// Particle subsystem also uses non-dynamic UBOs for per-frame
+		// state (NUM_COMMAND_BUFFERS slots × 2 descriptor sets [compute
+		// and render] = 4). Total: NUM_COMMAND_BUFFERS for IQM + 4 for
+		// particle, with headroom.
 		pool_size[4].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		pool_size[4].descriptorCount = NUM_COMMAND_BUFFERS;
+		pool_size[4].descriptorCount = NUM_COMMAND_BUFFERS + 8;
 
 		for ( i = 0, maxSets = 0; i < ARRAY_LEN( pool_size ); i++ ) {
 			maxSets += pool_size[i].descriptorCount;
@@ -6639,9 +9369,6 @@ void vk_initialize( void )
 
 	vk_create_storage_buffer( MAX_FLARES * vk.storage_alignment );
 
-	// compute shader infrastructure
-	vk_init_compute();
-
 	vk_create_shader_modules();
 
 	{
@@ -6661,16 +9388,32 @@ void vk_initialize( void )
 	// color/depth attachments
 	vk_create_attachments();
 
-	// renderpasses — must run before vk_init_rail_compute() and
-	// vk_init_iqm_gpu_skinning() because both create graphics pipelines that
-	// read vk.render_pass.main; with the previous ordering that field was
-	// still VK_NULL_HANDLE, tripping VUID-VkGraphicsPipelineCreateInfo-
-	// dynamicRendering-06576 on every Debug startup.
+	// renderpasses — must run before vk_init_iqm_gpu_skinning() because it
+	// creates a graphics pipeline that reads vk.render_pass.main; with the
+	// previous ordering that field was still VK_NULL_HANDLE, tripping
+	// VUID-VkGraphicsPipelineCreateInfo-dynamicRendering-06576 on every
+	// Debug startup.
 	vk_create_render_passes();
 
-	// rail trail GPU resources — must be after shader modules are loaded AND
-	// after render passes (graphics pipeline reads vk.render_pass.main).
-	vk_init_rail_compute();
+	// Primitive ribbon — must be after shader modules, descriptor pool, and
+	// render passes (graphics pipelines read vk.render_pass.main).
+	vk_init_ribbon();
+
+	// Primitive sprite — same prerequisites as ribbon.
+	vk_init_sprite();
+
+	// Primitive particle — same prerequisites as ribbon/sprite, plus
+	// uses compute pipeline. Must be after vk_init_sprite() so the
+	// descriptor pool sizing already accounts for sprite's slots.
+	vk_init_particle();
+
+	// Primitive beam — must be after vk_init_particle() because
+	// beam reuses vk.particle.sampler for the binding-1 sampler
+	// array. Beam's binding-1 descriptor write is deferred to
+	// vk_init_primitive_shader_images (called from R_Init), so the
+	// sampler reuse happens at that later point — ordering here is
+	// for documentation rather than strict dependency.
+	vk_init_beam();
 
 #if FEAT_IQM
 	// IQM GPU skinning — must be after shader modules, descriptor pool, AND
@@ -7006,11 +9749,14 @@ void vk_shutdown( refShutdownCode_t code )
 	if ( vk.pipeline_layout_msdf != VK_NULL_HANDLE )
 		qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_msdf, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_storage, NULL);
-	vk_shutdown_rail_compute();
+	vk_shutdown_ribbon();
+	vk_shutdown_sprite();
+	vk_shutdown_beam();
+	vk_shutdown_particle();
+	vk_shutdown_primitive_stages();
 #if FEAT_IQM
 	vk_shutdown_iqm_gpu_skinning();
 #endif
-	vk_shutdown_compute();
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_post_process, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_blend, NULL);
 	if ( vk.pipeline_layout_smaa != VK_NULL_HANDLE ) {
@@ -7114,6 +9860,28 @@ void vk_shutdown( refShutdownCode_t code )
 	if ( vk.modules.msdf_vs != VK_NULL_HANDLE )
 		qvkDestroyShaderModule( vk.device, vk.modules.msdf_vs, NULL );
 
+	if ( vk.modules.ribbon_fs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.ribbon_fs, NULL );
+	if ( vk.modules.ribbon_vs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.ribbon_vs, NULL );
+
+	if ( vk.modules.sprite_fs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.sprite_fs, NULL );
+	if ( vk.modules.sprite_vs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.sprite_vs, NULL );
+
+	if ( vk.modules.beam_fs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.beam_fs, NULL );
+	if ( vk.modules.beam_vs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.beam_vs, NULL );
+
+	if ( vk.modules.particle_fs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.particle_fs, NULL );
+	if ( vk.modules.particle_vs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.particle_vs, NULL );
+	if ( vk.modules.particle_integrate_cs != VK_NULL_HANDLE )
+		qvkDestroyShaderModule( vk.device, vk.modules.particle_integrate_cs, NULL );
+
 	if ( vk.modules.q1_ls_fs != VK_NULL_HANDLE )
 		qvkDestroyShaderModule( vk.device, vk.modules.q1_ls_fs, NULL );
 	if ( vk.modules.q1_ls_array_fs != VK_NULL_HANDLE )
@@ -7164,14 +9932,6 @@ void vk_shutdown( refShutdownCode_t code )
 	}
 #endif
 
-	/* Rail trail compute + graphics modules — only created when vk.computeAvailable;
-	 * the NULL check inside DESTROY_SM covers the disabled path. */
-	DESTROY_SM( vk.modules.rail_helix_cs );
-	DESTROY_SM( vk.modules.rail_debris_cs );
-	DESTROY_SM( vk.modules.rail_sparks_cs );
-	DESTROY_SM( vk.modules.rail_helix_vs );
-	DESTROY_SM( vk.modules.rail_helix_fs );
-
 #if FEAT_ADVANCED_WATER
 	DESTROY_SM( vk.modules.water_fs );
 #endif
@@ -7213,7 +9973,7 @@ __cleanup:
 
 	memset( &vk, 0, sizeof( vk ) );
 	memset( &vk_world, 0, sizeof( vk_world ) );
-	
+
 	if ( code != REF_KEEP_CONTEXT ) {
 		vk_destroy_instance();
 		deinit_instance_functions();
@@ -7724,7 +10484,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
-	VkSpecializationMapEntry spec_entries[11];
+	VkSpecializationMapEntry spec_entries[13];
 	VkSpecializationInfo frag_spec_info;
 	VkPipeline *pipeline;
 	VkShaderModule fsmodule;
@@ -7737,7 +10497,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	struct FragSpecData {
 		float gamma;
 		float overbright;
-		float greyscale;
+		float saturation;
 		float bloom_threshold;
 		float bloom_intensity;
 		int bloom_threshold_mode;
@@ -7746,6 +10506,14 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		int depth_r;
 		int depth_g;
 		int depth_b;
+		// Tonemap fields wire gamma.frag spec constants 17/18.
+		// They are present in the struct unconditionally even when
+		// FEAT_TONEMAP isn't compiled — the spec_entries below always
+		// include them, and the driver ignores spec entries whose
+		// constant IDs aren't declared in the bound shader. Keeping
+		// the struct shape stable simplifies offsetof maintenance.
+		int tonemap_mode;
+		float tonemap_exposure;
 	} frag_spec_data;
 
 	switch ( program_index ) {
@@ -7839,12 +10607,19 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 
 	frag_spec_data.gamma = 1.0 / (r_gamma->value);
 	frag_spec_data.overbright = (float)(1 << tr.overbrightBits);
-	frag_spec_data.greyscale = r_greyscale->value;
+	frag_spec_data.saturation = r_saturation->value;
 	frag_spec_data.bloom_threshold = r_bloom_threshold->value;
 	frag_spec_data.bloom_intensity = r_bloom_intensity->value;
 	frag_spec_data.bloom_threshold_mode = r_bloom_threshold_mode->integer;
 	frag_spec_data.bloom_modulate = r_bloom_modulate->integer;
 	frag_spec_data.dither = r_dither->integer;
+#if FEAT_TONEMAP
+	frag_spec_data.tonemap_mode = r_tonemap->integer;
+	frag_spec_data.tonemap_exposure = r_tonemapExposure->value;
+#else
+	frag_spec_data.tonemap_mode = 1;       // Reinhard if compiled-in path runs without the cvar
+	frag_spec_data.tonemap_exposure = 1.0f;
+#endif
 
 	if ( !vk_surface_format_color_depth( vk.present_format.format, &frag_spec_data.depth_r, &frag_spec_data.depth_g, &frag_spec_data.depth_b ) )
 		ri.Log( SEV_INFO, "Format %s not recognized, dither to assume 8bpc\n", vk_format_string( vk.base_format.format ) );
@@ -7858,8 +10633,8 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[1].size = sizeof( frag_spec_data.overbright );
 
 	spec_entries[2].constantID = 2;
-	spec_entries[2].offset = offsetof( struct FragSpecData, greyscale );
-	spec_entries[2].size = sizeof( frag_spec_data.greyscale );
+	spec_entries[2].offset = offsetof( struct FragSpecData, saturation );
+	spec_entries[2].size = sizeof( frag_spec_data.saturation );
 
 	spec_entries[3].constantID = 3;
 	spec_entries[3].offset = offsetof( struct FragSpecData, bloom_threshold );
@@ -7893,7 +10668,21 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[10].offset = offsetof(struct FragSpecData, depth_b);
 	spec_entries[10].size = sizeof(frag_spec_data.depth_b);
 
-	frag_spec_info.mapEntryCount = 11;
+	// Tonemap spec constants in gamma.frag — IDs 17 and 18 per the
+	// shader declaration. Pipelines without USE_TONEMAP defined
+	// (the non-tonemap gamma variants) never declare these IDs;
+	// the driver silently ignores spec entries whose IDs aren't
+	// referenced by the bound shader, so it's safe to write the
+	// entries unconditionally.
+	spec_entries[11].constantID = 17;
+	spec_entries[11].offset = offsetof(struct FragSpecData, tonemap_mode);
+	spec_entries[11].size = sizeof(frag_spec_data.tonemap_mode);
+
+	spec_entries[12].constantID = 18;
+	spec_entries[12].offset = offsetof(struct FragSpecData, tonemap_exposure);
+	spec_entries[12].size = sizeof(frag_spec_data.tonemap_exposure);
+
+	frag_spec_info.mapEntryCount = 13;
 	frag_spec_info.pMapEntries = spec_entries;
 	frag_spec_info.dataSize = sizeof( frag_spec_data );
 	frag_spec_info.pData = &frag_spec_data;
@@ -7912,8 +10701,19 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	//
 	// Viewport.
 	//
-	if ( program_index == 0 ) {
-		// gamma correction
+	if ( program_index == 0 || program_index == 5 ) {
+		// Gamma pipeline (case 0) and gamma feature variants
+		// (case 5 — SSAO/tonemap/colorgrade/FXAA/godrays combos)
+		// both target the gamma render pass at full window
+		// dimensions. Both call sites pass (0, 0) for width/height
+		// as a sentinel meaning "use the window extent". Without
+		// this branch covering case 5, the variant pipeline would
+		// fall into the else and produce a 0×0 viewport, which
+		// vkCreateGraphicsPipelines rejects with the "pViewports[0]
+		// .width (0.000000) is not greater than zero" validation
+		// error. The blitX0/blitY0 offsets are the windowed-mode
+		// blit insets; case 5 inherits the same insets because it
+		// renders into the same gamma render pass.
 		viewport.x = 0.0 + vk.blitX0;
 		viewport.y = 0.0 + vk.blitY0;
 		viewport.width = gls.windowWidth - vk.blitX0 * 2;
@@ -9353,15 +12153,14 @@ static uint32_t vk_alloc_pipeline( const Vk_Pipeline_Def *def ) {
 	if ( vk.pipelines_count >= MAX_VK_PIPELINES ) {
 		ri.Terminate( TERM_CLIENT_DROP, "alloc_pipeline: MAX_VK_PIPELINES reached" );
 		return 0;
-	} else {
-		int j;
-		pipeline = &vk.pipelines[ vk.pipelines_count ];
-		pipeline->def = *def;
-		for ( j = 0; j < RENDER_PASS_COUNT; j++ ) {
-			pipeline->handle[j] = VK_NULL_HANDLE;
-		}
-		return vk.pipelines_count++;
 	}
+	int j;
+	pipeline	  = &vk.pipelines[vk.pipelines_count];
+	pipeline->def = *def;
+	for ( j = 0; j < RENDER_PASS_COUNT; j++ ) {
+		pipeline->handle[j] = VK_NULL_HANDLE;
+	}
+	return vk.pipelines_count++;
 }
 
 
@@ -9373,10 +12172,9 @@ VkPipeline vk_gen_pipeline( uint32_t index ) {
 			pipeline->handle[ pass ] = create_pipeline( &pipeline->def, pass, index );
 		}
 		return pipeline->handle[ pass ];
-	} else {
-		ri.Terminate( TERM_UNRECOVERABLE, "%s(%i): NULL pipeline", __func__, index );
-		return VK_NULL_HANDLE;
 	}
+	ri.Terminate( TERM_UNRECOVERABLE, "%s(%i): NULL pipeline", __func__, index );
+	return VK_NULL_HANDLE;
 }
 
 
@@ -9776,11 +12574,10 @@ uint32_t vk_tess_index( uint32_t numIndexes, const void *src ) {
 		// schedule geometry buffer resize
 		vk.geometry_buffer_size_new = log2pad( offset + size, 1 );
 		return ~0U;
-	} else {
-		memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
-		vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
-		return offset;
 	}
+	memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
+	vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
+	return offset;
 }
 
 
@@ -10009,7 +12806,7 @@ void vk_bind_descriptor_sets( void )
 	 * (set by vk_bind_pipeline). Falls back to vk.pipeline_layout when no
 	 * pipeline is bound — matches the historical hardcoded behavior for
 	 * that pre-bind window and after callers that reset last_pipeline =
-	 * VK_NULL_HANDLE (rail trail / IQM / bloom etc.) to force a rebind. */
+	 * VK_NULL_HANDLE (IQM / bloom / etc.) to force a rebind. */
 	{
 		VkPipelineLayout layout = vk.cmd->last_pipeline != VK_NULL_HANDLE
 		                          ? vk.cmd->last_pipeline_layout
@@ -10094,6 +12891,7 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 	} else {
 		qvkCmdDraw( vk.cmd->command_buffer, tess.numVertexes, 1, 0, 0 );
 	}
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 	vk_diag_drawcalls++;
 	if ( vk_diag_msdf_active )
 		vk_diag_msdf_draws++;
@@ -11046,10 +13844,15 @@ _retry:
 	backEnd.screenMapDone = qfalse;
 	vk.depthFade.copied = qfalse;
 
-	// compute dispatch phase (before render pass)
-	if ( vk.computeAvailable && vk.rail.compute_pipeline != VK_NULL_HANDLE ) {
-		vk_dispatch_rail_compute();
-	}
+	// Particle compute pass — runs OUTSIDE any render pass, before the
+	// main / screenmap pass begins this frame. vkCmdDispatch is
+	// spec-forbidden inside a render pass instance; this is the only
+	// safe location in the frame to record the dispatch + the
+	// compute→vertex-shader buffer barrier. RB_RunParticleCompute
+	// updates only the compute region of its per-frame UBO; the render
+	// region is filled later by RB_DrawParticles when
+	// backEnd.viewParms is valid for this frame.
+	RB_RunParticleCompute();
 
 	if ( vk_find_screenmap_drawsurfs() ) {
 #if FEAT_FBO_DEBUG

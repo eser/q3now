@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // cg_players.c -- handle the media and animation for player entities
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 // Canonical sound slot names — order matches CSOUND_* defines in cg_public.h
 static const char *cg_soundSlotNames[CM_SOUND_SLOTS] = {
@@ -147,7 +149,7 @@ static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci )
 			}
 		}
 		if ( !found ) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, "IQM %s: unmapped animation '%s'\n", modelName, iqmAnims[i].name );
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "IQM %s: unmapped animation '%s'\n", modelName, iqmAnims[i].name );
 		}
 	}
 
@@ -158,7 +160,7 @@ static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci )
 	// warn about unmapped Q3 animation enums (developer-level)
 	for ( i = 0; i < MAX_ANIMATIONS; i++ ) {
 		if ( !mapped[i] ) {
-			Com_Log( SEV_INFO, LOG_CAT_CGAME, "IQM %s: missing Q3 animation enum %d\n", modelName, i );
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "IQM %s: missing Q3 animation enum %d\n", modelName, i );
 		}
 	}
 
@@ -198,7 +200,7 @@ static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci )
 		animations[FLAG_STAND2RUN].reversed = qtrue;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "IQM %s: mapped %d/%d animations from embedded data\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "IQM %s: mapped %d/%d animations from embedded data\n",
 		modelName, mappedCount, numAnims );
 
 	return qtrue;
@@ -234,7 +236,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 		return qfalse;
 	}
 	if ( len >= sizeof( text ) - 1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "File %s too long\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "File %s too long\n", filename );
 		trap_FS_FCloseFile( f );
 		return qfalse;
 	}
@@ -267,13 +269,16 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 				ci->headOffset[i] = atof( token );
 			}
 			continue;
-		} else if ( !Q_stricmp( token, "fixedlegs" ) ) {
+		}
+		if ( !Q_stricmp( token, "fixedlegs" ) ) {
 			ci->fixedlegs = qtrue;
 			continue;
-		} else if ( !Q_stricmp( token, "fixedtorso" ) ) {
+		}
+		if ( !Q_stricmp( token, "fixedtorso" ) ) {
 			ci->fixedtorso = qtrue;
 			continue;
-		} else if ( !Q_stricmp( token, "sex" ) ) {
+		}
+		if ( !Q_stricmp( token, "sex" ) ) {
 			token = COM_Parse( &parser, &text_p );
 			if ( !token[0] ) {
 				break;
@@ -293,7 +298,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 			text_p = prev;	// unget the token
 			break;
 		}
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "unknown token '%s' in %s\n", token, filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "unknown token '%s' in %s\n", token, filename );
 	}
 
 	// read information for each frame
@@ -355,7 +360,7 @@ static qboolean	CG_ParseAnimationFile( const char *filename, clientInfo_t *ci ) 
 	}
 
 	if ( i != MAX_ANIMATIONS ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Error parsing animation file: %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Error parsing animation file: %s\n", filename );
 		return qfalse;
 	}
 
@@ -485,7 +490,7 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *charac
 		if ( !CG_ParseIQMAnimations( characterName, ci ) ) {
 			Com_sprintf( filename, sizeof( filename ), "characters/%s/models/animation.cfg", characterName );
 			if ( !CG_ParseAnimationFile( filename, ci ) ) {
-				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load animation file %s\n", filename );
+				Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Failed to load animation file %s\n", filename );
 				return qfalse;
 			}
 		}
@@ -507,36 +512,36 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *charac
 #endif
 
 		return qtrue;
-	} else {
-		ci->iqmModel = qfalse;
 	}
+	ci->iqmModel = qfalse;
+
 #endif // FEAT_IQM
 
 	Com_sprintf( filename, sizeof( filename ), "characters/%s/models/lower.md3", characterName );
 	ci->legsModel = trap_R_RegisterModel( filename );
 	if ( !ci->legsModel ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load model file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Failed to load model file %s\n", filename );
 		return qfalse;
 	}
 
 	Com_sprintf( filename, sizeof( filename ), "characters/%s/models/upper.md3", characterName );
 	ci->torsoModel = trap_R_RegisterModel( filename );
 	if ( !ci->torsoModel ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load model file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Failed to load model file %s\n", filename );
 		return qfalse;
 	}
 
 	Com_sprintf( filename, sizeof( filename ), "characters/%s/models/head.md3", characterName );
 	ci->headModel = trap_R_RegisterModel( filename );
 	if ( !ci->headModel ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load model file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Failed to load model file %s\n", filename );
 		return qfalse;
 	}
 
 	// load the animations
 	Com_sprintf( filename, sizeof( filename ), "characters/%s/models/animation.cfg", characterName );
 	if ( !CG_ParseAnimationFile( filename, ci ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Failed to load animation file %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Failed to load animation file %s\n", filename );
 		return qfalse;
 	}
 
@@ -851,7 +856,7 @@ static void CG_SetDeferredClientInfo( int clientNum, clientInfo_t *ci ) {
 	}
 
 	// we should never get here...
-	Com_Log( SEV_INFO, LOG_CAT_CGAME, "CG_SetDeferredClientInfo: no valid clients!\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "CG_SetDeferredClientInfo: no valid clients!\n" );
 
 	CG_LoadClientInfo( clientNum, ci );
 }
@@ -968,7 +973,7 @@ void CG_NewClientInfo( int clientNum ) {
 			CG_SetDeferredClientInfo( clientNum, &newInfo );
 			// if we are low on memory, leave them with this model
 			if ( forceDefer ) {
-				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Memory is low. Using deferred model.\n" );
+				Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Memory is low. Using deferred model.\n" );
 				newInfo.deferred = qfalse;
 			}
 		} else {
@@ -1002,7 +1007,7 @@ void CG_LoadDeferredPlayers( void ) {
 		if ( ci->infoValid && ci->deferred ) {
 			// if we are low on memory, leave it deferred
 			if ( trap_MemoryRemaining() < 4000000 ) {
-				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Memory is low. Using deferred model.\n" );
+				Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Memory is low. Using deferred model.\n" );
 				ci->deferred = qfalse;
 				continue;
 			}
@@ -1044,7 +1049,7 @@ static void CG_SetLerpFrameAnimation( clientInfo_t *ci, lerpFrame_t *lf, int new
 	lf->animationTime = lf->frameTime + anim->initialLerp;
 
 	if ( cg_debugAnim.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "Anim: %i\n", newAnimation );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Anim: %i\n", newAnimation );
 	}
 }
 
@@ -1127,7 +1132,7 @@ static void CG_RunLerpFrame( clientInfo_t *ci, lerpFrame_t *lf, int newAnimation
 		if ( t > lf->frameTime ) {
 			lf->frameTime = t;
 			if ( cg_debugAnim.integer ) {
-				Com_Log( SEV_INFO, LOG_CAT_CGAME, "Clamp lf->frameTime\n");
+				Com_Log( SEV_INFO, LOG_CH(ch_cgame), "Clamp lf->frameTime\n");
 			}
 		}
 	}
@@ -1984,17 +1989,20 @@ static qhandle_t CG_GetPlayerSpriteShader(centity_t *cent) {
 
 	if (effectiveHealth > 300) {
 		return shaderarr[0];
-	} else if (effectiveHealth > 200) {
-		return shaderarr[1];
-	} else if (effectiveHealth > 150) {
-		return shaderarr[2];
-	} else if (effectiveHealth > 100) {
-		return shaderarr[3];
-	} else if (effectiveHealth > 80) {
-		return shaderarr[4];
-	} else {
-		return shaderarr[5];
 	}
+	if ( effectiveHealth > 200 ) {
+		return shaderarr[1];
+	}
+	if ( effectiveHealth > 150 ) {
+		return shaderarr[2];
+	}
+	if ( effectiveHealth > 100 ) {
+		return shaderarr[3];
+	}
+	if ( effectiveHealth > 80 ) {
+		return shaderarr[4];
+	}
+	return shaderarr[5];
 }
 
 static qboolean CG_FriendVisible(centity_t *cent) {
@@ -2719,12 +2727,8 @@ void CG_Player( centity_t *cent ) {
 		memset( &body, 0, sizeof(body) );
 
 		body.hModel = ci->bodyModel;
-#if FEAT_IQM
 		if ( ci->bodyShader ) body.customShader = ci->bodyShader;
 		else if ( ci->bodySkin ) body.customSkin = ci->bodySkin;
-#else
-		body.customSkin = ci->bodySkin;
-#endif
 
 		VectorCopy( cent->lerpOrigin, body.origin );
 		VectorCopy( cent->lerpOrigin, body.lightingOrigin );
@@ -2789,7 +2793,7 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean legs_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !legs_printed) { legs_printed = qtrue;
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "[ENT-legs] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "[ENT-legs] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			legs.characterSkin, legs.shaderRGBA[0], legs.shaderRGBA[1], legs.shaderRGBA[2], legs.shaderRGBA[3],
 			legs.renderfx, legs.customShader); }
 	}
@@ -2830,7 +2834,7 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean torso_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !torso_printed) { torso_printed = qtrue;
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "[ENT-torso] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "[ENT-torso] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			torso.characterSkin, torso.shaderRGBA[0], torso.shaderRGBA[1], torso.shaderRGBA[2], torso.shaderRGBA[3],
 			torso.renderfx, torso.customShader); }
 	}
@@ -3043,7 +3047,7 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean head_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !head_printed) { head_printed = qtrue;
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "[ENT-head] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "[ENT-head] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			head.characterSkin, head.shaderRGBA[0], head.shaderRGBA[1], head.shaderRGBA[2], head.shaderRGBA[3],
 			head.renderfx, head.customShader); }
 	}
@@ -3112,6 +3116,6 @@ void CG_ResetPlayerEntity( centity_t *cent ) {
 	cent->pe.torso.pitching = qfalse;
 
 	if ( cg_debugPosition.integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%i ResetPlayerEntity yaw=%f\n", cent->currentState.number, cent->pe.torso.yawAngle );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%i ResetPlayerEntity yaw=%f\n", cent->currentState.number, cent->pe.torso.yawAngle );
 	}
 }

@@ -27,6 +27,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "wired/store/cl_wired_store.h"
 
 #include "../botlib/botlib.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 extern	botlib_export_t	*botlib_export;
 
@@ -138,7 +141,7 @@ static qboolean CL_GetSnapshot( int snapshotNumber, snapshot_t *snapshot ) {
 	snapshot->ps = clSnap->ps;
 	int count = clSnap->numEntities;
 	if ( count > MAX_ENTITIES_IN_SNAPSHOT ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_GetSnapshot: truncated %i entities to %i\n", count, MAX_ENTITIES_IN_SNAPSHOT );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_GetSnapshot: truncated %i entities to %i\n", count, MAX_ENTITIES_IN_SNAPSHOT );
 		count = MAX_ENTITIES_IN_SNAPSHOT;
 	}
 	snapshot->numEntities = count;
@@ -429,8 +432,7 @@ static void *VM_ArgPtr( intptr_t intValue ) {
 
 	if ( cgvm->entryPoint )
 		return (void *)(intValue);
-	else
-		return (void *)(cgvm->dataBase + (intValue & cgvm->dataMask));
+	return (void *)( cgvm->dataBase + ( intValue & cgvm->dataMask ) );
 }
 
 
@@ -551,13 +553,13 @@ The cgame module is making a system call
 static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	switch( args[0] ) {
 	case CG_PRINT:
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "%s", (const char*)VMA(1) );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s", (const char*)VMA(1) );
 		return 0;
 	case CG_ERROR:
 		Com_Terminate( TERM_CLIENT_DROP, "%s", (const char*)VMA(1) );
 		return 0;
 	case CG_LOG:
-		Com_Log( (log_severity_t)args[1], LOG_CAT_CGAME, "%s", (const char*)VMA(2) );
+		Com_Log( (log_severity_t)args[1], LOG_CH(ch_cgame), "%s", (const char*)VMA(2) );
 		return 0;
 	case CG_TERMINATE:
 		Com_Terminate( (terminationReason_t)args[1], "%s", (const char*)VMA(2) );
@@ -745,6 +747,23 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		}
 		return h;
 	}
+	case CG_R_REGISTERPRIMITIVESHADER: {
+		// Like RegisterShader but also writes the shader's image into
+		// vk_primitive_shader_images[] for ribbon / beam consumers.
+		// Loading-progress increment matches the regular path so the
+		// progress bar stays consistent regardless of which API the
+		// cgame uses.
+		qhandle_t h = re.RegisterPrimitiveShader ? re.RegisterPrimitiveShader( VMA(1) ) : 0;
+		if ( cls.state == CA_LOADING ) {
+			loadYield_shaderCount++;
+			cl_loadProgress.shaders = (float)loadYield_shaderCount / LOADING_EST_SHADERS;
+			if ( cl_loadProgress.shaders > 1.0f ) cl_loadProgress.shaders = 1.0f;
+			if ( loadYield_shaderCount % LOADING_YIELD_SHADERS == 0 ) {
+				CL_LoadingYield( "compiling shaders" );
+			}
+		}
+		return h;
+	}
 	case CG_R_REGISTERFONT:
 		re.RegisterFont( VMA(1), args[2], VMA(3));
 		return 0;
@@ -768,6 +787,39 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_R_ADDADDITIVELIGHTTOSCENE:
 		re.AddAdditiveLightToScene( VMA(1), VMF(2), VMF(3), VMF(4), VMF(5) );
 		return 0;
+	case CG_R_ADDRIBBONTOSCENE:
+		if ( re.AddRibbonToScene ) {
+			// Rebuild the host-side ribbonDesc_t from individual syscall
+			// args. Cannot pass the descriptor as a struct over the VM
+			// boundary because it contains a pointer field — see traps.h.
+			ribbonDesc_t desc;
+			desc.points    = VMA(1);
+			desc.numPoints = args[2];
+			desc.shader    = args[3];
+			desc.flags     = args[4];
+			re.AddRibbonToScene( &desc );
+		}
+		return 0;
+	case CG_R_ADDBEAMTOSCENE:
+		if ( re.AddBeamToScene )
+			re.AddBeamToScene( VMA(1) );
+		return 0;
+	case CG_R_ADDSPRITETOSCENE:
+		if ( re.AddSpriteToScene )
+			re.AddSpriteToScene( VMA(1) );
+		return 0;
+	case CG_R_EMITPARTICLES:
+		if ( re.EmitParticles )
+			re.EmitParticles( VMA(1) );
+		return 0;
+	case CG_R_ADDDECALTOSCENE:
+		if ( re.AddDecalToScene )
+			re.AddDecalToScene( VMA(1) );
+		return 0;
+	case CG_R_REGISTERPARTICLECLASS:
+		if ( re.RegisterParticleClass )
+			re.RegisterParticleClass( args[1], VMA(2) );
+		return 0;
 	case CG_R_RENDERSCENE:
 		re.RenderScene( VMA(1) );
 		return 0;
@@ -776,7 +828,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return 0;
 	case CG_R_DRAWSTRETCHPIC:
 		/* removed — all callers migrated to CG_R_DRAWSTRETCHPICNORM */
-		COM_WARN( LOG_CAT_CLIENT, "WARNING: CG_R_DRAWSTRETCHPIC is removed, use CG_R_DRAWSTRETCHPICNORM\n" );
+		COM_WARN( LOG_CH(ch_client), "WARNING: CG_R_DRAWSTRETCHPIC is removed, use CG_R_DRAWSTRETCHPICNORM\n" );
 		return 0;
 	case CG_R_DRAWSTRETCHPICNORM: {
 		float x = VMF(1) * cls.glconfig.vidWidth;
@@ -926,11 +978,6 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 
 	case CG_R_ADDLINEARLIGHTTOSCENE:
 		re.AddLinearLightToScene( VMA(1), VMA(2), VMF(3), VMF(4), VMF(5), VMF(6) );
-		return 0;
-
-	case CG_R_ADDRAILTRAILPARAMS:
-		if ( re.AddRailTrailParams )
-			re.AddRailTrailParams( VMA(1) );
 		return 0;
 
 	case CG_R_FORCEFIXEDDLIGHTS:
@@ -1109,7 +1156,7 @@ void CL_InitCGame( void ) {
 
 	int t2 = Sys_Milliseconds();
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_InitCGame: %5.2f seconds\n", (t2-t1)/1000.0 );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_InitCGame: %5.2f seconds\n", (t2-t1)/1000.0 );
 
 	// have the renderer touch all its images, so they are present
 	// on the card even if the driver does deferred loading
@@ -1208,12 +1255,12 @@ static void CL_AdjustTimeDelta( void ) {
 		cl.oldServerTime = cl.snap.serverTime;	// FIXME: is this a problem for cgame?
 		cl.serverTime = cl.snap.serverTime;
 		if ( cl_showTimeDelta->integer ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "<RESET> " );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "<RESET> " );
 		}
 	} else if ( deltaDelta > 100 ) {
 		// fast adjust, cut the difference in half
 		if ( cl_showTimeDelta->integer ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "<FAST> " );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "<FAST> " );
 		}
 		cl.serverTimeDelta = ( cl.serverTimeDelta + newDelta ) >> 1;
 	} else {
@@ -1234,7 +1281,7 @@ static void CL_AdjustTimeDelta( void ) {
 	}
 
 	if ( cl_showTimeDelta->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i ", cl.serverTimeDelta );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%i ", cl.serverTimeDelta );
 	}
 }
 
@@ -1308,10 +1355,12 @@ static float CL_AvgPing( void ) {
 
 	// use median average ping
 	float result;
+	// NOLINTBEGIN(bugprone-integer-division) — `count / 2` is the median array index; integer division is correct here
 	if ( (count % 2) == 0 )
 		result = (ping[count / 2] + ping[(count / 2) - 1]) / 2.0f;
 	else
 		result = ping[count / 2];
+	// NOLINTEND(bugprone-integer-division)
 
 	return result;
 }
@@ -1329,8 +1378,7 @@ static int CL_TimeNudge( void ) {
 
 	if ( autoNudge != 0.0f )
 		return (int)((CL_AvgPing() * autoNudge) + 0.5f) * -1;
-	else
-		return cl_timeNudge->integer;
+	return cl_timeNudge->integer;
 }
 
 

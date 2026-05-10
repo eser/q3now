@@ -376,6 +376,7 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	}
 
 	// clamp ambient
+	// NOLINTNEXTLINE(readability-misleading-indentation) — preceding else without braces is a Q3 idiom; this statement is at function scope
 	for ( i = 0 ; i < 3 ; i++ ) {
 		if ( ent->ambientLight[i] > tr.identityLightByte ) {
 			ent->ambientLight[i] = tr.identityLightByte;
@@ -448,9 +449,9 @@ int R_GetDlightMode( void )
 #ifdef USE_PMLIGHT
 	if (!qglGenProgramsARB) {
 		return 0;
-	} else {
-		return r_dlightMode->integer;
 	}
+	return r_dlightMode->integer;
+
 #else
 	return 0;
 #endif

@@ -19,6 +19,8 @@ Free order MUST be LIFO: areas → tris → verts.
 
 #include "../q_shared.h"
 #include "../q_feats.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_nav, "nav" );
 
 #if FEAT_RECAST_NAVMESH
 
@@ -62,12 +64,12 @@ qboolean Nav_Geom_Extract( const char *mapname,
     Com_sprintf( bspPath, sizeof(bspPath), "maps/%s.bsp", mapname );
 
     if ( !BSP_Load( bspPath, &bsp, BSP_LOAD_FLAGS_NONE ) || !bsp ) {
-        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_Geom_Extract: BSP_Load failed for '%s'\n", mapname );
+        Com_Log( SEV_INFO, LOG_CH(ch_nav), "[NAV] Nav_Geom_Extract: BSP_Load failed for '%s'\n", mapname );
         return qfalse;
     }
 
     if ( !bsp->format || !bsp->format->extractNavGeometry ) {
-        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_Geom_Extract: format '%s' does not support nav geometry\n",
+        Com_Log( SEV_INFO, LOG_CH(ch_nav), "[NAV] Nav_Geom_Extract: format '%s' does not support nav geometry\n",
                     bsp->format ? bsp->format->name : "<null>" );
         BSP_Free( bsp );
         return qfalse;
@@ -75,7 +77,7 @@ qboolean Nav_Geom_Extract( const char *mapname,
 
     memset( geomOut, 0, sizeof(*geomOut) );
     if ( !bsp->format->extractNavGeometry( bsp, geomOut ) ) {
-        Com_Log( SEV_INFO, LOG_CAT_NAV, "[NAV] Nav_Geom_Extract: extractNavGeometry failed for '%s'\n", mapname );
+        Com_Log( SEV_INFO, LOG_CH(ch_nav), "[NAV] Nav_Geom_Extract: extractNavGeometry failed for '%s'\n", mapname );
         BSP_Free( bsp );
         return qfalse;
     }

@@ -1,0 +1,72 @@
+# q3now code style
+# Matches existing id-Software / Q3 conventions. The goal is minimal diff
+# on first format pass, not imposing a new style. See top of cvar.c /
+# sv_main.c / cl_main.c for the canonical examples.
+
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Always
+ContinuationIndentWidth: 4
+IndentCaseLabels: false
+IndentPPDirectives: None
+NamespaceIndentation: None
+
+# Braces
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeElse: false
+  BeforeCatch: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+
+# Line length
+ColumnLimit: 120
+
+# Spaces
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyBlock: false
+SpacesInParentheses: true
+SpacesInSquareBrackets: false
+SpaceBeforeSquareBrackets: false
+
+# Alignment
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AlignConsecutiveMacros: Consecutive
+AlignEscapedNewlines: Left
+AlignOperands: Align
+AlignTrailingComments: true
+
+# Functions
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# Includes — Q3 include order is semantically meaningful (q_shared.h must
+# come before qcommon.h, etc.). NEVER sort.
+IncludeBlocks: Preserve
+SortIncludes: Never
+
+# Other — Q3 style uses braceless single-line statements extensively. Do NOT
+# auto-insert braces; do NOT reflow comments (carefully formatted ASCII art
+# headers + aligned trailing comments are the norm).
+PointerAlignment: Right
+ReflowComments: false
+InsertBraces: false
+MaxEmptyLinesToKeep: 2
+KeepEmptyLinesAtTheStartOfBlocks: false

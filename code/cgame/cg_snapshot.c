@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // not necessarily every single rendered frame
 
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
 
@@ -257,7 +259,7 @@ static snapshot_t *CG_ReadNextSnapshot( void ) {
 	snapshot_t	*dest;
 
 	if ( cg.latestSnapshotNum > cgs.processedSnapshotNum + 1000 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CGAME, "WARNING: CG_ReadNextSnapshot: way out of range, %i > %i\n", 
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "WARNING: CG_ReadNextSnapshot: way out of range, %i > %i\n", 
 			cg.latestSnapshotNum, cgs.processedSnapshotNum );
 	}
 

@@ -1,6 +1,6 @@
 /*
 ===========================================================================
-Copyright (C) 2024 q3now contributors
+Copyright (C) 2024 Wired engine contributors
 
 This file is part of Quake III Arena source code.
 
@@ -147,10 +147,9 @@ REENTER:
 			tr->contents = contents;
 			if ( tr->allsolid ) tr->startsolid = qtrue;
 			return RHT_SOLID;
-		} else {
-			tr->allsolid = qfalse;
-			return RHT_EMPTY;
 		}
+		tr->allsolid = qfalse;
+		return RHT_EMPTY;
 	}
 
 	if ( num >= cm.q1.numClipnodes )
@@ -280,10 +279,9 @@ REENTER:
 			tr->contents = contents;
 			if ( tr->allsolid ) tr->startsolid = qtrue;
 			return RHT_SOLID;
-		} else {
-			tr->allsolid = qfalse;
-			return RHT_EMPTY;
 		}
+		tr->allsolid = qfalse;
+		return RHT_EMPTY;
 	}
 
 	if ( num >= cm.numNodes )

@@ -28,6 +28,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/util/crypto.h"
 #include "../qcommon/wired/net/wn_public.h"
 #include <limits.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
+LOG_DECLARE_CHANNEL( ch_renderer, "renderer" );
 
 cvar_t	*cl_noprint;
 cvar_t	*cl_debugMove;
@@ -200,8 +203,7 @@ void CL_AddReliableCommand( const char *cmd, qboolean isDisconnectCmd ) {
 	{
 		if( com_errorEntered )
 			return;
-		else
-			Com_Terminate( TERM_CLIENT_DROP, "Client command overflow");
+		Com_Terminate( TERM_CLIENT_DROP, "Client command overflow" );
 	}
 
 	clc.reliableSequence++;
@@ -285,9 +287,9 @@ void CL_StopRecord_f( void ) {
 	}
 
 	if ( !clc.demorecording ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Not recording a demo.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Not recording a demo.\n" );
 	} else {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Stopped demo recording.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Stopped demo recording.\n" );
 	}
 
 	clc.demorecording = qfalse;
@@ -447,6 +449,7 @@ static void CL_EmitPacketEntities( clSnapshot_t *from, clSnapshot_t *to, msg_t *
 
 		if ( newnum < oldnum ) {
 			// this is a new entity, send it from the baseline
+			// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — newnum < MAX_GENTITIES is enforced upstream by snapshot encoder
 			MSG_WriteDeltaEntity (msg, &cl.entityBaselines[newnum], newent, qtrue );
 			newindex++;
 			continue;
@@ -548,25 +551,25 @@ Begins recording a demo from the current position
 */
 static void CL_Record_f( void ) {
 	if ( Cmd_Argc() > 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "record <demoname>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "record <demoname>\n" );
 		return;
 	}
 
 	if ( clc.demorecording ) {
 		if ( !clc.spDemoRecording ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Already recording.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Already recording.\n" );
 		}
 		return;
 	}
 
 	if ( cls.state != CA_ACTIVE ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "You must be in a level to record.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "You must be in a level to record.\n" );
 		return;
 	}
 
 	// sync 0 doesn't prevent recording, so not forcing it off .. everyone does g_sync 1 ; record ; g_sync 0 ..
 	if ( NET_IsLocalAddress( &clc.serverAddress ) && !Cvar_VariableIntegerValue( "g_synchronousClients" ) ) {
-		COM_WARN( LOG_CAT_CLIENT, "WARNING: You should set 'g_synchronousClients 1' for smoother demo recording\n" );
+		COM_WARN( LOG_CH(ch_client), "WARNING: You should set 'g_synchronousClients 1' for smoother demo recording\n" );
 	}
 
 	char		demoName[MAX_OSPATH];
@@ -602,7 +605,7 @@ static void CL_Record_f( void ) {
 	// save desired filename without extension
 	Q_strncpyz( clc.recordName, name, sizeof( clc.recordName ) );
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "recording to %s.\n", name );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "recording to %s.\n", name );
 
 	// start new record with temporary extension
 	{ qstring_t _nm_qs = QS_WrapExisting( name, sizeof( name ) ); QS_Append( &_nm_qs, ".tmp" ); }
@@ -610,7 +613,7 @@ static void CL_Record_f( void ) {
 	// open the demo file
 	clc.recordfile = FS_FOpenFileWrite( name );
 	if ( clc.recordfile == FS_INVALID_HANDLE ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "ERROR: couldn't open.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "ERROR: couldn't open.\n" );
 		clc.recordName[0] = '\0';
 		return;
 	}
@@ -669,7 +672,7 @@ static void CL_DemoCompleted( void ) {
 	if ( com_timedemo->integer ) {
 		int time = Sys_Milliseconds() - clc.timeDemoStart;
 		if ( time > 0 ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i frames, %3.*f seconds: %3.1f fps\n", clc.timeDemoFrames,
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "%i frames, %3.*f seconds: %3.1f fps\n", clc.timeDemoFrames,
 			time > 10000 ? 1 : 2, time/1000.0, clc.timeDemoFrames*1000.0 / time );
 		}
 	}
@@ -724,7 +727,7 @@ void CL_ReadDemoMessage( void ) {
 	}
 	r = FS_Read( buf.data, buf.cursize, clc.demofile );
 	if ( r != buf.cursize ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Demo file was truncated.\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Demo file was truncated.\n");
 		CL_DemoCompleted();
 		return;
 	}
@@ -766,11 +769,10 @@ static int CL_WalkDemoExt( const char *arg, char *name, int name_len, fileHandle
 		FS_RestorePure();
 		if ( *handle != FS_INVALID_HANDLE )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Demo file: %s\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Demo file: %s\n", name );
 			return demo_protocols[ i ];
 		}
-		else
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Not found: %s\n", name );
+		Com_Log( SEV_INFO, LOG_CH( ch_client ), "Not found: %s\n", name );
 		i++;
 	}
 	return -1;
@@ -829,7 +831,7 @@ static void CL_PlayDemo_f( void ) {
 	char		name[MAX_OSPATH];
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "demo <demoname>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "demo <demoname>\n" );
 		return;
 	}
 
@@ -863,7 +865,7 @@ static void CL_PlayDemo_f( void ) {
 			char retry[MAX_OSPATH];
 			size_t len;
 
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Protocol %d not supported for demos\n", protocol );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Protocol %d not supported for demos\n", protocol );
 			len = ext_test - arg;
 
 			if ( len > ARRAY_LEN( retry ) - 1 ) {
@@ -879,7 +881,7 @@ static void CL_PlayDemo_f( void ) {
 		protocol = CL_WalkDemoExt( arg, name, sizeof( name ), &hFile );
 
 	if ( hFile == FS_INVALID_HANDLE ) {
-		COM_WARN( LOG_CAT_CLIENT, "couldn't open %s\n", name );
+		COM_WARN( LOG_CH(ch_client), "couldn't open %s\n", name );
 		// Honor the "nextdemo" cvar even if the current demo fails to
 		// open so that a queued demo reel keeps advancing.
 		CL_NextDemo();
@@ -899,7 +901,7 @@ static void CL_PlayDemo_f( void ) {
 	if ( FS_FOpenFileRead( name, &clc.demofile, qtrue ) == -1 )
 	{
 		// drop this time
-		COM_WARN( LOG_CAT_CLIENT, "couldn't open %s\n", name );
+		COM_WARN( LOG_CH(ch_client), "couldn't open %s\n", name );
 		// Honor the "nextdemo" cvar so a demo reel can progress past a
 		// missing entry rather than tearing down with an ERR_DROP.
 		CL_NextDemo();
@@ -947,7 +949,7 @@ static void CL_NextDemo( void ) {
 	char v[ MAX_CVAR_VALUE_STRING ];
 
 	Cvar_VariableStringBuffer( "nextdemo", v, sizeof( v ) );
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_NextDemo: %s\n", v );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_NextDemo: %s\n", v );
 	if ( !v[0] ) {
 		return;
 	}
@@ -1323,7 +1325,7 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 
 	// wipe the client connection
 	// Tear down client QUIC connection before wiping clc
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "*** CL_Disconnect: state=%d showMainMenu=%d initialized=%d ***\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "*** CL_Disconnect: state=%d showMainMenu=%d initialized=%d ***\n",
 		(int)cls.state, (int)showMainMenu, (int)WN_ClientIsConnecting() );
 	WN_ClientDisconnect();
 
@@ -1394,7 +1396,7 @@ void CL_ForwardCommandToServer( const char *string ) {
 	}
 
 	if ( clc.demoplaying || cls.state < CA_CONNECTED || cmd[0] == '+' ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Unknown command \"%s" S_COLOR_WHITE "\"\n", cmd );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Unknown command \"%s" S_COLOR_WHITE "\"\n", cmd );
 		return;
 	}
 
@@ -1419,13 +1421,13 @@ static void CL_RequestMotd( void ) {
 	if ( !cl_motd->integer ) {
 		return;
 	}
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Resolving %s\n", UPDATE_SERVER_NAME );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Resolving %s\n", UPDATE_SERVER_NAME );
 	if ( !NET_StringToAdr( UPDATE_SERVER_NAME, &cls.updateServer, NA_IP ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Couldn't resolve address\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Couldn't resolve address\n" );
 		return;
 	}
 	cls.updateServer.port = BigShort( PORT_UPDATE );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s resolved to %i.%i.%i.%i:%i\n", UPDATE_SERVER_NAME,
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "%s resolved to %i.%i.%i.%i:%i\n", UPDATE_SERVER_NAME,
 		cls.updateServer.ip[0], cls.updateServer.ip[1],
 		cls.updateServer.ip[2], cls.updateServer.ip[3],
 		BigShort( cls.updateServer.port ) );
@@ -1463,7 +1465,7 @@ CL_ForwardToServer_f
 */
 static void CL_ForwardToServer_f( void ) {
 	if ( cls.state != CA_ACTIVE || clc.demoplaying ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Not connected to a server.\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Not connected to a server.\n");
 		return;
 	}
 
@@ -1486,12 +1488,12 @@ static void CL_RconLogin_f( void ) {
 	}
 
 	if ( !cl_wiredRconPassword->string[0] ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: rcon_login <password>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Usage: rcon_login <password>\n" );
 		return;
 	}
 
 	if ( clc.serverAddress.type == NA_BAD ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Not connected to a server.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Not connected to a server.\n" );
 		return;
 	}
 
@@ -1501,14 +1503,14 @@ static void CL_RconLogin_f( void ) {
 	clc.wiredRconAddress = clc.serverAddress;
 
 	NET_OutOfBandPrint( NS_CLIENT, &clc.serverAddress, "rcon_auth" );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Wired RCON: requesting challenge...\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Wired RCON: requesting challenge...\n" );
 }
 
 static void CL_Rcon_f( void ) {
 	char cmd[2048];
 
 	if ( Cmd_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: rcon <lua code>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Usage: rcon <lua code>\n" );
 		return;
 	}
 
@@ -1522,7 +1524,7 @@ static void CL_Rcon_f( void ) {
 	}
 
 	if ( !clc.wiredRconAuthed ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Plaintext rcon disabled. Use rcon_login.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Plaintext rcon disabled. Use rcon_login.\n" );
 		return;
 	}
 
@@ -1549,7 +1551,7 @@ void CL_Disconnect_f( void ) {
 				// if running a local server, kill it
 				SV_Shutdown( "Disconnected from server" );
 			} else {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Disconnected from %s\n", cls.servername );
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "Disconnected from %s\n", cls.servername );
 			}
 			Com_ClearLastError();
 			if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
@@ -1586,7 +1588,7 @@ static void CL_Connect_f( void ) {
 	netadrtype_t family = NA_UNSPEC;
 
 	if ( argc != 2 && argc != 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "usage: connect [-4|-6] <server>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: connect [-4|-6] <server>\n");
 		return;
 	}
 
@@ -1600,9 +1602,9 @@ static void CL_Connect_f( void ) {
 		else if( !strcmp( Cmd_Argv(1), "-6" ) )
 			family = NA_IP6;
 		else
-			COM_WARN( LOG_CAT_CLIENT, "warning: only -4 or -6 as address type understood.\n" );
+			COM_WARN( LOG_CH(ch_client), "warning: only -4 or -6 as address type understood.\n" );
 #else
-			COM_WARN( LOG_CAT_CLIENT, "warning: only -4 as address type understood.\n" );
+			COM_WARN( LOG_CH(ch_client), "warning: only -4 as address type understood.\n" );
 #endif
 		server = Cmd_Argv(2);
 	}
@@ -1639,7 +1641,7 @@ static void CL_Connect_f( void ) {
 	// try resolve remote server first
 	netadr_t addr;
 	if ( !NET_StringToAdr( server, &addr, family ) ) {
-		COM_WARN( LOG_CAT_CLIENT, "Bad server address - %s\n", server );
+		COM_WARN( LOG_CH(ch_client), "Bad server address - %s\n", server );
 		return;
 	}
 
@@ -1676,7 +1678,7 @@ static void CL_Connect_f( void ) {
 
 	const char *serverString = NET_AdrToStringwPort( &clc.serverAddress );
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s resolved to %s\n", cls.servername, serverString );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "%s resolved to %s\n", cls.servername, serverString );
 
 	if ( cl_guidServerUniq->integer )
 		CL_UpdateGUID( serverString, strlen( serverString ) );
@@ -1839,7 +1841,7 @@ CL_PK3List_f
 ==================
 */
 void CL_OpenedPK3List_f( void ) {
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Opened PK3 Names: %s\n", FS_LoadedPakNames());
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Opened PK3 Names: %s\n", FS_LoadedPakNames());
 }
 
 
@@ -1849,7 +1851,7 @@ CL_PureList_f
 ==================
 */
 static void CL_ReferencedPK3List_f( void ) {
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Referenced PK3 Names: %s\n", FS_ReferencedPakNames() );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Referenced PK3 Names: %s\n", FS_ReferencedPakNames() );
 }
 
 
@@ -1860,7 +1862,7 @@ CL_Configstrings_f
 */
 static void CL_Configstrings_f( void ) {
 	if ( cls.state != CA_ACTIVE ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Not connected to a server.\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Not connected to a server.\n");
 		return;
 	}
 
@@ -1869,7 +1871,7 @@ static void CL_Configstrings_f( void ) {
 		if ( !ofs ) {
 			continue;
 		}
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%4i: %s\n", i, cl.gameState.stringData + ofs );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%4i: %s\n", i, cl.gameState.stringData + ofs );
 	}
 }
 
@@ -1880,12 +1882,12 @@ CL_Clientinfo_f
 ==============
 */
 static void CL_Clientinfo_f( void ) {
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "--------- Client Information ---------\n" );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "state: %i\n", cls.state );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Server: %s\n", cls.servername );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "User info settings:\n");
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "--------- Client Information ---------\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "state: %i\n", cls.state );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Server: %s\n", cls.servername );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "User info settings:\n");
 	Info_Print( Cvar_InfoString( CVAR_USERINFO, NULL ) );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "--------------------------------------\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "--------------------------------------\n" );
 }
 
 
@@ -1899,7 +1901,7 @@ static void CL_Serverinfo_f( void ) {
 	if ( !ofs )
 		return;
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Server info settings:\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Server info settings:\n" );
 	Info_Print( cl.gameState.stringData + ofs );
 }
 
@@ -1914,7 +1916,7 @@ static void CL_Systeminfo_f( void ) {
 	if ( !ofs )
 		return;
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "System info settings:\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "System info settings:\n" );
 	Info_Print( cl.gameState.stringData + ofs );
 }
 
@@ -2020,7 +2022,7 @@ game directory.
 */
 static void CL_BeginDownload( const char *localName, const char *remoteName ) {
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "***** CL_BeginDownload *****\n"
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "***** CL_BeginDownload *****\n"
 				"Localname: %s\n"
 				"Remotename: %s\n"
 				"****************************\n", localName, remoteName);
@@ -2090,18 +2092,18 @@ void CL_NextDownload( void )
 #ifdef USE_CURL
 		if(!(cl_allowDownload->integer & DLF_NO_REDIRECT)) {
 			if(clc.sv_allowDownload & DLF_NO_REDIRECT) {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WARNING: server does not "
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server does not "
 					"allow download redirection "
 					"(sv_allowDownload is %d)\n",
 					clc.sv_allowDownload);
 			}
 			else if(!*clc.sv_dlURL) {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WARNING: server allows "
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server allows "
 					"download redirection, but does not "
 					"have sv_dlURL set\n");
 			}
 			else if(!CL_cURL_Init()) {
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WARNING: could not load "
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: could not load "
 					"cURL library\n");
 			}
 			else {
@@ -2111,7 +2113,7 @@ void CL_NextDownload( void )
 			}
 		}
 		else if(!(clc.sv_allowDownload & DLF_NO_REDIRECT)) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WARNING: server allows download "
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server allows download "
 				"redirection, but it disabled by client "
 				"configuration (cl_allowDownload is %d)\n",
 				cl_allowDownload->integer);
@@ -2119,16 +2121,14 @@ void CL_NextDownload( void )
 #endif /* USE_CURL */
 
 		if( !useCURL ) {
-		if( (cl_allowDownload->integer & DLF_NO_UDP) ) {
+			if( (cl_allowDownload->integer & DLF_NO_UDP) ) {
 				Com_Terminate( TERM_CLIENT_DROP, "UDP Downloads are "
 					"disabled on your client. "
 					"(cl_allowDownload is %d)",
 					cl_allowDownload->integer);
 				return;
 			}
-			else {
-				CL_BeginDownload( localName, remoteName );
-			}
+			CL_BeginDownload( localName, remoteName );
 		}
 		clc.downloadRestart = qtrue;
 
@@ -2185,14 +2185,14 @@ void CL_InitDownloads( void ) {
 		{
 			// NOTE TTimo I would rather have that printed as a modal message box
 			// but at this point while joining the game we don't know whether we will successfully join or not
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "\nWARNING: You are missing some files referenced by the server:\n%s"
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "\nWARNING: You are missing some files referenced by the server:\n%s"
 				"You might not be able to join the game\n"
 				"Go to the setting menu to turn on autodownload, or get the file elsewhere\n\n", missingfiles );
 		}
 	}
 	else if ( FS_ComparePaks( clc.downloadList, sizeof( clc.downloadList ) , qtrue ) ) {
 
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Need paks: %s\n", clc.downloadList );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Need paks: %s\n", clc.downloadList );
 
 		if ( *clc.downloadList ) {
 			// if autodownloading is not enabled on the server
@@ -2314,7 +2314,7 @@ static void CL_MotdPacket( const netadr_t *from ) {
 
 	// check challenge
 	const char *challenge = Info_ValueForKey( info, "challenge" );
-	if ( strcmp( challenge, cls.updateChallenge ) ) {
+	if ( strcmp( challenge, cls.updateChallenge ) != 0 ) {
 		return;
 	}
 
@@ -2425,7 +2425,7 @@ CL_ServersResponsePacket
 static void CL_ServersResponsePacket( const netadr_t* from, msg_t *msg, qboolean extended ) {
 	netadr_t addresses[MAX_SERVERSPERPACKET];
 
-	//Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_ServersResponsePacket\n"); // moved down
+	//Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_ServersResponsePacket\n"); // moved down
 
 	if (cls.numglobalservers == -1) {
 		// state to detect lack of servers or lack of response
@@ -2532,7 +2532,7 @@ static void CL_ServersResponsePacket( const netadr_t* from, msg_t *msg, qboolean
 	cls.numglobalservers = count;
 	int total = count + cls.numGlobalServerAddresses;
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "getserversResponse:%3d servers parsed (total %d)\n", numservers, total);
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "getserversResponse:%3d servers parsed (total %d)\n", numservers, total);
 }
 
 
@@ -2558,13 +2558,13 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 
 	const char *c = Cmd_Argv(0);
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL packet %s: %s\n", NET_AdrToStringwPort( from ), s );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL packet %s: %s\n", NET_AdrToStringwPort( from ), s );
 
 	// challenge from the server we are connecting to
 	if ( !Q_stricmp(c, "challengeResponse" ) ) {
 
 		if ( cls.state != CA_CONNECTING ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Unwanted challenge response received. Ignored.\n" );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Unwanted challenge response received. Ignored.\n" );
 			return qfalse;
 		}
 
@@ -2579,7 +2579,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 
 		if ( *c == '\0' || challenge != clc.challenge )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Bad challenge for challengeResponse. Ignored.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Bad challenge for challengeResponse. Ignored.\n" );
 			return qfalse;
 		}
 
@@ -2592,7 +2592,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		// take this address as the new server address.  This allows
 		// a server proxy to hand off connections to multiple servers
 		clc.serverAddress = *from;
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "challengeResponse: %d\n", clc.challenge );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "challengeResponse: %d\n", clc.challenge );
 		return qtrue;
 	}
 
@@ -2607,7 +2607,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		}
 
 		if ( !challengeStr || strlen( challengeStr ) != 64 ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Wired RCON: invalid challenge received.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Wired RCON: invalid challenge received.\n" );
 			return qfalse;
 		}
 
@@ -2624,10 +2624,10 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		const char *result = Cmd_Argv( 1 );
 		if ( !Q_stricmp( result, "ok" ) ) {
 			clc.wiredRconAuthed = qtrue;
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Wired RCON: authenticated.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Wired RCON: authenticated.\n" );
 		} else {
 			clc.wiredRconAuthed = qfalse;
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Wired RCON: authentication failed.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Wired RCON: authentication failed.\n" );
 		}
 		return qfalse;
 	}
@@ -2658,7 +2658,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		return qfalse;
 	}
 
-	// Phase 6.4: legacy "keyAuthorize" packet handler removed — q3now never
+	// Phase 6.4: legacy "keyAuthorize" packet handler removed — Wired never
 	// talks to the id authorize server, so any such packet is unsolicited.
 
 	// global MOTD from id
@@ -2673,7 +2673,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		if ( NET_CompareAdr( from, &clc.serverAddress ) ) {
 			s = MSG_ReadString( msg );
 			Q_strncpyz( clc.serverMessage, s, sizeof( clc.serverMessage ) );
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s", s );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "%s", s );
 			return qtrue;
 		}
 		return qfalse;
@@ -2691,7 +2691,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		return qfalse;
 	}
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Unknown connectionless packet command.\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Unknown connectionless packet command.\n" );
 	return qfalse;
 }
 
@@ -2742,7 +2742,7 @@ static void CL_CheckTimeout( void ) {
 		&& cls.state >= CA_CONNECTED && cls.state != CA_CINEMATIC
 		&& cls.realtime - clc.lastPacketTime > cl_timeout->integer * 1000 ) {
 		if ( ++cl.timeoutcount > 5 ) { // timeoutcount saves debugger
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "\nServer connection timed out.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "\nServer connection timed out.\n" );
 			Com_SetLastError( "Server connection timed out." );
 			if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
 				CL_FlushMemory();
@@ -2812,7 +2812,7 @@ static void CL_CheckUserinfo( void ) {
 
 		info = Cvar_InfoString( CVAR_USERINFO, &infoTruncated );
 		if ( strlen( info ) > MAX_USERINFO_LENGTH || infoTruncated ) {
-			COM_WARN( LOG_CAT_CLIENT, "WARNING: oversize userinfo, you might be not able to play on remote server!\n" );
+			COM_WARN( LOG_CH(ch_client), "WARNING: oversize userinfo, you might be not able to play on remote server!\n" );
 		}
 
 		CL_AddReliableCommand( va( "userinfo \"%s\"", info ), qfalse );
@@ -2971,7 +2971,7 @@ static void CL_CheckConnectError( void )
 	// Consume before CL_Disconnect so the error slot is clean on retry.
 	WN_ClientClearError();
 
-	COM_WARN( LOG_CAT_CLIENT, "Connect failed: %s\n", msg );
+	COM_WARN( LOG_CH(ch_client), "Connect failed: %s\n", msg );
 	Com_SetLastError( "%s", msg );
 	CL_Disconnect( qfalse );
 
@@ -3341,7 +3341,7 @@ CL_InitRef
 static void QDECL RI_Log( log_severity_t severity, const char *fmt, ... ) {
 	va_list args;
 	va_start( args, fmt );
-	Com_Logv( severity, LOG_CAT_RENDERER, fmt, args );
+	Com_Logv( severity, LOG_CH(ch_renderer), fmt, args );
 	va_end( args );
 }
 
@@ -3355,7 +3355,7 @@ static void CL_InitRef( void ) {
 
 	CL_InitGLimp_Cvars();
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "----- Initializing Renderer ----\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "----- Initializing Renderer ----\n" );
 
 #ifdef USE_RENDERER_DLOPEN
 
@@ -3487,7 +3487,7 @@ static void CL_InitRef( void ) {
 
 	ret = GetRefAPI( REF_API_VERSION, &rimp );
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "-------------------------------\n");
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "-------------------------------\n");
 
 	if ( !ret ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Couldn't initialize refresh" );
@@ -3521,7 +3521,7 @@ static void CL_SetChar_f( void ) {
 		Cvar_Set( "char", charBuf );
 	} else {
 		Cvar_VariableStringBuffer( "char", name, sizeof( name ) );
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "char is set to %s\n", name );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "char is set to %s\n", name );
 	}
 }
 
@@ -3534,7 +3534,7 @@ static void CL_SetSkin_f( void ) {
 		Cvar_Set( "skin", arg );
 	} else {
 		Cvar_VariableStringBuffer( "skin", name, sizeof( name ) );
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "skin is set to %s\n", name );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "skin is set to %s\n", name );
 	}
 }
 
@@ -3558,7 +3558,7 @@ static void CL_Video_f( void )
 
 	if( !clc.demoplaying )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "The %s command can only be used when playing back demos\n", Cmd_Argv( 0 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "The %s command can only be used when playing back demos\n", Cmd_Argv( 0 ) );
 		return;
 	}
 
@@ -3599,7 +3599,7 @@ static void CL_Video_f( void )
 
 		if ( i > 9999 )
 		{
-			COM_ERROR( LOG_CAT_CLIENT, "ERROR: no free file names to create video\n" );
+			COM_ERROR( LOG_CH(ch_client), "ERROR: no free file names to create video\n" );
 			return;
 		}
 
@@ -3726,12 +3726,12 @@ qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode,
 */
 static void CL_ModeList_f( void )
 {
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "\n" );
 	for ( int i = 0; i < s_numVidModes; i++ )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s\n", cl_vidModes[ i ].description );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%s\n", cl_vidModes[ i ].description );
 	}
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "\n" );
 }
 
 
@@ -3902,7 +3902,7 @@ CL_Init
 ====================
 */
 void CL_Init( void ) {
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "----- Client Initialization -----\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "----- Client Initialization -----\n" );
 
 	Con_Init();
 
@@ -3953,6 +3953,11 @@ void CL_Init( void ) {
 	cl_dlURL                  = clInitHandles[CLI_DLURL];
 	cl_reconnectArgs          = clInitHandles[CLI_RECONNECTARGS];
 	cl_wiredRconPassword      = clInitHandles[CLI_WIREDRCONPASSWORD];
+
+	// Per-game identity — populated by cgame's CG_Init from
+	// bg_public.h's GAMENAME_FOR_MASTER. Engine reads only this cvar when
+	// querying master servers; it is empty until cgame loads.
+	Cvar_Get( "cl_gamename", "", CVAR_ROM );
 
 #ifdef USE_CURL
 	{
@@ -4059,7 +4064,7 @@ void CL_Init( void ) {
 	Cvar_Get( "cl_guid", "", CVAR_USERINFO | CVAR_ROM | CVAR_PROTECTED );
 	CL_UpdateGUID( NULL, 0 );
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "----- Client Initialization Complete -----\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "----- Client Initialization Complete -----\n" );
 }
 
 
@@ -4077,10 +4082,10 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	if ( !( com_cl_running && com_cl_running->integer ) )
 		return;
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "----- Client Shutdown (%s) -----\n", finalmsg );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "----- Client Shutdown (%s) -----\n", finalmsg );
 
 	if ( recursive ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WARNING: Recursive CL_Shutdown()\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: Recursive CL_Shutdown()\n" );
 		return;
 	}
 	recursive = qtrue;
@@ -4151,7 +4156,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	memset( &cls, 0, sizeof( cls ) );
 	Key_SetCatcher( 0 );
 	CL_Characters_Shutdown();
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "-----------------------\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "-----------------------\n" );
 }
 
 
@@ -4210,7 +4215,7 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 	// if this isn't the correct protocol version, ignore it
 	int prot = atoi( Info_ValueForKey( infoString, "protocol" ) );
 	if ( prot != com_protocol->integer ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Different protocol info packet: %s\n", infoString );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Different protocol info packet: %s\n", infoString );
 		return;
 	}
 
@@ -4225,7 +4230,7 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 			{
 				cl_pinglist[i].time = 1;
 			}
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "ping time %dms from %s\n", cl_pinglist[i].time, NET_AdrToString( from ) );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "ping time %dms from %s\n", cl_pinglist[i].time, NET_AdrToString( from ) );
 
 			// save of info
 			Q_strncpyz( cl_pinglist[i].info, infoString, sizeof( cl_pinglist[i].info ) );
@@ -4275,7 +4280,7 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 	}
 
 	if ( i == MAX_OTHER_SERVERS ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "MAX_OTHER_SERVERS hit, dropping infoResponse\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "MAX_OTHER_SERVERS hit, dropping infoResponse\n" );
 		return;
 	}
 
@@ -4289,7 +4294,7 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 		if ( info[ len-1 ] == '\n' ) {
 			info[ len-1 ] = '\0';
 		}
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s: %s\n", NET_AdrToStringwPort( from ), info );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%s: %s\n", NET_AdrToStringwPort( from ), info );
 	}
 }
 
@@ -4359,11 +4364,11 @@ int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int ma
 			return qtrue;
 		}
 		// resend the request regularly
-		else if ( Sys_Milliseconds() - serverStatus->startTime > cl_serverStatusResendTime->integer ) {
-			serverStatus->print = qfalse;
-			serverStatus->pending = qtrue;
+		if ( Sys_Milliseconds() - serverStatus->startTime > cl_serverStatusResendTime->integer ) {
+			serverStatus->print		= qfalse;
+			serverStatus->pending	= qtrue;
 			serverStatus->retrieved = qfalse;
-			serverStatus->time = 0;
+			serverStatus->time		= 0;
 			serverStatus->startTime = Sys_Milliseconds();
 			NET_OutOfBandPrint( NS_CLIENT, &to, "getstatus" );
 			return qfalse;
@@ -4410,7 +4415,7 @@ static void CL_ServerStatusResponse( const netadr_t *from, msg_t *msg ) {
 	Com_sprintf(&serverStatus->string[len], sizeof(serverStatus->string)-len, "%s", s);
 
 	if (serverStatus->print) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Server settings:\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Server settings:\n");
 		// print cvars
 		while (*s) {
 			for (int i = 0; i < 2 && *s; i++) {
@@ -4428,10 +4433,10 @@ static void CL_ServerStatusResponse( const netadr_t *from, msg_t *msg ) {
 				}
 				info[l] = '\0';
 				if (i) {
-					Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s\n", info);
+					Com_Log( SEV_INFO, LOG_CH(ch_client), "%s\n", info);
 				}
 				else {
-					Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%-24s", info);
+					Com_Log( SEV_INFO, LOG_CH(ch_client), "%-24s", info);
 				}
 			}
 		}
@@ -4441,8 +4446,8 @@ static void CL_ServerStatusResponse( const netadr_t *from, msg_t *msg ) {
 	Com_sprintf(&serverStatus->string[len], sizeof(serverStatus->string)-len, "\\");
 
 	if (serverStatus->print) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "\nPlayers:\n");
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "num: score: ping: name:\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "\nPlayers:\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "num: score: ping: name:\n");
 	}
 	s = MSG_ReadStringLine( msg );
 	for (int i = 0; *s; s = MSG_ReadStringLine( msg ), i++) {
@@ -4465,7 +4470,7 @@ static void CL_ServerStatusResponse( const netadr_t *from, msg_t *msg ) {
 				s++;
 			else
 				s = "unknown";
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%-2d   %-3d    %-3d   %s\n", i, score, ping, s );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "%-2d   %-3d    %-3d   %s\n", i, score, ping, s );
 		}
 	}
 	len = strlen(serverStatus->string);
@@ -4486,7 +4491,7 @@ CL_LocalServers_f
 ==================
 */
 static void CL_LocalServers_f( void ) {
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Scanning for servers on the local network...\n");
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Scanning for servers on the local network...\n");
 
 	// reset the list, waiting for response
 	cls.numlocalservers = 0;
@@ -4541,7 +4546,7 @@ static void CL_GlobalServers_f( void ) {
 	int count, masterNum;
 	if ( (count = Cmd_Argc()) < 3 || (masterNum = atoi(Cmd_Argv(1))) < 0 || masterNum > MAX_MASTER_SERVERS )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "usage: globalservers <master# 0-%d> <protocol> [keywords]\n", MAX_MASTER_SERVERS );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: globalservers <master# 0-%d> <protocol> [keywords]\n", MAX_MASTER_SERVERS );
 		return;
 	}
 
@@ -4563,7 +4568,7 @@ static void CL_GlobalServers_f( void ) {
 		}
 
 		if ( !numAddress ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_GlobalServers_f: Error: No master server addresses.\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_GlobalServers_f: Error: No master server addresses.\n");
 		}
 		return;
 	}
@@ -4573,7 +4578,7 @@ static void CL_GlobalServers_f( void ) {
 
 	if ( !*masteraddress )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_GlobalServers_f: Error: No master server address given.\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_GlobalServers_f: Error: No master server address given.\n");
 		return;
 	}
 
@@ -4585,18 +4590,23 @@ static void CL_GlobalServers_f( void ) {
 
 	if ( i == 0 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_GlobalServers_f: Error: could not resolve address of master %s\n", masteraddress );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_GlobalServers_f: Error: could not resolve address of master %s\n", masteraddress );
 		return;
 	}
-	else if ( i == 2 )
+	if ( i == 2 )
 		to.port = BigShort( PORT_MASTER );
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Requesting servers from %s (%s)...\n", masteraddress, NET_AdrToStringwPort( &to ) );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Requesting servers from %s (%s)...\n", masteraddress, NET_AdrToStringwPort( &to ) );
 
 	cls.numglobalservers = -1;
 	cls.pingUpdateSource = AS_GLOBAL;
 
 	// Use the extended query for IPv6 masters
+	const char *gamename = Cvar_VariableString( "cl_gamename" );
+	if ( !*gamename ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client), "CL_GlobalServers_f: cl_gamename empty (cgame not initialized?); cannot query master.\n" );
+		return;
+	}
 #if FEAT_IPV6
 	if ( to.type == NA_IP6 || to.type == NA_MULTICAST6 )
 	{
@@ -4605,12 +4615,12 @@ static void CL_GlobalServers_f( void ) {
 		if ( v4enabled )
 		{
 			Com_sprintf( command, sizeof( command ), "getserversExt %s %s",
-				GAMENAME_FOR_MASTER, Cmd_Argv(2) );
+				gamename, Cmd_Argv(2) );
 		}
 		else
 		{
 			Com_sprintf( command, sizeof( command ), "getserversExt %s %s ipv6",
-				GAMENAME_FOR_MASTER, Cmd_Argv(2) );
+				gamename, Cmd_Argv(2) );
 		}
 	}
 	else
@@ -4783,7 +4793,7 @@ static void CL_Ping_f( void ) {
 	netadrtype_t	family = NA_UNSPEC;
 
 	if ( argc != 2 && argc != 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "usage: ping [-4|-6] <server>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: ping [-4|-6] <server>\n");
 		return;
 	}
 
@@ -4798,10 +4808,10 @@ static void CL_Ping_f( void ) {
 		else if( !strcmp( Cmd_Argv(1), "-6" ) )
 			family = NA_IP6;
 		else
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "warning: only -4 or -6 as address type understood.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "warning: only -4 or -6 as address type understood.\n" );
 #else
 		else
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "warning: only -4 as address type understood.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "warning: only -4 as address type understood.\n" );
 #endif
 
 		server = Cmd_Argv(2);
@@ -4944,11 +4954,11 @@ static void CL_ServerStatus_f( void ) {
 	{
 		if (cls.state != CA_ACTIVE || clc.demoplaying)
 		{
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Not connected to a server.\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Not connected to a server.\n" );
 #if FEAT_IPV6
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "usage: serverstatus [-4|-6] <server>\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: serverstatus [-4|-6] <server>\n" );
 #else
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "usage: serverstatus <server>\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: serverstatus <server>\n");
 #endif
 			return;
 		}
@@ -4972,10 +4982,10 @@ static void CL_ServerStatus_f( void ) {
 			else if ( !strcmp( Cmd_Argv(1), "-6" ) )
 				family = NA_IP6;
 			else
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "warning: only -4 or -6 as address type understood.\n" );
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "warning: only -4 or -6 as address type understood.\n" );
 #else
 			else
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "warning: only -4 as address type understood.\n" );
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "warning: only -4 as address type understood.\n" );
 #endif
 
 			server = Cmd_Argv(2);
@@ -5011,7 +5021,7 @@ qboolean CL_Download( const char *cmd, const char *pakname, qboolean autoDownloa
 {
 	if ( cl_dlURL->string[0] == '\0' )
 	{
-		COM_WARN( LOG_CAT_CLIENT, "cl_dlURL cvar is not set\n" );
+		COM_WARN( LOG_CH(ch_client), "cl_dlURL cvar is not set\n" );
 		return qfalse;
 	}
 
@@ -5026,7 +5036,7 @@ qboolean CL_Download( const char *cmd, const char *pakname, qboolean autoDownloa
 
 	if ( !Com_DL_ValidFileName( pakname ) )
 	{
-		COM_WARN( LOG_CAT_CLIENT, "invalid file name: '%s'.\n", pakname );
+		COM_WARN( LOG_CH(ch_client), "invalid file name: '%s'.\n", pakname );
 		return qfalse;
 	}
 
@@ -5041,7 +5051,7 @@ qboolean CL_Download( const char *cmd, const char *pakname, qboolean autoDownloa
 		s = va( "maps/%s.bsp", name );
 		if ( FS_FileIsInPAK( s, NULL, url ) )
 		{
-			COM_WARN( LOG_CAT_CLIENT, " map %s already exists in %s.pk3\n", name, url );
+			COM_WARN( LOG_CH(ch_client), " map %s already exists in %s.pk3\n", name, url );
 			return qfalse;
 		}
 	}
@@ -5059,7 +5069,7 @@ static void CL_Download_f( void )
 {
 	if ( Cmd_Argc() < 2 || *Cmd_Argv( 1 ) == '\0' )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "usage: %s <mapname>\n", Cmd_Argv( 0 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: %s <mapname>\n", Cmd_Argv( 0 ) );
 		return;
 	}
 

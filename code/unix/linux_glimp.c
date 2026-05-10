@@ -64,6 +64,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <X11/Xatom.h>
 
 #include <X11/XKBlib.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #if !defined(__sun)
 #include <X11/extensions/Xxf86dga.h>
@@ -192,7 +194,7 @@ static char *XLateKey( XKeyEvent *ev, int *key )
 
   XLookupRet = XLookupString(ev, (char*)buf, sizeof(buf), &keysym, 0);
 #ifdef KBD_DBG
-  Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "XLookupString ret: %d buf: %s keysym: %x\n", XLookupRet, buf, (int)keysym) ;
+  Com_Log( SEV_INFO, LOG_CH(ch_system), "XLookupString ret: %d buf: %s keysym: %x\n", XLookupRet, buf, (int)keysym) ;
 #endif
 
   if (!in_shiftedKeys->integer) {
@@ -200,7 +202,7 @@ static char *XLateKey( XKeyEvent *ev, int *key )
     ev->state = 0;
     XLookupRet = XLookupString(ev, (char*)bufnomod, sizeof(bufnomod), &keysym, 0);
 #ifdef KBD_DBG
-    Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "XLookupString (minus modifiers) ret: %d buf: %s keysym: %x\n", XLookupRet, buf, (int)keysym );
+    Com_Log( SEV_INFO, LOG_CH(ch_system), "XLookupString (minus modifiers) ret: %d buf: %s keysym: %x\n", XLookupRet, buf, (int)keysym );
 #endif
   } else {
     bufnomod[0] = '\0';
@@ -350,10 +352,10 @@ static char *XLateKey( XKeyEvent *ev, int *key )
   case XK_backslash: *key = '\\'; break;
 
   default:
-    //Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "unknown keysym: %08X\n", keysym );
+    //Com_Log( SEV_INFO, LOG_CH(ch_system), "unknown keysym: %08X\n", keysym );
     if (XLookupRet == 0)
     {
-	  Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Warning: XLookupString failed on KeySym %d\n", (int)keysym );
+	  Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Warning: XLookupString failed on KeySym %d\n", (int)keysym );
 
 	  buf[0] = '\0';
       return (char*)buf;
@@ -425,7 +427,7 @@ static void install_mouse_grab( void )
 	res = XGrabPointer( dpy, win, False, MOUSE_MASK, GrabModeAsync, GrabModeAsync, win, None, CurrentTime );
 	if ( res != GrabSuccess )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Warning: XGrabPointer() failed\n" );
+		//Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Warning: XGrabPointer() failed\n" );
 	}
 	else
 	{
@@ -469,7 +471,7 @@ static void install_kb_grab( void )
 	res = XGrabKeyboard( dpy, win, False, GrabModeAsync, GrabModeAsync, CurrentTime );
 	if ( res != GrabSuccess )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Warning: XGrabKeyboard() failed\n" );
+		//Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Warning: XGrabKeyboard() failed\n" );
 	}
 
 	XSync( dpy, False );
@@ -481,7 +483,7 @@ static void uninstall_mouse_grab( void )
 #ifdef HAVE_XF86DGA
 	if ( in_dgamouse->integer )
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "DGA Mouse - Disabling DGA DirectVideo\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "DGA Mouse - Disabling DGA DirectVideo\n" );
 		DGA_Mouse( qfalse );
 	}
 #endif /* HAVE_XF86DGA */
@@ -672,12 +674,12 @@ static int Sys_XTimeToSysTime( Time xtime )
 	// we get 7132, the formula handles the wrap safely
 	unsigned long xtime_aux,base_aux;
 	int test;
-//	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "sys_timeBase: %p\n", sys_timeBase);
-//	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "xtime: %p\n", xtime);
+//	Com_Log( SEV_INFO, LOG_CH(ch_system), "sys_timeBase: %p\n", sys_timeBase);
+//	Com_Log( SEV_INFO, LOG_CH(ch_system), "xtime: %p\n", xtime);
 	xtime_aux = 500; // 500 ms after wrap
 	base_aux = 0x3df3b63f; // the base a few seconds before wrap
 	test = xtime_aux - (unsigned long)(base_aux*1000);
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "xtime wrap test: %d\n", test);
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "xtime wrap test: %d\n", test);
 #endif
 
 	// some X servers (like suse 8.1's) report weird event times
@@ -728,7 +730,7 @@ void HandleEvents( void )
 			break;
 
 		case KeyPress:
-			// Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "^2K+^7 %08X\n", event.xkey.keycode );
+			// Com_Log( SEV_INFO, LOG_CH(ch_system), "^2K+^7 %08X\n", event.xkey.keycode );
 			t = Sys_XTimeToSysTime( event.xkey.time );
 			if ( event.xkey.keycode == 0x31 )
 			{
@@ -784,7 +786,7 @@ void HandleEvents( void )
 
 			t = Sys_XTimeToSysTime( event.xkey.time );
 #if 0
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "^5K-^7 %08X %s\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "^5K-^7 %08X %s\n",
 				event.xkey.keycode,
 				X11_PendingInput()?"pending":"");
 #endif
@@ -873,7 +875,7 @@ void HandleEvents( void )
 		case CreateNotify:
 			win_x = event.xcreatewindow.x;
 			win_y = event.xcreatewindow.y;
-			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "CreateNotify: x=%i, y=%i\n", win_x, win_y );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "CreateNotify: x=%i, y=%i\n", win_x, win_y );
 			break;
 
 		case ConfigureNotify:
@@ -881,7 +883,7 @@ void HandleEvents( void )
 			win_x = event.xconfigure.x;
 			win_y = event.xconfigure.y;
 
-			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "ConfigureNotify: gw_minimized=%i, created=%i, exposed=%i, x=%i, y=%i\n",
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "ConfigureNotify: gw_minimized=%i, created=%i, exposed=%i, x=%i, y=%i\n",
 				gw_minimized, window_created, window_exposed, win_x, win_y );
 
 			if ( !glw_state.cdsFullscreen && window_created && !gw_minimized && window_exposed )
@@ -912,10 +914,10 @@ void HandleEvents( void )
 		case FocusOut:
 			if ( event.type == FocusIn ) {
 				gw_active = qtrue;
-				Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "FocusIn\n" );
+				Com_Log( SEV_DEBUG, LOG_CH(ch_system), "FocusIn\n" );
 			} else {
 				gw_active = qfalse;
-				Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "FocusOut\n" );
+				Com_Log( SEV_DEBUG, LOG_CH(ch_system), "FocusOut\n" );
 			}
 			Key_ClearStates();
 			break;
@@ -1037,7 +1039,7 @@ qboolean BuildGammaRampTable( unsigned char *red, unsigned char *green, unsigned
 		case 2048: shift = 3; break;
 		case 4096: shift = 4; break;
 		default:
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Unsupported gamma ramp size: %d\n", gammaRampSize );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Unsupported gamma ramp size: %d\n", gammaRampSize );
 		return qfalse;
 	};
 	
@@ -1255,7 +1257,7 @@ static rserr_t GLW_StartDriverAndSetMode( int mode, const char *modeFS, qboolean
 	
 	if ( fullscreen && in_nograb->integer )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Fullscreen not allowed with in_nograb 1\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Fullscreen not allowed with in_nograb 1\n");
 		Cvar_Set( "r_fullscreen", "0" );
 		fullscreen = qfalse;
 	}
@@ -1265,15 +1267,15 @@ static rserr_t GLW_StartDriverAndSetMode( int mode, const char *modeFS, qboolean
 	switch ( err )
 	{
 	case RSERR_INVALID_FULLSCREEN:
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WARNING: fullscreen unavailable in this mode\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...WARNING: fullscreen unavailable in this mode\n" );
 		return err;
 
 	case RSERR_INVALID_MODE:
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WARNING: could not set the given mode (%d)\n", mode );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...WARNING: could not set the given mode (%d)\n", mode );
 		return err;
 
 	case RSERR_FATAL_ERROR:
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...WARNING: couldn't open the X display\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...WARNING: couldn't open the X display\n" );
 		return err;
 
 	default:
@@ -1382,7 +1384,7 @@ static XVisualInfo *GL_SelectVisual( int colorbits, int depthbits, int stencilbi
 		if ( !visinfo )
 			continue;
 
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Using %d/%d/%d Color bits, %d depth, %d stencil display.\n", 
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Using %d/%d/%d Color bits, %d depth, %d stencil display.\n", 
 			attrib[ATTR_RED_IDX], attrib[ATTR_GREEN_IDX], attrib[ATTR_BLUE_IDX],
 			attrib[ATTR_DEPTH_IDX], attrib[ATTR_STENCIL_IDX]);
 
@@ -1512,14 +1514,14 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 		}
 	}
 #endif
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Initializing display\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "Initializing display\n" );
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...setting mode %d:", mode );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "...setting mode %d:", mode );
 
 	if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect,
 		mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " invalid mode\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), " invalid mode\n" );
 		return RSERR_INVALID_MODE;
 	}
 
@@ -1528,9 +1530,9 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 	actualRate = r_displayRefresh->integer;
 
 	if ( actualRate )
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " %d %d @%iHz\n", actualWidth, actualHeight, actualRate );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), " %d %d @%iHz\n", actualWidth, actualHeight, actualRate );
 	else
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, " %d %d\n", actualWidth, actualHeight );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), " %d %d\n", actualWidth, actualHeight );
 
 	if ( glw_state.randr_ext ) // try randr first
 	{
@@ -1545,7 +1547,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 		if ( fullscreen )
 			VidMode_SetMode( &actualWidth, &actualHeight, &actualRate );
 		else
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "XFree86-VidModeExtension: Ignored on non-fullscreen\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "XFree86-VidModeExtension: Ignored on non-fullscreen\n" );
 	}
 
 	colorbits = r_colorbits->integer;
@@ -1581,7 +1583,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 	if ( !visinfo )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Couldn't get a visual\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Couldn't get a visual\n" );
 		return RSERR_INVALID_MODE;
 	}
 
@@ -1713,14 +1715,14 @@ void GLimp_InitGamma( glconfig_t *config )
 
 	if ( glw_state.randr_gamma )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using xrandr gamma extension\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...using xrandr gamma extension\n" );
 		config->deviceSupportsGamma = qtrue;
 		return;
 	}
 
 	if ( glw_state.vidmode_gamma )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using vidmode gamma extension\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...using vidmode gamma extension\n" );
 		config->deviceSupportsGamma = qtrue;
 		return;
 	}
@@ -1739,10 +1741,10 @@ static int qXErrorHandler( Display *dpy, XErrorEvent *ev )
 	static char buf[1024];
 
 	XGetErrorText( dpy, ev->error_code, buf, sizeof( buf ) );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "X Error of failed request: %s\n", buf) ;
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  Major opcode of failed request: %d\n", ev->request_code );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  Minor opcode of failed request: %d\n", ev->minor_code );
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  Serial number of failed request: %d\n", (int)ev->serial );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "X Error of failed request: %s\n", buf) ;
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "  Major opcode of failed request: %d\n", ev->request_code );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "  Minor opcode of failed request: %d\n", ev->minor_code );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "  Serial number of failed request: %d\n", (int)ev->serial );
 
 #ifdef DEBUG
 	raise( SIGABRT );
@@ -1802,7 +1804,7 @@ static qboolean GLW_LoadOpenGL( const char *name )
 
 			if ( r_mode->integer != 3 || ( fullscreen && atoi( r_modeFullscreen->string ) != 3 ) )
 			{
-				Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
+				Com_Log( SEV_INFO, LOG_CH(ch_system), "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
 
 				if ( GLW_StartDriverAndSetMode( 3, "", fullscreen, qfalse /* vulkan */ ) != RSERR_OK )
 				{
@@ -1886,13 +1888,13 @@ void GLimp_Init( glconfig_t *config )
 
 	if ( qglXSwapIntervalEXT || qglXSwapIntervalMESA || qglXSwapIntervalSGI )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...using GLX_EXT_swap_control\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...using GLX_EXT_swap_control\n" );
 		r_swapInterval->onChange = GLW_SwapIntervalChanged;
 		GLW_SwapIntervalChanged( r_swapInterval );
 	}
 	else
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "...GLX_EXT_swap_control not found\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "...GLX_EXT_swap_control not found\n" );
 	}
 
 	Key_ClearStates();
@@ -2021,7 +2023,7 @@ void IN_Restart_f( void );
 
 void IN_Init( void )
 {
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "\n------- Input Initialization -------\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "\n------- Input Initialization -------\n" );
 
 	// mouse variables
 	in_mouse = Cvar_Get( "in_mouse", "1", CVAR_ARCHIVE );
@@ -2054,7 +2056,7 @@ void IN_Init( void )
 	Cmd_AddCommand( "minimize", IN_Minimize );
 	Cmd_AddCommand( "in_restart", IN_Restart_f );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "------------------------------------\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "------------------------------------\n" );
 }
 
 
@@ -2221,7 +2223,7 @@ void Sys_SetClipboardData( const char *text )
 	   data to any future SelectionRequest events. The simplest portable
 	   approach is to store the string on the window as a property and
 	   become the selection owner — consumers retrieve the property via
-	   XConvertSelection.  For q3now's use (round-trip within the engine),
+	   XConvertSelection.  For Wired's use (round-trip within the engine),
 	   setting XA_CUT_BUFFER0 covers the common "paste into other client"
 	   case on most X servers. */
 	XStoreBytes( dpy, text, (int)strlen( text ) );

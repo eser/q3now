@@ -398,7 +398,7 @@ typedef struct {
 
 typedef struct {
 	qboolean		active;
-	
+
 	textureBundle_t	bundle[NUM_TEXTURE_BUNDLES];
 
 	unsigned		stateBits;					// GLS_xxxx mask
@@ -484,8 +484,8 @@ typedef struct shader_s {
 	qboolean	multitextureEnv;		// if shader has multitexture stage(s)
 
 	cullType_t	cullType;				// CT_FRONT_SIDED, CT_BACK_SIDED, or CT_TWO_SIDED
-	qboolean	polygonOffset;			// set for decals and other items that must be offset 
-	
+	qboolean	polygonOffset;			// set for decals and other items that must be offset
+
 	unsigned	noMipMaps:1;			// for console fonts, 2D elements, etc.
 	unsigned	noPicMip:1;				// for images that must always be full resolution
 	unsigned	noLightScale:1;
@@ -729,7 +729,7 @@ typedef enum {
 	SF_IQM,
 #endif // FEAT_IQM
 	SF_FLARE,
-	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
+	SF_ENTITY,				// surface kinds determined per refEntity_t.reType
 
 	SF_NUM_SURFACE_TYPES,
 	SF_MAX = 0x7fffffff			// ensures that sizeof( surfaceType_t ) == sizeof( int )
@@ -976,7 +976,7 @@ typedef struct mnode_s {
 
 	// node specific
 	cplane_t	*plane;
-	struct mnode_s	*children[2];	
+	struct mnode_s	*children[2];
 
 	// leaf specific
 	int			cluster;
@@ -1067,7 +1067,7 @@ typedef struct model_s {
 
 void		R_ModelInit (void);
 model_t		*R_GetModelByHandle( qhandle_t hModel );
-int			R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame, 
+int			R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame,
 					 float frac, const char *tagName );
 void		R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs );
 #if FEAT_IQM
@@ -1171,7 +1171,7 @@ typedef struct glstatic_s {
 typedef struct {
 	int		c_surfaces, c_shaders, c_vertexes, c_indexes, c_totalIndexes;
 	float	c_overDraw;
-	
+
 	int		c_dlightVertexes;
 	int		c_dlightIndexes;
 
@@ -1231,7 +1231,7 @@ typedef struct {
 	qboolean screenShotJPGsilent;
 	qboolean screenShotBMPsilent;
 	videoFrameCommand_t	vcmd;	// avi capture
-	
+
 	qboolean throttle;
 	qboolean drawConsole;
 	qboolean doneShadows;
@@ -1248,7 +1248,7 @@ typedef struct {
 typedef struct drawSurfsCommand_s drawSurfsCommand_t;
 
 /*
-** trGlobals_t 
+** trGlobals_t
 **
 ** Most renderer globals are defined here.
 ** backend functions should never modify any of these fields,
@@ -1303,7 +1303,7 @@ typedef struct {
 	int						maxPropLightmaps;		/* allocated capacity of propLightmaps[] */
 
 	float					lightstyleValues[64];	// per-style animation intensity [0,1]
-	char					lightstylePatterns[64][64]; // per-style pattern string (Faz 1+, max LIGHTSTYLE_PATTERN_MAX)
+	char					lightstylePatterns[64][64]; // per-style pattern string (Phase 1+, max LIGHTSTYLE_PATTERN_MAX)
 
 	qboolean				mergeLightmaps;
 	float					lightmapOffset[2];	// current shader lightmap offset
@@ -1320,7 +1320,8 @@ typedef struct {
 
 	float					identityLight;		// 1.0 / ( 1 << overbrightBits )
 	int						identityLightByte;	// identityLight * 255
-	int						overbrightBits;		// r_overbrightBits->integer, but set to 0 if no hw gamma
+	int						overbrightBits;		// based on r_brightness->value, but set to 0 if no hw gamma
+	int                     mapOverbrightBits;  // based on r_mapBrightness->value
 
 	orientationr_t			or;					// for current entity
 
@@ -1419,12 +1420,7 @@ extern Vk_World		vk_world;		// this data is cleared during ref re-init
 //
 extern cvar_t	*r_flareSize;
 extern cvar_t	*r_flareFade;
-extern cvar_t	*r_flareCoeff;			// coefficient for the flare intensity falloff function. 
-
-extern cvar_t	*r_railWidth;
-extern cvar_t	*r_railCoreWidth;
-extern cvar_t	*r_railSegmentLength;
-extern cvar_t	*r_railGPU;
+extern cvar_t	*r_flareCoeff;			// coefficient for the flare intensity falloff function.
 
 extern cvar_t	*r_znear;				// near Z clip plane
 extern cvar_t	*r_zproj;				// z distance of projection plane
@@ -1481,6 +1477,7 @@ extern cvar_t	*r_ssao;
 #endif
 #if FEAT_TONEMAP
 extern cvar_t	*r_tonemap;
+extern cvar_t	*r_tonemapExposure;
 #endif
 #if FEAT_COLOR_GRADING
 extern cvar_t	*r_colorGrading;
@@ -1554,7 +1551,7 @@ extern	cvar_t	*r_subdivisions;
 extern	cvar_t	*r_lodCurveError;
 extern	cvar_t	*r_skipBackEnd;
 
-extern	cvar_t	*r_greyscale;
+extern	cvar_t	*r_saturation;
 extern	cvar_t	*r_dither;
 extern	cvar_t	*r_presentBits;
 #if FEAT_DEPTH_CLAMP
@@ -1563,11 +1560,10 @@ extern	cvar_t	*r_depthClamp;
 
 extern	cvar_t	*r_ignoreGLErrors;
 
-extern	cvar_t	*r_overBrightBits;
-extern	cvar_t	*r_mapOverBrightBits;
 extern	cvar_t	*r_brightness;
 extern	cvar_t	*r_mapBrightness;
-extern	cvar_t	*r_mapGreyScale;
+extern	cvar_t	*r_mapSaturation;
+extern	cvar_t	*r_lightmapSaturation;
 
 extern	cvar_t	*r_debugSurface;
 extern	cvar_t	*r_simpleMipMaps;
@@ -1589,12 +1585,10 @@ void R_RenderView( const viewParms_t *parms );
 void R_AddMD3Surfaces( trRefEntity_t *e );
 void R_AddNullModelSurfaces( trRefEntity_t *e );
 void R_AddBeamSurfaces( trRefEntity_t *e );
-void R_AddRailSurfaces( trRefEntity_t *e, qboolean isUnderwater );
-void R_AddLightningBoltSurfaces( trRefEntity_t *e );
 
 void R_AddPolygonSurfaces( void );
 
-void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader, 
+void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader,
 					 int *fogNum, int *dlightMap );
 
 void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader, int fogIndex, int dlightMap );
@@ -1729,7 +1723,7 @@ void		RE_RemapShader(const char *oldShader, const char *newShader, const char *t
 // tr_surface.c
 //
 #ifdef USE_VBO_GRID
-void		RB_SurfaceGridEstimate( srfGridMesh_t *cv, int *numVertexes, int *numIndexes ); 
+void		RB_SurfaceGridEstimate( srfGridMesh_t *cv, int *numVertexes, int *numIndexes );
 #endif
 
 /*
@@ -1747,7 +1741,7 @@ typedef struct stageVars
 	vec2_t		*texcoordPtr[NUM_TEXTURE_BUNDLES];
 } stageVars_t;
 
-typedef struct shaderCommands_s 
+typedef struct shaderCommands_s
 {
 #pragma pack(push,16)
 	glIndex_t	indexes[SHADER_MAX_INDEXES] QALIGN(16);
@@ -1938,6 +1932,52 @@ void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *vert
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
+void RE_AddRibbonToScene( const ribbonDesc_t *desc );
+void RE_AddBeamToScene( const beamDesc_t *desc );
+void RE_AddSpriteToScene( const spriteDesc_t *desc );
+void RE_EmitParticles( const emitterDesc_t *desc );
+void RE_AddDecalToScene( const decalDesc_t *desc );
+void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls );
+
+// vk.c — primitive ribbon backend
+void vk_init_ribbon( void );
+void vk_shutdown_ribbon( void );
+void RB_DrawRibbons( void );
+
+// vk.c — primitive sprite backend
+void vk_init_sprite( void );
+void vk_shutdown_sprite( void );
+void RB_DrawSprites( void );
+
+// vk.c — primitive beam backend (engine-managed pool, mixed
+// transient + persistent slots with lifetime fade).
+void vk_init_beam( void );
+void vk_shutdown_beam( void );
+void RB_DrawBeams( void );
+
+// vk.c — primitive particle backend (compute + graphics)
+void vk_init_particle( void );
+void vk_shutdown_particle( void );
+void RB_RunParticleCompute( void );
+void RB_DrawParticles( void );
+
+// vk.c — phase 5: write one slot of the per-class sampler array
+// (binding 3 of the particle render descriptor set) on every per-
+// frame descriptor set. Called from RE_RegisterParticleClass once
+// the resolved image is in hand. Encapsulates the qvkUpdateDescriptorSets
+// call which would otherwise require exposing the static qvk*
+// function pointer from vk.c.
+struct image_s;
+void vk_particle_set_class_image( int handle, struct image_s *image );
+
+// vk.c — phase 5: eager populate the per-class sampler array
+// (binding 3) with tr.whiteImage in every slot. Called once from
+// R_Init AFTER R_InitImages creates tr.whiteImage. Required because
+// vk_init_particle runs at vk_initialize-time, before
+// R_InitImages, when tr.whiteImage is still NULL. Subsequent
+// per-class slot writes by RE_RegisterParticleClass overwrite
+// individual slots.
+void vk_init_particle_textures( void );
 #if FEAT_CORONA
 void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
 void RB_AddCoronaFlares( void );
@@ -2251,15 +2291,5 @@ extern void VBO_Flush( void );
 #endif
 
 int R_GetLightmapCoords( const int lightmapIndex, float *x, float *y );
-
-// vk.c — compute shader infrastructure
-qboolean vk_init_compute( void );
-void vk_shutdown_compute( void );
-
-// tr_scene.c — GPU rail trail params
-void RE_AddRailTrailParams( const railTrailParams_t *params );
-
-// tr_surface.c — GPU rail trail draw
-void RB_DrawRailTrailGPU( int slot, int numSegments );
 
 #endif //TR_LOCAL_H

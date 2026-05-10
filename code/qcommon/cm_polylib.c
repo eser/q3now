@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 
 #include "cm_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_collision, "collision" );
 
 
 // counters are only bumped when running single threaded,
@@ -37,7 +39,7 @@ static int c_winding_points;
 static void pw(winding_t *w)
 {
 	for ( int i = 0 ; i < w->numpoints ; i++ )
-		Com_Log( SEV_INFO, LOG_CAT_COLLISION, "%f, %f, %f\n", w->p[i][0], w->p[i][1], w->p[i][2] );
+		Com_Log( SEV_INFO, LOG_CH(ch_collision), "%f, %f, %f\n", w->p[i][0], w->p[i][1], w->p[i][2] );
 }
 #endif
 

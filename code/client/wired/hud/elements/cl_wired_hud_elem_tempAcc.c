@@ -77,8 +77,10 @@ void CG_ModernHUDElementTempAccRoutine( void *context ) {
 			vec4_t color = { 1, 1, 1, 1 };
 
 			// fade alpha based on time since last update
+			// NOLINTBEGIN(bugprone-integer-division) — fadeTime is a frame-tick count; integer halving is correct for time-period thresholds
 			if ( wiredHud->time - element->lastUpdateTime > fadeTime / 2 ) {
 				float fadeProgress = (float)( wiredHud->time - element->lastUpdateTime - fadeTime / 2 ) / (float)( fadeTime / 2 );
+			// NOLINTEND(bugprone-integer-division)
 				if ( fadeProgress > 1.0f ) fadeProgress = 1.0f;
 				color[3] = 1.0f - fadeProgress;
 			}

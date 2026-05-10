@@ -346,6 +346,45 @@ void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float inten
 }
 
 
+/*
+=====================
+Primitive submission stubs (wired/render).
+
+Placeholders until the primitive pipeline lands. Empty bodies
+keep rendering output unchanged from today; cgame may call
+them safely.
+=====================
+*/
+void RE_AddRibbonToScene( const ribbonDesc_t *desc ) {
+	// TODO: implement primitive ribbon pipeline.
+	(void)desc;
+}
+
+void RE_AddBeamToScene( const beamDesc_t *desc ) {
+	// TODO: implement primitive beam pipeline.
+	(void)desc;
+}
+
+void RE_AddSpriteToScene( const spriteDesc_t *desc ) {
+	// TODO: implement primitive sprite pipeline.
+	(void)desc;
+}
+
+void RE_EmitParticles( const emitterDesc_t *desc ) {
+	// TODO: implement particle system.
+	(void)desc;
+}
+
+void RE_AddDecalToScene( const decalDesc_t *desc ) {
+	// TODO: implement decal projection.
+	(void)desc;
+}
+
+void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls ) {
+	// GL renderer does not yet implement the particle subsystem.
+	(void)handle; (void)cls;
+}
+
 
 /*
 =====================

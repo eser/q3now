@@ -3,6 +3,8 @@
 #include "../../client.h"
 #include "cl_wired_hud_compat.h"
 #include "cl_wired_hud_private.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
 
@@ -169,7 +171,7 @@ static qboolean WhudParseFamilyIndex( const char *name, char *familyBuf, int fam
 	while ( *p >= '0' && *p <= '9' ) { index = index * 10 + ( *p - '0' ); p++; }
 
 	if ( index < 1 || index > 16 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: family index out of range in '%s'\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredHud: family index out of range in '%s'\n", name );
 		return qfalse;
 	}
 
@@ -215,7 +217,7 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 	int familyIndex;
 
 	if ( wired_hudElementCount >= WIRED_HUD_MAX_ACTIVE_ELEMENTS ) {
-		COM_WARN( LOG_CAT_UI, "WiredHud: too many active elements\n" );
+		COM_WARN( LOG_CH(ch_ui), "WiredHud: too many active elements\n" );
 		return qfalse;
 	}
 
@@ -231,7 +233,7 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 			}
 		}
 		if ( !fam ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: unknown element '%s'\n", name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredHud: unknown element '%s'\n", name );
 			return qfalse;
 		}
 		ctx = fam->createIndexed( config, familyIndex );
@@ -246,7 +248,7 @@ qboolean WiredHud_CreateElement( const char *name, const modernhudConfig_t *conf
 		elem->active     = qtrue;
 		return qtrue;
 	} else {
-		Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredHud: unknown element '%s'\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredHud: unknown element '%s'\n", name );
 		return qfalse;
 	}
 	if ( !ctx ) return qfalse;

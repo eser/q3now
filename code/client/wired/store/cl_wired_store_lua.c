@@ -3,6 +3,8 @@
 #include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 #include "cl_wired_store.h"
 #include "../ui/cl_wired_ui.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #if FEAT_WIRED_UI
 
@@ -143,7 +145,7 @@ static const luaL_Reg wiredStoreLib[] = {
 static void WiredStoreLua_Register( lua_State *L ) {
 	luaL_newlib( L, wiredStoreLib );
 	lua_setglobal( L, "store" );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredCore/Scripting: store module registered\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredCore/Scripting: store module registered\n" );
 }
 
 void WiredStoreLua_Init( void ) {

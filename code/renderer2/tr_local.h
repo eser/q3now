@@ -398,7 +398,7 @@ typedef enum
 
 typedef struct {
 	qboolean		active;
-	
+
 	textureBundle_t	bundle[NUM_TEXTURE_BUNDLES];
 
 	waveForm_t		rgbWave;
@@ -486,7 +486,7 @@ typedef struct shader_s {
 	qboolean	isPortal;
 
 	cullType_t	cullType;				// CT_FRONT_SIDED, CT_BACK_SIDED, or CT_TWO_SIDED
-	qboolean	polygonOffset;			// set for decals and other items that must be offset 
+	qboolean	polygonOffset;			// set for decals and other items that must be offset
 	qboolean	noMipMaps;				// for console fonts, 2D elements, etc.
 	qboolean	noPicMip;				// for images that must always be full resolution
 
@@ -498,7 +498,7 @@ typedef struct shader_s {
 	deformStage_t	deforms[MAX_SHADER_DEFORMS];
 
 	int			numUnfoggedPasses;
-	shaderStage_t	*stages[MAX_SHADER_STAGES];		
+	shaderStage_t	*stages[MAX_SHADER_STAGES];
 
 	int	lightingStage;
 
@@ -534,7 +534,7 @@ enum
 	ATTR_INDEX_POSITION2      = 10,
 	ATTR_INDEX_TANGENT2       = 11,
 	ATTR_INDEX_NORMAL2        = 12,
-	
+
 	ATTR_INDEX_COUNT          = 13
 };
 
@@ -907,7 +907,7 @@ typedef enum {
 	SF_IQM,
 #endif // FEAT_IQM
 	SF_FLARE,
-	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
+	SF_ENTITY,				// surface kinds determined per refEntity_t.reType
 	SF_VAO_MDVMESH,
 #if FEAT_IQM
 	SF_VAO_IQM,
@@ -985,7 +985,7 @@ typedef struct srfBspSurface_s
 	// vertexes
 	int             numVerts;
 	srfVert_t      *verts;
-	
+
 	// SF_GRID specific variables after here
 
 	// lod information, which may be different
@@ -1120,7 +1120,7 @@ SHADOWS
 typedef struct pshadow_s
 {
 	float sort;
-	
+
 	int    numEntities;
 	int    entityNums[8];
 	vec3_t entityOrigins[8];
@@ -1186,7 +1186,7 @@ typedef struct mnode_s {
 
 	// node specific
 	cplane_t	*plane;
-	struct mnode_s	*children[2];	
+	struct mnode_s	*children[2];
 
 	// leaf specific
 	int			cluster;
@@ -1355,7 +1355,7 @@ typedef struct model_s {
 
 void		R_ModelInit (void);
 model_t		*R_GetModelByHandle( qhandle_t hModel );
-int			R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame, 
+int			R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame,
 					 float frac, const char *tagName );
 void		R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs );
 #if FEAT_IQM
@@ -1483,7 +1483,7 @@ typedef struct {
 	qboolean textureFloat;
 	textureCompressionRef_t textureCompression;
 	qboolean swizzleNormalmap;
-	
+
 	qboolean framebufferMultisample;
 	qboolean framebufferBlit;
 
@@ -1499,7 +1499,7 @@ typedef struct {
 	int		c_surfaces, c_shaders, c_vertexes, c_indexes, c_totalIndexes;
 	int     c_surfBatches;
 	float	c_overDraw;
-	
+
 	int		c_vaoBinds;
 	int		c_vaoVertexes;
 	int		c_vaoIndexes;
@@ -1550,7 +1550,7 @@ typedef struct {
 } backEndState_t;
 
 /*
-** trGlobals_t 
+** trGlobals_t
 **
 ** Most renderer globals are defined here.
 ** backend functions should never modify any of these fields,
@@ -1589,7 +1589,7 @@ typedef struct {
 	image_t					*identityLightImage;	// full of tr.identityLightByte
 
 	image_t                 *shadowCubemaps[MAX_DLIGHTS];
-	
+
 
 	image_t					*renderImage;
 	image_t					*sunRaysImage;
@@ -1606,7 +1606,7 @@ typedef struct {
 	image_t                 *screenSsaoImage;
 	image_t					*hdrDepthImage;
 	image_t                 *renderCubeImage;
-	
+
 	image_t					*textureDepthImage;
 
 	FBO_t					*renderFbo;
@@ -1677,7 +1677,8 @@ typedef struct {
 
 	float					identityLight;		// 1.0 / ( 1 << overbrightBits )
 	int						identityLightByte;	// identityLight * 255
-	int						overbrightBits;		// r_overbrightBits->integer, but set to 0 if no hw gamma
+	int						overbrightBits;		// based on r_brightness->value, but set to 0 if no hw gamma
+	int                     mapOverbrightBits;  // based on r_mapBrightness->value
 
 	orientationr_t			or;					// for current entity
 
@@ -1767,10 +1768,6 @@ extern cvar_t	*r_flareFade;
 // coefficient for the flare intensity falloff function.
 #define FLARE_STDCOEFF "150"
 extern cvar_t	*r_flareCoeff;
-
-extern cvar_t	*r_railWidth;
-extern cvar_t	*r_railCoreWidth;
-extern cvar_t	*r_railSegmentLength;
 
 extern cvar_t	*r_ignore;				// used for debugging anything
 
@@ -1915,8 +1912,6 @@ extern	cvar_t	*r_greyscale;
 
 extern	cvar_t	*r_ignoreGLErrors;
 
-extern	cvar_t	*r_overBrightBits;
-extern	cvar_t	*r_mapOverBrightBits;
 extern	cvar_t	*r_brightness;
 extern	cvar_t	*r_mapBrightness;
 
@@ -1969,15 +1964,13 @@ void R_RenderCubemapSide( int cubemapIndex, int cubemapSide, qboolean subscene )
 void R_AddMD3Surfaces( trRefEntity_t *e );
 void R_AddNullModelSurfaces( trRefEntity_t *e );
 void R_AddBeamSurfaces( trRefEntity_t *e );
-void R_AddRailSurfaces( trRefEntity_t *e, qboolean isUnderwater );
-void R_AddLightningBoltSurfaces( trRefEntity_t *e );
 
 void R_AddPolygonSurfaces( void );
 
-void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader, 
+void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader,
 					 int *fogNum, int *dlightMap, int *pshadowMap );
 
-void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader, 
+void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader,
 				   int fogIndex, int dlightMap, int pshadowMap, int cubemap );
 
 void R_CalcTexDirs(vec3_t sdir, vec3_t tdir, const vec3_t v1, const vec3_t v2,
@@ -2121,7 +2114,7 @@ typedef struct stageVars
 	vec2_t		texcoords[NUM_TEXTURE_BUNDLES][SHADER_MAX_VERTEXES];
 } stageVars_t;
 
-typedef struct shaderCommands_s 
+typedef struct shaderCommands_s
 {
 	glIndex_t	indexes[SHADER_MAX_INDEXES] QALIGN(16);
 	vec4_t		xyz[SHADER_MAX_VERTEXES] QALIGN(16);
@@ -2352,6 +2345,12 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime );
 void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts, int num );
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
+void RE_AddRibbonToScene( const ribbonDesc_t *desc );
+void RE_AddBeamToScene( const beamDesc_t *desc );
+void RE_AddSpriteToScene( const spriteDesc_t *desc );
+void RE_EmitParticles( const emitterDesc_t *desc );
+void RE_AddDecalToScene( const decalDesc_t *desc );
+void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls );
 #if FEAT_CORONA
 void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
 void RB_AddCoronaFlares( void );

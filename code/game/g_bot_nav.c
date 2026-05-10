@@ -297,8 +297,8 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
     }
 
     /* ── Final waypoint reached ─────────────────────────────────────────── */
-    if ( bn->pathIdx >= bn->path.count ) {
-        /* Goal reached: hold position, clear path so next call resets it. */
+    if ( bn->pathIdx < 0 || bn->pathIdx >= bn->path.count ) {
+        /* Goal reached (or invalid index): hold position, clear path. */
         bn->path.count = 0;
         bn->steeringState = NAV_STEER_IDLE;
         /* result->failure stays qfalse — bot should decide a new goal. */
@@ -345,7 +345,7 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
     /* ── Enter OMC_TRANSIT when stepping onto an OMC source ─────────────── */
     if ( bn->steeringState != NAV_STEER_OMC_TRANSIT ) {
         int curIdx = bn->pathIdx;
-        if ( curIdx < bn->path.count &&
+        if ( curIdx >= 0 && curIdx < bn->path.count &&
              (bn->path.flags[curIdx] & NAV_PATHFLAG_OFFMESH_CON) ) {
             vec3_t toWp;
             VectorSubtract( bn->path.positions[curIdx], bs->origin, toWp );
@@ -382,9 +382,9 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
          bn->steeringState == NAV_STEER_CROUCH ) {
         int curIdx  = bn->pathIdx;
         int nextIdx = (curIdx + 1 < bn->path.count) ? curIdx + 1 : curIdx;
-        int curFlags  = (curIdx  < bn->path.count) ?
+        int curFlags  = (curIdx  >= 0 && curIdx  < bn->path.count) ?
                         trap_Nav_GetPolyAreaFlags( bn->path.polyrefs[curIdx] )  : 0;
-        int nextFlags = (nextIdx != curIdx) ?
+        int nextFlags = (nextIdx != curIdx && nextIdx >= 0) ?
                         trap_Nav_GetPolyAreaFlags( bn->path.polyrefs[nextIdx] ) : curFlags;
 
         bn->currentArea = curFlags;
@@ -403,6 +403,7 @@ void BotNav_MoveToGoal( bot_state_t *bs, bot_goal_t *goal,
     }
 
     /* ── Steer toward current waypoint ─────────────────────────────────── */
+    // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — pathIdx is bounded above and below by the guard at line 300; the analyzer can't follow the value across the OMC_TRANSIT block
     float *wp = bn->path.positions[bn->pathIdx];
 
     /* FIX-2: OMC approach — when next waypoint is an OMC source and bot is

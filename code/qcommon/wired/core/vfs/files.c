@@ -51,7 +51,7 @@ a terminating zero. "..", "\\", and ":" are explicitly illegal in qpaths to prev
 references outside the quake directory system.
 
 The "base path" is the path to the directory holding all the game directories and usually
-the executable.  It defaults to ".", but can be overridden with a "+set fs_installpath /opt/q3now"
+the executable.  It defaults to ".", but can be overridden with a "+set fs_installpath /opt/wired"
 command line to allow code debugging in a different directory.  Basepath cannot
 be modified at all after startup.  Any files that are created (demos, screenshots,
 etc) will be created relative to the base path, so base path should usually be writable.
@@ -225,12 +225,14 @@ static const unsigned pak_checksums[] = {
 //#define PRE_RELEASE_TADEMO
 
 #include "files_pack.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_filesystem, "filesystem" );
 
 #define MAX_ZPATH			256
 #define MAX_FILEHASH_SIZE	4096
 
 typedef struct {
-	char		*path;		// /opt/q3now
+	char		*path;		// /opt/wired
 	char		*gamedir;	// baseq3
 } directory_t;
 
@@ -277,6 +279,7 @@ typedef union qfile_gus {
 	void*		v;
 } qfile_gut;
 
+// NOLINTNEXTLINE(bugprone-tagged-union-member-count) — `unique` tracks ownership, not union variant; variant is implicit (file-type-dependent)
 typedef struct qfile_us {
 	qfile_gut	file;
 	qboolean	unique;
@@ -566,7 +569,7 @@ static qboolean FS_CreatePath( const char *OSPath ) {
 	// make absolutely sure that it can't back up the path
 	// FIXME: is c: allowed???
 	if ( FS_CheckDirTraversal( OSPath ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "WARNING: refusing to create relative path \"%s\"\n", OSPath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "WARNING: refusing to create relative path \"%s\"\n", OSPath );
 		return qtrue;
 	}
 
@@ -597,10 +600,10 @@ static void FS_CopyFile( const char *fromOSPath, const char *toOSPath ) {
 	size_t	len;
 	byte	*buf;
 
-	Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "copy %s to %s\n", fromOSPath, toOSPath );
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "copy %s to %s\n", fromOSPath, toOSPath );
 
 	if (strstr(fromOSPath, "journal.dat") || strstr(fromOSPath, "journaldata.dat")) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "Ignoring journal files\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "Ignoring journal files\n");
 		return;
 	}
 
@@ -828,12 +831,12 @@ fileHandle_t FS_SV_FOpenFileWrite( const char *filename ) {
 	FS_InitHandle( fd );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_SV_FOpenFileWrite: %s\n", ospath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_SV_FOpenFileWrite: %s\n", ospath );
 	}
 
 	FS_CheckFilenameIsNotAllowed( ospath, __func__, qtrue );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "writing to: %s\n", ospath );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "writing to: %s\n", ospath );
 
 	fd->handleFiles.file.o = Sys_FOpen( ospath, "wb" );
 	if ( !fd->handleFiles.file.o ) {
@@ -882,12 +885,12 @@ fileHandle_t FS_SV_FOpenFileAppend( const char *filename ) {
 	FS_InitHandle( fd );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_SV_FOpenFileAppend: %s\n", ospath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_SV_FOpenFileAppend: %s\n", ospath );
 	}
 
 	FS_CheckFilenameIsNotAllowed( ospath, __func__, qtrue );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "appending to: %s\n", ospath );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "appending to: %s\n", ospath );
 
 	fd->handleFiles.file.o = Sys_FOpen( ospath, "ab" );
 	if ( !fd->handleFiles.file.o ) {
@@ -943,7 +946,7 @@ int FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp ) {
 	ospath = FS_BuildOSPath( fs_homepath->string, filename, NULL );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_SV_FOpenFileRead (fs_homepath): %s\n", ospath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_SV_FOpenFileRead (fs_homepath): %s\n", ospath );
 	}
 
 	// SV files only ever land in fs_homepath; the basepath fallback was
@@ -984,7 +987,7 @@ void FS_SV_Rename( const char *from, const char *to ) {
 	to_ospath = FS_BuildOSPath( fs_homepath->string, to, NULL );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_SV_Rename: %s --> %s\n", from_ospath, to_ospath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_SV_Rename: %s --> %s\n", from_ospath, to_ospath );
 	}
 
 	if ( rename( from_ospath, to_ospath ) ) {
@@ -1017,7 +1020,7 @@ void FS_Rename( const char *from, const char *to ) {
 	to_ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, to );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_Rename: %s --> %s\n", from_ospath, to_ospath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_Rename: %s --> %s\n", from_ospath, to_ospath );
 	}
 
 	f = Sys_FOpen( from_ospath, "rb" );
@@ -1083,6 +1086,7 @@ static void FS_AddToHandleList( pack_t *pak )
 	}
 #endif
 	while ( hpaksCount >= MAX_CACHED_HANDLES ) {
+		// NOLINTNEXTLINE(clang-analyzer-core.NullDereference) — invariant: hpaksCount > 0 implies hhead != NULL
 		pack_t *pk = hhead->prev_h; // tail item
 #ifdef _DEBUG
 		if ( PACK_ZIP_HANDLE(pk) == NULL || pk->handleUsed != 0 ) {
@@ -1203,7 +1207,7 @@ fileHandle_t FS_FOpenFileWrite( const char *filename ) {
 	ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, filename );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_FOpenFileWrite: %s\n", ospath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_FOpenFileWrite: %s\n", ospath );
 	}
 
 	FS_CheckFilenameIsNotAllowed( ospath, __func__, qfalse );
@@ -1214,7 +1218,7 @@ fileHandle_t FS_FOpenFileWrite( const char *filename ) {
 
 	// enabling the following line causes a recursive function call loop
 	// when running with +set logfile 1 +set developer 1
-	//Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "writing to: %s\n", ospath );
+	//Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "writing to: %s\n", ospath );
 	fd->handleFiles.file.o = Sys_FOpen( ospath, "wb" );
 	if ( fd->handleFiles.file.o == NULL ) {
 		if ( FS_CreatePath( ospath ) ) {
@@ -1260,7 +1264,7 @@ fileHandle_t FS_FOpenFileAppend( const char *filename ) {
 	ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, filename );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_FOpenFileAppend: %s\n", ospath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_FOpenFileAppend: %s\n", ospath );
 	}
 
 	FS_CheckFilenameIsNotAllowed( ospath, __func__, qfalse );
@@ -1299,8 +1303,8 @@ qboolean FS_FilenameCompare( const char *s1, const char *s2 ) {
 	int		c1, c2;
 
 	do {
-		c1 = *s1++;
-		c2 = *s2++;
+		c1 = (byte)*s1++;
+		c2 = (byte)*s2++;
 
 		if ( c1 <= 'Z' && c1 >= 'A' )
 			c1 += ('a' - 'A');
@@ -1450,7 +1454,7 @@ static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pak
 			case 2: compName = "zstd"; break;
 			default: compName = "other"; break;
 		}
-		// Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "SW3Z_Open: '%s' entry=%d size=%d compression=%s\n",
+		// Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "SW3Z_Open: '%s' entry=%d size=%d compression=%s\n",
 		// 	pakFile->name, entryIdx, size, compName );
 	}
 
@@ -1494,7 +1498,7 @@ static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pak
 	}
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_FOpenFileRead: %s (found in '%s' [sw3z])\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_FOpenFileRead: %s (found in '%s' [sw3z])\n",
 			pakFile->name, pak->pakFilename );
 	}
 
@@ -1521,7 +1525,7 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 	if ( !PACK_ZIP_HANDLE(pak) ) {
 		PACK_ZIP_HANDLE(pak) = unzOpen( pak->pakFilename );
 		if ( !PACK_ZIP_HANDLE(pak) ) {
-			COM_ERROR( LOG_CAT_FILESYSTEM, "Error opening %s@%s\n", pak->pakBasename, pakFile->name );
+			COM_ERROR( LOG_CH(ch_filesystem), "Error opening %s@%s\n", pak->pakBasename, pakFile->name );
 			*file = FS_INVALID_HANDLE;
 			return -1;
 		}
@@ -1531,7 +1535,7 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 		// open a new file on the pakfile
 		temp = unzReOpen( pak->pakFilename, PACK_ZIP_HANDLE(pak) );
 		if ( temp == NULL ) {
-			COM_ERROR( LOG_CAT_FILESYSTEM, "Couldn't reopen %s", pak->pakFilename );
+			COM_ERROR( LOG_CH(ch_filesystem), "Couldn't reopen %s", pak->pakFilename );
 			*file = FS_INVALID_HANDLE;
 			return -1;
 		}
@@ -1574,7 +1578,7 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 	pak->handleUsed++;
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_FOpenFileRead: %s (found in '%s')\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_FOpenFileRead: %s (found in '%s')\n",
 			pakFile->name, pak->pakFilename );
 	}
 
@@ -1713,7 +1717,7 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 			f->zipFile = qfalse;
 
 			if ( fs_debug->integer ) {
-				Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_FOpenFileRead: %s (found in '%s/%s')\n", filename,
+				Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_FOpenFileRead: %s (found in '%s/%s')\n", filename,
 					dir->path, dir->gamedir );
 			}
 
@@ -1802,7 +1806,7 @@ int FS_Home_FOpenFileRead( const char *filename, fileHandle_t *file )
 		PATH_SEP, fs_gamedir, PATH_SEP, filename );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "%s: %s\n", __func__, path );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%s: %s\n", __func__, path );
 	}
 
 	fd->handleFiles.file.o = Sys_FOpen( path, "rb" );
@@ -1862,7 +1866,7 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 
 	if ( !fsh[f].zipFile ) {
 		if ( !fsh[f].handleFiles.file.o ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, S_COLOR_YELLOW "FS_Read: NULL file pointer for handle %i (%s)\n", f, fsh[f].name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), S_COLOR_YELLOW "FS_Read: NULL file pointer for handle %i (%s)\n", f, fsh[f].name );
 			return 0;
 		}
 		remaining = len;
@@ -1888,9 +1892,8 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 			buf += read;
 		}
 		return len;
-	} else {
-		return unzReadCurrentFile( fsh[f].handleFiles.file.z, buffer, len );
 	}
+	return unzReadCurrentFile( fsh[f].handleFiles.file.z, buffer, len );
 }
 
 
@@ -1932,13 +1935,13 @@ int FS_Write( const void *buffer, int len, fileHandle_t h ) {
 			if (!tries) {
 				tries = 1;
 			} else {
-				Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_Write: 0 bytes written\n" );
+				Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_Write: 0 bytes written\n" );
 				return 0;
 			}
 		}
 
 		if (written == -1) {
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_Write: -1 bytes written\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_Write: -1 bytes written\n" );
 			return 0;
 		}
 
@@ -2035,26 +2038,25 @@ int FS_Seek( fileHandle_t f, long offset, fsOrigin_t origin ) {
 			remainder -= r;
 		}
 		return 0;
-	} else {
-		FILE *file;
-		file = FS_FileForHandle( f );
-		switch( origin ) {
-		case FS_SEEK_CUR:
-			_origin = SEEK_CUR;
-			break;
-		case FS_SEEK_END:
-			_origin = SEEK_END;
-			break;
-		case FS_SEEK_SET:
-			_origin = SEEK_SET;
-			break;
-		default:
-			Com_Terminate( TERM_UNRECOVERABLE, "Bad origin in FS_Seek" );
-			return -1;
-		}
-
-		return fseek( file, offset, _origin );
 	}
+	FILE *file;
+	file = FS_FileForHandle( f );
+	switch ( origin ) {
+	case FS_SEEK_CUR:
+		_origin = SEEK_CUR;
+		break;
+	case FS_SEEK_END:
+		_origin = SEEK_END;
+		break;
+	case FS_SEEK_SET:
+		_origin = SEEK_SET;
+		break;
+	default:
+		Com_Terminate( TERM_UNRECOVERABLE, "Bad origin in FS_Seek" );
+		return -1;
+	}
+
+	return fseek( file, offset, _origin );
 }
 
 
@@ -2163,7 +2165,7 @@ int FS_ReadFile( const char *qpath, void **buffer ) {
 		if ( com_journal->integer == 2 ) {
 			int		r;
 
-			Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "Loading %s from journal file.\n", qpath );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "Loading %s from journal file.\n", qpath );
 			r = FS_Read( &len, sizeof( len ), com_journalDataFile );
 			if ( r != sizeof( len ) ) {
 				if (buffer != NULL) *buffer = NULL;
@@ -2196,7 +2198,8 @@ int FS_ReadFile( const char *qpath, void **buffer ) {
 			buf[len] = '\0';
 
 			return len;
-		} else if ( com_journal->integer == 1 ) {
+		}
+		if ( com_journal->integer == 1 ) {
 			isConfig = qtrue;
 		}
 	}
@@ -2209,7 +2212,7 @@ int FS_ReadFile( const char *qpath, void **buffer ) {
 		}
 		// if we are journaling and it is a config file, write a zero to the journal file
 		if ( isConfig ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "Writing zero for %s to journal file.\n", qpath );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "Writing zero for %s to journal file.\n", qpath );
 			len = 0;
 			FS_Write( &len, sizeof( len ), com_journalDataFile );
 			FS_Flush( com_journalDataFile );
@@ -2219,7 +2222,7 @@ int FS_ReadFile( const char *qpath, void **buffer ) {
 
 	if ( !buffer ) {
 		if ( isConfig ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "Writing len for %s to journal file.\n", qpath );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "Writing len for %s to journal file.\n", qpath );
 			FS_Write( &len, sizeof( len ), com_journalDataFile );
 			FS_Flush( com_journalDataFile );
 		}
@@ -2246,7 +2249,7 @@ int FS_ReadFile( const char *qpath, void **buffer ) {
 
 	// if we are journaling and it is a config file, write it to the journal file
 	if ( isConfig ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "Writing %s to journal file.\n", qpath );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "Writing %s to journal file.\n", qpath );
 		FS_Write( &len, sizeof( len ), com_journalDataFile );
 		FS_Write( buf, len, com_journalDataFile );
 		FS_Flush( com_journalDataFile );
@@ -2294,7 +2297,7 @@ void FS_WriteFile( const char *qpath, const void *buffer, int size ) {
 
 	f = FS_FOpenFileWrite( qpath );
 	if ( f == FS_INVALID_HANDLE ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "Failed to open %s\n", qpath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "Failed to open %s\n", qpath );
 		return;
 	}
 
@@ -2335,10 +2338,9 @@ Check if file should NOT be added to hash search table
 */
 static qboolean FS_BannedPakFile( const char *filename )
 {
-	if ( !strcmp( filename, "autoexec.cfg" ) || !strcmp( filename, Q3CONFIG_CFG ) )
+	if ( !strcmp( filename, "autoexec.cfg" ) || !strcmp( filename, WIRED_CONFIG_CFG ) )
 		return qtrue;
-	else
-		return qfalse;
+	return qfalse;
 }
 
 
@@ -2352,7 +2354,7 @@ lower case and replace '\\' ':' with '/'
 static void FS_ConvertFilename( char *name )
 {
 	int c;
-	while ( (c = *name) != '\0' ) {
+	while ( (c = (byte)*name) != '\0' ) {
 		if ( c <= 'Z' && c >= 'A' ) {
 			*name = c - 'A' + 'a';
 		} else if ( c == '\\' || c == ':' ) {
@@ -2437,7 +2439,7 @@ typedef struct pk3cacheFileItem_s {
 static int FS_HashPK3( const char *name )
 {
 	unsigned int c, hash = 0;
-	while ( (c = *name++) != '\0' )
+	while ( (c = (byte)*name++) != '\0' )
 	{
 		hash = hash * 101 + c;
 	}
@@ -2699,39 +2701,39 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 
 	if ( pk.pakNameLen > sizeof( pakName ) || pk.pakNameLen & 3 || pk.pakNameLen == 0 )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "bad pakNameLen: %08X\n", pk.pakNameLen );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "bad pakNameLen: %08X\n", pk.pakNameLen );
 		return qfalse;
 	}
 
 	if ( pk.namesLen & 3 || pk.namesLen < pk.numFiles )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "bad namesLen: %i\n", pk.namesLen );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "bad namesLen: %i\n", pk.namesLen );
 		return qfalse;
 	}
 
 	if ( pk.numHeaderLongs == 0 || pk.numHeaderLongs > pk.numFiles + 1 )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "bad numHeaderLongs: %i\n", pk.numHeaderLongs );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "bad numHeaderLongs: %i\n", pk.numHeaderLongs );
 		return qfalse;
 	}
 
 	if ( pk.contentLen & 3 || pk.contentLen < 0 )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "bad contentLen: %i\n", pk.contentLen );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "bad contentLen: %i\n", pk.contentLen );
 		return qfalse;
 	}
 
 	// load filename
 	if ( fread( pakName, pk.pakNameLen, 1, f ) != 1 )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "error reading pakname\n" );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "error reading pakname\n" );
 		return qfalse;
 	}
 
 	// pakName must be zero-terminated
 	if ( pakName[ pk.pakNameLen - 1 ] != '\0' )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "pakname is not zero-terminated!\n" );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "pakname is not zero-terminated!\n" );
 		return qfalse;
 	}
 
@@ -2742,11 +2744,9 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 		{
 			return qfalse;
 		}
-		else
-		{
-			fs_paksSkipped++;
-			return qtrue; // just outdated info, we can continue
-		}
+
+		fs_paksSkipped++;
+		return qtrue; // just outdated info, we can continue
 	}
 
 	// extract basename from zip path
@@ -2758,7 +2758,9 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 
 	Q_strncpyz( pakBase, basename, sizeof( pakBase ) );
 #if FEAT_SW3Z
-	if ( pack->type == PACK_SW3Z )
+	// Use the cached header field — `pack` is not allocated until below (Z_TagMalloc),
+	// so `pack->type` here was reading uninitialized memory before the fix.
+	if ( (packType_t)pk.packType == PACK_SW3Z )
 		FS_StripExt( pakBase, ".sw3z" );
 	else
 #endif
@@ -2807,14 +2809,14 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 
 	if ( fread( namePtr, pk.namesLen, 1, f ) != 1 )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "error reading pak filenames\n" );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "error reading pak filenames\n" );
 		goto __error;
 	}
 
 	// filenames buffer must be zero-terminated
 	if ( namePtr[ pk.namesLen - 1 ] != '\0' )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "not zero terminated filenames\n" );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "not zero terminated filenames\n" );
 		goto __error;
 	}
 
@@ -2823,12 +2825,12 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 	{
 		if ( fread( &it, sizeof( it ), 1, f ) != 1 )
 		{
-			//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "error reading file item[%i]\n", i );
+			//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "error reading file item[%i]\n", i );
 			goto __error;
 		}
 		if ( it.name >= pk.namesLen )
 		{
-			//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "bad name offset: %i (expecting less than %i)\n", it.name, pk.namesLen );
+			//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "bad name offset: %i (expecting less than %i)\n", it.name, pk.namesLen );
 			goto __error;
 		}
 
@@ -2852,7 +2854,7 @@ static qboolean FS_LoadPakFromFile( FILE *f )
 
 	if ( fread( pack->headerLongs + 1, ( pack->numHeaderLongs - 1 ) * sizeof( pack->headerLongs[0] ), 1, f ) != 1 )
 	{
-		//Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "error reading headerLongs\n" );
+		//Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "error reading headerLongs\n" );
 		goto __error;
 	}
 
@@ -2904,13 +2906,13 @@ static qboolean FS_SaveCache( void )
 
 	if ( !fs_cacheLoaded )
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "synced FS cache on startup\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "synced FS cache on startup\n" );
 		fs_cacheSynced = qfalse;
 		fs_cacheLoaded = qtrue;
 	}
 	else if ( CACHE_SYNC_CONDITION )
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "synced FS cache on readed=%i, released=%i, skipped=%i\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "synced FS cache on readed=%i, released=%i, skipped=%i\n",
 			fs_paksReaded, fs_paksReleased, fs_paksSkipped );
 		fs_cacheSynced = qfalse;
 	}
@@ -3066,7 +3068,7 @@ static pack_t *FS_LoadZipFile( const char *zipfile )
 			break;
 		}
 		if ( file_info.compression_method != 0 && file_info.compression_method != 8 /*Z_DEFLATED*/ ) {
-			COM_WARN( LOG_CAT_FILESYSTEM, "%s|%s: unsupported compression method %i\n", basename, filename_inzip, (int)file_info.compression_method );
+			COM_WARN( LOG_CH(ch_filesystem), "%s|%s: unsupported compression method %i\n", basename, filename_inzip, (int)file_info.compression_method );
 			unzGoToNextFile( uf );
 			continue;
 		}
@@ -3837,8 +3839,8 @@ static int FS_PathCmp( const char* s1, const char* s2 ) {
 	int		c1, c2;
 
 	do {
-		c1 = *s1++;
-		c2 = *s2++;
+		c1 = (byte)*s1++;
+		c2 = (byte)*s2++;
 
 		if ( c1 >= 'a' && c1 <= 'z' ) {
 			c1 -= ('a' - 'A');
@@ -3940,6 +3942,7 @@ static int FS_GetModList( char *listbuf, int bufsize ) {
 	}
 
 	for ( i = 0; i < nPotential; i++ ) {
+		// NOLINTNEXTLINE(clang-analyzer-core.NullDereference) — Sys_CountFileList(NULL) returns 0, so loop body is unreachable when pFiles is NULL
 		name = pFiles[i];
 		// NOTE: cleaner would involve more changes
 		// ignore duplicate mod directories
@@ -4044,14 +4047,14 @@ static void FS_Ls_f( void ) {
 	int		ndirs;
 
 	if ( Cmd_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "usage: ls <filter>\n" );
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "example: ls *q3dm*.bsp\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "usage: ls <filter>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "example: ls *q3dm*.bsp\n");
 		return;
 	}
 
 	filter = Cmd_Argv( 1 );
 
-	Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "---------------\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "---------------\n" );
 
 	dirnames = FS_ListFilteredFiles( "", "", filter, &ndirs, FS_MATCH_ANY | FS_MATCH_SUBDIRS );
 
@@ -4062,10 +4065,10 @@ static void FS_Ls_f( void ) {
 	for ( int i = 0; i < ndirs; i++ ) {
 		Q_strncpyz( dirname, dirnames[i], sizeof( dirname ) );
 		FS_ConvertPath( dirname );
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "%s\n", dirname );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%s\n", dirname );
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "%d files listed\n", ndirs );
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%d files listed\n", ndirs );
 	FS_FreeFileList( dirnames );
 }
 
@@ -4078,32 +4081,32 @@ FS_Path_f
 static void FS_Path_f( void ) {
 	const searchpath_t *s;
 
-	Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "Current search path:\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "Current search path:\n" );
 	for ( s = fs_searchpaths; s; s = s->next ) {
 		if ( s->pack ) {
 #if FEAT_SW3Z
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "%s (%i files)%s\n", s->pack->pakFilename, s->pack->numfiles,
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%s (%i files)%s\n", s->pack->pakFilename, s->pack->numfiles,
 				s->pack->type == PACK_SW3Z ? " [sw3z]" : "" );
 #else
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "%s (%i files)\n", s->pack->pakFilename, s->pack->numfiles );
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%s (%i files)\n", s->pack->pakFilename, s->pack->numfiles );
 #endif
 			if ( fs_numServerPaks ) {
 				if ( !FS_PakIsPure( s->pack ) ) {
-					COM_WARN( LOG_CAT_FILESYSTEM, "    not on the pure list\n" );
+					COM_WARN( LOG_CH(ch_filesystem), "    not on the pure list\n" );
 				} else {
-					Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "    on the pure list\n" );
+					Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "    on the pure list\n" );
 				}
 			}
 		}
 		else {
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "%s%c%s\n", s->dir->path, PATH_SEP, s->dir->gamedir );
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%s%c%s\n", s->dir->path, PATH_SEP, s->dir->gamedir );
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "\n" );
 	for ( int i = 1 ; i < MAX_FILE_HANDLES ; i++ ) {
 		if ( fsh[i].handleFiles.file.o ) {
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "handle %i: %s\n", i, fsh[i].name );
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "handle %i: %s\n", i, fsh[i].name );
 		}
 	}
 }
@@ -4121,7 +4124,7 @@ static void FS_TouchFile_f( void ) {
 	fileHandle_t	f;
 
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "Usage: touchFile <file>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "Usage: touchFile <file>\n" );
 		return;
 	}
 
@@ -4166,7 +4169,7 @@ static void FS_Which_f( void ) {
 	filename = Cmd_Argv(1);
 
 	if ( !filename[0] ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "Usage: which <file>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "Usage: which <file>\n" );
 		return;
 	}
 
@@ -4189,7 +4192,7 @@ static void FS_Which_f( void ) {
 				// case and separator insensitive comparisons
 				if ( !FS_FilenameCompare( pakFile->name, filename ) ) {
 					// found it!
-					Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "File \"%s\" found in \"%s\"\n", filename, pak->pakFilename );
+					Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "File \"%s\" found in \"%s\"\n", filename, pak->pakFilename );
 					if ( ++numfound >= 32 ) {
 						return;
 					}
@@ -4208,7 +4211,7 @@ static void FS_Which_f( void ) {
 			fclose(temp);
 			Com_sprintf( buf, sizeof( buf ), "%s%c%s", dir->path, PATH_SEP, dir->gamedir );
 			FS_ReplaceSeparators( buf );
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "File \"%s\" found at \"%s\"\n", filename, buf );
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "File \"%s\" found at \"%s\"\n", filename, buf );
 			if ( ++numfound >= 32 ) {
 				return;
 			}
@@ -4216,7 +4219,7 @@ static void FS_Which_f( void ) {
 	}
 
 	if ( !numfound ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "File not found: \"%s\"\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "File not found: \"%s\"\n", filename );
 	}
 }
 
@@ -4448,6 +4451,13 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 /*
 ================
 FS_isProprietary
+
+NOTE: This list identifies id-Software-proprietary Quake III paks for download
+protection. It is engine-level only because the entries belong to the historical
+Q3 / Team-Arena content set; future games shipping on the wired engine should
+register their own proprietary lists at game-init time rather than baking
+filenames into the VFS. Tracked under MB-13 (multi-game smoke) in
+docs/wired-branding-migration.md.
 ================
 */
 static const char *proprietaryFileList[] = {
@@ -4546,7 +4556,7 @@ qboolean FS_ComparePaks( char *neededpaks, int len, qboolean dlstring ) {
 
 		// Make sure the server cannot make us write to non-quake3 directories.
 		if ( FS_CheckDirTraversal( fs_serverReferencedPakNames[i] ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "WARNING: Invalid download name %s\n", fs_serverReferencedPakNames[i] );
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "WARNING: Invalid download name %s\n", fs_serverReferencedPakNames[i] );
 			continue;
 		}
 
@@ -4798,7 +4808,7 @@ static void FS_ListOpenFiles_f( void ) {
 	for ( int i = 0; i < MAX_FILE_HANDLES; i++, fh++ ) {
 		if ( !fh->handleFiles.file.v )
 			continue;
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "%2i %2s %s\n", i, FS_OwnerName(fh->owner), fh->name );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "%2i %2s %s\n", i, FS_OwnerName(fh->owner), fh->name );
 	}
 }
 
@@ -4819,7 +4829,7 @@ static void FS_LoadedPakPureChecksums( void )
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
 		if ( search->pack ) {
 			if ( fs_numPureChecksums >= ARRAY_LEN( fs_pureChecksum ) ) {
-				Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "WARNING: pure checksums overflowed\n" );
+				Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "WARNING: pure checksums overflowed\n" );
 				fs_numPureChecksums = 0;
 				return;
 			}
@@ -5029,7 +5039,7 @@ static void FS_DeduplicateArchives( void )
 	}
 
 	if ( removed > 0 ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_Precedence: removed %d duplicate archives, %d unique remain\n", removed, numArchives );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_Precedence: removed %d duplicate archives, %d unique remain\n", removed, numArchives );
 	}
 }
 #endif /* FEAT_FS_PRECEDENCE */
@@ -5161,7 +5171,7 @@ static void FS_Startup( void ) {
 
 	// print the current search paths
 	//FS_Path_f();
-	Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "WiredCore/FS startup: %d cached pak(s), %d files in %d pak file(s) (%d ms)\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "WiredCore/FS startup: %d cached pak(s), %d files in %d pak file(s) (%d ms)\n",
 	            fs_paksCached, fs_packFiles, fs_packCount, end - start );
 
 
@@ -5206,12 +5216,12 @@ static void FS_PrintSearchPaths( void )
 {
 	const searchpath_t *path = fs_searchpaths;
 
-	Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "\nSearch paths:\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "\nSearch paths:\n" );
 
 	while ( path )
 	{
 		if ( path->dir && path->policy == DIR_STATIC )
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, " * %s\n", path->dir->path );
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), " * %s\n", path->dir->path );
 
 		path = path->next;
 	}
@@ -5249,7 +5259,7 @@ static void FS_CheckIdPaks( void )
 
 				if(pakBasename[3] == '0')
 				{
-					Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "\n\n"
+					Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "\n\n"
 						"**************************************************\n"
 						"ERROR: pak0.pk3 is present but its checksum (%u)\n"
 						"is not correct. Please re-copy pak0.pk3 from your\n"
@@ -5259,7 +5269,7 @@ static void FS_CheckIdPaks( void )
 				}
 				else
 				{
-					Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "\n\n"
+					Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "\n\n"
 						"**************************************************\n"
 						"ERROR: pak%d.pk3 is present but its checksum (%u)\n"
 						"is not correct. Please re-install Quake 3 Arena \n"
@@ -5280,19 +5290,19 @@ static void FS_CheckIdPaks( void )
 
 		if((foundPak&1) != 1 )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "\n\n"
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "\n\n"
 			"pak0.pk3 is missing. Please copy it\n"
 			"from your legitimate Q3 CDROM.\n");
 		}
 
 		if((foundPak&0x1fe) != 0x1fe )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "\n\n"
+			Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "\n\n"
 			"Point Release files are missing. Please\n"
 			"re-install the 1.32 point release.\n");
 		}
 
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "\n\n"
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "\n\n"
 			"Also check that your Q3 executable is in\n"
 			"the correct place and that every file\n"
 			"in the %s directory is present and readable.\n", BASEGAME);
@@ -5471,7 +5481,7 @@ const char *FS_ReferencedPakPureChecksums( int maxlen ) {
 	s = Q_stradd( s, va( "%i ", checksum ) );
 	if ( s > max ) {
 		// client-side overflow
-		COM_WARN( LOG_CAT_FILESYSTEM, "WARNING: pure checksum list is too long (%i), you might be not able to play on remote server!\n", (int)(s - info) );
+		COM_WARN( LOG_CH(ch_filesystem), "WARNING: pure checksum list is too long (%i), you might be not able to play on remote server!\n", (int)(s - info) );
 		*max = '\0';
 	}
 
@@ -5620,7 +5630,7 @@ void FS_PureServerSetLoadedPaks( const char *pakSums, const char *pakNames ) {
 	}
 
 	if ( fs_numServerPaks ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "Connected to a pure server.\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "Connected to a pure server.\n" );
 	}
 	else
 	{
@@ -5628,7 +5638,7 @@ void FS_PureServerSetLoadedPaks( const char *pakSums, const char *pakNames ) {
 		{
 			// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=540
 			// force a restart to make sure the search order will be correct
-			Com_Log( SEV_DEBUG, LOG_CAT_FILESYSTEM, "FS search reorder is required\n" );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), "FS search reorder is required\n" );
 			FS_Restart( fs_checksumFeed );
 			return;
 		}
@@ -5787,7 +5797,7 @@ void FS_Restart( int checksumFeed ) {
 	if ( Q_stricmp(fs_gamedirvar->string, lastValidGame) && execConfig ) {
 		// skip the config.cfg if "safe" is on the command line
 		if ( !Com_SafeMode() ) {
-			Cbuf_AddText( "exec " Q3CONFIG_CFG "\n" );
+			Cbuf_AddText( "exec " WIRED_CONFIG_CFG "\n" );
 		}
 	}
 	execConfig = qfalse;
@@ -5827,13 +5837,11 @@ qboolean FS_ConditionalRestart( int checksumFeed, qboolean clientRestart )
 		Com_GameRestart( checksumFeed, clientRestart );
 		return qtrue;
 	}
-	else if ( checksumFeed != fs_checksumFeed )
-	{
+	if ( checksumFeed != fs_checksumFeed ) {
 		FS_Restart( checksumFeed );
 		return qtrue;
 	}
-	else if( fs_numServerPaks && !fs_reordered )
-	{
+	if ( fs_numServerPaks && !fs_reordered ) {
 		FS_ReorderPurePaks();
 	}
 
@@ -6036,7 +6044,7 @@ void FS_VM_CloseFiles( handleOwner_t owner )
 	{
 		if ( fsh[i].owner != owner )
 			continue;
-		COM_WARN( LOG_CAT_FILESYSTEM, "%s:%i:%s leaked filehandle\n",
+		COM_WARN( LOG_CH(ch_filesystem), "%s:%i:%s leaked filehandle\n",
 			FS_OwnerName( owner ), i, fsh[i].name );
 		FS_FCloseFile( i );
 	}
@@ -6057,8 +6065,7 @@ const char *FS_GetInstallPath( void )
 {
 	if ( fs_installpath && fs_installpath->string[0] != '\0' )
 		return fs_installpath->string;
-	else
-		return "";
+	return "";
 }
 
 
@@ -6098,8 +6105,7 @@ const char *FS_GetHomePath( void )
 {
 	if ( fs_homepath && fs_homepath->string[0] != '\0' )
 		return fs_homepath->string;
-	else
-		return FS_GetInstallPath();
+	return FS_GetInstallPath();
 }
 
 
@@ -6115,7 +6121,7 @@ fileHandle_t FS_PipeOpenWrite( const char *cmd, const char *filename ) {
 	ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, filename );
 
 	if ( fs_debug->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "FS_PipeOpenWrite: %s\n", ospath );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_PipeOpenWrite: %s\n", ospath );
 	}
 
 	FS_CheckFilenameIsNotAllowed( ospath, __func__, qfalse );
@@ -6129,8 +6135,10 @@ fileHandle_t FS_PipeOpenWrite( const char *cmd, const char *filename ) {
 	}
 
 #ifdef _WIN32
+	// NOLINTNEXTLINE(bugprone-command-processor) — FS_FOpenPipe is intentional: feeds frames to ffmpeg for AVI capture
 	fd->handleFiles.file.o = _popen( cmd, "wb" );
 #else
+	// NOLINTNEXTLINE(bugprone-command-processor) — FS_FOpenPipe is intentional: feeds frames to ffmpeg for AVI capture
 	fd->handleFiles.file.o = popen( cmd, "w" );
 #endif
 
@@ -6190,7 +6198,7 @@ void *FS_LoadLibrary( const char *name )
 	}
 
 	if ( libHandle ) {
-		Com_Log( SEV_INFO, LOG_CAT_FILESYSTEM, "Sys_LoadLibrary(%s): loaded\n", name );
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "Sys_LoadLibrary(%s): loaded\n", name );
 	}
 
 	return libHandle;

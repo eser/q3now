@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_local.h"
 
 
+// NOLINTNEXTLINE(bugprone-macro-parentheses) — `table` is always a static float[] array, never a complex expression
 #define	WAVEVALUE( table, base, amplitude, phase, freq )  ((base) + table[ (int64_t)( ( ( (phase) + tess.shaderTime * (freq) ) * FUNCTABLE_SIZE ) ) & FUNCTABLE_MASK ] * (amplitude))
 
 static float *TableForFunc( genFunc_t func ) 
@@ -319,7 +320,7 @@ static void DeformText( const char *text ) {
 
 	// draw each character
 	for ( i = 0 ; i < len ; i++ ) {
-		ch = text[i];
+		ch = (byte)text[i];
 		ch &= 255;
 
 		if ( ch != ' ' ) {

@@ -3,18 +3,20 @@
 #endif
 
 #include "q_shared.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 int Com_Split( char *in, char **out, int outsz, int delim )
 {
 	int c;
 	char **o = out, **end = out + outsz;
 	if ( delim >= ' ' ) {
-		while( (c = *in) != '\0' && c <= ' ' )
+		while( (c = (byte)*in) != '\0' && c <= ' ' )
 			in++;
 	}
 	*out = in; out++;
 	while( out < end ) {
-		while( (c = *in) != '\0' && c != delim )
+		while( (c = (byte)*in) != '\0' && c != delim )
 			in++;
 		*in = '\0';
 		if ( !c ) {
@@ -24,12 +26,12 @@ int Com_Split( char *in, char **out, int outsz, int delim )
 		}
 		in++;
 		if ( delim >= ' ' ) {
-			while( (c = *in) != '\0' && c <= ' ' )
+			while( (c = (byte)*in) != '\0' && c <= ' ' )
 				in++;
 		}
 		*out = in; out++;
 	}
-	while( (c = *in) != '\0' && c != delim )
+	while( (c = (byte)*in) != '\0' && c != delim )
 		in++;
 	*in = '\0';
 	c = out - o;
@@ -45,10 +47,10 @@ static int Hex( char c )
 	if ( c >= '0' && c <= '9' ) {
 		return c - '0';
 	}
-	else if ( c >= 'A' && c <= 'F' ) {
+	if ( c >= 'A' && c <= 'F' ) {
 		return 10 + c - 'A';
 	}
-	else if ( c >= 'a' && c <= 'f' ) {
+	if ( c >= 'a' && c <= 'f' ) {
 		return 10 + c - 'a';
 	}
 	return -1;
@@ -152,7 +154,7 @@ int QDECL Com_sprintf( char *dest, int size, const char *fmt, ...)
 
 	if ( len >= size )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Com_sprintf: overflow of %i in %i\n", len, size );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Com_sprintf: overflow of %i in %i\n", len, size );
 #if defined(_DEBUG) && defined(_WIN32)
 		DebugBreak();
 #endif
@@ -186,6 +188,7 @@ static const char *Com_StringContains( const char *str1, const char *str2, int l
 	len = strlen(str1) - len2;
 	for (i = 0; i <= len; i++, str1++) {
 		for (j = 0; str2[j]; j++) {
+			// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.ArraySubscript) — locase[] is initialized at engine startup; analyzer can't see Com_InitLocaseTable
 			if (locase[(byte)str1[j]] != locase[(byte)str2[j]]) {
 				break;
 			}
@@ -204,6 +207,7 @@ int Com_Filter( const char *filter, const char *name )
 	const char *ptr;
 	int i, found;
 
+	// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch) — `filter` is a caller-supplied non-NULL string per the API contract
 	while(*filter) {
 		if (*filter == '*') {
 			filter++;
@@ -254,6 +258,7 @@ int Com_Filter( const char *filter, const char *name )
 			name++;
 		}
 		else {
+			// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.ArraySubscript) — locase[] is initialized at engine startup; analyzer can't see Com_InitLocaseTable
 			if (locase[(byte)*filter] != locase[(byte)*name])
 				return qfalse;
 			filter++;
@@ -312,7 +317,7 @@ qboolean Com_HasPatterns( const char *str )
 {
 	int c;
 
-	while ( (c = *str++) != '\0' )
+	while ( (c = (byte)*str++) != '\0' )
 	{
 		if ( c == '*' || c == '?' )
 		{
@@ -387,6 +392,5 @@ const char *Com_SkipTokens( const char *s, int numTokens, const char *sep )
 
 	if( sepCount == numTokens )
 		return p;
-	else
-		return s;
+	return s;
 }

@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "snd_codec.h"
 #include "../qcommon/q_feats.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #if FEAT_LEGACY_FORMATS_AUDIO
 
@@ -72,7 +74,7 @@ static int S_ReadChunkInfo(fileHandle_t f, char *name)
 
 	len = FGetLittleLong(f);
 	if( len < 0 ) {
-		COM_WARN( LOG_CAT_CLIENT, "Negative chunk length\n" );
+		COM_WARN( LOG_CH(ch_client), "Negative chunk length\n" );
 		return -1;
 	}
 
@@ -145,14 +147,14 @@ static qboolean S_ReadRIFFHeader(fileHandle_t file, snd_info_t *info)
 	// skip the riff wav header
 	if (FS_Read(dump, 12, file) != 12)
 	{
-		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Couldn't read header\n" );
+		COM_ERROR( LOG_CH(ch_client), "ERROR: Couldn't read header\n" );
 		return qfalse;
 	}
 
 	// Scan for the format chunk
 	if((fmtlen = S_FindRIFFChunk(file, "fmt ")) < 0)
 	{
-		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Couldn't find \"fmt\" chunk\n" );
+		COM_ERROR( LOG_CH(ch_client), "ERROR: Couldn't find \"fmt\" chunk\n" );
 		return qfalse;
 	}
 
@@ -166,7 +168,7 @@ static qboolean S_ReadRIFFHeader(fileHandle_t file, snd_info_t *info)
 
 	if( bits < 8 )
 	{
-	  COM_ERROR( LOG_CAT_CLIENT, "ERROR: Less than 8 bit sound is not supported\n" );
+	  COM_ERROR( LOG_CH(ch_client), "ERROR: Less than 8 bit sound is not supported\n" );
 	  return qfalse;
 	}
 
@@ -183,7 +185,7 @@ static qboolean S_ReadRIFFHeader(fileHandle_t file, snd_info_t *info)
 	// Scan for the data chunk
 	if( (info->size = S_FindRIFFChunk(file, "data")) < 0)
 	{
-		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Couldn't find \"data\" chunk\n" );
+		COM_ERROR( LOG_CH(ch_client), "ERROR: Couldn't find \"data\" chunk\n" );
 		return qfalse;
 	}
 	info->samples = (info->size / info->width) / info->channels;
@@ -223,7 +225,7 @@ void *S_WAV_CodecLoad(const char *filename, snd_info_t *info)
 	if(!S_ReadRIFFHeader(file, info))
 	{
 		FS_FCloseFile(file);
-		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Incorrect/unsupported format in \"%s\"\n", filename );
+		COM_ERROR( LOG_CH(ch_client), "ERROR: Incorrect/unsupported format in \"%s\"\n", filename );
 		return NULL;
 	}
 
@@ -232,7 +234,7 @@ void *S_WAV_CodecLoad(const char *filename, snd_info_t *info)
 	if(!buffer)
 	{
 		FS_FCloseFile(file);
-		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Out of memory reading \"%s\"\n", filename );
+		COM_ERROR( LOG_CH(ch_client), "ERROR: Out of memory reading \"%s\"\n", filename );
 		return NULL;
 	}
 
@@ -241,7 +243,7 @@ void *S_WAV_CodecLoad(const char *filename, snd_info_t *info)
 	{
 		Hunk_FreeTempMemory(buffer);
 		FS_FCloseFile(file);
-		COM_ERROR( LOG_CAT_CLIENT, "ERROR: Couldn't read \"%s\"\n", filename );
+		COM_ERROR( LOG_CH(ch_client), "ERROR: Couldn't read \"%s\"\n", filename );
 		return NULL;
 	}
 

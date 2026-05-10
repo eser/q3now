@@ -18,7 +18,7 @@ import (
 // three must be set to explicit valid (or explicit nil/DETACHED) values
 // to break the inheritance chain.
 //
-// engine-stdout.log lives beside q3now.x64.exe so users can find it without
+// engine-stdout.log lives beside wired.x64.exe so users can find it without
 // hunting in fs_homepath.  It captures only spawn-time pre-log-init output
 // (DLL load errors, CreateProcessW failures, etc.) — the engine's own
 // qconsole.jsonl handles everything after Com_Init.

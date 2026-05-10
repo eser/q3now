@@ -7,7 +7,7 @@ export DBUILD_SERVER="${DBUILD_SERVER:-1}"
 export DUSE_HTTP="${DUSE_HTTP:-1}"
 export DUSE_CODEC_OPUS="${DUSE_CODEC_OPUS:-1}"
 export DUSE_VOIP="${DUSE_VOIP:-1}"
-export DCMAKE_INSTALL_PREFIX="${DCMAKE_INSTALL_PREFIX:-~/q3now}"
+export DCMAKE_INSTALL_PREFIX="${DCMAKE_INSTALL_PREFIX:-~/wired}"
 Q3NOWREMOTE="${Q3NOWREMOTE:-https://github.com/eser/q3now.git}"
 CMAKE_OPTS="${CMAKE_OPTS:-}"
 
@@ -44,7 +44,7 @@ while true; do
                         -DUSE_VOIP="$USE_VOIP" \
                         -DCMAKE_INSTALL_PREFIX="$DCMAKE_INSTALL_PREFIX" \
                         $CMAKE_OPTS
-                        cmake --build build 
+                        cmake --build build
                         cmake --install build
                         exit
                         ;;

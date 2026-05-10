@@ -1,7 +1,7 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 q3now contributors
+Copyright (C) 2024 Wired engine contributors
 
 This file is part of Quake III Arena source code.
 
@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../q_shared.h"
 #include "../qcommon.h"
 #include "bsp.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_loading, "loading" );
 
 static bspFormat_t const *bspFormats[MAX_BSP_FORMATS];
 static int numBspFormats = 0;
@@ -73,7 +75,7 @@ byte *Lit_TryLoad( const char *litPath, int expectedRGBBytes ) {
 	  || LittleLong( ((const int *)litBuf)[1] ) != LIT_VERSION
 	  || litLen - 8 != expectedRGBBytes ) {
 		if ( litLen >= 8 )
-			Com_Log( SEV_WARN, LOG_CAT_LOADING, "Lit_TryLoad: %s rejected (data=%d expected=%d)\n",
+			Com_Log( SEV_WARN, LOG_CH(ch_loading), "Lit_TryLoad: %s rejected (data=%d expected=%d)\n",
 			         litPath, litLen - 8, expectedRGBBytes );
 		FS_FreeFile( litBuf );
 		return NULL;
@@ -82,7 +84,7 @@ byte *Lit_TryLoad( const char *litPath, int expectedRGBBytes ) {
 	out = Z_Malloc( expectedRGBBytes );
 	memcpy( out, (const byte *)litBuf + 8, expectedRGBBytes );
 	FS_FreeFile( litBuf );
-	Com_Log( SEV_INFO, LOG_CAT_LOADING, "Loaded .lit colored lighting: %s (%d texels)\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_loading), "Loaded .lit colored lighting: %s (%d texels)\n",
 	         litPath, expectedRGBBytes / 3 );
 	return out;
 }
@@ -144,7 +146,7 @@ qboolean BSP_Load( const char *name, bspFile_t **bspFile, unsigned flags ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Load: %s has no matching format\n", name );
+	Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Load: %s has no matching format\n", name );
 	FS_FreeFile( buf );
 	return qfalse;
 }

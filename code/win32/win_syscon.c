@@ -3,8 +3,8 @@
 win_syscon.c — stdio-based console for Windows (client + dedicated)
 
 Implements the Sys_Console* / Conbuf_AppendText / Sys_SetErrorText API
-that qcommon expects. Both q3now.x64.exe (client, GUI subsystem) and
-q3now-ded.x64.exe (dedicated, console subsystem) link this file.
+that qcommon expects. Both wired.x64.exe (client, GUI subsystem) and
+wired-ded.x64.exe (dedicated, console subsystem) link this file.
 
 History:
   This replaces id Software's 1999-vintage custom Win32 console window
@@ -159,7 +159,7 @@ void Sys_SetErrorText( const char *buf )
 	fflush( stderr );
 
 #ifndef DEDICATED
-	MessageBoxA( NULL, buf, "q3now error", MB_OK | MB_ICONERROR );
+	MessageBoxA( NULL, buf, "Wired error", MB_OK | MB_ICONERROR );
 #endif
 }
 
@@ -197,9 +197,9 @@ Two stdin modes handled:
 #ifndef DEDICATED (client): returns NULL. The client doesn't read
 stdin for typed commands — the in-game console (toggled with `~`)
 handles user command input via the game window. If the user runs
-`q3now.x64.exe +set dedicated 1` (deprecated client-as-dedicated
+`wired.x64.exe +set dedicated 1` (deprecated client-as-dedicated
 flow), they have no typed-command interface; direct them to
-q3now-ded.x64.exe.
+wired-ded.x64.exe.
 ==============
 */
 char *Sys_ConsoleInput( void )

@@ -129,15 +129,11 @@ static int R_CullModel( md3Header_t *header, const trRefEntity_t *ent, vec3_t bo
 					tr.pc.c_sphere_cull_md3_out++;
 					return CULL_OUT;
 				}
-				else if ( sphereCull == CULL_IN )
-				{
+				if ( sphereCull == CULL_IN ) {
 					tr.pc.c_sphere_cull_md3_in++;
 					return CULL_IN;
 				}
-				else
-				{
-					tr.pc.c_sphere_cull_md3_clip++;
-				}
+				tr.pc.c_sphere_cull_md3_clip++;
 			}
 		}
 	}

@@ -125,13 +125,13 @@ static	void R_ColorShiftLightingBytes( const byte in[4], byte out[4] ) {
 	int		shift, r, g, b;
 
 	// shift the color data based on overbright range
-	shift = r_mapOverBrightBits->integer - tr.overbrightBits;
+	shift = tr.mapOverbrightBits - tr.overbrightBits;
 
 	// shift the data based on overbright range
 	r = in[0] << shift;
 	g = in[1] << shift;
 	b = in[2] << shift;
-	
+
 	// normalize by color instead of saturating to white
 	if ( ( r | g | b ) > 255 ) {
 		int		max;
@@ -159,7 +159,7 @@ R_ColorShiftLightingFloats
 static void R_ColorShiftLightingFloats(const float in[4], float out[4])
 {
 	float	r, g, b;
-	float   scale = (1 << (r_mapOverBrightBits->integer - tr.overbrightBits)) / 255.0f;
+	float   scale = (1 << (tr.mapOverbrightBits - tr.overbrightBits)) / 255.0f;
 
 	r = in[0] * scale;
 	g = in[1] * scale;
@@ -362,13 +362,13 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 			{
 				byte *p = hdrLightmap, *end = hdrLightmap + size;
 				//ri.Log( SEV_INFO, "found!\n");
-				
+
 				/* FIXME: don't just skip over this header and actually parse it */
 				while (p < end && !(*p == '\n' && *(p+1) == '\n'))
 					p++;
 
 				p += 2;
-				
+
 				while (p < end && !(*p == '\n'))
 					p++;
 
@@ -393,7 +393,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 				buf_p = buf + imgOffset * tr.lightmapSize * tr.lightmapSize * 3;
 			}
 
-			for ( j = 0 ; j < tr.lightmapSize * tr.lightmapSize; j++ ) 
+			for ( j = 0 ; j < tr.lightmapSize * tr.lightmapSize; j++ )
 			{
 				if (hdrLightmap)
 				{
@@ -570,7 +570,7 @@ static int FatLightmap(int lightmapnum)
 
 	if (tr.fatLightmapCols > 0)
 		return lightmapnum / (tr.fatLightmapCols * tr.fatLightmapRows);
-	
+
 	return lightmapnum;
 }
 
@@ -1756,7 +1756,7 @@ static	void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 	if ( indexLump->filelen % sizeof(*indexes))
 		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 
-	out = ri.Hunk_Alloc ( count * sizeof(*out), h_low );	
+	out = ri.Hunk_Alloc ( count * sizeof(*out), h_low );
 
 	s_worldData.surfaces = out;
 	s_worldData.numsurfaces = count;
@@ -1939,7 +1939,7 @@ static	void R_LoadNodesAndLeafs (const lump_t *nodeLump, const lump_t *leafLump)
 	numNodes = nodeLump->filelen / sizeof(dnode_t);
 	numLeafs = leafLump->filelen / sizeof(dleaf_t);
 
-	out = ri.Hunk_Alloc ( (numNodes + numLeafs) * sizeof(*out), h_low);	
+	out = ri.Hunk_Alloc ( (numNodes + numLeafs) * sizeof(*out), h_low);
 
 	s_worldData.nodes = out;
 	s_worldData.numnodes = numNodes + numLeafs;
@@ -1953,7 +1953,7 @@ static	void R_LoadNodesAndLeafs (const lump_t *nodeLump, const lump_t *leafLump)
 			out->mins[j] = LittleLong (in->mins[j]);
 			out->maxs[j] = LittleLong (in->maxs[j]);
 		}
-	
+
 		p = LittleLong(in->planeNum);
 		out->plane = s_worldData.planes + p;
 
@@ -1968,7 +1968,7 @@ static	void R_LoadNodesAndLeafs (const lump_t *nodeLump, const lump_t *leafLump)
 				out->children[j] = s_worldData.nodes + numNodes + (-1 - p);
 		}
 	}
-	
+
 	// load leafs
 	inLeaf = (void *)(fileBase + leafLump->fileofs);
 	for ( i=0 ; i<numLeafs ; i++, inLeaf++, out++)
@@ -1988,7 +1988,7 @@ static	void R_LoadNodesAndLeafs (const lump_t *nodeLump, const lump_t *leafLump)
 
 		out->firstmarksurface = LittleLong(inLeaf->firstLeafSurface);
 		out->nummarksurfaces = LittleLong(inLeaf->numLeafSurfaces);
-	}	
+	}
 
 	// chain descendants
 	R_SetParent (s_worldData.nodes, NULL);
@@ -2001,10 +2001,10 @@ static	void R_LoadNodesAndLeafs (const lump_t *nodeLump, const lump_t *leafLump)
 R_LoadShaders
 =================
 */
-static	void R_LoadShaders( const lump_t *l ) {	
+static	void R_LoadShaders( const lump_t *l ) {
 	int		i, count;
 	dshader_t	*in, *out;
-	
+
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
 		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
@@ -2029,16 +2029,16 @@ R_LoadMarksurfaces
 =================
 */
 static	void R_LoadMarksurfaces (const lump_t *l)
-{	
+{
 	int		i, j, count;
 	int		*in;
 	int     *out;
-	
+
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
 		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	count = l->filelen / sizeof(*in);
-	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low);	
+	out = ri.Hunk_Alloc ( count*sizeof(*out), h_low);
 
 	s_worldData.marksurfaces = out;
 	s_worldData.nummarksurfaces = count;
@@ -2062,13 +2062,13 @@ static	void R_LoadPlanes( const lump_t *l ) {
 	const dplane_t 	*in;
 	int			count;
 	int			bits;
-	
+
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
 		ri.Terminate( TERM_CLIENT_DROP, "LoadMap: funny lump size in %s",s_worldData.name);
 	count = l->filelen / sizeof(*in);
-	out = ri.Hunk_Alloc ( count*2*sizeof(*out), h_low);	
-	
+	out = ri.Hunk_Alloc ( count*2*sizeof(*out), h_low);
+
 	s_worldData.planes = out;
 	s_worldData.numplanes = count;
 
@@ -2417,9 +2417,8 @@ qboolean R_GetEntityToken( char *buffer, int size ) {
 	if ( !s_worldData.entityParsePoint && !s[0] ) {
 		s_worldData.entityParsePoint = s_worldData.entityString;
 		return qfalse;
-	} else {
-		return qtrue;
 	}
+	return qtrue;
 }
 
 #ifndef MAX_SPAWN_VARS
@@ -2446,7 +2445,7 @@ static qboolean R_ParseSpawnVars( char *spawnVarChars, int maxSpawnVarChars, int
 	}
 
 	// go through all the key / value pairs
-	while ( 1 ) {	
+	while ( 1 ) {
 		int keyLength, tokenLength;
 
 		// parse key
@@ -2458,8 +2457,8 @@ static qboolean R_ParseSpawnVars( char *spawnVarChars, int maxSpawnVarChars, int
 		if ( keyname[0] == '}' ) {
 			break;
 		}
-		
-		// parse value	
+
+		// parse value
 		if ( !R_GetEntityToken( com_token, sizeof( com_token ) ) ) {
 			ri.Log( SEV_INFO, "R_ParseSpawnVars: EOF without closing brace\n" );
 			return qfalse;
@@ -2558,6 +2557,7 @@ static void R_LoadEnvironmentJson(const char *baseName)
 		keyValueJson = JSON_ObjectGetNamedValue(cubemapJson, bufferEnd, "Position");
 		JSON_ArrayGetIndex(keyValueJson, bufferEnd, indexes, 3);
 		for (int j = 0; j < 3; j++)
+			// NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage) — JSON_ArrayGetIndex initializes indexes[]; analyzer doesn't model the parser callback
 			cubemap->origin[j] = JSON_ValueGetFloat(indexes[j], bufferEnd);
 
 		cubemap->parallaxRadius = 1000.0f;

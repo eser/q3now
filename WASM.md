@@ -1,6 +1,6 @@
 # WASM VM Backend
 
-q3now supports WebAssembly (WASM) as a game module execution backend via
+Wired supports WebAssembly (WASM) as a game module execution backend via
 [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (WebAssembly
 Micro Runtime). Game modules (qagame, cgame) can run as `.wasm` files
 alongside or instead of traditional QVM bytecode. (Legacy q3_ui has been
@@ -72,7 +72,7 @@ If `.wasm` is not found, it silently falls back to `.qvm`.
 
 - **wamrc** (optional) for AOT compilation. Build from
   https://github.com/bytecodealliance/wasm-micro-runtime — not bundled. When
-  not on PATH, q3now builds interpreter-mode `.wasm` only (no `.aot`).
+  not on PATH, Wired builds interpreter-mode `.wasm` only (no `.aot`).
 
 ### Build commands
 
@@ -141,7 +141,7 @@ Bytecode Alliance.
 | `WAMR_BUILD_MULTI_MODULE` | 0 | Each game module is independent |
 | `WAMR_BUILD_REF_TYPES` | 1 | Required by wasi-sdk 32+ compiled modules |
 | `WAMR_BUILD_SIMD` | 0 | Not needed for game logic |
-| `WAMR_BUILD_LOAD_CUSTOM_SECTION` | 1 | For `q3now_api` version check |
+| `WAMR_BUILD_LOAD_CUSTOM_SECTION` | 1 | For `wired_api` version check |
 | `WAMR_DISABLE_HW_BOUND_CHECK` | 1 | **Critical** — see below |
 
 ## Design Decisions

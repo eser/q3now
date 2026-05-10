@@ -114,9 +114,8 @@ Clamp fp values that may result in denormalization after further multiplication
 float R_ClampDenorm( float v ) {
 	if ( fabsf( v ) > 0.0f && fabsf( v ) < 1e-9f ) {
 		return 0.0f;
-	} else {
-		return v;
 	}
+	return v;
 }
 
 
@@ -129,7 +128,7 @@ void R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha
 	int		shift, r, g, b;
 
 	// shift the color data based on overbright range
-	shift = r_mapOverBrightBits->integer - tr.overbrightBits;
+	shift = tr.mapOverbrightBits - tr.overbrightBits;
 
 	// shift the data based on overbright range
 	if ( shift >= 0 ) {
@@ -196,7 +195,7 @@ static void FillBorders( byte *img )
 		x0 = n - 1; x1 = LIGHTMAP_LEN - n;
 		y0 = n - 1; y1 = LIGHTMAP_LEN - n;
 		len = LIGHTMAP_SIZE + (LIGHTMAP_BORDER*2 - n);
-		for ( i = n; i < len; i++ ) 
+		for ( i = n; i < len; i++ )
 		{
 			PIX( i, y0, 0 ) = PIX( i, y0+1, 0 );
 			PIX( i, y0, 1 ) = PIX( i, y0+1, 1 );
@@ -224,12 +223,12 @@ static void FillBorders( byte *img )
 		PIX( x0, y0, 1 ) = (int)(PIX( x0, y0+1, 1 ) + PIX( x0+1, y0, 1 )) >> 1;
 		PIX( x0, y0, 2 ) = (int)(PIX( x0, y0+1, 2 ) + PIX( x0+1, y0, 2 )) >> 1;
 		PIX( x0, y0, 3 ) = (int)(PIX( x0, y0+1, 3 ) + PIX( x0+1, y0, 3 )) >> 1;
-		
+
 		PIX( x1, y0, 0 ) = (int)(PIX( x1-1, y0, 0 ) + PIX( x1, y0+1, 0 )) >> 1;
 		PIX( x1, y0, 1 ) = (int)(PIX( x1-1, y0, 1 ) + PIX( x1, y0+1, 1 )) >> 1;
 		PIX( x1, y0, 2 ) = (int)(PIX( x1-1, y0, 2 ) + PIX( x1, y0+1, 2 )) >> 1;
 		PIX( x1, y0, 3 ) = (int)(PIX( x1-1, y0, 3 ) + PIX( x1, y0+1, 3 )) >> 1;
-	
+
 		PIX( x0, y1, 0 ) = (int)(PIX( x0, y1-1, 0 ) + PIX( x0+1, y1, 0 )) >> 1;
 		PIX( x0, y1, 1 ) = (int)(PIX( x0, y1-1, 1 ) + PIX( x0+1, y1, 1 )) >> 1;
 		PIX( x0, y1, 2 ) = (int)(PIX( x0, y1-1, 2 ) + PIX( x0+1, y1, 2 )) >> 1;
@@ -472,9 +471,8 @@ static void R_LoadLightmaps( const lump_t *l, qboolean isQ1Lightmap ) {
 				tr.mergeLightmaps = qtrue;
 				R_LoadMergedLightmaps( l, image, isQ1Lightmap ); // reuse stack space
 				return;
-			} else {
-				ri.Log( SEV_DEBUG, "...GL_ARB_texture_border_clamp is not available, merged lighmaps disabled.\n" );
 			}
+			ri.Log( SEV_DEBUG, "...GL_ARB_texture_border_clamp is not available, merged lighmaps disabled.\n" );
 		}
 	}
 
@@ -882,7 +880,7 @@ static void ParseTriSurf( const dsurface_t *ds, const drawVert_t *verts, int num
 	// get shader
 	surf->shader = ShaderForShaderNum( LittleLong( ds->shaderNum ), LIGHTMAP_BY_VERTEX );
 
-	tri = ri.Hunk_Alloc( sizeof( *tri ) + numVerts * sizeof( tri->verts[0] ) 
+	tri = ri.Hunk_Alloc( sizeof( *tri ) + numVerts * sizeof( tri->verts[0] )
 		+ numIndexes * sizeof( tri->indexes[0] ), h_low );
 	tri->surfaceType = SF_TRIANGLES;
 	tri->numVerts = numVerts;
@@ -1871,7 +1869,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 	numNodes = nodeLump->filelen / sizeof(dnode_t);
 	numLeafs = leafLump->filelen / sizeof(dleaf_t);
 
-	out = ri.Hunk_Alloc ( (numNodes + numLeafs) * sizeof(*out), h_low);	
+	out = ri.Hunk_Alloc ( (numNodes + numLeafs) * sizeof(*out), h_low);
 
 	s_worldData.nodes = out;
 	s_worldData.numnodes = numNodes + numLeafs;
@@ -1885,7 +1883,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 			out->mins[j] = LittleLong (in->mins[j]);
 			out->maxs[j] = LittleLong (in->maxs[j]);
 		}
-	
+
 		p = LittleLong(in->planeNum);
 		if ( p >= s_worldData.numplanes ) {
 			ri.Terminate( TERM_CLIENT_DROP, "%s: bad planeNum", __func__ );
@@ -1911,7 +1909,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 			}
 		}
 	}
-	
+
 	// load leafs
 	inLeaf = (void *)(fileBase + leafLump->fileofs);
 	for ( i=0 ; i<numLeafs ; i++, inLeaf++, out++)
@@ -1942,7 +1940,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 
 		out->firstmarksurface = s_worldData.marksurfaces + firstmarksurface;
 		out->nummarksurfaces = nummarksurfaces;
-	}	
+	}
 
 	// chain descendants
 	R_SetParent (s_worldData.nodes, NULL);
@@ -1958,7 +1956,7 @@ R_ReplaceShaders
 replaces some buggy map shaders
 =================
 */
-static void R_ReplaceMapShaders( dshader_t *out, int count ) 
+static void R_ReplaceMapShaders( dshader_t *out, int count )
 {
 	if ( Q_stricmp( s_worldData.baseName, "mapel4b" ) == 0 && count == 86 ) {
 		if ( crc32_buffer( (const byte*)out, count*sizeof(*out) ) == 0x1593623C ) {
@@ -1978,7 +1976,7 @@ R_LoadShaders
 static void R_LoadShaders( const lump_t *l ) {
 	int		i, count;
 	dshader_t	*in, *out;
-	
+
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
 		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
@@ -2005,12 +2003,12 @@ R_LoadMarksurfaces
 =================
 */
 static void R_LoadMarksurfaces( const lump_t *l )
-{	
+{
 	int		i, count;
 	unsigned	j;
 	int		*in;
 	msurface_t **out;
-	
+
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
 		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
@@ -2142,7 +2140,7 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 
 		// get information from the shader for fog parameters
 		shader = R_FindShader( fogs->shader, LIGHTMAP_NONE, qtrue );
-	
+
 		VectorCopy( shader->fogParms.color, fogColor );
 
 		if ( r_mapGreyScale->value > 0 ) {
@@ -2355,9 +2353,8 @@ qboolean RE_GetEntityToken( char *buffer, int size ) {
 	if ( !s_worldData.entityParsePoint && !s[0] ) {
 		s_worldData.entityParsePoint = s_worldData.entityString;
 		return qfalse;
-	} else {
-		return qtrue;
 	}
+	return qtrue;
 }
 
 

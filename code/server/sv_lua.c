@@ -7,6 +7,8 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 #define SV_WB_MAX_CHARACTERS 256
 #define SV_WB_MAX_INDEX 64
@@ -55,7 +57,7 @@ typedef struct {
 } svLuaBotBinding_t;
 
 // Canonical float-valued characteristic name -> CHARACTERISTIC_* index table.
-// Injected into Lua as q3now.characteristics at init.
+// Injected into Lua as wired.characteristics at init.
 // String-valued indices (0/3/21/22/23/40) and undefined gaps are excluded.
 static const struct { const char *name; int index; } s_characteristicNames[] = {
 	{ "attack_skill",                 CHARACTERISTIC_ATTACK_SKILL },
@@ -594,13 +596,13 @@ static int SV_Lua_LoadFileChunk( lua_State *L, const char *qpath ) {
 	return status;
 }
 
-static int SV_Lua_Q3NowLoad( lua_State *L ) {
+static int SV_Lua_WiredLoad( lua_State *L ) {
 	const char *qpath = luaL_checkstring( L, 1 );
 	char pathbuf[MAX_QPATH];
 	int status;
 	int pathlen;
 
-	// append .lua if the caller omitted the extension (spec: q3now.load("path/module"))
+	// append .lua if the caller omitted the extension (spec: wired.load("path/module"))
 	pathlen = (int)strlen( qpath );
 	if ( pathlen < 4 || Q_stricmp( qpath + pathlen - 4, ".lua" ) != 0 ) {
 		Com_sprintf( pathbuf, sizeof( pathbuf ), "%s.lua", qpath );
@@ -622,7 +624,7 @@ static int SV_Lua_Q3NowLoad( lua_State *L ) {
 	return lua_gettop( L );
 }
 
-static int SV_Lua_Q3NowPrint( lua_State *L ) {
+static int SV_Lua_WiredPrint( lua_State *L ) {
 	int nargs = lua_gettop( L );
 	QS_LOCAL(message, 1024);
 
@@ -649,11 +651,11 @@ static int SV_Lua_Q3NowPrint( lua_State *L ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "BotLua: %s\n", QS_CStr(&message) );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "BotLua: %s\n", QS_CStr(&message) );
 	return 0;
 }
 
-static int SV_Lua_Q3NowTime( lua_State *L ) {
+static int SV_Lua_WiredTime( lua_State *L ) {
 	lua_pushnumber( L, (lua_Number)sv.time );
 	return 1;
 }
@@ -725,7 +727,7 @@ static int SV_Lua_GetOrCreateTemplate( const char *characterName ) {
 			return i;
 	}
 	if ( s_numTemplates >= SV_WB_MAX_CHARACTERS ) {
-		COM_WARN( LOG_CAT_SERVER, "BotLua: template table full, cannot register '%s'\n", characterName );
+		COM_WARN( LOG_CH(ch_server), "BotLua: template table full, cannot register '%s'\n", characterName );
 		return -1;
 	}
 	i = s_numTemplates++;
@@ -830,7 +832,7 @@ static int SV_Lua_GetOrCreateCharacterHandle( const char *characterName, float s
 		}
 	}
 
-	COM_WARN( LOG_CAT_SERVER, "BotLua: character table full, cannot register '%s'\n", characterName );
+	COM_WARN( LOG_CH(ch_server), "BotLua: character table full, cannot register '%s'\n", characterName );
 	return 0;
 }
 
@@ -842,19 +844,19 @@ void SV_Lua_Init( void ) {
 
 	L = UserVM_GetState();
 	if ( !L ) {
-		COM_WARN( LOG_CAT_SERVER, "BotLua: User VM not initialized\n" );
+		COM_WARN( LOG_CH(ch_server), "BotLua: User VM not initialized\n" );
 		return;
 	}
 
 	lua_newtable( L );
-	lua_pushcfunction( L, SV_Lua_Q3NowLoad );
+	lua_pushcfunction( L, SV_Lua_WiredLoad );
 	lua_setfield( L, -2, "load" );
-	lua_pushcfunction( L, SV_Lua_Q3NowPrint );
+	lua_pushcfunction( L, SV_Lua_WiredPrint );
 	lua_setfield( L, -2, "print" );
-	lua_pushcfunction( L, SV_Lua_Q3NowTime );
+	lua_pushcfunction( L, SV_Lua_WiredTime );
 	lua_setfield( L, -2, "time" );
 
-	// inject q3now.characteristics: name -> CHARACTERISTIC_* index
+	// inject wired.characteristics: name -> CHARACTERISTIC_* index
 	// single source of truth — derived from chars.h #defines, zero drift
 	lua_newtable( L );
 	for ( int i = 0; s_characteristicNames[i].name; i++ ) {
@@ -863,23 +865,23 @@ void SV_Lua_Init( void ) {
 	}
 	lua_setfield( L, -2, "characteristics" );
 
-	lua_setglobal( L, "q3now" );
+	lua_setglobal( L, "wired" );
 
-	// load scripts/char_framework.lua — installs q3now.load_character and q3now.load_bot
-	lua_getglobal( L, "q3now" );
+	// load scripts/char_framework.lua — installs wired.load_character and wired.load_bot
+	lua_getglobal( L, "wired" );
 	lua_getfield( L, -1, "load" );
 	lua_remove( L, -2 );
 	lua_pushstring( L, "scripts/char_framework" );
 	status = lua_pcall( L, 1, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		COM_WARN( LOG_CAT_SERVER, "BotLua: failed loading scripts/char_framework.lua (%s)\n", err ? err : "unknown" );
+		COM_WARN( LOG_CH(ch_server), "BotLua: failed loading scripts/char_framework.lua (%s)\n", err ? err : "unknown" );
 	}
 	lua_settop( L, 0 );
 
 	{
 		int loaded = SV_Characters_Preload();
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "WiredCore/Scripting: BotLua initialized (preloaded %d character(s))\n", loaded );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "WiredCore/Scripting: BotLua initialized (preloaded %d character(s))\n", loaded );
 	}
 }
 
@@ -1030,12 +1032,12 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	L = UserVM_GetState();
 	lua_settop( L, 0 );
 
-	// call q3now.load_character(name, skillNormalized) — trampoline installed by _base/main.lua
-	lua_getglobal( L, "q3now" );
+	// call wired.load_character(name, skillNormalized) — trampoline installed by _base/main.lua
+	lua_getglobal( L, "wired" );
 	lua_getfield( L, -1, "load_character" );
 	lua_remove( L, -2 );
 	if ( !lua_isfunction( L, -1 ) ) {
-		COM_WARN( LOG_CAT_SERVER, "BotLua: q3now.load_character not available\n" );
+		COM_WARN( LOG_CH(ch_server), "BotLua: wired.load_character not available\n" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
@@ -1045,14 +1047,14 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	status = lua_pcall( L, 2, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		COM_WARN( LOG_CAT_SERVER, "BotLua: failed loading character '%s' (%s)\n", characterName, err ? err : "unknown" );
+		COM_WARN( LOG_CH(ch_server), "BotLua: failed loading character '%s' (%s)\n", characterName, err ? err : "unknown" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
 	}
 
 	if ( !lua_istable( L, -1 ) ) {
-		COM_WARN( LOG_CAT_SERVER, "BotLua: load_character('%s') must return a table\n", characterName );
+		COM_WARN( LOG_CH(ch_server), "BotLua: load_character('%s') must return a table\n", characterName );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
@@ -1135,15 +1137,15 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	profileRef = luaL_ref( L, LUA_REGISTRYINDEX );
 	s_characters[handle].profileRef = profileRef;
 
-	// Load bot data via q3now.load_bot(name): shallow-merges _base/bot/main.lua
+	// Load bot data via wired.load_bot(name): shallow-merges _base/bot/main.lua
 	// with characters/{name}/bot/main.lua (if present). No __index needed.
 	botRef = LUA_NOREF;
 	lua_settop( L, 0 );
-	lua_getglobal( L, "q3now" );
+	lua_getglobal( L, "wired" );
 	lua_getfield( L, -1, "load_bot" );
 	lua_remove( L, -2 );
 	if ( !lua_isfunction( L, -1 ) ) {
-		COM_WARN( LOG_CAT_SERVER, "BotLua: q3now.load_bot not available\n" );
+		COM_WARN( LOG_CH(ch_server), "BotLua: wired.load_bot not available\n" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
@@ -1152,13 +1154,13 @@ int SV_Lua_LoadCharacter( const char *characterName, float skillNormalized ) {
 	status = lua_pcall( L, 1, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		COM_WARN( LOG_CAT_SERVER, "BotLua: load_bot('%s') failed (%s)\n", characterName, err ? err : "unknown" );
+		COM_WARN( LOG_CH(ch_server), "BotLua: load_bot('%s') failed (%s)\n", characterName, err ? err : "unknown" );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
 	}
 	if ( !lua_istable( L, -1 ) ) {
-		COM_WARN( LOG_CAT_SERVER, "BotLua: load_bot('%s') must return a table\n", characterName );
+		COM_WARN( LOG_CH(ch_server), "BotLua: load_bot('%s') must return a table\n", characterName );
 		lua_settop( L, 0 );
 		SV_Lua_FreeCharacter( handle );
 		return 0;
@@ -1324,7 +1326,7 @@ int SV_Lua_BotThink( int clientNum, float thinktime ) {
 
 	L = UserVM_GetState();
 	lua_settop( L, 0 );
-	lua_getglobal( L, "q3now_bot_think" );
+	lua_getglobal( L, "wired_bot_think" );
 	if ( !lua_isfunction( L, -1 ) ) {
 		lua_settop( L, 0 );
 		return qtrue;
@@ -1335,7 +1337,7 @@ int SV_Lua_BotThink( int clientNum, float thinktime ) {
 	status = lua_pcall( L, 2, 0, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		COM_WARN( LOG_CAT_SERVER, "BotLua: think error for client %d (%s)\n", clientNum, err ? err : "unknown" );
+		COM_WARN( LOG_CH(ch_server), "BotLua: think error for client %d (%s)\n", clientNum, err ? err : "unknown" );
 		lua_settop( L, 0 );
 		return qfalse;
 	}
@@ -1393,7 +1395,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 	{
 		int debugWeapon = Cvar_VariableIntegerValue( "sv_botDebugWeapon" );
 		if ( debugWeapon ) {
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "^3[BotPickWeapon] client=%d cachedAttackCount=%d\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "^3[BotPickWeapon] client=%d cachedAttackCount=%d\n",
 				clientNum, s_characters[characterHandle].cachedAttackCount );
 		}
 
@@ -1402,7 +1404,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 			weapon = bg_attacklist[idx].weapon;
 
 			if ( debugWeapon ) {
-				Com_Log( SEV_INFO, LOG_CAT_SERVER, "  [%d] shortname='%s' weapon=%d aim_height=%.0f has_weapon=%d has_ammo=%d\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_server), "  [%d] shortname='%s' weapon=%d aim_height=%.0f has_weapon=%d has_ammo=%d\n",
 					i,
 					bg_attacklist[idx].shortname,
 					weapon,
@@ -1414,7 +1416,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 			if ( weapon == WP_GAUNTLET ) {
 				// gauntlet: always usable, no inventory check
 				if ( debugWeapon ) {
-					Com_Log( SEV_INFO, LOG_CAT_SERVER, "  ^2=> selected '%s' (gauntlet fallback)\n", bg_attacklist[idx].shortname );
+					Com_Log( SEV_INFO, LOG_CH(ch_server), "  ^2=> selected '%s' (gauntlet fallback)\n", bg_attacklist[idx].shortname );
 				}
 				if ( weaponKey && weaponKeySize > 0 ) {
 					Q_strncpyz( weaponKey, bg_attacklist[idx].shortname, weaponKeySize );
@@ -1422,9 +1424,10 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 				return qtrue;
 			}
 
+			// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — `weapon` is bounded by bg_attacklist enumeration earlier in the loop; analyzer's path doesn't see the bg_attacklist contract
 			if ( ctx->weapons[weapon] && ctx->ammo[weapon] > 0 ) {
 				if ( debugWeapon ) {
-					Com_Log( SEV_INFO, LOG_CAT_SERVER, "  ^2=> selected '%s' weapon=%d\n", bg_attacklist[idx].shortname, weapon );
+					Com_Log( SEV_INFO, LOG_CH(ch_server), "  ^2=> selected '%s' weapon=%d\n", bg_attacklist[idx].shortname, weapon );
 				}
 				if ( weaponKey && weaponKeySize > 0 ) {
 					Q_strncpyz( weaponKey, bg_attacklist[idx].shortname, weaponKeySize );
@@ -1435,7 +1438,7 @@ int SV_Lua_BotPickWeapon( int clientNum, const wbCombatCtx_t *ctx, char *weaponK
 	}
 
 	if ( Cvar_VariableIntegerValue( "sv_botDebugWeapon" ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  ^1=> no attack selected (fallback to default 'mg')\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "  ^1=> no attack selected (fallback to default 'mg')\n" );
 	}
 
 	return qfalse;
@@ -1561,7 +1564,7 @@ int SV_Lua_BotEvalItem( int clientNum, const wbItemEvalCtx_t *ctx ) {
 
 #if FEAT_RECAST_NAVMESH
 	if ( Cvar_VariableIntegerValue( "sv_botDebugItem" ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "[EVALITEM-IN] cl=%d item=%s giType=%d giTag=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "[EVALITEM-IN] cl=%d item=%s giType=%d giTag=%d\n",
 			clientNum, ctx->itemType, ctx->giType, ctx->giTag );
 	}
 #endif
@@ -1661,7 +1664,7 @@ int SV_Lua_BotDecide( int clientNum, const wbDecideCtx_t *ctx, char *decision, i
 			if ( status != 0 ) {
 				if ( SV_Lua_ShouldPrintError( clientNum, WB_METHOD_DECIDE ) ) {
 					const char *err = lua_tostring( L, -1 );
-					COM_WARN( LOG_CAT_SERVER, "BotLua: decide failed for client %d (%s)\n", clientNum, err ? err : "unknown" );
+					COM_WARN( LOG_CH(ch_server), "BotLua: decide failed for client %d (%s)\n", clientNum, err ? err : "unknown" );
 				}
 				lua_settop( L, 0 );
 				// Fall through to C logic on Lua error.
@@ -1764,7 +1767,7 @@ int SV_Lua_BotOnChat( int clientNum, const char *eventName, const wbChatCtx_t *c
 	if ( status != 0 ) {
 		if ( SV_Lua_ShouldPrintError( clientNum, WB_METHOD_ON_CHAT ) ) {
 			const char *err = lua_tostring( L, -1 );
-			COM_WARN( LOG_CAT_SERVER, "BotLua: on_chat failed for client %d (%s)\n", clientNum, err ? err : "unknown" );
+			COM_WARN( LOG_CH(ch_server), "BotLua: on_chat failed for client %d (%s)\n", clientNum, err ? err : "unknown" );
 		}
 		lua_settop( L, 0 );
 		return qfalse;
@@ -1958,7 +1961,7 @@ static qboolean SV_BotVerifyLoadLuaValues(
 	}
 
 	lua_settop( L, 0 );
-	lua_getglobal( L, "q3now" );
+	lua_getglobal( L, "wired" );
 	lua_getfield( L, -1, "load_character" );
 	lua_remove( L, -2 );
 	if ( !lua_isfunction( L, -1 ) ) {
@@ -1970,7 +1973,7 @@ static qboolean SV_BotVerifyLoadLuaValues(
 	status = lua_pcall( L, 2, 1, 0 );
 	if ( status != 0 ) {
 		const char *err = lua_tostring( L, -1 );
-		COM_WARN( LOG_CAT_SERVER, "bot_verify_character: Lua error for '%s': %s\n",
+		COM_WARN( LOG_CH(ch_server), "bot_verify_character: Lua error for '%s': %s\n",
 		            charName, err ? err : "unknown" );
 		lua_settop( L, 0 );
 		return qfalse;
@@ -2014,7 +2017,7 @@ void SV_BotVerifyCharacter_f( void ) {
 	int matchCount = 0, mismatchCount = 0, skipCount = 0;
 
 	if ( Cmd_Argc() < 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: bot_verify_character <name> <skill>\n"
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: bot_verify_character <name> <skill>\n"
 		            "  name  - character name (e.g., sarge, daemia, grunt)\n"
 		            "  skill - integer skill level 1-5\n" );
 		return;
@@ -2024,30 +2027,30 @@ void SV_BotVerifyCharacter_f( void ) {
 	skill = atoi( Cmd_Argv( 2 ) );
 
 	if ( skill < 1 || skill > 5 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_verify_character: skill must be 1-5\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "bot_verify_character: skill must be 1-5\n" );
 		return;
 	}
 
 	skillNorm = (float)( skill - 1 ) * 0.25f;
 
 	if ( !SV_BotVerifyParseOldFile( charName, skill, oldVals, oldValid ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_verify_character: no legacy botfile for '%s' "
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "bot_verify_character: no legacy botfile for '%s' "
 		            "(botfiles/bots/%s_c.c not found)\n",
 		            charName, charName );
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "  Expected for new characters (keel, anarki, crash).\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "  Expected for new characters (keel, anarki, crash).\n" );
 		return;
 	}
 
 	if ( !SV_BotVerifyLoadLuaValues( charName, skillNorm, newVals, newValid ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_verify_character: failed to load Lua character '%s'\n", charName );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "bot_verify_character: failed to load Lua character '%s'\n", charName );
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "\n^3bot_verify_character: %s  skill=%d (norm=%.2f)\n\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "\n^3bot_verify_character: %s  skill=%d (norm=%.2f)\n\n",
 	            charName, skill, skillNorm );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8s  %-8s  %s\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "%-34s  %-8s  %-8s  %s\n",
 	            "characteristic", "old", "new", "status" );
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8s  %-8s  ------\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "%-34s  %-8s  %-8s  ------\n",
 	            "----------------------------------", "--------", "--------" );
 
 	for ( i = 0; s_characteristicNames[i].name; i++ ) {
@@ -2065,7 +2068,7 @@ void SV_BotVerifyCharacter_f( void ) {
 		if ( diff < 0.0f ) diff = -diff;
 
 		if ( SV_BotVerifyIsLegacyScale( idx ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  %-8.4f  ^6SCALE_DIFF (legacy range)\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "%-34s  %-8.4f  %-8.4f  ^6SCALE_DIFF (legacy range)\n",
 			            cname, oldVal, newVal );
 			skipCount++;
 		} else if ( oldValid[idx] && !newValid[idx] ) {
@@ -2073,35 +2076,35 @@ void SV_BotVerifyCharacter_f( void ) {
 			float defDiff = oldVal - def;
 			if ( defDiff < 0.0f ) defDiff = -defDiff;
 			if ( defDiff > 0.01f ) {
-				Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  ^1(undef)^7   ^1MISSING (def=%.4f, diff=%.4f)\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_server), "%-34s  %-8.4f  ^1(undef)^7   ^1MISSING (def=%.4f, diff=%.4f)\n",
 				            cname, oldVal, def, defDiff );
 				mismatchCount++;
 			} else {
-				Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  %-8s  ^3MISSING (def~=old)\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_server), "%-34s  %-8.4f  %-8s  ^3MISSING (def~=old)\n",
 				            cname, oldVal, "(undef)" );
 				matchCount++;
 			}
 		} else if ( !oldValid[idx] && newValid[idx] ) {
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8s  %-8.4f  ^2NEW_ONLY\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "%-34s  %-8s  %-8.4f  ^2NEW_ONLY\n",
 			            cname, "(none)", newVal );
 			matchCount++;
 		} else if ( diff > 0.01f ) {
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  %-8.4f  ^1MISMATCH (diff=%.4f)\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "%-34s  %-8.4f  %-8.4f  ^1MISMATCH (diff=%.4f)\n",
 			            cname, oldVal, newVal, diff );
 			mismatchCount++;
 		} else {
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "%-34s  %-8.4f  %-8.4f  ^2OK\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "%-34s  %-8.4f  %-8.4f  ^2OK\n",
 			            cname, oldVal, newVal );
 			matchCount++;
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "\n^3Summary: %s skill=%d -- %d match, %d mismatch, %d scale-skipped\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "\n^3Summary: %s skill=%d -- %d match, %d mismatch, %d scale-skipped\n",
 	            charName, skill, matchCount, mismatchCount, skipCount );
 	if ( mismatchCount == 0 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "^2All comparable values match.\n\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "^2All comparable values match.\n\n" );
 	} else {
-		COM_WARN( LOG_CAT_SERVER, "Fix %d mismatch(es) in modfiles/characters/%s/main.lua\n\n",
+		COM_WARN( LOG_CH(ch_server), "Fix %d mismatch(es) in modfiles/characters/%s/main.lua\n\n",
 		          mismatchCount, charName );
 	}
 }
@@ -2161,7 +2164,7 @@ qboolean SV_Lua_GetCharacterAt( int index, char *out, int outSize ) {
 // Sets the cvar that game code reads to enable per-frame weapon debug output.
 void SV_BotDebugWeapons_f( void ) {
 	if ( Cmd_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: bot_debug_weapons <botname|off>\n"
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: bot_debug_weapons <botname|off>\n"
 		            "  botname - track weapon selection for this bot (100 frames)\n"
 		            "  off     - disable weapon debug output\n" );
 		return;
@@ -2169,9 +2172,9 @@ void SV_BotDebugWeapons_f( void ) {
 
 	if ( !Q_stricmp( Cmd_Argv( 1 ), "off" ) ) {
 		Cvar_Set( "bot_debug_weapon", "" );
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_debug_weapons: disabled\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "bot_debug_weapons: disabled\n" );
 	} else {
 		Cvar_Set( "bot_debug_weapon", Cmd_Argv( 1 ) );
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "bot_debug_weapons: tracking '%s' for up to 100 frames\n", Cmd_Argv( 1 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "bot_debug_weapons: tracking '%s' for up to 100 frames\n", Cmd_Argv( 1 ) );
 	}
 }

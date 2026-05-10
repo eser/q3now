@@ -22,23 +22,23 @@ services:
       - "27960:27960/udp"
 
     environment:
-      Q3_HOSTNAME: "q3now Docker Server"
-      Q3_MAXCLIENTS: "16"
-      Q3_RCONPASSWORD: "changeme"
-      Q3_SCORELIMIT: "25"
-      Q3_TIMELIMIT: "15"
-      # Q3_GAMETYPE: "0"          # 0=FFA, 1=Duel, 3=TDM, 4=CTF
-      # Q3_MAPROTATION: "q3dm17 q3dm6 q3tourney2"
-      # Q3_QUIC: "1"              # Enable QUIC transport (needs certs)
-      # Q3_DOWNLOAD_URL: "http://yoursite.com/q3now"
-      # Q3_EXEC: "server.cfg"     # Execute a custom config on startup
-      # Q3_HUNKMEGS: "128"        # Increase for many custom maps
+      WIRED_HOSTNAME: "q3now Docker Server"
+      WIRED_MAXCLIENTS: "16"
+      WIRED_RCONPASSWORD: "changeme"
+      WIRED_SCORELIMIT: "25"
+      WIRED_TIMELIMIT: "15"
+      # WIRED_GAMETYPE: "0"          # 0=FFA, 1=Duel, 3=TDM, 4=CTF
+      # WIRED_MAPROTATION: "q3dm17 q3dm6 q3tourney2"
+      # WIRED_QUIC: "1"              # Enable QUIC transport (needs certs)
+      # WIRED_DOWNLOAD_URL: "http://yoursite.com/q3now"
+      # WIRED_EXEC: "server.cfg"     # Execute a custom config on startup
+      # WIRED_HUNKMEGS: "128"        # Increase for many custom maps
 
     volumes:
       # Game data: place pak0.pk3, custom maps (.pk3), and server.cfg here
-      - ./server-data/baseq3:/home/q3now/baseq3
+      - ./server-data/baseq3:/home/wired/baseq3
       # QUIC TLS certificates (uncomment if using QUIC)
-      # - ./certs:/home/q3now/certs:ro
+      # - ./certs:/home/wired/certs:ro
 
     # Override the default map
     command: ["+map", "q3dm17"]

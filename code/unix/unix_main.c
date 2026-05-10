@@ -63,6 +63,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "linux_local.h" // bk001204
 
 #include <execinfo.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #ifndef DEDICATED
 #include "../client/client.h"
@@ -220,7 +222,7 @@ void Sys_ConsoleInputShutdown( void )
 {
 	if ( ttycon_on )
 	{
-//		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Shutdown tty console\n" ); // -EC-
+//		Com_Log( SEV_INFO, LOG_CH(ch_system), "Shutdown tty console\n" ); // -EC-
 		tty_Back(); // delete "]" ? -EC-
 		tcsetattr( STDIN_FILENO, TCSADRAIN, &tty_tc );
 	}
@@ -336,7 +338,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *format, ... )
 	CL_Shutdown( text, qtrue );
 #endif
 
-	Com_Log( SEV_FATAL, LOG_CAT_SYSTEM, "Sys_Error: %s", text );
+	Com_Log( SEV_FATAL, LOG_CH(ch_system), "Sys_Error: %s", text );
 	fprintf( stderr, "Sys_Error: %s\n", text ); // belt-and-suspenders: bypasses pipeline
 
 	Sys_Exit( 1 ); // bk010104 - use single exit point.
@@ -410,7 +412,7 @@ static void Sys_CrashSignal( int sig, siginfo_t *info, void *ucontext )
 	/* Async-signal-safe native backtrace to stderr. */
 	nframes = backtrace( frames, (int)( sizeof( frames ) / sizeof( frames[ 0 ] ) ) );
 	{
-		static const char hdr[] = "\r\n=== q3now crash ===\r\n";
+		static const char hdr[] = "\r\n=== Wired crash ===\r\n";
 		if ( write( STDERR_FILENO, hdr, sizeof( hdr ) - 1 ) < 0 ) {
 			/* ignored */
 		}
@@ -639,7 +641,7 @@ char *Sys_ConsoleInput( void )
 					return NULL;
 				}
 
-				Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "dropping ISCTL sequence: %d, tty_erase: %d\n", key, tty_erase );
+				Com_Log( SEV_DEBUG, LOG_CH(ch_system), "dropping ISCTL sequence: %d, tty_erase: %d\n", key, tty_erase );
 				tty_FlushIn();
 				return NULL;
 			}
@@ -916,7 +918,7 @@ void Sys_ConfigureFPU( void )  // bk001213 - divide by zero
 	if ( current!=fpu_word)
 	{
 #if 0
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "FPU Control 0x%x (was 0x%x)\n", fpu_word, current );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "FPU Control 0x%x (was 0x%x)\n", fpu_word, current );
 		_FPU_SETCW( fpu_word );
 		_FPU_GETCW( current );
 		assert(fpu_word==current);
@@ -1227,7 +1229,7 @@ watchdog (com_noHardReboot 1, or non-DEDICATED) we simply exit normally.
 */
 void Sys_HardReboot( void )
 {
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Hard reboot requested — exiting with restart code.\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "Hard reboot requested — exiting with restart code.\n" );
 	_exit( HARD_REBOOT_EXIT_CODE );
 }
 
@@ -1325,13 +1327,13 @@ int main( int argc, const char* argv[] )
 	err = Sys_ConsoleInputInit();
 	if ( err == TTY_ENABLED )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Started tty console (use +set ttycon 0 to disable)\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Started tty console (use +set ttycon 0 to disable)\n" );
 	}
 	else
 	{
 		if ( err == TTY_ERROR )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "stdin is not a tty, tty console mode failed\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "stdin is not a tty, tty console mode failed\n" );
 			Cvar_Set( "ttycon", "0" );
 		}
 	}

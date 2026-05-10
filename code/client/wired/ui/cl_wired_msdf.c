@@ -4,6 +4,8 @@ cl_wired_msdf.c -- MSDF font loading and rendering
 
 #include "../../client.h"
 #include "cl_wired_msdf.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
 
@@ -170,7 +172,7 @@ static void JSON_NextToken( jsonParser_t *jp )
 	}
 
 	/* unknown character -- skip it */
-	COM_WARN( LOG_CAT_UI, "MSDF JSON: unexpected char '%c'\n", *jp->p );
+	COM_WARN( LOG_CH(ch_ui), "MSDF JSON: unexpected char '%c'\n", *jp->p );
 	jp->p++;
 	jp->type = JTOK_NONE;
 }
@@ -295,9 +297,9 @@ static qboolean MSDF_ParseGlyph( jsonParser_t *jp, msdfFont_t *font )
 					JSON_NextToken( jp );  /* reads ',' or outer '}' */
 					if ( jp->type == JTOK_RBRACE ) break; /* glyph object closed */
 					continue; /* comma — loop back to read next key */
-				} else {
-					JSON_SkipValue( jp );
 				}
+				JSON_SkipValue( jp );
+
 			} else if ( Q_stricmp( key, "atlasBounds" ) == 0 ) {
 				if ( jp->type == JTOK_LBRACE ) {
 					MSDF_ParseBounds( jp, &aL, &aB, &aR, &aT );
@@ -305,9 +307,9 @@ static qboolean MSDF_ParseGlyph( jsonParser_t *jp, msdfFont_t *font )
 					JSON_NextToken( jp );
 					if ( jp->type == JTOK_RBRACE ) break;
 					continue;
-				} else {
-					JSON_SkipValue( jp );
 				}
+				JSON_SkipValue( jp );
+
 			} else {
 				JSON_SkipValue( jp );
 			}
@@ -415,7 +417,7 @@ static qboolean MSDF_ParseJSON( const char *text, msdfFont_t *font )
 	/* expect opening '{' */
 	JSON_NextToken( &jp );
 	if ( jp.type != JTOK_LBRACE ) {
-		COM_ERROR( LOG_CAT_UI, "MSDF_ParseJSON: expected '{' at start\n" );
+		COM_ERROR( LOG_CH(ch_ui), "MSDF_ParseJSON: expected '{' at start\n" );
 		return qfalse;
 	}
 
@@ -469,7 +471,7 @@ msdfGlyph_t *MSDF_FindGlyph( msdfFont_t *font, int unicode )
 		int mid = (lo + hi) / 2;
 		if ( font->glyphs[mid].unicode == unicode )
 			return &font->glyphs[mid];
-		else if ( font->glyphs[mid].unicode < unicode )
+		if ( font->glyphs[mid].unicode < unicode )
 			lo = mid + 1;
 		else
 			hi = mid - 1;
@@ -485,7 +487,7 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 	char         shaderPath[MAX_QPATH];
 
 	if ( !fontName || !fontName[0] ) {
-		COM_ERROR( LOG_CAT_UI, "MSDF_LoadFont: NULL font name\n" );
+		COM_ERROR( LOG_CH(ch_ui), "MSDF_LoadFont: NULL font name\n" );
 		return NULL;
 	}
 
@@ -498,7 +500,7 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 
 	/* find a free slot */
 	if ( wui_fontCount >= MAX_MSDF_FONTS ) {
-		COM_ERROR( LOG_CAT_UI, "MSDF_LoadFont: too many fonts (max %d)\n", MAX_MSDF_FONTS );
+		COM_ERROR( LOG_CH(ch_ui), "MSDF_LoadFont: too many fonts (max %d)\n", MAX_MSDF_FONTS );
 		return NULL;
 	}
 	msdfFont_t *font = &wui_fonts[wui_fontCount];
@@ -512,12 +514,12 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 	void *buf;
 	int   len = FS_ReadFile( jsonPath, &buf );
 	if ( len <= 0 || !buf ) {
-		COM_WARN( LOG_CAT_UI, "MSDF_LoadFont: could not read '%s'\n", jsonPath );
+		COM_WARN( LOG_CH(ch_ui), "MSDF_LoadFont: could not read '%s'\n", jsonPath );
 		return NULL;
 	}
 
 	if ( !MSDF_ParseJSON( (const char *)buf, font ) ) {
-		COM_ERROR( LOG_CAT_UI, "MSDF_LoadFont: parse error in '%s'\n", jsonPath );
+		COM_ERROR( LOG_CH(ch_ui), "MSDF_LoadFont: parse error in '%s'\n", jsonPath );
 		FS_FreeFile( buf );
 		return NULL;
 	}
@@ -530,7 +532,7 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 
 	/* validate atlas metadata */
 	if ( font->atlasWidth <= 0 || font->atlasHeight <= 0 ) {
-		COM_ERROR( LOG_CAT_UI, "MSDF_LoadFont: invalid atlas dimensions in '%s'\n", jsonPath );
+		COM_ERROR( LOG_CH(ch_ui), "MSDF_LoadFont: invalid atlas dimensions in '%s'\n", jsonPath );
 		return NULL;
 	}
 
@@ -540,14 +542,14 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 	font->atlasShader = re.RegisterMSDFShader( shaderPath,
 		font->distanceRange, font->atlasWidth, font->atlasHeight );
 	if ( font->atlasShader == 0 ) {
-		COM_WARN( LOG_CAT_UI, "MSDF_LoadFont: could not register atlas shader '%s'\n", shaderPath );
+		COM_WARN( LOG_CH(ch_ui), "MSDF_LoadFont: could not register atlas shader '%s'\n", shaderPath );
 		/* not fatal -- font can still be used for measurement */
 	}
 
 	font->loaded = qtrue;
 	wui_fontCount++;
 
-	Com_Log( SEV_DEBUG, LOG_CAT_UI, "MSDF_LoadFont: loaded '%s' (%dx%d atlas, %.0f px, %d glyphs)\n",
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "MSDF_LoadFont: loaded '%s' (%dx%d atlas, %.0f px, %d glyphs)\n",
 	            fontName, font->atlasWidth, font->atlasHeight, font->atlasSize,
 	            font->glyphCount );
 
@@ -573,12 +575,12 @@ void MSDF_ReregisterShaders( void )
 			f->distanceRange, f->atlasWidth, f->atlasHeight );
 
 		if ( f->atlasShader == 0 ) {
-			COM_WARN( LOG_CAT_UI, "MSDF_ReregisterShaders: failed for '%s'\n", f->name );
+			COM_WARN( LOG_CH(ch_ui), "MSDF_ReregisterShaders: failed for '%s'\n", f->name );
 		}
 	}
 
 	if ( wui_fontCount > 0 ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_UI, "MSDF_ReregisterShaders: re-registered %d font(s)\n", wui_fontCount );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "MSDF_ReregisterShaders: re-registered %d font(s)\n", wui_fontCount );
 	}
 }
 

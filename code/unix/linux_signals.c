@@ -38,12 +38,12 @@ static qboolean signalcaught = qfalse;
 
 extern void NORETURN Sys_Exit( int code );
 
-/* Write a crash log to /tmp/q3now_crash.txt.
+/* Write a crash log to /tmp/wired_crash.txt.
  * Uses only async-signal-safe calls for the fd/write path; backtrace_symbols
  * technically isn't safe but is acceptable here since we're already crashing. */
 static void WriteCrashLog( int sig )
 {
-	static char  path[] = "/tmp/q3now_crash.txt";
+	static char  path[] = "/tmp/wired_crash.txt";
 	void        *syms[64];
 	int          size;
 	int          fd;
@@ -62,7 +62,7 @@ static void WriteCrashLog( int sig )
 
 	strftime( timestr, sizeof( timestr ), "%Y-%m-%d %H:%M:%S", tm );
 	snprintf( header, sizeof( header ),
-	          "=== q3now crash log ===\nTime:   %s\nSignal: %d (%s)\nFrames: %d\n\n",
+	          "=== Wired crash log ===\nTime:   %s\nSignal: %d (%s)\nFrames: %d\n\n",
 	          timestr, sig,
 	          sig == SIGSEGV ? "SIGSEGV (null/bad pointer)" :
 	          sig == SIGBUS  ? "SIGBUS (bus error)"         :

@@ -128,9 +128,8 @@ Clamp fp values that may result in denormalization after further multiplication
 float R_ClampDenorm( float v ) {
 	if ( fabsf( v ) > 0.0f && fabsf( v ) < 1e-9f ) {
 		return 0.0f;
-	} else {
-		return v;
 	}
+	return v;
 }
 
 
@@ -142,8 +141,13 @@ R_ColorShiftLightingBytes
 void R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha ) {
 	int		shift, r, g, b;
 
-	// shift the color data based on overbright range
-	shift = r_mapOverBrightBits->integer - tr.overbrightBits;
+	// Bake r_mapBrightness into lightmap pixel data at BSP load.
+	// r_brightness no longer compensates here — it lives in the
+	// gamma post-process pipeline's obScale spec constant
+	// (rebaked at pipeline-recreation time when the CVG_RENDERER
+	// group's modificationCount changes; see tr_cmds.c). The two
+	// cvars compose multiplicatively in final visible output.
+	shift = tr.mapOverbrightBits;
 
 	// shift the data based on overbright range
 	if ( shift >= 0 ) {
@@ -164,17 +168,28 @@ void R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha
 		b = in[2] >> -shift;
 	}
 
-	if ( r_mapGreyScale->integer ) {
-		const byte luma = LUMA( r, g, b );
-		out[0] = luma;
-		out[1] = luma;
-		out[2] = luma;
-	} else if( r_mapGreyScale->value ) {
-		const float scale = fabs( r_mapGreyScale->value );
+	if ( r_lightmapSaturation->value != 1.0f ) {
+		const float sat = r_lightmapSaturation->value;
 		const float luma = LUMA( r, g, b );
-		out[0] = LERP( r, luma, scale );
-		out[1] = LERP( g, luma, scale );
-		out[2] = LERP( b, luma, scale );
+		// saturation 0 → luma (grey); 1 → identity (excluded by
+		// the branch above); 2 → super-saturation, clamped to
+		// byte range below. Same formula as r_mapSaturation in
+		// tr_image.c.
+		const float fr = luma + sat * ( (float)r - luma );
+		const float fg = luma + sat * ( (float)g - luma );
+		const float fb = luma + sat * ( (float)b - luma );
+		int ri = (int)( fr + 0.5f );
+		int gi = (int)( fg + 0.5f );
+		int bi = (int)( fb + 0.5f );
+		if ( ri < 0 )   ri = 0;
+		if ( ri > 255 ) ri = 255;
+		if ( gi < 0 )   gi = 0;
+		if ( gi > 255 ) gi = 255;
+		if ( bi < 0 )   bi = 0;
+		if ( bi > 255 ) bi = 255;
+		out[0] = (byte)ri;
+		out[1] = (byte)gi;
+		out[2] = (byte)bi;
 	} else {
 		out[0] = r;
 		out[1] = g;
@@ -210,7 +225,7 @@ static void FillBorders( byte *img )
 		x0 = n - 1; x1 = LIGHTMAP_LEN - n;
 		y0 = n - 1; y1 = LIGHTMAP_LEN - n;
 		len = LIGHTMAP_SIZE + (LIGHTMAP_BORDER*2 - n);
-		for ( i = n; i < len; i++ ) 
+		for ( i = n; i < len; i++ )
 		{
 			PIX( i, y0, 0 ) = PIX( i, y0+1, 0 );
 			PIX( i, y0, 1 ) = PIX( i, y0+1, 1 );
@@ -238,12 +253,12 @@ static void FillBorders( byte *img )
 		PIX( x0, y0, 1 ) = (int)(PIX( x0, y0+1, 1 ) + PIX( x0+1, y0, 1 )) >> 1;
 		PIX( x0, y0, 2 ) = (int)(PIX( x0, y0+1, 2 ) + PIX( x0+1, y0, 2 )) >> 1;
 		PIX( x0, y0, 3 ) = (int)(PIX( x0, y0+1, 3 ) + PIX( x0+1, y0, 3 )) >> 1;
-		
+
 		PIX( x1, y0, 0 ) = (int)(PIX( x1-1, y0, 0 ) + PIX( x1, y0+1, 0 )) >> 1;
 		PIX( x1, y0, 1 ) = (int)(PIX( x1-1, y0, 1 ) + PIX( x1, y0+1, 1 )) >> 1;
 		PIX( x1, y0, 2 ) = (int)(PIX( x1-1, y0, 2 ) + PIX( x1, y0+1, 2 )) >> 1;
 		PIX( x1, y0, 3 ) = (int)(PIX( x1-1, y0, 3 ) + PIX( x1, y0+1, 3 )) >> 1;
-	
+
 		PIX( x0, y1, 0 ) = (int)(PIX( x0, y1-1, 0 ) + PIX( x0+1, y1, 0 )) >> 1;
 		PIX( x0, y1, 1 ) = (int)(PIX( x0, y1-1, 1 ) + PIX( x0+1, y1, 1 )) >> 1;
 		PIX( x0, y1, 2 ) = (int)(PIX( x0, y1-1, 2 ) + PIX( x0+1, y1, 2 )) >> 1;
@@ -421,7 +436,7 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image, qboolean isQ1Li
 					break;
 
 				R_ProcessLightmap( image, buf + offs, maxIntensity, isQ1Lightmap );
-				
+
 #ifdef USE_VULKAN
 				vk_upload_image_data( tr.lightmaps[ i ], x * LIGHTMAP_LEN, y * LIGHTMAP_LEN, LIGHTMAP_LEN, LIGHTMAP_LEN, 1, image, LIGHTMAP_LEN * LIGHTMAP_LEN * 4, qtrue, 0 );
 #else
@@ -1124,7 +1139,7 @@ static void ParseTriSurf( const dsurface_t *ds, const drawVert_t *verts, int num
 	// get shader
 	surf->shader = ShaderForShaderNum( LittleLong( ds->shaderNum ), LIGHTMAP_BY_VERTEX );
 
-	tri = ri.Hunk_Alloc( sizeof( *tri ) + numVerts * sizeof( tri->verts[0] ) 
+	tri = ri.Hunk_Alloc( sizeof( *tri ) + numVerts * sizeof( tri->verts[0] )
 		+ numIndexes * sizeof( tri->indexes[0] ), h_low );
 	tri->surfaceType = SF_TRIANGLES;
 	tri->numVerts = numVerts;
@@ -2108,7 +2123,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 	numNodes = nodeLump->filelen / sizeof(dnode_t);
 	numLeafs = leafLump->filelen / sizeof(dleaf_t);
 
-	out = ri.Hunk_Alloc ( (numNodes + numLeafs) * sizeof(*out), h_low);	
+	out = ri.Hunk_Alloc ( (numNodes + numLeafs) * sizeof(*out), h_low);
 
 	s_worldData.nodes = out;
 	s_worldData.numnodes = numNodes + numLeafs;
@@ -2122,7 +2137,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 			out->mins[j] = LittleLong (in->mins[j]);
 			out->maxs[j] = LittleLong (in->maxs[j]);
 		}
-	
+
 		p = LittleLong(in->planeNum);
 		if ( p >= s_worldData.numplanes ) {
 			ri.Terminate( TERM_CLIENT_DROP, "%s: bad planeNum", __func__ );
@@ -2148,7 +2163,7 @@ static void R_LoadNodesAndLeafs( const lump_t *nodeLump, const lump_t *leafLump 
 			}
 		}
 	}
-	
+
 	// load leafs
 	inLeaf = (void *)(fileBase + leafLump->fileofs);
 	for ( i=0 ; i<numLeafs ; i++, inLeaf++, out++)
@@ -2195,7 +2210,7 @@ R_ReplaceShaders
 replaces some buggy map shaders
 =================
 */
-static void R_ReplaceMapShaders( dshader_t *out, int count ) 
+static void R_ReplaceMapShaders( dshader_t *out, int count )
 {
 	if ( Q_stricmp( s_worldData.baseName, "mapel4b" ) == 0 && count == 86 ) {
 		if ( crc32_buffer( (const byte*)out, count*sizeof(*out) ) == 0x1593623C ) {
@@ -2215,7 +2230,7 @@ R_LoadShaders
 static void R_LoadShaders( const lump_t *l ) {
 	int		i, count;
 	dshader_t	*in, *out;
-	
+
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
 		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
@@ -2242,12 +2257,12 @@ R_LoadMarksurfaces
 =================
 */
 static void R_LoadMarksurfaces( const lump_t *l )
-{	
+{
 	int		i, count;
 	unsigned	j;
 	int		*in;
 	msurface_t **out;
-	
+
 	in = (void *)(fileBase + l->fileofs);
 	if (l->filelen % sizeof(*in))
 		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
@@ -2393,15 +2408,19 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 
 		// get information from the shader for fog parameters
 		shader = R_FindShader( fogs->shader, LIGHTMAP_NONE, qtrue );
-	
+
 		VectorCopy( shader->fogParms.color, fogColor );
 
-		if ( r_mapGreyScale->value > 0 ) {
-			float luminance;
-			luminance = LUMA( fogColor[0], fogColor[1], fogColor[2] );
-			fogColor[0] = LERP( fogColor[0], luminance, r_mapGreyScale->value );
-			fogColor[1] = LERP( fogColor[1], luminance, r_mapGreyScale->value );
-			fogColor[2] = LERP( fogColor[2], luminance, r_mapGreyScale->value );
+		if ( r_mapSaturation->value != 1.0f ) {
+			const float sat = r_mapSaturation->value;
+			const float luma = LUMA( fogColor[0], fogColor[1], fogColor[2] );
+			// saturation 0 → luma; 1 → identity (excluded); 2 →
+			// super-saturated. fogColor is float; downstream byte
+			// conversion at line 2413-2415 clamps via the float→byte
+			// cast. No clamp needed here.
+			fogColor[0] = luma + sat * ( fogColor[0] - luma );
+			fogColor[1] = luma + sat * ( fogColor[1] - luma );
+			fogColor[2] = luma + sat * ( fogColor[2] - luma );
 		}
 
 		out->parms = shader->fogParms;
@@ -2606,9 +2625,8 @@ qboolean RE_GetEntityToken( char *buffer, int size ) {
 	if ( !s_worldData.entityParsePoint && !s[0] ) {
 		s_worldData.entityParsePoint = s_worldData.entityString;
 		return qfalse;
-	} else {
-		return qtrue;
 	}
+	return qtrue;
 }
 
 
@@ -3057,7 +3075,7 @@ ParsePropFace
 Face parser for standalone Q1 BSP props (e.g. maps/b_explob.bsp).
 Resolves the shader full-bright (LIGHTMAP_WHITEIMAGE) so the Q1 LS
 pipeline never fires, then delegates geometry to ParseFaceCommon.
-No lightmap atlas, no anim chains, no lightstyle slots in Faz 1.
+No lightmap atlas, no anim chains, no lightstyle slots in Phase 1.
 ===========
 */
 static void ParsePropFace( const dsurface_t *ds, const drawVert_t *verts, int numPoints,

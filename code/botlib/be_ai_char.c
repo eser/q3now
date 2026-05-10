@@ -399,22 +399,21 @@ static bot_character_t *BotLoadCharacterFromFile(const char *charfile, int skill
 				} //end if
 				break;
 			} //end if
-			else
-			{
-				indent = 1;
-				while(indent)
-				{
-					if (!PC_ExpectAnyToken(source, &token))
-					{
-						FreeSource(source);
-						BotFreeCharacterStrings(ch);
-						FreeMemory(ch);
-						return NULL;
-					} //end if
-					if (!strcmp(token.string, "{")) indent++;
-					else if (!strcmp(token.string, "}")) indent--;
-				} //end while
-			} //end else
+
+			indent = 1;
+			while ( indent ) {
+				if ( !PC_ExpectAnyToken( source, &token ) ) {
+					FreeSource( source );
+					BotFreeCharacterStrings( ch );
+					FreeMemory( ch );
+					return NULL;
+				} //end if
+				if ( !strcmp( token.string, "{" ) )
+					indent++;
+				else if ( !strcmp( token.string, "}" ) )
+					indent--;
+			} //end while
+			//end else
 		} //end if
 		else
 		{
@@ -593,6 +592,7 @@ static int BotLoadCharacterSkill(const char *charfile, float skill)
 
 	if (defaultch && ch)
 	{
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — handles `ch` and `defaultch` are bounded by BotLoadCachedCharacter / botchar registry; analyzer doesn't model the registry contract
 		BotDefaultCharacteristics(botcharacters[ch], botcharacters[defaultch]);
 	} //end if
 
@@ -714,6 +714,7 @@ int BotLoadCharacter(const char *charfile, float skill)
 	BotReferenceHandle( handle, 1 );
 
 	//write the character to the log file
+	// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — `handle` is bounded by BotReferenceHandle / botchar registry; analyzer doesn't model the registry contract
 	BotDumpCharacter(botcharacters[handle]);
 	//
 	return handle;
@@ -762,17 +763,14 @@ float Characteristic_Float(int character, int index)
 		return (float) ch->c[index].value.integer;
 	} //end if
 	//floats are just returned
-	else if (ch->c[index].type == CT_FLOAT)
-	{
+	if ( ch->c[index].type == CT_FLOAT ) {
 		return ch->c[index].value._float;
 	} //end else if
 	//cannot convert a string pointer to a float
-	else
-	{
-		botimport.Print(PRT_ERROR, "characteristic %d is not a float\n", index);
-		return 0;
-	} //end else if
-//	return 0;
+	botimport.Print( PRT_ERROR, "characteristic %d is not a float\n", index );
+	return 0;
+	//end else if
+	//	return 0;
 } //end of the function Characteristic_Float
 //===========================================================================
 //
@@ -817,16 +815,13 @@ int Characteristic_Integer(int character, int index)
 		return ch->c[index].value.integer;
 	} //end if
 	//floats are casted to integers
-	else if (ch->c[index].type == CT_FLOAT)
-	{
-		return (int) ch->c[index].value._float;
+	if ( ch->c[index].type == CT_FLOAT ) {
+		return (int)ch->c[index].value._float;
 	} //end else if
-	else
-	{
-		botimport.Print(PRT_ERROR, "characteristic %d is not an integer\n", index);
-		return 0;
-	} //end else if
-//	return 0;
+	botimport.Print( PRT_ERROR, "characteristic %d is not an integer\n", index );
+	return 0;
+	//end else if
+	//	return 0;
 } //end of the function Characteristic_Integer
 //===========================================================================
 //

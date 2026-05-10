@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // world.c -- world query functions
 
 #include "server.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 /*
 ================
@@ -88,7 +90,7 @@ void SV_SectorList_f( void ) {
 		for ( svEntity_t *ent = sec->entities ; ent ; ent = ent->nextEntityInWorldSector ) {
 			c++;
 		}
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "sector %i: %i entities\n", i, c );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "sector %i: %i entities\n", i, c );
 	}
 }
 
@@ -179,7 +181,7 @@ void SV_UnlinkEntity( sharedEntity_t *gEnt ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_SERVER, "WARNING: SV_UnlinkEntity: not found in worldSector\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_server), "WARNING: SV_UnlinkEntity: not found in worldSector\n" );
 }
 
 
@@ -280,7 +282,7 @@ void SV_LinkEntity( sharedEntity_t *gEnt ) {
 			// but nothing should ever need more than that
 			if (ent->areanum != -1 && ent->areanum != area) {
 				if (ent->areanum2 != -1 && ent->areanum2 != area && sv.state == SS_LOADING) {
-					Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "Object %i touching 3 areas at %f %f %f\n",
+					Com_Log( SEV_DEBUG, LOG_CH(ch_server), "Object %i touching 3 areas at %f %f %f\n",
 					gEnt->s.number,
 					gEnt->r.absmin[0], gEnt->r.absmin[1], gEnt->r.absmin[2]);
 				}
@@ -376,7 +378,7 @@ static void SV_AreaEntities_r( worldSector_t *node, areaParms_t *ap ) {
 		}
 
 		if ( ap->count == ap->maxcount ) {
-			Com_Log( SEV_INFO, LOG_CAT_SERVER, "SV_AreaEntities: MAXCOUNT\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "SV_AreaEntities: MAXCOUNT\n");
 			return;
 		}
 

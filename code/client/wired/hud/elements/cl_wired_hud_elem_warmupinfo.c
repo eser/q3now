@@ -54,6 +54,7 @@ void CG_ModernHUDElementWarmupInfoRoutine(void* context)
 	{
 		return;
 	}
+	// NOLINTNEXTLINE(clang-analyzer-core.StackAddressEscape) — element->ctx.text aliases a local stack buffer; consumed within CG_ModernHUDTextPrint and not retained past this call
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 

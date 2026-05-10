@@ -8,7 +8,7 @@ layout(location = 0) out vec4 out_color;
 
 //layout(constant_id = 0) const float gamma = 1.0;
 //layout(constant_id = 1) const float obScale = 2.0;
-//layout(constant_id = 2) const float greyscale = 0.0;
+//layout(constant_id = 2) const float saturation = 1.0;
 layout(constant_id = 3) const float threshold = 0.6;
 //layout(constant_id = 4) const float factor = 0.5;
 layout(constant_id = 5) const int extract_mode = 0;

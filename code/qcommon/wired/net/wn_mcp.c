@@ -23,13 +23,13 @@ hand-rolled tokenizer that handles the JSON-RPC envelope.
 */
 #include "wn_local.h"
 #include "../../../server/server.h"  // for svs, sv, client_t, SV_GentityNum, sharedEntity_t
-#include "../../../game/bg_public.h" // for bg_itemlist, ET_ITEM
+#include "../protocol.h"             // for bg_itemlist, ET_ITEM, gitem_t
 
 #if FEAT_WIREDNET_CONTROL
 
 #define MCP_PROTOCOL_VERSION  "2025-03-26"
-#define MCP_SERVER_NAME       "q3-engine"
-#define MCP_SERVER_VERSION    "69.0.1"
+#define MCP_SERVER_NAME       "wired-mcp"
+#define MCP_SERVER_VERSION    WIRED_ENGINE_VERSION
 #define MCP_MAX_RESPONSE      (32 * 1024)  // 32KB max response
 
 // ── Minimal JSON helpers ─────────────────────────────────────────
@@ -370,6 +370,7 @@ static void WN_McpHandleEventHistory_Buf( char *out, int out_size,
 
 		// Write je->json with JSON string escaping: " → \", \ → \\
 		p = je->json;
+		// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign) — je->json is the registered JSON-escape buffer, populated upstream
 		while ( (c = (unsigned char)*p++) && off < out_size - 4 ) {
 			if ( c < 0x20 ) continue;
 			if ( c == '"' || c == '\\' ) out[off++] = '\\';
@@ -1535,7 +1536,7 @@ static void WN_McpHandleStartCasting_Buf( char *out, int out_size,
 		"COMMENTARY STYLE:\n"
 		"  - Short, punchy, energetic. Under 80 characters per message.\n"
 		"  - React to events, don't just list facts.\n"
-		"  - Use excitement for big plays: '[CASTER] HUGE rail by Sarge! 2 frags to go!'\n"
+		"  - Use excitement for big plays: '[CASTER] HUGE ${meansOfDeath} by ${player}! ${score} frags to go!'\n"
 		"  - Use tension for close matches: '[CASTER] 24-23, match point, who wants it more?'\n"
 		"  - Call out skill: '[CASTER] Clean rocket prediction, nothing Keel could do.'\n"
 		"  - Note patterns: '[CASTER] Third time Sarge dies at RL spawn. Eser owns that corridor.'\n"
@@ -1558,7 +1559,7 @@ static void WN_McpHandleStartCasting_Buf( char *out, int out_size,
 		"EXAMPLES (ASCII only — no accented chars):\n"
 		"  '[CASTER] Sarge opens with a double rocket -- Keel down! 1-0.'\n"
 		"  '[CASTER] Eser grabs quad. 30 seconds of carnage incoming.'\n"
-		"  '[CASTER] WHAT A RAIL! Keel from across the map! Tied 12-12!'\n"
+		"  '[CASTER] WHAT A ${meansOfDeath}! ${player} from across the map! Tied ${score}-${score}!'\n"
 		"  '[CASTER] Sarge on a 5 streak. Nobody can touch him right now.'\n"
 		"  '[CASTER] Match point. 24-23 Eser. One more frag...'\n"
 		"  '[CASTER] THAT IS THE MATCH! Eser takes it 25-19. GG!'\n"

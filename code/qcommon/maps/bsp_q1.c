@@ -1,7 +1,7 @@
 /*
 ===========================================================================
 Copyright (C) 1996-1997 Id Software, Inc.
-Copyright (C) 2024 q3now contributors
+Copyright (C) 2024 Wired engine contributors
 
 This file is part of Quake III Arena source code.
 
@@ -39,6 +39,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "bsp.h"
 #include "../surfaceflags.h"
 #include "../cm_local.h"   /* for cm.q1.leafContents in post-dup extension */
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_loading, "loading" );
 
 #if FEAT_RECAST_NAVMESH
 #include "../nav/nav_local.h"
@@ -311,12 +313,12 @@ static void BSP_Q1_WalkClipTree( ClipWalk_t *w,
 		const q1_dclipnode_t *node;
 
 		if ( cnIdx >= numCn ) {
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING, S_COLOR_YELLOW "BSP_Q1_WalkClipTree: index %d >= numCn %d\n",
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading), S_COLOR_YELLOW "BSP_Q1_WalkClipTree: index %d >= numCn %d\n",
 			            cnIdx, numCn );
 			return;
 		}
 		if ( w->depth >= MAX_CLIP_DEPTH ) {
-			Com_Log( SEV_WARN, LOG_CAT_LOADING, "BSP_Q1_WalkClipTree: depth %d >= MAX_CLIP_DEPTH; solid leaf dropped\n",
+			Com_Log( SEV_WARN, LOG_CH(ch_loading), "BSP_Q1_WalkClipTree: depth %d >= MAX_CLIP_DEPTH; solid leaf dropped\n",
 			            w->depth );
 			return;
 		}
@@ -552,15 +554,15 @@ static void BSP_Q1_DiagBrushes( const char *name, const bspFile_t *bsp, int enab
 	Q_strncpyz( lastBsp, name, sizeof( lastBsp ) );
 
 	nPrint = bsp->numBrushes < 3 ? bsp->numBrushes : 3;
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG] === Brush dump (first %d of %d) ===\n", nPrint, bsp->numBrushes );
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG] === Brush dump (first %d of %d) ===\n", nPrint, bsp->numBrushes );
 	for ( i = 0; i < nPrint; i++ ) {
 		const dbrush_t *b = &bsp->brushes[i];
-		Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG] brush[%d]: %d sides shader=%d\n", i, b->numSides, b->shaderNum );
+		Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG] brush[%d]: %d sides shader=%d\n", i, b->numSides, b->shaderNum );
 		for ( k = 0; k < b->numSides; k++ ) {
 			const dbrushside_t *s = &bsp->brushSides[b->firstSide + k];
 			int pn = s->planeNum;
 			const dplane_t *p = &bsp->planes[pn];
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG]   side[%d]: pn=%d(orig=%d,s=%d) n=(%.4f,%.4f,%.4f) d=%.4f\n",
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG]   side[%d]: pn=%d(orig=%d,s=%d) n=(%.4f,%.4f,%.4f) d=%.4f\n",
 			            k, pn, pn >> 1, pn & 1,
 			            p->normal[0], p->normal[1], p->normal[2], p->dist );
 		}
@@ -575,8 +577,8 @@ static void BSP_Q1_DiagBrushes( const char *name, const bspFile_t *bsp, int enab
 		testPt[1] = spawnOrig[1];
 		testPt[2] = spawnOrig[2];
 
-		Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG] === Q3-CM spawn trace ===\n" );
-		Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG] spawnOrigin=(%.1f,%.1f,%.1f) testPt=spawnOrigin\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG] === Q3-CM spawn trace ===\n" );
+		Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG] spawnOrigin=(%.1f,%.1f,%.1f) testPt=spawnOrigin\n",
 		            spawnOrig[0], spawnOrig[1], spawnOrig[2] );
 
 		nodeIdx   = 0;
@@ -586,19 +588,19 @@ static void BSP_Q1_DiagBrushes( const char *name, const bspFile_t *bsp, int enab
 			const dplane_t *pl = &bsp->planes[node->planeNum];
 			float d = DotProduct( testPt, pl->normal ) - pl->dist;
 			nodeIdx = ( d >= 0.0f ) ? node->children[0] : node->children[1];
-			if ( ++walkDepth > 100 ) { Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG] BSP walk depth limit\n" ); break; }
+			if ( ++walkDepth > 100 ) { Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG] BSP walk depth limit\n" ); break; }
 		}
 		leafIdx = -(nodeIdx + 1);
-		Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG] render BSP → leafIdx=%d\n", leafIdx );
+		Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG] render BSP → leafIdx=%d\n", leafIdx );
 
 		if ( leafIdx < 0 || leafIdx >= bsp->numLeafs ) {
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG] leafIdx out of range (%d leafs)\n", bsp->numLeafs );
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG] leafIdx out of range (%d leafs)\n", bsp->numLeafs );
 			return;
 		}
 
 		{
 			const dleaf_t *lf = &bsp->leafs[leafIdx];
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG] leaf[%d]: firstLeafBrush=%d numLeafBrushes=%d\n",
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG] leaf[%d]: firstLeafBrush=%d numLeafBrushes=%d\n",
 			            leafIdx, lf->firstLeafBrush, lf->numLeafBrushes );
 
 			maxLB = lf->numLeafBrushes < 8 ? lf->numLeafBrushes : 8;
@@ -607,7 +609,7 @@ static void BSP_Q1_DiagBrushes( const char *name, const bspFile_t *bsp, int enab
 				const dbrush_t *b;
 				qboolean inside = qtrue;
 				if ( bi < 0 || bi >= bsp->numBrushes ) {
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG]   leafBrush[%d]: bi=%d OUT OF RANGE\n", lb, bi );
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG]   leafBrush[%d]: bi=%d OUT OF RANGE\n", lb, bi );
 					continue;
 				}
 				b = &bsp->brushes[bi];
@@ -617,21 +619,21 @@ static void BSP_Q1_DiagBrushes( const char *name, const bspFile_t *bsp, int enab
 					float d = DotProduct( testPt, p->normal ) - p->dist;
 					if ( d > 0.0f ) inside = qfalse;
 				}
-				Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG]   leafBrush[%d]=brush[%d] (%d sides): testPt %s\n",
+				Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG]   leafBrush[%d]=brush[%d] (%d sides): testPt %s\n",
 				            lb, bi, b->numSides, inside ? "INSIDE(solid)" : "OUTSIDE" );
 				for ( k = 0; k < b->numSides; k++ ) {
 					const dbrushside_t *s = &bsp->brushSides[b->firstSide + k];
 					int pn = s->planeNum;
 					const dplane_t *p = &bsp->planes[pn];
 					float d = DotProduct( testPt, p->normal ) - p->dist;
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG]     side[%d]: pn=%d(orig=%d,s=%d) n=(%.4f,%.4f,%.4f) dist=%.4f testD=%.4f [%s]\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG]     side[%d]: pn=%d(orig=%d,s=%d) n=(%.4f,%.4f,%.4f) dist=%.4f testD=%.4f [%s]\n",
 					            k, pn, pn >> 1, pn & 1,
 					            p->normal[0], p->normal[1], p->normal[2], p->dist, d,
 					            d > 0.0f ? "OUTSIDE" : "inside" );
 				}
 			}
 			if ( lf->numLeafBrushes > 8 )
-				Com_Log( SEV_TRACE, LOG_CAT_LOADING, "[Q1DIAG]   ...(%d more brushes)\n", lf->numLeafBrushes - 8 );
+				Com_Log( SEV_TRACE, LOG_CH(ch_loading), "[Q1DIAG]   ...(%d more brushes)\n", lf->numLeafBrushes - 8 );
 		}
 	}
 }
@@ -1093,7 +1095,7 @@ static void BSP_Q1_RemoveRedundantPlanes( bspFile_t *bsp ) {
 		// AddBrushBevels guarantees ≥6 axial sides; fewer than 4 surviving
 		// means a degenerate zero-volume brush — drop it.
 		if ( nKeep < 4 ) {
-			Com_Log( SEV_WARN, LOG_CAT_LOADING,
+			Com_Log( SEV_WARN, LOG_CH(ch_loading),
 				"Q1RemoveRedundantPlanes: brush %d has %d sides after reduction — dropped\n",
 				bi, nKeep );
 			b->numSides  = 0;
@@ -1153,7 +1155,7 @@ static void BSP_Q1_RemoveRedundantPlanes( bspFile_t *bsp ) {
 		Z_Free( newIdx );
 	}
 
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 		"Q1RemoveRedundantPlanes: %d brushes processed, %d redundant planes removed, "
 		"%d brushes dropped (degenerate)\n",
 		bsp->numBrushes + nDropped, nRemoved, nDropped );
@@ -1605,13 +1607,13 @@ next_brush:
 		/* DIAGB: log firstSide/numSides/planes for first 3 brushes + brushes 710 and 631 */
 		if ( bi < 3 || bi == 710 || bi == 631 ) {
 			int dk;
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 			    "DIAGB brush[%d]: firstSide=%d numSides=%d btFound=%d\n",
 			    bi, (int)br->firstSide, brNumSides, (int)btFound );
 			for ( dk = 0; dk < brNumSides && dk < 4; dk++ ) {
 				const dbrushside_t *ds = &newSides[br->firstSide + dk];
 				const dplane_t     *dp = &newPlanes[ds->planeNum];
-				Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+				Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 				    "  DIAGB   side[%d] pn=%d n=(%.3f,%.3f,%.3f) dist=%.3f\n",
 				    dk, ds->planeNum,
 				    dp->normal[0], dp->normal[1], dp->normal[2], dp->dist );
@@ -1628,7 +1630,7 @@ next_brush:
 	bsp->planes        = newPlanes;
 	bsp->numPlanes     = numNewPlanes;
 
-	Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q1_AddBrushBevels: %d brushes processed, "
+	Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q1_AddBrushBevels: %d brushes processed, "
 	         "%d box bevels + %d edge bevels added, "
 	         "%d degenerate brushes skipped\n",
 	         numBrushes, totalBoxBevels, totalEdgeBevels, numDegenerateBrushes );
@@ -1766,7 +1768,7 @@ static void BSP_Q1_SynthesizeWorldShell( bspFile_t *bsp )
 	}
 	bsp->subModels[0].numBrushes += 6;
 
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: synthesized 6 world shell brushes "
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: synthesized 6 world shell brushes "
 	         "(bounds (%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f) margin=%.0f)\n",
 	         wmins[0], wmins[1], wmins[2], wmaxs[0], wmaxs[1], wmaxs[2], SD );
 }
@@ -1910,7 +1912,7 @@ static void BSP_Q1_SynthesizeLiquidBrushes( bspFile_t *bsp,
 	bsp->subModels[0].numBrushes += numLiquid;
 
 	if ( nWater + nSlime + nLava > 0 ) {
-		Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q1_Load: synthesized %d liquid brushes "
+		Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q1_Load: synthesized %d liquid brushes "
 		         "(%d water, %d slime, %d lava)\n",
 		         nWater + nSlime + nLava, nWater, nSlime, nLava );
 	}
@@ -1946,7 +1948,7 @@ static void BSP_Q1_LogEntitiesByModel( const char *entityString,
 		}
 
 		if ( hit ) {
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load entity #%d:\n", entNum );
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load entity #%d:\n", entNum );
 			const char *kp = bstart + 1;
 			while ( kp < bend ) {
 				/* Skip whitespace / newlines */
@@ -1977,7 +1979,7 @@ static void BSP_Q1_LogEntitiesByModel( const char *entityString,
 				}
 
 				if ( key[0] )
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  \"%s\" \"%s\"\n", key, val );
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  \"%s\" \"%s\"\n", key, val );
 			}
 		}
 
@@ -2221,7 +2223,7 @@ static void Q1_PostProcessPVS( bspFile_t        *bsp,
 
 	Z_Free( scratch );
 
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 		"Q1_PostProcessPVS: %d clusters x %d clusterBytes, "
 		"pop-in + liquid PVS expansion applied\n",
 		numClusters, clusterBytes );
@@ -2243,7 +2245,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 	*bspFile = NULL;
 
 	if ( length < (int)sizeof( q1_dheader_t ) ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_LOADING, "BSP_Q1_Load: %s has truncated header\n", name );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_loading), "BSP_Q1_Load: %s has truncated header\n", name );
 		return qfalse;
 	}
 
@@ -2262,7 +2264,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		uint32_t ofs = header.lumps[i].fileofs;
 		uint32_t len = header.lumps[i].filelen;
 		if ( (uint64_t)ofs + len > (uint64_t)length ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_LOADING, "BSP_Q1_Load: %s lump %i out of range (ofs=%u len=%u file=%i)\n",
+			Com_Log( SEV_DEBUG, LOG_CH(ch_loading), "BSP_Q1_Load: %s lump %i out of range (ofs=%u len=%u file=%i)\n",
 				name, i, ofs, len, length );
 			return qfalse;
 		}
@@ -2281,46 +2283,46 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 	// Q1 supports 4 lightstyle slots per face (blended at render time)
 	bsp->lightmapStyles = 4;
 
-	Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q1_Load: %s version=%d lumps:\n", name, header.version );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  entities:     %8d bytes\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q1_Load: %s version=%d lumps:\n", name, header.version );
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  entities:     %8d bytes\n",
 		header.lumps[LUMP_Q1_ENTITIES].filelen );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  planes:       %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  planes:       %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_PLANES].filelen,
 		header.lumps[LUMP_Q1_PLANES].filelen / (int)sizeof( q1_dplane_t ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  textures:     %8d bytes\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  textures:     %8d bytes\n",
 		header.lumps[LUMP_Q1_TEXTURES].filelen );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  vertexes:     %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  vertexes:     %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_VERTEXES].filelen,
 		header.lumps[LUMP_Q1_VERTEXES].filelen / (int)sizeof( q1_dvertex_t ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  visibility:   %8d bytes\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  visibility:   %8d bytes\n",
 		header.lumps[LUMP_Q1_VISIBILITY].filelen );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  nodes:        %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  nodes:        %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_NODES].filelen,
 		header.lumps[LUMP_Q1_NODES].filelen / (int)sizeof( q1_dnode_t ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  texinfo:      %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  texinfo:      %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_TEXINFO].filelen,
 		header.lumps[LUMP_Q1_TEXINFO].filelen / (int)sizeof( q1_dtexinfo_t ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  faces:        %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  faces:        %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_FACES].filelen,
 		header.lumps[LUMP_Q1_FACES].filelen / (int)sizeof( q1_dface_t ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  lighting:     %8d bytes\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  lighting:     %8d bytes\n",
 		header.lumps[LUMP_Q1_LIGHTING].filelen );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  clipnodes:    %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  clipnodes:    %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_CLIPNODES].filelen,
 		header.lumps[LUMP_Q1_CLIPNODES].filelen / (int)sizeof( q1_dclipnode_t ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  leafs:        %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  leafs:        %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_LEAFS].filelen,
 		header.lumps[LUMP_Q1_LEAFS].filelen / (int)sizeof( q1_dleaf_t ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  marksurfaces: %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  marksurfaces: %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_MARKSURFACES].filelen,
 		header.lumps[LUMP_Q1_MARKSURFACES].filelen / (int)sizeof( short ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  edges:        %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  edges:        %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_EDGES].filelen,
 		header.lumps[LUMP_Q1_EDGES].filelen / (int)sizeof( q1_dedge_t ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  surfedges:    %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  surfedges:    %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_SURFEDGES].filelen,
 		header.lumps[LUMP_Q1_SURFEDGES].filelen / (int)sizeof( int ) );
-	Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  models:       %8d bytes (%d)\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  models:       %8d bytes (%d)\n",
 		header.lumps[LUMP_Q1_MODELS].filelen,
 		header.lumps[LUMP_Q1_MODELS].filelen / (int)sizeof( q1_dmodel_t ) );
 
@@ -2348,7 +2350,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		dplane_t          *out;
 
 		if ( l->filelen % (int)sizeof( q1_dplane_t ) ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_LOADING, "BSP_Q1_Load: %s funny planes lump size\n", name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_loading), "BSP_Q1_Load: %s funny planes lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -2395,7 +2397,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		}
 
 		if ( texinfoLump->filelen % (int)sizeof( q1_dtexinfo_t ) ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_LOADING, "BSP_Q1_Load: %s funny texinfo lump size\n", name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_loading), "BSP_Q1_Load: %s funny texinfo lump size\n", name );
 			if ( miptexNames ) Hunk_FreeTempMemory( miptexNames );
 			BSP_Free( bsp );
 			return qfalse;
@@ -2421,7 +2423,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 					if ( Q_stricmpn( texName, s_liquidRemaps[ri].q1Prefix, plen ) == 0 ) {
 						Q_strncpyz( out->shader, s_liquidRemaps[ri].targetShader, sizeof( out->shader ) );
 						if ( ri == NUM_LIQUID_REMAPS - 1 ) {
-							Com_Log( SEV_WARN, LOG_CAT_LOADING,
+							Com_Log( SEV_WARN, LOG_CH(ch_loading),
 							         "BSP_Q1_Load: unmapped liquid '%s' → water\n", texName );
 						}
 						break;
@@ -2488,7 +2490,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 					int nF = (int)( header.lumps[LUMP_Q1_FACES].filelen
 					                / (int)sizeof( q1_dface_t ) );
 					uint32_t n;
-					Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q1_Load: BSPX extension: %u lumps at offset %u\n",
+					Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q1_Load: BSPX extension: %u lumps at offset %u\n",
 					         numBspxLumps, bspxOfs );
 					for ( n = 0; n < numBspxLumps; n++ ) {
 						const byte *entry = dir + n * 32;
@@ -2498,7 +2500,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 						uint32_t lofs = LittleLong( *(const int *)(entry + 24) );
 						uint32_t llen = LittleLong( *(const int *)(entry + 28) );
 						if ( (uint64_t)lofs + llen > (uint64_t)length ) {
-							Com_Log( SEV_WARN, LOG_CAT_LOADING, "BSP_Q1_Load: BSPX lump '%s' out of range\n", lname );
+							Com_Log( SEV_WARN, LOG_CH(ch_loading), "BSP_Q1_Load: BSPX lump '%s' out of range\n", lname );
 							continue;
 						}
 						if ( !strcmp( lname, "VERTEXNORMALS" ) ) {
@@ -2506,9 +2508,9 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 							if ( (int)llen == expected && nV > 0 ) {
 								bspxVertexNormals     = (const float *)( base + lofs );
 								bspxVertexNormalCount = nV;
-								Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q1_Load: BSPX VERTEXNORMALS: %d normals\n", nV );
+								Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q1_Load: BSPX VERTEXNORMALS: %d normals\n", nV );
 							} else {
-								Com_Log( SEV_WARN, LOG_CAT_LOADING,
+								Com_Log( SEV_WARN, LOG_CH(ch_loading),
 								         "BSP_Q1_Load: BSPX VERTEXNORMALS size mismatch "
 								         "(got %u expected %d)\n", llen, expected );
 							}
@@ -2517,9 +2519,9 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 							if ( (int)llen == expected && nF > 0 ) {
 								bspxFaceNormals     = (const float *)( base + lofs );
 								bspxFaceNormalCount = nF;
-								Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q1_Load: BSPX FACENORMALS: %d normals\n", nF );
+								Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q1_Load: BSPX FACENORMALS: %d normals\n", nF );
 							} else {
-								Com_Log( SEV_WARN, LOG_CAT_LOADING,
+								Com_Log( SEV_WARN, LOG_CH(ch_loading),
 								         "BSP_Q1_Load: BSPX FACENORMALS size mismatch "
 								         "(got %u expected %d)\n", llen, expected );
 							}
@@ -2635,7 +2637,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 							Q_strncpyz( skipTex, (const char *)( mipLumpBase + ofs ), sizeof(skipTex) );
 						}
 					}
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 					         "BSP_Q1_Load: skip face[%d]: numedges=%d (<3), texinfo=%d tex='%s'\n",
 					         i, n, texinfoIdx, skipTex );
 					skipLogCount++;
@@ -2749,7 +2751,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 				              lm_w, lm_h, lightBase, lightLen, lightofs, styles,
 				              litBase );
 				if ( litFaces < 20 ) {
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 					         "lightstyle face[%d]: styles=[%d,%d,%d,%d]"
 					         " (255=unused slot)\n",
 					         i, styles[0], styles[1], styles[2], styles[3] );
@@ -2838,7 +2840,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 					const char *match = ( dot >  0.9f ) ? "yes"
 					                  : ( dot < -0.9f ) ? "opposite"
 					                                    : "skewed";
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 					         "BSP_Q1 winding face[%d] side=%d:"
 					         " winding_normal=(%.3f,%.3f,%.3f)"
 					         " face_normal=(%.3f,%.3f,%.3f)"
@@ -2890,7 +2892,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 						if ( tv < minT ) minT = tv;
 						if ( tv > maxT ) maxT = tv;
 					}
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: UV sample: surface[0] st range = (%.3f..%.3f, %.3f..%.3f)\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: UV sample: surface[0] st range = (%.3f..%.3f, %.3f..%.3f)\n",
 					            minS, maxS, minT, maxT );
 				}
 			}
@@ -2926,11 +2928,11 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 			litBase = NULL;
 		}
 
-		Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: lightmap atlas: %d pages, %d lit faces, %d unlit faces\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: lightmap atlas: %d pages, %d lit faces, %d unlit faces\n",
 		            totalPages, litFaces, darkFaces );
-		Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: face normals: %d flipped (side=1), %d direct (side=0)\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: face normals: %d flipped (side=1), %d direct (side=0)\n",
 		            flippedCount, directCount );
-		Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+		Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 		         "BSP_Q1_Load: Q1 faces: %d total, %d emitted, %d skipped"
 		         " (n<3=%d texinfoClamp=%d lightofs-1=not-a-skip styles=not-a-skip)\n",
 		         numFaces, emittedCount, skippedCount,
@@ -2944,7 +2946,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		dnode_t          *out;
 
 		if ( l->filelen % (int)sizeof( q1_dnode_t ) ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_LOADING, "BSP_Q1_Load: %s funny nodes lump size\n", name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_loading), "BSP_Q1_Load: %s funny nodes lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -2982,7 +2984,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		dleaf_t          *out;
 
 		if ( l->filelen % (int)sizeof( q1_dleaf_t ) ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_LOADING, "BSP_Q1_Load: %s funny leafs lump size\n", name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_loading), "BSP_Q1_Load: %s funny leafs lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -3002,8 +3004,8 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 			}
 			out->firstLeafSurface = (int)(unsigned short)LittleShort( in->firstmarksurface );
 			out->numLeafSurfaces  = (int)(unsigned short)LittleShort( in->nummarksurfaces );
-			out->firstLeafBrush   = 0;  // Faz 4
-			out->numLeafBrushes   = 0;  // Faz 4
+			out->firstLeafBrush   = 0;  // Phase 4
+			out->numLeafBrushes   = 0;  // Phase 4
 		}
 
 		// Store Q3-translated leaf contents for native Q1 PointContents queries.
@@ -3051,7 +3053,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		const unsigned short   *in = (const unsigned short *)( base + l->fileofs );
 
 		if ( l->filelen % (int)sizeof( unsigned short ) ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_LOADING, "BSP_Q1_Load: %s funny marksurfaces lump size\n", name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_loading), "BSP_Q1_Load: %s funny marksurfaces lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -3079,7 +3081,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		dmodel_t          *out;
 
 		if ( l->filelen % (int)sizeof( q1_dmodel_t ) ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_LOADING, "BSP_Q1_Load: %s funny models lump size\n", name );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_loading), "BSP_Q1_Load: %s funny models lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -3094,8 +3096,8 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 			}
 			out->firstSurface = LittleLong( in->firstface );
 			out->numSurfaces  = LittleLong( in->numfaces );
-			out->firstBrush   = 0;  // Faz 4
-			out->numBrushes   = 0;  // Faz 4
+			out->firstBrush   = 0;  // Phase 4
+			out->numBrushes   = 0;  // Phase 4
 		}
 	}
 
@@ -3118,7 +3120,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		if ( mipCount < 0 ) mipCount = 0;
 
 		/* 1: submodel enumeration — flag any AABB overlapping bridge (480,2000,80) ±300 */
-		Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: submodel enumeration (%d total):\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: submodel enumeration (%d total):\n",
 		         bsp->numSubModels );
 		for ( i = 0; i < bsp->numSubModels; i++ ) {
 			const dmodel_t *sm = &bsp->subModels[i];
@@ -3142,7 +3144,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 			    sm->maxs[0] >= BX - TOL && sm->mins[0] <= BX + TOL &&
 			    sm->maxs[1] >= BY - TOL && sm->mins[1] <= BY + TOL &&
 			    sm->maxs[2] >= BZ - TOL && sm->mins[2] <= BZ + TOL );
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 			         "  [%d] mins=(%.0f,%.0f,%.0f) maxs=(%.0f,%.0f,%.0f)"
 			         " firstSurf=%d numSurf=%d tex='%s'%s\n",
 			         i,
@@ -3164,7 +3166,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 			for ( i = 0; i < numRawPlanes; i++ ) {
 				if ( planeRefCount[i] > 1 ) coplanarPairs++;
 			}
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 			         "BSP_Q1_Load: %d planes shared by 2+ faces (potential z-fight);"
 			         " %d total Q1 planes\n",
 			         coplanarPairs, numRawPlanes );
@@ -3176,7 +3178,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 			const float BX = 480.0f, BY = 2000.0f, BZ = 80.0f, RANGE = 200.0f;
 			const char *p = bsp->entityString;
 			int entNear = 0;
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 			         "BSP_Q1_Load: entities within 200 units of bridge (480,2000,80):\n" );
 			while ( p && *p ) {
 				const char *bstart = strchr( p, '{' );
@@ -3208,19 +3210,19 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 				if ( fabsf(ox - BX) <= RANGE &&
 				     fabsf(oy - BY) <= RANGE &&
 				     fabsf(oz - BZ) <= RANGE ) {
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  class='%s' origin=(%.0f,%.0f,%.0f)\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  class='%s' origin=(%.0f,%.0f,%.0f)\n",
 					         cls, ox, oy, oz );
 					entNear++;
 				}
 				p = bend + 1;
 			}
 			if ( entNear == 0 )
-				Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  (none within 200 units)\n" );
+				Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  (none within 200 units)\n" );
 		}
 	}
 
 
-	// ---- Embedded textures (raw copy for Faz 5) ----
+	// ---- Embedded textures (raw copy for Phase 5) ----
 	{
 		const lump_t *l = &header.lumps[LUMP_Q1_TEXTURES];
 		if ( l->filelen > 0 ) {
@@ -3287,7 +3289,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 					}
 				}
 			}
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: leaf-dup: numLeafs %d -> %d (+%d unique copies for %d shared refs)\n",
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: leaf-dup: numLeafs %d -> %d (+%d unique copies for %d shared refs)\n",
 				oldNumLeafs, newNumLeafs, extraLeaves, sharedLeaves );
 
 			/* Extend leafContents[] to cover post-dup leaf indices.
@@ -3313,7 +3315,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		Z_Free( leafRefCount );
 	}
 
-	// ---- Clipnodes — hull 1 only (Faz 4.1) ----
+	// ---- Clipnodes — hull 1 only (Phase 4.1) ----
 	// Traverse hull-1 clipnode tree, emit one brush per SOLID leaf.
 	// Each brush's plane set is accumulated on a stack during recursive descent.
 	{
@@ -3321,7 +3323,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 		qboolean        buildBrushes = qtrue;
 
 		if ( cnLump->filelen % (int)sizeof( q1_dclipnode_t ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, S_COLOR_YELLOW "BSP_Q1_Load: %s clipnodes lump not aligned; skipping brush conversion\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), S_COLOR_YELLOW "BSP_Q1_Load: %s clipnodes lump not aligned; skipping brush conversion\n",
 			            name );
 			buildBrushes = qfalse;
 		}
@@ -3351,7 +3353,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 					hull0Root[i] = LittleLong( q1mods[i].headnode[0] );
 				}
 			}
-			Com_Log( SEV_TRACE, LOG_CAT_LOADING,
+			Com_Log( SEV_TRACE, LOG_CH(ch_loading),
 			    "BSP_Q1_Load: clipnodes: %d, submodel 0 hull1 root = %d, hull0 root = %d\n",
 			    numClipnodes,
 			    bsp->numSubModels > 0 ? hull1Root[0] : -1,
@@ -3393,7 +3395,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 						}
 					}
 					numClipnodes = cursor;
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: clipnode-dup: %d -> %d (+%d)\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: clipnode-dup: %d -> %d (+%d)\n",
 					            origCount, numClipnodes, extra );
 				}
 				Z_Free( cnRef );
@@ -3472,7 +3474,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 						bsp->subModels[s].numBrushes = walk.numBrushes - brushStart;
 					}
 
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: hull1 brushes: %d (%d solid leaves), %d brushsides\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: hull1 brushes: %d (%d solid leaves), %d brushsides\n",
 					            bsp->numBrushes, walk.numSolids, bsp->numBrushSides );
 				}
 			}
@@ -3624,7 +3626,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 				Z_Free( brushRemap );
 				Z_Free( newIdx );
 
-				Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: brush-dedup: %d -> %d unique (%d -> %d sides)\n",
+				Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: brush-dedup: %d -> %d unique (%d -> %d sides)\n",
 				            origBrushes, bsp->numBrushes, origSides, bsp->numBrushSides );
 			}
 
@@ -3687,10 +3689,10 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 						else if ( n <= 2 ) sparseLeaves++;
 						else               denseLeaves++;
 					}
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: Step 9 tree walk coverage (pre-shell):\n" );
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  empty leaves (0 brushes): %d / %d\n", emptyLeaves, numLeafs );
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  sparse (1-2 brushes):     %d / %d\n", sparseLeaves, numLeafs );
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "  dense (3+ brushes):       %d / %d\n", denseLeaves, numLeafs );
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: Step 9 tree walk coverage (pre-shell):\n" );
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  empty leaves (0 brushes): %d / %d\n", emptyLeaves, numLeafs );
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  sparse (1-2 brushes):     %d / %d\n", sparseLeaves, numLeafs );
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "  dense (3+ brushes):       %d / %d\n", denseLeaves, numLeafs );
 				}
 
 				// Proximity-based shell brush insertion.
@@ -3720,10 +3722,10 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 						}
 					}
 
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: shell brushes inserted into %d / %d leaves (proximity %.0f)\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: shell brushes inserted into %d / %d leaves (proximity %.0f)\n",
 					            boundaryLeafCount, numLeafs, SHELL_PROXIMITY );
 					if ( boundaryLeafCount == 0 )
-						Com_Log( SEV_INFO, LOG_CAT_LOADING, S_COLOR_RED "BSP_Q1_Load: ERROR proximity pass found zero boundary"
+						Com_Log( SEV_INFO, LOG_CH(ch_loading), S_COLOR_RED "BSP_Q1_Load: ERROR proximity pass found zero boundary"
 						         " leaves — shell brushes unreachable, CM escape possible\n" );
 
 
@@ -3760,12 +3762,12 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 				}
 
 				if ( degenCount > 0 )
-					Com_Log( SEV_TRACE, LOG_CAT_LOADING, S_COLOR_YELLOW "BSP_Q1_Load: %d degenerate brushes skipped in tree walk\n",
+					Com_Log( SEV_TRACE, LOG_CH(ch_loading), S_COLOR_YELLOW "BSP_Q1_Load: %d degenerate brushes skipped in tree walk\n",
 					            degenCount );
 
-				Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: hull1 final: %d unique brushes, %d sides, %d leafBrush entries\n",
+				Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: hull1 final: %d unique brushes, %d sides, %d leafBrush entries\n",
 				            bsp->numBrushes, bsp->numBrushSides, bsp->numLeafBrushes );
-				Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: leafBrush entries per leaf: avg %.1f, max %d\n",
+				Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: leafBrush entries per leaf: avg %.1f, max %d\n",
 				            numLeafs > 0 ? (float)bsp->numLeafBrushes / numLeafs : 0.0f, maxPerLeaf );
 
 			}
@@ -3814,7 +3816,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 				Z_Free( bsp->planes );
 				bsp->planes    = allPlanes;
 				bsp->numPlanes = np;
-				Com_Log( SEV_TRACE, LOG_CAT_LOADING, "BSP_Q1_Load: hull-1 de-expansion: %d brush planes (total %d)\n",
+				Com_Log( SEV_TRACE, LOG_CH(ch_loading), "BSP_Q1_Load: hull-1 de-expansion: %d brush planes (total %d)\n",
 				            bsp->numBrushSides, np );
 			}
 		}
@@ -3830,7 +3832,7 @@ static qboolean BSP_Q1_Load( const bspFormat_t *format, const char *name,
 	// already-translated struct fields.
 	BSP_Q1_BuildSyntheticQ3Data( bsp );
 
-	Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q1_Load: translated %d surfaces, %d verts, %d indexes, %d shaders\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q1_Load: translated %d surfaces, %d verts, %d indexes, %d shaders\n",
 		bsp->numSurfaces, bsp->numDrawVerts, bsp->numDrawIndexes, bsp->numShaders );
 
 	*bspFile = bsp;
@@ -3962,7 +3964,11 @@ static int BSP_Q1_BrushFacePolygon( const dbrush_t *br, int sideIdx,
 			     fabsf( v[0] ) <= Q1_MAP_COORD_MAX &&
 			     fabsf( v[1] ) <= Q1_MAP_COORD_MAX &&
 			     fabsf( v[2] ) <= Q1_MAP_COORD_MAX ) {
-				VectorCopy( v, raw[numRaw++] );
+				// VectorCopy is `((b)[0]=…,(b)[1]=…,(b)[2]=…)` and would
+				// evaluate `numRaw++` three times if the post-increment were
+				// inside the macro argument — separating fixes that latent bug.
+				VectorCopy( v, raw[numRaw] );
+				numRaw++;
 			}
 		}
 	}
@@ -4078,7 +4084,7 @@ static qboolean BSP_Q1_ExtractNavGeometry( const bspFile_t  *bsp,
 	memset( geom, 0, sizeof(*geom) );
 
 	if ( numVerts == 0 || numTris == 0 ) {
-		COM_WARN( LOG_CAT_LOADING, "[NAV] no walkable tris extracted from %s\n", bsp->name );
+		COM_WARN( LOG_CH(ch_loading), "[NAV] no walkable tris extracted from %s\n", bsp->name );
 		return qfalse;
 	}
 
@@ -4089,7 +4095,7 @@ static qboolean BSP_Q1_ExtractNavGeometry( const bspFile_t  *bsp,
 			int delta = numTris - s_lastTris;
 			if ( delta < 0 ) delta = -delta;
 			if ( delta * 100 / s_lastTris > 20 ) {
-				COM_WARN( LOG_CAT_LOADING, "[NAV] tri count changed >20%% on %s: was %d, now %d\n",
+				COM_WARN( LOG_CH(ch_loading), "[NAV] tri count changed >20%% on %s: was %d, now %d\n",
 				          bsp->name, s_lastTris, numTris );
 			}
 		}
@@ -4168,7 +4174,7 @@ static qboolean BSP_Q1_ExtractNavGeometry( const bspFile_t  *bsp,
 					NavGeomWriter_WriteTri( &wr, base, base + v, base + v + 1, area );
 			}
 		}
-		Com_Log( SEV_INFO, LOG_CAT_LOADING, "[NAV] %s: Q1 brush extraction skipped %d brushes (shell+non-walkable)\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_loading), "[NAV] %s: Q1 brush extraction skipped %d brushes (shell+non-walkable)\n",
 		         bsp->name, skipped );
 	}
 
@@ -4221,7 +4227,7 @@ static qboolean BSP_Q1_ExtractNavGeometry( const bspFile_t  *bsp,
 		}
 
 		if ( dropped > 0 ) {
-			Com_Log( SEV_WARN, LOG_CAT_LOADING,
+			Com_Log( SEV_WARN, LOG_CH(ch_loading),
 			    "[NAV] %s: dropped %d degenerate triangles (first bad vert: %.1f %.1f %.1f)\n",
 			    bsp->name, dropped, firstBad[0], firstBad[1], firstBad[2] );
 
@@ -4243,7 +4249,7 @@ static qboolean BSP_Q1_ExtractNavGeometry( const bspFile_t  *bsp,
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_LOADING, "[NAV] %s: %d verts, %d tris extracted\n",
+	Com_Log( SEV_INFO, LOG_CH(ch_loading), "[NAV] %s: %d verts, %d tris extracted\n",
 	            bsp->name, geom->numVerts, geom->numTris );
 	return qtrue;
 }

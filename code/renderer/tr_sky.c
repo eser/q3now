@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_local.h"
 
 #define SKY_SUBDIVISIONS		8
+// NOLINTBEGIN(bugprone-integer-division) — sky subdivision count is an integer constant; uses through floor()/ceil() are mathematically float-correct
 #define HALF_SKY_SUBDIVISIONS	(SKY_SUBDIVISIONS/2)
 
 static float s_cloudTexCoords[6][SKY_SUBDIVISIONS+1][SKY_SUBDIVISIONS+1][2];
@@ -868,3 +869,4 @@ void RB_StageIteratorSky( void ) {
 	// note that sky was drawn so we will draw a sun later
 	backEnd.skyRenderedThisView = qtrue;
 }
+// NOLINTEND(bugprone-integer-division)

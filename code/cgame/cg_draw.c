@@ -393,20 +393,20 @@ static void CG_DrawCrosshair3D(void)
 	zProj = atof(rendererinfos);
 	trap_Cvar_VariableStringBuffer("r_stereoSeparation", rendererinfos, sizeof(rendererinfos));
 	stereoSep = zProj / atof(rendererinfos);
-	
+
 	xmax = zProj * tan(cg.refdef.fov_x * M_PI / 360.0f);
-	
+
 	// let the trace run through until a change in stereo separation of the crosshair becomes less than one pixel.
 	maxdist = cgs.glconfig.vidWidth * stereoSep * zProj / (2 * xmax);
 	VectorMA(cg.refdef.vieworg, maxdist, cg.refdef.viewaxis[0], endpos);
 	CG_Trace(&trace, cg.refdef.vieworg, NULL, NULL, endpos, 0, MASK_SHOT);
-	
+
 	memset(&ent, 0, sizeof(ent));
 	ent.reType = RT_SPRITE;
 	ent.renderfx = RF_DEPTHHACK | RF_CROSSHAIR;
-	
+
 	VectorCopy(trace.endpos, ent.origin);
-	
+
 	// scale the crosshair so it appears the same size for all distances
 	ent.radius = w * NORM_HSCALE * xmax * trace.fraction * maxdist / zProj;
 	ent.customShader = hShader;
@@ -586,7 +586,7 @@ CG_DrawIntermission
 static void CG_DrawIntermission( void ) {
 //	int key;
 
-    if ( cg_singlePlayer.integer ) {
+    if ( cgs.gameflags & GF_CAMPAIGN ) {
 		CG_DrawCenterString();
 		return;
 	}
@@ -705,7 +705,6 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		trap_WiredUI_PushEvent( WIRED_EVENT_CENTERPRINT, cg.centerPrint );
 		cg.centerPrintTime = 0;  // consumed — don't push again
 	}
-	return;
 #endif
 
 }
@@ -749,7 +748,7 @@ void CG_TileClear( void ) {
 	w = cgs.glconfig.vidWidth;
 	h = cgs.glconfig.vidHeight;
 
-	if ( cg.refdef.x == 0 && cg.refdef.y == 0 && 
+	if ( cg.refdef.x == 0 && cg.refdef.y == 0 &&
 		cg.refdef.width == w && cg.refdef.height == h ) {
 		return;		// full screen rendering
 	}

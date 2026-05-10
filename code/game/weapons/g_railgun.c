@@ -142,5 +142,4 @@ void Attack_Railgun_Primary (gentity_t *ent) {
 			ent->client->attackStats[ATT_RAILGUN_PRIMARY].hits++;
 		}
 	}
-
 }

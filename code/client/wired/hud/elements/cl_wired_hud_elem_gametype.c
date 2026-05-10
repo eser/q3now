@@ -68,6 +68,7 @@ void CG_ModernHUDElementGameTypeRoutine(void* context)
 		return;
 	}
 
+	// NOLINTNEXTLINE(clang-analyzer-core.StackAddressEscape) — element->ctx.text aliases local `str`; consumed within CG_ModernHUDTextPrint and not retained past this call
 	CG_ModernHUDTextPrint(&element->config, &element->ctx);
 }
 

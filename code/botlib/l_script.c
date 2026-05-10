@@ -327,20 +327,22 @@ static int PS_ReadWhiteSpace(script_t *script)
 				continue;
 			} //end if
 			//comments /* */
-			else if (*(script->script_p+1) == '*')
-			{
+			if ( *( script->script_p + 1 ) == '*' ) {
 				script->script_p++;
-				do
-				{
+				do {
 					script->script_p++;
-					if (!*script->script_p) return 0;
-					if (*script->script_p == '\n') script->line++;
+					if ( !*script->script_p )
+						return 0;
+					if ( *script->script_p == '\n' )
+						script->line++;
 				} //end do
-				while(!(*script->script_p == '*' && *(script->script_p+1) == '/'));
+				while ( !( *script->script_p == '*' && *( script->script_p + 1 ) == '/' ) );
 				script->script_p++;
-				if (!*script->script_p) return 0;
+				if ( !*script->script_p )
+					return 0;
 				script->script_p++;
-				if (!*script->script_p) return 0;
+				if ( !*script->script_p )
+					return 0;
 				continue;
 			} //end if
 		} //end if
@@ -381,7 +383,7 @@ static int PS_ReadEscapeCharacter(script_t *script, char *ch)
 			script->script_p++;
 			for (val = 0; ;script->script_p++)
 			{
-				c = *script->script_p;
+				c = (byte)*script->script_p;
 				if (c >= '0' && c <= '9')
 					c = c - '0';
 				else if (c >= 'A' && c <= 'Z')
@@ -406,7 +408,7 @@ static int PS_ReadEscapeCharacter(script_t *script, char *ch)
 			if (*script->script_p < '0' || *script->script_p > '9') ScriptError(script, "unknown escape char");
 			for (val = 0; ;script->script_p++)
 			{
-				c = *script->script_p;
+				c = (byte)*script->script_p;
 				if (c >= '0' && c <= '9')
 					c = c - '0';
 				else
@@ -1021,10 +1023,9 @@ int PS_ExpectAnyToken(script_t *script, token_t *token)
 		ScriptError(script, "couldn't read expected token");
 		return 0;
 	} //end if
-	else
-	{
-		return 1;
-	} //end else
+
+	return 1;
+	//end else
 } //end of the function PS_ExpectAnyToken
 #if 0
 //============================================================================

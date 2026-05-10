@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #define MAX_CMD_BUFFER  65536
 
@@ -73,13 +75,13 @@ Usage: waitms <milliseconds>
 */
 static void Cmd_WaitMs_f( void ) {
 	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "usage: waitms <milliseconds>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "usage: waitms <milliseconds>\n" );
 		return;
 	}
 
 	int duration = atoi( Cmd_Argv( 1 ) );
 	if ( duration <= 0 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "waitms: invalid duration\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "waitms: invalid duration\n" );
 		return;
 	}
 
@@ -121,7 +123,7 @@ void Cbuf_AddText( const char *text ) {
 
 	if (cmd_text.cursize + l >= cmd_text.maxsize)
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cbuf_AddText: overflow\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Cbuf_AddText: overflow\n");
 		return;
 	}
 
@@ -162,7 +164,7 @@ void Cbuf_NestedAdd( const char *text ) {
 			if ( cmd_text.cursize < cmd_text.maxsize ) {
 				cmd_text.data[cmd_text.cursize++] = ';';
 			} else {
-				COM_WARN( LOG_CAT_SYSTEM, "%s(%i) overflowed\n", __func__, pos );
+				COM_WARN( LOG_CH(ch_system), "%s(%i) overflowed\n", __func__, pos );
 				nestedCmdOffset = cmd_text.cursize;
 				return;
 			}
@@ -183,7 +185,7 @@ void Cbuf_NestedAdd( const char *text ) {
 	}
 
 	if ( len + cmd_text.cursize > cmd_text.maxsize ) {
-		COM_WARN( LOG_CAT_SYSTEM, "%s(%i) overflowed\n", __func__, pos );
+		COM_WARN( LOG_CH(ch_system), "%s(%i) overflowed\n", __func__, pos );
 		nestedCmdOffset = cmd_text.cursize;
 		return;
 	}
@@ -220,7 +222,7 @@ void Cbuf_InsertText( const char *text ) {
 	int len = strlen( text ) + 1;
 
 	if ( len + cmd_text.cursize > cmd_text.maxsize ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cbuf_InsertText overflowed\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Cbuf_InsertText overflowed\n" );
 		return;
 	}
 
@@ -252,11 +254,11 @@ void Cbuf_ExecuteText( cbufExec_t exec_when, const char *text )
 		cmd_wait = 0; // discard any pending waiting
 		cmd_waitms_until = 0;
 		if ( text && text[0] != '\0' ) {
-			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "EXEC_NOW %s\n", text);
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "EXEC_NOW %s\n", text);
 			Cmd_ExecuteString( text );
 		} else {
 			Cbuf_Execute();
-			Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, S_COLOR_YELLOW "EXEC_NOW %s\n", cmd_text.data );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "EXEC_NOW %s\n", cmd_text.data );
 		}
 		break;
 	case EXEC_INSERT:
@@ -429,7 +431,7 @@ static void Cmd_Exec_f( void ) {
 	qboolean quiet = !Q_stricmp(Cmd_Argv(0), "execq");
 
 	if (Cmd_Argc () != 2) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "exec%s <filename> : execute a script file%s\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "exec%s <filename> : execute a script file%s\n",
 			quiet ? "q" : "", quiet ? " without notification" : "");
 		return;
 	}
@@ -445,16 +447,16 @@ static void Cmd_Exec_f( void ) {
 	FS_ReadFile( filename, &f.v );
 	FS_RestorePure();
 	if ( f.v == NULL ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "couldn't exec %s\n", filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "couldn't exec %s\n", filename );
 		return;
 	}
 	if (!quiet)
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WiredCore/Scripting: executing %s\n", filename);
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "WiredCore/Scripting: executing %s\n", filename);
 
 	Cbuf_InsertText( f.c );
 
 #ifdef DELAY_WRITECONFIG
-	if ( !Q_stricmp( filename, Q3CONFIG_CFG ) ) {
+	if ( !Q_stricmp( filename, WIRED_CONFIG_CFG ) ) {
 		Com_WriteConfiguration(); // to avoid loading outdated values
 	}
 #endif
@@ -472,7 +474,7 @@ Inserts the current value of a variable as command text
 */
 static void Cmd_Vstr_f( void ) {
 	if ( Cmd_Argc () != 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "vstr <variablename> : execute a variable command\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "vstr <variablename> : execute a variable command\n" );
 		return;
 	}
 
@@ -499,7 +501,7 @@ static qboolean vstrKeyPressed[ MAX_VSTR_KEYS ];
 
 static void Cmd_VstrDown_f( void ) {
 	if ( Cmd_Argc() < 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "+vstr <press cvar> <release cvar> : press/release variable commands\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "+vstr <press cvar> <release cvar> : press/release variable commands\n" );
 		return;
 	}
 
@@ -523,7 +525,7 @@ static void Cmd_VstrDown_f( void ) {
 
 static void Cmd_VstrUp_f( void ) {
 	if ( Cmd_Argc() < 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "-vstr <press cvar> <release cvar> : press/release variable commands\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "-vstr <press cvar> <release cvar> : press/release variable commands\n" );
 		return;
 	}
 
@@ -555,7 +557,7 @@ Just prints the rest of the line to the console
 */
 static void Cmd_Echo_f( void )
 {
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\n", Cmd_ArgsFrom( 1 ) );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%s\n", Cmd_ArgsFrom( 1 ) );
 }
 
 
@@ -747,7 +749,7 @@ will point into this temporary buffer.
 static void Cmd_TokenizeString2( const char *text_in, qboolean ignoreQuotes ) {
 #ifdef TKN_DBG
 	// FIXME TTimo blunt hook to try to find the tokenization of userinfo
-	Com_Log( SEV_DEBUG, LOG_CAT_SYSTEM, "Cmd_TokenizeString: %s\n", text_in);
+	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Cmd_TokenizeString: %s\n", text_in);
 #endif
 
 	// clear previous args
@@ -895,7 +897,7 @@ static void Cmd_AddCommandInternal( const char *cmd_name, xcommand_t function, q
 	{
 		// allow completion-only commands to be silently doubled
 		if ( function != NULL )
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Cmd_AddCommand: %s already defined\n", cmd_name );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Cmd_AddCommand: %s already defined\n", cmd_name );
 		return;
 	}
 
@@ -1132,9 +1134,9 @@ void Cmd_ExecuteString( const char *text ) {
 			if ( !cmd->function ) {
 				// let the cgame or game handle it
 				break;
-			} else {
-				cmd->function();
 			}
+			cmd->function();
+
 			return;
 		}
 	}
@@ -1176,10 +1178,10 @@ static void Cmd_List_f( void )
 	for ( const cmd_function_t *cmd = cmd_functions ; cmd ; cmd=cmd->next ) {
 		if ( match && !Com_Filter( match, cmd->name ) )
 			continue;
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s\n", cmd->name );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s\n", cmd->name );
 		i++;
 	}
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%i commands\n", i );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%i commands\n", i );
 }
 
 

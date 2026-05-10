@@ -153,6 +153,7 @@ void SCR_DrawPing( void ) {
 				if ( pings[i] > flux + avgPing ) flux = pings[i] - avgPing;
 			}
 		}
+		// NOLINTNEXTLINE(bugprone-integer-division) — variance calc; integer division is intentional for stats display
 		std   = (int)sqrt( (double)( stsum / count ) );
 		aflux = acount ? (int)( asum / acount ) : 0;
 		timeRec = timeNew;
@@ -182,6 +183,7 @@ void SCR_DrawPing( void ) {
 				if ( pings2[i] > flux2 + avgPing2 ) flux2 = pings2[i] - avgPing2;
 			}
 		}
+		// NOLINTNEXTLINE(bugprone-integer-division) — variance calc; integer division is intentional for stats display
 		std2   = (int)sqrt( (double)( stsum2 / count2 ) );
 		aflux2 = acount2 ? (int)( asum2 / acount2 ) : 0;
 		timeRec2 = timeNew;
@@ -290,6 +292,7 @@ void SCR_DrawSnaps( void ) {
 		}
 		delayedF = (float)delayed * coef;
 		extrapF  = (float)extrap  * coef;
+		// NOLINTNEXTLINE(bugprone-integer-division) — variance calc; integer division is intentional for stats display
 		stdSps   = (int)sqrt( (double)( stsum / count ) );
 		asdrop   = dcount ? (int)( snsum / dcount ) : 0;
 		timeRec  = ctime;
@@ -330,6 +333,7 @@ void SCR_DrawSnaps( void ) {
 		}
 		delayedF2 = (float)delayed2 * coef2;
 		extrapF2  = (float)extrap2  * coef2;
+		// NOLINTNEXTLINE(bugprone-integer-division) — variance calc; integer division is intentional for stats display
 		stdSps2   = (int)sqrt( (double)( stsum2 / count2 ) );
 		asdrop2   = dcount2 ? (int)( snsum2 / dcount2 ) : 0;
 		timeRec2  = ctime;
@@ -413,6 +417,7 @@ void SCR_DrawPackets( void ) {
 				if ( packs[i] < avgPps - mdrop ) mdrop = avgPps - packs[i];
 			}
 		}
+		// NOLINTNEXTLINE(bugprone-integer-division) — variance calc; integer division is intentional for stats display
 		std   = (int)sqrt( (double)( stsum / count ) );
 		adrop = dcount ? (int)( dsum / dcount ) : 0;
 		timeRec = newtime;
@@ -442,6 +447,7 @@ void SCR_DrawPackets( void ) {
 				if ( packs2[i] < avgPps2 - mdrop2 ) mdrop2 = avgPps2 - packs2[i];
 			}
 		}
+		// NOLINTNEXTLINE(bugprone-integer-division) — variance calc; integer division is intentional for stats display
 		std2   = (int)sqrt( (double)( stsum2 / count2 ) );
 		adrop2 = dcount2 ? (int)( dsum2 / dcount2 ) : 0;
 		timeRec2 = newtime;

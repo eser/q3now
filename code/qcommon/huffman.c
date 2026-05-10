@@ -80,11 +80,10 @@ static int get_bit (byte *fin) {
 static node_t **get_ppnode(huff_t* huff) {
 	if (!huff->freelist) {
 		return &(huff->nodePtrs[huff->blocPtrs++]);
-	} else {
-		node_t **tppnode = huff->freelist;
-		huff->freelist = (node_t **)*tppnode;
-		return tppnode;
 	}
+	node_t **tppnode = huff->freelist;
+	huff->freelist	 = (node_t **)*tppnode;
+	return tppnode;
 }
 
 static void free_ppnode(huff_t* huff, node_t **ppnode) {

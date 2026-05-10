@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 float BG_GetArmorProtection( int armorClass ) {
@@ -1059,7 +1061,7 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
             Com_Terminate( TERM_CLIENT_DROP, "BG_CanItemBeGrabbed: IT_BAD" );
         default:
 #ifndef NDEBUG
-          Com_Log( SEV_INFO, LOG_CAT_GAME, "BG_CanItemBeGrabbed: unknown enum %d\n", item->giType );
+          Com_Log( SEV_INFO, LOG_CH(ch_game), "BG_CanItemBeGrabbed: unknown enum %d\n", item->giType );
 #endif
          break;
 	}
@@ -1386,9 +1388,9 @@ void BG_AddPredictableEventToPlayerstate( int newEvent, int eventParm, playerSta
 		trap_Cvar_VariableStringBuffer("showevents", buf, sizeof(buf));
 		if ( atof(buf) != 0 ) {
 #ifdef QAGAME
-			Com_Log( SEV_INFO, LOG_CAT_GAME, " game event svt %5d -> %5d: num = %20s parm %d\n", ps->pmove_framecount/*ps->commandTime*/, ps->eventSequence, eventnames[newEvent], eventParm);
+			Com_Log( SEV_INFO, LOG_CH(ch_game), " game event svt %5d -> %5d: num = %20s parm %d\n", ps->pmove_framecount/*ps->commandTime*/, ps->eventSequence, eventnames[newEvent], eventParm);
 #else
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Cgame event svt %5d -> %5d: num = %20s parm %d\n", ps->pmove_framecount/*ps->commandTime*/, ps->eventSequence, eventnames[newEvent], eventParm);
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Cgame event svt %5d -> %5d: num = %20s parm %d\n", ps->pmove_framecount/*ps->commandTime*/, ps->eventSequence, eventnames[newEvent], eventParm);
 #endif
 		}
 	}

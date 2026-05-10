@@ -125,6 +125,7 @@ static void MakeMeshNormals( int width, int height, drawVert_t ctrl[MAX_GRID_SIZ
 
 	wrapWidth = qfalse;
 	for ( i = 0 ; i < height ; i++ ) {
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — ctrl is sized [height][width]; [i][width-1] is in bounds
 		VectorSubtract( ctrl[i][0].xyz, ctrl[i][width-1].xyz, delta );
 		len = VectorLengthSquared( delta );
 		if ( len > 1.0 ) {
@@ -137,6 +138,7 @@ static void MakeMeshNormals( int width, int height, drawVert_t ctrl[MAX_GRID_SIZ
 
 	wrapHeight = qfalse;
 	for ( i = 0 ; i < width ; i++ ) {
+		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — ctrl is sized [height][width]; [height-1][i] is in bounds
 		VectorSubtract( ctrl[0][i].xyz, ctrl[height-1][i].xyz, delta );
 		len = VectorLengthSquared( delta );
 		if ( len > 1.0 ) {
@@ -180,11 +182,10 @@ static void MakeMeshNormals( int width, int height, drawVert_t ctrl[MAX_GRID_SIZ
 					VectorSubtract( ctrl[y][x].xyz, base, temp );
 					if ( VectorNormalize( temp ) < 0.001f ) {
 						continue;				// degenerate edge, get more dist
-					} else {
-						good[k] = qtrue;
-						VectorCopy( temp, around[k] );
-						break;					// good edge
 					}
+					good[k] = qtrue;
+					VectorCopy( temp, around[k] );
+					break; // good edge
 				}
 			}
 
@@ -538,6 +539,7 @@ srfGridMesh_t *R_GridInsertColumn( srfGridMesh_t *grid, int column, int row, vec
 		if (i == column) {
 			//insert new column
 			for (j = 0; j < grid->height; j++) {
+				// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — i > 0 inside the `i == column` branch when column > 0; analyzer's path doesn't see the column>=1 invariant
 				LerpDrawVert( &grid->verts[j * grid->width + i-1], &grid->verts[j * grid->width + i], &ctrl[j][i] );
 				if (j == row)
 					VectorCopy(point, ctrl[j][i].xyz);

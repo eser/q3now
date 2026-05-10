@@ -78,10 +78,10 @@ func gameBinaryName() string {
 	arch := runtime.GOARCH
 	switch arch {
 	case "amd64":
-		return "q3now.x86_64"
+		return "wired.x86_64"
 	case "arm64":
-		return "q3now.aarch64"
+		return "wired.aarch64"
 	default:
-		return "q3now." + arch
+		return "wired." + arch
 	}
 }

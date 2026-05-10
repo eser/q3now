@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 // q_shared.c -- stateless support routines that are included in each code dll
 #include "q_shared.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #ifdef COM_Parse
 #undef COM_Parse
@@ -59,8 +61,7 @@ const char *COM_GetExtension( const char *name )
 	const char *dot = strrchr(name, '.'), *slash;
 	if (dot && ((slash = strrchr(name, '/')) == NULL || slash < dot))
 		return dot + 1;
-	else
-		return "";
+	return "";
 }
 
 
@@ -252,7 +253,7 @@ void COM_ParseError( const ComParser *parser, const char *format, ... )
 	vsnprintf (string, sizeof(string), format, argptr);
 	va_end( argptr );
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "ERROR: %s, line %d: %s\n", parser->parsename, COM_GetCurrentParseLine( parser ), string );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "ERROR: %s, line %d: %s\n", parser->parsename, COM_GetCurrentParseLine( parser ), string );
 }
 
 
@@ -265,7 +266,7 @@ void COM_ParseWarning( const ComParser *parser, const char *format, ... )
 	vsnprintf (string, sizeof(string), format, argptr);
 	va_end( argptr );
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "WARNING: %s, line %d: %s\n", parser->parsename, COM_GetCurrentParseLine( parser ), string );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "WARNING: %s, line %d: %s\n", parser->parsename, COM_GetCurrentParseLine( parser ), string );
 }
 
 
@@ -284,7 +285,7 @@ a newline.
 static const char *SkipWhitespace( ComParser *parser, const char *data, qboolean *hasNewLines ) {
 	int c;
 
-	while( (c = *data) <= ' ') {
+	while ( (c = (byte)*data) <= ' ') {
 		if( !c ) {
 			return NULL;
 		}
@@ -306,7 +307,7 @@ int COM_Compress( char *data_p ) {
 	qboolean newline = qfalse, whitespace = qfalse;
 
 
-	while ((c = *in) != '\0') {
+	while ( (c = (byte)*in) != '\0') {
 		// skip double slash comments
 		if ( c == '/' && in[1] == '/' ) {
 			while (*in && *in != '\n') {
@@ -342,7 +343,7 @@ int COM_Compress( char *data_p ) {
 				*out++ = c;
 				in++;
 				while (1) {
-					c = *in;
+					c = (byte)*in;
 					if (c && c != '"') {
 						*out++ = c;
 						in++;
@@ -398,7 +399,7 @@ const char *COM_ParseExt( ComParser *parser, const char **data_p, qboolean allow
 			return parser->token;
 		}
 
-		c = *data;
+		c = (byte)*data;
 
 		// skip double slash comments
 		if ( c == '/' && data[1] == '/' )
@@ -440,7 +441,7 @@ const char *COM_ParseExt( ComParser *parser, const char **data_p, qboolean allow
 		data++;
 		while ( 1 )
 		{
-			c = *data;
+			c = (byte)*data;
 			if ( c == '"' || c == '\0' )
 			{
 				if ( c == '"' )
@@ -471,7 +472,7 @@ const char *COM_ParseExt( ComParser *parser, const char **data_p, qboolean allow
 			len++;
 		}
 		data++;
-		c = *data;
+		c = (byte)*data;
 	} while ( c > ' ' );
 
 	parser->token[ len ] = '\0';
@@ -708,7 +709,7 @@ COM_MatchToken
 */
 static void COM_MatchToken( ComParser *parser, const char **buf_p, const char *match ) {
 	const char *token = COM_Parse( parser, buf_p );
-	if ( strcmp( token, match ) ) {
+	if ( strcmp( token, match ) != 0 ) {
 		Com_Terminate( TERM_CLIENT_DROP, "MatchToken: %s != %s", token, match );
 	}
 }
@@ -752,7 +753,7 @@ void SkipRestOfLine( ComParser *parser, const char **data ) {
 		return;
 
 	int c;
-	while ( (c = *p) != '\0' ) {
+	while ( (c = (byte)*p) != '\0' ) {
 		p++;
 		if ( c == '\n' ) {
 			parser->lines++;
@@ -945,11 +946,12 @@ char *Q_strncpy( char *dest, const char *src, int destsize )
 
 	if ( src_len > destsize ) {
 #ifdef _DEBUG
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Q_strncpy: overlapped (src >= dst) buffers\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Q_strncpy: overlapped (src >= dst) buffers\n" );
 #endif
 		src_len = destsize;
 	}
 
+	// NOLINTNEXTLINE(bugprone-not-null-terminated-result) — memset below zero-fills the remainder, guaranteeing termination
 	memmove( dest, src, src_len );
 	memset( dest + src_len, '\0', destsize - src_len );
 
@@ -966,33 +968,32 @@ int Q_stricmpn( const char *s1, const char *s2, int n ) {
         if ( s1 == NULL ) {
            if ( s2 == NULL )
              return 0;
-           else
-             return -1;
-        }
-        else if ( s2==NULL )
-          return 1;
-
-
-	int c1, c2;
-	do {
-		c1 = *s1++;
-		c2 = *s2++;
-
-		if (!n--) {
-			return 0;		// strings are equal until end point
+		   return -1;
 		}
-		
-		if (c1 != c2) {
-			if (c1 >= 'a' && c1 <= 'z') {
-				c1 -= ('a' - 'A');
+		if ( s2 == NULL )
+			return 1;
+
+
+		int c1, c2;
+		do {
+			c1 = (byte)*s1++;
+			c2 = (byte)*s2++;
+
+			if ( !n-- ) {
+				return 0; // strings are equal until end point
 			}
-			if (c2 >= 'a' && c2 <= 'z') {
-				c2 -= ('a' - 'A');
+
+			if ( c1 != c2 ) {
+				if ( c1 >= 'a' && c1 <= 'z' ) {
+					c1 -= ( 'a' - 'A' );
+				}
+				if ( c2 >= 'a' && c2 <= 'z' ) {
+					c2 -= ( 'a' - 'A' );
+				}
+				if ( c1 != c2 ) {
+					return c1 < c2 ? -1 : 1;
+				}
 			}
-			if (c1 != c2) {
-				return c1 < c2 ? -1 : 1;
-			}
-		}
 	} while (c1);
 	
 	return 0;		// strings are equal
@@ -1004,10 +1005,9 @@ int Q_stricmp( const char *s1, const char *s2 )
 	{
 		if ( s2 == NULL )
 			return 0;
-		else
-			return -1;
+		return -1;
 	}
-	else if ( s2 == NULL )
+	if ( s2 == NULL )
 		return 1;
 
 	unsigned char c1, c2;
@@ -1143,42 +1143,38 @@ int Q_replace( const char *str1, const char *str2, char *src, int max_len )
 
         return count;
     }
-    else
-    if ( d < 0 ) // shrink and replace mode
-    {
-        do
-        {
-            // shrink source string
-            const char *s1 = match + len1;
-            char *dst = match + len2;
-            while ( (*dst++ = *s1++) != '\0' );
+	if ( d < 0 ) // shrink and replace mode
+	{
+		do {
+			// shrink source string
+			const char *s1	= match + len1;
+			char	   *dst = match + len2;
+			while ( ( *dst++ = *s1++ ) != '\0' )
+				;
 
 			//replace match
-            const char *s2 = str2;
+			const char *s2 = str2;
 			while ( *s2 ) {
 				*match++ = *s2++;
 			}
 
-            match = strstr( match, str1 );
+			match = strstr( match, str1 );
 
-            count++;
-        }
-        while ( match );
+			count++;
+		} while ( match );
 
-        return count;
-    }
-    else
-    do  // just replace match
-    {
-        const char *s2 = str2;
+		return count;
+	}
+	do // just replace match
+	{
+		const char *s2 = str2;
 		while ( *s2 ) {
 			*match++ = *s2++;
 		}
 
-        match = strstr( match, str1 );
-        count++;
-	}
-    while ( match );
+		match = strstr( match, str1 );
+		count++;
+	} while ( match );
 
 	return count;
 }
@@ -1208,7 +1204,7 @@ char *Q_CleanStr( char *string ) {
 	char *s = string;
 	char *d = string;
 	int c;
-	while ((c = *s) != 0 ) {
+	while ( (c = (byte)*s) != 0 ) {
 		if ( Q_IsColorString( s ) ) {
 			s++;
 		}		
@@ -1261,25 +1257,23 @@ int Q_UTF8_NextCodepoint( const char *str, int *bytesRead )
         if ( bytesRead ) *bytesRead = 1;
         return s[0];
     }
-    else if ( ( s[0] & 0xE0 ) == 0xC0 ) {
-        cp = s[0] & 0x1F;
-        expect = 2;
-    }
-    else if ( ( s[0] & 0xF0 ) == 0xE0 ) {
-        cp = s[0] & 0x0F;
-        expect = 3;
-    }
-    else if ( ( s[0] & 0xF8 ) == 0xF0 ) {
-        cp = s[0] & 0x07;
-        expect = 4;
-    }
-    else {
-        // invalid lead byte
-        if ( bytesRead ) *bytesRead = 1;
-        return -1;
-    }
+	if ( ( s[0] & 0xE0 ) == 0xC0 ) {
+		cp	   = s[0] & 0x1F;
+		expect = 2;
+	} else if ( ( s[0] & 0xF0 ) == 0xE0 ) {
+		cp	   = s[0] & 0x0F;
+		expect = 3;
+	} else if ( ( s[0] & 0xF8 ) == 0xF0 ) {
+		cp	   = s[0] & 0x07;
+		expect = 4;
+	} else {
+		// invalid lead byte
+		if ( bytesRead )
+			*bytesRead = 1;
+		return -1;
+	}
 
-    for ( int i = 1; i < expect; i++ ) {
+	for ( int i = 1; i < expect; i++ ) {
         if ( ( s[i] & 0xC0 ) != 0x80 ) {
             // truncated or invalid continuation
             if ( bytesRead ) *bytesRead = i;
@@ -1769,17 +1763,17 @@ qboolean Info_SetValueForKey_s( char *s, int slen, const char *key, const char *
 	int len1 = (int)strlen( s );
 
 	if ( len1 >= slen ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Info_SetValueForKey(%s): oversize infostring\n", key );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Info_SetValueForKey(%s): oversize infostring\n", key );
 		return qfalse;
 	}
 
 	if ( !key || !Info_ValidateKeyValue( key ) || *key == '\0' ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Invalid key name: '%s'\n", key );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Invalid key name: '%s'\n", key );
 		return qfalse;
 	}
 
 	if ( value && !Info_ValidateKeyValue( value ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Invalid value name: '%s'\n", value );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Invalid value name: '%s'\n", value );
 		return qfalse;
 	}
 
@@ -1791,7 +1785,7 @@ qboolean Info_SetValueForKey_s( char *s, int slen, const char *key, const char *
 	int len2 = Com_sprintf( newi, sizeof( newi ), "\\%s\\%s", key, value );
 
 	if ( len1 + len2 >= slen ) {
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Info string length exceeded for key '%s'\n", key );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Info string length exceeded for key '%s'\n", key );
 		return qfalse;
 	}
 

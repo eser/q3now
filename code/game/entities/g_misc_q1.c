@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // Q1 misc / ambient entities
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 /* worldtype constants matching Q1/RR */
 #define WORLDTYPE_MEDIEVAL  0
@@ -261,7 +263,7 @@ trap_SetBrushModel), so mins/maxs must be set manually from the QUAKED bounds.
 void SP_q1_misc_explobox( gentity_t *ent ) {
 	ent->s.modelindex = G_ModelIndex( "maps/b_explob.bsp" );
 	if ( !ent->s.modelindex ) {
-		Com_Log( SEV_WARN, LOG_CAT_GAME,
+		Com_Log( SEV_WARN, LOG_CH(ch_game),
 		         "SP_q1_misc_explobox: G_ModelIndex(\"maps/b_explob.bsp\") returned 0 — barrel will be invisible. "
 		         "Ensure the Q1 PAK is mounted and the renderer supports standalone Q1 BSP props.\n" );
 	}
@@ -295,7 +297,7 @@ FTEQW ref: misc.qc:245–273 — uses bbox 0,0,0 → 32,32,32 (asymmetric, floor
 void SP_q1_misc_explobox2( gentity_t *ent ) {
 	ent->s.modelindex = G_ModelIndex( "maps/b_exbox2.bsp" );
 	if ( !ent->s.modelindex ) {
-		Com_Log( SEV_WARN, LOG_CAT_GAME,
+		Com_Log( SEV_WARN, LOG_CH(ch_game),
 		         "SP_q1_misc_explobox2: G_ModelIndex(\"maps/b_exbox2.bsp\") returned 0 — barrel will be invisible. "
 		         "Ensure the Q1 PAK is mounted and the renderer supports standalone Q1 BSP props.\n" );
 	}
@@ -343,7 +345,7 @@ Q1 static brush entity — solid, visible, immovable.
 void SP_q1_func_wall( gentity_t *ent ) {
 	trap_SetBrushModel( ent, ent->model );
 
-	Com_Log( SEV_TRACE, LOG_CAT_GAME,
+	Com_Log( SEV_TRACE, LOG_CH(ch_game),
 	         "SP_q1_func_wall [after SetBrushModel]:"
 	         " model='%s' s.modelindex=%d"
 	         " r.mins=(%.0f,%.0f,%.0f) r.maxs=(%.0f,%.0f,%.0f)"
@@ -367,7 +369,7 @@ void SP_q1_func_wall( gentity_t *ent ) {
 	VectorCopy( ent->s.origin, ent->r.currentOrigin );
 	trap_LinkEntity( ent );
 
-	Com_Log( SEV_TRACE, LOG_CAT_GAME,
+	Com_Log( SEV_TRACE, LOG_CH(ch_game),
 	         "SP_q1_func_wall [after LinkEntity]:"
 	         " r.linked=%d"
 	         " r.absmin=(%.0f,%.0f,%.0f) r.absmax=(%.0f,%.0f,%.0f)"
@@ -415,7 +417,7 @@ static void Q1_CountSecrets( gentity_t *self ) {
 		if ( !Q_stricmp( e->classname, "q1_trigger_secret" ) )
 			level.q1_total_secrets++;
 	}
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "Q1 secrets: %d total\n", level.q1_total_secrets );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "Q1 secrets: %d total\n", level.q1_total_secrets );
 }
 
 void SP_q1_worldspawn( gentity_t *ent ) {
@@ -431,17 +433,17 @@ void SP_q1_worldspawn( gentity_t *ent ) {
 	}
 
 	if ( G_SpawnString( "sky", "", &s ) && s[0] ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME,
+		Com_Log( SEV_INFO, LOG_CH(ch_game),
 		         "Q1 worldspawn: sky='%s' (renderer integration deferred)\n", s );
 	}
 
 	if ( G_SpawnInt( "sounds", "0", &sounds ) && sounds ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME,
+		Com_Log( SEV_INFO, LOG_CH(ch_game),
 		         "Q1 worldspawn: sounds=%d (music mapping deferred)\n", sounds );
 	}
 
 	if ( G_SpawnInt( "light", "0", &light ) && light ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME,
+		Com_Log( SEV_INFO, LOG_CH(ch_game),
 		         "Q1 worldspawn: light=%d (ambient deferred)\n", light );
 	}
 
@@ -452,7 +454,7 @@ void SP_q1_worldspawn( gentity_t *ent ) {
 	ent->think     = Q1_CountSecrets;
 	ent->nextthink = level.time + FRAMETIME;
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME,
+	Com_Log( SEV_INFO, LOG_CH(ch_game),
 	         "SP_q1_worldspawn: worldtype=%d gravity=%d\n", worldtype, gravity );
 }
 

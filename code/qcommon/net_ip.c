@@ -25,6 +25,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "q_feats.h"
 
 #include "wired/net/wn_public.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_network, "network" );
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 // Set to qtrue when any registered demux consumed a packet — tells NET_Event to keep draining
 static qboolean net_packetConsumed;
 
@@ -34,7 +37,7 @@ static int                s_demux_count;
 
 void Net_RegisterDemux( transport_demux_t *demux ) {
 	if ( s_demux_count >= TRANSPORT_DEMUX_MAX ) {
-		Com_Log( SEV_ERROR, LOG_CAT_NETWORK,
+		Com_Log( SEV_ERROR, LOG_CH(ch_network),
 		         "Net_RegisterDemux: TRANSPORT_DEMUX_MAX exceeded, dropping '%s'\n",
 		         demux->name ? demux->name : "(unnamed)" );
 		return;
@@ -94,7 +97,8 @@ const char *NET_LastSendError( void ) {
 #		endif
 #	else // WINVER >= 0x501
 
-#if	1	// Windows2000 compatibility 
+#if	1	// Windows2000 compatibility
+// NOLINTNEXTLINE(readability-duplicate-include) — alternate-branch include vs the WINVER>=0x501 branch above
 #		include <ws2tcpip.h>
 #		include <wspiapi.h>
 #else
@@ -480,11 +484,11 @@ static qboolean Sys_StringToSockaddr( const char *s, sockaddr_t *sadr, int sadr_
 
 			return qtrue;
 		}
-		else
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: Error resolving %s: No address of required type found.\n", __func__, s );
+		Com_Log( SEV_INFO, LOG_CH( ch_network ), "%s: Error resolving %s: No address of required type found.\n",
+				 __func__, s );
 	}
 	else
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: Error resolving %s: %s\n", __func__, s, gai_error_str( retval ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: Error resolving %s: %s\n", __func__, s, gai_error_str( retval ) );
 
 	if ( res )
 		freeaddrinfo( res );
@@ -584,13 +588,13 @@ qboolean NET_CompareBaseAdrMask( const netadr_t *a, const netadr_t *b, unsigned 
 #endif
 	else
 	{
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: bad address type\n", __func__);
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: bad address type\n", __func__);
 		return qfalse;
 	}
 
 	int curbyte = netmask >> 3;
 
-	if(curbyte && memcmp(addra, addrb, curbyte))
+	if(curbyte && memcmp(addra, addrb, curbyte) != 0)
 		return qfalse;
 
 	netmask &= 0x07;
@@ -750,7 +754,7 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 			err = socketError;
 
 			if( err != EAGAIN && err != ECONNRESET )
-				Com_Log( SEV_INFO, LOG_CAT_NETWORK, "NET_GetPacket: %s\n", NET_ErrorString() );
+				Com_Log( SEV_INFO, LOG_CH(ch_network), "NET_GetPacket: %s\n", NET_ErrorString() );
 		}
 		else
 		{
@@ -775,7 +779,7 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 			}
 
 			if( ret >= net_message->maxsize ) {
-				Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Oversize packet from %s\n", NET_AdrToString( net_from ) );
+				Com_Log( SEV_INFO, LOG_CH(ch_network), "Oversize packet from %s\n", NET_AdrToString( net_from ) );
 				return qfalse;
 			}
 
@@ -812,7 +816,7 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 			err = socketError;
 
 			if( err != EAGAIN && err != ECONNRESET )
-				Com_Log( SEV_INFO, LOG_CAT_NETWORK, "NET_GetPacket: %s\n", NET_ErrorString() );
+				Com_Log( SEV_INFO, LOG_CH(ch_network), "NET_GetPacket: %s\n", NET_ErrorString() );
 		}
 		else
 		{
@@ -822,7 +826,7 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 
 			if(ret >= net_message->maxsize)
 			{
-				Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Oversize packet from %s\n", NET_AdrToString( net_from ) );
+				Com_Log( SEV_INFO, LOG_CH(ch_network), "Oversize packet from %s\n", NET_AdrToString( net_from ) );
 				return qfalse;
 			}
 
@@ -852,7 +856,7 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 			err = socketError;
 
 			if( err != EAGAIN && err != ECONNRESET )
-				Com_Log( SEV_INFO, LOG_CAT_NETWORK, "NET_GetPacket: %s\n", NET_ErrorString() );
+				Com_Log( SEV_INFO, LOG_CH(ch_network), "NET_GetPacket: %s\n", NET_ErrorString() );
 		}
 		else
 		{
@@ -862,7 +866,7 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 
 			if(ret >= net_message->maxsize)
 			{
-				Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Oversize packet from %s\n", NET_AdrToString( net_from ) );
+				Com_Log( SEV_INFO, LOG_CH(ch_network), "Oversize packet from %s\n", NET_AdrToString( net_from ) );
 				return qfalse;
 			}
 
@@ -942,7 +946,7 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 			            va( "Synthetic fault (net_forceSendError=%d)", forcedErrno ),
 			            sizeof( net_lastSendError ) );
 			Cvar_Set( "net_forceSendError", "0" );
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Sys_SendPacket: %s\n", net_lastSendError );
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "Sys_SendPacket: %s\n", net_lastSendError );
 			return;
 		}
 	}
@@ -985,7 +989,7 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
 		}
 
 		Q_strncpyz( net_lastSendError, NET_ErrorString(), sizeof( net_lastSendError ) );
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Sys_SendPacket: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "Sys_SendPacket: %s\n", NET_ErrorString() );
 	}
 }
 
@@ -1098,10 +1102,10 @@ void Sys_ShowIP( void ) {
 		Sys_SockaddrToString( addrbuf, sizeof(addrbuf), &localIP[i].addr );
 
 		if(localIP[i].type == NA_IP)
-			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "IP: %s\n", addrbuf);
+			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "IP: %s\n", addrbuf);
 #if FEAT_IPV6
 		else if(localIP[i].type == NA_IP6)
-			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "IP6: %s\n", addrbuf);
+			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "IP6: %s\n", addrbuf);
 #endif
 	}
 }
@@ -1123,20 +1127,20 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 	*err = 0;
 
 	if( net_interface ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Opening IP socket: %s:%i\n", net_interface, port );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "Opening IP socket: %s:%i\n", net_interface, port );
 	}
 	else {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Opening IP socket: 0.0.0.0:%i\n", port );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "Opening IP socket: 0.0.0.0:%i\n", port );
 	}
 
 	if( ( newsocket = socket( PF_INET, SOCK_DGRAM, IPPROTO_UDP ) ) == INVALID_SOCKET ) {
 		*err = socketError;
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_IPSocket: socket: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_IPSocket: socket: %s\n", NET_ErrorString() );
 		return newsocket;
 	}
 	// make it non-blocking
 	if( ioctlsocket( newsocket, FIONBIO, &_true ) == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_IPSocket: ioctl FIONBIO: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_IPSocket: ioctl FIONBIO: %s\n", NET_ErrorString() );
 		*err = socketError;
 		closesocket(newsocket);
 		return INVALID_SOCKET;
@@ -1145,7 +1149,7 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 	// make it broadcast capable
 	int i = 1;
 	if( setsockopt( newsocket, SOL_SOCKET, SO_BROADCAST, (char *) &i, sizeof(i) ) == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_IPSocket: setsockopt SO_BROADCAST: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_IPSocket: setsockopt SO_BROADCAST: %s\n", NET_ErrorString() );
 	}
 
 	if( !net_interface || !net_interface[0]) {
@@ -1169,7 +1173,7 @@ static SOCKET NET_IPSocket( const char *net_interface, int port, int *err ) {
 	}
 
 	if( bind( newsocket, (void *)&address, sizeof(address) ) == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_IPSocket: bind: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_IPSocket: bind: %s\n", NET_ErrorString() );
 		*err = socketError;
 		closesocket( newsocket );
 		return INVALID_SOCKET;
@@ -1196,22 +1200,22 @@ static SOCKET NET_IP6Socket( const char *net_interface, int port, struct sockadd
 	{
 		// Print the name in brackets if there is a colon:
 		if(Q_CountChar(net_interface, ':'))
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Opening IP6 socket: [%s]:%i\n", net_interface, port );
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "Opening IP6 socket: [%s]:%i\n", net_interface, port );
 		else
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Opening IP6 socket: %s:%i\n", net_interface, port );
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "Opening IP6 socket: %s:%i\n", net_interface, port );
 	}
 	else
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Opening IP6 socket: [::]:%i\n", port );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "Opening IP6 socket: [::]:%i\n", port );
 
 	if( ( newsocket = socket( PF_INET6, SOCK_DGRAM, IPPROTO_UDP ) ) == INVALID_SOCKET ) {
 		*err = socketError;
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_IP6Socket: socket: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_IP6Socket: socket: %s\n", NET_ErrorString() );
 		return newsocket;
 	}
 
 	// make it non-blocking
 	if( ioctlsocket( newsocket, FIONBIO, &_true ) == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_IP6Socket: ioctl FIONBIO: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_IP6Socket: ioctl FIONBIO: %s\n", NET_ErrorString() );
 		*err = socketError;
 		closesocket(newsocket);
 		return INVALID_SOCKET;
@@ -1225,7 +1229,7 @@ static SOCKET NET_IP6Socket( const char *net_interface, int port, struct sockadd
 		if(setsockopt(newsocket, IPPROTO_IPV6, IPV6_V6ONLY, (char *) &i, sizeof(i)) == SOCKET_ERROR)
 		{
 			// win32 systems don't seem to support this anyways.
-			Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "WARNING: NET_IP6Socket: setsockopt IPV6_V6ONLY: %s\n", NET_ErrorString());
+			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WARNING: NET_IP6Socket: setsockopt IPV6_V6ONLY: %s\n", NET_ErrorString());
 		}
 	}
 #endif
@@ -1251,7 +1255,7 @@ static SOCKET NET_IP6Socket( const char *net_interface, int port, struct sockadd
 	}
 
 	if( bind( newsocket, (void *)&address, sizeof(address) ) == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_IP6Socket: bind: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_IP6Socket: bind: %s\n", NET_ErrorString() );
 		*err = socketError;
 		closesocket( newsocket );
 		return INVALID_SOCKET;
@@ -1276,7 +1280,7 @@ static void NET_SetMulticast6( void )
 
 	if ( !*net_mcast6addr->string || !Sys_StringToSockaddr( net_mcast6addr->string, (sockaddr_t *) &addr, sizeof( addr ), AF_INET6, SOCK_DGRAM ) )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_JoinMulticast6: Incorrect multicast address given, "
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_JoinMulticast6: Incorrect multicast address given, "
 			   "please set cvar %s to a sane value.\n", net_mcast6addr->name);
 		
 		Cvar_SetIntegerValue( net_enabled->name, net_enabled->integer | NET_DISABLEMCAST );
@@ -1330,7 +1334,7 @@ void NET_JoinMulticast6( void )
 		if (setsockopt(multicast6_socket, IPPROTO_IPV6, IPV6_MULTICAST_IF,
 					(char *) &curgroup.ipv6mr_interface, sizeof(curgroup.ipv6mr_interface)) < 0)
 		{
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "NET_JoinMulticast6: Couldn't set scope on multicast socket: %s\n", NET_ErrorString());
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "NET_JoinMulticast6: Couldn't set scope on multicast socket: %s\n", NET_ErrorString());
 
 			if(multicast6_socket != ip6_socket)
 			{
@@ -1343,7 +1347,7 @@ void NET_JoinMulticast6( void )
 
 	if (setsockopt(multicast6_socket, IPPROTO_IPV6, IPV6_JOIN_GROUP, (char *) &curgroup, sizeof(curgroup)))
 	{
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "NET_JoinMulticast6: Couldn't join multicast group: %s\n", NET_ErrorString());
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "NET_JoinMulticast6: Couldn't join multicast group: %s\n", NET_ErrorString());
 
 		if(multicast6_socket != ip6_socket)
 		{
@@ -1383,22 +1387,22 @@ static void NET_OpenSocks( int port ) {
 
 	usingSocks = qfalse;
 
-	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Opening connection to SOCKS server.\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_network), "Opening connection to SOCKS server.\n" );
 
 	if ( ( socks_socket = socket( AF_INET, SOCK_STREAM, IPPROTO_TCP ) ) == INVALID_SOCKET ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: NET_OpenSocks: socket: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: NET_OpenSocks: socket: %s\n", NET_ErrorString() );
 		return;
 	}
 
 	if ( !Sys_StringToSockaddr( net_socksServer->string, (sockaddr_t*)&address, sizeof( address ), AF_INET, SOCK_STREAM ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: %s failed\n", __func__ );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: %s failed\n", __func__ );
 		return;
 	}
 
 	address.sin_port = htons( net_socksPort->integer );
 
 	if ( connect( socks_socket, ( struct sockaddr * )&address, sizeof( struct sockaddr_in ) ) == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: connect: %s\n", __func__, NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: connect: %s\n", __func__, NET_ErrorString() );
 		return;
 	}
 
@@ -1417,18 +1421,18 @@ static void NET_OpenSocks( int port ) {
 	}
 
 	if ( send( socks_socket, (void *)buf, len, 0 ) == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: send: %s\n", __func__, NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: send: %s\n", __func__, NET_ErrorString() );
 		return;
 	}
 
 	// get the response
 	len = recv( socks_socket, (void *)buf, 32, 0 );
 	if ( len == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: recv: %s\n", __func__, NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: recv: %s\n", __func__, NET_ErrorString() );
 		return;
 	}
 	if ( len != 2 || buf[0] != 5 ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: bad auth.method response\n", __func__ );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: bad auth.method response\n", __func__ );
 		return;
 	}
 
@@ -1437,7 +1441,7 @@ static void NET_OpenSocks( int port ) {
 		case 2: // username/password authentication
 			break;
 		default:
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: unsupported auth.method\n", __func__ );
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: unsupported auth.method\n", __func__ );
 			return;
 	}
 
@@ -1464,18 +1468,18 @@ static void NET_OpenSocks( int port ) {
 
 		// send it
 		if ( send( socks_socket, (void *)buf, 3 + ulen + plen, 0 ) == SOCKET_ERROR ) {
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: send: %s\n", __func__, NET_ErrorString() );
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: send: %s\n", __func__, NET_ErrorString() );
 			return;
 		}
 
 		// get the response
 		len = recv( socks_socket, (void *)buf, 64, 0 );
 		if ( len == SOCKET_ERROR ) {
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: recv: %s\n", __func__, NET_ErrorString() );
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: recv: %s\n", __func__, NET_ErrorString() );
 			return;
 		}
 		if ( len != 2 || buf[0] != 1 ) {
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: bad auth response\n", __func__ );
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: bad auth response\n", __func__ );
 			return;
 		}
 	}
@@ -1488,28 +1492,28 @@ static void NET_OpenSocks( int port ) {
 	cmd.u.v4.addr.s_addr = INADDR_ANY;
 	cmd.u.v4.port = htons( port );
 	if ( send( socks_socket, (void *)&cmd, 10, 0 ) == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: send: %s\n", __func__, NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: send: %s\n", __func__, NET_ErrorString() );
 		return;
 	}
 
 	// get the response
 	len = recv( socks_socket, (void *)&cmd, sizeof( cmd ), 0 );
 	if ( len == SOCKET_ERROR ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: recv: %s\n", __func__, NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: recv: %s\n", __func__, NET_ErrorString() );
 		return;
 	}
 	if ( len < 10 || cmd.version != 5 ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: bad response\n", __func__ );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: bad response\n", __func__ );
 		return;
 	}
 
 	// check completion code
 	if ( cmd.command != 0 ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: request denied: %i\n", __func__, cmd.command );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: request denied: %i\n", __func__, cmd.command );
 		return;
 	}
 	if ( cmd.addrtype != 1 ) {
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "%s: relay address is not IPV4: %i\n", __func__, cmd.addrtype );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "%s: relay address is not IPV4: %i\n", __func__, cmd.addrtype );
 		return;
 	}
 
@@ -1575,12 +1579,12 @@ static void NET_GetLocalAddress( void )
 	if ( gethostname( hostname, sizeof( hostname ) ) )
 		return;
 
-	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Hostname: %s\n", hostname );
+	Com_Log( SEV_INFO, LOG_CH(ch_network), "Hostname: %s\n", hostname );
 
 	numIP = 0;
 
 	if ( getifaddrs( &ifap ) )
-		Com_Log( SEV_INFO, LOG_CAT_NETWORK, "NET_GetLocalAddress: Unable to get list of network interfaces: %s\n", NET_ErrorString() );
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "NET_GetLocalAddress: Unable to get list of network interfaces: %s\n", NET_ErrorString() );
 	else
 	{
 		for( search = ifap; search; search = search->ifa_next )
@@ -1606,7 +1610,7 @@ static void NET_GetLocalAddress( void ) {
 	if ( gethostname( hostname, sizeof( hostname ) ) == SOCKET_ERROR )
 		return;
 
-	Com_Log( SEV_INFO, LOG_CAT_NETWORK, "Hostname: %s\n", hostname );
+	Com_Log( SEV_INFO, LOG_CH(ch_network), "Hostname: %s\n", hostname );
 	
 	memset(&hint, 0, sizeof(hint));
 	
@@ -1683,14 +1687,12 @@ static void NET_OpenIP( void ) {
 				Cvar_SetIntegerValue( "net_port6", port6 + i );
 				break;
 			}
-			else
-			{
-				if(err == EAFNOSUPPORT)
-					break;
-			}
+
+			if ( err == EAFNOSUPPORT )
+				break;
 		}
 		if(ip6_socket == INVALID_SOCKET)
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: Couldn't bind to a v6 ip address.\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: Couldn't bind to a v6 ip address.\n");
 	}
 #endif
 
@@ -1706,15 +1708,13 @@ static void NET_OpenIP( void ) {
 
 				break;
 			}
-			else
-			{
-				if(err == EAFNOSUPPORT)
-					break;
-			}
+
+			if ( err == EAFNOSUPPORT )
+				break;
 		}
 		
 		if(ip_socket == INVALID_SOCKET)
-			Com_Log( SEV_INFO, LOG_CAT_NETWORK, "WARNING: Couldn't bind to a v4 ip address.\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_network), "WARNING: Couldn't bind to a v4 ip address.\n");
 	}
 }
 
@@ -1958,12 +1958,12 @@ void NET_Init( void ) {
 
 	r = WSAStartup( MAKEWORD( 2, 0 ), &winsockdata );
 	if( r ) {
-		COM_WARN( LOG_CAT_SYSTEM, "Winsock initialization failed, returned %d\n", r );
+		COM_WARN( LOG_CH(ch_system), "Winsock initialization failed, returned %d\n", r );
 		return;
 	}
 
 	winsockInitialized = qtrue;
-	Com_Log( SEV_DEBUG, LOG_CAT_NETWORK, "Winsock Initialized\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_network), "Winsock Initialized\n" );
 #endif
 
 	NET_Config( qtrue );
@@ -2135,7 +2135,7 @@ qboolean NET_Sleep( int timeout )
 #ifndef _WIN32
 		if ( socketError != EINTR )
 #endif
-		COM_WARN( LOG_CAT_SYSTEM, "Warning: select() syscall failed: %s\n",
+		COM_WARN( LOG_CH(ch_system), "Warning: select() syscall failed: %s\n",
 			NET_ErrorString() );
 	}
 
@@ -2252,10 +2252,9 @@ static packetQueue_t *PQ_Insert( packetQueue_t *head, packetQueue_t *item ) {
 		item->prev = prev;
 		item->next = next;
 		return head;
-	} else {
-		item->prev = item->next = item;
-		return item;
 	}
+	item->prev = item->next = item;
+	return item;
 }
 
 static packetQueue_t *PQ_Process( packetQueue_t *head, const int time_diff ) {
@@ -2421,8 +2420,7 @@ int NET_StringToAdr( const char *s, netadr_t *a, netadrtype_t family )
 	if ( port ) {
 		a->port = BigShort( (short)atoi( port ) );
 		return 1;
-	} else {
-		a->port = BigShort( PORT_SERVER );
-		return 2;
 	}
+	a->port = BigShort( PORT_SERVER );
+	return 2;
 }

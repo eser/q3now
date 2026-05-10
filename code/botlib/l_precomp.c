@@ -379,7 +379,7 @@ static int PC_ReadDefineParms(source_t *source, define_t *define, token_t **parm
 	//
 	for (i = 0; i < define->numparms; i++) parms[i] = NULL;
 	//if no leading "("
-	if (strcmp(token.string, "("))
+	if (strcmp(token.string, "(") != 0)
 	{
 		PC_UnreadSourceToken(source, &token);
 		SourceError(source, "define %s missing parms", define->name);
@@ -425,13 +425,10 @@ static int PC_ReadDefineParms(source_t *source, define_t *define, token_t **parm
 				indent++;
 				continue;
 			} //end if
-			else if (!strcmp(token.string, ")"))
-			{
-				if (--indent <= 0)
-				{
-					if (!parms[define->numparms-1])
-					{
-						SourceWarning(source, "too few define parms");
+			if ( !strcmp( token.string, ")" ) ) {
+				if ( --indent <= 0 ) {
+					if ( !parms[define->numparms - 1] ) {
+						SourceWarning( source, "too few define parms" );
 					} //end if
 					done = 1;
 					break;
@@ -1285,7 +1282,7 @@ static int PC_Directive_define(source_t *source)
 				//
 				if (!strcmp(token.string, ")")) break;
 				//then it must be a comma
-				if (strcmp(token.string, ","))
+				if (strcmp(token.string, ",") != 0)
 				{
 					SourceError(source, "define not terminated");
 					return qfalse;
@@ -1681,6 +1678,7 @@ static int PC_OperatorPriority(int op)
 
 #define MAX_VALUES		64
 #define MAX_OPERATORS	64
+// NOLINTBEGIN(bugprone-macro-parentheses) — vendored Q3 botlib expression evaluator; macro args are always lvalue pointers at every call site
 #define AllocValue(val)									\
 	if (numvalues >= MAX_VALUES) {						\
 		SourceError(source, "out of value space");		\
@@ -1700,6 +1698,7 @@ static int PC_OperatorPriority(int op)
 	else												\
 		op = &operator_heap[numoperators++];
 #define FreeOperator(op)
+// NOLINTEND(bugprone-macro-parentheses)
 
 static int PC_EvaluateTokens(source_t *source, token_t *tokens, int *intvalue, float *floatvalue, int integer)
 {
@@ -1736,7 +1735,7 @@ static int PC_EvaluateTokens(source_t *source, token_t *tokens, int *intvalue, f
 					error = 1;
 					break;
 				} //end if
-				if (strcmp(t->string, "defined"))
+				if (strcmp(t->string, "defined") != 0)
 				{
 					SourceError(source, "undefined name %s in #if/#elif", t->string);
 					error = 1;
@@ -1755,6 +1754,7 @@ static int PC_EvaluateTokens(source_t *source, token_t *tokens, int *intvalue, f
 					break;
 				} //end if
 				//v = (value_t *) GetClearedMemory(sizeof(value_t));
+				// NOLINTNEXTLINE(readability-else-after-return) — AllocValue is a multi-line if/else macro; auto-fix mangles the call site to "( v );"
 				AllocValue(v);
 #if DEFINEHASHING
 				if (PC_FindHashedDefine(source->definehash, t->string))
@@ -1779,7 +1779,7 @@ static int PC_EvaluateTokens(source_t *source, token_t *tokens, int *intvalue, f
 				if (brace)
 				{
 					t = t->next;
-					if (!t || strcmp(t->string, ")"))
+					if (!t || strcmp(t->string, ")") != 0)
 					{
 						SourceError(source, "defined without ) in #if/#elif");
 						error = 1;
@@ -1800,6 +1800,7 @@ static int PC_EvaluateTokens(source_t *source, token_t *tokens, int *intvalue, f
 					break;
 				} //end if
 				//v = (value_t *) GetClearedMemory(sizeof(value_t));
+				// NOLINTNEXTLINE(readability-else-after-return) — AllocValue is a multi-line if/else macro; auto-fix mangles the call site to "( v );"
 				AllocValue(v);
 				if (negativevalue)
 				{
@@ -1836,12 +1837,10 @@ static int PC_EvaluateTokens(source_t *source, token_t *tokens, int *intvalue, f
 					parentheses++;
 					break;
 				} //end if
-				else if (t->subtype == P_PARENTHESESCLOSE)
-				{
+				if ( t->subtype == P_PARENTHESESCLOSE ) {
 					parentheses--;
-					if (parentheses < 0)
-					{
-						SourceError(source, "too many ) in #if/#elsif");
+					if ( parentheses < 0 ) {
+						SourceError( source, "too many ) in #if/#elsif" );
 						error = 1;
 					} //end if
 					break;
@@ -1930,6 +1929,7 @@ static int PC_EvaluateTokens(source_t *source, token_t *tokens, int *intvalue, f
 				if (!error && !negativevalue)
 				{
 					//o = (operator_t *) GetClearedMemory(sizeof(operator_t));
+					// NOLINTNEXTLINE(readability-else-after-return) — AllocOperator is a multi-line if/else macro; auto-fix mangles the call site to "( o );"
 					AllocOperator(o);
 					o->operator = t->subtype;
 					o->priority = PC_OperatorPriority(t->subtype);
@@ -2817,7 +2817,7 @@ int PC_ExpectTokenString(source_t *source, char *string)
 		return qfalse;
 	} //end if
 
-	if (strcmp(token.string, string))
+	if (strcmp(token.string, string) != 0)
 	{
 		SourceError(source, "expected %s, found %s", string, token.string);
 		return qfalse;
@@ -2891,10 +2891,9 @@ int PC_ExpectAnyToken(source_t *source, token_t *token)
 		SourceError(source, "couldn't read expected token");
 		return qfalse;
 	} //end if
-	else
-	{
-		return qtrue;
-	} //end else
+
+	return qtrue;
+	//end else
 } //end of the function PC_ExpectAnyToken
 //============================================================================
 //

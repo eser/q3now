@@ -283,11 +283,11 @@ Used to resample images in a more general than quartering fashion.
 This will only be filtered properly if the resampled size
 is greater than half the original size.
 
-If a larger shrinking is needed, use the mipmap function 
+If a larger shrinking is needed, use the mipmap function
 before or after.
 ================
 */
-static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *out,  
+static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *out,
 							int outwidth, int outheight ) {
 	int		i, j;
 	unsigned	*inrow, *inrow2;
@@ -298,7 +298,8 @@ static void ResampleTexture( unsigned *in, int inwidth, int inheight, unsigned *
 
 	if ( outwidth > ARRAY_LEN( p1 ) )
 		ri.Terminate( TERM_CLIENT_DROP, "ResampleTexture: max width" );
-								
+
+	// NOLINTNEXTLINE(clang-analyzer-core.DivideZero) — caller never passes outwidth == 0; image-resampling caller invariant
 	fracstep = inwidth * 0x10000 / outwidth;
 
 	frac = fracstep>>2;
@@ -430,7 +431,7 @@ static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, i
 		for ( j = 0 ; j < outWidth ; j++ ) {
 			outpix = (byte *) ( temp + i * outWidth + j );
 			for ( k = 0 ; k < 4 ; k++ ) {
-				total = 
+				total =
 					1 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
 					2 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
 					2 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
@@ -582,7 +583,7 @@ typedef struct {
 } Image_Upload_Data;
 
 static void generate_image_upload_data( image_t *image, byte *data, Image_Upload_Data *upload_data ) {
-	
+
 	qboolean mipmap = (image->flags & IMGFLAG_MIPMAP) ? qtrue : qfalse;
 	qboolean picmip = (image->flags & IMGFLAG_PICMIP) ? qtrue : qfalse;
 	byte* resampled_buffer = NULL;
@@ -699,7 +700,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 		if (width < 1) width = 1;
 
 		height >>= 1;
-		if (height < 1) height = 1; 
+		if (height < 1) height = 1;
 	}
 
 	// At this point width == scaled_width and height == scaled_height.
@@ -716,7 +717,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 
 	memcpy(upload_data->buffer, scaled_buffer, mip_level_size);
 	upload_data->buffer_size = mip_level_size;
-	
+
 	if ( mipmap ) {
 		while (scaled_width > 1 && scaled_height > 1) {
 			R_MipMap((byte *)scaled_buffer, (byte *)scaled_buffer, scaled_width, scaled_height);
@@ -1122,7 +1123,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 		image->imgName2 = image->imgName + namelen;
 		strcpy( image->imgName2, name2 );
 	} else {
-		image->imgName2 = image->imgName; 
+		image->imgName2 = image->imgName;
 	}
 
 	hash = generateHashValue( name );
@@ -1417,7 +1418,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	for ( image = hashTable[ hash ]; image; image = image->next ) {
 		if ( !Q_stricmp( name, image->imgName ) ) {
 			// the white image can be used with any set of parms, but other mismatches are errors
-			if ( strcmp( name, "*white" ) ) {
+			if ( strcmp( name, "*white" ) != 0 ) {
 				if ( image->flags != flags ) {
 					if ( MixedFlagsWarnOnce( name, image->flags, flags ) )
 						ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
@@ -1451,20 +1452,31 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 		return NULL;
 	}
 
-	if ( tr.mapLoading && r_mapGreyScale->value > 0 ) {
+	if ( tr.mapLoading && r_mapSaturation->value != 1.0f ) {
+		const float sat = r_mapSaturation->value;
 		byte *img = pic;
 		for ( int i = 0; i < width * height; i++, img += 4 ) {
-			if ( r_mapGreyScale->integer ) {
-				byte luma = LUMA( img[0], img[1], img[2] );
-				img[0] = luma;
-				img[1] = luma;
-				img[2] = luma;
-			} else {
-				float luma = LUMA( img[0], img[1], img[2] );
-				img[0] = LERP( img[0], luma, r_mapGreyScale->value );
-				img[1] = LERP( img[1], luma, r_mapGreyScale->value );
-				img[2] = LERP( img[2], luma, r_mapGreyScale->value );
-			}
+			const float luma = LUMA( img[0], img[1], img[2] );
+			// saturation 0 → luma (grey); 1 → identity (branch
+			// excluded above); 2 → super-saturation, clamped to
+			// byte range below. The formula is the inverse-mix
+			// form of the gamma.frag mix(luma, base, sat) with
+			// signed integer math at byte precision.
+			float r = luma + sat * ( (float)img[0] - luma );
+			float g = luma + sat * ( (float)img[1] - luma );
+			float b = luma + sat * ( (float)img[2] - luma );
+			int ri = (int)( r + 0.5f );
+			int gi = (int)( g + 0.5f );
+			int bi = (int)( b + 0.5f );
+			if ( ri < 0 )   ri = 0;
+			if ( ri > 255 ) ri = 255;
+			if ( gi < 0 )   gi = 0;
+			if ( gi > 255 ) gi = 255;
+			if ( bi < 0 )   bi = 0;
+			if ( bi > 255 ) bi = 255;
+			img[0] = (byte)ri;
+			img[1] = (byte)gi;
+			img[2] = (byte)bi;
 		}
 	}
 
@@ -1498,8 +1510,8 @@ static void R_CreateDlightImage( void ) {
 			} else if ( b < 75 ) {
 				b = 0;
 			}
-			data[y][x][0] = 
-			data[y][x][1] = 
+			data[y][x][0] =
+			data[y][x][1] =
 			data[y][x][2] = b;
 			data[y][x][3] = 255;
 		}
@@ -1582,8 +1594,8 @@ static void R_CreateFogImage( void ) {
 		for (y=0 ; y<FOG_T ; y++) {
 			d = R_FogFactor( ( x + 0.5f ) / FOG_S, ( y + 0.5f ) / FOG_T );
 
-			data[(y*FOG_S+x)*4+0] = 
-			data[(y*FOG_S+x)*4+1] = 
+			data[(y*FOG_S+x)*4+0] =
+			data[(y*FOG_S+x)*4+1] =
 			data[(y*FOG_S+x)*4+2] = 255;
 			data[(y*FOG_S+x)*4+3] = 255*d;
 		}
@@ -1743,8 +1755,8 @@ static void R_CreateBuiltinImages( void ) {
 	// for default lightmaps, etc
 	for (x=0 ; x<DEFAULT_SIZE ; x++) {
 		for (y=0 ; y<DEFAULT_SIZE ; y++) {
-			data[y][x][0] = 
-			data[y][x][1] = 
+			data[y][x][0] =
+			data[y][x][1] =
 			data[y][x][2] = tr.identityLightByte;
 			data[y][x][3] = 255;
 		}
@@ -1774,7 +1786,7 @@ void R_SetColorMappings( void ) {
 	int		inf;
 	int		shift;
 	qboolean applyGamma;
-	float	brightness;
+	float	brightness, mapBrightness;
 
 	if ( !tr.inited ) {
 		// it may be called from window handling functions where gamma flags is now yet known/set
@@ -1782,58 +1794,42 @@ void R_SetColorMappings( void ) {
 	}
 
 	// Float-based brightness (CNQ3-style rework).
-	// r_brightness replaces r_overBrightBits when set (value > 0), but we
-	// still honor negative r_overBrightBits as the signal to force gamma in
-	// windowed mode.
-	if ( r_brightness != NULL && r_brightness->value > 0.0f ) {
-		brightness = r_brightness->value;
-		if ( brightness < 0.25f ) brightness = 0.25f;
-		if ( brightness > 32.0f ) brightness = 32.0f;
-		tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
-		if ( r_overBrightBits->integer < 0 ) {
-			tr.overbrightBits = -tr.overbrightBits;
-		}
-	} else {
-		// setup the overbright lighting
-		// negative value will force gamma in windowed mode
-		tr.overbrightBits = r_overBrightBits->integer;
-	}
-	tr.overbrightBits = abs( tr.overbrightBits );
+	// When r_brightness != 0 we convert log2(brightness) into overbright-bits.
+	brightness = Com_Clamp( 0.25f, 32.0f, r_brightness->value );
+	tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
 
-	// never overbright in windowed mode
+	mapBrightness = Com_Clamp( 0.25f, 32.0f, r_mapBrightness->value );
+	tr.mapOverbrightBits = (int)( logf( mapBrightness ) / logf( 2.0f ) + 0.5f );
+
+	tr.overbrightBits    = Com_Clampi( 0, 2, tr.overbrightBits );
+	tr.mapOverbrightBits = Com_Clampi( 0, 2, tr.mapOverbrightBits );
+
+	// r_brightness and r_mapBrightness are independent multipliers,
+	// mirroring the r_saturation / r_mapSaturation / r_lightmapSaturation
+	// split (post-process vs load-time bake):
+	//   - r_mapBrightness bakes 2^mapOverbrightBits into lightmap
+	//     pixel data at BSP load time (R_ColorShiftLightingBytes).
+	//   - r_brightness drives obScale = 2^overbrightBits in the gamma
+	//     post-process pipeline (frag_spec_data.overbright).
+	// They compose multiplicatively in visible output. No cap — the
+	// q3-canonical "compensating pair" semantic (overbrightBits <=
+	// mapOverbrightBits) is intentionally dropped.
+
 #ifdef USE_VULKAN
-	if ( !glConfig.isFullscreen && r_overBrightBits->integer >= 0 && !vk.fboActive ) {
+	if ( !glConfig.deviceSupportsGamma && !vk.fboActive ) {
 #else
-	if ( !glConfig.isFullscreen && r_overBrightBits->integer >= 0 ) {
+	if ( !glConfig.deviceSupportsGamma ) {
 #endif
-		tr.overbrightBits = 0;
+		tr.overbrightBits = 0; // need hardware gamma for overbright
 		applyGamma = qfalse;
 	} else {
-#ifdef USE_VULKAN
-		if ( !glConfig.deviceSupportsGamma && !vk.fboActive ) {
-#else
-		if ( !glConfig.deviceSupportsGamma ) {
-#endif
-			tr.overbrightBits = 0; // need hardware gamma for overbright
-			applyGamma = qfalse;
-		} else {
-			applyGamma = qtrue;
-		}
+		applyGamma = qtrue;
 	}
 
-	// allow 2 overbright bits in 24 bit, but only 1 in 16 bit
-	if ( glConfig.colorBits > 16 ) {
-		if ( tr.overbrightBits > 2 ) {
-			tr.overbrightBits = 2;
-		}
-	} else {
-		if ( tr.overbrightBits > 1 ) {
-			tr.overbrightBits = 1;
-		}
-	}
-	if ( tr.overbrightBits < 0 ) {
-		tr.overbrightBits = 0;
-	}
+	// 16-bit color buffer can't carry 2 overbright bits cleanly
+    if ( glConfig.colorBits <= 16 && tr.overbrightBits > 1 ) {
+        tr.overbrightBits = 1;
+    }
 
 	tr.identityLight = 1.0f / ( 1 << tr.overbrightBits );
 	tr.identityLightByte = 255 * tr.identityLight;
@@ -1998,14 +1994,14 @@ static char *CommaParse( const char **data_p ) {
 
 	while ( 1 ) {
 		// skip whitespace
-		while ( (c = *data) <= ' ' ) {
+		 while ( (c = (byte)*data) <= ' ' ) {
 			if ( c == '\0' ) {
 				break;
 			}
 			data++;
 		}
 
-		c = *data;
+		c = (byte)*data;
 
 		// skip double slash comments
 		if ( c == '/' && data[1] == '/' )
@@ -2016,14 +2012,14 @@ static char *CommaParse( const char **data_p ) {
 			}
 		}
 		// skip /* */ comments
-		else if ( c == '/' && data[1] == '*' ) 
+		else if ( c == '/' && data[1] == '*' )
 		{
 			data += 2;
-			while ( *data && ( *data != '*' || data[1] != '/' ) ) 
+			while ( *data && ( *data != '*' || data[1] != '/' ) )
 			{
 				data++;
 			}
-			if ( *data ) 
+			if ( *data )
 			{
 				data += 2;
 			}
@@ -2044,7 +2040,7 @@ static char *CommaParse( const char **data_p ) {
 		data++;
 		while (1)
 		{
-			c = *data;
+			c = (byte)*data;
 			if ( c == '\"' || c == '\0' )
 			{
 				if ( c == '\"' )
@@ -2071,7 +2067,7 @@ static char *CommaParse( const char **data_p ) {
 			len++;
 		}
 		data++;
-		c = *data;
+		c = (byte)*data;
 	} while ( c > ' ' && c != ',' );
 
 	com_token[ len ] = '\0';
@@ -2134,7 +2130,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	skin->numSurfaces = 0;
 
 	// If not a .skin file, load as a single shader
-	if ( strcmp( name + strlen( name ) - 5, ".skin" ) ) {
+	if ( strcmp( name + strlen( name ) - 5, ".skin" ) != 0 ) {
 		skin->numSurfaces = 1;
 		skin->surfaces = ri.Hunk_Alloc( sizeof( skinSurface_t ), h_low );
 		skin->surfaces[0].shader = R_FindShader( name, LIGHTMAP_NONE, qtrue );
@@ -2250,7 +2246,7 @@ void	R_SkinList_f( void ) {
 
 		ri.Log( SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
 		for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-			ri.Log( SEV_INFO, "       %s = %s\n", 
+			ri.Log( SEV_INFO, "       %s = %s\n",
 				skin->surfaces[j].name, skin->surfaces[j].shader->name );
 		}
 	}

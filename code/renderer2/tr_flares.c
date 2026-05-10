@@ -57,6 +57,7 @@ up to five or more times in a frame with 3D status bar icons).
 
 // flare states maintain visibility over multiple frames for fading
 // layers: view, mirror, menu
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — fields ordered by semantics, not packing
 typedef struct flare_s {
 	struct		flare_s	*next;		// for active chain
 

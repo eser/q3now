@@ -8,7 +8,7 @@ cl_wired_hud_compat.h — Compatibility shim for ModernHUD element migration
 // NOTE: include "client.h" BEFORE this header in your .c file
 // This header must NOT include client.h itself to avoid double-include issues
 
-#include "../../../game/bg_public.h"
+#include "../../../qcommon/wired/protocol.h"
 #include "cl_wired_hud.h"
 #include "cl_wired_fonts.h"
 #include "../ui/cl_wired_text.h"
@@ -27,6 +27,10 @@ cl_wired_hud_compat.h — Compatibility shim for ModernHUD element migration
 // ── Wired UI draw helpers — REAL SCREEN PIXELS (bypass AdjustFrom640) ─
 #include "cl_wired_draw.h"
 
+// Macros below expand into Com_Log calls that pass LOG_CH(ch_ui). Every
+// translation unit that includes this header is responsible for declaring
+// ch_ui itself via LOG_DECLARE_CHANNEL( ch_ui, "ui" ) at file scope.
+
 // ── filesystem trap → direct FS_* calls ───────────────────────────────
 
 #define trap_FS_FOpenFile(n,f,m)    FS_FOpenFileByMode(n,f,m)
@@ -44,7 +48,7 @@ cl_wired_hud_compat.h — Compatibility shim for ModernHUD element migration
 
 // ── print ─────────────────────────────────────────────────────────────
 
-#define trap_Print(s)               COM_INFO( LOG_CAT_UI, "%s", s )
+#define trap_Print(s)               COM_INFO( LOG_CH(ch_ui), "%s", s )
 
 // ── memory ────────────────────────────────────────────────────────────
 // Z_Malloc and Z_Free are available in both cgame and client

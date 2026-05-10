@@ -422,6 +422,239 @@ typedef struct vk_tess_s {
 } vk_tess_t;
 
 
+// ── shared primitive shader image registry ──────────────────────────
+//
+// Global registry of resolved image_t* per primitive shader, used by
+// wired primitive pipelines that need texturing. **Slot index ≠ qhandle.**
+// Phase 5K decoupled the two: the qhandle space (MAX_SHADERS=16384) is
+// monotonic across all RE_RegisterShader calls (world textures, models,
+// UI, primitive); the registry has only PRIMITIVE_SHADER_IMAGE_MAX = 64
+// slots. RE_RegisterPrimitiveShader allocates a slot per shader via
+// vk_alloc_primitive_shader_image_slot and records the mapping in
+// vk.qhandle_to_prim_slot[]. SSBO write sites translate cgame-supplied
+// qhandles to slots via vk_qhandle_to_prim_slot at submit time.
+//
+// Slot 0 is reserved for tr.whiteImage. Slots 1..63 are dynamically
+// assigned to registered primitive shaders. Out-of-range or
+// unregistered qhandles map to slot 0, rendering "untextured" (white
+// texel × vertex color = vertex color) instead of producing OOB SSBO
+// reads.
+//
+// Consumers: ribbon (binding 2), beam (binding 1). Particle has its
+// own per-class registry (vk.particle.classImages[]) because it
+// indexes by particleClassHandle_t, not qhandle_t.
+//
+// vk_register_primitive_shader_image idempotently writes both the
+// host array slot and every dependent primitive's descriptor set.
+#define PRIMITIVE_SHADER_IMAGE_MAX 64
+
+// Phase 5K: upper bound on the qhandle space used to size the
+// qhandle→primitive-slot indirection table. Must equal MAX_SHADERS
+// in tr_local.h (1<<SHADERNUM_BITS = 16384). vk.h is included by
+// tr_local.h before MAX_SHADERS is defined, so we need a parallel
+// constant here; a _Static_assert in vk.c verifies they agree.
+#define VK_PRIM_QHANDLE_MAX 16384
+
+extern struct image_s *vk_primitive_shader_images[PRIMITIVE_SHADER_IMAGE_MAX];
+
+void vk_init_primitive_shader_images( void );
+// Phase 5K: takes a primitive registry slot index (NOT a qhandle).
+// Slot range [1, PRIMITIVE_SHADER_IMAGE_MAX); slot 0 is reserved for
+// tr.whiteImage. Callers from RE_RegisterPrimitiveShader should go
+// through vk_alloc_primitive_shader_image_slot instead, which is the
+// stable allocator that maintains the qhandle→slot lookup table.
+void vk_register_primitive_shader_image( int slot, struct image_s *image );
+
+// Phase 5F: allocate (or reuse) a registry slot for a stage>0 image
+// whose qhandle slot is already taken by stage 0's image. Linear
+// search: returns existing slot if `image` is already registered;
+// otherwise writes into the first slot still holding tr.whiteImage
+// and broadcasts the descriptor write. Returns -1 on exhaustion.
+int  vk_alloc_primitive_shader_image_slot( struct image_s *image );
+void vk_shutdown_primitive_stages( void );
+
+// Phase 5K: translate a cgame qhandle (whatever value
+// RE_RegisterShader returned for the primitive shader) into the
+// engine-internal primitive registry slot (0..PRIMITIVE_SHADER_IMAGE_MAX-1).
+// Used at SSBO write time to pack a small slot index into the GPU
+// header where the previous design had relied on (qhandle == slot).
+// Out-of-range or unregistered qhandles return slot 0 (whiteImage),
+// rendering as untextured rather than producing OOB SSBO reads.
+unsigned int vk_qhandle_to_prim_slot( qhandle_t h );
+
+// Phase 5F: per-stage rendering parameters for multi-stage primitive
+// shaders, packed for the GPU SSBO. std430, 32 bytes per entry,
+// indexed [shaderHandle * PRIMITIVE_STAGE_MAX + stageNumber].
+//
+// Trailing entries (stageNumber >= stageCount) are zero-initialized
+// and should not be drawn — caller checks
+// vk.primitive_shader_stage_counts[handle] before per-stage draws.
+//
+// blendPacked encodes (srcBlend << 16) | dstBlend so the 32B target
+// fits without padding. GLSL unpacks via shifts.
+#define VK_PRIMITIVE_STAGE_BYTES 32u
+
+typedef struct {
+	uint32_t imageSlot;          // bytes  0..3
+	uint32_t blendPacked;        // bytes  4..7   (src << 16) | dst
+	uint32_t rgbGen;             // bytes  8..11  primRgbGen_t
+	uint32_t alphaGen;           // bytes 12..15  primAlphaGen_t
+	float    uvScale[2];         // bytes 16..23
+	float    uvScroll[2];        // bytes 24..31
+} VkPrimitiveStageGPU;
+
+#if defined( __STDC_VERSION__ ) && __STDC_VERSION__ >= 201112L
+_Static_assert( sizeof( VkPrimitiveStageGPU ) == VK_PRIMITIVE_STAGE_BYTES,
+	"VkPrimitiveStageGPU must be 32 bytes (std430-aligned, vec4-stride friendly)" );
+#endif
+
+// ── primitive particle (host-side type definitions) ────────────────
+//
+// These live outside Vk_Instance because C does not allow nested
+// typedefs inside a struct definition. The particle subsystem state
+// itself (buffers / pipelines / descriptor sets / cursors) lives as
+// the `vk.particle` member inside Vk_Instance below.
+//
+// PARTICLE_BYTES (64) and PARTICLE_CLASS_GPU_BYTES (400) are the
+// std430 sizes computed for the matching GLSL structs in
+// particle_integrate.comp / particle.vert. PARTICLES_PER_POOL is the
+// fixed pool capacity. _Static_assert in vk_init_particle catches
+// any drift between this C layout and the std430 stride.
+#define PARTICLES_PER_POOL          16384u
+#define PARTICLE_BYTES                 64u  // sizeof(GPU Particle), std430
+#define PARTICLE_CLASS_GPU_BYTES      400u  // sizeof(ParticleClassGPU), std430
+
+// Host-side mirror of GLSL std430 ParticleClassGPU. Field order +
+// trailing pads MUST exactly match particle_integrate.comp /
+// particle.vert. Padding is required because std430 rounds the
+// struct's stride up to its largest member alignment (vec4 = 16);
+// the natural C packing would leave 8 trailing bytes off, causing
+// silent misreads from element 1 onward in the classes[] SSBO.
+//
+// shaderBlendIsAdditive (consumed phase 5): derived at class
+// registration time from `cls->shader`'s stateBits (additive vs
+// alpha-blend). Replaces the cgame-supplied PRIM_FLAG_ADDITIVE bit
+// for blend-variant filtering — particle pipeline now honors the
+// underlying shader script's blendFunc, matching CPU rendering
+// semantics. The cgame `renderFlags` field still ships through but
+// is informational only; see primitives.h.
+typedef struct {
+	uint32_t shader;
+	uint32_t renderFlags;
+	uint32_t emitMode;
+	uint32_t scatterShape;
+	float    scatterMagnitude;
+	uint32_t velocityShape;
+	float    axialSpeed;
+	float    cubeJitter;
+	float    coneHalfAngle;
+	float    lifetimeMean;
+	float    lifetimeJitter;
+	int32_t  paletteCount;
+	vec4_t   colorPalette[16];   // PARTICLE_CLASS_MAX_PALETTE
+	vec4_t   colorEndMult;
+	float    sizeStart;
+	float    sizeEnd;
+	float    gravityScale;
+	float    drag;
+	uint32_t shaderBlendIsAdditive;  // was pad0 — phase 5; 0=alpha, 1=additive
+	uint32_t pad1;
+	uint32_t pad2;
+	uint32_t pad3;
+	// Expressivity extension. Appended at the end so previously-set
+	// offsets (palette, colorEndMult, size/gravity/drag,
+	// shaderBlendIsAdditive) stay byte-identical. .w lanes on the two
+	// vec4s are unused — only .xyz carry data — but storing as vec4
+	// avoids std430 vec3-stride traps and keeps offsets 16-aligned.
+	vec4_t   velocityBias;           // 352..367; .xyz = constant added to vel post-shape
+	vec4_t   velocityBiasJitter;     // 368..383; .xyz = symmetric crandom() per-axis jitter
+	float    speedJitter;            // 384..387; axialSpeed scatter, picked at emit
+	float    sizeJitter;             // 388..391; sizeStart scatter, picked at emit
+	uint32_t pad4;                   // 392..395
+	uint32_t pad5;                   // 396..399; total stride 400 B (= 25 * vec4)
+} particleClassGPU_t;
+
+// Host-side mirror of GLSL std430 Particle (per-particle pool slot).
+// Layout MUST exactly match the Particle struct in
+// particle_integrate.comp / particle.vert. Size is fixed at 64 B
+// (PARTICLE_BYTES); a sizeof check in vk_init_particle catches drift.
+//
+// In std430 a `vec3` followed by a `float` packs into a single 16 B
+// slot (offset 0..11 for vec3, 12..15 for float), so two such pairs
+// occupy 32 B. The next 16 B carries classHandle + paletteIndex +
+// sizeJitterPick + pad1, and the trailing 16 B is reserved (pad2..5)
+// to round the per-element stride up to 64 B (= 4 * vec4); std430
+// rounds the array element stride up to the largest member's
+// alignment (vec3 → 16 B), so sizes between 16-multiples would still
+// pad implicitly — making the extra fields explicit avoids surprise
+// at host-side memcpy time.
+typedef struct {
+	vec3_t   pos;            //  0..11
+	float    age;            // 12..15
+	vec3_t   vel;            // 16..27
+	float    lifetimeInv;    // 28..31
+	uint32_t classHandle;    // 32..35  (1..MAX_PARTICLE_CLASSES, 0 = dead)
+	uint32_t paletteIndex;   // 36..39  index into class colorPalette[]; rand() % paletteCount at emit
+	float    sizeJitterPick; // 40..43  per-particle sizeStart offset = crandom() * cls->sizeJitter
+	uint32_t pad1;           // 44..47
+	uint32_t pad2;           // 48..51
+	uint32_t pad3;           // 52..55
+	uint32_t pad4;           // 56..59
+	uint32_t pad5;           // 60..63  total stride 64 B
+} particleGPU_t;
+
+// Host-side mirror of GLSL std140 ParticleFrame. 144 B; std140
+// rounds vec4 / mat4 members to 16 B alignment, scalars to 4 B.
+//
+// Three write owners during a frame:
+//   render region  (bytes   0..111, 112 B): mvp, viewLeft, viewUp,
+//                                           eyeWorld. Filled in
+//                                           RB_DrawParticles, where
+//                                           backEnd.viewParms is valid.
+//   compute region (bytes 112..127,  16 B): dt, poolSize, numClasses,
+//                                           pingPongRead. Filled in
+//                                           RB_RunParticleCompute,
+//                                           which now runs from
+//                                           vk_begin_frame BEFORE the
+//                                           main render pass opens.
+//   shared region  (bytes 128..143,  16 B): identityLight + pad.
+//                                           tr.identityLight (CGEN_VERTEX
+//                                           halving factor; 1/2^overbrightBits).
+//                                           Read by particle.frag to
+//                                           match the engine's
+//                                           half-bright vertex-color
+//                                           convention. Written from
+//                                           RB_RunParticleCompute (the
+//                                           earliest per-frame UBO
+//                                           touch, runs before any
+//                                           render-pass open). Updated
+//                                           live when r_brightness or
+//                                           r_mapBrightness changes;
+//                                           the cvar onChange callback
+//                                           updates tr.identityLight
+//                                           and the next frame's UBO
+//                                           write picks it up.
+// Regions are contiguous and disjoint; do NOT memcpy the entire struct
+// from either site — that races / overwrites the other site's fields.
+typedef struct {
+	// ── render region (filled in RB_DrawParticles) ──────────────
+	float    mvp[16];        //   0..63
+	float    viewLeft[4];    //  64..79
+	float    viewUp[4];      //  80..95
+	float    eyeWorld[4];    //  96..111
+	// ── compute region (filled in RB_RunParticleCompute) ────────
+	float    dt;             // 112..115
+	uint32_t poolSize;       // 116..119
+	uint32_t numClasses;     // 120..123
+	uint32_t pingPongRead;   // 124..127
+	// ── shared region (filled in RB_RunParticleCompute) ─────────
+	float    identityLight;  // 128..131  tr.identityLight; consumed by particle.frag
+	float    pad0;           // 132..135  std140 vec4-stride pad
+	float    pad1;           // 136..139
+	float    pad2;           // 140..143  total stride 144 B (= 9 * vec4)
+} particleFrame_t;
+
+
 // Vk_Instance contains engine-specific vulkan resources that persist entire renderer lifetime.
 // This structure is initialized/deinitialized by vk_initialize/vk_shutdown functions correspondingly.
 typedef struct {
@@ -474,49 +707,269 @@ typedef struct {
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
 	VkPipelineLayout pipeline_layout_msdf;		// MSDF text (112-byte push constant range)
 
-	// ── compute shader infrastructure ─────────────────────────────
+	// ── primitive ribbon infrastructure ──────────────────────────────
 	//
-	// Frame sequence:
-	//   vk_begin_frame() → vk_compute_dispatch() → barrier → vk_begin_main_render_pass()
+	// Self-contained pipeline for the ribbon primitive. Cgame submits
+	// world-space control points + a header per ribbon via
+	// RE_AddRibbonToScene; the renderer accumulates them into per-frame
+	// host-coherent SSBOs and issues one vkCmdDraw per ribbon at the
+	// translucent draw site in RB_DrawSurfs.
 	//
-	// Per-frame output SSBOs avoid write/read contention across 2 frames in flight.
-	//
-	VkDescriptorSetLayout set_layout_compute;	// 2 SSBOs: input params + output verts
-	VkPipelineLayout pipeline_layout_compute;	// compute layout + push constants
-	qboolean computeAvailable;					// false if compute init failed
-
-	// per-frame trail dispatch queue (filled by cgame, consumed by renderer)
-	#define MAX_GPU_RAIL_TRAILS         8
-	#define RAIL_GPU_VERTEX_SIZE        48
-	#define RAIL_GPU_VERTS_PER_TRAIL    (2048 * 4)                                  // matches cgame MAX_RAIL_SEGMENTS * 4
-	#define RAIL_GPU_MAX_VERTS          (MAX_GPU_RAIL_TRAILS * RAIL_GPU_VERTS_PER_TRAIL)
-	#define RAIL_GPU_PARAMS_SIZE        656                                         // sizeof( railTrailParams_t ), std430
+	// Per-frame slots are indexed by vk.cmd_index; each frame in flight
+	// has its own buffer pair so CPU writes don't race GPU reads.
+	#define RIBBON_POINTS_PER_FRAME    16384u  // worst case: 8 ribbons × 2048 points
+	#define RIBBON_HEADERS_PER_FRAME      256u // hard cap on submissions per frame
+	#define RIBBON_POINT_BYTES             48u // sizeof(GPU RibbonPoint), std430
+	                                           // (3 * vec4: posW, rgba, normal+pad)
+	#define RIBBON_HEADER_BYTES            32u // sizeof(GPU RibbonHeader), std430
+	                                           // 4 uints (pointOffset, pointCount, shaderHandle, flags) +
+	                                           // vec2 uvScroll + float spawnTime + float _pad = 32 B
 	struct {
-		int   numSegments;
-		float beamLen;
-		float frac;
-		float curRadius;
-		float curSpacing;
-		float curWidth;
-	} railDispatch[MAX_GPU_RAIL_TRAILS];
-	int numRailDispatches;
+		// pipeline + layouts + shader-bound state
+		VkDescriptorSetLayout	set_layout;          // 2 SSBOs: points, headers
+		VkPipelineLayout		pipeline_layout;     // push(mvp+eyeWorld) + set0(SSBOs)
+		VkPipeline				pipeline_alpha;      // SRC_ALPHA / ONE_MINUS_SRC_ALPHA
+		VkPipeline				pipeline_additive;   // SRC_ALPHA / ONE
+		// per-frame staging (host-coherent, mapped)
+		VkBuffer				points_buffer  [NUM_COMMAND_BUFFERS];
+		VkDeviceMemory			points_memory  [NUM_COMMAND_BUFFERS];
+		byte					*points_ptr    [NUM_COMMAND_BUFFERS];
+		VkBuffer				headers_buffer [NUM_COMMAND_BUFFERS];
+		VkDeviceMemory			headers_memory [NUM_COMMAND_BUFFERS];
+		byte					*headers_ptr   [NUM_COMMAND_BUFFERS];
+		VkDescriptorSet			descriptor     [NUM_COMMAND_BUFFERS];
+		// per-frame write cursors (CPU-side, reset in RE_BeginFrame
+		// at frontend frame begin, before cgame submissions)
+		uint32_t				numPointsThisFrame;
+		uint32_t				numHeadersThisFrame;
+		qboolean				available;            // false if init failed
+	} ribbon;
 
-	// Per-frame, per-slot params buffer prevents the CPU from overwriting
-	// data the GPU is still reading: with NUM_COMMAND_BUFFERS frames in
-	// flight, each gets its own params memory keyed by vk.cmd_index. Within
-	// a frame, MAX_GPU_RAIL_TRAILS disjoint slots let multiple trails coexist
-	// without clobbering each other (bound via dynamic SSBO offset).
+	// ── primitive beam ───────────────────────────────────────────────
+	//
+	// Camera-facing two-endpoint quad with optional axial-copy
+	// expansion (cross pattern). Engine-managed pool with mixed
+	// transient (one-frame) and persistent (lifetime + fade) entries.
+	//
+	// Pool layout: vk.beam.active[i] tracks slot occupancy. Persistent
+	// metadata (spawnTime, duration, fadeIn, fadeOut) lives alongside
+	// the descriptor copy; transient slots have duration == 0 and
+	// expire at the end of each frame's RB_DrawBeams pass.
+	//
+	// SSBO write pattern: at draw time, RB_DrawBeams walks the pool,
+	// resolves entity-attached endpoints + fade alpha, and writes
+	// drawCount consecutive beamHeaderGPU_t entries to the per-frame
+	// SSBO. Then issues a single vkCmdDraw with instance count =
+	// drawCount and vertex count = 6 * BEAM_AXIAL_MAX. The vertex
+	// shader expands each instance to (axialCopies × 6) vertices,
+	// emitting degenerate clip-space-behind triangles for unused
+	// axial copies (when axialCopies < BEAM_AXIAL_MAX).
+	#define BEAM_POOL_MAX       128u   // max concurrent beams (transient + persistent combined). Phase 5P bump 64→128 gives headroom for 16-player matches and trail beam consumers (jumppad, rocket trails) on the roadmap.
+	#define BEAM_AXIAL_MAX        8u   // max axialCopies per beam (vertex-shader fixed loop bound)
+	#define BEAM_HEADER_BYTES    96u   // sizeof(GPU BeamHeader), std430:
+	                                   //   4 vec4 (start, end, startColor, endColor)  = 64 B
+	                                   //   vec2 uvScroll + 2 float widths + float spawnTime
+	                                   //                                       + 3 uint  = 32 B
+	                                   // total 96 B, naturally 16-aligned for vec4
+	                                   // array stride; no manual padding needed.
 	struct {
-		VkPipeline		compute_pipeline;		// helix geometry generation
-		VkPipeline		graphics_pipeline;		// helix rendering (empty vertex input)
-		uint32_t		params_slot_stride;		// PAD(RAIL_GPU_PARAMS_SIZE, vk.storage_alignment)
-		VkBuffer		params_buffer[NUM_COMMAND_BUFFERS];	// per-frame input SSBOs (slotted)
-		VkDeviceMemory	params_memory[NUM_COMMAND_BUFFERS];
-		byte			*params_ptr   [NUM_COMMAND_BUFFERS];	// mapped memory for CPU writes
-		VkBuffer		vertex_buffer[NUM_COMMAND_BUFFERS];	// per-frame output SSBOs (slotted)
-		VkDeviceMemory	vertex_memory[NUM_COMMAND_BUFFERS];
-		VkDescriptorSet	descriptor[NUM_COMMAND_BUFFERS];	// per-frame descriptor sets
-	} rail;
+		// pipeline + layouts + shader-bound state
+		VkDescriptorSetLayout	set_layout;            // 4 bindings: headers SSBO, image array, stages SSBO, stage-counts SSBO
+		VkPipelineLayout		pipeline_layout;       // push(mvp+eyeWorld+frameParams+stageParams) + set0
+		VkPipeline				pipeline;              // single ONE/ONE additive pipeline
+		// Phase 5J: dedicated REPEAT-mode sampler for beam binding 1.
+		// Beam UV scrolling produces large out-of-range UVs; REPEAT
+		// wraps natively. Ribbon/sprite/particle continue to share
+		// vk.particle.sampler (CLAMP_TO_EDGE).
+		VkSampler				sampler_repeat;
+		// per-frame staging (host-coherent, mapped)
+		VkBuffer				header_buffer  [NUM_COMMAND_BUFFERS];
+		VkDeviceMemory			header_memory  [NUM_COMMAND_BUFFERS];
+		byte					*header_ptr    [NUM_COMMAND_BUFFERS];
+		VkDescriptorSet			descriptor     [NUM_COMMAND_BUFFERS];
+		// host-side pool state. Slots 0..BEAM_POOL_MAX-1.
+		qboolean				active         [BEAM_POOL_MAX];
+		float					spawnTime      [BEAM_POOL_MAX];
+		float					duration       [BEAM_POOL_MAX];
+		float					fadeIn         [BEAM_POOL_MAX];
+		float					fadeOut        [BEAM_POOL_MAX];
+		beamDesc_t				desc           [BEAM_POOL_MAX];
+		uint32_t				drawCount;             // beams written to SSBO this frame (compacted from active slots)
+		qboolean				available;             // false if init failed
+	} beam;
+
+	// ── primitive shader stage SSBO (Phase 5F) ─────────────────────────
+	//
+	// Per-stage rendering parameters for multi-stage primitive
+	// shaders. Indexed [shaderHandle * PRIMITIVE_STAGE_MAX +
+	// stageNumber]. Host-mapped, written at shader registration
+	// time; consumers (Phase 5G beam.vert / RB_DrawBeams) read this to
+	// drive multi-stage draws.
+	//
+	// Allocated lazily (first call to vk_init_primitive_shader_images
+	// after init) and persisted across vid_restart — buffer survives
+	// because it lives outside the descriptor pool. Contents are
+	// re-zeroed on every vk_init_primitive_shader_images call so
+	// vid_restart sees a clean slate before cgame re-registers
+	// shaders.
+	VkBuffer       primitive_stages_buffer;
+	VkDeviceMemory primitive_stages_memory;
+	void          *primitive_stages_mapped;
+	// Indexed by primitive registry SLOT (0..PRIMITIVE_SHADER_IMAGE_MAX-1),
+	// NOT by qhandle. Phase 5K decoupled the two when the qhandle space
+	// (MAX_SHADERS=16384) outgrew the registry capacity.
+	int            primitive_shader_stage_counts[PRIMITIVE_SHADER_IMAGE_MAX];
+
+	// Phase 5K: qhandle → primitive registry slot indirection.
+	// Primitive registry has only PRIMITIVE_SHADER_IMAGE_MAX slots (64),
+	// but qhandle is monotonic across all RE_RegisterShader calls (world
+	// textures, models, UI, primitive). Map registered primitive shaders
+	// into the compact slot space.
+	//
+	// Sentinel PRIMITIVE_SLOT_INVALID (0xFF) means "not registered as
+	// primitive shader". Slot 0 is reserved for tr.whiteImage fallback
+	// but is a legal allocation outcome — distinguish via the sentinel,
+	// not the slot value.
+	//
+	// Sized via VK_PRIM_QHANDLE_MAX (declared above) which matches
+	// MAX_SHADERS in tr_local.h. The mismatch is detected by a
+	// _Static_assert in vk.c at first compile.
+	//
+	// Initialized to all 0xFF in vk_init_primitive_shader_stages
+	// (memset 0xFF), repopulated by RE_RegisterPrimitiveShader on each
+	// successful registration.
+	uint8_t        qhandle_to_prim_slot[VK_PRIM_QHANDLE_MAX];
+
+	// Phase 5G: per-shader stage count SSBO. Tiny (PRIMITIVE_SHADER_IMAGE_MAX
+	// uint32_t = 256 B), uploaded once per RB_DrawBeams frame. Bound at
+	// beam descriptor set binding 3 so the vertex shader can cull
+	// per-stage draws for shaders with fewer stages than the current
+	// loop index.
+	VkBuffer       primitive_stage_counts_buffer;
+	VkDeviceMemory primitive_stage_counts_memory;
+	void          *primitive_stage_counts_mapped;
+
+	// ── primitive sprite (billboard quad) ────────────────────────────
+	//
+	// Self-contained pipeline for the sprite primitive. Cgame submits
+	// world-space billboard sprites via RE_AddSpriteToScene; the
+	// renderer accumulates them into a per-frame host-coherent SSBO
+	// of SpriteHeaders and issues one direct vkCmdDraw per blend
+	// variant (alpha / additive) at the translucent draw site in
+	// RB_DrawSurfs, with vertexCount=6 and instanceCount=N.
+	//
+	// Per-frame slots are indexed by vk.cmd_index; each frame in
+	// flight has its own buffer so CPU writes don't race GPU reads.
+	#define SPRITES_PER_FRAME    4096u  // hard cap on submissions per frame
+	#define SPRITE_HEADER_BYTES    48u  // sizeof(GPU SpriteHeader), std430
+	struct {
+		// pipeline + layouts + shader-bound state
+		VkDescriptorSetLayout	set_layout;          // 1 SSBO: headers
+		VkPipelineLayout		pipeline_layout;     // push(mvp+viewLeft+viewUp) + set0(SSBO)
+		VkPipeline				pipeline_alpha;      // SRC_ALPHA / ONE_MINUS_SRC_ALPHA
+		VkPipeline				pipeline_additive;   // SRC_ALPHA / ONE
+		// per-frame staging (host-coherent, mapped)
+		VkBuffer				headers_buffer [NUM_COMMAND_BUFFERS];
+		VkDeviceMemory			headers_memory [NUM_COMMAND_BUFFERS];
+		byte					*headers_ptr   [NUM_COMMAND_BUFFERS];
+		VkDescriptorSet			descriptor     [NUM_COMMAND_BUFFERS];
+		// per-frame write cursor (CPU-side, reset in RE_BeginFrame
+		// at frontend frame begin, before cgame submissions)
+		uint32_t				numThisFrame;
+		qboolean				available;            // false if init failed
+	} sprite;
+
+	// ── primitive particle (compute-integrated GPU pool) ────────────
+	//
+	// Self-contained compute + render pipeline for the particle
+	// primitive. Particles live in a fixed-size GPU pool (ping-pong'd
+	// between two SSBOs); each frame's compute pass reads from one
+	// pool, integrates physics + age, and writes to the other. The
+	// render pass reads from the just-written pool and emits a
+	// billboard quad per live particle.
+	//
+	// Particle classes (the data-driven recipe registered by cgame
+	// via CG_RegisterParticleClass) are mirrored into a separate
+	// classes SSBO that both compute and render shaders read.
+	//
+	// The Particle struct in std430 has hard-fixed size 48 B
+	// (vec3+float pairs round to 16 B each, plus 16 B of trailing
+	// uints for classHandle + pad). Pool memory: 16384 × 48 B =
+	// 768 KB per buffer × 2 buffers = 1.5 MB total.
+	//
+	// The ParticleClassGPU host-side mirror has hard-fixed size 352 B
+	// to match GLSL std430's computed stride (vec4-aligned struct).
+	// A static_assert in vk_init_particle catches any drift.
+	//
+	// Type definitions (particleClassGPU_t, particleFrame_t) and the
+	// PARTICLES_PER_POOL / *_BYTES constants live above this struct,
+	// outside the Vk_Instance typedef — C disallows nested typedefs
+	// inside a struct.
+	struct {
+		// pipeline state
+		VkDescriptorSetLayout	compute_set_layout;  // 4 bindings: UBO + 3 SSBOs
+		VkDescriptorSetLayout	render_set_layout;   // 3 bindings: UBO + 2 SSBOs
+		VkPipelineLayout		compute_pipeline_layout;
+		VkPipelineLayout		render_pipeline_layout;
+		VkPipeline				compute_pipeline;
+		VkPipeline				render_pipeline_alpha;
+		VkPipeline				render_pipeline_additive;
+
+		// ping-pong particle pool (host-coherent for emit-time CPU
+		// writes in phase 3). Indexed by ping-pong bit, NOT by
+		// cmd_index — semantically distinct, even though they happen
+		// to advance in lockstep at NUM_COMMAND_BUFFERS == 2.
+		VkBuffer				pool_buffer  [2];
+		VkDeviceMemory			pool_memory  [2];
+		byte					*pool_ptr    [2];
+
+		// class shadow SSBO (host-coherent, mapped). Renderer-side
+		// shadow registry: phase-3 RE_RegisterParticleClass writes
+		// into shadow_ptr at offset (handle-1)*PARTICLE_CLASS_GPU_BYTES.
+		VkBuffer				classes_buffer;
+		VkDeviceMemory			classes_memory;
+		byte					*classes_ptr;
+		uint32_t				numClasses;          // current registry count
+
+		// Phase-5 texturing: per-class image cache + shared sampler.
+		// At RE_RegisterParticleClass time the resolved image_t
+		// (shader→stages[0]→bundle[0]→image[0] with three-tier
+		// fallback) is cached here so vk_init_descriptors's re-alloc
+		// path can re-walk the registry after a descriptor pool
+		// reset and re-write the sampler-array binding. The shared
+		// sampler is created once at vk_init_particle (linear,
+		// clamp-to-edge, no anisotropy) and used for every slot of
+		// the array — billboard particles don't need per-class
+		// filter/wrap variations.
+		struct image_s			*classImages[64];    // MAX_PARTICLE_CLASSES; NULL = unregistered slot, fall back to tr.whiteImage
+		VkSampler				sampler;
+
+		// per-frame uniform buffer (host-coherent, mapped). One slot
+		// per cmd_index; frame N writes uniform[N%NUM_COMMAND_BUFFERS]
+		// before recording compute + render commands.
+		VkBuffer				frame_buffer [NUM_COMMAND_BUFFERS];
+		VkDeviceMemory			frame_memory [NUM_COMMAND_BUFFERS];
+		byte					*frame_ptr   [NUM_COMMAND_BUFFERS];
+
+		// descriptor sets. compute_descriptor[i] binds read=pool[i],
+		// write=pool[1-i]; render_descriptor[i] binds read=pool[1-i]
+		// (the pool the compute pass just wrote). Frame N selects
+		// index pingPongRead.
+		VkDescriptorSet			compute_descriptor[NUM_COMMAND_BUFFERS];
+		VkDescriptorSet			render_descriptor [NUM_COMMAND_BUFFERS];
+
+		// frame-to-frame state
+		uint32_t				pingPongRead;        // 0 or 1, flipped each frame
+		float					prevSceneTime;       // backEnd.refdef.floatTime at last
+		                                             // RB_RunParticleCompute call
+
+		// emit-time state (host-side cursor for RE_EmitParticles).
+		// Round-robin allocation index into the host-coherent pool;
+		// wrap-around overwrites the oldest slot.
+		uint32_t				nextSlot;
+
+		qboolean				available;           // false if init failed
+	} particle;
 
 #if FEAT_IQM
 	// ── IQM GPU skinning infrastructure ──────────────────────────────
@@ -761,12 +1214,22 @@ typedef struct {
 		VkShaderModule q1_ls_fs;
 		VkShaderModule q1_ls_array_fs;   // array variant; reuses q1_ls_vs
 
-		// rail trail compute + render
-		VkShaderModule rail_helix_cs;
-		VkShaderModule rail_debris_cs;
-		VkShaderModule rail_sparks_cs;
-		VkShaderModule rail_helix_vs;
-		VkShaderModule rail_helix_fs;
+		// primitive ribbon
+		VkShaderModule ribbon_vs;
+		VkShaderModule ribbon_fs;
+
+		// primitive sprite (billboarded quad, view-axis aligned)
+		VkShaderModule sprite_vs;
+		VkShaderModule sprite_fs;
+
+		// primitive beam (two-endpoint camera-facing quad with axial-copy expansion)
+		VkShaderModule beam_vs;
+		VkShaderModule beam_fs;
+
+		// primitive particle (compute-driven pool, billboard render)
+		VkShaderModule particle_integrate_cs;
+		VkShaderModule particle_vs;
+		VkShaderModule particle_fs;
 
 #if FEAT_IQM
 		// IQM GPU skinning

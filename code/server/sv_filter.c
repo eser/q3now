@@ -1,5 +1,7 @@
 #include <string.h>
 #include "server.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 #define MAX_FILTER_MESSAGE 1000
 
@@ -71,11 +73,12 @@ static void CleanStr( char *dst, int dst_size, const char *src )
 	const char *max = dst + dst_size - 1;
 	int	c;
 
-	while ( (c = *src) != '\0' ) {
+	while ( (c = (byte)*src) != '\0' ) {
 		if ( Q_IsColorString( src ) ) {
 			src += 2;
 			continue;
-		} else if ( c >= ' ' && c <= '~' ) {
+		}
+		if ( c >= ' ' && c <= '~' ) {
 			*dst++ = c;
 			if ( dst >= max )
 				break;
@@ -91,9 +94,7 @@ static const char *op2str( filter_op op )
 {
 	if ( (unsigned) op >= FOP_MAX )
 		return "? ";
-	else
-		return opstr[ op ];
-
+	return opstr[op];
 }
 
 
@@ -120,84 +121,78 @@ static int eval_node( const InfoTokens *tokens, const filter_node_t *node )
 		Q_strncpyz( filterMessage, node->p1, sizeof( filterMessage ) );
 		return -1; // will break *->next node walk in parent
 	}
-	else
-	{
-		const char *value, *value2;
-		int res = 0, v1, v2;
 
-		if ( node->is_date )
+	const char *value, *value2;
+	int			res = 0, v1, v2;
+
+	if ( node->is_date ) {
+		if ( filterCurrMsec != filterDateMsec ) // update date string
 		{
-			if ( filterCurrMsec != filterDateMsec ) // update date string
-			{
-				qtime_t t;
-				Com_RealTime( &t );
-				sprintf( node->p1, "%04i-%02i-%02i %02i:%02i",
-					t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
-					t.tm_hour, t.tm_min );
-				filterDateMsec = filterCurrMsec;
-			}
-			value = node->p1;
+			qtime_t t;
+			Com_RealTime( &t );
+			sprintf( node->p1, "%04i-%02i-%02i %02i:%02i", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour,
+					 t.tm_min );
+			filterDateMsec = filterCurrMsec;
 		}
-		else
-		if ( node->is_fname )
-		{
-			if ( filterName[0] == '\0' )
-			{
-				CleanStr( filterName, sizeof( filterName ), Info_ValueForKeyToken( tokens, "name" ) );
-			}
-			//value = node->p1; // p1 points on filterName
-			value = filterName;
+		value = node->p1;
+	} else if ( node->is_fname ) {
+		if ( filterName[0] == '\0' ) {
+			CleanStr( filterName, sizeof( filterName ), Info_ValueForKeyToken( tokens, "name" ) );
 		}
-		else
+		//value = node->p1; // p1 points on filterName
+		value = filterName;
+	} else {
+		value = Info_ValueForKeyToken( tokens, node->p1 );
+	}
+
+	if ( node->is_string ) {
+		value2 = node->p2.string;
+		if ( node->is_cvar ) // dereference value2
 		{
-			value = Info_ValueForKeyToken( tokens, node->p1 );
+			value2 = Cvar_VariableString( value2 + 1 );
 		}
 
-		if ( node->is_string )
-		{
-			value2 = node->p2.string;
-			if ( node->is_cvar ) // dereference value2 
-			{
-				value2 = Cvar_VariableString( value2 + 1 );
-			}
-
-			if ( node->fop == FOP_MATCH )
-			{
-				res = Com_FilterExt( value2, value );
-				return res; // early exit, just to silent compiler warnings about uninitialized v1 & v2
-			}
-			else
-			{
-				if ( node->is_quoted ) // forced string comparison
-				{
-					v1 = Q_stricmp( value, value2 );
-					v2 = 0;
-				}
-				else // integer comparison
-				{
-					v1 = atoi( value );
-					v2 = atoi( value2 );
-				}
-			}
+		if ( node->fop == FOP_MATCH ) {
+			res = Com_FilterExt( value2, value );
+			return res; // early exit, just to silent compiler warnings about uninitialized v1 & v2
 		}
-		else
+		if ( node->is_quoted ) // forced string comparison
+		{
+			v1 = Q_stricmp( value, value2 );
+			v2 = 0;
+		} else // integer comparison
 		{
 			v1 = atoi( value );
-			v2 = node->p2.integer;
+			v2 = atoi( value2 );
 		}
 
-		switch ( node->fop )
-		{
-			//case FOP_MATCH:res = Com_FilterExt( value2, value ); break;
-			case FOP_EQ:   res = (v1 == v2); break;
-			case FOP_NEQ:  res = (v1 != v2); break;
-			case FOP_LT:   res = (v1 <  v2); break;
-			case FOP_LTE:  res = (v1 <= v2); break;
-			case FOP_GT:   res = (v1 >  v2); break;
-			case FOP_GTE:  res = (v1 >= v2); break;
-		}
-		return res;
+	} else {
+		v1 = atoi( value );
+		v2 = node->p2.integer;
 	}
+
+	switch ( node->fop ) {
+	//case FOP_MATCH:res = Com_FilterExt( value2, value ); break;
+	case FOP_EQ:
+		res = ( v1 == v2 );
+		break;
+	case FOP_NEQ:
+		res = ( v1 != v2 );
+		break;
+	case FOP_LT:
+		res = ( v1 < v2 );
+		break;
+	case FOP_LTE:
+		res = ( v1 <= v2 );
+		break;
+	case FOP_GT:
+		res = ( v1 > v2 );
+		break;
+	case FOP_GTE:
+		res = ( v1 >= v2 );
+		break;
+	}
+	return res;
 }
 
 
@@ -412,8 +407,7 @@ static int is_integer( const char *s )
 
 	if ( n == 0 || n > 24 || *s != '\0' )
 		return 0;
-	else
-		return 1;
+	return 1;
 }
 
 
@@ -617,7 +611,7 @@ static const char *parse_section( ComParser *parser, const char *text, int level
 					return NULL;
 			}
 
-			//Com_Log( SEV_INFO, LOG_CAT_SERVER, "%i: KEY %s <%i> %s\n", level, lvalue, fop, v0 ); // debug
+			//Com_Log( SEV_INFO, LOG_CH(ch_server), "%i: KEY %s <%i> %s\n", level, lvalue, fop, v0 ); // debug
 
 			// allocate new filter node
 			ch = new_node( parser, lvalue, v0, fop, (parser->tokentype == TK_QUOTED) ); // quoted = x
@@ -687,7 +681,7 @@ static qboolean parse_file( const char *filename )
 	if ( f == NULL )
 		return qfalse;
 
-	//Com_Log( SEV_INFO, LOG_CAT_SERVER, "...loading userinfo filters form '%s'\n", filename );
+	//Com_Log( SEV_INFO, LOG_CH(ch_server), "...loading userinfo filters form '%s'\n", filename );
 
 	fseek( f, 0, SEEK_END );
 	size = ftell( f );
@@ -753,7 +747,7 @@ static void SV_ReloadFilters( const char *filename, filter_node_t *new_node )
 		qboolean dump;
 
 		ospath = FS_BuildOSPath( FS_GetHomePath(), FS_GetCurrentGameDir(), filename );
-		if ( strcmp( ospath, loaded_name ) )
+		if ( strcmp( ospath, loaded_name ) != 0 )
 			reload = qtrue;
 		else if ( !Sys_GetFileStats( loaded_name, &curr_fsize, &curr_mtime, &curr_ctime ) )
 			reload = qtrue;
@@ -764,7 +758,7 @@ static void SV_ReloadFilters( const char *filename, filter_node_t *new_node )
 
 		if ( reload )
 		{
-			//Com_Log( SEV_INFO, LOG_CAT_SERVER, "...reloading filter nodes from %s\n", ospath );
+			//Com_Log( SEV_INFO, LOG_CH(ch_server), "...reloading filter nodes from %s\n", ospath );
 			if ( parse_file( ospath ) )
 			{
 				Q_strncpyz( loaded_name, ospath, sizeof( loaded_name ) );
@@ -827,7 +821,7 @@ static void SV_ReloadFilters( const char *filename, filter_node_t *new_node )
 
 	if ( parse_file( ospath ) )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "...%i filter nodes loaded from '%s'\n", nodeCount, filename );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "...%i filter nodes loaded from '%s'\n", nodeCount, filename );
 		// save file metadata
 		Q_strncpyz( loaded_name, ospath, sizeof( loaded_name ) );
 		Sys_GetFileStats( loaded_name, &loaded_fsize, &loaded_mtime, &loaded_ctime );
@@ -857,11 +851,9 @@ const char *SV_RunFilters( const char *userinfo, const netadr_t *addr )
 	{
 		if ( filterMessage[0] )
 			return filterMessage;
-		else
-			return "Banned.";
+		return "Banned.";
 	}
-	else
-		return "";
+	return "";
 }
 
 
@@ -979,21 +971,21 @@ void SV_AddFilter_f( void )
 
 	if ( !sv_filter->string[0] )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Filter system is not enabled.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Filter system is not enabled.\n" );
 		SV_ReloadFilters( "", NULL );
 		return;
 	}
 
 	if ( Cmd_Argc() < 2 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: %s <id> [key1] [key2] ... [keyN] [date +<duration[h|d|w|m]>|<date> ] [reason <text>]\nDefault key is \"ip\"\nDefault duration unit is minutes, h(ours), d(ays), w(eeks), m(onths) suffixes can also be specified.\n", Cmd_Argv( 0 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: %s <id> [key1] [key2] ... [keyN] [date +<duration[h|d|w|m]>|<date> ] [reason <text>]\nDefault key is \"ip\"\nDefault duration unit is minutes, h(ours), d(ays), w(eeks), m(onths) suffixes can also be specified.\n", Cmd_Argv( 0 ) );
 		return;
 	}
 
 	cl = SV_GetPlayerByHandle();
 	if ( cl == NULL )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Unknown client '%s'\n", Cmd_Argv( 1 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Unknown client '%s'\n", Cmd_Argv( 1 ) );
 		return;
 	}
 
@@ -1015,7 +1007,7 @@ void SV_AddFilter_f( void )
 		{
 			if ( i >= Cmd_Argc() - 1 )
 			{
-				COM_WARN( LOG_CAT_SERVER, "missing reason value\n" );
+				COM_WARN( LOG_CH(ch_server), "missing reason value\n" );
 				return;
 			}
 			reason = Cmd_Argv( i + 1 );
@@ -1028,7 +1020,7 @@ void SV_AddFilter_f( void )
 		{
 			if ( i >= Cmd_Argc() - 1 )
 			{
-				COM_WARN( LOG_CAT_SERVER, "missing date value\n" );
+				COM_WARN( LOG_CH(ch_server), "missing date value\n" );
 				return;
 			}
 			i++;
@@ -1038,7 +1030,7 @@ void SV_AddFilter_f( void )
 				v++;
 				if ( *v < '1' || *v > '9' )
 				{
-					Com_Log( SEV_INFO, LOG_CAT_SERVER, "expecting integer value for duration\n" );
+					Com_Log( SEV_INFO, LOG_CH(ch_server), "expecting integer value for duration\n" );
 					return;
 				}
 				n = 0;
@@ -1052,7 +1044,7 @@ void SV_AddFilter_f( void )
 					case 'W': case 'w': Q_AddTime( &t, n * 24 * 7 * 60 ); break;
 					case 'M': case 'm': Q_AddDate( &t, n ); break;
 					default:
-						COM_WARN( LOG_CAT_SERVER, "unsupported date suffix '%c'\n", *v );
+						COM_WARN( LOG_CH(ch_server), "unsupported date suffix '%c'\n", *v );
 						return;
 				}
 				Com_sprintf( date, sizeof( date ), " date \"%04i-%02i-%02i %02i:%02i\"", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min );
@@ -1089,7 +1081,7 @@ void SV_AddFilter_f( void )
 
 	QS_Append( &cmd, buf );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_SERVER, "bancmd: `%s`\n", QS_CStr(&cmd) );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_server), "bancmd: `%s`\n", QS_CStr(&cmd) );
 
 	node = NULL;
 	{
@@ -1105,7 +1097,7 @@ void SV_AddFilter_f( void )
 
 	if ( node && node->fop == FOP_DROP )
 	{
-		COM_WARN( LOG_CAT_SERVER, "Standalone \"drop\" nodes is not allowed!\n" );
+		COM_WARN( LOG_CH(ch_server), "Standalone \"drop\" nodes is not allowed!\n" );
 		free_nodes( node );
 		return;
 	}
@@ -1132,14 +1124,14 @@ void SV_AddFilterCmd_f( void )
 
 	if ( !sv_filter->string[0] ) 
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Filter system is not enabled.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Filter system is not enabled.\n" );
 		SV_ReloadFilters( "", NULL );
 		return;
 	}
 
 	if ( Cmd_Argc() < 2 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SERVER, "Usage: %s <filter format string>\n", Cmd_Argv( 0 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: %s <filter format string>\n", Cmd_Argv( 0 ) );
 		return;
 	}
 
@@ -1159,7 +1151,7 @@ void SV_AddFilterCmd_f( void )
 
 	if ( node && node->fop == FOP_DROP )
 	{
-		COM_WARN( LOG_CAT_SERVER, "Standalone \"drop\" nodes is not allowed!\n" );
+		COM_WARN( LOG_CH(ch_server), "Standalone \"drop\" nodes is not allowed!\n" );
 		free_nodes( node );
 		return;
 	}

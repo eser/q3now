@@ -338,7 +338,7 @@ static void Con_DrawSolidConsole( float frac ) {
 			re.SetColor( con_bgColor );
 			re.DrawStretchPic( 0, 0, wf, yf, 0, 0, 1, 1, cls.whiteShader );
 		} else if ( cl_conColor->string[0] ) {
-			if ( strcmp( cl_conColor->string, conColorString ) )
+			if ( strcmp( cl_conColor->string, conColorString ) != 0 )
 			{
 				char buf[ MAX_CVAR_VALUE_STRING ];
 				char *v[4];
@@ -367,10 +367,12 @@ static void Con_DrawSolidConsole( float frac ) {
 	re.DrawStretchPic( 0, yf, wf, 2, 0, 0, 1, 1, cls.whiteShader );
 
 	{
+		// NOLINTBEGIN(bugprone-integer-division) — ARRAY_LEN expands to a sizeof/sizeof integer expression; result is a chars-count multiplied by char-width
 		float verVX = Con_NativeToVirtualX( (float)cls.glconfig.vidWidth
-		              - ( ARRAY_LEN( Q3NOW_ENGINE_VERSION ) ) * con_textNativeCharW );
+		              - ( ARRAY_LEN( WIRED_ENGINE_VERSION ) ) * con_textNativeCharW );
+		// NOLINTEND(bugprone-integer-division)
 		float verVY = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance) );
-		Text_Draw( Q3NOW_ENGINE_VERSION, verVX, verVY, FONT_MONO,
+		Text_Draw( WIRED_ENGINE_VERSION, verVX, verVY, FONT_MONO,
 		           con_textPointSize, colorWhite, TEXT_ALIGN_LEFT, 0 );
 	}
 
@@ -510,7 +512,9 @@ void Con_DrawConsole( void ) {
 
 	Con_CheckResize();
 
-	if ( cls.state < CA_ACTIVE && cls.state != CA_CINEMATIC ) {
+	// CA_CINEMATIC > CA_ACTIVE in the connstate_t order, so the < CA_ACTIVE check
+	// already excludes cinematic; the explicit comparison is redundant.
+	if ( cls.state < CA_ACTIVE ) {
 		if ( !( Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CGAME) ) ) {
 			if ( cls.state != CA_LOADING && cls.state != CA_PRIMED
 			     && cl_loadProgress.startTime <= 0 ) {

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # smoke-quic-game.sh — QUIC game transport smoke test for q3now
 #
-# Launches q3now-ded with QUIC game transport enabled, verifies QUIC
+# Launches wired-ded with QUIC game transport enabled, verifies QUIC
 # initialization and that the server accepts game connections without
 # crashing.  No Q3A assets required (exits before map load if assets
 # are missing, but still validates QUIC init + networking stack).
 #
 # Usage:
-#   tests/smoke-quic-game.sh [path-to-q3now-ded]
+#   tests/smoke-quic-game.sh [path-to-wired-ded]
 #
 # Environment:
 #   Q3DIR   path to game installation with baseq3/pak*.pk3
@@ -20,19 +20,19 @@
 
 set -euo pipefail
 
-DED="${1:-q3now-ded}"
+DED="${1:-wired-ded}"
 Q3DIR="${Q3DIR:-/Applications/q3now}"
 
 # Locate binary: support macOS .app bundle layout
 if [ ! -x "$DED" ]; then
-  BUNDLED="$Q3DIR/Contents/MacOS/q3now-ded"
-  ALT="$Q3DIR/q3now-ded"
+  BUNDLED="$Q3DIR/Contents/MacOS/wired-ded"
+  ALT="$Q3DIR/wired-ded"
   if [ -x "$BUNDLED" ]; then
     DED="$BUNDLED"
   elif [ -x "$ALT" ]; then
     DED="$ALT"
   else
-    echo "SKIP: q3now-ded not found (tried $BUNDLED, $ALT, $DED)"
+    echo "SKIP: wired-ded not found (tried $BUNDLED, $ALT, $DED)"
     exit 77
   fi
 fi

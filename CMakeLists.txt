@@ -1,6 +1,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
 
-PROJECT(q3now LANGUAGES C CXX ASM)
+PROJECT(wired LANGUAGES C CXX ASM)
 
 SET(CMAKE_C_STANDARD 11)
 SET(CMAKE_C_STANDARD_REQUIRED ON)
@@ -25,8 +25,20 @@ SET(CMAKE_CXX_STANDARD_REQUIRED ON)
 # "Linux dev workflow silently broken for 14 days" for motivation.
 ADD_COMPILE_DEFINITIONS(_GNU_SOURCE)
 
-SET(CNAME "q3now")
-SET(DNAME "q3now-ded")
+# Product / channel branding — used for per-user data layout
+# (~/wired/<PRODUCT_NAME><CHANNEL_SUFFIX>/) and OS bundle / install paths.
+# Override via -DPRODUCT_NAME=<name> / -DCHANNEL_SUFFIX=-<channel>.
+IF(NOT DEFINED PRODUCT_NAME)
+	SET(PRODUCT_NAME "q3now")
+ENDIF()
+IF(NOT DEFINED CHANNEL_SUFFIX)
+	SET(CHANNEL_SUFFIX "-preview")
+ENDIF()
+ADD_COMPILE_DEFINITIONS(PRODUCT_NAME="${PRODUCT_NAME}")
+ADD_COMPILE_DEFINITIONS(CHANNEL_SUFFIX="${CHANNEL_SUFFIX}")
+
+SET(CNAME "wired")
+SET(DNAME "wired-ded")
 
 SET(RENDERER_PREFIX ${CNAME})
 SET(RENDERER_DEFAULT vulkan) # valid options: opengl, vulkan, opengl2; opengl as ultimate fallback
@@ -61,8 +73,8 @@ ENDIF()
 
 # MinGW: picoquic + picotls use bare `#ifdef _WINDOWS` (MSVC-only auto-define)
 # to gate winsock includes. Inject _WINDOWS so they take the Windows code
-# path; vendored sources stay untouched. Definition is innocuous for q3now's
-# own code (q3now uses _WIN32 throughout). Applied globally before any target
+# path; vendored sources stay untouched. Definition is innocuous for wired's
+# own code (wired uses _WIN32 throughout). Applied globally before any target
 # is created so every TU that transitively includes picoquic.h sees it.
 # See docs/health.md "picoquic _WINDOWS guards do not match MinGW".
 IF(WIN32 AND NOT MSVC)
@@ -135,10 +147,15 @@ FILE(GLOB WIRED_CVAR_SRCS code/qcommon/wired/core/cvars/*.c)
 TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CVAR_SRCS})
 TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CVAR_SRCS})
 
-# wired/core/shell — log pipeline (console/tty/file sinks)
+# wired/core/shell — keys + cmd
 FILE(GLOB WIRED_CON_SRCS  code/qcommon/wired/core/shell/*.c)
 TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CON_SRCS})
 TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CON_SRCS})
+
+# wired/core/logging — log pipeline (console/tty/file sinks, ring buffer)
+FILE(GLOB WIRED_LOG_SRCS  code/qcommon/wired/core/logging/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_LOG_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_LOG_SRCS})
 
 # wired/core/events — event primitive stubs (V2 bodies TBD)
 FILE(GLOB WIRED_EVENT_SRCS code/qcommon/wired/core/events/*.c)
@@ -582,7 +599,7 @@ ELSEIF(USE_JPEG_TURBO)
 	FILE(READ "${_JPEGTURBO_CML}" _JPEGTURBO_SRC)
 	STRING(REPLACE
 		"if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)"
-		"if(FALSE) # q3now: add_subdirectory() guard neutralized"
+		"if(FALSE) # wired: add_subdirectory() guard neutralized"
 		_JPEGTURBO_PATCHED "${_JPEGTURBO_SRC}")
 	IF(NOT _JPEGTURBO_PATCHED STREQUAL _JPEGTURBO_SRC)
 		FILE(WRITE "${_JPEGTURBO_CML}" "${_JPEGTURBO_PATCHED}")
@@ -726,20 +743,18 @@ IF(UNIX)
 	ENDIF()
 
 	IF(APPLE)
-		SET(EXE_TYPE MACOSX_BUNDLE)
-		list(APPEND Q3_SRCS code/unix/quake3_flat.icns)
-		set_source_files_properties(code/unix/quake3_flat.icns PROPERTIES
-			MACOSX_PACKAGE_LOCATION Resources)
-		SET(MACOSX_BUNDLE_ICON_FILE quake3_flat.icns)
-		SET(MACOSX_BUNDLE_GUI_IDENTIFIER "com.eser.q3now")
-		SET(MACOSX_BUNDLE_BUNDLE_NAME "q3now")
+		# macOS: build the engine binaries as plain executables. The combined
+		# product bundle (containing both wired and wired-ded under
+		# Contents/MacOS/) is assembled by a custom target later in this file —
+		# see "Combined macOS bundle assembly".
+		SET(EXE_TYPE "")
 		list(APPEND Q3_SRCS code/macosx/macosx_main.c)
 	ENDIF()
 ELSEIF(WIN32)
 	# Per-target subsystem: client is GUI (game has a window), dedicated is
 	# console (Linux-style stdio so smoke harnesses, NSSM-services, Docker
 	# logs, terminal redirection etc. all see stdout/stderr). See
-	# docs/health.md "q3now-ded Windows GUI-subsystem blocks smoke output capture"
+	# docs/health.md "wired-ded Windows GUI-subsystem blocks smoke output capture"
 	# and docs/launcher.md (analogous launcher CLI dual-mode pattern).
 	SET(EXE_TYPE_CLIENT WIN32) # GUI subsystem (-mwindows / /SUBSYSTEM:WINDOWS)
 	SET(EXE_TYPE_DED    "")    # Console subsystem (default, no flag)
@@ -946,11 +961,68 @@ ENDIF()
 # macOS: ARM64 JIT requires entitlements for MAP_JIT and executable memory
 IF(APPLE)
 	SET_TARGET_PROPERTIES(${CNAME}${BINEXT} PROPERTIES
-		XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/misc/macos/q3now.entitlements"
+		XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/misc/macos/wired.entitlements"
 	)
 	# rpath: find bundled dylibs (SDL3, MoltenVK) in the same dir as the executable
 	SET(CMAKE_INSTALL_RPATH "@executable_path")
 	SET(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+ENDIF()
+
+# ─────────────────────────────────────────────────────────────────────
+# Combined macOS bundle assembly
+#
+# CMake builds the engine binaries (wired, wired-ded) as plain executables on
+# macOS. This target assembles both into a single product bundle named after
+# PRODUCT_NAME + CHANNEL_SUFFIX, with the engine binaries co-located under
+# Contents/MacOS/. This keeps the engine identity ("wired") on the binary while
+# the user-facing product identity ("q3now-preview") owns the bundle.
+#
+# Layout produced:
+#   build/<cfg>/${APP_BUNDLE_NAME}${BINEXT}.app/
+#     Contents/
+#       Info.plist             (configured from misc/macos/Info.plist.in)
+#       PkgInfo                ("APPL????")
+#       MacOS/
+#         wired${BINEXT}       (client engine binary)
+#         wired-ded${BINEXT}   (dedicated server engine binary)
+#       Resources/
+#         quake3_flat.icns
+# ─────────────────────────────────────────────────────────────────────
+IF(APPLE)
+	SET(APP_BUNDLE_NAME "${PRODUCT_NAME}${CHANNEL_SUFFIX}")
+	SET(APP_BUNDLE_DIR  "${CMAKE_BINARY_DIR}/${APP_BUNDLE_NAME}${BINEXT}.app")
+
+	# Info.plist substitution variables (referenced by misc/macos/Info.plist.in).
+	SET(WIRED_BUNDLE_NAME       "${APP_BUNDLE_NAME}")
+	SET(WIRED_BUNDLE_EXECUTABLE "${CNAME}${BINEXT}")
+	SET(WIRED_BUNDLE_VERSION    "${WIRED_ENGINE_VERSION_RAW}")
+	IF(NOT WIRED_BUNDLE_VERSION)
+		SET(WIRED_BUNDLE_VERSION "0.80")
+	ENDIF()
+	configure_file(
+		"${CMAKE_SOURCE_DIR}/misc/macos/Info.plist.in"
+		"${APP_BUNDLE_DIR}/Contents/Info.plist"
+		@ONLY
+	)
+
+	add_custom_target(macos_app_bundle ALL
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${APP_BUNDLE_DIR}/Contents/MacOS"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${APP_BUNDLE_DIR}/Contents/Resources"
+		COMMAND ${CMAKE_COMMAND} -E copy
+			"$<TARGET_FILE:${CNAME}${BINEXT}>"
+			"${APP_BUNDLE_DIR}/Contents/MacOS/${CNAME}${BINEXT}"
+		COMMAND ${CMAKE_COMMAND} -E copy
+			"$<TARGET_FILE:${DNAME}${BINEXT}>"
+			"${APP_BUNDLE_DIR}/Contents/MacOS/${DNAME}${BINEXT}"
+		COMMAND ${CMAKE_COMMAND} -E copy
+			"${CMAKE_SOURCE_DIR}/code/unix/quake3_flat.icns"
+			"${APP_BUNDLE_DIR}/Contents/Resources/quake3_flat.icns"
+		COMMAND ${CMAKE_COMMAND} -E echo_append "APPL????"
+			> "${APP_BUNDLE_DIR}/Contents/PkgInfo"
+		DEPENDS ${CNAME}${BINEXT} ${DNAME}${BINEXT}
+		COMMENT "Assembling macOS bundle: ${APP_BUNDLE_NAME}${BINEXT}.app"
+		VERBATIM
+	)
 ENDIF()
 
 # ============================================================
@@ -976,11 +1048,38 @@ IF(BUILD_GAME_LIBRARIES)
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
-	# Release channel suffix (e.g. "-preview", "-canary", or "" for public)
-	IF(DEFINED CHANNEL_SUFFIX)
-		ADD_COMPILE_DEFINITIONS(CHANNEL_SUFFIX="${CHANNEL_SUFFIX}")
-	ELSE()
-		ADD_COMPILE_DEFINITIONS(CHANNEL_SUFFIX="-preview")
-	ENDIF()
+	# CHANNEL_SUFFIX + PRODUCT_NAME compile definitions are propagated globally
+	# from the top-of-file branding block (search for "Product / channel branding").
 	INCLUDE(basegame)
+ENDIF()
+
+# ============================================================
+# Lint & format integration
+# ============================================================
+# -DENABLE_CLANG_TIDY=ON       run clang-tidy at compile time using .clang-tidy
+# --target format-check        CI: fail if any engine source deviates from .clang-format
+# (No bulk in-place format target — clang-format is on-demand per project policy.)
+
+OPTION(ENABLE_CLANG_TIDY "Run clang-tidy during compilation (uses .clang-tidy)" OFF)
+IF(ENABLE_CLANG_TIDY)
+	FIND_PROGRAM(CLANG_TIDY_EXE NAMES clang-tidy)
+	IF(CLANG_TIDY_EXE)
+		SET(CMAKE_C_CLANG_TIDY "${CLANG_TIDY_EXE};--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")
+		MESSAGE(STATUS "clang-tidy enabled: ${CLANG_TIDY_EXE}")
+	ELSE()
+		MESSAGE(WARNING "ENABLE_CLANG_TIDY=ON but clang-tidy not found in PATH")
+	ENDIF()
+ENDIF()
+
+FIND_PROGRAM(CLANG_FORMAT_EXE NAMES clang-format)
+IF(CLANG_FORMAT_EXE)
+	ADD_CUSTOM_TARGET(format-check
+		COMMAND ${CMAKE_COMMAND}
+			-DCLANG_FORMAT=${CLANG_FORMAT_EXE}
+			-DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+			-P ${CMAKE_SOURCE_DIR}/cmake/format_check.cmake
+		WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+		COMMENT "Checking clang-format compliance for engine + game sources"
+		VERBATIM
+	)
 ENDIF()

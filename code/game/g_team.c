@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 typedef struct teamgame_s {
@@ -64,7 +66,7 @@ void Team_InitGame( void ) {
 int OtherTeam(int team) {
 	if (team==TEAM_RED)
 		return TEAM_BLUE;
-	else if (team==TEAM_BLUE)
+	if ( team == TEAM_BLUE )
 		return TEAM_RED;
 	return team;
 }
@@ -72,9 +74,9 @@ int OtherTeam(int team) {
 const char *TeamName(int team)  {
 	if (team==TEAM_RED)
 		return "RED";
-	else if (team==TEAM_BLUE)
+	if ( team == TEAM_BLUE )
 		return "BLUE";
-	else if (team==TEAM_SPECTATOR)
+	if ( team == TEAM_SPECTATOR )
 		return "SPECTATOR";
 	return "FREE";
 }
@@ -82,9 +84,9 @@ const char *TeamName(int team)  {
 const char *TeamColorString(int team) {
 	if (team==TEAM_RED)
 		return S_COLOR_RED;
-	else if (team==TEAM_BLUE)
+	if ( team == TEAM_BLUE )
 		return S_COLOR_BLUE;
-	else if (team==TEAM_SPECTATOR)
+	if ( team == TEAM_SPECTATOR )
 		return S_COLOR_YELLOW;
 	return S_COLOR_WHITE;
 }
@@ -529,7 +531,7 @@ gentity_t *Team_ResetFlag( int team ) {
 
 	ent = NULL;
 	while ((ent = G_Find (ent, FOFS(classname), c)) != NULL) {
-        if (ent->s.eFlags & EF_DROPPED_ITEM)
+		if (ent->s.eFlags & EF_DROPPED_ITEM)
 			G_FreeEntity(ent);
 		else {
 			rent = ent;
@@ -556,7 +558,7 @@ void Team_ReturnFlagSound( gentity_t *ent, int team ) {
 	gentity_t	*te;
 
 	if (ent == NULL) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Warning:  NULL passed to Team_ReturnFlagSound\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Warning:  NULL passed to Team_ReturnFlagSound\n");
 		return;
 	}
 
@@ -574,7 +576,7 @@ void Team_TakeFlagSound( gentity_t *ent, int team ) {
 	gentity_t	*te;
 
 	if (ent == NULL) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Warning:  NULL passed to Team_TakeFlagSound\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Warning:  NULL passed to Team_TakeFlagSound\n");
 		return;
 	}
 
@@ -612,7 +614,7 @@ void Team_CaptureFlagSound( gentity_t *ent, int team ) {
 	gentity_t	*te;
 
 	if (ent == NULL) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Warning:  NULL passed to Team_CaptureFlagSound\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Warning:  NULL passed to Team_CaptureFlagSound\n");
 		return;
 	}
 
@@ -1366,7 +1368,7 @@ void ObeliskInit( gentity_t *ent ) {
 		trap_Trace( &tr, ent->s.origin, ent->r.mins, ent->r.maxs, dest, ent->s.number, MASK_SOLID );
 		if ( tr.startsolid ) {
 			ent->s.origin[2] -= 1;
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "SpawnObelisk: %s startsolid at %s\n", ent->classname, vtos(ent->s.origin) );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "SpawnObelisk: %s startsolid at %s\n", ent->classname, vtos(ent->s.origin) );
 
 			ent->s.groundEntityNum = ENTITYNUM_NONE;
 			G_SetOrigin( ent, ent->s.origin );

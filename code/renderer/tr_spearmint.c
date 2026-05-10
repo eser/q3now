@@ -1,8 +1,8 @@
 /*
 ===========================================================================
-Copyright (C) 2026 q3now contributors.
+Copyright (C) 2026 Wired engine contributors.
 
-This file is part of q3now and is distributed under the terms of the
+This file is part of the Wired engine and is distributed under the terms of the
 GNU General Public License version 2 or (at your option) any later version.
 
 tr_spearmint.c — Phase 5 Spearmint feature adaptation.
@@ -28,8 +28,8 @@ compiles cleanly into a renderer build that opts out of any subset.
  *
  * FOG SYSTEM (FEAT_FOG_SYSTEM)
  *
- * q3now already implements traditional Q3 volume fog via tess.fogNum and the
- * RB_FogPass texcoord-based blend. What Spearmint adds on top is:
+ * The renderer already implements traditional Q3 volume fog via tess.fogNum
+ * and the RB_FogPass texcoord-based blend. What Spearmint adds on top is:
  *
  *   1. fogType_t          — choose between FT_LINEAR / FT_EXP / FT_EXP2
  *   2. Global fog         — a view-wide fog that is applied when the camera
@@ -131,8 +131,8 @@ a volume fog, return that volume's parameters; otherwise fall back to the
 global fog (if configured).
 
 useColorArray is set to qtrue when the engine should use per-vertex color
-arrays rather than a fixed-function fog; q3now historically uses vertex
-colours for volume fog and GL_FOG for the global fog.
+arrays rather than a fixed-function fog; the renderer historically uses
+vertex colours for volume fog and GL_FOG for the global fog.
 ====================
 */
 void RE_GetViewFog( const vec3_t origin, refFogType_t *type, vec3_t color,

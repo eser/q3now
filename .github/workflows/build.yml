@@ -59,6 +59,82 @@ jobs:
           git tag "${{ github.event.inputs.version }}"
           git push origin "${{ github.event.inputs.version }}"
 
+  lint:
+    name: Lint (clang-tidy + clang-format)
+    needs: [prepare]
+    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get -y install cmake ninja-build clang-tidy clang-format \
+          libcurl4-openssl-dev libopus-dev libopusfile-dev \
+          libasound-dev mesa-common-dev libegl-dev libgbm-dev libdrm-dev
+
+    - name: Configure (generate compile_commands.json)
+      run: |
+        cmake -B build/lint -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+          -DUSE_SDL=OFF -DUSE_WASM=OFF \
+          -DBUILD_GAME_LIBRARIES=ON
+        cp build/lint/compile_commands.json .
+
+    # PR mode: changed-files-only — fast feedback, also matches the
+    # "clang-format is on-demand" project policy (legacy drift not gated).
+    # Push mode: full-tree sweep — regression gate on already-clean code.
+    - name: Determine changed files (PR)
+      if: github.event_name == 'pull_request'
+      id: changed
+      shell: bash
+      run: |
+        base="${{ github.base_ref }}"
+        git fetch origin "$base" --depth=1
+        all=$(git diff --name-only --diff-filter=ACMR "origin/$base"...HEAD \
+          | grep -E '^code/(cgame|game|qcommon|server|client|botlib|renderer|renderer2|renderercommon|renderervk|sdl|unix|win32)/.*\.(c|h)$' || true)
+        c_only=$(echo "$all" | grep -E '\.c$' || true)
+        # Use $'\n' delimiter so multiline outputs survive GHA's parser.
+        {
+          echo "all<<EOF"
+          echo "$all"
+          echo "EOF"
+          echo "c_only<<EOF"
+          echo "$c_only"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: clang-format (PR — changed files)
+      if: github.event_name == 'pull_request' && steps.changed.outputs.all != ''
+      shell: bash
+      run: |
+        echo "${{ steps.changed.outputs.all }}" | xargs clang-format --dry-run --Werror --style=file
+
+    - name: clang-tidy (PR — changed .c files)
+      if: github.event_name == 'pull_request' && steps.changed.outputs.c_only != ''
+      shell: bash
+      run: |
+        echo "${{ steps.changed.outputs.c_only }}" | while IFS= read -r f; do
+          [ -z "$f" ] && continue
+          clang-tidy -p . "$f"
+        done
+
+    - name: clang-tidy (push — full engine + game sweep)
+      if: github.event_name != 'pull_request'
+      shell: bash
+      run: |
+        find code/cgame code/game code/qcommon code/server code/client code/sdl \
+             code/botlib code/renderer code/renderer2 code/renderervk code/renderercommon \
+             -name '*.c' | grep -vE 'sv_rankings\.c|g_rankings\.c' | while IFS= read -r f; do
+          clang-tidy -p . "$f"
+        done
+
   linux-x86_64:
     name: Linux x86_64
     needs: [prepare]
@@ -168,7 +244,7 @@ jobs:
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build and package
-      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now.app
+      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/Wired.app
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'

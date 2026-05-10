@@ -12,6 +12,8 @@ cgame writes via staging buffer + batch syscall, client reads at render time.
 
 #include <ctype.h>
 #include <stdlib.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #if FEAT_WIRED_UI
 
@@ -70,7 +72,7 @@ wuiStoreEntry_t *WiredStore_Set( const char *key ) {
 	}
 
 	if ( wired_store.numEntries >= WUI_STORE_MAX_ENTRIES ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore: WARNING — pool exhausted (%d entries)\n", WUI_STORE_MAX_ENTRIES );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore: WARNING — pool exhausted (%d entries)\n", WUI_STORE_MAX_ENTRIES );
 		return NULL;
 	}
 
@@ -83,7 +85,7 @@ wuiStoreEntry_t *WiredStore_Set( const char *key ) {
 	}
 
 	if ( !e ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore: WARNING — no free pool slot found\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore: WARNING — no free pool slot found\n" );
 		return NULL;
 	}
 
@@ -163,7 +165,7 @@ void WiredStore_BeginFrame( void ) {
 		}
 
 		if ( ( e->flags & WUI_STORE_FLAG_DIRTY ) && ( e->flags & WUI_STORE_FLAG_WATCHED ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore [watch] %s = \"%s\" (%.2f) [%s]\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore [watch] %s = \"%s\" (%.2f) [%s]\n",
 				e->key, e->text, e->value, e->state );
 		}
 
@@ -215,7 +217,7 @@ static void WiredStore_Cmd_Get( void ) {
 	wuiStoreEntry_t *e;
 
 	if ( Cmd_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: wui_store_get <key>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Usage: wui_store_get <key>\n" );
 		return;
 	}
 
@@ -223,18 +225,18 @@ static void WiredStore_Cmd_Get( void ) {
 	e = WiredStore_Get( key );
 
 	if ( !e ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Key not found.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Key not found.\n" );
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  key:   %s\n", e->key );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  text:  \"%s\"\n", e->text );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  value: %.4f\n", e->value );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  color: %.2f %.2f %.2f %.2f\n", e->color[0], e->color[1], e->color[2], e->color[3] );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  icon:  %d\n", e->icon );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  state: \"%s\"\n", e->state );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  flags: 0x%x\n", e->flags );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  gen:   %d\n", e->generation );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  key:   %s\n", e->key );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  text:  \"%s\"\n", e->text );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  value: %.4f\n", e->value );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  color: %.2f %.2f %.2f %.2f\n", e->color[0], e->color[1], e->color[2], e->color[3] );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  icon:  %d\n", e->icon );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  state: \"%s\"\n", e->state );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  flags: 0x%x\n", e->flags );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  gen:   %d\n", e->generation );
 }
 
 /*
@@ -249,14 +251,14 @@ static void WiredStore_Cmd_Dump( void ) {
 	for ( int i = 0; i < WUI_STORE_BUCKETS; i++ ) {
 		wuiStoreEntry_t *e = wired_store.buckets[i];
 		while ( e ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "[%3d] %-40s text=\"%s\" value=%.2f state=\"%s\"\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "[%3d] %-40s text=\"%s\" value=%.2f state=\"%s\"\n",
 				i, e->key, e->text, e->value, e->state );
 			count++;
 			e = e->next;
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore: %d entries dumped\n", count );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore: %d entries dumped\n", count );
 }
 
 /*
@@ -278,10 +280,10 @@ static void WiredStore_Cmd_List( void ) {
 	qsort( keys, count, sizeof( keys[0] ), WiredStore_KeyCmp );
 
 	for ( int i = 0; i < count; i++ ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  %s\n", keys[i] );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "  %s\n", keys[i] );
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore: %d keys\n", count );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore: %d keys\n", count );
 }
 
 /*
@@ -297,7 +299,7 @@ static void WiredStore_Cmd_Watch( void ) {
 	wuiStoreEntry_t *e;
 
 	if ( Cmd_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Usage: wui_store_watch <key>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Usage: wui_store_watch <key>\n" );
 		return;
 	}
 
@@ -305,16 +307,16 @@ static void WiredStore_Cmd_Watch( void ) {
 	e = WiredStore_Get( key );
 
 	if ( !e ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Key not found.\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Key not found.\n" );
 		return;
 	}
 
 	e->flags ^= WUI_STORE_FLAG_WATCHED;
 
 	if ( e->flags & WUI_STORE_FLAG_WATCHED ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore: watching \"%s\"\n", key );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore: watching \"%s\"\n", key );
 	} else {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore: unwatching \"%s\"\n", key );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore: unwatching \"%s\"\n", key );
 	}
 }
 
@@ -355,12 +357,12 @@ static void WiredStore_Cmd_Stats( void ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore stats:\n" );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  Entries: %d / %d\n", wired_store.numEntries, WUI_STORE_MAX_ENTRIES );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  Buckets: %d (%d empty)\n", WUI_STORE_BUCKETS, emptyBuckets );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  Max chain: %d\n", maxChain );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  Avg chain: %.2f\n", nonEmptyBuckets ? totalChain / nonEmptyBuckets : 0.0f );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  Load factor: %.2f\n", (float)wired_store.numEntries / WUI_STORE_BUCKETS );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore stats:\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  Entries: %d / %d\n", wired_store.numEntries, WUI_STORE_MAX_ENTRIES );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  Buckets: %d (%d empty)\n", WUI_STORE_BUCKETS, emptyBuckets );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  Max chain: %d\n", maxChain );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  Avg chain: %.2f\n", nonEmptyBuckets ? totalChain / nonEmptyBuckets : 0.0f );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  Load factor: %.2f\n", (float)wired_store.numEntries / WUI_STORE_BUCKETS );
 }
 
 /* ── init / shutdown ────────────────────────────────────────────────── */
@@ -379,7 +381,7 @@ void WiredStore_Init( void ) {
 	Cmd_AddCommand( "wui_store_watch", WiredStore_Cmd_Watch );
 	Cmd_AddCommand( "wui_store_stats", WiredStore_Cmd_Stats );
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "WiredStore: initialized (%d buckets, %d max entries)\n", WUI_STORE_BUCKETS, WUI_STORE_MAX_ENTRIES );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "WiredStore: initialized (%d buckets, %d max entries)\n", WUI_STORE_BUCKETS, WUI_STORE_MAX_ENTRIES );
 }
 
 /*

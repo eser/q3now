@@ -318,11 +318,11 @@ Used to resample images in a more general than quartering fashion.
 This will only be filtered properly if the resampled size
 is greater than half the original size.
 
-If a larger shrinking is needed, use the mipmap function 
+If a larger shrinking is needed, use the mipmap function
 before or after.
 ================
 */
-static void ResampleTexture( byte *in, int inwidth, int inheight, byte *out,  
+static void ResampleTexture( byte *in, int inwidth, int inheight, byte *out,
 							int outwidth, int outheight ) {
 	int		i, j;
 	byte	*inrow, *inrow2;
@@ -332,7 +332,7 @@ static void ResampleTexture( byte *in, int inwidth, int inheight, byte *out,
 
 	if (outwidth>2048)
 		ri.Terminate( TERM_CLIENT_DROP, "ResampleTexture: max width");
-								
+
 	fracstep = inwidth*0x10000/outwidth;
 
 	frac = fracstep>>2;
@@ -552,7 +552,7 @@ static void DoFCBI(byte *in, byte *out, int width, int height, int component)
 			inbyte += 8;
 		}
 	}
-	
+
 	for (y = 3; y < height - 3; y += 2)
 	{
 		// diagonals
@@ -702,7 +702,7 @@ static void DoFCBI(byte *in, byte *out, int width, int height, int component)
 			inbyte += 8;
 		}
 	}
-	
+
 	for (y = 2; y < height - 3; y++)
 	{
 		// horizontal & vertical
@@ -742,7 +742,7 @@ static void DoFCBI(byte *in, byte *out, int width, int height, int component)
 
 		//x = (y + 1) % 2;
 		x = (y + 1) % 2 + 2;
-		
+
 		// optimization one
 		//            SAMPLE2(sa, x-1, y-2);
 		//SAMPLE2(sc, x-2, y-1); SAMPLE2(sd, x,   y-1);
@@ -799,7 +799,7 @@ static void DoFCBI(byte *in, byte *out, int width, int height, int component)
 			sj = *line4; line4 += 8;
 			sl = *line5; line5 += 8;
 
-			hp = sf + sg; 
+			hp = sf + sg;
 			vp = sd + si;
 			hd = abs(sf - sg);
 			vd = abs(sd - si);
@@ -823,7 +823,7 @@ static void DoFCBI(byte *in, byte *out, int width, int height, int component)
 
 				if (hdd > vdd)
 					*outbyte = hp >> 1;
-				else 
+				else
 					*outbyte = vp >> 1;
 			}
 
@@ -915,7 +915,7 @@ static void DoFCBIQuick(byte *in, byte *out, int width, int height, int componen
 			inbyte += 8;
 		}
 	}
-	
+
 	for (y = 2; y < height - 3; y++)
 	{
 		byte sd, sf, sg, si;
@@ -938,8 +938,8 @@ static void DoFCBIQuick(byte *in, byte *out, int width, int height, int componen
 			sd = *line2; line2 += 8;
 			sg = *line3; line3 += 8;
 			si = *line4; line4 += 8;
-			
-			hp = sf + sg; 
+
+			hp = sf + sg;
 			vp = sd + si;
 			hd = abs(sf - sg);
 			vd = abs(sd - si);
@@ -1000,7 +1000,7 @@ static void DoLinear(byte *in, byte *out, int width, int height)
 			COPYSAMPLE(si, line3); line3 += 8;
 
 			for (i = 0; i < 4; i++)
-			{	
+			{
 				*outbyte++ = (sd[i] + si[i] + se[i] + sh[i]) >> 2;
 			}
 
@@ -1026,7 +1026,7 @@ static void DoLinear(byte *in, byte *out, int width, int height)
 			inbyte += 8;
 		}
 	}
-	
+
 	for (y = 1; y < height - 1; y++)
 	{
 		byte sd[4], sf[4], sg[4], si[4];
@@ -1164,7 +1164,7 @@ static void FCBIByBlock(byte *data, int width, int height, qboolean clampToEdge,
 				}
 
 				outbyte = workdata + y2   * fullworkwidth * 4;
-				inbyte  = data     + srcy * width         * 4;		
+				inbyte  = data     + srcy * width         * 4;
 
 				for (x2 = 0; x2 < fullworkwidth; x2 += 2)
 				{
@@ -1301,7 +1301,7 @@ static void R_LightScaleTexture (byte *in, int inwidth, int inheight, qboolean o
 R_MipMapsRGB
 
 Operates in place, quartering the size of the texture
-Colors are gamma correct 
+Colors are gamma correct
 ================
 */
 static void R_MipMapsRGB( byte *in, int inWidth, int inHeight)
@@ -1331,7 +1331,7 @@ static void R_MipMapsRGB( byte *in, int inWidth, int inHeight)
 			}
 			*out++ = (*(in) + *(in + 4)) >> 1; in += 5;
 		}
-		
+
 		return;
 	}
 
@@ -1368,7 +1368,7 @@ static void R_MipMapNormalHeight (const byte *in, byte *out, int width, int heig
 	row = width * 4;
 	width >>= 1;
 	height >>= 1;
-	
+
 	for (i=0 ; i<height ; i++, in+=row) {
 		for (j=0 ; j<width ; j++, out+=4, in+=8) {
 			vec3_t v;
@@ -1498,7 +1498,7 @@ static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inou
 	if ( r_roundImagesDown->integer && scaled_height > height )
 		scaled_height >>= 1;
 
-	if ( picmip && data && resampledBuffer && r_imageUpsample->integer && 
+	if ( picmip && data && resampledBuffer && r_imageUpsample->integer &&
 	     scaled_width < r_imageUpsampleMaxSize->integer && scaled_height < r_imageUpsampleMaxSize->integer)
 	{
 		int finalwidth, finalheight;
@@ -1621,7 +1621,7 @@ static qboolean RawImage_HasAlpha(const byte *scan, int numPixels)
 
 	for ( int i = 0; i < numPixels; i++ )
 	{
-		if ( scan[i*4 + 3] != 255 ) 
+		if ( scan[i*4 + 3] != 255 )
 		{
 			return qtrue;
 		}
@@ -1972,12 +1972,11 @@ static void RawImage_UploadTexture(GLuint texture, byte *data, int x, int y, int
 				qglGenerateTextureMipmapEXT(texture, target);
 				break;
 			}
-			else if (rgba8)
-			{
-				if (type == IMGTYPE_NORMAL || type == IMGTYPE_NORMALHEIGHT)
-					R_MipMapNormalHeight(data, data, width, height, glRefConfig.swizzleNormalmap);
+			if ( rgba8 ) {
+				if ( type == IMGTYPE_NORMAL || type == IMGTYPE_NORMALHEIGHT )
+					R_MipMapNormalHeight( data, data, width, height, glRefConfig.swizzleNormalmap );
 				else
-					R_MipMapsRGB(data, width, height);
+					R_MipMapsRGB( data, width, height );
 			}
 		}
 
@@ -2430,7 +2429,7 @@ image_t	*R_FindImageFile( const char *name, imgType_t type, imgFlags_t flags )
 	for (image=hashTable[hash]; image; image=image->next) {
 		if ( !strcmp( name, image->imgName ) ) {
 			// the white image can be used with any set of parms, but other mismatches are errors
-			if ( strcmp( name, "*white" ) ) {
+			if ( strcmp( name, "*white" ) != 0 ) {
 				if ( image->flags != flags ) {
 					ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
 				}
@@ -2547,7 +2546,7 @@ image_t	*R_FindImageFile( const char *name, imgType_t type, imgFlags_t flags )
 #endif
 
 			R_CreateImage( normalName, normalPic, normalWidth, normalHeight, IMGTYPE_NORMAL, normalFlags, 0 );
-			ri.Free( normalPic );	
+			ri.Free( normalPic );
 		}
 	}
 
@@ -2595,10 +2594,10 @@ static void R_CreateDlightImage( void ) {
 			} else if ( b < 75 ) {
 				b = 0;
 			}
-			data[y][x][0] = 
-			data[y][x][1] = 
+			data[y][x][0] =
+			data[y][x][1] =
 			data[y][x][2] = b;
-			data[y][x][3] = 255;			
+			data[y][x][3] = 255;
 		}
 	}
 	tr.dlightImage = R_CreateImage("*dlight", (byte *)data, DLIGHT_SIZE, DLIGHT_SIZE, IMGTYPE_COLORALPHA, IMGFLAG_CLAMPTOEDGE, 0 );
@@ -2614,7 +2613,7 @@ void R_InitFogTable( void ) {
 	int		i;
 	float	d;
 	float	exp;
-	
+
 	exp = 0.5;
 
 	for ( i = 0 ; i < FOG_TABLE_SIZE ; i++ ) {
@@ -2678,8 +2677,8 @@ static void R_CreateFogImage( void ) {
 		for (y=0 ; y<FOG_T ; y++) {
 			d = R_FogFactor( ( x + 0.5f ) / FOG_S, ( y + 0.5f ) / FOG_T );
 
-			data[(y*FOG_S+x)*4+0] = 
-			data[(y*FOG_S+x)*4+1] = 
+			data[(y*FOG_S+x)*4+0] =
+			data[(y*FOG_S+x)*4+1] =
 			data[(y*FOG_S+x)*4+2] = 255;
 			data[(y*FOG_S+x)*4+3] = 255*d;
 		}
@@ -2751,10 +2750,10 @@ static void R_CreateBuiltinImages( void ) {
 	// for default lightmaps, etc
 	for (x=0 ; x<DEFAULT_SIZE ; x++) {
 		for (y=0 ; y<DEFAULT_SIZE ; y++) {
-			data[y][x][0] = 
-			data[y][x][1] = 
+			data[y][x][0] =
+			data[y][x][1] =
 			data[y][x][2] = tr.identityLightByte;
-			data[y][x][3] = 255;			
+			data[y][x][3] = 255;
 		}
 	}
 
@@ -2860,44 +2859,27 @@ void R_SetColorMappings( void ) {
 	int		i, j;
 	float	g;
 	int		inf;
-	float	brightness;
+	float	brightness, mapBrightness;
 
 	// Float-based brightness (CNQ3-style rework).
 	// When r_brightness != 0 we convert log2(brightness) into overbright-bits.
-	if ( r_brightness != NULL && r_brightness->value > 0.0f ) {
-		brightness = r_brightness->value;
-		if ( brightness < 0.25f ) brightness = 0.25f;
-		if ( brightness > 32.0f ) brightness = 32.0f;
-		tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
-	} else {
-		// setup the overbright lighting
-		tr.overbrightBits = r_overBrightBits->integer;
-	}
+	brightness = Com_Clamp( 0.25f, 32.0f, r_brightness->value );
+	tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
 
-	// allow 2 overbright bits
-	if ( tr.overbrightBits > 2 ) {
-		tr.overbrightBits = 2;
-	} else if ( tr.overbrightBits < 0 ) {
-		tr.overbrightBits = 0;
-	}
+	mapBrightness = Com_Clamp( 0.25f, 32.0f, r_mapBrightness->value );
+	tr.mapOverbrightBits = (int)( logf( mapBrightness ) / logf( 2.0f ) + 0.5f );
+
+	tr.overbrightBits    = Com_Clampi( 0, 2, tr.overbrightBits );
+	tr.mapOverbrightBits = Com_Clampi( 0, 2, tr.mapOverbrightBits );
 
 	// don't allow more overbright bits than map overbright bits
-	{
-		int mapShift = r_mapOverBrightBits->integer;
-		if ( r_mapBrightness != NULL && r_mapBrightness->value > 0.0f ) {
-			float mb = r_mapBrightness->value;
-			if ( mb < 0.25f ) mb = 0.25f;
-			if ( mb > 32.0f ) mb = 32.0f;
-			mapShift = (int)( logf( mb ) / logf( 2.0f ) + 0.5f );
-		}
-		if ( tr.overbrightBits > mapShift ) {
-			tr.overbrightBits = mapShift;
-		}
-	}
+	if ( tr.overbrightBits > tr.mapOverbrightBits ) {
+        tr.overbrightBits = tr.mapOverbrightBits;
+    }
 
+	// NOLINTNEXTLINE(clang-analyzer-core.BitwiseShift) — overbrightBits is clamped to [0, r_overBrightBitsMax] earlier; analyzer's path doesn't see the clamp
 	tr.identityLight = 1.0f / ( 1 << tr.overbrightBits );
 	tr.identityLightByte = 255 * tr.identityLight;
-
 
 	if ( r_intensity->value <= 1 ) {
 		ri.Cvar_Set( "r_intensity", "1" );
@@ -3000,7 +2982,7 @@ static char *CommaParse( const char **data_p ) {
 
 	while ( 1 ) {
 		// skip whitespace
-		while( (c = *data) <= ' ') {
+		while( (c = (byte)*data) <= ' ') {
 			if( !c ) {
 				break;
 			}
@@ -3008,7 +2990,7 @@ static char *CommaParse( const char **data_p ) {
 		}
 
 
-		c = *data;
+		c = (byte)*data;
 
 		// skip double slash comments
 		if ( c == '/' && data[1] == '/' )
@@ -3019,14 +3001,14 @@ static char *CommaParse( const char **data_p ) {
 			}
 		}
 		// skip /* */ comments
-		else if ( c=='/' && data[1] == '*' ) 
+		else if ( c=='/' && data[1] == '*' )
 		{
 			data += 2;
-			while ( *data && ( *data != '*' || data[1] != '/' ) ) 
+			while ( *data && ( *data != '*' || data[1] != '/' ) )
 			{
 				data++;
 			}
-			if ( *data ) 
+			if ( *data )
 			{
 				data += 2;
 			}
@@ -3047,7 +3029,7 @@ static char *CommaParse( const char **data_p ) {
 		data++;
 		while (1)
 		{
-			c = *data++;
+			c = (byte)*data++;
 			if (c=='\"' || !c)
 			{
 				com_token[len] = 0;
@@ -3071,7 +3053,7 @@ static char *CommaParse( const char **data_p ) {
 			len++;
 		}
 		data++;
-		c = *data;
+		c = (byte)*data;
 	} while (c>32 && c != ',' );
 
 	com_token[len] = 0;
@@ -3137,7 +3119,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	R_IssuePendingRenderCommands();
 
 	// If not a .skin file, load as a single shader
-	if ( strcmp( name + strlen( name ) - 5, ".skin" ) ) {
+	if ( strcmp( name + strlen( name ) - 5, ".skin" ) != 0 ) {
 		skin->numSurfaces = 1;
 		skin->surfaces = ri.Hunk_Alloc( sizeof( skinSurface_t ), h_low );
 		skin->surfaces[0].shader = R_FindShader( name, LIGHTMAP_NONE, qtrue );
@@ -3170,7 +3152,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 		if ( strstr( token, "tag_" ) ) {
 			continue;
 		}
-		
+
 		// parse the shader name
 		token = CommaParse( &text_p );
 
@@ -3251,7 +3233,7 @@ void	R_SkinList_f( void ) {
 
 		ri.Log( SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
 		for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-			ri.Log( SEV_INFO, "       %s = %s\n", 
+			ri.Log( SEV_INFO, "       %s = %s\n",
 				skin->surfaces[j].name, skin->surfaces[j].shader->name );
 		}
 	}

@@ -12,6 +12,8 @@ See arena.h for the public API contract.
 #include "q_shared.h"
 #include "qcommon.h"
 #include "arena.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #define ARENA_MAX_REGISTERED 32
 #define ARENA_GUARD_MAGIC    0xA2A2A2A2U
@@ -218,7 +220,7 @@ void Arena_Register( arena_t *arena )
 {
     if ( s_registryCount >= ARENA_MAX_REGISTERED ) {
         /* Log but don't fatal — arena still works, just won't appear in /memstats */
-        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Arena_Register: registry full, '%s' won't appear in /memstats\n", arena->name );
+        Com_Log( SEV_INFO, LOG_CH(ch_system), "Arena_Register: registry full, '%s' won't appear in /memstats\n", arena->name );
         return;
     }
     s_registry[s_registryCount++] = arena;
@@ -247,12 +249,12 @@ void Arena_PrintStats( void )
     size_t totalUsed = 0, totalSize = 0;
 
     if ( s_registryCount == 0 ) {
-        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "  (no persistent arenas registered)\n" );
+        Com_Log( SEV_INFO, LOG_CH(ch_system), "  (no persistent arenas registered)\n" );
         return;
     }
 
-    Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%-24s %8s %8s %8s  %s\n", "Arena", "Size", "Used", "Peak", "Pct" );
-    Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%-24s %8s %8s %8s  %s\n",
+    Com_Log( SEV_INFO, LOG_CH(ch_system), "%-24s %8s %8s %8s  %s\n", "Arena", "Size", "Used", "Peak", "Pct" );
+    Com_Log( SEV_INFO, LOG_CH(ch_system), "%-24s %8s %8s %8s  %s\n",
         "------------------------",
         "--------", "--------", "--------", "---" );
 
@@ -263,7 +265,7 @@ void Arena_PrintStats( void )
         size_t peak = Arena_Peak( a );
         int    pct  = size > 0 ? (int)( used * 100 / size ) : 0;
 
-        Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%-24s %7zuK %7zuK %7zuK  %d%%\n",
+        Com_Log( SEV_INFO, LOG_CH(ch_system), "%-24s %7zuK %7zuK %7zuK  %d%%\n",
             a->name,
             size / 1024,
             used / 1024,
@@ -274,7 +276,7 @@ void Arena_PrintStats( void )
         totalSize += size;
     }
 
-    Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%-24s %7zuK %7zuK\n",
+    Com_Log( SEV_INFO, LOG_CH(ch_system), "%-24s %7zuK %7zuK\n",
         "TOTAL",
         totalSize / 1024,
         totalUsed / 1024 );

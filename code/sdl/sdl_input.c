@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "../client/client.h"
 #include "sdl_glw.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 static cvar_t *in_keyboardDebug;
 static cvar_t *in_forceCharset;
@@ -75,28 +77,28 @@ IN_PrintKey
 static void IN_PrintKey( const SDL_KeyboardEvent *event, keyNum_t key, qboolean down )
 {
 	if( down )
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "+ " );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "+ " );
 	else
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "  " );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "  " );
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Scancode: 0x%02x(%s) Sym: 0x%02x(%s)",
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Scancode: 0x%02x(%s) Sym: 0x%02x(%s)",
 			event->scancode, SDL_GetScancodeName( event->scancode ),
 			event->key, SDL_GetKeyName( event->key ) );
 
-	if( event->mod & SDL_KMOD_LSHIFT ) Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_LSHIFT" );
-	if( event->mod & SDL_KMOD_RSHIFT ) Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_RSHIFT" );
-	if( event->mod & SDL_KMOD_LCTRL )  Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_LCTRL" );
-	if( event->mod & SDL_KMOD_RCTRL )  Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_RCTRL" );
-	if( event->mod & SDL_KMOD_LALT )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_LALT" );
-	if( event->mod & SDL_KMOD_RALT )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_RALT" );
-	if( event->mod & SDL_KMOD_LGUI )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_LGUI" );
-	if( event->mod & SDL_KMOD_RGUI )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_RGUI" );
-	if( event->mod & SDL_KMOD_NUM )    Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_NUM" );
-	if( event->mod & SDL_KMOD_CAPS )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_CAPS" );
-	if( event->mod & SDL_KMOD_MODE )   Com_Log( SEV_INFO, LOG_CAT_CLIENT, " KMOD_MODE" );
+	if( event->mod & SDL_KMOD_LSHIFT ) Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_LSHIFT" );
+	if( event->mod & SDL_KMOD_RSHIFT ) Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_RSHIFT" );
+	if( event->mod & SDL_KMOD_LCTRL )  Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_LCTRL" );
+	if( event->mod & SDL_KMOD_RCTRL )  Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_RCTRL" );
+	if( event->mod & SDL_KMOD_LALT )   Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_LALT" );
+	if( event->mod & SDL_KMOD_RALT )   Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_RALT" );
+	if( event->mod & SDL_KMOD_LGUI )   Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_LGUI" );
+	if( event->mod & SDL_KMOD_RGUI )   Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_RGUI" );
+	if( event->mod & SDL_KMOD_NUM )    Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_NUM" );
+	if( event->mod & SDL_KMOD_CAPS )   Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_CAPS" );
+	if( event->mod & SDL_KMOD_MODE )   Com_Log( SEV_INFO, LOG_CH(ch_client), " KMOD_MODE" );
 	// SDL3: KMOD_RESERVED removed
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, " Q:0x%02x(%s)\n", key, Key_KeynumToString( key ) );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), " Q:0x%02x(%s)\n", key, Key_KeynumToString( key ) );
 }
 
 
@@ -417,7 +419,7 @@ static void IN_GobbleMouseEvents( void )
 		SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_WHEEL ) ) > 0 ) { }
 
 	if ( val < 0 )
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%s failed: %s\n", __func__, SDL_GetError() );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%s failed: %s\n", __func__, SDL_GetError() );
 }
 
 
@@ -445,11 +447,13 @@ static void IN_ActivateMouse( void )
 		if ( glw_state.isFullscreen )
 			SDL_HideCursor(); // SDL3: SDL_ShowCursor(SDL_FALSE) → SDL_HideCursor()
 
+		// NOLINTBEGIN(bugprone-integer-division) — pixel-aligned window-center coordinates; integer math intentional
 		SDL_WarpMouseInWindow( SDL_window,
 			(float)(glw_state.window_width / 2), (float)(glw_state.window_height / 2) );
+		// NOLINTEND(bugprone-integer-division)
 
 #ifdef DEBUG_EVENTS
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%4i %s\n", Sys_Milliseconds(), __func__ );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%4i %s\n", Sys_Milliseconds(), __func__ );
 #endif
 	}
 
@@ -492,13 +496,14 @@ static void IN_DeactivateMouse( void )
 	if ( mouseActive )
 	{
 #ifdef DEBUG_EVENTS
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%4i %s\n", Sys_Milliseconds(), __func__ );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%4i %s\n", Sys_Milliseconds(), __func__ );
 #endif
 		IN_GobbleMouseEvents();
 
 		SDL_SetWindowMouseGrab( SDL_window, false );
 		SDL_SetWindowRelativeMouseMode( SDL_window, false );
 
+		// NOLINTBEGIN(bugprone-integer-division) — pixel-aligned screen/window-center coordinates; integer math intentional
 		if ( gw_active )
 			SDL_WarpMouseInWindow( SDL_window,
 				(float)(glw_state.window_width / 2), (float)(glw_state.window_height / 2) );
@@ -513,6 +518,7 @@ static void IN_DeactivateMouse( void )
 					(float)(glw_state.desktop_height / 2) );
 			}
 		}
+		// NOLINTEND(bugprone-integer-division)
 
 		mouseActive = qfalse;
 	}
@@ -586,31 +592,31 @@ static void IN_InitJoystick( void )
 
 	if (!SDL_WasInit(SDL_INIT_JOYSTICK))
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Calling SDL_Init(SDL_INIT_JOYSTICK)...\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Calling SDL_Init(SDL_INIT_JOYSTICK)...\n");
 		// SDL3: SDL_Init returns bool (true = success)
 		if (!SDL_Init(SDL_INIT_JOYSTICK))
 		{
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_Init(SDL_INIT_JOYSTICK) failed: %s\n", SDL_GetError());
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_Init(SDL_INIT_JOYSTICK) failed: %s\n", SDL_GetError());
 			return;
 		}
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_Init(SDL_INIT_JOYSTICK) passed.\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_Init(SDL_INIT_JOYSTICK) passed.\n");
 	}
 
 	// SDL3: SDL_INIT_GAMECONTROLLER renamed to SDL_INIT_GAMEPAD
 	if (!SDL_WasInit(SDL_INIT_GAMEPAD))
 	{
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Calling SDL_Init(SDL_INIT_GAMEPAD)...\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Calling SDL_Init(SDL_INIT_GAMEPAD)...\n");
 		if (!SDL_Init(SDL_INIT_GAMEPAD))
 		{
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_Init(SDL_INIT_GAMEPAD) failed: %s\n", SDL_GetError());
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_Init(SDL_INIT_GAMEPAD) failed: %s\n", SDL_GetError());
 			return;
 		}
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "SDL_Init(SDL_INIT_GAMEPAD) passed.\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_Init(SDL_INIT_GAMEPAD) passed.\n");
 	}
 
 	// SDL3: SDL_NumJoysticks() replaced by SDL_GetJoysticks(&count) returning ID array
 	joysticks = SDL_GetJoysticks(&total);
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "%d possible joysticks\n", total);
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "%d possible joysticks\n", total);
 
 	// Print list and build cvar to allow ui to select joystick.
 	for (i = 0; i < total; i++)
@@ -623,7 +629,7 @@ static void IN_InitJoystick( void )
 	Cvar_SetDescription( cv, "List of available joysticks." );
 
 	if( !in_joystick->integer ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Joystick is not active.\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Joystick is not active.\n" );
 		SDL_free(joysticks);
 		SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
 		return;
@@ -650,7 +656,7 @@ static void IN_InitJoystick( void )
 		stick = SDL_OpenJoystick( joystickID );
 
 		if (stick == NULL) {
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "No joystick opened: %s\n", SDL_GetError() );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "No joystick opened: %s\n", SDL_GetError() );
 			SDL_free(joysticks);
 			return;
 		}
@@ -659,15 +665,15 @@ static void IN_InitJoystick( void )
 		if (SDL_IsGamepad(joystickID))
 			gamepad = SDL_OpenGamepad(joystickID); // SDL3: SDL_GameControllerOpen → SDL_OpenGamepad
 
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Joystick %d opened\n", in_joystickNo->integer );
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Name:       %s\n", SDL_GetJoystickNameForID(joystickID) );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Joystick %d opened\n", in_joystickNo->integer );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Name:       %s\n", SDL_GetJoystickNameForID(joystickID) );
 		// SDL3: SDL_JoystickNum* renamed to SDL_GetNumJoystick*
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Axes:       %d\n", SDL_GetNumJoystickAxes(stick) );
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Hats:       %d\n", SDL_GetNumJoystickHats(stick) );
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Buttons:    %d\n", SDL_GetNumJoystickButtons(stick) );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Axes:       %d\n", SDL_GetNumJoystickAxes(stick) );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Hats:       %d\n", SDL_GetNumJoystickHats(stick) );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Buttons:    %d\n", SDL_GetNumJoystickButtons(stick) );
 		// SDL3: SDL_JoystickNumBalls removed (balls emulated as axes)
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Use Analog: %s\n", in_joystickUseAnalog->integer ? "Yes" : "No" );
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Is gamepad: %s\n", gamepad ? "Yes" : "No" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Use Analog: %s\n", in_joystickUseAnalog->integer ? "Yes" : "No" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Is gamepad: %s\n", gamepad ? "Yes" : "No" );
 		// SDL3: SDL_JoystickEventState and SDL_GameControllerEventState removed (always enabled)
 	}
 
@@ -1226,7 +1232,7 @@ void HandleEvents( void )
 						int utf32 = 0;
 
 						if( ( *c & 0x80 ) == 0 )
-							utf32 = *c++;
+							utf32 = (byte)*c++;
 						else if( ( *c & 0xE0 ) == 0xC0 ) // 110x xxxx
 						{
 							utf32 |= ( *c++ & 0x1F ) << 6;
@@ -1247,7 +1253,7 @@ void HandleEvents( void )
 						}
 						else
 						{
-							Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "Unrecognised UTF-8 lead byte: 0x%x\n", (unsigned int)*c );
+							Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Unrecognised UTF-8 lead byte: 0x%x\n", (unsigned int)*c );
 							c++;
 						}
 
@@ -1486,7 +1492,7 @@ void IN_Init( void )
 		return;
 	}
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "\n------- Input Initialization -------\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "\n------- Input Initialization -------\n" );
 
 	{
 		static const cvarDesc_t d = CVAR_BOOL( "in_keyboardDebug", "0", CVAR_ARCHIVE,
@@ -1544,7 +1550,7 @@ void IN_Init( void )
 	Cmd_AddCommand( "minimize", IN_Minimize );
 	Cmd_AddCommand( "in_restart", IN_Restart );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "------------------------------------\n" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "------------------------------------\n" );
 }
 
 

@@ -26,6 +26,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // when the snapshot transitions like all the other entities
 
 #include "cg_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 /*
 ==============
@@ -264,7 +266,7 @@ void CG_CheckChangedPredictableEvents( playerState_t *ps ) {
 				cg.predictableEvents[ i & (MAX_PREDICTED_EVENTS-1) ] = event;
 
 				if ( cg_showmiss.integer ) {
-					Com_Log( SEV_INFO, LOG_CAT_CGAME, "WARNING: changed predicted event\n");
+					Com_Log( SEV_INFO, LOG_CH(ch_cgame), "WARNING: changed predicted event\n");
 				}
 			}
 		}

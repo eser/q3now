@@ -30,6 +30,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <io.h>
 #include <conio.h>
 #include <intrin.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 /* Sys_Milliseconds → wired/core/time/time.c */
 
@@ -58,14 +60,14 @@ qboolean Sys_RandomBytes( byte *string, int len )
 
 
 #ifdef UNICODE
-LPWSTR AtoW( const char *s ) 
+LPWSTR AtoW( const char *s )
 {
 	static WCHAR buffer[MAXPRINTMSG*2];
 	MultiByteToWideChar( CP_ACP, 0, s, strlen( s ) + 1, (LPWSTR) buffer, ARRAYSIZE( buffer ) );
 	return buffer;
 }
 
-const char *WtoA( const LPWSTR s ) 
+const char *WtoA( const LPWSTR s )
 {
 	static char buffer[MAXPRINTMSG*2];
 	WideCharToMultiByte( CP_ACP, 0, s, -1, buffer, ARRAYSIZE( buffer ), NULL, NULL );
@@ -90,18 +92,36 @@ const char *Sys_DefaultHomePath( void )
 	userProfile = getenv( "USERPROFILE" );
 	if ( userProfile == NULL || *userProfile == '\0' )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Unable to detect USERPROFILE\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Unable to detect USERPROFILE\n" );
 		return NULL;
 	}
 
-	Q_strncpyz( path, userProfile, sizeof( path ) );
-	{ qstring_t _ph_qs = QS_WrapExisting( path, sizeof( path ) ); QS_Append( &_ph_qs, "\\q3now" CHANNEL_SUFFIX ); }
+	// Engine root <userprofile>{SEP}wired{SEP} — shared across every game built
+	// on the wired engine. PATH_SEP comes from q_platform.h ('\\' on Windows,
+	// '/' on Unix); using it instead of literal separators keeps the source
+	// portable across platform shims even though this file only compiles on
+	// Windows.
+	{
+		char engineRoot[MAX_OSPATH];
+		Com_sprintf( engineRoot, sizeof( engineRoot ),
+			"%s%c%s", userProfile, PATH_SEP, "wired" );
+		if ( !CreateDirectory( engineRoot, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS )
+		{
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Unable to create directory \"%s\"\n", engineRoot );
+			return NULL;
+		}
+	}
+
+	// Per-product subfolder <userprofile>{SEP}wired{SEP}<PRODUCT_NAME><CHANNEL_SUFFIX>{SEP}
+	Com_sprintf( path, sizeof( path ),
+		"%s%c%s%c%s%s", userProfile, PATH_SEP, "wired", PATH_SEP,
+		PRODUCT_NAME, CHANNEL_SUFFIX );
 
 	if ( !CreateDirectory( path, NULL ) )
 	{
 		if ( GetLastError() != ERROR_ALREADY_EXISTS )
 		{
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "Unable to create directory \"%s\"\n", path );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "Unable to create directory \"%s\"\n", path );
 			return NULL;
 		}
 	}

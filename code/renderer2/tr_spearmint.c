@@ -1,8 +1,8 @@
 /*
 ===========================================================================
-Copyright (C) 2026 q3now contributors.
+Copyright (C) 2026 Wired engine contributors.
 
-This file is part of q3now and is distributed under the terms of the
+This file is part of the Wired engine and is distributed under the terms of the
 GNU General Public License version 2 or (at your option) any later version.
 
 tr_spearmint.c — Phase 5 Spearmint feature adaptation (GL2 renderer).

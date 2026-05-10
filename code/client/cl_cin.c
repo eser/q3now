@@ -34,6 +34,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
 #include "snd_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #define MAXSIZE				8
 #define MINSIZE				4
@@ -91,6 +93,7 @@ typedef struct {
 	int					currentHandle;
 } cinematics_t;
 
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — vendored RoQ codec struct; member order matches the file format
 typedef struct {
 	char				fileName[MAX_OSPATH];
 	int					CIN_WIDTH, CIN_HEIGHT;
@@ -517,6 +520,7 @@ static void ROQ_GenYUVTables( void )
 	}
 }
 
+// NOLINTBEGIN(bugprone-macro-parentheses) — VQ codec inner-loop macros; all call sites pass plain identifiers (a, b, c, d are buffer pointers). Adding parens would obscure the codec semantics for no functional gain.
 #define VQ2TO4(a,b,c,d) { \
     	*c++ = a[0];	\
 	*d++ = a[0];	\
@@ -552,6 +556,7 @@ static void ROQ_GenYUVTables( void )
 	*d++ = *b;	\
 	*d++ = *b;	\
 	a++; b++; }
+// NOLINTEND(bugprone-macro-parentheses)
 
 /******************************************************************************
 *
@@ -1000,7 +1005,7 @@ static void readQuadInfo( byte *qData )
 			cinTable[currentHandle].drawY = 256;
 		}
 		if ( cinTable[currentHandle].CIN_WIDTH != 256 || cinTable[currentHandle].CIN_HEIGHT != 256 ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "HACK: approxmimating cinematic for Rage Pro or Voodoo\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "HACK: approxmimating cinematic for Rage Pro or Voodoo\n" );
 		}
 	}
 }
@@ -1199,11 +1204,13 @@ redump:
 	cinTable[currentHandle].roq_id		 = framedata[0] + framedata[1]*256;
 	cinTable[currentHandle].RoQFrameSize = framedata[2] + framedata[3]*256 + framedata[4]*65536;
 	cinTable[currentHandle].roq_flags	 = framedata[6] + framedata[7]*256;
+	// NOLINTNEXTLINE(bugprone-signed-char-misuse) — RoQ motion vectors are intentionally signed [-128,127]
 	cinTable[currentHandle].roqF0		 = (signed char)framedata[7];
+	// NOLINTNEXTLINE(bugprone-signed-char-misuse) — RoQ motion vectors are intentionally signed [-128,127]
 	cinTable[currentHandle].roqF1		 = (signed char)framedata[6];
 
 	if (cinTable[currentHandle].RoQFrameSize>65536||cinTable[currentHandle].roq_id==0x1084) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "roq_size>65536||roq_id==0x1084\n");
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "roq_size>65536||roq_id==0x1084\n");
 		cinTable[currentHandle].status = FMV_EOF;
 		if (cinTable[currentHandle].looping) {
 			RoQReset();
@@ -1268,7 +1275,7 @@ static void RoQShutdown( void ) {
 	if ( cinTable[currentHandle].status == FMV_IDLE ) {
 		return;
 	}
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "finished cinematic\n");
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "finished cinematic\n");
 	cinTable[currentHandle].status = FMV_IDLE;
 
 	if ( cinTable[currentHandle].iFile != FS_INVALID_HANDLE ) {
@@ -1303,7 +1310,7 @@ e_status CIN_StopCinematic( int handle ) {
 	if (handle < 0 || handle>= MAX_VIDEO_HANDLES || cinTable[handle].status == FMV_EOF) return FMV_EOF;
 	currentHandle = handle;
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "trFMV::stop(), closing %s\n", cinTable[currentHandle].fileName);
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "trFMV::stop(), closing %s\n", cinTable[currentHandle].fileName);
 
 	if (!cinTable[currentHandle].buf) {
 		return FMV_EOF;
@@ -1414,7 +1421,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 		}
 	}
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CIN_PlayCinematic( %s )\n", arg);
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CIN_PlayCinematic( %s )\n", arg);
 
 	memset(&cin, 0, sizeof(cinematics_t) );
 	currentHandle = CIN_HandleForVideo();
@@ -1426,7 +1433,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 	cinTable[currentHandle].ROQSize = FS_FOpenFileRead( cinTable[currentHandle].fileName, &cinTable[currentHandle].iFile, qtrue );
 
 	if (cinTable[currentHandle].ROQSize<=0) {
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "play(%s), ROQSize<=0\n", arg);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "play(%s), ROQSize<=0\n", arg);
 		cinTable[currentHandle].fileName[0] = '\0';
 		if ( cinTable[currentHandle].iFile != FS_INVALID_HANDLE ) {
 			FS_FCloseFile( cinTable[currentHandle].iFile );
@@ -1456,7 +1463,8 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 	}
 
 	initRoQ();
-					
+
+	// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — currentHandle is allocated and bounded by CIN_OpenFile earlier in this function
 	FS_Read (cin.file, 16, cinTable[currentHandle].iFile);
 
 	unsigned short RoQID = (unsigned short)(cin.file[0]) + (unsigned short)(cin.file[1])*256;
@@ -1466,7 +1474,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 //		FS_Read (cin.file, cinTable[currentHandle].RoQFrameSize+8, cinTable[currentHandle].iFile);
 
 		cinTable[currentHandle].status = FMV_PLAY;
-		Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "trFMV::play(), playing %s\n", arg);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "trFMV::play(), playing %s\n", arg);
 
 		// Phase 6.3: pre-buffer the first frame BEFORE transitioning to
 		// CA_CINEMATIC. Without this, cls.state flips to CA_CINEMATIC while
@@ -1498,7 +1506,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 
 		return currentHandle;
 	}
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "trFMV::play(), invalid RoQ ID\n");
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "trFMV::play(), invalid RoQ ID\n");
 
 	RoQShutdown();
 	return -1;
@@ -1626,7 +1634,7 @@ void CIN_DrawCinematic( int handle ) {
 void CL_PlayCinematic_f( void ) {
 	int bits = CIN_system;
 
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "CL_PlayCinematic_f\n");
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_PlayCinematic_f\n");
 	if (cls.state == CA_CINEMATIC) {
 		SCR_StopCinematic();
 	}

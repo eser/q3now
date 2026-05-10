@@ -1,5 +1,7 @@
 #include "q_shared.h"
 #include "crypto.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 /* Declared in qcommon.h; forward-declared here to keep util/ free of qcommon.h. */
 qboolean Sys_RandomBytes( byte *string, int len );
@@ -243,7 +245,8 @@ void Com_RandomBytes( byte *string, int len )
 	if ( Sys_RandomBytes( string, len ) )
 		return;
 
-	Com_Log( SEV_INFO, LOG_CAT_SYSTEM, S_COLOR_YELLOW "Com_RandomBytes: using weak randomization\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Com_RandomBytes: using weak randomization\n" );
+	// NOLINTNEXTLINE(bugprone-random-generator-seed) — explicit fallback path; non-crypto warning string above flags the weakness
 	srand( time( NULL ) );
 	for( int i = 0; i < len; i++ )
 		string[i] = (unsigned char)( rand() % 256 );

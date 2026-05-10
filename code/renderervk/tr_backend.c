@@ -699,6 +699,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 					R_TransformDlights( backEnd.refdef.num_dlights, backEnd.refdef.dlights, &backEnd.or );
 				}
 #endif // USE_LEGACY_DLIGHTS
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 				if ( backEnd.currentEntity->e.renderfx & RF_DEPTHHACK ) {
 					// hack the depth range to prevent view model from poking into walls
 					depthRange = qtrue;
@@ -1663,17 +1664,35 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
 
-	// GPU rail trail draw (after scene geometry, before flares)
-	if ( vk.computeAvailable && vk.numRailDispatches > 0 ) {
-		for ( int rt = 0; rt < vk.numRailDispatches; rt++ ) {
-			RB_DrawRailTrailGPU( rt, vk.railDispatch[rt].numSegments );
-		}
-		vk.numRailDispatches = 0; // clear after draw
-	}
-
 #ifdef USE_VBO
 	VBO_UnBind();
 #endif
+
+	// Primitive ribbons (world-space, translucent). Drawn after world
+	// surfaces, before screen-space sun/flares/lit-surface passes.
+	// RB_DrawRibbons internally skips during the screenmap pass, since
+	// the ribbon pipeline is created against vk.render_pass.main only.
+	RB_DrawRibbons();
+
+	// Primitive sprites (world-space, translucent). Drawn immediately
+	// after ribbons so sprites composite over ribbons at the same depth
+	// slot. Same screenmap-pass guard as ribbons.
+	RB_DrawSprites();
+
+	// Primitive beams (world-space, additive). Drawn after sprites
+	// so beam highlights composite over sprite particles. Walks the
+	// engine-managed pool, expires/fades persistent slots, and emits
+	// one vkCmdDraw with instanceCount = drawCount. Same
+	// screenmap-pass guard as ribbons.
+	RB_DrawBeams();
+
+	// Primitive particles (compute-integrated GPU pool). The compute
+	// pass runs from vk_begin_frame BEFORE any render pass opens —
+	// vkCmdDispatch is spec-forbidden inside a render pass instance.
+	// What's left here is the graphics pass that consumes the just-
+	// integrated pool and emits billboard quads. Same screenmap-pass
+	// guard as ribbons / sprites.
+	RB_DrawParticles();
 
 	if ( r_drawSun->integer ) {
 		RB_DrawSun( 0.1f, tr.sunShader );

@@ -22,6 +22,8 @@ No trap syscall is added — this extends the existing CG_TRAP_GETVALUE path.
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 // ── Canonical sound slot names (index matches CSOUND_* defines in cg_public.h) ──
 
@@ -157,7 +159,7 @@ static qboolean CL_Char_LoadLuaTable( lua_State *L, const char *path ) {
 	Z_Free( buf );
 
 	if ( status != 0 ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: Lua load error (%s): %s\n",
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: Lua load error (%s): %s\n",
 			path, lua_tostring( L, -1 ) );
 		lua_pop( L, 1 );
 		return qfalse;
@@ -166,14 +168,14 @@ static qboolean CL_Char_LoadLuaTable( lua_State *L, const char *path ) {
 	// Execute with 0 args, expect 1 return value.
 	status = lua_pcall( L, 0, 1, 0 );
 	if ( status != 0 ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: Lua exec error (%s): %s\n",
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: Lua exec error (%s): %s\n",
 			path, lua_tostring( L, -1 ) );
 		lua_pop( L, 1 );
 		return qfalse;
 	}
 
 	if ( !lua_istable( L, -1 ) ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: '%s' did not return a table\n", path );
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: '%s' did not return a table\n", path );
 		lua_pop( L, 1 );
 		return qfalse;
 	}
@@ -313,7 +315,7 @@ static void CL_Char_WarnUnknownKeys( lua_State *L, int tbl_idx, const char **kno
 				if ( !Q_stricmp( k, known[i] ) ) { found = qtrue; break; }
 			}
 			if ( !found ) {
-				COM_WARN( LOG_CAT_CLIENT,
+				COM_WARN( LOG_CH(ch_client),
 					"CL_Characters: '%s' unknown key '%s' in %s (typo?)\n",
 					charName, k, context );
 			}
@@ -333,7 +335,7 @@ static qhandle_t CL_RegisterCharacterSkin( const clParsedSkin_t *parsed ) {
 	int i;
 
 	if ( s_characterSkinCount >= MAX_CHARACTER_SKINS ) {
-		COM_WARN( LOG_CAT_CLIENT, "CL_Characters: skin registry full\n" );
+		COM_WARN( LOG_CH(ch_client), "CL_Characters: skin registry full\n" );
 		return 0;
 	}
 
@@ -365,7 +367,7 @@ static qhandle_t CL_RegisterCharacterSkin( const clParsedSkin_t *parsed ) {
 	}
 
 	int handle = ++s_characterSkinCount;
-	Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "[CSK-REG] name=%s handle=%d singlePath=%d fallbackPath=%s fallbackShader=%d overrideCount=%d paintable=%d\n",
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "[CSK-REG] name=%s handle=%d singlePath=%d fallbackPath=%s fallbackShader=%d overrideCount=%d paintable=%d\n",
 		entry->skin.name, handle, entry->skin.singlePath,
 		entry->fallbackPath, entry->skin.fallbackShader,
 		entry->skin.overrideCount, entry->skin.paintable );
@@ -380,7 +382,7 @@ void CL_Characters_RegisterShaders( void ) {
 		if ( entry->skin.singlePath ) {
 			if ( entry->fallbackPath[0] )
 				entry->skin.fallbackShader = re.RegisterShaderLightMap( entry->fallbackPath, LIGHTMAP_NONE );
-			Com_Log( SEV_DEBUG, LOG_CAT_CLIENT, "[CSK-RE] name=%s path=%s -> shader=%d\n",
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "[CSK-RE] name=%s path=%s -> shader=%d\n",
 				entry->skin.name, entry->fallbackPath, entry->skin.fallbackShader );
 		} else {
 			for ( j = 0; j < entry->skin.overrideCount; j++ ) {
@@ -433,7 +435,7 @@ static qboolean CL_Char_ParseSkin( lua_State *L, const char *charName,
 	}
 
 	if ( !lua_istable( L, val ) ) {
-		COM_WARN( LOG_CAT_CLIENT,
+		COM_WARN( LOG_CH(ch_client),
 			"CL_Characters: '%s' skin '%s' value must be a string or table (ignored)\n",
 			charName, skinName );
 		return qfalse;
@@ -466,7 +468,7 @@ static qboolean CL_Char_ParseSkin( lua_State *L, const char *charName,
 					sizeof( sk->overrides[overrideCount].path ), charName, v );
 				overrideCount++;
 			} else {
-				COM_WARN( LOG_CAT_CLIENT,
+				COM_WARN( LOG_CH(ch_client),
 					"CL_Characters: '%s' skin '%s' exceeds CM_MAX_SURFACE_OVERRIDES=%d; extra surfaces ignored\n",
 					charName, skinName, CM_MAX_SURFACE_OVERRIDES );
 			}
@@ -477,7 +479,7 @@ static qboolean CL_Char_ParseSkin( lua_State *L, const char *charName,
 	if ( overrideCount > 0 ) {
 		// Case 2: explicit surface overrides
 		if ( hasDefault ) {
-			COM_WARN( LOG_CAT_CLIENT,
+			COM_WARN( LOG_CH(ch_client),
 				"CL_Characters: '%s' skin '%s' has both 'default' and explicit surface entries; "
 				"'default' ignored — list every surface explicitly\n",
 				charName, skinName );
@@ -520,7 +522,7 @@ static qboolean CL_Char_LoadAnimations( lua_State *L, const char *charName,
 	int skip;
 
 	if ( !CL_Char_LoadLuaTable( L, "characters/_archetypes/_base/animations.lua" ) ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: '%s' failed to load _archetypes/_base/animations.lua\n",
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: '%s' failed to load _archetypes/_base/animations.lua\n",
 			charName );
 		return qfalse;
 	}
@@ -589,7 +591,7 @@ static qboolean CL_Char_LoadAnimations( lua_State *L, const char *charName,
 	lua_pop( L, 1 );  // pop animation template table
 
 	if ( !mapped[TORSO_GESTURE] || !mapped[LEGS_WALKCR] ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: '%s' animations.lua missing required entries\n",
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: '%s' animations.lua missing required entries\n",
 			charName );
 		return qfalse;
 	}
@@ -671,7 +673,7 @@ static void CL_Archetypes_Scan( void ) {
 	s_archetypeCount = 0;
 	dirs = FS_ListDirectories( "characters/_archetypes", &numDirs );
 	if ( !dirs || numDirs == 0 ) {
-		COM_WARN( LOG_CAT_CLIENT, "CL_Characters: no archetype directories found\n" );
+		COM_WARN( LOG_CH(ch_client), "CL_Characters: no archetype directories found\n" );
 		if ( dirs ) FS_FreeFileList( dirs );
 		return;
 	}
@@ -682,7 +684,7 @@ static void CL_Archetypes_Scan( void ) {
 			sizeof( s_archetypeNames[0] ) );
 	}
 	FS_FreeFileList( dirs );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_Characters: %d archetype(s) found\n", s_archetypeCount );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_Characters: %d archetype(s) found\n", s_archetypeCount );
 }
 
 // ── Registry ─────────────────────────────────────────────────────────────────
@@ -702,7 +704,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	int base;
 
 	if ( s_clCharacterCount >= CL_MAX_CHARACTERS ) {
-		COM_WARN( LOG_CAT_CLIENT, "CL_Characters: registry full, skipping '%s'\n", dirname );
+		COM_WARN( LOG_CH(ch_client), "CL_Characters: registry full, skipping '%s'\n", dirname );
 		return qfalse;
 	}
 
@@ -712,7 +714,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 
 	// ── Step 1: Load _archetypes/_base defaults ─────────────────────────
 	if ( !CL_Char_LoadLuaTable( L, "characters/_archetypes/_base/main.lua" ) ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: failed to load _archetypes/_base/main.lua\n" );
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: failed to load _archetypes/_base/main.lua\n" );
 		lua_settop( L, base );
 		return qfalse;
 	}
@@ -722,7 +724,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	Com_sprintf( path, sizeof( path ), "characters/%s/main.lua", dirname );
 	if ( !CL_Char_LoadLuaTable( L, path ) ) {
 		lua_settop( L, base );
-		COM_WARN( LOG_CAT_CLIENT, "CL_Characters: no manifest for '%s'\n", dirname );
+		COM_WARN( LOG_CH(ch_client), "CL_Characters: no manifest for '%s'\n", dirname );
 		return qfalse;
 	}
 	int char_idx = lua_gettop( L );
@@ -740,7 +742,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	lua_pop( L, 1 );
 
 	if ( !archetypeBuf[0] ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: '%s/main.lua' missing required 'archetype'\n",
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: '%s/main.lua' missing required 'archetype'\n",
 			dirname );
 		lua_settop( L, base );
 		return qfalse;
@@ -772,7 +774,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 			Q_CleanStr( mfNameBuf );
 			mfName = mfNameBuf;
 		} else {
-			COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: '%s/main.lua' missing required 'display_name'\n",
+			COM_ERROR( LOG_CH(ch_client), "CL_Characters: '%s/main.lua' missing required 'display_name'\n",
 				dirname );
 			lua_settop( L, base );
 			return qfalse;
@@ -780,7 +782,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	}
 
 	if ( Q_stricmp( mfName, dirname ) != 0 ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: '%s/main.lua' name '%s' "
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: '%s/main.lua' name '%s' "
 			"does not match directory\n", dirname, mfName );
 		lua_settop( L, base );
 		return qfalse;
@@ -884,7 +886,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 		lua_pop( L, 1 );
 
 		if ( !CL_Char_LoadAnimations( L, dirname, archetypeName, mf.animations ) ) {
-			COM_WARN( LOG_CAT_CLIENT, "CL_Characters: '%s' animation load failed\n",
+			COM_WARN( LOG_CH(ch_client), "CL_Characters: '%s' animation load failed\n",
 				dirname );
 		}
 	}
@@ -934,7 +936,7 @@ static void CL_Characters_Scan( lua_State *L ) {
 
 	dirs = FS_ListDirectories( "characters", &numDirs );
 	if ( !dirs || numDirs == 0 ) {
-		COM_WARN( LOG_CAT_CLIENT, "CL_Characters: no character directories found under characters/\n" );
+		COM_WARN( LOG_CH(ch_client), "CL_Characters: no character directories found under characters/\n" );
 		if ( dirs ) FS_FreeFileList( dirs );
 		return;
 	}
@@ -958,13 +960,13 @@ void CL_Characters_Init( void ) {
 
 	L = WiredScript_GetState();
 	if ( !L ) {
-		COM_WARN( LOG_CAT_CLIENT, "CL_Characters: WiredScript not available, skipping preload\n" );
+		COM_WARN( LOG_CH(ch_client), "CL_Characters: WiredScript not available, skipping preload\n" );
 		return;
 	}
 
 	CL_Archetypes_Scan();
 	CL_Characters_Scan( L );
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_Characters: loaded %d character(s)\n", s_clCharacterCount );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_Characters: loaded %d character(s)\n", s_clCharacterCount );
 
 	Cmd_AddCommand( "reload_characters", CL_ReloadCharacters_f );
 }
@@ -981,7 +983,7 @@ void CL_Characters_Reload( void ) {
 
 	L = WiredScript_GetState();
 	if ( !L ) {
-		COM_WARN( LOG_CAT_CLIENT, "CL_Characters: WiredScript not available\n" );
+		COM_WARN( LOG_CH(ch_client), "CL_Characters: WiredScript not available\n" );
 		return;
 	}
 
@@ -992,7 +994,7 @@ void CL_Characters_Reload( void ) {
 	if ( re.RegisterShaderNoMip )
 		CL_Characters_RegisterIcons();
 
-	Com_Log( SEV_INFO, LOG_CAT_CLIENT, "CL_Characters: reloaded %d character(s)\n", s_clCharacterCount );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_Characters: reloaded %d character(s)\n", s_clCharacterCount );
 }
 
 void CL_Characters_Shutdown( void ) {
@@ -1035,7 +1037,7 @@ void CL_Characters_RegisterIcons( void ) {
 
 		s_clCharacters[i].iconHandle = CL_Characters_TryIconCandidates( &s_clCharacters[i] );
 		if ( !s_clCharacters[i].iconHandle ) {
-			COM_WARN( LOG_CAT_CLIENT,
+			COM_WARN( LOG_CH(ch_client),
 				"CL_Characters: '%s' has no icon — looked for %sicon_<skin>.{png,tga,jpg} in %d skin slot(s)\n",
 				s_clCharacters[i].dirname,
 				s_clCharacters[i].manifest.charRoot,
@@ -1073,7 +1075,7 @@ qboolean CL_Characters_GetManifest( const char *charName, char *buf, int bufSize
 	int i;
 
 	if ( bufSize < (int)sizeof( characterManifest_t ) ) {
-		COM_ERROR( LOG_CAT_CLIENT, "CL_Characters: buffer too small for '%s' "
+		COM_ERROR( LOG_CH(ch_client), "CL_Characters: buffer too small for '%s' "
 			"(need %d, got %d)\n", charName, (int)sizeof(characterManifest_t), bufSize );
 		return qfalse;
 	}
@@ -1085,7 +1087,7 @@ qboolean CL_Characters_GetManifest( const char *charName, char *buf, int bufSize
 		}
 	}
 
-	COM_WARN( LOG_CAT_CLIENT, "CL_Characters: '%s' not found in registry\n", charName );
+	COM_WARN( LOG_CH(ch_client), "CL_Characters: '%s' not found in registry\n", charName );
 	return qfalse;
 }
 

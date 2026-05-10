@@ -21,7 +21,7 @@ Endpoints:
 #if FEAT_WIREDNET_OBSERVER
 
 #include "../../../server/server.h"  // svs, sv, SV_GameClientNum, sv_maxclients
-#include "../../../game/bg_public.h" // PERS_SCORE, PERS_TEAM, PERS_KILLED
+#include "../protocol.h"             // PERS_SCORE, PERS_TEAM, PERS_KILLED, ET_*
 
 // Platform socket headers for TCP listener
 #ifdef _WIN32
@@ -279,33 +279,33 @@ static void WN_HttpHandleMetrics( wn_http_ctx_t *ctx )
 	int  offset = 0;
 
 	offset += Com_sprintf( body + offset, sizeof(body) - offset,
-		"# HELP q3_quic_connections_active Current QUIC connections.\n"
-		"# TYPE q3_quic_connections_active gauge\n"
-		"q3_quic_connections_active %d\n\n",
+		"# HELP wired_quic_connections_active Current QUIC connections.\n"
+		"# TYPE wired_quic_connections_active gauge\n"
+		"wired_quic_connections_active %d\n\n",
 		wn.num_connections );
 
 	offset += Com_sprintf( body + offset, sizeof(body) - offset,
-		"# HELP q3_quic_connections_max Maximum QUIC connections allowed.\n"
-		"# TYPE q3_quic_connections_max gauge\n"
-		"q3_quic_connections_max %d\n\n",
+		"# HELP wired_quic_connections_max Maximum QUIC connections allowed.\n"
+		"# TYPE wired_quic_connections_max gauge\n"
+		"wired_quic_connections_max %d\n\n",
 		wn.sv_wirednetMaxClients->integer );
 
 	offset += Com_sprintf( body + offset, sizeof(body) - offset,
-		"# HELP q3_quic_packets_dropped_total Packets dropped by QUIC demux.\n"
-		"# TYPE q3_quic_packets_dropped_total counter\n"
-		"q3_quic_packets_dropped_total %d\n\n",
+		"# HELP wired_quic_packets_dropped_total Packets dropped by QUIC demux.\n"
+		"# TYPE wired_quic_packets_dropped_total counter\n"
+		"wired_quic_packets_dropped_total %d\n\n",
 		wn.dropped_packets );
 
 	offset += Com_sprintf( body + offset, sizeof(body) - offset,
-		"# HELP q3_quic_events_total Total game events emitted.\n"
-		"# TYPE q3_quic_events_total counter\n"
-		"q3_quic_events_total %llu\n\n",
+		"# HELP wired_quic_events_total Total game events emitted.\n"
+		"# TYPE wired_quic_events_total counter\n"
+		"wired_quic_events_total %llu\n\n",
 		(unsigned long long)wn.event_seq );
 
 	offset += Com_sprintf( body + offset, sizeof(body) - offset,
-		"# HELP q3_server_uptime_ms Server uptime in milliseconds.\n"
-		"# TYPE q3_server_uptime_ms gauge\n"
-		"q3_server_uptime_ms %d\n",
+		"# HELP wired_server_uptime_ms Server uptime in milliseconds.\n"
+		"# TYPE wired_server_uptime_ms gauge\n"
+		"wired_server_uptime_ms %d\n",
 		Sys_Milliseconds() );
 
 	WN_HttpCtxSendStr( ctx, 200, "OK",
@@ -514,6 +514,7 @@ static void WN_UrlDecodeParam( const char *in, char *out, int out_size )
 	while ( *in && j < out_size - 1 ) {
 		if ( in[0] == '%' ) {
 			unsigned int hi = 0, lo = 0;
+			// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign) — `in` is a non-NULL string per caller contract; in[1]/in[2] are read after `*in` checked non-NUL above (URL %XX decoder)
 			char c1 = in[1], c2 = in[2];
 			if ( c1 >= '0' && c1 <= '9' ) hi = (unsigned int)(c1 - '0');
 			else if ( c1 >= 'a' && c1 <= 'f' ) hi = (unsigned int)(c1 - 'a' + 10);
@@ -611,7 +612,7 @@ static void WN_HttpHandleRegister( wn_http_ctx_t *ctx, const char *req, int req_
 		Q_strncpyz( redirect_uris, "[]", sizeof(redirect_uris) );
 	}
 
-	Q_strncpyz( resp, "{\"client_id\":\"q3now-mcp-client\","
+	Q_strncpyz( resp, "{\"client_id\":\"wired-mcp-client\","
 		"\"client_id_issued_at\":0,"
 		"\"redirect_uris\":", sizeof(resp) );
 	{
@@ -684,10 +685,10 @@ static void WN_HttpHandleAuthorize( wn_http_ctx_t *ctx, const char *req )
 	}
 
 	if ( state[0] ) {
-		Com_sprintf( location, sizeof(location), "%s?code=q3now-auto&state=%s",
+		Com_sprintf( location, sizeof(location), "%s?code=wired-auto&state=%s",
 		             redirect_uri, state );
 	} else {
-		Com_sprintf( location, sizeof(location), "%s?code=q3now-auto", redirect_uri );
+		Com_sprintf( location, sizeof(location), "%s?code=wired-auto", redirect_uri );
 	}
 
 	WN_HttpCtxSendRedirect( ctx, location );
@@ -706,7 +707,7 @@ mandatory OAuth handshake (MCP spec 2025-03-26, HTTP transport).
 static void WN_HttpHandleToken( wn_http_ctx_t *ctx )
 {
 	WN_HttpCtxSendStr( ctx, 200, "OK", "application/json",
-		"{\"access_token\":\"q3now-local\","
+		"{\"access_token\":\"wired-local\","
 		"\"token_type\":\"Bearer\","
 		"\"expires_in\":86400}" );
 }

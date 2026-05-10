@@ -1,11 +1,11 @@
 /*
 ===========================================================================
 Copyright (C) 2017-2020 Gian 'myT' Schellenbaum (CNQ3 original)
-Copyright (C) 2026 q3now project (C port and adaptation)
+Copyright (C) 2026 Wired engine contributors (C port and adaptation)
 
-This file is part of q3now (derived from Quake III Arena source code and
-Challenge Quake 3). It is free software released under the terms of the
-GNU General Public License version 2 or (at your option) any later
+This file is part of the Wired engine (derived from Quake III Arena source
+code and Challenge Quake 3). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
 version. See the file COPYING.txt for details.
 ===========================================================================
 */
@@ -327,7 +327,7 @@ static void Crash_WriteEngineInfo( const char *reason, const char *address, cons
 		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec );
 
-	JSON_StringValue( "engine_version", Q3NOW_ENGINE_VERSION );
+	JSON_StringValue( "engine_version", WIRED_ENGINE_VERSION );
 	JSON_StringValue( "engine_platform", PLATFORM_STRING );
 	JSON_StringValue( "engine_arch", ARCH_STRING );
 	JSON_StringValue( "engine_build_date", __DATE__ );

@@ -29,6 +29,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  *****************************************************************************/
 
+#pragma once
+
 //undef if binary numbers of the form 0b... or 0B... are not allowed
 #define BINARYNUMBERS
 //undef if not using the token.intvalue and token.floatvalue

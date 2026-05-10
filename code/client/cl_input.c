@@ -24,6 +24,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
 #include "../qcommon/wired/net/wn_public.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 extern int cl_sent; /* net-stats packet counter — defined in cl_net_stats.c */
 
@@ -127,7 +129,7 @@ static void IN_KeyDown( kbutton_t *b ) {
 	} else if ( !b->down[1] ) {
 		b->down[1] = k;
 	} else {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "Three keys down for a button!\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Three keys down for a button!\n");
 		return;
 	}
 
@@ -203,7 +205,7 @@ static float CL_KeyState( kbutton_t *key ) {
 
 #if 0
 	if (msec) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i ", msec);
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%i ", msec);
 	}
 #endif
 
@@ -468,7 +470,7 @@ static void CL_MouseMove( usercmd_t *cmd )
 			my *= accelSensitivity;
 
 			if ( cl_showMouseRate->integer )
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "rate: %f, accelSensitivity: %f\n", rate, accelSensitivity );
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "rate: %f, accelSensitivity: %f\n", rate, accelSensitivity );
 		}
 		else
 		{
@@ -496,7 +498,7 @@ static void CL_MouseMove( usercmd_t *cmd )
 			my = cl_sensitivity->value * (my + ((my < 0) ? -power[1] : power[1]) * offset);
 
 			if(cl_showMouseRate->integer)
-				Com_Log( SEV_INFO, LOG_CAT_CLIENT, "ratex: %f, ratey: %f, powx: %f, powy: %f\n", rate[0], rate[1], power[0], power[1]);
+				Com_Log( SEV_INFO, LOG_CH(ch_client), "ratex: %f, ratey: %f, powx: %f, powy: %f\n", rate[0], rate[1], power[0], power[1]);
 		}
 	}
 	else
@@ -802,7 +804,7 @@ void CL_WritePacket( int repeat ) {
 		/* serverCmd_ack:u32 — last server command processed by client;
 		 * server advances reliableAcknowledge to stop re-embedding processed commands */
 		MSG_WriteLong( &udg, clc.serverCommandSequence );
-		Com_Log( SEV_TRACE, LOG_CAT_CLIENT, "[WiredNet] usercmd send: snapshot_ack=%d serverCmd_ack=%d\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_client), "[WiredNet] usercmd send: snapshot_ack=%d serverCmd_ack=%d\n",
 			clc.serverMessageSequence, clc.serverCommandSequence );
 		MSG_WriteByte( &udg, qcount );
 
@@ -836,11 +838,11 @@ void CL_WritePacket( int repeat ) {
 	int count        = cl.cmdNumber - cl.outPackets[ oldPacketNum ].p_cmdNumber;
 	if ( count > MAX_PACKET_USERCMDS ) {
 		count = MAX_PACKET_USERCMDS;
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "MAX_PACKET_USERCMDS\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "MAX_PACKET_USERCMDS\n");
 	}
 	if ( count >= 1 ) {
 		if ( cl_showSend->integer ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, "(%i)", count );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "(%i)", count );
 		}
 
 		// begin a client move command
@@ -880,7 +882,7 @@ void CL_WritePacket( int repeat ) {
 	cl_sent++;
 
 	if ( cl_showSend->integer ) {
-		Com_Log( SEV_INFO, LOG_CAT_CLIENT, "%i ", buf.cursize );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%i ", buf.cursize );
 	}
 
 	MSG_WriteByte( &buf, clc_EOF );
@@ -920,7 +922,7 @@ void CL_SendCmd( void ) {
 	// don't send a packet if the last packet was sent too recently
 	if ( !CL_ReadyToSendPacket() ) {
 		if ( cl_showSend->integer ) {
-			Com_Log( SEV_INFO, LOG_CAT_CLIENT, ". " );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), ". " );
 		}
 		return;
 	}

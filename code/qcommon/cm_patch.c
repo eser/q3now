@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "cm_local.h"
 #include "cm_patch.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_collision, "collision" );
 
 /*
 
@@ -327,6 +329,7 @@ static void CM_SubdivideGridColumns( cGrid_t *grid ) {
 			// columns i+1 will be replaced, column i+2 will become i+4
 			// i+1, i+2, and i+3 will be generated
 			for ( int k = grid->width - 1 ; k > i + 1 ; k-- ) {
+				// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — patch invariant: grid->width + 2 <= MAX_GRID_SIZE; caller bounds-checks before each subdivision
 				VectorCopy( grid->points[k][j], grid->points[k+2][j] );
 			}
 
@@ -591,7 +594,7 @@ static int	CM_GridPlane( int gridPlanes[MAX_GRID_SIZE][MAX_GRID_SIZE][2], int i,
 	}
 
 	// should never happen
-	Com_Log( SEV_INFO, LOG_CAT_COLLISION, "WARNING: CM_GridPlane unresolvable\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_collision), "WARNING: CM_GridPlane unresolvable\n" );
 	return -1;
 }
 
@@ -736,7 +739,7 @@ static void CM_SetBorderInward( facet_t *facet, const cGrid_t *grid, int gridPla
 			facet->borderPlanes[k] = -1;
 		} else {
 			// bisecting side border
-			Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "WARNING: CM_SetBorderInward: mixed plane sides\n" );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "WARNING: CM_SetBorderInward: mixed plane sides\n" );
 			facet->borderInward[k] = qfalse;
 			if ( !debugBlock ) {
 				debugBlock = qtrue;
@@ -862,7 +865,7 @@ static void CM_AddFacetBevels( facet_t *facet ) {
 
 			if ( i == facet->numBorders ) {
 				if ( facet->numBorders >= 4 + 6 + 16 ) {
-					Com_Log( SEV_INFO, LOG_CAT_COLLISION, "ERROR: too many bevels\n" );
+					Com_Log( SEV_INFO, LOG_CH(ch_collision), "ERROR: too many bevels\n" );
 					continue;
 				}
 				facet->borderPlanes[facet->numBorders] = CM_FindPlane2(plane, &flipped);
@@ -929,14 +932,14 @@ static void CM_AddFacetBevels( facet_t *facet ) {
 
 				if ( i == facet->numBorders ) {
 					if ( facet->numBorders >= 4 + 6 + 16 ) {
-						Com_Log( SEV_INFO, LOG_CAT_COLLISION, "ERROR: too many bevels\n" );
+						Com_Log( SEV_INFO, LOG_CH(ch_collision), "ERROR: too many bevels\n" );
 						continue;
 					}
 					facet->borderPlanes[facet->numBorders] = CM_FindPlane2(plane, &flipped);
 
 					for ( k = 0 ; k < facet->numBorders ; k++ ) {
 						if (facet->borderPlanes[facet->numBorders] ==
-							facet->borderPlanes[k]) Com_Log( SEV_INFO, LOG_CAT_COLLISION, "WARNING: bevel plane already used\n");
+							facet->borderPlanes[k]) Com_Log( SEV_INFO, LOG_CH(ch_collision), "WARNING: bevel plane already used\n");
 					}
 
 					facet->borderNoAdjust[facet->numBorders] = 0;
@@ -951,12 +954,11 @@ static void CM_AddFacetBevels( facet_t *facet ) {
 					} //end if
 					ChopWindingInPlace( &w2, newplane, newplane[3], 0.1f );
 					if (!w2) {
-						Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "WARNING: CM_AddFacetBevels... invalid bevel\n");
+						Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "WARNING: CM_AddFacetBevels... invalid bevel\n");
 						continue;
 					}
-					else {
-						FreeWinding(w2);
-					}
+					FreeWinding( w2 );
+
 					//
 					facet->numBorders++;
 					//already got a bevel
@@ -970,7 +972,7 @@ static void CM_AddFacetBevels( facet_t *facet ) {
 #ifndef BSPC
 	//add opposite plane
 	if ( facet->numBorders >= 4 + 6 + 16 ) {
-		Com_Log( SEV_INFO, LOG_CAT_COLLISION, "ERROR: too many bevels\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_collision), "ERROR: too many bevels\n" );
 		return;
 	}
 	facet->borderPlanes[facet->numBorders] = facet->surfacePlane;
@@ -1748,14 +1750,14 @@ void CM_DrawDebugSurface( void (*drawPoly)(int color, int numPoints, float *poin
 			if ( w ) {
 				if ( facet == debugFacet ) {
 					drawPoly( 4, w->numpoints, w->p[0] );
-					//Com_Log( SEV_INFO, LOG_CAT_COLLISION, "blue facet has %d border planes\n", facet->numBorders);
+					//Com_Log( SEV_INFO, LOG_CH(ch_collision), "blue facet has %d border planes\n", facet->numBorders);
 				} else {
 					drawPoly( 1, w->numpoints, w->p[0] );
 				}
 				FreeWinding( w );
 			}
 			else
-				Com_Log( SEV_INFO, LOG_CAT_COLLISION, "winding chopped away by border planes\n");
+				Com_Log( SEV_INFO, LOG_CH(ch_collision), "winding chopped away by border planes\n");
 		}
 	}
 
@@ -1854,7 +1856,7 @@ static void CM_SetTriangleSoupBorderInward( facet_t *facet, float *p1, float *p2
 			facet->borderPlanes[k] = -1;
 		} else {
 			// bisecting side border
-			Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "WARNING: CM_SetTriangleSoupBorderInward: mixed plane sides\n" );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "WARNING: CM_SetTriangleSoupBorderInward: mixed plane sides\n" );
 			facet->borderInward[k] = qfalse;
 		}
 	}
@@ -2080,10 +2082,10 @@ void CM_TriangleSoupCollideSelfTest( void ) {
 	// Trace a point straight down through the tetrahedron's apex.
 	CM_BoxTrace( &trace, traceStart, traceEnd, mins, maxs, handle, CONTENTS_SOLID, qfalse );
 	if ( trace.fraction >= 1.0f ) {
-		Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_TriangleSoupCollideSelfTest: warning — downward trace missed tetrahedron\n" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "CM_TriangleSoupCollideSelfTest: warning — downward trace missed tetrahedron\n" );
 	}
 
-	Com_Log( SEV_DEBUG, LOG_CAT_COLLISION, "CM_TriangleSoupCollideSelfTest: ok (facets=%i planes=%i bounds=[%.1f %.1f %.1f]-[%.1f %.1f %.1f] handle=%i trace=%.3f)\n",
+	Com_Log( SEV_DEBUG, LOG_CH(ch_collision), "CM_TriangleSoupCollideSelfTest: ok (facets=%i planes=%i bounds=[%.1f %.1f %.1f]-[%.1f %.1f %.1f] handle=%i trace=%.3f)\n",
 		pc->numFacets, pc->numPlanes,
 		pc->bounds[0][0], pc->bounds[0][1], pc->bounds[0][2],
 		pc->bounds[1][0], pc->bounds[1][1], pc->bounds[1][2],

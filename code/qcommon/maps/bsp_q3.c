@@ -1,7 +1,7 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 q3now contributors
+Copyright (C) 2024 Wired engine contributors
 
 This file is part of Quake III Arena source code.
 
@@ -36,6 +36,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../q_shared.h"
 #include "../qcommon.h"
 #include "bsp.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_loading, "loading" );
 
 #if FEAT_RECAST_NAVMESH
 #include "../surfaceflags.h"
@@ -70,7 +72,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 	*bspFile = NULL;
 
 	if ( length < (int)sizeof( dheader_t ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s has truncated header\n", name );
+		Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s has truncated header\n", name );
 		return qfalse;
 	}
 
@@ -92,7 +94,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		uint32_t ofs = header.lumps[i].fileofs;
 		uint32_t len = header.lumps[i].filelen;
 		if ( (uint64_t)ofs + len > (uint64_t)length ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s lump %i out of range (ofs=%u len=%u file=%i)\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s lump %i out of range (ofs=%u len=%u file=%i)\n",
 				name, i, ofs, len, length );
 			return qfalse;
 		}
@@ -125,7 +127,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const dshader_t *in = (const dshader_t *)( base + l->fileofs );
 		dshader_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny shader lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny shader lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -145,7 +147,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const dplane_t *in = (const dplane_t *)( base + l->fileofs );
 		dplane_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny planes lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny planes lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -166,7 +168,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const dnode_t *in = (const dnode_t *)( base + l->fileofs );
 		dnode_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny nodes lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny nodes lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -190,7 +192,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const dleaf_t *in = (const dleaf_t *)( base + l->fileofs );
 		dleaf_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny leafs lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny leafs lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -217,7 +219,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const int *in = (const int *)( base + l->fileofs );
 		int *out;
 		if ( l->filelen % sizeof( int ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny leafsurfaces lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny leafsurfaces lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -235,7 +237,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const int *in = (const int *)( base + l->fileofs );
 		int *out;
 		if ( l->filelen % sizeof( int ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny leafbrushes lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny leafbrushes lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -253,7 +255,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const dmodel_t *in = (const dmodel_t *)( base + l->fileofs );
 		dmodel_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny models lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny models lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -278,7 +280,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const dbrush_t *in = (const dbrush_t *)( base + l->fileofs );
 		dbrush_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny brushes lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny brushes lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -298,7 +300,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const dbrushside_t *in = (const dbrushside_t *)( base + l->fileofs );
 		dbrushside_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny brushsides lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny brushsides lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -317,7 +319,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const drawVert_t *in = (const drawVert_t *)( base + l->fileofs );
 		drawVert_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny drawverts lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny drawverts lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -347,7 +349,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const int *in = (const int *)( base + l->fileofs );
 		int *out;
 		if ( l->filelen % sizeof( int ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny drawindexes lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny drawindexes lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -366,7 +368,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		dsurface_t *out;
 		int k;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny surfaces lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny surfaces lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -403,7 +405,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const dfog_t *in = (const dfog_t *)( base + l->fileofs );
 		dfog_t *out;
 		if ( l->filelen % sizeof( *in ) ) {
-			Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s funny fogs lump size\n", name );
+			Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s funny fogs lump size\n", name );
 			BSP_Free( bsp );
 			return qfalse;
 		}
@@ -437,7 +439,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const lump_t *l = &header.lumps[LUMP_LIGHTMAPS];
 		if ( l->filelen > 0 ) {
 			if ( l->filelen % BSP_LIGHTMAP_PAGE_SIZE ) {
-				Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s lightmap lump not a multiple of %d\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s lightmap lump not a multiple of %d\n",
 					name, BSP_LIGHTMAP_PAGE_SIZE );
 				BSP_Free( bsp );
 				return qfalse;
@@ -467,7 +469,7 @@ static qboolean BSP_Q3_Load( const bspFormat_t *format, const char *name,
 		const lump_t *l = &header.lumps[LUMP_LIGHTGRID];
 		if ( l->filelen > 0 ) {
 			if ( l->filelen % BSP_LIGHTGRID_ENTRY_SIZE ) {
-				Com_Log( SEV_INFO, LOG_CAT_LOADING, "BSP_Q3_Load: %s light grid lump not a multiple of %d\n",
+				Com_Log( SEV_INFO, LOG_CH(ch_loading), "BSP_Q3_Load: %s light grid lump not a multiple of %d\n",
 					name, BSP_LIGHTGRID_ENTRY_SIZE );
 				BSP_Free( bsp );
 				return qfalse;
@@ -736,7 +738,7 @@ static qboolean BSP_Q3_ExtractNavGeometry( const bspFile_t  *bsp,
     memset( geom, 0, sizeof(*geom) );
 
     if ( numVerts == 0 || numTris == 0 ) {
-        COM_WARN( LOG_CAT_LOADING, "[NAV] no walkable tris extracted from %s\n", bsp->name );
+        COM_WARN( LOG_CH(ch_loading), "[NAV] no walkable tris extracted from %s\n", bsp->name );
         return qfalse;
     }
 
@@ -749,7 +751,7 @@ static qboolean BSP_Q3_ExtractNavGeometry( const bspFile_t  *bsp,
             int delta = numTris - s_lastTris;
             if ( delta < 0 ) delta = -delta;
             if ( delta * 100 / s_lastTris > 20 ) {
-                COM_WARN( LOG_CAT_LOADING, "[NAV] tri count changed >20%% on %s: was %d, now %d\n",
+                COM_WARN( LOG_CH(ch_loading), "[NAV] tri count changed >20%% on %s: was %d, now %d\n",
                             bsp->name, s_lastTris, numTris );
             }
         }
@@ -801,7 +803,7 @@ static qboolean BSP_Q3_ExtractNavGeometry( const bspFile_t  *bsp,
     geom->numVerts = wr.numVerts;
     geom->numTris  = wr.numTris;
 
-    Com_Log( SEV_INFO, LOG_CAT_LOADING, "[NAV] %s: %d verts, %d tris extracted\n",
+    Com_Log( SEV_INFO, LOG_CH(ch_loading), "[NAV] %s: %d verts, %d tris extracted\n",
                 bsp->name, geom->numVerts, geom->numTris );
     return qtrue;
 }

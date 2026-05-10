@@ -2061,10 +2061,8 @@ qboolean FBO_Bloom( const float gamma, const float obScale, qboolean finalStage 
 			FBO_CleanBloom();
 			return qfalse;
 		}
-		else
-		{
-			ri.Log( SEV_INFO, "...bloom framebuffers created\n" );
-		}
+
+		ri.Log( SEV_INFO, "...bloom framebuffers created\n" );
 	}
 
 	if ( blitMSfbo )

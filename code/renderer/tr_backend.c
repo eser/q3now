@@ -652,6 +652,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 					R_TransformDlights( backEnd.refdef.num_dlights, backEnd.refdef.dlights, &backEnd.or );
 				}
 #endif // USE_LEGACY_DLIGHTS
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 				if ( backEnd.currentEntity->e.renderfx & RF_DEPTHHACK ) {
 					// hack the depth range to prevent view model from poking into walls
 					depthRange = qtrue;

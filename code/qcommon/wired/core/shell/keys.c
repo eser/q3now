@@ -23,6 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "q_shared.h"
 #include "qcommon.h"
 #include "../../../client/keys.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 int		 anykeydown;
 qkey_t	 keys[MAX_KEYS];
@@ -456,14 +458,14 @@ static void Key_Unbind_f( void )
 {
 	if ( Cmd_Argc() != 2 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "unbind <key> : remove commands from a key\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "unbind <key> : remove commands from a key\n" );
 		return;
 	}
 
 	int b = Key_StringToKeynum( Cmd_Argv( 1 ) );
 	if ( b == -1 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\"%s\" isn't a valid key\n", Cmd_Argv( 1 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "\"%s\" isn't a valid key\n", Cmd_Argv( 1 ) );
 		return;
 	}
 
@@ -499,23 +501,23 @@ static void Key_Bind_f( void )
 
 	if ( c < 2 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "bind <key> [command] : attach a command to a key\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "bind <key> [command] : attach a command to a key\n" );
 		return;
 	}
 
 	int b = Key_StringToKeynum( Cmd_Argv( 1 ) );
 	if ( b == -1 )
 	{
-		Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\"%s\" isn't a valid key\n", Cmd_Argv( 1 ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "\"%s\" isn't a valid key\n", Cmd_Argv( 1 ) );
 		return;
 	}
 
 	if ( c == 2 )
 	{
 		if ( keys[b].binding && keys[b].binding[0] )
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\"%s\" = \"%s\"\n", Cmd_Argv( 1 ), keys[b].binding );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "\"%s\" = \"%s\"\n", Cmd_Argv( 1 ), keys[b].binding );
 		else
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "\"%s\" is not bound\n", Cmd_Argv( 1 ) );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "\"%s\" is not bound\n", Cmd_Argv( 1 ) );
 		return;
 	}
 
@@ -550,7 +552,7 @@ Key_Bindlist_f
 static void Key_Bindlist_f( void ) {
 	for ( int i = 0 ; i < MAX_KEYS ; i++ ) {
 		if ( keys[i].binding && keys[i].binding[0] ) {
-			Com_Log( SEV_INFO, LOG_CAT_SYSTEM, "%s \"%s\"\n", Key_KeynumToString(i), keys[i].binding );
+			Com_Log( SEV_INFO, LOG_CH(ch_system), "%s \"%s\"\n", Key_KeynumToString(i), keys[i].binding );
 		}
 	}
 }

@@ -98,7 +98,7 @@ static int AAS_OptimizeEdge(optimized_t *optimized, int edgenum)
 	{
 		//keep the edge reversed sign
 		if (edgenum > 0) return optedgenum;
-		else return -optedgenum;
+		return -optedgenum;
 	} //end if
 
 	optedge = &optimized->edges[optimized->numedges];
@@ -122,7 +122,7 @@ static int AAS_OptimizeEdge(optimized_t *optimized, int edgenum)
 	optimized->numedges++;
 	//keep the edge reversed sign
 	if (edgenum > 0) return optedgenum;
-	else return -optedgenum;
+	return -optedgenum;
 } //end of the function AAS_OptimizeEdge
 //===========================================================================
 //
@@ -133,7 +133,7 @@ static int AAS_OptimizeEdge(optimized_t *optimized, int edgenum)
 static int AAS_KeepFace(aas_face_t *face)
 {
 	if (!(face->faceflags & FACE_LADDER)) return 0;
-	else return 1;
+	return 1;
 } //end of the function AAS_KeepFace
 //===========================================================================
 //
@@ -154,7 +154,7 @@ static int AAS_OptimizeFace(optimized_t *optimized, int facenum)
 	{
 		//keep the face side sign
 		if (facenum > 0) return optfacenum;
-		else return -optfacenum;
+		return -optfacenum;
 	} //end if
 
 	optface = &optimized->faces[optimized->numfaces];
@@ -178,7 +178,7 @@ static int AAS_OptimizeFace(optimized_t *optimized, int facenum)
 	optimized->numfaces++;
 	//keep the face side sign
 	if (facenum > 0) return optfacenum;
-	else return -optfacenum;
+	return -optfacenum;
 } //end of the function AAS_OptimizeFace
 //===========================================================================
 //

@@ -145,13 +145,11 @@ void CG_ModernHUDElementTeamRoutine(void* context)
 				CG_ModernHUDDrawStretchPicCtx(&element->config, &element->ctxPowerup);
 				break;
 			}
-			else if (ci->powerups & (1 << k))
-			{
-				gi = BG_FindItemForPowerup(k);
-				if (gi)
-				{
-					element->ctxPowerup.image = trap_R_RegisterShader(gi->icon);
-					CG_ModernHUDDrawStretchPicCtx(&element->config, &element->ctxPowerup);
+			if ( ci->powerups & ( 1 << k ) ) {
+				gi = BG_FindItemForPowerup( k );
+				if ( gi ) {
+					element->ctxPowerup.image = trap_R_RegisterShader( gi->icon );
+					CG_ModernHUDDrawStretchPicCtx( &element->config, &element->ctxPowerup );
 				}
 			}
 		}

@@ -4,6 +4,8 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 static void Rcon_SanitizeInline( char *dst, int dstSize, const char *src ) {
 	int i;
@@ -357,7 +359,7 @@ void SV_RconLua_Init( void ) {
 
 	L = UserVM_GetState();
 	if ( !L ) {
-		COM_ERROR( LOG_CAT_SERVER, "WiredRconLua: User VM not initialized\n" );
+		COM_ERROR( LOG_CH(ch_server), "WiredRconLua: User VM not initialized\n" );
 		return;
 	}
 

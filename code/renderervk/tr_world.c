@@ -72,28 +72,21 @@ static qboolean	R_CullGrid( srfGridMesh_t *cv ) {
 		return qtrue;
 	}
 	// check bounding box if necessary
-	else if ( sphereCull == CULL_CLIP )
-	{
+	if ( sphereCull == CULL_CLIP ) {
 		tr.pc.c_sphere_cull_patch_clip++;
 
 		boxCull = R_CullLocalBox( cv->meshBounds );
 
-		if ( boxCull == CULL_OUT ) 
-		{
+		if ( boxCull == CULL_OUT ) {
 			tr.pc.c_box_cull_patch_out++;
 			return qtrue;
 		}
-		else if ( boxCull == CULL_IN )
-		{
+		if ( boxCull == CULL_IN ) {
 			tr.pc.c_box_cull_patch_in++;
-		}
-		else
-		{
+		} else {
 			tr.pc.c_box_cull_patch_clip++;
 		}
-	}
-	else
-	{
+	} else {
 		tr.pc.c_sphere_cull_patch_in++;
 	}
 
@@ -695,6 +688,7 @@ static void R_RecursiveWorldNode( mnode_t *node, unsigned int planeBits, unsigne
 #endif // USE_LEGACY_DLIGHTS
 
 		// recurse down the children, front side first
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 		R_RecursiveWorldNode( node->children[0], planeBits, newDlights[0] );
 
 		// tail recurse

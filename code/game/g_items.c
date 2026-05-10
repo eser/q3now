@@ -21,6 +21,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 //
 #include "g_local.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 /*
 
@@ -640,7 +642,7 @@ void FinishSpawningItem( gentity_t *ent ) {
 		VectorSet( dest, ent->s.origin[0], ent->s.origin[1], ent->s.origin[2] - 4096 );
 		trap_Trace( &tr, ent->s.origin, ent->r.mins, ent->r.maxs, dest, ent->s.number, MASK_SOLID );
 		if ( tr.startsolid ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "FinishSpawningItem: %s startsolid at %s\n", ent->classname, vtos(ent->s.origin));
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "FinishSpawningItem: %s startsolid at %s\n", ent->classname, vtos(ent->s.origin));
 			G_FreeEntity( ent );
 			return;
 		}
@@ -702,11 +704,11 @@ void G_CheckTeamItems( void ) {
 		// check for the two flags
 		item = BG_FindItem( "Red Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
 		}
 		item = BG_FindItem( "Blue Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
 		}
 	}
 	if( g_gametype.integer == GT_1FCTF ) {
@@ -715,15 +717,15 @@ void G_CheckTeamItems( void ) {
 		// check for all three flags
 		item = BG_FindItem( "Red Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
 		}
 		item = BG_FindItem( "Blue Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
 		}
 		item = BG_FindItem( "Neutral Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_CTF_neutralflag in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_neutralflag in map\n" );
 		}
 	}
 
@@ -735,13 +737,13 @@ void G_CheckTeamItems( void ) {
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_redobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_blueobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
 		}
 	}
 #endif
@@ -754,19 +756,19 @@ void G_CheckTeamItems( void ) {
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_redobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_blueobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_neutralobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, S_COLOR_YELLOW "WARNING: No team_neutralobelisk in map\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_neutralobelisk in map\n" );
 		}
 	}
 #endif
@@ -830,7 +832,7 @@ void SaveRegisteredItems( void ) {
 	}
 	string[ bg_numItems ] = 0;
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "%i items registered\n", count );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "%i items registered\n", count );
 	trap_SetConfigstring(CS_ITEMS, string);
 }
 

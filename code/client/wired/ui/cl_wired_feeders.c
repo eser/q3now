@@ -6,6 +6,8 @@ cl_wired_feeders.c — Wired UI feeder implementations
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
 #include "../../../qcommon/menudef.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
 
@@ -293,9 +295,18 @@ void WiredFeeder_LoadMods( void ) {
 
 	wui_modCount = 0;
 
-	// first entry is always the base game
+	// first entry is always the base game; description sources the product
+	// name from cl_gamename (set by the cgame at init via GAMENAME_FOR_MASTER).
+	// Engine code stays product-agnostic — falls back to "Wired" before init.
 	Q_strncpyz( wui_modList[0], "baseq3", sizeof( wui_modList[0] ) );
-	Q_strncpyz( wui_modDesc[0], "q3now (base game)", sizeof( wui_modDesc[0] ) );
+	{
+		const char *gamename = Cvar_VariableString( "cl_gamename" );
+		if ( gamename && *gamename ) {
+			Com_sprintf( wui_modDesc[0], sizeof( wui_modDesc[0] ), "%s (base game)", gamename );
+		} else {
+			Q_strncpyz( wui_modDesc[0], "Wired (base game)", sizeof( wui_modDesc[0] ) );
+		}
+	}
 	wui_modCount = 1;
 
 	int numDirs = FS_GetFileList( "$modlist", "", listBuf, sizeof( listBuf ) );
@@ -559,7 +570,7 @@ void WiredFeeder_LoadMaps( void ) {
 	WiredFeeder_StateSetString( "ui_favMapAction", "Favorite" );
 	WiredFeeder_StateSetString( "ui_favoriteMaps", "" );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: %d maps loaded, %d arena files parsed\n", wui_mapCount, arenaCount );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: %d maps loaded, %d arena files parsed\n", wui_mapCount, arenaCount );
 }
 
 static void WiredFeeder_FilterMaps( void ) {
@@ -832,7 +843,7 @@ void WiredFeeder_LoadCharacters( void ) {
 	// align the skin selection with whatever the current skin cvar is
 	wui_skinSelected = WiredFeeder_PickSkinForChar( CL_Characters_At( wui_charSelected ) );
 
-	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: found %d characters\n", count );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: found %d characters\n", count );
 }
 
 static int WiredFeeder_CharactersCount( int feederID ) {
@@ -930,7 +941,7 @@ void WiredUI_RegisterCoreFeeders( void ) {
 	WiredFeeder_LoadMods();
 	WiredFeeder_LoadCharacters();
 
-	Com_Log( SEV_DEBUG, LOG_CAT_UI, "WiredUI: feeders registered (demos=%d, mods=%d)\n",
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: feeders registered (demos=%d, mods=%d)\n",
 		wui_demoCount, wui_modCount );
 }
 

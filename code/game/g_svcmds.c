@@ -25,6 +25,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "g_local.h"
 #include "wired/bots/g_wiredbots.h"
+/* Phase 5: log channels */
+LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
 /*
@@ -102,7 +104,7 @@ static qboolean StringToFilter (char *s, ipFilter_t *f)
 				s++;
 				continue;
 			}
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Bad filter address: %s\n", s );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Bad filter address: %s\n", s );
 			return qfalse;
 		}
 		
@@ -160,7 +162,7 @@ static void UpdateIPBans (void)
 		}
 		else
 		{
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "g_banIPs overflowed at MAX_CVAR_VALUE_STRING\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "g_banIPs overflowed at MAX_CVAR_VALUE_STRING\n");
 			break;
 		}
 	}
@@ -218,7 +220,7 @@ static void AddIP( char *str )
 	{
 		if (numIPFilters == MAX_IPFILTERS)
 		{
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "IP filter list is full\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "IP filter list is full\n");
 			return;
 		}
 		numIPFilters++;
@@ -265,7 +267,7 @@ void Svcmd_AddIP_f (void)
 	char		str[MAX_TOKEN_CHARS];
 
 	if ( trap_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: addip <ip-mask>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: addip <ip-mask>\n");
 		return;
 	}
 
@@ -287,7 +289,7 @@ void Svcmd_RemoveIP_f (void)
 	char		str[MAX_TOKEN_CHARS];
 
 	if ( trap_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: removeip <ip-mask>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: removeip <ip-mask>\n");
 		return;
 	}
 
@@ -300,14 +302,14 @@ void Svcmd_RemoveIP_f (void)
 		if (ipFilters[i].mask == f.mask	&&
 			ipFilters[i].compare == f.compare) {
 			ipFilters[i].compare = 0xffffffffu;
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Removed.\n");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Removed.\n");
 
 			UpdateIPBans();
 			return;
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "Didn't find %s.\n", str );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "Didn't find %s.\n", str );
 }
 
 /*
@@ -324,53 +326,53 @@ void	Svcmd_EntityList_f (void) {
 		if ( !check->inuse ) {
 			continue;
 		}
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "%3i:", e);
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "%3i:", e);
 		switch ( check->s.eType ) {
 		case ET_GENERAL:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_GENERAL          ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_GENERAL          ");
 			break;
 		case ET_PLAYER:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_PLAYER           ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_PLAYER           ");
 			break;
 		case ET_ITEM:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_ITEM             ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_ITEM             ");
 			break;
 		case ET_MISSILE:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_MISSILE          ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_MISSILE          ");
 			break;
 		case ET_MOVER:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_MOVER            ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_MOVER            ");
 			break;
 		case ET_BEAM:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_BEAM             ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_BEAM             ");
 			break;
 		case ET_PORTAL:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_PORTAL           ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_PORTAL           ");
 			break;
 		case ET_SPEAKER:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_SPEAKER          ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_SPEAKER          ");
 			break;
 		case ET_PUSH_TRIGGER:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_PUSH_TRIGGER     ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_PUSH_TRIGGER     ");
 			break;
 		case ET_TELEPORT_TRIGGER:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_TELEPORT_TRIGGER ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_TELEPORT_TRIGGER ");
 			break;
 		case ET_INVISIBLE:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_INVISIBLE        ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_INVISIBLE        ");
 			break;
 		case ET_GRAPPLE:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "ET_GRAPPLE          ");
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "ET_GRAPPLE          ");
 			break;
 		default:
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "%3i                 ", check->s.eType);
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "%3i                 ", check->s.eType);
 			break;
 		}
 
 		if ( check->classname ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "%s", check->classname);
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "%s", check->classname);
 		}
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "\n");
 	}
 }
 
@@ -383,13 +385,13 @@ gclient_t	*ClientForString( const char *s ) {
 	if ( s[0] >= '0' && s[0] <= '9' ) {
 		idnum = atoi( s );
 		if ( idnum < 0 || idnum >= level.maxclients ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Bad client slot: %i\n", idnum );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Bad client slot: %i\n", idnum );
 			return NULL;
 		}
 
 		cl = &level.clients[idnum];
 		if ( cl->pers.connected == CON_DISCONNECTED ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Client %i is not connected\n", idnum );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Client %i is not connected\n", idnum );
 			return NULL;
 		}
 		return cl;
@@ -406,7 +408,7 @@ gclient_t	*ClientForString( const char *s ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "User %s is not on the server\n", s );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "User %s is not on the server\n", s );
 
 	return NULL;
 }
@@ -423,7 +425,7 @@ void	Svcmd_ForceTeam_f( void ) {
 	char		str[MAX_TOKEN_CHARS];
 
 	if ( trap_Argc() < 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: forceteam <player> <team>\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: forceteam <player> <team>\n");
 		return;
 	}
 
@@ -450,11 +452,11 @@ ConsoleCommand
 static void Svcmd_Q3nowEngine_f( void ) {
     char buf[256];
     trap_Cvar_VariableStringBuffer( "version", buf, sizeof(buf) );
-    Com_Log( SEV_INFO, LOG_CAT_GAME, "Engine:      %s\n", buf );
+    Com_Log( SEV_INFO, LOG_CH(ch_game), "Engine:      %s\n", buf );
     trap_Cvar_VariableStringBuffer( "cl_renderer", buf, sizeof(buf) );
-    Com_Log( SEV_INFO, LOG_CAT_GAME, "Renderer:    %s\n", buf );
+    Com_Log( SEV_INFO, LOG_CH(ch_game), "Renderer:    %s\n", buf );
     trap_Cvar_VariableStringBuffer( "com_maxfps", buf, sizeof(buf) );
-    Com_Log( SEV_INFO, LOG_CAT_GAME, "com_maxfps:  %s\n", buf );
+    Com_Log( SEV_INFO, LOG_CH(ch_game), "com_maxfps:  %s\n", buf );
 }
 
 // Called by the MCP bot_say tool via Cbuf_ExecuteText("bot_say_console ...").
@@ -465,7 +467,7 @@ static void Svcmd_BotSayConsole_f( void ) {
 	wbParseResult_t result;
 
 	if ( trap_Argc() < 2 ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: bot_say_console <message>\n" );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: bot_say_console <message>\n" );
 		return;
 	}
 
@@ -490,7 +492,7 @@ static void Svcmd_Lightstyle_f( void ) {
 	int  style;
 
 	if ( trap_Argc() < 3 ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME,
+		Com_Log( SEV_INFO, LOG_CH(ch_game),
 		         "Usage: lightstyle <slot> <pattern>\n"
 		         "  slot: 0-63; pattern: lowercase a-z string (empty string = off)\n" );
 		return;
@@ -501,12 +503,12 @@ static void Svcmd_Lightstyle_f( void ) {
 	style = atoi( slotStr );
 
 	if ( !G_SetLightstyle( style, pattern ) ) {
-		Com_Log( SEV_INFO, LOG_CAT_GAME,
+		Com_Log( SEV_INFO, LOG_CH(ch_game),
 		         "lightstyle: invalid slot %d or pattern '%s'\n", style, pattern );
 		return;
 	}
 
-	Com_Log( SEV_INFO, LOG_CAT_GAME, "lightstyle: style %d set to '%s'\n", style, pattern );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "lightstyle: style %d set to '%s'\n", style, pattern );
 }
 
 qboolean	ConsoleCommand( void ) {
@@ -567,7 +569,7 @@ qboolean	ConsoleCommand( void ) {
 	if ( Q_stricmp( cmd, "bot_order" ) == 0 ) {
 		char botname[MAX_NETNAME];
 		if ( trap_Argc() < 3 ) {
-			Com_Log( SEV_INFO, LOG_CAT_GAME, "Usage: bot_order <botname> <order>\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: bot_order <botname> <order>\n" );
 			return qtrue;
 		}
 		trap_Argv( 1, botname, sizeof( botname ) );

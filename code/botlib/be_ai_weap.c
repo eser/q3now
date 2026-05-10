@@ -48,8 +48,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //#define DEBUG_AI_WEAP
 
 //structure field offsets
+// NOLINTBEGIN(bugprone-macro-parentheses) — `x` is a member name in `->x`; parens around it are syntactically invalid
 #define WEAPON_OFS(x) (size_t)&(((weaponinfo_t *)0)->x)
 #define PROJECTILE_OFS(x) (size_t)&(((projectileinfo_t *)0)->x)
+// NOLINTEND(bugprone-macro-parentheses)
 
 //weapon definition
 static const fielddef_t weaponinfo_fields[] =
