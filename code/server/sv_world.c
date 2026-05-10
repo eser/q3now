@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // world.c -- world query functions
@@ -121,13 +116,13 @@ static worldSector_t *SV_CreateworldSector( int depth, vec3_t mins, vec3_t maxs 
 	}
 
 	anode->dist = 0.5 * (maxs[anode->axis] + mins[anode->axis]);
-	VectorCopy (mins, mins1);	
-	VectorCopy (mins, mins2);	
-	VectorCopy (maxs, maxs1);	
-	VectorCopy (maxs, maxs2);	
-	
+	VectorCopy (mins, mins1);
+	VectorCopy (mins, mins2);
+	VectorCopy (maxs, maxs1);
+	VectorCopy (maxs, maxs2);
+
 	maxs1[anode->axis] = mins2[anode->axis] = anode->dist;
-	
+
 	anode->children[0] = SV_CreateworldSector (depth+1, mins2, maxs2);
 	anode->children[1] = SV_CreateworldSector (depth+1, mins1, maxs1);
 
@@ -243,7 +238,7 @@ void SV_LinkEntity( sharedEntity_t *gEnt ) {
 		}
 	} else {
 		// normal
-		VectorAdd (origin, gEnt->r.mins, gEnt->r.absmin);	
+		VectorAdd (origin, gEnt->r.mins, gEnt->r.absmin);
 		VectorAdd (origin, gEnt->r.maxs, gEnt->r.absmax);
 	}
 
@@ -326,7 +321,7 @@ void SV_LinkEntity( sharedEntity_t *gEnt ) {
 		else
 			break;		// crosses the node
 	}
-	
+
 	// link it in
 	ent->worldSector = node;
 	ent->nextEntityInWorldSector = node->entities;
@@ -385,7 +380,7 @@ static void SV_AreaEntities_r( worldSector_t *node, areaParms_t *ap ) {
 		ap->list[ap->count] = check - sv.svEntities;
 		ap->count++;
 	}
-	
+
 	if (node->axis == -1) {
 		return;		// terminal node
 	}

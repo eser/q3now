@@ -36,6 +36,7 @@ export default [
 	{ stage: 'frag', source: 'blend.frag',        output: 'blend_frag_spv'        },
 	{ stage: 'frag', source: 'bloom.frag',        output: 'bloom_frag_spv'        },
 	{ stage: 'frag', source: 'blur.frag',         output: 'blur_frag_spv'         },
+	{ stage: 'frag', source: 'boost.frag',        output: 'boost_frag_spv'        },
 	{ stage: 'frag', source: 'color.frag',        output: 'color_frag_spv'        },
 	{ stage: 'frag', source: 'dot.frag',          output: 'dot_frag_spv'          },
 	{ stage: 'frag', source: 'fog.frag',          output: 'fog_frag_spv'          },

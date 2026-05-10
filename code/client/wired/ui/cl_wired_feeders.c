@@ -6,6 +6,7 @@ cl_wired_feeders.c — Wired UI feeder implementations
 #include "cl_wired_ui.h"
 #include "cl_wired_hud.h"
 #include "../../../qcommon/menudef.h"
+#include "../../../qcommon/maps/meta.h"
 /* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
@@ -378,7 +379,6 @@ qboolean WiredFeeder_IsMapInList( const char *list, const char *mapName ) {
 }
 
 #define MAX_WIRED_MAPS  1024
-#define MAX_ARENA_TEXT  8192
 
 typedef struct {
 	char    mapLoadName[MAX_QPATH];
@@ -391,103 +391,12 @@ static int             wui_mapCount = 0;
 static int             wui_filteredMaps[MAX_WIRED_MAPS];
 static int             wui_filteredMapCount = 0;
 
-// parse "ffa duel team ctf" → bitmask
-static int WiredFeeder_GametypeBits( const char *string ) {
-	int         bits = 0;
-	const char  *p = string;
-	ComParser   parser = { 0 };
-
-	while ( 1 ) {
-		const char *token = COM_ParseExt( &parser, &p, qfalse );
-		if ( !token[0] ) break;
-		bits |= BG_GametypeBits( token );
-	}
-
-	return bits;
-}
-
-// find a map entry by load name (case-insensitive)
-static wiredMapInfo_t *WiredFeeder_FindMap( const char *mapname ) {
-	for ( int i = 0; i < wui_mapCount; i++ ) {
-		if ( Q_stricmp( wui_maps[i].mapLoadName, mapname ) == 0 ) {
-			return &wui_maps[i];
-		}
-	}
-	return NULL;
-}
-
-// parse { key value } arena blocks from a buffer — same format as UI_ParseInfos
-// but stores directly into wui_maps entries instead of Info strings
-static void WiredFeeder_ParseArenaBuffer( const char *buf ) {
-	const char  *p = buf;
-	ComParser   parser = { 0 };
-
-	while ( 1 ) {
-		const char *token = COM_Parse( &parser, &p );
-		if ( !token[0] ) break;
-		if ( strcmp( token, "{" ) != 0 ) break;
-
-		char arenaMap[MAX_QPATH];
-		char arenaLongname[64];
-		char arenaType[64];
-		arenaMap[0] = '\0';
-		arenaLongname[0] = '\0';
-		arenaType[0] = '\0';
-
-		// parse key-value pairs until closing brace
-		while ( 1 ) {
-			token = COM_ParseExt( &parser, &p, qtrue );
-			if ( !token[0] || !strcmp( token, "}" ) ) break;
-
-			char key[MAX_TOKEN_CHARS];
-			Q_strncpyz( key, token, sizeof( key ) );
-			token = COM_ParseExt( &parser, &p, qfalse );
-
-			if ( Q_stricmp( key, "map" ) == 0 ) {
-				Q_strncpyz( arenaMap, token, sizeof( arenaMap ) );
-			} else if ( Q_stricmp( key, "longname" ) == 0 ) {
-				Q_strncpyz( arenaLongname, token, sizeof( arenaLongname ) );
-			} else if ( Q_stricmp( key, "type" ) == 0 ) {
-				Q_strncpyz( arenaType, token, sizeof( arenaType ) );
-			}
-		}
-
-		if ( !arenaMap[0] ) continue;
-
-		// cross-reference: find the BSP entry and enrich it
-		wiredMapInfo_t *entry = WiredFeeder_FindMap( arenaMap );
-		if ( !entry ) continue;
-
-		if ( arenaLongname[0] ) {
-			Q_strncpyz( entry->mapName, arenaLongname, sizeof( entry->mapName ) );
-		}
-		if ( arenaType[0] ) {
-			entry->typeBits = WiredFeeder_GametypeBits( arenaType );
-		}
-	}
-}
-
-// load a single .arena file and cross-reference with map entries
-static void WiredFeeder_LoadArenaFile( const char *filename ) {
-	fileHandle_t f;
-	char buf[MAX_ARENA_TEXT];
-
-	int len = FS_FOpenFileRead( filename, &f, qfalse );
-	if ( !f || len <= 0 ) {
-		if ( f != FS_INVALID_HANDLE ) FS_FCloseFile( f );
-		return;
-	}
-	if ( len >= (int)sizeof( buf ) ) {
-		FS_FCloseFile( f );
-		return;
-	}
-
-	FS_Read( buf, len, f );
-	buf[len] = '\0';
-	FS_FCloseFile( f );
-
-	WiredFeeder_ParseArenaBuffer( buf );
-}
+// Phase 5 (q3now meta migration): WiredFeeder_LoadArenaFile and
+// WiredFeeder_ParseArenaBuffer were removed when the UI map roster
+// was migrated to the .meta-driven maps_list[] global. The legacy
+// .arena fallback still happens — but inside Maps_LoadMetaFor, not
+// here. UI consumers only ever see normalized map_meta_t, projected
+// into wui_maps[] for the existing widget surface.
 
 static int WiredFeeder_MapSortCompare( const void *a, const void *b ) {
 	const wiredMapInfo_t *ma = (const wiredMapInfo_t *)a;
@@ -496,69 +405,58 @@ static int WiredFeeder_MapSortCompare( const void *a, const void *b ) {
 }
 
 void WiredFeeder_LoadMaps( void ) {
-	char listBuf[16384];
-	int arenaCount = 0;
-
 	wui_mapCount = 0;
 
-	// ── Step 1: scan all .bsp files ──────────────────────────────────
-	int numFiles = FS_GetFileList( "maps", ".bsp", listBuf, sizeof( listBuf ) );
+	// Source of truth: maps_list[] (owned by code/qcommon/maps).
+	// Already populated at engine init and on every FS_Restart; we
+	// trigger a refresh here as well so the UI reflects content
+	// changes that happened while the menu was hidden.
+	Maps_ScanAll();
 
-	char *namePtr = listBuf;
-	for ( int i = 0; i < numFiles && wui_mapCount < MAX_WIRED_MAPS; i++ ) {
-		char *dot;
-		Q_strncpyz( wui_maps[wui_mapCount].mapLoadName, namePtr, sizeof( wui_maps[0].mapLoadName ) );
+	const int n = ( maps_count < MAX_WIRED_MAPS ) ? maps_count : MAX_WIRED_MAPS;
+	for ( int i = 0; i < n; i++ ) {
+		const map_meta_t *m = &maps_list[i];
+		wiredMapInfo_t   *o = &wui_maps[i];
 
-		// strip .bsp extension
-		dot = strrchr( wui_maps[wui_mapCount].mapLoadName, '.' );
-		if ( dot ) *dot = '\0';
+		Q_strncpyz( o->mapLoadName, m->mapname, sizeof( o->mapLoadName ) );
 
-		// defaults: display name = load name, all game types
-		Q_strncpyz( wui_maps[wui_mapCount].mapName,
-			wui_maps[wui_mapCount].mapLoadName, sizeof( wui_maps[0].mapName ) );
-		/* default: all common gametypes (0=FFA, 1=duel, 2=KotH, 3=LMS, 4=TDM, 5=CTF) */
-		wui_maps[wui_mapCount].typeBits =
-			(1 << 0) | (1 << 1) | (1 << 4) |
-			(1 << 5) | (1 << 2) | (1 << 3);
+		// Defensive consumer rule: empty longname → display the load name.
+		Q_strncpyz( o->mapName,
+			m->longname[0] ? m->longname : m->mapname,
+			sizeof( o->mapName ) );
 
-		wui_mapCount++;
-		namePtr += strlen( namePtr ) + 1;
+		// Empty type list → permissive fallback: support every
+		// gametype (per the file-optionality invariant table).
+		// Otherwise OR in the bits each canonical token resolves to.
+		// BG_GametypeBits accepts both legacy ("ffa", "tourney") and
+		// canonical ("dm", "duel") tokens, so the canonical tokens
+		// from m->type.tokens go through unchanged.
+		if ( m->type.count == 0 ) {
+			o->typeBits = (1 << 0) | (1 << 1) | (1 << 2) |
+			              (1 << 3) | (1 << 4) | (1 << 5);
+		} else {
+			int bits = 0;
+			for ( int t = 0; t < m->type.count; t++ ) {
+				bits |= BG_GametypeBits( m->type.tokens[t] );
+			}
+			o->typeBits = bits;
+		}
 	}
+	wui_mapCount = n;
 
-	// ── Step 2: parse .arena files to enrich map entries ─────────────
-	// first try arenas.txt (bulk arena definitions)
-	WiredFeeder_LoadArenaFile( "scripts/arenas.txt" );
-
-	// then scan individual .arena files
-	char arenaListBuf[4096];
-	int numArenaFiles = FS_GetFileList( "scripts", ".arena", arenaListBuf, sizeof( arenaListBuf ) );
-	char *arenaPtr = arenaListBuf;
-	for ( int i = 0; i < numArenaFiles; i++ ) {
-		int arenaLen = strlen( arenaPtr );
-		char filename[128];
-		Com_sprintf( filename, sizeof( filename ), "scripts/%s", arenaPtr );
-		WiredFeeder_LoadArenaFile( filename );
-		arenaCount++;
-		arenaPtr += arenaLen + 1;
-	}
-
-	// ── Step 3: sort alphabetically by display name ──────────────────
 	qsort( wui_maps, wui_mapCount, sizeof( wiredMapInfo_t ), WiredFeeder_MapSortCompare );
 
-	// ── Step 4: initialize filtered list ─────────────────────────────
 	wui_filteredMapCount = wui_mapCount;
 	for ( int i = 0; i < wui_mapCount; i++ ) {
 		wui_filteredMaps[i] = i;
 	}
 
-	// select first map by default and set levelshot
 	if ( wui_mapCount > 0 ) {
 		WiredFeeder_StateSetString( "ui_selectedMap", wui_maps[0].mapLoadName );
 		WiredFeeder_StateSetString( "ui_mapLevelshot", va( "levelshots/%s", wui_maps[0].mapLoadName ) );
 		WiredFeeder_StateSetString( "ui_currentNetMap", "0" );
 	}
 
-	// ensure cvars are initialized
 	if ( WiredFeeder_StateGetInt( "ui_netGameType", -1 ) < 0 ) {
 		WiredFeeder_StateSetString( "ui_netGameType", "0" );
 	}
@@ -570,7 +468,8 @@ void WiredFeeder_LoadMaps( void ) {
 	WiredFeeder_StateSetString( "ui_favMapAction", "Favorite" );
 	WiredFeeder_StateSetString( "ui_favoriteMaps", "" );
 
-	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: %d maps loaded, %d arena files parsed\n", wui_mapCount, arenaCount );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: %d maps loaded from maps_list[]\n", wui_mapCount );
 }
 
 static void WiredFeeder_FilterMaps( void ) {

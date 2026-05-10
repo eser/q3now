@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // snd_mix.c -- portable code to mix sounds for snd_dma.c
@@ -63,7 +58,7 @@ void S_WriteLinearBlastStereo16_SSE( void );
 
 #ifdef _WIN32
 
-void S_WriteLinearBlastStereo16_MMX( void ) 
+void S_WriteLinearBlastStereo16_MMX( void )
 {
 __asm {
 	push ebx
@@ -165,7 +160,7 @@ LExit:
 }
 
 
-void S_WriteLinearBlastStereo16_SSE( void ) 
+void S_WriteLinearBlastStereo16_SSE( void )
 {
 __asm {
 	push ebx
@@ -506,7 +501,7 @@ static void S_PaintChannelFrom16_scalar( channel_t *ch, const sfx_t *sc, int cou
 }
 
 
-static void S_PaintChannelFrom16( channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset ) 
+static void S_PaintChannelFrom16( channel_t *ch, const sfx_t *sc, int count, int sampleOffset, int bufferOffset )
 {
 	S_PaintChannelFrom16_scalar( ch, sc, count, sampleOffset, bufferOffset );
 }

@@ -396,6 +396,37 @@ lightningBoltNPM
 	}
 }
 
+// Push-displacement trail beam (Phase 5R; jumppads are the first
+// consumer, but the effect generalizes to any "applied velocity"
+// hook — knockback, launchers, Q-style movement assists). Subtle
+// invismap-based shimmer, two-stage cross-scroll for "ghost trail
+// invisible-until-motion" aesthetic. The cgame-side render
+// enforces an alpha ceiling (≤0.25) so this stays a barely-there
+// distortion rather than a bright energy beam.
+//
+// rgbGen/alphaGen vertex pulls per-vertex tint and fade alpha from
+// the cgame-supplied bd.startColor / bd.endColor.
+pushTrail
+{
+	cull none
+	{
+		map textures/effects/invismap.tga
+		blendfunc add
+		rgbGen vertex
+		alphaGen vertex
+		tcMod scale 1 1
+		tcMod scroll -1.5 0.3
+	}
+	{
+		map textures/effects/invismap.tga
+		blendfunc add
+		rgbGen vertex
+		alphaGen vertex
+		tcMod scale -1 -1
+		tcMod scroll -2.0 -0.4
+	}
+}
+
 // Additive grayscale particle, rgbGen vertex
 // so per-entity shaderRGBA controls the tint.
 gfx/misc/particle

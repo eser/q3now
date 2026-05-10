@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 //
@@ -684,6 +679,40 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		{
 			clientInfo_t *ci_jp = &cgs.clientinfo[es->number < MAX_CLIENTS ? es->number : 0];
 			trap_S_StartSound (NULL, es->number, CHAN_VOICE, ci_jp->sounds[CSOUND_JUMP] );
+		}
+
+		// Phase 5T: PTRAIL_PUSH trigger for jumppad launch. Trail is
+		// anchored behind the launched player along their negative
+		// velocity vector by CG_RenderOnePlayerTrail; no pad origin
+		// needed here. `es->number` is the launched player's
+		// clientNum.
+		//
+		// Speed source: predicted velocity for the local player
+		// (post-bounce velocity is already applied client-side in
+		// the predicted state); for remote players the snapped
+		// trDelta still holds the pre-bounce vector at this moment
+		// (post-bounce arrives next snap), so the < 100 fallback
+		// gives a sensible default duration.
+		{
+			float pushSpeed = 0.0f;
+			float t;
+			int   durationMs;
+
+			if ( es->number == cg.predictedPlayerState.clientNum ) {
+				pushSpeed = VectorLength( cg.predictedPlayerState.velocity );
+			} else if ( es->number >= 0 && es->number < MAX_CLIENTS ) {
+				pushSpeed = VectorLength(
+					cg_entities[es->number].currentState.pos.trDelta );
+			}
+			if ( pushSpeed < 100.0f ) pushSpeed = 800.0f;
+
+			t = pushSpeed / PTRAIL_JUMPPAD_SPEED_NORM;
+			if ( t > 1.0f ) t = 1.0f;
+			durationMs = PTRAIL_JUMPPAD_DURATION_MIN_MS +
+				(int)( t * ( PTRAIL_JUMPPAD_DURATION_MAX_MS -
+				             PTRAIL_JUMPPAD_DURATION_MIN_MS ) );
+
+			CG_TriggerPlayerTrail( es->number, PTRAIL_PUSH, durationMs );
 		}
 		break;
 

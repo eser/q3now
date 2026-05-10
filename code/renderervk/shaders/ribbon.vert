@@ -63,8 +63,8 @@ struct RibbonHeader {
 	uint  shaderHandle;
 	uint  flags;
 	vec2  uvScroll;     // UV/second; {0,0} = static UV
-	float spawnTime;    // tr.refdef.floatTime captured at submit
-	float _pad;         // std430 alignment to 32 B stride
+	// std430 stride: 4 uints (16 B) + vec2 (8 B) = 24 B, struct alignment 8 B
+	// (vec2 is the largest member); 24 is a multiple of 8 so no trailing pad.
 };
 
 layout(std430, set = 0, binding = 0) readonly buffer Points  { RibbonPoint  points[];  };
@@ -171,10 +171,12 @@ void main() {
 	// Ribbon's V is per-point (varies smoothly along the strip)
 	// not per-edge, so the V-collapse case doesn't apply here.)
 	//
-	// hdr.spawnTime is dormant in this path (kept in the layout
-	// to avoid cascading the host-side SSBO write); revisit if
-	// ribbon ever gains a persistent variant — same flag-branch
-	// pattern as beam.vert.
+	// Ribbon has no per-submission spawnTime field — uvScroll is
+	// referenced against the absolute frame clock, so per-frame
+	// re-submissions don't disturb scroll continuity. If a future
+	// persistent ribbon variant lands, restore the spawnTime field
+	// (and host write at tr_scene.c RE_AddRibbonToScene) and
+	// branch on a flag like beam.vert does.
 	fragUV = fract(baseUV + hdr.uvScroll * frameParams.y);
 	fragColor = p.rgba;
 	fragShaderHandle = hdr.shaderHandle;

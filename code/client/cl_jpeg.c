@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -58,14 +53,14 @@ q_jpeg_error_mgr_t;
 static void CL_JPGErrorExit(j_common_ptr cinfo)
 {
 	char buffer[JMSG_LENGTH_MAX];
-  
+
 	/* cinfo->err really points to a q_jpeg_error_mgr_s struct, so coerce pointer */
 	q_jpeg_error_mgr_t *jerr = (q_jpeg_error_mgr_t *)cinfo->err;
-  
+
 	(*cinfo->err->format_message)( cinfo, buffer );
-  
+
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "Error: %s", buffer );
-  
+
 	/* Return control to the setjmp point */
 	Q_longjmp( (void **)jerr->setjmp_buffer, 1 );
 }
@@ -74,10 +69,10 @@ static void CL_JPGErrorExit(j_common_ptr cinfo)
 static void CL_JPGOutputMessage(j_common_ptr cinfo)
 {
   char buffer[JMSG_LENGTH_MAX];
-  
+
   /* Create the message */
   (*cinfo->err->format_message) (cinfo, buffer);
-  
+
   /* Send it to stderr, adding a newline */
   Com_Log( SEV_INFO, LOG_CH(ch_client), "%s\n", buffer );
 }
@@ -187,7 +182,7 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
    * output image dimensions available, as well as the output colormap
    * if we asked for color quantization.
    * In this example, we need to make an output work buffer of the right size.
-   */ 
+   */
   /* JSAMPLEs per row in output buffer */
 
   pixelcount = cinfo.output_width * cinfo.output_height;
@@ -200,7 +195,7 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
     // Free the memory to make sure we don't leak memory
     FS_FreeFile( fbuffer.v );
     jpeg_destroy_decompress(&cinfo);
-  
+
     Com_Terminate( TERM_CLIENT_DROP, "LoadJPG: %s has an invalid image format: %dx%d*4=%d, components: %d", filename,
 		    cinfo.output_width, cinfo.output_height, pixelcount * 4, cinfo.output_components);
   }
@@ -228,7 +223,7 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
 	buffer = &buf;
     (void) jpeg_read_scanlines(&cinfo, buffer, 1);
   }
-  
+
   buf = out;
 
   // Expand from RGB to RGBA
@@ -236,7 +231,7 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
   dindex = memcount;
 
   do
-  {	
+  {
     buf[--dindex] = 255;
     buf[--dindex] = buf[--sindex];
     buf[--dindex] = buf[--sindex];
@@ -325,9 +320,9 @@ init_destination (j_compress_ptr cinfo)
 static boolean empty_output_buffer( j_compress_ptr cinfo )
 {
   my_dest_ptr dest = (my_dest_ptr) cinfo->dest;
-  
+
   jpeg_destroy_compress(cinfo);
-  
+
   // Make crash fatal or we would probably leak memory.
   Com_Terminate( TERM_UNRECOVERABLE, "Output buffer for encoded JPEG image has insufficient size of %d bytes", dest->size );
 
@@ -442,7 +437,7 @@ size_t CL_SaveJPGToBuffer(byte *buffer, size_t bufSize, int quality,
   /* Step 5: while (scan lines remain to be written) */
   /*           jpeg_write_scanlines(...); */
   row_stride = image_width * cinfo.input_components + padding; /* JSAMPLEs per row in image_buffer */
-  
+
   while (cinfo.next_scanline < cinfo.image_height) {
     /* jpeg_write_scanlines expects an array of pointers to scanlines.
      * Here the array is only one element long, but you could pass
@@ -454,10 +449,10 @@ size_t CL_SaveJPGToBuffer(byte *buffer, size_t bufSize, int quality,
 
   /* Step 6: Finish compression */
   jpeg_finish_compress(&cinfo);
-  
+
   dest = (my_dest_ptr) cinfo.dest;
   outcount = dest->size - dest->pub.free_in_buffer;
- 
+
   /* Step 7: release JPEG compression object */
   jpeg_destroy_compress(&cinfo);
 

@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -151,7 +146,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 		poly->hShader = hShader;
 		poly->numVerts = numVerts;
 		poly->verts = &backEndData->polyVerts[r_numpolyverts];
-		
+
 		memcpy( poly->verts, &verts[numVerts*j], numVerts * sizeof( *verts ) );
 #if 0
 		if ( glConfig.hardwareType == GLHW_RAGEPRO ) {
@@ -180,7 +175,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 				AddPointToBounds( poly->verts[i].xyz, bounds[0], bounds[1] );
 			}
 			for ( fogIndex = 1 ; fogIndex < tr.world->numfogs ; fogIndex++ ) {
-				fog = &tr.world->fogs[fogIndex]; 
+				fog = &tr.world->fogs[fogIndex];
 				if ( bounds[1][0] >= fog->bounds[0][0]
 					&& bounds[1][1] >= fog->bounds[0][1]
 					&& bounds[1][2] >= fog->bounds[0][2]
@@ -394,11 +389,14 @@ void RE_AddRibbonToScene( const ribbonDesc_t *desc ) {
 	memcpy( dstPoints, desc->points, (size_t)desc->numPoints * RIBBON_POINT_BYTES );
 
 	// Append header.
-	// Layout (32 B std430, must match ribbon.vert RibbonHeader):
+	// Layout (24 B std430, must match ribbon.vert RibbonHeader):
 	//   offset  0..15  4 × uint  (pointOffset, pointCount, shaderHandle, flags)
 	//   offset 16..23  vec2      uvScroll
-	//   offset 24..27  float     spawnTime  (= tr.refdef.floatTime at submit)
-	//   offset 28..31  float     _pad
+	// Ribbon is transient-only; uvScroll references the absolute frame
+	// clock (frameParams.y) directly, so no per-submission spawnTime is
+	// needed (Phase 5U dropped the dormant field). For a future
+	// persistent ribbon variant, restore the field here and in
+	// ribbon.vert's RibbonHeader (mirror beam's flag-branch pattern).
 	dstHeader = vk.ribbon.headers_ptr[frame] + dstHeaderIdx * RIBBON_HEADER_BYTES;
 	udst = (uint32_t *)dstHeader;
 	fdst = (float    *)dstHeader;
@@ -410,13 +408,6 @@ void RE_AddRibbonToScene( const ribbonDesc_t *desc ) {
 	udst[3] = (uint32_t)desc->flags;
 	fdst[4] = desc->uvScroll[0];
 	fdst[5] = desc->uvScroll[1];
-	// spawnTime uses tr.refdef.floatTime (front-end current-frame
-	// time, set in RE_BeginScene). Same rationale as RE_AddBeamToScene
-	// — backEnd.refdef.floatTime here would be one frame stale; using
-	// the front-end value keeps spawnTime aligned with what the
-	// vertex shader sees as frameParams.y at draw time.
-	fdst[6] = (float)tr.refdef.floatTime;
-	fdst[7] = 0.0f; // pad
 
 	vk.ribbon.numPointsThisFrame  += (uint32_t)desc->numPoints;
 	vk.ribbon.numHeadersThisFrame += 1;
@@ -1097,7 +1088,7 @@ void RE_RenderScene( const refdef_t *fd ) {
 
 	parms.fovX = tr.refdef.fov_x;
 	parms.fovY = tr.refdef.fov_y;
-	
+
 	parms.stereoFrame = tr.refdef.stereoFrame;
 
 	VectorCopy( fd->vieworg, parms.or.origin );

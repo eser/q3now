@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -462,7 +457,7 @@ aas_trace_t AAS_TraceClientBBox(vec3_t start, vec3_t end, int presencetype,
 	memset(&trace, 0, sizeof(aas_trace_t));
 
 	if (!aasworld.loaded) return trace;
-	
+
 	tstack_p = tracestack;
 	//we start with the whole line on the stack
 	VectorCopy(start, tstack_p->start);
@@ -471,7 +466,7 @@ aas_trace_t AAS_TraceClientBBox(vec3_t start, vec3_t end, int presencetype,
 	//start with node 1 because node zero is a dummy for a solid leaf
 	tstack_p->nodenum = 1;		//starting at the root of the tree
 	tstack_p++;
-	
+
 	while (1)
 	{
 		//pop up the stack
@@ -663,7 +658,7 @@ aas_trace_t AAS_TraceClientBBox(vec3_t start, vec3_t end, int presencetype,
 		{
 			tmpplanenum = tstack_p->planenum;
 			// bk010221 - new location of divide by zero (see above)
-			if ( front == back ) front -= 0.001f; // bk0101022 - hack/FPE 
+			if ( front == back ) front -= 0.001f; // bk0101022 - hack/FPE
                 	//calculate the hitpoint with the node (split point of the line)
 			//put the crosspoint TRACEPLANE_EPSILON pixels on the near side
 			if (front < 0) frac = (front + TRACEPLANE_EPSILON)/(front-back);
@@ -958,7 +953,7 @@ static qboolean AAS_InsideFace(aas_face_t *face, vec3_t pnormal, vec3_t point, f
 		//check on which side of the above plane the point is
 		//this is done by checking the sign of the dot product of the
 		//vector orthogonal vector from above and the vector from the
-		//origin (first vertex of edge) to the point 
+		//origin (first vertex of edge) to the point
 		//if the dotproduct is smaller than zero the point is outside the face
 		if (DotProduct(pointvec, sepnormal) < -epsilon) return qfalse;
 	} //end for
@@ -1239,7 +1234,7 @@ aas_link_t *AAS_AASLinkEntity(vec3_t absmins, vec3_t absmaxs, int entnum)
 	//start with node 1 because node zero is a dummy used for solid leafs
 	lstack_p->nodenum = 1;		//starting at the root of the tree
 	lstack_p++;
-	
+
 	while (1)
 	{
 		//pop up the stack

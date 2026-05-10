@@ -1,27 +1,22 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // tr_shade.c
 
-#include "tr_local.h" 
+#include "tr_local.h"
 #if idppc_altivec && !defined(__APPLE__)
 #include <altivec.h>
 #endif
@@ -122,7 +117,7 @@ static void DrawTris (const shaderCommands_t *input) {
 		vec4_t color;
 
 		GLSL_BindProgram(sp);
-		
+
 		GLSL_SetUniformMat4(sp, UNIFORM_MODELVIEWPROJECTIONMATRIX, glState.modelviewProjection);
 		VectorSet4(color, 1, 1, 1, 1);
 		GLSL_SetUniformVec4(sp, UNIFORM_COLOR, color);
@@ -209,7 +204,7 @@ static void ComputeTexMods( shaderStage_t *pStage, int bundleNum, float *outMatr
 	for ( int tm = 0; tm < bundle->numTexMods ; tm++ ) {
 		switch ( bundle->texMods[tm].type )
 		{
-			
+
 		case TMOD_NONE:
 			tm = TR_MAX_TEXMODS;		// break out of for loop
 			break;
@@ -231,9 +226,9 @@ static void ComputeTexMods( shaderStage_t *pStage, int bundleNum, float *outMatr
 			RB_CalcScaleTexMatrix( bundle->texMods[tm].scale,
 								  matrix );
 			break;
-		
+
 		case TMOD_STRETCH:
-			RB_CalcStretchTexMatrix( &bundle->texMods[tm].wave, 
+			RB_CalcStretchTexMatrix( &bundle->texMods[tm].wave,
 								   matrix );
 			break;
 
@@ -253,7 +248,7 @@ static void ComputeTexMods( shaderStage_t *pStage, int bundleNum, float *outMatr
 		}
 
 		switch ( bundle->texMods[tm].type )
-		{	
+		{
 		case TMOD_NONE:
 		case TMOD_TURBULENT:
 		default:
@@ -363,7 +358,7 @@ static void ProjectDlightTexture( void ) {
 		GLSL_SetUniformMat4(sp, UNIFORM_MODELVIEWPROJECTIONMATRIX, glState.modelviewProjection);
 
 		GLSL_SetUniformFloat(sp, UNIFORM_VERTEXLERP, glState.vertexAttribsInterpolation);
-		
+
 		GLSL_SetUniformInt(sp, UNIFORM_DEFORMGEN, deformGen);
 		if (deformGen != DGEN_NONE)
 		{
@@ -382,7 +377,7 @@ static void ProjectDlightTexture( void ) {
 		vector[2] = origin[2];
 		vector[3] = scale;
 		GLSL_SetUniformVec4(sp, UNIFORM_DLIGHTINFO, vector);
-	  
+
 		GL_BindToTMU( tr.dlightImage, TB_COLORMAP );
 
 		// include GLS_DEPTHFUNC_EQUAL so alpha tested surfaces don't add light
@@ -418,7 +413,7 @@ static void ComputeShaderColors( const shaderStage_t *pStage, vec4_t baseColor, 
 
 	const fog_t *fog;
 
-	baseColor[0] = 
+	baseColor[0] =
 	baseColor[1] =
 	baseColor[2] =
 	baseColor[3] = 1.0f;
@@ -435,9 +430,9 @@ static void ComputeShaderColors( const shaderStage_t *pStage, vec4_t baseColor, 
 	{
 		case CGEN_EXACT_VERTEX:
 		case CGEN_EXACT_VERTEX_LIT:
-			baseColor[0] = 
+			baseColor[0] =
 			baseColor[1] =
-			baseColor[2] = 
+			baseColor[2] =
 			baseColor[3] = 0.0f;
 
 			vertColor[0] =
@@ -464,7 +459,7 @@ static void ComputeShaderColors( const shaderStage_t *pStage, vec4_t baseColor, 
 			vertColor[3] = 1.0f;
 			break;
 		case CGEN_ONE_MINUS_VERTEX:
-			baseColor[0] = 
+			baseColor[0] =
 			baseColor[1] =
 			baseColor[2] = 1.0f;
 
@@ -481,8 +476,8 @@ static void ComputeShaderColors( const shaderStage_t *pStage, vec4_t baseColor, 
 			baseColor[3] = ((unsigned char *)(&fog->colorInt))[3] / 255.0f;
 			break;
 		case CGEN_WAVEFORM:
-			baseColor[0] = 
-			baseColor[1] = 
+			baseColor[0] =
+			baseColor[1] =
 			baseColor[2] = RB_CalcWaveColorSingle( &pStage->rgbWave );
 			break;
 		case CGEN_ENTITY:
@@ -566,7 +561,7 @@ static void ComputeShaderColors( const shaderStage_t *pStage, vec4_t baseColor, 
 	if(r_greyscale->integer)
 	{
 		int scale;
-		
+
 		for(i = 0; i < tess.numVertexes; i++)
 		{
 			scale = (tess.svars.colors[i][0] + tess.svars.colors[i][1] + tess.svars.colors[i][2]) / 3;
@@ -599,11 +594,11 @@ static void ComputeFogValues(vec4_t fogDistanceVector, vec4_t fogDepthVector, fl
 
 	// rotate the gradient vector for this orientation
 	if ( fog->hasSurface ) {
-		fogDepthVector[0] = fog->surface[0] * backEnd.or.axis[0][0] + 
+		fogDepthVector[0] = fog->surface[0] * backEnd.or.axis[0][0] +
 			fog->surface[1] * backEnd.or.axis[0][1] + fog->surface[2] * backEnd.or.axis[0][2];
-		fogDepthVector[1] = fog->surface[0] * backEnd.or.axis[1][0] + 
+		fogDepthVector[1] = fog->surface[0] * backEnd.or.axis[1][0] +
 			fog->surface[1] * backEnd.or.axis[1][1] + fog->surface[2] * backEnd.or.axis[1][2];
-		fogDepthVector[2] = fog->surface[0] * backEnd.or.axis[2][0] + 
+		fogDepthVector[2] = fog->surface[0] * backEnd.or.axis[2][0] +
 			fog->surface[1] * backEnd.or.axis[2][1] + fog->surface[2] * backEnd.or.axis[2][2];
 		fogDepthVector[3] = -fog->surface[3] + DotProduct( backEnd.or.origin, fog->surface );
 
@@ -654,7 +649,7 @@ static void ForwardDlight( void ) {
 
 	int deformGen;
 	vec5_t deformParams;
-	
+
 	vec4_t fogDistanceVector, fogDepthVector = {0, 0, 0, 0};
 	float eyeT = 0;
 
@@ -664,7 +659,7 @@ static void ForwardDlight( void ) {
 	if ( !backEnd.refdef.num_dlights ) {
 		return;
 	}
-	
+
 	ComputeDeformValues(&deformGen, deformParams);
 
 	ComputeFogValues(fogDistanceVector, fogDepthVector, &eyeT);
@@ -755,7 +750,7 @@ static void ForwardDlight( void ) {
 
 		GLSL_SetUniformVec4(sp, UNIFORM_NORMALSCALE, pStage->normalScale);
 		GLSL_SetUniformVec4(sp, UNIFORM_SPECULARSCALE, pStage->specularScale);
-		
+
 		// include GLS_DEPTHFUNC_EQUAL so alpha tested surfaces don't add light
 		// where they aren't rendered
 		GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL );
@@ -832,7 +827,7 @@ static void ProjectPshadowVBOGLSL( void ) {
 	if ( !backEnd.refdef.num_pshadows ) {
 		return;
 	}
-	
+
 	ComputeDeformValues(&deformGen, deformParams);
 
 	for ( l = 0 ; l < backEnd.refdef.num_pshadows ; l++ ) {
@@ -868,7 +863,7 @@ static void ProjectPshadowVBOGLSL( void ) {
 		GLSL_SetUniformVec3(sp, UNIFORM_LIGHTUP, vector);
 
 		GLSL_SetUniformFloat(sp, UNIFORM_LIGHTRADIUS, radius);
-	  
+
 		// include GLS_DEPTHFUNC_EQUAL so alpha tested surfaces don't add light
 		// where they aren't rendered
 		GL_State( GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA | GLS_DEPTHFUNC_EQUAL );
@@ -918,7 +913,7 @@ static void RB_FogPass( void ) {
 			index |= FOGDEF_USE_VERTEX_ANIMATION;
 		else if (glState.boneAnimation)
 			index |= FOGDEF_USE_BONE_ANIMATION;
-		
+
 		sp = &tr.fogShader[index];
 	}
 
@@ -936,7 +931,7 @@ static void RB_FogPass( void ) {
 	{
 		GLSL_SetUniformMat4BoneMatrix(sp, UNIFORM_BONEMATRIX, glState.boneMatrix, glState.boneAnimation);
 	}
-	
+
 	GLSL_SetUniformInt(sp, UNIFORM_DEFORMGEN, deformGen);
 	if (deformGen != DGEN_NONE)
 	{
@@ -1136,7 +1131,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		{
 			GLSL_SetUniformMat4BoneMatrix(sp, UNIFORM_BONEMATRIX, glState.boneMatrix, glState.boneAnimation);
 		}
-		
+
 		GLSL_SetUniformInt(sp, UNIFORM_DEFORMGEN, deformGen);
 		if (deformGen != DGEN_NONE)
 		{
@@ -1188,7 +1183,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 
 			VectorScale(backEnd.currentEntity->directedLight, 1.0f / 255.0f, vec);
 			GLSL_SetUniformVec3(sp, UNIFORM_DIRECTEDLIGHT, vec);
-			
+
 			VectorCopy(backEnd.currentEntity->lightDir, vec);
 			vec[3] = 0.0f;
 			GLSL_SetUniformVec4(sp, UNIFORM_LIGHTORIGIN, vec);
@@ -1376,7 +1371,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			R_BindAnimatedImageToTMU( &pStage->bundle[0], 0 );
 			R_BindAnimatedImageToTMU( &pStage->bundle[1], 1 );
 		}
-		else 
+		else
 		{
 			//
 			// set state
@@ -1494,7 +1489,7 @@ void RB_StageIteratorGeneric( void )
 	unsigned int vertexAttribs = 0;
 
 	input = &tess;
-	
+
 	if (!input->numVertexes || !input->numIndexes)
 	{
 		return;
@@ -1601,7 +1596,7 @@ void RB_StageIteratorGeneric( void )
 	}
 
 
-	// 
+	//
 	// now do any dynamic lighting needed
 	//
 	if ( tess.dlightBits && tess.shader->lightingStage >= 0 ) {
@@ -1646,7 +1641,7 @@ void RB_EndSurface( void ) {
 
 	if (input->indexes[SHADER_MAX_INDEXES-1] != 0) {
 		ri.Terminate( TERM_CLIENT_DROP, "RB_EndSurface() - SHADER_MAX_INDEXES hit");
-	}	
+	}
 	if (input->xyz[SHADER_MAX_VERTEXES-1][0] != 0) {
 		ri.Terminate( TERM_CLIENT_DROP, "RB_EndSurface() - SHADER_MAX_VERTEXES hit");
 	}

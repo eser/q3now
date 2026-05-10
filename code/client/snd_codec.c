@@ -3,30 +3,39 @@
 Copyright (C) 1999-2005 Id Software, Inc.
 Copyright (C) 2005 Stuart Dalton (badcdev@gmail.com)
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
-#include "client.h"
+// snd_codec.c — codec dispatcher + offline availability probe.
+//
+// This TU does not own engine init/shutdown anymore (those live in
+// snd_codec_init.c). It is intentionally free of client-only
+// includes so it can be linked into offline tools (extract-meta) for
+// asset auditing without dragging the audio HW backend or the codec
+// implementations.
+
 #include "snd_codec.h"
+#include "../qcommon/asset_load_log.h"
 
+// Single source of truth for codec extension priority.
+// Engine init walks this; offline probe walks this; runtime fallback
+// in S_CodecGetSound walks this. Order matters: opus first (q3now
+// native), legacy after.
+static const char *s_codec_extensions[] = { "opus", "wav", "ogg", NULL };
+
+// Codecs registered at runtime by S_CodecInit (in snd_codec_init.c).
+// Stays NULL when snd_codec.c is linked standalone (e.g. extract-meta);
+// S_CodecResolves walks the static array above instead.
 static snd_codec_t *codecs;
-
-static void S_CodecRegister( snd_codec_t *codec );
 
 static qboolean S_CodecPreferLegacy( void ) {
 	char profile[16];
@@ -194,45 +203,70 @@ static void *S_CodecGetSound( const char *filename, snd_info_t *info )
 
 /*
 =================
-S_CodecInit
+S_CodecResolves
+
+Offline availability probe: does `name` correspond to a sound file
+the engine could load via any of the canonical codec extensions?
+Walks s_codec_extensions[] (static array) so this works without
+S_CodecInit having registered anything in the dynamic `codecs` list.
+Used by extract-meta and any future asset-audit tool.
 =================
 */
-void S_CodecInit( void )
+qboolean S_CodecResolves( const char *name )
 {
-	codecs = NULL;
+	char normName[ MAX_VFS_PATH ];
+	char localName[ MAX_VFS_PATH ];
+	char altName[ MAX_VFS_PATH ];
 
-#if FEAT_LEGACY_FORMATS_AUDIO
-#ifdef USE_OGG_VORBIS
-	S_CodecRegister( &ogg_codec );
-#endif
-	S_CodecRegister( &wav_codec );
-#endif // FEAT_LEGACY_FORMATS_AUDIO
+	if ( !name || !*name ) return qfalse;
 
-	// Register opus codec last so it is head of list (tried first in fallback)
-	S_CodecRegister( &opus_codec );
-}
+	// Backslash normalize (matches S_CodecGetSound).
+	Q_strncpyz( normName, name, sizeof( normName ) );
+	for ( char *p = normName; *p; p++ ) {
+		if ( *p == '\\' ) *p = '/';
+	}
 
+	COM_StripExtension( normName, localName, sizeof( localName ) );
 
-/*
-=================
-S_CodecShutdown
-=================
-*/
-void S_CodecShutdown( void )
-{
-	codecs = NULL;
+	for ( const char **ext = s_codec_extensions; *ext; ext++ ) {
+		fileHandle_t f;
+		Com_sprintf( altName, sizeof( altName ), "%s.%s", localName, *ext );
+		if ( FS_FOpenFileRead( altName, &f, qtrue ) > 0 ) {
+			FS_FCloseFile( f );
+			return qtrue;
+		}
+	}
+	return qfalse;
 }
 
 
 /*
 =================
 S_CodecRegister
+
+Append a codec to the head of the dispatcher list. Called from
+snd_codec_init.c::S_CodecInit at engine startup.
 =================
 */
-static void S_CodecRegister( snd_codec_t *codec )
+void S_CodecRegister( snd_codec_t *codec )
 {
 	codec->next = codecs;
 	codecs = codec;
+}
+
+
+/*
+=================
+S_CodecResetList
+
+Clear the dispatcher list. Called at the top of S_CodecInit (in
+snd_codec_init.c) and at S_CodecShutdown so engine restart paths
+can re-register codecs cleanly.
+=================
+*/
+void S_CodecResetList( void )
+{
+	codecs = NULL;
 }
 
 

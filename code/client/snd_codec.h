@@ -3,21 +3,15 @@
 Copyright (C) 1999-2005 Id Software, Inc.
 Copyright (C) 2005 Stuart Dalton (badcdev@gmail.com)
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -76,6 +70,22 @@ void *S_CodecLoad(const char *filename, snd_info_t *info);
 snd_stream_t *S_CodecOpenStream(const char *filename);
 void S_CodecCloseStream(snd_stream_t *stream);
 int S_CodecReadStream(snd_stream_t *stream, int bytes, void *buffer);
+
+// Probe whether `name` resolves to any registered codec format,
+// applying the same path normalization and extension fallback as
+// S_CodecGetSound. Does NOT allocate streams or decode buffers.
+// Walks the static codec extension priority list, not the dynamic
+// `codecs` linked list — safe to call from offline tools that link
+// snd_codec.c without codec implementations or calling S_CodecInit.
+qboolean S_CodecResolves( const char *name );
+
+// Exposed so snd_codec_init.c can register codecs from a separate TU.
+// (Was static in pre-split snd_codec.c.)
+void S_CodecRegister( snd_codec_t *codec );
+
+// Clear the dispatcher list — called at the top of S_CodecInit to
+// support engine restart paths that re-register codecs from scratch.
+void S_CodecResetList( void );
 
 // Util functions (used by codecs)
 snd_stream_t *S_CodecUtilOpen(const char *filename, snd_codec_t *codec);

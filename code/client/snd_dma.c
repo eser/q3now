@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -279,7 +274,7 @@ static sfx_t *S_FindName( const char *name ) {
 		}
 		s_numSfx++;
 	}
-	
+
 	sfx = &s_knownSfx[i];
 	memset (sfx, 0, sizeof(*sfx));
 	sfx->soundName = CopyString( name );
@@ -702,7 +697,7 @@ so sound doesn't stutter.
 */
 static void S_Base_ClearSoundBuffer( void ) {
 	int		clear;
-		
+
 	if (!s_soundStarted)
 		return;
 
@@ -721,7 +716,7 @@ static void S_Base_ClearSoundBuffer( void ) {
 		clear = 0;
 
 	SNDDMA_BeginPainting();
-	
+
 	if ( dma.buffer )
 		memset(dma.buffer, clear, dma.samples * dma.samplebits/8);
 
@@ -947,14 +942,14 @@ void S_AddLoopSounds( void ) {
 
 		// allocate a channel
 		ch = &loop_channels[numLoopChannels];
-		
+
 		if (left_total > 255) {
 			left_total = 255;
 		}
 		if (right_total > 255) {
 			right_total = 255;
 		}
-		
+
 		ch->master_vol = MASTER_VOL;
 		ch->leftvol = left_total;
 		ch->rightvol = right_total;
@@ -971,7 +966,7 @@ void S_AddLoopSounds( void ) {
 
 //=============================================================================
 
-portable_samplepair_t *S_GetRawSamplePointer( void ) 
+portable_samplepair_t *S_GetRawSamplePointer( void )
 {
 	return s_rawsamples;
 }
@@ -1241,7 +1236,7 @@ static void S_GetSoundtime( void )
 	if (samplepos < oldsamplepos)
 	{
 		buffers++;					// buffer wrapped
-		
+
 		if (s_paintedtime > 0x40000000)
 		{	// time to chop things off to avoid 32 bit limits
 			buffers = 0;

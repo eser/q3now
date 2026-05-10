@@ -4,21 +4,15 @@ Copyright (C) 2011 Thilo Schulz <thilo@tjps.eu>
 Copyright (C) 2011 Matthias Bentrup <matthias.bentrup@googlemail.com>
 Copyright (C) 2011-2019 Zack Middleton <zturtleman@gmail.com>
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -1172,7 +1166,7 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 	// when the surfaces are rendered, they don't need to be
 	// range checked again.
 	//
-	if ( (ent->e.frame >= data->num_frames) 
+	if ( (ent->e.frame >= data->num_frames)
 	     || (ent->e.frame < 0)
 	     || (ent->e.oldframe >= data->num_frames)
 	     || (ent->e.oldframe < 0) ) {
@@ -1228,9 +1222,9 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 
 		// stencil shadows can't do personal models unless I polyhedron clip
 		if ( !personalModel
-			&& r_shadows->integer == 2 
+			&& r_shadows->integer == 2
 			&& fogNum == 0
-			&& !(ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) ) 
+			&& !(ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) )
 			&& shader->sort == SS_OPAQUE ) {
 			R_AddDrawSurf( (void *)surface, tr.shadowShader, 0, 0 );
 		}
@@ -1548,7 +1542,7 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 }
 
 int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
-		  int startFrame, int endFrame, 
+		  int startFrame, int endFrame,
 		  float frac, const char *tagName ) {
 	float	jointMats[IQM_MAX_JOINTS * 12];
 	int	joint;

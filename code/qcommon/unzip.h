@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -26,14 +21,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #if defined(STRICTUNZIP) || defined(STRICTZIPUNZIP)
 /* like the STRICT of WIN32, we define a pointer that cannot be converted
     from (void*) without cast */
-typedef struct TagunzFile__ { int unused; } unzFile__; 
+typedef struct TagunzFile__ { int unused; } unzFile__;
 typedef unzFile__ *unzFile;
 #else
 typedef void* unzFile;
 #endif
 
 /* tm_unz contain date/time info */
-typedef struct tm_unz_s 
+typedef struct tm_unz_s
 {
 	unsigned int tm_sec;            /* seconds after the minute - [0,59] */
 	unsigned int tm_min;            /* minutes after the hour - [0,59] */
@@ -61,8 +56,8 @@ typedef struct unz_file_info_s
     unsigned long compression_method;   /* compression method              2 unsigned chars */
     unsigned long dosDate;              /* last mod file date in Dos fmt   4 unsigned chars */
     unsigned long crc;                  /* crc-32                          4 unsigned chars */
-    unsigned long compressed_size;      /* compressed size                 4 unsigned chars */ 
-    unsigned long uncompressed_size;    /* uncompressed size               4 unsigned chars */ 
+    unsigned long compressed_size;      /* compressed size                 4 unsigned chars */
+    unsigned long uncompressed_size;    /* uncompressed size               4 unsigned chars */
     unsigned long size_filename;        /* filename length                 2 unsigned chars */
     unsigned long size_file_extra;      /* extra field length              2 unsigned chars */
     unsigned long size_file_comment;    /* file comment length             2 unsigned chars */
@@ -301,7 +296,7 @@ extern int unzCloseCurrentFile (unzFile file);
   Return UNZ_CRCERROR if all the file was read but the CRC is not good
 */
 
-												
+
 extern int unzReadCurrentFile (unzFile file, void* buf, unsigned len);
 
 /*
@@ -324,7 +319,7 @@ extern long unztell(unzFile file);
 extern int unzeof (unzFile file);
 
 /*
-  return 1 if the end of file was reached, 0 elsewhere 
+  return 1 if the end of file was reached, 0 elsewhere
 */
 
 extern int unzGetLocalExtrafield (unzFile file, void* buf, unsigned len);

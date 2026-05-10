@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -243,19 +238,19 @@ winding_t *BaseWindingForPlane (vec3_t normal, vec_t dist)
 
 // project a really big	axis aligned box onto the plane
 	winding_t *w = AllocWinding (4);
-	
+
 	VectorSubtract (org, vright, w->p[0]);
 	VectorAdd (w->p[0], vup, w->p[0]);
-	
+
 	VectorAdd (org, vright, w->p[1]);
 	VectorAdd (w->p[1], vup, w->p[1]);
-	
+
 	VectorAdd (org, vright, w->p[2]);
 	VectorSubtract (w->p[2], vup, w->p[2]);
-	
+
 	VectorSubtract (org, vright, w->p[3]);
 	VectorSubtract (w->p[3], vup, w->p[3]);
-	
+
 	w->numpoints = 4;
 
 	return w;
@@ -348,7 +343,7 @@ static void ClipWindingEpsilon( winding_t *in, vec3_t normal, vec_t dist, vec_t 
 	for (int i=0 ; i<in->numpoints ; i++)
 	{
 		vec_t *p1 = in->p[i];
-		
+
 		if (sides[i] == SIDE_ON)
 		{
 			VectorCopy (p1, f->p[f->numpoints]);
@@ -357,7 +352,7 @@ static void ClipWindingEpsilon( winding_t *in, vec3_t normal, vec_t dist, vec_t 
 			b->numpoints++;
 			continue;
 		}
-	
+
 		if (sides[i] == SIDE_FRONT)
 		{
 			VectorCopy (p1, f->p[f->numpoints]);
@@ -371,7 +366,7 @@ static void ClipWindingEpsilon( winding_t *in, vec3_t normal, vec_t dist, vec_t 
 
 		if (sides[i+1] == SIDE_ON || sides[i+1] == sides[i])
 			continue;
-			
+
 		// generate a split point
 		vec_t *p2 = in->p[(i+1)%in->numpoints];
 		double d1 = dists[i], d2 = dists[i+1];
@@ -388,13 +383,13 @@ static void ClipWindingEpsilon( winding_t *in, vec3_t normal, vec_t dist, vec_t 
 				mid[j] = d1 + dot * ( d2 - d1 );
 			}
 		}
-			
+
 		VectorCopy (mid, f->p[f->numpoints]);
 		f->numpoints++;
 		VectorCopy (mid, b->p[b->numpoints]);
 		b->numpoints++;
 	}
-	
+
 	if (f->numpoints > maxpts || b->numpoints > maxpts)
 		Com_Terminate( TERM_CLIENT_DROP, "ClipWinding: points exceeded estimate");
 	if (f->numpoints > MAX_POINTS_ON_WINDING || b->numpoints > MAX_POINTS_ON_WINDING)
@@ -454,14 +449,14 @@ void ChopWindingInPlace( winding_t **inout, const vec3_t normal, vec_t dist, vec
 	for (int i=0 ; i<in->numpoints ; i++)
 	{
 		vec_t *p1 = in->p[i];
-		
+
 		if (sides[i] == SIDE_ON)
 		{
 			VectorCopy (p1, f->p[f->numpoints]);
 			f->numpoints++;
 			continue;
 		}
-	
+
 		if (sides[i] == SIDE_FRONT)
 		{
 			VectorCopy (p1, f->p[f->numpoints]);
@@ -470,7 +465,7 @@ void ChopWindingInPlace( winding_t **inout, const vec3_t normal, vec_t dist, vec
 
 		if (sides[i+1] == SIDE_ON || sides[i+1] == sides[i])
 			continue;
-			
+
 		// generate a split point
 		vec_t *p2 = in->p[(i+1)%in->numpoints];
 		double d1 = dists[i], d2 = dists[i+1];
@@ -487,11 +482,11 @@ void ChopWindingInPlace( winding_t **inout, const vec3_t normal, vec_t dist, vec
 				mid[j] = d1 + dot * ( d2 - d1 );
 			}
 		}
-			
+
 		VectorCopy (mid, f->p[f->numpoints]);
 		f->numpoints++;
 	}
-	
+
 	if (f->numpoints > maxpts)
 		Com_Terminate( TERM_CLIENT_DROP, "ClipWinding: points exceeded estimate");
 	if (f->numpoints > MAX_POINTS_ON_WINDING)

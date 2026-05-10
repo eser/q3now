@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // cmodel.c -- model loading
@@ -469,9 +464,36 @@ static void CMod_LoadBrushSides( void )
 /*
 =================
 CMod_LoadEntityString
+
+Load the entity string. Prefers an external override file at
+maps/<mapname>.ent (plain-text Q3 entity grammar) over the BSP's
+embedded entity lump. The .ent override is server-side only; clients
+never read it. There is no checksum or hot-reload — the file is read
+once per map load, exactly like the BSP lump.
 =================
 */
 static void CMod_LoadEntityString( void ) {
+	char         path[MAX_QPATH];
+	fileHandle_t f;
+	int          extLen;
+
+	Com_sprintf( path, sizeof( path ), "maps/%s.ent", cm.name );
+	extLen = FS_FOpenFileRead( path, &f, qfalse );
+
+	if ( f != FS_INVALID_HANDLE && extLen > 0 ) {
+		cm.entityString = Hunk_Alloc( extLen + 1, h_high );
+		FS_Read( cm.entityString, extLen, f );
+		cm.entityString[extLen] = '\0';
+		cm.numEntityChars = extLen;
+		FS_FCloseFile( f );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_loading),
+			"Loaded external entities from %s (%d bytes)\n", path, extLen );
+		return;
+	}
+	if ( f != FS_INVALID_HANDLE ) {
+		FS_FCloseFile( f );
+	}
+
 	cm.entityString = Hunk_Alloc( cm_bsp->entityStringLength + 1, h_high );
 	cm.numEntityChars = cm_bsp->entityStringLength;
 	memcpy( cm.entityString, cm_bsp->entityString, cm_bsp->entityStringLength );
@@ -529,7 +551,12 @@ static void CMod_LoadPatches( void ) {
 	vec3_t points[MAX_PATCH_VERTS];
 
 	cm.numSurfaces = count;
-	cm.surfaces = Hunk_Alloc( cm.numSurfaces * sizeof( cm.surfaces[0] ), h_high );
+	// cm.surfaces is `cPatch_t **` (array of pointers, one slot per surface,
+	// NULL for non-patch surfaces). Using `sizeof(cPatch_t *)` rather than
+	// `sizeof(cm.surfaces[0])` documents that we're reserving room for
+	// pointers (not for cPatch_t structs) and dodges clang-tidy's
+	// bugprone-sizeof-expression "sizeof(A*); pointer to aggregate" check.
+	cm.surfaces = Hunk_Alloc( cm.numSurfaces * sizeof( cPatch_t * ), h_high );
 
 	drawVert_t *dv = cm_bsp->drawVerts;
 	unsigned totalVerts = cm_bsp->numDrawVerts;

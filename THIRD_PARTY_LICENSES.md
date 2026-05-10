@@ -44,7 +44,7 @@ For machine-readable enumeration of every transitive dependency, see:
 ## 1. Project license & derivation
 
 q3now and Wired is licensed under the **GNU General Public License, version 2 or
-later (GPL-2.0-or-later)**. The full license text is in `COPYING.txt` at
+later (GPL-2.0-or-later)**. The full license text is in `LICENSE` at
 the repository root.
 
 q3now and Wired is derived from **ioquake3** (`https://github.com/ioquake/ioq3`),

@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 
@@ -31,7 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define INTERNAL_NODE (HMAX+1)
 
 typedef struct nodetype {
-	struct	nodetype *left, *right, *parent; /* tree structure */ 
+	struct	nodetype *left, *right, *parent; /* tree structure */
 	struct	nodetype *next, *prev; /* doubly-linked list */
 	struct	nodetype **head; /* highest ranked node in block */
 	int		weight;
@@ -92,7 +87,7 @@ static void free_ppnode(huff_t* huff, node_t **ppnode) {
 }
 
 /* Swap the location of these two nodes in the tree */
-static void swap (huff_t* huff, node_t *node1, node_t *node2) { 
+static void swap (huff_t* huff, node_t *node1, node_t *node2) {
 	node_t *par1, *par2;
 
 	par1 = node1->parent;
@@ -117,7 +112,7 @@ static void swap (huff_t* huff, node_t *node1, node_t *node2) {
 	} else {
 		huff->tree = node1;
 	}
-  
+
 	node1->parent = par2;
 	node2->parent = par1;
 }
@@ -176,7 +171,7 @@ static void increment(huff_t* huff, node_t *node) {
 	node->weight++;
 	if (node->next && node->next->weight == node->weight) {
 		node->head = node->next->head;
-	} else { 
+	} else {
 		node->head = get_ppnode(huff);
 		*node->head = node;
 	}
@@ -213,7 +208,7 @@ static void Huff_addRef(huff_t* huff, byte ch) {
 		}
 		huff->lhead->next = tnode2;
 		tnode2->prev = huff->lhead;
- 
+
 		tnode->symbol = ch;
 		tnode->weight = 1;
 		tnode->next = huff->lhead->next;
@@ -234,7 +229,7 @@ static void Huff_addRef(huff_t* huff, byte ch) {
 		huff->lhead->next = tnode;
 		tnode->prev = huff->lhead;
 		tnode->left = tnode->right = NULL;
- 
+
 		if (huff->lhead->parent) {
 			if (huff->lhead->parent->left == huff->lhead) { /* lhead is guaranteed to by the NYT */
 				huff->lhead->parent->left = tnode2;
@@ -242,17 +237,17 @@ static void Huff_addRef(huff_t* huff, byte ch) {
 				huff->lhead->parent->right = tnode2;
 			}
 		} else {
-			huff->tree = tnode2; 
+			huff->tree = tnode2;
 		}
- 
+
 		tnode2->right = tnode;
 		tnode2->left = huff->lhead;
- 
+
 		tnode2->parent = huff->lhead->parent;
 		huff->lhead->parent = tnode->parent = tnode2;
-     
+
 		huff->loc[ch] = tnode;
- 
+
 		increment(huff, tnode2->parent);
 	} else {
 		increment(huff, huff->loc[ch]);
@@ -402,7 +397,7 @@ void Huff_Init(huffman_t *huff) {
 	memset(&huff->compressor, 0, sizeof(huff_t));
 	memset(&huff->decompressor, 0, sizeof(huff_t));
 
-	// Initialize the tree & list with the NYT node 
+	// Initialize the tree & list with the NYT node
 	huff->decompressor.tree = huff->decompressor.lhead = huff->decompressor.ltail = huff->decompressor.loc[NYT] = &(huff->decompressor.nodeList[huff->decompressor.blocNode++]);
 	huff->decompressor.tree->symbol = NYT;
 	huff->decompressor.tree->weight = 0;

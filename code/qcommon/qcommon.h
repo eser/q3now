@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 // qcommon.h -- definitions common between client and server, but not game.or ref modules
@@ -814,6 +809,12 @@ extern int fs_lastPakIndex;
 
 extern qboolean fs_reordered;
 
+// Tool-mode opt-out: when set qtrue before FS_InitFilesystem (only the
+// extract-meta tool does this today), FS_Restart skips its
+// "Couldn't load default.cfg" fatal check. Tools that bring up the FS
+// purely to enumerate files / parse BSPs don't need a baseq3 config.
+extern qboolean fs_skipExecDefaults;
+
 int		FS_Write( const void *buffer, int len, fileHandle_t f );
 
 int		FS_Read( void *buffer, int len, fileHandle_t f );
@@ -1287,6 +1288,12 @@ unsigned int Com_TouchMemory( void );
 void Com_Init( char *commandLine );
 void Com_FrameInit( void );
 void Com_Frame( qboolean noDelay );
+
+// Zone allocator initializers — exposed so out-of-tree consumers
+// (extract-meta tool) can bring up the zone before Cvar_Init without
+// pulling in the full Com_Init pipeline.
+void Com_InitSmallZoneMemory( void );
+void Com_InitZoneMemory( void );
 
 /*
 ==============================================================

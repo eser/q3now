@@ -1,22 +1,17 @@
 /*
 ===========================================================================
 Copyright (C) 1999-2005 Id Software, Inc.
+Copyright (C) 2024 Wired engine contributors
 
-This file is part of Quake III Arena source code.
+This file is part of the Wired Engine (derived from idTech 3 & 4 source
+code and community around it). It is free software released under the terms
+of the GNU General Public License version 2 or (at your option) any later
+version.
 
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+Quake III Arena, q3now, Wired Engine and the rest are licensed under the
+**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
+The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
+repository root.
 ===========================================================================
 */
 /*****************************************************************************
@@ -33,6 +28,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "qcommon.h"
 #include "unzip.h"
 #include "q_feats.h"
+#include "maps/meta.h"
 
 #if FEAT_SW3Z
 #include "sw3z.h"
@@ -313,6 +309,12 @@ static fileHandleData_t	fsh[MAX_FILE_HANDLES];
 // TTimo - https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=540
 // whether we did a reorder on the current search path when joining the server
 qboolean fs_reordered;
+
+// Tool-mode opt-out (see qcommon.h). Default qfalse keeps engine
+// behavior identical: missing default.cfg is fatal. The extract-meta
+// tool sets this qtrue before FS_InitFilesystem so it can bring the
+// VFS up without a configured baseq3.
+qboolean fs_skipExecDefaults = qfalse;
 
 #define MAX_REF_PAKS	MAX_STRING_TOKENS
 
@@ -6242,7 +6244,11 @@ void FS_Restart( int checksumFeed ) {
 	// if we can't find default.cfg, assume that the paths are
 	// busted and error out now, rather than getting an unreadable
 	// graphics screen when the font fails to load
-	if ( FS_ReadFile( "default.cfg", NULL ) <= 0 ) {
+	//
+	// Tools that don't need engine configuration (extract-meta,
+	// future asset auditors) set fs_skipExecDefaults qtrue before
+	// FS_InitFilesystem to bypass this fatal check.
+	if ( !fs_skipExecDefaults && FS_ReadFile( "default.cfg", NULL ) <= 0 ) {
 		// this might happen when connecting to a pure server not using BASEGAME/pak0.pk3
 		// (for instance a TA demo server)
 		if (lastValidGame[0]) {
@@ -6268,6 +6274,11 @@ void FS_Restart( int checksumFeed ) {
 	execConfig = qfalse;
 
 	Q_strncpyz( lastValidGame, fs_gamedirvar->string, sizeof( lastValidGame ) );
+
+	// Refresh the map roster after the search path is rebuilt. Fresh paks
+	// can introduce new maps; deleted paks can remove them. Both maps_list[]
+	// and the Maps_Arena (remap tables) are reset here.
+	Maps_ScanAll();
 }
 
 
