@@ -397,58 +397,6 @@ ralBuffer_t *vk_ral_lookup_buffer( VkBuffer vkBuf ) {
 	return NULL;
 }
 
-ralPipeline_t *vk_ral_lookup_pipeline( VkPipeline vkPipe ) {
-	uint32_t i, j;
-	if ( vkPipe == VK_NULL_HANDLE ) return NULL;
-	// Phase 7.4c-submit-A3 — RAL siblings now identity-share their
-	// VkPipelineLayout with the renderer's qvkCreatePipelineLayout-created
-	// handle (via ralGraphicsPipelineCreateInfo_t.externalLayout). The lookup
-	// scan below returns a usable sibling whose vkCmdBindPipeline is
-	// layout-compatible with the renderer's vkCmdBindDescriptorSets recorded
-	// on the same parallel cmd buffer — no more layout-incompatibility VUIDs.
-	// Centralized helper pipelines — vk.pipelines[].ral_handle[] mirrors
-	// vk.pipelines[].pipeline_handle[] (one slot per render-pass variant).
-	for ( i = 0; i < (uint32_t)vk.pipelines_count; i++ ) {
-		for ( j = 0; j < RENDER_PASS_COUNT; j++ ) {
-			if ( vk.pipelines[i].handle[j] == vkPipe && vk.pipelines[i].ral_handle[j] != NULL ) {
-				return vk.pipelines[i].ral_handle[j];
-			}
-		}
-	}
-	// Special-case sibling fields. List once; future RAL pipeline additions
-	// extend here.
-	#define MATCH( vk_field, ral_field ) if ( (vk_field) == vkPipe && (ral_field) != NULL ) return (ral_field)
-	MATCH( vk.gamma_pipeline,             vk.ral_gamma_pipeline );
-	MATCH( vk.capture_pipeline,           vk.ral_capture_pipeline );
-	MATCH( vk.bloom_extract_pipeline,     vk.ral_bloom_extract_pipeline );
-	MATCH( vk.bloom_blend_pipeline,       vk.ral_bloom_blend_pipeline );
-	MATCH( vk.smaa_edge_pipeline,         vk.ral_smaa_edge_pipeline );
-	MATCH( vk.smaa_blend_pipeline,        vk.ral_smaa_blend_pipeline );
-	MATCH( vk.smaa_resolve_pipeline,      vk.ral_smaa_resolve_pipeline );
-	MATCH( vk.tonemap_pipeline,           vk.ral_tonemap_pipeline );
-	for ( i = 0; i < ARRAY_LEN( vk.tonemap_variants ); i++ ) {
-		MATCH( vk.tonemap_variants[i],    vk.ral_tonemap_variants[i] );
-	}
-	for ( i = 0; i < ARRAY_LEN( vk.blur_pipeline ); i++ ) {
-		MATCH( vk.blur_pipeline[i],       vk.ral_blur_pipeline[i] );
-	}
-	MATCH( vk.ribbon.pipeline_alpha,      vk.ribbon.ral_pipeline_alpha );
-	MATCH( vk.ribbon.pipeline_additive,   vk.ribbon.ral_pipeline_additive );
-	MATCH( vk.beam.pipeline,              vk.beam.ral_pipeline );
-	MATCH( vk.sprite.pipeline_alpha,      vk.sprite.ral_pipeline_alpha );
-	MATCH( vk.sprite.pipeline_additive,   vk.sprite.ral_pipeline_additive );
-	MATCH( vk.particle.compute_pipeline,        vk.particle.ral_compute_pipeline );
-	MATCH( vk.particle.render_pipeline_alpha,   vk.particle.ral_render_pipeline_alpha );
-	MATCH( vk.particle.render_pipeline_additive, vk.particle.ral_render_pipeline_additive );
-#if FEAT_IQM
-	MATCH( vk.iqmGpu.pipeline,            vk.iqmGpu.ral_pipeline );
-#endif
-#if FEAT_SHADOW_MAPPING
-	MATCH( vk.shadowMap.depthPipeline,    vk.shadowMap.ral_depthPipeline );
-#endif
-	#undef MATCH
-	return NULL;
-}
 
 struct ralRenderPass_s *vk_ral_lookup_render_pass( VkRenderPass vkRp ) {
 	uint32_t i;
@@ -891,20 +839,10 @@ ralBindGroup_t *vk_ral_lookup_bindgroup( VkDescriptorSet vkSet ) {
 			return s_adopted_bgs[i];
 		}
 	}
-	// Phase 7.4c-cmd: also walk the per-frame ring adoption mirror. These
-	// are per-image VkDescriptorSets (allocated at R_CreateImage time) that
-	// vk_update_descriptor parks in vk.cmd->descriptor_set.current_ral[]
-	// alongside the matching .current[] slot. Scanning this short array
-	// is O(VK_DESC_COUNT+1) = O(8) and only fires on the miss path of the
-	// boot-time registry above.
-	if ( vk.cmd != NULL ) {
-		for ( i = 0; i < ARRAY_LEN( vk.cmd->descriptor_set.current_ral ); i++ ) {
-			ralBindGroup_t *bg = vk.cmd->descriptor_set.current_ral[i];
-			if ( bg != NULL && Ral_GetBindGroupHandle( bg ) == (void *)vkSet ) {
-				return bg;
-			}
-		}
-	}
+	// Phase 7.4c-submit-sibling-retire — per-frame ring adoption mirror
+	// (vk.cmd->descriptor_set.current_ral[]) was deleted alongside the
+	// parallel bind helper; the boot-time s_adopted_bgs registry above is
+	// the only lookup source now.
 	return NULL;
 }
 
@@ -1001,38 +939,10 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 	// checks each sibling field and finds NULL (we cleared them below), so it
 	// only destroys the legacy VkPipelines.
 	{
-		uint32_t i, j;
-		#define KILL_PIPE( field )   do { if ( (field) ) { Ral_DestroyPipeline      ( (field) ); (field) = NULL; } } while (0)
+		uint32_t i;
+		// Phase 7.4c-submit-sibling-retire — all 21 sibling pipeline KILL_PIPE
+		// entries deleted (fields removed from vk.h). BGL teardown below stays.
 		#define KILL_BGL(  field )   do { if ( (field) ) { Ral_DestroyBindGroupLayout( (field) ); (field) = NULL; } } while (0)
-		// centralized helper variants
-		for ( i = 0; i < vk.pipelines_count; i++ )
-			for ( j = 0; j < RENDER_PASS_COUNT; j++ )
-				KILL_PIPE( vk.pipelines[i].ral_handle[j] );
-		// post-process + bloom + capture + tonemap + gamma + blur
-		KILL_PIPE( vk.ral_gamma_pipeline );
-		KILL_PIPE( vk.ral_tonemap_pipeline );
-		for ( i = 0; i < ARRAY_LEN( vk.ral_tonemap_variants ); i++ )
-			KILL_PIPE( vk.ral_tonemap_variants[i] );
-		KILL_PIPE( vk.ral_capture_pipeline );
-		KILL_PIPE( vk.ral_bloom_extract_pipeline );
-		KILL_PIPE( vk.ral_bloom_blend_pipeline );
-		for ( i = 0; i < ARRAY_LEN( vk.ral_blur_pipeline ); i++ )
-			KILL_PIPE( vk.ral_blur_pipeline[i] );
-		// SMAA three-pass
-		KILL_PIPE( vk.ral_smaa_edge_pipeline );
-		KILL_PIPE( vk.ral_smaa_blend_pipeline );
-		KILL_PIPE( vk.ral_smaa_resolve_pipeline );
-		// special-case subsystems
-		KILL_PIPE( vk.shadowMap.ral_depthPipeline );
-		KILL_PIPE( vk.ribbon.ral_pipeline_alpha );
-		KILL_PIPE( vk.ribbon.ral_pipeline_additive );
-		KILL_PIPE( vk.beam.ral_pipeline );
-		KILL_PIPE( vk.sprite.ral_pipeline_alpha );
-		KILL_PIPE( vk.sprite.ral_pipeline_additive );
-		KILL_PIPE( vk.particle.ral_compute_pipeline );
-		KILL_PIPE( vk.particle.ral_render_pipeline_alpha );
-		KILL_PIPE( vk.particle.ral_render_pipeline_additive );
-		KILL_PIPE( vk.iqmGpu.ral_pipeline );
 		// adopted BGL wrappers (ownsLayout=qfalse: only the wrapper struct
 		// gets freed, the underlying VkDescriptorSetLayout stays alive for
 		// the legacy renderer code to vkDestroyDescriptorSetLayout later).
@@ -1429,6 +1339,19 @@ typedef struct {
 } ral_pipeline_test_fixture_t;
 
 Q_EXPORT void Ral_PipelineTest( void ) {
+	// Phase 7.4c-submit-sibling-retire — body retired alongside the
+	// sibling pipeline fields. The test enumerated 19 fixtures backed by
+	// vk.ral_*_pipeline siblings; with those fields deleted, every fixture
+	// is permanently N/A. The command stays exported so the cl_main.c
+	// resolver still binds, but it just logs the retirement.
+	ri.Log( SEV_INFO, "===== \\ral_pipeline_test =====\n" );
+	ri.Log( SEV_INFO, "  Sibling pipeline scaffolding retired in Phase 7.4c-submit-sibling-retire.\n" );
+	ri.Log( SEV_INFO, "  Rendering is now exclusively on the legacy VkPipeline path.\n" );
+	ri.Log( SEV_INFO, "===== end \\ral_pipeline_test =====\n" );
+}
+
+#if 0  /* retired Ral_PipelineTest body — kept for archival reference only */
+static void Ral_PipelineTest_retired( void ) {
 	uint32_t pass = 0, fail = 0, na = 0, i;
 
 	ri.Log( SEV_INFO, "===== \\ral_pipeline_test (Phase 7.4c-pipeline-followup-4) =====\n" );
@@ -1574,6 +1497,7 @@ Q_EXPORT void Ral_PipelineTest( void ) {
 	        pass, fail, na );
 	ri.Log( SEV_INFO, "===== end \\ral_pipeline_test =====\n" );
 }
+#endif  /* retired Ral_PipelineTest body */
 
 // ── \ral_resources developer dump (textures + buffers) ─────────────────
 void vk_ral_textures_diag_dump( void ) {

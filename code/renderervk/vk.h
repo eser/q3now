@@ -256,7 +256,6 @@ typedef struct VK_Pipeline {
 	// Phase 7.4c-pipeline — sibling ralPipeline_t * created when
 	// r_useRALPipelines=1. NULL when the flag is off OR when RAL creation
 	// failed for this variant. Rendering still uses .handle[] until 7.4c-cmd.
-	struct ralPipeline_s *ral_handle[ RENDER_PASS_COUNT ];
 } VK_Pipeline_t;
 
 // this structure must be in sync with shader uniforms!
@@ -508,15 +507,14 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 
 typedef struct vk_tess_s {
 	VkCommandBuffer command_buffer;
-
-	// Phase 7.4c-cmd — parallel-paths adoption. Created at vk_begin_frame
-	// (immediately after qvkBeginCommandBuffer) via Ral_AcquireBegunCommandBuffer
-	// (ownsBuffer = qfalse), destroyed at vk_end_frame after
-	// qvkEndCommandBuffer. Lifetime matches command_buffer's per-frame
-	// reuse cycle; the underlying VkCommandBuffer stays in the renderer's
-	// existing pool. Used as the first arg of every Ral_Cmd*Vk parallel-path
-	// call site. NULL when RAL backend isn't up (r_useRAL* all 0 or imported-
-	// mode init failed) — Ral_Cmd*Vk shims are NULL-safe.
+	// Phase 7.4c-submit-lifecycle-retire — per-slot persistent RAL command
+	// buffer acquired once at vk_initialize via Ral_AcquireCommandBuffer.
+	// command_buffer above is an ALIAS to Ral_GetCommandBufferHandle(ral_cmd)
+	// — 123 existing qvkCmd*/qvkBegin/qvkEnd/qvkReset sites continue to
+	// reference the alias unchanged (K2 bypass-state-tracker rule: the
+	// wrapper's state field is intentionally not maintained across legacy
+	// reset/begin/end cycles). Per-frame Ral_Submit's commandBuffers array
+	// reads vk.cmd->ral_cmd directly (no Ral_WrapCommandBuffer per frame).
 	struct ralCommandBuffer_s *ral_cmd;
 
 	VkSemaphore image_acquired;
@@ -547,16 +545,8 @@ typedef struct vk_tess_s {
 		uint32_t		start, end;
 		VkDescriptorSet	current[VK_DESC_COUNT + 1]; // 0:uniform, 1:color0, 2:color1, 3:color2, 4:fog, 5:depth_fade, 6:normalmap/Q1-anim-next
 		uint32_t		offset[1]; // 0 (uniform)
-		// Phase 7.4c-cmd — per-frame ring adoption mirror of current[].
-		// Each slot holds a ralBindGroup_t wrapper (ownsSet=qfalse) for the
-		// VkDescriptorSet currently parked in current[]. Updated by
-		// vk_update_descriptor / vk_reset_descriptor as the per-shader-type
-		// rotation walks fresh VkDescriptorSets in; the old wrapper is
-		// destroyed before the new one is adopted (no leak across rotation).
-		// Read by vk_ral_parallel_bind_descriptor_sets at bind-side call
-		// sites; when adopted, the lookup succeeds without falling through
-		// to the boot-time s_adopted_bgs registry scan.
-		struct ralBindGroup_s *current_ral[VK_DESC_COUNT + 1];
+		// Phase 7.4c-submit-sibling-retire — per-frame parallel ring
+		// bind-group mirror deleted alongside the parallel-bind helper.
 	} descriptor_set;
 
 	Vk_Depth_Range		depth_range;
@@ -830,7 +820,10 @@ typedef struct {
 	uint32_t queue_family_transfer;        // dedicated async-transfer (DMA), or == queue_family_index
 	uint32_t instance_api_version;         // Phase 7.4c-pre: VK_API_VERSION_1_2+ (gated at create_instance)
 	VkDevice device;
-	VkQueue queue;
+	// Phase 7.4c-submit-lifecycle-retire — VkQueue field retired. Per-
+	// frame submit is via RAL (BC-C-final); shutdown queue-wait is via
+	// Ral_WaitQueueIdle (fix3 + BC-C-final). No remaining renderer-side
+	// consumer.
 
 	VkSwapchainKHR swapchain;
 	struct ralSwapchain_s *ral_swapchain;  // Phase 7.4c-submit-followup-present-1 — RAL-owned parallel swapchain wrapper. NULL this turn (Cluster D.5 deferred to -2 due to multi-swapchain-per-surface hazard); the field exists so -2's atomic switchover has a sibling slot ready.
@@ -841,7 +834,10 @@ typedef struct {
 	struct ralSemaphore_s *ral_swapchain_rendering_finished[MAX_SWAPCHAIN_IMAGES];  // Phase 7.4c-submit-followup-present-1 — adopted per-swapchain-image siblings for typed ralPresentInfo_t.waitSemaphores[] (consumed in -2)
 	//uint32_t swapchain_image_index;
 
-	VkCommandPool command_pool;
+	// Phase 7.4c-submit-lifecycle-retire — VkCommandPool command_pool field
+	// retired. All renderer command buffers (per-frame ring + staging) now
+	// live in RAL's b->cmdPools[GRAPHICS] (functional equivalent — same
+	// flags, same queue family).
 #ifdef USE_UPLOAD_QUEUE
 	VkCommandBuffer staging_command_buffer;        // alias — populated from Ral_GetCommandBufferHandle(ral_staging_cmd) at acquisition; the 30+ qvkBegin/End/Reset/Cmd* legacy sites on this field operate on the RAL-allocated underlying VkCommandBuffer transparently
 	struct ralCommandBuffer_s *ral_staging_cmd;     // Phase 7.4c-submit-followup-staging — persistent acquire-once-at-init staging cb (RAL-owned via Ral_AcquireCommandBuffer; ownsBuffer=qtrue); submitted via Ral_Submit at vk_flush_staging_buffer
@@ -950,9 +946,7 @@ typedef struct {
 		VkPipelineLayout		pipeline_layout;     // push(mvp+eyeWorld) + set0(SSBOs)
 		struct ralPipelineLayout_s *ral_pipeline_layout;  // Phase 7.4c-submit-A2 — typed sibling
 		VkPipeline				pipeline_alpha;      // SRC_ALPHA / ONE_MINUS_SRC_ALPHA
-		struct ralPipeline_s   *ral_pipeline_alpha;
 		VkPipeline				pipeline_additive;   // SRC_ALPHA / ONE
-		struct ralPipeline_s   *ral_pipeline_additive;
 		// per-frame staging (host-coherent, mapped)
 		VkBuffer				points_buffer  [NUM_COMMAND_BUFFERS];
 		VkDeviceMemory			points_memory  [NUM_COMMAND_BUFFERS];
@@ -1002,7 +996,6 @@ typedef struct {
 		VkPipelineLayout		pipeline_layout;       // push(mvp+eyeWorld+frameParams+stageParams) + set0
 		struct ralPipelineLayout_s *ral_pipeline_layout;  // Phase 7.4c-submit-A2 — typed sibling
 		VkPipeline				pipeline;              // single ONE/ONE additive pipeline
-		struct ralPipeline_s   *ral_pipeline;
 		// Phase 5J: dedicated REPEAT-mode sampler for beam binding 1.
 		// Beam UV scrolling produces large out-of-range UVs; REPEAT
 		// wraps natively. Ribbon/sprite/particle continue to share
@@ -1095,9 +1088,7 @@ typedef struct {
 		VkPipelineLayout		pipeline_layout;     // push(mvp+viewLeft+viewUp) + set0(SSBO)
 		struct ralPipelineLayout_s *ral_pipeline_layout;  // Phase 7.4c-submit-A2 — typed sibling
 		VkPipeline				pipeline_alpha;      // SRC_ALPHA / ONE_MINUS_SRC_ALPHA
-		struct ralPipeline_s   *ral_pipeline_alpha;
 		VkPipeline				pipeline_additive;   // SRC_ALPHA / ONE
-		struct ralPipeline_s   *ral_pipeline_additive;
 		// per-frame staging (host-coherent, mapped)
 		VkBuffer				headers_buffer [NUM_COMMAND_BUFFERS];
 		VkDeviceMemory			headers_memory [NUM_COMMAND_BUFFERS];
@@ -1147,11 +1138,8 @@ typedef struct {
 		struct ralPipelineLayout_s *ral_compute_pipeline_layout;
 		struct ralPipelineLayout_s *ral_render_pipeline_layout;
 		VkPipeline				compute_pipeline;
-		struct ralPipeline_s   *ral_compute_pipeline;     // Phase 7.4c-pipeline PART F
 		VkPipeline				render_pipeline_alpha;
-		struct ralPipeline_s   *ral_render_pipeline_alpha;
 		VkPipeline				render_pipeline_additive;
-		struct ralPipeline_s   *ral_render_pipeline_additive;
 		// PART E sibling fields for the 15 graphics special-case pipelines
 		// remain at NULL in this turn — per-site parallel creation lands in
 		// 7.4c-pipeline-followup. Their teardown still pairs with
@@ -1227,7 +1215,6 @@ typedef struct {
 		VkPipelineLayout		pipeline_layout;	// push(mvp) + set0(bones) + set1(texture)
 		struct ralPipelineLayout_s *ral_pipeline_layout;  // Phase 7.4c-submit-A2 — typed sibling
 		VkPipeline				pipeline;			// graphics pipeline
-		struct ralPipeline_s   *ral_pipeline;
 		VkBuffer				bone_buffer[NUM_COMMAND_BUFFERS]; // per-frame bone UBOs
 		VkDeviceMemory			bone_memory[NUM_COMMAND_BUFFERS];
 		byte					*bone_ptr[NUM_COMMAND_BUFFERS];   // mapped pointers
@@ -1290,7 +1277,6 @@ typedef struct {
 		struct ralRenderPass_s *ral_renderPass;                // Phase 7.4c-submit-A3 — typed sibling
 		VkFramebuffer    framebuffer[SHADOWMAP_MAX_CASCADES];
 		VkPipeline       depthPipeline;   // depth-only caster pipeline (created against renderPass)
-		struct ralPipeline_s *ral_depthPipeline;   // Phase 7.4c-pipeline-followup
 		VkPipelineLayout depthLayout;     // push constants only (per-cascade MVP)
 		struct ralPipelineLayout_s *ral_depthLayout;  // Phase 7.4c-submit-A2 — typed sibling
 		qboolean         active;
@@ -1618,7 +1604,6 @@ typedef struct {
 	uint32_t q1ls_array_pipeline;	// Q1 4-style lightmap blend, texture array animation
 
 	VkPipeline gamma_pipeline;
-	struct ralPipeline_s *ral_gamma_pipeline;   // Phase 7.4c-pipeline-followup
 
 	// Phase 6B3'-c1: tonemap pass is the new home of scene-radiance
 	// post-process effects. gamma_pipeline is now a thin display-encode
@@ -1640,9 +1625,7 @@ typedef struct {
 #define TONEMAP_VAR_GODRAYS 8
 #define TONEMAP_VAR_COUNT   16
 	VkPipeline tonemap_pipeline;
-	struct ralPipeline_s *ral_tonemap_pipeline;       // Phase 7.4c-pipeline-followup
 	VkPipeline tonemap_variants[TONEMAP_VAR_COUNT];
-	struct ralPipeline_s *ral_tonemap_variants[TONEMAP_VAR_COUNT];
 	VkShaderModule tonemap_variant_fs[TONEMAP_VAR_COUNT];
 	VkPipelineLayout pipeline_layout_ssao;    // 2 samplers: color + depth (SSAO without godrays)
 	VkPipelineLayout pipeline_layout_godrays; // 2 samplers + push constants (godrays sun position)
@@ -1650,20 +1633,13 @@ typedef struct {
 	struct ralPipelineLayout_s *ral_pipeline_layout_ssao;
 	struct ralPipelineLayout_s *ral_pipeline_layout_godrays;
 	VkPipeline capture_pipeline;
-	struct ralPipeline_s *ral_capture_pipeline;
 	VkPipeline bloom_extract_pipeline;
-	struct ralPipeline_s *ral_bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs
-	struct ralPipeline_s *ral_blur_pipeline[VK_NUM_BLOOM_PASSES*2];
 	VkPipeline bloom_blend_pipeline;
-	struct ralPipeline_s *ral_bloom_blend_pipeline;
 
 	VkPipeline smaa_edge_pipeline;
-	struct ralPipeline_s *ral_smaa_edge_pipeline;
 	VkPipeline smaa_blend_pipeline;
-	struct ralPipeline_s *ral_smaa_blend_pipeline;
 	VkPipeline smaa_resolve_pipeline;
-	struct ralPipeline_s *ral_smaa_resolve_pipeline;
 
 	uint32_t frame_count;
 	qboolean active;

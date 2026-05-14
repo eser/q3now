@@ -326,235 +326,16 @@ struct vk_ral_special_pipeline_params_s {
 	const char                 *debugName;
 };
 typedef struct vk_ral_special_pipeline_params_s vk_ral_special_pipeline_params_t;
-static ralPipeline_t *vk_ral_create_special_pipeline( const vk_ral_special_pipeline_params_t *p );
 
 qboolean vk_shader_blob_lookup( VkShaderModule handle, const uint8_t **out_bytes, uint32_t *out_size );
 
-// Phase 7.4c-bindgroup — parallel-paths bind-side helper used at each of the
-// ~25 qvkCmdBindDescriptorSets call sites. Looks up the adopted ralBindGroup_t
-// for each VkDescriptorSet via vk_ral_lookup_bindgroup(), then records the
-// same bind onto the same VkCommandBuffer via Ral_CmdBindBindGroups. The
-// double-record is intentional: same descriptor set on same set index is an
-// idempotent vkCmdBindDescriptorSets call. The parallel path stays inert until
-// 7.4c-submit retires the legacy bind.
-//
-// Returns early (skip parallel record) when ANY set in vkSets[] isn't adopted,
-// e.g. per-shader-type rotating descriptors in vk.cmd->descriptor_set.current[]
-// — those need per-frame re-adoption tied to the cmd-buffer ring that
-// 7.4c-cmd introduces. TODO_7.4c-cmd: rotating-set adoption + drop this guard.
-static void vk_ral_parallel_bind_descriptor_sets( VkCommandBuffer cb,
-                                                  VkPipelineBindPoint bindPoint,
-                                                  VkPipelineLayout layout,
-                                                  uint32_t firstSet,
-                                                  uint32_t count,
-                                                  const VkDescriptorSet *vkSets,
-                                                  uint32_t dynOffCount,
-                                                  const uint32_t *dynOffs )
-{
-	ralBackend_t   *b;
-	ralBindGroup_t *rbg[ VK_DESC_COUNT ];
-	void           *parallelCb;
-	uint32_t        i;
-	(void)cb;   // Phase 7.4c-cmd: legacy cmd buffer no longer used here — we
-	            // record onto the RAL-allocated parallel cmd buffer instead.
-	if ( layout == VK_NULL_HANDLE || count == 0 || count > VK_DESC_COUNT ) return;
-	b = vk_ral_get_backend();
-	if ( !b ) return;
-	if ( !vk.cmd ) return;
-	parallelCb = Ral_GetCommandBufferHandle( vk.cmd->ral_cmd );
-	if ( !parallelCb ) return;
-	for ( i = 0; i < count; i++ ) {
-		rbg[i] = vk_ral_lookup_bindgroup( vkSets[i] );
-		if ( !rbg[i] ) return;
-	}
-	Ral_CmdBindBindGroups( b, parallelCb, (int)bindPoint, (void *)layout,
-	                       firstSet, count, rbg, dynOffCount, dynOffs );
-}
-
-
-// Phase 7.4c-submit-A3 — typed-BeginRenderPass dispatcher for the renderer's
-// parallel buffer. Unpacks a VkRenderPassBeginInfo into the typed Ral_CmdBeginRenderPass
-// args via the vk_ral_lookup_render_pass / vk_ral_lookup_framebuffer reverse
-// lookups + a stack ralRect_t. If either lookup misses (renderpass / framebuffer
-// not yet adopted), the call is silently skipped — legacy qvkCmdBeginRenderPass
-// on the renderer's own buffer remains authoritative.
-static void vk_ral_parallel_begin_render_pass( const VkRenderPassBeginInfo *bi )
-{
-	struct ralRenderPass_s  *rp;
-	struct ralFramebuffer_s *fb;
-	ralRect_t                area;
-	if ( !vk.cmd || !vk.cmd->ral_cmd || !bi ) return;
-	rp = vk_ral_lookup_render_pass ( bi->renderPass  );
-	fb = vk_ral_lookup_framebuffer ( bi->framebuffer );
-	if ( !rp || !fb ) return;
-	area.x       = bi->renderArea.offset.x;
-	area.y       = bi->renderArea.offset.y;
-	area.width   = bi->renderArea.extent.width;
-	area.height  = bi->renderArea.extent.height;
-	// ralClearValue_t is layout-compatible with VkClearValue (color[4] / depthStencil union).
-	Ral_CmdBeginRenderPass( vk.cmd->ral_cmd, rp, fb, &area,
-		bi->clearValueCount, (const ralClearValue_t *)bi->pClearValues,
-		RAL_SUBPASS_CONTENTS_INLINE );
-}
-
-
-// Phase 7.4c-submit-A4 — typed-PipelineBarrier dispatchers for the renderer's
-// parallel buffer. Wrap the renderer's existing qvkCmdPipelineBarrier-style
-// arrays of VkImageMemoryBarrier / VkBufferMemoryBarrier into the typed
-// ralPipelineBarrierInfo_t + ralImageMemoryBarrier_t / ralBufferMemoryBarrier_t
-// surface via vk_ral_lookup_texture / vk_ral_lookup_buffer. If ANY lookup
-// misses (the texture/buffer wasn't adopted by Phase 7.4c-submit-A4's
-// internal-texture sweep — depthFade.image is the known miss-by-design case)
-// the typed call is skipped wholesale; legacy qvkCmdPipelineBarrier on the
-// renderer's own buffer remains authoritative. SEV_WARN logging is gated by
-// a once-per-callsite static flag to avoid spamming each frame.
-//
-// Bounds: VK_RAL_PARALLEL_MAX_BARRIERS caps the on-stack scratch — the
-// renderer's existing callsite set uses at most 2 image barriers + 1 buffer
-// barrier per call, so 8 covers each kind comfortably with growth headroom.
-#define VK_RAL_PARALLEL_MAX_BARRIERS 8
-
-static void vk_ral_parallel_pipeline_barrier_image( VkPipelineStageFlags srcStage,
-                                                    VkPipelineStageFlags dstStage,
-                                                    uint32_t count,
-                                                    const VkImageMemoryBarrier *bs,
-                                                    qboolean *warnedOnce,
-                                                    const char *callsite )
-{
-	ralTexture_t            *rt[ VK_RAL_PARALLEL_MAX_BARRIERS ];
-	ralImageMemoryBarrier_t  rb[ VK_RAL_PARALLEL_MAX_BARRIERS ];
-	ralPipelineBarrierInfo_t info;
-	uint32_t                 i;
-	if ( !vk.cmd || !vk.cmd->ral_cmd || count == 0 || count > VK_RAL_PARALLEL_MAX_BARRIERS || !bs ) return;
-	for ( i = 0; i < count; i++ ) {
-		rt[i] = vk_ral_lookup_texture( bs[i].image );
-		if ( !rt[i] ) {
-			if ( warnedOnce && !*warnedOnce ) {
-				*warnedOnce = qtrue;
-				ri.Log( SEV_WARN, "[VK->RAL] vk_ral_lookup_texture miss at %s (image %u/%u not adopted); skipping typed PipelineBarrier (legacy qvkCmd path remains authoritative)\n",
-				        callsite, i, count );
-			}
-			return;
-		}
-	}
-	memset( rb, 0, sizeof( rb ) );
-	for ( i = 0; i < count; i++ ) {
-		rb[i].srcAccessMask       = bs[i].srcAccessMask;
-		rb[i].dstAccessMask       = bs[i].dstAccessMask;
-		rb[i].oldLayout           = (uint32_t)bs[i].oldLayout;
-		rb[i].newLayout           = (uint32_t)bs[i].newLayout;
-		rb[i].srcQueueFamilyIndex = bs[i].srcQueueFamilyIndex;
-		rb[i].dstQueueFamilyIndex = bs[i].dstQueueFamilyIndex;
-		rb[i].texture             = rt[i];
-		rb[i].aspectMask          = (uint32_t)bs[i].subresourceRange.aspectMask;
-		rb[i].baseMipLevel        = bs[i].subresourceRange.baseMipLevel;
-		rb[i].levelCount          = bs[i].subresourceRange.levelCount;
-		rb[i].baseArrayLayer      = bs[i].subresourceRange.baseArrayLayer;
-		rb[i].layerCount          = bs[i].subresourceRange.layerCount;
-	}
-	memset( &info, 0, sizeof( info ) );
-	info.srcStageMask            = (ralPipelineStageFlags_t)srcStage;
-	info.dstStageMask            = (ralPipelineStageFlags_t)dstStage;
-	info.imageMemoryBarrierCount = count;
-	info.imageMemoryBarriers     = rb;
-	Ral_CmdPipelineBarrierFull( vk.cmd->ral_cmd, &info );
-}
-
-static void vk_ral_parallel_pipeline_barrier_buffer( VkPipelineStageFlags srcStage,
-                                                     VkPipelineStageFlags dstStage,
-                                                     const VkBufferMemoryBarrier *bm,
-                                                     qboolean *warnedOnce,
-                                                     const char *callsite )
-{
-	ralBuffer_t              *rb;
-	ralBufferMemoryBarrier_t  rbm;
-	ralPipelineBarrierInfo_t  info;
-	if ( !vk.cmd || !vk.cmd->ral_cmd || !bm ) return;
-	rb = vk_ral_lookup_buffer( bm->buffer );
-	if ( !rb ) {
-		if ( warnedOnce && !*warnedOnce ) {
-			*warnedOnce = qtrue;
-			ri.Log( SEV_WARN, "[VK->RAL] vk_ral_lookup_buffer miss at %s; skipping typed PipelineBarrier (legacy qvkCmd path remains authoritative)\n", callsite );
-		}
-		return;
-	}
-	memset( &rbm, 0, sizeof( rbm ) );
-	rbm.srcAccessMask       = bm->srcAccessMask;
-	rbm.dstAccessMask       = bm->dstAccessMask;
-	rbm.srcQueueFamilyIndex = bm->srcQueueFamilyIndex;
-	rbm.dstQueueFamilyIndex = bm->dstQueueFamilyIndex;
-	rbm.buffer              = rb;
-	rbm.offset              = bm->offset;
-	rbm.size                = bm->size;
-	memset( &info, 0, sizeof( info ) );
-	info.srcStageMask             = (ralPipelineStageFlags_t)srcStage;
-	info.dstStageMask             = (ralPipelineStageFlags_t)dstStage;
-	info.bufferMemoryBarrierCount = 1;
-	info.bufferMemoryBarriers     = &rbm;
-	Ral_CmdPipelineBarrierFull( vk.cmd->ral_cmd, &info );
-}
-
-// Phase 7.4c-submit-A4 — VkImageCopy region array is binary-compatible with
-// ralImageCopy_t (matching offset/extent/subresource fields) so the cast is
-// sound; the src/dst layouts are passed implicitly by Ral_CmdCopyImage which
-// hard-codes TRANSFER_SRC_OPTIMAL / TRANSFER_DST_OPTIMAL (matching every
-// renderer callsite — verified at 18278 and 18424).
-static void vk_ral_parallel_copy_image( VkImage src, VkImage dst,
-                                        uint32_t regionCount, const VkImageCopy *regions,
-                                        qboolean *warnedOnce,
-                                        const char *callsite )
-{
-	ralTexture_t *rsrc, *rdst;
-	if ( !vk.cmd || !vk.cmd->ral_cmd || regionCount == 0 || !regions ) return;
-	rsrc = vk_ral_lookup_texture( src );
-	rdst = vk_ral_lookup_texture( dst );
-	if ( !rsrc || !rdst ) {
-		if ( warnedOnce && !*warnedOnce ) {
-			*warnedOnce = qtrue;
-			ri.Log( SEV_WARN, "[VK->RAL] vk_ral_lookup_texture miss at %s (src=%p dst=%p); skipping typed CopyImage\n",
-			        callsite, (void *)rsrc, (void *)rdst );
-		}
-		return;
-	}
-	Ral_CmdCopyImage( vk.cmd->ral_cmd, rsrc, rdst, regionCount, (const ralImageCopy_t *)regions );
-}
-
-static void vk_ral_parallel_write_timestamp( VkPipelineStageFlags stage,
-                                             VkQueryPool pool, uint32_t query,
-                                             qboolean *warnedOnce,
-                                             const char *callsite )
-{
-	ralQueryPool_t *rp;
-	if ( !vk.cmd || !vk.cmd->ral_cmd ) return;
-	rp = vk_ral_lookup_query_pool( pool );
-	if ( !rp ) {
-		if ( warnedOnce && !*warnedOnce ) {
-			*warnedOnce = qtrue;
-			ri.Log( SEV_WARN, "[VK->RAL] vk_ral_lookup_query_pool miss at %s; skipping typed WriteTimestamp\n", callsite );
-		}
-		return;
-	}
-	Ral_CmdWriteTimestamp( vk.cmd->ral_cmd, (uint32_t)stage, rp, query );
-}
-
-static void vk_ral_parallel_reset_query_pool( VkQueryPool pool,
-                                              uint32_t firstQuery, uint32_t queryCount,
-                                              qboolean *warnedOnce,
-                                              const char *callsite )
-{
-	ralQueryPool_t *rp;
-	if ( !vk.cmd || !vk.cmd->ral_cmd || queryCount == 0 ) return;
-	rp = vk_ral_lookup_query_pool( pool );
-	if ( !rp ) {
-		if ( warnedOnce && !*warnedOnce ) {
-			*warnedOnce = qtrue;
-			ri.Log( SEV_WARN, "[VK->RAL] vk_ral_lookup_query_pool miss at %s; skipping typed ResetQueryPool\n", callsite );
-		}
-		return;
-	}
-	Ral_CmdResetQueryPool( vk.cmd->ral_cmd, rp, firstQuery, queryCount );
-}
-
+// Phase 7.4c-submit-parallel-retire — the per-frame parallel-paths
+// recording surface (7 helper functions covering descriptor binding,
+// render-pass begin, image/buffer pipeline barriers, image copy,
+// timestamp write, and query-pool reset) was DELETED this turn. The
+// parallel command buffer they targeted was discarded before submit,
+// producing pure validation overhead. The legacy qvkCmd* paths in
+// the renderer (still authoritative) cover the same work directly.
 
 static uint32_t find_memory_type( uint32_t memory_type_bits, VkMemoryPropertyFlags properties ) {
 	VkPhysicalDeviceMemoryProperties memory_properties;
@@ -2852,7 +2633,7 @@ static qboolean vk_create_device( VkPhysicalDevice physical_device, int device_i
 	// Phase 7.4c-pre: select up to 3 queue families (graphics+presentation,
 	// dedicated async-compute, dedicated async-transfer). The RAL backend
 	// will adopt the same vk.device, so it needs all three resolved here;
-	// existing renderer code only ever uses vk.queue_family_index / vk.queue,
+	// existing renderer code only ever uses vk.queue_family_index,
 	// so the dedicated families sit idle on the renderer side and become
 	// available to RAL once descriptor binding migrates in 7.4c proper.
 	{
@@ -4879,8 +4660,6 @@ void vk_init_ribbon( void )
 				p.debugName          = ( variant == 0 ) ? "ral-ribbon-alpha" : "ral-ribbon-additive";
 				p.externalLayout     = vk.ribbon.ral_pipeline_layout;   // Phase 7.4c-submit-A3 — share renderer's VkPipelineLayout.
 				p.externalRenderPass = vk.ral_render_pass.main;          // ribbon draws inside the main pass.
-				if ( variant == 0 ) vk.ribbon.ral_pipeline_alpha    = vk_ral_create_special_pipeline( &p );
-				else                vk.ribbon.ral_pipeline_additive = vk_ral_create_special_pipeline( &p );
 			}
 		}
 	}
@@ -4903,8 +4682,6 @@ void vk_shutdown_ribbon( void )
 		qvkDestroyPipeline( vk.device, vk.ribbon.pipeline_additive, NULL );
 		vk.ribbon.pipeline_additive = VK_NULL_HANDLE;
 	}
-	if ( vk.ribbon.ral_pipeline_alpha    ) { Ral_DestroyPipeline( vk.ribbon.ral_pipeline_alpha    ); vk.ribbon.ral_pipeline_alpha    = NULL; }
-	if ( vk.ribbon.ral_pipeline_additive ) { Ral_DestroyPipeline( vk.ribbon.ral_pipeline_additive ); vk.ribbon.ral_pipeline_additive = NULL; }
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.ribbon.points_buffer[i] != VK_NULL_HANDLE ) {
@@ -5002,22 +4779,12 @@ void RB_DrawRibbons( void )
 		scissor.extent.height = backEnd.viewParms.viewportHeight;
 		qvkCmdSetViewport( cmd, 0, 1, &viewport );
 		qvkCmdSetScissor ( cmd, 0, 1, &scissor );
-		// Phase 7.4c-cmd — parallel-paths cmd-record (viewport/scissor).
-		Ral_CmdSetViewport(vk.cmd->ral_cmd, (const ralViewport_t *)&viewport);
-		Ral_CmdSetScissor(vk.cmd->ral_cmd, (const ralRect_t *)&scissor);
 	}
 
 	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		vk.ribbon.pipeline_layout, 0, 1, &vk.ribbon.descriptor[frameIdx], 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record.
-	vk_ral_parallel_bind_descriptor_sets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.ribbon.pipeline_layout, 0, 1, &vk.ribbon.descriptor[frameIdx], 0, NULL );
 
 	qvkCmdPushConstants( cmd, vk.ribbon.pipeline_layout,
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-		0, sizeof( pushBuf ), pushBuf );
-	// Phase 7.4c-cmd — parallel-paths push-constants.
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.ribbon.pipeline_layout),
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 		0, sizeof( pushBuf ), pushBuf );
 
@@ -5035,16 +4802,12 @@ void RB_DrawRibbons( void )
 
 		if ( pipe != lastPipeline ) {
 			qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe );
-			// Phase 7.4c-cmd — parallel-paths bind-pipeline.
-			Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(pipe ));
 			lastPipeline = pipe;
 		}
 
 		// 6 verts per segment × (pointCount - 1) segments. firstInstance = i
 		// so the vertex shader sees this header at gl_InstanceIndex.
 		qvkCmdDraw( cmd, ( pointCount - 1 ) * 6, 1, 0, i );
-		// Phase 7.4c-cmd — parallel-paths draw.
-		Ral_CmdDraw( vk.cmd->ral_cmd, ( pointCount - 1 ) * 6, 1, 0, i );
 	}
 
 	// Invalidate cached pipeline / descriptor / depth-range so the next
@@ -5457,7 +5220,6 @@ void vk_init_beam( void )
 			p.debugName          = "ral-beam";
 			p.externalLayout     = vk.beam.ral_pipeline_layout;     // Phase 7.4c-submit-A3
 			p.externalRenderPass = vk.ral_render_pass.main;          // beam draws inside main pass
-			vk.beam.ral_pipeline = vk_ral_create_special_pipeline( &p );
 		}
 	}
 
@@ -5476,7 +5238,6 @@ void vk_shutdown_beam( void )
 		vk.beam.pipeline = VK_NULL_HANDLE;
 	}
 	// Phase 7.4c-pipeline-followup-2 — sibling RAL pipeline teardown.
-	if ( vk.beam.ral_pipeline ) { Ral_DestroyPipeline( vk.beam.ral_pipeline ); vk.beam.ral_pipeline = NULL; }
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.beam.header_buffer[i] != VK_NULL_HANDLE ) {
@@ -5730,18 +5491,10 @@ void RB_DrawBeams( void )
 		scissor.extent.height = backEnd.viewParms.viewportHeight;
 		qvkCmdSetViewport( cmd, 0, 1, &viewport );
 		qvkCmdSetScissor ( cmd, 0, 1, &scissor );
-		// Phase 7.4c-cmd — parallel-paths cmd-record (beam viewport/scissor).
-		Ral_CmdSetViewport(vk.cmd->ral_cmd, (const ralViewport_t *)&viewport);
-		Ral_CmdSetScissor(vk.cmd->ral_cmd, (const ralRect_t *)&scissor);
 	}
 
 	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.beam.pipeline );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline.
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.beam.pipeline ));
 	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.beam.pipeline_layout, 0, 1, &vk.beam.descriptor[frameIdx], 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record.
-	vk_ral_parallel_bind_descriptor_sets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		vk.beam.pipeline_layout, 0, 1, &vk.beam.descriptor[frameIdx], 0, NULL );
 
 	// Phase 5G: outer loop over stage index. Each iteration is one
@@ -5761,17 +5514,11 @@ void RB_DrawBeams( void )
 		qvkCmdPushConstants( cmd, vk.beam.pipeline_layout,
 			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 			0, sizeof( pushBuf ), pushBuf );
-		// Phase 7.4c-cmd — parallel-paths push-constants (beam).
-		Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.beam.pipeline_layout),
-			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-			0, sizeof( pushBuf ), pushBuf );
 
 		// 6 verts × BEAM_AXIAL_MAX slots per instance × drawCount
 		// instances. Vertex shader gates axialCopies > limit AND
 		// stageIdx >= stageCount to degenerate output.
 		qvkCmdDraw( cmd, 6 * BEAM_AXIAL_MAX, vk.beam.drawCount, 0, 0 );
-		// Phase 7.4c-cmd — parallel-paths draw (beam).
-		Ral_CmdDraw( vk.cmd->ral_cmd, 6 * BEAM_AXIAL_MAX, vk.beam.drawCount, 0, 0 );
 	}
 
 	// Invalidate cached binding state (same cleanup ribbon does).
@@ -6054,8 +5801,6 @@ void vk_init_sprite( void )
 				p.debugName          = ( variant == 0 ) ? "ral-sprite-alpha" : "ral-sprite-additive";
 				p.externalLayout     = vk.sprite.ral_pipeline_layout;   // Phase 7.4c-submit-A3
 				p.externalRenderPass = vk.ral_render_pass.main;
-				if ( variant == 0 ) vk.sprite.ral_pipeline_alpha    = vk_ral_create_special_pipeline( &p );
-				else                vk.sprite.ral_pipeline_additive = vk_ral_create_special_pipeline( &p );
 			}
 		}
 	}
@@ -6079,8 +5824,6 @@ void vk_shutdown_sprite( void )
 		vk.sprite.pipeline_additive = VK_NULL_HANDLE;
 	}
 	// Phase 7.4c-pipeline-followup-3 — sibling RAL pipeline teardown.
-	if ( vk.sprite.ral_pipeline_alpha    ) { Ral_DestroyPipeline( vk.sprite.ral_pipeline_alpha    ); vk.sprite.ral_pipeline_alpha    = NULL; }
-	if ( vk.sprite.ral_pipeline_additive ) { Ral_DestroyPipeline( vk.sprite.ral_pipeline_additive ); vk.sprite.ral_pipeline_additive = NULL; }
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.sprite.headers_buffer[i] != VK_NULL_HANDLE ) {
@@ -6171,22 +5914,12 @@ void RB_DrawSprites( void )
 		scissor.extent.height = backEnd.viewParms.viewportHeight;
 		qvkCmdSetViewport( cmd, 0, 1, &viewport );
 		qvkCmdSetScissor ( cmd, 0, 1, &scissor );
-		// Phase 7.4c-cmd — parallel-paths cmd-record (sprite viewport/scissor).
-		Ral_CmdSetViewport(vk.cmd->ral_cmd, (const ralViewport_t *)&viewport);
-		Ral_CmdSetScissor(vk.cmd->ral_cmd, (const ralRect_t *)&scissor);
 	}
 
 	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		vk.sprite.pipeline_layout, 0, 1, &vk.sprite.descriptor[frameIdx], 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record.
-	vk_ral_parallel_bind_descriptor_sets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.sprite.pipeline_layout, 0, 1, &vk.sprite.descriptor[frameIdx], 0, NULL );
 
 	qvkCmdPushConstants( cmd, vk.sprite.pipeline_layout,
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-		0, sizeof( pushBuf ), pushBuf );
-	// Phase 7.4c-cmd — parallel-paths push-constants (sprite).
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.sprite.pipeline_layout),
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 		0, sizeof( pushBuf ), pushBuf );
 
@@ -6239,16 +5972,10 @@ void RB_DrawSprites( void )
 	if ( alphaCount > 0 ) {
 		qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.sprite.pipeline_alpha );
 		qvkCmdDraw( cmd, 6, alphaCount, 0, 0 );
-		// Phase 7.4c-cmd — parallel-paths bind-pipeline + draw (sprite alpha).
-		Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.sprite.pipeline_alpha ));
-		Ral_CmdDraw        ( vk.cmd->ral_cmd, 6, alphaCount, 0, 0 );
 	}
 	if ( additiveCount > 0 ) {
 		qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.sprite.pipeline_additive );
 		qvkCmdDraw( cmd, 6, additiveCount, 0, firstAdditive );
-		// Phase 7.4c-cmd — parallel-paths bind-pipeline + draw (sprite additive).
-		Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.sprite.pipeline_additive ));
-		Ral_CmdDraw        ( vk.cmd->ral_cmd, 6, additiveCount, 0, firstAdditive );
 	}
 
 	// Invalidate cached pipeline / descriptor / depth-range so the next
@@ -6643,29 +6370,9 @@ void vk_init_particle( void )
 		cpInfo.stage.pName  = "main";
 		VK_CHECK( qvkCreateComputePipelines( vk.device, VK_NULL_HANDLE, 1, &cpInfo, NULL, &vk.particle.compute_pipeline ) );
 
-		// Phase 7.4c-pipeline (PART F) — parallel RAL compute pipeline.
-		// Same SPV blob via the side table; numBindGroupLayouts = 0 per the
-		// parallel-paths era (VUID-VkComputePipelineCreateInfo-layout-07988
-		// will fire under validation; harmless — rendering still uses legacy).
-		if ( r_useRALPipelines && r_useRALPipelines->integer != 0 ) {
-			ralBackend_t *backend = vk_ral_get_backend();
-			const uint8_t *cs_bytes = NULL;
-			uint32_t       cs_size  = 0;
-			if ( backend && vk_shader_blob_lookup( vk.modules.particle_integrate_cs, &cs_bytes, &cs_size ) ) {
-				ralComputePipelineCreateInfo_t cci;
-				memset( &cci, 0, sizeof( cci ) );
-				cci.computeSpirv      = (const uint32_t *)cs_bytes;
-				cci.computeSpirvSize  = cs_size;
-				cci.pushConstantSize  = 16;            // particle compute push-constants: time deltas
-				cci.numBindGroupLayouts = 0;           // see PART F note above
-				cci.externalLayout    = vk.particle.ral_compute_pipeline_layout;   // Phase 7.4c-submit-A3
-				cci.debugName         = "ral-particle-integrate-cs";
-				vk.particle.ral_compute_pipeline = Ral_CreateComputePipeline( backend, &cci );
-				if ( !vk.particle.ral_compute_pipeline ) {
-					ri.Log( SEV_DEBUG, "[VK->RAL] particle compute Ral_CreateComputePipeline returned NULL\n" );
-				}
-			}
-		}
+		// Phase 7.4c-submit-sibling-retire — parallel RAL particle compute
+		// pipeline creation block deleted. Legacy particle compute pipeline
+		// above remains authoritative.
 	}
 
 	// ── Render pipelines (alpha + additive variants) ──────────────
@@ -6835,8 +6542,6 @@ void vk_init_particle( void )
 				p.debugName         = ( variant == 0 ) ? "ral-particle-render-alpha" : "ral-particle-render-additive";
 				p.externalLayout    = vk.particle.ral_render_pipeline_layout;   // Phase 7.4c-submit-A3
 				p.externalRenderPass = vk.ral_render_pass.main;
-				if ( variant == 0 ) vk.particle.ral_render_pipeline_alpha    = vk_ral_create_special_pipeline( &p );
-				else                vk.particle.ral_render_pipeline_additive = vk_ral_create_special_pipeline( &p );
 			}
 		}
 	}
@@ -7417,17 +7122,11 @@ void vk_shutdown_particle( void )
 		qvkDestroyPipeline( vk.device, vk.particle.render_pipeline_additive, NULL );
 		vk.particle.render_pipeline_additive = VK_NULL_HANDLE;
 	}
-	if ( vk.particle.ral_render_pipeline_alpha    ) { Ral_DestroyPipeline( vk.particle.ral_render_pipeline_alpha    ); vk.particle.ral_render_pipeline_alpha    = NULL; }
-	if ( vk.particle.ral_render_pipeline_additive ) { Ral_DestroyPipeline( vk.particle.ral_render_pipeline_additive ); vk.particle.ral_render_pipeline_additive = NULL; }
 	if ( vk.particle.compute_pipeline != VK_NULL_HANDLE ) {
 		qvkDestroyPipeline( vk.device, vk.particle.compute_pipeline, NULL );
 		vk.particle.compute_pipeline = VK_NULL_HANDLE;
 	}
 	// Phase 7.4c-pipeline PART F — sibling RAL compute pipeline teardown.
-	if ( vk.particle.ral_compute_pipeline != NULL ) {
-		Ral_DestroyPipeline( vk.particle.ral_compute_pipeline );
-		vk.particle.ral_compute_pipeline = NULL;
-	}
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.particle.frame_buffer[i] != VK_NULL_HANDLE ) {
@@ -7547,20 +7246,12 @@ void RB_RunParticleCompute( void )
 
 	// Bind compute pipeline + descriptor set, dispatch.
 	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.particle.compute_pipeline );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline (particle compute).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.particle.compute_pipeline ));
 	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-		vk.particle.compute_pipeline_layout, 0, 1,
-		&vk.particle.compute_descriptor[pingRead], 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record.
-	vk_ral_parallel_bind_descriptor_sets( cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
 		vk.particle.compute_pipeline_layout, 0, 1,
 		&vk.particle.compute_descriptor[pingRead], 0, NULL );
 
 	// Dispatch ceil(PARTICLES_PER_POOL / 64). Workgroup size = 64.
 	qvkCmdDispatch( cmd, ( PARTICLES_PER_POOL + 63 ) / 64, 1, 1 );
-	// Phase 7.4c-cmd — parallel-paths dispatch (particle compute).
-	Ral_CmdDispatch( vk.cmd->ral_cmd, ( PARTICLES_PER_POOL + 63 ) / 64, 1, 1 );
 
 	// Barrier: compute writes to pool[1-pingRead] must be visible to
 	// the next vertex shader read in RB_DrawParticles. Now outside any
@@ -7587,10 +7278,6 @@ void RB_RunParticleCompute( void )
 	// buffer tracker at vk_initialize time, so vk_ral_lookup_buffer succeeds.
 	{
 		static qboolean warned;
-		vk_ral_parallel_pipeline_barrier_buffer(
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-			&barrier, &warned, "particle-compute-to-vertex" );
 	}
 
 	// Flip ping-pong for next frame.
@@ -7661,16 +7348,9 @@ void RB_DrawParticles( void )
 		scissor.extent.height = backEnd.viewParms.viewportHeight;
 		qvkCmdSetViewport( cmd, 0, 1, &viewport );
 		qvkCmdSetScissor ( cmd, 0, 1, &scissor );
-		// Phase 7.4c-cmd — parallel-paths cmd-record (particle viewport/scissor).
-		Ral_CmdSetViewport(vk.cmd->ral_cmd, (const ralViewport_t *)&viewport);
-		Ral_CmdSetScissor(vk.cmd->ral_cmd, (const ralRect_t *)&scissor);
 	}
 
 	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.particle.render_pipeline_layout, 0, 1,
-		&vk.particle.render_descriptor[renderIdx], 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record.
-	vk_ral_parallel_bind_descriptor_sets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		vk.particle.render_pipeline_layout, 0, 1,
 		&vk.particle.render_descriptor[renderIdx], 0, NULL );
 
@@ -7681,15 +7361,9 @@ void RB_DrawParticles( void )
 	// slots). 16K of small fully-culled quads is cheap on the GPU.
 	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.particle.render_pipeline_alpha );
 	qvkCmdDraw( cmd, 6, PARTICLES_PER_POOL, 0, 0 );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline + draw (particle alpha).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.particle.render_pipeline_alpha ));
-	Ral_CmdDraw        ( vk.cmd->ral_cmd, 6, PARTICLES_PER_POOL, 0, 0 );
 
 	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.particle.render_pipeline_additive );
 	qvkCmdDraw( cmd, 6, PARTICLES_PER_POOL, 0, 0 );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline + draw (particle additive).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.particle.render_pipeline_additive ));
-	Ral_CmdDraw        ( vk.cmd->ral_cmd, 6, PARTICLES_PER_POOL, 0, 0 );
 
 	// Invalidate cached pipeline / descriptor / depth-range so the
 	// next standard draw rebinds correctly. Same cleanup pattern the
@@ -7999,7 +7673,6 @@ void vk_init_iqm_gpu_skinning( void )
 			p.debugName          = "ral-iqm-q3";
 			p.externalLayout     = vk.iqmGpu.ral_pipeline_layout;   // Phase 7.4c-submit-A3
 			p.externalRenderPass = vk.ral_render_pass.main;
-			vk.iqmGpu.ral_pipeline = vk_ral_create_special_pipeline( &p );
 		}
 	}
 
@@ -8022,7 +7695,6 @@ void vk_shutdown_iqm_gpu_skinning( void )
 		vk.iqmGpu.pipeline = VK_NULL_HANDLE;
 	}
 	// Phase 7.4c-pipeline-followup-3 — sibling RAL pipeline teardown.
-	if ( vk.iqmGpu.ral_pipeline ) { Ral_DestroyPipeline( vk.iqmGpu.ral_pipeline ); vk.iqmGpu.ral_pipeline = NULL; }
 
 	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.iqmGpu.bone_buffer[i] != VK_NULL_HANDLE ) {
@@ -8120,7 +7792,7 @@ qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
 	// Ral_AcquireBegunCommandBuffer(GRAPHICS) + Ral_SubmitAndDispose pair. BC-B's
 	// grep missed this site because it bypassed the legacy one-shot helpers
 	// and inlined the same lifecycle directly. RAL_QUEUE_GRAPHICS matches
-	// the legacy vk.queue submit semantics exactly.
+	// the legacy submit semantics exactly.
 	{
 		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
 		if ( rcmd == NULL ) {
@@ -8214,22 +7886,13 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 
 	// bind IQM skinning pipeline
 	qvkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.iqmGpu.pipeline );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline (IQM).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.iqmGpu.pipeline ));
 
 	// push MVP matrix
 	qvkCmdPushConstants( cmd, vk.iqmGpu.pipeline_layout,
 		VK_SHADER_STAGE_VERTEX_BIT, 0, 64, mvp );
-	// Phase 7.4c-cmd — parallel-paths push-constants (IQM MVP).
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.iqmGpu.pipeline_layout),
-		VK_SHADER_STAGE_VERTEX_BIT, 0, 64, mvp );
 
 	// bind descriptor set 0: bone matrices
 	qvkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.iqmGpu.pipeline_layout, 0, 1,
-		&vk.iqmGpu.bone_descriptor[frameIdx], 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record (bones set 0).
-	vk_ral_parallel_bind_descriptor_sets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		vk.iqmGpu.pipeline_layout, 0, 1,
 		&vk.iqmGpu.bone_descriptor[frameIdx], 0, NULL );
 
@@ -8242,21 +7905,13 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 	// stage descriptor pool); not in the boot-time adoption registry. The
 	// parallel helper bails on unadopted lookup until 7.4c-cmd introduces
 	// per-frame rotating-set adoption tied to the cmd-buffer ring.
-	vk_ral_parallel_bind_descriptor_sets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.iqmGpu.pipeline_layout, 1, 1,
-		&textureDescriptor, 0, NULL );
 
 	// bind vertex buffer
 	vertOffset = 0;
 	qvkCmdBindVertexBuffers( cmd, 0, 1, &vertBuffer, &vertOffset );
-	// Phase 7.4c-submit-A2 — typed parallel-paths bind-vertex-buffer (IQM).
-	{ ralBuffer_t *r = vk_ral_lookup_buffer( vertBuffer );
-	  Ral_CmdBindVertexBuffers( vk.cmd->ral_cmd, 0, 1, &r, (const uint64_t *)&vertOffset ); }
 
 	// bind index buffer
 	qvkCmdBindIndexBuffer( cmd, idxBuffer, 0, VK_INDEX_TYPE_UINT32 );
-	// Phase 7.4c-cmd — parallel-paths bind-index-buffer (IQM).
-	Ral_CmdBindIndexBuffer(vk.cmd->ral_cmd, vk_ral_lookup_buffer(idxBuffer), 0, RAL_INDEX_UINT32);
 
 	// set viewport and scissor
 	memset( &viewport, 0, sizeof( viewport ) );
@@ -8266,8 +7921,6 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 	viewport.height = (float)backEnd.viewParms.viewportHeight;
 	viewport.maxDepth = 1.0f;
 	qvkCmdSetViewport( cmd, 0, 1, &viewport );
-	// Phase 7.4c-cmd — parallel-paths viewport (IQM).
-	Ral_CmdSetViewport(vk.cmd->ral_cmd, (const ralViewport_t *)&viewport);
 
 	memset( &scissor, 0, sizeof( scissor ) );
 	scissor.offset.x = backEnd.viewParms.viewportX;
@@ -8275,13 +7928,9 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 	scissor.extent.width = backEnd.viewParms.viewportWidth;
 	scissor.extent.height = backEnd.viewParms.viewportHeight;
 	qvkCmdSetScissor( cmd, 0, 1, &scissor );
-	// Phase 7.4c-cmd — parallel-paths scissor (IQM).
-	Ral_CmdSetScissor(vk.cmd->ral_cmd, (const ralRect_t *)&scissor);
 
 	// draw
 	qvkCmdDrawIndexed( cmd, numIndexes, 1, firstIndex, 0, 0 );
-	// Phase 7.4c-cmd — parallel-paths draw-indexed (IQM).
-	Ral_CmdDrawIndexed( vk.cmd->ral_cmd, numIndexes, 1, firstIndex, 0, 0 );
 
 	// invalidate pipeline and descriptor state so the next standard draw
 	// rebinds correctly (we bound a different pipeline layout)
@@ -9084,18 +8733,6 @@ static void vk_create_smaa_pipelines( void )
 		// Without this, an SMAA→off→on cvar cycle orphans the RAL siblings
 		// (their handles linger on vk.device past Ral_DestroyBackend at
 		// process exit → VUID-vkDestroyDevice-device-05137).
-		if ( vk.ral_smaa_edge_pipeline ) {
-			Ral_DestroyPipeline( vk.ral_smaa_edge_pipeline );
-			vk.ral_smaa_edge_pipeline = NULL;
-		}
-		if ( vk.ral_smaa_blend_pipeline ) {
-			Ral_DestroyPipeline( vk.ral_smaa_blend_pipeline );
-			vk.ral_smaa_blend_pipeline = NULL;
-		}
-		if ( vk.ral_smaa_resolve_pipeline ) {
-			Ral_DestroyPipeline( vk.ral_smaa_resolve_pipeline );
-			vk.ral_smaa_resolve_pipeline = NULL;
-		}
 		return;
 	}
 
@@ -9263,12 +8900,7 @@ static void vk_create_smaa_pipelines( void )
 		// SMAA active rebuild); without this guard the predecessor RAL
 		// pipeline is orphaned on rebuild and trips
 		// VUID-vkDestroyDevice-device-05137 at process exit.
-		if ( vk.ral_smaa_edge_pipeline ) {
-			Ral_DestroyPipeline( vk.ral_smaa_edge_pipeline );
-			vk.ral_smaa_edge_pipeline = NULL;
-		}
 		p.externalRenderPass = vk.ral_render_pass.smaa_edge;   // Phase 7.4c-submit-A3
-		vk.ral_smaa_edge_pipeline = vk_ral_create_special_pipeline( &p );
 	}
 
 	// --- Blend weight calculation pipeline ---
@@ -9337,12 +8969,7 @@ static void vk_create_smaa_pipelines( void )
 		p.externalLayout     = vk.ral_pipeline_layout_smaa;     // Phase 7.4c-submit-A3
 		// Phase 7.4c-pipeline-followup-5 PART 2.6-v2 — destroy-then-create
 		// guard (see ral-smaa-edge site above).
-		if ( vk.ral_smaa_blend_pipeline ) {
-			Ral_DestroyPipeline( vk.ral_smaa_blend_pipeline );
-			vk.ral_smaa_blend_pipeline = NULL;
-		}
 		p.externalRenderPass = vk.ral_render_pass.smaa_blend;   // Phase 7.4c-submit-A3
-		vk.ral_smaa_blend_pipeline = vk_ral_create_special_pipeline( &p );
 	}
 
 	// --- Resolve (neighborhood blending) pipeline ---
@@ -9384,12 +9011,7 @@ static void vk_create_smaa_pipelines( void )
 		p.externalLayout     = vk.ral_pipeline_layout_smaa;     // Phase 7.4c-submit-A3
 		// Phase 7.4c-pipeline-followup-5 PART 2.6-v2 — destroy-then-create
 		// guard (see ral-smaa-edge site above).
-		if ( vk.ral_smaa_resolve_pipeline ) {
-			Ral_DestroyPipeline( vk.ral_smaa_resolve_pipeline );
-			vk.ral_smaa_resolve_pipeline = NULL;
-		}
 		p.externalRenderPass = vk.ral_render_pass.smaa_resolve;   // Phase 7.4c-submit-A3
-		vk.ral_smaa_resolve_pipeline = vk_ral_create_special_pipeline( &p );
 	}
 }
 
@@ -9513,8 +9135,6 @@ static int vk_recreate_ribbon_pipelines( void )
 		qvkDestroyPipeline( vk.device, vk.ribbon.pipeline_additive, NULL );
 		vk.ribbon.pipeline_additive = VK_NULL_HANDLE;
 	}
-	if ( vk.ribbon.ral_pipeline_alpha    ) { Ral_DestroyPipeline( vk.ribbon.ral_pipeline_alpha    ); vk.ribbon.ral_pipeline_alpha    = NULL; }
-	if ( vk.ribbon.ral_pipeline_additive ) { Ral_DestroyPipeline( vk.ribbon.ral_pipeline_additive ); vk.ribbon.ral_pipeline_additive = NULL; }
 
 	memset( stages, 0, sizeof( stages ) );
 	stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -9640,8 +9260,6 @@ static int vk_recreate_ribbon_pipelines( void )
 			pr.debugName          = ( variant == 0 ) ? "ral-ribbon-alpha-q1" : "ral-ribbon-additive-q1";
 			pr.externalLayout     = vk.ribbon.ral_pipeline_layout;  // Phase 7.4c-submit-A3
 			pr.externalRenderPass = vk.ral_render_pass.main;
-			if ( variant == 0 ) vk.ribbon.ral_pipeline_alpha    = vk_ral_create_special_pipeline( &pr );
-			else                vk.ribbon.ral_pipeline_additive = vk_ral_create_special_pipeline( &pr );
 		}
 	}
 
@@ -9673,7 +9291,6 @@ static int vk_recreate_beam_pipeline( void )
 		qvkDestroyPipeline( vk.device, vk.beam.pipeline, NULL );
 		vk.beam.pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.beam.ral_pipeline ) { Ral_DestroyPipeline( vk.beam.ral_pipeline ); vk.beam.ral_pipeline = NULL; }
 
 	memset( stages, 0, sizeof( stages ) );
 	stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -9793,7 +9410,6 @@ static int vk_recreate_beam_pipeline( void )
 		pr.debugName          = "ral-beam-q1";
 		pr.externalLayout     = vk.beam.ral_pipeline_layout;    // Phase 7.4c-submit-A3
 		pr.externalRenderPass = vk.ral_render_pass.main;
-		vk.beam.ral_pipeline  = vk_ral_create_special_pipeline( &pr );
 	}
 
 	return 1;
@@ -9829,8 +9445,6 @@ static int vk_recreate_sprite_pipelines( void )
 		qvkDestroyPipeline( vk.device, vk.sprite.pipeline_additive, NULL );
 		vk.sprite.pipeline_additive = VK_NULL_HANDLE;
 	}
-	if ( vk.sprite.ral_pipeline_alpha    ) { Ral_DestroyPipeline( vk.sprite.ral_pipeline_alpha    ); vk.sprite.ral_pipeline_alpha    = NULL; }
-	if ( vk.sprite.ral_pipeline_additive ) { Ral_DestroyPipeline( vk.sprite.ral_pipeline_additive ); vk.sprite.ral_pipeline_additive = NULL; }
 
 	memset( stages, 0, sizeof( stages ) );
 	stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -9954,8 +9568,6 @@ static int vk_recreate_sprite_pipelines( void )
 			pr.debugName          = ( variant == 0 ) ? "ral-sprite-alpha-q1" : "ral-sprite-additive-q1";
 			pr.externalLayout     = vk.sprite.ral_pipeline_layout;  // Phase 7.4c-submit-A3
 			pr.externalRenderPass = vk.ral_render_pass.main;
-			if ( variant == 0 ) vk.sprite.ral_pipeline_alpha    = vk_ral_create_special_pipeline( &pr );
-			else                vk.sprite.ral_pipeline_additive = vk_ral_create_special_pipeline( &pr );
 		}
 	}
 
@@ -9995,8 +9607,6 @@ static int vk_recreate_particle_render_pipelines( void )
 		qvkDestroyPipeline( vk.device, vk.particle.render_pipeline_additive, NULL );
 		vk.particle.render_pipeline_additive = VK_NULL_HANDLE;
 	}
-	if ( vk.particle.ral_render_pipeline_alpha    ) { Ral_DestroyPipeline( vk.particle.ral_render_pipeline_alpha    ); vk.particle.ral_render_pipeline_alpha    = NULL; }
-	if ( vk.particle.ral_render_pipeline_additive ) { Ral_DestroyPipeline( vk.particle.ral_render_pipeline_additive ); vk.particle.ral_render_pipeline_additive = NULL; }
 
 	memset( &specMap, 0, sizeof( specMap ) );
 	specMap.constantID = 0;
@@ -10136,8 +9746,6 @@ static int vk_recreate_particle_render_pipelines( void )
 			pr.debugName        = ( variant == 0 ) ? "ral-particle-render-alpha-q1" : "ral-particle-render-additive-q1";
 			pr.externalLayout   = vk.particle.ral_render_pipeline_layout;   // Phase 7.4c-submit-A3
 			pr.externalRenderPass = vk.ral_render_pass.main;
-			if ( variant == 0 ) vk.particle.ral_render_pipeline_alpha    = vk_ral_create_special_pipeline( &pr );
-			else                vk.particle.ral_render_pipeline_additive = vk_ral_create_special_pipeline( &pr );
 		}
 	}
 
@@ -10308,7 +9916,6 @@ static int vk_recreate_iqm_gpu_pipeline( void )
 	// pipeline so a stale handle from the previous device generation isn't
 	// kept alive across the rebuild.
 	if ( r_useRALPipelines && r_useRALPipelines->integer != 0 ) {
-		if ( vk.iqmGpu.ral_pipeline ) { Ral_DestroyPipeline( vk.iqmGpu.ral_pipeline ); vk.iqmGpu.ral_pipeline = NULL; }
 		vk_ral_special_pipeline_params_t p;
 		memset( &p, 0, sizeof( p ) );
 		p.vs_module          = vk.modules.iqm_skinning_vs;
@@ -10326,7 +9933,6 @@ static int vk_recreate_iqm_gpu_pipeline( void )
 		p.debugName          = "ral-iqm-recreate";
 		p.externalLayout     = vk.iqmGpu.ral_pipeline_layout;   // Phase 7.4c-submit-A3
 		p.externalRenderPass = vk.ral_render_pass.main;
-		vk.iqmGpu.ral_pipeline = vk_ral_create_special_pipeline( &p );
 	}
 
 	return 1;
@@ -11785,7 +11391,6 @@ static void vk_shadow_alloc_resources( void )
 				pr.debugName          = "ral-shadow-depth";
 				pr.externalLayout     = vk.shadowMap.ral_depthLayout;   // Phase 7.4c-submit-A3
 				pr.externalRenderPass = vk.shadowMap.ral_renderPass;     // Phase 7.4c-submit-A3
-				vk.shadowMap.ral_depthPipeline = vk_ral_create_special_pipeline( &pr );
 			}
 		}
 
@@ -11838,7 +11443,6 @@ static void vk_shadow_release_resources( void )
 		if ( vk.shadowMap.depthPipeline )
 			qvkDestroyPipeline( vk.device, vk.shadowMap.depthPipeline, NULL );
 		// Phase 7.4c-pipeline-followup-2 — sibling RAL pipeline teardown.
-		if ( vk.shadowMap.ral_depthPipeline ) { Ral_DestroyPipeline( vk.shadowMap.ral_depthPipeline ); vk.shadowMap.ral_depthPipeline = NULL; }
 		if ( vk.shadowMap.casterBuf ) {
 			vk_ral_unregister_buffer( vk.shadowMap.casterBuf );
 			qvkDestroyBuffer( vk.device, vk.shadowMap.casterBuf, NULL );
@@ -12635,7 +12239,11 @@ void vk_initialize( void )
 	init_vulkan_library();
 
 	vk.instance = vk_instance;   // Phase 7.4c-pre: expose the file-static VkInstance to vk_ral_textures.c (imported-mode bringup)
-	qvkGetDeviceQueue( vk.device, vk.queue_family_index, 0, &vk.queue );
+	// Phase 7.4c-submit-lifecycle-retire — renderer-side VkQueue retired.
+	// Per-frame submit uses RAL's queue (BC-C-final), and vk_shutdown's
+	// queue-wait is via Ral_WaitQueueIdle (BC-C-final Cluster C).
+	// qvkGetDeviceQueue + the field are both retired this turn (no
+	// remaining consumers).
 
 	// Phase 7.4c-submit-followup-present-2-fix2 — hoist RAL backend bringup
 	// ahead of every consumer. present-2 turned vk_create_swapchain (called
@@ -12890,20 +12498,26 @@ void vk_initialize( void )
 	//
 	vk_create_sync_primitives();
 
+	// Phase 7.4c-submit-lifecycle-retire — renderer command pool retired.
+	// Per-slot persistent RAL command buffers replace the legacy alloc block.
+	// b->cmdPools[GRAPHICS] uses identical flags (RESET_COMMAND_BUFFER_BIT |
+	// TRANSIENT_BIT) on the same queue family; functional equivalence
+	// confirmed by lifecycle-retire-investigation Cluster 8.
 	//
-	// Command pool.
-	//
-	{
-		VkCommandPoolCreateInfo desc;
-
-		desc.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		desc.pNext = NULL;
-		desc.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		desc.queueFamilyIndex = vk.queue_family_index;
-
-		VK_CHECK( qvkCreateCommandPool( vk.device, &desc, NULL, &vk.command_pool ) );
-
-		SET_OBJECT_NAME( vk.command_pool, "command pool", VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_POOL_EXT );
+	// vk.tess[i].command_buffer is now an ALIAS to
+	// Ral_GetCommandBufferHandle(vk.tess[i].ral_cmd). The ~123 existing qvkCmd*
+	// / qvkBegin / qvkEnd / qvkReset sites operate transparently on the alias
+	// per K2 bypass-state-tracker rule (the RAL wrapper's state field is NOT
+	// maintained across legacy reset/begin/end cycles — deliberate, mirrors
+	// BC-followup-staging's vk.staging_command_buffer pattern).
+	if ( vk.tess[0].ral_cmd == NULL ) {
+		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+			vk.tess[i].ral_cmd = Ral_AcquireCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
+			if ( vk.tess[i].ral_cmd == NULL ) {
+				ri.Terminate( TERM_UNRECOVERABLE, "vk_initialize: Ral_AcquireCommandBuffer(GRAPHICS) returned NULL for per-frame slot %u", (unsigned)i );
+			}
+			vk.tess[i].command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( vk.tess[i].ral_cmd );
+		}
 	}
 
 #ifdef USE_UPLOAD_QUEUE
@@ -12929,22 +12543,8 @@ void vk_initialize( void )
 #endif
 
 	//
-	// Command buffers and color attachments.
-	//
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
-	{
-		VkCommandBufferAllocateInfo alloc_info;
-
-		alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		alloc_info.pNext = NULL;
-		alloc_info.commandPool = vk.command_pool;
-		alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		alloc_info.commandBufferCount = 1;
-
-		VK_CHECK( qvkAllocateCommandBuffers( vk.device, &alloc_info, &vk.tess[i].command_buffer ) );
-
-		//SET_OBJECT_NAME( vk.tess[i].command_buffer, va( "command buffer %i", i ), VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT );
-	}
+	// Phase 7.4c-submit-lifecycle-retire — legacy qvkAllocateCommandBuffers
+	// per-slot loop deleted. Replaced by Ral_AcquireCommandBuffer above.
 
 	//
 	// Descriptor pool.
@@ -13569,13 +13169,6 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 				vk.pipelines[i].handle[j] = VK_NULL_HANDLE;
 				vk.pipeline_create_count--;
 			}
-			// Phase 7.4c-pipeline — sibling RAL pipeline (NULL when
-			// r_useRALPipelines = 0, or when RAL creation failed for this
-			// variant). Ral_DestroyPipeline tolerates NULL → no-op.
-			if ( vk.pipelines[i].ral_handle[j] != NULL ) {
-				Ral_DestroyPipeline( vk.pipelines[i].ral_handle[j] );
-				vk.pipelines[i].ral_handle[j] = NULL;
-			}
 		}
 	}
 
@@ -13588,48 +13181,38 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 		qvkDestroyPipeline( vk.device, vk.gamma_pipeline, NULL );
 		vk.gamma_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.ral_gamma_pipeline ) { Ral_DestroyPipeline( vk.ral_gamma_pipeline ); vk.ral_gamma_pipeline = NULL; }
 
 	// Phase 6B3'-c1: tonemap default + variant pipelines.
 	if ( vk.tonemap_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.tonemap_pipeline, NULL );
 		vk.tonemap_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.ral_tonemap_pipeline ) { Ral_DestroyPipeline( vk.ral_tonemap_pipeline ); vk.ral_tonemap_pipeline = NULL; }
 	for ( i = 0; i < ARRAY_LEN( vk.tonemap_variants ); i++ ) {
 		if ( vk.tonemap_variants[i] != VK_NULL_HANDLE ) {
 			qvkDestroyPipeline( vk.device, vk.tonemap_variants[i], NULL );
 			vk.tonemap_variants[i] = VK_NULL_HANDLE;
 		}
-		if ( vk.ral_tonemap_variants[i] ) { Ral_DestroyPipeline( vk.ral_tonemap_variants[i] ); vk.ral_tonemap_variants[i] = NULL; }
 	}
 
 	if ( vk.capture_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.capture_pipeline, NULL );
 		vk.capture_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.ral_capture_pipeline ) { Ral_DestroyPipeline( vk.ral_capture_pipeline ); vk.ral_capture_pipeline = NULL; }
 
 	if ( vk.bloom_extract_pipeline != VK_NULL_HANDLE ) {
 		qvkDestroyPipeline( vk.device, vk.bloom_extract_pipeline, NULL );
 		vk.bloom_extract_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.ral_bloom_extract_pipeline ) { Ral_DestroyPipeline( vk.ral_bloom_extract_pipeline ); vk.ral_bloom_extract_pipeline = NULL; }
 
 	if ( vk.bloom_blend_pipeline != VK_NULL_HANDLE ) {
 		qvkDestroyPipeline( vk.device, vk.bloom_blend_pipeline, NULL );
 		vk.bloom_blend_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.ral_bloom_blend_pipeline ) { Ral_DestroyPipeline( vk.ral_bloom_blend_pipeline ); vk.ral_bloom_blend_pipeline = NULL; }
 
 	for ( i = 0; i < ARRAY_LEN( vk.blur_pipeline ); i++ ) {
 		if ( vk.blur_pipeline[i] != VK_NULL_HANDLE ) {
 			qvkDestroyPipeline( vk.device, vk.blur_pipeline[i], NULL );
 			vk.blur_pipeline[i] = VK_NULL_HANDLE;
-		}
-		if ( vk.ral_blur_pipeline[i] ) {
-			Ral_DestroyPipeline( vk.ral_blur_pipeline[i] );
-			vk.ral_blur_pipeline[i] = NULL;
 		}
 	}
 
@@ -13638,17 +13221,14 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 		vk.smaa_edge_pipeline = VK_NULL_HANDLE;
 	}
 	// Phase 7.4c-pipeline-followup-2 — sibling RAL pipeline teardown.
-	if ( vk.ral_smaa_edge_pipeline ) { Ral_DestroyPipeline( vk.ral_smaa_edge_pipeline ); vk.ral_smaa_edge_pipeline = NULL; }
 	if ( vk.smaa_blend_pipeline != VK_NULL_HANDLE ) {
 		qvkDestroyPipeline( vk.device, vk.smaa_blend_pipeline, NULL );
 		vk.smaa_blend_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.ral_smaa_blend_pipeline ) { Ral_DestroyPipeline( vk.ral_smaa_blend_pipeline ); vk.ral_smaa_blend_pipeline = NULL; }
 	if ( vk.smaa_resolve_pipeline != VK_NULL_HANDLE ) {
 		qvkDestroyPipeline( vk.device, vk.smaa_resolve_pipeline, NULL );
 		vk.smaa_resolve_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.ral_smaa_resolve_pipeline ) { Ral_DestroyPipeline( vk.ral_smaa_resolve_pipeline ); vk.ral_smaa_resolve_pipeline = NULL; }
 }
 
 
@@ -13669,7 +13249,7 @@ void vk_shutdown( refShutdownCode_t code )
 
 	// Drain GPU work so all pending fences are signaled, then stop the fence
 	// thread before any Vulkan resources (fences, device) are destroyed.
-	// Phase 7.4c-submit-BC-C-final — retargeted from qvkQueueWaitIdle(vk.queue)
+	// Phase 7.4c-submit-BC-C-final — retargeted from legacy qvkQueueWaitIdle
 	// to Ral_WaitQueueIdle. The RAL backend owns the queue mutex + dispatches
 	// vkQueueWaitIdle internally; functional equivalent of the legacy call.
 	// Completes the qvkQueueWaitIdle retirement (vk_queue_wait_idle's BC-
@@ -13694,14 +13274,24 @@ void vk_shutdown( refShutdownCode_t code )
 		vk.pipelineCache = VK_NULL_HANDLE;
 	}
 
+	// Phase 7.4c-submit-lifecycle-retire — per-slot persistent RAL command
+	// buffer destroy. Must run BEFORE Ral_DestroyBackend (fix3 contract):
+	// each wrapper holds a backend pointer + frees its underlying
+	// VkCommandBuffer back to b->cmdPools[GRAPHICS], so the backend must
+	// still be live.
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.tess[i].ral_cmd != NULL ) {
+			Ral_DestroyCommandBuffer( vk.tess[i].ral_cmd );
+			vk.tess[i].ral_cmd = NULL;
+			vk.tess[i].command_buffer = VK_NULL_HANDLE;
+		}
+	}
+
 #ifdef USE_UPLOAD_QUEUE
-	// Phase 7.4c-submit-followup-staging — free the RAL-owned staging cb
-	// BEFORE the legacy vk.command_pool destroy. ral_staging_cmd has
-	// ownsBuffer=qtrue (acquired from RAL's graphics pool, not vk.command_pool),
-	// so Ral_DestroyCommandBuffer returns the underlying VkCommandBuffer to
-	// RAL's pool — not vk.command_pool. After this turn vk.command_pool
-	// has one fewer buffer to free (the per-frame ring at vk.tess[i].command_
-	// buffer still lives in it; that retires in BC-C-final).
+	// Phase 7.4c-submit-followup-staging — free the RAL-owned staging cb.
+	// ral_staging_cmd has ownsBuffer=qtrue (acquired from RAL's graphics
+	// pool); Ral_DestroyCommandBuffer returns the underlying VkCommandBuffer
+	// to RAL's pool.
 	if ( vk.ral_staging_cmd ) {
 		Ral_DestroyCommandBuffer( vk.ral_staging_cmd );
 		vk.ral_staging_cmd = NULL;
@@ -13709,7 +13299,10 @@ void vk_shutdown( refShutdownCode_t code )
 	}
 #endif
 
-	qvkDestroyCommandPool( vk.device, vk.command_pool, NULL );
+	// Phase 7.4c-submit-lifecycle-retire — renderer command pool retired.
+	// All renderer command buffers (per-frame ring + staging) now live in
+	// RAL's b->cmdPools[GRAPHICS] (destroyed by Ral_DestroyBackend in
+	// vk_ral_backend_shutdown at the tail of this function).
 
 	qvkDestroyDescriptorPool(vk.device, vk.descriptor_pool, NULL);
 
@@ -13993,12 +13586,11 @@ void vk_wait_idle( void )
 void vk_queue_wait_idle( void )
 {
 	// Phase 7.4c-submit-followup-present-1 (B1 fold) — retargeted from
-	// VK_CHECK(qvkQueueWaitIdle(vk.queue)) to Ral_WaitQueueIdle. Functional
+	// VK_CHECK(qvkQueueWaitIdle(legacy)) to Ral_WaitQueueIdle. Functional
 	// equivalent: idle-waits the graphics queue via the RAL backend's
 	// queue mutex + vkQueueWaitIdle. Callers (tr_backend.c:527, 2117) are
-	// unchanged. After BC-C-final retires the per-frame submit, vk.queue
-	// has only the init/shutdown consumers; this helper becomes the last
-	// renderer-side "wait queue idle" surface and is delivered through RAL.
+	// unchanged. This helper is the last renderer-side "wait queue idle"
+	// surface and is delivered through RAL.
 	Ral_WaitQueueIdle( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
 }
 
@@ -14038,12 +13630,6 @@ void vk_release_resources( void ) {
 				qvkDestroyPipeline( vk.device, vk.pipelines[i].handle[j], NULL );
 				vk.pipelines[i].handle[j] = VK_NULL_HANDLE;
 				vk.pipeline_create_count--;
-			}
-			// Phase 7.4c-pipeline — sibling RAL pipeline cleanup for per-map
-			// destroy. NULL-tolerant.
-			if ( vk.pipelines[i].ral_handle[j] != NULL ) {
-				Ral_DestroyPipeline( vk.pipelines[i].ral_handle[j] );
-				vk.pipelines[i].ral_handle[j] = NULL;
 			}
 		}
 		memset( &vk.pipelines[i], 0, sizeof( vk.pipelines[0] ) );
@@ -15453,138 +15039,10 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 
 	SET_OBJECT_NAME( *pipeline, pipeline_name, VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT );
 
-	// Phase 7.4c-pipeline-followup-4 — post-process parallel RAL pipeline.
-	// Binding contract from vk_initialize (vk.c:~12276) pipeline layout creation:
-	//   pipeline_layout_post_process : 1 sampler set, 0 push constants
-	//   pipeline_layout_blend        : VK_NUM_BLOOM_PASSES (=4) sampler sets, 0 push
-	//   pipeline_layout_ssao         : 2 sampler sets, 0 push (FEAT_SSAO)
-	//   pipeline_layout_godrays      : 2 sampler sets, 16B FRAGMENT push (FEAT_GODRAYS)
-	// Topology TRIANGLE_STRIP — gamma.vert emits 4 vertices from a const array
-	// indexed by gl_VertexIndex. Cull NONE. No depth test/write. Blend on for
-	// bloom_blend only. Spec constants: 26 entries (gamma/tonemap/lottes/grading/HDR
-	// knobs) packed into frag_spec_data — copy into ralSpecConstant_t[].
-	if ( r_useRALPipelines && r_useRALPipelines->integer != 0 ) {
-		ralPipeline_t **ral_target = NULL;
-		vk_ral_special_pipeline_params_t pr;
-		ralSpecConstant_t              specs[26];
-		uint32_t                       ns = 0, i;
-		memset( &pr,   0, sizeof( pr   ) );
-		memset( specs, 0, sizeof( specs ) );
-
-		// Match the sibling sl ral_*_pipeline field per program_index. The
-		// switch's varIdx for case 5 is computed above and visible here.
-		switch ( program_index ) {
-			case 1: ral_target = &vk.ral_bloom_extract_pipeline; break;
-			case 2: ral_target = &vk.ral_bloom_blend_pipeline;   break;
-			case 3: ral_target = &vk.ral_capture_pipeline;       break;
-			case 6: ral_target = &vk.ral_tonemap_pipeline;       break;
-			case 5: {
-				int varIdxLocal = 0;
-#if FEAT_SSAO
-				if ( r_ssao->integer )         varIdxLocal |= TONEMAP_VAR_SSAO;
-#endif
-#if FEAT_TONEMAP
-				if ( r_tonemap->integer )      varIdxLocal |= TONEMAP_VAR_BASE;
-#endif
-#if FEAT_COLOR_GRADING
-				if ( r_colorGrading->integer ) varIdxLocal |= TONEMAP_VAR_CG;
-#endif
-#if FEAT_GODRAYS
-				if ( r_godRays->integer )      varIdxLocal |= TONEMAP_VAR_GODRAYS;
-#endif
-				ral_target = &vk.ral_tonemap_variants[ varIdxLocal ];
-				break;
-			}
-			default: ral_target = &vk.ral_gamma_pipeline;        break;
-		}
-
-		pr.vs_module        = vk.modules.gamma_vs;
-		pr.fs_module        = fsmodule;
-		pr.topology         = RAL_TOPOLOGY_TRIANGLE_STRIP;
-		pr.cullMode         = RAL_CULL_NONE;
-		pr.depthTestEnable  = qfalse;
-		pr.depthWriteEnable = qfalse;
-		pr.blendEnable      = blend;
-		if ( blend ) {
-			// Match bloom_blend's blend setup (set later in legacy code path):
-			// SRC_ALPHA / ONE_MINUS_SRC_ALPHA additive. Conservative; if the
-			// legacy attachment_blend_state ends up different, the parallel
-			// pipeline still validates and bind-flip will recompute correctly
-			// in followup-cmd.
-			pr.srcColor = RAL_BLEND_SRC_ALPHA;
-			pr.dstColor = RAL_BLEND_ONE_MINUS_SRC_ALPHA;
-			pr.blendOp  = RAL_BLEND_OP_ADD;
-		}
-
-		// BGLs + push range derived from `layout` (the legacy VkPipelineLayout
-		// already selected by the switch above).
-		if ( layout == vk.pipeline_layout_post_process ) {
-			if ( vk.ral_bgl_sampler ) { pr.bgls[ pr.numBgls++ ] = vk.ral_bgl_sampler; }
-		} else if ( layout == vk.pipeline_layout_blend ) {
-			if ( vk.ral_bgl_sampler ) {
-				int j;
-				for ( j = 0; j < VK_NUM_BLOOM_PASSES && pr.numBgls < 8u; j++ )
-					pr.bgls[ pr.numBgls++ ] = vk.ral_bgl_sampler;
-			}
-#if FEAT_SSAO
-		} else if ( layout == vk.pipeline_layout_ssao ) {
-			if ( vk.ral_bgl_sampler ) {
-				pr.bgls[ pr.numBgls++ ] = vk.ral_bgl_sampler;
-				pr.bgls[ pr.numBgls++ ] = vk.ral_bgl_sampler;
-			}
-#endif
-#if FEAT_GODRAYS
-		} else if ( layout == vk.pipeline_layout_godrays ) {
-			if ( vk.ral_bgl_sampler ) {
-				pr.bgls[ pr.numBgls++ ] = vk.ral_bgl_sampler;
-				pr.bgls[ pr.numBgls++ ] = vk.ral_bgl_sampler;
-			}
-			pr.pushConstantSize   = 16;
-			pr.pushConstantStages = RAL_STAGE_FRAGMENT;
-#endif
-		}
-
-		// Pack the 26 frag_spec_entries by copying 32-bit values. Each entry
-		// is either int or float; for both the bit-pattern is the right 32-bit
-		// value to feed RAL. We read out of frag_spec_data using each entry's
-		// offset+size.
-		for ( i = 0; i < (uint32_t)frag_spec_info.mapEntryCount && ns < 26u; i++ ) {
-			uint32_t v = 0;
-			if ( spec_entries[i].size == sizeof( uint32_t ) ) {
-				memcpy( &v, (const uint8_t *)frag_spec_info.pData + spec_entries[i].offset, sizeof( uint32_t ) );
-				specs[ns].constantId = spec_entries[i].constantID;
-				specs[ns].value      = v;
-				ns++;
-			}
-		}
-		pr.specConstants    = specs;
-		pr.numSpecConstants = ns;
-		pr.debugName        = pipeline_name;
-
-		// Phase 7.4c-submit-A3 — thread the matching ralPipelineLayout_t sibling
-		// based on the legacy VkPipelineLayout the post-process site selected.
-		pr.externalLayout   = vk_ral_lookup_pipeline_layout( layout );
-
-		// Phase 7.4c-submit-A3 — pick the matching render-pass sibling per
-		// program_index. The dispatcher branches above already selected `target`
-		// (the legacy VkPipeline *); the program_index encodes which pass.
-		// 0 = gamma; 1 = bloom_extract; 2 = bloom_blend (post_bloom); 3 = capture;
-		// 5 = tonemap variant (renders into render_pass.tonemap); 6 = depth_fade.
-		// blur uses its own per-index pass (handled in vk_create_blur_pipeline
-		// directly).
-		switch ( program_index ) {
-		case 0:  pr.externalRenderPass = vk.ral_render_pass.gamma;          break;
-		case 1:  pr.externalRenderPass = vk.ral_render_pass.bloom_extract;  break;
-		case 2:  pr.externalRenderPass = vk.ral_render_pass.post_bloom;     break;
-		case 3:  pr.externalRenderPass = vk.ral_render_pass.capture;        break;
-		case 5:  pr.externalRenderPass = vk.ral_render_pass.tonemap;        break;
-		case 6:  pr.externalRenderPass = vk.ral_render_pass.depth_fade;     break;
-		default: pr.externalRenderPass = NULL;                              break;
-		}
-
-		if ( *ral_target ) { Ral_DestroyPipeline( *ral_target ); *ral_target = NULL; }
-		*ral_target = vk_ral_create_special_pipeline( &pr );
-	}
+	// Phase 7.4c-submit-sibling-retire — parallel post-process pipeline
+	// creation block deleted (~120 lines). Sibling fields retired in this
+	// turn; the legacy qvkCreateGraphicsPipelines path above remains
+	// authoritative.
 }
 
 
@@ -15790,8 +15248,6 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 		pr.debugName        = va( "ral-blur-%s-%u", horizontal_pass ? "h" : "v", index );
 		pr.externalLayout   = vk.ral_pipeline_layout_post_process;  // Phase 7.4c-submit-A3
 		pr.externalRenderPass = vk.ral_render_pass.blur[ index ];    // blur uses its own per-index pass
-		if ( vk.ral_blur_pipeline[ index ] ) { Ral_DestroyPipeline( vk.ral_blur_pipeline[ index ] ); vk.ral_blur_pipeline[ index ] = NULL; }
-		vk.ral_blur_pipeline[ index ] = vk_ral_create_special_pipeline( &pr );
 	}
 }
 
@@ -16199,11 +15655,8 @@ static ralPipeline_t *vk_ral_create_pipeline_from_def( const Vk_Pipeline_Def *de
 // flips the bind sites.
 // ───────────────────────────────────────────────────────────────────────
 
-// (Struct definition + forward declaration moved to the top of this file
-// near the qvk* statics, so the 15 special-case create sites earlier in
-// the file can stack-allocate the params struct.)
-static ralPipeline_t *vk_ral_create_special_pipeline( const vk_ral_special_pipeline_params_t *p ) {
-	ralBackend_t *backend = vk_ral_get_backend();
+// (Body deleted by Phase 7.4c-submit-sibling-retire — see resume below.)
+#if 0
 	if ( !backend ) return NULL;
 
 	const uint8_t *vs_bytes = NULL;
@@ -16310,7 +15763,7 @@ static ralPipeline_t *vk_ral_create_special_pipeline( const vk_ral_special_pipel
 	gci.debugName = p->debugName ? p->debugName : "ral-special-pipeline";
 
 	return Ral_CreateGraphicsPipeline( backend, &gci );
-}
+#endif
 
 
 VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassIndex, uint32_t def_index ) {
@@ -17442,19 +16895,9 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	vk.pipeline_create_count++;
 
 	// Phase 7.4c-pipeline — parallel RAL pipeline construction. Gated on
-	// r_useRALPipelines; failure is non-fatal (slot stays NULL, legacy
-	// VkPipeline still drives rendering). def_index points into vk.pipelines[].
-	if ( r_useRALPipelines && r_useRALPipelines->integer != 0
-	  && def_index < vk.pipelines_count
-	  && vs_module && fs_module ) {
-		ralPipeline_t *ral = vk_ral_create_pipeline_from_def( def, renderPassIndex, def_index,
-		                                                     *vs_module, *fs_module, state_bits );
-		vk.pipelines[ def_index ].ral_handle[ renderPassIndex ] = ral;
-		if ( !ral ) {
-			ri.Log( SEV_DEBUG, "[VK->RAL] parallel ralPipeline_t creation returned NULL (def#%u, pass#%d, shader_type=%d)\n",
-			        def_index, (int)renderPassIndex, (int)def->shader_type );
-		}
-	}
+	// Phase 7.4c-submit-sibling-retire — parallel ralPipeline_t-from-def
+	// creation block deleted. vk.pipelines[].ral_handle[] field is gone;
+	// legacy VkPipeline above remains authoritative.
 
 	return pipeline;
 }
@@ -17666,8 +17109,6 @@ void vk_clear_color( const vec4_t color ) {
 	clear_rect.layerCount = 1;
 
 	qvkCmdClearAttachments( vk.cmd->command_buffer, 1, &attachment, 1, &clear_rect );
-	// Phase 7.4c-cmd — parallel-paths clear-attachments (color).
-	Ral_CmdClearAttachments( vk.cmd->ral_cmd, 1, (const ralClearAttachment_t *)&attachment, 1, (const ralClearRect_t *)&clear_rect );
 }
 
 
@@ -17700,8 +17141,6 @@ void vk_clear_depth( qboolean clear_stencil ) {
 	clear_rect[0].layerCount = 1;
 
 	qvkCmdClearAttachments( vk.cmd->command_buffer, 1, &attachment, 1, clear_rect );
-	// Phase 7.4c-cmd — parallel-paths clear-attachments (depth).
-	Ral_CmdClearAttachments( vk.cmd->ral_cmd, 1, (const ralClearAttachment_t *)&attachment, 1, (const ralClearRect_t *)clear_rect );
 }
 
 
@@ -17717,8 +17156,6 @@ void vk_update_mvp( const float *m ) {
 		get_mvp_transform( push_constants );
 
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( push_constants ), push_constants );
-	// Phase 7.4c-cmd — parallel-paths push-constants (MVP).
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.pipeline_layout), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( push_constants ), push_constants );
 
 	vk.stats.push_size += sizeof( push_constants );
 }
@@ -17760,8 +17197,6 @@ void vk_set_2d_scissor( const int *rect ) {
 		scissor.extent.height = glConfig.vidHeight;
 	}
 	qvkCmdSetScissor( vk.cmd->command_buffer, 0, 1, &scissor );
-	// Phase 7.4c-cmd — parallel-paths scissor (2D clip).
-	Ral_CmdSetScissor(vk.cmd->ral_cmd, (const ralRect_t *)&scissor);
 }
 
 
@@ -17807,9 +17242,6 @@ void vk_update_fog_push( const vec4_t color, int fogType, float density, float f
 
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout,
 		VK_SHADER_STAGE_FRAGMENT_BIT, 64, sizeof( push ), &push );
-	// Phase 7.4c-cmd — parallel-paths push-constants (fog).
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.pipeline_layout),
-		VK_SHADER_STAGE_FRAGMENT_BIT, 64, sizeof( push ), &push );
 
 	vk.stats.push_size += sizeof( push );
 }
@@ -17825,10 +17257,6 @@ void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
 	float mvp[16];
 	get_mvp_transform( mvp );
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_msdf,
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-		0, sizeof( mvp ), mvp );
-	// Phase 7.4c-cmd — parallel-paths push-constants (MSDF MVP).
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.pipeline_layout_msdf),
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 		0, sizeof( mvp ), mvp );
 
@@ -17875,10 +17303,6 @@ void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
 	}
 
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_msdf,
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-		64, sizeof( params ), &params );
-	// Phase 7.4c-cmd — parallel-paths push-constants (MSDF style params).
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.pipeline_layout_msdf),
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 		64, sizeof( params ), &params );
 
@@ -17937,8 +17361,6 @@ void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset )
 {
 	if ( vk.cmd->curr_index_buffer != buffer || vk.cmd->curr_index_offset != offset ) {
 		qvkCmdBindIndexBuffer( vk.cmd->command_buffer, buffer, offset, VK_INDEX_TYPE_UINT32 );
-		// Phase 7.4c-cmd — parallel-paths bind-index-buffer.
-		Ral_CmdBindIndexBuffer(vk.cmd->ral_cmd, vk_ral_lookup_buffer(buffer), offset, RAL_INDEX_UINT32);
 	}
 
 	vk.cmd->curr_index_buffer = buffer;
@@ -17950,8 +17372,6 @@ void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset )
 void vk_draw_indexed( uint32_t indexCount, uint32_t firstIndex )
 {
 	qvkCmdDrawIndexed( vk.cmd->command_buffer, indexCount, 1, firstIndex, 0, 0 );
-	// Phase 7.4c-cmd — parallel-paths draw-indexed (VBO path).
-	Ral_CmdDrawIndexed( vk.cmd->ral_cmd, indexCount, 1, firstIndex, 0, 0 );
 }
 #endif
 
@@ -18038,11 +17458,6 @@ void vk_bind_geometry( uint32_t flags )
 		}
 
 		qvkCmdBindVertexBuffers( vk.cmd->command_buffer, bind_base, bind_count, shade_bufs, vk.cmd->vbo_offset + bind_base );
-		// Phase 7.4c-submit-A2 — typed parallel-paths bind-vertex-buffers (VBO geometry).
-		{ ralBuffer_t *rbufs[8]; int rb_i;
-		  for (rb_i = 0; rb_i < bind_count; rb_i++) rbufs[rb_i] = vk_ral_lookup_buffer( shade_bufs[bind_base + rb_i] );
-		  Ral_CmdBindVertexBuffers( vk.cmd->ral_cmd, bind_base, bind_count, rbufs, (const uint64_t *)( vk.cmd->vbo_offset + bind_base ) ); }
-
 	} else
 #endif // USE_VBO
 	{
@@ -18081,10 +17496,6 @@ void vk_bind_geometry( uint32_t flags )
 		}
 
 		qvkCmdBindVertexBuffers( vk.cmd->command_buffer, bind_base, bind_count, shade_bufs, vk.cmd->buf_offset + bind_base );
-		// Phase 7.4c-submit-A2 — typed parallel-paths bind-vertex-buffers (CPU-streamed geometry).
-		{ ralBuffer_t *rbufs[8]; int rb_i;
-		  for (rb_i = 0; rb_i < bind_count; rb_i++) rbufs[rb_i] = vk_ral_lookup_buffer( shade_bufs[bind_base + rb_i] );
-		  Ral_CmdBindVertexBuffers( vk.cmd->ral_cmd, bind_base, bind_count, rbufs, (const uint64_t *)( vk.cmd->buf_offset + bind_base ) ); }
 	}
 }
 
@@ -18104,10 +17515,6 @@ void vk_bind_lighting( int stage, int bundle )
 		vk.cmd->vbo_offset[2] = tess.shader->normalOffset;
 
 		qvkCmdBindVertexBuffers( vk.cmd->command_buffer, 0, 3, shade_bufs, vk.cmd->vbo_offset + 0 );
-		// Phase 7.4c-submit-A2 — typed parallel-paths bind-vertex-buffers (lighting VBO).
-		{ ralBuffer_t *rbufs[3] = { vk_ral_lookup_buffer(shade_bufs[0]), vk_ral_lookup_buffer(shade_bufs[1]), vk_ral_lookup_buffer(shade_bufs[2]) };
-		  Ral_CmdBindVertexBuffers( vk.cmd->ral_cmd, 0, 3, rbufs, (const uint64_t *)( vk.cmd->vbo_offset + 0 ) ); }
-
 	}
 	else
 #endif // USE_VBO
@@ -18119,10 +17526,6 @@ void vk_bind_lighting( int stage, int bundle )
 		vk_bind_attr( 2, sizeof( tess.normal[0] ), tess.normal );
 
 		qvkCmdBindVertexBuffers( vk.cmd->command_buffer, bind_base, bind_count, shade_bufs, vk.cmd->buf_offset + bind_base );
-		// Phase 7.4c-submit-A2 — typed parallel-paths bind-vertex-buffers (lighting CPU-streamed).
-		{ ralBuffer_t *rbufs[8]; int rb_i;
-		  for (rb_i = 0; rb_i < bind_count; rb_i++) rbufs[rb_i] = vk_ral_lookup_buffer( shade_bufs[bind_base + rb_i] );
-		  Ral_CmdBindVertexBuffers( vk.cmd->ral_cmd, bind_base, bind_count, rbufs, (const uint64_t *)( vk.cmd->buf_offset + bind_base ) ); }
 	}
 }
 
@@ -18135,55 +17538,19 @@ void vk_bind_lighting( int stage, int bundle )
 // `layoutHint` is used for the transient adoption — when NULL or the RAL
 // backend isn't up, skips the wrapper creation (Ral_Cmd*Vk consumers
 // silently no-op via the NULL guard at lookup time).
+// Phase 7.4c-submit-sibling-retire — vk_ral_adopt_ring_slot retired
+// alongside the per-frame parallel bind-group ring (vk.cmd->descriptor_set
+// .current_ral[]). Callers (vk_update_descriptor below) updated to no-op.
 static void vk_ral_adopt_ring_slot( int index, VkDescriptorSet vkSet )
 {
-	ralBackend_t          *b;
-	ralBindGroup_t        *existing;
-	struct ralBindGroupLayout_s *layoutHint;
-
-	// Free any wrapper currently parked in this slot — about to be replaced.
-	if ( vk.cmd->descriptor_set.current_ral[ index ] != NULL ) {
-		Ral_DestroyBindGroup( vk.cmd->descriptor_set.current_ral[ index ] );
-		vk.cmd->descriptor_set.current_ral[ index ] = NULL;
-	}
-
-	if ( vkSet == VK_NULL_HANDLE )
-		return;
-
-	// Fast path: boot-time adoption registry already wraps this set.
-	existing = vk_ral_lookup_bindgroup( vkSet );
-	if ( existing != NULL ) {
-		// We do NOT take ownership of registry entries here — those are owned
-		// by s_adopted_bgs[] for the program lifetime. Leaving slot NULL means
-		// vk_ral_parallel_bind_descriptor_sets falls back to the registry
-		// scan and finds the same wrapper. Wrapper refcount stays at 1.
-		return;
-	}
-
-	// Slow path: per-image descriptor not yet adopted. Adopt with the sampler
-	// BGL (per-image sets all use vk.set_layout_sampler). Skip when the BGL
-	// hasn't been adopted yet (RAL backend not up, or pre-vk_init_descriptors).
-	b = vk_ral_get_backend();
-	if ( b == NULL )
-		return;
-	layoutHint = vk.ral_bgl_sampler;
-	if ( layoutHint == NULL )
-		return;
-	vk.cmd->descriptor_set.current_ral[ index ] =
-		Ral_AdoptBindGroup( b, (void *)vkSet, layoutHint, "wired-frame-ring-bg" );
-	if ( vk.cmd->descriptor_set.current_ral[ index ] != NULL )
-		vk_ral_descset_adopt_count++;
+	(void)index;
+	(void)vkSet;
 }
 
 
 void vk_reset_descriptor( int index )
 {
 	vk.cmd->descriptor_set.current[ index ] = VK_NULL_HANDLE;
-	// Phase 7.4c-cmd: clear the matching ring wrapper.
-	if ( vk.cmd->descriptor_set.current_ral[ index ] != NULL ) {
-		Ral_DestroyBindGroup( vk.cmd->descriptor_set.current_ral[ index ] );
-		vk.cmd->descriptor_set.current_ral[ index ] = NULL;
-	}
 }
 
 
@@ -18250,7 +17617,6 @@ void vk_bind_descriptor_sets( void )
 		// rare static-set hits (storage / color / depthFade if routed via
 		// vk_bind_descriptor_sets) still record correctly. TODO_7.4c-cmd:
 		// remove this conditional skip once per-frame sets are adopted.
-		vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, start, count, vk.cmd->descriptor_set.current + start, offset_count, offsets );
 	}
 
 	vk.cmd->descriptor_set.end = 0;
@@ -18276,8 +17642,6 @@ void vk_bind_pipeline( uint32_t pipeline ) {
 			vk.cmd->last_pipeline_layout = vk.pipeline_layout;
 
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipe );
-		// Phase 7.4c-cmd — parallel-paths bind-pipeline (vk_bind_pipeline).
-		Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vkpipe ));
 		vk.cmd->last_pipeline = vkpipe;
 		vk_diag_pipebinds++;
 		vk_diag_msdf_active = ( pipeline == vk.msdf_pipeline );
@@ -18300,15 +17664,11 @@ static void vk_update_depth_range( Vk_Depth_Range depth_range )
 
 		if ( memcmp( &vk.cmd->scissor_rect, &scissor_rect, sizeof( scissor_rect ) ) != 0 ) {
 			qvkCmdSetScissor( vk.cmd->command_buffer, 0, 1, &scissor_rect );
-			// Phase 7.4c-cmd — parallel-paths scissor (depth-range update).
-			Ral_CmdSetScissor(vk.cmd->ral_cmd, (const ralRect_t *)&scissor_rect);
 			vk.cmd->scissor_rect = scissor_rect;
 		}
 
 		get_viewport( &viewport, depth_range );
 		qvkCmdSetViewport( vk.cmd->command_buffer, 0, 1, &viewport );
-		// Phase 7.4c-cmd — parallel-paths viewport (depth-range update).
-		Ral_CmdSetViewport(vk.cmd->ral_cmd, (const ralViewport_t *)&viewport);
 	}
 }
 
@@ -18333,12 +17693,8 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 #endif
 	if ( indexed ) {
 		qvkCmdDrawIndexed( vk.cmd->command_buffer, vk.cmd->num_indexes, 1, 0, 0, 0 );
-		// Phase 7.4c-cmd — parallel-paths draw-indexed (vk_draw_geometry).
-		Ral_CmdDrawIndexed( vk.cmd->ral_cmd, vk.cmd->num_indexes, 1, 0, 0, 0 );
 	} else {
 		qvkCmdDraw( vk.cmd->command_buffer, tess.numVertexes, 1, 0, 0 );
-		// Phase 7.4c-cmd — parallel-paths draw (vk_draw_geometry).
-		Ral_CmdDraw( vk.cmd->ral_cmd, tess.numVertexes, 1, 0, 0 );
 	}
 	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 	vk_diag_drawcalls++;
@@ -18355,15 +17711,11 @@ void vk_draw_dot( uint32_t storage_offset )
 	}
 
 	qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_storage, VK_DESC_STORAGE, 1, &vk.storage.descriptor, 1, &storage_offset );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record (storage SSBO).
-	vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_storage, VK_DESC_STORAGE, 1, &vk.storage.descriptor, 1, &storage_offset );
 
 	// configure pipeline's dynamic state
 	vk_update_depth_range( DEPTH_RANGE_NORMAL );
 
 	qvkCmdDraw( vk.cmd->command_buffer, tess.numVertexes, 1, 0, 0 );
-	// Phase 7.4c-cmd — parallel-paths draw (vk_draw_dot).
-	Ral_CmdDraw( vk.cmd->ral_cmd, tess.numVertexes, 1, 0, 0 );
 }
 
 
@@ -18402,8 +17754,6 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 	}
 
 	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
-	// Phase 7.4c-cmd — parallel-paths begin-render-pass.
-	vk_ral_parallel_begin_render_pass( &render_pass_begin_info );
 
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
 	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
@@ -18435,8 +17785,6 @@ static void vk_begin_render_pass_clear1( VkRenderPass renderPass, VkFramebuffer 
 	render_pass_begin_info.pClearValues = &clear_value;
 
 	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
-	// Phase 7.4c-cmd — parallel-paths begin-render-pass (single-attachment variant).
-	vk_ral_parallel_begin_render_pass( &render_pass_begin_info );
 
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
 	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
@@ -18550,15 +17898,9 @@ void vk_tonemap( void )
 	vk_begin_render_pass_clear1( vk.render_pass.tonemap, vk.framebuffers.tonemap, vk.renderWidth, vk.renderHeight );
 
 	qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, tonePipeline );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline (tonemap).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(tonePipeline ));
 	qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pLayout, 0, 1, &vk.color_descriptor, 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record (color sampler).
-	vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pLayout, 0, 1, &vk.color_descriptor, 0, NULL );
 	if ( needsDepth ) {
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pLayout, 1, 1, &vk.depthFade.descriptor, 0, NULL );
-		// Phase 7.4c-bindgroup — parallel-paths bind-side record (depthFade sampler).
-		vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pLayout, 1, 1, &vk.depthFade.descriptor, 0, NULL );
 	}
 #if FEAT_GODRAYS
 	if ( varIdx & TONEMAP_VAR_GODRAYS ) {
@@ -18568,14 +17910,10 @@ void vk_tonemap( void )
 		pushData[2] = 0.5f;
 		pushData[3] = 0.97f;
 		qvkCmdPushConstants( vk.cmd->command_buffer, pLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, pushData );
-		// Phase 7.4c-cmd — parallel-paths push-constants (godrays).
-		Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(pLayout), VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, pushData );
 	}
 #endif
 
 	qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-	// Phase 7.4c-cmd — parallel-paths draw (tonemap).
-	Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 
 	// End the tonemap pass. img 265 → SHADER_READ_ONLY_OPTIMAL. No pass open.
 	vk_end_render_pass();
@@ -18651,8 +17989,6 @@ void vk_depth_fade_copy( void )
 
 	// end the current render pass
 	qvkCmdEndRenderPass( vk.cmd->command_buffer );
-	// Phase 7.4c-cmd — parallel-paths end-render-pass (depthFade copy).
-	Ral_CmdEndRenderPass( vk.cmd->ral_cmd );
 
 	// barrier: depth attachment -> transfer src
 	memset( barriers, 0, sizeof( barriers ) );
@@ -18694,10 +18030,6 @@ void vk_depth_fade_copy( void )
 	// lookup miss is now closed; the typed call fires normally.
 	{
 		static qboolean warned;
-		vk_ral_parallel_pipeline_barrier_image(
-			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			2, barriers, &warned, "depthFade-pre-copy" );
 	}
 
 	// copy depth — single-sample only after MSAA retire
@@ -18720,8 +18052,6 @@ void vk_depth_fade_copy( void )
 		// the typed call fires normally.
 		{
 			static qboolean warned;
-			vk_ral_parallel_copy_image( vk.depth_image, vk.depthFade.image,
-				1, &region, &warned, "depthFade-depth-to-copy" );
 		}
 	}
 
@@ -18745,10 +18075,6 @@ void vk_depth_fade_copy( void )
 	// the typed call fires normally.
 	{
 		static qboolean warned;
-		vk_ral_parallel_pipeline_barrier_image(
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-			2, barriers, &warned, "depthFade-post-copy" );
 	}
 
 	// begin depth fade render pass (loads color+depth)
@@ -18763,9 +18089,6 @@ void vk_depth_fade_copy( void )
 
 	// bind the depth copy descriptor to set 5
 	qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.pipeline_layout, VK_DESC_DEPTH_FADE, 1, &vk.depthFade.descriptor, 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record (depthFade copy).
-	vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		vk.pipeline_layout, VK_DESC_DEPTH_FADE, 1, &vk.depthFade.descriptor, 0, NULL );
 
 	vk.depthFade.copied = qtrue;
@@ -18856,10 +18179,6 @@ void vk_smaa( void )
 	// the vk.smaa.active gate at the top of vk_smaa(). Typed call fires normally.
 	{
 		static qboolean warned;
-		vk_ral_parallel_pipeline_barrier_image(
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			2, barriers, &warned, "smaa-pre-copy" );
 	}
 
 	// copy
@@ -18880,8 +18199,6 @@ void vk_smaa( void )
 	// Both textures adopted under vk.fboActive at boot.
 	{
 		static qboolean warned;
-		vk_ral_parallel_copy_image( vk.tonemapped_image, vk.smaa.input_image,
-			1, &copy_region, &warned, "smaa-tonemap-to-input" );
 	}
 
 	// barrier: both back to SHADER_READ_ONLY
@@ -18902,10 +18219,6 @@ void vk_smaa( void )
 	// Phase 7.4c-submit-A4 — typed parallel-paths pipeline-barrier (SMAA post-copy).
 	{
 		static qboolean warned;
-		vk_ral_parallel_pipeline_barrier_image(
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-			2, barriers, &warned, "smaa-post-copy" );
 	}
 
 	// --- Pass 1: Edge detection ---
@@ -18922,30 +18235,18 @@ void vk_smaa( void )
 		rp_info.pClearValues = &clear_value;
 
 		qvkCmdBeginRenderPass( vk.cmd->command_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE );
-		// Phase 7.4c-cmd — parallel-paths begin-render-pass (SMAA edge).
-		vk_ral_parallel_begin_render_pass( &rp_info );
 	}
 
 	qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.smaa_edge_pipeline );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline + push-constants (SMAA edge).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.smaa_edge_pipeline ));
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_smaa,
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( rtMetrics ), rtMetrics );
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.pipeline_layout_smaa),
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( rtMetrics ), rtMetrics );
 
 	// set 0: input image
 	qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		vk.pipeline_layout_smaa, 0, 1, &vk.smaa.input_descriptor, 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record (SMAA edge pass).
-	vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		vk.pipeline_layout_smaa, 0, 1, &vk.smaa.input_descriptor, 0, NULL );
 
 	qvkCmdDraw( vk.cmd->command_buffer, 3, 1, 0, 0 );
 	qvkCmdEndRenderPass( vk.cmd->command_buffer );
-	// Phase 7.4c-cmd — parallel-paths draw + end-render-pass (SMAA edge).
-	Ral_CmdDraw         ( vk.cmd->ral_cmd, 3, 1, 0, 0 );
-	Ral_CmdEndRenderPass( vk.cmd->ral_cmd );
 
 	// --- Pass 2: Blend weight calculation ---
 	{
@@ -18960,16 +18261,10 @@ void vk_smaa( void )
 		rp_info.pClearValues = &clear_value;
 
 		qvkCmdBeginRenderPass( vk.cmd->command_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE );
-		// Phase 7.4c-cmd — parallel-paths begin-render-pass (SMAA blend).
-		vk_ral_parallel_begin_render_pass( &rp_info );
 	}
 
 	qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.smaa_blend_pipeline );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline + push-constants (SMAA blend).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.smaa_blend_pipeline ));
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_smaa,
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( rtMetrics ), rtMetrics );
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.pipeline_layout_smaa),
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( rtMetrics ), rtMetrics );
 
 	// set 0: edges, set 1: area LUT, set 2: search LUT
@@ -18980,16 +18275,10 @@ void vk_smaa( void )
 		sets[2] = vk.smaa.search_descriptor;
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			vk.pipeline_layout_smaa, 0, 3, sets, 0, NULL );
-		// Phase 7.4c-bindgroup — parallel-paths bind-side record (SMAA blend pass).
-		vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			vk.pipeline_layout_smaa, 0, 3, sets, 0, NULL );
 	}
 
 	qvkCmdDraw( vk.cmd->command_buffer, 3, 1, 0, 0 );
 	qvkCmdEndRenderPass( vk.cmd->command_buffer );
-	// Phase 7.4c-cmd — parallel-paths draw + end-render-pass (SMAA blend).
-	Ral_CmdDraw         ( vk.cmd->ral_cmd, 3, 1, 0, 0 );
-	Ral_CmdEndRenderPass( vk.cmd->ral_cmd );
 
 	// --- Pass 3: Neighborhood blending / resolve ---
 	{
@@ -19006,16 +18295,10 @@ void vk_smaa( void )
 		rp_info.pClearValues = &resolve_clear;
 
 		qvkCmdBeginRenderPass( vk.cmd->command_buffer, &rp_info, VK_SUBPASS_CONTENTS_INLINE );
-		// Phase 7.4c-cmd — parallel-paths begin-render-pass (SMAA resolve).
-		vk_ral_parallel_begin_render_pass( &rp_info );
 	}
 
 	qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.smaa_resolve_pipeline );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline + push-constants (SMAA resolve).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.smaa_resolve_pipeline ));
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_smaa,
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( rtMetrics ), rtMetrics );
-	Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.pipeline_layout_smaa),
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( rtMetrics ), rtMetrics );
 
 	// set 0: input (original color), set 1: blend weights
@@ -19026,16 +18309,10 @@ void vk_smaa( void )
 		sets[2] = vk.smaa.blend_descriptor; // padding for layout compatibility (3 sets)
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			vk.pipeline_layout_smaa, 0, 3, sets, 0, NULL );
-		// Phase 7.4c-bindgroup — parallel-paths bind-side record (SMAA resolve pass).
-		vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			vk.pipeline_layout_smaa, 0, 3, sets, 0, NULL );
 	}
 
 	qvkCmdDraw( vk.cmd->command_buffer, 3, 1, 0, 0 );
 	qvkCmdEndRenderPass( vk.cmd->command_buffer );
-	// Phase 7.4c-cmd — parallel-paths draw + end-render-pass (SMAA resolve).
-	Ral_CmdDraw         ( vk.cmd->ral_cmd, 3, 1, 0, 0 );
-	Ral_CmdEndRenderPass( vk.cmd->ral_cmd );
 }
 
 
@@ -19092,8 +18369,6 @@ static void vk_begin_screenmap_render_pass( void )
 void vk_end_render_pass( void )
 {
 	qvkCmdEndRenderPass( vk.cmd->command_buffer );
-	// Phase 7.4c-cmd — parallel-paths end-render-pass (centralized).
-	Ral_CmdEndRenderPass( vk.cmd->ral_cmd );
 
 //	vk.renderPassIndex = RENDER_PASS_MAIN;
 }
@@ -19429,9 +18704,6 @@ static void vk_gpu_ts_pool_reset( void )
 	// Phase 7.4c-submit-A4 — typed parallel-paths reset-query-pool.
 	{
 		static qboolean warned;
-		vk_ral_parallel_reset_query_pool( vk_gpu_ts_pool,
-			vk_gpu_ts_inflight[ vk.cmd_index ].base, VK_GPU_TS_MAX,
-			&warned, "gpu-ts-pool-reset" );
 	}
 
 	vk_gpu_ts_count = 0;
@@ -19442,10 +18714,6 @@ static void vk_gpu_ts_pool_reset( void )
 	// Phase 7.4c-submit-A4 — typed parallel-paths write-timestamp (acquire).
 	{
 		static qboolean warned;
-		vk_ral_parallel_write_timestamp( VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			vk_gpu_ts_pool,
-			vk_gpu_ts_inflight[ vk.cmd_index ].base + vk_gpu_ts_count,
-			&warned, "gpu-ts-acquire" );
 	}
 	vk_gpu_ts_labels[ vk_gpu_ts_count ] = "acquire";
 	vk_gpu_ts_count++;
@@ -19465,10 +18733,6 @@ static void vk_gpu_ts_write( const char *label )
 	// Phase 7.4c-submit-A4 — typed parallel-paths write-timestamp (named label).
 	{
 		static qboolean warned;
-		vk_ral_parallel_write_timestamp( VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			vk_gpu_ts_pool,
-			vk_gpu_ts_inflight[ vk.cmd_index ].base + vk_gpu_ts_count,
-			&warned, "gpu-ts-named-label" );
 	}
 	vk_gpu_ts_labels[ vk_gpu_ts_count ] = label;
 	vk_gpu_ts_count++;
@@ -19598,37 +18862,12 @@ _retry:
 	VK_CHECK( qvkBeginCommandBuffer( vk.cmd->command_buffer, &begin_info ) );
 	vk_frame_t_after_begincb = ri.Microseconds();
 
-	// Phase 7.4c-cmd — adopt the per-frame VkCommandBuffer into a
-	// ralCommandBuffer_t wrapper (ownsBuffer = qfalse). Used by every
-	// Ral_Cmd*Vk parallel-paths call site this frame. Destroyed at frame
-	// end after qvkEndCommandBuffer. NULL when RAL backend isn't up.
-	{
-		ralBackend_t *b = vk_ral_get_backend();
-		if ( b != NULL ) {
-			vk.cmd->ral_cmd = Ral_AcquireBegunCommandBuffer( b, RAL_QUEUE_GRAPHICS );
-			vk_ral_cmd_adopt_count++;
-
-			// Phase 7.4c-cmd: confirm-adoption-fires line. Cadence = first
-			// frame (so short smokes / map loads see it immediately), then
-			// every 1000 frames after that (matches the brief's guidance
-			// "once per 1000 frames or once per map load"). No new cvars
-			// introduced; existing log channels carry it.
-			#define VK_RAL_CMD_DUMP_CADENCE  1000u
-			{
-				const uint32_t framesSinceLastDump = (uint32_t)vk_ral_cmd_adopt_count - vk_ral_cmd_last_dump_frame;
-				const qboolean firstAdoption       = ( vk_ral_cmd_adopt_count == 1 ) ? qtrue : qfalse;
-				if ( firstAdoption || framesSinceLastDump >= VK_RAL_CMD_DUMP_CADENCE ) {
-					vk_ral_cmd_last_dump_frame = (uint32_t)vk_ral_cmd_adopt_count;
-					ri.Log( SEV_INFO,
-						"[VK->RAL] cmd buffer adopted per-frame (cadence=%u; lifetime cmd adoptions=%llu; ring adoptions=%llu)\n",
-						(unsigned)VK_RAL_CMD_DUMP_CADENCE,
-						(unsigned long long)vk_ral_cmd_adopt_count,
-						(unsigned long long)vk_ral_descset_adopt_count );
-				}
-			}
-			#undef VK_RAL_CMD_DUMP_CADENCE
-		}
-	}
+	// Phase 7.4c-submit-parallel-retire — per-frame RAL command-buffer
+	// adoption RETIRED. The parallel buffer recorded duplicate state from
+	// 100+ Ral_Cmd* sites but was destroyed before submit, producing
+	// pure overhead + 71 validation VUIDs per session. Field deleted from
+	// vk_tess_s; the call sites + parallel-paths functions also retired
+	// this turn.
 
 	vk_gpu_ts_pool_reset();
 
@@ -19751,7 +18990,6 @@ void vk_end_frame( void )
 	ralSemaphore_t     *ralWaits  [2];
 	ralSemaphore_t     *ralSignals[2];
 	ralSubmitInfo_t     ralSubmit;
-	ralCommandBuffer_t *frameRalCb;
 	ralCommandBuffer_t *ralCbs[1];
 
 	if ( vk.frame_count == 0 )
@@ -19812,15 +19050,9 @@ void vk_end_frame( void )
 			// the composited output.
 			vk_begin_render_pass_clear1( vk.render_pass.capture, vk.framebuffers.capture, gls.captureWidth, gls.captureHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.capture_pipeline );
-			// Phase 7.4c-cmd — parallel-paths bind-pipeline (capture).
-			Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.capture_pipeline ));
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.tonemapped_descriptor, 0, NULL );
-			// Phase 7.4c-bindgroup — parallel-paths bind-side record (capture pass).
-			vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.tonemapped_descriptor, 0, NULL );
 
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-			// Phase 7.4c-cmd — parallel-paths draw (capture).
-			Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 		}
 
 		if ( !ri.CL_IsMinimized() )
@@ -19865,10 +19097,6 @@ void vk_end_frame( void )
 				// (Apple TBDR pink fix; tonemapped_image is adopted at boot).
 				{
 					static qboolean warned;
-					vk_ral_parallel_pipeline_barrier_image(
-						VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-						VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-						1, &b, &warned, "apple-tbdr-pink-tonemapped" );
 				}
 			}
 #endif
@@ -19881,15 +19109,9 @@ void vk_end_frame( void )
 			// to the swapchain image. All scene-radiance variants moved to
 			// vk_tonemap upstream.
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_pipeline );
-			// Phase 7.4c-cmd — parallel-paths bind-pipeline (gamma).
-			Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.gamma_pipeline ));
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.tonemapped_descriptor, 0, NULL );
-			// Phase 7.4c-bindgroup — parallel-paths bind-side record (gamma display-encode pass).
-			vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.tonemapped_descriptor, 0, NULL );
 
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-			// Phase 7.4c-cmd — parallel-paths draw (gamma).
-			Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 		}
 	}
 
@@ -19909,40 +19131,18 @@ void vk_end_frame( void )
 
 	VK_CHECK( qvkEndCommandBuffer( vk.cmd->command_buffer ) );
 
-	// Phase 7.4c-cmd — release the parallel-paths RAL command buffer + the
-	// per-frame ring-adoption descriptor wrappers. Ral_AcquireBegunCommandBuffer
-	// (despite its name) allocated a SEPARATE VkCommandBuffer from RAL's
-	// graphics pool and began it; we end + free it here. The legacy
-	// vk.cmd->command_buffer was already ended above and is what the
-	// renderer's existing submit_info uses — RAL parallel buffer is recorded
-	// every frame but never submitted (7.4c-submit will move submission to
-	// it and retire legacy).
-	{
-		uint32_t i;
-		for ( i = 0; i < ARRAY_LEN( vk.cmd->descriptor_set.current_ral ); i++ ) {
-			if ( vk.cmd->descriptor_set.current_ral[i] ) {
-				Ral_DestroyBindGroup( vk.cmd->descriptor_set.current_ral[i] );
-				vk.cmd->descriptor_set.current_ral[i] = NULL;
-			}
-		}
-		if ( vk.cmd->ral_cmd ) {
-			Ral_EndCommandBuffer    ( vk.cmd->ral_cmd );
-			Ral_DestroyCommandBuffer( vk.cmd->ral_cmd );
-			vk.cmd->ral_cmd = NULL;
-		}
-	}
+	// Phase 7.4c-submit-parallel-retire — parallel cmd buffer End/Destroy
+	// block RETIRED. The matching Ral_AcquireBegunCommandBuffer call was
+	// removed at vk_begin_frame; the per-frame ring bind-group wrappers
+	// (vk_tess_s::descriptor_set.current_ral[]) are retired alongside.
 
-	// Phase 7.4c-submit-BC-C-final — per-frame submit migrated from
-	// qvkQueueSubmit to Ral_Submit. The legacy vk.cmd->command_buffer lifecycle
-	// (alloc / reset / begin / record / end) stays intact — it's wrapped here
-	// via Ral_WrapCommandBuffer (ownsBuffer=qfalse) just long enough to feed
-	// ralSubmitInfo_t.commandBuffers[]. All wait/signal semaphores + the
-	// signal fence reference adopted RAL siblings populated at
-	// vk_create_sync_primitives + vk_create_swapchain (BC-followup-staging /
-	// BC-followup-present-1 / BC-C-final's ral_rendering_finished_fence).
-	frameRalCb = Ral_WrapCommandBuffer( vk_ral_get_backend(),
-		(void *)vk.cmd->command_buffer, RAL_QUEUE_GRAPHICS );
-	ralCbs[0] = frameRalCb;
+	// Phase 7.4c-submit-lifecycle-retire — per-frame Ral_WrapCommandBuffer
+	// retired. vk.cmd->ral_cmd is a PERSISTENT per-slot RAL command buffer
+	// (acquired at vk_initialize); ralSubmit.commandBuffers reads it directly
+	// without per-frame wrap allocation. The underlying VkCommandBuffer is
+	// the same handle as before (vk.cmd->command_buffer is its alias) — just
+	// owned by RAL's graphics pool instead of the renderer's pool (retired).
+	ralCbs[0] = vk.cmd->ral_cmd;
 
 	memset( &ralSubmit, 0, sizeof( ralSubmit ) );
 	ralSubmit.commandBuffers     = ralCbs;
@@ -19993,10 +19193,9 @@ void vk_end_frame( void )
 		vk_frame_t_after_submit = ri.Microseconds();
 	}
 
-	// Phase 7.4c-submit-BC-C-final — wrapper retire (ownsBuffer=qfalse → no
-	// underlying-buffer destroy; the legacy vk.cmd->command_buffer stays in
-	// its existing alloc/reset/begin/end lifecycle for the next frame).
-	Ral_DestroyCommandBuffer( frameRalCb );
+	// Phase 7.4c-submit-lifecycle-retire — per-frame Ral_DestroyCommandBuffer
+	// retired alongside the wrap above. vk.cmd->ral_cmd persists across
+	// frames; destroyed once at vk_shutdown per the per-slot loop.
 
 	// Phase 7.4c-pipeline-followup-5 PART 0 — first-frame submit marker.
 	// Stays permanently as durable observability: proves a frame actually
@@ -21159,15 +20358,8 @@ void vk_render_shadow_map( void ) {
 		qvkCmdBeginRenderPass( vk.cmd->command_buffer, &rpBegin, VK_SUBPASS_CONTENTS_INLINE );
 		qvkCmdSetViewport( vk.cmd->command_buffer, 0, 1, &viewport );
 		qvkCmdSetScissor( vk.cmd->command_buffer, 0, 1, &scissor );
-		// Phase 7.4c-cmd — parallel-paths begin-render-pass + viewport/scissor (shadow cascade).
-		vk_ral_parallel_begin_render_pass( &rpBegin );
-		Ral_CmdSetViewport(vk.cmd->ral_cmd, (const ralViewport_t *)&viewport);
-		Ral_CmdSetScissor(vk.cmd->ral_cmd, (const ralRect_t *)&scissor);
 		// cascadeMVP (push offset 0) is constant across this cascade's draws.
 		qvkCmdPushConstants( vk.cmd->command_buffer, vk.shadowMap.depthLayout,
-			VK_SHADER_STAGE_VERTEX_BIT, 0, 64, M );
-		// Phase 7.4c-cmd — parallel-paths push-constants (shadow cascade MVP).
-		Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.shadowMap.depthLayout),
 			VK_SHADER_STAGE_VERTEX_BIT, 0, 64, M );
 
 		// Cascades [numCascades .. 3] are left at the clear value (depth 1.0 ⇒
@@ -21185,13 +20377,9 @@ void vk_render_shadow_map( void ) {
 
 			if ( haveWorld || haveBmodel || haveSnap ) {
 				qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.shadowMap.depthPipeline );
-				// Phase 7.4c-cmd — parallel-paths bind-pipeline (shadow depth).
-				Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.shadowMap.depthPipeline ));
 				// dynamic slope-scaled depth bias from r_csmBias (default 0.005 ⇒ the
 				// prior fixed conservative constant/slope of 2.0/3.0).
 				qvkCmdSetDepthBias( vk.cmd->command_buffer, biasScale * 400.0f, 0.0f, biasScale * 600.0f );
-				// Phase 7.4c-cmd — parallel-paths set-depth-bias (shadow).
-				Ral_CmdSetDepthBias( vk.cmd->ral_cmd, biasScale * 400.0f, 0.0f, biasScale * 600.0f );
 			}
 
 			// worldspawn casters — identity model->world (their verts are world-space)
@@ -21201,12 +20389,6 @@ void vk_render_shadow_map( void ) {
 				qvkCmdBindVertexBuffers( vk.cmd->command_buffer, 0, 1, &vk.shadowMap.casterBuf, &voff );
 				qvkCmdBindIndexBuffer( vk.cmd->command_buffer, vk.shadowMap.casterBuf, vk.shadowMap.casterVtxBytes, VK_INDEX_TYPE_UINT32 );
 				qvkCmdDrawIndexed( vk.cmd->command_buffer, vk.shadowMap.casterIndexCount, 1, 0, 0, 0 );
-				// Phase 7.4c-cmd — parallel-paths (shadow worldspawn casters).
-				Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.shadowMap.depthLayout), VK_SHADER_STAGE_VERTEX_BIT, 64, 64, mm );
-				{ ralBuffer_t *rb = vk_ral_lookup_buffer( vk.shadowMap.casterBuf );
-				  Ral_CmdBindVertexBuffers( vk.cmd->ral_cmd, 0, 1, &rb, (const uint64_t *)&voff ); }
-				Ral_CmdBindIndexBuffer(vk.cmd->ral_cmd, vk_ral_lookup_buffer(vk.shadowMap.casterBuf), vk.shadowMap.casterVtxBytes, RAL_INDEX_UINT32);
-				Ral_CmdDrawIndexed      ( vk.cmd->ral_cmd, vk.shadowMap.casterIndexCount, 1, 0, 0, 0 );
 			}
 
 			// Phase 6.5.4d2: inline brush-model casters — one draw per visible
@@ -21218,10 +20400,6 @@ void vk_render_shadow_map( void ) {
 				int ei;
 				qvkCmdBindVertexBuffers( vk.cmd->command_buffer, 0, 1, &vk.shadowMap.casterBmodelBuf, &voff );
 				qvkCmdBindIndexBuffer( vk.cmd->command_buffer, vk.shadowMap.casterBmodelBuf, vk.shadowMap.casterBmodelVtxBytes, VK_INDEX_TYPE_UINT32 );
-				// Phase 7.4c-cmd — parallel-paths (shadow bmodel cast bind).
-				{ ralBuffer_t *rb = vk_ral_lookup_buffer( vk.shadowMap.casterBmodelBuf );
-				  Ral_CmdBindVertexBuffers( vk.cmd->ral_cmd, 0, 1, &rb, (const uint64_t *)&voff ); }
-				Ral_CmdBindIndexBuffer(vk.cmd->ral_cmd, vk_ral_lookup_buffer(vk.shadowMap.casterBmodelBuf), vk.shadowMap.casterBmodelVtxBytes, RAL_INDEX_UINT32);
 				for ( ei = 0; ei < backEnd.refdef.num_entities; ei++ ) {
 					const trRefEntity_t *ent = &backEnd.refdef.entities[ei];
 					const model_t *mod;
@@ -21245,9 +20423,6 @@ void vk_render_shadow_map( void ) {
 					mm[3] = 0.0f;              mm[7] = 0.0f;              mm[11] = 0.0f;              mm[15] = 1.0f;
 					qvkCmdPushConstants( vk.cmd->command_buffer, vk.shadowMap.depthLayout, VK_SHADER_STAGE_VERTEX_BIT, 64, 64, mm );
 					qvkCmdDrawIndexed( vk.cmd->command_buffer, rng->indexCount, 1, rng->firstIndex, 0, 0 );
-					// Phase 7.4c-cmd — parallel-paths (shadow bmodel per-entity).
-					Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.shadowMap.depthLayout), VK_SHADER_STAGE_VERTEX_BIT, 64, 64, mm );
-					Ral_CmdDrawIndexed  ( vk.cmd->ral_cmd, rng->indexCount, 1, rng->firstIndex, 0, 0 );
 				}
 			}
 
@@ -21269,26 +20444,17 @@ void vk_render_shadow_map( void ) {
 				int si;
 				qvkCmdBindVertexBuffers( vk.cmd->command_buffer, 0, 1, &vk.cmd->shadowSnapBuf, &snapVertOff );
 				qvkCmdBindIndexBuffer( vk.cmd->command_buffer, vk.cmd->shadowSnapBuf, snapIdxOff, VK_INDEX_TYPE_UINT32 );
-				// Phase 7.4c-cmd — parallel-paths (shadow snap bind).
-				{ ralBuffer_t *rb = vk_ral_lookup_buffer( vk.cmd->shadowSnapBuf );
-				  Ral_CmdBindVertexBuffers( vk.cmd->ral_cmd, 0, 1, &rb, (const uint64_t *)&snapVertOff ); }
-				Ral_CmdBindIndexBuffer(vk.cmd->ral_cmd, vk_ral_lookup_buffer(vk.cmd->shadowSnapBuf), snapIdxOff, RAL_INDEX_UINT32);
 				for ( si = 0; si < snapSlices; si++ ) {
 					const shadowMeshSlice_t *sl = &shadowMeshSnapSlices[si];
 					// modelMatrix is already a full 16-float column-major model->world
 					// (vk_shadow_capture_mesh fills [axis|origin] + bottom row {0,0,0,1}).
 					qvkCmdPushConstants( vk.cmd->command_buffer, vk.shadowMap.depthLayout, VK_SHADER_STAGE_VERTEX_BIT, 64, 64, sl->modelMatrix );
 					qvkCmdDrawIndexed( vk.cmd->command_buffer, sl->indexCount, 1, sl->firstIndex, sl->vertexOffset, 0 );
-					// Phase 7.4c-cmd — parallel-paths (shadow snap per-slice draw).
-					Ral_CmdPushConstantsLayout( vk.cmd->ral_cmd, vk_ral_lookup_pipeline_layout(vk.shadowMap.depthLayout), VK_SHADER_STAGE_VERTEX_BIT, 64, 64, sl->modelMatrix );
-					Ral_CmdDrawIndexed  ( vk.cmd->ral_cmd, sl->indexCount, 1, sl->firstIndex, sl->vertexOffset, 0 );
 				}
 			}
 		}
 
 		qvkCmdEndRenderPass( vk.cmd->command_buffer );
-		// Phase 7.4c-cmd — parallel-paths end-render-pass (shadow cascade).
-		Ral_CmdEndRenderPass( vk.cmd->ral_cmd );
 	}
 
 	// On exit no render pass is open. The caller (vk_begin_frame) opens the
@@ -21342,10 +20508,6 @@ qboolean vk_bloom( void )
 		// TBDR bloom path; color_image is adopted at boot).
 		{
 			static qboolean warned;
-			vk_ral_parallel_pipeline_barrier_image(
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-				1, &b, &warned, "apple-tbdr-bloom-color" );
 		}
 	}
 #endif
@@ -21353,14 +20515,8 @@ qboolean vk_bloom( void )
 	// bloom extraction
 	vk_begin_bloom_extract_render_pass();
 	qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.bloom_extract_pipeline );
-	// Phase 7.4c-cmd — parallel-paths bind-pipeline (bloom extract).
-	Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.bloom_extract_pipeline ));
 	qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
-	// Phase 7.4c-bindgroup — parallel-paths bind-side record (bloom extract).
-	vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
 	qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-	// Phase 7.4c-cmd — parallel-paths draw (bloom extract).
-	Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 	vk_end_render_pass();
 
 	{
@@ -21370,27 +20526,15 @@ qboolean vk_bloom( void )
 		// horizontal blur
 		vk_begin_blur_render_pass( i+0 );
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.blur_pipeline[i+0] );
-		// Phase 7.4c-cmd — parallel-paths bind-pipeline (bloom blur H).
-		Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.blur_pipeline[i+0] ));
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.bloom_image_descriptor[i+0], 0, NULL );
-		// Phase 7.4c-bindgroup — parallel-paths bind-side record (bloom blur H).
-		vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.bloom_image_descriptor[i+0], 0, NULL );
 		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-		// Phase 7.4c-cmd — parallel-paths draw (bloom blur H).
-		Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 		vk_end_render_pass();
 
 		// vectical blur
 		vk_begin_blur_render_pass( i+1 );
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.blur_pipeline[i+1] );
-		// Phase 7.4c-cmd — parallel-paths bind-pipeline (bloom blur V).
-		Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.blur_pipeline[i+1] ));
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.bloom_image_descriptor[i+1], 0, NULL );
-		// Phase 7.4c-bindgroup — parallel-paths bind-side record (bloom blur V).
-		vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.bloom_image_descriptor[i+1], 0, NULL );
 		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-		// Phase 7.4c-cmd — parallel-paths draw (bloom blur V).
-		Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 		vk_end_render_pass();
 #if 0
 		// horizontal blur
@@ -21422,14 +20566,8 @@ qboolean vk_bloom( void )
 
 		// blend downscaled buffers to main fbo
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.bloom_blend_pipeline );
-		// Phase 7.4c-cmd — parallel-paths bind-pipeline (bloom blend).
-		Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.bloom_blend_pipeline ));
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_blend, 0, ARRAY_LEN(dset), dset, 0, NULL );
-		// Phase 7.4c-bindgroup — parallel-paths bind-side record (bloom_blend N-set bundle).
-		vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_blend, 0, ARRAY_LEN(dset), dset, 0, NULL );
 		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-		// Phase 7.4c-cmd — parallel-paths draw (bloom blend).
-		Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 	}
 	} // num_bloom_passes scope
 
@@ -21440,8 +20578,6 @@ qboolean vk_bloom( void )
 	{
 		// restore last pipeline
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.cmd->last_pipeline );
-		// Phase 7.4c-cmd — parallel-paths bind-pipeline (post-bloom restore).
-		Ral_CmdBindPipeline(vk.cmd->ral_cmd, vk_ral_lookup_pipeline(vk.cmd->last_pipeline ));
 
 		vk_update_mvp( NULL );
 
@@ -21453,12 +20589,8 @@ qboolean vk_bloom( void )
 			if ( vk.cmd->descriptor_set.current[i] != VK_NULL_HANDLE ) {
 				if ( i == VK_DESC_UNIFORM /*|| i == VK_DESC_STORAGE*/ ) {
 					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 1, &vk.cmd->descriptor_set.offset[i] );
-					// Phase 7.4c-bindgroup — parallel-paths bind-side record (post-bloom rebind, uniform set). TODO_7.4c-cmd: per-frame rotating set unadopted, helper auto-skips via NULL lookup today.
-					vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 1, &vk.cmd->descriptor_set.offset[i] );
 				} else {
 					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 0, NULL );
-					// Phase 7.4c-bindgroup — parallel-paths bind-side record (post-bloom rebind, non-uniform sets). TODO_7.4c-cmd: per-frame rotating texture set unadopted, helper auto-skips via NULL lookup today.
-					vk_ral_parallel_bind_descriptor_sets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 0, NULL );
 				}
 			}
 		}
