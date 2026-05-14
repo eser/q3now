@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #if defined(_DEBUG) && defined(_WIN32)
 #include <windows.h>
 #endif

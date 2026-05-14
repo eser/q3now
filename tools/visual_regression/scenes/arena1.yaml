@@ -1,0 +1,57 @@
+# arena1.yaml — in-game HUD over the arena1 map. STARTER SCENE.
+#
+# The passive HUD overlay (crosshair, fps, ammo/health bars, …) draws over
+# the world scene. Like the menu, the HUD is a fullscreen overlay and
+# bypasses the tonemap operator by design — so `operator: identity` and the
+# predicted byte == round(authored * 255). HUD elements that are
+# alpha-blended over the scene pick up some of the world colour underneath,
+# so those regions get a looser per-region tolerance.
+#
+# STATUS: the `region` names below must match `name` attributes on the
+# in-game HUD .wmenu / .whud items (modfiles/ui/ingame*.wmenu and the HUD
+# element definitions). As shipped, those items may not be `name`-tagged
+# yet — in which case vr_check.py reports "none of the expected regions
+# appeared in layoutdump" until tags are added. Treat the entries below as
+# a template: add `name` tags to the HUD items you want to track, point the
+# `source` at the .wmenu element (or a wmenumacros.h macro, or an rgba
+# literal matching the element's authored colour), and uncomment.
+
+name: arena1
+
+operator: identity
+
+cvars:
+  s_initsound: 0
+  r_brightness: 1
+  r_tonemap: 1
+  # cg_draw2D 1 / cg_drawFPS 1 etc. could be pinned here if a specific HUD
+  # element needs to be guaranteed visible at the captured frame.
+
+map: arena1             # load the level (renderdoccmd: `+map arena1`)
+
+capture_frame: 600      # informational — WN_RDOC_CAPTURE build hard-codes the frame
+
+texture: backbuffer
+
+# shoulder_regions: []  # HUD is identity-encoded, so no shoulder concerns
+
+expected_regions:
+  # Example 1 — a HUD accent-coloured element (forecolor WCOLOR_ACCENT from
+  # wmenumacros.h = 0.85 0.55 0.1 1). Replace `hud.accent` with the actual
+  # `name` you tag the element with.
+  - region: hud.accent
+    source: { macro: WCOLOR_ACCENT }
+
+  # Example 2 — a HUD separator / divider (WCOLOR_SEPARATOR = 0.3 0.3 0.3 0.5),
+  # alpha-blended over the scene, so a looser tolerance.
+  - region: hud.separator
+    source: { macro: WCOLOR_SEPARATOR }
+    tolerance: 8
+
+  # Example 3 — an element whose authored colour is *not* a wmenumacros.h
+  # macro and not in a .wmenu (e.g. set in HUD element C code): use an rgba
+  # literal that matches the element's authored colour. Fill in the real
+  # value; do not guess.
+  #  - region: hud.scoreboard_bg
+  #    source: { rgba: [0.0, 0.0, 0.0, 0.6] }   # <-- replace with the real authored colour
+  #    tolerance: 8

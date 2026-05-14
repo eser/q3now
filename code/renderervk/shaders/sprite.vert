@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
 /*
@@ -17,10 +20,15 @@ Push range layout (VERTEX | FRAGMENT, 112 bytes):
     bytes   0..63   mat4  mvp           — world MVP, Y-flipped for Vulkan
     bytes  64..79   vec4  viewLeft      — .xyz = camera-left in world space
     bytes  80..95   vec4  viewUp        — .xyz = camera-up in world space
-    bytes  96..111  vec4  frameParams   — .x = tr.identityLight,
+    bytes  96..111  vec4  frameParams   — .x = reserved / unused (was
+                                          the legacy identityLight
+                                          halving factor; dropped Phase
+                                          6B3'-a, field removed in the
+                                          Block 9 sweep; the word stays
+                                          for push-range byte-compat),
                                           .yzw reserved
-frameParams is consumed by sprite.frag (CGEN_VERTEX-equivalent
-halving), so the host-side push range covers VERTEX | FRAGMENT.
+Push range covers VERTEX | FRAGMENT for stage layout compatibility
+even though sprite.frag does not consume frameParams.
 */
 
 layout(push_constant) uniform Push {

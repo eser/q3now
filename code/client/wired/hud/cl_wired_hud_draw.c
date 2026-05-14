@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 // Wired UI: ModernHUD drawing helpers migrated from cg_modernhud_util.c
 #include "../../client.h"
 #include "cl_wired_hud_compat.h"

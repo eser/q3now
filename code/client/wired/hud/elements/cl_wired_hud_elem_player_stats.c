@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 // cl_wired_hud_elem_player_stats.c — Aggregate player stats (DG, DR, ratio)
 // DG = damage given (sum of all weapon damage)
 // DR = damage received (approximated from deaths * 100, since exact DR isn't tracked)

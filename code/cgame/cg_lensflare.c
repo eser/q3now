@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: JuHo X (BrightArena lens flares)
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 ===========================================================================
 cg_lensflare.c -- Lens flare effects (9A / FEAT_LENS_FLARES)

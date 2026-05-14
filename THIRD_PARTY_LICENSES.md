@@ -43,13 +43,27 @@ For machine-readable enumeration of every transitive dependency, see:
 
 ## 1. Project license & derivation
 
-q3now and Wired is licensed under the **GNU General Public License, version 2 or
-later (GPL-2.0-or-later)**. The full license text is in `LICENSE` at
-the repository root.
+This repository combines source code released under **two versions of the GNU
+General Public License**:
 
-q3now and Wired is derived from **ioquake3** (`https://github.com/ioquake/ioq3`),
-which is itself a continuation of id Software's open-source release of
-the **Quake III Arena** engine. Per the original release:
+- **Inherited id Tech 3 code** — the engine and game code derived from id
+  Software's **Quake III Arena** release and its community successors
+  (**ioquake3** → **Quake3e** → this tree), plus the id-derived **q3now** game
+  modules under `code/game/` and `code/cgame/` — is licensed under
+  **GPL-2.0-or-later**. Such files carry `SPDX-License-Identifier:
+  GPL-2.0-or-later`.
+- **New Wired Engine code** — files first written for this project, notably
+  everything under `code/.../wired/` — is licensed under **GPL-3.0-or-later**.
+  Such files carry `SPDX-License-Identifier: GPL-3.0-or-later`.
+- Because GPL-2.0-or-later code is upgrade-compatible with GPLv3, the **combined
+  work / distributed binaries are effectively GPL-3.0-or-later**.
+
+The full text of both licenses is in `LICENSE` at the repository root and,
+verbatim, under `LICENSES/` (`LICENSES/GPL-2.0-or-later.txt`,
+`LICENSES/GPL-3.0-or-later.txt`). The authoritative license for any individual
+file is the `SPDX-License-Identifier` tag at the top of that file.
+
+Per the original id Software release:
 
 > Copyright (C) 1999-2005 Id Software, Inc.
 >
@@ -58,13 +72,41 @@ the **Quake III Arena** engine. Per the original release:
 > the Free Software Foundation; either version 2 of the License, or
 > (at your option) any later version.
 
-Per-source-file attribution headers are preserved verbatim throughout
-`code/`. Notable files with non-id attribution:
+A few in-tree files are derived from **other GPL projects** (not id Software);
+their `SPDX-FileCopyrightText` lines preserve the real upstream attribution and
+they remain `GPL-2.0-or-later`:
 
-- `code/qcommon/unzip.c` — IO over zip files, derived from zlib's `unzip.c`
-  (Zlib license — see Appendix D), originally by Gilles Vollant.
+- `code/qcommon/crash.c`, `code/qcommon/crash.h` — JSON crash-report writer,
+  originally from **CNQ3** (`Copyright (c) 2017-2020 Gian 'myT' Schellenbaum`).
+- `code/qcommon/cm_q1.c` — native Q1 hull-1 clipnode tracer, algorithm ported
+  from **FTEQW** (`q1bsp.c`, Spike / FTEQW contributors).
+- `code/client/snd_codec*.c`, `code/client/snd_opus.c`, `code/client/snd_adpcm.c`,
+  `code/qcommon/json.h` — sound-codec and JSON helpers from **ioquake3** /
+  ioquake3 contributors (Stuart Dalton, James Canete, et al.).
+- `code/renderer*/tr_spearmint.c` — fog / corona / 2D-draw feature adaptation
+  derived from **Spearmint** (Zack Middleton / Spearmint contributors).
+- `code/qcommon/util/md4.c` — MD4 implementation from **Samba**
+  (`Copyright (c) 1997-1998 Andrew Tridgell`), GPL-2.0-or-later.
+
+Other in-tree files are third-party code under **non-GPL** licenses; see
+§4 below and the `SPDX-License-Identifier` tag in each such file. Notable ones:
+
+- `code/qcommon/unzip.c`, `code/qcommon/unzip.h` — IO over zip files, derived
+  from zlib's `unzip.c` / minizip (Zlib license — see Appendix D), originally by
+  Gilles Vollant; with a small modification by Joerg Dietrich.
+- `code/qcommon/puff.c`, `code/qcommon/puff.h` — minimal inflate, by Mark Adler
+  (zlib-style permissive license, kept verbatim in the file).
 - `code/qcommon/bg_lib.c` — minimal libc replacement, BSD-derived
   (BSD-3-Clause — see Appendix B).
+- `code/qcommon/util/md5.c` — MD5 implementation (see §4.6 for its license).
+- `code/renderer/iqm.h`, `code/renderervk/iqm.h` — Inter-Quake Model format
+  header, by Lee Salzman (public domain — see §4.5).
+- `code/renderer2/glext.h` — OpenGL extension header from the Khronos OpenGL
+  registry (MIT — see §4.7).
+- `code/renderervk/smaa_area_texture.h`, `code/renderervk/smaa_search_texture.h`
+  — precomputed SMAA lookup textures (MIT, see §4.4).
+- `code/renderercommon/vulkan/*.h` — Khronos Vulkan headers (Apache-2.0 —
+  see §4.2).
 
 ---
 
@@ -632,7 +674,78 @@ Copyright 2015-2022 The Khronos Group Inc.
 SPDX-License-Identifier: Apache-2.0
 ```
 
-Per Apache-2.0 §4, this notice is preserved.
+Per Apache-2.0 §4, this notice is preserved. Each `code/renderercommon/vulkan/*.h`
+file carries `SPDX-License-Identifier: Apache-2.0` and the Khronos copyright
+line (plus, where applicable, a short note recording a backported definition).
+
+### 4.3 minizip / unzip (zip read support)
+
+- **Upstream:** minizip, originally distributed with zlib
+  (https://www.zlib.net/) — by Gilles Vollant (https://www.winimage.com/zLibDll/minizip.html)
+- **License:** Zlib (see Appendix D)
+- **Path:** `code/qcommon/unzip.c`, `code/qcommon/unzip.h`
+- **Copyright:** `Copyright (c) 1998-2010 Gilles Vollant`; the in-tree copy
+  also carries a small modification by `Joerg Dietrich <dietrich_joerg@gmx.de>`.
+
+Both files carry `SPDX-License-Identifier: Zlib` and retain the upstream
+copyright / permission notice.
+
+### 4.4 SMAA — precomputed lookup textures
+
+- **Upstream:** https://github.com/iryoku/smaa
+- **License:** MIT (with an explicit clarification that the notice need not be
+  reproduced in binary distributions)
+- **Path:** `code/renderervk/smaa_area_texture.h`, `code/renderervk/smaa_search_texture.h`
+- **Copyright (2013):** Jorge Jimenez, Jose I. Echevarria, Belen Masia,
+  Fernando Navarro, Diego Gutierrez
+
+These two headers contain the precomputed AreaTex / SearchTex byte arrays used
+by the renderer's SMAA pass. Each file carries `SPDX-License-Identifier: MIT`,
+the five copyright lines above, and the upstream permission text verbatim. The
+canonical MIT permission text also appears in Appendix A.
+
+### 4.5 puff — minimal inflate
+
+- **Upstream:** distributed with zlib (`contrib/puff/`) — by Mark Adler
+- **License:** zlib-style permissive (the upstream `puff.h` permission notice,
+  kept verbatim in the file)
+- **Path:** `code/qcommon/puff.c`, `code/qcommon/puff.h`
+- **Copyright:** `Copyright (c) 2002-2013 Mark Adler`; the in-tree copy also
+  carries a modification note by `Joerg Dietrich <dietrich_joerg@gmx.de>` (2006).
+
+The full upstream permission notice is reproduced verbatim in `puff.h`. The
+files carry `SPDX-License-Identifier: LicenseRef-puff` (the upstream license has
+no SPDX standard identifier; the full text is the authoritative grant).
+
+### 4.6 MD5 implementation
+
+- **Path:** `code/qcommon/util/md5.c`
+- **License:** as stated in the file's own header — preserved verbatim, with
+  `SPDX-License-Identifier` set to match. (Common provenances for this file in
+  the Quake 3 lineage are RSA Data Security's MD5 reference implementation or a
+  public-domain rewrite; the in-tree file's header is authoritative.)
+
+### 4.7 OpenGL extension header (`glext.h`)
+
+- **Upstream:** Khronos OpenGL / OpenGL ES Registry
+  (https://github.com/KhronosGroup/OpenGL-Registry)
+- **License:** MIT (modern Khronos registry headers) — see Appendix A
+- **Path:** `code/renderer2/glext.h`
+- **Copyright:** `Copyright (c) 2013-2020 The Khronos Group Inc.`
+
+The file carries `SPDX-License-Identifier: MIT` and the Khronos copyright line.
+
+### 4.8 Inter-Quake Model (IQM) format header
+
+- **Upstream:** http://sauerbraten.org/iqm/ — by Lee Salzman
+- **License:** public domain (the format and reference header are released into
+  the public domain by the author)
+- **Path:** `code/renderer/iqm.h`, `code/renderervk/iqm.h`
+- The IQM model *loaders* (`tr_model_iqm.c` in each renderer) were backported
+  from ioquake3 and remain under the engine's GPL terms; only the format
+  *header* `iqm.h` is the public-domain upstream artifact.
+
+These headers carry `SPDX-License-Identifier: LicenseRef-public-domain`.
 
 ---
 
@@ -942,4 +1055,5 @@ WAMR, Vulkan-Headers, or Cobra source from upstream releases.
 ---
 
 *This document was generated for q3now and Wired and is itself licensed under the
-project's GPL-2.0-or-later. Last updated: 2026-05-07.*
+project's terms (see `LICENSE` — GPL-3.0-or-later for new project material).
+Last updated: 2026-05-12.*

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #pragma once
 
 // cl_wired_attract.h — Wired Attract scheduler public API.

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
 layout(set = 0, binding = 0) uniform sampler2D texture0;
@@ -10,7 +14,10 @@ layout(location = 0) in vec2 tex_coord;
 layout(location = 0) out vec4 out_color;
 
 //layout(constant_id = 0) const float gamma = 1.0;
-//layout(constant_id = 1) const float obScale = 2.0;
+// Phase 6B3'-a: legacy obScale (constant_id 1) declaration removed
+// — bloom-blend operates on already-blurred linear bloom samples
+// + r_bloomIntensity factor. Host now feeds exposure_bias to
+// constant_id 1 globally; blend.frag does not consume it.
 //layout(constant_id = 2) const float saturation = 1.0;
 //layout(constant_id = 3) const float threshold = 0.6;
 layout(constant_id = 4) const float factor = 0.5;

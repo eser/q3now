@@ -1,11 +1,5 @@
-/*
-===========================================================================
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of Quake III Arena source code.
-Released under GPLv2 — see meta.h for the full notice.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 // meta_aliases.c -- legacy-to-canonical name normalization for .meta keys
 // and gametype tokens. Linear scans over short tables; hot-path cost is

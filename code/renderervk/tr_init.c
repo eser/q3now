@@ -1,22 +1,12 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired Engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
+#ifdef USE_VULKAN
+#include "vk_ral_textures.h"   // Phase 7.4a — \ral_textures dump cmd registration
+#endif
 #include <stdlib.h>
 
 static int s_r_device_mod = -1;
@@ -98,15 +88,20 @@ cvar_t	*r_vbo;
 #endif
 cvar_t	*r_fbo;
 cvar_t	*r_hdr;
+cvar_t	*r_hdrDisplay;        // Phase 6B3'-d8: HDR10 swapchain colorspace (BT.2020 + PQ)
+cvar_t	*r_hdrPeakLuminance;  // HDR10 display peak (nits) — tonemap shoulder + metadata hint
+cvar_t	*r_hdrMinLuminance;   // HDR10 display min (nits) — metadata hint only
+#if FEAT_PBR
+cvar_t	*r_pbr;
+#endif
 cvar_t	*r_bloom;
-cvar_t	*r_bloom_passes;
+cvar_t	*r_bloomPasses;
 #ifdef __APPLE__
 cvar_t	*r_vkApplePinkBarrier;
 #endif
-cvar_t	*r_bloom_threshold;
-cvar_t	*r_bloom_intensity;
-cvar_t	*r_bloom_threshold_mode;
-cvar_t	*r_bloom_modulate;
+cvar_t	*r_bloomThreshold;
+cvar_t	*r_bloomIntensity;
+cvar_t	*r_bloomThresholdMode;
 cvar_t	*r_renderWidth;
 cvar_t	*r_renderHeight;
 cvar_t	*r_renderScale;
@@ -121,12 +116,19 @@ cvar_t	*r_ssao;
 #if FEAT_TONEMAP
 cvar_t	*r_tonemap;
 cvar_t	*r_tonemapExposure;
+cvar_t	*r_lottes_contrast;
+cvar_t	*r_lottes_shoulder;
+cvar_t	*r_lottes_mid_in;
+cvar_t	*r_lottes_mid_out;
+cvar_t	*r_lottes_hdr_max;
 #endif
 #if FEAT_COLOR_GRADING
 cvar_t	*r_colorGrading;
-#endif
-#if FEAT_FXAA
-cvar_t	*r_fxaa;
+cvar_t	*r_grade_tint_r;
+cvar_t	*r_grade_tint_g;
+cvar_t	*r_grade_tint_b;
+cvar_t	*r_grade_saturation;
+cvar_t	*r_grade_contrast;
 #endif
 #if FEAT_GODRAYS
 cvar_t	*r_godRays;
@@ -134,6 +136,7 @@ cvar_t	*r_sunX;
 cvar_t	*r_sunY;
 #endif
 cvar_t	*r_smaa;
+cvar_t	*r_smaa_threshold;
 cvar_t	*r_lerpLightstyles;
 #endif // USE_VULKAN
 
@@ -143,8 +146,8 @@ cvar_t	*r_lodbias;
 cvar_t	*r_lodscale;
 
 cvar_t	*r_norefresh;
-cvar_t	*r_drawentities;
-cvar_t	*r_drawworld;
+cvar_t	*r_drawEntities;
+cvar_t	*r_drawWorld;
 cvar_t	*r_speeds;
 cvar_t	*r_gpuSpeeds;
 cvar_t	*r_vkDebugTiming;
@@ -153,7 +156,7 @@ cvar_t	*r_fullbright;
 cvar_t	*r_novis;
 cvar_t	*r_nocull;
 cvar_t	*r_facePlaneCull;
-cvar_t	*r_showcluster;
+cvar_t	*r_showCluster;
 cvar_t	*r_nocurves;
 
 cvar_t	*r_allowExtensions;
@@ -167,9 +170,11 @@ cvar_t	*r_ext_max_anisotropy;
 
 cvar_t	*r_ignoreGLErrors;
 
-//cvar_t	*r_stencilbits;
-cvar_t	*r_texturebits;
-cvar_t	*r_ext_multisample;
+//cvar_t	*r_stencilBits;
+cvar_t	*r_textureBits;
+cvar_t	*r_useRALTextures;    // Phase 7.4a — gates the parallel-paths RAL texture migration
+cvar_t	*r_useRALBuffers;     // Phase 7.4b — gates the parallel-paths RAL buffer migration
+cvar_t	*r_useRALPipelines;   // Phase 7.4c-pipeline — gates the parallel-paths RAL pipeline migration
 cvar_t	*r_ext_alpha_to_coverage;
 
 cvar_t	*r_drawBuffer;
@@ -183,9 +188,9 @@ cvar_t	*r_roundImagesDown;
 cvar_t	*r_colorMipLevels;
 cvar_t	*r_picmip;
 cvar_t	*r_nomip;
-cvar_t	*r_showtris;
-cvar_t	*r_showsky;
-cvar_t	*r_shownormals;
+cvar_t	*r_showTris;
+cvar_t	*r_showSky;
+cvar_t	*r_showNormals;
 cvar_t	*r_finish;
 cvar_t	*r_clear;
 cvar_t	*r_textureMode;
@@ -201,7 +206,6 @@ cvar_t	*r_subdivisions;
 cvar_t	*r_lodCurveError;
 
 cvar_t	*r_brightness;
-cvar_t	*r_mapBrightness;
 cvar_t	*r_mapSaturation;
 cvar_t	*r_lightmapSaturation;
 
@@ -1021,7 +1025,7 @@ static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
 	int ms = ri.Milliseconds() % 1000;
 	if ( ms < 0 ) ms = 0;
 
-	/* CNQ3 backport: YYYY_MM_DD-HH_MM_SS-TTT filename format */
+	/* YYYY_MM_DD-HH_MM_SS-TTT filename format */
 	Com_sprintf( fileName, MAX_OSPATH,
 		"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d.%s",
 		1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
@@ -1472,14 +1476,17 @@ Prints info that may change every R_Init() call
 */
 static void VarInfo( void )
 {
+	/* Phase 6B3'-a: overbright bits removed; r_brightness drives the
+	 * pre-tonemap exposure_bias spec constant. Log records hardware-
+	 * vs-software gamma path only. */
 	if ( glConfig.deviceSupportsGamma ) {
-		ri.Log( SEV_DEBUG, "GAMMA: hardware w/ %d overbright bits\n", tr.overbrightBits );
+		ri.Log( SEV_DEBUG, "GAMMA: hardware path\n" );
 	} else {
-		ri.Log( SEV_DEBUG, "GAMMA: software w/ %d overbright bits\n", tr.overbrightBits );
+		ri.Log( SEV_DEBUG, "GAMMA: software path\n" );
 	}
 
 	ri.Log( SEV_INFO, "texturemode: %s\n", r_textureMode->string );
-	ri.Log( SEV_INFO, "texture bits: %d\n", r_texturebits->integer ? r_texturebits->integer : 32 );
+	ri.Log( SEV_INFO, "texture bits: %d\n", r_textureBits->integer ? r_textureBits->integer : 32 );
 	ri.Log( SEV_INFO, "picmip: %d%s\n", r_picmip->integer, r_nomip->integer ? ", worldspawn only" : "" );
 
 #ifdef USE_VULKAN
@@ -1552,6 +1559,7 @@ static void R_Register( void )
 {
 	// make sure all the commands added here are also removed in R_Shutdown
 	ri.Cmd_AddCommand( "imagelist", R_ImageList_f );
+	ri.Cmd_AddCommand( "testdds", R_TestDDS_f );	// Phase 6.5.1: load + classify a .dds (cubemap / volume smoke)
 	ri.Cmd_AddCommand( "shaderlist", R_ShaderList_f );
 	ri.Cmd_AddCommand( "skinlist", R_SkinList_f );
 	ri.Cmd_AddCommand( "modellist", R_Modellist_f );
@@ -1562,6 +1570,7 @@ static void R_Register( void )
 	ri.Cmd_AddCommand( "bspdump", Cmd_BSPDump_f );
 #ifdef USE_VULKAN
 	ri.Cmd_AddCommand( "vkinfo", VkInfo_f );
+	ri.Cmd_AddCommand( "ral_textures", vk_ral_textures_diag_dump );   // Phase 7.4a — bindless slot population dump
 #endif
 
 	//
@@ -1570,45 +1579,40 @@ static void R_Register( void )
 	r_fullbright = ri.Cvar_Get( "r_fullbright", "0", CVAR_LATCH );
 	ri.Cvar_SetDescription( r_fullbright, "Debugging tool to render the entire level without lighting." );
 
-	// r_brightness is a runtime-live post-process scene multiplier.
-	// CVG_RENDERER group membership wires it into tr_cmds.c's
-	// per-frame check that calls vk_update_post_process_pipelines()
-	// when any group cvar's modificationCount changes — same
-	// mechanism r_saturation, r_gamma, r_dither, and the bloom cvars
-	// already use. The gamma pipeline gets destroyed + recreated
-	// with a fresh frag_spec_data.overbright = 1 << overbrightBits
-	// on the next frame after the cvar changes; no vid_restart
-	// required.
-	r_brightness = ri.Cvar_Get( "r_brightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	// r_brightness is a runtime-live pre-tonemap exposure multiplier
+	// (tonemap.frag spec constant id 1, applied on linear-radiance scene
+	// values before the tonemap operator). CVG_RENDERER group membership
+	// wires it into tr_cmds.c's per-frame check that rebakes the
+	// post-process pipeline spec constants on modificationCount change;
+	// no vid_restart required.
+	//
+	// Phase 6B3'-d4-m12 / m_final (Block 1): default is 1.0 — the true
+	// identity for the now self-consistently linear pipeline. (During the
+	// m10..m_final transition window the plan was an interim 0.85 to take
+	// the edge off the still-gamma-byte stock-map texel path; that window
+	// closed when Block 1 retired the worldLinearize* / srgb gate in the
+	// same turn, so 1.0 is the committed value.) Eser tunes from console
+	// if the scene reads hot on visual verification.
+	r_brightness = ri.Cvar_Get( "r_brightness", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_brightness, "0.25", "32", CV_FLOAT );
 	ri.Cvar_SetDescription( r_brightness,
-		"Post-process scene-wide brightness multiplier.\n"
-		"Range 0.25-32, default 2.0.\n"
-		"Multiplies the rendered frame in the gamma pipeline\n"
-		"via obScale = 2**round(log2(value)), clamped to [1, 4].\n"
-		"Independent of r_mapBrightness; they compose\n"
-		"multiplicatively. Live: takes effect on next frame." );
+		"Pre-tonemap exposure multiplier.\n"
+		"Range 0.25-32, default 1.0 (no boost).\n"
+		"Values >1 brighten the scene; tonemap operator\n"
+		"rolls off highlights smoothly instead of clipping.\n"
+		"Values <1 darken atmospherically.\n"
+		"Live: takes effect on next frame via the renderer\n"
+		"post-process pipeline group." );
 	ri.Cvar_SetGroup( r_brightness, CVG_RENDERER );
-
-	// r_mapBrightness stays CVAR_LATCH: lightmap pixel data is
-	// pre-multiplied at BSP load via R_ColorShiftLightingBytes
-	// (tr_bsp.c), shift = mapOverbrightBits. Live changes would
-	// leave loaded lightmaps stale; same constraint as
-	// r_mapSaturation. Vid_restart re-walks the BSP and applies
-	// the new value.
-	r_mapBrightness = ri.Cvar_Get( "r_mapBrightness", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_mapBrightness, "0.25", "32", CV_FLOAT );
-	ri.Cvar_SetDescription( r_mapBrightness,
-		"Lightmap brightness multiplier baked into pixel data\n"
-		"at BSP load. Range 0.25-32, default 2.0.\n"
-		"Lightmap shift = 2**round(log2(value)), clamped to [1, 4].\n"
-		"Vid_restart required after change. Independent of\n"
-		"r_brightness — they compose multiplicatively in\n"
-		"final visible output." );
 
 	r_intensity = ri.Cvar_Get( "r_intensity", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_intensity, "1", "255", CV_FLOAT );
-	ri.Cvar_SetDescription( r_intensity, "Global texture lighting scale." );
+	ri.Cvar_SetDescription( r_intensity,
+		"Global texture lighting scale (range 1-255, default 1 = off).\n"
+		"Legacy brighten-only byte-space multiply baked into sRGB texture\n"
+		"bytes at upload (R_LightScaleTexture); not domain-correct as a\n"
+		"linear lighting multiplier — kept as-is for backward compatibility\n"
+		"with user-calibrated values. Vid_restart required." );
 	r_singleShader = ri.Cvar_Get( "r_singleShader", "0", CVAR_CHEAT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_singleShader, "Debugging tool that only uses the default shader for all rendering." );
 	r_defaultImage = ri.Cvar_Get( "r_defaultImage", "", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
@@ -1635,27 +1639,68 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_colorMipLevels, "Debugging tool to artificially color different mipmap levels so that they are more apparent." );
 	r_detailTextures = ri.Cvar_Get( "r_detailtextures", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_detailTextures, "Enables usage of shader stages flagged as detail." );
-	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_texturebits, "Number of texture bits per texture." );
+	r_textureBits = ri.Cvar_Get( "r_textureBits", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_textureBits, "Number of texture bits per texture." );
+
+	// Phase 7.4a — when 1 (default), R_CreateImage creates a parallel RAL
+	// texture alongside the legacy VkImage and registers it in a bindless
+	// BindGroup. The RAL bindless table is unused by the renderer in 7.4a
+	// (descriptor binding stays on the legacy path until 7.4c), so this
+	// flag is effectively a memory-cost knob for the migration window.
+	r_useRALTextures = ri.Cvar_Get( "r_useRALTextures", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_useRALTextures, "1 = create parallel RAL textures alongside legacy VkImages (Phase 7.4a migration; default).\n0 = legacy path only (debugging / regression guard)." );
+
+	// Phase 7.4b — when 1 (default), every vkCreateBuffer site in vk.c also
+	// creates a parallel RAL buffer (sized + usage-matched). The legacy
+	// VkBuffer keeps driving all vertex / index / UBO / SSBO binding paths
+	// until 7.4c migrates descriptor binding onto the RAL surface.
+	// Composable independently of r_useRALTextures.
+	r_useRALBuffers = ri.Cvar_Get( "r_useRALBuffers", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_useRALBuffers, "1 = create parallel RAL buffers alongside legacy VkBuffers (Phase 7.4b migration; default).\n0 = legacy path only (debugging / regression guard)." );
+
+	// Phase 7.4c-pipeline — when 1 (default), every vkCreateGraphicsPipelines /
+	// vkCreateComputePipelines site in vk.c additionally creates a parallel
+	// ralPipeline_t via Ral_CreateGraphics/ComputePipeline. Legacy VkPipeline
+	// drives all bind / draw / dispatch sites until 7.4c-cmd migrates recording.
+	r_useRALPipelines = ri.Cvar_Get( "r_useRALPipelines", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_useRALPipelines, "1 = create parallel RAL pipelines alongside legacy VkPipelines (Phase 7.4c-pipeline; default).\n0 = legacy path only (debugging / regression guard; bit-identical to pre-7.4c)." );
+
+	// Phase 7.4c-submit-BC-C-final — post-fix2 the RAL backend is brought up
+	// unconditionally (vk_create_swapchain depends on it). The texture-set
+	// bindless infrastructure + per-buffer parallel registration are still
+	// gated by these cvars; the backend itself ignores them. Log a one-shot
+	// SEV_INFO at cvar-init time when any cvar is set to 0 so regression
+	// testers know the legacy-only-path the cvar promises is no longer
+	// available. The cvars themselves are kept as inert flags this turn;
+	// retirement is a follow-up cleanup pass.
+	if ( r_useRALTextures && r_useRALTextures->integer == 0 ) {
+		ri.Log( SEV_INFO, "[VK->RAL] r_useRALTextures=0 ignored — RAL backend is unconditional post-7.4c-submit; cvar will be retired in cleanup pass\n" );
+	}
+	if ( r_useRALBuffers && r_useRALBuffers->integer == 0 ) {
+		ri.Log( SEV_INFO, "[VK->RAL] r_useRALBuffers=0 ignored — RAL backend is unconditional post-7.4c-submit; cvar will be retired in cleanup pass\n" );
+	}
+	if ( r_useRALPipelines && r_useRALPipelines->integer == 0 ) {
+		ri.Log( SEV_INFO, "[VK->RAL] r_useRALPipelines=0 ignored — RAL backend is unconditional post-7.4c-submit; cvar will be retired in cleanup pass\n" );
+	}
 
 	r_mergeLightmaps = ri.Cvar_Get( "r_mergeLightmaps", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_mergeLightmaps, "Merge built-in small lightmaps into bigger lightmaps (atlases)." );
 
-	// CNQ3 lightmap atlas optimization alias. In the Vulkan renderer the
-	// atlas is already implemented by R_LoadMergedLightmaps() in tr_bsp.c,
+	// lightmap atlas optimization alias. In the Vulkan renderer the atlas
+	// is already implemented by R_LoadMergedLightmaps() in tr_bsp.c,
 	// but we expose r_lightmapAtlas as an alias so the cvar name matches
 	// CNQ3 and the GL1 renderer. Both cvars must be non-zero for the
 	// atlas pack to be built. Vulkan descriptor sets still benefit from
 	// fewer image views, so leave this on by default.
 	r_lightmapAtlas = ri.Cvar_Get( "r_lightmapAtlas", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_lightmapAtlas,
-		"Pack individual BSP lightmaps into larger atlas textures (CNQ3 port).\n"
+		"Pack individual BSP lightmaps into larger atlas textures.\n"
 		" 1: pack into atlases (default, fewer image/descriptor allocations)\n"
 		" 0: one image per lightmap (legacy behaviour)\n"
 		" Works together with r_mergeLightmaps." );
 
-	// CNQ3 port: cap presentation while map is loading to reduce
-	// CPU/GPU contention with BSP parse, lightmap upload, shader compile.
+	// cap presentation while map is loading to reduce CPU/GPU contention
+	// with BSP parse, lightmap upload, shader compile.
 	r_loadingFpsCap = ri.Cvar_Get( "r_loadingFpsCap", "10", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_loadingFpsCap, "0", "60", CV_INTEGER );
 	ri.Cvar_SetDescription( r_loadingFpsCap,
@@ -1774,11 +1819,13 @@ static void R_Register( void )
 	//ri.Cvar_SetDescription( r_anaglyphMode, "Enable rendering of anaglyph images. Valid options for 3D glasses types:\n 0: Disabled\n 1: Red-cyan\n 2: Red-blue\n 3: Red-green\n 4: Green-magenta" );
 
 	// r_saturation drives the post-process saturation multiplier
-	// in gamma.frag (spec constant id 2). Range [0, 2]; 1.0 is
+	// (tonemap.frag spec constant id 2). Range [0, 2]; 1.0 is
 	// identity. Below 1.0 desaturates toward grey; above 1.0
-	// super-saturates (8-bit framebuffer clamps pixels exceeding
-	// [0,1]). Live: takes effect on next frame via CVG_RENDERER
+	// super-saturates. Live: takes effect on next frame via CVG_RENDERER
 	// group rebake.
+	// Phase 6B3'-d4-m12: applied POST-tonemap (display domain), so the
+	// multiplier is perceptual — 1.0 is the identity regardless of input
+	// domain; verified correct for the linear pipeline. No retune.
 	r_saturation = ri.Cvar_Get( "r_saturation", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_saturation, "0", "2", CV_FLOAT );
 	ri.Cvar_SetDescription( r_saturation,
@@ -1811,7 +1858,16 @@ static void R_Register( void )
 	r_showImages = ri.Cvar_Get( "r_showImages", "0", CVAR_TEMP );
 	ri.Cvar_SetDescription( r_showImages, "Draw all images currently loaded into memory:\n 0: Disabled\n 1: Show images set to uniform size\n 2: Show images with scaled relative to largest image" );
 
-	r_debugLight = ri.Cvar_Get( "r_debuglight", "0", CVAR_TEMP );
+	// r_layoutDump — visual-regression instrumentation hook. The renderer
+	// does not consume this; it is registered here for global visibility so
+	// the client-side Wired UI layout pass (cl_wired_layout_dump.c) can read
+	// it. When non-zero, every WUI_LayoutMenu pass appends each named item's
+	// resolved pixel rect + authored colours to layoutdump.jsonl (in the
+	// process working directory). Consumed by tools/visual_regression.
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_layoutDump", "0", CVAR_TEMP ),
+		"Visual-regression instrumentation: when non-zero, the Wired UI layout pass appends each named item's resolved rect + authored colours to layoutdump.jsonl (working directory) every frame. 0 = disabled." );
+
+	r_debugLight = ri.Cvar_Get( "r_debugLight", "0", CVAR_TEMP );
 	ri.Cvar_SetDescription( r_debugLight, "Debugging tool to print ambient and directed lighting information." );
 	r_debugSort = ri.Cvar_Get( "r_debugSort", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_debugSort, "Debugging tool to filter out shaders with depth sorting order values higher than the set value." );
@@ -1821,8 +1877,8 @@ static void R_Register( void )
 
 	r_nocurves = ri.Cvar_Get ("r_nocurves", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_nocurves, "Set to 1 to disable drawing world bezier curves. Set to 0 to enable." );
-	r_drawworld = ri.Cvar_Get ("r_drawworld", "1", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_drawworld, "Set to 0 to disable drawing the world. Set to 1 to enable." );
+	r_drawWorld = ri.Cvar_Get ("r_drawWorld", "1", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_drawWorld, "Set to 0 to disable drawing the world. Set to 1 to enable." );
 	r_lightmap = ri.Cvar_Get ("r_lightmap", "0", 0 );
 	ri.Cvar_SetDescription( r_lightmap, "Show only lightmaps on all world surfaces." );
 	r_portalOnly = ri.Cvar_Get ("r_portalOnly", "0", CVAR_CHEAT );
@@ -1855,14 +1911,14 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_lodscale, "Set scale for level of detail adjustment." );
 	r_norefresh = ri.Cvar_Get ("r_norefresh", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_norefresh, "Bypasses refreshing of the rendered scene." );
-	r_drawentities = ri.Cvar_Get ("r_drawentities", "1", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_drawentities, "Draw all world entities." );
+	r_drawEntities = ri.Cvar_Get ("r_drawEntities", "1", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_drawEntities, "Draw all world entities." );
 	r_nocull = ri.Cvar_Get ("r_nocull", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_nocull, "Draw all culled objects." );
 	r_novis = ri.Cvar_Get ("r_novis", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_novis, "Disables usage of PVS." );
-	r_showcluster = ri.Cvar_Get ("r_showcluster", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_showcluster, "Shows current cluster index." );
+	r_showCluster = ri.Cvar_Get ("r_showCluster", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showCluster, "Shows current cluster index." );
 	r_speeds = ri.Cvar_Get ("r_speeds", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
 	r_gpuSpeeds = ri.Cvar_Get( "r_gpuSpeeds", "0", CVAR_CHEAT );
@@ -1875,10 +1931,10 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_debugSurface, "Backend visual debugging tool for bezier mesh surfaces." );
 	r_nobind = ri.Cvar_Get ("r_nobind", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_nobind, "Backend debugging tool: Disables texture binding." );
-	r_showtris = ri.Cvar_Get ("r_showtris", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_showtris, "Debugging tool: Wireframe rendering of polygon triangles in the world." );
-	r_shownormals = ri.Cvar_Get( "r_shownormals", "0", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_shownormals, "Debugging tool: Show wireframe surface normals." );
+	r_showTris = ri.Cvar_Get ("r_showTris", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showTris, "Debugging tool: Wireframe rendering of polygon triangles in the world." );
+	r_showNormals = ri.Cvar_Get( "r_showNormals", "0", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_showNormals, "Debugging tool: Show wireframe surface normals." );
 	r_clear = ri.Cvar_Get( "r_clear", "0", 0 );
 	ri.Cvar_SetDescription( r_clear, "Forces screen buffer clearing every frame, removing any hall of mirrors effect in void.\n Use \\r_clearColor to set color." );
 	r_offsetFactor = ri.Cvar_Get( "r_offsetFactor", "-2", CVAR_CHEAT | CVAR_LATCH );
@@ -1896,26 +1952,45 @@ static void R_Register( void )
 	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) Requires impact marks to be enabled in the game code." );
 
-	r_aviMotionJpegQuality = ri.Cvar_Get( "r_aviMotionJpegQuality", "90", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	r_aviMotionJpegQuality = ri.Cvar_Get( "r_aviMotionJpegQuality", "100", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_aviMotionJpegQuality, "Controls quality of Jpeg video capture when \\cl_aviMotionJpeg 1." );
-	r_screenshotJpegQuality = ri.Cvar_Get( "r_screenshotJpegQuality", "90", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	r_screenshotJpegQuality = ri.Cvar_Get( "r_screenshotJpegQuality", "100", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_screenshotJpegQuality, "Controls quality of Jpeg screenshots when using screenshotJpeg." );
 
-	r_bloom_threshold = ri.Cvar_Get( "r_bloom_threshold", "0.6", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloom_threshold, "Color level to extract to bloom texture, default is 0.6." );
-	ri.Cvar_SetGroup( r_bloom_threshold, CVG_RENDERER );
+	// Block 3 (colour closure): bloom-extract is now a soft knee in
+	// bloom.frag — extraction = `max(metric(base) - threshold, 0)`
+	// (over-threshold *excess*, not the full pixel) across all three
+	// threshold modes. The default rebases to 0.32 (≈ sRGBToLinear(0.6),
+	// the pre-linear-pipeline 0.6 cutoff in linear radiance): low-radiance
+	// pixels contribute nothing, mid-bright surfaces contribute only their
+	// over-threshold margin — no more frame-wide blue veil from the sky.
+	// r_bloomThresholdMode selects the metric (per-channel / average /
+	// luma) that drives the subtraction. The legacy r_bloomModulate cvar
+	// and its bloom.frag `base_modulate` spec constant were both removed —
+	// the soft knee subsumes that post-tweak.
+	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.32", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription( r_bloomThreshold, "Linear-radiance knee below which a pixel contributes nothing to bloom; over-threshold excess is extracted via a soft-knee subtraction. Default 0.32." );
+	ri.Cvar_SetGroup( r_bloomThreshold, CVG_RENDERER );
 
-	r_bloom_threshold_mode = ri.Cvar_Get( "r_bloom_threshold_mode", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloom_threshold_mode, "Color extraction mode:\n 0: (r|g|b) >= threshold\n 1: (r + g + b ) / 3 >= threshold\n 2: luma(r, g, b) >= threshold" );
-	ri.Cvar_SetGroup( r_bloom_threshold_mode, CVG_RENDERER );
+	// Block 3 (colour closure): the three modes now select the *metric*
+	// that drives the soft-knee threshold subtraction (over-threshold
+	// excess) — not a hard pass/fail gate that emits the full pixel.
+	// Default unchanged (0 = per-channel knee).
+	r_bloomThresholdMode = ri.Cvar_Get( "r_bloomThresholdMode", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription( r_bloomThresholdMode, "Bloom soft-knee metric:\n 0: per-channel  excess = max(rgb - threshold, 0)\n 1: average      knee on (r+g+b)/3, hue-preserving scale\n 2: luma         knee on Rec.709 luma, hue-preserving scale" );
+	ri.Cvar_SetGroup( r_bloomThresholdMode, CVG_RENDERER );
 
-	r_bloom_intensity = ri.Cvar_Get( "r_bloom_intensity", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloom_intensity, "Final bloom blend factor, default is 0.5." );
-	ri.Cvar_SetGroup( r_bloom_intensity, CVG_RENDERER );
+	// Phase 6B3'-d4-m10: blend factor left at 0.5. blend.frag adds
+	// factor × Σ(blurred bloom mips) into vk.color_image; additive bloom
+	// composites correctly in linear domain (it's the gamma-domain version
+	// that was wrong), so the factor's meaning is unchanged. Default unchanged.
+	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription( r_bloomIntensity, "Final bloom blend factor, default is 0.5." );
+	ri.Cvar_SetGroup( r_bloomIntensity, CVG_RENDERER );
 
-	r_bloom_modulate = ri.Cvar_Get( "r_bloom_modulate", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloom_modulate, "Modulate extracted color:\n 0: off (color = color, i.e. no changes)\n 1: by itself (color = color * color)\n 2: by intensity (color = color * luma(color))" );
-	ri.Cvar_SetGroup( r_bloom_modulate, CVG_RENDERER );
+	// Block 3 (colour closure): r_bloomModulate removed — the bloom soft-
+	// knee in bloom.frag replaced its "emphasise the bright part" post-
+	// tweak (the matching base_modulate spec constant is gone too).
 
 	if ( glConfig.vidWidth )
 		return;
@@ -1942,13 +2017,13 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_ext_max_anisotropy, "1", NULL, CV_INTEGER );
 	ri.Cvar_SetDescription( r_ext_max_anisotropy, "Sets maximum anisotropic level for your graphics driver. Requires \\r_ext_texture_filter_anisotropic." );
 
-	//r_stencilbits = ri.Cvar_Get( "r_stencilbits", "8", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	//r_stencilBits = ri.Cvar_Get( "r_stencilBits", "8", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	r_ignorehwgamma = ri.Cvar_Get( "r_ignorehwgamma", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ignorehwgamma, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ignorehwgamma, "Overrides hardware gamma capabilities." );
 
-	r_showsky = ri.Cvar_Get( "r_showsky", "0", CVAR_LATCH );
-	ri.Cvar_SetDescription( r_showsky, "Forces sky in front of all surfaces." );
+	r_showSky = ri.Cvar_Get( "r_showSky", "0", CVAR_LATCH );
+	ri.Cvar_SetDescription( r_showSky, "Forces sky in front of all surfaces." );
 #ifdef USE_VULKAN
 	r_device = ri.Cvar_Get( "r_device", "-1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_device, "-2", NULL, CV_INTEGER );
@@ -1958,29 +2033,101 @@ static void R_Register( void )
 		" -2 - first integrated GPU" );
 	s_r_device_mod = r_device->modificationCount;
 
-	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and post-process saturation/tonemap effects." );
-	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	// Phase 6B3'-f: r_fbo live conversion. Pre-6B3'-f was CVAR_LATCH
+	// because flipping the FBO chain on/off rebuilds the swapchain
+	// (sRGB selection + present format), every render pass, every
+	// framebuffer, every attachment image, and the static post-process
+	// pipelines. Now wired through CVG_RENDERER ->
+	// vk_update_post_process_pipelines, which detects r_fbo change and
+	// calls vk_rebuild_for_fbo_change. Expect a noticeable hitch on the
+	// change frame (~50-200 ms — closer to vid_restart than r_hdr's
+	// FBO-only rebuild because the swapchain itself is recreated).
+	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_fbo, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_fbo,
+		"Use framebuffer objects: enables gamma correction in windowed mode\n"
+		"and allows arbitrary video size and screenshot/video capture.\n"
+		"Required for bloom, HDR rendering, anti-aliasing and post-process\n"
+		"saturation/tonemap effects.\n"
+		"Live: takes effect on next frame; expect a noticeable hitch as the\n"
+		"swapchain + FBO chain rebuild." );
+	ri.Cvar_SetGroup( r_fbo, CVG_RENDERER );
+	// Phase 6B3'-d: r_hdr live conversion. Pre-6B3'-d was CVAR_LATCH
+	// because flipping the color attachment format requires tearing
+	// down + recreating the FBO chain (color_image + render_pass.main
+	// + dependent pipelines + framebuffers). Now wired through
+	// CVG_RENDERER -> vk_update_post_process_pipelines, which detects
+	// r_hdr change and calls vk_rebuild_fbo_for_hdr_change. Expect a
+	// one-frame hitch on the change frame.
+	r_hdr = ri.Cvar_Get( "r_hdr", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_hdr, "0", "2", CV_INTEGER );
 	ri.Cvar_SetDescription( r_hdr,
-		"Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n"
-		" -1: 4-bit B4G4R4A4, for testing purposes, heavy color banding, might not work on all systems\n"
-		"  0: 8-bit BGRA, default, moderate color banding with multi-stage shaders\n"
-		"  1: 16-bit UNORM, enhanced blending precision, no color banding, [0,1] range, might decrease performance on AMD / Intel GPUs\n"
-		"  2: 16-bit SFLOAT, true HDR pipeline, supports values >1.0 and <0, foundation for tonemap auto-exposure and PBR shading (planned)\n" );
+		"High dynamic range frame buffer texture format. Requires \\r_fbo 1.\n"
+		"  0: 8 bit BGRA, no HDR pipeline (legacy fallback)\n"
+		"  1: 16 bit SFLOAT, true HDR (default), supports values >1.0,\n"
+		"     foundation for tonemap, auto-exposure, and PBR shading.\n"
+		"  2: 16 bit UNORM, clamped HDR [0,1] range, enhanced precision\n"
+		"     but no highlights above white. For GPUs lacking SFLOAT\n"
+		"     storage / blend support — engine downgrades 1->2 automatically.\n"
+		"Live: takes effect on next frame via the renderer post-process\n"
+		"pipeline group; expect a one-frame hitch on the change frame as\n"
+		"the FBO color attachment + render passes + pipelines rebuild." );
+	ri.Cvar_SetGroup( r_hdr, CVG_RENDERER );
+
+	// Phase 6B3'-d8: HDR10 display output. r_hdr (above) controls the
+	// internal scene-buffer FORMAT (R16F linear render target); r_hdrDisplay
+	// controls the SWAPCHAIN colorspace (BT.2020 + PQ ST.2084 vs BT.709 +
+	// sRGB). Default 0 = SDR sRGB swapchain (bit-identical to pre-d8).
+	// CVG_RENDERER live — a change recreates the swapchain (re-negotiating the
+	// colorspace) via the same path r_fbo uses; expect a one-frame hitch. The
+	// negotiated/effective state shows in `gfxinfo`.
+	r_hdrDisplay = ri.Cvar_Get( "r_hdrDisplay", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_hdrDisplay, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_hdrDisplay,
+		"HDR10 (PQ / ST.2084, BT.2020) display output. Requires \\r_fbo 1,\n"
+		"\\r_hdr 1, an HDR-capable display in HDR mode, and a Vulkan surface\n"
+		"that enumerates VK_COLOR_SPACE_HDR10_ST2084_EXT (else falls back to\n"
+		"SDR with a warning).\n"
+		"  0: SDR sRGB swapchain (default)\n"
+		"  1: HDR10 swapchain — A2B10G10R10_UNORM_PACK32 + HDR10_ST2084.\n"
+		"     The gamma pass PQ-encodes; the tonemap operator uses an HDR\n"
+		"     shoulder peaking at r_hdrPeakLuminance.\n"
+		"Use `gfxinfo` to confirm the negotiated swapchain colorspace.\n"
+		"Live: takes effect on next frame (swapchain recreate; one-frame\n"
+		"hitch) via the renderer post-process pipeline group." );
+	ri.Cvar_SetGroup( r_hdrDisplay, CVG_RENDERER );
+	// r_hdrPeakLuminance — display peak luminance in nits. Feeds (a) the
+	// tonemap operator's HDR shoulder (peak_norm = nits/100, so a fully-
+	// bright scene element maps to that normalised value), and (b) the
+	// HDR10 mastering-metadata MaxCLL / max-display-luminance hint.
+	// "Graphics white" (UI / diffuse-white tonemapped 1.0) maps to ~100
+	// nits regardless; only scene highlights reach the peak.
+	r_hdrPeakLuminance = ri.Cvar_Get( "r_hdrPeakLuminance", "1000", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_hdrPeakLuminance, "100", "10000", CV_INTEGER );
+	ri.Cvar_SetDescription( r_hdrPeakLuminance,
+		"HDR10 display peak luminance (nits, 100-10000, default 1000).\n"
+		"Sets the tonemap HDR shoulder and the mastering-metadata hint.\n"
+		"Live: takes effect on next frame (post-process pipeline rebuild +\n"
+		"vkSetHdrMetadataEXT re-issue). No effect unless r_hdrDisplay 1." );
+	ri.Cvar_SetGroup( r_hdrPeakLuminance, CVG_RENDERER );
+	r_hdrMinLuminance = ri.Cvar_Get( "r_hdrMinLuminance", "0.01", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_hdrMinLuminance, "0.0001", "1.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_hdrMinLuminance,
+		"HDR10 display minimum luminance (nits, default 0.01) — the\n"
+		"mastering-metadata black-level hint only. Live: re-issues\n"
+		"vkSetHdrMetadataEXT. No effect unless r_hdrDisplay 1." );
+	ri.Cvar_SetGroup( r_hdrMinLuminance, CVG_RENDERER );
+
 	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
-	r_bloom_passes = ri.Cvar_Get( "r_bloom_passes", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_bloom_passes, "1", "4", CV_INTEGER );
-	ri.Cvar_SetDescription( r_bloom_passes, "Number of bloom blur levels (1-4). Lower = fewer GPU render passes = higher FPS. Default 2 is a good balance between quality and performance." );
+	r_bloomPasses = ri.Cvar_Get( "r_bloomPasses", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_bloomPasses, "1", "4", CV_INTEGER );
+	ri.Cvar_SetDescription( r_bloomPasses, "Number of bloom blur levels (1-4). Lower = fewer GPU render passes = higher FPS. Default 2 is a good balance between quality and performance." );
 #ifdef __APPLE__
 	r_vkApplePinkBarrier = ri.Cvar_Get( "r_vkApplePinkBarrier", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_vkApplePinkBarrier, "MoltenVK: emit explicit tile-cache barrier between main and gamma passes. Disable (0) to test FPS impact; re-enable (1) if pink glitch appears." );
 #endif
-
-	r_ext_multisample = ri.Cvar_Get( "r_ext_multisample", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_ext_multisample, "0", "64", CV_INTEGER );
-	ri.Cvar_SetDescription( r_ext_multisample, "For anti-aliasing geometry edges, valid values: 0|2|4|6|8. Requires \\r_fbo 1." );
 
 	r_ext_supersample = ri.Cvar_Get( "r_ext_supersample", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_supersample, "0", "1", CV_INTEGER );
@@ -2028,26 +2175,49 @@ static void R_Register( void )
 
 #if FEAT_TONEMAP
 	// r_tonemap is in CVG_RENDERER (runtime-live): the operator
-	// selection is wired through tonemap_mode (gamma.frag spec
-	// constant id 17). Group membership triggers gamma pipeline
+	// selection is wired through tonemap_mode (tonemap.frag spec
+	// constant id 17). Group membership triggers tonemap pipeline
 	// rebake on modificationCount changes; same mechanism as
 	// r_brightness, r_saturation, etc.
-	r_tonemap = ri.Cvar_Get( "r_tonemap", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_CheckRange( r_tonemap, "0", "3", CV_INTEGER );
+	// Phase 6B3'-c1: default 0 -> 1 (Reinhard). Pre-c1 default 0
+	// defeated the linear HDR pipeline because exposure_bias scaled
+	// HDR values past the LDR clamp without roll-off. Mode 0 is still
+	// reachable (`r_tonemap 0`) and now means "identity passthrough,
+	// hard clip at LDR range" — the legacy behaviour.
+	//
+	// Phase 6B3'-d4-m12: this cvar and the r_tonemapExposure / r_lottes_*
+	// family below all carry defaults verified correct for linear-radiance
+	// input post m1-m_final — no retune. Rationale per cvar:
+	//   r_tonemap 1       = PBR Neutral, the modern hue-preserving operator
+	//                       (mid-tones below ~0.8 pass through, soft shoulder
+	//                       above) — the right neutral default for linear.
+	//   r_tonemapExposure = a *linear* pre-operator multiplier, folds with
+	//                       r_brightness; 1.0 is the identity.
+	//   r_lottes_*        = canonical Lottes GDC-2016 shape parameters
+	//                       (mid_in 0.18 is the photographic 18%-grey LINEAR
+	//                       reference; hdr_max 8.0 is a sensible linear HDR
+	//                       ceiling) — not domain-sensitive.
+	r_tonemap = ri.Cvar_Get( "r_tonemap", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_tonemap, "0", "4", CV_INTEGER );
 	ri.Cvar_SetDescription( r_tonemap,
-		"HDR tone mapping operator.\n"
-		"  0 - disabled\n"
-		"  1 - Reinhard (default film curve)\n"
-		"  2 - ACES filmic\n"
-		"  3 - Uncharted 2\n"
-		"Requires r_fbo 1. Live: takes effect on next frame." );
+		"HDR tone mapping operator. Compresses scene radiance to LDR\n"
+		"display range. All operators are hue-preserving except where\n"
+		"noted.\n"
+		"  0 - identity passthrough (HDR clipped at display range, legacy)\n"
+		"  1 - PBR Neutral (default, glTF 2.0 reference, minimal manipulation,\n"
+		"      preserves LDR mid-tones, soft highlight roll-off)\n"
+		"  2 - AgX (modern hue-preserving, sigmoid curve, polished cinematic feel)\n"
+		"  3 - Lottes (configurable filmic, tunable via r_lottes_* cvars)\n"
+		"  4 - Reinhard (classical 1985 reference, alters mid-tones, hue-shift)\n"
+		"Requires r_fbo 1. Live: takes effect on next frame via the\n"
+		"renderer post-process pipeline group." );
 	ri.Cvar_SetGroup( r_tonemap, CVG_RENDERER );
 
 	// r_tonemapExposure is the pre-tonemap multiplier (gamma.frag
 	// spec constant id 18). Values <1 darken atmospherically
 	// before the operator's shoulder kicks in; values >1 brighten.
 	// Only takes effect when r_tonemap > 0 — when r_tonemap is 0,
-	// the GAMMA_VAR_TONEMAP varIdx bit is unset and the gamma-with-
+	// the TONEMAP_VAR_BASE varIdx bit is unset and the gamma-with-
 	// tonemap pipeline isn't selected, so the exposure write
 	// doesn't reach a running shader.
 	r_tonemapExposure = ri.Cvar_Get( "r_tonemapExposure", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
@@ -2061,27 +2231,136 @@ static void R_Register( void )
 		"Requires r_tonemap > 0 and r_fbo 1. Live: takes\n"
 		"effect on next frame." );
 	ri.Cvar_SetGroup( r_tonemapExposure, CVG_RENDERER );
+
+	// Lottes (r_tonemap 3) configurable filmic parameters. All five
+	// are CVG_RENDERER live cvars — the per-frame check in
+	// tr_cmds.c:441 polls the group and triggers
+	// vk_update_post_process_pipelines on any change, so a Lottes
+	// tweak rebakes the tonemap pipeline's spec constants on the
+	// next frame without vid_restart. Defaults match Timothy Lottes's
+	// GDC 2016 reference curve.
+	r_lottes_contrast = ri.Cvar_Get( "r_lottes_contrast", "1.6", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_lottes_contrast, "0.5", "3.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_lottes_contrast,
+		"Lottes tonemap contrast parameter. Higher = steeper mid-tones.\n"
+		"Default 1.6 (canonical Lottes 2016 reference).\n"
+		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetGroup( r_lottes_contrast, CVG_RENDERER );
+
+	r_lottes_shoulder = ri.Cvar_Get( "r_lottes_shoulder", "0.977", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_lottes_shoulder, "0.5", "1.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_lottes_shoulder,
+		"Lottes tonemap highlight shoulder softness. Higher = softer roll-off.\n"
+		"Default 0.977 (canonical).\n"
+		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetGroup( r_lottes_shoulder, CVG_RENDERER );
+
+	r_lottes_mid_in = ri.Cvar_Get( "r_lottes_mid_in", "0.18", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_lottes_mid_in, "0.0", "1.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_lottes_mid_in,
+		"Lottes tonemap input mid-point. Anchors the curve's middle.\n"
+		"Default 0.18 (canonical, 18% gray photographic reference).\n"
+		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetGroup( r_lottes_mid_in, CVG_RENDERER );
+
+	r_lottes_mid_out = ri.Cvar_Get( "r_lottes_mid_out", "0.267", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_lottes_mid_out, "0.0", "1.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_lottes_mid_out,
+		"Lottes tonemap output mid-point. The display value mid_in maps to.\n"
+		"Default 0.267 (canonical).\n"
+		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetGroup( r_lottes_mid_out, CVG_RENDERER );
+
+	r_lottes_hdr_max = ri.Cvar_Get( "r_lottes_hdr_max", "8.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_lottes_hdr_max, "1.0", "64.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_lottes_hdr_max,
+		"Lottes tonemap maximum HDR input value (mapped to display white).\n"
+		"Default 8.0 (canonical).\n"
+		"Effective only when r_tonemap 3 is active. Live cvar." );
+	ri.Cvar_SetGroup( r_lottes_hdr_max, CVG_RENDERER );
 #endif
 
 #if FEAT_COLOR_GRADING
+	// r_colorGrading is the master enable for the colour-grading post-
+	// process pass. Stays CVAR_LATCH because flipping it toggles which
+	// shader variant (USE_COLOR_GRADING) the pipeline binds — variant
+	// selection is rebuilt by vk_update_post_process_pipelines on the
+	// next group reset, but the enable itself requires a vid_restart
+	// for the shader-module table to repopulate consistently. Once
+	// enabled, the five r_grade_* knobs below are live.
 	r_colorGrading = ri.Cvar_Get( "r_colorGrading", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_colorGrading, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_colorGrading, "Color grading post-process (tint, saturation, contrast).\n"
-		" Requires \\r_fbo 1." );
-#endif
+		" 0: off (default)\n"
+		" 1: on — bind USE_COLOR_GRADING tonemap variant; r_grade_*\n"
+		"        live cvars then control the look.\n"
+		"Requires \\r_fbo 1. vid_restart required when toggling on/off." );
 
-#if FEAT_FXAA
-	r_fxaa = ri.Cvar_Get( "r_fxaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_fxaa, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_fxaa, "Fast approximate anti-aliasing.\n"
-		" Requires \\r_fbo 1." );
+	// Phase 6B3'-e: live colour-grading knobs. CVG_RENDERER routes
+	// every change through vk_update_post_process_pipelines, which
+	// rewrites cg_tint_r/g/b, cg_saturation, cg_contrast spec
+	// constants on the next tonemap variant rebuild. Effective only
+	// when r_colorGrading 1 (master gate).
+	r_grade_tint_r = ri.Cvar_Get( "r_grade_tint_r", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_grade_tint_r, "0.0", "2.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_grade_tint_r,
+		"Colour grading red tint multiplier. 1.0 = neutral, <1.0 less\n"
+		"red, >1.0 more red. Live; requires r_colorGrading 1." );
+	ri.Cvar_SetGroup( r_grade_tint_r, CVG_RENDERER );
+
+	r_grade_tint_g = ri.Cvar_Get( "r_grade_tint_g", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_grade_tint_g, "0.0", "2.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_grade_tint_g,
+		"Colour grading green tint multiplier. 1.0 = neutral, <1.0 less\n"
+		"green, >1.0 more green. Live; requires r_colorGrading 1." );
+	ri.Cvar_SetGroup( r_grade_tint_g, CVG_RENDERER );
+
+	r_grade_tint_b = ri.Cvar_Get( "r_grade_tint_b", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_grade_tint_b, "0.0", "2.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_grade_tint_b,
+		"Colour grading blue tint multiplier. 1.0 = neutral, <1.0 less\n"
+		"blue, >1.0 more blue. Live; requires r_colorGrading 1." );
+	ri.Cvar_SetGroup( r_grade_tint_b, CVG_RENDERER );
+
+	r_grade_saturation = ri.Cvar_Get( "r_grade_saturation", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_grade_saturation, "0.0", "2.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_grade_saturation,
+		"Colour grading saturation. 1.0 = identity, 0.0 = greyscale,\n"
+		"2.0 = oversaturated. Distinct from r_saturation (radiance\n"
+		"domain, pre-tonemap); this applies post-tonemap in display\n"
+		"domain. Live; requires r_colorGrading 1." );
+	ri.Cvar_SetGroup( r_grade_saturation, CVG_RENDERER );
+
+	r_grade_contrast = ri.Cvar_Get( "r_grade_contrast", "1.0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_grade_contrast, "0.5", "2.0", CV_FLOAT );
+	ri.Cvar_SetDescription( r_grade_contrast,
+		"Colour grading contrast. 1.0 = identity, <1.0 flatter, >1.0\n"
+		"punchier. Applied around the 0.5 luminance pivot. Live;\n"
+		"requires r_colorGrading 1." );
+	ri.Cvar_SetGroup( r_grade_contrast, CVG_RENDERER );
 #endif
 
 #if FEAT_PBR
-	ri.Cvar_Get( "r_pbr", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( ri.Cvar_Get( "r_pbr", "0", 0 ),
+	// Phase 6B3'-f: r_pbr live conversion. Pre-6B3'-f was CVAR_LATCH;
+	// the gate at tr_shade.c (PBR pipeline swap on materials with a
+	// pbrMap stage) now reads r_pbr->integer live. CVG_RENDERER group
+	// membership is documentation-only here — the pipeline cache
+	// (vk_find_pipeline_ext) naturally selects PBR vs non-PBR variants
+	// per draw based on the live r_pbr value, so no rebuild is
+	// triggered, just a different cached pipeline gets bound.
+	r_pbr = ri.Cvar_Get( "r_pbr", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_pbr, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_pbr,
 		"Physically based rendering on surfaces with pbrMap textures.\n"
-		" pbrMap: R=roughness, G=metalness (glTF ORM convention)." );
+		" pbrMap follows glTF 2.0 ORM packing:\n"
+		"   R = ambient occlusion (linear)\n"
+		"   G = roughness (linear)\n"
+		"   B = metalness (linear)\n"
+		" Authors using Substance, Blender, Godot, UE5 glTF export\n"
+		" produce this packing by default.\n"
+		" Ambient occlusion consumed by IBL path (Phase 6C+).\n"
+		" Live: 0 disables the PBR pipeline swap, 1 enables it." );
+	ri.Cvar_SetGroup( r_pbr, CVG_RENDERER );
 #endif
 
 #if FEAT_ADVANCED_WATER
@@ -2091,15 +2370,56 @@ static void R_Register( void )
 #endif
 
 #if FEAT_SHADOW_MAPPING
-	ri.Cvar_Get( "r_shadowMapping", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	// Phase 6.5.4 Part B: r_shadowMapping / r_shadowMapSize are live (CVG_RENDERER) —
+	// changing either rebuilds the FBO chain on the next frame (no \vid_restart),
+	// closing the zero-vid_restart invariant. (The pre-6.5.4-Part-B CVAR_LATCH on
+	// these was inherited from the dormant-feature scaffold.)
+	ri.Cvar_Get( "r_shadowMapping", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowMapping", "0", 0 ), "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( ri.Cvar_Get( "r_shadowMapping", "0", 0 ),
-		"Per-light shadow maps with PCF filtering.\n"
-		" Requires \\r_fbo 1 and \\r_dlightMode 2." );
+		"Sun-driven cascaded shadow map with PCF filtering.\n"
+		" Requires \\r_fbo 1. Live: takes effect on the next frame." );
+	ri.Cvar_SetGroup( ri.Cvar_Get( "r_shadowMapping", "0", 0 ), CVG_RENDERER );
 	ri.Cvar_Get( "r_shadowPCF", "5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowPCF", "5", 0 ), "1", "9", CV_INTEGER );
-	ri.Cvar_Get( "r_shadowMapSize", "512", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowMapSize", "512", 0 ), "256", "2048", CV_INTEGER );
+	ri.Cvar_Get( "r_shadowMapSize", "2048", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_shadowMapSize", "2048", 0 ), "512", "4096", CV_INTEGER );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_shadowMapSize", "2048", 0 ),
+		"Shadow-map resolution (per cascade). Live: rebuilt on the next frame." );
+	ri.Cvar_SetGroup( ri.Cvar_Get( "r_shadowMapSize", "2048", 0 ), CVG_RENDERER );
+	ri.Cvar_Get( "r_csmCascades", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmCascades", "1", 0 ), "1", "4", CV_INTEGER ); // 4 == SHADOWMAP_MAX_CASCADES
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmCascades", "1", 0 ),
+		"Number of cascaded shadow-map cascades to render (1..4). Cascades beyond\n"
+		" this count are left fully lit. Live (re-read per frame)." );
+	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmCascades", "1", 0 ), CVG_RENDERER );
+
+	// Phase 6.5.4d1: CSM polish knobs (all live via CVG_RENDERER).
+	ri.Cvar_Get( "r_csmBias", "0.005", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmBias", "0.005", 0 ), "0", "0.1", CV_FLOAT );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmBias", "0.005", 0 ),
+		"Shadow depth-bias intensity. Drives the depth pass's slope-scaled bias\n"
+		" (0.005 == the prior fixed conservative value). Lower → acne, higher → peter-panning." );
+	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmBias", "0.005", 0 ), CVG_RENDERER );
+
+	ri.Cvar_Get( "r_csmLambda", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmLambda", "0.5", 0 ), "0", "1", CV_FLOAT );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmLambda", "0.5", 0 ),
+		"Practical Split blend: 0 = uniform splits, 1 = logarithmic splits." );
+	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmLambda", "0.5", 0 ), CVG_RENDERER );
+
+	ri.Cvar_Get( "r_csmMaxDistance", "4096", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmMaxDistance", "4096", 0 ), "256", "16384", CV_FLOAT );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmMaxDistance", "4096", 0 ),
+		"Far distance covered by the last cascade (clamps the view far plane for CSM)." );
+	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmMaxDistance", "4096", 0 ), CVG_RENDERER );
+
+	ri.Cvar_Get( "r_csmShowCascades", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( ri.Cvar_Get( "r_csmShowCascades", "0", 0 ), "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( ri.Cvar_Get( "r_csmShowCascades", "0", 0 ),
+		"Debug: tint lit-pass output by the cascade sampled per pixel\n"
+		" (0 = red, 1 = green, 2 = blue, 3 = yellow)." );
+	ri.Cvar_SetGroup( ri.Cvar_Get( "r_csmShowCascades", "0", 0 ), CVG_RENDERER );
 #endif
 
 #if FEAT_GODRAYS
@@ -2111,15 +2431,62 @@ static void R_Register( void )
 	r_sunY = ri.Cvar_Get( "r_sunY", "0.2", CVAR_ARCHIVE | CVAR_NODEFAULT );
 #endif
 
-	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	// Phase 6B4: live conversion. Pre-6B4 was CVAR_LATCH because SMAA
+	// resources (input/edges/blend images + descriptors + pipelines)
+	// were lifecycle-tied to r_smaa->integer. Resources are now allocated
+	// unconditionally when r_fbo 1 (vk.c:9114 — vk.smaa.active = fboActive),
+	// and r_smaa is just the per-frame dispatch gate + quality preset
+	// selector for pipeline rebuild. CVG_RENDERER group membership wires
+	// changes into vk_update_post_process_pipelines.
+	// Phase 6B3'-d4-m11: no SMAA re-tune needed for the linear pipeline.
+	// The edge-detection threshold (preset, or r_smaa_threshold override)
+	// is a *relative-luma delta* (delta / max(L, eps)) — unitless, so it
+	// reads the same at any input magnitude (the 6B4 design point); the
+	// neighbourhood-blend pass (smaa_resolve.frag) is a weight-normalised
+	// bilinear blend that becomes *more* correct once vk.color_image holds
+	// linear radiance (m1-m_final). So m11 is verification + documentation
+	// only — defaults unchanged (unlike the bloom threshold, m10, which
+	// is an absolute level and was rebased).
+	// Block 8 (2026-05-12): SMAA output route fixed — it now reads and
+	// writes the tonemapped image (img 265), dispatched from the 3D→2D
+	// transition (RB_TransitionToUI, tr_backend.c) between vk_tonemap()
+	// and vk_open_ui_pass(qfalse) — i.e. after tonemap, before the HUD
+	// pass. The HUD composes on top of the anti-aliased scene and is
+	// itself left un-AA'd. (Delta 2 also decoupled vk_tonemap() from the
+	// UI pass — pure-2D frames skip tonemap entirely via render_pass.ui_clear.)
+	r_smaa = ri.Cvar_Get( "r_smaa", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_smaa, "0", "4", CV_INTEGER );
 	ri.Cvar_SetDescription( r_smaa, "SMAA anti-aliasing quality:\n"
 		" 0 - disabled\n"
-		" 1 - low\n"
-		" 2 - medium\n"
-		" 3 - high\n"
-		" 4 - ultra\n"
-		" Requires \\r_fbo 1." );
+		" 1 - low     (threshold 0.15, 4-step search)\n"
+		" 2 - medium  (threshold 0.10, 8-step search)\n"
+		" 3 - high    (threshold 0.10, 16-step search + diagonal + corner rounding)\n"
+		" 4 - ultra   (threshold 0.05, 32-step search + diagonal + corner rounding)\n"
+		"Threshold is a relative-luma delta (same semantic at LDR and HDR).\n"
+		"Override the preset threshold via r_smaa_threshold.\n"
+		"Anti-aliases the tonemapped scene (img 265) before the HUD pass —\n"
+		"the HUD stays sharp. Requires r_fbo 1. Live: takes effect on next\n"
+		"frame via the renderer post-process pipeline group." );
+	ri.Cvar_SetGroup( r_smaa, CVG_RENDERER );
+
+	// r_smaa_threshold — Phase 6B4 cvar. Overrides the quality preset
+	// edge threshold when > 0; default 0 means "use r_smaa preset".
+	// Live via CVG_RENDERER (rebakes the SMAA edge pipeline's spec
+	// constant on cvar change). Range [0, 0.5] matches sane relative-
+	// luma deltas: 0.5 means "neighbour must be at least 50% off-center"
+	// which only catches the sharpest discontinuities; 0.001 catches
+	// everything.
+	r_smaa_threshold = ri.Cvar_Get( "r_smaa_threshold", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_smaa_threshold, "0", "0.5", CV_FLOAT );
+	ri.Cvar_SetDescription( r_smaa_threshold,
+		"SMAA edge detection threshold override (relative-luma delta).\n"
+		" 0       - use r_smaa quality preset (default)\n"
+		" 0.001+  - explicit threshold value; overrides preset\n"
+		"Higher = fewer edges detected (less smoothing).\n"
+		"Lower  = more edges detected (more smoothing).\n"
+		"Live: takes effect on next frame via the renderer\n"
+		"post-process pipeline group." );
+	ri.Cvar_SetGroup( r_smaa_threshold, CVG_RENDERER );
 
 	r_lerpLightstyles = ri.Cvar_Get( "r_lerpLightstyles", "1", CVAR_ARCHIVE );
 	ri.Cvar_SetDescription( r_lerpLightstyles, "Interpolate lightstyle animation between pattern characters for smooth fading (1=on, 0=stepped 10Hz)." );
@@ -2279,6 +2646,7 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	ri.Cmd_RemoveCommand( "screenshotJPEG" );
 	ri.Cmd_RemoveCommand( "screenshot" );
 	ri.Cmd_RemoveCommand( "imagelist" );
+	ri.Cmd_RemoveCommand( "testdds" );
 	ri.Cmd_RemoveCommand( "shaderlist" );
 	ri.Cmd_RemoveCommand( "skinlist" );
 	ri.Cmd_RemoveCommand( "gfxinfo" );
@@ -2286,6 +2654,7 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	ri.Cmd_RemoveCommand( "shaderstate" );
 #ifdef USE_VULKAN
 	ri.Cmd_RemoveCommand( "vkinfo" );
+	ri.Cmd_RemoveCommand( "ral_textures" );
 #endif
 
 	// Release the prop lightmap page-pointer array. The image_t* within it are
@@ -2315,6 +2684,20 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	// vk_release_resources so the order is always correct.
 	R_DeleteTextures();
 #ifdef USE_VULKAN
+	// Phase 7.4c-pre: tear down the RAL backend BEFORE vk_release_resources
+	// and vk_shutdown. The backend (imported mode) holds cmd pools / fences
+	// / descriptor pools created against vk.device — those must release
+	// before vk.device itself is destroyed.
+	//
+	// Phase 7.4c-pipeline-followup-5 PART 2.5: destroyWindow gate threaded
+	// through so REF_KEEP_CONTEXT (map-transition partial teardown) leaves
+	// the RAL backend alive across the transition, mirroring legacy
+	// vk_shutdown's preservation of vk.device + vk.gamma_pipeline et al.
+	// REF_KEEP_CONTEXT = 0 = !destroyWindow ⇒ vk_ral_textures_shutdown
+	// returns after the diag dump. REF_UNLOAD_DLL / REF_DESTROY_WINDOW run
+	// the full teardown. Interim until Phase 7.4d-map-arena retires
+	// REF_KEEP_CONTEXT entirely.
+	vk_ral_textures_shutdown( code != REF_KEEP_CONTEXT );
 	vk_release_resources();
 #endif
 	//}

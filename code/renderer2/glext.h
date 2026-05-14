@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2013-2015 The Khronos Group Inc.
+
 #ifndef __glext_h_
 #define __glext_h_ 1
 

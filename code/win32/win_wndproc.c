@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "../client/client.h"
 #include "win_local.h"
@@ -165,6 +152,10 @@ VID_AppActivate
 */
 static void VID_AppActivate( qboolean active )
 {
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"VID_AppActivate: active=%d hWnd=%p activeWindow=%p\n",
+		active, (void*)g_wv.hWnd, (void*)GetActiveWindow() );
+
 	Key_ClearStates();
 
 	IN_Activate( active );
@@ -705,6 +696,11 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 		active = (LOWORD( wParam ) != WA_INACTIVE) ? qtrue : qfalse;
 		minimized = (BOOL)HIWORD( wParam ) ? qtrue : qfalse;
 
+		Com_Log( SEV_TRACE, LOG_CH(ch_system),
+			"WM_ACTIVATE: active=%d minimized=%d focused=%d hWnd=%p activeWindow=%p cdsFullscreen=%d monitorCount=%d\n",
+			active, minimized, focused, (void*)hWnd, (void*)GetActiveWindow(),
+			glw_state.cdsFullscreen, glw_state.monitorCount );
+
 		// We can receive Active & Minimized when restoring from minimized state
 		if ( active && minimized ) {
 			gw_minimized = qtrue;
@@ -759,10 +755,16 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 		break;
 
 	case WM_SETFOCUS:
+		Com_Log( SEV_TRACE, LOG_CH(ch_system),
+			"WM_SETFOCUS: hWnd=%p gw_active=%d gw_minimized=%d\n",
+			(void*)hWnd, gw_active, gw_minimized );
 		focused = qtrue;
 		break;
 
 	case WM_KILLFOCUS:
+		Com_Log( SEV_TRACE, LOG_CH(ch_system),
+			"WM_KILLFOCUS: hWnd=%p gw_active=%d gw_minimized=%d KEYCATCH=0x%x\n",
+			(void*)hWnd, gw_active, gw_minimized, Key_GetCatcher() );
 		//gw_active = qfalse;
 		focused = qfalse;
 		break;

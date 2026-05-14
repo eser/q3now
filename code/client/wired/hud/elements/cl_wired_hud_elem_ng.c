@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 // cl_wired_hud_elem_ng.c — Lagometer / Netgraph HUD element
 // Renders frame timing (top 1/3) and snapshot latency (bottom 2/3)
 // as a bar graph. Yellow=interpolating, Blue=extrapolating,

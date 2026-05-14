@@ -1,15 +1,5 @@
-/*
-===========================================================================
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of Quake III Arena source code.
-
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 // cm_q1.c — Native Q1 hull-1 clipnode tracer.
 //

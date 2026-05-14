@@ -1,11 +1,5 @@
-/*
-===========================================================================
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of Quake III Arena source code.
-Released under GPLv2 — see meta.h for the full notice.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 // meta_remap.c -- typed remap_set_t implementation, Maps_Arena allocator,
 // and the renderer/sound facing R_TryRemap* / S_TryRemap* hooks.

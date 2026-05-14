@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_map.c
 
 #include "tr_local.h"
@@ -130,22 +117,46 @@ float R_ClampDenorm( float v ) {
 
 /*
 ===============
-R_ColorShiftLightingBytes
+R_ColorShiftLightingBytes — decode Q3 BSP byte data.
+
+`linearLightmap == qtrue` (the lightmap-texel call sites, Phase
+6B3'-d4-m_final / Block 1): copy the byte verbatim. The ×2
+q3map2-overbright doubling is done in the world fragment shader as a
+linear-domain `× LIGHTMAP_BOOST` (gen_frag.tmpl, modulate-default
+branches, after sampleColorTex's sRGB → linear decode) — colorimetrically
+correct, unlike the byte-space `<< 1` (byte 128 doubled to 255 is ~4×
+linear light, not 2×).
+
+`linearLightmap == qfalse` (the vertex-light-colour and light-grid
+call sites): apply the byte-space `<< 1` overbright shift + preserve-hue
+clamp on overflow. These streams have no shader-side compensation path
+yet — retiring this `<< 1` requires a model-lighting boost migration
+(reconciling RB_Calc*Color outputs with a new shader path), tracked
+separately (m_final-model-lighting-boost / Phase 6C). Until then it
+stays here.
+
+Phase 6B3'-b removed r_mapBrightness (Q3 lightmap intensity is a
+format constant, not a runtime parameter). Block 7 (colour closure):
+r_lightmapSaturation now operates in linear domain for the lightmap-
+texel path (linearLightmap == qtrue) — decode → mix → re-encode, like
+R_LoadFogs. The vertex-colour / light-grid path (linearLightmap ==
+qfalse) stays byte-space pending the Phase 6C model-lighting-boost
+migration.
 ===============
 */
-void R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha ) {
-	int		shift, r, g, b;
+void R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha, qboolean linearLightmap ) {
+	int r, g, b;
 
-	// Bake r_mapBrightness into lightmap pixel data at BSP load.
-	// r_brightness no longer compensates here — it lives in the
-	// gamma post-process pipeline's obScale spec constant
-	// (rebaked at pipeline-recreation time when the CVG_RENDERER
-	// group's modificationCount changes; see tr_cmds.c). The two
-	// cvars compose multiplicatively in final visible output.
-	shift = tr.mapOverbrightBits;
-
-	// shift the data based on overbright range
-	if ( shift >= 0 ) {
+	if ( linearLightmap ) {
+		// Byte verbatim; the world shader applies LIGHTMAP_BOOST (× 2.0)
+		// in linear domain post-sRGB-decode.
+		r = in[0];
+		g = in[1];
+		b = in[2];
+	} else {
+		// Byte-space << 1 overbright boost — vertex colours / light grid
+		// (no shader-side compensation path yet; see the header comment).
+		const int shift = 1;
 		r = in[0] << shift;
 		g = in[1] << shift;
 		b = in[2] << shift;
@@ -157,34 +168,64 @@ void R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha
 			g = g * 255 / max;
 			b = b * 255 / max;
 		}
-	} else {
-		r = in[0] >> -shift;
-		g = in[1] >> -shift;
-		b = in[2] >> -shift;
 	}
 
 	if ( r_lightmapSaturation->value != 1.0f ) {
 		const float sat = r_lightmapSaturation->value;
-		const float luma = LUMA( r, g, b );
-		// saturation 0 → luma (grey); 1 → identity (excluded by
-		// the branch above); 2 → super-saturation, clamped to
-		// byte range below. Same formula as r_mapSaturation in
-		// tr_image.c.
-		const float fr = luma + sat * ( (float)r - luma );
-		const float fg = luma + sat * ( (float)g - luma );
-		const float fb = luma + sat * ( (float)b - luma );
-		int ri = (int)( fr + 0.5f );
-		int gi = (int)( fg + 0.5f );
-		int bi = (int)( fb + 0.5f );
-		if ( ri < 0 )   ri = 0;
-		if ( ri > 255 ) ri = 255;
-		if ( gi < 0 )   gi = 0;
-		if ( gi > 255 ) gi = 255;
-		if ( bi < 0 )   bi = 0;
-		if ( bi > 255 ) bi = 255;
-		out[0] = (byte)ri;
-		out[1] = (byte)gi;
-		out[2] = (byte)bi;
+
+		if ( linearLightmap ) {
+			// Block 7 (colour closure): lightmap texels are stored
+			// sRGB-encoded — R_ProcessLightmap copies them byte-verbatim
+			// (the ×2 q3map2 overbright moved to the world shader as a
+			// linear-domain × LIGHTMAP_BOOST). Desaturating in byte
+			// space biases the result toward a too-bright grey because
+			// the sRGB curve compresses midtones — same error class
+			// Block 4 fixed for fog. Decode → mix toward linear luma →
+			// re-encode. Mirrors R_LoadFogs below and the in-shader
+			// fogColor decode (tr_shade.c R_SRGBToLinear).
+			float lr = R_SRGBToLinear( (float)r / 255.0f );
+			float lg = R_SRGBToLinear( (float)g / 255.0f );
+			float lb = R_SRGBToLinear( (float)b / 255.0f );
+			const float luma = LUMA( lr, lg, lb );
+			// saturation 0 → luma (grey); 1 → identity (excluded by the
+			// branch above); 2 → super-saturation, clamped below.
+			lr = luma + sat * ( lr - luma );
+			lg = luma + sat * ( lg - luma );
+			lb = luma + sat * ( lb - luma );
+			// R_LinearToSRGB clamps negatives to 0; clamp the high end.
+			int ri = (int)( R_LinearToSRGB( lr ) * 255.0f + 0.5f );
+			int gi = (int)( R_LinearToSRGB( lg ) * 255.0f + 0.5f );
+			int bi = (int)( R_LinearToSRGB( lb ) * 255.0f + 0.5f );
+			if ( ri > 255 ) ri = 255;
+			if ( gi > 255 ) gi = 255;
+			if ( bi > 255 ) bi = 255;
+			out[0] = (byte)ri;
+			out[1] = (byte)gi;
+			out[2] = (byte)bi;
+		} else {
+			// linearLightmap == qfalse: vertex colours / light grid.
+			// These streams still carry the byte << 1 overbright above
+			// and have no shader-side compensation path yet — Phase 6C's
+			// model-lighting-boost migration reconciles them. Until then
+			// byte-space saturation matches the byte-space overbright it
+			// sits alongside, so it stays here (Block 7 left it as-is).
+			const float luma = LUMA( r, g, b );
+			const float fr = luma + sat * ( (float)r - luma );
+			const float fg = luma + sat * ( (float)g - luma );
+			const float fb = luma + sat * ( (float)b - luma );
+			int ri = (int)( fr + 0.5f );
+			int gi = (int)( fg + 0.5f );
+			int bi = (int)( fb + 0.5f );
+			if ( ri < 0 )   ri = 0;
+			if ( ri > 255 ) ri = 255;
+			if ( gi < 0 )   gi = 0;
+			if ( gi > 255 ) gi = 255;
+			if ( bi < 0 )   bi = 0;
+			if ( bi > 255 ) bi = 255;
+			out[0] = (byte)ri;
+			out[1] = (byte)gi;
+			out[2] = (byte)bi;
+		}
 	} else {
 		out[0] = r;
 		out[1] = g;
@@ -318,7 +359,7 @@ static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensi
 						dst[1] = buf_p[1];
 						dst[2] = buf_p[2];
 					} else {
-						R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+						R_ColorShiftLightingBytes( buf_p, dst, qfalse, qtrue );
 					}
 					dst[3] = 255;
 					buf_p += 3;
@@ -337,7 +378,7 @@ static float R_ProcessLightmap( byte *image, const byte *buf_p, float maxIntensi
 						dst[1] = buf_p[1];
 						dst[2] = buf_p[2];
 					} else {
-						R_ColorShiftLightingBytes( buf_p, dst, qfalse );
+						R_ColorShiftLightingBytes( buf_p, dst, qfalse, qtrue );
 					}
 					dst[3] = 255;
 					buf_p += 3;
@@ -916,7 +957,7 @@ static srfSurfaceFace_t *ParseFaceCommon( const dsurface_t *ds, const drawVert_t
 			cv->points[i][3+j] = LittleFloat( verts[i].st[j] );
 			cv->points[i][5+j] = LittleFloat( verts[i].lightmap[j] );
 		}
-		R_ColorShiftLightingBytes( verts[i].color.rgba, (byte *)&cv->points[i][7], qtrue );
+		R_ColorShiftLightingBytes( verts[i].color.rgba, (byte *)&cv->points[i][7], qtrue, qfalse );
 		if ( lightmapNum >= 0 && tr.mergeLightmaps ) {
 			cv->points[i][5] = cv->points[i][5] * tr.lightmapScale[0] + lightmapX;
 			cv->points[i][6] = cv->points[i][6] * tr.lightmapScale[1] + lightmapY;
@@ -1084,7 +1125,7 @@ static void ParseMesh( const dsurface_t *ds, const drawVert_t *verts, int numVer
 			points[i].st[j] = LittleFloat( verts[i].st[j] );
 			points[i].lightmap[j] = LittleFloat( verts[i].lightmap[j] );
 		}
-		R_ColorShiftLightingBytes( verts[i].color.rgba, points[i].color.rgba, qtrue );
+		R_ColorShiftLightingBytes( verts[i].color.rgba, points[i].color.rgba, qtrue, qfalse );
 		if ( lightmapNum >= 0 && tr.mergeLightmaps ) {
 			// adjust lightmap coords
 			points[i].lightmap[0] = points[i].lightmap[0] * tr.lightmapScale[0] + lightmapX;
@@ -1157,7 +1198,7 @@ static void ParseTriSurf( const dsurface_t *ds, const drawVert_t *verts, int num
 			tri->verts[i].lightmap[j] = LittleFloat( verts[i].lightmap[j] );
 		}
 
-		R_ColorShiftLightingBytes( verts[i].color.rgba, tri->verts[i].color.rgba, qtrue );
+		R_ColorShiftLightingBytes( verts[i].color.rgba, tri->verts[i].color.rgba, qtrue, qfalse );
 		if ( lightmapNum >= 0 && tr.mergeLightmaps ) {
 			// adjust lightmap coords
 			tri->verts[i].lightmap[0] = tri->verts[i].lightmap[0] * tr.lightmapScale[0] + lightmapX;
@@ -2038,6 +2079,7 @@ static void R_LoadSubmodels( const lump_t *l ) {
 		ri.Terminate( TERM_CLIENT_DROP, "%s(): funny lump size in %s", __func__, s_worldData.name );
 	count = l->filelen / sizeof(*in);
 
+	s_worldData.numBModels = count;
 	s_worldData.bmodels = out = ri.Hunk_Alloc( count * sizeof(*out), h_low );
 
 	for ( i=0 ; i<count ; i++, in++, out++ ) {
@@ -2407,22 +2449,38 @@ static void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, const lump_t
 		VectorCopy( shader->fogParms.color, fogColor );
 
 		if ( r_mapSaturation->value != 1.0f ) {
+			// Block 4 (colour closure): fogParms.color is float display-
+			// domain (sRGB-encoded, 0..1). Desaturating it in display
+			// domain shifts the result towards a too-bright grey because
+			// the sRGB curve compresses midtones. Do it in linear:
+			// decode → mix toward linear luma → re-encode. Matches the
+			// r_mapSaturation handling for image texels (tr_image.c
+			// R_FindImageFile — migrated to linear in Block 7) and
+			// fogColor for the in-shader fog (tr_shade.c R_SRGBToLinear).
 			const float sat = r_mapSaturation->value;
-			const float luma = LUMA( fogColor[0], fogColor[1], fogColor[2] );
-			// saturation 0 → luma; 1 → identity (excluded); 2 →
-			// super-saturated. fogColor is float; downstream byte
-			// conversion at line 2413-2415 clamps via the float→byte
-			// cast. No clamp needed here.
-			fogColor[0] = luma + sat * ( fogColor[0] - luma );
-			fogColor[1] = luma + sat * ( fogColor[1] - luma );
-			fogColor[2] = luma + sat * ( fogColor[2] - luma );
+			vec3_t lin;
+			float luma;
+			lin[0] = R_SRGBToLinear( fogColor[0] );
+			lin[1] = R_SRGBToLinear( fogColor[1] );
+			lin[2] = R_SRGBToLinear( fogColor[2] );
+			luma = LUMA( lin[0], lin[1], lin[2] );
+			lin[0] = luma + sat * ( lin[0] - luma );
+			lin[1] = luma + sat * ( lin[1] - luma );
+			lin[2] = luma + sat * ( lin[2] - luma );
+			// R_LinearToSRGB clamps its input to >= 0; the float→byte
+			// cast below clamps the high end.
+			fogColor[0] = R_LinearToSRGB( lin[0] );
+			fogColor[1] = R_LinearToSRGB( lin[1] );
+			fogColor[2] = R_LinearToSRGB( lin[2] );
 		}
 
 		out->parms = shader->fogParms;
 
-		out->colorInt.rgba[0] = ( fogColor[0] * tr.identityLight ) * 255.0f;
-		out->colorInt.rgba[1] = ( fogColor[1] * tr.identityLight ) * 255.0f;
-		out->colorInt.rgba[2] = ( fogColor[2] * tr.identityLight ) * 255.0f;
+		/* Phase 6B3'-a: dropped `* tr.identityLight` halving from
+		 * fog vertex-color bake. Linear pipeline. */
+		out->colorInt.rgba[0] = fogColor[0] * 255.0f;
+		out->colorInt.rgba[1] = fogColor[1] * 255.0f;
+		out->colorInt.rgba[2] = fogColor[2] * 255.0f;
 		out->colorInt.rgba[3] = 255;
 
 		for ( n = 0; n < 4; n++ )
@@ -2514,8 +2572,8 @@ static void R_LoadLightGrid( const lump_t *l ) {
 
 	// deal with overbright bits
 	for ( i = 0 ; i < numGridPoints ; i++ ) {
-		R_ColorShiftLightingBytes( &w->lightGridData[i*8], &w->lightGridData[i*8], qfalse );
-		R_ColorShiftLightingBytes( &w->lightGridData[i*8+3], &w->lightGridData[i*8+3], qfalse );
+		R_ColorShiftLightingBytes( &w->lightGridData[i*8], &w->lightGridData[i*8], qfalse, qfalse );
+		R_ColorShiftLightingBytes( &w->lightGridData[i*8+3], &w->lightGridData[i*8+3], qfalse, qfalse );
 	}
 }
 
@@ -2602,6 +2660,12 @@ static void R_LoadEntities( const lump_t *l ) {
 			w->lightGridSize[2] = Q_atof( v[2] );
 			continue;
 		}
+		// Phase 6B3'-d4-m_final (Block 1): the A1-era `_q3map2_cmdline`
+		// per-map linear-colorspace opt-in (Daemon `-sRGB*` convention)
+		// is retired — the engine renders self-consistently linear
+		// end-to-end now, so there is no per-map regime to derive. The
+		// key is left unhandled (silently ignored, like any other
+		// unrecognised worldspawn key).
 	}
 }
 
@@ -2660,7 +2724,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 		ri.Cvar_Set( "com_mapBspVersion", va( "%d", bsp->version ) );
 	}
 
-	// CNQ3 port: clear any stale loading flag from a previous errored load
+	// clear any stale loading flag from a previous errored load
 	tr.mapLoading = qfalse;
 
 	// set default sun direction to be used if it isn't
@@ -2750,6 +2814,11 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 	// only set tr.world now that we know the entire level has loaded properly
 	tr.world = &s_worldData;
 
+#if FEAT_SHADOW_MAPPING
+	// Phase 6.5.4b: build the sun-shadow caster geometry now that tr.world is
+	// valid (no-op when r_shadowMapping is off). Mirrors R_BuildWorldVBO timing.
+	vk_build_shadow_caster();
+#endif
 }
 
 // ---------------------------------------------------------------------------

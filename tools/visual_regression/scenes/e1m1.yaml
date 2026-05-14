@@ -1,0 +1,38 @@
+# e1m1.yaml — in-game HUD over e1m1 (a Quake 1 map). STARTER SCENE.
+#
+# Q1 paks ship inside the binary's SW3Z bundle (pax21.sw3z + pax01.sw3z),
+# so e1m1 is loadable from the engine's standard asset path with no extra
+# content. Like the other in-game scenes, this checks the identity-encoded
+# HUD overlay; the Q1 world behind it (lightstyles, fullbright pixels, the
+# "bright red button" anomaly) is out of scope for layout-dump-based VR —
+# those would need fixed-coordinate world-pixel sampling.
+#
+# STATUS: template. The `region` names must match `name` tags on the HUD
+# items (see arena1.yaml's notes).
+
+name: e1m1
+
+operator: identity
+
+cvars:
+  s_initsound: 0
+  r_brightness: 1
+  r_tonemap: 1
+
+map: e1m1
+
+capture_frame: 600
+
+texture: backbuffer
+
+expected_regions:
+  - region: hud.accent
+    source: { macro: WCOLOR_ACCENT }
+
+  - region: hud.separator
+    source: { macro: WCOLOR_SEPARATOR }
+    tolerance: 8
+
+  # Q1-specific HUD bits (if Q1 maps use a different HUD layout) would go
+  # here. World-surface Q1 anomaly checks (fullbright path, lightstyle
+  # oscillation) need a non-UI sample-point source — not implemented.

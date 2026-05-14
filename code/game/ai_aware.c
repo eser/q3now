@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 ===========================================================================
 ai_aware.c — entity/sound awareness for bot AI improvements

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #include "tr_local.h"
 #include "tr_common.h"
 
@@ -931,14 +935,14 @@ static char *ARB_BuildBloomProgram( char *buf ) {
 		"TEMP base; \n"
 		"TEX base, fragment.texcoord[0], texture[0], 2D; \n" );
 
-	if ( r_bloom_threshold_mode->integer == 0 ) {
+	if ( r_bloomThresholdMode->integer == 0 ) {
 		// (r|g|b) >= threshold
 		s = Q_stradd( s,
 			"TEMP minv; \n"
 			"SGE minv, base, thres; \n"
 			"DP3_SAT minv.w, minv, minv; \n"
 			"MUL base.rgb, base, minv.w; \n" );
-	} else if ( r_bloom_threshold_mode->integer == 1 ) {
+	} else if ( r_bloomThresholdMode->integer == 1 ) {
 		// (r+g+b)/3 >= threshold
 		s = Q_stradd( s,
 			"PARAM scale = { 0.3333, 0.3334, 0.3333, 1.0 }; \n"
@@ -958,8 +962,8 @@ static char *ARB_BuildBloomProgram( char *buf ) {
 	}
 
 	// modulation
-	if ( r_bloom_modulate->integer ) {
-		if ( r_bloom_modulate->integer == 1 ) {
+	if ( r_bloomModulate->integer ) {
+		if ( r_bloomModulate->integer == 1 ) {
 			// by itself
 			s = Q_stradd( s, "MUL base, base, base; \n" );
 		} else {
@@ -1298,15 +1302,15 @@ qboolean ARB_UpdatePrograms( void )
 		return qfalse;
 
 	// only 1, 2, 3, 6, 8, 10, 12, 14, 16, 18 and 20 produces real visual difference
-	fboBloomFilterSize = r_bloom_filter_size->integer;
+	fboBloomFilterSize = r_bloomFilterSize->integer;
 	if ( !ARB_CompileProgram( Fragment, ARB_BuildBlurProgram( buf, fboBloomFilterSize ), programs[ BLUR_FRAGMENT ] ) )
 		return qfalse;
 
 	if ( !ARB_CompileProgram( Fragment, ARB_BuildBlurProgram( buf, 6 ), programs[ BLUR2_FRAGMENT ] ) )
 		return qfalse;
 
-	fboBloomBlendBase = r_bloom_blend_base->integer;
-	if ( !ARB_CompileProgram( Fragment, ARB_BuildBlendProgram( buf, r_bloom_passes->integer - fboBloomBlendBase ), programs[ BLENDX_FRAGMENT ] ) )
+	fboBloomBlendBase = r_bloomBlendBase->integer;
+	if ( !ARB_CompileProgram( Fragment, ARB_BuildBlendProgram( buf, r_bloomPasses->integer - fboBloomBlendBase ), programs[ BLENDX_FRAGMENT ] ) )
 		return qfalse;
 
 	if ( !ARB_CompileProgram( Fragment, blend2FP, programs[ BLEND2_FRAGMENT ] ) )
@@ -1709,14 +1713,14 @@ static qboolean FBO_CreateBloom( void )
 
 	fboBloomPasses = 0;
 
-	if ( glConfig.numTextureUnits < r_bloom_passes->integer )
+	if ( glConfig.numTextureUnits < r_bloomPasses->integer )
 	{
 		ri.Log( SEV_WARN, "...not enough texture units (%i) for %i-pass bloom\n",
-			glConfig.numTextureUnits, r_bloom_passes->integer );
+			glConfig.numTextureUnits, r_bloomPasses->integer );
 		return qfalse;
 	}
 
-	for ( i = 0; i < r_bloom_passes->integer; i++ )
+	for ( i = 0; i < r_bloomPasses->integer; i++ )
 	{
 		// we may need depth/stencil buffers for first bloom buffer in \r_bloom 2 mode
 		if ( !FBO_Create( &frameBuffers[ i*2 + BLOOM_BASE + 0 ], width, height, i == 0 ? qtrue : qfalse, NULL, NULL ) ||
@@ -2078,8 +2082,8 @@ qboolean FBO_Bloom( const float gamma, const float obScale, qboolean finalStage 
 	GL_BindTexture( 0, src->color );
 	qglViewport( 0, 0, dst->width, dst->height );
 	ARB_ProgramEnable( DUMMY_VERTEX, BLOOM_EXTRACT_FRAGMENT );
-	qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 0, r_bloom_threshold->value, r_bloom_threshold->value,
-		r_bloom_threshold->value, 1.0 );
+	qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 0, r_bloomThreshold->value, r_bloomThreshold->value,
+		r_bloomThreshold->value, 1.0 );
 	RenderQuad( w, h );
 
 	// downscale and blur
@@ -2116,7 +2120,7 @@ qboolean FBO_Bloom( const float gamma, const float obScale, qboolean finalStage 
 	}
 	RenderQuad( w, h );
 
-	if ( r_bloom_reflection->value )
+	if ( r_bloomReflection->value )
 	{
 		ARB_ProgramDisable();
 
@@ -2132,7 +2136,7 @@ qboolean FBO_Bloom( const float gamma, const float obScale, qboolean finalStage 
 		GL_BindTexture( 0, dst->color );
 		GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE );
 		qglViewport( 0, 0, dst->width, dst->height );
-		R_Bloom_LensEffect( fabs( r_bloom_reflection->value ) );
+		R_Bloom_LensEffect( fabs( r_bloomReflection->value ) );
 
 		// restore color and blend mode
 		qglColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
@@ -2144,7 +2148,7 @@ qboolean FBO_Bloom( const float gamma, const float obScale, qboolean finalStage 
 
 		// add lens effect to final bloom buffer
 		FBO_Bind( GL_FRAMEBUFFER, src->fbo );
-		if ( r_bloom_reflection->value > 0 ) {
+		if ( r_bloomReflection->value > 0 ) {
 			GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
 		} else {
 			// negative reflection values will replace bloom texture with just lens effect
@@ -2178,11 +2182,11 @@ qboolean FBO_Bloom( const float gamma, const float obScale, qboolean finalStage 
 		// blend & apply gamma in one pass
 		ARB_ProgramEnable( DUMMY_VERTEX, BLEND2_GAMMA_FRAGMENT );
 		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 0, gamma, gamma, gamma, obScale );
-		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 1, r_bloom_intensity->value, 0, 0, 0 );
+		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 1, r_bloomIntensity->value, 0, 0, 0 );
 	} else {
 		// just blend
 		ARB_ProgramEnable( DUMMY_VERTEX, BLEND2_FRAGMENT );
-		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 1, r_bloom_intensity->value, 0, 0, 0 );
+		qglProgramLocalParameter4fARB( GL_FRAGMENT_PROGRAM_ARB, 1, r_bloomIntensity->value, 0, 0, 0 );
 	}
 	RenderQuad( w, h );
 	ARB_ProgramDisable();

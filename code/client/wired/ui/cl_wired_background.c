@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 cl_wired_background.c -- Shared 3-layer background: base fill, radial glows, grid lines.
 */

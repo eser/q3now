@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 ===========================================================================
 wasm_bridge.c — varargs adapter for WASM game modules

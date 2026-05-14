@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 ===========================================================================
 cg_wired_store.h -- Wired Store: cgame staging buffer

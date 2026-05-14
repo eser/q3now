@@ -1,0 +1,17 @@
+Public Domain
+
+The file(s) carrying `SPDX-License-Identifier: LicenseRef-public-domain` are
+released into the public domain by their original author(s). No copyright is
+claimed; you may do with the code what you wish. Each such file's own header
+states the dedication and (where known) names the original author — for
+example, `code/qcommon/util/md5.c`:
+
+    This code implements the MD5 message-digest algorithm.
+    The algorithm is due to Ron Rivest.  This code was written by Colin Plumb
+    in 1993, no copyright is claimed.  This code is in the public domain;
+    do with it what you wish.
+
+Where local law does not recognise a public-domain dedication, the author(s)
+grant an unconditional, irrevocable, royalty-free licence to use, copy,
+modify, distribute, and sublicense the work for any purpose, with no warranty
+of any kind, express or implied.

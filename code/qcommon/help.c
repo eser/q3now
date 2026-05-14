@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 2017-2020 Gian 'myT' Schellenbaum (CNQ3 original)
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 ===========================================================================
 help.c — CNQ3-style help system backport
@@ -24,7 +28,7 @@ a help panel below the input line when con_drawHelp is set.
 /* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
-/* con_drawHelp bitmask flags — mirror cnq3 */
+/* con_drawHelp bitmask flags */
 #define HELP_FLAG_ENABLE	1	/* draw at all */
 #define HELP_FLAG_ALWAYS	2	/* draw even if the token has no help text */
 #define HELP_FLAG_MODULES	4	/* show [cvar|cmd] tag */

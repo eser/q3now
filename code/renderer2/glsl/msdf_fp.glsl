@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 uniform sampler2D u_DiffuseMap;
 // u_Color.xyz = (distanceRange, atlasWidth, atlasHeight)
 uniform vec4      u_Color;

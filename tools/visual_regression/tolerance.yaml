@@ -1,0 +1,45 @@
+# tolerance.yaml — per-channel byte-delta tolerance for VR diffs.
+#
+# Resolution order for a region's tolerance (most-specific wins):
+#   1. a `tolerance:` key on the region entry in the scene YAML
+#   2. a `regions:` entry here, keyed by region name
+#   3. `shoulder` (if the region name is in `shoulder_regions` here, or the
+#      scene lists it under `shoulder_regions:`)
+#   4. `default`
+#
+# Bytes are 0-255 per channel; the diff fails a region if ANY channel's
+# |expected - actual| exceeds the resolved tolerance.
+#
+# Phase 6B3'-d8: for `display_mode: hdr10` scenes the diff is in 10-bit PQ
+# code values [0,1023], not 8-bit sRGB bytes — PQ quantisation is steep and
+# asymmetric at low nits, and the BT.709<->BT.2020 round-trip plus the coarse
+# (peak-scaled SDR) HDR tonemap shoulder add error, so HDR10 scenes use a
+# much looser per-channel tolerance. See the `hdr10:` block below.
+
+default: 5
+
+# Phase 6B3'-d8: per-display-mode overrides. An hdr10 scene's region uses
+# `hdr10.default` (or `hdr10.shoulder` for shoulder regions / `hdr10.regions.<name>`)
+# unless the region entry in the scene YAML pins its own `tolerance:`. The
+# values are in 10-bit code units (0-1023).
+hdr10:
+  default: 30
+  shoulder: 60
+  regions: {}
+
+# Tonemap-shoulder regions: near-display-white values sit on the steep
+# shoulder of the PBR Neutral / AgX / Lottes curves, so a small linear
+# delta maps to a larger byte delta. (Irrelevant for operator=identity
+# UI/HUD regions, which is most of them — but useful for world-surface
+# checks if this tool is later extended.)
+shoulder: 15
+shoulder_regions: []
+
+regions:
+  # The main-menu panel ("main" menuDef backcolor, 0.08 0.08 0.12 0.92) is
+  # alpha 0.92 over the WFULLSCREEN_BACKGROUND ownerdraw — ~8% of the
+  # composited result bleeds through from whatever that ownerdraw renders,
+  # so allow a bit more slack here than the default. (Still tight enough to
+  # catch the [0,0,3] / [222,222,222] regressions, whose deltas are ~19 /
+  # ~200 respectively.)
+  main: 10

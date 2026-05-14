@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
@@ -68,14 +55,14 @@ cvar_t	*r_lodbias;
 cvar_t	*r_lodscale;
 
 cvar_t	*r_norefresh;
-cvar_t	*r_drawentities;
-cvar_t	*r_drawworld;
+cvar_t	*r_drawEntities;
+cvar_t	*r_drawWorld;
 cvar_t	*r_speeds;
 cvar_t	*r_fullbright;
 cvar_t	*r_novis;
 cvar_t	*r_nocull;
 cvar_t	*r_facePlaneCull;
-cvar_t	*r_showcluster;
+cvar_t	*r_showCluster;
 cvar_t	*r_nocurves;
 
 cvar_t	*r_allowExtensions;
@@ -158,8 +145,8 @@ cvar_t  *r_ignoreDstAlpha;
 cvar_t	*r_ignoreGLErrors;
 cvar_t	*r_logFile;
 
-//cvar_t	*r_stencilbits;
-cvar_t	*r_texturebits;
+//cvar_t	*r_stencilBits;
+cvar_t	*r_textureBits;
 cvar_t  *r_ext_multisample;
 
 cvar_t	*r_drawBuffer;
@@ -172,9 +159,9 @@ cvar_t	*r_singleShader;
 cvar_t	*r_roundImagesDown;
 cvar_t	*r_colorMipLevels;
 cvar_t	*r_picmip;
-cvar_t	*r_showtris;
-cvar_t	*r_showsky;
-cvar_t	*r_shownormals;
+cvar_t	*r_showTris;
+cvar_t	*r_showSky;
+cvar_t	*r_showNormals;
 cvar_t	*r_finish;
 cvar_t	*r_clear;
 cvar_t	*r_textureMode;
@@ -563,7 +550,7 @@ static void R_TakeScreenshot( int x, int y, int width, int height, char *name, q
 
 /*
 ==================
-R_ScreenshotFilename (CNQ3 backport: timestamp-based)
+R_ScreenshotFilename
 ==================
 */
 static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
@@ -975,7 +962,7 @@ static void GfxInfo_f( void )
 
 	ri.Log( SEV_INFO, "texturemode: %s\n", r_textureMode->string );
 	ri.Log( SEV_INFO, "picmip: %d\n", r_picmip->integer );
-	ri.Log( SEV_INFO, "texture bits: %d\n", r_texturebits->integer );
+	ri.Log( SEV_INFO, "texture bits: %d\n", r_textureBits->integer );
 	ri.Log( SEV_INFO, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
 	ri.Log( SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
 
@@ -1081,9 +1068,9 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_colorMipLevels, "Debugging tool to artificially color different mipmap levels so that they are more apparent." );
 	r_detailTextures = ri.Cvar_Get( "r_detailtextures", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_detailTextures, "Enables usage of shader stages flagged as detail." );
-	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_texturebits, "Number of texture bits per texture." );
-//	r_stencilbits = ri.Cvar_Get( "r_stencilbits", "8", CVAR_ARCHIVE | CVAR_LATCH );
+	r_textureBits = ri.Cvar_Get( "r_textureBits", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_textureBits, "Number of texture bits per texture." );
+//	r_stencilBits = ri.Cvar_Get( "r_stencilBits", "8", CVAR_ARCHIVE | CVAR_LATCH );
 	r_ext_multisample = ri.Cvar_Get( "r_ext_multisample", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_multisample, "0", "8", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ext_multisample, "For anti-aliasing geometry edges." );
@@ -1160,16 +1147,16 @@ static void R_Register( void )
 	r_pshadowDist = ri.Cvar_Get( "r_pshadowDist", "128", CVAR_ARCHIVE );
 	r_mergeLightmaps = ri.Cvar_Get( "r_mergeLightmaps", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_mergeLightmaps, "Merge small lightmaps into 2 or fewer giant lightmaps." );
-	// CNQ3 lightmap atlas optimization (alias). Both cvars must be non-zero
+	// lightmap atlas optimization (alias). Both cvars must be non-zero
 	// for the atlas pack to be built inside R_LoadLightmaps().
 	r_lightmapAtlas = ri.Cvar_Get( "r_lightmapAtlas", "1", CVAR_ARCHIVE | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_lightmapAtlas,
-		"Pack individual BSP lightmaps into larger atlas textures (CNQ3 port).\n"
+		"Pack individual BSP lightmaps into larger atlas textures.\n"
 		" 1: pack into atlases (default, fewer texture binds, faster loads)\n"
 		" 0: one texture per lightmap (legacy behaviour)\n"
 		" Works together with r_mergeLightmaps." );
 
-	// CNQ3 port: swap throttle during map loads.
+	// swap throttle during map loads.
 	r_loadingFpsCap = ri.Cvar_Get( "r_loadingFpsCap", "10", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_loadingFpsCap, "0", "60", CV_INTEGER );
 	ri.Cvar_SetDescription( r_loadingFpsCap,
@@ -1269,7 +1256,7 @@ static void R_Register( void )
 	r_showImages = ri.Cvar_Get( "r_showImages", "0", CVAR_TEMP );
 	ri.Cvar_SetDescription( r_showImages, "Draw all images currently loaded into memory:\n 0: Disabled\n 1: Show images set to uniform size\n 2: Show images with scaled relative to largest image" );
 
-	r_debugLight = ri.Cvar_Get( "r_debuglight", "0", CVAR_TEMP );
+	r_debugLight = ri.Cvar_Get( "r_debugLight", "0", CVAR_TEMP );
 	ri.Cvar_SetDescription( r_debugLight, "Debugging tool to print ambient and directed lighting information." );
 	r_debugSort = ri.Cvar_Get( "r_debugSort", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_debugSort, "Debugging tool to filter out shaders with depth sorting order values higher than the set value." );
@@ -1279,8 +1266,8 @@ static void R_Register( void )
 
 	r_nocurves = ri.Cvar_Get ("r_nocurves", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_nocurves, "Set to 1 to disable drawing world bezier curves. Set to 0 to enable." );
-	r_drawworld = ri.Cvar_Get ("r_drawworld", "1", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_drawworld, "Set to 0 to disable drawing the world. Set to 1 to enable." );
+	r_drawWorld = ri.Cvar_Get ("r_drawWorld", "1", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_drawWorld, "Set to 0 to disable drawing the world. Set to 1 to enable." );
 	r_lightmap = ri.Cvar_Get ("r_lightmap", "0", 0 );
 	ri.Cvar_SetDescription( r_lightmap, "Show only lightmaps on all world surfaces." );
 	r_portalOnly = ri.Cvar_Get ("r_portalOnly", "0", CVAR_CHEAT );
@@ -1311,27 +1298,27 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_lodscale, "Set scale for level of detail adjustment." );
 	r_norefresh = ri.Cvar_Get ("r_norefresh", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_norefresh, "Bypasses refreshing of the rendered scene." );
-	r_drawentities = ri.Cvar_Get ("r_drawentities", "1", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_drawentities, "Draw all world entities." );
+	r_drawEntities = ri.Cvar_Get ("r_drawEntities", "1", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_drawEntities, "Draw all world entities." );
 	r_ignore = ri.Cvar_Get( "r_ignore", "1", CVAR_CHEAT );
 	r_nocull = ri.Cvar_Get ("r_nocull", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_nocull, "Draw all culled objects." );
 	r_novis = ri.Cvar_Get ("r_novis", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_novis, "Disables usage of PVS." );
-	r_showcluster = ri.Cvar_Get ("r_showcluster", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_showcluster, "Shows current cluster index." );
+	r_showCluster = ri.Cvar_Get ("r_showCluster", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showCluster, "Shows current cluster index." );
 	r_speeds = ri.Cvar_Get ("r_speeds", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
 	r_debugSurface = ri.Cvar_Get ("r_debugSurface", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_debugSurface, "Backend visual debugging tool for bezier mesh surfaces." );
 	r_nobind = ri.Cvar_Get ("r_nobind", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_nobind, "Backend debugging tool: Disables texture binding." );
-	r_showtris = ri.Cvar_Get ("r_showtris", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_showtris, "Debugging tool: Wireframe rendering of polygon triangles in the world." );
-	r_showsky = ri.Cvar_Get ("r_showsky", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_showsky, "Forces sky in front of all surfaces." );
-	r_shownormals = ri.Cvar_Get ("r_shownormals", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_shownormals, "Debugging tool: Show wireframe surface normals." );
+	r_showTris = ri.Cvar_Get ("r_showTris", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showTris, "Debugging tool: Wireframe rendering of polygon triangles in the world." );
+	r_showSky = ri.Cvar_Get ("r_showSky", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showSky, "Forces sky in front of all surfaces." );
+	r_showNormals = ri.Cvar_Get ("r_showNormals", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showNormals, "Debugging tool: Show wireframe surface normals." );
 	r_clear = ri.Cvar_Get ("r_clear", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_clear, "Forces screen buffer clearing every frame, removing any hall of mirrors effect in void.\n Use \\r_clearColor to set color." );
 	r_offsetFactor = ri.Cvar_Get( "r_offsetFactor", "-1", CVAR_CHEAT );
@@ -1349,9 +1336,9 @@ static void R_Register( void )
 	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE);
 	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) Requires impact marks to be enabled in the game code." );
 
-	r_aviMotionJpegQuality = ri.Cvar_Get("r_aviMotionJpegQuality", "90", CVAR_ARCHIVE);
+	r_aviMotionJpegQuality = ri.Cvar_Get("r_aviMotionJpegQuality", "100", CVAR_ARCHIVE);
 	ri.Cvar_SetDescription( r_aviMotionJpegQuality, "Controls quality of Jpeg video capture when \\cl_aviMotionJpeg 1." );
-	r_screenshotJpegQuality = ri.Cvar_Get("r_screenshotJpegQuality", "90", CVAR_ARCHIVE);
+	r_screenshotJpegQuality = ri.Cvar_Get("r_screenshotJpegQuality", "100", CVAR_ARCHIVE);
 	ri.Cvar_SetDescription( r_screenshotJpegQuality, "Controls quality of Jpeg screenshots when using screenshotJpeg." );
 
 	r_maxpolys = ri.Cvar_Get( "r_maxpolys", va("%d", MAX_POLYS), 0);

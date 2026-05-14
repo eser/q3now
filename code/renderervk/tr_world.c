@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
 #include "../renderercommon/r_q1_texture.h"
 
@@ -829,18 +816,18 @@ static void R_MarkLeaves (void) {
 	// if the cluster is the same and the area visibility matrix
 	// hasn't changed, we don't need to mark everything again
 
-	// if r_showcluster was just turned on, remark everything
+	// if r_showCluster was just turned on, remark everything
 	static int s_showcluster_mod = -1;
-	int showcluster_changed = ( r_showcluster->modificationCount != s_showcluster_mod );
+	int showcluster_changed = ( r_showCluster->modificationCount != s_showcluster_mod );
 
 	if ( tr.viewCluster == cluster && !tr.refdef.areamaskModified
 		&& !showcluster_changed ) {
 		return;
 	}
 
-	if ( showcluster_changed || r_showcluster->integer ) {
-		s_showcluster_mod = r_showcluster->modificationCount;
-		if ( r_showcluster->integer ) {
+	if ( showcluster_changed || r_showCluster->integer ) {
+		s_showcluster_mod = r_showCluster->modificationCount;
+		if ( r_showCluster->integer ) {
 			ri.Log( SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
 		}
 	}
@@ -896,7 +883,7 @@ void R_AddWorldSurfaces( void ) {
 	dlight_t* dl;
 #endif
 
-	if ( !r_drawworld->integer ) {
+	if ( !r_drawWorld->integer ) {
 		return;
 	}
 

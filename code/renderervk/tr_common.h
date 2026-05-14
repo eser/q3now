@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #ifndef TR_COMMON_H
 #define TR_COMMON_H
 
@@ -38,7 +25,39 @@ typedef enum
 	IMGFLAG_RGB            = 0x0100,
 	IMGFLAG_COLORSHIFT     = 0x0200,
 	IMGFLAG_ARRAY          = 0x0400,  /* 2D_ARRAY image; layerCount gives depth */
+	/* Block 5d: explicit colour-domain overrides (shader keywords linearMap /
+	   srgbMap / gammaMap). When neither is set, R_CreateImage auto-classifies
+	   by filename suffix. */
+	IMGFLAG_DOMAIN_LINEAR  = 0x0800,
+	IMGFLAG_DOMAIN_SRGB    = 0x1000,
+	/* Phase 6.5.1: caller wants a cubemap (shader keyword `cubeMap`). The DDS
+	   loader auto-detects cube/volume from the file header regardless; this
+	   flag only records intent so a mismatch (file isn't a cubemap) can warn. */
+	IMGFLAG_CUBEMAP        = 0x2000,
 } imgFlags_t;
+
+// Phase 6.5.1: image dimensionality. The DDS loader classifies by header
+// (DDSCAPS2_CUBEMAP / DDSCAPS2_VOLUME, or the DXT10 resourceDimension /
+// D3D10_RESOURCE_MISC_TEXTURECUBE). image_t.texType drives vk_create_image's
+// VkImageType / view type / arrayLayers; CUBE_ARRAY is reserved (the loader
+// does not produce it yet). TEXTYPE_2D == 0 so a zero-initialised image_t is
+// a plain 2D texture by default.
+typedef enum {
+	TEXTYPE_2D         = 0,
+	TEXTYPE_CUBE       = 1,   // 6 array layers, VK_IMAGE_VIEW_TYPE_CUBE
+	TEXTYPE_3D         = 2,   // extent.depth slices, VK_IMAGE_VIEW_TYPE_3D
+	TEXTYPE_CUBE_ARRAY = 3,   // reserved
+} texType_t;
+
+// Phase 6.5.1: extra DDS classification returned by R_LoadDDS alongside the
+// raw mip buffer. layers == 6 for a plain cubemap (6*N for a cube array, not
+// yet produced); depth > 1 for a volume texture. numMips is the per-face /
+// per-volume mip-chain length (returned separately by R_LoadDDS as before).
+typedef struct {
+	texType_t texType;
+	int       layers;   // VkImageCreateInfo.arrayLayers (1 for 2D / 3D)
+	int       depth;    // VkImageCreateInfo.extent.depth (1 for 2D / cube)
+} ddsImageInfo_t;
 
 typedef enum {
 	CT_FRONT_SIDED = 0,
@@ -69,12 +88,34 @@ extern int       maxAnisotropy;
 //
 // cvars
 //
-//extern cvar_t *r_stencilbits;			// number of desired stencil bits
-extern cvar_t *r_texturebits;			// number of desired texture bits
+//extern cvar_t *r_stencilBits;			// number of desired stencil bits
+extern cvar_t *r_textureBits;			// number of desired texture bits
 										// 0 = use framebuffer depth
 										// 16 = use 16-bit textures
 										// 32 = use 32-bit textures
 										// all else = error
+
+// Phase 7.4a: when set, R_CreateImage additionally creates a parallel RAL
+// texture and registers it in a bindless BindGroup (the qvk* VkImage on the
+// legacy VkDevice still drives all renderer-side use — descriptor binding,
+// blits, screenshots — until 7.4c migrates that path). Cvar is LATCHED:
+// flip requires vid_restart since the image lifecycle changes mid-stream.
+extern cvar_t *r_useRALTextures;
+
+// Phase 7.4b: when set, every vkCreateBuffer site in vk.c also creates a
+// parallel RAL buffer (vk_ral_register_buffer); the legacy VkBuffer on the
+// qvk* VkDevice keeps driving all bind / draw / dispatch paths until 7.4c
+// migrates descriptor binding. CVAR_LATCH; flip requires vid_restart since
+// the buffer lifecycle changes mid-stream.
+extern cvar_t *r_useRALBuffers;
+
+// Phase 7.4c-pipeline: when set, every vkCreateGraphicsPipelines /
+// vkCreateComputePipelines site in vk.c also creates a parallel ralPipeline_t
+// via Ral_CreateGraphics/ComputePipeline. The legacy VkPipeline drives all
+// vkCmdBindPipeline / vkCmdDraw / vkCmdDispatch sites until 7.4c-cmd migrates
+// recording. CVAR_LATCH; flip requires vid_restart since pipeline lifecycle
+// changes mid-stream.
+extern cvar_t *r_useRALPipelines;
 
 extern cvar_t *r_drawBuffer;
 
@@ -123,6 +164,13 @@ void R_LoadJPG( const char *name, byte **pic, int *width, int *height );
 void R_LoadPCX( const char *name, byte **pic, int *width, int *height );
 void R_LoadPNG( const char *name, byte **pic, int *width, int *height );
 void R_LoadTGA( const char *name, byte **pic, int *width, int *height );
+// Phase 6.5: DDS BCn loader. Returns the raw mip-chain buffer; caller
+// owns *pic (ri.Free) and inspects *picFormat / *numMips / *dataSize
+// to schedule the compressed upload (vk_upload_image_data_compressed).
+// Phase 6.5.1: *info (may be NULL) receives the cubemap / volume / array
+// classification — see ddsImageInfo_t. *numMips is the per-face mip count
+// for cubemaps and the per-volume mip count for 3D textures.
+void R_LoadDDS( const char *name, byte **pic, int *width, int *height, VkFormat *picFormat, int *numMips, int *dataSize, ddsImageInfo_t *info );
 
 /*
 ====================================================================

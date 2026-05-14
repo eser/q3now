@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 ===========================================================================
 tr_model_mdl.c  —  Q1 MDL (IDPO) alias model loader, shared across all renderers.

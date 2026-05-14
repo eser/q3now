@@ -215,10 +215,26 @@ static shader_t *R_Q1_BuildSyntheticShader( const char *name, int lightmapIndex 
             Q1_ST_ALPHAGEN( st )   = AGEN_IDENTITY;
             st->stateBits          = GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO |
                                      GLS_ATEST_GT_0;
-#ifdef LIGHTMAP_INDEX_SHADER
-            if ( lightmapIndex != LIGHTMAP_WHITEIMAGE )
-                st->bundle[1].lightmap = ( lightmapIndex >= 0 ? lightmapIndex : 0 ) + LIGHTMAP_INDEX_OFFSET;
-#endif
+            /* Phase 6.5.3 stopgap — VUID-vkCmdDrawIndexed-None-04007.
+               Deliberately do NOT stamp bundle[1].lightmap on this stage.
+               GLS_ATEST_GT_0 makes CollapseMultitexture bail (the lightmap
+               and diffuse stages can't merge — see tr_shader.c's
+               "identical state other than blend modes" check), so this
+               stage stays a plain single-texture diffuse stage whose
+               tessFlags request only vertex bindings 0/1/2. If bundle[1].
+               lightmap were set, the tr_shade.c q1ls gate would pick the
+               single-pass q1ls pipeline — which declares vertex binding 3
+               (the lightmap-UV stream) — for that stage, and vk_bind_geometry
+               never binds binding 3 → 04007 on every Q1 {-surface drawn.
+               Leaving it at LIGHTMAP_INDEX_NONE (the InitShader-zeroed
+               default) routes {-surfaces through the generic two-stage
+               lightmap + ATEST diffuse path, exactly like the
+               LIGHTMAP_WHITEIMAGE prop case above. Trade-off: no per-frame
+               lightstyle animation on {-surfaces (switchable lights rarely
+               target them). Proper fix — build Q1TC_ALPHA as a single
+               multitexture stage with ATEST on the merged stage so the q1ls
+               path's binding-3 stream is bound — is a separate turn; see the
+               Phase 6.5.3 Q1 bug audit. */
             ns++;
         }
         if ( qi->glow )

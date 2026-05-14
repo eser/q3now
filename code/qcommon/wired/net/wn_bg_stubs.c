@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
  * wn_bg_stubs.c — stubs for bg_*.c trap calls in the qcommon/server build context
  *

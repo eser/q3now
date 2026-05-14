@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: fX3 contributors
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /* cl_net_stats.c — statistical network overlay (ported from fX3)
  *
  * Three on-screen overlays:

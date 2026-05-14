@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #ifndef CG_LOCAL_H
 #define CG_LOCAL_H
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
 //
 #include "../qcommon/q_shared.h"
 #include "../renderercommon/tr_types.h"
@@ -929,6 +916,7 @@ typedef struct {
 	qhandle_t	shotgunSmokePuffShader;
 	qhandle_t	plasmaBallShader;
 	qhandle_t	waterBubbleShader;
+	sfxHandle_t	waterSplashSound;	// Phase 6.5.3: water-surface crossing impact (Q1 misc/h2ohit1, Q3 watr_in fallback; 0 if neither present)
 	qhandle_t	bloodTrailShader;
 
 	// qhandle_t	nailPuffShader;
@@ -1270,6 +1258,11 @@ typedef struct {
 
 	// per-attack stats (populated by bstats server command)
 	cgAttackStat_t	attackStats[MAX_CLIENTS][ATT_NUM_ATTACKS];
+
+	// Phase 6.5.3: this is a Quake-1 BSP (com_mapBspVersion == 29). Gates the
+	// Q1-fidelity water-surface FX (splash sprite/sound, underwater-impact
+	// bubble burst). Q3 maps keep their existing visuals. Set in CG_Init.
+	qboolean		q1Map;
 
 } cgs_t;
 
@@ -1742,6 +1735,12 @@ localEntity_t *CG_SmokePuff( const vec3_t p,
 				   int leFlags,
 				   qhandle_t hShader );
 void CG_BubbleTrail( vec3_t start, vec3_t end, float spacing );
+// Phase 6.5.3: a small spray-of-droplets burst + watr_in sound at a point on a
+// liquid surface. Pure helper — callers gate on cgs.q1Map.
+void CG_WaterSplash( vec3_t point );
+// Phase 6.5.3: given a hitscan segment [start,end], emit CG_WaterSplash() at
+// wherever it pierces a liquid surface (entry and/or exit). No-op unless cgs.q1Map.
+void CG_WaterCrossingSplashes( vec3_t start, vec3_t end );
 void CG_SpawnEffect( vec3_t org );
 void CG_KamikazeEffect( vec3_t org );
 #if FEAT_OVERLOAD

@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
 
@@ -404,7 +391,20 @@ void RE_AddRibbonToScene( const ribbonDesc_t *desc ) {
 	udst[1] = (uint32_t)desc->numPoints;
 	// Phase 5K: cgame submits a qhandle; the GPU header carries a
 	// primitive registry slot. Translate via the indirection table.
-	udst[2] = vk_qhandle_to_prim_slot( desc->shader );
+	//
+	// Block 5d-followup: bits 0..30 carry the registry slot; bit 31 the
+	// slot image's colour domain (CD_LINEAR → ribbon.frag samples raw).
+	// ribbon.vert passes the packed value through unchanged; ribbon.frag
+	// masks the slot before the range clamp. Every registered primitive
+	// image is CD_SRGB today → bit 31 is 0 → no behaviour change.
+	{
+		uint32_t primSlot = vk_qhandle_to_prim_slot( desc->shader );
+		if ( primSlot < PRIMITIVE_SHADER_IMAGE_MAX
+		  && vk_primitive_shader_images[primSlot] != NULL
+		  && vk_primitive_shader_images[primSlot]->colorDomain == CD_LINEAR )
+			primSlot |= 0x80000000u;
+		udst[2] = primSlot;
+	}
 	udst[3] = (uint32_t)desc->flags;
 	fdst[4] = desc->uvScroll[0];
 	fdst[5] = desc->uvScroll[1];
@@ -915,6 +915,13 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 			}
 		}
 		dst->shaderBlendIsAdditive = isAdditive;
+
+		// Block 5d-followup: carry the resolved image's colour domain
+		// (CD_SRGB(0) | CD_LINEAR(1)) into the GPU class record;
+		// particle.vert packs it into bit 31 of particleClassHandle so
+		// particle.frag can sample raw vs. sRGB-decode per class. Every
+		// shipped class image is CD_SRGB today → 0 → no behaviour change.
+		dst->colorDomain = (uint32_t)resolvedImage->colorDomain;
 
 		// Cache image pointer for re-alloc-after-pool-reset.
 		vk.particle.classImages[ handle - 1 ] = resolvedImage;

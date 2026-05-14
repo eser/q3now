@@ -1,12 +1,7 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2005 Stuart Dalton (badcdev@gmail.com)
-Copyright (C) 2024-2026 Wired engine contributors
-
-This file is part of the Wired Engine source code. GPLv2.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2005 Stuart Dalton (badcdev@gmail.com)
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 // snd_codec_init.c — engine-side codec init/shutdown.
 //

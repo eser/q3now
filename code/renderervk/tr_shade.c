@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_shade.c
 
 #include "tr_local.h"
@@ -117,7 +104,7 @@ static void DrawTris( const shaderCommands_t *input ) {
 #ifdef USE_VULKAN
 	uint32_t pipeline;
 
-	if ( r_showtris->integer == 1 && backEnd.drawConsole )
+	if ( r_showTris->integer == 1 && backEnd.drawConsole )
 		return;
 
 	if ( tess.numIndexes == 0 )
@@ -149,7 +136,7 @@ static void DrawTris( const shaderCommands_t *input ) {
 	vk_draw_geometry( DEPTH_RANGE_ZERO, qtrue );
 
 #else
-	if ( r_showtris->integer == 1 && backEnd.drawConsole )
+	if ( r_showTris->integer == 1 && backEnd.drawConsole )
 		return;
 
 	GL_ClientState( 0, CLS_NONE );
@@ -204,7 +191,10 @@ static void DrawNormals( const shaderCommands_t *input ) {
 		tess.numIndexes += 2;
 	}
 	tess.numVertexes *= 2;
-	memset( tess.svars.colors[0][0].rgba, tr.identityLightByte, tess.numVertexes * sizeof( color4ub_t ) );
+	/* Phase 6B3'-a: full-white initialization (was identityLightByte
+	 * = 0.5*255 in the legacy LDR pipeline). Normals-debug overlay
+	 * inherits linear-pipeline color authoring. */
+	memset( tess.svars.colors[0][0].rgba, 255, tess.numVertexes * sizeof( color4ub_t ) );
 
 	vk_bind_pipeline( vk.normals_debug_pipeline );
 	vk_bind_index();
@@ -279,9 +269,9 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 
 #ifdef USE_TESS_NEEDS_NORMAL
 #ifdef USE_PMLIGHT
-	tess.needsNormal = state->needsNormal || tess.dlightPass || r_shownormals->integer;
+	tess.needsNormal = state->needsNormal || tess.dlightPass || r_showNormals->integer;
 #else
-	tess.needsNormal = state->needsNormal || r_shownormals->integer;
+	tess.needsNormal = state->needsNormal || r_showNormals->integer;
 #endif
 #endif
 
@@ -642,7 +632,12 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 			break;
 		default:
 		case CGEN_IDENTITY_LIGHTING:
-			memset( dest, tr.identityLightByte, tess.numVertexes * 4 );
+			/* Phase 6B3'-a: identityLightByte (= 128 under legacy
+			 * obScale=2) collapses to full-white 255 in the linear
+			 * pipeline. CGEN_IDENTITY_LIGHTING is functionally
+			 * indistinguishable from CGEN_IDENTITY post-migration;
+			 * the case is retained for shader-script compatibility. */
+			memset( dest, 255, tess.numVertexes * 4 );
 			break;
 		case CGEN_LIGHTING_DIFFUSE:
 			RB_CalcDiffuseColor( ( unsigned char * ) dest );
@@ -656,39 +651,20 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 			}
 			break;
 		case CGEN_VERTEX:
-			if ( tr.identityLight == 1 )
-			{
-				memcpy( dest, tess.vertexColors, tess.numVertexes * sizeof( tess.vertexColors[0] ) );
-			}
-			else
-			{
-				for ( i = 0; i < tess.numVertexes; i++ )
-				{
-					dest[i].rgba[0] = tess.vertexColors[i].rgba[0] * tr.identityLight;
-					dest[i].rgba[1] = tess.vertexColors[i].rgba[1] * tr.identityLight;
-					dest[i].rgba[2] = tess.vertexColors[i].rgba[2] * tr.identityLight;
-					dest[i].rgba[3] = tess.vertexColors[i].rgba[3];
-				}
-			}
+			/* Phase 6B3'-a: linear-pipeline migration drops the
+			 * `* tr.identityLight` halving; vertex colors pass
+			 * through verbatim. The two-branch slow/fast path
+			 * collapses to the original memcpy. */
+			memcpy( dest, tess.vertexColors, tess.numVertexes * sizeof( tess.vertexColors[0] ) );
 			break;
 		case CGEN_ONE_MINUS_VERTEX:
-			if ( tr.identityLight == 1 )
+			/* Phase 6B3'-a: same as CGEN_VERTEX above — no
+			 * identityLight halving in the linear pipeline. */
+			for ( i = 0; i < tess.numVertexes; i++ )
 			{
-				for ( i = 0; i < tess.numVertexes; i++ )
-				{
-					dest[i].rgba[0] = 255 - tess.vertexColors[i].rgba[0];
-					dest[i].rgba[1] = 255 - tess.vertexColors[i].rgba[1];
-					dest[i].rgba[2] = 255 - tess.vertexColors[i].rgba[2];
-				}
-			}
-			else
-			{
-				for ( i = 0; i < tess.numVertexes; i++ )
-				{
-					dest[i].rgba[0] = ( 255 - tess.vertexColors[i].rgba[0] ) * tr.identityLight;
-					dest[i].rgba[1] = ( 255 - tess.vertexColors[i].rgba[1] ) * tr.identityLight;
-					dest[i].rgba[2] = ( 255 - tess.vertexColors[i].rgba[2] ) * tr.identityLight;
-				}
+				dest[i].rgba[0] = 255 - tess.vertexColors[i].rgba[0];
+				dest[i].rgba[1] = 255 - tess.vertexColors[i].rgba[1];
+				dest[i].rgba[2] = 255 - tess.vertexColors[i].rgba[2];
 			}
 			break;
 		case CGEN_FOG:
@@ -719,8 +695,9 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 	case AGEN_SKIP:
 		break;
 	case AGEN_IDENTITY:
-		if ( ( pStage->bundle[b].rgbGen == CGEN_VERTEX && tr.identityLight != 1 ) ||
-			 pStage->bundle[b].rgbGen != CGEN_VERTEX ) {
+		/* CGEN_VERTEX halving removed in 6B3'-a linear migration;
+		 * previously triggered CPU path on r_brightness > 1. */
+		if ( pStage->bundle[b].rgbGen != CGEN_VERTEX ) {
 			for ( i = 0; i < tess.numVertexes; i++ ) {
 				dest[i].rgba[3] = 255;
 			}
@@ -1057,9 +1034,15 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 #endif
 				}
 				if ( tess_flags & (TESS_ENT0 << i) && backEnd.currentEntity ) {
-					uniform.ent.color[i][0] = backEnd.currentEntity->e.shader.rgba[0] / 255.0;
-					uniform.ent.color[i][1] = backEnd.currentEntity->e.shader.rgba[1] / 255.0;
-					uniform.ent.color[i][2] = backEnd.currentEntity->e.shader.rgba[2] / 255.0;
+					// Phase 6B3'-d4-m8: decode the entity colour to linear domain
+					// at the UBO fill site. gen_frag.tmpl's USE_ENT_COLOR variants
+					// multiply this against the (sampleColorTex-decoded) texel in
+					// linear domain. shaderRGBA is a display-domain byte triple;
+					// the alpha component below carries per-stage alphaGen state,
+					// not an sRGB-encoded colour — left raw.
+					uniform.ent.color[i][0] = R_SRGBToLinear( backEnd.currentEntity->e.shader.rgba[0] / 255.0f );
+					uniform.ent.color[i][1] = R_SRGBToLinear( backEnd.currentEntity->e.shader.rgba[1] / 255.0f );
+					uniform.ent.color[i][2] = R_SRGBToLinear( backEnd.currentEntity->e.shader.rgba[2] / 255.0f );
 				#if FEAT_THIRD_PERSON
 				#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
 					// RF_FORCE_ENT_ALPHA: force alpha from entity regardless of alphaGen
@@ -1093,6 +1076,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		} else {
 			pipeline = pStage->vk_pipeline[fog_stage];
 		}
+
+		// Phase 6B3'-d4-m_final (Block 1): the A3 per-map srgb-variant
+		// swap is gone — gen_frag.tmpl decodes colour texels
+		// unconditionally now, so there is no second variant to pick.
 
 #if FEAT_THIRD_PERSON
 #if FEAT_FORCE_ENTITY_VERTEX_ALPHA
@@ -1309,7 +1296,16 @@ void VK_SetFogParams( vkUniform_t *uniform, int *fogStage )
 			uniform->fogEyeT[1] = 1.0; // fog eye in
 		}
 		// fragment data
-		Vector4Copy( fp->fogColor, uniform->fogColor );
+		// Phase 6B3'-d4-m4: decode fogColor to linear domain at the
+		// (single) UBO fill site. fog.frag and gen_frag.tmpl's USE_FOG
+		// branch consume this in linear-domain math now; light_frag.tmpl's
+		// USE_FOG branch reads only the fog-texture alpha, so it's
+		// unaffected. Alpha (fp->fogColor[3], normally 1.0) is not an
+		// sRGB-encoded channel — copied verbatim.
+		uniform->fogColor[0] = R_SRGBToLinear( fp->fogColor[0] );
+		uniform->fogColor[1] = R_SRGBToLinear( fp->fogColor[1] );
+		uniform->fogColor[2] = R_SRGBToLinear( fp->fogColor[2] );
+		uniform->fogColor[3] = fp->fogColor[3];
 		*fogStage = 1;
 	} else {
 		*fogStage = 0;
@@ -1328,13 +1324,32 @@ static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 	if ( !glConfig.deviceSupportsGamma )
 #endif
 		VectorScale( dl->color, 2 * powf( r_intensity->value, r_gamma->value ), uniform->light.color);
-	else
-		VectorCopy( dl->color, uniform->light.color );
+	else {
+		// Phase 6B3'-d4-m7: decode the dlight colour to linear domain.
+		// light_frag.tmpl's BRDF (classic Phong + the GGX/Schlick/Smith
+		// Cook-Torrance path) needs linear-radiance light values for
+		// colorimetrically correct math; light.color[3] (1/r^2 falloff)
+		// is set below and is not a colour. The branch above is the legacy
+		// non-FBO gamma-ramp path (dead in Wired — vk.fboActive is always
+		// set with r_fbo 1) and does its own gamma compensation, so it is
+		// left untouched.
+		uniform->light.color[0] = R_SRGBToLinear( dl->color[0] );
+		uniform->light.color[1] = R_SRGBToLinear( dl->color[1] );
+		uniform->light.color[2] = R_SRGBToLinear( dl->color[2] );
+	}
 
 	radius = dl->radius;
 
 	// vertex data
 	VectorCopy( backEnd.or.viewOrigin, uniform->eyePos ); uniform->eyePos[3] = 0.0f;
+#if FEAT_SHADOW_MAPPING
+	// Phase 6.5.4d1: repurpose the unused eyePos.w slot as the live
+	// r_csmShowCascades debug flag (light_frag.tmpl tints by sampled cascade).
+	// The vertex stage's V = eyePos - vec4(in_position,1) only uses V.xyz, so
+	// V.w changing 0→? is harmless; no UBO layout change, no spec constant.
+	if ( vk.shadowMap.active && ri.Cvar_Get( "r_csmShowCascades", "0", 0 )->integer )
+		uniform->eyePos[3] = 1.0f;
+#endif
 	VectorCopy( dl->transformed, uniform->light.pos ); uniform->light.pos[3] = 0.0f;
 
 	// fragment data
@@ -1391,6 +1406,31 @@ void VK_LightingPass( void )
 		// light parameters
 		VK_SetLightParams( &uniform, tess.light );
 
+#if FEAT_SHADOW_MAPPING
+		// Phase 6.5.4c: feed the 4 per-cascade light matrices + split distances
+		// to the lit shader. These live in proper UBO fields appended at the end
+		// of vkUniform_t (std140 offset 144 / 400 / 416) — the lit shader's
+		// USE_SHADOWMAP block declares them at matching layout(offset=)s. (No
+		// effect when shadow mapping is inactive, or on surfaces that keep a
+		// non-shadow pipeline — those just don't read the tail of the UBO.)
+		if ( vk.shadowMap.active ) {
+			const orientationr_t *o = &backEnd.or;
+			memcpy( uniform.cascadeMVP, vk.shadowMap.cascadeMVP, sizeof( uniform.cascadeMVP ) );
+			Vector4Copy( vk.shadowMap.cascadeSplits, uniform.cascadeSplits );
+			// Phase 6.5.4d2: model->world for this surface so light_vert.tmpl can
+			// put shadowData.xyz in world space. backEnd.or is set per surface by
+			// R_RotateForEntity — identity (axis = identity, origin = 0) for the
+			// worldspawn, the entity's [axis|origin] for entity / brush-model
+			// surfaces. Column-major, same convention as cascadeMVP / the caster
+			// push constant. (Matches the matrix R_RotateForEntity builds before
+			// composing with the world->view matrix.)
+			uniform.modelMatrix[ 0] = o->axis[0][0]; uniform.modelMatrix[ 4] = o->axis[1][0]; uniform.modelMatrix[ 8] = o->axis[2][0]; uniform.modelMatrix[12] = o->origin[0];
+			uniform.modelMatrix[ 1] = o->axis[0][1]; uniform.modelMatrix[ 5] = o->axis[1][1]; uniform.modelMatrix[ 9] = o->axis[2][1]; uniform.modelMatrix[13] = o->origin[1];
+			uniform.modelMatrix[ 2] = o->axis[0][2]; uniform.modelMatrix[ 6] = o->axis[1][2]; uniform.modelMatrix[10] = o->axis[2][2]; uniform.modelMatrix[14] = o->origin[2];
+			uniform.modelMatrix[ 3] = 0.0f;          uniform.modelMatrix[ 7] = 0.0f;          uniform.modelMatrix[11] = 0.0f;          uniform.modelMatrix[15] = 1.0f;
+		}
+#endif
+
 		uniform_offset = VK_PushUniform( &uniform );
 
 		tess.dlightUpdateParams = qfalse;
@@ -1420,9 +1460,17 @@ void VK_LightingPass( void )
 		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — index bounded by upstream invariant (sun-shadow cascades, surfaceIndexSets count, dlight pipeline count); analyzer doesn't see the bound
 		pipeline = vk.dlight_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
 
+	// Phase 6B3'-d4-m_final (Block 1): the A4 per-map srgb-variant swap
+	// is gone — light_frag.tmpl decodes the albedo texel unconditionally
+	// now. (The PBR/shadow/parallax swaps below are unaffected.)
+
 #if FEAT_PBR
-	// Swap to PBR pipeline when surface has a pbrMap
-	if ( pStage->bundle[3].image[0] ) {
+	// Swap to PBR pipeline when surface has a pbrMap. r_pbr is the
+	// runtime gate (Phase 6B3'-f live conversion); the pipeline cache
+	// (vk_find_pipeline_ext) holds both PBR and non-PBR variants so
+	// flipping r_pbr selects between cached pipelines per draw with
+	// no rebuild.
+	if ( pStage->bundle[3].image[0] && r_pbr->integer ) {
 		Vk_Pipeline_Def def;
 		vk_get_pipeline_def( pipeline, &def );
 		if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING )
@@ -1471,6 +1519,15 @@ void VK_LightingPass( void )
 			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PARALLAX;
 		else if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR )
 			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PARALLAX_LINEAR;
+		// Phase 6.5.2: a BC5 (2-channel ATI2N/3Dc) normal map only stores
+		// X+Y — the shader reconstructs Z. RGB-encoded normal maps (BC1 /
+		// BC3 / uncompressed) keep the legacy all-3-channels path. Keys the
+		// parallax pipeline variant so the two don't share a pipeline.
+		switch ( pStage->bundle[2].image[0]->internalFormat ) {
+			case VK_FORMAT_BC5_UNORM_BLOCK: def.normal_format = 1; break;
+			case VK_FORMAT_BC5_SNORM_BLOCK: def.normal_format = 2; break;
+			default:                        def.normal_format = 0; break;
+		}
 		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		// bind normalmap to descriptor set 6
 		vk_update_descriptor( VK_DESC_NORMALMAP, pStage->bundle[2].image[0]->descriptor );
@@ -1756,10 +1813,10 @@ void RB_EndSurface( void ) {
 	//
 	// draw debugging stuff
 	//
-	if ( r_showtris->integer ) {
+	if ( r_showTris->integer ) {
 		DrawTris( input );
 	}
-	if ( r_shownormals->integer ) {
+	if ( r_showNormals->integer ) {
 		DrawNormals( input );
 	}
 

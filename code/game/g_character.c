@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #include "g_character.h"
 #include "g_local.h"
 /* Phase 5: log channels */

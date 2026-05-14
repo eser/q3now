@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // qcommon.h -- definitions common between client and server, but not game.or ref modules
 #ifndef _QCOMMON_H_
 #define _QCOMMON_H_
@@ -962,7 +949,7 @@ typedef struct {
 	int		scroll;
 	int		widthInChars;
 	char	buffer[MAX_EDIT_LINE];
-	/* CNQ3 backport Phase 6: cycling auto-completion (con_completionStyle 1) */
+	/* cycling auto-completion (con_completionStyle 1) */
 	int		acOffset;	/* buffer offset at which the current cycle began, 0 = no active cycle */
 	int		acLength;	/* length of the most recently inserted match (for future use) */
 	int		acMatchIndex;	/* current match index used by cycling tab */
@@ -1448,7 +1435,7 @@ char	*Sys_GetClipboardData( void );	// note that this isn't journaled...
 void	Sys_SetClipboardData( const char *text );
 void	Sys_SetClipboardBitmap( const byte *bitmap, int length );
 
-/* CNQ3 backport: match alerts.
+/* match alerts.
  * Sys_FlashWindow briefly flashes the taskbar / dock entry to draw
  * attention to the game window when the user is in another app.
  * Sys_BeepAttention emits a single system-level alert beep. */

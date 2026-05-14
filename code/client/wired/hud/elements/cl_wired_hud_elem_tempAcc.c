@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 // cl_wired_hud_elem_tempAcc.c — Temporary weapon accuracy HUD element
 // Shows the player's recent accuracy with a weapon, computed from the delta
 // of hits/shots between bstats updates. Fades after no new data.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /* cl_wired_hud_elem_holdablelist.c -- Holdable inventory list HUD element.
    Mirrors the weapon list layout (CENTER_RIGHT anchor, T direction, vertical).
    Reads wiredHud->holdableList[]; selected entry is highlighted with color2. */

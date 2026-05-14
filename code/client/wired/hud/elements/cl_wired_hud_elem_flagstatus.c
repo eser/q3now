@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /* cl_wired_hud_elem_flagstatus.c -- Flag status HUD elements (OWN / NME)
    Uses pre-computed flag shader handles from wiredHud bridge. Numeric
    team IDs (0=free, 1=red, 2=blue, 3=spectator) avoid enum dependencies. */

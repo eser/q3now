@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // console_state.c
 
 #include "../../../client.h"
@@ -93,9 +80,9 @@ cvar_t		*cl_consoleHeight;
 cvar_t		*cl_consoleType;
 cvar_t		*con_timestamp;
 
-/* CNQ3 backport: per-element console colors.  Each cvar stores a hex
-   string in the form "RRGGBB" or "RRGGBBAA"; we parse them lazily every
-   frame (string comparison guards against rebuilding the vec4 when the
+/* per-element console colors.  Each cvar stores a hex string in the
+ * form "RRGGBB" or "RRGGBBAA"; we parse them lazily every frame
+ * (string comparison guards against rebuilding the vec4 when the
    value has not changed). */
 cvar_t		*con_colBG;
 cvar_t		*con_colBorder;
@@ -632,7 +619,7 @@ void Con_Init( void )
 	con_fade          = s_conHandles[CON_FADE];
 	con_fps           = s_conHandles[CON_FPS];
 	con_timestamp     = s_conHandles[CON_TIMESTAMP];
-	/* CNQ3 backport: per-element console colors */
+	/* per-element console colors */
 	con_colBG         = s_conHandles[CON_COLBG];
 	con_colBorder     = s_conHandles[CON_COLBORDER];
 	con_colText       = s_conHandles[CON_COLTEXT];

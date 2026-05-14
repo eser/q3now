@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
 /*
@@ -64,7 +67,9 @@ struct ParticleClassGPU {
 	vec4  velocityBiasJitter;     // .xyz post-shape symmetric jitter
 	float speedJitter;            // axialSpeed scatter at emit time
 	float sizeJitter;             // sizeStart scatter at emit time
-	uint  pad4;
+	uint  colorDomain;            // Block 5d-followup: was pad4 — CD_SRGB(0)|CD_LINEAR(1)
+	                              //   of the class's resolved stage-0 image; packed into bit
+	                              //   31 of particleClassHandle for the fragment stage.
 	uint  pad5;
 };
 
@@ -77,10 +82,13 @@ layout(set = 0, binding = 0) uniform ParticleFrame {
 	uint  poolSize;
 	uint  numClasses;
 	uint  pingPongRead;
-	float identityLight;   // tr.identityLight; CGEN_VERTEX-equivalent halving
+	// 16 B of std140 vec4-stride padding. pad0 (offset 128) was the
+	// legacy `identityLight` halving factor — dropped Phase 6B3'-a,
+	// field removed in the Block 9 sweep. Mirrors host particleFrame_t.
 	float pad0;
 	float pad1;
 	float pad2;
+	float pad3;
 };
 
 layout(std430, set = 0, binding = 1) readonly buffer Pool {
@@ -97,6 +105,12 @@ layout(location = 1) out vec4 fragColor;
 // shader for the per-class sampler array lookup. Same value for all 6
 // vertices of one particle (all share gl_InstanceIndex), so flat is
 // uniform-correct.
+//
+// Block 5d-followup: bits 0..30 = classHandle (1..MAX_PARTICLE_CLASSES);
+// bit 31 = the class's colour-domain (1 = CD_LINEAR → fragment samples
+// raw; 0 = CD_SRGB → fragment decodes sRGB→linear). Today every
+// particle-class image is CD_SRGB so bit 31 is always 0 — the fragment
+// path is byte-identical to before this change.
 layout(location = 2) flat out uint particleClassHandle;
 
 out gl_PerVertex {
@@ -182,5 +196,7 @@ void main() {
 	gl_Position         = mvp * vec4(worldPos, 1.0);
 	fragUV              = uvCorner[vertInQuad];
 	fragColor           = color;
-	particleClassHandle = p.classHandle;
+	// Block 5d-followup: low bits carry the class handle; bit 31 carries
+	// the resolved image's colour domain (c.colorDomain ∈ {0,1}).
+	particleClassHandle = p.classHandle | (c.colorDomain << 31u);
 }

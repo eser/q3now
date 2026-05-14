@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /* cl_wired_hud_elem_powerup.c -- Powerup icon and timer HUD elements
    Reads pre-computed powerup data from wiredHud->activePowerups[].
    cgame iterates game powerup arrays and pushes results; client displays. */

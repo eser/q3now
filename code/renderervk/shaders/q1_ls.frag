@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
 // lightstyle blend — fragment shader
@@ -39,18 +42,59 @@ layout(location = 2) centroid in vec2 frag_tex_coord1;
 
 layout(location = 0) out vec4 out_color;
 
+// Phase 6B3'-d4-m6: precise piecewise sRGB <-> linear conversion.
+// Duplicated in every fragment shader per the engine-wide
+// unconditional linear migration; compile.mjs lacks #include
+// support. Matches m1/m2/m3/m4/m5 verbatim. linearToSRGB is unused
+// here — driver DCEs it; kept for migration symmetry.
+vec3 sRGBToLinear( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	bvec3 cutoff = lessThanEqual( c, vec3( 0.04045 ) );
+	vec3 lo = c / 12.92;
+	vec3 hi = pow( ( c + vec3( 0.055 ) ) / 1.055, vec3( 2.4 ) );
+	return mix( hi, lo, vec3( cutoff ) );
+}
+
+vec3 linearToSRGB( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	bvec3 cutoff = lessThanEqual( c, vec3( 0.0031308 ) );
+	vec3 lo = c * 12.92;
+	vec3 hi = pow( c, vec3( 1.0 / 2.4 ) ) * 1.055 - 0.055;
+	return mix( hi, lo, vec3( cutoff ) );
+}
+
 void main() {
+	// Phase 6B3'-d4-m6: decode the diffuse + lightmap colour samples to
+	// linear, then run the Q1 lightstyle model in linear domain — surface
+	// diffuse × sum(lightmap_s × intensity_s). The weighted sum is a true
+	// sum of light contributions and the diffuse × light product is a
+	// physical modulation; both are only colorimetrically correct in
+	// linear. q1StyleIntensities are per-style scalar weights (not colour)
+	// — used raw. Alpha (diffuse cross-fade × Σ weighted lightmap alpha)
+	// is preserved exactly; alpha is not sRGB-encoded. No Q1-overbright
+	// byte boost exists in the lightmap loader (LM_FillPatch writes the
+	// byte verbatim), so there is no LIGHTMAP_BOOST here — brightness is
+	// carried entirely by the style intensities. NOT addressed here: the
+	// pre-existing multi-style shading oscillation on batched bmodels
+	// (docs/health.md "Q1 multi-style lightmap shading oscillation") —
+	// that's a draw-order / per-surface-styles concern, separate from this
+	// colour-domain migration; its behaviour may shift slightly post-m6.
 	float animBlend = _animPad.x;
 	vec4 diffuseA = texture(diffuseMap,     frag_tex_coord0);
 	vec4 diffuseB = texture(diffuseMapNext, frag_tex_coord0);
+	diffuseA.rgb = sRGBToLinear( diffuseA.rgb );
+	diffuseB.rgb = sRGBToLinear( diffuseB.rgb );
 	vec4 diffuse  = mix(diffuseA, diffuseB, animBlend);
 
-	vec4 s0 = texture(lm0, frag_tex_coord1) * q1StyleIntensities.x;
-	vec4 s1 = texture(lm1, frag_tex_coord1) * q1StyleIntensities.y;
-	vec4 s2 = texture(lm2, frag_tex_coord1) * q1StyleIntensities.z;
-	vec4 s3 = texture(lm3, frag_tex_coord1) * q1StyleIntensities.w;
+	vec4 t0 = texture(lm0, frag_tex_coord1); t0.rgb = sRGBToLinear( t0.rgb );
+	vec4 t1 = texture(lm1, frag_tex_coord1); t1.rgb = sRGBToLinear( t1.rgb );
+	vec4 t2 = texture(lm2, frag_tex_coord1); t2.rgb = sRGBToLinear( t2.rgb );
+	vec4 t3 = texture(lm3, frag_tex_coord1); t3.rgb = sRGBToLinear( t3.rgb );
 
-	vec4 lm = s0 + s1 + s2 + s3;
+	vec4 lm = t0 * q1StyleIntensities.x
+	        + t1 * q1StyleIntensities.y
+	        + t2 * q1StyleIntensities.z
+	        + t3 * q1StyleIntensities.w;
 
 	out_color = diffuse * lm;
 }

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
  * cl_console_private.h — Shared internal interface between cl_console.c
  * and wired/ui/panels/console.c.

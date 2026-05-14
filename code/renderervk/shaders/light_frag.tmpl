@@ -14,7 +14,21 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 fogColor;				// fragment
 #endif
 #ifdef USE_SHADOWMAP
-	mat4 shadowMVP;				// light view-projection matrix (vertex uses this)
+	// Phase 6.5.4c: 4 per-cascade light view-projection matrices + cascade
+	// split distances (view-space Z for splits 1..4) at host offsets 144 and
+	// 400 (see code/renderervk/vk.h vkUniform_t). Phase 7.3b-followup:
+	// explicit `layout(offset=)` (an ARB_enhanced_layouts feature, not in
+	// GLSL ES 300) is replaced with natural std140 padding so SPIRV-Cross can
+	// emit the block under every backend (MSL / GLSL 4.30 / GLSL ES 300 /
+	// WGSL). The pad-array sizing reaches offset 144 from whichever previous
+	// field ended (lightVector @64 / fogColor @128).
+#ifdef USE_FOG
+	vec4 _pad_to_cascadeMVP[1];   //  128 → 144 (16 bytes, after fogColor)
+#else
+	vec4 _pad_to_cascadeMVP[5];   //   64 → 144 (80 bytes, after lightVector)
+#endif
+	mat4 cascadeMVP[4];           // offset 144, 256 bytes
+	vec4 cascadeSplits;           // offset 400,  16 bytes
 #endif
 };
 
@@ -26,10 +40,13 @@ layout(set = 2, binding = 0) uniform sampler2D fogtexture;
 layout(set = 6, binding = 0) uniform sampler2D normalmap;
 #endif
 #ifdef USE_SHADOWMAP
-layout(set = 3, binding = 0) uniform sampler2D shadowMap;
+// Phase 6.5.4b/c: depth target is a 4-layer 2D array (one layer per CSM
+// cascade). 6.5.4c picks the layer per fragment from view-space depth. The
+// descriptor binding is unchanged (COMBINED_IMAGE_SAMPLER accepts a 2D_ARRAY view).
+layout(set = 3, binding = 0) uniform sampler2DArray shadowMap;
 #endif
 #ifdef USE_PBR
-layout(set = 4, binding = 0) uniform sampler2D pbrMap; // R=roughness, G=metalness
+layout(set = 4, binding = 0) uniform sampler2D pbrMap; // glTF 2.0 ORM: R=occlusion, G=roughness, B=metalness
 #endif
 
 layout(location = 0) centroid in vec2 frag_tex_coord;
@@ -43,7 +60,7 @@ layout(location = 4) in vec2 fog_tex_coord;
 layout(location = 5) in vec3 frag_position;
 #endif
 #ifdef USE_SHADOWMAP
-layout(location = 6) in vec4 shadowCoord; // light-space position for shadow lookup
+layout(location = 6) in vec4 shadowData; // xyz = object/world position, w = view-space depth (for cascade select)
 #endif
 
 layout(location = 0) out vec4 out_color;
@@ -52,58 +69,118 @@ layout (constant_id = 0) const int alpha_test_func = 0;
 layout (constant_id = 1) const float alpha_test_value = 0.0;
 //layout (constant_id = 2) const float depth_fragment = 0.85;
 layout (constant_id = 3) const int alpha_to_coverage = 0;
-//layout (constant_id = 4) const int color_mode = 0;
+// Block 5d: per-slot colour-domain bitmask (shared spec-constant id 4 with
+// gen_frag.tmpl / water.frag — see gen_frag.tmpl for the rationale). Bit 0 =
+// the albedo (texture0) is CD_LINEAR → raw fetch; otherwise CD_SRGB → decode.
+// For the dynamic-light (PMLIGHT) pass the base pipelines are vk-init-created
+// with tex_domain == 0, so albedo is decoded unconditionally as before — the
+// constant exists for consistency and future per-stage wiring.
+layout (constant_id = 4) const int tex_domain = 0;
 layout (constant_id = 5) const int abs_light = 0;
 #ifdef USE_SHADOWMAP
 layout (constant_id = 28) const int shadow_pcf = 5;       // 1, 5, or 9 samples
 layout (constant_id = 29) const float shadow_bias = 0.005;
 #endif
-#ifdef USE_PBR
-layout (constant_id = 30) const float pbr_base_roughness = 0.5;
-layout (constant_id = 31) const float pbr_base_metalness = 0.0;
-#endif
+
+// Phase 6B3'-d4-m_final (Block 1): the A4-era per-map `srgb` spec
+// constant (id 15) is retired along with the worldLinearize* opt-in.
+// sampleColorTex below decodes the diffuse/albedo texel unconditionally
+// — the engine is self-consistently linear end-to-end. Phase 6.5.2
+// reuses spec-constant id 15 for `normal_format` (see USE_PARALLAX
+// block below); ids are not required contiguous.
+
 #ifdef USE_PARALLAX
 layout (constant_id = 12) const float parallax_scale = 0.03;
 layout (constant_id = 13) const int parallax_steps = 8;
+
+// Phase 6.5.2: tangent-space normal-map encoding.
+//   0 = RGB  — BC1 / BC3 / uncompressed RGBA: X,Y,Z in all 3 channels,
+//              unpack *2-1 (legacy; the only encoding before this).
+//   1 = BC5 UNORM (ATI2N / 3Dc) — R=X, G=Y in [0,1]; unpack *2-1, then
+//              reconstruct Z = sqrt(1 - x² - y²) (unit-length implied).
+//              BC5 stores X+Y at far better quality than BC1/BC3 for
+//              normal gradients (no chroma block artifacts) — the modern
+//              AAA standard. A BC5 texture has no usable B/A, so the
+//              parallax-height read (normalmap.a, below) degrades to "no
+//              height" — correct, BC5 carries none.
+//   2 = BC5 SNORM — R=X, G=Y already signed in [-1,1]; reconstruct Z.
+// Set host-side at the parallax pipeline-swap from bundle[2].image[0]->
+// internalFormat (VK_FORMAT_BC5_UNORM_BLOCK / _SNORM_BLOCK / else).
+layout (constant_id = 15) const int normal_format = 0;
+
+vec3 sampleNormalMap( sampler2D tex, vec2 uv ) {
+	if ( normal_format == 0 )
+		return texture( tex, uv ).rgb * 2.0 - 1.0;
+	vec2 xy = ( normal_format == 1 ) ? texture( tex, uv ).rg * 2.0 - 1.0
+	                                 : texture( tex, uv ).rg;          // SNORM: already [-1,1]
+	return vec3( xy, sqrt( max( 0.0, 1.0 - dot( xy, xy ) ) ) );
+}
 #endif
 
 #ifdef USE_SHADOWMAP
-// PCF shadow sampling — 3-tier quality (1/5/9 samples, FTEQW-style)
-float sampleShadow() {
-	// Perspective divide → NDC → [0,1] shadow UV
-	vec3 sc = shadowCoord.xyz / shadowCoord.w;
-	sc.xy = sc.xy * 0.5 + 0.5;
+// PCF shadow sampling — 3-tier quality (1/5/9 samples, FTEQW-style).
+// Phase 6.5.4c/d1: Cascaded Shadow Maps. The cascade is chosen per fragment from
+// view-space depth (cascadeSplits = view-space Z for splits 1..4; split 0 =
+// near is implicit); the fragment's world position is projected by that
+// cascade's matrix and the PCF taps read that cascade's array layer. 6.5.4d1
+// adds a soft boundary blend (lerp into cascade i+1 near the far split).
 
-	// Out-of-bounds → fully lit
+// Sample one cascade layer with PCF. Returns 1.0 (lit) when outside the
+// cascade's window or beyond its far plane — which is also what a
+// cleared/disabled cascade layer (depth = 1.0 everywhere) returns.
+float sampleCascade( int c, vec3 worldPos ) {
+	vec4 sc4 = cascadeMVP[c] * vec4( worldPos, 1.0 );
+	vec3 sc = sc4.xyz / sc4.w;        // orthographic — w == 1
+	sc.xy = sc.xy * 0.5 + 0.5;        // NDC [-1,1] → UV [0,1]; sc.z already in [0,1]
 	if ( sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0 )
 		return 1.0;
 
-	vec2 texelSize = 1.0 / vec2( textureSize( shadowMap, 0 ) );
+	float layer = float( c );
+	vec2 texelSize = 1.0 / vec2( textureSize( shadowMap, 0 ).xy );
 	float currentDepth = sc.z - shadow_bias;
 	float shadow = 0.0;
 
 	if ( shadow_pcf <= 1 ) {
-		// Single sample
-		shadow = step( currentDepth, texture( shadowMap, sc.xy ).r );
+		shadow = step( currentDepth, texture( shadowMap, vec3( sc.xy, layer ) ).r );
 	} else if ( shadow_pcf <= 5 ) {
-		// 5-sample cross pattern
-		shadow += step( currentDepth, texture( shadowMap, sc.xy ).r );
-		shadow += step( currentDepth, texture( shadowMap, sc.xy + vec2( texelSize.x, 0 ) ).r );
-		shadow += step( currentDepth, texture( shadowMap, sc.xy - vec2( texelSize.x, 0 ) ).r );
-		shadow += step( currentDepth, texture( shadowMap, sc.xy + vec2( 0, texelSize.y ) ).r );
-		shadow += step( currentDepth, texture( shadowMap, sc.xy - vec2( 0, texelSize.y ) ).r );
+		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy, layer ) ).r );
+		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy + vec2( texelSize.x, 0 ), layer ) ).r );
+		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy - vec2( texelSize.x, 0 ), layer ) ).r );
+		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy + vec2( 0, texelSize.y ), layer ) ).r );
+		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy - vec2( 0, texelSize.y ), layer ) ).r );
 		shadow /= 5.0;
 	} else {
-		// 9-sample 3x3 kernel
 		for ( int x = -1; x <= 1; x++ ) {
 			for ( int y = -1; y <= 1; y++ ) {
-				shadow += step( currentDepth, texture( shadowMap, sc.xy + vec2( x, y ) * texelSize ).r );
+				shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy + vec2( x, y ) * texelSize, layer ) ).r );
 			}
 		}
 		shadow /= 9.0;
 	}
-
 	return shadow;
+}
+
+//   worldPos  = object/world-space fragment position (shadowData.xyz)
+//   viewDepth = view-space depth of the fragment    (shadowData.w)
+//   outCascade = the cascade index that was selected (for r_csmShowCascades viz)
+float sampleShadow( vec3 worldPos, float viewDepth, out int outCascade ) {
+	// branchless cascade select: how many split planes is the fragment past?
+	vec4 cmp = step( cascadeSplits, vec4( viewDepth ) );
+	int cascade = min( int( cmp.x + cmp.y + cmp.z + cmp.w ), 3 );
+	outCascade = cascade;
+
+	// soft cascade boundary blend: as viewDepth approaches this cascade's far
+	// split, lerp toward the next cascade. The next cascade (clamped to 3, and
+	// for a disabled/cleared layer) reads as 1.0, so the blend hands off cleanly
+	// even at the last enabled cascade. No-op away from boundaries.
+	float prevSplit  = ( cascade == 0 ) ? 0.0 : cascadeSplits[max( cascade - 1, 0 )]; // max() guards a possible eager eval of the OOB index
+	float farSplit   = cascadeSplits[cascade];
+	float blendRange = max( 0.1 * ( farSplit - prevSplit ), 1.0 );
+	float blendT     = clamp( ( farSplit - viewDepth ) / blendRange, 0.0, 1.0 ); // 1 = interior, 0 = at the far edge
+
+	float s0 = sampleCascade( cascade, worldPos );
+	float s1 = sampleCascade( min( cascade + 1, 3 ), worldPos );
+	return mix( s1, s0, blendT );
 }
 #endif
 
@@ -147,6 +224,48 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 	float scale = max(1.0 / dxy, 1.0);
 	float ac = threshold + (alpha - threshold) * scale;
 	return ac;
+}
+
+// Phase 6B3'-d4-A2/A4 / m_final: precise piecewise sRGB <-> linear
+// conversion (sRGB EOTF / OETF). Matches RBDOOM-3-BFG and Daemon
+// Engine convention and the renderer's CPU-side mipmap LUTs (Phase
+// 6B3'-d3-C); the pow(x, 2.2) approximation is rejected so the
+// colour-space pipeline stays precise end-to-end. The defensive
+// max(c, 0.0) guards against negatives that could reach these from a
+// float-FBO read in future use (a UNORM texture sample is already
+// non-negative). Duplicated from gen_frag.tmpl because compile.mjs
+// has no #include support — if a third consumer appears, revisit
+// build-infra.
+vec3 sRGBToLinear( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	bvec3 cutoff = lessThanEqual( c, vec3( 0.04045 ) );
+	vec3 lo = c / 12.92;
+	vec3 hi = pow( ( c + vec3( 0.055 ) ) / 1.055, vec3( 2.4 ) );
+	return mix( hi, lo, vec3( cutoff ) );
+}
+
+vec3 linearToSRGB( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	bvec3 cutoff = lessThanEqual( c, vec3( 0.0031308 ) );
+	vec3 lo = c * 12.92;
+	vec3 hi = pow( c, vec3( 1.0 / 2.4 ) ) * 1.055 - 0.055;
+	return mix( hi, lo, vec3( cutoff ) );
+}
+
+// Block 5d: domain-aware colour-texture fetch — matches gen_frag.tmpl's
+// helper. In the lighting pass texture0 is the diffuse/albedo. CD_SRGB
+// (the default for ordinary albedo) is decoded sRGB->linear here, before
+// the BRDF / Phong terms; CD_LINEAR (an explicit linearMap, or a _suffix
+// data texture used as albedo) is fetched raw. Alpha always passes through.
+// (See gen_frag.tmpl for the tex_domain mechanism. The normal/shadow/depth/
+// PBR textures sampled elsewhere in this shader are linear data and stay on
+// raw texture() — they were never sRGB-encoded.)
+vec4 sampleColorTex( sampler2D s, vec2 uv, int slot ) {
+	vec4 c = texture( s, uv );
+	if ( ( tex_domain & ( 1 << slot ) ) != 0 )
+		return c;	// CD_LINEAR — raw
+	c.rgb = sRGBToLinear( c.rgb );
+	return c;		// CD_SRGB — decoded
 }
 
 void main() {
@@ -202,15 +321,17 @@ void main() {
 
 	vec2 parallax_tc = currentUV;
 
-	// Sample normal from normalmap and transform to object space
-	vec3 mapNormal = texture( normalmap, parallax_tc ).rgb * 2.0 - 1.0;
+	// Sample normal from normalmap and transform to object space.
+	// Phase 6.5.2: format-aware fetch — RGB unpack, or BC5 X+Y with Z
+	// reconstructed (see sampleNormalMap / normal_format above).
+	vec3 mapNormal = sampleNormalMap( normalmap, parallax_tc );
 	vec3 Np = normalize( TBN * mapNormal );
 #else
 	vec2 parallax_tc = frag_tex_coord;
 	vec3 Np = N;
 #endif
 
-	vec4 base = texture(texture0, parallax_tc);
+	vec4 base = sampleColorTex(texture0, parallax_tc, 0);
 
 	if ( alpha_to_coverage != 0 ) {
 		if (alpha_test_func == 1) {
@@ -230,6 +351,25 @@ void main() {
 		if (base.a < alpha_test_value) discard;
 	}
 
+	// Phase 6B3'-d4-m7: linear-domain BRDF contract for this pass.
+	//   - texture0 (albedo): decoded unconditionally by sampleColorTex
+	//     above (m_final retired the A4 per-map srgb gate).
+	//   - lightColor.rgb: host-decoded to linear at the VK_SetLightParams
+	//     UBO fill site (m7) — the value below is already linear.
+	//   - lightColor.a (lightColorRadius.w): 1/r^2 falloff scalar — not a
+	//     colour, not decoded.
+	//   - normalmap (set 6, USE_PARALLAX): tangent normal in .rgb (unpacked
+	//     *2-1) + parallax height in .a — non-colour data, NEVER decoded.
+	//   - pbrMap (set 4, USE_PBR): glTF 2.0 ORM, R=AO / G=roughness /
+	//     B=metalness, all linear — NEVER decoded.
+	//   - shadowMap (set 3, USE_SHADOWMAP): depth-comparison sampler —
+	//     non-colour, NEVER decoded.
+	//   - fogColor (USE_FOG): not consumed here (this shader reads only
+	//     fog.a); the host-side fogColor linearisation (m4) is irrelevant
+	//     to light_frag.
+	// All BRDF math below (classic Phong, and the GGX/Schlick/Smith
+	// Cook-Torrance path) operates on linear-radiance inputs and emits
+	// linear output — no structural change was needed.
 	vec4 lightColorRadius = lightColor;
 
 #ifdef USE_LINE
@@ -255,21 +395,37 @@ void main() {
 	vec3 intens = lightColorRadius.rgb * intensFactor;
 
 #ifdef USE_SHADOWMAP
-	intens *= sampleShadow();
+	int dbgCascade = 0;
+	intens *= sampleShadow( shadowData.xyz, shadowData.w, dbgCascade );
 #endif
 
 #ifdef USE_FOG
 	// modulate base by inverted fog alpha
+	// Phase 6B3'-d4-m4: this branch reads only fog.a (the fog_texture
+	// density ramp, not a colour) — it does not consume the fogColor
+	// uniform, so the m4 host-side fogColor linearisation does not affect
+	// it. Math unchanged.
 	base.xyz = base.xyz * ( 1.0 - fog.a );
 #endif
 
 #ifdef USE_PBR
 	// Physically Based Rendering — GGX + Schlick + Smith
-	float roughness, metalness;
+	//
+	// pbrMap glTF 2.0 ORM packing:
+	//   R = ambient occlusion (linear)
+	//   G = roughness (linear)
+	//   B = metalness (linear)
+	//   A = reserved
+	//
+	// AO is sampled but not yet consumed; consumed by
+	// the ambient/IBL path in Phase 6C1+. Direct-light
+	// BRDF below uses only roughness + metalness.
+	float roughness, metalness, ao;
 	{
-		vec2 pbr = texture( pbrMap, parallax_tc ).rg;
-		roughness = clamp( pbr.r, 0.04, 1.0 );
-		metalness = pbr.g;
+		vec3 pbr = texture( pbrMap, parallax_tc ).rgb;
+		ao        = pbr.r;
+		roughness = clamp( pbr.g, 0.04, 1.0 );
+		metalness = pbr.b;
 	}
 
 	vec3 halfVec = normalize( nL + nV );
@@ -321,5 +477,17 @@ void main() {
 	vec4 spec = vec4(pow(specFactor, 10.0)*0.25) * base * 0.8;
 
 	out_color = (base * vec4(diffuse) + spec) * vec4(intens, 1.0);
+#endif
+
+#ifdef USE_SHADOWMAP
+	// Phase 6.5.4d1: r_csmShowCascades debug viz (eyePos.w == 1 ⇒ on). Tint by
+	// the cascade that was sampled: 0 = red, 1 = green, 2 = blue, 3 = yellow.
+	if ( eyePos.w > 0.5 ) {
+		vec3 tint = ( dbgCascade == 0 ) ? vec3( 1.0, 0.3, 0.3 )
+		          : ( dbgCascade == 1 ) ? vec3( 0.3, 1.0, 0.3 )
+		          : ( dbgCascade == 2 ) ? vec3( 0.3, 0.3, 1.0 )
+		          :                       vec3( 1.0, 1.0, 0.3 );
+		out_color.rgb *= tint;
+	}
 #endif
 }

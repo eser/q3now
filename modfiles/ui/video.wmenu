@@ -189,7 +189,7 @@ menuDef {
 		rect 0.540 0.460 0.400 0.050
 		font "oxanium" 13
 		forecolor WCOLOR_TEXT
-		cvar "r_texturebits"
+		cvar "r_textureBits"
 		cvarFloatList { "Default" 0 "16-bit" 16 "32-bit" 32 }
 		visible 1
 	}

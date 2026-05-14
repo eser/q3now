@@ -1,21 +1,11 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_image.c
 #include "tr_local.h"
+#ifdef USE_VULKAN
+#include "vk_ral_textures.h"   // Phase 7.4a — parallel-paths RAL texture migration
+#endif
 
 static byte			 s_intensitytable[256];
 static unsigned char s_gammatable[256];
@@ -267,6 +257,57 @@ void R_ImageList_f( void ) {
 	ri.Log( SEV_INFO, " %i total images\n\n", tr.numImages );
 }
 
+
+/*
+===============
+R_TestDDS_f
+
+Phase 6.5.1: developer command — `testdds <path[.dds]>`. Loads the
+named DDS through the normal image path (so cubemap / volume header
+classification and the cube/3D VkImage + view creation all run) and
+prints what came back: dimensions, texType, array layers, internal
+VkFormat, and whether the GPU view / descriptor were created. This is
+the engine-side smoke for the DDS cubemap/volume loader — there is no
+shader yet that samples a samplerCube/sampler3D (that lands with the
+IBL work), so this is how you confirm the loader + upload mechanics.
+===============
+*/
+void R_TestDDS_f( void ) {
+	static const char *texTypeName[] = { "2D", "CUBE", "3D", "CUBE_ARRAY" };
+	char         path[MAX_QPATH];
+	const image_t *image;
+	int          tt;
+
+	if ( ri.Cmd_Argc() < 2 ) {
+		ri.Log( SEV_INFO, "usage: testdds <path>  (e.g. testdds gfx/env/test_cube.dds)\n" );
+		return;
+	}
+
+	{
+		const char *arg = ri.Cmd_Argv( 1 );
+		if ( COM_GetExtension( arg )[0] == '\0' )
+			Com_sprintf( path, sizeof( path ), "%s.dds", arg );
+		else
+			Q_strncpyz( path, arg, sizeof( path ) );
+	}
+
+	image = R_FindImageFile( path, IMGFLAG_NONE );
+	if ( image == NULL ) {
+		ri.Log( SEV_WARN, "testdds: '%s' could not be loaded (missing, bad header, or unsupported format).\n", path );
+		return;
+	}
+
+	tt = (int)image->texType;
+	if ( tt < 0 || tt >= (int)ARRAY_LEN( texTypeName ) )
+		tt = 0;
+
+	ri.Log( SEV_INFO, "testdds: '%s' -> %dx%d depth=%d  texType=%s  arrayLayers=%u  VkFormat=%d  view=%s descriptor=%s\n",
+		image->imgName, image->width, image->height, image->depth,
+		texTypeName[tt], image->layerCount, (int)image->internalFormat,
+		( image->view != VK_NULL_HANDLE ) ? "ok" : "NULL",
+		( image->descriptor != VK_NULL_HANDLE ) ? "ok" : "NULL" );
+}
+
 //=======================================================================
 
 /*
@@ -395,15 +436,93 @@ static void R_LightScaleTexture( byte *in, int inwidth, int inheight, qboolean o
 }
 
 
+//
+// Phase 6B3'-d3-C: sRGB <-> linear lookup tables for gamma-correct
+// mipmap generation. Mipmap bytes are sRGB-encoded; naive byte-
+// space averaging compresses dark tones disproportionately,
+// producing chromatic shift in distant LODs. Decode -> linear-
+// average -> re-encode preserves authored mid-tone luminance.
+//
+// Approximate sRGB transfer (pow 2.2) chosen over the piecewise
+// sRGB OETF for the same reasons as gamma.frag Fix B: dark-end
+// error is small, and the LUT speedup vs. piecewise branching
+// matters when applied to every byte of every mip level of every
+// loaded texture.
+//
+// The decode LUT has 256 entries (one per byte value). The encode
+// LUT has 1024 entries (oversampled vs. the 256-byte output range)
+// so that closely-spaced linear averages don't collapse into the
+// same output bucket after the encode round-trip.
+//
+static float    s_srgb_to_linear_lut[256];     // sRGB byte -> linear [0,1]
+static byte     s_linear_to_srgb_lut[1024];    // quantised linear -> sRGB byte
+static qboolean s_mipmap_luts_initialized = qfalse;
+
+static void R_InitMipmapLUTs( void ) {
+	int i;
+	if ( s_mipmap_luts_initialized ) {
+		return;
+	}
+	for ( i = 0; i < 256; i++ ) {
+		s_srgb_to_linear_lut[i] = (float)pow( (double)i / 255.0, 2.2 );
+	}
+	for ( i = 0; i < 1024; i++ ) {
+		double linear = (double)i / 1023.0;
+		s_linear_to_srgb_lut[i] = (byte)( pow( linear, 1.0 / 2.2 ) * 255.0 + 0.5 );
+	}
+	s_mipmap_luts_initialized = qtrue;
+}
+
+
+/*
+================
+R_SRGBToLinear / R_LinearToSRGB — Phase 6B3'-d4-m2
+
+Precise piecewise sRGB EOTF / OETF for one-off host-side colour
+decodes (push constants, colour uniforms). Math matches the GLSL
+sRGBToLinear / linearToSRGB helpers verbatim. Deliberately *not*
+the pow(x, 2.2) approximation used by the mipmap LUTs above — that
+LUT trades precision for bulk throughput across every texel of
+every mip; these helpers run a handful of times per frame, so
+accuracy wins. Defensive clamp of negatives to 0, mirroring the
+shader-side max(c, 0.0).
+================
+*/
+float R_SRGBToLinear( float c ) {
+	if ( c <= 0.0f )
+		return 0.0f;
+	if ( c <= 0.04045f )
+		return c / 12.92f;
+	return (float)pow( ( (double)c + 0.055 ) / 1.055, 2.4 );
+}
+
+float R_LinearToSRGB( float c ) {
+	if ( c <= 0.0f )
+		return 0.0f;
+	if ( c <= 0.0031308f )
+		return c * 12.92f;
+	return (float)( pow( (double)c, 1.0 / 2.4 ) * 1.055 - 0.055 );
+}
+
+
 /*
 ================
 R_MipMap2
 
 Operates in place, quartering the size of the texture
 Proper linear filter
+
+Phase 6B3'-d3-C: when isSRGB == qtrue, the inner loop decodes
+input bytes via s_srgb_to_linear_lut, averages in linear domain,
+re-encodes via s_linear_to_srgb_lut. Alpha is averaged byte-space
+in both modes (alpha is not sRGB-encoded). When isSRGB == qfalse
+the original byte-space path runs verbatim, preserving behaviour
+for non-color content (normal maps, masks, MSDF distance fields,
+LUTs — anything carrying IMGFLAG_NOLIGHTSCALE without
+IMGFLAG_LIGHTMAP).
 ================
 */
-static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, int inHeight ) {
+static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, int inHeight, qboolean isSRGB ) {
 	int			i, j, k;
 	byte		*outpix;
 	int			inWidthMask, inHeightMask;
@@ -422,34 +541,69 @@ static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, i
 	inWidthMask = inWidth - 1;
 	inHeightMask = inHeight - 1;
 
+	if ( isSRGB ) {
+		R_InitMipmapLUTs();
+	}
+
+	// Sample helper: lifts the 4-fold byte-address arithmetic into
+	// a single expression and lets both branches reuse the same
+	// 16-tap pattern without duplicating the address-mask math.
+#define SRC(yi, xi, ch) ((byte *)&in[((yi) & inHeightMask) * inWidth + ((xi) & inWidthMask)])[(ch)]
+
 	for ( i = 0 ; i < outHeight ; i++ ) {
 		for ( j = 0 ; j < outWidth ; j++ ) {
 			outpix = (byte *) ( temp + i * outWidth + j );
-			for ( k = 0 ; k < 4 ; k++ ) {
+
+			if ( isSRGB ) {
+				// RGB: decode -> weighted linear average -> encode.
+				for ( k = 0 ; k < 3 ; k++ ) {
+					float ftotal =
+						1.0f * s_srgb_to_linear_lut[SRC(i*2-1, j*2-1, k)] +
+						2.0f * s_srgb_to_linear_lut[SRC(i*2-1, j*2  , k)] +
+						2.0f * s_srgb_to_linear_lut[SRC(i*2-1, j*2+1, k)] +
+						1.0f * s_srgb_to_linear_lut[SRC(i*2-1, j*2+2, k)] +
+
+						2.0f * s_srgb_to_linear_lut[SRC(i*2  , j*2-1, k)] +
+						4.0f * s_srgb_to_linear_lut[SRC(i*2  , j*2  , k)] +
+						4.0f * s_srgb_to_linear_lut[SRC(i*2  , j*2+1, k)] +
+						2.0f * s_srgb_to_linear_lut[SRC(i*2  , j*2+2, k)] +
+
+						2.0f * s_srgb_to_linear_lut[SRC(i*2+1, j*2-1, k)] +
+						4.0f * s_srgb_to_linear_lut[SRC(i*2+1, j*2  , k)] +
+						4.0f * s_srgb_to_linear_lut[SRC(i*2+1, j*2+1, k)] +
+						2.0f * s_srgb_to_linear_lut[SRC(i*2+1, j*2+2, k)] +
+
+						1.0f * s_srgb_to_linear_lut[SRC(i*2+2, j*2-1, k)] +
+						2.0f * s_srgb_to_linear_lut[SRC(i*2+2, j*2  , k)] +
+						2.0f * s_srgb_to_linear_lut[SRC(i*2+2, j*2+1, k)] +
+						1.0f * s_srgb_to_linear_lut[SRC(i*2+2, j*2+2, k)];
+					int idx = (int)( ftotal * ( 1023.0f / 36.0f ) + 0.5f );
+					if ( idx < 0 )    idx = 0;
+					if ( idx > 1023 ) idx = 1023;
+					outpix[k] = s_linear_to_srgb_lut[idx];
+				}
+				// Alpha: byte-space weighted average (alpha is not sRGB).
 				total =
-					1 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
-					1 * ((byte *)&in[ ((i*2-1)&inHeightMask)*inWidth + ((j*2+2)&inWidthMask) ])[k] +
-
-					2 * ((byte *)&in[ ((i*2)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
-					4 * ((byte *)&in[ ((i*2)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
-					4 * ((byte *)&in[ ((i*2)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2)&inHeightMask)*inWidth + ((j*2+2)&inWidthMask) ])[k] +
-
-					2 * ((byte *)&in[ ((i*2+1)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
-					4 * ((byte *)&in[ ((i*2+1)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
-					4 * ((byte *)&in[ ((i*2+1)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2+1)&inHeightMask)*inWidth + ((j*2+2)&inWidthMask) ])[k] +
-
-					1 * ((byte *)&in[ ((i*2+2)&inHeightMask)*inWidth + ((j*2-1)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2+2)&inHeightMask)*inWidth + ((j*2)&inWidthMask) ])[k] +
-					2 * ((byte *)&in[ ((i*2+2)&inHeightMask)*inWidth + ((j*2+1)&inWidthMask) ])[k] +
-					1 * ((byte *)&in[ ((i*2+2)&inHeightMask)*inWidth + ((j*2+2)&inWidthMask) ])[k];
-				outpix[k] = total / 36;
+					1 * SRC(i*2-1, j*2-1, 3) + 2 * SRC(i*2-1, j*2  , 3) + 2 * SRC(i*2-1, j*2+1, 3) + 1 * SRC(i*2-1, j*2+2, 3) +
+					2 * SRC(i*2  , j*2-1, 3) + 4 * SRC(i*2  , j*2  , 3) + 4 * SRC(i*2  , j*2+1, 3) + 2 * SRC(i*2  , j*2+2, 3) +
+					2 * SRC(i*2+1, j*2-1, 3) + 4 * SRC(i*2+1, j*2  , 3) + 4 * SRC(i*2+1, j*2+1, 3) + 2 * SRC(i*2+1, j*2+2, 3) +
+					1 * SRC(i*2+2, j*2-1, 3) + 2 * SRC(i*2+2, j*2  , 3) + 2 * SRC(i*2+2, j*2+1, 3) + 1 * SRC(i*2+2, j*2+2, 3);
+				outpix[3] = total / 36;
+			} else {
+				// Original byte-space path (non-color content).
+				for ( k = 0 ; k < 4 ; k++ ) {
+					total =
+						1 * SRC(i*2-1, j*2-1, k) + 2 * SRC(i*2-1, j*2  , k) + 2 * SRC(i*2-1, j*2+1, k) + 1 * SRC(i*2-1, j*2+2, k) +
+						2 * SRC(i*2  , j*2-1, k) + 4 * SRC(i*2  , j*2  , k) + 4 * SRC(i*2  , j*2+1, k) + 2 * SRC(i*2  , j*2+2, k) +
+						2 * SRC(i*2+1, j*2-1, k) + 4 * SRC(i*2+1, j*2  , k) + 4 * SRC(i*2+1, j*2+1, k) + 2 * SRC(i*2+1, j*2+2, k) +
+						1 * SRC(i*2+2, j*2-1, k) + 2 * SRC(i*2+2, j*2  , k) + 2 * SRC(i*2+2, j*2+1, k) + 1 * SRC(i*2+2, j*2+2, k);
+					outpix[k] = total / 36;
+				}
 			}
 		}
 	}
+
+#undef SRC
 
 	if ( out == in ) {
 		memcpy( out, temp, outWidth * outHeight * 4 );
@@ -465,7 +619,7 @@ R_MipMap
 Operates in place, quartering the size of the texture
 ================
 */
-static void R_MipMap( byte *out, byte *in, int width, int height ) {
+static void R_MipMap( byte *out, byte *in, int width, int height, qboolean isSRGB ) {
 	int		i, j;
 	int		row;
 
@@ -473,7 +627,7 @@ static void R_MipMap( byte *out, byte *in, int width, int height ) {
 		return;
 
 	if ( !r_simpleMipMaps->integer ) {
-		R_MipMap2( (unsigned *)out, (unsigned *)in, width, height );
+		R_MipMap2( (unsigned *)out, (unsigned *)in, width, height, isSRGB );
 		return;
 	}
 
@@ -481,27 +635,68 @@ static void R_MipMap( byte *out, byte *in, int width, int height ) {
 		return;
 	}
 
+	if ( isSRGB ) {
+		R_InitMipmapLUTs();
+	}
+
 	row = width * 4;
 	width >>= 1;
 	height >>= 1;
 
+	// Phase 6B3'-d3-C: per-channel sRGB-aware averaging when isSRGB.
+	// RGB channels round-trip through the decode/encode LUTs; alpha
+	// stays in byte space. The encode LUT is 1024-entry so the
+	// (sum / 4) bucket index uses `* (1023.0f / 4.0f)` directly.
 	if ( width == 0 || height == 0 ) {
 		width += height;	// get largest
-		for (i=0 ; i<width ; i++, out+=4, in+=8 ) {
-			out[0] = ( in[0] + in[4] )>>1;
-			out[1] = ( in[1] + in[5] )>>1;
-			out[2] = ( in[2] + in[6] )>>1;
-			out[3] = ( in[3] + in[7] )>>1;
+		if ( isSRGB ) {
+			for ( i = 0 ; i < width ; i++, out += 4, in += 8 ) {
+				int kk;
+				for ( kk = 0 ; kk < 3 ; kk++ ) {
+					float ftotal = s_srgb_to_linear_lut[in[kk]] + s_srgb_to_linear_lut[in[kk+4]];
+					int idx = (int)( ftotal * ( 1023.0f / 2.0f ) + 0.5f );
+					if ( idx < 0 )    idx = 0;
+					if ( idx > 1023 ) idx = 1023;
+					out[kk] = s_linear_to_srgb_lut[idx];
+				}
+				out[3] = ( in[3] + in[7] ) >> 1;
+			}
+		} else {
+			for ( i = 0 ; i < width ; i++, out += 4, in += 8 ) {
+				out[0] = ( in[0] + in[4] ) >> 1;
+				out[1] = ( in[1] + in[5] ) >> 1;
+				out[2] = ( in[2] + in[6] ) >> 1;
+				out[3] = ( in[3] + in[7] ) >> 1;
+			}
 		}
 		return;
 	}
 
-	for (i=0 ; i<height ; i++, in+=row) {
-		for (j=0 ; j<width ; j++, out+=4, in+=8) {
-			out[0] = (in[0] + in[4] + in[row+0] + in[row+4])>>2;
-			out[1] = (in[1] + in[5] + in[row+1] + in[row+5])>>2;
-			out[2] = (in[2] + in[6] + in[row+2] + in[row+6])>>2;
-			out[3] = (in[3] + in[7] + in[row+3] + in[row+7])>>2;
+	if ( isSRGB ) {
+		for ( i = 0 ; i < height ; i++, in += row ) {
+			for ( j = 0 ; j < width ; j++, out += 4, in += 8 ) {
+				int kk;
+				for ( kk = 0 ; kk < 3 ; kk++ ) {
+					float ftotal = s_srgb_to_linear_lut[in[kk]]
+					             + s_srgb_to_linear_lut[in[kk + 4]]
+					             + s_srgb_to_linear_lut[in[row + kk]]
+					             + s_srgb_to_linear_lut[in[row + kk + 4]];
+					int idx = (int)( ftotal * ( 1023.0f / 4.0f ) + 0.5f );
+					if ( idx < 0 )    idx = 0;
+					if ( idx > 1023 ) idx = 1023;
+					out[kk] = s_linear_to_srgb_lut[idx];
+				}
+				out[3] = ( in[3] + in[7] + in[row+3] + in[row+7] ) >> 2;
+			}
+		}
+	} else {
+		for ( i = 0 ; i < height ; i++, in += row ) {
+			for ( j = 0 ; j < width ; j++, out += 4, in += 8 ) {
+				out[0] = ( in[0] + in[4] + in[row+0] + in[row+4] ) >> 2;
+				out[1] = ( in[1] + in[5] + in[row+1] + in[row+5] ) >> 2;
+				out[2] = ( in[2] + in[6] + in[row+2] + in[row+6] ) >> 2;
+				out[3] = ( in[3] + in[7] + in[row+3] + in[row+7] ) >> 2;
+			}
 		}
 	}
 }
@@ -644,7 +839,13 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 			byte *p = data;
 			int i, n = width * height;
 			for ( i = 0; i < n; i++, p+=4 ) {
-				R_ColorShiftLightingBytes( p, p, qfalse );
+				// IMGFLAG_COLORSHIFT is currently never set (see the
+				// commented-out line in R_CreateImage for external
+				// lm_XXXX atlases) — this loop is dead. If resurrected
+				// it'd be for lightmap atlases, so byte-verbatim (qtrue):
+				// the ×2 q3map2-overbright doubling is done in the shader
+				// (LIGHTMAP_BOOST). Phase 6B3'-d4-m_final (Block 1).
+				R_ColorShiftLightingBytes( p, p, qfalse, qtrue );
 			}
 		}
 	}
@@ -687,15 +888,28 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 		return;	//return upload_data;
 	}
 
-	// Use the normal mip-mapping to go down from [width, height] to [scaled_width, scaled_height] dimensions.
-	while (width > scaled_width || height > scaled_height) {
-		R_MipMap(data, data, width, height);
+	// Phase 6B3'-d3-C: source-content classification for sRGB-aware
+	// mipmap averaging. Color content (no NOLIGHTSCALE, OR LIGHTMAP)
+	// gets the decode/average/encode round-trip. Non-color content
+	// (normal maps, masks, MSDF, LUTs — IMGFLAG_NOLIGHTSCALE without
+	// IMGFLAG_LIGHTMAP) preserves the legacy byte-space averaging.
+	// The LIGHTMAP override is required because tr_bsp.c's lightmap
+	// flags carry both NOLIGHTSCALE and LIGHTMAP — lightmaps are
+	// sRGB-encoded radiance from q3map2 and must decode/encode.
+	{
+		qboolean isSRGB = ( !( image->flags & IMGFLAG_NOLIGHTSCALE )
+		                    || ( image->flags & IMGFLAG_LIGHTMAP ) ) ? qtrue : qfalse;
 
-		width >>= 1;
-		if (width < 1) width = 1;
+		// Use the normal mip-mapping to go down from [width, height] to [scaled_width, scaled_height] dimensions.
+		while ( width > scaled_width || height > scaled_height ) {
+			R_MipMap( data, data, width, height, isSRGB );
 
-		height >>= 1;
-		if (height < 1) height = 1;
+			width >>= 1;
+			if ( width < 1 ) width = 1;
+
+			height >>= 1;
+			if ( height < 1 ) height = 1;
+		}
 	}
 
 	// At this point width == scaled_width and height == scaled_height.
@@ -714,8 +928,10 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 	upload_data->buffer_size = mip_level_size;
 
 	if ( mipmap ) {
+		qboolean isSRGB = ( !( image->flags & IMGFLAG_NOLIGHTSCALE )
+		                    || ( image->flags & IMGFLAG_LIGHTMAP ) ) ? qtrue : qfalse;
 		while (scaled_width > 1 && scaled_height > 1) {
-			R_MipMap((byte *)scaled_buffer, (byte *)scaled_buffer, scaled_width, scaled_height);
+			R_MipMap((byte *)scaled_buffer, (byte *)scaled_buffer, scaled_width, scaled_height, isSRGB);
 
 			scaled_width >>= 1;
 			if (scaled_width < 1) scaled_width = 1;
@@ -754,7 +970,13 @@ static void upload_vk_image( image_t *image, byte *pic ) {
 	w = upload_data.base_level_width;
 	h = upload_data.base_level_height;
 
-	if ( r_texturebits->integer > 16 || r_texturebits->integer == 0 || ( image->flags & IMGFLAG_LIGHTMAP ) || !( image->flags & IMGFLAG_MIPMAP ) ) {
+	/* Linear (non-color) data — PBR ORM, normal maps, depth — must
+	 * preserve 8-bit/channel precision. 4-5 bit packed formats
+	 * destroy the scalar precision required by physical shading. */
+	if ( r_textureBits->integer > 16 || r_textureBits->integer == 0
+		 || ( image->flags & IMGFLAG_LIGHTMAP )
+		 || !( image->flags & IMGFLAG_MIPMAP )
+		 || ( image->flags & IMGFLAG_NOLIGHTSCALE ) ) {
 		image->internalFormat = VK_FORMAT_R8G8B8A8_UNORM;
 		//image->internalFormat = VK_FORMAT_B8G8R8A8_UNORM;
 	} else {
@@ -822,7 +1044,7 @@ image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int
 		Image_Upload_Data ud0;
 		generate_image_upload_data( image, frames[0], &ud0 );
 
-		if ( r_texturebits->integer > 16 || r_texturebits->integer == 0 || !( flags & IMGFLAG_MIPMAP ) ) {
+		if ( r_textureBits->integer > 16 || r_textureBits->integer == 0 || !( flags & IMGFLAG_MIPMAP ) ) {
 			image->internalFormat = VK_FORMAT_R8G8B8A8_UNORM;
 		} else {
 			image->internalFormat = RawImage_HasAlpha( ud0.buffer, ud0.base_level_width * ud0.base_level_height )
@@ -863,11 +1085,11 @@ static GLint RawImage_GetInternalFormat( const byte *scan, int numPixels, qboole
 
 	if ( RawImage_HasAlpha( scan, numPixels ) )
 	{
-		if ( r_texturebits->integer == 16 )
+		if ( r_textureBits->integer == 16 )
 		{
 			internalFormat = GL_RGBA4;
 		}
-		else if ( r_texturebits->integer == 32 )
+		else if ( r_textureBits->integer == 32 )
 		{
 			internalFormat = GL_RGBA8;
 		}
@@ -886,11 +1108,11 @@ static GLint RawImage_GetInternalFormat( const byte *scan, int numPixels, qboole
 		{
 			internalFormat = GL_RGB4_S3TC;
 		}
-		else if ( r_texturebits->integer == 16 )
+		else if ( r_textureBits->integer == 16 )
 		{
 			internalFormat = GL_RGB5;
 		}
-		else if ( r_texturebits->integer == 32 )
+		else if ( r_textureBits->integer == 32 )
 		{
 			internalFormat = GL_RGB8;
 		}
@@ -975,7 +1197,9 @@ static void Upload32( byte *data, int x, int y, int width, int height, image_t *
 		byte *p = data;
 		int i, n = width * height;
 		for ( i = 0; i < n; i++, p+=4 ) {
-			R_ColorShiftLightingBytes( p, p, qfalse );
+			// dead loop (IMGFLAG_COLORSHIFT never set); see the twin in
+			// the Vulkan path above. Phase 6B3'-d4-m_final: byte-verbatim.
+			R_ColorShiftLightingBytes( p, p, qfalse, qtrue );
 		}
 	}
 
@@ -1019,9 +1243,11 @@ static void Upload32( byte *data, int x, int y, int width, int height, image_t *
 	}
 	else
 	{
+		qboolean isSRGB = ( !( image->flags & IMGFLAG_NOLIGHTSCALE )
+		                    || ( image->flags & IMGFLAG_LIGHTMAP ) ) ? qtrue : qfalse;
 		// use the normal mip-mapping function to go down from here
 		while ( width > scaled_width || height > scaled_height ) {
-			R_MipMap( data, data, width, height );
+			R_MipMap( data, data, width, height, isSRGB );
 			width = MAX( 1, width >> 1 );
 			height = MAX( 1, height >> 1 );
 		}
@@ -1035,9 +1261,11 @@ static void Upload32( byte *data, int x, int y, int width, int height, image_t *
 	if ( mipmap )
 	{
 		int	miplevel = 0;
+		qboolean isSRGB = ( !( image->flags & IMGFLAG_NOLIGHTSCALE )
+		                    || ( image->flags & IMGFLAG_LIGHTMAP ) ) ? qtrue : qfalse;
 		while (scaled_width > 1 || scaled_height > 1)
 		{
-			R_MipMap( data, data, scaled_width, scaled_height );
+			R_MipMap( data, data, scaled_width, scaled_height, isSRGB );
 			scaled_width = MAX( 1, scaled_width >> 1 );
 			scaled_height = MAX( 1, scaled_height >> 1 );
 			x >>= 1;
@@ -1073,6 +1301,66 @@ void R_UploadSubImage( byte *data, int x, int y, int width, int height, image_t 
 	}
 }
 #endif // !USE_VULKAN
+
+
+/*
+================
+R_ClassifyColorDomain
+
+Block 5d: auto-classify a texture's colour domain from its filename suffix
+(case-insensitive, basename before the last '.'). Channel-data maps
+(normal / spec / roughness / metallic / AO / height) are CD_LINEAR (sampled
+raw); everything else — including emissive, which is display content — is
+CD_SRGB (decoded sRGB->linear at sample time). Matches the modern-engine
+convention (Unreal SamplerType, Unity HDRP sRGB checkbox, Source 2 explicit
+declaration). Overridable per shader stage via linearMap / srgbMap / gammaMap
+(IMGFLAG_DOMAIN_LINEAR / IMGFLAG_DOMAIN_SRGB), handled at the call site.
+
+Only the unambiguous long-form suffixes are auto-detected. The bare
+single-letter forms (_n / _s / _r / _m / _h) are deliberately NOT in the
+table: in id-tech-3-era content they are common variant markers on plain
+diffuse textures (lion_m.tga, spawn3_r.tga, ...) and auto-classifying them
+as CD_LINEAR mis-renders stock maps. Content that genuinely ships a
+single-letter-suffixed channel map should declare it with the linearMap
+shader keyword.
+================
+*/
+static colorDomain_t R_ClassifyColorDomain( const char *name ) {
+	static const char *linTok[] = {
+		"_normal", "_norm", "_nrm",
+		"_spec", "_specular", "_shiny", "_shiney",
+		"_rough", "_roughness",
+		"_metal", "_metallic",
+		"_ao", "_occlusion",
+		"_height", "_disp", "_displacement",
+		NULL
+	};
+	const char	*slash, *dot, *us;
+	char		base[MAX_QPATH];
+	int			i, n;
+
+	slash = strrchr( name, '/' );
+	if ( slash )
+		name = slash + 1;
+	dot = strrchr( name, '.' );
+	n = dot ? (int)( dot - name ) : (int)strlen( name );
+	if ( n <= 0 || n >= (int)sizeof( base ) )
+		return CD_SRGB;
+	memcpy( base, name, n );
+	base[n] = '\0';
+	for ( i = 0; i < n; i++ )
+		if ( base[i] >= 'A' && base[i] <= 'Z' )
+			base[i] += 32;
+
+	us = strrchr( base, '_' );
+	if ( !us )
+		return CD_SRGB;	// no trailing "_<token>" — display content
+	for ( i = 0; linTok[i] != NULL; i++ )
+		if ( strcmp( us, linTok[i] ) == 0 )
+			return CD_LINEAR;
+	// _e / _emissive / _emit and everything else → CD_SRGB (display content)
+	return CD_SRGB;
+}
 
 
 /*
@@ -1132,6 +1420,17 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->height     = height;
 	image->layerCount = 1;
 
+	// Block 5d: colour domain — explicit shader-keyword override wins;
+	// otherwise auto-classify by filename suffix. Built-in images ("*white",
+	// "*default", ...) have no path/suffix → CD_SRGB, which is harmless
+	// (sRGBToLinear is identity at 0 and 1).
+	if ( flags & IMGFLAG_DOMAIN_LINEAR )
+		image->colorDomain = CD_LINEAR;
+	else if ( flags & IMGFLAG_DOMAIN_SRGB )
+		image->colorDomain = CD_SRGB;
+	else
+		image->colorDomain = R_ClassifyColorDomain( name );
+
 	if ( namelen > 6 && Q_stristr( image->imgName, "maps/" ) == image->imgName && Q_stristr( image->imgName + 6, "/lm_" ) != NULL ) {
 		// external lightmap atlases stored in maps/<mapname>/lm_XXXX textures
 		// image->flags = IMGFLAG_NOLIGHTSCALE | IMGFLAG_NO_COMPRESSION | IMGFLAG_NOSCALE | IMGFLAG_COLORSHIFT;
@@ -1149,6 +1448,16 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->handle = VK_NULL_HANDLE;
 	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
+	image->ral = NULL;
+	image->ralBindlessSlot = -1;
+
+	// Phase 7.4a: parallel-paths migration. The RAL texture is registered
+	// BEFORE upload_vk_image because generate_image_upload_data may mutate
+	// `pic` in place (NPOT scaling, R_MipMap downsamples). Ral_TextureUpload-
+	// Async copies pic into a staging buffer + waits internally, so by the
+	// time it returns the pic data is safe to mutate again. Registration is
+	// a no-op when r_useRALTextures=0 or the RAL infra failed to init.
+	vk_ral_register_image( image, pic, width, height );
 
 	upload_vk_image( image, pic );
 #else
@@ -1366,12 +1675,13 @@ Returns NULL if it fails, not a default image.
 */
 /* Dedup cache for mixed-flags warnings — warn once per (image, flagPair) per session. */
 #define MIXED_FLAGS_CACHE_SIZE 64
-static struct {
+typedef struct {
 	unsigned int nameHash;
 	imgFlags_t   storedFlags;
 	imgFlags_t   requestedFlags;
 	qboolean     used;
-} s_mixedFlagsCache[ MIXED_FLAGS_CACHE_SIZE ];
+} mixedFlagsCacheEntry_t;
+static mixedFlagsCacheEntry_t s_mixedFlagsCache[ MIXED_FLAGS_CACHE_SIZE ];
 
 static qboolean MixedFlagsWarnOnce( const char *name, imgFlags_t storedFlags, imgFlags_t requestedFlags ) {
 	unsigned int h = 0;
@@ -1381,7 +1691,7 @@ static qboolean MixedFlagsWarnOnce( const char *name, imgFlags_t storedFlags, im
 	/* linear probe */
 	for ( int i = 0; i < MIXED_FLAGS_CACHE_SIZE; i++ ) {
 		int idx = ( slot + i ) % MIXED_FLAGS_CACHE_SIZE;
-		struct { unsigned int nameHash; imgFlags_t storedFlags, requestedFlags; qboolean used; } *e = &s_mixedFlagsCache[idx];
+		mixedFlagsCacheEntry_t *e = &s_mixedFlagsCache[idx];
 		if ( !e->used ) {
 			e->nameHash = h; e->storedFlags = storedFlags; e->requestedFlags = requestedFlags; e->used = qtrue;
 			return qtrue;
@@ -1391,6 +1701,94 @@ static qboolean MixedFlagsWarnOnce( const char *name, imgFlags_t storedFlags, im
 	}
 	return qtrue; /* cache full — allow through */
 }
+
+/*
+================
+R_CreateImageDDS
+
+Phase 6.5: image_t allocation + GPU upload for DDS assets. Skips the
+RGBA-byte processing chain (Upload32, r_mapSaturation mutation,
+mipmap generation, format auto-detect) — the DDS file ships
+pre-encoded blocks with its own mip chain. Mirrors the bookkeeping
+side of R_CreateImage (hash table, tr.images[], wrapClampMode) so the
+engine treats the result like any other sampleable image.
+
+Phase 6.5.1: `info` carries the cubemap / volume classification from
+R_LoadDDS; image->texType / layerCount / depth are populated from it
+before vk_create_image (which then picks VkImageType, view type and
+arrayLayers) and vk_upload_dds_image_data (which picks the upload
+path). Cubemaps default to CLAMP_TO_EDGE wrapping (seamless cube
+sampling still needs the cube view; edge clamp avoids visible seams
+on drivers that honour it for cube faces).
+================
+*/
+static image_t *R_CreateImageDDS( const char *name, byte *data, int width, int height, VkFormat picFormat, int numMips, int dataSize, imgFlags_t flags, const ddsImageInfo_t *info ) {
+	image_t *image;
+	long     hash;
+	int      namelen;
+	ddsImageInfo_t local2d = { TEXTYPE_2D, 1, 1 };
+
+	if ( info == NULL )
+		info = &local2d;
+
+	namelen = (int)strlen( name ) + 1;
+	if ( namelen > MAX_QPATH ) {
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImageDDS: \"%s\" is too long", name );
+	}
+
+	if ( tr.numImages == MAX_DRAWIMAGES ) {
+		ri.Terminate( TERM_CLIENT_DROP, "R_CreateImageDDS: MAX_DRAWIMAGES hit" );
+	}
+
+	image = ri.Hunk_Alloc( sizeof( *image ) + namelen, h_low );
+	image->imgName = (char *)( image + 1 );
+	strcpy( image->imgName, name );
+	image->imgName2 = image->imgName;
+
+	hash = generateHashValue( name );
+	image->next = hashTable[ hash ];
+	hashTable[ hash ] = image;
+
+	tr.images[ tr.numImages++ ] = image;
+
+	image->flags          = flags;
+	image->width          = width;
+	image->height         = height;
+	image->uploadWidth    = width;
+	image->uploadHeight   = height;
+	image->texType        = info->texType;
+	image->layerCount     = ( info->layers > 1 ) ? (uint32_t)info->layers : 1;
+	image->depth          = ( info->depth  > 1 ) ? info->depth : 1;
+	image->internalFormat = picFormat;
+
+	// A VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT image must be square; if a .dds
+	// claims to be a cubemap but isn't, fall back to a plain 2D texture
+	// rather than letting vkCreateImage fail fatally.
+	if ( image->texType == TEXTYPE_CUBE && width != height ) {
+		ri.Log( SEV_WARN, "DDS %s is a non-square cubemap (%dx%d); loading as a plain 2D texture.\n", name, width, height );
+		image->texType    = TEXTYPE_2D;
+		image->layerCount = 1;
+		image->depth      = 1;
+	}
+
+	if ( flags & IMGFLAG_CLAMPTOBORDER )
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	else if ( ( flags & IMGFLAG_CLAMPTOEDGE ) || info->texType == TEXTYPE_CUBE )
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	else
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+	image->handle     = VK_NULL_HANDLE;
+	image->view       = VK_NULL_HANDLE;
+	image->descriptor = VK_NULL_HANDLE;
+
+	if ( numMips < 1 ) numMips = 1;
+	vk_create_image( image, width, height, numMips );
+	vk_upload_dds_image_data( image, width, height, image->depth, numMips, data, dataSize );
+
+	return image;
+}
+
 
 image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 {
@@ -1440,6 +1838,49 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	}
 
 	//
+	// Phase 6.5: explicit .dds reference routes through the DDS loader.
+	// Skip the RGBA byte-processing path entirely — DDS files ship
+	// pre-encoded blocks + a mip chain. r_mapSaturation is not applied
+	// (BC data isn't mutable per-pixel without decompress + recompress,
+	// out of scope). Falls back to the standard loader chain if the file
+	// is missing or the GPU can't use the format.
+	// Phase 6.5.1: the loader also classifies cubemap / volume textures
+	// (ddsImageInfo_t); R_CreateImageDDS turns that into the right
+	// VkImage / view. IMGFLAG_CUBEMAP (set by the `cubeMap` shader keyword)
+	// only records that a cubemap was expected so a mismatch can warn.
+	{
+		const char *ext = COM_GetExtension( name );
+		if ( ext && !Q_stricmp( ext, "dds" ) ) {
+			VkFormat picFormat = VK_FORMAT_UNDEFINED;
+			int numMips = 1;
+			int dataSize = 0;
+			byte *ddsData = NULL;
+			ddsImageInfo_t ddsInfo;
+
+			R_LoadDDS( name, &ddsData, &width, &height, &picFormat, &numMips, &dataSize, &ddsInfo );
+			if ( ddsData != NULL ) {
+				if ( !vk_dds_format_uploadable( picFormat ) ) {
+					ri.Log( SEV_WARN, "DDS %s uses VkFormat %d which this GPU can't use for sampling; skipping.\n",
+						name, (int)picFormat );
+					ri.Free( ddsData );
+					return NULL;
+				}
+				if ( ( flags & IMGFLAG_CUBEMAP ) && ddsInfo.texType != TEXTYPE_CUBE ) {
+					ri.Log( SEV_WARN, "DDS %s was loaded as a cubemap but the file is not a 6-face cubemap (texType %d).\n",
+						name, (int)ddsInfo.texType );
+				}
+
+				image = R_CreateImageDDS( name, ddsData, width, height, picFormat, numMips, dataSize, flags, &ddsInfo );
+				ri.Free( ddsData );
+				return image;
+			}
+			// Loader returned NULL — either parse failure or file missing.
+			// Drop through to the regular loader chain (which will look
+			// for non-.dds substitutes).
+		}
+	}
+
+	//
 	// load the pic from disk
 	//
 	localName = R_LoadImage( name, &pic, &width, &height );
@@ -1451,23 +1892,27 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 		const float sat = r_mapSaturation->value;
 		byte *img = pic;
 		for ( int i = 0; i < width * height; i++, img += 4 ) {
-			const float luma = LUMA( img[0], img[1], img[2] );
-			// saturation 0 → luma (grey); 1 → identity (branch
-			// excluded above); 2 → super-saturation, clamped to
-			// byte range below. The formula is the inverse-mix
-			// form of the gamma.frag mix(luma, base, sat) with
-			// signed integer math at byte precision.
-			float r = luma + sat * ( (float)img[0] - luma );
-			float g = luma + sat * ( (float)img[1] - luma );
-			float b = luma + sat * ( (float)img[2] - luma );
-			int ri = (int)( r + 0.5f );
-			int gi = (int)( g + 0.5f );
-			int bi = (int)( b + 0.5f );
-			if ( ri < 0 )   ri = 0;
+			// Block 7 (colour closure): world texture bytes are
+			// sRGB-encoded. Mixing toward grey in byte space biases the
+			// result toward a too-bright grey because the sRGB curve
+			// compresses midtones. Decode → mix toward linear luma →
+			// re-encode — mirrors the Block 4 fog path (R_LoadFogs) and
+			// the in-shader fog/grade saturation math. saturation 0 →
+			// luma (grey); 1 → identity (branch excluded above); 2 →
+			// super-saturation, clamped to byte range below.
+			float lr = R_SRGBToLinear( (float)img[0] / 255.0f );
+			float lg = R_SRGBToLinear( (float)img[1] / 255.0f );
+			float lb = R_SRGBToLinear( (float)img[2] / 255.0f );
+			const float luma = LUMA( lr, lg, lb );
+			lr = luma + sat * ( lr - luma );
+			lg = luma + sat * ( lg - luma );
+			lb = luma + sat * ( lb - luma );
+			// R_LinearToSRGB clamps negatives to 0; clamp the high end.
+			int ri = (int)( R_LinearToSRGB( lr ) * 255.0f + 0.5f );
+			int gi = (int)( R_LinearToSRGB( lg ) * 255.0f + 0.5f );
+			int bi = (int)( R_LinearToSRGB( lb ) * 255.0f + 0.5f );
 			if ( ri > 255 ) ri = 255;
-			if ( gi < 0 )   gi = 0;
 			if ( gi > 255 ) gi = 255;
-			if ( bi < 0 )   bi = 0;
 			if ( bi > 255 ) bi = 255;
 			img[0] = (byte)ri;
 			img[1] = (byte)gi;
@@ -1746,13 +2191,16 @@ static void R_CreateBuiltinImages( void ) {
 	memset( data, 255, sizeof( data ) );
 	tr.whiteImage = R_CreateImage( "*white", NULL, (byte *)data, 8, 8, IMGFLAG_NONE );
 
-	// with overbright bits active, we need an image which is some fraction of full color,
-	// for default lightmaps, etc
+	// Phase 6B3'-a: in the linear pipeline, "*identityLight" is a
+	// solid white 8x8 (was 0.5×white under the legacy LDR overbright
+	// scheme). Used as a default sampler bind for stages without a
+	// real texture — the default fragment color is pure white,
+	// multiplied by whatever vertex color modulates it.
 	for (x=0 ; x<DEFAULT_SIZE ; x++) {
 		for (y=0 ; y<DEFAULT_SIZE ; y++) {
-			data[y][x][0] =
-			data[y][x][1] =
-			data[y][x][2] = tr.identityLightByte;
+			data[y][x][0] = 255;
+			data[y][x][1] = 255;
+			data[y][x][2] = 255;
 			data[y][x][3] = 255;
 		}
 	}
@@ -1779,69 +2227,33 @@ void R_SetColorMappings( void ) {
 	int		i, j;
 	float	g;
 	int		inf;
-	int		shift;
 	qboolean applyGamma;
-	float	brightness, mapBrightness;
 
 	if ( !tr.inited ) {
 		// it may be called from window handling functions where gamma flags is now yet known/set
 		return;
 	}
 
-	// Float-based brightness (CNQ3-style rework).
-	// When r_brightness != 0 we convert log2(brightness) into overbright-bits.
-	brightness = Com_Clamp( 0.25f, 32.0f, r_brightness->value );
-	tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );
+	// Phase 6B3'-a: r_brightness no longer participates in the LUT
+	// build. It drives the pre-tonemap exposure_bias spec constant
+	// (see vk.c) directly as a float; no log2/clamp transformation.
+	// Phase 6B3'-b: r_mapBrightness removed. R_ColorShiftLightingBytes
+	// uses a fixed << 1 decode shift per Q3 BSP lightmap format spec.
 
-	mapBrightness = Com_Clamp( 0.25f, 32.0f, r_mapBrightness->value );
-	tr.mapOverbrightBits = (int)( logf( mapBrightness ) / logf( 2.0f ) + 0.5f );
-
-	tr.overbrightBits    = Com_Clampi( 0, 2, tr.overbrightBits );
-	tr.mapOverbrightBits = Com_Clampi( 0, 2, tr.mapOverbrightBits );
-
-	// r_brightness and r_mapBrightness are independent multipliers,
-	// mirroring the r_saturation / r_mapSaturation / r_lightmapSaturation
-	// split (post-process vs load-time bake):
-	//   - r_mapBrightness bakes 2^mapOverbrightBits into lightmap
-	//     pixel data at BSP load time (R_ColorShiftLightingBytes).
-	//   - r_brightness drives obScale = 2^overbrightBits in the gamma
-	//     post-process pipeline (frag_spec_data.overbright).
-	// They compose multiplicatively in visible output. No cap — the
-	// q3-canonical "compensating pair" semantic (overbrightBits <=
-	// mapOverbrightBits) is intentionally dropped.
-
-#ifdef USE_VULKAN
-	if ( !glConfig.deviceSupportsGamma && !vk.fboActive ) {
-#else
-	if ( !glConfig.deviceSupportsGamma ) {
-#endif
-		tr.overbrightBits = 0; // need hardware gamma for overbright
-		applyGamma = qfalse;
-	} else {
-		applyGamma = qtrue;
-	}
-
-	// 16-bit color buffer can't carry 2 overbright bits cleanly
-    if ( glConfig.colorBits <= 16 && tr.overbrightBits > 1 ) {
-        tr.overbrightBits = 1;
-    }
-
-	tr.identityLight = 1.0f / ( 1 << tr.overbrightBits );
-	tr.identityLightByte = 255 * tr.identityLight;
+	// applyGamma still gates the hardware-display LUT upload below.
+	// Under r_fbo 1 the shader gamma path handles it; r_fbo 0 + no
+	// hardware gamma falls back to per-texel s_gammatable upload via
+	// R_LightScaleTexture.
+	applyGamma = ( glConfig.deviceSupportsGamma || vk.fboActive ) ? qtrue : qfalse;
 
 	g = r_gamma->value;
 
-	shift = tr.overbrightBits;
-
+	// Pure gamma LUT (no overbright shift in the linear pipeline).
 	for ( i = 0; i < ARRAY_LEN( s_gammatable ); i++ ) {
 		if ( g == 1.0f ) {
 			inf = i;
 		} else {
 			inf = 255 * powf( i/255.0f, 1.0f / g ) + 0.5f;
-		}
-		inf <<= shift;
-		if (inf < 0) {
-			inf = 0;
 		}
 		if (inf > 255) {
 			inf = 255;
@@ -1891,6 +2303,11 @@ void R_InitImages( void ) {
 	ri.FreeAll();
 
 #ifdef USE_VULKAN
+	// Phase 7.4c-pre: RAL backend bringup moved into vk_initialize's tail
+	// (Option A — shared VkDevice with renderervk). Backend internal
+	// allocations are on stdlib malloc/free since PART C, so the ri.FreeAll
+	// above no longer wipes them and we don't need to re-init here.
+
 	// initialize linear gamma table before setting color mappings for the first time
 	for ( int i = 0; i < 256; i++ )
 		s_gammatable_linear[i] = (unsigned char)i;
@@ -1927,6 +2344,11 @@ void R_DeleteTextures( void ) {
 
 	for ( i = 0; i < tr.numImages; i++ ) {
 		image_t *img = tr.images[ i ];
+		// Phase 7.4a: tear down the parallel RAL texture (if any) FIRST so the
+		// bindless slot is cleared while the RAL texture is still alive. Order
+		// against the legacy VkImage destroy doesn't matter (different VkDevice)
+		// but conceptually pairs with the registration order in R_CreateImage.
+		vk_ral_unregister_image( img );
 		vk_destroy_image_resources( &img->handle, &img->view );
 
 		// img->descriptor will be released with pool reset

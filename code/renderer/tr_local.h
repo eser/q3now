@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #ifndef TR_LOCAL_H
 #define TR_LOCAL_H
@@ -1133,9 +1120,9 @@ typedef struct {
 	qboolean drawConsole;
 	qboolean doneShadows;
 
-	// CNQ3 loading throttle: last time RB_SwapBuffers actually presented
-	// while tr.mapLoading was set. Used with r_loadingFpsCap to rate-limit
-	// buffer swaps during map loads.
+	// loading throttle: last time RB_SwapBuffers actually presented while
+	// tr.mapLoading was set. Used with r_loadingFpsCap to rate-limit buffer
+	// swaps during map loads.
 	int		lastLoadingSwapMsec;
 
 } backEndState_t;
@@ -1311,12 +1298,12 @@ extern cvar_t	*r_lodscale;
 extern cvar_t	*r_teleporterFlash;		// teleport hyperspace visual
 
 extern cvar_t	*r_fastsky;				// controls whether sky should be cleared or drawn
-extern cvar_t	*r_neatsky;				// nomip and nopicmip for skyboxes, cnq3 like look
+extern cvar_t	*r_neatsky;				// nomip and nopicmip for skyboxes,
 extern cvar_t	*r_drawSun;				// controls drawing of sun quad
 extern cvar_t	*r_dynamiclight;		// dynamic lights enabled/disabled
 extern cvar_t	*r_mergeLightmaps;
-extern cvar_t	*r_lightmapAtlas;	// CNQ3 alias for r_mergeLightmaps
-extern cvar_t	*r_loadingFpsCap;	// CNQ3 swap throttle during map loads
+extern cvar_t	*r_lightmapAtlas;	// alias for r_mergeLightmaps
+extern cvar_t	*r_loadingFpsCap;	// swap throttle during map loads
 #ifdef USE_PMLIGHT
 extern cvar_t	*r_dlightMode;			// 0 - vq3, 1 - pmlight
 extern cvar_t	*r_dlightSpecPower;		// 1 - 32
@@ -1332,14 +1319,14 @@ extern cvar_t	*r_vbo;
 extern cvar_t	*r_fbo;
 extern cvar_t	*r_hdr;
 extern cvar_t	*r_bloom;
-extern cvar_t	*r_bloom_threshold;
-extern cvar_t	*r_bloom_threshold_mode;
-extern cvar_t	*r_bloom_modulate;
-extern cvar_t	*r_bloom_passes;
-extern cvar_t	*r_bloom_blend_base;
-extern cvar_t	*r_bloom_intensity;
-extern cvar_t	*r_bloom_filter_size;
-extern cvar_t	*r_bloom_reflection;
+extern cvar_t	*r_bloomThreshold;
+extern cvar_t	*r_bloomThresholdMode;
+extern cvar_t	*r_bloomModulate;
+extern cvar_t	*r_bloomPasses;
+extern cvar_t	*r_bloomBlendBase;
+extern cvar_t	*r_bloomIntensity;
+extern cvar_t	*r_bloomFilterSize;
+extern cvar_t	*r_bloomReflection;
 
 extern cvar_t	*r_renderWidth;
 extern cvar_t	*r_renderHeight;
@@ -1349,15 +1336,15 @@ extern cvar_t	*r_renderScale;
 extern cvar_t	*r_dlightBacks;			// dlight non-facing surfaces for continuity
 
 extern	cvar_t	*r_norefresh;			// bypasses the ref rendering
-extern	cvar_t	*r_drawentities;		// disable/enable entity rendering
-extern	cvar_t	*r_drawworld;			// disable/enable world rendering
+extern	cvar_t	*r_drawEntities;		// disable/enable entity rendering
+extern	cvar_t	*r_drawWorld;			// disable/enable world rendering
 extern	cvar_t	*r_speeds;				// various levels of information display
 extern  cvar_t	*r_detailTextures;		// enables/disables detail texturing stages
 extern	cvar_t	*r_novis;				// disable/enable usage of PVS
 extern	cvar_t	*r_nocull;
 extern	cvar_t	*r_facePlaneCull;		// enables culling of planar surfaces with back side test
 extern	cvar_t	*r_nocurves;
-extern	cvar_t	*r_showcluster;
+extern	cvar_t	*r_showCluster;
 
 extern cvar_t	*r_gamma;
 
@@ -1376,9 +1363,9 @@ extern	cvar_t	*r_fullbright;					// avoid lightmap pass
 extern	cvar_t	*r_lightmap;					// render lightmaps only
 extern	cvar_t	*r_vertexLight;					// vertex lighting mode for better performance
 
-extern	cvar_t	*r_showtris;					// enables wireframe rendering of the world
-extern	cvar_t	*r_showsky;						// forces sky in front of all surfaces
-extern	cvar_t	*r_shownormals;					// draws wireframe normals
+extern	cvar_t	*r_showTris;					// enables wireframe rendering of the world
+extern	cvar_t	*r_showSky;						// forces sky in front of all surfaces
+extern	cvar_t	*r_showNormals;					// draws wireframe normals
 extern	cvar_t	*r_clear;						// force screen clear every frame
 
 extern	cvar_t	*r_shadows;						// controls shadows: 0 = none, 1 = blur, 2 = stencil, 3 = black planar projection

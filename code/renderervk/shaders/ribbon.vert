@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
 /*
@@ -38,10 +41,19 @@ normal.xyz; .w is unused pad.
 // Push range layout (must match the host-side push):
 //   bytes  0..63   mat4  mvp           (vertex stage)
 //   bytes 64..79   vec4  eyeWorld      (.xyz used; world-space camera origin)
-//   bytes 80..95   vec4  frameParams   (.x  = tr.identityLight,
+//   bytes 80..95   vec4  frameParams   (.x  = reserved / unused — was
+//                                            the legacy identityLight
+//                                            halving factor (dropped
+//                                            Phase 6B3'-a, field removed
+//                                            in the Block 9 sweep); the
+//                                            word stays for push-range
+//                                            byte-compat across the
+//                                            primitive shaders,
 //                                       .yzw reserved for future scalars)
-// frameParams is consumed by ribbon.frag (CGEN_VERTEX-equivalent
-// halving), so the host-side push range covers VERTEX | FRAGMENT.
+// frameParams.x was the CGEN_VERTEX-equivalent halving factor before
+// Phase 6B3'-a's linear-pipeline migration. ribbon.frag no longer
+// consumes it; the field stays only because push range layouts must
+// be byte-compatible across stages.
 layout(push_constant) uniform Push {
 	mat4 mvp;
 	vec4 eyeWorld;
@@ -76,6 +88,11 @@ layout(location = 1) out vec4 fragColor;
 // for the binding-2 sampler-array lookup. Same value for every
 // vertex of one ribbon (all share gl_InstanceIndex), so flat is
 // uniform-correct.
+//
+// Block 5d-followup: bits 0..30 = registry slot; bit 31 = that slot
+// image's colour domain (host packs it in RE_AddRibbonToScene). This
+// stage just passes hdr.shaderHandle through; ribbon.frag masks the
+// slot and reads the domain bit.
 layout(location = 2) flat out uint fragShaderHandle;
 
 out gl_PerVertex {
